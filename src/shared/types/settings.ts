@@ -261,6 +261,14 @@ export type StartupWindowMode =
 	 */
 	dshHomeDir?: string;
 
+	/**
+	 * DSH 审批自动放行：开启后 DSH 会话的工具/命令审批（approval/requested）
+	 * 自动应答 allowed-once，不再弹出确认。
+	 * 缺省 undefined/false：保持人工审批（会话内 Ask 弹窗）。
+	 * 运行时读取（每次审批即时生效），无需重启 DSH host。
+	 */
+	dshApprovalAutoAllow?: boolean;
+
 };
 
 // ── 桌面宠物类型 ──

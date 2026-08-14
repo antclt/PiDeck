@@ -140,6 +140,20 @@ export function projectDshEvent(
 			const message = (data.message ?? {}) as { content?: unknown };
 			const { text, reasoning } = splitBlocks(message.content);
 			const finalText = text.trim() ? text : base.pendingAssistantText;
+			// 纯工具调用消息（模型只发 tool-call、无正文无思考）不落 assistant 气泡：
+			// 否则时间线出现空白 assistant 行，终态由后续 tool/call 卡片承接。
+			// （splitBlocks 不抽 tool-call 块，text/reasoning 均为空即命中。）
+			const hasToolCalls = Array.isArray(message.content) && message.content.some(
+				(block) => block !== null && typeof block === "object" && (block as { type?: unknown }).type === "tool-call",
+			);
+			if (hasToolCalls && !finalText.trim() && !reasoning.trim()) {
+				next.pendingAssistantId = undefined;
+				next.pendingAssistantText = "";
+				next.pendingAssistantThinking = "";
+				next.isStreaming = false;
+				next.stateChanged = true;
+				break;
+			}
 			next.messages = [
 				...base.messages,
 				{
@@ -175,7 +189,8 @@ export function projectDshEvent(
 					role: "tool",
 					text: toolName,
 					timestamp: eventTime(event.time),
-					meta: { toolCallId: callId, toolName },
+					// status=running 驱动渲染层工具卡片的旋转动画；tool/result 到达后清掉。
+					meta: { toolCallId: callId, toolName, status: "running" },
 				},
 			];
 			next.executingTool = toolName;
@@ -187,13 +202,15 @@ export function projectDshEvent(
 			const message = (data.message ?? {}) as { content?: unknown };
 			const text = textFromBlocks(message.content).slice(0, TOOL_RESULT_MAX_CHARS);
 			if (base.executingTool) {
-				// 更新最后一条 tool 消息为「工具名 + 结果摘要」
+				// 更新最后一条 tool 消息为「工具名 + 结果摘要」，并摘掉 running 状态
+				// （工具执行已结束，卡片动画停止；getToolStatus 无 running 即 done）。
 				const messages = [...base.messages];
 				const last = messages[messages.length - 1];
 				if (last && last.role === "tool") {
 					messages[messages.length - 1] = {
 						...last,
 						text: text ? `${last.text}: ${text}` : last.text,
+						meta: last.meta ? { ...last.meta, status: "done" } : last.meta,
 					};
 					next.messages = messages;
 					next.messagesChanged = true;

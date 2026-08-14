@@ -82,7 +82,7 @@ import {
   requireSessionCommand,
   toSessionRuntimeTarget,
 } from "../utils/sessionCommands";
-import { isUserFacingSessionStart } from "./useSessionTimelineController";
+import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
 
 /**
@@ -536,7 +536,7 @@ export function useSessionComposerController(
     return { top: "auto", bottom: 16, left };
   }, [cursor, suggestionsOpen]);
 
-  const isBusy = runtime?.status === "running" || Boolean(runtime?.state?.isStreaming);
+  const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
   // 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
   const isStarting = isUserFacingSessionStart(sendState.status);
   const hasContent = Boolean(draft.trim() || attachments.length);

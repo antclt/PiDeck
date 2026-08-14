@@ -327,6 +327,8 @@ let agentManager: AgentManager;
 /** DSH 深融合宿主（懒启动）与后端网关；未创建 DSH 会话前不 boot，零成本。 */
 let dshHost: DshHost;
 let dshAgentManager: DshAgentManager;
+/** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
+let compositeAgentGateway: CompositeAgentGateway | undefined;
 let configManager: ConfigManager;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -2164,10 +2166,12 @@ function registerFeishuIpc() {
 async function sendAgentPromptWithIntegrations(
 	input: SendPromptInput,
 ): Promise<SendPromptResult> {
-	// 多后端路由：DSH 会话不经过飞书/pi 扩展链路，直接走 dsh 网关。
-	const isDshAgent = dshAgentManager?.list().some((tab) => tab.id === input.agentId) === true;
-	if (isDshAgent) {
-		return dshAgentManager.sendPrompt(input);
+	// 多后端路由：非 pi 后端（dsh/未来新增后端）不经过 pi 专属的飞书/扩展链路，
+	// 按 agentId 交给合成网关路由到所属后端网关（pi 后端继续走下方集成链路）。
+	const gateway = compositeAgentGateway;
+	const agentTab = gateway?.list().find((item) => item.id === input.agentId);
+	if (gateway && agentTab && agentTab.backend !== "pi") {
+		return gateway.sendPrompt(input);
 	}
 	const bridge = feishuBridge;
 	const bridgeConnected = bridge?.getStatus().status === "connected";
@@ -2631,7 +2635,12 @@ app.whenReady().then(async () => {
 		undefined,
 		() => settingsStore.get().dshHomeDir ?? "",
 	);
-	dshAgentManager = new DshAgentManager(dshHost, (projectId) => projectStore.get(projectId));
+	dshAgentManager = new DshAgentManager(
+		dshHost,
+		(projectId) => projectStore.get(projectId),
+		// 审批自动放行：运行时读取设置（即时生效，无需重启 host），见 settings.ts dshApprovalAutoAllow。
+		() => settingsStore.get().dshApprovalAutoAllow === true,
+	);
 	webServiceManager = new WebServiceManager({
 		// dev 模式（electron-vite dev 不产出 out/renderer 构建物）下，静态资源
 		// 代理到 vite dev server，外部 Web 端加载重构后的 React 版页面并支持热更新；
@@ -2836,7 +2845,7 @@ app.whenReady().then(async () => {
 	await sessionCatalog.load();
 	// 多后端网关装配：pi + dsh（DSH 懒启动，未使用不 boot）。
 	// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
-	const compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
+	compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 	sessionRuntimeCoordinator = new SessionRuntimeCoordinator(
 		sessionCatalog,
 		compositeAgentGateway,

@@ -9,12 +9,17 @@ const { DshAgentManager } = loadTsCommonJs("src/main/dsh/DshAgentManager.ts");
  * DshAgentManager 只依赖 DshHost 的 ensureStarted/getClient（InProcessApiClient），
  * 这里用同形状的假 client（sessions.list/create/history + events.mux 空流）。
  */
-function makeFakeHost() {
+function makeFakeHost({ muxFrames = [], failRespond = false } = {}) {
 	const sessions = new Map();
 	let nextSession = 0;
 	const historyBySession = new Map();
 	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0 };
 	const promptCalls = [];
+	const respondCalls = [];
+	// host 进程状态（断连自愈测试用）：triggerExit 模拟崩溃，restartHost 模拟自动重启完成。
+	const hostState = { running: true, ready: true };
+	const muxCalls = [];
+	let muxWaiter = null;
 	const client = {
 		sessions: {			async list() {
 				calls.list += 1;
@@ -81,11 +86,28 @@ function makeFakeHost() {
 				return { result: { ok: true, value: { sessionId: newId } } };
 			},
 		},
-		events: {
-			async *mux() {
-				// 空事件流：测试不关心实时事件，只验证 create 路径本身。
-				return;
+			events: {
+				async *mux(_input, signal) {
+					muxCalls.push(Date.now());
+					// 可注入帧队列：自动放行测试用它推 approval/requested。
+					for (const item of muxFrames) yield item;
+					// 之后挂起等待 triggerExit（模拟 host 退出 → abortAllPending 中断流）
+					// 或 signal abort（manager.stop 停会话）。同真实 DshApiClient：abort 即流结束。
+					await new Promise((resolve) => {
+						muxWaiter = resolve;
+						signal?.addEventListener("abort", resolve, { once: true });
+					});
+				},
 			},
+			abortAllPending() {
+				// 同 DshApiClient.abortAllPending：中断悬挂的 mux 流（error 语义）。
+				muxWaiter?.();
+				muxWaiter = null;
+			},
+			async respond(input) {
+			if (failRespond) throw new Error("host not started");
+			respondCalls.push(input);
+			return { result: { ok: true, value: {} } };
 		},
 		llm: {
 			async models() {
@@ -98,9 +120,39 @@ function makeFakeHost() {
 		getClient() {
 			return client;
 		},
+		isHostProcessRunning() {
+			return hostState.running;
+		},
+		isHostReady() {
+			return hostState.ready;
+		},
+		/** 模拟 host 进程退出（崩溃）：置位 + 中断在途 mux，同 DshHost 的 exit → abortAllPending 联动。 */
+		triggerExit() {
+			hostState.running = false;
+			hostState.ready = false;
+			client.abortAllPending();
+		},
+		/** 模拟崩溃自动重启完成（DshHostProcess.restartAfterCrash → host-ready）。 */
+		restartHost() {
+			hostState.running = true;
+			hostState.ready = true;
+		},
 	};
-	return { host, client, sessions, historyBySession, calls, promptCalls };
+	return { host, client, sessions, historyBySession, calls, promptCalls, respondCalls, muxCalls };
 }
+
+/** 让 pump/respond 等异步链全部落盘（循环 setImmediate 而非定时器，测试更稳）。 */
+async function flush() {
+	for (let i = 0; i < 10; i += 1) {
+		await new Promise((resolve) => setImmediate(resolve));
+	}
+}
+
+/** 与 DSH mux 实测一致的 approval/requested 帧。 */
+const approvalFrame = (rpcId, sessionId, approvalId, extra = {}) => ({
+	rpcId,
+	payload: { type: "approval/requested", sessionId, approvalId, ...extra },
+});
 
 const PROJECT = { id: "project-1", path: "C:\\work" };
 
@@ -338,4 +390,137 @@ test("capabilities 声明 fork/getForkMessages/compact 且不含 pi 专属能力
 	assert.ok(!caps.has("deleteMessage"));
 	assert.ok(!caps.has("getCommands"));
 	assert.ok(!caps.has("exportHtml"));
+});
+
+test("审批自动放行开启：approval 帧直接应答 allowed-once，不弹 agents:ui-request", async () => {
+	const { host, respondCalls } = makeFakeHost({
+		muxFrames: [approvalFrame("rpc-1", "session-fake-1", "appr-1", { toolName: "shell" })],
+	});
+	const emitted = [];
+	const manager = new DshAgentManager(host, () => PROJECT, () => true);
+	manager.onOutput((channel, payload) => emitted.push([channel, payload]));
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	// 注意：respondCalls 里的对象来自 VM 编译的 DshAgentManager（跨 realm），
+	// deepStrictEqual 会因 prototype 不同报 "not reference-equal"，故分字段断言。
+	assert.equal(respondCalls.length, 1);
+	assert.equal(respondCalls[0].type, "client-response");
+	assert.equal(respondCalls[0].rpcId, "rpc-1");
+	assert.equal(respondCalls[0].result.ok, true);
+	const value = respondCalls[0].result.value;
+	assert.equal(value.sessionId, "session-fake-1");
+	assert.equal(value.approvalId, "appr-1");
+	assert.equal(value.outcome, "allowed-once");
+	assert.equal(
+		emitted.some(([channel]) => channel === "agents:ui-request"),
+		false,
+		"自动放行时不弹审批 UI",
+	);
+});
+
+test("审批自动放行关闭（缺省）：approval 帧走人工审批（弹 UI、不 respond）", async () => {
+	const { host, respondCalls } = makeFakeHost({
+		muxFrames: [approvalFrame("rpc-2", "session-fake-1", "appr-2")],
+	});
+	const emitted = [];
+	const manager = new DshAgentManager(host, () => PROJECT);
+	manager.onOutput((channel, payload) => emitted.push([channel, payload]));
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal(respondCalls.length, 0, "人工审批路径不应自动应答");
+	const ui = emitted.find(([channel]) => channel === "agents:ui-request");
+	assert.ok(ui, "应弹 agents:ui-request");
+	assert.equal(ui[1].agentId, tab.id);
+	assert.equal(ui[1].method, "confirm");
+	assert.equal(ui[1].requestId, "rpc-2");
+});
+
+test("审批自动放行失败（host 通道异常）：回退人工审批避免请求丢失", async () => {
+	const { host, respondCalls } = makeFakeHost({
+		muxFrames: [approvalFrame("rpc-3", "session-fake-1", "appr-3")],
+		failRespond: true,
+	});
+	const emitted = [];
+	const manager = new DshAgentManager(host, () => PROJECT, () => true);
+	manager.onOutput((channel, payload) => emitted.push([channel, payload]));
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal(respondCalls.length, 0, "respond 抛错不应有成功记录");
+	const ui = emitted.find(([channel]) => channel === "agents:ui-request");
+	assert.ok(ui, "自动放行失败应回退弹审批 UI");
+	assert.equal(ui[1].requestId, "rpc-3");
+});
+
+/** 构造与 DSH mux 实测一致的 session/event 帧（会话事件走 mux 流）。 */
+const sessionEventFrame = (sessionId, evt) => ({
+	payload: { type: "session/event", sessionId, event: evt },
+});
+
+test("流式正文按累积语义发 agents:text-stream（渲染层 streamingTextByIdAtom 按累积存储）", async () => {
+	const { host } = makeFakeHost({
+		muxFrames: [
+			sessionEventFrame("session-fake-1", event("assistant/chunk", 1, { chunk: { type: "text-delta", text: "你" } })),
+			sessionEventFrame("session-fake-1", event("assistant/chunk", 2, { chunk: { type: "text-delta", text: "好" } })),
+			sessionEventFrame("session-fake-1", event("turn/end", 3)),
+		],
+	});
+	const streams = [];
+	const manager = new DshAgentManager(host, () => PROJECT);
+	manager.onOutput((channel, payload) => {
+		if (channel === "agents:text-stream") streams.push(payload);
+	});
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	const texts = streams.filter((item) => !item.done).map((item) => item.text);
+	assert.deepEqual(texts, ["你", "你好"], "text 应为累积文本而非单帧增量（增量会被渲染层逐帧覆盖）");
+	assert.equal(streams.at(-1).done, true, "turn/end 补发 done:true");
+});
+
+test("reasoning delta 走 agents:thinking 独立通道，不进正文流", async () => {
+	const { host } = makeFakeHost({
+		muxFrames: [
+			sessionEventFrame("session-fake-1", event("assistant/chunk", 1, { chunk: { type: "reasoning-delta", text: "先" } })),
+			sessionEventFrame("session-fake-1", event("assistant/chunk", 2, { chunk: { type: "reasoning-delta", text: "想" } })),
+			sessionEventFrame("session-fake-1", event("assistant/message", 3, { message: { content: [{ type: "text", text: "答" }] } })),
+		],
+	});
+	const thoughts = [];
+	const streams = [];
+	const manager = new DshAgentManager(host, () => PROJECT);
+	manager.onOutput((channel, payload) => {
+		if (channel === "agents:thinking") thoughts.push(payload);
+		if (channel === "agents:text-stream") streams.push(payload);
+	});
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal(thoughts.length, 3);
+	assert.equal(thoughts[0].done, false);
+	assert.equal(thoughts[0].text, "先");
+	assert.equal(thoughts[1].text, "先想", "thinking 文本也应累积");
+	assert.equal(thoughts[0].id, thoughts[1].id, "turn 内思考段 id 稳定");
+	assert.equal(thoughts[2].done, true, "assistant/message 清空 pending 后补发 done");
+	// 正文流只允许出现「assistant/message 落定时关闭流式槽」的 done 信号，
+	// 推理文本绝不能进正文流（否则正文与思考双显）。
+	assert.equal(streams.length, 1, "正文流只收到关闭信号");
+	assert.equal(streams[0].done, true);
+	assert.equal(streams[0].text, "");
+});
+
+test("host 进程退出后 mux 自动重连（流中断 → 退避 → 重新订阅，不再静默悬挂）", async () => {
+	const { host, muxCalls } = makeFakeHost({
+		muxFrames: [sessionEventFrame("session-fake-1", event("turn/start", 1))],
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal(muxCalls.length, 1, "首条 mux 订阅已建立");
+	// 模拟 host 运行中崩溃：DshHost 联动 abortAllPending → mux 流中断 → pump 捕获后退避重连。
+	host.triggerExit();
+	// 崩溃自动重启需要时间（DshHostProcess 重启 + host-ready），期间 pump 应等待而非空转。
+	await new Promise((resolve) => setTimeout(resolve, 100));
+	assert.equal(muxCalls.length, 1, "host 未就绪前不应重复订阅");
+	host.restartHost();
+	// 指数退避首档 250ms：跨过退避窗口后应完成重连。
+	await new Promise((resolve) => setTimeout(resolve, 400));
+	assert.ok(muxCalls.length >= 2, `应自动重连 mux（实际订阅 ${muxCalls.length} 次）`);
 });

@@ -45,11 +45,14 @@ export function beginDshCancel(prev: DshControlState): DshControlState {
 /**
  * 一帧 mux 事件对控制态的影响。
  * `eventGeneration` 是泵在读到该帧时快照的 cancelGeneration。
+ * `data` 为事件 data（assistant/message 需要检查内容块：带 tool-call 的消息不是
+ * 回合终点，工具执行与后续 LLM 流仍在同一回合内，不能提前回 idle）。
  */
 export function applyDshControlEvent(
 	prev: DshControlState,
 	type: string | undefined,
 	eventGeneration: number,
+	data?: unknown,
 ): { next: DshControlState; ignoreStream: boolean } {
 	// 停止之后才到的旧帧：禁止重新点亮 streaming/running；turn/end 仍用来收口 cancelled。
 	if (eventGeneration !== prev.cancelGeneration) {
@@ -89,7 +92,29 @@ export function applyDshControlEvent(
 			ignoreStream: false,
 		};
 	}
-	if (kind === "assistant/message" || kind === "turn/end") {
+	if (kind === "assistant/message") {
+		if (isAssistantMessageWithToolCalls(data)) {
+			// DSH 事件顺序（dsh-agent-loop 实测）：LLM 流结束先落 assistant/message
+			// （内容块含 tool-call），之后才是 tool/call → 工具执行 → tool/result →
+			// 下一轮 LLM 流。带工具调用的消息只是「本轮模型输出」结束，回合仍在跑：
+			// 保持 running（只收流式标记），否则工具执行期间 UI 提前回 idle——
+			// 发送按钮变回「发送」、页面无运行动画，用户误以为会话已停止。
+			return {
+				next: { ...prev, isStreaming: false, cancelled: false },
+				ignoreStream: false,
+			};
+		}
+		return {
+			next: {
+				...prev,
+				status: "idle",
+				isStreaming: false,
+				cancelled: false,
+			},
+			ignoreStream: false,
+		};
+	}
+	if (kind === "turn/end") {
 		return {
 			next: {
 				...prev,
@@ -101,4 +126,16 @@ export function applyDshControlEvent(
 		};
 	}
 	return { next: prev, ignoreStream: false };
+}
+
+/** assistant/message 的内容块里是否含工具调用（type === "tool-call"）。 */
+function isAssistantMessageWithToolCalls(data: unknown): boolean {
+	if (!data || typeof data !== "object") return false;
+	const message = (data as { message?: unknown }).message;
+	if (!message || typeof message !== "object") return false;
+	const content = (message as { content?: unknown }).content;
+	if (!Array.isArray(content)) return false;
+	return content.some(
+		(block) => block !== null && typeof block === "object" && (block as { type?: unknown }).type === "tool-call",
+	);
 }

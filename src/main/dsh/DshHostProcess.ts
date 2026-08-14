@@ -24,6 +24,8 @@ export class DshHostProcess {
 	private stopping = false;
 	/** postMessage 在 host 已退出时只警告一次（abort 竞态可能连续触发）。 */
 	private warnedDisposed = false;
+	/** host 进程退出订阅（DshHost 借此中断悬挂的桥 pending）。 */
+	private readonly exitListeners = new Set<() => void>();
 	private readonly log: (scope: string, message: string, detail?: unknown) => void;
 
 	constructor(
@@ -78,6 +80,14 @@ export class DshHostProcess {
 			this.log("dsh-host", `host process exited code=${code}`);
 			this.child = null;
 			this.ready = false;
+			// 先通知订阅者（DshHost 借此 abortAllPending 中断悬挂 mux），再处理重启。
+			for (const listener of this.exitListeners) {
+				try {
+					listener();
+				} catch {
+					// 订阅者异常不影响进程生命周期处理
+				}
+			}
 			// 未 ready 的等待者：boot 失败（exit 早于 host-ready）。
 			const rejecters = this.readyRejecters;
 			this.readyRejecters = [];
@@ -145,6 +155,14 @@ export class DshHostProcess {
 			return;
 		}
 		this.child.postMessage(message);
+	}
+
+	/** 订阅 host 进程退出（运行中崩溃/主动 kill 都会触发；重启后需重新订阅）。 */
+	onExit(listener: () => void): () => void {
+		this.exitListeners.add(listener);
+		return () => {
+			this.exitListeners.delete(listener);
+		};
 	}
 
 	/** 崩溃重启（限次）：kill 后重新 fork。返回是否已重启。 */

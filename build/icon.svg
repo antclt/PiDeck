@@ -1,15 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <!-- 深色底和银白主体保持高对比，确保小尺寸系统图标仍然清晰可辨。 -->
+    <!-- 深色底 + 银灰主体保持高对比，确保小尺寸系统图标仍然清晰可辨；
+         图形取自品牌跳蛛（JumpingSpiderLogo），与旧版 pi 字标完全区分。 -->
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop stop-color="#161719"/>
       <stop offset="0.58" stop-color="#050506"/>
       <stop offset="1" stop-color="#000000"/>
     </linearGradient>
-    <linearGradient id="logo" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop stop-color="#ffffff"/>
-      <stop offset="0.48" stop-color="#f4f4f5"/>
-      <stop offset="1" stop-color="#a7a8ab"/>
+    <!-- 身体用银灰渐变而非纯白：给白色大眼睛留出对比，眼睛加深描边后任何尺寸都醒目 -->
+    <linearGradient id="spider" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#e6e6e9"/>
+      <stop offset="0.5" stop-color="#c9c9ce"/>
+      <stop offset="1" stop-color="#8f8f96"/>
     </linearGradient>
     <linearGradient id="shine" x1="0.3" y1="0" x2="0.7" y2="1">
       <stop stop-color="#ffffff" stop-opacity="0.18" offset="0"/>
@@ -21,27 +23,37 @@
   </defs>
   <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
   <rect width="1024" height="512" rx="228" fill="url(#shine)"/>
-  <g transform="translate(160, 170) scale(1.4)" filter="url(#logo-shadow)">
-    <svg viewBox="140 140 520 520" width="520" height="520">
-      <!-- 保留项目现有 pi 几何字标，仅将主体改为银白渐变。 -->
-      <path fill="url(#logo)" fill-rule="evenodd" d="
-        M165.29 165.29
-        H517.36
-        V400
-        H400
-        V517.36
-        H282.65
-        V634.72
-        H165.29
-        Z
-        M282.65 282.65
-        V400
-        H400
-        V282.65
-        Z
-      "/>
-      <path fill="url(#logo)" d="M517.36 400 H634.72 V634.72 H517.36 Z"/>
+  <!-- 跳蛛 32×32 视口放大 20 倍并居中（scale=20，中心对齐 512,512） -->
+  <g transform="translate(192, 142) scale(20)" filter="url(#logo-shadow)">
+    <svg viewBox="0 0 32 32" width="32" height="32">
+      <!-- 八条腿 + 脸前一对触肢：银灰渐变描边 -->
+      <g stroke="url(#spider)" stroke-width="1.5" stroke-linecap="round" fill="none">
+        <path d="M7.5 15.5C3.5 14 1.5 11 2 7"/>
+        <path d="M6.5 17.5C2.5 16.5 0.5 15 0.5 12"/>
+        <path d="M6.5 20C3 20 1 21 1 23.5"/>
+        <path d="M7.5 22C4.5 23 3.5 25 4.5 27.5"/>
+        <path d="M24.5 15.5C28.5 14 30.5 11 30 7"/>
+        <path d="M25.5 17.5C29.5 16.5 31.5 15 31.5 12"/>
+        <path d="M25.5 20C29 20 31 21 31 23.5"/>
+        <path d="M24.5 22C27.5 23 28.5 25 27.5 27.5"/>
+        <path d="M12 14.5C10 16.5 9 18.5 10 20"/>
+        <path d="M20 14.5C22 16.5 23 18.5 22 20"/>
+      </g>
+      <!-- 腹部 + 头胸 -->
+      <ellipse cx="16" cy="22.5" rx="7" ry="7.5" fill="url(#spider)"/>
+      <circle cx="16" cy="10" r="6.8" fill="url(#spider)"/>
+      <!-- 两只大前中眼：白底深描边 + 黑瞳 + 高光，保证在浅色身体上仍醒目 -->
+      <circle cx="12.3" cy="9" r="3" fill="#ffffff" stroke="#1c1c1f" stroke-width="0.5"/>
+      <circle cx="19.7" cy="9" r="3" fill="#ffffff" stroke="#1c1c1f" stroke-width="0.5"/>
+      <circle cx="12.3" cy="9" r="1.5" fill="#141414"/>
+      <circle cx="19.7" cy="9" r="1.5" fill="#141414"/>
+      <circle cx="11.4" cy="8.1" r="0.55" fill="#ffffff"/>
+      <circle cx="18.8" cy="8.1" r="0.55" fill="#ffffff"/>
+      <!-- 两侧小眼 -->
+      <circle cx="7" cy="7.5" r="1.1" fill="#ffffff" stroke="#1c1c1f" stroke-width="0.4"/>
+      <circle cx="25" cy="7.5" r="1.1" fill="#ffffff" stroke="#1c1c1f" stroke-width="0.4"/>
+      <circle cx="7" cy="7.5" r="0.55" fill="#141414"/>
+      <circle cx="25" cy="7.5" r="0.55" fill="#141414"/>
     </svg>
   </g>
-  <!-- PURE 方案不加入外部彩色装饰，避免借用其他品牌的识别元素。 -->
 </svg>

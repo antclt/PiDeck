@@ -63,11 +63,15 @@ export interface SessionAgentGateway {
 	abort(agentId: string): Promise<void>;
 	compact(agentId: string, prompt?: string): Promise<AgentRuntimeState>;
 	getRuntimeState(agentId: string): Promise<AgentRuntimeState>;
-	getCommands(agentId: string): Promise<unknown[]>;
+	/** 可选能力：会话内命令列表（pi 提供；dsh 缺失，capabilities 不含 getCommands）。 */
+	getCommands?(agentId: string): Promise<unknown[]>;
 	getAvailableModels(agentId: string): Promise<AvailableModel[]>;
-	exportHtml(agentId: string): Promise<unknown>;
-	editMessage(agentId: string, messageId: string, newText: string): Promise<void>;
-	deleteMessage(agentId: string, messageId: string): Promise<void>;
+	/** 可选能力：导出 HTML（pi 提供；dsh 缺失，capabilities 不含 exportHtml）。 */
+	exportHtml?(agentId: string): Promise<unknown>;
+	/** 可选能力：编辑历史消息（pi 提供；dsh 缺失，capabilities 不含 editMessage）。 */
+	editMessage?(agentId: string, messageId: string, newText: string): Promise<void>;
+	/** 可选能力：删除历史消息（pi 提供；dsh 缺失，capabilities 不含 deleteMessage）。 */
+	deleteMessage?(agentId: string, messageId: string): Promise<void>;
 	prepareResendFromMessage(
 		agentId: string,
 		messageId: string,
@@ -377,9 +381,17 @@ export class SessionRuntimeCoordinator {
 	listRuntimeCommands(
 		target: SessionRuntimeTarget,
 	): Promise<SessionCommandResult<SessionTargetedValue<PiCommand[]>>> {
-		return this.runTargetCommand(target, async (agentId) => (
-			await this.agents.getCommands(agentId) as PiCommand[]
-		));
+		return this.runTargetCommand(target, async (agentId) => {
+			// 命令列表是可选能力：后端未声明 getCommands 时按能力缺失拒绝（UI 应已按能力隐藏入口）。
+			const getCommands = this.agents.getCommands;
+			if (!getCommands) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support getCommands`,
+				);
+			}
+			return await getCommands(agentId) as PiCommand[];
+		});
 	}
 
 	listRuntimeModels(
@@ -391,7 +403,16 @@ export class SessionRuntimeCoordinator {
 	exportRuntimeHtml(
 		target: SessionRuntimeTarget,
 	): Promise<SessionCommandResult<SessionTargetedValue<unknown>>> {
-		return this.runTargetCommand(target, (agentId) => this.agents.exportHtml(agentId));
+		return this.runTargetCommand(target, async (agentId) => {
+			const exportHtml = this.agents.exportHtml;
+			if (!exportHtml) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support exportHtml`,
+				);
+			}
+			return exportHtml(agentId);
+		});
 	}
 
 	editRuntimeMessage(
@@ -399,20 +420,32 @@ export class SessionRuntimeCoordinator {
 		messageId: string,
 		newText: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<void>>> {
-		return this.runTargetCommand(
-			target,
-			(agentId) => this.agents.editMessage(agentId, messageId, newText),
-		);
+		return this.runTargetCommand(target, async (agentId) => {
+			const editMessage = this.agents.editMessage;
+			if (!editMessage) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support editMessage`,
+				);
+			}
+			return editMessage(agentId, messageId, newText);
+		});
 	}
 
 	deleteRuntimeMessage(
 		target: SessionRuntimeTarget,
 		messageId: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<void>>> {
-		return this.runTargetCommand(
-			target,
-			(agentId) => this.agents.deleteMessage(agentId, messageId),
-		);
+		return this.runTargetCommand(target, async (agentId) => {
+			const deleteMessage = this.agents.deleteMessage;
+			if (!deleteMessage) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support deleteMessage`,
+				);
+			}
+			return deleteMessage(agentId, messageId);
+		});
 	}
 
 	prepareRuntimeResend(

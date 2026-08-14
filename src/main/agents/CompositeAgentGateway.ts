@@ -75,6 +75,25 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		throw new Error(`CompositeAgentGateway: no gateway owns agent "${agentId}"`);
 	}
 
+	/**
+	 * 可选能力转发：子网关未实现该方法（capabilities 未声明）时抛错，
+	 * 语义与后端自身显式 throw 一致，由 Coordinator 转 SESSION_COMMAND_FAILED。
+	 */
+	private callOptional<T>(
+		agentId: string,
+		capability: string,
+		invoke: (gateway: SessionAgentGateway) => T | undefined,
+	): T {
+		const gateway = this.owner(agentId);
+		const result = invoke(gateway);
+		if (result === undefined) {
+			throw new Error(
+				`CompositeAgentGateway: backend "${gateway.backend}" does not support ${capability}`,
+			);
+		}
+		return result;
+	}
+
 	list(): AgentTab[] {
 		return this.gateways.flatMap((gateway) => gateway.list());
 	}
@@ -122,7 +141,7 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 	}
 
 	async getCommands(agentId: string): Promise<unknown[]> {
-		return this.owner(agentId).getCommands(agentId);
+		return this.callOptional(agentId, "getCommands", (gateway) => gateway.getCommands?.(agentId));
 	}
 
 	async getAvailableModels(agentId: string): Promise<AvailableModel[]> {
@@ -130,15 +149,17 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 	}
 
 	async exportHtml(agentId: string): Promise<unknown> {
-		return this.owner(agentId).exportHtml(agentId);
+		return this.callOptional(agentId, "exportHtml", (gateway) => gateway.exportHtml?.(agentId));
 	}
 
 	async editMessage(agentId: string, messageId: string, newText: string): Promise<void> {
-		return this.owner(agentId).editMessage(agentId, messageId, newText);
+		return this.callOptional(agentId, "editMessage", (gateway) =>
+			gateway.editMessage?.(agentId, messageId, newText));
 	}
 
 	async deleteMessage(agentId: string, messageId: string): Promise<void> {
-		return this.owner(agentId).deleteMessage(agentId, messageId);
+		return this.callOptional(agentId, "deleteMessage", (gateway) =>
+			gateway.deleteMessage?.(agentId, messageId));
 	}
 
 	async prepareResendFromMessage(

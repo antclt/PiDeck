@@ -253,3 +253,54 @@ test("dispose 后 abort/新请求不再向 transport 发消息", async () => {
 });
 
 
+
+test("abortAllPending 中断悬挂流（host 进程退出联动：mux 无 fetch-end 时不再永久悬挂）", async () => {
+	const { transport, mainToHost, hostPush } = makeMemoryTransport();
+	const client = new DshApiClient({ transport, loadModule });
+	const api = await client.getClient();
+	// mux 流已建立但 host 侧永远不会发 fetch-end（进程崩溃场景）
+	const iterator = api.events.mux({}, new AbortController().signal);
+	const pending = iterator.next().catch((error) => error);
+	await waitForOutbound(mainToHost, 1);
+	const requestId = mainToHost[0].id;
+	hostPush({ type: "fetch-stream-start", id: requestId, status: 200 });
+	// DshHost 的 exit 联动：abortAllPending 应让悬挂流以 error 结束（pump 据此退避重连）
+	client.abortAllPending();
+	const error = await pending;
+	assert.match(String(error), /DSH host process exited/);
+	client.dispose();
+});
+
+test("abortAllPending 后新请求不受影响（仅中断当时在途的流）", async () => {
+	const { transport, mainToHost, hostPush } = makeMemoryTransport();
+	const client = new DshApiClient({ transport, loadModule });
+	const api = await client.getClient();
+	const iterator = api.events.mux({}, new AbortController().signal);
+	const pending = iterator.next().catch((error) => error);
+	await waitForOutbound(mainToHost, 1);
+	const requestId = mainToHost[0].id;
+	hostPush({ type: "fetch-stream-start", id: requestId, status: 200 });
+	client.abortAllPending();
+	await pending;
+	// 新 mux 订阅（重启完成后）：应正常建立并接收帧
+	const iterator2 = api.events.mux({}, new AbortController().signal);
+	const pending2 = iterator2.next();
+	await waitForOutbound(mainToHost, 2);
+	const requestId2 = mainToHost[1].id;
+	hostPush({ type: "fetch-stream-start", id: requestId2, status: 200 });
+	// 注意：readSse 会按 zod schema 校验帧，event 必须带 time/data，否则整帧被 drop。
+	const frame = {
+		type: "server-request",
+		rpcId: "rpc-9",
+		method: "events.mux",
+		payload: {
+			type: "session/event",
+			sessionId: "s1",
+			event: { type: "turn/start", seq: 1, time: 1, data: {} },
+		},
+	};
+	hostPush({ type: "fetch-chunk", id: requestId2, data: `data: ${JSON.stringify(frame)}\n\n` });
+	// readSse 解析信封后 yield { rpcId, payload }。
+	assert.deepEqual((await pending2).value, { rpcId: "rpc-9", payload: frame.payload });
+	client.dispose();
+});

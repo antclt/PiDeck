@@ -35,6 +35,7 @@ export class DshHost {
 	private startPromise: Promise<void> | null = null;
 	private dshHome = "";
 	private configDir = "";
+	private unsubscribeHostExit: (() => void) | null = null;
 
 	constructor(
 		private readonly getUserDataDir: () => string,
@@ -48,6 +49,16 @@ export class DshHost {
 	/** 是否已完成引导。 */
 	isStarted(): boolean {
 		return this.client !== null;
+	}
+
+	/** host utilityProcess 是否存活（崩溃重启中返回 false）。 */
+	isHostProcessRunning(): boolean {
+		return this.hostProcess?.isRunning() ?? false;
+	}
+
+	/** host 是否已完成 boot（host-ready 已收到；重启后重新置位）。 */
+	isHostReady(): boolean {
+		return this.hostProcess?.isReady() ?? false;
 	}
 
 	/** 懒启动（幂等）：fork host 并建立桥接客户端。 */
@@ -231,6 +242,12 @@ export class DshHost {
 			(scope, message, detail) => this.log(scope, message, detail),
 		);
 		this.hostProcess = hostProcess;
+		// 崩溃联动：host 进程退出（运行中崩溃）时中断全部在途桥 fetch（mux 长连接），
+		// 否则 pump 的 for await 悬挂在永远不会结束的流上——会话静默断开的根因。
+		this.unsubscribeHostExit?.();
+		this.unsubscribeHostExit = hostProcess.onExit(() => {
+			this.apiClient?.abortAllPending();
+		});
 		// 先 fork 并等 host-ready：桥消息必须等 host 侧监听就绪后才能发。
 		await hostProcess.start();
 
@@ -268,6 +285,8 @@ export class DshHost {
 			this.apiClient = null;
 		}
 		if (this.hostProcess) {
+			this.unsubscribeHostExit?.();
+			this.unsubscribeHostExit = null;
 			await this.hostProcess.dispose();
 			this.hostProcess = null;
 		}

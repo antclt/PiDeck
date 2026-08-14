@@ -111,6 +111,27 @@ test("assistant/message 以终态内容块为准生成 assistant 消息（text/r
 	assert.equal(p.isStreaming, false);
 });
 
+test("assistant/message 只有 tool-call 块（无正文无思考）不落空气泡", () => {
+	// 模型直接发起工具调用时，assistant/message 的 content 只含 tool-call 块：
+	// 落一条空文本 assistant 消息会让时间线出现空白气泡，终态由 tool/call 卡片承接。
+	let p = projectDshEvent(undefined, event("turn/start", 2), AGENT);
+	p = projectDshEvent(p, event("assistant/chunk", 3, {
+		chunk: { type: "reasoning-delta", index: 0, text: "我先查一下" },
+	}), AGENT);
+	p = projectDshEvent(p, event("assistant/message", 5, {
+		message: {
+			content: [
+				{ type: "tool-call", id: "call-1", name: "pwsh", arguments: { command: "Get-Location" } },
+			],
+		},
+	}), AGENT);
+	assert.equal(p.messages.length, 0, "纯工具调用不产生 assistant 消息");
+	assert.equal(p.pendingAssistantText, "");
+	assert.equal(p.pendingAssistantThinking, "");
+	assert.equal(p.isStreaming, false);
+	assert.equal(p.stateChanged, true);
+});
+
 test("tool/call 与 tool/result 投影工具消息（结果拼到工具行）", () => {
 	let p = projectDshEvent(undefined, event("tool/call", 6, {
 		toolName: "pwsh",
@@ -120,6 +141,8 @@ test("tool/call 与 tool/result 投影工具消息（结果拼到工具行）", 
 	assert.equal(p.messages[0].role, "tool");
 	assert.equal(p.messages[0].text, "pwsh");
 	assert.equal(p.executingTool, "pwsh");
+	// status=running 驱动工具卡片旋转动画（getToolStatus 读取 meta.status）
+	assert.equal(p.messages[0].meta?.status, "running");
 
 	p = projectDshEvent(p, event("tool/result", 7, {
 		message: {
@@ -128,6 +151,8 @@ test("tool/call 与 tool/result 投影工具消息（结果拼到工具行）", 
 	}), AGENT);
 	assert.equal(p.messages.length, 1);
 	assert.match(p.messages[0].text, /pwsh: C:/);
+	// 结果到达：摘掉 running，卡片动画停止（无 running 即 done）
+	assert.equal(p.messages[0].meta?.status, "done");
 	assert.equal(p.executingTool, undefined);
 });
 

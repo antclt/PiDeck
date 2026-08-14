@@ -14,6 +14,7 @@ import { t, type TranslationKey } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
+import { Switch } from "../components/ui-shadcn/switch";
 import {
 	Select,
 	SelectContent,
@@ -240,6 +241,32 @@ function Overview(props: {
 	const { status } = props;
 	const [picking, setPicking] = useState(false);
 	const [switching, setSwitching] = useState(false);
+	const [autoAllow, setAutoAllow] = useState(false);
+	const [autoAllowLoaded, setAutoAllowLoaded] = useState(false);
+
+	// 读审批自动放行设置（缺省 undefined = 关闭）；加载前禁用开关避免闪动。
+	useEffect(() => {
+		void desktopApi.settings
+			.get()
+			.then((settings) => {
+				setAutoAllow(settings.dshApprovalAutoAllow === true);
+				setAutoAllowLoaded(true);
+			})
+			.catch(() => setAutoAllowLoaded(true));
+	}, []);
+
+	/** 切换审批自动放行：乐观更新 UI，写设置失败回滚。运行时读取、无需重启 host。 */
+	const toggleAutoAllow = async (checked: boolean) => {
+		const prev = autoAllow;
+		setAutoAllow(checked);
+		try {
+			await desktopApi.settings.update({ dshApprovalAutoAllow: checked });
+			showNotice(t(checked ? "config.dsh.autoAllowOn" : "config.dsh.autoAllowOff"), 3000);
+		} catch (error) {
+			setAutoAllow(prev);
+			showNotice(error instanceof Error ? error.message : String(error), 4000);
+		}
+	};
 
 	/**
 	 * 切换 DSH_HOME 目录：选目录 → 写设置 → 立即重启 host 生效。
@@ -342,6 +369,13 @@ function Overview(props: {
 					</Button>
 				</div>
 				<p className="text-micro text-muted-foreground">{t("config.dsh.homeHint")}</p>
+			</section>
+			<section className="grid gap-2">
+				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.approvals")}</h3>
+				<div className="flex items-center justify-between gap-4">
+					<p className="text-micro text-muted-foreground">{t("config.dsh.autoAllowApprovalHint")}</p>
+					<Switch checked={autoAllow} disabled={!autoAllowLoaded} onCheckedChange={(checked) => void toggleAutoAllow(checked)} />
+				</div>
 			</section>
 			{props.hasDocument && (
 				<section>

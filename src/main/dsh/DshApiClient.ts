@@ -219,6 +219,27 @@ export class DshApiClient {
 		}
 	}
 
+	/**
+	 * host 进程退出时调用：中断全部在途 fetch（含 mux 长连接）。
+	 * host 崩溃后桥消息永久中断，悬挂的 pending 若不主动 error，
+	 * pump 的 for await 会永远等不到结束——这是「会话静默断开」的根因。
+	 */
+	abortAllPending(): void {
+		for (const pending of this.pending.values()) {
+			const stream = pending.stream;
+			if (stream && !stream.closed) {
+				stream.closed = true;
+				try {
+					stream.controller.error(new Error("DSH host process exited"));
+				} catch {
+					// 已关闭忽略
+				}
+			}
+			pending.reject(new Error("DSH host process exited"));
+		}
+		this.pending.clear();
+	}
+
 	/** 释放：清空 pending（拒绝在途请求），退订桥消息，置 disposed 阻止后续 send。 */
 	dispose(): void {
 		this.disposed = true;
