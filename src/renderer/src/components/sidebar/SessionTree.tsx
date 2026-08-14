@@ -305,7 +305,9 @@ export function SessionTree(props: {
         className={rowContainerClass}
         onContextMenu={(event) => openContext(event, child.session)}
       >
-        <PathTooltip content={`${child.session.name || t("common.untitled")}\n${child.session.filePath}`}>
+        <PathTooltip content={child.session.filePath
+          ? `${child.session.name || t("common.untitled")}\n${child.session.filePath}`
+          : (child.session.name || t("common.untitled"))}>
           <button
             type="button"
             className={cn(

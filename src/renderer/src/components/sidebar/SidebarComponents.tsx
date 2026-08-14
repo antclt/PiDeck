@@ -504,6 +504,8 @@ export function SessionContextMenu(props: {
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
 	onOpenSessionFile?: () => void;
+	/** 会话是否有文件路径（DSH 会话无 pi 会话文件：隐藏「复制路径/打开文件」） */
+	hasFilePath?: boolean;
 	/** RPC 日志菜单组（与 AgentContextMenu 同语义）：仅会话有 live runtime 时显示 */
 	canRpcLog?: boolean;
 	rpcToggleDisabled?: boolean;
@@ -530,13 +532,17 @@ export function SessionContextMenu(props: {
 				{props.actionLoading === "export" && <span className="mini-loader" />}
 				{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 			</DropdownMenuItem>
-			<DropdownMenuSeparator />
-			<DropdownMenuItem disabled={busy} onSelect={props.onCopySessionFilePath}>
-				{t("menu.copySessionFilePath")}
-			</DropdownMenuItem>
-			<DropdownMenuItem disabled={busy} onSelect={props.onOpenSessionFile}>
-				{t("menu.openSessionFile")}
-			</DropdownMenuItem>
+			{props.hasFilePath !== false && (
+				<>
+					<DropdownMenuSeparator />
+					<DropdownMenuItem disabled={busy} onSelect={props.onCopySessionFilePath}>
+						{t("menu.copySessionFilePath")}
+					</DropdownMenuItem>
+					<DropdownMenuItem disabled={busy} onSelect={props.onOpenSessionFile}>
+						{t("menu.openSessionFile")}
+					</DropdownMenuItem>
+				</>
+			)}
 			{showRpcGroup && (
 				<>
 					<DropdownMenuItem

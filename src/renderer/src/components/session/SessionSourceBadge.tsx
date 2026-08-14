@@ -89,7 +89,9 @@ export function DshLogo(props: { className?: string }) {
   );
 }
 
-/** DSH 运行时徽标：官方鲸鱼 logo，与来源徽章同尺寸。 */
+/** DSH 运行时徽标：官方鲸鱼 logo，与来源徽章同尺寸。
+ * 官方品牌为黑白单色（favicon 仅 fill #000/#fff），与 opencode 徽章同一套中性灰策略：
+ * 不用品牌色（避免紫色观感），随主题自适应。 */
 export function SessionBackendBadge(props: { className?: string }) {
   const label = t("sessionBackend.dsh");
   return (
@@ -99,7 +101,7 @@ export function SessionBackendBadge(props: { className?: string }) {
       title={label}
       data-backend="dsh"
       className={cn(
-        "size-5 rounded-md p-0 border-violet-300/70 text-violet-700 dark:border-violet-700/70 dark:text-violet-300",
+        "size-5 rounded-md p-0 border-muted-foreground/40 text-muted-foreground",
         props.className,
       )}
     >
