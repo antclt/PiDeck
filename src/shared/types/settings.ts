@@ -253,6 +253,14 @@ export type StartupWindowMode =
 	 */
 	securityConfig?: SecurityConfig;
 
+	// ── DSH 后端 ──
+	/**
+	 * DSH_HOME 覆盖目录：用户自己的 DSH 配置目录（如 ~/.dsh）。
+	 * 缺省 undefined/空串：使用应用私有目录 userData/dsh-home（首次启动复制真实 ~/.dsh 配置）。
+	 * 变更在 DSH host 下次启动（懒 boot）时生效；已启动时切换需重启 host。
+	 */
+	dshHomeDir?: string;
+
 };
 
 // ── 桌面宠物类型 ──

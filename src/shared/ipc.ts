@@ -85,6 +85,24 @@ export const ipcChannels = {
 	sessionsRuntimeFork: "sessions:runtime-fork",
 	/** 渲染层汇报当前聚焦的会话（用于非聚焦会话 Ask 请求的桌面通知） */
 	sessionsSetFocusedSession: "sessions:set-focused-session",
+	/** DSH host 级模型目录（llm.models），不依赖已启动的会话。 */
+	dshListModels: "dsh:list-models",
+	/** DSH 配置管理页状态（host 启动状态 + 目录 + providers + 模型目录）。 */
+	dshGetStatus: "dsh:get-status",
+	/** DSH settings.describe（脱敏 namespace 视图 + schema，渲染配置表单）。 */
+	dshConfigDescribe: "dsh:config-describe",
+	/** DSH settings.update（合并 patch 到 namespace 用户层）。 */
+	dshConfigUpdate: "dsh:config-update",
+	/** DSH settings.openDocument（把配置文档交给平台打开）。 */
+	dshOpenDocument: "dsh:open-document",
+	/** DSH host 重启（DSH_HOME 切换后立即生效；有活跃 DSH 会话时拒绝）。 */
+	dshRestartHost: "dsh:restart-host",
+	/** DSH credentials.describe（configured/source/writable，无值）。 */
+	dshCredentialDescribe: "dsh:credential-describe",
+	/** DSH credentials.set（写凭证值）。 */
+	dshCredentialSet: "dsh:credential-set",
+	/** DSH credentials.unset（删凭证）。 */
+	dshCredentialUnset: "dsh:credential-unset",
 	codexSessionsScan: "codex-sessions:scan",
 	codexSessionsImport: "codex-sessions:import",
 	claudeSessionsScan: "claude-sessions:scan",

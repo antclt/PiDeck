@@ -75,7 +75,8 @@
     "test:e2e": "npm run build:fast && playwright test",
     "e2e": "playwright test",
     "verify": "npm run typecheck && npm test && npm run test:e2e",
-    "sync:model-specs": "node scripts/sync-model-specs.mjs"
+    "sync:model-specs": "node scripts/sync-model-specs.mjs",
+    "probe:dsh": "node scripts/dsh-embed-probe.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh": "^0.1.0-rc.6",
@@ -109,7 +110,8 @@
     "afterPack": "./scripts/after-pack-cleanup.js",
     "npmRebuild": false,
     "asarUnpack": [
-      "node_modules/sql.js/dist/*.wasm"
+      "node_modules/sql.js/dist/*.wasm",
+      "out/main/hostEntry.js"
     ],
     "directories": {
       "output": "release",
@@ -263,3 +265,4 @@
     "vitepress": "^1.6.4"
   }
 }
+

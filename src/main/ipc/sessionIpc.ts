@@ -82,6 +82,60 @@ export type SessionIpcDeps = {
 	) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
 	exportCatalogSessionHtml: (sessionId: string) => Promise<Record<string, unknown> & { path: string }>;
 	replaceAgentSession: (agentId: string, fn: () => Promise<any>) => Promise<any>;
+	/** DSH host 级模型目录；未装配时返回空列表。 */
+	listDshModels?: () => Promise<import("../../shared/types").AvailableModel[]>;
+	/** DSH 配置管理页状态；未装配时返回空状态。 */
+	getDshStatus?: () => Promise<{
+		started: boolean;
+		homeDir: string;
+	}>;
+	/** DSH settings.describe（脱敏 namespace 视图 + schema）。 */
+	describeDshSettings?: () => Promise<{
+		writable: boolean;
+		hasDocument: boolean;
+		namespaces: Array<{
+			ns: string;
+			applies: string;
+			revision: number;
+			value: unknown;
+			user?: unknown;
+			secrets: Array<{ path: string[]; set: boolean }>;
+			schema: unknown;
+		}>;
+	}>;
+	/** DSH settings.update。 */
+	updateDshSettings?: (
+		ns: string,
+		patch: Record<string, unknown>,
+		expectedRevision?: number,
+	) => Promise<unknown>;
+	/** DSH credentials.describe。 */
+	describeDshCredentials?: (refs: string[]) => Promise<Record<string, {
+		configured: boolean;
+		source?: string;
+		writable: boolean;
+	}>>;
+	/** DSH credentials.set。 */
+	setDshCredential?: (ref: string, value: string) => Promise<void>;
+	/** DSH credentials.unset。 */
+	unsetDshCredential?: (ref: string) => Promise<void>;
+	/** DSH settings.openDocument（平台打开配置文档）。 */
+	openDshDocument?: () => Promise<void>;
+	/** DSH host 重启；返回 false 表示有活跃 DSH 会话被拒绝。 */
+	restartDshHost?: () => Promise<boolean>;
+	/** DSH 历史分页（session.history 事件流翻页）；未装配时返回空页。 */
+	readDshHistoryPage?: (
+		dshSessionId: string,
+		beforeSeq: number | undefined,
+		pageSize: number,
+	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; total: number; nextBefore: number | null }>;
+	/** 判断 agentId 是否属于 DSH 后端（fork 等 pi 专属命令按 backend 分流）。 */
+	isDshAgent: (agentId: string) => boolean;
+	/** DSH fork：session.fork 裁剪 + runtime 换绑 + catalog dshSessionId 回写。 */
+	forkDshAgentSession?: (
+		target: SessionRuntimeTarget,
+		entryId: string,
+	) => Promise<Record<string, unknown> & { targetSessionId?: string }>;
 };
 
 function sessionCommandIpcError(
@@ -123,6 +177,18 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
+		listDshModels,
+		getDshStatus,
+		describeDshSettings,
+		updateDshSettings,
+		describeDshCredentials,
+		setDshCredential,
+		unsetDshCredential,
+		openDshDocument,
+		restartDshHost,
+		readDshHistoryPage,
+		isDshAgent,
+		forkDshAgentSession,
 	} = deps;
 
 	ipcMain.handle(
@@ -212,9 +278,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			if (!project) throw new Error(mainCopy("project.notFound"));
 			// Auto-fill model / thinkingLevel from pi config when the caller hasn't
 			// provided them, so the composer bar shows the effective default.
-			let model = input.model;
-			let thinkingLevel = input.thinkingLevel;
-			if (!model || !thinkingLevel) {
+			// DSH 后端不适用 pi 的模型配置（模型路由由 DSH host 自己的 settings 决定），跳过。
+			let model = input.backend === "dsh" ? undefined : input.model;
+			let thinkingLevel = input.backend === "dsh" ? undefined : input.thinkingLevel;
+			if (input.backend !== "dsh" && (!model || !thinkingLevel)) {
 				try {
 					const [settingsResult, modelsResult] = await Promise.all([
 						configManager.getSettingsConfig(),
@@ -256,6 +323,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				projectId: input.projectId,
 				title: input.title?.trim() || mainCopy("session.newTitle"),
 				environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+				// 后端透传：仅接受白名单枚举，其余视为 pi（渲染层不可信输入校验在边界）。
+				backend: input.backend === "dsh" ? "dsh" : undefined,
 				model,
 				thinkingLevel,
 			});
@@ -284,6 +353,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (_event, sessionId: string, patch: UpdateSessionRecordInput) => {
 			const entry = sessionCatalog.get(sessionId);
 			if (!entry) throw new Error(mainCopy("session.notFound"));
+			// 后端锁定（草稿期可改，激活后禁止）：pi 会话文件（JSONL）与 DSH 会话
+			// （host session log）格式不同，中途切换会导致消息同步渲染不可靠。
+			// 已 active 或已有 runtime 的会话拒绝 backend 变更（渲染层已隐藏入口，这里是边界防御）。
+			if (
+				patch.backend !== undefined &&
+				patch.backend !== entry.backend &&
+				(entry.status === "active" || sessionRuntimeCoordinator.getTarget(sessionId))
+			) {
+				throw new Error(mainCopy("session.backendLocked"));
+			}
 			const title = patch.title?.trim();
 			if (title && title !== entry.title) {
 				const target = sessionRuntimeCoordinator.getTarget(sessionId);
@@ -399,6 +478,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		ipcChannels.sessionsCatalogReadMessagePage,
 		async (_event, sessionId: string, before?: number, pageSize?: number, options?: { unit?: "message" | "turn"; beforeEntryId?: string }) => {
 			const entry = sessionCatalog.get(sessionId);
+			// DSH 会话没有 pi 会话文件：历史浏览走 host 的 session.history 事件流翻页
+			// （游标 = 事件 seq），与 pi 的磁盘分页同形状（messages/total/nextBefore）。
+			if (entry?.backend === "dsh" && entry.dshSessionId && readDshHistoryPage) {
+				return readDshHistoryPage(entry.dshSessionId, before, pageSize ?? 100);
+			}
 			if (!entry?.filePath) return { messages: [], total: 0, nextBefore: null };
 			// unit=turn（2026-08 激活分页）：页边界对齐完整轮次，pageSize 复用为轮次数（上限 10）；
 			// 游标协议不变（before/nextBefore 为绝对消息下标，与运行时数组同一下标空间）；
@@ -567,6 +651,61 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		},
 	);
 	ipcMain.handle(
+		ipcChannels.dshListModels,
+		async () => (listDshModels ? listDshModels() : []),
+	);
+	ipcMain.handle(
+		ipcChannels.dshGetStatus,
+		async () => (getDshStatus
+			? getDshStatus()
+			: { started: false, homeDir: "" }),
+	);
+	ipcMain.handle(
+		ipcChannels.dshConfigDescribe,
+		async () => (describeDshSettings
+			? describeDshSettings()
+			: { writable: false, hasDocument: false, namespaces: [] }),
+	);
+	ipcMain.handle(
+		ipcChannels.dshConfigUpdate,
+		async (_event, ns: string, patch: Record<string, unknown>, expectedRevision?: number) => {
+			if (!updateDshSettings) throw new Error("DSH settings are not available");
+			return updateDshSettings(ns, patch, expectedRevision);
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshCredentialDescribe,
+		async (_event, refs: string[]) => (describeDshCredentials ? describeDshCredentials(refs) : {}),
+	);
+	ipcMain.handle(
+		ipcChannels.dshCredentialSet,
+		async (_event, ref: string, value: string) => {
+			if (!setDshCredential) throw new Error("DSH credentials are not available");
+			await setDshCredential(ref, value);
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshCredentialUnset,
+		async (_event, ref: string) => {
+			if (!unsetDshCredential) throw new Error("DSH credentials are not available");
+			await unsetDshCredential(ref);
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshOpenDocument,
+		async () => {
+			if (!openDshDocument) throw new Error("DSH settings document is not available");
+			await openDshDocument();
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshRestartHost,
+		async () => {
+			if (!restartDshHost) throw new Error("DSH host restart is not available");
+			return restartDshHost();
+		},
+	);
+	ipcMain.handle(
 		ipcChannels.sessionsRuntimeStop,
 		(_event, target: SessionRuntimeTarget) => stopSessionRuntime(target),
 	);
@@ -687,6 +826,19 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			const validated = sessionRuntimeCoordinator.validateTarget(target);
 			if (!validated.ok) return validated;
 			try {
+				// DSH 后端：fork = session.fork 裁剪 + runtime 换绑新会话（catalog 的
+				// dshSessionId 同步更新，重启后 attach 到 fork 结果）。
+				if (isDshAgent(target.agentId)) {
+					if (!forkDshAgentSession) {
+						throw new Error("dsh fork is not available");
+					}
+					const value = await forkDshAgentSession(target, entryId);
+					void appLogger.info("session", "Session forked (dsh)", {
+						sessionId: target.sessionId,
+						entryId,
+					});
+					return { ok: true as const, value };
+				}
 				const value = await replaceAgentSession(
 					target.agentId,
 					() => agentManager.forkSession(target.agentId, entryId),

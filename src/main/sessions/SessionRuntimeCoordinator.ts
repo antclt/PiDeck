@@ -1,4 +1,6 @@
 import type {
+	AgentBackend,
+	AgentGatewayCapability,
 	AgentRuntimeState,
 	AgentTab,
 	AvailableModel,
@@ -31,8 +33,9 @@ export interface SessionCatalogGateway {
 		sessionId: string,
 		patch: {
 			title?: string;
-			model?: { provider: string; modelId: string };
-			thinkingLevel?: string;
+			model?: { provider: string; modelId: string } | null;
+			thinkingLevel?: string | null;
+			backend?: AgentBackend;
 			updatedAt?: number;
 		},
 	): Promise<SessionCatalogEntry>;
@@ -40,11 +43,18 @@ export interface SessionCatalogGateway {
 		sessionId: string;
 		filePath?: string;
 		piSessionId?: string;
+		dshSessionId?: string;
 	}): Promise<unknown>;
 }
 
 export interface SessionAgentGateway {
+	/** 本网关的运行时后端身份（pi/dsh）；CompositeAgentGateway 按它路由。 */
+	readonly backend: AgentBackend;
+	/** 本网关持有的可选能力；缺失项由 UI 按能力禁用，禁止硬造等价物。 */
+	readonly capabilities: ReadonlySet<AgentGatewayCapability>;
 	list(): AgentTab[];
+	/** 发送提示词到 agent（pi: stdio RPC；dsh: session.prompt）。 */
+	sendPrompt(input: SendPromptInput): Promise<SendPromptResult>;
 	getMessages(agentId: string): ChatMessage[];
 	create(input: CreateAgentInput): Promise<AgentTab>;
 	restart(agentId: string): Promise<AgentTab>;
@@ -81,6 +91,8 @@ export interface SessionAgentGateway {
 		sessionTitle: string,
 		question: string,
 	): void;
+	/** 统一的事件出口（agents:* 通道推送），主进程桥接进 sessions:runtime-event 用。 */
+	onOutput(listener: (channel: string, payload: unknown) => void): () => void;
 }
 
 /**
@@ -796,6 +808,13 @@ export class SessionRuntimeCoordinator {
 					filePath: tab.sessionPath,
 					piSessionId: tab.sessionId,
 				});
+			} else if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
+				// DSH restart 会新建 host 会话（旧会话停止）：回写新 sessionId，
+				// 否则重启应用后 attach 到已停止的旧会话。
+				await this.catalog.attachRuntime({
+					sessionId,
+					dshSessionId: tab.sessionId,
+				});
 			}
 			// 与 activate 同链路：绑定完成后推送完整 runtime state，渲染层底栏即时反映真实模型。
 			await this.agents.publishRuntimeState(tab.id).catch(() => undefined);
@@ -949,6 +968,8 @@ export class SessionRuntimeCoordinator {
 				sessionPath: entry.filePath,
 				environment: entry.environment,
 				source: entry.source,
+				backend: entry.backend,
+				dshSessionId: entry.backend === "dsh" ? entry.dshSessionId : undefined,
 				wslDistro: entry.wslDistro,
 				wslUser: entry.wslUser,
 				importedSourceId: entry.importedSourceId,
@@ -975,6 +996,13 @@ export class SessionRuntimeCoordinator {
 				sessionId,
 				filePath: tab.sessionPath,
 				piSessionId: tab.sessionId,
+			});
+		} else if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
+			// DSH 会话没有 pi 会话文件，DSH sessionId 由 host 持久化（$DSH_HOME）：
+			// 新建会话时回写 catalog，重启后 activate 走 attach 路径恢复旧会话。
+			await this.catalog.attachRuntime({
+				sessionId,
+				dshSessionId: tab.sessionId,
 			});
 		}
 		// 绑定完成后主动推送完整 runtime state：emitSessionRuntimeEvent 依赖 binding 才转发，

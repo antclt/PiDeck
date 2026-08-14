@@ -47,6 +47,26 @@ function katexWoff2OnlyPlugin(): Plugin {
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      lib: {
+        // electron-vite 多入口：lib.entry 对象形式输出到 out/main（index.js + hostEntry.js）。
+        // hostEntry 是 utilityProcess 的 DSH host 入口，独立 chunk 供 DshHostProcess fork。
+        entry: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          hostEntry: resolve(__dirname, "src/main/dsh/hostEntry.ts"),
+        },
+        formats: ["cjs"],
+      },
+      rollupOptions: {
+        // @deepseek-ai/dsh 的子包（dsh-app-boot / dsh-llm / cordis 等）不在
+        // package.json 顶层 dependencies，externalizeDepsPlugin 只外置
+        // `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh/...`，不会匹配
+        // `@deepseek-ai/dsh-app-boot`。打进 out/main 后 import.meta.url
+        // 变成产物路径，createRequire(...)("../package.json") 会报
+        // Cannot find module '../package.json'（发送 DSH 消息即触发）。
+        external: [/^@deepseek-ai\//],
+      },
+    },
     define: {
       // 构建标记：npm run dist:win:dev 打包时注入 true，用于隔离 dev 构建的配置目录与 AppUserModelID。
       __PIDECK_DEV_BUILD__: JSON.stringify(process.env.PIDECK_DEV_BUILD === "1"),

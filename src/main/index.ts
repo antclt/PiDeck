@@ -207,6 +207,9 @@ import type {
 import { ProjectStore } from "./projects/ProjectStore";
 import { FileSystemService } from "./fs/FileSystemService";
 import { AgentManager } from "./pi/AgentManager";
+import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
+import { DshHost } from "./dsh/DshHost";
+import { DshAgentManager } from "./dsh/DshAgentManager";
 import { PiLocator } from "./pi/PiLocator";
 import { testPiProxy } from "./pi/PiProxyTester";
 import { SessionScanner } from "./sessions/SessionScanner";
@@ -321,6 +324,9 @@ let worktreeService: WorktreeService;
 let gitService: GitService;
 let piLocator: PiLocator;
 let agentManager: AgentManager;
+/** DSH 深融合宿主（懒启动）与后端网关；未创建 DSH 会话前不 boot，零成本。 */
+let dshHost: DshHost;
+let dshAgentManager: DshAgentManager;
 let configManager: ConfigManager;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -2158,6 +2164,11 @@ function registerFeishuIpc() {
 async function sendAgentPromptWithIntegrations(
 	input: SendPromptInput,
 ): Promise<SendPromptResult> {
+	// 多后端路由：DSH 会话不经过飞书/pi 扩展链路，直接走 dsh 网关。
+	const isDshAgent = dshAgentManager?.list().some((tab) => tab.id === input.agentId) === true;
+	if (isDshAgent) {
+		return dshAgentManager.sendPrompt(input);
+	}
 	const bridge = feishuBridge;
 	const bridgeConnected = bridge?.getStatus().status === "connected";
 	const hasFeishuBinding = bridgeConnected && bridge.hasSessionBinding(input.agentId);
@@ -2300,6 +2311,39 @@ function registerIpc() {
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
+		listDshModels: () => dshHost.listModels(),
+		getDshStatus: () => dshHost.getStatus(),
+		describeDshSettings: () => dshHost.describeSettings(),
+		updateDshSettings: (ns, patch, expectedRevision) => dshHost.updateSettings(ns, patch, expectedRevision),
+		describeDshCredentials: (refs) => dshHost.describeCredentials(refs),
+		setDshCredential: (ref, value) => dshHost.setCredential(ref, value),
+		unsetDshCredential: (ref) => dshHost.unsetCredential(ref),
+		openDshDocument: () => dshHost.openDocument(),
+		restartDshHost: async () => {
+			// 切换 DSH_HOME 前先停掉全部活跃 DSH 会话（host 侧会话仍在 $DSH_HOME
+			// 持久化，catalog 保留 dshSessionId，重新打开会话时 attach 恢复），
+			// 避免旧目录的 mux 悬挂在已 dispose 的 transport 上；再重启 host。
+			await dshAgentManager.stopAll();
+			await dshHost.restart();
+			return true;
+		},
+		readDshHistoryPage: (dshSessionId, beforeSeq, pageSize) =>
+			dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
+		isDshAgent: (agentId) =>
+			dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
+		forkDshAgentSession: async (target, entryId) => {
+			// DSH fork：runtime 已原地换绑到新会话（agentId 不变，焦点会话 id 不变），
+			// 这里只需把 catalog 的 dshSessionId 同步为新 fork 会话，重启后 attach 正确。
+			const result = await dshAgentManager.forkSession(target.agentId, entryId);
+			const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
+			if (tab?.sessionId) {
+				await sessionCatalog.attachRuntime({
+					sessionId: target.sessionId,
+					dshSessionId: tab.sessionId,
+				});
+			}
+			return { ...result };
+		},
 	});
 
 	// ── 启动预扫描（2026-08 展开项目卡顿优化）──
@@ -2579,6 +2623,15 @@ app.whenReady().then(async () => {
 		// 闭包延迟读 feishuBridge（连接成功后才创建），spawn 时 binding 已先于 runtime 建立。
 		(key) => Boolean(key && feishuBridge?.hasSessionBinding(key)),
 	);
+	// DSH 后端：懒启动（首个 DSH 会话创建时 boot），见 docs/dsh-agent-backend-plan.md。
+	// DSH_HOME 可用设置 dshHomeDir 覆盖（用户自己的 ~/.dsh 等），空串 = 应用私有目录。
+	dshHost = new DshHost(
+		() => app.getPath("userData"),
+		() => app.getAppPath(),
+		undefined,
+		() => settingsStore.get().dshHomeDir ?? "",
+	);
+	dshAgentManager = new DshAgentManager(dshHost, (projectId) => projectStore.get(projectId));
 	webServiceManager = new WebServiceManager({
 		// dev 模式（electron-vite dev 不产出 out/renderer 构建物）下，静态资源
 		// 代理到 vite dev server，外部 Web 端加载重构后的 React 版页面并支持热更新；
@@ -2781,13 +2834,16 @@ app.whenReady().then(async () => {
 		},
 	);
 	await sessionCatalog.load();
+	// 多后端网关装配：pi + dsh（DSH 懒启动，未使用不 boot）。
+	// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
+	const compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 	sessionRuntimeCoordinator = new SessionRuntimeCoordinator(
 		sessionCatalog,
-		agentManager,
+		compositeAgentGateway,
 		sendAgentPromptWithIntegrations,
 		appLogger,
 	);
-	agentManager.onOutput((sourceChannel, payload) => {
+	compositeAgentGateway.onOutput((sourceChannel, payload) => {
 		if (sourceChannel === ipcChannels.agentsState && Array.isArray(payload)) {
 			for (const tab of payload) {
 				if (tab && typeof tab === "object" && typeof tab.id === "string") {
@@ -3041,6 +3097,8 @@ app.on("before-quit", () => {
 	void webServiceManager?.stop();
 	terminalManager?.closeAll();
 	agentManager?.stopAll();
+	// DSH host 退出清理（懒启动未 boot 时为 no-op）
+	void dshHost?.dispose();
 	petSystem?.stop();
 	petSystem = null;
 });

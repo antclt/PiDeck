@@ -75,11 +75,15 @@ export type SessionSummary = {
 	messageCount: number;
 	/** 会话来源：pi 原生、Codex 导入、Claude 导入、OpenCode 导入 */
 	source?: SessionSource;
+	/** 运行时后端；缺省 "pi"。草稿/历史行用来区分 DSH 会话。 */
+	backend?: import("./agent").AgentBackend;
 	/** 标记此会话文件来自 WSL，rename/delete/copy 等操作需走 wsl.exe */
 	wsl?: boolean;
 	/** 从 JSONL 中的 model_change / thinking_level_change 提取的最后值 */
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
+	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
+	dshSessionId?: string;
 	codexSessionId?: string;
 	codexThreadSource?: "user" | "subagent";
 	codexParentThreadId?: string;
@@ -99,6 +103,8 @@ export type SessionRecord = {
 	noSession?: boolean;
 	source: SessionSource;
 	environment: SessionEnvironment;
+	/** 运行时后端（pi/dsh）；缺省 "pi"，旧 catalog 数据无需迁移。 */
+	backend?: import("./agent").AgentBackend;
 	filePath?: string;
 	wslDistro?: string;
 	wslUser?: string;
@@ -111,6 +117,8 @@ export type SessionRecord = {
 	status: "draft" | "active";
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
+	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
+	dshSessionId?: string;
 	createdAt: number;
 	updatedAt: number;
 	wsl?: boolean;
@@ -126,6 +134,8 @@ export type CreateSessionDraftInput = {
 	title?: string;
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
+	/** 运行时后端；缺省 "pi"（旧调用方无需改动）。 */
+	backend?: import("./agent").AgentBackend;
 };
 
 /** 启动前选择的模型与思考级别；显式值优先于 pi 配置默认值。 */
@@ -138,6 +148,8 @@ export type SessionLaunchPreferences = {
 export type CreateAnonymousSessionInput = {
 	projectId: string;
 	title?: string;
+	/** 运行时后端；缺省 "pi"。 */
+	backend?: import("./agent").AgentBackend;
 } & SessionLaunchPreferences;
 
 export type CreateAnonymousSessionResult = {
@@ -148,8 +160,12 @@ export type CreateAnonymousSessionResult = {
 
 export type UpdateSessionRecordInput = {
 	title?: string;
-	model?: { provider: string; modelId: string };
-	thinkingLevel?: string;
+	/** null = 清空（切后端时丢掉另一套目录里的模型）。 */
+	model?: { provider: string; modelId: string } | null;
+	thinkingLevel?: string | null;
+	/** 后端（pi/dsh）：仅草稿期可变更；会话激活（active/有 runtime）后锁定——pi 会话文件
+	 *  与 DSH session log 格式不同，中途切换会导致消息同步渲染不可靠。 */
+	backend?: import("./agent").AgentBackend;
 };
 
 export type ForkMessage = {

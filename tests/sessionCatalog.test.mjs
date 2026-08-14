@@ -87,6 +87,63 @@ test("does not restore an unsubmitted draft after the catalog is reloaded", asyn
   }
 });
 
+test("persists an active session backend switch from pi to dsh", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-backend-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    // 未发送的 draft 会在重启时被清理（load 清理逻辑），要验证持久化必须让会话 active。
+    const draft = await catalog.createDraft({
+      projectId: "project-1",
+      title: "New session",
+      environment: "native",
+    });
+    await catalog.attachRuntime({
+      sessionId: draft.id,
+      filePath: "C:\\Sessions\\Example.jsonl",
+    });
+    const updated = await catalog.update(draft.id, { backend: "dsh" });
+    assert.equal(updated.backend, "dsh");
+    const reloaded = new SessionCatalog(join(dir, "sessions.json"));
+    await reloaded.load();
+    assert.equal(reloaded.getRecord(draft.id)?.backend, "dsh");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("persists DSH session id so a restarted app can attach the same host session", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-dsh-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    const draft = await catalog.createDraft({
+      projectId: "project-1",
+      title: "DSH session",
+      environment: "native",
+      backend: "dsh",
+    });
+    // DSH 会话没有 pi 会话文件：attachRuntime 只带 dshSessionId（backend=dsh 的 Coordinator 路径）。
+    await catalog.attachRuntime({
+      sessionId: draft.id,
+      dshSessionId: "session-host-abc123",
+    });
+    const record = catalog.getRecord(draft.id);
+    assert.equal(record?.dshSessionId, "session-host-abc123");
+    assert.equal(record?.filePath, undefined, "DSH 会话不落 pi 会话文件");
+    // 重启后 catalog 重载：dshSessionId 存活，Coordinator 可据此 attach 旧会话。
+    const reloaded = new SessionCatalog(join(dir, "sessions.json"));
+    await reloaded.load();
+    const restored = reloaded.getRecord(draft.id);
+    assert.equal(restored?.backend, "dsh");
+    assert.equal(restored?.dshSessionId, "session-host-abc123");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("keeps a draft desktop session ID after Pi assigns a file path", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-"));

@@ -396,6 +396,52 @@ const api = {
 				sessionId,
 				patch,
 			) as Promise<SessionRecord>,
+		/** DSH host 级模型目录（llm.models），未装配时返回空列表。 */
+		listDshModels: () =>
+			ipcRenderer.invoke(ipcChannels.dshListModels) as Promise<AvailableModel[]>,
+		/** DSH 配置管理页状态（host 启动状态 + DSH_HOME 目录）。 */
+		getDshStatus: () =>
+			ipcRenderer.invoke(ipcChannels.dshGetStatus) as Promise<{
+				started: boolean;
+				homeDir: string;
+			}>,
+		/** DSH settings.describe（脱敏 namespace 视图 + schema）。 */
+		describeDshSettings: () =>
+			ipcRenderer.invoke(ipcChannels.dshConfigDescribe) as Promise<{
+				writable: boolean;
+				hasDocument: boolean;
+				namespaces: Array<{
+					ns: string;
+					applies: string;
+					revision: number;
+					value: unknown;
+					user?: unknown;
+					secrets: Array<{ path: string[]; set: boolean }>;
+					schema: unknown;
+				}>;
+			}>,
+		/** DSH settings.update。 */
+		updateDshSettings: (ns: string, patch: Record<string, unknown>, expectedRevision?: number) =>
+			ipcRenderer.invoke(ipcChannels.dshConfigUpdate, ns, patch, expectedRevision) as Promise<unknown>,
+		/** DSH credentials.describe。 */
+		describeDshCredentials: (refs: string[]) =>
+			ipcRenderer.invoke(ipcChannels.dshCredentialDescribe, refs) as Promise<Record<string, {
+				configured: boolean;
+				source?: string;
+				writable: boolean;
+			}>>,
+		/** DSH credentials.set。 */
+		setDshCredential: (ref: string, value: string) =>
+			ipcRenderer.invoke(ipcChannels.dshCredentialSet, ref, value) as Promise<void>,
+		/** DSH credentials.unset。 */
+		unsetDshCredential: (ref: string) =>
+			ipcRenderer.invoke(ipcChannels.dshCredentialUnset, ref) as Promise<void>,
+		/** DSH settings.openDocument（平台打开配置文档）。 */
+		openDshDocument: () =>
+			ipcRenderer.invoke(ipcChannels.dshOpenDocument) as Promise<void>,
+		/** DSH host 重启（DSH_HOME 切换后立即生效；有活跃 DSH 会话时返回 false）。 */
+		restartDshHost: () =>
+			ipcRenderer.invoke(ipcChannels.dshRestartHost) as Promise<boolean>,
 		deleteRecord: (sessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogDelete, sessionId) as Promise<boolean>,
 		/** 归档会话（移入 .pideck-archive/ 并从目录移除）；运行中的会话会抛错 */
