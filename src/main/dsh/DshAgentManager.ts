@@ -161,12 +161,14 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (attached) {
 			const history = await client.sessions.history({ sessionId: dshSessionId, maxMessages: 200 }).catch(() => null);
 			if (history?.result.ok) {
-				const events = (history.result.value.events ?? [])
-					.map((entry) => entry.event)
-					.filter((event): event is NonNullable<typeof event> => Boolean(event))
-					.sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0));
-				for (const event of events) {
-					runtime.projection = projectDshEvent(runtime.projection, event, agentId);
+				// history 条目带 host 计算的 tool view（与 mux 帧同源），随事件一起投影，
+				// 历史工具卡片也能展示命令/描述（dsh-web 历史页同数据）。
+				const entries = (history.result.value.events ?? [])
+					.map((entry) => ({ event: entry.event, view: entry.view }))
+					.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
+					.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+				for (const { event, view } of entries) {
+					runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 				}
 				runtime.messages = runtime.projection.messages;
 			}
@@ -316,17 +318,17 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (!page.result.ok) {
 			return { messages: [], total: 0, nextBefore: null };
 		}
-		const events = (page.result.value.events ?? [])
-			.map((entry) => entry.event)
-			.filter((event): event is NonNullable<typeof event> => Boolean(event))
-			.sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0));
+		const entries = (page.result.value.events ?? [])
+			.map((entry) => ({ event: entry.event, view: entry.view }))
+			.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
+			.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
 		const agentId = `dsh:${dshSessionId}`;
 		let projection = projectDshEvent(undefined, undefined, agentId);
-		for (const event of events) {
-			projection = projectDshEvent(projection, event, agentId);
+		for (const { event, view } of entries) {
+			projection = projectDshEvent(projection, event, agentId, view);
 		}
 		const hasMore = page.result.value.hasMore === true;
-		const oldestSeq = events.length > 0 ? events[0].seq : undefined;
+		const oldestSeq = entries.length > 0 ? entries[0].event.seq : undefined;
 		// 游标语义：下一页传本页最旧事件 seq（DSH history 的 beforeSeq 是排除边界，
 		// 返回 seq < beforeSeq 的事件，与渲染层 prepend 协议「nextBefore 原样回传」对齐）。
 		const nextBefore = hasMore && typeof oldestSeq === "number" ? oldestSeq : null;
@@ -458,12 +460,12 @@ export class DshAgentManager implements SessionAgentGateway {
 		};
 		const history = await client.sessions.history({ sessionId: newSessionId, maxMessages: 200 }).catch(() => null);
 		if (history?.result.ok) {
-			const events = (history.result.value.events ?? [])
-				.map((entry) => entry.event)
-				.filter((event): event is NonNullable<typeof event> => Boolean(event))
-				.sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0));
-			for (const event of events) {
-				nextRuntime.projection = projectDshEvent(nextRuntime.projection, event, agentId);
+			const entries = (history.result.value.events ?? [])
+				.map((entry) => ({ event: entry.event, view: entry.view }))
+				.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
+				.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+			for (const { event, view } of entries) {
+				nextRuntime.projection = projectDshEvent(nextRuntime.projection, event, agentId, view);
 			}
 			nextRuntime.messages = nextRuntime.projection.messages;
 		}
@@ -637,6 +639,9 @@ export class DshAgentManager implements SessionAgentGateway {
 						if (!payload || payload.type !== "session/event") continue;
 						if (payload.sessionId !== runtime.sessionId) continue;
 						const event = payload.event;
+						// host 为事件计算的下发 view（tool/call 的卡片模型，dsh-web 同源）；
+						// 与事件一起投影，工具消息 meta.view 供渲染层展示命令/描述。
+						const eventView = payload.view;
 						const eventGeneration = runtime.control.cancelGeneration;
 						const controlled = applyDshControlEvent(runtime.control, event?.type, eventGeneration, event?.data);
 						this.applyControl(runtime, controlled.next);
@@ -651,7 +656,7 @@ export class DshAgentManager implements SessionAgentGateway {
 							}
 							continue;
 						}
-						runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id);
+						runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, eventView);
 						// 投影器是纯函数，必须把消息数组写回 runtime，getMessages / emitMessages 才看得到。
 						runtime.messages = runtime.projection.messages;
 						const p = runtime.projection;

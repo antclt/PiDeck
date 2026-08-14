@@ -156,6 +156,38 @@ test("tool/call 与 tool/result 投影工具消息（结果拼到工具行）", 
 	assert.equal(p.executingTool, undefined);
 });
 
+test("tool/call 的 arguments（JSON 字符串）解析进 meta.args，host view 透传进 meta.view", () => {
+	// DSH 的 tool/call.arguments 是 JSON 字符串（host 侧 presentCall 也 JSON.parse 后消费）；
+	// PiDeck 工具卡片的副标题（command/path/pattern/query/url）、详情与 diff 都读 meta.args。
+	let p = projectDshEvent(undefined, event("tool/call", 6, {
+		toolName: "pwsh",
+		callId: "call-1",
+		arguments: JSON.stringify({
+			command: "Get-Location",
+			description: "查看当前目录",
+			workdir: "C:\\work",
+		}),
+	}), AGENT, { for: "call", view: { card: "terminal", title: "Get-Location", description: "查看当前目录" } });
+	assert.equal(p.messages.length, 1);
+	// loadTsCommonJs 在独立 realm 执行 TS：JSON.parse 产物的原型属于该 realm，
+	// deepStrictEqual 跨 realm 恒失败，逐字段断言（行为等价）。
+	const args = p.messages[0].meta?.args;
+	assert.equal(args?.command, "Get-Location");
+	assert.equal(args?.description, "查看当前目录");
+	assert.equal(args?.workdir, "C:\\work");
+	assert.equal(p.messages[0].meta?.view?.for, "call");
+	assert.equal(p.messages[0].meta?.view?.view?.card, "terminal");
+});
+
+test("tool/call 的 arguments 非法 JSON 时保留原始字符串（渲染层 parseToolArgs 双兼容）", () => {
+	const p = projectDshEvent(undefined, event("tool/call", 6, {
+		toolName: "pwsh",
+		callId: "call-1",
+		arguments: "{not-json",
+	}), AGENT);
+	assert.equal(p.messages[0].meta?.args, "{not-json");
+});
+
 test("turn/end 正常结束：清 pending、置 turnEnded、无错误消息", () => {
 	let p = projectDshEvent(undefined, event("turn/start", 2), AGENT);
 	p = projectDshEvent(p, event("assistant/chunk", 3, {

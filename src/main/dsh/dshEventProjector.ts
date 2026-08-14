@@ -74,6 +74,9 @@ export function projectDshEvent(
 	prev: DshProjection | undefined,
 	event: { type?: string; seq?: number; data?: unknown; time?: unknown } | undefined,
 	agentId: string,
+	/** host 为事件计算的下发 view（session/event 帧与 history 条目的 view 字段，
+	 *  dsh-web 渲染工具卡片用的就是它；对 tool/call 投影进 meta.view）。 */
+	view?: unknown,
 ): DshProjection {
 	const base: DshProjection = prev ?? {
 		messages: [],
@@ -181,6 +184,21 @@ export function projectDshEvent(
 					? data.name
 					: "tool";
 			const callId = typeof data.callId === "string" ? data.callId : undefined;
+			// DSH 的 arguments 是 JSON 字符串（模型调用侧约定，host 侧 presentCall 也
+			// JSON.parse 后消费）。解析成对象投影进 meta.args——PiDeck 工具卡片的
+			// 副标题（command/path/pattern/query/url）、详情、文件 diff 与 SKILL 识别
+			// 全部读 meta.args；解析失败时保留原始字符串（渲染层 parseToolArgs 双兼容）。
+			const rawArgs = data.arguments;
+			let args: unknown;
+			if (typeof rawArgs === "string") {
+				try {
+					args = JSON.parse(rawArgs);
+				} catch {
+					args = rawArgs;
+				}
+			} else {
+				args = rawArgs;
+			}
 			next.messages = [
 				...base.messages,
 				{
@@ -190,7 +208,13 @@ export function projectDshEvent(
 					text: toolName,
 					timestamp: eventTime(event.time),
 					// status=running 驱动渲染层工具卡片的旋转动画；tool/result 到达后清掉。
-					meta: { toolCallId: callId, toolName, status: "running" },
+					meta: {
+						toolCallId: callId,
+						toolName,
+						status: "running",
+						...(args !== undefined ? { args } : {}),
+						...(view !== undefined ? { view } : {}),
+					},
 				},
 			];
 			next.executingTool = toolName;

@@ -141,6 +141,34 @@ function makeFakeHost({ muxFrames = [], failRespond = false } = {}) {
 	return { host, client, sessions, historyBySession, calls, promptCalls, respondCalls, muxCalls };
 }
 
+/**
+ * 模拟 host 懒启动（冷启动）：getClient 返回 null，ensureStarted 后才就绪。
+ * 回归锚点：readHistoryPage 是唯一不经 runtime 激活、按 catalog dshSessionId
+ * 直接读 host 历史的入口（渲染层打开会话的首屏分页），冷启动时必须先
+ * ensureStarted（等 boot）而不是 requireClient 直接抛错——否则聊天区域
+ * 表现为「历史消息没加载」（空白），会话里其实有消息。
+ */
+function makeColdStartHost() {
+	const inner = makeFakeHost();
+	let started = false;
+	const host = {
+		async ensureStarted() {
+			started = true;
+			await inner.host.ensureStarted();
+		},
+		getClient() {
+			return started ? inner.client : null;
+		},
+		isHostProcessRunning() {
+			return inner.host.isHostProcessRunning();
+		},
+		isHostReady() {
+			return inner.host.isHostReady();
+		},
+	};
+	return { host, ...inner };
+}
+
 /** 让 pump/respond 等异步链全部落盘（循环 setImmediate 而非定时器，测试更稳）。 */
 async function flush() {
 	for (let i = 0; i < 10; i += 1) {
@@ -287,6 +315,27 @@ test("readHistoryPage 空会话返回空页且 nextBefore=null", async () => {
 	assert.equal(page.messages.length, 0);
 	assert.equal(page.nextBefore, null);
 	assert.equal(page.total, -1);
+});
+
+test("readHistoryPage host 冷启动：先 ensureStarted 等 boot，不抛「DSH host is not started」", async () => {
+	const { host, sessions, historyBySession, calls } = makeColdStartHost();
+	sessions.set("session-cold-1", { sessionId: "session-cold-1", cwd: PROJECT.path, running: false, blank: false });
+	historyBySession.set("session-cold-1", [
+		event("user/message", 1, {
+			content: [{ type: "text", text: "重启前的提问" }],
+			source: { kind: "user", rpcId: "rpc-1" },
+		}),
+		event("assistant/message", 2, {
+			message: { content: [{ type: "text", text: "重启前的回复" }] },
+		}),
+	]);
+	const manager = new DshAgentManager(host, () => PROJECT);
+	// 冷启动打开会话：渲染层首屏拉历史页 → host 未 boot → 必须等 ensureStarted 而不是抛错
+	const page = await manager.readHistoryPage("session-cold-1", undefined, 100);
+	assert.equal(page.messages.length, 2, "冷启动历史页必须返回会话消息");
+	assert.equal(page.messages[0].text, "重启前的提问");
+	assert.equal(page.messages[1].text, "重启前的回复");
+	assert.equal(calls.history, 1);
 });
 
 test("getForkMessages 收集用户消息并以 seq 编码 entryId", async () => {
@@ -504,6 +553,39 @@ test("reasoning delta 走 agents:thinking 独立通道，不进正文流", async
 	assert.equal(streams.length, 1, "正文流只收到关闭信号");
 	assert.equal(streams[0].done, true);
 	assert.equal(streams[0].text, "");
+});
+
+test("tool/call 帧携带 arguments 与 host view：投影进工具消息 meta（args/view）", async () => {
+	const { host } = makeFakeHost({
+		muxFrames: [{
+			payload: {
+				type: "session/event",
+				sessionId: "session-fake-1",
+				event: event("tool/call", 1, {
+					toolName: "pwsh",
+					callId: "call-1",
+					arguments: JSON.stringify({ command: "Get-Location", description: "看当前目录" }),
+				}),
+				// host 计算的工具卡片 view（dsh-web 同源数据）：透传进 meta.view
+				view: { for: "call", view: { card: "terminal", title: "Get-Location", description: "看当前目录" } },
+			},
+		}],
+	});
+	const messages = [];
+	const manager = new DshAgentManager(host, () => PROJECT);
+	manager.onOutput((channel, payload) => {
+		if (channel === "agents:message") messages.push(payload);
+	});
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	const tool = messages.at(-1).messages.at(-1);
+	assert.equal(tool.role, "tool");
+	// 跨 realm 对象不能 deepStrictEqual，逐字段断言
+	assert.equal(tool.meta.args.command, "Get-Location");
+	assert.equal(tool.meta.args.description, "看当前目录");
+	assert.equal(tool.meta.status, "running");
+	assert.equal(tool.meta.view.for, "call");
+	assert.equal(tool.meta.view.view.card, "terminal");
 });
 
 test("host 进程退出后 mux 自动重连（流中断 → 退避 → 重新订阅，不再静默悬挂）", async () => {
