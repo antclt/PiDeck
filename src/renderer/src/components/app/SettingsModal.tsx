@@ -1600,7 +1600,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 									<SettingRow
 										title={
 											<>
-												<span>PiDeck</span>
+												<span>phids</span>
 												<span className="text-caption font-normal text-muted-foreground">v{props.appInfo.version}</span>
 											</>
 										}
