@@ -166,7 +166,9 @@ function makeColdStartHost() {
 			return inner.host.isHostReady();
 		},
 	};
-	return { host, ...inner };
+	// 冷启动 host 必须最后展开：inner 里也带 host 键（fake host，getClient 恒返回 client），
+	// 若先展开 host 会被 inner 覆盖 → 测试拿到的是「温 host」，冷启动回归永远测不到。
+	return { ...inner, host };
 }
 
 /** 让 pump/respond 等异步链全部落盘（循环 setImmediate 而非定时器，测试更稳）。 */

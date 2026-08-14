@@ -309,7 +309,10 @@ export class DshAgentManager implements SessionAgentGateway {
 		beforeSeq: number | undefined,
 		maxMessages: number,
 	): Promise<{ messages: ChatMessage[]; total: number; nextBefore: number | null }> {
-		const client = this.requireClient();
+		// 历史浏览是 DSH host 的第一个入口：点击历史 DSH 会话时 runtime 尚未激活
+		// （懒启动），必须 ensureStarted 拉起 host，否则 requireClient 直接抛
+		// "DSH host is not started"，时间线加载失败显示为空会话。
+		const client = await this.ensureClient();
 		const page = await client.sessions.history({
 			sessionId: dshSessionId as SessionId,
 			beforeSeq,
