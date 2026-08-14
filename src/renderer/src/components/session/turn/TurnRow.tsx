@@ -1,7 +1,7 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronUp, Clock, Share, SquarePen, Trash } from "lucide-react";
 import { atom, useAtomValue } from "jotai";
-import type { ImageContent } from "../../../../../shared/types";
+import type { AgentBackend, ImageContent } from "../../../../../shared/types";
 import { liveTextStreamingBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily } from "../../../atoms/session-atoms";
 import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";
@@ -47,6 +47,8 @@ export type TurnRowProps = {
 	run: AgentRunItem;
 	/** 所属会话 id（转交给 live InterimAnswer） */
 	sessionId?: string;
+	/** 运行时后端（pi/dsh）：决定行头回复者署名；缺省 "pi"（旧调用方兼容） */
+	backend?: AgentBackend;
 	/** 新消息入场动画：仅发送后尾部新增的消息播放一次 */
 	fresh?: boolean;
 	onPreviewImage: (image: ImageContent) => void;
@@ -252,7 +254,8 @@ export const TurnRow = memo(
 				    时间用 text-body（14px）。耗时不放行头——回复生成时用户视线在底部，
 				    统一显示在 turn 尾部（见底部耗时行），不用翻回开头看跑了多久。 */}
 				<div className="mb-1 inline-flex items-center gap-2 text-muted-foreground tabular-nums">
-					<span className="shrink-0 font-mono text-brand font-semibold leading-none text-foreground/80">pi</span>
+					{/* 行头署名：DSH 后端的回复署名 dsh，pi 后端署名 pi；"pi" 为历史默认值 */}
+					<span className="shrink-0 font-mono text-brand font-semibold leading-none text-foreground/80">{props.backend === "dsh" ? "dsh" : "pi"}</span>
 					<time className="shrink-0 font-mono text-body leading-none">{formatTime(run.endedAt)}</time>
 				</div>
 

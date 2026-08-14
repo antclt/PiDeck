@@ -105,8 +105,11 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     // 但模型列表是全量的，listModels 不依赖 projectId）。
     if (props.picker !== "model") return;
     const sequence = ++modelLoadSequenceRef.current;
-    // Always read models.json directly — same source as Agent RPC, no transition flicker
-    void desktopApi.projects.listModels(record?.projectId).then((next) => {
+    // DSH 会话走 host 级模型目录；pi 走 models.json（与 Agent RPC 同源，无抖动）。
+    const loader = record?.backend === "dsh"
+      ? desktopApi.sessions.listDshModels()
+      : desktopApi.projects.listModels(record?.projectId);
+    void loader.then((next) => {
       if (sequence === modelLoadSequenceRef.current) setModels(next);
     }).catch((error) => {
       if (sequence === modelLoadSequenceRef.current) {

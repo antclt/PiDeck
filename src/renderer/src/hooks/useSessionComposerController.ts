@@ -30,6 +30,7 @@ import {
   setSessionComposerModeAtom,
   setSessionDraftAtom,
   setSessionSendStateAtom,
+  upsertSessionAtom,
 } from "../atoms";
 import {
   getComposerEnterIntent,
@@ -1158,6 +1159,29 @@ export function useSessionComposerController(
     setSendStateAtom({ sessionId, state: { status: "idle" } });
   }, [sessionId, setSendStateAtom]);
 
+  const upsertSession = useSetAtom(upsertSessionAtom);
+
+  /**
+   * 切换后端（pi ↔ dsh）：仅草稿期可用。
+   * 会话一旦激活（有 runtime 或 record 已 active）即锁定后端——pi 会话文件（JSONL）
+   * 与 DSH 会话（host session log）格式不同，中途切换会导致时间线消息来源混乱、
+   * 同步渲染不可靠。激活后 UI 不再渲染切换器（changeBackend 返回 undefined）。
+   */
+  const backendLocked = Boolean(runtime?.agentId) || record?.status === "active";
+  const changeBackend = useCallback(async (next: "pi" | "dsh") => {
+    if (backendLocked) return;
+    try {
+      const updated = await desktopApi.sessions.updateRecord(sessionId, {
+        backend: next,
+        model: null,
+        thinkingLevel: null,
+      });
+      upsertSession(updated);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : String(error), 4000);
+    }
+  }, [backendLocked, sessionId, upsertSession]);
+
   const compact = useCallback(async () => {
     const target = toSessionRuntimeTarget(sessionId, runtime);
     if (!target) {
@@ -1195,6 +1219,9 @@ export function useSessionComposerController(
     sessionId,
     record,
     runtime,
+    backend: record?.backend ?? "pi",
+    /** 草稿期可切换后端；激活后锁定（undefined → UI 隐藏切换器）。 */
+    changeBackend: backendLocked ? undefined : changeBackend,
     draft,
     attachments,
     mode,

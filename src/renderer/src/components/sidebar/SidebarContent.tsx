@@ -46,6 +46,8 @@ export type SidebarActions = {
     beginDrag?: (sessionId: string) => void;
     endDrag?: () => void;
     createDraft: (projectId: string) => Promise<void>;
+    /** 新建 DSH 后端会话（深融合：进程内 boot，见 docs/dsh-agent-backend-plan.md）。 */
+    createDraftDsh: (projectId: string) => Promise<void>;
     createAnonymous: (projectId: string) => Promise<void>;
     deleteDraft: (session: SessionRecord) => Promise<void>;
     rename: (projectId: string, session: SessionSummary) => void;

@@ -50,6 +50,8 @@ import { PromptsTab } from "./config/PromptsTab";
 import { SkillsTab } from "./config/SkillsTab";
 import { ExtensionsTab } from "./config/ExtensionsTab";
 import { SecuritySection, type SecuritySectionHandle } from "./components/config/SecuritySection";
+import { DshLogo, PiLogo } from "./components/session/SessionSourceBadge";
+import { DshConfigTab } from "./config/DshConfigTab";
 import { t } from "./i18n";
 import { CodeMirrorEditor } from "./components/app/CodeMirrorEditor";
 import { translateBuiltinPromptDescription } from "./composerBehavior";
@@ -290,6 +292,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 	const [lastTab] = useState(loadLastConfigTab);
 	const [section, setSection] = useState<ConfigSection>(lastTab?.section ?? "config");
 	const [tab, setTab] = useState<ConfigTab>(lastTab?.tab ?? "models");
+	/** 配置管理顶层后端分页：默认 DSH（新建会话默认 dsh），pi 页复用原有全部导航。 */
+	const [backendPane, setBackendPane] = useState<"dsh" | "pi">("dsh");
 	const [loading, setLoading] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -1656,7 +1660,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 							)}
 							{saving ? t("common.saving") : t("common.save")}
 						</Button>
-						{section === "config" ? (
+						{backendPane === "pi" && section === "config" ? (
 							<>
 								<Button variant="outline" size="sm" onClick={handleExport}>
 									{t("common.export")}
@@ -1673,6 +1677,22 @@ function ConfigModalContent(props: ConfigModalProps) {
 						</DialogClose>
 					</div>
 				</DialogHeader>
+			{/* 顶层后端分页：DSH 配置管理（默认）/ Pi 配置管理（复用原有全部导航） */}
+			<Tabs value={backendPane} onValueChange={(value) => setBackendPane(value === "pi" ? "pi" : "dsh")} className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<TabsList className="config-backend-switch flex h-9 shrink-0 items-center gap-1 border-b border-border/60 px-3">
+					<TabsTrigger value="dsh" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
+						<DshLogo className="size-3.5 shrink-0" />
+						{t("config.backend.dsh")}
+					</TabsTrigger>
+					<TabsTrigger value="pi" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
+						<PiLogo className="size-3.5 shrink-0" />
+						{t("config.backend.pi")}
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="dsh" className="flex min-h-0 min-w-0 flex-1">
+					<DshConfigTab />
+				</TabsContent>
+				<TabsContent value="pi" className="min-h-0 min-w-0 flex-1">
 			{/* 默认浅色主题整页同底（bg-background），避免顶栏白 / 下方多层灰的割裂感。
 			  左侧导航 = shadcn Vertical Tabs：TabsList 竖排（orientation=vertical），
 			  组标题是非 trigger 的普通 div；窄屏（<820px）回退为横向导航。 */}
@@ -1999,6 +2019,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 						</div>
 					</TabsContent>
 				</Tabs>
+				</TabsContent>
+			</Tabs>
 
 				{deleteSkillConfirm && (
 					<ConfirmDialog

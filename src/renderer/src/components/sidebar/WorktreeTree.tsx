@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, GitBranch, HatGlasses, Plus, Trash2 } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, GitBranch, HatGlasses, Plus, Trash2 } from "lucide-react";
 import type { AgentTab, Project, SessionRecord, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import { t } from "../../i18n";
@@ -24,7 +24,7 @@ const workspaceSessionsClass = "min-w-0 basis-[calc(100%-24px)] ml-6 pl-2";
  * 按钮会跑到「标题 + 全部历史会话」整块的中心，压住历史会话行、挡住点击。
  * 窄侧栏（<256px）时按钮会盖住标题：行文本上 @max-[255px]:group-hover:pr-* 压出
  * 按钮宽度的右侧留白，文本截断让位但保持可见（淡出到透明会不可读，已弃用），
- * 与项目行/会话行同一套策略。主工作区行 2 按钮 52px，子工作区行 3 按钮 78px。
+ * 与项目行/会话行同一套策略。主工作区行 3 按钮 78px，子工作区行 4 按钮 104px。
  */
 function WorkspaceRowActions(props: {
   children: React.ReactNode;
@@ -87,7 +87,7 @@ export function WorktreeTree(props: {
             title={t("app.worktreeMainWorkspace")}
           >
             <span className="worktree-main-branch-icon grid size-5 shrink-0 place-items-center text-muted-foreground"><GitBranch size={14} /></span>
-            <span className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-[52px] @max-[255px]:group-focus-within:pr-[52px]">
+            <span className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-[78px] @max-[255px]:group-focus-within:pr-[78px]">
               <span className="conversation-title flex min-w-0 items-center gap-1.5">
                 <strong className="min-w-0 truncate font-medium">{t("app.worktreeMainWorkspace")}</strong>
                 <span className="worktree-main-branch min-w-0 truncate text-control text-muted-foreground">{props.branch ?? t("app.worktreeBranchLoading")}</span>
@@ -108,6 +108,17 @@ export function WorktreeTree(props: {
               onClick={() => void props.actions.sessions.createDraft(props.project.id)}
             >
               <Plus size={13} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={workspaceActionClass}
+              title={t("app.projectNewDshAgent")}
+              aria-label={t("app.projectNewDshAgent")}
+              onClick={() => void props.actions.sessions.createDraftDsh(props.project.id)}
+            >
+              <Bot size={13} />
             </Button>
             <Button
               type="button"
@@ -220,7 +231,7 @@ function WorkspaceTreeRowView(props: {
               // 子 worktree 是父项目下的分支入口，不应与父项目/主工作区争夺视觉层级。
               "text-control",
               // 窄侧栏 hover 压出 3 按钮（78px）留白；transition-all 让压缩动画与配色过渡共存
-              "transition-all @max-[255px]:group-hover:pr-[78px] @max-[255px]:group-focus-within:pr-[78px]",
+              "transition-all @max-[255px]:group-hover:pr-[104px] @max-[255px]:group-focus-within:pr-[104px]",
               isActive && "bg-accent/60 border border-border-strong text-foreground",
             )}
             disabled={!childProject}
@@ -256,6 +267,17 @@ function WorkspaceTreeRowView(props: {
               onClick={() => void props.actions.sessions.createDraft(childProject.id)}
             >
               <Plus size={13} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={workspaceActionClass}
+              title={t("app.projectNewDshAgent")}
+              aria-label={t("app.projectNewDshAgent")}
+              onClick={() => void props.actions.sessions.createDraftDsh(childProject.id)}
+            >
+              <Bot size={13} />
             </Button>
             <Button
               type="button"

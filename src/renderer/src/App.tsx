@@ -154,6 +154,7 @@ import type {
   ImageContent,
   PiCommand,
   Project,
+  AgentBackend,
   SessionLaunchPreferences,
   SessionRecord,
   SessionSummary,
@@ -1200,8 +1201,8 @@ export function App() {
 
   /** 新建会话：选中 + 登记常驻 Tab（chrome 与 selection 在 App 边界组合） */
   const createSessionDraftWithTab = useCallback(
-    async (projectId?: string, preferences: SessionLaunchPreferences = {}) => {
-      const session = await runCreateSessionDraft(projectId, preferences);
+    async (projectId?: string, preferences: SessionLaunchPreferences = {}, backend?: AgentBackend) => {
+      const session = await runCreateSessionDraft(projectId, preferences, backend);
       if (session) workspaceChrome.registerOpenSession(session.id, "permanent");
       return session;
     },
@@ -2468,6 +2469,9 @@ export function App() {
       endDrag: workspaceChrome.endDrag,
       createDraft: async (projectId) => {
         await createSessionDraftWithTab(projectId);
+      },
+      createDraftDsh: async (projectId) => {
+        await createSessionDraftWithTab(projectId, {}, "dsh");
       },
       createAnonymous: async (projectId) => {
         await createAnonymousSessionWithTab(projectId);

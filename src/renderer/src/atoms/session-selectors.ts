@@ -22,6 +22,7 @@ export function sessionRecordToSummary(
     updatedAt: session.updatedAt,
     messageCount: session.messageCount,
     source: session.source,
+    backend: session.backend,
     wsl: session.environment === "wsl" || session.wsl || undefined,
     codexSessionId: session.codexSessionId,
     codexThreadSource: session.codexThreadSource,

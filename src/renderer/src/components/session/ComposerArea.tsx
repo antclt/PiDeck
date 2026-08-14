@@ -314,6 +314,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 composerAgentMode={composer.mode}
                 gitInfo={props.gitInfo}
                 record={composer.record}
+                backend={composer.backend}
+                onChangeBackend={composer.changeBackend}
                 feishuIndicator={feishuIndicator}
                 securityControl={
                   /* 安全级别切换是策略快照热更新（安全门每次工具调用重读），运行中即时生效，
