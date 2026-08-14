@@ -18,6 +18,7 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
+import { installHiddenConsolePatch } from "./hideChildConsoles";
 
 // utilityProcess 的 parentPort：electron 包类型里有（Electron.ParentPort）。
 import type { ParentPort } from "electron";
@@ -69,6 +70,11 @@ async function main(): Promise<void> {
 	mkdirSync(configDir, { recursive: true });
 	process.env.DSH_HOME = dshHome;
 	process.env.DSH_TELEMETRY_DISABLED = "1";
+
+	// Windows 黑窗口治理：必须在下面任何 @deepseek-ai/* 动态 import 之前安装——
+	// dsh-subprocess-local 等模块加载时会捕获 child_process.spawn 的引用，
+	// 补丁先于加载才覆盖得到（utilityProcess 无控制台，pwsh 子进程默认会弹新窗口）。
+	installHiddenConsolePatch();
 
 	// ── 组合：base 补丁 + 覆盖层（ApiProxy/workspace/storage + picker stub + 遥测关）──
 	// require base 用宿主 node_modules 目录（DshHost 传 --dsh-node-modules 的 file URL）：
