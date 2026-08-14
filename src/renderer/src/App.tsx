@@ -1349,7 +1349,11 @@ export function App() {
       .catch(() => setSystemLanguage(null));
     void api.app
       .info()
-      .then(setAppInfo)
+      .then((info) => {
+        setAppInfo(info);
+        // 与窗口标题一致：开发态功能分支时文档标题带分支名
+        document.title = info.devBranch ? `phids · ${info.devBranch}` : "phids";
+      })
       .catch(() => undefined);
     void api.settings.get().then((next) => {
       setSettings(next);

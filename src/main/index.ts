@@ -28,6 +28,13 @@ import {
 	readSingleInstancePreference,
 } from "./settings/SettingsStore";
 import { acquireVersionSingleInstance, type FocusPayload } from "./singleInstance";
+import {
+	DEFAULT_DEV_USER_DATA_NAME,
+	isSharedDevBranch,
+	readDevGitBranch,
+	resolveDevUserDataDirName,
+	sanitizeDevBranchSegment,
+} from "./devIsolation";
 import { extractFocusTargetFromArgv } from "./utils/focusTarget";
 import type { Project, StartupWindowMode } from "../shared/types";
 // 使用 ?asset 后缀导入图标，electron-vite 会在构建时将其复制到输出目录并提供正确的运行时路径
@@ -43,15 +50,23 @@ const isDevBuild = !app.isPackaged || __PIDECK_DEV_BUILD__;
 
 // 开发态与正式版隔离 userData。
 // 否则 npm run dev 会与已安装的 PiDeck 共用数据/锁，表现为「开发启动被复用到正式版窗口」。
+// 未打包的 npm run dev：功能分支再按 git 分支名拆目录（pi-desktop-dev-<branch>），
+// 避免多个 worktree 同时启动共用 catalog / 单实例锁 / DSH home。main/dev 仍用历史目录。
+// 打包的 dist:win:dev 仍固定 pi-desktop-dev（与脚本约定一致，复用现有开发配置）。
 // 必须在读取 settings / 版本单实例锁之前设置。
+const isolateDevByGitBranch = !app.isPackaged;
+const devGitBranch = isolateDevByGitBranch ? readDevGitBranch() : undefined;
+const devUserDataDirName = isolateDevByGitBranch
+	? resolveDevUserDataDirName(devGitBranch)
+	: DEFAULT_DEV_USER_DATA_NAME;
 if (isDevBuild) {
-	// 显式固定为 pi-desktop-dev：dev 构建的 productName 是 PiDeckDev，
+	// 显式固定目录名：dev 构建的 productName 是 PiDeckDev，
 	// 默认 userData 会落在 %APPDATA%\PiDeckDev，必须指回 dev 配置目录以复用现有配置。
 	// 例外：命令行显式传入 --user-data-dir（e2e 隔离、多实例调试）时尊重该路径，
 	// 否则 e2e 会读到本机真实开发数据（settings/projects 全部污染测试断言）。
 	const explicitUserDataDir = process.argv.find((arg) => arg.startsWith("--user-data-dir="));
 	if (!explicitUserDataDir) {
-		app.setPath("userData", join(app.getPath("appData"), "pi-desktop-dev"));
+		app.setPath("userData", join(app.getPath("appData"), devUserDataDirName));
 	}
 }
 
@@ -81,7 +96,11 @@ app.commandLine.appendSwitch("js-flags", "--max-old-space-size=384");
 // Windows 系统通知必须设置 AppUserModelID，否则通知不显示、点击事件不触发。
 // dev 与正式版使用不同 AppID，避免通知中心归属混淆（与 dev userData 隔离思路一致）。
 if (process.platform === "win32") {
-	app.setAppUserModelId(isDevBuild ? "com.ayuayue.pi-desktop-dev" : "com.ayuayue.pi-desktop");
+	const devAppId =
+		devUserDataDirName === DEFAULT_DEV_USER_DATA_NAME
+			? "com.ayuayue.pi-desktop-dev"
+			: `com.ayuayue.pi-desktop-dev.${sanitizeDevBranchSegment(devGitBranch ?? "detached")}`;
+	app.setAppUserModelId(isDevBuild ? devAppId : "com.ayuayue.pi-desktop");
 }
 
 // 注册 pideck:// 自定义协议：系统通知点击（toast activationType="protocol"）通过该协议唤起应用，
@@ -1487,7 +1506,10 @@ async function createWindow() {
 		height: startupBounds.height,
 		minWidth: 880,
 		minHeight: 640,
-		title: "",
+		// 多 worktree 并行 dev：标题带分支名，任务栏/Alt-Tab 一眼区分窗口
+		title: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch)
+			? `PiDeck · ${devGitBranch}`
+			: "PiDeck",
 		icon: iconPath,
 		frame: windowOptions.frame,
 		titleBarStyle: windowOptions.titleBarStyle,
@@ -2398,6 +2420,7 @@ function registerIpc() {
 			},
 		},
 		RELEASES_URL,
+		devBranch: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch) ? devGitBranch : undefined,
 	});
 
 	registerStoreIpc({

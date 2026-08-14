@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 import type { Plugin } from "vite";
+import { readDevGitBranch, resolveDevVitePort } from "./src/main/devIsolation";
 
 /**
  * KaTeX 字体精简 Vite 插件
@@ -59,7 +60,9 @@ export default defineConfig({
     server: {
       host: "127.0.0.1",
       // 5173 落在部分 Windows/Hyper-V 动态端口排除范围内时会 EACCES；使用相邻的未保留端口保证 dev server 可监听。
-      port: 5181,
+      // 功能分支按 git 分支散列端口，避免多个 worktree 同时 npm run dev 抢 5181。
+      // 未开 strictPort：散列碰撞时 Vite 自动让位，ELECTRON_RENDERER_URL 仍指向实际地址。
+      port: resolveDevVitePort(readDevGitBranch()),
     },
     // dev 预构建：web 端独享的 ai-sdk 依赖树必须启动即优化。
     // 否则首次访问 web 服务端口时 vite 才在运行中重新优化，页面已引用的
