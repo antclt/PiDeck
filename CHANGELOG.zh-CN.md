@@ -4,6 +4,31 @@
 
 这里记录 PiDeck 各版本的重要变化。
 
+## 未发布（DSH 双后端兼容）
+
+### 🚀 新功能
+
+- **DSH 双 Agent 后端** — 同一项目下 pi / DSH（DeepSeek Harness）会话并存、自由切换；
+  DSH 深融合（utilityProcess 内嵌引导，无 `dsh web`/无端口/无后台 HTTP），懒启动不拖慢应用启动。
+- **DSH 会话能力** — 历史分页（`session.history` 事件流翻页，seq 游标）、fork（`session.fork`
+  锚 seq 裁剪，fork 点文案回填输入框）、compact（`/compact` 命令）、审批/提问桥
+  （`approval/requested` + `question/requested` → 桌面 Ask 弹窗 → `respond` 回执）。
+- **DSH 会话持久化** — `dshSessionId` 映射写入 catalog，重启后 attach 恢复旧会话（历史尾部回放）；
+  fork/restart 后同步更新映射。
+- **DSH 配置管理页** — 设置页新增 DSH 分页：settings/credentials 可视化编辑（schema 驱动表单）、
+  host 级模型目录、host 状态与重启。
+- **v2 传输形态** — DSH host 从主进程内嵌迁入 utilityProcess（MessagePort fetch 桥 +
+  `AbstractApiClient` 契约），原生 ABI 与崩溃面不污染主进程；hostEntry 独立构建产物并
+  asarUnpack。
+- **后端标识与能力集** — 会话带 `backend` 标识（缺省 pi，旧数据零迁移）；UI 按能力声明
+  禁用入口（DSH 隐藏编辑/删除历史消息，保留重发/fork；compact 常显）。
+
+### 🐛 修复
+
+- DSH 会话注入上下文（AGENTS.md / runtime context / skills）不再被投影为用户消息
+  （按 `source.kind` 分流，时间线只留真实对话）。
+- 修复文件抽屉滚动容器与滚动层归属（同步 dev 基底修复，`files-panel` 不再自带纵向滚动）。
+
 ## v0.7.0 - 2026-08-13
 
 ### 🚀 新功能

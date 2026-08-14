@@ -4,6 +4,41 @@
 
 All notable changes to PiDeck are documented here.
 
+## Unreleased (DSH dual-backend support)
+
+### 🚀 New Features
+
+- **DSH dual agent backend** — pi / DSH (DeepSeek Harness) sessions coexist in the
+  same project and can be freely created, switched and browsed; DSH is deeply
+  embedded (utilityProcess boot, no `dsh web`, no port, no background HTTP),
+  lazily started so app startup stays fast.
+- **DSH session capabilities** — history paging (`session.history` event-stream
+  pages with seq cursors), fork (`session.fork` anchored at a seq, forked text
+  prefilled into the composer), compact (`/compact` command), and an
+  approval/question bridge (`approval/requested` + `question/requested` →
+  desktop Ask dialog → `respond` receipt).
+- **DSH session persistence** — a `dshSessionId` mapping is written to the
+  catalog; after restart, old sessions are re-attached with a history-tail
+  replay; fork/restart keep the mapping in sync.
+- **DSH config management page** — a DSH pane in Settings: schema-driven
+  settings/credentials forms, host-level model catalog, host status and restart.
+- **v2 transport** — the DSH host moved from an in-process embed into a
+  utilityProcess (MessagePort fetch bridge over the same `AbstractApiClient`
+  contract); native ABI and crash surface no longer touch the main process;
+  the hostEntry is a dedicated build output and is asarUnpacked.
+- **Backend identity & capability sets** — sessions carry a `backend` marker
+  (defaults to `pi`, zero migration for old data); UI hides entry points by
+  declared capability (DSH hides edit/delete of history messages, keeps
+  resend/fork; compact is always visible).
+
+### 🐛 Fixes
+
+- DSH injected context (AGENTS.md / runtime context / skills) is no longer
+  projected as user messages (filtered by `source.kind`; the timeline keeps
+  only real conversation).
+- Fixed the files drawer scroll container ownership (synced the dev-baseline
+  fix; `files-panel` no longer scrolls itself vertically).
+
 ## v0.7.0 - 2026-08-13
 
 ### 🚀 New Features

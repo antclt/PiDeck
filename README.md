@@ -29,6 +29,13 @@
 
 > **最新版本 v0.7.0**（2026-08-11）
 
+### 未发布（DSH 双后端兼容，开发中）
+- 🚀 **DSH 双 Agent 后端** — 同一项目下 pi / DSH 会话并存、自由切换；DSH 深融合（utilityProcess 内嵌，无 `dsh web`/无端口），懒启动不拖慢应用
+- 🚀 **DSH 会话能力** — 历史分页（`session.history` 事件流）、fork（锚 seq 裁剪）、compact（`/compact`）、审批/提问桥（approval/question → 桌面 Ask 弹窗）
+- 🚀 **DSH 会话持久化** — 重启后 attach 恢复旧会话（`dshSessionId` 映射 + 历史回放）
+- 🚀 **DSH 配置管理页** — 设置页 DSH 分页：settings/credentials 可视化编辑、模型目录、host 状态
+- 🚀 **v2 传输形态** — host 移入 utilityProcess（MessagePort 桥，`AbstractApiClient` 契约不变），原生 ABI 与崩溃面不污染主进程
+
 ### v0.7.0 更新亮点
 - 🚀 **Session-first 架构（#113）**
 - 🚀 **会话 Tab 栏**
@@ -56,6 +63,7 @@
 | 功能 | 说明 |
 |---|---|
 | **多项目工作区** | 添加、搜索、拖动排序和切换本地项目目录，同时运行多个 pi Agent，项目间完全隔离。 |
+| **双 Agent 后端（pi / DSH）** | 同一项目下可创建 pi 或 DSH（DeepSeek Harness）会话并自由切换浏览；DSH 后端深融合（utilityProcess 内嵌引导，无 `dsh web`/无端口），支持历史分页、fork、compact、审批/提问桥与 DSH 配置管理页。 |
 | **内置 Chat 对话区** | 项目列表顶部固定 Chat 入口，写入应用用户目录，适合无需绑定代码项目的通用对话。 |
 | **计划模式 (Plan Mode)** | Composer 工具栏切换计划模式，Agent 先生成计划，逐条确认后执行，取消后返回选单。 |
 | **消息编辑/删除** | AI 回答和用户消息均支持复制、编辑和删除，编辑后回填到输入框重新发送。 |
