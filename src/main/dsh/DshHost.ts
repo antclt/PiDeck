@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -7,6 +7,8 @@ import { getAppLogger } from "../logging/sharedLogger";
 import { DshHostProcess, resolveHostEntryPath } from "./DshHostProcess";
 import { DshApiClient, type DshFetchTransport } from "./DshApiClient";
 import { toDshAvailableModels } from "./dshModels";
+import { parseAgentDefaultModel } from "./dshDefaultModel";
+import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
 import type { DshFetchMessage } from "./dshHostBridge";
 
 // 注意：主进程产物为 CJS，而 @deepseek-ai/* 是 ESM-only 包。
@@ -170,6 +172,29 @@ export class DshHost {
 		}
 	}
 
+	/**
+	 * 读取凭证明文（仅渲染层点「眼睛」时调用一次；DSH RPC 刻意不回显值）。
+	 *
+	 * 解析层与 dsh-credentials-local 一致：`$DSH_HOME/.credentials.yaml` 是严格
+	 * ref→value 映射，环境变量层只读兜底（继承环境 > 凭证文件）。返回 undefined
+	 * 表示该 ref 无值（未配置）。ref 必须匹配 env 名格式，杜绝路径注入。
+	 */
+	async readCredentialValue(ref: string): Promise<string | undefined> {
+		if (!isValidCredentialRef(ref)) throw new Error(`invalid credential ref: ${ref}`);
+		// 环境层（继承进程环境）优先：与 dsh-credentials-local 的优先级一致
+		const inherited = process.env[ref];
+		if (typeof inherited === "string" && inherited.length > 0) return inherited;
+		// 凭证文件层：$DSH_HOME/.credentials.yaml（严格 ref→value 映射）
+		const filePath = join(this.getHomeDir(), ".credentials.yaml");
+		try {
+			const text = await import("node:fs/promises").then((fs) => fs.readFile(filePath, "utf8"));
+			return credentialValueFromDocument(text, ref);
+		} catch {
+			// 文件缺失/读取失败：视为未配置（describe 侧会如实报告状态）
+		}
+		return undefined;
+	}
+
 	/** settings.openDocument：让 host 把配置文档交给平台文本编辑器打开。 */
 	async openDocument(): Promise<void> {
 		await this.ensureStarted();
@@ -211,6 +236,30 @@ export class DshHost {
 	}
 
 	/**
+	 * 可配置提供方目录（llm.providers）：内置 catalog（declared，未配置）+
+	 * 已注册路由（active）。模型页「添加提供方」从 declared 未激活行中选择，
+	 * 与 dsh-web 的休眠目录选择同源。首次调用会懒 boot。
+	 */
+	async listProviders(): Promise<Array<{
+		provider: string;
+		displayName: string;
+		active: boolean;
+		declared?: boolean;
+	}>> {
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) return [];
+		const listed = await client.llm.providers({});
+		if (!listed.result.ok) return [];
+		return (listed.result.value.providers ?? []).map((entry) => ({
+			provider: entry.provider,
+			displayName: entry.displayName,
+			active: entry.active,
+			...(entry.declared === true ? { declared: true } : {}),
+		}));
+	}
+
+	/**
 	 * DSH agent 预设目录（agentPreset.list）：会话 agent 的组合预设（standard/code/…）。
 	 * 只读展示（id/trust/isDefault/名称/描述），配置页「预设设置」分区用。
 	 */
@@ -242,6 +291,23 @@ export class DshHost {
 			...(typeof preset.description === "string" && preset.description ? { description: preset.description } : {}),
 			...(typeof preset.broken === "string" && preset.broken ? { broken: preset.broken } : {}),
 		}));
+	}
+
+	/**
+	 * 部署默认模型选择（settings.yaml 的 agent-default-model 段）。
+	 * 草稿/未激活会话的底栏与选择器展示默认模型/思考档位用；无需启动 host
+	 * （直接读 DSH_HOME/settings.yaml，host 写出的简单 YAML）。文件缺失或解析
+	 * 失败返回 undefined，调用方回退为不展示默认值。
+	 */
+	getDefaultModelSelection(): import("./dshDefaultModel").DshDefaultModel | undefined {
+		const home = this.getHomeDir();
+		const filePath = join(home, "settings.yaml");
+		if (!existsSync(filePath)) return undefined;
+		try {
+			return parseAgentDefaultModel(readFileSync(filePath, "utf8"));
+		} catch {
+			return undefined;
+		}
 	}
 
 	private async start(): Promise<void> {

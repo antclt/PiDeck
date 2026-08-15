@@ -43,6 +43,9 @@ export type ComposerPickerHostProps = {
   onPickMode?: (mode: ComposerAgentMode) => void;
   /** 当前派生模式（DSH：planModeActive 驱动的 plan）；缺省读本地 atom。 */
   currentMode?: ComposerAgentMode;
+  /** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期高亮与过滤用。 */
+  defaultModel?: { provider?: string; modelId?: string; modelName?: string };
+  defaultThinkingLevel?: string;
 };
 
 export function ComposerPickerHost(props: ComposerPickerHostProps) {
@@ -413,14 +416,15 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   if (props.picker === "model") {
     // DSH 会话的模型归属 host（agent-default-model），不读 pi 的欢迎页偏好：
     // 否则 localStorage 里的 pi 模型会被当成「当前模型」高亮，误导用户以为已选中。
+    // 草稿期用部署默认模型（settings.yaml agent-default-model）作当前值。
     const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
     const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
     return (
       <ModelPicker
         models={models}
         current={{
-          provider: runtime?.state?.provider ?? record?.model?.provider ?? welcomeModel?.provider,
-          modelId: runtime?.state?.modelId ?? record?.model?.modelId ?? welcomeModel?.modelId,
+          provider: runtime?.state?.provider ?? record?.model?.provider ?? props.defaultModel?.provider ?? welcomeModel?.provider,
+          modelId: runtime?.state?.modelId ?? record?.model?.modelId ?? props.defaultModel?.modelId ?? welcomeModel?.modelId,
           modelName: runtime?.state?.modelName,
         }}
         onClose={props.onClose}
@@ -451,9 +455,10 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     // DSH：只显示当前模型支持的档位。host 的 models catalog 带 reasoningEfforts
     // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——选不支持的档位
     // 不会立即报错，而是在下一次 LLM 请求抛 UNSUPPORTED_REASONING_EFFORT（回合失败）。
+    // 草稿期当前模型 = 部署默认模型（settings.yaml agent-default-model）。
     const isDsh = record?.backend === "dsh" || runtime?.backend === "dsh";
-    const currentProvider = runtime?.state?.provider ?? record?.model?.provider;
-    const currentModelId = runtime?.state?.modelId ?? record?.model?.modelId;
+    const currentProvider = runtime?.state?.provider ?? record?.model?.provider ?? props.defaultModel?.provider;
+    const currentModelId = runtime?.state?.modelId ?? record?.model?.modelId ?? props.defaultModel?.modelId;
     const currentModel = models.find(
       (model) => model.provider === currentProvider && model.id === currentModelId,
     );
@@ -467,7 +472,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       : undefined;
     return (
       <ThinkingPicker
-        current={runtime?.state?.thinkingLevel ?? record?.thinkingLevel ?? readWelcomeThinkingPreference()?.thinkingLevel}
+        current={runtime?.state?.thinkingLevel ?? record?.thinkingLevel ?? props.defaultThinkingLevel ?? readWelcomeThinkingPreference()?.thinkingLevel}
         levels={thinkingLevels}
         onClose={props.onClose}
         onPick={(level) => void pickThinking(level)}

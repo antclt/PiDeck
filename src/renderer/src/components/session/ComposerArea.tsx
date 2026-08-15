@@ -315,6 +315,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 composerAgentMode={composer.mode}
                 gitInfo={props.gitInfo}
                 record={composer.record}
+                defaultModel={composer.dshDefaultModel}
+                defaultThinkingLevel={composer.dshDefaultThinkingLevel}
                 backend={composer.backend}
                 onChangeBackend={composer.changeBackend}
                 feishuIndicator={feishuIndicator}
@@ -359,6 +361,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
             onInsertTemplate={composer.pickers.insertTemplate}
             onPickMode={composer.pickers.setMode}
             currentMode={composer.mode}
+            defaultModel={composer.dshDefaultModel}
+            defaultThinkingLevel={composer.dshDefaultThinkingLevel}
           />
           {composer.previewImage ? (
             <ImagePreviewModal

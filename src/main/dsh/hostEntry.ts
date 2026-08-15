@@ -15,10 +15,11 @@
  * @deepseek-ai/* 全部 externalize，运行时动态 import() 加载（与 DshHost 一致）。
  */
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { installHiddenConsolePatch, installHostHiddenConsole } from "./hideChildConsoles";
+import { agentPresetsRow } from "./dshPresetComposition";
 
 // utilityProcess 的 parentPort：electron 包类型里有（Electron.ParentPort）。
 import type { ParentPort } from "electron";
@@ -123,6 +124,11 @@ async function main(): Promise<void> {
 				id: "tool-pwsh-persistent",
 				name: join(__dirname, "pideckPwshPersistent.js"),
 			},
+			// Agent preset 名单（standard/code/minimal/cordis 等组合预设）：与 dsh-web
+			// 同一部署形态——随包 system 根 + $DSH_HOME/.agent-presets 用户根（插件
+			// includeUserRoot 默认追加），默认 standard（标准模式）。不声明该行时
+			// agentPreset.list 返回空名单，配置页「预设设置」无模式可选。
+			agentPresetsRow(dirname(require.resolve("@deepseek-ai/dsh/package.json"))),
 		],
 	});
 

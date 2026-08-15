@@ -377,10 +377,13 @@ function emitSessionRuntimeEvent(
 				canAttachRuntimeMetadata(entry, tab) &&
 				(entry?.filePath !== tab.sessionPath || entry.piSessionId !== tab.sessionId)
 			) {
+				// DSH 的 agents:state 也带 host 会话文件路径：文件配对分支同步回写
+				// dshSessionId（标题同步 findByDshSessionId / 重开 attach 依赖）。
 				void sessionCatalog.attachRuntime({
 					sessionId: runtimeBinding.sessionId,
 					filePath: tab.sessionPath,
 					piSessionId: tab.sessionId,
+					dshSessionId: tab.backend === "dsh" ? tab.sessionId : undefined,
 				}).catch(() => undefined);
 			}
 		}
@@ -2316,13 +2319,16 @@ function registerIpc() {
 		exportCatalogSessionHtml,
 		replaceAgentSession,
 		listDshModels: () => dshHost.listModels(),
+		listDshProviders: () => dshHost.listProviders(),
 		listDshAgentPresets: () => dshHost.listAgentPresets(),
+		getDshDefaultModel: () => Promise.resolve(dshHost.getDefaultModelSelection()),
 		getDshStatus: () => dshHost.getStatus(),
 		describeDshSettings: () => dshHost.describeSettings(),
 		updateDshSettings: (ns, patch, expectedRevision) => dshHost.updateSettings(ns, patch, expectedRevision),
 		describeDshCredentials: (refs) => dshHost.describeCredentials(refs),
 		setDshCredential: (ref, value) => dshHost.setCredential(ref, value),
 		unsetDshCredential: (ref) => dshHost.unsetCredential(ref),
+		readDshCredential: (ref) => dshHost.readCredentialValue(ref),
 		openDshDocument: () => dshHost.openDocument(),
 		restartDshHost: async () => {
 			// 切换 DSH_HOME 前先停掉全部活跃 DSH 会话（host 侧会话仍在 $DSH_HOME

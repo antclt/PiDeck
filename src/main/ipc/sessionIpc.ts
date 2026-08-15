@@ -84,6 +84,13 @@ export type SessionIpcDeps = {
 	replaceAgentSession: (agentId: string, fn: () => Promise<any>) => Promise<any>;
 	/** DSH host 级模型目录；未装配时返回空列表。 */
 	listDshModels?: () => Promise<import("../../shared/types").AvailableModel[]>;
+	/** DSH 可配置提供方目录（内置 catalog + 已注册路由）；未装配时返回空列表。 */
+	listDshProviders?: () => Promise<Array<{
+		provider: string;
+		displayName: string;
+		active: boolean;
+		declared?: boolean;
+	}>>;
 	/** DSH agent 预设目录（agentPreset.list）；未装配时返回空列表。 */
 	listDshAgentPresets?: () => Promise<Array<{
 		id: string;
@@ -93,6 +100,12 @@ export type SessionIpcDeps = {
 		description?: string;
 		broken?: string;
 	}>>;
+	/** DSH 部署默认模型选择（settings.yaml agent-default-model）；未装配/不可读时 undefined。 */
+	getDshDefaultModel?: () => Promise<{
+		provider: string;
+		model: string;
+		reasoningEffort?: string;
+	} | undefined>;
 	/** DSH 配置管理页状态；未装配时返回空状态。 */
 	getDshStatus?: () => Promise<{
 		started: boolean;
@@ -128,6 +141,8 @@ export type SessionIpcDeps = {
 	setDshCredential?: (ref: string, value: string) => Promise<void>;
 	/** DSH credentials.unset。 */
 	unsetDshCredential?: (ref: string) => Promise<void>;
+	/** DSH 凭证明文读取（渲染层点「眼睛」时按 ref 取一次；无值返回 undefined）。 */
+	readDshCredential?: (ref: string) => Promise<string | undefined>;
 	/** DSH settings.openDocument（平台打开配置文档）。 */
 	openDshDocument?: () => Promise<void>;
 	/** DSH host 重启；返回 false 表示有活跃 DSH 会话被拒绝。 */
@@ -187,13 +202,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		exportCatalogSessionHtml,
 		replaceAgentSession,
 		listDshModels,
+		listDshProviders,
 		listDshAgentPresets,
+		getDshDefaultModel,
 		getDshStatus,
 		describeDshSettings,
 		updateDshSettings,
 		describeDshCredentials,
 		setDshCredential,
 		unsetDshCredential,
+		readDshCredential,
 		openDshDocument,
 		restartDshHost,
 		readDshHistoryPage,
@@ -669,8 +687,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async () => (listDshModels ? listDshModels() : []),
 	);
 	ipcMain.handle(
+		ipcChannels.dshListProviders,
+		async () => (listDshProviders ? listDshProviders() : []),
+	);
+	ipcMain.handle(
 		ipcChannels.dshAgentPresets,
 		async () => (listDshAgentPresets ? listDshAgentPresets() : []),
+	);
+	ipcMain.handle(
+		ipcChannels.dshDefaultModel,
+		async () => (getDshDefaultModel ? getDshDefaultModel() : undefined),
 	);
 	ipcMain.handle(
 		ipcChannels.dshGetStatus,
@@ -707,6 +733,18 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (_event, ref: string) => {
 			if (!unsetDshCredential) throw new Error("DSH credentials are not available");
 			await unsetDshCredential(ref);
+		},
+	);
+	// 凭证明文读取：渲染层点「眼睛」时按 ref 取一次（无值返回 undefined）。
+	// ref 格式校验与 DSH credentialRef 同规则，防路径注入。
+	ipcMain.handle(
+		ipcChannels.dshCredentialRead,
+		async (_event, ref: unknown) => {
+			if (!readDshCredential) throw new Error("DSH credentials are not available");
+			if (typeof ref !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) {
+				throw new Error(`invalid credential ref: ${String(ref)}`);
+			}
+			return readDshCredential(ref);
 		},
 	);
 	ipcMain.handle(

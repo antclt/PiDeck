@@ -305,6 +305,7 @@ export function createPreviewApi(): PiDesktopApi {
 			list: async () => getSessions(),
 			// 预览模式无 DSH host：空预设目录满足接口契约
 			listDshAgentPresets: async () => [],
+			getDshDefaultModel: async () => undefined,
 			listCatalog: async (projectId, _options?: { scan?: boolean }): Promise<SessionRecord[]> => getSessions().map((session) => ({
 				id: `preview-record:${session.id}`,
 				projectId,
@@ -450,6 +451,7 @@ export function createPreviewApi(): PiDesktopApi {
 				value: { cancelled: false, text: "", targetSessionId: `${target.sessionId}:fork` },
 			}),
 			listDshModels: async () => [],
+			listDshProviders: async () => [],
 			getDshStatus: async () => ({
 				started: false,
 				homeDir: "",
@@ -459,6 +461,7 @@ export function createPreviewApi(): PiDesktopApi {
 			describeDshCredentials: async () => ({}),
 			setDshCredential: async () => undefined,
 			unsetDshCredential: async () => undefined,
+			readDshCredential: async () => undefined,
 			openDshDocument: async () => undefined,
 			restartDshHost: async () => true,
 			setFocusedSession: async () => undefined,

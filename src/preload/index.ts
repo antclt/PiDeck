@@ -399,6 +399,14 @@ const api = {
 		/** DSH host 级模型目录（llm.models），未装配时返回空列表。 */
 		listDshModels: () =>
 			ipcRenderer.invoke(ipcChannels.dshListModels) as Promise<AvailableModel[]>,
+		/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由）。 */
+		listDshProviders: () =>
+			ipcRenderer.invoke(ipcChannels.dshListProviders) as Promise<Array<{
+				provider: string;
+				displayName: string;
+				active: boolean;
+				declared?: boolean;
+			}>>,
 		/** DSH agent 预设目录（agentPreset.list），未装配时返回空列表。 */
 		listDshAgentPresets: () =>
 			ipcRenderer.invoke(ipcChannels.dshAgentPresets) as Promise<Array<{
@@ -409,6 +417,13 @@ const api = {
 				description?: string;
 				broken?: string;
 			}>>,
+		/** DSH 部署默认模型选择（settings.yaml agent-default-model），未装配/不可读时 undefined。 */
+		getDshDefaultModel: () =>
+			ipcRenderer.invoke(ipcChannels.dshDefaultModel) as Promise<{
+				provider: string;
+				model: string;
+				reasoningEffort?: string;
+			} | undefined>,
 		/** DSH 配置管理页状态（host 启动状态 + DSH_HOME 目录）。 */
 		getDshStatus: () =>
 			ipcRenderer.invoke(ipcChannels.dshGetStatus) as Promise<{
@@ -446,6 +461,9 @@ const api = {
 		/** DSH credentials.unset。 */
 		unsetDshCredential: (ref: string) =>
 			ipcRenderer.invoke(ipcChannels.dshCredentialUnset, ref) as Promise<void>,
+		/** DSH 凭证明文读取（渲染层点「眼睛」时按 ref 取一次；无值返回 undefined）。 */
+		readDshCredential: (ref: string) =>
+			ipcRenderer.invoke(ipcChannels.dshCredentialRead, ref) as Promise<string | undefined>,
 		/** DSH settings.openDocument（平台打开配置文档）。 */
 		openDshDocument: () =>
 			ipcRenderer.invoke(ipcChannels.dshOpenDocument) as Promise<void>,

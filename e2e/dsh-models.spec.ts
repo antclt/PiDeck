@@ -30,17 +30,25 @@ test("DSH 模型列表、切换与思考档位（草稿 → 激活全链路）",
 			.piDesktop.settings.update({ dshHomeDir: dir });
 	}, dshHome);
 
-	// ── 2. 新建 DSH 会话草稿 ───────────────────────────────────────────────────
+	// ── 2. 新建 DSH 会话草稿（新会话默认 DSH 后端）────────────────────────────
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
-	const newDsh = window.getByRole("button", { name: "新建 DSH Agent", exact: true });
+	const newDsh = window.getByRole("button", { name: "新会话", exact: true });
 	await expect(newDsh).toBeVisible({ timeout: 15_000 });
 	await newDsh.click();
 	const composer = window.locator(".composer .rich-input");
 	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
 
-	// ── 3. 模型列表：必须来自 DSH host 目录（两组 provider）──────────────────
+	// ── 2.5 部署默认模型/思考档位展示（settings.yaml agent-default-model）─────
+	// 草稿未激活时底栏模型按钮应显示默认模型名（deepseek-v4-flash），思考按钮应显示
+	// 默认档位（max）——这是「没有渲染出来默认的模型和思考级别的显示」bug 的回归保护。
 	const modelBtn = window.locator(".composer-bar-btn.model");
+	const thinkingBtn = window.locator(".composer-bar-btn.thinking");
 	await expect(modelBtn).toBeVisible();
+	await expect(modelBtn).toContainText("deepseek-v4-flash", { timeout: 10_000 });
+	await expect(thinkingBtn).toBeVisible();
+	await expect(thinkingBtn).toContainText("max", { timeout: 10_000 });
+
+	// ── 3. 模型列表：必须来自 DSH host 目录（两组 provider）──────────────────
 	await modelBtn.click();
 	const picker = window.locator(".model-picker");
 	await expect(picker).toBeVisible();
@@ -58,8 +66,6 @@ test("DSH 模型列表、切换与思考档位（草稿 → 激活全链路）",
 	await expect(modelBtn).toContainText("glm-5.2", { timeout: 5_000 });
 
 	// ── 5. 思考档位过滤：glm-5.2 只支持 high/max，不得出现 off ──────────────
-	const thinkingBtn = window.locator(".composer-bar-btn.thinking");
-	await expect(thinkingBtn).toBeVisible();
 	await thinkingBtn.click();
 	const thinking = window.locator(".thinking-picker");
 	await expect(thinking).toBeVisible();

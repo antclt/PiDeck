@@ -1,65 +1,276 @@
 /**
- * DshProviderCards — DSH 模型 tab 的两类 namespace 卡片。
+ * DshProviderCards — DSH 模型 tab 的两类 namespace 卡片（对齐 dsh-web 模型页形态）。
  *
- * - PiAiProvidersCard：llm-pi-ai（动态 providers dict，每个 provider 一张可展开卡）；
- * - DeepseekRouteCard：llm-deepseek（官方 DeepSeek 路由，单 provider 形态）。
+ * - PiAiProvidersCard：llm-pi-ai（动态 providers dict，每个 provider 一行）；
+ * - DeepseekRouteCard：llm-deepseek（官方 DeepSeek 路由，单行形态）。
  *
- * 两者共享同一套结构（与 Pi 管理 ModelsTab 对齐）：卡片头（名称 + badge +
- * 保存按钮）+ 基础字段表单 + ModelsTable 模型列表；模型数组行式增删编辑，
- * 不再以只读 JSON 展示。
+ * 行式布局（与 dsh-web 的 ProviderEditor 同款）：
+ * 收起时一行 = 名称/displayName + API 密钥状态点 + 模型数 + 展开箭头（+ 删除）；
+ * 展开后 = 主字段「API 密钥」输入框（credentials.set 只写）+「自定义设置」折叠区
+ * （其余 schema 字段）+ 行式模型列表（DshModelsTable）。密钥状态点：
+ * 绿 = 已配置、红 = 缺失（仅当名单能提供该 ref 的状态信息时显示），无引用不显示。
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Eye, EyeOff, LoaderCircle, Plus, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
+import { desktopApi } from "../desktopApi";
+import { showNotice } from "../utils/notice";
+import { writeClipboard } from "../utils/clipboard";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { DshSchemaField, type DshNamespaceView } from "./DshSchemaForm";
 import { dictEntries, normalizeDshSchema, objectFields, pruneEmptyObjects, readPath, setPath } from "./dshSchema";
+import { credentialRefFor } from "./dshCredentialRef";
 import { ModelsTable, type DshModelRow } from "./DshModelsTable";
 
-/** 卡片头通用布局：标题 + badge + 保存按钮（错误/保存中/已保存状态）。 */
-function ConfigCardHeader(props: {
-	title: string;
-	badge: ReactNode;
-	savedAt: number | null;
-	error: string | null;
-	saving: boolean;
-	dirty: boolean;
+export type DshCredentialState = {
+	configured: boolean;
+	source?: string;
 	writable: boolean;
-	onSave: () => void;
+};
+
+/** 密钥操作回调（由配置页注入：credentials.set/unset + 状态刷新）。 */
+export type DshCredentialOps = {
+	credentials: Record<string, DshCredentialState>;
+	setKey: (ref: string, value: string) => Promise<void>;
+	unsetKey: (ref: string) => Promise<void>;
+};
+
+/** 收起行头通用布局：chevron + 标题 + badge + 状态点 + 模型数 + 右侧操作。 */
+function ProviderRowHead(props: {
+	title: string;
+	subtitle?: string;
+	keyRef?: string;
+	keyDot?: ReactNode;
+	badges?: ReactNode[];
+	isOpen: boolean;
+	onToggle: () => void;
+	onRemove?: () => void;
+	removeDisabled?: boolean;
+	removeTitle?: string;
 }) {
 	return (
-		<div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-4 py-2">
-			<span className="text-caption font-semibold text-foreground">{props.title}</span>
-			{props.badge}
-			<div className="ml-auto flex items-center gap-2">
-				{props.savedAt && <span className="text-micro text-emerald-600 dark:text-emerald-400">{t("config.dsh.saved")}</span>}
-				{props.error && <span className="max-w-64 truncate text-micro text-danger" title={props.error}>{props.error}</span>}
+		<div className="flex items-center gap-2 px-3 py-2">
+			<button
+				type="button"
+				className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+				onClick={props.onToggle}
+			>
+				{props.isOpen ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+				<span className="truncate font-mono text-control font-semibold text-foreground">{props.title}</span>
+				{props.subtitle && <span className="truncate text-micro text-muted-foreground">{props.subtitle}</span>}
+				{props.badges?.map((badge, index) => (
+					<span key={index} className="shrink-0 rounded-full border border-border-subtle px-1.5 py-px font-mono text-micro text-muted-foreground">
+						{badge}
+					</span>
+				))}
+			</button>
+			{props.keyRef && (
+				<span className="shrink-0 rounded-full border border-border-subtle px-1.5 py-px font-mono text-micro text-muted-foreground" title={t("config.dsh.keyEnvRef")}>
+					{props.keyRef}
+				</span>
+			)}
+			{props.keyDot}
+			{props.onRemove && (
 				<Button
 					type="button"
-					variant="default"
-					size="sm"
-					className="h-7"
-					disabled={!props.writable || props.saving || !props.dirty}
-					onClick={props.onSave}
+					variant="ghost"
+					size="icon-sm"
+					className="size-7 shrink-0 text-muted-foreground hover:text-danger"
+					title={props.removeTitle}
+					aria-label={props.removeTitle}
+					disabled={props.removeDisabled}
+					onClick={props.onRemove}
 				>
-					{props.saving ? t("common.saving") : t("common.save")}
+					<Trash2 className="size-3.5" aria-hidden="true" />
 				</Button>
+			)}
+		</div>
+	);
+}
+
+/** API 密钥状态点：绿=已配置、红=缺失（有名单信息时）、灰=未知/无引用。 */
+function KeyStatusDot(props: { state: DshCredentialState | undefined }) {
+	const { state } = props;
+	if (!state) {
+		return (
+			<span className="size-2 shrink-0 rounded-full bg-muted-foreground/30" title={t("config.dsh.keyUnknown")} aria-label={t("config.dsh.keyUnknown")} />
+		);
+	}
+	if (state.configured) {
+		return (
+			<span className="size-2 shrink-0 rounded-full bg-emerald-500" title={t("config.dsh.keyConfigured")} aria-label={t("config.dsh.keyConfigured")} />
+		);
+	}
+	return (
+		<span className="size-2 shrink-0 rounded-full bg-red-500" title={t("config.dsh.keyMissing")} aria-label={t("config.dsh.keyMissing")} />
+	);
+}
+
+/**
+ * API 密钥主字段（对齐 dsh-web）：密钥输入不单独保存——草稿上抛到卡片，
+ * 由卡片头部的统一保存提交（先 credentials.set 再 settings.update）。
+ * 已配置时输入框默认留空；点「眼睛」按 ref 取回明文展示（主进程读凭证文件），
+ * 再次点击隐藏并清空；「复制」把明文写入剪贴板。
+ */
+function ApiKeyField(props: {
+	ref: string;
+	/** 当前密钥草稿（父级持有；空串 = 未改动）。 */
+	value: string;
+	onChange: (value: string) => void;
+	ops: DshCredentialOps;
+}) {
+	const { ref, value, onChange, ops } = props;
+	const [revealed, setRevealed] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const state = ops.credentials[ref];
+	const configured = state?.configured === true;
+	const writable = state?.writable !== false;
+
+	/** 取回明文（眼睛显示 / 复制共用）：输入框有草稿用草稿，否则读存储值。 */
+	const readPlain = async (): Promise<string | undefined> => {
+		if (value) return value;
+		if (!configured) return undefined;
+		return desktopApi.sessions.readDshCredential(ref).catch(() => undefined);
+	};
+
+	/** 眼睛切换：显示时取回明文，隐藏时清空输入（明文不常驻渲染层）。 */
+	const toggleReveal = async () => {
+		if (revealed) {
+			setRevealed(false);
+			onChange("");
+			return;
+		}
+		if (!value) {
+			setBusy(true);
+			try {
+				const stored = await readPlain();
+				if (stored !== undefined) onChange(stored);
+			} finally {
+				setBusy(false);
+			}
+		}
+		setRevealed(true);
+	};
+
+	/** 复制明文到剪贴板（草稿优先，否则读存储值）。 */
+	const copyValue = async () => {
+		setBusy(true);
+		try {
+			const plain = await readPlain();
+			if (plain !== undefined) {
+				await writeClipboard(plain);
+				showNotice(t("config.dsh.keyCopied"), 2000);
+			}
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<div className="grid gap-1.5">
+			<span className="flex items-center gap-1.5 text-caption font-medium text-foreground">
+				{t("config.dsh.apiKey")}
+				<span className="truncate font-mono text-micro text-muted-foreground">{ref}</span>
+				{configured && (
+					<span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-1.5 py-px text-micro text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
+						{t("config.dsh.keyConfigured")}
+					</span>
+				)}
+			</span>
+			<div className="flex items-center gap-2">
+				<div className="relative max-w-sm flex-1">
+					<Input
+						className="h-8 w-full pr-16 font-mono"
+						type={revealed ? "text" : "password"}
+						placeholder={configured ? t("config.dsh.keyStored") : t("config.dsh.keyPlaceholder")}
+						value={value}
+						disabled={!writable || busy}
+						onChange={(event) => onChange(event.target.value)}
+					/>
+					<div className="absolute inset-y-0 right-0.5 my-auto flex items-center gap-0.5">
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							className="size-7 text-muted-foreground"
+							title={t("config.dsh.keyCopy")}
+							aria-label={t("config.dsh.keyCopy")}
+							disabled={!configured || busy}
+							onClick={() => void copyValue()}
+						>
+							<Copy className="size-3.5" aria-hidden="true" />
+						</Button>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							className="size-7 text-muted-foreground"
+							title={revealed ? t("config.dsh.keyHide") : t("config.dsh.keyReveal")}
+							aria-label={revealed ? t("config.dsh.keyHide") : t("config.dsh.keyReveal")}
+							disabled={!configured || busy}
+							onClick={() => void toggleReveal()}
+						>
+							{revealed ? <EyeOff className="size-3.5" aria-hidden="true" /> : <Eye className="size-3.5" aria-hidden="true" />}
+						</Button>
+					</div>
+				</div>
+				{configured && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						className="h-8 shrink-0 text-muted-foreground hover:text-danger"
+						disabled={!writable || busy}
+						onClick={() => void ops.unsetKey(ref)}
+					>
+						{t("config.dsh.keyUnset")}
+					</Button>
+				)}
 			</div>
+			{!state && <p className="text-micro text-muted-foreground">{t("config.dsh.keyRefHint", { ref })}</p>}
+			{state && !state.writable && <p className="text-micro text-muted-foreground">{t("config.dsh.keyEnvLocked")}</p>}
+		</div>
+	);
+}
+
+/** 「自定义设置」折叠区：收容主字段（密钥）与模型列表之外的其余 schema 字段。 */
+function CustomSettings(props: {
+	label: ReactNode;
+	children: ReactNode;
+}) {
+	const [open, setOpen] = useState(false);
+	return (
+		<div className="rounded-sm border border-border-subtle">
+			<button
+				type="button"
+				className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-caption font-medium text-foreground"
+				onClick={() => setOpen((prev) => !prev)}
+			>
+				{open ? <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden="true" />}
+				{props.label}
+			</button>
+			{open && <div className="grid gap-2.5 border-t border-border/40 px-3 py-2.5">{props.children}</div>}
 		</div>
 	);
 }
 
 /**
- * llm-pi-ai providers 卡片：与 Pi 管理 ModelsTab 同款操作——
- * 每个 provider 一张可展开卡（字段表单 + 模型列表），支持添加/删除 provider。
+ * llm-pi-ai providers 卡片：每个 provider 一行（可展开），支持添加/删除 provider。
+ * 保存收敛到卡片头（对齐 dsh-web）：密钥草稿与 settings 草稿一起提交——
+ * 先按行 credentials.set，再 settings.update。
  */
 export function PiAiProvidersCard(props: {
 	namespace: DshNamespaceView;
 	writable: boolean;
+	ops: DshCredentialOps;
+	/** 适配器内置模型目录（llm.models 按 provider id 分组）；行头模型数与展开区继承模型用它。 */
+	catalog?: Record<string, Array<{ id: string; name?: string }>>;
+	/** 可配置提供方目录（llm.providers）：添加提供方时从 declared 未激活行选择。 */
+	directory?: Array<{ provider: string; displayName: string; active: boolean; declared?: boolean }>;
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 }) {
-	const { namespace, writable } = props;
+	const { namespace, writable, ops } = props;
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 	const providersField = useMemo(() => {
@@ -71,6 +282,8 @@ export function PiAiProvidersCard(props: {
 	const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 	const [newProviderKey, setNewProviderKey] = useState("");
 	const [addingProvider, setAddingProvider] = useState(false);
+	/** 密钥草稿：providerKey → 输入的新密钥（保存时统一 credentials.set）。 */
+	const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -79,12 +292,27 @@ export function PiAiProvidersCard(props: {
 	}
 
 	const providersValue = (namespace.value as { providers?: unknown } | undefined)?.providers;
-	const entries = dictEntries(providersValue);
+	// 合并现值与 draft：draft 新增的 provider（添加后未保存）也要渲染成行
+	const mergedProvidersValue = {
+		...((providersValue ?? {}) as Record<string, unknown>),
+		...((draft.providers ?? {}) as Record<string, unknown>),
+	};
+	const entries = dictEntries(mergedProvidersValue);
 	const innerRefId = providersField.ref.inner;
 	if (innerRefId === undefined) {
 		return <div className="py-6 text-center text-control text-muted-foreground">{t("config.dsh.schemaUnavailable")}</div>;
 	}
 	const inner = schema.refs[innerRefId];
+
+	/** 内置目录候选：未激活（尚未配置）且不在当前列表中的行；已配置的 provider 不重复推荐。
+	 *  注意 dsh-llm-pi-ai 的 declared 语义：内置 catalog 行 declared=false，
+	 *  用户自定义行 declared=true——候选不看 declared，只看 active。 */
+	const directoryCandidates = useMemo(() => {
+		const configured = new Set(entries.map((entry) => entry.key));
+		return (props.directory ?? [])
+			.filter((entry) => !entry.active && !configured.has(entry.provider))
+			.sort((left, right) => left.displayName.localeCompare(right.displayName));
+	}, [props.directory, entries]);
 
 	/** 草稿覆盖读取：draft 优先，否则用现值。 */
 	const entryValue = (key: string, path: string[]) => {
@@ -125,13 +353,20 @@ export function PiAiProvidersCard(props: {
 		setDraft(nextDraft);
 	};
 
-	const addProvider = () => {
-		const key = newProviderKey.trim();
+	/** 添加 provider：优先从内置目录（llm.providers declared 行）带出 displayName/apiKeyEnv。 */
+	const addProvider = (directoryEntry?: { provider: string; displayName: string }) => {
+		const key = directoryEntry?.provider ?? newProviderKey.trim();
 		if (!key || entries.some((entry) => entry.key === key)) return;
 		setDraft((prev) => {
 			const next = structuredClone(prev) as Record<string, unknown>;
 			const providers = (next.providers ?? {}) as Record<string, unknown>;
-			providers[key] = {};
+			const profile: Record<string, unknown> = {};
+			if (directoryEntry && directoryEntry.displayName && directoryEntry.displayName !== key) {
+				profile.displayName = directoryEntry.displayName;
+			}
+			// 内置目录带出派生密钥引用（dsh-web 同规则：profile 未声明 apiKeyEnv 时派生 <ROUTE>_API_KEY）
+			profile.apiKeyEnv = credentialRefFor(undefined, key);
+			providers[key] = profile;
 			next.providers = providers;
 			return next;
 		});
@@ -149,6 +384,11 @@ export function PiAiProvidersCard(props: {
 			return next;
 		});
 		setExpanded((prev) => {
+			const next = { ...prev };
+			delete next[key];
+			return next;
+		});
+		setKeyDrafts((prev) => {
 			const next = { ...prev };
 			delete next[key];
 			return next;
@@ -205,12 +445,24 @@ export function PiAiProvidersCard(props: {
 		});
 	};
 
+	/** 统一保存（对齐 dsh-web）：先写全部密钥草稿（credentials.set），再提交 settings patch。 */
 	const handleSave = async () => {
 		setSaving(true);
 		setError(null);
 		try {
+			// 密钥草稿逐行提交（有输入才写）；失败即中止，settings 不动
+			for (const [key, keyValue] of Object.entries(keyDrafts)) {
+				const trimmed = keyValue.trim();
+				if (!trimmed) continue;
+				const draftProfile = (draft.providers as Record<string, unknown> | undefined)?.[key];
+				const currentProfile = (namespace.value as { providers?: Record<string, unknown> } | undefined)?.providers?.[key];
+				const meta = (draftProfile ?? currentProfile) as Record<string, unknown> | undefined;
+				const ref = credentialRefFor(meta, key);
+				await ops.setKey(ref, trimmed);
+			}
 			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
 			setDraft({});
+			setKeyDrafts({});
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -218,28 +470,33 @@ export function PiAiProvidersCard(props: {
 		}
 	};
 
-	const providerProfileFields = objectFields(schema, inner);
+	const providerProfileFields = objectFields(schema, inner).filter((field) => field.name !== "models");
 
 	return (
 		<div className="flex min-w-0 flex-col">
-			<ConfigCardHeader
-				title={namespace.ns}
-				badge={
-					<span className="rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
-						{t("config.dsh.providersCount", { count: entries.length })}
-					</span>
-				}
-				savedAt={null}
-				error={error}
-				saving={saving}
-				dirty={Object.keys(draft).length > 0}
-				writable={writable}
-				onSave={() => void handleSave()}
-			/>
+			<div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-4 py-2">
+				<span className="text-caption font-semibold text-foreground">{namespace.ns}</span>
+				<span className="rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
+					{t("config.dsh.providersCount", { count: entries.length })}
+				</span>
+				<div className="ml-auto flex items-center gap-2">
+					{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
+					<Button
+						type="button"
+						variant="default"
+						size="sm"
+						className="h-7"
+						disabled={!writable || saving || (Object.keys(draft).length === 0 && !Object.values(keyDrafts).some((value) => value.trim()))}
+						onClick={() => void handleSave()}
+					>
+						{saving ? t("common.saving") : t("common.save")}
+					</Button>
+				</div>
+			</div>
 
-			<div className="grid gap-3 p-4">
-				{/* 添加 provider */}
-				<div className="flex items-center gap-2">
+			<div className="grid gap-2 p-4">
+				{/* 添加 provider（对齐 dsh-web 的休眠目录选择 + 自定义输入）：目录行点击即带出 displayName/密钥引用 */}
+				<div className="flex flex-wrap items-center gap-2">
 					{addingProvider ? (
 						<>
 							<Input
@@ -253,7 +510,7 @@ export function PiAiProvidersCard(props: {
 									if (event.key === "Enter") addProvider();
 								}}
 							/>
-							<Button type="button" variant="default" size="sm" className="h-7" disabled={!newProviderKey.trim()} onClick={addProvider}>
+							<Button type="button" variant="default" size="sm" className="h-7" disabled={!newProviderKey.trim()} onClick={() => addProvider()}>
 								{t("common.confirm")}
 							</Button>
 							<Button type="button" variant="ghost" size="icon-sm" className="size-7" onClick={() => setAddingProvider(false)}>
@@ -273,9 +530,29 @@ export function PiAiProvidersCard(props: {
 							{t("config.dsh.addProvider")}
 						</Button>
 					)}
+					{/* 内置目录候选（declared 未激活行；与 dsh-web 的休眠目录同一数据源） */}
+					{directoryCandidates.length > 0 && (
+						<div className="flex flex-wrap items-center gap-1.5">
+							<span className="text-micro text-muted-foreground">{t("config.dsh.directoryLabel")}</span>
+							{directoryCandidates.map((entry) => (
+								<Button
+									key={entry.provider}
+									type="button"
+									variant="outline"
+									size="sm"
+									className="h-7 gap-1 font-mono"
+									disabled={!writable}
+									onClick={() => addProvider(entry)}
+								>
+									<Plus className="size-3" aria-hidden="true" />
+									{entry.displayName !== entry.provider ? `${entry.displayName} (${entry.provider})` : entry.provider}
+								</Button>
+							))}
+						</div>
+					)}
 				</div>
 
-				{/* provider 卡片 */}
+				{/* provider 行列表 */}
 				{entries.map((entry) => {
 					const isOpen = expanded[entry.key] ?? false;
 					// 模型列表：draft 覆盖优先（新增/删除行即时反映），否则用现值
@@ -289,62 +566,53 @@ export function PiAiProvidersCard(props: {
 					const baseURL = typeof providerMeta.baseURL === "string" ? providerMeta.baseURL : "";
 					const api = typeof providerMeta.api === "string" ? providerMeta.api : "";
 					const displayName = typeof providerMeta.displayName === "string" ? providerMeta.displayName : "";
+					const keyRef = credentialRefFor(providerMeta, entry.key);
+					const providerCatalog = props.catalog?.[entry.key];
+					// 生效模型数：自定义 models 非空取自定义数，否则取内置目录数（dsh-web 同语义）
+					const modelCount = models.length > 0 ? models.length : (providerCatalog?.length ?? 0);
 					return (
 						<div key={entry.key} className="rounded-md border border-border-subtle bg-bg-panel">
-							<div className="flex items-center gap-2 px-3 py-2">
-								<button
-									type="button"
-									className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-									onClick={() => setExpanded((prev) => ({ ...prev, [entry.key]: !prev[entry.key] }))}
-								>
-									{isOpen ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
-									<span className="truncate font-mono text-control font-semibold text-foreground">{entry.key}</span>
-									{displayName && displayName !== entry.key && (
-										<span className="truncate text-micro text-muted-foreground">{displayName}</span>
-									)}
-									<span className="shrink-0 rounded-full border border-border-subtle px-1.5 py-px font-mono text-micro text-muted-foreground">
-										{t("config.dsh.modelsCount", { count: models.length })}
-									</span>
-									{api && (
-										<span className="shrink-0 rounded-full border border-border-subtle px-1.5 py-px font-mono text-micro text-muted-foreground">{api}</span>
-									)}
-									{baseURL && <span className="max-w-40 truncate text-micro text-muted-foreground/70">{baseURL}</span>}
-								</button>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-sm"
-									className="size-7 shrink-0 text-muted-foreground hover:text-danger"
-									title={t("config.dsh.removeProvider")}
-									aria-label={t("config.dsh.removeProvider")}
-									disabled={!writable}
-									onClick={() => removeProvider(entry.key)}
-								>
-									<Trash2 className="size-3.5" aria-hidden="true" />
-								</Button>
-							</div>
+							<ProviderRowHead
+								title={entry.key}
+								subtitle={displayName && displayName !== entry.key ? displayName : undefined}
+								badges={[
+									t("config.dsh.modelsCount", { count: modelCount }),
+									...(api ? [api] : []),
+									...(baseURL ? [baseURL] : []),
+								]}
+								keyRef={keyRef}
+								keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
+								isOpen={isOpen}
+								onToggle={() => setExpanded((prev) => ({ ...prev, [entry.key]: !prev[entry.key] }))}
+								onRemove={() => removeProvider(entry.key)}
+								removeDisabled={!writable}
+								removeTitle={t("config.dsh.removeProvider")}
+							/>
 							{isOpen && (
 								<div className="grid gap-3 border-t border-border/40 px-3 py-3">
-									{/* provider 基础字段（apiKeyEnv/displayName/api/baseURL…） */}
-									<div className="grid max-w-xl gap-2.5">
-										{providerProfileFields
-											.filter((field) => field.name !== "models")
-											.map((field) => (
-												<DshSchemaField
-													key={field.name}
-													schema={schema}
-													ref={field.ref}
-													path={[]}
-													value={entryValue(entry.key, [field.name])}
-													secrets={namespace.secrets}
-													onChange={(path, next) => updateEntry(entry.key, [field.name, ...path], next)}
-													writable={writable}
-												/>
-											))}
-									</div>
-									{/* 模型列表：与 Pi 管理 ModelsTab 同款表格（行内编辑 + 增删） */}
+									<ApiKeyField
+										ref={keyRef}
+										value={keyDrafts[entry.key] ?? ""}
+										onChange={(next) => setKeyDrafts((prev) => ({ ...prev, [entry.key]: next }))}
+										ops={ops}
+									/>
+									<CustomSettings label={t("config.dsh.customSettings")}>
+										{providerProfileFields.map((field) => (
+											<DshSchemaField
+												key={field.name}
+												schema={schema}
+												ref={field.ref}
+												path={[]}
+												value={entryValue(entry.key, [field.name])}
+												secrets={namespace.secrets}
+												onChange={(path, next) => updateEntry(entry.key, [field.name, ...path], next)}
+												writable={writable}
+											/>
+										))}
+									</CustomSettings>
 									<ModelsTable
 										models={models}
+										catalog={providerCatalog}
 										writable={writable}
 										onAdd={() => addModel(entry.key)}
 										onUpdate={(index, field, value) => updateModel(entry.key, index, field, value)}
@@ -362,23 +630,27 @@ export function PiAiProvidersCard(props: {
 }
 
 /**
- * llm-deepseek 官方路由卡片：单 provider 形态（无动态 providers dict）。
- * 卡片头 + 基础字段（apiKeyEnv/maxTokens/defaultContextWindow/…）+
- * ModelsTable 模型列表；draft/patch 与 PiAiProvidersCard 同一套覆盖语义。
+ * llm-deepseek 官方路由卡片：单行形态（无动态 providers dict）。
+ * 收起一行 = 路由名 + 密钥状态点 + 模型数；展开 = 密钥主字段 + 自定义设置 + 模型列表。
  */
 export function DeepseekRouteCard(props: {
 	namespace: DshNamespaceView;
 	writable: boolean;
+	ops: DshCredentialOps;
+	/** 适配器内置模型目录（llm.models 中 provider=deepseek-official 的分组）。 */
+	catalog?: Array<{ id: string; name?: string }>;
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 }) {
-	const { namespace, writable } = props;
+	const { namespace, writable, ops } = props;
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 
 	const [draft, setDraft] = useState<Record<string, unknown>>({});
+	const [open, setOpen] = useState(false);
+	/** 密钥草稿：保存时先 credentials.set 再 settings.update（与 pi-ai 卡同一收敛语义）。 */
+	const [keyDraft, setKeyDraft] = useState("");
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [savedAt, setSavedAt] = useState<number | null>(null);
 
 	if (!schema || !root) {
 		return <div className="py-6 text-center text-control text-muted-foreground">{t("config.dsh.schemaUnavailable")}</div>;
@@ -399,13 +671,14 @@ export function DeepseekRouteCard(props: {
 			setPath(nextDraft, path, next);
 		}
 		setDraft(nextDraft);
-		setSavedAt(null);
 	};
 
 	// models 数组的读写（ModelsTable 行内编辑）
 	const modelsValue = value(["models"]);
 	const models = Array.isArray(modelsValue) ? modelsValue as DshModelRow[] : [];
 	const baseFields = objectFields(schema, root).filter((field) => field.name !== "models");
+	const apiKeyEnv = typeof value(["apiKeyEnv"]) === "string" ? value(["apiKeyEnv"]) as string : "";
+	const keyRef = credentialRefFor({ apiKeyEnv }, "deepseek");
 
 	const addModel = () => {
 		setDraft((prev) => {
@@ -415,7 +688,6 @@ export function DeepseekRouteCard(props: {
 			next.models = models;
 			return next;
 		});
-		setSavedAt(null);
 	};
 
 	const updateModel = (index: number, field: string, next: unknown) => {
@@ -432,7 +704,6 @@ export function DeepseekRouteCard(props: {
 			nextDraft.models = models;
 			return nextDraft;
 		});
-		setSavedAt(null);
 	};
 
 	const removeModel = (index: number) => {
@@ -443,16 +714,20 @@ export function DeepseekRouteCard(props: {
 				: [];
 			return next;
 		});
-		setSavedAt(null);
 	};
 
+	/** 统一保存：先写密钥草稿（credentials.set），再提交 settings patch。 */
 	const handleSave = async () => {
 		setSaving(true);
 		setError(null);
 		try {
+			const trimmed = keyDraft.trim();
+			if (trimmed) {
+				await ops.setKey(keyRef, trimmed);
+			}
 			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
 			setDraft({});
-			setSavedAt(Date.now());
+			setKeyDraft("");
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -462,44 +737,63 @@ export function DeepseekRouteCard(props: {
 
 	return (
 		<div className="flex min-w-0 flex-col">
-			<ConfigCardHeader
-				title={namespace.ns}
-				badge={
-					<span className="rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
-						{namespace.applies === "live" ? t("config.dsh.appliesLive") : t("config.dsh.appliesRestart")}
-					</span>
-				}
-				savedAt={savedAt}
-				error={error}
-				saving={saving}
-				dirty={Object.keys(draft).length > 0}
-				writable={writable}
-				onSave={() => void handleSave()}
-			/>
-			<div className="grid max-w-3xl gap-4 p-4">
-				{/* 基础字段：除 models 外的根字段（apiKeyEnv/maxTokens/defaultContextWindow/…） */}
-				<div className="grid max-w-xl gap-2.5">
-					{baseFields.map((field) => (
-						<DshSchemaField
-							key={field.name}
-							schema={schema}
-							ref={field.ref}
-							path={[field.name]}
-							value={value([field.name])}
-							secrets={namespace.secrets}
-							onChange={update}
-							writable={writable}
-						/>
-					))}
+			<div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-4 py-2">
+				<span className="text-caption font-semibold text-foreground">{namespace.ns}</span>
+				<span className="rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
+					{namespace.applies === "live" ? t("config.dsh.appliesLive") : t("config.dsh.appliesRestart")}
+				</span>
+				<div className="ml-auto flex items-center gap-2">
+					{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
+					<Button
+						type="button"
+						variant="default"
+						size="sm"
+						className="h-7"
+						disabled={!writable || saving || (Object.keys(draft).length === 0 && !keyDraft.trim())}
+						onClick={() => void handleSave()}
+					>
+						{saving ? t("common.saving") : t("common.save")}
+					</Button>
 				</div>
-				{/* 模型列表表格 */}
-				<ModelsTable
-					models={models}
-					writable={writable}
-					onAdd={addModel}
-					onUpdate={updateModel}
-					onRemove={removeModel}
-				/>
+			</div>
+			<div className="grid gap-2 p-4">
+				<div className="rounded-md border border-border-subtle bg-bg-panel">
+					<ProviderRowHead
+						title={namespace.ns === "llm-deepseek" ? t("config.dsh.deepseekOfficial") : namespace.ns}
+						badges={[t("config.dsh.modelsCount", { count: models.length > 0 ? models.length : (props.catalog?.length ?? 0) })]}
+						keyRef={keyRef}
+						keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
+						isOpen={open}
+						onToggle={() => setOpen((prev) => !prev)}
+					/>
+					{open && (
+						<div className="grid gap-3 border-t border-border/40 px-3 py-3">
+							<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
+							<CustomSettings label={t("config.dsh.customSettings")}>
+								{baseFields.map((field) => (
+									<DshSchemaField
+										key={field.name}
+										schema={schema}
+										ref={field.ref}
+										path={[field.name]}
+										value={value([field.name])}
+										secrets={namespace.secrets}
+										onChange={update}
+										writable={writable}
+									/>
+								))}
+							</CustomSettings>
+							<ModelsTable
+								models={models}
+								catalog={props.catalog}
+								writable={writable}
+								onAdd={addModel}
+								onUpdate={updateModel}
+								onRemove={removeModel}
+							/>
+						</div>
+					)}
+				</div>
 			</div>
 		</div>
 	);

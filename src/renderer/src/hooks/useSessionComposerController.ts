@@ -264,6 +264,19 @@ export function useSessionComposerController(
       : (modes[sessionId] === "imagegen" ? "imagegen" : "normal")
     : (modes[sessionId] ?? "normal");
   const sendState = sendStates[sessionId] ?? { status: "idle" as const };
+  // DSH 部署默认模型选择（settings.yaml agent-default-model）：草稿/未激活会话
+  // 的底栏与选择器用它展示默认模型/思考档位（host 会话创建前没有 runtime state）。
+  const [dshDefault, setDshDefault] = useState<{ provider: string; model: string; reasoningEffort?: string } | undefined>(undefined);
+  useEffect(() => {
+    if (!isDshBackend) return;
+    let cancelled = false;
+    void desktopApi.sessions.getDshDefaultModel().then((next) => {
+      if (!cancelled) setDshDefault(next);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isDshBackend]);
   const editorRef = useRef<HTMLDivElement | null>(null);
   // 程序化光标请求（带归属 forValue，见 composer/types.ts 的 ComposerCaretRequest）；
   // 编辑器只在内容同步到 forValue 的同一趟 layout pass 配对消费，过期请求会被丢弃。
@@ -1250,6 +1263,12 @@ export function useSessionComposerController(
     backend: record?.backend ?? "pi",
     /** 草稿期可切换后端；激活后锁定（undefined → UI 隐藏切换器）。 */
     changeBackend: backendLocked ? undefined : changeBackend,
+    /** DSH 部署默认模型（settings.yaml agent-default-model）；底栏/选择器展示用。 */
+    dshDefaultModel: dshDefault
+      ? { provider: dshDefault.provider, modelId: dshDefault.model, modelName: dshDefault.model }
+      : undefined,
+    /** DSH 部署默认思考档位（agent-default-model.reasoningEffort）。 */
+    dshDefaultThinkingLevel: dshDefault?.reasoningEffort,
     draft,
     attachments,
     mode,

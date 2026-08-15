@@ -87,6 +87,8 @@ export const ipcChannels = {
 	sessionsSetFocusedSession: "sessions:set-focused-session",
 	/** DSH host 级模型目录（llm.models），不依赖已启动的会话。 */
 	dshListModels: "dsh:list-models",
+	/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由；添加提供方用）。 */
+	dshListProviders: "dsh:list-providers",
 	/** DSH 配置管理页状态（host 启动状态 + 目录 + providers + 模型目录）。 */
 	dshGetStatus: "dsh:get-status",
 	/** DSH settings.describe（脱敏 namespace 视图 + schema，渲染配置表单）。 */
@@ -103,8 +105,12 @@ export const ipcChannels = {
 	dshCredentialSet: "dsh:credential-set",
 	/** DSH credentials.unset（删凭证）。 */
 	dshCredentialUnset: "dsh:credential-unset",
+	/** DSH 凭证明文读取（仅渲染层点「眼睛」时按 ref 取一次；DSH RPC 不回显值，由主进程读凭证文件/环境）。 */
+	dshCredentialRead: "dsh:credential-read",
 	/** DSH agent 预设目录（agentPreset.list：id/trust/isDefault/名称/描述）。 */
 	dshAgentPresets: "dsh:agent-presets",
+	/** DSH 部署默认模型选择（settings.yaml agent-default-model：provider/model/reasoningEffort）。 */
+	dshDefaultModel: "dsh:default-model",
 	codexSessionsScan: "codex-sessions:scan",
 	codexSessionsImport: "codex-sessions:import",
 	claudeSessionsScan: "claude-sessions:scan",

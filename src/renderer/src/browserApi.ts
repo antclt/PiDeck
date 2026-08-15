@@ -326,6 +326,7 @@ export function createBrowserApi(): PiDesktopApi {
 			forkRuntimeSession: (target, entryId) =>
 				sessionRuntimeCommand(target, "fork", { entryId }),
 			listDshModels: async () => [],
+			listDshProviders: async () => [],
 			getDshStatus: async () => ({
 				started: false,
 				homeDir: "",
@@ -335,6 +336,7 @@ export function createBrowserApi(): PiDesktopApi {
 			describeDshCredentials: async () => ({}),
 			setDshCredential: async () => undefined,
 			unsetDshCredential: async () => undefined,
+			readDshCredential: async () => undefined,
 			openDshDocument: async () => undefined,
 			restartDshHost: async () => true,
 		},

@@ -211,6 +211,10 @@ export function ComposerBottomBar(props: {
 	gitInfo?: GitBranchInfo;
 	/** Draft sessions do not have a runtime yet, so retain their persisted settings in the bar. */
 	record?: Pick<SessionRecord, "model" | "thinkingLevel">;
+	/** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期展示默认值用，
+	 *  不写入记录（激活后 runtime state 覆盖）。 */
+	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
+	defaultThinkingLevel?: string;
 	/** 当前会话后端（pi 缺省）。 */
 	backend?: AgentBackend;
 	/** 切换后端：UI 层面先停 runtime 再写 catalog。 */
@@ -235,7 +239,8 @@ export function ComposerBottomBar(props: {
 	const contextPercent = isDsh ? 0 : (ctxPercent ?? 0);
 	// 默认模型/思考级别来自主进程按 pi 配置自动填充进会话记录的默认值（props.record），
 	// 不读取渲染层 welcome localStorage 偏好，避免用户偏好覆盖 pi 配置。
-	const currentThinkingLevel = props.state?.thinkingLevel ?? props.record?.thinkingLevel;
+	// DSH 草稿：记录未填默认时用部署默认（settings.yaml agent-default-model）兜底展示。
+	const currentThinkingLevel = props.state?.thinkingLevel ?? props.record?.thinkingLevel ?? props.defaultThinkingLevel;
 	// 有待生效切换时展示 from→to（新档位尚未被任何生成使用），否则展示当前档位
 	const thinkingDisplay = computeThinkingDisplay(currentThinkingLevel, props.thinkingPending);
 	const thinkingLevelLabel = (level: string) => {
@@ -259,9 +264,9 @@ export function ComposerBottomBar(props: {
 			? t("app.composerModeImagegen")
 			: t("app.composerModeNormal");
 	const liveModel = {
-		provider: props.state?.provider ?? props.record?.model?.provider ?? "",
-		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? "",
-		modelName: props.state?.modelName ?? props.record?.model?.modelId,
+		provider: props.state?.provider ?? props.record?.model?.provider ?? props.defaultModel?.provider ?? "",
+		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? props.defaultModel?.modelId ?? "",
+		modelName: props.state?.modelName ?? props.record?.model?.modelId ?? props.defaultModel?.modelName,
 	};
 	const modelDisplay = computeModelDisplay(
 		liveModel.modelId ? liveModel : undefined,
