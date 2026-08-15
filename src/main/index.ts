@@ -2365,6 +2365,15 @@ function registerIpc() {
 				dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
 			readDshMessageFullText: (agentId, messageId) =>
 				dshAgentManager.readMessageFullText(agentId, messageId),
+			resolveDshSessionFilePath: async (sessionId) => {
+				// F5：DSH 会话没有 pi 会话文件，「复制会话文件路径」按 catalog 的
+				// dshSessionId + 项目 cwd 推导 host 持久化路径。
+				const entry = sessionCatalog.get(sessionId);
+				if (!entry?.dshSessionId) return undefined;
+				const project = projectStore.get(entry.projectId);
+				if (!project?.path) return undefined;
+				return dshAgentManager.resolveSessionFilePath(project.path, entry.dshSessionId);
+			},
 			isDshAgent: (agentId) =>
 				dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 			forkDshAgentSession: async (target, entryId) => {

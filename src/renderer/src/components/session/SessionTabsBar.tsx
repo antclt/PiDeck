@@ -12,6 +12,7 @@ import {
   PinOff,
   Plus,
   RotateCw,
+  ShieldAlert,
   X,
 } from "lucide-react";
 import {
@@ -685,6 +686,21 @@ function SessionTab(props: {
         )}
         {pinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />}
         {record?.backend === "dsh" && <SessionBackendBadge className="size-4 shrink-0" />}
+        {/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
+        {runtime?.state?.planModeActive && (
+          <span
+            className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary"
+            title={t("app.composerModePlan")}
+          >
+            {t("app.composerModePlan")}
+          </span>
+        )}
+        {runtime?.state?.permissionPreset === "danger-full-access" && (
+          <ShieldAlert
+            className="size-3 shrink-0 text-destructive"
+            aria-label={t("dshPermission.fullAccess")}
+          />
+        )}
         <span className={cn("min-w-0 flex-1 truncate", preview && "italic")}>{title}</span>
         {/* 拖拽插入指示线：2px 主题色竖线，贴在目标 Tab 左/右缘 */}
         {props.indicator && (

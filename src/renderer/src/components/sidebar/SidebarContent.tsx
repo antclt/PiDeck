@@ -286,7 +286,8 @@ export function SidebarContent(props: SidebarContentProps) {
           onCopySession={() => { void actions.sessions.copy(menu.projectId, menuSession); controller.closeMenu(); }}
           onCopySessionFilePath={() => { void actions.sessions.copyPath(menuSession); controller.closeMenu(); }}
           onOpenSessionFile={() => { void actions.sessions.openFile(menuSession); controller.closeMenu(); }}
-          hasFilePath={Boolean(menuSession.filePath)}
+          // F5：DSH 会话无 filePath 但可复制 host 会话文件路径（主进程按 dshSessionId 推导）
+          hasFilePath={Boolean(menuSession.filePath) || menuSession.backend === "dsh"}
           canRpcLog={Boolean(menuSessionRuntimeAgent)}
           rpcToggleDisabled={!menuSessionRuntimeAgent}
           isRpcLogging={menuSessionRuntimeAgent ? controller.isAgentRpcLogging(menuSessionRuntimeAgent.id) : false}

@@ -82,6 +82,8 @@ export function projectDshEvent(
 	/** host 为事件计算的下发 view（session/event 帧与 history 条目的 view 字段，
 	 *  dsh-web 渲染工具卡片用的就是它；对 tool/call 投影进 meta.view）。 */
 	view?: unknown,
+	/** 投影选项（D8：用户主动停止后的迟到 turn/end 不追加 error 气泡——停止被显示为回合失败）。 */
+	opts?: { skipErrorTurnEnd?: boolean },
 ): DshProjection {
 	const base: DshProjection = prev ?? {
 		messages: [],
@@ -350,7 +352,9 @@ export function projectDshEvent(
 		}
 		case "turn/end": {
 			const reason = (data.reason ?? {}) as { kind?: string; error?: { message?: string } };
-			if (reason.kind === "error" && reason.error?.message) {
+			// D8：用户主动停止（cancelled）后的迟到 turn/end 若报 error，不追加错误气泡——
+			// 停止被显示为「回合失败」是误导；正常回合的错误仍照常投影。
+			if (reason.kind === "error" && reason.error?.message && !opts?.skipErrorTurnEnd) {
 				next.messages = [
 					...base.messages,
 					{
@@ -386,6 +390,16 @@ export function projectDshEvent(
 			next.pendingAssistantId = undefined;
 			next.pendingAssistantText = "";
 			next.pendingAssistantThinking = "";
+			// D9：回合结束（含中断/停止）时，仍 running 的工具卡兜底收口——host 崩溃/取消后
+			// tool/result 可能永远不来，卡片不能一直转圈；只清 running 状态不改文案。
+			if (next.messages.some((m) => m.role === "tool" && m.meta?.status === "running")) {
+				next.messages = next.messages.map((m) =>
+					m.role === "tool" && m.meta?.status === "running"
+						? { ...m, meta: { ...m.meta, status: "done" } }
+						: m,
+				);
+				next.messagesChanged = true;
+			}
 			next.isStreaming = false;
 			next.turnEnded = true;
 			next.stateChanged = true;

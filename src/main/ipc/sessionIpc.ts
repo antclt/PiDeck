@@ -141,6 +141,8 @@ export type DshBackendIpcDeps = {
 		agentId: string,
 		messageId: string,
 	) => Promise<{ text: string }>;
+	/** DSH 会话文件路径推导（按 catalog entry 的 dshSessionId + cwd）；未装配/不可推导返回 undefined。 */
+	resolveDshSessionFilePath?: (sessionId: string) => Promise<string | undefined>;
 	/** 判断 agentId 是否属于 DSH 后端（fork 等 pi 专属命令按 backend 分流）。 */
 	isDshAgent: (agentId: string) => boolean;
 	/** DSH fork：session.fork 裁剪 + runtime 换绑 + catalog dshSessionId 回写。 */
@@ -242,6 +244,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		restartDshHost,
 		readDshHistoryPage,
 		readDshMessageFullText,
+		resolveDshSessionFilePath,
 		isDshAgent = () => false,
 		forkDshAgentSession,
 		cloneDshAgentSession,
@@ -642,6 +645,15 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				}
 				throw error;
 			}
+		},
+	);
+	// DSH 会话文件路径推导（F5：渲染层右键「复制会话文件路径」，历史会话无运行时 tab 也适用）
+	ipcMain.handle(
+		ipcChannels.sessionsGetDshSessionPath,
+		async (_event, sessionId: unknown): Promise<string | undefined> => {
+			if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
+			if (!resolveDshSessionFilePath) return undefined;
+			return resolveDshSessionFilePath(sessionId);
 		},
 	);
 	ipcMain.handle(

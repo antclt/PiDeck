@@ -87,6 +87,8 @@ export const ipcChannels = {
 	sessionsRuntimeFork: "sessions:runtime-fork",
 	/** 渲染层汇报当前聚焦的会话（用于非聚焦会话 Ask 请求的桌面通知） */
 	sessionsSetFocusedSession: "sessions:set-focused-session",
+	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
+	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
 	/** DSH host 级模型目录（llm.models），不依赖已启动的会话。 */
 	dshListModels: "dsh:list-models",
 	/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由；添加提供方用）。 */

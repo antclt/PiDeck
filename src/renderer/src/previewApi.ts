@@ -306,6 +306,7 @@ export function createPreviewApi(): PiDesktopApi {
 			// 预览模式无 DSH host：空预设目录满足接口契约
 			listDshAgentPresets: async () => [],
 			getDshDefaultModel: async () => undefined,
+			getDshSessionPath: async () => undefined,
 			listCatalog: async (projectId, _options?: { scan?: boolean }): Promise<SessionRecord[]> => getSessions().map((session) => ({
 				id: `preview-record:${session.id}`,
 				projectId,

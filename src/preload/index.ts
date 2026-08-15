@@ -528,6 +528,11 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogExportHtml, sessionId) as Promise<{
 				path: string;
 			}>,
+		/** DSH 会话文件路径推导（右键「复制会话文件路径」；非 DSH/不可推导返回 undefined）。 */
+		getDshSessionPath: (sessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsGetDshSessionPath, sessionId) as Promise<
+				string | undefined
+			>,
 		sendPrompt: (input: SendSessionPromptInput) =>
 			ipcRenderer.invoke(ipcChannels.sessionsSendPrompt, input) as Promise<SendSessionPromptResult>,
 		sendUiResponse: (input: SessionUiResponseInput) =>

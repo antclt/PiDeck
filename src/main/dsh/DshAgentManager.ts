@@ -141,6 +141,14 @@ export class DshAgentManager implements SessionAgentGateway {
 		return this.runtime(agentId).messages;
 	}
 
+	/**
+	 * 按 cwd + dsh sessionId 推导 host 会话文件路径（F5：渲染层右键「复制会话文件路径」用，
+	 * 历史会话无运行时 tab 时也拿得到）。DSH 会话文件是 zstd 压缩日志，路径仅作定位。
+	 */
+	resolveSessionFilePath(cwd: string, dshSessionId: string): string {
+		return dshSessionFilePath(this.dshHost.getHomeDir(), cwd, dshSessionId);
+	}
+
 	async create(input: CreateAgentInput): Promise<AgentTab> {
 		const project = this.getProject(input.projectId);
 		if (!project) throw new Error(`Project not found: ${input.projectId}`);
@@ -1078,7 +1086,8 @@ export class DshAgentManager implements SessionAgentGateway {
 							// 一律不投影——否则停止后完整回答/工具卡片继续上屏（「还在跑」），
 							// 或被拼进下一条消息（「串台」）。
 							if (event?.type === "turn/end") {
-								runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id);
+								// D8：停止后的迟到 turn/end 不追加 error 气泡（停止 ≠ 回合失败）
+								runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, undefined, { skipErrorTurnEnd: true });
 								runtime.messages = runtime.projection.messages;
 								this.emit(ipcChannels.agentsTextStream, { agentId: runtime.tab.id, text: "", done: true });
 								this.emitMessages(runtime);

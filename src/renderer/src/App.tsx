@@ -2582,7 +2582,16 @@ export function App() {
       export: runExportSidebarSession,
       copy: runCopySidebarSession,
       copyPath: async (session) => {
-        await navigator.clipboard.writeText(session.filePath);
+        // DSH 会话没有 pi 会话文件：走主进程按 dshSessionId + cwd 推导 host 持久化路径（F5）。
+        // 失败/不可推导时提示而不是把空值写进剪贴板（原实现会把 undefined 写成 "undefined" 字符串）。
+        const path = session.backend === "dsh"
+          ? await api.sessions.getDshSessionPath(session.id)
+          : session.filePath;
+        if (!path) {
+          showToast(t("menu.copySessionFilePathUnavailable"), 3000);
+          return;
+        }
+        await navigator.clipboard.writeText(path);
         showToast(t("common.copied"));
       },
       openFile: (session) => api.files.open(session.filePath),
