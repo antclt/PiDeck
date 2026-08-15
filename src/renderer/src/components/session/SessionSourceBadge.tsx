@@ -1,4 +1,4 @@
-import type { SessionSource } from "../../../../shared/types";
+import type { AgentBackend, SessionSource } from "../../../../shared/types";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui-shadcn/badge";
@@ -127,6 +127,15 @@ export function SessionPiBadge(props: { className?: string }) {
       <PiLogo className="size-3.5" />
     </Badge>
   );
+}
+
+/**
+ * 后端标识统一入口（C18）：收敛 `backend === "dsh" ? <SessionBackendBadge/> :
+ * <SessionPiBadge/>` 三元。新增后端（如未来 Codex 运行时）只改这里。
+ */
+export function SessionBackendMark(props: { backend?: AgentBackend; className?: string }) {
+  if (props.backend === "dsh") return <SessionBackendBadge className={props.className} />;
+  return <SessionPiBadge className={props.className} />;
 }
 
 /**

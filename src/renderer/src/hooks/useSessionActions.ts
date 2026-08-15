@@ -10,6 +10,12 @@ import type {
 import { isSameSessionPath } from "../agentListDisplay";
 import { t } from "../i18n";
 
+/**
+ * 新建会话默认后端（C21 统一真相源）：产品决策为 DSH（深融合内嵌，新用户默认体验）。
+ * 引导页/匿名会话/侧栏「+」都经这里或显式传值，避免后端默认值分裂（F2）。
+ */
+export const DEFAULT_AGENT_BACKEND: AgentBackend = "dsh";
+
 export type RefreshProjectSessions = (
   projectId: string,
   silent?: boolean,
@@ -221,8 +227,8 @@ export function useSessionActions(options: UseSessionActionsOptions) {
   async function createSessionDraft(
     projectId = activeProjectId,
     preferences: SessionLaunchPreferences = {},
-    // 新建会话默认 DSH 后端（用户确认）；旧会话缺省仍按 pi 语义读取。
-    backend: AgentBackend = "dsh",
+    // 新建会话默认后端：产品决策为 DSH（C21 统一真相源；旧会话缺省仍按 pi 语义读取）。
+    backend: AgentBackend = DEFAULT_AGENT_BACKEND,
   ): Promise<SessionRecord | undefined> {
     if (!projectId || creatingSessionDraftRef.current.has(projectId)) return undefined;
     const project = projects.find((item) => item.id === projectId);
@@ -249,7 +255,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
   async function createAnonymousSession(
     projectId = activeProjectId,
     preferences: SessionLaunchPreferences = {},
-    backend: AgentBackend = "dsh",
+    backend: AgentBackend = DEFAULT_AGENT_BACKEND,
   ): Promise<SessionRecord | undefined> {
     if (!projectId || creatingSessionDraftRef.current.has(projectId)) return undefined;
     const project = projects.find((item) => item.id === projectId);
