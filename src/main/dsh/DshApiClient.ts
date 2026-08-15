@@ -58,6 +58,8 @@ export type DshApiClientOptions = {
  */
 export class DshApiClient {
 	private client: import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient | null = null;
+	/** 懒加载初始化中的 promise（E16：并发 getClient 只建一个客户端；dispose 时清空）。 */
+	private clientPromise: Promise<import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient> | null = null;
 	private readonly pending = new Map<string, PendingFetch>();
 	private readonly unsubscribe: () => void;
 	private readonly transport: DshFetchTransport;
@@ -78,26 +80,29 @@ export class DshApiClient {
 		});
 	}
 
-	/** 懒加载官方客户端并覆写 doFetch 为桥接实现（抽象类动态继承，避免实例化抽象基类）。 */
+	/** 懒加载官方客户端并覆写 doFetch 为桥接实现（抽象类动态继承，避免实例化抽象基类）。
+	 *  E16：初始化 promise 缓存，并发调用共享同一个客户端。 */
 	async getClient(): Promise<import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient> {
 		if (this.client) return this.client;
-		const module = await this.loadModule();
-		// AbstractApiClient 是抽象类（doFetch 抽象）：动态建一个具体子类，
-		// 只覆写 doFetch，其余（postJson/readSse/领域方法）全部继承。
-		const Base = module.AbstractApiClient as unknown as new () => import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient;
-		class BridgedClient extends Base {
-			override doFetch(
-				input: URL,
-				init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
-			): Promise<Response> {
-				return this.owner.bridgedFetch(input, init);
+		this.clientPromise ??= this.loadModule().then((module) => {
+			// AbstractApiClient 是抽象类（doFetch 抽象）：动态建一个具体子类，
+			// 只覆写 doFetch，其余（postJson/readSse/领域方法）全部继承。
+			const Base = module.AbstractApiClient as unknown as new () => import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient;
+			class BridgedClient extends Base {
+				override doFetch(
+					input: URL,
+					init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
+				): Promise<Response> {
+					return this.owner.bridgedFetch(input, init);
+				}
+				owner!: DshApiClient;
 			}
-			owner!: DshApiClient;
-		}
-		const client = new BridgedClient();
-		client.owner = this;
-		this.client = client;
-		return client;
+			const client = new BridgedClient();
+			client.owner = this;
+			this.client = client;
+			return client;
+		});
+		return this.clientPromise;
 	}
 
 	/** 真正的桥接 fetch：发 fetch-request，等 unary 响应或组装流式响应。 */
@@ -302,5 +307,6 @@ export class DshApiClient {
 		}
 		this.pending.clear();
 		this.client = null;
+		this.clientPromise = null;
 	}
 }

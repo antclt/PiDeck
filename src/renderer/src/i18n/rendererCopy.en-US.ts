@@ -507,6 +507,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.sessionCopied": "Session copied through pi RPC",
   "app.sessionCopyCancelled": "Session copy cancelled",
   "app.sessionDeleted": "Session deleted",
+  "session.deletedDshKeepData": "Session record deleted (DSH host data remains in DSH_HOME; clean it up manually)",
   "app.sessionArchived": "Session archived",
   "app.sessionRestored": "Session restored",
   "app.sessionDuration": "This session duration",

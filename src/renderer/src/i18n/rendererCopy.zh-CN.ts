@@ -504,6 +504,7 @@ export const zhCN = {
   "app.sessionCopied": "已通过 pi RPC 复制会话",
   "app.sessionCopyCancelled": "复制会话已取消",
   "app.sessionDeleted": "已删除会话",
+  "session.deletedDshKeepData": "会话记录已删除（DSH host 数据保留在 DSH_HOME，可手动清理）",
   "app.sessionArchived": "已归档会话",
   "app.sessionRestored": "已恢复会话",
   "app.sessionDuration": "本次会话耗时",

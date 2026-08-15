@@ -54,6 +54,11 @@ type CredentialState = {
 /** 模型配置相关的 namespace：llm-deepseek（官方 DeepSeek 路由）+ llm-pi-ai（pi-ai providers dict）。 */
 const MODEL_NS = new Set(["llm-deepseek", "llm-pi-ai"]);
 
+/** 配置目录 + 文件名 → 平台路径（F9：统一拼接，避免散落的 replace 兜底）。 */
+function joinConfigPath(homeDir: string, fileName: string): string {
+	return `${homeDir.replace(/[\\/]+$/, "")}/${fileName}`;
+}
+
 /** 插件配置相关的 namespace（与 dsh-web 插件配置页同源的 host 平面分节）。 */
 const PLUGIN_NS: Array<{ ns: string; titleKey: TranslationKey }> = [
 	{ ns: "agent-loop", titleKey: "config.dsh.pluginAgentLoop" },
@@ -1058,7 +1063,7 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi }) {
 		if (!dirty) return true;
 		setSaving(true);
 		try {
-			const filePath = `${props.homeDir.replace(/[\\/]+$/, "")}/${fileName}`;
+			const filePath = joinConfigPath(props.homeDir, fileName);
 			await desktopApi.files.writeContent(filePath, content);
 			setDirty(false);
 			return true;
@@ -1081,7 +1086,7 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi }) {
 		let cancelled = false;
 		setLoaded(false);
 		setDirty(false);
-		const filePath = `${props.homeDir.replace(/[\\/]+$/, "")}/${fileName}`;
+		const filePath = joinConfigPath(props.homeDir, fileName);
 		void desktopApi.files.readContent(filePath)
 			.then((next) => {
 				if (!cancelled) {

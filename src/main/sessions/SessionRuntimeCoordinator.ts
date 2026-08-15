@@ -519,11 +519,14 @@ export class SessionRuntimeCoordinator {
 		level: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>> {
 		return this.runTargetCommand(target, async (agentId) => {
+			// D13：与 setRuntimeModel 一致——先调运行中 Agent，成功后再写 catalog。
+			// 原先先写 catalog 再调 agent：DSH 无模型选中时 setThinking 只记内存不落 host，
+			// catalog 已更新但 host 未生效，重启/attach 后对账漂移。
+			await this.agents.setThinking(agentId, level);
 			await this.catalog.update(target.sessionId, {
 				thinkingLevel: level,
 				updatedAt: Date.now(),
 			});
-			await this.agents.setThinking(agentId, level);
 			void this.logger?.info("session-runtime", "Runtime thinking changed", {
 				sessionId: target.sessionId,
 				agentId,
