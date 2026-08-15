@@ -235,6 +235,12 @@ export class DshAgentManager implements SessionAgentGateway {
 	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
 		const runtime = this.runtime(input.agentId);
 		const client = this.requireClient();
+		// host 侧 bug 规避：dsh-agent-loop 的 slash 命令步骤（/permission /plan 等被
+		// pideck-slash-bridge 在 pre-step reject）会让本轮以 blocked 收场，且 reject 路径
+		// 跳过 pending-inbox 检查；若此时 inbox 里已 splice 下一条消息（本回合进行中到达
+		// 的 followup），该消息会永久滞留、不再开新回合。因此所有 prompt 必须串行化：
+		// 上一回合（含命令回合）真正 idle 之后才发下一条。
+		await this.waitForIdle(input.agentId);
 		const sent = await client.sessions.prompt({
 			sessionId: runtime.sessionId,
 			mode: "queue",
@@ -246,17 +252,45 @@ export class DshAgentManager implements SessionAgentGateway {
 		return { accepted: true };
 	}
 
+	/**
+	 * 等待该 agent 无运行中回合（control 状态 idle）。mux 事件驱动 control 状态机：
+	 * turn/start → running，turn/end → idle（含命令 reject 的 blocked 收场）。
+	 * 超时（默认 30s）直接放行，避免 host 卡死把发送永久挂起；放行后由 host 侧
+	 * queue 语义兜底（正常回合的 followup 不丢消息，只有 reject 路径才有滞留 bug）。
+	 */
+	private async waitForIdle(agentId: string, timeoutMs = 30_000): Promise<void> {
+		const runtime = this.runtime(agentId);
+		const startedAt = Date.now();
+		while (runtime.control.status !== "idle") {
+			if (Date.now() - startedAt >= timeoutMs) return;
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+	}
+
 	async restart(agentId: string): Promise<AgentTab> {
-		// v1：停止旧会话并新建（同 cwd），保持 agentId 不变，映射到新 dsh sessionId。
+		// 重启 = 重建运行时投影，但 attach 到同一个 host 会话（会话数据由 $DSH_HOME
+		// 持久化）：新建会话会让重启后对话历史「消失」（旧会话被 catalog 换绑丢弃）。
+		// 仅当 host 里已不存在该会话（DSH_HOME 被清/更换）才退回新建。
 		const old = this.runtime(agentId);
 		const { cwd, projectId, title } = old.tab;
 		await this.stop(agentId);
 		const client = await this.ensureClient();
-		const created = await client.sessions.create({ cwd });
-		if (!created.result.ok) {
-			throw new Error(`dsh session.create (restart) failed: ${JSON.stringify(created.result.error)}`);
+		let sessionId = old.tab.sessionId;
+		if (sessionId) {
+			const listed = await client.sessions.list({}).catch(() => null);
+			const exists = listed?.result.ok === true && listed.result.value.items.some(
+				(item) => item.sessionId === sessionId,
+			);
+			if (!exists) sessionId = undefined;
 		}
-		const sessionId = created.result.value.sessionId;
+		if (!sessionId) {
+			const created = await client.sessions.create({ cwd });
+			if (!created.result.ok) {
+				throw new Error(`dsh session.create (restart) failed: ${JSON.stringify(created.result.error)}`);
+			}
+			sessionId = created.result.value.sessionId;
+		}
+		const dshSessionId = sessionId as SessionId;
 		const tab: AgentTab = {
 			...old.tab,
 			id: agentId,
@@ -266,18 +300,30 @@ export class DshAgentManager implements SessionAgentGateway {
 			sessionId,
 			status: "idle",
 			createdAt: Date.now(),
-			// restart 映射到新 dsh sessionId：会话文件路径必须同步更新（不能沿用旧 id 的）
+			// attach 同一会话：文件路径不变（沿用旧 id 的 host 会话文件）
 			sessionPath: dshSessionFilePath(this.dshHost.getHomeDir(), cwd, sessionId),
 		};
 		const runtime: DshAgentRuntime = {
 			tab,
-			sessionId,
+			sessionId: dshSessionId,
 			cwd,
 			messages: [],
 			projection: projectDshEvent(undefined, undefined, agentId),
 			isStreaming: false,
 			control: initialDshControl(),
 		};
+		// 拉历史尾部投影为初始消息（重启后时间线恢复旧对话，同 create attach 路径）
+		const history = await client.sessions.history({ sessionId: dshSessionId, maxMessages: 200 }).catch(() => null);
+		if (history?.result.ok) {
+			const entries = (history.result.value.events ?? [])
+				.map((entry) => ({ event: entry.event, view: entry.view }))
+				.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
+				.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+			for (const { event, view } of entries) {
+				runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
+			}
+			runtime.messages = runtime.projection.messages;
+		}
 		this.runtimes.set(agentId, runtime);
 		this.startMux(runtime);
 		this.emit(ipcChannels.agentsState, this.list());
@@ -463,6 +509,26 @@ export class DshAgentManager implements SessionAgentGateway {
 			runtime.thinkingLevel = updated.result.value.selected.reasoningEffort ?? level;
 		}
 		return this.getRuntimeState(agentId);
+	}
+
+	async setPermission(agentId: string, preset: string): Promise<unknown> {
+		// DSH 权限预设切换走 /permission 命令（host 侧 slash 桥在 agent/pre-step
+		// 拦截执行）：sandbox 模式 + approval 策略随命令立即生效，permission/preset
+		// 等事件经 mux 折叠进 runtime state。命令消息不进模型、不上时间线。
+		const runtime = this.runtime(agentId);
+		const client = this.requireClient();
+		// 与 sendPrompt 同一串行化约束：命令回合运行中不允许再 splice 消息
+		// （reject 路径会滞留回合内到达的 followup，见 sendPrompt 注释）。
+		await this.waitForIdle(agentId);
+		const sent = await client.sessions.prompt({
+			sessionId: runtime.sessionId,
+			mode: "queue",
+			content: [{ type: "text", text: `/permission ${preset}` }],
+		});
+		if (!sent.result.ok) {
+			throw new Error(`dsh /permission failed: ${JSON.stringify(sent.result.error)}`);
+		}
+		return { accepted: true, preset };
 	}
 
 	async publishRuntimeState(agentId: string): Promise<void> {

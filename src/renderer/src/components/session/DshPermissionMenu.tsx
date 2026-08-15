@@ -12,10 +12,10 @@
  *   消息不进模型、不上时间线），随后 runtime-state 推送刷新底栏。
  * - danger-full-access 需确认（与 dsh-web 一致：完全访问是高风险预设）。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Shield, ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
-import { useAtomValue } from "jotai";
-import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
+import { useAtomValue, useSetAtom } from "jotai";
+import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, upsertSessionAtom } from "../../atoms";
 import { Button } from "../ui-shadcn/button";
 import { Dialog, DialogContent } from "../ui-shadcn/dialog";
 import { CommandItem } from "../ui-shadcn/command";
@@ -49,14 +49,15 @@ function presetLabel(preset: string | undefined): string {
 
 export function DshPermissionMenu(props: { sessionId: string; disabled?: boolean }) {
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(props.sessionId));
+	const record = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));
+	const upsertSession = useSetAtom(upsertSessionAtom);
 	const [open, setOpen] = useState(false);
 	const [confirmingFull, setConfirmingFull] = useState(false);
 	const [sending, setSending] = useState(false);
 	const [defaultPreset, setDefaultPreset] = useState<string | undefined>(undefined);
-	const [needRuntime, setNeedRuntime] = useState(false);
 
-	// 当前生效预设：runtime 折叠值优先（激活会话），草稿/未激活回退 settings 默认。
-	const effectivePreset = runtime?.state?.permissionPreset ?? defaultPreset;
+	// 当前生效预设：运行时折叠值（激活会话）> 会话记录预选（草稿期）> settings 默认
+	const effectivePreset = runtime?.state?.permissionPreset ?? record?.permissionPreset ?? defaultPreset;
 
 	useEffect(() => {
 		let cancelled = false;
@@ -75,11 +76,19 @@ export function DshPermissionMenu(props: { sessionId: string; disabled?: boolean
 
 	const hasRuntime = Boolean(runtime?.agentId);
 
-	/** 切换：发送 /permission <name>，host slash 桥执行（不进模型、不上时间线）。 */
+	/** 切换：激活会话发 /permission <name>（host slash 桥执行，不进模型/不上时间线）；
+	 *  草稿会话只写记录预选，激活时 applyPreferences 应用。两者都回写记录（源真相）。 */
 	const switchPreset = async (preset: string) => {
 		if (!hasRuntime) {
-			// 草稿会话没有 host 会话可切（新会话默认预设由 settings 决定）
-			setNeedRuntime(true);
+			// 草稿期预选：启动会话后生效
+			try {
+				const updated = await desktopApi.sessions.updateRecord(props.sessionId, { permissionPreset: preset });
+				upsertSession(updated);
+			} catch (error) {
+				showNotice(error instanceof Error ? error.message : String(error), 4000);
+				return;
+			}
+			showNotice(t("dshPermission.presetPendingNotice", { name: presetLabel(preset) }), 3000);
 			setOpen(false);
 			return;
 		}
@@ -90,6 +99,9 @@ export function DshPermissionMenu(props: { sessionId: string; disabled?: boolean
 				requestId: crypto.randomUUID(),
 				message: `/permission ${preset}`,
 			});
+			// 记录同步为源真相：会话内切换也要持久化，重启/重新激活后保持一致
+			const updated = await desktopApi.sessions.updateRecord(props.sessionId, { permissionPreset: preset });
+			upsertSession(updated);
 			showNotice(t("dshPermission.switchNotice", { name: presetLabel(preset) }), 3000);
 		} catch (error) {
 			showNotice(error instanceof Error ? error.message : String(error), 4000);
@@ -146,7 +158,7 @@ export function DshPermissionMenu(props: { sessionId: string; disabled?: boolean
 									value={preset.id}
 									data-picker-value={preset.id}
 									onSelect={() => pick(preset.id)}
-									disabled={!hasRuntime || sending}
+									disabled={sending}
 									className="min-h-9 items-center gap-2 rounded-md px-2.5 py-1"
 								>
 									<span className={`grid size-6 shrink-0 place-items-center rounded-md ${selected ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground"}`}>
@@ -188,15 +200,6 @@ export function DshPermissionMenu(props: { sessionId: string; disabled?: boolean
 						void switchPreset(FULL_ACCESS);
 					}}
 					onCancel={() => setConfirmingFull(false)}
-				/>
-			)}
-			{needRuntime && (
-				<ConfirmDialog
-					title={t("dshPermission.needRuntimeTitle")}
-					message={t("dshPermission.needRuntimeBody")}
-					confirmLabel={t("common.close")}
-					onConfirm={() => setNeedRuntime(false)}
-					onCancel={() => setNeedRuntime(false)}
 				/>
 			)}
 		</>

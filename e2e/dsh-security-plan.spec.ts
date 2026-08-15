@@ -26,13 +26,46 @@ test("DSH 权限预设切换、plan 模式与配置页分区", async ({ window }
 			.piDesktop.settings.update({ dshHomeDir: dir });
 	}, dshHome);
 
-	// ── 2. 新建 DSH 会话并激活 ────────────────────────────────────────────────
+	// ── 2. 新建 DSH 会话草稿（新会话默认 DSH 后端）──────────────────────────
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
-	const newDsh = window.getByRole("button", { name: "新建 DSH Agent", exact: true });
+	const newDsh = window.getByRole("button", { name: "新会话", exact: true });
 	await expect(newDsh).toBeVisible({ timeout: 15_000 });
 	await newDsh.click();
 	const composer = window.locator(".composer .rich-input");
 	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+
+	// ── 2.5 草稿期权限预选（回归：未启动时下拉可点、不可灰）──────────────────
+	// 旧 bug：会话未启动时权限下拉能弹出但选项是灰的、无法选中。修复后草稿期
+	// 选择只写会话记录（启动时 applyPreferences 应用），选项必须可点击。
+	const securityBtn = window.locator(".composer-bar-btn.security.dsh");
+	await expect(securityBtn).toBeVisible();
+	// 草稿期展示 settings permission.defaultPreset（workspace-write）
+	await expect(securityBtn).toContainText("Workspace Write", { timeout: 10_000 });
+	await securityBtn.click();
+	const permissionPicker = window.locator(".dsh-permission-picker");
+	await expect(permissionPicker).toBeVisible();
+	await expect(permissionPicker.locator('[data-picker-value="read-only"]')).toBeVisible();
+	await expect(permissionPicker.locator('[data-picker-value="workspace-write"]')).toBeVisible();
+	await expect(permissionPicker.locator('[data-picker-value="danger-full-access"]')).toBeVisible();
+	// 选项必须可交互（disabled 状态即旧 bug 的灰态）
+	await expect(permissionPicker.locator('[data-picker-value="read-only"]')).toBeEnabled();
+	await permissionPicker.locator('[data-picker-value="read-only"]').click();
+	await expect(permissionPicker).toHaveCount(0, { timeout: 5_000 });
+	// 草稿期选择持久化到会话记录
+	const draftRecord = await window.evaluate(async () => {
+		const pi = (window as unknown as { piDesktop: { sessions: { listCatalog: (projectId: string, opts?: unknown) => Promise<Array<{ id: string; title: string; permissionPreset?: string; backend?: string }>> } } }).piDesktop;
+		try {
+			const records = await pi.sessions.listCatalog("builtin-chat", { scan: false });
+			const dsh = records.find((r) => r.backend === "dsh");
+			return dsh ? { id: dsh.id, permissionPreset: dsh.permissionPreset } : null;
+		} catch {
+			return null;
+		}
+	});
+	expect(draftRecord?.permissionPreset).toBe("read-only");
+	await expect(securityBtn).toContainText("Read Only", { timeout: 10_000 });
+
+	// 发送激活：applyPreferences 把草稿期预选的 read-only 套到 host 会话
 	await composer.click();
 	await window.keyboard.type("启动会话");
 	await window.keyboard.press("Enter");
@@ -65,25 +98,22 @@ test("DSH 权限预设切换、plan 模式与配置页分区", async ({ window }
 	const activated = await waitForState((state) => state.modelId !== undefined, 40);
 	expect(activated?.modelId).toBeTruthy();
 
-	// ── 3. 权限预设：底栏盾牌按钮 → 切换 read-only ───────────────────────────
-	const securityBtn = window.locator(".composer-bar-btn.security.dsh");
-	await expect(securityBtn).toBeVisible();
-	// 激活会话初始预设 = permission.defaultPreset（workspace-write）
-	await expect(securityBtn).toContainText("Workspace Write", { timeout: 10_000 });
+	// ── 3. 权限预设：激活后底栏盾牌按钮 → host 命令切换 workspace-write ──────
+	// 激活时 applyPreferences 已把草稿期预选的 read-only 套到 host
+	await expect(securityBtn).toContainText("Read Only", { timeout: 10_000 });
 
 	await securityBtn.click();
-	const permissionPicker = window.locator(".dsh-permission-picker");
 	await expect(permissionPicker).toBeVisible();
 	await expect(permissionPicker.locator('[data-picker-value="read-only"]')).toBeVisible();
 	await expect(permissionPicker.locator('[data-picker-value="workspace-write"]')).toBeVisible();
 	await expect(permissionPicker.locator('[data-picker-value="danger-full-access"]')).toBeVisible();
-	await permissionPicker.locator('[data-picker-value="read-only"]').click();
+	await permissionPicker.locator('[data-picker-value="workspace-write"]').click();
 	await expect(permissionPicker).toHaveCount(0, { timeout: 5_000 });
 
 	// host /permission 命令执行：permission/preset 事件折叠进 runtime state
-	const readOnly = await waitForState((state) => state.permissionPreset === "read-only", 20);
-	expect(readOnly?.permissionPreset).toBe("read-only");
-	await expect(securityBtn).toContainText("Read Only", { timeout: 10_000 });
+	const readWrite = await waitForState((state) => state.permissionPreset === "workspace-write", 20);
+	expect(readWrite?.permissionPreset).toBe("workspace-write");
+	await expect(securityBtn).toContainText("Workspace Write", { timeout: 10_000 });
 
 	// ── 4. plan 模式：模式选择器「计划」→ 下一条消息生效 ─────────────────────
 	await window.locator(".composer-bar-btn.mode").first().click();

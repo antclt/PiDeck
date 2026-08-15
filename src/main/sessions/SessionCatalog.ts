@@ -48,6 +48,8 @@ export type SessionCatalogEntry = {
 	piSessionId?: string;
 	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 时由 DshAgentManager 创建/attach 维护。 */
 	dshSessionId?: string;
+	/** DSH 权限预设（read-only/workspace-write/danger-full-access）：草稿期预选，激活时应用。 */
+	permissionPreset?: string;
 	createdAt: number;
 	updatedAt: number;
 };
@@ -192,6 +194,26 @@ export class SessionCatalog {
 				await this.writeSnapshot(this.entries);
 			} catch {
 				// 修复是 best-effort；内存已生效，下一次启动仍会重试。
+			}
+		}
+
+		// 兼容旧数据：DSH 会话曾只按文件分支 attach（filePath/piSessionId 落盘，
+		// dshSessionId 缺失）——标题同步（findByDshSessionId）与重启后 attach 恢复
+		// 旧会话都依赖 dshSessionId。加载时把 backend=dsh 且缺 dshSessionId 的
+		// 记录用 piSessionId（当时存的就是 host 会话 id）补齐。
+		const migratedDsh = this.entries.some((entry) => (
+			entry.backend === "dsh" && !entry.dshSessionId && entry.piSessionId
+		));
+		if (migratedDsh) {
+			for (const entry of this.entries) {
+				if (entry.backend === "dsh" && !entry.dshSessionId && entry.piSessionId) {
+					entry.dshSessionId = entry.piSessionId;
+				}
+			}
+			try {
+				await this.writeSnapshot(this.entries);
+			} catch {
+				// 迁移是 best-effort；内存已生效，下一次启动仍会重试。
 			}
 		}
 		this.loaded = true;
@@ -356,6 +378,7 @@ export class SessionCatalog {
 		backend?: AgentBackend;
 		model?: { provider: string; modelId: string };
 		thinkingLevel?: string;
+		permissionPreset?: string;
 	}): Promise<SessionRecord> {
 		this.assertLoaded();
 		const entry = await this.enqueueMutation((entries) => {
@@ -376,6 +399,7 @@ export class SessionCatalog {
 				status: "draft",
 				model: input.model,
 				thinkingLevel: input.thinkingLevel,
+				permissionPreset: input.permissionPreset,
 				createdAt: now,
 				updatedAt: now,
 			};
@@ -393,6 +417,7 @@ export class SessionCatalog {
 		>> & {
 			model?: { provider: string; modelId: string } | null;
 			thinkingLevel?: string | null;
+			permissionPreset?: string | null;
 		},
 	): Promise<SessionRecord> {
 		this.assertLoaded();
@@ -401,6 +426,7 @@ export class SessionCatalog {
 			if (patch.title !== undefined) transient.title = patch.title;
 			if (patch.model !== undefined) transient.model = patch.model ?? undefined;
 			if (patch.thinkingLevel !== undefined) transient.thinkingLevel = patch.thinkingLevel ?? undefined;
+			if (patch.permissionPreset !== undefined) transient.permissionPreset = patch.permissionPreset ?? undefined;
 			if (patch.backend !== undefined) transient.backend = patch.backend;
 			transient.updatedAt = patch.updatedAt ?? Date.now();
 			return this.recordFromEntry(transient);
@@ -410,6 +436,7 @@ export class SessionCatalog {
 			if (patch.title !== undefined) nextEntry.title = patch.title;
 			if (patch.model !== undefined) nextEntry.model = patch.model ?? undefined;
 			if (patch.thinkingLevel !== undefined) nextEntry.thinkingLevel = patch.thinkingLevel ?? undefined;
+			if (patch.permissionPreset !== undefined) nextEntry.permissionPreset = patch.permissionPreset ?? undefined;
 			if (patch.backend !== undefined) nextEntry.backend = patch.backend;
 			nextEntry.updatedAt = patch.updatedAt ?? Date.now();
 			return { value: cloneEntry(nextEntry), changed: true };
@@ -647,6 +674,7 @@ export class SessionCatalog {
 			status: entry.status,
 			model: entry.model ? { ...entry.model } : undefined,
 			thinkingLevel: entry.thinkingLevel,
+			permissionPreset: entry.permissionPreset,
 			dshSessionId: entry.dshSessionId,
 			createdAt: entry.createdAt,
 			updatedAt: summary?.updatedAt ?? entry.updatedAt,

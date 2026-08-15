@@ -177,6 +177,11 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		return this.owner(agentId).setThinking(agentId, level);
 	}
 
+	async setPermission(agentId: string, preset: string): Promise<unknown> {
+		return this.callOptional(agentId, "setPermission", (gateway) =>
+			gateway.setPermission?.(agentId, preset));
+	}
+
 	async publishRuntimeState(agentId: string): Promise<void> {
 		return this.owner(agentId).publishRuntimeState(agentId);
 	}

@@ -117,6 +117,9 @@ export type SessionRecord = {
 	status: "draft" | "active";
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
+	/** DSH 会话权限预设（read-only / workspace-write / danger-full-access）；
+	 *  草稿期预选，激活时经 /permission 命令应用到 host 会话。 */
+	permissionPreset?: string;
 	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
 	dshSessionId?: string;
 	createdAt: number;
@@ -163,6 +166,8 @@ export type UpdateSessionRecordInput = {
 	/** null = 清空（切后端时丢掉另一套目录里的模型）。 */
 	model?: { provider: string; modelId: string } | null;
 	thinkingLevel?: string | null;
+	/** DSH 会话权限预设（草稿期预选；激活会话经 /permission 命令应用后回写同步）。 */
+	permissionPreset?: string | null;
 	/** 后端（pi/dsh）：仅草稿期可变更；会话激活（active/有 runtime）后锁定——pi 会话文件
 	 *  与 DSH session log 格式不同，中途切换会导致消息同步渲染不可靠。 */
 	backend?: import("./agent").AgentBackend;

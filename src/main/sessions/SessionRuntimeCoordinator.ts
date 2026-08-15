@@ -78,6 +78,8 @@ export interface SessionAgentGateway {
 	): Promise<{ text: string; images?: ImageContent[] }>;
 	setModel(agentId: string, provider: string, modelId: string): Promise<unknown>;
 	setThinking(agentId: string, level: string): Promise<unknown>;
+	/** 可选能力：DSH 会话权限预设（/permission 命令）；pi 后端不持有。 */
+	setPermission?(agentId: string, preset: string): Promise<unknown>;
 	/** 主动推送一次完整 runtime state（get_state）给渲染层：懒启动/重启链路在偏好应用后调用。 */
 	publishRuntimeState(agentId: string): Promise<void>;
 	getForkMessages(agentId: string): Promise<Array<{ entryId: string; text: string }>>;
@@ -836,10 +838,14 @@ export class SessionRuntimeCoordinator {
 			const runtimeGeneration = this.bind(sessionId, tab.id);
 			tab.runtimeGeneration = runtimeGeneration;
 			if (tab.sessionPath && !entry.noSession) {
+				// DSH tab 带 host 会话文件路径（侧栏按文件配对）：文件分支也要同时
+				// 写 dshSessionId——标题同步（findByDshSessionId）与重启后 attach 恢复
+				// 旧会话都依赖它；只写 filePath/piSessionId 会让 DSH 会话无法恢复。
 				await this.catalog.attachRuntime({
 					sessionId,
 					filePath: tab.sessionPath,
 					piSessionId: tab.sessionId,
+					dshSessionId: entry.backend === "dsh" ? tab.sessionId : undefined,
 				});
 			} else if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
 				// DSH restart 会新建 host 会话（旧会话停止）：回写新 sessionId，
@@ -938,10 +944,12 @@ export class SessionRuntimeCoordinator {
 				// Prompt acceptance is the latency-sensitive boundary. Catalog persistence is
 				// recovery metadata and must not keep the composer in a sending state; failures
 				// are intentionally isolated from the already accepted prompt.
+				// DSH：文件配对分支同时回写 dshSessionId（标题同步/重开恢复依赖）。
 				void this.catalog.attachRuntime({
 					sessionId: input.sessionId,
 					filePath: currentTab.sessionPath,
 					piSessionId: currentTab.sessionId,
+					dshSessionId: currentTab.backend === "dsh" ? currentTab.sessionId : undefined,
 				}).catch(() => undefined);
 			}
 			if (!this.isCurrentDispatchLease(lease)) {
@@ -1025,10 +1033,12 @@ export class SessionRuntimeCoordinator {
 		const runtimeGeneration = this.bind(sessionId, tab.id);
 		tab.runtimeGeneration = runtimeGeneration;
 		if (tab.sessionPath && !entry.noSession) {
+			// 同 restartSession：DSH 的文件分支一并写 dshSessionId（标题同步/恢复依赖）
 			await this.catalog.attachRuntime({
 				sessionId,
 				filePath: tab.sessionPath,
 				piSessionId: tab.sessionId,
+				dshSessionId: entry.backend === "dsh" ? tab.sessionId : undefined,
 			});
 		} else if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
 			// DSH 会话没有 pi 会话文件，DSH sessionId 由 host 持久化（$DSH_HOME）：
@@ -1077,6 +1087,10 @@ export class SessionRuntimeCoordinator {
 		}
 		if (entry.thinkingLevel) {
 			await this.agents.setThinking(agentId, entry.thinkingLevel);
+		}
+		// DSH 权限预设（草稿期预选 / 会话内切换回写）：激活时经 /permission 命令应用
+		if (entry.permissionPreset && this.agents.setPermission) {
+			await this.agents.setPermission(agentId, entry.permissionPreset);
 		}
 	}
 
