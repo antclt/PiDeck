@@ -271,6 +271,19 @@ export class DshHost {
 	}
 
 	/**
+	 * host 中全部已持久化会话 id（G3/D11：孤儿检测用——与 catalog 的 dshSessionId 对照，
+	 * 找出「PiDeck 无映射但 host 数据仍在」的会话）。
+	 */
+	async listSessionIds(): Promise<string[]> {
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) return [];
+		const listed = await client.sessions.list({});
+		if (!listed.result.ok) return [];
+		return (listed.result.value.items ?? []).map((item) => String(item.sessionId));
+	}
+
+	/**
 	 * 可配置提供方目录（llm.providers）：内置 catalog（declared，未配置）+
 	 * 已注册路由（active）。模型页「添加提供方」从 declared 未激活行中选择，
 	 * 与 dsh-web 的休眠目录选择同源。首次调用会懒 boot。

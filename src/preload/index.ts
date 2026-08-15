@@ -567,6 +567,9 @@ const api = {
 				messages: import("../shared/types").ChatMessage[];
 				hasMore: boolean;
 			}>,
+		/** DSH 孤儿会话 id 列表（host 有但 catalog 无映射；G3/D11 清理提示用）。 */
+		listDshOrphans: () =>
+			ipcRenderer.invoke(ipcChannels.dshListOrphans) as Promise<string[]>,
 		sendPrompt: (input: SendSessionPromptInput) =>
 			ipcRenderer.invoke(ipcChannels.sessionsSendPrompt, input) as Promise<SendSessionPromptResult>,
 		sendUiResponse: (input: SessionUiResponseInput) =>

@@ -2387,6 +2387,17 @@ function registerIpc() {
 			listDshSubagents: (agentId) => dshAgentManager.listSubagents(agentId),
 			readDshSubagentHistory: (agentId, childSessionId, beforeSeq, maxMessages) =>
 				dshAgentManager.readSubagentHistory(agentId, childSessionId, beforeSeq, maxMessages),
+			listDshOrphans: async () => {
+				// G3/D11：host 持久化会话中，catalog 无 dshSessionId 映射的视为孤儿
+				// （被删除映射的记录、匿名会话残留等）。wire 无删除 API，仅用于提示。
+				const hostIds = await dshHost.listSessionIds();
+				const known = new Set(
+					sessionCatalog.listEntries()
+						.map((entry) => entry.dshSessionId)
+						.filter((id): id is string => Boolean(id)),
+				);
+				return hostIds.filter((id) => !known.has(id));
+			},
 			isDshAgent: (agentId) =>
 				dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 			forkDshAgentSession: async (target, entryId) => {

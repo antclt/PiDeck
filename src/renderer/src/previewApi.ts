@@ -312,6 +312,7 @@ export function createPreviewApi(): PiDesktopApi {
 			runDshGoalAction: async () => undefined,
 			listDshSubagents: async () => [],
 			readDshSubagentHistory: async () => ({ messages: [], hasMore: false }),
+			listDshOrphans: async () => [],
 			listCatalog: async (projectId, _options?: { scan?: boolean }): Promise<SessionRecord[]> => getSessions().map((session) => ({
 				id: `preview-record:${session.id}`,
 				projectId,

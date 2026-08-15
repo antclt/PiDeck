@@ -831,6 +831,7 @@ export const zhCN = {
   "config.backend.pi": "Pi 配置管理",
   "config.dsh.title": "DSH 配置管理",
   "config.dsh.started": "运行中",
+  "config.dsh.orphans": "发现 {count} 个孤儿 DSH 会话（host 数据无 PiDeck 映射，可到 DSH_HOME/sessions 下手动清理）",
   "config.dsh.notStarted": "DSH host 尚未启动（首个 DSH 会话创建时懒启动）。",
   "config.dsh.directories": "配置目录",
   "config.dsh.homeDir": "DSH_HOME",

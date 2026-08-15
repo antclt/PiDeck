@@ -837,6 +837,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.backend.pi": "Pi Configuration",
   "config.dsh.title": "DSH Configuration",
   "config.dsh.started": "Running",
+  "config.dsh.orphans": "{count} orphan DSH sessions (host data without a PiDeck mapping; clean up manually under DSH_HOME/sessions)",
   "config.dsh.notStarted": "DSH host has not started (lazy boot on first DSH session).",
   "config.dsh.directories": "Directories",
   "config.dsh.homeDir": "DSH_HOME",

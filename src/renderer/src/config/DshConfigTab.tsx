@@ -423,6 +423,18 @@ function Overview(props: {
 	const { status } = props;
 	const [picking, setPicking] = useState(false);
 	const [switching, setSwitching] = useState(false);
+	/** 孤儿 DSH 会话数（G3/D11：host 有但 catalog 无映射；加载概览时查询一次）。 */
+	const [orphanCount, setOrphanCount] = useState(0);
+
+	useEffect(() => {
+		let cancelled = false;
+		void desktopApi.sessions.listDshOrphans().then((ids) => {
+			if (!cancelled) setOrphanCount(ids.length);
+		}).catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	/**
 	 * 切换 DSH_HOME 目录：选目录 → 写设置 → 立即重启 host 生效。
@@ -493,6 +505,14 @@ function Overview(props: {
 					) : (
 						<span className="rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
 							{t("config.dsh.notStarted")}
+						</span>
+					)}
+					{orphanCount > 0 && (
+						<span
+							className="rounded-full border border-amber-300/70 bg-amber-500/10 px-2 py-0.5 text-micro font-medium text-amber-700 dark:border-amber-700/70 dark:text-amber-300"
+							title={t("config.dsh.orphans", { count: orphanCount })}
+						>
+							{t("config.dsh.orphans", { count: orphanCount })}
 						</span>
 					)}
 				</div>

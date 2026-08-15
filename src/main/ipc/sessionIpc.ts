@@ -168,6 +168,8 @@ export type DshBackendIpcDeps = {
 		beforeSeq?: number,
 		maxMessages?: number,
 	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; hasMore: boolean }>;
+	/** DSH 孤儿会话 id 列表（G3/D11：host 有但 catalog 无映射）；未装配时返回空列表。 */
+	listDshOrphans?: () => Promise<string[]>;
 	/** 判断 agentId 是否属于 DSH 后端（fork 等 pi 专属命令按 backend 分流）。 */
 	isDshAgent: (agentId: string) => boolean;
 	/** DSH fork：session.fork 裁剪 + runtime 换绑 + catalog dshSessionId 回写。 */
@@ -275,6 +277,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		runDshGoalAction,
 		listDshSubagents,
 		readDshSubagentHistory,
+		listDshOrphans,
 		isDshAgent = () => false,
 		forkDshAgentSession,
 		cloneDshAgentSession,
@@ -747,6 +750,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				typeof beforeSeq === "number" ? beforeSeq : undefined,
 				typeof maxMessages === "number" ? maxMessages : undefined,
 			);
+		},
+	);
+	// DSH 孤儿会话列表（G3/D11：host 有但 catalog 无映射，用于清理提示）
+	ipcMain.handle(
+		ipcChannels.dshListOrphans,
+		async (): Promise<string[]> => {
+			if (!listDshOrphans) return [];
+			return listDshOrphans();
 		},
 	);
 	ipcMain.handle(
