@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.1-yellow)
+![Version](https://img.shields.io/badge/version-7.2--beta-yellow)
 
 <!-- star-history:start -->
 <picture>
