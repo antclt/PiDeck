@@ -7,6 +7,7 @@ import {
 	ChevronRight,
 	Eye,
 	FileText,
+	FoldVertical,
 	GitBranch,
 	ImageIcon,
 	ListChecks,
@@ -34,6 +35,13 @@ import {
 import { cn } from "../../lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { SessionContextMeter } from "./SessionContextMeter";
+import { DshLogo, PiLogo } from "./SessionSourceBadge";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+} from "../ui-shadcn/select";
 import { computeModelDisplay, formatModelRef, type ModelPending } from "../../utils/modelPendingDisplay";
 import { computeThinkingDisplay, type ThinkingLevelPending } from "../../utils/thinkingDisplay";
 import {
@@ -43,6 +51,7 @@ import {
 import { CommandPickerGroup, CommandPickerPanel } from "../ui-shadcn/command-picker";
 import { THINKING_LEVELS, groupModelsByProvider } from "./sessionPickerOptions";
 import type {
+	AgentBackend,
 	AgentRuntimeState,
 	AvailableModel,
 	ComposerAgentMode,
@@ -150,6 +159,48 @@ export function ExtensionWidgetCard(props: {
 	);
 }
 
+/** 输入框底栏的后端选择下拉（pi / dsh）：默认 dsh，官方 logo 区分。
+ * 触发区只显示当前后端 logo（不再带文字）；下拉选项保留文字便于选择时区分。 */
+export function ComposerBackendPicker(props: {
+	backend: AgentBackend;
+	disabled?: boolean;
+	onChangeBackend: (backend: AgentBackend) => void;
+}) {
+	return (
+		<Select
+			value={props.backend}
+			disabled={props.disabled}
+			onValueChange={(value) => props.onChangeBackend(value as AgentBackend)}
+		>
+			<SelectTrigger
+				size="sm"
+				className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 [&_[data-slot='select-icon']]:hidden"
+				title={t("session.backendPickerHint")}
+			>
+				{/* 不渲染 SelectValue：按当前后端手动渲染 logo，输入框只显示图标不带文字。
+				    隐藏 shadcn SelectTrigger 自带的 chevron（[data-slot='select-icon']），
+				    否则 logo 与 chevron 并排（justify-between）→ 图标偏左不居中、
+				    16px chevron 与 14px logo 混排导致上下不齐。 */}
+				{props.backend === "dsh" ? (
+					<DshLogo className="size-[15px] shrink-0" />
+				) : (
+					<PiLogo className="size-[15px] shrink-0" />
+				)}
+			</SelectTrigger>
+			<SelectContent align="start">
+				<SelectItem value="dsh">
+					<DshLogo className="size-3.5 shrink-0" />
+					{t("sessionBackend.dsh")}
+				</SelectItem>
+				<SelectItem value="pi">
+					<PiLogo className="size-3.5 shrink-0" />
+					{t("sessionSource.pi")}
+				</SelectItem>
+			</SelectContent>
+		</Select>
+	);
+}
+
 export function ComposerBottomBar(props: {
 	state?: AgentRuntimeState;
 	disabled?: boolean;
@@ -166,6 +217,14 @@ export function ComposerBottomBar(props: {
 	gitInfo?: GitBranchInfo;
 	/** Draft sessions do not have a runtime yet, so retain their persisted settings in the bar. */
 	record?: Pick<SessionRecord, "model" | "thinkingLevel">;
+	/** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期展示默认值用，
+	 *  不写入记录（激活后 runtime state 覆盖）。 */
+	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
+	defaultThinkingLevel?: string;
+	/** 当前会话后端（pi 缺省）。 */
+	backend?: AgentBackend;
+	/** 切换后端：UI 层面先停 runtime 再写 catalog。 */
+	onChangeBackend?: (backend: AgentBackend) => void;
 	feishuIndicator?: ReactNode;
 	/** 安全等级选择器（自包含组件，注入到左下角工具组） */
 	securityControl?: ReactNode;
@@ -188,9 +247,15 @@ export function ComposerBottomBar(props: {
 		model: readWelcomeModelPreference()?.model,
 		thinking: readWelcomeThinkingPreference()?.thinkingLevel,
 	};
+	// DSH 后端没有 pi 的 contextPercent（走 /compact 命令），compact 入口常显；
+	// pi 沿用 >30% 才显示的阈值逻辑，70%/90% 用色阶提示紧迫度。
+	const isDsh = props.backend === "dsh";
+	const showCompact = isDsh || (ctxPercent != null && ctxPercent > 30);
+	const contextPercent = isDsh ? 0 : (ctxPercent ?? 0);
+	// DSH 草稿：记录未填默认时用部署默认（settings.yaml agent-default-model）兜底展示。
 	const currentThinkingLevel = props.state?.thinkingLevel
 		?? props.record?.thinkingLevel
-		?? welcomePreference?.thinking;
+		?? (isDsh ? props.defaultThinkingLevel : welcomePreference?.thinking);
 	// 有待生效切换时展示 from→to（新档位尚未被任何生成使用），否则展示当前档位
 	const thinkingDisplay = computeThinkingDisplay(currentThinkingLevel, props.thinkingPending);
 	const thinkingLevelLabel = (level: string) => {
@@ -214,9 +279,9 @@ export function ComposerBottomBar(props: {
 			? t("app.composerModeImagegen")
 			: t("app.composerModeNormal");
 	const liveModel = {
-		provider: props.state?.provider ?? props.record?.model?.provider ?? welcomePreference?.model?.provider ?? "",
-		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? welcomePreference?.model?.modelId ?? "",
-		modelName: props.state?.modelName ?? props.record?.model?.modelId,
+		provider: props.state?.provider ?? props.record?.model?.provider ?? (isDsh ? props.defaultModel?.provider : welcomePreference?.model?.provider) ?? "",
+		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelId : welcomePreference?.model?.modelId) ?? "",
+		modelName: props.state?.modelName ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelName : undefined),
 	};
 	const modelDisplay = computeModelDisplay(
 		liveModel.modelId ? liveModel : undefined,
@@ -241,10 +306,32 @@ export function ComposerBottomBar(props: {
 		<div className="composer-bottom-bar min-h-10 shrink-0 border-t border-transparent px-2.5 py-2">
 			<div className="composer-bottom-layout flex min-w-0 items-center gap-2">
 				<div className="composer-bottom-left flex min-w-0 flex-wrap items-center gap-0.5">
+					{props.onChangeBackend ? (
+						<ComposerBackendPicker
+							backend={props.backend ?? "pi"}
+							disabled={props.disabled}
+							onChangeBackend={props.onChangeBackend}
+						/>
+					) : props.backend ? (
+						/* 后端已锁定（会话激活后不可切换：pi 文件与 DSH session log 格式不同，
+						   中途切换会导致消息同步渲染不可靠）：只读标识，只显示官方 logo 不重复文字。
+						   inline-flex 居中：span 默认 inline，svg 按 baseline 排会偏上，
+						   与底栏其它按钮（flex 居中 15px 图标）水平不平齐。 */
+						<span
+							className="composer-bar-btn backend inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-control font-semibold text-foreground"
+							title={t("session.backendLockedHint")}
+						>
+							{props.backend === "dsh" ? (
+								<DshLogo className="size-[15px] shrink-0" />
+							) : (
+								<PiLogo className="size-[15px] shrink-0" />
+							)}
+						</span>
+					) : null}
 					<Button
 						variant="ghost"
 						size="sm"
-						className={`composer-bar-btn h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60${isPlanMode ? " active" : ""}`}
+						className={`composer-bar-btn mode h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60${isPlanMode ? " active" : ""}`}
 						disabled={props.disabled}
 						onClick={props.onOpenComposerModePicker}
 						aria-haspopup="dialog"
@@ -314,6 +401,27 @@ export function ComposerBottomBar(props: {
 						onPickModel={props.onPickModel}
 						onPickThinking={props.onPickThinking}
 					/>
+					{isDsh && showCompact && (() => {
+						// DSH 后端没有 pi 的 contextPercent（走 /compact 命令），且上下文圆环
+						// 无 capacity 数据时自身不渲染——compact 入口必须常显（pi 走圆环面板内压缩）。
+						const isCompactingNow = Boolean(props.state?.isCompacting);
+						return (
+							<Button
+								variant="ghost"
+								size="sm"
+								className={`composer-bar-btn compact h-7 gap-1 rounded-md px-1.5 text-control${isCompactingNow ? " compacting" : ""}`}
+								disabled={isCompactingNow || Boolean(props.state?.isStreaming)}
+								title={t("app.compactDshTitle")}
+								aria-label={t("app.compact")}
+								onClick={props.onCompact}
+							>
+								<FoldVertical size={13} strokeWidth={1.8} aria-hidden="true" />
+								{isCompactingNow
+									? t("app.compacting")
+									: t("app.compactUsage", { percent: 0 })}
+							</Button>
+						);
+					})()}
 				</div>
 				<div className="composer-bottom-right ml-auto flex shrink-0 items-center gap-2">
 					{/* 上下文占用圆环（dsh ContextMeter 移植）：发送按钮旁常驻指示，
@@ -659,7 +767,16 @@ export function ThinkingPicker(props: {
 	current?: string;
 	onClose: () => void;
 	onPick: (level: string) => void;
+	/** 受支持的档位列表（DSH 按当前模型 reasoningEfforts 过滤）；缺省用全部档位。 */
+	levels?: Array<{
+		value: string;
+		labelKey?: TranslationKey;
+		descriptionKey?: TranslationKey;
+		label?: string;
+		description?: string;
+	}>;
 }) {
+	const levels = props.levels ?? THINKING_LEVELS;
 	return (
 		<CommandPickerDialog
 			title={t("app.thinkingPickerTitle")}
@@ -668,7 +785,7 @@ export function ThinkingPicker(props: {
 			className="thinking-picker"
 			value={props.current}
 		>
-			{THINKING_LEVELS.map((level) => {
+			{levels.map((level) => {
 				const selected = level.value === props.current;
 				return (
 					<CommandItem
@@ -681,7 +798,12 @@ export function ThinkingPicker(props: {
 						<span className={`grid size-6 shrink-0 place-items-center rounded-md ${selected ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground"}`}>
 							<Brain size={14} aria-hidden="true" />
 						</span>
-						<span className="min-w-0 flex-1 truncate text-control font-semibold text-foreground" title={t(level.descriptionKey)}>{t(level.labelKey)}</span>
+						<span
+							className="min-w-0 flex-1 truncate text-control font-semibold text-foreground"
+							title={level.descriptionKey ? t(level.descriptionKey) : level.description}
+						>
+							{level.labelKey ? t(level.labelKey) : (level.label ?? level.value)}
+						</span>
 						{selected ? <Check size={15} className="ml-auto shrink-0 text-primary" aria-hidden="true" /> : null}
 					</CommandItem>
 				);

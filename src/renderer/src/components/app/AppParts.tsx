@@ -1,4 +1,5 @@
 import { Input } from "../ui-shadcn/input";
+import { useEffect, useState } from "react";
 // ============================================================
 // AppParts — 产品级顶层桥接文件
 // ============================================================
@@ -422,6 +423,8 @@ export function ConfirmDialog(props: {
 	return <ShadcnConfirmDialog {...props} />;
 }
 
+import { JumpingSpiderLogo } from "./JumpingSpiderLogo";
+
 // ============================================================
 // Re-exports from Surface domain (session rendering components)
 // 保持旧 import 路径继续工作
@@ -455,13 +458,39 @@ export { TurnRow } from "../session/turn";
 // PiLogoCanvas — canvas-based animated pi logo (from upstream dev)
 export { PiLogoCanvas } from "./PiLogoCanvas";
 
-/** Brand lockup: pi 图标 + 全大写粗字标，沿用参考 Logo 的简洁无衬线视觉。 */
+/** 模块级缓存：dev 分支名（多 worktree 并行区分窗口）。一次拉取，全实例共享。 */
+let cachedDevBranch: string | undefined;
+let devBranchPromise: Promise<string | undefined> | null = null;
+function loadDevBranch(): Promise<string | undefined> {
+	if (cachedDevBranch !== undefined) return Promise.resolve(cachedDevBranch);
+	devBranchPromise ??= (async () => {
+		try {
+			const info = await (window as unknown as { piDesktop?: { app?: { info: () => Promise<{ devBranch?: string }> } } })
+				.piDesktop?.app?.info();
+			cachedDevBranch = info?.devBranch?.trim() || undefined;
+			return cachedDevBranch;
+		} catch {
+			return undefined;
+		}
+	})();
+	return devBranchPromise;
+}
+
+/**
+ * Brand lockup：品牌字标统一为 "phids" + 跳蛛临时 logo（正式品牌图到位前占位）。
+ * 分支名不再上视觉（并行 worktree 窗口区分改由 title/aria-label 承载，避免视觉噪声）。
+ */
 export function BrandLockup(props: { replayToken?: number } = {}) {
+	const [branch, setBranch] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		void loadDevBranch().then(setBranch);
+	}, []);
+	const brandTitle = branch ? `phids · ${branch}` : "phids";
 	return (
-		<div className="brand-lockup flex h-full min-w-0 items-center gap-2" aria-label="PiDeck">
-			<PiLogoCanvas size={28} autoPlay playOnClick replayToken={props.replayToken} />
+		<div className="brand-lockup flex h-full min-w-0 items-center gap-2" aria-label={brandTitle} title={branch ? brandTitle : undefined}>
+			<JumpingSpiderLogo className="size-5 shrink-0" />
 			{/* 视觉变形只作用于字标本身，品牌语义仍由外层 aria-label 保留。 */}
-			<span className="brand-wordmark translate-x-0.5 truncate text-[18px] font-[PiDeckDepartureMono] font-normal uppercase leading-none text-zinc-950 dark:text-white" aria-hidden="true">PiDeck</span>
+			<span className="brand-wordmark translate-x-0.5 truncate text-[18px] font-[PiDeckDepartureMono] font-normal leading-none text-zinc-950 dark:text-white" aria-hidden="true">phids</span>
 		</div>
 	);
 }

@@ -46,6 +46,8 @@ export type SidebarActions = {
     beginDrag?: (sessionId: string) => void;
     endDrag?: () => void;
     createDraft: (projectId: string) => Promise<void>;
+    /** 新建 DSH 后端会话（深融合：进程内 boot，见 docs/dsh-agent-backend-plan.md）。 */
+    createDraftDsh: (projectId: string) => Promise<void>;
     createAnonymous: (projectId: string) => Promise<void>;
     deleteDraft: (session: SessionRecord) => Promise<void>;
     rename: (projectId: string, session: SessionSummary) => void;
@@ -286,6 +288,7 @@ export function SidebarContent(props: SidebarContentProps) {
           onCopySession={() => { void actions.sessions.copy(menu.projectId, menuSession); controller.closeMenu(); }}
           onCopySessionFilePath={() => { void actions.sessions.copyPath(menuSession); controller.closeMenu(); }}
           onOpenSessionFile={() => { void actions.sessions.openFile(menuSession); controller.closeMenu(); }}
+          hasFilePath={Boolean(menuSession.filePath)}
           canRpcLog={Boolean(menuSessionRuntimeAgent)}
           rpcToggleDisabled={!menuSessionRuntimeAgent}
           isRpcLogging={menuSessionRuntimeAgent ? controller.isAgentRpcLogging(menuSessionRuntimeAgent.id) : false}

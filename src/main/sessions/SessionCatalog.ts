@@ -8,6 +8,7 @@ import {
 } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
+	AgentBackend,
 	AgentTab,
 	SessionEnvironment,
 	SessionRecord,
@@ -33,6 +34,8 @@ export type SessionCatalogEntry = {
 	noSession?: boolean;
 	source: SessionSource;
 	environment: SessionEnvironment;
+	/** 运行时后端；缺省 "pi"（旧 catalog 数据兼容）。 */
+	backend?: AgentBackend;
 	filePath?: string;
 	wslDistro?: string;
 	wslUser?: string;
@@ -43,6 +46,10 @@ export type SessionCatalogEntry = {
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
 	piSessionId?: string;
+	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 时由 DshAgentManager 创建/attach 维护。 */
+	dshSessionId?: string;
+	/** DSH 权限预设（read-only/workspace-write/danger-full-access）：草稿期预选，激活时应用。 */
+	permissionPreset?: string;
 	createdAt: number;
 	updatedAt: number;
 };
@@ -189,6 +196,26 @@ export class SessionCatalog {
 				// 修复是 best-effort；内存已生效，下一次启动仍会重试。
 			}
 		}
+
+		// 兼容旧数据：DSH 会话曾只按文件分支 attach（filePath/piSessionId 落盘，
+		// dshSessionId 缺失）——标题同步（findByDshSessionId）与重启后 attach 恢复
+		// 旧会话都依赖 dshSessionId。加载时把 backend=dsh 且缺 dshSessionId 的
+		// 记录用 piSessionId（当时存的就是 host 会话 id）补齐。
+		const migratedDsh = this.entries.some((entry) => (
+			entry.backend === "dsh" && !entry.dshSessionId && entry.piSessionId
+		));
+		if (migratedDsh) {
+			for (const entry of this.entries) {
+				if (entry.backend === "dsh" && !entry.dshSessionId && entry.piSessionId) {
+					entry.dshSessionId = entry.piSessionId;
+				}
+			}
+			try {
+				await this.writeSnapshot(this.entries);
+			} catch {
+				// 迁移是 best-effort；内存已生效，下一次启动仍会重试。
+			}
+		}
 		this.loaded = true;
 		if (this.skipNextBackup) {
 			await this.writeSnapshot(this.entries);
@@ -206,6 +233,14 @@ export class SessionCatalog {
 	get(id: string): SessionCatalogEntry | undefined {
 		this.assertLoaded();
 		const entry = this.transientEntries.get(id) ?? this.entries.find((candidate) => candidate.id === id);
+		return entry ? cloneEntry(entry) : undefined;
+	}
+
+	/** 按 DSH host 会话 id 反查 catalog 记录（会话标题同步用；只读查询，不排队写）。
+	 *  transient 草稿尚未 attach host 会话（无 dshSessionId），只需查持久 entries。 */
+	findByDshSessionId(dshSessionId: string): SessionCatalogEntry | undefined {
+		this.assertLoaded();
+		const entry = this.entries.find((candidate) => candidate.dshSessionId === dshSessionId);
 		return entry ? cloneEntry(entry) : undefined;
 	}
 
@@ -340,8 +375,10 @@ export class SessionCatalog {
 		title: string;
 		environment: SessionEnvironment;
 		source?: SessionSource;
+		backend?: AgentBackend;
 		model?: { provider: string; modelId: string };
 		thinkingLevel?: string;
+		permissionPreset?: string;
 	}): Promise<SessionRecord> {
 		this.assertLoaded();
 		const entry = await this.enqueueMutation((entries) => {
@@ -352,6 +389,7 @@ export class SessionCatalog {
 				title: input.title,
 				source: input.source ?? "pi",
 				environment: input.environment,
+				backend: input.backend,
 				wslDistro: input.environment === "wsl"
 					? this.identityContext.wslDistro
 					: undefined,
@@ -361,6 +399,7 @@ export class SessionCatalog {
 				status: "draft",
 				model: input.model,
 				thinkingLevel: input.thinkingLevel,
+				permissionPreset: input.permissionPreset,
 				createdAt: now,
 				updatedAt: now,
 			};
@@ -374,23 +413,31 @@ export class SessionCatalog {
 		id: string,
 		patch: Partial<Pick<
 			SessionCatalogEntry,
-			"title" | "model" | "thinkingLevel" | "updatedAt"
-		>>,
+			"title" | "backend" | "updatedAt"
+		>> & {
+			model?: { provider: string; modelId: string } | null;
+			thinkingLevel?: string | null;
+			permissionPreset?: string | null;
+		},
 	): Promise<SessionRecord> {
 		this.assertLoaded();
 		const transient = this.transientEntries.get(id);
 		if (transient) {
 			if (patch.title !== undefined) transient.title = patch.title;
-			if (patch.model !== undefined) transient.model = patch.model;
-			if (patch.thinkingLevel !== undefined) transient.thinkingLevel = patch.thinkingLevel;
+			if (patch.model !== undefined) transient.model = patch.model ?? undefined;
+			if (patch.thinkingLevel !== undefined) transient.thinkingLevel = patch.thinkingLevel ?? undefined;
+			if (patch.permissionPreset !== undefined) transient.permissionPreset = patch.permissionPreset ?? undefined;
+			if (patch.backend !== undefined) transient.backend = patch.backend;
 			transient.updatedAt = patch.updatedAt ?? Date.now();
 			return this.recordFromEntry(transient);
 		}
 		const entry = await this.enqueueMutation((entries) => {
 			const nextEntry = this.requireEntry(entries, id);
 			if (patch.title !== undefined) nextEntry.title = patch.title;
-			if (patch.model !== undefined) nextEntry.model = patch.model;
-			if (patch.thinkingLevel !== undefined) nextEntry.thinkingLevel = patch.thinkingLevel;
+			if (patch.model !== undefined) nextEntry.model = patch.model ?? undefined;
+			if (patch.thinkingLevel !== undefined) nextEntry.thinkingLevel = patch.thinkingLevel ?? undefined;
+			if (patch.permissionPreset !== undefined) nextEntry.permissionPreset = patch.permissionPreset ?? undefined;
+			if (patch.backend !== undefined) nextEntry.backend = patch.backend;
 			nextEntry.updatedAt = patch.updatedAt ?? Date.now();
 			return { value: cloneEntry(nextEntry), changed: true };
 		});
@@ -401,6 +448,7 @@ export class SessionCatalog {
 		sessionId: string;
 		filePath?: string;
 		piSessionId?: string;
+		dshSessionId?: string;
 	}): Promise<SessionCatalogEntry> {
 		this.assertLoaded();
 		return this.enqueueMutation((entries) => {
@@ -418,6 +466,12 @@ export class SessionCatalog {
 			const previousFilePath = entry.filePath;
 			if (filePath) entry.filePath = filePath;
 			if (input.piSessionId) entry.piSessionId = input.piSessionId;
+			if (input.dshSessionId) entry.dshSessionId = input.dshSessionId;
+			// DSH 会话没有 pi 会话文件：无 filePath 分支，但 attach 到 host 会话后即视为
+			// active（会话持久化在 $DSH_HOME，重启不应被 draft 清理逻辑清掉）。
+			if (input.dshSessionId && !entry.filePath && entry.status === "draft") {
+				entry.status = "active";
+			}
 			if (entry.filePath) {
 				const pathUnchanged = Boolean(
 					previousFilePath &&
@@ -606,6 +660,7 @@ export class SessionCatalog {
 			noSession: entry.noSession,
 			source: summary?.source ?? entry.source,
 			environment: summary ? getSessionEnvironment(summary) : entry.environment,
+			backend: entry.backend,
 			filePath: summary?.filePath ?? entry.filePath,
 			wslDistro: entry.wslDistro,
 			wslUser: entry.wslUser,
@@ -619,6 +674,8 @@ export class SessionCatalog {
 			status: entry.status,
 			model: entry.model ? { ...entry.model } : undefined,
 			thinkingLevel: entry.thinkingLevel,
+			permissionPreset: entry.permissionPreset,
+			dshSessionId: entry.dshSessionId,
 			createdAt: entry.createdAt,
 			updatedAt: summary?.updatedAt ?? entry.updatedAt,
 			wsl: summary?.wsl,

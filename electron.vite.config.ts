@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 import type { Plugin } from "vite";
+import { readDevGitBranch, resolveDevVitePort } from "./src/main/devIsolation";
 
 /**
  * KaTeX 字体精简 Vite 插件
@@ -46,6 +47,31 @@ function katexWoff2OnlyPlugin(): Plugin {
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      lib: {
+        // electron-vite 多入口：lib.entry 对象形式输出到 out/main（index.js + hostEntry.js + runnerConsolePreload.js + pideckPwshPersistent.js）。
+        // hostEntry 是 utilityProcess 的 DSH host 入口，独立 chunk 供 DshHostProcess fork；
+        // runnerConsolePreload 经 host 补丁 NODE_OPTIONS=--require 注入沙箱 runner，
+        // 在 runner 进程内分配隐藏控制台（黑窗口治理，见 hideChildConsoles.ts）；
+        // pideckPwshPersistent 是持久 pwsh 工具插件，经 hostEntry patches insert 注入 DSH host。
+        entry: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          hostEntry: resolve(__dirname, "src/main/dsh/hostEntry.ts"),
+          runnerConsolePreload: resolve(__dirname, "src/main/dsh/runnerConsolePreload.ts"),
+          pideckPwshPersistent: resolve(__dirname, "src/main/dsh/pideckPwshPersistent.ts"),
+        },
+        formats: ["cjs"],
+      },
+      rollupOptions: {
+        // @deepseek-ai/dsh 的子包（dsh-app-boot / dsh-llm / cordis 等）不在
+        // package.json 顶层 dependencies，externalizeDepsPlugin 只外置
+        // `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh/...`，不会匹配
+        // `@deepseek-ai/dsh-app-boot`。打进 out/main 后 import.meta.url
+        // 变成产物路径，createRequire(...)("../package.json") 会报
+        // Cannot find module '../package.json'（发送 DSH 消息即触发）。
+        external: [/^@deepseek-ai\//],
+      },
+    },
     define: {
       // 构建标记：npm run dist:win:dev 打包时注入 true，用于隔离 dev 构建的配置目录与 AppUserModelID。
       __PIDECK_DEV_BUILD__: JSON.stringify(process.env.PIDECK_DEV_BUILD === "1"),
@@ -59,7 +85,9 @@ export default defineConfig({
     server: {
       host: "127.0.0.1",
       // 5173 落在部分 Windows/Hyper-V 动态端口排除范围内时会 EACCES；使用相邻的未保留端口保证 dev server 可监听。
-      port: 5181,
+      // 功能分支按 git 分支散列端口，避免多个 worktree 同时 npm run dev 抢 5181。
+      // 未开 strictPort：散列碰撞时 Vite 自动让位，ELECTRON_RENDERER_URL 仍指向实际地址。
+      port: resolveDevVitePort(readDevGitBranch()),
     },
     // dev 预构建：web 端独享的 ai-sdk 依赖树必须启动即优化。
     // 否则首次访问 web 服务端口时 vite 才在运行中重新优化，页面已引用的

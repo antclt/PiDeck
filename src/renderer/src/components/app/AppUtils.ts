@@ -828,7 +828,8 @@ export function buildSuggestionItems(
 			.sort((a, b) => b.score - a.score)
 			.slice(0, 8)
 			.map((item) => ({
-				key: item.session.filePath,
+				// key 用会话 id：DSH 会话没有文件路径，用 filePath 会与其它会话撞 key
+				key: item.session.id,
 				label: item.session.name ?? item.session.filePath,
 				description: item.session.preview,
 				value: `&${item.session.name ?? item.session.filePath}`,

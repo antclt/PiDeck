@@ -44,6 +44,7 @@ import {
   PopoverTrigger,
 } from "../ui-shadcn/popover";
 import { cn } from "../../lib/utils";
+import { SessionBackendBadge } from "./SessionSourceBadge";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 
@@ -683,6 +684,7 @@ function SessionTab(props: {
           />
         )}
         {pinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />}
+        {record?.backend === "dsh" && <SessionBackendBadge className="size-4 shrink-0" />}
         <span className={cn("min-w-0 flex-1 truncate", preview && "italic")}>{title}</span>
         {/* 拖拽插入指示线：2px 主题色竖线，贴在目标 Tab 左/右缘 */}
         {props.indicator && (

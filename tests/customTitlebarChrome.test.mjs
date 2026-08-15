@@ -138,7 +138,11 @@ test("window control hover uses solid hover surface", () => {
 });
 
 test("brand lockup is larger inside the 40px titlebar", () => {
-  assert.match(brand, /PiLogoCanvas size=\{28\}/);
+  // 品牌区：跳蛛临时 logo + phids 字标（不再放 pi 方块 logo，避免与 DSH 混淆）；
+  // 功能分支时分支名只保留在 title/aria-label，不上视觉
+  assert.doesNotMatch(brand, /PiLogoCanvas size=\{28\}/);
+  assert.match(brand, /brand-wordmark/);
+  assert.match(brand, /phids · \$\{branch\}/);
   assert.match(sidebar, /list-toolbar flex h-10/);
   assert.doesNotMatch(sidebar, /list-toggle-native floating/);
 });

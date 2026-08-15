@@ -129,6 +129,8 @@ export type AppInfo = {
 	platform: NodeJS.Platform;
 	/** 用户 home 目录，供扩展读取本地文件（如 memory-store.json） */
 	homeDir: string;
+	/** 开发态 git 分支名（多 worktree 并行时区分窗口）；正式包/共享分支为空。 */
+	devBranch?: string;
 };
 
 export type FeedbackEnvironment = {

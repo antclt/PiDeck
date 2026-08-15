@@ -2,6 +2,26 @@ import type { SessionEnvironment, SessionSource } from "./session";
 
 export type AgentStatus = "starting" | "idle" | "running" | "error" | "closed";
 
+/**
+ * 运行时后端：pi（stdio JSON-RPC，现有）或 dsh（DeepSeek Harness，无 web 内嵌形态）。
+ * 与 `SessionSource`（历史导入来源）是两个维度：source 描述会话文件从哪来，
+ * backend 描述会话由哪个引擎驱动。缺省视为 "pi"，旧数据天然兼容。
+ */
+export type AgentBackend = "pi" | "dsh";
+
+/**
+ * 后端可选能力（核心接口方法之外的可选扩展）。
+ * 能力缺失的后端必须显式声明不持有，UI 按能力禁用入口，禁止硬造等价物。
+ */
+export type AgentGatewayCapability =
+	| "compact" // 手动压缩
+	| "fork" // 从消息 fork 新会话
+	| "getForkMessages" // fork 前置的消息列表
+	| "editMessage" // 编辑历史消息
+	| "deleteMessage" // 删除历史消息
+	| "getCommands" // 会话内命令列表
+	| "exportHtml"; // 导出 HTML
+
 export type AgentTab = {
 	id: string;
 	projectId: string;
@@ -15,6 +35,8 @@ export type AgentTab = {
 	/** Identity used only for session/runtime matching; agentId remains the process handle. */
 	sessionEnvironment?: SessionEnvironment;
 	sessionSource?: SessionSource;
+	/** 运行时后端；缺省 "pi"（旧数据/旧路径兼容）。 */
+	backend?: AgentBackend;
 	wslDistro?: string;
 	wslUser?: string;
 	importedSourceId?: string;
@@ -31,6 +53,11 @@ export type AgentRuntimeState = {
 	provider?: string;
 	modelId?: string;
 	thinkingLevel?: string;
+	/** DSH 会话当前权限预设（read-only / workspace-write / danger-full-access / custom）；
+	 *  pi 后端无此概念。 */
+	permissionPreset?: string;
+	/** DSH 会话 plan 模式是否生效（/plan 命令，可能延迟到下一条消息的步骤生效）。 */
+	planModeActive?: boolean;
 	isStreaming?: boolean;
 	isCompacting?: boolean;
 	/** 是否正在执行工具调用（read/write/bash 等） */
@@ -77,12 +104,20 @@ export type AvailableModel = {
 	reasoning?: boolean;
 	/** 是否支持图片输入（来自 images 列；undefined = pi 未提供该列） */
 	images?: boolean;
+	/** 该模型支持的思考档位（DSH models catalog 的 reasoning.efforts；
+	 *  选择器按它过滤档位——DSH deepseek 适配器只接受 off/high/max，
+	 *  pi-ai provider 按模型声明，选不支持的档位会在下次请求抛 UNSUPPORTED_REASONING_EFFORT）。 */
+	reasoningEfforts?: Array<{ id: string; name?: string; description?: string }>;
 };
 
 export type CreateAgentInput = {
 	projectId: string;
 	title?: string;
 	sessionPath?: string;
+	/** 运行时后端；缺省走当前装配的默认后端（pi），旧调用方无需改动。 */
+	backend?: AgentBackend;
+	/** DSH 会话身份（DSH host 的 sessionId）：backend=dsh 且已持久化时，attach 旧会话而非新建。 */
+	dshSessionId?: string;
 	/**
 	 * PiDeck 会话身份（SessionRecord.id，可能为 UUID 或会话文件路径）。
 	 * 会话级安全覆盖（SecurityStore.sessionOverrides）与 PIDECK_SESSION_ID 注入都使用这个 key；

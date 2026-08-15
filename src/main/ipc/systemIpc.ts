@@ -127,6 +127,8 @@ export type SystemIpcDeps = {
 	isQuitting?: { value: boolean };
 	/** Releases URL */
 	RELEASES_URL?: string;
+	/** 开发态 git 分支名（多 worktree 并行区分窗口）；正式包/共享分支为空。 */
+	devBranch?: string;
 };
 
 export function registerSystemIpc(deps: SystemIpcDeps): void {
@@ -171,6 +173,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		terminalManager,
 		isQuitting,
 		RELEASES_URL,
+		devBranch,
 	} = deps;
 
 	// ── Pi 检测 ──────────────────────────────────────────────────────
@@ -455,6 +458,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		version: app.getVersion(),
 		releasesUrl: RELEASES_URL ?? "https://github.com/ayuayue/pi-desktop/releases",
 		platform: process.platform,
+		devBranch: devBranch,
 	}));
 
 	ipcMain.handle(ipcChannels.appNetworkAddresses, () => listWebNetworkAddresses());

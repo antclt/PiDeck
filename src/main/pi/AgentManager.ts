@@ -5,6 +5,8 @@ import { existsSync, statSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import type {
+	AgentBackend,
+	AgentGatewayCapability,
 	AgentRuntimeState,
 	AgentTab,
 	AvailableModel,
@@ -93,6 +95,18 @@ function readAskField(input: unknown, key: string): unknown {
 }
 
 export class AgentManager {
+	/** 本网关的运行时后端身份：pi。 */
+	readonly backend: AgentBackend = "pi";
+	/** pi 后端支持全部可选能力。 */
+	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set([
+		"compact",
+		"fork",
+		"getForkMessages",
+		"editMessage",
+		"deleteMessage",
+		"getCommands",
+		"exportHtml",
+	]);
 	private readonly agents = new Map<string, AgentRuntime>();
 	private readonly messages = new Map<string, ChatMessage[]>();
 	/** 工具完整结果 LRU 缓存：截断下发后完整文本仅存于此（运行期「查看完整输出」走内存，

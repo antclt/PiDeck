@@ -1,4 +1,6 @@
 import type {
+	AgentBackend,
+	AgentGatewayCapability,
 	AgentRuntimeState,
 	AgentTab,
 	AvailableModel,
@@ -31,8 +33,9 @@ export interface SessionCatalogGateway {
 		sessionId: string,
 		patch: {
 			title?: string;
-			model?: { provider: string; modelId: string };
-			thinkingLevel?: string;
+			model?: { provider: string; modelId: string } | null;
+			thinkingLevel?: string | null;
+			backend?: AgentBackend;
 			updatedAt?: number;
 		},
 	): Promise<SessionCatalogEntry>;
@@ -40,11 +43,18 @@ export interface SessionCatalogGateway {
 		sessionId: string;
 		filePath?: string;
 		piSessionId?: string;
+		dshSessionId?: string;
 	}): Promise<unknown>;
 }
 
 export interface SessionAgentGateway {
+	/** 本网关的运行时后端身份（pi/dsh）；CompositeAgentGateway 按它路由。 */
+	readonly backend: AgentBackend;
+	/** 本网关持有的可选能力；缺失项由 UI 按能力禁用，禁止硬造等价物。 */
+	readonly capabilities: ReadonlySet<AgentGatewayCapability>;
 	list(): AgentTab[];
+	/** 发送提示词到 agent（pi: stdio RPC；dsh: session.prompt）。 */
+	sendPrompt(input: SendPromptInput): Promise<SendPromptResult>;
 	getMessages(agentId: string): ChatMessage[];
 	create(input: CreateAgentInput): Promise<AgentTab>;
 	restart(agentId: string): Promise<AgentTab>;
@@ -53,17 +63,23 @@ export interface SessionAgentGateway {
 	abort(agentId: string): Promise<void>;
 	compact(agentId: string, prompt?: string): Promise<AgentRuntimeState>;
 	getRuntimeState(agentId: string): Promise<AgentRuntimeState>;
-	getCommands(agentId: string): Promise<unknown[]>;
+	/** 可选能力：会话内命令列表（pi 提供；dsh 缺失，capabilities 不含 getCommands）。 */
+	getCommands?(agentId: string): Promise<unknown[]>;
 	getAvailableModels(agentId: string): Promise<AvailableModel[]>;
-	exportHtml(agentId: string): Promise<unknown>;
-	editMessage(agentId: string, messageId: string, newText: string): Promise<void>;
-	deleteMessage(agentId: string, messageId: string): Promise<void>;
+	/** 可选能力：导出 HTML（pi 提供；dsh 缺失，capabilities 不含 exportHtml）。 */
+	exportHtml?(agentId: string): Promise<unknown>;
+	/** 可选能力：编辑历史消息（pi 提供；dsh 缺失，capabilities 不含 editMessage）。 */
+	editMessage?(agentId: string, messageId: string, newText: string): Promise<void>;
+	/** 可选能力：删除历史消息（pi 提供；dsh 缺失，capabilities 不含 deleteMessage）。 */
+	deleteMessage?(agentId: string, messageId: string): Promise<void>;
 	prepareResendFromMessage(
 		agentId: string,
 		messageId: string,
 	): Promise<{ text: string; images?: ImageContent[] }>;
 	setModel(agentId: string, provider: string, modelId: string): Promise<unknown>;
 	setThinking(agentId: string, level: string): Promise<unknown>;
+	/** 可选能力：DSH 会话权限预设（/permission 命令）；pi 后端不持有。 */
+	setPermission?(agentId: string, preset: string): Promise<unknown>;
 	/** 主动推送一次完整 runtime state（get_state）给渲染层：懒启动/重启链路在偏好应用后调用。 */
 	publishRuntimeState(agentId: string): Promise<void>;
 	getForkMessages(agentId: string): Promise<Array<{ entryId: string; text: string }>>;
@@ -81,6 +97,8 @@ export interface SessionAgentGateway {
 		sessionTitle: string,
 		question: string,
 	): void;
+	/** 统一的事件出口（agents:* 通道推送），主进程桥接进 sessions:runtime-event 用。 */
+	onOutput(listener: (channel: string, payload: unknown) => void): () => void;
 }
 
 /**
@@ -373,9 +391,17 @@ export class SessionRuntimeCoordinator {
 	listRuntimeCommands(
 		target: SessionRuntimeTarget,
 	): Promise<SessionCommandResult<SessionTargetedValue<PiCommand[]>>> {
-		return this.runTargetCommand(target, async (agentId) => (
-			await this.agents.getCommands(agentId) as PiCommand[]
-		));
+		return this.runTargetCommand(target, async (agentId) => {
+			// 命令列表是可选能力：后端未声明 getCommands 时按能力缺失拒绝（UI 应已按能力隐藏入口）。
+			const getCommands = this.agents.getCommands;
+			if (!getCommands) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support getCommands`,
+				);
+			}
+			return await getCommands(agentId) as PiCommand[];
+		});
 	}
 
 	listRuntimeModels(
@@ -387,7 +413,16 @@ export class SessionRuntimeCoordinator {
 	exportRuntimeHtml(
 		target: SessionRuntimeTarget,
 	): Promise<SessionCommandResult<SessionTargetedValue<unknown>>> {
-		return this.runTargetCommand(target, (agentId) => this.agents.exportHtml(agentId));
+		return this.runTargetCommand(target, async (agentId) => {
+			const exportHtml = this.agents.exportHtml;
+			if (!exportHtml) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support exportHtml`,
+				);
+			}
+			return exportHtml(agentId);
+		});
 	}
 
 	editRuntimeMessage(
@@ -395,20 +430,32 @@ export class SessionRuntimeCoordinator {
 		messageId: string,
 		newText: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<void>>> {
-		return this.runTargetCommand(
-			target,
-			(agentId) => this.agents.editMessage(agentId, messageId, newText),
-		);
+		return this.runTargetCommand(target, async (agentId) => {
+			const editMessage = this.agents.editMessage;
+			if (!editMessage) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support editMessage`,
+				);
+			}
+			return editMessage(agentId, messageId, newText);
+		});
 	}
 
 	deleteRuntimeMessage(
 		target: SessionRuntimeTarget,
 		messageId: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<void>>> {
-		return this.runTargetCommand(
-			target,
-			(agentId) => this.agents.deleteMessage(agentId, messageId),
-		);
+		return this.runTargetCommand(target, async (agentId) => {
+			const deleteMessage = this.agents.deleteMessage;
+			if (!deleteMessage) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support deleteMessage`,
+				);
+			}
+			return deleteMessage(agentId, messageId);
+		});
 	}
 
 	prepareRuntimeResend(
@@ -818,10 +865,21 @@ export class SessionRuntimeCoordinator {
 			const runtimeGeneration = this.bind(sessionId, tab.id);
 			tab.runtimeGeneration = runtimeGeneration;
 			if (tab.sessionPath && !entry.noSession) {
+				// DSH tab 带 host 会话文件路径（侧栏按文件配对）：文件分支也要同时
+				// 写 dshSessionId——标题同步（findByDshSessionId）与重启后 attach 恢复
+				// 旧会话都依赖它；只写 filePath/piSessionId 会让 DSH 会话无法恢复。
 				await this.catalog.attachRuntime({
 					sessionId,
 					filePath: tab.sessionPath,
 					piSessionId: tab.sessionId,
+					dshSessionId: entry.backend === "dsh" ? tab.sessionId : undefined,
+				});
+			} else if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
+				// DSH restart 会新建 host 会话（旧会话停止）：回写新 sessionId，
+				// 否则重启应用后 attach 到已停止的旧会话。
+				await this.catalog.attachRuntime({
+					sessionId,
+					dshSessionId: tab.sessionId,
 				});
 			}
 			// 与 activate 同链路：绑定完成后推送完整 runtime state，渲染层底栏即时反映真实模型。
@@ -913,10 +971,12 @@ export class SessionRuntimeCoordinator {
 				// Prompt acceptance is the latency-sensitive boundary. Catalog persistence is
 				// recovery metadata and must not keep the composer in a sending state; failures
 				// are intentionally isolated from the already accepted prompt.
+				// DSH：文件配对分支同时回写 dshSessionId（标题同步/重开恢复依赖）。
 				void this.catalog.attachRuntime({
 					sessionId: input.sessionId,
 					filePath: currentTab.sessionPath,
 					piSessionId: currentTab.sessionId,
+					dshSessionId: currentTab.backend === "dsh" ? currentTab.sessionId : undefined,
 				}).catch(() => undefined);
 			}
 			if (!this.isCurrentDispatchLease(lease)) {
@@ -976,6 +1036,8 @@ export class SessionRuntimeCoordinator {
 				sessionPath: entry.filePath,
 				environment: entry.environment,
 				source: entry.source,
+				backend: entry.backend,
+				dshSessionId: entry.backend === "dsh" ? entry.dshSessionId : undefined,
 				wslDistro: entry.wslDistro,
 				wslUser: entry.wslUser,
 				importedSourceId: entry.importedSourceId,
@@ -998,10 +1060,19 @@ export class SessionRuntimeCoordinator {
 		const runtimeGeneration = this.bind(sessionId, tab.id);
 		tab.runtimeGeneration = runtimeGeneration;
 		if (tab.sessionPath && !entry.noSession) {
+			// 同 restartSession：DSH 的文件分支一并写 dshSessionId（标题同步/恢复依赖）
 			await this.catalog.attachRuntime({
 				sessionId,
 				filePath: tab.sessionPath,
 				piSessionId: tab.sessionId,
+				dshSessionId: entry.backend === "dsh" ? tab.sessionId : undefined,
+			});
+		} else if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
+			// DSH 会话没有 pi 会话文件，DSH sessionId 由 host 持久化（$DSH_HOME）：
+			// 新建会话时回写 catalog，重启后 activate 走 attach 路径恢复旧会话。
+			await this.catalog.attachRuntime({
+				sessionId,
+				dshSessionId: tab.sessionId,
 			});
 		}
 		// 绑定完成后主动推送完整 runtime state：emitSessionRuntimeEvent 依赖 binding 才转发，
@@ -1043,6 +1114,10 @@ export class SessionRuntimeCoordinator {
 		}
 		if (entry.thinkingLevel) {
 			await this.agents.setThinking(agentId, entry.thinkingLevel);
+		}
+		// DSH 权限预设（草稿期预选 / 会话内切换回写）：激活时经 /permission 命令应用
+		if (entry.permissionPreset && this.agents.setPermission) {
+			await this.agents.setPermission(agentId, entry.permissionPreset);
 		}
 	}
 

@@ -261,7 +261,20 @@ export function getProjectAgentSessionDisplay({
 
 	const agentBySessionKey = new Map<string, AgentTab>();
 	const unkeyedAgents: AgentTab[] = [];
+	// DSH agent ↔ DSH 会话配对：pi 按 sessionPath 关联（agent 行替换会话行），
+	// DSH 会话没有文件路径，只能按 dshSessionId 配对——否则激活后侧栏出现
+	// 「agent 行 + 会话行」两个相同标题的重复条目。
+	const dshAgentBySessionId = new Map<string, AgentTab>();
 	for (const agent of agents) {
+		if (agent.backend === "dsh" && typeof agent.sessionId === "string" && agent.sessionId) {
+			const linked = parentCandidateSessions.find(
+				(session) => session.dshSessionId === agent.sessionId,
+			);
+			if (linked) {
+				dshAgentBySessionId.set(agent.sessionId, agent);
+				continue; // 会话行已存在（unkeyedSessions），不再产生独立 agent 行
+			}
+		}
 		const sessionKey = findSessionKeyForAgent(agent.sessionPath, sessionByKey) ??
 			getSessionKey(agent.sessionPath, "native");
 		if (!sessionKey) {
@@ -363,17 +376,24 @@ export function getProjectAgentSessionDisplay({
 					getSessionEnvironment(session),
 				),
 			})),
-		...unkeyedSessions.map<ProjectChildItem>((session) => ({
-			type: "session",
-			key: getSessionRowKey(session),
-			session,
-			sortAt: session.updatedAt,
-			codexSubagents: codexSubagentsByParent.get(getCodexParentKey(session)) ?? [],
-			piSubagents: getPiSubagents(
-				session.filePath,
-				getSessionEnvironment(session),
-			),
-		})),
+		...unkeyedSessions.map<ProjectChildItem>((session) => {
+			// DSH 会话行带上配对 agent 装饰（状态点/右键菜单走 runtime 查找，这里提供 title 权重等）
+			const pairedAgent = typeof session.dshSessionId === "string"
+				? dshAgentBySessionId.get(session.dshSessionId)
+				: undefined;
+			return {
+				type: "session",
+				key: getSessionRowKey(session),
+				session,
+				agent: pairedAgent,
+				sortAt: session.updatedAt,
+				codexSubagents: codexSubagentsByParent.get(getCodexParentKey(session)) ?? [],
+				piSubagents: getPiSubagents(
+					session.filePath,
+					getSessionEnvironment(session),
+				),
+			};
+		}),
 	];
 
 	// 孤儿恢复：父会话缺失（被删除/过滤/搜索排除）时，将子会话降级回顶层。

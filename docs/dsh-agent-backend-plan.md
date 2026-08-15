@@ -3,7 +3,7 @@
 > 目标：在 PiDeck 中把 DeepSeek Harness（DSH）作为**第二个 agent 后端**接入，与 pi 后端并列，同一项目下两种 agent 会话可自由创建、切换、浏览；DSH 侧采用**深融合（无 `dsh web`）**路线：进程内 `boot()` 引导完整 host，通过官方 `ApiProxy` 契约驱动，传输形态从 stdio 演进到 utilityProcess + IPC 桥。
 > 非目标：不做「同一会话中途换引擎」（pi 会话文件与 DSH session log 格式不同，迁移=重放）；不导入 DSH 历史会话为只读浏览源（一期不做 scanner，走 `session.list` 实时映射）；不把 DSH 的 Web GUI / 浏览器 UI 搬进 PiDeck。
 
-**状态：** 方案定稿（调研完成，待 PoC 验证）  
+**状态：** 已全部落地（2026-08-15 快照）：v2 utilityProcess 传输为当前形态；P0（D01–D12）全通；P1 按能力声明缺失（D13 编辑/删除历史、D14 图片附件、D15 命令列表未做，D16 思考档位已实现）；P2 中 plan 模式与 agent-preset 已提前落地，goals/subagents UI 与动态插件管理仍后置。pi 零回归，typecheck + 全量单测绿，`npm run pack` 打包验证通过。落地细节、模块清单与计划偏差见 §12。  
 **范围：** 桌面端；pi 现有链路零改动  
 **原则：** DSH 契约（`ApiProxy`）传输无关，传输载体可替换；PiDeck 架构规则（session-first / Jotai / IPC 注册式 / 单向依赖）继续生效；DSH 的事由 DSH 做，PiDeck 只做进程、映射与 UI。
 
@@ -64,13 +64,13 @@ boot(binName, absoluteConfigPath, patches?, prepare?, bareModuleBaseUrl?): Promi
 
 ### 2.5 原生依赖面（硬依赖）
 
-| 原生依赖 | 所在子包（base 行） | 加载方式 | 处置 |
-|---|---|---|---|
-| `node-pty@^1.1.0` | `dsh-subprocess-local`（`subprocess`） | boot 即静态 import | disable 行，或 electron-rebuild（PiDeck 已有 node-pty 经验：asarUnpack + fix-pty-permissions） |
-| `sharp@^0.35.3` | `dsh-attachment-local`（`attachment-local`） | boot 即加载 | disable 行（失去 DSH 图片附件），或 rebuild |
-| `koffi@^3.1.0`（win） | `dsh-fs-local` / `dsh-session-persistence-jsonl` / `dsh-sandbox-windows-acl` | 仅 Windows 特定路径**动态 import** | 包可安装即可；触发路径可接受 |
-| `node-addon-landlock-run`（linux） | `dsh-sandbox-local` | linux 原生 | disable 或 rebuild |
-| `node:sqlite`（Node 内置） | `dsh-session-query-sqlite` | 动态 `await import`，base 默认 `openAt: never` | 零风险；要求 Node ≥22.5（Electron 43 满足） |
+| 原生依赖 | 所在子包（base 行） | 加载方式 | 处置 | 落地（2026-08-15） |
+|---|---|---|---|---|
+| `node-pty@^1.1.0` | `dsh-subprocess-local`（`subprocess`） | boot 即静态 import | disable 行，或 electron-rebuild（PiDeck 已有 node-pty 经验：asarUnpack + fix-pty-permissions） | ✅ base 行保留（未 disable），host 在 utilityProcess 内加载；持久 pwsh 插件亦自含 node-pty |
+| `sharp@^0.35.3` | `dsh-attachment-local`（`attachment-local`） | boot 即加载 | disable 行（失去 DSH 图片附件），或 rebuild | ⚠️ 原生绑定随包打包兼容（asarUnpack + `patch-sharp-index.js`），但 attachment-local 能力未启用（桥不支持字节载荷，见 §12.4 #3） |
+| `koffi@^3.1.0`（win） | `dsh-fs-local` / `dsh-session-persistence-jsonl` / `dsh-sandbox-windows-acl` | 仅 Windows 特定路径**动态 import** | 包可安装即可；触发路径可接受 | ✅ 随包（win32 asarUnpack）；另用于 Windows 隐藏控制台治理（§12.4 #7） |
+| `node-addon-landlock-run`（linux） | `dsh-sandbox-local` | linux 原生 | disable 或 rebuild | ⚠️ Linux 侧按需验证（未在 Windows 开发环境核查） |
+| `node:sqlite`（Node 内置） | `dsh-session-query-sqlite` | 动态 `await import`，base 默认 `openAt: never` | 零风险；要求 Node ≥22.5（Electron 43 满足） | ✅ Electron 43 满足 |
 
 `dsh-terminal` 本身是纯注册表接口；`cordis` / `cosmokit` / `schemastery` 纯 JS。loader 的 N-API 定制加载器在 Electron 下失败会退回 ambient import，不硬崩。
 
@@ -95,12 +95,12 @@ boot(binName, absoluteConfigPath, patches?, prepare?, bareModuleBaseUrl?): Promi
 
 ### 3.2 传输形态演进（(c) → (b)，官方注释预告的形态）
 
-| 阶段 | 形态 | 说明 |
-|---|---|---|
-| PoC | 独立 Node 脚本同进程 `boot()` + `InProcessApiClient` | 验证组合与全流程，不碰 Electron |
-| v1 | **(c) 无 web 的 stdio sidecar** | PiDeck 自写 30 行入口（`boot()` + stdio JSON-RPC 循环），`ELECTRON_RUN_AS_NODE` 或系统 node spawn；与 pi 的 `PiRpcClient` 模式同构，最稳落地 |
-| v2 | **(b) utilityProcess + 薄桥** | `AbstractApiClient` 子类覆写 `doFetch` 走 `postMessage`，host 侧 `toFetchHandler(api).fetch` 当处理器；复用四象限信封与 SSE 帧 |
-| （不推荐） | (a) 主进程内嵌 | 原生 ABI + 崩溃面 + 启动时间全压主进程，仅 PoC 用 |
+| 阶段 | 形态 | 说明 | 落地 |
+|---|---|---|---|
+| PoC | 独立 Node 脚本同进程 `boot()` + `InProcessApiClient` | 验证组合与全流程，不碰 Electron | ✅ `scripts/dsh-embed-probe.mjs`（`npm run probe:dsh`） |
+| v1 | **(c) 无 web 的 stdio sidecar** | PiDeck 自写 30 行入口（`boot()` + stdio JSON-RPC 循环），`ELECTRON_RUN_AS_NODE` 或系统 node spawn；与 pi 的 `PiRpcClient` 模式同构，最稳落地 | 未实施（被 v2 直接取代） |
+| v2 | **(b) utilityProcess + 薄桥** | `AbstractApiClient` 子类覆写 `doFetch` 走 `postMessage`，host 侧 `toFetchHandler(api).fetch` 当处理器；复用四象限信封与 SSE 帧 | ✅ 当前形态（`hostEntry.ts` + `DshApiClient` + `dshHostBridge.ts`） |
+| （不推荐） | (a) 主进程内嵌 | 原生 ABI + 崩溃面 + 启动时间全压主进程，仅 PoC 用 | ❌ 未采用 |
 
 **关键：v1→v2 是纯传输替换**，`DshAgentManager` 面对同一个 `ApiProxy` 契约，PiDeck 侧代码不变。
 
@@ -126,8 +126,8 @@ boot(binName, absoluteConfigPath, patches?, prepare?, bareModuleBaseUrl?): Promi
 - DSH Web GUI / 浏览器端 UI 搬运；`dsh web` 端口与静态服务
 - DSH 历史会话文件扫描导入（一期只做运行时映射；`session.list`/`session.history` 已覆盖浏览）
 - 飞书桥接 / PIDECK_* 安全扩展注入到 DSH（pi 扩展机制不适用于 DSH，DSH 用自己的 permission/approval）
-- DSH 动态 Cordis 插件管理 UI（`cordis-host-runner` 保留可运行，管理界面后置）
-- 会话级 agent-presets 管理（一期用 base 进程级 agent 平面）
+- DSH 动态 Cordis 插件管理 UI（`cordis-host-runner` 保留可运行，管理界面后置；当前仅提供 agent-loop/shell/web-search 配置分区，见 §12.4 #6 与 §12.8）
+- 会话级 agent-presets 管理（一期用 base 进程级 agent 平面；部署级默认预设（`agent-presets.default`）已实现，见 §7 D19）
 
 ---
 
@@ -153,15 +153,27 @@ backend?: AgentBackend;   // 缺省 "pi"，旧数据天然兼容
 
 ### 6.3 新模块 `src/main/dsh/`（对标 `src/main/pi/`）
 
+> 计划模块名与最终落地的差异见 §12.2；以下为当前实际文件。
+
 ```
 src/main/dsh/
-├── DshLocator.ts          # 定位 dsh 包/入口（内嵌 node_modules 解析；对标 PiLocator）
-├── DshHostProcess.ts      # host 进程管理：v1 spawn 入口脚本（stdio）；v2 utilityProcess；健康检查、重启、退出清理
-├── DshApiClient.ts        # AbstractApiClient 子类：v1 stdio carrier；v2 MessagePort carrier（doFetch 覆写）
-├── DshAgentManager.ts     # 实现 SessionAgentGateway：session.create/prompt/cancel/history/models/selectModel/rename/fork
-├── dshEventProjector.ts   # 纯函数：SessionEvent / MuxFrame → ChatMessage / ThinkingUpdate / AgentRuntimeState / ToolEventView
-├── dshApprovalBridge.ts   # approval/requested + question/requested → agents:ui-request 通道；respond 回执
-└── dshComposition.ts      # PiDeck 版组合：base 补丁 + 覆盖（disable attachment/subprocess 等行、注入 provideCmdline）
+├── DshHost.ts               # 深融合宿主：懒启动 utilityProcess、桥接客户端、settings/credentials/models/presets 管理、DSH_HOME 解析
+├── DshHostProcess.ts        # utilityProcess 生命周期：fork hostEntry、host-ready 健康信号、崩溃限次重启（3 次）、退出清理
+├── hostEntry.ts             # utilityProcess 入口：boot() 自组组合（base patch + overlay）、fetch 桥循环、Windows 控制台治理、slash 桥/持久 pwsh 插件
+├── DshApiClient.ts          # AbstractApiClient 子类：doFetch 走 MessagePort 桥（fetch-request → stream/chunk），pending 表 + abortAllPending
+├── dshHostBridge.ts         # 桥协议纯函数（fetch-request/response/chunk/end/error + abort；body 一律字符串）
+├── DshAgentManager.ts       # 实现 SessionAgentGateway：create/attach/restart/sendPrompt/abort/rename/compact/fork/history/models/setModel/setThinking/setPermission/ui-response
+├── dshEventProjector.ts     # 纯函数：SessionEvent → ChatMessage / ThinkingUpdate / ToolEventView / permission-preset / plan-mode
+├── dshRuntimeControl.ts     # 纯函数：回合 running/idle、abort 抬 cancelGeneration、迟到流丢弃
+├── dshApprovalBridge.ts     # approval/question server-request 帧 ↔ agents:ui-request 通道互转、respond 载荷构造
+├── dshModels.ts             # host 模型目录 → AvailableModel（透传 reasoningEfforts）
+├── dshDefaultModel.ts       # 解析 settings.yaml 的 agent-default-model 段（provider/model/reasoningEffort）
+├── dshCredentials.ts        # 凭证 ref 校验 + .credentials.yaml 明文解析
+├── dshPresetComposition.ts  # agent-presets 组合行（default standard，随包 system 根 + 用户根）
+├── pideckPwshPersistent.ts  # 持久 pwsh 工具（应用侧插件，node-pty，复用常驻会话避免冷启动）
+├── hideChildConsoles.ts     # Windows 控制台治理：host 隐藏控制台 + windowsHide 兜底 + runner preload 注入
+├── runnerConsolePreload.ts  # 沙箱 runner（GUI 进程）自建隐藏控制台的 preload
+└── js-yaml.d.ts             # js-yaml 类型声明
 ```
 
 ### 6.4 事件映射（DSH → PiDeck 模型）
@@ -185,11 +197,14 @@ src/main/dsh/
 
 DSH 会话由 DSH 自己持久化（`$DSH_HOME`，session log 事件流，`session-persistence-jsonl` 行）。PiDeck `SessionCatalog` 对 DSH 会话只存一条映射记录：`SessionRecord.id`（PiDeck mint）↔ DSH `sessionId` + `backend: "dsh"` + `cwd`；历史浏览走 `session.history`（分页、`projections` 块给标题基线），**不**复用 `SessionScanner`（那是 pi 文件扫描）。
 
+**落地补充（与 §9 原「默认隔离」决策不同，见 §12.4）：** DSH_HOME 默认优先使用用户真实 `~/.dsh`（与 `dsh` CLI 行为一致，配置/凭证/会话全在同一处）；仅当 `~/.dsh` 不存在（全新用户）才回退应用私有 `userData/dsh-home`，不再复制任何文件。重启后通过 catalog 中的 `dshSessionId` 映射 attach 旧 host 会话并重放历史尾部，`dshSessionId` 不换绑（restart/fork 后同步更新映射）。
+
 ### 6.7 UI 层
 
 - 新建会话：后端选择器（Pi / DSH），记入 `SessionRecord.backend`——同项目下两种会话并存、随时来回操作。
 - 侧栏/列表：badge + 过滤（现有 `sessionSourceFilter` 模式扩展）。
 - 设置页：DSH 配置（host 形态选择、`$DSH_HOME` 路径、审批策略、可禁用行开关）。
+  - 落地：`$DSH_HOME` 路径切换 ✅、审批策略（自动放行开关）✅、DSH 配置管理页 8 分区（概览/模型/预设/插件/安全/认证/设置/源文件）✅；host 形态选择 ❌（仅 v2 utilityProcess 一种形态）、可禁用行开关 ❌（组合行由 hostEntry 固定，见 §12.4）。
 - runtime 面板：模型/状态/工具卡沿用现有组件，数据源换成 DshAgentManager 投影结果。
 
 ### 6.8 生命周期与安全
@@ -204,64 +219,66 @@ DSH 会话由 DSH 自己持久化（`$DSH_HOME`，session log 事件流，`sessi
 
 ### P0 — 等价能力（DSH 后端必须提供，验收后才算可用）
 
-| ID | 能力 | pi 实现 | DSH 实现 | 验收 |
-|----|------|---------|----------|------|
-| D01 | 创建会话/agent | spawn pi + session 文件 | `session.create({ cwd, sessionId? })` | PoC 跑通 |
-| D02 | 发送消息（流式） | `send_prompt` + message_start/delta/end | `session.prompt({ mode: 'queue' })` + mux 流 `session/event` | 流式 UI 与 pi 一致 |
-| D03 | 中止 | `abort` + streamGate | `session.cancel` | 回归 |
-| D04 | 历史分页浏览 | 会话文件 JSONL 解析 | `session.history({ beforeSeq, maxMessages })` | 翻页一致 |
-| D05 | 模型列表/切换 | `get_available_models` / `set_model` | `session.models` / `session.selectModel` | 类型映射单测 |
-| D06 | thinking 展示 | thinking_delta | chunk reasoning 块 | 折叠单行模式 |
-| D07 | 工具调用展示 | tool start/update/end | `tool/call` + `ToolEventView` | 卡片一致 |
-| D08 | 审批/提问 | pi 扩展 ask_question/trust | `approval/requested` + `question/requested` → respond | 弹窗链路手测 |
-| D09 | 重命名 | `session_rename` | `session.rename` | 冒烟 |
-| D10 | fork | `fork`（entryId 裁剪） | `session.fork({ atSeq })` | 冒烟 |
-| D11 | compact | `compact` RPC | 发送 `/compact` slash 命令（host 侧命令注册表执行） | 手测 |
-| D12 | 并发多会话 | 每会话一个 pi 进程 | 单 host 多 agent（in-process fiber） | 双会话并行 |
+> 状态列：✅ = 已落地（含 e2e/单测验证）；代码证据见 §12.2。
+
+| ID | 能力 | pi 实现 | DSH 实现 | 验收 | 状态 |
+|----|------|---------|----------|------|------|
+| D01 | 创建会话/agent | spawn pi + session 文件 | `session.create({ cwd, sessionId? })` | PoC 跑通 | ✅ |
+| D02 | 发送消息（流式） | `send_prompt` + message_start/delta/end | `session.prompt({ mode: 'queue' })` + mux 流 `session/event` | 流式 UI 与 pi 一致 | ✅ |
+| D03 | 中止 | `abort` + streamGate | `session.cancel` | 回归 | ✅ |
+| D04 | 历史分页浏览 | 会话文件 JSONL 解析 | `session.history({ beforeSeq, maxMessages })` | 翻页一致 | ✅ |
+| D05 | 模型列表/切换 | `get_available_models` / `set_model` | `session.models` / `session.selectModel` | 类型映射单测 | ✅（含思考档位，见 D16） |
+| D06 | thinking 展示 | thinking_delta | chunk reasoning 块 | 折叠单行模式 | ✅ |
+| D07 | 工具调用展示 | tool start/update/end | `tool/call` + `ToolEventView` | 卡片一致 | ✅ |
+| D08 | 审批/提问 | pi 扩展 ask_question/trust | `approval/requested` + `question/requested` → respond | 弹窗链路手测 | ✅ |
+| D09 | 重命名 | `session_rename` | `session.rename` | 冒烟 | ✅ |
+| D10 | fork | `fork`（entryId 裁剪） | `session.fork({ atSeq })` | 冒烟 | ✅ |
+| D11 | compact | `compact` RPC | 发送 `/compact` slash 命令（host 侧命令注册表执行） | 手测 | ✅（slash 桥） |
+| D12 | 并发多会话 | 每会话一个 pi 进程 | 单 host 多 agent（in-process fiber） | 双会话并行 | ✅ |
 
 ### P1 — 降级/可选项（能力声明缺失，UI 隐藏）
 
-| ID | 能力 | 说明 |
-|----|------|------|
-| D13 | 编辑/删除历史消息 | DSH 无对应（`session.updateQueue` 只改 pending 队列项）→ 能力缺失 |
-| D14 | 图片附件 | 依赖 `attachment-local` 行（sharp）→ 一期 disable，能力随行关闭 |
-| D15 | `/commands` 列表 | DSH 命令注册表存在，wire 上无显式 list 方法 → 二期经 host 侧自定义桥或文档化命令集 |
-| D16 | 会话级模型/thinking 持久偏好 | `session.models.current` + selectModel 已覆盖；thinkingLevel 无显式 API → 映射到 reasoningEffort |
+| ID | 能力 | 说明 | 状态 |
+|----|------|------|------|
+| D13 | 编辑/删除历史消息 | DSH 无对应（`session.updateQueue` 只改 pending 队列项）→ 能力缺失 | ✅ 按计划缺失（`capabilities` 不含 editMessage/deleteMessage，UI 隐藏） |
+| D14 | 图片附件 | 依赖 `attachment-local` 行（sharp）→ 一期 disable，能力随行关闭 | ✅ 仍不支持（桥 body 仅字符串，字节载荷一期不支持） |
+| D15 | `/commands` 列表 | DSH 命令注册表存在，wire 上无显式 list 方法 → 二期经 host 侧自定义桥或文档化命令集 | ⏳ 仍后置（`getCommands` 未声明；已实现的是命令*执行*桥，非列表） |
+| D16 | 会话级模型/thinking 持久偏好 | `session.models.current` + selectModel 已覆盖；thinkingLevel 无显式 API → 映射到 reasoningEffort | ✅ 已实现（`session.selectModel` + `reasoningEffort`，按模型 `reasoningEfforts` 过滤档位；草稿期写 catalog，激活时 applyPreferences） |
 
 ### P2 — DSH 特有加分项（后置）
 
-| ID | 能力 | 说明 |
-|----|------|------|
-| D17 | 动态 Cordis 插件 | `cordis-host-runner` 保留，PiDeck 内可运行 `@pluginId` 插件（管理 UI 后置） |
-| D18 | goals / plan-mode / skills / subagents | DSH 原生能力；`goal.*` / `subagent.*` API 已就绪，UI 呈现后置 |
-| D19 | 会话 agentPreset | `agent-presets` 行（default: standard）是 web 特有；自建组合时可注入 preset 目录 |
+| ID | 能力 | 说明 | 状态 |
+|----|------|------|------|
+| D17 | 动态 Cordis 插件 | `cordis-host-runner` 保留，PiDeck 内可运行 `@pluginId` 插件（管理 UI 后置） | ⏳ 部分：配置页提供 agent-loop/shell/web-search 插件分区（dsh-web 同源命名空间），无插件安装/管理 UI |
+| D18 | goals / plan-mode / skills / subagents | DSH 原生能力；`goal.*` / `subagent.*` API 已就绪，UI 呈现后置 | ⚠️ plan-mode 已提前落地（`/plan` + plan/mode 事件 → `planModeActive`）；goals/subagents 的 UI 呈现仍后置 |
+| D19 | 会话 agentPreset | `agent-presets` 行（default: standard）是 web 特有；自建组合时可注入 preset 目录 | ✅ 已实现（`dshPresetComposition` 注入随包 system 根 + `$DSH_HOME/.agent-presets` 用户根；配置页「预设设置」列出 standard/code/minimal/cordis 并支持设为默认） |
 
 ---
 
 ## 8. 落地路线（阶段与验收门禁）
 
-| 阶段 | 内容 | 验收门禁 |
-|---|---|---|
-| **0. PoC**（不动产品代码） | `scripts/dsh-embed-probe.mjs`：组装 base 组合 → `boot()`（prepare 注入 `provideCmdline`）→ `InProcessApiClient` → `session.create` → `session.prompt` → mux 流式输出 → 模拟 approval → `respond` → `session.history` → `dispose()` | 控制台全流程跑通；不依赖网络外的外部服务 |
-| **1. 契约层** | `AgentBackend` 类型、gateway 能力集、`CompositeAgentGateway`、catalog `backend` 字段兼容迁移 | `npm run typecheck` + 现有单测全绿；旧会话无迁移即工作 |
-| **2. v1 运行时（stdio sidecar）** | `DshHostProcess`（spawn 入口脚本）+ `DshApiClient`（stdio carrier）+ `DshAgentManager` + 事件投影 | 投影纯函数单测；双后端同项目并存手测 |
-| **3. UI** | 后端选择器、badge/过滤、设置页、runtime 面板适配 | 手测双后端切换无状态串扰 |
-| **4. v2（utilityProcess）** | host 移入 utilityProcess，carrier 换 MessagePort；打包验证（asarUnpack 原生模块） | `npm test` + `npm run pack` smoke；退出清理清单核对 |
-| **5. 打磨** | 错误恢复、日志、DSH_HOME 策略、文档（README/CHANGELOG） | 发版流程合规 |
+| 阶段 | 内容 | 验收门禁 | 状态 |
+|---|---|---|---|
+| **0. PoC**（不动产品代码） | `scripts/dsh-embed-probe.mjs`：组装 base 组合 → `boot()`（prepare 注入 `provideCmdline`）→ `InProcessApiClient` → `session.create` → `session.prompt` → mux 流式输出 → 模拟 approval → `respond` → `session.history` → `dispose()` | 控制台全流程跑通；不依赖网络外的外部服务 | ✅ |
+| **1. 契约层** | `AgentBackend` 类型、gateway 能力集、`CompositeAgentGateway`、catalog `backend` 字段兼容迁移 | `npm run typecheck` + 现有单测全绿；旧会话无迁移即工作 | ✅ |
+| **2. v1 运行时（stdio sidecar）** | `DshHostProcess`（spawn 入口脚本）+ `DshApiClient`（stdio carrier）+ `DshAgentManager` + 事件投影 | 投影纯函数单测；双后端同项目并存手测 | ✅（以 v2 直接取代，未单独发布） |
+| **3. UI** | 后端选择器、badge/过滤、设置页、runtime 面板适配 | 手测双后端切换无状态串扰 | ✅ |
+| **4. v2（utilityProcess）** | host 移入 utilityProcess，carrier 换 MessagePort；打包验证（asarUnpack 原生模块） | `npm test` + `npm run pack` smoke；退出清理清单核对 | ✅（当前形态；另含 Windows 控制台治理、崩溃限次重启、hostEntry 独立产物 asarUnpack） |
+| **5. 打磨** | 错误恢复、日志、DSH_HOME 策略、文档（README/CHANGELOG） | 发版流程合规 | ⚠️ 进行中（README/CHANGELOG 已随功能更新；文档 §12 本附录为现状快照） |
 
 ---
 
 ## 9. 风险与对策
 
-| 风险 | 对策 |
-|---|---|
-| 打包体积 +200~400MB（150+ 子包） | 依赖树瘦身（按需禁用行）、native 模块 asarUnpack；若验收不过退回 stdio sidecar 复用用户环境（代码不变，仅传输/定位差异） |
-| 原生 ABI（node-pty/sharp/koffi/landlock） | v1 先 disable 原生重行；v2 在 utilityProcess 内单独 rebuild，主进程零污染 |
-| 版本锁定 rc.6 | DSH 升级跟随 PiDeck 发版；信封 schema drift 由 `clientRequestSchema` zod 校验层兜底报错而非静默错位 |
-| DSH host 崩溃 | utilityProcess/子进程可重启（限次）；主进程内嵌形态禁用 |
-| `$DSH_HOME` 与用户 CLI 会话冲突 | 默认隔离（userData 下）可选共享；双 host 同目录并发不做支持 |
-| 双后端状态串扰 | 事件严格带 `sessionId+agentId+runtimeGeneration`，沿用现有 Coordinator 门禁 |
-| rc 期 API 变动 | 协议面收窄到 `ApiProxy` 契约（官方声明稳定）；投影层集中隔离映射差异 |
+| 风险 | 对策 | 落地 |
+|---|---|---|
+| 打包体积 +200~400MB（150+ 子包） | 依赖树瘦身（按需禁用行）、native 模块 asarUnpack；若验收不过退回 stdio sidecar 复用用户环境（代码不变，仅传输/定位差异） | ✅ 已控制：依赖显式锁定 19 个 `@deepseek-ai/*` 子包 + `check-dsh-asar.mjs` 打包回归校验；sharp/koffi/node-addon-require-builtin 已 asarUnpack（见 §12.6） |
+| 原生 ABI（node-pty/sharp/koffi/landlock） | v1 先 disable 原生重行；v2 在 utilityProcess 内单独 rebuild，主进程零污染 | ✅ host 在 utilityProcess 内加载原生模块；sharp 打包经 `patch-sharp-index.js` 修复（DLL 与 .node 同目录）；Windows 控制台治理见 §12.5 |
+| 版本锁定 rc.6 | DSH 升级跟随 PiDeck 发版；信封 schema drift 由 `clientRequestSchema` zod 校验层兜底报错而非静默错位 | ✅ 锁定 `^0.1.0-rc.6` |
+| DSH host 崩溃 | utilityProcess/子进程可重启（限次）；主进程内嵌形态禁用 | ✅ 崩溃限次重启（3 次）+ `abortAllPending` 中断悬挂请求（会话静默断开已修复） |
+| `$DSH_HOME` 与用户 CLI 会话冲突 | 默认隔离（userData 下）可选共享；双 host 同目录并发不做支持 | ⚠️ 策略已调整：默认直接用 `~/.dsh`（与 CLI 共享），仅全新用户回退 userData/dsh-home（见 §12.4）；双 host 同目录并发仍不支持 |
+| 双后端状态串扰 | 事件严格带 `sessionId+agentId+runtimeGeneration`，沿用现有 Coordinator 门禁 | ✅ 沿用（DSH agentId = `dsh:<sessionId>`） |
+| rc 期 API 变动 | 协议面收窄到 `ApiProxy` 契约（官方声明稳定）；投影层集中隔离映射差异 | ✅ 投影/桥协议均为纯函数单测覆盖 |
 
 ---
 
@@ -274,6 +291,8 @@ DSH 会话由 DSH 自己持久化（`$DSH_HOME`，session log 事件流，`sessi
   - stdio carrier：信封 marshal/SSE 帧解析（用内存管道模拟，不依赖真实 DSH 进程）。
 - 主进程集成：mock DSH 侧协议（参照现有 mock-pi RPC 的 E2E 基建）。
 - 门禁：任何合并前 `npm run typecheck` 与 `npm test` 全绿；不放松断言、不注释失败测试。
+
+> 落地后的实际测试清单见 §12.7（单测文件与 e2e spec 名称均以代码为准）。`CompositeAgentGateway` 专项单测已落地（`tests/compositeAgentGateway.test.mjs`：按 backend 路由 + 能力缺失拒绝）；「stdio carrier 用内存管道模拟」随 v1 形态取消，由 `tests/dshApiClientBridge.test.mjs`（MessagePort 桥 + `dshHostBridge` 纯函数）覆盖。
 
 ---
 
@@ -288,3 +307,80 @@ DSH 会话由 DSH 自己持久化（`$DSH_HOME`，session log 事件流，`sessi
 - 组合构成：`@deepseek-ai/dsh-base/cordis.patch.yml`（base 行全集）、`@deepseek-ai/dsh-web-app/cordis.patch.yml`（web 专属行）
 - 原生依赖：`dsh-attachment-local`（sharp）、`dsh-subprocess-local`（node-pty）、`dsh-fs-local`/`dsh-session-persistence-jsonl`（koffi）、`dsh-session-query-sqlite`（`node:sqlite`，`openAt: never`）
 - launcher 职责：`@deepseek-ai/dsh-cmdline`（`provideCmdline`）、`@deepseek-ai/dsh-home-paths`（`resolveDshHome`）
+
+---
+
+## 12. 落地现状与偏差（2026-08-15 快照）
+
+> 本节是 §1–§10 计划落地后的**现状快照**，代码为准；计划正文保留为设计记录，与本节冲突处以本节为准。
+> 依据：`src/main/dsh/`、`src/shared/types/agent.ts`、`src/shared/ipc.ts`、`tests/dsh*.test.mjs`、`e2e/dsh-*.spec.ts`、`package.json`、`electron.vite.config.ts`。
+
+### 12.1 总体结论
+
+- 深融合（无 `dsh web`）已按 §3.2 形态 (b) 落地：host 运行在 **utilityProcess**（`serviceName: pideck-dsh-host`），主进程通过 `AbstractApiClient` 子类（`DshApiClient`）走 **MessagePort fetch 桥**访问同一 ApiProxy 契约；v1 stdio sidecar 被 v2 直接取代，从未单独发布。
+- 懒启动：首个 DSH 会话创建时才 `utilityProcess.fork` + `boot()`（约 800ms），不拖慢应用启动。
+- P0（D01–D12）全部通过（含 e2e：`dsh-models`、`dsh-restart`、`dsh-security-plan`、`dsh-title-diag`）。
+- 超出 P0 提前落地：**权限预设**（`/permission`）、**plan 模式**（`/plan`）、**agent-presets**（D19）、**模型/思考档位全链路**（D16）、**持久化 pwsh**（应用侧插件）。
+- 仍未做（按能力声明缺失，UI 隐藏）：编辑/删除历史消息（D13）、图片附件（D14）、`/commands` 列表（D15）、goals/subagents UI 呈现（D18 后半）、动态插件管理 UI（D17 后半）。
+
+### 12.2 模块清单（实际，与 §6.3 计划对照）
+
+见 §6.3 更新的实际文件树。计划名与落地名的差异：
+
+| 计划模块 | 落地对应 | 说明 |
+|---|---|---|
+| `DshLocator.ts` | `DshHostProcess.resolveHostEntryPath` + `createRequire` 解析 | 定位逻辑并入 host 进程管理与 `hostEntry`（dev/打包/e2e 三种路径） |
+| `dshComposition.ts` | `hostEntry.ts` 内联组合 + `dshPresetComposition.ts` | 组合在 utilityProcess 入口内完成（base patch + overlay：storage/workspace/api-gateway/directory-picker/slash-bridge/tool-pwsh-persistent/agent-presets；disable hmr、session-telemetry-otel） |
+| `DshApiClient.ts` | 同名 | v2 MessagePort carrier（未实现 v1 stdio carrier） |
+| 新增（计划未列） | `dshHostBridge.ts` / `dshRuntimeControl.ts` / `dshModels.ts` / `dshDefaultModel.ts` / `dshCredentials.ts` / `pideckPwshPersistent.ts` / `hideChildConsoles.ts` / `runnerConsolePreload.ts` | 桥协议、运行态控制、模型目录/默认模型/凭证解析、持久 pwsh、Windows 控制台治理 |
+
+### 12.3 类型与 IPC（§6.1 落地形态）
+
+- `src/shared/types/agent.ts`：`AgentBackend = "pi" | "dsh"`；`AgentGatewayCapability = compact | fork | getForkMessages | editMessage | deleteMessage | getCommands | exportHtml`；`AgentRuntimeState` 增 `permissionPreset` / `planModeActive`；`AvailableModel` 增 `reasoningEfforts`；`CreateAgentInput` 增 `dshSessionId`。
+- `src/shared/types/session.ts`：`SessionRecord` / `AgentTab` 增 `backend`、`dshSessionId`（缺省 pi，旧数据零迁移）。
+- `src/shared/ipc.ts`：DSH 专用通道 `dsh:list-models / list-providers / get-status / config-describe / config-update / open-document / restart-host / credential-describe / credential-set / credential-unset / credential-read / agent-presets / default-model`；会话运行通道复用通用 `sessions:runtime-*`，事件复用 `agents:*`。
+- `DshAgentManager.capabilities = { fork, getForkMessages, compact }`；`editMessage/deleteMessage/getCommands/exportHtml` 接口不实现，调用方经 capability 检查拒绝。
+
+### 12.4 与原计划的偏差
+
+| # | 计划表述 | 落地事实 |
+|---|---|---|
+| 1 | §9「`$DSH_HOME` 默认隔离（userData 下）可选共享」 | **改为默认直接用用户真实 `~/.dsh`**（与 `dsh` CLI 共用配置/凭证/会话，无复制）；仅当 `~/.dsh` 不存在（全新用户）才回退 `userData/dsh-home`。设置页可切换 DSH_HOME（`dsh:restart-host` 重启生效）。⚠️ `src/shared/types/settings.ts` 的 `dshHomeDir` 注释仍写旧策略（「应用私有目录 + 首次复制」），与 `DshHost.resolveDshHomeDir` 实际行为不一致，属代码注释漂移，待修。 |
+| 2 | §3.2 先 v1（stdio sidecar）再 v2 | v1 未单独发布；直接以 v2 utilityProcess 形态交付。 |
+| 3 | §2.5/§7 D14 图片附件「一期 disable」 | 仍不支持：桥 body 一律字符串（`dshHostBridge.ts` 注释「字节载荷（图片附件等）一期不支持」），attachment-local 行禁用兜底。sharp 仅作为原生依赖打包兼容（asarUnpack + `patch-sharp-index.js`），不代表图片附件已启用。 |
+| 4 | §7 D11 compact「手测」 | 经 **slash 桥**（`pideck-slash-bridge.js` 插件）实现：以 `/` 开头的单条用户消息在 `agent/pre-step` 拦截 → `ctx.commands.execute`；命中则 reject 步骤（命令事件落盘、消息不进模型不上时间线），未知命令放行给模型。`/permission`、`/plan` 同链路。 |
+| 5 | §7 D18 plan-mode「后置」 | plan 模式已提前落地（`plan/mode` 事件 → `planModeActive`，Composer 模式选择器切换）；goals/subagents UI 仍后置。 |
+| 6 | §7 D19 agentPreset「web 特有，后置」 | 已落地：`agentPresetsRow` 注入随包 system 根（`<dsh 包>/config/agent-presets`，default standard）+ `$DSH_HOME/.agent-presets` 用户根；配置页「预设设置」tab 列出 standard/code/minimal/cordis，「设为默认」写 settings.yaml 的 `agent-presets.default`。 |
+| 7 | 计划未提 | **Windows 控制台治理**：utilityProcess 无控制台，`installHostHiddenConsole`（koffi AllocConsole + SW_HIDE）给 host 分配隐藏控制台使整棵进程树零弹窗；失败退回 windowsHide 注入兜底；沙箱 runner（GUI 进程不继承控制台）经 `NODE_OPTIONS=--require=runnerConsolePreload` 自建隐藏控制台。 |
+| 8 | 计划未提 | **持久化 pwsh**（`pideckPwshPersistent.ts`）：DSH 会话内 `!` 命令复用常驻 pwsh（自包含 node-pty，仿 `dsh-tool-bash-persistent`），避免每次调用 ~350ms 冷启动（实测约 30 倍提速）。 |
+| 9 | 计划未提 | **重启 attach 语义**：restart 改为 attach 同一 host 会话（`$DSH_HOME` 持久化数据不换），仅当 host 中已不存在该会话（DSH_HOME 被清/更换）才退回新建；catalog 的 `dshSessionId` 保持不变。修复了「重启后原会话消息丢失」用户 bug（`e2e/dsh-restart.spec.ts` 回归）。 |
+| 10 | 计划未提 | **消息串行化**：同一 DSH 会话的发送按序串行（一次一个回合），队列消息自动排队。 |
+| 11 | 计划未提 | **标题同步**：attach/restart 三处 + 事件桥为 DSH tab 补写 `dshSessionId`，侧栏标题随 host 会话标题同步（`e2e/dsh-title-diag.spec.ts` 回归）。 |
+| 12 | §6.8「启动失败可诊断」 | `appLogger` 关键节点留痕（host fork/boot/ready/error/exit、崩溃重启计数）。 |
+
+### 12.5 生命周期与稳定性（落地形态）
+
+- 启动：`utilityProcess.fork(hostEntry.js, argv)`（`--dsh-home` / `--dsh-config` / `--dsh-node-modules`）；host-ready 信号后建桥；mux 泵带指数退避重连。
+- 崩溃：限次重启（maxRestarts = 3）；host 退出 → `abortAllPending` 中断悬挂请求（修复会话静默断开）。
+- 退出清理：`DshHost.dispose` 注册进主进程退出清单；`DshHostProcess.kill` + 5s 兜底强杀。
+- 安全：审批/提问经 `agents:ui-request` 桌面 Ask 弹窗；「DSH 审批自动放行」默认关闭（`dshApprovalAutoAllow` 运行时即时生效）；`danger-full-access` 权限预设切换需二次确认。
+
+### 12.6 打包与依赖
+
+- `electron.vite.config.ts` 主进程多入口：`index` / `hostEntry` / `runnerConsolePreload` / `pideckPwshPersistent`；`@deepseek-ai/*` 全部 external（`tests/dshMainExternalize.test.mjs` 守护该契约，`dshPeerDepsPackaged.test.mjs` 守护 peerDep 进 asar）。
+- `asarUnpack`：`out/main/hostEntry.js`、`@img/sharp-win32-x64`、`@koromix/koffi-win32-x64`、`node-addon-require-builtin-win32-x64-msvc`；`npmRebuild: false`。
+- `scripts/check-dsh-asar.mjs`：校验 19 个 `@deepseek-ai/*` 依赖已进 app.asar（打包回归）。
+- `scripts/dsh-embed-probe.mjs`（`npm run probe:dsh`）：深融合 PoC 探针，不入产品构建。
+- 依赖：`@deepseek-ai/dsh@^0.1.0-rc.6` + 18 个显式子包（cordis-plugin-group、dsh-bash-local、dsh-sandbox、dsh-subprocess、dsh-session-title-llm、dsh-workflow 等）+ `@deepseek-ai/cordis-plugin-group`。
+
+### 12.7 测试覆盖（`tests/dsh*.test.mjs` + `e2e/dsh-*.spec.ts`）
+
+- 单测：`dshAgentManager`（会话文件路径编码）、`dshEventProjector`、`dshRuntimeControl`、`dshApiClientBridge`、`dshHostBridge`、`dshApprovalBridge`、`dshCredentials`、`dshHomeDir`（DSH_HOME 解析优先级）、`dshModels`、`dshDefaultModel`、`dshSchema`、`dshPresetComposition`、`dshPresetDisplay`、`dshCredentialRef`、`dshMainExternalize`、`dshPeerDepsPackaged`、`hideChildConsoles`、`pideckPwshPersistent`、`compositeAgentGateway`（按 backend 路由 + 能力缺失拒绝）。
+- e2e（真实 DSH host，临时 DSH_HOME 隔离，不触碰用户 `~/.dsh`）：`dsh-models`（模型列表/切换/思考档位草稿→激活全链路）、`dsh-restart`（重启保留原消息并可续聊）、`dsh-security-plan`（权限预设切换、plan 模式、配置页三分区）、`dsh-title-diag`（标题同步）。
+
+### 12.8 已知缺口与后续
+
+- 能力缺失（按计划保持，UI 隐藏）：编辑/删除历史消息（D13）、图片附件（D14，桥需支持字节载荷）、`/commands` 列表（D15，命令*执行*桥已就绪，列表接口二期）。
+- UI 后置：goals / subagents / skills 的专项呈现（D18 后半）、动态 Cordis 插件管理（D17 后半，目前仅有 agent-loop/shell/web-search 配置分区）。
+- 双 host 同 `$DSH_HOME` 并发运行不支持（与 CLI 同目录并发同理）。
+- 文档待跟进：`src/shared/types/settings.ts` 的 `dshHomeDir` 注释与 `DshHost.resolveDshHomeDir` 实际行为不一致（见 §12.4 #1）；README/CHANGELOG 的 DSH 条目随发版流程维护。

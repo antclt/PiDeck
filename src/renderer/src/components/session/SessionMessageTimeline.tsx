@@ -676,6 +676,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     key={item.id}
                     run={item}
                     sessionId={sessionId}
+                    // 行头署名与后端一致：DSH 会话的回复标 dsh，而非 pi
+                    backend={session?.backend ?? "pi"}
                     fresh={freshMessageIds.has(item.id)}
                     onPreviewImage={props.onPreviewImage}
                     showThinking={props.showThinking}

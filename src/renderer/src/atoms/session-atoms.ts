@@ -2,12 +2,13 @@ import { atom } from "jotai";
 import type { Getter, Setter } from "jotai";
 import { atomFamily, selectAtom } from "jotai/utils";
 import type {
+  AgentBackend,
   AgentRuntimeState,
-	AgentStatus,
-	AgentUiBatchQuestion,
-	AgentUiRequest,
-	ChatMessage,
-	SessionMessagePage,
+  AgentStatus,
+  AgentUiBatchQuestion,
+  AgentUiRequest,
+  ChatMessage,
+  SessionMessagePage,
   SessionRecord,
   SessionRuntimeEvent,
   SessionRuntimeInfo,
@@ -38,6 +39,8 @@ export type SessionRuntimeViewState = {
   createdAt?: number;
   compactionCount?: number;
   noSession?: boolean;
+  /** 运行时后端（pi/dsh）：agents:state 事件透传，侧栏徽章/配对用。 */
+  backend?: AgentBackend;
 };
 
 /** Live 思考段（按稳定 id 索引，与 History msg-thinking-* 同一身份）。 */
@@ -1043,6 +1046,7 @@ export const applySessionRuntimeEventAtom = atom(
             ? payload.compactionCount
             : nextRuntime.compactionCount,
           noSession: payload.noSession === true || nextRuntime.noSession,
+          backend: payload.backend === "dsh" ? "dsh" : (nextRuntime.backend ?? "pi"),
         };
       }
     } else if (event.sourceChannel === "agents:runtime-state" && payload?.state) {

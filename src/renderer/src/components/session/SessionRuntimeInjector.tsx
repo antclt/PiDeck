@@ -132,6 +132,11 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
     ? services.agents.find((a) => a.id === runtime.activeAgentId)
     : undefined;
   const canMutateActiveMessages = runtime.canMutateActiveMessages;
+  // DSH 后端能力集：支持重发与 fork，不支持编辑/删除历史消息（capabilities 缺失，
+  // 禁止硬造等价物）——入口按能力隐藏，与 CompositeAgentGateway 的能力声明一致。
+  const isDshBackend = activeAgent?.backend === "dsh";
+  const canEditOrDeleteMessages = canMutateActiveMessages && !isDshBackend;
+  const canResendOrFork = canMutateActiveMessages;
 
   return (
     <SessionView
@@ -158,10 +163,10 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       onPreviewImage={services.onPreviewImage}
       onOpenFile={services.onOpenFile}
       onDiffFile={services.onDiffFile}
-      onResendUserMessage={canMutateActiveMessages ? services.resendUserMessage : undefined}
-      onEditMessage={canMutateActiveMessages ? services.editMessage : undefined}
-      onDeleteMessage={canMutateActiveMessages ? services.deleteMessage : undefined}
-      onForkMessage={canMutateActiveMessages ? services.forkFromUserMessage : undefined}
+      onResendUserMessage={canResendOrFork ? services.resendUserMessage : undefined}
+      onEditMessage={canEditOrDeleteMessages ? services.editMessage : undefined}
+      onDeleteMessage={canEditOrDeleteMessages ? services.deleteMessage : undefined}
+      onForkMessage={canResendOrFork ? services.forkFromUserMessage : undefined}
       forkingMessageId={services.forkingMessageId}
       onToast={(message: string) => services.showToast(message)}
       onQuickPrompt={(message) => services.insertQuickPrompt(currentSessionId, message)}

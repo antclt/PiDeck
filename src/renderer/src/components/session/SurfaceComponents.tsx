@@ -418,21 +418,31 @@ export function LogoMark({ size = 32 }: { size?: number } = {}) {
 			style={{ width: size, height: size }}
 			aria-label={t("app.logoLabel")}
 		>
-			{/* 使用独立渐变而不是 currentColor，让 LogoMark 在浅色/深色主题下都保持黑底白标的品牌对比。 */}
-			<svg viewBox="140 140 520 520" width={Math.round(size * 0.5625)} height={Math.round(size * 0.5625)} aria-hidden="true">
+			{/* 品牌跳蛛剪影：独立渐变 + 深色大眼睛，让 LogoMark 在浅色/深色主题下都保持黑底银灰标的品牌对比。 */}
+			<svg viewBox="0 0 32 32" width={Math.round(size * 0.5625)} height={Math.round(size * 0.5625)} aria-hidden="true">
 				<defs>
 					<linearGradient id="logo-mark-silver" x1="0.2" y1="0" x2="0.8" y2="1">
-						<stop stopColor="#ffffff" />
-						<stop offset="0.5" stopColor="#f4f4f5" />
-						<stop offset="1" stopColor="#a7a8ab" />
+						<stop stopColor="#e6e6e9" />
+						<stop offset="0.5" stopColor="#c9c9ce" />
+						<stop offset="1" stopColor="#8f8f96" />
 					</linearGradient>
 				</defs>
-				<path
-					fill="url(#logo-mark-silver)"
-					fillRule="evenodd"
-					d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
-				/>
-				<path fill="url(#logo-mark-silver)" d="M517.36 400H634.72V634.72H517.36Z" />
+				<g stroke="url(#logo-mark-silver)" strokeWidth="1.5" strokeLinecap="round" fill="none">
+					<path d="M7.5 15.5C3.5 14 1.5 11 2 7" />
+					<path d="M6.5 17.5C2.5 16.5 0.5 15 0.5 12" />
+					<path d="M6.5 20C3 20 1 21 1 23.5" />
+					<path d="M7.5 22C4.5 23 3.5 25 4.5 27.5" />
+					<path d="M24.5 15.5C28.5 14 30.5 11 30 7" />
+					<path d="M25.5 17.5C29.5 16.5 31.5 15 31.5 12" />
+					<path d="M25.5 20C29 20 31 21 31 23.5" />
+					<path d="M24.5 22C27.5 23 28.5 25 27.5 27.5" />
+					<path d="M12 14.5C10 16.5 9 18.5 10 20" />
+					<path d="M20 14.5C22 16.5 23 18.5 22 20" />
+				</g>
+				<ellipse cx="16" cy="22.5" rx="7" ry="7.5" fill="url(#logo-mark-silver)" />
+				<circle cx="16" cy="10" r="6.8" fill="url(#logo-mark-silver)" />
+				<circle cx="12.3" cy="9" r="1.6" fill="#0a0a0b" />
+				<circle cx="19.7" cy="9" r="1.6" fill="#0a0a0b" />
 			</svg>
 		</div>
 	);

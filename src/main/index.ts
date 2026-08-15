@@ -29,6 +29,13 @@ import {
 } from "./settings/SettingsStore";
 import { acquireVersionSingleInstance, type FocusPayload } from "./singleInstance";
 import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
+import {
+	DEFAULT_DEV_USER_DATA_NAME,
+	isSharedDevBranch,
+	readDevGitBranch,
+	resolveDevUserDataDirName,
+	sanitizeDevBranchSegment,
+} from "./devIsolation";
 import { extractFocusTargetFromArgv } from "./utils/focusTarget";
 import type { Project, StartupWindowMode } from "../shared/types";
 // 使用 ?asset 后缀导入图标，electron-vite 会在构建时将其复制到输出目录并提供正确的运行时路径
@@ -39,21 +46,36 @@ import iconPath from "../../build/icon.png?asset";
 declare const __PIDECK_DEV_BUILD__: boolean;
 
 // 开发态（electron-vite dev）或 dev 构建（dist:win:dev）统一使用 -dev 配置目录，
-// 避免与正式版（pi-desktop / PiDeck）的数据、单实例锁和通知归属互相污染。
+// 避免与正式版（pi-desktop / phids）的数据、单实例锁和通知归属互相污染。
 const isDevBuild = !app.isPackaged || __PIDECK_DEV_BUILD__;
 
 // 开发态与正式版隔离 userData。
 // 否则 npm run dev 会与已安装的 PiDeck 共用数据/锁，表现为「开发启动被复用到正式版窗口」。
+// 未打包的 npm run dev：功能分支再按 git 分支名拆目录（pi-desktop-dev-<branch>），
+// 避免多个 worktree 同时启动共用 catalog / 单实例锁 / DSH home。main/dev 仍用历史目录。
+// 打包的 dist:win:dev 仍固定 pi-desktop-dev（与脚本约定一致，复用现有开发配置）。
 // 必须在读取 settings / 版本单实例锁之前设置。
+const isolateDevByGitBranch = !app.isPackaged;
+const devGitBranch = isolateDevByGitBranch ? readDevGitBranch() : undefined;
+const devUserDataDirName = isolateDevByGitBranch
+	? resolveDevUserDataDirName(devGitBranch)
+	: DEFAULT_DEV_USER_DATA_NAME;
 if (isDevBuild) {
-	// 显式固定为 pi-desktop-dev：dev 构建的 productName 是 PiDeckDev，
+	// 显式固定目录名：dev 构建的 productName 是 phidsDev，
 	// 默认 userData 会落在 %APPDATA%\PiDeckDev，必须指回 dev 配置目录以复用现有配置。
 	// 例外：命令行显式传入 --user-data-dir（e2e 隔离、多实例调试）时尊重该路径，
 	// 否则 e2e 会读到本机真实开发数据（settings/projects 全部污染测试断言）。
 	const explicitUserDataDir = process.argv.find((arg) => arg.startsWith("--user-data-dir="));
 	if (!explicitUserDataDir) {
-		app.setPath("userData", join(app.getPath("appData"), "pi-desktop-dev"));
+		app.setPath("userData", join(app.getPath("appData"), devUserDataDirName));
 	}
+} else {
+	// 正式版固定 userData 目录为 pi-desktop（与历史安装版一致）：asar 内 package.json
+	// 无 productName 时 Electron 默认取 name（pi-desktop），但显式固定可避免未来
+	// 改名/加 productName 后 userData 漂移到 %APPDATA%\phids，导致旧数据（settings/
+	// projects/会话目录/DSH home 等）在新版本里读不到。与 dev 分支同一 setPath 模式，
+	// 必须在读取 settings / 版本单实例锁之前设置。
+	app.setPath("userData", join(app.getPath("appData"), "pi-desktop"));
 }
 
 // Linux XWayland 兼容层：仅当桌面宠物启用时才强制 ozone-platform=x11（#108，
@@ -82,7 +104,11 @@ app.commandLine.appendSwitch("js-flags", "--max-old-space-size=384");
 // Windows 系统通知必须设置 AppUserModelID，否则通知不显示、点击事件不触发。
 // dev 与正式版使用不同 AppID，避免通知中心归属混淆（与 dev userData 隔离思路一致）。
 if (process.platform === "win32") {
-	app.setAppUserModelId(isDevBuild ? "com.ayuayue.pi-desktop-dev" : "com.ayuayue.pi-desktop");
+	const devAppId =
+		devUserDataDirName === DEFAULT_DEV_USER_DATA_NAME
+			? "com.ayuayue.pi-desktop-dev"
+			: `com.ayuayue.pi-desktop-dev.${sanitizeDevBranchSegment(devGitBranch ?? "detached")}`;
+	app.setAppUserModelId(isDevBuild ? devAppId : "com.ayuayue.pi-desktop");
 }
 
 // 注册 pideck:// 自定义协议：系统通知点击（toast activationType="protocol"）通过该协议唤起应用，
@@ -189,6 +215,9 @@ import type {
 import { ProjectStore } from "./projects/ProjectStore";
 import { FileSystemService } from "./fs/FileSystemService";
 import { AgentManager } from "./pi/AgentManager";
+import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
+import { DshHost } from "./dsh/DshHost";
+import { DshAgentManager } from "./dsh/DshAgentManager";
 import { PiLocator } from "./pi/PiLocator";
 import { testPiProxy } from "./pi/PiProxyTester";
 import { SessionScanner } from "./sessions/SessionScanner";
@@ -303,6 +332,11 @@ let worktreeService: WorktreeService;
 let gitService: GitService;
 let piLocator: PiLocator;
 let agentManager: AgentManager;
+/** DSH 深融合宿主（懒启动）与后端网关；未创建 DSH 会话前不 boot，零成本。 */
+let dshHost: DshHost;
+let dshAgentManager: DshAgentManager;
+/** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
+let compositeAgentGateway: CompositeAgentGateway | undefined;
 let configManager: ConfigManager;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -351,10 +385,13 @@ function emitSessionRuntimeEvent(
 				canAttachRuntimeMetadata(entry, tab) &&
 				(entry?.filePath !== tab.sessionPath || entry.piSessionId !== tab.sessionId)
 			) {
+				// DSH 的 agents:state 也带 host 会话文件路径：文件配对分支同步回写
+				// dshSessionId（标题同步 findByDshSessionId / 重开 attach 依赖）。
 				void sessionCatalog.attachRuntime({
 					sessionId: runtimeBinding.sessionId,
 					filePath: tab.sessionPath,
 					piSessionId: tab.sessionId,
+					dshSessionId: tab.backend === "dsh" ? tab.sessionId : undefined,
 				}).catch(() => undefined);
 			}
 		}
@@ -1268,7 +1305,7 @@ function setupTray() {
 	// iconPath 由 electron-vite 的 ?asset 后缀自动解析，打包后也能正确定位
 	const icon = nativeImage.createFromPath(iconPath);
 	tray = new Tray(icon.resize({ width: 16, height: 16 }));
-	tray.setToolTip("PiDeck");
+	tray.setToolTip("phids");
 
 	// 双击托盘图标恢复窗口（Windows 常见交互）
 	tray.on("double-click", () => {
@@ -1518,7 +1555,10 @@ async function createWindow() {
 		height: startupBounds.height,
 		minWidth: 880,
 		minHeight: 640,
-		title: "",
+		// 多 worktree 并行 dev：标题带分支名，任务栏/Alt-Tab 一眼区分窗口
+		title: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch)
+			? `phids · ${devGitBranch}`
+			: "phids",
 		icon: iconPath,
 		frame: windowOptions.frame,
 		titleBarStyle: windowOptions.titleBarStyle,
@@ -2130,6 +2170,13 @@ function registerFeishuIpc() {
 async function sendAgentPromptWithIntegrations(
 	input: SendPromptInput,
 ): Promise<SendPromptResult> {
+	// 多后端路由：非 pi 后端（dsh/未来新增后端）不经过 pi 专属的飞书/扩展链路，
+	// 按 agentId 交给合成网关路由到所属后端网关（pi 后端继续走下方集成链路）。
+	const gateway = compositeAgentGateway;
+	const agentTab = gateway?.list().find((item) => item.id === input.agentId);
+	if (gateway && agentTab && agentTab.backend !== "pi") {
+		return gateway.sendPrompt(input);
+	}
 	const bridge = feishuBridge;
 	const bridgeConnected = bridge?.getStatus().status === "connected";
 	const hasFeishuBinding = bridgeConnected && bridge.hasSessionBinding(input.agentId);
@@ -2272,6 +2319,43 @@ function registerIpc() {
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
+		listDshModels: () => dshHost.listModels(),
+		listDshProviders: () => dshHost.listProviders(),
+		listDshAgentPresets: () => dshHost.listAgentPresets(),
+		getDshDefaultModel: () => Promise.resolve(dshHost.getDefaultModelSelection()),
+		getDshStatus: () => dshHost.getStatus(),
+		describeDshSettings: () => dshHost.describeSettings(),
+		updateDshSettings: (ns, patch, expectedRevision) => dshHost.updateSettings(ns, patch, expectedRevision),
+		describeDshCredentials: (refs) => dshHost.describeCredentials(refs),
+		setDshCredential: (ref, value) => dshHost.setCredential(ref, value),
+		unsetDshCredential: (ref) => dshHost.unsetCredential(ref),
+		readDshCredential: (ref) => dshHost.readCredentialValue(ref),
+		openDshDocument: () => dshHost.openDocument(),
+		restartDshHost: async () => {
+			// 切换 DSH_HOME 前先停掉全部活跃 DSH 会话（host 侧会话仍在 $DSH_HOME
+			// 持久化，catalog 保留 dshSessionId，重新打开会话时 attach 恢复），
+			// 避免旧目录的 mux 悬挂在已 dispose 的 transport 上；再重启 host。
+			await dshAgentManager.stopAll();
+			await dshHost.restart();
+			return true;
+		},
+		readDshHistoryPage: (dshSessionId, beforeSeq, pageSize) =>
+			dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
+		isDshAgent: (agentId) =>
+			dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
+		forkDshAgentSession: async (target, entryId) => {
+			// DSH fork：runtime 已原地换绑到新会话（agentId 不变，焦点会话 id 不变），
+			// 这里只需把 catalog 的 dshSessionId 同步为新 fork 会话，重启后 attach 正确。
+			const result = await dshAgentManager.forkSession(target.agentId, entryId);
+			const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
+			if (tab?.sessionId) {
+				await sessionCatalog.attachRuntime({
+					sessionId: target.sessionId,
+					dshSessionId: tab.sessionId,
+				});
+			}
+			return { ...result };
+		},
 	});
 
 	// ── 启动预扫描（2026-08 展开项目卡顿优化）──
@@ -2392,6 +2476,7 @@ function registerIpc() {
 			},
 		},
 		RELEASES_URL,
+		devBranch: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch) ? devGitBranch : undefined,
 	});
 
 	registerStoreIpc({
@@ -2552,6 +2637,40 @@ app.whenReady().then(async () => {
 		(key) => Boolean(key && feishuBridge?.hasSessionBinding(key)),
 		// 通知点击跳转需要 record.id（renderer 按它索引会话）；agentId → record.id 由 coordinator 维护。
 		(agentId) => sessionRuntimeCoordinator.getSessionId(agentId),
+	);
+	// DSH 后端：懒启动（首个 DSH 会话创建时 boot），见 docs/dsh-agent-backend-plan.md。
+	// DSH_HOME 可用设置 dshHomeDir 覆盖（用户自己的 ~/.dsh 等），空串 = 应用私有目录。
+	dshHost = new DshHost(
+		() => app.getPath("userData"),
+		() => app.getAppPath(),
+		undefined,
+		() => settingsStore.get().dshHomeDir ?? "",
+	);
+	dshAgentManager = new DshAgentManager(
+		dshHost,
+		(projectId) => projectStore.get(projectId),
+		// 审批自动放行：运行时读取设置（即时生效，无需重启 host），见 settings.ts dshApprovalAutoAllow。
+		() => settingsStore.get().dshApprovalAutoAllow === true,
+		// DSH host 会话标题变化（attach 初值 / session/title 事件 / rename）写回 catalog：
+		// DSH 会话没有 pi 会话文件，标题只存在于 host（dsh-session-title fold），
+		// 不写回则侧栏/重启后一直显示 draft 占位名（如「pi-desktop DSH」）。
+		// 更新后推送 catalog-refreshed，渲染层 useProjectSync 静默重拉刷新侧栏标题。
+		(dshSessionId, title) => {
+			const entry = sessionCatalog?.findByDshSessionId(dshSessionId);
+			if (!entry || entry.title === title) return;
+			void sessionCatalog.update(entry.id, { title }).then(() => {
+				// index.ts 作用域用模块级 mainWindow（本文件没有 getMainWindow 助手）
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+				}
+			}).catch((error: unknown) => {
+				void appLogger.warn("session", "DSH title sync to catalog failed", {
+					dshSessionId,
+					title,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+		},
 	);
 	webServiceManager = new WebServiceManager({
 		// dev 模式（electron-vite dev 不产出 out/renderer 构建物）下，静态资源
@@ -2757,13 +2876,16 @@ app.whenReady().then(async () => {
 		},
 	);
 	await sessionCatalog.load();
+	// 多后端网关装配：pi + dsh（DSH 懒启动，未使用不 boot）。
+	// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
+	compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 	sessionRuntimeCoordinator = new SessionRuntimeCoordinator(
 		sessionCatalog,
-		agentManager,
+		compositeAgentGateway,
 		sendAgentPromptWithIntegrations,
 		appLogger,
 	);
-	agentManager.onOutput((sourceChannel, payload) => {
+	compositeAgentGateway.onOutput((sourceChannel, payload) => {
 		if (sourceChannel === ipcChannels.agentsState && Array.isArray(payload)) {
 			for (const tab of payload) {
 				if (tab && typeof tab === "object" && typeof tab.id === "string") {
@@ -3023,6 +3145,8 @@ app.on("before-quit", () => {
 	void webServiceManager?.stop();
 	terminalManager?.closeAll();
 	agentManager?.stopAll();
+	// DSH host 退出清理（懒启动未 boot 时为 no-op）
+	void dshHost?.dispose();
 	petSystem?.stop();
 	petSystem = null;
 });

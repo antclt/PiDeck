@@ -1,5 +1,6 @@
 import type { MutableRefObject } from "react";
 import type {
+  AgentBackend,
   CreateAnonymousSessionResult,
   Project,
   SessionRecord,
@@ -36,8 +37,8 @@ export interface UseSessionActionsOptions {
       archiveRecord: (sessionId: string) => Promise<boolean>;
       unarchiveRecord: (archivedPath: string) => Promise<boolean>;
       listArchived: () => Promise<SessionSummary[]>;
-      createDraft: (input: { projectId: string; title: string } & SessionLaunchPreferences) => Promise<SessionRecord>;
-      createAnonymous: (input: { projectId: string; title: string } & SessionLaunchPreferences) => Promise<CreateAnonymousSessionResult>;
+      createDraft: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<SessionRecord>;
+      createAnonymous: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<CreateAnonymousSessionResult>;
     };
   };
   showToast: (message: string, duration?: number) => void;
@@ -220,6 +221,8 @@ export function useSessionActions(options: UseSessionActionsOptions) {
   async function createSessionDraft(
     projectId = activeProjectId,
     preferences: SessionLaunchPreferences = {},
+    // 新建会话默认 DSH 后端（用户确认）；旧会话缺省仍按 pi 语义读取。
+    backend: AgentBackend = "dsh",
   ): Promise<SessionRecord | undefined> {
     if (!projectId || creatingSessionDraftRef.current.has(projectId)) return undefined;
     const project = projects.find((item) => item.id === projectId);
@@ -228,7 +231,8 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     try {
       const session = await api.sessions.createDraft({
         projectId,
-        title: `${project.name} agent`,
+        title: backend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
+        backend,
         ...preferences,
       });
       upsertSession(session);
@@ -245,6 +249,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
   async function createAnonymousSession(
     projectId = activeProjectId,
     preferences: SessionLaunchPreferences = {},
+    backend: AgentBackend = "dsh",
   ): Promise<SessionRecord | undefined> {
     if (!projectId || creatingSessionDraftRef.current.has(projectId)) return undefined;
     const project = projects.find((item) => item.id === projectId);
@@ -254,6 +259,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
       const { session } = await api.sessions.createAnonymous({
         projectId,
         title: t("app.anonymousChatTitle", { name: project.name }),
+        backend,
         ...preferences,
       });
       upsertSession(session);

@@ -9,6 +9,7 @@ import {
 } from "react";
 import type {
   ChatMessage,
+  ComposerAgentMode,
   FileTreeNode,
   ImageContent,
   PiCommand,
@@ -30,6 +31,7 @@ import {
   setSessionComposerModeAtom,
   setSessionDraftAtom,
   setSessionSendStateAtom,
+  upsertSessionAtom,
 } from "../atoms";
 import {
   getComposerEnterIntent,
@@ -81,7 +83,7 @@ import {
   requireSessionCommand,
   toSessionRuntimeTarget,
 } from "../utils/sessionCommands";
-import { isUserFacingSessionStart } from "./useSessionTimelineController";
+import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
 
 /**
@@ -259,8 +261,29 @@ export function useSessionComposerController(
 
   const draft = drafts[sessionId] ?? "";
   const attachments = attachmentsBySession[sessionId] ?? [];
-  const mode = modes[sessionId] ?? "normal";
+  // DSH 后端：plan 模式由 host 持有（dsh-plan-mode 的 plan/mode 会话事件），
+  // 本地 mode atom 只承载 imagegen；plan 状态以 runtime state 为准（下一条消息生效）。
+  const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh";
+  const dshPlanActive = isDshBackend && runtime?.state?.planModeActive === true;
+  const mode: ComposerAgentMode = isDshBackend
+    ? dshPlanActive
+      ? "plan"
+      : (modes[sessionId] === "imagegen" ? "imagegen" : "normal")
+    : (modes[sessionId] ?? "normal");
   const sendState = sendStates[sessionId] ?? { status: "idle" as const };
+  // DSH 部署默认模型选择（settings.yaml agent-default-model）：草稿/未激活会话
+  // 的底栏与选择器用它展示默认模型/思考档位（host 会话创建前没有 runtime state）。
+  const [dshDefault, setDshDefault] = useState<{ provider: string; model: string; reasoningEffort?: string } | undefined>(undefined);
+  useEffect(() => {
+    if (!isDshBackend) return;
+    let cancelled = false;
+    void desktopApi.sessions.getDshDefaultModel().then((next) => {
+      if (!cancelled) setDshDefault(next);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isDshBackend]);
   const editorRef = useRef<HTMLDivElement | null>(null);
   // 程序化光标请求（带归属 forValue，见 composer/types.ts 的 ComposerCaretRequest）；
   // 编辑器只在内容同步到 forValue 的同一趟 layout pass 配对消费，过期请求会被丢弃。
@@ -333,8 +356,27 @@ export function useSessionComposerController(
   }, [sessionId, setAttachmentsAtom]);
 
   const setMode = useCallback((nextMode: "normal" | "plan" | "imagegen") => {
+    // DSH 后端：plan 开关走 host /plan 命令（host slash 桥执行，plan/mode 事件
+    // 落会话日志，下一条消息的步骤才生效）；imagegen 仍是本地 UI 模式。
+    if (isDshBackend && (nextMode === "plan" || nextMode === "normal")) {
+      const command = nextMode === "plan" ? "/plan" : "/plan off";
+      void desktopApi.sessions.sendPrompt({
+        sessionId,
+        requestId: crypto.randomUUID(),
+        message: command,
+      }).then((result) => {
+        if (!result.accepted) {
+          showNotice(result.error ?? t("dshPlan.switchFailed"), 4000);
+        } else if (nextMode === "plan") {
+          showNotice(t("dshPlan.pendingNotice"), 3000);
+        }
+      }).catch((error) => {
+        showNotice(error instanceof Error ? error.message : String(error), 4000);
+      });
+      return;
+    }
     setModeAtom({ sessionId, mode: nextMode });
-  }, [sessionId, setModeAtom]);
+  }, [isDshBackend, sessionId, setModeAtom]);
 
   const loadTemplates = useCallback(async () => {
     const token = templateRequestGateRef.current.begin(templateKey);
@@ -542,7 +584,7 @@ export function useSessionComposerController(
     return { top: "auto", bottom: 16, left };
   }, [cursor, suggestionsOpen]);
 
-  const isBusy = runtime?.status === "running" || Boolean(runtime?.state?.isStreaming);
+  const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
   // 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
   const isStarting = isUserFacingSessionStart(sendState.status);
   const hasContent = Boolean(draft.trim() || attachments.length);
@@ -1167,6 +1209,29 @@ export function useSessionComposerController(
     setSendStateAtom({ sessionId, state: { status: "idle" } });
   }, [sessionId, setSendStateAtom]);
 
+  const upsertSession = useSetAtom(upsertSessionAtom);
+
+  /**
+   * 切换后端（pi ↔ dsh）：仅草稿期可用。
+   * 会话一旦激活（有 runtime 或 record 已 active）即锁定后端——pi 会话文件（JSONL）
+   * 与 DSH 会话（host session log）格式不同，中途切换会导致时间线消息来源混乱、
+   * 同步渲染不可靠。激活后 UI 不再渲染切换器（changeBackend 返回 undefined）。
+   */
+  const backendLocked = Boolean(runtime?.agentId) || record?.status === "active";
+  const changeBackend = useCallback(async (next: "pi" | "dsh") => {
+    if (backendLocked) return;
+    try {
+      const updated = await desktopApi.sessions.updateRecord(sessionId, {
+        backend: next,
+        model: null,
+        thinkingLevel: null,
+      });
+      upsertSession(updated);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : String(error), 4000);
+    }
+  }, [backendLocked, sessionId, upsertSession]);
+
   const compact = useCallback(async () => {
     const target = toSessionRuntimeTarget(sessionId, runtime);
     if (!target) {
@@ -1206,6 +1271,15 @@ export function useSessionComposerController(
     sessionId,
     record,
     runtime,
+    backend: record?.backend ?? "pi",
+    /** 草稿期可切换后端；激活后锁定（undefined → UI 隐藏切换器）。 */
+    changeBackend: backendLocked ? undefined : changeBackend,
+    /** DSH 部署默认模型（settings.yaml agent-default-model）；底栏/选择器展示用。 */
+    dshDefaultModel: dshDefault
+      ? { provider: dshDefault.provider, modelId: dshDefault.model, modelName: dshDefault.model }
+      : undefined,
+    /** DSH 部署默认思考档位（agent-default-model.reasoningEffort）。 */
+    dshDefaultThinkingLevel: dshDefault?.reasoningEffort,
     draft,
     attachments,
     mode,
