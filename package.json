@@ -163,13 +163,18 @@
         "nsis",
         "portable",
         "zip"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-win.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "mac": {
       "icon": "build/icon.icns",

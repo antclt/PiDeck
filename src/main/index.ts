@@ -68,6 +68,13 @@ if (isDevBuild) {
 	if (!explicitUserDataDir) {
 		app.setPath("userData", join(app.getPath("appData"), devUserDataDirName));
 	}
+} else {
+	// 正式版固定 userData 目录为 pi-desktop（与历史安装版一致）：asar 内 package.json
+	// 无 productName 时 Electron 默认取 name（pi-desktop），但显式固定可避免未来
+	// 改名/加 productName 后 userData 漂移到 %APPDATA%\phids，导致旧数据（settings/
+	// projects/会话目录/DSH home 等）在新版本里读不到。与 dev 分支同一 setPath 模式，
+	// 必须在读取 settings / 版本单实例锁之前设置。
+	app.setPath("userData", join(app.getPath("appData"), "pi-desktop"));
 }
 
 // Linux XWayland 兼容层：仅当桌面宠物启用时才强制 ozone-platform=x11（#108，
