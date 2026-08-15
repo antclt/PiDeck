@@ -16,6 +16,7 @@ import type {
 // DSH 会话 id 品牌类型（零运行时成本，仅类型擦除）
 import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import { ipcChannels } from "../../shared/ipc";
+import { getAppLogger } from "../logging/sharedLogger";
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
 import type { DshHost } from "./DshHost";
 import { projectDshEvent, type DshProjection } from "./dshEventProjector";
@@ -27,6 +28,7 @@ import {
 import { toDshAvailableModels } from "./dshModels";
 import {
 	approvalUiRequest,
+	buildDshRejectValue,
 	buildDshRespondValue,
 	parseDshApprovalFrame,
 	parseDshQuestionFrame,
@@ -96,6 +98,10 @@ export class DshAgentManager implements SessionAgentGateway {
 	private readonly outputListeners = new Set<(channel: string, payload: unknown) => void>();
 	/** 待应答的 DSH server-request 帧：rpcId → frame（approval/question 共用一张表）。 */
 	private readonly pendingResponses = new Map<string, DshApprovalFrame | DshQuestionFrame>();
+	/** 审批/提问 pending 超时定时器（D5：用户不响应时自动拒绝，避免永久挂起）。 */
+	private readonly pendingTimers = new Map<string, NodeJS.Timeout>();
+	/** pending 审批/提问的超时时长（10 分钟：Ask 弹窗常驻等待太久无意义）。 */
+	private static readonly PENDING_RESPONSE_TIMEOUT_MS = 10 * 60_000;
 
 	constructor(
 		private readonly dshHost: DshHost,
@@ -106,7 +112,13 @@ export class DshAgentManager implements SessionAgentGateway {
 		 *  装配层据此写回 catalog 并推送侧栏刷新——DSH 会话没有 pi 会话文件，
 		 *  标题只存在于 host（dsh-session-title 的 session/title 事件 fold）。 */
 		private readonly onTitleChanged?: (dshSessionId: string, title: string) => void,
-	) {}
+	) {
+		// E4：host 崩溃自动重启完成后恢复所有 runtime（host 内存已丢失：流式/工具/
+		// 压缩状态停在崩溃前，mux 重连后新 host 没有已订阅会话，事件不会再推）。
+		this.dshHost.onHostReady(() => {
+			void this.recoverAfterHostRestart();
+		});
+	}
 
 	// ── 网关身份与订阅 ─────────────────────────────────────────────────────────
 
@@ -219,6 +231,11 @@ export class DshAgentManager implements SessionAgentGateway {
 					runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 				}
 				runtime.messages = runtime.projection.messages;
+				// 初始 attach 也推进 lastProjectedSeq：避免 mux 重连补帧重复投影（D6）。
+				const lastEntry = entries[entries.length - 1];
+				if (lastEntry && typeof lastEntry.event.seq === "number") {
+					runtime.lastProjectedSeq = lastEntry.event.seq;
+				}
 			}
 		}
 		// attach 初值同步：host 里已有标题（list 投影）时立即写回 catalog——
@@ -235,6 +252,25 @@ export class DshAgentManager implements SessionAgentGateway {
 	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
 		const runtime = this.runtime(input.agentId);
 		const client = this.requireClient();
+		// DSH 一期不支持图片附件（桥 body 仅字符串，见 dshHostBridge.ts）与宿主指令
+		// （agentMessage）/steer 语义：显式拒绝而非静默丢弃（D2）。渲染层已对 DSH
+		// 隐藏附件入口（F1），这里兜底防御直连主进程的调用方。
+		if (input.images && input.images.length > 0) {
+			return {
+				accepted: false,
+				error: "DSH images are not supported yet",
+				delivery: "rejected",
+				i18nKey: "session.sendDshImagesUnsupported",
+			};
+		}
+		if (input.agentMessage || input.streamingBehavior) {
+			return {
+				accepted: false,
+				error: "DSH host instructions / streaming behavior are not supported yet",
+				delivery: "rejected",
+				i18nKey: "session.sendDshUnsupportedPayload",
+			};
+		}
 		// host 侧 bug 规避：dsh-agent-loop 的 slash 命令步骤（/permission /plan 等被
 		// pideck-slash-bridge 在 pre-step reject）会让本轮以 blocked 收场，且 reject 路径
 		// 跳过 pending-inbox 检查；若此时 inbox 里已 splice 下一条消息（本回合进行中到达
@@ -338,8 +374,41 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (!runtime) return;
 		runtime.muxAbort?.abort();
 		await runtime.pump?.catch(() => undefined);
+		// D1/D5：stop 前解阻塞 pending 审批/提问帧——host 侧工具调用在等 client-response，
+		// 不应答则回合永不结束；且 runtime 删除后旧弹窗应答（sendUIResponse）会因
+		// pendingResponses 已清而 no-op，弹窗残留。这里以拒绝收尾 + 通知渲染层 completed。
+		await this.rejectAllPending(agentId).catch(() => undefined);
 		this.runtimes.delete(agentId);
 		this.emit(ipcChannels.agentsState, this.list());
+	}
+
+	/** 对全部 pending 审批/提问帧应答「拒绝」并清表（abort/stop 共用，D1/D5）。
+	 * 与 pi abort 对每个 pending UI 请求发 value:null 解阻塞同语义。 */
+	private async rejectAllPending(agentId: string): Promise<void> {
+		if (this.pendingResponses.size === 0) return;
+		const client = this.requireClient();
+		const pending = [...this.pendingResponses.entries()];
+		this.pendingResponses.clear();
+		for (const [requestId, frame] of pending) {
+			this.clearPendingTimeout(requestId);
+			const value = buildDshRejectValue(frame);
+			await client.respond({
+				type: "client-response",
+				// rpcId 来自 mux 帧（持久化为普通字符串），respond 需要品牌类型：边界一次性转换。
+				rpcId: requestId as import("@deepseek-ai/dsh-host-apiproxy").RpcId,
+				result: { ok: true, value },
+			}).catch(() => undefined);
+			this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true });
+		}
+	}
+
+	/** 清除 pending 超时定时器（应答/拒绝/清理时调用）。 */
+	private clearPendingTimeout(requestId: string): void {
+		const timer = this.pendingTimers.get(requestId);
+		if (timer) {
+			clearTimeout(timer);
+			this.pendingTimers.delete(requestId);
+		}
 	}
 
 	/** 停掉全部活跃 DSH 会话（host 重启/目录切换前调用）。
@@ -349,6 +418,96 @@ export class DshAgentManager implements SessionAgentGateway {
 		const agentIds = [...this.runtimes.keys()];
 		for (const agentId of agentIds) {
 			await this.stop(agentId);
+		}
+	}
+
+	/**
+	 * mux 断连重连后的历史补帧（D6）：断连窗口内已完成的回合事件不会重放
+	 * （mux 只推实时事件），从 session.history 拉尾部，按 seq 跳过已投影事件，
+	 * 只补缺失部分。失败不阻断（下一条消息会正常激活 host 侧 agent）。
+	 */
+	private async backfillHistory(runtime: DshAgentRuntime): Promise<void> {
+		try {
+			const client = this.requireClient();
+			const history = await client.sessions.history({
+				sessionId: runtime.sessionId,
+				maxMessages: 200,
+			}).catch(() => null);
+			if (!history?.result.ok) return;
+			const entries = (history.result.value.events ?? [])
+				.map((entry) => ({ event: entry.event, view: entry.view }))
+				.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
+				.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+			let projection = runtime.projection;
+			let lastSeq = runtime.lastProjectedSeq ?? 0;
+			for (const { event, view } of entries) {
+				const seq = typeof event?.seq === "number" ? event.seq : 0;
+				if (seq <= lastSeq) continue;
+				projection = projectDshEvent(projection, event, runtime.tab.id, view);
+				if (seq > lastSeq) lastSeq = seq;
+			}
+			runtime.projection = projection;
+			runtime.messages = projection.messages;
+			runtime.lastProjectedSeq = lastSeq;
+			this.emitMessages(runtime);
+		} catch (error) {
+			getAppLogger()?.warn("dsh-agent", "mux backfill failed", {
+				sessionId: String(runtime.sessionId),
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	/**
+	 * host 崩溃自动重启完成后的恢复（E4）：
+	 * - 重置所有 runtime 的运行态（isStreaming/isCompacting/executingTool/control/thinking）：
+	 *   host 内存已丢失，mux 重连后新 host 没有已订阅会话、旧回合事件不会再推，
+	 *   UI 不能停在「运行中/压缩中/工具执行中」；
+	 * - 重新拉 history 尾部补齐投影（断连窗口内可能缺帧，恢复到最近的完整历史）；
+	 * - 推送 agentsState / messages / runtime state，渲染层即时刷新。
+	 * 会话数据由 $DSH_HOME 持久化；用户下一条消息 prompt 会重新激活 host 侧 agent。
+	 */
+	private async recoverAfterHostRestart(): Promise<void> {
+		for (const runtime of this.runtimes.values()) {
+			const agentId = runtime.tab.id;
+			try {
+				const client = this.requireClient();
+				runtime.isStreaming = false;
+				runtime.isCompacting = false;
+				runtime.executingTool = undefined;
+				runtime.control = initialDshControl();
+				runtime.thinkingId = undefined;
+				runtime.thinkingStartedAt = undefined;
+				const history = await client.sessions.history({
+					sessionId: runtime.sessionId,
+					maxMessages: 200,
+				}).catch(() => null);
+				if (history?.result.ok) {
+					const entries = (history.result.value.events ?? [])
+						.map((entry) => ({ event: entry.event, view: entry.view }))
+						.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
+						.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+					let projection = projectDshEvent(undefined, undefined, agentId);
+					for (const { event, view } of entries) {
+						projection = projectDshEvent(projection, event, agentId, view);
+					}
+					runtime.projection = projection;
+					runtime.messages = projection.messages;
+					// 恢复后推进 lastProjectedSeq（D6 重连补帧跳过基准）。
+					const lastEntry = entries[entries.length - 1];
+					if (lastEntry && typeof lastEntry.event.seq === "number") {
+						runtime.lastProjectedSeq = lastEntry.event.seq;
+					}
+				}
+				this.emit(ipcChannels.agentsState, this.list());
+				this.emitMessages(runtime);
+				this.emitRuntimeState(agentId);
+			} catch (error) {
+				// 单个会话恢复失败不阻断其余会话；下一条用户消息仍会重新激活。
+				getAppLogger()?.warn("dsh-agent", `host restart recovery failed for ${agentId}`, {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
 		}
 	}
 
@@ -371,6 +530,9 @@ export class DshAgentManager implements SessionAgentGateway {
 			runtime.thinkingId = undefined;
 			runtime.thinkingStartedAt = undefined;
 		}
+		// D1：abort 必须解阻塞 pending 审批/提问帧——host 侧工具调用在等 client-response，
+		// 不应答则回合永不结束（后续发送被 waitForIdle 卡满 30s），Ask 弹窗残留。
+		await this.rejectAllPending(agentId).catch(() => undefined);
 		await client.sessions.cancel({ sessionId: runtime.sessionId }).catch(() => undefined);
 		this.emitRuntimeState(agentId);
 		this.emit(ipcChannels.agentsState, this.list());
@@ -393,6 +555,9 @@ export class DshAgentManager implements SessionAgentGateway {
 		// wire 上没有显式 compact RPC（计划 D11）：以 queue 提示词触发，随后返回当前 runtime 状态。
 		const runtime = this.runtime(agentId);
 		const client = this.requireClient();
+		// 与 sendPrompt 同一串行化约束：上一回合（含命令回合）idle 后才发 /compact，
+		// 避免压缩指令被 host 拼进运行中回合（D4）。
+		await this.waitForIdle(agentId);
 		const commandText = prompt && prompt.trim()
 			? `/compact ${prompt.trim()}`
 			: "/compact";
@@ -404,6 +569,9 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (!sent.result.ok) {
 			throw new Error(`dsh /compact failed: ${JSON.stringify(sent.result.error)}`);
 		}
+		// 压缩进行态：turn/end（命令回合收口）到达后由 mux 复位（D4）。
+		runtime.isCompacting = true;
+		this.emitRuntimeState(agentId);
 		return this.getRuntimeState(agentId);
 	}
 
@@ -411,6 +579,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const runtime = this.runtime(agentId);
 		return {
 			isStreaming: runtime.isStreaming,
+			isCompacting: runtime.isCompacting === true,
 			isExecutingTool: runtime.executingTool !== undefined,
 			executingToolName: runtime.executingTool,
 			modelName: runtime.model?.model,
@@ -486,6 +655,21 @@ export class DshAgentManager implements SessionAgentGateway {
 		const message = this.runtime(agentId).messages.find((item) => item.id === messageId);
 		if (!message) throw new Error(`Message not found: ${messageId}`);
 		return { text: message.text };
+	}
+
+	/**
+	 * 「查看完整输出」：DSH 会话没有 pi 会话文件可定位（pi 走 SessionFileEditor 文件路径），
+	 * 工具结果全文随投影消息保存在 meta.fullText（dshEventProjector tool/result 分支写入），
+	 * 这里直接从运行时消息返回；历史会话（未激活）不在此列，由 readDshHistoryPage 路径覆盖。
+	 */
+	async readMessageFullText(agentId: string, messageId: string): Promise<{ text: string }> {
+		const runtime = this.runtime(agentId);
+		const message = runtime.messages.find((item) => item.id === messageId);
+		if (!message) throw new Error(`Message not found: ${messageId}`);
+		const fullText = typeof message.meta?.fullText === "string"
+			? message.meta.fullText
+			: message.text;
+		return { text: fullText };
 	}
 
 	async setModel(agentId: string, provider: string, modelId: string): Promise<unknown> {
@@ -571,22 +755,39 @@ export class DshAgentManager implements SessionAgentGateway {
 	async forkSession(agentId: string, entryId: string): Promise<{ text?: string }> {
 		// DSH fork：session.fork 在 atSeq 处裁剪出新会话，然后把当前 runtime 换绑过去
 		// （保留 agentId，模拟 pi /fork 的「当前会话变成 fork 结果」语义）。
-		const runtime = this.runtime(agentId);
 		const seqMatch = /^seq:(\d+)$/.exec(entryId);
 		if (!seqMatch) throw new Error(`Invalid dsh fork entryId: ${entryId}`);
-		const atSeq = Number(seqMatch[1]);
+		return this.replaceWithFork(agentId, Number(seqMatch[1]));
+	}
+
+	/** DSH clone = fork 无锚点：wire 语义是复制到源会话最后一个完成的 turn（完整副本）。 */
+	async cloneSession(agentId: string): Promise<{ text?: string }> {
+		return this.replaceWithFork(agentId, undefined);
+	}
+
+	/**
+	 * session.fork + 换绑共用流程：fork 出新 host 会话 → 停旧 mux → runtime 换绑
+	 * 新会话并拉历史。atSeq=undefined 表示复制完整会话（clone）。
+	 */
+	private async replaceWithFork(
+		agentId: string,
+		atSeq: number | undefined,
+	): Promise<{ text?: string }> {
+		const runtime = this.runtime(agentId);
 		const client = this.requireClient();
 		const forked = await client.sessions.fork({
 			sessionId: runtime.sessionId,
-			atSeq,
+			...(atSeq !== undefined ? { atSeq } : {}),
 		});
 		if (!forked.result.ok) {
 			throw new Error(`dsh session.fork failed: ${JSON.stringify(forked.result.error)}`);
 		}
 		const newSessionId = forked.result.value.sessionId;
-		const forkedText = runtime.messages.find(
-			(message) => message.role === "user" && message.id === `dsh:${atSeq}`,
-		)?.text;
+		const forkedText = atSeq !== undefined
+			? runtime.messages.find(
+				(message) => message.role === "user" && message.id === `dsh:${atSeq}`,
+			)?.text
+			: undefined;
 		// 停旧 mux，换绑到新会话并拉历史（fork 会话自带 atSeq 前历史）。
 		await this.stop(agentId);
 		const tab: AgentTab = {
@@ -594,7 +795,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			sessionId: newSessionId,
 			status: "idle",
 			createdAt: Date.now(),
-			// fork 产生新 dsh sessionId：会话文件路径同步更新
+			// fork/clone 产生新 dsh sessionId：会话文件路径同步更新
 			sessionPath: dshSessionFilePath(this.dshHost.getHomeDir(), runtime.cwd, newSessionId),
 		};
 		const nextRuntime: DshAgentRuntime = {
@@ -616,13 +817,18 @@ export class DshAgentManager implements SessionAgentGateway {
 				nextRuntime.projection = projectDshEvent(nextRuntime.projection, event, agentId, view);
 			}
 			nextRuntime.messages = nextRuntime.projection.messages;
+			// 初始 attach 也推进 lastProjectedSeq（D6 重连补帧跳过基准）。
+			const lastEntry = entries[entries.length - 1];
+			if (lastEntry && typeof lastEntry.event.seq === "number") {
+				nextRuntime.lastProjectedSeq = lastEntry.event.seq;
+			}
 		}
 		this.runtimes.set(agentId, nextRuntime);
 		this.startMux(nextRuntime);
 		this.emit(ipcChannels.agentsState, this.list());
 		this.emitMessages(nextRuntime);
 		this.emitRuntimeState(agentId);
-		// 返回 fork 点文案（渲染层把它预填到输入框，与 pi 一致）
+		// 返回 fork 点文案（渲染层把它预填到输入框，与 pi 一致；clone 无锚点时为 undefined）
 		return { text: forkedText };
 	}
 
@@ -637,6 +843,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		const value = buildDshRespondValue(frame, response);
 		if (!value) {
 			// 应答不可解析（如 batch 答案 JSON 损坏）：按拒绝处理，避免 host 永久挂起。
+			this.pendingResponses.delete(requestId);
+			this.clearPendingTimeout(requestId);
 			this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true });
 			return { accepted: false, reason: "unparseable-response" };
 		}
@@ -647,6 +855,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			result: { ok: true, value },
 		});
 		this.pendingResponses.delete(requestId);
+		this.clearPendingTimeout(requestId);
 		// 通知渲染层请求完成（与 pi 的 agentsUiRequest completed 同协议）
 		this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true });
 		return { accepted: true };
@@ -720,14 +929,46 @@ export class DshAgentManager implements SessionAgentGateway {
 				return;
 			}
 			this.pendingResponses.set(approval.requestId, approval);
+			this.schedulePendingTimeout(runtime.tab.id, approval.requestId);
 			this.emit(ipcChannels.agentsUiRequest, approvalUiRequest(approval, runtime.tab.id));
 			return;
 		}
 		const question = parseDshQuestionFrame(frame);
 		if (question) {
 			this.pendingResponses.set(question.requestId, question);
+			this.schedulePendingTimeout(runtime.tab.id, question.requestId);
 			this.emit(ipcChannels.agentsUiRequest, questionUiRequest(question, runtime.tab.id));
 		}
+	}
+
+	/**
+	 * pending 审批/提问超时（D5）：用户长时间不响应 Ask 弹窗时，自动应答拒绝并通知
+	 * 渲染层 completed——否则 host 侧工具调用永远等不到 client-response，回合不结束，
+	 * 后续发送被 waitForIdle 卡满。与 pi 的 scheduleUIRequestTimeout 同语义。
+	 */
+	private schedulePendingTimeout(agentId: string, requestId: string): void {
+		const timer = setTimeout(() => {
+			this.pendingTimers.delete(requestId);
+			const frame = this.pendingResponses.get(requestId);
+			if (!frame) return;
+			this.pendingResponses.delete(requestId);
+			void (async () => {
+				try {
+					const client = this.requireClient();
+					const value = buildDshRejectValue(frame);
+					await client.respond({
+						type: "client-response",
+						rpcId: requestId as import("@deepseek-ai/dsh-host-apiproxy").RpcId,
+						result: { ok: true, value },
+					});
+				} catch {
+					// host 已不可用：应答失败也不阻断 completed 通知
+				}
+				this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true });
+			})();
+		}, DshAgentManager.PENDING_RESPONSE_TIMEOUT_MS);
+		timer.unref();
+		this.pendingTimers.set(requestId, timer);
 	}
 
 	/**
@@ -747,6 +988,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			});
 		} catch (error) {
 			this.pendingResponses.set(approval.requestId, approval);
+			this.schedulePendingTimeout(runtime.tab.id, approval.requestId);
 			this.emit(ipcChannels.agentsUiRequest, approvalUiRequest(approval, runtime.tab.id));
 		}
 	}
@@ -766,6 +1008,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		runtime.muxAbort = controller;
 		runtime.pump = (async () => {
 			let backoffMs = 250;
+			// 首次订阅不补帧（初始 attach 已拉过 history）；重连（非首次）才补（D6）。
+			let firstSubscription = true;
 			while (!controller.signal.aborted) {
 				// host 进程不在/未 ready（崩溃自动重启期间）：等待重新拉起后再订阅。
 				if (!this.dshHost.isHostProcessRunning() || !this.dshHost.isHostReady()) {
@@ -775,6 +1019,23 @@ export class DshAgentManager implements SessionAgentGateway {
 				}
 				try {
 					const client = this.requireClient();
+					// D6：mux 重连成功后先补拉断连窗口内已完成的回合（history 只含
+					// turn/end 后的事件）；进行中的回合（断连时正在 streaming）无法从
+					// history 恢复，重置运行态避免 UI 卡死/流式残留。补帧按 seq 跳过
+					// 已投影事件，幂等不重复。首次订阅跳过（初始 attach 已拉过历史）。
+					if (!firstSubscription) {
+						if (runtime.control.status === "running" || runtime.isStreaming || runtime.isCompacting) {
+							runtime.isStreaming = false;
+							runtime.isCompacting = false;
+							runtime.executingTool = undefined;
+							runtime.control = initialDshControl();
+							runtime.thinkingId = undefined;
+							runtime.thinkingStartedAt = undefined;
+							this.emitRuntimeState(runtime.tab.id);
+						}
+						await this.backfillHistory(runtime);
+					}
+					firstSubscription = false;
 					for await (const frame of client.events.mux({}, controller.signal)) {
 						backoffMs = 250; // 收到帧说明流活着，重置退避
 						const payload = frame?.payload ?? frame;
@@ -821,13 +1082,21 @@ export class DshAgentManager implements SessionAgentGateway {
 								runtime.messages = runtime.projection.messages;
 								this.emit(ipcChannels.agentsTextStream, { agentId: runtime.tab.id, text: "", done: true });
 								this.emitMessages(runtime);
-								this.emitRuntimeState(runtime.tab.id);
+								// 停止/中断路径的 turn/end 同样收口压缩进行态（D4）
+								if (runtime.isCompacting) {
+									runtime.isCompacting = false;
+									this.emitRuntimeState(runtime.tab.id);
+								}
 							}
 							continue;
 						}
 						runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, eventView);
 						// 投影器是纯函数，必须把消息数组写回 runtime，getMessages / emitMessages 才看得到。
 						runtime.messages = runtime.projection.messages;
+						// 记录已投影的最大 seq（D6 重连补帧的跳过基准）。
+						if (typeof event?.seq === "number" && event.seq > (runtime.lastProjectedSeq ?? 0)) {
+							runtime.lastProjectedSeq = event.seq;
+						}
 						const p = runtime.projection;
 						const eventSeq = typeof event?.seq === "number" ? event.seq : 0;
 						const eventTime = typeof event?.time === "number" ? event.time : Date.now();
@@ -884,6 +1153,11 @@ export class DshAgentManager implements SessionAgentGateway {
 							// 终态：清空流式缓冲，全量 flush 消息
 							this.emit(ipcChannels.agentsTextStream, { agentId: runtime.tab.id, text: "", done: true });
 							this.emitMessages(runtime);
+							// /compact 命令回合收口：复位压缩进行态（D4）
+							if (runtime.isCompacting) {
+								runtime.isCompacting = false;
+								this.emitRuntimeState(runtime.tab.id);
+							}
 						}
 						if (p.messagesChanged && !p.turnEnded) {
 							this.emitMessages(runtime);
@@ -952,6 +1226,10 @@ type DshAgentRuntime = {
 	permissionPreset?: string;
 	/** DSH plan 模式（plan/mode 事件折叠）。 */
 	planModeActive?: boolean;
+	/** /compact 命令回合进行中（命令已发出、turn/end 未到）；UI 压缩按钮显示进行态。 */
+	isCompacting?: boolean;
+	/** 已投影的最大事件 seq（D6：mux 重连补帧时跳过已投影事件，避免重复）。 */
+	lastProjectedSeq?: number;
 	/** 进行中的思考段 id（turn 内首个 reasoning-delta 起登记；终态清空）。 */
 	thinkingId?: string;
 	thinkingStartedAt?: number;

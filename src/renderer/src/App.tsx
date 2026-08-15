@@ -1301,9 +1301,11 @@ export function App() {
         // 统一创建 draft 会话（Chat 项目也走普通会话、可保存）：创建不拉 pi，
         // selectSessionCommand 同步切页、立即进入会话页；匿名会话仅保留给侧栏
         // 「新建临时对话」入口（createAnonymousSessionWithTab）。
+        // 默认后端与侧栏「+」一致（dsh）：避免同一应用内新建会话后端分裂（F2）。
         const session = await api.sessions.createDraft({
           projectId: project.id,
-          title: `${project.name} agent`,
+          title: `${project.name} DSH`,
+          backend: "dsh",
           ...launchPreferences,
         });
         upsertSession(session);
@@ -2571,9 +2573,6 @@ export function App() {
       endDrag: workspaceChrome.endDrag,
       createDraft: async (projectId) => {
         await createSessionDraftWithTab(projectId);
-      },
-      createDraftDsh: async (projectId) => {
-        await createSessionDraftWithTab(projectId, {}, "dsh");
       },
       createAnonymous: async (projectId) => {
         await createAnonymousSessionWithTab(projectId);

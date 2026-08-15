@@ -819,6 +819,17 @@ export class SessionRuntimeCoordinator {
 		this.unbindAgentUnchecked(agentId);
 	}
 
+	/**
+	 * DSH fork/clone 前调用（D3）：确保该 agent 无在途发送（dispatch lease）。
+	 * pi fork 走 replaceBoundRuntime 内部已做此检查；DSH fork 是 manager 内原地换绑，
+	 * 不经过 replacement 流程，这里显式检查避免「fork 时 prompt 在途 → RPC 响应落到
+	 * 已废弃 mux」的结果丢失/串台。有在途发送时抛错（调用方转 SESSION_COMMAND_FAILED）。
+	 */
+	assertNoDispatchInFlight(agentId: string): void {
+		const sessionId = this.sessionIdByAgent.get(agentId);
+		if (sessionId) this.assertNoDispatchLease(sessionId, agentId);
+	}
+
 	/** Fail closed after a process reaches a terminal state, including mid-dispatch. */
 	unbindTerminalAgent(agentId: string): void {
 		this.unbindAgentUnchecked(agentId);

@@ -23,6 +23,11 @@ export interface DshFetchTransport {
 type PendingFetch = {
 	resolve: (response: Response) => void;
 	reject: (error: Error) => void;
+	/** 请求超时定时器（E2：transport 死亡后请求不能永久悬挂）；结算时清理。 */
+	timer?: NodeJS.Timeout;
+	/** 外部 abort signal 与已注册的监听器（E8：结算时必须移除，避免长生命周期 signal 累积监听）。 */
+	signal?: AbortSignal;
+	abortHandler?: () => void;
 	/** 流式响应组装中（fetch-stream-start 后建立）。 */
 	stream?: {
 		controller: ReadableStreamDefaultController<Uint8Array>;
@@ -39,6 +44,8 @@ export type DshApiClientOptions = {
 	loadModule: () => Promise<typeof import("@deepseek-ai/dsh-host-apiproxy")>;
 	/** 日志（可选；默认静默）。 */
 	log?: (message: string, detail?: unknown) => void;
+	/** 请求超时（毫秒；默认 30s）。流式请求在 fetch-stream-start 到达后不再受此限制。 */
+	timeoutMs?: number;
 };
 
 /**
@@ -58,11 +65,13 @@ export class DshApiClient {
 	private readonly log: (message: string, detail?: unknown) => void;
 	/** dispose 后置位：拒绝新请求、abort/流取消回调不再向已死 transport 发消息。 */
 	private disposed = false;
+	private readonly timeoutMs: number;
 
 	constructor(options: DshApiClientOptions) {
 		this.transport = options.transport;
 		this.loadModule = options.loadModule;
 		this.log = options.log ?? (() => undefined);
+		this.timeoutMs = options.timeoutMs ?? 30_000;
 		this.unsubscribe = this.transport.onMessage((message) => {
 			const parsed = parseDshFetchMessage(message);
 			if (parsed) this.handleMessage(parsed);
@@ -109,22 +118,37 @@ export class DshApiClient {
 				reject(new DOMException("The operation was aborted.", "AbortError"));
 				return;
 			}
-			this.pending.set(id, { resolve, reject });
+			// E2：请求超时——transport 死亡（host 崩溃且重启超限放弃）后，host 侧不会有
+			// 任何响应帧，悬挂 pending 会让 IPC 永久挂起。流式请求在 fetch-stream-start
+			// 到达后由 abort/fetch-end 管理，不再受此超时限制（mux 是长连接）。
+			const timer = setTimeout(() => {
+				const pending = this.pending.get(id);
+				if (!pending) return;
+				if (pending.stream) return;
+				this.pending.delete(id);
+				this.log(`fetch timed out after ${this.timeoutMs}ms`, { id });
+				reject(new Error(`DSH bridge fetch timed out after ${this.timeoutMs}ms`));
+			}, this.timeoutMs);
+			timer.unref();
+			const pending: PendingFetch = { resolve, reject, timer };
+			this.pending.set(id, pending);
 			this.transport.send(request);
 			// abort 转发：host 侧 req.signal 联动取消（SSE 流 / 超时）；
 			// 同时本地 promise 也要 reject（与 InProcessApiClient.doFetch 的 abort 契约一致）。
-			init?.signal?.addEventListener("abort", () => {
+			// E8：结算时（settlePending）必须 removeEventListener，否则长生命周期 signal
+			// （会话级 controller，mux 重连多次复用）下监听器随请求数累积。
+			const abortHandler = () => {
 				// dispose 后 abort 回调仍可能触发（外部 signal 生命周期比 client 长）：
 				// 不再向已死 transport 发消息，只清 pending。
 				if (this.disposed) {
-					this.pending.delete(id);
+					this.settlePending(id, undefined, new DOMException("The operation was aborted.", "AbortError"));
 					return;
 				}
 				this.transport.send({ type: "fetch-abort", id });
-				const pending = this.pending.get(id);
-				if (pending) {
+				const current = this.pending.get(id);
+				if (current) {
 					this.pending.delete(id);
-					const stream = pending.stream;
+					const stream = current.stream;
 					if (stream && !stream.closed) {
 						stream.closed = true;
 						try {
@@ -133,10 +157,34 @@ export class DshApiClient {
 							// 已关闭忽略
 						}
 					}
-					pending.reject(new DOMException("The operation was aborted.", "AbortError"));
+					if (current.timer) clearTimeout(current.timer);
+					current.reject(new DOMException("The operation was aborted.", "AbortError"));
 				}
-			}, { once: true });
+			};
+			pending.abortHandler = abortHandler;
+			if (init?.signal) {
+				pending.signal = init.signal;
+				init.signal.addEventListener("abort", abortHandler, { once: true });
+			}
 		});
+	}
+
+	/** 结算 pending：清超时定时器 + 移除 abort 监听器（E2/E8）。 */
+	private settlePending(id: string, resolveWith: Response | undefined, rejectWith: Error): void {
+		const pending = this.pending.get(id);
+		if (!pending) return;
+		this.pending.delete(id);
+		this.cleanupPending(pending);
+		if (resolveWith !== undefined) pending.resolve(resolveWith);
+		else pending.reject(rejectWith);
+	}
+
+	/** 清理 pending 的超时定时器与 abort 监听器（E2/E8）。 */
+	private cleanupPending(pending: PendingFetch): void {
+		if (pending.timer) clearTimeout(pending.timer);
+		if (pending.signal && pending.abortHandler) {
+			pending.signal.removeEventListener("abort", pending.abortHandler);
+		}
 	}
 
 	private handleMessage(message: DshFetchMessage): void {
@@ -146,6 +194,7 @@ export class DshApiClient {
 			case "fetch-response": {
 				// unary：一次性 body，直接组装 Response 并结算。
 				this.pending.delete(message.id);
+				this.cleanupPending(pending);
 				const headers = new Headers(message.headers);
 				pending.resolve(new Response(message.body ?? "", {
 					status: message.status,
@@ -190,6 +239,7 @@ export class DshApiClient {
 			case "fetch-end": {
 				const stream = pending.stream;
 				this.pending.delete(message.id);
+				this.cleanupPending(pending);
 				if (stream && !stream.closed) {
 					stream.closed = true;
 					try {
@@ -203,6 +253,7 @@ export class DshApiClient {
 			case "fetch-error": {
 				const stream = pending.stream;
 				this.pending.delete(message.id);
+				this.cleanupPending(pending);
 				if (stream && !stream.closed) {
 					stream.closed = true;
 					try {
@@ -226,6 +277,7 @@ export class DshApiClient {
 	 */
 	abortAllPending(): void {
 		for (const pending of this.pending.values()) {
+			this.cleanupPending(pending);
 			const stream = pending.stream;
 			if (stream && !stream.closed) {
 				stream.closed = true;
@@ -245,6 +297,7 @@ export class DshApiClient {
 		this.disposed = true;
 		this.unsubscribe();
 		for (const pending of this.pending.values()) {
+			this.cleanupPending(pending);
 			pending.reject(new Error("DSH host transport disposed"));
 		}
 		this.pending.clear();

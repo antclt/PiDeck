@@ -583,6 +583,12 @@ async function readCatalogSessionReferenceMessages(sessionId: string) {
 
 async function copyCatalogSession(sessionId: string) {
 	const entry = sessionCatalog.get(sessionId);
+	// DSH 会话复制走运行中 agent 的 clone（sessionsRuntimeClone 已按 backend 分流）；
+	// 历史 DSH 会话没有宿主文件可复制（host 会话在 $DSH_HOME），显式拒绝并提示正确入口，
+	// 而不是报「文件不存在」误导（A8）。
+	if (entry?.backend === "dsh") {
+		throw new Error(mainCopy("session.copyDshUnsupported"));
+	}
 	if (!entry?.filePath) throw new Error(mainCopy("session.fileNotFound"));
 	const result = await agentManager.cloneSessionFile(entry.projectId, entry.filePath, entry.environment) as {
 		cancelled?: boolean;
@@ -604,6 +610,11 @@ async function copyCatalogSession(sessionId: string) {
 
 async function exportCatalogSessionHtml(sessionId: string): Promise<{ path: string }> {
 	const entry = sessionCatalog.get(sessionId);
+	// DSH 会话导出暂不支持（G10 待决策：downloads.sessionLog 需桥字节流扩展）；
+	// 显式拒绝而非报「文件不存在」（A9）。
+	if (entry?.backend === "dsh") {
+		throw new Error(mainCopy("session.exportDshUnsupported"));
+	}
 	if (!entry?.filePath) throw new Error(mainCopy("session.fileNotFound"));
 	const result = await agentManager.exportSessionHtml(entry.projectId, entry.filePath);
 	if (!result || typeof result !== "object" || !("path" in result) || typeof result.path !== "string") {
@@ -2341,12 +2352,26 @@ function registerIpc() {
 		},
 		readDshHistoryPage: (dshSessionId, beforeSeq, pageSize) =>
 			dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
+		readDshMessageFullText: (agentId, messageId) =>
+			dshAgentManager.readMessageFullText(agentId, messageId),
 		isDshAgent: (agentId) =>
 			dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 		forkDshAgentSession: async (target, entryId) => {
 			// DSH fork：runtime 已原地换绑到新会话（agentId 不变，焦点会话 id 不变），
 			// 这里只需把 catalog 的 dshSessionId 同步为新 fork 会话，重启后 attach 正确。
 			const result = await dshAgentManager.forkSession(target.agentId, entryId);
+			const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
+			if (tab?.sessionId) {
+				await sessionCatalog.attachRuntime({
+					sessionId: target.sessionId,
+					dshSessionId: tab.sessionId,
+				});
+			}
+			return { ...result };
+		},
+		cloneDshAgentSession: async (target) => {
+			// DSH clone：fork 无锚点（完整副本），runtime 换绑到新会话，语义同 fork。
+			const result = await dshAgentManager.cloneSession(target.agentId);
 			const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
 			if (tab?.sessionId) {
 				await sessionCatalog.attachRuntime({
@@ -3145,8 +3170,13 @@ app.on("before-quit", () => {
 	void webServiceManager?.stop();
 	terminalManager?.closeAll();
 	agentManager?.stopAll();
-	// DSH host 退出清理（懒启动未 boot 时为 no-op）
-	void dshHost?.dispose();
+	// DSH host 退出清理（懒启动未 boot 时为 no-op）：
+	// 先停全部活跃 DSH 会话（清 mux/订阅/pending），再 dispose host（E15）——
+	// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
+	// before-quit 是同步回调无法 await，用 finally 链保持顺序。
+	void (dshAgentManager?.stopAll() ?? Promise.resolve()).finally(() => {
+		void dshHost?.dispose();
+	});
 	petSystem?.stop();
 	petSystem = null;
 });

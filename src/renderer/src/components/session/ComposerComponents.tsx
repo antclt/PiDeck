@@ -376,8 +376,9 @@ export function ComposerBottomBar(props: {
 					</Button>
 					<Button variant="ghost" size="icon"
 						className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60"
-						aria-label={t("menu.attachFile")} title={t("menu.attachFile")}
-						disabled={props.disabled}
+						aria-label={isDsh ? t("app.attachFileDshUnsupported") : t("menu.attachFile")}
+						title={isDsh ? t("app.attachFileDshUnsupported") : t("menu.attachFile")}
+						disabled={props.disabled || isDsh}
 						onClick={props.onAttachFile}
 					>
 						<Paperclip size={15} strokeWidth={2} aria-hidden="true" />
@@ -418,7 +419,8 @@ export function ComposerBottomBar(props: {
 								<FoldVertical size={13} strokeWidth={1.8} aria-hidden="true" />
 								{isCompactingNow
 									? t("app.compacting")
-									: t("app.compactUsage", { percent: 0 })}
+									// DSH 没有 pi 的 contextPercent，不显示「压缩 0%」误导文案
+									: t("app.compact")}
 							</Button>
 						);
 					})()}

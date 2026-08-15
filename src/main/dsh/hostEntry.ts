@@ -235,6 +235,8 @@ async function main(): Promise<void> {
 			const controller = new AbortController();
 			init.signal = controller.signal;
 			// 主进程 abort 转发：取消 host 侧进行中的请求（SSE 流 / 超时）。
+			// 注册必须在任何 await 之前（E9）：fetch-abort 是独立消息，若注册晚于
+			// handler.fetch 的同步段，先到的 abort 会丢失 → unary 请求无取消路径。
 			const onAbortMessage = (abortMessage: unknown) => {
 				const abortRaw = (abortMessage as { data?: unknown } | null)?.data ?? abortMessage;
 				const parsed = abortRaw as Partial<DshFetchMessage>;

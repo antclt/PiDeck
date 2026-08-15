@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -39,6 +39,11 @@ export class DshHost {
 	private dshHome = "";
 	private configDir = "";
 	private unsubscribeHostExit: (() => void) | null = null;
+	/** host-ready 订阅（首次启动与崩溃自动重启都会触发；DshAgentManager 据此恢复会话，E4）。 */
+	private readonly hostReadyListeners = new Set<() => void>();
+	/** DSH_HOME 并发锁（B6）：锁文件路径与是否由本实例持有。 */
+	private hostLockPath = "";
+	private ownsHostLock = false;
 
 	constructor(
 		private readonly getUserDataDir: () => string,
@@ -48,6 +53,14 @@ export class DshHost {
 		/** DSH_HOME 覆盖目录 getter（设置里 dshHomeDir）；空串/undefined = 自动（~/.dsh 优先）。 */
 		private readonly getDshHomeOverride: () => string | undefined = () => undefined,
 	) {}
+
+	/** 订阅 host-ready（首次启动与崩溃自动重启；E4：崩溃后恢复运行时状态）。 */
+	onHostReady(listener: () => void): () => void {
+		this.hostReadyListeners.add(listener);
+		return () => {
+			this.hostReadyListeners.delete(listener);
+		};
+	}
 
 	/** 是否已完成引导。 */
 	isStarted(): boolean {
@@ -310,6 +323,42 @@ export class DshHost {
 		}
 	}
 
+	/**
+	 * DSH_HOME 并发锁（B6）：同目录双 host 并发会互相覆盖 session log，DSH 官方
+	 * 不支持。锁文件记录主进程 pid：发现存活 pid 时告警（不阻断——dsh CLI 等外部
+	 * 进程不遵守本锁，阻断也无法防外部并发，但至少双 PiDeck 实例有提示）。
+	 */
+	private acquireHostLock(): void {
+		this.hostLockPath = join(this.dshHome, ".pideck-host.lock");
+		try {
+			if (existsSync(this.hostLockPath)) {
+				const raw = readFileSync(this.hostLockPath, "utf8");
+				const parsed = JSON.parse(raw) as { pid?: unknown };
+				const pid = typeof parsed.pid === "number" ? parsed.pid : NaN;
+				if (Number.isFinite(pid) && isProcessAlive(pid)) {
+					this.log("dsh-host", `DSH_HOME 可能正被其他 DSH host 使用（pid=${pid}）：${this.dshHome}`);
+				}
+			}
+			writeFileSync(this.hostLockPath, JSON.stringify({ pid: process.pid }), "utf8");
+			this.ownsHostLock = true;
+		} catch (error) {
+			this.log("dsh-host", "DSH_HOME 锁文件写入失败（继续启动）", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	/** 释放 DSH_HOME 并发锁（dispose 调用）。 */
+	private releaseHostLock(): void {
+		if (!this.ownsHostLock || !this.hostLockPath) return;
+		try {
+			rmSync(this.hostLockPath, { force: true });
+		} catch {
+			// 释放失败不阻塞退出
+		}
+		this.ownsHostLock = false;
+	}
+
 	private async start(): Promise<void> {
 		const userData = this.getUserDataDir();
 		const override = this.getDshHomeOverride()?.trim();
@@ -325,6 +374,7 @@ export class DshHost {
 		this.configDir = join(userData, "dsh-config");
 		mkdirSync(this.dshHome, { recursive: true });
 		mkdirSync(this.configDir, { recursive: true });
+		this.acquireHostLock();
 
 		// 定位 hostEntry 产物与 node_modules 锚点（bareModuleBaseUrl）。
 		const require = createRequire(join(this.getAppPath(), "package.json"));
@@ -338,7 +388,11 @@ export class DshHost {
 				`--dsh-config=${this.configDir}`,
 				`--dsh-node-modules=${pathToFileURL(appRoot + "/").href}`,
 			],
-			{},
+			// E5：utilityProcess.fork 的 env 显式传入即整体替换——传 {} 会让 host 以
+			// 近空环境运行（无 PATH/SystemRoot 等），host 内 spawn 的 bash/pwsh 子进程
+			// 依赖这些变量。改为继承主进程环境并剔除 Electron/Node 宿主注入类变量
+			// （ELECTRON_*/NODE_OPTIONS），避免污染 DSH 子进程树。
+			buildDshHostForkEnv(),
 			(scope, message, detail) => this.log(scope, message, detail),
 		);
 		this.hostProcess = hostProcess;
@@ -348,8 +402,19 @@ export class DshHost {
 		this.unsubscribeHostExit = hostProcess.onExit(() => {
 			this.apiClient?.abortAllPending();
 		});
+		// host-ready 转发（首次启动与崩溃自动重启）：订阅者恢复崩溃前状态（E4）。
+		hostProcess.onReady(() => {
+			for (const listener of this.hostReadyListeners) {
+				try {
+					listener();
+				} catch {
+					// 订阅者异常不影响 host-ready 处理
+				}
+			}
+		});
 		// 先 fork 并等 host-ready：桥消息必须等 host 侧监听就绪后才能发。
-		await hostProcess.start();
+		// start(true)：用户显式触发（懒启动/重启 host），重置连续崩溃计数（E3）。
+		await hostProcess.start(true);
 
 		const transport: DshFetchTransport = {
 			send: (message: DshFetchMessage) => hostProcess.postMessage(message),
@@ -365,9 +430,25 @@ export class DshHost {
 			loadModule: () => import(pathToFileURL(require.resolve("@deepseek-ai/dsh-host-apiproxy")).href),
 			log: (message, detail) => this.log("dsh-bridge", message, detail),
 		});
-		// 覆写后的客户端即领域客户端（doFetch 走桥）。
-		const client = await this.apiClient.getClient();
-		this.client = client;
+		try {
+			// 覆写后的客户端即领域客户端（doFetch 走桥）。
+			const client = await this.apiClient.getClient();
+			this.client = client;
+		} catch (error) {
+			// E10：启动失败路径必须清理已 fork 的 host 进程与 apiClient——否则下次
+			// ensureStarted 会再 fork 一个新 host，双 host 进程并存。
+			this.log("dsh-host", "host client init failed; cleaning up forked host", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			this.apiClient.dispose();
+			this.apiClient = null;
+			this.unsubscribeHostExit?.();
+			this.unsubscribeHostExit = null;
+			await hostProcess.dispose().catch(() => undefined);
+			this.hostProcess = null;
+			this.releaseHostLock();
+			throw error;
+		}
 		this.log("dsh-host", "host ready（utilityProcess）");
 	}
 
@@ -392,6 +473,7 @@ export class DshHost {
 		}
 		this.client = null;
 		this.startPromise = null;
+		this.releaseHostLock();
 	}
 
 	/** 重启 host（DSH_HOME 切换后立即生效）：dispose 后清空状态，
@@ -418,4 +500,27 @@ export function resolveDshHomeDir(
 	if (override?.trim()) return override.trim();
 	if (realHomeExists) return join(homedir(), ".dsh");
 	return join(userDataDir, "dsh-home");
+}
+
+/** 进程是否存活（B6 锁检测用）：kill(pid, 0) 成功 = 存活；EPERM = 存在但无权限，也算存活。 */
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+/** DSH host fork 环境（E5）：继承主进程环境，剔除 Electron/Node 宿主注入类变量。 */
+function buildDshHostForkEnv(): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (value === undefined) continue;
+		// ELECTRON_*（如 ELECTRON_RUN_AS_NODE/ELECTRON_NO_ASAR）与 NODE_OPTIONS
+		// （可能带 --require preload 注入）不该进 DSH 子进程树。
+		if (key.startsWith("ELECTRON_") || key === "NODE_OPTIONS") continue;
+		env[key] = value;
+	}
+	return env;
 }

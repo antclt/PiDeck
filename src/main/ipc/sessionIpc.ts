@@ -155,12 +155,21 @@ export type SessionIpcDeps = {
 		beforeSeq: number | undefined,
 		pageSize: number,
 	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; total: number; nextBefore: number | null }>;
+	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
+	readDshMessageFullText?: (
+		agentId: string,
+		messageId: string,
+	) => Promise<{ text: string }>;
 	/** 判断 agentId 是否属于 DSH 后端（fork 等 pi 专属命令按 backend 分流）。 */
 	isDshAgent: (agentId: string) => boolean;
 	/** DSH fork：session.fork 裁剪 + runtime 换绑 + catalog dshSessionId 回写。 */
 	forkDshAgentSession?: (
 		target: SessionRuntimeTarget,
 		entryId: string,
+	) => Promise<Record<string, unknown> & { targetSessionId?: string }>;
+	/** DSH clone：fork 无锚点（完整副本）+ runtime 换绑 + catalog dshSessionId 回写。 */
+	cloneDshAgentSession?: (
+		target: SessionRuntimeTarget,
 	) => Promise<Record<string, unknown> & { targetSessionId?: string }>;
 };
 
@@ -217,8 +226,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		openDshDocument,
 		restartDshHost,
 		readDshHistoryPage,
+		readDshMessageFullText,
 		isDshAgent,
 		forkDshAgentSession,
+		cloneDshAgentSession,
 	} = deps;
 
 	ipcMain.handle(
@@ -503,6 +514,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		ipcChannels.sessionsCatalogReadMessages,
 		async (_event, sessionId: string) => {
 			const entry = sessionCatalog.get(sessionId);
+			// DSH 会话没有 pi 会话文件：全量读走 host 历史事件流（一次拉最大页），
+			// 与分页路径同源；未装配 readDshHistoryPage 时返回空数组。
+			if (entry?.backend === "dsh" && entry.dshSessionId && readDshHistoryPage) {
+				const page = await readDshHistoryPage(entry.dshSessionId, undefined, 1000);
+				return page.messages;
+			}
 			if (!entry?.filePath) return [];
 			const content = await sessionScanner.readSessionRawText(entry.filePath);
 			return agentManager.readSessionDisplayMessages(entry.filePath, sessionId, content);
@@ -584,6 +601,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				throw new Error("Invalid entryId");
 			}
 			try {
+				// DSH 会话：工具结果全文随投影消息存内存（meta.fullText），
+				// 走 DshAgentManager 直接读取；pi 走运行时缓存/会话文件。
+				if (isDshAgent(agentId)) {
+					if (!readDshMessageFullText) {
+						throw new Error("dsh message full-text is not available");
+					}
+					return await readDshMessageFullText(agentId, messageId);
+				}
 				return await agentManager.readMessageFullText(
 					agentId,
 					messageId,
@@ -862,6 +887,20 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			const validated = sessionRuntimeCoordinator.validateTarget(target);
 			if (!validated.ok) return validated;
 			try {
+				// DSH 后端：clone = fork 无锚点（完整副本）+ runtime 换绑新会话
+				// （catalog 的 dshSessionId 同步更新，重启后 attach 到 clone 结果）。
+				// D3：与 fork 同约束——在途发送时拒绝（原地换绑不经过 replacement 保护）。
+				if (isDshAgent(target.agentId)) {
+					sessionRuntimeCoordinator.assertNoDispatchInFlight(target.agentId);
+					if (!cloneDshAgentSession) {
+						throw new Error("dsh clone is not available");
+					}
+					const value = await cloneDshAgentSession(target);
+					void appLogger.info("session", "Session cloned (dsh)", {
+						sessionId: target.sessionId,
+					});
+					return { ok: true as const, value };
+				}
 				const value = await replaceAgentSession(
 					target.agentId,
 					() => agentManager.cloneSession(target.agentId),
@@ -896,7 +935,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			try {
 				// DSH 后端：fork = session.fork 裁剪 + runtime 换绑新会话（catalog 的
 				// dshSessionId 同步更新，重启后 attach 到 fork 结果）。
+				// D3：fork 前检查无在途发送（dispatch lease）——DSH fork 在 manager 内
+				// 原地换绑，不经过 pi 的 replaceBoundRuntime 保护；有在途发送时拒绝，
+				// 避免 RPC 响应落到已废弃 mux 导致结果丢失/串台。
 				if (isDshAgent(target.agentId)) {
+					sessionRuntimeCoordinator.assertNoDispatchInFlight(target.agentId);
 					if (!forkDshAgentSession) {
 						throw new Error("dsh fork is not available");
 					}

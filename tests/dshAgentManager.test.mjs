@@ -158,6 +158,10 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 		getClient() {
 			return client;
 		},
+		onHostReady() {
+			// E4 恢复钩子：测试中不触发恢复逻辑，直接返回退订函数。
+			return () => {};
+		},
 		isHostProcessRunning() {
 			return hostState.running;
 		},
@@ -205,6 +209,9 @@ function makeColdStartHost() {
 		},
 		isHostReady() {
 			return inner.host.isHostReady();
+		},
+		onHostReady() {
+			return () => {};
 		},
 	};
 	// 冷启动 host 必须最后展开：inner 里也带 host 键（fake host，getClient 恒返回 client），

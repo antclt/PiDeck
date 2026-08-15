@@ -179,6 +179,7 @@ export const zhCN = {
   "app.compactDone": "上下文压缩完成",
   "app.compactFailed": "压缩失败",
   "app.attachFile": "加入对话引用",
+  "app.attachFileDshUnsupported": "DSH 暂不支持图片附件，已跳过",
   "app.startupWindowModeSaved": "启动窗口设置已保存，下次启动生效",
   "app.singleInstanceSaved": "单实例设置已保存，重启后生效",
   "app.electronSandboxSaved": "Chromium 沙箱设置已保存，重启后生效",
@@ -439,7 +440,6 @@ export const zhCN = {
   "app.projectInfo":
     "项目下方默认展示运行中的 Agent 和最近历史会话；右键项目可导入 Codex 会话或删除目录记录。",
   "app.projectNewAgent": "新建 Agent",
-  "app.projectNewDshAgent": "新建 DSH Agent",
   "app.chatProjectSettings": "修改聊天记录保存目录",
   "app.modelRestartTitle": "重启 Agent 生效",
   "app.modelRestartBody": "模型 {model} 已在本地 models.json 中配置，但当前运行的 Agent 尚未加载新配置。重启 Agent 后即可使用，是否重启？",
@@ -741,6 +741,8 @@ export const zhCN = {
   "sessionBackend.dsh": "DSH",
   "session.backendPickerHint": "选择后端（pi / dsh）",
   "session.backendLockedHint": "后端已锁定（会话创建后不可切换）",
+  "session.sendDshImagesUnsupported": "DSH 暂不支持图片附件",
+  "session.sendDshUnsupportedPayload": "DSH 暂不支持宿主指令与流式行为参数",
   "codex.emptyDesc":
     "只会扫描 `~/.codex/sessions` 中 cwd 与当前项目一致的会话。",
   "codex.emptyTitle": "没有找到当前项目的 Codex 会话",

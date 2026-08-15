@@ -445,14 +445,18 @@ export function AgentContextMenu(props: {
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
 			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>{t("common.rename")}</DropdownMenuItem>
+			{/* DSH 运行中会话的复制走 clone 分流（fork 无锚点完整副本），保留入口；
+			    导出 HTML 无 DSH 实现（G10 待决策），对 dsh agent 隐藏 */}
 			<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
 				{props.actionLoading === "copy" && <span className="mini-loader" />}
 				{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
 			</DropdownMenuItem>
-			<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
-				{props.actionLoading === "export" && <span className="mini-loader" />}
-				{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
-			</DropdownMenuItem>
+			{props.menu.agent.backend !== "dsh" && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
+					{props.actionLoading === "export" && <span className="mini-loader" />}
+					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
+				</DropdownMenuItem>
+			)}
 			{props.menu.agent.sessionPath && (
 				<>
 					<DropdownMenuItem disabled={busy} onSelect={props.onCopySessionFilePath}>
@@ -527,14 +531,19 @@ export function SessionContextMenu(props: {
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
 			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>{t("common.rename")}</DropdownMenuItem>
-			<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
-				{props.actionLoading === "copy" && <span className="mini-loader" />}
-				{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
-			</DropdownMenuItem>
-			<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
-				{props.actionLoading === "export" && <span className="mini-loader" />}
-				{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
-			</DropdownMenuItem>
+			{/* DSH 历史会话无宿主文件可复制/导出（主进程显式拒绝，A8/A9）：隐藏入口 */}
+			{props.menu.session.backend !== "dsh" && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
+					{props.actionLoading === "copy" && <span className="mini-loader" />}
+					{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
+				</DropdownMenuItem>
+			)}
+			{props.menu.session.backend !== "dsh" && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
+					{props.actionLoading === "export" && <span className="mini-loader" />}
+					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
+				</DropdownMenuItem>
+			)}
 			{props.hasFilePath !== false && (
 				<>
 					<DropdownMenuSeparator />

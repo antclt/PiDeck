@@ -179,6 +179,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.compactDone": "Context compacted",
   "app.compactFailed": "Compaction failed",
   "app.attachFile": "Attach file reference",
+  "app.attachFileDshUnsupported": "Image attachments are not supported by DSH yet; skipped",
   "app.startupWindowModeSaved": "Startup window setting saved; applies on next launch",
   "app.singleInstanceSaved": "Single-instance setting saved; restart to apply",
   "app.electronSandboxSaved": "Chromium sandbox setting saved; restart to apply",
@@ -442,7 +443,6 @@ export const enUS: Record<TranslationKey, string> = {
   "app.projectInfo":
     "Projects show running Agents and recent sessions by default. Right-click a project to import Codex sessions or remove the record.",
   "app.projectNewAgent": "New Agent",
-  "app.projectNewDshAgent": "New DSH Agent",
   "app.chatProjectSettings": "Change chat save directory",
   "app.modelRestartTitle": "Restart agent to apply",
   "app.modelRestartBody": "Model {model} is configured in local models.json but the running agent has not loaded it yet. Restart the agent to use it. Restart now?",
@@ -747,6 +747,8 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionBackend.dsh": "DSH",
   "session.backendPickerHint": "Choose backend (pi / dsh)",
   "session.backendLockedHint": "Backend locked (cannot switch after the session is created)",
+  "session.sendDshImagesUnsupported": "Image attachments are not supported by DSH yet",
+  "session.sendDshUnsupportedPayload": "Host instructions and streaming behavior are not supported by DSH yet",
   "codex.emptyDesc":
     "Only sessions in `~/.codex/sessions` whose cwd matches this project will be scanned.",
   "codex.emptyTitle": "No Codex sessions found for this project",

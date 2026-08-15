@@ -307,7 +307,12 @@ export function projectDshEvent(
 		}
 		case "tool/result": {
 			const message = (data.message ?? {}) as { content?: unknown };
-			const text = textFromBlocks(message.content).slice(0, TOOL_RESULT_MAX_CHARS);
+			const fullText = textFromBlocks(message.content);
+			// 工具结果截断展示（渲染层工具卡展开区 2000 字符内），完整文本保留在
+			// meta.fullText 供「查看完整输出」按需读取（A3：DSH 会话没有 pi 会话
+			// 文件可定位，全文只能随投影消息走内存）。
+			const truncated = fullText.length > TOOL_RESULT_MAX_CHARS;
+			const text = fullText.slice(0, TOOL_RESULT_MAX_CHARS);
 			if (base.executingTool) {
 				// 更新最后一条 tool 消息为「工具名 + 结果摘要」，并摘掉 running 状态
 				// （工具执行已结束，卡片动画停止；getToolStatus 无 running 即 done）。
@@ -325,6 +330,8 @@ export function projectDshEvent(
 								...last.meta,
 								status: "done",
 								durationMs: Math.max(0, resultTime - callTime),
+								// 截断标记与完整文本：渲染层 ToolCard 据此显示「查看完整输出」
+								...(truncated ? { truncated: true as const, fullText } : {}),
 							}
 							: last.meta,
 					};

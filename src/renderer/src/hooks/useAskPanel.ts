@@ -32,6 +32,8 @@ export function useAskPanel() {
 				const { session } = await desktopApi.sessions.createAnonymous({
 					projectId,
 					title: t("askPanel.sessionTitle"),
+					// 默认后端与侧栏「+」一致（dsh），避免匿名问询走 pi 造成后端分裂（F2）
+					backend: "dsh",
 				});
 				// 只登记会话记录供 timeline 渲染，不加入 sessionIdsByProjectAtom：
 				// 匿名会话不落盘、不该出现在左侧项目会话列表（关闭弹框后由 detach 事件清理）

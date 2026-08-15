@@ -128,6 +128,25 @@ export function questionUiRequest(frame: DshQuestionFrame, agentId: string): Rec
 }
 
 /**
+ * 构造「用户取消/停止」时的拒绝应答载荷（abort/stop 解阻塞 pending 帧用，D1）：
+ * - approval → outcome: "rejected"（host 侧工具调用以拒绝收尾）
+ * - question → 空答案数组（用户未作答）
+ * 与 buildDshRespondValue 的 allowed-once/answered 分支互补。
+ */
+export function buildDshRejectValue(
+	frame: DshApprovalFrame | DshQuestionFrame,
+): Record<string, unknown> {
+	if ("approvalId" in frame) {
+		return {
+			sessionId: frame.sessionId,
+			approvalId: frame.approvalId,
+			outcome: "rejected",
+		};
+	}
+	return { sessionId: frame.sessionId, answer: { answers: [] } };
+}
+
+/**
  * 构造 DSH client-response 的应答载荷（result.value 槽）：
  * - approval → { sessionId, approvalId, outcome: "allowed-once" | "rejected" }
  * - question → { sessionId, answer: { answers: [{ id, selected, custom? }] } }

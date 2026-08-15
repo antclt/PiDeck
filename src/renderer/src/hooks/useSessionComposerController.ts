@@ -906,6 +906,14 @@ export function useSessionComposerController(
   ]);
 
   const addImageFiles = useCallback(async (imageFiles: File[]) => {
+    // DSH 后端图片附件一期不支持（桥 body 仅字符串，见 dshHostBridge.ts）：
+    // 在统一附件入口拦截，避免「附件上屏但主进程只发 text」的静默丢数据（F1）。
+    if (isDshBackend) {
+      if (imageFiles.length > 0) {
+        showNotice(t("app.attachFileDshUnsupported"), 3000);
+      }
+      return;
+    }
     for (const file of imageFiles) {
       try {
         const image = await processComposerImageFile(file);
@@ -914,7 +922,7 @@ export function useSessionComposerController(
         showNotice(composerImageNotice(error), 3000);
       }
     }
-  }, [setAttachments]);
+  }, [isDshBackend, setAttachments]);
 
   /**
    * 把已格式化的引用文本（@path、@"a b/" 等）插入输入框当前光标处。
