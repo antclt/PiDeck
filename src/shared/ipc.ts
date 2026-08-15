@@ -89,6 +89,16 @@ export const ipcChannels = {
 	sessionsSetFocusedSession: "sessions:set-focused-session",
 	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
 	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
+	/** DSH 会话内容搜索（session.search；结果最多 20 会话，返回 sessionId + snippet）。 */
+	sessionsSearchDsh: "sessions:search-dsh",
+	/** DSH 创建目标（goal.create；objective 必填，maxGoalRounds 可选）。 */
+	dshCreateGoal: "dsh:create-goal",
+	/** DSH 目标操作（goal.pause/resume/complete/clear，按当前 goal CAS ref）。 */
+	dshGoalAction: "dsh:goal-action",
+	/** DSH 子代理列表（subagent.list 直接子代目录）。 */
+	dshListSubagents: "dsh:list-subagents",
+	/** DSH 子代理历史（subagent.history 只读 transcript）。 */
+	dshSubagentHistory: "dsh:subagent-history",
 	/** DSH host 级模型目录（llm.models），不依赖已启动的会话。 */
 	dshListModels: "dsh:list-models",
 	/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由；添加提供方用）。 */

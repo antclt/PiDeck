@@ -33,6 +33,15 @@ export type DshProjection = {
 	/** 最近一次 assistant 回合的 token 用量（G16：assistant/message 携带 adapter 报告
 	 *  的 usage 时更新，latest wins；缺失 = 适配器未报告）。 */
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+	/** 当前 goal（G5：goal/change 事件 last-wins；clear 后为 undefined）。 */
+	goal?: {
+		refId: string;
+		revision: number;
+		objective: string;
+		phase: "active" | "paused" | "blocked" | "complete";
+		maxGoalRounds: number;
+		roundsStarted: number;
+	};
 	/** 本条事件的增量信号（供调用方逐帧转发）。 */
 	deltaText?: string;
 	deltaReasoning?: string;
@@ -432,6 +441,29 @@ export function projectDshEvent(
 				next.model = model;
 				next.stateChanged = true;
 			}
+			break;
+		}
+		case "goal/change": {
+			// G5：goal/change 携带完整 post-change 快照（last-wins）；clear 是 tombstone。
+			const meta = data as { operation?: unknown; goal?: unknown; roundsStarted?: unknown; cleared?: unknown };
+			if (meta.operation === "clear") {
+				next.goal = undefined;
+			} else if (isRecord(meta.goal)) {
+				const g = meta.goal as Record<string, unknown>;
+				const rawPhase = g.phase;
+				const phase = rawPhase === "active" || rawPhase === "paused" || rawPhase === "blocked" || rawPhase === "complete"
+					? rawPhase
+					: "active";
+				next.goal = {
+					refId: typeof g.id === "string" ? g.id : "",
+					revision: typeof g.revision === "number" ? g.revision : 0,
+					objective: typeof g.objective === "string" ? g.objective : "",
+					phase,
+					maxGoalRounds: typeof g.maxGoalRounds === "number" ? g.maxGoalRounds : 0,
+					roundsStarted: typeof meta.roundsStarted === "number" ? meta.roundsStarted : 0,
+				};
+			}
+			next.stateChanged = true;
 			break;
 		}
 		case "permission/preset": {

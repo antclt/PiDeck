@@ -307,6 +307,11 @@ export function createPreviewApi(): PiDesktopApi {
 			listDshAgentPresets: async () => [],
 			getDshDefaultModel: async () => undefined,
 			getDshSessionPath: async () => undefined,
+			searchDshSessions: async () => [],
+			createDshGoal: async () => undefined,
+			runDshGoalAction: async () => undefined,
+			listDshSubagents: async () => [],
+			readDshSubagentHistory: async () => ({ messages: [], hasMore: false }),
 			listCatalog: async (projectId, _options?: { scan?: boolean }): Promise<SessionRecord[]> => getSessions().map((session) => ({
 				id: `preview-record:${session.id}`,
 				projectId,

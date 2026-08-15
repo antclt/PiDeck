@@ -533,6 +533,40 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.sessionsGetDshSessionPath, sessionId) as Promise<
 				string | undefined
 			>,
+		/** DSH 会话内容搜索（侧栏搜索框全文搜索；结果含 dshSessionId + snippet）。 */
+		searchDshSessions: (query: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsSearchDsh, query) as Promise<
+				Array<{ sessionId: string; snippet: string }>
+			>,
+		/** DSH 创建目标（goal.create）。 */
+		createDshGoal: (agentId: string, objective: string, maxGoalRounds?: number) =>
+			ipcRenderer.invoke(ipcChannels.dshCreateGoal, agentId, objective, maxGoalRounds) as Promise<void>,
+		/** DSH 目标操作（pause/resume/complete/clear）。 */
+		runDshGoalAction: (agentId: string, action: "pause" | "resume" | "complete" | "clear") =>
+			ipcRenderer.invoke(ipcChannels.dshGoalAction, agentId, action) as Promise<void>,
+		/** DSH 子代理列表（subagent.list）。 */
+		listDshSubagents: (agentId: string) =>
+			ipcRenderer.invoke(ipcChannels.dshListSubagents, agentId) as Promise<
+				Array<{
+					id: string;
+					label?: string;
+					activity: "running" | "inactive";
+					hasChildren: boolean;
+					mode: "one-shot" | "continuable";
+					kind: "child" | "diagnostic";
+				}>
+			>,
+		/** DSH 子代理历史（subagent.history 只读 transcript）。 */
+		readDshSubagentHistory: (
+			agentId: string,
+			childSessionId: string,
+			beforeSeq?: number,
+			maxMessages?: number,
+		) =>
+			ipcRenderer.invoke(ipcChannels.dshSubagentHistory, agentId, childSessionId, beforeSeq, maxMessages) as Promise<{
+				messages: import("../shared/types").ChatMessage[];
+				hasMore: boolean;
+			}>,
 		sendPrompt: (input: SendSessionPromptInput) =>
 			ipcRenderer.invoke(ipcChannels.sessionsSendPrompt, input) as Promise<SendSessionPromptResult>,
 		sendUiResponse: (input: SessionUiResponseInput) =>

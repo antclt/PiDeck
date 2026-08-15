@@ -143,6 +143,31 @@ export type DshBackendIpcDeps = {
 	) => Promise<{ text: string }>;
 	/** DSH 会话文件路径推导（按 catalog entry 的 dshSessionId + cwd）；未装配/不可推导返回 undefined。 */
 	resolveDshSessionFilePath?: (sessionId: string) => Promise<string | undefined>;
+	/** DSH 会话内容搜索（session.search）；未装配时返回空列表。 */
+	searchDshSessions?: (query: string) => Promise<Array<{ sessionId: string; snippet: string }>>;
+	/** DSH 创建目标（G5）；未装配时抛错。 */
+	createDshGoal?: (agentId: string, objective: string, maxGoalRounds?: number) => Promise<void>;
+	/** DSH 目标操作（G5：pause/resume/complete/clear）；未装配时抛错。 */
+	runDshGoalAction?: (
+		agentId: string,
+		action: "pause" | "resume" | "complete" | "clear",
+	) => Promise<void>;
+	/** DSH 子代理列表（G6）；未装配时返回空列表。 */
+	listDshSubagents?: (agentId: string) => Promise<Array<{
+		id: string;
+		label?: string;
+		activity: "running" | "inactive";
+		hasChildren: boolean;
+		mode: "one-shot" | "continuable";
+		kind: "child" | "diagnostic";
+	}>>;
+	/** DSH 子代理历史（G6）；未装配时返回空页。 */
+	readDshSubagentHistory?: (
+		agentId: string,
+		childSessionId: string,
+		beforeSeq?: number,
+		maxMessages?: number,
+	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; hasMore: boolean }>;
 	/** 判断 agentId 是否属于 DSH 后端（fork 等 pi 专属命令按 backend 分流）。 */
 	isDshAgent: (agentId: string) => boolean;
 	/** DSH fork：session.fork 裁剪 + runtime 换绑 + catalog dshSessionId 回写。 */
@@ -245,6 +270,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		readDshHistoryPage,
 		readDshMessageFullText,
 		resolveDshSessionFilePath,
+		searchDshSessions,
+		createDshGoal,
+		runDshGoalAction,
+		listDshSubagents,
+		readDshSubagentHistory,
 		isDshAgent = () => false,
 		forkDshAgentSession,
 		cloneDshAgentSession,
@@ -654,6 +684,69 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
 			if (!resolveDshSessionFilePath) return undefined;
 			return resolveDshSessionFilePath(sessionId);
+		},
+	);
+	// DSH 会话内容搜索（G9：侧栏搜索框全文搜索，结果按 dshSessionId 映射回 catalog）
+	ipcMain.handle(
+		ipcChannels.sessionsSearchDsh,
+		async (_event, query: unknown): Promise<Array<{ sessionId: string; snippet: string }>> => {
+			if (typeof query !== "string" || !query.trim()) return [];
+			if (!searchDshSessions) return [];
+			return searchDshSessions(query);
+		},
+	);
+	// DSH 目标创建（G5：goal.create）
+	ipcMain.handle(
+		ipcChannels.dshCreateGoal,
+		async (_event, agentId: unknown, objective: unknown, maxGoalRounds?: unknown): Promise<void> => {
+			if (typeof agentId !== "string" || typeof objective !== "string") {
+				throw new Error("Invalid goal create request");
+			}
+			if (!createDshGoal) throw new Error("dsh goals are not available");
+			await createDshGoal(
+				agentId,
+				objective,
+				typeof maxGoalRounds === "number" ? maxGoalRounds : undefined,
+			);
+		},
+	);
+	// DSH 目标操作（G5：pause/resume/complete/clear）
+	ipcMain.handle(
+		ipcChannels.dshGoalAction,
+		async (_event, agentId: unknown, action: unknown): Promise<void> => {
+			if (
+				typeof agentId !== "string" ||
+				(action !== "pause" && action !== "resume" && action !== "complete" && action !== "clear")
+			) {
+				throw new Error("Invalid goal action request");
+			}
+			if (!runDshGoalAction) throw new Error("dsh goals are not available");
+			await runDshGoalAction(agentId, action);
+		},
+	);
+	// DSH 子代理列表（G6）
+	ipcMain.handle(
+		ipcChannels.dshListSubagents,
+		async (_event, agentId: unknown) => {
+			if (typeof agentId !== "string") return [];
+			if (!listDshSubagents) return [];
+			return listDshSubagents(agentId);
+		},
+	);
+	// DSH 子代理历史（G6）
+	ipcMain.handle(
+		ipcChannels.dshSubagentHistory,
+		async (_event, agentId: unknown, childSessionId: unknown, beforeSeq?: unknown, maxMessages?: unknown) => {
+			if (typeof agentId !== "string" || typeof childSessionId !== "string") {
+				return { messages: [], hasMore: false };
+			}
+			if (!readDshSubagentHistory) return { messages: [], hasMore: false };
+			return readDshSubagentHistory(
+				agentId,
+				childSessionId,
+				typeof beforeSeq === "number" ? beforeSeq : undefined,
+				typeof maxMessages === "number" ? maxMessages : undefined,
+			);
 		},
 	);
 	ipcMain.handle(

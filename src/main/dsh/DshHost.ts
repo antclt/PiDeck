@@ -249,6 +249,25 @@ export class DshHost {
 	}
 
 	/**
+	 * DSH 会话内容搜索（G9）：wire `session.search` 搜索 user/assistant/steering 消息面，
+	 * 结果最多 20 个会话（无游标，hasMore 提示收窄查询）。返回 { sessionId, snippet }，
+	 * 由渲染层按 dshSessionId 映射回 catalog 记录。
+	 */
+	async searchSessions(query: string): Promise<Array<{ sessionId: string; snippet: string }>> {
+		const trimmed = query.trim();
+		if (!trimmed) return [];
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) return [];
+		const searched = await client.sessions.search({ query: trimmed }, new AbortController().signal);
+		if (!searched.result.ok) return [];
+		return (searched.result.value.items ?? []).map((item) => ({
+			sessionId: String(item.sessionId),
+			snippet: item.snippet,
+		}));
+	}
+
+	/**
 	 * 可配置提供方目录（llm.providers）：内置 catalog（declared，未配置）+
 	 * 已注册路由（active）。模型页「添加提供方」从 declared 未激活行中选择，
 	 * 与 dsh-web 的休眠目录选择同源。首次调用会懒 boot。

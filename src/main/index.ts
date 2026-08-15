@@ -2374,6 +2374,13 @@ function registerIpc() {
 				if (!project?.path) return undefined;
 				return dshAgentManager.resolveSessionFilePath(project.path, entry.dshSessionId);
 			},
+			searchDshSessions: (query) => dshHost.searchSessions(query),
+			createDshGoal: (agentId, objective, maxGoalRounds) =>
+				dshAgentManager.createGoal(agentId, objective, maxGoalRounds),
+			runDshGoalAction: (agentId, action) => dshAgentManager.goalAction(agentId, action),
+			listDshSubagents: (agentId) => dshAgentManager.listSubagents(agentId),
+			readDshSubagentHistory: (agentId, childSessionId, beforeSeq, maxMessages) =>
+				dshAgentManager.readSubagentHistory(agentId, childSessionId, beforeSeq, maxMessages),
 			isDshAgent: (agentId) =>
 				dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 			forkDshAgentSession: async (target, entryId) => {

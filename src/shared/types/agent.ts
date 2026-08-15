@@ -58,6 +58,15 @@ export type AgentRuntimeState = {
 	permissionPreset?: string;
 	/** DSH 会话 plan 模式是否生效（/plan 命令，可能延迟到下一条消息的步骤生效）。 */
 	planModeActive?: boolean;
+	/** DSH 当前目标（goal/change 事件投影；无目标时为 undefined）。 */
+	goal?: {
+		refId: string;
+		revision: number;
+		objective: string;
+		phase: "active" | "paused" | "blocked" | "complete";
+		maxGoalRounds: number;
+		roundsStarted: number;
+	};
 	isStreaming?: boolean;
 	isCompacting?: boolean;
 	/** 是否正在执行工具调用（read/write/bash 等） */

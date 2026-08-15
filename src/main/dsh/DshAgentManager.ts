@@ -244,6 +244,8 @@ export class DshAgentManager implements SessionAgentGateway {
 				if (lastEntry && typeof lastEntry.event.seq === "number") {
 					runtime.lastProjectedSeq = lastEntry.event.seq;
 				}
+				// G5：attach 后从投影恢复 goal 状态（goal/change 事件随历史重放）
+				runtime.goal = runtime.projection.goal;
 			}
 		}
 		// attach 初值同步：host 里已有标题（list 投影）时立即写回 catalog——
@@ -457,6 +459,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			runtime.projection = projection;
 			runtime.messages = projection.messages;
 			runtime.lastProjectedSeq = lastSeq;
+			runtime.goal = projection.goal;
 			this.emitMessages(runtime);
 		} catch (error) {
 			getAppLogger()?.warn("dsh-agent", "mux backfill failed", {
@@ -506,6 +509,7 @@ export class DshAgentManager implements SessionAgentGateway {
 					if (lastEntry && typeof lastEntry.event.seq === "number") {
 						runtime.lastProjectedSeq = lastEntry.event.seq;
 					}
+					runtime.goal = runtime.projection.goal;
 				}
 				this.emit(ipcChannels.agentsState, this.list());
 				this.emitMessages(runtime);
@@ -596,6 +600,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			thinkingLevel: runtime.thinkingLevel,
 			permissionPreset: runtime.permissionPreset,
 			planModeActive: runtime.planModeActive,
+			// G5：当前 goal（goal/change 事件投影）
+			goal: runtime.goal,
 			// G16：usage 指标（adapter 报告时才有）
 			inputTokens: runtime.usage?.inputTokens,
 			outputTokens: runtime.usage?.outputTokens,
@@ -686,6 +692,109 @@ export class DshAgentManager implements SessionAgentGateway {
 			? message.meta.fullText
 			: message.text;
 		return { text: fullText };
+	}
+
+	/** 创建目标（G5）：objective 必填；maxGoalRounds 缺省由 host 服务配置解析。 */
+	async createGoal(agentId: string, objective: string, maxGoalRounds?: number): Promise<void> {
+		const trimmed = objective.trim();
+		if (!trimmed) throw new Error("Goal objective is required");
+		const runtime = this.runtime(agentId);
+		const client = this.requireClient();
+		const created = await client.goals.create({
+			sessionId: runtime.sessionId,
+			objective: trimmed,
+			...(typeof maxGoalRounds === "number" ? { maxGoalRounds } : {}),
+		});
+		if (!created.result.ok) {
+			throw new Error(`dsh goal.create failed: ${JSON.stringify(created.result.error)}`);
+		}
+	}
+
+	/** 目标操作（G5）：pause/resume/complete/clear，按当前 goal 的 CAS ref 提交。 */
+	async goalAction(
+		agentId: string,
+		action: "pause" | "resume" | "complete" | "clear",
+	): Promise<void> {
+		const runtime = this.runtime(agentId);
+		const goal = runtime.goal;
+		if (!goal) throw new Error("No active goal");
+		const client = this.requireClient();
+		// goal.refId 是投影持久化的普通字符串，host API 需要品牌类型：边界一次性转换（同 SessionId 模式）。
+		const ref = {
+			id: goal.refId as import("@deepseek-ai/dsh-goal/types").GoalId,
+			revision: goal.revision,
+		};
+		const request = {
+			sessionId: runtime.sessionId,
+			ref,
+		};
+		const result = action === "pause"
+			? await client.goals.pause(request)
+			: action === "resume"
+				? await client.goals.resume(request)
+				: action === "complete"
+					? await client.goals.complete(request)
+					: await client.goals.clear({ sessionId: runtime.sessionId, ref });
+		if (!result.result.ok) {
+			throw new Error(`dsh goal.${action} failed: ${JSON.stringify(result.result.error)}`);
+		}
+	}
+
+	/** 子代理列表（G6）：subagent.list 直接子代目录（不激活双方）。 */
+	async listSubagents(agentId: string): Promise<Array<{
+		id: string;
+		label?: string;
+		activity: "running" | "inactive";
+		hasChildren: boolean;
+		mode: "one-shot" | "continuable";
+		kind: "child" | "diagnostic";
+	}>> {
+		const runtime = this.runtime(agentId);
+		const client = this.requireClient();
+		const listed = await client.subagents.list({ parentSessionId: runtime.sessionId });
+		if (!listed.result.ok) return [];
+		return (listed.result.value.entries ?? []).map((entry) => ({
+			id: String(entry.id),
+			label: "label" in entry ? entry.label : undefined,
+			activity: "activity" in entry ? entry.activity : "inactive",
+			hasChildren: "hasChildren" in entry ? entry.hasChildren : false,
+			mode: "mode" in entry ? entry.mode : "one-shot",
+			kind: entry.kind,
+		}));
+	}
+
+	/** 子代理历史（G6）：只读 transcript（不激活 Agent），投影成 ChatMessage。 */
+	async readSubagentHistory(
+		agentId: string,
+		childSessionId: string,
+		beforeSeq?: number,
+		maxMessages = 100,
+	): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
+		const runtime = this.runtime(agentId);
+		const client = this.requireClient();
+		const address = {
+			parentSessionId: runtime.sessionId,
+			childSessionId: childSessionId as SessionId,
+			mode: "one-shot" as const,
+		};
+		const page = await client.subagents.history({
+			...address,
+			...(typeof beforeSeq === "number" ? { beforeSeq } : {}),
+			maxMessages,
+		});
+		if (!page.result.ok) {
+			return { messages: [], hasMore: false };
+		}
+		const entries = (page.result.value.events ?? [])
+			.map((entry) => ({ event: entry.event, view: entry.view }))
+			.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event))
+			.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+		const childAgentId = `dsh:${childSessionId}`;
+		let projection = projectDshEvent(undefined, undefined, childAgentId);
+		for (const { event, view } of entries) {
+			projection = projectDshEvent(projection, event, childAgentId, view);
+		}
+		return { messages: projection.messages, hasMore: page.result.value.hasMore === true };
 	}
 
 	async setModel(agentId: string, provider: string, modelId: string): Promise<unknown> {
@@ -838,6 +947,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (lastEntry && typeof lastEntry.event.seq === "number") {
 				nextRuntime.lastProjectedSeq = lastEntry.event.seq;
 			}
+			nextRuntime.goal = nextRuntime.projection.goal;
 		}
 		this.runtimes.set(agentId, nextRuntime);
 		this.startMux(nextRuntime);
@@ -1162,6 +1272,10 @@ export class DshAgentManager implements SessionAgentGateway {
 							if (p.model) runtime.model = p.model;
 							// G16：usage 随投影同步（assistant/message 更新）
 							if (p.usage) runtime.usage = p.usage;
+							// G5：goal 随投影同步（goal/change 更新；clear 时 p.goal 为 undefined）。
+							// event.type 是 dsh-session 已知事件联合（不含 goal/change 声明），
+							// 这里按字符串比较（宿主包未合并 dsh-goal 的 module 声明）。
+							if ((event as { type?: string } | undefined)?.type === "goal/change") runtime.goal = p.goal;
 							// DSH 权限预设 / plan 模式（/permission /plan 命令事件折叠）：
 							// 同步进 runtime state，渲染层底栏/模式按钮即时反映。
 							if (p.permissionPreset !== undefined) runtime.permissionPreset = p.permissionPreset;
@@ -1251,6 +1365,15 @@ type DshAgentRuntime = {
 	lastProjectedSeq?: number;
 	/** 最近一次 assistant 回合的 token 用量（G16；assistant/message 事件投影更新）。 */
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+	/** 当前 goal（G5；goal/change 事件投影更新，clear 后为 undefined）。 */
+	goal?: {
+		refId: string;
+		revision: number;
+		objective: string;
+		phase: "active" | "paused" | "blocked" | "complete";
+		maxGoalRounds: number;
+		roundsStarted: number;
+	};
 	/** 进行中的思考段 id（turn 内首个 reasoning-delta 起登记；终态清空）。 */
 	thinkingId?: string;
 	thinkingStartedAt?: number;

@@ -16,6 +16,7 @@ import { sessionRecordToSummary } from "../../atoms";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
 import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, hasLiveSidebarRuntime, type SidebarController, type SidebarRpcLog } from "../../hooks/useSidebarController";
+import { DshSearchResults } from "./DshSearchResults";
 import { ProjectTree } from "./ProjectTree";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
@@ -173,6 +174,16 @@ export function SidebarContent(props: SidebarContentProps) {
             <FolderPlus className="size-3.5" />
           </Button>
         </div>
+
+        {/* G9：DSH 全文搜索结果（搜索词非空时展示；结果按 dshSessionId 映射回 catalog） */}
+        {controller.search.trim() && (
+          <DshSearchResults
+            query={controller.search}
+            onOpen={(projectId, sessionId) => {
+              void actions.sessions.open(projectId, sessionId);
+            }}
+          />
+        )}
 
         {/* 单一滚动区承载项目与展开内容，避免项目导航/详情双滚动和重复标题。
             scrollbar-gutter: stable：滚动条出现/消失时列表宽度不跳变（与抽屉一致）。 */}
