@@ -30,6 +30,9 @@ export type DshProjection = {
 	permissionPreset?: string;
 	/** DSH plan 模式是否生效（plan/mode 事件最后值；缺失 = 关闭）。 */
 	planModeActive: boolean;
+	/** 最近一次 assistant 回合的 token 用量（G16：assistant/message 携带 adapter 报告
+	 *  的 usage 时更新，latest wins；缺失 = 适配器未报告）。 */
+	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 	/** 本条事件的增量信号（供调用方逐帧转发）。 */
 	deltaText?: string;
 	deltaReasoning?: string;
@@ -177,6 +180,24 @@ export function projectDshEvent(
 		case "assistant/message": {
 			// 终态：以组装后的完整内容块为准（delta 可能因适配器差异与终态不完全一致）
 			const message = (data.message ?? {}) as { content?: unknown };
+			// G16：usage 统计——adapter 报告 token 用量时 assistant/message 携带 usage，
+			// 投影进 projection（渲染层 runtime state 的 token/缓存指标）。
+			if (isRecord(data.message)) {
+				const usage = (data.message as { usage?: unknown }).usage;
+				if (isRecord(usage)) {
+					const u = usage as Record<string, unknown>;
+					const inputTokens = typeof u.inputTokens === "number" ? u.inputTokens : 0;
+					const outputTokens = typeof u.outputTokens === "number" ? u.outputTokens : 0;
+					if (inputTokens > 0 || outputTokens > 0) {
+						next.usage = {
+							inputTokens,
+							outputTokens,
+							...(typeof u.cacheReadTokens === "number" ? { cacheReadTokens: u.cacheReadTokens } : {}),
+							...(typeof u.cacheWriteTokens === "number" ? { cacheWriteTokens: u.cacheWriteTokens } : {}),
+						};
+					}
+				}
+			}
 			const { text, reasoning } = splitBlocks(message.content);
 			const finalText = text.trim() ? text : base.pendingAssistantText;
 			// 流式累积兜底：终态 content 缺失 thinking 时用已流式渲染的累积文本

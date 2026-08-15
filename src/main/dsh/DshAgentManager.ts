@@ -596,6 +596,14 @@ export class DshAgentManager implements SessionAgentGateway {
 			thinkingLevel: runtime.thinkingLevel,
 			permissionPreset: runtime.permissionPreset,
 			planModeActive: runtime.planModeActive,
+			// G16：usage 指标（adapter 报告时才有）
+			inputTokens: runtime.usage?.inputTokens,
+			outputTokens: runtime.usage?.outputTokens,
+			cacheRead: runtime.usage?.cacheReadTokens,
+			cacheWrite: runtime.usage?.cacheWriteTokens,
+			cacheTotal: runtime.usage
+				? (runtime.usage.cacheReadTokens ?? 0) + (runtime.usage.cacheWriteTokens ?? 0)
+				: undefined,
 		};
 	}
 
@@ -1152,6 +1160,8 @@ export class DshAgentManager implements SessionAgentGateway {
 						if (p.stateChanged) {
 							runtime.executingTool = p.executingTool;
 							if (p.model) runtime.model = p.model;
+							// G16：usage 随投影同步（assistant/message 更新）
+							if (p.usage) runtime.usage = p.usage;
 							// DSH 权限预设 / plan 模式（/permission /plan 命令事件折叠）：
 							// 同步进 runtime state，渲染层底栏/模式按钮即时反映。
 							if (p.permissionPreset !== undefined) runtime.permissionPreset = p.permissionPreset;
@@ -1239,6 +1249,8 @@ type DshAgentRuntime = {
 	isCompacting?: boolean;
 	/** 已投影的最大事件 seq（D6：mux 重连补帧时跳过已投影事件，避免重复）。 */
 	lastProjectedSeq?: number;
+	/** 最近一次 assistant 回合的 token 用量（G16；assistant/message 事件投影更新）。 */
+	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 	/** 进行中的思考段 id（turn 内首个 reasoning-delta 起登记；终态清空）。 */
 	thinkingId?: string;
 	thinkingStartedAt?: number;

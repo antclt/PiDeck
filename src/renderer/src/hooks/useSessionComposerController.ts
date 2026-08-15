@@ -47,6 +47,7 @@ import {
   buildSuggestionItems,
   clearSuggestionTrigger,
   detectTrigger,
+  DSH_COMMAND_SUGGESTIONS,
   fileNodeDragPayloadToRef,
   flattenFiles,
   mergeCommands,
@@ -501,6 +502,18 @@ export function useSessionComposerController(
   }, [record?.projectId]);
 
   useEffect(() => {
+    // G4：DSH 会话没有 pi 的 get_commands（capabilities 未声明 getCommands），
+    // 走已知命令建议集（与 dsh-web 命名空间一致；slash 桥未命中会放行给模型）。
+    if (isDshBackend) {
+      setCommands(
+        DSH_COMMAND_SUGGESTIONS.map((command) => ({
+          name: command.name,
+          description: t(command.descriptionKey),
+          source: command.source,
+        })),
+      );
+      return;
+    }
     const target = toSessionRuntimeTarget(sessionId, runtime);
     if (!target) {
       setCommands([]);
@@ -515,7 +528,7 @@ export function useSessionComposerController(
     return () => {
       current = false;
     };
-  }, [runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
+  }, [isDshBackend, runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
 
   useEffect(() => {
     templateRequestGateRef.current.invalidate(templateKey);
