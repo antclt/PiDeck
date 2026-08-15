@@ -270,13 +270,15 @@
 
 ## 5. 落地路线（建议顺序）
 
-| 阶段 | 内容 | 依赖 | 验收 |
-|---|---|---|---|
-| **S1 运行时硬伤** | D1 abort 解阻塞审批/提问 + 超时、D2 sendPrompt 显式拒绝不支持载荷、D3 fork 接入 Coordinator lease 保护、D4 compact 补 waitForIdle/isCompacting；E1 host-ready 超时、E2 请求超时、E3 崩溃重启限次+退避、E4 崩溃后状态重置/re-attach；F1 DSH 附件入口禁用、F2 默认后端统一、F3 compact 0% 文案；A1 clone 分流（或 UI 禁用）、A8/A9 复制/导出分流、A2/A3 全量读/全文读 DSH 分支 | 无 | typecheck + 单测绿；DSH 会话 abort 中审批、fork 并发、host 崩溃恢复、clone/导出手测 |
-| **S2 收尾 + 公共抽象一期** | A4 注释修正、B6 同目录并发提示、D5 pending 表生命周期、D6 mux 重连补帧、E5 环境策略、E6 日志/消息处理、E8/E9 abort 泄漏与竞态、E10/E15 清理与退出登记；C2 生命周期基类、C5 ModelCatalog、C8 PromptSerializer、C11 进程生命周期基类、C12 退出清理表、C13 pending 超时 | S1 | 重构后 pi/dsh 全量回归（e2e 双后端） |
-| **S3 公共抽象二期 + 数据面** | C1 后端注册表、C3 历史分页协议、C6 偏好存储（含 G8 对账）、C9 身份桥、C10 fork 统一 replacement、C18-C22 渲染层抽象 | S2 | sessionIpc deps 收敛；backend 特判消除；UI 双后端分支收敛 |
-| **S4 功能补齐 P1** | G4 `/commands` 列表、G9 搜索、G5/G6 goals/subagents UI、G16 usage、G11/G12 设置页入口与权限/plan 徽标、F5 复制路径入口、D7 注释对齐、D8-D10 投影边界 | S3 | e2e 新增覆盖 |
-| **S5 功能补齐 P2 + 增强** | G2 图片附件（桥字节载荷，含 D2/F1 收尾）、G1/G3 会话删除语义、G14 归档、G17 rpc log、G13 插件管理 UI、D11-D16/E11-E16/F6-F9 一致性修复 | S4 | 全量手测 + 打包验证 |
+> 状态：✅ 已完成（commit d258eeff / 30758e95 / ee5cc1d9）｜⏳ 后置（纯架构重构，功能已等价落地）
+
+| 阶段 | 内容 | 依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| **S1 运行时硬伤** | D1 abort 解阻塞审批/提问 + 超时、D2 sendPrompt 显式拒绝不支持载荷、D3 fork 接入 Coordinator lease 保护、D4 compact 补 waitForIdle/isCompacting；E1 host-ready 超时、E2 请求超时、E3 崩溃重启限次+退避、E4 崩溃后状态重置/re-attach；F1 DSH 附件入口禁用、F2 默认后端统一、F3 compact 0% 文案；A1 clone 分流（或 UI 禁用）、A8/A9 复制/导出分流、A2/A3 全量读/全文读 DSH 分支 | 无 | typecheck + 单测绿；DSH 会话 abort 中审批、fork 并发、host 崩溃恢复、clone/导出手测 | ✅ |
+| **S2 收尾 + 公共抽象一期** | A4 注释修正、B6 同目录并发提示、D5 pending 表生命周期、D6 mux 重连补帧、E5 环境策略、E6 日志/消息处理、E8/E9 abort 泄漏与竞态、E10/E15 清理与退出登记；C12 退出清理表；C2/C11/C13 的等价修复已在 DshHostProcess/DshApiClient 内部落地（健康信号超时/请求超时/崩溃限次退避/pending 清理），基类化后置；C5 ModelCatalog 渲染侧已由 C19 覆盖（主进程侧 SessionAgentGateway.getAvailableModels 即统一接口，无需再抽）；C8 PromptSerializer 后置（pi 协议队列语义有回归风险） | S1 | 重构后 pi/dsh 全量回归（e2e 双后端） | ✅（抽象基类化后置） |
+| **S3 公共抽象二期 + 数据面** | C18 SessionBackendMark、C19 useBackendModelCatalog、C20 SecurityControl、C21 DEFAULT_AGENT_BACKEND、C9 buildAttachPatch、C12 QuitCleanupRegistry 已完成；C6 偏好存储现状已满足（SessionCatalog=store，Coordinator.applyPreferences=applyOnActivate，G8 对账以 catalog 为准的语义已文档化）；C1 后端注册表、C3 历史分页协议（readDshHistoryPage 注入已隔离 pi/dsh 分支）、C10 fork replacement 完整版（D3 已加 dispatch lease 检查，replacement 预留后置）、C22 useSaveRegistry 后置（纯架构重构） | S2 | sessionIpc deps 收敛；backend 特判消除；UI 双后端分支收敛 | ✅（C1/C3/C10/C22 后置） |
+| **S4 功能补齐 P1** | G4 `/commands` 列表、G9 搜索、G5/G6 goals/subagents UI、G16 usage、G11/G12 设置页入口与权限/plan 徽标、F5 复制路径入口、D7 注释对齐、D8-D10 投影边界 | S3 | e2e 新增覆盖 | ⏳ 未开始 |
+| **S5 功能补齐 P2 + 增强** | G2 图片附件（桥字节载荷，含 D2/F1 收尾）、G1/G3 会话删除语义、G14 归档、G17 rpc log、G13 插件管理 UI、D11-D16/E11-E16/F6-F9 一致性修复 | S4 | 全量手测 + 打包验证 | ⏳ 未开始 |
 
 ## 6. 验证门禁（沿用 AGENTS.md）
 
