@@ -830,6 +830,29 @@ export class SessionRuntimeCoordinator {
 		if (sessionId) this.assertNoDispatchLease(sessionId, agentId);
 	}
 
+	/**
+	 * DSH fork/clone 的绑定预留（C10）：执行期间占用 replacement 槽位，阻止并发
+	 * restart/其他 replacement 命令交错（restart 的 reserveBoundRuntime 会发现
+	 * replacement 已被占用而拒绝）；执行完成后释放。DSH fork 保持同一
+	 * SessionRecord ↔ agentId 绑定（dshSessionId 由 manager/catalog 回写），
+	 * 无需像 restart 那样重建绑定。内部同样做 dispatch lease 检查。
+	 */
+	async withRuntimeReservation<T>(
+		sessionId: string,
+		agentId: string,
+		fn: () => Promise<T>,
+	): Promise<T> {
+		const reservation = this.reserveBoundRuntime(sessionId, agentId);
+		try {
+			const result = await fn();
+			this.releaseRuntimeReplacement(reservation);
+			return result;
+		} catch (error) {
+			this.releaseRuntimeReplacement(reservation);
+			throw error;
+		}
+	}
+
 	/** Fail closed after a process reaches a terminal state, including mid-dispatch. */
 	unbindTerminalAgent(agentId: string): void {
 		this.unbindAgentUnchecked(agentId);

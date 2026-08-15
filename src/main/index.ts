@@ -2339,56 +2339,59 @@ function registerIpc() {
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
-		listDshModels: () => dshHost.listModels(),
-		listDshProviders: () => dshHost.listProviders(),
-		listDshAgentPresets: () => dshHost.listAgentPresets(),
-		getDshDefaultModel: () => Promise.resolve(dshHost.getDefaultModelSelection()),
-		getDshStatus: () => dshHost.getStatus(),
-		describeDshSettings: () => dshHost.describeSettings(),
-		updateDshSettings: (ns, patch, expectedRevision) => dshHost.updateSettings(ns, patch, expectedRevision),
-		describeDshCredentials: (refs) => dshHost.describeCredentials(refs),
-		setDshCredential: (ref, value) => dshHost.setCredential(ref, value),
-		unsetDshCredential: (ref) => dshHost.unsetCredential(ref),
-		readDshCredential: (ref) => dshHost.readCredentialValue(ref),
-		openDshDocument: () => dshHost.openDocument(),
-		restartDshHost: async () => {
-			// 切换 DSH_HOME 前先停掉全部活跃 DSH 会话（host 侧会话仍在 $DSH_HOME
-			// 持久化，catalog 保留 dshSessionId，重新打开会话时 attach 恢复），
-			// 避免旧目录的 mux 悬挂在已 dispose 的 transport 上；再重启 host。
-			await dshAgentManager.stopAll();
-			await dshHost.restart();
-			return true;
-		},
-		readDshHistoryPage: (dshSessionId, beforeSeq, pageSize) =>
-			dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
-		readDshMessageFullText: (agentId, messageId) =>
-			dshAgentManager.readMessageFullText(agentId, messageId),
-		isDshAgent: (agentId) =>
-			dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
-		forkDshAgentSession: async (target, entryId) => {
-			// DSH fork：runtime 已原地换绑到新会话（agentId 不变，焦点会话 id 不变），
-			// 这里只需把 catalog 的 dshSessionId 同步为新 fork 会话，重启后 attach 正确。
-			const result = await dshAgentManager.forkSession(target.agentId, entryId);
-			const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
-			if (tab?.sessionId) {
-				await sessionCatalog.attachRuntime({
-					sessionId: target.sessionId,
-					dshSessionId: tab.sessionId,
-				});
-			}
-			return { ...result };
-		},
-		cloneDshAgentSession: async (target) => {
-			// DSH clone：fork 无锚点（完整副本），runtime 换绑到新会话，语义同 fork。
-			const result = await dshAgentManager.cloneSession(target.agentId);
-			const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
-			if (tab?.sessionId) {
-				await sessionCatalog.attachRuntime({
-					sessionId: target.sessionId,
-					dshSessionId: tab.sessionId,
-				});
-			}
-			return { ...result };
+		// C1：DSH 后端专用 IPC 依赖按后端分组（注册表化铺路；未来新增后端各自提供一份）
+		dshBackend: {
+			listDshModels: () => dshHost.listModels(),
+			listDshProviders: () => dshHost.listProviders(),
+			listDshAgentPresets: () => dshHost.listAgentPresets(),
+			getDshDefaultModel: () => Promise.resolve(dshHost.getDefaultModelSelection()),
+			getDshStatus: () => dshHost.getStatus(),
+			describeDshSettings: () => dshHost.describeSettings(),
+			updateDshSettings: (ns, patch, expectedRevision) => dshHost.updateSettings(ns, patch, expectedRevision),
+			describeDshCredentials: (refs) => dshHost.describeCredentials(refs),
+			setDshCredential: (ref, value) => dshHost.setCredential(ref, value),
+			unsetDshCredential: (ref) => dshHost.unsetCredential(ref),
+			readDshCredential: (ref) => dshHost.readCredentialValue(ref),
+			openDshDocument: () => dshHost.openDocument(),
+			restartDshHost: async () => {
+				// 切换 DSH_HOME 前先停掉全部活跃 DSH 会话（host 侧会话仍在 $DSH_HOME
+				// 持久化，catalog 保留 dshSessionId，重新打开会话时 attach 恢复），
+				// 避免旧目录的 mux 悬挂在已 dispose 的 transport 上；再重启 host。
+				await dshAgentManager.stopAll();
+				await dshHost.restart();
+				return true;
+			},
+			readDshHistoryPage: (dshSessionId, beforeSeq, pageSize) =>
+				dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
+			readDshMessageFullText: (agentId, messageId) =>
+				dshAgentManager.readMessageFullText(agentId, messageId),
+			isDshAgent: (agentId) =>
+				dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
+			forkDshAgentSession: async (target, entryId) => {
+				// DSH fork：runtime 已原地换绑到新会话（agentId 不变，焦点会话 id 不变），
+				// 这里只需把 catalog 的 dshSessionId 同步为新 fork 会话，重启后 attach 正确。
+				const result = await dshAgentManager.forkSession(target.agentId, entryId);
+				const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
+				if (tab?.sessionId) {
+					await sessionCatalog.attachRuntime({
+						sessionId: target.sessionId,
+						dshSessionId: tab.sessionId,
+					});
+				}
+				return { ...result };
+			},
+			cloneDshAgentSession: async (target) => {
+				// DSH clone：fork 无锚点（完整副本），runtime 换绑到新会话，语义同 fork。
+				const result = await dshAgentManager.cloneSession(target.agentId);
+				const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
+				if (tab?.sessionId) {
+					await sessionCatalog.attachRuntime({
+						sessionId: target.sessionId,
+						dshSessionId: tab.sessionId,
+					});
+				}
+				return { ...result };
+			},
 		},
 	});
 

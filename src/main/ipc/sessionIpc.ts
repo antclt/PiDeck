@@ -58,32 +58,13 @@ import type { ClaudeSessionImporter } from "../sessions/ClaudeSessionImporter";
 import type { OpenCodeSessionImporter } from "../sessions/OpenCodeSessionImporter";
 import type { AppLogger } from "../logging/AppLogger";
 
-export type SessionIpcDeps = {
-	projectStore: ProjectStore;
-	settingsStore: SettingsStore;
-	sessionScanner: SessionScanner;
-	sessionCatalog: SessionCatalog;
-	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
-	agentManager: AgentManager;
-	configManager: ConfigManager;
-	codexSessionImporter: CodexSessionImporter;
-	claudeSessionImporter: ClaudeSessionImporter;
-	openCodeSessionImporter: OpenCodeSessionImporter;
-	appLogger: AppLogger;
-	terminalManager: TerminalSessionManager;
-	mainCopy: (key: string, params?: Record<string, string | number>) => string;
-	getMainWindow: () => BrowserWindow | null;
-	emitSessionRuntimeEvent: (agentId: string, channel: string, payload: unknown) => boolean;
-	emitSessionRuntimeDetach: (target: SessionRuntimeTarget) => void;
-	createAnonymousSession: (input: CreateAnonymousSessionInput) => Promise<CreateAnonymousSessionResult>;
-	stopSessionRuntime: (target: SessionRuntimeTarget) => void;
-	emitReplacementState: (runtime: SessionRuntimeInfo, includeMessages: boolean) => void;
-	readCatalogSessionReferenceMessages: (sessionId: string) => Promise<unknown[]>;
-	copyCatalogSession: (
-		sessionId: string,
-	) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
-	exportCatalogSessionHtml: (sessionId: string) => Promise<Record<string, unknown> & { path: string }>;
-	replaceAgentSession: (agentId: string, fn: () => Promise<any>) => Promise<any>;
+/**
+ * DSH 后端专用 IPC 依赖（C1 分组）：按后端收敛可选注入，为「后端注册表」铺路——
+ * 未来新增后端时各自提供一份 BackendIpcDeps，装配层按 backendId 查注册表注入，
+ * 而不是在 SessionIpcDeps 上继续堆可选字段。未装配（dshBackend undefined）= 无 DSH
+ * 后端，相关通道降级返回空/错误。
+ */
+export type DshBackendIpcDeps = {
 	/** DSH host 级模型目录；未装配时返回空列表。 */
 	listDshModels?: () => Promise<import("../../shared/types").AvailableModel[]>;
 	/** DSH 可配置提供方目录（内置 catalog + 已注册路由）；未装配时返回空列表。 */
@@ -173,6 +154,36 @@ export type SessionIpcDeps = {
 	) => Promise<Record<string, unknown> & { targetSessionId?: string }>;
 };
 
+export type SessionIpcDeps = {
+	projectStore: ProjectStore;
+	settingsStore: SettingsStore;
+	sessionScanner: SessionScanner;
+	sessionCatalog: SessionCatalog;
+	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
+	agentManager: AgentManager;
+	configManager: ConfigManager;
+	codexSessionImporter: CodexSessionImporter;
+	claudeSessionImporter: ClaudeSessionImporter;
+	openCodeSessionImporter: OpenCodeSessionImporter;
+	appLogger: AppLogger;
+	terminalManager: TerminalSessionManager;
+	mainCopy: (key: string, params?: Record<string, string | number>) => string;
+	getMainWindow: () => BrowserWindow | null;
+	emitSessionRuntimeEvent: (agentId: string, channel: string, payload: unknown) => boolean;
+	emitSessionRuntimeDetach: (target: SessionRuntimeTarget) => void;
+	createAnonymousSession: (input: CreateAnonymousSessionInput) => Promise<CreateAnonymousSessionResult>;
+	stopSessionRuntime: (target: SessionRuntimeTarget) => void;
+	emitReplacementState: (runtime: SessionRuntimeInfo, includeMessages: boolean) => void;
+	readCatalogSessionReferenceMessages: (sessionId: string) => Promise<unknown[]>;
+	copyCatalogSession: (
+		sessionId: string,
+	) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
+	exportCatalogSessionHtml: (sessionId: string) => Promise<Record<string, unknown> & { path: string }>;
+	replaceAgentSession: (agentId: string, fn: () => Promise<any>) => Promise<any>;
+	/** DSH 后端专用 IPC 依赖（C1 分组；未装配 = 无 DSH 后端）。 */
+	dshBackend?: DshBackendIpcDeps;
+};
+
 function sessionCommandIpcError(
 	error: SessionCommandError,
 	appLogger: Pick<AppLogger, "warn">,
@@ -212,6 +223,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
+		dshBackend,
+	} = deps;
+	// C1：DSH 后端依赖从 dshBackend 分组解构（未装配 = 空对象，相关通道降级）。
+	const {
 		listDshModels,
 		listDshProviders,
 		listDshAgentPresets,
@@ -227,10 +242,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		restartDshHost,
 		readDshHistoryPage,
 		readDshMessageFullText,
-		isDshAgent,
+		isDshAgent = () => false,
 		forkDshAgentSession,
 		cloneDshAgentSession,
-	} = deps;
+	} = dshBackend ?? {};
 
 	ipcMain.handle(
 		ipcChannels.sessionsList,
@@ -889,13 +904,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			try {
 				// DSH 后端：clone = fork 无锚点（完整副本）+ runtime 换绑新会话
 				// （catalog 的 dshSessionId 同步更新，重启后 attach 到 clone 结果）。
-				// D3：与 fork 同约束——在途发送时拒绝（原地换绑不经过 replacement 保护）。
+				// D3/C10：与 fork 同约束——withRuntimeReservation（lease 检查 + replacement 预留）。
 				if (isDshAgent(target.agentId)) {
-					sessionRuntimeCoordinator.assertNoDispatchInFlight(target.agentId);
 					if (!cloneDshAgentSession) {
 						throw new Error("dsh clone is not available");
 					}
-					const value = await cloneDshAgentSession(target);
+					const value = await sessionRuntimeCoordinator.withRuntimeReservation(
+						target.sessionId,
+						target.agentId,
+						() => cloneDshAgentSession(target),
+					);
 					void appLogger.info("session", "Session cloned (dsh)", {
 						sessionId: target.sessionId,
 					});
@@ -935,15 +953,18 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			try {
 				// DSH 后端：fork = session.fork 裁剪 + runtime 换绑新会话（catalog 的
 				// dshSessionId 同步更新，重启后 attach 到 fork 结果）。
-				// D3：fork 前检查无在途发送（dispatch lease）——DSH fork 在 manager 内
-				// 原地换绑，不经过 pi 的 replaceBoundRuntime 保护；有在途发送时拒绝，
-				// 避免 RPC 响应落到已废弃 mux 导致结果丢失/串台。
+				// D3/C10：withRuntimeReservation 提供完整保护——dispatch lease 检查
+				// （在途发送拒绝，防 RPC 响应落到已废弃 mux）+ replacement 预留
+				// （fork 期间阻止并发 restart 等命令交错）。
 				if (isDshAgent(target.agentId)) {
-					sessionRuntimeCoordinator.assertNoDispatchInFlight(target.agentId);
 					if (!forkDshAgentSession) {
 						throw new Error("dsh fork is not available");
 					}
-					const value = await forkDshAgentSession(target, entryId);
+					const value = await sessionRuntimeCoordinator.withRuntimeReservation(
+						target.sessionId,
+						target.agentId,
+						() => forkDshAgentSession(target, entryId),
+					);
 					void appLogger.info("session", "Session forked (dsh)", {
 						sessionId: target.sessionId,
 						entryId,

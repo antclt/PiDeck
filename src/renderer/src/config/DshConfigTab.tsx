@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useState, type ReactNode } from "react";
 import {
 	Blocks,
 	ChevronDown,
@@ -33,6 +33,7 @@ import {
 } from "../components/ui-shadcn/select";
 import { DshLogo } from "../components/session/SessionSourceBadge";
 import { DSH_PERMISSION_PRESETS } from "../components/session/DshPermissionMenu";
+import { useSaveRegistry } from "../hooks/useSaveRegistry";
 import { DshSchemaForm, type DshNamespaceView } from "./DshSchemaForm";
 import { DeepseekRouteCard, PiAiProvidersCard } from "./DshProviderCards";
 import { collectCredentialRefsWithValue, normalizeDshSchema, type DshSectionApi } from "./dshSchema";
@@ -107,24 +108,28 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 	const [loading, setLoading] = useState(true);
 	const [activeTab, setActiveTab] = useState("overview");
 
-	/** 子分区保存函数注册表（instanceId → save）；顶部保存按钮统一遍历调用。 */
-	const saversRef = useRef(new Map<string, () => Promise<boolean>>());
-	/** 脏状态来源集合（instanceId）；非空即存在未保存修改。 */
-	const dirtyRef = useRef(new Set<string>());
+	/** 子分区保存注册表（C22：公共 hook，instanceId → save；顶部保存按钮统一遍历调用）。
+	 *  脏状态同步维护（isDirty 立即可读），state 仅驱动 UI。 */
+	const {
+		register: registryRegister,
+		unregister: registryUnregister,
+		markDirty: registryMarkDirty,
+		isDirty: registryIsDirty,
+		saveAll: registrySaveAll,
+	} = useSaveRegistry();
 
 	const registerSave = useCallback((instanceId: string, save: () => Promise<boolean>) => {
-		saversRef.current.set(instanceId, save);
-	}, []);
+		registryRegister(instanceId, save);
+	}, [registryRegister]);
 
 	const unregisterSave = useCallback((instanceId: string) => {
-		saversRef.current.delete(instanceId);
-	}, []);
+		registryUnregister(instanceId);
+	}, [registryUnregister]);
 
 	const onDirtyChange = useCallback((instanceId: string, dirty: boolean) => {
-		if (dirty) dirtyRef.current.add(instanceId);
-		else dirtyRef.current.delete(instanceId);
-		props.onDirtyChange(dirtyRef.current.size > 0);
-	}, [props.onDirtyChange]);
+		registryMarkDirty(instanceId, dirty);
+		props.onDirtyChange(registryIsDirty());
+	}, [props.onDirtyChange, registryIsDirty, registryMarkDirty]);
 
 	const sectionApi: DshSectionApi = useMemo(() => ({
 		onDirtyChange,
@@ -132,15 +137,13 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 		unregisterSave,
 	}), [onDirtyChange, registerSave, unregisterSave]);
 
-	/** 统一保存：遍历所有注册的子分区保存函数；全部成功返回 true。 */
+	/** 统一保存：遍历所有注册的子分区保存函数；全部成功返回 true。
+	 *  成功后清除脏标记（含卸载/收起分区的残留）并上报上层。 */
 	const saveAll = useCallback(async (): Promise<boolean> => {
-		let ok = true;
-		for (const save of saversRef.current.values()) {
-			const result = await save();
-			if (!result) ok = false;
-		}
+		const ok = await registrySaveAll();
+		if (ok) props.onDirtyChange(false);
 		return ok;
-	}, []);
+	}, [props.onDirtyChange, registrySaveAll]);
 
 	useImperativeHandle(ref, () => ({ save: saveAll }), [saveAll]);
 
