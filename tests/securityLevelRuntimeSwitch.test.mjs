@@ -11,16 +11,19 @@ import test from "node:test";
  *   resources/extensions/pi-deck-security-gate.ts loadSnapshot），即「即时生效」；
  * - 因此没有「下一轮才生效」的延迟语义，UI 只需放开运行中禁用，无需 pending 指示。
  */
-test("契约: SecurityLevelMenu 运行中不再置灰（仅 Agent 启动中禁用）", () => {
+test("契约: 底栏安全控制位经 SecurityControl 统一入口（pi 安全等级 / DSH 权限预设）", () => {
   const area = readFileSync(
     "src/renderer/src/components/session/ComposerArea.tsx",
     "utf8",
   );
-  // 安全按钮只被启动中禁用；isBusy（运行/流式）时仍可切换
+  // C20：后端分支收敛到 SecurityControl，ComposerArea 不再直接 if/else 两个菜单；
+  // SecurityControl 内部按 backend 路由（SecurityLevelMenu 保持「仅启动中禁用」语义）。
   assert.match(
     area,
-    /<SecurityLevelMenu sessionId=\{props\.sessionId\} disabled=\{composer\.isStarting\} \/>/,
+    /<SecurityControl sessionId=\{props\.sessionId\} backend=\{composer\.backend\} disabled=\{composer\.isStarting\} \/>/,
   );
+  assert.doesNotMatch(area, /<SecurityLevelMenu/);
+  assert.doesNotMatch(area, /<DshPermissionMenu/);
   // 模板/附件仍走全局 busy 禁用；思考与模型已单独放开运行中
   assert.match(
     area,

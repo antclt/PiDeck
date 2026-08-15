@@ -29,6 +29,7 @@ import {
 import { ConfirmDialog } from "../app/AppParts";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { usePendingModelApply } from "../../hooks/usePendingModelApply";
+import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import type { ComposerPickerKind } from "../../hooks/useSessionComposerController";
 import { WELCOME_MODEL_KEY, WELCOME_THINKING_KEY, readWelcomeModelPreference, readWelcomeThinkingPreference } from "../../utils/chatSessionBootstrap";
 import { THINKING_LEVELS } from "./sessionPickerOptions";
@@ -59,11 +60,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   const setThinkingPendingMap = useSetAtom(thinkingLevelPendingByIdAtom);
   const modelPending = useAtomValue(modelPendingByIdAtom)[sessionId];
   const setModelPendingMap = useSetAtom(modelPendingByIdAtom);
-  const [models, setModels] = useState<AvailableModel[]>([]);
   const composerModes = useAtomValue(sessionComposerModeByIdAtom);
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
   const [planModeAvailable, setPlanModeAvailable] = useState(true);
-  const modelLoadSequenceRef = useRef(0);
   /** 模型在本地 models.json 存在但运行中 Agent 未加载：待确认重启的目标。 */
   const [restartTarget, setRestartTarget] = useState<{
     handle: SessionRuntimeTarget;
@@ -90,7 +89,6 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   }, []);
 
   useEffect(() => {
-    if (props.picker !== "mode") return;
     // 计划模式由内置扩展提供；每次打开模式选择器读取最新状态，避免禁用扩展后仍显示过期选项。
     const extensionsApi = (window as unknown as {
       piDesktop?: { extensions?: { list: () => Promise<{ extensions: Array<{ source: string; enabled?: boolean; builtIn?: boolean }> }> } };
@@ -108,27 +106,18 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     });
   }, [composerModes, props.picker, sessionId, setMode]);
 
-  useEffect(() => {
-    // 打开模型选择器即加载（不依赖 record：欢迎页/未启动 Agent 时 record 为 undefined，
-    // 但模型列表是全量的，listModels 不依赖 projectId）。
-    // 思考选择器也要加载：DSH 按当前模型 reasoningEfforts 过滤档位，模型目录只在
-    // 「打开模型选择器」时加载会导致用户先开思考选择器时拿不到过滤数据（显示全量档位）。
-    const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
-    if (props.picker !== "model" && !(props.picker === "thinking" && isDshSession)) return;
-    const sequence = ++modelLoadSequenceRef.current;
-    // DSH 会话走 host 级模型目录；pi 走 models.json（与 Agent RPC 同源，无抖动）。
-    const loader = isDshSession
-      ? desktopApi.sessions.listDshModels()
-      : desktopApi.projects.listModels(record?.projectId);
-    void loader.then((next) => {
-      if (sequence === modelLoadSequenceRef.current) setModels(next);
-    }).catch((error) => {
-      if (sequence === modelLoadSequenceRef.current) {
-        setModels([]);
-        showNotice(error instanceof Error ? error.message : String(error), 4000);
-      }
-    });
-  }, [props.picker, record, runtime]);
+  // C19：模型目录数据源统一 hook——打开模型选择器即加载（不依赖 record：欢迎页/未启动
+  // Agent 时 record 为 undefined，但模型列表是全量的）。思考选择器也要加载：DSH 按当前
+  // 模型 reasoningEfforts 过滤档位，模型目录只在「打开模型选择器」时加载会导致用户先开
+  // 思考选择器时拿不到过滤数据（显示全量档位）。
+  const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
+  const pickerNeedsModels = props.picker === "model" || (props.picker === "thinking" && isDshSession);
+  const { models } = useBackendModelCatalog({
+    sessionId,
+    backend: isDshSession ? "dsh" : "pi",
+    projectId: record?.projectId,
+    enabled: pickerNeedsModels,
+  });
 
   function currentHandle() {
     const current = store.get(sessionRuntimeByIdAtom)[sessionId];

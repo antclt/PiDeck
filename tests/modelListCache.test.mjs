@@ -179,12 +179,18 @@ test("renderer ComposerPickerHost shows restart confirm on needsRestart", () => 
 
 test("ComposerPickerHost loads models on welcome page (no record)", () => {
   // 欢迎页/未启动 Agent 时 record 为 undefined，模型列表也必须加载：
-  // useEffect 不再被 `!record` 短路（listModels 是全量的，不依赖 projectId）。
-  // DSH 会话的思考选择器同样触发加载（按当前模型 reasoningEfforts 过滤档位）。
-  assert.match(pickerHost, /if \(props\.picker !== "model" && !\(props\.picker === "thinking" && isDshSession\)\) return/);
-  assert.doesNotMatch(pickerHost, /picker !== "model" \|\| !record/);
-  assert.match(pickerHost, /listModels\(record\?\.projectId\)/);
-  assert.match(pickerHost, /desktopApi\.sessions\.listDshModels\(\)/);
+  // 加载逻辑收敛到 useBackendModelCatalog（listModels 是全量的，不依赖 projectId），
+  // enabled 由 pickerNeedsModels 驱动（DSH 思考选择器同样触发加载，供档位过滤）。
+  const hook = readFileSync(
+    "src/renderer/src/hooks/useBackendModelCatalog.ts",
+    "utf8",
+  );
+  assert.match(pickerHost, /const pickerNeedsModels = props\.picker === "model" \|\| \(props\.picker === "thinking" && isDshSession\)/);
+  assert.match(pickerHost, /useBackendModelCatalog\(\{[\s\S]*?enabled: pickerNeedsModels/);
+  // 后端分支收敛在 hook 内：DSH 走 host 目录，pi 走 models.json
+  assert.match(hook, /listModels\(options\.projectId\)/);
+  assert.match(hook, /desktopApi\.sessions\.listDshModels\(\)/);
+  assert.match(hook, /options\.backend === "dsh"/);
 });
 
 test("welcome page model/thinking selection persists; draft defaults come from pi config auto-fill", () => {

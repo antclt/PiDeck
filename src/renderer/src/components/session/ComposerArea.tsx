@@ -17,8 +17,7 @@ import {
   SessionDeliveryNotice,
 } from "./ComposerPanels";
 import { ComposerPickerHost } from "./ComposerPickerHost";
-import { DshPermissionMenu } from "./DshPermissionMenu";
-import { SecurityLevelMenu } from "./SecurityLevelMenu";
+import { SecurityControl } from "./SecurityControl";
 import { useAskPanel } from "../../hooks/useAskPanel";
 import { modelPendingByIdAtom, setSessionDraftAtom, thinkingLevelPendingByIdAtom } from "../../atoms/composer-atoms";
 import { sessionRecordByIdAtomFamily } from "../../atoms";
@@ -328,15 +327,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 onChangeBackend={composer.changeBackend}
                 feishuIndicator={feishuIndicator}
                 securityControl={
-                  /* DSH 后端不走内置安全等级（pi 安全门链路），显示 DSH 权限预设选择器
-                     （read-only / workspace-write / danger-full-access，dsh-web 同款）； */
-                  composer.backend === "dsh"
-                    ? <DshPermissionMenu sessionId={props.sessionId} disabled={composer.isStarting} />
-                    : (
-                    /* 安全级别切换是策略快照热更新（安全门每次工具调用重读），运行中即时生效，
-                       无需等下一轮生成；因此只保留 Agent 启动中禁用（与思考按钮一致） */
-                    <SecurityLevelMenu sessionId={props.sessionId} disabled={composer.isStarting} />
-                    )
+                  /* C20：后端安全控制位统一入口（pi 安全等级 / DSH 权限预设） */
+                  <SecurityControl sessionId={props.sessionId} backend={composer.backend} disabled={composer.isStarting} />
                 }
                 onPickModel={() => composer.pickers.open("model")}
                 onPickThinking={() => composer.pickers.open("thinking")}

@@ -309,6 +309,7 @@ import {
 	setFeishuConfigDefaultBotName,
 } from "./feishu/FeishuConfig";
 import { startMemoryProfile, isMemoryProfileEnabled, type MemoryProfileHandle } from "./memory/MemoryMonitor";
+import { QuitCleanupRegistry } from "./lifecycle/QuitCleanupRegistry";
 import type { FeishuChatBinding } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
@@ -352,6 +353,9 @@ let rpcLogger: RpcLogger;
 let memoryProfileHandle: MemoryProfileHandle | null = null;
 let feishuBridge: FeishuBridge | null = null;
 let usageStatsService: UsageStatsService | null = null;
+
+/** 退出清理登记表（C12）：常驻资源创建处登记，before-quit 统一顺序执行。 */
+const quitCleanup = new QuitCleanupRegistry();
 
 
 function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
@@ -1317,6 +1321,11 @@ function setupTray() {
 	const icon = nativeImage.createFromPath(iconPath);
 	tray = new Tray(icon.resize({ width: 16, height: 16 }));
 	tray.setToolTip("phids");
+	// C12：退出清理登记（before-quit 统一 runAll）
+	quitCleanup.register("tray", () => {
+		tray?.destroy();
+		tray = null;
+	});
 
 	// 双击托盘图标恢复窗口（Windows 常见交互）
 	tray.on("double-click", () => {
@@ -2663,6 +2672,8 @@ app.whenReady().then(async () => {
 		// 通知点击跳转需要 record.id（renderer 按它索引会话）；agentId → record.id 由 coordinator 维护。
 		(agentId) => sessionRuntimeCoordinator.getSessionId(agentId),
 	);
+	// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
+	quitCleanup.register("pi-agents", () => agentManager?.stopAll());
 	// DSH 后端：懒启动（首个 DSH 会话创建时 boot），见 docs/dsh-agent-backend-plan.md。
 	// DSH_HOME 可用设置 dshHomeDir 覆盖（用户自己的 ~/.dsh 等），空串 = 应用私有目录。
 	dshHost = new DshHost(
@@ -2697,6 +2708,12 @@ app.whenReady().then(async () => {
 			});
 		},
 	);
+	// C12/E15：DSH 退出清理——先停全部活跃会话（清 mux/订阅/pending）再 dispose host，
+	// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
+	quitCleanup.register("dsh", async () => {
+		await dshAgentManager?.stopAll();
+		await dshHost?.dispose();
+	});
 	webServiceManager = new WebServiceManager({
 		// dev 模式（electron-vite dev 不产出 out/renderer 构建物）下，静态资源
 		// 代理到 vite dev server，外部 Web 端加载重构后的 React 版页面并支持热更新；
@@ -2878,10 +2895,14 @@ app.whenReady().then(async () => {
 			}
 		},
 	});
+	// C12：退出清理登记（before-quit 统一 runAll）
+	quitCleanup.register("web-service", () => webServiceManager?.stop());
 	terminalManager = new TerminalSessionManager(
 		(agentId) => agentManager.getCwd(agentId),
 		(channel, payload) => mainWindow?.webContents.send(channel, payload),
 	);
+	// C12：退出清理登记（before-quit 统一 runAll）
+	quitCleanup.register("terminal", () => terminalManager?.closeAll());
 
 	await settingsStore.load();
 	setFeishuConfigDefaultBotName(feishuT(currentFeishuLocale(), "bridge.defaultBotName"));
@@ -2994,6 +3015,8 @@ app.whenReady().then(async () => {
 			console.error("Failed to start memory profile:", error);
 			return null;
 		});
+		// C12：退出清理登记（before-quit 统一 runAll）
+		quitCleanup.register("memory-profile", () => memoryProfileHandle?.stop());
 	}
 	await createWindow();
 	setupTray();
@@ -3028,6 +3051,11 @@ app.whenReady().then(async () => {
 			await createWindow();
 			return mainWindow!;
 		},
+	});
+	// C12：退出清理登记（before-quit 统一 runAll）
+	quitCleanup.register("pet", () => {
+		petSystem?.stop();
+		petSystem = null;
 	});
 	void petSystem.start().catch((error) => {
 		void appLogger.warn("pet", "Pet system start failed", error);
@@ -3163,22 +3191,9 @@ async function ensureAllPiSettingsDefaults(): Promise<void> {
 
 app.on("before-quit", () => {
 	isQuitting = true;
-	memoryProfileHandle?.stop();
-	memoryProfileHandle = null;
-	tray?.destroy();
-	tray = null;
-	void webServiceManager?.stop();
-	terminalManager?.closeAll();
-	agentManager?.stopAll();
-	// DSH host 退出清理（懒启动未 boot 时为 no-op）：
-	// 先停全部活跃 DSH 会话（清 mux/订阅/pending），再 dispose host（E15）——
-	// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
-	// before-quit 是同步回调无法 await，用 finally 链保持顺序。
-	void (dshAgentManager?.stopAll() ?? Promise.resolve()).finally(() => {
-		void dshHost?.dispose();
-	});
-	petSystem?.stop();
-	petSystem = null;
+	// 退出清理统一走登记表（C12）：各常驻资源在创建处 register，这里只负责顺序执行。
+	// 新增资源不再改 before-quit；单项失败由 registry 记日志不阻塞其余清理。
+	void quitCleanup.runAll();
 });
 
 app.on("window-all-closed", () => {
