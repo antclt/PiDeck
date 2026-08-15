@@ -432,6 +432,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         currentMode={props.currentMode ?? composerModes[sessionId] ?? "normal"}
         onClose={props.onClose}
         planModeAvailable={isDshSession || planModeAvailable}
+        imagegenAvailable={!isDshSession}
         onPick={(nextMode) => {
           if (props.onPickMode) props.onPickMode(nextMode);
           else setMode({ sessionId, mode: nextMode });

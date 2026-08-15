@@ -230,7 +230,10 @@ export class DshHost {
 		started: boolean;
 		homeDir: string;
 	}> {
-		return { started: this.client !== null, homeDir: this.getHomeDir() };
+		// E14：started 语义 = host 进程存活且 boot 完成（client 非 null 可能在崩溃重启
+		// 超限放弃后仍是陈旧引用，UI 会误显示「已启动」）。
+		const started = this.client !== null && this.isHostProcessRunning() && this.isHostReady();
+		return { started, homeDir: this.getHomeDir() };
 	}
 
 	/**

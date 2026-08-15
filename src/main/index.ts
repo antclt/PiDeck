@@ -2357,9 +2357,15 @@ function registerIpc() {
 				// 切换 DSH_HOME 前先停掉全部活跃 DSH 会话（host 侧会话仍在 $DSH_HOME
 				// 持久化，catalog 保留 dshSessionId，重新打开会话时 attach 恢复），
 				// 避免旧目录的 mux 悬挂在已 dispose 的 transport 上；再重启 host。
+				// D16：restart 后校验 host 真正拉起（boot 完成），失败返回 false 而非恒 true。
 				await dshAgentManager.stopAll();
 				await dshHost.restart();
-				return true;
+				try {
+					await dshHost.ensureStarted();
+					return dshHost.isHostProcessRunning() && dshHost.isHostReady();
+				} catch {
+					return false;
+				}
 			},
 			readDshHistoryPage: (dshSessionId, beforeSeq, pageSize) =>
 				dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),

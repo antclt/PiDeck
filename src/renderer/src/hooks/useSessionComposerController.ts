@@ -264,12 +264,13 @@ export function useSessionComposerController(
   const attachments = attachmentsBySession[sessionId] ?? [];
   // DSH 后端：plan 模式由 host 持有（dsh-plan-mode 的 plan/mode 会话事件），
   // 本地 mode atom 只承载 imagegen；plan 状态以 runtime state 为准（下一条消息生效）。
+  // F6：DSH 无生图能力，imagegen 残留一律降级 normal（选择器已隐藏入口）。
   const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh";
   const dshPlanActive = isDshBackend && runtime?.state?.planModeActive === true;
   const mode: ComposerAgentMode = isDshBackend
     ? dshPlanActive
       ? "plan"
-      : (modes[sessionId] === "imagegen" ? "imagegen" : "normal")
+      : "normal"
     : (modes[sessionId] ?? "normal");
   const sendState = sendStates[sessionId] ?? { status: "idle" as const };
   // DSH 部署默认模型选择（settings.yaml agent-default-model）：草稿/未激活会话

@@ -254,8 +254,8 @@ export const TurnRow = memo(
 				    时间用 text-body（14px）。耗时不放行头——回复生成时用户视线在底部，
 				    统一显示在 turn 尾部（见底部耗时行），不用翻回开头看跑了多久。 */}
 				<div className="mb-1 inline-flex items-center gap-2 text-muted-foreground tabular-nums">
-					{/* 行头署名：DSH 后端的回复署名 dsh，pi 后端署名 pi；"pi" 为历史默认值 */}
-					<span className="shrink-0 font-mono text-brand font-semibold leading-none text-foreground/80">{props.backend === "dsh" ? "dsh" : "pi"}</span>
+					{/* 行头署名：DSH 后端的回复署名 DSH，pi 后端署名 Pi（i18n 标签，F7）；"Pi" 为历史默认值 */}
+					<span className="shrink-0 font-mono text-brand font-semibold leading-none text-foreground/80">{props.backend === "dsh" ? t("sessionBackend.dsh") : t("sessionBackend.pi")}</span>
 					<time className="shrink-0 font-mono text-body leading-none">{formatTime(run.endedAt)}</time>
 				</div>
 

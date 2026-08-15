@@ -714,6 +714,8 @@ export function ModelPicker(props: {
 export function ComposerModePicker(props: {
 	currentMode: ComposerAgentMode;
 	planModeAvailable: boolean;
+	/** imagegen 是否可用（F6：DSH 后端无生图能力，隐藏入口）。缺省 true。 */
+	imagegenAvailable?: boolean;
 	onClose: () => void;
 	onPick: (mode: ComposerAgentMode) => void;
 }) {
@@ -728,11 +730,11 @@ export function ComposerModePicker(props: {
 			labelKey: "app.composerModePlan" as const,
 			descriptionKey: "app.composerModePlanDesc" as const,
 		}] : []),
-		{
+		...(props.imagegenAvailable !== false ? [{
 			value: "imagegen" as const,
 			labelKey: "app.composerModeImagegen" as const,
 			descriptionKey: "app.composerModeImagegenDesc" as const,
-		},
+		}] : []),
 	];
 
 	return (

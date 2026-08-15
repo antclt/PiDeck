@@ -27,12 +27,17 @@ export type DshFetchMessage =
 	| { type: "fetch-end"; id: string }
 	| { type: "fetch-error"; id: string; message: string };
 
-/** 构造 fetch-request 消息（URL 拆成 path + query，headers 只保留字符串值）。 */
+/** 构造 fetch-request 消息（URL 拆成 path + query，headers 只保留字符串值）。
+ *  E12：桥只承载 host 内部 ApiProxy 端点（http://dsh.internal）；外部 origin 是
+ *  调用方误用，显式拒绝而不是静默重写成内部路径（host 侧重基会吞掉外部 URL）。 */
 export function marshalFetchRequest(
 	id: string,
 	url: URL,
 	init?: { method?: string; headers?: Record<string, string>; body?: string },
 ): DshFetchMessage {
+	if (url.origin !== "http://dsh.internal") {
+		throw new Error(`DSH bridge: unexpected origin "${url.origin}" (only http://dsh.internal is bridged)`);
+	}
 	return {
 		type: "fetch-request",
 		id,
