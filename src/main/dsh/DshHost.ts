@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { getAppLogger } from "../logging/sharedLogger";
 import { DshHostProcess, resolveHostEntryPath } from "./DshHostProcess";
 import { DshApiClient, type DshFetchTransport } from "./DshApiClient";
+import { toDshAvailableModels } from "./dshModels";
 import type { DshFetchMessage } from "./dshHostBridge";
 
 // 注意：主进程产物为 CJS，而 @deepseek-ai/* 是 ESM-only 包。
@@ -180,20 +181,25 @@ export class DshHost {
 		}
 	}
 
+	/** 当前生效的 DSH_HOME（未启动时按同一解析规则返回「即将使用」的目录）。 */
+	getHomeDir(): string {
+		const override = this.getDshHomeOverride()?.trim();
+		return this.dshHome || resolveDshHomeDir(override, this.getUserDataDir());
+	}
+
 	/** DSH 配置管理页数据：host 启动状态 + DSH_HOME 目录（配置/会话/凭证同目录）。 */
 	async getStatus(): Promise<{
 		started: boolean;
 		homeDir: string;
 	}> {
-		const override = this.getDshHomeOverride()?.trim();
-		// 未启动时也按同一解析规则展示「即将使用」的目录（override > ~/.dsh > 私有）。
-		const homeDir = this.dshHome || resolveDshHomeDir(override, this.getUserDataDir());
-		return { started: this.client !== null, homeDir };
+		return { started: this.client !== null, homeDir: this.getHomeDir() };
 	}
 
 	/**
 	 * Host 级模型目录（llm.models），不依赖已创建的 DSH 会话。
 	 * 给草稿/未启动会话的模型下拉用；首次调用会懒 boot。
+	 * 与会话级 session.models 同一目录数据，透传每模型支持的思考档位
+	 * （reasoningEfforts），思考选择器按当前模型过滤档位。
 	 */
 	async listModels(): Promise<import("../../shared/types").AvailableModel[]> {
 		await this.ensureStarted();
@@ -201,13 +207,41 @@ export class DshHost {
 		if (!client) return [];
 		const listed = await client.llm.models({});
 		if (!listed.result.ok) return [];
-		const result: import("../../shared/types").AvailableModel[] = [];
-		for (const group of listed.result.value.groups ?? []) {
-			for (const model of group.models ?? []) {
-				result.push({ id: model.id, name: model.name, provider: group.id });
-			}
-		}
-		return result;
+		return toDshAvailableModels(listed.result.value.groups ?? []);
+	}
+
+	/**
+	 * DSH agent 预设目录（agentPreset.list）：会话 agent 的组合预设（standard/code/…）。
+	 * 只读展示（id/trust/isDefault/名称/描述），配置页「预设设置」分区用。
+	 */
+	async listAgentPresets(): Promise<Array<{
+		id: string;
+		trust: "system" | "user";
+		isDefault: boolean;
+		name?: string;
+		description?: string;
+		broken?: string;
+	}>> {
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) return [];
+		const listed = await client.agentPresets.list({});
+		if (!listed.result.ok) return [];
+		return (listed.result.value.presets ?? []).map((preset: {
+			id: string;
+			trust: "system" | "user";
+			isDefault: boolean;
+			name?: string;
+			description?: string;
+			broken?: string;
+		}) => ({
+			id: preset.id,
+			trust: preset.trust,
+			isDefault: preset.isDefault,
+			...(typeof preset.name === "string" && preset.name ? { name: preset.name } : {}),
+			...(typeof preset.description === "string" && preset.description ? { description: preset.description } : {}),
+			...(typeof preset.broken === "string" && preset.broken ? { broken: preset.broken } : {}),
+		}));
 	}
 
 	private async start(): Promise<void> {

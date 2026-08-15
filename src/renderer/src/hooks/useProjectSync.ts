@@ -207,6 +207,13 @@ export function useProjectSync(input: UseProjectSyncInput) {
         .then((records) => {
           if (sessionRequestByProjectRef.current[projectId] !== request) return;
           replaceProjectSessions({ projectId, sessions: records });
+          // 静默拉取完成 = catalog 已就绪：清掉可能残留的 loading 态。
+          // 场景：非 silent 刷新（loading）进行中，catalog-refreshed 推送的静默
+          // 拉取覆盖了 request 序号——原请求的 finally 因 isCurrentRequest=false
+          // 不再清理 loading（也不 set ready），这里补上，否则侧栏「加载中」
+          // （project-session-loading）永远转。典型触发：重命名 DSH 会话
+          // （onTitleChanged → catalog 更新 → catalog-refreshed 推送）。
+          setSessionCatalogLoadState?.({ projectId, state: { status: "ready" } });
         })
         .catch(() => undefined); // 静默路径失败不打断：下一次轮询/推送仍会纠正
     });

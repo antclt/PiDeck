@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import type { UtilityProcess } from "electron";
 import { getAppLogger } from "../logging/sharedLogger";
 
@@ -219,11 +220,17 @@ export class DshHostProcess {
 
 /**
  * hostEntry 产物路径。
- * - 未打包（dev）：out/main/hostEntry.js（与主进程产物同目录）。
+ * - 未打包（dev / electron-vite dev 以 `electron .` 启动）：appPath = 项目根，
+ *   out/main/hostEntry.js。
  * - 打包：app.asar/out/main/hostEntry.js；electron-builder 已把 hostEntry.js 加入
  *   asarUnpack，Electron 的 asar fs patch 会把 app.asar 内路径自动映射到
  *   app.asar.unpacked（utilityProcess 加载真实文件，避免 asar 虚拟目录问题）。
+ * - 直接以主进程产物启动（e2e `electron out/main/index.js` / electron-vite preview）：
+ *   appPath 已是 out/main，标准拼接会翻倍成 out/main/out/main/hostEntry.js；
+ *   探测到标准路径不存在时退到 appPath 同目录（产物与入口同目录）。
  */
 export function resolveHostEntryPath(appPath: string): string {
-	return join(appPath, "out", "main", "hostEntry.js");
+	const standard = join(appPath, "out", "main", "hostEntry.js");
+	if (existsSync(standard)) return standard;
+	return join(appPath, "hostEntry.js");
 }

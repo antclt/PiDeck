@@ -96,7 +96,7 @@
   },
   "build": {
     "appId": "com.ayuayue.pi-desktop",
-    "productName": "PiDeck",
+    "productName": "phids",
     "protocols": [
       {
         "name": "PiDeck Agent Link",

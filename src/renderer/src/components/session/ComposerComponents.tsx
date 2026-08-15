@@ -167,14 +167,17 @@ export function ComposerBackendPicker(props: {
 		>
 			<SelectTrigger
 				size="sm"
-				className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60"
+				className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 [&_[data-slot='select-icon']]:hidden"
 				title={t("session.backendPickerHint")}
 			>
-				{/* 不渲染 SelectValue：按当前后端手动渲染 logo，输入框只显示图标不带文字 */}
+				{/* 不渲染 SelectValue：按当前后端手动渲染 logo，输入框只显示图标不带文字。
+				    隐藏 shadcn SelectTrigger 自带的 chevron（[data-slot='select-icon']），
+				    否则 logo 与 chevron 并排（justify-between）→ 图标偏左不居中、
+				    16px chevron 与 14px logo 混排导致上下不齐。 */}
 				{props.backend === "dsh" ? (
-					<DshLogo className="size-3.5 shrink-0" />
+					<DshLogo className="size-[15px] shrink-0" />
 				) : (
-					<PiLogo className="size-3.5 shrink-0" />
+					<PiLogo className="size-[15px] shrink-0" />
 				)}
 			</SelectTrigger>
 			<SelectContent align="start">
@@ -291,22 +294,24 @@ export function ComposerBottomBar(props: {
 						/>
 					) : props.backend ? (
 						/* 后端已锁定（会话激活后不可切换：pi 文件与 DSH session log 格式不同，
-						   中途切换会导致消息同步渲染不可靠）：只读标识，只显示官方 logo 不重复文字。 */
+						   中途切换会导致消息同步渲染不可靠）：只读标识，只显示官方 logo 不重复文字。
+						   inline-flex 居中：span 默认 inline，svg 按 baseline 排会偏上，
+						   与底栏其它按钮（flex 居中 15px 图标）水平不平齐。 */
 						<span
-							className="composer-bar-btn backend h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground"
+							className="composer-bar-btn backend inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-control font-semibold text-foreground"
 							title={t("session.backendLockedHint")}
 						>
 							{props.backend === "dsh" ? (
-								<DshLogo className="size-3.5 shrink-0" />
+								<DshLogo className="size-[15px] shrink-0" />
 							) : (
-								<PiLogo className="size-3.5 shrink-0" />
+								<PiLogo className="size-[15px] shrink-0" />
 							)}
 						</span>
 					) : null}
 					<Button
 						variant="ghost"
 						size="sm"
-						className={`composer-bar-btn h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60${isPlanMode ? " active" : ""}`}
+						className={`composer-bar-btn mode h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60${isPlanMode ? " active" : ""}`}
 						disabled={props.disabled}
 						onClick={props.onOpenComposerModePicker}
 						aria-haspopup="dialog"
@@ -682,7 +687,16 @@ export function ThinkingPicker(props: {
 	current?: string;
 	onClose: () => void;
 	onPick: (level: string) => void;
+	/** 受支持的档位列表（DSH 按当前模型 reasoningEfforts 过滤）；缺省用全部档位。 */
+	levels?: Array<{
+		value: string;
+		labelKey?: TranslationKey;
+		descriptionKey?: TranslationKey;
+		label?: string;
+		description?: string;
+	}>;
 }) {
+	const levels = props.levels ?? THINKING_LEVELS;
 	return (
 		<CommandPickerDialog
 			title={t("app.thinkingPickerTitle")}
@@ -691,7 +705,7 @@ export function ThinkingPicker(props: {
 			className="thinking-picker"
 			value={props.current}
 		>
-			{THINKING_LEVELS.map((level) => {
+			{levels.map((level) => {
 				const selected = level.value === props.current;
 				return (
 					<CommandItem
@@ -704,7 +718,12 @@ export function ThinkingPicker(props: {
 						<span className={`grid size-6 shrink-0 place-items-center rounded-md ${selected ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground"}`}>
 							<Brain size={14} aria-hidden="true" />
 						</span>
-						<span className="min-w-0 flex-1 truncate text-control font-semibold text-foreground" title={t(level.descriptionKey)}>{t(level.labelKey)}</span>
+						<span
+							className="min-w-0 flex-1 truncate text-control font-semibold text-foreground"
+							title={level.descriptionKey ? t(level.descriptionKey) : level.description}
+						>
+							{level.labelKey ? t(level.labelKey) : (level.label ?? level.value)}
+						</span>
 						{selected ? <Check size={15} className="ml-auto shrink-0 text-primary" aria-hidden="true" /> : null}
 					</CommandItem>
 				);

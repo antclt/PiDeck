@@ -235,8 +235,9 @@ test("Chat section keeps an independent collapse control after the parent projec
   assert.match(chatSection, /changeChatPath/);
   assert.match(chatSection, /FolderCog size=\{13\} aria-hidden="true" \/>/);
   assert.match(chatSection, /t\("app\.chatProjectSettings"\)/);
-  assert.match(chatSection, /createDraftDsh\(project\.id\)/);
-  assert.match(chatSection, /t\("app\.projectNewDshAgent"\)/);
+  // 新建 DSH 会话入口已收敛到会话内的后端选择器，Chat 标题栏不再提供独立机器人按钮
+  assert.doesNotMatch(chatSection, /createDraftDsh\(project\.id\)/);
+  assert.doesNotMatch(chatSection, /t\("app\.projectNewDshAgent"\)/);
   assert.match(chatSection, /!collapsed && \([\s\S]*?<SessionTree/);
 });
 

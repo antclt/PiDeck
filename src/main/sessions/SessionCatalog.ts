@@ -214,6 +214,14 @@ export class SessionCatalog {
 		return entry ? cloneEntry(entry) : undefined;
 	}
 
+	/** 按 DSH host 会话 id 反查 catalog 记录（会话标题同步用；只读查询，不排队写）。
+	 *  transient 草稿尚未 attach host 会话（无 dshSessionId），只需查持久 entries。 */
+	findByDshSessionId(dshSessionId: string): SessionCatalogEntry | undefined {
+		this.assertLoaded();
+		const entry = this.entries.find((candidate) => candidate.dshSessionId === dshSessionId);
+		return entry ? cloneEntry(entry) : undefined;
+	}
+
 	createAnonymous(input: {
 		projectId: string;
 		title: string;

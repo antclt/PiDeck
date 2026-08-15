@@ -17,6 +17,7 @@ import {
   SessionDeliveryNotice,
 } from "./ComposerPanels";
 import { ComposerPickerHost } from "./ComposerPickerHost";
+import { DshPermissionMenu } from "./DshPermissionMenu";
 import { SecurityLevelMenu } from "./SecurityLevelMenu";
 import { useAskPanel } from "../../hooks/useAskPanel";
 import { modelPendingByIdAtom, setSessionDraftAtom, thinkingLevelPendingByIdAtom } from "../../atoms/composer-atoms";
@@ -318,9 +319,15 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 onChangeBackend={composer.changeBackend}
                 feishuIndicator={feishuIndicator}
                 securityControl={
-                  /* 安全级别切换是策略快照热更新（安全门每次工具调用重读），运行中即时生效，
-                     无需等下一轮生成；因此只保留 Agent 启动中禁用（与思考按钮一致） */
-                  <SecurityLevelMenu sessionId={props.sessionId} disabled={composer.isStarting} />
+                  /* DSH 后端不走内置安全等级（pi 安全门链路），显示 DSH 权限预设选择器
+                     （read-only / workspace-write / danger-full-access，dsh-web 同款）； */
+                  composer.backend === "dsh"
+                    ? <DshPermissionMenu sessionId={props.sessionId} disabled={composer.isStarting} />
+                    : (
+                    /* 安全级别切换是策略快照热更新（安全门每次工具调用重读），运行中即时生效，
+                       无需等下一轮生成；因此只保留 Agent 启动中禁用（与思考按钮一致） */
+                    <SecurityLevelMenu sessionId={props.sessionId} disabled={composer.isStarting} />
+                    )
                 }
                 onPickModel={() => composer.pickers.open("model")}
                 onPickThinking={() => composer.pickers.open("thinking")}
@@ -350,6 +357,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
             templates={composer.templates}
             onClose={composer.pickers.close}
             onInsertTemplate={composer.pickers.insertTemplate}
+            onPickMode={composer.pickers.setMode}
+            currentMode={composer.mode}
           />
           {composer.previewImage ? (
             <ImagePreviewModal

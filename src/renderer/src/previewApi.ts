@@ -303,6 +303,8 @@ export function createPreviewApi(): PiDesktopApi {
 		},
 		sessions: {
 			list: async () => getSessions(),
+			// 预览模式无 DSH host：空预设目录满足接口契约
+			listDshAgentPresets: async () => [],
 			listCatalog: async (projectId, _options?: { scan?: boolean }): Promise<SessionRecord[]> => getSessions().map((session) => ({
 				id: `preview-record:${session.id}`,
 				projectId,

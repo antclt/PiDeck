@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-	KeyRound,
-	FolderOpen,
-	FileCode2,
+	Blocks,
 	Cpu,
-	Settings2,
+	FileCode2,
+	FolderOpen,
+	KeyRound,
 	LayoutDashboard,
 	LoaderCircle,
+	Puzzle,
+	Settings2,
+	ShieldCheck,
 	Trash2,
 } from "lucide-react";
 import { desktopApi } from "../desktopApi";
@@ -23,6 +26,7 @@ import {
 	SelectValue,
 } from "../components/ui-shadcn/select";
 import { DshLogo } from "../components/session/SessionSourceBadge";
+import { DSH_PERMISSION_PRESETS } from "../components/session/DshPermissionMenu";
 import { DshSchemaForm, type DshNamespaceView } from "./DshSchemaForm";
 import { DeepseekRouteCard, PiAiProvidersCard } from "./DshProviderCards";
 import { collectCredentialRefsWithValue, normalizeDshSchema } from "./dshSchema";
@@ -41,9 +45,19 @@ type CredentialState = {
 /** 模型配置相关的 namespace：llm-deepseek（官方 DeepSeek 路由）+ llm-pi-ai（pi-ai providers dict）。 */
 const MODEL_NS = new Set(["llm-deepseek", "llm-pi-ai"]);
 
+/** 插件配置相关的 namespace（与 dsh-web 插件配置页同源的 host 平面分节）。 */
+const PLUGIN_NS: Array<{ ns: string; titleKey: TranslationKey }> = [
+	{ ns: "agent-loop", titleKey: "config.dsh.pluginAgentLoop" },
+	{ ns: "shell", titleKey: "config.dsh.pluginShell" },
+	{ ns: "web-search-deepseek", titleKey: "config.dsh.pluginWebSearch" },
+];
+
 const NAV_ITEMS: Array<{ id: string; labelKey: TranslationKey; icon: ReactNode }> = [
 	{ id: "overview", labelKey: "config.dsh.tab.overview", icon: <LayoutDashboard className="size-3.5" aria-hidden="true" /> },
 	{ id: "models", labelKey: "config.dsh.tab.models", icon: <Cpu className="size-3.5" aria-hidden="true" /> },
+	{ id: "presets", labelKey: "config.dsh.tab.presets", icon: <Blocks className="size-3.5" aria-hidden="true" /> },
+	{ id: "plugins", labelKey: "config.dsh.tab.plugins", icon: <Puzzle className="size-3.5" aria-hidden="true" /> },
+	{ id: "security", labelKey: "config.dsh.tab.security", icon: <ShieldCheck className="size-3.5" aria-hidden="true" /> },
 	{ id: "auth", labelKey: "config.dsh.tab.auth", icon: <KeyRound className="size-3.5" aria-hidden="true" /> },
 	{ id: "settings", labelKey: "config.dsh.tab.settings", icon: <Settings2 className="size-3.5" aria-hidden="true" /> },
 	{ id: "raw", labelKey: "config.dsh.tab.raw", icon: <FileCode2 className="size-3.5" aria-hidden="true" /> },
@@ -112,8 +126,20 @@ export function DshConfigTab() {
 		() => namespaces.filter((ns) => MODEL_NS.has(ns.ns)),
 		[namespaces],
 	);
+	// 插件分区：agent-loop / shell / web-search-deepseek（host 平面插件分节）
+	const pluginNamespaces = useMemo(
+		() => PLUGIN_NS
+			.map((entry) => ({ entry, ns: namespaces.find((item) => item.ns === entry.ns) }))
+			.filter((item): item is { entry: typeof PLUGIN_NS[number]; ns: NonNullable<typeof item.ns> } => Boolean(item.ns)),
+		[namespaces],
+	);
+	const permissionNamespace = useMemo(
+		() => namespaces.find((ns) => ns.ns === "permission"),
+		[namespaces],
+	);
+	// 其余命名空间（目前为空；保留给未来新增的 host 设置）
 	const settingNamespaces = useMemo(
-		() => namespaces.filter((ns) => !MODEL_NS.has(ns.ns)),
+		() => namespaces.filter((ns) => !MODEL_NS.has(ns.ns) && ns.ns !== "permission" && !PLUGIN_NS.some((entry) => entry.ns === ns.ns)),
 		[namespaces],
 	);
 
@@ -198,6 +224,35 @@ export function DshConfigTab() {
 								)}
 							</div>
 						)}
+						{activeTab === "presets" && (
+							<div className="p-4">
+								<PresetsTab />
+							</div>
+						)}
+						{activeTab === "plugins" && (
+							<div className="p-4">
+								<p className="mb-3 text-micro text-muted-foreground">{t("config.dsh.pluginsHint")}</p>
+								{pluginNamespaces.length === 0 ? (
+									<Empty text={t("config.dsh.namespacesEmpty")} />
+								) : (
+									<div className="grid gap-4">
+										{pluginNamespaces.map(({ entry, ns }) => (
+											<section key={ns.ns} className="rounded-md border border-border-subtle bg-bg-panel">
+												<div className="border-b border-border/40 px-4 py-2 text-caption font-semibold text-foreground">
+													{t("config.dsh.pluginTitle", { name: t(entry.titleKey) })}
+												</div>
+												<DshSchemaForm namespace={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} />
+											</section>
+										))}
+									</div>
+								)}
+							</div>
+						)}
+						{activeTab === "security" && (
+							<div className="p-4">
+								<SecurityTab namespace={permissionNamespace} writable={writable} onSave={(patch) => saveNamespace("permission", patch)} onChanged={() => void load()} />
+							</div>
+						)}
 						{activeTab === "auth" && (
 							<div className="p-4">
 								<AuthTab refs={credentialRefs} credentials={credentials} onChanged={load} />
@@ -241,32 +296,6 @@ function Overview(props: {
 	const { status } = props;
 	const [picking, setPicking] = useState(false);
 	const [switching, setSwitching] = useState(false);
-	const [autoAllow, setAutoAllow] = useState(false);
-	const [autoAllowLoaded, setAutoAllowLoaded] = useState(false);
-
-	// 读审批自动放行设置（缺省 undefined = 关闭）；加载前禁用开关避免闪动。
-	useEffect(() => {
-		void desktopApi.settings
-			.get()
-			.then((settings) => {
-				setAutoAllow(settings.dshApprovalAutoAllow === true);
-				setAutoAllowLoaded(true);
-			})
-			.catch(() => setAutoAllowLoaded(true));
-	}, []);
-
-	/** 切换审批自动放行：乐观更新 UI，写设置失败回滚。运行时读取、无需重启 host。 */
-	const toggleAutoAllow = async (checked: boolean) => {
-		const prev = autoAllow;
-		setAutoAllow(checked);
-		try {
-			await desktopApi.settings.update({ dshApprovalAutoAllow: checked });
-			showNotice(t(checked ? "config.dsh.autoAllowOn" : "config.dsh.autoAllowOff"), 3000);
-		} catch (error) {
-			setAutoAllow(prev);
-			showNotice(error instanceof Error ? error.message : String(error), 4000);
-		}
-	};
 
 	/**
 	 * 切换 DSH_HOME 目录：选目录 → 写设置 → 立即重启 host 生效。
@@ -370,13 +399,6 @@ function Overview(props: {
 				</div>
 				<p className="text-micro text-muted-foreground">{t("config.dsh.homeHint")}</p>
 			</section>
-			<section className="grid gap-2">
-				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.approvals")}</h3>
-				<div className="flex items-center justify-between gap-4">
-					<p className="text-micro text-muted-foreground">{t("config.dsh.autoAllowApprovalHint")}</p>
-					<Switch checked={autoAllow} disabled={!autoAllowLoaded} onCheckedChange={(checked) => void toggleAutoAllow(checked)} />
-				</div>
-			</section>
 			{props.hasDocument && (
 				<section>
 					<Button type="button" variant="secondary" size="sm" onClick={props.onOpenDocument}>
@@ -393,6 +415,194 @@ function Overview(props: {
 /** settings.openDocument：让 host 把配置文档交给平台打开。 */
 function openDocument() {
 	void desktopApi.sessions.openDshDocument?.().catch(() => undefined);
+}
+
+type DshAgentPreset = {
+	id: string;
+	trust: "system" | "user";
+	isDefault: boolean;
+	name?: string;
+	description?: string;
+	broken?: string;
+};
+
+/**
+ * 预设设置 tab（对齐 dsh-web 的 agent preset 选择）：列出 host 可组合的会话
+ * Agent 预设（standard/code/…），标记当前默认（settings.yaml 的 agent-presets.default）。
+ * 只读展示——预设的默认选择在 settings.yaml 中（「源文件」tab 可直接编辑）。
+ */
+function PresetsTab() {
+	const [presets, setPresets] = useState<DshAgentPreset[]>([]);
+	const [loading, setLoading] = useState(true);
+
+	useEffect(() => {
+		let cancelled = false;
+		void desktopApi.sessions.listDshAgentPresets().then((list) => {
+			if (!cancelled) {
+				setPresets(list);
+				setLoading(false);
+			}
+		}).catch(() => {
+			if (!cancelled) setLoading(false);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	if (loading) {
+		return (
+			<div className="flex min-h-32 items-center justify-center gap-2 text-control text-muted-foreground">
+				<LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+				{t("common.loading")}
+			</div>
+		);
+	}
+	return (
+		<div className="grid max-w-2xl gap-4">
+			<p className="text-micro text-muted-foreground">{t("config.dsh.presetsHint")}</p>
+			{presets.length === 0 ? (
+				<Empty text={t("config.dsh.presetsEmpty")} />
+			) : (
+				presets.map((preset) => (
+					<section key={preset.id} className="rounded-md border border-border-subtle bg-bg-panel px-3.5 py-2.5">
+						<div className="flex items-center gap-2">
+							<span className="min-w-0 flex-1 truncate font-mono text-control font-semibold text-foreground">{preset.name ?? preset.id}</span>
+							{preset.isDefault && (
+								<span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-2 py-0.5 text-micro font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
+									{t("config.dsh.presetDefault")}
+								</span>
+							)}
+							<span className={`rounded-full border border-border-subtle px-2 py-0.5 text-micro ${preset.trust === "user" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+								{t(preset.trust === "user" ? "config.dsh.presetUser" : "config.dsh.presetSystem")}
+							</span>
+						</div>
+						{preset.description && <p className="mt-1 text-micro text-muted-foreground">{preset.description}</p>}
+						{preset.broken && <p className="mt-1 text-micro text-danger">{t("config.dsh.presetBroken", { reason: preset.broken })}</p>}
+					</section>
+				))
+			)}
+		</div>
+	);
+}
+
+/**
+ * 安全 tab（对齐 dsh-web 的 permission 预设）：新会话默认权限预设
+ * （read-only / workspace-write / danger-full-access，sandbox + approval 捆绑）
+ * + PiDeck 侧的审批自动放行开关（仅影响本应用内的 DSH 会话）。
+ */
+function SecurityTab(props: {
+	namespace?: DshNamespaceView;
+	writable: boolean;
+	onSave: (patch: Record<string, unknown>) => Promise<void>;
+	onChanged: () => void;
+}) {
+	const [draft, setDraft] = useState<string | null>(null);
+	const [saving, setSaving] = useState(false);
+	const [savedAt, setSavedAt] = useState<number | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [autoAllow, setAutoAllow] = useState(false);
+	const [autoAllowLoaded, setAutoAllowLoaded] = useState(false);
+
+	useEffect(() => {
+		void desktopApi.settings
+			.get()
+			.then((settings) => {
+				setAutoAllow(settings.dshApprovalAutoAllow === true);
+				setAutoAllowLoaded(true);
+			})
+			.catch(() => setAutoAllowLoaded(true));
+	}, []);
+
+	/** 切换审批自动放行：乐观更新 UI，写设置失败回滚。运行时读取、无需重启 host。 */
+	const toggleAutoAllow = async (checked: boolean) => {
+		const prev = autoAllow;
+		setAutoAllow(checked);
+		try {
+			await desktopApi.settings.update({ dshApprovalAutoAllow: checked });
+			showNotice(t(checked ? "config.dsh.autoAllowOn" : "config.dsh.autoAllowOff"), 3000);
+		} catch (saveError) {
+			setAutoAllow(prev);
+			showNotice(saveError instanceof Error ? saveError.message : String(saveError), 4000);
+		}
+	};
+
+	const value = props.namespace?.value as { defaultPreset?: unknown } | undefined;
+	const currentDefault = typeof value?.defaultPreset === "string" ? value.defaultPreset : undefined;
+	const selected = draft ?? currentDefault;
+
+	const handleSave = async () => {
+		if (!draft) return;
+		setSaving(true);
+		setError(null);
+		try {
+			await props.onSave({ defaultPreset: draft });
+			setDraft(null);
+			setSavedAt(Date.now());
+			props.onChanged();
+		} catch (saveError) {
+			setError(saveError instanceof Error ? saveError.message : String(saveError));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	return (
+		<div className="grid max-w-2xl gap-4">
+			<p className="text-micro text-muted-foreground">{t("config.dsh.securityHint")}</p>
+			<section className="rounded-md border border-border-subtle bg-bg-panel">
+				<div className="flex items-center gap-2 border-b border-border/40 px-4 py-2">
+					<span className="text-caption font-semibold text-foreground">{t("config.dsh.securityDefaultPreset")}</span>
+					{savedAt && <span className="text-micro text-emerald-600 dark:text-emerald-400">{t("config.dsh.saved")}</span>}
+					{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
+					<div className="ml-auto flex items-center gap-2">
+						<Button
+							type="button"
+							variant="default"
+							size="sm"
+							className="h-7"
+							disabled={!props.writable || !draft || saving}
+							onClick={() => void handleSave()}
+						>
+							{saving ? t("common.saving") : t("common.save")}
+						</Button>
+					</div>
+				</div>
+				<div className="grid gap-3 p-4">
+					<Select value={selected ?? ""} disabled={!props.writable} onValueChange={(next) => setDraft(next)}>
+						<SelectTrigger size="sm" className="h-8 w-72">
+							<SelectValue placeholder={t("config.dsh.selectPlaceholder")} />
+						</SelectTrigger>
+						<SelectContent>
+							{DSH_PERMISSION_PRESETS.map((preset) => (
+								<SelectItem key={preset.id} value={preset.id}>
+									<span className="font-medium">{t(preset.labelKey)}</span>
+									<span className="ml-2 text-micro text-muted-foreground">{t(preset.descriptionKey)}</span>
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<div className="grid gap-1.5">
+						{DSH_PERMISSION_PRESETS.map((preset) => (
+							<div key={preset.id} className="flex items-baseline gap-2 text-micro text-muted-foreground">
+								<span className="w-28 shrink-0 font-mono text-caption text-foreground/80">{t(preset.labelKey)}</span>
+								<span>{t(preset.descriptionKey)}</span>
+							</div>
+						))}
+					</div>
+				</div>
+			</section>
+			<section className="rounded-md border border-border-subtle bg-bg-panel px-3.5 py-2.5">
+				<div className="flex items-center justify-between gap-4">
+					<div className="grid gap-0.5">
+						<span className="text-caption font-semibold text-foreground">{t("config.dsh.approvals")}</span>
+						<p className="text-micro text-muted-foreground">{t("config.dsh.autoAllowApprovalHint")}</p>
+					</div>
+					<Switch checked={autoAllow} disabled={!autoAllowLoaded} onCheckedChange={(checked) => void toggleAutoAllow(checked)} />
+				</div>
+			</section>
+		</div>
+	);
 }
 
 function AuthTab(props: {

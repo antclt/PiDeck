@@ -84,6 +84,15 @@ export type SessionIpcDeps = {
 	replaceAgentSession: (agentId: string, fn: () => Promise<any>) => Promise<any>;
 	/** DSH host 级模型目录；未装配时返回空列表。 */
 	listDshModels?: () => Promise<import("../../shared/types").AvailableModel[]>;
+	/** DSH agent 预设目录（agentPreset.list）；未装配时返回空列表。 */
+	listDshAgentPresets?: () => Promise<Array<{
+		id: string;
+		trust: "system" | "user";
+		isDefault: boolean;
+		name?: string;
+		description?: string;
+		broken?: string;
+	}>>;
 	/** DSH 配置管理页状态；未装配时返回空状态。 */
 	getDshStatus?: () => Promise<{
 		started: boolean;
@@ -178,6 +187,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		exportCatalogSessionHtml,
 		replaceAgentSession,
 		listDshModels,
+		listDshAgentPresets,
 		getDshStatus,
 		describeDshSettings,
 		updateDshSettings,
@@ -278,33 +288,37 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			if (!project) throw new Error(mainCopy("project.notFound"));
 			// Auto-fill model / thinkingLevel from pi config when the caller hasn't
 			// provided them, so the composer bar shows the effective default.
-			// DSH 后端不适用 pi 的模型配置（模型路由由 DSH host 自己的 settings 决定），跳过。
+			// DSH 后端不适用 pi 的模型配置（模型路由由 DSH host 自己的 settings 决定），
+			// 只跳过 model；思考档位值域与 DSH 兼容（off/high/max 等），新会话默认档位
+			// 同样填充——否则 DSH 新会话的思考按钮只显示「思考」而非实际默认档位。
 			let model = input.backend === "dsh" ? undefined : input.model;
-			let thinkingLevel = input.backend === "dsh" ? undefined : input.thinkingLevel;
-			if (input.backend !== "dsh" && (!model || !thinkingLevel)) {
+			let thinkingLevel = input.thinkingLevel;
+			if ((input.backend !== "dsh" && !model) || !thinkingLevel) {
 				try {
 					const [settingsResult, modelsResult] = await Promise.all([
 						configManager.getSettingsConfig(),
 						configManager.getModelsConfig(),
 					]);
 					const settings = settingsResult.parsed;
-					const defaultProvider = typeof settings.defaultProvider === "string"
-						? settings.defaultProvider
-						: undefined;
-					const defaultModelId = typeof settings.defaultModel === "string"
-						? settings.defaultModel
-						: undefined;
-					if (!model && defaultProvider && defaultModelId) {
-						model = { provider: defaultProvider, modelId: defaultModelId };
-					} else if (!model) {
-						// Fallback: first provider's first model from models.json
-						const providers = modelsResult.parsed?.providers;
-						if (providers) {
-							const firstProviderName = Object.keys(providers)[0];
-							const firstProvider = firstProviderName ? providers[firstProviderName] : undefined;
-							const firstModel = firstProvider?.models?.[0];
-							if (firstProviderName && firstModel?.id) {
-								model = { provider: firstProviderName, modelId: firstModel.id };
+					if (input.backend !== "dsh" && !model) {
+						const defaultProvider = typeof settings.defaultProvider === "string"
+							? settings.defaultProvider
+							: undefined;
+						const defaultModelId = typeof settings.defaultModel === "string"
+							? settings.defaultModel
+							: undefined;
+						if (defaultProvider && defaultModelId) {
+							model = { provider: defaultProvider, modelId: defaultModelId };
+						} else {
+							// Fallback: first provider's first model from models.json
+							const providers = modelsResult.parsed?.providers;
+							if (providers) {
+								const firstProviderName = Object.keys(providers)[0];
+								const firstProvider = firstProviderName ? providers[firstProviderName] : undefined;
+								const firstModel = firstProvider?.models?.[0];
+								if (firstProviderName && firstModel?.id) {
+									model = { provider: firstProviderName, modelId: firstModel.id };
+								}
 							}
 						}
 					}
@@ -653,6 +667,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(
 		ipcChannels.dshListModels,
 		async () => (listDshModels ? listDshModels() : []),
+	);
+	ipcMain.handle(
+		ipcChannels.dshAgentPresets,
+		async () => (listDshAgentPresets ? listDshAgentPresets() : []),
 	);
 	ipcMain.handle(
 		ipcChannels.dshGetStatus,

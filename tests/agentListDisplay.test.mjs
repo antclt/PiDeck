@@ -87,6 +87,52 @@ test("keeps a stable Session row and key when a runtime is attached", () => {
 	assert.equal(getSessionRowKey(record), "session:desktop-session-1");
 });
 
+test("DSH agent 与 DSH 会话按 dshSessionId 配对：只渲染一个会话行，不产生重复 agent 行", () => {
+	const { getProjectAgentSessionDisplay } = loadModule();
+	const dshSession = session({
+		id: "dsh-session-1",
+		filePath: "",
+		backend: "dsh",
+		dshSessionId: "session-abc",
+		source: "pi",
+		updatedAt: 5,
+	});
+	// 激活 DSH 会话后：agent 行（backend=dsh, sessionId=dshSessionId）与
+	// 会话行（无 filePath → unkeyedSessions）同时出现会产生两个相同标题的条目，
+	// 必须按 dshSessionId 配对合并成一个会话行。
+	const display = getProjectAgentSessionDisplay({
+		agents: [{
+			id: "dsh:session-abc",
+			backend: "dsh",
+			sessionId: "session-abc",
+			sessionPath: undefined,
+			createdAt: 2,
+			status: "idle",
+		}],
+		sessions: [dshSession],
+	});
+	assert.equal(display.children.length, 1, "配对后只保留一个行，不得出现重复条目");
+	assert.equal(display.children[0].type, "session");
+	assert.equal(display.children[0].session.id, "dsh-session-1");
+	assert.equal(display.children[0].agent?.id, "dsh:session-abc", "会话行携带配对 agent 装饰");
+});
+
+test("DSH agent 无配对会话时仍平铺为 agent 行（孤儿不消失）", () => {
+	const { getProjectAgentSessionDisplay } = loadModule();
+	const display = getProjectAgentSessionDisplay({
+		agents: [{
+			id: "dsh:orphan",
+			backend: "dsh",
+			sessionId: "session-orphan",
+			createdAt: 2,
+			status: "idle",
+		}],
+		sessions: [],
+	});
+	assert.equal(display.children.length, 1);
+	assert.equal(display.children[0].type, "agent");
+});
+
 test("filters runtime rows by their canonical Session origin before falling back to agent source", () => {
 	const { filterAgentsForSidebarDisplay } = loadModule();
 	const piSession = session({ id: "pi-session", filePath: "C:/sessions/pi.jsonl", source: "pi" });

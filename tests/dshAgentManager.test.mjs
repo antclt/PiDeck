@@ -2,14 +2,34 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { DshAgentManager } = loadTsCommonJs("src/main/dsh/DshAgentManager.ts");
+const { DshAgentManager, dshSessionFilePath } = loadTsCommonJs("src/main/dsh/DshAgentManager.ts");
+
+test("dshSessionFilePath：workspace 目录名编码与 DSH 内部规则一致", () => {
+	// 实测目录：cwd = C:\Users\14012\pi-desktop → "--C-Users-14012-pi-desktop--"；
+	// 盘符冒号与分隔符折叠为一个 "-"；sessionId 自带 session- 前缀（目录名 = sessionId）
+	assert.equal(
+		dshSessionFilePath("C:\\Users\\14012\\.dsh", "C:\\Users\\14012\\pi-desktop", "session-abc-123"),
+		"C:\\Users\\14012\\.dsh\\sessions\\--C-Users-14012-pi-desktop--\\session-abc-123\\session.jsonl.zstd",
+	);
+	// 正斜杠混合（WSL 风格 cwd）；join 分隔符随平台，归一化后比较
+	const norm = (path) => path.replace(/\\/g, "/");
+	assert.equal(
+		norm(dshSessionFilePath("/home/user/.dsh", "C:/work/project", "session-x")),
+		"/home/user/.dsh/sessions/--C-work-project--/session-x/session.jsonl.zstd",
+	);
+	// 不安全字符按 ~XXXX 转义（与 projectKey 一致）
+	assert.equal(
+		norm(dshSessionFilePath("/h", "C:\\work\\带空格 项目", "session-y")),
+		"/h/sessions/--C-work-~5E26~7A7A~683C~0020~9879~76EE--/session-y/session.jsonl.zstd",
+	);
+});
 
 /**
  * 假 DSH host：内存 session 注册表 + 可注入的 history 事件。
  * DshAgentManager 只依赖 DshHost 的 ensureStarted/getClient（InProcessApiClient），
  * 这里用同形状的假 client（sessions.list/create/history + events.mux 空流）。
  */
-function makeFakeHost({ muxFrames = [], failRespond = false } = {}) {
+function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undefined } = {}) {
 	const sessions = new Map();
 	let nextSession = 0;
 	const historyBySession = new Map();
@@ -71,7 +91,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false } = {}) {
 				return { result: { ok: true, value: { title } } };
 			},
 			async models() {
-				return { result: { ok: true, value: { groups: [] } } };
+				return { result: { ok: true, value: modelsValue ?? { groups: [] } } };
 			},
 			async selectModel({ provider, model }) {
 				return { result: { ok: true, value: { selected: { provider, model } } } };
@@ -125,6 +145,9 @@ function makeFakeHost({ muxFrames = [], failRespond = false } = {}) {
 		},
 		isHostReady() {
 			return hostState.ready;
+		},
+		getHomeDir() {
+			return "C:\\fake-dsh-home";
 		},
 		/** 模拟 host 进程退出（崩溃）：置位 + 中断在途 mux，同 DshHost 的 exit → abortAllPending 联动。 */
 		triggerExit() {
@@ -338,6 +361,52 @@ test("readHistoryPage host 冷启动：先 ensureStarted 等 boot，不抛「DSH
 	assert.equal(page.messages[0].text, "重启前的提问");
 	assert.equal(page.messages[1].text, "重启前的回复");
 	assert.equal(calls.history, 1);
+});
+
+test("create attach 从 list 投影取 host 标题（侧栏显示真实标题而非 draft 占位名）", async () => {
+	const { host, sessions, historyBySession } = makeFakeHost();
+	sessions.set("session-old-1", {
+		sessionId: "session-old-1",
+		cwd: PROJECT.path,
+		running: false,
+		blank: false,
+		// dsh-session-title 的 fold 投影：session.list 行携带最新标题
+		projections: { asOfSeq: 10, values: { title: "打包的体积是否能优化一下呢" } },
+	});
+	historyBySession.set("session-old-1", []);
+	const titles = [];
+	const manager = new DshAgentManager(host, () => PROJECT, undefined, (dshSessionId, title) => {
+		titles.push([dshSessionId, title]);
+	});
+	const tab = await manager.create({
+		projectId: "project-1",
+		backend: "dsh",
+		dshSessionId: "session-old-1",
+		title: "pi-desktop DSH",
+	});
+	assert.equal(tab.title, "打包的体积是否能优化一下呢", "attach 后 tab 标题应为 host 真实标题");
+	assert.deepEqual(titles, [["session-old-1", "打包的体积是否能优化一下呢"]], "标题初值应通知 catalog 同步");
+});
+
+test("mux session/title 事件实时更新 tab 标题并通知 catalog 同步", async () => {
+	const { host } = makeFakeHost({
+		muxFrames: [
+			sessionEventFrame("session-fake-1", event("session/title", 5, { title: "帮我看看这个报错" })),
+		],
+	});
+	const emitted = [];
+	const titles = [];
+	const manager = new DshAgentManager(host, () => PROJECT, undefined, (dshSessionId, title) => {
+		titles.push([dshSessionId, title]);
+	});
+	manager.onOutput((channel, payload) => emitted.push([channel, payload]));
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal(tab.title, "帮我看看这个报错", "session/title 事件应更新 runtime tab 标题");
+	assert.deepEqual(titles, [["session-fake-1", "帮我看看这个报错"]], "标题变化应通知 catalog 同步");
+	const state = emitted.filter(([channel]) => channel === "agents:state");
+	assert.equal(state.length, 2, "create 全量 + 标题变化各推一次 agents:state");
+	assert.equal(state.at(-1)[1][0].title, "帮我看看这个报错", "标题变化推送应带新标题");
 });
 
 test("getForkMessages 收集用户消息并以 seq 编码 entryId", async () => {
@@ -607,4 +676,57 @@ test("host 进程退出后 mux 自动重连（流中断 → 退避 → 重新订
 	// 指数退避首档 250ms：跨过退避窗口后应完成重连。
 	await new Promise((resolve) => setTimeout(resolve, 400));
 	assert.ok(muxCalls.length >= 2, `应自动重连 mux（实际订阅 ${muxCalls.length} 次）`);
+});
+
+test("getAvailableModels 透传模型支持的思考档位（reasoningEfforts）", async () => {
+	// host 的 models catalog 带 reasoning.efforts：llm-deepseek 只声明 off/high/max，
+	// llm-pi-ai 按模型声明——选择器按它过滤档位，避免选不支持的档位导致回合失败。
+	const { host } = makeFakeHost({
+		modelsValue: {
+			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
+			routable: [],
+			failures: [],
+			groups: [{
+				id: "llm-deepseek",
+				name: "DeepSeek",
+				models: [{
+					id: "deepseek-v4-flash",
+					name: "DeepSeek V4 Flash",
+					reasoning: {
+						efforts: [
+							{ id: "off", name: "Off" },
+							{ id: "high", name: "High" },
+							{ id: "max", name: "Max" },
+						],
+						defaultEffort: "high",
+					},
+				}],
+			}],
+		},
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	const models = await manager.getAvailableModels("dsh:session-fake-1");
+	assert.equal(models.length, 1);
+	assert.deepEqual(models[0].reasoningEfforts?.map((effort) => effort.id), ["off", "high", "max"]);
+	assert.equal(models[0].reasoningEfforts?.[1].name, "High");
+});
+
+test("setModel 携带已设置的思考档位（先选档位再换模型不被默认值覆盖）", async () => {
+	const { host, client } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	const agentId = "dsh:session-fake-1";
+	// 先设档位（无模型时只记 runtime.thinkingLevel，不调 selectModel）
+	await manager.setThinking(agentId, "high");
+	// 换模型：selectModel 必须带上 reasoningEffort=high
+	const selectModelCalls = [];
+	const original = client.sessions.selectModel;
+	client.sessions.selectModel = async (input) => {
+		selectModelCalls.push(input);
+		return original(input);
+	};
+	await manager.setModel(agentId, "llm-deepseek", "deepseek-v4-flash");
+	assert.equal(selectModelCalls.length, 1);
+	assert.equal(selectModelCalls[0].reasoningEffort, "high");
 });

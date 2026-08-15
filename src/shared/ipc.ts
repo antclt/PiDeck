@@ -103,6 +103,8 @@ export const ipcChannels = {
 	dshCredentialSet: "dsh:credential-set",
 	/** DSH credentials.unset（删凭证）。 */
 	dshCredentialUnset: "dsh:credential-unset",
+	/** DSH agent 预设目录（agentPreset.list：id/trust/isDefault/名称/描述）。 */
+	dshAgentPresets: "dsh:agent-presets",
 	codexSessionsScan: "codex-sessions:scan",
 	codexSessionsImport: "codex-sessions:import",
 	claudeSessionsScan: "claude-sessions:scan",

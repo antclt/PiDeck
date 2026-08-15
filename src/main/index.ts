@@ -45,7 +45,7 @@ import iconPath from "../../build/icon.png?asset";
 declare const __PIDECK_DEV_BUILD__: boolean;
 
 // 开发态（electron-vite dev）或 dev 构建（dist:win:dev）统一使用 -dev 配置目录，
-// 避免与正式版（pi-desktop / PiDeck）的数据、单实例锁和通知归属互相污染。
+// 避免与正式版（pi-desktop / phids）的数据、单实例锁和通知归属互相污染。
 const isDevBuild = !app.isPackaged || __PIDECK_DEV_BUILD__;
 
 // 开发态与正式版隔离 userData。
@@ -60,7 +60,7 @@ const devUserDataDirName = isolateDevByGitBranch
 	? resolveDevUserDataDirName(devGitBranch)
 	: DEFAULT_DEV_USER_DATA_NAME;
 if (isDevBuild) {
-	// 显式固定目录名：dev 构建的 productName 是 PiDeckDev，
+	// 显式固定目录名：dev 构建的 productName 是 phidsDev，
 	// 默认 userData 会落在 %APPDATA%\PiDeckDev，必须指回 dev 配置目录以复用现有配置。
 	// 例外：命令行显式传入 --user-data-dir（e2e 隔离、多实例调试）时尊重该路径，
 	// 否则 e2e 会读到本机真实开发数据（settings/projects 全部污染测试断言）。
@@ -1272,7 +1272,7 @@ function setupTray() {
 	// iconPath 由 electron-vite 的 ?asset 后缀自动解析，打包后也能正确定位
 	const icon = nativeImage.createFromPath(iconPath);
 	tray = new Tray(icon.resize({ width: 16, height: 16 }));
-	tray.setToolTip("PiDeck");
+	tray.setToolTip("phids");
 
 	// 双击托盘图标恢复窗口（Windows 常见交互）
 	tray.on("double-click", () => {
@@ -1516,8 +1516,8 @@ async function createWindow() {
 		minHeight: 640,
 		// 多 worktree 并行 dev：标题带分支名，任务栏/Alt-Tab 一眼区分窗口
 		title: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch)
-			? `PiDeck · ${devGitBranch}`
-			: "PiDeck",
+			? `phids · ${devGitBranch}`
+			: "phids",
 		icon: iconPath,
 		frame: windowOptions.frame,
 		titleBarStyle: windowOptions.titleBarStyle,
@@ -2316,6 +2316,7 @@ function registerIpc() {
 		exportCatalogSessionHtml,
 		replaceAgentSession,
 		listDshModels: () => dshHost.listModels(),
+		listDshAgentPresets: () => dshHost.listAgentPresets(),
 		getDshStatus: () => dshHost.getStatus(),
 		describeDshSettings: () => dshHost.describeSettings(),
 		updateDshSettings: (ns, patch, expectedRevision) => dshHost.updateSettings(ns, patch, expectedRevision),
@@ -2640,6 +2641,26 @@ app.whenReady().then(async () => {
 		(projectId) => projectStore.get(projectId),
 		// 审批自动放行：运行时读取设置（即时生效，无需重启 host），见 settings.ts dshApprovalAutoAllow。
 		() => settingsStore.get().dshApprovalAutoAllow === true,
+		// DSH host 会话标题变化（attach 初值 / session/title 事件 / rename）写回 catalog：
+		// DSH 会话没有 pi 会话文件，标题只存在于 host（dsh-session-title fold），
+		// 不写回则侧栏/重启后一直显示 draft 占位名（如「pi-desktop DSH」）。
+		// 更新后推送 catalog-refreshed，渲染层 useProjectSync 静默重拉刷新侧栏标题。
+		(dshSessionId, title) => {
+			const entry = sessionCatalog?.findByDshSessionId(dshSessionId);
+			if (!entry || entry.title === title) return;
+			void sessionCatalog.update(entry.id, { title }).then(() => {
+				// index.ts 作用域用模块级 mainWindow（本文件没有 getMainWindow 助手）
+				if (mainWindow && !mainWindow.isDestroyed()) {
+					mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+				}
+			}).catch((error: unknown) => {
+				void appLogger.warn("session", "DSH title sync to catalog failed", {
+					dshSessionId,
+					title,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+		},
 	);
 	webServiceManager = new WebServiceManager({
 		// dev 模式（electron-vite dev 不产出 out/renderer 构建物）下，静态资源

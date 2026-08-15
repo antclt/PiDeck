@@ -25,13 +25,14 @@ test("sidebar host declares the container query anchor", () => {
 
 test("project row text yields to the hover action buttons on narrow sidebar", () => {
 	const src = read("src/renderer/src/components/sidebar/ProjectTree.tsx");
-	// 项目名 conversation-body：hover 压出 144px 留白（5 个 size-6 按钮：pi/dsh/匿名/更多 + 可选筛选），
+	// 项目名 conversation-body：hover 压出 112px 留白（4 个 size-6 按钮：pi/匿名/更多 + 可选筛选），
 	// 聚焦态（键盘导航）同样让位；transition 只动画 padding-right
 	assert.match(
 		src,
-		/conversation-body min-w-0 flex-1 transition-\[padding-right\] @max-\[255px\]:group-hover:pr-36 @max-\[255px\]:group-focus-within:pr-36/,
+		/conversation-body min-w-0 flex-1 transition-\[padding-right\] @max-\[255px\]:group-hover:pr-28 @max-\[255px\]:group-focus-within:pr-28/,
 	);
-	assert.match(src, /createDraftDsh\(project\.id\)/);
+	// 新建 DSH 会话入口已收敛到会话内的后端选择器，项目行不再提供独立机器人按钮
+	assert.doesNotMatch(src, /createDraftDsh\(project\.id\)/);
 	// 按钮浮层模式不变：absolute 不占位 + group-hover 显现
 	assert.match(src, /pointer-events-none absolute top-1\/2 right-1 flex/);
 	assert.match(src, /group-hover:pointer-events-auto group-hover:opacity-100/);
@@ -54,15 +55,16 @@ test("session rows yield to hover actions on narrow sidebar", () => {
 
 test("worktree rows yield to hover actions on narrow sidebar", () => {
 	const src = read("src/renderer/src/components/sidebar/WorktreeTree.tsx");
-	// 主工作区行：3 按钮（pi/dsh/匿名）→ 78px 留白
+	// 主工作区行：2 按钮（pi/匿名）→ 52px 留白
 	assert.match(
 		src,
-		/conversation-body min-w-0 flex-1 transition-\[padding-right\] @max-\[255px\]:group-hover:pr-\[78px\] @max-\[255px\]:group-focus-within:pr-\[78px\]/,
+		/conversation-body min-w-0 flex-1 transition-\[padding-right\] @max-\[255px\]:group-hover:pr-\[52px\] @max-\[255px\]:group-focus-within:pr-\[52px\]/,
 	);
-	// 子工作区行：4 按钮（pi/dsh/匿名/删除）→ 104px 留白，挂在行按钮上（transition-all 与配色过渡共存）
-	assert.match(src, /transition-all @max-\[255px\]:group-hover:pr-\[104px\] @max-\[255px\]:group-focus-within:pr-\[104px\]/);
-	assert.match(src, /createDraftDsh\(props\.project\.id\)/);
-	assert.match(src, /createDraftDsh\(childProject\.id\)/);
+	// 子工作区行：3 按钮（pi/匿名/删除）→ 78px 留白，挂在行按钮上（transition-all 与配色过渡共存）
+	assert.match(src, /transition-all @max-\[255px\]:group-hover:pr-\[78px\] @max-\[255px\]:group-focus-within:pr-\[78px\]/);
+	// 新建 DSH 会话入口已收敛到会话内的后端选择器，工作区行不再提供独立机器人按钮
+	assert.doesNotMatch(src, /createDraftDsh\(props\.project\.id\)/);
+	assert.doesNotMatch(src, /createDraftDsh\(childProject\.id\)/);
 	// 子行文本 span 回归原始形态（不再淡出/不再带过渡）
 	assert.match(src, /<span className=\{cn\("min-w-0 flex-1 truncate", isActive/);
 	assert.match(src, /workspace-tree-directory max-w-20 shrink-0 truncate text-micro text-muted-foreground\">\{row\.directory\}<\/span>/);

@@ -53,6 +53,11 @@ export type AgentRuntimeState = {
 	provider?: string;
 	modelId?: string;
 	thinkingLevel?: string;
+	/** DSH 会话当前权限预设（read-only / workspace-write / danger-full-access / custom）；
+	 *  pi 后端无此概念。 */
+	permissionPreset?: string;
+	/** DSH 会话 plan 模式是否生效（/plan 命令，可能延迟到下一条消息的步骤生效）。 */
+	planModeActive?: boolean;
 	isStreaming?: boolean;
 	isCompacting?: boolean;
 	/** 是否正在执行工具调用（read/write/bash 等） */
@@ -96,6 +101,10 @@ export type AvailableModel = {
 	reasoning?: boolean;
 	/** 是否支持图片输入（来自 images 列；undefined = pi 未提供该列） */
 	images?: boolean;
+	/** 该模型支持的思考档位（DSH models catalog 的 reasoning.efforts；
+	 *  选择器按它过滤档位——DSH deepseek 适配器只接受 off/high/max，
+	 *  pi-ai provider 按模型声明，选不支持的档位会在下次请求抛 UNSUPPORTED_REASONING_EFFORT）。 */
+	reasoningEfforts?: Array<{ id: string; name?: string; description?: string }>;
 };
 
 export type CreateAgentInput = {

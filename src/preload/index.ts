@@ -399,6 +399,16 @@ const api = {
 		/** DSH host 级模型目录（llm.models），未装配时返回空列表。 */
 		listDshModels: () =>
 			ipcRenderer.invoke(ipcChannels.dshListModels) as Promise<AvailableModel[]>,
+		/** DSH agent 预设目录（agentPreset.list），未装配时返回空列表。 */
+		listDshAgentPresets: () =>
+			ipcRenderer.invoke(ipcChannels.dshAgentPresets) as Promise<Array<{
+				id: string;
+				trust: "system" | "user";
+				isDefault: boolean;
+				name?: string;
+				description?: string;
+				broken?: string;
+			}>>,
 		/** DSH 配置管理页状态（host 启动状态 + DSH_HOME 目录）。 */
 		getDshStatus: () =>
 			ipcRenderer.invoke(ipcChannels.dshGetStatus) as Promise<{

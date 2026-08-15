@@ -8,7 +8,7 @@ import { filterSidebarSessions, getBoundSidebarRuntimeAgent, hasLiveSidebarRunti
 import { Button } from "../ui-shadcn/button";
 import { PathTooltip } from "../ui-shadcn/PathTooltip";
 import type { SidebarActions } from "./SidebarContent";
-import { SessionBackendBadge, SessionSourceBadge } from "../session/SessionSourceBadge";
+import { SessionBackendBadge, SessionPiBadge, SessionSourceBadge } from "../session/SessionSourceBadge";
 import { cn } from "../../lib/utils";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 
@@ -270,7 +270,7 @@ export function SessionTree(props: {
               {renderRuntimeStatusDot(child.agent.status)}
               <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover/row:pr-7 @max-[255px]:group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
                 <strong className="min-w-0 flex-1 truncate font-medium">{child.agent.title}</strong>
-                {child.agent.backend === "dsh" && <SessionBackendBadge />}
+                {child.agent.backend === "dsh" ? <SessionBackendBadge /> : <SessionPiBadge />}
                 {child.agent.noSession && <span className="anonymous-indicator" title={t("app.anonymousChat")}><HatGlasses size={11} aria-hidden="true" /></span>}
                 {renderToggle(groupKey, childCount)}
               </div></div>
@@ -325,8 +325,10 @@ export function SessionTree(props: {
           <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover/row:pr-7 @max-[255px]:group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
             {/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差 */}
             <strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>{child.session.name || t("common.untitled")}</strong>
+            {child.session.backend === "dsh"
+              ? <SessionBackendBadge />
+              : (!child.session.source || child.session.source === "pi") && <SessionPiBadge />}
             {child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
-            {child.session.backend === "dsh" && <SessionBackendBadge />}
             {renderToggle(groupKey, childCount)}
           </div></div>
         </button>
@@ -381,7 +383,7 @@ export function SessionTree(props: {
               <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover/row:pr-7 @max-[255px]:group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
                 {renderRuntimeStatusDot(runtime?.status)}
                 <strong className="min-w-0 flex-1 truncate font-medium">{session.title}</strong>
-                {session.backend === "dsh" && <SessionBackendBadge />}
+                {session.backend === "dsh" ? <SessionBackendBadge /> : <SessionPiBadge />}
               </div></div>
             </button>
           </PathTooltip>

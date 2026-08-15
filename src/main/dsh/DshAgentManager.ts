@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type {
 	AgentBackend,
 	AgentGatewayCapability,
@@ -23,6 +24,7 @@ import {
 	beginDshCancel,
 	type DshControlState,
 } from "./dshRuntimeControl";
+import { toDshAvailableModels } from "./dshModels";
 import {
 	approvalUiRequest,
 	buildDshRespondValue,
@@ -52,9 +54,38 @@ import {
  * - turn/end.data.reason.kind === 'error' 表示回合失败
  * 投影逻辑在 dshEventProjector.ts（纯函数，可单测）。
  */
+/**
+ * DSH 会话的持久化文件路径：$DSH_HOME/sessions/<workspace 编码目录>/<sessionId>/session.jsonl.zstd。
+ * workspace 目录名编码规则与 dsh-session-persistence-jsonl 的 projectKey 一致（2026-08 实测对齐）：
+ * - 路径分隔符与盘符冒号（`/` `\` `:`）折叠为单个 "-"；
+ * - 安全字符（A-Za-z0-9._-）原样，其余按 ~XXXX 转义；
+ * - 首尾各补一个 "-"，并截断到 251 字符。
+ * sessionId 自带 "session-" 前缀，且全为安全字符（目录名 = sessionId，实测）。
+ * 用于侧栏右键「复制会话文件路径」——DSH 会话没有 pi 会话文件，路径指向 host 持久化文件。
+ */
+export function dshSessionFilePath(dshHome: string, cwd: string, sessionId: string): string {
+	let readable = "";
+	let separatorRun = false;
+	for (let i = 0; i < cwd.length; i += 1) {
+		const code = cwd.charCodeAt(i);
+		const ch = String.fromCharCode(code);
+		if (ch === "/" || ch === "\\" || ch === ":") {
+			if (!separatorRun) readable += "-";
+			separatorRun = true;
+		} else if (ch !== "~" && /^[A-Za-z0-9._-]$/.test(ch)) {
+			readable += ch;
+			separatorRun = false;
+		} else {
+			readable += `~${code.toString(16).toUpperCase().padStart(4, "0")}`;
+			separatorRun = false;
+		}
+	}
+	const workspaceDir = `--${(readable.replace(/^-+/, "") || "root").slice(0, 251)}--`;
+	return join(dshHome, "sessions", workspaceDir, sessionId, "session.jsonl.zstd");
+}
+
 export class DshAgentManager implements SessionAgentGateway {
-	readonly backend: AgentBackend = "dsh";
-	/** 已支持的可选能力：fork（session.fork 锚 seq 裁剪）与 compact（/compact 命令）。 */
+	readonly backend: AgentBackend = "dsh";	/** 已支持的可选能力：fork（session.fork 锚 seq 裁剪）与 compact（/compact 命令）。 */
 	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set([
 		"fork",
 		"getForkMessages",
@@ -71,6 +102,10 @@ export class DshAgentManager implements SessionAgentGateway {
 		private readonly getProject: (id: string) => Project | undefined,
 		/** 审批自动放行开关：运行时读取（默认关闭），true 时 approval 帧直接应答 allowed-once。 */
 		private readonly getAutoAllowApproval: () => boolean = () => false,
+		/** DSH host 会话标题变化回调（attach 初值 / session/title 事件 / rename）：
+		 *  装配层据此写回 catalog 并推送侧栏刷新——DSH 会话没有 pi 会话文件，
+		 *  标题只存在于 host（dsh-session-title 的 session/title 事件 fold）。 */
+		private readonly onTitleChanged?: (dshSessionId: string, title: string) => void,
 	) {}
 
 	// ── 网关身份与订阅 ─────────────────────────────────────────────────────────
@@ -104,15 +139,26 @@ export class DshAgentManager implements SessionAgentGateway {
 		// 不新建——DSH 会话由 host 持久化（$DSH_HOME），重建会丢失对话历史。
 		let sessionId: string = "";
 		let attached = false;
+		/** attach 时从 host 拿到的会话标题（list 投影的 title 单元，非 draft 占位名）。 */
+		let hostTitle: string | undefined;
 		if (input.dshSessionId) {
 			const listed = await client.sessions.list({});
 			if (listed.result.ok) {
-				const existing = listed.result.value.items.some(
+				const existing = listed.result.value.items.find(
 					(item) => item.sessionId === input.dshSessionId,
 				);
 				if (existing) {
 					sessionId = input.dshSessionId;
 					attached = true;
+					// dsh-session-title 把最新标题 fold 进 list 行的 projections.values.title：
+					// 侧栏显示真实标题（如「打包的体积是否能优化一下呢」）而不是 draft 占位名。
+					const values = (existing.projections as { values?: unknown } | undefined)?.values;
+					const projectedTitle = values !== null && typeof values === "object"
+						? (values as Record<string, unknown>).title
+						: undefined;
+					if (typeof projectedTitle === "string" && projectedTitle.trim()) {
+						hostTitle = projectedTitle.trim();
+					}
 				} else {
 					// 持久化 id 在 host 里已不存在（DSH_HOME 被清/更换）：退回新建。
 					const created = await client.sessions.create({ cwd });
@@ -140,12 +186,14 @@ export class DshAgentManager implements SessionAgentGateway {
 			id: agentId,
 			projectId: input.projectId,
 			cwd,
-			title: input.title ?? "DSH 会话",
+			title: hostTitle ?? input.title ?? "DSH 会话",
 			status: "idle",
 			sessionId,
 			backend: "dsh",
 			noSession: input.noSession,
 			createdAt: Date.now(),
+			// DSH 会话文件（侧栏右键「复制会话文件路径」；attach 时同步写回 catalog 记录）
+			sessionPath: dshSessionFilePath(this.dshHost.getHomeDir(), cwd, sessionId),
 		};
 		const runtime: DshAgentRuntime = {
 			tab,
@@ -172,6 +220,11 @@ export class DshAgentManager implements SessionAgentGateway {
 				}
 				runtime.messages = runtime.projection.messages;
 			}
+		}
+		// attach 初值同步：host 里已有标题（list 投影）时立即写回 catalog——
+		// 否则重启后侧栏一直显示 draft 占位名（如「pi-desktop DSH」）。
+		if (hostTitle) {
+			this.onTitleChanged?.(sessionId, hostTitle);
 		}
 		this.runtimes.set(agentId, runtime);
 		this.startMux(runtime);
@@ -213,6 +266,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			sessionId,
 			status: "idle",
 			createdAt: Date.now(),
+			// restart 映射到新 dsh sessionId：会话文件路径必须同步更新（不能沿用旧 id 的）
+			sessionPath: dshSessionFilePath(this.dshHost.getHomeDir(), cwd, sessionId),
 		};
 		const runtime: DshAgentRuntime = {
 			tab,
@@ -262,7 +317,11 @@ export class DshAgentManager implements SessionAgentGateway {
 		const runtime = this.runtime(agentId);
 		const client = this.requireClient();
 		const renamed = await client.sessions.rename({ sessionId: runtime.sessionId, title: name });
-		if (renamed.result.ok) runtime.tab.title = renamed.result.value.title;
+		if (renamed.result.ok) {
+			runtime.tab.title = renamed.result.value.title;
+			this.emit(ipcChannels.agentsState, this.list());
+			this.onTitleChanged?.(String(runtime.sessionId), runtime.tab.title);
+		}
 		return runtime.tab;
 	}
 
@@ -295,6 +354,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			provider: runtime.model?.provider,
 			modelId: runtime.model?.model,
 			thinkingLevel: runtime.thinkingLevel,
+			permissionPreset: runtime.permissionPreset,
+			planModeActive: runtime.planModeActive,
 		};
 	}
 
@@ -348,14 +409,11 @@ export class DshAgentManager implements SessionAgentGateway {
 		const client = this.requireClient();
 		const models = await client.sessions.models({ sessionId: runtime.sessionId });
 		if (!models.result.ok) return [];
-		const groups = models.result.value.groups ?? [];
-		const result: AvailableModel[] = [];
-		for (const group of groups) {
-			for (const model of group.models ?? []) {
-				result.push({ id: model.id, name: model.name, provider: group.id });
-			}
-		}
-		return result;
+		// host 的 models catalog 带每个模型的 reasoning.efforts（支持的思考档位）：
+		// 透传给选择器按模型过滤——llm-deepseek 只接受 off/high/max，
+		// llm-pi-ai 按模型声明，选不支持的档位会在下次请求抛 UNSUPPORTED_REASONING_EFFORT。
+		// 与 DshHost.listModels 共用同一映射（目录数据同源）。
+		return toDshAvailableModels(models.result.value.groups ?? []);
 	}
 
 	async prepareResendFromMessage(
@@ -374,6 +432,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			sessionId: runtime.sessionId,
 			provider,
 			model: modelId,
+			// 先选了思考档位再换模型：档位随 selectModel 一起下发，否则会被模型默认档位覆盖。
+			...(runtime.thinkingLevel ? { reasoningEffort: runtime.thinkingLevel } : {}),
 		});
 		if (!selected.result.ok) {
 			throw new Error(`dsh selectModel failed: ${JSON.stringify(selected.result.error)}`);
@@ -451,6 +511,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			sessionId: newSessionId,
 			status: "idle",
 			createdAt: Date.now(),
+			// fork 产生新 dsh sessionId：会话文件路径同步更新
+			sessionPath: dshSessionFilePath(this.dshHost.getHomeDir(), runtime.cwd, newSessionId),
 		};
 		const nextRuntime: DshAgentRuntime = {
 			...runtime,
@@ -642,6 +704,24 @@ export class DshAgentManager implements SessionAgentGateway {
 						if (!payload || payload.type !== "session/event") continue;
 						if (payload.sessionId !== runtime.sessionId) continue;
 						const event = payload.event;
+						// DSH host 会话标题（dsh-session-title 的 session/title 事件）：
+						// 更新 runtime tab + 写回 catalog（侧栏运行中行实时、历史行/重启后持久），
+						// 不投影消息、不影响流式状态机。
+						if (
+							event?.type === "session/title" &&
+							event.data !== null &&
+							typeof event.data === "object" &&
+							typeof (event.data as { title?: unknown }).title === "string" &&
+							((event.data as { title: string }).title).trim()
+						) {
+							const title = (event.data as { title: string }).title.trim();
+							if (runtime.tab.title !== title) {
+								runtime.tab.title = title;
+								this.emit(ipcChannels.agentsState, this.list());
+								this.onTitleChanged?.(String(runtime.sessionId), title);
+							}
+							continue;
+						}
 						// host 为事件计算的下发 view（tool/call 的卡片模型，dsh-web 同源）；
 						// 与事件一起投影，工具消息 meta.view 供渲染层展示命令/描述。
 						const eventView = payload.view;
@@ -674,10 +754,13 @@ export class DshAgentManager implements SessionAgentGateway {
 								done: false,
 							});
 						}
-						// 思考流：agents:thinking 独立通道（与 pi 对齐）。turn 内首个 reasoning-delta
-						// 登记 thinking 段 id；终态（assistant/message / turn/end 清空 pending）补发 done。
+						// 思考流：agents:thinking 独立通道（与 pi 对齐）。id 必须与渲染层
+						// buildTurnDisplay 的 group id 一致（msg-thinking-<消息 id>，消息 id
+						// = 骨架消息 id = dsh:<首个 delta 的 seq>），否则 Live 思考命中不了
+						// atom、只能等终态一次性出现。终态（assistant/message / turn/end
+						// 清空 pending）补发 done。
 						if (p.deltaReasoning !== undefined) {
-							runtime.thinkingId ??= `dsh-thinking-${eventSeq}`;
+							runtime.thinkingId ??= `msg-thinking-${p.pendingAssistantId ?? `dsh:${eventSeq}`}`;
 							runtime.thinkingStartedAt ??= eventTime;
 							this.emit(ipcChannels.agentsThinking, {
 								agentId: runtime.tab.id,
@@ -688,12 +771,14 @@ export class DshAgentManager implements SessionAgentGateway {
 							});
 						}
 						if (runtime.thinkingId && p.deltaReasoning === undefined && p.pendingAssistantThinking === "") {
-							// 思考段收尾：text 留空，渲染层用 prev.text 兑底（跨通道乱序防 remount 同 pi）。
+							// 思考段收尾：text 留空，渲染层用 prev.text 兑底（跨通道乱序防 remount 同 pi）；
+							// endedAt = 终态事件时间（渲染层思考块耗时 = endedAt - startedAt）。
 							this.emit(ipcChannels.agentsThinking, {
 								agentId: runtime.tab.id,
 								id: runtime.thinkingId,
 								text: "",
 								startedAt: runtime.thinkingStartedAt ?? 0,
+								endedAt: eventTime,
 								done: true,
 							});
 							runtime.thinkingId = undefined;
@@ -703,6 +788,10 @@ export class DshAgentManager implements SessionAgentGateway {
 						if (p.stateChanged) {
 							runtime.executingTool = p.executingTool;
 							if (p.model) runtime.model = p.model;
+							// DSH 权限预设 / plan 模式（/permission /plan 命令事件折叠）：
+							// 同步进 runtime state，渲染层底栏/模式按钮即时反映。
+							if (p.permissionPreset !== undefined) runtime.permissionPreset = p.permissionPreset;
+							runtime.planModeActive = p.planModeActive;
 							this.emitRuntimeState(runtime.tab.id);
 						}
 						if (p.turnEnded) {
@@ -773,6 +862,10 @@ type DshAgentRuntime = {
 	executingTool?: string;
 	model?: { provider: string; model: string };
 	thinkingLevel?: string;
+	/** DSH 权限预设（permission/preset 事件折叠；read-only/workspace-write/danger-full-access）。 */
+	permissionPreset?: string;
+	/** DSH plan 模式（plan/mode 事件折叠）。 */
+	planModeActive?: boolean;
 	/** 进行中的思考段 id（turn 内首个 reasoning-delta 起登记；终态清空）。 */
 	thinkingId?: string;
 	thinkingStartedAt?: number;

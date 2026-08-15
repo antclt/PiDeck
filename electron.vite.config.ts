@@ -49,11 +49,16 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       lib: {
-        // electron-vite 多入口：lib.entry 对象形式输出到 out/main（index.js + hostEntry.js）。
-        // hostEntry 是 utilityProcess 的 DSH host 入口，独立 chunk 供 DshHostProcess fork。
+        // electron-vite 多入口：lib.entry 对象形式输出到 out/main（index.js + hostEntry.js + runnerConsolePreload.js + pideckPwshPersistent.js）。
+        // hostEntry 是 utilityProcess 的 DSH host 入口，独立 chunk 供 DshHostProcess fork；
+        // runnerConsolePreload 经 host 补丁 NODE_OPTIONS=--require 注入沙箱 runner，
+        // 在 runner 进程内分配隐藏控制台（黑窗口治理，见 hideChildConsoles.ts）；
+        // pideckPwshPersistent 是持久 pwsh 工具插件，经 hostEntry patches insert 注入 DSH host。
         entry: {
           index: resolve(__dirname, "src/main/index.ts"),
           hostEntry: resolve(__dirname, "src/main/dsh/hostEntry.ts"),
+          runnerConsolePreload: resolve(__dirname, "src/main/dsh/runnerConsolePreload.ts"),
+          pideckPwshPersistent: resolve(__dirname, "src/main/dsh/pideckPwshPersistent.ts"),
         },
         formats: ["cjs"],
       },

@@ -110,6 +110,25 @@ export function SessionBackendBadge(props: { className?: string }) {
   );
 }
 
+/** pi 运行时徽标：pi 官方 logo，与 DSH 徽章同尺寸同中性灰策略，构成后端徽章对。 */
+export function SessionPiBadge(props: { className?: string }) {
+  const label = t("sessionBackend.pi");
+  return (
+    <Badge
+      variant="outline"
+      aria-label={label}
+      title={label}
+      data-backend="pi"
+      className={cn(
+        "size-5 rounded-md p-0 border-muted-foreground/40 text-muted-foreground",
+        props.className,
+      )}
+    >
+      <PiLogo className="size-3.5" />
+    </Badge>
+  );
+}
+
 /**
  * 统一渲染会话来源标记：Badge 只承载品牌 Logo，不显示文字；名称通过 title 和 aria-label
  * 保留给悬停提示及辅助技术，避免用户无法区分相似 Logo。

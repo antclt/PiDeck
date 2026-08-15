@@ -458,9 +458,12 @@ export function AgentContextMenu(props: {
 					<DropdownMenuItem disabled={busy} onSelect={props.onCopySessionFilePath}>
 						{t("menu.copySessionFilePath")}
 					</DropdownMenuItem>
-					<DropdownMenuItem disabled={busy} onSelect={props.onOpenSessionFile}>
-						{t("menu.openAgentSessionFile")}
-					</DropdownMenuItem>
+					{/* DSH 会话文件是 zstd 压缩的持久化日志，系统默认程序打开无意义：只留复制 */}
+					{props.menu.agent.backend !== "dsh" && (
+						<DropdownMenuItem disabled={busy} onSelect={props.onOpenSessionFile}>
+							{t("menu.openAgentSessionFile")}
+						</DropdownMenuItem>
+					)}
 				</>
 			)}
 			<DropdownMenuSeparator />
@@ -538,9 +541,12 @@ export function SessionContextMenu(props: {
 					<DropdownMenuItem disabled={busy} onSelect={props.onCopySessionFilePath}>
 						{t("menu.copySessionFilePath")}
 					</DropdownMenuItem>
-					<DropdownMenuItem disabled={busy} onSelect={props.onOpenSessionFile}>
-						{t("menu.openSessionFile")}
-					</DropdownMenuItem>
+					{/* DSH 会话文件是 zstd 压缩的持久化日志，系统默认程序打开无意义：只留复制 */}
+					{props.menu.session.backend !== "dsh" && (
+						<DropdownMenuItem disabled={busy} onSelect={props.onOpenSessionFile}>
+							{t("menu.openSessionFile")}
+						</DropdownMenuItem>
+					)}
 				</>
 			)}
 			{showRpcGroup && (

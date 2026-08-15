@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { installHiddenConsolePatch } from "./hideChildConsoles";
+import { installHiddenConsolePatch, installHostHiddenConsole } from "./hideChildConsoles";
 
 // utilityProcess 的 parentPort：electron 包类型里有（Electron.ParentPort）。
 import type { ParentPort } from "electron";
@@ -71,9 +71,16 @@ async function main(): Promise<void> {
 	process.env.DSH_HOME = dshHome;
 	process.env.DSH_TELEMETRY_DISABLED = "1";
 
-	// Windows 黑窗口治理：必须在下面任何 @deepseek-ai/* 动态 import 之前安装——
+	// Windows 黑窗口治理（必须在下面任何 @deepseek-ai/* 动态 import 之前安装——
 	// dsh-subprocess-local 等模块加载时会捕获 child_process.spawn 的引用，
-	// 补丁先于加载才覆盖得到（utilityProcess 无控制台，pwsh 子进程默认会弹新窗口）。
+	// 补丁先于加载才覆盖得到）：
+	// 1) installHostHiddenConsole：给 host 分配隐藏控制台。utilityProcess 无控制台，
+	//    child_process.spawn 拉起控制台子程序时 libuv 自动 CREATE_NO_WINDOW（本地
+	//    路径本就不弹窗）；分配隐藏控制台后所有子进程/孙进程继承它，整棵树零弹窗。
+	// 2) installHiddenConsolePatch：隐藏控制台分配失败时退回 windowsHide 注入兜底；
+	//    并对沙箱 runner 的 spawn 注入 NODE_OPTIONS preload（runner 是 GUI 进程、
+	//    不继承 host 控制台，需在 runner 进程内自建隐藏控制台——见 runnerConsolePreload.ts）。
+	installHostHiddenConsole();
 	installHiddenConsolePatch();
 
 	// ── 组合：base 补丁 + 覆盖层（ApiProxy/workspace/storage + picker stub + 遥测关）──
@@ -107,6 +114,15 @@ async function main(): Promise<void> {
 			{ id: "workspace", name: "@deepseek-ai/dsh-workspace" },
 			{ id: "api-gateway", name: "@deepseek-ai/dsh-host-apiproxy" },
 			{ id: "pideck-directory-picker", name: "./pideck-directory-picker.js" },
+			{ id: "pideck-slash-bridge", name: "./pideck-slash-bridge.js" },
+			// 持久 pwsh 工具（应用侧插件，仿 dsh-tool-bash-persistent）：
+			// 常驻 pwsh 会话复用，避免每次调用 ~350ms 冷启动（实测 30 倍提速）。
+			// 自包含 node-pty，不依赖 ctx.terminals（dsh-terminal-bash 的进程组
+			// 空闲检测在 win32 不可用）。name 用绝对路径指向构建产物。
+			{
+				id: "tool-pwsh-persistent",
+				name: join(__dirname, "pideckPwshPersistent.js"),
+			},
 		],
 	});
 
@@ -123,6 +139,51 @@ async function main(): Promise<void> {
 				"      capability() { return { kind: 'none' }; },",
 				"    });",
 				"  },",
+				"};",
+				"",
+			].join("\n"),
+		);
+	}
+	// Slash 命令桥：dsh-web 的命令执行（/permission /plan /compact 等）走浏览器
+	// 客户端通道（commands.execute Remote），PiDeck 只有 api-proxy RPC 通道，拿不到
+	// 该 Remote。本插件把「以 / 开头的单条用户消息」在 agent/pre-step（步骤组装前）
+	// 拦截下来，经 ctx.commands.execute 执行：命中则 reject 该步骤（命令日志事件
+	// command/run + command/done 由执行器落盘，消息不进模型、不上时间线），
+	// 未命中（未知命令/非命令）原样放行。与 dsh-web 的客户端语义一致。
+	const slashBridgePath = join(configDir, "pideck-slash-bridge.js");
+	if (!existsSync(slashBridgePath)) {
+		writeFileSync(
+			slashBridgePath,
+			[
+				"export default {",
+				"  apply(ctx) {",
+				"    ctx.inject(['commands'], (commandCtx) => {",
+				"      commandCtx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {",
+				"        try {",
+				"          // 只认 source.kind === 'user' 的输入：回合注入的运行时上下文等",
+				"          // 系统消息也作为 user/message 进 claimed 批次，必须排除。",
+				"          const userMessages = Array.isArray(messages)",
+				"            ? messages.filter((m) => m && m.source && m.source.kind === 'user')",
+				"            : [];",
+				"          if (userMessages.length !== 1) return next();",
+				"          const content = userMessages[0] && userMessages[0].content;",
+				"          const block = Array.isArray(content) && content.length === 1 ? content[0] : undefined;",
+				"          const line = block && block.type === 'text' && typeof block.text === 'string'",
+				"            ? block.text.trim()",
+				"            : '';",
+				"          if (!line.startsWith('/')) return next();",
+				"          // 未知命令 execute 返回 undefined：放行给模型当普通文本；",
+				"          // 已知命令执行成功后 reject 步骤（消息已 claim，不会重入）。",
+				"          const result = await commandCtx.commands.execute(agent, line, signal);",
+				"          if (result === undefined) return next();",
+				"          return { kind: 'reject' };",
+				"        } catch (error) {",
+				"          // 执行异常（含用户中止）不吞消息：放行回正常步骤流。",
+				"          return next();",
+				"        }",
+				"      });",
+				"    });",
+				"  }",
 				"};",
 				"",
 			].join("\n"),

@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { useEffect, useRef, useState } from "react";
-import type { AvailableModel, SessionRuntimeTarget } from "../../../../shared/types";
+import type { AvailableModel, ComposerAgentMode, SessionRuntimeTarget } from "../../../../shared/types";
 import {
   modelPendingByIdAtom,
   sessionComposerModeByIdAtom,
@@ -31,6 +31,7 @@ import { useSessionPaneServices } from "./SessionPaneServices";
 import { usePendingModelApply } from "../../hooks/usePendingModelApply";
 import type { ComposerPickerKind } from "../../hooks/useSessionComposerController";
 import { WELCOME_MODEL_KEY, WELCOME_THINKING_KEY, readWelcomeModelPreference, readWelcomeThinkingPreference } from "../../utils/chatSessionBootstrap";
+import { THINKING_LEVELS } from "./sessionPickerOptions";
 
 export type ComposerPickerHostProps = {
   sessionId: string;
@@ -38,6 +39,10 @@ export type ComposerPickerHostProps = {
   templates: PromptTemplateInfo[];
   onClose: () => void;
   onInsertTemplate: (template: PromptTemplateInfo) => void;
+  /** 模式选择回调（DSH 后端走 controller 的 DSH 分支：plan 发 /plan 命令）；缺省写本地 atom。 */
+  onPickMode?: (mode: ComposerAgentMode) => void;
+  /** 当前派生模式（DSH：planModeActive 驱动的 plan）；缺省读本地 atom。 */
+  currentMode?: ComposerAgentMode;
 };
 
 export function ComposerPickerHost(props: ComposerPickerHostProps) {
@@ -103,10 +108,13 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   useEffect(() => {
     // 打开模型选择器即加载（不依赖 record：欢迎页/未启动 Agent 时 record 为 undefined，
     // 但模型列表是全量的，listModels 不依赖 projectId）。
-    if (props.picker !== "model") return;
+    // 思考选择器也要加载：DSH 按当前模型 reasoningEfforts 过滤档位，模型目录只在
+    // 「打开模型选择器」时加载会导致用户先开思考选择器时拿不到过滤数据（显示全量档位）。
+    const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
+    if (props.picker !== "model" && !(props.picker === "thinking" && isDshSession)) return;
     const sequence = ++modelLoadSequenceRef.current;
     // DSH 会话走 host 级模型目录；pi 走 models.json（与 Agent RPC 同源，无抖动）。
-    const loader = record?.backend === "dsh"
+    const loader = isDshSession
       ? desktopApi.sessions.listDshModels()
       : desktopApi.projects.listModels(record?.projectId);
     void loader.then((next) => {
@@ -117,7 +125,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         showNotice(error instanceof Error ? error.message : String(error), 4000);
       }
     });
-  }, [props.picker, record]);
+  }, [props.picker, record, runtime]);
 
   function currentHandle() {
     const current = store.get(sessionRuntimeByIdAtom)[sessionId];
@@ -403,7 +411,10 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     );
   }
   if (props.picker === "model") {
-    const welcomeModel = readWelcomeModelPreference()?.model;
+    // DSH 会话的模型归属 host（agent-default-model），不读 pi 的欢迎页偏好：
+    // 否则 localStorage 里的 pi 模型会被当成「当前模型」高亮，误导用户以为已选中。
+    const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
+    const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
     return (
       <ModelPicker
         models={models}
@@ -420,22 +431,44 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     );
   }
   if (props.picker === "mode") {
+    // DSH 后端 plan 模式由 host 持有（/plan 命令）：plan 项恒可用，选中走
+    // controller 的 DSH 分支（发命令而非本地 atom）；currentMode 以派生值为准。
+    const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
     return (
       <ComposerModePicker
-        currentMode={composerModes[sessionId] ?? "normal"}
+        currentMode={props.currentMode ?? composerModes[sessionId] ?? "normal"}
         onClose={props.onClose}
-        planModeAvailable={planModeAvailable}
+        planModeAvailable={isDshSession || planModeAvailable}
         onPick={(nextMode) => {
-          setMode({ sessionId, mode: nextMode });
+          if (props.onPickMode) props.onPickMode(nextMode);
+          else setMode({ sessionId, mode: nextMode });
           props.onClose();
         }}
       />
     );
   }
   if (props.picker === "thinking") {
+    // DSH：只显示当前模型支持的档位。host 的 models catalog 带 reasoningEfforts
+    // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——选不支持的档位
+    // 不会立即报错，而是在下一次 LLM 请求抛 UNSUPPORTED_REASONING_EFFORT（回合失败）。
+    const isDsh = record?.backend === "dsh" || runtime?.backend === "dsh";
+    const currentProvider = runtime?.state?.provider ?? record?.model?.provider;
+    const currentModelId = runtime?.state?.modelId ?? record?.model?.modelId;
+    const currentModel = models.find(
+      (model) => model.provider === currentProvider && model.id === currentModelId,
+    );
+    const thinkingLevels = isDsh && currentModel?.reasoningEfforts
+      ? currentModel.reasoningEfforts.map((effort) => {
+          const known = THINKING_LEVELS.find((level) => level.value === effort.id);
+          return known
+            ? { value: known.value, labelKey: known.labelKey, descriptionKey: known.descriptionKey }
+            : { value: effort.id, label: effort.name ?? effort.id, description: effort.description };
+        })
+      : undefined;
     return (
       <ThinkingPicker
         current={runtime?.state?.thinkingLevel ?? record?.thinkingLevel ?? readWelcomeThinkingPreference()?.thinkingLevel}
+        levels={thinkingLevels}
         onClose={props.onClose}
         onPick={(level) => void pickThinking(level)}
       />

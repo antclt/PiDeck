@@ -1,4 +1,4 @@
-import { Bot, ChevronsDownUp, ChevronRight, Ellipsis, Filter, Folder, FolderCog, FolderOpen, FolderPlus, HatGlasses, Plus } from "lucide-react";
+import { ChevronsDownUp, ChevronRight, Ellipsis, Filter, Folder, FolderCog, FolderOpen, FolderPlus, HatGlasses, Plus } from "lucide-react";
 import type { DragEvent } from "react";
 import type { Project, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
@@ -21,9 +21,9 @@ const treeRowClass =
 /** 项目行右侧操作按钮的虚化模式：absolute 浮层，不参与布局（不挤压项目名文字），
  * 默认隐藏（pointer-events 一并关闭防误触），行 hover / 行内聚焦时显现。
  * 窄侧栏（<256px）时按钮会盖住项目名：conversation-body 上
- * @max-[255px]:group-hover:pr-36 在 hover 时压出 144px 右侧留白（5 个按钮宽：pi/dsh/匿名/更多 + 可选筛选），
- * 文本截断让位但保持可见——2027-01 用户反馈：整行淡出到透明会导致标题不可读，
- * 必须点击激活才能看到文字；压缩+截断只损失尾部文字，不影响辨认。 */
+ * @max-[255px]:group-hover:pr-28 在 hover 时压出 112px 右侧留白（4 个按钮宽：
+ * pi/匿名/更多 + 可选筛选），文本截断让位但保持可见——2027-01 用户反馈：整行淡出到透明
+ * 会导致标题不可读，必须点击激活才能看到文字；压缩+截断只损失尾部文字，不影响辨认。 */
 const dimmedActionsClass =
 	"pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100";
 
@@ -129,7 +129,7 @@ export function ProjectTree(props: {
             <span className="grid size-5 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
               {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
             </span>
-            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-36 @max-[255px]:group-focus-within:pr-36">
+            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-28 @max-[255px]:group-focus-within:pr-28">
               <div className="conversation-title flex min-w-0 items-center">
                 {/* 悬浮展示完整项目目录名 + 路径（目录名在行内常被 truncate） */}
                 <PathTooltip content={`${projectDirectoryName}\n${project.path}`}>
@@ -156,7 +156,6 @@ export function ProjectTree(props: {
             {isCurrent && !project.worktreeEnabled && (
               <>
                 <button type="button" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-background/80 hover:text-foreground" title={t("app.projectNewAgent")} aria-label={t("app.projectNewAgent")} onClick={() => void props.actions.sessions.createDraft(project.id)}><Plus size={14} /></button>
-                <button type="button" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-background/80 hover:text-foreground" title={t("app.projectNewDshAgent")} aria-label={t("app.projectNewDshAgent")} onClick={() => void props.actions.sessions.createDraftDsh(project.id)}><Bot size={14} /></button>
               </>
             )}
             {!project.worktreeEnabled && (
@@ -164,7 +163,6 @@ export function ProjectTree(props: {
                 {!isCurrent && (
                   <>
                     <button type="button" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-background/80 hover:text-foreground" title={t("app.projectNewAgent")} aria-label={t("app.projectNewAgent")} onClick={() => void props.actions.sessions.createDraft(project.id)}><Plus size={14} /></button>
-                    <button type="button" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-background/80 hover:text-foreground" title={t("app.projectNewDshAgent")} aria-label={t("app.projectNewDshAgent")} onClick={() => void props.actions.sessions.createDraftDsh(project.id)}><Bot size={14} /></button>
                   </>
                 )}
                 <button type="button" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-background/80 hover:text-foreground" title={t("app.anonymousChat")} aria-label={t("app.anonymousChat")} onClick={() => void props.actions.sessions.createAnonymous(project.id)}><HatGlasses size={14} /></button>
@@ -292,18 +290,6 @@ export function ProjectTree(props: {
                 }}
               >
                 <Plus size={13} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title={t("app.projectNewDshAgent")}
-                aria-label={t("app.projectNewDshAgent")}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void props.actions.sessions.createDraftDsh(project.id);
-                }}
-              >
-                <Bot size={13} aria-hidden="true" />
               </button>
               <button
                 type="button"
