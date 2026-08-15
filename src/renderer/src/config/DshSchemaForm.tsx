@@ -1,6 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { t } from "../i18n";
-import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import {
 	Select,
@@ -10,6 +9,7 @@ import {
 	SelectValue,
 } from "../components/ui-shadcn/select";
 import { cn } from "../lib/utils";
+import type { DshSectionApi } from "./dshSchema";
 import {
 	dictEntries,
 	isSecretSet,
@@ -38,6 +38,8 @@ export type DshSchemaFormProps = {
 	writable: boolean;
 	/** 保存 patch（调用方走 settings.update）。 */
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
+	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
+	sectionApi?: DshSectionApi;
 };
 
 /**
@@ -46,9 +48,13 @@ export type DshSchemaFormProps = {
  *
  * v1 能力：object/dict/string(secret|credential-ref)/number/boolean/
  * union(const 分支下拉)；array 与复杂嵌套只读展示（JSON 行）。
+ *
+ * 保存语义与 Pi 管理页一致：表单不自带保存按钮，草稿变化上报脏状态，
+ * 由 ConfigModal 顶部统一保存按钮经 sectionApi 触发。
  */
 export function DshSchemaForm(props: DshSchemaFormProps) {
-	const { namespace, writable } = props;
+	const { namespace, writable, sectionApi } = props;
+	const instanceId = useId();
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 
@@ -56,7 +62,36 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 	const [draft, setDraft] = useState<Record<string, unknown>>({});
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [savedAt, setSavedAt] = useState<number | null>(null);
+
+	const dirty = Object.keys(draft).length > 0;
+
+	// 脏状态上报 + 保存函数注册（顶部统一保存）
+	useEffect(() => {
+		sectionApi?.onDirtyChange(instanceId, dirty);
+		// 卸载时清掉本实例的脏来源，避免收起/切换后残留黄点
+		return () => sectionApi?.onDirtyChange(instanceId, false);
+	}, [sectionApi, instanceId, dirty]);
+	const save = useCallback(async (): Promise<boolean> => {
+		if (Object.keys(draft).length === 0) return true;
+		const patch = pruneEmptyObjects(draft) as Record<string, unknown>;
+		setSaving(true);
+		setError(null);
+		try {
+			await props.onSave(patch);
+			setDraft({});
+			return true;
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+			return false;
+		} finally {
+			setSaving(false);
+		}
+	}, [draft, props]);
+	useEffect(() => {
+		if (!sectionApi) return;
+		sectionApi.registerSave(instanceId, save);
+		return () => sectionApi.unregisterSave(instanceId);
+	}, [sectionApi, instanceId, save]);
 
 	if (!schema || !root) {
 		return <div className="py-6 text-center text-control text-muted-foreground">{t("config.dsh.schemaUnavailable")}</div>;
@@ -76,22 +111,6 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 			setPath(nextDraft, path, next);
 		}
 		setDraft(nextDraft);
-		setSavedAt(null);
-	};
-
-	const handleSave = async () => {
-		const patch = pruneEmptyObjects(draft) as Record<string, unknown>;
-		setSaving(true);
-		setError(null);
-		try {
-			await props.onSave(patch);
-			setDraft({});
-			setSavedAt(Date.now());
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setSaving(false);
-		}
 	};
 
 	return (
@@ -101,20 +120,9 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 				<span className="rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
 					{namespace.applies === "live" ? t("config.dsh.appliesLive") : t("config.dsh.appliesRestart")}
 				</span>
-				<div className="ml-auto flex items-center gap-2">
-					{savedAt && <span className="text-micro text-emerald-600 dark:text-emerald-400">{t("config.dsh.saved")}</span>}
-					{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
-					<Button
-						type="button"
-						variant="default"
-						size="sm"
-						className="h-7"
-						disabled={!writable || saving || Object.keys(draft).length === 0}
-						onClick={() => void handleSave()}
-					>
-						{saving ? t("common.saving") : t("common.save")}
-					</Button>
-				</div>
+				{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
+				{dirty && <span className="ml-auto text-micro text-amber-500" title={t("config.dirtyTooltip")}>●</span>}
+				{saving && <span className="ml-auto text-micro text-muted-foreground">{t("common.saving")}</span>}
 			</div>
 			<div className="p-4">
 				{!writable && (

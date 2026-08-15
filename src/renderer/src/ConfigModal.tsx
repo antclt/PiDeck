@@ -51,7 +51,7 @@ import { SkillsTab } from "./config/SkillsTab";
 import { ExtensionsTab } from "./config/ExtensionsTab";
 import { SecuritySection, type SecuritySectionHandle } from "./components/config/SecuritySection";
 import { DshLogo, PiLogo } from "./components/session/SessionSourceBadge";
-import { DshConfigTab } from "./config/DshConfigTab";
+import { DshConfigTab, type DshConfigTabHandle } from "./config/DshConfigTab";
 import { t } from "./i18n";
 import { CodeMirrorEditor } from "./components/app/CodeMirrorEditor";
 import { translateBuiltinPromptDescription } from "./composerBehavior";
@@ -316,6 +316,12 @@ function ConfigModalContent(props: ConfigModalProps) {
 				: prev,
 		);
 	}, []);
+
+	/** DSH 页脏状态上报：转发到 "dsh" 标记（引用稳定，避免 DshConfigTab 的 sectionApi 反复重建）。 */
+	const handleDshDirtyChange = useCallback((dirty: boolean) => {
+		if (dirty) markDirty("dsh");
+		else clearDirty("dsh");
+	}, [markDirty, clearDirty]);
 	const [configDiagnostic, setConfigDiagnostic] = useState<ConfigFileDiagnostic | null>(null);
 	/* toast 已改用 sonner 实现 */
 
@@ -1539,6 +1545,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 
 	/** 安全管理面板句柄（顶部统一保存按钮经 saveByKey 调用其 save） */
 	const securitySectionRef = useRef<SecuritySectionHandle>(null);
+	/** DSH 配置页句柄（顶部统一保存按钮经 saveByKey 调用其 save）。 */
+	const dshConfigRef = useRef<DshConfigTabHandle>(null);
 
 	/** 安全管理草稿脏状态上报：有修改 markDirty("security")，保存成功/卸载清标记。 */
 	const handleSecurityDirtyChange = useCallback(
@@ -1552,6 +1560,13 @@ function ConfigModalContent(props: ConfigModalProps) {
 	/** 按 tab 编码分发到对应保存 handler；返回是否保存成功（false = 保存失败，由错误提示区展示原因）。 */
 	const saveByKey = async (tabKey: string): Promise<boolean> => {
 		switch (tabKey) {
+			case "dsh": {
+				// DSH 页保存成功后显式清未保存标记：子分区草稿已清空并上报 false，
+				// 但卸载/收起的分区可能残留脏来源，这里兜底保证黄点消失。
+				const ok = (await dshConfigRef.current?.save()) ?? false;
+				if (ok) clearDirty("dsh");
+				return ok;
+			}
 			case "config:models":
 				return handleSaveModels();
 			case "config:auth":
@@ -1574,9 +1589,12 @@ function ConfigModalContent(props: ConfigModalProps) {
 		}
 	};
 
+	/** 当前后端分页下的 tab 编码（DSH 页固定 "dsh"，Pi 页按 section:tab）。 */
+	const currentTabKey = backendPane === "dsh" ? "dsh" : sectionTabValue(section, tab);
+
 	/** 顶部统一保存按钮：保存当前 tab 的未保存修改（不关闭弹框）。 */
 	const handleSaveCurrent = async () => {
-		const tabKey = sectionTabValue(section, tab);
+		const tabKey = currentTabKey;
 		if (saving || !dirtyTabs.has(tabKey)) {
 			// 当前 tab 无修改但其他 tab 有：提示而不是静默，避免用户以为保存成功了
 			if (dirtyTabs.size > 0) showToast(t("config.noUnsavedChangesCurrentTab"));
@@ -1596,7 +1614,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 
 	/** 关闭确认框选择保存并关闭：保存当前 tab 成功才关；失败留在弹框（错误已展示在内容区）。 */
 	const handleSaveAndClose = async () => {
-		const tabKey = sectionTabValue(section, tab);
+		const tabKey = currentTabKey;
 		if (dirtyTabs.has(tabKey)) {
 			const ok = await saveByKey(tabKey);
 			if (!ok) return;
@@ -1690,7 +1708,10 @@ function ConfigModalContent(props: ConfigModalProps) {
 					</TabsTrigger>
 				</TabsList>
 				<TabsContent value="dsh" className="flex min-h-0 min-w-0 flex-1">
-					<DshConfigTab />
+					<DshConfigTab
+						ref={dshConfigRef}
+						onDirtyChange={handleDshDirtyChange}
+					/>
 				</TabsContent>
 				<TabsContent value="pi" className="min-h-0 min-w-0 flex-1">
 			{/* 默认浅色主题整页同底（bg-background），避免顶栏白 / 下方多层灰的割裂感。

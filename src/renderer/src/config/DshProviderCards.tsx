@@ -10,7 +10,7 @@
  * （其余 schema 字段）+ 行式模型列表（DshModelsTable）。密钥状态点：
  * 绿 = 已配置、红 = 缺失（仅当名单能提供该 ref 的状态信息时显示），无引用不显示。
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Copy, Eye, EyeOff, LoaderCircle, Plus, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
@@ -19,7 +19,7 @@ import { writeClipboard } from "../utils/clipboard";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { DshSchemaField, type DshNamespaceView } from "./DshSchemaForm";
-import { dictEntries, normalizeDshSchema, objectFields, pruneEmptyObjects, readPath, setPath } from "./dshSchema";
+import { dictEntries, normalizeDshSchema, objectFields, pruneEmptyObjects, readPath, setPath, type DshSectionApi } from "./dshSchema";
 import { credentialRefFor } from "./dshCredentialRef";
 import { ModelsTable, type DshModelRow } from "./DshModelsTable";
 
@@ -257,8 +257,8 @@ function CustomSettings(props: {
 
 /**
  * llm-pi-ai providers 卡片：每个 provider 一行（可展开），支持添加/删除 provider。
- * 保存收敛到卡片头（对齐 dsh-web）：密钥草稿与 settings 草稿一起提交——
- * 先按行 credentials.set，再 settings.update。
+ * 保存语义与 Pi 管理页一致：不自带保存按钮，草稿变化上报脏状态，
+ * 由顶部统一保存（先按行 credentials.set 再 settings.update）。
  */
 export function PiAiProvidersCard(props: {
 	namespace: DshNamespaceView;
@@ -269,8 +269,11 @@ export function PiAiProvidersCard(props: {
 	/** 可配置提供方目录（llm.providers）：添加提供方时从 declared 未激活行选择。 */
 	directory?: Array<{ provider: string; displayName: string; active: boolean; declared?: boolean }>;
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
+	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
+	sectionApi?: DshSectionApi;
 }) {
-	const { namespace, writable, ops } = props;
+	const { namespace, writable, ops, sectionApi } = props;
+	const instanceId = useId();
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 	const providersField = useMemo(() => {
@@ -286,6 +289,46 @@ export function PiAiProvidersCard(props: {
 	const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+
+	/** 脏状态：settings 草稿或任一密钥草稿非空。 */
+	const dirty = Object.keys(draft).length > 0 || Object.values(keyDrafts).some((value) => value.trim());
+	useEffect(() => {
+		sectionApi?.onDirtyChange(instanceId, dirty);
+		// 卸载时清掉本实例的脏来源，避免收起/切换后残留黄点
+		return () => sectionApi?.onDirtyChange(instanceId, false);
+	}, [sectionApi, instanceId, dirty]);
+
+	/** 统一保存：先写全部密钥草稿，再提交 settings patch；全部成功返回 true。 */
+	const save = useCallback(async (): Promise<boolean> => {
+		if (!dirty) return true;
+		setSaving(true);
+		setError(null);
+		try {
+			for (const [key, keyValue] of Object.entries(keyDrafts)) {
+				const trimmed = keyValue.trim();
+				if (!trimmed) continue;
+				const draftProfile = (draft.providers as Record<string, unknown> | undefined)?.[key];
+				const currentProfile = (namespace.value as { providers?: Record<string, unknown> } | undefined)?.providers?.[key];
+				const meta = (draftProfile ?? currentProfile) as Record<string, unknown> | undefined;
+				const ref = credentialRefFor(meta, key);
+				await ops.setKey(ref, trimmed);
+			}
+			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
+			setDraft({});
+			setKeyDrafts({});
+			return true;
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+			return false;
+		} finally {
+			setSaving(false);
+		}
+	}, [dirty, keyDrafts, draft, namespace.value, ops, props]);
+	useEffect(() => {
+		if (!sectionApi) return;
+		sectionApi.registerSave(instanceId, save);
+		return () => sectionApi.unregisterSave(instanceId);
+	}, [sectionApi, instanceId, save]);
 
 	if (!schema || !root || !providersField) {
 		return <div className="py-6 text-center text-control text-muted-foreground">{t("config.dsh.schemaUnavailable")}</div>;
@@ -445,31 +488,6 @@ export function PiAiProvidersCard(props: {
 		});
 	};
 
-	/** 统一保存（对齐 dsh-web）：先写全部密钥草稿（credentials.set），再提交 settings patch。 */
-	const handleSave = async () => {
-		setSaving(true);
-		setError(null);
-		try {
-			// 密钥草稿逐行提交（有输入才写）；失败即中止，settings 不动
-			for (const [key, keyValue] of Object.entries(keyDrafts)) {
-				const trimmed = keyValue.trim();
-				if (!trimmed) continue;
-				const draftProfile = (draft.providers as Record<string, unknown> | undefined)?.[key];
-				const currentProfile = (namespace.value as { providers?: Record<string, unknown> } | undefined)?.providers?.[key];
-				const meta = (draftProfile ?? currentProfile) as Record<string, unknown> | undefined;
-				const ref = credentialRefFor(meta, key);
-				await ops.setKey(ref, trimmed);
-			}
-			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
-			setDraft({});
-			setKeyDrafts({});
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setSaving(false);
-		}
-	};
-
 	const providerProfileFields = objectFields(schema, inner).filter((field) => field.name !== "models");
 
 	return (
@@ -479,19 +497,9 @@ export function PiAiProvidersCard(props: {
 				<span className="rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
 					{t("config.dsh.providersCount", { count: entries.length })}
 				</span>
-				<div className="ml-auto flex items-center gap-2">
-					{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
-					<Button
-						type="button"
-						variant="default"
-						size="sm"
-						className="h-7"
-						disabled={!writable || saving || (Object.keys(draft).length === 0 && !Object.values(keyDrafts).some((value) => value.trim()))}
-						onClick={() => void handleSave()}
-					>
-						{saving ? t("common.saving") : t("common.save")}
-					</Button>
-				</div>
+				{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
+				{dirty && <span className="ml-auto text-micro text-amber-500" title={t("config.dirtyTooltip")}>●</span>}
+				{saving && <span className="ml-auto text-micro text-muted-foreground">{t("common.saving")}</span>}
 			</div>
 
 			<div className="grid gap-2 p-4">
@@ -640,8 +648,11 @@ export function DeepseekRouteCard(props: {
 	/** 适配器内置模型目录（llm.models 中 provider=deepseek-official 的分组）。 */
 	catalog?: Array<{ id: string; name?: string }>;
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
+	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
+	sectionApi?: DshSectionApi;
 }) {
-	const { namespace, writable, ops } = props;
+	const { namespace, writable, ops, sectionApi } = props;
+	const instanceId = useId();
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 
@@ -652,15 +663,54 @@ export function DeepseekRouteCard(props: {
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	if (!schema || !root) {
-		return <div className="py-6 text-center text-control text-muted-foreground">{t("config.dsh.schemaUnavailable")}</div>;
-	}
-
 	/** draft 覆盖读取：draft 优先，否则用现值。 */
 	const value = (path: string[]) => {
 		const overridden = readPath(draft, path);
 		return overridden !== undefined ? overridden : readPath(namespace.value, path);
 	};
+
+	// 密钥 ref 需在保存回调之前计算（save useCallback 依赖它）
+	const apiKeyEnv = typeof value(["apiKeyEnv"]) === "string" ? value(["apiKeyEnv"]) as string : "";
+	const keyRef = credentialRefFor({ apiKeyEnv }, "deepseek");
+
+	/** 脏状态：settings 草稿或密钥草稿非空。 */
+	const dirty = Object.keys(draft).length > 0 || keyDraft.trim().length > 0;
+	useEffect(() => {
+		sectionApi?.onDirtyChange(instanceId, dirty);
+		// 卸载时清掉本实例的脏来源，避免收起/切换后残留黄点
+		return () => sectionApi?.onDirtyChange(instanceId, false);
+	}, [sectionApi, instanceId, dirty]);
+
+	/** 统一保存：先写密钥草稿（credentials.set），再提交 settings patch；成功返回 true。 */
+	const save = useCallback(async (): Promise<boolean> => {
+		if (!dirty) return true;
+		setSaving(true);
+		setError(null);
+		try {
+			const trimmed = keyDraft.trim();
+			if (trimmed) {
+				await ops.setKey(keyRef, trimmed);
+			}
+			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
+			setDraft({});
+			setKeyDraft("");
+			return true;
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+			return false;
+		} finally {
+			setSaving(false);
+		}
+	}, [dirty, keyDraft, keyRef, ops, props]);
+	useEffect(() => {
+		if (!sectionApi) return;
+		sectionApi.registerSave(instanceId, save);
+		return () => sectionApi.unregisterSave(instanceId);
+	}, [sectionApi, instanceId, save]);
+
+	if (!schema || !root) {
+		return <div className="py-6 text-center text-control text-muted-foreground">{t("config.dsh.schemaUnavailable")}</div>;
+	}
 
 	const update = (path: string[], next: unknown) => {
 		const nextDraft = structuredClone(draft) as Record<string, unknown>;
@@ -677,8 +727,6 @@ export function DeepseekRouteCard(props: {
 	const modelsValue = value(["models"]);
 	const models = Array.isArray(modelsValue) ? modelsValue as DshModelRow[] : [];
 	const baseFields = objectFields(schema, root).filter((field) => field.name !== "models");
-	const apiKeyEnv = typeof value(["apiKeyEnv"]) === "string" ? value(["apiKeyEnv"]) as string : "";
-	const keyRef = credentialRefFor({ apiKeyEnv }, "deepseek");
 
 	const addModel = () => {
 		setDraft((prev) => {
@@ -716,25 +764,6 @@ export function DeepseekRouteCard(props: {
 		});
 	};
 
-	/** 统一保存：先写密钥草稿（credentials.set），再提交 settings patch。 */
-	const handleSave = async () => {
-		setSaving(true);
-		setError(null);
-		try {
-			const trimmed = keyDraft.trim();
-			if (trimmed) {
-				await ops.setKey(keyRef, trimmed);
-			}
-			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
-			setDraft({});
-			setKeyDraft("");
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setSaving(false);
-		}
-	};
-
 	return (
 		<div className="flex min-w-0 flex-col">
 			<div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-4 py-2">
@@ -742,19 +771,9 @@ export function DeepseekRouteCard(props: {
 				<span className="rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
 					{namespace.applies === "live" ? t("config.dsh.appliesLive") : t("config.dsh.appliesRestart")}
 				</span>
-				<div className="ml-auto flex items-center gap-2">
-					{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
-					<Button
-						type="button"
-						variant="default"
-						size="sm"
-						className="h-7"
-						disabled={!writable || saving || (Object.keys(draft).length === 0 && !keyDraft.trim())}
-						onClick={() => void handleSave()}
-					>
-						{saving ? t("common.saving") : t("common.save")}
-					</Button>
-				</div>
+				{error && <span className="max-w-64 truncate text-micro text-danger" title={error}>{error}</span>}
+				{dirty && <span className="ml-auto text-micro text-amber-500" title={t("config.dirtyTooltip")}>●</span>}
+				{saving && <span className="ml-auto text-micro text-muted-foreground">{t("common.saving")}</span>}
 			</div>
 			<div className="grid gap-2 p-4">
 				<div className="rounded-md border border-border-subtle bg-bg-panel">

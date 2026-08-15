@@ -26,6 +26,16 @@ export type DshSchema = {
 	refs: Record<number, DshSchemaRef>;
 };
 
+/** 子分区统一保存/脏状态接口（与 Pi 管理页同一模式：顶部保存 + 关闭确认）。 */
+export type DshSectionApi = {
+	/** 上报本实例是否有未保存修改（DshConfigTab 汇总 → ConfigModal 顶部黄点/关闭确认）。 */
+	onDirtyChange: (instanceId: string, dirty: boolean) => void;
+	/** 注册本实例的保存函数（顶部保存按钮统一调用）。 */
+	registerSave: (instanceId: string, save: () => Promise<boolean>) => void;
+	/** 卸载时注销保存函数。 */
+	unregisterSave: (instanceId: string) => void;
+};
+
 /** 归一化 schema：兼容 refs 键是 number 或 string。 */
 export function normalizeDshSchema(raw: unknown): DshSchema | null {
 	if (!raw || typeof raw !== "object") return null;
