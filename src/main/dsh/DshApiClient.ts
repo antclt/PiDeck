@@ -109,8 +109,7 @@ export class DshApiClient {
 	private bridgedFetch(
 		input: URL,
 		init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
-	): Promise<Response> {
-		// host 已 dispose：不再向桥发消息（transport.send 已静默丢弃，这里直接拒绝
+	): Promise<Response> {		// host 已 dispose：不再向桥发消息（transport.send 已静默丢弃，这里直接拒绝
 		// 更快暴露问题，且不产生悬挂的 pending）。
 		if (this.disposed) {
 			return Promise.reject(new Error("DSH host transport disposed"));

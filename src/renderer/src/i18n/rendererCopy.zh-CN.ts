@@ -179,7 +179,6 @@ export const zhCN = {
   "app.compactDone": "上下文压缩完成",
   "app.compactFailed": "压缩失败",
   "app.attachFile": "加入对话引用",
-  "app.attachFileDshUnsupported": "DSH 暂不支持图片附件，已跳过",
   "app.startupWindowModeSaved": "启动窗口设置已保存，下次启动生效",
   "app.singleInstanceSaved": "单实例设置已保存，重启后生效",
   "app.electronSandboxSaved": "Chromium 沙箱设置已保存，重启后生效",

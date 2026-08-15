@@ -57,6 +57,15 @@ import {
  * 投影逻辑在 dshEventProjector.ts（纯函数，可单测）。
  */
 /**
+ * DSH prompt image 媒体类型收窄（G2）：仅 attachment 服务支持的四种光栅格式。
+ */
+function isDshImageMediaType(
+	value: string,
+): value is "image/png" | "image/jpeg" | "image/webp" | "image/gif" {
+	return value === "image/png" || value === "image/jpeg" || value === "image/webp" || value === "image/gif";
+}
+
+/**
  * DSH 会话的持久化文件路径：$DSH_HOME/sessions/<workspace 编码目录>/<sessionId>/session.jsonl.zstd。
  * workspace 目录名编码规则与 dsh-session-persistence-jsonl 的 projectKey 一致（2026-08 实测对齐）：
  * - 路径分隔符与盘符冒号（`/` `\` `:`）折叠为单个 "-"；
@@ -292,17 +301,24 @@ export class DshAgentManager implements SessionAgentGateway {
 	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
 		const runtime = this.runtime(input.agentId);
 		const client = this.requireClient();
-		// DSH 一期不支持图片附件（桥 body 仅字符串，见 dshHostBridge.ts）与宿主指令
-		// （agentMessage）/steer 语义：显式拒绝而非静默丢弃（D2）。渲染层已对 DSH
-		// 隐藏附件入口（F1），这里兜底防御直连主进程的调用方。
+		// G2：图片附件直接以 PromptContentPart 的 image 块（mediaType + base64 data）
+		// 随 prompt 发送——host 受理时自行校验/落盘，无需额外上传端点。
+		// 格式非法（非 base64 图片 / 不支持的媒体类型）时整体拒绝，不静默丢图。
+		const imageParts: Array<{ type: "image"; mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif"; data: string }> = [];
 		if (input.images && input.images.length > 0) {
-			return {
-				accepted: false,
-				error: "DSH images are not supported yet",
-				delivery: "rejected",
-				i18nKey: "session.sendDshImagesUnsupported",
-			};
+			for (const image of input.images) {
+				if (image.type !== "image" || !image.data || !isDshImageMediaType(image.mimeType)) {
+					return {
+						accepted: false,
+						error: "Invalid image attachment",
+						delivery: "rejected",
+						i18nKey: "session.sendDshImagesUnsupported",
+					};
+				}
+				imageParts.push({ type: "image", mediaType: image.mimeType, data: image.data });
+			}
 		}
+		// DSH 一期不支持宿主指令（agentMessage）与 steer 语义：显式拒绝而非静默丢弃（D2）。
 		if (input.agentMessage || input.streamingBehavior) {
 			return {
 				accepted: false,
@@ -317,11 +333,14 @@ export class DshAgentManager implements SessionAgentGateway {
 		// 的 followup），该消息会永久滞留、不再开新回合。因此所有 prompt 必须串行化：
 		// 上一回合（含命令回合）真正 idle 之后才发下一条。
 		await this.waitForIdle(input.agentId);
-		this.logRpc(input.agentId, "send", "sessions.prompt", { message: input.message });
+		this.logRpc(input.agentId, "send", "sessions.prompt", { message: input.message, images: imageParts.length });
 		const sent = await client.sessions.prompt({
 			sessionId: runtime.sessionId,
 			mode: "queue",
-			content: [{ type: "text", text: input.message }],
+			content: [
+				{ type: "text", text: input.message },
+				...imageParts,
+			],
 		});
 		if (!sent.result.ok) {
 			this.logRpc(input.agentId, "recv", "sessions.prompt rejected", sent.result.error);
@@ -711,7 +730,11 @@ export class DshAgentManager implements SessionAgentGateway {
 	): Promise<{ text: string; images?: ImageContent[] }> {
 		const message = this.runtime(agentId).messages.find((item) => item.id === messageId);
 		if (!message) throw new Error(`Message not found: ${messageId}`);
-		return { text: message.text };
+		// G2：图片消息重发时带回图片（渲染层附件栏恢复）
+		return {
+			text: message.text,
+			...(message.images && message.images.length > 0 ? { images: message.images } : {}),
+		};
 	}
 
 	/**

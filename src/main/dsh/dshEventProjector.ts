@@ -78,6 +78,21 @@ function textFromBlocks(blocks: unknown): string {
 	return splitBlocks(blocks).text;
 }
 
+/** 从内容块中提取图片（G2：user/message 的 { type: "image", mediaType, data } 块）。 */
+function imageBlocksFromContent(blocks: unknown): Array<{ type: "image"; data: string; mimeType: string }> {
+	if (!Array.isArray(blocks)) return [];
+	const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
+	for (const block of blocks) {
+		if (!isRecord(block) || block.type !== "image") continue;
+		const data = block.data;
+		const mediaType = block.mediaType;
+		if (typeof data === "string" && data && typeof mediaType === "string" && mediaType) {
+			images.push({ type: "image", data, mimeType: mediaType });
+		}
+	}
+	return images;
+}
+
 /** 归一化模型路由（request/context.data.provider + model）。 */
 function modelFromEvent(event: { data?: unknown }): { provider: string; model: string } | undefined {
 	const data = (event.data ?? {}) as { provider?: unknown; model?: unknown };
@@ -133,6 +148,9 @@ export function projectDshEvent(
 			const sourceKind = isRecord(data.source) ? data.source.kind : undefined;
 			if (sourceKind !== undefined && sourceKind !== "user") break;
 			const text = textFromBlocks(data.content);
+			// G2：用户消息的图片块（{ type: "image", mediaType, data }）投影为
+			// ChatMessage.images，历史浏览/重发时图片可恢复显示。
+			const images = imageBlocksFromContent(data.content);
 			next.messages = [
 				...base.messages,
 				{
@@ -141,6 +159,7 @@ export function projectDshEvent(
 					role: "user",
 					text,
 					timestamp: eventTime(event.time),
+					...(images.length > 0 ? { images } : {}),
 				},
 			];
 			next.messagesChanged = true;

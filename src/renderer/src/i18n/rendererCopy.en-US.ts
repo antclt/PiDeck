@@ -179,7 +179,6 @@ export const enUS: Record<TranslationKey, string> = {
   "app.compactDone": "Context compacted",
   "app.compactFailed": "Compaction failed",
   "app.attachFile": "Attach file reference",
-  "app.attachFileDshUnsupported": "Image attachments are not supported by DSH yet; skipped",
   "app.startupWindowModeSaved": "Startup window setting saved; applies on next launch",
   "app.singleInstanceSaved": "Single-instance setting saved; restart to apply",
   "app.electronSandboxSaved": "Chromium sandbox setting saved; restart to apply",

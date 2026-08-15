@@ -376,9 +376,8 @@ export function ComposerBottomBar(props: {
 					</Button>
 					<Button variant="ghost" size="icon"
 						className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60"
-						aria-label={isDsh ? t("app.attachFileDshUnsupported") : t("menu.attachFile")}
-						title={isDsh ? t("app.attachFileDshUnsupported") : t("menu.attachFile")}
-						disabled={props.disabled || isDsh}
+						aria-label={t("menu.attachFile")} title={t("menu.attachFile")}
+						disabled={props.disabled}
 						onClick={props.onAttachFile}
 					>
 						<Paperclip size={15} strokeWidth={2} aria-hidden="true" />
