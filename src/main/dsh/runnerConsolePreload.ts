@@ -35,7 +35,14 @@ function installRunnerHiddenConsole(): void {
 		if (getConsoleWindow()) return; // 已有控制台（终端拉起等场景）：无需处理
 		if (allocConsole() === 0) return;
 		const handle = getConsoleWindow();
-		if (handle) showWindow(handle, 0); // SW_HIDE = 0
+		if (handle) {
+			showWindow(handle, 0); // SW_HIDE = 0
+			// conhost 窗口创建异步（独立 conhost.exe 渲染）：单次 ShowWindow 可能
+			// 早于窗口创建而失效，窗口随后出现会「一闪而过」——定时重复隐藏覆盖。
+			const hideTimer = setInterval(() => showWindow(handle, 0), 50);
+			setTimeout(() => clearInterval(hideTimer), 1000);
+			hideTimer.unref?.();
+		}
 	} catch {
 		// 尽力而为：失败时退回 runner 原有行为
 	}

@@ -85,6 +85,14 @@ export function installHostHiddenConsole(
 		if (allocConsole() === 0) return false;
 		const handle = getConsoleWindow();
 		if (handle) showWindow(handle, 0); // SW_HIDE = 0
+		// conhost 窗口创建是异步的（独立 conhost.exe 进程渲染）：AllocConsole 返回时
+		// 窗口可能尚未创建，此刻 ShowWindow 无效，窗口随后出现会「一闪而过」。
+		// 定时重复隐藏覆盖创建窗口期（1s 内每 50ms 一次，过后窗口已稳定隐藏）。
+		if (handle) {
+			const hideTimer = setInterval(() => showWindow(handle, 0), 50);
+			setTimeout(() => clearInterval(hideTimer), 1000);
+			hideTimer.unref?.();
+		}
 		hostHiddenConsoleActive = true;
 		return true;
 	} catch {
@@ -128,6 +136,35 @@ function isPwshCommand(command: string): boolean {
 	return /(^|[\\/])(pwsh|powershell)(\.exe)?$/i.test(command);
 }
 
+/**
+ * pwsh 挂起兜底（实测：host 内普通 pwsh 调用约 8% 概率「命令执行完不退出」，
+ * 直到工具超时被回收——用户可见为每次调用慢/超时）：
+ * 1. stdin 从 pipe 改 ignore：pwsh 不会等待管道 EOF（已知的挂起形态之一）；
+ *    工具命令本就没有 stdin 输入通道，无行为差异。
+ * 2. `-Command` 命令末尾追加换行 + `exit $LASTEXITCODE`：无论挂起原因，
+ *    命令执行完都强制退出（命令内已有 exit 时先执行它，追加项不生效，无害）。
+ */
+function withPwshHangGuard(
+	args: readonly string[],
+	options: childProcessModule.SpawnOptions | undefined,
+): { args: readonly string[]; options: childProcessModule.SpawnOptions | undefined } {
+	let nextArgs: string[] | undefined;
+	const cmdIndex = args.findIndex((arg) => arg === "-Command");
+	if (cmdIndex >= 0 && cmdIndex + 1 < args.length) {
+		const cmd = args[cmdIndex + 1];
+		// 换行拼接：命令以 # 注释结尾时 exit 也不会被注释吞掉
+		nextArgs = [...args];
+		nextArgs[cmdIndex + 1] = `${cmd}\nexit $LASTEXITCODE`;
+	}
+	let nextOptions = options;
+	if (options !== undefined && Array.isArray(options.stdio) && options.stdio[0] === "pipe") {
+		const stdio = options.stdio.map((entry) => entry);
+		stdio[0] = "ignore";
+		nextOptions = { ...options, stdio };
+	}
+	return { args: nextArgs ?? args, options: nextOptions };
+}
+
 /** 给 pwsh 相关 spawn 注入启动优化环境变量（env 缺失时跳过：真实链路恒带 env）。 */
 function withPwshStartupEnv(
 	options: childProcessModule.SpawnOptions | undefined,
@@ -160,6 +197,27 @@ function withRunnerPreload(
 			NODE_OPTIONS: existing ? `${existing} ${preload}` : preload,
 		},
 	};
+}
+
+/**
+ * 沙箱 runner 的 spawn 必须注入 ELECTRON_RUN_AS_NODE=1（挂起根治，实测确认）：
+ * runner.js 是 Node 脚本，靠该环境变量让 electron.exe 以 Node 模式执行。
+ * DSH host 跑在 utilityProcess（NodeService）里——NodeService 是 Electron 内部
+ * 机制、进程环境里【没有】ELECTRON_RUN_AS_NODE；dsh-subprocess 的
+ * scrubbedParentEnv 只按父进程 env 过滤（KEY/DSH_*），也不会补它。缺失时
+ * electron.exe 会以 GUI 主进程模式加载 runner.js：业务逻辑照常执行（pwsh 被
+ * 拉起、输出正常、TSF 输入法 DLL 注入产生日志），但 Electron 主进程事件循环
+ * 永不退出（app 未 quit）——host 等 runner 退出等到工具超时（实测 120s，
+ * 会话里表现为「PID 打印后挂起」）。注入后 runner 按 Node 模式跑，业务完成后
+ * 事件循环清空正常退出（复现实验：缺变量 3/3 挂、注入后 2/2 正常）。
+ * env 缺失时跳过（真实链路恒带 env）。
+ */
+function withRunnerRunAsNode(
+	options: childProcessModule.SpawnOptions | undefined,
+): childProcessModule.SpawnOptions | undefined {
+	if (options === undefined || options.env === undefined) return options;
+	if (options.env.ELECTRON_RUN_AS_NODE === "1") return options;
+	return { ...options, env: { ...options.env, ELECTRON_RUN_AS_NODE: "1" } };
 }
 
 /** 本次 spawn 的 argv 是否指向沙箱 runner（argv 内含 runner.js/runner.ts 路径）。 */
@@ -222,7 +280,9 @@ export function installHiddenConsolePatch(
 	): childProcessModule.SpawnOptions | undefined {
 		if (isRunnerSpawn(command, args)) {
 			return withRunnerPreload(
-				withPwshStartupEnv(hostHiddenConsoleActive ? options : withHiddenOptions(options), true),
+				withRunnerRunAsNode(
+					withPwshStartupEnv(hostHiddenConsoleActive ? options : withHiddenOptions(options), true),
+				),
 				runnerPreloadPath,
 			);
 		}
@@ -235,10 +295,14 @@ export function installHiddenConsolePatch(
 	// spawn(command[, args][, options])：options 在第 2 位（无 args）或第 3 位。
 	replaceExport("spawn", ((command: string, argsOrOptions?: readonly string[] | SpawnOptions, maybeOptions?: SpawnOptions) => {
 		if (Array.isArray(argsOrOptions)) {
-			const next = resolveSpawnOptions(command, argsOrOptions, maybeOptions);
+			// pwsh 挂起兜底：改写 args（追加 exit）与 options（stdin ignore）
+			const guarded = isPwshCommand(command)
+				? withPwshHangGuard(argsOrOptions, maybeOptions)
+				: { args: argsOrOptions, options: maybeOptions };
+			const next = resolveSpawnOptions(command, guarded.args, guarded.options);
 			return next === undefined
-				? originals.spawn(command, argsOrOptions)
-				: originals.spawn(command, argsOrOptions, next);
+				? originals.spawn(command, guarded.args)
+				: originals.spawn(command, guarded.args, next);
 		}
 		const next = resolveSpawnOptions(command, undefined, argsOrOptions as SpawnOptions | undefined);
 		return next === undefined ? originals.spawn(command) : originals.spawn(command, next);
@@ -247,10 +311,13 @@ export function installHiddenConsolePatch(
 	// spawnSync 与 spawn 同形态。
 	replaceExport("spawnSync", ((command: string, argsOrOptions?: readonly string[] | SpawnOptions, maybeOptions?: SpawnOptions) => {
 		if (Array.isArray(argsOrOptions)) {
-			const next = resolveSpawnOptions(command, argsOrOptions, maybeOptions);
+			const guarded = isPwshCommand(command)
+				? withPwshHangGuard(argsOrOptions, maybeOptions)
+				: { args: argsOrOptions, options: maybeOptions };
+			const next = resolveSpawnOptions(command, guarded.args, guarded.options);
 			return next === undefined
-				? originals.spawnSync(command, argsOrOptions)
-				: originals.spawnSync(command, argsOrOptions, next);
+				? originals.spawnSync(command, guarded.args)
+				: originals.spawnSync(command, guarded.args, next);
 		}
 		const next = resolveSpawnOptions(command, undefined, argsOrOptions as SpawnOptions | undefined);
 		return next === undefined ? originals.spawnSync(command) : originals.spawnSync(command, next);

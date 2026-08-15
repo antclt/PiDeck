@@ -257,7 +257,33 @@ test("pwsh spawn：注入启动优化环境变量（冷启动提速），非 pws
 	assert.equal("POWERSHELL_TELEMETRY_OPTOUT" in calls[2][2].env, false, "非 pwsh 不注入");
 });
 
-test("runner spawn：同时注入 pwsh 启动环境（沙箱 pwsh 继承 runner env）", () => {
+test("pwsh spawn：追加 exit 兜底 + stdin 改 ignore（挂起止血）", () => {
+	installHostHiddenConsole("win32", makeFfi({ getResults: [0, 0xabc] }).koffi);
+	const originalSpawn = childProcess.spawn;
+	const calls = [];
+	childProcess.spawn = (...args) => {
+		calls.push(args);
+		return {};
+	};
+	const restore = installHiddenConsolePatch("win32");
+	try {
+		// 本地 pwsh spawn：-Command 命令追加换行 + exit；stdin pipe → ignore
+		childProcess.spawn("C:\\Program Files\\PowerShell\\7\\pwsh.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Write-Output hi"], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: "p" } });
+		// 非 pwsh 不受影响
+		childProcess.spawn("git", ["status"], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: "g" } });
+	} finally {
+		restore();
+		childProcess.spawn = originalSpawn;
+	}
+	assert.equal(calls[0][1][4], "Write-Output hi\nexit $LASTEXITCODE", "命令末尾追加 exit 兜底");
+	assert.equal(calls[0][2].stdio[0], "ignore", "stdin 改 ignore（不等管道 EOF）");
+	assert.equal(calls[0][2].stdio[1], "pipe", "stdout 保持 pipe");
+	assert.equal(calls[0][2].env.POWERSHELL_TELEMETRY_OPTOUT, "1", "启动环境注入不受影响");
+	assert.deepEqual(calls[1][1], ["status"], "非 pwsh 不追加 exit");
+	assert.equal(calls[1][2].stdio[0], "pipe", "非 pwsh 的 stdin 不动");
+});
+
+test("runner spawn：不受 pwsh 挂起兜底影响（argv 不含 -Command）", () => {
 	installHostHiddenConsole("win32", makeFfi({ getResults: [0, 0xabc] }).koffi);
 	const originalSpawn = childProcess.spawn;
 	const calls = [];
@@ -269,15 +295,52 @@ test("runner spawn：同时注入 pwsh 启动环境（沙箱 pwsh 继承 runner 
 	try {
 		childProcess.spawn(
 			"C:\\app\\electron.exe",
-			["C:\\app\\node_modules\\@deepseek-ai\\dsh-sandbox-windows-acl\\lib\\runner.js"],
+			["C:\\app\\node_modules\\@deepseek-ai\\dsh-sandbox-windows-acl\\lib\\runner.js", "--workspace", "C:\\work"],
 			{ env: { PATH: "x" } },
 		);
 	} finally {
 		restore();
 		childProcess.spawn = originalSpawn;
 	}
-	assert.equal(calls[0][2].env.POWERSHELL_TELEMETRY_OPTOUT, "1", "runner env 携带 pwsh 启动优化（CreateProcessAsUserW 子进程继承）");
+	assert.deepEqual(calls[0][1], [
+		"C:\\app\\node_modules\\@deepseek-ai\\dsh-sandbox-windows-acl\\lib\\runner.js",
+		"--workspace",
+		"C:\\work",
+	], "runner argv 原样透传");
+	assert.equal(calls[0][2].env.NODE_OPTIONS, '--require="C:\\\\app\\\\out\\\\main\\\\runnerConsolePreload.js"');
+});
+
+test("runner spawn：强制注入 ELECTRON_RUN_AS_NODE=1（挂起根治：缺它 runner 以 GUI 模式跑、永不退出）", () => {
+	installHostHiddenConsole("win32", makeFfi({ getResults: [0, 0xabc] }).koffi);
+	const originalSpawn = childProcess.spawn;
+	const calls = [];
+	childProcess.spawn = (...args) => {
+		calls.push(args);
+		return {};
+	};
+	const restore = installHiddenConsolePatch("win32", "C:\\app\\out\\main\\runnerConsolePreload.js");
+	try {
+		childProcess.spawn(
+			"C:\\app\\electron.exe",
+			["C:\\app\\node_modules\\@deepseek-ai\\dsh-sandbox-windows-acl\\lib\\runner.js", "--workspace", "C:\\work", "--", "pwsh.exe", "-Command", "$PID"],
+			{ env: { PATH: "x" } },
+		);
+		// 普通 spawn 不受影响
+		childProcess.spawn("git", ["status"], { env: { PATH: "g" } });
+		// env 已有值时保持（幂等）
+		childProcess.spawn(
+			"C:\\app\\electron.exe",
+			["C:\\app\\node_modules\\@deepseek-ai\\dsh-sandbox-windows-acl\\lib\\runner.js", "--workspace", "C:\\work"],
+			{ env: { PATH: "y", ELECTRON_RUN_AS_NODE: "1" } },
+		);
+	} finally {
+		restore();
+		childProcess.spawn = originalSpawn;
+	}
+	assert.equal(calls[0][2].env.ELECTRON_RUN_AS_NODE, "1", "runner spawn 注入 ELECTRON_RUN_AS_NODE=1");
 	assert.equal(calls[0][2].env.NODE_OPTIONS, '--require="C:\\\\app\\\\out\\\\main\\\\runnerConsolePreload.js"', "preload 注入不受影响");
+	assert.equal(calls[1][2].env.ELECTRON_RUN_AS_NODE, undefined, "非 runner 不注入");
+	assert.equal(calls[2][2].env.ELECTRON_RUN_AS_NODE, "1", "env 已有值时保持 1（幂等）");
 });
 
 test("win32 补丁：execFile（带 callback）与 exec 在兜底模式注入、生效模式不动", () => {
