@@ -580,6 +580,24 @@ const api = {
 		/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
 		unarchiveDshSession: (dshSessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshUnarchive, dshSessionId) as Promise<boolean>,
+		/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
+		listDshDynamicPlugins: () =>
+			ipcRenderer.invoke(ipcChannels.dshPluginList) as Promise<import("../shared/types").DshPluginView[]>,
+		/** DSH 静态 Loader 条目清单（只读：moduleName/enabled/fiberPhase）。 */
+		listDshStaticPlugins: () =>
+			ipcRenderer.invoke(ipcChannels.dshPluginStaticList) as Promise<import("../shared/types").DshStaticPluginView[]>,
+		/** DSH 动态插件安装（define：定义源码包，不运行）。 */
+		installDshPlugin: (input: import("../shared/types").DshPluginInstallInput) =>
+			ipcRenderer.invoke(ipcChannels.dshPluginInstall, input) as Promise<unknown>,
+		/** DSH 动态插件运行（面板手势，无需审批）。 */
+		runDshPlugin: (input: import("../shared/types").DshPluginLifecycleInput) =>
+			ipcRenderer.invoke(ipcChannels.dshPluginRun, input) as Promise<unknown>,
+		/** DSH 动态插件停止（保留全部包版本）。 */
+		stopDshPlugin: (input: import("../shared/types").DshPluginLifecycleInput) =>
+			ipcRenderer.invoke(ipcChannels.dshPluginStop, input) as Promise<unknown>,
+		/** DSH 动态插件卸载（undefine：删除插件与全部包版本）。 */
+		uninstallDshPlugin: (input: import("../shared/types").DshPluginLifecycleInput) =>
+			ipcRenderer.invoke(ipcChannels.dshPluginUninstall, input) as Promise<unknown>,
 		sendPrompt: (input: SendSessionPromptInput) =>
 			ipcRenderer.invoke(ipcChannels.sessionsSendPrompt, input) as Promise<SendSessionPromptResult>,
 		sendUiResponse: (input: SessionUiResponseInput) =>

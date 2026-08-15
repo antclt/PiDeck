@@ -105,6 +105,18 @@ export const ipcChannels = {
 	dshListArchived: "dsh:list-archived",
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
 	dshUnarchive: "dsh:unarchive",
+	/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
+	dshPluginList: "dsh:plugin-list",
+	/** DSH 静态 Loader 条目清单（只读：moduleName/enabled/fiberPhase）。 */
+	dshPluginStaticList: "dsh:plugin-static-list",
+	/** DSH 动态插件安装（define：定义源码包，不运行）。 */
+	dshPluginInstall: "dsh:plugin-install",
+	/** DSH 动态插件运行（面板手势，requestId=null 无需审批）。 */
+	dshPluginRun: "dsh:plugin-run",
+	/** DSH 动态插件停止（保留全部包版本）。 */
+	dshPluginStop: "dsh:plugin-stop",
+	/** DSH 动态插件卸载（undefine：删除插件与全部包版本）。 */
+	dshPluginUninstall: "dsh:plugin-uninstall",
 	/** DSH host 级模型目录（llm.models），不依赖已启动的会话。 */
 	dshListModels: "dsh:list-models",
 	/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由；添加提供方用）。 */

@@ -20,6 +20,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { installHiddenConsolePatch, installHostHiddenConsole } from "./hideChildConsoles";
 import { agentPresetsRow } from "./dshPresetComposition";
+import {
+	PIDECK_PLUGIN_BRIDGE_PATH,
+	handlePluginBridgeFetch,
+} from "./pideckPluginBridge";
 
 // utilityProcess 的 parentPort：electron 包类型里有（Electron.ParentPort）。
 import type { ParentPort } from "electron";
@@ -129,6 +133,12 @@ async function main(): Promise<void> {
 			// includeUserRoot 默认追加），默认 standard（标准模式）。不声明该行时
 			// agentPreset.list 返回空名单，配置页「预设设置」无模式可选。
 			agentPresetsRow(dirname(require.resolve("@deepseek-ai/dsh/package.json"))),
+			// 动态 Cordis 插件管理（G13 深化）：运行器（define/run/stop/undefine，
+			// 进程内临时扩展、按会话归属）+ 只读静态 Loader 清单 + PiDeck 管理桥。
+			// 与 dsh-web-app 的 cordis.patch.yml 同一挂载形态（无 config 的普通行）。
+			{ id: "plugin-inventory", name: "@deepseek-ai/dsh-host-plugin-inventory" },
+			{ id: "cordis-host-runner", name: "@deepseek-ai/dsh-cordis-host-runner" },
+			{ id: "pideck-plugin-bridge", name: join(__dirname, "pideckPluginBridge.js") },
 		],
 	});
 
@@ -212,7 +222,21 @@ async function main(): Promise<void> {
 		},
 		nodeModulesUrl,
 	);
-	const handler = toFetchHandler(ctx.apiProxy as never);
+	const apiHandler = toFetchHandler(ctx.apiProxy as never);
+	// PiDeck 插件管理桥（G13 深化）：/pideck-plugin/rpc 走桥插件服务（动态插件
+	// 生命周期 + 静态 Loader 清单），其余路径原样交给 ApiProxy RPC handler。
+	const handler = (url: URL, init?: RequestInit): Promise<Response> => {
+		if (url.pathname === PIDECK_PLUGIN_BRIDGE_PATH) {
+			return handlePluginBridgeFetch(ctx, {
+				method: init?.method,
+				// 桥协议 headers 是 Record<string,string>（见 DshFetchMessage）；RequestInit
+				// 的 HeadersInit 形状更宽，此处收窄到桥协议形状。body 同理只透传字符串。
+				headers: init?.headers as Record<string, string> | undefined,
+				body: typeof init?.body === "string" ? init.body : undefined,
+			});
+		}
+		return apiHandler.fetch(url, init);
+	};
 	console.log(`[dsh-host-entry] boot OK in ${Date.now() - startedAt}ms`);
 	port.postMessage({ type: "host-ready" });
 
@@ -244,7 +268,7 @@ async function main(): Promise<void> {
 			};
 			port.on("message", onAbortMessage);
 			try {
-				const response = await handler.fetch(url, init);
+				const response = await handler(url, init);
 				const status = response.status;
 				const headers: Record<string, string> = {};
 				response.headers.forEach((value: string, key: string) => {

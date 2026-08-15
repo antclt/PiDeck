@@ -315,6 +315,12 @@ export function createPreviewApi(): PiDesktopApi {
 			listDshOrphans: async () => [],
 			listArchivedDshSessions: async () => [],
 			unarchiveDshSession: async () => true,
+			listDshDynamicPlugins: async () => [],
+			listDshStaticPlugins: async () => [],
+			installDshPlugin: async () => undefined,
+			runDshPlugin: async () => undefined,
+			stopDshPlugin: async () => undefined,
+			uninstallDshPlugin: async () => undefined,
 			listCatalog: async (projectId, _options?: { scan?: boolean }): Promise<SessionRecord[]> => getSessions().map((session) => ({
 				id: `preview-record:${session.id}`,
 				projectId,

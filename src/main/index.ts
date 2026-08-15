@@ -2402,6 +2402,13 @@ function registerIpc() {
 			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),
 			unarchiveDshSession: (dshSessionId) => dshHost.unarchiveSession(dshSessionId),
 			listArchivedDshSessions: () => dshHost.listArchivedSessions(),
+			// G13 深化：动态 Cordis 插件管理（进程内临时扩展，define/run/stop/undefine）
+			listDshDynamicPlugins: () => dshHost.listDynamicPlugins(),
+			listDshStaticPlugins: () => dshHost.listStaticPlugins(),
+			installDshPlugin: (input) => dshHost.installDynamicPlugin(input),
+			runDshPlugin: (input) => dshHost.runDynamicPlugin(input),
+			stopDshPlugin: (input) => dshHost.stopDynamicPlugin(input),
+			uninstallDshPlugin: (input) => dshHost.uninstallDynamicPlugin(input),
 			isDshAgent: (agentId) =>
 				dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 			forkDshAgentSession: async (target, entryId) => {

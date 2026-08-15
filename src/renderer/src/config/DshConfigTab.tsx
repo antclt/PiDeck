@@ -36,6 +36,7 @@ import { DSH_PERMISSION_PRESETS } from "../components/session/DshPermissionMenu"
 import { useSaveRegistry } from "../hooks/useSaveRegistry";
 import { DshSchemaForm, type DshNamespaceView } from "./DshSchemaForm";
 import { isDshPluginNamespace, dshPluginNamespaceTitleKey } from "./dshPluginNamespaces";
+import { DshPluginSection } from "./DshPluginSection";
 import { DeepseekRouteCard, PiAiProvidersCard } from "./DshProviderCards";
 import { collectCredentialRefsWithValue, normalizeDshSchema, type DshSectionApi } from "./dshSchema";
 import { presetDisplayDescription, presetDisplayName } from "./dshPresetDisplay";
@@ -348,17 +349,21 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 							</div>
 						</div>
 						<div hidden={activeTab !== "plugins"}>
-							<div className="p-4">
-								<p className="mb-3 text-micro text-muted-foreground">{t("config.dsh.pluginsHint")}</p>
-								{pluginNamespaces.length === 0 ? (
-									<Empty text={t("config.dsh.namespacesEmpty")} />
-								) : (
-									<div className="grid gap-2">
-										{pluginNamespaces.map((ns) => (
-											<PluginCard key={ns.ns} ns={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} />
-										))}
-									</div>
-								)}
+							<div className="grid gap-4 p-4">
+								<div className="grid gap-2">
+									<p className="text-micro text-muted-foreground">{t("config.dsh.pluginsHint")}</p>
+									{pluginNamespaces.length === 0 ? (
+										<Empty text={t("config.dsh.namespacesEmpty")} />
+									) : (
+										<div className="grid gap-2">
+											{pluginNamespaces.map((ns) => (
+												<PluginCard key={ns.ns} ns={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} />
+											))}
+										</div>
+									)}
+								</div>
+								{/* G13 深化：动态 Cordis 插件管理（define/run/stop/undefine）+ 静态 Loader 只读清单 */}
+								<DshPluginSection />
 							</div>
 						</div>
 						<div hidden={activeTab !== "security"}>

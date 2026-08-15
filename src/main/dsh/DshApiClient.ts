@@ -105,6 +105,15 @@ export class DshApiClient {
 		return this.clientPromise;
 	}
 
+	/** 桥接原始 fetch（插件管理桥等非 ApiProxy 路径用）：任意 dsh.internal URL。 */
+	rawFetch(
+		input: URL | string,
+		init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
+	): Promise<Response> {
+		const url = input instanceof URL ? input : new URL(input, "http://dsh.internal");
+		return this.bridgedFetch(url, init);
+	}
+
 	/** 真正的桥接 fetch：发 fetch-request，等 unary 响应或组装流式响应。 */
 	private bridgedFetch(
 		input: URL,

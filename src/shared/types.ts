@@ -18,3 +18,4 @@ export * from "./types/vision";
 export * from "./types/security";
 export * from "./types/modelSpecs";
 export * from "./types/trajectory";
+export * from "./types/dshPlugin";

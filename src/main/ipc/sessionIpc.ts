@@ -176,6 +176,18 @@ export type DshBackendIpcDeps = {
 	unarchiveDshSession?: (dshSessionId: string) => Promise<{ restoredPath: string; cwd: string } | undefined>;
 	/** DSH 归档区会话清单（G14：恢复入口用）；未装配时返回空列表。 */
 	listArchivedDshSessions?: () => Array<{ dshSessionId: string; cwd: string; archivedAt: number }>;
+	/** DSH 动态插件清单（G13 深化）；未装配时返回空列表。 */
+	listDshDynamicPlugins?: () => Promise<import("../../shared/types").DshPluginView[]>;
+	/** DSH 静态 Loader 条目清单（只读）；未装配时返回空列表。 */
+	listDshStaticPlugins?: () => Promise<import("../../shared/types").DshStaticPluginView[]>;
+	/** DSH 动态插件安装（define）；未装配时抛错。 */
+	installDshPlugin?: (input: import("../../shared/types").DshPluginInstallInput) => Promise<unknown>;
+	/** DSH 动态插件运行（面板手势）；未装配时抛错。 */
+	runDshPlugin?: (input: import("../../shared/types").DshPluginLifecycleInput) => Promise<unknown>;
+	/** DSH 动态插件停止；未装配时抛错。 */
+	stopDshPlugin?: (input: import("../../shared/types").DshPluginLifecycleInput) => Promise<unknown>;
+	/** DSH 动态插件卸载（undefine）；未装配时抛错。 */
+	uninstallDshPlugin?: (input: import("../../shared/types").DshPluginLifecycleInput) => Promise<unknown>;
 	/** 判断 agentId 是否属于 DSH 后端（fork 等 pi 专属命令按 backend 分流）。 */
 	isDshAgent: (agentId: string) => boolean;
 	/** DSH fork：session.fork 裁剪 + runtime 换绑 + catalog dshSessionId 回写。 */
@@ -287,6 +299,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		archiveDshSession,
 		unarchiveDshSession,
 		listArchivedDshSessions,
+		listDshDynamicPlugins,
+		listDshStaticPlugins,
+		installDshPlugin,
+		runDshPlugin,
+		stopDshPlugin,
+		uninstallDshPlugin,
 		isDshAgent = () => false,
 		forkDshAgentSession,
 		cloneDshAgentSession,
@@ -839,6 +857,84 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				projectId: project?.id,
 			});
 			return true;
+		},
+	);
+	// DSH 动态插件管理（G13 深化：进程内临时扩展，define/run/stop/undefine）。
+	// 语义校验（idPrefix 规则、源码单侧上限、会话归属）在 host 侧桥插件统一执行；
+	// IPC 边界只做第一行类型检查（渲染层数据不可信）。
+	ipcMain.handle(
+		ipcChannels.dshPluginList,
+		async (): Promise<import("../../shared/types").DshPluginView[]> => {
+			if (!listDshDynamicPlugins) return [];
+			return listDshDynamicPlugins();
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshPluginStaticList,
+		async (): Promise<import("../../shared/types").DshStaticPluginView[]> => {
+			if (!listDshStaticPlugins) return [];
+			return listDshStaticPlugins();
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshPluginInstall,
+		async (_event, input: unknown): Promise<unknown> => {
+			if (typeof input !== "object" || input === null) {
+				throw new Error("invalid plugin install payload");
+			}
+			const record = input as Record<string, unknown>;
+			if (
+				typeof record.sessionId !== "string" || !record.sessionId ||
+				typeof record.idPrefix !== "string" || !record.idPrefix ||
+				typeof record.name !== "string" || !record.name.trim() ||
+				typeof record.purpose !== "string" || !record.purpose.trim()
+			) {
+				throw new Error("invalid plugin install payload");
+			}
+			if (!installDshPlugin) throw new Error("DSH plugin install is not available");
+			return installDshPlugin(input as import("../../shared/types").DshPluginInstallInput);
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshPluginRun,
+		async (_event, input: unknown): Promise<unknown> => {
+			if (typeof input !== "object" || input === null) {
+				throw new Error("invalid plugin lifecycle payload");
+			}
+			const record = input as Record<string, unknown>;
+			if (typeof record.sessionId !== "string" || !record.sessionId || typeof record.pluginId !== "string" || !record.pluginId) {
+				throw new Error("invalid plugin lifecycle payload");
+			}
+			if (!runDshPlugin) throw new Error("DSH plugin run is not available");
+			return runDshPlugin(input as import("../../shared/types").DshPluginLifecycleInput);
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshPluginStop,
+		async (_event, input: unknown): Promise<unknown> => {
+			if (typeof input !== "object" || input === null) {
+				throw new Error("invalid plugin lifecycle payload");
+			}
+			const record = input as Record<string, unknown>;
+			if (typeof record.sessionId !== "string" || !record.sessionId || typeof record.pluginId !== "string" || !record.pluginId) {
+				throw new Error("invalid plugin lifecycle payload");
+			}
+			if (!stopDshPlugin) throw new Error("DSH plugin stop is not available");
+			return stopDshPlugin(input as import("../../shared/types").DshPluginLifecycleInput);
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshPluginUninstall,
+		async (_event, input: unknown): Promise<unknown> => {
+			if (typeof input !== "object" || input === null) {
+				throw new Error("invalid plugin lifecycle payload");
+			}
+			const record = input as Record<string, unknown>;
+			if (typeof record.sessionId !== "string" || !record.sessionId || typeof record.pluginId !== "string" || !record.pluginId) {
+				throw new Error("invalid plugin lifecycle payload");
+			}
+			if (!uninstallDshPlugin) throw new Error("DSH plugin uninstall is not available");
+			return uninstallDshPlugin(input as import("../../shared/types").DshPluginLifecycleInput);
 		},
 	);
 	ipcMain.handle(

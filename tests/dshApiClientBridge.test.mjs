@@ -304,3 +304,35 @@ test("abortAllPending 后新请求不受影响（仅中断当时在途的流）"
 	assert.deepEqual((await pending2).value, { rpcId: "rpc-9", payload: frame.payload });
 	client.dispose();
 });
+
+test("rawFetch：任意 dsh.internal 路径（插件管理桥用），不经过 ApiProxy 信封", async () => {
+	const { transport, mainToHost, hostPush } = makeMemoryTransport();
+	const client = new DshApiClient({ transport, loadModule });
+
+	const promise = client.rawFetch("http://dsh.internal/pideck-plugin/rpc", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ method: "inventory", params: undefined }),
+	});
+	await waitForOutbound(mainToHost, 1);
+	assert.equal(mainToHost[0].type, "fetch-request");
+	assert.equal(mainToHost[0].path, "/pideck-plugin/rpc");
+	assert.equal(mainToHost[0].method, "POST");
+	const requestBody = JSON.parse(mainToHost[0].body);
+	assert.equal(requestBody.method, "inventory");
+	// JSON.stringify 会省略 undefined 字段：params 不传时请求体只有 method
+	assert.equal("params" in requestBody, false);
+
+	// 桥协议 unary 响应：rawFetch 不做四象限信封校验，原样返回 body
+	hostPush({
+		type: "fetch-response",
+		id: mainToHost[0].id,
+		status: 200,
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ ok: true, value: [{ pluginId: "p" }] }),
+	});
+	const response = await promise;
+	assert.equal(response.status, 200);
+	assert.deepEqual(JSON.parse(await response.text()), { ok: true, value: [{ pluginId: "p" }] });
+	client.dispose();
+});

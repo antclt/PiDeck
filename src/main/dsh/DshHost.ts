@@ -10,7 +10,15 @@ import { toDshAvailableModels } from "./dshModels";
 import { parseAgentDefaultModel } from "./dshDefaultModel";
 import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
 import { workspaceDirFor } from "./dshSessionPath";
+import { PIDECK_PLUGIN_BRIDGE_PATH } from "./pideckPluginBridge";
 import type { DshFetchMessage } from "./dshHostBridge";
+import type {
+	DshPluginBridgeResponse,
+	DshPluginInstallInput,
+	DshPluginLifecycleInput,
+	DshPluginView,
+	DshStaticPluginView,
+} from "../../shared/types";
 
 // 注意：主进程产物为 CJS，而 @deepseek-ai/* 是 ESM-only 包。
 // 静态 import 会被 electron-vite 打包器改写（externalize 后变 require，Node <22.12 无法加载 ESM），
@@ -322,6 +330,62 @@ export class DshHost {
 				}
 			})
 			.filter((item): item is { dshSessionId: string; cwd: string; archivedAt: number } => Boolean(item));
+	}
+
+	/**
+	 * 动态 Cordis 插件桥（G13 深化）：经 fetch 桥调 host 侧 pideck-plugin-bridge 服务。
+	 * 所有方法统一走 pluginRpc（POST /pideck-plugin/rpc，{ method, params } → { ok, value|error }）。
+	 */
+	private async pluginRpc(method: string, params: unknown): Promise<unknown> {
+		await this.ensureStarted();
+		if (!this.apiClient) throw new Error("DSH host is not started");
+		const response = await this.apiClient.rawFetch(PIDECK_PLUGIN_BRIDGE_PATH, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ method, params }),
+		});
+		let parsed: DshPluginBridgeResponse<unknown>;
+		try {
+			parsed = JSON.parse(await response.text()) as DshPluginBridgeResponse<unknown>;
+		} catch {
+			throw new Error(`plugin bridge returned non-JSON response (HTTP ${response.status})`);
+		}
+		if (parsed.ok !== true) {
+			throw new Error(parsed.ok === false ? parsed.error : "plugin bridge request failed");
+		}
+		return parsed.value;
+	}
+
+	/** 动态插件清单（进程内全部会话的临时扩展；重启即失）。 */
+	async listDynamicPlugins(): Promise<DshPluginView[]> {
+		const value = await this.pluginRpc("inventory", undefined);
+		return Array.isArray(value) ? (value as DshPluginView[]) : [];
+	}
+
+	/** 静态 Loader 条目清单（只读：moduleName/enabled/fiberPhase）。 */
+	async listStaticPlugins(): Promise<DshStaticPluginView[]> {
+		const value = await this.pluginRpc("staticInventory", undefined);
+		return Array.isArray(value) ? (value as DshStaticPluginView[]) : [];
+	}
+
+	/** 安装动态插件（define：定义源码包，不运行；按会话归属）。 */
+	async installDynamicPlugin(input: DshPluginInstallInput): Promise<unknown> {
+		return this.pluginRpc("install", input);
+	}
+
+	/** 运行动态插件的指定包（面板手势 requestId=null，无需审批）。 */
+	async runDynamicPlugin(input: DshPluginLifecycleInput): Promise<unknown> {
+		return this.pluginRpc("run", input);
+	}
+
+	/** 停止动态插件的活动 run（保留全部包版本）。 */
+	async stopDynamicPlugin(input: DshPluginLifecycleInput): Promise<unknown> {
+		return this.pluginRpc("stop", input);
+	}
+
+	/** 卸载动态插件（undefine：删除插件与全部包版本）。 */
+	async uninstallDynamicPlugin(input: DshPluginLifecycleInput): Promise<unknown> {
+		return this.pluginRpc("uninstall", input);
 	}
 
 	/**
