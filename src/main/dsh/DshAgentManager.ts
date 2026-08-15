@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type {
 	AgentBackend,
 	AgentGatewayCapability,
@@ -36,6 +35,8 @@ import {
 	type DshApprovalFrame,
 	type DshQuestionFrame,
 } from "./dshApprovalBridge";
+// DSH 会话持久化路径编码（与 DshHost 归档共用同一 workspace 目录名规则）
+import { dshSessionFilePath } from "./dshSessionPath";
 
 /**
  * DSH 后端网关：实现 SessionAgentGateway，把 DSH host（DshHost）的会话/事件
@@ -63,36 +64,6 @@ function isDshImageMediaType(
 	value: string,
 ): value is "image/png" | "image/jpeg" | "image/webp" | "image/gif" {
 	return value === "image/png" || value === "image/jpeg" || value === "image/webp" || value === "image/gif";
-}
-
-/**
- * DSH 会话的持久化文件路径：$DSH_HOME/sessions/<workspace 编码目录>/<sessionId>/session.jsonl.zstd。
- * workspace 目录名编码规则与 dsh-session-persistence-jsonl 的 projectKey 一致（2026-08 实测对齐）：
- * - 路径分隔符与盘符冒号（`/` `\` `:`）折叠为单个 "-"；
- * - 安全字符（A-Za-z0-9._-）原样，其余按 ~XXXX 转义；
- * - 首尾各补一个 "-"，并截断到 251 字符。
- * sessionId 自带 "session-" 前缀，且全为安全字符（目录名 = sessionId，实测）。
- * 用于侧栏右键「复制会话文件路径」——DSH 会话没有 pi 会话文件，路径指向 host 持久化文件。
- */
-export function dshSessionFilePath(dshHome: string, cwd: string, sessionId: string): string {
-	let readable = "";
-	let separatorRun = false;
-	for (let i = 0; i < cwd.length; i += 1) {
-		const code = cwd.charCodeAt(i);
-		const ch = String.fromCharCode(code);
-		if (ch === "/" || ch === "\\" || ch === ":") {
-			if (!separatorRun) readable += "-";
-			separatorRun = true;
-		} else if (ch !== "~" && /^[A-Za-z0-9._-]$/.test(ch)) {
-			readable += ch;
-			separatorRun = false;
-		} else {
-			readable += `~${code.toString(16).toUpperCase().padStart(4, "0")}`;
-			separatorRun = false;
-		}
-	}
-	const workspaceDir = `--${(readable.replace(/^-+/, "") || "root").slice(0, 251)}--`;
-	return join(dshHome, "sessions", workspaceDir, sessionId, "session.jsonl.zstd");
 }
 
 export class DshAgentManager implements SessionAgentGateway {

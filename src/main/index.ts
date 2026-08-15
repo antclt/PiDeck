@@ -2398,6 +2398,10 @@ function registerIpc() {
 				);
 				return hostIds.filter((id) => !known.has(id));
 			},
+			// G14：DSH 归档/恢复（目录移动 + manifest，与 pi 归档同语义，不销毁数据）
+			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),
+			unarchiveDshSession: (dshSessionId) => dshHost.unarchiveSession(dshSessionId),
+			listArchivedDshSessions: () => dshHost.listArchivedSessions(),
 			isDshAgent: (agentId) =>
 				dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 			forkDshAgentSession: async (target, entryId) => {

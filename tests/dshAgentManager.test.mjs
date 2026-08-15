@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { DshAgentManager, dshSessionFilePath } = loadTsCommonJs("src/main/dsh/DshAgentManager.ts");
+const { DshAgentManager } = loadTsCommonJs("src/main/dsh/DshAgentManager.ts");
+const { dshSessionFilePath } = loadTsCommonJs("src/main/dsh/dshSessionPath.ts");
 
 test("dshSessionFilePath：workspace 目录名编码与 DSH 内部规则一致", () => {
 	// 实测目录：cwd = C:\Users\14012\pi-desktop → "--C-Users-14012-pi-desktop--"；

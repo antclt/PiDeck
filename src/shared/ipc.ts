@@ -101,6 +101,10 @@ export const ipcChannels = {
 	dshSubagentHistory: "dsh:subagent-history",
 	/** DSH 孤儿会话 id 列表（host 有但 catalog 无映射；G3/D11 清理提示用）。 */
 	dshListOrphans: "dsh:list-orphans",
+	/** DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）。 */
+	dshListArchived: "dsh:list-archived",
+	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
+	dshUnarchive: "dsh:unarchive",
 	/** DSH host 级模型目录（llm.models），不依赖已启动的会话。 */
 	dshListModels: "dsh:list-models",
 	/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由；添加提供方用）。 */

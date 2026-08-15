@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, rmSync, renameSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -9,6 +9,7 @@ import { DshApiClient, type DshFetchTransport } from "./DshApiClient";
 import { toDshAvailableModels } from "./dshModels";
 import { parseAgentDefaultModel } from "./dshDefaultModel";
 import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
+import { workspaceDirFor } from "./dshSessionPath";
 import type { DshFetchMessage } from "./dshHostBridge";
 
 // 注意：主进程产物为 CJS，而 @deepseek-ai/* 是 ESM-only 包。
@@ -249,6 +250,78 @@ export class DshHost {
 		const listed = await client.llm.models({});
 		if (!listed.result.ok) return [];
 		return toDshAvailableModels(listed.result.value.groups ?? []);
+	}
+
+	/**
+	 * 归档 DSH 会话（G14，与 pi 归档同语义：目录移动而非销毁）：
+	 * 把 host 会话目录移出 sessions 树到 $DSH_HOME/.pideck-archive/<sessionId>，
+	 * 并写 manifest（记录原 workspace cwd，恢复时移回）。host 重启后 session.list
+	 * 不再包含该会话（目录已不在 sessions 树）。
+	 * 返回归档目录路径；会话不存在时返回 undefined。
+	 */
+	async archiveSession(dshSessionId: string, cwd: string): Promise<string | undefined> {
+		const sourceDir = join(this.getHomeDir(), "sessions", workspaceDirFor(cwd), dshSessionId);
+		if (!existsSync(sourceDir)) return undefined;
+		const archiveRoot = join(this.getHomeDir(), ".pideck-archive");
+		const targetDir = join(archiveRoot, dshSessionId);
+		mkdirSync(archiveRoot, { recursive: true });
+		if (existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true });
+		renameSync(sourceDir, targetDir);
+		writeFileSync(join(targetDir, "pideck-manifest.json"), JSON.stringify({
+			dshSessionId,
+			cwd,
+			archivedAt: Date.now(),
+		}), "utf8");
+		return targetDir;
+	}
+
+	/** 恢复归档的 DSH 会话（G14）：读 manifest 移回原 workspace 目录。返回恢复后的目录与 manifest 中的原 cwd。 */
+	async unarchiveSession(dshSessionId: string): Promise<{ restoredPath: string; cwd: string } | undefined> {
+		const archiveRoot = join(this.getHomeDir(), ".pideck-archive");
+		const archivedDir = join(archiveRoot, dshSessionId);
+		const manifestPath = join(archivedDir, "pideck-manifest.json");
+		if (!existsSync(manifestPath)) return undefined;
+		let cwd = "";
+		try {
+			const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { cwd?: unknown };
+			if (typeof manifest.cwd === "string" && manifest.cwd) cwd = manifest.cwd;
+		} catch {
+			// manifest 损坏：无法恢复原位置
+			return undefined;
+		}
+		const targetDir = join(this.getHomeDir(), "sessions", workspaceDirFor(cwd), dshSessionId);
+		mkdirSync(dirname(targetDir), { recursive: true });
+		renameSync(archivedDir, targetDir);
+		return { restoredPath: targetDir, cwd };
+	}
+
+	/**
+	 * 归档区中的 DSH 会话清单（G14：恢复入口用；返回 manifest 里的原 workspace cwd 与归档时间）。
+	 * manifest 缺失/损坏的目录跳过（无 manifest 不视为 PiDeck 归档）。
+	 */
+	listArchivedSessions(): Array<{ dshSessionId: string; cwd: string; archivedAt: number }> {
+		const archiveRoot = join(this.getHomeDir(), ".pideck-archive");
+		if (!existsSync(archiveRoot)) return [];
+		return readdirSync(archiveRoot, { withFileTypes: true })
+			.filter((item) => item.isDirectory())
+			.map((item): { dshSessionId: string; cwd: string; archivedAt: number } | undefined => {
+				const manifestPath = join(archiveRoot, item.name, "pideck-manifest.json");
+				try {
+					const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+						dshSessionId?: unknown;
+						cwd?: unknown;
+						archivedAt?: unknown;
+					};
+					return {
+						dshSessionId: typeof manifest.dshSessionId === "string" ? manifest.dshSessionId : item.name,
+						cwd: typeof manifest.cwd === "string" ? manifest.cwd : "",
+						archivedAt: typeof manifest.archivedAt === "number" ? manifest.archivedAt : 0,
+					};
+				} catch {
+					return undefined;
+				}
+			})
+			.filter((item): item is { dshSessionId: string; cwd: string; archivedAt: number } => Boolean(item));
 	}
 
 	/**

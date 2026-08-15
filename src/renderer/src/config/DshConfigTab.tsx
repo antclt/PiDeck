@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useState, type ReactNode } from "react";
 import {
+	ArchiveRestore,
 	Blocks,
 	ChevronDown,
 	ChevronRight,
@@ -13,7 +14,6 @@ import {
 	LayoutDashboard,
 	LoaderCircle,
 	Puzzle,
-	Settings2,
 	ShieldCheck,
 	Trash2,
 } from "lucide-react";
@@ -35,6 +35,7 @@ import { DshLogo } from "../components/session/SessionSourceBadge";
 import { DSH_PERMISSION_PRESETS } from "../components/session/DshPermissionMenu";
 import { useSaveRegistry } from "../hooks/useSaveRegistry";
 import { DshSchemaForm, type DshNamespaceView } from "./DshSchemaForm";
+import { isDshPluginNamespace, dshPluginNamespaceTitleKey } from "./dshPluginNamespaces";
 import { DeepseekRouteCard, PiAiProvidersCard } from "./DshProviderCards";
 import { collectCredentialRefsWithValue, normalizeDshSchema, type DshSectionApi } from "./dshSchema";
 import { presetDisplayDescription, presetDisplayName } from "./dshPresetDisplay";
@@ -59,13 +60,6 @@ function joinConfigPath(homeDir: string, fileName: string): string {
 	return `${homeDir.replace(/[\\/]+$/, "")}/${fileName}`;
 }
 
-/** 插件配置相关的 namespace（与 dsh-web 插件配置页同源的 host 平面分节）。 */
-const PLUGIN_NS: Array<{ ns: string; titleKey: TranslationKey }> = [
-	{ ns: "agent-loop", titleKey: "config.dsh.pluginAgentLoop" },
-	{ ns: "shell", titleKey: "config.dsh.pluginShell" },
-	{ ns: "web-search-deepseek", titleKey: "config.dsh.pluginWebSearch" },
-];
-
 const NAV_ITEMS: Array<{ id: string; labelKey: TranslationKey; icon: ReactNode }> = [
 	{ id: "overview", labelKey: "config.dsh.tab.overview", icon: <LayoutDashboard className="size-3.5" aria-hidden="true" /> },
 	{ id: "models", labelKey: "config.dsh.tab.models", icon: <Cpu className="size-3.5" aria-hidden="true" /> },
@@ -73,7 +67,6 @@ const NAV_ITEMS: Array<{ id: string; labelKey: TranslationKey; icon: ReactNode }
 	{ id: "plugins", labelKey: "config.dsh.tab.plugins", icon: <Puzzle className="size-3.5" aria-hidden="true" /> },
 	{ id: "security", labelKey: "config.dsh.tab.security", icon: <ShieldCheck className="size-3.5" aria-hidden="true" /> },
 	{ id: "auth", labelKey: "config.dsh.tab.auth", icon: <KeyRound className="size-3.5" aria-hidden="true" /> },
-	{ id: "settings", labelKey: "config.dsh.tab.settings", icon: <Settings2 className="size-3.5" aria-hidden="true" /> },
 	{ id: "raw", labelKey: "config.dsh.tab.raw", icon: <FileCode2 className="size-3.5" aria-hidden="true" /> },
 ];
 
@@ -240,21 +233,14 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 		() => namespaces.filter((ns) => MODEL_NS.has(ns.ns)),
 		[namespaces],
 	);
-	// 插件分区：agent-loop / shell / web-search-deepseek（host 平面插件分节）
+	// G13：插件分区动态化——DSH 的 settings namespace 即插件短名（dsh-settings 契约），
+	// 除 PiDeck 独占管理的保留命名空间（模型/安全/预设）外，host 注册的命名空间全部按插件呈现。
 	const pluginNamespaces = useMemo(
-		() => PLUGIN_NS
-			.map((entry) => ({ entry, ns: namespaces.find((item) => item.ns === entry.ns) }))
-			.filter((item): item is { entry: typeof PLUGIN_NS[number]; ns: NonNullable<typeof item.ns> } => Boolean(item.ns)),
+		() => namespaces.filter((ns) => isDshPluginNamespace(ns.ns)),
 		[namespaces],
 	);
 	const permissionNamespace = useMemo(
 		() => namespaces.find((ns) => ns.ns === "permission"),
-		[namespaces],
-	);
-	// 其余命名空间（agent-presets 由「预设设置」tab 独占管理，与 permission 同理
-	// 不进通用设置表单；其余保留给未来新增的 host 设置）
-	const settingNamespaces = useMemo(
-		() => namespaces.filter((ns) => !MODEL_NS.has(ns.ns) && ns.ns !== "permission" && ns.ns !== "agent-presets" && !PLUGIN_NS.some((entry) => entry.ns === ns.ns)),
 		[namespaces],
 	);
 
@@ -368,8 +354,8 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 									<Empty text={t("config.dsh.namespacesEmpty")} />
 								) : (
 									<div className="grid gap-2">
-										{pluginNamespaces.map(({ entry, ns }) => (
-											<PluginCard key={ns.ns} entry={entry} ns={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} />
+										{pluginNamespaces.map((ns) => (
+											<PluginCard key={ns.ns} ns={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} />
 										))}
 									</div>
 								)}
@@ -383,22 +369,6 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 						<div hidden={activeTab !== "auth"}>
 							<div className="p-4">
 								<AuthTab refs={credentialRefs} credentials={credentials} onSetKey={setDshKey} onUnsetKey={unsetDshKey} sectionApi={sectionApi} />
-							</div>
-						</div>
-						<div hidden={activeTab !== "settings"}>
-							<div className="p-4">
-								<p className="mb-3 text-micro text-muted-foreground">{t("config.dsh.settingsHint")}</p>
-								{settingNamespaces.length === 0 ? (
-									<Empty text={t("config.dsh.namespacesEmpty")} />
-								) : (
-									<div className="grid gap-4">
-										{settingNamespaces.map((ns) => (
-											<section key={ns.ns} className="rounded-md border border-border-subtle bg-bg-panel">
-												<DshSchemaForm namespace={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} />
-											</section>
-										))}
-									</div>
-								)}
 							</div>
 						</div>
 						<div hidden={activeTab !== "raw"}>
@@ -425,16 +395,39 @@ function Overview(props: {
 	const [switching, setSwitching] = useState(false);
 	/** 孤儿 DSH 会话数（G3/D11：host 有但 catalog 无映射；加载概览时查询一次）。 */
 	const [orphanCount, setOrphanCount] = useState(0);
+	/** G14：归档区 DSH 会话清单（目录已移入 .pideck-archive 的 host 会话；恢复入口用）。 */
+	const [archived, setArchived] = useState<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>([]);
+	/** G14：正在恢复的 dshSessionId（按钮转圈防重复点击）。 */
+	const [restoring, setRestoring] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
 		void desktopApi.sessions.listDshOrphans().then((ids) => {
 			if (!cancelled) setOrphanCount(ids.length);
 		}).catch(() => undefined);
+		void desktopApi.sessions.listArchivedDshSessions().then((items) => {
+			if (!cancelled) setArchived(items);
+		}).catch(() => undefined);
 		return () => {
 			cancelled = true;
 		};
 	}, []);
+
+	/** G14：恢复归档的 DSH 会话（主进程移回 sessions 树并重建 catalog 记录）。 */
+	const restoreArchived = async (dshSessionId: string) => {
+		if (restoring) return;
+		setRestoring(dshSessionId);
+		try {
+			await desktopApi.sessions.unarchiveDshSession(dshSessionId);
+			showNotice(t("config.dsh.restored"), 3000);
+			setArchived((current) => current.filter((item) => item.dshSessionId !== dshSessionId));
+			props.onChanged();
+		} catch (error) {
+			showNotice(error instanceof Error ? error.message : String(error), 4000);
+		} finally {
+			setRestoring(null);
+		}
+	};
 
 	/**
 	 * 切换 DSH_HOME 目录：选目录 → 写设置 → 立即重启 host 生效。
@@ -546,6 +539,41 @@ function Overview(props: {
 				</div>
 				<p className="text-micro text-muted-foreground">{t("config.dsh.homeHint")}</p>
 			</section>
+			{/* G14：DSH 归档区（归档动作在会话列表右键；恢复入口在这里） */}
+			<section className="grid gap-2">
+				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.archived")}</h3>
+				{archived.length === 0 ? (
+					<p className="text-micro text-muted-foreground">{t("config.dsh.archivedEmpty")}</p>
+				) : (
+					<div className="grid gap-1.5">
+						{archived.map((item) => (
+							<div
+								key={item.dshSessionId}
+								className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-panel px-2 py-1.5"
+							>
+								<span className="min-w-0 flex-1 truncate text-control text-foreground" title={item.cwd}>
+									<span className="font-medium">{item.dshSessionId}</span>
+									<span className="ml-2 text-caption text-text-secondary">{item.cwd}</span>
+								</span>
+								<Button
+									type="button"
+									variant="secondary"
+									size="sm"
+									className="h-6 shrink-0"
+									disabled={restoring === item.dshSessionId}
+									onClick={() => void restoreArchived(item.dshSessionId)}
+								>
+									{restoring === item.dshSessionId
+										? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+										: <ArchiveRestore className="size-3.5" aria-hidden="true" />}
+									{t("config.dsh.restore")}
+								</Button>
+							</div>
+						))}
+					</div>
+				)}
+				<p className="text-micro text-muted-foreground">{t("config.dsh.archivedHint")}</p>
+			</section>
 			{props.hasDocument && (
 				<section>
 					<Button type="button" variant="secondary" size="sm" onClick={props.onOpenDocument}>
@@ -579,13 +607,14 @@ type DshAgentPreset = {
  * 一堆输入框。卡片持有自己的展开状态与表单草稿（收起再展开不丢草稿）。
  */
 function PluginCard(props: {
-	entry: { ns: string; titleKey: TranslationKey };
 	ns: DshNamespaceView;
 	writable: boolean;
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 	sectionApi?: DshSectionApi;
 }) {
 	const [open, setOpen] = useState(false);
+	// G13：已知插件走 i18n 标题；host 新注册的插件命名空间回退显示 ns 原名
+	const titleKey = dshPluginNamespaceTitleKey(props.ns.ns);
 	return (
 		<div className="rounded-md border border-border-subtle bg-bg-panel">
 			<button
@@ -594,7 +623,7 @@ function PluginCard(props: {
 				onClick={() => setOpen((prev) => !prev)}
 			>
 				{open ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
-				<span className="min-w-0 flex-1 truncate text-caption font-semibold text-foreground">{t(props.entry.titleKey)}</span>
+				<span className="min-w-0 flex-1 truncate text-caption font-semibold text-foreground">{titleKey ? t(titleKey) : props.ns.ns}</span>
 				<span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
 					{props.ns.applies === "live" ? t("config.dsh.appliesLive") : t("config.dsh.appliesRestart")}
 				</span>

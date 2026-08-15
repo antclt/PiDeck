@@ -170,6 +170,12 @@ export type DshBackendIpcDeps = {
 	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; hasMore: boolean }>;
 	/** DSH 孤儿会话 id 列表（G3/D11：host 有但 catalog 无映射）；未装配时返回空列表。 */
 	listDshOrphans?: () => Promise<string[]>;
+	/** DSH 会话归档（G14：host 目录移入 .pideck-archive + manifest）；未装配时抛错。 */
+	archiveDshSession?: (dshSessionId: string, cwd: string) => Promise<string | undefined>;
+	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树，返回恢复路径与原 cwd）；未装配时抛错。 */
+	unarchiveDshSession?: (dshSessionId: string) => Promise<{ restoredPath: string; cwd: string } | undefined>;
+	/** DSH 归档区会话清单（G14：恢复入口用）；未装配时返回空列表。 */
+	listArchivedDshSessions?: () => Array<{ dshSessionId: string; cwd: string; archivedAt: number }>;
 	/** 判断 agentId 是否属于 DSH 后端（fork 等 pi 专属命令按 backend 分流）。 */
 	isDshAgent: (agentId: string) => boolean;
 	/** DSH fork：session.fork 裁剪 + runtime 换绑 + catalog dshSessionId 回写。 */
@@ -278,6 +284,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		listDshSubagents,
 		readDshSubagentHistory,
 		listDshOrphans,
+		archiveDshSession,
+		unarchiveDshSession,
+		listArchivedDshSessions,
 		isDshAgent = () => false,
 		forkDshAgentSession,
 		cloneDshAgentSession,
@@ -531,6 +540,27 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		ipcChannels.sessionsCatalogArchive,
 		async (_event, sessionId: string) => {
 			const entry = sessionCatalog.get(sessionId);
+			// DSH 会话归档（G14）：host 目录移入 .pideck-archive（目录移动 + manifest，不销毁数据）。
+			// 运行中的会话不能归档（同 pi：移动文件会破坏 host 对当前写入位置的引用）。
+			if (entry?.backend === "dsh" && entry.dshSessionId && archiveDshSession) {
+				if (
+					sessionRuntimeCoordinator.getTarget(sessionId) ||
+					sessionRuntimeCoordinator.isActivating(sessionId)
+				) {
+					throw new Error(mainCopy("session.stopBeforeDelete"));
+				}
+				const cwd = projectStore.get(entry.projectId)?.path ?? "";
+				if (!cwd) throw new Error(mainCopy("project.notFound"));
+				const archivedPath = await archiveDshSession(entry.dshSessionId, cwd);
+				if (!archivedPath) throw new Error(mainCopy("session.invalidArchivePath"));
+				await sessionCatalog.remove(sessionId);
+				void appLogger.info("session", "DSH session archived", {
+					sessionId,
+					dshSessionId: entry.dshSessionId,
+					archivedPath,
+				});
+				return true;
+			}
 			if (!entry?.filePath) return false;
 			// 运行中的会话不能归档（同删除）：移动文件会破坏 pi 对当前写入位置的引用。
 			if (
@@ -758,6 +788,57 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (): Promise<string[]> => {
 			if (!listDshOrphans) return [];
 			return listDshOrphans();
+		},
+	);
+	// DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）
+	ipcMain.handle(
+		ipcChannels.dshListArchived,
+		async (): Promise<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>> => {
+			if (!listArchivedDshSessions) return [];
+			return listArchivedDshSessions();
+		},
+	);
+	// DSH 会话恢复（G14）：目录按 manifest 移回 sessions 树，并重建 catalog 记录
+	ipcMain.handle(
+		ipcChannels.dshUnarchive,
+		async (_event, dshSessionId: unknown): Promise<boolean> => {
+			// 入参校验：host 生成的会话 id 固定 "session-" 前缀（host 侧目录名 = sessionId），
+			// 白名单正则挡掉路径穿越类输入（渲染层数据不可信，校验在边界）。
+			if (typeof dshSessionId !== "string" || !/^session-[A-Za-z0-9-]+$/.test(dshSessionId)) {
+				throw new Error(mainCopy("session.invalidArchivePath"));
+			}
+			if (!unarchiveDshSession) throw new Error("DSH archive restore is not available");
+			const restored = await unarchiveDshSession(dshSessionId);
+			if (!restored) throw new Error(mainCopy("session.invalidArchivePath"));
+			// 重建 catalog 记录：manifest 里的原 workspace cwd 优先映射到已注册项目；
+			// 无匹配项目时挂到第一个非 chat 项目，让恢复的会话重新出现在侧栏（重新打开时
+			// 走 attach 旧 host 会话路径）。projectId 完全缺失时只恢复 host 数据并记日志。
+			const project = projectStore.findByPath(restored.cwd)
+				?? projectStore.list().find((candidate) => candidate.kind !== "chat") ?? null;
+			if (project) {
+				const draft = await sessionCatalog.createDraft({
+					projectId: project.id,
+					title: mainCopy("session.newTitle"),
+					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+					backend: "dsh",
+				});
+				await sessionCatalog.attachRuntime({ sessionId: draft.id, dshSessionId });
+				const window = getMainWindow();
+				if (window && !window.isDestroyed()) {
+					window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: project.id });
+				}
+			} else {
+				void appLogger.warn("session", "DSH session restored without catalog record (no project matched)", {
+					dshSessionId,
+					cwd: restored.cwd,
+				});
+			}
+			void appLogger.info("session", "DSH session restored from archive", {
+				dshSessionId,
+				restoredPath: restored.restoredPath,
+				projectId: project?.id,
+			});
+			return true;
 		},
 	);
 	ipcMain.handle(
