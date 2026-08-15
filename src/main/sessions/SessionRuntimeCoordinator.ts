@@ -875,23 +875,11 @@ export class SessionRuntimeCoordinator {
 			this.unbindAgentUnchecked(agentId);
 			const runtimeGeneration = this.bind(sessionId, tab.id);
 			tab.runtimeGeneration = runtimeGeneration;
-			if (tab.sessionPath && !entry.noSession) {
-				// DSH tab 带 host 会话文件路径（侧栏按文件配对）：文件分支也要同时
-				// 写 dshSessionId——标题同步（findByDshSessionId）与重启后 attach 恢复
-				// 旧会话都依赖它；只写 filePath/piSessionId 会让 DSH 会话无法恢复。
-				await this.catalog.attachRuntime({
-					sessionId,
-					filePath: tab.sessionPath,
-					piSessionId: tab.sessionId,
-					dshSessionId: entry.backend === "dsh" ? tab.sessionId : undefined,
-				});
-			} else if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
-				// DSH restart 会新建 host 会话（旧会话停止）：回写新 sessionId，
-				// 否则重启应用后 attach 到已停止的旧会话。
-				await this.catalog.attachRuntime({
-					sessionId,
-					dshSessionId: tab.sessionId,
-				});
+			// C9：attach patch 收拢 backend 特判（DSH 文件配对分支同时写 dshSessionId，
+			// 标题同步与重启后 attach 恢复依赖它）。
+			const restartPatch = this.buildAttachPatch(sessionId, tab, entry);
+			if (restartPatch) {
+				await this.catalog.attachRuntime(restartPatch);
 			}
 			// 与 activate 同链路：绑定完成后推送完整 runtime state，渲染层底栏即时反映真实模型。
 			await this.agents.publishRuntimeState(tab.id).catch(() => undefined);
@@ -978,17 +966,16 @@ export class SessionRuntimeCoordinator {
 			if (!currentTab) {
 				return this.unknownDelivery(input, "Session runtime stopped during prompt dispatch");
 			}
-			if (currentTab.sessionPath && !this.catalog.get(input.sessionId)?.noSession) {
+			// C9：attach patch 收拢 backend 特判（DSH 文件配对分支同时回写 dshSessionId）。
+			const dispatchEntry = this.catalog.get(input.sessionId);
+			const dispatchPatch = dispatchEntry
+				? this.buildAttachPatch(input.sessionId, currentTab, dispatchEntry)
+				: null;
+			if (dispatchPatch) {
 				// Prompt acceptance is the latency-sensitive boundary. Catalog persistence is
 				// recovery metadata and must not keep the composer in a sending state; failures
 				// are intentionally isolated from the already accepted prompt.
-				// DSH：文件配对分支同时回写 dshSessionId（标题同步/重开恢复依赖）。
-				void this.catalog.attachRuntime({
-					sessionId: input.sessionId,
-					filePath: currentTab.sessionPath,
-					piSessionId: currentTab.sessionId,
-					dshSessionId: currentTab.backend === "dsh" ? currentTab.sessionId : undefined,
-				}).catch(() => undefined);
+				void this.catalog.attachRuntime(dispatchPatch).catch(() => undefined);
 			}
 			if (!this.isCurrentDispatchLease(lease)) {
 				return this.unknownDelivery(input, "Session runtime binding changed after prompt dispatch");
@@ -1070,26 +1057,42 @@ export class SessionRuntimeCoordinator {
 
 		const runtimeGeneration = this.bind(sessionId, tab.id);
 		tab.runtimeGeneration = runtimeGeneration;
-		if (tab.sessionPath && !entry.noSession) {
-			// 同 restartSession：DSH 的文件分支一并写 dshSessionId（标题同步/恢复依赖）
-			await this.catalog.attachRuntime({
-				sessionId,
-				filePath: tab.sessionPath,
-				piSessionId: tab.sessionId,
-				dshSessionId: entry.backend === "dsh" ? tab.sessionId : undefined,
-			});
-		} else if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
-			// DSH 会话没有 pi 会话文件，DSH sessionId 由 host 持久化（$DSH_HOME）：
-			// 新建会话时回写 catalog，重启后 activate 走 attach 路径恢复旧会话。
-			await this.catalog.attachRuntime({
-				sessionId,
-				dshSessionId: tab.sessionId,
-			});
+		// C9：attach patch 收拢 backend 特判——DSH 会话没有 pi 会话文件，DSH sessionId
+		// 由 host 持久化（$DSH_HOME），回写 catalog 后重启 activate 走 attach 恢复。
+		const activatePatch = this.buildAttachPatch(sessionId, tab, entry);
+		if (activatePatch) {
+			await this.catalog.attachRuntime(activatePatch);
 		}
 		// 绑定完成后主动推送完整 runtime state：emitSessionRuntimeEvent 依赖 binding 才转发，
 		// 且在偏好应用（setModel/setThinking）之后执行，渲染层底栏拿到的是真实模型而不是旧残留。
 		await this.agents.publishRuntimeState(tab.id).catch(() => undefined);
 		return tab;
+	}
+
+	/**
+	 * 会话运行时身份 → catalog attach patch（C9）：收拢 backend 特判——
+	 * - 通用/pi：sessionPath + piSessionId 落「文件配对」分支；
+	 * - DSH：文件配对分支同时写 dshSessionId（标题同步 findByDshSessionId / 重开 attach 恢复依赖）；
+	 * - DSH 无文件分支（sessionPath 未落盘）：只回写 dshSessionId。
+	 * 返回 null 表示无需回写（匿名会话等）。
+	 */
+	private buildAttachPatch(
+		sessionId: string,
+		tab: Pick<AgentTab, "sessionPath" | "sessionId" | "backend">,
+		entry: Pick<SessionCatalogEntry, "noSession" | "backend">,
+	): { sessionId: string; filePath?: string; piSessionId?: string; dshSessionId?: string } | null {
+		if (tab.sessionPath && !entry.noSession) {
+			return {
+				sessionId,
+				filePath: tab.sessionPath,
+				piSessionId: tab.sessionId,
+				dshSessionId: entry.backend === "dsh" ? tab.sessionId : undefined,
+			};
+		}
+		if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
+			return { sessionId, dshSessionId: tab.sessionId };
+		}
+		return null;
 	}
 
 	private findAgentBySessionPath(entry: SessionCatalogEntry): AgentTab | undefined {
