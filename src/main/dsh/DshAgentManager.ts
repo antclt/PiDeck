@@ -253,15 +253,18 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/**
-	 * 等待该 agent 无运行中回合（control 状态 idle）。mux 事件驱动 control 状态机：
-	 * turn/start → running，turn/end → idle（含命令 reject 的 blocked 收场）。
+	 * 等待该 agent 无运行中回合（control 状态 idle）且无未收口的取消。
+	 * mux 事件驱动 control 状态机：turn/start → running，turn/end → idle（含命令 reject 的 blocked 收场）。
+	 * cancelled 也计入等待：abort 把 status 立即置 idle，但 host 侧旧回合可能仍在收尾
+	 * （工具未中断 / cancel 在途），此时发下一条会被 host 当作 followup 拼进旧回合，
+	 * 新问题答案串进被停止的输出（「消息串台」）。必须等旧回合 turn/end 收口 cancelled 才放行。
 	 * 超时（默认 30s）直接放行，避免 host 卡死把发送永久挂起；放行后由 host 侧
 	 * queue 语义兜底（正常回合的 followup 不丢消息，只有 reject 路径才有滞留 bug）。
 	 */
 	private async waitForIdle(agentId: string, timeoutMs = 30_000): Promise<void> {
 		const runtime = this.runtime(agentId);
 		const startedAt = Date.now();
-		while (runtime.control.status !== "idle") {
+		while (runtime.control.status !== "idle" || runtime.control.cancelled) {
 			if (Date.now() - startedAt >= timeoutMs) return;
 			await new Promise((resolve) => setTimeout(resolve, 100));
 		}
@@ -354,6 +357,20 @@ export class DshAgentManager implements SessionAgentGateway {
 		const client = this.requireClient();
 		// 先抬世代再 cancel：mux 里迟到的 chunk/turn/start 必须丢掉，否则停止按钮会一直亮。
 		this.applyControl(runtime, beginDshCancel(runtime.control));
+		// 立即收口思考流：停止后旧回合的 reasoning 残留帧会被 cancelled 守卫丢弃，
+		// Live 思考块不能等 turn/end（可能迟到/缺失），否则「停止后思考还在转」。
+		if (runtime.thinkingId) {
+			this.emit(ipcChannels.agentsThinking, {
+				agentId: runtime.tab.id,
+				id: runtime.thinkingId,
+				text: "",
+				startedAt: runtime.thinkingStartedAt ?? 0,
+				endedAt: Date.now(),
+				done: true,
+			});
+			runtime.thinkingId = undefined;
+			runtime.thinkingStartedAt = undefined;
+		}
 		await client.sessions.cancel({ sessionId: runtime.sessionId }).catch(() => undefined);
 		this.emitRuntimeState(agentId);
 		this.emit(ipcChannels.agentsState, this.list());
@@ -795,8 +812,11 @@ export class DshAgentManager implements SessionAgentGateway {
 						const controlled = applyDshControlEvent(runtime.control, event?.type, eventGeneration, event?.data);
 						this.applyControl(runtime, controlled.next);
 						if (controlled.ignoreStream) {
-							// 停止后的迟到流：终态消息仍投影（方便落一条中止痕迹），但不重开 streaming。
-							if (event?.type === "turn/end" || event?.type === "assistant/message") {
+							// 停止后的迟到流：只投影 turn/end（把已流式的部分文本落回骨架，
+							// 并收口 cancelled）。assistant/message、chunk、tool 等旧回合残留
+							// 一律不投影——否则停止后完整回答/工具卡片继续上屏（「还在跑」），
+							// 或被拼进下一条消息（「串台」）。
+							if (event?.type === "turn/end") {
 								runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id);
 								runtime.messages = runtime.projection.messages;
 								this.emit(ipcChannels.agentsTextStream, { agentId: runtime.tab.id, text: "", done: true });

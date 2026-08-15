@@ -6,6 +6,7 @@ out/
 dist/
 release/
 release-test/
+release-fix/
 docs-site/.vitepress/cache/
 docs-site/.vitepress/dist/
 *.asar

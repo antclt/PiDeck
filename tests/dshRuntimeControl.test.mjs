@@ -82,3 +82,71 @@ test("abort 后的 turn/end（旧世代）只收口 cancelled，不重新 runnin
 	assert.equal(ended.next.isStreaming, false);
 	assert.equal(ended.ignoreStream, true);
 });
+
+// ── 停止竞态回归：cancelled 期间旧回合残留事件必须全部丢弃 ──────────────────
+// 生产路径里 eventGeneration 与 prev.cancelGeneration 同代（泵在处理帧时才快照），
+// 真正挡住「停止了还在跑 / 消息串台」的是 cancelled 守卫而非世代不匹配分支。
+
+test("abort 后同世代 assistant/message 被丢弃：不投影、不清 cancelled", () => {
+	let state = applyDshControlEvent(idle(), "turn/start", 0).next;
+	state = beginDshCancel(state);
+	const stale = applyDshControlEvent(state, "assistant/message", 1, {
+		message: { content: [{ type: "text", text: "停止后的完整回答" }] },
+	});
+	assert.equal(stale.ignoreStream, true, "旧回合终态消息必须丢弃");
+	assert.equal(stale.next.cancelled, true, "assistant/message 不得提前解除 cancelled（须等 turn/end）");
+	assert.equal(stale.next.isStreaming, false);
+	assert.equal(stale.next.status, "idle");
+});
+
+test("abort 后 tool/call、tool/result 被丢弃（工具卡片不再点亮）", () => {
+	let state = applyDshControlEvent(idle(), "turn/start", 0).next;
+	state = beginDshCancel(state);
+	const call = applyDshControlEvent(state, "tool/call", 1, { toolName: "pwsh" });
+	assert.equal(call.ignoreStream, true, "abort 后工具调用不得投影");
+	const result = applyDshControlEvent(state, "tool/result", 1, {});
+	assert.equal(result.ignoreStream, true);
+	assert.equal(result.next.cancelled, true);
+	assert.equal(result.next.status, "idle");
+});
+
+test("abort 后 user/message 仍放行且保持 cancelled（用户新消息文本不能丢）", () => {
+	let state = applyDshControlEvent(idle(), "turn/start", 0).next;
+	state = beginDshCancel(state);
+	const incoming = applyDshControlEvent(state, "user/message", 1, {
+		content: [{ type: "text", text: "新问题" }],
+	});
+	assert.equal(incoming.ignoreStream, false, "user/message 必须投影");
+	assert.equal(incoming.next.cancelled, true, "cancelled 仍保持，直到 turn/end");
+});
+
+test("abort 后同世代 turn/end 收口 cancelled（与旧世代路径一致）", () => {
+	let state = applyDshControlEvent(idle(), "turn/start", 0).next;
+	state = beginDshCancel(state);
+	const ended = applyDshControlEvent(state, "turn/end", 1);
+	assert.equal(ended.next.cancelled, false);
+	assert.equal(ended.next.status, "idle");
+	assert.equal(ended.next.isStreaming, false);
+	assert.equal(ended.ignoreStream, true);
+});
+
+test("abort 后同世代迟到 chunk 不重开 streaming", () => {
+	let state = applyDshControlEvent(idle(), "turn/start", 0).next;
+	state = beginDshCancel(state);
+	const chunk = applyDshControlEvent(state, "assistant/chunk", 1, {
+		chunk: { type: "text-delta", text: "尾" },
+	});
+	assert.equal(chunk.ignoreStream, true);
+	assert.equal(chunk.next.isStreaming, false);
+	assert.equal(chunk.next.status, "idle");
+});
+
+test("idle 时 beginDshCancel 是 no-op（cancelled 不会等不到 turn/end）", () => {
+	// 回合已结束后再点停止：没有 turn/end 可等，若置 cancelled 会让后续
+	// sendPrompt 的 waitForIdle 被卡满超时（每轮发送白等 30s）。
+	const state = beginDshCancel(idle());
+	assert.equal(state.cancelled, false);
+	assert.equal(state.cancelGeneration, 0);
+	assert.equal(state.status, "idle");
+	assert.equal(state.isStreaming, false);
+});

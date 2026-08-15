@@ -33,13 +33,17 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 	const sessions = new Map();
 	let nextSession = 0;
 	const historyBySession = new Map();
-	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0 };
+	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0, cancel: 0 };
 	const promptCalls = [];
 	const respondCalls = [];
 	// host 进程状态（断连自愈测试用）：triggerExit 模拟崩溃，restartHost 模拟自动重启完成。
 	const hostState = { running: true, ready: true };
 	const muxCalls = [];
-	let muxWaiter = null;
+	// 可中途注入的 mux 帧队列（abort 竞态测试用：先注入 turn/start+chunk，
+	// abort 之后再注入旧回合残留帧，模拟 host 侧 cancel 收尾）。
+	const frameQueue = [...muxFrames];
+	let nextBatchResolve = null;
+	let streamDone = false;
 	const client = {
 		sessions: {			async list() {
 				calls.list += 1;
@@ -85,6 +89,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 				return { result: { ok: true, value: { accepted: true } } };
 			},
 			async cancel() {
+				calls.cancel += 1;
 				return { result: { ok: true, value: {} } };
 			},
 			async rename({ title }) {
@@ -109,20 +114,33 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 			events: {
 				async *mux(_input, signal) {
 					muxCalls.push(Date.now());
-					// 可注入帧队列：自动放行测试用它推 approval/requested。
-					for (const item of muxFrames) yield item;
-					// 之后挂起等待 triggerExit（模拟 host 退出 → abortAllPending 中断流）
-					// 或 signal abort（manager.stop 停会话）。同真实 DshApiClient：abort 即流结束。
-					await new Promise((resolve) => {
-						muxWaiter = resolve;
-						signal?.addEventListener("abort", resolve, { once: true });
-					});
+					// 可注入帧队列：初始帧（muxFrames）先放行，之后每次 pushFrames 补一批；
+					// abortAllPending（host 崩溃）置 streamDone 结束生成器（同真实桥中断语义）。
+					// 每次订阅都是新流：重置 streamDone，否则重连后的生成器会立即结束，
+					// pump 陷入「订阅→立即结束→退避→再订阅」的无限定时器循环。
+					streamDone = false;
+					while (!streamDone) {
+						while (frameQueue.length > 0) yield frameQueue.shift();
+						if (signal?.aborted) return;
+						await new Promise((resolve) => {
+							nextBatchResolve = resolve;
+							signal?.addEventListener("abort", resolve, { once: true });
+						});
+						if (signal?.aborted) return;
+					}
 				},
+			},
+			/** 测试注入：向运行中的 mux 流补发帧（模拟 host 后续推送）。 */
+			pushFrames(...frames) {
+				frameQueue.push(...frames);
+				nextBatchResolve?.();
+				nextBatchResolve = null;
 			},
 			abortAllPending() {
 				// 同 DshApiClient.abortAllPending：中断悬挂的 mux 流（error 语义）。
-				muxWaiter?.();
-				muxWaiter = null;
+				streamDone = true;
+				nextBatchResolve?.();
+				nextBatchResolve = null;
 			},
 			async respond(input) {
 			if (failRespond) throw new Error("host not started");
@@ -729,4 +747,122 @@ test("setModel 携带已设置的思考档位（先选档位再换模型不被�
 	await manager.setModel(agentId, "llm-deepseek", "deepseek-v4-flash");
 	assert.equal(selectModelCalls.length, 1);
 	assert.equal(selectModelCalls[0].reasoningEffort, "high");
+});
+
+// ── 停止（abort）竞态回归：旧回合残留事件不得串台、不得重开流式 ───────────────
+
+test("abort 后旧回合的终态回答与工具事件不上屏：只留已流式的部分文本", async () => {
+	const { host, client, calls } = makeFakeHost();
+	const emitted = [];
+	const manager = new DshAgentManager(host, () => PROJECT);
+	manager.onOutput((channel, payload) => emitted.push([channel, payload]));
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	// 回合进行中：turn/start + 一段正文已流式
+	client.pushFrames(
+		sessionEventFrame("session-fake-1", event("turn/start", 1)),
+		sessionEventFrame("session-fake-1", event("assistant/chunk", 2, { chunk: { type: "text-delta", text: "旧" } })),
+	);
+	await flush();
+	assert.equal(manager.getMessages(tab.id).length, 1, "chunk 已建立流式骨架");
+
+	// 用户停止：抬世代 + 发 cancel RPC
+	await manager.abort(tab.id);
+	assert.equal(calls.cancel, 1, "abort 必须发 session.cancel");
+	// host 收尾期残留事件：完整回答、工具调用、工具结果、回合结束
+	client.pushFrames(
+		sessionEventFrame("session-fake-1", event("assistant/message", 3, {
+			message: { content: [{ type: "text", text: "旧回合的完整回答（不应出现）" }] },
+		})),
+		sessionEventFrame("session-fake-1", event("tool/call", 4, { toolName: "pwsh", callId: "call-1", arguments: "{}" })),
+		sessionEventFrame("session-fake-1", event("tool/result", 5, { message: { content: [{ type: "text", text: "ok" }] } })),
+		sessionEventFrame("session-fake-1", event("turn/end", 6)),
+	);
+	await flush();
+	const messages = manager.getMessages(tab.id);
+	assert.equal(messages.length, 1, "旧回合只留一条已流式骨架消息");
+	assert.equal(messages[0].role, "assistant");
+	assert.equal(messages[0].text, "旧", "turn/end 把部分文本落回骨架，完整回答不得上屏");
+	assert.ok(!messages.some((m) => m.role === "tool"), "abort 后工具事件不得投影");
+	// 正文流：只有 chunk 的累积正文 + turn/end 的 done，无其他内容
+	const streams = emitted
+		.filter(([channel]) => channel === "agents:text-stream")
+		.map(([, payload]) => payload);
+	assert.deepEqual(streams.map((s) => s.text), ["旧", ""]);
+	assert.deepEqual(streams.map((s) => s.done), [false, true]);
+	// 停止后不得重新点亮 streaming
+	const states = emitted
+		.filter(([channel]) => channel === "agents:runtime-state")
+		.map(([, payload]) => payload.state);
+	assert.equal(states.at(-1).isStreaming, false);
+});
+
+test("abort 后立刻发送：必须等旧回合 turn/end 收口才真正发 prompt（防 followup 拼接串台）", async () => {
+	const { host, client, calls, promptCalls } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	client.pushFrames(
+		sessionEventFrame("session-fake-1", event("turn/start", 1)),
+		sessionEventFrame("session-fake-1", event("assistant/chunk", 2, { chunk: { type: "text-delta", text: "旧" } })),
+	);
+	await flush();
+	await manager.abort(tab.id);
+
+	// 停止后立刻发下一条：cancelled 未收口前不得发给 host（否则被拼进旧回合）
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "新问题" });
+	await flush();
+	assert.equal(calls.prompt, 0, "旧回合 turn/end 未到，新消息不得发给 host");
+
+	// 旧回合收尾：用户新消息文本仍投影（不能丢），随后 turn/end 收口 cancelled
+	client.pushFrames(
+		sessionEventFrame("session-fake-1", event("user/message", 3, {
+			content: [{ type: "text", text: "新问题" }],
+			source: { kind: "user", rpcId: "rpc-new" },
+		})),
+		sessionEventFrame("session-fake-1", event("turn/end", 4)),
+	);
+	await sendPromise;
+	assert.equal(calls.prompt, 1, "turn/end 收口后新消息才放行");
+	assert.equal(promptCalls[0], "新问题");
+	const messages = manager.getMessages(tab.id);
+	assert.ok(
+		messages.some((m) => m.role === "user" && m.text === "新问题"),
+		"abort 期间到达的 user/message 仍投影（用户消息不能丢）",
+	);
+});
+
+test("idle 时 abort 不置 cancelled：下次发送不被卡（cancelled 无 turn/end 可等）", async () => {
+	const { host, client, calls } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	// 回合已结束后点停止：beginDshCancel no-op，cancelled 保持 false
+	await manager.abort(tab.id);
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "你好" });
+	assert.equal(result.accepted, true);
+	assert.equal(calls.prompt, 1, "idle abort 后发送立即放行，不被 cancelled 卡 30s");
+});
+
+test("abort 立即收口 Live 思考流（停止后思考块不再转）", async () => {
+	const { host, client } = makeFakeHost();
+	const thoughts = [];
+	const manager = new DshAgentManager(host, () => PROJECT);
+	manager.onOutput((channel, payload) => {
+		if (channel === "agents:thinking") thoughts.push(payload);
+	});
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	client.pushFrames(
+		sessionEventFrame("session-fake-1", event("turn/start", 1)),
+		sessionEventFrame("session-fake-1", event("assistant/chunk", 2, { chunk: { type: "reasoning-delta", text: "想" } })),
+	);
+	await flush();
+	assert.equal(thoughts.filter((t) => !t.done).length, 1, "思考流已点亮");
+	// 停止：思考块必须随 abort 立即收口（旧回合残留 reasoning 帧会被丢弃，
+	// 不能等 turn/end——否则「停止后思考还在转」）
+	await manager.abort(tab.id);
+	assert.equal(thoughts.at(-1).done, true, "abort 必须立即补发 thinking done");
+	assert.equal(thoughts.at(-1).text, "");
+	assert.equal(thoughts.at(-1).id, thoughts[0].id, "思考段 id 保持一致（渲染层原位收口）");
 });

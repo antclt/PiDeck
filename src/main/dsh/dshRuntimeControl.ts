@@ -22,6 +22,7 @@ export type DshControlEventKind =
 	| "turn/end"
 	| "assistant/chunk"
 	| "assistant/message"
+	| "user/message"
 	| "other";
 
 export function classifyDshControlEvent(type: string | undefined): DshControlEventKind {
@@ -29,11 +30,19 @@ export function classifyDshControlEvent(type: string | undefined): DshControlEve
 	if (type === "turn/end") return "turn/end";
 	if (type === "assistant/chunk") return "assistant/chunk";
 	if (type === "assistant/message") return "assistant/message";
+	if (type === "user/message") return "user/message";
 	return "other";
 }
 
-/** 用户点停止：抬世代、清流式，等 turn/end 再真正解除 cancelled。 */
+/**
+ * 用户点停止：抬世代、清流式，等 turn/end 再真正解除 cancelled。
+ * 已 idle 且无流式时无事可取消：保持原状态（否则 cancelled 永远等不到 turn/end，
+ * 后续 sendPrompt 的 waitForIdle 会被 cancelled 卡满超时）。
+ */
 export function beginDshCancel(prev: DshControlState): DshControlState {
+	if (prev.status === "idle" && !prev.isStreaming) {
+		return prev;
+	}
 	return {
 		status: "idle",
 		isStreaming: false,
@@ -72,6 +81,30 @@ export function applyDshControlEvent(
 	}
 
 	const kind = classifyDshControlEvent(type);
+	// 本回合已被取消、turn/end 尚未到达：旧回合的迟到事件一律丢弃，
+	// 只放行两类——turn/end（收口 cancelled）与 user/message（用户消息文本不能丢）。
+	// 若放行 assistant/message / chunk / tool 事件，停止后旧回合的终态回答、工具卡片
+	// 与迟到 delta 会继续点亮 streaming（「停止了还在跑」），或被拼接进下一条消息
+	// （「消息串台」）。host 侧 cancel 只中断 LLM phase、不中断运行中的工具，
+	// 旧回合残留事件只能靠这里丢弃。
+	if (prev.cancelled) {
+		if (kind === "turn/end") {
+			return {
+				next: {
+					...prev,
+					status: "idle",
+					isStreaming: false,
+					cancelled: false,
+				},
+				ignoreStream: true,
+			};
+		}
+		if (kind === "user/message") {
+			return { next: prev, ignoreStream: false };
+		}
+		return { next: prev, ignoreStream: true };
+	}
+
 	if (kind === "turn/start") {
 		return {
 			next: {
@@ -84,9 +117,6 @@ export function applyDshControlEvent(
 		};
 	}
 	if (kind === "assistant/chunk") {
-		if (prev.cancelled) {
-			return { next: { ...prev, isStreaming: false, status: "idle" }, ignoreStream: true };
-		}
 		return {
 			next: { ...prev, status: "running", isStreaming: true },
 			ignoreStream: false,
