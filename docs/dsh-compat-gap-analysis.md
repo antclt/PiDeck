@@ -113,7 +113,7 @@
 
 | # | 缺失项 | 现状 | 目标 | 涉及模块 |
 |---|---|---|---|---|
-| G13 | **动态 Cordis 插件管理（D17）** | 配置页仅 3 分区硬编码 | 插件安装/启用/禁用 UI（`cordis-host-runner` 可运行 `@pluginId`） | 配置页 plugins / `hostEntry` |
+| G13 | **动态 Cordis 插件管理（D17）** | ✅ 配置页插件区动态化 + 真正安装/卸载（`dsh-cordis-host-runner` 服务经 `pideck-plugin-bridge` 暴露：define/run/stop/undefine，按会话归属、面板手势免审批；静态 Loader 只读清单；详见 §7） | 插件安装/启用/禁用 UI（`cordis-host-runner` 可运行 `@pluginId`） | 配置页 plugins / `hostEntry` / `pideckPluginBridge.ts` |
 | G14 | **DSH 会话归档恢复** | pi 有归档/恢复（unarchive）；DSH 无 | host 会话文件是 zstd jsonl，可做独立归档格式 + 恢复导入（需要校验 host 路径规则） | 新模块 || G15 | **会话标题 AI 生成** | DSH 侧已依赖 `dsh-session-title` fold（list 投影 title），pi 侧标题生成在 `sessionNameLine` | 确认 DSH 标题生成是否走 host fold（现状已能同步标题），无需新增 | 验证即可 |
 | G16 | **usage/计费统计接入** | pi 侧有 `usageStats`（usage.log 解析）；DSH 事件带 token/usage 吗？ | 若 `turn/end` 带 usage，投影进 `AgentRuntimeState` 的 token/cost 字段（当前 DSH runtime state 无 usage 数据） | `dshEventProjector` / runtime state |
 | G17 | **RPC 日志查看器** | pi 有 `setRpcLogging`/rpcLogViewer；DSH 无 | DSH 桥帧可记 rpc log（fetch-request/response），复用 rpcLog 通道 | `DshApiClient` / rpcLog |
@@ -287,3 +287,79 @@
 - 纯 UI 调整至少 typecheck；交互状态流转 hook 配测试。
 - 双后端回归：e2e `dsh-models / dsh-restart / dsh-security-plan / dsh-title-diag` + pi 侧现有 e2e。
 - 能力新增必须三处同步：`AgentGatewayCapability` 枚举、网关实现/缺失声明、渲染层 UI 入口。
+
+---
+
+## 7. G13 深化：真正的插件安装/卸载（动态 Cordis 插件管理）
+
+> 状态：✅ 已实现（本目标轮）｜范围：**动态 Cordis 插件**（进程内临时扩展）的
+> 安装/运行/停止/卸载 + 静态 Loader 只读清单。静态部署插件的增删/启停**论证为不做**
+> （见下方「边界」）。
+
+### 为什么是动态 runner，而不是静态 loader
+
+- **静态 loader（cordis.yml）**：`ctx.loader.create/remove/update` 可运行时变更，但
+  DSH host 的 Include 持久化写回的是**patch 合成后的树**（`applyEntryPatches` 把
+  base + overlay 的 `insert` 行 append 进根列表），写回会把 patch 行 bake 进
+  `cordis.yml`，下次 boot 再 apply 会重复——运行时变更静态 loader 不安全；
+  且打包环境无法运行时 npm install 新包。
+- **动态 runner（`dsh-cordis-host-runner`）**：官方为运行时插件生命周期设计的服务
+  （`dsh-tool-cordis` 同源）：`define`（源码包，不落盘）/`run`/`stop`/`undefine`，
+  按会话归属、面板手势无需审批。这就是 G13 文档里 `cordis-host-runner 可运行
+  @pluginId` 所指的机制。官方 dsh-web 的插件页只有只读 inventory + 配置展示，
+  **安装/卸载操作 UI 是本轮新增**（服务对象本身是官方能力）。
+
+### 架构（三层）
+
+```
+配置页插件 tab（DshPluginSection）
+  └─ IPC dshPluginList/Install/Run/Stop/Uninstall/StaticList
+      └─ DshHost.pluginRpc → DshApiClient.rawFetch（复用同一桥 transport，不经过 ApiProxy 信封）
+          └─ fetch 桥 POST /pideck-plugin/rpc
+              └─ hostEntry 前缀路由 → ctx.pideckPluginBridge
+                  └─ pideckPluginBridge.ts（cordis 插件，独立入口打包）
+                      ├─ ctx.dynamicCordisRunner（define/runHostHalf/stop/undefine/inventory）
+                      ├─ ctx.pluginInventory（只读 Loader 清单）
+                      └─ ctx.agents.get(sessionId)（会话归属解析）
+```
+
+- `src/main/dsh/pideckPluginBridge.ts`：桥插件 + 纯函数（入参校验/视图映射/Agent
+  解析/RPC 分发），命名导出 `{ name, apply }`（与 pideckPwshPersistent 同形状，
+  electron-vite 多入口产物 `out/main/pideckPluginBridge.js`）。
+- `src/main/dsh/hostEntry.ts`：overlay patches 挂载 `plugin-inventory` +
+  `cordis-host-runner` + `pideck-plugin-bridge`；fetch handler 前缀路由
+  `/pideck-plugin/rpc`（其余路径仍走 ApiProxy handler）。
+- `src/main/dsh/DshApiClient.ts`：新增公开 `rawFetch`（桥传输复用，含超时/abort/
+  dispose 全链路）。
+- 主进程 `DshHost`：`listDynamicPlugins/listStaticPlugins/installDynamicPlugin/
+  runDynamicPlugin/stopDynamicPlugin/uninstallDynamicPlugin`。
+- 渲染层 `src/renderer/src/config/DshPluginSection.tsx`：清单行（名称/pluginId/
+  归属会话/状态/错误）+ 运行/停止/两步确认卸载 + 安装表单（会话选择 + 3-6 小写
+  前缀 + 名称/用途 + Host 源码）；静态 Loader 只读列表。
+
+### 语义与安全边界
+
+- 动态插件**进程内临时**：define 不写仓库/配置/磁盘，host 重启即失（运行器与
+  dsh-tool-cordis 同语义）。
+- **面板手势**（run/stop/uninstall）走 `requestId=null` 的 direct gesture，无需审批；
+  模型驱动的 Client 激活审批流不在本 UI 范围。
+- **只支持 Host 半区**：Client 半区需 dsh-web 浏览器页面渲染，PiDeck 桌面端没有
+  client runtime——安装表单提示用户只填 Host 源码。
+- Host 源码在 DSH host 进程内执行，运行器明示**不是安全边界**：UI 文案提示只安装
+  自己编写的代码。
+
+### 边界（明确不做，记录理由）
+
+- 静态部署插件（`@deepseek-ai/dsh-*` 等 cordis 组合行）的增删/启停：Include 写回
+  bake patch 行（见上），改动走「源文件」raw tab + host 重启；只读清单已展示
+  moduleName/enabled/fiberPhase。
+- Client 半区渲染、审批流 UI、跨重启持久化：依赖官方未提供/桌面端不存在的运行时。
+
+### 测试
+
+- `tests/dshPluginBridge.test.mjs`：入参校验（idPrefix/必填/源码上限）、inventory/
+  Loader 视图映射、Agent 解析、RPC 分发、桥 fetch 协议（POST/JSON/错误 4xx）。
+- `tests/dshApiClientBridge.test.mjs`：`rawFetch` 不经过 ApiProxy 信封、桥 unary
+  响应原样返回。
+- 真机验证（需真实 Electron + DSH host）：安装→运行→停止→卸载全链路，以及 host
+  重启后清单清空。
