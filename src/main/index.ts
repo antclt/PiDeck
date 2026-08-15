@@ -2492,6 +2492,11 @@ function registerIpc() {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		// G17：RPC 日志按 backend 分流（DSH 走 DshAgentManager 领域调用记录）
+		isDshAgent: (agentId) =>
+			dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
+		setDshRpcLogging: (agentId, enabled) => dshAgentManager.setRpcLogging(agentId, enabled),
+		isDshRpcLogging: (agentId) => dshAgentManager.isRpcLogging(agentId),
 		modelSpecsStore,
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
@@ -2743,6 +2748,8 @@ app.whenReady().then(async () => {
 				});
 			});
 		},
+		// G17：DSH RPC 日志复用 RpcLogger（按 agentId=dsh:<sessionId> 分文件）
+		rpcLogger,
 	);
 	// C12/E15：DSH 退出清理——先停全部活跃会话（清 mux/订阅/pending）再 dispose host，
 	// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。

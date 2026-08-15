@@ -56,6 +56,12 @@ export type SystemIpcDeps = {
 	appLogger: AppLogger;
 	rpcLogger: RpcLogger;
 	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
+	/** DSH 后端判定（G17：RPC 日志按 backend 分流）。 */
+	isDshAgent?: (agentId: string) => boolean;
+	/** DSH RPC 日志开关（G17；未装配 = 无 DSH 后端）。 */
+	setDshRpcLogging?: (agentId: string, enabled: boolean) => void;
+	/** DSH RPC 日志状态查询（G17）。 */
+	isDshRpcLogging?: (agentId: string) => boolean;
 	/** 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送），装配层注入 */
 	stopAgentFromMonitor: (
 		agentId: string,
@@ -141,6 +147,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		isDshAgent,
+		setDshRpcLogging,
+		isDshRpcLogging,
 		modelSpecsStore,
 		getMainWindow,
 		mainCopy,
@@ -567,12 +576,24 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		rpcLogger.clear(resolveRpcRuntimeAgent(target)),
 	);
 	ipcMain.handle(ipcChannels.rpcLoggingSet, async (_event, target: SessionRuntimeTarget, enabled: boolean) => {
-		agentManager.setRpcLogging(resolveRpcRuntimeAgent(target)!, enabled);
+		const agentId = resolveRpcRuntimeAgent(target);
+		if (!agentId) return enabled;
+		// G17：DSH 会话的 RPC 日志走 DshAgentManager（领域调用记录），pi 走 AgentManager。
+		if (isDshAgent?.(agentId)) {
+			setDshRpcLogging?.(agentId, enabled);
+		} else {
+			agentManager.setRpcLogging(agentId, enabled);
+		}
 		return enabled;
 	});
-	ipcMain.handle(ipcChannels.rpcLoggingGet, async (_event, target: SessionRuntimeTarget) =>
-		agentManager.isRpcLogging(resolveRpcRuntimeAgent(target)!),
-	);
+	ipcMain.handle(ipcChannels.rpcLoggingGet, async (_event, target: SessionRuntimeTarget) => {
+		const agentId = resolveRpcRuntimeAgent(target);
+		if (!agentId) return false;
+		if (isDshAgent?.(agentId)) {
+			return isDshRpcLogging?.(agentId) ?? false;
+		}
+		return agentManager.isRpcLogging(agentId);
+	});
 
 	// ── 反馈环境 ─────────────────────────────────────────────────────
 

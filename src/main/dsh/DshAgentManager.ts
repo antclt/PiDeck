@@ -98,6 +98,8 @@ export class DshAgentManager implements SessionAgentGateway {
 	private readonly outputListeners = new Set<(channel: string, payload: unknown) => void>();
 	/** 待应答的 DSH server-request 帧：rpcId → frame（approval/question 共用一张表）。 */
 	private readonly pendingResponses = new Map<string, DshApprovalFrame | DshQuestionFrame>();
+	/** RPC 日志开关集合（G17；agentId → 开启）。 */
+	private readonly rpcLoggingAgents = new Set<string>();
 	/** 审批/提问 pending 超时定时器（D5：用户不响应时自动拒绝，避免永久挂起）。 */
 	private readonly pendingTimers = new Map<string, NodeJS.Timeout>();
 	/** pending 审批/提问的超时时长（10 分钟：Ask 弹窗常驻等待太久无意义）。 */
@@ -112,11 +114,39 @@ export class DshAgentManager implements SessionAgentGateway {
 		 *  装配层据此写回 catalog 并推送侧栏刷新——DSH 会话没有 pi 会话文件，
 		 *  标题只存在于 host（dsh-session-title 的 session/title 事件 fold）。 */
 		private readonly onTitleChanged?: (dshSessionId: string, title: string) => void,
+		/** RPC 日志服务（G17：DSH 领域调用记录，与 pi 共用 RpcLogger；未注入时静默）。 */
+		private readonly rpcLogger?: { push(entry: import("../../shared/types/rpcLog").RpcLogEntry): void },
 	) {
 		// E4：host 崩溃自动重启完成后恢复所有 runtime（host 内存已丢失：流式/工具/
 		// 压缩状态停在崩溃前，mux 重连后新 host 没有已订阅会话，事件不会再推）。
 		this.dshHost.onHostReady(() => {
 			void this.recoverAfterHostRestart();
+		});
+	}
+
+	// ── RPC 日志（G17，与 pi 的 setRpcLogging 语义一致）────────────────────────
+
+	/** 开启/关闭某 DSH 会话的 RPC 日志（领域调用经 rpcLogger 落盘）。 */
+	setRpcLogging(agentId: string, enabled: boolean): void {
+		if (enabled) this.rpcLoggingAgents.add(agentId);
+		else this.rpcLoggingAgents.delete(agentId);
+	}
+
+	/** 是否开启 RPC 日志。 */
+	isRpcLogging(agentId: string): boolean {
+		return this.rpcLoggingAgents.has(agentId);
+	}
+
+	/** 记录一条 DSH 领域调用日志（仅开关开启时；data 透传 RpcLogger 的截断/脱敏）。 */
+	private logRpc(agentId: string, direction: "send" | "recv", summary: string, data?: unknown): void {
+		if (!this.rpcLoggingAgents.has(agentId)) return;
+		this.rpcLogger?.push({
+			id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+			agentId,
+			direction,
+			summary,
+			time: Date.now(),
+			...(data !== undefined ? { data } : {}),
 		});
 	}
 
@@ -287,14 +317,17 @@ export class DshAgentManager implements SessionAgentGateway {
 		// 的 followup），该消息会永久滞留、不再开新回合。因此所有 prompt 必须串行化：
 		// 上一回合（含命令回合）真正 idle 之后才发下一条。
 		await this.waitForIdle(input.agentId);
+		this.logRpc(input.agentId, "send", "sessions.prompt", { message: input.message });
 		const sent = await client.sessions.prompt({
 			sessionId: runtime.sessionId,
 			mode: "queue",
 			content: [{ type: "text", text: input.message }],
 		});
 		if (!sent.result.ok) {
+			this.logRpc(input.agentId, "recv", "sessions.prompt rejected", sent.result.error);
 			return { accepted: false, error: JSON.stringify(sent.result.error), delivery: "rejected" };
 		}
+		this.logRpc(input.agentId, "recv", "sessions.prompt accepted");
 		return { accepted: true };
 	}
 
@@ -545,7 +578,9 @@ export class DshAgentManager implements SessionAgentGateway {
 		// D1：abort 必须解阻塞 pending 审批/提问帧——host 侧工具调用在等 client-response，
 		// 不应答则回合永不结束（后续发送被 waitForIdle 卡满 30s），Ask 弹窗残留。
 		await this.rejectAllPending(agentId).catch(() => undefined);
+		this.logRpc(agentId, "send", "sessions.cancel");
 		await client.sessions.cancel({ sessionId: runtime.sessionId }).catch(() => undefined);
+		this.logRpc(agentId, "recv", "sessions.cancel done");
 		this.emitRuntimeState(agentId);
 		this.emit(ipcChannels.agentsState, this.list());
 	}
