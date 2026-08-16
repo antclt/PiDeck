@@ -33,7 +33,7 @@ import {
   canLoadSessionTimelineMore,
   deriveSessionSurfaceRuntime,
   isLatestTimelineRunBusy,
-  resolveTimelineTopCompensation,
+  restoreTimelineAnchor,
   useSessionTimelineController,
   type SessionTimelineController,
 } from "../../hooks/useSessionTimelineController";
@@ -617,20 +617,14 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
       nextHeight > prev.height &&
       !followingForTurnWindow
     ) {
-      // 顶部（≤HISTORY_AUTO_LOAD_THRESHOLD）不补偿：插入内容在视口上方时
-      // 浏览器无滚动锚定（overflow-anchor:none），scrollTop 原位不动即可看到
-      // 新展开的内容；补偿会把新内容推出视口上方，表现为「点「显示更早」没反应」。
-      // 与数据 prepend 补偿共用 resolveTimelineTopCompensation 决策（2026-02 修复）。
-      const nextTop = resolveTimelineTopCompensation(
+      // 所有窗口扩张都锚定当前视口：新内容只出现在上方，正在读的行不被推走。
+      // 顶部场景同样补偿，避免「加载后整屏往上跳」；按钮与滚动加载体验统一。
+      const nextTop = restoreTimelineAnchor(
         timeline.scrollTop,
         nextHeight - prev.height,
       );
-      if (nextTop !== null) {
-        // 标记程序化滚动：补偿的 scrollTop 位移会派发 scroll 事件，
-        // 必须让自动加载监听忽略（补偿后视口可能落在顶部区间）
-        controller.markProgrammaticScroll?.();
-        timeline.scrollTop = nextTop;
-      }
+      controller.markProgrammaticScroll?.();
+      timeline.scrollTop = nextTop;
     }
     turnWindowStateRef.current = {
       windowed: turnWindowActive,

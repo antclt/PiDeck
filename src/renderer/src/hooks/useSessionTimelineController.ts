@@ -451,9 +451,10 @@ export function useSessionTimelineController(options: {
     setAutoScroll(false);
     setShowScrollToBottom(true);
   }, []);
-  const expandWindowBatched = useCallback(() => {
+  const expandWindowBatched = useCallback((turns = TIMELINE_WINDOW_EXPAND_STEP) => {
     escapeAutoScroll();
-    pendingExpandTurnsRef.current += TIMELINE_WINDOW_EXPAND_STEP;
+    if (turns <= 0) return;
+    pendingExpandTurnsRef.current += turns;
     if (expandBatchFrameRef.current === undefined) {
       expandBatchFrameRef.current = window.requestAnimationFrame(consumeExpandBatch);
     }
@@ -670,7 +671,7 @@ export function useSessionTimelineController(options: {
 						// 历史消息页最多只开放一个 3 轮 cohort；数据页可能按消息数返回很多轮，
 						// 不能再固定 +10 把 DOM 一次性解锁，剩余已加载数据交给本地扩窗。
 						const growth = resolvePageWindowGrowth(page.messages);
-						if (growth > 0) setScrolledWindowTurns((prev) => prev + growth);
+						if (growth > 0) expandWindowBatched(growth);
 					}
 				})
 				.finally(() => {
@@ -716,7 +717,7 @@ export function useSessionTimelineController(options: {
 						// runtime history 页与 DOM 使用同一 3 轮 cohort；缓存命中和文件回退
 						// 都只开放实际带回的轮数，避免数据 +3、窗口却 +10。
 						const growth = resolvePageWindowGrowth(page.messages);
-						if (growth > 0) setScrolledWindowTurns((prev) => prev + growth);
+						if (growth > 0) expandWindowBatched(growth);
 					}
 				})
 				.finally(() => {
@@ -724,7 +725,7 @@ export function useSessionTimelineController(options: {
 				});
 			return;
 		}
-	}, [cachedEntry?.revision, diskPage, historyHasMore, isLoadingMessagePage, messages, options.pageSize, options.sessionId, ownerKey, prependHistoryPage, prependMessagePage, runtimeHistory]);
+	}, [cachedEntry?.revision, diskPage, expandWindowBatched, historyHasMore, isLoadingMessagePage, messages, options.pageSize, options.sessionId, ownerKey, prependHistoryPage, prependMessagePage, runtimeHistory]);
 
 	// ── 回底清理临时历史（2026-11 轮次模型）──
 	// 贴底稳定 1.5s 后清掉翻过的历史前缀（atom 只留运行时窗口段），渲染层内存回到最小；
@@ -929,7 +930,12 @@ export function useSessionTimelineController(options: {
       // 渲染窗口（挂载已加载但未显示的轮次，纯本地 DOM 操作，无 IPC）。
       // 触顶时同样先消费 atom 隐藏数据：用户把滚动条一把拉到顶时不应跳过本地 cohort
       // 直接翻 IPC 页；此时浏览器本来就会显示前插内容，与「触顶加载更早」观感一致。
-      if (timeline.scrollTop <= expandThreshold && windowExpandableRef.current) {
+      if (
+        timeline.scrollTop <= expandThreshold &&
+        windowExpandableRef.current &&
+        pendingExpandTurnsRef.current === 0 &&
+        expandBatchFrameRef.current === undefined
+      ) {
         if (now - lastWindowExpandAtRef.current < TURN_WINDOW_AUTO_EXPAND_COOLDOWN_MS) return;
         lastWindowExpandAtRef.current = now;
         // 滚动触发的扩展走分批（每帧小批挂载，摊平渲染压力）；

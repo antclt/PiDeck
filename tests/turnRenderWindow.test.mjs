@@ -143,13 +143,13 @@ test("auto-expand wiring: controller exposes windowExpandableRef and listens nea
   // 滚动监听进入「接近顶部」区间（scrollTop ≤ 视口比例阈值，下限 120px）且窗口仍可
   // 扩展时先扩窗口：触顶也优先消费 atom 已加载的 cohort，不因一把拉到顶而跳过本地扩窗。
   assert.match(controllerSource, /TURN_WINDOW_AUTO_EXPAND_THRESHOLD/);
-  assert.match(controllerSource, /timeline\.scrollTop <= expandThreshold && windowExpandableRef\.current/);
+  assert.match(controllerSource, /timeline\.scrollTop <= expandThreshold &&[\s\S]*?windowExpandableRef\.current/);
   assert.match(controllerSource, /resolveAutoExpandThreshold\(timeline\.clientHeight\)/);
   assert.match(controllerSource, /windowExpandableRef/);
   // 滚动触发的扩展走分批（每帧小批挂载），按钮/跳转走原子扩展
-  assert.match(controllerSource, /expandWindowBatched\(\)/);
+  assert.match(controllerSource, /expandWindowBatched\(growth\)/);
   assert.match(controllerSource, /requestAnimationFrame\(consumeExpandBatch\)/);
-  // 只在真实上滚时预取；滚动加载始终锚定当前视口，按钮加载才直接显示新页。
+  // 只在真实上滚时预取；滚动与按钮加载统一锚定当前视口。
   assert.match(controllerSource, /scrollingUp/);
   assert.match(controllerSource, /loadMoreMessages\("scroll"\)/);
   assert.match(controllerSource, /preserveAtTop/);
