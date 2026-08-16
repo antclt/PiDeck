@@ -113,6 +113,12 @@
   animation: assistant-answer-settle 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* 上滚窗口扩展顶部新增的轮次：整轮从上方淡入（top-enter，见 keyframes 定义）。
+ * 只包一层轮容器动画，内部子元素（思考/工具）各自保持原有入场逻辑。 */
+.turn-row--top-fresh {
+  animation: top-enter 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* Live plain → Settled Markdown 交接：挂载全量渲染时淡入，避免硬切闪一下。 */
 .execution-interim[data-settle="1"],
 .assistant-text[data-settle="1"] {
@@ -2772,6 +2778,29 @@ body.ask-dialog-open .ask-question-card.pending {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+/* ── 上滚窗口扩展的顶部新增入场（2026-12）──
+ * 窗口扩展 / 翻页在 displayRuns 顶部插入更早轮次时，新内容从上方轻微滑入淡入，
+ * 避免「内容挂载那一下」硬切。只动 opacity + translateY（transform 不占布局，
+ * 不干扰窗口扩展的 scrollTop 补偿），时长 280ms 与 topFresh 标记保留期（400ms）匹配。 */
+@keyframes top-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 减少动态：顶部历史展开不播位移动画，避免大轮容器整块提升为合成层。 */
+@media (prefers-reduced-motion: reduce) {
+  .turn-row--top-fresh,
+  .user-turn--top-fresh {
+    animation: none !important;
   }
 }
 

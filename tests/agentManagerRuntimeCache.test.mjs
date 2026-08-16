@@ -80,6 +80,30 @@ test("tryReadRuntimeTurnPage serves cache-resident turns without reading the fil
   }
 });
 
+test("tryReadRuntimeTurnPage strips tool results on cache-hit pages", async () => {
+  const { manager, sessionPath, directory } = await createHarness();
+  try {
+    const cached = manager.messages.get("agent-1");
+    // 把 e6 伪装成工具消息：主进程缓存必须保留完整 result，但翻页回包必须剥离。
+    cached[2] = {
+      ...cached[2],
+      role: "tool",
+      meta: { ...cached[2].meta, result: "full tool output that must not reach the renderer" },
+    };
+    const page = await manager.tryReadRuntimeTurnPage(sessionPath, "agent-1", {
+      beforeEntryId: "e7",
+      turnCount: 3,
+    });
+    assert.ok(page, "cache hit expected");
+    const deliveredTool = page.messages.find((message) => message.meta?.entryId === "e6");
+    assert.ok(deliveredTool, "tool message is part of the cached page");
+    assert.equal(deliveredTool.meta.result, undefined, "cache-hit pages must match file-path payloads");
+    assert.equal(cached[2].meta.result, "full tool output that must not reach the renderer", "main cache stays intact");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("tryReadRuntimeTurnPage misses when anchor is outside the runtime cache", async () => {
   const { manager, sessionPath, directory } = await createHarness();
   try {
@@ -291,11 +315,12 @@ test("loadMessages aligns trimmed runtime messages with their real entry ids", a
     assert.equal(cached[0].text, "q4");
     assert.equal(cached[0].meta.entryId, "u4");
     assert.equal(cached[cached.length - 1].meta.entryId, "a15");
-    // 全量 flush 携带 windowStartFilePos：窗口首条（q13）的文件消息下标 = 24
+    // 全量 flush 携带 windowStartFilePos：DOM 3 / atom 9 / main 12 模型下窗口 = 尾部 9 轮，
+    // 窗口首条（q7）在裁剪后数组下标 6，文件消息下标 = headOffset(6) + 6 = 12
     const full = payloads.find((p) => p.windowStart !== undefined);
     assert.ok(full, "windowed full flush expected");
-    assert.equal(full.windowStart, 18);
-    assert.equal(full.windowStartFilePos, 24);
+    assert.equal(full.windowStart, 6);
+    assert.equal(full.windowStartFilePos, 12);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -325,17 +350,18 @@ test("trimRuntimeCache keeps leading compaction summary cards", async () => {
     assert.equal(after.length, 25);
     assert.equal(after[1].text, "q4");
     assert.equal(after[24].text, "a15");
-    // 数值游标不被卡片污染：窗口首条 q13 的文件消息下标 = 24（headOffset 只按角色消息递增）
+    // 数值游标不被卡片污染：窗口 = 尾部 9 轮（q7 起），裁剪后数组下标 7（卡片占 1 位），
+    // 文件消息下标 = headOffset(6) + (7 − 卡片数 1) = 12
     const full = payloads.find((p) => p.windowStart !== undefined);
     assert.ok(full, "windowed full flush expected");
-    assert.equal(full.windowStart, 19);
-    assert.equal(full.windowStartFilePos, 24);
+    assert.equal(full.windowStart, 7);
+    assert.equal(full.windowStartFilePos, 12);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("trimRuntimeCache slides out the old window head and keeps anonymous headOffset at -1 (H2+M2 regression)", async () => {
+test("flushMessageEmit slides the 9-turn window and carries slideOut, keeping anonymous headOffset (H2+M2 regression)", async () => {
   const { manager, sessionPath, directory } = await createHarness();
   try {
     const many = [];
@@ -343,25 +369,28 @@ test("trimRuntimeCache slides out the old window head and keeps anonymous headOf
       many.push({ id: `m-u${i}`, agentId: "agent-1", role: "user", text: `q${i}`, timestamp: 1, meta: { entryId: `u${i}` } });
       many.push({ id: `m-a${i}`, agentId: "agent-1", role: "assistant", text: `a${i}`, timestamp: 1, meta: { entryId: `a${i}` } });
     }
+    // 新轮 q16 追加到尾部：窗口从 q7 起（下标 12）右移到 q8 起（下标 14）
+    many.push({ id: "m-u16", agentId: "agent-1", role: "user", text: "q16", timestamp: 1, meta: { entryId: "u16" } });
+    many.push({ id: "m-a16", agentId: "agent-1", role: "assistant", text: "a16", timestamp: 1, meta: { entryId: "a16" } });
     manager.messages.set("agent-1", many);
-    // 旧窗口 = q10 起（旧空间下标 18）；trim 后窗口 = q13 起 → 滑出 [q10..a12]（3 轮 6 条）
-    manager.displayWindowStartByAgent.set("agent-1", 18);
-    // 匿名会话（无文件路径/无 entryId 映射）：headOffset 未知 = -1，trim 后必须保持 -1（M2）
+    // 旧窗口 = q7 起（DOM 3 / atom 9 / main 12 模型的尾部 9 轮起点）
+    manager.displayWindowStartByAgent.set("agent-1", 12);
+    // 匿名会话（无文件路径/无 entryId 映射）：headOffset 未知 = -1，flush 后必须保持 -1（M2）
     manager.messageHeadOffsetByAgent.set("agent-1", -1);
     const payloads = [];
     manager.onOutput((channel, payload) => {
       if (channel === "agents:message") payloads.push(payload);
     });
-    manager.trimRuntimeCache("agent-1");
-    // H2：滑出轮随全量 flush 下发（渲染层并入历史前缀，锚点轮不消失）
+    manager.flushMessageEmit("agent-1");
+    // H2：窗口右移滑出的旧窗口头部轮随全量 flush 下发（渲染层并入历史前缀，锚点轮不消失）
     const slidePayload = payloads.find((p) => p.slideOut !== undefined);
     assert.ok(slidePayload, "full flush must carry slideOut");
     assert.deepEqual(
-      slidePayload.slideOut.map((m) => m.meta.entryId),
-      ["u10", "a10", "u11", "a11", "u12", "a12"],
+      Array.from(slidePayload.slideOut, (m) => m.meta.entryId),
+      ["u7", "a7"],
     );
-    assert.equal(slidePayload.windowStart, 18, "trim 后窗口 = q13 起（新空间下标 18）");
-    assert.equal(slidePayload.messages[0].meta.entryId, "u13");
+    assert.equal(slidePayload.windowStart, 14, "窗口右移到 q8 起（下标 14）");
+    assert.equal(slidePayload.messages[0].meta.entryId, "u8");
     assert.equal(manager.pendingSlideOutByAgent.get("agent-1"), undefined, "flush 后待发滑出已清空");
     // M2：-1 保持 -1（修复前被递增成 5 的伪造游标）
     assert.equal(manager.messageHeadOffsetByAgent.get("agent-1"), -1);
@@ -385,12 +414,13 @@ test("trimRuntimeCache increments headOffset for file-backed sessions only (M2 r
       if (channel === "agents:message") payloads.push(payload);
     });
     manager.trimRuntimeCache("agent-1");
-    // 被裁 q1..a3 = 6 条角色消息 → 数值游标前移 6；窗口首条 u13 的文件下标 = 6 + 18 = 24
+    // 被裁 q1..a3 = 6 条角色消息 → 数值游标前移 6；
+    // 窗口 = 尾部 9 轮（q7 起，trim 后数组下标 6），文件消息下标 = 6 + 6 = 12
     assert.equal(manager.messageHeadOffsetByAgent.get("agent-1"), 6);
     const full = payloads.find((p) => p.windowStart !== undefined);
     assert.ok(full, "windowed full flush expected");
-    assert.equal(full.windowStart, 18);
-    assert.equal(full.windowStartFilePos, 24);
+    assert.equal(full.windowStart, 6);
+    assert.equal(full.windowStartFilePos, 12);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

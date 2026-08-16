@@ -33,10 +33,10 @@ function loadTimelineHelpers() {
     react: {},
     jotai: { atom: (value) => ({ _mockInit: value }) },
     "jotai/utils": {},
-    "../atoms": {},
-    "../desktopApi": {},    "../components/session/timeline/turnRenderWindow": {
-      TIMELINE_SCROLLED_TURN_LIMIT: 15,
-      TIMELINE_WINDOW_EXPAND_STEP: 10,
+    "../atoms": {}, "../lib/pinTurnScroll": { animateScrollTop: () => () => undefined, pinScrollDurationMs: () => 320 },
+    "../desktopApi": {},    "./timeline/autoExpandThreshold": { TURN_WINDOW_AUTO_EXPAND_THRESHOLD: 120, resolveAutoExpandThreshold: (h) => Math.max(120, Math.round(h * 0.4)) },    "../components/session/timeline/turnRenderWindow": {
+      TIMELINE_SCROLLED_TURN_LIMIT: 3,
+      TIMELINE_WINDOW_EXPAND_STEP: 3,
     },
   });
 }
@@ -101,10 +101,12 @@ test("background Session cache changes retain the selected timeline slice", () =
 test("bottom-settle history clear invalidates in-flight runtime history pages", () => {
   // 清理成功后必须推进 load 序号并复位加载标志：迟到页响应被 latestLoadBySession 丢弃，
   // isLoadingMessagePage 也不会卡死后续加载（修复前只有 clearHistory 调用）。
-  assert.match(source, /if \(clearHistory\(sessionId\)\)/);
+  assert.match(source, /clearHistory\(sessionId\)/);
   assert.match(source, /const sequence = \+\+nextLoadSequence;/);
   assert.match(source, /setIsLoadingMessagePage\(false\)/);
   assert.match(source, /trackLatestLoad\(sessionId, sequence\)/);
+  // 逻辑跟底不等于物理到底：平滑回底途中不会立刻清历史。
+  assert.match(source, /isTimelineAtBottom\(timeline\.scrollTop/);
 });
 
 test("prepend scroll compensation is skipped while following bottom and marks programmatic scroll", () => {
@@ -129,8 +131,9 @@ test("load-more compensation is skipped at the very top so prepended content sta
 
 test("auto history load ignores programmatic scrolls and only fires on real user scroll", () => {
   // 监听器迁移到 controller：程序化滚动事件先消费 programmaticScrollRef 抑制标记；
-  // 组件里不再存在裸的 scrollTop>240 触发（原实现会因补偿滚动连锁翻页）。
-  assert.match(source, /if \(programmaticScrollRef\.current\) \{\n\s*programmaticScrollRef\.current = false;\n\s*return;\n\s*\}/);
+  // 只有 scrollTop 真实变小（上滚）才扩窗/预取，触顶后下滑不会把新历史突然插进视口。
+  assert.match(source, /if \(programmaticScrollRef\.current\) \{[\s\S]*?return;\s*\}/);
+  assert.match(source, /const scrollingUp = timeline\.scrollTop < lastScrollTop/);
   assert.match(source, /HISTORY_AUTO_LOAD_THRESHOLD/);
   assert.match(source, /timeline\.addEventListener\("scroll", onScroll, \{ passive: true \}\)/);
 });

@@ -147,7 +147,7 @@ test("remaining renderer product copy is available in Chinese and English", () =
 
 test("reachable renderer surfaces use i18n without changing their UI structure", () => {
 	assert.match(fileDiffViewer, /\{dirty && t\("editor\.unsavedMarker"\)\}/);
-	assert.match(timeline, /t\("timeline\.loadMoreHistory", \{[\s\S]*?count:/);
+	assert.match(timeline, /t\("timeline\.loadMoreTurns"\)/);
 	assert.match(drawer, /className="drawer-content-frame[^"]*"[\s\S]*?\{t\("drawer\.lazyLoading"\)\}/);
 	// StorageTab 自 SettingsModal 拆分为 lazy 加载（tab 级按需下载 chunk）
 	assert.match(settings, /const StorageTab = lazy\(\(\) => import\("\.\/settings\/SettingsStorageTab"\)/);

@@ -38,17 +38,16 @@ test("tool card name uses medium weight like process summary, not bold 650", () 
   assert.match(toolCard, /tool-activity-name/);
 });
 
-test("auto-expand process when the agent stops (session end shows tool calls)", () => {
-  // 2026-12 兼容期：会话结束展开执行过程（工具调用/思考可见），取代旧的 1.5s 自动收起
+test("latest turn auto-collapses from the timeline idle signal after streaming", () => {
+  // 1.5s idle 计时在 timeline 侧；TurnRow 只消费 autoCollapseTick。
   assert.doesNotMatch(turnExecution, /}, 1500\)/);
-  assert.doesNotMatch(turnExecution, /1\.5s 后自动收起/);
-  // 结束展开只改折叠态，不再回调滚动（对准最终回答会解锁跟底并点亮回底按钮）
-  assert.doesNotMatch(turnExecution, /autoCollapseTick/);
-  // 只在「运行中 → 停转」边沿展开：历史会话挂载（从未 running）保持折叠初始态
-  assert.match(turnExecution, /const justFinished = wasRunningRef\.current && !running;/);
-  assert.match(turnExecution, /justFinished \|\| userOverrideRef\.current\) return;/);
-  // 上升沿才强制展开，避免用户收起后被 busy 抖动撑开
-  assert.match(turnExecution, /running && !wasRunningRef\.current/);
+  assert.match(timeline, /TURN_SETTLE_IDLE_COLLAPSE_MS = 1500/);
+  assert.match(turnExecution, /autoCollapseTick/);
+  assert.match(turnExecution, /onAutoCollapsed/);
+  // 不再在「运行中 → 停转」边沿自动展开执行过程（旧 2026-12 兼容行为已移除）
+  assert.doesNotMatch(turnExecution, /const justFinished = wasRunningRef\.current && !running;/);
+  // 上升沿仍只在设置①开启时展开，避免用户收起后被 busy 抖动撑开
+  assert.match(turnExecution, /!wasRunningRef\.current/);
   assert.match(turnExecution, /setStepsVisibleFromUser/);
 });
 
@@ -61,13 +60,16 @@ test("scrollToBottom uses stick-to-bottom spring via scrollerScrollApiRef", () =
   assert.match(timeline, /scrollApiRef=\{controller\.scrollerScrollApiRef\}/);
 });
 
-test("auto-collapse does not steal follow or show the jump-to-bottom button", () => {
-  // 最终回答标记仍在（折叠后阅读用），但不再接线滚动对准
+test("auto-collapse uses run-start positioning without breaking follow semantics", () => {
+  // 最终回答标记仍在（折叠后阅读用）；自动收起回调使用新的 onAutoCollapsed。
   assert.match(turnRow, /data-final-answer=\{run\.id\}/);
   assert.doesNotMatch(controller, /scrollFinalAnswerIntoView/);
   assert.doesNotMatch(turnRow, /onProcessAutoCollapsed/);
   assert.doesNotMatch(timeline, /onProcessAutoCollapsed/);
-  assert.doesNotMatch(controller, /clientHeight \* 0\.35/);
+  assert.match(turnRow, /onAutoCollapsed/);
+  assert.match(controller, /scrollFinalAnswerToUpperMiddle/);
+  assert.match(controller, /data-final-answer/);
+  assert.match(controller, /SETTLED_TURN_VIEWPORT_ANCHOR_RATIO/);
   // isLatestRun（自动收起）保持按「最后一条显示条目」判定；
   // live 挂载门用单独的 isLastAgentRun（最后一个 agent-run）判定——
   // 两者语义不同，不能合并（见 liveMountDecision 回归）

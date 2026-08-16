@@ -710,6 +710,59 @@ test("full flush merges trim slide-out turns into the history prefix (H2 regress
   assert.deepEqual([...entry().history.messages.map((m) => m.meta.entryId)], ["n1"]);
 });
 
+test("slideOut-only history keeps an entryId cursor so older pages stay reachable", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  const entry = () => store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+  const emit = (payload) =>
+    store.set(atoms.applySessionRuntimeEventAtom, {
+      sessionId: "session-a",
+      agentId: "agent-a",
+      runtimeGeneration: 1,
+      sourceChannel: "agents:message",
+      payload,
+    });
+
+  // 基线窗口段：e5..e6（历史前缀尚未创建）
+  emit({ agentId: "agent-a", windowStart: 4, totalLength: 6, messages: [
+    { id: "m5", role: "user", text: "q3", meta: { entryId: "e5" } },
+    { id: "m6", role: "assistant", text: "a3", meta: { entryId: "e6" } },
+  ] });
+  assert.equal(entry().history, undefined);
+
+  // 窗口右移，e3..e4 作为 slideOut 单独重建前缀
+  emit({ agentId: "agent-a", windowStart: 6, totalLength: 6, slideOut: [
+    { id: "m3", role: "user", text: "q2", meta: { entryId: "e3" } },
+    { id: "m4", role: "assistant", text: "a2", meta: { entryId: "e4" } },
+  ], messages: [
+    { id: "m5", role: "user", text: "q3", meta: { entryId: "e5" } },
+    { id: "m6", role: "assistant", text: "a3", meta: { entryId: "e6" } },
+  ] });
+  assert.equal(entry().history.nextBefore, null);
+  assert.equal(entry().history.nextBeforeEntryId, "e3", "slideOut 最旧消息必须成为续页锚点");
+
+  // 首次续页 before=null 必须被接受，并接在 slideOut 前缀之前
+  assert.equal(store.set(atoms.prependSessionHistoryPageAtom, {
+    sessionId: "session-a",
+    expectedRevision: entry().revision,
+    before: null,
+    page: {
+      messages: [
+        { id: "m1", role: "user", text: "q1", meta: { entryId: "e1" } },
+        { id: "m2", role: "assistant", text: "a1", meta: { entryId: "e2" } },
+      ],
+      total: 6,
+      nextBefore: 0,
+      nextBeforeEntryId: "e1",
+      indexVersion: "100:2000",
+    },
+  }), true);
+  assert.deepEqual([...entry().history.messages.map((m) => m.meta.entryId)],
+    ["e1", "e2", "e3", "e4"]);
+  assert.equal(entry().history.nextBefore, 0);
+  assert.equal(entry().history.nextBeforeEntryId, "e1");
+});
+
 test("prependSessionHistoryPageAtom guards revision and cursor continuity, dedupes against segment", () => {
   const atoms = loadAtoms();
   const store = createStore();

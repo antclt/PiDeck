@@ -15,7 +15,7 @@ function compile(filePath, imports = {}) {
 }
 
 const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts", {
-  react: {}, jotai: { atom: (value) => ({ _mockInit: value }) }, "jotai/utils": {}, "../atoms": {}, "../desktopApi": {},});
+  react: {}, jotai: { atom: (value) => ({ _mockInit: value }) }, "jotai/utils": {}, "../atoms": {}, "../lib/pinTurnScroll": { animateScrollTop: () => () => undefined, pinScrollDurationMs: () => 320 },  "../desktopApi": {}, "./timeline/autoExpandThreshold": { TURN_WINDOW_AUTO_EXPAND_THRESHOLD: 120, resolveAutoExpandThreshold: (h) => Math.max(120, Math.round(h * 0.4)) },});
 
 function readRendererRuntimeSources(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

@@ -1,18 +1,19 @@
 /**
  * 时间线 turn 挂载窗口：控制「画多少 TurnRow」。
  * - 贴底跟随：只挂尾部 N 轮（TIMELINE_MOUNTED_TURN_LIMIT），流式期间 DOM 最小。
- * - 上滚查看历史：挂尾部大窗口（TIMELINE_SCROLLED_TURN_LIMIT + 用户逐步展开），
+ * - 上滚查看历史：从尾部小窗口起步，按 3 轮 cohort 渐进展开，
  *   并在窗口前留「显示更早」按钮 —— 历史全量挂载是渲染进程内存峰值/黑屏的来源
  *   （2026-08 治理：此前上滚 = 取消跟随 = 全量放开，大会话可一次挂载近千条消息）。
- * 与消息分页（100 条）/ 主进程轮次缓存（12 轮）正交——只决定「渲染多少」。
+ * 与主进程 runtime 缓存（12 轮）正交：runtime atom 常驻尾部 9 轮窗口段，
+ * DOM 只从尾部 3 轮开始按 3 轮 cohort 渐进挂载。
  */
 
-/** 贴底时最多挂载的 agent-run 轮数（2026-11 轮次模型：10 → 3，与激活下发窗口对齐）。 */
+/** 贴底时最多挂载的 agent-run 轮数。 */
 export const TIMELINE_MOUNTED_TURN_LIMIT = 3;
-/** 上滚查看历史时的基础渲染窗口轮数（2026-08 黑屏治理新增）。 */
-export const TIMELINE_SCROLLED_TURN_LIMIT = 15;
-/** 「显示更早」按钮每次展开的轮数步长。 */
-export const TIMELINE_WINDOW_EXPAND_STEP = 10;
+/** 上滚查看历史时的基础渲染窗口轮数：与贴底同为 3，避免脱离贴底瞬间挂载隐藏历史。 */
+export const TIMELINE_SCROLLED_TURN_LIMIT = 3;
+/** 本地 DOM 扩窗 / 数据翻页的统一 cohort 大小；主进程 12 轮 = atom 9 轮 + 一页 3 轮。 */
+export const TIMELINE_WINDOW_EXPAND_STEP = 3;
 /** 上滚窗口的展示条目预算：单轮超大（一轮内上百条工具调用）时按轮截断仍会挂载海量 DOM，
  *  按条目数兜底截断（截断点取整轮边界，不切碎 run）。贴底窗口不设此限（折叠态 DOM 可控）。 */
 export const TIMELINE_SCROLLED_MAX_ITEMS = 200;
@@ -21,6 +22,15 @@ export function countAgentRunItems(items: ReadonlyArray<{ kind: string }>): numb
 	let count = 0;
 	for (const item of items) {
 		if (item.kind === "agent-run") count += 1;
+	}
+	return count;
+}
+
+/** 统计历史页新增的完整 user 轮次；分页协议与主进程都以 user 消息作为轮次起点。 */
+export function countUserTurns(messages: ReadonlyArray<{ role?: string }>): number {
+	let count = 0;
+	for (const message of messages) {
+		if (message.role === "user") count += 1;
 	}
 	return count;
 }

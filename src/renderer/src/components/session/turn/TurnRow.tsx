@@ -52,6 +52,8 @@ export type TurnRowProps = {
 	backend?: AgentBackend;
 	/** 新消息入场动画：仅发送后尾部新增的消息播放一次 */
 	fresh?: boolean;
+	/** 上滚窗口扩展时顶部新增的轮次：播放「从顶部淡入」过渡（2026-12 体验优化） */
+	topFresh?: boolean;
 	onPreviewImage: (image: ImageContent) => void;
 	showThinking?: boolean;
 	isStreaming?: boolean;
@@ -69,6 +71,10 @@ export type TurnRowProps = {
 	isLatestRun?: boolean;
 	/** 是否为时间线上最后一个 agent-run（live 正文挂载门：仅它可挂会话级流式槽） */
 	isLastAgentRun?: boolean;
+	/** 最新轮结束后的自动收起信号（timeline 1.5s idle 计时） */
+	autoCollapseTick?: number;
+	/** 自动收起真实发生后回调（timeline 据此定位本轮起始消息） */
+	onAutoCollapsed?: () => void;
 	/** 打开多选分享弹框 */
 	onEnterMultiSelect?: () => void;
 };
@@ -184,6 +190,7 @@ export const TurnRow = memo(
 	);
 	const { stepsVisible, setStepsVisibleFromUser, toggleSteps } =
 		useTurnExecution({
+			runId: run.id,
 			agentRunning: props.agentRunning,
 			isComplete,
 			hasFinalAnswer,
@@ -191,6 +198,8 @@ export const TurnRow = memo(
 			expandInterimDuringStream: flowSettings.expandInterimDuringStream,
 			collapsePrevRunsOnNewTurn: flowSettings.collapsePrevRunsOnNewTurn,
 			newTurnCollapseTick,
+			autoCollapseTick: props.autoCollapseTick,
+			onAutoCollapsed: props.onAutoCollapsed,
 		});
 
 	// 中间内容（思考/工具/中间回答）与最终回答分组：
@@ -247,7 +256,7 @@ export const TurnRow = memo(
 					: isComplete
 						? "turn-row--complete"
 						: "turn-row--pending"
-			} ${props.fresh ? "turn-row--fresh" : ""}`}
+			} ${props.fresh ? "turn-row--fresh" : ""} ${props.topFresh ? "turn-row--top-fresh" : ""}`}
 			data-message-id={run.id}
 		>
 			<div className="flex min-w-0 flex-col gap-3">
@@ -470,10 +479,12 @@ function turnRowPropsEqual(prev: TurnRowProps, next: TurnRowProps): boolean {
 	return (
 		prev.sessionId === next.sessionId &&
 		prev.fresh === next.fresh &&
+		prev.topFresh === next.topFresh &&
 		prev.showThinking === next.showThinking &&
 		prev.liveThinkingId === next.liveThinkingId &&
 		prev.agentRunning === next.agentRunning &&
 		prev.isLatestRun === next.isLatestRun &&
-		prev.isLastAgentRun === next.isLastAgentRun
+		prev.isLastAgentRun === next.isLastAgentRun &&
+		prev.autoCollapseTick === next.autoCollapseTick
 	);
 }

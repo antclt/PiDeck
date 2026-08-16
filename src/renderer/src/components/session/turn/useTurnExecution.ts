@@ -11,23 +11,21 @@ export type TurnExecutionState = {
 /**
  * run 级执行过程折叠状态（一个开关控制全部思考/工具/中间回答步骤）。
  *
- * 行为（2026-12 与用户确认的版本）：
- * - 手动开合（setStepsVisibleFromUser/toggleSteps）记 override，**永远最高优先**：
- *   流式上升沿、结束展开信号都不会覆盖手动状态；
- * - 初始状态：历史已完成且有最终回答的轮始终折叠；进行中/无最终回答的轮
- *   默认折叠，仅设置①（expandInterimDuringStream）开启时才默认展开；
- * - agentRunning 上升沿：仅「设置①开启且无手动 override」时展开（新一轮流式实时滚出）；
- * - agent 停转且有最终回答（本轮结束）：展开执行过程（工具调用/思考可见，2026-12
- *   兼容期要求「会话结束展开工具调用」，取代旧的 1.5s 自动收起）——仅最新轮、无 override；
- * - 新一轮信号（newTurnCollapseTick 变化）：设置②（collapsePrevRunsOnNewTurn）开启时
- *   非最新轮强制收起（含手动展开的，清 override）。
+ * 行为：
+ * - 手动开合永远最高优先：流式上升沿不会覆盖用户已折叠的状态；
+ * - 流式上升沿：设置①（expandInterimDuringStream）开启且无手动 override 时展开；
+ * - 新一轮信号：非最新轮强制收起（含手动展开的），节省渲染资源；
+ * - 自动收起信号：最新轮结束且用户 1.5s 无操作后，timeline 发来 autoCollapseTick；
+ *   若执行过程仍打开，则收起并回调 onAutoCollapsed，由 timeline 把本轮起始消息
+ *   拉到视口中上方。这样「结束即展开」的旧行为被替换为「先复盘，再安静收起」。
  */
 export function useTurnExecution(opts: {
+	runId?: string;
 	agentRunning?: boolean;
 	isComplete: boolean;
-	/** 本轮是否存在最终回答：无最终回答的 run 不自动展开。 */
+	/** 本轮是否存在最终回答：无最终回答的 run 不自动展开/收起（中间回答是唯一输出）。 */
 	hasFinalAnswer?: boolean;
-	/** 是否时间线上最新一轮。非最新轮不自动展开。 */
+	/** 是否时间线上最新一轮。非最新轮不自动展开/收起。 */
 	isLatestRun?: boolean;
 	/** 设置①：流式对话时展开中间过程。默认关。 */
 	expandInterimDuringStream?: boolean;
@@ -35,6 +33,10 @@ export function useTurnExecution(opts: {
 	collapsePrevRunsOnNewTurn?: boolean;
 	/** 新一轮开始信号（session 级单调递增）。变化时非最新轮被强制收起。 */
 	newTurnCollapseTick?: number;
+	/** 最新轮结束后的自动收起信号（timeline 侧 1.5s idle 计时）。 */
+	autoCollapseTick?: number;
+	/** 自动收起真正发生后回调（timeline 据此做「拉到中上方」定位）。 */
+	onAutoCollapsed?: () => void;
 }): TurnExecutionState {
 	const [stepsVisible, setStepsVisible] = useState(() => {
 		// 历史已完成且有最终回答的轮：始终折叠（时间线只留最终回答）。
@@ -44,38 +46,36 @@ export function useTurnExecution(opts: {
 	});
 	const userOverrideRef = useRef(false);
 	const wasRunningRef = useRef(Boolean(opts.agentRunning));
+	const stepsVisibleRef = useRef(stepsVisible);
+	const lastAutoCollapseTickRef = useRef(0);
+	const lastRunIdRef = useRef(opts.runId);
 
-	// 仅在「开始跑」上升沿按设置①展开。若写成「只要 agentRunning 就展开」，
-	// 流式中用户收起后会被 busy 抖动（tool/streaming 边沿）重新撑开。
-	// 手动 override 最高优先：不清 override、不撑开手动折叠过的轮次。
+	useEffect(() => {
+		stepsVisibleRef.current = stepsVisible;
+	}, [stepsVisible]);
+
+	useEffect(() => {
+		if (lastRunIdRef.current === opts.runId) return;
+		lastRunIdRef.current = opts.runId;
+		lastAutoCollapseTickRef.current = 0;
+	}, [opts.runId]);
+
+	// 流式上升沿展开。只处理「开始跑」这一个边沿，busy 抖动不会把用户手动折叠的
+	// 轮次重新撑开；下降沿不再自动展开（旧「结束展开」已由 1.5s 自动收起取代）。
 	useEffect(() => {
 		const running = Boolean(opts.agentRunning);
-		if (running && !wasRunningRef.current && !userOverrideRef.current) {
-			if (opts.expandInterimDuringStream) {
-				setStepsVisible(true);
-			}
+		if (
+			running &&
+			!wasRunningRef.current &&
+			!userOverrideRef.current &&
+			opts.expandInterimDuringStream
+		) {
+			setStepsVisible(true);
 		}
 		wasRunningRef.current = running;
 	}, [opts.agentRunning, opts.expandInterimDuringStream]);
 
-	// 结束展开：以「agent 停转」为准（不用 run.endedAt>0，流式中也会有时间戳）。
-	// 只在「运行中 → 停转」的边沿触发——历史会话挂载（从未 running）不展开，
-	// 保持「历史轮始终折叠」的初始语义。手动 override 最高优先。
-	useEffect(() => {
-		const running = Boolean(opts.agentRunning);
-		const justFinished = wasRunningRef.current && !running;
-		wasRunningRef.current = running;
-		if (!justFinished || userOverrideRef.current) return;
-		if (!opts.hasFinalAnswer) return;
-		if (opts.isLatestRun === false) return;
-		// 本轮结束：展开执行过程（工具调用/思考/中间回答可见），供用户复盘；
-		// 不回调滚动：对准最终回答会主动解锁跟底、点亮回底按钮，
-		// 并把视口从最新位置拽回本轮回答开头（用户体感「发了新消息还停在上一条」）。
-		setStepsVisible(true);
-	}, [opts.agentRunning, opts.hasFinalAnswer, opts.isLatestRun]);
-
-	// 新一轮信号：设置②开启时，非最新轮强制收起（含手动展开的——本轮已结束，
-	// 用户展开它多半是在对照，新消息发出后收掉以节省渲染资源）。
+	// 新一轮信号：非最新轮强制收起（含手动展开的——本轮已结束，新消息发出后收掉）。
 	useEffect(() => {
 		if (!opts.collapsePrevRunsOnNewTurn) return;
 		if (opts.isLatestRun === false && (opts.newTurnCollapseTick ?? 0) > 0) {
@@ -86,6 +86,24 @@ export function useTurnExecution(opts: {
 		opts.collapsePrevRunsOnNewTurn,
 		opts.isLatestRun,
 		opts.newTurnCollapseTick,
+	]);
+
+	// timeline 侧 1.5s idle 后发来的自动收起信号。仅最新轮、仍有最终回答且执行过程
+	// 当前可见时收起；已经手动折叠/从未展开的轮次不回调，timeline 不会错误滚动。
+	useEffect(() => {
+		const tick = opts.autoCollapseTick ?? 0;
+		if (tick <= 0 || tick === lastAutoCollapseTickRef.current) return;
+		lastAutoCollapseTickRef.current = tick;
+		if (opts.isLatestRun === false || !opts.hasFinalAnswer) return;
+		if (!stepsVisibleRef.current) return;
+		userOverrideRef.current = false;
+		setStepsVisible(false);
+		opts.onAutoCollapsed?.();
+	}, [
+		opts.autoCollapseTick,
+		opts.hasFinalAnswer,
+		opts.isLatestRun,
+		opts.onAutoCollapsed,
 	]);
 
 	const setStepsVisibleFromUser = useCallback((open: boolean) => {

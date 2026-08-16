@@ -43,9 +43,11 @@ test("single-turn DOM stays light via default-collapsed process group", () => {
   );
   // 手动 override 最高优先：上升沿不清 override、不撑开手动折叠过的轮次
   assert.match(turnExecution, /!userOverrideRef\.current/);
-  // 2026-12 兼容期：会话结束（agent 停转边沿）展开执行过程，不再 1.5s 自动收起
+  // 1.5s idle 自动收起由 timeline 统一计时，TurnRow 消费 autoCollapseTick；
+  // 历史 run 默认折叠、流式上升沿才展开，仍然保证单 turn DOM 轻量。
   assert.doesNotMatch(turnExecution, /}, 1500\)/);
-  assert.match(turnExecution, /const justFinished = wasRunningRef\.current && !running;/);
+  assert.match(turnExecution, /autoCollapseTick/);
+  assert.match(turnExecution, /!wasRunningRef\.current/);
 });
 
 test("process group uses CollapsibleContent height transition", () => {

@@ -162,6 +162,12 @@ export class AgentManager {
 	 */
 	private readonly displayWindowStartByAgent = new Map<string, number>();
 	/**
+	 * displayWindowStartByAgent 最近一次重算时的数组长度。
+	 * 流式期 assistant/tool 更新不改变轮次边界，flush 若长度未变可跳过 findTurnPageStart 的
+	 * O(n) map/scan；只有 append/截断/重载等长度变化才重算，降低 50ms flush 的分配频率。
+	 */
+	private readonly displayWindowComputedLengthByAgent = new Map<string, number>();
+	/**
 	 * 运行期消息缓存头部在会话文件消息下标空间中的偏移（entryId 缺失时的数值游标换算）。
 	 * loadMessages / trimRuntimeCache 维护；-1 表示未知（匿名会话等无文件场景）。
 	 */
@@ -202,8 +208,8 @@ export class AgentManager {
 	private readonly thinkingPushCountByAgent = new Map<string, number>();
 	/** 流式 emit 合并窗口（毫秒）。50ms 兼顾流畅度与传输量，肉眼几乎无延迟。 */
 	private static readonly MESSAGE_FLUSH_INTERVAL_MS = 50;
-	/** 激活显示窗口轮数（2026-08 激活分页）：loadMessages 后只下发尾部 N 轮，更早历史走 disk 轮次分页。 */
-	private static readonly DISPLAY_WINDOW_TURNS = 3;
+	/** 激活显示窗口轮数：renderer atom 常驻最近 9 轮，DOM 仍按 3 轮窗口渐进挂载；更早历史走轮次分页。 */
+	private static readonly DISPLAY_WINDOW_TURNS = 9;
 	/**
 	 * agent_end 后等待 agent_settled 的超时时间（毫秒）。
 	 * 如果 Pi 在此时间内未发送 agent_settled，桌面端将主动查询 get_state 并尝试恢复 idle。
@@ -225,7 +231,7 @@ export class AgentManager {
 	private static readonly MAX_HISTORY_LOAD_TURNS = 12;
 	/**
 	 * 运行期消息缓存上限（轮）：agent_settled 后把主进程数组裁到最近 N 轮。
-	 * 12 轮覆盖激活窗口（3 轮）+ 三级缓存的回看命中率；头部更早历史随时可从文件分页读回。
+	 * 12 轮覆盖激活显示窗口（9 轮）外再缓存 1 页历史（3 轮）；更早历史随时可从文件分页读回。
 	 */
 	private static readonly MAX_RUNTIME_CACHE_TURNS = 12;
 	/**
@@ -684,7 +690,10 @@ export class AgentManager {
 			pageCount: page.length,
 		});
 		return {
-			messages: page,
+			// 与文件路径/全量 flush 同口径瘦身：缓存页也必须剥离 meta.result，
+			// 否则一次缓存命中会把主进程保留的完整工具结果带回渲染层，
+			// 历史前缀的内存会随翻页快速膨胀。
+			messages: stripToolResultForDelivery(page),
 			total,
 			nextBefore,
 			...(oldestEntryId ? { nextBeforeEntryId: oldestEntryId } : {}),
@@ -869,8 +878,8 @@ export class AgentManager {
 		// 避免「投影 partial + 运行期完整版」双份或事件 append 到错误轮次。
 		this.rebindInFlightMessages(agentId, nextMessages, messages);
 		this.messages.set(agentId, nextMessages);
-		// 显示窗口 = 尾部 3 轮（轮次起点对齐 user 消息，与 disk 轮次分页同一约定；
-		// 字节预算不参与窗口计算——单轮再大也整轮显示，折叠完整性优先）
+		// 显示窗口 = 尾部 9 轮（DOM 3 / atom 9 / main 12 模型；轮次起点对齐 user 消息，
+		// 与 disk 轮次分页同一约定；字节预算不参与窗口计算——单轮再大也整轮显示，折叠完整性优先）
 		this.displayWindowStartByAgent.set(
 			agentId,
 			findTurnPageStart(
@@ -2495,6 +2504,8 @@ export class AgentManager {
 		this.toolExecutingByAgent.delete(agentId);
 		this.toolStateSequenceByAgent.delete(agentId);
 		this.pendingSlideOutByAgent.delete(agentId);
+		this.displayWindowStartByAgent.delete(agentId);
+		this.displayWindowComputedLengthByAgent.delete(agentId);
 		this.clearAgentState(agentId);
 		this.emitState();
 
@@ -2741,6 +2752,7 @@ export class AgentManager {
 		this.rpcLoggingAgents.delete(agentId);
 		this.dropPendingLiveRpcLogs(agentId);
 		this.displayWindowStartByAgent.delete(agentId);
+		this.displayWindowComputedLengthByAgent.delete(agentId);
 		this.sessionFileVersionByAgent.delete(agentId);
 		this.clearAgentState(agentId);
 		process.stop();
@@ -3385,10 +3397,10 @@ export class AgentManager {
 				// agent_settled 是 Pi 的最终稳定点：没有自动重试、自动压缩、压缩 retry
 				// 或 queued follow-up 会继续执行，此时才允许恢复 idle 并通知用户完成。
 				runtime.tab.status = "idle";
-				// 若 message_end 未到（边缘路径），仍先落盘再清 live。
+				// 若 message_end 未到（边缘路径），仍先落盘再清 live；settled 同时
+				// 重算 renderer 的尾部 9 轮窗口，并在必要时裁剪主进程缓存。
 				this.finalizeThinkingIntoMessage(agentId);
 				this.flushMessageEmit(agentId);
-				// 一轮结束：运行期缓存裁剪到最近 12 轮（含本轮），防止长会话数组无界增长
 				this.trimRuntimeCache(agentId);
 				this.finishThinkingChannel(agentId);
 				this.activeAssistantMessageIds.delete(agentId);
@@ -4729,7 +4741,7 @@ export class AgentManager {
 		runtime.tab.status = "idle";
 		this.finalizeThinkingIntoMessage(agentId);
 		this.flushMessageEmit(agentId);
-		// 兜底确认空闲同样视为一轮结束：运行期缓存裁剪，与 agent_settled 路径一致
+		// 兜底确认空闲同样视为一轮结束：重算尾部 9 轮窗口并裁剪运行期缓存。
 		this.trimRuntimeCache(agentId);
 		this.finishThinkingChannel(agentId);
 		this.textEmitter.cancel(agentId);
@@ -5033,9 +5045,32 @@ export class AgentManager {
 		}
 		this.pendingMessageAgents.delete(agentId);
 		const all = this.messages.get(agentId) ?? [];
-		const dirtyFrom = this.messageDirtyFromByAgent.get(agentId);
+		let dirtyFrom = this.messageDirtyFromByAgent.get(agentId);
 		this.messageDirtyFromByAgent.delete(agentId);
-		const windowStart = this.displayWindowStartByAgent.get(agentId) ?? 0;
+		// 新一轮进入尾部后，窗口起点必须右移到最近 9 轮；坐标变化时升级为
+		// 全量快照，并把滑出的完整轮次交给 renderer history 保存。
+		const currentWindowStart = this.displayWindowStartByAgent.get(agentId) ?? 0;
+		const lastComputedLength = this.displayWindowComputedLengthByAgent.get(agentId) ?? -1;
+		let nextWindowStart = currentWindowStart;
+		if (all.length !== lastComputedLength) {
+			nextWindowStart = findTurnPageStart(
+				all.map((message) => ({ role: message.role, byteLength: 0 })),
+				all.length,
+				AgentManager.DISPLAY_WINDOW_TURNS,
+				Number.MAX_SAFE_INTEGER,
+			);
+			this.displayWindowComputedLengthByAgent.set(agentId, all.length);
+		}
+		if (nextWindowStart > currentWindowStart) {
+			const slideOut = all.slice(currentWindowStart, nextWindowStart);
+			if (slideOut.length > 0) {
+				const pending = this.pendingSlideOutByAgent.get(agentId) ?? [];
+				this.pendingSlideOutByAgent.set(agentId, [...pending, ...slideOut]);
+			}
+			dirtyFrom = undefined;
+		}
+		this.displayWindowStartByAgent.set(agentId, nextWindowStart);
+		const windowStart = nextWindowStart;
 		const payload = buildMessageFlushPayload(
 			agentId,
 			all,
@@ -5097,7 +5132,29 @@ export class AgentManager {
 		const summaryCards = leadingSummaryCards(list, list.length);
 		const trimmedStart = turnTrimStartIndex(list, AgentManager.MAX_RUNTIME_CACHE_TURNS);
 		const trimmed = list.slice(trimmedStart);
-		if (trimmed.length === list.length) return;
+		const didTrim = trimmed.length !== list.length;
+		const currentWindowStart = this.displayWindowStartByAgent.get(agentId) ?? 0;
+		const nextWindowStartInList = findTurnPageStart(
+			list.map((m) => ({ role: m.role, byteLength: 0 })),
+			list.length,
+			AgentManager.DISPLAY_WINDOW_TURNS,
+			Number.MAX_SAFE_INTEGER,
+		);
+		// 不超过 12 轮时也要校准尾部 9 轮窗口。通常 settled 前的 flush 已经做过这步，
+		// 这里保留独立调用时的兜底，避免新会话在 12 轮以内把全部消息留在 atom。
+		if (!didTrim) {
+			if (nextWindowStartInList > currentWindowStart) {
+				const slideOut = list.slice(currentWindowStart, nextWindowStartInList);
+				if (slideOut.length > 0) {
+					const pending = this.pendingSlideOutByAgent.get(agentId) ?? [];
+					this.pendingSlideOutByAgent.set(agentId, [...pending, ...slideOut]);
+				}
+				this.displayWindowStartByAgent.set(agentId, nextWindowStartInList);
+				this.markMessagesDirtyFrom(agentId, 0);
+				this.flushMessageEmit(agentId);
+			}
+			return;
+		}
 		// 卡片恒在数组最前（index 0），trim 保留尾部时必然被整体丢弃，重新 prepend 不会重复。
 		const next = summaryCards.length > 0 ? [...summaryCards, ...trimmed] : trimmed;
 		// 缓存头部在文件消息空间前移 = 被裁「角色消息」数（卡片/系统消息不计入文件消息空间，
@@ -5110,21 +5167,9 @@ export class AgentManager {
 				prevHeadOffset + countRoleMessagesBefore(list, trimmedStart),
 			);
 		}
-		// 窗口前移的滑出轮：旧窗口（冻结于上次 loadMessages/trim）与新窗口（裁剪后尾部 3 轮）
-		// 的头部会滑出窗口覆盖区；抓取 [oldWindowStart, 新窗口最旧轮次起点) 随全量 flush 下发，
-		// 渲染层并入历史前缀——否则锚点轮从视口消失且翻页翻不回来（2026-12 回归修复）。
-		const oldWindowStart = this.displayWindowStartByAgent.get(agentId) ?? 0;
-		const newWindowStartInList = findTurnPageStart(
-			list.map((m) => ({ role: m.role, byteLength: 0 })),
-			list.length,
-			AgentManager.DISPLAY_WINDOW_TURNS,
-			Number.MAX_SAFE_INTEGER,
-		);
-		if (newWindowStartInList > oldWindowStart) {
-			const slideOut = list.slice(oldWindowStart, newWindowStartInList);
-			if (slideOut.length > 0) this.pendingSlideOutByAgent.set(agentId, slideOut);
-		}
 		this.messages.set(agentId, next);
+		// 裁剪后数组下标空间前移，尾部 9 轮的身份不变但数值起点改变；
+		// 先重置坐标，再用全量 flush 校准 renderer。
 		this.displayWindowStartByAgent.set(
 			agentId,
 			findTurnPageStart(

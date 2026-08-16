@@ -21,7 +21,7 @@ import { sameProjectSessionList } from "../utils/sessionRecordIdentity";
  * 6 → 8（2026-12 会话切换闪屏修复）：4 个分屏常驻 + 3 个预览 + 1 个切换缓冲；
  * 切回被淘汰的会话要重新走磁盘读取，大会话（几十 MB）会先闪骨架屏/起始页，
  * 放宽到 8 在内存可接受范围内减少淘汰频次；
- * 淘汰的会话切回时走激活分页（尾部 3 轮）重新拉取，成本可控。
+ * 淘汰的会话切回时走激活分页（尾部 9 轮）重新拉取，成本可控。
  */
 export const SESSION_MESSAGE_CACHE_LIMIT = 8;
 
@@ -608,10 +608,21 @@ function reconcileHistoryPrefix(
   if (slideMessages.length === 0 && messages.length === (history?.messages.length ?? 0)) {
     return history;
   }
+  // 仅 slideOut 重建前缀时，游标不是 null：下一页应从 slideOut 最旧消息继续向上翻。
+  // 保留 nextBeforeEntryId（文件/主进程缓存路径都能消费），否则 historyHasMore 会把
+  // 刚滑出的前缀误判为「已经到最早」，窗口右移后更早历史无法继续翻页。
+  let nextBeforeEntryId = history?.nextBeforeEntryId;
+  if (!history) {
+    const slideAnchor = slideMessages.find(
+      (message) => typeof message.meta?.entryId === "string" && Boolean(message.meta.entryId),
+    );
+    const slideAnchorEntryId = slideAnchor?.meta?.entryId;
+    if (typeof slideAnchorEntryId === "string") nextBeforeEntryId = slideAnchorEntryId;
+  }
   return {
     nextBefore: history?.nextBefore ?? null,
-    ...(history?.nextBeforeEntryId !== undefined
-      ? { nextBeforeEntryId: history?.nextBeforeEntryId }
+    ...(nextBeforeEntryId !== undefined
+      ? { nextBeforeEntryId }
       : {}),
     version: history?.version ?? fileVersion,
     messages,
@@ -681,7 +692,7 @@ export const prependSessionHistoryPageAtom = atom(
 
 /**
  * 回底清理临时历史（2026-11 轮次模型）：贴底稳定后把 runtime 会话翻过的历史前缀清掉，
- * 只保留运行时窗口段 —— atom 数据回到「最近 3 轮窗口」，渲染层内存最小；
+ * 只保留运行时窗口段 —— atom 数据回到「最近 9 轮窗口」（DOM 3 / atom 9 / main 12 模型）；
  * 再次上翻走「atom → 主进程缓存 → 文件」三级递进重新拉取。
  * 仅 runtime 来源缓存生效；disk 来源（历史会话浏览）不清，避免打断按条分页游标。
  */

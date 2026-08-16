@@ -68,11 +68,14 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 
 	const diskPage = cachedEntry?.source === "disk" ? cachedEntry.page : undefined;
 	const runtimeHistory = cachedEntry?.source === "runtime" ? cachedEntry.history : undefined;
+	// slideOut 重建前缀时 nextBefore 可能为 null；nextBeforeEntryId 仍是有效续页锚点。
 	const hasMore = diskPage
 		? diskPage.nextBefore !== null
 		: Boolean(
 			cachedEntry?.source === "runtime" &&
-			(runtimeHistory ? runtimeHistory.nextBefore !== null : (cachedEntry.windowStart ?? 0) > 0),
+			(runtimeHistory
+				? runtimeHistory.nextBefore !== null || Boolean(runtimeHistory.nextBeforeEntryId)
+				: (cachedEntry.windowStart ?? 0) > 0),
 		);
 
 	const loadMore = useCallback(() => {

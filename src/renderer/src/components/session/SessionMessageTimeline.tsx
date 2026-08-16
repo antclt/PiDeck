@@ -1,6 +1,7 @@
 import { useAtomValue } from "jotai";
 import { selectAtom } from "jotai/utils";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useReducedMotion } from "motion/react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode, RefObject } from "react";
 import type { ChatMessage, ImageContent } from "../../../../shared/types";
 import { MarkdownStream } from "./MarkdownStream";
@@ -56,6 +57,11 @@ import {
 type TurnRowProps = ComponentProps<typeof TurnRow>;
 type UserBubbleProps = ComponentProps<typeof UserBubble>;
 
+/** 一轮结束后、用户无操作的自动收起等待时间。 */
+const TURN_SETTLE_IDLE_COLLAPSE_MS = 1500;
+/** 折叠高度动画基本结束后再做「拉到中上方」定位，避免用折叠前的高度计算目标。 */
+const TURN_SETTLE_SCROLL_DELAY_MS = 320;
+
 // ── 失败/重试提示：时间线不再渲染卡片，改为 toast ──
 // 主进程以 role=error / role=system 消息携带这些 i18nKey（见 AgentManager 的
 // addLocalizedMessage / upsertRetryStatusMessage）。它们在时间线里的诊断卡片
@@ -92,6 +98,24 @@ function markFailureToastShown(messageId: string) {
 	// 超限：清空重建（Set 无 FIFO；失败 toast 是低频事件，偶发重复提醒可接受）
 	toastedFailureIds.clear();
 	toastedFailureIds.add(messageId);
+}
+
+/** 数组按对象身份判断 prefix/suffix：runtime history 的补页与 slideOut 保留旧消息引用。 */
+function isMessagePrefix(prefix: readonly ChatMessage[], next: readonly ChatMessage[]): boolean {
+	if (prefix.length > next.length) return false;
+	for (let i = 0; i < prefix.length; i += 1) {
+		if (prefix[i] !== next[i]) return false;
+	}
+	return true;
+}
+
+function isMessageSuffix(suffix: readonly ChatMessage[], next: readonly ChatMessage[]): boolean {
+	if (suffix.length > next.length) return false;
+	const offset = next.length - suffix.length;
+	for (let i = 0; i < suffix.length; i += 1) {
+		if (suffix[i] !== next[offset + i]) return false;
+	}
+	return true;
 }
 
 /** 判断消息是否为「失败/重试类」提示（时间线不渲染、改 toast）。 */
@@ -217,7 +241,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   const loadMoreMessages = controller.loadMoreMessages;
   // ── 滚动接近顶部自动加载历史（2026-11 轮次模型）──
   // 监听器已迁移到 useSessionTimelineController（程序化滚动抑制在同一 owner）：
-  // 用户上滚到距顶部 240px 内即按轮补历史，prepend 补偿不会连锁触发下一页。
+  // 用户接近顶部时先扩 DOM 窗口，挂满后触顶才按轮补历史；
+  // prepend 补偿不会连锁触发下一页。
   // 新增消息入场动画跟踪 ──
   // 只对「时间线尾部新增」的消息播放一次入场动画：历史加载/分页前插不算，
   // 避免整屏消息同时闪烁。乐观上屏的用户消息与流式替换后的权威消息都会触发。
@@ -225,6 +250,21 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   const [freshMessageIds, setFreshMessageIds] = useState<ReadonlySet<string>>(() => new Set());
   const seenTailMessageIdRef = useRef<string | undefined>(undefined);
   const freshTimersRef = useRef<Map<string, number>>(new Map());
+  // ── 上滚窗口扩展的「顶部新增」入场动画（2026-12 体验优化）──
+  // 窗口扩展（上滚 3→N 轮 / 翻页 prepend）会在 displayRuns 顶部插入新轮次；
+  // 对比前后 id 序列找出「顶部新增段」，给它们播从上方淡入的过渡，
+  // 让「内容挂载那一下」不是硬切而是流进来。动画播完（约 300ms）后清理标记。
+  const reduceMotion = useReducedMotion() ?? false;
+  const [topFreshIds, setTopFreshIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [latestTurnAutoCollapseTick, setLatestTurnAutoCollapseTick] = useState(0);
+  const lastSessionIdRef = useRef(sessionId);
+  const prevDisplayRunsIdsRef = useRef<string[] | undefined>(undefined);
+  const topFreshTimersRef = useRef<Map<string, number>>(new Map());
+  const turnSettleIdleTimerRef = useRef<number | undefined>(undefined);
+  const turnSettleScrollTimerRef = useRef<number | undefined>(undefined);
+  const turnSettleScrollCancelRef = useRef<(() => void) | undefined>(undefined);
+  const idleActivityCleanupRef = useRef<(() => void) | undefined>(undefined);
+  const latestRunIdRef = useRef<string | undefined>(undefined);
   // 会话内容就绪淡入：isConversationLoading true→false（切会话历史加载完成）时，
   // 给 MessageScroller 挂一次 160ms 淡入动画类，与骨架屏消失衔接，避免整块瞬间出现。
   // 触发必须用 useLayoutEffect（paint 前同步）：若用 useEffect，内容会先以正常透明度
@@ -244,12 +284,28 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     return () => window.clearTimeout(timer);
   }, [contentEntering]);
 
-  useEffect(() => {
-    // 会话切换时重置：新会话的首帧（历史加载）不播动画
+  useLayoutEffect(() => {
+    // 会话切换时重置：新会话的首帧（历史加载）不播动画。
+    // 用 layout effect：必须在上滚窗口 layout effect 之前清掉 prevDisplayRunsIdsRef，
+    // 否则切会话后新旧 id 序列会被拿去比较，可能误播顶部入场动画。
+    if (lastSessionIdRef.current === sessionId) return;
+    lastSessionIdRef.current = sessionId;
+    wasAgentBusyRef.current = isAgentBusy;
     seenTailMessageIdRef.current = undefined;
     setFreshMessageIds(new Set());
     for (const timer of freshTimersRef.current.values()) window.clearTimeout(timer);
     freshTimersRef.current.clear();
+    prevDisplayRunsIdsRef.current = undefined;
+    setTopFreshIds(new Set());
+    for (const timer of topFreshTimersRef.current.values()) window.clearTimeout(timer);
+    topFreshTimersRef.current.clear();
+    if (turnSettleIdleTimerRef.current !== undefined) {
+      window.clearTimeout(turnSettleIdleTimerRef.current);
+      turnSettleIdleTimerRef.current = undefined;
+    }
+    turnSettleScrollCancelRef.current?.();
+    latestRunIdRef.current = undefined;
+    setLatestTurnAutoCollapseTick(0);
   }, [sessionId]);
 
   // ── 失败/重试 toast：只对「加载完成后新增」的消息弹，历史回放不打扰 ──
@@ -316,10 +372,51 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     freshTimersRef.current.clear();
   }, []);
 
-  const renderedRuns = useMemo(
-    () => groupToolMessages(paginatedMessages),
-    [paginatedMessages],
+  // 流式期渲染优化：runtime 会话把「历史前缀」和「窗口段」分开分组。
+  // history 是 prepend-only、低频变化；流式 50ms 增量只影响窗口段，
+  // 若每次都对全部已加载历史跑 groupToolMessages，上翻很多页后打字机仍会全量重建。
+  const runtimeHistoryMessages =
+    surfaceCachedEntry?.source === "runtime"
+      ? surfaceCachedEntry.history?.messages
+      : undefined;
+  // runtime history 变化只有三种：头部补页（prepend）、尾部并入 slideOut（append）、
+  // 版本失效重建。前两种保留旧消息引用，可增量 group，避免每次补页都全量重建历史。
+  const historyGroupStateRef = useRef<{
+    messages: readonly ChatMessage[] | undefined;
+    groups: RenderMessage[];
+  }>({ messages: undefined, groups: [] });
+  const groupedHistoryRuns = useMemo(() => {
+    const next = runtimeHistoryMessages;
+    const state = historyGroupStateRef.current;
+    if (next === undefined) {
+      historyGroupStateRef.current = { messages: undefined, groups: [] };
+      return null;
+    }
+    if (state.messages === next) return state.groups;
+    const prev = state.messages;
+    let groups: RenderMessage[];
+    if (prev && isMessagePrefix(prev, next)) {
+      const appended = next.slice(prev.length);
+      groups = [...state.groups, ...groupToolMessages(appended)];
+    } else if (prev && isMessageSuffix(prev, next)) {
+      const prepended = next.slice(0, next.length - prev.length);
+      groups = [...groupToolMessages(prepended), ...state.groups];
+    } else {
+      groups = groupToolMessages(next);
+    }
+    historyGroupStateRef.current = { messages: next, groups };
+    return groups;
+  }, [runtimeHistoryMessages]);
+  const groupedWindowRuns = useMemo(
+    () => groupToolMessages(controller.messages),
+    [controller.messages],
   );
+  const renderedRuns = useMemo(() => {
+    if (groupedHistoryRuns) {
+      return [...groupedHistoryRuns, ...groupedWindowRuns];
+    }
+    return groupToolMessages(paginatedMessages);
+  }, [groupedHistoryRuns, groupedWindowRuns, paginatedMessages]);
   // 阶段0补强：对未变化的 run 复用旧对象引用，历史 run 的 memo 比较退化为 O(1)
   const prevRenderedRunsRef = useRef<RenderMessage[] | undefined>(undefined);
   const reconciledRuns = useMemo(() => {
@@ -328,7 +425,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     return next;
   }, [renderedRuns]);
   // 渲染窗口（2026-08 黑屏治理）：贴底只挂尾部 3 轮；上滚查看历史也裁剪
-  // （controller.scrolledWindowTurns，初始 15 轮 + 「显示更早」逐步扩大）——
+  // （controller.scrolledWindowTurns，初始 3 轮，接近顶部按 3 轮 cohort 自动扩大）——
   // 历史全量放开挂载是大会话渲染进程内存峰值/黑屏的来源。数据仍在 atoms。
   const followingForTurnWindow = controller.autoScroll;
   const turnWindowTurns = followingForTurnWindow
@@ -342,6 +439,49 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     ),
     [followingForTurnWindow, reconciledRuns, turnWindowTurns],
   );
+  // 上滚窗口扩展：对比前后 displayRuns 的 id 序列，找出顶部新增段
+  // （窗口扩展 / 数据翻页都在顶部插入内容）。只标记「前缀新增」——
+  // 尾部追加（流式新轮）走 freshMessageIds，不在此处处理。
+  // 用 useLayoutEffect 而不是 useEffect：被动 effect 在浏览器 paint 后才补动画类，
+  // 新内容会先以正常透明度画出一帧再跳回 opacity:0，视觉上闪一下。
+  useLayoutEffect(() => {
+    const nextIds = displayRuns.map((item) =>
+      item.kind === "message" ? item.message.id : item.id,
+    );
+    const prevIds = prevDisplayRunsIdsRef.current;
+    prevDisplayRunsIdsRef.current = nextIds;
+    if (!prevIds || prevIds.length === 0 || reduceMotion) return; // 首帧/减少动态不播
+    // 找顶部新增段：从头部逐个对比，遇到第一个旧序列中存在的 id 为止
+    const prevSet = new Set(prevIds);
+    let added: string[] = [];
+    for (const id of nextIds) {
+      if (prevSet.has(id)) break;
+      added.push(id);
+    }
+    // 新增段为空（纯尾部变化/无变化）或过大（会话切换整段替换）时不播
+    if (added.length === 0 || added.length >= nextIds.length) return;
+    setTopFreshIds((current) => {
+      const next = new Set(current);
+      for (const id of added) next.add(id);
+      return next;
+    });
+    for (const id of added) {
+      const timer = window.setTimeout(() => {
+        topFreshTimersRef.current.delete(id);
+        setTopFreshIds((current) => {
+          if (!current.has(id)) return current;
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+      }, 400); // 动画约 280-300ms，保留 400ms 后清理
+      topFreshTimersRef.current.set(id, timer);
+    }
+  }, [displayRuns, reduceMotion]);
+  useEffect(() => () => {
+    for (const timer of topFreshTimersRef.current.values()) window.clearTimeout(timer);
+    topFreshTimersRef.current.clear();
+  }, []);
   // 「最后一个 agent-run」：live 挂载门的判定基准。不能按最后一条显示条目判定：
   // steer 排队期显示数组以用户消息结尾（新轮尚未产生首条消息），最后一条 agent-run
   // 才是真正的流式轮；反过来若门控放宽到任意轮，被 steer 打断的旧轮（尾部是空文本
@@ -356,11 +496,109 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     }
     return -1;
   }, [displayRuns]);
+
+  // ── 最新轮结束后的 1.5s idle 自动收起 ──
+  // 用户动鼠标/滚轮/键盘会取消；仅仍在跟底时安排。真正收起由 TurnRow 的
+  // useTurnExecution 完成，收完后回调这里，把本轮起始消息拉到视口中上方。
+  const wasAgentBusyRef = useRef(isAgentBusy);
+
+  useEffect(() => {
+    const latestRun = lastAgentRunIndex >= 0 ? displayRuns[lastAgentRunIndex] : undefined;
+    latestRunIdRef.current =
+      latestRun?.kind === "agent-run" ? latestRun.id : undefined;
+  }, [displayRuns, lastAgentRunIndex]);
+
+  const scrollFinalAnswerToUpperMiddle = controller.scrollFinalAnswerToUpperMiddle;
+  const handleLatestTurnAutoCollapsed = useCallback(() => {
+    turnSettleScrollCancelRef.current?.();
+    const runId = latestRunIdRef.current;
+    if (!runId) return;
+
+    let cancelled = false;
+    const cleanupActivity = () => {
+      window.removeEventListener("pointerdown", cancel, true);
+      window.removeEventListener("wheel", cancel, true);
+      window.removeEventListener("touchstart", cancel, true);
+      window.removeEventListener("keydown", cancel, true);
+    };
+    const cancel = () => {
+      if (cancelled) return;
+      cancelled = true;
+      if (turnSettleScrollTimerRef.current !== undefined) {
+        window.clearTimeout(turnSettleScrollTimerRef.current);
+        turnSettleScrollTimerRef.current = undefined;
+      }
+      cleanupActivity();
+      turnSettleScrollCancelRef.current = undefined;
+    };
+    window.addEventListener("pointerdown", cancel, { capture: true });
+    window.addEventListener("wheel", cancel, { passive: true, capture: true });
+    window.addEventListener("touchstart", cancel, { passive: true, capture: true });
+    window.addEventListener("keydown", cancel, { capture: true });
+    turnSettleScrollCancelRef.current = cancel;
+
+    // 等 Collapsible 高度动画基本结束再测目标位置；期间任何用户操作都会取消。
+    turnSettleScrollTimerRef.current = window.setTimeout(() => {
+      turnSettleScrollTimerRef.current = undefined;
+      cleanupActivity();
+      turnSettleScrollCancelRef.current = undefined;
+      scrollFinalAnswerToUpperMiddle(runId);
+    }, TURN_SETTLE_SCROLL_DELAY_MS);
+  }, [scrollFinalAnswerToUpperMiddle]);
+
+  useEffect(() => {
+    const wasBusy = wasAgentBusyRef.current;
+    wasAgentBusyRef.current = isAgentBusy;
+
+    const clearIdle = () => {
+      if (turnSettleIdleTimerRef.current !== undefined) {
+        window.clearTimeout(turnSettleIdleTimerRef.current);
+        turnSettleIdleTimerRef.current = undefined;
+      }
+      turnSettleScrollCancelRef.current?.();
+      idleActivityCleanupRef.current?.();
+      idleActivityCleanupRef.current = undefined;
+    };
+
+    if (isAgentBusy || !controller.autoScroll) {
+      clearIdle();
+      return;
+    }
+    // 只处理「运行中 → 停转」边沿；历史会话挂载/普通渲染不安排自动收起。
+    if (!wasBusy) return;
+
+    const cancelIdle = () => clearIdle();
+    window.addEventListener("pointermove", cancelIdle, { passive: true, capture: true });
+    window.addEventListener("pointerdown", cancelIdle, { capture: true });
+    window.addEventListener("wheel", cancelIdle, { passive: true, capture: true });
+    window.addEventListener("touchstart", cancelIdle, { passive: true, capture: true });
+    window.addEventListener("keydown", cancelIdle, { capture: true });
+    idleActivityCleanupRef.current = () => {
+      window.removeEventListener("pointermove", cancelIdle, true);
+      window.removeEventListener("pointerdown", cancelIdle, true);
+      window.removeEventListener("wheel", cancelIdle, true);
+      window.removeEventListener("touchstart", cancelIdle, true);
+      window.removeEventListener("keydown", cancelIdle, true);
+    };
+    turnSettleIdleTimerRef.current = window.setTimeout(() => {
+      turnSettleIdleTimerRef.current = undefined;
+      idleActivityCleanupRef.current?.();
+      idleActivityCleanupRef.current = undefined;
+      setLatestTurnAutoCollapseTick((tick) => tick + 1);
+    }, TURN_SETTLE_IDLE_COLLAPSE_MS);
+
+    return clearIdle;
+  }, [controller.autoScroll, isAgentBusy, sessionId]);
   const turnWindowActive = shouldWindowTimelineTurns(
     countAgentRunItems(reconciledRuns),
     turnWindowTurns,
   );
-  // 窗口轮数变化（上滚 3→15、点「显示更早」扩大）会在顶部插入内容，需补偿 scrollTop
+  // 方案 C（2026-12）渐进扩展：把「窗口是否仍可扩展」同步给 controller 的滚动监听——
+  // 接近窗口顶部且还有未挂载的已加载数据时，先自动扩窗口（本地 DOM，无网络往返），
+  // 而不是一次性把整个历史窗口挂出来导致滚动条骤变。渲染期写 ref，
+  // 与 ownerKeyRef 同模式；turnWindowActive 变化低频，不引发额外渲染。
+  controller.windowExpandableRef.current = turnWindowActive;
+  // 窗口轮数变化（上滚 3→6→9、点按钮扩大）会在顶部插入内容，需补偿 scrollTop
   // 保持视口内容不动；数据 prepend 的补偿由 controller 的 loadMoreAnchorRef 负责，
   // 两者按「窗口轮数变化 / 数据变化」分工，不会同帧双重补偿。贴底时由引擎接管不补偿。
   const turnWindowStateRef = useRef<{ windowed: boolean; height: number; turns: number }>({
@@ -575,7 +813,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
               if (turnWindowActive) {
                 controller.expandWindow();
               } else if (hasMoreMessages && canLoadMoreMessages) {
-                loadMoreMessages();
+                // 与滚动加载同一策略：新历史只出现在上方，视口不做「直接展示」跳动。
+                loadMoreMessages("scroll");
               }
             }}
             disabled={isLoadingMoreMessages}
@@ -600,15 +839,12 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                 <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
                 {t("timeline.loadingMore")}
               </>
-            ) : turnWindowActive
-                ? t("timeline.loadEarlierTurns", {
-                    count: countAgentRunItems(reconciledRuns) - turnWindowTurns,
-                  })
-                : controller.nextLoadIsHistory
-                  ? t("timeline.loadMoreTurns")
-                  : t("timeline.loadMoreHistory", {
-										count: totalMessageCount - paginatedMessages.length,
-									})}
+            ) : (
+              // 2026-12 统一文案：上滚窗口已由「接近顶部自动扩展」接管（无需再提示
+              // 剩余已加载轮数），按钮统一为「加载更多对话」——窗口可扩时点击本地扩
+              // 窗口，已挂满且有更早历史时点击翻页，对用户透明。
+              t("timeline.loadMoreTurns")
+            )}
           </button>
         </div>
       )}
@@ -679,6 +915,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     // 行头署名与后端一致：DSH 会话的回复标 dsh，而非 pi
                     backend={session?.backend ?? "pi"}
                     fresh={freshMessageIds.has(item.id)}
+                    topFresh={topFreshIds.has(item.id)}
                     onPreviewImage={props.onPreviewImage}
                     showThinking={props.showThinking}
                     isStreaming={isRunStreaming}
@@ -688,6 +925,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     agentRunning={isRunStreaming}
                     isLatestRun={index === displayRuns.length - 1}
                     isLastAgentRun={index === lastAgentRunIndex}
+                    autoCollapseTick={index === lastAgentRunIndex ? latestTurnAutoCollapseTick : 0}
+                    onAutoCollapsed={index === lastAgentRunIndex ? handleLatestTurnAutoCollapsed : undefined}
                     onOpenExternal={props.onOpenExternal}
                     onOpenFile={props.onOpenFile}
                     onDiffFile={props.onDiffFile}
@@ -705,6 +944,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     key={message.id}
                     message={message}
                     fresh={freshMessageIds.has(message.id)}
+                    topFresh={topFreshIds.has(message.id)}
                     onPreviewImage={props.onPreviewImage}
                     onOpenFile={props.onOpenFile}
                     onResendUserMessage={props.onResendUserMessage}

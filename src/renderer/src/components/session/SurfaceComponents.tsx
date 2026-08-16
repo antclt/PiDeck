@@ -756,6 +756,8 @@ export const UserBubble = memo(function UserBubble(props: {
 	message: ChatMessage;
 	/** 新消息入场动画：发送后乐观上屏的用户消息播放一次 */
 	fresh?: boolean;
+	/** 上滚窗口扩展时顶部新增的用户消息：播放「从顶部淡入」过渡 */
+	topFresh?: boolean;
 	onPreviewImage: (image: ImageContent) => void;
 	onOpenFile?: (path: string) => void;
 	onResendUserMessage?: (message: ChatMessage) => void;
@@ -911,7 +913,7 @@ export const UserBubble = memo(function UserBubble(props: {
 		);
 	};
 	return (
-		<article /* user-turn 为 e2e 选择器锚点 */ ref={rowRef} className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh animate-[message-enter_260ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}`} data-message-id={message.id}>
+		<article /* user-turn 为 e2e 选择器锚点 */ ref={rowRef} className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh animate-[message-enter_260ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}${props.topFresh ? " user-turn--top-fresh animate-[top-enter_280ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}`} data-message-id={message.id}>
 			{skills.length > 0 && (
 				<div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
 					{skills.map((name) => (

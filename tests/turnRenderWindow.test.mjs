@@ -106,3 +106,57 @@ test("timeline wires the turn mount window helper", () => {
   assert.match(source, /TIMELINE_SCROLLED_MAX_ITEMS/);
   assert.match(source, /displayRuns\.map/);
 });
+
+test("scrolled window starts small and expands by one cohort (2026-12 progressive window)", () => {
+  // 方案 C：上滚初始窗口与贴底同为 3 轮；历史轮由「滚动接近窗口顶部自动扩窗口」渐进挂载。
+  // DOM 3 / atom 9 / main 12 模型：扩窗与翻页共用同一 3 轮 cohort，避免数据页 +3、窗口却 +10。
+  assert.equal(windowing.TIMELINE_SCROLLED_TURN_LIMIT, 3);
+  assert.equal(windowing.TIMELINE_WINDOW_EXPAND_STEP, 3);
+  // 小窗口裁剪行为仍正确：11 轮数据、窗口 3 轮 → 只保留尾部 3 轮
+  const items = runs("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k");
+  assert.equal(windowing.shouldWindowTimelineTurns(11, 3), true);
+  const scrolled = windowing.selectTimelineTurnWindow(items, 3);
+  assert.deepEqual(scrolled.map((item) => item.id), ["i", "j", "k"]);
+  // 3 轮 cohort 扩展：窗口 6 轮 → 保留尾部 6 轮
+  const six = windowing.selectTimelineTurnWindow(items, 6);
+  assert.deepEqual(six.map((item) => item.id), ["f", "g", "h", "i", "j", "k"]);
+});
+
+test("resolveAutoExpandThreshold scales with viewport but floors at 120px", () => {
+  // 纯函数文件无依赖，直接编译即可
+  const threshold = compile(
+    "src/renderer/src/hooks/timeline/autoExpandThreshold.ts",
+  );
+  // 小视口：下限 120px 兜底，不过早触发
+  assert.equal(threshold.resolveAutoExpandThreshold(200), 120);
+  // 常规视口（约 800px）：0.4 比例 ≈ 320px，比固定 120px 提前 2.7 倍
+  assert.equal(threshold.resolveAutoExpandThreshold(800), 320);
+  // 大视口（分屏/全屏）：提前量随视口继续放大
+  assert.equal(threshold.resolveAutoExpandThreshold(1600), 640);
+});
+
+test("auto-expand wiring: controller exposes windowExpandableRef and listens near top", () => {
+  const controllerSource = readFileSync(
+    "src/renderer/src/hooks/useSessionTimelineController.ts",
+    "utf8",
+  );
+  // 滚动监听进入「接近顶部」区间（scrollTop ≤ 视口比例阈值，下限 120px）且窗口仍可
+  // 扩展时先扩窗口：触顶也优先消费 atom 已加载的 cohort，不因一把拉到顶而跳过本地扩窗。
+  assert.match(controllerSource, /TURN_WINDOW_AUTO_EXPAND_THRESHOLD/);
+  assert.match(controllerSource, /timeline\.scrollTop <= expandThreshold && windowExpandableRef\.current/);
+  assert.match(controllerSource, /resolveAutoExpandThreshold\(timeline\.clientHeight\)/);
+  assert.match(controllerSource, /windowExpandableRef/);
+  // 滚动触发的扩展走分批（每帧小批挂载），按钮/跳转走原子扩展
+  assert.match(controllerSource, /expandWindowBatched\(\)/);
+  assert.match(controllerSource, /requestAnimationFrame\(consumeExpandBatch\)/);
+  // 只在真实上滚时预取；滚动加载始终锚定当前视口，按钮加载才直接显示新页。
+  assert.match(controllerSource, /scrollingUp/);
+  assert.match(controllerSource, /loadMoreMessages\("scroll"\)/);
+  assert.match(controllerSource, /preserveAtTop/);
+  // 渲染层把 turnWindowActive 同步进 controller（窗口可扩判定）
+  const timelineSource = readFileSync(
+    "src/renderer/src/components/session/SessionMessageTimeline.tsx",
+    "utf8",
+  );
+  assert.match(timelineSource, /windowExpandableRef\.current = turnWindowActive/);
+});
