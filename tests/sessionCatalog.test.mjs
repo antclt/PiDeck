@@ -87,6 +87,66 @@ test("does not restore an unsubmitted draft after the catalog is reloaded", asyn
   }
 });
 
+// 回归：DSH 草稿必须跨重启保留（host 会话由 $DSH_HOME 持久化，catalog 只是映射）。
+// 仅清除 pi 后端（backend !== "dsh"）的草稿；dsh draft（含带 dshSessionId 的异常
+// 中间态）与 active 条目都应原样保留。
+test("keeps dsh drafts across reload while clearing pi drafts", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-dsh-draft-"));
+  const filePath = join(dir, "sessions.json");
+  const now = Date.now();
+  const entry = (overrides) => ({
+    projectId: "project-1",
+    title: "Entry",
+    source: "pi",
+    environment: "native",
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  });
+  const catalogFile = {
+    version: 1,
+    sessions: [
+      entry({ id: "dsh-draft", title: "DSH draft", backend: "dsh", status: "draft" }),
+      entry({
+        id: "dsh-draft-with-session",
+        title: "DSH draft (mid-activation)",
+        backend: "dsh",
+        status: "draft",
+        dshSessionId: "session-host-orphan",
+      }),
+      entry({ id: "pi-draft", title: "Pi draft", status: "draft" }),
+      entry({ id: "active", title: "Active", status: "active" }),
+    ],
+  };
+  try {
+    await writeFile(filePath, JSON.stringify(catalogFile), "utf8");
+    const catalog = new SessionCatalog(filePath);
+    await catalog.load();
+    const ids = new Map(
+      catalog.listEntries().map((item) => [item.id, item]),
+    );
+    assert.equal(ids.size, 3, "pi draft should be cleared on load");
+    assert.equal(ids.get("dsh-draft")?.status, "draft", "dsh draft without dshSessionId must survive");
+    assert.equal(
+      ids.get("dsh-draft-with-session")?.status === "draft" && ids.get("dsh-draft-with-session")?.dshSessionId === "session-host-orphan",
+      true,
+      "dsh draft with dshSessionId (abnormal mid-state) must survive",
+    );
+    assert.equal(ids.get("active")?.status, "active", "active entry preserved");
+    assert.equal(ids.get("pi-draft"), undefined, "pi draft removed from memory");
+    // 清理结果应落盘：磁盘上也不再有 pi draft
+    const persisted = JSON.parse(await readFile(filePath, "utf8"));
+    const persistedIds = persisted.sessions.map((item) => item.id);
+    assert.ok(persistedIds.includes("dsh-draft"), "dsh draft persisted after cleanup");
+    assert.ok(persistedIds.includes("dsh-draft-with-session"), "dsh mid-state draft persisted after cleanup");
+    assert.ok(!persistedIds.includes("pi-draft"), "pi draft not persisted after cleanup");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("persists an active session backend switch from pi to dsh", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-backend-"));

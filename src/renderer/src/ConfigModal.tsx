@@ -1713,7 +1713,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 						onDirtyChange={handleDshDirtyChange}
 					/>
 				</TabsContent>
-				<TabsContent value="pi" className="min-h-0 min-w-0 flex-1">
+				<TabsContent value="pi" className="flex min-h-0 min-w-0 flex-1">
 			{/* 默认浅色主题整页同底（bg-background），避免顶栏白 / 下方多层灰的割裂感。
 			  左侧导航 = shadcn Vertical Tabs：TabsList 竖排（orientation=vertical），
 			  组标题是非 trigger 的普通 div；窄屏（<820px）回退为横向导航。 */}

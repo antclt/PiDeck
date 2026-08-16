@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Brain, Check, ChevronDown, ChevronUp, MessageCircle, Minimize, X } from "lucide-react";
 import type { ChatMessage } from "../../../../shared/types";
 import { t, translateI18nDescriptor } from "../../i18n";
+import { classifyAskCardStatus } from "../../utils/askUi";
 import { formatDuration, formatTime, stripAnsi } from "./TimelineFormat";
 import { Textarea } from "../ui-shadcn/textarea";
 import { StackTrace } from "../ui-shadcn/stack-trace";
@@ -161,8 +162,9 @@ export const AskQuestionCard = memo(function AskQuestionCard(props: {
 	const uiRequest = meta?.uiRequest as Record<string, unknown> | undefined;
 	const status = String(meta?.status ?? "pending");
 	const response = meta?.response as Record<string, unknown> | undefined;
-	const answered = status === "answered" && response && !response.cancelled;
-	const cancelled = status === "cancelled" || status === "error";
+	const askState = classifyAskCardStatus(status, Boolean(response?.cancelled));
+	const answered = askState === "answered";
+	const cancelled = askState === "cancelled";
 
 	const [inputValue, setInputValue] = useState("");
 	const [cancelling, setCancelling] = useState(false);
@@ -217,6 +219,7 @@ export const AskQuestionCard = memo(function AskQuestionCard(props: {
 				title={t("ask.toolName")}
 				description={title || t("ask.defaultTitle")}
 				status={cancelling ? t("ask.cancelling") : t("ask.waiting")}
+				statusTone={cancelling ? "danger" : "active"}
 				onCancel={handleCancel}
 				cancelDisabled={cancelling}
 				cancelLabel={t("common.cancel")}

@@ -10,9 +10,11 @@ import {
   claimIdleHead,
   claimNextSteerPrompt,
   claimPrompt,
+  discardControlHint,
   enqueuePrompt,
   getQueuedPromptView,
   resolveClaimedPrompt,
+  retractControlHint,
   retractPrompt,
   retryFailedPrompt,
 } from "../src/renderer/src/utils/queuedPromptQueue.ts";
@@ -106,6 +108,19 @@ test("cancel and edit eligibility end at the atomic sending boundary", () => {
   assert.deepEqual(queues, unknownQueues);
   queues = acknowledgeUnknownPrompt(queues, "agentA", "unknown");
   assert.deepEqual(queues, {});
+});
+
+test("control hints explain disabled state for retract and discard", () => {
+  // 可撤回
+  assert.deepEqual(retractControlHint("pending"), { disabled: false });
+  assert.deepEqual(retractControlHint("failed"), { disabled: false });
+  // sending/unknown 撤回被禁用并给出原因
+  assert.deepEqual(retractControlHint("sending"), { disabled: true, reason: "sending" });
+  assert.deepEqual(retractControlHint("unknown"), { disabled: true, reason: "unknown" });
+  // 只有 sending 丢弃被禁用
+  assert.deepEqual(discardControlHint("pending"), { disabled: false });
+  assert.deepEqual(discardControlHint("unknown"), { disabled: false });
+  assert.deepEqual(discardControlHint("sending"), { disabled: true, reason: "sending" });
 });
 
 test("unknown delivery cannot be reclaimed or retried after a deferred response fails", async () => {

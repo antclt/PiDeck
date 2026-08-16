@@ -11,10 +11,12 @@ import { isSameSessionPath } from "../agentListDisplay";
 import { t } from "../i18n";
 
 /**
- * 新建会话默认后端（C21 统一真相源）：产品决策为 DSH（深融合内嵌，新用户默认体验）。
+ * 新建会话默认后端（C21 统一真相源）：缺省为 pi（经典后端，2026-12 兼容期
+ * 从 dsh 回调）。用户可在设置「默认 Agent 后端」中切换为 dsh；运行时值由
+ * useSessionActions 的 options.defaultBackend 注入（App 从 settings 读取）。
  * 引导页/匿名会话/侧栏「+」都经这里或显式传值，避免后端默认值分裂（F2）。
  */
-export const DEFAULT_AGENT_BACKEND: AgentBackend = "dsh";
+export const DEFAULT_AGENT_BACKEND: AgentBackend = "pi";
 
 export type RefreshProjectSessions = (
   projectId: string,
@@ -35,6 +37,8 @@ export interface UseSessionActionsOptions {
   removeSessionState: (sessionId: string) => void;
   removeSessionComposerState: (sessionId: string) => void;
   refreshProjectSessions: RefreshProjectSessions;
+  /** 新建会话默认后端（设置项 defaultAgentBackend；缺省走 DEFAULT_AGENT_BACKEND）。 */
+  defaultBackend?: AgentBackend;
   api: {
     sessions: {
       copyRecord: (sessionId: string) => Promise<{ cancelled?: boolean; targetSessionId?: string }>;
@@ -229,8 +233,8 @@ export function useSessionActions(options: UseSessionActionsOptions) {
   async function createSessionDraft(
     projectId = activeProjectId,
     preferences: SessionLaunchPreferences = {},
-    // 新建会话默认后端：产品决策为 DSH（C21 统一真相源；旧会话缺省仍按 pi 语义读取）。
-    backend: AgentBackend = DEFAULT_AGENT_BACKEND,
+    // 新建会话默认后端：设置项 defaultAgentBackend（C21 统一真相源；旧会话缺省仍按 pi 语义读取）。
+    backend: AgentBackend = options.defaultBackend ?? DEFAULT_AGENT_BACKEND,
   ): Promise<SessionRecord | undefined> {
     if (!projectId || creatingSessionDraftRef.current.has(projectId)) return undefined;
     const project = projects.find((item) => item.id === projectId);
@@ -257,7 +261,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
   async function createAnonymousSession(
     projectId = activeProjectId,
     preferences: SessionLaunchPreferences = {},
-    backend: AgentBackend = DEFAULT_AGENT_BACKEND,
+    backend: AgentBackend = options.defaultBackend ?? DEFAULT_AGENT_BACKEND,
   ): Promise<SessionRecord | undefined> {
     if (!projectId || creatingSessionDraftRef.current.has(projectId)) return undefined;
     const project = projects.find((item) => item.id === projectId);

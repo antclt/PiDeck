@@ -35,6 +35,23 @@ export function hasSelectableOptions(request: AgentUiRequest | undefined): boole
 }
 
 /**
+ * 归类 ask 卡片的终态（供卡片决定是否继续渲染交互区）：
+ * - answered：明确收到回答且未取消
+ * - cancelled：已取消或出错（error 视为取消，避免残留可交互输入误导用户）
+ * - waiting：仍在等待用户响应
+ * cancelled 由调用方从 response 推导（answered 状态但 response.cancelled=true 视为取消）。
+ */
+export function classifyAskCardStatus(
+	status: string | undefined,
+	cancelled: boolean,
+): "waiting" | "answered" | "cancelled" {
+	const normalized = status ?? "pending";
+	if (normalized === "answered" && !cancelled) return "answered";
+	if (normalized === "cancelled" || normalized === "error") return "cancelled";
+	return "waiting";
+}
+
+/**
  * 构造 4 种提问方式的回答 payload（与 pi extension_ui_response 协议一致）：
  * - select/input/editor → { value }
  * - confirm → { confirmed, value }

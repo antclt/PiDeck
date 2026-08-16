@@ -33,13 +33,16 @@ import { TimelineMarker } from "./TimelineMarker";
 import { LiveDuration } from "./LiveDuration";
 import { getToolPhraseFromArgs } from "./timeline/toolPhrase";
 import { ToolResult } from "../agents/tool-result";
+import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
 import {
   formatDuration,
   getToolDetailText,
+  getToolDiffTarget,
   getToolExitCode,
   getToolName,
   getToolStatus,
+  fileChangeToDiffLines,
 } from "./TimelineFormat";
 
 export type DiffFileHandler = (
@@ -256,6 +259,10 @@ export const ToolCard = memo(function ToolCard(props: {
 	const tone = status === "stopped" ? "ok" : getToolTone(props.message);
 	const subtitle = getToolSubtitle(props.message);
 	const kindLabel = getToolKindLabel(toolName);
+	// write/edit/create/patch 工具：从参数直接取 diff 目标（写整文件新内容 /
+	// 编辑的 oldText→newText 变动区），展开区优先展示 diff 而不是原始结果文本。
+	const diffTarget = getToolDiffTarget(props.message);
+	const showDiff = diffTarget !== undefined;
 	// 学 Proma：折叠态显示语义短语（如「读取 foo.ts」）而非完整命令行
 	const phrase = getToolPhraseFromArgs(toolName, props.message.meta?.args);
 	const displayLabel = status === "running" ? phrase.loadingLabel : phrase.label;
@@ -407,19 +414,36 @@ export const ToolCard = memo(function ToolCard(props: {
 							</div>
 						</div>
 					) : (
-						<ToolResult
-							showHeader={false}
-							tool={toolIcon(toolName)}
-							title={toolName}
-							status={status === "running" ? "running" : status === "error" ? "error" : "success"}
-							kind={toolName.toLowerCase().includes("bash") || toolName.toLowerCase().includes("shell") ? "terminal" : "custom"}
-							maxHeight={320}
-							copyText={displayText}
-							copyClassName="tool-card-copy"
-							contentClassName="text-text-tertiary"
-						>
-							{displayText}
-						</ToolResult>
+						<>
+							{showDiff && diffTarget && (
+								// 文件工具内联 diff（issue-兼容期：edit/write 的工具卡直接看改动，
+								// 不必再点开右侧差异查看器）。折叠态渲染行；maxHeight 上限防长文件撑爆卡片。
+								<div className="mb-1.5">
+									<FileDiff
+										className="min-w-0"
+										file={diffTarget.path}
+										lines={fileChangeToDiffLines(diffTarget)}
+										status="complete"
+										defaultOpen={false}
+										maxHeight={200}
+										language="diff"
+									/>
+								</div>
+							)}
+							<ToolResult
+								showHeader={false}
+								tool={toolIcon(toolName)}
+								title={toolName}
+								status={status === "running" ? "running" : status === "error" ? "error" : "success"}
+								kind={toolName.toLowerCase().includes("bash") || toolName.toLowerCase().includes("shell") ? "terminal" : "custom"}
+								maxHeight={320}
+								copyText={displayText}
+								copyClassName="tool-card-copy"
+								contentClassName="text-text-tertiary"
+							>
+								{displayText}
+							</ToolResult>
+						</>
 					)}
 					{isTruncated && !fullText && (
 						// 截断提示后的按需加载入口：内容完整与否由主进程决定（内存缓存/会话文件），

@@ -363,3 +363,25 @@
   响应原样返回。
 - 真机验证（需真实 Electron + DSH host）：安装→运行→停止→卸载全链路，以及 host
   重启后清单清空。
+
+
+---
+
+## 8. 2026-12 兼容期修复清单（用户实测反馈轮）
+
+> 用户实测反馈的一批问题，已在本轮全部处理；每条含根因与落点，供回归验证。
+
+| # | 问题 | 根因 | 修复 |
+|---|---|---|---|
+| H1 | **轨迹面板不支持 dsh** | DSH 会话没有 pi 会话文件，`sessionsCatalogReadProcessEvents` 对 dsh 恒返回空数组，轨迹账本缺过程记录（模型切换/权限/plan/goal/压缩） | 新增 `src/main/dsh/dshProcessEvents.ts`（纯函数收集器）：mux 事件流按语义收集 modelChange（request/context）/ permission / plan / goal / compaction（/compact 命令回合）→ `DshAgentManager.readProcessEvents` → sessionIpc dsh 分支（运行时会话有效）；单测 `tests/dshProcessEvents.test.mjs` |
+| H2 | **上下文圆环不支持 dsh** | DSH runtime state 无 contextPercent/contextTokens/contextWindow，圆环（ContextMeter）无 capacity 不渲染 | 接入 host `contextPressure`/`contextBreakdown` 投影：mux `session/projection` 帧实时推送（`applyProjectionFrame`）+ attach/restart 时 list projections 初值（`parseContextPressureProjection`/`parseContextBreakdownProjection`）→ getRuntimeState 映射 percent/tokens/window/messageTokens，圆环与 dsh-web 同源 |
+| H3 | **草稿本全屏遮挡** | `.scratch-pad-overlay` 全屏遮罩 + 背景盖住整个应用 | 改为悬浮便签：overlay `pointer-events:none` 不拦截点击、去掉遮罩底色；面板右上角新增 X 关闭（Escape/⌘⇧S 保留） |
+| H4 | **edit/write 工具卡不显示 diff** | ToolCard 展开区只渲染工具结果文本 | ToolCard 展开区对 write/edit/create/patch 优先渲染内联 FileDiff（复用 `getToolDiffTarget`/`fileChangeToDiffLines`），结果文本保留在其下 |
+| H5 | **plan 模式回车不发送** | Enter 意图判定与 composer 模式无关，sendShortcut 非 enter-send 时 plan 模式回车只换行 | `composerBehavior.ts` 新增 `isPlanModeSendKey`：plan 模式（ComposerAgentMode==="plan"）下无修饰键回车强制发送（Shift/Ctrl+Enter 仍换行，IME 合成忽略）；controller onKeyDown 接入；单测补 `tests/composerBehavior.test.mjs` |
+| H6 | **更新无法弹窗** | 更新检查改为「仅设置页手动触发」后，启动不再自动检查，有新版也不弹窗 | App 设置加载完成后自动 `appUpdate.check("auto")` 一次（`disableUpdateCheck` 门控，只跑一次，无周期定时器）；测试 `tests/appUpdateManualCheck.test.mjs` 随策略更新 |
+| H7 | **web 端 dsh 会话未分组 / 重启后会话丢失** | WebSidebar 按 projectId 分组，孤儿记录（projectId 无匹配项目）不可见；catalog 草稿清理（见 H7b） | WebSidebar 增加「未分组」兜底分组（i18n `web.ungrouped`）；catalog 草稿清理只删 pi 后端 draft，dsh draft 保留（host 数据由 $DSH_HOME 持久化）；回归测试 `tests/sessionCatalog.test.mjs` |
+| H8 | **自定义供应商无法保存** | DSH 配置保存带 `expectedRevision` CAS；并发写入（host 预设/dsh-web/另一 tab）使页面 revision 过期后，host 以 `SETTINGS_CONFLICT` 拒绝写入，而页面沿用同一过期 revision 重试会被**永久拒绝**（草稿无法保存） | `DshConfigTab.saveNamespace` 冲突时刷新 namespace（最新 revision）后重试一次（patch 为部分合并，安全）；非冲突错误原样上抛并保留草稿 |
+| H9 | **排队/ask/目标/后台任务/子代理展示优化** | 五类卡片信息缺失、状态不可辨 | 队列项状态图标与撤回/重试、ask 卡片等待/已答/取消三态、目标卡片 phase 语义色+轮次进度、后台任务通知带会话/摘要、子代理 running 指示与模式徽标（渲染层多文件，见提交） |
+| H10 | **历史会话加载（web 端 DSH 历史空态）** | Web 服务的 `readSessionMessages`/`readSessionMessagePage` 依赖只处理 pi 会话（有 filePath），DSH 会话（无 filePath）直接返回空数组/空页——桌面 IPC 已接 `readDshHistoryPage`，Web 侧独立依赖未接通 | `src/main/index.ts` 给两个 web 依赖补 DSH 分支，走 `dshAgentManager.readHistoryPage`（与 IPC 同源；未挂载 DSH 后端时安全回退空）；Web 前端无需改动 |
+| H11 | **会话结束不展开工具调用、思考打字机残留** | useTurnExecution 在 agent 停转 1.5s 后自动收起；useSmoothStream 流式结束后仍按 drain 速率逐字排空 | 结束边沿（running→停转，有最终回答、最新轮、无手动 override）改为展开执行过程；`isStreaming` 置 false 时立即取消 rAF、排空队列、直接显示全文（打字机只在流式期间运行）；测试 `tests/timelineUxPolish.test.mjs` 随策略更新 |
+| H12 | **默认 Agent 后端不可配置** | 新建会话默认后端硬编码 dsh（`DEFAULT_AGENT_BACKEND`，引导页/侧栏/并行问询三处） | 新增设置项 `defaultAgentBackend`（默认 pi，用户可切 dsh）：SettingsStore 默认值、CommonTab 选择器、useSessionActions 注入、引导页与 AskPanel 跟随；i18n 中英同步 |

@@ -59,3 +59,20 @@ test("Project actions are sibling buttons instead of nested controls", () => {
 	assert.match(webSidebar, /project-row-actions[\s\S]*?<Button/);
 	assert.doesNotMatch(webSidebar, /project-row-actions[\s\S]*?<span[\s\S]*?role="button"/);
 });
+
+// 回归：孤儿 catalog 记录（projectId 不匹配任何项目）必须出现在「未分组」兜底分组里，
+// 而不是在侧栏完全不可见。会话行与项目内会话复用同一渲染路径（含运行态圆点 + 点击打开）。
+test("Web sidebar groups orphan sessions under an ungrouped fallback", () => {
+	assert.match(webSidebar, /t\("web\.ungrouped"\)/);
+	assert.match(webSidebar, /projectIds\.has\(session\.projectId\)/);
+	assert.match(
+		webSidebar,
+		/const ungroupedSessions = useMemo\(/,
+		"ungrouped sessions must be derived from sessions whose projectId matches no registered project",
+	);
+	// 未分组分组用与项目内会话相同的 SessionRows 渲染（运行态圆点 + 可点击打开）。
+	assert.match(webSidebar, /sessions=\{ungroupedSessions\}/);
+	assert.match(webSidebar, /onSelect=\{props\.onSelectSession\}/);
+	// 未分组分组不会在无孤儿记录时显示，避免空标题占位。
+	assert.match(webSidebar, /ungroupedSessions\.length > 0/);
+});

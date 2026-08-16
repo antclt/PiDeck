@@ -3,7 +3,7 @@ import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
 import { defaultRemarkPlugins } from "streamdown";
-import { Download, Eye, FilePlus, PanelRightOpen, Pencil, Trash2 } from "lucide-react";
+import { Download, Eye, FilePlus, PanelRightOpen, Pencil, Trash2, X } from "lucide-react";
 import { MarkdownStream } from "../session/MarkdownStream";
 import { continueListOnNewline, normalizeOrderedLists, prepareTaskListPreview } from "./scratchPadLists";
 import type { Plugin } from "unified";
@@ -46,6 +46,8 @@ type ScratchPadPanelProps = {
 	onSelectDraft: (draftPath: string) => void;
 	onCreateDraft: () => void;
 	onDeleteDraft: (draftPath: string) => void;
+	/** 关闭草稿本（不再有全屏遮罩，关闭入口收敛到面板右上角 X / Escape / ⌘⇧S）。 */
+	onClose: () => void;
 };
 
 /*
@@ -141,6 +143,7 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 		onSelectDraft,
 		onCreateDraft,
 		onDeleteDraft,
+		onClose,
 	} = props;
 
 	const empty = !content.trim();
@@ -234,6 +237,12 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 							onClick={() => setShowFileList(v => !v)}
 						/>
 					)}
+					{/* 关闭按钮：悬浮便签无全屏遮罩，X 是唯一可见的关闭入口（Escape/⌘⇧S 仍有效） */}
+					<ToolButton
+						icon={<X size={15} />}
+						label={t("common.close")}
+						onClick={onClose}
+					/>
 				</div>
 			</header>
 

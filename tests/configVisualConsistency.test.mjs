@@ -121,7 +121,10 @@ test("skill list is not accidentally filtered by the new-skill destination", () 
 test("skill table uses real aligned columns, not a colSpan card", () => {
   assert.match(skillTableRow, /<TableRow>/);
   assert.match(skillTableRow, /<TableCell className="min-w-0">/);
-  assert.match(skillTableRow, /<TableCell className="whitespace-normal break-words/);
+  // 描述列：min-w 保底（窗口拉小不被挤压）+ 长描述 3 行截断（line-clamp 包在
+  // 内部 span 上，避免 display:-webkit-box 破坏 table-cell 布局），title 悬浮看全文
+  assert.match(skillTableRow, /<TableCell className="min-w-52 whitespace-normal break-words/);
+  assert.match(skillTableRow, /<span className="block line-clamp-3">/);
   assert.match(skillTableRow, /<TableCell className="text-right">/);
   // 操作按钮直接放在 TableCell 内，不再包一层可点击的卡片 button。
   assert.doesNotMatch(skillTableRow, /<button[\s\S]*skill-rename-inline[\s\S]*<Button/);

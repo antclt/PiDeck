@@ -143,15 +143,17 @@ export function useSmoothStream({
 	// ?????????????????????? dump ???? rAF ?????
 	useEffect(() => {
 		if (isStreaming) return;
-		if (rafRef.current) return; // rAF ????????????
-		if (chunkQueueRef.current.length > 0) {
-			displayedRef.current += chunkQueueRef.current.join("");
-			chunkQueueRef.current = [];
+		// 流式结束（会话/回合收口）：立即收口，不再逐字排空——
+		// 打字机只在流式期间运行，「会话结束后思考打字机不触发」（2026-12 兼容期）。
+		// 取消在途 rAF、清空队列、直接显示全文（终态文本权威）。
+		if (rafRef.current) {
+			cancelAnimationFrame(rafRef.current);
+			rafRef.current = null;
 		}
-		if (displayedRef.current !== content) {
-			displayedRef.current = content;
-		}
-		setDisplayedContent(displayedRef.current);
+		chunkQueueRef.current = [];
+		displayedRef.current = content;
+		prevContentRef.current = content;
+		setDisplayedContent(content);
 	}, [isStreaming, content]);
 
 	// ????

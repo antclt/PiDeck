@@ -35,6 +35,60 @@ function matchesSearch(value: string, search: string): boolean {
 	return !search || value.toLowerCase().includes(search.toLowerCase());
 }
 
+const UNGROUPED_GROUP_KEY = "__web_ungrouped__";
+
+/** 未分组会话列表的会话行 + 「更多会话」折叠按钮。 */
+function SessionRows(props: {
+	sessions: WebSession[];
+	runtimeFor: (sessionId: string) => WebRuntime | undefined;
+	activeSessionId: string;
+	showAll: boolean;
+	onToggleShowAll: () => void;
+	onSelect: (sessionId: string) => void;
+}) {
+	const { sessions, runtimeFor, activeSessionId, showAll, onToggleShowAll, onSelect } = props;
+	const visible = showAll ? sessions : sessions.slice(0, 5);
+	const hiddenCount = sessions.length - visible.length;
+	return (
+		<>
+			{visible.map((session) => {
+				const runtime = runtimeFor(session.id);
+				return (
+					<button
+						type="button"
+						key={session.id}
+						className={cn(
+							sessionRowClass,
+							"session-row",
+							session.id === activeSessionId && "active border-border-strong bg-accent/20 text-foreground shadow-sm",
+						)}
+						title={session.title}
+						onClick={() => onSelect(session.id)}
+					>
+						{renderRuntimeStatusDot(runtime?.status)}
+						<div className="conversation-body min-w-0 flex-1">
+							<div className="conversation-title flex min-w-0 items-center gap-1.5">
+								<strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>
+									{session.title || t("common.untitled")}
+								</strong>
+							</div>
+						</div>
+					</button>
+				);
+			})}
+			{hiddenCount > 0 && (
+				<button
+					type="button"
+					className="conversation session-row relative flex min-h-7 w-full items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-0 text-center text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+					onClick={onToggleShowAll}
+				>
+					{showAll ? t("common.collapse") : t("web.moreSessions", { count: hiddenCount })}
+				</button>
+			)}
+		</>
+	);
+}
+
 /** Web 侧栏与桌面 Tab/侧栏复用同一组状态点，纯历史记录不显示状态。 */
 function renderRuntimeStatusDot(status?: string) {
 	const dotClass = sessionStatusDotClass(status);
@@ -116,6 +170,22 @@ export function WebSidebar(props: {
 		});
 	};
 
+	// 未分组会话 = projectId 不匹配任何已登记项目的 catalog 记录（孤儿/项目被删等）。
+	// 兜底分组始终可见，不会被项目折叠状态吞掉；搜索时仍按标题过滤。
+	const searching = search.trim().length > 0;
+	const projectIds = useMemo(() => new Set(state.projects.map((project) => project.id)), [state.projects]);
+	const ungroupedSessions = useMemo(
+		() =>
+			sortedSessions.filter(
+				(session) =>
+					!projectIds.has(session.projectId) &&
+					matchesSearch(session.title || session.id, search.trim()),
+			),
+		[sortedSessions, projectIds, search],
+	);
+	const showAllUngrouped = searching || expandedSessionProjects.has(UNGROUPED_GROUP_KEY);
+	const toggleUngroupedExpand = () => toggleSessionExpand(UNGROUPED_GROUP_KEY);
+
 	const submitProject = async () => {
 		const path = projectPath.trim();
 		if (!path || projectBusy) return;
@@ -138,8 +208,7 @@ export function WebSidebar(props: {
 		await props.onDeleteProject(project.id);
 	};
 
-	// 搜索时自动展开全部命中项目；普通项目展开状态完全由用户控制
-	const searching = search.trim().length > 0;
+	// 搜索/切换会话时自动展开对应项目；普通项目展开状态完全由用户控制。
 	const activeSessionProjectId = state.sessions.find(
 		(session) => session.id === activeSessionId,
 	)?.projectId;
@@ -245,9 +314,6 @@ export function WebSidebar(props: {
 							.filter((session) => matchesSearch(session.title || session.id, search.trim()));
 						const expanded = searching || expandedProjects.has(project.id);
 						const showAllSessions = searching || expandedSessionProjects.has(project.id);
-						// 默认只展示最近 5 条，超过部分折叠在「更多会话」按钮后，避免列表一次性全部加载
-						const visibleSessions = showAllSessions ? projectSessions : projectSessions.slice(0, 5);
-						const hiddenSessionCount = projectSessions.length - visibleSessions.length;
 						const projectName = displayProjectName(project);
 						const creating = creatingProjectId === project.id;
 						return (
@@ -309,42 +375,14 @@ export function WebSidebar(props: {
 								</div>
 								{expanded && (
 									<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
-										{visibleSessions.map((session) => {
-											const runtime = runtimeFor(session.id);
-											return (
-												<button
-													type="button"
-													key={session.id}
-													className={cn(
-														sessionRowClass,
-														"session-row",
-														session.id === activeSessionId && "active border-border-strong bg-accent/20 text-foreground shadow-sm",
-													)}
-													title={session.title}
-													onClick={() => props.onSelectSession(session.id)}
-												>
-													{renderRuntimeStatusDot(runtime?.status)}
-													<div className="conversation-body min-w-0 flex-1">
-														<div className="conversation-title flex min-w-0 items-center gap-1.5">
-															<strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>
-																{session.title || t("common.untitled")}
-															</strong>
-														</div>
-													</div>
-												</button>
-											);
-										})}
-										{hiddenSessionCount > 0 && (
-											<button
-												type="button"
-												className="conversation session-row relative flex min-h-7 w-full items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-0 text-center text-caption text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-												onClick={() => toggleSessionExpand(project.id)}
-											>
-												{showAllSessions
-													? t("common.collapse")
-													: t("web.moreSessions", { count: hiddenSessionCount })}
-											</button>
-											)}
+										<SessionRows
+											sessions={projectSessions}
+											runtimeFor={runtimeFor}
+											activeSessionId={activeSessionId}
+											showAll={showAllSessions}
+											onToggleShowAll={() => toggleSessionExpand(project.id)}
+											onSelect={props.onSelectSession}
+										/>
 										{projectSessions.length === 0 && (
 											<div className="px-6 py-1 text-caption text-muted-foreground">
 												{t("web.noSessions")}
@@ -355,7 +393,38 @@ export function WebSidebar(props: {
 							</div>
 						);
 					})}
-					{state.projects.length === 0 && (
+					{/* 未分组兜底：孤儿 catalog 记录（projectId 缺失、项目被删除/从未注册等）
+						无法匹配任何项目，不能让它们在侧栏完全不可见。收集到独立分组下，保留
+						运行态圆点与点击打开能力，与项目内会话同等待遇。 */}
+					{ungroupedSessions.length > 0 && (
+						<div className="project-group mb-2">
+							<div className="project-row flex min-w-0 items-center gap-0.5">
+								<div
+									className={cn(projectRowClass, "cursor-default bg-muted/40")}
+									title={t("web.ungroupedHint")}
+								>
+									<div className="conversation-body min-w-0 flex-1">
+										<div className="conversation-title flex min-w-0 items-center gap-1.5">
+											<strong className="min-w-0 flex-1 truncate font-medium">
+												{t("web.ungrouped")}
+											</strong>
+										</div>
+									</div>
+								</div>
+							</div>
+							<div className="project-children mt-2 flex flex-col gap-2 px-1 pb-1">
+								<SessionRows
+									sessions={ungroupedSessions}
+									runtimeFor={runtimeFor}
+									activeSessionId={activeSessionId}
+									showAll={showAllUngrouped}
+									onToggleShowAll={() => toggleUngroupedExpand()}
+									onSelect={props.onSelectSession}
+								/>
+							</div>
+						</div>
+					)}
+					{state.projects.length === 0 && ungroupedSessions.length === 0 && (
 						<div className="px-2 py-3 text-caption text-muted-foreground">
 							{t("app.emptyNoProject")}
 						</div>

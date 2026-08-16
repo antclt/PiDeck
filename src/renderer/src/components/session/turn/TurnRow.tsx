@@ -39,7 +39,8 @@ const NO_TURN_TICK_ATOM = atom(0);
  * - 唯一「执行过程」折叠汇总按钮（run 开头，纯数字）；
  * - 思考/工具/中间回答原位穿插，共用一个 run 级折叠开关；
  * - 最终回答常驻、永不折叠；
- * - 流式中自动展开（实时滚出），run 结束后 1.5s 自动收起。
+ * - 流式中自动展开（实时滚出），run 结束后展开执行过程（2026-12：会话结束展开工具调用，
+ *   取代旧的 1.5s 自动收起；历史已完成轮保持折叠）。
  *
  * Live 正文由 InterimAnswer(mode=live) → AnswerOutput 订阅 atom，本组件不订 streaming store。
  */
@@ -171,7 +172,7 @@ export const TurnRow = memo(
 	}, [liveInterimId]);
 
 	// run 级折叠状态（一个开关控制全部思考/工具/中间回答步骤）
-	// hasFinalAnswer：无最终回答的 run 不自动收起（中间回答是唯一输出，不能被折叠隐藏）
+	// hasFinalAnswer：无最终回答的 run 不自动展开（中间回答是唯一输出，不能被折叠隐藏）
 	const hasFinalAnswer = displayItems.some((item) => item.kind === "final-answer");
 	// 流式对话行为设置（App 同步写入）+ 新一轮信号（composer 发送成功后 bump）。
 	// 设置变化低频；tick 经 atomFamily selectAtom 隔离，跨会话 bump 不触发本行重渲染。

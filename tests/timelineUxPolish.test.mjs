@@ -38,13 +38,15 @@ test("tool card name uses medium weight like process summary, not bold 650", () 
   assert.match(toolCard, /tool-activity-name/);
 });
 
-test("auto-collapse process waits 1.5s after agent stops (not merely endedAt)", () => {
-  assert.match(turnExecution, /}, 1500\)/);
-  assert.match(turnExecution, /1\.5s 后自动收起/);
-  // 收起只改折叠态，不再回调滚动（对准最终回答会解锁跟底并点亮回底按钮）
+test("auto-expand process when the agent stops (session end shows tool calls)", () => {
+  // 2026-12 兼容期：会话结束展开执行过程（工具调用/思考可见），取代旧的 1.5s 自动收起
+  assert.doesNotMatch(turnExecution, /}, 1500\)/);
+  assert.doesNotMatch(turnExecution, /1\.5s 后自动收起/);
+  // 结束展开只改折叠态，不再回调滚动（对准最终回答会解锁跟底并点亮回底按钮）
   assert.doesNotMatch(turnExecution, /autoCollapseTick/);
-  // 以 agentRunning 停转为准，避免流式中 endedAt>0 误触发收起
-  assert.match(turnExecution, /if \(opts\.agentRunning \|\| userOverrideRef\.current\) return;/);
+  // 只在「运行中 → 停转」边沿展开：历史会话挂载（从未 running）保持折叠初始态
+  assert.match(turnExecution, /const justFinished = wasRunningRef\.current && !running;/);
+  assert.match(turnExecution, /justFinished \|\| userOverrideRef\.current\) return;/);
   // 上升沿才强制展开，避免用户收起后被 busy 抖动撑开
   assert.match(turnExecution, /running && !wasRunningRef\.current/);
   assert.match(turnExecution, /setStepsVisibleFromUser/);

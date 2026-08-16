@@ -170,6 +170,9 @@ Gitmoji 对应关系：
   // ── 更新检测：默认正常检测，用户可手动关闭忽略更新 ──
   disableUpdateCheck: false,
 
+  // ── Agent 后端：默认 pi（经典后端），用户可在设置中切换为 dsh ──
+  defaultAgentBackend: "pi",
+
   // ── Agent 启动诊断/加速：offline 默认开；扩展/技能默认加载 ──
   piRpcOffline: true,
   piRpcNoExtensions: false,

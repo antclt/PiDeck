@@ -68,6 +68,26 @@ test("pickActiveAskRequest: 过滤 responding 与 pending 之外的请求", () =
 	assert.equal(picked, active);
 });
 
+test("classifyAskCardStatus: 明确回答视为 answered", () => {
+	const { classifyAskCardStatus } = loadAskUi();
+	assert.equal(classifyAskCardStatus("answered", false), "answered");
+	// answered 状态但 response.cancelled=true：两者都未成定论，按历史行为视为仍待确认（waiting）
+	assert.equal(classifyAskCardStatus("answered", true), "waiting");
+});
+
+test("classifyAskCardStatus: 取消或出错视为 cancelled", () => {
+	const { classifyAskCardStatus } = loadAskUi();
+	assert.equal(classifyAskCardStatus("cancelled", false), "cancelled");
+	assert.equal(classifyAskCardStatus("error", false), "cancelled");
+});
+
+test("classifyAskCardStatus: 其余（含缺省）视为 waiting", () => {
+	const { classifyAskCardStatus } = loadAskUi();
+	assert.equal(classifyAskCardStatus("pending", false), "waiting");
+	assert.equal(classifyAskCardStatus(undefined, false), "waiting");
+	assert.equal(classifyAskCardStatus("responding", false), "waiting");
+});
+
 const json = (value) => JSON.stringify(value);
 
 test("buildAskResponse: select/input/editor 回传 value", () => {

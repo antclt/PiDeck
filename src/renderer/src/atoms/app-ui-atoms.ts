@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import type { AgentBackend } from "../../../shared/types";
 import {
   defaultExpandedSidebarProjects,
   readExpandedSidebarProjects,
@@ -6,6 +7,13 @@ import {
 
 /** Settings overlay visibility is shared by Sidebar, Pi environment flow, and Session surface. */
 export const settingsOpenAtom = atom(false);
+
+/**
+ * 新建会话默认后端（设置项 defaultAgentBackend 的渲染层快照）。
+ * App 在 settings 变化时写入；并行问询等不持有 settings props 的根级组件读取。
+ * 默认 "pi"（与 SettingsStore.defaultSettings 保持一致，2026-12 兼容期调整）。
+ */
+export const defaultAgentBackendAtom = atom<AgentBackend>("pi");
 
 /**
  * 侧栏展开的项目 id 集合（有 id = 展开）。

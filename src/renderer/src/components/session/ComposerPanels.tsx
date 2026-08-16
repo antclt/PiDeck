@@ -1,10 +1,13 @@
 import {
+  AlertTriangle,
   ArrowUp,
   ChevronDown,
+  Clock,
   LoaderCircle,
   Pencil,
   Square,
   X,
+  XCircle,
 } from "lucide-react";
 import type { RefObject } from "react";
 import type { ImageContent } from "../../../../shared/types";
@@ -12,6 +15,8 @@ import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
 import {
   canDiscardQueuedPrompt,
   canRetractQueuedPromptToInput,
+  discardControlHint,
+  retractControlHint,
 } from "../../utils/queuedPromptQueue";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
@@ -115,7 +120,25 @@ export function QueuedPromptPanel(props: {
             const status = prompt.status ?? "pending";
             const previewText =
               prompt.displayText.trim() || t("app.queuedImageMessage");
+            const retractHint = retractControlHint(status);
+            const discardHint = discardControlHint(status);
+            const retractTitle = [
+              t("app.retractToInput"),
+              !retractHint.disabled
+                ? ""
+                : retractHint.reason === "unknown"
+                  ? t("app.queuedRetractDisabledUnknown")
+                  : t("app.queuedRetractDisabledSending"),
+            ]
+              .filter(Boolean)
+              .join("\n");
+            const discardTitle = discardHint.disabled
+              ? [t("app.retractDiscard"), t("app.queuedDiscardDisabledSending")]
+                .filter(Boolean)
+                .join("\n")
+              : t("app.retractDiscard");
             const rowTitle = [
+              t("app.queuedOrder", { n: index + 1 }),
               previewText,
               prompt.error,
               status === "unknown" ? t("app.queuedUnknown") : "",
@@ -128,6 +151,15 @@ export function QueuedPromptPanel(props: {
                 className={`queued-row flex min-h-8 shrink-0 basis-8 items-center gap-1.5 rounded-[7px] border border-transparent px-[5px] py-1 pl-2 transition-[border-color,background-color] duration-100 ${status} queued-behavior-${prompt.behavior}`}
                 title={rowTitle}
               >
+                {status === "pending" ? (
+                  <Clock size={13} strokeWidth={2} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+                ) : status === "sending" ? (
+                  <LoaderCircle size={13} strokeWidth={2} className="shrink-0 animate-spin text-text-secondary" aria-hidden="true" />
+                ) : status === "failed" ? (
+                  <XCircle size={13} strokeWidth={2} className="shrink-0 text-[var(--color-danger)]" aria-hidden="true" />
+                ) : (
+                  <AlertTriangle size={13} strokeWidth={2} className="shrink-0 text-[var(--color-warning)]" aria-hidden="true" />
+                )}
                 <span className="w-[1.1em] shrink-0 text-center font-mono text-micro leading-none tabular-nums text-text-tertiary" aria-hidden="true">
                   {index + 1}
                 </span>
@@ -151,7 +183,7 @@ export function QueuedPromptPanel(props: {
                 <div className="inline-flex shrink-0 items-center gap-px">
                   <Button variant="ghost" size="icon"
                     className="size-[26px] rounded-[4px] p-0 text-text-tertiary hover:bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)] hover:text-[color:var(--color-accent)]"
-                    aria-label={t("app.retractToInput")} title={t("app.retractToInput")}
+                    aria-label={t("app.retractToInput")} title={retractTitle}
                     disabled={!canRetractQueuedPromptToInput(status)}
                     onClick={() => props.onRetract(props.sessionId!, prompt)}
                   >
@@ -159,7 +191,7 @@ export function QueuedPromptPanel(props: {
                   </Button>
                   <Button variant="ghost" size="icon"
                     className="size-[26px] rounded-[4px] p-0 text-text-tertiary hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-                    aria-label={t("app.retractDiscard")} title={t("app.retractDiscard")}
+                    aria-label={t("app.retractDiscard")} title={discardTitle}
                     disabled={!canDiscardQueuedPrompt(status)}
                     onClick={() => props.onDiscard(props.sessionId!, prompt.id)}
                   >

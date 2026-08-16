@@ -81,6 +81,7 @@ let previewSettings: AppSettings = {
 	useNativeTitleBar: true,
 	showNativeMenu: false,
 	sendShortcut: "enter-send",
+	defaultAgentBackend: "pi",
 	theme: "system",
 	accent: "default",
 	themeSkin: "classic-green",

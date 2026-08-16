@@ -2413,17 +2413,9 @@ select:focus-visible {
   --color-card: transparent;
   --color-bg-muted: transparent;
 }
-/* 草稿本是独立书写平面：壁纸模式下遮罩用与面板同档的半透明底色
-   （面板本身 100% 不透明）。遮罩若用纯色会把背景图整个盖住，
-   表现为“点开草稿本整页变空白”；半透明后背景图与会话界面仍隐约可见，
-   圆角边缘外是同基色半透明遮罩，也不会形成黑角。 */
-:root[data-bg-image="on"] .scratch-pad-overlay {
-  background: color-mix(
-    in srgb,
-    var(--wallpaper-base, var(--color-bg-app)) var(--wallpaper-panel-alpha, 30%),
-    transparent
-  );
-}
+/* 草稿本是独立书写平面：壁纸模式下面板底色统一为系统面板色并跟随背景图透明度
+   （内部控件/textarea 经 BG_TOKENS 内联注入与滑块联动）。overlay 已不画遮罩
+   （2026-12：草稿本改为悬浮便签，不再全屏遮挡），无需再盖背景图。 */
 :root[data-bg-image="on"] .scratch-pad-panel {
   /* 草稿本是独立书写平面，但底色统一为系统面板色并跟随背景图透明度：
      内部控件（工具条/textarea 等）经 BG_TOKENS 内联注入已与滑块联动（30% 档），

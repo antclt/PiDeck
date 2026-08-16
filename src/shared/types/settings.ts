@@ -1,3 +1,4 @@
+import type { AgentBackend } from "./agent";
 import type { ExternalEditorSettings } from "./project";
 import type { SecurityConfig } from "./security";
 
@@ -212,6 +213,14 @@ export type StartupWindowMode =
 	/** 是否禁用版本更新检测（PiDeck + Pi CLI），默认 false 表示正常检测；
 	 *  开启后自动跳过启动和定时检测，设置页中检测按钮也禁用。 */
 	disableUpdateCheck: boolean;
+
+	// ── Agent 后端 ──
+	/**
+	 * 新建会话的默认后端（侧栏「+」/ 引导页 / 并行问询共用）。
+	 * "pi" = 经典 pi CLI 后端；"dsh" = DeepSeek Harness 内嵌后端。
+	 * 缺省 "pi"（2026-12 兼容期调整：默认回归 pi，用户可在设置中切换为 dsh）。
+	 */
+	defaultAgentBackend: AgentBackend;
 
 	// ── Agent 启动诊断/加速（开发设置） ──
 	/**

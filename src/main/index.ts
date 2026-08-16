@@ -2369,6 +2369,7 @@ function registerIpc() {
 			},
 			readDshHistoryPage: (dshSessionId, beforeSeq, pageSize) =>
 				dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
+			readDshProcessEvents: (agentId) => dshAgentManager.readProcessEvents(agentId),
 			readDshMessageFullText: (agentId, messageId) =>
 				dshAgentManager.readMessageFullText(agentId, messageId),
 			resolveDshSessionFilePath: async (sessionId) => {
@@ -2877,12 +2878,23 @@ app.whenReady().then(async () => {
 			readCatalogSessionReferenceMessages(sessionId),
 		readSessionMessages: async (sessionId) => {
 			const entry = sessionCatalog.get(sessionId);
+			// DSH 会话没有 pi 会话文件：全量读走 host 历史事件流（一次拉最大页），
+			// 与分页路径同源；未挂载 DSH 后端时返回空数组。
+			if (entry?.backend === "dsh" && entry.dshSessionId && dshAgentManager) {
+				const page = await dshAgentManager.readHistoryPage(entry.dshSessionId, undefined, 1000);
+				return page.messages;
+			}
 			if (!entry?.filePath) return [];
 			const content = await sessionScanner.readSessionRawText(entry.filePath);
 			return agentManager.readSessionDisplayMessages(entry.filePath, sessionId, content);
 		},
 		readSessionMessagePage: async (sessionId, before, pageSize) => {
 			const entry = sessionCatalog.get(sessionId);
+			// DSH 会话没有 pi 会话文件：历史浏览走 host 的 session.history 事件流翻页
+			// （游标 = 事件 seq），与 pi 的磁盘分页同形状（messages/total/nextBefore）。
+			if (entry?.backend === "dsh" && entry.dshSessionId && dshAgentManager) {
+				return dshAgentManager.readHistoryPage(entry.dshSessionId, before, pageSize ?? 100);
+			}
 			if (!entry?.filePath) return { messages: [], total: 0, nextBefore: null };
 			return agentManager.readSessionDisplayMessagePage(entry.filePath, sessionId, before, pageSize);
 		},

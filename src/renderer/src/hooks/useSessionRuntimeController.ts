@@ -17,8 +17,9 @@ import { sessionSendStateByIdAtom } from "../atoms/composer-atoms";
 import { isUserFacingSessionStart } from "./useSessionTimelineController";
 import type { QueuedPrompt } from "./useQueuedPrompt";
 import { t } from "../i18n";
-import { dismissNotice, type NoticeId } from "../utils/notice";
+import { dismissNotice, type NoticeActions, type NoticeId } from "../utils/notice";
 import {
+  describeBackgroundAsk,
   forgetBackgroundAsk,
   getRememberedBackgroundAskKeys,
   getRuntimeNotificationKey,
@@ -71,7 +72,15 @@ export interface UseSessionRuntimeControllerOptions {
   restartingAgentId: string | null;
   sessionDurationByAgent: Record<string, number>;
   activeProjectId: string | undefined;
-  showNotice: (message: string, duration?: number, kind?: "info" | "warning" | "error") => NoticeId | undefined;
+  showNotice: (
+    message: string,
+    duration?: number,
+    kind?: "info" | "warning" | "error",
+    title?: string,
+    actions?: NoticeActions,
+  ) => NoticeId | undefined;
+  /** 后台 Ask 通知的「前往会话」动作：跳转到等待回答的会话（渲染层提供，不依赖主进程）。 */
+  onFocusSession?: (sessionId: string) => void;
 }
 
 const idleSendState = { status: "idle" as const };
@@ -92,6 +101,7 @@ export function useSessionRuntimeController(
     sessionDurationByAgent,
     activeProjectId,
     showNotice,
+    onFocusSession,
   } = options;
 
   const focusedSessionId = useAtomValue(currentSessionIdAtom);
@@ -236,8 +246,19 @@ export function useSessionRuntimeController(
       if (sessionId === focusedSessionId) continue;
       activeBackgroundKeys.add(key);
       if (!rememberBackgroundAsk(key)) continue;
-      const title = sessionRecords[sessionId]?.title?.trim() || pendingAsk.request.title || t("ask.defaultTitle");
-      const noticeId = showNotice(t("ask.backgroundPending", { title }), Number.POSITIVE_INFINITY, "warning");
+      const display = describeBackgroundAsk({
+        sessionName: sessionRecords[sessionId]?.title,
+        requestTitle: pendingAsk.request.title,
+        defaultSessionName: t("ask.defaultTitle"),
+      });
+      const message = display.question
+        ? t("ask.backgroundPendingDetail", { title: display.sessionName, question: display.question })
+        : t("ask.backgroundPending", { title: display.sessionName });
+      const noticeId = showNotice(message, Number.POSITIVE_INFINITY, "warning", undefined, {
+        action: onFocusSession
+          ? { label: t("ask.jumpToSession"), onClick: () => onFocusSession(sessionId) }
+          : undefined,
+      });
       if (noticeId !== undefined) backgroundAskNoticeIdMap.set(key, noticeId);
     }
 
@@ -252,7 +273,7 @@ export function useSessionRuntimeController(
     for (const key of getRememberedBackgroundAskKeys()) {
       if (!pendingAskKeys.has(key)) forgetBackgroundAsk(key);
     }
-  }, [focusedSessionId, isFocusedPane, sessionRecords, sessionRuntimeUiById, showNotice]);
+  }, [focusedSessionId, isFocusedPane, sessionRecords, sessionRuntimeUiById, showNotice, onFocusSession]);
 
   return {
     currentSessionId,

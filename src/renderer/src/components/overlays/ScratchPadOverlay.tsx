@@ -29,7 +29,7 @@ export function ScratchPadOverlay({ controller }: ScratchPadOverlayProps) {
 
 	if (!controller.isOpen && !controller.isClosing) return null;
 	return (
-		<div className={`scratch-pad-overlay${controller.isClosing ? " closing" : ""}`} onClick={controller.close}>
+		<div className={`scratch-pad-overlay${controller.isClosing ? " closing" : ""}`}>
 			<ScratchPadPanel
 				drafts={controller.drafts}
 				currentDraftPath={controller.currentDraftPath}
@@ -45,6 +45,7 @@ export function ScratchPadOverlay({ controller }: ScratchPadOverlayProps) {
 				onSelectDraft={(path) => void controller.selectDraft(path)}
 				onCreateDraft={() => void controller.createDraft()}
 				onDeleteDraft={(path) => void controller.deleteDraft(path)}
+				onClose={controller.close}
 			/>
 		</div>
 	);

@@ -78,6 +78,24 @@ export function canDiscardQueuedPrompt(status?: QueuedPromptStatus): boolean {
   return status !== "sending";
 }
 
+/** 矩阵项的可用性提示：disabled=false 可操作；disabled=true 时给出禁用原因，供 UI 渲染 tooltip/aria。 */
+export type QueueControlHint =
+  | { disabled: false; reason?: undefined }
+  | { disabled: true; reason: "sending" | "unknown" };
+
+/** 撤回（撤回修改）的可用性：sending/unknown 禁用，原因用于展示禁用提示。 */
+export function retractControlHint(status?: QueuedPromptStatus): QueueControlHint {
+  if (status === "sending") return { disabled: true, reason: "sending" };
+  if (status === "unknown") return { disabled: true, reason: "unknown" };
+  return { disabled: false };
+}
+
+/** 丢弃的可用性：仅 sending 禁用，原因用于展示禁用提示。 */
+export function discardControlHint(status?: QueuedPromptStatus): QueueControlHint {
+  if (status === "sending") return { disabled: true, reason: "sending" };
+  return { disabled: false };
+}
+
 export function retryFailedPrompt(
   current: QueuedPromptMap,
   sessionId: string,

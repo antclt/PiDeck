@@ -6,8 +6,10 @@ import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
+import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Dialog, DialogContent } from "../ui-shadcn/dialog";
 import { Input } from "../ui-shadcn/input";
+import { Progress } from "../ui-shadcn/progress";
 
 /**
  * DSH 会话工具面板（G5/G6）：目标管理 + 子代理呈现。
@@ -59,6 +61,7 @@ function GoalsPanel(props: { sessionId: string; agentId: string }) {
   const goal = runtime?.state?.goal;
   const [objective, setObjective] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     if (busy) return;
@@ -84,22 +87,46 @@ function GoalsPanel(props: { sessionId: string; agentId: string }) {
     void run(() => desktopApi.sessions.runDshGoalAction(props.agentId, action));
   };
 
+  const goalPhase = goal?.phase ?? "active";
+  const phaseBadgeClass =
+    goalPhase === "complete"
+      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+      : goalPhase === "blocked"
+        ? "bg-red-500/15 text-red-600 dark:text-red-400"
+        : goalPhase === "paused"
+          ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+          : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
+  const roundsStarted = Math.max(0, goal?.roundsStarted ?? 0);
+  const maxGoalRounds = Math.max(0, goal?.maxGoalRounds ?? 0);
+  const progressPercent =
+    maxGoalRounds > 0 ? Math.max(0, Math.min(100, (roundsStarted / maxGoalRounds) * 100)) : 0;
+
   return (
     <div className="flex flex-col gap-3 p-1">
       {goal ? (
         <div className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-bg-panel/60 p-3">
-          <div className="flex items-center gap-2">
-            <Target size={14} className="shrink-0 text-primary" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate text-control font-medium text-foreground">
+          <div className="flex items-start gap-2">
+            <Target size={14} className="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+            <span className="min-w-0 flex-1 whitespace-normal break-words text-control font-medium leading-5 text-foreground">
               {goal.objective}
             </span>
-            <span className="shrink-0 rounded bg-accent/50 px-1.5 py-0.5 text-micro text-text-secondary">
+            <span className={`shrink-0 rounded px-1.5 py-0.5 text-micro font-medium ${phaseBadgeClass}`}>
               {t(`dshTools.goalPhase.${goal.phase}`)}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Progress
+              value={progressPercent}
+              className="h-1.5 flex-1"
+              aria-valuetext={t("dshTools.goalProgressAria", { rounds: roundsStarted, cap: maxGoalRounds })}
+            />
+            <span className="shrink-0 font-mono text-micro tabular-nums text-text-tertiary">
+              {roundsStarted}/{maxGoalRounds}
             </span>
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="text-micro text-text-tertiary">
-              {t("dshTools.goalRounds", { rounds: goal.roundsStarted, cap: goal.maxGoalRounds })}
+              {t("dshTools.goalRounds", { rounds: roundsStarted, cap: maxGoalRounds })}
             </span>
             <div className="flex shrink-0 gap-1">
               {goal.phase === "active" && (
@@ -117,7 +144,7 @@ function GoalsPanel(props: { sessionId: string; agentId: string }) {
                   <CheckCircle2 size={12} aria-hidden="true" />{t("dshTools.goalComplete")}
                 </Button>
               )}
-              <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-destructive" disabled={busy} onClick={() => act("clear")}>
+              <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-destructive" disabled={busy} onClick={() => setConfirmClear(true)}>
                 <XCircle size={12} aria-hidden="true" />{t("dshTools.goalClear")}
               </Button>
             </div>
@@ -140,6 +167,19 @@ function GoalsPanel(props: { sessionId: string; agentId: string }) {
           {t("dshTools.goalCreate")}
         </Button>
       </div>
+      {confirmClear ? (
+        <ConfirmDialog
+          title={t("dshTools.goalClearConfirmTitle")}
+          message={t("dshTools.goalClearConfirmMessage")}
+          danger
+          confirmLabel={t("dshTools.goalClear")}
+          onConfirm={() => {
+            setConfirmClear(false);
+            act("clear");
+          }}
+          onCancel={() => setConfirmClear(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -159,6 +199,8 @@ function SubagentsPanel(props: { agentId: string }) {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Array<{ role: string; text: string }>>([]);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const [transcriptError, setTranscriptError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,13 +221,21 @@ function SubagentsPanel(props: { agentId: string }) {
     if (expanded === id) {
       setExpanded(null);
       setTranscript([]);
+      setTranscriptError(false);
       return;
     }
     setExpanded(id);
     setTranscript([]);
-    const page = await desktopApi.sessions.readDshSubagentHistory(props.agentId, id).catch(() => null);
+    setTranscriptError(false);
+    setTranscriptLoading(true);
+    const page = await desktopApi.sessions
+      .readDshSubagentHistory(props.agentId, id)
+      .catch(() => null);
+    setTranscriptLoading(false);
     if (page) {
       setTranscript(page.messages.map((message) => ({ role: message.role, text: message.text })));
+    } else {
+      setTranscriptError(true);
     }
   };
 
@@ -208,17 +258,39 @@ function SubagentsPanel(props: { agentId: string }) {
             <span className="min-w-0 flex-1 truncate text-control font-medium text-foreground">
               {entry.label ?? entry.id}
             </span>
-            <span className={`shrink-0 rounded px-1.5 py-0.5 text-micro ${entry.activity === "running" ? "bg-primary/15 text-primary" : "bg-accent/50 text-text-secondary"}`}>
-              {entry.activity === "running" ? t("dshTools.subagentRunning") : t("dshTools.subagentInactive")}
-            </span>
-            {entry.mode === "continuable" && (
-              <span className="shrink-0 text-micro text-text-tertiary">{t("dshTools.subagentContinuable")}</span>
+            {entry.activity === "running" ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 text-micro font-medium text-primary">
+                <Loader2 size={11} className="animate-spin" aria-hidden="true" />
+                {t("dshTools.subagentRunning")}
+              </span>
+            ) : (
+              <span className="shrink-0 inline-flex items-center rounded bg-accent/50 px-1.5 py-0.5 text-micro text-text-secondary">
+                <span className="mr-1 inline-block size-1.5 rounded-full bg-muted-foreground/60" aria-hidden="true" />
+                {t("dshTools.subagentInactive")}
+              </span>
             )}
+            {entry.kind === "diagnostic" && (
+              <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro text-amber-600 dark:text-amber-400">
+                {t("dshTools.subagentDiagnostic")}
+              </span>
+            )}
+            <span className="shrink-0 text-micro text-text-tertiary">
+              {entry.mode === "continuable" ? t("dshTools.subagentContinuable") : t("dshTools.subagentOneShot")}
+            </span>
           </button>
           {expanded === entry.id && (
             <div className="flex max-h-56 flex-col gap-1 overflow-y-auto border-t border-border-subtle p-2">
-              {transcript.length === 0 && <p className="px-1 text-caption text-text-tertiary">{t("dshTools.subagentTranscriptEmpty")}</p>}
-              {transcript.map((message, index) => (
+              {transcriptLoading && (
+                <p className="flex items-center gap-1.5 px-1 text-caption text-text-tertiary">
+                  <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                  {t("dshTools.loading")}
+                </p>
+              )}
+              {!transcriptLoading && transcriptError && (
+                <p className="px-1 text-caption text-[var(--color-danger)]">{t("dshTools.subagentTranscriptError")}</p>
+              )}
+              {!transcriptLoading && !transcriptError && transcript.length === 0 && <p className="px-1 text-caption text-text-tertiary">{t("dshTools.subagentTranscriptEmpty")}</p>}
+              {!transcriptLoading && transcript.map((message, index) => (
                 <div key={index} className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${message.role === "user" ? "bg-accent/30" : "bg-bg-panel"}`}>
                   <span className="text-micro text-text-tertiary">{message.role === "user" ? t("dshTools.roleUser") : t("dshTools.roleAssistant")}</span>
                   <span className="whitespace-pre-wrap break-words text-caption text-foreground">{message.text || "…"}</span>

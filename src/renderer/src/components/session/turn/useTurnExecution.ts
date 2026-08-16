@@ -11,23 +11,23 @@ export type TurnExecutionState = {
 /**
  * run 级执行过程折叠状态（一个开关控制全部思考/工具/中间回答步骤）。
  *
- * 行为（2026-10 与用户确认的版本）：
+ * 行为（2026-12 与用户确认的版本）：
  * - 手动开合（setStepsVisibleFromUser/toggleSteps）记 override，**永远最高优先**：
- *   流式上升沿、新一轮信号都不会覆盖手动状态（历史行为：agentRunning 上升沿清 override
- *   强制撑开，用户手动折叠的轮次会被新一轮撑开——已废弃）；
+ *   流式上升沿、结束展开信号都不会覆盖手动状态；
  * - 初始状态：历史已完成且有最终回答的轮始终折叠；进行中/无最终回答的轮
  *   默认折叠，仅设置①（expandInterimDuringStream）开启时才默认展开；
  * - agentRunning 上升沿：仅「设置①开启且无手动 override」时展开（新一轮流式实时滚出）；
- * - agent 停转且有最终回答：1.5s 后自动收起（仅最新轮、且无 override）；
+ * - agent 停转且有最终回答（本轮结束）：展开执行过程（工具调用/思考可见，2026-12
+ *   兼容期要求「会话结束展开工具调用」，取代旧的 1.5s 自动收起）——仅最新轮、无 override；
  * - 新一轮信号（newTurnCollapseTick 变化）：设置②（collapsePrevRunsOnNewTurn）开启时
  *   非最新轮强制收起（含手动展开的，清 override）。
  */
 export function useTurnExecution(opts: {
 	agentRunning?: boolean;
 	isComplete: boolean;
-	/** 本轮是否存在最终回答：无最终回答的 run 不自动收起。 */
+	/** 本轮是否存在最终回答：无最终回答的 run 不自动展开。 */
 	hasFinalAnswer?: boolean;
-	/** 是否时间线上最新一轮。非最新轮不自动收起。 */
+	/** 是否时间线上最新一轮。非最新轮不自动展开。 */
 	isLatestRun?: boolean;
 	/** 设置①：流式对话时展开中间过程。默认关。 */
 	expandInterimDuringStream?: boolean;
@@ -58,18 +58,20 @@ export function useTurnExecution(opts: {
 		wasRunningRef.current = running;
 	}, [opts.agentRunning, opts.expandInterimDuringStream]);
 
-	// 自动收起：以「agent 已停」为准，不用 run.endedAt>0（流式中也会有时间戳）。
+	// 结束展开：以「agent 停转」为准（不用 run.endedAt>0，流式中也会有时间戳）。
+	// 只在「运行中 → 停转」的边沿触发——历史会话挂载（从未 running）不展开，
+	// 保持「历史轮始终折叠」的初始语义。手动 override 最高优先。
 	useEffect(() => {
-		if (opts.agentRunning || userOverrideRef.current) return;
+		const running = Boolean(opts.agentRunning);
+		const justFinished = wasRunningRef.current && !running;
+		wasRunningRef.current = running;
+		if (!justFinished || userOverrideRef.current) return;
 		if (!opts.hasFinalAnswer) return;
 		if (opts.isLatestRun === false) return;
-		const timer = window.setTimeout(() => {
-			if (userOverrideRef.current) return;
-			// 只收起执行过程，不回调滚动：对准最终回答会主动解锁跟底、点亮回底按钮，
-			// 并把视口从最新位置拽回本轮回答开头（用户体感「发了新消息还停在上一条」）。
-			setStepsVisible(false);
-		}, 1500);
-		return () => window.clearTimeout(timer);
+		// 本轮结束：展开执行过程（工具调用/思考/中间回答可见），供用户复盘；
+		// 不回调滚动：对准最终回答会主动解锁跟底、点亮回底按钮，
+		// 并把视口从最新位置拽回本轮回答开头（用户体感「发了新消息还停在上一条」）。
+		setStepsVisible(true);
 	}, [opts.agentRunning, opts.hasFinalAnswer, opts.isLatestRun]);
 
 	// 新一轮信号：设置②开启时，非最新轮强制收起（含手动展开的——本轮已结束，

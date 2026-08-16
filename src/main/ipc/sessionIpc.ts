@@ -136,6 +136,8 @@ export type DshBackendIpcDeps = {
 		beforeSeq: number | undefined,
 		pageSize: number,
 	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; total: number; nextBefore: number | null }>;
+	/** DSH 轨迹过程事件（运行时会话按 mux 事件流收集；未装配时返回空数组）。 */
+	readDshProcessEvents?: (agentId: string) => import("../../shared/types/trajectory").SessionProcessEvent[];
 	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
 	readDshMessageFullText?: (
 		agentId: string,
@@ -288,6 +290,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		openDshDocument,
 		restartDshHost,
 		readDshHistoryPage,
+		readDshProcessEvents,
 		readDshMessageFullText,
 		resolveDshSessionFilePath,
 		searchDshSessions,
@@ -663,6 +666,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (_event, sessionId: string): Promise<SessionProcessEvent[]> => {
 			if (typeof sessionId !== "string" || !sessionId.trim()) return [];
 			const entry = sessionCatalog.get(sessionId);
+			// DSH 会话没有 pi 会话文件：过程事件由运行时会话按 mux 事件流收集
+			// （轨迹账本的 modelChange/permission/plan/goal/compaction 记录）；
+			// 未激活的历史 DSH 会话与 pi 文件缺失一样返回空数组。
+			if (entry?.backend === "dsh" && readDshProcessEvents) {
+				const target = sessionRuntimeCoordinator.getTarget(sessionId);
+				if (!target) return [];
+				return readDshProcessEvents(target.agentId);
+			}
 			if (!entry?.filePath) return [];
 			const content = await sessionScanner.readSessionRawText(entry.filePath);
 			return parseSessionProcessEvents(content);

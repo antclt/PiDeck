@@ -94,6 +94,65 @@ test("inserts newline on Ctrl+Enter when Enter-to-send is enabled", () => {
 	assert.equal(intent, "newline");
 });
 
+// plan 模式是一次性提交流：回车即发，不再受 sendShortcut（enter/ctrl-enter/shift-enter）影响。
+test("plan mode sends on plain Enter regardless of sendShortcut", () => {
+	const { isPlanModeSendKey } = loadComposerBehaviorModule();
+
+	assert.equal(isPlanModeSendKey({
+		key: "Enter",
+		ctrlKey: false,
+		metaKey: false,
+		shiftKey: false,
+		nativeEvent: { isComposing: false },
+	}), true);
+});
+
+test("plan mode keeps Shift+Enter as newline", () => {
+	const { isPlanModeSendKey } = loadComposerBehaviorModule();
+
+	assert.equal(isPlanModeSendKey({
+		key: "Enter",
+		ctrlKey: false,
+		metaKey: false,
+		shiftKey: true,
+		nativeEvent: { isComposing: false },
+	}), false);
+});
+
+test("plan mode keeps Ctrl+Enter as newline", () => {
+	const { isPlanModeSendKey } = loadComposerBehaviorModule();
+
+	assert.equal(isPlanModeSendKey({
+		key: "Enter",
+		ctrlKey: true,
+		metaKey: false,
+		shiftKey: false,
+	}), false);
+});
+
+test("plan mode ignores Enter while an IME composition is being confirmed", () => {
+	const { isPlanModeSendKey } = loadComposerBehaviorModule();
+
+	assert.equal(isPlanModeSendKey({
+		key: "Enter",
+		ctrlKey: false,
+		metaKey: false,
+		shiftKey: false,
+		nativeEvent: { isComposing: true },
+	}), false);
+});
+
+test("plan mode ignores non-Enter keys", () => {
+	const { isPlanModeSendKey } = loadComposerBehaviorModule();
+
+	assert.equal(isPlanModeSendKey({
+		key: "a",
+		ctrlKey: false,
+		metaKey: false,
+		shiftKey: false,
+	}), false);
+});
+
 test("keeps normal composer submissions visible without hidden agent instructions", () => {
 	const { buildComposerPromptSubmission } = loadComposerBehaviorModule();
 

@@ -259,6 +259,22 @@ export function getComposerEnterIntent(
 }
 
 /**
+ * 判断 plan 模式下是否应当把按键视为「发送」意图。
+ *
+ * 业务规则：plan 是一次性提交流——用户点「计划模式」chip 后回车即发一眼计划，
+ * 不再受「发送快捷键」sendShortcut 设置（enter/ctrl-enter/shift-enter）影响；
+ * 否则用户把 sendShortcut 设为 ctrl/shift-enter 时，plan 模式回车只会被当成换行。
+ * 依旧忽略 IME 合成中的回车（复用 isComposingKeyboardEvent），并剔除 Ctrl/Meta/Shift
+ * 修饰键，保证 Shift+Enter 换行、Ctrl+Enter 快捷键等原有语义不被破坏。
+ */
+export function isPlanModeSendKey(event: ComposerKeyboardState): boolean {
+	if (event.key !== "Enter") return false;
+	if (isComposingKeyboardEvent(event)) return false;
+	if (event.ctrlKey || event.metaKey || event.shiftKey) return false;
+	return true;
+}
+
+/**
  * 判断一次按键是否处于 IME 合成中，是所有 composer 输入路径唯一的 IME 判定口。
  *
  * 必须同时看 `event` 与 `event.nativeEvent`：TipTap 的 DOM 事件桥接会把原生

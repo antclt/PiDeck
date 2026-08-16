@@ -118,13 +118,17 @@ export function AskPanelOverlay() {
 
   if (!panel.isOpen || !sessionId) return null;
 
-  // 胶囊摘要：取最新一条非空 assistant 正文，去掉 markdown 后截断
+  // 胶囊摘要：取最新一条非空 assistant 正文，去掉 markdown 后截断；问题摘要取首条 user 消息
   const messages = cache?.messages ?? [];
   const lastAssistant = [...messages].reverse().find(
     (m) => m.role === "assistant" && m.text.trim().length > 0,
   );
   const summary = lastAssistant
     ? removeMarkdown(lastAssistant.text).replace(/\s+/g, " ").trim().slice(0, 36)
+    : "";
+  const firstUser = messages.find((m) => m.role === "user" && m.text.trim().length > 0);
+  const questionSummary = firstUser
+    ? removeMarkdown(firstUser.text).replace(/\s+/g, " ").trim().slice(0, 36)
     : "";
   // 就绪态 = idle（空闲）或 running（处理中）：agent 启动完成后为 idle，发送后才变 running
   const running = runtime?.status === "running" || runtime?.status === "idle";
@@ -195,17 +199,22 @@ export function AskPanelOverlay() {
     >
       {expanded && (
         <div className="ask-panel-detail mb-2 flex h-[min(48vh,400px)] w-[min(560px,calc(100vw-2rem))] animate-in fade-in-0 zoom-in-95 duration-base flex-col overflow-hidden rounded-xl border bg-popover shadow-lg">
-          {/* 详情头部：标题 + 运行状态 + 最小化（仅收起详情，会话继续运行） */}
+          {/* 详情头部：标题 + 问题摘要 + 运行状态 + 最小化（仅收起详情，会话继续运行） */}
           <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
             <MessageSquarePlus size={14} className="text-muted-foreground" aria-hidden="true" />
-            <span className="text-sm font-medium">{t("askPanel.title")}</span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{t("askPanel.title")}</div>
+              {questionSummary || summary ? (
+                <div className="truncate text-[11px] text-muted-foreground" title={questionSummary || summary}>{questionSummary || summary}</div>
+              ) : null}
+            </div>
             {running ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+              <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                 <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden="true" />
                 {t("askPanel.running")}
               </span>
             ) : done ? (
-              <Check size={13} className="text-emerald-500" aria-hidden="true" />
+              <Check size={13} className="shrink-0 text-emerald-500" aria-hidden="true" />
             ) : null}
             <span className="flex-1" />
             <button
@@ -279,8 +288,14 @@ export function AskPanelOverlay() {
           <MessageSquarePlus size={14} className="text-muted-foreground" aria-hidden="true" />
         )}
         <span className="truncate text-xs text-foreground/90">
-          {summary || (panel.creating ? t("askPanel.creating") : t("askPanel.waiting"))}
+          {questionSummary || summary || (panel.creating ? t("askPanel.creating") : t("askPanel.waiting"))}
         </span>
+        {running && !panel.creating ? (
+          <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+            <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden="true" />
+            {t("askPanel.running")}
+          </span>
+        ) : null}
         <span
           className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/60 hover:text-foreground"
           aria-label={t("askPanel.close")}

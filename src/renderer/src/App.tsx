@@ -27,7 +27,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom } from "./atoms/app-ui-atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom } from "./atoms/app-ui-atoms";
 // 文件链接路由：图片类型走弹窗预览
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"]);
 const ConfigModal = lazy(() => import("./ConfigModal").then((m) => ({ default: m.ConfigModal })));
@@ -510,6 +510,7 @@ export function App() {
     useNativeTitleBar: true,
     showNativeMenu: false,
     sendShortcut: "enter-send",
+    defaultAgentBackend: "pi",
     theme: "system",
     accent: "default",
 	themeSkin: "classic-green",
@@ -598,6 +599,23 @@ export function App() {
     settings.collapsePrevRunsOnNewTurn,
     setTurnFlowSettings,
   ]);
+
+  // 新建会话默认后端同步给根级组件（并行问询 AskPanel 等不持有 settings props）。
+  const setDefaultAgentBackend = useSetAtom(defaultAgentBackendAtom);
+  useEffect(() => {
+    setDefaultAgentBackend(settings.defaultAgentBackend);
+  }, [settings.defaultAgentBackend, setDefaultAgentBackend]);
+
+  // 更新弹窗（2026-12 兼容期修复）：设置加载完成后自动检查一次，有新版本直接弹窗；
+  // 用户禁用更新检查时不触发（设置页手动检查按钮仍可用）。只跑一次，避免
+  // settings 变化（如用户保存其它设置项）触发重复检查。
+  const autoCheckedUpdateRef = useRef(false);
+  useEffect(() => {
+    if (!settingsLoaded || autoCheckedUpdateRef.current) return;
+    if (settings.disableUpdateCheck) return;
+    autoCheckedUpdateRef.current = true;
+    void appUpdate.check("auto");
+  }, [settingsLoaded, settings.disableUpdateCheck, appUpdate.check]);
 
   // Guard: hide git drawer when git management is disabled.
   // Equivalent to: if (panel === "git" && !settings.enableGitManagement) return
@@ -1211,6 +1229,8 @@ export function App() {
     refreshProjectSessions,
     api,
     showToast,
+    // 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh）
+    defaultBackend: settings.defaultAgentBackend,
   });
 
   // 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
@@ -1301,11 +1321,11 @@ export function App() {
         // 统一创建 draft 会话（Chat 项目也走普通会话、可保存）：创建不拉 pi，
         // selectSessionCommand 同步切页、立即进入会话页；匿名会话仅保留给侧栏
         // 「新建临时对话」入口（createAnonymousSessionWithTab）。
-        // 默认后端与侧栏「+」一致（dsh）：避免同一应用内新建会话后端分裂（F2）。
+        // 默认后端跟随设置项（settings.defaultAgentBackend，默认 pi）。
         const session = await api.sessions.createDraft({
           projectId: project.id,
-          title: `${project.name} DSH`,
-          backend: "dsh",
+          title: settings.defaultAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
+          backend: settings.defaultAgentBackend,
           ...launchPreferences,
         });
         upsertSession(session);
@@ -1343,6 +1363,7 @@ export function App() {
       selectSessionCommand,
       upsertSession,
       workspaceChrome,
+      settings.defaultAgentBackend,
     ],
   );
 

@@ -36,6 +36,7 @@ import {
 import {
   getComposerEnterIntent,
   isComposingKeyboardEvent,
+  isPlanModeSendKey,
   parseArgumentHint,
   translateBuiltinPromptDescription,
   extractUserPrompts,
@@ -896,7 +897,10 @@ export function useSessionComposerController(
       return;
     }
 
-    const intent = getComposerEnterIntent(event, sendShortcut);
+    const intent =
+      mode === "plan" && isPlanModeSendKey(event)
+        ? "send"
+        : getComposerEnterIntent(event, sendShortcut);
     if (intent === "send") {
       event.preventDefault();
       // Enter 发送也晋升预览 Tab（promoteAndSend 内部统一处理）
@@ -908,6 +912,7 @@ export function useSessionComposerController(
     getPromptHistory,
     historyIndex,
     isBusy,
+    mode,
     promoteAndSend,
     savedDraft,
     selectedSuggestionIndex,

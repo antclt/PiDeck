@@ -173,7 +173,7 @@ export function SkillsTab(props: {
 				</Button>
 			</section>
 
-			<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
+			<div className="overflow-x-auto rounded-lg border border-border-subtle bg-bg-panel">
 				{visibleSkills.length === 0 ? (
 					<div className="py-12 text-center text-control text-text-tertiary">{t("config.emptySkills")}</div>
 				) : (
@@ -181,7 +181,9 @@ export function SkillsTab(props: {
 						<TableHeader>
 							<TableRow>
 								<TableHead className="w-56">{t("config.name")}</TableHead>
-								<TableHead>{t("config.description")}</TableHead>
+								{/* 描述列保底宽度：窗口拉小时其他固定列会挤压它，太窄时长描述变成
+								    竖条难读；min-w-52 保底 + 表格容器横向滚动兜底（见外层 overflow-x-auto） */}
+								<TableHead className="min-w-52">{t("config.description")}</TableHead>
 								<TableHead className="w-44">{t("config.extensionPath")}</TableHead>
 								<TableHead className="w-36 text-right">{t("config.actions")}</TableHead>
 							</TableRow>
@@ -275,8 +277,11 @@ function SkillTableRow(props: {
 					</div>
 				)}
 			</TableCell>
-			<TableCell className="whitespace-normal break-words text-caption leading-relaxed text-muted-foreground" title={skill.description}>
-				{skill.description || t("config.skillDescriptionMissing")}
+			{/* 描述太长时截断为 3 行（title 悬浮可看全文），避免长描述把整行撑得
+			    很高；窗口拉小时描述列有 min-w 保底 + 容器横向滚动，不再挤压成窄条。
+			    line-clamp 会改 display 为 -webkit-box，必须包一层 span 而不能直接放 td 上。 */}
+			<TableCell className="min-w-52 whitespace-normal break-words text-caption leading-relaxed text-muted-foreground" title={skill.description}>
+				<span className="block line-clamp-3">{skill.description || t("config.skillDescriptionMissing")}</span>
 			</TableCell>
 			<TableCell className="truncate font-mono text-caption text-muted-foreground" title={skill.path}>
 				{skill.path}

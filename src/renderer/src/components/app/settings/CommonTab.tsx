@@ -137,6 +137,29 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
         <SettingRow
           title={
             <>
+              <span>{t("settings.defaultAgentBackend")}</span>
+              <DirtyMarker dirty={isDirty("defaultAgentBackend")} label={t("settings.defaultAgentBackend")} />
+            </>
+          }
+          description={t("settings.defaultAgentBackendDesc")}
+          alignEnd={false}
+        >
+          <Select
+            value={draft.defaultAgentBackend}
+            onValueChange={(value) =>
+              updateDraft({ defaultAgentBackend: value as AppSettings["defaultAgentBackend"] })
+            }
+          >
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pi">{t("settings.defaultAgentBackendPi")}</SelectItem>
+              <SelectItem value="dsh">{t("settings.defaultAgentBackendDsh")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
+          title={
+            <>
               <span>{t("settings.linkOpenMode")}</span>
               <DirtyMarker dirty={isDirty("linkOpenMode")} label={t("settings.linkOpenMode")} />
             </>

@@ -172,10 +172,19 @@ export class SessionCatalog {
 			}
 		}
 		// Draft 只代表当前进程中的“尚未发送”编辑面：没有用户消息就没有
-		// 可恢复的 Pi session。重启时清掉它们，避免空 Agent 在历史列表中永久残留。
-		const staleDrafts = this.entries.filter((entry) => entry.status === "draft");
+		// 可恢复的 Pi session。重启时清掉它们（仅限 pi 后端），避免空 Agent 在
+		// 历史列表中永久残留。
+		// 例外：DSH 会话的草稿必须保留。DSH 的 host 会话数据由 $DSH_HOME 持久化，
+		// catalog 只是 id 映射；即使“创建后激活链路未走完”（attachRuntime 未把
+		// status 置 active），重启后用户仍应在侧栏看到并重新激活它。若在此清掉，
+		// host 侧会话会变成孤儿且无法从侧栏访问。带 dshSessionId 的异常中间态同样保留。
+		const staleDrafts = this.entries.filter(
+			(entry) => entry.status === "draft" && entry.backend !== "dsh",
+		);
 		if (staleDrafts.length > 0) {
-			this.entries = this.entries.filter((entry) => entry.status !== "draft");
+			this.entries = this.entries.filter(
+				(entry) => entry.status !== "draft" || entry.backend === "dsh",
+			);
 			try {
 				await this.writeSnapshot(this.entries);
 			} catch {

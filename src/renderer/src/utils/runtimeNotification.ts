@@ -49,3 +49,25 @@ export function forgetBackgroundAsk(key: string): void {
 export function getRememberedBackgroundAskKeys(): string[] {
   return Array.from(seenBackgroundAskKeys);
 }
+
+/** 后台 Ask 通知的展示信息拆分：会话名缺失时回退默认名，问题摘要取请求标题。 */
+export type BackgroundAskDisplay = {
+  sessionName: string;
+  question: string | undefined;
+};
+
+/**
+ * 拆分「会话名 + 问题摘要」两部分，供 i18n 文案插值：
+ * - sessionName：优先会话记录标题，缺失时用 defaultSessionName 兜底；
+ * - question：请求自身的标题（即提问内容），无则不提供（调用方选择精简文案）。
+ * 纯逻辑，不依赖 React / i18n，便于单测。
+ */
+export function describeBackgroundAsk(input: {
+  sessionName?: string;
+  requestTitle?: string;
+  defaultSessionName: string;
+}): BackgroundAskDisplay {
+  const sessionName = input.sessionName?.trim() || input.defaultSessionName;
+  const question = input.requestTitle?.trim() || undefined;
+  return { sessionName, question };
+}

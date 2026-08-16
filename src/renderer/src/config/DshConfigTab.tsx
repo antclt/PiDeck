@@ -190,8 +190,11 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 				setProviderDirectory([]);
 			}
 			setError(null);
+			// 返回本次拉到的 namespace 列表（saveNamespace 冲突重试要用最新 revision）
+			return settingsResult.namespaces;
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
+			return undefined;
 		} finally {
 			setLoading(false);
 		}
@@ -251,7 +254,20 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 
 	const saveNamespace = useCallback(async (ns: string, patch: Record<string, unknown>) => {
 		const view = namespaces.find((item) => item.ns === ns);
-		await desktopApi.sessions.updateDshSettings(ns, patch, view?.revision);
+		try {
+			await desktopApi.sessions.updateDshSettings(ns, patch, view?.revision);
+		} catch (error) {
+			// SETTINGS_CONFLICT：并发写入（host 预设/dsh-web/另一 tab）使本页 revision
+			// 过期，host 拒绝本次写入。若沿用旧 revision 重试会被永久拒绝——刷新
+			// namespace（拿最新 revision 与现值）后重试一次，patch 是部分合并仍安全。
+			// 其它错误（schema 拒绝等）原样上抛，由子卡片展示错误并保留草稿。
+			const isConflict = error instanceof Error &&
+				(error.message.includes("SETTINGS_CONFLICT") || error.message.includes("changed since it was read"));
+			if (!isConflict) throw error;
+			const fresh = await load();
+			const freshView = fresh?.find((item) => item.ns === ns);
+			await desktopApi.sessions.updateDshSettings(ns, patch, freshView?.revision);
+		}
 		// 保存后刷新（revision / 脱敏值更新）
 		await load();
 	}, [namespaces, load]);

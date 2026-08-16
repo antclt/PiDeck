@@ -1,10 +1,11 @@
 import { useCallback } from "react";
-import { useAtom, useStore } from "jotai";
+import { useAtom, useAtomValue, useStore } from "jotai";
 import {
 	askPanelCreatingAtom,
 	askPanelOpenAtom,
 	askPanelSessionIdAtom,
 } from "../atoms/ask-panel-atoms";
+import { defaultAgentBackendAtom } from "../atoms/app-ui-atoms";
 import { upsertSessionAtom, sessionRecordsAtom } from "../atoms/session-atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../atoms/session-selectors";
 import { desktopApi } from "../desktopApi";
@@ -21,6 +22,7 @@ export function useAskPanel() {
 	const [isOpen, setOpen] = useAtom(askPanelOpenAtom);
 	const [sessionId, setSessionId] = useAtom(askPanelSessionIdAtom);
 	const [creating, setCreating] = useAtom(askPanelCreatingAtom);
+	const defaultAgentBackend = useAtomValue(defaultAgentBackendAtom);
 	const store = useStore();
 
 	// 创建或复用匿名会话；失败返回 null 并 toast
@@ -32,8 +34,8 @@ export function useAskPanel() {
 				const { session } = await desktopApi.sessions.createAnonymous({
 					projectId,
 					title: t("askPanel.sessionTitle"),
-					// 默认后端与侧栏「+」一致（dsh），避免匿名问询走 pi 造成后端分裂（F2）
-					backend: "dsh",
+					// 默认后端跟随设置项（defaultAgentBackend，默认 pi），避免后端分裂（F2）
+					backend: defaultAgentBackend,
 				});
 				// 只登记会话记录供 timeline 渲染，不加入 sessionIdsByProjectAtom：
 				// 匿名会话不落盘、不该出现在左侧项目会话列表（关闭弹框后由 detach 事件清理）
@@ -52,7 +54,7 @@ export function useAskPanel() {
 				setCreating(false);
 			}
 		},
-		[sessionId, setCreating, setOpen, setSessionId, store],
+		[sessionId, setCreating, setOpen, setSessionId, store, defaultAgentBackend],
 	);
 
 	// 轮询等待匿名 runtime 就绪：匿名会话是后台激活（createAnonymous 后主进程
