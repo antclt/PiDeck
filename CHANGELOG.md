@@ -4,6 +4,50 @@
 
 All notable changes to PiDeck are documented here.
 
+## v0.7.2 - 2026-08-16
+
+### 🚀 New Features
+
+- **DSH command completion from the host registry** — A new
+  `pideck-command-bridge` (in-process host bridge) feeds the Composer `/` menu
+  from `ctx.commands` in real time (including user/plugin-registered commands),
+  falling back to the static suggestion set while a session is not active.
+- **DSH session HTML export** — Projection-based export: pages the full host
+  history and renders a self-contained HTML file (static inline styles in the
+  dsh-web visual language), returning a file path with the same protocol as
+  pi's `export_html`; live sessions export from memory, history sessions are
+  collected with a runaway guard.
+- **DSH skill catalog presentation** — `skill.list` wired into the session
+  tools panel ("Skills" tab): name/description/when-to-use plus `/name`
+  slash-invocation hints (user-only skills get a badge).
+- **Web UI restyled in the dsh-web design language** — The built-in web
+  service follows the official dsh-web design tokens: semantic palette
+  (background layers, border levels, label hierarchy, state colors) and font
+  stacks taken from the official dist, near-black layered dark theme; sidebar /
+  header / timeline / composer refinements (frosted header, focus ring on the
+  composer, content column width, slim scrollbars).
+- **Web DSH tools panel** — A "DSH tools" entry in the session header for dsh
+  sessions: Goals (read-only), Subagents (directory + expandable transcript),
+  Skills, and Plugins tabs, all over REST (same main-process sources as the
+  desktop IPC).
+- **Web DSH plugin management** — Dynamic Cordis plugin inventory + install
+  form + run / stop / two-step uninstall (G13 semantics: in-process temporary,
+  session-owned, panel gestures without approval), plus the read-only static
+  loader list.
+- **Dual-backend badges on the Web** — Sidebar session rows and the session
+  header show pi/dsh backend badges (same source as the desktop
+  SessionBackendMark), so both backends are instantly distinguishable.
+
+### ✨ UX Improvements
+
+- **DSH session export entry enabled** — Sidebar/drawer "Export HTML" now works
+  for dsh sessions instead of reporting "not supported yet".
+
+### 🔧 Performance
+
+- **Export runaway guard** — History export is page-capped and oversized images
+  are skipped to avoid hundred-megabyte HTML files.
+
 ## v0.7.1 - 2026-08-15
 
 ### 🚀 New Features

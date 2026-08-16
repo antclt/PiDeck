@@ -572,6 +572,9 @@ const api = {
 				messages: import("../shared/types").ChatMessage[];
 				hasMore: boolean;
 			}>,
+		/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */
+		listDshSkills: (agentId: string) =>
+			ipcRenderer.invoke(ipcChannels.dshListSkills, agentId) as Promise<import("../shared/types").DshSkillView[]>,
 		/** DSH 孤儿会话 id 列表（host 有但 catalog 无映射；G3/D11 清理提示用）。 */
 		listDshOrphans: () =>
 			ipcRenderer.invoke(ipcChannels.dshListOrphans) as Promise<string[]>,

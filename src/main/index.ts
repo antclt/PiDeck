@@ -614,10 +614,12 @@ async function copyCatalogSession(sessionId: string) {
 
 async function exportCatalogSessionHtml(sessionId: string): Promise<{ path: string }> {
 	const entry = sessionCatalog.get(sessionId);
-	// DSH 会话导出暂不支持（G10 待决策：downloads.sessionLog 需桥字节流扩展）；
-	// 显式拒绝而非报「文件不存在」（A9）。
+	// G10：DSH 会话投影式导出（无活跃 runtime 时从 host 分页拉全量渲染），
+	// 与 pi 的 export_html 同协议返回导出文件路径。
 	if (entry?.backend === "dsh") {
-		throw new Error(mainCopy("session.exportDshUnsupported"));
+		if (!entry.dshSessionId) throw new Error(mainCopy("session.fileNotFound"));
+		const project = projectStore.get(entry.projectId);
+		return dshAgentManager.exportSessionHtml(entry.dshSessionId, entry.title, project?.path);
 	}
 	if (!entry?.filePath) throw new Error(mainCopy("session.fileNotFound"));
 	const result = await agentManager.exportSessionHtml(entry.projectId, entry.filePath);
@@ -2419,6 +2421,7 @@ function registerIpc() {
 				dshAgentManager.createGoal(agentId, objective, maxGoalRounds),
 			runDshGoalAction: (agentId, action) => dshAgentManager.goalAction(agentId, action),
 			listDshSubagents: (agentId) => dshAgentManager.listSubagents(agentId),
+			listDshSkills: (agentId) => dshAgentManager.listSkills(agentId),
 			readDshSubagentHistory: (agentId, childSessionId, beforeSeq, maxMessages) =>
 				dshAgentManager.readSubagentHistory(agentId, childSessionId, beforeSeq, maxMessages),
 			listDshOrphans: async () => {
@@ -2820,6 +2823,8 @@ app.whenReady().then(async () => {
 		},
 		// G17：DSH RPC 日志复用 RpcLogger（按 agentId=dsh:<sessionId> 分文件）
 		rpcLogger,
+		// G10：DSH 会话 HTML 导出目录（应用数据目录内，AGENTS.md 路径安全约束）
+		() => join(app.getPath("userData"), "exports"),
 	);
 	// C12/E15：DSH 退出清理——先停全部活跃会话（清 mux/订阅/pending）再 dispose host，
 	// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
@@ -2967,6 +2972,18 @@ app.whenReady().then(async () => {
 		listSessionRuntimes: () => sessionRuntimeCoordinator.listRuntimes(),
 		listPendingUiRequests: () => sessionRuntimeCoordinator.listPendingUiRequests(),
 		respondToUi: (input) => sessionRuntimeCoordinator.respondToUi(input),
+		// S6.3：Web 端 DSH 工具面板（goals/subagents/skills）——与桌面 IPC 同源
+		listDshSubagents: (agentId) => dshAgentManager.listSubagents(agentId),
+		readDshSubagentHistory: (agentId, childSessionId, beforeSeq, maxMessages) =>
+			dshAgentManager.readSubagentHistory(agentId, childSessionId, beforeSeq, maxMessages),
+		listDshSkills: (agentId) => dshAgentManager.listSkills(agentId),
+		// S6.5：Web 端 DSH 插件管理（动态 Cordis 插件，与桌面配置页同源）
+		listDshDynamicPlugins: () => dshHost.listDynamicPlugins(),
+		listDshStaticPlugins: () => dshHost.listStaticPlugins(),
+		installDshPlugin: (input) => dshHost.installDynamicPlugin(input),
+		runDshPlugin: (input) => dshHost.runDynamicPlugin(input),
+		stopDshPlugin: (input) => dshHost.stopDynamicPlugin(input),
+		uninstallDshPlugin: (input) => dshHost.uninstallDynamicPlugin(input),
 		listSessionRuntimeModels: (target) => sessionRuntimeCoordinator.listRuntimeModels(target),
 		stopSessionRuntime: stopSessionRuntime,
 		abortSessionRuntime: (target) => sessionRuntimeCoordinator.abortRuntime(target),

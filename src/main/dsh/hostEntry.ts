@@ -24,6 +24,10 @@ import {
 	PIDECK_PLUGIN_BRIDGE_PATH,
 	handlePluginBridgeFetch,
 } from "./pideckPluginBridge";
+import {
+	PIDECK_COMMANDS_BRIDGE_PATH,
+	handleCommandsBridgeFetch,
+} from "./pideckCommandsBridge";
 
 // utilityProcess 的 parentPort：electron 包类型里有（Electron.ParentPort）。
 import type { ParentPort } from "electron";
@@ -139,6 +143,10 @@ async function main(): Promise<void> {
 			{ id: "plugin-inventory", name: "@deepseek-ai/dsh-host-plugin-inventory" },
 			{ id: "cordis-host-runner", name: "@deepseek-ai/dsh-cordis-host-runner" },
 			{ id: "pideck-plugin-bridge", name: join(__dirname, "pideckPluginBridge.js") },
+			// 会话命令枚举桥（D15）：host 命令注册表（ctx.commands.list）经
+			// /pideck-command/rpc 暴露给主进程，Composer `/` 补全拿到 live 命令
+			// （含用户/插件注册的命令），执行仍走 pideck-slash-bridge。
+			{ id: "pideck-command-bridge", name: join(__dirname, "pideckCommandsBridge.js") },
 		],
 	});
 
@@ -231,6 +239,13 @@ async function main(): Promise<void> {
 				method: init?.method,
 				// 桥协议 headers 是 Record<string,string>（见 DshFetchMessage）；RequestInit
 				// 的 HeadersInit 形状更宽，此处收窄到桥协议形状。body 同理只透传字符串。
+				headers: init?.headers as Record<string, string> | undefined,
+				body: typeof init?.body === "string" ? init.body : undefined,
+			});
+		}
+		if (url.pathname === PIDECK_COMMANDS_BRIDGE_PATH) {
+			return handleCommandsBridgeFetch(ctx, {
+				method: init?.method,
 				headers: init?.headers as Record<string, string> | undefined,
 				body: typeof init?.body === "string" ? init.body : undefined,
 			});

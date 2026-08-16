@@ -178,6 +178,8 @@ export type DshBackendIpcDeps = {
 		beforeSeq?: number,
 		maxMessages?: number,
 	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; hasMore: boolean }>;
+	/** DSH 技能目录（G7：skill.list 只读）；未装配时返回空列表。 */
+	listDshSkills?: (agentId: string) => Promise<import("../../shared/types").DshSkillView[]>;
 	/** DSH 孤儿会话 id 列表（G3/D11：host 有但 catalog 无映射）；未装配时返回空列表。 */
 	listDshOrphans?: () => Promise<string[]>;
 	/** DSH 外部会话清单（dsh-web 等其他工具创建的 host 根会话）；未装配时返回空列表。 */
@@ -316,6 +318,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		runDshGoalAction,
 		listDshSubagents,
 		readDshSubagentHistory,
+		listDshSkills,
 		listDshOrphans,
 		listDshForeignSessions,
 		importDshForeignSession,
@@ -843,6 +846,15 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				typeof beforeSeq === "number" ? beforeSeq : undefined,
 				typeof maxMessages === "number" ? maxMessages : undefined,
 			);
+		},
+	);
+	// DSH 技能目录（G7：skill.list 只读；/name 斜杠调用提示由渲染层给）
+	ipcMain.handle(
+		ipcChannels.dshListSkills,
+		async (_event, agentId: unknown) => {
+			if (typeof agentId !== "string") return [];
+			if (!listDshSkills) return [];
+			return listDshSkills(agentId);
 		},
 	);
 	// DSH 孤儿会话列表（G3/D11：host 有但 catalog 无映射，用于清理提示）

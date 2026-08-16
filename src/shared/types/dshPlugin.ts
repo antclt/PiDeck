@@ -52,3 +52,32 @@ export type DshPluginLifecycleInput = {
 
 /** 桥 RPC 响应（主进程 rawFetch 解析用；{ ok:false } 时主进程抛 error 文本）。 */
 export type DshPluginBridgeResponse<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/**
+ * 会话命令枚举桥（D15）的跨进程契约类型：host 侧 `ctx.commands.list(agent)`
+ * 的 CommandDescriptor 安全 JSON 视图（pideck-command-bridge 服务）。
+ */
+export type DshCommandView = {
+	/** 命令名（不带前导斜杠的小写名；Composer `/` 补全用）。 */
+	name: string;
+	/** 命令描述（host 注册表原文，`CommandDescriptor.description`）。 */
+	description: string;
+	/** 可选自由输入占位提示（`CommandDescriptor.input.hint`）。 */
+	inputHint?: string;
+};
+
+/**
+ * DSH 技能目录行（G7）：wire `skill.list` 的 SkillEntry 安全 JSON 视图。
+ * 技能经 composer 的 `/name` 斜杠调用（dsh-tool-skill 在 pre-step 注入正文），
+ * 本目录只做只读呈现，不做管理。
+ */
+export type DshSkillView = {
+	/** Kebab-case 标识（composer 以 /name 引用）。 */
+	name: string;
+	/** 简短路由描述。 */
+	description: string;
+	/** 可选额外路由指导。 */
+	whenToUse?: string;
+	/** false = 用户专用技能（disable-model-invocation）：模型目录不可见、仅用户可调用。 */
+	modelInvocable: boolean;
+};

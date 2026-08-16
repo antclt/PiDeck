@@ -6,7 +6,9 @@ import type {
 	AvailableModel,
 	ChatMessage,
 	CreateAgentInput,
+	DshSkillView,
 	ImageContent,
+	PiCommand,
 	Project,
 	SendPromptInput,
 	SendPromptResult,
@@ -15,10 +17,13 @@ import type {
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
 // DSH 会话 id 品牌类型（零运行时成本，仅类型擦除）
 import type { SessionId } from "@deepseek-ai/dsh-session/types";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
 import { getAppLogger } from "../logging/sharedLogger";
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
 import type { DshHost } from "./DshHost";
+import { renderDshSessionHtml, sanitizeExportFileName } from "./dshSessionHtmlExport";
 import { projectDshEvent, type DshProjection } from "./dshEventProjector";
 import {
 	collectDshProcessEvent,
@@ -55,10 +60,11 @@ import { dshSessionFilePath } from "./dshSessionPath";
  * v1 范围（能力缺失显式声明，UI 按能力禁用入口）：
  * - 支持：create/list/sendPrompt/abort/stop/restart/rename/getRuntimeState/
  *   getAvailableModels/setModel/prepareResendFromMessage/publishRuntimeState/
- *   fork/getForkMessages（session.fork 锚 seq）/compact（/compact 命令）
+ *   fork/getForkMessages（session.fork 锚 seq）/compact（/compact 命令）/
+ *   getCommands（D15：host 命令注册表枚举桥）/exportHtml（G10：投影式导出）
  * - 缺失（capabilities 未声明，且接口方法不实现——可选能力，见 SessionAgentGateway
- *   注释）：editMessage/deleteMessage/getCommands/exportHtml。调用方经 capability
- *   检查拒绝，不再复制 throw 样板。
+ *   注释）：editMessage/deleteMessage。调用方经 capability 检查拒绝，
+ *   不再复制 throw 样板。
  *
  * 事件模型（DSH SessionEvent = { type, seq, time, data }，PoC 实测）：
  * - assistant/chunk.data.chunk 是 StreamChunk delta（text-delta / reasoning-delta / finish）
@@ -76,11 +82,13 @@ function isDshImageMediaType(
 }
 
 export class DshAgentManager implements SessionAgentGateway {
-	readonly backend: AgentBackend = "dsh";	/** 已支持的可选能力：fork（session.fork 锚 seq 裁剪）与 compact（/compact 命令）。 */
+	readonly backend: AgentBackend = "dsh";	/** 已支持的可选能力：fork（session.fork 锚 seq 裁剪）、compact（/compact 命令）、getCommands（host 命令注册表枚举桥，D15）、exportHtml（投影式导出，G10）。 */
 	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set([
 		"fork",
 		"getForkMessages",
 		"compact",
+		"getCommands",
+		"exportHtml",
 	]);
 
 	private readonly runtimes = new Map<string, DshAgentRuntime>();
@@ -93,7 +101,9 @@ export class DshAgentManager implements SessionAgentGateway {
 	private readonly pendingTimers = new Map<string, NodeJS.Timeout>();
 	/** pending 审批/提问的超时时长（10 分钟：Ask 弹窗常驻等待太久无意义）。 */
 	private static readonly PENDING_RESPONSE_TIMEOUT_MS = 10 * 60_000;
-
+	/** 历史导出分页大小与页数上限（防超大会话导出失控；单页 500 事件 ≈ 数十轮对话）。 */
+	private static readonly EXPORT_HISTORY_PAGE_SIZE = 500;
+	private static readonly EXPORT_MAX_HISTORY_PAGES = 100;
 	constructor(
 		private readonly dshHost: DshHost,
 		private readonly getProject: (id: string) => Project | undefined,
@@ -105,6 +115,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		private readonly onTitleChanged?: (dshSessionId: string, title: string) => void,
 		/** RPC 日志服务（G17：DSH 领域调用记录，与 pi 共用 RpcLogger；未注入时静默）。 */
 		private readonly rpcLogger?: { push(entry: import("../../shared/types/rpcLog").RpcLogEntry): void },
+		/** 会话 HTML 导出目录（G10：应用数据目录内，装配层注入；空串 = 导出不可用）。 */
+		private readonly getExportDir: () => string = () => "",
 	) {
 		// E4：host 崩溃自动重启完成后恢复所有 runtime（host 内存已丢失：流式/工具/
 		// 压缩状态停在崩溃前，mux 重连后新 host 没有已订阅会话，事件不会再推）。
@@ -841,6 +853,96 @@ export class DshAgentManager implements SessionAgentGateway {
 		return toDshAvailableModels(models.result.value.groups ?? []);
 	}
 
+	/**
+	 * 会话命令列表（D15）：经 pideck-command-bridge 枚举 host 命令注册表
+	 * （ctx.commands.list(agent)），Composer `/` 补全据此展示 live 命令
+	 * （含用户/插件注册的命令）。会话未激活时桥报错上抛，渲染层按能力
+	 * 降级为静态建议列表（DSH_COMMAND_SUGGESTIONS）。
+	 */
+	async listCommands(agentId: string): Promise<PiCommand[]> {
+		const runtime = this.runtime(agentId);
+		const views = await this.dshHost.listCommands(String(runtime.sessionId));
+		return views.map((view) => ({
+			name: view.name,
+			description: view.description,
+			source: "dsh",
+		}));
+	}
+
+	// ── 会话 HTML 导出（G10：投影式导出，DSH wire 无 export_html）─────────────
+
+	/**
+	 * 活跃会话导出：直接用 runtime 内存消息渲染（含流式最新内容），
+	 * 与 pi 的 export_html 同协议（返回导出文件路径）。
+	 */
+	async exportHtml(agentId: string): Promise<{ path: string }> {
+		const runtime = this.runtime(agentId);
+		const messages = runtime.messages;
+		return this.writeSessionHtmlExport(messages, {
+			title: runtime.tab.title,
+			cwd: runtime.cwd,
+			dshSessionId: String(runtime.sessionId),
+		});
+	}
+
+	/**
+	 * 历史会话导出（无活跃 runtime）：分页拉全量事件后单次投影渲染。
+	 * 分页上限防失控（超大会话截断并提示，不静默失败）。
+	 */
+	async exportSessionHtml(
+		dshSessionId: string,
+		title: string,
+		cwd?: string,
+	): Promise<{ path: string }> {
+		const messages = await this.collectAllDshMessages(dshSessionId);
+		return this.writeSessionHtmlExport(messages, { title, cwd, dshSessionId });
+	}
+
+	/** 历史全量消息收集：从最新往前分页（beforeSeq 为排除边界，页间不重叠）。 */
+	private async collectAllDshMessages(dshSessionId: string): Promise<ChatMessage[]> {
+		const client = await this.ensureClient();
+		const entries: Array<{ event: import("@deepseek-ai/dsh-host-apiproxy").HistoryEntry["event"]; view: import("@deepseek-ai/dsh-host-apiproxy").HistoryEntry["view"] }> = [];
+		let beforeSeq: number | undefined;
+		for (let page = 0; page < DshAgentManager.EXPORT_MAX_HISTORY_PAGES; page += 1) {
+			const pageResult = await client.sessions.history({
+				sessionId: dshSessionId as SessionId,
+				beforeSeq,
+				maxMessages: DshAgentManager.EXPORT_HISTORY_PAGE_SIZE,
+			});
+			if (!pageResult.result.ok) break;
+			const pageEntries = (pageResult.result.value.events ?? [])
+				.map((entry) => ({ event: entry.event, view: entry.view }))
+				.filter((item): item is { event: NonNullable<typeof item.event>; view: typeof item.view } => Boolean(item.event));
+			if (pageEntries.length === 0) break;
+			entries.push(...pageEntries);
+			const oldestSeq = pageEntries[0].event.seq;
+			if (pageResult.result.value.hasMore !== true || typeof oldestSeq !== "number") break;
+			beforeSeq = oldestSeq;
+		}
+		entries.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
+		const agentId = `dsh:${dshSessionId}`;
+		let projection = projectDshEvent(undefined, undefined, agentId);
+		for (const { event, view } of entries) {
+			projection = projectDshEvent(projection, event, agentId, view);
+		}
+		return projection.messages;
+	}
+
+	/** 渲染 + 落盘（导出目录由装配层注入，写入前确保目录存在）。 */
+	private async writeSessionHtmlExport(
+		messages: ChatMessage[],
+		meta: { title: string; cwd?: string; dshSessionId: string },
+	): Promise<{ path: string }> {
+		const dir = this.getExportDir();
+		if (!dir) throw new Error("session export is not configured");
+		const html = renderDshSessionHtml(messages, meta);
+		await mkdir(dir, { recursive: true });
+		const fileName = sanitizeExportFileName(meta.title, meta.dshSessionId);
+		const filePath = join(dir, fileName);
+		await writeFile(filePath, html, "utf8");
+		return { path: filePath };
+	}
+
 	async prepareResendFromMessage(
 		agentId: string,
 		messageId: string,
@@ -970,6 +1072,26 @@ export class DshAgentManager implements SessionAgentGateway {
 			projection = projectDshEvent(projection, event, childAgentId, view);
 		}
 		return { messages: projection.messages, hasMore: page.result.value.hasMore === true };
+	}
+
+	/**
+	 * 技能目录（G7）：wire `skill.list` 只读清单（按会话项目 cwd 解析的目录）。
+	 * 技能经 composer `/name` 斜杠调用（dsh-tool-skill 在 pre-step 注入正文），
+	 * 本方法只做呈现数据源，不做技能管理。
+	 */
+	async listSkills(agentId: string): Promise<DshSkillView[]> {
+		const runtime = this.runtime(agentId);
+		const client = this.requireClient();
+		const listed = await client.skills.list({ sessionId: runtime.sessionId });
+		if (!listed.result.ok) return [];
+		return (listed.result.value.skills ?? []).map((skill) => ({
+			name: String(skill.name),
+			description: String(skill.description),
+			...(skill.whenToUse !== undefined && skill.whenToUse !== null
+				? { whenToUse: String(skill.whenToUse) }
+				: {}),
+			modelInvocable: skill.modelInvocable !== false,
+		}));
 	}
 
 	async setModel(agentId: string, provider: string, modelId: string): Promise<unknown> {

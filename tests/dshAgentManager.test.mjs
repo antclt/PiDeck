@@ -599,7 +599,7 @@ test("compact 以 /compact 提示词触发 host 命令并返回 runtime state", 
 	assert.equal(promptCalls[1], "/compact keep focus on refactor");
 });
 
-test("capabilities 声明 fork/getForkMessages/compact 且不含 pi 专属能力", () => {
+test("capabilities 声明 fork/getForkMessages/compact/getCommands/exportHtml 且不含 pi 专属能力", () => {
 	const { host, sessions } = makeFakeHost();
 	sessions.set("session-cap", { sessionId: "session-cap", cwd: PROJECT.path, running: false, blank: true });
 	const manager = new DshAgentManager(host, () => PROJECT);
@@ -607,10 +607,11 @@ test("capabilities 声明 fork/getForkMessages/compact 且不含 pi 专属能力
 	assert.ok(caps.has("fork"));
 	assert.ok(caps.has("getForkMessages"));
 	assert.ok(caps.has("compact"));
+	// D15：host 命令注册表枚举桥；G10：投影式导出（两者均为 S6 新增能力）
+	assert.ok(caps.has("getCommands"));
+	assert.ok(caps.has("exportHtml"));
 	assert.ok(!caps.has("editMessage"), "DSH 不支持编辑历史消息");
 	assert.ok(!caps.has("deleteMessage"));
-	assert.ok(!caps.has("getCommands"));
-	assert.ok(!caps.has("exportHtml"));
 });
 
 test("审批自动放行开启：approval 帧直接应答 allowed-once，不弹 agents:ui-request", async () => {

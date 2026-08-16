@@ -60,6 +60,7 @@ export default defineConfig({
           runnerConsolePreload: resolve(__dirname, "src/main/dsh/runnerConsolePreload.ts"),
           pideckPwshPersistent: resolve(__dirname, "src/main/dsh/pideckPwshPersistent.ts"),
           pideckPluginBridge: resolve(__dirname, "src/main/dsh/pideckPluginBridge.ts"),
+          pideckCommandsBridge: resolve(__dirname, "src/main/dsh/pideckCommandsBridge.ts"),
         },
         formats: ["cjs"],
       },

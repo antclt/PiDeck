@@ -63,10 +63,10 @@ export interface SessionAgentGateway {
 	abort(agentId: string): Promise<void>;
 	compact(agentId: string, prompt?: string): Promise<AgentRuntimeState>;
 	getRuntimeState(agentId: string): Promise<AgentRuntimeState>;
-	/** 可选能力：会话内命令列表（pi 提供；dsh 缺失，capabilities 不含 getCommands）。 */
+	/** 可选能力：会话内命令列表（pi 经 get_commands RPC；dsh 经 host 命令注册表枚举桥 D15）。 */
 	getCommands?(agentId: string): Promise<unknown[]>;
 	getAvailableModels(agentId: string): Promise<AvailableModel[]>;
-	/** 可选能力：导出 HTML（pi 提供；dsh 缺失，capabilities 不含 exportHtml）。 */
+	/** 可选能力：导出 HTML（pi 经 export_html RPC；dsh 投影式导出 G10）。 */
 	exportHtml?(agentId: string): Promise<unknown>;
 	/** 可选能力：编辑历史消息（pi 提供；dsh 缺失，capabilities 不含 editMessage）。 */
 	editMessage?(agentId: string, messageId: string, newText: string): Promise<void>;

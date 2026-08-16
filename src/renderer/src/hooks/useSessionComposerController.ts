@@ -504,17 +504,35 @@ export function useSessionComposerController(
   }, [record?.projectId]);
 
   useEffect(() => {
-    // G4：DSH 会话没有 pi 的 get_commands（capabilities 未声明 getCommands），
-    // 走已知命令建议集（与 dsh-web 命名空间一致；slash 桥未命中会放行给模型）。
+    // D15：DSH 会话的命令补全优先走 live 注册表（host 侧 ctx.commands.list，
+    // 含用户/插件注册的命令）；会话未激活（无 live Agent）或桥失败时降级为
+    // 已知命令建议集（与 dsh-web 命名空间一致；slash 桥未命中会放行给模型）。
     if (isDshBackend) {
-      setCommands(
-        DSH_COMMAND_SUGGESTIONS.map((command) => ({
-          name: command.name,
-          description: t(command.descriptionKey),
-          source: command.source,
-        })),
-      );
-      return;
+      const staticCommands = DSH_COMMAND_SUGGESTIONS.map((command) => ({
+        name: command.name,
+        description: t(command.descriptionKey),
+        source: command.source,
+      }));
+      const dshTarget = toSessionRuntimeTarget(sessionId, runtime);
+      if (!dshTarget) {
+        setCommands(staticCommands);
+        return;
+      }
+      let current = true;
+      void desktopApi.sessions.listRuntimeCommands(dshTarget).then((result) => {
+        if (current) {
+          const live = requireSessionCommand(result).value;
+          // live 清单可能不含 help 等基础命令（部分命令仅桌面侧存在）：
+          // 与静态建议集合并去重，优先 live 描述。
+          const names = new Set(live.map((command) => command.name));
+          setCommands([...live, ...staticCommands.filter((command) => !names.has(command.name))]);
+        }
+      }).catch(() => {
+        if (current) setCommands(staticCommands);
+      });
+      return () => {
+        current = false;
+      };
     }
     const target = toSessionRuntimeTarget(sessionId, runtime);
     if (!target) {

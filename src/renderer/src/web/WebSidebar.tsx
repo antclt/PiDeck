@@ -16,6 +16,7 @@ import { t } from "@/i18n";
 import { WebBrandLockup } from "./WebBrandLockup";
 import { cn } from "@/lib/utils";
 import { sessionStatusDotClass } from "@/agentListDisplay";
+import { SessionBackendMark } from "@/components/session/SessionSourceBadge";
 import type { WebProject, WebRuntime, WebSession, WebState } from "./webTypes";
 
 const projectRowClass =
@@ -71,6 +72,8 @@ function SessionRows(props: {
 								<strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>
 									{session.title || t("common.untitled")}
 								</strong>
+								{/* 后端徽标（C18 同源）：dsh 会话显示鲸鱼 logo，pi 会话显示 pi logo */}
+								<SessionBackendMark backend={session.backend} className="size-4 shrink-0 rounded" />
 							</div>
 						</div>
 					</button>

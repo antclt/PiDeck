@@ -101,6 +101,8 @@ export const ipcChannels = {
 	dshListSubagents: "dsh:list-subagents",
 	/** DSH 子代理历史（subagent.history 只读 transcript）。 */
 	dshSubagentHistory: "dsh:subagent-history",
+	/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */
+	dshListSkills: "dsh:list-skills",
 	/** DSH 孤儿会话 id 列表（host 有但 catalog 无映射；G3/D11 清理提示用）。 */
 	dshListOrphans: "dsh:list-orphans",
 	/** DSH 外部会话清单（dsh-web 等其他工具创建的 host 根会话，跨工具导入用）。 */

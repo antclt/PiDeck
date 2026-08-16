@@ -11,8 +11,10 @@ import { parseAgentDefaultModel } from "./dshDefaultModel";
 import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
 import { workspaceDirFor } from "./dshSessionPath";
 import { PIDECK_PLUGIN_BRIDGE_PATH } from "./pideckPluginBridge";
+import { PIDECK_COMMANDS_BRIDGE_PATH } from "./pideckCommandsBridge";
 import type { DshFetchMessage } from "./dshHostBridge";
 import type {
+	DshCommandView,
 	DshPluginBridgeResponse,
 	DshPluginInstallInput,
 	DshPluginLifecycleInput,
@@ -333,13 +335,13 @@ export class DshHost {
 	}
 
 	/**
-	 * 动态 Cordis 插件桥（G13 深化）：经 fetch 桥调 host 侧 pideck-plugin-bridge 服务。
-	 * 所有方法统一走 pluginRpc（POST /pideck-plugin/rpc，{ method, params } → { ok, value|error }）。
+	 * 桥 RPC 通用入口（G13/D15 共用）：经 fetch 桥调 host 侧 pideck-* 桥服务。
+	 * 所有桥方法统一走 POST {path}，{ method, params } → { ok, value|error } 信封。
 	 */
-	private async pluginRpc(method: string, params: unknown): Promise<unknown> {
+	private async bridgeRpc(path: string, method: string, params: unknown): Promise<unknown> {
 		await this.ensureStarted();
 		if (!this.apiClient) throw new Error("DSH host is not started");
-		const response = await this.apiClient.rawFetch(PIDECK_PLUGIN_BRIDGE_PATH, {
+		const response = await this.apiClient.rawFetch(path, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ method, params }),
@@ -348,12 +350,17 @@ export class DshHost {
 		try {
 			parsed = JSON.parse(await response.text()) as DshPluginBridgeResponse<unknown>;
 		} catch {
-			throw new Error(`plugin bridge returned non-JSON response (HTTP ${response.status})`);
+			throw new Error(`bridge returned non-JSON response (HTTP ${response.status})`);
 		}
 		if (parsed.ok !== true) {
-			throw new Error(parsed.ok === false ? parsed.error : "plugin bridge request failed");
+			throw new Error(parsed.ok === false ? parsed.error : "bridge request failed");
 		}
 		return parsed.value;
+	}
+
+	/** 动态插件桥（G13 深化）：pideck-plugin-bridge 服务的 RPC 入口。 */
+	private async pluginRpc(method: string, params: unknown): Promise<unknown> {
+		return this.bridgeRpc(PIDECK_PLUGIN_BRIDGE_PATH, method, params);
 	}
 
 	/** 动态插件清单（进程内全部会话的临时扩展；重启即失）。 */
@@ -386,6 +393,17 @@ export class DshHost {
 	/** 卸载动态插件（undefine：删除插件与全部包版本）。 */
 	async uninstallDynamicPlugin(input: DshPluginLifecycleInput): Promise<unknown> {
 		return this.pluginRpc("uninstall", input);
+	}
+
+	/**
+	 * 会话命令枚举（D15）：经 pideck-command-bridge 调 host 命令注册表
+	 * （ctx.commands.list(agent)），返回该会话 live Agent 生效的命令描述符。
+	 * 会话未激活（无 live Agent）时桥返回结构化错误，主进程抛错，
+	 * 渲染层按能力降级为静态建议列表（DSH_COMMAND_SUGGESTIONS）。
+	 */
+	async listCommands(sessionId: string): Promise<DshCommandView[]> {
+		const value = await this.bridgeRpc(PIDECK_COMMANDS_BRIDGE_PATH, "list", { sessionId });
+		return Array.isArray(value) ? (value as DshCommandView[]) : [];
 	}
 
 	/**

@@ -1,10 +1,194 @@
 /**
- * web.css — Web 端专用布局覆盖。
+ * web.css — Web 端专用布局覆盖 + dsh-web 视觉语言（S6.2）。
  *
- * 基础布局在 WebChatApp 用 flex 完成（桌面三栏风格：侧栏 + 主区），
+ * 风格来源：官方 `@deepseek-ai/dsh-web-frontend` dist 的设计 token（用户授权
+ * 「直接抄」）：alias 语义变量名（bg-layer/border-l/label/state/interactive/
+ * button/markdown）与亮色值逐字取自 dist CSS；暗色值取同一设计语言的近黑分层
+ * （官方暗色值由主题插件运行时注入，dist 内不可静态提取，此处为等价推导值）。
+ *
+ * 实现方式：在 `:root` 覆盖 foundation 的 `--color-*` 语义变量（web 页独立入口，
+ * 只影响本页），全部既有 Tailwind utility 自动换肤；结构精修限定 `.web-app`
+ * 作用域，不影响桌面端。
+ *
+ * 基础布局在 WebChatApp 用 flex 完成（侧栏 + 主区），
  * 这里只补移动端（≤760px）断点：聊天作为主画面，项目树改为可关闭抽屉，
  * 与旧 A1/A2 的 760px 断点语义保持一致。
  */
+
+/* ── dsh-web 设计 token（浅色：官方 dist 原值）────────────────────────── */
+:root {
+  /* 官方字体栈（--dsw-font-family / --ds-font-family-code） */
+  --font-family-base:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  --font-family-mono:
+    "SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo,
+    Courier, "PingFang SC", "Microsoft YaHei";
+
+  /* 背景分层（--dsw-alias-bg-layer-1/2/3）：layer-1 应用底，layer-2 侧栏/浮层，layer-3 控件面 */
+  --color-bg-app: #ffffff;        /* layer-1 */
+  --color-bg-sidebar: #f9fafb;    /* layer-2（bluish-50） */
+  --color-bg-panel: #ffffff;      /* layer-1 */
+  --color-bg-popover: #ffffff;
+  --color-bg-input: #ffffff;
+  --color-bg-muted: #ebedf2;      /* layer-3（bluish-100） */
+  --color-bg-hover: #e1e5ee;      /* interactive hover（bluish-200） */
+  --color-bg-active: #cfd3d6;     /* interactive active（bluish-300） */
+  --color-chat-card-bg: #f9fafb;
+  --color-chat-muted-bg: #f4f5f7;
+
+  /* 文字层级（--dsw-alias-label-primary/secondary/tertiary） */
+  --color-text-primary: #0f1115;  /* bluish-1000 */
+  --color-text-secondary: #61666b; /* bluish-700 */
+  --color-text-tertiary: #81858c; /* bluish-500 */
+  --color-text-inverse: #ffffff;
+
+  /* 边框层级（--dsw-alias-border-l1..l4） */
+  --color-border-subtle: rgb(0 0 0 / 4%);
+  --color-border-default: rgb(0 0 0 / 9%);
+  --color-border-strong: rgb(0 0 0 / 16%);
+
+  /* 动作/状态色（--dsw-alias-button-* / --dsw-alias-state-*：官方 static 值） */
+  --color-accent: #18181b;
+  --color-accent-strong: #09090b;
+  --color-accent-soft: #ebedf2;
+  --color-danger: #ef4444;        /* red-500 */
+  --color-danger-soft: #fef2f2;   /* red-50 */
+  --color-success: #22c55e;       /* green-500 */
+  --color-success-soft: #f0fdf4;
+  --color-success-strong: #16a34a;
+  --color-warning: #f59e0b;       /* amber-500 */
+  --color-info: #3b82f6;          /* blue-500 */
+
+  /* 代码面（--dsl-code-block-*） */
+  --color-code-bg: #171a26;
+  --color-code-text: #d1d5db;
+}
+
+/* 暗色：dsh 设计语言的近黑分层（等价推导值，与导出 HTML / 官方暗色观感一致） */
+:root[data-theme="dark"] {
+  --color-bg-app: #0d0f14;        /* layer-1 */
+  --color-bg-sidebar: #131620;    /* layer-2 */
+  --color-bg-panel: #131620;      /* layer-2 */
+  --color-bg-popover: #1a1e2c;    /* layer-3 */
+  --color-bg-input: #0d0f14;
+  --color-bg-muted: #1a1e2c;      /* layer-3 */
+  --color-bg-hover: #232838;      /* interactive hover */
+  --color-bg-active: #2a3042;     /* interactive active */
+  --color-chat-card-bg: #131620;
+  --color-chat-muted-bg: #171a26;
+
+  --color-text-primary: #e8eaf2;
+  --color-text-secondary: #9aa1b5;
+  --color-text-tertiary: #6b7288;
+  --color-text-inverse: #ffffff;
+
+  --color-border-subtle: rgb(255 255 255 / 6%);
+  --color-border-default: rgb(255 255 255 / 10%);
+  --color-border-strong: rgb(255 255 255 / 18%);
+
+  --color-accent: #e8eaf2;
+  --color-accent-strong: #ffffff;
+  --color-accent-soft: #232838;
+  --color-danger: #f87171;
+  --color-danger-soft: rgb(248 113 113 / 12%);
+  --color-success: #34d399;
+  --color-success-soft: rgb(52 211 153 / 12%);
+  --color-success-strong: #6ee7b7;
+  --color-warning: #fbbf24;
+  --color-info: #60a5fa;
+
+  --color-code-bg: #171a26;
+  --color-code-text: #d1d5db;
+}
+
+/* ── dsh-web 结构精修（仅 Web 页）─────────────────────────────────────── */
+
+/* 侧栏：layer-2 表面 + 细边框；会话行 hover 用 interactive hover 面 */
+.web-app .chat-list-pane {
+  background: var(--color-bg-sidebar);
+  border-right-color: var(--color-border-subtle);
+}
+
+.web-app .conversation.agent-row:hover,
+.web-app .conversation:hover {
+  background: var(--color-bg-hover);
+  border-color: transparent;
+}
+
+.web-app .conversation.agent-row.active {
+  background: var(--color-bg-active);
+  border-color: var(--color-border-strong);
+}
+
+/* 头部：细底边框 + 半透明毛玻璃（dsh-web 的浮层头部观感） */
+.web-app .chat-header {
+  background: color-mix(in srgb, var(--color-bg-app) 86%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom-color: var(--color-border-subtle);
+}
+
+/* 时间线消息列：dsh-web 的内容列宽（大屏居中限宽） */
+.web-app .message-timeline .message-list {
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 用户气泡：dsh-web 风格（layer-2 面 + 细边框 + 14px 圆角） */
+.web-app .user-turn .rounded-\[14px\] {
+  background: var(--color-bg-muted);
+  border-color: var(--color-border-subtle);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+}
+
+/* 助手正文：正文色层级 + 更宽松行高 */
+.web-app .timeline-inline-text {
+  color: var(--color-text-primary);
+}
+
+/* Composer：浮起容器（layer-2 面 + 细边框 + 聚焦品牌环），dsh-web 输入区观感 */
+.web-app .composer {
+  background: var(--color-bg-app);
+}
+.web-app .composer-box {
+  background: var(--color-bg-panel);
+  border-color: var(--color-border-default);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 5%);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+.web-app .composer-box:focus-within {
+  border-color: var(--color-info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-info) 18%, transparent);
+}
+
+/* 滚动条（--dsh-scrollbar-* 语义：细滚动条 + 低调 thumb） */
+.web-app ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.web-app ::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.web-app ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* 工具卡/思考卡：统一细边框 + 圆角（dsw alias 边框层级） */
+.web-app .tool-card,
+.web-app .thinking-block {
+  border-color: var(--color-border-default);
+  border-radius: 10px;
+  background: var(--color-bg-panel);
+}
 
 /* 桌面遗留的「整行按压缩放」反馈（foundation.css 的
    .project-group > .conversation:first-child:active 会 scale(0.985)）：

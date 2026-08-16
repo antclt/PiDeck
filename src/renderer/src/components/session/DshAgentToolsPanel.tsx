@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { CheckCircle2, Loader2, Pause, Play, Target, Users, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, Pause, Play, Sparkles, Target, Users, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
@@ -12,16 +12,17 @@ import { Input } from "../ui-shadcn/input";
 import { Progress } from "../ui-shadcn/progress";
 
 /**
- * DSH 会话工具面板（G5/G6）：目标管理 + 子代理呈现。
+ * DSH 会话工具面板（G5/G6/G7）：目标管理 + 子代理呈现 + 技能目录。
  * - 目标：当前 goal（runtime state 投影）显示 + 创建 / pause / resume / complete / clear；
- * - 子代理：subagent.list 直接子代目录 + 展开只读 transcript。
+ * - 子代理：subagent.list 直接子代目录 + 展开只读 transcript；
+ * - 技能：skill.list 只读目录（/name 斜杠调用提示，不做管理）。
  */
 export function DshAgentToolsPanel(props: {
   sessionId: string;
   agentId: string;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"goals" | "subagents">("goals");
+  const [tab, setTab] = useState<"goals" | "subagents" | "skills">("goals");
   return (
     <Dialog open onOpenChange={(next) => !next && props.onClose()}>
       <DialogContent showCloseButton className="sm:max-w-lg">
@@ -44,11 +45,20 @@ export function DshAgentToolsPanel(props: {
             <Users size={14} aria-hidden="true" />
             {t("dshTools.subagents")}
           </Button>
+          <Button
+            variant={tab === "skills" ? "secondary" : "ghost"}
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setTab("skills")}
+          >
+            <Sparkles size={14} aria-hidden="true" />
+            {t("dshTools.skills")}
+          </Button>
         </div>
         <div className="min-h-40 overflow-y-auto">
-          {tab === "goals"
-            ? <GoalsPanel sessionId={props.sessionId} agentId={props.agentId} />
-            : <SubagentsPanel agentId={props.agentId} />}
+          {tab === "goals" && <GoalsPanel sessionId={props.sessionId} agentId={props.agentId} />}
+          {tab === "subagents" && <SubagentsPanel agentId={props.agentId} />}
+          {tab === "skills" && <SkillsPanel agentId={props.agentId} />}
         </div>
       </DialogContent>
     </Dialog>
@@ -298,6 +308,61 @@ function SubagentsPanel(props: { agentId: string }) {
               ))}
             </div>
           )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type SkillEntry = {
+  name: string;
+  description: string;
+  whenToUse?: string;
+  modelInvocable: boolean;
+};
+
+/** 技能目录（G7）：skill.list 只读清单 + /name 斜杠调用提示。 */
+function SkillsPanel(props: { agentId: string }) {
+  const [entries, setEntries] = useState<SkillEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    void desktopApi.sessions.listDshSkills(props.agentId).then((items) => {
+      if (!cancelled) setEntries(items);
+    }).catch(() => {
+      if (!cancelled) setEntries([]);
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.agentId]);
+
+  if (loading) {
+    return <div className="flex items-center gap-2 p-3 text-caption text-text-secondary"><Loader2 size={14} className="animate-spin" aria-hidden="true" />{t("dshTools.loading")}</div>;
+  }
+  if (entries.length === 0) {
+    return <p className="p-3 text-caption text-text-secondary">{t("dshTools.skillsEmpty")}</p>;
+  }
+  return (
+    <div className="flex flex-col gap-1.5 p-1">
+      {entries.map((entry) => (
+        <div key={entry.name} className="flex flex-col gap-1 rounded-lg border border-border-subtle bg-bg-panel/60 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Sparkles size={13} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+            <code className="min-w-0 flex-1 truncate text-control font-medium text-foreground">/{entry.name}</code>
+            {!entry.modelInvocable && (
+              <span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">
+                {t("dshTools.skillUserOnly")}
+              </span>
+            )}
+          </div>
+          <p className="text-caption text-text-secondary">{entry.description}</p>
+          {entry.whenToUse && <p className="text-micro text-text-tertiary">{entry.whenToUse}</p>}
+          <p className="text-micro text-text-tertiary">{t("dshTools.skillInvokeHint", { name: entry.name })}</p>
         </div>
       ))}
     </div>

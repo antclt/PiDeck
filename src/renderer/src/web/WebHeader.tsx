@@ -5,7 +5,7 @@
  * 运行态来自 useChat status（submitted/streaming）与轮询的 runtime.status 兜底。
  */
 import { useState } from "react";
-import { Check, ChevronsUpDown, Menu } from "lucide-react";
+import { Check, ChevronsUpDown, Menu, Target } from "lucide-react";
 import type { AvailableModel } from "../../../shared/types";
 import { Button } from "@/components/ui-shadcn/button";
 import {
@@ -25,6 +25,8 @@ import {
 } from "@/components/ui-shadcn/select";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { SessionBackendMark } from "@/components/session/SessionSourceBadge";
+import type { AgentBackend } from "../../../shared/types";
 
 export type WebHeaderStatus = "idle" | "starting" | "running" | "error";
 
@@ -35,8 +37,10 @@ export function WebHeader(props: {
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
 	models: AvailableModel[];
+	backend?: AgentBackend;
 	onModelChange: (model: AvailableModel) => void;
 	onThinkingChange: (level: string) => void;
+	onOpenDshTools?: () => void;
 }) {
 	const {
 		title,
@@ -45,8 +49,10 @@ export function WebHeader(props: {
 		model,
 		thinkingLevel,
 		models,
+		backend,
 		onModelChange,
 		onThinkingChange,
+		onOpenDshTools,
 	} = props;
 	// 允许窄屏换行：标题保留可用宽度，控制项在下一行展开，避免手机上相互挤压。
 	return (
@@ -64,13 +70,30 @@ export function WebHeader(props: {
 			</Button>
 			<div className="chat-title-block min-w-0 flex-1">
 				<strong
-					className="block min-w-0 truncate text-sm font-semibold tracking-tight text-foreground"
+					className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold tracking-tight text-foreground"
 					title={title}
 				>
-					{title}
+					{/* 后端徽标（C18 同源）：与侧栏会话行一致，头部可辨 pi/dsh */}
+					{backend && <SessionBackendMark backend={backend} className="size-4 shrink-0 rounded" />}
+					<span className="min-w-0 truncate">{title}</span>
 				</strong>
 			</div>
 			<div className="chat-header-actions flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
+				{/* S6.3：DSH 会话的 goals/subagents/skills 工具面板入口（仅 dsh 后端显示） */}
+				{backend === "dsh" && onOpenDshTools && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						className="h-8 gap-1 px-2 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+						onClick={onOpenDshTools}
+						aria-label={t("web.dshTools")}
+						title={t("web.dshTools")}
+					>
+						<Target size={14} aria-hidden="true" />
+						<span className="hidden sm:inline">{t("web.dshTools")}</span>
+					</Button>
+				)}
 				<ModelPicker model={model} models={models} onChange={onModelChange} />
 				<Select value={thinkingLevel ?? "off"} onValueChange={onThinkingChange}>
 					<SelectTrigger
