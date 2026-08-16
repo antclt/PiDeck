@@ -5,6 +5,7 @@ import { t } from "../../i18n";
 import type { AgentRuntimeState } from "../../../../shared/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { buildSessionStatusDetail } from "./SurfaceComponents";
+import { formatPercent } from "./TimelineFormat";
 
 /**
  * composer 发送按钮旁的上下文占用圆环（移植自 dsh-web ContextMeter）。
@@ -47,15 +48,21 @@ export function formatTokens(n: number): string {
 }
 
 /** 由 runtime 状态计算占用（dsh contextOccupancy 同款语义）：
- *  缺任一字段视为无 capacity（null），percent 封顶 100。 */
+ *  缺任一字段视为无 capacity（null）；percent 保留原始精度（封顶 100）。
+ *  当上报 percent ≤ 0 而 tokens 非 0（pi/dsh 取整成 0 或尚未随 tokens 刷新）时，
+ *  按 tokens/window 重算，避免「占用 0% 但 ~408 / 1M」这类自相矛盾的展示。 */
 export function contextOccupancy(
 	state: Pick<AgentRuntimeState, "contextPercent" | "contextTokens" | "contextWindow"> | undefined,
 ): { percent: number; usedTokens?: number; contextWindow?: number } | null {
 	const usedTokens = state?.contextTokens ?? undefined;
 	const contextWindow = state?.contextWindow ?? undefined;
 	if (state?.contextPercent == null || contextWindow == null) return null;
+	let percent = state.contextPercent;
+	if (percent <= 0 && usedTokens != null && usedTokens > 0 && contextWindow > 0) {
+		percent = (usedTokens / contextWindow) * 100;
+	}
 	return {
-		percent: Math.min(100, Math.round(state.contextPercent)),
+		percent: Math.min(100, percent),
 		usedTokens,
 		contextWindow,
 	};
@@ -182,7 +189,8 @@ export function SessionContextMeter(props: {
 
 	if (context === null) return null;
 	const percent = context.percent;
-	const reading = t("sessionContext.used", { percent });
+	// 低占用保留有效数字（1M 窗口下 408 tokens ≈ 0.04%，不显示成「0%」）
+	const reading = t("sessionContext.used", { percent: formatPercent(percent) });
 	const figures = [context.usedTokens, context.contextWindow].every((v) => v != null)
 		? `~${formatTokens(context.usedTokens!)} / ${formatTokens(context.contextWindow!)}`
 		: undefined;
@@ -236,7 +244,7 @@ export function SessionContextMeter(props: {
 						}}
 					>
 					<div className="flex items-center gap-1.5">
-						<span className="text-text-tertiary">{t("sessionContext.used", { percent })}</span>
+						<span className="text-text-tertiary">{t("sessionContext.used", { percent: formatPercent(percent) })}</span>
 						{figures !== undefined && (
 							<span className="ml-auto font-medium tabular-nums text-foreground">
 								{figures}

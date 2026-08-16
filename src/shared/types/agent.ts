@@ -81,6 +81,22 @@ export type AgentRuntimeState = {
 	/** 对话消息估算 token：主进程按会话文件消息文本字符数 ÷ 4 粗估，
 	 *  用于 UI 展示「对话 vs 系统+工具」两段占比（pi 不返回 prompt 构成）。 */
 	contextMessageTokens?: number;
+	/** DSH host contextBreakdown 投影：系统提示 token 估算（缺失 = 无投影；0 表示确实为 0）。 */
+	contextSystemTokens?: number;
+	/** DSH host contextBreakdown 投影：工具 schema token 估算（缺失 = 无投影；0 表示确实为 0）。 */
+	contextToolsTokens?: number;
+	/** DSH 会话统计（host sessionStats 投影：整段日志回合/步骤计数与墙钟汇总；
+	 *  dsh-web StatsLine 同源；pi 无此概念，pi 用「上次回复」性能组）。 */
+	dshSessionStats?: {
+		turns: number;
+		steps: number;
+		llmMs: number;
+		toolMs: number;
+		/** 平均首 token 延迟（ms；ttftMs ÷ ttftSteps），无首字样本时为 undefined */
+		ttftAvgMs?: number;
+		/** 生成速度（tokens/s；decodeTokens ÷ decode 时长），无输出样本时为 undefined */
+		tokensPerSecond?: number;
+	};
 	inputTokens?: number;
 	outputTokens?: number;
 	cacheRead?: number;

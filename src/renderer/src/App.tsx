@@ -1482,9 +1482,6 @@ export function App() {
         // 首次检测延后一帧启动,先让主界面完成绘制,避免 packaged app 打开时出现几秒白屏。
         window.setTimeout(() => void piUpdate.checkPiInstall("startup"), 300);
       }
-      if (!next.disableUpdateCheck) {
-        window.setTimeout(() => void piUpdate.checkPiCliUpdateOnStartup(), 1200);
-      }
     }).catch(() => {
       // 即使 settings IPC 暂不可用，也要允许侧栏继续使用 localStorage/default 状态。
       setSettingsLoaded(true);

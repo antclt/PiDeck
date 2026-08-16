@@ -241,6 +241,17 @@ export function formatTime(timestamp: number): string {
   });
 }
 
+/**
+ * 上下文占用百分比展示（adaptive precision）：≥10 取整、≥1 一位小数、<1 保留两位小数。
+ * 1M 上下文窗口下几百 token 的占用（≈0.04%）若按整数四舍五入会显示成「0%」，
+ * 与「~408 / 1M」并列时看起来像算错了——低占用必须保留有效数字。
+ */
+export function formatPercent(value: number): string {
+  if (value >= 10) return String(Math.round(value));
+  if (value >= 1) return String(Math.round(value * 10) / 10);
+  return String(Math.round(value * 100) / 100);
+}
+
 /* ── 一轮回答的展示分段已迁移至 timeline/buildTurnDisplay.ts ──
  *
  * 旧 buildTurnSegments（多个 process 折叠段）已被新 buildTurnDisplay（扁平展示序列 +

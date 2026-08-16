@@ -32,6 +32,7 @@ import {
 	DialogTitle,
 } from "../ui-shadcn/dialog";
 import { cn } from "../../lib/utils";
+import { showNotice } from "../../utils/notice";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { SessionContextMeter } from "./SessionContextMeter";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
@@ -310,17 +311,22 @@ export function ComposerBottomBar(props: {
 						/* 后端已锁定（会话激活后不可切换：pi 文件与 DSH session log 格式不同，
 						   中途切换会导致消息同步渲染不可靠）：只读标识，只显示官方 logo 不重复文字。
 						   inline-flex 居中：span 默认 inline，svg 按 baseline 排会偏上，
-						   与底栏其它按钮（flex 居中 15px 图标）水平不平齐。 */
-						<span
-							className="composer-bar-btn backend inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-control font-semibold text-foreground"
+						   与底栏其它按钮（flex 居中 15px 图标）水平不平齐。
+						   用户输入时 Agent 可能已被自动启动、后端随之锁定，但用户不一定知情；
+						   点击时弹提示说明锁定原因与换后端的途径（新建会话）。 */
+						<button
+							type="button"
+							className="composer-bar-btn backend inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60"
 							title={t("session.backendLockedHint")}
+							aria-label={t("session.backendLockedHint")}
+							onClick={() => showNotice(t("session.backendLockedNotice"), 5000)}
 						>
 							{props.backend === "dsh" ? (
 								<DshLogo className="size-[15px] shrink-0" />
 							) : (
 								<PiLogo className="size-[15px] shrink-0" />
 							)}
-						</span>
+						</button>
 					) : null}
 					<Button
 						variant="ghost"

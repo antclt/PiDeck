@@ -216,6 +216,94 @@ export function parseContextBreakdownProjection(
 }
 
 /**
+ * DSH host sessionStats 投影原始字段：整段日志的回合/步骤计数与墙钟汇总
+ * （dsh-web StatsLine 同源；decode 段 = 首字之后到回复完成的输出阶段）。
+ */
+export type DshSessionStatsProjection = {
+	turns: number;
+	steps: number;
+	llmMs: number;
+	toolMs: number;
+	ttftMs: number;
+	ttftSteps: number;
+	decodeMs: number;
+	decodeTokens: number;
+};
+
+/** 由 sessions.list 的 projections.values 恢复会话统计初值（attach/restart 时）。 */
+export function parseSessionStatsProjection(values: unknown): DshSessionStatsProjection | undefined {
+	if (!isRecord(values)) return undefined;
+	const raw = values.sessionStats;
+	if (!isRecord(raw)) return undefined;
+	const turns = asNumber(raw.turns);
+	const steps = asNumber(raw.steps);
+	if (turns === undefined && steps === undefined) return undefined;
+	return {
+		turns: turns ?? 0,
+		steps: steps ?? 0,
+		llmMs: asNumber(raw.llmMs) ?? 0,
+		toolMs: asNumber(raw.toolMs) ?? 0,
+		ttftMs: asNumber(raw.ttftMs) ?? 0,
+		ttftSteps: asNumber(raw.ttftSteps) ?? 0,
+		decodeMs: asNumber(raw.decodeMs) ?? 0,
+		decodeTokens: asNumber(raw.decodeTokens) ?? 0,
+	};
+}
+
+/**
+ * 由 host sessionStats 投影派生渲染层视图：平均首字延迟与生成速度
+ * （无样本字段保持 undefined，UI 不渲染对应行）。
+ */
+export function deriveDshSessionStats(
+	raw: DshSessionStatsProjection,
+): import("../../shared/types").AgentRuntimeState["dshSessionStats"] {
+	return {
+		turns: raw.turns,
+		steps: raw.steps,
+		llmMs: raw.llmMs,
+		toolMs: raw.toolMs,
+		ttftAvgMs: raw.ttftSteps > 0 ? raw.ttftMs / raw.ttftSteps : undefined,
+		tokensPerSecond: raw.decodeMs > 0 ? raw.decodeTokens / (raw.decodeMs / 1000) : undefined,
+	};
+}
+
+/** 会话累计 token 用量（tokenUsage 投影或最近一步 usage 的统一步骤）。 */
+export type DshUsageTotals = {
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
+};
+
+/** 由 sessions.list 的 projections.values 恢复会话累计用量初值（attach/restart 时）。
+ *  host tokenUsage 投影 = 整段日志累计（uncachedInput 计入 input；dsh-web StatsLine 同源）。 */
+export function parseTokenUsageProjection(values: unknown): DshUsageTotals | undefined {
+	if (!isRecord(values)) return undefined;
+	const raw = values.tokenUsage;
+	if (!isRecord(raw)) return undefined;
+	const inputTokens = asNumber(raw.uncachedInputTokens);
+	const outputTokens = asNumber(raw.outputTokens);
+	if (inputTokens === undefined && outputTokens === undefined) return undefined;
+	const cacheReadTokens = asNumber(raw.cacheReadTokens);
+	const cacheWriteTokens = asNumber(raw.cacheWriteTokens);
+	return {
+		inputTokens: inputTokens ?? 0,
+		outputTokens: outputTokens ?? 0,
+		...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+		...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+	};
+}
+
+/** 缓存命中率：cacheRead ÷ (input + cacheRead + cacheWrite) × 100
+ *  （与 pi 的会话文件口径、dsh-web 的 cacheHitPercent 同公式；无输入计费时 undefined）。 */
+export function cacheHitPercentOf(usage: DshUsageTotals | undefined): number | undefined {
+	if (!usage) return undefined;
+	const denominator = (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
+	if (denominator <= 0) return undefined;
+	return Math.min(100, Math.round(((usage.cacheReadTokens ?? 0) / denominator) * 100));
+}
+
+/**
  * 对话消息 token 估算（与 pi 的 contextMessageTokens 同规则：文本字符数 ÷ 4）。
  * 无 host contextPressure 投影（token-meter 未挂载/adapter 未上报 usage）时的
  * 上下文圆环兜底占用——配合 request/context 的 contextWindow，dsh 会话在首个

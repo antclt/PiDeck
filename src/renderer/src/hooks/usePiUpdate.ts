@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useSetAtom } from "jotai";
 import { t } from "../i18n";
 import { settingsOpenAtom } from "../atoms";
@@ -227,26 +227,7 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
   }, [installCommand, api]);
 
   // ---- Pi CLI 更新 ----
-  // 启动检查只执行一次：StrictMode 下 useEffect([]) 在 dev 双执行、settings.get
-  // 的 .then 回调也会跑两遍，不加闸门会弹两次「Pi 不是最新版本」toast。
-  // ref 置位在函数开头同步完成，两个并发回调先后到达时第二个直接跳过。
-  const startupUpdateCheckDoneRef = useRef(false);
-  const checkPiCliUpdateOnStartup = useCallback(async () => {
-    if (settings.disableUpdateCheck) return;
-    if (startupUpdateCheckDoneRef.current) return;
-    startupUpdateCheckDoneRef.current = true;
-    try {
-      const result = await api.pi.checkUpdate();
-      setPiUpdateCheck(result);
-      if (result.hasUpdate) {
-        const message = t("settings.piUpdateStartupNotice");
-        showToast(message, 6500);
-      }
-    } catch {
-      // 后台检查失败不打扰用户
-    }
-  }, [settings.disableUpdateCheck, api]);
-
+  // 启动不再自动检查 pi 更新（toast 打扰启动流程）；仅设置页手动检查。
   const checkPiCliUpdate = useCallback(async () => {
     if (settings.disableUpdateCheck) return;
     setPiUpdateChecking(true);
@@ -370,7 +351,6 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
     clearCustomPiPath,
     checkNpm,
     execInstallCommand,
-    checkPiCliUpdateOnStartup,
     checkPiCliUpdate,
     updatePiCli,
     testPiProxy,

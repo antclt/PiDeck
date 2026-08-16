@@ -184,10 +184,8 @@ export function FileDiff({
         </span>
         <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/60">
           {streaming ? (
-            <LoaderCircle
-              aria-label="Applying changes"
-              className={cn("size-3.5", !reduce && "animate-spin")}
-            />
+            // 按用户要求关闭转圈动画：保留图标表示「应用变更中」，不再旋转
+            <LoaderCircle aria-label="Applying changes" className="size-3.5" />
           ) : (
             <Check aria-label="Changes applied" className="size-3.5" />
           )}

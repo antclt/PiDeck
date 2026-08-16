@@ -167,7 +167,7 @@ import { parseRichInputChips, unwrapFileChipPath } from "./composer/chips";
 import removeMarkdown from "remove-markdown";
 
 import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
-import { formatDuration, formatTime, stripAnsi } from "./TimelineFormat";
+import { formatDuration, formatTime, stripAnsi, formatPercent } from "./TimelineFormat";
 import { extractVisionBridgeBlocks, matchVisionBridgeEvent } from "../../utils/visionBridgeBlocks";
 import { visionImageHashes } from "../../utils/visionImageHash";
 import { ToolCard, ToolGroupCard, type DiffFileHandler } from "./ToolCallComponents";
@@ -251,7 +251,7 @@ export function buildSessionStatusDetail(
 	if (state.contextPercent != null || state.contextTokens != null) {
 		detailRows.push({
 			label: t("ctx.detail.context"),
-			value: `${state.contextPercent != null ? `${state.contextPercent.toFixed(1)}%` : "-"} / ${formatCompact(state.contextTokens)} / ${formatCompact(state.contextWindow)}`,
+			value: `${state.contextPercent != null ? `${formatPercent(state.contextPercent)}%` : "-"} / ${formatCompact(state.contextTokens)} / ${formatCompact(state.contextWindow)}`,
 		});
 	}
 	if (state.inputTokens != null || state.outputTokens != null) {
@@ -334,8 +334,7 @@ export function SessionStatus(props: {
 			{state.contextPercent != null && (
 				<span className="ctx-chip">
 					{t("app.ctx")}:{" "}
-					{state.contextPercent?.toFixed?.(1) ??
-						state.contextPercent}
+					{formatPercent(state.contextPercent)}
 					% / {formatCompact(state.contextWindow)}
 				</span>
 			)}

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
+import { formatPercent } from "../src/renderer/src/components/session/TimelineFormat.ts";
 
 // 与 sessionWidgetChips.test.mjs 相同的 TSX 编译替身模式：只测公开 helper 与源码结构。
 function compile(filePath, stubs = {}) {
@@ -57,7 +58,7 @@ test("formatTokens follows the dsh StatsLine compaction", () => {
   assert.equal(formatTokens(12_400_000), "12.4M");
 });
 
-test("contextOccupancy computes capped percent and requires both fields", () => {
+test("contextOccupancy keeps raw percent and recomputes zero percent from tokens", () => {
   const { contextOccupancy } = loadMeterHelpers();
   const occ = (state) => contextOccupancy(state);
   // vm 跨 realm 对象原型不同，deepEqual 会误判，按字段断言
@@ -65,15 +66,37 @@ test("contextOccupancy computes capped percent and requires both fields", () => 
     const result = occ(state);
     return result === null ? null : `${result.percent}:${result.usedTokens}:${result.contextWindow}`;
   };
-  // 常规：percent 四舍五入取整
-  assert.equal(fieldsOf({ contextPercent: 45.3, contextTokens: 57600, contextWindow: 128000 }), "45:57600:128000");
+  // 常规：percent 保留原始精度（不再四舍五入成整数）
+  assert.equal(fieldsOf({ contextPercent: 45.3, contextTokens: 57600, contextWindow: 128000 }), "45.3:57600:128000");
   // 超过 100 封顶（主进程可能上报未封顶的估算值）
   assert.equal(fieldsOf({ contextPercent: 112, contextTokens: 100, contextWindow: 200 }), "100:100:200");
+  // percent 上报为 0 但 tokens 非 0（pi/dsh 取整成 0 或未随 tokens 刷新）：
+  // 按 tokens/window 重算，避免「占用 0% 但 ~408 / 1M」的自相矛盾展示
+  const recomputed = occ({ contextPercent: 0, contextTokens: 408, contextWindow: 1_000_000 });
+  assert.ok(recomputed !== null && Math.abs(recomputed.percent - 0.0408) < 1e-9);
+  assert.equal(recomputed.usedTokens, 408);
+  // tokens 为 0 时保持 0，不重算
+  assert.equal(fieldsOf({ contextPercent: 0, contextTokens: 0, contextWindow: 1000 }), "0:0:1000");
   // 缺任一字段 = 无 capacity（模型切换瞬间），返回 null 不渲染
   assert.equal(occ(undefined), null);
   assert.equal(occ({ contextPercent: 50 }), null);
   assert.equal(occ({ contextTokens: 50, contextWindow: 100 }), null);
   assert.equal(occ({ contextPercent: 50, contextTokens: 50 }), null);
+});
+
+test("formatPercent keeps sub-percent precision for small context usage", () => {
+  // 1M 窗口下 408 tokens ≈ 0.04%：整数四舍五入会显示成「0%」，必须保留有效数字
+  assert.equal(formatPercent(0.0408), "0.04");
+  assert.equal(formatPercent(0), "0");
+  assert.equal(formatPercent(0.004), "0"); // 两位小数后仍为 0
+  assert.equal(formatPercent(0.996), "1");
+  assert.equal(formatPercent(1), "1");
+  assert.equal(formatPercent(1.26), "1.3");
+  assert.equal(formatPercent(9.94), "9.9");
+  assert.equal(formatPercent(10), "10");
+  assert.equal(formatPercent(45), "45");
+  assert.equal(formatPercent(45.3), "45");
+  assert.equal(formatPercent(100), "100");
 });
 
 test("meter ring follows the dsh geometry: 14px viewBox, r=5.5, 2px stroke, top-start fill", () => {
@@ -112,7 +135,7 @@ test("contextSegments splits conversation vs system+tools by estimate", () => {
 test("meter panel shows the localized reading and ~used/window figures", () => {
   const source = meterSource();
   assert.match(source, /w-\[264px\]/);
-  assert.match(source, /t\("sessionContext\.used", \{ percent \}\)/);
+  assert.match(source, /t\("sessionContext\.used", \{ percent: formatPercent\(percent\) \}\)/);
   assert.match(source, /formatTokens\(context\.usedTokens!\)\} \/ \$\{formatTokens\(context\.contextWindow!\)\}/);
   // 面板占用条：4px 圆角条，宽度按 percent
   assert.match(source, /h-1 overflow-hidden rounded-full bg-muted/);
