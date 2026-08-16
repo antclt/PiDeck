@@ -181,9 +181,10 @@ export function SkillsTab(props: {
 						<TableHeader>
 							<TableRow>
 								<TableHead className="w-56">{t("config.name")}</TableHead>
-								{/* 描述列保底宽度：窗口拉小时其他固定列会挤压它，太窄时长描述变成
-								    竖条难读；min-w-52 保底 + 表格容器横向滚动兜底（见外层 overflow-x-auto） */}
-								<TableHead className="min-w-52">{t("config.description")}</TableHead>
+								{/* 描述列固定 40% 占比：table-fixed 忽略 min-width，窗口拉小时
+								    无 width 的列会被压到接近 0（描述竖条）；给百分比宽度后
+								    各列按比例压缩，描述列任何窗口下都保持可读宽度 */}
+								<TableHead className="w-2/5">{t("config.description")}</TableHead>
 								<TableHead className="w-44">{t("config.extensionPath")}</TableHead>
 								<TableHead className="w-36 text-right">{t("config.actions")}</TableHead>
 							</TableRow>
@@ -278,9 +279,9 @@ function SkillTableRow(props: {
 				)}
 			</TableCell>
 			{/* 描述太长时截断为 3 行（title 悬浮可看全文），避免长描述把整行撑得
-			    很高；窗口拉小时描述列有 min-w 保底 + 容器横向滚动，不再挤压成窄条。
+			    很高；描述列 w-2/5 占比 + 3 行截断，窗口拉小也不挤压成竖条。
 			    line-clamp 会改 display 为 -webkit-box，必须包一层 span 而不能直接放 td 上。 */}
-			<TableCell className="min-w-52 whitespace-normal break-words text-caption leading-relaxed text-muted-foreground" title={skill.description}>
+			<TableCell className="w-2/5 whitespace-normal break-words text-caption leading-relaxed text-muted-foreground" title={skill.description}>
 				<span className="block line-clamp-3">{skill.description || t("config.skillDescriptionMissing")}</span>
 			</TableCell>
 			<TableCell className="truncate font-mono text-caption text-muted-foreground" title={skill.path}>

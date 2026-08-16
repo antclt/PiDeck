@@ -12,7 +12,6 @@ import {
   PinOff,
   Plus,
   RotateCw,
-  ShieldAlert,
   X,
 } from "lucide-react";
 import {
@@ -694,12 +693,6 @@ function SessionTab(props: {
           >
             {t("app.composerModePlan")}
           </span>
-        )}
-        {runtime?.state?.permissionPreset === "danger-full-access" && (
-          <ShieldAlert
-            className="size-3 shrink-0 text-destructive"
-            aria-label={t("dshPermission.fullAccess")}
-          />
         )}
         <span className={cn("min-w-0 flex-1 truncate", preview && "italic")}>{title}</span>
         {/* 拖拽插入指示线：2px 主题色竖线，贴在目标 Tab 左/右缘 */}

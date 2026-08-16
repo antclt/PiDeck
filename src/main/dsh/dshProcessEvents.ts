@@ -164,6 +164,22 @@ export function pushDshProcessEvent(
 	return result;
 }
 
+/**
+ * 批量收集：按 seq 升序逐条 collect（attach/restart/backfill/history 重放共用）。
+ * 幂等规则由 collectDshProcessEvent 内部保证（同模型/同预设连续不重复记账）。
+ */
+export function collectDshProcessEvents(
+	prev: SessionProcessEvent[],
+	events: ReadonlyArray<{ type?: string; seq?: number; data?: unknown; time?: unknown } | undefined>,
+): SessionProcessEvent[] {
+	let result = prev;
+	for (const event of events) {
+		if (!event) continue;
+		result = pushDshProcessEvent(result, collectDshProcessEvent(result, event));
+	}
+	return result;
+}
+
 /** 由 sessions.list 的 projections.values 恢复 context 占用初值（attach/restart 时）。 */
 export function parseContextPressureProjection(
 	values: unknown,
@@ -197,4 +213,21 @@ export function parseContextBreakdownProjection(
 		toolsTokens: toolsTokens ?? 0,
 		messageTokens: messageTokens ?? 0,
 	};
+}
+
+/**
+ * 对话消息 token 估算（与 pi 的 contextMessageTokens 同规则：文本字符数 ÷ 4）。
+ * 无 host contextPressure 投影（token-meter 未挂载/adapter 未上报 usage）时的
+ * 上下文圆环兜底占用——配合 request/context 的 contextWindow，dsh 会话在首个
+ * 回合后即可显示圆环，与 pi 行为统一。
+ */
+export function estimateContextTokens(
+	messages: ReadonlyArray<{ role?: string; text?: string }>,
+): number {
+	let chars = 0;
+	for (const message of messages) {
+		if (typeof message.text !== "string" || !message.text) continue;
+		chars += message.text.length;
+	}
+	return Math.floor(chars / 4);
 }

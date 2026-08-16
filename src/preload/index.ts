@@ -570,6 +570,17 @@ const api = {
 		/** DSH 孤儿会话 id 列表（host 有但 catalog 无映射；G3/D11 清理提示用）。 */
 		listDshOrphans: () =>
 			ipcRenderer.invoke(ipcChannels.dshListOrphans) as Promise<string[]>,
+		/** DSH 外部会话清单（dsh-web 等其他工具创建的 host 根会话，跨工具导入用）。 */
+		listDshForeignSessions: () =>
+			ipcRenderer.invoke(ipcChannels.dshListForeignSessions) as Promise<Array<{
+				dshSessionId: string;
+				title?: string;
+				cwd?: string;
+				updatedAt?: number;
+			}>>,
+		/** DSH 外部会话导入（把 host 会话映射进 catalog，侧栏可见可加载）。 */
+		importDshForeignSession: (dshSessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.dshImportForeignSession, dshSessionId) as Promise<import("../shared/types").SessionRecord>,
 		/** DSH 归档区会话清单（G14：恢复入口用；目录已移入 .pideck-archive 的 host 会话）。 */
 		listArchivedDshSessions: () =>
 			ipcRenderer.invoke(ipcChannels.dshListArchived) as Promise<Array<{

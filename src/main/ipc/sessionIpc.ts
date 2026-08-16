@@ -136,8 +136,11 @@ export type DshBackendIpcDeps = {
 		beforeSeq: number | undefined,
 		pageSize: number,
 	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; total: number; nextBefore: number | null }>;
-	/** DSH 轨迹过程事件（运行时会话按 mux 事件流收集；未装配时返回空数组）。 */
-	readDshProcessEvents?: (agentId: string) => import("../../shared/types/trajectory").SessionProcessEvent[];
+	/** DSH 轨迹过程事件（运行时会话按 mux/重放收集；历史会话从 host history 推导；未装配时返回空数组）。 */
+	readDshProcessEvents?: (
+		agentId: string | undefined,
+		dshSessionId: string | undefined,
+	) => Promise<import("../../shared/types/trajectory").SessionProcessEvent[]>;
 	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
 	readDshMessageFullText?: (
 		agentId: string,
@@ -172,6 +175,15 @@ export type DshBackendIpcDeps = {
 	) => Promise<{ messages: import("../../shared/types").ChatMessage[]; hasMore: boolean }>;
 	/** DSH 孤儿会话 id 列表（G3/D11：host 有但 catalog 无映射）；未装配时返回空列表。 */
 	listDshOrphans?: () => Promise<string[]>;
+	/** DSH 外部会话清单（dsh-web 等其他工具创建的 host 根会话）；未装配时返回空列表。 */
+	listDshForeignSessions?: () => Promise<Array<{
+		dshSessionId: string;
+		title?: string;
+		cwd?: string;
+		updatedAt?: number;
+	}>>;
+	/** DSH 外部会话导入：按 host 会话 id 映射进 catalog（返回新 SessionRecord）。 */
+	importDshForeignSession?: (dshSessionId: string) => Promise<import("../../shared/types").SessionRecord>;
 	/** DSH 会话归档（G14：host 目录移入 .pideck-archive + manifest）；未装配时抛错。 */
 	archiveDshSession?: (dshSessionId: string, cwd: string) => Promise<string | undefined>;
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树，返回恢复路径与原 cwd）；未装配时抛错。 */
@@ -299,6 +311,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		listDshSubagents,
 		readDshSubagentHistory,
 		listDshOrphans,
+		listDshForeignSessions,
+		importDshForeignSession,
 		archiveDshSession,
 		unarchiveDshSession,
 		listArchivedDshSessions,
@@ -666,13 +680,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (_event, sessionId: string): Promise<SessionProcessEvent[]> => {
 			if (typeof sessionId !== "string" || !sessionId.trim()) return [];
 			const entry = sessionCatalog.get(sessionId);
-			// DSH 会话没有 pi 会话文件：过程事件由运行时会话按 mux 事件流收集
-			// （轨迹账本的 modelChange/permission/plan/goal/compaction 记录）；
-			// 未激活的历史 DSH 会话与 pi 文件缺失一样返回空数组。
+			// DSH 会话没有 pi 会话文件：过程事件由运行时会话按 mux/重放收集，
+			// 历史（未激活）会话从 host history 事件流推导（轨迹账本的
+			// modelChange/permission/plan/goal/compaction 记录）。
 			if (entry?.backend === "dsh" && readDshProcessEvents) {
 				const target = sessionRuntimeCoordinator.getTarget(sessionId);
-				if (!target) return [];
-				return readDshProcessEvents(target.agentId);
+				return readDshProcessEvents(target?.agentId, entry.dshSessionId);
 			}
 			if (!entry?.filePath) return [];
 			const content = await sessionScanner.readSessionRawText(entry.filePath);
@@ -817,6 +830,26 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (): Promise<string[]> => {
 			if (!listDshOrphans) return [];
 			return listDshOrphans();
+		},
+	);
+	// DSH 外部会话清单（跨工具兼容，2026-12）：dsh-web 等其他工具创建的 host 根会话，
+	// 带标题/cwd，供配置页「导入」把 host 数据映射进 catalog（导入后侧栏可见可加载）。
+	ipcMain.handle(
+		ipcChannels.dshListForeignSessions,
+		async (): Promise<Array<{ dshSessionId: string; title?: string; cwd?: string; updatedAt?: number }>> => {
+			if (!listDshForeignSessions) return [];
+			return listDshForeignSessions();
+		},
+	);
+	// DSH 外部会话导入：按 host 会话 id 建 catalog 映射（status=active，重启保留）。
+	ipcMain.handle(
+		ipcChannels.dshImportForeignSession,
+		async (_event, dshSessionId: unknown): Promise<import("../../shared/types").SessionRecord> => {
+			if (typeof dshSessionId !== "string" || !/^session-[A-Za-z0-9-]+$/.test(dshSessionId)) {
+				throw new Error(mainCopy("session.invalidArchivePath"));
+			}
+			if (!importDshForeignSession) throw new Error("DSH session import is not available");
+			return importDshForeignSession(dshSessionId);
 		},
 	);
 	// DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）

@@ -101,6 +101,10 @@ export const ipcChannels = {
 	dshSubagentHistory: "dsh:subagent-history",
 	/** DSH 孤儿会话 id 列表（host 有但 catalog 无映射；G3/D11 清理提示用）。 */
 	dshListOrphans: "dsh:list-orphans",
+	/** DSH 外部会话清单（dsh-web 等其他工具创建的 host 根会话，跨工具导入用）。 */
+	dshListForeignSessions: "dsh:list-foreign-sessions",
+	/** DSH 外部会话导入（把 host 会话映射进 catalog，侧栏可见可加载）。 */
+	dshImportForeignSession: "dsh:import-foreign-session",
 	/** DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）。 */
 	dshListArchived: "dsh:list-archived",
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */

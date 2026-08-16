@@ -322,6 +322,29 @@ test("request/context 记录模型路由", () => {
 	assert.equal(p.stateChanged, true);
 });
 
+test("request/context 携带 contextWindow 时记录路由容量（圆环窗口兜底源）", () => {
+	const p = projectDshEvent(undefined, event("request/context", 11, {
+		provider: "deepseek",
+		model: "deepseek-chat",
+		contextWindow: 64_000,
+	}), AGENT);
+	assert.equal(p.contextWindow, 64_000);
+	assert.equal(p.stateChanged, true);
+	// 同值重复：窗口保持（模型路由本身仍会置 stateChanged，窗口不重复记账）
+	const again = projectDshEvent(p, event("request/context", 12, {
+		provider: "deepseek",
+		model: "deepseek-chat",
+		contextWindow: 64_000,
+	}), AGENT);
+	assert.equal(again.contextWindow, 64_000);
+	// 缺失 contextWindow 不覆盖已有值
+	const missing = projectDshEvent(p, event("request/context", 13, {
+		provider: "deepseek",
+		model: "deepseek-chat",
+	}), AGENT);
+	assert.equal(missing.contextWindow, 64_000);
+});
+
 test("无关事件不产生任何信号", () => {
 	const p = projectDshEvent(undefined, event("session/title", 10, { title: "t" }), AGENT);
 	assert.equal(p.messagesChanged, false);

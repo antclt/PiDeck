@@ -33,6 +33,10 @@ export type DshProjection = {
 	/** 最近一次 assistant 回合的 token 用量（G16：assistant/message 携带 adapter 报告
 	 *  的 usage 时更新，latest wins；缺失 = 适配器未报告）。 */
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+	/** 路由上下文容量（request/context 事件携带的 contextWindow，adapter 上报时才有）：
+	 *  上下文圆环的窗口数据源（dsh-web ContextMeter 同源；与 token-meter 的
+	 *  contextPressure.contextWindow 互为补充，后者依赖投影帧推送）。 */
+	contextWindow?: number;
 	/** 当前 goal（G5：goal/change 事件 last-wins；clear 后为 undefined）。 */
 	goal?: {
 		refId: string;
@@ -381,6 +385,10 @@ export function projectDshEvent(
 								...last.meta,
 								status: "done",
 								durationMs: Math.max(0, resultTime - callTime),
+								// host 为结果事件计算的下发 view（dsh-web 历史页同数据）：
+								// 与 call 侧 meta.view 区分存放（resultView），供轨迹/工具卡
+								// 展示输出/退出码/实际 diff 等结果态信息。
+								...(view !== undefined ? { resultView: view } : {}),
 								// 截断标记与完整文本：渲染层 ToolCard 据此显示「查看完整输出」
 								...(truncated ? { truncated: true as const, fullText } : {}),
 							}
@@ -458,6 +466,16 @@ export function projectDshEvent(
 			const model = modelFromEvent(event);
 			if (model) {
 				next.model = model;
+				next.stateChanged = true;
+			}
+			// 路由上下文容量：adapter 上报时随 request/context 下发（contextWindow），
+			// 上下文圆环的窗口数据源。last-wins；缺失不覆盖已有值。
+			const ctxData = (event.data ?? {}) as { contextWindow?: unknown };
+			const contextWindow = typeof ctxData.contextWindow === "number" && ctxData.contextWindow > 0
+				? ctxData.contextWindow
+				: undefined;
+			if (contextWindow !== undefined && contextWindow !== base.contextWindow) {
+				next.contextWindow = contextWindow;
 				next.stateChanged = true;
 			}
 			break;

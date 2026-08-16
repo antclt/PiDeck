@@ -388,6 +388,8 @@ export class SessionCatalog {
 		model?: { provider: string; modelId: string };
 		thinkingLevel?: string;
 		permissionPreset?: string;
+		/** 外部（dsh-web 等）会话导入：host 会话已存在，条目直接置 active（重启不清理）。 */
+		dshSessionId?: string;
 	}): Promise<SessionRecord> {
 		this.assertLoaded();
 		const entry = await this.enqueueMutation((entries) => {
@@ -405,10 +407,13 @@ export class SessionCatalog {
 				wslUser: input.environment === "wsl"
 					? this.identityContext.wslUser
 					: undefined,
-				status: "draft",
+				// 带 dshSessionId = 导入已有 host 会话（数据在 $DSH_HOME），
+				// 不是「尚未发送」的草稿：置 active，重启清理/重新打开都按真实会话处理。
+				status: input.dshSessionId ? "active" : "draft",
 				model: input.model,
 				thinkingLevel: input.thinkingLevel,
 				permissionPreset: input.permissionPreset,
+				dshSessionId: input.dshSessionId,
 				createdAt: now,
 				updatedAt: now,
 			};

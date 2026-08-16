@@ -204,6 +204,34 @@ test("persists DSH session id so a restarted app can attach the same host sessio
   }
 });
 
+test("imports a foreign DSH session as active (survives restart cleanup, attachable)", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-foreign-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    // 外部（dsh-web 等）会话导入：createDraft 带 dshSessionId 直接置 active，
+    // 不经过「创建→发送→attach」的激活链路。
+    const imported = await catalog.createDraft({
+      projectId: "project-1",
+      title: "dsh-web session",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-foreign-xyz789",
+    });
+    assert.equal(imported.status, "active", "imported session must be active, not draft");
+    assert.equal(imported.dshSessionId, "session-foreign-xyz789");
+    // 重启清理只删 pi draft：active 的导入会话必须保留并可 attach。
+    const reloaded = new SessionCatalog(join(dir, "sessions.json"));
+    await reloaded.load();
+    const restored = reloaded.getRecord(imported.id);
+    assert.equal(restored?.status, "active");
+    assert.equal(restored?.dshSessionId, "session-foreign-xyz789");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("keeps a draft desktop session ID after Pi assigns a file path", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-"));

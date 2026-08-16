@@ -421,6 +421,57 @@ export class DshHost {
 	}
 
 	/**
+	 * 外部（dsh-web 等其他工具）创建的 host 会话清单（跨工具兼容，2026-12）：
+	 * sessions.list 的根会话（排除 subagent 后代），带标题/cwd，供配置页
+	 * 「外部会话导入」把 host 数据映射进 PiDeck catalog（否则在 PiDeck 侧显示为孤儿）。
+	 */
+	async listForeignSessions(): Promise<Array<{
+		dshSessionId: string;
+		title?: string;
+		cwd?: string;
+		updatedAt?: number;
+	}>> {
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) return [];
+		const listed = await client.sessions.list({});
+		if (!listed.result.ok) return [];
+		return (listed.result.value.items ?? [])
+			.filter((item) => item.origin !== "subagent" && item.parentSessionId === undefined)
+			.map((item) => {
+				const values = (item.projections as { values?: unknown } | undefined)?.values;
+				const projectedTitle = values !== null && typeof values === "object"
+					? (values as Record<string, unknown>).title
+					: undefined;
+				return {
+					dshSessionId: String(item.sessionId),
+					...(typeof projectedTitle === "string" && projectedTitle.trim() ? { title: projectedTitle.trim() } : {}),
+					...(typeof item.cwd === "string" && item.cwd ? { cwd: item.cwd } : {}),
+					...(typeof item.updatedAt === "number" ? { updatedAt: item.updatedAt } : {}),
+				};
+			});
+	}
+
+	/**
+	 * 解析 cwd 对应的 host workspace id（幂等）：workspace.create 对已存在目录
+	 * 返回既有 workspace。新会话带 workspaceId 创建会被 host 挂到该 workspace，
+	 * dsh-web 按 workspace 分组（不挂 = dsh-web「未分组」）。失败（目录无效/
+	 * host 异常）返回 undefined，不阻断会话创建。
+	 */
+	async resolveWorkspaceId(cwd: string): Promise<import("@deepseek-ai/dsh-host-apiproxy").WorkspaceId | undefined> {
+		try {
+			await this.ensureStarted();
+			const client = this.client;
+			if (!client) return undefined;
+			const resolved = await client.workspace.create({ path: cwd });
+			if (!resolved.result.ok) return undefined;
+			return resolved.result.value.workspace.workspaceId;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
 	 * 可配置提供方目录（llm.providers）：内置 catalog（declared，未配置）+
 	 * 已注册路由（active）。模型页「添加提供方」从 declared 未激活行中选择，
 	 * 与 dsh-web 的休眠目录选择同源。首次调用会懒 boot。

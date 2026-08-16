@@ -159,6 +159,10 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 		getClient() {
 			return client;
 		},
+		/** workspace 解析：测试假 host 不注册 workspace（返回 undefined = 走无 workspaceId 的旧路径）。 */
+		async resolveWorkspaceId() {
+			return undefined;
+		},
 		onHostReady() {
 			// E4 恢复钩子：测试中不触发恢复逻辑，直接返回退订函数。
 			return () => {};

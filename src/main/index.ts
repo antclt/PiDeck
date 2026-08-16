@@ -2369,7 +2369,8 @@ function registerIpc() {
 			},
 			readDshHistoryPage: (dshSessionId, beforeSeq, pageSize) =>
 				dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
-			readDshProcessEvents: (agentId) => dshAgentManager.readProcessEvents(agentId),
+			readDshProcessEvents: (agentId, dshSessionId) =>
+				dshAgentManager.readProcessEvents(agentId, dshSessionId),
 			readDshMessageFullText: (agentId, messageId) =>
 				dshAgentManager.readMessageFullText(agentId, messageId),
 			resolveDshSessionFilePath: async (sessionId) => {
@@ -2398,6 +2399,31 @@ function registerIpc() {
 						.filter((id): id is string => Boolean(id)),
 				);
 				return hostIds.filter((id) => !known.has(id));
+			},
+			// 跨工具兼容（2026-12）：dsh-web 等其他工具创建的 host 根会话（含标题/cwd）
+			listDshForeignSessions: () => dshHost.listForeignSessions(),
+			// 外部会话导入：把 host 会话映射进 catalog（status=active），侧栏可见可加载；
+			// 目标项目按 cwd 匹配已注册项目（找不到时回退第一个非 chat 项目）。
+			importDshForeignSession: async (dshSessionId) => {
+				const foreign = await dshHost.listForeignSessions();
+				const target = foreign.find((item) => item.dshSessionId === dshSessionId);
+				if (!target) throw new Error(mainCopy("session.notFound"));
+				const project = (target.cwd ? projectStore.findByPath(target.cwd) : undefined)
+					?? projectStore.list().find((candidate) => candidate.kind !== "chat") ?? null;
+				if (!project) throw new Error(mainCopy("project.notFound"));
+				const record = await sessionCatalog.createDraft({
+					projectId: project.id,
+					title: target.title ?? "DSH 会话",
+					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+					backend: "dsh",
+					dshSessionId,
+				});
+				void appLogger.info("session", "Foreign DSH session imported", {
+					dshSessionId,
+					projectId: project.id,
+					title: record.title,
+				});
+				return record;
 			},
 			// G14：DSH 归档/恢复（目录移动 + manifest，与 pi 归档同语义，不销毁数据）
 			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),

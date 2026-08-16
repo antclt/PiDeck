@@ -16,6 +16,11 @@
 
 import type { ChatMessage } from "../../../../../shared/types";
 import type { SessionProcessEvent } from "../../../../../shared/types/trajectory";
+import {
+	toolViewDetail,
+	toolViewTitle,
+	type DshToolViewEnvelope,
+} from "./dshToolView";
 
 export type TrajectoryLane = "input" | "model" | "tools" | "process";
 
@@ -325,13 +330,22 @@ export function buildTrajectory(
 				: durationMs !== undefined
 					? startedAt + durationMs
 					: message.timestamp;
+			// DSH 工具视图（host ToolEventView，dsh-web 同数据源）：call/result 视图
+			// 提供命令/输出/退出码/diff 等更完整的信息，标题用卡片头（如 "Write foo.txt"）。
+			const meta = message.meta as
+				| { view?: DshToolViewEnvelope; resultView?: DshToolViewEnvelope; [key: string]: unknown }
+				| undefined;
+			const viewTitle = toolViewTitle(meta);
+			const viewDetail = toolViewDetail(meta);
 			pushRecord(current, {
 				id: message.id,
 				kind: "tool",
 				lane: laneOf("tool"),
 				turnIndex: turns.length,
-				title: name,
-				summary: summarize(asString(message.meta?.detailText) || message.text || name),
+				title: viewTitle ?? name,
+				summary: summarize(
+					viewTitle ?? asString(message.meta?.detailText) ?? message.text ?? name,
+				),
 				startedAt,
 				endedAt,
 				durationMs: inFlight ? undefined : durationMs,
@@ -339,7 +353,7 @@ export function buildTrajectory(
 				toolName: name,
 				toolCallId: asString(message.meta?.toolCallId),
 				text: message.text,
-				detail: asString(message.meta?.detailText) ?? asString(message.meta?.result),
+				detail: viewDetail ?? asString(message.meta?.detailText) ?? asString(message.meta?.result),
 			});
 			continue;
 		}

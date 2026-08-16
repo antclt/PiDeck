@@ -22,6 +22,8 @@ import type { DshHost } from "./DshHost";
 import { projectDshEvent, type DshProjection } from "./dshEventProjector";
 import {
 	collectDshProcessEvent,
+	collectDshProcessEvents,
+	estimateContextTokens,
 	parseContextBreakdownProjection,
 	parseContextPressureProjection,
 	pushDshProcessEvent,
@@ -201,21 +203,21 @@ export class DshAgentManager implements SessionAgentGateway {
 					}
 				} else {
 					// 持久化 id 在 host 里已不存在（DSH_HOME 被清/更换）：退回新建。
-					const created = await client.sessions.create({ cwd });
-					if (!created.result.ok) {
-						throw new Error(`dsh session.create failed: ${JSON.stringify(created.result.error)}`);
+					const created = await this.createHostSession(client, cwd);
+					if (!created.ok) {
+						throw new Error(`dsh session.create failed: ${created.error}`);
 					}
-					sessionId = created.result.value.sessionId;
+					sessionId = created.sessionId;
 				}
 			} else {
 				throw new Error(`dsh session.list failed: ${JSON.stringify(listed.result.error)}`);
 			}
 		} else {
-			const created = await client.sessions.create({ cwd });
-			if (!created.result.ok) {
-				throw new Error(`dsh session.create failed: ${JSON.stringify(created.result.error)}`);
+			const created = await this.createHostSession(client, cwd);
+			if (!created.ok) {
+				throw new Error(`dsh session.create failed: ${created.error}`);
 			}
-			sessionId = created.result.value.sessionId;
+			sessionId = created.sessionId;
 		}
 
 		// catalog 持久化的是普通字符串，host API 需要品牌类型：边界处一次性转换。
@@ -260,6 +262,11 @@ export class DshAgentManager implements SessionAgentGateway {
 					runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 				}
 				runtime.messages = runtime.projection.messages;
+				// 轨迹过程事件随历史重放一并恢复（重新打开的 dsh 会话也有 modelChange/权限等记录）
+				runtime.processEvents = collectDshProcessEvents(
+					runtime.processEvents,
+					entries.map(({ event }) => event),
+				);
 				// 初始 attach 也推进 lastProjectedSeq：避免 mux 重连补帧重复投影（D6）。
 				const lastEntry = entries[entries.length - 1];
 				if (lastEntry && typeof lastEntry.event.seq === "number") {
@@ -373,11 +380,11 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (!exists) sessionId = undefined;
 		}
 		if (!sessionId) {
-			const created = await client.sessions.create({ cwd });
-			if (!created.result.ok) {
-				throw new Error(`dsh session.create (restart) failed: ${JSON.stringify(created.result.error)}`);
+			const created = await this.createHostSession(client, cwd);
+			if (!created.ok) {
+				throw new Error(`dsh session.create (restart) failed: ${created.error}`);
 			}
-			sessionId = created.result.value.sessionId;
+			sessionId = created.sessionId;
 		}
 		const dshSessionId = sessionId as SessionId;
 		const tab: AgentTab = {
@@ -405,6 +412,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			processEvents: old.processEvents,
 			contextPressure: old.contextPressure,
 			contextBreakdown: old.contextBreakdown,
+			contextWindow: old.contextWindow,
 		};
 		// 拉历史尾部投影为初始消息（重启后时间线恢复旧对话，同 create attach 路径）
 		const history = await client.sessions.history({ sessionId: dshSessionId, maxMessages: 200 }).catch(() => null);
@@ -417,6 +425,10 @@ export class DshAgentManager implements SessionAgentGateway {
 				runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 			}
 			runtime.messages = runtime.projection.messages;
+			runtime.processEvents = collectDshProcessEvents(
+				runtime.processEvents,
+				entries.map(({ event }) => event),
+			);
 		}
 		this.runtimes.set(agentId, runtime);
 		this.startMux(runtime);
@@ -495,16 +507,20 @@ export class DshAgentManager implements SessionAgentGateway {
 				.sort((left, right) => (left.event.seq ?? 0) - (right.event.seq ?? 0));
 			let projection = runtime.projection;
 			let lastSeq = runtime.lastProjectedSeq ?? 0;
+			const freshEvents: Array<{ type?: string; seq?: number; data?: unknown; time?: unknown }> = [];
 			for (const { event, view } of entries) {
 				const seq = typeof event?.seq === "number" ? event.seq : 0;
 				if (seq <= lastSeq) continue;
 				projection = projectDshEvent(projection, event, runtime.tab.id, view);
+				freshEvents.push(event);
 				if (seq > lastSeq) lastSeq = seq;
 			}
 			runtime.projection = projection;
 			runtime.messages = projection.messages;
 			runtime.lastProjectedSeq = lastSeq;
 			runtime.goal = projection.goal;
+			// 断连窗口内的过程事件（modelChange/权限/plan/压缩）一并补账
+			runtime.processEvents = collectDshProcessEvents(runtime.processEvents, freshEvents);
 			this.emitMessages(runtime);
 		} catch (error) {
 			getAppLogger()?.warn("dsh-agent", "mux backfill failed", {
@@ -555,6 +571,11 @@ export class DshAgentManager implements SessionAgentGateway {
 						runtime.lastProjectedSeq = lastEntry.event.seq;
 					}
 					runtime.goal = runtime.projection.goal;
+					// 过程事件随恢复重放补齐（host 崩溃窗口内的 modelChange/权限/plan 记录）
+					runtime.processEvents = collectDshProcessEvents(
+						runtime.processEvents,
+						entries.map(({ event }) => event),
+					);
 				}
 				this.emit(ipcChannels.agentsState, this.list());
 				this.emitMessages(runtime);
@@ -636,14 +657,18 @@ export class DshAgentManager implements SessionAgentGateway {
 
 	async getRuntimeState(agentId: string): Promise<AgentRuntimeState> {
 		const runtime = this.runtime(agentId);
-		// 上下文占用圆环（ContextMeter）：host contextPressure 投影（provider 上报 +
-		// 下一条请求估算 + 路由容量），与 dsh-web 的 contextPressure 投影同源。
-		// projectedTokens 缺省时回退 pressureTokens（provider 上报值）；
-		// 两者皆缺（provider 尚未上报 usage）时 percent/window 缺省，圆环自身不渲染。
+		// 上下文占用圆环（ContextMeter）：优先 host contextPressure 投影（provider 上报 +
+		// 下一条请求估算 + 路由容量，dsh-web 同源）；投影缺失（token-meter 未挂载 /
+		// adapter 未上报 usage / 投影帧未推送）时退化到「request/context 的 contextWindow
+		// + 消息字符估算」，保证 dsh 会话首个回合后圆环即出现，与 pi 行为统一。
 		const pressure = runtime.contextPressure;
 		const breakdown = runtime.contextBreakdown;
-		const contextTokens = pressure?.projectedTokens ?? pressure?.pressureTokens;
-		const contextWindow = pressure?.contextWindow;
+		const contextWindow = pressure?.contextWindow ?? runtime.contextWindow;
+		// 对话消息估算（字符数 ÷ 4，与 pi 的 contextMessageTokens 同规则）；空会话不兜底
+		const estimatedTokens = estimateContextTokens(runtime.messages);
+		const fallbackTokens = estimatedTokens > 0 ? estimatedTokens : undefined;
+		const contextTokens = pressure?.projectedTokens ?? pressure?.pressureTokens ?? fallbackTokens;
+		const contextMessageTokens = breakdown?.messageTokens ?? fallbackTokens;
 		const contextPercent =
 			typeof contextTokens === "number" && typeof contextWindow === "number" && contextWindow > 0
 				? Math.min(100, Math.round((contextTokens / contextWindow) * 100))
@@ -661,11 +686,11 @@ export class DshAgentManager implements SessionAgentGateway {
 			planModeActive: runtime.planModeActive,
 			// G5：当前 goal（goal/change 事件投影）
 			goal: runtime.goal,
-			// 上下文占用（host contextPressure/contextBreakdown 投影；G-context）
+			// 上下文占用（host contextPressure/contextBreakdown 投影；缺失时消息估算兜底）
 			contextTokens: typeof contextTokens === "number" ? contextTokens : undefined,
 			contextWindow: typeof contextWindow === "number" ? contextWindow : undefined,
 			contextPercent: contextPercent,
-			contextMessageTokens: breakdown?.messageTokens,
+			contextMessageTokens: typeof contextMessageTokens === "number" ? contextMessageTokens : undefined,
 			// G16：usage 指标（adapter 报告时才有）
 			inputTokens: runtime.usage?.inputTokens,
 			outputTokens: runtime.usage?.outputTokens,
@@ -678,14 +703,40 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/**
-	 * 轨迹过程事件（G-context）：mux 事件流按语义收集的 modelChange/permission/plan/
-	 * goal/compaction 记录（pi 会话文件过程事件的 DSH 等价物）。只对运行时会话有效；
-	 * 历史（未激活）会话无过程事件，与 pi 的 readProcessEvents 对 DSH 返回空数组一致。
+	 * 轨迹过程事件（G-context）：modelChange/permission/plan/goal/compaction 记录
+	 * （pi 会话文件过程事件的 DSH 等价物）。
+	 * - 运行时会话：mux 事件流 + attach/backfill 重放收集的缓存；
+	 * - 历史（未激活）会话：从 host history 尾部按事件流推导（与 dsh-web 历史页同数据源），
+	 *   失败/无 host 时返回空数组（不阻断轨迹展示）。
 	 */
-	readProcessEvents(agentId: string): SessionProcessEvent[] {
-		const runtime = this.runtimes.get(agentId);
-		if (!runtime) return [];
-		return [...runtime.processEvents].sort((left, right) => left.timestamp - right.timestamp);
+	async readProcessEvents(
+		agentId: string | undefined,
+		dshSessionId: string | undefined,
+	): Promise<SessionProcessEvent[]> {
+		if (agentId) {
+			const runtime = this.runtimes.get(agentId);
+			if (runtime) {
+				return [...runtime.processEvents].sort((left, right) => left.timestamp - right.timestamp);
+			}
+		}
+		if (!dshSessionId) return [];
+		try {
+			const client = await this.ensureClient();
+			const page = await client.sessions.history({
+				sessionId: dshSessionId as SessionId,
+				maxMessages: 1000,
+			});
+			if (!page.result.ok) return [];
+			const events = (page.result.value.events ?? [])
+				.map((entry) => entry.event)
+				.filter((event): event is NonNullable<typeof event> => Boolean(event))
+				.sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0));
+			return collectDshProcessEvents([], events).sort(
+				(left, right) => left.timestamp - right.timestamp,
+			);
+		} catch {
+			return [];
+		}
 	}
 
 	/**
@@ -1010,10 +1061,12 @@ export class DshAgentManager implements SessionAgentGateway {
 			projection: projectDshEvent(undefined, undefined, agentId),
 			isStreaming: false,
 			control: initialDshControl(),
-			// fork/clone 是全新 host 会话：过程事件/上下文占用投影随旧会话作废，等 mux 重推。
+			// fork/clone 是全新 host 会话：过程事件/上下文占用投影/路由容量随旧会话作废，
+			// 等 mux 重推（request/context 会重新带 contextWindow）。
 			processEvents: [],
 			contextPressure: undefined,
 			contextBreakdown: undefined,
+			contextWindow: undefined,
 		};		const history = await client.sessions.history({ sessionId: newSessionId, maxMessages: 200 }).catch(() => null);
 		if (history?.result.ok) {
 			const entries = (history.result.value.events ?? [])
@@ -1024,6 +1077,11 @@ export class DshAgentManager implements SessionAgentGateway {
 				nextRuntime.projection = projectDshEvent(nextRuntime.projection, event, agentId, view);
 			}
 			nextRuntime.messages = nextRuntime.projection.messages;
+			// fork 会话自带 atSeq 前历史：过程事件一并重放（新会话从零开始收集）
+			nextRuntime.processEvents = collectDshProcessEvents(
+				nextRuntime.processEvents,
+				entries.map(({ event }) => event),
+			);
 			// 初始 attach 也推进 lastProjectedSeq（D6 重连补帧跳过基准）。
 			const lastEntry = entries[entries.length - 1];
 			if (lastEntry && typeof lastEntry.event.seq === "number") {
@@ -1086,6 +1144,31 @@ export class DshAgentManager implements SessionAgentGateway {
 		const client = this.dshHost.getClient();
 		if (!client) throw new Error("DSH host is not started");
 		return client;
+	}
+
+	/**
+	 * 新建 host 会话并挂到 cwd 对应 workspace：sessions.create 只在传入
+	 * workspaceId 时把会话计入 workspace（dsh-web 按 workspace 分组展示；
+	 * 不挂 = dsh-web「未分组」）。workspace 解析失败不阻断创建（降级为不带
+	 * workspaceId 的旧行为）。
+	 */
+	private async createHostSession(
+		client: import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient,
+		cwd: string,
+	): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }> {
+		try {
+			const workspaceId = await this.dshHost.resolveWorkspaceId(cwd);
+			const created = await client.sessions.create({
+				cwd,
+				...(workspaceId !== undefined ? { workspaceId } : {}),
+			});
+			if (!created.result.ok) {
+				return { ok: false, error: JSON.stringify(created.result.error) };
+			}
+			return { ok: true, sessionId: created.result.value.sessionId };
+		} catch (error) {
+			return { ok: false, error: error instanceof Error ? error.message : String(error) };
+		}
 	}
 
 	private async ensureClient(): Promise<import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient> {
@@ -1395,6 +1478,8 @@ export class DshAgentManager implements SessionAgentGateway {
 						if (p.stateChanged) {
 							runtime.executingTool = p.executingTool;
 							if (p.model) runtime.model = p.model;
+							// 路由上下文容量（request/context 的 contextWindow）：圆环窗口兜底源
+							if (p.contextWindow !== undefined) runtime.contextWindow = p.contextWindow;
 							// G16：usage 随投影同步（assistant/message 更新）
 							if (p.usage) runtime.usage = p.usage;
 							// G5：goal 随投影同步（goal/change 更新；clear 时 p.goal 为 undefined）。
@@ -1498,6 +1583,8 @@ type DshAgentRuntime = {
 	contextPressure?: { pressureTokens?: number; projectedTokens?: number; contextWindow?: number };
 	/** 上下文构成投影（host contextBreakdown 单元）：系统提示/工具 schema/对话的启发式估算。 */
 	contextBreakdown?: { systemTokens: number; toolsTokens: number; messageTokens: number };
+	/** 路由上下文容量（request/context 事件的 contextWindow；无 pressure 投影时的兜底窗口）。 */
+	contextWindow?: number;
 	/** 轨迹过程事件（modelChange/permission/plan/goal/compaction；pi 会话文件过程事件的 DSH 等价物）。 */
 	processEvents: SessionProcessEvent[];
 	/** 当前 goal（G5；goal/change 事件投影更新，clear 后为 undefined）。 */

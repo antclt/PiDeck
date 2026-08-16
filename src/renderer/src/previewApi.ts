@@ -314,6 +314,10 @@ export function createPreviewApi(): PiDesktopApi {
 			listDshSubagents: async () => [],
 			readDshSubagentHistory: async () => ({ messages: [], hasMore: false }),
 			listDshOrphans: async () => [],
+			listDshForeignSessions: async () => [],
+			importDshForeignSession: async () => {
+				throw new Error("preview mode: DSH session import is not available");
+			},
 			listArchivedDshSessions: async () => [],
 			unarchiveDshSession: async () => true,
 			listDshDynamicPlugins: async () => [],

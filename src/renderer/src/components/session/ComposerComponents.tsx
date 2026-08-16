@@ -7,7 +7,6 @@ import {
 	ChevronRight,
 	Eye,
 	FileText,
-	FoldVertical,
 	GitBranch,
 	ImageIcon,
 	ListChecks,
@@ -237,7 +236,6 @@ export function ComposerBottomBar(props: {
 	onCancelPlan: () => void;
 	onAttachFile: () => void;
 }) {
-	const ctxPercent = props.state?.contextPercent;
 	// 默认模型/思考级别来自主进程按 pi 配置自动填充进会话记录的默认值（props.record），
 	// 不读取渲染层 welcome localStorage 偏好，避免用户偏好覆盖 pi 配置。
 	// 例外：无 record（引导页虚拟会话）时回退显示欢迎页偏好——picker 无 record
@@ -247,11 +245,7 @@ export function ComposerBottomBar(props: {
 		model: readWelcomeModelPreference()?.model,
 		thinking: readWelcomeThinkingPreference()?.thinkingLevel,
 	};
-	// DSH 后端没有 pi 的 contextPercent（走 /compact 命令），compact 入口常显；
-	// pi 沿用 >30% 才显示的阈值逻辑，70%/90% 用色阶提示紧迫度。
 	const isDsh = props.backend === "dsh";
-	const showCompact = isDsh || (ctxPercent != null && ctxPercent > 30);
-	const contextPercent = isDsh ? 0 : (ctxPercent ?? 0);
 	// DSH 草稿：记录未填默认时用部署默认（settings.yaml agent-default-model）兜底展示。
 	const currentThinkingLevel = props.state?.thinkingLevel
 		?? props.record?.thinkingLevel
@@ -401,28 +395,10 @@ export function ComposerBottomBar(props: {
 						onPickModel={props.onPickModel}
 						onPickThinking={props.onPickThinking}
 					/>
-					{isDsh && showCompact && (() => {
-						// DSH 后端没有 pi 的 contextPercent（走 /compact 命令），且上下文圆环
-						// 无 capacity 数据时自身不渲染——compact 入口必须常显（pi 走圆环面板内压缩）。
-						const isCompactingNow = Boolean(props.state?.isCompacting);
-						return (
-							<Button
-								variant="ghost"
-								size="sm"
-								className={`composer-bar-btn compact h-7 gap-1 rounded-md px-1.5 text-control${isCompactingNow ? " compacting" : ""}`}
-								disabled={isCompactingNow || Boolean(props.state?.isStreaming)}
-								title={t("app.compactDshTitle")}
-								aria-label={t("app.compact")}
-								onClick={props.onCompact}
-							>
-								<FoldVertical size={13} strokeWidth={1.8} aria-hidden="true" />
-								{isCompactingNow
-									? t("app.compacting")
-									// DSH 没有 pi 的 contextPercent，不显示「压缩 0%」误导文案
-									: t("app.compact")}
-							</Button>
-						);
-					})()}
+					{/* DSH 压缩入口与 pi 统一：上下文圆环（右侧）常驻并带压缩按钮。
+					    2026-12 兼容期：dsh runtime state 已由主进程提供 contextPercent 兜底
+					    （request/context 的 contextWindow + 消息估算），圆环不再因缺数据隐藏，
+					    原独立 compact 按钮移除，避免双入口。 */}
 				</div>
 				<div className="composer-bottom-right ml-auto flex shrink-0 items-center gap-2">
 					{/* 上下文占用圆环（dsh ContextMeter 移植）：发送按钮旁常驻指示，

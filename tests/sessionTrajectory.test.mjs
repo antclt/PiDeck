@@ -12,10 +12,26 @@ function loadModule() {
 	const { outputText } = ts.transpileModule(source, {
 		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 	});
-	const sandbox = { exports: {}, module: { exports: {} } };
+	const sandbox = { exports: {}, module: { exports: {} }, require: loadDshToolView };
 	sandbox.module.exports = sandbox.exports;
 	vm.runInNewContext(outputText, sandbox, { filename: "buildTrajectory.ts" });
 	return sandbox.exports;
+}
+
+/** buildTrajectory 依赖的 dsh 工具视图助手（独立纯模块，vm 内编译加载）。 */
+function loadDshToolView(specifier) {
+	if (specifier !== "./dshToolView") throw new Error(`unexpected require: ${specifier}`);
+	const viewSource = readFileSync(
+		"src/renderer/src/components/session/trajectory/dshToolView.ts",
+		"utf8",
+	);
+	const { outputText } = ts.transpileModule(viewSource, {
+		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+	});
+	const viewSandbox = { exports: {}, module: { exports: {} } };
+	viewSandbox.module.exports = viewSandbox.exports;
+	vm.runInNewContext(outputText, viewSandbox, { filename: "dshToolView.ts" });
+	return viewSandbox.exports;
 }
 
 function msg(partial) {

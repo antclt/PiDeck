@@ -416,6 +416,15 @@ function Overview(props: {
 	const [switching, setSwitching] = useState(false);
 	/** 孤儿 DSH 会话数（G3/D11：host 有但 catalog 无映射；加载概览时查询一次）。 */
 	const [orphanCount, setOrphanCount] = useState(0);
+	/** 外部 DSH 会话（dsh-web 等其他工具创建的 host 根会话；跨工具导入用，2026-12）。 */
+	const [foreignSessions, setForeignSessions] = useState<Array<{
+		dshSessionId: string;
+		title?: string;
+		cwd?: string;
+		updatedAt?: number;
+	}>>([]);
+	/** 正在导入的 dshSessionId（按钮转圈防重复点击）。 */
+	const [importing, setImporting] = useState<string | null>(null);
 	/** G14：归档区 DSH 会话清单（目录已移入 .pideck-archive 的 host 会话；恢复入口用）。 */
 	const [archived, setArchived] = useState<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>([]);
 	/** G14：正在恢复的 dshSessionId（按钮转圈防重复点击）。 */
@@ -426,6 +435,9 @@ function Overview(props: {
 		void desktopApi.sessions.listDshOrphans().then((ids) => {
 			if (!cancelled) setOrphanCount(ids.length);
 		}).catch(() => undefined);
+		void desktopApi.sessions.listDshForeignSessions().then((items) => {
+			if (!cancelled) setForeignSessions(items);
+		}).catch(() => undefined);
 		void desktopApi.sessions.listArchivedDshSessions().then((items) => {
 			if (!cancelled) setArchived(items);
 		}).catch(() => undefined);
@@ -433,6 +445,23 @@ function Overview(props: {
 			cancelled = true;
 		};
 	}, []);
+
+	/** 跨工具导入：把外部 DSH 会话映射进 catalog（主进程按 cwd 匹配项目）。 */
+	const importForeign = async (dshSessionId: string) => {
+		if (importing) return;
+		setImporting(dshSessionId);
+		try {
+			await desktopApi.sessions.importDshForeignSession(dshSessionId);
+			showNotice(t("config.dsh.imported"), 3000);
+			setForeignSessions((current) => current.filter((item) => item.dshSessionId !== dshSessionId));
+			setOrphanCount((current) => Math.max(0, current - 1));
+			props.onChanged();
+		} catch (error) {
+			showNotice(error instanceof Error ? error.message : String(error), 4000);
+		} finally {
+			setImporting(null);
+		}
+	};
 
 	/** G14：恢复归档的 DSH 会话（主进程移回 sessions 树并重建 catalog 记录）。 */
 	const restoreArchived = async (dshSessionId: string) => {
@@ -530,6 +559,49 @@ function Overview(props: {
 						</span>
 					)}
 				</div>
+			</section>
+			{/* 跨工具兼容（2026-12）：dsh-web 等其他工具创建的 host 会话，导入后侧栏可见可加载 */}
+			<section className="grid gap-2">
+				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.foreignSessions")}</h3>
+				{foreignSessions.length === 0 ? (
+					<p className="text-micro text-muted-foreground">{t("config.dsh.foreignSessionsEmpty")}</p>
+				) : (
+					<>
+						<p className="text-micro text-muted-foreground">{t("config.dsh.foreignSessionsHint")}</p>
+						<div className="grid max-h-56 gap-1.5 overflow-y-auto pr-1">
+							{foreignSessions.map((item) => (
+								<div
+									key={item.dshSessionId}
+									className="flex items-center gap-2 rounded-sm border border-border-subtle bg-bg-panel px-2.5 py-1.5"
+								>
+									<div className="min-w-0 flex-1">
+										<div className="truncate text-control text-foreground" title={item.title ?? item.dshSessionId}>
+											{item.title ?? item.dshSessionId}
+										</div>
+										{item.cwd && (
+											<div className="truncate font-mono text-micro text-muted-foreground" title={item.cwd}>
+												{item.cwd}
+											</div>
+										)}
+									</div>
+									<Button
+										type="button"
+										variant="secondary"
+										size="sm"
+										className="h-7 shrink-0 gap-1"
+										disabled={importing !== null}
+										onClick={() => void importForeign(item.dshSessionId)}
+									>
+										{importing === item.dshSessionId ? (
+											<LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+										) : null}
+										{t("config.dsh.importSession")}
+									</Button>
+								</div>
+							))}
+						</div>
+					</>
+				)}
 			</section>
 			<section className="grid gap-2">
 				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.directories")}</h3>

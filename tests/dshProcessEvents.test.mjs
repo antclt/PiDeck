@@ -31,6 +31,7 @@ function loadModule() {
 const {
 	collectDshProcessEvent,
 	pushDshProcessEvent,
+	estimateContextTokens,
 	parseContextPressureProjection,
 	parseContextBreakdownProjection,
 	DSH_PROCESS_EVENTS_LIMIT,
@@ -157,4 +158,27 @@ test("parseContextBreakdownProjection tolerates partial fields", () => {
 	assert.equal(parsed.systemTokens, 0);
 	assert.equal(parsed.toolsTokens, 0);
 	assert.equal(parsed.messageTokens, 10);
+});
+
+test("estimateContextTokens counts text chars / 4 across messages", () => {
+	// 与 pi 的 contextMessageTokens 同规则（字符数 ÷ 4）
+	assert.equal(estimateContextTokens([
+		{ role: "user", text: "abcd" },
+		{ role: "assistant", text: "efgh" },
+	]), 2);
+	assert.equal(estimateContextTokens([
+		{ role: "user", text: "你好世界" },
+		{ role: "tool", text: "abcd" },
+	]), 2);
+});
+
+test("estimateContextTokens skips empty and missing text", () => {
+	assert.equal(estimateContextTokens([
+		{ role: "user", text: "" },
+		{ role: "assistant" },
+		{ role: "user", text: "abcdefgh" },
+	]), 2);
+	assert.equal(estimateContextTokens([]), 0);
+	// 不足 4 字符按 0 处理（floor）
+	assert.equal(estimateContextTokens([{ role: "user", text: "abc" }]), 0);
 });
