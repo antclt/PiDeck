@@ -133,7 +133,16 @@ export function ProjectTree(props: {
               </span>
               <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-29 @max-[255px]:group-focus-within:pr-29">
                 <div className="conversation-title flex min-w-0 items-center">
-                  <strong className="min-w-0 flex-1 truncate font-medium">{projectDirectoryName}</strong>
+                  <strong className={`min-w-0 flex-1 truncate font-medium${project.missing ? " text-muted-foreground" : ""}`}>{projectDirectoryName}</strong>
+                  {/* 目录已被删除/移动/未挂载：保留记录并标记，用户可右键移除或恢复目录 */}
+                  {project.missing && (
+                    <span
+                      className="shrink-0 rounded bg-destructive/10 px-1 text-[10px] font-medium leading-4 text-destructive"
+                      title={t("app.projectMissingHint")}
+                    >
+                      {t("app.projectMissing")}
+                    </span>
+                  )}
                 </div>
                 {/* 项目名称只承担导航信息；详细会话状态由下方的 Agent/历史会话行承担。 */}
               </div>

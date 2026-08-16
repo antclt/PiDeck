@@ -499,6 +499,11 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogReadProcessEvents, sessionId) as Promise<
 				SessionProcessEvent[]
 			>,
+		/** DSH 会话轨迹系统提示（request/header 的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
+		readDshSystemPrompt: (sessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsCatalogReadDshSystemPrompt, sessionId) as Promise<
+				string | undefined
+			>,
 		/** 按需读取单条消息完整文本（工具结果截断后的「查看完整输出」）。
 		 *  sessionId 用于运行期绑定不可用时的历史会话文件回退（_viewer 投影）。 */
 		readMessageFullText: (

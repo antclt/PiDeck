@@ -58,6 +58,8 @@ export type TrajectoryRecord = {
 	modelId?: string;
 	thinkingLevel?: string;
 	customType?: string;
+	/** 本条 assistant 消息的 token 用量（DSH adapter 上报，存 meta.usage；pi 无此字段）。 */
+	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 };
 
 export type TrajectoryTurn = {
@@ -128,6 +130,22 @@ function isInFlightTool(message: ChatMessage): boolean {
 
 function isInFlightAssistant(message: ChatMessage): boolean {
 	return message.stopReason === "pending";
+}
+
+/** 从消息 meta.usage 提取 token 用量（DSH adapter 上报；无效/全零返回 undefined）。 */
+function usageOf(message: ChatMessage): TrajectoryRecord["usage"] | undefined {
+	const usage = message.meta?.usage;
+	if (!usage || typeof usage !== "object") return undefined;
+	const u = usage as Record<string, unknown>;
+	const inputTokens = typeof u.inputTokens === "number" ? u.inputTokens : 0;
+	const outputTokens = typeof u.outputTokens === "number" ? u.outputTokens : 0;
+	if (inputTokens <= 0 && outputTokens <= 0) return undefined;
+	return {
+		inputTokens,
+		outputTokens,
+		...(typeof u.cacheReadTokens === "number" ? { cacheReadTokens: u.cacheReadTokens } : {}),
+		...(typeof u.cacheWriteTokens === "number" ? { cacheWriteTokens: u.cacheWriteTokens } : {}),
+	};
 }
 
 function pushRecord(records: TrajectoryRecord[], record: TrajectoryRecord): void {
@@ -381,6 +399,7 @@ export function buildTrajectory(
 			}
 			if (!isThinkingOnly(message)) {
 				const inFlight = isInFlightAssistant(message);
+				const usage = usageOf(message);
 				pushRecord(current, {
 					id: message.id,
 					kind: "assistant",
@@ -392,6 +411,7 @@ export function buildTrajectory(
 					endedAt: inFlight ? undefined : message.timestamp,
 					status: message.stopReason,
 					text: message.text,
+					...(usage ? { usage } : {}),
 				});
 			}
 			continue;

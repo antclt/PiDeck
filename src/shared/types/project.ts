@@ -12,6 +12,13 @@ export type Project = {
 	worktreeParentId?: string;
 	/** 项目所属环境：windows 或 wsl。缺省视为 windows（兼容旧数据）。 */
 	environment?: "windows" | "wsl";
+	/**
+	 * 项目目录在磁盘上不存在（被删除/移动/未挂载）。列表保留记录并标记，
+	 * 由用户决定手动移除或恢复目录——不自动删除：网络盘/WSL/移动盘短暂
+	 * 不可达时自动移除会误删项目关联（2026-08 用户反馈「目录删了项目列表
+	 * 还有残留」）。
+	 */
+	missing?: boolean;
 };
 
 export const SUPPORTED_EXTERNAL_EDITORS = [

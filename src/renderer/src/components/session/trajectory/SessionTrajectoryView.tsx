@@ -90,6 +90,8 @@ export function SessionTrajectoryView(props: {
 	messages: ChatMessage[];
 	processEvents?: SessionProcessEvent[];
 	systemPrompt?: string;
+	/** 会话是否 DSH 后端（系统提示说明文案按后端区分）。 */
+	isDsh?: boolean;
 	hasMoreMessages?: boolean;
 	isLoadingMoreMessages?: boolean;
 	onLoadMore?: () => void;
@@ -171,7 +173,7 @@ export function SessionTrajectoryView(props: {
 					onSelect={setSelectedId}
 					borderBottom={drawer}
 				/>
-				<TrajectoryInspector record={selected} runtimeState={runtime?.state} />
+				<TrajectoryInspector record={selected} runtimeState={runtime?.state} isDsh={props.isDsh} />
 			</div>
 		</div>
 	);
@@ -388,6 +390,8 @@ function TrajectoryLedger(props: {
 function TrajectoryInspector(props: {
 	record?: TrajectoryRecord;
 	runtimeState?: AgentRuntimeState;
+	/** 会话是否 DSH 后端（系统提示说明文案按后端区分）。 */
+	isDsh?: boolean;
 }) {
 	const record = props.record;
 	const state = props.runtimeState;
@@ -405,7 +409,11 @@ function TrajectoryInspector(props: {
 				{record.kind === "tool" ? record.toolName : kindLabel(record)}
 			</div>
 			{record.kind === "systemPrompt" ? (
-				<p className="mb-2 text-caption text-muted-foreground">{t("session.trajectory.systemPromptHint")}</p>
+				<p className="mb-2 text-caption text-muted-foreground">
+					{props.isDsh
+						? t("session.trajectory.systemPromptHintDsh")
+						: t("session.trajectory.systemPromptHint")}
+				</p>
 			) : null}
 			<dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-caption">
 				{record.startedAt > 0 ? (
@@ -444,6 +452,26 @@ function TrajectoryInspector(props: {
 					<>
 						<dt className="text-muted-foreground">{t("session.trajectory.field.thinkingLevel")}</dt>
 						<dd>{record.thinkingLevel}</dd>
+					</>
+				) : null}
+				{record.usage ? (
+					<>
+						<dt className="text-muted-foreground">{t("session.trajectory.field.inputTokens")}</dt>
+						<dd className="tabular-nums">{record.usage.inputTokens}</dd>
+						<dt className="text-muted-foreground">{t("session.trajectory.field.outputTokens")}</dt>
+						<dd className="tabular-nums">{record.usage.outputTokens}</dd>
+						{record.usage.cacheReadTokens !== undefined ? (
+							<>
+								<dt className="text-muted-foreground">{t("session.trajectory.field.cacheRead")}</dt>
+								<dd className="tabular-nums">{record.usage.cacheReadTokens}</dd>
+							</>
+						) : null}
+						{record.usage.cacheWriteTokens !== undefined ? (
+							<>
+								<dt className="text-muted-foreground">{t("session.trajectory.field.cacheWrite")}</dt>
+								<dd className="tabular-nums">{record.usage.cacheWriteTokens}</dd>
+							</>
+						) : null}
 					</>
 				) : null}
 				{record.customType ? (

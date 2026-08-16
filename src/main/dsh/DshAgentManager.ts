@@ -274,6 +274,10 @@ export class DshAgentManager implements SessionAgentGateway {
 				}
 				// G5：attach 后从投影恢复 goal 状态（goal/change 事件随历史重放）
 				runtime.goal = runtime.projection.goal;
+				// 轨迹系统提示随历史重放恢复（request/header 事件随历史投影）
+				if (runtime.projection.systemPrompt !== undefined) {
+					runtime.systemPrompt = runtime.projection.systemPrompt;
+				}
 			}
 		}
 		// attach 初值：list 的 projections.values 携带 host 折叠好的 contextPressure /
@@ -519,6 +523,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			runtime.messages = projection.messages;
 			runtime.lastProjectedSeq = lastSeq;
 			runtime.goal = projection.goal;
+			// 系统提示随补帧同步（request/header 事件可能落在断连窗口内）
+			if (projection.systemPrompt !== undefined) runtime.systemPrompt = projection.systemPrompt;
 			// 断连窗口内的过程事件（modelChange/权限/plan/压缩）一并补账
 			runtime.processEvents = collectDshProcessEvents(runtime.processEvents, freshEvents);
 			this.emitMessages(runtime);
@@ -571,6 +577,10 @@ export class DshAgentManager implements SessionAgentGateway {
 						runtime.lastProjectedSeq = lastEntry.event.seq;
 					}
 					runtime.goal = runtime.projection.goal;
+					// 系统提示随恢复重放补齐（host 崩溃窗口内的 request/header 事件）
+					if (runtime.projection.systemPrompt !== undefined) {
+						runtime.systemPrompt = runtime.projection.systemPrompt;
+					}
 					// 过程事件随恢复重放补齐（host 崩溃窗口内的 modelChange/权限/plan 记录）
 					runtime.processEvents = collectDshProcessEvents(
 						runtime.processEvents,
@@ -736,6 +746,41 @@ export class DshAgentManager implements SessionAgentGateway {
 			);
 		} catch {
 			return [];
+		}
+	}
+
+	/**
+	 * 轨迹系统提示（与 dsh-web 轨迹同源：request/header 事件的 EpochHeader.system）：
+	 * - 运行时会话：mux 实时 + attach/backfill 重放收集的投影缓存；
+	 * - 历史（未激活）会话：从 host history 尾部折叠最后一个 request/header，
+	 *   失败/无 host 时返回 undefined（不阻断轨迹展示）。
+	 */
+	async readSystemPrompt(
+		agentId: string | undefined,
+		dshSessionId: string | undefined,
+	): Promise<string | undefined> {
+		if (agentId) {
+			const runtime = this.runtimes.get(agentId);
+			if (runtime?.systemPrompt) return runtime.systemPrompt;
+		}
+		if (!dshSessionId) return undefined;
+		try {
+			const client = await this.ensureClient();
+			const page = await client.sessions.history({
+				sessionId: dshSessionId as SessionId,
+				maxMessages: 1000,
+			});
+			if (!page.result.ok) return undefined;
+			const events = (page.result.value.events ?? [])
+				.map((entry) => entry.event)
+				.filter((event): event is NonNullable<typeof event> => Boolean(event));
+			let projection = projectDshEvent(undefined, undefined, `dsh:${dshSessionId}`);
+			for (const event of events) {
+				projection = projectDshEvent(projection, event, `dsh:${dshSessionId}`);
+			}
+			return projection.systemPrompt;
+		} catch {
+			return undefined;
 		}
 	}
 
@@ -1149,8 +1194,11 @@ export class DshAgentManager implements SessionAgentGateway {
 	/**
 	 * 新建 host 会话并挂到 cwd 对应 workspace：sessions.create 只在传入
 	 * workspaceId 时把会话计入 workspace（dsh-web 按 workspace 分组展示；
-	 * 不挂 = dsh-web「未分组」）。workspace 解析失败不阻断创建（降级为不带
-	 * workspaceId 的旧行为）。
+	 * 不挂 = dsh-web「未分组」）。
+	 * 契约约束：payload 的 workspaceId 与 cwd **二选一**（host schema
+	 * `.refine(workspaceId === undefined || cwd === undefined)`，同传会被
+	 * bad-request 拒绝）——有 workspaceId 时省略 cwd（workspace 路径即 cwd）。
+	 * workspace 解析失败不阻断创建（降级为只传 cwd 的旧行为）。
 	 */
 	private async createHostSession(
 		client: import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient,
@@ -1158,10 +1206,9 @@ export class DshAgentManager implements SessionAgentGateway {
 	): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }> {
 		try {
 			const workspaceId = await this.dshHost.resolveWorkspaceId(cwd);
-			const created = await client.sessions.create({
-				cwd,
-				...(workspaceId !== undefined ? { workspaceId } : {}),
-			});
+			const created = workspaceId !== undefined
+				? await client.sessions.create({ workspaceId })
+				: await client.sessions.create({ cwd });
 			if (!created.result.ok) {
 				return { ok: false, error: JSON.stringify(created.result.error) };
 			}
@@ -1482,6 +1529,8 @@ export class DshAgentManager implements SessionAgentGateway {
 							if (p.contextWindow !== undefined) runtime.contextWindow = p.contextWindow;
 							// G16：usage 随投影同步（assistant/message 更新）
 							if (p.usage) runtime.usage = p.usage;
+							// 轨迹系统提示：request/header 事件投影（当轮真实提示，dsh-web 同源）
+							if (p.systemPrompt !== undefined) runtime.systemPrompt = p.systemPrompt;
 							// G5：goal 随投影同步（goal/change 更新；clear 时 p.goal 为 undefined）。
 							// event.type 是 dsh-session 已知事件联合（不含 goal/change 声明），
 							// 这里按字符串比较（宿主包未合并 dsh-goal 的 module 声明）。
@@ -1575,6 +1624,8 @@ type DshAgentRuntime = {
 	lastProjectedSeq?: number;
 	/** 最近一次 assistant 回合的 token 用量（G16；assistant/message 事件投影更新）。 */
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+	/** DSH 当轮真实系统提示（request/header 事件投影；attach/backfill 重放与 mux 实时双来源）。 */
+	systemPrompt?: string;
 	/**
 	 * 上下文占用投影（host contextPressure 单元）：provider 上报的最新请求大小 +
 	 * 下一条请求的估算成本 + 路由容量。mux session/projection 帧与 attach 初值双来源，
@@ -1600,3 +1651,4 @@ type DshAgentRuntime = {
 	thinkingId?: string;
 	thinkingStartedAt?: number;
 };
+

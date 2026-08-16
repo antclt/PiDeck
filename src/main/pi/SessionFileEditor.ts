@@ -34,6 +34,24 @@ export type SessionMutationResult = {
 	backupPath: string;
 };
 
+/**
+ * 追加型消息条目（生图等 PiDeck 本地产物落盘用）：按 pi jsonl message 格式写入。
+ * content 块格式与 pi 一致（text / image{source:{type:"base64",media_type,data}}）。
+ */
+export type AppendMessageEntry = {
+	role: "user" | "assistant";
+	content: Array<Record<string, unknown>>;
+	/** 可选附加 message 字段（如 api/provider/model/stopReason），原样并入。 */
+	extra?: Record<string, unknown>;
+};
+
+/** appendMessages 的入参：文件引用 + 追加条目 + reload 回调（无 target 定位）。 */
+export type AppendMessagesInput = {
+	file: SessionFileRef;
+	reload: () => Promise<void>;
+	entries: AppendMessageEntry[];
+};
+
 export type SessionFileEditorErrorCode =
 	| "SESSION_FILE_EMPTY"
 	| "SESSION_FILE_INVALID_JSONL"
@@ -513,6 +531,112 @@ export class SessionFileEditor {
 
 	truncateForResend(input: MutationInput): Promise<SessionMutationResult> {
 		return this.mutate("resend", input);
+	}
+
+	/**
+	 * 追加消息条目到会话末尾（生图等 PiDeck 本地产物落盘，不走 pi RPC）。
+	 * 复用 mutate 的事务骨架：文件锁 / 备份 / 原子写 / reload marker 全保留，
+	 * 只把「定位既有条目」换成「以当前 leaf 为 parent 追加新行」。
+	 */
+	appendMessages(input: AppendMessagesInput): Promise<SessionMutationResult> {
+		return this.withFileLock(input.file, async () => {
+			const original = await this.readSessionFile(input.file.hostPath);
+			const document = parseDocument(original);
+			if (document.lines.some((line) => line.entry?._reloadMarker !== undefined)) {
+				throw new SessionFileEditorError(
+					"SESSION_MARKER_CONFLICT",
+					"Session file already contains a reload marker",
+				);
+			}
+			const { firstEntryId, changedEntryIds } = this.appendEntriesToDocument(
+				document,
+				input.entries,
+			);
+			const next = serializeDocument(document);
+			const backupPath = await this.createBackup(input.file.hostPath, original);
+
+			await this.replaceIfUnchanged(input.file.hostPath, original, next, backupPath);
+			try {
+				await this.reloadWithMarker(input.file, input.reload, next);
+			} catch (cause) {
+				const reloadFailure = cause instanceof ReloadAttemptFailure
+					? cause
+					: new ReloadAttemptFailure(cause, [next]);
+				// rollback 只读 input.file，target 用占位值满足类型（append 无定位目标）。
+				await this.rollback(
+					{ ...input, target: {} as SessionEntryTarget },
+					backupPath,
+					reloadFailure.error,
+					reloadFailure.ownedStates,
+				);
+				throw new SessionFileEditorError(
+					"SESSION_RELOAD_FAILED",
+					"Session reload failed; the original file and runtime were restored",
+					{ cause: reloadFailure.error, backupPath },
+				);
+			}
+
+			return {
+				targetEntryId: firstEntryId,
+				changedEntryIds,
+				backupPath,
+			};
+		});
+	}
+
+	private appendEntriesToDocument(
+		document: JsonlDocument,
+		entries: AppendMessageEntry[],
+	): { firstEntryId: string; changedEntryIds: string[] } {
+		if (entries.length === 0) {
+			throw new SessionFileEditorError(
+				"SESSION_ENTRY_NOT_FOUND",
+				"No entries to append",
+			);
+		}
+		// leaf = 文件最后一条带 id 的 message 条目（跳过 session header / deleted 墓碑，
+		// 与 activeBranchIds 无显式 leaf 时的回退语义一致）；首条新消息挂到 leaf 之后，
+		// 后续条目按序串成 parent 链。header-only 会话无 message leaf → parentId=null。
+		let parentId: string | null = null;
+		for (let index = document.lines.length - 1; index >= 0; index -= 1) {
+			const entry = document.lines[index].entry;
+			if (!entry || entry.type !== "message") continue;
+			const candidate = entryIdOf(entry);
+			if (candidate) {
+				parentId = candidate;
+				break;
+			}
+		}
+
+		const eol = document.lines.length > 0
+			? (document.lines[document.lines.length - 1].eol || "\n")
+			: "\n";
+		const changedEntryIds: string[] = [];
+		let firstEntryId = "";
+		for (const item of entries) {
+			const entryId = this.createUuid();
+			if (!firstEntryId) firstEntryId = entryId;
+			const now = this.now();
+			const timestamp = new Date(now).toISOString();
+			const message = {
+				role: item.role,
+				content: item.content,
+				timestamp: now,
+				...item.extra,
+			};
+			const entry: JsonlEntry = {
+				type: "message",
+				id: entryId,
+				parentId,
+				timestamp,
+				message,
+			};
+			document.lines.push({ content: JSON.stringify(entry), eol, entry });
+			document.entryLineById.set(entryId, document.lines.length - 1);
+			changedEntryIds.push(entryId);
+			parentId = entryId;
+		}
+		return { firstEntryId, changedEntryIds };
 	}
 
 	reload(input: { file: SessionFileRef; reload: () => Promise<void> }): Promise<void> {

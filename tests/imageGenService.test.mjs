@@ -227,3 +227,40 @@ test("normalizeImagesUrl：无 /v1 时补全，尾斜杠归一", async () => {
 		restore();
 	}
 });
+
+test("normalizeImagesUrl：非 OpenAI 风格版本段不再强行补 /v1（火山方舟 /api/v3）", async () => {
+	const cases = [
+		["https://ark.cn-beijing.volces.com/api/v3", "https://ark.cn-beijing.volces.com/api/v3/images/generations"],
+		["https://ark.cn-beijing.volces.com/api/v3/", "https://ark.cn-beijing.volces.com/api/v3/images/generations"],
+		["https://generativelanguage.googleapis.com/v1beta", "https://generativelanguage.googleapis.com/v1beta/images/generations"],
+		["http://localhost:11434/api", "http://localhost:11434/api/images/generations"],
+		["https://proxy.example.com/custom/v2", "https://proxy.example.com/custom/v2/images/generations"],
+	];
+	for (const [baseUrl, expected] of cases) {
+		let captured;
+		const { service, restore } = createService({
+			credentials: { baseUrl, apiKey: "k" },
+			fetchStub: (input) => {
+				captured = String(input);
+				return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
+			},
+		});
+		await service.generate({ provider: "p", model: "m", prompt: "x" });
+		assert.equal(captured, expected, `baseUrl=${baseUrl}`);
+		restore();
+	}
+});
+
+test("normalizeImagesUrl：已配置完整 images/generations 端点原样使用", async () => {
+	let captured;
+	const { service, restore } = createService({
+		credentials: { baseUrl: "https://proxy.example.com/v1/images/generations", apiKey: "k" },
+		fetchStub: (input) => {
+			captured = String(input);
+			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
+		},
+	});
+	await service.generate({ provider: "p", model: "m", prompt: "x" });
+	assert.equal(captured, "https://proxy.example.com/v1/images/generations");
+	restore();
+});

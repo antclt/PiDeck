@@ -372,6 +372,77 @@ test("readHistoryPage 空会话返回空页且 nextBefore=null", async () => {
 	assert.equal(page.total, -1);
 });
 
+test("readSystemPrompt：运行时会话返回 attach 重放缓存的系统提示（request/header 折叠）", async () => {
+	const { host, sessions, historyBySession } = makeFakeHost();
+	sessions.set("session-old-9", { sessionId: "session-old-9", cwd: PROJECT.path, running: false, blank: false });
+	historyBySession.set("session-old-9", [
+		event("request/header", 1, {
+			header: { system: "你是 DSH 代理。\n## 准则\n…" },
+			reason: { kind: "steer", step: 1 },
+		}),
+		event("user/message", 2, {
+			content: [{ type: "text", text: "提问" }],
+			source: { kind: "user", rpcId: "rpc-9" },
+		}),
+		event("turn/start", 3),
+		event("assistant/message", 4, {
+			message: { content: [{ type: "text", text: "回复" }] },
+		}),
+	]);
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh", dshSessionId: "session-old-9" });
+	// attach 重放后：运行时会话直接读 runtime 缓存（不重复拉 history）
+	const prompt = await manager.readSystemPrompt(tab.id, "session-old-9");
+	assert.equal(prompt, "你是 DSH 代理。\n## 准则\n…");
+});
+
+test("readSystemPrompt：历史会话从 host history 折叠最后一个 request/header", async () => {
+	const { host, sessions, historyBySession } = makeFakeHost();
+	sessions.set("session-hist-9", { sessionId: "session-hist-9", cwd: PROJECT.path, running: false, blank: false });
+	historyBySession.set("session-hist-9", [
+		event("request/header", 1, { header: { system: "第一版提示" } }),
+		event("user/message", 2, {
+			content: [{ type: "text", text: "提问" }],
+			source: { kind: "user", rpcId: "rpc-9" },
+		}),
+		event("assistant/message", 3, {
+			message: { content: [{ type: "text", text: "回复" }] },
+		}),
+		// 模型切换后第二次请求：last wins
+		event("request/header", 4, { header: { system: "第二版提示" } }),
+		event("user/message", 5, {
+			content: [{ type: "text", text: "追问" }],
+			source: { kind: "user", rpcId: "rpc-10" },
+		}),
+		event("assistant/message", 6, {
+			message: { content: [{ type: "text", text: "回复 2" }] },
+		}),
+	]);
+	const manager = new DshAgentManager(host, () => PROJECT);
+	// 未激活会话（agentId undefined）：走 host history 折叠
+	const prompt = await manager.readSystemPrompt(undefined, "session-hist-9");
+	assert.equal(prompt, "第二版提示");
+});
+
+test("readSystemPrompt：无 request/header / 无 host 时返回 undefined（不阻断轨迹）", async () => {
+	const { host, sessions, historyBySession } = makeFakeHost();
+	sessions.set("session-no-hdr", { sessionId: "session-no-hdr", cwd: PROJECT.path, running: false, blank: false });
+	historyBySession.set("session-no-hdr", [
+		event("user/message", 1, {
+			content: [{ type: "text", text: "提问" }],
+			source: { kind: "user", rpcId: "rpc-1" },
+		}),
+		event("assistant/message", 2, {
+			message: { content: [{ type: "text", text: "回复" }] },
+		}),
+	]);
+	const manager = new DshAgentManager(host, () => PROJECT);
+	assert.equal(await manager.readSystemPrompt(undefined, "session-no-hdr"), undefined);
+	// host 无该会话：history 返回空页 → undefined（不抛错）
+	assert.equal(await manager.readSystemPrompt(undefined, "session-missing-9"), undefined);
+	assert.equal(await manager.readSystemPrompt(undefined, undefined), undefined);
+});
+
 test("readHistoryPage host 冷启动：先 ensureStarted 等 boot，不抛「DSH host is not started」", async () => {
 	const { host, sessions, historyBySession, calls } = makeColdStartHost();
 	sessions.set("session-cold-1", { sessionId: "session-cold-1", cwd: PROJECT.path, running: false, blank: false });

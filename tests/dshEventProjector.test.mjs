@@ -396,3 +396,96 @@ test("permission/preset 与 plan/mode 不影响消息/回合信号", () => {
 	assert.equal(p.turnEnded, false);
 	assert.equal(p.messages.length, 0);
 });
+
+test("assistant/message 携带 usage：投影进 projection.usage + 消息 meta.usage（无骨架 push 路径）", () => {
+	// G16：adapter 报告 token 用量时 assistant/message 携带 usage；轨迹账本按消息展示。
+	const p = projectDshEvent(undefined, event("assistant/message", 5, {
+		message: {
+			content: [{ type: "text", text: "完整回答" }],
+			usage: { inputTokens: 120, outputTokens: 45, cacheReadTokens: 300, cacheWriteTokens: 12 },
+		},
+	}), AGENT);
+	assert.equal(p.usage?.inputTokens, 120);
+	assert.equal(p.usage?.outputTokens, 45);
+	assert.equal(p.usage?.cacheReadTokens, 300);
+	assert.equal(p.usage?.cacheWriteTokens, 12);
+	assert.equal(p.messages[0].id, "dsh:5");
+	assert.equal(p.messages[0].meta?.usage?.inputTokens, 120);
+	assert.equal(p.messages[0].meta?.usage?.outputTokens, 45);
+	assert.equal(p.messages[0].meta?.usage?.cacheReadTokens, 300);
+	assert.equal(p.messages[0].meta?.usage?.cacheWriteTokens, 12);
+});
+
+test("assistant/message usage 更新流式骨架：保留已有 meta 并写入 usage", () => {
+	// 骨架路径（reasoning/text delta 已渲染）更新原位消息：meta 合并而非覆盖
+	// （骨架可能已带工具视图等 meta，usage 只是增量字段）。
+	let p = projectDshEvent(undefined, event("turn/start", 2), AGENT);
+	p = projectDshEvent(p, event("assistant/chunk", 3, {
+		chunk: { type: "text-delta", index: 0, text: "旧" },
+	}), AGENT);
+	p = projectDshEvent(p, event("assistant/message", 5, {
+		message: {
+			content: [{ type: "text", text: "终态" }],
+			usage: { inputTokens: 88, outputTokens: 7 },
+		},
+	}), AGENT);
+	assert.equal(p.messages.length, 1);
+	assert.equal(p.messages[0].id, "dsh:3", "骨架 id 保持（不 remount）");
+	assert.equal(p.messages[0].meta?.usage?.inputTokens, 88);
+	assert.equal(p.messages[0].meta?.usage?.outputTokens, 7);
+	assert.equal(p.usage?.inputTokens, 88);
+});
+
+test("assistant/message usage 缺失/全零：不写 meta.usage、不覆盖已有 projection.usage", () => {
+	// adapter 未报告 usage 时字段缺省：消息 meta 无 usage 键，projection.usage 保持旧值
+	// （latest wins 语义：只有新值到达才更新，避免「无报告」把上一回合用量清掉）。
+	let p = projectDshEvent(undefined, event("assistant/message", 5, {
+		message: {
+			content: [{ type: "text", text: "第一轮" }],
+			usage: { inputTokens: 50, outputTokens: 10 },
+		},
+	}), AGENT);
+	assert.equal(p.messages[0].meta?.usage?.inputTokens, 50);
+	p = projectDshEvent(p, event("assistant/message", 9, {
+		message: { content: [{ type: "text", text: "第二轮" }] },
+	}), AGENT);
+	assert.equal(p.messages[1].meta?.usage, undefined, "无 usage 的消息不写 meta.usage");
+	assert.equal(p.usage?.inputTokens, 50, "无新报告不覆盖旧值");
+	// 全零 usage 视为未报告
+	p = projectDshEvent(p, event("assistant/message", 12, {
+		message: {
+			content: [{ type: "text", text: "第三轮" }],
+			usage: { inputTokens: 0, outputTokens: 0 },
+		},
+	}), AGENT);
+	assert.equal(p.messages[2].meta?.usage, undefined);
+	assert.equal(p.usage?.inputTokens, 50);
+});
+
+test("request/header 折叠系统提示（EpochHeader.system，last wins）", () => {
+	// DSH 系统提示由 harness 在请求时组装（persona + sections），request/header 事件
+	// 携带完整文本（dsh-web 轨迹同源）；同一会话多次请求头取最后一次。
+	let p = projectDshEvent(undefined, event("request/header", 3, {
+		header: { system: "你是 PiDeck 的 DSH 代理。\n## 准则\n…" },
+		reason: { kind: "steer", step: 1 },
+	}), AGENT);
+	assert.equal(p.systemPrompt, "你是 PiDeck 的 DSH 代理。\n## 准则\n…");
+	assert.equal(p.stateChanged, true);
+	p = projectDshEvent(p, event("request/header", 7, {
+		header: { system: "更新后的系统提示" },
+	}), AGENT);
+	assert.equal(p.systemPrompt, "更新后的系统提示");
+	// 同值重复不产生信号
+	p = projectDshEvent(p, event("request/header", 8, {
+		header: { system: "更新后的系统提示" },
+	}), AGENT);
+	assert.equal(p.stateChanged, false);
+	// 无 system 字段 / 非对象 header：不覆盖已有值
+	p = projectDshEvent(p, event("request/header", 9, { header: { system: 42 } }), AGENT);
+	assert.equal(p.systemPrompt, "更新后的系统提示");
+	p = projectDshEvent(p, event("request/header", 10, { header: "raw" }), AGENT);
+	assert.equal(p.systemPrompt, "更新后的系统提示");
+	// request/header 不产生消息信号
+	assert.equal(p.messagesChanged, false);
+	assert.equal(p.turnEnded, false);
+});

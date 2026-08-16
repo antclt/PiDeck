@@ -7,6 +7,7 @@ import type { WorktreeService } from "../git/WorktreeService";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
+import { attachProjectPresence } from "../projects/projectPresence";
 import { registerProjectResourceIpc } from "./projectResourceIpc";
 
 export type ProjectsIpcDeps = {
@@ -32,16 +33,17 @@ export function registerProjectsIpc({
 	mainCopy,
 	getMainWindow,
 }: ProjectsIpcDeps): void {
-	const getVisibleProjects = () => {
+	// 可见项目 = 按环境过滤 + 目录存在性标记（missing 保留记录，见 projectPresence.ts）
+	const getVisibleProjects = async () => {
 		const settings = settingsStore.get();
 		const all = projectStore.list();
-		if (settings.wslEnabled) {
-			return all.filter((p) => p.kind === "chat" || p.environment === "wsl");
-		}
-		return all.filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
+		const visible = settings.wslEnabled
+			? all.filter((p) => p.kind === "chat" || p.environment === "wsl")
+			: all.filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
+		return attachProjectPresence(visible);
 	};
 
-	ipcMain.handle(ipcChannels.projectsList, () => getVisibleProjects());
+	ipcMain.handle(ipcChannels.projectsList, async () => getVisibleProjects());
 	ipcMain.handle(ipcChannels.projectsAdd, async () => {
 		const settings = settingsStore.get();
 		const env = settings.wslEnabled ? "wsl" as const : "windows" as const;
@@ -133,7 +135,7 @@ export function registerProjectsIpc({
 			const project = await projectStore.setChatProjectPath(path);
 			// 路径变更后广播项目列表变化，渲染端据此刷新聊天项目的会话。
 			const mainWindow = getMainWindow();
-			mainWindow?.webContents.send(ipcChannels.projectsChanged, getVisibleProjects());
+			mainWindow?.webContents.send(ipcChannels.projectsChanged, await getVisibleProjects());
 			void appLogger.info("project", "Chat project path updated", { path });
 			return project;
 		},

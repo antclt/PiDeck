@@ -1042,9 +1042,11 @@ test("commandFailure classifies message-not-found separately from session-not-fo
   const sessionMiss = coordinator.commandFailure(new Error("Session not found: session-1"));
   assert.equal(sessionMiss.ok, false);
   assert.equal(sessionMiss.error.code, "SESSION_NOT_FOUND");
-  // 其他 not found 前缀（agent/项目）不受影响
+  // Agent 运行实例已不存在（stop/restart 后立即操作）：是「没有可用的运行实例」
+  // 而非「会话已不存在」——旧实现归 SESSION_NOT_FOUND，用户删消息收到
+  // 「删除失败:会话已不存在，请刷新会话列表后重试」但刷新后依然复现（2026-08 反馈）
   const agentMiss = coordinator.commandFailure(new Error("Agent not found: agent-1"));
-  assert.equal(agentMiss.error.code, "SESSION_NOT_FOUND");
+  assert.equal(agentMiss.error.code, "SESSION_RUNTIME_UNAVAILABLE");
 });
 
 test("commandFailure classifies model-not-found as SESSION_MODEL_NOT_FOUND (not session gone)", () => {

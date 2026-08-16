@@ -14,21 +14,48 @@ export function registerImageGenIpc(deps: {
 	imageGen: ImageGenService;
 	configManager: ConfigManager;
 	log: (message: string, ...args: unknown[]) => void;
+	/** 可选：生图成功后把 user+assistant 消息落盘到指定会话（pi 会话文件）。 */
+	persistImageGen?: (input: {
+		sessionId: string;
+		provider: string;
+		model: string;
+		prompt: string;
+		image: { data: string; mimeType: string };
+	}) => Promise<void>;
 }) {
-	const { imageGen, configManager, log } = deps;
+	const { imageGen, configManager, log, persistImageGen } = deps;
 
 	ipcMain.handle(ipcChannels.imagegenGenerate, async (_event, input: unknown) => {
 		// 渲染层数据不可信：三个字段都必须是有限长度的非空字符串
-		const candidate = input as { provider?: unknown; model?: unknown; prompt?: unknown } | null;
+		const candidate = input as { provider?: unknown; model?: unknown; prompt?: unknown; sessionId?: unknown } | null;
 		const provider = typeof candidate?.provider === "string" ? candidate.provider.trim() : "";
 		const model = typeof candidate?.model === "string" ? candidate.model.trim() : "";
 		const prompt = typeof candidate?.prompt === "string" ? candidate.prompt.trim() : "";
+		const sessionId = typeof candidate?.sessionId === "string" ? candidate.sessionId.trim() : "";
 		if (!provider || !model || !prompt || prompt.length > 4000) {
 			return { ok: false, error: "http", detail: "invalid request" } as const;
 		}
 		const result = await imageGen.generate({ provider, model, prompt });
 		if (!result.ok) {
 			log("imagegen", "generate rejected", { error: result.error, provider });
+			return result;
+		}
+		// 落盘失败只记日志，不阻断生图成功返回（图片已在响应里，历史记录是尽力而为）。
+		if (persistImageGen && sessionId) {
+			try {
+				await persistImageGen({
+					sessionId,
+					provider,
+					model,
+					prompt,
+					image: result.image,
+				});
+			} catch (error) {
+				log("imagegen", "persist to session failed", {
+					sessionId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
 		}
 		return result;
 	});

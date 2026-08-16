@@ -64,18 +64,28 @@ export function visionConfigDir(): string {
 	return process.env.PIDECK_VISION_CONFIG_DIR ?? join(homedir(), ".pi", "agent");
 }
 
-/** 输入白名单校验：只允许写入已知字段，长度/枚举/范围限制。 */
-function sanitizeConfig(input: unknown): VisionBridgeConfig | null {
+/**
+ * 输入白名单校验：只允许写入已知字段，长度/枚举/范围限制。
+ *
+ * requireModel 区分两条路径：
+ * - 保存（saveConfig，默认 true）：开启状态必须有模型；关闭状态（enabled:false）
+ *   允许空 provider/model——「关掉视觉桥」本身就是要保存的目标，拒绝会导致用户
+ *   关不掉（2026-08 反馈「存不了，强制开启的」）。
+ * - 读取（getConfig，传 false）：只解析不要求模型。否则关闭状态的文件（enabled:false
+ *   无模型）会被当成非法返回 null，UI 回退默认草稿（enabled:true）→ 显示成强制开启。
+ */
+function sanitizeConfig(input: unknown, requireModel = true): VisionBridgeConfig | null {
 	if (typeof input !== "object" || input === null) return null;
 	const raw = input as Record<string, unknown>;
 
 	const provider = typeof raw.provider === "string" ? raw.provider.trim().slice(0, 128) : "";
 	const model = typeof raw.model === "string" ? raw.model.trim().slice(0, 128) : "";
-	// 未配置 provider/model 时允许保存（相当于关闭桥），但写空值无意义，直接拒绝
-	if (!provider || !model) return null;
+	const enabled = raw.enabled === false ? false : true;
+	// 开启状态必须有模型（无模型视觉桥无法工作）；关闭状态允许空模型
+	if (enabled && requireModel && (!provider || !model)) return null;
 
 	const next: VisionBridgeConfig = {
-		enabled: raw.enabled === false ? false : true,
+		enabled,
 		provider,
 		model,
 	};
@@ -121,7 +131,9 @@ function sanitizeConfig(input: unknown): VisionBridgeConfig | null {
 export class VisionBridgeConfigManager {
 	constructor(private readonly configManager: ConfigManager) {}
 
-	/** 读取当前配置；文件缺失或非法返回 null（与扩展的静默放行语义一致）。 */
+	/** 读取当前配置；文件缺失或非法返回 null（与扩展的静默放行语义一致）。
+	 * 读取不要求模型（requireModel=false）：关闭状态（enabled:false 无模型）是
+	 * 合法配置，必须原样读回，否则 UI 会回退默认开启（「强制开启」假象）。 */
 	async getConfig(): Promise<VisionBridgeConfig | null> {
 		try {
 			const filePath = join(visionConfigDir(), CONFIG_FILE_NAME);
@@ -129,7 +141,7 @@ export class VisionBridgeConfigManager {
 			const parsed: unknown = JSON.parse(raw);
 			if (typeof parsed !== "object" || parsed === null) return null;
 			// 直接返回文件内容（已由保存路径校验过），不做二次裁剪，避免 UI 显示与文件不一致
-			return sanitizeConfig(parsed);
+			return sanitizeConfig(parsed, false);
 		} catch {
 			return null;
 		}

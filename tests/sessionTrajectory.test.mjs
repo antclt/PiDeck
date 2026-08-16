@@ -169,6 +169,12 @@ test("trajectory source concatenates runtime history prefix with the live window
 	assert.match(source, /prependSessionHistoryPageAtom/);
 	assert.match(source, /readProcessEvents/);
 	assert.match(source, /pi-system/);
+	// dsh 会话：系统提示由 harness 在请求时组装，从 host request/header 事件读取
+	// （readDshSystemPrompt），不加载 pi 的 pi-system 模板——否则 dsh 轨迹错误显示
+	// pi 的系统提示（2026-08 用户反馈）
+	assert.match(source, /record\?\.backend === "dsh"/);
+	assert.match(source, /isDshSession/);
+	assert.match(source, /readDshSystemPrompt/);
 	assert.match(panel, /currentSessionIdAtom/);
 	assert.match(panel, /processEvents/);
 });
@@ -196,4 +202,35 @@ test("first user message is the initial prompt; process events join the ledger",
 	assert.ok(model.records.some((r) => r.processKind === "modelChange"));
 	assert.equal(model.records.find((r) => r.kind === "systemPrompt")?.durationMs, undefined);
 	assert.equal(model.records.find((r) => r.processKind === "session")?.durationMs, undefined);
+});
+
+test("assistant message usage lands on the trajectory record (DSH adapter report)", () => {
+	const { buildTrajectory } = loadModule();
+	const model = buildTrajectory([
+		msg({ id: "u1", role: "user", text: "go", timestamp: 1000 }),
+		msg({
+			id: "a1",
+			role: "assistant",
+			text: "done",
+			timestamp: 2000,
+			stopReason: "stop",
+			meta: {
+				usage: { inputTokens: 120, outputTokens: 45, cacheReadTokens: 300, cacheWriteTokens: 12 },
+			},
+		}),
+	]);
+	const assistant = model.records.find((r) => r.kind === "assistant");
+	assert.equal(assistant?.usage?.inputTokens, 120);
+	assert.equal(assistant?.usage?.outputTokens, 45);
+	assert.equal(assistant?.usage?.cacheReadTokens, 300);
+	assert.equal(assistant?.usage?.cacheWriteTokens, 12);
+});
+
+test("assistant message without usage leaves record.usage undefined (pi path)", () => {
+	const { buildTrajectory } = loadModule();
+	const model = buildTrajectory([
+		msg({ id: "u1", role: "user", text: "go", timestamp: 1000 }),
+		msg({ id: "a1", role: "assistant", text: "done", timestamp: 2000, stopReason: "stop" }),
+	]);
+	assert.equal(model.records.find((r) => r.kind === "assistant")?.usage, undefined);
 });

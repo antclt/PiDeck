@@ -141,6 +141,11 @@ export type DshBackendIpcDeps = {
 		agentId: string | undefined,
 		dshSessionId: string | undefined,
 	) => Promise<import("../../shared/types/trajectory").SessionProcessEvent[]>;
+	/** DSH 轨迹系统提示（运行时会话读投影缓存；历史会话从 host history 折叠 request/header；未装配返回 undefined）。 */
+	readDshSystemPrompt?: (
+		agentId: string | undefined,
+		dshSessionId: string | undefined,
+	) => Promise<string | undefined>;
 	/** DSH 「查看完整输出」（工具结果全文随投影消息存 meta.fullText）；未装配时抛错。 */
 	readDshMessageFullText?: (
 		agentId: string,
@@ -303,6 +308,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		restartDshHost,
 		readDshHistoryPage,
 		readDshProcessEvents,
+		readDshSystemPrompt,
 		readDshMessageFullText,
 		resolveDshSessionFilePath,
 		searchDshSessions,
@@ -693,6 +699,21 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		},
 	);
 	ipcMain.handle(
+		ipcChannels.sessionsCatalogReadDshSystemPrompt,
+		async (_event, sessionId: string): Promise<string | undefined> => {
+			if (typeof sessionId !== "string" || !sessionId.trim()) return undefined;
+			const entry = sessionCatalog.get(sessionId);
+			// DSH 会话的系统提示由 harness 在请求时组装（persona + sections），PiDeck
+			// 只能从 request/header 事件取；运行时会话读投影缓存，历史会话从 host history
+			// 折叠（未装配/无数据返回 undefined，轨迹不展示，不阻断）。
+			if (entry?.backend === "dsh" && readDshSystemPrompt) {
+				const target = sessionRuntimeCoordinator.getTarget(sessionId);
+				return readDshSystemPrompt(target?.agentId, entry.dshSessionId);
+			}
+			return undefined;
+		},
+	);
+	ipcMain.handle(
 		ipcChannels.sessionsCatalogReadReferenceMessages,
 		(_event, sessionId: string) => readCatalogSessionReferenceMessages(sessionId),
 	);
@@ -1056,6 +1077,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				sessionId,
 				ok: result.ok,
 				activationMs: Date.now() - startedAt,
+				// 失败时带错误详情（此前只记 ok:false，排障要翻渲染层 toast）
+				...(result.ok ? {} : {
+					error: result.error?.debugDetails ?? JSON.stringify(result.error),
+				}),
 			});
 			return result;
 		},
