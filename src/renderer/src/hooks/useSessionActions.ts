@@ -121,7 +121,19 @@ export function useSessionActions(options: UseSessionActionsOptions) {
   }
 
   async function deleteHistorySession(session: SessionSummary) {
-    await api.sessions.deleteRecord(session.id);
+    try {
+      await api.sessions.deleteRecord(session.id);
+    } catch (error) {
+      // 主进程拦截（会话正在使用中/删除失败）必须转成友好 toast，避免未处理 rejection
+      // （全局"未处理异常"弹窗）。剥离 Electron invoke 前缀只保留真实原因。
+      const raw = error instanceof Error ? error.message : String(error ?? "");
+      const reason = raw
+        .replace(/^Error invoking remote method ['"][^'"]+['"]:\s*/i, "")
+        .replace(/^Error:\s*/i, "")
+        .trim();
+      showToast(reason || t("app.sessionDeleteFailed"), 5000);
+      return;
+    }
     removeSessionState(session.id);
     removeSessionComposerState(session.id);
     // G1：DSH 会话删除只删 PiDeck catalog 映射；host 会话数据由 $DSH_HOME 保留

@@ -128,6 +128,52 @@ test("saveConfig: rejects missing provider/model", async () => {
 	rmSync(dir, { recursive: true, force: true });
 });
 
+// ── 关闭状态（enabled:false）允许保存/读取（2026-08 反馈：视觉桥「存不了，强制开启」）──
+
+test("saveConfig: disabled state saves without provider/model (closing the bridge)", async () => {
+	const { dir, manager } = makeManager();
+	const result = await manager.saveConfig({ enabled: false, provider: "", model: "" });
+	assert.equal(result.ok, true, "关闭视觉桥不应要求模型");
+	const saved = JSON.parse(readFileSync(join(dir, "pi-deck-vision.json"), "utf8"));
+	assert.equal(saved.enabled, false);
+	assert.equal(saved.provider, "");
+	assert.equal(saved.model, "");
+	rmSync(dir, { recursive: true, force: true });
+});
+
+test("saveConfig: disabled state keeps previously configured model", async () => {
+	const { dir, manager } = makeManager();
+	const result = await manager.saveConfig({
+		enabled: false,
+		provider: "glm",
+		model: "glm-4v-flash",
+		baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+		apiKey: "sk-test",
+	});
+	assert.equal(result.ok, true);
+	const saved = JSON.parse(readFileSync(join(dir, "pi-deck-vision.json"), "utf8"));
+	assert.equal(saved.enabled, false);
+	// 模型信息保留：重新开启时无需重选
+	assert.equal(saved.provider, "glm");
+	assert.equal(saved.model, "glm-4v-flash");
+	rmSync(dir, { recursive: true, force: true });
+});
+
+test("getConfig: reads disabled state back without model (not forced-on)", async () => {
+	const { dir, manager } = makeManager();
+	writeFileSync(
+		join(dir, "pi-deck-vision.json"),
+		JSON.stringify({ enabled: false, provider: "", model: "" }, null, 2),
+		"utf8",
+	);
+	const config = await manager.getConfig();
+	assert.notEqual(config, null, "关闭状态是合法配置，必须能读回");
+	assert.equal(config.enabled, false);
+	assert.equal(config.provider, "");
+	assert.equal(config.model, "");
+	rmSync(dir, { recursive: true, force: true });
+});
+
 test("saveConfig: rejects non-object input", async () => {
 	const { dir, manager } = makeManager();
 	assert.equal((await manager.saveConfig(null)).ok, false);

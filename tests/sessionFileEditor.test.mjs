@@ -817,3 +817,85 @@ test("a second reload failure reports rollback-reload failure after restoring th
     assert.equal((await readFile(path, "utf8")).includes("_reloadMarker"), false);
   });
 });
+
+test("appendMessages chains entries after the current leaf and keeps header/trailing bytes", async () => {
+  await withTempSession(basicEntries("answer"), { eol: "\n", trailing: true }, async ({ path }) => {
+    const before = await readFile(path, "utf8");
+    const editor = new SessionFileEditor();
+    const result = await editor.appendMessages({
+      file: fileRef(path),
+      reload: async () => undefined,
+      entries: [
+        { role: "user", content: [{ type: "text", text: "画一只猫" }] },
+        {
+          role: "assistant",
+          content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } }],
+          extra: { api: "openai-images", provider: "siliconflow", model: "Kwai-Kolors/Kolors" },
+        },
+      ],
+    });
+
+    const after = parseLines(await readFile(path, "utf8"));
+    assert.equal(after.length, 5);
+    // 首条追加消息以原 leaf（a1）为 parent，第二条串在第一条之后
+    assert.equal(after[3].type, "message");
+    assert.equal(after[3].parentId, "a1");
+    assert.equal(after[3].message.role, "user");
+    assert.deepEqual(after[3].message.content, [{ type: "text", text: "画一只猫" }]);
+    assert.equal(after[4].parentId, after[3].id);
+    assert.equal(after[4].message.role, "assistant");
+    assert.equal(after[4].message.api, "openai-images");
+    assert.equal(after[4].message.provider, "siliconflow");
+    assert.equal(after[4].message.model, "Kwai-Kolors/Kolors");
+    assert.deepEqual(
+      after[4].message.content,
+      [{ type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } }],
+    );
+    assert.equal(result.targetEntryId, after[3].id);
+    assert.deepEqual([...result.changedEntryIds], [after[3].id, after[4].id]);
+    assert.equal((await readFile(result.backupPath, "utf8")), before);
+  });
+});
+
+test("appendMessages with empty file (header only) starts a fresh chain from null parent", async () => {
+  await withTempSession([header()], {}, async ({ path }) => {
+    const editor = new SessionFileEditor();
+    await editor.appendMessages({
+      file: fileRef(path),
+      reload: async () => undefined,
+      entries: [{ role: "user", content: [{ type: "text", text: "first" }] }],
+    });
+    const after = parseLines(await readFile(path, "utf8"));
+    assert.equal(after.length, 2);
+    assert.equal(after[1].parentId, null);
+    assert.equal(after[1].message.role, "user");
+  });
+});
+
+test("appendMessages rejects empty entry list before backup or write", async () => {
+  await withTempSession(basicEntries(), {}, async ({ path, original }) => {
+    const editor = new SessionFileEditor();
+    await expectCode(editor.appendMessages({
+      file: fileRef(path),
+      reload: async () => undefined,
+      entries: [],
+    }), "SESSION_ENTRY_NOT_FOUND");
+    assert.equal((await readFile(path)).equals(original), true);
+  });
+});
+
+test("appendMessages runs reload with marker and cleans it up", async () => {
+  await withTempSession(basicEntries(), {}, async ({ path }) => {
+    let markerSeen = false;
+    const editor = new SessionFileEditor();
+    await editor.appendMessages({
+      file: fileRef(path),
+      reload: async () => {
+        markerSeen = (await readFile(path, "utf8")).includes("_reloadMarker");
+      },
+      entries: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    });
+    assert.equal(markerSeen, true);
+    assert.equal((await readFile(path, "utf8")).includes("_reloadMarker"), false);
+  });
+});

@@ -31,6 +31,7 @@ export function SessionTrajectoryPanel() {
 			messages={source.messages}
 			processEvents={source.processEvents}
 			systemPrompt={source.systemPrompt}
+			isDsh={source.isDshSession}
 			hasMoreMessages={source.hasMoreMessages}
 			isLoadingMoreMessages={source.isLoadingMoreMessages}
 			onLoadMore={source.loadMore}

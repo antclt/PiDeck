@@ -91,12 +91,19 @@ export class ImageGenService {
 }
 
 /**
- * 归一化生图端点：OpenAI 兼容服务的 images 接口标准路径为 /v1/images/generations。
- * 用户配置的 baseUrl 可能带 /v1 也可能只有根地址，这里补全 /v1 段；
- * 非常规路径（如 /api）无法推测时保持原样，由 badBaseUrl 错误兜底。
+ * 归一化生图端点：OpenAI 兼容服务的 images 接口标准路径为 /images/generations，
+ * 前缀取决于供应商 baseUrl 的写法：
+ * - 已带版本段（/v1、/v1beta、/api、/api/v3 等，规则与 baseUrlPath.hasApiVersionPath
+ *   一致）→ 直接追加 /images/generations（火山方舟 /api/v3、Google /v1beta 等
+ *   非 OpenAI 风格路径都落这里，不再强行补 /v1）；
+ * - 裸根地址（OpenAI 默认风格）→ 补 /v1 再追加；
+ * - 用户已配置完整 /images/generations 端点 → 原样使用。
  */
 function normalizeImagesUrl(baseUrl: string): string {
 	const trimmed = baseUrl.trim().replace(/\/+$/, "");
-	if (trimmed.endsWith("/v1")) return `${trimmed}/images/generations`;
+	if (/\/images\/generations$/i.test(trimmed)) return trimmed;
+	if (/\/v\d+(alpha|beta)?$|\/api$/.test(trimmed)) {
+		return `${trimmed}/images/generations`;
+	}
 	return `${trimmed}/v1/images/generations`;
 }

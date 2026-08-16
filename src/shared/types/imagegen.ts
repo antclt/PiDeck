@@ -11,6 +11,8 @@ export type ImageGenRequest = {
 	model: string;
 	/** 提示词 */
 	prompt: string;
+	/** 可选：所属会话 id。提供时生图结果会以 user+assistant 消息落盘到该会话的 pi 文件。 */
+	sessionId?: string;
 };
 
 /**

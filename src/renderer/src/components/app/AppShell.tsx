@@ -324,7 +324,12 @@ export function AppShell(props: AppShellProps) {
             {sidebarContent}
           </div>
         </ResizablePanel>
-        <ResizableHandle className="splitter splitter-left" />
+        {/* 双击分隔条 = react-resizable-panels 把相邻有 defaultSize 的面板 resize 回
+            defaultSize。drawer 面板 defaultSize={0}（常驻挂载、初始折叠），双击
+            splitter-right 会把抽屉缩到 0 且再次双击仍回 0——「缩没了无法复原，只能
+            重启」（2026-08 用户反馈）。左右分隔条统一 disableDoubleClick：桌面工作台
+            里双击折叠不是预期手势，折叠/展开走侧栏与抽屉的专属按钮。 */}
+        <ResizableHandle className="splitter splitter-left" disableDoubleClick />
 
         <ResizablePanel id="chat" minSize={360} className="shell-panel-chat">
           <main
@@ -344,10 +349,13 @@ export function AppShell(props: AppShellProps) {
 
         {/* 抽屉面板常驻挂载：drawer=null 时折叠为 0 宽，避免动态挂载导致
             Group 布局时序错误（Invalid panel layout / constraints not found）。
-            内容由 WorkspaceDrawerHost 的空态兜底。 */}
+            内容由 WorkspaceDrawerHost 的空态兜底。
+            disableDoubleClick：drawer defaultSize=0，双击分隔条会把抽屉缩到 0
+            且无法再双击恢复（见 splitter-left 注释，2026-08 用户反馈）。 */}
         <ResizableHandle
           className="splitter splitter-right"
           data-active={Boolean(drawer) && !drawerCollapsed}
+          disableDoubleClick
         />
         <ResizablePanel
           id="drawer"

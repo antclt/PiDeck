@@ -439,6 +439,8 @@ export const zhCN = {
   "app.projectInfo":
     "项目下方默认展示运行中的 Agent 和最近历史会话；右键项目可导入 Codex 会话或删除目录记录。",
   "app.projectNewAgent": "新建 Agent",
+  "app.projectMissing": "目录不存在",
+  "app.projectMissingHint": "项目目录已被删除、移动或暂时不可达（如未挂载的磁盘/未启动的 WSL）。可恢复目录，或在项目右键菜单中移除该项目。",
   "app.chatProjectSettings": "修改聊天记录保存目录",
   "app.modelRestartTitle": "重启 Agent 生效",
   "app.modelRestartBody": "模型 {model} 已在本地 models.json 中配置，但当前运行的 Agent 尚未加载新配置。重启 Agent 后即可使用，是否重启？",
@@ -507,6 +509,7 @@ export const zhCN = {
   "app.sessionCopied": "已通过 pi RPC 复制会话",
   "app.sessionCopyCancelled": "复制会话已取消",
   "app.sessionDeleted": "已删除会话",
+  "app.sessionDeleteFailed": "删除会话失败",
   "session.deletedDshKeepData": "会话记录已删除（DSH host 数据保留在 DSH_HOME，可手动清理）",
   "app.sessionArchived": "已归档会话",
   "app.sessionRestored": "已恢复会话",
@@ -2556,6 +2559,7 @@ export const zhCN = {
   "session.trajectory.kind.import": "导入",
   "session.trajectory.kind.error": "错误",
   "session.trajectory.systemPromptHint": "Pi 不会把当轮真实系统提示落进会话文件。这里展示内置 pi-system 参考文本，便于对照身份、工具和行为准则。",
+  "session.trajectory.systemPromptHintDsh": "DSH 的系统提示由 harness 在请求时组装（persona + sections）。这里展示当轮请求的真实系统提示（dsh-web 轨迹同源）。",
   "session.trajectory.field.time": "时间",
   "session.trajectory.field.duration": "耗时",
   "session.trajectory.field.status": "状态",
@@ -2568,6 +2572,7 @@ export const zhCN = {
   "session.trajectory.field.inputTokens": "输入 tokens",
   "session.trajectory.field.outputTokens": "输出 tokens",
   "session.trajectory.field.cacheRead": "缓存读取",
+  "session.trajectory.field.cacheWrite": "缓存写入",
 } as const;
 
 export type TranslationKey = keyof typeof zhCN;

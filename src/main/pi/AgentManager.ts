@@ -2416,6 +2416,61 @@ export class AgentManager {
 	}
 
 	/**
+	 * 追加 PiDeck 本地产物的消息条目到 pi 会话文件（生图等不走 pi RPC 的记录落盘）。
+	 * - 会话有活跃 runtime 时：写文件后 switch_session 让 pi 重读，内存与文件保持一致；
+	 * - 无 runtime（生图不依赖 Agent）时：直接落盘，下次激活由 pi 读文件自然吸收。
+	 * reload 失败不阻断落盘（文件已原子写成功），仅记日志——pi 重读失败不影响磁盘记录。
+	 */
+	async appendLocalMessagesToSession(
+		sessionPath: string,
+		entries: import("./SessionFileEditor").AppendMessageEntry[],
+	): Promise<void> {
+		if (entries.length === 0) return;
+		const hostPath = this.toSessionHostPath(sessionPath);
+		const runtime = [...this.agents.values()].find(
+			(candidate) => candidate.tab.sessionPath &&
+				this.toSessionHostPath(candidate.tab.sessionPath) === hostPath,
+		);
+		try {
+			if (runtime) {
+				const agentId = runtime.tab.id;
+				await this.ensureAgentIdle(agentId);
+				const file = this.createSessionFileRef(runtime, sessionPath);
+				await this.sessionFileEditor.appendMessages({
+					file,
+					reload: () => this.requestSessionReload(runtime, file),
+					entries,
+				});
+				await this.loadMessages(agentId);
+			} else {
+				// 无 runtime：按环境默认值构造文件引用（WSL 走 Linux 协议路径 + Windows 宿主路径）。
+				const file: SessionFileRef = {
+					protocolPath: this.toSessionProtocolPath(sessionPath),
+					hostPath,
+					environment: this.wslEnvironment ? "wsl" : "native",
+					wslDistro: this.wslEnvironment?.distro,
+				};
+				await this.sessionFileEditor.appendMessages({
+					file,
+					reload: async () => undefined,
+					entries,
+				});
+			}
+			void this.appLogger?.info("agent", "Local messages appended to session", {
+				sessionPath,
+				entryCount: entries.length,
+				hadRuntime: Boolean(runtime),
+			});
+		} catch (error) {
+			void this.appLogger?.warn("agent", "Local messages append failed", {
+				sessionPath,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		}
+	}
+
+	/**
 	 * 重启 agent 进程：停止当前 pi RPC 子进程，用同一个 session 重新启动。
 	 * 适用场景：修改了 provider 配置、切换了 API key、更新了 pi 版本后，
 	 * /reload 只重载 extension，不会重新读取配置文件，restart 才能生效。

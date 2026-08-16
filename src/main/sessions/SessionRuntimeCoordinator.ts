@@ -1077,7 +1077,17 @@ export class SessionRuntimeCoordinator {
 		try {
 			await this.applyPreferences(entry, tab.id);
 		} catch (error) {
-			if (created) await this.agents.stop(tab.id).catch(() => undefined);
+			if (created) {
+				// 激活失败兜底（非偏好类错误）：DSH 的 host 会话已在 $DSH_HOME 创建，
+				// 先落 catalog 映射（dshSessionId + active）再停运行时——否则 host 会话
+				// 变孤儿，用户每次重试都新建一个（孤儿堆积根因，2026-08 兼容期修复）。
+				if (tab.backend === "dsh" && tab.sessionId) {
+					await this.catalog
+						.attachRuntime({ sessionId, dshSessionId: tab.sessionId })
+						.catch(() => undefined);
+				}
+				await this.agents.stop(tab.id).catch(() => undefined);
+			}
 			throw new Error(`Failed to apply session preferences: ${errorMessage(error)}`);
 		}
 
@@ -1097,9 +1107,10 @@ export class SessionRuntimeCoordinator {
 
 	/**
 	 * 会话运行时身份 → catalog attach patch（C9）：收拢 backend 特判——
-	 * - 通用/pi：sessionPath + piSessionId 落「文件配对」分支；
-	 * - DSH：文件配对分支同时写 dshSessionId（标题同步 findByDshSessionId / 重开 attach 恢复依赖）；
-	 * - DSH 无文件分支（sessionPath 未落盘）：只回写 dshSessionId。
+	 * - DSH：只回写 dshSessionId，**绝不写 filePath/piSessionId**（2026-08 兼容期教训：
+	 *   dsh 的 tab.sessionPath 是 host 的 zstd 会话文件，曾随文件分支落盘导致 pi 侧把
+	 *   zstd 文件当 pi 会话文件启动（pi exited code=1））；
+	 * - 通用/pi：sessionPath + piSessionId 落「文件配对」分支。
 	 * 返回 null 表示无需回写（匿名会话等）。
 	 */
 	private buildAttachPatch(
@@ -1107,16 +1118,15 @@ export class SessionRuntimeCoordinator {
 		tab: Pick<AgentTab, "sessionPath" | "sessionId" | "backend">,
 		entry: Pick<SessionCatalogEntry, "noSession" | "backend">,
 	): { sessionId: string; filePath?: string; piSessionId?: string; dshSessionId?: string } | null {
+		if (entry.backend === "dsh") {
+			return tab.sessionId && !entry.noSession ? { sessionId, dshSessionId: tab.sessionId } : null;
+		}
 		if (tab.sessionPath && !entry.noSession) {
 			return {
 				sessionId,
 				filePath: tab.sessionPath,
 				piSessionId: tab.sessionId,
-				dshSessionId: entry.backend === "dsh" ? tab.sessionId : undefined,
 			};
-		}
-		if (entry.backend === "dsh" && tab.sessionId && !entry.noSession) {
-			return { sessionId, dshSessionId: tab.sessionId };
 		}
 		return null;
 	}
@@ -1149,11 +1159,35 @@ export class SessionRuntimeCoordinator {
 		entry: SessionCatalogEntry,
 		agentId: string,
 	): Promise<void> {
+		// DSH 草稿的 entry.model 可能来自 pi 的 models.json（引导页/欢迎页选型在
+		// 创建时不知道后端，或用户切了默认后端）；host 目录没有该 provider/模型时
+		// selectModel 会拒绝。降级为「应用宿主默认模型」并告警，不让整个激活失败
+		// （否则每次重试都新建一个 host 会话 = 孤儿堆积）。pi 保持严格（模型应在 models.json）。
+		const isDsh = entry.backend === "dsh";
 		if (entry.model) {
-			await this.agents.setModel(agentId, entry.model.provider, entry.model.modelId);
+			try {
+				await this.agents.setModel(agentId, entry.model.provider, entry.model.modelId);
+			} catch (error) {
+				if (!isDsh) throw error;
+				void this.logger?.warn("session-runtime", "DSH model preference ignored", {
+					sessionId: entry.id,
+					provider: entry.model.provider,
+					modelId: entry.model.modelId,
+					error: errorMessage(error),
+				});
+			}
 		}
 		if (entry.thinkingLevel) {
-			await this.agents.setThinking(agentId, entry.thinkingLevel);
+			try {
+				await this.agents.setThinking(agentId, entry.thinkingLevel);
+			} catch (error) {
+				if (!isDsh) throw error;
+				void this.logger?.warn("session-runtime", "DSH thinking preference ignored", {
+					sessionId: entry.id,
+					thinkingLevel: entry.thinkingLevel,
+					error: errorMessage(error),
+				});
+			}
 		}
 		// DSH 权限预设（草稿期预选 / 会话内切换回写）：激活时经 /permission 命令应用
 		if (entry.permissionPreset && this.agents.setPermission) {
@@ -1478,20 +1512,26 @@ export class SessionRuntimeCoordinator {
 			// 否则会误报成 SESSION_NOT_FOUND（「会话已不存在」），而会话其实还在。
 			lower.includes("message not found")
 				? "MESSAGE_NOT_FOUND"
-				// set_model 的 "Model not found: provider/model"（本地 models.json 也没有该模型，
-				// 如手误/列表错位产生的假模型）是「模型不存在」而非「会话不存在」——
-				// 若落到泛化 "not found" 分支会误报成「会话已不存在」误导排查。
-				: lower.includes("model not found")
-					? "SESSION_MODEL_NOT_FOUND"
-					: lower.includes("not found")
-						? "SESSION_NOT_FOUND"
-						: lower.includes("busy") || lower.includes("in progress") || lower.includes("stream")
-							? "SESSION_RUNTIME_BUSY"
-							: lower.includes("binding") || lower.includes("generation") || lower.includes("changed")
-								? "SESSION_RUNTIME_CHANGED"
-								: lower.includes("runtime") && lower.includes("available")
-									? "SESSION_RUNTIME_UNAVAILABLE"
-									: "SESSION_COMMAND_FAILED";
+				// Agent 运行实例已不存在（stop/restart 后立即操作、崩溃清理等）：是
+				// 「没有可用的运行实例」而非「会话不存在」——泛化 not found 会误报成
+				// 「会话已不存在，请刷新会话列表后重试」，用户刷新后依然复现（2026-08
+				// 用户反馈：删除消息报会话已不存在）。
+				: lower.includes("agent not found")
+					? "SESSION_RUNTIME_UNAVAILABLE"
+					// set_model 的 "Model not found: provider/model"（本地 models.json 也没有该模型，
+					// 如手误/列表错位产生的假模型）是「模型不存在」而非「会话不存在」——
+					// 若落到泛化 "not found" 分支会误报成「会话已不存在」误导排查。
+					: lower.includes("model not found")
+						? "SESSION_MODEL_NOT_FOUND"
+						: lower.includes("not found")
+							? "SESSION_NOT_FOUND"
+							: lower.includes("busy") || lower.includes("in progress") || lower.includes("stream")
+								? "SESSION_RUNTIME_BUSY"
+								: lower.includes("binding") || lower.includes("generation") || lower.includes("changed")
+									? "SESSION_RUNTIME_CHANGED"
+									: lower.includes("runtime") && lower.includes("available")
+										? "SESSION_RUNTIME_UNAVAILABLE"
+										: "SESSION_COMMAND_FAILED";
 		return {
 			ok: false,
 			error: {

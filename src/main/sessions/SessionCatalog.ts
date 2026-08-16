@@ -225,6 +225,27 @@ export class SessionCatalog {
 				// 迁移是 best-effort；内存已生效，下一次启动仍会重试。
 			}
 		}
+
+		// 兼容旧数据：早期版本把 DSH 会话当 pi 会话 attach（filePath=host zstd 文件、
+		// piSessionId=host 会话 id 落盘）。pi 侧逻辑会把 zstd 文件当 pi 会话文件
+		// 处理（启动 pi exited code=1、导出/删除误判等）。dsh 条目只保留 dshSessionId，
+		// filePath/piSessionId 一律清除（dshSessionId 已在上方迁移补齐）。
+		const pollutedDsh = this.entries.some((entry) => (
+			entry.backend === "dsh" && (Boolean(entry.filePath) || Boolean(entry.piSessionId))
+		));
+		if (pollutedDsh) {
+			for (const entry of this.entries) {
+				if (entry.backend !== "dsh") continue;
+				delete entry.filePath;
+				delete entry.piSessionId;
+				entry.originKey = undefined;
+			}
+			try {
+				await this.writeSnapshot(this.entries);
+			} catch {
+				// 迁移是 best-effort；内存已生效，下一次启动仍会重试。
+			}
+		}
 		this.loaded = true;
 		if (this.skipNextBackup) {
 			await this.writeSnapshot(this.entries);

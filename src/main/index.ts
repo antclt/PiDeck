@@ -2313,6 +2313,36 @@ function registerIpc() {
 		}),
 		configManager,
 		log: (message, ...args) => appLogger.info("imagegen", message, ...args),
+		// 生图记录落盘：user 提示词 + assistant 图片两条消息写入 pi 会话文件，
+		// 让「不走 pi/dsh 直连 API」的生图结果也进会话历史（重启后可见）。
+		// DSH 会话无 pi 会话文件且 host 无消息追加 API，跳过（生图仍正常返回）。
+		// agentManager/sessionCatalog 在此处尚未初始化，闭包延迟引用（IPC 调用时已就绪）。
+		persistImageGen: async ({ sessionId, provider, model, prompt, image }) => {
+			const entry = sessionCatalog?.get(sessionId);
+			if (!entry || entry.backend === "dsh" || !entry.filePath) return;
+			await agentManager?.appendLocalMessagesToSession(entry.filePath, [
+				{
+					role: "user",
+					content: [{ type: "text", text: prompt }],
+				},
+				{
+					role: "assistant",
+					content: [{
+						type: "image",
+						source: {
+							type: "base64",
+							media_type: image.mimeType,
+							data: image.data,
+						},
+					}],
+					extra: {
+						api: "openai-images",
+						provider,
+						model,
+					},
+				},
+			]);
+		},
 	});
 
 	registerSessionIpc({
@@ -2371,6 +2401,8 @@ function registerIpc() {
 				dshAgentManager.readHistoryPage(dshSessionId, beforeSeq, pageSize),
 			readDshProcessEvents: (agentId, dshSessionId) =>
 				dshAgentManager.readProcessEvents(agentId, dshSessionId),
+			readDshSystemPrompt: (agentId, dshSessionId) =>
+				dshAgentManager.readSystemPrompt(agentId, dshSessionId),
 			readDshMessageFullText: (agentId, messageId) =>
 				dshAgentManager.readMessageFullText(agentId, messageId),
 			resolveDshSessionFilePath: async (sessionId) => {

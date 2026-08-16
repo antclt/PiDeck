@@ -33,6 +33,10 @@ export type DshProjection = {
 	/** 最近一次 assistant 回合的 token 用量（G16：assistant/message 携带 adapter 报告
 	 *  的 usage 时更新，latest wins；缺失 = 适配器未报告）。 */
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+	/** DSH 当轮真实系统提示（request/header 事件的 EpochHeader.system；last wins；
+	 *  缺失 = 会话尚未发过请求头）。dsh-web 轨迹同源——DSH 的系统提示由 harness 按
+	 *  persona + sections 在请求时组装，PiDeck 只能从请求头拿到文本。 */
+	systemPrompt?: string;
 	/** 路由上下文容量（request/context 事件携带的 contextWindow，adapter 上报时才有）：
 	 *  上下文圆环的窗口数据源（dsh-web ContextMeter 同源；与 token-meter 的
 	 *  contextPressure.contextWindow 互为补充，后者依赖投影帧推送）。 */
@@ -213,23 +217,27 @@ export function projectDshEvent(
 			// 终态：以组装后的完整内容块为准（delta 可能因适配器差异与终态不完全一致）
 			const message = (data.message ?? {}) as { content?: unknown };
 			// G16：usage 统计——adapter 报告 token 用量时 assistant/message 携带 usage，
-			// 投影进 projection（渲染层 runtime state 的 token/缓存指标）。
-			if (isRecord(data.message)) {
+			// 投影进 projection（渲染层 runtime state 的 token/缓存指标），并写入本条
+			// assistant 消息的 meta.usage（轨迹账本按消息展示 token 用量，dsh-web 同源）。
+			const usageForMessage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | undefined = (() => {
+				if (!isRecord(data.message)) return undefined;
 				const usage = (data.message as { usage?: unknown }).usage;
-				if (isRecord(usage)) {
-					const u = usage as Record<string, unknown>;
-					const inputTokens = typeof u.inputTokens === "number" ? u.inputTokens : 0;
-					const outputTokens = typeof u.outputTokens === "number" ? u.outputTokens : 0;
-					if (inputTokens > 0 || outputTokens > 0) {
-						next.usage = {
-							inputTokens,
-							outputTokens,
-							...(typeof u.cacheReadTokens === "number" ? { cacheReadTokens: u.cacheReadTokens } : {}),
-							...(typeof u.cacheWriteTokens === "number" ? { cacheWriteTokens: u.cacheWriteTokens } : {}),
-						};
-					}
+				if (!isRecord(usage)) return undefined;
+				const u = usage as Record<string, unknown>;
+				const inputTokens = typeof u.inputTokens === "number" ? u.inputTokens : 0;
+				const outputTokens = typeof u.outputTokens === "number" ? u.outputTokens : 0;
+				if (inputTokens > 0 || outputTokens > 0) {
+					const result = {
+						inputTokens,
+						outputTokens,
+						...(typeof u.cacheReadTokens === "number" ? { cacheReadTokens: u.cacheReadTokens } : {}),
+						...(typeof u.cacheWriteTokens === "number" ? { cacheWriteTokens: u.cacheWriteTokens } : {}),
+					};
+					next.usage = result;
+					return result;
 				}
-			}
+				return undefined;
+			})();
 			const { text, reasoning } = splitBlocks(message.content);
 			const finalText = text.trim() ? text : base.pendingAssistantText;
 			// 流式累积兜底：终态 content 缺失 thinking 时用已流式渲染的累积文本
@@ -275,6 +283,11 @@ export function projectDshEvent(
 						...((previous.thinkingStartedAt !== undefined)
 							? { thinkingStartedAt: previous.thinkingStartedAt }
 							: {}),
+						// 保留骨架已有 meta（工具视图等），并写入本条 usage（轨迹 token 用量）
+						meta: {
+							...(previous.meta ?? {}),
+							...(usageForMessage ? { usage: usageForMessage } : {}),
+						},
 					};
 					next.messages = messages;
 				} else {
@@ -289,6 +302,7 @@ export function projectDshEvent(
 							thinking: finalThinking.trim() ? finalThinking : undefined,
 							timestamp: eventTime(event.time),
 							stopReason: "stop",
+							...(usageForMessage ? { meta: { usage: usageForMessage } } : {}),
 						},
 					];
 				}
@@ -304,6 +318,7 @@ export function projectDshEvent(
 						thinking: finalThinking.trim() ? finalThinking : undefined,
 						timestamp: eventTime(event.time),
 						stopReason: "stop",
+						...(usageForMessage ? { meta: { usage: usageForMessage } } : {}),
 					},
 				];
 				next.messagesChanged = true;
@@ -501,6 +516,20 @@ export function projectDshEvent(
 				};
 			}
 			next.stateChanged = true;
+			break;
+		}
+		case "request/header": {
+			// 当轮请求头（EpochHeader）：system 是 harness 组装的真实系统提示（persona +
+			// sections 展开后的完整文本，dsh-web 轨迹展示同源）。同一会话可能因模型切换/
+			// 权限变化多次发请求头，last wins；无 system 字段（低版本 host）不覆盖已有值。
+			const header = isRecord(data.header) ? data.header : undefined;
+			const system = header && typeof (header as { system?: unknown }).system === "string"
+				? (header as { system: string }).system
+				: undefined;
+			if (system && system !== base.systemPrompt) {
+				next.systemPrompt = system;
+				next.stateChanged = true;
+			}
 			break;
 		}
 		case "permission/preset": {

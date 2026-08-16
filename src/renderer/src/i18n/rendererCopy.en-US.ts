@@ -442,6 +442,8 @@ export const enUS: Record<TranslationKey, string> = {
   "app.projectInfo":
     "Projects show running Agents and recent sessions by default. Right-click a project to import Codex sessions or remove the record.",
   "app.projectNewAgent": "New Agent",
+  "app.projectMissing": "Directory missing",
+  "app.projectMissingHint": "The project directory was deleted, moved, or is temporarily unreachable (e.g. unmounted disk or stopped WSL). Restore the directory, or remove the project from its context menu.",
   "app.chatProjectSettings": "Change chat save directory",
   "app.modelRestartTitle": "Restart agent to apply",
   "app.modelRestartBody": "Model {model} is configured in local models.json but the running agent has not loaded it yet. Restart the agent to use it. Restart now?",
@@ -510,6 +512,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.sessionCopied": "Session copied through pi RPC",
   "app.sessionCopyCancelled": "Session copy cancelled",
   "app.sessionDeleted": "Session deleted",
+  "app.sessionDeleteFailed": "Failed to delete session",
   "session.deletedDshKeepData": "Session record deleted (DSH host data remains in DSH_HOME; clean it up manually)",
   "app.sessionArchived": "Session archived",
   "app.sessionRestored": "Session restored",
@@ -2591,6 +2594,7 @@ export const enUS: Record<TranslationKey, string> = {
   "session.trajectory.kind.import": "Import",
   "session.trajectory.kind.error": "Error",
   "session.trajectory.systemPromptHint": "Pi does not persist the live system prompt in the session file. This shows the built-in pi-system reference for identity, tools, and guidelines.",
+  "session.trajectory.systemPromptHintDsh": "DSH assembles the system prompt at request time (persona + sections). This shows the real prompt of the latest request (same source as dsh-web).",
   "session.trajectory.field.time": "Time",
   "session.trajectory.field.duration": "Duration",
   "session.trajectory.field.status": "Status",
@@ -2603,5 +2607,6 @@ export const enUS: Record<TranslationKey, string> = {
   "session.trajectory.field.inputTokens": "Input tokens",
   "session.trajectory.field.outputTokens": "Output tokens",
   "session.trajectory.field.cacheRead": "Cache read",
+  "session.trajectory.field.cacheWrite": "Cache write",
 };
 

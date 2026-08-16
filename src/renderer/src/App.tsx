@@ -2449,7 +2449,20 @@ export function App() {
   }
 
   async function deleteSidebarSession(projectId: string, session: SessionSummary) {
-    await api.sessions.deleteRecord(session.id);
+    try {
+      await api.sessions.deleteRecord(session.id);
+    } catch (error) {
+      // 主进程可能拦截删除（会话正在使用中/删除失败），拒绝必须落成友好 toast，
+      // 否则会成为未处理 rejection（全局"未处理异常"弹窗，2026-08 用户反馈）。
+      // 剥离 Electron 的 "Error invoking remote method 'xxx': " 前缀，只展示主进程真实原因。
+      const raw = error instanceof Error ? error.message : String(error ?? "");
+      const reason = raw
+        .replace(/^Error invoking remote method ['"][^'"]+['"]:\s*/i, "")
+        .replace(/^Error:\s*/i, "")
+        .trim();
+      showToast(reason || t("app.sessionDeleteFailed"), 5000, "error");
+      return;
+    }
     removeSessionState(session.id);
     removeSessionComposerState(session.id);
     showToast(t("app.sessionDeleted"), 2200);

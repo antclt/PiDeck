@@ -731,6 +731,8 @@ export function useSessionComposerController(
         provider: model.provider,
         model: model.modelId,
         prompt,
+        // 生图记录落盘：主进程成功后把 user+assistant 消息写入当前会话的 pi 文件
+        sessionId,
       });
       if (result.ok) {
         updateTimelineMessage(imageMessageId, (m) => ({

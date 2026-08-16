@@ -106,8 +106,10 @@ export class AgentMessageProjector {
 					const currentEntryId = taken.entryId;
 					const text = this.extractText(typed.content);
 					const thinking = this.extractThinking(typed.content);
-					// 无文本且无 thinking 时才是真正的空消息，跳过。
-					if (!text.trim() && !thinking?.trim()) return [];
+					// 生图等 PiDeck 本地落盘的 assistant 消息可能只有图片块、没有文本。
+					const images = this.extractImages(typed.content);
+					// 无文本、无 thinking、无图片时才是真正的空消息，跳过。
+					if (!text.trim() && !thinking?.trim() && images.length === 0) return [];
 					// stopReason（provider 归一化）：历史 JSONL 已持久化，
 					// 渲染层据此精确区分中间/最终回复（与 live 路径同源）。
 					const stopReason =
@@ -125,6 +127,7 @@ export class AgentMessageProjector {
 							_piDeckMsgSeq: index,
 						},
 						...(thinking ? { thinking } : {}),
+						...(images.length > 0 ? { images } : {}),
 						...(stopReason ? { stopReason } : {}),
 					}];
 				}
@@ -252,7 +255,12 @@ export class AgentMessageProjector {
 			})
 			// thinking-only assistant turns intentionally carry an empty visible text field.
 			// Keep them so renderer grouping can render the reasoning between tool steps.
-			.filter((message: ChatMessage) => Boolean(message.text.trim() || message.thinking?.trim()));
+			// 生图等本地落盘的纯图片 assistant 消息（无 text/thinking 但有 images）同样保留。
+			.filter((message: ChatMessage) => Boolean(
+				message.text.trim() ||
+				message.thinking?.trim() ||
+				(message.images?.length ?? 0) > 0,
+			));
 	}
 
 	private collectHistoricalToolCalls(rawMessages: unknown[]) {
@@ -412,20 +420,30 @@ export class AgentMessageProjector {
 		return extractMessageText(content);
 	}
 
-	/** 从 pi 历史消息 content 中恢复图片附件，用于历史会话重新打开后的图片展示。 */
+	/** 从 pi 历史消息 content 中恢复图片附件，用于历史会话重新打开后的图片展示。
+	 *  兼容两种图片块：
+	 *  - 直接块 { type:"image", data, mimeType }（PiDeck 落盘旧格式）
+	 *  - Anthropic 风格 { type:"image", source:{ type:"base64", media_type, data } }
+	 *    （pi jsonl / SessionHistoryReader.extractResendContent 同协议） */
 	private extractImages(content: unknown): ImageContent[] {
 		if (!Array.isArray(content)) return [];
 		return content.flatMap<ImageContent>((item) => {
 			if (!item || typeof item !== "object") return [];
 			const typed = item as any;
 			if (typed.type !== "image") return [];
-			const data = typeof typed.data === "string" ? typed.data : "";
+			const data = typeof typed.data === "string"
+				? typed.data
+				: typeof typed.source?.data === "string"
+					? typed.source.data
+					: "";
 			const mimeType =
 				typeof typed.mimeType === "string"
 					? typed.mimeType
 					: typeof typed.mime_type === "string"
 						? typed.mime_type
-						: "image/png";
+						: typeof typed.source?.media_type === "string"
+							? typed.source.media_type
+							: "image/png";
 			return data ? [{ type: "image", data, mimeType }] : [];
 		});
 	}

@@ -66,6 +66,31 @@ test("restores image-only history messages with a localized placeholder", () => 
   assert.equal(messages[0].meta.entryId, "entry-image");
 });
 
+test("restores assistant image-only history messages (PiDeck imagegen persistence)", () => {
+  const messages = createProjector().convert("agent", [{
+    role: "assistant",
+    // 生图落盘格式：Anthropic 风格 source 包装（与 SessionHistoryReader 同协议）
+    content: [{
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+    }],
+    timestamp: 3,
+    api: "openai-images",
+    provider: "siliconflow",
+    model: "Kwai-Kolors/Kolors",
+  }], ["entry-image-gen"]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].role, "assistant");
+  // 无文本无 thinking 的纯图片 assistant 消息必须保留（生图落盘记录），不能当空消息跳过
+  assert.equal(messages[0].text, "");
+  assert.equal(messages[0].images.length, 1);
+  assert.equal(messages[0].images[0].type, "image");
+  assert.equal(messages[0].images[0].data, "iVBORw0KGgo=");
+  assert.equal(messages[0].images[0].mimeType, "image/png");
+  assert.equal(messages[0].meta.entryId, "entry-image-gen");
+});
+
 test("restores tool arguments while bounding retained historical output", () => {
   const hugeResult = `${"a".repeat(9_000)}\nEND-MARKER`;
   const messages = createProjector().convert("agent", [
