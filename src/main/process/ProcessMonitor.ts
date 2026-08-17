@@ -91,12 +91,13 @@ export async function getProcessSnapshot(
     kind?: AgentProcessMetric["kind"];
     sessionId?: string;
     sessionTitle?: string;
+    sessionTitles?: string[];
   }>,
 ): Promise<ProcessMetricsSnapshot> {
   const sampled = await Promise.all(
     agents.map(async (agent) => {
       const memoryBytes = await sampleProcessMemoryBytes(agent.pid);
-      // 展开保留会话身份字段（sessionId/sessionTitle），供监控表展示
+      // 展开保留会话身份字段（sessionId/sessionTitle/sessionTitles），供监控表展示
       return { ...agent, memoryBytes } as AgentProcessMetric;
     }),
   );

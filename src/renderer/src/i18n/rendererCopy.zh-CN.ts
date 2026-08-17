@@ -1079,6 +1079,7 @@ export const zhCN = {
   "config.process.agentSection": "Pi Agent 进程",
   "config.process.section": "运行中进程",
   "config.process.dshHost": "DSH Host",
+  "config.process.dshSessionSummary": "{title} 等共 {count} 个会话",
   "config.process.empty": "当前没有运行中的进程",
   "config.process.loadFailed": "获取进程快照失败",
   "config.process.column.pid": "PID",

@@ -68,17 +68,20 @@ test("formatBytes: human readable units", () => {
 	assert.equal(formatBytes(Number.NaN), "-");
 });
 
-test("buildDshHostMonitorRow uses a stable id and joins session titles", () => {
+test("buildDshHostMonitorRow uses a stable id and keeps full titles for hover", () => {
 	const empty = buildDshHostMonitorRow({ pid: 4242, sessions: [] });
 	assert.equal(empty.agentId, DSH_HOST_MONITOR_ROW_ID);
 	assert.equal(empty.kind, "dsh-host");
 	assert.equal(empty.pid, 4242);
 	assert.equal(empty.sessionTitle, undefined);
+	assert.equal(empty.sessionTitles, undefined);
 	const named = buildDshHostMonitorRow({
 		pid: 7,
 		sessions: [{ title: "打包体积" }, { title: "  " }, { title: "外部会话" }],
 	});
-	assert.equal(named.sessionTitle, "打包体积 · 外部会话");
+	// 单元格只放首个标题，完整列表走 sessionTitles，避免长串拼接被表格截断
+	assert.equal(named.sessionTitle, "打包体积");
+	assert.deepEqual(named.sessionTitles, ["打包体积", "外部会话"]);
 	assert.equal(isDshHostMonitorId(DSH_HOST_MONITOR_ID), true);
 	assert.equal(isDshHostMonitorId("agent-1"), false);
 	assert.equal(DSH_HOST_MONITOR_ROW_ID, DSH_HOST_MONITOR_ID);
@@ -217,10 +220,15 @@ test("stop-agent: full session stop chain (coordinator + detach)", () => {
 
 	test("process monitor rows show the session associated with each agent", () => {
 	const tab = readFileSync("src/renderer/src/components/app/settings/ProcessMetricsTab.tsx", "utf8");
-	// 会话列：优先标题（易读），无标题回落 sessionId，无绑定显示占位符
-	assert.match(tab, /agent\.sessionTitle \?\? agent\.sessionId \?\? "-"/);
-	assert.match(tab, /title=\{agent\.sessionId\}/);
+	// 会话列：标题优先；DSH 多会话用摘要 + 悬停完整列表，不再把内部 id 当 tooltip
+	assert.match(tab, /sessionColumnLabel\(agent\)/);
+	assert.match(tab, /title=\{sessionColumnTooltip\(agent\)\}/);
+	assert.match(tab, /title=\{monitorRowLabel\(agent\)\}/);
+	assert.match(tab, /config\.process\.dshSessionSummary/);
+	assert.match(tab, /titles\.join\("\\n"\)/);
 	assert.match(tab, /max-w-56 truncate text-text-secondary/);
+	assert.doesNotMatch(tab, /title=\{agent\.agentId\}/);
+	assert.doesNotMatch(tab, /title=\{agent\.sessionId\}/);
 	// 主进程：会话身份由 coordinator 按 agentId 反查（同源：sessionIdByAgent + catalog）
 	const coordinator = readFileSync(
 		"src/main/sessions/SessionRuntimeCoordinator.ts",
@@ -234,6 +242,7 @@ test("stop-agent: full session stop chain (coordinator + detach)", () => {
 	const types = readFileSync("src/shared/types/processMetrics.ts", "utf8");
 	assert.match(types, /sessionId\?: string/);
 	assert.match(types, /sessionTitle\?: string/);
+	assert.match(types, /sessionTitles\?: string\[\]/);
 });
 
 test("ProcessMetricsTab wires table columns and refresh", () => {
@@ -272,6 +281,7 @@ test("process monitor i18n keys exist in zh-CN and en-US", () => {
 		"config.process.agentSection",
 		"config.process.section",
 		"config.process.dshHost",
+		"config.process.dshSessionSummary",
 		"config.process.empty",
 		"config.process.stopHostConfirm",
 		"config.process.loadFailed",

@@ -1085,6 +1085,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.process.agentSection": "Pi agent processes",
   "config.process.section": "Running processes",
   "config.process.dshHost": "DSH Host",
+  "config.process.dshSessionSummary": "{title} ({count} sessions)",
   "config.process.empty": "No running processes",
   "config.process.loadFailed": "Failed to fetch process snapshot",
   "config.process.column.pid": "PID",

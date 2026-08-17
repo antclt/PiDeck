@@ -499,7 +499,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// 进程监控：Electron 各进程 + pi agent 子进程内存/CPU 快照（手动刷新，不做高频轮询）
 	ipcMain.handle(ipcChannels.processMetrics, async (): Promise<ProcessMetricsSnapshot> => {
-		const agents: Array<Pick<AgentProcessMetric, "agentId" | "pid" | "kind" | "sessionId" | "sessionTitle">> =
+		const agents: Array<Pick<AgentProcessMetric, "agentId" | "pid" | "kind" | "sessionId" | "sessionTitle" | "sessionTitles">> =
 			deps.agentManager.listAgentPids().map((agent) => {
 				// 进程监控表展示会话身份：按 agentId 反查关联的会话 id/标题，
 				// 让用户知道每个 agent 对应哪个会话（而不是只看到内部 id）

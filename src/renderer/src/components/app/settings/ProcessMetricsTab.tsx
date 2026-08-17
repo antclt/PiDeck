@@ -133,16 +133,15 @@ export function ProcessMetricsTab() {
                 <TableBody>
                   {agents.map((agent) => (
                     <TableRow key={`${agent.kind ?? "pi"}:${agent.pid}`}>
-                      <TableCell className="max-w-56 truncate font-medium" title={agent.agentId}>
+                      <TableCell className="max-w-56 truncate font-medium" title={monitorRowLabel(agent)}>
                         {monitorRowLabel(agent)}
                       </TableCell>
-                      {/* 会话列：展示关联会话标题（进程监控与打开的对话对应起来）；
-                          无绑定（匿名/终端 agent）时显示占位符 */}
+                      {/* 会话列：标题优先；DSH 共用一行时单元格用摘要，悬停给完整标题列表 */}
                       <TableCell
                         className="max-w-56 truncate text-text-secondary"
-                        title={agent.sessionId}
+                        title={sessionColumnTooltip(agent)}
                       >
-                        {agent.sessionTitle ?? agent.sessionId ?? "-"}
+                        {sessionColumnLabel(agent)}
                       </TableCell>
                       <TableCell className="font-mono text-text-secondary">{agent.pid}</TableCell>
                       <TableCell className="font-mono text-text-secondary">
@@ -205,4 +204,28 @@ function isDshHostRow(agent: AgentProcessMetric): boolean {
 /** 表内展示名：DSH host 用固定文案，避免把内部 id `dsh-host` 直接甩给用户。 */
 function monitorRowLabel(agent: AgentProcessMetric): string {
   return isDshHostRow(agent) ? t("config.process.dshHost") : agent.agentId;
+}
+
+function listedSessionTitles(agent: AgentProcessMetric): string[] {
+  if (agent.sessionTitles && agent.sessionTitles.length > 0) {
+    return agent.sessionTitles.filter((title) => title.trim().length > 0);
+  }
+  const single = agent.sessionTitle?.trim();
+  return single ? [single] : [];
+}
+
+/** 会话列正文：单会话用标题；DSH 多会话用「首个标题 + 共 N 个」，避免拼成长串被截断。 */
+function sessionColumnLabel(agent: AgentProcessMetric): string {
+  const titles = listedSessionTitles(agent);
+  if (titles.length > 1) {
+    return t("config.process.dshSessionSummary", { title: titles[0], count: String(titles.length) });
+  }
+  return titles[0] ?? agent.sessionId ?? "-";
+}
+
+/** 会话列悬停：完整标题列表，不再用内部 sessionId / dsh-host。 */
+function sessionColumnTooltip(agent: AgentProcessMetric): string | undefined {
+  const titles = listedSessionTitles(agent);
+  if (titles.length > 0) return titles.join("\n");
+  return agent.sessionId;
 }

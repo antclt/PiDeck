@@ -20,8 +20,10 @@ export type AgentProcessMetric = {
 	kind?: ProcessMetricKind;
 	/** 关联的会话 id（可点击跳转）；DSH host / 匿名 agent 无绑定时为 undefined */
 	sessionId?: string;
-	/** 关联会话标题（catalog 有记录时提供；DSH host 为挂在其上的会话名拼接） */
+	/** 关联会话标题（catalog 有记录时提供；DSH host 为摘要，完整列表见 sessionTitles） */
 	sessionTitle?: string;
+	/** DSH host 挂着的全部会话标题（表内摘要 + 悬停完整列表） */
+	sessionTitles?: string[];
 	/** 子进程 pid（pi ChildProcess 或 DSH utilityProcess） */
 	pid: number;
 	/** 常驻内存（字节）；系统命令采样失败时 undefined */
