@@ -12,6 +12,8 @@ import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredenti
 import { workspaceDirFor } from "./dshSessionPath";
 import { PIDECK_PLUGIN_BRIDGE_PATH } from "./pideckPluginBridge";
 import { PIDECK_COMMANDS_BRIDGE_PATH } from "./pideckCommandsBridge";
+// DSH 会话 id 品牌类型（零运行时成本，仅类型擦除；与 DshAgentManager 同源）
+import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import type { DshFetchMessage } from "./dshHostBridge";
 import type {
 	DshCommandView,
@@ -468,6 +470,34 @@ export class DshHost {
 					...(typeof item.updatedAt === "number" ? { updatedAt: item.updatedAt } : {}),
 				};
 			});
+	}
+
+	/**
+	 * 按 host 会话 id 补全标题（外部会话导入用）：sessions.list 对冷会话（未 attach）
+	 * 可能不带投影（listProjectionsFor 在投影缓存缺失时整体省略 projections 块），
+	 * 而 session.history 尾页总是随 detached 投影恢复 session/title 事件的 fold 结果
+	 * （dsh-session-title 单元，与 dsh-web 历史页同源）。失败/无标题返回 undefined，
+	 * 由调用方回落兜底标题。
+	 */
+	async resolveSessionTitle(dshSessionId: string): Promise<string | undefined> {
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) return undefined;
+		try {
+			const history = await client.sessions.history({
+				sessionId: dshSessionId as SessionId,
+				maxMessages: 200,
+			});
+			if (!history.result.ok) return undefined;
+			const values = history.result.value.projections?.values;
+			const title = values !== null && typeof values === "object"
+				? (values as Record<string, unknown>).title
+				: undefined;
+			return typeof title === "string" && title.trim() ? title.trim() : undefined;
+		} catch {
+			// 标题补全是 best-effort：host 异常/会话已删都不阻断导入
+			return undefined;
+		}
 	}
 
 	/**

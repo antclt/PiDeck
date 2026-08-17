@@ -415,6 +415,29 @@ export class SessionCatalog {
 		this.assertLoaded();
 		const entry = await this.enqueueMutation((entries) => {
 			const now = Date.now();
+			// 幂等去重：DSH 外部会话按 host 会话 id 唯一映射。同一 dshSessionId 重复
+			// 导入（自动同步与手动导入并发、配置页重复点击、host-ready 重放）时
+			// 不再新建条目，只更新标题/项目归属——否则侧栏出现两条同 host 会话记录，
+			// 且删除其一后另一条仍可加载同一 host 数据（「重复导入」用户问题）。
+			if (input.dshSessionId) {
+				const existing = entries.find((candidate) => (
+					candidate.dshSessionId === input.dshSessionId
+				));
+				if (existing) {
+					const changed = (
+						existing.projectId !== input.projectId ||
+						existing.title !== input.title ||
+						existing.backend !== input.backend ||
+						existing.status !== "active"
+					);
+					existing.projectId = input.projectId;
+					existing.title = input.title;
+					existing.backend = input.backend;
+					existing.status = "active";
+					existing.updatedAt = now;
+					return { value: cloneEntry(existing), changed };
+				}
+			}
 			const nextEntry: SessionCatalogEntry = {
 				id: randomUUID(),
 				projectId: input.projectId,

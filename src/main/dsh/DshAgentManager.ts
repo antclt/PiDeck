@@ -123,6 +123,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		private readonly rpcLogger?: { push(entry: import("../../shared/types/rpcLog").RpcLogEntry): void },
 		/** 会话 HTML 导出目录（G10：应用数据目录内，装配层注入；空串 = 导出不可用）。 */
 		private readonly getExportDir: () => string = () => "",
+		/** 新会话无标题时的兜底标题（i18n；缺省保留历史文案「DSH 会话」）。 */
+		private readonly getUntitledTitle: () => string = () => "DSH 会话",
 	) {
 		// E4：host 崩溃自动重启完成后恢复所有 runtime（host 内存已丢失：流式/工具/
 		// 压缩状态停在崩溃前，mux 重连后新 host 没有已订阅会话，事件不会再推）。
@@ -246,7 +248,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			id: agentId,
 			projectId: input.projectId,
 			cwd,
-			title: hostTitle ?? input.title ?? "DSH 会话",
+			title: hostTitle ?? input.title ?? this.getUntitledTitle(),
 			status: "idle",
 			sessionId,
 			backend: "dsh",

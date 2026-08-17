@@ -109,6 +109,8 @@ export const ipcChannels = {
 	dshListForeignSessions: "dsh:list-foreign-sessions",
 	/** DSH 外部会话导入（把 host 会话映射进 catalog，侧栏可见可加载）。 */
 	dshImportForeignSession: "dsh:import-foreign-session",
+	/** DSH 外部会话全量同步（自动发现：catalog 未映射的 host 根会话全部导入；返回导入/跳过统计）。 */
+	dshSyncForeignSessions: "dsh:sync-foreign-sessions",
 	/** DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）。 */
 	dshListArchived: "dsh:list-archived",
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */

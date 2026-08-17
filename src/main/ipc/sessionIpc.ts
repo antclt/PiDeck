@@ -191,6 +191,8 @@ export type DshBackendIpcDeps = {
 	}>>;
 	/** DSH 外部会话导入：按 host 会话 id 映射进 catalog（返回新 SessionRecord）。 */
 	importDshForeignSession?: (dshSessionId: string) => Promise<import("../../shared/types").SessionRecord>;
+	/** DSH 外部会话全量同步（自动发现：catalog 未映射的 host 根会话全部导入）；未装配时返回空统计。 */
+	syncDshForeignSessions?: () => Promise<{ imported: number; skipped: number }>;
 	/** DSH 会话归档（G14：host 目录移入 .pideck-archive + manifest）；未装配时抛错。 */
 	archiveDshSession?: (dshSessionId: string, cwd: string) => Promise<string | undefined>;
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树，返回恢复路径与原 cwd）；未装配时抛错。 */
@@ -322,6 +324,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		listDshOrphans,
 		listDshForeignSessions,
 		importDshForeignSession,
+		syncDshForeignSessions,
 		archiveDshSession,
 		unarchiveDshSession,
 		listArchivedDshSessions,
@@ -867,14 +870,22 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	);
 	// DSH 外部会话清单（跨工具兼容，2026-12）：dsh-web 等其他工具创建的 host 根会话，
 	// 带标题/cwd，供配置页「导入」把 host 数据映射进 catalog（导入后侧栏可见可加载）。
+	// 已映射进 catalog 的会话从清单过滤掉：导入后即从「待导入」列表消失，避免重复导入。
 	ipcMain.handle(
 		ipcChannels.dshListForeignSessions,
 		async (): Promise<Array<{ dshSessionId: string; title?: string; cwd?: string; updatedAt?: number }>> => {
 			if (!listDshForeignSessions) return [];
-			return listDshForeignSessions();
+			const items = await listDshForeignSessions();
+			const known = new Set(
+				sessionCatalog.listEntries()
+					.map((entry) => entry.dshSessionId)
+					.filter((id): id is string => Boolean(id)),
+			);
+			return items.filter((item) => !known.has(item.dshSessionId));
 		},
 	);
-	// DSH 外部会话导入：按 host 会话 id 建 catalog 映射（status=active，重启保留）。
+	// DSH 外部会话导入：按 host 会话 id 建 catalog 映射（status=active，重启保留；
+	// 同 dshSessionId 重复导入幂等吸收，见 SessionCatalog.createDraft）。
 	ipcMain.handle(
 		ipcChannels.dshImportForeignSession,
 		async (_event, dshSessionId: unknown): Promise<import("../../shared/types").SessionRecord> => {
@@ -883,6 +894,15 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			}
 			if (!importDshForeignSession) throw new Error("DSH session import is not available");
 			return importDshForeignSession(dshSessionId);
+		},
+	);
+	// DSH 外部会话全量同步（自动发现）：把 catalog 未映射的 host 根会话全部导入，
+	// 返回 { imported, skipped } 供配置页展示。host 未启动/未装配时返回空统计。
+	ipcMain.handle(
+		ipcChannels.dshSyncForeignSessions,
+		async (): Promise<{ imported: number; skipped: number }> => {
+			if (!syncDshForeignSessions) return { imported: 0, skipped: 0 };
+			return syncDshForeignSessions();
 		},
 	);
 	// DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）
@@ -906,32 +926,26 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			const restored = await unarchiveDshSession(dshSessionId);
 			if (!restored) throw new Error(mainCopy("session.invalidArchivePath"));
 			// 重建 catalog 记录：manifest 里的原 workspace cwd 优先映射到已注册项目；
-			// 无匹配项目时挂到第一个非 chat 项目，让恢复的会话重新出现在侧栏（重新打开时
-			// 走 attach 旧 host 会话路径）。projectId 完全缺失时只恢复 host 数据并记日志。
-			const project = projectStore.findByPath(restored.cwd)
-				?? projectStore.list().find((candidate) => candidate.kind !== "chat") ?? null;
-			if (project) {
-				const draft = await sessionCatalog.createDraft({
-					projectId: project.id,
-					title: mainCopy("session.newTitle"),
-					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
-					backend: "dsh",
-				});
-				await sessionCatalog.attachRuntime({ sessionId: draft.id, dshSessionId });
-				const window = getMainWindow();
-				if (window && !window.isDestroyed()) {
-					window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: project.id });
-				}
-			} else {
-				void appLogger.warn("session", "DSH session restored without catalog record (no project matched)", {
-					dshSessionId,
-					cwd: restored.cwd,
-				});
+			// 无匹配项目时才创建「外部会话」兑底项目（幂等），让恢复的会话重新出现
+			// 在侧栏（重新打开时走 attach 旧 host 会话路径）。
+			const matched = restored.cwd ? projectStore.findByPath(restored.cwd) : null;
+			const project = matched
+				?? await projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions"));
+			const draft = await sessionCatalog.createDraft({
+				projectId: project.id,
+				title: mainCopy("session.newTitle"),
+				environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+				backend: "dsh",
+			});
+			await sessionCatalog.attachRuntime({ sessionId: draft.id, dshSessionId });
+			const window = getMainWindow();
+			if (window && !window.isDestroyed()) {
+				window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: project.id });
 			}
 			void appLogger.info("session", "DSH session restored from archive", {
 				dshSessionId,
 				restoredPath: restored.restoredPath,
-				projectId: project?.id,
+				projectId: project.id,
 			});
 			return true;
 		},

@@ -218,6 +218,12 @@ import { AgentManager } from "./pi/AgentManager";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost } from "./dsh/DshHost";
 import { DshAgentManager } from "./dsh/DshAgentManager";
+import {
+	importForeignSession,
+	knownForeignSessionIds,
+	syncForeignSessions,
+	type DshForeignSyncDeps,
+} from "./dsh/dshForeignSync";
 import { PiLocator } from "./pi/PiLocator";
 import { testPiProxy } from "./pi/PiProxyTester";
 import { SessionScanner } from "./sessions/SessionScanner";
@@ -357,6 +363,56 @@ let usageStatsService: UsageStatsService | null = null;
 /** 退出清理登记表（C12）：常驻资源创建处登记，before-quit 统一顺序执行。 */
 const quitCleanup = new QuitCleanupRegistry();
 
+// ── DSH 外部会话同步（dshForeignSync 编排；本文件只做依赖装配）────────────
+// 目标项目按 cwd 匹配已注册项目，无 cwd/未匹配进入「外部会话」兑底项目；
+// 标题优先 host list 投影，缺失时从 host 历史投影补全，再缺用 i18n 兜底。
+// 依赖闭包延迟引用模块级实例（registerIpc/whenReady 阶段才赋值），调用时已就绪。
+const foreignSyncDeps: DshForeignSyncDeps = {
+	listForeignSessions: () => dshHost.listForeignSessions(),
+	findProjectByPath: (cwd) => projectStore.findByPath(cwd),
+	ensureFallbackProject: () =>
+		projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions")),
+	createDraft: (input) => sessionCatalog.createDraft(input),
+	getEnvironment: () => (settingsStore.get().wslEnabled ? "wsl" : "native"),
+	fallbackTitle: mainCopy("session.dshUntitled"),
+	resolveHostTitle: (dshSessionId) => dshHost.resolveSessionTitle(dshSessionId),
+	onError: (dshSessionId, error) => {
+		void appLogger.warn("session", "Foreign DSH session import failed", {
+			dshSessionId,
+			error: error instanceof Error ? error.message : String(error),
+		});
+	},
+};
+
+/** 导入/同步落库后向渲染层广播对应项目刷新（侧栏静默重拉，新会话立即可见）。 */
+function notifyDshCatalogRefreshed(projectIds: Iterable<string>): void {
+	const window = mainWindow;
+	if (!window || window.isDestroyed()) return;
+	for (const projectId of new Set(projectIds)) {
+		window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
+	}
+}
+
+/** DSH 外部会话全量同步（自动发现）：host-ready 自动导入与配置页「全部导入」共用。
+ *  结果含本轮导入数/已导入跳过数；有新增时广播受影响项目刷新侧栏。 */
+async function runDshForeignSync(): Promise<{ imported: number; skipped: number }> {
+	const result = await syncForeignSessions(
+		foreignSyncDeps,
+		knownForeignSessionIds(sessionCatalog.listEntries()),
+	);
+	if (result.imported > 0) {
+		notifyDshCatalogRefreshed(
+			sessionCatalog.listEntries()
+				.filter((entry) => entry.backend === "dsh" && entry.dshSessionId)
+				.map((entry) => entry.projectId),
+		);
+	}
+	void appLogger.info("session", "Foreign DSH sessions synced", {
+		imported: result.imported,
+		skipped: result.skipped,
+	});
+	return result;
+}
 
 function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
 	const window = mainWindow;
@@ -2435,31 +2491,24 @@ function registerIpc() {
 				);
 				return hostIds.filter((id) => !known.has(id));
 			},
-			// 跨工具兼容（2026-12）：dsh-web 等其他工具创建的 host 根会话（含标题/cwd）
+			// 跨工具兼容（2026-12）：dsh-web 等其他工具创建的 host 根会话（含标题/cwd）；
+			// 已映射进 catalog 的在 IPC 层（sessionIpc）过滤，配置页只显示「待导入」。
 			listDshForeignSessions: () => dshHost.listForeignSessions(),
-			// 外部会话导入：把 host 会话映射进 catalog（status=active），侧栏可见可加载；
-			// 目标项目按 cwd 匹配已注册项目（找不到时回退第一个非 chat 项目）。
+			// 外部会话导入：把 host 会话映射进 catalog（status=active，侧栏可见可加载）。
+			// 幂等：同 dshSessionId 重复导入被 SessionCatalog.createDraft 吸收（只更新标题/归属）。
 			importDshForeignSession: async (dshSessionId) => {
-				const foreign = await dshHost.listForeignSessions();
-				const target = foreign.find((item) => item.dshSessionId === dshSessionId);
-				if (!target) throw new Error(mainCopy("session.notFound"));
-				const project = (target.cwd ? projectStore.findByPath(target.cwd) : undefined)
-					?? projectStore.list().find((candidate) => candidate.kind !== "chat") ?? null;
-				if (!project) throw new Error(mainCopy("project.notFound"));
-				const record = await sessionCatalog.createDraft({
-					projectId: project.id,
-					title: target.title ?? "DSH 会话",
-					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
-					backend: "dsh",
-					dshSessionId,
-				});
+				const record = await importForeignSession(foreignSyncDeps, dshSessionId);
+				notifyDshCatalogRefreshed([record.projectId]);
 				void appLogger.info("session", "Foreign DSH session imported", {
 					dshSessionId,
-					projectId: project.id,
+					projectId: record.projectId,
 					title: record.title,
 				});
 				return record;
 			},
+			// 外部会话全量同步（自动发现）：catalog 未映射的 host 根会话全部导入。
+			// 配置页「全部导入」按钮与 host-ready 自动同步共用此入口。
+			syncDshForeignSessions: () => runDshForeignSync(),
 			// G14：DSH 归档/恢复（目录移动 + manifest，与 pi 归档同语义，不销毁数据）
 			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),
 			unarchiveDshSession: (dshSessionId) => dshHost.unarchiveSession(dshSessionId),
@@ -2825,12 +2874,33 @@ app.whenReady().then(async () => {
 		rpcLogger,
 		// G10：DSH 会话 HTML 导出目录（应用数据目录内，AGENTS.md 路径安全约束）
 		() => join(app.getPath("userData"), "exports"),
+		// 新会话无标题时的兜底标题（i18n；与外部会话导入兜底一致）
+		() => mainCopy("session.dshUntitled"),
 	);
 	// C12/E15：DSH 退出清理——先停全部活跃会话（清 mux/订阅/pending）再 dispose host，
 	// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
 	quitCleanup.register("dsh", async () => {
 		await dshAgentManager?.stopAll();
 		await dshHost?.dispose();
+	});
+	// DSH 外部会话自动导入（设置 dshAutoImportSessions 可关闭，默认开）：
+	// host-ready（首次启动/崩溃自动重启）后延迟扫描一次，把 dsh-web 等其他工具创建的
+	// host 根会话直接映射进 catalog（幂等：catalog 已有的跳过，重复触发只补新会话）。
+	// 延迟等 catalog 装载完成；失败只记日志，不阻断启动路径。
+	let foreignSyncScheduled = false;
+	dshHost.onHostReady(() => {
+		if (settingsStore.get().dshAutoImportSessions === false) return;
+		if (foreignSyncScheduled) return;
+		foreignSyncScheduled = true;
+		const timer = setTimeout(() => {
+			foreignSyncScheduled = false;
+			void runDshForeignSync().catch((error: unknown) => {
+				void appLogger.warn("session", "Foreign DSH sessions auto-sync failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+		}, 2500);
+		timer.unref();
 	});
 	webServiceManager = new WebServiceManager({
 		// dev 模式（electron-vite dev 不产出 out/renderer 构建物）下，静态资源

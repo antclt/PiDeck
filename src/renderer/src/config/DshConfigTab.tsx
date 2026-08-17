@@ -14,6 +14,7 @@ import {
 	LayoutDashboard,
 	LoaderCircle,
 	Puzzle,
+	RefreshCw,
 	ShieldCheck,
 	Trash2,
 } from "lucide-react";
@@ -425,6 +426,8 @@ function Overview(props: {
 	}>>([]);
 	/** 正在导入的 dshSessionId（按钮转圈防重复点击）。 */
 	const [importing, setImporting] = useState<string | null>(null);
+	/** 全量同步进行中（「全部导入」按钮转圈防重复触发）。 */
+	const [syncing, setSyncing] = useState(false);
 	/** G14：归档区 DSH 会话清单（目录已移入 .pideck-archive 的 host 会话；恢复入口用）。 */
 	const [archived, setArchived] = useState<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>([]);
 	/** G14：正在恢复的 dshSessionId（按钮转圈防重复点击）。 */
@@ -460,6 +463,28 @@ function Overview(props: {
 			showNotice(error instanceof Error ? error.message : String(error), 4000);
 		} finally {
 			setImporting(null);
+		}
+	};
+
+	/** 全量同步：把 catalog 尚未映射的外部 DSH 会话一次全部导入（host-ready 也会自动执行）。 */
+	const syncAllForeign = async () => {
+		if (syncing) return;
+		setSyncing(true);
+		try {
+			const result = await desktopApi.sessions.syncDshForeignSessions();
+			showNotice(t("config.dsh.synced", { count: result.imported }), 3000);
+			// 已导入的从清单消失（主进程按 catalog 过滤）；孤儿/清单重拉保持最新。
+			const [items, orphanIds] = await Promise.all([
+				desktopApi.sessions.listDshForeignSessions(),
+				desktopApi.sessions.listDshOrphans(),
+			]);
+			setForeignSessions(items);
+			setOrphanCount(orphanIds.length);
+			props.onChanged();
+		} catch (error) {
+			showNotice(error instanceof Error ? error.message : String(error), 4000);
+		} finally {
+			setSyncing(false);
 		}
 	};
 
@@ -560,9 +585,23 @@ function Overview(props: {
 					)}
 				</div>
 			</section>
-			{/* 跨工具兼容（2026-12）：dsh-web 等其他工具创建的 host 会话，导入后侧栏可见可加载 */}
+			{/* 跨工具兼容（2026-12）：dsh-web 等其他工具创建的 host 会话，导入后侧栏可见可加载。
+			    host-ready 自动导入默认开启（设置 dshAutoImportSessions 关闭）；此处仅剩手动补漏 */}
 			<section className="grid gap-2">
-				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.foreignSessions")}</h3>
+				<div className="flex items-center gap-2">
+					<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.foreignSessions")}</h3>
+					<Button
+						type="button"
+						variant="secondary"
+						size="sm"
+						className="ml-auto h-7 gap-1"
+						disabled={syncing}
+						onClick={() => void syncAllForeign()}
+					>
+						{syncing ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
+						{t("config.dsh.syncAll")}
+					</Button>
+				</div>
 				{foreignSessions.length === 0 ? (
 					<p className="text-micro text-muted-foreground">{t("config.dsh.foreignSessionsEmpty")}</p>
 				) : (

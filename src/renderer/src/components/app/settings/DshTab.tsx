@@ -83,6 +83,12 @@ export const DshTab = memo(function DshTab(props: DshTabProps) {
         checked={draft.dshApprovalAutoAllow === true}
         onChange={(checked) => updateDraft({ dshApprovalAutoAllow: checked })}
       />
+      <SettingSwitchRow
+        title={t("settings.dsh.autoImportForeign")}
+        description={t("settings.dsh.autoImportForeignDesc")}
+        checked={draft.dshAutoImportSessions !== false}
+        onChange={(checked) => updateDraft({ dshAutoImportSessions: checked })}
+      />
     </SettingBox>
   );
 });

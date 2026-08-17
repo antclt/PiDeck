@@ -173,6 +173,9 @@ Gitmoji 对应关系：
   // ── Agent 后端：默认 pi（经典后端），用户可在设置中切换为 dsh ──
   defaultAgentBackend: "pi",
 
+  // ── DSH 外部会话：默认自动导入（host-ready 后按目录匹配/兑底项目入侧栏）──
+  dshAutoImportSessions: true,
+
   // ── Agent 启动诊断/加速：offline 默认开；扩展/技能默认加载 ──
   piRpcOffline: true,
   piRpcNoExtensions: false,

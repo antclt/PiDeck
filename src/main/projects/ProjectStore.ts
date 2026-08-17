@@ -14,6 +14,8 @@ const CHAT_PROJECT_ID = "builtin-chat";
 const CHAT_PROJECT_NAME = "Chat";
 
 export class ProjectStore {
+  /** DSH 外部会话兑底项目稳定 id（无 cwd/未匹配目录的会话归属；见 ensureExternalSessionsProject）。 */
+  private static readonly EXTERNAL_PROJECT_ID = "builtin-external";
   private readonly filePath = join(app.getPath("userData"), "projects.json");
   private readonly chatPathFile = join(app.getPath("userData"), "chat-path.json");
   // 聊天工作区目录：默认在 userData 下，用户可在侧栏聊天项目设置中改为任意目录并持久化。
@@ -269,6 +271,35 @@ export class ProjectStore {
   findByPath(path: string) {
     const normalizedPath = this.normalizeProjectPath(path);
     return this.projects.find(project => this.sameProjectPath(project.path, normalizedPath)) ?? null;
+  }
+
+  /**
+   * DSH 外部会话兑底项目（稳定 id，幂等）：给「没有 cwd / cwd 未注册项目」的
+   * 外部会话一个确定归属，而不是随机挂到第一个非 chat 项目（用户不可预期）。
+   * 目录落在 userData/external-sessions（随应用数据存在，不会被标记 missing）。
+   */
+  async ensureExternalSessionsProject(name: string): Promise<Project> {
+    const existing = this.projects.find(project => project.id === ProjectStore.EXTERNAL_PROJECT_ID);
+    if (existing) {
+      // 语言切换等场景下名称可能变化：就地更新，保持 id 稳定（catalog 引用不失效）。
+      const changed = existing.name !== name || existing.pinned !== true;
+      existing.name = name;
+      existing.pinned = true;
+      if (changed) await this.save();
+      return existing;
+    }
+    const project: Project = {
+      id: ProjectStore.EXTERNAL_PROJECT_ID,
+      name,
+      path: join(app.getPath("userData"), "external-sessions"),
+      lastOpenedAt: Date.now(),
+      pinned: true,
+      sortOrder: this.nextSortOrder(),
+    };
+    await mkdir(project.path, { recursive: true });
+    this.projects.push(project);
+    await this.save();
+    return project;
   }
 
   async toggleWorktreeEnabled(id: string) {

@@ -232,6 +232,44 @@ test("imports a foreign DSH session as active (survives restart cleanup, attacha
   }
 });
 
+// 回归：外部会话重复导入（自动同步与手动导入并发、配置页重复点击、host-ready 重放）
+// 必须幂等吸收——同一 dshSessionId 只保留一条记录，后续导入只更新标题/项目归属，
+// 否则侧栏出现两条同 host 会话记录（「重复导入」用户问题）。
+test("createDraft with the same dshSessionId is idempotent (updates in place, no duplicate)", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-foreign-dedup-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    const first = await catalog.createDraft({
+      projectId: "project-1",
+      title: "Old title",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-foreign-dedup-1",
+    });
+    const second = await catalog.createDraft({
+      projectId: "project-2",
+      title: "New title",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-foreign-dedup-1",
+    });
+    assert.equal(second.id, first.id, "same host session must resolve to the same catalog record");
+    assert.equal(catalog.listEntries().length, 1);
+    assert.equal(second.title, "New title");
+    assert.equal(second.projectId, "project-2");
+    assert.equal(second.status, "active");
+    // 持久化同样只有一条：重启重载后不出现重复。
+    const reloaded = new SessionCatalog(join(dir, "sessions.json"));
+    await reloaded.load();
+    assert.equal(reloaded.listEntries().length, 1);
+    assert.equal(reloaded.getRecord(first.id)?.title, "New title");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("keeps a draft desktop session ID after Pi assigns a file path", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-"));
