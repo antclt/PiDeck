@@ -7,6 +7,7 @@ const {
 	validatePluginLifecycleInput,
 	toDynamicPluginView,
 	toStaticPluginView,
+	mergeStaticPluginViews,
 	resolveBridgeAgent,
 	pluginBridgeRpc,
 	handlePluginBridgeFetch,
@@ -110,6 +111,44 @@ test("toStaticPluginView：Loader 条目映射", () => {
 	assert.equal(view.enabled, false);
 	assert.equal(view.fiberPhase, "active");
 	assert.equal(toStaticPluginView({ moduleName: "x" }), undefined);
+});
+
+test("mergeStaticPluginViews：同模块多条条目合并成一行（enabled 取任一启用、phase 取高优先级）", () => {
+	const merged = mergeStaticPluginViews([
+		{ entryId: "e1", moduleName: "@deepseek-ai/dsh-shell", enabled: false, fiberPhase: null },
+		{ entryId: "e2", moduleName: "@deepseek-ai/dsh-shell", enabled: true, fiberPhase: "active" },
+		{ entryId: "e3", moduleName: "@deepseek-ai/dsh-agent", enabled: true, fiberPhase: "active" },
+	]);
+	assert.equal(merged.length, 2);
+	// 顺序按首次出现：dsh-shell 保留第一条 entryId e1，enabled 合并为 true
+	assert.equal(merged[0].moduleName, "@deepseek-ai/dsh-shell");
+	assert.equal(merged[0].entryId, "e1");
+	assert.equal(merged[0].enabled, true);
+	assert.equal(merged[0].fiberPhase, "active");
+	assert.equal(merged[1].entryId, "e3");
+});
+
+test("mergeStaticPluginViews：phase 优先级 failed > active，且不改变模块顺序", () => {
+	const merged = mergeStaticPluginViews([
+		{ entryId: "e1", moduleName: "@deepseek-ai/m", enabled: true, fiberPhase: "active" },
+		{ entryId: "e2", moduleName: "@deepseek-ai/m", enabled: true, fiberPhase: "failed" },
+		{ entryId: "e3", moduleName: "@deepseek-ai/other", enabled: false, fiberPhase: "loading" },
+	]);
+	assert.equal(merged.length, 2);
+	assert.equal(merged[0].fiberPhase, "failed");
+	assert.equal(merged[0].entryId, "e1");
+	assert.equal(merged[1].moduleName, "@deepseek-ai/other");
+	assert.equal(merged[1].fiberPhase, "loading");
+});
+
+test("mergeStaticPluginViews：空输入返回空、null phase 不参与优先级", () => {
+	// vm realm 数组跨域，deepEqual 不可用：按长度/字段断言
+	const empty = mergeStaticPluginViews([]);
+	assert.equal(Array.isArray(empty), true);
+	assert.equal(empty.length, 0);
+	const single = mergeStaticPluginViews([{ entryId: "e1", moduleName: "m", enabled: false, fiberPhase: null }]);
+	assert.equal(single.length, 1);
+	assert.equal(single[0].fiberPhase, null);
 });
 
 test("resolveBridgeAgent：按 sessionId 解析 live Agent", () => {

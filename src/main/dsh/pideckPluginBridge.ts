@@ -202,6 +202,41 @@ export function toStaticPluginView(entry: unknown): StaticPluginView | undefined
 	};
 }
 
+/** 合并时 fiberPhase 的取用优先级（数字越大越值得展示：失败最该被看见）。 */
+const FIBER_PHASE_RANK: Record<string, number> = {
+	failed: 5,
+	active: 4,
+	loading: 3,
+	pending: 2,
+	unloading: 1,
+};
+
+/**
+ * 把同 moduleName 的多个静态 Loader 条目合并成一行（只读清单去重）。
+ *
+ * 背景：cordis Loader 按「条目标识」管理条目，同一模块可因多个 group/fiber
+ * 配置出现多条（entryId 不同、启停/阶段可能不一致），面板只读清单因此出现
+ * 整块重复行。对用户而言模块才是关心的单位——合并后一模块一行：
+ * enabled 取任一启用（模块有一个实例启用即算启用），fiberPhase 取优先级
+ * 最高的一条（failed > active > loading > pending > unloading > null），
+ * entryId 保留第一条以维持稳定 key；整体顺序按首次出现保持 Loader 序。
+ */
+export function mergeStaticPluginViews(views: StaticPluginView[]): StaticPluginView[] {
+	const merged = new Map<string, StaticPluginView>();
+	for (const view of views) {
+		const existing = merged.get(view.moduleName);
+		if (!existing) {
+			merged.set(view.moduleName, { ...view });
+			continue;
+		}
+		existing.enabled = existing.enabled || view.enabled;
+		const existingRank = FIBER_PHASE_RANK[existing.fiberPhase ?? ""] ?? 0;
+		const nextRank = FIBER_PHASE_RANK[view.fiberPhase ?? ""] ?? 0;
+		if (nextRank > existingRank) existing.fiberPhase = view.fiberPhase;
+	}
+	return [...merged.values()];
+}
+
 /** 按 sessionId 解析 live Agent（运行器全部生命周期方法要求会话归属）。 */
 export function resolveBridgeAgent(
 	ctx: PluginBridgeCtx,
@@ -309,7 +344,9 @@ export function apply(ctx: PluginBridgeCtx): void {
 			const views = Array.isArray(entries)
 				? entries.map(toStaticPluginView).filter((view): view is StaticPluginView => Boolean(view))
 				: [];
-			return { ok: true, value: views };
+			// 同模块的多条 Loader 条目（不同 group/fiber 各一条）合并成一行，
+			// 桌面配置页与 dsh-web 面板拿到的都是去重后的模块清单。
+			return { ok: true, value: mergeStaticPluginViews(views) };
 		},
 		install(input) {
 			const validated = validatePluginInstallInput(input);

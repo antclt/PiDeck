@@ -6,8 +6,10 @@ import { sessionRecordsAtom } from "../atoms";
 import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
+import { Badge } from "../components/ui-shadcn/badge";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
+import { Pagination } from "../components/ui-shadcn/pagination";
 import {
 	Select,
 	SelectContent,
@@ -15,7 +17,18 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui-shadcn/select";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "../components/ui-shadcn/table";
 import { Textarea } from "../components/ui-shadcn/textarea";
+
+/** 静态 Loader 清单每页行数（合并后一模块一行；分页避免只读长列表刷屏）。 */
+const STATIC_PAGE_SIZE = 15;
 
 /**
  * 动态 Cordis 插件管理区（G13 深化）。
@@ -38,6 +51,8 @@ export function DshPluginSection() {
 	/** 两步确认卸载：第一次点击进入确认态，第二次执行。 */
 	const [confirmUninstallId, setConfirmUninstallId] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	/** 静态 Loader 清单当前页（1 基；数据刷新导致页数收缩时展示层负责收敛）。 */
+	const [staticPage, setStaticPage] = useState(1);
 
 	const loadPlugins = useCallback(async () => {
 		try {
@@ -114,6 +129,14 @@ export function DshPluginSection() {
 			setBusy(false);
 		}
 	};
+
+	/** 静态清单分页派生：总页数随合并后行数变化；数据刷新导致页号越界时收敛到末页再切片。 */
+	const staticTotalPages = Math.max(1, Math.ceil(staticPlugins.length / STATIC_PAGE_SIZE));
+	const staticPageClamped = Math.min(staticPage, staticTotalPages);
+	const staticPageRows = staticPlugins.slice(
+		(staticPageClamped - 1) * STATIC_PAGE_SIZE,
+		staticPageClamped * STATIC_PAGE_SIZE,
+	);
 
 	return (
 		<section className="grid gap-2">
@@ -197,19 +220,63 @@ export function DshPluginSection() {
 					))}
 				</div>
 			)}
-			<h3 className="mt-2 text-caption font-semibold text-muted-foreground">{t("config.dsh.staticPlugins")}</h3>
+			<div className="mt-2 flex items-baseline gap-2">
+				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.staticPlugins")}</h3>
+				{staticPlugins.length > 0 && (
+					<span className="text-micro text-muted-foreground/70">
+						{t("config.dsh.staticPluginsCount", { count: staticPlugins.length })}
+					</span>
+				)}
+			</div>
 			<p className="text-micro text-muted-foreground">{t("config.dsh.staticPluginsHint")}</p>
 			{staticPlugins.length === 0 ? (
 				<p className="text-micro text-muted-foreground">{t("config.dsh.staticPluginsEmpty")}</p>
 			) : (
-				<div className="grid gap-1">
-					{staticPlugins.map((entry) => (
-						<div key={entry.entryId} className="flex items-center gap-2 text-caption text-text-secondary">
-							<span className="min-w-0 flex-1 truncate" title={entry.moduleName}>{entry.moduleName}</span>
-							<span className="shrink-0">{entry.enabled ? t("config.dsh.pluginEnabled") : t("config.dsh.pluginDisabled")}</span>
-							{entry.fiberPhase && <span className="shrink-0 text-text-tertiary">{entry.fiberPhase}</span>}
-						</div>
-					))}
+				<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
+					<Table>
+						<TableHeader>
+							<TableRow>
+								<TableHead className="w-full">{t("config.dsh.staticPluginsColumnModule")}</TableHead>
+								<TableHead>{t("config.dsh.staticPluginsColumnState")}</TableHead>
+								<TableHead>{t("config.dsh.staticPluginsColumnPhase")}</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{staticPageRows.map((entry) => (
+								<TableRow key={entry.entryId}>
+									<TableCell className="min-w-0">
+										<span className="block truncate font-mono text-control text-foreground" title={entry.moduleName}>
+											{entry.moduleName}
+										</span>
+									</TableCell>
+									<TableCell>
+										<Badge
+											variant="outline"
+											className={
+												entry.enabled
+													? "border-emerald-300/70 bg-emerald-500/10 font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300"
+													: "border-border-subtle text-muted-foreground"
+											}
+										>
+											{entry.enabled ? t("config.dsh.pluginEnabled") : t("config.dsh.pluginDisabled")}
+										</Badge>
+									</TableCell>
+									<TableCell>
+										{entry.fiberPhase ? (
+											<Badge variant="outline" className="border-border-subtle font-mono text-micro text-text-tertiary">
+												{entry.fiberPhase}
+											</Badge>
+										) : (
+											<span className="text-micro text-text-tertiary">—</span>
+										)}
+									</TableCell>
+								</TableRow>
+							))}
+						</TableBody>
+					</Table>
+					{staticTotalPages > 1 && (
+						<Pagination page={staticPageClamped} totalPages={staticTotalPages} onPageChange={setStaticPage} className="py-2" />
+					)}
 				</div>
 			)}
 		</section>

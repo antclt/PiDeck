@@ -104,9 +104,9 @@ src/
 
 ## 测试标准（硬性门禁）
 
-测试位于 `tests/*.test.mjs`，运行 `npm test`（node --test）。
+测试位于 `tests/*.test.mjs`（node --test）。日常改动只跑**针对性测试文件**（`node --test tests/<相关>.test.mjs`）；全量 `npm test` 仅在必要时机运行（见下方「验证命令」）。
 
-1. **必过门禁**：任何合并前 `npm run typecheck` 与 `npm test` 必须全绿；不许“先合再修”。
+1. **必过门禁**：任何合并前 `npm run typecheck` 与本次改动涉及的**针对性测试**（`node --test tests/<相关>.test.mjs`）必须全绿；全量 `npm test` 仅在改动影响面大（IPC/会话链路/装配层等跨域改动）或合并前最终确认时运行；不许“先合再修”。
 2. **何时必须写测试**：
    - 修复 bug：先写复现测试（红），再修到绿。回归测试永久保留。
    - 新增主进程业务逻辑（sessions/git/settings/extensions/prompts 等）：必须有单测。
@@ -190,10 +190,11 @@ src/
 | 场景 | 命令 |
 |------|------|
 | 类型检查（每次改动后） | `npm run typecheck` |
-| 全量单测 | `npm test` |
+| 针对性单测（改动涉及的测试文件，日常必跑） | `node --test tests/<相关>.test.mjs` |
+| 全量单测（仅必要时：跨域大改动/合并前最终确认） | `npm test` |
 | 单测串行（排查并发干扰） | `npm run test:serial` |
 
-改动影响主进程/IPC/会话链路时，两个命令都必须跑；纯 UI 样式微调至少跑 typecheck。
+改动影响主进程/IPC/会话链路时，跑 typecheck + 相关针对性测试即可；全量单测约 40s+，非必要不执行，避免每次小改动都等全量时长；纯 UI 样式微调至少跑 typecheck。
 
 ## UI 约定（简版）
 
