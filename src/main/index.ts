@@ -216,7 +216,7 @@ import { ProjectStore } from "./projects/ProjectStore";
 import { FileSystemService } from "./fs/FileSystemService";
 import { AgentManager } from "./pi/AgentManager";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
-import { DshHost } from "./dsh/DshHost";
+import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
 import { DshAgentManager } from "./dsh/DshAgentManager";
 import {
 	importForeignSession,
@@ -2869,10 +2869,13 @@ app.whenReady().then(async () => {
 	appLogger = new AppLogger();
 	setAppLogger(appLogger);
 	rpcLogger = new RpcLogger();
-	// 用量统计：数据源 = pi-tracker 写入的 <agentDir>/analytics/usage.jsonl
-	// （默认宿主 ~/.pi/agent；WSL 场景的目录同步暂按默认宿主处理）
+	// 用量统计：pi-tracker 的 <agentDir>/analytics/usage.jsonl
+	// + dsh-bill 的 <DSH_HOME>/dsh-bill/records.jsonl（采集由插件负责，此处只读）。
+	// DSH_HOME 与 DshHost 同一套解析（设置覆盖 > ~/.dsh > 应用私有目录）。
 	usageStatsService = new UsageStatsService({
 		agentDir: join(app.getPath("home"), ".pi", "agent"),
+		getDshHomeDir: () =>
+			resolveDshHomeDir(settingsStore.get().dshHomeDir ?? "", app.getPath("userData")),
 		logger: {
 			info: (message) => void appLogger?.info("usage-stats", message),
 			warn: (message) => void appLogger?.warn("usage-stats", message),

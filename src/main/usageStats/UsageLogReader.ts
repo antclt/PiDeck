@@ -15,6 +15,9 @@ import { stat } from "node:fs/promises";
 import type { UsageRecord } from "../../shared/types/usageStats";
 import { parseUsageLogLine } from "./usageLogParser.ts";
 
+/** 单行解析器：坏行返回 null，由读取层计数跳过。 */
+export type UsageLineParser = (line: string) => UsageRecord | null;
+
 /** 游标：上次读取结束时的文件状态。 */
 export type LogFileState = {
   size: number;
@@ -43,6 +46,8 @@ export type UsageLogReaderOptions = {
   highWaterMark?: number;
   /** 单次读取字节上限：防御日志失控导致的全量读 OOM（超限截读并标记 truncated） */
   maxBytes?: number;
+  /** 行解析器（默认 pi-tracker 数组行；dsh-bill 传入对象行解析） */
+  parseLine?: UsageLineParser;
 };
 
 /** 日志失控防御上限：单次读取超过即截断（设计文档 §7 性能预算）。 */
@@ -99,10 +104,12 @@ async function* physicalLines(stream: NodeJS.ReadableStream): AsyncGenerator<str
 export class UsageLogReader {
   private readonly highWaterMark: number;
   private readonly maxBytes: number;
+  private readonly parseLine: UsageLineParser;
 
   constructor(options: UsageLogReaderOptions = {}) {
     this.highWaterMark = options.highWaterMark ?? 64 * 1024;
     this.maxBytes = options.maxBytes ?? DEFAULT_MAX_LOG_BYTES;
+    this.parseLine = options.parseLine ?? parseUsageLogLine;
   }
 
   /**
@@ -152,7 +159,7 @@ export class UsageLogReader {
 
     for await (const line of physicalLines(stream)) {
       if (!line.trim()) continue;
-      const record = parseUsageLogLine(line);
+      const record = this.parseLine(line);
       if (!record) {
         skippedLines++;
         continue;

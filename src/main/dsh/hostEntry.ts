@@ -147,6 +147,12 @@ async function main(): Promise<void> {
 			// /pideck-command/rpc 暴露给主进程，Composer `/` 补全拿到 live 命令
 			// （含用户/插件注册的命令），执行仍走 pideck-slash-bridge。
 			{ id: "pideck-command-bridge", name: join(__dirname, "pideckCommandsBridge.js") },
+			// 用量采集（G16）：成熟第三方 dsh-bill。无 web 硬依赖，钩 llm/stream
+			// 落盘 $DSH_HOME/dsh-bill/records.jsonl；PiDeck 费用页只读该日志。
+			// inject 为空：headless host 没有 webServer 也能继续记账。
+			// name 用绝对路径：host 的模块解析锚在 app node_modules，裸名在
+			// utilityProcess 里不一定能走到同一目录。
+			{ id: "bill", name: require.resolve("dsh-bill") },
 		],
 	});
 
