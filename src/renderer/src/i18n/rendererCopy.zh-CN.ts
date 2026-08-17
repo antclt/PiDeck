@@ -660,6 +660,8 @@ export const zhCN = {
   "app.shareAsText": "分享为文本",
   "app.shareAsMarkdown": "分享为 Markdown",
   "session.turnFileChangesTitle": "本轮修改的文件",
+  "session.turnFileChangesShowAll": "展开全部（{count} 个文件）",
+  "session.turnFileChangesShowLess": "收起多余",
   "session.openInDiffViewer": "在差异查看器中打开 {path}",
   "session.split.preview.left": "在左侧打开",
   "session.split.preview.right": "在右侧打开",

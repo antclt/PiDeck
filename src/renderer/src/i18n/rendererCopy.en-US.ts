@@ -666,6 +666,8 @@ export const enUS: Record<TranslationKey, string> = {
   "app.shareAsText": "Share as Text",
   "app.shareAsMarkdown": "Share as Markdown",
   "session.turnFileChangesTitle": "Files changed",
+  "session.turnFileChangesShowAll": "Show all ({count} files)",
+  "session.turnFileChangesShowLess": "Show less",
   "session.openInDiffViewer": "Open {path} in diff viewer",
   "session.split.preview.left": "Open to the left",
   "session.split.preview.right": "Open to the right",
