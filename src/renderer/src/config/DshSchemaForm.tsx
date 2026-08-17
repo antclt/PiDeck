@@ -9,6 +9,7 @@ import {
 	SelectValue,
 } from "../components/ui-shadcn/select";
 import { cn } from "../lib/utils";
+import { dshFieldCopy } from "./dshFieldLabels";
 import type { DshSectionApi } from "./dshSchema";
 import {
 	dictEntries,
@@ -264,13 +265,15 @@ function Field(props: {
 		const isCredentialRef = meta.role === "credential-ref";
 		const current = typeof value === "string" ? value : "";
 		const secretSet = isSecret ? isSecretSet(secrets, path) : false;
+		const fieldName = path[path.length - 1] ?? "";
+		const copy = dshFieldCopy(fieldName);
 		return (
-			<Labeled name={path[path.length - 1] ?? ""} meta={meta} secretSet={secretSet}>
+			<Labeled name={fieldName} meta={meta} secretSet={secretSet}>
 				<Input
 					className="h-8"
 					type={isSecret ? "password" : "text"}
 					value={current}
-					placeholder={isSecret ? (secretSet ? t("config.dsh.secretConfigured") : t("config.dsh.secretEmpty")) : undefined}
+					placeholder={isSecret ? (secretSet ? t("config.dsh.secretConfigured") : t("config.dsh.secretEmpty")) : copy.placeholder}
 					disabled={!writable || (isSecret && secretSet)}
 					onChange={(event) => onChange(path, event.target.value)}
 				/>
@@ -324,16 +327,23 @@ function Labeled(props: {
 	inline?: boolean;
 	secretSet?: boolean;
 }) {
-	const label = props.name || "(root)";
+	const copy = dshFieldCopy(props.name);
+	// schema 很少带 title；用字段名映射中文/英文，空 path 不再显示无意义根标签
+	const title = (typeof props.meta.title === "string" && props.meta.title) || copy.label;
+	const description =
+		(typeof props.meta.description === "string" && props.meta.description) || copy.hint;
 	return (
 		<label className={cn("grid gap-1", props.inline && "flex items-center justify-between gap-2")}>
-			<span className="flex items-center gap-1.5 text-caption font-medium text-foreground">
-				<span className="truncate">{label}</span>
-				{props.secretSet && (
-					<span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-1.5 py-px text-micro text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
-						{t("config.dsh.secretSet")}
-					</span>
-				)}
+			<span className="grid min-w-0 gap-0.5">
+				<span className="flex items-center gap-1.5 text-caption font-medium text-foreground">
+					{title ? <span className="truncate">{title}</span> : null}
+					{props.secretSet && (
+						<span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-1.5 py-px text-micro text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
+							{t("config.dsh.secretSet")}
+						</span>
+					)}
+				</span>
+				{description && <span className="text-micro text-muted-foreground">{description}</span>}
 			</span>
 			{props.children}
 		</label>

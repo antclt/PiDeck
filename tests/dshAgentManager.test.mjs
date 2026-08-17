@@ -34,8 +34,10 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 	const sessions = new Map();
 	let nextSession = 0;
 	const historyBySession = new Map();
-	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0, cancel: 0 };
+	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0, cancel: 0, workspaceCreate: 0 };
+	const createPayloads = [];
 	const promptCalls = [];
+	const promptModes = [];
 	const respondCalls = [];
 	// host 进程状态（断连自愈测试用）：triggerExit 模拟崩溃，restartHost 模拟自动重启完成。
 	const hostState = { running: true, ready: true };
@@ -50,9 +52,21 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 				calls.list += 1;
 				return { result: { ok: true, value: { items: [...sessions.values()] } } };
 			},
-			async create({ cwd }) {
+			async create(payload) {
 				calls.create += 1;
+				createPayloads.push(payload);
+				// 与官方 schema 对齐：workspaceId 与 cwd 二选一；本夹具拒绝 cwd-only，
+				// 锁住「只传 cwd 会进 dsh-web 未分组」这条兼容红线。
+				if (payload?.workspaceId !== undefined && payload?.cwd !== undefined) {
+					return { result: { ok: false, error: { code: "bad-request", message: "workspaceId and cwd are mutually exclusive" } } };
+				}
+				if (!payload?.workspaceId) {
+					return { result: { ok: false, error: { code: "ungrouped", message: "cwd-only create leaves the session Ungrouped" } } };
+				}
 				const sessionId = `session-fake-${++nextSession}`;
+				const cwd = String(payload.workspaceId).startsWith("ws:")
+					? String(payload.workspaceId).slice(3)
+					: PROJECT.path;
 				const summary = { sessionId, cwd, running: false, blank: true };
 				sessions.set(sessionId, summary);
 				return { result: { ok: true, value: summary } };
@@ -84,9 +98,10 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 					},
 				};
 			},
-			async prompt({ content }) {
+			async prompt({ content, mode }) {
 				calls.prompt += 1;
 				promptCalls.push(content?.[0]?.text ?? "");
+				promptModes.push(mode ?? "queue");
 				return { result: { ok: true, value: { accepted: true } } };
 			},
 			async cancel() {
@@ -153,15 +168,34 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 				return { result: { ok: true, value: { groups: [] } } };
 			},
 		},
+		workspace: {
+			async create({ path }) {
+				calls.workspaceCreate += 1;
+				if (!path) {
+					return { result: { ok: false, error: { code: "bad-request", message: "path required" } } };
+				}
+				return {
+					result: {
+						ok: true,
+						value: {
+							workspace: { workspaceId: `ws:${path}`, path, sessionIds: [] },
+							created: false,
+						},
+					},
+				};
+			},
+		},
 	};
 	const host = {
 		async ensureStarted() {},
 		getClient() {
 			return client;
 		},
-		/** workspace 解析：测试假 host 不注册 workspace（返回 undefined = 走无 workspaceId 的旧路径）。 */
-		async resolveWorkspaceId() {
-			return undefined;
+		/** 官方路径：workspace.create({path}) 幂等解析，失败才返回 undefined。 */
+		async resolveWorkspaceId(cwd) {
+			const resolved = await client.workspace.create({ path: cwd });
+			if (!resolved.result.ok) return undefined;
+			return resolved.result.value.workspace.workspaceId;
 		},
 		onHostReady() {
 			// E4 恢复钩子：测试中不触发恢复逻辑，直接返回退订函数。
@@ -188,7 +222,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 			hostState.ready = true;
 		},
 	};
-	return { host, client, sessions, historyBySession, calls, promptCalls, respondCalls, muxCalls };
+	return { host, client, sessions, historyBySession, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls };
 }
 
 /**
@@ -218,6 +252,10 @@ function makeColdStartHost() {
 		onHostReady() {
 			return () => {};
 		},
+		async resolveWorkspaceId(cwd) {
+			await this.ensureStarted();
+			return inner.host.resolveWorkspaceId(cwd);
+		},
 	};
 	// 冷启动 host 必须最后展开：inner 里也带 host 键（fake host，getClient 恒返回 client），
 	// 若先展开 host 会被 inner 覆盖 → 测试拿到的是「温 host」，冷启动回归永远测不到。
@@ -243,14 +281,28 @@ const PROJECT = { id: "project-1", path: "C:\\work" };
 const event = (type, seq, data = {}) => ({ type, seq, time: 1700000000000 + seq, data });
 
 test("create 新建 DSH 会话并注册 runtime（无 dshSessionId 时）", async () => {
-	const { host, client, calls } = makeFakeHost();
+	const { host, calls, createPayloads } = makeFakeHost();
 	const manager = new DshAgentManager(host, () => PROJECT);
 	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
 	assert.equal(calls.create, 1);
+	assert.equal(calls.workspaceCreate, 1, "必须先走官方 workspace.create({path})");
+	// vm 上下文对象与测试字面量 prototype 不同，deepStrictEqual 会误报
+	assert.equal(createPayloads[0].workspaceId, `ws:${PROJECT.path}`);
+	assert.equal(createPayloads[0].cwd, undefined, "不得再传 cwd，否则会进 dsh-web 未分组");
 	assert.match(tab.id, /^dsh:session-fake-/);
 	assert.equal(tab.backend, "dsh");
 	assert.equal(manager.list().length, 1);
 	assert.equal(manager.getMessages(tab.id).length, 0, "新建会话无历史");
+});
+
+test("create 在 workspace 解析失败时不得降级为 cwd-only（会进 dsh-web 未分组）", async () => {
+	const { host } = makeFakeHost();
+	host.resolveWorkspaceId = async () => undefined;
+	const manager = new DshAgentManager(host, () => PROJECT);
+	await assert.rejects(
+		() => manager.create({ projectId: "project-1", backend: "dsh" }),
+		/workspace\.resolve failed/,
+	);
 });
 
 test("create 带 dshSessionId 且 host 存在该会话：attach 不新建", async () => {
@@ -963,6 +1015,79 @@ test("stop 先 cancel 再解绑，且不打断共享 mux", async () => {
 	assert.equal(manager.list().some((tab) => tab.id === first.id), false);
 	assert.equal(manager.list().some((tab) => tab.id === second.id), true);
 	assert.equal(muxCalls.length, 1, "停一个会话不得重开/掐断共享 mux");
+});
+
+test("sendPrompt 默认 queue；steer 映射 host mode 且不等 idle", async () => {
+	const { host, client, calls, promptCalls, promptModes } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+
+	const queued = await manager.sendPrompt({ agentId: tab.id, message: "下一轮" });
+	assert.equal(queued.accepted, true);
+	assert.equal(promptModes[0], "queue");
+	assert.equal(promptCalls[0], "下一轮");
+
+	// followUp 与未指定行为一样走 queue（host followup），不是 steer。
+	const followUp = await manager.sendPrompt({
+		agentId: tab.id,
+		message: "也排队",
+		streamingBehavior: "followUp",
+	});
+	assert.equal(followUp.accepted, true);
+	assert.equal(promptModes[1], "queue");
+
+	client.pushFrames(sessionEventFrame("session-fake-1", event("turn/start", 1)));
+	await flush();
+	const steered = await manager.sendPrompt({
+		agentId: tab.id,
+		message: "插入当前回合",
+		streamingBehavior: "steer",
+	});
+	assert.equal(steered.accepted, true);
+	assert.equal(calls.prompt, 3, "steer 不得被 waitForIdle 卡住");
+	assert.equal(promptModes[2], "steer");
+	assert.equal(promptCalls[2], "插入当前回合");
+});
+
+test("abort 收尾期的 steer 也要等 turn/end，避免插进已停止回合", async () => {
+	const { host, client, calls, promptModes } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	client.pushFrames(
+		sessionEventFrame("session-fake-1", event("turn/start", 1)),
+		sessionEventFrame("session-fake-1", event("assistant/chunk", 2, { chunk: { type: "text-delta", text: "旧" } })),
+	);
+	await flush();
+	await manager.abort(tab.id);
+
+	const sendPromise = manager.sendPrompt({
+		agentId: tab.id,
+		message: "停止后插入",
+		streamingBehavior: "steer",
+	});
+	await flush();
+	assert.equal(calls.prompt, 0, "cancelled 未收口时 steer 也不得发给 host");
+
+	client.pushFrames(sessionEventFrame("session-fake-1", event("turn/end", 3)));
+	await sendPromise;
+	assert.equal(calls.prompt, 1);
+	assert.equal(promptModes[0], "steer");
+});
+
+test("sendPrompt 仍拒绝 DSH 不支持的宿主指令", async () => {
+	const { host, calls } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	const result = await manager.sendPrompt({
+		agentId: tab.id,
+		message: "hi",
+		agentMessage: "plan mode marker",
+	});
+	assert.equal(result.accepted, false);
+	assert.equal(result.i18nKey, "session.sendDshUnsupportedPayload");
+	assert.equal(calls.prompt, 0, "宿主指令不得发给 host");
 });
 
 test("setModel 在回合进行中拒绝，错误带 busy", async () => {

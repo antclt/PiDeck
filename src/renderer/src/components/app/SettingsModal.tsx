@@ -10,7 +10,6 @@ import {
 	ChartColumnBig,
 	Activity,
 	MessageSquare,
-	Cpu,
 	X,
 } from "lucide-react";
 import { t } from "../../i18n";
@@ -56,9 +55,9 @@ const StorageTab = lazy(() => import("./settings/SettingsStorageTab").then((m) =
 const ProcessMetricsTab = lazy(() => import("./settings/ProcessMetricsTab").then((m) => ({ default: m.ProcessMetricsTab })));
 const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => ({ default: m.UsageStatsTab })));
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
-const DshTab = lazy(() => import("./settings/DshTab").then((m) => ({ default: m.DshTab })));
 
-type SettingsTabId = "common" | "appearance" | "proxy" | "dev" | "im" | "pet" | "storage" | "usage" | "process" | "vision" | "dsh";
+// DSH 配置（HOME / 审批 / 外部会话）只放配置管理，避免设置页再开一个重复 tab
+type SettingsTabId = "common" | "appearance" | "proxy" | "dev" | "im" | "pet" | "storage" | "usage" | "process" | "vision";
 
 // 注意：修改 SettingsTabId 枚举时需同步更新 SETTINGS_TAB_IDS 校验数组
 
@@ -67,7 +66,7 @@ const SETTINGS_LAST_TAB_KEY = "pideck-settings-last-tab";
 
 /** 全部合法 tab id，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
 const SETTINGS_TAB_IDS: readonly SettingsTabId[] = [
-	"common", "appearance", "proxy", "dev", "im", "pet", "storage", "usage", "process", "vision", "dsh",
+	"common", "appearance", "proxy", "dev", "im", "pet", "storage", "usage", "process", "vision",
 ];
 
 /**
@@ -370,11 +369,6 @@ function SettingsModalContent(props: SettingsModalProps) {
 			label: t("settings.tabs.vision"),
 			icon: <Eye size={16} />,
 		},
-		{
-			id: "dsh",
-			label: t("settings.tabs.dsh"),
-			icon: <Cpu size={16} />,
-		},
 	];
 
 	const hasDirtyChanges = dirtyFields.size > 0;
@@ -563,19 +557,6 @@ function SettingsModalContent(props: SettingsModalProps) {
 								configDir={visionDraft.configDir}
 								notice={visionDraft.notice}
 								onChange={visionDraft.updateDraft}
-							/>
-							</Suspense>
-						</TabsContent>
-					)}
-
-					{/* ── DSH 设置 tab（G11：DSH_HOME / 审批策略 / host 状态）── */}
-					{activeTab === "dsh" && (
-						<TabsContent value="dsh" className="settings-panel min-w-0">
-							<Suspense fallback={<SettingsTabLoading />}>
-							<DshTab
-								draft={draftSettings}
-								updateDraft={updateDraft}
-								isDirty={isDirty}
 							/>
 							</Suspense>
 						</TabsContent>

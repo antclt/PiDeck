@@ -193,6 +193,15 @@ export type DshBackendIpcDeps = {
 	importDshForeignSession?: (dshSessionId: string) => Promise<import("../../shared/types").SessionRecord>;
 	/** DSH 外部会话全量同步（磁盘扫描：catalog 未映射的根会话全部导入）；未装配时返回空统计。 */
 	syncDshForeignSessions?: () => Promise<{ imported: number; skipped: number }>;
+	/** dsh-web 未分组、cwd 已匹配现有 workspace 的根会话（只读）。 */
+	listUngroupedAdoptable?: () => Promise<Array<{
+		dshSessionId: string;
+		cwd: string;
+		workspaceId: string;
+		workspaceTitle?: string;
+	}>>;
+	/** 官方认领未分组根会话（会启动我们自己的 host）。 */
+	adoptUngroupedSessions?: () => Promise<{ adopted: number; failed: number }>;
 	/** DSH 会话归档（G14：host 目录移入 .pideck-archive + manifest）；未装配时抛错。 */
 	archiveDshSession?: (dshSessionId: string, cwd: string) => Promise<string | undefined>;
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树，返回恢复路径与原 cwd）；未装配时抛错。 */
@@ -325,6 +334,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		listDshForeignSessions,
 		importDshForeignSession,
 		syncDshForeignSessions,
+		listUngroupedAdoptable,
+		adoptUngroupedSessions,
 		archiveDshSession,
 		unarchiveDshSession,
 		listArchivedDshSessions,
@@ -899,6 +910,28 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (): Promise<{ imported: number; skipped: number }> => {
 			if (!syncDshForeignSessions) return { imported: 0, skipped: 0 };
 			return syncDshForeignSessions();
+		},
+	);
+	// dsh-web 未分组根会话：只读磁盘对照官方 workspace.json，不启动 host。
+	ipcMain.handle(
+		ipcChannels.dshListUngroupedAdoptable,
+		async (): Promise<Array<{
+			dshSessionId: string;
+			cwd: string;
+			workspaceId: string;
+			workspaceTitle?: string;
+		}>> => {
+			if (!listUngroupedAdoptable) return [];
+			return listUngroupedAdoptable();
+		},
+	);
+	// 官方认领：sessions.create({workspaceId,sessionId})。会启动我们自己的 host，
+	// dsh-web 还占着同一 DSH_HOME 时不要点——双 host 会抢 session log。
+	ipcMain.handle(
+		ipcChannels.dshAdoptUngroupedSessions,
+		async (): Promise<{ adopted: number; failed: number }> => {
+			if (!adoptUngroupedSessions) return { adopted: 0, failed: 0 };
+			return adoptUngroupedSessions();
 		},
 	);
 	// DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）

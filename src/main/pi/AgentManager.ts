@@ -9,6 +9,7 @@ import type {
 	AgentGatewayCapability,
 	AgentRuntimeState,
 	AgentTab,
+	AppSettings,
 	AvailableModel,
 	ChatMessage,
 	CreateAgentInput,
@@ -25,6 +26,10 @@ import type {
 import { ipcChannels } from "../../shared/ipc";
 import { PiProcess } from "./PiProcess";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
+import {
+	formatExtensionFallbackDebug,
+	shouldRetryWithoutExtensions,
+} from "./extensionStartupFallback";
 import type { RpcResponse } from "./PiRpcClient";
 import { formatBashToolMessage } from "./bashResult";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
@@ -274,6 +279,12 @@ export class AgentManager {
 	/** 已尝试过自动重连的 agent（防止无限循环），重连成功后清除 */
 	private readonly autoRestartAttempted = new Set<string>();
 	/**
+	 * 启动握手中（start + 首次 get_state 完成前）：忽略 exit/error 的终态处理。
+	 * 扩展加载失败时进程会先 exit 1，若此时把 tab 标 closed/清状态，
+	 * 后续 --no-extensions 回退就没有 runtime 可接。
+	 */
+	private readonly startupHandshakeAgents = new Set<string>();
+	/**
 	 * 用户主动 abort 后正在等待 pi 确认的 agent。
 	 * abort() 先加入该集合，再发送 abort RPC；在收到 agent_settled 或下一个 agent_start 之前，
 	 * 用于抑制 auto-retry/compaction 等状态回写，避免把侧边栏重新标成 running。
@@ -402,9 +413,17 @@ export class AgentManager {
 	 * 统一构造 PiProcess：注入 PiDeck 内置扩展路径解析 + 安全管理快照/会话身份。
 	 * 内置扩展以 -e 从 app resources 加载，不再依赖用户扩展目录副本。
 	 * 安全管理：确保策略快照已落盘（小 JSON 写，等完成后启动，保证扩展首次拦截即可读到）。
+	 * settingsOverride 仅用于本次 spawn（如扩展加载失败后强制 --no-extensions），不改持久设置。
 	 */
-	private createPiProcess(cwd: string, sessionPath?: string, securitySessionKey?: string): PiProcess {
-		const settings = this.settingsStore.get();
+	private createPiProcess(
+		cwd: string,
+		sessionPath?: string,
+		securitySessionKey?: string,
+		settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions" | "piRpcNoSkills" | "removedBuiltInExtensions">>,
+	): PiProcess {
+		const settings = settingsOverride
+			? { ...this.settingsStore.get(), ...settingsOverride }
+			: this.settingsStore.get();
 		if (this.securityStore) {
 			void this.securityStore.ensureSnapshotWritten();
 		}
@@ -428,6 +447,145 @@ export class AgentManager {
 			// 预检修复：全部 spawn 路径（create/reattach/withTemporarySession）都在 start() 内生效。
 			repairSessionFileBeforeStart: this.repairSessionFile,
 		});
+	}
+
+	/**
+	 * 启动 pi 并等到首次 get_state：失败时按策略用 --no-extensions 再试一次。
+	 * 握手期间 exit/error 不把 tab 标 closed，否则回退没有 runtime 可接。
+	 */
+	private async handshakePiProcess(
+		agentId: string,
+		options: {
+			projectPath: string;
+			sessionPath?: string;
+			deckSessionId?: string;
+			trustOverride?: "approve" | "no-approve";
+			noSession?: boolean;
+			onExit: (payload: { code: number | null; signal: string | null }) => void;
+		},
+	): Promise<{
+		client: Awaited<ReturnType<PiProcess["start"]>>;
+		process: PiProcess;
+		state: RpcResponse;
+		fallbackFromExtensions: boolean;
+		fallbackDebug?: string;
+	}> {
+		this.startupHandshakeAgents.add(agentId);
+		try {
+			try {
+				const first = await this.spawnAndGetState(agentId, options);
+				return { ...first, fallbackFromExtensions: false };
+			} catch (firstError) {
+				const failed = this.agents.get(agentId)?.process;
+				const diag = failed?.getDiagnostics();
+				const rawMessage = firstError instanceof Error ? firstError.message : String(firstError);
+				const alreadyNoExtensions = Boolean(this.settingsStore.get().piRpcNoExtensions);
+				if (
+					!shouldRetryWithoutExtensions({
+						alreadyNoExtensions,
+						stderr: diag?.stderr.join("") ?? "",
+						errorMessage: rawMessage,
+						exitCode: diag?.exitCode,
+						processStillRunning: failed?.isRunning() ?? false,
+					})
+				) {
+					throw firstError;
+				}
+
+				void this.appLogger?.warn("agent", "Pi start failed; retrying without extensions", {
+					agentId,
+					error: rawMessage,
+					exitCode: diag?.exitCode ?? null,
+				});
+				// 停掉已死/将死的带扩展进程，再换无扩展参数重拉。
+				failed?.stop();
+
+				const second = await this.spawnAndGetState(agentId, options, { piRpcNoExtensions: true });
+				// 仅在回退成功后持久化：避免后续每个会话都先踩同一坑。用户修好后可在开发设置重新打开。
+				void this.settingsStore.update({ piRpcNoExtensions: true }).catch((error) => {
+					void this.appLogger?.warn("agent", "Failed to persist piRpcNoExtensions after fallback", {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
+				return {
+					...second,
+					fallbackFromExtensions: true,
+					fallbackDebug: formatExtensionFallbackDebug({
+						rawMessage,
+						stderr: diag?.stderr.join("") ?? "",
+						exitCode: diag?.exitCode,
+					}),
+				};
+			}
+		} finally {
+			this.startupHandshakeAgents.delete(agentId);
+		}
+	}
+
+	/** spawn + 首次 get_state；成功才算握手完成。 */
+	private async spawnAndGetState(
+		agentId: string,
+		options: {
+			projectPath: string;
+			sessionPath?: string;
+			deckSessionId?: string;
+			trustOverride?: "approve" | "no-approve";
+			noSession?: boolean;
+			onExit: (payload: { code: number | null; signal: string | null }) => void;
+		},
+		settingsOverride?: Partial<Pick<AppSettings, "piRpcNoExtensions">>,
+	): Promise<{
+		client: Awaited<ReturnType<PiProcess["start"]>>;
+		process: PiProcess;
+		state: RpcResponse;
+	}> {
+		const runtime = this.agents.get(agentId);
+		const existing = runtime?.process;
+		// 只复用 createUnlocked 预置、从未 start 的占位进程（diagnostics 仍为 null）。
+		// 已退出的旧进程不能复用：再 attach 会叠监听，reattach 必须换新实例。
+		let process: PiProcess;
+		if (
+			!settingsOverride &&
+			existing &&
+			!existing.isRunning() &&
+			existing.getDiagnostics() === null
+		) {
+			process = existing;
+		} else {
+			process = this.createPiProcess(
+				options.projectPath,
+				options.sessionPath,
+				options.deckSessionId,
+				settingsOverride,
+			);
+		}
+		if (runtime) runtime.process = process;
+		process.on("version-check", (payload) => {
+			void this.appLogger?.info("agent", "Pi version check completed", {
+				agentId,
+				...(payload && typeof payload === "object" ? payload : {}),
+			});
+		});
+		// 关键：监听器必须在 process.start() 之前挂上。
+		this.attachPiProcessLifecycle(agentId, process, {
+			projectPath: options.projectPath,
+			onExit: options.onExit,
+		});
+		const client = await process.start(options.sessionPath, options.trustOverride, options.noSession);
+		void this.appLogger?.info("agent", "Agent get_state request start", { agentId });
+		const state = await client.request({ type: "get_state" }, this.rpcTimeoutMs);
+		return { client, process, state };
+	}
+
+	/** 回退成功后的系统卡：说明已禁用扩展，并附上可粘贴给 AI 的 stderr。 */
+	private notifyExtensionFallback(agentId: string, debugDetails?: string): void {
+		this.addLocalizedMessage(
+			agentId,
+			"system",
+			"diagnostic.extensionsDisabledFallback",
+			"扩展加载失败，已禁用扩展运行。可在本会话把下面的错误信息发给 AI，协助排查扩展问题。",
+			{ debugDetails },
+		);
 	}
 
 	/** Windows 主进程文件操作必须使用可由 host 访问的路径。 */
@@ -1037,48 +1195,41 @@ export class AgentManager {
 		// 每次 spawn 前异步刷新模型列表缓存（不等完成，避免阻塞 Agent 启动）：
 		// 用户直接编辑 models.json/auth.json 后，下一次启动的 Agent 即能看到新模型。
 		this.onBeforeAgentSpawn?.();
-		const process = this.createPiProcess(project.path, input.sessionPath, input.deckSessionId);
-		process.on("version-check", (payload) => {
-			void this.appLogger?.info("agent", "Pi version check completed", {
-				agentId: id,
-				...(payload && typeof payload === "object" ? payload : {}),
-			});
-		});
-		const runtime: AgentRuntime = { tab, process };
-		this.agents.set(id, runtime);
+		this.agents.set(id, { tab, process: this.createPiProcess(project.path, input.sessionPath, input.deckSessionId) });
 		this.messages.set(id, []);
 		this.emitState();
 
-		// 关键：监听器必须在 process.start() 之前挂上。
-		// spawn 的 ENOENT / EACCES 等 error 事件是异步的；若等 start() 返回后再 on("error")，
-		// 中间窗口可能 0 listener，EventEmitter 会把 error 升级成未捕获异常，
-		// 在部分 macOS arm 环境上表现为“一点启动 Agent 就闪退”。
-		this.attachPiProcessLifecycle(id, process, {
-			projectPath: project.path,
-			onExit: (payload) => this.handleCreateProcessExit(id, tab, payload),
-		});
-
-		let client: Awaited<ReturnType<PiProcess["start"]>>;
+		let handshake: Awaited<ReturnType<AgentManager["handshakePiProcess"]>>;
 		try {
-			client = await process.start(input.sessionPath, trustOverride, input.noSession);
+			handshake = await this.handshakePiProcess(id, {
+				projectPath: project.path,
+				sessionPath: input.sessionPath,
+				deckSessionId: input.deckSessionId,
+				trustOverride,
+				noSession: input.noSession,
+				onExit: (payload) => this.handleCreateProcessExit(id, tab, payload),
+			});
 		} catch (error) {
 			// start() 同步失败（非法 cwd、spawn 抛错等）也要落到会话错误卡，而不是 IPC 裸抛。
 			tab.status = "error";
 			const rawMessage = error instanceof Error ? error.message : String(error);
+			const failedProcess = this.agents.get(id)?.process;
 			void this.appLogger?.error("agent", "Agent pi process start threw", {
 				agentId: id,
 				projectId: project.id,
 				sessionPath: input.sessionPath,
 				error: rawMessage,
-				diagnostics: process.getDiagnostics(),
-				// 注意：局部变量 process 是 PiProcess，宿主平台要用 globalThis.process
+				diagnostics: failedProcess?.getDiagnostics(),
 				platform: globalThis.process.platform,
 				arch: globalThis.process.arch,
 			});
-			this.addMessage(id, "error", this.buildStartupFailureMessage(rawMessage, process.getDiagnostics()));
+			this.addLocalizedMessage(id, "error", "diagnostic.agentStartFailed", "Pi RPC 启动失败。", {
+				debugDetails: this.buildStartupFailureMessage(rawMessage, failedProcess?.getDiagnostics() ?? null),
+			});
 			this.emitState();
 			return tab;
 		}
+		const { client, process, fallbackFromExtensions } = handshake;
 		const t3 = Date.now();
 		const diag = process.getDiagnostics();
 		void this.appLogger?.info("agent", "Pi process spawned", {
@@ -1089,20 +1240,16 @@ export class AgentManager {
 			command: diag?.command,
 			args: diag?.args?.join(' '),
 			cwd: diag?.cwd,
+			fallbackFromExtensions,
 		});
 
-		// 启动后先获取状态，get_messages 必须等状态就绪后再发送，
-		// 确保 pi 进程已完全加载会话文件，避免竞态导致返回空结果。
-		void this.appLogger?.info("agent", "Agent get_state request start", { agentId: id });
-		// 启动 get_state 吃用户配置的 rpcTimeout：WSL/代理/慢机器上 pi 首次响应可能超过默认 30s，
-		// 超时即触发「Pi RPC 启动失败」诊断卡；与诊断指引（调大设置里的 RPC 超时）保持一致。
-		const statePromise = client.request({ type: "get_state" }, this.rpcTimeoutMs);
+		// get_state 已在 handshake 完成；get_messages 必须等状态就绪后再发，避免空历史。
 		const historyLoadDecision = this.getHistoryAutoLoadDecision(input.sessionPath);
 
 
 		try {
 			void this.appLogger?.info("agent", "Agent get_state request completed", { agentId: id });
-			const state = await statePromise;
+			const state = handshake.state;
 			const t4 = Date.now();
 			void this.appLogger?.info("agent", "Agent get_state completed", {
 				agentId: id,
@@ -1133,7 +1280,11 @@ export class AgentManager {
 			const messagesPromise = historyLoadDecision.shouldLoad
 				? client.request({ type: "get_messages" }, this.rpcTimeoutMs)
 				: undefined;
+			// 回退提示必须落在 preserveMessagesAfter 之后，否则后台历史回写会丢掉这条系统卡。
 			const preserveMessagesAfter = Date.now();
+			if (fallbackFromExtensions) {
+				this.notifyExtensionFallback(id, handshake.fallbackDebug);
+			}
 			if (messagesPromise) {
 				void this.loadMessages(id, true, messagesPromise, { preserveMessagesAfter })
 					.catch(() =>
@@ -1208,63 +1359,20 @@ export class AgentManager {
 				agentId: id,
 				totalMs: Date.now() - t0,
 				historyLoading: "background",
+				fallbackFromExtensions,
 			});
 		} catch (error) {
 			tab.status = "error";
 			const rawMessage = error instanceof Error ? error.message : String(error);
+			const failedProcess = this.agents.get(id)?.process;
 			void this.appLogger?.error("agent", "Agent create failed", {
 				agentId: id,
 				projectId: project.id,
 				sessionPath: input.sessionPath,
 				error: rawMessage,
 			});
-			// 构建丰富的错误诊断信息
-			const diag = process.getDiagnostics();
-			let debugDetails: string | undefined;
-			if (diag) {
-				const lines: string[] = [];
-				// 退出码
-				if (diag.exitCode !== null) {
-					lines.push(`Exit code: ${diag.exitCode}${diag.exitSignal ? ` (signal: ${diag.exitSignal})` : ""}`);
-				}
-				// stderr 输出（截取末尾最有用的部分）
-				const stderrText = diag.stderr.join("").trim();
-				if (stderrText) {
-					// 只保留末尾 600 字符，避免刷屏
-					const snippet = stderrText.length > 600 ? "…" + stderrText.slice(-600) : stderrText;
-					lines.push(`Process stderr:\n${snippet}`);
-				}
-				// pi 路径与版本检测
-				lines.push(`Pi command: ${diag.command}`);
-				if (diag.customPiPath) {
-					lines.push(`Configured path: ${diag.customPiPath}`);
-				}
-				lines.push(`Working directory: ${diag.cwd}`);
-				lines.push(`Version check: ${diag.versionCheck ? "passed" : "failed"}`);
-
-				// 诊断与指引
-				lines.push("");
-				lines.push("Troubleshooting");
-				if (!diag.versionCheck) {
-					lines.push("1. Run pi --version in a terminal and verify the configured path.");
-					lines.push("2. If Pi is missing, run npm install -g @earendil-works/pi-coding-agent.");
-					lines.push("3. Run pi --version again after installation.");
-				} else if (diag.exitCode !== 0) {
-					lines.push("1. Run pi --mode rpc in a terminal.");
-					lines.push("2. Resolve the error reported by Pi before retrying.");
-				} else if (!stderrText && diag.exitCode === null) {
-					lines.push("1. Pi may still be starting. Increase the RPC timeout in settings and retry.");
-				} else {
-					lines.push("1. Run pi --mode rpc and verify that Pi starts successfully.");
-					lines.push("2. Verify the Pi path in settings.");
-				}
-				lines.push("");
-				lines.push("If the problem persists, include these diagnostics in a GitHub issue.");
-
-				debugDetails = lines.join("\n");
-			}
 			this.addLocalizedMessage(id, "error", "diagnostic.agentStartFailed", "Pi RPC 启动失败。", {
-				debugDetails: [rawMessage, debugDetails].filter(Boolean).join("\n\n"),
+				debugDetails: this.buildStartupFailureMessage(rawMessage, failedProcess?.getDiagnostics() ?? null),
 			});
 		}
 
@@ -1792,28 +1900,24 @@ export class AgentManager {
 			sessionPath,
 		});
 
-		const process = this.createPiProcess(project.path, sessionPath, runtime.tab.deckSessionId);
-		// 与 createUnlocked 同理：监听器必须在 start() 前挂上，
-		// 避免重连窗口期 spawn error 变成未捕获异常。
-		this.attachPiProcessLifecycle(agentId, process, {
+		const handshake = await this.handshakePiProcess(agentId, {
 			projectPath: project.path,
+			sessionPath,
+			deckSessionId: runtime.tab.deckSessionId,
 			onExit: (payload) => this.handleReattachProcessExit(agentId, runtime, payload),
 		});
-		const client = await process.start(sessionPath);
+		const process = handshake.process;
 		const restartDiag = process.getDiagnostics();
 		void this.appLogger?.info("agent", "Pi process restarted", {
 			agentId,
 			command: restartDiag?.command,
 			args: restartDiag?.args?.join(' '),
 			cwd: restartDiag?.cwd,
+			fallbackFromExtensions: handshake.fallbackFromExtensions,
 		});
 
-
-		// 替换旧进程引用（但不修改 agents map 中的 key）
-		runtime.process = process;
-
 		try {
-			const stateResponse = await client.request({ type: "get_state" }, this.rpcTimeoutMs);
+			const stateResponse = handshake.state;
 			const data = stateResponse.data as
 				| { sessionId?: string; sessionFile?: string; sessionName?: string }
 				| undefined;
@@ -1836,6 +1940,9 @@ export class AgentManager {
 
 			// 重连期间用户可能已发送消息（乐观上屏）：必须保护，否则替换投影时未落盘消息丢失
 			await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() }).catch(() => undefined);
+			if (handshake.fallbackFromExtensions) {
+				this.notifyExtensionFallback(agentId, handshake.fallbackDebug);
+			}
 
 			void this.appLogger?.info("agent", "Process reattached successfully", {
 				agentId,
@@ -2508,6 +2615,7 @@ export class AgentManager {
 		this.notifiedAskAgents.delete(agentId);
 		this.abortedDuringAsk.delete(agentId);
 		this.pendingUIRequests.delete(agentId);
+		this.startupHandshakeAgents.delete(agentId);
 		this.clearStreamGate(agentId);
 		// 工具完整结果缓存是运行期性能优化（回退读文件等价），agent 停止时整体释放
 		this.toolFullTextByMessageId.clear();
@@ -2974,8 +3082,14 @@ export class AgentManager {
 					agentId,
 					code: payload.code,
 					signal: payload.signal,
+					handshake: this.startupHandshakeAgents.has(agentId),
+					stale: this.agents.get(agentId)?.process !== piProcess,
 					diagnostics: piProcess.getDiagnostics(),
 				});
+				// 握手中的 exit 交给 handshakePiProcess 决定是否 --no-extensions 回退。
+				// 回退后旧进程的迟到 exit 不能把新 runtime 标 closed。
+				if (this.startupHandshakeAgents.has(agentId)) return;
+				if (this.agents.get(agentId)?.process !== piProcess) return;
 				options.onExit(payload);
 			} catch (error) {
 				void this.appLogger?.error("agent", "Pi process exit handler failed", {
@@ -2985,6 +3099,15 @@ export class AgentManager {
 			}
 		});
 		piProcess.on("error", (error: Error) => {
+			if (this.startupHandshakeAgents.has(agentId) || this.agents.get(agentId)?.process !== piProcess) {
+				void this.appLogger?.error("agent", "Pi process error ignored (handshake or stale process)", {
+					agentId,
+					handshake: this.startupHandshakeAgents.has(agentId),
+					stale: this.agents.get(agentId)?.process !== piProcess,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				return;
+			}
 			const runtime = this.agents.get(agentId);
 			if (runtime) runtime.tab.status = "error";
 			const message = error instanceof Error ? error.message : String(error);
@@ -3011,6 +3134,7 @@ export class AgentManager {
 		tab: AgentTab,
 		payload: { code: number | null; signal: string | null },
 	) {
+		if (this.startupHandshakeAgents.has(agentId)) return;
 		// 模型配置刷新期间的进程退出由 refreshModels() 负责重连，此处静默忽略
 		if (this.modelRefreshingAgents.has(agentId)) return;
 		// 用户主动停止 → 不自动重连
@@ -3099,6 +3223,7 @@ export class AgentManager {
 		runtime: AgentRuntime,
 		payload: { code: number | null; signal: string | null },
 	) {
+		if (this.startupHandshakeAgents.has(agentId)) return;
 		if (this.modelRefreshingAgents.has(agentId)) return;
 		if (this.userInitiatedStop.has(agentId)) {
 			this.userInitiatedStop.delete(agentId);

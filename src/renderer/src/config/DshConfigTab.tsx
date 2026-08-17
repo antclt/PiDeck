@@ -415,76 +415,77 @@ function Overview(props: {
 	const { status } = props;
 	const [picking, setPicking] = useState(false);
 	const [switching, setSwitching] = useState(false);
-	/** 孤儿 DSH 会话数（G3/D11：host 有但 catalog 无映射；加载概览时查询一次）。 */
-	const [orphanCount, setOrphanCount] = useState(0);
-	/** 外部 DSH 会话（dsh-web 等其他工具创建的 host 根会话；跨工具导入用，2026-12）。 */
-	const [foreignSessions, setForeignSessions] = useState<Array<{
+	/** dsh-web 未分组、cwd 已匹配现有 workspace 的根会话（官方认领清单）。 */
+	const [ungroupedAdoptable, setUngroupedAdoptable] = useState<Array<{
 		dshSessionId: string;
-		title?: string;
-		cwd?: string;
-		updatedAt?: number;
+		cwd: string;
+		workspaceId: string;
+		workspaceTitle?: string;
 	}>>([]);
-	/** 正在导入的 dshSessionId（按钮转圈防重复点击）。 */
-	const [importing, setImporting] = useState<string | null>(null);
-	/** 全量同步进行中（「全部导入」按钮转圈防重复触发）。 */
-	const [syncing, setSyncing] = useState(false);
+	/** 官方认领进行中。 */
+	const [adopting, setAdopting] = useState(false);
 	/** G14：归档区 DSH 会话清单（目录已移入 .pideck-archive 的 host 会话；恢复入口用）。 */
 	const [archived, setArchived] = useState<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>([]);
 	/** G14：正在恢复的 dshSessionId（按钮转圈防重复点击）。 */
 	const [restoring, setRestoring] = useState<string | null>(null);
+	/** 启动时是否自动导入外部会话：原设置页 DSH tab 独有项，收口到配置管理概览。 */
+	const [autoImport, setAutoImport] = useState(true);
+	const [autoImportLoaded, setAutoImportLoaded] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
-		void desktopApi.sessions.listDshOrphans().then((ids) => {
-			if (!cancelled) setOrphanCount(ids.length);
-		}).catch(() => undefined);
-		void desktopApi.sessions.listDshForeignSessions().then((items) => {
-			if (!cancelled) setForeignSessions(items);
+		void desktopApi.sessions.listUngroupedAdoptable().then((items) => {
+			if (!cancelled) setUngroupedAdoptable(items);
 		}).catch(() => undefined);
 		void desktopApi.sessions.listArchivedDshSessions().then((items) => {
 			if (!cancelled) setArchived(items);
 		}).catch(() => undefined);
+		void desktopApi.settings.get().then((settings) => {
+			if (!cancelled) {
+				setAutoImport(settings.dshAutoImportSessions !== false);
+				setAutoImportLoaded(true);
+			}
+		}).catch(() => {
+			if (!cancelled) setAutoImportLoaded(true);
+		});
 		return () => {
 			cancelled = true;
 		};
 	}, []);
 
-	/** 跨工具导入：把外部 DSH 会话映射进 catalog（主进程按 cwd 匹配项目）。 */
-	const importForeign = async (dshSessionId: string) => {
-		if (importing) return;
-		setImporting(dshSessionId);
+	/** 启动自动导入：即时写入设置，下次启动生效；关闭后侧栏不再收录外部会话。 */
+	const toggleAutoImport = async (checked: boolean) => {
+		const prev = autoImport;
+		setAutoImport(checked);
 		try {
-			await desktopApi.sessions.importDshForeignSession(dshSessionId);
-			showNotice(t("config.dsh.imported"), 3000);
-			setForeignSessions((current) => current.filter((item) => item.dshSessionId !== dshSessionId));
-			setOrphanCount((current) => Math.max(0, current - 1));
-			props.onChanged();
-		} catch (error) {
-			showNotice(error instanceof Error ? error.message : String(error), 4000);
-		} finally {
-			setImporting(null);
+			await desktopApi.settings.update({ dshAutoImportSessions: checked });
+			showNotice(t(checked ? "config.dsh.autoImportOn" : "config.dsh.autoImportOff"), 3000);
+		} catch (saveError) {
+			setAutoImport(prev);
+			showNotice(saveError instanceof Error ? saveError.message : String(saveError), 4000);
 		}
 	};
 
-	/** 全量同步：把 catalog 尚未映射的外部 DSH 会话一次全部导入（启动时也会自动执行）。 */
-	const syncAllForeign = async () => {
-		if (syncing) return;
-		setSyncing(true);
+	/** 官方认领：把 cwd 已匹配现有 workspace 的未分组根会话挂回去。先关 dsh-web。 */
+	const adoptUngrouped = async () => {
+		if (adopting || ungroupedAdoptable.length === 0) return;
+		setAdopting(true);
 		try {
-			const result = await desktopApi.sessions.syncDshForeignSessions();
-			showNotice(t("config.dsh.synced", { count: result.imported }), 3000);
-			// 已导入的从清单消失（主进程按 catalog 过滤）；孤儿/清单重拉保持最新。
-			const [items, orphanIds] = await Promise.all([
-				desktopApi.sessions.listDshForeignSessions(),
-				desktopApi.sessions.listDshOrphans(),
-			]);
-			setForeignSessions(items);
-			setOrphanCount(orphanIds.length);
-			props.onChanged();
+			const result = await desktopApi.sessions.adoptUngroupedSessions();
+			if (result.failed > 0) {
+				showNotice(t("config.dsh.ungroupedAdoptPartial", {
+					adopted: result.adopted,
+					failed: result.failed,
+				}), 4000);
+			} else {
+				showNotice(t("config.dsh.ungroupedAdopted", { count: result.adopted }), 3000);
+			}
+			const remaining = await desktopApi.sessions.listUngroupedAdoptable();
+			setUngroupedAdoptable(remaining);
 		} catch (error) {
 			showNotice(error instanceof Error ? error.message : String(error), 4000);
 		} finally {
-			setSyncing(false);
+			setAdopting(false);
 		}
 	};
 
@@ -575,67 +576,50 @@ function Overview(props: {
 							{t("config.dsh.notStarted")}
 						</span>
 					)}
-					{orphanCount > 0 && (
-						<span
-							className="rounded-full border border-amber-300/70 bg-amber-500/10 px-2 py-0.5 text-micro font-medium text-amber-700 dark:border-amber-700/70 dark:text-amber-300"
-							title={t("config.dsh.orphans", { count: orphanCount })}
-						>
-							{t("config.dsh.orphans", { count: orphanCount })}
-						</span>
-					)}
 				</div>
 			</section>
-			{/* 跨工具兼容：dsh-web 等其他工具创建的会话，启动时磁盘扫描自动入侧栏。
-			    设置 dshAutoImportSessions 关闭后此处仍可手动补漏；清单本身也不启动 host */}
+			{/* 跨工具兼容只留开关：开=启动只读扫盘入侧栏；关=不收录。不提供手动导入。 */}
+			<section className="grid gap-2">
+				<div className="flex items-center justify-between gap-4 rounded-md border border-border-subtle bg-bg-panel px-3.5 py-2.5">
+					<div className="grid gap-0.5">
+						<span className="text-caption font-semibold text-foreground">{t("config.dsh.autoImportForeign")}</span>
+						<p className="text-micro text-muted-foreground">{t("config.dsh.autoImportForeignHint")}</p>
+					</div>
+					<Switch checked={autoImport} disabled={!autoImportLoaded} onCheckedChange={(checked) => void toggleAutoImport(checked)} />
+				</div>
+			</section>
 			<section className="grid gap-2">
 				<div className="flex items-center gap-2">
-					<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.foreignSessions")}</h3>
+					<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.ungroupedAdopt")}</h3>
 					<Button
 						type="button"
 						variant="secondary"
 						size="sm"
 						className="ml-auto h-7 gap-1"
-						disabled={syncing}
-						onClick={() => void syncAllForeign()}
+						disabled={adopting || ungroupedAdoptable.length === 0}
+						onClick={() => void adoptUngrouped()}
 					>
-						{syncing ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
-						{t("config.dsh.syncAll")}
+						{adopting ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
+						{t("config.dsh.ungroupedAdoptAll")}
 					</Button>
 				</div>
-				{foreignSessions.length === 0 ? (
-					<p className="text-micro text-muted-foreground">{t("config.dsh.foreignSessionsEmpty")}</p>
+				{ungroupedAdoptable.length === 0 ? (
+					<p className="text-micro text-muted-foreground">{t("config.dsh.ungroupedAdoptEmpty")}</p>
 				) : (
 					<>
-						<p className="text-micro text-muted-foreground">{t("config.dsh.foreignSessionsHint")}</p>
-						<div className="grid max-h-56 gap-1.5 overflow-y-auto pr-1">
-							{foreignSessions.map((item) => (
+						<p className="text-micro text-muted-foreground">{t("config.dsh.ungroupedAdoptHint")}</p>
+						<div className="grid max-h-40 gap-1.5 overflow-y-auto pr-1">
+							{ungroupedAdoptable.map((item) => (
 								<div
 									key={item.dshSessionId}
-									className="flex items-center gap-2 rounded-sm border border-border-subtle bg-bg-panel px-2.5 py-1.5"
+									className="rounded-sm border border-border-subtle bg-bg-panel px-2.5 py-1.5"
 								>
-									<div className="min-w-0 flex-1">
-										<div className="truncate text-control text-foreground" title={item.title ?? item.dshSessionId}>
-											{item.title ?? item.dshSessionId}
-										</div>
-										{item.cwd && (
-											<div className="truncate font-mono text-micro text-muted-foreground" title={item.cwd}>
-												{item.cwd}
-											</div>
-										)}
+									<div className="truncate text-control text-foreground" title={item.dshSessionId}>
+										{item.workspaceTitle ?? item.workspaceId}
 									</div>
-									<Button
-										type="button"
-										variant="secondary"
-										size="sm"
-										className="h-7 shrink-0 gap-1"
-										disabled={importing !== null}
-										onClick={() => void importForeign(item.dshSessionId)}
-									>
-										{importing === item.dshSessionId ? (
-											<LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-										) : null}
-										{t("config.dsh.importSession")}
-									</Button>
+									<div className="truncate font-mono text-micro text-muted-foreground" title={item.cwd}>
+										{item.cwd}
+									</div>
 								</div>
 							))}
 						</div>

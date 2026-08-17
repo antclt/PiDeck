@@ -344,6 +344,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                     canSend={composer.delivery.canSend}
                     isGeneratingImage={composer.delivery.generatingImage}
                     onSend={composer.delivery.send}
+                    onSendSteer={composer.delivery.steer}
                     onSendFollowUp={composer.delivery.followUp}
                     onSendAsk={() => void handleAskSend()}
                     onStop={composer.delivery.abort}

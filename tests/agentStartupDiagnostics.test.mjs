@@ -21,6 +21,8 @@ test("agent startup writes diagnostics across renderer IPC and pi launch boundar
 	assert.match(mainSource, /Agent ensure trusted directory completed/);
 	assert.match(mainSource, /Agent pi process start/);
 	assert.match(mainSource, /Agent get_state request start/);
+	assert.match(mainSource, /handshakePiProcess/);
+	assert.match(mainSource, /retrying without extensions/);
 	// 启动/重连路径的 get_state 必须吃用户配置的 rpcTimeout（而非默认 30s 硬编码），
 	// 否则慢启动场景超时后，诊断卡“调大 RPC 超时”的指引对启动无效（误导）
 	assert.match(mainSource, /client\.request\(\{ type: "get_state" \}, this\.rpcTimeoutMs\)/);

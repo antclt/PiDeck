@@ -64,10 +64,11 @@ import { dshSessionFilePath } from "./dshSessionPath";
  * （agents:* 载荷）推给渲染层——渲染层无需区分后端。
  *
  * v1 范围（能力缺失显式声明，UI 按能力禁用入口）：
- * - 支持：create/list/sendPrompt/abort/stop/restart/rename/getRuntimeState/
- *   getAvailableModels/setModel/prepareResendFromMessage/publishRuntimeState/
- *   fork/getForkMessages（session.fork 锚 seq）/compact（/compact 命令）/
- *   getCommands（D15：host 命令注册表枚举桥）/exportHtml（G10：投影式导出）
+ * - 支持：create/list/sendPrompt（queue=下一轮 / steer=插入当前回合）/abort/stop/
+ *   restart/rename/getRuntimeState/getAvailableModels/setModel/
+ *   prepareResendFromMessage/publishRuntimeState/fork/getForkMessages
+ *   （session.fork 锚 seq）/compact（/compact 命令）/getCommands（D15）/
+ *   exportHtml（G10：投影式导出）
  * - 缺失（capabilities 未声明，且接口方法不实现——可选能力，见 SessionAgentGateway
  *   注释）：editMessage/deleteMessage。调用方经 capability 检查拒绝，
  *   不再复制 throw 样板。
@@ -346,25 +347,33 @@ export class DshAgentManager implements SessionAgentGateway {
 				imageParts.push({ type: "image", mediaType: image.mimeType, data: image.data });
 			}
 		}
-		// DSH 一期不支持宿主指令（agentMessage）与 steer 语义：显式拒绝而非静默丢弃（D2）。
-		if (input.agentMessage || input.streamingBehavior) {
+		// 宿主指令仍是 pi 扩展：DSH 没有等价物，显式拒绝。
+		if (input.agentMessage) {
 			return {
 				accepted: false,
-				error: "DSH host instructions / streaming behavior are not supported yet",
+				error: "DSH host instructions are not supported",
 				delivery: "rejected",
 				i18nKey: "session.sendDshUnsupportedPayload",
 			};
 		}
-		// host 侧 bug 规避：dsh-agent-loop 的 slash 命令步骤（/permission /plan 等被
-		// pideck-slash-bridge 在 pre-step reject）会让本轮以 blocked 收场，且 reject 路径
-		// 跳过 pending-inbox 检查；若此时 inbox 里已 splice 下一条消息（本回合进行中到达
-		// 的 followup），该消息会永久滞留、不再开新回合。因此所有 prompt 必须串行化：
-		// 上一回合（含命令回合）真正 idle 之后才发下一条。
-		await this.waitForIdle(input.agentId);
-		this.logRpc(input.agentId, "send", "sessions.prompt", { message: input.message, images: imageParts.length });
+		// 复用 composer 的 steer / followUp：host prompt.mode 是 queue|steer。
+		// queue = 默认下一轮（followup）；steer = 插入当前回合（dsh-web 手动插入）。
+		// slash 命令走 host 命令注册表，mode 无关；命令回合仍须等 idle，避免
+		// reject 路径滞留下一条 followup（见 waitForIdle 注释）。
+		const mode = input.streamingBehavior === "steer" ? "steer" : "queue";
+		// queue 一律等 idle。steer 只在 abort 收尾期等：cancelled 时旧回合还在收口，
+		// 立刻插入会被 host 拼进已停止的回合。正常 running 的 steer 必须马上发。
+		if (mode === "queue" || runtime.control.cancelled) {
+			await this.waitForIdle(input.agentId);
+		}
+		this.logRpc(input.agentId, "send", "sessions.prompt", {
+			message: input.message,
+			images: imageParts.length,
+			mode,
+		});
 		const sent = await client.sessions.prompt({
 			sessionId: runtime.sessionId,
-			mode: "queue",
+			mode,
 			content: [
 				{ type: "text", text: input.message },
 				...imageParts,
@@ -1395,7 +1404,8 @@ export class DshAgentManager implements SessionAgentGateway {
 	 * 契约约束：payload 的 workspaceId 与 cwd **二选一**（host schema
 	 * `.refine(workspaceId === undefined || cwd === undefined)`，同传会被
 	 * bad-request 拒绝）——有 workspaceId 时省略 cwd（workspace 路径即 cwd）。
-	 * workspace 解析失败不阻断创建（降级为只传 cwd 的旧行为）。
+	 * 禁止降级为只传 cwd：官方规则里 cwd-only 会话永远留在 dsh-web「未分组」，
+	 * 会污染第三方客户端的分组视图。解析失败就让创建失败，由调用方重试/报错。
 	 */
 	private async createHostSession(
 		client: import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient,
@@ -1403,9 +1413,13 @@ export class DshAgentManager implements SessionAgentGateway {
 	): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }> {
 		try {
 			const workspaceId = await this.dshHost.resolveWorkspaceId(cwd);
-			const created = workspaceId !== undefined
-				? await client.sessions.create({ workspaceId })
-				: await client.sessions.create({ cwd });
+			if (workspaceId === undefined) {
+				return {
+					ok: false,
+					error: `workspace.resolve failed for cwd: ${cwd}`,
+				};
+			}
+			const created = await client.sessions.create({ workspaceId });
 			if (!created.result.ok) {
 				return { ok: false, error: JSON.stringify(created.result.error) };
 			}

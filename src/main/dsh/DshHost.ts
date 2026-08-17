@@ -453,10 +453,33 @@ export class DshHost {
 	}
 
 	/**
-	 * 解析 cwd 对应的 host workspace id（幂等）：workspace.create 对已存在目录
-	 * 返回既有 workspace。新会话带 workspaceId 创建会被 host 挂到该 workspace，
-	 * dsh-web 按 workspace 分组（不挂 = dsh-web「未分组」）。失败（目录无效/
-	 * host 异常）返回 undefined，不阻断会话创建。
+	 * 认领已存在的未分组会话进已有 workspace（官方 adopt）。
+	 * 必须走 sessions.create({ workspaceId, sessionId })：host 对已有日志做
+	 * ensureSession + attachSession，不新建会话文件。cwd 对不上会 workspace-attach-failed。
+	 * 会启动我们自己的 host——dsh-web 还占着同一 DSH_HOME 时不要调用。
+	 */
+	async adoptSessionIntoWorkspace(
+		workspaceId: string,
+		sessionId: string,
+	): Promise<void> {
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) throw new Error("DSH host is not started");
+		const created = await client.sessions.create({
+			workspaceId: workspaceId as import("@deepseek-ai/dsh-host-apiproxy").WorkspaceId,
+			sessionId: sessionId as import("@deepseek-ai/dsh-session/types").SessionId,
+		});
+		if (!created.result.ok) {
+			throw new Error(JSON.stringify(created.result.error));
+		}
+	}
+
+	/**
+	 * 解析 cwd 对应的 host workspace id（幂等）：走官方 workspace.create({path})，
+	 * 已存在目录返回既有 workspace，不会手写 workspace.json。
+	 * 新会话必须带这个 workspaceId 创建，host 才会 attachSession；
+	 * 只传 cwd 会永远留在 dsh-web「未分组」。失败返回 undefined，由创建方失败，
+	 * 不再静默降级成 cwd-only。
 	 */
 	async resolveWorkspaceId(cwd: string): Promise<import("@deepseek-ai/dsh-host-apiproxy").WorkspaceId | undefined> {
 		try {

@@ -238,6 +238,8 @@ export function ComposerSendControls(props: {
   /** 生图进行中：发送按钮显示转圈并禁用（与 busy 区分，不显示停止按钮） */
   isGeneratingImage?: boolean;
   onSend: () => void;
+  /** 显式插入当前回合；DSH 忙碌默认发送是下一轮，不能复用 onSend。 */
+  onSendSteer: () => void;
   onSendFollowUp: () => void;
   /** 并行发送：独立匿名会话后台处理（不打断当前输出），始终可选 */
   onSendAsk: () => void;
@@ -253,7 +255,7 @@ export function ComposerSendControls(props: {
             variant="default"
             size="icon-sm"
             className="send-behavior-primary size-8 rounded-none shadow-none hover:bg-primary/90"
-            aria-label={t("app.sendSteerTitle")} title={t("app.sendSteerTitle")}
+            aria-label={t("app.send")} title={t("app.send")}
             disabled={props.isAgentStarting || props.isGeneratingImage || !props.canSend}
             onClick={props.onSend}
           >
@@ -286,7 +288,7 @@ export function ComposerSendControls(props: {
               {props.isAgentBusy && (
                 <DropdownMenuItem
                   className="send-behavior-option steer gap-2"
-                  onClick={props.onSend}
+                  onClick={props.onSendSteer}
                 >
                   <span className="send-behavior-option-dot size-1.5 rounded-full bg-foreground" aria-hidden="true" />
                   <span>{t("app.sendSteerTitle")}</span>

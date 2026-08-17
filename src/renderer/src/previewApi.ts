@@ -320,6 +320,8 @@ export function createPreviewApi(): PiDesktopApi {
 				throw new Error("preview mode: DSH session import is not available");
 			},
 			syncDshForeignSessions: async () => ({ imported: 0, skipped: 0 }),
+			listUngroupedAdoptable: async () => [],
+			adoptUngroupedSessions: async () => ({ adopted: 0, failed: 0 }),
 			listArchivedDshSessions: async () => [],
 			unarchiveDshSession: async () => true,
 			listDshDynamicPlugins: async () => [],

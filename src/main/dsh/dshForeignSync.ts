@@ -8,7 +8,7 @@ import type { SessionRecord } from "../../shared/types";
  * - 幂等由 SessionCatalog.createDraft 的 dshSessionId 去重保证（重复导入只更新不新增）；
  * - 目标项目按会话自己的 cwd：已注册则挂入该项目，未注册则按该目录创建项目；
  *   只有没有 cwd 的会话才进入「外部会话」兑底项目（不能把不同目录堆在一起）；
- * - 标题优先 list 投影；没有标题时用 cwd 末段（侧栏先有可读名）；再缺用兜底标题。
+ * - 标题优先官方投影缓存 / 日志 session/title / 首条提示回退；再缺才用 cwd 末段或 i18n。
  * - 批量同步禁止走 resolveHostTitle / sessions.history：那会 attach 冷会话，
  *   与 dsh-web 抢同一份 DSH_HOME（官方不支持双 host）。
  */
@@ -50,6 +50,8 @@ export type DshForeignSyncDeps = {
 		dshSessionId: string;
 		keepExistingTitle?: boolean;
 	}) => Promise<SessionRecord>;
+	/** 已映射记录（纠正归属时判断现有标题是不是 cwd 兑底占位）。 */
+	getExistingDraft?: (dshSessionId: string) => { title: string } | undefined;
 	/** 当前环境（native/wsl）。 */
 	getEnvironment: () => "native" | "wsl";
 	/**
@@ -136,6 +138,19 @@ export function cwdDisplayName(cwd: string | undefined): string | undefined {
 	return last || undefined;
 }
 
+/** 目录末段 / i18n 兑底——不是 dsh-web 那种投影标题，纠正归属时可以被官方缓存覆盖。 */
+export function isPlaceholderForeignTitle(
+	title: string | undefined,
+	cwd: string | undefined,
+	fallbackTitle: string,
+): boolean {
+	const normalized = normalizeForeignTitle(title);
+	if (!normalized) return true;
+	if (normalized === fallbackTitle) return true;
+	const folder = cwdDisplayName(cwd);
+	return Boolean(folder && normalized === folder);
+}
+
 /** 解析最终标题：投影 > 可选 host 补全 > cwd 末段 > 兜底标题。 */
 export async function resolveForeignSessionTitle(
 	item: DshForeignSessionItem,
@@ -156,7 +171,8 @@ export async function resolveForeignSessionTitle(
  * 导入单个外部会话（幂等）。item 未给出时按 dshSessionId 从清单反查；
  * 目标项目与标题按上面的策略解析，最后经 createDraft 落 catalog（重复导入被吸收）。
  * @param allowHostTitle 仅手动单条导入为 true；批量同步必须 false，避免 attach。
- * @param keepExistingTitle 纠正归属时保留 catalog 已有标题，避免磁盘扫描用 cwd 末段覆盖。
+ * @param keepExistingTitle 纠正归属时保留 catalog 已有「真实」标题。
+ * 上一轮用 cwd 末段兑底的占位名不算真实标题：官方投影缓存有 title 时要覆盖上去。
  */
 export async function importForeignSession(
 	deps: DshForeignSyncDeps,
@@ -173,18 +189,26 @@ export async function importForeignSession(
 	if (!target) throw new Error(`Foreign DSH session not found: ${dshSessionId}`);
 	const projectId = await resolveForeignProjectId(deps, target);
 	// 批量同步禁止 host 标题补全：resolveHostTitle 会 sessions.history，抢 dsh-web。
+	const fallback = resolveFallbackTitle(deps.fallbackTitle);
 	const title = await resolveForeignSessionTitle(
 		target,
-		resolveFallbackTitle(deps.fallbackTitle),
+		fallback,
 		allowHostTitle ? deps.resolveHostTitle : undefined,
 	);
+	const existing = deps.getExistingDraft?.(dshSessionId);
+	const projected = Boolean(normalizeForeignTitle(target.title));
+	// 已有真实标题且本轮仍没有投影名：保住旧名，避免 cwd 末段盖掉 host 回写。
+	// 已有占位名但本轮读到投影：必须写回，否则侧栏永远停在目录名。
+	const retainTitle = keepExistingTitle && existing
+		&& !isPlaceholderForeignTitle(existing.title, target.cwd, fallback)
+		&& !projected;
 	return deps.createDraft({
 		projectId,
 		title,
 		environment: deps.getEnvironment(),
 		backend: "dsh",
 		dshSessionId,
-		...(keepExistingTitle ? { keepExistingTitle: true } : {}),
+		...(retainTitle ? { keepExistingTitle: true } : {}),
 	});
 }
 

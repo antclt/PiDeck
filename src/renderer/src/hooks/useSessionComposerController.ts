@@ -924,7 +924,8 @@ export function useSessionComposerController(
     if (intent === "send") {
       event.preventDefault();
       // Enter 发送也晋升预览 Tab（promoteAndSend 内部统一处理）
-      void promoteAndSend(isBusy ? "steer" : undefined);
+      // DSH 默认下一轮（queue）；插入当前回合走发送菜单「加入当前回合」。
+      void promoteAndSend(isBusy ? (isDshBackend ? "followUp" : "steer") : undefined);
     }
   }, [
     closeSuggestions,
@@ -932,6 +933,7 @@ export function useSessionComposerController(
     getPromptHistory,
     historyIndex,
     isBusy,
+    isDshBackend,
     mode,
     promoteAndSend,
     savedDraft,
@@ -1386,7 +1388,12 @@ export function useSessionComposerController(
     delivery: {
       // 发送/追问都算主动交互：先把预览 Tab 晋升常驻，再投递（幂等，非预览无副作用）
       send: () => {
-        void promoteAndSend(isBusy ? "steer" : undefined);
+        // pi 忙碌默认插入当前回合；DSH 默认排队下一轮，插入走菜单。
+        void promoteAndSend(isBusy ? (isDshBackend ? "followUp" : "steer") : undefined);
+      },
+      // 菜单「加入当前回合」必须显式 steer：不能复用 send，否则 DSH 忙碌默认会变成 queue。
+      steer: () => {
+        void promoteAndSend("steer");
       },
       followUp: () => {
         void promoteAndSend("followUp");

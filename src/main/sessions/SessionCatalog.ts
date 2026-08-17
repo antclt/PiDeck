@@ -411,7 +411,7 @@ export class SessionCatalog {
 		permissionPreset?: string;
 		/** 外部（dsh-web 等）会话导入：host 会话已存在，条目直接置 active（重启不清理）。 */
 		dshSessionId?: string;
-		/** 纠正归属时保留已有标题（磁盘扫描没有投影标题，不能用 cwd 末段覆盖 host 回写名）。 */
+		/** 纠正归属时保留已有真实标题；占位名（cwd 末段）由调用方决定是否覆盖。 */
 		keepExistingTitle?: boolean;
 	}): Promise<SessionRecord> {
 		this.assertLoaded();

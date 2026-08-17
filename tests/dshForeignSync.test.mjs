@@ -84,6 +84,10 @@ async function createFixture(foreignItems, knownIds = new Set()) {
       return fallbackProject;
     },
     createDraft: (input) => catalog.createDraft(input),
+    getExistingDraft: (dshSessionId) => {
+      const existing = catalog.listEntries().find((entry) => entry.dshSessionId === dshSessionId);
+      return existing ? { title: existing.title } : undefined;
+    },
     getEnvironment: () => "native",
     fallbackTitle: "DSH 会话",
     onError: () => undefined,
@@ -193,6 +197,11 @@ test("index foreignSyncDeps must not call mainCopy at module load", () => {
   assert.doesNotMatch(
     source,
     /fallbackTitle:\s*mainCopy\(/,
+  );
+  assert.match(
+    source,
+    /getExistingDraft:\s*\(dshSessionId\)/,
+    "纠正归属时必须能读到已有标题，才能用官方投影覆盖 cwd 占位名",
   );
 });
 
@@ -343,6 +352,32 @@ test("syncForeignSessions keeps going when a single import fails", async () => {
     assert.ok(String(errors[0].error).includes("host session vanished"));
     assert.equal(fixture.catalog.listEntries().length, 1);
     assert.equal(fixture.catalog.listEntries()[0].dshSessionId, "session-good");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("isPlaceholderForeignTitle treats folder name and i18n fallback as placeholders", () => {
+  const { isPlaceholderForeignTitle } = loadModules();
+  assert.equal(isPlaceholderForeignTitle("alpha", "C:/repo/alpha", "DSH 会话"), true);
+  assert.equal(isPlaceholderForeignTitle("DSH 会话", "C:/repo/alpha", "DSH 会话"), true);
+  assert.equal(isPlaceholderForeignTitle("你好", "C:/repo/alpha", "DSH 会话"), false);
+});
+
+test("syncForeignSessions overwrites a cwd-placeholder title with the official projection title", async () => {
+  const fixture = await createFixture([
+    foreignItem({ dshSessionId: "session-dumped", title: "你好", cwd: "C:/repo/alpha" }),
+  ]);
+  try {
+    await fixture.catalog.createDraft({
+      projectId: "project-alpha",
+      title: "alpha",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-dumped",
+    });
+    await fixture.sync.syncForeignSessions(fixture.deps, new Set(["session-dumped"]));
+    assert.equal(fixture.catalog.listEntries()[0].title, "你好");
   } finally {
     await fixture.cleanup();
   }

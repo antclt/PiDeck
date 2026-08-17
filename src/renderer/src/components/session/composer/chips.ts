@@ -87,9 +87,17 @@ export function extractPastedPath(text: string): string | null {
 		body = body.slice(1, -1).trim();
 	}
 	if (!body) return null;
-	// 只拦截绝对路径：Windows 盘符（C:\… / C:/…）或 POSIX 根路径（/…）
-	if (!/^[a-zA-Z]:[\\/]/.test(body) && !/^\//.test(body)) return null;
+	// 只拦截绝对路径：Windows 盘符（C:\… / C:/…），或至少两段的 POSIX 路径（/Users/me）。
+	// 单段 /compact、/maestro-next "…" 是斜杠命令：旧规则把任意 / 开头单行当路径，
+	// 粘贴进 composer 会被 formatFilePathRef 包成 @"/maestro-next \"…\""。
+	if (!isAbsoluteLocalPath(body)) return null;
 	return body;
+}
+
+/** 粘贴拦截用的绝对路径判定：盘符路径，或 /seg/seg…（排除斜杠命令）。 */
+function isAbsoluteLocalPath(body: string): boolean {
+	if (/^[a-zA-Z]:[\\/]/.test(body)) return true;
+	return body.startsWith("/") && body.includes("/", 1);
 }
 
 /**

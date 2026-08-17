@@ -134,14 +134,16 @@ test("AgentManager attaches lifecycle listeners before process.start", () => {
 	const source = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 	assert.match(source, /attachPiProcessLifecycle\(/);
 	assert.match(source, /buildStartupFailureMessage\(/);
-	// createUnlocked：先 attach，再 await process.start
-	const createBlock = source.slice(
-		source.indexOf("private async createUnlocked"),
-		source.indexOf("async rename("),
+	// spawnAndGetState：先 attach，再 await process.start（create/reattach 共用握手）
+	const spawnBlock = source.slice(
+		source.indexOf("private async spawnAndGetState"),
+		source.indexOf("private notifyExtensionFallback"),
 	);
-	const attachAt = createBlock.indexOf("this.attachPiProcessLifecycle");
-	const startAt = createBlock.indexOf("await process.start");
+	const attachAt = spawnBlock.indexOf("this.attachPiProcessLifecycle");
+	const startAt = spawnBlock.indexOf("await process.start");
 	assert.ok(attachAt >= 0 && startAt > attachAt, "lifecycle must be attached before start()");
+	assert.match(source, /handshakePiProcess\(/);
+	assert.match(source, /shouldRetryWithoutExtensions\(/);
 });
 
 test("macOS search dirs include Homebrew prefixes for Dock-launched PATH gaps", () => {

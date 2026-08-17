@@ -188,3 +188,14 @@ test("extractPastedPath rejects non-path text and relative paths", () => {
 	assert.equal(extractPastedPath(""), null);
 	assert.equal(extractPastedPath("C:"), null);
 });
+
+test("extractPastedPath rejects slash commands that only look like POSIX paths", () => {
+	// 代码块复制 /maestro-next "…" 再粘到 composer：旧规则把任意 / 开头单行当成绝对路径，
+	// formatFilePathRef 再包成 @"/maestro-next \"…\""。
+	assert.equal(extractPastedPath('/maestro-next "修复登录页重定向 bug"'), null);
+	assert.equal(extractPastedPath("/compact"), null);
+	assert.equal(extractPastedPath("/permission workspace-write"), null);
+	// 真 POSIX 路径仍要认：多段路径，或空格出现在第二段之后。
+	assert.equal(extractPastedPath("/Users/me/a.txt"), "/Users/me/a.txt");
+	assert.equal(extractPastedPath("/Users/me/My Documents/a.txt"), "/Users/me/My Documents/a.txt");
+});

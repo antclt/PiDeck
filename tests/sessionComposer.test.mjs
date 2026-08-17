@@ -441,6 +441,17 @@ test("selected Session reference messages zip original indices with compressed m
   assert.equal(selection.entries[1].index, 4);
 });
 
+test("DSH busy send defaults to followUp; menu insert is explicit steer", () => {
+  const controller = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
+  const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+  // Enter / 主发送按钮：pi 忙碌默认 steer，DSH 忙碌默认下一轮。
+  assert.match(controller, /isBusy \? \(isDshBackend \? "followUp" : "steer"\) : undefined/);
+  assert.match(controller, /steer: \(\) => \{\s*void promoteAndSend\("steer"\);/);
+  // 客户端队列未指定行为时，DSH 也默认 followUp。
+  assert.match(app, /behavior: snapshot\.behavior \?\? \(backend === "dsh" \? "followUp" : "steer"\)/);
+  assert.match(app, /\? "followUp"\s*: "steer";/);
+});
+
 test("image handling keeps GIFs lossless and rejects unsupported/oversized files", () => {
   const source = readFileSync("src/renderer/src/utils/composerImages.ts", "utf8");
   const helpers = loadImageHelpers();

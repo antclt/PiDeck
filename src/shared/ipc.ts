@@ -111,6 +111,10 @@ export const ipcChannels = {
 	dshImportForeignSession: "dsh:import-foreign-session",
 	/** DSH 外部会话全量同步（自动发现：catalog 未映射的 host 根会话全部导入；返回导入/跳过统计）。 */
 	dshSyncForeignSessions: "dsh:sync-foreign-sessions",
+	/** dsh-web 未分组根会话清单（cwd 已有 workspace、尚未入账；只读磁盘）。 */
+	dshListUngroupedAdoptable: "dsh:list-ungrouped-adoptable",
+	/** 经官方 sessions.create({workspaceId,sessionId}) 认领未分组根会话。 */
+	dshAdoptUngroupedSessions: "dsh:adopt-ungrouped-sessions",
 	/** DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）。 */
 	dshListArchived: "dsh:list-archived",
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */

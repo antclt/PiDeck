@@ -833,12 +833,15 @@ export function App() {
     snapshot: { displayText: string; message: string; images?: ImageContent[]; agentMode: string; behavior?: "steer" | "followUp" },
   ) => {
     if (!store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))?.agentId) return false;
+    const backend = store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))?.backend
+      ?? store.get(sessionRecordByIdAtomFamily(sessionId))?.backend;
     return queue.enqueueQueuedPrompt(sessionId, {
       id: crypto.randomUUID(),
       message: snapshot.message,
       displayText: snapshot.displayText,
       images: snapshot.images,
-      behavior: snapshot.behavior ?? "steer",
+      // 未指定行为时：pi 默认插入当前回合，DSH 默认排队下一轮。
+      behavior: snapshot.behavior ?? (backend === "dsh" ? "followUp" : "steer"),
       agentMode: snapshot.agentMode as ComposerAgentMode,
       timestamp: Date.now(),
     });
@@ -2086,11 +2089,15 @@ export function App() {
     /** prompt 模板匹配到的 description，作为元数据发给 pi agent 标识意图 */
     templateDescription?: string,
   ) {
-    // 非队列入口继续保持原有行为：当前选中 agent 忙碌时默认 steer。
+    // 非队列入口：当前选中 agent 忙碌时，pi 默认插入当前回合，DSH 默认排队下一轮。
     // 客户端队列 drain 直接调用 dispatchPromptSnapshot，并显式指定其投递语义。
+    const busyDefault = store.get(sessionRecordByIdAtomFamily(sessionId))?.backend === "dsh"
+      || store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))?.backend === "dsh"
+      ? "followUp"
+      : "steer";
     const behavior =
       streamingBehavior ??
-      (sessionId === currentSessionId && isAgentCurrentlyBusy() ? "steer" : undefined);
+      (sessionId === currentSessionId && isAgentCurrentlyBusy() ? busyDefault : undefined);
     try {
       await dispatchPromptSnapshot(
         sessionId,

@@ -13,6 +13,14 @@ const {
   listForeignSessionsFromDisk,
   scanDshSessionHeaders,
 } = loadTsCommonJs("src/main/dsh/dshForeignSessionScan.ts");
+const {
+  parseProjectionTitles,
+  titleFromProjectionRecord,
+} = loadTsCommonJs("src/main/dsh/dshProjectionCache.ts");
+const {
+  fallbackSessionTitle,
+  foldLoggedSessionTitle,
+} = loadTsCommonJs("src/main/dsh/dshSessionTitleFold.ts");
 const { workspaceDirFor } = loadTsCommonJs("src/main/dsh/dshSessionPath.ts");
 const { DshHost } = loadTsCommonJs("src/main/dsh/DshHost.ts");
 
@@ -57,17 +65,37 @@ test("firstZstdFrameEnd locates a real checksummed header frame", () => {
   assert.equal(firstZstdFrameEnd(frame.subarray(0, 8)), undefined);
 });
 
-/** 在临时 DSH_HOME 写下 header（zstd 或明文 jsonl）。 */
-function writeSession(home, cwd, sessionId, headerOverrides, encoding = "zstd") {
+/** 在临时 DSH_HOME 写下 header（zstd 或明文 jsonl）；extraLines 可追加 session/title 等事件。 */
+function writeSession(home, cwd, sessionId, headerOverrides, encoding = "zstd", extraLines = []) {
   const dir = join(home, "sessions", workspaceDirFor(cwd), sessionId);
   mkdirSync(dir, { recursive: true });
-  const line = `${headerJson({ id: sessionId, cwd, ...headerOverrides })}\n`;
+  const line = [`${headerJson({ id: sessionId, cwd, ...headerOverrides })}`, ...extraLines, ""].join("\n");
   if (encoding === "zstd") {
     writeFileSync(join(dir, "session.jsonl.zstd"), zstdCompressSync(Buffer.from(line, "utf8")));
   } else {
     writeFileSync(join(dir, "session.jsonl"), line);
   }
 }
+
+test("parseProjectionTitles reads official session_projcache title.val rows", () => {
+  const titles = parseProjectionTitles(JSON.stringify({
+    unit: "session_projcache",
+    tables: {
+      sessions: {
+        "session-root-a": {
+          identity: { cwd: "D:/project/alpha" },
+          rows: { title: { ver: 1, seq: 1, val: "你好" } },
+        },
+        "session-blank": {
+          rows: { title: { ver: 1, seq: 1, val: "   " } },
+        },
+      },
+    },
+  }));
+  assert.equal(titles.get("session-root-a"), "你好");
+  assert.equal(titles.has("session-blank"), false);
+  assert.equal(titleFromProjectionRecord({ rows: { title: { val: 12 } } }), undefined);
+});
 
 test("listForeignSessionsFromDisk returns root sessions and skips subagents", () => {
   const home = mkdtempSync(join(tmpdir(), "pideck-dsh-foreign-scan-"));
@@ -85,6 +113,87 @@ test("listForeignSessionsFromDisk returns root sessions and skips subagents", ()
     const alpha = items.find((item) => item.dshSessionId === "session-root-a");
     assert.equal(alpha.cwd, "D:/project/alpha");
     assert.equal(typeof alpha.updatedAt, "number");
+    assert.equal(alpha.title, undefined, "空日志没有 session/title 也没有首条提示时不得编造标题");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("foldLoggedSessionTitle prefers last session/title then first-prompt fallback", () => {
+  assert.equal(fallbackSessionTitle("几个问题需要修复，1 现在模型 自动重试失败"), "几个问题需要修复，1 现在模");
+  const folded = foldLoggedSessionTitle([
+    headerJson({ id: "session-root-a" }),
+    JSON.stringify({
+      type: "user/message",
+      data: {
+        source: { kind: "user" },
+        content: [{ type: "text", text: "几个问题需要修复，1 现在模型 自动重试失败" }],
+      },
+    }),
+    JSON.stringify({ type: "session/title", data: { title: "静态 Loader 条目" } }),
+    JSON.stringify({ type: "session/title", data: { title: "你好" } }),
+  ].join("\n"));
+  assert.equal(folded, "你好");
+});
+
+test("listForeignSessionsFromDisk folds session/title from the log when cache is missing", () => {
+  const home = mkdtempSync(join(tmpdir(), "pideck-dsh-foreign-log-title-"));
+  try {
+    writeSession(home, "D:/project/alpha", "session-root-a", {}, "jsonl", [
+      JSON.stringify({
+        type: "user/message",
+        data: {
+          source: { kind: "user" },
+          content: [{ type: "text", text: "几个问题需要修复" }],
+        },
+      }),
+      JSON.stringify({ type: "session/title", data: { title: "静态 Loader 条目" } }),
+    ]);
+    const items = listForeignSessionsFromDisk(home);
+    assert.equal(items[0].title, "静态 Loader 条目");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("listForeignSessionsFromDisk uses first-prompt fallback when the log has no session/title", () => {
+  const home = mkdtempSync(join(tmpdir(), "pideck-dsh-foreign-fallback-"));
+  try {
+    writeSession(home, "D:/project/alpha", "session-root-a", {}, "zstd", [
+      JSON.stringify({
+        type: "user/message",
+        data: {
+          source: { kind: "user" },
+          content: [{ type: "text", text: "几个问题需要修复，1 现在模型 自动重试失败" }],
+        },
+      }),
+    ]);
+    const items = listForeignSessionsFromDisk(home);
+    assert.equal(items[0].title, "几个问题需要修复，1 现在模");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("listForeignSessionsFromDisk attaches official projection-cache titles", () => {
+  const home = mkdtempSync(join(tmpdir(), "pideck-dsh-foreign-title-"));
+  try {
+    writeSession(home, "D:/project/alpha", "session-root-a", {});
+    mkdirSync(join(home, "storages"), { recursive: true });
+    writeFileSync(join(home, "storages", "session_projcache.json"), JSON.stringify({
+      unit: "session_projcache",
+      tables: {
+        sessions: {
+          "session-root-a": {
+            identity: { cwd: "D:/project/alpha" },
+            rows: { title: { ver: 1, seq: 12, val: "你好" } },
+          },
+        },
+      },
+    }));
+    const items = listForeignSessionsFromDisk(home);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].title, "你好");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

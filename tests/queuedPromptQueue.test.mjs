@@ -134,6 +134,8 @@ test("busy composer keeps stop and queued-send controls separate", () => {
   const composerAreaSource = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
   const sendControls = componentInvocation(composerAreaSource, "ComposerSendControls");
 
+  assert.match(sendControls, /onSend=\{composer\.delivery\.send\}/);
+  assert.match(sendControls, /onSendSteer=\{composer\.delivery\.steer\}/);
   assert.match(sendControls, /onSendFollowUp=\{composer\.delivery\.followUp\}/);
   assert.match(composerPanelsSource, /composer-bar-btn stop/);
   assert.match(composerPanelsSource, /send-behavior-toggle/);
@@ -151,6 +153,7 @@ test("busy composer keeps stop and queued-send controls separate", () => {
   assert.match(composerPanelsSource, /<DropdownMenu>\s*<DropdownMenuTrigger asChild>/);
   assert.match(composerAreaSource, /onSend=\{composer\.delivery\.send\}/);
   // 当前回合/下一轮仅在会话进行中显示（隐藏而非置灰）；并行发送始终可用
+  assert.match(composerPanelsSource, /onClick=\{props\.onSendSteer\}/);
   assert.match(composerPanelsSource, /props\.isAgentBusy && \(\s*<DropdownMenuItem[\s\S]*send-behavior-option steer/);
   assert.match(composerPanelsSource, /props\.isAgentBusy && \(\s*<DropdownMenuItem[\s\S]*send-behavior-option follow-up/);
   assert.doesNotMatch(composerPanelsSource, /<span>\{t\("app\.sendSteerDesc"\)\}<\/span>/);

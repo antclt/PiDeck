@@ -7,7 +7,7 @@
  * 行式布局（与 dsh-web 的 ProviderEditor 同款）：
  * 收起时一行 = 名称/displayName + API 密钥状态点 + 模型数 + 展开箭头（+ 删除）；
  * 展开后 = 主字段「API 密钥」输入框（credentials.set 只写）+「自定义设置」折叠区
- * （其余 schema 字段）+ 行式模型列表（DshModelsTable）。密钥状态点：
+ * （其余 schema 字段）+ 自定义模型编辑器（先铺底再改，避免清空目录）。密钥状态点：
  * 绿 = 已配置、红 = 缺失（仅当名单能提供该 ref 的状态信息时显示），无引用不显示。
  */
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
@@ -18,10 +18,12 @@ import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
+import { isDshCustomSettingsHiddenField } from "./dshFieldLabels";
 import { DshSchemaField, type DshNamespaceView } from "./DshSchemaForm";
 import { dictEntries, normalizeDshSchema, objectFields, pruneEmptyObjects, readPath, setPath, type DshSectionApi } from "./dshSchema";
 import { credentialRefFor } from "./dshCredentialRef";
-import { ModelsTable, type DshModelRow } from "./DshModelsTable";
+import { DshModelsEditor } from "./DshModelsEditor";
+import type { DshModelRow } from "./DshModelsTable";
 
 export type DshCredentialState = {
 	configured: boolean;
@@ -335,11 +337,11 @@ export function PiAiProvidersCard(props: {
 	}
 
 	const providersValue = (namespace.value as { providers?: unknown } | undefined)?.providers;
-	// 合并现值与 draft：draft 新增的 provider（添加后未保存）也要渲染成行
-	const mergedProvidersValue = {
-		...((providersValue ?? {}) as Record<string, unknown>),
-		...((draft.providers ?? {}) as Record<string, unknown>),
-	};
+	// 按 key 深合并：draft 往往只带 models，浅合并会盖掉已保存的 displayName/baseURL
+	const mergedProvidersValue = mergeProviderMaps(
+		(providersValue ?? {}) as Record<string, unknown>,
+		(draft.providers ?? {}) as Record<string, unknown>,
+	);
 	const entries = dictEntries(mergedProvidersValue);
 	const innerRefId = providersField.ref.inner;
 	if (innerRefId === undefined) {
@@ -438,14 +440,12 @@ export function PiAiProvidersCard(props: {
 		});
 	};
 
-	/** 模型行增删：models 数组在 provider 条目下（行内编辑由 ModelsTable 触发）。 */
-	const addModel = (providerKey: string) => {
+	/** 整表写入自定义 models：编辑器已按目录/已保存列表铺底，这里不再从空 draft 起步。 */
+	const setProviderModels = (providerKey: string, models: DshModelRow[]) => {
 		setDraft((prev) => {
 			const next = structuredClone(prev) as Record<string, unknown>;
 			const providers = (next.providers ?? {}) as Record<string, unknown>;
 			const provider = (providers[providerKey] ?? {}) as Record<string, unknown>;
-			const models = Array.isArray(provider.models) ? [...provider.models] : [];
-			models.push({ id: "", name: "" });
 			provider.models = models;
 			providers[providerKey] = provider;
 			next.providers = providers;
@@ -453,42 +453,10 @@ export function PiAiProvidersCard(props: {
 		});
 	};
 
-	const updateModel = (providerKey: string, index: number, field: string, value: unknown) => {
-		setDraft((prev) => {
-			const next = structuredClone(prev) as Record<string, unknown>;
-			const providers = (next.providers ?? {}) as Record<string, unknown>;
-			const provider = (providers[providerKey] ?? {}) as Record<string, unknown>;
-			const models = Array.isArray(provider.models) ? [...provider.models] : [];
-			const entry = { ...((models[index] as Record<string, unknown>) ?? {}) };
-			// 空值 = 删除字段：模型行输入清空后不向 DSH 提交空串配置
-			if (value === undefined || value === "") {
-				delete entry[field];
-			} else {
-				entry[field] = value;
-			}
-			models[index] = entry;
-			provider.models = models;
-			providers[providerKey] = provider;
-			next.providers = providers;
-			return next;
-		});
-	};
-
-	const removeModel = (providerKey: string, index: number) => {
-		setDraft((prev) => {
-			const next = structuredClone(prev) as Record<string, unknown>;
-			const providers = (next.providers ?? {}) as Record<string, unknown>;
-			const provider = (providers[providerKey] ?? {}) as Record<string, unknown>;
-			provider.models = Array.isArray(provider.models)
-				? provider.models.filter((_: unknown, itemIndex: number) => itemIndex !== index)
-				: [];
-			providers[providerKey] = provider;
-			next.providers = providers;
-			return next;
-		});
-	};
-
-	const providerProfileFields = objectFields(schema, inner).filter((field) => field.name !== "models");
+	// 密钥/凭证槽位已在卡片上方单独编辑，自定义设置只留 baseURL、协议、显示名等
+	const providerProfileFields = objectFields(schema, inner).filter(
+		(field) => !isDshCustomSettingsHiddenField(field.name, field.ref.meta),
+	);
 
 	return (
 		<div className="flex min-w-0 flex-col">
@@ -565,14 +533,15 @@ export function PiAiProvidersCard(props: {
 					const isOpen = expanded[entry.key] ?? false;
 					// 模型列表：draft 覆盖优先（新增/删除行即时反映），否则用现值
 					const draftModels = entryValue(entry.key, ["models"]);
-					const models = Array.isArray(draftModels)
-						? draftModels as DshModelRow[]
-						: Array.isArray((entry.value as { models?: unknown })?.models)
-							? (entry.value as { models: DshModelRow[] }).models
-							: [];
+					// 已保存列表必须读 namespace，不能读 entry.value：后者可能是未合并的 draft 碎片
+					const persisted = (namespace.value as { providers?: Record<string, { models?: unknown }> } | undefined)?.providers?.[entry.key]?.models;
+					const savedModels = Array.isArray(persisted) ? persisted as DshModelRow[] : [];
+					const models = Array.isArray(draftModels) ? draftModels as DshModelRow[] : savedModels;
 					const providerMeta = (entry.value ?? {}) as Record<string, unknown>;
-					const baseURL = typeof providerMeta.baseURL === "string" ? providerMeta.baseURL : "";
-					const api = typeof providerMeta.api === "string" ? providerMeta.api : "";
+					const baseURLValue = entryValue(entry.key, ["baseURL"]);
+					const apiValue = entryValue(entry.key, ["api"]);
+					const baseURL = typeof baseURLValue === "string" ? baseURLValue : "";
+					const api = typeof apiValue === "string" ? apiValue : "";
 					const displayName = typeof providerMeta.displayName === "string" ? providerMeta.displayName : "";
 					const keyRef = credentialRefFor(providerMeta, entry.key);
 					const providerCatalog = props.catalog?.[entry.key];
@@ -605,26 +574,31 @@ export function PiAiProvidersCard(props: {
 										ops={ops}
 									/>
 									<CustomSettings label={t("config.dsh.customSettings")}>
+										<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
 										{providerProfileFields.map((field) => (
 											<DshSchemaField
 												key={field.name}
 												schema={schema}
 												ref={field.ref}
-												path={[]}
+												path={[field.name]}
 												value={entryValue(entry.key, [field.name])}
 												secrets={namespace.secrets}
-												onChange={(path, next) => updateEntry(entry.key, [field.name, ...path], next)}
+												onChange={(path, next) => updateEntry(entry.key, path, next)}
 												writable={writable}
 											/>
 										))}
 									</CustomSettings>
-									<ModelsTable
+									<DshModelsEditor
 										models={models}
+										savedModels={savedModels}
 										catalog={providerCatalog}
 										writable={writable}
-										onAdd={() => addModel(entry.key)}
-										onUpdate={(index, field, value) => updateModel(entry.key, index, field, value)}
-										onRemove={(index) => removeModel(entry.key, index)}
+										providerKey={entry.key}
+										baseURL={baseURL}
+										api={api}
+										apiKeyDraft={keyDrafts[entry.key]}
+										credentialRef={keyRef}
+										onChange={(nextModels) => setProviderModels(entry.key, nextModels)}
 									/>
 								</div>
 							)}
@@ -723,43 +697,24 @@ export function DeepseekRouteCard(props: {
 		setDraft(nextDraft);
 	};
 
-	// models 数组的读写（ModelsTable 行内编辑）
-	const modelsValue = value(["models"]);
-	const models = Array.isArray(modelsValue) ? modelsValue as DshModelRow[] : [];
-	const baseFields = objectFields(schema, root).filter((field) => field.name !== "models");
+	// models：draft 覆盖优先；保存列表单独传给编辑器做铺底，避免首次自定义清空目录
+	const savedModels = Array.isArray((namespace.value as { models?: unknown } | undefined)?.models)
+		? (namespace.value as { models: DshModelRow[] }).models
+		: [];
+	const draftModels = readPath(draft, ["models"]);
+	const models = Array.isArray(draftModels) ? draftModels as DshModelRow[] : savedModels;
+	const baseURLValue = value(["baseURL"]);
+	const apiValue = value(["api"]);
+	const baseURL = typeof baseURLValue === "string" ? baseURLValue : "";
+	const api = typeof apiValue === "string" ? apiValue : "";
+	const baseFields = objectFields(schema, root).filter(
+		(field) => !isDshCustomSettingsHiddenField(field.name, field.ref.meta),
+	);
 
-	const addModel = () => {
+	const setModels = (nextModels: DshModelRow[]) => {
 		setDraft((prev) => {
 			const next = structuredClone(prev) as Record<string, unknown>;
-			const models = Array.isArray(next.models) ? [...next.models] : [];
-			models.push({ id: "", name: "" });
-			next.models = models;
-			return next;
-		});
-	};
-
-	const updateModel = (index: number, field: string, next: unknown) => {
-		setDraft((prev) => {
-			const nextDraft = structuredClone(prev) as Record<string, unknown>;
-			const models = Array.isArray(nextDraft.models) ? [...nextDraft.models] : [];
-			const entry = { ...((models[index] as Record<string, unknown>) ?? {}) };
-			if (next === undefined || next === "") {
-				delete entry[field];
-			} else {
-				entry[field] = next;
-			}
-			models[index] = entry;
-			nextDraft.models = models;
-			return nextDraft;
-		});
-	};
-
-	const removeModel = (index: number) => {
-		setDraft((prev) => {
-			const next = structuredClone(prev) as Record<string, unknown>;
-			next.models = Array.isArray(next.models)
-				? next.models.filter((_: unknown, itemIndex: number) => itemIndex !== index)
-				: [];
+			next.models = nextModels;
 			return next;
 		});
 	};
@@ -789,6 +744,7 @@ export function DeepseekRouteCard(props: {
 						<div className="grid gap-3 border-t border-border/40 px-3 py-3">
 							<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
 							<CustomSettings label={t("config.dsh.customSettings")}>
+								<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
 								{baseFields.map((field) => (
 									<DshSchemaField
 										key={field.name}
@@ -802,13 +758,17 @@ export function DeepseekRouteCard(props: {
 									/>
 								))}
 							</CustomSettings>
-							<ModelsTable
+							<DshModelsEditor
 								models={models}
+								savedModels={savedModels}
 								catalog={props.catalog}
 								writable={writable}
-								onAdd={addModel}
-								onUpdate={updateModel}
-								onRemove={removeModel}
+								providerKey="deepseek-official"
+								baseURL={baseURL}
+								api={api}
+								apiKeyDraft={keyDraft}
+								credentialRef={keyRef}
+								onChange={setModels}
 							/>
 						</div>
 					)}
@@ -816,6 +776,26 @@ export function DeepseekRouteCard(props: {
 			</div>
 		</div>
 	);
+}
+
+/** 现值与草稿按 provider key 合并；同一 key 下对象字段再浅合并一层。 */
+function mergeProviderMaps(
+	saved: Record<string, unknown>,
+	draft: Record<string, unknown>,
+): Record<string, unknown> {
+	const next: Record<string, unknown> = { ...saved };
+	for (const [key, draftEntry] of Object.entries(draft)) {
+		const savedEntry = saved[key];
+		if (
+			savedEntry && typeof savedEntry === "object" && !Array.isArray(savedEntry)
+			&& draftEntry && typeof draftEntry === "object" && !Array.isArray(draftEntry)
+		) {
+			next[key] = { ...(savedEntry as Record<string, unknown>), ...(draftEntry as Record<string, unknown>) };
+		} else {
+			next[key] = draftEntry;
+		}
+	}
+	return next;
 }
 
 function Empty(props: { text: string }) {

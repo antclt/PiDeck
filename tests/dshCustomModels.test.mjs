@@ -1,0 +1,171 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import ts from "typescript";
+import vm from "node:vm";
+
+function asJson(value) {
+	return JSON.parse(JSON.stringify(value));
+}
+
+function loadDshModelsModule() {
+	const source = readFileSync("src/renderer/src/config/dshModels.ts", "utf8");
+	const { outputText } = ts.transpileModule(source, {
+		compilerOptions: {
+			module: ts.ModuleKind.CommonJS,
+			target: ts.ScriptTarget.ES2022,
+		},
+	});
+	const sandbox = {
+		exports: {},
+		require: (id) => {
+			if (id === "./modelsUtils") {
+				return {
+					buildModelsFromFetchedSelection: (fetched, selectedIds, existing) => {
+						const existingIds = new Set(existing.map((model) => model.id));
+						const selected = new Set(selectedIds);
+						return fetched
+							.filter((model) => selected.has(model.id) && !existingIds.has(model.id))
+							.map((model) => ({ id: model.id, name: model.name ?? model.id }));
+					},
+				};
+			}
+			if (id === "./providerHeaders") {
+				return {
+					KNOWN_PROVIDER_ENDPOINTS: {
+						deepseek: { baseUrl: "https://api.deepseek.com/v1", apiType: "openai-completions" },
+						openai: { baseUrl: "https://api.openai.com/v1", apiType: "openai-completions" },
+					},
+				};
+			}
+			throw new Error(`Unexpected require: ${id}`);
+		},
+	};
+	vm.runInNewContext(outputText, sandbox, { filename: "dshModels.ts" });
+	return sandbox.exports;
+}
+
+test("first custom add while inheriting catalog keeps catalog then appends blank", () => {
+	const { appendBlankDshModel } = loadDshModelsModule();
+	const next = appendBlankDshModel({
+		catalog: [
+			{ id: "deepseek-chat", name: "DeepSeek Chat" },
+			{ id: "deepseek-reasoner", name: "DeepSeek Reasoner" },
+		],
+	});
+	assert.deepEqual(asJson(next), [
+		{ id: "deepseek-chat", name: "DeepSeek Chat" },
+		{ id: "deepseek-reasoner", name: "DeepSeek Reasoner" },
+		{ id: "", name: "" },
+	]);
+});
+
+test("adding onto saved custom models does not wipe them", () => {
+	const { appendBlankDshModel } = loadDshModelsModule();
+	const next = appendBlankDshModel({
+		savedModels: [{ id: "grok-4", name: "Grok 4", contextWindow: 200000 }],
+		catalog: [{ id: "should-not-replace", name: "Catalog" }],
+	});
+	assert.equal(next.length, 2);
+	assert.deepEqual(asJson(next[0]), { id: "grok-4", name: "Grok 4", contextWindow: 200000 });
+	assert.deepEqual(asJson(next[1]), { id: "", name: "" });
+});
+
+test("empty draft falls back to saved or catalog instead of wiping them", () => {
+	const { seedDshModelsForCustomEdit, appendBlankDshModel } = loadDshModelsModule();
+	assert.deepEqual(
+		asJson(seedDshModelsForCustomEdit({
+			draftModels: [],
+			savedModels: [{ id: "saved", name: "Saved" }],
+			catalog: [{ id: "catalog" }],
+		})),
+		[{ id: "saved", name: "Saved" }],
+	);
+	assert.deepEqual(
+		asJson(appendBlankDshModel({
+			draftModels: [],
+			catalog: [{ id: "catalog", name: "Catalog" }],
+		})),
+		[
+			{ id: "catalog", name: "Catalog" },
+			{ id: "", name: "" },
+		],
+	);
+});
+
+test("editing a saved custom row does not drop sibling models", () => {
+	const { updateDshModelAt } = loadDshModelsModule();
+	const next = updateDshModelAt({
+		savedModels: [
+			{ id: "a", name: "A" },
+			{ id: "b", name: "B" },
+		],
+		index: 1,
+		field: "name",
+		value: "Bee",
+	});
+	assert.deepEqual(asJson(next), [
+		{ id: "a", name: "A" },
+		{ id: "b", name: "Bee" },
+	]);
+});
+
+test("removing from inherited catalog keeps the remaining catalog rows", () => {
+	const { removeDshModelAt } = loadDshModelsModule();
+	const next = removeDshModelAt({
+		catalog: [
+			{ id: "keep", name: "Keep" },
+			{ id: "drop", name: "Drop" },
+		],
+		index: 1,
+	});
+	assert.deepEqual(asJson(next), [{ id: "keep", name: "Keep" }]);
+});
+
+test("appending fetched models keeps existing rows and skips duplicates", () => {
+	const { appendFetchedDshModels } = loadDshModelsModule();
+	const next = appendFetchedDshModels({
+		savedModels: [{ id: "already", name: "Already" }],
+		catalog: [{ id: "catalog-only" }],
+		fetched: [
+			{ id: "already", name: "Already Remote" },
+			{ id: "new-a", name: "New A" },
+			{ id: "new-b", name: "New B" },
+		],
+		selectedIds: ["already", "new-a"],
+	});
+	assert.deepEqual(asJson(next), [
+		{ id: "already", name: "Already" },
+		{ id: "new-a", name: "New A" },
+	]);
+});
+
+test("fetch endpoint prefers configured baseURL then known provider aliases", () => {
+	const { resolveDshFetchEndpoint } = loadDshModelsModule();
+	assert.deepEqual(
+		asJson(resolveDshFetchEndpoint({
+			providerKey: "deepseek-official",
+			baseURL: "https://gateway.example/v1",
+			api: "openai-completions",
+		})),
+		{ baseUrl: "https://gateway.example/v1", apiType: "openai-completions" },
+	);
+	assert.deepEqual(asJson(resolveDshFetchEndpoint({ providerKey: "deepseek-official" })), {
+		baseUrl: "https://api.deepseek.com/v1",
+		apiType: "openai-completions",
+	});
+	assert.equal(resolveDshFetchEndpoint({ providerKey: "unknown-local" }), undefined);
+});
+
+test("DSH cards seed custom models instead of starting from an empty draft array", () => {
+	const cards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
+	const editor = readFileSync("src/renderer/src/config/DshModelsEditor.tsx", "utf8");
+	assert.match(cards, /DshModelsEditor/);
+	assert.match(editor, /appendBlankDshModel/);
+	assert.match(editor, /appendFetchedDshModels/);
+	assert.match(editor, /desktopApi\.config\.fetchModels/);
+	assert.doesNotMatch(
+		cards,
+		/const models = Array.isArray\((?:provider|next)\.models\) \? \[\.\.\.(?:provider|next)\.models\] : \[\];\s*models\.push\(\{ id: ""/,
+	);
+});

@@ -224,6 +224,12 @@ import {
 	syncForeignSessions,
 	type DshForeignSyncDeps,
 } from "./dsh/dshForeignSync";
+import { scanDshSessionHeaders } from "./dsh/dshForeignSessionScan";
+import {
+	adoptUngroupedSessions,
+	listUngroupedAdoptCandidatesFromDisk,
+} from "./dsh/dshUngroupedAdopt";
+import { readWorkspaceRegistry } from "./dsh/dshWorkspaceRegistry";
 import { PiLocator } from "./pi/PiLocator";
 import { testPiProxy } from "./pi/PiProxyTester";
 import { SessionScanner } from "./sessions/SessionScanner";
@@ -365,7 +371,7 @@ const quitCleanup = new QuitCleanupRegistry();
 
 // ── DSH 外部会话同步（dshForeignSync 编排；本文件只做依赖装配）────────────
 // 清单来自磁盘只读扫描（不启动 host）；目标项目按会话自己的 cwd 建/挂，无 cwd 才兑底。
-// 标题用投影 / cwd 末段 / i18n 兜底——批量不同步 sessions.history（会抢 dsh-web）。
+// 标题优先官方 session_projcache；cwd 末段只作占位，下次扫描有投影名会覆盖。
 // 依赖闭包延迟引用模块级实例（registerIpc/whenReady 阶段才赋值），调用时已就绪。
 const foreignSyncDeps: DshForeignSyncDeps = {
 	listForeignSessions: () => dshHost.listForeignSessions(),
@@ -379,6 +385,11 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 	ensureFallbackProject: () =>
 		projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions")),
 	createDraft: (input) => sessionCatalog.createDraft(input),
+	// 纠正归属时看现有标题是不是 cwd 兑底占位；有官方投影名时必须覆盖。
+	getExistingDraft: (dshSessionId) => {
+		const existing = sessionCatalog.listEntries().find((entry) => entry.dshSessionId === dshSessionId);
+		return existing ? { title: existing.title } : undefined;
+	},
 	getEnvironment: () => (settingsStore.get().wslEnabled ? "wsl" : "native"),
 	// 惰性：此对象在模块顶层创建，此时 settingsStore 尚未赋值，eager mainCopy 会崩。
 	fallbackTitle: () => mainCopy("session.dshUntitled"),
@@ -2561,6 +2572,25 @@ function registerIpc() {
 			// 外部会话全量同步：catalog 未映射的磁盘根会话全部导入（不启动 host）。
 			// 配置页「全部导入」与启动自动同步共用此入口。
 			syncDshForeignSessions: () => runDshForeignSync(),
+			listUngroupedAdoptable: async () => listUngroupedAdoptCandidatesFromDisk(dshHost.getHomeDir()),
+			adoptUngroupedSessions: async () => {
+				// 必须我们自己的 host 来写 workspace 记账。dsh-web 还占着同一
+				// DSH_HOME 时不要点——双 host 会互相覆盖 session log。
+				const result = await adoptUngroupedSessions({
+					scanHeaders: () => scanDshSessionHeaders(dshHost.getHomeDir()),
+					listWorkspaces: () => readWorkspaceRegistry(dshHost.getHomeDir()),
+					adoptIntoWorkspace: ({ workspaceId, sessionId }) =>
+						dshHost.adoptSessionIntoWorkspace(workspaceId, sessionId),
+					onError: (dshSessionId, error) => {
+						void appLogger.warn("session", "Adopt ungrouped DSH session failed", {
+							dshSessionId,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					},
+				});
+				void appLogger.info("session", "Adopted ungrouped DSH sessions", result);
+				return result;
+			},
 			// G14：DSH 归档/恢复（目录移动 + manifest，与 pi 归档同语义，不销毁数据）
 			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),
 			unarchiveDshSession: (dshSessionId) => dshHost.unarchiveSession(dshSessionId),
