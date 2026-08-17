@@ -36,6 +36,9 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 /** 两段图例色：对话=蓝、系统+工具=紫（dsh ROWS 的 messages/tools 色系）。 */
 const COLOR_CONVERSATION = "var(--color-context-conversation, #2563eb)";
 const COLOR_SYSTEM_TOOLS = "var(--color-context-system-tools, rgb(167, 139, 250))";
+/** host contextBreakdown 三段图例色（dsh-web ROWS 色系）：系统=蓝灰、工具=紫、对话=蓝。 */
+const COLOR_SYSTEM = "var(--color-context-system, #94a3b8)";
+const COLOR_TOOLS = "var(--color-context-tools, rgb(167, 139, 250))";
 
 /** token 数紧凑格式化（dsh StatsLine 同款）：<1K 原样，<1M 用 K，之后用 M；
  *  ≥100 取整，其余保留一位小数。 */
@@ -68,16 +71,34 @@ export function contextOccupancy(
 	};
 }
 
-/** 两段占比：对话 = 消息估算 token（封顶 contextTokens），系统+工具为反推余量。
+/** 占用构成：
+ *  - breakdown：host contextBreakdown 投影（dsh），系统/工具/对话三段直接可用（0 也是有效值）；
+ *  - estimate：无投影时的反推两段（对话 = 消息估算，系统+工具 = total − 对话，pi 路径）。
  *  返回 null 表示无估算数据（渲染单段条）。 */
-export function contextSegments(state: Pick<AgentRuntimeState, "contextTokens" | "contextMessageTokens"> | undefined):
-	| { conversation: number; systemTools: number }
-	| null {
+export type ContextSegments =
+	| { kind: "breakdown"; system: number; tools: number; conversation: number }
+	| { kind: "estimate"; conversation: number; systemTools: number };
+
+export function contextSegments(
+	state: Pick<
+		AgentRuntimeState,
+		"contextTokens" | "contextMessageTokens" | "contextSystemTokens" | "contextToolsTokens"
+	> | undefined,
+): ContextSegments | null {
+	// DSH host contextBreakdown 投影优先：三段数值就是 token-meter 的构成估算（dsh-web 同源）
+	if (state?.contextSystemTokens != null && state?.contextToolsTokens != null) {
+		return {
+			kind: "breakdown",
+			system: state.contextSystemTokens,
+			tools: state.contextToolsTokens,
+			conversation: state.contextMessageTokens ?? 0,
+		};
+	}
 	const total = state?.contextTokens;
 	const messageTokens = state?.contextMessageTokens;
 	if (total == null || total <= 0 || messageTokens == null || messageTokens <= 0) return null;
 	const conversation = Math.min(messageTokens, total);
-	return { conversation, systemTools: Math.max(0, total - conversation) };
+	return { kind: "estimate", conversation, systemTools: Math.max(0, total - conversation) };
 }
 
 export function SessionContextMeter(props: {
@@ -194,6 +215,21 @@ export function SessionContextMeter(props: {
 	const figures = [context.usedTokens, context.contextWindow].every((v) => v != null)
 		? `~${formatTokens(context.usedTokens!)} / ${formatTokens(context.contextWindow!)}`
 		: undefined;
+	// host contextBreakdown 三段占用条（dsh-web 同宽算法：各自占 breakdownTotal 份额 × percent）
+	const breakdownSegments = segments?.kind === "breakdown"
+		? (() => {
+			const breakdownTotal = segments.system + segments.tools + segments.conversation;
+			if (breakdownTotal <= 0) return [];
+			const parts = [
+				{ key: "system", tokens: segments.system, color: COLOR_SYSTEM },
+				{ key: "tools", tokens: segments.tools, color: COLOR_TOOLS },
+				{ key: "conversation", tokens: segments.conversation, color: COLOR_CONVERSATION },
+			];
+			return parts
+				.filter((part) => part.tokens > 0)
+				.map((part) => ({ key: part.key, color: part.color, width: Math.min(100, (percent * part.tokens) / breakdownTotal) }));
+		})()
+		: undefined;
 	const showCompact = props.onCompact !== undefined;
 	// 与旧右上角紧凑徽章一致的 urgency 色阶：≥90 红（危险）/ ≥70 黄（警告）/ 其余默认
 	const compactUrgency =
@@ -258,6 +294,17 @@ export function SessionContextMeter(props: {
 								className="h-full rounded-full bg-text-tertiary"
 								style={{ width: `${percent}%` }}
 							/>
+						) : segments.kind === "breakdown" ? (
+							// host contextBreakdown 三段（dsh-web 同宽算法：各自占 breakdownTotal 份额 × percent）
+							<div className="flex h-full overflow-hidden rounded-full">
+								{breakdownSegments?.map((part) => (
+									<div
+										key={part.key}
+										className="h-full"
+										style={{ width: `${part.width}%`, backgroundColor: part.color }}
+									/>
+								))}
+							</div>
 						) : (
 							// 两段：对话（蓝）在前、系统+工具（紫）在后，宽度按占 contextTokens 比例
 							<div className="flex h-full overflow-hidden rounded-full">
@@ -280,29 +327,67 @@ export function SessionContextMeter(props: {
 					</div>
 					{segments !== null && (
 						<div className="mt-2 space-y-0.5">
-							<div className="flex items-center gap-1.5">
-								<span
-									className="size-2 flex-none rounded-[2px]"
-									style={{ backgroundColor: COLOR_CONVERSATION }}
-								/>
-								<span>{t("sessionContext.conversation")}</span>
-								<span className="ml-auto tabular-nums text-text-tertiary">
-									~{formatTokens(segments.conversation)}
-								</span>
-							</div>
-							<div className="flex items-center gap-1.5">
-								<span
-									className="size-2 flex-none rounded-[2px]"
-									style={{ backgroundColor: COLOR_SYSTEM_TOOLS }}
-								/>
-								<span>{t("sessionContext.systemTools")}</span>
-								<span className="ml-auto tabular-nums text-text-tertiary">
-									~{formatTokens(segments.systemTools)}
-								</span>
-							</div>
+							{segments.kind === "breakdown" ? (
+								// host breakdown 三段图例（dsh-web ROWS 同序）：系统 / 工具 / 对话
+								<>
+									<div className="flex items-center gap-1.5">
+										<span
+											className="size-2 flex-none rounded-[2px]"
+											style={{ backgroundColor: COLOR_SYSTEM }}
+										/>
+										<span>{t("sessionContext.system")}</span>
+										<span className="ml-auto tabular-nums text-text-tertiary">
+											~{formatTokens(segments.system)}
+										</span>
+									</div>
+									<div className="flex items-center gap-1.5">
+										<span
+											className="size-2 flex-none rounded-[2px]"
+											style={{ backgroundColor: COLOR_TOOLS }}
+										/>
+										<span>{t("sessionContext.tools")}</span>
+										<span className="ml-auto tabular-nums text-text-tertiary">
+											~{formatTokens(segments.tools)}
+										</span>
+									</div>
+									<div className="flex items-center gap-1.5">
+										<span
+											className="size-2 flex-none rounded-[2px]"
+											style={{ backgroundColor: COLOR_CONVERSATION }}
+										/>
+										<span>{t("sessionContext.conversation")}</span>
+										<span className="ml-auto tabular-nums text-text-tertiary">
+											~{formatTokens(segments.conversation)}
+										</span>
+									</div>
+								</>
+							) : (
+								<>
+									<div className="flex items-center gap-1.5">
+										<span
+											className="size-2 flex-none rounded-[2px]"
+											style={{ backgroundColor: COLOR_CONVERSATION }}
+										/>
+										<span>{t("sessionContext.conversation")}</span>
+										<span className="ml-auto tabular-nums text-text-tertiary">
+											~{formatTokens(segments.conversation)}
+										</span>
+									</div>
+									<div className="flex items-center gap-1.5">
+										<span
+											className="size-2 flex-none rounded-[2px]"
+											style={{ backgroundColor: COLOR_SYSTEM_TOOLS }}
+										/>
+										<span>{t("sessionContext.systemTools")}</span>
+										<span className="ml-auto tabular-nums text-text-tertiary">
+											~{formatTokens(segments.systemTools)}
+										</span>
+									</div>
+								</>
+							)}
 						</div>
 					)}
-					{(detail.detailRows.length > 0 || detail.replyPerfRows.length > 0) && (
+					{(detail.detailRows.length > 0 || detail.replyPerfRows.length > 0 || detail.sessionStatRows.length > 0) && (
 						<div className="mt-2 space-y-0.5 border-t border-border pt-2">
 							{detail.detailRows.map((row) => (
 								<div
@@ -321,6 +406,22 @@ export function SessionContextMeter(props: {
 								{t("ctx.detail.lastReply")}
 							</div>
 							{detail.replyPerfRows.map((row) => (
+								<div
+									key={row.label}
+									className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5"
+								>
+									<span className="shrink-0 text-text-secondary">{row.label}</span>
+									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
+								</div>
+							))}
+						</div>
+					)}
+					{detail.sessionStatRows.length > 0 && (
+						<div className="mt-2.5 space-y-0.5 border-t border-border pt-2">
+							<div className="px-0.5 text-micro font-semibold uppercase tracking-wide text-text-tertiary">
+								{t("ctx.detail.sessionStats")}
+							</div>
+							{detail.sessionStatRows.map((row) => (
 								<div
 									key={row.label}
 									className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5"

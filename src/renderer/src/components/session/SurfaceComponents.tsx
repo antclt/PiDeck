@@ -219,6 +219,8 @@ export type SessionStatusDetail = {
 	detailRows: SessionDetailRow[];
 	/** 最近一条回复的性能指标（TTFT/总耗时/tps）：与上下文累计量分开展示，避免误读为整段会话均值 */
 	replyPerfRows: SessionDetailRow[];
+	/** DSH 会话统计（host sessionStats 投影：回合/步骤、墙钟、平均首字、生成速度） */
+	sessionStatRows: SessionDetailRow[];
 	hasDetail: boolean;
 };
 
@@ -234,6 +236,7 @@ export function buildSessionStatusDetail(
 				| "inputTokens" | "outputTokens"
 				| "cacheRead" | "cacheWrite" | "cacheTotal" | "cacheHitPercent"
 				| "ttftMs" | "totalMs" | "tps" | "cost"
+				| "dshSessionStats"
 		  >
 		| undefined,
 	averageCacheHit: number | undefined,
@@ -241,7 +244,8 @@ export function buildSessionStatusDetail(
 ): SessionStatusDetail {
 	const detailRows: SessionDetailRow[] = [];
 	const replyPerfRows: SessionDetailRow[] = [];
-	if (!state) return { detailRows, replyPerfRows, hasDetail: false };
+	const sessionStatRows: SessionDetailRow[] = [];
+	if (!state) return { detailRows, replyPerfRows, sessionStatRows, hasDetail: false };
 	// 美元→人民币估算汇率（仅用于费用提示的便捷换算，非实时牌价；
 	// 如后续需要跟随实时汇率，可升级为设置项 usdToCnyRate）
 	const cnyAmount = state.cost != null
@@ -299,7 +303,33 @@ export function buildSessionStatusDetail(
 		detailRows.push({ label: t("ctx.detail.cost"), value: `$${state.cost.toFixed(3)}`, emphasis: true });
 		detailRows.push({ label: t("ctx.detail.costCny"), value: cnyAmount ?? "-", emphasis: true });
 	}
-	return { detailRows, replyPerfRows, hasDetail: detailRows.length > 0 || replyPerfRows.length > 0 };
+	// DSH 会话统计（host sessionStats 投影，dsh-web StatsLine 同源）：整段日志的
+	// 回合/步骤计数与墙钟汇总。与 pi 的「上次回复」性能组语义不同，独立成组展示。
+	const sessionStats = state.dshSessionStats;
+	if (sessionStats) {
+		sessionStatRows.push({
+			label: t("ctx.detail.turnsSteps"),
+			value: `${sessionStats.turns} / ${sessionStats.steps}`,
+		});
+		if (sessionStats.llmMs > 0) {
+			sessionStatRows.push({ label: t("ctx.detail.llmDuration"), value: formatDuration(sessionStats.llmMs) });
+		}
+		if (sessionStats.toolMs > 0) {
+			sessionStatRows.push({ label: t("ctx.detail.toolDuration"), value: formatDuration(sessionStats.toolMs) });
+		}
+		if (sessionStats.ttftAvgMs != null) {
+			sessionStatRows.push({ label: t("ctx.detail.ttftAverage"), value: formatDuration(sessionStats.ttftAvgMs) });
+		}
+		if (sessionStats.tokensPerSecond != null) {
+			sessionStatRows.push({ label: t("ctx.detail.tps"), value: `${sessionStats.tokensPerSecond.toFixed(0)} tok/s` });
+		}
+	}
+	return {
+		detailRows,
+		replyPerfRows,
+		sessionStatRows,
+		hasDetail: detailRows.length > 0 || replyPerfRows.length > 0 || sessionStatRows.length > 0,
+	};
 }
 
 export function SessionStatus(props: {
@@ -319,7 +349,7 @@ export function SessionStatus(props: {
 			: undefined
 	);
 	const averageCacheHitSampleCount = state.cacheHitSampleCount ?? history.length;
-	const { detailRows, replyPerfRows, hasDetail } = buildSessionStatusDetail(
+	const { detailRows, replyPerfRows, sessionStatRows, hasDetail } = buildSessionStatusDetail(
 		state,
 		averageCacheHit,
 		averageCacheHitSampleCount,
@@ -389,6 +419,19 @@ export function SessionStatus(props: {
 								{t("ctx.detail.lastReply")}
 							</div>
 							{replyPerfRows.map((row) => (
+								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
+									<span className="shrink-0 text-muted-foreground">{row.label}</span>
+									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
+								</div>
+							))}
+						</div>
+					)}
+					{sessionStatRows.length > 0 && (
+						<div className="mt-2.5 grid gap-1 border-t border-border/70 pt-2">
+							<div className="px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground">
+								{t("ctx.detail.sessionStats")}
+							</div>
+							{sessionStatRows.map((row) => (
 								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
 									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>

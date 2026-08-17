@@ -26,12 +26,18 @@ import type { DshHost } from "./DshHost";
 import { renderDshSessionHtml, sanitizeExportFileName } from "./dshSessionHtmlExport";
 import { projectDshEvent, type DshProjection } from "./dshEventProjector";
 import {
+	cacheHitPercentOf,
 	collectDshProcessEvent,
 	collectDshProcessEvents,
+	deriveDshSessionStats,
 	estimateContextTokens,
 	parseContextBreakdownProjection,
 	parseContextPressureProjection,
+	parseSessionStatsProjection,
+	parseTokenUsageProjection,
 	pushDshProcessEvent,
+	type DshSessionStatsProjection,
+	type DshUsageTotals,
 } from "./dshProcessEvents";
 import {
 	applyDshControlEvent,
@@ -293,10 +299,13 @@ export class DshAgentManager implements SessionAgentGateway {
 			}
 		}
 		// attach 初值：list 的 projections.values 携带 host 折叠好的 contextPressure /
-		// contextBreakdown（dsh-web ContextMeter 同源），打开历史会话即可显示占用圆环。
+		// contextBreakdown / tokenUsage / sessionStats（dsh-web ContextMeter/StatsLine 同源），
+		// 打开历史会话即可显示占用圆环与会话统计。
 		if (attached) {
 			runtime.contextPressure = parseContextPressureProjection(attachProjectionValues);
 			runtime.contextBreakdown = parseContextBreakdownProjection(attachProjectionValues);
+			runtime.usageTotals = parseTokenUsageProjection(attachProjectionValues);
+			runtime.sessionStats = parseSessionStatsProjection(attachProjectionValues);
 		}
 		// attach 初值同步：host 里已有标题（list 投影）时立即写回 catalog——
 		// 否则重启后侧栏一直显示 draft 占位名（如「pi-desktop DSH」）。
@@ -429,6 +438,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			contextPressure: old.contextPressure,
 			contextBreakdown: old.contextBreakdown,
 			contextWindow: old.contextWindow,
+			usageTotals: old.usageTotals,
+			sessionStats: old.sessionStats,
 		};
 		// 拉历史尾部投影为初始消息（重启后时间线恢复旧对话，同 create attach 路径）
 		const history = await client.sessions.history({ sessionId: dshSessionId, maxMessages: 200 }).catch(() => null);
@@ -695,6 +706,9 @@ export class DshAgentManager implements SessionAgentGateway {
 			typeof contextTokens === "number" && typeof contextWindow === "number" && contextWindow > 0
 				? Math.min(100, Math.round((contextTokens / contextWindow) * 100))
 				: undefined;
+		// 用量：优先 host tokenUsage 投影（整段日志累计，dsh-web StatsLine 同源），
+		// 缺失（token-meter 未挂载/未推送）时回退最近一步 usage（G16）。
+		const usage = runtime.usageTotals ?? runtime.usage;
 		return {
 			isStreaming: runtime.isStreaming,
 			isCompacting: runtime.isCompacting === true,
@@ -713,13 +727,23 @@ export class DshAgentManager implements SessionAgentGateway {
 			contextWindow: typeof contextWindow === "number" ? contextWindow : undefined,
 			contextPercent: contextPercent,
 			contextMessageTokens: typeof contextMessageTokens === "number" ? contextMessageTokens : undefined,
-			// G16：usage 指标（adapter 报告时才有）
-			inputTokens: runtime.usage?.inputTokens,
-			outputTokens: runtime.usage?.outputTokens,
-			cacheRead: runtime.usage?.cacheReadTokens,
-			cacheWrite: runtime.usage?.cacheWriteTokens,
-			cacheTotal: runtime.usage
-				? (runtime.usage.cacheReadTokens ?? 0) + (runtime.usage.cacheWriteTokens ?? 0)
+			// host contextBreakdown 的系统/工具两段（dsh-web ContextMeter 三段图例同源；
+			// 0 是有效值，undefined 表示无投影）
+			contextSystemTokens: breakdown?.systemTokens,
+			contextToolsTokens: breakdown?.toolsTokens,
+			// G16：usage 指标（tokenUsage 累计投影优先；缺失时最近一步 usage）
+			inputTokens: usage?.inputTokens,
+			outputTokens: usage?.outputTokens,
+			cacheRead: usage?.cacheReadTokens,
+			cacheWrite: usage?.cacheWriteTokens,
+			cacheTotal: usage
+				? (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+				: undefined,
+			// 缓存命中率：cacheRead ÷ (input + cacheRead + cacheWrite)，与 pi/dsh-web 同公式
+			cacheHitPercent: cacheHitPercentOf(usage),
+			// 会话统计（host sessionStats 投影；回合/步骤/墙钟汇总 → 平均首字/生成速度）
+			dshSessionStats: runtime.sessionStats
+				? deriveDshSessionStats(runtime.sessionStats)
 				: undefined,
 		};
 	}
@@ -1354,10 +1378,11 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/**
-	 * mux session/projection 帧 → runtime 投影缓存（上下文圆环数据源）。
-	 * 只消费本项目消费的投影单元（contextPressure/contextBreakdown），其余键忽略——
-	 * 渲染层队列/后台任务展示（session/queue、session/jobs）如需接入，在此扩展。
-	 * value 为 host schema 校验后的单元值，按字段名结构性收窄（与 dsh-web 同协议）。
+	 * mux session/projection 帧 → runtime 投影缓存（上下文圆环/会话统计数据源）。
+	 * 只消费本项目消费的投影单元（contextPressure/contextBreakdown/tokenUsage/sessionStats），
+	 * 其余键忽略——渲染层队列/后台任务展示（session/queue、session/jobs）如需接入，在此扩展。
+	 * 帧的 value 是 host 按 onChanged 原样下发的单元值本体（无 {key: value} 包装）；
+	 * 解析器（parse*Projection）统一兼容包装形（attach projections.values）与单元值形（帧）。
 	 */
 	private applyProjectionFrame(
 		runtime: DshAgentRuntime,
@@ -1376,6 +1401,22 @@ export class DshAgentManager implements SessionAgentGateway {
 			const parsed = parseContextBreakdownProjection(payload.value);
 			if (parsed !== undefined) {
 				runtime.contextBreakdown = parsed;
+				this.emitRuntimeState(runtime.tab.id);
+			}
+			return;
+		}
+		if (key === "tokenUsage") {
+			const parsed = parseTokenUsageProjection(payload.value);
+			if (parsed !== undefined) {
+				runtime.usageTotals = parsed;
+				this.emitRuntimeState(runtime.tab.id);
+			}
+			return;
+		}
+		if (key === "sessionStats") {
+			const parsed = parseSessionStatsProjection(payload.value);
+			if (parsed !== undefined) {
+				runtime.sessionStats = parsed;
 				this.emitRuntimeState(runtime.tab.id);
 			}
 			return;
@@ -1746,6 +1787,11 @@ type DshAgentRuntime = {
 	lastProjectedSeq?: number;
 	/** 最近一次 assistant 回合的 token 用量（G16；assistant/message 事件投影更新）。 */
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+	/** 会话累计 token 用量（host tokenUsage 投影；整段日志累计，dsh-web StatsLine 同源）。
+	 *  优先于 usage（最近一步），缺失时回退 usage。 */
+	usageTotals?: DshUsageTotals;
+	/** 会话统计（host sessionStats 投影；整段日志回合/步骤计数与墙钟汇总，dsh-web StatsLine 同源）。 */
+	sessionStats?: DshSessionStatsProjection;
 	/** DSH 当轮真实系统提示（request/header 事件投影；attach/backfill 重放与 mux 实时双来源）。 */
 	systemPrompt?: string;
 	/**

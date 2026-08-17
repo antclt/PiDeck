@@ -34,6 +34,10 @@ const {
 	estimateContextTokens,
 	parseContextPressureProjection,
 	parseContextBreakdownProjection,
+	parseTokenUsageProjection,
+	parseSessionStatsProjection,
+	deriveDshSessionStats,
+	cacheHitPercentOf,
 	DSH_PROCESS_EVENTS_LIMIT,
 } = loadModule();
 
@@ -144,6 +148,26 @@ test("parseContextPressureProjection returns undefined for empty or foreign valu
 	assert.equal(parseContextPressureProjection(undefined), undefined);
 });
 
+test("projection parsers accept the unwrapped mux-frame unit value", () => {
+	// 回归：mux session/projection 帧的 value 是单元值本体（host onChanged 原样下发），
+	// 不是 attach projections.values 的 { key: 单元值 } 包装；之前帧被静默丢弃，
+	// 运行中会话的圆环永远走字符估算兜底（表现 = 「dsh-web 准、PiDeck 不准」）。
+	const pressure = parseContextPressureProjection({ pressureTokens: 1200, projectedTokens: 1500, contextWindow: 64_000 });
+	assert.equal(pressure.pressureTokens, 1200);
+	assert.equal(pressure.projectedTokens, 1500);
+	assert.equal(pressure.contextWindow, 64_000);
+	const breakdown = parseContextBreakdownProjection({ systemTokens: 900, toolsTokens: 300, messageTokens: 4200 });
+	assert.equal(breakdown.systemTokens, 900);
+	assert.equal(breakdown.toolsTokens, 300);
+	assert.equal(breakdown.messageTokens, 4200);
+	const usage = parseTokenUsageProjection({ uncachedInputTokens: 1200, outputTokens: 800, cacheReadTokens: 6400, cacheWriteTokens: 100 });
+	assert.equal(usage.inputTokens, 1200);
+	assert.equal(usage.cacheReadTokens, 6400);
+	const stats = parseSessionStatsProjection({ turns: 3, steps: 7, llmMs: 12_000, toolMs: 4_000, ttftMs: 900, ttftSteps: 3, decodeMs: 8_000, decodeTokens: 2_400 });
+	assert.equal(stats.turns, 3);
+	assert.equal(stats.decodeTokens, 2_400);
+});
+
 test("parseContextBreakdownProjection reads heuristic composition", () => {
 	const parsed = parseContextBreakdownProjection({
 		contextBreakdown: { systemTokens: 900, toolsTokens: 300, messageTokens: 4200 },
@@ -181,4 +205,65 @@ test("estimateContextTokens skips empty and missing text", () => {
 	assert.equal(estimateContextTokens([]), 0);
 	// 不足 4 字符按 0 处理（floor）
 	assert.equal(estimateContextTokens([{ role: "user", text: "abc" }]), 0);
+});
+
+test("parseTokenUsageProjection maps uncachedInput to input totals", () => {
+	const parsed = parseTokenUsageProjection({
+		tokenUsage: { uncachedInputTokens: 1200, outputTokens: 800, cacheReadTokens: 6400, cacheWriteTokens: 100 },
+	});
+	assert.equal(parsed.inputTokens, 1200);
+	assert.equal(parsed.outputTokens, 800);
+	assert.equal(parsed.cacheReadTokens, 6400);
+	assert.equal(parsed.cacheWriteTokens, 100);
+});
+
+test("parseTokenUsageProjection tolerates partial and foreign values", () => {
+	const parsed = parseTokenUsageProjection({ tokenUsage: { outputTokens: 50 } });
+	assert.equal(parsed.inputTokens, 0);
+	assert.equal(parsed.outputTokens, 50);
+	assert.equal(parseTokenUsageProjection({}), undefined);
+	assert.equal(parseTokenUsageProjection({ tokenUsage: {} }), undefined);
+	assert.equal(parseTokenUsageProjection(undefined), undefined);
+});
+
+test("parseSessionStatsProjection reads wall-clock aggregates", () => {
+	const parsed = parseSessionStatsProjection({
+		sessionStats: { turns: 3, steps: 7, llmMs: 12_000, toolMs: 4_000, ttftMs: 900, ttftSteps: 3, decodeMs: 8_000, decodeTokens: 2_400 },
+	});
+	assert.equal(parsed.turns, 3);
+	assert.equal(parsed.steps, 7);
+	assert.equal(parsed.llmMs, 12_000);
+	assert.equal(parsed.toolMs, 4_000);
+	assert.equal(parsed.ttftMs, 900);
+	assert.equal(parsed.ttftSteps, 3);
+	assert.equal(parsed.decodeMs, 8_000);
+	assert.equal(parsed.decodeTokens, 2_400);
+});
+
+test("parseSessionStatsProjection requires turns or steps", () => {
+	assert.equal(parseSessionStatsProjection({ sessionStats: { llmMs: 100 } }), undefined);
+	const parsed = parseSessionStatsProjection({ sessionStats: { turns: 2 } });
+	assert.equal(parsed.turns, 2);
+	assert.equal(parsed.steps, 0);
+	assert.equal(parseSessionStatsProjection(undefined), undefined);
+});
+
+test("deriveDshSessionStats computes averages and keeps sample-less fields undefined", () => {
+	const full = deriveDshSessionStats({ turns: 3, steps: 7, llmMs: 12_000, toolMs: 4_000, ttftMs: 900, ttftSteps: 3, decodeMs: 8_000, decodeTokens: 2_400 });
+	assert.equal(full.turns, 3);
+	assert.equal(full.steps, 7);
+	assert.equal(full.llmMs, 12_000);
+	assert.equal(full.toolMs, 4_000);
+	assert.equal(full.ttftAvgMs, 300);
+	assert.equal(full.tokensPerSecond, 300);
+	// 无样本：平均首字/生成速度保持 undefined（UI 不渲染对应行）
+	const empty = deriveDshSessionStats({ turns: 0, steps: 0, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0 });
+	assert.equal(empty.ttftAvgMs, undefined);
+	assert.equal(empty.tokensPerSecond, undefined);
+});
+
+test("cacheHitPercentOf uses the dsh-web/pi shared formula", () => {
+	assert.equal(cacheHitPercentOf({ inputTokens: 1200, outputTokens: 800, cacheReadTokens: 6400, cacheWriteTokens: 100 }), 83);
+	assert.equal(cacheHitPercentOf({ inputTokens: 0, outputTokens: 10 }), undefined);
+	assert.equal(cacheHitPercentOf(undefined), undefined);
 });

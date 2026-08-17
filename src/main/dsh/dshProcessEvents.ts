@@ -1,4 +1,5 @@
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
+import type { AgentRuntimeState } from "../../shared/types";
 
 /**
  * DSH SessionEvent → 轨迹过程事件（纯函数，可单测）。
@@ -180,12 +181,22 @@ export function collectDshProcessEvents(
 	return result;
 }
 
-/** 由 sessions.list 的 projections.values 恢复 context 占用初值（attach/restart 时）。 */
+/**
+ * 投影值两种来源的统一取形：
+ * - attach/restart 的 sessions.list projections.values：`{ key: 单元值 }` 包装；
+ * - mux session/projection 帧的 value：单元值本体（host 按 onChanged 原样下发，无包装）。
+ * 规则：values 里存在同名 key 的记录时取该 key（包装形），否则把 values 本身当单元值（帧形）。
+ */
+function unwrapProjectionValue(values: unknown, key: string): unknown {
+	if (!isRecord(values)) return undefined;
+	return isRecord(values[key]) ? values[key] : values;
+}
+
+/** 解析 contextPressure 投影单元值（attach 的 values 包装形或 mux 帧的单元值形均可）。 */
 export function parseContextPressureProjection(
 	values: unknown,
 ): { pressureTokens?: number; projectedTokens?: number; contextWindow?: number } | undefined {
-	if (!isRecord(values)) return undefined;
-	const raw = values.contextPressure;
+	const raw = unwrapProjectionValue(values, "contextPressure");
 	if (!isRecord(raw)) return undefined;
 	const result: { pressureTokens?: number; projectedTokens?: number; contextWindow?: number } = {};
 	const pressureTokens = asNumber(raw.pressureTokens);
@@ -197,12 +208,11 @@ export function parseContextPressureProjection(
 	return Object.keys(result).length > 0 ? result : undefined;
 }
 
-/** 由 sessions.list 的 projections.values 恢复 context 构成初值（attach/restart 时）。 */
+/** 解析 contextBreakdown 投影单元值（attach 的 values 包装形或 mux 帧的单元值形均可）。 */
 export function parseContextBreakdownProjection(
 	values: unknown,
 ): { systemTokens: number; toolsTokens: number; messageTokens: number } | undefined {
-	if (!isRecord(values)) return undefined;
-	const raw = values.contextBreakdown;
+	const raw = unwrapProjectionValue(values, "contextBreakdown");
 	if (!isRecord(raw)) return undefined;
 	const systemTokens = asNumber(raw.systemTokens);
 	const toolsTokens = asNumber(raw.toolsTokens);
@@ -230,10 +240,9 @@ export type DshSessionStatsProjection = {
 	decodeTokens: number;
 };
 
-/** 由 sessions.list 的 projections.values 恢复会话统计初值（attach/restart 时）。 */
+/** 解析 sessionStats 投影单元值（attach 的 values 包装形或 mux 帧的单元值形均可）。 */
 export function parseSessionStatsProjection(values: unknown): DshSessionStatsProjection | undefined {
-	if (!isRecord(values)) return undefined;
-	const raw = values.sessionStats;
+	const raw = unwrapProjectionValue(values, "sessionStats");
 	if (!isRecord(raw)) return undefined;
 	const turns = asNumber(raw.turns);
 	const steps = asNumber(raw.steps);
@@ -256,7 +265,7 @@ export function parseSessionStatsProjection(values: unknown): DshSessionStatsPro
  */
 export function deriveDshSessionStats(
 	raw: DshSessionStatsProjection,
-): import("../../shared/types").AgentRuntimeState["dshSessionStats"] {
+): AgentRuntimeState["dshSessionStats"] {
 	return {
 		turns: raw.turns,
 		steps: raw.steps,
@@ -275,11 +284,10 @@ export type DshUsageTotals = {
 	cacheWriteTokens?: number;
 };
 
-/** 由 sessions.list 的 projections.values 恢复会话累计用量初值（attach/restart 时）。
+/** 解析 tokenUsage 投影单元值（attach 的 values 包装形或 mux 帧的单元值形均可）。
  *  host tokenUsage 投影 = 整段日志累计（uncachedInput 计入 input；dsh-web StatsLine 同源）。 */
 export function parseTokenUsageProjection(values: unknown): DshUsageTotals | undefined {
-	if (!isRecord(values)) return undefined;
-	const raw = values.tokenUsage;
+	const raw = unwrapProjectionValue(values, "tokenUsage");
 	if (!isRecord(raw)) return undefined;
 	const inputTokens = asNumber(raw.uncachedInputTokens);
 	const outputTokens = asNumber(raw.outputTokens);
