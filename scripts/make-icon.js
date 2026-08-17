@@ -5,7 +5,14 @@ const { Icns, IcnsImage } = require('@fiahfy/icns');
 const pngToIcoModule = require('png-to-ico');
 const pngToIco = pngToIcoModule.default ?? pngToIcoModule;
 
+// 打包标必须是矢量几何跳蛛（与 BrandMarkSvg 同源）。嵌 PNG 的旧稿会在小尺寸糊、圆角漏白。
 const svg = fs.readFileSync(path.join(__dirname, '..', 'build', 'icon.svg'), 'utf8');
+if (svg.includes('data:image/png')) {
+  throw new Error('build/icon.svg must stay a vector mark; do not embed a PNG');
+}
+if (!svg.includes('<ellipse cx="60" cy="50"')) {
+  throw new Error('build/icon.svg must keep the BrandMarkSvg geometry');
+}
 
 const out = path.join(__dirname, '..', 'build');
 const iconsDir = path.join(out, 'icons');
@@ -85,7 +92,11 @@ async function main() {
   await fs.promises.writeFile(path.join(out, 'icon.ico'), ico);
   await writeIcns(path.join(out, 'icon.icns'));
 
-  console.log('wrote build/icon.svg, build/icon.png, build/icon.ico, build/icon.icns and build/icons/*.png');
+  // 应用内侧栏/空态用同一枚正式标；不要直接拷系统 512（含 Dock 留白），按 SVG 铺满导出。
+  const rendererMark = path.join(__dirname, '..', 'src', 'renderer', 'src', 'assets', 'brand-mark.png');
+  await sharp(Buffer.from(svg)).resize(256, 256).png().toFile(rendererMark);
+
+  console.log('wrote build/icon.svg, build/icon.png, build/icon.ico, build/icon.icns, build/icons/*.png and src/renderer/src/assets/brand-mark.png');
 }
 
 main().catch(error => {

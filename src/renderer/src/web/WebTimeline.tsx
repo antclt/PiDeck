@@ -20,6 +20,7 @@ import type { AgentUiResponse } from "../../../shared/types";
 import { MarkdownStream } from "@/components/session/MarkdownStream";
 import { SingleLinePreview } from "@/components/session/SingleLinePreview";
 import { TimelineMarker } from "../components/session/TimelineMarker";
+import { JumpingSpiderLogo } from "../components/app/JumpingSpiderLogo";
 
 /** 用户消息右对齐气泡（结构与桌面 UserBubble 一致，去掉操作栏/附件能力）。 */
 export const WebUserBubble = memo(function WebUserBubble(props: { message: UIMessage }) {
@@ -338,48 +339,14 @@ export function WebTimeline(props: {
 				{!hasActiveSession && messages.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-logo">
-							<svg viewBox="0 0 32 32" width="66" height="66" aria-hidden="true">
-								<g stroke="#fff" strokeWidth="1.5" strokeLinecap="round" fill="none">
-									<path d="M7.5 15.5C3.5 14 1.5 11 2 7" />
-									<path d="M6.5 17.5C2.5 16.5 0.5 15 0.5 12" />
-									<path d="M6.5 20C3 20 1 21 1 23.5" />
-									<path d="M7.5 22C4.5 23 3.5 25 4.5 27.5" />
-									<path d="M24.5 15.5C28.5 14 30.5 11 30 7" />
-									<path d="M25.5 17.5C29.5 16.5 31.5 15 31.5 12" />
-									<path d="M25.5 20C29 20 31 21 31 23.5" />
-									<path d="M24.5 22C27.5 23 28.5 25 27.5 27.5" />
-									<path d="M12 14.5C10 16.5 9 18.5 10 20" />
-									<path d="M20 14.5C22 16.5 23 18.5 22 20" />
-								</g>
-								<ellipse cx="16" cy="22.5" rx="7" ry="7.5" fill="#fff" />
-								<circle cx="16" cy="10" r="6.8" fill="#fff" />
-								<circle cx="12.3" cy="9" r="1.6" fill="#0a0a0b" />
-								<circle cx="19.7" cy="9" r="1.6" fill="#0a0a0b" />
-							</svg>
+							<JumpingSpiderLogo className="size-[66px]" />
 						</div>
 						<p className="empty-hint">{t("web.emptySelection")}</p>
 					</div>
 				) : messages.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-logo">
-							<svg viewBox="0 0 32 32" width="66" height="66" aria-hidden="true">
-								<g stroke="#fff" strokeWidth="1.5" strokeLinecap="round" fill="none">
-									<path d="M7.5 15.5C3.5 14 1.5 11 2 7" />
-									<path d="M6.5 17.5C2.5 16.5 0.5 15 0.5 12" />
-									<path d="M6.5 20C3 20 1 21 1 23.5" />
-									<path d="M7.5 22C4.5 23 3.5 25 4.5 27.5" />
-									<path d="M24.5 15.5C28.5 14 30.5 11 30 7" />
-									<path d="M25.5 17.5C29.5 16.5 31.5 15 31.5 12" />
-									<path d="M25.5 20C29 20 31 21 31 23.5" />
-									<path d="M24.5 22C27.5 23 28.5 25 27.5 27.5" />
-									<path d="M12 14.5C10 16.5 9 18.5 10 20" />
-									<path d="M20 14.5C22 16.5 23 18.5 22 20" />
-								</g>
-								<ellipse cx="16" cy="22.5" rx="7" ry="7.5" fill="#fff" />
-								<circle cx="16" cy="10" r="6.8" fill="#fff" />
-								<circle cx="12.3" cy="9" r="1.6" fill="#0a0a0b" />
-								<circle cx="19.7" cy="9" r="1.6" fill="#0a0a0b" />
-							</svg>
+							<JumpingSpiderLogo className="size-[66px]" />
 						</div>
 						<p className="empty-hint">{t("web.noMessages")}</p>
 					</div>

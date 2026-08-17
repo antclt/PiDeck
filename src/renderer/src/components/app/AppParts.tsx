@@ -477,7 +477,7 @@ function loadDevBranch(): Promise<string | undefined> {
 }
 
 /**
- * Brand lockup：品牌字标统一为 "phids" + 跳蛛临时 logo（正式品牌图到位前占位）。
+ * Brand lockup：品牌字标统一为 "phids" + 正式几何跳蛛标（与任务栏图标同源）。
  * 分支名不再上视觉（并行 worktree 窗口区分改由 title/aria-label 承载，避免视觉噪声）。
  */
 export function BrandLockup(props: { replayToken?: number } = {}) {

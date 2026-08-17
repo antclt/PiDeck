@@ -3,7 +3,7 @@
  *
  * 不直接复用 AppParts.BrandLockup 是为了避免把桌面端整棵渲染组件树
  * （SurfaceComponents / atoms / desktopApi 等）拖进 Web 包；这里只复用
- * 自包含的 JumpingSpiderLogo（无外部依赖）。
+ * JumpingSpiderLogo（正式几何跳蛛标，无桌面业务依赖）。
  */
 import { JumpingSpiderLogo } from "../components/app/JumpingSpiderLogo";
 

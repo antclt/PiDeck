@@ -605,21 +605,26 @@ select:focus-visible {
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 10px;
+  gap: 16px;
   color: var(--color-text-primary);
   background: var(--color-bg-app);
 }
 .boot-logo {
-  width: 58px;
-  height: 58px;
+  width: 120px;
+  height: 120px;
   display: grid;
   place-items: center;
-  border-radius: var(--radius-lg);
-  background: var(--logo-boot-gradient);
+  /* 启动标用铺满 SVG，避免 PNG 圆角透明边漏白 */
+  border-radius: 26px;
+  background: transparent;
   color: var(--color-text-inverse);
-  font-size: var(--font-size-logo);
-  font-weight: 900;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
+}
+.boot-logo svg,
+.boot-logo img {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .boot-screen span {
   color: var(--color-text-tertiary);
