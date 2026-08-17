@@ -51,6 +51,12 @@ export class DshHostProcess {
 		return this.child !== null;
 	}
 
+	/** OS pid（fork 后才有；供进程监控采样内存）。 */
+	get pid(): number | undefined {
+		const pid = this.child?.pid;
+		return typeof pid === "number" && pid > 0 ? pid : undefined;
+	}
+
 	/** 是否已完成 boot（host-ready 已收到）。 */
 	isReady(): boolean {
 		return this.ready;

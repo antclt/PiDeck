@@ -27,7 +27,8 @@ import type { SkillManager } from "../skills/SkillManager";
 import { fetchModelList, invalidateModelListCache, getCachedModelList, refreshModelList } from "../pi/modelListCache";
 import type { ModelSpecsStore } from "../pi/modelSpecsStore";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
-import type { ProcessMetricsSnapshot } from "../../shared/types";
+import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
+import type { AgentProcessMetric, ProcessMetricsSnapshot } from "../../shared/types";
 import { getWslExe } from "../wsl/wslExe";
 import { listWebNetworkAddresses } from "../web/WebNetwork";
 import { toggleMainWindowDevTools } from "../devTools";
@@ -66,6 +67,12 @@ export type SystemIpcDeps = {
 	stopAgentFromMonitor: (
 		agentId: string,
 	) => Promise<SessionCommandResult<SessionRuntimeTarget | undefined>>;
+	/** DSH host utilityProcess pid；未 fork 返回 undefined。 */
+	getDshHostPid?: () => number | undefined;
+	/** 当前挂在 host 上的 DSH 会话（监控行展示用，不各自占 pid）。 */
+	listDshMonitorSessions?: () => Array<{ title?: string }>;
+	/** 停止 DSH host：先卸会话再 dispose，不能走 pi stopAgentById。 */
+	stopDshHostFromMonitor?: () => Promise<SessionCommandResult<undefined>>;
 	/** 模型规格存储（resources/model-specs.db 只读，发版前由 sync-model-specs.mjs 同步） */
 	modelSpecsStore: ModelSpecsStore;
 	getMainWindow: () => Electron.BrowserWindow | null;
@@ -492,14 +499,23 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// 进程监控：Electron 各进程 + pi agent 子进程内存/CPU 快照（手动刷新，不做高频轮询）
 	ipcMain.handle(ipcChannels.processMetrics, async (): Promise<ProcessMetricsSnapshot> => {
-		const agents = deps.agentManager.listAgentPids().map((agent) => {
-			// 进程监控表展示会话身份：按 agentId 反查关联的会话 id/标题，
-			// 让用户知道每个 agent 对应哪个会话（而不是只看到内部 id）
-			const sessionInfo = deps.sessionRuntimeCoordinator.getSessionInfoForAgent(
-				agent.agentId,
-			);
-			return { ...agent, ...(sessionInfo ?? {}) };
-		});
+		const agents: Array<Pick<AgentProcessMetric, "agentId" | "pid" | "kind" | "sessionId" | "sessionTitle">> =
+			deps.agentManager.listAgentPids().map((agent) => {
+				// 进程监控表展示会话身份：按 agentId 反查关联的会话 id/标题，
+				// 让用户知道每个 agent 对应哪个会话（而不是只看到内部 id）
+				const sessionInfo = deps.sessionRuntimeCoordinator.getSessionInfoForAgent(
+					agent.agentId,
+				);
+				return { ...agent, kind: "pi" as const, ...(sessionInfo ?? {}) };
+			});
+		// DSH 会话共享一个 utilityProcess：有 pid 时追加一行，不按会话伪造多个 pid。
+		const dshPid = deps.getDshHostPid?.();
+		if (dshPid) {
+			agents.push(buildDshHostMonitorRow({
+				pid: dshPid,
+				sessions: deps.listDshMonitorSessions?.() ?? [],
+			}));
+		}
 		return getProcessSnapshot(agents);
 	});
 
@@ -507,6 +523,17 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		// 输入校验：agentId 必须是字符串，否则拒绝（渲染层数据不可信）
 		if (typeof agentId !== "string" || !agentId) {
 			throw new Error("invalid agentId");
+		}
+		// DSH host 行：停全部 DSH 会话 + dispose utilityProcess，不能当 pi agentId。
+		if (isDshHostMonitorId(agentId)) {
+			if (!deps.stopDshHostFromMonitor) {
+				throw new Error("DSH host stop is not available");
+			}
+			const hostResult = await deps.stopDshHostFromMonitor();
+			if (!hostResult.ok) {
+				throw new Error(hostResult.error.debugDetails ?? "failed to stop DSH host");
+			}
+			return;
 		}
 		// 走完整会话停止链路（coordinator 反查会话 + 解绑 + detach 推送），
 		// 不能只调 agentManager.stop——那会跳过会话状态收尾，渲染层运行标记不熄灭

@@ -1,6 +1,7 @@
 import { Activity, CircleStop, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { AgentProcessMetric, ProcessMetricsSnapshot } from "../../../../../shared/types";
+import { DSH_HOST_MONITOR_ID } from "../../../../../shared/types/processMetrics";
 import { formatMb } from "../../../../../shared/formatBytes";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
@@ -17,8 +18,8 @@ import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
 
 /**
  * 进程与内存监控面板（由 Pi 管理界面迁入设置，独立 tab）。
- * 只监控 pi agent 子进程：Electron 自身进程的内存不再展示（用户自行在系统
- * 任务管理器/活动监视器中查看）。
+ * 监控 pi agent 子进程 + 共享的 DSH host。Electron 自身进程的内存不再展示
+ * （用户自行在系统任务管理器/活动监视器中查看）。
  * 仅手动刷新：点击「刷新」时经 IPC 拉取一次快照，不做轮询，避免 tasklist/ps
  * 系统调用对性能敏感场景（大量 agent 并发）造成不必要的开销。
  * 内存统一以 MB 展示（formatMb），便于多进程横向对比。
@@ -55,13 +56,14 @@ export function ProcessMetricsTab() {
    * Windows/Linux/macOS 由 Node 统一处理，不直接调系统 kill。
    */
   const stopAgent = useCallback(async (agent: AgentProcessMetric) => {
+    const label = monitorRowLabel(agent);
     try {
       await window.piDesktop.system.stopAgent(agent.agentId);
-      showNotice(t("config.process.stopped", { agent: agent.agentId }), 2000, "info");
+      showNotice(t("config.process.stopped", { agent: label }), 2000, "info");
       await refresh();
     } catch (error) {
       showNotice(
-        t("config.process.stopFailed", { agent: agent.agentId }) + (error instanceof Error ? `：${error.message}` : ""),
+        t("config.process.stopFailed", { agent: label }) + (error instanceof Error ? `：${error.message}` : ""),
         4000,
         "error",
       );
@@ -108,7 +110,7 @@ export function ProcessMetricsTab() {
           <div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
             <div className="flex items-center gap-1.5 border-b border-border-subtle px-3 py-2">
               <Activity className="size-3.5 text-muted-foreground" aria-hidden="true" />
-              <span className="text-sm font-medium text-foreground">{t("config.process.agentSection")}</span>
+              <span className="text-sm font-medium text-foreground">{t("config.process.section")}</span>
               <span className="ml-auto text-micro text-muted-foreground">
                 {t("config.process.sampledAt")}：{new Date(snapshot.sampledAt).toLocaleTimeString()}
               </span>
@@ -130,9 +132,9 @@ export function ProcessMetricsTab() {
                 </TableHeader>
                 <TableBody>
                   {agents.map((agent) => (
-                    <TableRow key={agent.pid}>
+                    <TableRow key={`${agent.kind ?? "pi"}:${agent.pid}`}>
                       <TableCell className="max-w-56 truncate font-medium" title={agent.agentId}>
-                        {agent.agentId}
+                        {monitorRowLabel(agent)}
                       </TableCell>
                       {/* 会话列：展示关联会话标题（进程监控与打开的对话对应起来）；
                           无绑定（匿名/终端 agent）时显示占位符 */}
@@ -154,8 +156,8 @@ export function ProcessMetricsTab() {
                           variant="ghost"
                           size="sm"
                           className="gap-1 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          title={t("config.process.stop", { agent: agent.agentId })}
-                          aria-label={t("config.process.stop", { agent: agent.agentId })}
+                          title={t("config.process.stop", { agent: monitorRowLabel(agent) })}
+                          aria-label={t("config.process.stop", { agent: monitorRowLabel(agent) })}
                           onClick={() => setStoppingAgent(agent)}
                         >
                           <CircleStop className="size-4" aria-hidden="true" />
@@ -178,7 +180,10 @@ export function ProcessMetricsTab() {
       {stoppingAgent ? (
         <ConfirmDialog
           title={t("config.process.stop")}
-          message={t("config.process.stopConfirm", { agent: stoppingAgent.agentId })}
+          message={t(
+            isDshHostRow(stoppingAgent) ? "config.process.stopHostConfirm" : "config.process.stopConfirm",
+            { agent: monitorRowLabel(stoppingAgent) },
+          )}
           confirmLabel={t("config.process.stop")}
           danger
           onConfirm={() => {
@@ -191,4 +196,13 @@ export function ProcessMetricsTab() {
       ) : null}
     </div>
   );
+}
+
+function isDshHostRow(agent: AgentProcessMetric): boolean {
+  return agent.kind === "dsh-host" || agent.agentId === DSH_HOST_MONITOR_ID;
+}
+
+/** 表内展示名：DSH host 用固定文案，避免把内部 id `dsh-host` 直接甩给用户。 */
+function monitorRowLabel(agent: AgentProcessMetric): string {
+  return isDshHostRow(agent) ? t("config.process.dshHost") : agent.agentId;
 }

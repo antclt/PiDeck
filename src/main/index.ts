@@ -656,6 +656,23 @@ async function stopAgentFromMonitor(
 	return result;
 }
 
+/**
+ * 进程监控停 DSH host：先按会话走完整停止（detach 推送，运行标记熄灭），
+ * 再 dispose utilityProcess。不能把 dsh-host 当 pi agentId 丢给 stopAgentById。
+ */
+async function stopDshHostFromMonitor(): Promise<SessionCommandResult<undefined>> {
+	const tabs = dshAgentManager.list();
+	for (const tab of tabs) {
+		const result = await sessionRuntimeCoordinator.stopAgentById(tab.id);
+		if (!result.ok) return result;
+		terminalManager.closeAgent(tab.id);
+		if (result.value) emitSessionRuntimeDetach(result.value);
+	}
+	await dshAgentManager.stopAll();
+	await dshHost.dispose();
+	return { ok: true, value: undefined };
+}
+
 function emitReplacementState(binding: SessionRuntimeBinding, includeMessages: boolean): void {
 	const tab = agentManager.list().find((candidate) => candidate.id === binding.agentId);
 	if (!tab) return;
@@ -2657,6 +2674,9 @@ function registerIpc() {
 		modelSpecsStore,
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
+		getDshHostPid: () => dshHost.getHostPid(),
+		listDshMonitorSessions: () => dshAgentManager.list().map((tab) => ({ title: tab.title })),
+		stopDshHostFromMonitor,
 		getMainWindow: () => mainWindow,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		checkForAppUpdate: checkForAppUpdate as (installationType?: string) => Promise<AppUpdateInfo | null>,

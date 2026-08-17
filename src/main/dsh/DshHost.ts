@@ -89,6 +89,11 @@ export class DshHost {
 		return this.hostProcess?.isReady() ?? false;
 	}
 
+	/** host utilityProcess 的 OS pid；未 fork / 已退出返回 undefined。 */
+	getHostPid(): number | undefined {
+		return this.hostProcess?.pid;
+	}
+
 	/** 懒启动（幂等）：fork host 并建立桥接客户端。 */
 	ensureStarted(): Promise<void> {
 		if (this.client) return Promise.resolve();
