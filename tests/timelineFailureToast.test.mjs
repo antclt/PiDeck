@@ -58,7 +58,10 @@ test("toast effect: baseline on load completion, only new failures toast", () =>
 	assert.match(source, /toastedFailureIds\.has\(message\.id\)/);
 	assert.match(source, /markFailureToastShown\(message\.id\);/);
 	assert.match(source, /showFailureToast\(message\);/);
-	// 模块级 Set：分屏多栏同一条消息只弹一次
+	// 自动重试按 attempt/count 更新同一条 toast，而不是按 message.id 永久去重
+	assert.match(source, /lastRetryToastRef/);
+	assert.match(source, /session-retry:\$\{message\.agentId\}/);
+	// 模块级 Set：分屏多栏同一条失败消息只弹一次
 	assert.match(source, /const toastedFailureIds = new Set<string>\(\);/);
 });
 
@@ -66,7 +69,7 @@ test("showFailureToast: retry uses info kind, failure uses error kind", () => {
 	const source = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
 	assert.match(source, /const isRetry = key\.startsWith\("diagnostic\.retry"\);/);
 	assert.match(source, /translateI18nDescriptor\(meta, message\.text\)/);
-	assert.match(source, /isRetry \? 4000 : 6000/);
+	assert.match(source, /isRetry \? 2200 : 6000/);
 	assert.match(source, /isRetry \? "info" : "error"/);
 	assert.match(source, /t\(isRetry \? "diagnostic\.retryToastTitle" : "diagnostic\.failureToastTitle"\)/);
 });

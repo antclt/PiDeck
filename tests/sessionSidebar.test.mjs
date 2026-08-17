@@ -125,18 +125,16 @@ test("unstarted drafts have an independent delete control and context menu", () 
   assert.match(sessionTree, /getBoundSidebarRuntimeAgent\(props\.controller\.catalog, session\.id\)/);
   assert.match(sessionTree, /kind: "agent",\s*agentId: runtimeAgent\.id/);
   assert.match(sessionTree, /draft-session-row/);
-  assert.match(sessionTree, /has-runtime/);
   assert.match(sessionTree, /onContextMenu=\{\(event\) => openDraftContext\(event, session\)\}/);
-  assert.match(sessionTree, /canDelete && \([\s\S]*<Button variant="ghost" size="icon"[\s\S]*className="draft-session-delete"/);
+  assert.match(sessionTree, /<Button variant="ghost" size="icon"[\s\S]*className="draft-session-delete"/);
   assert.doesNotMatch(sessionTree, /<span className="project-action" role="button"/);
   assert.match(parts, /DraftSessionContextMenu/);
   assert.match(components, /export function DraftSessionContextMenu/);
   assert.match(content, /menu\?\.kind === "draft"/);
-  assert.match(content, /!hasLiveSidebarRuntime\(menuDraftRuntime\)/);
+  assert.match(content, /onDeleteSession/);
   assert.match(content, /<DraftSessionContextMenu/);
   // draft 行布局改由 SessionTree Tailwind 承担（pure official P2-2）
   assert.match(sessionTree, /grid-cols-\[minmax\(0,1fr\)_2rem\]/);
-  assert.match(sessionTree, /has-runtime/);
   assert.match(styles, /\.draft-session-delete/);
 });
 

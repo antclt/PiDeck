@@ -950,3 +950,30 @@ test("abort 立即收口 Live 思考流（停止后思考块不再转）", async
 	assert.equal(thoughts.at(-1).text, "");
 	assert.equal(thoughts.at(-1).id, thoughts[0].id, "思考段 id 保持一致（渲染层原位收口）");
 });
+
+test("stop 先 cancel 再解绑，且不打断共享 mux", async () => {
+	const { host, client, calls, muxCalls } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const first = await manager.create({ projectId: "project-1", backend: "dsh" });
+	const second = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal(muxCalls.length, 1, "两个 runtime 只订阅一条共享 mux");
+	await manager.stop(first.id);
+	assert.equal(calls.cancel, 1, "stop 必须先发 session.cancel");
+	assert.equal(manager.list().some((tab) => tab.id === first.id), false);
+	assert.equal(manager.list().some((tab) => tab.id === second.id), true);
+	assert.equal(muxCalls.length, 1, "停一个会话不得重开/掐断共享 mux");
+});
+
+test("setModel 在回合进行中拒绝，错误带 busy", async () => {
+	const { host, client } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	client.pushFrames(sessionEventFrame("session-fake-1", event("turn/start", 1)));
+	await flush();
+	await assert.rejects(
+		() => manager.setModel(tab.id, "llm-deepseek", "deepseek-v4-flash"),
+		/busy/,
+	);
+});

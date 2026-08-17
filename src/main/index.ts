@@ -3033,12 +3033,8 @@ app.whenReady().then(async () => {
 		deleteSessionRecord: async (sessionId) => {
 			const entry = sessionCatalog.get(sessionId);
 			if (!entry) return false;
-			if (
-				sessionRuntimeCoordinator.getTarget(sessionId) ||
-				sessionRuntimeCoordinator.isActivating(sessionId)
-			) {
-				throw new Error(mainCopy("session.stopBeforeDelete"));
-			}
+			// Web 删除与桌面 IPC 同一策略：先强制停运行时再删 catalog。
+			await sessionRuntimeCoordinator.releaseRuntimeForDelete(sessionId);
 			if (entry.filePath) await sessionScanner.delete(entry.filePath);
 			await sessionCatalog.remove(sessionId);
 			return true;

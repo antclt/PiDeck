@@ -440,6 +440,8 @@ export function AgentContextMenu(props: {
 	onOpenLogs?: () => void;
 	onOpenSessionFile?: () => void;
 	onCloseAgent: () => void;
+	/** 运行中也可删：主进程先停后删，不必先关 Agent。 */
+	onDeleteSession?: () => void;
 }) {
 	const busy = Boolean(props.actionLoading);
 	return (
@@ -486,6 +488,11 @@ export function AgentContextMenu(props: {
 			)}
 			<DropdownMenuSeparator />
 			<DropdownMenuItem variant="destructive" onSelect={props.onCloseAgent}>{t("menu.closeAgent")}</DropdownMenuItem>
+			{props.onDeleteSession && (
+				<DropdownMenuItem variant="destructive" disabled={busy} onSelect={props.onDeleteSession}>
+					{t("common.delete")}
+				</DropdownMenuItem>
+			)}
 		</MenuShell>
 	);
 }

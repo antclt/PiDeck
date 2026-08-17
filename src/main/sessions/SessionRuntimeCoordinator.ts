@@ -297,6 +297,30 @@ export class SessionRuntimeCoordinator {
 		return this.activationBySession.has(sessionId);
 	}
 
+	/**
+	 * 删除前强制释放运行时：等激活结束（如有），再 stop 解绑。
+	 * 失败一次后状态卡在 bound/error 时，旧逻辑会拒绝删除；这里先杀后删，
+	 * stop 失败也尽量解绑，避免用户永远删不掉。
+	 */
+	async releaseRuntimeForDelete(sessionId: string): Promise<void> {
+		const activating = this.activationBySession.get(sessionId);
+		if (activating) await activating.catch(() => undefined);
+		// 先读原始映射：getTarget 会把 error/closed 当终态解绑，
+		// 失败一次卡在 error 的会话也必须先 stop 再删。
+		const mappedAgentId = this.agentIdBySession.get(sessionId);
+		const mappedGeneration = mappedAgentId
+			? this.getRuntimeBinding(mappedAgentId)?.runtimeGeneration ?? 0
+			: 0;
+		const liveTarget = this.getTarget(sessionId);
+		const target = liveTarget ?? (mappedAgentId
+			? { sessionId, agentId: mappedAgentId, runtimeGeneration: mappedGeneration }
+			: undefined);
+		if (!target) return;
+		// 终态/绑定已漂时 stopRuntime 可能拒绝：删除路径直接杀进程再解绑。
+		await this.agents.stop(target.agentId).catch(() => undefined);
+		this.unbindAgentUnchecked(target.agentId);
+	}
+
 	getRuntimeMessages(sessionId: string): SessionTargetedValue<ChatMessage[]> | undefined {
 		const target = this.getTarget(sessionId);
 		if (!target) return undefined;

@@ -1026,6 +1026,31 @@ test("stop invalidates the target and restart replaces it with a higher generati
   assert.equal(restarted.value.session.id, "session-1");
 });
 
+test("releaseRuntimeForDelete stops a bound runtime so catalog delete can proceed", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness({
+    tabs: [{
+      id: "agent-a",
+      projectId: "project-1",
+      cwd: "C:/project",
+      title: "Session",
+      status: "error",
+      sessionPath: "C:/sessions/session-1.jsonl",
+      createdAt: 1,
+    }],
+  });
+  const coordinator = new SessionRuntimeCoordinator(
+    harness.catalog,
+    harness.agents,
+    harness.sender,
+  );
+  coordinator.bindExistingAgent("session-1", "agent-a");
+  // getTarget 会把 error 当终态解绑；删除仍必须先 stop 进程。
+  await coordinator.releaseRuntimeForDelete("session-1");
+  assert.equal(coordinator.getTarget("session-1"), undefined);
+  assert.equal(harness.calls.stop, 1);
+});
+
 test("commandFailure classifies message-not-found separately from session-not-found", () => {
   const { SessionRuntimeCoordinator } = loadCoordinator();
   const harness = createHarness();

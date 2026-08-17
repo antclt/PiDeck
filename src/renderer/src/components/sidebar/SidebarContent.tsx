@@ -15,7 +15,7 @@ import { RpcLogViewer } from "./RpcLogViewer";
 import { sessionRecordToSummary } from "../../atoms";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
-import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, hasLiveSidebarRuntime, type SidebarController, type SidebarRpcLog } from "../../hooks/useSidebarController";
+import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController, type SidebarRpcLog } from "../../hooks/useSidebarController";
 import { DshSearchResults } from "./DshSearchResults";
 import { ProjectTree } from "./ProjectTree";
 import { Button } from "../ui-shadcn/button";
@@ -118,9 +118,6 @@ export function SidebarContent(props: SidebarContentProps) {
     : undefined;
   const menuDraft = menu?.kind === "draft"
     ? controller.catalog.sessionsByProject[menu.projectId]?.find((session) => session.id === menu.sessionId)
-    : undefined;
-  const menuDraftRuntime = menuDraft
-    ? controller.catalog.runtimeBySessionId[menuDraft.id]
     : undefined;
   const menuSession = menuSessionRecord ? sessionRecordToSummary(menuSessionRecord) : undefined;
   const menuSessionRuntimeAgent = menuSessionRecord
@@ -279,9 +276,26 @@ export function SidebarContent(props: SidebarContentProps) {
           rpcToggleDisabled={!menuAgentCanRpcLog}
           onOpenLogs={() => { controller.openRpcLogs(menuAgent.id); controller.closeMenu(); }}
           onCloseAgent={() => { void actions.agents.close(menuAgent); controller.closeMenu(); }}
+          onDeleteSession={() => {
+            const bound = Object.entries(controller.catalog.runtimeBySessionId).find(
+              ([, runtime]) => runtime?.agentId === menuAgent.id,
+            );
+            const sessionId = bound?.[0];
+            const projectId = menuAgent.projectId;
+            const record = sessionId
+              ? controller.catalog.sessionsByProject[projectId]?.find((session) => session.id === sessionId)
+              : undefined;
+            if (record?.status === "draft") {
+              void actions.sessions.deleteDraft(record);
+            } else if (record) {
+              const summary = sessionRecordToSummary(record);
+              if (summary) void actions.sessions.delete(projectId, summary);
+            }
+            controller.closeMenu();
+          }}
         />
       )}
-      {menuDraft && menu?.kind === "draft" && menuDraft.status === "draft" && !hasLiveSidebarRuntime(menuDraftRuntime) && (
+      {menuDraft && menu?.kind === "draft" && menuDraft.status === "draft" && !menuAgent && (
         <DraftSessionContextMenu
           menu={{ x: menu.x, y: menu.y }}
           onClose={controller.closeMenu}

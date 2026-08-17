@@ -4,7 +4,7 @@ import type { AgentTab, Project, SessionRecord, SessionSummary } from "../../../
 import { collectDisplayedSessionIds, filterAgentsForSidebarDisplay, getProjectAgentSessionDisplay, sessionStatusDotClass, type ProjectChildItem } from "../../agentListDisplay";
 import { sessionRecordToSummary } from "../../atoms";
 import { t } from "../../i18n";
-import { filterSidebarSessions, getBoundSidebarRuntimeAgent, hasLiveSidebarRuntime, type SidebarController } from "../../hooks/useSidebarController";
+import { filterSidebarSessions, getBoundSidebarRuntimeAgent, type SidebarController } from "../../hooks/useSidebarController";
 import { Button } from "../ui-shadcn/button";
 import { PathTooltip } from "../ui-shadcn/PathTooltip";
 import type { SidebarActions } from "./SidebarContent";
@@ -156,9 +156,9 @@ export function SessionTree(props: {
   };
   const openDraftContext = (event: React.MouseEvent, session: SessionRecord) => {
     event.preventDefault();
-    const runtime = props.controller.catalog.runtimeBySessionId[session.id];
     const runtimeAgent = getBoundSidebarRuntimeAgent(props.controller.catalog, session.id);
     if (runtimeAgent) {
+      // 运行中也给删除：主进程会先停后删，不必先关 Agent。
       void props.controller.openMenu({
         kind: "agent",
         agentId: runtimeAgent.id,
@@ -167,9 +167,6 @@ export function SessionTree(props: {
       });
       return;
     }
-    // The runtime snapshot can arrive just before the Agent inventory. Suppress
-    // a destructive menu in that gap; the main process applies the same guard.
-    if (hasLiveSidebarRuntime(runtime)) return;
     void props.controller.openMenu({
       kind: "draft",
       projectId: props.project.id,
@@ -362,11 +359,10 @@ export function SessionTree(props: {
     )}>
       {draftSessions.map((session) => {
         const runtime = props.controller.catalog.runtimeBySessionId[session.id];
-        const canDelete = !hasLiveSidebarRuntime(runtime);
         return (
           <div
             key={`draft:${session.id}`}
-            className={cn("draft-session-row group/draft grid items-center gap-1", canDelete ? "grid-cols-[minmax(0,1fr)_2rem]" : "grid-cols-1 has-runtime")}
+            className={cn("draft-session-row group/draft grid items-center gap-1", "grid-cols-[minmax(0,1fr)_2rem]")}
             onContextMenu={(event) => openDraftContext(event, session)}
           >
           <PathTooltip content={session.title}>
@@ -388,15 +384,13 @@ export function SessionTree(props: {
               </div></div>
             </button>
           </PathTooltip>
-            {canDelete && (
-              <Button variant="ghost" size="icon"
-                className="draft-session-delete"
-                aria-label={t("common.delete")} title={t("common.delete")}
-                onClick={() => void props.actions.sessions.deleteDraft(session)}
-              >
-                <Trash2 size={14} aria-hidden="true" />
-              </Button>
-            )}
+            <Button variant="ghost" size="icon"
+              className="draft-session-delete"
+              aria-label={t("common.delete")} title={t("common.delete")}
+              onClick={() => void props.actions.sessions.deleteDraft(session)}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </Button>
           </div>
         );
       })}

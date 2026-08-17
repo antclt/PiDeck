@@ -541,14 +541,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (_event, sessionId: string) => {
 			const entry = sessionCatalog.get(sessionId);
 			if (!entry) return false;
-			// A draft may be promoted while a renderer click is in flight. Never delete
-			// a catalog record that has acquired, or is acquiring, a Session runtime.
-			if (
-				sessionRuntimeCoordinator.getTarget(sessionId) ||
-				sessionRuntimeCoordinator.isActivating(sessionId)
-			) {
-				throw new Error(mainCopy("session.stopBeforeDelete"));
-			}
+			// 删除即先杀后删：失败一次/卡在 bound 的会话也能删掉。
+			// 仍按路径扫一遍游离 agent，避免只解绑 catalog 却留着进程。
+			await sessionRuntimeCoordinator.releaseRuntimeForDelete(sessionId);
 			try {
 				if (entry.filePath) {
 					const normalizedTarget = canonicalizeSessionPath(
@@ -565,7 +560,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 						canonicalizeSessionPath(agent.sessionPath, entry.environment) === normalizedTarget
 					));
 					if (usingAgent) {
-						throw new Error(mainCopy("session.inUseDeleteBlocked", { title: usingAgent.title }));
+						await sessionRuntimeCoordinator.stopAgentById(usingAgent.id).catch(() => undefined);
+						await agentManager.stop(usingAgent.id).catch(() => undefined);
 					}
 					await sessionScanner.delete(entry.filePath);
 				}

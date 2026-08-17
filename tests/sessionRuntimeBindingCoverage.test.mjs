@@ -83,9 +83,10 @@ test("Web wiring is Session-first and exposes no Agent compatibility creation", 
   assert.doesNotMatch(main, /LEGACY_EXTERNAL_RUNTIME|ipcChannels\.agentsCreate/);
 });
 
-test("catalog deletion rejects bound or activating Session runtimes", () => {
-  assert.match(sessionIpc, /sessionsCatalogDelete[\s\S]*sessionRuntimeCoordinator\.getTarget\(sessionId\)[\s\S]*sessionRuntimeCoordinator\.isActivating\(sessionId\)/);
-  assert.match(main, /deleteSessionRecord: async \(sessionId\)[\s\S]*sessionRuntimeCoordinator\.getTarget\(sessionId\)[\s\S]*sessionRuntimeCoordinator\.isActivating\(sessionId\)/);
+test("catalog deletion force-stops bound or activating Session runtimes", () => {
+  assert.match(sessionIpc, /sessionsCatalogDelete[\s\S]*releaseRuntimeForDelete\(sessionId\)/);
+  assert.match(main, /deleteSessionRecord: async \(sessionId\)[\s\S]*releaseRuntimeForDelete\(sessionId\)/);
+  assert.match(coordinator, /async releaseRuntimeForDelete\(sessionId: string\)/);
   assert.match(coordinator, /isActivating\(sessionId: string\): boolean/);
 });
 

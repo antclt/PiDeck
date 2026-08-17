@@ -75,9 +75,14 @@ function dismissFallbackNotice(item: HTMLDivElement, host: HTMLDivElement) {
 }
 
 /** Toaster 未挂载时的 DOM 兜底 toast，避免全局异常完全静默。 */
-function showFallbackNotice(message: string, duration: number, kind: NoticeData["kind"] = "info", title?: string, actions?: NoticeActions): NoticeId | undefined {
+function showFallbackNotice(message: string, duration: number, kind: NoticeData["kind"] = "info", title?: string, actions?: NoticeActions, id?: NoticeId): NoticeId | undefined {
 	if (typeof document === "undefined") return;
-	const noticeId = `fallback-notice-${++nextFallbackNoticeId}`;
+	// 同稳定 id 再弹：先撤掉上一条，避免自动重试连发堆一排。
+	if (id !== undefined && fallbackHost) {
+		const existing = fallbackHost.querySelector<HTMLDivElement>(`[data-notice-id="${CSS.escape(String(id))}"]`);
+		if (existing) dismissFallbackNotice(existing, fallbackHost);
+	}
+	const noticeId = id !== undefined ? String(id) : `fallback-notice-${++nextFallbackNoticeId}`;
 	const host = ensureFallbackHost();
 	const item = document.createElement("div");
 	// 与 sonner 卡片同一套中性面板样式（走 CSS 变量，主题自动适配）；
@@ -165,17 +170,26 @@ function toasterMounted() {
 	return toasterReady;
 }
 
-export function showNotice(message: string, duration?: number, kind?: NoticeData["kind"], title?: string, actions?: NoticeActions): NoticeId | undefined {
+export function showNotice(
+	message: string,
+	duration?: number,
+	kind?: NoticeData["kind"],
+	title?: string,
+	actions?: NoticeActions,
+	/** 稳定 id：同 id 再次弹出时顶掉上一条，避免自动重试等连发场景堆一排 toast。 */
+	id?: NoticeId,
+): NoticeId | undefined {
 	const resolvedDuration = duration ?? (kind === "error" || kind === "warning" ? 3000 : 1500);
 	const text = String(message ?? "").trim();
 	if (!text) return;
 	if (!toasterMounted()) {
-		return showFallbackNotice(text, resolvedDuration, kind, title, actions);
+		return showFallbackNotice(text, resolvedDuration, kind, title, actions, id);
 	}
 	// 带标题/操作按钮的提示：sonner 以 title 为主文案、正文放 description，视觉层级更清晰
 	const options: ExternalToast = {
 		duration: resolvedDuration,
 		description: text,
+		...(id !== undefined ? { id } : {}),
 	};
 	if (actions?.action) options.action = toSonnerAction(actions.action);
 	if (actions?.cancel) options.cancel = toSonnerAction(actions.cancel);
@@ -188,6 +202,7 @@ export function showNotice(message: string, duration?: number, kind?: NoticeData
 	// 无标题：保持历史行为，整段作为主文案
 	const plainOptions: ExternalToast = {
 		duration: resolvedDuration,
+		...(id !== undefined ? { id } : {}),
 	};
 	if (actions?.action) plainOptions.action = toSonnerAction(actions.action);
 	if (actions?.cancel) plainOptions.cancel = toSonnerAction(actions.cancel);

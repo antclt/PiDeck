@@ -134,9 +134,12 @@ function showFailureToast(message: ChatMessage): void {
 	const text = translateI18nDescriptor(meta, message.text) || message.text;
 	showNotice(
 		stripAnsi(text),
-		isRetry ? 4000 : 6000,
+		// 自动重试连发：短一点、同会话共用一条 toast，后一次顶掉前一次。
+		isRetry ? 2200 : 6000,
 		isRetry ? "info" : "error",
 		t(isRetry ? "diagnostic.retryToastTitle" : "diagnostic.failureToastTitle"),
+		undefined,
+		isRetry ? `session-retry:${message.agentId}` : undefined,
 	);
 }
 
@@ -312,6 +315,12 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   // 加载中（loading=true）直接返回；加载完成瞬间把已存在的失败消息静默记为基线；
   // 之后新增的失败/重试消息才弹 toast（模块级 Set 跨栏/跨渲染去重）。
   const failureBaselineRef = useRef<string[] | null>(null);
+  // 自动重试是同一条系统消息的 upsert：id 不变、attempt 变。按「id:key:count」跟踪最后弹过的状态，
+  // 每次重试都更新 toast，但不重复弹同一次尝试（re-emit / 分屏多栏）。
+  const lastRetryToastRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    lastRetryToastRef.current = undefined;
+  }, [sessionId]);
   useEffect(() => {
     if (isConversationLoading) {
       failureBaselineRef.current = null;
@@ -324,6 +333,19 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
       return;
     }
     for (const message of floating) {
+      const meta = message.meta as Record<string, unknown> | undefined;
+      const key = typeof meta?.i18nKey === "string" ? meta.i18nKey : "";
+      const isRetry = key.startsWith("diagnostic.retry");
+      if (isRetry) {
+        const count = typeof meta?.i18nParams === "object" && meta.i18nParams
+          ? String((meta.i18nParams as Record<string, unknown>).count ?? meta.attempt ?? "")
+          : String(meta?.attempt ?? "");
+        const signature = `${message.id}:${key}:${count}`;
+        if (lastRetryToastRef.current === signature) continue;
+        lastRetryToastRef.current = signature;
+        showFailureToast(message);
+        continue;
+      }
       if (failureBaselineRef.current.includes(message.id)) continue;
       if (toastedFailureIds.has(message.id)) continue;
       markFailureToastShown(message.id);
