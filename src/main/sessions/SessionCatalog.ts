@@ -411,6 +411,8 @@ export class SessionCatalog {
 		permissionPreset?: string;
 		/** 外部（dsh-web 等）会话导入：host 会话已存在，条目直接置 active（重启不清理）。 */
 		dshSessionId?: string;
+		/** 纠正归属时保留已有标题（磁盘扫描没有投影标题，不能用 cwd 末段覆盖 host 回写名）。 */
+		keepExistingTitle?: boolean;
 	}): Promise<SessionRecord> {
 		this.assertLoaded();
 		const entry = await this.enqueueMutation((entries) => {
@@ -424,14 +426,15 @@ export class SessionCatalog {
 					candidate.dshSessionId === input.dshSessionId
 				));
 				if (existing) {
+					const nextTitle = input.keepExistingTitle ? existing.title : input.title;
 					const changed = (
 						existing.projectId !== input.projectId ||
-						existing.title !== input.title ||
+						existing.title !== nextTitle ||
 						existing.backend !== input.backend ||
 						existing.status !== "active"
 					);
 					existing.projectId = input.projectId;
-					existing.title = input.title;
+					existing.title = nextTitle;
 					existing.backend = input.backend;
 					existing.status = "active";
 					existing.updatedAt = now;

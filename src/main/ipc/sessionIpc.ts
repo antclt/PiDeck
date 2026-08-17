@@ -925,12 +925,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			if (!unarchiveDshSession) throw new Error("DSH archive restore is not available");
 			const restored = await unarchiveDshSession(dshSessionId);
 			if (!restored) throw new Error(mainCopy("session.invalidArchivePath"));
-			// 重建 catalog 记录：manifest 里的原 workspace cwd 优先映射到已注册项目；
-			// 无匹配项目时才创建「外部会话」兑底项目（幂等），让恢复的会话重新出现
-			// 在侧栏（重新打开时走 attach 旧 host 会话路径）。
-			const matched = restored.cwd ? projectStore.findByPath(restored.cwd) : null;
-			const project = matched
-				?? await projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions"));
+			// 重建 catalog 记录：按会话自己的 cwd 匹配或注册项目；没有 cwd 才兑底。
+			// 打开会话时 DshAgentManager 用 project.path 当 cwd，挂错项目会 attach 错 workspace。
+			const project = restored.cwd
+				? (projectStore.findByPath(restored.cwd)
+					?? await projectStore.add(
+						restored.cwd,
+						undefined,
+						settingsStore.get().wslEnabled ? "wsl" : "windows",
+					))
+				: await projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions"));
 			const draft = await sessionCatalog.createDraft({
 				projectId: project.id,
 				title: mainCopy("session.newTitle"),

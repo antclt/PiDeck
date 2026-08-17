@@ -64,13 +64,21 @@ async function createFixture(foreignItems, knownIds = new Set()) {
   await catalog.load();
   const fallbackProject = { id: "builtin-external" };
   let fallbackCreated = 0;
+  const registeredByCwd = new Map();
   const deps = {
     listForeignSessions: async () => foreignItems,
     findProjectByPath: (cwd) => (
       cwd === "C:/repo/alpha" ? { id: "project-alpha" }
         : cwd === "C:/repo/beta" ? { id: "project-beta" }
-          : null
+          : registeredByCwd.get(cwd) ?? null
     ),
+    ensureProjectForCwd: async (cwd) => {
+      const existing = registeredByCwd.get(cwd);
+      if (existing) return existing;
+      const created = { id: `registered:${cwd}` };
+      registeredByCwd.set(cwd, created);
+      return created;
+    },
     ensureFallbackProject: async () => {
       fallbackCreated += 1;
       return fallbackProject;
@@ -106,21 +114,24 @@ test("splitForeignSessions separates catalog-known sessions from pending ones", 
   assert.equal(imported.map((item) => item.dshSessionId).join(","), "session-a,session-c");
 });
 
-test("pickProjectForForeignSession matches cwd and falls back for missing/unmatched cwd", () => {
+test("pickProjectForForeignSession matches cwd, registers unmatched cwd, falls back only when cwd is missing", () => {
   const { pickProjectForForeignSession } = loadModules();
   const findProject = (cwd) => (cwd === "C:/repo/alpha" ? { id: "project-alpha" } : null);
   // vm 上下文对象的 prototype 与测试字面量不同，deepStrictEqual 会误报：逐字段断言
   let picked = pickProjectForForeignSession(foreignItem({ cwd: "C:/repo/alpha" }), findProject, "builtin-external");
   assert.equal(picked.projectId, "project-alpha");
   assert.equal(picked.matched, true);
-  // cwd 存在但未注册项目：兑底
+  assert.equal(picked.cwdToRegister, undefined);
+  // cwd 存在但未注册：按该目录建/挂项目，不能塞进同一个「外部会话」兑底
   picked = pickProjectForForeignSession(foreignItem({ cwd: "C:/elsewhere" }), findProject, "builtin-external");
-  assert.equal(picked.projectId, "builtin-external");
+  assert.equal(picked.projectId, undefined);
   assert.equal(picked.matched, false);
-  // 无 cwd：兑底
+  assert.equal(picked.cwdToRegister, "C:/elsewhere");
+  // 无 cwd：才兑底
   picked = pickProjectForForeignSession(foreignItem({}), findProject, "builtin-external");
   assert.equal(picked.projectId, "builtin-external");
   assert.equal(picked.matched, false);
+  assert.equal(picked.cwdToRegister, undefined);
 });
 
 test("importForeignSession maps into the matched project and keeps the projected title", async () => {
@@ -248,6 +259,47 @@ test("re-importing the same dshSessionId updates in place instead of duplicating
   }
 });
 
+test("importForeignSession registers a project for an unmatched cwd instead of the fallback bucket", async () => {
+  const fixture = await createFixture([]);
+  try {
+    const record = await fixture.sync.importForeignSession(
+      fixture.deps,
+      "session-elsewhere",
+      foreignItem({ dshSessionId: "session-elsewhere", cwd: "C:/elsewhere" }),
+    );
+    assert.equal(record.projectId, "registered:C:/elsewhere");
+    assert.equal(fixture.fallbackCreated, 0, "有自己目录的会话不得进入「外部会话」兑底");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("syncForeignSessions rehomes a previously dumped fallback session onto its own cwd", async () => {
+  const fixture = await createFixture([
+    foreignItem({ dshSessionId: "session-dumped", title: "Dumped", cwd: "C:/elsewhere" }),
+  ]);
+  try {
+    await fixture.catalog.createDraft({
+      projectId: "builtin-external",
+      title: "Dumped",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-dumped",
+    });
+    const result = await fixture.sync.syncForeignSessions(
+      fixture.deps,
+      new Set(["session-dumped"]),
+    );
+    assert.equal(result.imported, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(fixture.catalog.listEntries().length, 1);
+    assert.equal(fixture.catalog.listEntries()[0].projectId, "registered:C:/elsewhere");
+    assert.equal(fixture.catalog.listEntries()[0].title, "Dumped", "纠正归属不得覆盖已有标题");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("syncForeignSessions imports all pending sessions and counts known ones as skipped", async () => {
   const fixture = await createFixture([
     foreignItem({ dshSessionId: "session-a", title: "A", cwd: "C:/repo/alpha" }),
@@ -261,11 +313,9 @@ test("syncForeignSessions imports all pending sessions and counts known ones as 
     );
     assert.equal(result.imported, 2);
     assert.equal(result.skipped, 1);
-    // knownIds 里的 session-a 假定已在 catalog（跳过了导入），这里从空 catalog 起步，
-    // 实际落库的是 session-b / session-c 两条（vm 上下文数组与宿主数组 prototype 不同，
-    // 用 join 比较避免 deepStrictEqual 误报）。
+    // 已在 knownIds 的 session-a 也会再导入一遍（纠正归属），空 catalog 上会补写该条。
     const ids = fixture.catalog.listEntries().map((entry) => entry.dshSessionId).sort();
-    assert.equal(ids.join(","), "session-b,session-c");
+    assert.equal(ids.join(","), "session-a,session-b,session-c");
     // 无目录会话进入兑底项目
     const c = fixture.catalog.listEntries().find((entry) => entry.dshSessionId === "session-c");
     assert.equal(c.projectId, "builtin-external");

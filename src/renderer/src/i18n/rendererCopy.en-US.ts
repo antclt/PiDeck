@@ -870,7 +870,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.dsh.foreignSessions": "Foreign sessions (other tools)",
   "config.dsh.foreignSessionsEmpty": "No pending foreign sessions — everything in DSH_HOME is already mapped into the sidebar.",
   "config.dsh.foreignSessionsHint":
-    "Sessions created in DSH_HOME by other tools (dsh-web, etc.) appear in the sidebar when PiDeck starts (the target project is matched by directory; sessions without a directory go to the \"External sessions\" project). Only unmapped sessions are listed here — import them individually or all at once; imported ones disappear from this list and are never imported twice.",
+    "Sessions created in DSH_HOME by other tools (dsh-web, etc.) appear in the sidebar when PiDeck starts (each session is matched or registered under its own working directory; only sessions without a directory go to the \"External sessions\" project). Only unmapped sessions are listed here — import them individually or all at once; imported ones disappear from this list and are never imported twice.",
   "config.dsh.importSession": "Import",
   "config.dsh.imported": "Foreign DSH session imported.",
   "config.dsh.syncAll": "Import all",
@@ -1930,7 +1930,7 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.dsh.autoAllowApproval": "Auto-allow DSH approvals",
   "settings.dsh.autoAllowApprovalDesc": "When enabled, DSH tool/command approvals are auto-allowed (allowed-once) without a confirmation prompt.",
   "settings.dsh.autoImportForeign": "Auto-import foreign sessions",
-  "settings.dsh.autoImportForeignDesc": "On startup, sessions created in DSH_HOME by other tools (dsh-web, etc.) are mapped into the sidebar automatically (read-only disk scan — does not start the host or affect other tools loading those sessions; project matched by directory; sessions without a directory go to the \"External sessions\" project; already imported are skipped). Turn this off to import them manually from the config page.",
+  "settings.dsh.autoImportForeignDesc": "On startup, sessions created in DSH_HOME by other tools (dsh-web, etc.) are mapped into the sidebar automatically (read-only disk scan — does not start the host or affect other tools loading those sessions; each session is matched or registered under its own working directory; only sessions without a directory go to the \"External sessions\" project; already imported are skipped). Turn this off to import them manually from the config page.",
   "settings.tabs.base": "General",
   "settings.tabs.baseDesc": "Interface, input, and session behavior",
   "settings.tabs.proxy": "Proxy",

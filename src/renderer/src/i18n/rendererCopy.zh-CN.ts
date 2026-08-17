@@ -864,7 +864,7 @@ export const zhCN = {
   "config.dsh.foreignSessions": "外部会话（其他工具）",
   "config.dsh.foreignSessionsEmpty": "暂无待导入的外部会话，DSH_HOME 中的会话已全部映射到侧栏。",
   "config.dsh.foreignSessionsHint":
-    "由 dsh-web 等其他工具在 DSH_HOME 里创建的会话，PiDeck 启动时会自动出现在侧栏（目标项目按目录自动匹配；没有目录的进入「外部会话」项目）。此处仅列出尚未映射的会话，可单独导入或一键全部导入；导入后从本清单消失，不会重复导入。",
+    "由 dsh-web 等其他工具在 DSH_HOME 里创建的会话，PiDeck 启动时会自动出现在侧栏（按会话自己的工作目录匹配或注册项目；没有目录的才进入「外部会话」项目）。此处仅列出尚未映射的会话，可单独导入或一键全部导入；导入后从本清单消失，不会重复导入。",
   "config.dsh.importSession": "导入",
   "config.dsh.imported": "已导入外部 DSH 会话。",
   "config.dsh.syncAll": "全部导入",
@@ -1905,7 +1905,7 @@ export const zhCN = {
   "settings.dsh.autoAllowApproval": "DSH 审批自动放行",
   "settings.dsh.autoAllowApprovalDesc": "开启后 DSH 工具/命令审批自动允许（allowed-once），不再弹确认。",
   "settings.dsh.autoImportForeign": "自动导入外部会话",
-  "settings.dsh.autoImportForeignDesc": "启动时把 dsh-web 等其他工具在 DSH_HOME 创建的会话自动写入侧栏（只读扫描，不启动 host，不影响其他工具加载这些会话；按目录匹配项目，无目录进入「外部会话」项目；已导入的跳过）。关闭后需在配置页手动导入。",
+  "settings.dsh.autoImportForeignDesc": "启动时把 dsh-web 等其他工具在 DSH_HOME 创建的会话自动写入侧栏（只读扫描，不启动 host，不影响其他工具加载这些会话；按会话自己的工作目录匹配或注册项目，没有目录的才进入「外部会话」项目；已导入的跳过）。关闭后需在配置页手动导入。",
   "settings.tabs.base": "基础设置",
   "settings.tabs.baseDesc": "界面、输入和会话行为",
   "settings.tabs.proxy": "代理设置",

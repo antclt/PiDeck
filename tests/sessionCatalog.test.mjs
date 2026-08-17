@@ -270,6 +270,35 @@ test("createDraft with the same dshSessionId is idempotent (updates in place, no
   }
 });
 
+test("createDraft keepExistingTitle preserves title while moving project", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-keep-title-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    await catalog.createDraft({
+      projectId: "builtin-external",
+      title: "Host 回写标题",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-keep-title",
+    });
+    const moved = await catalog.createDraft({
+      projectId: "project-elsewhere",
+      title: "elsewhere",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-keep-title",
+      keepExistingTitle: true,
+    });
+    assert.equal(moved.title, "Host 回写标题");
+    assert.equal(moved.projectId, "project-elsewhere");
+    assert.equal(catalog.listEntries().length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("keeps a draft desktop session ID after Pi assigns a file path", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-"));

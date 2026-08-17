@@ -364,12 +364,18 @@ let usageStatsService: UsageStatsService | null = null;
 const quitCleanup = new QuitCleanupRegistry();
 
 // ── DSH 外部会话同步（dshForeignSync 编排；本文件只做依赖装配）────────────
-// 清单来自磁盘只读扫描（不启动 host）；目标项目按 cwd 匹配，无匹配进兑底项目。
+// 清单来自磁盘只读扫描（不启动 host）；目标项目按会话自己的 cwd 建/挂，无 cwd 才兑底。
 // 标题用投影 / cwd 末段 / i18n 兜底——批量不同步 sessions.history（会抢 dsh-web）。
 // 依赖闭包延迟引用模块级实例（registerIpc/whenReady 阶段才赋值），调用时已就绪。
 const foreignSyncDeps: DshForeignSyncDeps = {
 	listForeignSessions: () => dshHost.listForeignSessions(),
 	findProjectByPath: (cwd) => projectStore.findByPath(cwd),
+	// 会话自带工作目录但侧栏还没有该项目：按该目录注册，打开会话时 cwd 才对得上。
+	ensureProjectForCwd: (cwd) => projectStore.add(
+		cwd,
+		undefined,
+		settingsStore.get().wslEnabled ? "wsl" : "windows",
+	),
 	ensureFallbackProject: () =>
 		projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions")),
 	createDraft: (input) => sessionCatalog.createDraft(input),
@@ -411,9 +417,9 @@ function broadcastVisibleProjects(): void {
 async function scheduleDshForeignAutoImport(): Promise<void> {
 	if (settingsStore.get().dshAutoImportSessions === false) return;
 	try {
-		const result = await runDshForeignSync();
-		// 兑底项目可能是本轮首次创建：侧栏项目列表也要刷新，否则会话挂在看不见的项目上。
-		if (result.imported > 0) broadcastVisibleProjects();
+		await runDshForeignSync();
+		// 按会话 cwd 新建的项目必须立刻出现在侧栏，否则会话挂在看不见的项目上。
+		broadcastVisibleProjects();
 	} catch (error: unknown) {
 		void appLogger.warn("session", "Foreign DSH sessions auto-sync failed", {
 			error: error instanceof Error ? error.message : String(error),
@@ -428,7 +434,8 @@ async function runDshForeignSync(): Promise<{ imported: number; skipped: number 
 		foreignSyncDeps,
 		knownForeignSessionIds(sessionCatalog.listEntries()),
 	);
-	if (result.imported > 0) {
+	if (result.imported > 0 || result.skipped > 0) {
+		// skipped>0 也可能是纠正归属（从兑底拆到各自目录），侧栏要重拉。
 		notifyDshCatalogRefreshed(
 			sessionCatalog.listEntries()
 				.filter((entry) => entry.backend === "dsh" && entry.dshSessionId)

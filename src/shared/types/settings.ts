@@ -282,8 +282,8 @@ export type StartupWindowMode =
 
 	/**
 	 * DSH 外部会话自动导入：应用启动后只读扫描 DSH_HOME/sessions，把其他工具
-	 * （dsh-web 等）创建的、catalog 尚未映射的根会话写入侧栏（按 cwd 匹配项目；
-	 * 无目录/无匹配的进入「外部会话」兑底项目）。缺省 true。
+	 * （dsh-web 等）创建的、catalog 尚未映射的根会话写入侧栏（按会话自己的 cwd
+	 * 匹配或注册项目；没有 cwd 的才进入「外部会话」兑底项目）。缺省 true。
 	 * 不启动 host、不 attach，避免与 dsh-web 抢同一份 DSH_HOME。
 	 * 关闭后外部会话只出现在配置页「外部会话」清单，需手动导入。
 	 */

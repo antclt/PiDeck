@@ -6,7 +6,8 @@ import type { SessionRecord } from "../../shared/types";
  *
  * 本模块只做编排与纯策略（选项目、过滤已导入、标题归一），不碰 Electron：
  * - 幂等由 SessionCatalog.createDraft 的 dshSessionId 去重保证（重复导入只更新不新增）；
- * - 目标项目按 cwd 匹配已注册项目，无 cwd / 未匹配的进入「外部会话」兑底项目；
+ * - 目标项目按会话自己的 cwd：已注册则挂入该项目，未注册则按该目录创建项目；
+ *   只有没有 cwd 的会话才进入「外部会话」兑底项目（不能把不同目录堆在一起）；
  * - 标题优先 list 投影；没有标题时用 cwd 末段（侧栏先有可读名）；再缺用兜底标题。
  * - 批量同步禁止走 resolveHostTitle / sessions.history：那会 attach 冷会话，
  *   与 dsh-web 抢同一份 DSH_HOME（官方不支持双 host）。
@@ -33,8 +34,13 @@ export type DshForeignSyncDeps = {
 	listForeignSessions: () => Promise<DshForeignSessionItem[]>;
 	/** 按目录找已注册项目（无匹配返回 null）。 */
 	findProjectByPath: (cwd: string) => { id: string } | null;
-	/** 兑底项目（无 cwd / 未匹配目录时使用；惰性创建一次）。 */
+	/** 兑底项目（仅无 cwd 时使用；惰性创建一次）。 */
 	ensureFallbackProject: () => Promise<{ id: string }>;
+	/**
+	 * 会话有自己的工作目录但尚未注册项目时，按该目录创建/复用项目。
+	 * 缺省则退回兑底（测试/旧装配）；生产必须提供，否则不同目录会堆在一起。
+	 */
+	ensureProjectForCwd?: (cwd: string) => Promise<{ id: string }>;
 	/** catalog 映射写入（幂等：同 dshSessionId 已存在时更新并返回既有记录）。 */
 	createDraft: (input: {
 		projectId: string;
@@ -42,6 +48,7 @@ export type DshForeignSyncDeps = {
 		environment: "native" | "wsl";
 		backend: "dsh";
 		dshSessionId: string;
+		keepExistingTitle?: boolean;
 	}) => Promise<SessionRecord>;
 	/** 当前环境（native/wsl）。 */
 	getEnvironment: () => "native" | "wsl";
@@ -86,19 +93,30 @@ export function splitForeignSessions(
 	return { pending, imported };
 }
 
+/** 项目选择结果：已匹配 / 待按 cwd 注册 / 无目录兑底。 */
+export type ForeignProjectPick = {
+	/** 已能确定的项目 id；cwd 待注册时为空，由 ensureProjectForCwd 补上。 */
+	projectId?: string;
+	matched: boolean;
+	/** 未注册但会话自带的工作目录，调用方应按此建项目，不能丢进兑底。 */
+	cwdToRegister?: string;
+};
+
 /**
  * 决定外部会话的目标项目（纯策略）：
- * cwd 命中已注册项目 → 该项目；无 cwd 或未命中 → 兑底项目。
- * 返回是否按目录匹配（matched），供日志区分归属来源。
+ * cwd 命中已注册项目 → 该项目；
+ * cwd 存在但未注册 → 返回 cwdToRegister（按会话自己的目录建项目）；
+ * 无 cwd → 兑底项目。
  */
 export function pickProjectForForeignSession(
 	item: DshForeignSessionItem,
 	findProjectByPath: (cwd: string) => { id: string } | null,
 	fallbackProjectId: string,
-): { projectId: string; matched: boolean } {
+): ForeignProjectPick {
 	if (item.cwd) {
 		const matched = findProjectByPath(item.cwd);
 		if (matched) return { projectId: matched.id, matched: true };
+		return { matched: false, cwdToRegister: item.cwd };
 	}
 	return { projectId: fallbackProjectId, matched: false };
 }
@@ -138,12 +156,14 @@ export async function resolveForeignSessionTitle(
  * 导入单个外部会话（幂等）。item 未给出时按 dshSessionId 从清单反查；
  * 目标项目与标题按上面的策略解析，最后经 createDraft 落 catalog（重复导入被吸收）。
  * @param allowHostTitle 仅手动单条导入为 true；批量同步必须 false，避免 attach。
+ * @param keepExistingTitle 纠正归属时保留 catalog 已有标题，避免磁盘扫描用 cwd 末段覆盖。
  */
 export async function importForeignSession(
 	deps: DshForeignSyncDeps,
 	dshSessionId: string,
 	item?: DshForeignSessionItem,
 	allowHostTitle = true,
+	keepExistingTitle = false,
 ): Promise<SessionRecord> {
 	let target = item;
 	if (!target) {
@@ -151,12 +171,7 @@ export async function importForeignSession(
 		target = items.find((candidate) => candidate.dshSessionId === dshSessionId);
 	}
 	if (!target) throw new Error(`Foreign DSH session not found: ${dshSessionId}`);
-	const fallbackProject = await deps.ensureFallbackProject();
-	const { projectId } = pickProjectForForeignSession(
-		target,
-		deps.findProjectByPath,
-		fallbackProject.id,
-	);
+	const projectId = await resolveForeignProjectId(deps, target);
 	// 批量同步禁止 host 标题补全：resolveHostTitle 会 sessions.history，抢 dsh-web。
 	const title = await resolveForeignSessionTitle(
 		target,
@@ -169,12 +184,31 @@ export async function importForeignSession(
 		environment: deps.getEnvironment(),
 		backend: "dsh",
 		dshSessionId,
+		...(keepExistingTitle ? { keepExistingTitle: true } : {}),
 	});
 }
 
 /**
- * 全量同步外部会话：把 catalog 尚未映射的 host 根会话全部导入（自动发现）。
- * 单条失败只记日志不阻断其余；knownIds 缺省时全部交给 createDraft 幂等吸收。
+ * 解析最终项目 id：已注册 → 用该项目；有 cwd 未注册 → 按目录建项目；无 cwd → 兑底。
+ * 有自己目录时绝不进兑底，否则 dsh-web 里按 workspace 分开的会话会堆在「外部会话」里。
+ */
+export async function resolveForeignProjectId(
+	deps: DshForeignSyncDeps,
+	item: DshForeignSessionItem,
+): Promise<string> {
+	const picked = pickProjectForForeignSession(item, deps.findProjectByPath, "__fallback__");
+	if (picked.matched && picked.projectId) return picked.projectId;
+	if (picked.cwdToRegister && deps.ensureProjectForCwd) {
+		return (await deps.ensureProjectForCwd(picked.cwdToRegister)).id;
+	}
+	// 无 cwd，或装配未提供按目录建项目（测试/旧路径）才兑底。
+	return (await deps.ensureFallbackProject()).id;
+}
+
+/**
+ * 全量同步外部会话：catalog 未映射的导入；已映射的也再走一遍以按 cwd 纠正归属
+ * （上一版把未注册目录全塞进兑底，启动时要把它们拆回各自目录）。
+ * 单条失败只记日志不阻断其余。
  */
 export async function syncForeignSessions(
 	deps: DshForeignSyncDeps,
@@ -183,25 +217,16 @@ export async function syncForeignSessions(
 	const items = await deps.listForeignSessions();
 	let imported = 0;
 	let skipped = 0;
-	if (knownIds) {
-		const { pending, imported: alreadyImported } = splitForeignSessions(items, knownIds);
-		skipped = alreadyImported.length;
-		for (const item of pending) {
-			try {
-				await importForeignSession(deps, item.dshSessionId, item, false);
-				imported += 1;
-			} catch (error) {
-				deps.onError?.(item.dshSessionId, error);
-			}
-		}
-	} else {
-		for (const item of items) {
-			try {
-				await importForeignSession(deps, item.dshSessionId, item, false);
-				imported += 1;
-			} catch (error) {
-				deps.onError?.(item.dshSessionId, error);
-			}
+	// 已在 catalog 的也再导入一遍：createDraft 按 dshSessionId 幂等更新项目归属，
+	// 把上一版堆在「外部会话」兑底里的会话拆回各自 cwd 对应的项目。
+	for (const item of items) {
+		const alreadyKnown = Boolean(knownIds?.has(item.dshSessionId));
+		try {
+			await importForeignSession(deps, item.dshSessionId, item, false, alreadyKnown);
+			if (alreadyKnown) skipped += 1;
+			else imported += 1;
+		} catch (error) {
+			deps.onError?.(item.dshSessionId, error);
 		}
 	}
 	return { imported, skipped };
