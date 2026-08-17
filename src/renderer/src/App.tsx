@@ -401,6 +401,7 @@ export function App() {
     refreshProjectSessions,
     refreshFiles,
     refreshProjectTree,
+    syncDshForeignSessionsIfEnabled,
   } = useProjectSync({
     projects,
     activeProjectId,
@@ -409,10 +410,12 @@ export function App() {
     replaceProjectSessions,
     api: {
       projects: { list: api.projects.list },
+      settings: { get: api.settings.get },
       git: { worktreeList: api.git.worktreeList, branches: api.git.branches },
       sessions: {
         listCatalog: api.sessions.listCatalog,
         onCatalogRefreshed: api.sessions.onCatalogRefreshed,
+        syncDshForeignSessions: api.sessions.syncDshForeignSessions,
       },
       files: { list: api.files.list },
     },
@@ -1868,8 +1871,11 @@ export function App() {
   async function addProject() {
     const project = await api.projects.add();
     if (!project) return;
+    // 先同步 DSH：新目录注册后，原先按 cwd 找不到项目的外部会话才能挂进来。
+    await syncDshForeignSessionsIfEnabled();
     await refreshProjects();
     setActiveProjectId(project.id);
+    await refreshProjectSessions(project.id);
   }
 
   function updateAfterProjectRemoved(

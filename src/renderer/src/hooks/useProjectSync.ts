@@ -29,10 +29,15 @@ type UseProjectSyncInput = {
   api: {
     projects: { list: () => Promise<Project[]> };
     git: { worktreeList: (projectId: string) => Promise<WorktreeEntry[]>; branches: (projectId: string) => Promise<{ current: string | null; branches: string[] }> };
+    settings?: {
+      get: () => Promise<{ dshAutoImportSessions?: boolean }>;
+    };
     sessions: {
       listCatalog: (projectId: string, options?: { scan?: boolean }) => Promise<SessionRecord[]>;
       /** 后台扫描完成推送（主进程 → 渲染层）；可选，缺省时退化为纯轮询。 */
       onCatalogRefreshed?: (listener: (input: { projectId: string }) => void) => () => void;
+      /** 只读扫 $DSH_HOME，把外部根会话写入 catalog；关闭自动导入时调用方不应触发。 */
+      syncDshForeignSessions?: () => Promise<{ imported: number; skipped: number }>;
     };
     files: { list: (projectId: string) => Promise<FileTreeNode[]> };
   };
@@ -221,6 +226,21 @@ export function useProjectSync(input: UseProjectSyncInput) {
     // replaceProjectSessions/api 由 App 以稳定引用提供（useCallback/useMemo），依赖安全
   }, [api, replaceProjectSessions]);
 
+  /**
+   * DSH 会话在 $DSH_HOME，不在项目目录 JSONL。添加项目 / 右键刷新若只扫 pi，
+   * 侧栏会缺刚对上 cwd 的外部会话。关闭自动导入后保持现状，不偷偷写入。
+   */
+  async function syncDshForeignSessionsIfEnabled() {
+    if (!api.sessions.syncDshForeignSessions || !api.settings?.get) return;
+    const settings = await api.settings.get();
+    if (settings.dshAutoImportSessions === false) return;
+    try {
+      await api.sessions.syncDshForeignSessions();
+    } catch {
+      // 磁盘扫描失败不阻断项目刷新：已入册的 DSH/pi 会话仍应出现。
+    }
+  }
+
   function refreshProjectSessions(projectId: string, silent = false): ProjectSessionRefreshPromise {
     const current = sessionRefreshCompletionByProjectRef.current[projectId];
     if (current) {
@@ -234,6 +254,8 @@ export function useProjectSync(input: UseProjectSyncInput) {
   }
 
   async function refreshProjectTree(project: Project) {
+    await syncDshForeignSessionsIfEnabled();
+    await refreshProjects();
     await refreshProjectSessions(project.id);
     if (project.worktreeEnabled) {
       await refreshWorktrees(project.id);
@@ -252,5 +274,5 @@ export function useProjectSync(input: UseProjectSyncInput) {
     if (!silent) showToast(t("app.filesRefreshed", {}), 1800);
   }
 
-  return { worktreesByProject, branchByProject, files, setFiles, gitInfo, setGitInfo, sessionLoadingByProject, setSessionLoadingByProject, visibleProjectChildCountByProject, setVisibleProjectChildCountByProject, refreshProjects, refreshWorktrees, refreshSessions, refreshProjectSessions, refreshFiles, refreshProjectTree };
+  return { worktreesByProject, branchByProject, files, setFiles, gitInfo, setGitInfo, sessionLoadingByProject, setSessionLoadingByProject, visibleProjectChildCountByProject, setVisibleProjectChildCountByProject, refreshProjects, refreshWorktrees, refreshSessions, refreshProjectSessions, refreshFiles, refreshProjectTree, syncDshForeignSessionsIfEnabled };
 }
