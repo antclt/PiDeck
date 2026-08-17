@@ -364,8 +364,8 @@ let usageStatsService: UsageStatsService | null = null;
 const quitCleanup = new QuitCleanupRegistry();
 
 // ── DSH 外部会话同步（dshForeignSync 编排；本文件只做依赖装配）────────────
-// 目标项目按 cwd 匹配已注册项目，无 cwd/未匹配进入「外部会话」兑底项目；
-// 标题优先 host list 投影，缺失时从 host 历史投影补全，再缺用 i18n 兜底。
+// 清单来自磁盘只读扫描（不启动 host）；目标项目按 cwd 匹配，无匹配进兑底项目。
+// 标题用投影 / cwd 末段 / i18n 兜底——批量不同步 sessions.history（会抢 dsh-web）。
 // 依赖闭包延迟引用模块级实例（registerIpc/whenReady 阶段才赋值），调用时已就绪。
 const foreignSyncDeps: DshForeignSyncDeps = {
 	listForeignSessions: () => dshHost.listForeignSessions(),
@@ -374,8 +374,8 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 		projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions")),
 	createDraft: (input) => sessionCatalog.createDraft(input),
 	getEnvironment: () => (settingsStore.get().wslEnabled ? "wsl" : "native"),
-	fallbackTitle: mainCopy("session.dshUntitled"),
-	resolveHostTitle: (dshSessionId) => dshHost.resolveSessionTitle(dshSessionId),
+	// 惰性：此对象在模块顶层创建，此时 settingsStore 尚未赋值，eager mainCopy 会崩。
+	fallbackTitle: () => mainCopy("session.dshUntitled"),
 	onError: (dshSessionId, error) => {
 		void appLogger.warn("session", "Foreign DSH session import failed", {
 			dshSessionId,
@@ -393,7 +393,35 @@ function notifyDshCatalogRefreshed(projectIds: Iterable<string>): void {
 	}
 }
 
-/** DSH 外部会话全量同步（自动发现）：host-ready 自动导入与配置页「全部导入」共用。
+/** 按当前设置过滤可见项目并推给渲染层（启动 load / 自动导入兑底项目后共用）。 */
+function broadcastVisibleProjects(): void {
+	const window = mainWindow;
+	if (!window || window.isDestroyed()) return;
+	const s = settingsStore.get();
+	const visible = s.wslEnabled
+		? projectStore.list().filter((p) => p.kind === "chat" || p.environment === "wsl")
+		: projectStore.list().filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
+	window.webContents.send(ipcChannels.projectsChanged, visible);
+}
+
+/**
+ * 启动自动导入：catalog + projects 都已就绪后扫磁盘，把外部根会话写入侧栏。
+ * 设置 dshAutoImportSessions=false 时跳过；失败只记日志，不阻断启动。
+ */
+async function scheduleDshForeignAutoImport(): Promise<void> {
+	if (settingsStore.get().dshAutoImportSessions === false) return;
+	try {
+		const result = await runDshForeignSync();
+		// 兑底项目可能是本轮首次创建：侧栏项目列表也要刷新，否则会话挂在看不见的项目上。
+		if (result.imported > 0) broadcastVisibleProjects();
+	} catch (error: unknown) {
+		void appLogger.warn("session", "Foreign DSH sessions auto-sync failed", {
+			error: error instanceof Error ? error.message : String(error),
+		});
+	}
+}
+
+/** DSH 外部会话全量同步：启动扫描与配置页「全部导入」共用（只读磁盘，不 boot host）。
  *  结果含本轮导入数/已导入跳过数；有新增时广播受影响项目刷新侧栏。 */
 async function runDshForeignSync(): Promise<{ imported: number; skipped: number }> {
 	const result = await syncForeignSessions(
@@ -2506,8 +2534,8 @@ function registerIpc() {
 				});
 				return record;
 			},
-			// 外部会话全量同步（自动发现）：catalog 未映射的 host 根会话全部导入。
-			// 配置页「全部导入」按钮与 host-ready 自动同步共用此入口。
+			// 外部会话全量同步：catalog 未映射的磁盘根会话全部导入（不启动 host）。
+			// 配置页「全部导入」与启动自动同步共用此入口。
 			syncDshForeignSessions: () => runDshForeignSync(),
 			// G14：DSH 归档/恢复（目录移动 + manifest，与 pi 归档同语义，不销毁数据）
 			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),
@@ -2883,25 +2911,8 @@ app.whenReady().then(async () => {
 		await dshAgentManager?.stopAll();
 		await dshHost?.dispose();
 	});
-	// DSH 外部会话自动导入（设置 dshAutoImportSessions 可关闭，默认开）：
-	// host-ready（首次启动/崩溃自动重启）后延迟扫描一次，把 dsh-web 等其他工具创建的
-	// host 根会话直接映射进 catalog（幂等：catalog 已有的跳过，重复触发只补新会话）。
-	// 延迟等 catalog 装载完成；失败只记日志，不阻断启动路径。
-	let foreignSyncScheduled = false;
-	dshHost.onHostReady(() => {
-		if (settingsStore.get().dshAutoImportSessions === false) return;
-		if (foreignSyncScheduled) return;
-		foreignSyncScheduled = true;
-		const timer = setTimeout(() => {
-			foreignSyncScheduled = false;
-			void runDshForeignSync().catch((error: unknown) => {
-				void appLogger.warn("session", "Foreign DSH sessions auto-sync failed", {
-					error: error instanceof Error ? error.message : String(error),
-				});
-			});
-		}, 2500);
-		timer.unref();
-	});
+	// DSH 外部会话自动导入改到 projectStore.load 之后（见下方 scheduleDshForeignAutoImport）：
+	// 必须在启动时扫磁盘，不能等 host-ready——host 懒启动，且启动它会与 dsh-web 抢 DSH_HOME。
 	webServiceManager = new WebServiceManager({
 		// dev 模式（electron-vite dev 不产出 out/renderer 构建物）下，静态资源
 		// 代理到 vite dev server，外部 Web 端加载重构后的 React 版页面并支持热更新；
@@ -3275,12 +3286,10 @@ app.whenReady().then(async () => {
 	// 项目列表可能位于杀软/同步盘较慢的 userData；窗口先显示，随后异步加载，避免 packaged app 打开时白屏等待。
 	void projectStore
 		.load()
-		.then(() => {
-			const s = settingsStore.get();
-			const visible = s.wslEnabled
-				? projectStore.list().filter((p) => p.kind === "chat" || p.environment === "wsl")
-				: projectStore.list().filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
-			mainWindow?.webContents.send("projects:changed", visible);
+		.then(async () => {
+			broadcastVisibleProjects();
+			// 项目表就绪后再扫 DSH_HOME：cwd 才能匹配已注册项目；不启动 host。
+			await scheduleDshForeignAutoImport();
 		})
 		.catch(() => undefined);
 

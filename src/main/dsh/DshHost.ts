@@ -10,10 +10,9 @@ import { toDshAvailableModels } from "./dshModels";
 import { parseAgentDefaultModel } from "./dshDefaultModel";
 import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
 import { workspaceDirFor } from "./dshSessionPath";
+import { listForeignSessionsFromDisk, scanDshSessionHeaders } from "./dshForeignSessionScan";
 import { PIDECK_PLUGIN_BRIDGE_PATH } from "./pideckPluginBridge";
 import { PIDECK_COMMANDS_BRIDGE_PATH } from "./pideckCommandsBridge";
-// DSH 会话 id 品牌类型（零运行时成本，仅类型擦除；与 DshAgentManager 同源）
-import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import type { DshFetchMessage } from "./dshHostBridge";
 import type {
 	DshCommandView,
@@ -428,22 +427,16 @@ export class DshHost {
 	}
 
 	/**
-	 * host 中全部已持久化会话 id（G3/D11：孤儿检测用——与 catalog 的 dshSessionId 对照，
-	 * 找出「PiDeck 无映射但 host 数据仍在」的会话）。
+	 * 磁盘上全部已持久化会话 id（G3/D11：孤儿检测用）。
+	 * 只读扫 DSH_HOME/sessions，不启动 host——配置页概览不能为了数孤儿去抢 dsh-web。
 	 */
 	async listSessionIds(): Promise<string[]> {
-		await this.ensureStarted();
-		const client = this.client;
-		if (!client) return [];
-		const listed = await client.sessions.list({});
-		if (!listed.result.ok) return [];
-		return (listed.result.value.items ?? []).map((item) => String(item.sessionId));
+		return scanDshSessionHeaders(this.getHomeDir()).map((header) => header.id);
 	}
 
 	/**
-	 * 外部（dsh-web 等其他工具）创建的 host 会话清单（跨工具兼容，2026-12）：
-	 * sessions.list 的根会话（排除 subagent 后代），带标题/cwd，供配置页
-	 * 「外部会话导入」把 host 数据映射进 PiDeck catalog（否则在 PiDeck 侧显示为孤儿）。
+	 * 外部（dsh-web 等其他工具）创建的根会话清单：只读扫磁盘 header，
+	 * 不 fork host、不 sessions.list / history。双 host 会互相覆盖 session log。
 	 */
 	async listForeignSessions(): Promise<Array<{
 		dshSessionId: string;
@@ -451,53 +444,7 @@ export class DshHost {
 		cwd?: string;
 		updatedAt?: number;
 	}>> {
-		await this.ensureStarted();
-		const client = this.client;
-		if (!client) return [];
-		const listed = await client.sessions.list({});
-		if (!listed.result.ok) return [];
-		return (listed.result.value.items ?? [])
-			.filter((item) => item.origin !== "subagent" && item.parentSessionId === undefined)
-			.map((item) => {
-				const values = (item.projections as { values?: unknown } | undefined)?.values;
-				const projectedTitle = values !== null && typeof values === "object"
-					? (values as Record<string, unknown>).title
-					: undefined;
-				return {
-					dshSessionId: String(item.sessionId),
-					...(typeof projectedTitle === "string" && projectedTitle.trim() ? { title: projectedTitle.trim() } : {}),
-					...(typeof item.cwd === "string" && item.cwd ? { cwd: item.cwd } : {}),
-					...(typeof item.updatedAt === "number" ? { updatedAt: item.updatedAt } : {}),
-				};
-			});
-	}
-
-	/**
-	 * 按 host 会话 id 补全标题（外部会话导入用）：sessions.list 对冷会话（未 attach）
-	 * 可能不带投影（listProjectionsFor 在投影缓存缺失时整体省略 projections 块），
-	 * 而 session.history 尾页总是随 detached 投影恢复 session/title 事件的 fold 结果
-	 * （dsh-session-title 单元，与 dsh-web 历史页同源）。失败/无标题返回 undefined，
-	 * 由调用方回落兜底标题。
-	 */
-	async resolveSessionTitle(dshSessionId: string): Promise<string | undefined> {
-		await this.ensureStarted();
-		const client = this.client;
-		if (!client) return undefined;
-		try {
-			const history = await client.sessions.history({
-				sessionId: dshSessionId as SessionId,
-				maxMessages: 200,
-			});
-			if (!history.result.ok) return undefined;
-			const values = history.result.value.projections?.values;
-			const title = values !== null && typeof values === "object"
-				? (values as Record<string, unknown>).title
-				: undefined;
-			return typeof title === "string" && title.trim() ? title.trim() : undefined;
-		} catch {
-			// 标题补全是 best-effort：host 异常/会话已删都不阻断导入
-			return undefined;
-		}
+		return listForeignSessionsFromDisk(this.getHomeDir());
 	}
 
 	/**

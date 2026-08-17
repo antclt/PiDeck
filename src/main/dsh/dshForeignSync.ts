@@ -7,8 +7,9 @@ import type { SessionRecord } from "../../shared/types";
  * 本模块只做编排与纯策略（选项目、过滤已导入、标题归一），不碰 Electron：
  * - 幂等由 SessionCatalog.createDraft 的 dshSessionId 去重保证（重复导入只更新不新增）；
  * - 目标项目按 cwd 匹配已注册项目，无 cwd / 未匹配的进入「外部会话」兑底项目；
- * - 标题优先取 host list 投影，缺失时经 resolveHostTitle 从 host 历史投影补全，
- *   仍缺失则用兜底标题（mainCopy session.dshUntitled）。
+ * - 标题优先 list 投影；没有标题时用 cwd 末段（侧栏先有可读名）；再缺用兜底标题。
+ * - 批量同步禁止走 resolveHostTitle / sessions.history：那会 attach 冷会话，
+ *   与 dsh-web 抢同一份 DSH_HOME（官方不支持双 host）。
  */
 
 /** host sessions.list 的一行外部根会话（DshHost.listForeignSessions 的返回形状）。 */
@@ -44,9 +45,13 @@ export type DshForeignSyncDeps = {
 	}) => Promise<SessionRecord>;
 	/** 当前环境（native/wsl）。 */
 	getEnvironment: () => "native" | "wsl";
-	/** list 投影缺失标题时的兜底标题（i18n：DSH 会话）。 */
-	fallbackTitle: string;
-	/** host 侧标题补全（按会话 id 从历史投影读取；缺省不补全）。 */
+	/**
+	 * list 投影缺失标题时的兜底标题（i18n：DSH 会话）。
+	 * 必须是惰性取值（函数或 getter）：装配对象在模块顶层创建时
+	 * settingsStore 尚未赋值，eager `mainCopy()` 会在加载期崩溃。
+	 */
+	fallbackTitle: string | (() => string);
+	/** 可选标题补全（仅单条手动导入用；批量同步不要传——会 attach host 会话）。 */
 	resolveHostTitle?: (dshSessionId: string) => Promise<string | undefined>;
 	/** 单条导入失败回调（不阻断其余会话；缺省静默）。 */
 	onError?: (dshSessionId: string, error: unknown) => void;
@@ -98,7 +103,22 @@ export function pickProjectForForeignSession(
 	return { projectId: fallbackProjectId, matched: false };
 }
 
-/** 解析最终标题：list 投影 > host 历史投影补全 > 兜底标题。 */
+/** 解析兜底标题：字符串原样返回，函数在使用时再取（避免模块加载期调 i18n）。 */
+export function resolveFallbackTitle(fallbackTitle: string | (() => string)): string {
+	return typeof fallbackTitle === "function" ? fallbackTitle() : fallbackTitle;
+}
+
+/** 从 cwd 取侧栏可读名（末段目录）；无路径时返回 undefined。 */
+export function cwdDisplayName(cwd: string | undefined): string | undefined {
+	if (!cwd) return undefined;
+	const trimmed = cwd.replace(/[\\/]+$/, "").trim();
+	if (!trimmed) return undefined;
+	const parts = trimmed.split(/[\\/]/);
+	const last = parts[parts.length - 1]?.trim();
+	return last || undefined;
+}
+
+/** 解析最终标题：投影 > 可选 host 补全 > cwd 末段 > 兜底标题。 */
 export async function resolveForeignSessionTitle(
 	item: DshForeignSessionItem,
 	fallbackTitle: string,
@@ -111,17 +131,19 @@ export async function resolveForeignSessionTitle(
 		const normalized = normalizeForeignTitle(hostTitle);
 		if (normalized) return normalized;
 	}
-	return fallbackTitle;
+	return cwdDisplayName(item.cwd) ?? fallbackTitle;
 }
 
 /**
  * 导入单个外部会话（幂等）。item 未给出时按 dshSessionId 从清单反查；
  * 目标项目与标题按上面的策略解析，最后经 createDraft 落 catalog（重复导入被吸收）。
+ * @param allowHostTitle 仅手动单条导入为 true；批量同步必须 false，避免 attach。
  */
 export async function importForeignSession(
 	deps: DshForeignSyncDeps,
 	dshSessionId: string,
 	item?: DshForeignSessionItem,
+	allowHostTitle = true,
 ): Promise<SessionRecord> {
 	let target = item;
 	if (!target) {
@@ -135,7 +157,12 @@ export async function importForeignSession(
 		deps.findProjectByPath,
 		fallbackProject.id,
 	);
-	const title = await resolveForeignSessionTitle(target, deps.fallbackTitle, deps.resolveHostTitle);
+	// 批量同步禁止 host 标题补全：resolveHostTitle 会 sessions.history，抢 dsh-web。
+	const title = await resolveForeignSessionTitle(
+		target,
+		resolveFallbackTitle(deps.fallbackTitle),
+		allowHostTitle ? deps.resolveHostTitle : undefined,
+	);
 	return deps.createDraft({
 		projectId,
 		title,
@@ -161,7 +188,7 @@ export async function syncForeignSessions(
 		skipped = alreadyImported.length;
 		for (const item of pending) {
 			try {
-				await importForeignSession(deps, item.dshSessionId, item);
+				await importForeignSession(deps, item.dshSessionId, item, false);
 				imported += 1;
 			} catch (error) {
 				deps.onError?.(item.dshSessionId, error);
@@ -170,7 +197,7 @@ export async function syncForeignSessions(
 	} else {
 		for (const item of items) {
 			try {
-				await importForeignSession(deps, item.dshSessionId, item);
+				await importForeignSession(deps, item.dshSessionId, item, false);
 				imported += 1;
 			} catch (error) {
 				deps.onError?.(item.dshSessionId, error);

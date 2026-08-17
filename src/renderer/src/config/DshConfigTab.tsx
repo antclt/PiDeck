@@ -466,7 +466,7 @@ function Overview(props: {
 		}
 	};
 
-	/** 全量同步：把 catalog 尚未映射的外部 DSH 会话一次全部导入（host-ready 也会自动执行）。 */
+	/** 全量同步：把 catalog 尚未映射的外部 DSH 会话一次全部导入（启动时也会自动执行）。 */
 	const syncAllForeign = async () => {
 		if (syncing) return;
 		setSyncing(true);
@@ -585,8 +585,8 @@ function Overview(props: {
 					)}
 				</div>
 			</section>
-			{/* 跨工具兼容（2026-12）：dsh-web 等其他工具创建的 host 会话，导入后侧栏可见可加载。
-			    host-ready 自动导入默认开启（设置 dshAutoImportSessions 关闭）；此处仅剩手动补漏 */}
+			{/* 跨工具兼容：dsh-web 等其他工具创建的会话，启动时磁盘扫描自动入侧栏。
+			    设置 dshAutoImportSessions 关闭后此处仍可手动补漏；清单本身也不启动 host */}
 			<section className="grid gap-2">
 				<div className="flex items-center gap-2">
 					<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.foreignSessions")}</h3>

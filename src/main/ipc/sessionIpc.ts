@@ -191,7 +191,7 @@ export type DshBackendIpcDeps = {
 	}>>;
 	/** DSH 外部会话导入：按 host 会话 id 映射进 catalog（返回新 SessionRecord）。 */
 	importDshForeignSession?: (dshSessionId: string) => Promise<import("../../shared/types").SessionRecord>;
-	/** DSH 外部会话全量同步（自动发现：catalog 未映射的 host 根会话全部导入）；未装配时返回空统计。 */
+	/** DSH 外部会话全量同步（磁盘扫描：catalog 未映射的根会话全部导入）；未装配时返回空统计。 */
 	syncDshForeignSessions?: () => Promise<{ imported: number; skipped: number }>;
 	/** DSH 会话归档（G14：host 目录移入 .pideck-archive + manifest）；未装配时抛错。 */
 	archiveDshSession?: (dshSessionId: string, cwd: string) => Promise<string | undefined>;
@@ -896,8 +896,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return importDshForeignSession(dshSessionId);
 		},
 	);
-	// DSH 外部会话全量同步（自动发现）：把 catalog 未映射的 host 根会话全部导入，
-	// 返回 { imported, skipped } 供配置页展示。host 未启动/未装配时返回空统计。
+	// DSH 外部会话全量同步：把 catalog 未映射的磁盘根会话全部导入（不启动 host），
+	// 返回 { imported, skipped } 供配置页展示。未装配时返回空统计。
 	ipcMain.handle(
 		ipcChannels.dshSyncForeignSessions,
 		async (): Promise<{ imported: number; skipped: number }> => {

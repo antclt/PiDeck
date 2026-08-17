@@ -158,6 +158,57 @@ test("importForeignSession falls back to host-resolved title when the projection
   }
 });
 
+test("resolveFallbackTitle defers function evaluation until use", () => {
+  const { resolveFallbackTitle } = loadModules();
+  assert.equal(resolveFallbackTitle("DSH 会话"), "DSH 会话");
+  let called = 0;
+  const title = resolveFallbackTitle(() => {
+    called += 1;
+    return "lazy-title";
+  });
+  assert.equal(title, "lazy-title");
+  assert.equal(called, 1);
+});
+
+test("index foreignSyncDeps must not call mainCopy at module load", () => {
+  // 回归：eager fallbackTitle: mainCopy(...) 在 settingsStore 赋值前求值，
+  // 启动即 TypeError: Cannot read properties of undefined (reading 'get')。
+  const source = readFileSync("src/main/index.ts", "utf8");
+  assert.match(
+    source,
+    /fallbackTitle:\s*\(\)\s*=>\s*mainCopy\(/,
+    "fallbackTitle 必须惰性取 i18n，不能在对象字面量里直接 mainCopy",
+  );
+  assert.doesNotMatch(
+    source,
+    /fallbackTitle:\s*mainCopy\(/,
+  );
+});
+
+test("cwdDisplayName takes the last path segment on both separators", () => {
+  const { cwdDisplayName } = loadModules();
+  assert.equal(cwdDisplayName("C:/repo/alpha"), "alpha");
+  assert.equal(cwdDisplayName("D:\\project\\github\\pi-desktop\\"), "pi-desktop");
+  assert.equal(cwdDisplayName(""), undefined);
+  assert.equal(cwdDisplayName(undefined), undefined);
+});
+
+test("importForeignSession uses cwd last segment when title is missing and host title is not used", async () => {
+  const fixture = await createFixture([]);
+  try {
+    const record = await fixture.sync.importForeignSession(
+      fixture.deps,
+      "session-web-1",
+      foreignItem({ cwd: "C:/repo/alpha" }),
+      false,
+    );
+    assert.equal(record.title, "alpha");
+    assert.equal(record.projectId, "project-alpha");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("importForeignSession uses the fallback title and fallback project for directory-less sessions", async () => {
   const fixture = await createFixture([]);
   try {
@@ -242,6 +293,25 @@ test("syncForeignSessions keeps going when a single import fails", async () => {
     assert.ok(String(errors[0].error).includes("host session vanished"));
     assert.equal(fixture.catalog.listEntries().length, 1);
     assert.equal(fixture.catalog.listEntries()[0].dshSessionId, "session-good");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("syncForeignSessions never calls resolveHostTitle so bulk sync cannot attach host", async () => {
+  const fixture = await createFixture([
+    foreignItem({ dshSessionId: "session-a", cwd: "C:/repo/alpha" }),
+  ]);
+  let called = 0;
+  fixture.deps.resolveHostTitle = async () => {
+    called += 1;
+    return "should-not-use";
+  };
+  try {
+    const result = await fixture.sync.syncForeignSessions(fixture.deps);
+    assert.equal(result.imported, 1);
+    assert.equal(called, 0, "批量同步禁止 sessions.history 标题补全");
+    assert.equal(fixture.catalog.listEntries()[0].title, "alpha");
   } finally {
     await fixture.cleanup();
   }
