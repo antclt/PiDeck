@@ -1467,6 +1467,7 @@ export const zhCN = {
   "config.needsFix": "需修复",
   "config.openFolder": "打开目录",
   "config.providerNamePlaceholder": "供应商名称，如 openai",
+  "config.providerNameRule": "仅支持字母开头，字母、数字、下划线或连字符（用于 DSH 环境变量名兼容）",
   "config.reason": "原因",
   "config.reasoning": "推理",
   "config.capabilities": "能力",

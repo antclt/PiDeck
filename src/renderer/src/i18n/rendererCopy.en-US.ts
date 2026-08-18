@@ -1482,6 +1482,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.needsFix": "Needs fix",
   "config.openFolder": "Open folder",
   "config.providerNamePlaceholder": "Provider name, for example openai",
+  "config.providerNameRule": "Must start with a letter; only letters, digits, underscore and hyphen (for DSH env-var compatibility)",
   "config.reason": "Reason",
   "config.reasoning": "Reasoning",
   "config.capabilities": "Capabilities",

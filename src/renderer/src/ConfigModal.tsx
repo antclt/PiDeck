@@ -65,6 +65,7 @@ import type {
 import type { ConfigFileDiagnostic, CreatePiPromptTemplateInput, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary } from "../../shared/types";
 import { getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS } from "./config/providerHeaders";
 import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload } from "./config/configDirtyMarks";
+import { isValidProviderName } from "../../shared/providerName";
 
 const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi })
 	.piDesktop;
@@ -638,7 +639,13 @@ function ConfigModalContent(props: ConfigModalProps) {
 
 	const handleAddProvider = () => {
 		const providerName = newProviderName.trim();
+		// 空：静默返回（用户尚未输入）；非法字符：提示规则，避免 DSH credentialRefFor
+		// 把含特殊字符的名字转成非法环境变量名 → 密钥读不到。
 		if (!providerName) return;
+		if (!isValidProviderName(providerName)) {
+			showNotice(t("config.providerNameRule"));
+			return;
+		}
 		const updated = {
 			...modelsData,
 			providers: {
@@ -666,6 +673,11 @@ function ConfigModalContent(props: ConfigModalProps) {
 			// 名称未变、为空或已存在则不操作
 			setRenamingProvider(null);
 			setRenameValue("");
+			return;
+		}
+		// 重命名同样走严格白名单（新名字会经 credentialRefFor / 配置 key）。
+		if (!isValidProviderName(newName)) {
+			showNotice(t("config.providerNameRule"));
 			return;
 		}
 		const providers = { ...modelsData.providers };

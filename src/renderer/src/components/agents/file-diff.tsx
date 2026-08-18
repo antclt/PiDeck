@@ -6,7 +6,6 @@ import {
   ChevronDown,
   Copy,
   FileCode2,
-  LoaderCircle,
 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -181,14 +180,6 @@ export function FileDiff({
         <span className="flex shrink-0 items-center gap-2">
           <ChangeCount value={additions} type="added" />
           <ChangeCount value={deletions} type="removed" />
-        </span>
-        <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/60">
-          {streaming ? (
-            // 按用户要求关闭转圈动画：保留图标表示「应用变更中」，不再旋转
-            <LoaderCircle aria-label="Applying changes" className="size-3.5" />
-          ) : (
-            <Check aria-label="Changes applied" className="size-3.5" />
-          )}
         </span>
         <motion.span
           aria-hidden="true"

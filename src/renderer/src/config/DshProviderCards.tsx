@@ -25,6 +25,7 @@ import { credentialRefFor } from "./dshCredentialRef";
 import { DshModelsEditor } from "./DshModelsEditor";
 import type { DshModelRow } from "./DshModelsTable";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
+import { isValidProviderName } from "../../../shared/providerName";
 
 export type DshCredentialState = {
 	configured: boolean;
@@ -406,7 +407,15 @@ export function PiAiProvidersCard(props: {
 	/** 添加 provider：优先从内置目录（llm.providers declared 行）带出 displayName/apiKeyEnv。 */
 	const addProvider = (directoryEntry?: { provider: string; displayName: string }) => {
 		const key = directoryEntry?.provider ?? newProviderKey.trim();
-		if (!key || entries.some((entry) => entry.key === key)) return;
+		// DSH 兼容性：provider name 经 credentialRefFor 转成 <NAME>_API_KEY 环境变量名，
+		// 含特殊字符/空格/点号会生成非法环境变量名 → host 进程读不到密钥。
+		// 目录候选已预置合规名，仅校验自定义输入；非法时提示规则、不写入。
+		if (!key) return;
+		if (entries.some((entry) => entry.key === key)) return;
+		if (!isValidProviderName(key)) {
+			showNotice(t("config.providerNameRule"));
+			return;
+		}
 		setDraft((prev) => {
 			const next = structuredClone(prev) as Record<string, unknown>;
 			const providers = (next.providers ?? {}) as Record<string, unknown>;
@@ -491,12 +500,15 @@ export function PiAiProvidersCard(props: {
 									if (event.key === "Enter") addProvider();
 								}}
 							/>
-							<Button type="button" variant="default" size="sm" className="h-7" disabled={!newProviderKey.trim()} onClick={() => addProvider()}>
+							<Button type="button" variant="default" size="sm" className="h-7" disabled={!isValidProviderName(newProviderKey)} onClick={() => addProvider()}>
 								{t("common.confirm")}
 							</Button>
 							<Button type="button" variant="ghost" size="icon-sm" className="size-7" onClick={() => setAddingProvider(false)}>
 								<X className="size-3.5" aria-hidden="true" />
 							</Button>
+							{newProviderKey.trim() && !isValidProviderName(newProviderKey) ? (
+								<p className="text-micro text-destructive">{t("config.providerNameRule")}</p>
+							) : null}
 						</>
 					) : (
 						<Button

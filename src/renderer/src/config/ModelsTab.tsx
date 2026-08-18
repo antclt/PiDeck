@@ -1,5 +1,5 @@
 import { Button } from "../components/ui-shadcn/button";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Brain, Check, ChevronDown, ChevronRight, Coins, Copy, ExternalLink, Plus, SquarePen, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
@@ -24,6 +24,7 @@ import { showNotice } from "../utils/notice";
 import { computeModelSpecPatches } from "../utils/modelSpecAutoFill";
 import type { ModelSpec } from "../../../shared/types/modelSpecs";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
+import { isValidProviderName } from "../../../shared/providerName";
 
 const KNOWN_PROVIDER_FIELDS = new Set([
 	"baseUrl",
@@ -347,13 +348,17 @@ export function ModelsTab(props: {
 					/>
 					<Button size="sm" variant="default"
 						onClick={props.onConfirmAddProvider}
-						disabled={!props.newProviderName.trim()}
+						disabled={!isValidProviderName(props.newProviderName)}
 					>
 						{t("common.confirm")}
 					</Button>
 					<Button size="sm" variant="outline" onClick={props.onCancelAddProvider}>
 						{t("common.cancel")}
 					</Button>
+					{/* 输入了内容但非法时给出规则提示，避免按钮禁用却不知原因 */}
+					{props.newProviderName.trim() && !isValidProviderName(props.newProviderName) ? (
+						<p className="text-micro text-destructive">{t("config.providerNameRule")}</p>
+					) : null}
 				</div>
 			)}
 
