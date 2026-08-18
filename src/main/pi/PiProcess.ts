@@ -333,7 +333,12 @@ export class PiProcess extends EventEmitter {
     });
 
     // 安全管理：把策略快照路径 + 会话身份注入 pi 子进程环境。
-    // WSL 模式下 Windows 盘符路径必须转成 Linux 路径（/mnt/c/...），否则扩展读不到快照。
+    // - securitySnapshotPath 是真实 Windows 路径（扩展需 fs 读取），WSL 下必须转成 /mnt/c/...，
+    //   否则 pi 在 distro 内打不开。
+    // - securitySessionId 是不透明身份 key（SessionRecord.id：新会话为 UUID，历史会话为文件路径），
+    //   扩展仅用它做 sessionLevels 字典查表，从不 fs 打开——任何模式都原样注入，绝不能做路径转换：
+    //   UUID 既非 UNC/盘符/绝对 Linux 路径，喂给 toWslLinuxPath 会抛 INVALID_WSL_PATH，
+    //   导致 WSL 下临时会话（deckSessionId=UUID、无 sessionPath 兜底）在 spawn 前就崩、起不来。
     const env = this.locator.createProcessEnv(this.settings, invocation.pathPrefix, invocation.wsl);
     if (this.options.securitySnapshotPath) {
       env.PIDECK_SECURITY_CONFIG = command.startsWith("wsl://")
@@ -341,9 +346,7 @@ export class PiProcess extends EventEmitter {
         : this.options.securitySnapshotPath;
     }
     if (this.options.securitySessionId) {
-      env.PIDECK_SESSION_ID = command.startsWith("wsl://")
-        ? toWslLinuxPath(this.options.securitySessionId, { distro: this.settings?.wslDistro ?? "" })
-        : this.options.securitySessionId;
+      env.PIDECK_SESSION_ID = this.options.securitySessionId;
     }
     // 飞书绑定会话：ask_question 换成禁用提示版（扩展读取此标记，纯标志位无需路径转换）
     if (this.options.feishuLinked) {
