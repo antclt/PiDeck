@@ -322,7 +322,7 @@ export async function handlePluginBridgeFetch(
 	});
 }
 
-/** 桥插件（cordis 插件形状，命名导出与 pideckPwshPersistent 一致）。 */
+/** 桥插件（cordis 插件形状：name + apply）。 */
 export const name = "pideck-plugin-bridge";
 
 export function apply(ctx: PluginBridgeCtx): void {

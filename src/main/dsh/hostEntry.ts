@@ -124,13 +124,12 @@ async function main(): Promise<void> {
 			{ id: "api-gateway", name: "@deepseek-ai/dsh-host-apiproxy" },
 			{ id: "pideck-directory-picker", name: "./pideck-directory-picker.js" },
 			{ id: "pideck-slash-bridge", name: "./pideck-slash-bridge.js" },
-			// 持久 pwsh 工具（应用侧插件，仿 dsh-tool-bash-persistent）：
-			// 常驻 pwsh 会话复用，避免每次调用 ~350ms 冷启动（实测 30 倍提速）。
-			// 自包含 node-pty，不依赖 ctx.terminals（dsh-terminal-bash 的进程组
-			// 空闲检测在 win32 不可用）。name 用绝对路径指向构建产物。
+			// 持久 pwsh 工具：独立包 dsh-tool-pwsh-persistent（仿 bash-persistent）。
+			// 自包含 node-pty，不依赖 ctx.terminals。绝对路径：utilityProcess
+			// 的模块锚在 app node_modules，裸名不一定解析到同一目录。
 			{
 				id: "tool-pwsh-persistent",
-				name: join(__dirname, "pideckPwshPersistent.js"),
+				name: require.resolve("dsh-tool-pwsh-persistent"),
 			},
 			// Agent preset 名单（standard/code/minimal/cordis 等组合预设）：与 dsh-web
 			// 同一部署形态——随包 system 根 + $DSH_HOME/.agent-presets 用户根（插件

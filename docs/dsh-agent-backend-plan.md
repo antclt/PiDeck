@@ -170,7 +170,7 @@ src/main/dsh/
 ├── dshDefaultModel.ts       # 解析 settings.yaml 的 agent-default-model 段（provider/model/reasoningEffort）
 ├── dshCredentials.ts        # 凭证 ref 校验 + .credentials.yaml 明文解析
 ├── dshPresetComposition.ts  # agent-presets 组合行（default standard，随包 system 根 + 用户根）
-├── pideckPwshPersistent.ts  # 持久 pwsh 工具（应用侧插件，node-pty，复用常驻会话避免冷启动）
+├── （持久 pwsh 已抽成独立包 packages/dsh-tool-pwsh-persistent）
 ├── hideChildConsoles.ts     # Windows 控制台治理：host 隐藏控制台 + windowsHide 兜底 + runner preload 注入
 ├── runnerConsolePreload.ts  # 沙箱 runner（GUI 进程）自建隐藏控制台的 preload
 └── js-yaml.d.ts             # js-yaml 类型声明
@@ -332,7 +332,7 @@ DSH 会话由 DSH 自己持久化（`$DSH_HOME`，session log 事件流，`sessi
 | `DshLocator.ts` | `DshHostProcess.resolveHostEntryPath` + `createRequire` 解析 | 定位逻辑并入 host 进程管理与 `hostEntry`（dev/打包/e2e 三种路径） |
 | `dshComposition.ts` | `hostEntry.ts` 内联组合 + `dshPresetComposition.ts` | 组合在 utilityProcess 入口内完成（base patch + overlay：storage/workspace/api-gateway/directory-picker/slash-bridge/tool-pwsh-persistent/agent-presets；disable hmr、session-telemetry-otel） |
 | `DshApiClient.ts` | 同名 | v2 MessagePort carrier（未实现 v1 stdio carrier） |
-| 新增（计划未列） | `dshHostBridge.ts` / `dshRuntimeControl.ts` / `dshModels.ts` / `dshDefaultModel.ts` / `dshCredentials.ts` / `pideckPwshPersistent.ts` / `hideChildConsoles.ts` / `runnerConsolePreload.ts` | 桥协议、运行态控制、模型目录/默认模型/凭证解析、持久 pwsh、Windows 控制台治理 |
+| 新增（计划未列） | `dshHostBridge.ts` / `dshRuntimeControl.ts` / `dshModels.ts` / `dshDefaultModel.ts` / `dshCredentials.ts` / `hideChildConsoles.ts` / `runnerConsolePreload.ts`；持久 pwsh 见 `packages/dsh-tool-pwsh-persistent` | 桥协议、运行态控制、模型目录/默认模型/凭证解析、Windows 控制台治理、独立 pwsh 插件 |
 
 ### 12.3 类型与 IPC（§6.1 落地形态）
 
@@ -352,7 +352,7 @@ DSH 会话由 DSH 自己持久化（`$DSH_HOME`，session log 事件流，`sessi
 | 5 | §7 D18 plan-mode「后置」 | plan 模式已提前落地（`plan/mode` 事件 → `planModeActive`，Composer 模式选择器切换）；goals/subagents UI 仍后置。 |
 | 6 | §7 D19 agentPreset「web 特有，后置」 | 已落地：`agentPresetsRow` 注入随包 system 根（`<dsh 包>/config/agent-presets`，default standard）+ `$DSH_HOME/.agent-presets` 用户根；配置页「预设设置」tab 列出 standard/code/minimal/cordis，「设为默认」写 settings.yaml 的 `agent-presets.default`。 |
 | 7 | 计划未提 | **Windows 控制台治理**：utilityProcess 无控制台，`installHostHiddenConsole`（koffi AllocConsole + SW_HIDE）给 host 分配隐藏控制台使整棵进程树零弹窗；失败退回 windowsHide 注入兜底；沙箱 runner（GUI 进程不继承控制台）经 `NODE_OPTIONS=--require=runnerConsolePreload` 自建隐藏控制台。 |
-| 8 | 计划未提 | **持久化 pwsh**（`pideckPwshPersistent.ts`）：DSH 会话内 `!` 命令复用常驻 pwsh（自包含 node-pty，仿 `dsh-tool-bash-persistent`），避免每次调用 ~350ms 冷启动（实测约 30 倍提速）。 |
+| 8 | 计划未提 | **持久化 pwsh**（独立包 `dsh-tool-pwsh-persistent`）：DSH 会话内复用常驻 pwsh（自包含 node-pty，仿 `dsh-tool-bash-persistent`），避免每次调用 ~350ms 冷启动。可单独发给其他 DSH 用户。 |
 | 9 | 计划未提 | **重启 attach 语义**：restart 改为 attach 同一 host 会话（`$DSH_HOME` 持久化数据不换），仅当 host 中已不存在该会话（DSH_HOME 被清/更换）才退回新建；catalog 的 `dshSessionId` 保持不变。修复了「重启后原会话消息丢失」用户 bug（`e2e/dsh-restart.spec.ts` 回归）。 |
 | 10 | 计划未提 | **消息串行化**：同一 DSH 会话的发送按序串行（一次一个回合），队列消息自动排队。 |
 | 11 | 计划未提 | **标题同步**：attach/restart 三处 + 事件桥为 DSH tab 补写 `dshSessionId`，侧栏标题随 host 会话标题同步（`e2e/dsh-title-diag.spec.ts` 回归）。 |
@@ -367,7 +367,7 @@ DSH 会话由 DSH 自己持久化（`$DSH_HOME`，session log 事件流，`sessi
 
 ### 12.6 打包与依赖
 
-- `electron.vite.config.ts` 主进程多入口：`index` / `hostEntry` / `runnerConsolePreload` / `pideckPwshPersistent`；`@deepseek-ai/*` 全部 external（`tests/dshMainExternalize.test.mjs` 守护该契约，`dshPeerDepsPackaged.test.mjs` 守护 peerDep 进 asar）。
+- `electron.vite.config.ts` 主进程多入口：`index` / `hostEntry` / `runnerConsolePreload` / `pideckPluginBridge` / `pideckCommandsBridge`；`@deepseek-ai/*` 与 `dsh-tool-pwsh-persistent` external（`tests/dshMainExternalize.test.mjs` 守护该契约，`dshPeerDepsPackaged.test.mjs` 守护 peerDep 进 asar）。
 - `asarUnpack`：`out/main/hostEntry.js`、`@img/sharp-win32-x64`、`@koromix/koffi-win32-x64`、`node-addon-require-builtin-win32-x64-msvc`；`npmRebuild: false`。
 - `scripts/check-dsh-asar.mjs`：校验 19 个 `@deepseek-ai/*` 依赖已进 app.asar（打包回归）。
 - `scripts/dsh-embed-probe.mjs`（`npm run probe:dsh`）：深融合 PoC 探针，不入产品构建。
@@ -375,7 +375,7 @@ DSH 会话由 DSH 自己持久化（`$DSH_HOME`，session log 事件流，`sessi
 
 ### 12.7 测试覆盖（`tests/dsh*.test.mjs` + `e2e/dsh-*.spec.ts`）
 
-- 单测：`dshAgentManager`（会话文件路径编码）、`dshEventProjector`、`dshRuntimeControl`、`dshApiClientBridge`、`dshHostBridge`、`dshApprovalBridge`、`dshCredentials`、`dshHomeDir`（DSH_HOME 解析优先级）、`dshModels`、`dshDefaultModel`、`dshSchema`、`dshPresetComposition`、`dshPresetDisplay`、`dshCredentialRef`、`dshMainExternalize`、`dshPeerDepsPackaged`、`hideChildConsoles`、`pideckPwshPersistent`、`compositeAgentGateway`（按 backend 路由 + 能力缺失拒绝）。
+- 单测：`dshAgentManager`（会话文件路径编码）、`dshEventProjector`、`dshRuntimeControl`、`dshApiClientBridge`、`dshHostBridge`、`dshApprovalBridge`、`dshCredentials`、`dshHomeDir`（DSH_HOME 解析优先级）、`dshModels`、`dshDefaultModel`、`dshSchema`、`dshPresetComposition`、`dshPresetDisplay`、`dshCredentialRef`、`dshMainExternalize`、`dshPeerDepsPackaged`、`hideChildConsoles`、`pideckPwshPersistent`（协议测 `packages/dsh-tool-pwsh-persistent`）、`compositeAgentGateway`（按 backend 路由 + 能力缺失拒绝）。
 - e2e（真实 DSH host，临时 DSH_HOME 隔离，不触碰用户 `~/.dsh`）：`dsh-models`（模型列表/切换/思考档位草稿→激活全链路）、`dsh-restart`（重启保留原消息并可续聊）、`dsh-security-plan`（权限预设切换、plan 模式、配置页三分区）、`dsh-title-diag`（标题同步）。
 
 ### 12.8 已知缺口与后续

@@ -42,6 +42,9 @@ coverage/
 
 # Local artifacts
 *.local
+*.tgz
+packages/dsh-tool-pwsh-persistent/lib/
+packages/dsh-tool-pwsh-persistent/node_modules/
 # 本地下载/导入的临时文件不参与版本发布，避免把用户机器上的产物打进 tag。
 downloads/
 

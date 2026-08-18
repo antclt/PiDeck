@@ -1,11 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { deadline, timeoutOf } from "@deepseek-ai/dsh-timeout";
 import z from "@deepseek-ai/schemastery";
+import {
+	parsePwshCommandOutput,
+	pwshPromptCompleted,
+	SHELL_PROMPT,
+	stripPwshControl,
+	wrapPwshCommand,
+} from "./protocol.js";
+
+export {
+	parsePwshCommandOutput,
+	pwshPromptCompleted,
+	quoteForPwsh,
+	stripPwshControl,
+	wrapPwshCommand,
+} from "./protocol.js";
+
+/** ESM 下解析 CJS 原生模块（node-pty 无 ESM 入口）。 */
+const require = createRequire(import.meta.url);
 
 /**
- * 持久 PowerShell 工具（PiDeck 应用侧插件，仿 @deepseek-ai/dsh-tool-bash-persistent）。
+ * 持久 PowerShell 工具（标准 DSH Cordis 插件，仿 @deepseek-ai/dsh-tool-bash-persistent）。
  *
  * 动机：普通 pwsh 工具每次 `pwsh -NoLogo -NoProfile -NonInteractive -Command` 冷启动
  * 约 350-400ms（.NET 运行时加载）；常驻会话复用后单命令往返约 13ms（实测 30 倍差距）。
@@ -27,75 +46,15 @@ import z from "@deepseek-ai/schemastery";
  *   空闲检测在 win32 不可用，自包含实现最稳）。
  */
 
-const SHELL_PROMPT = "__DSH_PERSISTENT_PWSH_PROMPT__";
 const TIMEOUT_CODE = "PERSISTENT_PWSH_TIMEOUT";
 const POLL_INTERVAL_MS = 25;
 const SCROLLBACK_MAX_CHARS = 512 * 1024;
 const DEFAULT_DESCRIPTION =
 	"Run PowerShell commands in a persistent pwsh shell (much faster than the regular pwsh tool: the shell process is reused, avoiding ~350ms cold start per call). State, including the current directory and exported environment variables, persists across calls for this agent — use `Set-Location` and read it back, or pass `workdir`-independent absolute paths when you need a known location. Runs with full permissions (no sandbox): prefer the regular `pwsh` tool when the file policy requires a sandbox. Non-zero exits are reported as `[exit code: N]`. If the shell crashes or times out it is reset automatically and the next call starts fresh.";
 
-/** CSI / OSC / 其他 ANSI 控制序列剥离（pwsh 在 PTY 下输出光标移动、标题、模式切换等）。 */
-const ANSI_RE = /\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]/g;
-
-export function stripPwshControl(text: string): string {
-	return text.replace(ANSI_RE, "");
-}
-
-/** 提示符是否已完成（viewport 去控制序列后以提示符结尾 = shell 空闲）。 */
-export function pwshPromptCompleted(viewport: string): boolean {
-	const clean = stripPwshControl(viewport);
-	return clean.endsWith(SHELL_PROMPT) || clean.endsWith(`${SHELL_PROMPT}\n`) || clean.endsWith(`${SHELL_PROMPT}\r\n`);
-}
-
 function markers(): { start: string; end: string } {
 	const nonce = randomUUID();
 	return { start: `__DSH_PWSH_START_${nonce}__`, end: `__DSH_PWSH_END_${nonce}:` };
-}
-
-/** 单引号转义（PowerShell 单引号字符串内 `''` 表示字面单引号）。 */
-function quoteForPwsh(value: string): string {
-	return value.replaceAll("'", "''");
-}
-
-/**
- * 包装命令：start marker → Invoke-Expression 执行 → end marker + 退出码。
- * 退出码语义：原生命令（git 等）取 $LASTEXITCODE；cmdlet 终止错误 catch 置 1；
- * 其余按 $?（上一条命令成败）归一。exit 语句会退出 pwsh 会话（同 bash eval），
- * 由调用方检测会话退出并重置。
- *
- * conpty 折行鲁棒性：PTY 列宽有限，超长 wrapped 命令会被 conpty 折行——折点在
- * 语句内部时 pwsh 续行拼接（无损）；折点在语句边界时会被拆成两条独立命令执行。
- * 因此 end marker 与退出码用**两条独立语句**输出（而非字符串拼接）——即使被拆开，
- * 解析端也能在 end marker 之后取到数字退出码。
- */
-export function wrapPwshCommand(command: string, marker: { start: string; end: string }): string {
-	const escaped = quoteForPwsh(command);
-	return [
-		`Write-Output '${marker.start}'`,
-		"$global:LASTEXITCODE = $null",
-		`try { Invoke-Expression -Command '${escaped}' } catch { Write-Error $_; $global:LASTEXITCODE = 1 }`,
-		"if ($null -eq $global:LASTEXITCODE) { $global:LASTEXITCODE = if ($?) { 0 } else { 1 } }",
-		`Write-Output '${marker.end}'`,
-		"Write-Output $global:LASTEXITCODE",
-	].join("; ");
-}
-
-/**
- * 从滚动缓冲提取命令结果：end marker 前的最后一个 start marker 起（命令回显行也含
- * start 文本，lastIndexOf 天然跳过回显）；返回文本 + 退出码。命令未完成返回 undefined。
- * 退出码在 end marker 之后的独立输出行（容忍 conpty 折行产生的换行）。
- */
-export function parsePwshCommandOutput(text: string, marker: { start: string; end: string }): { text: string; exitCode: number } | undefined {
-	const end = text.lastIndexOf(marker.end);
-	if (end < 0) return undefined;
-	const status = /^\r?\n?(\d+)\r?\n/.exec(text.slice(end + marker.end.length))?.[1];
-	if (status === undefined) return undefined;
-	const startMarker = text.lastIndexOf(marker.start, end);
-	const start = startMarker < 0 ? 0 : startMarker + marker.start.length;
-	return {
-		text: text.slice(start, end).replace(/^\r?\n/, "").replace(/\r?\n$/, "").replace(/\r\n/g, "\n"),
-		exitCode: Number(status),
-	};
 }
 
 // ── 持久会话（node-pty 自包含）───────────────────────────────────────────────
@@ -117,7 +76,6 @@ type PersistentSession = {
 };
 
 function createPtySession(pwshPath: string, cwd: string | undefined, env: Record<string, string>): PersistentSession {
-	const require = createRequire(__filename);
 	const pty = require("node-pty") as {
 		spawn(file: string, args: string[], options: Record<string, unknown>): PwshPty;
 	};
@@ -386,9 +344,9 @@ function apply(ctx: { tools: { register(def: unknown): void }; effect(fn: () => 
 	registerPersistentPwsh(ctx, resolved);
 }
 
-/** 默认 pwsh 路径：Program Files 的 PowerShell 7（Windows 标配安装位），PATH 兜底。 */
+/** 默认 pwsh：Windows 用 Program Files 的 PowerShell 7；其它平台走 PATH 里的 `pwsh`。 */
 function resolveDefaultPwshPath(): string {
-	const { join } = createRequire(__filename)("node:path") as typeof import("node:path");
+	if (process.platform !== "win32") return "pwsh";
 	const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
 	return join(programFiles, "PowerShell", "7", "pwsh.exe");
 }

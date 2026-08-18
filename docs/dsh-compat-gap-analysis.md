@@ -29,7 +29,7 @@
 审批/提问弹窗、重命名、fork（`session.fork` 锚 seq）、compact（`/compact` slash 桥）、并发多会话。
 
 **超出 P0 提前落地**：权限预设（`/permission`）、plan 模式（`/plan`）、agent-presets（D19）、
-持久化 pwsh 工具（`pideckPwshPersistent`）、Windows 控制台治理、崩溃限次重启、
+持久化 pwsh 工具（独立包 `dsh-tool-pwsh-persistent`）、Windows 控制台治理、崩溃限次重启、
 重启 attach 语义、标题同步、消息串行化、DSH 配置管理页（8 分区）。
 
 ### 1.3 已声明缺失 / 后置（按能力集隐藏）
@@ -324,7 +324,7 @@
 ```
 
 - `src/main/dsh/pideckPluginBridge.ts`：桥插件 + 纯函数（入参校验/视图映射/Agent
-  解析/RPC 分发），命名导出 `{ name, apply }`（与 pideckPwshPersistent 同形状，
+  解析/RPC 分发），命名导出 `{ name, apply }`（标准 Cordis 插件形状，
   electron-vite 多入口产物 `out/main/pideckPluginBridge.js`）。
 - `src/main/dsh/hostEntry.ts`：overlay patches 挂载 `plugin-inventory` +
   `cordis-host-runner` + `pideck-plugin-bridge`；fetch handler 前缀路由

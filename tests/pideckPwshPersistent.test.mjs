@@ -7,7 +7,7 @@ const {
   pwshPromptCompleted,
   stripPwshControl,
   wrapPwshCommand,
-} = loadTsCommonJs("src/main/dsh/pideckPwshPersistent.ts");
+} = loadTsCommonJs("packages/dsh-tool-pwsh-persistent/src/protocol.ts");
 
 test("wrapPwshCommand：start/end marker + Invoke-Expression 包裹 + 单引号转义", () => {
   const marker = { start: "__DSH_PWSH_START_x__", end: "__DSH_PWSH_END_x:" };
