@@ -1535,6 +1535,7 @@ export class SessionRuntimeCoordinator {
 			// 消息定位失败（编辑/删除/重发缓存与文件都未命中）先于泛化 "not found" 识别：
 			// 否则会误报成 SESSION_NOT_FOUND（「会话已不存在」），而会话其实还在。
 			lower.includes("message not found")
+				|| lower.includes("not found on the active session branch")
 				? "MESSAGE_NOT_FOUND"
 				// Agent 运行实例已不存在（stop/restart 后立即操作、崩溃清理等）：是
 				// 「没有可用的运行实例」而非「会话不存在」——泛化 not found 会误报成

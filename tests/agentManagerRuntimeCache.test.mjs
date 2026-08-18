@@ -438,3 +438,84 @@ test("cache-miss delete of a message absent from the file rejects with Message n
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("delete after send+abort locates the user bubble by the renderer requestId", async () => {
+  const { manager, directory } = await createHarness();
+  const requestId = "optimistic-request-id";
+  const editorCalls = [];
+  try {
+    const runtime = manager.agents.get("agent-1");
+    runtime.tab.status = "idle";
+    runtime.process.isRunning = () => true;
+    runtime.process.client.request = async ({ type }) => {
+      if (type === "prompt") return { success: true, data: {} };
+      if (type === "abort") return { success: true, data: {} };
+      if (type === "get_entries") return { success: true, data: { leafId: "e12" } };
+      return { success: true, data: {} };
+    };
+    manager.sessionFileEditor = {
+      deleteMessage: async (input) => {
+        editorCalls.push(input.target);
+        return {};
+      },
+    };
+    manager.loadMessages = async () => {};
+
+    const sent = await manager.sendPrompt({
+      agentId: "agent-1",
+      message: "send-then-abort-then-delete",
+      requestId,
+    });
+    assert.equal(sent.accepted, true);
+    await manager.abort("agent-1");
+
+    // 渲染层乐观气泡 id = requestId；中断后用户立刻删这条，必须命中同一条缓存，不能再抛 Message not found
+    await manager.deleteMessage("agent-1", requestId);
+    assert.equal(editorCalls.length, 1);
+    assert.equal(editorCalls[0].legacyMessageId, requestId);
+    assert.equal(editorCalls[0].role, "user");
+    assert.equal(editorCalls[0].text, "send-then-abort-then-delete");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("delete after abort drops an unpersisted turn from runtime cache instead of failing", async () => {
+  const { manager, directory } = await createHarness();
+  try {
+    manager.messages.set("agent-1", [
+      {
+        id: "optimistic-request-id",
+        agentId: "agent-1",
+        role: "user",
+        text: "unpersisted prompt",
+        timestamp: 1,
+        meta: { requestId: "optimistic-request-id" },
+      },
+      {
+        id: "aborted-assistant",
+        agentId: "agent-1",
+        role: "assistant",
+        text: "partial",
+        timestamp: 2,
+      },
+    ]);
+    manager.sessionFileEditor = {
+      deleteMessage: async () => {
+        const error = new Error("Message was not found on the active session branch");
+        error.code = "SESSION_ENTRY_NOT_FOUND";
+        throw error;
+      },
+    };
+    manager.loadMessages = async () => {
+      throw new Error("unpersisted delete must not reload from file");
+    };
+    // 中断后 JSONL 还没这条：不能把「文件未命中」当成用户可见的删除失败
+    await manager.deleteMessage("agent-1", "optimistic-request-id");
+    const remaining = manager.messages.get("agent-1");
+    assert.equal(remaining.some((message) => message.text === "unpersisted prompt"), false);
+    assert.equal(remaining.some((message) => message.id === "aborted-assistant"), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

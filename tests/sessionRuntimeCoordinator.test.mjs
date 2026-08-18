@@ -1063,6 +1063,10 @@ test("commandFailure classifies message-not-found separately from session-not-fo
   const messageMiss = coordinator.commandFailure(new Error("Message not found"));
   assert.equal(messageMiss.ok, false);
   assert.equal(messageMiss.error.code, "MESSAGE_NOT_FOUND");
+  const fileMiss = coordinator.commandFailure(
+    new Error("Message was not found on the active session branch"),
+  );
+  assert.equal(fileMiss.error.code, "MESSAGE_NOT_FOUND");
   // 回归：真正的会话不存在仍归 SESSION_NOT_FOUND
   const sessionMiss = coordinator.commandFailure(new Error("Session not found: session-1"));
   assert.equal(sessionMiss.ok, false);

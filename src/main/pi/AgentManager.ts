@@ -1472,11 +1472,17 @@ export class AgentManager {
 		// 乐观更新：在等待 RPC 返回前先把用户消息写入会话，让用户立即看到自己的消息。
 		// 只展示用户原文；agentMessage 里的宿主指令不进 UI 气泡。
 		// 如果后续 RPC 失败，再追加错误消息；用户消息本身仍保留在聊天中（用户确已发送）。
+		const optimisticMeta = {
+			...(promptDeliveryBehavior ? { streamingBehavior: promptDeliveryBehavior } : {}),
+			// 与渲染层乐观气泡共用 requestId：发送完成立刻中断再删时，
+			// 删除按钮仍拿着乐观 id，不能再另起 UUID 导致 Message not found。
+			...(input.requestId ? { requestId: input.requestId } : {}),
+		};
 		this.addMessage(
 			input.agentId,
 			"user",
 			trimmed || this.translate("session.imagePlaceholder"),
-			promptDeliveryBehavior ? { streamingBehavior: promptDeliveryBehavior } : undefined,
+			Object.keys(optimisticMeta).length > 0 ? optimisticMeta : undefined,
 			input.images,
 		);
 
@@ -2400,7 +2406,9 @@ export class AgentManager {
 		messageId: string,
 		activeLeafId?: string,
 	): Promise<{ target: SessionEntryTarget; resend?: { text: string; images?: ImageContent[] } }> {
-		const message = this.messages.get(agentId)?.find((candidate) => candidate.id === messageId);
+		const cached = this.messages.get(agentId) ?? [];
+		const message = cached.find((candidate) => candidate.id === messageId)
+			?? cached.find((candidate) => candidate.meta?.requestId === messageId);
 		if (message) {
 			return { target: this.createSessionEntryTarget(message, activeLeafId) };
 		}
@@ -2464,17 +2472,69 @@ export class AgentManager {
 		const file = this.createSessionFileRef(runtime, sessionPath);
 		const activeLeafId = await this.getActiveSessionLeafId(agentId, runtime);
 		const { target } = await this.locateMessageTarget(agentId, sessionPath, messageId, activeLeafId);
-		await this.sessionFileEditor.deleteMessage({
-			file,
-			target,
-			reload: () => this.requestSessionReload(runtime, file),
-		});
+		try {
+			await this.sessionFileEditor.deleteMessage({
+				file,
+				target,
+				reload: () => this.requestSessionReload(runtime, file),
+			});
+		} catch (error) {
+			// 发送后立刻中断：缓存里有气泡，JSONL 可能还没落盘。此时按未持久化轮次从内存删掉，
+			// 避免把 SESSION_ENTRY_NOT_FOUND 误报成「消息未找到，可能已被删除或上下文压缩」。
+			if (this.removeUnpersistedRuntimeTurn(agentId, messageId, target, error)) {
+				void this.appLogger?.info("agent", "Deleted unpersisted runtime message", {
+					agentId,
+					messageId,
+					elapsedMs: Date.now() - startTime,
+				});
+				return;
+			}
+			throw error;
+		}
 		await this.loadMessages(agentId);
 		void this.appLogger?.info("agent", "Delete message completed", {
 			agentId,
 			messageId,
 			elapsedMs: Date.now() - startTime,
 		});
+	}
+
+	/**
+	 * 发送后立刻中断再删：缓存命中、JSONL 还没这条时，按本轮从内存摘掉，不当成定位失败。
+	 * 只处理「无 entryId」的未落盘气泡；已有 entryId 说明文件里该有记录，继续抛原错。
+	 */
+	private removeUnpersistedRuntimeTurn(
+		agentId: string,
+		messageId: string,
+		target: SessionEntryTarget,
+		error: unknown,
+	): boolean {
+		if (!this.isSessionEntryMissing(error)) return false;
+		if (typeof target.entryId === "string" && target.entryId.trim()) return false;
+		const list = this.messages.get(agentId);
+		if (!list?.length) return false;
+		const index = list.findIndex((candidate) => (
+			candidate.id === messageId
+			|| candidate.meta?.requestId === messageId
+			|| (candidate.role === target.role && candidate.text === target.text)
+		));
+		if (index < 0) return false;
+		const next = list.slice(0, index);
+		this.messages.set(agentId, next);
+		this.scheduleMessageEmit(agentId, true);
+		return true;
+	}
+
+	private isSessionEntryMissing(error: unknown): boolean {
+		// 按 code / 文案识别，不依赖 instanceof：部分测试夹具只注入 editor 方法，没有真实 Error 子类。
+		const code = error && typeof error === "object" && "code" in error
+			? String((error as { code?: unknown }).code ?? "")
+			: "";
+		if (code === "SESSION_ENTRY_NOT_FOUND") return true;
+		const message = error instanceof Error ? error.message : String(error);
+		const lower = message.toLowerCase();
+		return lower.includes("message not found")
+			|| lower.includes("not found on the active session branch");
 	}
 
 	async prepareResendFromMessage(
@@ -4688,8 +4748,10 @@ export class AgentManager {
 		images?: ImageContent[],
 	) {
 		const list = this.messages.get(agentId) ?? [];
+		const requestId = typeof meta?.requestId === "string" ? meta.requestId.trim() : "";
 		list.push({
-			id: randomUUID(),
+			// 有上层 requestId 时复用，让乐观气泡 / 编辑删除 / 主进程缓存对上同一条
+			id: requestId || randomUUID(),
 			agentId,
 			role,
 			text,
