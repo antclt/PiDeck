@@ -444,4 +444,14 @@ describe("GitService committed-file diff integration", () => {
     assert.equal(git("branch", "--show-current"), currentBranch);
     assert.equal(existsSync(injectedOutput), false);
   });
+
+  test("fetch on a non-git directory does not throw", async () => {
+    const service = new GitService();
+    const plainDir = mkdtempSync(join(tmpdir(), "pideck-not-git-"));
+    try {
+      await assert.doesNotReject(() => service.fetch(plainDir));
+    } finally {
+      rmSync(plainDir, { recursive: true, force: true });
+    }
+  });
 });

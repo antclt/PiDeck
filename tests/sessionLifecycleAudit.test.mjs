@@ -99,6 +99,9 @@ test("second-wave audit: proxy, single-instance, catalog, clone/fork", () => {
   // catalog 主文件+备份双损坏必须 error 级留痕
   assert.match(sessionCatalog, /"Catalog and backup both failed to load"/);
   assert.match(sessionCatalog, /getAppLogger\(\)\?\.error\("session-catalog"/);
+  // 损坏 catalog 不得阻断打包启动（否则窗口永不出现）
+  assert.match(sessionCatalog, /this\.entries = \[\];/);
+  assert.doesNotMatch(sessionCatalog, /Failed to load Session catalog or backup/);
   // SessionScanner JSONL 解析失败双写日志
   assert.match(sessionScanner, /"Skipped unparseable JSONL line", \{ filePath \}\)/);
   // 视觉桥配置写盘：只记 provider/hasApiKey，不记 key 值

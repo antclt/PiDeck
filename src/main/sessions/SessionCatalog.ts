@@ -160,14 +160,13 @@ export class SessionCatalog {
 				if (isMissingFileError(primaryError) && isMissingFileError(backupError)) {
 					this.entries = [];
 				} else {
-					// catalog 主文件与备份同时损坏是数据丢失信号，必须留 error 级日志供审计
+					// catalog 主文件与备份同时损坏是数据丢失信号，必须留 error 级日志供审计。
+					// 不再向上抛：打包启动链会 await load()，抛错会让 whenReady 中断、窗口永不出现。
 					void getAppLogger()?.error("session-catalog", "Catalog and backup both failed to load", {
 						primary: primaryError instanceof Error ? primaryError.message : String(primaryError),
 						backup: backupError instanceof Error ? backupError.message : String(backupError),
 					});
-					throw new Error(
-						`Failed to load Session catalog or backup: ${String(primaryError)}; ${String(backupError)}`,
-					);
+					this.entries = [];
 				}
 			}
 		}

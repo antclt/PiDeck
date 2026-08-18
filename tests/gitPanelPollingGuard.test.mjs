@@ -33,6 +33,14 @@ test("非 git 仓库 / 未安装 git 时暂停 5 分钟 fetch 远程轮询", () 
     fetchBlock,
     /\[refreshAheadBehind, props\.fetch, props\.aheadBehind, notAGitRepo, gitNotInstalled\]/,
   );
+  // 首次挂载不得立刻 fetch：必须等 refresh 成功确认仓库，否则非 git 项目一打开就 git fetch 报 128
+  assert.doesNotMatch(fetchBlock, /void refreshAheadBehind\(\);\s*const timer/);
+});
+
+test("仅非 silent 的 refresh 成功路径才会 fetch 远程", () => {
+  const successBlock = source.slice(source.indexOf("setGroups(next);"));
+  const afterGroups = successBlock.slice(0, successBlock.indexOf("} catch (caught)"));
+  assert.match(afterGroups, /if \(!silent\) void refreshAheadBehind\(\);/);
 });
 
 test("refresh 成功路径清除仓库/工具标记（git init 或安装 git 后自动恢复轮询）", () => {

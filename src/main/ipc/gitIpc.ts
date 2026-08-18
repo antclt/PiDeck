@@ -576,12 +576,14 @@ export function registerGitIpc({
 		},
 	);
 
-	// Fetch：刷新远程跟踪引用（定时轮询 ahead/behind 的前置步骤）
+	// Fetch：刷新远程跟踪引用（定时轮询 ahead/behind 的前置步骤）。
+	// 非仓库直接跳过：面板首次挂载时 status 与 fetch 会并行，不能等 UI 标记。
 	ipcMain.handle(
 		ipcChannels.gitFetch,
 		async (_event, projectId: string) => {
 			const project = projectStore.get(projectId);
 			if (!project) throw new Error(`Project not found: ${projectId}`);
+			if (!(await gitService.isGitRepo(project.path))) return;
 			await gitService.fetch(project.path);
 		},
 	);

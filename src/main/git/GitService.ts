@@ -796,9 +796,19 @@ export class GitService {
 		await execFileAsync("git", ["pull"], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS * 4 });
 	}
 
-	/** Fetch：从远程获取最新数据但不合并 */
+	/** Fetch：从远程获取最新数据但不合并。
+	 * 非仓库 / 未安装 git 时静默返回，避免 Git 面板挂载或手动刷新时把
+	 * `fatal: not a git repository` 打进主进程 unhandledRejection。 */
 	async fetch(cwd: string): Promise<void> {
-		await execFileAsync("git", ["fetch"], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS * 4 });
+		try {
+			await execFileAsync("git", ["fetch"], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS * 4 });
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (/not a git repository|fatal:|command not found|ENOENT|spawn.*git.*ENOENT/i.test(msg)) {
+				return;
+			}
+			throw err;
+		}
 	}
 
 	/**

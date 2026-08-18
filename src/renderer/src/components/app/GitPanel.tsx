@@ -535,6 +535,7 @@ export function GitPanel(props: GitPanelProps) {
     dismissNotice(commitGenProgressRef.current);
     commitGenProgressRef.current = undefined;
     setNotAGitRepo(false);
+    setGitNotInstalled(false);
   }, [props.projectId]);
 
   useEffect(() => {
@@ -554,6 +555,23 @@ export function GitPanel(props: GitPanelProps) {
       // Storage can be blocked in preview/web mode; pane interaction must still work for this session.
     }
   }, [paneState, props.projectId]);
+
+  /**
+   * 刷新 push/pull 角标：先 fetch 远程跟踪引用，再对比本地差距。
+   * 静默失败（无远程/离线/非仓库）时保持上次角标，不打扰用户。
+   */
+  const refreshAheadBehind = useCallback(async () => {
+    if (!props.fetch || !props.aheadBehind) return;
+    const projectId = props.projectId;
+    try {
+      await props.fetch(projectId);
+      if (projectId !== projectIdRef.current) return;
+      const result = await props.aheadBehind(projectId);
+      if (projectId === projectIdRef.current) setAheadBehind(result);
+    } catch {
+      // 静默失败：离线/无远程时角标保持上次已知值，不弹错误
+    }
+  }, [props.fetch, props.aheadBehind, props.projectId]);
 
   /**
    * 拉取最新 Git 工作区状态。
@@ -588,6 +606,8 @@ export function GitPanel(props: GitPanelProps) {
           // 刷新成功说明当前目录可用，恢复仓库/工具标记（手动 git init 或安装 git 后自动恢复轮询）
           setNotAGitRepo(false);
           setGitNotInstalled(false);
+          // 仅首次/手动刷新成功后再 fetch：5 秒静默轮询不应打远程。
+          if (!silent) void refreshAheadBehind();
         }
       } catch (caught) {
         if (
@@ -625,7 +645,7 @@ export function GitPanel(props: GitPanelProps) {
           setLoading(false);
       }
     },
-    [props.getStatus, props.projectId],
+    [props.getStatus, props.projectId, refreshAheadBehind],
   );
 
   // 打开 Git drawer 时首次加载；依赖 refresh 引用稳定。
@@ -644,28 +664,12 @@ export function GitPanel(props: GitPanelProps) {
     return () => window.clearInterval(timer);
   }, [refresh, notAGitRepo, gitNotInstalled]);
 
-  /**
-   * 刷新 push/pull 角标：先 fetch 远程跟踪引用，再对比本地差距。
-   * 静默失败（无远程/离线/非仓库）时保持上次角标，不打扰用户。
-   */
-  const refreshAheadBehind = useCallback(async () => {
-    if (!props.fetch || !props.aheadBehind) return;
-    const projectId = props.projectId;
-    try {
-      await props.fetch(projectId);
-      if (projectId !== projectIdRef.current) return;
-      const result = await props.aheadBehind(projectId);
-      if (projectId === projectIdRef.current) setAheadBehind(result);
-    } catch {
-      // 静默失败：离线/无远程时角标保持上次已知值，不弹错误
-    }
-  }, [props.fetch, props.aheadBehind, props.projectId]);
-
-  // 定时 fetch 远程：每 5 分钟刷新一次 ahead/behind 角标；首次挂载也立即刷一次。
+  // 定时 fetch 远程：每 5 分钟刷新一次 ahead/behind 角标。
+  // 首次 fetch 改走 refresh 成功路径，避免未确认仓库时立刻 spawn `git fetch`。
   // 非 git 仓库 / 未安装 git 时暂停（fetch 同样会 spawn git 报错）。
   useEffect(() => {
     if (!props.fetch || !props.aheadBehind) return;
-    void refreshAheadBehind();
+    if (notAGitRepo || gitNotInstalled) return;
     const timer = window.setInterval(() => {
       if (notAGitRepo || gitNotInstalled) return;
       void refreshAheadBehind();
@@ -1254,10 +1258,8 @@ export function GitPanel(props: GitPanelProps) {
             title={t("common.refresh")}
             aria-label={t("common.refresh")}
             onClick={() => {
+              // 非 silent refresh 成功后会顺带 refreshAheadBehind，不必再单独 fetch
               void refresh();
-              // 手动刷新必须同步刷新 push/pull 角标：角标走 5 分钟定时 fetch，
-              // 用户主动点击时应立即对比远程，否则刚 push 完角标仍是旧值
-              void refreshAheadBehind();
             }}
           >
             <RefreshCw size={14} />

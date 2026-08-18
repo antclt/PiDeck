@@ -36,6 +36,7 @@ import {
 	resolveDevUserDataDirName,
 	sanitizeDevBranchSegment,
 } from "./devIsolation";
+import { resolvePackagedUserDataDir } from "./portableUserData";
 import { extractFocusTargetFromArgv } from "./utils/focusTarget";
 import type { Project, StartupWindowMode } from "../shared/types";
 // 使用 ?asset 后缀导入图标，electron-vite 会在构建时将其复制到输出目录并提供正确的运行时路径
@@ -70,12 +71,11 @@ if (isDevBuild) {
 		app.setPath("userData", join(app.getPath("appData"), devUserDataDirName));
 	}
 } else {
-	// 正式版固定 userData 目录为 pi-desktop（与历史安装版一致）：asar 内 package.json
-	// 无 productName 时 Electron 默认取 name（pi-desktop），但显式固定可避免未来
-	// 改名/加 productName 后 userData 漂移到 %APPDATA%\phids，导致旧数据（settings/
-	// projects/会话目录/DSH home 等）在新版本里读不到。与 dev 分支同一 setPath 模式，
+	// 正式版：安装包仍用历史 %APPDATA%/pi-desktop；Windows 便携 exe 改落到
+	// PORTABLE_EXECUTABLE_DIR/data，避免与安装版抢同一把版本单实例锁
+	// （次实例会 app.exit(0)，用户看到「启动没反应」）。
 	// 必须在读取 settings / 版本单实例锁之前设置。
-	app.setPath("userData", join(app.getPath("appData"), "pi-desktop"));
+	app.setPath("userData", resolvePackagedUserDataDir({ appData: app.getPath("appData") }));
 }
 
 // Linux XWayland 兼容层：仅当桌面宠物启用时才强制 ozone-platform=x11（#108，
@@ -3258,35 +3258,39 @@ app.whenReady().then(async () => {
 			if (xuePromptManager) xuePromptManager.configureWsl(null);
 		}
 	};
-	await syncWslConfig();
 
-	// 内置扩展改为 RPC -e 注入（见 PiProcess/AgentManager），不再复制到用户扩展目录。
-	// 启动时清理历史版本部署的 pi-deck-* 与已下线扩展，避免 CLI/RPC 双加载。
-	await migrateLegacyBuiltInExtensions().catch((error) => {
+	// 先注册 IPC 并创建窗口：WSL 探测 / pi settings / 代理 / Web 服务都可能卡住或抛错，
+	// 不能挡在 createWindow 前面（打包便携版表现为「启动没反应」，dev 因热路径较短不易复现）。
+	registerIpc();
+	registerFeishuIpc();
+	await createWindow();
+	setupTray();
+
+	void syncWslConfig().catch((error) => {
+		void appLogger.warn("app", "WSL config sync failed during startup", error);
+	});
+	void migrateLegacyBuiltInExtensions().catch((error) => {
 		console.error("Failed to migrate legacy built-in extensions:", error);
 	});
-
-	// 补齐 pi settings.json 缺失的默认配置项，新安装或精简配置的用户无需手动添加。
-	await ensureAllPiSettingsDefaults().catch((error) => {
+	void ensureAllPiSettingsDefaults().catch((error) => {
 		console.error("Failed to ensure pi settings defaults:", error);
 	});
-
-	await appLogger.info("app", "Application started", {
+	void appLogger.info("app", "Application started", {
 		version: app.getVersion(),
 		platform: process.platform,
 		arch: process.arch,
 		installationType: settingsStore.get().installationType,
 	});
-	await applyDesktopProxy(settingsStore.get());
-	await webServiceManager.applySettings(settingsStore.get()).catch((error) => {
+	void applyDesktopProxy(settingsStore.get()).catch((error) => {
+		void appLogger.warn("settings", "Desktop proxy skipped after apply failure", error);
+	});
+	void webServiceManager.applySettings(settingsStore.get()).catch((error) => {
 		console.error("Failed to start web service:", error);
 		void appLogger.warn("web", "Web service disabled after apply failure", {
 			error: error instanceof Error ? error.message : String(error),
 		});
 		void settingsStore.update({ webServiceEnabled: false });
 	});
-	registerIpc();
-	registerFeishuIpc();
 
 	// 🆕 自动连接：如果已有 Bot 配置，自动启动飞书连接
 	autoConnectFeishu();
@@ -3296,15 +3300,13 @@ app.whenReady().then(async () => {
 	// 内存分析模式（PIDECK_MEMORY_PROFILE=1）：尽早开始采样，覆盖窗口创建/加载全过程。
 	// 采样失败不阻塞启动（诊断工具降级为不可用）。
 	if (isMemoryProfileEnabled()) {
-		memoryProfileHandle = await startMemoryProfile(() => agentManager.hasActiveStreaming()).catch((error) => {
+		void startMemoryProfile(() => agentManager.hasActiveStreaming()).then((handle) => {
+			memoryProfileHandle = handle;
+			quitCleanup.register("memory-profile", () => memoryProfileHandle?.stop());
+		}).catch((error) => {
 			console.error("Failed to start memory profile:", error);
-			return null;
 		});
-		// C12：退出清理登记（before-quit 统一 runAll）
-		quitCleanup.register("memory-profile", () => memoryProfileHandle?.stop());
 	}
-	await createWindow();
-	setupTray();
 
 	// 冷启动通知唤起：应用未运行时点击系统通知，本进程即为唯一实例（无次实例 .focus 流转），
 	// argv 携带 pideck:// URL，窗口就绪后跳转对应会话。
@@ -3375,6 +3377,16 @@ app.whenReady().then(async () => {
 			});
 		}
 	});
+}).catch((error) => {
+	// 打包启动链无窗口时用户只能看到「没反应」；必须落盘并尽力弹出错误框。
+	console.error("Application startup failed:", error);
+	void appLogger?.error("app", "Application startup failed", error);
+	void import("electron").then(({ dialog }) => {
+		dialog.showErrorBox(
+			"PiDeck failed to start",
+			error instanceof Error ? (error.stack ?? error.message) : String(error),
+		);
+	}).catch(() => undefined);
 });
 
 /**

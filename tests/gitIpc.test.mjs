@@ -51,3 +51,11 @@ test("Git IPC keeps project lookup, bounded diffs, and stale-worktree cleanup", 
   assert.match(gitIpc, /if \(ok \|\| !stillInGit\)/);
   assert.match(gitIpc, /projectStore\.remove\(child\.id\)/);
 });
+
+test("git:fetch skips non-repositories instead of throwing", () => {
+  const service = readFileSync("src/main/git/GitService.ts", "utf8");
+  const fetchFn = service.slice(service.indexOf("async fetch(cwd: string)"), service.indexOf("async getAheadBehind"));
+  assert.match(fetchFn, /not a git repository/);
+  assert.match(fetchFn, /return;/);
+  assert.match(gitIpc, /if \(!\(await gitService\.isGitRepo\(project\.path\)\)\) return;/);
+});
