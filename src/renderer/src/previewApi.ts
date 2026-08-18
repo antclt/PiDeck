@@ -322,6 +322,8 @@ export function createPreviewApi(): PiDesktopApi {
 			syncDshForeignSessions: async () => ({ imported: 0, skipped: 0 }),
 			listUngroupedAdoptable: async () => [],
 			adoptUngroupedSessions: async () => ({ adopted: 0, failed: 0 }),
+			previewMissingProjectionTitles: async () => ({ missing: 0, titled: 0, samples: [] }),
+			backfillProjectionTitles: async () => ({ attempted: 0, failed: 0 }),
 			listArchivedDshSessions: async () => [],
 			unarchiveDshSession: async () => true,
 			listDshDynamicPlugins: async () => [],

@@ -601,6 +601,14 @@ const api = {
 			}>>,
 		adoptUngroupedSessions: () =>
 			ipcRenderer.invoke(ipcChannels.dshAdoptUngroupedSessions) as Promise<{ adopted: number; failed: number }>,
+		previewMissingProjectionTitles: () =>
+			ipcRenderer.invoke(ipcChannels.dshPreviewMissingProjectionTitles) as Promise<{
+				missing: number;
+				titled: number;
+				samples: Array<{ dshSessionId: string; loggedTitle?: string; cwd?: string }>;
+			}>,
+		backfillProjectionTitles: () =>
+			ipcRenderer.invoke(ipcChannels.dshBackfillProjectionTitles) as Promise<{ attempted: number; failed: number }>,
 		/** DSH 归档区会话清单（G14：恢复入口用；目录已移入 .pideck-archive 的 host 会话）。 */
 		listArchivedDshSessions: () =>
 			ipcRenderer.invoke(ipcChannels.dshListArchived) as Promise<Array<{

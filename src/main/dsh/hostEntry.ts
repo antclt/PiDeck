@@ -21,6 +21,10 @@ import { createRequire } from "node:module";
 import { installHiddenConsolePatch, installHostHiddenConsole } from "./hideChildConsoles";
 import { agentPresetsRow } from "./dshPresetComposition";
 import {
+	backfillMissingProjectionTitles,
+	bindProjectionCacheBackfillDeps,
+} from "./dshProjectionCacheBackfill";
+import {
 	PIDECK_PLUGIN_BRIDGE_PATH,
 	handlePluginBridgeFetch,
 } from "./pideckPluginBridge";
@@ -28,6 +32,10 @@ import {
 	PIDECK_COMMANDS_BRIDGE_PATH,
 	handleCommandsBridgeFetch,
 } from "./pideckCommandsBridge";
+import {
+	PIDECK_PROJECTION_CACHE_BRIDGE_PATH,
+	handleProjectionCacheBridgeFetch,
+} from "./pideckProjectionCacheBridge";
 
 // utilityProcess 的 parentPort：electron 包类型里有（Electron.ParentPort）。
 import type { ParentPort } from "electron";
@@ -120,6 +128,15 @@ async function main(): Promise<void> {
 				config: { root: { __jsExpr: "dshHomePath('storages')" } },
 			},
 			{ id: "storage-domain", name: "@deepseek-ai/dsh-storage-domain", config: { backend: "json" } },
+			// 官方投影缓存：与 dsh-web-app 同配置。dsh-web 冷列表只读
+			// session_projcache 的 title 行，不 fold 日志；不挂这个插件，
+			// PiDeck 会话在 dsh-web 侧栏就会只显示 workspace / 目录名。
+			// 写点仍是官方 turn/end + dispose + coldSnapshot 回写，不手写 JSON。
+			{
+				id: "session-projection-cache",
+				name: "@deepseek-ai/dsh-session-projection-cache",
+				config: { writeEveryEvents: 200, writeIntervalMs: 5000 },
+			},
 			{ id: "workspace", name: "@deepseek-ai/dsh-workspace" },
 			{ id: "api-gateway", name: "@deepseek-ai/dsh-host-apiproxy" },
 			{ id: "pideck-directory-picker", name: "./pideck-directory-picker.js" },
@@ -236,6 +253,24 @@ async function main(): Promise<void> {
 		nodeModulesUrl,
 	);
 	const apiHandler = toFetchHandler(ctx.apiProxy as never);
+	// 先发 host-ready，再后台 coldSnapshot 缺标题的冷会话：
+	// dsh-web 侧栏只读 session_projcache；旧 PiDeck 会话日志里已有
+	// session/title，但缓存没行。官方 coldSnapshot 会 fold + fail-soft 回写。
+	// 不 attach、不并行，避免 utilityProcess 同时解多份 zstd。
+	void (async () => {
+		const deps = bindProjectionCacheBackfillDeps(ctx, (message) => {
+			console.log(`[dsh-host-entry] ${message}`);
+		});
+		if (!deps) return;
+		const result = await backfillMissingProjectionTitles(deps);
+		if (result.attempted > 0) {
+			console.log(
+				`[dsh-host-entry] projection title backfill attempted=${result.attempted} failed=${result.failed}`,
+			);
+		}
+	})().catch((error) => {
+		console.warn(`[dsh-host-entry] projection title backfill skipped: ${String(error)}`);
+	});
 	// PiDeck 插件管理桥（G13 深化）：/pideck-plugin/rpc 走桥插件服务（动态插件
 	// 生命周期 + 静态 Loader 清单），其余路径原样交给 ApiProxy RPC handler。
 	const handler = (url: URL, init?: RequestInit): Promise<Response> => {
@@ -252,6 +287,13 @@ async function main(): Promise<void> {
 			return handleCommandsBridgeFetch(ctx, {
 				method: init?.method,
 				headers: init?.headers as Record<string, string> | undefined,
+				body: typeof init?.body === "string" ? init.body : undefined,
+			});
+		}
+		// 历史标题回写：主进程点配置页按钮时走这条桥，调用官方 coldSnapshot。
+		if (url.pathname === PIDECK_PROJECTION_CACHE_BRIDGE_PATH) {
+			return handleProjectionCacheBridgeFetch(ctx, {
+				method: init?.method,
 				body: typeof init?.body === "string" ? init.body : undefined,
 			});
 		}

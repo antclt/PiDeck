@@ -9,8 +9,9 @@ import { join } from "node:path";
  * dsh-web 侧栏标题来自这里的 `tables.sessions[id].rows.title.val`，
  * 会话 header 本身没有 title。
  *
- * 只读、失败跳过：不启动 host、不写缓存、不 attach。双 host 抢 DSH_HOME 时
- * 也不能改这份文件，否则会干扰 dsh-web / CLI 的投影水位。
+ * 只读、失败跳过：扫描路径不启动 host、不写缓存、不 attach。
+ * 写回只走官方 `@deepseek-ai/dsh-session-projection-cache`（host 挂载后
+ * turn/end / dispose / coldSnapshot），禁止手写这份 JSON。
  */
 
 export const DSH_PROJECTION_CACHE_RELATIVE = join("storages", "session_projcache.json");

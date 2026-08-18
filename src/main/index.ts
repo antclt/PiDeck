@@ -229,6 +229,7 @@ import {
 	adoptUngroupedSessions,
 	listUngroupedAdoptCandidatesFromDisk,
 } from "./dsh/dshUngroupedAdopt";
+import { previewMissingProjectionTitles } from "./dsh/dshProjectionCacheBackfill";
 import { readWorkspaceRegistry } from "./dsh/dshWorkspaceRegistry";
 import { PiLocator } from "./pi/PiLocator";
 import { testPiProxy } from "./pi/PiProxyTester";
@@ -2573,6 +2574,8 @@ function registerIpc() {
 			// 配置页「全部导入」与启动自动同步共用此入口。
 			syncDshForeignSessions: () => runDshForeignSync(),
 			listUngroupedAdoptable: async () => listUngroupedAdoptCandidatesFromDisk(dshHost.getHomeDir()),
+			previewMissingProjectionTitles: () => previewMissingProjectionTitles(dshHost.getHomeDir()),
+			backfillProjectionTitles: () => dshHost.backfillProjectionTitles(),
 			adoptUngroupedSessions: async () => {
 				// 必须我们自己的 host 来写 workspace 记账。dsh-web 还占着同一
 				// DSH_HOME 时不要点——双 host 会互相覆盖 session log。

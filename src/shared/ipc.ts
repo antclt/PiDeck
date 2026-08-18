@@ -115,6 +115,10 @@ export const ipcChannels = {
 	dshListUngroupedAdoptable: "dsh:list-ungrouped-adoptable",
 	/** 经官方 sessions.create({workspaceId,sessionId}) 认领未分组根会话。 */
 	dshAdoptUngroupedSessions: "dsh:adopt-ungrouped-sessions",
+	/** 磁盘预览：缓存缺 title 的根会话数量（dsh-web 会显示成目录名）。 */
+	dshPreviewMissingProjectionTitles: "dsh:preview-missing-projection-titles",
+	/** 启动我们自己的 host，用官方 coldSnapshot 回写历史标题。 */
+	dshBackfillProjectionTitles: "dsh:backfill-projection-titles",
 	/** DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）。 */
 	dshListArchived: "dsh:list-archived",
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
