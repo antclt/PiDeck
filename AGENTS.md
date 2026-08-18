@@ -244,11 +244,10 @@ src/
 
 ## Issue 修复流程
 
-1. 从最新 `main` 建短修复分支：`fix/issue-<number>-<short-description>`。
+1. 直接在当前开发分支（通常是 `dev`）上改，**不要**为单个 issue 另拉 `fix/issue-*` 分支。多 agent 并行时分叉会互相踩工作区。
 2. 先定位根因，记录影响范围；涉及启动、环境检测、会话恢复等核心流程时，同步检查相邻路径同类问题。
 3. 修复聚焦单一问题，`fix:` 前缀提交，关联 issue。
-4. PR 描述包含：问题原因、修复摘要、验证命令、`Closes #<number>`。
-5. 建议 Squash and merge；合并后按用户影响决定是否发 patch。
+4. 需要开 PR 时，描述写清问题原因、修复摘要、验证命令，并写 `Closes #<number>`。
 
 ## 发版要求
 
