@@ -48,18 +48,45 @@ function readUnpackedPatterns(asarPath) {
 
 /**
  * asar 的 unpack 选项对「文件绝对路径」做 minimatch（matchBase: true），
- * 相对路径列表匹配不上 Windows 绝对路径。改成按后缀/目录名匹配：
- * 原 header 里出现过的 .node / .dll / .exe / .wasm 继续 unpack。
+ * 相对路径列表匹配不上 Windows 绝对路径。
+ *
+ * 禁止按「原 header 里出现过的任意后缀」展开：asarUnpack 含 hostEntry.js 时
+ * 会得到 `*.js`，repack 把整包 JS 标成 unpacked，并在 resources/ 留下
+ * `app.asar.tmp.unpacked`（上万文件）。便携 NSIS 启动先解压这堆，表现为
+ * 「后台有进程、没有窗口」。
+ *
+ * 只保留原生后缀 + utilityProcess 入口文件名。
  */
+const NATIVE_UNPACK_SUFFIXES = new Set([".node", ".dll", ".exe", ".wasm", ".so", ".dylib"]);
+const ALWAYS_UNPACK_BASENAMES = new Set(["hostentry.js"]);
+
 function unpackGlobFromFiles(files) {
-  const suffixes = new Set();
+  const patterns = new Set();
   for (const file of files ?? []) {
-    const match = file.match(/(\.[A-Za-z0-9]+)$/);
-    if (match) suffixes.add(match[1].toLowerCase());
+    const base = String(file).split("/").pop() ?? "";
+    if (ALWAYS_UNPACK_BASENAMES.has(base.toLowerCase())) {
+      patterns.add(base);
+      continue;
+    }
+    const match = /\.([A-Za-z0-9]+)$/.exec(base);
+    if (!match) continue;
+    const suffix = `.${match[1].toLowerCase()}`;
+    if (NATIVE_UNPACK_SUFFIXES.has(suffix)) patterns.add(`*${suffix}`);
   }
-  if (suffixes.size === 0) return undefined;
-  const list = [...suffixes].map((suffix) => `*${suffix}`);
+  if (patterns.size === 0) return undefined;
+  const list = [...patterns];
   return list.length === 1 ? list[0] : `{${list.join(",")}}`;
+}
+
+async function removeAsarRepackArtifacts(asarPath) {
+  const tmpAsar = `${asarPath}.tmp`;
+  const tmpUnpacked = `${asarPath}.tmp.unpacked`;
+  await rmDir(tmpUnpacked);
+  try {
+    await fs.promises.unlink(tmpAsar);
+  } catch {
+    // 正常路径里 tmp asar 已被 rename 成 app.asar
+  }
 }
 
 function unpackDirGlobFromDirs(dirs) {
@@ -141,6 +168,7 @@ async function stripFromAsar(asarPath, extractDir, removePaths, label) {
     const unpacked = readUnpackedPatterns(asarPath);
     await packAsarPreservingUnpacked(extractDir, tmpAsar, unpacked);
     fs.renameSync(tmpAsar, asarPath);
+    await removeAsarRepackArtifacts(asarPath);
 
     // 清理临时目录
     await rmDir(extractDir);
@@ -164,6 +192,7 @@ async function stripFromAsar(asarPath, extractDir, removePaths, label) {
 exports.collectUnpackedPatterns = collectUnpackedPatterns;
 exports.readUnpackedPatterns = readUnpackedPatterns;
 exports.packAsarPreservingUnpacked = packAsarPreservingUnpacked;
+exports.unpackGlobFromFiles = unpackGlobFromFiles;
 
 exports.default = async function (context) {
   const { appOutDir } = context;
@@ -352,14 +381,16 @@ exports.default = async function (context) {
     await packAsarPreservingUnpacked(extractDir, tmpAsar, unpackedPatterns);
     const oldSize = fs.statSync(asarPath).size;
     fs.renameSync(tmpAsar, asarPath);
+    await removeAsarRepackArtifacts(asarPath);
     const newSize = fs.statSync(asarPath).size;
     console.log(`[afterPack] asar: 节省 ${(totalRemoved / 1024 / 1024).toFixed(1)} MB (${(oldSize / 1024 / 1024).toFixed(0)} → ${(newSize / 1024 / 1024).toFixed(0)} MB)`);
   } else {
     console.log(`[afterPack] asar: 无冗余可清理`);
   }
 
-  // 清理临时目录
+  // 清理临时目录，以及 createPackageWithOptions 写 dest=app.asar.tmp 时留下的影子目录。
   await rmDir(extractDir);
+  await removeAsarRepackArtifacts(asarPath);
 
   // ====================================
   // 4. node-pty 跨平台 prebuild 清理（asar.unpacked）

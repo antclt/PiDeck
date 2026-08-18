@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url);
 const asar = require("@electron/asar");
 const afterPack = require("../scripts/after-pack-cleanup.js");
 const afterPackCleanup = afterPack.default;
+const unpackGlobFromFiles = afterPack.unpackGlobFromFiles;
 
 function isUnpackedInHeader(archive, relativePath) {
 	const parts = relativePath.replaceAll("\\", "/").replace(/^\//, "").split("/");
@@ -62,6 +63,20 @@ test("afterPack cleanup preserves the Lark SDK package main entry", async () => 
 	}
 });
 
+test("repack unpack glob keeps native binaries and hostEntry, not every .js", () => {
+	const glob = unpackGlobFromFiles([
+		"out/main/hostEntry.js",
+		"node_modules/node-pty/prebuilds/win32-x64/pty.node",
+		"node_modules/sql.js/dist/sql-wasm.wasm",
+		"node_modules/@img/sharp-win32-x64/lib/libvips-42.dll",
+	]);
+	assert.match(String(glob), /hostEntry\.js/);
+	assert.match(String(glob), /\*\.node/);
+	assert.match(String(glob), /\*\.wasm/);
+	assert.match(String(glob), /\*\.dll/);
+	assert.doesNotMatch(String(glob), /\*\.js/);
+});
+
 test("package.json unpacks node-pty so packaged terminal can load pty.node", () => {
 	const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 	const unpack = pkg.build?.asarUnpack ?? [];
@@ -83,14 +98,23 @@ test("afterPack cleanup keeps node-pty unpacked after asar repack", async () => 
 		const ptyDir = join(sourceDir, "node_modules", "node-pty");
 		await put(join(ptyDir, "lib", "utils.js"), "module.exports = {};\n");
 		await put(join(ptyDir, "prebuilds", "win32-x64", "pty.node"), "NATIVE");
+		await put(join(sourceDir, "out", "main", "hostEntry.js"), "module.exports = {};\n");
+		await put(join(sourceDir, "out", "main", "index.js"), "module.exports = {};\n");
 		await put(join(ptyDir, "README.md"), "fixture documentation that forces a repack\n");
 		await mkdir(dirname(archive), { recursive: true });
-		await asar.createPackageWithOptions(sourceDir, archive, { unpack: "**/*.node" });
+		await asar.createPackageWithOptions(sourceDir, archive, {
+			unpack: "{**/*.node,hostEntry.js}",
+		});
 
 		assert.equal(
 			isUnpackedInHeader(archive, "node_modules/node-pty/prebuilds/win32-x64/pty.node"),
 			true,
 			"fixture must start with an unpacked pty.node so the test exercises the regression",
+		);
+		assert.equal(
+			isUnpackedInHeader(archive, "out/main/hostEntry.js"),
+			true,
+			"fixture must start with unpacked hostEntry.js like electron-builder asarUnpack",
 		);
 
 		await afterPackCleanup({ appOutDir });
@@ -101,9 +125,30 @@ test("afterPack cleanup keeps node-pty unpacked after asar repack", async () => 
 			"repacking asar must keep pty.node unpacked so Electron maps require() to app.asar.unpacked",
 		);
 		assert.equal(
+			isUnpackedInHeader(archive, "out/main/hostEntry.js"),
+			true,
+			"repacking asar must keep hostEntry.js unpacked for utilityProcess",
+		);
+		assert.equal(
+			isUnpackedInHeader(archive, "out/main/index.js"),
+			false,
+			"repacking must not unpack every .js just because hostEntry.js is unpacked",
+		);
+		assert.equal(
 			normalizedEntries(archive).includes("node_modules/node-pty/README.md"),
 			false,
 			"the fixture must still exercise an asar repack through documentation cleanup",
+		);
+		const { existsSync } = await import("node:fs");
+		assert.equal(
+			existsSync(join(appOutDir, "resources", "app.asar.tmp")),
+			false,
+			"repack must not leave app.asar.tmp in the shipped app directory",
+		);
+		assert.equal(
+			existsSync(join(appOutDir, "resources", "app.asar.tmp.unpacked")),
+			false,
+			"repack must not leave app.asar.tmp.unpacked; portable NSIS extracts it before the window appears",
 		);
 	} finally {
 		await rm(appOutDir, { recursive: true, force: true });
