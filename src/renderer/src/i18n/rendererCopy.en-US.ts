@@ -1017,7 +1017,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.dsh.presetNotWritable": "The settings document is not writable; the default preset cannot be changed",
   "config.dsh.presetStandardName": "Standard mode",
   "config.dsh.presetStandardDesc": "Full coding agent with file editing, shell, file and web search, skills, planning, goals, subagents, and workflows.",
-  "config.dsh.presetCodeName": "Code mode",
+  "config.dsh.presetCodeName": "PTC mode",
   "config.dsh.presetCodeDesc": "All Standard mode capabilities, with tools exposed through the Code Mode SDK so the model can combine multi-step operations in one TypeScript program.",
   "config.dsh.presetMinimalName": "Minimal mode",
   "config.dsh.presetMinimalDesc": "Two-tool coding agent with persistent bash and str_replace_editor.",

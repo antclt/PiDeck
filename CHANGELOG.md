@@ -6,6 +6,14 @@ All notable changes to PiDeck are documented here.
 
 ## Unreleased
 
+### 🚀 New Features
+
+- **DSH 0.1.0-rc.7** — Bump `@deepseek-ai/dsh*` to the current harness release
+  (plugin settings cards, Job Panel for Codex/Claude Code subagents, durable
+  MCP/ACP image attachments, large-history pagination fix, max-token session
+  recovery). English built-in `Code mode` label follows upstream as `PTC mode`.
+  `dsh-bill` is 0.13.1.
+
 ### 🐛 Bug Fixes
 
 - **Packaged terminal could not load pty.node (#154)** — afterPack now keeps

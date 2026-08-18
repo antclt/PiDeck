@@ -64,9 +64,14 @@ test("afterPack cleanup preserves the Lark SDK package main entry", async () => 
 
 test("package.json unpacks node-pty so packaged terminal can load pty.node", () => {
 	const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+	const unpack = pkg.build?.asarUnpack ?? [];
 	assert.ok(
-		(pkg.build?.asarUnpack ?? []).includes("node_modules/node-pty/**"),
+		unpack.includes("node_modules/node-pty/**"),
 		"asarUnpack must list node-pty; otherwise terminal:ensure fails in the installed app (#154)",
+	);
+	assert.ok(
+		unpack.includes("node_modules/@deepseek-ai/dsh-subprocess-local/node_modules/node-pty/**"),
+		"asarUnpack must list the nested DSH node-pty 1.2 prebuild used by dsh-subprocess-local",
 	);
 });
 

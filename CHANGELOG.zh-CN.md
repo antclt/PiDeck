@@ -6,6 +6,13 @@
 
 ## 未发布
 
+### 🚀 新功能
+
+- **DSH 0.1.0-rc.7** — `@deepseek-ai/dsh*` 升到当前 harness 发布版（插件可注册
+  设置卡片、Codex/Claude Code 子代理进 Job Panel、MCP/ACP 持久图片附件、
+  大历史分页栈溢出修复、max-tokens 截断后会话可继续）。英文内置预设
+  `Code mode` 跟随上游改为 `PTC mode`。`dsh-bill` 升到 0.13.1。
+
 ### 🐛 Bug 修复
 
 - **打包版终端找不到 pty.node（#154）** — afterPack 重打 asar 时保留
