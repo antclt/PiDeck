@@ -4,4 +4,10 @@
  */
 declare module "js-yaml" {
 	export function load(text: string): unknown;
+	export function dump(value: unknown, options?: {
+		lineWidth?: number;
+		noRefs?: boolean;
+		quotingType?: "'" | '"';
+		sortKeys?: boolean;
+	}): string;
 }

@@ -24,6 +24,7 @@ import { dictEntries, normalizeDshSchema, objectFields, pruneEmptyObjects, readP
 import { credentialRefFor } from "./dshCredentialRef";
 import { DshModelsEditor } from "./DshModelsEditor";
 import type { DshModelRow } from "./DshModelsTable";
+import { ProviderMigrationButton } from "./ProviderMigrationButton";
 
 export type DshCredentialState = {
 	configured: boolean;
@@ -50,6 +51,7 @@ function ProviderRowHead(props: {
 	onRemove?: () => void;
 	removeDisabled?: boolean;
 	removeTitle?: string;
+	extraActions?: ReactNode;
 }) {
 	return (
 		<div className="flex items-center gap-2 px-3 py-2">
@@ -73,6 +75,7 @@ function ProviderRowHead(props: {
 				</span>
 			)}
 			{props.keyDot}
+			{props.extraActions}
 			{props.onRemove && (
 				<Button
 					type="button"
@@ -273,6 +276,8 @@ export function PiAiProvidersCard(props: {
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
 	sectionApi?: DshSectionApi;
+	/** 把供应商迁到 pi 后刷新本页。 */
+	onMigrated?: () => void;
 }) {
 	const { namespace, writable, ops, sectionApi } = props;
 	const instanceId = useId();
@@ -559,6 +564,13 @@ export function PiAiProvidersCard(props: {
 								]}
 								keyRef={keyRef}
 								keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
+								extraActions={
+									<ProviderMigrationButton
+										direction="dsh-to-pi"
+										provider={entry.key}
+										onMigrated={props.onMigrated}
+									/>
+								}
 								isOpen={isOpen}
 								onToggle={() => setExpanded((prev) => ({ ...prev, [entry.key]: !prev[entry.key] }))}
 								onRemove={() => removeProvider(entry.key)}
@@ -624,6 +636,8 @@ export function DeepseekRouteCard(props: {
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
 	sectionApi?: DshSectionApi;
+	/** 把官方 DeepSeek 迁到 pi 后刷新本页。 */
+	onMigrated?: () => void;
 }) {
 	const { namespace, writable, ops, sectionApi } = props;
 	const instanceId = useId();
@@ -737,6 +751,13 @@ export function DeepseekRouteCard(props: {
 						badges={[t("config.dsh.modelsCount", { count: models.length > 0 ? models.length : (props.catalog?.length ?? 0) })]}
 						keyRef={keyRef}
 						keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
+						extraActions={
+							<ProviderMigrationButton
+								direction="dsh-to-pi"
+								provider="deepseek"
+								onMigrated={props.onMigrated}
+							/>
+						}
 						isOpen={open}
 						onToggle={() => setOpen((prev) => !prev)}
 					/>

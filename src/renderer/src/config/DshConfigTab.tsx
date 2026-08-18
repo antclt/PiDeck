@@ -230,6 +230,14 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 	}, [load, loadStatus]);
 
 	useEffect(() => {
+		const onMigrated = () => {
+			void load();
+		};
+		window.addEventListener("pideck:provider-migrated", onMigrated);
+		return () => window.removeEventListener("pideck:provider-migrated", onMigrated);
+	}, [load]);
+
+	useEffect(() => {
 		if (credentialRefs.length === 0) return;
 		void desktopApi.sessions.describeDshCredentials(credentialRefs).then(setCredentials).catch(() => undefined);
 	}, [credentialRefs]);
@@ -334,6 +342,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 														directory={providerDirectory}
 														onSave={(patch) => saveNamespace(ns.ns, patch)}
 														sectionApi={sectionApi}
+														onMigrated={() => { void load(); }}
 													/>
 												) : (
 													<DeepseekRouteCard
@@ -343,6 +352,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 														catalog={modelCatalog["deepseek-official"]}
 														onSave={(patch) => saveNamespace(ns.ns, patch)}
 														sectionApi={sectionApi}
+														onMigrated={() => { void load(); }}
 													/>
 												)}
 											</section>

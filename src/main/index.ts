@@ -2705,6 +2705,10 @@ function registerIpc() {
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
 		getDshHostPid: () => dshHost.getHostPid(),
+		providerMigration: {
+			configManager,
+			dshHost,
+		},
 		listDshMonitorSessions: () => dshAgentManager.list().map((tab) => ({ title: tab.title })),
 		stopDshHostFromMonitor,
 		getMainWindow: () => mainWindow,

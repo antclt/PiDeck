@@ -908,6 +908,14 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 		},
 		config: {
+			previewProviderMigration: async () => ({ direction: "pi-to-dsh" as const, providers: [] }),
+			applyProviderMigration: async (direction, provider) => ({
+				ok: true,
+				provider,
+				direction,
+				copiedKey: false,
+				wroteViaHost: false,
+			}),
 			getModels: async () => ({
 				raw: '{"providers":{}}',
 				parsed: { providers: {} },

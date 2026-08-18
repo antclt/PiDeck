@@ -32,6 +32,12 @@ import type { AgentProcessMetric, ProcessMetricsSnapshot } from "../../shared/ty
 import { getWslExe } from "../wsl/wslExe";
 import { listWebNetworkAddresses } from "../web/WebNetwork";
 import { toggleMainWindowDevTools } from "../devTools";
+import {
+	applyProviderMigration,
+	previewProviderMigration,
+	type ProviderMigrationDeps,
+} from "../config/providerMigrationService";
+import type { ProviderMigrationDirection } from "../../shared/types/providerMigration";
 
 /**
  * IPC 边界校验：RPC 日志条目必须字段齐全，防止渲染层传伪造对象写盘。
@@ -73,6 +79,8 @@ export type SystemIpcDeps = {
 	listDshMonitorSessions?: () => Array<{ title?: string }>;
 	/** 停止 DSH host：先卸会话再 dispose，不能走 pi stopAgentById。 */
 	stopDshHostFromMonitor?: () => Promise<SessionCommandResult<undefined>>;
+	/** 单供应商 pi↔DSH 互迁（不为此拉起 host）。 */
+	providerMigration?: ProviderMigrationDeps;
 	/** 模型规格存储（resources/model-specs.db 只读，发版前由 sync-model-specs.mjs 同步） */
 	modelSpecsStore: ModelSpecsStore;
 	getMainWindow: () => Electron.BrowserWindow | null;
@@ -190,6 +198,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		isQuitting,
 		RELEASES_URL,
 		devBranch,
+		providerMigration,
 	} = deps;
 
 	// ── Pi 检测 ──────────────────────────────────────────────────────
@@ -843,6 +852,34 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configGetModels, () =>
 		configManager.getModelsConfig(),
 	);
+	// 预览/执行单供应商互迁：方向必须是枚举，供应商名在服务层再校验。
+	ipcMain.handle(ipcChannels.configPreviewProviderMigration, async (_event, direction: unknown) => {
+		if (direction !== "pi-to-dsh" && direction !== "dsh-to-pi") {
+			throw new Error("invalid migration direction");
+		}
+		if (!providerMigration) throw new Error("provider migration is not available");
+		return previewProviderMigration(providerMigration, direction as ProviderMigrationDirection);
+	});
+	ipcMain.handle(ipcChannels.configApplyProviderMigration, async (_event, direction: unknown, provider: unknown) => {
+		if (direction !== "pi-to-dsh" && direction !== "dsh-to-pi") {
+			throw new Error("invalid migration direction");
+		}
+		if (typeof provider !== "string") throw new Error("invalid provider name");
+		if (!providerMigration) throw new Error("provider migration is not available");
+		const result = await applyProviderMigration(providerMigration, direction as ProviderMigrationDirection, provider);
+		if (result.ok && direction === "dsh-to-pi") {
+			invalidateModelListCache();
+			void refreshModelList(piLocator, settingsStore).catch(() => undefined);
+		}
+		void appLogger.info("config", "Provider migration applied", {
+			direction,
+			provider,
+			ok: result.ok,
+			copiedKey: result.copiedKey,
+			wroteViaHost: result.wroteViaHost,
+		});
+		return result;
+	});
 	ipcMain.handle(ipcChannels.configGetAuth, () =>
 		configManager.getAuthConfig(),
 	);

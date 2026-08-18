@@ -1239,6 +1239,17 @@ const api = {
 			) as Promise<{ ok: true; config: SecurityConfig } | { ok: false; error: string }>,
 	},
 	config: {
+		previewProviderMigration: (direction: import("../shared/types/providerMigration").ProviderMigrationDirection) =>
+			ipcRenderer.invoke(ipcChannels.configPreviewProviderMigration, direction) as Promise<
+				import("../shared/types/providerMigration").ProviderMigrationPreview
+			>,
+		applyProviderMigration: (
+			direction: import("../shared/types/providerMigration").ProviderMigrationDirection,
+			provider: string,
+		) =>
+			ipcRenderer.invoke(ipcChannels.configApplyProviderMigration, direction, provider) as Promise<
+				import("../shared/types/providerMigration").ProviderMigrationResult
+			>,
 		getModels: () =>
 			ipcRenderer.invoke(ipcChannels.configGetModels) as Promise<{
 				raw: string;

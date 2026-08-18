@@ -569,6 +569,15 @@ function ConfigModalContent(props: ConfigModalProps) {
 
 	useEffect(() => {
 		if (!open) return;
+		const onMigrated = () => {
+			void loadConfig("models");
+		};
+		window.addEventListener("pideck:provider-migrated", onMigrated);
+		return () => window.removeEventListener("pideck:provider-migrated", onMigrated);
+	}, [open, loadConfig]);
+
+	useEffect(() => {
+		if (!open) return;
 		if (section === "skills") {
 			void refreshSkills();
 			return;

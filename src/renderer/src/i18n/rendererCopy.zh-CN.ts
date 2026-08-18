@@ -1261,6 +1261,12 @@ export const zhCN = {
   "config.deleteModel": "删除模型",
   "config.deleteProvider": "删除供应商",
   "config.duplicateProvider": "复制供应商",
+  "config.migrate.toDsh": "一键迁移到 DSH",
+  "config.migrate.toPi": "一键迁移到 pi",
+  "config.migrate.overwriteConfirm": "对端已有供应商「{name}」，覆盖它的地址、模型和密钥？",
+  "config.migrate.okWithKey": "已迁移「{name}」（含 API 密钥）",
+  "config.migrate.okNoKey": "已迁移「{name}」（未找到可复制的密钥，请到对端补填）",
+  "config.migrate.failed": "供应商迁移失败",
   "config.deleteSkillConfirmTitle": "删除 Skill",
   "config.deleteSkillConfirmBody":
     "确认删除「{name}」吗？此操作会删除本地 Skill 文件，且不可撤销。",

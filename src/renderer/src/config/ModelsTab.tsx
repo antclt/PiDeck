@@ -23,6 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../components/ui-shadcn
 import { showNotice } from "../utils/notice";
 import { computeModelSpecPatches } from "../utils/modelSpecAutoFill";
 import type { ModelSpec } from "../../../shared/types/modelSpecs";
+import { ProviderMigrationButton } from "./ProviderMigrationButton";
 
 const KNOWN_PROVIDER_FIELDS = new Set([
 	"baseUrl",
@@ -462,6 +463,10 @@ export function ModelsTab(props: {
 											<SquarePen size={14} />
 										</Button>
 									)}
+									<ProviderMigrationButton
+										direction="pi-to-dsh"
+										provider={name}
+									/>
 									<Button variant="ghost" size="icon-sm" className="size-7"
 										onClick={(e) => {
 											e.stopPropagation();

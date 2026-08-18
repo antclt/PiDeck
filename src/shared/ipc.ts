@@ -325,6 +325,10 @@ export const ipcChannels = {
 	/** 项目信任确认：渲染进程 → 主进程，回传用户的信任选择（trust-remember/trust-session/deny） */
 	projectsTrustResponse: "projects:trust-response",
 
+	/** 预览可互迁的单供应商（pi → DSH 或 DSH → pi）。 */
+	configPreviewProviderMigration: "config:preview-provider-migration",
+	/** 执行单供应商互迁（覆盖同名目标前由渲染层确认）。 */
+	configApplyProviderMigration: "config:apply-provider-migration",
 	configGetModels: "config:get-models",
 	configGetAuth: "config:get-auth",
 	configGetSettings: "config:get-settings",

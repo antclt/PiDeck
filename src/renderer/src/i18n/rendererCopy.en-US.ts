@@ -1275,6 +1275,12 @@ export const enUS: Record<TranslationKey, string> = {
   "config.deleteModel": "Delete model",
   "config.deleteProvider": "Delete provider",
   "config.duplicateProvider": "Duplicate provider",
+  "config.migrate.toDsh": "Copy to DSH",
+  "config.migrate.toPi": "Copy to pi",
+  "config.migrate.overwriteConfirm": "Provider \"{name}\" already exists on the other side. Overwrite its URL, models, and key?",
+  "config.migrate.okWithKey": "Copied \"{name}\" (including API key)",
+  "config.migrate.okNoKey": "Copied \"{name}\" (no key found; add it on the other side)",
+  "config.migrate.failed": "Provider migration failed",
   "config.deleteSkillConfirmTitle": "Delete Skill",
   "config.deleteSkillConfirmBody":
     'Delete "{name}"? This removes the local skill files and cannot be undone.',
