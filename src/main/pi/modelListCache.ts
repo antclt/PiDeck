@@ -1,8 +1,12 @@
 /**
  * pi --list-models 全局缓存模块。
  *
- * 数据源：pi --list-models（pi 内部处理 auth.json/models.json/内置目录，输出「可用模型」）。
- * 加速参数：--offline --no-extensions --no-skills --no-themes（实测 2s → ~1.1s，输出一致）。
+ * 数据源：优先 pi --list-models（pi 内部处理 auth.json/models.json/内置目录）。
+ * 加速参数：--offline --no-extensions --no-skills --no-themes（新版 pi 实测更快）。
+ * 老版本不认识这些旗标会直接 unknown option / 非 0 退出；会话页 IPC 再把失败
+ * 吞成 []，表现为「设置页默认模型正常、会话选择器空」。因此：
+ * - 未知参数时回退到只传 --list-models；
+ * - CLI 仍空/失败时回退读本地 models.json（与设置页同源）。
  *
  * 刷新策略：
  * - 启动时异步预加载（应用 ready 后后台 fork 一次）；
@@ -13,6 +17,11 @@
 import type { AvailableModel } from "../../shared/types";
 import type { PiLocator } from "./PiLocator";
 import type { SettingsStore } from "../settings/SettingsStore";
+
+/** 本地 models.json 读取面：只依赖 parsed，避免 modelListCache 反向依赖 ConfigManager 实现。 */
+export type ModelListConfigSource = {
+	getModelsConfig: () => Promise<{ parsed: unknown }>;
+};
 
 /** 全局缓存：模型列表（null = 未加载/已失效） */
 let cachedListModels: AvailableModel[] | null = null;
@@ -34,6 +43,21 @@ export const MODEL_LIST_FAST_ARGS = [
 	"--no-themes",
 ];
 
+/** 老版本 pi 只认 --list-models；加速旗标会 unknown option。 */
+export const MODEL_LIST_COMPAT_ARGS = ["--list-models"];
+
+export function isUnknownCliOption(message: string): boolean {
+	return /unknown option|unrecognized option|unexpected argument/i.test(message);
+}
+
+function isYesNo(token: string): boolean {
+	return /^(yes|no)$/i.test(token);
+}
+
+function stripAnsi(text: string): string {
+	return text.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
+}
+
 /**
  * 解析 pi --list-models 的文本表格输出。
  * 表格格式：provider  model  context  max-out  thinking  images
@@ -45,20 +69,23 @@ export const MODEL_LIST_FAST_ARGS = [
  * 倒数第 5 个 token 是模型 id，再往前的所有 token 拼回 provider 名。
  */
 export function parsePiListModels(stdout: string): AvailableModel[] {
-	const lines = stdout.split(/\r?\n/).filter(Boolean);
-	if (lines.length < 2) return [];
-	// 跳过表头
-	const dataLines = lines.slice(1);
+	const lines = stripAnsi(stdout)
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean);
 	const models: AvailableModel[] = [];
-	for (const line of dataLines) {
-		const parts = line.trim().split(/\s+/).filter(Boolean);
-		if (parts.length < 3) continue;
-		if (parts.length >= 6) {
-			// 完整 6 列表格：后 4 列固定为 context/max-out/thinking/images；
-			// provider 名可含空格，模型 id 之前的所有 token 拼回 provider
+	for (const line of lines) {
+		if (/unknown option|unrecognized option|error:/i.test(line)) continue;
+		const parts = line.split(/\s+/).filter(Boolean);
+		if (parts.length < 2) continue;
+		// 跳过表头，而不是「永远丢掉第一行」——老 pi 可能没有表头，或 stderr 混进 stdout。
+		if (parts[0].toLowerCase() === "provider") continue;
+
+		if (parts.length >= 6 && isYesNo(parts[parts.length - 1] ?? "") && isYesNo(parts[parts.length - 2] ?? "")) {
 			const tail = parts.slice(-4);
 			const provider = parts.slice(0, -5).join(" ");
 			const modelId = parts[parts.length - 5];
+			if (!provider || !modelId) continue;
 			models.push({
 				provider,
 				id: modelId,
@@ -68,18 +95,46 @@ export function parsePiListModels(stdout: string): AvailableModel[] {
 				reasoning: tail[2]?.toLowerCase() === "yes",
 				images: tail[3]?.toLowerCase() === "yes",
 			});
-		} else {
-			// 兼容旧格式（provider/model/thinking）：同样从右往左，
-			// 最后一段是 thinking，倒数第二是模型 id，前面拼回 provider
-			const provider = parts.slice(0, -2).join(" ");
-			const modelId = parts[parts.length - 2];
+			continue;
+		}
+
+		const last = parts[parts.length - 1] ?? "";
+		const prev = parts[parts.length - 2] ?? "";
+		if (parts.length >= 4 && parseTokenSize(prev) !== undefined && parseTokenSize(last) !== undefined) {
+			const provider = parts.slice(0, -3).join(" ");
+			const modelId = parts[parts.length - 3];
+			if (!provider || !modelId) continue;
 			models.push({
 				provider,
 				id: modelId,
 				name: `${provider}/${modelId}`,
-				reasoning: parts[parts.length - 1]?.toLowerCase() === "yes",
+				contextWindow: parseTokenSize(prev),
+				maxTokens: parseTokenSize(last),
 			});
+			continue;
 		}
+
+		if (parts.length >= 3 && isYesNo(last)) {
+			const provider = parts.slice(0, -2).join(" ");
+			const modelId = parts[parts.length - 2];
+			if (!provider || !modelId) continue;
+			models.push({
+				provider,
+				id: modelId,
+				name: `${provider}/${modelId}`,
+				reasoning: last.toLowerCase() === "yes",
+			});
+			continue;
+		}
+
+		const provider = parts.slice(0, -1).join(" ");
+		const modelId = parts[parts.length - 1];
+		if (!provider || !modelId) continue;
+		models.push({
+			provider,
+			id: modelId,
+			name: `${provider}/${modelId}`,
+		});
 	}
 	return models;
 }
@@ -98,11 +153,55 @@ export function parseTokenSize(value: string): number | undefined {
 	return Math.round(num);
 }
 
-/** fork pi --list-models 并解析（一次调用，带超时）。 */
-async function runPiListModels(
+/**
+ * 把设置页同源的 models.json 展平为会话选择器结构。
+ * CLI 失败时必须能靠这份数据填列表，否则用户配完默认模型仍看不到可选模型。
+ */
+export function modelsFromPiConfig(modelsFile: unknown): AvailableModel[] {
+	if (!modelsFile || typeof modelsFile !== "object" || Array.isArray(modelsFile)) return [];
+	const providers = (modelsFile as { providers?: unknown }).providers;
+	if (!providers || typeof providers !== "object" || Array.isArray(providers)) return [];
+	const models: AvailableModel[] = [];
+	for (const [provider, config] of Object.entries(providers)) {
+		if (!provider || !config || typeof config !== "object" || Array.isArray(config)) continue;
+		const list = (config as { models?: unknown }).models;
+		if (!Array.isArray(list)) continue;
+		for (const item of list) {
+			if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+			const record = item as Record<string, unknown>;
+			if (typeof record.id !== "string" || !record.id) continue;
+			const input = record.input;
+			models.push({
+				provider,
+				id: record.id,
+				name: typeof record.name === "string" && record.name ? record.name : `${provider}/${record.id}`,
+				reasoning: record.reasoning === true,
+				contextWindow: typeof record.contextWindow === "number" ? record.contextWindow : undefined,
+				maxTokens: typeof record.maxTokens === "number" ? record.maxTokens : undefined,
+				images: Array.isArray(input) ? input.includes("image") : undefined,
+			});
+		}
+	}
+	return models;
+}
+
+async function loadModelsFromLocalConfig(
+	configSource?: ModelListConfigSource,
+): Promise<AvailableModel[]> {
+	if (!configSource) return [];
+	try {
+		const result = await configSource.getModelsConfig();
+		return modelsFromPiConfig(result.parsed);
+	} catch {
+		return [];
+	}
+}
+
+function execPiListModels(
 	piLocator: PiLocator,
 	settingsStore: SettingsStore,
-): Promise<AvailableModel[]> {
+	args: readonly string[],
+): Promise<string> {
 	const settings = settingsStore.get();
 	const command = piLocator.resolveCommand(
 		settings.customPiPath,
@@ -110,26 +209,82 @@ async function runPiListModels(
 		settings.wslDistro,
 		settings.wslUser,
 	);
-	const invocation = piLocator.createInvocation(command, MODEL_LIST_FAST_ARGS);
-	const { execFile } = await import("node:child_process");
-	const result = await new Promise<{ stdout: string }>((resolve, reject) => {
-		execFile(invocation.command, invocation.args, {
-			env: piLocator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl),
-			shell: invocation.shell,
-			windowsHide: true,
-			timeout: 20_000,
-			encoding: "utf8",
-			windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-		}, (error, stdout, stderr) => {
-			if (error) {
-				const message = (stderr || error.message).slice(0, 300);
-				reject(new Error(message));
-			} else {
-				resolve({ stdout });
-			}
-		});
+	const invocation = piLocator.createInvocation(command, [...args]);
+	return new Promise((resolve, reject) => {
+		void import("node:child_process").then(({ execFile }) => {
+			execFile(
+				invocation.command,
+				invocation.args,
+				{
+					env: piLocator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl),
+					shell: invocation.shell,
+					windowsHide: true,
+					timeout: 20_000,
+					encoding: "utf8",
+					windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+				},
+				(error, stdout, stderr) => {
+					if (error) {
+						const message = (stderr || error.message).slice(0, 300);
+						reject(new Error(message));
+					} else {
+						resolve(stdout);
+					}
+				},
+			);
+		}).catch(reject);
 	});
-	return parsePiListModels(result.stdout);
+}
+
+/** fork pi --list-models 并解析。新旗标不被认时回退到只传 --list-models。 */
+export async function runPiListModels(
+	piLocator: PiLocator,
+	settingsStore: SettingsStore,
+): Promise<AvailableModel[]> {
+	const argSets = [MODEL_LIST_FAST_ARGS, MODEL_LIST_COMPAT_ARGS];
+	let lastError: Error | null = null;
+	for (const args of argSets) {
+		try {
+			const stdout = await execPiListModels(piLocator, settingsStore, args);
+			if (isUnknownCliOption(stdout)) {
+				lastError = new Error(stdout.slice(0, 300));
+				continue;
+			}
+			return parsePiListModels(stdout);
+		} catch (error) {
+			const err = error instanceof Error ? error : new Error(String(error));
+			lastError = err;
+			if (!isUnknownCliOption(err.message)) throw err;
+		}
+	}
+	if (lastError) throw lastError;
+	return [];
+}
+
+async function resolveModels(
+	piLocator: PiLocator,
+	settingsStore: SettingsStore,
+	configSource?: ModelListConfigSource,
+): Promise<AvailableModel[]> {
+	let models: AvailableModel[] = [];
+	try {
+		models = await runPiListModels(piLocator, settingsStore);
+	} catch {
+		models = [];
+	}
+	// 空结果重试一次：启动早期 pi 冷启动/环境未就绪时可能返回空表头。
+	if (models.length === 0) {
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		try {
+			models = await runPiListModels(piLocator, settingsStore);
+		} catch {
+			// CLI 仍失败：走本地配置兜底
+		}
+	}
+	if (models.length === 0) {
+		models = await loadModelsFromLocalConfig(configSource);
+	}
+	return models;
 }
 
 /**
@@ -142,19 +297,13 @@ async function runPiListModels(
 export function fetchModelList(
 	piLocator: PiLocator,
 	settingsStore: SettingsStore,
+	configSource?: ModelListConfigSource,
 ): Promise<AvailableModel[]> {
 	if (cachedListModels) return Promise.resolve(cachedListModels);
 	if (cachedListModelsPending) return cachedListModelsPending;
 
-	cachedListModelsPending = runPiListModels(piLocator, settingsStore)
-		.then(async (models) => {
-			// 空结果重试一次：启动早期 pi 冷启动/环境未就绪时可能返回空表头。
-			if (models.length === 0) {
-				await new Promise((resolve) => setTimeout(resolve, 500));
-				models = await runPiListModels(piLocator, settingsStore).catch(() => models);
-			}
-			// 仅非空结果入缓存；空结果（pi 未就绪/无可用模型）保持 null，下次重试。
-			// 期间配置被保存过（configInvalidated）则丢弃本次结果，由 refresh 重取。
+	cachedListModelsPending = resolveModels(piLocator, settingsStore, configSource)
+		.then((models) => {
 			if (models.length > 0 && !configInvalidated) cachedListModels = models;
 			return models;
 		})
@@ -172,22 +321,17 @@ export function fetchModelList(
 export function refreshModelList(
 	piLocator: PiLocator,
 	settingsStore: SettingsStore,
+	configSource?: ModelListConfigSource,
 ): Promise<AvailableModel[]> {
 	const pending = cachedListModelsPending;
 	if (pending) {
-		// 旧请求结束后（其结果已被 invalidate 时的标记挡在缓存外）重新 fork；
-		// 必须等旧 then 跑完再复位，否则旧结果会趁标记已清写进缓存。
 		cachedListModelsPending = pending
 			.catch(() => undefined)
 			.then(() => {
 				configInvalidated = false;
-				return runPiListModels(piLocator, settingsStore);
+				return resolveModels(piLocator, settingsStore, configSource);
 			})
-			.then(async (models) => {
-				if (models.length === 0) {
-					await new Promise((resolve) => setTimeout(resolve, 500));
-					models = await runPiListModels(piLocator, settingsStore).catch(() => models);
-				}
+			.then((models) => {
 				if (models.length > 0 && !configInvalidated) cachedListModels = models;
 				return models;
 			})
@@ -196,14 +340,9 @@ export function refreshModelList(
 			});
 		return cachedListModelsPending;
 	}
-	// 无在途请求：立即复位，否则新 fork 结果会被 !configInvalidated 挡在缓存外。
 	configInvalidated = false;
-	cachedListModelsPending = runPiListModels(piLocator, settingsStore)
-		.then(async (models) => {
-			if (models.length === 0) {
-				await new Promise((resolve) => setTimeout(resolve, 500));
-				models = await runPiListModels(piLocator, settingsStore).catch(() => models);
-			}
+	cachedListModelsPending = resolveModels(piLocator, settingsStore, configSource)
+		.then((models) => {
 			if (models.length > 0 && !configInvalidated) cachedListModels = models;
 			return models;
 		})

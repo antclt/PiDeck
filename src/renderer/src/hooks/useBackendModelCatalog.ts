@@ -5,8 +5,9 @@ import { showNotice } from "../utils/notice";
 
 /**
  * 后端模型目录数据源（C19）：统一「按 backend 加载模型列表」——
- * DSH 会话走 host 级 llm.models（listDshModels），pi 走 models.json（projects.listModels，
- * 与 Agent RPC 同源无抖动）。enabled=false 时不加载（选择器打开才拉取，避免常驻轮询）；
+ * DSH 会话走 host 级 llm.models（listDshModels），pi 走 projects.listModels
+ *（优先 pi --list-models，失败回退本地 models.json）。enabled=false 时不加载
+ *（选择器打开才拉取，避免常驻轮询）；
  * 内部带 sequence 防竞态（快速开关选择器时旧响应不覆盖新响应）。
  */
 export function useBackendModelCatalog(options: {

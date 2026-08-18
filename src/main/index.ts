@@ -2792,7 +2792,7 @@ function registerIpc() {
 	if (typeof piLocator !== "undefined" && typeof settingsStore !== "undefined") {
 		setTimeout(() => {
 			if (!getCachedModelList()) {
-				void fetchModelList(piLocator, settingsStore).catch(() => {
+				void fetchModelList(piLocator, settingsStore, configManager).catch(() => {
 					// 预取失败静默；用户首次点击选择器时会自动重试。
 				});
 			}
@@ -2918,7 +2918,7 @@ app.whenReady().then(async () => {
 		// 每次 spawn Agent 前异步刷新模型列表缓存（防用户直接改 models.json/auth.json 不生效）。
 		() => {
 			if (piLocator && settingsStore) {
-				void refreshModelList(piLocator, settingsStore).catch(() => undefined);
+				void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
 			}
 		},
 		securityStore,
@@ -3004,7 +3004,7 @@ app.whenReady().then(async () => {
 			await projectStore.remove(projectId);
 			return true;
 		},
-		listModels: () => fetchModelList(piLocator, settingsStore),
+		listModels: () => fetchModelList(piLocator, settingsStore, configManager),
 		listSessions: (projectId) => {
 			const project = projectStore.get(projectId);
 			return sessionScanner.list(project?.path);

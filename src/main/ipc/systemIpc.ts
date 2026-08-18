@@ -234,7 +234,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.projectsListModels, async (_event, _projectId?: string) => {
 		try {
 			// 读缓存；无缓存时后台 fork pi --list-models（含加速参数，auth 由 pi 处理）。
-			const models = await fetchModelList(piLocator, settingsStore);
+			const models = await fetchModelList(piLocator, settingsStore, configManager);
 			void appLogger.info("pi", "Model list resolved", {
 				count: models.length,
 				cached: getCachedModelList() === models,
@@ -869,7 +869,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		const result = await applyProviderMigration(providerMigration, direction as ProviderMigrationDirection, provider);
 		if (result.ok && direction === "dsh-to-pi") {
 			invalidateModelListCache();
-			void refreshModelList(piLocator, settingsStore).catch(() => undefined);
+			void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
 		}
 		void appLogger.info("config", "Provider migration applied", {
 			direction,
@@ -897,7 +897,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		const result = await configManager.saveModelsConfig(data);
 		invalidateModelListCache();
 		// 配置保存后立即后台重取，下次打开选择器直接命中新缓存。
-		void refreshModelList(piLocator, settingsStore).catch(() => undefined);
+		void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
 		void appLogger.info("config", "Models config saved", { providerCount: Object.keys(data?.providers ?? {}).length });
 		return result;
 	});
@@ -905,7 +905,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		const result = await configManager.saveAuthConfig(data);
 		invalidateModelListCache();
 		// auth 影响「可用模型」过滤（pi 只列已认证 provider），保存后同样后台重取。
-		void refreshModelList(piLocator, settingsStore).catch(() => undefined);
+		void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
 		void appLogger.info("config", "Auth config saved", { authCount: Object.keys(data ?? {}).length });
 		return result;
 	});

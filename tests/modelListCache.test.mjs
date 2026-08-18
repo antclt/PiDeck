@@ -15,7 +15,11 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const {
   parsePiListModels,
+  parseTokenSize,
+  modelsFromPiConfig,
+  isUnknownCliOption,
   MODEL_LIST_FAST_ARGS,
+  MODEL_LIST_COMPAT_ARGS,
 } = loadTsCommonJs("src/main/pi/modelListCache.ts");
 const cacheSource = readFileSync("src/main/pi/modelListCache.ts", "utf8");
 const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
@@ -93,8 +97,27 @@ test("parsePiListModels captures context/maxTokens/images columns", () => {
   assert.equal(models[2].images, true);
 });
 
+test("parsePiListModels still works when older pi omits the header row", () => {
+  const stdout = "openai    gpt-4o   128K     16K      no        yes\n";
+  const models = parsePiListModels(stdout);
+  assert.equal(models.length, 1);
+  assert.equal(models[0].provider, "openai");
+  assert.equal(models[0].id, "gpt-4o");
+  assert.equal(models[0].images, true);
+});
+
+test("parsePiListModels ignores unknown-option banners mixed into stdout", () => {
+  const stdout = [
+    "error: unknown option '--offline'",
+    "provider  model  thinking",
+    "openai    gpt-4o  no",
+  ].join("\n");
+  const models = parsePiListModels(stdout);
+  assert.equal(models.length, 1);
+  assert.equal(models[0].id, "gpt-4o");
+});
+
 test("parseTokenSize handles M/K/plain and rejects garbage", () => {
-  const { parseTokenSize } = loadTsCommonJs("src/main/pi/modelListCache.ts");
   assert.equal(parseTokenSize("1M"), 1024 * 1024);
   assert.equal(parseTokenSize("65.5K"), Math.round(65.5 * 1024));
   assert.equal(parseTokenSize("200K"), 200 * 1024);
@@ -110,6 +133,36 @@ test("MODEL_LIST_FAST_ARGS includes speed flags", () => {
   assert.ok(MODEL_LIST_FAST_ARGS.includes("--no-extensions"));
   assert.ok(MODEL_LIST_FAST_ARGS.includes("--no-skills"));
   assert.ok(MODEL_LIST_FAST_ARGS.includes("--no-themes"));
+  assert.equal(MODEL_LIST_COMPAT_ARGS.join(","), "--list-models");
+});
+
+test("isUnknownCliOption detects older pi flag rejections", () => {
+  assert.equal(isUnknownCliOption("error: unknown option '--offline'"), true);
+  assert.equal(isUnknownCliOption("Unknown option: --no-themes"), true);
+  assert.equal(isUnknownCliOption("pi: command not found"), false);
+});
+
+test("modelsFromPiConfig flattens settings-page models.json", () => {
+  const models = modelsFromPiConfig({
+    providers: {
+      deepseek: {
+        models: [
+          { id: "v4-flash", name: "Flash", reasoning: true, contextWindow: 1_000_000, input: ["text"] },
+          { id: "bad" },
+        ],
+      },
+      openai: {
+        models: [{ id: "gpt-4o", input: ["text", "image"] }],
+      },
+    },
+  });
+  assert.equal(models.length, 3);
+  assert.equal(models[0].provider, "deepseek");
+  assert.equal(models[0].name, "Flash");
+  assert.equal(models[0].reasoning, true);
+  assert.equal(models[2].provider, "openai");
+  assert.equal(models[2].images, true);
+  assert.equal(modelsFromPiConfig({ providers: {} }).length, 0);
 });
 
 test("fetchModelList uses cache; refreshModelList forces reload", () => {
@@ -138,7 +191,7 @@ test("config save must not let stale in-flight list overwrite new cache", () => 
 
 test("config save (models/auth) triggers background refresh", () => {
   assert.match(systemIpc, /invalidateModelListCache\(\)/);
-  assert.match(systemIpc, /refreshModelList\(piLocator, settingsStore\)/);
+  assert.match(systemIpc, /refreshModelList\(piLocator, settingsStore, configManager\)/);
   // auth 保存同样触发（auth 决定可用模型过滤）
   assert.match(systemIpc, /configSaveAuth/);
 });
@@ -149,12 +202,19 @@ test("agent spawn refreshes model cache via onBeforeAgentSpawn hook", () => {
   // createUnlocked spawn 前调用
   assert.match(agentManager, /this\.onBeforeAgentSpawn\?\.\(\)/);
   // index.ts 装配时传 refreshModelList
-  assert.match(indexSource, /refreshModelList\(piLocator, settingsStore\)/);
+  assert.match(indexSource, /refreshModelList\(piLocator, settingsStore, configManager\)/);
 });
 
 test("startup prefetch still present", () => {
-  assert.match(indexSource, /fetchModelList\(piLocator, settingsStore\)/);
+  assert.match(indexSource, /fetchModelList\(piLocator, settingsStore, configManager\)/);
   assert.match(indexSource, /getCachedModelList\(\)/);
+});
+
+test("older pi unknown-option and empty CLI fall back to local models.json", () => {
+  assert.match(cacheSource, /MODEL_LIST_COMPAT_ARGS/);
+  assert.match(cacheSource, /isUnknownCliOption/);
+  assert.match(cacheSource, /loadModelsFromLocalConfig/);
+  assert.match(systemIpc, /fetchModelList\(piLocator, settingsStore, configManager\)/);
 });
 
 test("AgentManager.setModel detects Model not found with local model present", () => {
