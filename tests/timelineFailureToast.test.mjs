@@ -2,10 +2,46 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-// ===== 失败/重试提示 → toast 的渲染层改动 =====
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-test("floating failure keys: covers retry + failure diagnostics, excludes pi start failure", () => {
-	const source = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
+const timeline = readFileSync(
+	"src/renderer/src/components/session/SessionMessageTimeline.tsx",
+	"utf8",
+);
+const notice = readFileSync(
+	"src/renderer/src/components/session/timelineFailureNotice.ts",
+	"utf8",
+);
+
+const i18n = loadTsCommonJs("src/renderer/src/i18n.ts");
+const {
+	FLOATING_FAILURE_KEYS,
+	composeFailureNotice,
+	isExtensionErrorMessage,
+	isFailureNoticeMessage,
+	isFloatingFailureMessage,
+} = loadTsCommonJs("src/renderer/src/components/session/timelineFailureNotice.ts", {
+	// 与 composeFailureNotice 共用同一份 i18n 模块，否则 setI18nLocale 改不到 toast 文案。
+	stubs: { "../../i18n": i18n },
+});
+const { setI18nLocale } = i18n;
+
+function message(i18nKey, extras = {}) {
+	return {
+		id: extras.id ?? "msg-1",
+		agentId: extras.agentId ?? "agent-1",
+		role: extras.role ?? "error",
+		text: extras.text ?? "fallback",
+		timestamp: 1,
+		meta: {
+			i18nKey,
+			...(extras.debugDetails ? { debugDetails: extras.debugDetails } : {}),
+			...(extras.i18nParams ? { i18nParams: extras.i18nParams } : {}),
+		},
+	};
+}
+
+test("floating failure keys: covers retry + failure diagnostics, excludes start/runtime/extension cards", () => {
 	const keys = [
 		"diagnostic.requestFailed",
 		"diagnostic.requestFailedAfterRetries",
@@ -19,66 +55,94 @@ test("floating failure keys: covers retry + failure diagnostics, excludes pi sta
 		"diagnostic.commandCancelled",
 		"diagnostic.processReconnectFailed",
 		"diagnostic.historyLoadFailed",
-		"diagnostic.extensionError",
 		"diagnostic.retryScheduled",
 		"diagnostic.retryScheduledAfterDelay",
 		"diagnostic.retrySucceeded",
 		"diagnostic.retryFailed",
 	];
 	for (const key of keys) {
-		assert.match(source, new RegExp(`"${key}"`), `missing ${key} in FLOATING_FAILURE_KEYS`);
+		assert.equal(FLOATING_FAILURE_KEYS.has(key), true, `missing ${key} in FLOATING_FAILURE_KEYS`);
 	}
-	// pi 启动失败提示（含排查诊断）必须保留卡片，不能进 Set
-	assert.doesNotMatch(source, /"diagnostic\.agentStartFailed"/);
-	// 运行时错误同样带完整诊断（buildStartupFailureMessage），保留卡片
-	assert.doesNotMatch(source, /"diagnostic\.runtimeError"/);
+	// 扩展错误要保留诊断卡（带 debugDetails），不能再进浮动 Set
+	assert.equal(FLOATING_FAILURE_KEYS.has("diagnostic.extensionError"), false);
+	assert.equal(isFloatingFailureMessage(message("diagnostic.extensionError")), false);
+	assert.equal(isExtensionErrorMessage(message("diagnostic.extensionError")), true);
+	assert.equal(isFailureNoticeMessage(message("diagnostic.extensionError")), true);
+	assert.equal(isFailureNoticeMessage(message("diagnostic.requestFailed")), true);
+	assert.equal(isFailureNoticeMessage(message("diagnostic.agentStartFailed")), false);
+	assert.doesNotMatch(notice, /"diagnostic\.agentStartFailed"/);
+	assert.doesNotMatch(notice, /"diagnostic\.runtimeError"/);
 });
 
-test("floating failure helper: guards non-string meta and uses i18nKey", () => {
-	const source = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
-	assert.match(source, /function isFloatingFailureMessage\(message: ChatMessage\): boolean/);
-	assert.match(source, /FLOATING_FAILURE_KEYS\.has\(key\)/);
-});
-
-test("timeline render: failure/retry messages return null, diagnostics kept", () => {
-	const source = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
-	// error 分支：失败类不渲染卡片（已转 toast）
-	assert.match(source, /if \(message\.role === "error"\) \{\s*\/\/ 失败\/重试类提示已转 toast/s);
-	assert.match(source, /if \(isFloatingFailureMessage\(message\)\) return null;/);
-	// system 分支：自动重试状态同样转 toast，其他诊断卡片保留
-	assert.match(source, /\/\/ 自动重试状态（retryScheduled\/retrySucceeded\/retryFailed 等）\s*\/\/ 属于「重试提示」/s);
-	assert.match(source, /if \(isFloatingFailureMessage\(message\)\) return null;/);
+test("timeline render: failure/retry messages return null, extension errors keep the card", () => {
+	assert.match(timeline, /if \(message\.role === "error"\) \{\s*\/\/ 失败\/重试类提示已转 toast/s);
+	assert.match(timeline, /if \(isFloatingFailureMessage\(message\)\) return null;/);
+	assert.match(timeline, /\/\/ 自动重试状态（retryScheduled\/retrySucceeded\/retryFailed 等）\s*\/\/ 属于「重试提示」/s);
+	assert.match(timeline, /composeFailureNotice\(message\)/);
+	assert.match(timeline, /isFailureNoticeMessage/);
+	assert.match(timeline, /from "\.\/timelineFailureNotice"/);
 });
 
 test("toast effect: baseline on load completion, only new failures toast", () => {
-	const source = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
-	assert.match(source, /const failureBaselineRef = useRef<string\[\] \| null>\(null\);/);
-	assert.match(source, /if \(isConversationLoading\) \{\s*failureBaselineRef\.current = null;/s);
-	assert.match(source, /failureBaselineRef\.current = floating\.map\(\(message\) => message\.id\);/);
-	assert.match(source, /toastedFailureIds\.has\(message\.id\)/);
-	assert.match(source, /markFailureToastShown\(message\.id\);/);
-	assert.match(source, /showFailureToast\(message\);/);
-	// 自动重试按 attempt/count 更新同一条 toast，而不是按 message.id 永久去重
-	assert.match(source, /lastRetryToastRef/);
-	assert.match(source, /session-retry:\$\{message\.agentId\}/);
-	// 模块级 Set：分屏多栏同一条失败消息只弹一次
-	assert.match(source, /const toastedFailureIds = new Set<string>\(\);/);
+	assert.match(timeline, /const failureBaselineRef = useRef<string\[\] \| null>\(null\);/);
+	assert.match(timeline, /if \(isConversationLoading\) \{\s*failureBaselineRef\.current = null;/s);
+	assert.match(timeline, /failureBaselineRef\.current = floating\.map\(\(message\) => message\.id\);/);
+	assert.match(timeline, /toastedFailureIds\.has\(message\.id\)/);
+	assert.match(timeline, /markFailureToastShown\(message\.id\);/);
+	assert.match(timeline, /showFailureToast\(message\);/);
+	assert.match(timeline, /lastRetryToastRef/);
+	assert.match(notice, /session-retry:\$\{message\.agentId\}/);
+	assert.match(timeline, /const toastedFailureIds = new Set<string>\(\);/);
 });
 
-test("showFailureToast: retry uses info kind, failure uses error kind", () => {
-	const source = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
-	assert.match(source, /const isRetry = key\.startsWith\("diagnostic\.retry"\);/);
-	assert.match(source, /translateI18nDescriptor\(meta, message\.text\)/);
-	assert.match(source, /isRetry \? 2200 : 6000/);
-	assert.match(source, /isRetry \? "info" : "error"/);
-	assert.match(source, /t\(isRetry \? "diagnostic\.retryToastTitle" : "diagnostic\.failureToastTitle"\)/);
+test("composeFailureNotice: retry stays info, request failure stays session-error title", () => {
+	setI18nLocale("zh-CN");
+	const retry = composeFailureNotice(message("diagnostic.retryScheduled", {
+		text: "正在自动重试 2",
+		i18nParams: { count: 2 },
+	}));
+	assert.equal(retry.kind, "info");
+	assert.equal(retry.duration, 2200);
+	assert.equal(retry.id, "session-retry:agent-1");
+	assert.equal(retry.title, "自动重试");
+
+	const failed = composeFailureNotice(message("diagnostic.requestFailed", {
+		text: "请求失败。",
+		debugDetails: "HTTP 429",
+	}));
+	assert.equal(failed.kind, "error");
+	assert.equal(failed.title, "会话失败");
+	assert.match(failed.body, /请求失败/);
+	assert.match(failed.body, /HTTP 429/);
+});
+
+test("composeFailureNotice: extension error uses its own title and shows debugDetails", () => {
+	setI18nLocale("zh-CN");
+	const noticeContent = composeFailureNotice(message("diagnostic.extensionError", {
+		text: "扩展执行错误。",
+		debugDetails: "pi-deck-todo: Cannot read properties of undefined",
+	}));
+	assert.equal(noticeContent.title, "扩展执行错误");
+	assert.equal(noticeContent.kind, "error");
+	assert.equal(noticeContent.body, "pi-deck-todo: Cannot read properties of undefined");
+	assert.notEqual(noticeContent.title, "会话失败");
+	assert.equal(noticeContent.id, undefined);
+
+	const clipped = composeFailureNotice(message("diagnostic.extensionError", {
+		text: "扩展执行错误。",
+		debugDetails: "x".repeat(400),
+	}));
+	assert.equal(clipped.body.endsWith("…"), true);
+	assert.ok(clipped.body.length < 400);
 });
 
 test("failure toast i18n keys exist in zh-CN and en-US", () => {
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 	assert.match(zh, /"diagnostic\.failureToastTitle": "会话失败"/);
+	assert.match(zh, /"diagnostic\.extensionErrorToastTitle": "扩展执行错误"/);
 	assert.match(zh, /"diagnostic\.retryToastTitle": "自动重试"/);
 	assert.match(en, /"diagnostic\.failureToastTitle": "Session error"/);
+	assert.match(en, /"diagnostic\.extensionErrorToastTitle": "Extension error"/);
 	assert.match(en, /"diagnostic\.retryToastTitle": "Auto retry"/);
 });

@@ -30,6 +30,7 @@ import {
 	formatExtensionFallbackDebug,
 	shouldRetryWithoutExtensions,
 } from "./extensionStartupFallback";
+import { formatExtensionErrorReason } from "./extensionError";
 import type { RpcResponse } from "./PiRpcClient";
 import { formatBashToolMessage } from "./bashResult";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
@@ -3716,7 +3717,9 @@ export class AgentManager {
 		}
 
 		if (typed.type === "extension_error") {
-			const reason = String(typed.error ?? "Extension error");
+			// 扩展报错不等于会话失败：不改 tab.status，只记诊断。
+			// reason 给 toast / 诊断卡展示，避免 String(object) 变成 [object Object]。
+			const reason = formatExtensionErrorReason(typed);
 			this.addLocalizedMessage(
 				agentId,
 				"error",

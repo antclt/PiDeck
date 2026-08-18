@@ -2484,6 +2484,7 @@ export const zhCN = {
   "diagnostic.errorTitle": "错误诊断",
   "diagnostic.systemTitle": "系统状态",
   "diagnostic.failureToastTitle": "会话失败",
+  "diagnostic.extensionErrorToastTitle": "扩展执行错误",
   "diagnostic.retryToastTitle": "自动重试",
   ...mainProcessZhCN,
   "update.availableTitle": "发现新版本 v{version}",

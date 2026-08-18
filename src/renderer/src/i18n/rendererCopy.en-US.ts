@@ -2518,6 +2518,7 @@ export const enUS: Record<TranslationKey, string> = {
   "diagnostic.errorTitle": "Error diagnostics",
   "diagnostic.systemTitle": "System status",
   "diagnostic.failureToastTitle": "Session error",
+  "diagnostic.extensionErrorToastTitle": "Extension error",
   "diagnostic.retryToastTitle": "Auto retry",
   ...mainProcessEnUS,
   "update.availableTitle": "New version v{version} available",

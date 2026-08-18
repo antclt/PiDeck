@@ -37,11 +37,15 @@ import {
   useSessionTimelineController,
   type SessionTimelineController,
 } from "../../hooks/useSessionTimelineController";
-import { t, translateI18nDescriptor } from "../../i18n";
+import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Loader2 } from "lucide-react";
 import { showNotice } from "../../utils/notice";
-import { stripAnsi } from "./TimelineFormat";
+import {
+  composeFailureNotice,
+  isFailureNoticeMessage,
+  isFloatingFailureMessage,
+} from "./timelineFailureNotice";
 import { SessionStartSurface } from "./SessionStartSurface";
 import { MessageScroller } from "../agents/message-scroller";
 import { resolveFreshTailIds } from "../../lib/pinTurnScroll";
@@ -62,32 +66,7 @@ const TURN_SETTLE_IDLE_COLLAPSE_MS = 1500;
 /** 折叠高度动画基本结束后再做「拉到中上方」定位，避免用折叠前的高度计算目标。 */
 const TURN_SETTLE_SCROLL_DELAY_MS = 320;
 
-// ── 失败/重试提示：时间线不再渲染卡片，改为 toast ──
-// 主进程以 role=error / role=system 消息携带这些 i18nKey（见 AgentManager 的
-// addLocalizedMessage / upsertRetryStatusMessage）。它们在时间线里的诊断卡片
-// 视觉过重且打断阅读流，改为首次出现时弹 toast；pi 启动失败
-// （diagnostic.agentStartFailed）与携带完整排查诊断的 runtimeError 保留卡片。
-const FLOATING_FAILURE_KEYS = new Set([
-	"diagnostic.requestFailed",
-	"diagnostic.requestFailedAfterRetries",
-	"diagnostic.requestFailedUnknown",
-	"diagnostic.requestFailedUnknownAfterRetries",
-	"diagnostic.agentStopped",
-	"diagnostic.promptRejected",
-	"diagnostic.promptDeliveryUnknown",
-	"diagnostic.commandFailed",
-	"diagnostic.commandDeliveryUnknown",
-	"diagnostic.commandCancelled",
-	"diagnostic.processReconnectFailed",
-	"diagnostic.historyLoadFailed",
-	"diagnostic.extensionError",
-	"diagnostic.retryScheduled",
-	"diagnostic.retryScheduledAfterDelay",
-	"diagnostic.retrySucceeded",
-	"diagnostic.retryFailed",
-]);
-
-// 已弹过 toast 的消息 id：模块级去重，分屏多栏同一条消息只弹一次，
+// 失败/重试 toast 去重：模块级 Set，分屏多栏同一条消息只弹一次，
 // 也避免消息重发（re-emit）或重新渲染时重复打扰。
 // 上限裁剪：失败类消息 id 全局唯一且无删除路径，长期运行会无界增长（2026-10）。
 const toastedFailureIds = new Set<string>();
@@ -118,28 +97,16 @@ function isMessageSuffix(suffix: readonly ChatMessage[], next: readonly ChatMess
 	return true;
 }
 
-/** 判断消息是否为「失败/重试类」提示（时间线不渲染、改 toast）。 */
-function isFloatingFailureMessage(message: ChatMessage): boolean {
-	const key = (message.meta as Record<string, unknown> | undefined)?.i18nKey;
-	return typeof key === "string" && FLOATING_FAILURE_KEYS.has(key);
-}
-
-/** 弹失败/重试 toast：重试类用中性标题，失败类用错误变体。 */
+/** 弹失败/重试/扩展错误 toast：标题与正文由 composeFailureNotice 统一收口。 */
 function showFailureToast(message: ChatMessage): void {
-	const meta = message.meta as Record<string, unknown> | undefined;
-	const key = typeof meta?.i18nKey === "string" ? meta.i18nKey : "";
-	const isRetry = key.startsWith("diagnostic.retry");
-	// translateI18nDescriptor 优先取 meta.i18nKey 的本地化文案，
-	// 取不到时回退消息原文（主进程写的中文/占位文本）。
-	const text = translateI18nDescriptor(meta, message.text) || message.text;
+	const notice = composeFailureNotice(message);
 	showNotice(
-		stripAnsi(text),
-		// 自动重试连发：短一点、同会话共用一条 toast，后一次顶掉前一次。
-		isRetry ? 2200 : 6000,
-		isRetry ? "info" : "error",
-		t(isRetry ? "diagnostic.retryToastTitle" : "diagnostic.failureToastTitle"),
+		notice.body,
+		notice.duration,
+		notice.kind,
+		notice.title,
 		undefined,
-		isRetry ? `session-retry:${message.agentId}` : undefined,
+		notice.id,
 	);
 }
 
@@ -326,7 +293,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
       failureBaselineRef.current = null;
       return;
     }
-    const floating = activeMessages.filter(isFloatingFailureMessage);
+    const floating = activeMessages.filter(isFailureNoticeMessage);
     if (failureBaselineRef.current === null) {
       // 加载完成基线：本次会话已有的失败消息不弹（历史回放/attach 重连）
       failureBaselineRef.current = floating.map((message) => message.id);
