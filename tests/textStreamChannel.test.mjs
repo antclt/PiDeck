@@ -62,7 +62,7 @@ test("main process: message_end pushes final text with done flag", () => {
 test("renderer: streamingTextByIdAtom updates from agents:text-stream without runtime bump", () => {
   const atoms = readFileSync("src/renderer/src/atoms/session-atoms.ts", "utf8");
   assert.match(atoms, /export const streamingTextByIdAtom = atom/);
-  assert.match(atoms, /Record<string, \{ content: string; streaming: boolean \}>/);
+  assert.match(atoms, /Record<string, \{ content: string; streaming: boolean; held\?: boolean \}>/);
   assert.match(atoms, /event\.sourceChannel === "agents:text-stream"/);
   assert.match(atoms, /const streaming = !done && text\.length > 0/);
   assert.match(atoms, /delete nextMap\[event\.sessionId\]/);

@@ -56,6 +56,15 @@ test("non-append input bumps generation so callers drop frozen nodes", () => {
 	assert.equal(second.prefixEnd, 0);
 });
 
+test("shrink to a prefix does not bump generation", () => {
+	const { IncrementalMarkdownFrontier } = loadModule();
+	const frontier = new IncrementalMarkdownFrontier();
+	const first = frontier.update("alpha\n\nbeta\n\ngamma");
+	const second = frontier.update("alpha");
+	assert.equal(first.generation, 0);
+	assert.equal(second.generation, 0);
+});
+
 test("identical input is idempotent", () => {
 	const { IncrementalMarkdownFrontier } = loadModule();
 	const frontier = new IncrementalMarkdownFrontier();

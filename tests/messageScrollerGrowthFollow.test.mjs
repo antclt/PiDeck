@@ -184,7 +184,7 @@ test("TurnRow liveInterimId requires an active text stream", () => {
     "utf8",
   );
   // 订阅「活动流」派生 atom（稳定 boolean：流式期间 content 变化不触发重渲染）
-  assert.match(turnSource, /liveTextStreamingBySessionAtom\(props\.sessionId\)/);
+  assert.match(turnSource, /liveTextActiveBySessionAtom\(props\.sessionId\)/);
   // 判定逻辑收敛到 liveMount.ts（纯函数可单测），TurnRow 只做接线
   assert.match(turnSource, /resolveLiveInterimId\(\{/);
   const liveMountSource = readFileSync(
@@ -192,15 +192,17 @@ test("TurnRow liveInterimId requires an active text stream", () => {
     "utf8",
   );
   assert.match(liveMountSource, /if \(!input\.liveTextActive\) return undefined;/);
-  // 派生 atom 输出 streaming 位（session 级单槽），false 时立即落回 settled
+  // 派生 atom 输出 streaming 或 held 位（session 级单槽）
   const atomsSource = readFileSync(
     "src/renderer/src/atoms/session-atoms.ts",
     "utf8",
   );
   assert.match(atomsSource, /liveTextStreamingBySessionAtom = atomFamily/);
-  assert.match(atomsSource, /map\[sessionId\]\?\.streaming === true/);
+  assert.match(atomsSource, /liveTextActiveBySessionAtom = atomFamily/);
+  assert.match(atomsSource, /map\[sessionId\]\?\.streaming === true \|\| map\[sessionId\]\?\.held === true/);
   // 会话移除时成对清理 family（防 atomFamily Map 泄漏）
   assert.match(atomsSource, /liveTextStreamingBySessionAtom\.remove\(sessionId\)/);
+  assert.match(atomsSource, /liveTextActiveBySessionAtom\.remove\(sessionId\)/);
 });
 
 // stopReason 协议信号：主进程两处提取（live upsert + 历史回放），渲染层按

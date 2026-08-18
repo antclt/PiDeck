@@ -17,7 +17,7 @@ test("responding indicator reserves stable space across status changes", () => {
 
 test("starting state has a distinct indicator before response states", () => {
   assert.match(events, /isStarting\?: boolean/);
-  assert.match(events, /if \(isStarting\)[\s\S]*kind = "starting"/);
+  assert.match(events, /deriveRespondingKind/);
   assert.match(timelineStyles, /data-kind="starting"/);
   // 状态色仍区分（作用于前置指示器 currentColor）
   assert.match(timelineStyles, /\[data-kind="starting"\][\s\S]*color: var\(--color-warning/);

@@ -418,6 +418,9 @@ export function projectDshEvent(
 			break;
 		}
 		case "turn/start": {
+			// 新回合立刻清上一轮工具名：否则渲染层 isExecutingTool 会粘到本轮开头，
+			// 状态条显示「工具调用中」而其实还在预热/等首 token（与 pi agent_start 对齐）。
+			next.executingTool = undefined;
 			next.isStreaming = true;
 			next.stateChanged = true;
 			break;

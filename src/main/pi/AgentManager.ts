@@ -3441,8 +3441,15 @@ export class AgentManager {
 			this.activeAssistantMessageIds.delete(agentId);
 			this.toolMessageIds.delete(agentId);
 			this.activeToolCallsByAgent.delete(agentId);
+			// 新一轮必须立刻清渲染层工具/流式态：只 emitState 不会推 runtime-state，
+			// 上一轮「工具调用中 / 回复中」会粘到本轮开头。
 			this.toolExecutingByAgent.set(agentId, null);
+			this.streamingAgents.delete(agentId);
 			this.emitState();
+			this.emitToolRuntimeTransition(agentId, false);
+			this.emitStreamingStatePatch(agentId);
+			// 新一轮丢掉上一轮 held live 槽，避免旧正文串到本轮。
+			this.emit(ipcChannels.agentsTextStream, { agentId, text: "", done: true, reset: true });
 		}
 
 		if (typed.type === "message_start" && typed.message?.role === "assistant") {

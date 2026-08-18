@@ -109,9 +109,8 @@
   border-color: color-mix(in srgb, var(--color-accent) 34%, var(--color-border));
   box-shadow: 0 4px 12px color-mix(in srgb, var(--color-text-primary) 8%, transparent);
 }
-.turn-row--fresh .assistant-text {
-  animation: assistant-answer-settle 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
+/* 已可见的助手正文不再因 turn-row--fresh 重播收回动画。
+ * 入场只留给用户气泡（user-turn--fresh）和顶部新轮（turn-row--top-fresh）。 */
 
 /* 上滚窗口扩展顶部新增的轮次：整轮从上方淡入（top-enter，见 keyframes 定义）。
  * 只包一层轮容器动画，内部子元素（思考/工具）各自保持原有入场逻辑。 */
@@ -119,15 +118,15 @@
   animation: top-enter 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Live plain → Settled Markdown 交接：挂载全量渲染时淡入，避免硬切闪一下。 */
+/* Live → settled 交接：字已经在屏幕上，只做极轻透明度衔接，禁止压到 0.35 / 位移收回。 */
 .execution-interim[data-settle="1"],
 .assistant-text[data-settle="1"] {
-  animation: assistant-answer-settle 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: assistant-answer-settle 180ms ease-out both;
 }
 
 @keyframes assistant-answer-settle {
-  from { opacity: 0.35; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0.92; }
+  to { opacity: 1; }
 }
 
 /* turn-row--running::before 的呼吸背景（见上方会话生命周期注释） */

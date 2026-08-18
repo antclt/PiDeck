@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { classifySmoothStreamChange } from "./smoothStreamContent";
 
 /**
  * useSmoothStream - ???????? Hook????????
@@ -120,21 +121,28 @@ export function useSmoothStream({
 			return;
 		}
 
-		const isAppend = newContent.startsWith(prevContent);
-		if (isAppend) {
-			// ??????????????
-			const delta = newContent.slice(prevContent.length);
-			if (delta) {
-				const chars = segmentText(delta);
-				chunkQueueRef.current.push(...chars);
-				// 空转停帧后新 delta 到达：重启打字机
-				if (!rafRef.current) renderLoopRef.current(performance.now());
-			}
-		} else {
-			// ?????????/???????????????
+		const change = classifySmoothStreamChange(
+			prevContent,
+			displayedRef.current,
+			newContent,
+		);
+		if (change.kind === "append") {
+			const chars = segmentText(change.delta);
+			chunkQueueRef.current.push(...chars);
+			// 空转停帧后新 delta 到达：重启打字机
+			if (!rafRef.current) renderLoopRef.current(performance.now());
+		} else if (change.kind === "rewind") {
+			// 权威文本真回退：钳到更短前缀，不清已显示的无关尾巴以外的字。
 			chunkQueueRef.current = [];
-			displayedRef.current = newContent;
-			setDisplayedContent(newContent);
+			displayedRef.current = change.text;
+			setDisplayedContent(change.text);
+		} else if (change.kind === "replace") {
+			chunkQueueRef.current = [];
+			displayedRef.current = change.text;
+			setDisplayedContent(change.text);
+		} else if (change.kind === "ignore") {
+			// 更短后缀快照：不改 prevContent，下一帧真实追加仍相对完整文本判定。
+			return;
 		}
 		prevContentRef.current = newContent;
 		lastChunkAtRef.current = performance.now();

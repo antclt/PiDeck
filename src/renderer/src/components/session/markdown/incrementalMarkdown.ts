@@ -268,7 +268,10 @@ export class IncrementalMarkdownFrontier {
 		// 非追加（回退、整段替换、新一轮）会让已冻结块的源区间失效。
 		// 首个 update（prevText 为空）不算非追加：generation 保持 0。
 		const appended = this.prevText !== "" && text.startsWith(this.prevText);
-		if (this.prevText !== "" && !appended) {
+		const shrinkToPrefix = this.prevText !== "" && this.prevText.startsWith(text);
+		// 更短前缀是真回退，不升 generation：已冻结块仍有效，避免整段收回重铺。
+		// 完全无关的替换才升 generation。
+		if (this.prevText !== "" && !appended && !shrinkToPrefix) {
 			this.generation += 1;
 		}
 		this.prevText = text;

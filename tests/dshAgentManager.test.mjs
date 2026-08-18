@@ -748,6 +748,7 @@ test("流式正文按累积语义发 agents:text-stream（渲染层 streamingTex
 	const texts = streams.filter((item) => !item.done).map((item) => item.text);
 	assert.deepEqual(texts, ["你", "你好"], "text 应为累积文本而非单帧增量（增量会被渲染层逐帧覆盖）");
 	assert.equal(streams.at(-1).done, true, "turn/end 补发 done:true");
+	assert.equal(streams.at(-1).text, "你好", "done 必须带上已累积正文，空 text 会抹掉 live 槽");
 });
 
 test("reasoning delta 走 agents:thinking 独立通道，不进正文流", async () => {
@@ -777,7 +778,7 @@ test("reasoning delta 走 agents:thinking 独立通道，不进正文流", async
 	// 推理文本绝不能进正文流（否则正文与思考双显）。
 	assert.equal(streams.length, 1, "正文流只收到关闭信号");
 	assert.equal(streams[0].done, true);
-	assert.equal(streams[0].text, "");
+	assert.equal(streams[0].text, "答", "done 带终态正文，避免空快照抹掉 live 槽");
 });
 
 test("tool/call 帧携带 arguments 与 host view：投影进工具消息 meta（args/view）", async () => {
@@ -920,12 +921,18 @@ test("abort 后旧回合的终态回答与工具事件不上屏：只留已流�
 	assert.equal(messages[0].role, "assistant");
 	assert.equal(messages[0].text, "旧", "turn/end 把部分文本落回骨架，完整回答不得上屏");
 	assert.ok(!messages.some((m) => m.role === "tool"), "abort 后工具事件不得投影");
-	// 正文流：只有 chunk 的累积正文 + turn/end 的 done，无其他内容
+	// 正文流：turn/start reset 空槽 + chunk 累积 + abort/turn/end 带已出的字收口。
+	// 完整回答不得作为新的非 done 快照上屏。
 	const streams = emitted
 		.filter(([channel]) => channel === "agents:text-stream")
 		.map(([, payload]) => payload);
-	assert.deepEqual(streams.map((s) => s.text), ["旧", ""]);
-	assert.deepEqual(streams.map((s) => s.done), [false, true]);
+	assert.ok(streams.some((item) => item.text === "旧" && item.done === false), "chunk 应推累积正文");
+	assert.ok(streams.some((item) => item.reset === true && item.done === true), "turn/start 应 reset 上一轮 live 槽");
+	assert.ok(
+		streams.filter((item) => item.done).every((item) => item.text === "" || item.text === "旧"),
+		"收口不得带上 abort 后的完整回答",
+	);
+	assert.ok(!streams.some((item) => item.text.includes("完整回答")), "完整回答不得进正文流");
 	// 停止后不得重新点亮 streaming
 	const states = emitted
 		.filter(([channel]) => channel === "agents:runtime-state")

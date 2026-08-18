@@ -229,6 +229,17 @@ test("text-chunks 非字符串成员被过滤（防御脏数据）", () => {
 	assert.equal(p.deltaText, "好");
 });
 
+test("turn/start 清掉上一轮 executingTool，避免状态条粘在工具调用中", () => {
+	let p = projectDshEvent(undefined, event("tool/call", 6, {
+		toolName: "pwsh",
+		callId: "call-1",
+	}), AGENT);
+	assert.equal(p.executingTool, "pwsh");
+	p = projectDshEvent(p, event("turn/start", 8), AGENT);
+	assert.equal(p.executingTool, undefined);
+	assert.equal(p.isStreaming, true);
+});
+
 test("tool/call 与 tool/result 投影工具消息（结果拼到工具行）", () => {
 	let p = projectDshEvent(undefined, event("tool/call", 6, {
 		toolName: "pwsh",

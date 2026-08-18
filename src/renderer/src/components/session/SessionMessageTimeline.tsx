@@ -23,6 +23,8 @@ import {
 } from "../app/AppUtils";
 import {
   liveThinkingIdBySessionIdAtomFamily,
+  liveTextStreamingBySessionAtom,
+  liveThinkingStreamingBySessionAtom,
   sessionMessageCacheBySessionIdAtomFamily,
   sessionMessageLoadStateAtom,
   sessionRecordByIdAtomFamily,
@@ -206,6 +208,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   const activeConversationStatus = modernSurfaceState.status;
   // 只订 live id：思考正文由 ThinkingStep 叶子订阅，避免 50ms 戳醒整条 timeline。
   const liveThinkingId = useAtomValue(liveThinkingIdBySessionIdAtomFamily(sessionId ?? ""));
+  // 状态条只订 streaming 位（boolean），不订正文 atom，避免 50ms 重渲整条 timeline。
+  const liveTextStreaming = useAtomValue(liveTextStreamingBySessionAtom(sessionId ?? ""));
+  const liveThinkingStreaming = useAtomValue(liveThinkingStreamingBySessionAtom(sessionId ?? ""));
   const isAgentBusy = modernSurfaceState.isBusy;
   const cancellingUi = false;
   const loadMoreMessages = controller.loadMoreMessages;
@@ -972,12 +977,10 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
               !cancellingUi &&
               isAgentBusy && (
                 <RespondingIndicator
-                  // 有 live 思考段即可；不订正文 atom，避免 50ms 重渲 timeline。
-                  thinking={liveThinkingId ? "." : undefined}
-                  showThinking={props.showThinking}
                   isStarting={activeConversationStatus === "starting"}
                   isExecutingTool={activeRuntimeState?.isExecutingTool}
-                  isStreaming={activeRuntimeState?.isStreaming}
+                  liveTextStreaming={liveTextStreaming}
+                  liveThinkingStreaming={liveThinkingStreaming}
                 />
               )}
 

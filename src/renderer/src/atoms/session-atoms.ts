@@ -15,6 +15,11 @@ import type {
 } from "../../../shared/types";
 import { mergeAgentRuntimeState } from "../utils/agentRuntimeState";
 import { sameProjectSessionList } from "../utils/sessionRecordIdentity";
+import {
+  resolveStreamingTextUpdate,
+  shouldHoldLiveText,
+  shouldReleaseHeldLiveText,
+} from "../utils/liveTextHandoff";
 
 /**
  * 渲染层会话消息缓存上限（LRU）。
@@ -211,7 +216,7 @@ export const saveSessionScrollAnchorAtom = atom(
  * message_end 后由历史消息（sessionMessagesCacheAtom）接管，此处清空。
  */
 export const streamingTextByIdAtom = atom<
-	Record<string, { content: string; streaming: boolean }>
+	Record<string, { content: string; streaming: boolean; held?: boolean }>
 >({});
 /**
  * Live 思考正文通道（镜像 text-stream）：key = msg-thinking-${assistantMessageId}。
@@ -270,14 +275,38 @@ export const liveTextStreamingBySessionAtom = atomFamily((sessionId: string) =>
   ),
 );
 
+/**
+ * 本会话是否应继续挂 live 正文：推流中，或 done 已到、History 未到（held）。
+ * 状态条只用 streaming 位；挂载用本 atom，避免交接空白。
+ */
+export const liveTextActiveBySessionAtom = atomFamily((sessionId: string) =>
+  selectAtom(
+    streamingTextByIdAtom,
+    (map) => map[sessionId]?.streaming === true || map[sessionId]?.held === true,
+    Object.is,
+  ),
+);
+
+/**
+ * 本会话 live 思考是否仍在推流（只订 streaming 位，不订思考正文）。
+ * 状态条用它区分「回复中」和「残留 liveThinkingId 的空窗」。
+ */
+export const liveThinkingStreamingBySessionAtom = atomFamily((sessionId: string) =>
+  atom((get) => {
+    const liveId = get(liveThinkingIdBySessionAtom)[sessionId];
+    if (!liveId) return false;
+    return get(streamingThinkingByIdAtom)[liveId]?.streaming === true;
+  }),
+);
+
 /** 正文流条目同值比较：content 与 streaming 位都相等才算同值。 */
 function sameStreamingTextEntry(
-  a: { content: string; streaming: boolean } | undefined,
-  b: { content: string; streaming: boolean } | undefined,
+  a: { content: string; streaming: boolean; held?: boolean } | undefined,
+  b: { content: string; streaming: boolean; held?: boolean } | undefined,
 ): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.content === b.content && a.streaming === b.streaming;
+  return a.content === b.content && a.streaming === b.streaming && a.held === b.held;
 }
 
 /**
@@ -832,6 +861,20 @@ function clearSessionLiveThinking(get: Getter, set: Setter, sessionId: string) {
  * done 与 agents:message 跨通道可能乱序；若 done 先清，会在 message.thinking 仍空时
  * 拆掉 ThinkingStep，等 History 到达再 remount → 整段糊屏。
  */
+/** History 已写入本轮助手正文（或用户已发下一问）后，卸掉 done 暂留的 live 槽。 */
+function tryReleaseHeldLiveTextAfterHistory(get: Getter, set: Setter, sessionId: string) {
+  const live = get(streamingTextByIdAtom)[sessionId];
+  if (!live?.held) return;
+  const messages = get(sessionMessagesCacheAtom)[sessionId]?.messages ?? [];
+  if (!shouldReleaseHeldLiveText(messages)) return;
+  set(streamingTextByIdAtom, (prevMap) => {
+    if (!(sessionId in prevMap)) return prevMap;
+    const nextMap = { ...prevMap };
+    delete nextMap[sessionId];
+    return nextMap;
+  });
+}
+
 function tryReleaseLiveThinkingAfterHistory(get: Getter, set: Setter, sessionId: string) {
   const liveId = get(liveThinkingIdBySessionAtom)[sessionId];
   if (!liveId?.startsWith("msg-thinking-")) return;
@@ -1177,20 +1220,31 @@ export const applySessionRuntimeEventAtom = atom(
       const prev = get(streamingTextByIdAtom)[event.sessionId];
       // 增量协议（2026-08 治理）：主进程正常 append 只推 delta，渲染层追加到
       // 本地累积；text 全量快照（非 append 重置 / 2.5s 自愈）整体替换。
-      const text = typeof payload.delta === "string"
+      const incoming = typeof payload.delta === "string"
         ? (prev?.content ?? "") + payload.delta
         : typeof payload.text === "string"
           ? payload.text
           : prev?.content ?? "";
       const done = payload.done === true;
+      const reset = payload.reset === true;
+      const text = resolveStreamingTextUpdate(prev?.content ?? "", incoming, done, reset);
+      const historyReady = shouldReleaseHeldLiveText(
+        get(sessionMessagesCacheAtom)[event.sessionId]?.messages ?? [],
+      );
+      const hold = shouldHoldLiveText({
+        done,
+        reset,
+        liveText: text,
+        historyHasAssistantText: historyReady,
+      });
       const streaming = !done && text.length > 0;
-      if (!prev || prev.content !== text || prev.streaming !== streaming) {
+      if (!prev || prev.content !== text || prev.streaming !== streaming || prev.held !== hold) {
         set(streamingTextByIdAtom, {
           ...get(streamingTextByIdAtom),
-          [event.sessionId]: { content: text, streaming },
+          [event.sessionId]: { content: text, streaming, held: hold || undefined },
         });
       }
-      if (done) {
+      if (done && !hold) {
         set(streamingTextByIdAtom, (prevMap) => {
           if (!(event.sessionId in prevMap)) return prevMap;
           const nextMap = { ...prevMap };
@@ -1276,6 +1330,7 @@ export const applySessionRuntimeEventAtom = atom(
         }
         // message 到达后若已含同段 thinking，安全卸 live（覆盖 done 先到的情况）。
         tryReleaseLiveThinkingAfterHistory(get, set, event.sessionId);
+        tryReleaseHeldLiveTextAfterHistory(get, set, event.sessionId);
       }
     }
 
@@ -1455,6 +1510,8 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
   set(sessionMessagesCacheAtom, cache);
   clearSessionLiveThinking(get, set, sessionId);
   liveTextStreamingBySessionAtom.remove(sessionId);
+  liveTextActiveBySessionAtom.remove(sessionId);
+  liveThinkingStreamingBySessionAtom.remove(sessionId);
   // atomFamily 无自动 GC：会话删除时必须同步 remove 各 family 实例，否则长期泄漏（2026-10）。
   liveThinkingIdBySessionIdAtomFamily.remove(sessionId);
   newTurnCollapseTickBySessionIdAtomFamily.remove(sessionId);

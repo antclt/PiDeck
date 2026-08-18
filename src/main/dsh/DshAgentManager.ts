@@ -702,6 +702,12 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.logRpc(agentId, "send", "sessions.cancel");
 		await client.sessions.cancel({ sessionId: runtime.sessionId }).catch(() => undefined);
 		this.logRpc(agentId, "recv", "sessions.cancel done");
+		// 停止时立刻收口正文通道：带上已累积字，避免空 done 把屏幕抹空白。
+		this.emit(ipcChannels.agentsTextStream, {
+			agentId: runtime.tab.id,
+			text: lastAssistantText(runtime.messages) || runtime.projection.pendingAssistantText || "",
+			done: true,
+		});
 		this.emitRuntimeState(agentId);
 		this.emit(ipcChannels.agentsState, this.list());
 	}
@@ -1709,7 +1715,12 @@ export class DshAgentManager implements SessionAgentGateway {
 				// D8：停止后的迟到 turn/end 不追加 error 气泡（停止 ≠ 回合失败）
 				runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, undefined, { skipErrorTurnEnd: true });
 				runtime.messages = runtime.projection.messages;
-				this.emit(ipcChannels.agentsTextStream, { agentId: runtime.tab.id, text: "", done: true });
+				// 收口时带上已累积正文，避免空 done 把渲染层 live 槽抹成空白。
+				this.emit(ipcChannels.agentsTextStream, {
+					agentId: runtime.tab.id,
+					text: lastAssistantText(runtime.messages),
+					done: true,
+				});
 				this.emitMessages(runtime);
 				if (runtime.isCompacting) {
 					runtime.isCompacting = false;
@@ -1726,6 +1737,15 @@ export class DshAgentManager implements SessionAgentGateway {
 		const p = runtime.projection;
 		const eventSeq = typeof event?.seq === "number" ? event.seq : 0;
 		const eventTime = typeof event?.time === "number" ? event.time : Date.now();
+		if (event?.type === "turn/start") {
+			// 与 pi agent_start 对齐：新回合丢掉上一轮 held live 槽。
+			this.emit(ipcChannels.agentsTextStream, {
+				agentId: runtime.tab.id,
+				text: "",
+				done: true,
+				reset: true,
+			});
+		}
 		if (p.deltaText !== undefined) {
 			this.emit(ipcChannels.agentsTextStream, {
 				agentId: runtime.tab.id,
@@ -1768,7 +1788,11 @@ export class DshAgentManager implements SessionAgentGateway {
 			this.emitRuntimeState(runtime.tab.id);
 		}
 		if (p.turnEnded) {
-			this.emit(ipcChannels.agentsTextStream, { agentId: runtime.tab.id, text: "", done: true });
+			this.emit(ipcChannels.agentsTextStream, {
+				agentId: runtime.tab.id,
+				text: lastAssistantText(runtime.messages),
+				done: true,
+			});
 			this.emitMessages(runtime);
 			if (runtime.isCompacting) {
 				runtime.isCompacting = false;
@@ -1780,7 +1804,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (event?.type === "assistant/message") {
 				this.emit(ipcChannels.agentsTextStream, {
 					agentId: runtime.tab.id,
-					text: "",
+					text: lastAssistantText(runtime.messages),
 					done: true,
 				});
 			}
@@ -1788,7 +1812,16 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 }
 
-/** 等待指定毫秒；signal abort 时提前返回（配合 pump 的退出检查）。 */
+/** 本轮最后一条助手正文；收口 text-stream 时带上，避免空 done 抹掉 live 槽。 */
+function lastAssistantText(messages: ChatMessage[]): string {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (message.role === "user") return "";
+		if (message.role === "assistant" && message.text.trim()) return message.text;
+	}
+	return "";
+}
+
 function delay(ms: number, signal: AbortSignal): Promise<void> {
 	return new Promise((resolve) => {
 		const timer = setTimeout(resolve, ms);

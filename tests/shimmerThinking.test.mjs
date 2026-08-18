@@ -59,9 +59,10 @@ test("RespondingIndicator 使用 beUI ReasoningText（swap）轮播状态短语"
 	assert.match(fn, /ReasoningText/);
 	assert.match(fn, /variant="swap"/);
 	assert.match(fn, /key=\{kind\}/);
-	// 状态判定保留
-	assert.match(fn, /kind = "starting"/);
-	assert.match(fn, /kind = "waiting"/);
+	// 状态判定抽到 deriveRespondingKind（pi / DSH 共用），组件只接线
+	assert.match(fn, /deriveRespondingKind/);
+	assert.match(fn, /liveTextStreaming/);
+	assert.match(fn, /liveThinkingStreaming/);
 });
 
 test("RespondingIndicator 轮播短语文案中英同步", () => {

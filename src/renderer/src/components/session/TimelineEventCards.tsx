@@ -15,6 +15,7 @@ import { ReasoningText } from "../agents/loading-states/reasoning-text";
 import { Loader } from "../motion/loader";
 import { useSmoothStream } from "../../utils/useSmoothStream";
 import { SingleLinePreview } from "./SingleLinePreview";
+import { deriveRespondingKind, type RespondingKind } from "./timeline/respondingKind";
 
 // Button 收口状态（P0）：本文件按钮全部保留原生——
 // compaction-card-header / thinking-card-trigger 是折叠触发器 + 内容排版容器（内部 span/small/em 结构）；
@@ -462,8 +463,6 @@ export const ThinkingBlock = memo(
  */
 
 /** 每种状态对应的轮播短语组（i18n；waiting 单条即不轮播）。 */
-type RespondingKind = "starting" | "executing" | "responding" | "waiting";
-
 const RESPONDING_PHRASES: Record<RespondingKind, string[]> = {
 	starting: [
 		t("agent.loading.starting1"),
@@ -484,27 +483,18 @@ const RESPONDING_PHRASES: Record<RespondingKind, string[]> = {
 };
 
 export function RespondingIndicator(props: {
-	thinking?: string;
-	showThinking?: boolean;
 	isStarting?: boolean;
 	isExecutingTool?: boolean;
-	isStreaming?: boolean;
+	liveTextStreaming?: boolean;
+	liveThinkingStreaming?: boolean;
 }) {
-	const { isStarting, isExecutingTool, isStreaming, thinking, showThinking } = props;
-
-	let kind: RespondingKind;
-
-	if (isStarting) {
-		kind = "starting";
-	} else if (isExecutingTool) {
-		kind = "executing";
-	} else if ((showThinking && thinking && thinking.length > 0) || isStreaming) {
-		// 有思考文本或流式回答中统一显示“正在回应”
-		kind = "responding";
-	} else {
-		// 过渡等待：单条静态文案（不轮播）
-		kind = "waiting";
-	}
+	// 判定抽到 deriveRespondingKind：pi / DSH 共用，状态条跟「此刻有没有字/工具」对齐。
+	const kind = deriveRespondingKind({
+		isStarting: props.isStarting,
+		isExecutingTool: props.isExecutingTool,
+		liveTextStreaming: props.liveTextStreaming,
+		liveThinkingStreaming: props.liveThinkingStreaming,
+	});
 
 	return (
 		<div className="responding-indicator" data-kind={kind}>
