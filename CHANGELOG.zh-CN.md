@@ -4,6 +4,14 @@
 
 这里记录 PiDeck 各版本的重要变化。
 
+## 未发布
+
+### 🐛 Bug 修复
+
+- **打包版终端找不到 pty.node（#154）** — afterPack 重打 asar 时保留
+  unpacked 标记，并显式 unpack `node-pty`，避免 `terminal:ensure` 在
+  安装包里加载原生模块失败。
+
 ## v0.7.2 - 2026-08-16
 
 ### 🚀 新功能

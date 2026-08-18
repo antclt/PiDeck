@@ -4,6 +4,15 @@
 
 All notable changes to PiDeck are documented here.
 
+## Unreleased
+
+### 🐛 Bug Fixes
+
+- **Packaged terminal could not load pty.node (#154)** — afterPack now keeps
+  asar unpacked metadata when it repacks, and `node-pty` is listed in
+  `asarUnpack`, so `terminal:ensure` can load the native module in the
+  installed app.
+
 ## v0.7.2 - 2026-08-16
 
 ### 🚀 New Features

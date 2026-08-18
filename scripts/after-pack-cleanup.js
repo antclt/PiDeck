@@ -10,13 +10,73 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execSync } = require("node:child_process");
+const asar = require("@electron/asar");
 const { patchSharpIndexCjs } = require("./patch-sharp-index");
 
 /** 要保留的语言包列表（小写，无 .pak 后缀） */
 const KEEP_LOCALES = new Set(["en-us", "zh-cn", "zh-tw"]);
 
-/** asar 工具路径 */
+/** asar 工具路径（extract 仍走 CLI；repack 必须走 API 才能保留 unpacked 标记） */
 const ASAR_BIN = path.join(__dirname, "..", "node_modules", ".bin", "asar");
+
+/**
+ * 从 asar header 收集 originally unpacked 的相对路径。
+ * electron-builder 会把 .node 等原生文件标 unpacked，并镜像到 app.asar.unpacked；
+ * 裸 `asar pack` 会丢掉这些标记，Electron 就不再把 require 映射到磁盘，
+ * 表现为打包版 terminal:ensure 找不到 pty.node（#154）。
+ */
+function collectUnpackedPatterns(headerNode, prefix = "", acc = { files: [], dirs: [] }) {
+  const children = headerNode && headerNode.files;
+  if (!children || typeof children !== "object") return acc;
+  for (const [name, child] of Object.entries(children)) {
+    const rel = prefix ? `${prefix}/${name}` : name;
+    if (!child || typeof child !== "object") continue;
+    if (child.files) {
+      if (child.unpacked) acc.dirs.push(rel);
+      collectUnpackedPatterns(child, rel, acc);
+    } else if (child.unpacked) {
+      acc.files.push(rel);
+    }
+  }
+  return acc;
+}
+
+function readUnpackedPatterns(asarPath) {
+  const raw = asar.getRawHeader(asarPath);
+  return collectUnpackedPatterns(raw.header);
+}
+
+/**
+ * asar 的 unpack 选项对「文件绝对路径」做 minimatch（matchBase: true），
+ * 相对路径列表匹配不上 Windows 绝对路径。改成按后缀/目录名匹配：
+ * 原 header 里出现过的 .node / .dll / .exe / .wasm 继续 unpack。
+ */
+function unpackGlobFromFiles(files) {
+  const suffixes = new Set();
+  for (const file of files ?? []) {
+    const match = file.match(/(\.[A-Za-z0-9]+)$/);
+    if (match) suffixes.add(match[1].toLowerCase());
+  }
+  if (suffixes.size === 0) return undefined;
+  const list = [...suffixes].map((suffix) => `*${suffix}`);
+  return list.length === 1 ? list[0] : `{${list.join(",")}}`;
+}
+
+function unpackDirGlobFromDirs(dirs) {
+  if (!dirs || dirs.length === 0) return undefined;
+  // unpackDir 匹配相对 src 的目录路径；用末级目录名覆盖常见 native 目录。
+  const names = [...new Set(dirs.map((dir) => dir.split("/").pop()).filter(Boolean))];
+  return names.length === 1 ? names[0] : `{${names.join(",")}}`;
+}
+
+/** 重打包 asar，保留原 header 里的 unpacked 文件/目录。 */
+async function packAsarPreservingUnpacked(srcDir, destAsar, unpacked) {
+  const options = {
+    unpack: unpackGlobFromFiles(unpacked.files),
+    unpackDir: unpackDirGlobFromDirs(unpacked.dirs),
+  };
+  await asar.createPackageWithOptions(srcDir, destAsar, options);
+}
 
 /** 运行时当前平台标识，如 win32-x64 */
 const CURRENT_PLATFORM = `${process.platform}-${process.arch}`;
@@ -76,12 +136,10 @@ async function stripFromAsar(asarPath, extractDir, removePaths, label) {
   }
 
   if (totalRemoved > 0) {
-    // 重新打包为 asar, 覆盖原文件
+    // 重新打包为 asar, 覆盖原文件（必须保留 unpacked 标记，见 packAsarPreservingUnpacked）
     const tmpAsar = asarPath + ".tmp";
-    execSync(
-      `"${ASAR_BIN}" pack "${extractDir}" "${tmpAsar}"`,
-      { stdio: "pipe", timeout: 120_000 },
-    );
+    const unpacked = readUnpackedPatterns(asarPath);
+    await packAsarPreservingUnpacked(extractDir, tmpAsar, unpacked);
     fs.renameSync(tmpAsar, asarPath);
 
     // 清理临时目录
@@ -103,6 +161,10 @@ async function stripFromAsar(asarPath, extractDir, removePaths, label) {
 /**
  * @param {import("electron-builder").AfterPackContext} context
  */
+exports.collectUnpackedPatterns = collectUnpackedPatterns;
+exports.readUnpackedPatterns = readUnpackedPatterns;
+exports.packAsarPreservingUnpacked = packAsarPreservingUnpacked;
+
 exports.default = async function (context) {
   const { appOutDir } = context;
 
@@ -176,6 +238,8 @@ exports.default = async function (context) {
   }
 
   const extractDir = path.join(appOutDir, ".asar-extract");
+  // 必须在 extract 前读 header：repack 后才知道哪些路径原本是 unpacked。
+  const unpackedPatterns = readUnpackedPatterns(asarPath);
   console.log(`[afterPack] 正在提取 asar 进行清理...`);
   execSync(`"${ASAR_BIN}" extract "${asarPath}" "${extractDir}"`, {
     stdio: "pipe",
@@ -282,13 +346,10 @@ exports.default = async function (context) {
     }
   }
 
-  // --- 3c. 重新打包 asar ---
+  // --- 3c. 重新打包 asar（保留 electron-builder 的 unpacked 标记）---
   if (totalRemoved > 0 || sharpIndexPatched) {
     const tmpAsar = asarPath + ".tmp";
-    execSync(`"${ASAR_BIN}" pack "${extractDir}" "${tmpAsar}"`, {
-      stdio: "pipe",
-      timeout: 120_000,
-    });
+    await packAsarPreservingUnpacked(extractDir, tmpAsar, unpackedPatterns);
     const oldSize = fs.statSync(asarPath).size;
     fs.renameSync(tmpAsar, asarPath);
     const newSize = fs.statSync(asarPath).size;
