@@ -79,17 +79,49 @@ function buildContainsList<T extends { id: string }>(entries: T[]): T[] {
 	return [...entries].sort((a, b) => b.id.length - a.id.length);
 }
 
-/** 包含匹配：needle 与 id 双向 contains（大小写不敏感）。
- *  语义：用户手填的字符串只要包含某已知 id（或反之），即视为匹配，
- *  用于带版本后缀/前缀变体（如 kimi-k3-2025）或厂商拼写差异时的兜底 */
+/** 短于该长度的子串不做 contains：o1/r1/kimi/qwen3 这类前缀会误中更长型号。 */
+const MIN_CONTAINS_LEN = 6;
+
+function isModelIdSeparator(ch: string): boolean {
+	return ch === "/" || ch === "-" || ch === "_" || ch === ":" || ch === ".";
+}
+
+/**
+ * haystack 是否在分隔符边界上包含 needle。
+ * 只认「用户输入包含已知 id」，不认「已知长 id 包含用户短串」——
+ * 后者会把 claude-4 配到 Gemma-…-Claude-4.6-… 蒸馏卡。
+ */
+function containsAtTokenBoundary(haystack: string, needle: string): boolean {
+	if (!needle || needle.length < MIN_CONTAINS_LEN) return false;
+	if (haystack === needle) return true;
+	let from = 0;
+	while (from <= haystack.length - needle.length) {
+		const index = haystack.indexOf(needle, from);
+		if (index < 0) return false;
+		const beforeOk = index === 0 || isModelIdSeparator(haystack[index - 1]);
+		const afterIndex = index + needle.length;
+		const afterOk =
+			afterIndex === haystack.length || isModelIdSeparator(haystack[afterIndex]);
+		if (beforeOk && afterOk) return true;
+		from = index + 1;
+	}
+	return false;
+}
+
+/** 包含匹配：仅当用户输入（needle）在分隔符边界上包含足够长的已知 id。 */
 function findLongestContains<T extends { id: string }>(
 	list: T[],
 	needleLower: string,
 ): T | undefined {
-	if (!needleLower) return undefined;
+	if (needleLower.length < MIN_CONTAINS_LEN) return undefined;
 	for (const entry of list) {
 		const idLower = entry.id.toLowerCase();
-		if (idLower.includes(needleLower) || needleLower.includes(idLower)) return entry;
+		const slash = idLower.lastIndexOf("/");
+		const tail = slash >= 0 ? idLower.slice(slash + 1) : idLower;
+		// 完整 id 或尾段任一端满足「输入包含已知型号」即可（中转站前缀/版本后缀）。
+		if (containsAtTokenBoundary(needleLower, idLower) || containsAtTokenBoundary(needleLower, tail)) {
+			return entry;
+		}
 	}
 	return undefined;
 }
@@ -229,6 +261,8 @@ export function stripProviderPrefix(id: string, knownProviders: Set<string>): st
  * 1. openrouter 完整 id（provider/model 或裸 id）
  * 2. openrouter 尾段（用户填 gpt-4o → openai/gpt-4o；中转站场景的核心路径）
  * 3. models.dev 裸 id（先剥已知厂商前缀，再试原样）
+ * 4. contains 兜底：仅当用户输入在分隔符边界上包含足够长的已知 id
+ *    （覆盖 kimi-k3-2025）；禁止「长卡名包含用户短串」（claude-4 ≠ Gemma-…-Claude-4.6）
  * 两源命中任一即合并返回（openrouter 提供 context/maxTokens，models.dev 补能力）。
  */
 export function lookupModelSpec(
@@ -258,8 +292,7 @@ export function lookupModelSpec(
 		// 小写别名：驼峰/小写变体（moonshotai/Kimi-K3 vs kimi-k3）统一命中
 		index.modelsDevByIdLower.get(mdId.toLowerCase()) ??
 		index.modelsDevByIdLower.get(trimmed.toLowerCase());
-	// contains 兜底（放精确匹配之后）：字符串互相包含即匹配、大小写忽略，
-	// 覆盖带版本后缀/前缀变体（kimi-k3-2025）等手填场景；列表按 id 长度降序取最长命中
+	// contains 兜底（精确匹配之后）：只认「输入包含已知 id」，且 id 至少 6 字符、落在 /-_:. 边界上。
 	const trimmedLower = trimmed.toLowerCase();
 	const orContains =
 		findLongestContains(index.openrouterContains, trimmedLower) ??

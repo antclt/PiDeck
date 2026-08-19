@@ -187,7 +187,7 @@ test("lookupModelSpec: models.dev 条目缺能力字段时不下发 false（保�
 		assert.equal(spec?.contextWindow, undefined);
 	});
 
-	test("lookupModelSpec: contains 兜底（字符串包含即匹配，大小写忽略）", () => {
+	test("lookupModelSpec: contains 兜底（用户输入包含已知 id，大小写忽略）", () => {
 		const { openrouter, modelsDev } = makeFixture();
 		const index = indexMod.buildSpecIndex(openrouter, modelsDev);
 		// 带版本后缀变体：kimi-k3-2025 包含 kimi-k3 → 最长命中 openrouter 1M
@@ -204,6 +204,35 @@ test("lookupModelSpec: models.dev 条目缺能力字段时不下发 false（保�
 		const mdContained = indexMod.lookupModelSpec(index, "kimi-for-coding", "k3-256k-xxx");
 		assert.equal(mdContained?.source, "models-dev");
 		assert.equal(mdContained?.reasoning, true);
+	});
+
+	test("lookupModelSpec: 短前缀 / 营销名子串不得误匹配更长模型", () => {
+		const { openrouter, modelsDev } = makeFixture();
+		modelsDev.push({
+			provider: "huggingface",
+			id: "Gemma-4-31B-Claude-4.6-Opus-Reasoning-Distilled",
+			reasoning: true,
+			toolCall: true,
+			attachment: true,
+			inputModalities: ["text", "image"],
+		});
+		openrouter.push({
+			id: "moonshotai/kimi-k2.7-code:batch",
+			contextWindow: 262144,
+			maxTokens: 8192,
+			inputModalities: ["text", "image"],
+		});
+		openrouter.push({
+			id: "qwen/qwen3-235b-a22b-thinking-2507",
+			contextWindow: 262144,
+			inputModalities: ["text"],
+		});
+		const index = indexMod.buildSpecIndex(openrouter, modelsDev);
+		// 旧规则双向 includes + 最长 id：claude-4 会命中 Gemma 蒸馏、kimi 会命中 k2.7 batch。
+		assert.equal(indexMod.lookupModelSpec(index, "myrelay", "claude-4"), undefined);
+		assert.equal(indexMod.lookupModelSpec(index, "myrelay", "kimi"), undefined);
+		assert.equal(indexMod.lookupModelSpec(index, "myrelay", "qwen3"), undefined);
+		assert.equal(indexMod.lookupModelSpec(index, "myrelay", "r1"), undefined);
 	});
 
 // ── entriesFromRows（db 行 → 双源条目）──────────────────────────────
@@ -301,6 +330,11 @@ test("integration: 内置 db 可读且真实模型可命中（不绑定数值）
 	assert.equal(step1o?.contextWindow, 32768);
 	// 未知模型不命中
 	assert.equal(indexMod.lookupModelSpec(index, "myrelay", "definitely-not-a-model-xyz"), undefined);
+	// 短前缀 / 营销子串不得落到更长卡名（真实库回归：曾把 claude-4 配到 Gemma 蒸馏）
+	const claude4 = indexMod.lookupModelSpec(index, "myrelay", "claude-4");
+	assert.ok(!claude4 || !String(claude4.matchedId).toLowerCase().includes("gemma"), "claude-4 不得命中 Gemma 蒸馏卡");
+	assert.equal(indexMod.lookupModelSpec(index, "myrelay", "kimi")?.matchedId, undefined);
+	assert.equal(indexMod.lookupModelSpec(index, "myrelay", "r1")?.matchedId, undefined);
 
 	// Kimi K3：官方驼峰完整 id 应通过大小写兜底命中 openrouter 1M 上下文（不丢 context）
 	const kimiCamel = indexMod.lookupModelSpec(index, "moonshotai", "moonshotai/Kimi-K3");
