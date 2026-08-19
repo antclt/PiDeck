@@ -13,6 +13,7 @@ test("Git IPC is registered through one-way service dependencies", () => {
 
 test("Git IPC keeps project lookup, bounded diffs, and stale-worktree cleanup", () => {
   for (const channel of [
+    "gitListRepos",
     "gitBranches",
     "gitCheckout",
     "gitCreateBranch",
@@ -57,5 +58,5 @@ test("git:fetch skips non-repositories instead of throwing", () => {
   const fetchFn = service.slice(service.indexOf("async fetch(cwd: string)"), service.indexOf("async getAheadBehind"));
   assert.match(fetchFn, /not a git repository/);
   assert.match(fetchFn, /return;/);
-  assert.match(gitIpc, /if \(!\(await gitService\.isGitRepo\(project\.path\)\)\) return;/);
+  assert.match(gitIpc, /if \(!\(await gitService\.isGitRepo\(cwd\)\)\) return;/);
 });

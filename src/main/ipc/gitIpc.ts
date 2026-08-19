@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { ipcChannels } from "../../shared/ipc";
 import type { GitGenerateCommitMessageResult, GitWorkspaceDiffGroup } from "../../shared/types";
 import type { GitService } from "../git/GitService";
+import { listGitRepos, resolveGitCwd } from "../git/gitRepoScope";
 import type { AppLogger } from "../logging/AppLogger";
 import type { PiLocator } from "../pi/PiLocator";
 import { PiRpcClient } from "../pi/PiRpcClient";
@@ -220,30 +221,45 @@ export function registerGitIpc({
 	settingsStore,
 	worktreeService,
 }: GitIpcDeps): void {
-	ipcMain.handle(ipcChannels.gitBranches, async (_event, projectId: string) => {
+	/** 解析项目 + 可选嵌套仓库路径。repoPath 必须落在项目内，缺省仍用项目根。 */
+	const requireGitCwd = (projectId: string, repoPath?: unknown): string => {
 		const project = projectStore.get(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
-		return gitService.getBranches(project.path);
+		return resolveGitCwd(project.path, repoPath);
+	};
+
+	const findGitCwd = (projectId: string, repoPath?: unknown): string | null => {
+		const project = projectStore.get(projectId);
+		if (!project) return null;
+		return resolveGitCwd(project.path, repoPath);
+	};
+
+	// 扫描项目内独立仓库（根 + 嵌套）。worktree / git init 仍只作用于项目根。
+	ipcMain.handle(ipcChannels.gitListRepos, async (_event, projectId: string) => {
+		const project = projectStore.get(projectId);
+		if (!project) return [];
+		return listGitRepos(project.path);
+	});
+
+	ipcMain.handle(ipcChannels.gitBranches, async (_event, projectId: string, repoPath?: string) => {
+		return gitService.getBranches(requireGitCwd(projectId, repoPath));
 	});
 
 	ipcMain.handle(
 		ipcChannels.gitCheckout,
-		async (_event, projectId: string, branch: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			const result = await gitService.checkout(project.path, branch);
+		async (_event, projectId: string, branch: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			const result = await gitService.checkout(cwd, branch);
 			// 切换分支可能覆盖未提交的工作区改动：记 warn 审计日志，排查"文件消失"时能定位到切换动作。
-			void appLogger.warn("git", "Branch checked out", { projectId, branch, changed: result });
+			void appLogger.warn("git", "Branch checked out", { projectId, branch, repoPath: cwd, changed: result });
 			return result;
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitCreateBranch,
-		async (_event, projectId: string, branchName: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			return gitService.createBranch(project.path, branchName);
+		async (_event, projectId: string, branchName: string, repoPath?: string) => {
+			return gitService.createBranch(requireGitCwd(projectId, repoPath), branchName);
 		},
 	);
 
@@ -329,56 +345,54 @@ export function registerGitIpc({
 	// -- Git 增强：提交历史 / 分支对比 / Graph
 	ipcMain.handle(
 		ipcChannels.gitCommitLog,
-		async (_event, projectId: string, options?: { maxEntries?: number; ref?: string; path?: string; allBranches?: boolean }) => {
-			const project = projectStore.get(projectId);
-			if (!project) return [];
-			return gitService.getCommitLog(project.path, options);
+		async (_event, projectId: string, options?: { maxEntries?: number; ref?: string; path?: string; allBranches?: boolean }, repoPath?: string) => {
+			const cwd = findGitCwd(projectId, repoPath);
+			if (!cwd) return [];
+			return gitService.getCommitLog(cwd, options);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitRefs,
-		async (_event, projectId: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) return [];
-			return gitService.getRefs(project.path);
+		async (_event, projectId: string, repoPath?: string) => {
+			const cwd = findGitCwd(projectId, repoPath);
+			if (!cwd) return [];
+			return gitService.getRefs(cwd);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitBranchCompare,
-		async (_event, projectId: string, base: string, target: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			return gitService.compareBranches(project.path, base, target);
+		async (_event, projectId: string, base: string, target: string, repoPath?: string) => {
+			return gitService.compareBranches(requireGitCwd(projectId, repoPath), base, target);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitCommitDetail,
-		async (_event, projectId: string, ref: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) return null;
-			return gitService.getCommitDetail(project.path, ref);
+		async (_event, projectId: string, ref: string, repoPath?: string) => {
+			const cwd = findGitCwd(projectId, repoPath);
+			if (!cwd) return null;
+			return gitService.getCommitDetail(cwd, ref);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitCommitFileDiff,
-		async (_event, projectId: string, ref: string, filePath: string, originalPath?: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) return null;
+		async (_event, projectId: string, ref: string, filePath: string, originalPath?: string, repoPath?: string) => {
+			const cwd = findGitCwd(projectId, repoPath);
+			if (!cwd) return null;
 			const maxBytes = Math.max(1, settingsStore.get().maxEditorFileSizeMB) * 1024 * 1024;
-			return gitService.getCommitFileDiff(project.path, ref, filePath, originalPath, maxBytes);
+			return gitService.getCommitFileDiff(cwd, ref, filePath, originalPath, maxBytes);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitDiffFileBetween,
-		async (_event, projectId: string, ref1: string, ref2: string, filePath: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) return "";
-			return gitService.diffFileBetweenRefs(project.path, ref1, ref2, filePath);
+		async (_event, projectId: string, ref1: string, ref2: string, filePath: string, repoPath?: string) => {
+			const cwd = findGitCwd(projectId, repoPath);
+			if (!cwd) return "";
+			return gitService.diffFileBetweenRefs(cwd, ref1, ref2, filePath);
 		},
 	);
 
@@ -386,55 +400,51 @@ export function registerGitIpc({
 	// Git 工作区状态 + Stage/Unstage
 	ipcMain.handle(
 		ipcChannels.gitStatus,
-		async (_event, projectId: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) return { merge: [], index: [], workingTree: [], untracked: [] };
-			return gitService.getStatus(project.path);
+		async (_event, projectId: string, repoPath?: string) => {
+			const cwd = findGitCwd(projectId, repoPath);
+			if (!cwd) return { merge: [], index: [], workingTree: [], untracked: [] };
+			return gitService.getStatus(cwd);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitWorkspaceFileDiff,
-		async (_event, projectId: string, group: GitWorkspaceDiffGroup, filePath: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) return null;
+		async (_event, projectId: string, group: GitWorkspaceDiffGroup, filePath: string, repoPath?: string) => {
+			const cwd = findGitCwd(projectId, repoPath);
+			if (!cwd) return null;
 			const maxBytes = Math.max(1, settingsStore.get().maxEditorFileSizeMB) * 1024 * 1024;
-			return gitService.getWorkspaceFileDiff(project.path, group, filePath, maxBytes);
+			return gitService.getWorkspaceFileDiff(cwd, group, filePath, maxBytes);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitStage,
-		async (_event, projectId: string, paths: string[]) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.stageFiles(project.path, paths);
+		async (_event, projectId: string, paths: string[], repoPath?: string) => {
+			await gitService.stageFiles(requireGitCwd(projectId, repoPath), paths);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitUnstage,
-		async (_event, projectId: string, paths: string[]) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.unstageFiles(project.path, paths);
+		async (_event, projectId: string, paths: string[], repoPath?: string) => {
+			await gitService.unstageFiles(requireGitCwd(projectId, repoPath), paths);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitDiscard,
-		async (_event, projectId: string, group: "workingTree" | "untracked", filePath: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
+		async (_event, projectId: string, group: "workingTree" | "untracked", filePath: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
 			try {
-				await gitService.discardFile(project.path, group, filePath);
+				await gitService.discardFile(cwd, group, filePath);
 				// untracked 丢弃 = 删除用户文件（走回收站），记审计日志便于追踪。
-				void appLogger.info("git", "Changes discarded", { projectId, group, filePath });
+				void appLogger.info("git", "Changes discarded", { projectId, group, filePath, repoPath: cwd });
 			} catch (error) {
 				void appLogger.error("git", "Discard changes failed", {
 					projectId,
 					group,
 					filePath,
+					repoPath: cwd,
 					error: error instanceof Error ? error.message : String(error),
 				});
 				throw error;
@@ -444,82 +454,75 @@ export function registerGitIpc({
 
 	ipcMain.handle(
 		ipcChannels.gitCommit,
-		async (_event, projectId: string, message: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.commit(project.path, message);
-			void appLogger.info("git", "Commit created", { projectId, message });
+		async (_event, projectId: string, message: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			await gitService.commit(cwd, message);
+			void appLogger.info("git", "Commit created", { projectId, message, repoPath: cwd });
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitCherryPick,
-		async (_event, projectId: string, hash: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.cherryPick(project.path, hash);
-			void appLogger.info("git", "Commit cherry-picked", { projectId, hash });
+		async (_event, projectId: string, hash: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			await gitService.cherryPick(cwd, hash);
+			void appLogger.info("git", "Commit cherry-picked", { projectId, hash, repoPath: cwd });
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitRevert,
-		async (_event, projectId: string, hash: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.revertCommit(project.path, hash);
-			void appLogger.info("git", "Commit reverted", { projectId, hash });
+		async (_event, projectId: string, hash: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			await gitService.revertCommit(cwd, hash);
+			void appLogger.info("git", "Commit reverted", { projectId, hash, repoPath: cwd });
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitPush,
-		async (_event, projectId: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.push(project.path);
-			void appLogger.info("git", "Pushed", { projectId });
+		async (_event, projectId: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			await gitService.push(cwd);
+			void appLogger.info("git", "Pushed", { projectId, repoPath: cwd });
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitPull,
-		async (_event, projectId: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.pull(project.path);
-			void appLogger.info("git", "Pulled", { projectId });
+		async (_event, projectId: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			await gitService.pull(cwd);
+			void appLogger.info("git", "Pulled", { projectId, repoPath: cwd });
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitReset,
-		async (_event, projectId: string, hash: string, mode: "soft" | "mixed" | "hard") => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.resetToCommit(project.path, hash, mode);
+		async (_event, projectId: string, hash: string, mode: "soft" | "mixed" | "hard", repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			await gitService.resetToCommit(cwd, hash, mode);
 			// hard reset 会丢工作区/暂存区改动（reflog 外的不可恢复路径），warn 级突出显示。
-			void appLogger.warn("git", "Reset to commit", { projectId, hash, mode });
+			void appLogger.warn("git", "Reset to commit", { projectId, hash, mode, repoPath: cwd });
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitDropCommit,
-		async (_event, projectId: string, hash: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			await gitService.dropCommit(project.path, hash);
-			void appLogger.warn("git", "Commit dropped", { projectId, hash });
+		async (_event, projectId: string, hash: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			await gitService.dropCommit(cwd, hash);
+			void appLogger.warn("git", "Commit dropped", { projectId, hash, repoPath: cwd });
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitGenerateCommitMessage,
-		async (_event, projectId: string): Promise<GitGenerateCommitMessageResult> => {
-			const project = projectStore.get(projectId);
-			if (!project) return { ok: true, message: "" };
+		async (_event, projectId: string, repoPath?: string): Promise<GitGenerateCommitMessageResult> => {
+			const cwd = findGitCwd(projectId, repoPath);
+			if (!cwd) return { ok: true, message: "" };
 
-			const diff = await gitService.getStagedDiff(project.path);
+			const diff = await gitService.getStagedDiff(cwd);
 			if (!diff.trim()) return { ok: true, message: "" };
 
 			const settings = settingsStore.get();
@@ -541,7 +544,7 @@ export function registerGitIpc({
 
 			try {
 				const result = await quickGenerate(
-					project.path,
+					cwd,
 					prompt,
 					piLocator,
 					settingsStore,
@@ -580,37 +583,33 @@ export function registerGitIpc({
 	// 非仓库直接跳过：面板首次挂载时 status 与 fetch 会并行，不能等 UI 标记。
 	ipcMain.handle(
 		ipcChannels.gitFetch,
-		async (_event, projectId: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			if (!(await gitService.isGitRepo(project.path))) return;
-			await gitService.fetch(project.path);
+		async (_event, projectId: string, repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
+			if (!(await gitService.isGitRepo(cwd))) return;
+			await gitService.fetch(cwd);
 		},
 	);
 
 	// ahead/behind：驱动 push/pull 角标；无上游返回 null（不显示角标）
 	ipcMain.handle(
 		ipcChannels.gitAheadBehind,
-		async (_event, projectId: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
-			return gitService.getAheadBehind(project.path);
+		async (_event, projectId: string, repoPath?: string) => {
+			return gitService.getAheadBehind(requireGitCwd(projectId, repoPath));
 		},
 	);
 
 	// 删除变更文件（移入回收站）：路径由 GitService 按 status 白名单校验
 	ipcMain.handle(
 		ipcChannels.gitDeleteFiles,
-		async (_event, projectId: string, paths: string[]) => {
-			const project = projectStore.get(projectId);
-			if (!project) throw new Error(`Project not found: ${projectId}`);
+		async (_event, projectId: string, paths: string[], repoPath?: string) => {
+			const cwd = requireGitCwd(projectId, repoPath);
 			// 入参不可信：必须是非空字符串数组，防注入
 			if (!Array.isArray(paths) || paths.length === 0 || paths.some((p) => typeof p !== "string" || !p)) {
 				throw new Error("Invalid paths");
 			}
-			await gitService.deleteFiles(project.path, paths);
+			await gitService.deleteFiles(cwd, paths);
 			// 批量删除文件：最高风险操作之一，完整记录路径清单（含数量）便于误删回溯。
-			void appLogger.warn("git", "Files deleted (recycle bin)", { projectId, count: paths.length, paths });
+			void appLogger.warn("git", "Files deleted (recycle bin)", { projectId, count: paths.length, paths, repoPath: cwd });
 		},
 	);
 

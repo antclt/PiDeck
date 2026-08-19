@@ -1,5 +1,5 @@
 import { BrowserSurface } from "./BrowserSurface";
-import { GitPanel } from "../app/GitPanel";
+import { GitDrawerHost } from "./GitDrawerHost";
 import { DrawerContent } from "../app/AppParts";
 import { SessionTrajectoryPanel } from "../session/trajectory/SessionTrajectoryPanel";
 import { LazyWrapper } from "../../hooks/useLazyComponent";
@@ -103,35 +103,16 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
         <div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="git-drawer-stack">
             <div className="git-drawer-source">
-              <GitPanel
+              <GitDrawerHost
                 projectId={git.activeProjectId}
-                projectRoot={files.projects.find((project: any) => project.id === git.activeProjectId)?.path}
-                commitLog={git.gitApi.commitLog}
-                commitDetail={git.gitApi.commitDetail}
+                projectRoot={files.projects.find((project: { id: string; path?: string }) => project.id === git.activeProjectId)?.path}
+                gitApi={git.gitApi}
+                fallbackGitInfo={git.gitInfo}
+                fallbackSwitchBranch={git.switchBranch}
+                fallbackCreateBranch={git.createBranch}
                 onOpenCommitFileDiff={git.openCommitFileDiff}
                 onOpenWorkspaceFileDiff={git.openWorkspaceFileDiff}
                 onOpenFile={files.openEditorTab}
-                branchCompare={git.gitApi.branchCompare}
-                getStatus={git.gitApi.status}
-                stageFiles={git.gitApi.stage}
-                unstageFiles={git.gitApi.unstage}
-                discardFile={git.gitApi.discard}
-                commit={git.gitApi.commit}
-                branches={git.gitInfo.branches}
-                currentBranch={git.gitInfo.current}
-                onSwitchBranch={git.switchBranch}
-                onCreateBranch={git.createBranch}
-                cherryPick={git.gitApi.cherryPick}
-                revert={git.gitApi.revert}
-                reset={git.gitApi.reset}
-                dropCommit={git.gitApi.dropCommit}
-                generateCommitMessage={git.gitApi.generateCommitMessage}
-                gitInit={git.gitApi.init}
-                push={git.gitApi.push}
-                pull={git.gitApi.pull}
-                fetch={git.gitApi.fetch}
-                aheadBehind={git.gitApi.aheadBehind}
-                deleteFiles={git.gitApi.deleteFiles}
               />
             </div>
           </div>

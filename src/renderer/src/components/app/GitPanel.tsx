@@ -67,6 +67,11 @@ type GitPanelProps = {
   projectId: string;
   /** 项目根目录路径，用于将绝对路径转为相对路径显示 */
   projectRoot?: string;
+  /**
+   * 当前操作的仓库身份。多仓切换时 projectId 不变，用此项让 status/mutation 序号失效并清空面板。
+   * 未传时等同 projectId，单仓行为与改前一致。
+   */
+  repoScopeKey?: string;
   commitLog: (
     projectId: string,
     options?: { maxEntries?: number; ref?: string; allBranches?: boolean },
@@ -424,6 +429,7 @@ export function GitPanel(props: GitPanelProps) {
   const setSettingsOpen = useSetAtom(settingsOpenAtom);
   const projectIdRef = useRef(props.projectId);
   projectIdRef.current = props.projectId;
+  const repoScopeKey = props.repoScopeKey ?? props.projectId;
   const statusRequestRef = useRef(0);
   const statusRunningRequestRef = useRef<{
     projectId: string;
@@ -536,7 +542,7 @@ export function GitPanel(props: GitPanelProps) {
     commitGenProgressRef.current = undefined;
     setNotAGitRepo(false);
     setGitNotInstalled(false);
-  }, [props.projectId]);
+  }, [props.projectId, repoScopeKey]);
 
   useEffect(() => {
     setPaneState((current) => ({

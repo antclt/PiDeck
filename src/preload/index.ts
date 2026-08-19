@@ -54,6 +54,7 @@ import type {
 	FeishuTestResult,
 	FileTreeNode,
 	GitBranchInfo,
+	GitRepoInfo,
 	ImageContent,
 	CommitDetail,
 	GitCommitFileDiff,
@@ -796,22 +797,31 @@ const api = {
 			) as Promise<OpenCodeImportReport>,
 	},
 	git: {
-		branches: (projectId: string) =>
+		/** 扫描项目内独立仓库；单仓项目通常只返回根仓库 */
+		listRepos: (projectId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitListRepos,
+				projectId,
+			) as Promise<GitRepoInfo[]>,
+		branches: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitBranches,
 				projectId,
+				repoPath,
 			) as Promise<GitBranchInfo>,
-		checkout: (projectId: string, branch: string) =>
+		checkout: (projectId: string, branch: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitCheckout,
 				projectId,
 				branch,
+				repoPath,
 			) as Promise<GitBranchInfo>,
-		createBranch: (projectId: string, branchName: string) =>
+		createBranch: (projectId: string, branchName: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitCreateBranch,
 				projectId,
 				branchName,
+				repoPath,
 			) as Promise<GitBranchInfo>,
 		// 读取文件的 Git HEAD 原始内容，供差异编辑器左侧基准列使用。
 		originalContent: (filePath: string) =>
@@ -840,161 +850,183 @@ const api = {
 				worktreePath,
 			) as Promise<boolean>,
 		// Git 增强：提交历史、分支对比、Graph
-		commitLog: (projectId: string, options?: { maxEntries?: number; ref?: string; path?: string; allBranches?: boolean }) =>
+		commitLog: (projectId: string, options?: { maxEntries?: number; ref?: string; path?: string; allBranches?: boolean }, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitCommitLog,
 				projectId,
 				options,
+				repoPath,
 			) as Promise<CommitEntry[]>,
 		// Git 引用（分支 / 远程分支 / Tag）
-		refs: (projectId: string) =>
+		refs: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitRefs,
 				projectId,
+				repoPath,
 			) as Promise<GitRef[]>,
 		// 分支对比概要（变更文件 + ahead/behind）
-		branchCompare: (projectId: string, base: string, target: string) =>
+		branchCompare: (projectId: string, base: string, target: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitBranchCompare,
 				projectId,
 				base,
 				target,
+				repoPath,
 			) as Promise<BranchDiffResult>,
 		// 单个 commit 详情
-		commitDetail: (projectId: string, ref: string) =>
+		commitDetail: (projectId: string, ref: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitCommitDetail,
 				projectId,
 				ref,
+				repoPath,
 			) as Promise<CommitDetail | null>,
 		// 提交历史中单个文件相对第一父提交的两侧内容
-		commitFileDiff: (projectId: string, ref: string, filePath: string, originalPath?: string) =>
+		commitFileDiff: (projectId: string, ref: string, filePath: string, originalPath?: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitCommitFileDiff,
 				projectId,
 				ref,
 				filePath,
 				originalPath,
+				repoPath,
 			) as Promise<GitCommitFileDiff | null>,
 		// 两个 ref 间单个文件的 diff
-		diffFileBetween: (projectId: string, ref1: string, ref2: string, filePath: string) =>
+		diffFileBetween: (projectId: string, ref1: string, ref2: string, filePath: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitDiffFileBetween,
 				projectId,
 				ref1,
 				ref2,
 				filePath,
+				repoPath,
 			) as Promise<string>,
 		// Git 工作区状态（VS Code 风格分组：Staged/Unstaged/Untracked/Merge）
-		status: (projectId: string) =>
+		status: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitStatus,
 				projectId,
+				repoPath,
 			) as Promise<import("../shared/types").GitResourceGroups>,
 		// Git Changes 中单个文件的两侧快照（按点击惰性读取）
-		workspaceFileDiff: (projectId: string, group: GitWorkspaceDiffGroup, filePath: string) =>
+		workspaceFileDiff: (projectId: string, group: GitWorkspaceDiffGroup, filePath: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitWorkspaceFileDiff,
 				projectId,
 				group,
 				filePath,
+				repoPath,
 			) as Promise<GitWorkspaceFileDiff | null>,
 		// Stage 文件
-		stage: (projectId: string, paths: string[]) =>
+		stage: (projectId: string, paths: string[], repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitStage,
 				projectId,
 				paths,
+				repoPath,
 			) as Promise<void>,
 		// Unstage 文件
-		unstage: (projectId: string, paths: string[]) =>
+		unstage: (projectId: string, paths: string[], repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitUnstage,
 				projectId,
 				paths,
+				repoPath,
 			) as Promise<void>,
 		// 丢弃单个未暂存文件；主进程会按最新 status 再次验证 group 与路径。
-		discard: (projectId: string, group: "workingTree" | "untracked", filePath: string) =>
+		discard: (projectId: string, group: "workingTree" | "untracked", filePath: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitDiscard,
 				projectId,
 				group,
 				filePath,
+				repoPath,
 			) as Promise<void>,
 		// Commit
-		commit: (projectId: string, message: string) =>
+		commit: (projectId: string, message: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitCommit,
 				projectId,
 				message,
+				repoPath,
 			) as Promise<void>,
-		cherryPick: (projectId: string, hash: string) =>
+		cherryPick: (projectId: string, hash: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitCherryPick,
 				projectId,
 				hash,
+				repoPath,
 			) as Promise<void>,
-		revert: (projectId: string, hash: string) =>
+		revert: (projectId: string, hash: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitRevert,
 				projectId,
 				hash,
+				repoPath,
 			) as Promise<void>,
-		reset: (projectId: string, hash: string, mode: "soft" | "mixed" | "hard") =>
+		reset: (projectId: string, hash: string, mode: "soft" | "mixed" | "hard", repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitReset,
 				projectId,
 				hash,
 				mode,
+				repoPath,
 			) as Promise<void>,
-		dropCommit: (projectId: string, hash: string) =>
+		dropCommit: (projectId: string, hash: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitDropCommit,
 				projectId,
 				hash,
+				repoPath,
 			) as Promise<void>,
 		/** AI 生成提交摘要 */
-		generateCommitMessage: (projectId: string) =>
+		generateCommitMessage: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitGenerateCommitMessage,
 				projectId,
+				repoPath,
 			) as Promise<import("../shared/types").GitGenerateCommitMessageResult>,
-		/** 初始化 Git 仓库 */
+		/** 初始化 Git 仓库（始终作用于项目根，不跟随嵌套仓库切换） */
 		init: (projectId: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitInit,
 				projectId,
 			) as Promise<void>,
 		/** Push：将当前分支推送到远程 */
-		push: (projectId: string) =>
+		push: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitPush,
 				projectId,
+				repoPath,
 			) as Promise<void>,
 		/** Pull：从远程拉取并合并到当前分支 */
-		pull: (projectId: string) =>
+		pull: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitPull,
 				projectId,
+				repoPath,
 			) as Promise<void>,
 		/** Fetch：从远程获取最新数据但不合并 */
-		fetch: (projectId: string) =>
+		fetch: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitFetch,
 				projectId,
+				repoPath,
 			) as Promise<void>,
 		/** 当前分支相对上游的提交差距（ahead/behind），驱动 push/pull 角标 */
-		aheadBehind: (projectId: string) =>
+		aheadBehind: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitAheadBehind,
 				projectId,
+				repoPath,
 			) as Promise<import("../shared/types").GitAheadBehind | null>,
 		/** 从磁盘删除变更文件（移入回收站，可恢复） */
-		deleteFiles: (projectId: string, paths: string[]) =>
+		deleteFiles: (projectId: string, paths: string[], repoPath?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.gitDeleteFiles,
 				projectId,
 				paths,
+				repoPath,
 			) as Promise<void>,
 	},
 	pi: {

@@ -5,6 +5,19 @@ export type GitBranchInfo = {
 	branches: string[];
 };
 
+/**
+ * 项目目录内发现的独立 Git 仓库（含根仓库与嵌套仓库）。
+ * 侧栏按此项切换 cwd，避免把整棵工作区当成单一仓库。
+ */
+export type GitRepoInfo = {
+	/** 仓库工作区绝对路径，作为后续 git 命令的 cwd */
+	path: string;
+	/** 展示名：根仓库用项目文件夹名，嵌套仓库用该目录名 */
+	name: string;
+	/** 相对项目根的 posix 路径；根仓库为空串 */
+	relativePath: string;
+};
+
 /** AI 生成提交摘要的结果：结构化错误码供渲染层区分“未配置/忙碌/超时”，避免透传 pi 英文错误。 */
 export type GitGenerateCommitMessageResult =
 	| { ok: true; message: string }

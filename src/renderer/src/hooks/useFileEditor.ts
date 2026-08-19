@@ -76,6 +76,7 @@ export interface UseFileEditorInput {
     projectId: string,
     group: GitResourceGroupType,
     path: string,
+    repoPath?: string,
   ) => Promise<{
     path: string;
     originalContent: string;
@@ -87,6 +88,7 @@ export interface UseFileEditorInput {
     hash: string,
     path: string,
     originalPath?: string,
+    repoPath?: string,
   ) => Promise<{
     path: string;
     originalContent: string;
@@ -128,10 +130,15 @@ export interface UseFileEditorOutput {
   /** 单击默认 preview；双击传 permanent */
   viewFilePath: (path: string, openMode?: EditorTabOpenMode) => void;
   diffFilePath: (path: string, originalContent?: string, content?: string) => void;
-  openWorkspaceFileDiff: (group: GitResourceGroupType, path: string) => Promise<void>;
+  openWorkspaceFileDiff: (
+    group: GitResourceGroupType,
+    path: string,
+    repoPath?: string,
+  ) => Promise<void>;
   openCommitFileDiff: (
     commit: CommitEntry,
     file: GitChangedFile,
+    repoPath?: string,
   ) => Promise<void>;
   closeGitDiff: () => void;
   gitDiffDisplayMode: WorkspaceContentOpenMode;
@@ -470,12 +477,13 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
   );
 
   const openWorkspaceFileDiffFn = useCallback(
-    async (group: GitResourceGroupType, path: string) => {
+    async (group: GitResourceGroupType, path: string, repoPath?: string) => {
       if (!activeProjectId) return;
       const projectId = activeProjectId;
       const request = ++gitDiffRequestSequenceRef.current;
       try {
-        const diff = await workspaceFileDiff(projectId, group, path);
+        // repoPath 来自 Git 侧栏当前选中仓库；缺省仍读项目根，兼容单仓。
+        const diff = await workspaceFileDiff(projectId, group, path, repoPath);
         if (
           activeProjectIdRef.current !== projectId ||
           request !== gitDiffRequestSequenceRef.current
@@ -527,7 +535,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
   );
 
   const openCommitFileDiffFn = useCallback(
-    async (commit: CommitEntry, file: GitChangedFile) => {
+    async (commit: CommitEntry, file: GitChangedFile, repoPath?: string) => {
       if (!activeProjectId) return;
       const projectId = activeProjectId;
       const request = ++gitDiffRequestSequenceRef.current;
@@ -537,6 +545,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
           commit.hash,
           file.path,
           file.originalPath,
+          repoPath,
         );
         if (
           activeProjectIdRef.current !== projectId ||

@@ -259,7 +259,8 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
     assert.match(gitSurface, /getFileIconSeti\(name\)/);
     assert.doesNotMatch(graph, /title=\{`\$\{commit\.message\}/);
     assert.match(app, /gitApi:/);
-    assert.match(app, /commitDetail=\{git\.gitApi\.commitDetail\}/);
+    assert.match(app, /<GitDrawerHost/);
+    assert.match(app, /gitApi=\{git\.gitApi\}/);
     assert.match(preload, /Promise<CommitDetail \| null>/);
     assert.match(graph, /\[--git-panel-bg:var\(--color-bg-panel\)\]/);
     assert.match(graph, /git-history-file-row grid min-h-\[26px\]/);
@@ -340,7 +341,7 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
   });
 
   test("discard flows through literal-pathspec restore and trash for untracked files", () => {
-    assert.match(preload, /discard: \(projectId: string, group: "workingTree" \| "untracked", filePath: string\)/);
+    assert.match(preload, /discard: \(projectId: string, group: "workingTree" \| "untracked", filePath: string, repoPath\?: string\)/);
     assert.match(gitIpc, /ipcChannels\.gitDiscard/);
     assert.match(gitService, /async discardFile/);
     assert.match(gitService, /"--literal-pathspecs", "add"/);
