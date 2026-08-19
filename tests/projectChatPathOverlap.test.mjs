@@ -35,7 +35,16 @@ function loadWslPaths() {
   return sandbox.exports;
 }
 
+function loadProjectPathPolicy() {
+  const sandbox = { exports: {}, require, process };
+  vm.runInNewContext(transpile("src/main/projects/projectPathPolicy.ts"), sandbox, {
+    filename: "projectPathPolicy.ts",
+  });
+  return sandbox.exports;
+}
+
 const paths = loadWslPaths();
+const pathPolicy = loadProjectPathPolicy();
 
 /** 与 wslPaths.test.mjs 同款 vm 沙箱加载 ProjectStore，userData 可参数化（真实文件 I/O 落在临时目录）。 */
 function loadProjectStore(userData) {
@@ -45,6 +54,7 @@ function loadProjectStore(userData) {
     require: (id) => {
       if (id === "electron") return { app: { getPath: () => userData }, dialog: {} };
       if (id === "../wsl/WslPaths") return paths;
+      if (id === "./projectPathPolicy") return pathPolicy;
       return require(id);
     },
   };
@@ -147,6 +157,33 @@ test("setChatProjectPath 拒绝把聊天目录指向已注册的普通项目目�
       (error) => String(error?.message ?? "").includes("CHAT_PATH_OVERLAPS_PROJECT"),
     );
     assert.equal(store.getChatProjectPath(), before, "拒绝后聊天目录不得被改动");
+  });
+});
+
+test("remove 记住路径，add 同一目录后允许再次出现", async () => {
+  await withStore(async (store, { userFolder }) => {
+    await store.load();
+    const added = await store.add(userFolder);
+    await store.remove(added.id);
+    assert.equal(store.list().some((project) => project.id === added.id), false);
+    assert.ok(store.listDismissedPaths().some((path) => path.includes("x-prd")));
+    const restored = await store.add(userFolder);
+    assert.ok(restored.id);
+    assert.equal(store.listDismissedPaths().length, 0);
+  });
+});
+
+test("load 丢掉 e2e 临时项目并记入已移除名单", async () => {
+  await withStore(async (store, { userData }) => {
+    const ephemeral = join(userData, "pideck-mockpi-abc", "profile", "chat-workspace");
+    await store.load();
+    await store.add(ephemeral);
+    assert.equal(store.list().some((project) => project.path === ephemeral), true);
+    const reloaded = loadProjectStore(userData).ProjectStore;
+    const next = new reloaded();
+    await next.load();
+    assert.equal(next.list().some((project) => project.path === ephemeral), false);
+    assert.ok(next.listDismissedPaths().some((path) => path.includes("pideck-mockpi-abc")));
   });
 });
 

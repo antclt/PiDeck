@@ -1,7 +1,7 @@
 /**
  * BrandMarkSvg — 启动页 / preload 失败页用的几何跳蛛标。
  *
- * 不用系统 PNG：圆角透明边会在浅色启动底上漏出白隙，且标内「phids」
+ * 不用系统 PNG：圆角透明边会在浅色启动底上漏出白隙，且标内字标
  * 缩到小尺寸后看不清。这里用铺满圆角方的矢量，字标放在图标外放大。
  */
 export function BrandMarkSvg(props: { className?: string; size?: number }) {

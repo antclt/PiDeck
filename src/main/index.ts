@@ -213,6 +213,8 @@ import type {
 	YaoPromptDetailResult,
 } from "../shared/types";
 import { ProjectStore } from "./projects/ProjectStore";
+import { shouldAutoRegisterForeignCwd } from "./projects/projectPathPolicy";
+import { defaultPathCheck } from "./projects/projectPresence";
 import { FileSystemService } from "./fs/FileSystemService";
 import { AgentManager } from "./pi/AgentManager";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
@@ -378,6 +380,11 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 	listForeignSessions: () => dshHost.listForeignSessions(),
 	findProjectByPath: (cwd) => projectStore.findByPath(cwd),
 	// 会话自带工作目录但侧栏还没有该项目：按该目录注册，打开会话时 cwd 才对得上。
+	// 已删记录 / e2e 临时目录 / 磁盘不存在：拒绝注册，避免「删了重启又回来」。
+	shouldRegisterCwd: async (cwd) => shouldAutoRegisterForeignCwd(cwd, {
+		dismissedPaths: projectStore.listDismissedPaths(),
+		pathExists: await defaultPathCheck(cwd),
+	}),
 	ensureProjectForCwd: (cwd) => projectStore.add(
 		cwd,
 		undefined,
@@ -1442,7 +1449,7 @@ function setupTray() {
 	// iconPath 由 electron-vite 的 ?asset 后缀自动解析，打包后也能正确定位
 	const icon = nativeImage.createFromPath(iconPath);
 	tray = new Tray(icon.resize({ width: 16, height: 16 }));
-	tray.setToolTip("phids");
+	tray.setToolTip("PiDeck");
 	// C12：退出清理登记（before-quit 统一 runAll）
 	quitCleanup.register("tray", () => {
 		tray?.destroy();
@@ -1699,8 +1706,8 @@ async function createWindow() {
 		minHeight: 640,
 		// 多 worktree 并行 dev：标题带分支名，任务栏/Alt-Tab 一眼区分窗口
 		title: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch)
-			? `phids · ${devGitBranch}`
-			: "phids",
+			? `PiDeck · ${devGitBranch}`
+			: "PiDeck",
 		icon: iconPath,
 		frame: windowOptions.frame,
 		titleBarStyle: windowOptions.titleBarStyle,
@@ -2409,6 +2416,7 @@ function registerIpc() {
 		agentManager,
 		appLogger,
 		projectResourceManager,
+		sessionCatalog,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		getMainWindow: () => mainWindow,
 	});
@@ -3001,7 +3009,11 @@ app.whenReady().then(async () => {
 		),
 		deleteProject: async (projectId) => {
 			if (!projectStore.get(projectId) || projectStore.get(projectId)?.kind === "chat") return false;
+			const childIds = projectStore.listWorktreeChildren(projectId).map((child) => child.id);
 			await projectStore.remove(projectId);
+			for (const id of [projectId, ...childIds]) {
+				await sessionCatalog.removeByProjectId(id).catch(() => 0);
+			}
 			return true;
 		},
 		listModels: () => fetchModelList(piLocator, settingsStore, configManager),
@@ -3352,6 +3364,16 @@ app.whenReady().then(async () => {
 	void projectStore
 		.load()
 		.then(async () => {
+			// load() 已丢掉 e2e 临时项目；对应 catalog 映射一并清掉，侧栏会话不会再挂回来。
+			const knownProjectIds = new Set(projectStore.list().map((project) => project.id));
+			const orphanProjectIds = new Set(
+				sessionCatalog.listEntries()
+					.map((entry) => entry.projectId)
+					.filter((projectId) => !knownProjectIds.has(projectId)),
+			);
+			for (const projectId of orphanProjectIds) {
+				await sessionCatalog.removeByProjectId(projectId).catch(() => 0);
+			}
 			broadcastVisibleProjects();
 			// 项目表就绪后再扫 DSH_HOME：cwd 才能匹配已注册项目；不启动 host。
 			await scheduleDshForeignAutoImport();

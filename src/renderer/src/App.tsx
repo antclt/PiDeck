@@ -22,7 +22,6 @@ import {
   GitBranch,
 } from "lucide-react";
 import { showNotice } from "./utils/notice";
-import { BrandMarkSvg } from "./components/app/BrandMarkSvg";
 import {
   desktopApi as api,
   isLanWeb,
@@ -176,11 +175,25 @@ export function App() {
   if (missingElectronPreload) {
     return (
       <div className="boot-screen root-loading">
-        {/* 与启动页同一枚铺满 SVG，避免 PNG 圆角透明边漏白。 */}
+        {/* 与 EmptyState / index.html 启动标同一套 π path */}
         <div className="boot-logo root-loading-logo" aria-hidden="true">
-          <BrandMarkSvg size={120} />
+          <svg viewBox="140 140 520 520" width="48" height="48">
+            <defs>
+              <linearGradient id="root-loading-logo-silver" x1="0.2" y1="0" x2="0.8" y2="1">
+                <stop stopColor="#ffffff" />
+                <stop offset="0.5" stopColor="#f4f4f5" />
+                <stop offset="1" stopColor="#a7a8ab" />
+              </linearGradient>
+            </defs>
+            <path
+              fill="url(#root-loading-logo-silver)"
+              fillRule="evenodd"
+              d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
+            />
+            <path fill="url(#root-loading-logo-silver)" d="M517.36 400H634.72V634.72H517.36Z" />
+          </svg>
         </div>
-        <strong className="text-[40px] font-bold tracking-[0.06em]">phids</strong>
+        <strong className="text-[40px] font-bold tracking-[0.06em]">PiDeck</strong>
         <span>{t("app.preloadMissing")}</span>
       </div>
     );
@@ -1444,7 +1457,7 @@ export function App() {
       .then((info) => {
         setAppInfo(info);
         // 与窗口标题一致：开发态功能分支时文档标题带分支名
-        document.title = info.devBranch ? `phids · ${info.devBranch}` : "phids";
+        document.title = info.devBranch ? `PiDeck · ${info.devBranch}` : "PiDeck";
       })
       .catch(() => undefined);
     void api.settings.get().then((next) => {

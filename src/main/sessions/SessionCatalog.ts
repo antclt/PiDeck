@@ -574,6 +574,24 @@ export class SessionCatalog {
 		});
 	}
 
+	/**
+	 * 删除侧栏项目时清掉该项目下全部 catalog 映射（含 DSH 导入）。
+	 * host 会话文件仍在 $DSH_HOME，但不再自动挂回侧栏；用户手动导入才会再出现。
+	 */
+	async removeByProjectId(projectId: string): Promise<number> {
+		this.assertLoaded();
+		for (const [id, entry] of this.transientEntries) {
+			if (entry.projectId === projectId) this.transientEntries.delete(id);
+		}
+		return this.enqueueMutation((entries) => {
+			const next = entries.filter((entry) => entry.projectId !== projectId);
+			const removed = entries.length - next.length;
+			if (removed === 0) return { value: 0, changed: false };
+			entries.splice(0, entries.length, ...next);
+			return { value: removed, changed: true };
+		});
+	}
+
 	async removeByFilePath(
 		filePath: string,
 		environment: SessionEnvironment,

@@ -9,6 +9,7 @@ import {
   WslPathError,
   type WslEnvironment,
 } from "../wsl/WslPaths";
+import { isEphemeralProjectPath, projectPathKey } from "./projectPathPolicy";
 
 const CHAT_PROJECT_ID = "builtin-chat";
 const CHAT_PROJECT_NAME = "Chat";
@@ -18,9 +19,12 @@ export class ProjectStore {
   private static readonly EXTERNAL_PROJECT_ID = "builtin-external";
   private readonly filePath = join(app.getPath("userData"), "projects.json");
   private readonly chatPathFile = join(app.getPath("userData"), "chat-path.json");
+  /** 用户从侧栏移除过的目录：启动自动导入不得再按会话 cwd 把它们加回。 */
+  private readonly dismissedFilePath = join(app.getPath("userData"), "dismissed-project-paths.json");
   // 聊天工作区目录：默认在 userData 下，用户可在侧栏聊天项目设置中改为任意目录并持久化。
   private chatProjectPath = join(app.getPath("userData"), "chat-workspace");
   private projects: Project[] = [];
+  private dismissedPaths: string[] = [];
 
   constructor(private readonly chooseProjectTitle: () => string = () => "Choose project folder") {}
 
@@ -33,11 +37,14 @@ export class ProjectStore {
     }
     // 先读取用户自定义的聊天目录（若存在），再据此修正内置聊天项目路径。
     await this.loadChatProjectPath();
+    await this.loadDismissedPaths();
     const chatChanged = this.ensureChatProject();
     const orderChanged = this.ensureSortOrder();
-    const changed = chatChanged || orderChanged;
+    const ephemeralRemoved = this.dropEphemeralProjects();
+    const changed = chatChanged || orderChanged || ephemeralRemoved.length > 0;
     await mkdir(this.chatProjectPath, { recursive: true });
     if (changed) await this.save();
+    if (ephemeralRemoved.length > 0) await this.saveDismissedPaths();
     return this.list();
   }
 
@@ -83,6 +90,39 @@ export class ProjectStore {
     await mkdir(normalized, { recursive: true });
     await this.save();
     return chat ?? null;
+  }
+
+  private rememberDismissedPath(path: string) {
+    const key = projectPathKey(path);
+    if (!key) return;
+    if (this.dismissedPaths.some((item) => projectPathKey(item) === key)) return;
+    this.dismissedPaths.push(path);
+  }
+
+  private forgetDismissedPath(path: string) {
+    const key = projectPathKey(path);
+    this.dismissedPaths = this.dismissedPaths.filter((item) => projectPathKey(item) !== key);
+  }
+
+  private async loadDismissedPaths() {
+    try {
+      const raw = await readFile(this.dismissedFilePath, "utf8");
+      const parsed = JSON.parse(raw) as { paths?: unknown };
+      this.dismissedPaths = Array.isArray(parsed.paths)
+        ? parsed.paths.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [];
+    } catch {
+      this.dismissedPaths = [];
+    }
+  }
+
+  private async saveDismissedPaths() {
+    await mkdir(app.getPath("userData"), { recursive: true });
+    await writeFile(
+      this.dismissedFilePath,
+      JSON.stringify({ paths: this.dismissedPaths }, null, 2),
+      "utf8",
+    );
   }
 
   /** 读取用户自定义的聊天目录；不存在或解析失败时回退到默认 chat-workspace。 */
@@ -137,7 +177,9 @@ export class ProjectStore {
         existing.worktreeParentId = worktreeParentId;
         existing.pinned = false;
       }
+      this.forgetDismissedPath(normalizedPath);
       await this.save();
+      await this.saveDismissedPaths();
       return existing;
     }
 
@@ -153,16 +195,54 @@ export class ProjectStore {
     };
 
     this.projects.push(project);
+    // 用户再次手动添加同一目录：从「已移除」名单拿掉，允许以后自动导入。
+    this.forgetDismissedPath(normalizedPath);
     await this.save();
+    await this.saveDismissedPaths();
     return project;
   }
 
   async remove(id: string) {
+    const removed = this.projects.filter((project) =>
+      project.id === id || project.worktreeParentId === id,
+    );
     // 删除父项目时同步移除子项目记录，避免留下不可见的孤儿 worktree 项目。
     this.projects = this.projects.filter(project =>
       (project.id !== id && project.worktreeParentId !== id) || this.isChatProject(project),
     );
+    for (const project of removed) {
+      if (!this.isChatProject(project) && project.path) {
+        this.rememberDismissedPath(project.path);
+      }
+    }
     await this.save();
+    await this.saveDismissedPaths();
+  }
+
+  /** 用户已从侧栏移除的目录（供启动自动导入判断是否按 cwd 重建项目）。 */
+  listDismissedPaths(): string[] {
+    return [...this.dismissedPaths];
+  }
+
+  /**
+   * 丢掉 e2e/临时隔离目录项目（如 %TEMP%/pideck-mockpi-*）。
+   * 这些路径本就不该进入开发者本机侧栏；启动时清掉并记入已移除名单，
+   * 避免 DSH 自动导入按 cwd 再注册。返回被删项目 id。
+   */
+  dropEphemeralProjects(): string[] {
+    const removedIds: string[] = [];
+    const kept: Project[] = [];
+    for (const project of this.projects) {
+      if (!this.isChatProject(project) && project.path && isEphemeralProjectPath(project.path)) {
+        removedIds.push(project.id);
+        this.rememberDismissedPath(project.path);
+        continue;
+      }
+      kept.push(project);
+    }
+    if (removedIds.length === 0) return [];
+    this.projects = kept;
+    return removedIds;
   }
 
   async reorder(projectIds: string[]) {

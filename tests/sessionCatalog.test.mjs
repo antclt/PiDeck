@@ -879,6 +879,35 @@ test("ensureRuntimeTarget absolutizes relative session paths", async () => {
   }
 });
 
+test("removeByProjectId drops every catalog entry for a removed sidebar project", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-remove-project-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    await catalog.createDraft({
+      projectId: "gone-project",
+      title: "Keep me out",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-gone",
+    });
+    await catalog.createDraft({
+      projectId: "keep-project",
+      title: "Stay",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-keep",
+    });
+    const removed = await catalog.removeByProjectId("gone-project");
+    assert.equal(removed, 1);
+    assert.equal(catalog.listEntries().length, 1);
+    assert.equal(catalog.listEntries()[0].projectId, "keep-project");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("parentSessionPath survives reload: getRecord/listEntries rebuild keeps the subagent tree link", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-parent-path-"));

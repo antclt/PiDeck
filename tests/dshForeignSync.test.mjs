@@ -72,6 +72,7 @@ async function createFixture(foreignItems, knownIds = new Set()) {
         : cwd === "C:/repo/beta" ? { id: "project-beta" }
           : registeredByCwd.get(cwd) ?? null
     ),
+    shouldRegisterCwd: async () => true,
     ensureProjectForCwd: async (cwd) => {
       const existing = registeredByCwd.get(cwd);
       if (existing) return existing;
@@ -263,6 +264,46 @@ test("re-importing the same dshSessionId updates in place instead of duplicating
     const persisted = fixture.catalog.listEntries()[0];
     assert.equal(persisted.title, "新标题");
     assert.equal(persisted.projectId, "project-beta");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("importForeignSession skips a cwd that the caller refuses to auto-register", async () => {
+  const fixture = await createFixture([]);
+  fixture.deps.shouldRegisterCwd = async () => false;
+  try {
+    await assert.rejects(
+      () => fixture.sync.importForeignSession(
+        fixture.deps,
+        "session-gone",
+        foreignItem({ dshSessionId: "session-gone", cwd: "C:/Temp/pideck-mockpi-abc/profile/chat-workspace" }),
+      ),
+      /FOREIGN_CWD_NOT_REGISTERED/,
+    );
+    assert.equal(fixture.catalog.listEntries().length, 0);
+    assert.equal(fixture.fallbackCreated, 0, "拒绝注册的 cwd 不得掉进「外部会话」兑底");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("syncForeignSessions skips dismissed or missing cwds without recreating projects", async () => {
+  const fixture = await createFixture([
+    foreignItem({
+      dshSessionId: "session-e2e",
+      title: "chat-workspace",
+      cwd: "C:/Temp/pideck-mockpi-abc/profile/chat-workspace",
+    }),
+    foreignItem({ dshSessionId: "session-keep", title: "Keep", cwd: "C:/repo/alpha" }),
+  ]);
+  fixture.deps.shouldRegisterCwd = async (cwd) => cwd === "C:/repo/alpha";
+  try {
+    const result = await fixture.sync.syncForeignSessions(fixture.deps);
+    assert.equal(result.imported, 1);
+    assert.equal(result.skipped, 1);
+    const ids = fixture.catalog.listEntries().map((entry) => entry.dshSessionId);
+    assert.equal(ids.join(","), "session-keep");
   } finally {
     await fixture.cleanup();
   }

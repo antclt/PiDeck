@@ -129,7 +129,6 @@ import {
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { normalizeSessionPathForCompare } from "../../agentListDisplay";
 import { t } from "../../i18n";
-import { brandMarkSrc } from "../app/brandMark";
 import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
 import {
@@ -453,21 +452,7 @@ function formatCompact(value?: number | null) {
 	return String(value);
 }
 
-export function LogoMark({ size = 32 }: { size?: number } = {}) {
-	// 正式标本身已是圆角黑底 + 几何跳蛛；再套一层黑方会叠框。
-	// size 默认 32（错误页）；起始页 / 空态传 72 放大品牌存在感。
-	return (
-		<img
-			src={brandMarkSrc}
-			alt={t("app.logoLabel")}
-			width={size}
-			height={size}
-			draggable={false}
-			className="logo-mark block shrink-0 rounded-[22%] shadow-sm"
-			style={{ width: size, height: size }}
-		/>
-	);
-}
+export { LogoMark } from "../app/LogoMark";
 
 
 export function AgentAvatar(props: { status: string }) {

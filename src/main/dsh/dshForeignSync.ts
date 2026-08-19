@@ -8,6 +8,8 @@ import type { SessionRecord } from "../../shared/types";
  * - 幂等由 SessionCatalog.createDraft 的 dshSessionId 去重保证（重复导入只更新不新增）；
  * - 目标项目按会话自己的 cwd：已注册则挂入该项目，未注册则按该目录创建项目；
  *   只有没有 cwd 的会话才进入「外部会话」兑底项目（不能把不同目录堆在一起）；
+ * - shouldRegisterCwd=false（已删记录 / 临时隔离目录 / 磁盘不存在）时跳过该条，
+ *   既不建项目也不兑底，避免侧栏「删了重启又回来」；
  * - 标题优先官方投影缓存 / 日志 session/title / 首条提示回退；再缺才用 cwd 末段或 i18n。
  * - 批量同步禁止走 resolveHostTitle / sessions.history：那会 attach 冷会话，
  *   与 dsh-web 抢同一份 DSH_HOME（官方不支持双 host）。
@@ -41,6 +43,11 @@ export type DshForeignSyncDeps = {
 	 * 缺省则退回兑底（测试/旧装配）；生产必须提供，否则不同目录会堆在一起。
 	 */
 	ensureProjectForCwd?: (cwd: string) => Promise<{ id: string }>;
+	/**
+	 * 自动导入是否允许按该 cwd 建项目。
+	 * 返回 false 时本条会话跳过（不兑底、不注册），避免已删/临时/缺失目录重启后复活。
+	 */
+	shouldRegisterCwd?: (cwd: string) => boolean | Promise<boolean>;
 	/** catalog 映射写入（幂等：同 dshSessionId 已存在时更新并返回既有记录）。 */
 	createDraft: (input: {
 		projectId: string;
@@ -222,8 +229,14 @@ export async function resolveForeignProjectId(
 ): Promise<string> {
 	const picked = pickProjectForForeignSession(item, deps.findProjectByPath, "__fallback__");
 	if (picked.matched && picked.projectId) return picked.projectId;
-	if (picked.cwdToRegister && deps.ensureProjectForCwd) {
-		return (await deps.ensureProjectForCwd(picked.cwdToRegister)).id;
+	if (picked.cwdToRegister) {
+		if (deps.shouldRegisterCwd && !(await deps.shouldRegisterCwd(picked.cwdToRegister))) {
+			// 已删记录 / 临时隔离目录 / 磁盘不存在：不建项目、也不塞进兑底。
+			throw new Error("FOREIGN_CWD_NOT_REGISTERED");
+		}
+		if (deps.ensureProjectForCwd) {
+			return (await deps.ensureProjectForCwd(picked.cwdToRegister)).id;
+		}
 	}
 	// 无 cwd，或装配未提供按目录建项目（测试/旧路径）才兑底。
 	return (await deps.ensureFallbackProject()).id;
@@ -250,6 +263,11 @@ export async function syncForeignSessions(
 			if (alreadyKnown) skipped += 1;
 			else imported += 1;
 		} catch (error) {
+			// 主动拒绝注册的 cwd 计入 skipped：不是导入失败，侧栏也不应出现。
+			if (error instanceof Error && error.message === "FOREIGN_CWD_NOT_REGISTERED") {
+				skipped += 1;
+				continue;
+			}
 			deps.onError?.(item.dshSessionId, error);
 		}
 	}

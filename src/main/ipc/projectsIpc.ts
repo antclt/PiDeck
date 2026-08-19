@@ -7,6 +7,7 @@ import type { WorktreeService } from "../git/WorktreeService";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
+import type { SessionCatalog } from "../sessions/SessionCatalog";
 import { attachProjectPresence } from "../projects/projectPresence";
 import { registerProjectResourceIpc } from "./projectResourceIpc";
 
@@ -18,6 +19,7 @@ export type ProjectsIpcDeps = {
 	agentManager: AgentManager;
 	appLogger: AppLogger;
 	projectResourceManager: ProjectResourceManager;
+	sessionCatalog?: SessionCatalog;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	getMainWindow: () => BrowserWindow | null;
 };
@@ -30,6 +32,7 @@ export function registerProjectsIpc({
 	agentManager,
 	appLogger,
 	projectResourceManager,
+	sessionCatalog,
 	mainCopy,
 	getMainWindow,
 }: ProjectsIpcDeps): void {
@@ -56,8 +59,18 @@ export function registerProjectsIpc({
 		if (agentManager.hasAgentForProject(id)) {
 			throw new Error("PROJECT_HAS_RUNNING_AGENT");
 		}
+		const removed = projectStore.get(id);
+		const childIds = removed
+			? projectStore.listWorktreeChildren(removed.id).map((child) => child.id)
+			: [];
 		await projectStore.remove(id);
-		void appLogger.info("project", "Project removed", { projectId: id });
+		// 侧栏项目删了，catalog 映射也必须走：否则启动 DSH 自动导入按 cwd 再把项目/会话加回来。
+		if (sessionCatalog) {
+			for (const projectId of [id, ...childIds]) {
+				await sessionCatalog.removeByProjectId(projectId).catch(() => 0);
+			}
+		}
+		void appLogger.info("project", "Project removed", { projectId: id, path: removed?.path });
 		return getVisibleProjects();
 	});
 	ipcMain.handle(

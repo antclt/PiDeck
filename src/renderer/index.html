@@ -50,27 +50,30 @@
 
       .boot-logo {
         position: relative;
-        width: 120px;
-        height: 120px;
+        width: 88px;
+        height: 88px;
         display: grid;
         place-items: center;
-        /* SVG 已铺满圆角方，外层只留光晕，不再叠第二层黑底。 */
-        background: transparent;
-        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.3);
+        border-radius: 22px;
+        /* 与 LogoMark / 任务栏一致的黑底 π 标 */
+        background: linear-gradient(145deg, #1c1c1e, #000000);
+        box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.18) inset,
+          0 14px 32px rgba(15, 23, 42, 0.28),
+          0 2px 8px rgba(15, 23, 42, 0.08);
       }
       .boot-logo::after {
         content: "";
         position: absolute;
-        inset: -12px;
-        border-radius: 34px;
+        inset: -10px;
+        border-radius: 28px;
         border: 1px solid rgba(15, 23, 42, 0.14);
         animation: boot-ring 1.8s ease-out infinite;
         pointer-events: none;
       }
       .boot-logo svg {
-        width: 120px;
-        height: 120px;
-        display: block;
+        width: 48px;
+        height: 48px;
       }
 
       .boot-title {
@@ -178,36 +181,19 @@
     <div id="boot-overlay">
       <div class="boot-brand">
         <div class="boot-logo">
-          <!-- 铺满圆角方的几何跳蛛，避免 PNG 透明边漏白；字标放在图标外放大 -->
-          <svg viewBox="0 0 120 120" width="120" height="120" aria-hidden="true">
+          <svg viewBox="140 140 520 520" aria-hidden="true">
             <defs>
-              <linearGradient id="boot-mark-bg" x1="0" y1="0" x2="1" y2="1">
-                <stop stop-color="#161719" />
-                <stop offset="0.58" stop-color="#050506" />
-                <stop offset="1" stop-color="#000000" />
-              </linearGradient>
-              <linearGradient id="boot-mark-shine" x1="0.3" y1="0" x2="0.7" y2="1">
-                <stop stop-color="#ffffff" stop-opacity="0.16" />
-                <stop offset="0.55" stop-color="#ffffff" stop-opacity="0" />
+              <linearGradient id="boot-logo-silver" x1="0.2" y1="0" x2="0.8" y2="1">
+                <stop stop-color="#ffffff"/>
+                <stop offset="0.5" stop-color="#f4f4f5"/>
+                <stop offset="1" stop-color="#a7a8ab"/>
               </linearGradient>
             </defs>
-            <rect width="120" height="120" rx="26" fill="url(#boot-mark-bg)" />
-            <rect width="120" height="58" rx="26" fill="url(#boot-mark-shine)" />
-            <g fill="#f4f4f5">
-              <ellipse cx="60" cy="50" rx="17" ry="15" />
-              <ellipse cx="60" cy="72" rx="11" ry="13" />
-              <path d="M47 40 24 16 34 14 54 38Z" />
-              <path d="M43 48 12 34 20 28 46 46Z" />
-              <path d="M43 60 12 76 20 82 46 62Z" />
-              <path d="M49 70 28 98 38 100 56 72Z" />
-              <path d="M73 40 96 16 86 14 66 38Z" />
-              <path d="M77 48 108 34 100 28 74 46Z" />
-              <path d="M77 60 108 76 100 82 74 62Z" />
-              <path d="M71 70 92 98 82 100 64 72Z" />
-            </g>
+            <path fill="url(#boot-logo-silver)" fill-rule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"/>
+            <path fill="url(#boot-logo-silver)" d="M517.36 400H634.72V634.72H517.36Z"/>
           </svg>
         </div>
-        <strong class="boot-title">phids</strong>
+        <strong class="boot-title">PiDeck</strong>
         <span class="boot-subtitle">正在启动工作台…</span>
       </div>
       <div class="boot-progress" aria-hidden="true">

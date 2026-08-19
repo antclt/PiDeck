@@ -423,8 +423,6 @@ export function ConfirmDialog(props: {
 	return <ShadcnConfirmDialog {...props} />;
 }
 
-import { JumpingSpiderLogo } from "./JumpingSpiderLogo";
-
 // ============================================================
 // Re-exports from Surface domain (session rendering components)
 // 保持旧 import 路径继续工作
@@ -477,20 +475,20 @@ function loadDevBranch(): Promise<string | undefined> {
 }
 
 /**
- * Brand lockup：品牌字标统一为 "phids" + 正式几何跳蛛标（与任务栏图标同源）。
- * 分支名不再上视觉（并行 worktree 窗口区分改由 title/aria-label 承载，避免视觉噪声）。
+ * Brand lockup：官方 pi 风格 canvas logo + PiDeck 字标。
+ * 分支名不上视觉（并行 worktree 窗口区分改由 title/aria-label 承载，避免视觉噪声）。
  */
 export function BrandLockup(props: { replayToken?: number } = {}) {
 	const [branch, setBranch] = useState<string | undefined>(undefined);
 	useEffect(() => {
 		void loadDevBranch().then(setBranch);
 	}, []);
-	const brandTitle = branch ? `phids · ${branch}` : "phids";
+	const brandTitle = branch ? `PiDeck · ${branch}` : "PiDeck";
 	return (
 		<div className="brand-lockup flex h-full min-w-0 items-center gap-2" aria-label={brandTitle} title={branch ? brandTitle : undefined}>
-			<JumpingSpiderLogo className="size-5 shrink-0" />
+			<PiLogoCanvas size={28} autoPlay playOnClick replayToken={props.replayToken} />
 			{/* 视觉变形只作用于字标本身，品牌语义仍由外层 aria-label 保留。 */}
-			<span className="brand-wordmark translate-x-0.5 truncate text-[18px] font-[PiDeckDepartureMono] font-normal leading-none text-zinc-950 dark:text-white" aria-hidden="true">phids</span>
+			<span className="brand-wordmark translate-x-0.5 truncate text-[18px] font-[PiDeckDepartureMono] font-normal uppercase leading-none text-zinc-950 dark:text-white" aria-hidden="true">PiDeck</span>
 		</div>
 	);
 }

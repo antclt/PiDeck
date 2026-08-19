@@ -2,7 +2,8 @@
 export { SessionStatus, UserBubble, stripMarkdown } from "./SurfaceComponents";
 export { TurnRow } from "./turn";
 export { ConversationOutline, EmptyState } from "./SurfaceComponents";
-export { LogoMark, AgentAvatar } from "./SurfaceComponents";
+export { LogoMark } from "../app/LogoMark";
+export { AgentAvatar } from "./SurfaceComponents";
 export { AskQuestionCard, CompactionCard, DiagnosticMessageCard } from "./SurfaceComponents";
 export { MultiSelectModal, RespondingIndicator, ThinkingBlock } from "./SurfaceComponents";
 export { AssistantText, ToolCard, ToolGroupCard } from "./SurfaceComponents";

@@ -20,7 +20,7 @@ import type { AgentUiResponse } from "../../../shared/types";
 import { MarkdownStream } from "@/components/session/MarkdownStream";
 import { SingleLinePreview } from "@/components/session/SingleLinePreview";
 import { TimelineMarker } from "../components/session/TimelineMarker";
-import { JumpingSpiderLogo } from "../components/app/JumpingSpiderLogo";
+import { LogoMark } from "../components/app/LogoMark";
 
 /** 用户消息右对齐气泡（结构与桌面 UserBubble 一致，去掉操作栏/附件能力）。 */
 export const WebUserBubble = memo(function WebUserBubble(props: { message: UIMessage }) {
@@ -339,14 +339,14 @@ export function WebTimeline(props: {
 				{!hasActiveSession && messages.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-logo">
-							<JumpingSpiderLogo className="size-[66px]" />
+							<LogoMark size={66} />
 						</div>
 						<p className="empty-hint">{t("web.emptySelection")}</p>
 					</div>
 				) : messages.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-logo">
-							<JumpingSpiderLogo className="size-[66px]" />
+							<LogoMark size={66} />
 						</div>
 						<p className="empty-hint">{t("web.noMessages")}</p>
 					</div>
