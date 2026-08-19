@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { getAppLogger } from "../logging/sharedLogger";
+import { applyProxyEnvPatch, type HostProxyEnvPatch } from "../sessions/sessionProxyPolicy";
 import { DshHostProcess, resolveHostEntryPath } from "./DshHostProcess";
 import { DshApiClient, type DshFetchTransport } from "./DshApiClient";
 import { toDshAvailableModels } from "./dshModels";
@@ -66,6 +67,12 @@ export class DshHost {
 			(scope, message, detail) => getAppLogger()?.info(scope, message, detail),
 		/** DSH_HOME 覆盖目录 getter（设置里 dshHomeDir）；空串/undefined = 自动（~/.dsh 优先）。 */
 		private readonly getDshHomeOverride: () => string | undefined = () => undefined,
+		/**
+		 * DSH host 级代理 env patch 解析（由 main/index.ts 聚合所有 DSH 会话的覆盖生成；
+		 * set = 注入键值，unset = 从继承环境剥离的键）。缺省 = 沿用现有行为（不注入代理 env）。
+		 * 只在 host fork 时生效：运行中变更需 host 重启/下次启动才应用（DSH 无 per-session 通道）。
+		 */
+		private readonly resolveHostProxyEnvPatch: () => HostProxyEnvPatch | undefined = () => undefined,
 	) {}
 
 	/** 订阅 host-ready（首次启动与崩溃自动重启；E4：崩溃后恢复运行时状态）。 */
@@ -639,6 +646,13 @@ export class DshHost {
 		const appRoot = dirname(dirname(dirname(require.resolve("@deepseek-ai/dsh-base/package.json"))));
 		const hostEntryPath = resolveHostEntryPath(this.getAppPath());
 
+		// 会话级代理覆盖（DSH 降级方案）：DSH 是单一共享 host，无法按会话注入，
+		// 只能聚合所有 DSH 会话的开关应用到 host（off 优先于 on，见 sessionProxyPolicy）。
+		// patch 仅在 fork 时生效：运行中变更需 host 重启后才应用（dsh 读取与否属其内部实现）。
+		const forkEnv = buildDshHostForkEnv();
+		const proxyPatch = this.resolveHostProxyEnvPatch();
+		if (proxyPatch) applyProxyEnvPatch(forkEnv, proxyPatch);
+
 		const hostProcess = new DshHostProcess(
 			hostEntryPath,
 			[
@@ -650,7 +664,7 @@ export class DshHost {
 			// 近空环境运行（无 PATH/SystemRoot 等），host 内 spawn 的 bash/pwsh 子进程
 			// 依赖这些变量。改为继承主进程环境并剔除 Electron/Node 宿主注入类变量
 			// （ELECTRON_*/NODE_OPTIONS），避免污染 DSH 子进程树。
-			buildDshHostForkEnv(),
+			forkEnv,
 			(scope, message, detail) => this.log(scope, message, detail),
 		);
 		this.hostProcess = hostProcess;

@@ -15,6 +15,7 @@ import type {
 	SessionSource,
 	SessionSummary,
 } from "../../shared/types";
+import type { SessionProxyOverride } from "../../shared/types/session";
 import { getAppLogger } from "../logging/sharedLogger";
 import { renameWithRetry } from "../utils/fsRetry";
 import {
@@ -50,6 +51,8 @@ export type SessionCatalogEntry = {
 	dshSessionId?: string;
 	/** DSH 权限预设（read-only/workspace-write/danger-full-access）：草稿期预选，激活时应用。 */
 	permissionPreset?: string;
+	/** 会话级代理覆盖（缺省 = 跟随全局）。DSH 会话的设置在 host 启动时被聚合应用。 */
+	proxy?: SessionProxyOverride;
 	createdAt: number;
 	updatedAt: number;
 };
@@ -478,6 +481,7 @@ export class SessionCatalog {
 			model?: { provider: string; modelId: string } | null;
 			thinkingLevel?: string | null;
 			permissionPreset?: string | null;
+			proxy?: SessionProxyOverride | null;
 		},
 	): Promise<SessionRecord> {
 		this.assertLoaded();
@@ -488,6 +492,8 @@ export class SessionCatalog {
 			if (patch.thinkingLevel !== undefined) transient.thinkingLevel = patch.thinkingLevel ?? undefined;
 			if (patch.permissionPreset !== undefined) transient.permissionPreset = patch.permissionPreset ?? undefined;
 			if (patch.backend !== undefined) transient.backend = patch.backend;
+			// null = 清除覆盖恢复跟随全局
+			if (patch.proxy !== undefined) transient.proxy = patch.proxy ?? undefined;
 			transient.updatedAt = patch.updatedAt ?? Date.now();
 			return this.recordFromEntry(transient);
 		}
@@ -498,6 +504,8 @@ export class SessionCatalog {
 			if (patch.thinkingLevel !== undefined) nextEntry.thinkingLevel = patch.thinkingLevel ?? undefined;
 			if (patch.permissionPreset !== undefined) nextEntry.permissionPreset = patch.permissionPreset ?? undefined;
 			if (patch.backend !== undefined) nextEntry.backend = patch.backend;
+			// null = 清除覆盖恢复跟随全局
+			if (patch.proxy !== undefined) nextEntry.proxy = patch.proxy ?? undefined;
 			nextEntry.updatedAt = patch.updatedAt ?? Date.now();
 			return { value: cloneEntry(nextEntry), changed: true };
 		});
@@ -754,6 +762,7 @@ export class SessionCatalog {
 			thinkingLevel: entry.thinkingLevel,
 			permissionPreset: entry.permissionPreset,
 			dshSessionId: entry.dshSessionId,
+			proxy: entry.proxy ? { ...entry.proxy } : undefined,
 			createdAt: entry.createdAt,
 			updatedAt: summary?.updatedAt ?? entry.updatedAt,
 			wsl: summary?.wsl,

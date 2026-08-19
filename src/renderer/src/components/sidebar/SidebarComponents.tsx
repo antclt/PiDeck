@@ -518,6 +518,8 @@ export function SessionContextMenu(props: {
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
 	onOpenSessionFile?: () => void;
+	/** 打开会话代理设置弹框（菜单项「会话代理」） */
+	onOpenProxySetting?: () => void;
 	/** 会话是否有文件路径（DSH 会话无 pi 会话文件：隐藏「复制路径/打开文件」） */
 	hasFilePath?: boolean;
 	/** RPC 日志菜单组（与 AgentContextMenu 同语义）：仅会话有 live runtime 时显示 */
@@ -539,6 +541,7 @@ export function SessionContextMenu(props: {
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
 			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>{t("common.rename")}</DropdownMenuItem>
 			{/* DSH 历史会话无宿主文件可复制/导出（主进程显式拒绝，A8/A9）：隐藏入口 */}
+			<DropdownMenuItem disabled={busy} onSelect={props.onOpenProxySetting}>{t("menu.sessionProxy")}</DropdownMenuItem>
 			{props.menu.session.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
 					{props.actionLoading === "copy" && <span className="mini-loader" />}

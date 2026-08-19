@@ -384,6 +384,12 @@ export class AgentManager {
 		 * 用它跳转在 renderer 永远解析不到会话。
 		 */
 		private readonly resolveSessionId?: (agentId: string) => string | undefined,
+		/**
+		 * 会话 key（SessionRecord.id 或会话文件路径）→ 会话级代理覆盖模式（follow/on/off）。
+		 * 由 main/index.ts 注入 catalog 查询；缺省/未命中 = 跟随全局。与 isFeishuSession 使用
+		 * 同一 key（securitySessionKey ?? sessionPath），保证 create/reattach/临时会话行为一致。
+		 */
+		private readonly resolveSessionProxy?: (sessionKey: string | undefined) => import("../../shared/types/session").SessionProxyMode | undefined,
 	) {
 		this.messageProjector = new AgentMessageProjector({
 			translate: this.translate,
@@ -441,6 +447,9 @@ export class AgentManager {
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,
+			// 会话级代理覆盖：spawn 时按会话记录覆盖全局设置（on → 强制代理 / off → 强制直连）。
+			// 与 securitySessionId 用同一 key，匿名会话（noSession）无 key → 跟随全局。
+			proxyOverride: this.resolveSessionProxy?.(securitySessionKey ?? sessionPath),
 			// 飞书绑定会话：ask_question 禁用（扩展读 PIDECK_FEISHU_LINKED）。
 			// 查询用与 securitySessionId 相同的会话 key，保证与 FeishuBridge 的 sessionId 索引一致。
 			feishuLinked: this.isFeishuSession?.(securitySessionKey ?? sessionPath) ?? false,

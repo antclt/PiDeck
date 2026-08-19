@@ -10,9 +10,11 @@ import {
   type ParkedExtension,
 } from "./piExtensionFilter";
 import type { AppSettings } from "../../shared/types";
+import type { SessionProxyMode } from "../../shared/types/session";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { appendBuiltInExtensionArgs } from "../extensions/builtInExtensions";
 import { getAppLogger } from "../logging/sharedLogger";
+import { applyPiProxyMode } from "../sessions/sessionProxyPolicy";
 
 type PiProcessSettings = Pick<
   AppSettings,
@@ -60,6 +62,11 @@ type PiProcessOptions = {
    * 因此 spawn 时判断可靠；绑定后已运行的会话需重启才生效（解绑后同样持续到重启）。
    */
   feishuLinked?: boolean;
+  /**
+   * 会话级代理覆盖（单会话开关）：on = 强制启用（复用全局 piProxyUrl），
+   * off = 强制直连；缺省/follow = 跟随全局设置。仅在本进程 spawn 时生效。
+   */
+  proxyOverride?: SessionProxyMode;
   /**
    * spawn pi 前对会话文件的预检/修复回调（如剔除旧版 PiDeck 私有 sessionName 头行，
    * 该行会让 pi 报 "Session file is not a valid pi session" 并 exit 1）。
@@ -339,7 +346,15 @@ export class PiProcess extends EventEmitter {
     //   扩展仅用它做 sessionLevels 字典查表，从不 fs 打开——任何模式都原样注入，绝不能做路径转换：
     //   UUID 既非 UNC/盘符/绝对 Linux 路径，喂给 toWslLinuxPath 会抛 INVALID_WSL_PATH，
     //   导致 WSL 下临时会话（deckSessionId=UUID、无 sessionPath 兜底）在 spawn 前就崩、起不来。
-    const env = this.locator.createProcessEnv(this.settings, invocation.pathPrefix, invocation.wsl);
+    // 会话级代理覆盖：先按单会话开关改写设置（on/off），再走 createProcessEnv 注入标准代理 env。
+    const effectiveSettings = applyPiProxyMode(this.settings, this.options.proxyOverride);
+    if (this.options.proxyOverride === "on" && this.settings && !this.settings.piProxyUrl.trim()) {
+      // on 但全局 URL 为空：applyPiProxyEnv 会因空 URL 直接放行（直连），留日志便于排查。
+      void getAppLogger()?.warn("pi-process", "Session proxy override 'on' but global proxy URL is empty: falling back to direct", {
+        sessionKey: this.options.securitySessionId,
+      });
+    }
+    const env = this.locator.createProcessEnv(effectiveSettings, invocation.pathPrefix, invocation.wsl);
     if (this.options.securitySnapshotPath) {
       env.PIDECK_SECURITY_CONFIG = command.startsWith("wsl://")
         ? toWslLinuxPath(this.options.securitySnapshotPath, { distro: this.settings?.wslDistro ?? "" })

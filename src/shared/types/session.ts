@@ -68,6 +68,19 @@ export type FileTreeNode = {
 export type SessionSource = "pi" | "codex" | "claude" | "opencode";
 export type SessionEnvironment = "native" | "wsl";
 
+/**
+ * 会话级代理覆盖模式（单会话开关，复用全局代理 URL，不存每会话 URL）：
+ * - follow：跟随全局代理设置（缺省值，旧数据自然兼容）；
+ * - on：强制启用代理（即使全局开关关闭，URL 仍取自全局 piProxyUrl）；
+ * - off：强制直连（即使全局开着代理，本会话也不走任何代理）。
+ */
+export type SessionProxyMode = "follow" | "on" | "off";
+
+/** 会话级代理覆盖；对象结构便于未来按会话扩展 url/bypass 字段而不破坏兼容。 */
+export type SessionProxyOverride = {
+	mode: SessionProxyMode;
+};
+
 export type SessionSummary = {
 	id: string;
 	filePath: string;
@@ -127,6 +140,8 @@ export type SessionRecord = {
 	permissionPreset?: string;
 	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
 	dshSessionId?: string;
+	/** 会话级代理覆盖（缺省 = 跟随全局）；沿用全局代理 URL，仅生效于下次 spawn。 */
+	proxy?: SessionProxyOverride;
 	createdAt: number;
 	updatedAt: number;
 	wsl?: boolean;
@@ -176,6 +191,8 @@ export type UpdateSessionRecordInput = {
 	/** 后端（pi/dsh）：仅草稿期可变更；会话激活（active/有 runtime）后锁定——pi 会话文件
 	 *  与 DSH session log 格式不同，中途切换会导致消息同步渲染不可靠。 */
 	backend?: import("./agent").AgentBackend;
+	/** 会话级代理覆盖；null = 恢复跟随全局（清除已保存覆盖）。 */
+	proxy?: SessionProxyOverride | null;
 };
 
 export type ForkMessage = {

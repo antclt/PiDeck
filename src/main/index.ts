@@ -241,6 +241,7 @@ import {
 	SessionCatalog,
 	canAttachRuntimeMetadata,
 } from "./sessions/SessionCatalog";
+import { aggregateDshProxyMode, buildHostProxyEnvPatch } from "./sessions/sessionProxyPolicy";
 import {
 	SessionRuntimeCoordinator,
 	type SessionRuntimeBinding,
@@ -2938,6 +2939,9 @@ app.whenReady().then(async () => {
 		(key) => Boolean(key && feishuBridge?.hasSessionBinding(key)),
 		// 通知点击跳转需要 record.id（renderer 按它索引会话）；agentId → record.id 由 coordinator 维护。
 		(agentId) => sessionRuntimeCoordinator.getSessionId(agentId),
+		// 会话级代理覆盖：spawn 时按 SessionRecord.proxy 覆盖全局设置（on → 强制代理 / off → 强制直连）。
+		// sessionKey = SessionRecord.id（新会话 UUID / 历史会话为会话文件路径），匿名会话无记录 → 跟随全局。
+		(sessionKey) => (sessionKey ? sessionCatalog?.get(sessionKey)?.proxy?.mode : undefined),
 	);
 	// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 	quitCleanup.register("pi-agents", () => agentManager?.stopAll());
@@ -2948,6 +2952,22 @@ app.whenReady().then(async () => {
 		() => app.getAppPath(),
 		undefined,
 		() => settingsStore.get().dshHomeDir ?? "",
+		// 会话级代理覆盖（DSH 降级方案，用户确认的取舍）：DSH 是单一共享 host、无 per-session
+		// 通道，只能聚合所有 DSH 会话（backend=dsh）的开关应用到共享 host 的 fork env。
+		// 冲突规则 off 优先于 on（直连是安全默认）；全 follow → 不动（保持 host 现有行为）。
+		// 注意：dsh host 内部是否读取这些标准代理 env 属 dsh 实现（@deepseek-ai/* 包内部），
+		// 此处仅 best-effort 注入，不保证生效。
+		() => {
+			const settings = settingsStore.get();
+			const dshOverrides = (sessionCatalog?.listEntries() ?? [])
+				.filter((entry) => entry.backend === "dsh")
+				.map((entry) => entry.proxy);
+			const mode = aggregateDshProxyMode(dshOverrides);
+			return buildHostProxyEnvPatch(mode, {
+				url: settings.piProxyUrl,
+				bypass: settings.piProxyBypass,
+			});
+		},
 	);
 	dshAgentManager = new DshAgentManager(
 		dshHost,

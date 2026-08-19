@@ -38,9 +38,8 @@ export async function testPiProxy(
 
 	try {
 		const target = new URL(testUrl);
-		if (!settings.piProxyEnabled) {
-			return failure(translate("mainProxy.enableFirst"), startedAt, testUrl);
-		}
+		// 配置与开关解耦：不再要求全局启用才可测试。测试验证的是「已配置的代理地址」
+		// 是否可用——单会话代理（on 模式）会复用同一地址，即使全局开关关闭也走代理。
 
 		const proxyValue = settings.piProxyUrl.trim();
 		if (!proxyValue) {

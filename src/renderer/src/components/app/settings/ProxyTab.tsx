@@ -51,51 +51,51 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
       >
         <SettingSwitchRow
           title={t("settings.enablePiProxy")}
-          description={t("settings.settingTakesEffectAfterRestart")}
+          description={t("settings.enablePiProxyDesc")}
           checked={draft.piProxyEnabled}
           onChange={(checked) =>
             updateDraft({ piProxyEnabled: checked })
           }
         />
-        {draft.piProxyEnabled && (
-          <div className="setting-proxy-panel">
-            <SettingRow
-              title={<span>{t("settings.proxyUrl")}</span>}
-              stacked
+        {/* 配置与开关解耦：地址/绕过/测试始终可编辑，关闭开关时仅保存配置不启用——
+            单会话「会话代理」的 on 模式会复用下方地址，无需全局开启。 */}
+        <div className="setting-proxy-panel">
+          <SettingRow
+            title={<span>{t("settings.proxyUrl")}</span>}
+            stacked
+          >
+            <Input type="text" value={draft.piProxyUrl} placeholder={"http://127.0.0.1:7890"} onChange={(event) => updateDraft({ piProxyUrl: event.target.value })} />
+          </SettingRow>
+          <SettingRow
+            title={<span>{t("settings.proxyBypass")}</span>}
+            description={t("settings.noProxyHint")}
+            stacked
+          >
+            <Input type="text" value={draft.piProxyBypass} placeholder={"localhost,127.0.0.1,::1"} onChange={(event) => updateDraft({ piProxyBypass: event.target.value })} />
+          </SettingRow>
+          <SettingRow
+            title={<span>{t("settings.proxyTest")}</span>}
+            description={
+              <>
+                {t("settings.proxyNoApiKey")}
+                {props.piProxyNotice && (
+                  <span className={`setting-status ${props.piProxyNoticeTone}`}>
+                    {props.piProxyNotice}
+                  </span>
+                )}
+              </>
+            }
+          >
+            <Button variant="secondary"
+              onClick={props.onTestPiProxy}
+              disabled={props.piProxyChecking}
             >
-              <Input type="text" value={draft.piProxyUrl} placeholder={"http://127.0.0.1:7890"} onChange={(event) => updateDraft({ piProxyUrl: event.target.value })} />
-            </SettingRow>
-            <SettingRow
-              title={<span>{t("settings.proxyBypass")}</span>}
-              description={t("settings.noProxyHint")}
-              stacked
-            >
-              <Input type="text" value={draft.piProxyBypass} placeholder={"localhost,127.0.0.1,::1"} onChange={(event) => updateDraft({ piProxyBypass: event.target.value })} />
-            </SettingRow>
-            <SettingRow
-              title={<span>{t("settings.proxyTest")}</span>}
-              description={
-                <>
-                  {t("settings.proxyNoApiKey")}
-                  {props.piProxyNotice && (
-                    <span className={`setting-status ${props.piProxyNoticeTone}`}>
-                      {props.piProxyNotice}
-                    </span>
-                  )}
-                </>
-              }
-            >
-              <Button variant="secondary"
-                onClick={props.onTestPiProxy}
-                disabled={props.piProxyChecking}
-              >
-                {props.piProxyChecking
-                  ? t("settings.testingProxy")
-                  : t("settings.testProxy")}
-              </Button>
-            </SettingRow>
-          </div>
-        )}
+              {props.piProxyChecking
+                ? t("settings.testingProxy")
+                : t("settings.testProxy")}
+            </Button>
+          </SettingRow>
+        </div>
       </SettingsSection>
       <SettingsSection
         title={t("settings.desktopProxy")}

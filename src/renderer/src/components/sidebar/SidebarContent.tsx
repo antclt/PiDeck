@@ -12,6 +12,7 @@ import {
   RpcLogOpenedDialog,
 } from "./SidebarParts";
 import { RpcLogViewer } from "./RpcLogViewer";
+import { SessionProxyDialog } from "../session/SessionProxyDialog";
 import { sessionRecordToSummary } from "../../atoms";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
@@ -113,6 +114,8 @@ export function SidebarContent(props: SidebarContentProps) {
     && getBoundSidebarRuntimeAgentByAgentId(controller.catalog, menuAgent.id) !== undefined;
   // “RPC 日志已打开”提醒弹框的打开目标 agent id（null = 关闭）
   const [rpcLogOpenedAgentId, setRpcLogOpenedAgentId] = useState<string | null>(null);
+  // 会话代理设置弹框的打开目标会话 id（null = 关闭）
+  const [proxyDialogSessionId, setProxyDialogSessionId] = useState<string | null>(null);
   const menuSessionRecord = menu?.kind === "session"
     ? controller.catalog.sessionsByProject[menu.projectId]?.find((session) => session.id === menu.sessionId)
     : undefined;
@@ -307,6 +310,7 @@ export function SidebarContent(props: SidebarContentProps) {
           menu={{ x: menu.x, y: menu.y, session: menuSession }}
           onClose={controller.closeMenu}
           onRename={() => { actions.sessions.rename(menu.projectId, menuSession); controller.closeMenu(); }}
+          onOpenProxySetting={() => { controller.closeMenu(); setProxyDialogSessionId(menuSession.id); }}
           onExport={() => { void actions.sessions.export(menu.projectId, menuSession); controller.closeMenu(); }}
           onCopySession={() => { void actions.sessions.copy(menu.projectId, menuSession); controller.closeMenu(); }}
           onCopySessionFilePath={() => { void actions.sessions.copyPath(menuSession); controller.closeMenu(); }}
@@ -347,6 +351,13 @@ export function SidebarContent(props: SidebarContentProps) {
           }}
           onArchiveSession={() => { void actions.sessions.archive(menu.projectId, menuSession); controller.closeMenu(); }}
           onDeleteSession={() => { void actions.sessions.delete(menu.projectId, menuSession); controller.closeMenu(); }}
+        />
+      )}
+      {/* 会话代理设置弹框（菜单项「会话代理」打开；会话 id 为 null 时关闭） */}
+      {proxyDialogSessionId && (
+        <SessionProxyDialog
+          sessionId={proxyDialogSessionId}
+          onClose={() => setProxyDialogSessionId(null)}
         />
       )}
       {managerProject && (
