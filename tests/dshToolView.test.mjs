@@ -28,7 +28,7 @@ function loadModule() {
 	return sandbox.exports;
 }
 
-const { unwrapToolView, toolViewTitle, toolViewDetail } = loadModule();
+const { unwrapToolView, toolViewTitle, toolViewDetail, toolViewInput, toolViewOutput } = loadModule();
 
 test("unwrapToolView 只解包对应 for 的视图", () => {
 	const envelope = { for: "call", view: { card: "terminal", title: "ls" } };
@@ -107,4 +107,16 @@ test("toolViewDetail：无视图信息返回 undefined", () => {
 	assert.equal(toolViewDetail(undefined), undefined);
 	assert.equal(toolViewDetail({}), undefined);
 	assert.equal(toolViewDetail({ view: { for: "call", view: {} } }), undefined);
+});
+
+test("toolViewInput / toolViewOutput split call payload from result", () => {
+	const meta = {
+		view: { for: "call", view: { card: "terminal", title: "ls -la", cwd: "/repo" } },
+		resultView: { for: "result", view: { card: "terminal", output: "pass", exitCode: 0 } },
+	};
+	assert.match(toolViewInput(meta) ?? "", /\$ ls -la/);
+	assert.match(toolViewInput(meta) ?? "", /cwd: \/repo/);
+	assert.doesNotMatch(toolViewInput(meta) ?? "", /pass/);
+	assert.match(toolViewOutput(meta) ?? "", /pass/);
+	assert.match(toolViewOutput(meta) ?? "", /exit 0/);
 });

@@ -110,6 +110,36 @@ test("unknown event types are ignored", () => {
 	assert.equal(record, undefined);
 });
 
+test("llm/retry yields a retry process record with seq and delay", () => {
+	const record = collectDshProcessEvent([], event("llm/retry", {
+		retry: 2,
+		maxRetries: 5,
+		delayMs: 1200,
+		provider: "deepseek",
+		failure: { code: "OVERLOADED", message: "provider overloaded" },
+	}, 42, 2500));
+	assert.ok(record);
+	assert.equal(record.kind, "retry");
+	assert.equal(record.seq, 42);
+	assert.equal(record.retry, 2);
+	assert.equal(record.maxRetries, 5);
+	assert.equal(record.retryDelayMs, 1200);
+	assert.equal(record.provider, "deepseek");
+	assert.match(record.summary, /retry 2\/5/);
+	assert.match(record.summary, /provider overloaded/);
+});
+
+test("llm/retry AUTH failure does not leak credential text", () => {
+	const record = collectDshProcessEvent([], event("llm/retry", {
+		retry: 1,
+		delayMs: 0,
+		failure: { code: "AUTH", message: "sk-secret-key is invalid" },
+	}, 7, 1100));
+	assert.equal(record?.kind, "retry");
+	assert.equal(record?.detail, "API key is invalid");
+	assert.doesNotMatch(record?.summary ?? "", /sk-secret/);
+});
+
 test("pushDshProcessEvent appends and caps at the limit", () => {
 	let events = [];
 	for (let i = 0; i < DSH_PROCESS_EVENTS_LIMIT + 5; i += 1) {

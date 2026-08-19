@@ -12,26 +12,36 @@ function loadModule() {
 	const { outputText } = ts.transpileModule(source, {
 		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 	});
-	const sandbox = { exports: {}, module: { exports: {} }, require: loadDshToolView };
+	const sandbox = { exports: {}, module: { exports: {} }, require: loadTrajectoryDep };
 	sandbox.module.exports = sandbox.exports;
 	vm.runInNewContext(outputText, sandbox, { filename: "buildTrajectory.ts" });
 	return sandbox.exports;
 }
 
 /** buildTrajectory 依赖的 dsh 工具视图助手（独立纯模块，vm 内编译加载）。 */
-function loadDshToolView(specifier) {
-	if (specifier !== "./dshToolView") throw new Error(`unexpected require: ${specifier}`);
-	const viewSource = readFileSync(
-		"src/renderer/src/components/session/trajectory/dshToolView.ts",
-		"utf8",
-	);
-	const { outputText } = ts.transpileModule(viewSource, {
+function loadTrajectoryDep(specifier) {
+	const file =
+		specifier === "./dshToolView"
+			? "src/renderer/src/components/session/trajectory/dshToolView.ts"
+			: specifier === "./trajectoryOrder"
+				? "src/renderer/src/components/session/trajectory/trajectoryOrder.ts"
+				: undefined;
+	if (!file) throw new Error(`unexpected require: ${specifier}`);
+	const source = readFileSync(file, "utf8");
+	const { outputText } = ts.transpileModule(source, {
 		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 	});
-	const viewSandbox = { exports: {}, module: { exports: {} } };
-	viewSandbox.module.exports = viewSandbox.exports;
-	vm.runInNewContext(outputText, viewSandbox, { filename: "dshToolView.ts" });
-	return viewSandbox.exports;
+	const sandbox = {
+		exports: {},
+		module: { exports: {} },
+		require: (inner) => {
+			if (inner === "./buildTrajectory") return { };
+			throw new Error(`unexpected nested require: ${inner}`);
+		},
+	};
+	sandbox.module.exports = sandbox.exports;
+	vm.runInNewContext(outputText, sandbox, { filename: file });
+	return sandbox.exports;
 }
 
 function msg(partial) {
@@ -157,6 +167,10 @@ test("trajectory lives in the right drawer, not the session surface", () => {
 	assert.doesNotMatch(header, /session.view.trajectory/);
 	assert.match(hook, /"trajectory"/);
 	assert.match(app, /id: "trajectory"/);
+	const rail = app.slice(app.indexOf("WorkspaceDrawerRail"));
+	const trajectoryAt = rail.indexOf('id: "trajectory"');
+	const browserAt = rail.indexOf('id: "browser"');
+	assert.ok(trajectoryAt >= 0 && browserAt > trajectoryAt, "trajectory tab must sit before the built-in browser");
 	assert.match(drawer, /SessionTrajectoryPanel/);
 	assert.match(drawer, /drawer === "trajectory"/);
 });
@@ -233,4 +247,80 @@ test("assistant message without usage leaves record.usage undefined (pi path)", 
 		msg({ id: "a1", role: "assistant", text: "done", timestamp: 2000, stopReason: "stop" }),
 	]);
 	assert.equal(model.records.find((r) => r.kind === "assistant")?.usage, undefined);
+});
+
+test("ledger orders by seq, not array order (dsh-web layoutEntryOrder)", () => {
+	const { buildTrajectory } = loadModule();
+	const model = buildTrajectory([
+		msg({ id: "dsh:30", role: "assistant", text: "later", timestamp: 3000, stopReason: "stop" }),
+		msg({ id: "dsh:10", role: "user", text: "first", timestamp: 1000 }),
+		msg({ id: "dsh:20", role: "tool", text: "read", timestamp: 2000, meta: { toolName: "read", status: "done" } }),
+	]);
+	assert.equal(model.records.map((r) => r.kind).join(","), "user,tool,assistant");
+	assert.equal(model.records.map((r) => r.seq).join(","), "10,20,30");
+});
+
+test("retry process event stays after the user that opened the turn", () => {
+	const { buildTrajectory } = loadModule();
+	const model = buildTrajectory(
+		[
+			msg({ id: "dsh:10", role: "user", text: "go", timestamp: 2000 }),
+			msg({ id: "dsh:40", role: "assistant", text: "ok", timestamp: 4000, stopReason: "stop" }),
+		],
+		5000,
+		{
+			processEvents: [
+				{
+					id: "retry-1",
+					kind: "retry",
+					timestamp: 2500,
+					seq: 25,
+					summary: "retry 1/3: overloaded",
+					retry: 1,
+					maxRetries: 3,
+					retryDelayMs: 800,
+				},
+			],
+		},
+	);
+	assert.equal(model.records.map((r) => r.kind).join(","), "user,process,assistant");
+	const retry = model.records.find((r) => r.processKind === "retry");
+	assert.equal(retry?.retry, 1);
+	assert.equal(retry?.maxRetries, 3);
+	assert.equal(retry?.retryDelayMs, 800);
+	assert.equal(retry?.turnIndex, 0);
+});
+
+test("tool records split inputDetail and outputDetail for the inspector copy blocks", () => {
+	const { buildTrajectory } = loadModule();
+	const model = buildTrajectory([
+		msg({ id: "u1", role: "user", text: "run", timestamp: 1000 }),
+		msg({
+			id: "t1",
+			role: "tool",
+			text: "bash",
+			timestamp: 1800,
+			meta: {
+				toolName: "bash",
+				startedAt: 1600,
+				durationMs: 200,
+				status: "done",
+				view: { for: "call", view: { card: "terminal", title: "ls", cwd: "/repo" } },
+				resultView: { for: "result", view: { card: "terminal", output: "a.txt", exitCode: 0 } },
+			},
+		}),
+	]);
+	const tool = model.records.find((r) => r.kind === "tool");
+	assert.match(tool?.inputDetail ?? "", /\$ ls/);
+	assert.match(tool?.inputDetail ?? "", /cwd: \/repo/);
+	assert.match(tool?.outputDetail ?? "", /a\.txt/);
+	assert.match(tool?.outputDetail ?? "", /exit 0/);
+});
+
+test("inspector copy control is wired on the trajectory detail panel", () => {
+	const view = readFileSync("src/renderer/src/components/session/trajectory/SessionTrajectoryView.tsx", "utf8");
+	assert.match(view, /function CopyableBlock/);
+	assert.match(view, /writeClipboard/);
+	assert.match(view, /session\.trajectory\.field\.payload/);
+	assert.match(view, /session\.trajectory\.field\.result/);
 });

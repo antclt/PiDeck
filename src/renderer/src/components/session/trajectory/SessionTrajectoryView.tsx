@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useAtomValue } from "jotai";
-import { Activity, Clock, Hash, Wrench } from "lucide-react";
+import { Activity, Check, Clock, Copy, Hash, Wrench } from "lucide-react";
 import type { AgentRuntimeState, ChatMessage } from "../../../../../shared/types";
 import type { SessionProcessEvent } from "../../../../../shared/types/trajectory";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../../atoms";
 import { t } from "../../../i18n";
+import { writeClipboard } from "../../../utils/clipboard";
 import { formatDuration, formatTime } from "../TimelineFormat";
 import {
 	buildTrajectory,
@@ -43,6 +44,7 @@ function kindLabel(record: TrajectoryRecord): string {
 		if (record.processKind === "compaction") return t("session.trajectory.kind.compaction");
 		if (record.processKind === "custom") return t("session.trajectory.kind.custom");
 		if (record.processKind === "import") return t("session.trajectory.kind.import");
+		if (record.processKind === "retry") return t("session.trajectory.kind.retry");
 		return t("session.trajectory.kind.process");
 	}
 	return t("session.trajectory.kind.system");
@@ -387,6 +389,43 @@ function TrajectoryLedger(props: {
 	);
 }
 
+/**
+ * dsh-web 详情面板的复制控件（CodeBlock / JsonTree）：
+ * 工具入参、结果、思考正文各自一块，点复制写整段。
+ */
+function CopyableBlock(props: { label?: string; text: string }) {
+	const [copied, setCopied] = useState(false);
+	const onCopy = async () => {
+		if (!props.text || copied) return;
+		await writeClipboard(props.text);
+		setCopied(true);
+		window.setTimeout(() => setCopied(false), 1500);
+	};
+	return (
+		<div className="mt-3">
+			<div className="mb-1 flex items-center justify-between gap-2">
+				{props.label ? (
+					<span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+						{props.label}
+					</span>
+				) : <span />}
+				<button
+					type="button"
+					className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+					onClick={() => { void onCopy(); }}
+					title={t("common.copy")}
+				>
+					{copied ? <Check size={11} /> : <Copy size={11} />}
+					{copied ? t("common.copied") : t("common.copy")}
+				</button>
+			</div>
+			<pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-2 text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap">
+				{props.text}
+			</pre>
+		</div>
+	);
+}
+
 function TrajectoryInspector(props: {
 	record?: TrajectoryRecord;
 	runtimeState?: AgentRuntimeState;
@@ -480,11 +519,31 @@ function TrajectoryInspector(props: {
 						<dd className="truncate font-mono text-[11px]">{record.customType}</dd>
 					</>
 				) : null}
+				{record.retry !== undefined ? (
+					<>
+						<dt className="text-muted-foreground">{t("session.trajectory.field.retry")}</dt>
+						<dd className="tabular-nums">
+							{record.maxRetries !== undefined
+								? `${record.retry}/${record.maxRetries}`
+								: record.retry}
+						</dd>
+					</>
+				) : null}
+				{record.retryDelayMs !== undefined ? (
+					<>
+						<dt className="text-muted-foreground">{t("session.trajectory.field.retryDelay")}</dt>
+						<dd className="tabular-nums">{formatDuration(record.retryDelayMs)}</dd>
+					</>
+				) : null}
 			</dl>
-			{record.detail || record.text ? (
-				<pre className="mt-3 max-h-72 overflow-auto rounded-md bg-muted/50 p-2 text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap">
-					{record.detail || record.text}
-				</pre>
+			{record.inputDetail ? (
+				<CopyableBlock label={t("session.trajectory.field.payload")} text={record.inputDetail} />
+			) : null}
+			{record.outputDetail ? (
+				<CopyableBlock label={t("session.trajectory.field.result")} text={record.outputDetail} />
+			) : null}
+			{!record.inputDetail && !record.outputDetail && (record.detail || record.text) ? (
+				<CopyableBlock text={record.detail || record.text || ""} />
 			) : null}
 			{state && (state.ttftMs !== undefined || state.inputTokens !== undefined) ? (
 				<div className="mt-4 border-t border-border/60 pt-3">

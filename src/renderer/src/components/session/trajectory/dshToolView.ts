@@ -117,49 +117,80 @@ export function toolViewTitle(
 	return asString(result?.title) ?? asString(call?.title);
 }
 
+function clipOutput(text: string): string {
+	return text.length > 800 ? `${text.slice(0, 800)}…` : text;
+}
+
 /**
- * 视图详情（按卡片形态拼可读信息，轨迹 inspector 用）：
- * - terminal：命令（call title）+ cwd；result 追加输出尾部与退出码；
- * - diff：改动文件摘要（call/result 取后者优先）；
- * - generic：rawInput + content 文本；
- * - search：命中列表；read：行数；web：标题/URL。
+ * 工具入参（dsh-web RecordPayload direction=input / inputDetail）：
+ * call 视图的命令、cwd、rawInput、call 侧 diff。
  */
-export function toolViewDetail(
-	meta: { view?: DshToolViewEnvelope; resultView?: DshToolViewEnvelope } | undefined,
+export function toolViewInput(
+	meta: { view?: DshToolViewEnvelope; resultView?: DshToolViewEnvelope; args?: unknown } | undefined,
 ): string | undefined {
 	if (!meta) return undefined;
 	const call = unwrapToolView(meta.view, "call");
-	const result = unwrapToolView(meta.resultView, "result");
-	if (!call && !result) return undefined;
-
-	const card = result?.card ?? call?.card;
 	const parts: string[] = [];
+	const card = call?.card;
 	if (card === "terminal") {
-		const command = asString(result?.title) ?? asString(call?.title);
+		const command = asString(call?.title);
 		if (command) parts.push(`$ ${command}`);
 		const cwd = asString(call?.cwd);
 		if (cwd) parts.push(`cwd: ${cwd}`);
-		const output = asString(result?.output);
-		if (output) parts.push(output.length > 800 ? `${output.slice(0, 800)}…` : output);
-		const exitCode = asNumber(result?.exitCode);
-		if (exitCode !== undefined) parts.push(`exit ${exitCode}`);
-		const signal = asString(result?.signal);
-		if (signal) parts.push(`signal ${signal}`);
 	} else if (card === "diff") {
-		const summary = diffsSummary(result?.diffs) ?? diffsSummary(call?.diffs);
-		if (summary) parts.push(summary);
-	} else if (card === "search") {
-		const summary = searchSummary(result ?? {});
-		if (summary) parts.push(summary);
-	} else if (card === "read") {
-		const summary = readSummary(result ?? {});
+		const summary = diffsSummary(call?.diffs);
 		if (summary) parts.push(summary);
 	} else {
-		// generic / web：rawInput + content 文本
-		const raw = rawInputText(call?.rawInput);
+		const raw = rawInputText(call?.rawInput) ?? rawInputText(meta.args);
 		if (raw) parts.push(raw);
-		const content = contentText(result?.content) ?? contentText(call?.content);
+	}
+	return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
+/**
+ * 工具结果（dsh-web RecordPayload direction=output / outputDetail）：
+ * 输出、退出码、result 侧 diff/search/read/content。
+ */
+export function toolViewOutput(
+	meta: { view?: DshToolViewEnvelope; resultView?: DshToolViewEnvelope } | undefined,
+): string | undefined {
+	if (!meta) return undefined;
+	const result = unwrapToolView(meta.resultView, "result");
+	if (!result) return undefined;
+	const parts: string[] = [];
+	const card = result.card;
+	if (card === "terminal") {
+		const output = asString(result.output);
+		if (output) parts.push(clipOutput(output));
+		const exitCode = asNumber(result.exitCode);
+		if (exitCode !== undefined) parts.push(`exit ${exitCode}`);
+		const signal = asString(result.signal);
+		if (signal) parts.push(`signal ${signal}`);
+	} else if (card === "diff") {
+		const summary = diffsSummary(result.diffs);
+		if (summary) parts.push(summary);
+	} else if (card === "search") {
+		const summary = searchSummary(result);
+		if (summary) parts.push(summary);
+	} else if (card === "read") {
+		const summary = readSummary(result);
+		if (summary) parts.push(summary);
+	} else {
+		const content = contentText(result.content);
 		if (content) parts.push(content);
 	}
 	return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
+/**
+ * 视图详情（入参 + 结果拼在一起，账本摘要用）。
+ * inspector 优先分开展示 inputDetail / outputDetail。
+ */
+export function toolViewDetail(
+	meta: { view?: DshToolViewEnvelope; resultView?: DshToolViewEnvelope; args?: unknown } | undefined,
+): string | undefined {
+	const input = toolViewInput(meta);
+	const output = toolViewOutput(meta);
+	if (input && output) return `${input}\n${output}`;
+	return output ?? input;
 }

@@ -10,7 +10,8 @@ import type { AgentRuntimeState } from "../../shared/types";
  * - permission/preset → custom(permission)（权限预设切换）；
  * - plan/mode → custom(plan)（plan 模式开关）；
  * - goal/change → custom(goal)（目标创建/操作/clear）；
- * - user/message 且文本以 /compact 开头 → compaction（压缩命令回合）。
+ * - user/message 且文本以 /compact 开头 → compaction（压缩命令回合）；
+ * - llm/retry → retry（dsh-web 轨迹的 request-only 重试记录；不投影为聊天消息）。
  *
  * 只返回「相对上一条新增」的过程事件；调用方（DshAgentManager）按序追加并封顶，
  * 与 pi 的 parseSessionProcessEvents（MAX_EVENTS=240）同语义。
@@ -32,6 +33,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function eventTime(time: unknown): number {
 	return typeof time === "number" && Number.isFinite(time) ? time : Date.now();
+}
+
+/** dsh-web displayFailureMessage：AUTH 不把凭证投影进 UI。 */
+function retryFailureMessage(failure: unknown): string | undefined {
+	if (!isRecord(failure)) return undefined;
+	if (failure.code === "AUTH") return "API key is invalid";
+	return asString(failure.message);
 }
 
 /** user/message 正文拼接（与 dshEventProjector 的 textFromBlocks 同规则）。 */
@@ -82,6 +90,7 @@ export function collectDshProcessEvent(
 				id,
 				kind: "modelChange",
 				timestamp,
+				seq,
 				summary: `${model.provider}/${model.model}`,
 				detail: `${model.provider}/${model.model}`,
 				provider: model.provider,
@@ -97,6 +106,7 @@ export function collectDshProcessEvent(
 				id,
 				kind: "custom",
 				timestamp,
+				seq,
 				summary: `permission ${preset}`,
 				detail: `permission ${preset}`,
 				customType: "permission",
@@ -111,6 +121,7 @@ export function collectDshProcessEvent(
 				id,
 				kind: "custom",
 				timestamp,
+				seq,
 				summary,
 				detail: summary,
 				customType: "plan",
@@ -127,6 +138,7 @@ export function collectDshProcessEvent(
 				id,
 				kind: "custom",
 				timestamp,
+				seq,
 				summary,
 				detail: summary,
 				customType: "goal",
@@ -143,8 +155,34 @@ export function collectDshProcessEvent(
 				id,
 				kind: "compaction",
 				timestamp,
+				seq,
 				summary: prompt ? `compact: ${prompt}` : "compact",
 				detail: text,
+			};
+		}
+		case "llm/retry": {
+			// dsh-web layout.ts：失败/重试请求没有 assistant 消息时仍发 request-only cell。
+			// PiDeck 聊天时间线不投影 llm/retry，轨迹账本单独收这条过程记录。
+			const retry = asNumber(data.retry);
+			if (retry === undefined) return undefined;
+			const maxRetries = asNumber(data.maxRetries);
+			const delayMs = asNumber(data.delayMs);
+			const failureText = retryFailureMessage(data.failure);
+			const countText = maxRetries !== undefined ? `${retry}/${maxRetries}` : String(retry);
+			const summary = failureText
+				? `retry ${countText}: ${failureText}`
+				: `retry ${countText}`;
+			return {
+				id,
+				kind: "retry",
+				timestamp,
+				seq,
+				summary,
+				detail: failureText,
+				provider: asString(data.provider),
+				retry,
+				maxRetries,
+				retryDelayMs: delayMs,
 			};
 		}
 		default:

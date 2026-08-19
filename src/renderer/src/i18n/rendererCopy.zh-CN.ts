@@ -2614,6 +2614,7 @@ export const zhCN = {
   "session.trajectory.kind.compaction": "压缩",
   "session.trajectory.kind.custom": "扩展过程",
   "session.trajectory.kind.import": "导入",
+  "session.trajectory.kind.retry": "重试",
   "session.trajectory.kind.error": "错误",
   "session.trajectory.systemPromptHint": "Pi 不会把当轮真实系统提示落进会话文件。这里展示内置 pi-system 参考文本，便于对照身份、工具和行为准则。",
   "session.trajectory.systemPromptHintDsh": "DSH 的系统提示由 harness 在请求时组装（persona + sections）。这里展示当轮请求的真实系统提示（dsh-web 轨迹同源）。",
@@ -2630,6 +2631,10 @@ export const zhCN = {
   "session.trajectory.field.outputTokens": "输出 tokens",
   "session.trajectory.field.cacheRead": "缓存读取",
   "session.trajectory.field.cacheWrite": "缓存写入",
+  "session.trajectory.field.retry": "重试",
+  "session.trajectory.field.retryDelay": "重试延迟",
+  "session.trajectory.field.payload": "入参",
+  "session.trajectory.field.result": "结果",
 } as const;
 
 export type TranslationKey = keyof typeof zhCN;

@@ -2649,6 +2649,7 @@ export const enUS: Record<TranslationKey, string> = {
   "session.trajectory.kind.compaction": "Compaction",
   "session.trajectory.kind.custom": "Extension event",
   "session.trajectory.kind.import": "Import",
+  "session.trajectory.kind.retry": "Retry",
   "session.trajectory.kind.error": "Error",
   "session.trajectory.systemPromptHint": "Pi does not persist the live system prompt in the session file. This shows the built-in pi-system reference for identity, tools, and guidelines.",
   "session.trajectory.systemPromptHintDsh": "DSH assembles the system prompt at request time (persona + sections). This shows the real prompt of the latest request (same source as dsh-web).",
@@ -2665,5 +2666,9 @@ export const enUS: Record<TranslationKey, string> = {
   "session.trajectory.field.outputTokens": "Output tokens",
   "session.trajectory.field.cacheRead": "Cache read",
   "session.trajectory.field.cacheWrite": "Cache write",
+  "session.trajectory.field.retry": "Retry",
+  "session.trajectory.field.retryDelay": "Retry delay",
+  "session.trajectory.field.payload": "Payload",
+  "session.trajectory.field.result": "Result",
 };
 
