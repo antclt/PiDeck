@@ -414,27 +414,24 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// 纯读路径：事件回调/订阅刷新专用，不再触发扫描（防止推送-拉取循环触发）
 			if (options?.scan === false) return cachedRecords;
 
-			// 首次访问该项目：缓存无数据可回显，同步扫描保证首次有结果；
-			// 之后转入「缓存先回显 + 后台扫描推送」模式。
-			if (!scannedProjects.has(projectId)) {
-				scannedProjects.add(projectId);
-				return runScanAndMerge();
-			}
-
-			// 已有缓存：立即返回，后台扫描（去重+冷却）完成后推送 catalog-refreshed，
-			// 渲染层收到后以 scan:false 重新拉取合并结果。
+			// 一律先回磁盘 catalog：打包正式 userData 的历史 JSONL 远多于 dev，
+			// 首次 await 全量扫描会让侧栏「正在加载历史会话」卡住整窗。
+			// 无缓存时回 []，渲染层保持 loading，等 catalog-refreshed 再揭开。
+			scannedProjects.add(projectId);
 			catalogScanCoordinator.schedule(projectId, async () => {
 				try {
 					await runScanAndMerge();
-					const window = getMainWindow();
-					if (window && !window.isDestroyed()) {
-						window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
-					}
 				} catch (error) {
 					void appLogger.warn("session", "Background catalog scan failed", {
 						projectId,
 						error: error instanceof Error ? error.message : String(error),
 					});
+				} finally {
+					// 成功/失败都通知渲染层：空项目不能永远转圈，失败也要让 UI 可操作。
+					const window = getMainWindow();
+					if (window && !window.isDestroyed()) {
+						window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
+					}
 				}
 			});
 			return cachedRecords;

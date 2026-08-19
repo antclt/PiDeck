@@ -79,6 +79,14 @@ export type SessionFilePathResolver = (
 	environment: SessionEnvironment,
 ) => string;
 
+/** 扫描未读正文时没有 session_info；新条目用文件名 stem，避免侧栏全是 Untitled。 */
+function scannedFileStemTitle(filePath: string): string {
+	const normalized = filePath.replace(/\\/g, "/");
+	const base = normalized.slice(normalized.lastIndexOf("/") + 1);
+	const stem = base.replace(/\.jsonl$/i, "").trim();
+	return stem || "Untitled";
+}
+
 function cloneEntry(entry: SessionCatalogEntry): SessionCatalogEntry {
 	return {
 		...entry,
@@ -656,7 +664,7 @@ export class SessionCatalog {
 						id: randomUUID(),
 						projectId,
 						originKey,
-						title: summary.name || "Untitled",
+						title: summary.name || scannedFileStemTitle(summary.filePath),
 						source: summary.source ?? "pi",
 						environment: getSessionEnvironment(summary),
 						filePath: summary.filePath,

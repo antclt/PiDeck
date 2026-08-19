@@ -23,6 +23,7 @@ function loadTranspiledModule(filePath, overrides = new Map()) {
 		process,
 		require: (id) => overrides.has(id) ? overrides.get(id) : require(id),
 		setTimeout,
+		setImmediate: typeof setImmediate === "function" ? setImmediate : (fn) => setTimeout(fn, 0),
 	};
 	vm.runInNewContext(outputText, sandbox, { filename: filePath });
 	return sandbox.exports;
@@ -287,7 +288,8 @@ test("hides persisted pi-subagents runs without deleting them or unrelated neste
 		// 子会话仍然在摘要列表中，但标记了父会话路径
 		assert.equal(visiblePaths.has(workerFile), true);
 		assert.equal(visiblePaths.has(reviewerFile), true);
-		assert.equal(summaries.some(summary => summary.name === "subagent-worker-manual-0"), true);
+		// 列表扫描不再读 JSONL 正文，标题留给 catalog / 点开后的 readSummary。
+		assert.equal(summaries.some(summary => summary.name === "subagent-worker-manual-0"), false);
 		assert.equal(existsSync(workerFile), true);
 		assert.equal(existsSync(reviewerFile), true);
 		// 验证子会话的 parentSessionPath 指向正确的父会话文件
@@ -346,10 +348,12 @@ test("groups WSL child sessions with POSIX parent paths", async () => {
 		const summaries = await scanner.list(selectedProjectPath);
 		assert.equal(summaries.length, 4);
 		assert.equal(summaries.find((item) => item.filePath === childFile)?.parentSessionPath, parentFile);
-		assert.equal(summaries.find((item) => item.filePath === forkChildFile)?.parentSessionPath, forkParentFile);
+		// 仅 header 引用的 fork 父路径要读正文；列表扫描只认磁盘嵌套，这里保持平铺。
+		assert.equal(summaries.find((item) => item.filePath === forkChildFile)?.parentSessionPath, undefined);
 		assert.equal(summaries.some((item) => item.parentSessionPath?.includes("\\")), false);
-		assert.equal(fullReadCount.get(parentFile), 1);
-		assert.equal(fullReadCount.get(forkParentFile), 1);
+		// 摘要扫描与父会话校验都只读头部，禁止对大型 JSONL 再走一次完整 cat。
+		assert.equal(fullReadCount.get(parentFile) ?? 0, 0);
+		assert.equal(fullReadCount.get(forkParentFile) ?? 0, 0);
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}
@@ -464,9 +468,11 @@ test("resolves fork child with absolute Windows parent path via parentSession he
 		]);
 
 		const { SessionScanner } = loadSessionScanner(home);
-		const summaries = await new SessionScanner().list(projectPath);
-		assert.equal(summaries.length, 2);
-		const forkSummary = summaries.find(s => s.filePath === forkChildFile);
+		const scanner = new SessionScanner();
+		const listed = await scanner.list(projectPath);
+		assert.equal(listed.length, 2);
+		assert.equal(listed.find(s => s.filePath === forkChildFile)?.parentSessionPath, undefined);
+		const forkSummary = await scanner["readSummary"](forkChildFile);
 		assert.equal(forkSummary.parentSessionPath, parentFile);
 	} finally {
 		rmSync(home, { recursive: true, force: true });
@@ -501,7 +507,11 @@ test("recovers last-used model from assistant message when JSONL has no model_ch
 		]);
 
 		const { SessionScanner } = loadSessionScanner(home);
-		const summaries = await new SessionScanner().list(projectPath);
+		const scanner = new SessionScanner();
+		const listed = await scanner.list(projectPath);
+		assert.equal(listed.length, 1);
+		assert.equal(listed[0].model, undefined);
+		const summaries = [await scanner["readSummary"](sessionFile)];
 
 		assert.equal(summaries.length, 1);
 		assert.equal(summaries[0].model?.provider, "deepseek");
@@ -542,7 +552,9 @@ test("model_change takes precedence over message-level model", async () => {
 		]);
 
 		const { SessionScanner } = loadSessionScanner(home);
-		const summaries = await new SessionScanner().list(projectPath);
+		const scanner = new SessionScanner();
+		assert.equal((await scanner.list(projectPath)).length, 1);
+		const summaries = [await scanner["readSummary"](sessionFile)];
 
 		assert.equal(summaries.length, 1);
 		assert.equal(summaries[0].model?.provider, "anthropic");
@@ -571,7 +583,9 @@ test("only user messages yield undefined model and undefined thinking", async ()
 		]);
 
 		const { SessionScanner } = loadSessionScanner(home);
-		const summaries = await new SessionScanner().list(projectPath);
+		const scanner = new SessionScanner();
+		assert.equal((await scanner.list(projectPath)).length, 1);
+		const summaries = [await scanner["readSummary"](sessionFile)];
 
 		assert.equal(summaries.length, 1);
 		assert.equal(summaries[0].model, undefined);

@@ -239,7 +239,13 @@ test("backfills Codex subagent metadata for sessions imported before grouping fi
 		);
 
 		const { SessionScanner } = loadSessionScanner(home);
-		const summaries = await new SessionScanner().list(projectPath);
+		const scanner = new SessionScanner();
+		const listed = await scanner.list(projectPath);
+		assert.equal(listed.length, 1);
+		assert.equal(listed[0].source, "codex");
+		assert.equal(listed[0].codexSessionId, "child-thread");
+		assert.equal(listed[0].codexThreadSource, undefined);
+		const summaries = [await scanner["readSummary"](listed[0].filePath)];
 
 		assert.equal(summaries.length, 1);
 		assert.equal(summaries[0].codexThreadSource, "subagent");

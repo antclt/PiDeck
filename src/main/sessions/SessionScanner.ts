@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { app, shell } from "electron";
-import { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
 import { mkdir, open as openFile, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { basename as posixBasename, dirname as posixDirname, isAbsolute as posixIsAbsolute, join as posixJoin } from "node:path/posix";
@@ -45,6 +45,49 @@ function defaultTranslate(
   ));
 }
 
+/** catalog 扫描只取摘要字段；JSONL 行形态不固定，未知字段忽略。 */
+type SessionScanMessage = {
+  role?: string;
+  content?: unknown;
+  provider?: string;
+  model?: string;
+};
+
+type SessionScanLine = {
+  type?: string;
+  customType?: string;
+  name?: string;
+  sessionName?: string;
+  cwd?: string;
+  projectPath?: string;
+  parentSession?: string;
+  provider?: string;
+  modelId?: string;
+  thinkingLevel?: string;
+  codexSessionId?: string;
+  sourcePath?: string;
+  threadSource?: string;
+  parentThreadId?: string;
+  agentRole?: string;
+  agentNickname?: string;
+  role?: string;
+  content?: unknown;
+  model?: string;
+  message?: SessionScanMessage;
+  data?: {
+    name?: string;
+    cwd?: string;
+    message?: SessionScanMessage;
+    session?: { cwd?: string };
+  };
+  header?: { name?: string; cwd?: string; parentSession?: string };
+  session?: { name?: string; cwd?: string };
+};
+
+function isSessionScanLine(value: unknown): value is SessionScanLine {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 /**
  * 在文本片段（通常是文件头 4KB）中探测旧版私有 sessionName 行。
  * 只对可解析的行判定；片段末尾可能截断行，解析失败时保守跳过（不影响判定）。
@@ -68,6 +111,12 @@ export class SessionScanner {
   private wslConfig: { distro: string; user: string; home: string } | null = null;
   /** 比 renderer watchdog 更短，确保超时前先终止实际扫描，避免后台请求堆积。 */
   private scanTimeoutMs = 18_000;
+  /** 摘要扫描并发：打包正式目录可有数百 JSONL，Promise.all 全开会占满主线程，点击/输入跟着卡。 */
+  private static readonly SUMMARY_READ_CONCURRENCY = 4;
+  /** 摘要只读文件前缀：catalog 不需要整份历史，1MB 足够取 cwd/预览/模型。 */
+  private static readonly SUMMARY_PARSE_MAX_BYTES = 1024 * 1024;
+  /** 多项目同时 list() 时串行化，避免展开多个项目时并行扫盘把 IPC 打爆。 */
+  private listQueue: Promise<void> = Promise.resolve();
   private readonly summaryCache = new SessionSummaryCache<SessionSummary | null>();
   private summaryCacheFileSetKey = "";
   /**
@@ -279,6 +328,15 @@ export class SessionScanner {
   }
 
   async list(projectPath?: string): Promise<SessionSummary[]> {
+    const run = this.listQueue.then(
+      () => this.listUnqueued(projectPath),
+      () => this.listUnqueued(projectPath),
+    );
+    this.listQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private async listUnqueued(projectPath?: string): Promise<SessionSummary[]> {
     // 匹配用路径：WSL 模式下转 /mnt/...，与会话 JSONL 内 cwd 对齐。
     const normalizedProjectPath = projectPath && this.wslConfig
       ? toWslLinuxPath(projectPath, this.wslConfig)
@@ -315,9 +373,13 @@ export class SessionScanner {
         this.summaryCacheFileSetKey = fileSetKey;
       }
 
-      const summaries = await Promise.all(files.map(file =>
-        this.readSummary(file, signal).catch(rethrowAbort(null))
-      ));
+      // 侧栏列表只认路径 + stat：正文留给点击后的 readRecordMessagePage。
+      // 打包目录可有数百 JSONL，再在 list() 里 parse 会占满主进程，点击/输入跟着卡。
+      const summaries = await this.mapLimited(
+        files,
+        SessionScanner.SUMMARY_READ_CONCURRENCY,
+        (file) => this.listPathSummary(file, signal).catch(rethrowAbort(null)),
+      );
       signal?.throwIfAborted();
 
       const validSummaries = summaries.filter((summary): summary is SessionSummary => Boolean(summary));
@@ -325,15 +387,9 @@ export class SessionScanner {
       if (!normalizedProjectPath) {
         return validSummaries.sort((a, b) => b.updatedAt - a.updatedAt);
       }
-      // 异步 isSameProject 过滤（自定义 sessionDir 下的文件也会按 cwd/路径归属判断）
-      const matched = await Promise.all(
-        validSummaries.map(summary => this.isSameProject(summary, normalizedProjectPath, signal))
-      );
-      signal?.throwIfAborted();
       const filtered = validSummaries
-        .filter((_, i) => matched[i])
+        .filter((summary) => this.isSameProject(summary, normalizedProjectPath))
         .sort((a, b) => b.updatedAt - a.updatedAt);
-      const childCount = filtered.filter(s => s.parentSessionPath).length;
       return filtered;
     } finally {
       if (scanTimer) clearTimeout(scanTimer);
@@ -493,6 +549,28 @@ export class SessionScanner {
       }
     }
     return all;
+  }
+
+  /** 分块并发 + 块间让出事件循环，避免数百 JSONL 同时 parse 卡住点击/输入。 */
+  private async mapLimited<T, R>(
+    items: readonly T[],
+    concurrency: number,
+    mapper: (item: T) => Promise<R>,
+  ): Promise<R[]> {
+    const results: R[] = [];
+    const limit = Math.max(1, concurrency);
+    for (let index = 0; index < items.length; index += limit) {
+      const chunk = items.slice(index, index + limit);
+      const mapped = await Promise.all(chunk.map((item) => mapper(item)));
+      results.push(...mapped);
+      if (index + limit < items.length) {
+        // setTimeout(0) 兼容测试 VM（无 setImmediate），同样把控制权交回事件循环。
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      }
+    }
+    return results;
   }
 
   // ── 会话操作：rename / delete / copy / exportHtml / readMessages ─
@@ -1118,6 +1196,15 @@ export class SessionScanner {
     return files;
   }
 
+  /** 路径比「sessions 根下的单层 jsonl」更深，才值得做父会话探测。 */
+  private looksLikeNestedSessionPath(filePath: string): boolean {
+    const normalized = this.normalize(filePath);
+    const root = this.normalize(this.findSessionsRootForFile(filePath));
+    if (!normalized.startsWith(`${root}/`)) return false;
+    const relative = normalized.slice(root.length + 1);
+    return relative.split("/").length > 2;
+  }
+
   /**
    * 从文件路径推断父会话文件路径。
    *
@@ -1223,6 +1310,55 @@ export class SessionScanner {
     return undefined;
   }
 
+  /**
+   * 侧栏 list() 专用：只 stat + 路径推断，不读 JSONL 正文。
+   * 标题/预览/模型留给 catalog 已有条目；点开会话走 readRecordMessagePage。
+   * 不写入 summaryCache——空标题一旦进缓存，会把后续真正的 readSummary 结果冻住。
+   */
+  private async listPathSummary(filePath: string, signal?: AbortSignal): Promise<SessionSummary | null> {
+    const isWsl = this.isWslPath(filePath);
+    const info = isWsl
+      ? await this.readWslFileVersion(filePath, signal)
+      : await stat(filePath);
+    const source = this.inferSourceFromFileName(filePath);
+    // 只对明显嵌套的路径查父会话，避免每个顶层 JSONL 都走 exists/wsl.exe。
+    const nested = this.looksLikeNestedSessionPath(filePath);
+    const parentSessionPath = source === "pi" && nested
+      ? (isWsl
+        ? await this.inferWslParentSessionFromPath(filePath, signal)
+        : this.inferParentSessionFromPath(filePath))
+      : undefined;
+    return {
+      id: filePath,
+      filePath,
+      projectPath: this.inferProjectPathFromFile(filePath),
+      preview: "",
+      updatedAt: info.mtimeMs,
+      messageCount: 0,
+      source,
+      parentSessionPath,
+      wsl: isWsl || undefined,
+      // originKey 对 Codex 导入含 importedSourceId；从文件名 codex_<id>.jsonl 还原，避免扫描后变成另一条记录。
+      codexSessionId: source === "codex" ? this.inferImportedIdFromFileName(filePath, "codex_") : undefined,
+    };
+  }
+
+  /** 导入器约定文件名：codex_<id>.jsonl / claude_<id>.jsonl / opencode_<id>.jsonl。 */
+  private inferSourceFromFileName(filePath: string): NonNullable<SessionSummary["source"]> {
+    const base = basename(filePath).toLowerCase();
+    if (base.startsWith("codex_")) return "codex";
+    if (base.startsWith("claude_")) return "claude";
+    if (base.startsWith("opencode_")) return "opencode";
+    return "pi";
+  }
+
+  private inferImportedIdFromFileName(filePath: string, prefix: string): string | undefined {
+    const base = basename(filePath);
+    if (!base.toLowerCase().startsWith(prefix) || !base.toLowerCase().endsWith(".jsonl")) return undefined;
+    const id = base.slice(prefix.length, -".jsonl".length).trim();
+    return id || undefined;
+  }
+
   private async readSummary(filePath: string, signal?: AbortSignal): Promise<SessionSummary | null> {
     // 先读取轻量文件指纹；未变化时复用摘要，避免周期扫描反复读取和解析全部 JSONL。
     const isWsl = this.isWslPath(filePath);
@@ -1233,10 +1369,15 @@ export class SessionScanner {
     const cached = this.summaryCache.get(filePath, version);
     if (cached !== undefined) return cached;
 
+    // catalog 摘要只读前缀：整文件 parse 会在后台扫描时占满主线程，点击/输入跟着卡。
     const raw = isWsl
-      ? await this.readWslFile(filePath, signal)
-      : await readFile(filePath, "utf8");
-    const lines = raw.split(/\r?\n/).filter(Boolean);
+      ? await this.readWslFileHead(filePath, SessionScanner.SUMMARY_PARSE_MAX_BYTES, signal)
+      : await this.readLocalFilePrefix(filePath, SessionScanner.SUMMARY_PARSE_MAX_BYTES);
+    const truncated = version.size > SessionScanner.SUMMARY_PARSE_MAX_BYTES;
+    const text = truncated
+      ? raw.slice(0, Math.max(0, raw.lastIndexOf("\n")))
+      : raw;
+    const lines = text.split(/\r?\n/).filter(Boolean);
     if (lines.length === 0) {
       this.summaryCache.set(filePath, version, null);
       return null;
@@ -1268,7 +1409,15 @@ export class SessionScanner {
     let lastAssistantModel: { provider: string; modelId: string } | undefined;
 
     for (const line of lines) {
-      const entry = JSON.parse(line) as any;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        // 损坏行或前缀截断的半行：跳过，不影响该会话摘要。
+        continue;
+      }
+      if (!isSessionScanLine(parsed)) continue;
+      const entry = parsed;
       if (entry.type === "session_info") {
         // Forked sessions may contain an older copied name; only the latest marker is authoritative.
         latestSessionInfoName = this.optionalString(entry.name ?? entry.data?.name);
@@ -1308,8 +1457,14 @@ export class SessionScanner {
         thinkingLevel = typeof entry.thinkingLevel === "string" ? entry.thinkingLevel : thinkingLevel;
       }
 
-      const message = entry.message ?? entry.data?.message ?? entry;
-      if (message?.role) {
+      const nested = entry.message ?? entry.data?.message;
+      const message: SessionScanMessage = nested ?? {
+        role: entry.role,
+        content: entry.content,
+        provider: entry.provider,
+        model: entry.model,
+      };
+      if (message.role) {
         messageCount += 1;
         const text = this.extractText(message.content).trim();
         if (text && preview === emptyPreview) preview = text;
@@ -1444,7 +1599,7 @@ export class SessionScanner {
       const root = this.normalize(this.codexRoot);
       const target = this.normalize(sourcePath);
       if (target !== root && !target.startsWith(`${root}/`)) return undefined;
-      for (const line of readFileSync(sourcePath, "utf8").split(/\r?\n/).filter(Boolean).slice(0, 16)) {
+      for (const line of this.readLocalFileHead(sourcePath).split(/\r?\n/).filter(Boolean).slice(0, 16)) {
         const entry = JSON.parse(line) as any;
         if (entry.type === "session_meta" && entry.payload) {
           return getCodexSessionThreadInfo(entry.payload);
@@ -1531,20 +1686,18 @@ export class SessionScanner {
     return trimmed.replace(/-/g, "/");
   }
 
-  private async isSameProject(summary: SessionSummary, projectPath: string, signal?: AbortSignal) {
+  private isSameProject(summary: SessionSummary, projectPath: string) {
     const normalizedProject = this.normalize(projectPath);
     const normalizedSessionProject = summary.projectPath ? this.normalize(summary.projectPath) : "";
     if (normalizedSessionProject === normalizedProject) return true;
-    if (await this.isParentSessionForProject(normalizedSessionProject, normalizedProject, summary.filePath, signal)) return true;
+    // 列表扫描禁止读 JSONL 正文做父目录归属。早期「在 home 启动再进子项目」的会话，
+    // 若路径编码的是父目录，侧栏可能暂时不显示；已入册条目仍走 catalog 缓存。
 
     // 项目级自定义 sessionDir（如 <project>/.pi/sessions）下的文件默认归属该项目。
     // 该布局不再使用 encoded-cwd 子目录，safePathToken 无法从路径反推项目。
     if (this.isUnderProjectSessionDir(summary.filePath, projectPath)) return true;
 
-    const filePathMatch = this.normalize(summary.filePath).includes(this.safePathToken(projectPath));
-    if (!filePathMatch && summary.parentSessionPath) {
-    }
-    return filePathMatch;
+    return this.normalize(summary.filePath).includes(this.safePathToken(projectPath));
   }
 
   /**
@@ -1568,22 +1721,14 @@ export class SessionScanner {
     return false;
   }
 
-  private async isParentSessionForProject(sessionProject: string, projectPath: string, filePath: string, signal?: AbortSignal) {
-    // 早期用户常在 home 目录启动 pi 再操作子项目；这类历史 session 的 cwd 是父目录，
-    // 但文件内容可能明确提到当前项目。仅对父目录 session 做内容校验，避免把无关 home 会话全部展示到子项目下。
-    if (!sessionProject || !projectPath.startsWith(`${sessionProject}/`)) return false;
-    const text = await this.readCachedText(filePath, signal);
-    return text.includes(projectPath);
-  }
-
-  private async readCachedText(filePath: string, signal?: AbortSignal) {
+  private async readLocalFilePrefix(filePath: string, maxBytes: number): Promise<string> {
+    const handle = await openFile(filePath, "r");
     try {
-      const raw = this.isWslPath(filePath)
-        ? await this.readWslFile(filePath, signal)
-        : readFileSync(filePath, "utf8");
-      return raw.replace(/\\/g, "/").toLowerCase();
-    } catch {
-      return "";
+      const buffer = Buffer.allocUnsafe(maxBytes);
+      const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+      return buffer.toString("utf8", 0, bytesRead);
+    } finally {
+      await handle.close();
     }
   }
 

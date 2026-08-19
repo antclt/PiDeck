@@ -240,9 +240,9 @@ test("WSL list() 能识别超过 1MB 的会话（#147 回归：大文件不被 m
 
 		const list = await scanner.list();
 
-		// 修复前：readWslFile 默认 maxBuffer=1MB 溢出 → readSummary 返回 null → 会话消失
+		// 列表扫描只 stat 路径，不再整文件 cat；超过 1MB 的会话仍应出现在列表中。
 		assert.equal(list.length, 1, "超过 1MB 的 WSL 会话不应从列表消失");
-		assert.equal(list[0].name, "big-session");
+		assert.equal(list[0].filePath, BIG_PATH);
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}

@@ -36,6 +36,13 @@ function createHookForRuntimeTest() {
           useEffect: () => undefined,
         };
       }
+      if (request === "../utils/fileTreeLazy") {
+        return {
+          hydrateExpandedFileTree: async (_list, tree) => tree,
+          mergeFileTreeChildren: (nodes) => nodes,
+          findLoadedDirectory: () => undefined,
+        };
+      }
       if (request === "../atoms/session-selectors") {
         return {
           sessionRecordToSummary: (session) => session.filePath ? {

@@ -908,6 +908,40 @@ test("removeByProjectId drops every catalog entry for a removed sidebar project"
   }
 });
 
+test("nameless scanned summaries keep existing titles and use the file stem for new rows", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-stem-title-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    const [named] = await catalog.mergeScanned("project-1", [summary({
+      filePath: "C:/sessions/known.jsonl",
+      id: "C:/sessions/known.jsonl",
+      name: "Saved title",
+    })]);
+    const [kept] = await catalog.mergeScanned("project-1", [summary({
+      filePath: "C:/sessions/known.jsonl",
+      id: "C:/sessions/known.jsonl",
+      name: undefined,
+      preview: "",
+      messageCount: 0,
+    })]);
+    assert.equal(kept.id, named.id);
+    assert.equal(kept.title, "Saved title");
+    assert.equal(kept.preview, "");
+
+    const records = await catalog.mergeScanned("project-1", [summary({
+      filePath: "C:/sessions/2026-08-08T10-47-19-239Z_abc.jsonl",
+      id: "C:/sessions/2026-08-08T10-47-19-239Z_abc.jsonl",
+      name: undefined,
+    })]);
+    const fresh = records.find((record) => record.filePath?.includes("2026-08-08T10-47-19-239Z_abc"));
+    assert.equal(fresh?.title, "2026-08-08T10-47-19-239Z_abc");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("parentSessionPath survives reload: getRecord/listEntries rebuild keeps the subagent tree link", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-parent-path-"));

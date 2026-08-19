@@ -150,7 +150,11 @@ export function useProjectSync(input: UseProjectSyncInput) {
         result = records;
       } else {
         replaceProjectSessions({ projectId, sessions: records });
-        setSessionCatalogLoadState?.({ projectId, state: { status: "ready" } });
+        // 空缓存先回 []：保持 loading，等 catalog-refreshed 才揭开，避免侧栏闪空白。
+        // 磁盘 catalog 已有记录则立刻 ready，后台扫描稍后静默补齐。
+        if (records.length > 0) {
+          setSessionCatalogLoadState?.({ projectId, state: { status: "ready" } });
+        }
         const sorted = records
           .map(sessionRecordToSummary)
           .filter((session): session is SessionSummary => Boolean(session))
