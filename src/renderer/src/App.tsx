@@ -116,6 +116,7 @@ import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
 import { splitLayoutSessionIds } from "./utils/sessionSplitEdge";
+import { findLoadedDirectory, hydrateExpandedFileTree, mergeFileTreeChildren } from "./utils/fileTreeLazy";
 import { SessionTabsBar } from "./components/session/SessionTabsBar";
 import { SessionPaneServicesProvider } from "./components/session/SessionPaneServices";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
@@ -406,7 +407,10 @@ export function App() {
         onCatalogRefreshed: api.sessions.onCatalogRefreshed,
         syncDshForeignSessions: api.sessions.syncDshForeignSessions,
       },
-      files: { list: api.files.list },
+      files: {
+        list: (projectId: string, options?: { maxDepth?: number; directory?: string }) =>
+          api.files.list(projectId, options),
+      },
     },
     showToast,
     setSessionCatalogLoadState,
@@ -672,6 +676,11 @@ export function App() {
     return { kind: "project", projectId: project.id, cwd: project.path };
   }, [terminalOwner, currentSessionId, projects]);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  // 手动刷新/增删改后仍只拉浅层 + 当前展开目录，避免再走整棵 12 层 IPC。
+  const refreshVisibleFiles = useCallback(
+    (projectId?: string, silent?: boolean) => refreshFiles(projectId, silent, expandedDirs),
+    [expandedDirs, refreshFiles],
+  );
   const [, setBranchByProject] = useState<Record<string, string | null>>({});
   const [expandedSidebarProjects, setExpandedSidebarProjects] = useState<Set<string>>(new Set());
   const expandedSidebarProjectsRef = useRef(expandedSidebarProjects);
@@ -1186,10 +1195,10 @@ export function App() {
       }
       workspace.closeDrawer();
     } else {
-      if (panel === "files" && activeProjectId) void refreshFiles(activeProjectId, true);
+      if (panel === "files" && activeProjectId) void refreshVisibleFiles(activeProjectId, true);
       workspace.openDrawer(panel);
     }
-  }, [workspace, gitDrawerDiff, closeGitDiff, activeProjectId, refreshFiles]);
+  }, [workspace, gitDrawerDiff, closeGitDiff, activeProjectId, refreshVisibleFiles]);
 
   const workspaceChrome = useSessionWorkspaceChrome({
     currentSessionId,
@@ -1705,12 +1714,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeProjectId) {
-      setFiles([]);
-      setGitInfo({ current: null, branches: [] });
-      return;
-    }
-
+    if (!activeProjectId) return;
     // 切换项目时按 catalog load state 判断。空项目成功返回 [] 后也会是 ready，
     // 不能再用列表长度，否则每次选中都会重扫。
     const activeProject = projects.find((p) => p.id === activeProjectId);
@@ -1718,17 +1722,46 @@ export function App() {
     if (expandedProjectsReady && activeProject && expandedProjects.has(activeProjectId) && loadState?.status !== "loading" && loadState?.status !== "ready") {
       void refreshProjectSessions(activeProjectId).catch(() => undefined);
     }
+  }, [activeProjectId, expandedProjects, expandedProjectsReady, projects, refreshProjectSessions, store]);
 
-    setExpandedDirs(new Set());
-    void api.files
-      .list(activeProjectId)
-      .then(setFiles)
-      .catch((error) => console.error("[Files] refresh failed", error));
+  useEffect(() => {
+    if (!activeProjectId) {
+      setFiles([]);
+      setGitInfo({ current: null, branches: [] });
+      return;
+    }
+
+    // 只跟项目：切 tab / agent 数量变化不得清空展开目录，也不得整棵重扫文件树。
+    // 抽屉默认浅层 listing（maxDepth=0），已展开目录再按路径补齐。
+    const dirs = loadExpandedDirs(activeProjectId);
+    setExpandedDirs(dirs);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const tree = await api.files.list(activeProjectId, { maxDepth: 0 });
+        if (cancelled) return;
+        const hydrated = await hydrateExpandedFileTree(
+          (directory) => api.files.list(activeProjectId, { maxDepth: 0, directory }),
+          tree,
+          dirs,
+        );
+        if (!cancelled) setFiles(hydrated);
+      } catch (error) {
+        if (!cancelled) console.error("[Files] refresh failed", error);
+      }
+    })();
     void api.git
       .branches(activeProjectId)
-      .then(setGitInfo)
-      .catch(() => setGitInfo({ current: null, branches: [] }));
-  }, [activeProjectId, currentSessionId, displayAgents.length]);
+      .then((info) => {
+        if (!cancelled) setGitInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setGitInfo({ current: null, branches: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId, loadExpandedDirs]);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -2430,13 +2463,30 @@ export function App() {
 
   function toggleDirectory(path: string) {
     // 文件树默认折叠,只有用户显式展开目录才显示子项,避免大仓库一打开就产生视觉噪音。
+    let expanding = false;
     setExpandedDirs((current) => {
       const next = new Set(current);
       if (next.has(path)) next.delete(path);
-      else next.add(path);
+      else {
+        next.add(path);
+        expanding = true;
+      }
       // 持久化展开状态到 localStorage，切换回此项目时恢复
       if (activeProjectId) saveExpandedDirs(activeProjectId, next);
       return next;
+    });
+    // 首次展开时按需拉这一层；收起或已有 children 只改展开态，避免重复 IPC。
+    if (!expanding || !activeProjectId) return;
+    setFiles((current) => {
+      if (findLoadedDirectory(current, path)) return current;
+      const projectId = activeProjectId;
+      void api.files
+        .list(projectId, { maxDepth: 0, directory: path })
+        .then((children) => {
+          setFiles((tree) => mergeFileTreeChildren(tree, path, children));
+        })
+        .catch((error) => console.error("[Files] expand failed", error));
+      return current;
     });
   }
 
@@ -2932,7 +2982,6 @@ export function App() {
             onDropSplit={workspaceChrome.dropSplit}
             solo={
               <ChatSessionPane
-                key={currentSessionId}
                 sessionId={currentSessionId}
                 focused
                 onFocusPane={() => focusSessionPane(currentSessionId)}
@@ -3107,7 +3156,7 @@ export function App() {
         setHasClipboardFiles(false);
       }
     },
-    refreshFiles,
+    refreshFiles: refreshVisibleFiles,
     projects,
     refreshProjectSessions,
     runOpenSidebarSession: async (projectId: string, session: SessionSummary) => {
@@ -3131,7 +3180,7 @@ export function App() {
       }
       if (paths.length > 0) {
         void api.files.copy(paths, targetDir).then(() => {
-          void refreshFiles();
+          void refreshVisibleFiles();
           showToast(t("app.fileCopyDone", { count: paths.length }), 2000);
         }).catch((error) => {
           showToast(error instanceof Error ? error.message : String(error), 4000);
@@ -3144,7 +3193,7 @@ export function App() {
         const paths = api.files.getClipboardPaths();
         if (paths.length > 0) {
           void api.files.copy(paths, targetDir).then(() => {
-            void refreshFiles();
+            void refreshVisibleFiles();
             showToast(t("app.fileCopyDone", { count: paths.length }), 2000);
           }).catch((error) => {
             showToast(t("app.filePasteFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
@@ -3155,7 +3204,7 @@ export function App() {
     onMoveFiles: (sourcePaths, targetDir) => {
       // 文件树内部拖拽移动：同设备 rename，跨设备 cp+rm
       void api.files.move(sourcePaths, targetDir).then(() => {
-        void refreshFiles();
+        void refreshVisibleFiles();
         showToast(t("app.fileMoveDone", { count: sourcePaths.length }), 2000);
       }).catch((error) => {
         showToast(error instanceof Error ? error.message : String(error), 4000);
@@ -3199,19 +3248,20 @@ export function App() {
               active: drawer === "git",
               onClick: () => handleToolDrawerAction("git"),
             }] : []),
-            {
-              id: "browser",
-              label: t("app.browser"),
-              icon: <Globe size={16} />,
-              active: drawer === "browser",
-              onClick: () => handleToolDrawerAction("browser"),
-            },
+            // 轨迹固定在内置浏览器前面：有 Git 时是第 3 个（files / git / trajectory / browser）。
             {
               id: "trajectory",
               label: t("session.view.trajectory"),
               icon: <Activity size={16} />,
               active: drawer === "trajectory",
               onClick: () => handleToolDrawerAction("trajectory"),
+            },
+            {
+              id: "browser",
+              label: t("app.browser"),
+              icon: <Globe size={16} />,
+              active: drawer === "browser",
+              onClick: () => handleToolDrawerAction("browser"),
             },
           ]}
         />
@@ -3299,7 +3349,7 @@ export function App() {
             const paths = api.files.getClipboardPaths();
             if (paths.length > 0) {
               void api.files.copy(paths, targetDir).then(() => {
-                void refreshFiles();
+                void refreshVisibleFiles();
                 showToast(t("app.fileCopyDone", { count: paths.length }), 2000);
               }).catch((error) => {
                 showToast(t("app.filePasteFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
@@ -3349,7 +3399,7 @@ export function App() {
               overlays.clearConfirm();
               try {
                 await api.files.delete(node.path, true);
-                void refreshFiles();
+                void refreshVisibleFiles();
                 showToast(t("app.fileDeleted"), 2000);
               } catch (e) {
                 console.error("[File] 删除失败:", e);
@@ -3378,7 +3428,7 @@ export function App() {
         onClose: () => setRenamingFile(null),
         onConfirm: (path, newName) => {
           void api.files.rename(path, newName).then(() => {
-            void refreshFiles();
+            void refreshVisibleFiles();
             setRenamingFile(null);
             showToast(t("app.fileRenamed"), 2000);
           }).catch((err) => console.error("[File] rename failed:", err));

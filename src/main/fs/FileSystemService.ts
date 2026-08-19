@@ -1,16 +1,38 @@
 import { readdir, rename as fsRename, mkdir, writeFile, stat } from "node:fs/promises";
-import { join, relative, dirname } from "node:path";
+import { join, relative, dirname, resolve, sep } from "node:path";
 import { trashPath } from "./trash";
 import type { FileTreeNode } from "../../shared/types";
 
 const ignoredNames = new Set([".git", "node_modules", "dist", "build", ".next", "coverage", ".venv", "__pycache__"]);
 
-// 文件侧边栏需要能展示常见前端/桌面项目的深层源码目录；保留上限是为了避免误打开超大仓库时递归读取拖慢 UI。
-const DEFAULT_FILE_TREE_MAX_DEPTH = 12;
+// composer @ 引用仍需要一棵较深的树；抽屉默认走浅层 listing，不再一次递归 12 层。
+export const DEFAULT_FILE_TREE_MAX_DEPTH = 8;
+export const FILE_TREE_ABSOLUTE_MAX_DEPTH = 12;
+
+/** 路径必须落在项目根内（resolve 后比较，防 ../ 逃逸）。 */
+export function isPathInsideProject(root: string, target: string): boolean {
+  const rootResolved = resolve(root);
+  const resolved = resolve(target);
+  return resolved === rootResolved || resolved.startsWith(rootResolved + sep);
+}
 
 export class FileSystemService {
-  async listTree(root: string, maxDepth = DEFAULT_FILE_TREE_MAX_DEPTH): Promise<FileTreeNode[]> {
-    return this.readDirectory(root, root, 0, maxDepth);
+  /**
+   * 列出项目文件树。
+   * maxDepth=0：只读当前目录一层，子目录 children=[] 且 hasChildren 标记是否可再展开。
+   * maxDepth>0：继续向下递归，供 composer @ 引用一次性拿到有限深度清单。
+   */
+  async listTree(
+    root: string,
+    maxDepth = DEFAULT_FILE_TREE_MAX_DEPTH,
+    directory?: string,
+  ): Promise<FileTreeNode[]> {
+    const current = directory ? resolve(directory) : resolve(root);
+    if (!isPathInsideProject(root, current)) {
+      throw new Error(`Invalid path: "${directory}" escapes project directory`);
+    }
+    const depthLimit = Math.max(0, Math.min(maxDepth, FILE_TREE_ABSOLUTE_MAX_DEPTH));
+    return this.readDirectory(root, current, 0, depthLimit);
   }
 
   private async readDirectory(root: string, current: string, depth: number, maxDepth: number): Promise<FileTreeNode[]> {
@@ -41,14 +63,23 @@ export class FileSystemService {
         : undefined;
 
       if (entry.isDirectory()) {
+        // 达到深度上限时不再递归，只看一层是否还有可见子项，避免抽屉一次拉整棵仓库。
+        const canRecurse = depth < maxDepth;
+        const children = canRecurse
+          ? await this.readDirectory(root, absolutePath, depth + 1, maxDepth)
+          : undefined;
         nodes.push({
           name: entry.name,
           path: absolutePath,
           relativePath,
           type: "directory",
           ...sharedMeta,
-          // 深度达到上限时停止继续递归；上限由默认常量控制，兼顾深层目录展示和大仓库性能。
-          children: depth < maxDepth ? await this.readDirectory(root, absolutePath, depth + 1, maxDepth) : [],
+          // 未递归时 children 为 undefined，省略该字段；已递归的空目录是 []。
+          // 渲染层用「有没有 children 数组」区分未加载 vs 已加载空目录。
+          ...(children ? { children } : {}),
+          hasChildren: canRecurse
+            ? (children?.length ?? 0) > 0
+            : await this.directoryHasVisibleChildren(absolutePath),
         });
       } else if (entry.isFile()) {
         nodes.push({
@@ -66,6 +97,16 @@ export class FileSystemService {
       if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
+  }
+
+  /** 浅层 listing 用：目录是否还有未被忽略的子项，决定是否显示展开箭头。 */
+  private async directoryHasVisibleChildren(directory: string): Promise<boolean> {
+    try {
+      const entries = await readdir(directory, { withFileTypes: true });
+      return entries.some((entry) => !ignoredNames.has(entry.name) && (entry.isDirectory() || entry.isFile()));
+    } catch {
+      return false;
+    }
   }
 
   /** 删除文件或空目录；非空目录需要递归删除 */

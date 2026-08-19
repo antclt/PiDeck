@@ -314,8 +314,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.projectResourcesRenameSkill, projectId, skillPath, newName) as Promise<PiSkillSummary>,
 	},
 	files: {
-		list: (projectId: string) =>
-			ipcRenderer.invoke(ipcChannels.filesList, projectId) as Promise<
+		list: (projectId: string, options?: { maxDepth?: number; directory?: string }) =>
+			ipcRenderer.invoke(ipcChannels.filesList, projectId, options) as Promise<
 				FileTreeNode[]
 			>,
 		open: (path: string) =>

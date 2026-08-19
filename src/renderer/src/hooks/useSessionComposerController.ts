@@ -487,13 +487,31 @@ export function useSessionComposerController(
     }).catch(() => undefined);
   }, []);
 
+  // 单栏会话复用同一 Composer 实例：切 tab 必须清掉 picker/建议/预览等本地 UI，
+  // 草稿和附件走 per-session atom，这里只重置不属于 atom 的瞬时状态。
+  useEffect(() => {
+    setCursor(0);
+    setSuggestionsOpen(false);
+    setSelectedSuggestionIndex(0);
+    setHistoryIndex(-1);
+    setSavedDraft("");
+    setBusyDraftLocked(false);
+    setSendBehaviorMenuOpen(false);
+    setPreviewImage(null);
+    setGeneratingImage(false);
+    setPicker(null);
+    setSessionReference(null);
+    setSessionReferenceSelections({});
+  }, [sessionId]);
+
   useEffect(() => {
     if (!record?.projectId) {
       setFiles([]);
       return;
     }
     let current = true;
-    void desktopApi.files.list(record.projectId).then((next) => {
+    // @ 引用需要一棵有限深度的树；只跟项目，不跟 sessionId，避免切 tab 再扫盘。
+    void desktopApi.files.list(record.projectId, { maxDepth: 8 }).then((next) => {
       if (current) setFiles(next);
     }).catch(() => {
       if (current) setFiles([]);

@@ -54,6 +54,11 @@ export type FileTreeNode = {
 	relativePath: string;
 	type: "file" | "directory";
 	children?: FileTreeNode[];
+	/**
+	 * 目录是否可能有可见子项。懒加载时未展开的目录 children 为空，
+	 * 靠这个字段决定是否显示展开箭头；已加载则与 children.length 对齐。
+	 */
+	hasChildren?: boolean;
 	/** 文件元数据（文件树排序用；缺失时回退按名称）。目录 size 无意义恒为 0。 */
 	mtimeMs?: number;
 	ctimeMs?: number;

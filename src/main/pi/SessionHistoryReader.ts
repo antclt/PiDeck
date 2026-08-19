@@ -165,6 +165,8 @@ function syntheticHistoryEntryId(messageId: string): string | undefined {
 export class SessionHistoryReader {
 	private readonly sessionDisplayIndexes = new Map<string, SessionDisplayIndex>();
 	private static readonly SESSION_DISPLAY_INDEX_LIMIT = 32;
+	/** 全量重建时每隔这么多行让出事件循环，避免几十 MB JSONL 同步 parse 卡死主进程。 */
+	private static readonly INDEX_PARSE_YIELD_EVERY = 400;
 	private static readonly MAX_SESSION_DISPLAY_PAGE_SIZE = 100;
 	private static readonly MAX_SESSION_DISPLAY_PAGE_BYTES = 256 * 1024;
 	/** 完整消息文本 LRU 缓存（「查看完整输出」按需读取结果）：键 `${sessionPath}#${messageId}`。 */
@@ -594,6 +596,12 @@ export class SessionHistoryReader {
 				lastEntryId = parsed.id;
 			}
 			byteOffset += byteLength + (hasNewline ? 1 : 0);
+			// 大会话全量 rebuild 不能占满主线程：每 N 行让出一轮，IPC/窗口消息才能继续走。
+			if ((lineIndex + 1) % SessionHistoryReader.INDEX_PARSE_YIELD_EVERY === 0) {
+				await new Promise<void>((resolve) => {
+					setImmediate(resolve);
+				});
+			}
 		}
 		const activeBranch = this.traceActiveBranch(entries, lastEntryId);
 		const index = this.finishIndex(hostPath, version, entries, activeBranch, endsWithNewline);

@@ -53,10 +53,23 @@ export function registerFilesIpc({
 		return result.canceled ? [] : result.filePaths;
 	});
 
-	ipcMain.handle(ipcChannels.filesList, async (_event, projectId: string) => {
+	ipcMain.handle(
+		ipcChannels.filesList,
+		async (
+			_event,
+			projectId: string,
+			options?: { maxDepth?: number; directory?: string },
+		) => {
 		const project = projectStore.get(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
-		return fileSystemService.listTree(project.path);
+		const maxDepth = typeof options?.maxDepth === "number" && Number.isFinite(options.maxDepth)
+			? options.maxDepth
+			: undefined;
+		const directory = typeof options?.directory === "string" && options.directory.trim()
+			? options.directory.trim()
+			: undefined;
+		// directory 必须落在项目内；越界由 FileSystemService.listTree 拒绝。
+		return fileSystemService.listTree(project.path, maxDepth, directory);
 	});
 
 	ipcMain.handle(ipcChannels.filesOpen, async (_event, path: string) => {

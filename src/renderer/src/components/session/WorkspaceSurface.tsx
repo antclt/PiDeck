@@ -579,6 +579,9 @@ function FileNode(props: {
 					</button>
 				</CollapsibleTrigger>
 				<CollapsibleContent>
+					{expanded && node.hasChildren !== false && !node.children && (
+						<div className="file-children px-2 py-1 text-xs text-muted-foreground">{t("drawer.lazyLoading")}</div>
+					)}
 					{node.children && node.children.length > 0 && (
 						<div className="file-children">
 							{node.children.map((child) => (

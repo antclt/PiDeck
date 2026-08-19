@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import type { Project, FileTreeNode, GitBranchInfo, WorktreeEntry, SessionSummary, SessionRecord } from "../../../shared/types";
 import type { SessionLoadState } from "../atoms/session-atoms";
 import { sessionRecordToSummary } from "../atoms/session-selectors";
+import { hydrateExpandedFileTree } from "../utils/fileTreeLazy";
 
 const SESSION_REFRESH_TIMEOUT_MS = 20_000;
 const SIDEBAR_PROJECT_CHILD_PAGE_SIZE = 5;
@@ -39,7 +40,12 @@ type UseProjectSyncInput = {
       /** 只读扫 $DSH_HOME，把外部根会话写入 catalog；关闭自动导入时调用方不应触发。 */
       syncDshForeignSessions?: () => Promise<{ imported: number; skipped: number }>;
     };
-    files: { list: (projectId: string) => Promise<FileTreeNode[]> };
+    files: {
+      list: (
+        projectId: string,
+        options?: { maxDepth?: number; directory?: string },
+      ) => Promise<FileTreeNode[]>;
+    };
   };
   showToast: (message: string, duration?: number) => void;
   setSessionCatalogLoadState?: (input: { projectId: string; state: SessionLoadState }) => void;
@@ -267,9 +273,19 @@ export function useProjectSync(input: UseProjectSyncInput) {
     showToast(t("app.projectRefreshed", {}), 1800);
   }
 
-  async function refreshFiles(projectId = activeProjectId, silent = false) {
+  async function refreshFiles(
+    projectId = activeProjectId,
+    silent = false,
+    expandedDirs: Iterable<string> = [],
+  ) {
     if (!projectId) return;
-    const next = await api.files.list(projectId);
+    // 抽屉刷新只拉浅层根，再按当前展开目录补齐，避免整棵 12 层 IPC。
+    const tree = await api.files.list(projectId, { maxDepth: 0 });
+    const next = await hydrateExpandedFileTree(
+      (directory) => api.files.list(projectId, { maxDepth: 0, directory }),
+      tree,
+      expandedDirs,
+    );
     setFiles(next);
     if (!silent) showToast(t("app.filesRefreshed", {}), 1800);
   }

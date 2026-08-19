@@ -459,6 +459,17 @@ export function useSessionTimelineController(options: {
       expandBatchFrameRef.current = window.requestAnimationFrame(consumeExpandBatch);
     }
   }, [consumeExpandBatch, escapeAutoScroll]);
+  // 单栏无 key 复用：切会话时重置上滚窗口，避免把上一会话扩开的轮数带到新会话。
+  useEffect(() => {
+    setScrolledWindowTurns(TIMELINE_SCROLLED_TURN_LIMIT);
+    setIsLoadingMessagePage(false);
+    pendingExpandTurnsRef.current = 0;
+    lastWindowExpandAtRef.current = 0;
+    if (expandBatchFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(expandBatchFrameRef.current);
+      expandBatchFrameRef.current = undefined;
+    }
+  }, [ownerKey]);
   const expandWindow = useCallback(() => {
     // 跟底状态（内容短于视口、按钮可见）下点击「显示更早」：先解锁跟随，
     // 否则 turnWindowTurns 恒取贴底窗口 3 轮，扩大 scrolledWindowTurns 不生效，

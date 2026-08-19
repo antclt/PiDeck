@@ -59,6 +59,20 @@ const files: FileTreeNode[] = [
 	},
 ];
 
+function findPreviewDirectory(
+	nodes: FileTreeNode[],
+	directory: string,
+): FileTreeNode | undefined {
+	for (const node of nodes) {
+		if (node.type === "directory" && node.path === directory) return node;
+		if (node.children) {
+			const nested = findPreviewDirectory(node.children, directory);
+			if (nested) return nested;
+		}
+	}
+	return undefined;
+}
+
 function getSessions(): SessionSummary[] {
 	return [
 		{
@@ -283,7 +297,13 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 		},
 		files: {
-			list: async () => files,
+			list: async (_projectId, options) => {
+				if (options?.directory) {
+					const match = findPreviewDirectory(files, options.directory);
+					return match?.children ?? [];
+				}
+				return files;
+			},
 			open: async () => undefined,
 			showInFolder: async () => undefined,
 			readContent: async () => "",

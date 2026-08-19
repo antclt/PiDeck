@@ -43,6 +43,7 @@ test("file tree nodes carry stat metadata for sorting", async () => {
     assert.equal(typeof subNode.mtimeMs, "number");
     // 目录排在文件前（默认名称排序的既有契约不变）
     assert.equal(tree[0].name, "sub");
+    assert.equal(subNode.hasChildren, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -58,6 +59,40 @@ test("ignored names stay excluded from the tree", async () => {
     const names = tree.map((n) => n.name);
     assert.ok(names.includes("keep.ts"));
     assert.ok(!names.includes("node_modules"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("shallow listing does not recurse and marks expandable directories", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pideck-tree-shallow-"));
+  const nested = join(root, "src", "deep");
+  mkdirSync(nested, { recursive: true });
+  writeFileSync(join(nested, "a.ts"), "x");
+  try {
+    const service = new FileSystemService();
+    const tree = await service.listTree(root, 0);
+    const src = tree.find((node) => node.name === "src");
+    assert.equal(src.type, "directory");
+    assert.equal(src.children, undefined);
+    assert.equal(src.hasChildren, true);
+
+    const children = await service.listTree(root, 0, src.path);
+    assert.equal(children[0].name, "deep");
+    assert.equal(children[0].hasChildren, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("listTree rejects a directory outside the project root", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pideck-tree-escape-"));
+  try {
+    const service = new FileSystemService();
+    await assert.rejects(
+      () => service.listTree(root, 0, join(root, "..", "outside")),
+      /escapes project directory/,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
