@@ -217,7 +217,9 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    // 切换器与 GitPanel 是同一个抽屉表面；在宿主层挂上 git-panel，
+    // 让它也继承 --git-panel-* token，避免切换仓库后顶部出现另一块底色。
+    <div className="git-panel flex h-full min-h-0 flex-col overflow-hidden">
       {showSwitcher ? (
         <GitRepoSwitcher
           repos={scope.repos}

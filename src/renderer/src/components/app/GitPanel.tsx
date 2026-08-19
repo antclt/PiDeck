@@ -1080,12 +1080,12 @@ export function GitPanel(props: GitPanelProps) {
       aria-label={t("git.sourceControl")}
     >
       {/* 当前分支 + 切换下拉（pure official：outline 触发器 + popover 菜单） */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-border/40 bg-background px-2 py-1.5" ref={branchBarRef}>
+      <div className="flex shrink-0 items-center gap-1 border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] px-2 py-1.5" ref={branchBarRef}>
         <Button
           ref={branchTriggerRef}
           type="button"
           variant="outline"
-          className="inline-flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-left text-xs text-foreground hover:bg-accent"
+          className="inline-flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-[var(--git-input-border)] bg-[var(--git-input-bg)] px-2 text-left text-xs text-[var(--git-panel-fg)] hover:bg-[var(--git-panel-hover)]"
           onClick={() => {
             if (!branchOpen) updateBranchDropdownPosition();
             setBranchOpen((v) => !v);

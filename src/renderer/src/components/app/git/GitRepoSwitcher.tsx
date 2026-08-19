@@ -29,20 +29,20 @@ export function GitRepoSwitcher(props: GitRepoSwitcherProps) {
   if (repos.length <= 1) return null;
   const value = activePath ?? repos[0]?.path;
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-border/40 bg-background px-2 py-1.5">
+    <div className="flex shrink-0 items-center gap-1 border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] px-2 py-1.5">
       <Select value={value} onValueChange={onSelect}>
         <SelectTrigger
           aria-label={t("git.switchRepository")}
           title={t("git.switchRepository")}
-          className="h-7 min-w-0 flex-1 gap-1.5 rounded-md border border-border bg-background px-2 text-xs"
+          className="h-7 min-w-0 flex-1 gap-1.5 rounded-md border border-[var(--git-input-border)] bg-[var(--git-input-bg)] px-2 text-xs text-[var(--git-panel-fg)] hover:bg-[var(--git-panel-hover)]"
         >
           <FolderGit2 size={14} className="shrink-0 text-muted-foreground" />
           <SelectValue placeholder={t("git.repository")} />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="max-w-[min(24rem,calc(100vw-16px))]">
           {repos.map((repo) => (
             <SelectItem key={repo.path} value={repo.path} title={repo.path}>
-              {repoLabel(repo)}
+              <span className="min-w-0 truncate">{repoLabel(repo)}</span>
             </SelectItem>
           ))}
         </SelectContent>
