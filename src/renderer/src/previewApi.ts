@@ -591,6 +591,7 @@ export function createPreviewApi(): PiDesktopApi {
 				stage: async () => {},
 				unstage: async () => {},
 				discard: async () => {},
+				discardFiles: async () => {},
 				commit: async () => {},
 				cherryPick: async () => {},
 				revert: async () => {},

@@ -75,7 +75,7 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
     assert.match(panel, /open: \{ changes: true, graph: false, compare: false \}/);
     assert.match(panel, /\[id\]: !current\.open\[id\]/);
     assert.doesNotMatch(panel, /id === "changes" \? true/);
-    assert.match(panel, /pideck:git-panel:\$\{projectId\}:\$\{encodeURIComponent\(repoScopeKey\)\}:pane-state:v4/);
+    assert.match(panel, /pideck:git-panel:\$\{projectId\}:\$\{encodeURIComponent\(repoScopeKey\)\}:pane-state:\$\{suffix\}/);
     assert.match(panel, /id=\{`git-pane-\$\{paneIdPrefix\}-changes`\}/);
     assert.match(graph, /id=\{`git-pane-\$\{props\.paneIdPrefix\}-graph`\}/);
     assert.match(panel, /id=\{`git-pane-\$\{props\.paneIdPrefix\}-compare`\}/);
@@ -91,7 +91,7 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
     assert.match(panel, /pointercancel/);
     assert.match(panel, /ArrowUp/);
     assert.match(panel, /ArrowDown/);
-    assert.match(panel, /adjacentVisiblePane\(\s*paneState\.open,\s*"changes",\s*1,\s*\)/);
+    assert.match(panel, /adjacentVisiblePane\(\s*visibleOpen,\s*"changes",\s*1,\s*\)/);
     assert.match(panel, /renderSash\(\s*"changes",\s*visibleSashAfterChanges\s*\)/);
     assert.match(panel, /renderSash\(\s*"graph",\s*visibleSashAfterGraph\s*\)/);
     assert.match(styles, /\.git-pane-sash\s*\{/);

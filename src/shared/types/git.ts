@@ -93,6 +93,12 @@ export type GitResourceGroups = {
 	untracked: GitResource[];
 };
 
+/** 批量回滚时保留资源组，避免同一目录中的 tracked/untracked 文件混淆。 */
+export type GitDiscardResource = {
+	group: "workingTree" | "untracked";
+	path: string;
+};
+
 /** Git Changes 各资源组打开 Diff 时的比较上下文。 */
 export type GitWorkspaceDiffGroup = GitResourceGroupType;
 

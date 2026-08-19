@@ -55,6 +55,10 @@ export type GitGraphProps = {
     mode: "soft" | "mixed" | "hard",
   ) => Promise<void>;
   dropCommit?: (projectId: string, hash: string) => Promise<void>;
+  /** 多仓共享图时的仓库下拉；不传则保持单仓标题栏。 */
+  historyRepoPath?: string;
+  historyRepoOptions?: { value: string; label: string }[];
+  onSelectHistoryRepo?: (path: string) => void;
 };
 
 function errorMessage(error: unknown): string {
@@ -856,6 +860,15 @@ export function SourceControlGraph(props: GitGraphProps) {
         open={props.open}
         onToggle={props.onToggle}
       >
+        {props.historyRepoOptions && props.historyRepoOptions.length > 1 && props.onSelectHistoryRepo && (
+          <GitCompactFilter
+            value={props.historyRepoPath ?? ""}
+            ariaLabel={t("git.switchRepository")}
+            options={props.historyRepoOptions}
+            onChange={props.onSelectHistoryRepo}
+            className="max-w-[8.5rem]"
+          />
+        )}
         <GitCompactFilter
           value={ref}
           ariaLabel={t("git.filterReference")}

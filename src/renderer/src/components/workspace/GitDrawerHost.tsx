@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BranchDiffResult,
   CommitDetail,
@@ -6,6 +6,7 @@ import type {
   GitAheadBehind,
   GitBranchInfo,
   GitChangedFile,
+  GitDiscardResource,
   GitGenerateCommitMessageResult,
   GitRepoInfo,
   GitResourceGroups,
@@ -39,6 +40,7 @@ export type GitDrawerApi = {
     filePath: string,
     repoPath?: string,
   ) => Promise<void>;
+  discardFiles: (projectId: string, resources: GitDiscardResource[], repoPath?: string) => Promise<void>;
   commit: (projectId: string, message: string, repoPath?: string) => Promise<void>;
   cherryPick: (projectId: string, hash: string, repoPath?: string) => Promise<void>;
   revert: (projectId: string, hash: string, repoPath?: string) => Promise<void>;
@@ -111,6 +113,8 @@ function createScopedGitApi(
     unstageFiles: (id: string, paths: string[]) => gitApi.unstage(id, paths, repoPath),
     discardFile: (id: string, group: "workingTree" | "untracked", path: string) =>
       gitApi.discard(id, group, path, repoPath),
+    discardFiles: (id: string, resources: GitDiscardResource[]) =>
+      gitApi.discardFiles(id, resources, repoPath),
     commit: (id: string, message: string) => gitApi.commit(id, message, repoPath),
     cherryPick: (id: string, hash: string) => gitApi.cherryPick(id, hash, repoPath),
     revert: (id: string, hash: string) => gitApi.revert(id, hash, repoPath),
@@ -136,8 +140,8 @@ function repoLabel(repo: GitRepoInfo): string {
 }
 
 /**
- * Git 抽屉宿主：多仓时将每个仓库作为独立的 Source Control 区块同时展示。
- * 单仓继续复用 App 的分支数据；嵌套仓及多仓的分支状态按绝对路径隔离。
+ * Git 抽屉宿主：多仓时只堆叠各仓变更区；Graph / Compare 全局只挂一份，
+ * 通过下拉切换仓库。单仓继续完整三栏；嵌套仓分支状态按路径隔离。
  */
 export function GitDrawerHost(props: GitDrawerHostProps) {
   const {
@@ -210,7 +214,42 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
     [gitApi, projectId, updateGitInfo],
   );
 
-  const renderPanel = (repo: GitRepoInfo | undefined, repositoryLabel?: string) => {
+  const [historyRepoPath, setHistoryRepoPath] = useState<string | undefined>(undefined);
+  const historyRepoPathRef = useRef(historyRepoPath);
+  historyRepoPathRef.current = historyRepoPath;
+
+  useEffect(() => {
+    if (!scope.hasMultipleRepos) {
+      setHistoryRepoPath(undefined);
+      return;
+    }
+    // Graph/Compare 全局只挂一份：记住上次选中的仓，仓库列表变化时落到仍存在的路径。
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(`pideck:git-panel:${projectId}:history-repo`);
+    } catch {
+      stored = null;
+    }
+    const match = scope.repos.find((repo) => repo.path === stored)
+      ?? scope.repos.find((repo) => repo.path === historyRepoPathRef.current)
+      ?? scope.repos[0];
+    setHistoryRepoPath(match?.path);
+  }, [projectId, scope.hasMultipleRepos, scope.repos]);
+
+  const selectHistoryRepo = useCallback((path: string) => {
+    setHistoryRepoPath(path);
+    try {
+      localStorage.setItem(`pideck:git-panel:${projectId}:history-repo`, path);
+    } catch {
+      // 预览/无存储环境仍允许本次会话内切换。
+    }
+  }, [projectId]);
+
+  const renderPanel = (
+    repo: GitRepoInfo | undefined,
+    repositoryLabel?: string,
+    layout: "full" | "changesOnly" | "historyOnly" = "full",
+  ) => {
     const repoPath = repo?.path;
     const scopedApi = createScopedGitApi(gitApi, repoPath, scope.refreshRepos);
     const useScopedBranches = Boolean(repoPath) && needsScopedBranchInfo;
@@ -224,6 +263,14 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
         projectRoot={repoPath ?? projectRoot}
         repoScopeKey={repoPath ?? projectRoot}
         repositoryLabel={repositoryLabel}
+        layout={layout}
+        historyRepoPath={layout === "historyOnly" ? historyRepoPath : undefined}
+        historyRepoOptions={
+          layout === "historyOnly"
+            ? scope.repos.map((item) => ({ value: item.path, label: repoLabel(item) }))
+            : undefined
+        }
+        onSelectHistoryRepo={layout === "historyOnly" ? selectHistoryRepo : undefined}
         commitLog={scopedApi.commitLog}
         commitDetail={scopedApi.commitDetail}
         onOpenCommitFileDiff={(commit, file) => onOpenCommitFileDiff(commit, file, repoPath)}
@@ -234,6 +281,7 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
         stageFiles={scopedApi.stageFiles}
         unstageFiles={scopedApi.unstageFiles}
         discardFile={scopedApi.discardFile}
+        discardFiles={scopedApi.discardFiles}
         commit={scopedApi.commit}
         branches={gitInfo.branches}
         currentBranch={gitInfo.current}
@@ -269,14 +317,19 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
   };
 
   if (scope.hasMultipleRepos) {
+    const historyRepo = scope.repos.find((repo) => repo.path === historyRepoPath) ?? scope.repos[0];
     return (
       <div className="git-panel flex h-full min-h-0 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
           {scope.repos.map((repo) => (
-            <section key={repo.path} className="h-[420px] min-h-[320px] shrink-0 border-b border-[var(--git-panel-border)] last:border-b-0">
-              {renderPanel(repo, repoLabel(repo))}
+            <section key={repo.path} className="shrink-0 border-b border-[var(--git-panel-border)] last:border-b-0">
+              {renderPanel(repo, repoLabel(repo), "changesOnly")}
             </section>
           ))}
+        </div>
+        {/* 不预留固定高度：折叠时只占两行标题，避免截图里大块空白。 */}
+        <div className="shrink-0 overflow-hidden border-t border-[var(--git-panel-border)]">
+          {historyRepo && renderPanel(historyRepo, undefined, "historyOnly")}
         </div>
       </div>
     );

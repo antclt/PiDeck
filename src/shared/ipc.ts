@@ -230,6 +230,8 @@ export const ipcChannels = {
 	gitStage: "git:stage",
 	gitUnstage: "git:unstage",
 	gitDiscard: "git:discard",
+	/** 按目录批量回滚未暂存资源，主进程会重新校验每个资源所属分组。 */
+	gitDiscardFiles: "git:discard-files",
 	gitCommit: "git:commit",
 	gitCherryPick: "git:cherry-pick",
 	gitRevert: "git:revert",

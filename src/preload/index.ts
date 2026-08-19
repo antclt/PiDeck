@@ -54,6 +54,7 @@ import type {
 	FeishuTestResult,
 	FileTreeNode,
 	GitBranchInfo,
+	GitDiscardResource,
 	GitRepoInfo,
 	ImageContent,
 	CommitDetail,
@@ -940,6 +941,14 @@ const api = {
 				projectId,
 				group,
 				filePath,
+				repoPath,
+			) as Promise<void>,
+		// 按目录批量回滚：资源组随路径传入，主进程会重新校验最新状态。
+		discardFiles: (projectId: string, resources: GitDiscardResource[], repoPath?: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitDiscardFiles,
+				projectId,
+				resources,
 				repoPath,
 			) as Promise<void>,
 		// Commit

@@ -2,7 +2,7 @@ import { ipcMain } from "electron";
 import { resolve } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { ipcChannels } from "../../shared/ipc";
-import type { GitGenerateCommitMessageResult, GitWorkspaceDiffGroup } from "../../shared/types";
+import type { GitDiscardResource, GitGenerateCommitMessageResult, GitWorkspaceDiffGroup } from "../../shared/types";
 import type { GitService } from "../git/GitService";
 import { listGitRepos, resolveGitCwd } from "../git/gitRepoScope";
 import type { AppLogger } from "../logging/AppLogger";
@@ -449,6 +449,31 @@ export function registerGitIpc({
 				});
 				throw error;
 			}
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitDiscardFiles,
+		async (_event, projectId: string, resources: GitDiscardResource[], repoPath?: string) => {
+			if (
+				!Array.isArray(resources) ||
+				resources.length > 1000 ||
+				resources.some((resource) =>
+					!resource ||
+					(resource.group !== "workingTree" && resource.group !== "untracked") ||
+					typeof resource.path !== "string" ||
+					resource.path.length === 0,
+				)
+			) {
+				throw new Error("Invalid Git discard resources");
+			}
+			const cwd = requireGitCwd(projectId, repoPath);
+			await gitService.discardFiles(cwd, resources);
+			void appLogger.info("git", "Changes discarded in batch", {
+				projectId,
+				count: resources.length,
+				repoPath: cwd,
+			});
 		},
 	);
 

@@ -753,6 +753,50 @@ export class GitService {
 		await execFileAsync("git", ["--literal-pathspecs", "restore", "--worktree", "--", resource.path], { cwd: repoRoot, timeout: GIT_MUTATION_TIMEOUT_MS });
 	}
 
+	/**
+	 * 批量丢弃同一目录下的未暂存资源。
+	 * 先用一次状态快照校验分组和路径，再合并 tracked restore；未跟踪文件逐个进回收站，
+	 * 这样既保持单文件回滚语义，也避免渲染层并发发送多个相互覆盖的 Git 操作。
+	 */
+	async discardFiles(cwd: string, resources: Array<{ group: "workingTree" | "untracked"; path: string }>): Promise<void> {
+		if (resources.length === 0) return;
+		const { groups, repoRoot } = await this.getStatusContext(cwd);
+		const samePath = (left: string, right: string) => process.platform === "win32"
+			? left.toLocaleLowerCase() === right.toLocaleLowerCase()
+			: left === right;
+		const trackedPaths: string[] = [];
+		const untrackedPaths: string[] = [];
+		for (const resource of resources) {
+			const requestedPath = resolve(resource.path);
+			const match = groups[resource.group].find((entry) => samePath(resolve(entry.path), requestedPath));
+			if (!match) throw new Error("Git resource is stale or outside the project");
+			if (resource.group === "untracked") {
+				const metadata = await lstat(match.path);
+				if (!metadata.isFile() && !metadata.isSymbolicLink()) {
+					throw new Error("Only individual untracked files can be discarded");
+				}
+				untrackedPaths.push(match.path);
+			} else {
+				trackedPaths.push(match.path);
+			}
+		}
+		if (trackedPaths.length > 0) {
+			await execFileAsync(
+				"git",
+				["--literal-pathspecs", "restore", "--worktree", "--", ...[...new Set(trackedPaths)]],
+				{ cwd: repoRoot, timeout: GIT_MUTATION_TIMEOUT_MS },
+			);
+		}
+		for (const filePath of [...new Set(untrackedPaths)]) {
+			const metadata = await lstat(filePath);
+			if (metadata.isSymbolicLink()) {
+				await unlink(filePath);
+			} else {
+				await trashPath(filePath, { source: "git:discard-files" });
+			}
+		}
+	}
+
 	/** 创建提交 */
 	async commit(cwd: string, message: string): Promise<void> {
 		await execFileAsync("git", ["commit", "-m", message], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });

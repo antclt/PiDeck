@@ -74,8 +74,12 @@ export function FileTree(props: {
 	resources: GitResource[];
 	groupType: GitResourceGroupType;
 	stageFile?: (path: string) => void;
+	/** 目录级暂存只传当前目录资源，避免影响其他目录。 */
+	stageDir?: (paths: string[]) => void;
 	unstageFile?: (path: string) => void;
 	discardFile?: (path: string, group: "workingTree" | "untracked") => void;
+	/** 目录级回滚携带资源组，主进程可在一次状态快照中安全处理混合资源。 */
+	discardDir?: (resources: Array<{ path: string; group: "workingTree" | "untracked" }>, label: string) => void;
 	/** 右键菜单“删除文件”入口；未提供时不启用右键菜单 */
 	deleteFile?: (path: string) => void;
 	/** 行内“打开文件”按钮：打开编辑器而非 diff 视图 */
@@ -104,11 +108,13 @@ export function FileTree(props: {
 			const resources = byDir.get(dir)!;
 			// 单目录且无嵌套时不显示目录头
 			const isSingleRoot = dirs.length === 1 && dir === "";
+			// 即使只有根目录，目录级操作仍需要一个可点击的目录头；没有批量操作时保持旧的紧凑布局。
+			const hideDirHeader = isSingleRoot && !props.stageDir && !props.discardDir;
 			return (
 				<Fragment key={dir || "root"}>
-					{!isSingleRoot && (
+					{!hideDirHeader && (
 						<div
-							className="flex cursor-pointer items-center gap-1 rounded-[4px] px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]"
+							className="group/dir flex cursor-pointer items-center gap-1 rounded-[4px] px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]"
 							onClick={() => props.onToggleDir(dir)}
 						>
 							<ChevronDown
@@ -118,10 +124,47 @@ export function FileTree(props: {
 							<span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={dir || "/"}>
 								{shortenDir(dir) || "/"}
 							</span>
-							<span className="ml-auto px-1 text-[11px] tabular-nums text-text-tertiary">{resources.length}</span>
+							{(() => {
+								const stageable = resources.filter(
+									(resource) => !props.stagedPaths?.has(resource.path),
+									);
+								const discardable = stageable
+									.filter((resource) => resource.status === GitStatus.UNTRACKED || props.groupType === "workingTree")
+									.map((resource) => ({
+										path: resource.path,
+										group: resource.status === GitStatus.UNTRACKED ? "untracked" as const : "workingTree" as const,
+									}));
+								return (
+									<span className="ml-auto flex items-center gap-0.5">
+										{props.stageDir && stageable.length > 0 && (
+											<Button
+												type="button" variant="ghost" size="icon-sm"
+												className="invisible size-6 rounded-[4px] text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-text-primary"
+												aria-label={t("git.stageDirectory")} title={t("git.stageDirectory")}
+												disabled={props.mutating}
+												onClick={(event) => { event.stopPropagation(); props.stageDir?.(stageable.map((resource) => resource.path)); }}
+											>
+												<Plus size={13} aria-hidden="true" />
+											</Button>
+										)}
+										{props.discardDir && discardable.length > 0 && (
+											<Button
+												type="button" variant="ghost" size="icon-sm"
+												className="invisible size-6 rounded-[4px] text-text-tertiary group-hover/dir:visible hover:bg-[var(--git-panel-hover)] hover:text-[var(--color-danger)]"
+												aria-label={t("git.discardDirectory")} title={t("git.discardDirectory")}
+												disabled={props.mutating}
+												onClick={(event) => { event.stopPropagation(); props.discardDir?.(discardable, dir || "/"); }}
+											>
+												<RotateCcw size={13} aria-hidden="true" />
+											</Button>
+										)}
+										<span className="px-1 text-[11px] tabular-nums text-text-tertiary">{resources.length}</span>
+									</span>
+								);
+							})()}
 						</div>
 					)}
-					{(!props.collapsedDirs.has(dir) || isSingleRoot) && resources.map((r) => {
+					{(!props.collapsedDirs.has(dir) || hideDirHeader) && resources.map((r) => {
 						const actions: Array<{
 							label: string;
 							kind: "stage" | "unstage" | "discard" | "open";

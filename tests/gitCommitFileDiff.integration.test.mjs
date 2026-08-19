@@ -362,6 +362,35 @@ describe("GitService committed-file diff integration", () => {
     git("reset", "--hard", "HEAD");
   });
 
+  test("discards a mixed directory batch while preserving staged content", async () => {
+    const service = new GitService();
+
+    mkdirSync(join(repositoryDir, "batch-dir"), { recursive: true });
+    write("batch-dir/tracked.txt", "head\n");
+    write("batch-dir/staged.txt", "head\n");
+    git("add", "--", "batch-dir/tracked.txt", "batch-dir/staged.txt");
+    git("commit", "-m", "batch discard base");
+
+    write("batch-dir/tracked.txt", "working\n");
+    write("batch-dir/staged.txt", "staged\n");
+    git("add", "--", "batch-dir/staged.txt");
+    write("batch-dir/staged.txt", "staged plus working\n");
+    write("batch-dir/untracked.txt", "temporary\n");
+
+    await service.discardFiles(repositoryDir, [
+      { group: "workingTree", path: join(repositoryDir, "batch-dir", "tracked.txt") },
+      { group: "workingTree", path: join(repositoryDir, "batch-dir", "staged.txt") },
+      { group: "untracked", path: join(repositoryDir, "batch-dir", "untracked.txt") },
+    ]);
+
+    assert.equal(readFileSync(join(repositoryDir, "batch-dir", "tracked.txt"), "utf8"), "head\n");
+    assert.equal(readFileSync(join(repositoryDir, "batch-dir", "staged.txt"), "utf8"), "staged\n");
+    assert.equal(existsSync(join(repositoryDir, "batch-dir", "untracked.txt")), false);
+    assert.equal(git("diff", "--", "batch-dir/staged.txt"), "");
+    assert.equal(git("diff", "--cached", "--", "batch-dir/staged.txt").includes("+staged"), true);
+    git("reset", "--hard", "HEAD");
+  });
+
   test("keeps discard scoped to the active nested project", async () => {
     const service = new GitService();
     mkdirSync(join(repositoryDir, "discard-nested"), { recursive: true });
