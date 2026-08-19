@@ -603,6 +603,27 @@ function Overview(props: {
 		}
 	};
 
+	/**
+	 * 手动恢复 host：复用设置切换时的完整重启链路，确保先终止旧 mux，
+	 * 再等待新 host ready，不能只杀 utilityProcess 留下运行会话。
+	 */
+	const restartHost = async () => {
+		if (switching) return;
+		setSwitching(true);
+		try {
+			const restarted = await desktopApi.sessions.restartDshHost();
+			showNotice(
+				restarted ? t("config.dsh.hostRestarted") : t("config.dsh.hostRestartFailed"),
+				restarted ? 4000 : 6000,
+			);
+		} catch (error) {
+			showNotice(error instanceof Error ? error.message : String(error), 4000);
+		} finally {
+			setSwitching(false);
+			props.onChanged();
+		}
+	};
+
 	return (
 		<div className="grid max-w-2xl gap-4 p-4">
 			<section className="grid gap-2">
@@ -620,6 +641,17 @@ function Overview(props: {
 							{t("config.dsh.notStarted")}
 						</span>
 					)}
+					<Button
+						type="button"
+						variant="secondary"
+						size="sm"
+						className="h-7 gap-1"
+						disabled={switching}
+						onClick={() => void restartHost()}
+					>
+						{switching ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
+						{t("config.dsh.restartHost")}
+					</Button>
 				</div>
 			</section>
 			{/* 跨工具兼容只留开关：开=启动只读扫盘入侧栏；关=不收录。不提供手动导入。 */}

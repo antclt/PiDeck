@@ -38,7 +38,7 @@ import type {
  * 形态说明（docs/dsh-agent-backend-plan.md §3.2 形态 b）：
  * - host 在 utilityProcess 里 boot（无 web/无 HTTP/无端口），原生 ABI 与崩溃面
  *   不污染主进程；hostEntry 产物经 electron-vite 多入口打包到 out/main/。
- * - 懒启动：首个 DSH 会话创建时才 fork+boot（约 800ms），不拖慢应用启动。
+ * - 应用启动后后台预热：窗口首帧不等待 fork+boot；发送链路调用 ensureStarted() 幂等兜底。
  * - 桥协议：dshHostBridge.ts（fetch-request/response/chunk/end/error）。
  *
  * DSH_HOME：优先直接使用用户真实 ~/.dsh（与 dsh CLI 行为一致，配置/凭证/会话
@@ -96,7 +96,7 @@ export class DshHost {
 		return this.hostProcess?.pid;
 	}
 
-	/** 懒启动（幂等）：fork host 并建立桥接客户端。 */
+	/** 启动/按需兜底（幂等）：fork host 并建立桥接客户端。 */
 	ensureStarted(): Promise<void> {
 		if (this.client) return Promise.resolve();
 		this.startPromise ??= this.start().catch((error) => {
@@ -671,7 +671,7 @@ export class DshHost {
 			}
 		});
 		// 先 fork 并等 host-ready：桥消息必须等 host 侧监听就绪后才能发。
-		// start(true)：用户显式触发（懒启动/重启 host），重置连续崩溃计数（E3）。
+		// start(true)：首次预热、按需兜底或用户重启时都重置连续崩溃计数（E3）。
 		await hostProcess.start(true);
 
 		const transport: DshFetchTransport = {

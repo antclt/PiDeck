@@ -220,6 +220,7 @@ import { AgentManager } from "./pi/AgentManager";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
 import { DshAgentManager } from "./dsh/DshAgentManager";
+import { startDshHostInBackground } from "./dsh/startDshHostInBackground";
 import {
 	importForeignSession,
 	knownForeignSessionIds,
@@ -348,7 +349,7 @@ let worktreeService: WorktreeService;
 let gitService: GitService;
 let piLocator: PiLocator;
 let agentManager: AgentManager;
-/** DSH 深融合宿主（懒启动）与后端网关；未创建 DSH 会话前不 boot，零成本。 */
+/** DSH 深融合宿主与后端网关；窗口创建后后台预热，发送链路仍可按需兜底。 */
 let dshHost: DshHost;
 let dshAgentManager: DshAgentManager;
 /** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
@@ -2940,7 +2941,7 @@ app.whenReady().then(async () => {
 	);
 	// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 	quitCleanup.register("pi-agents", () => agentManager?.stopAll());
-	// DSH 后端：懒启动（首个 DSH 会话创建时 boot），见 docs/dsh-agent-backend-plan.md。
+	// DSH host 在窗口创建后后台预热；此处先完成实例装配，发送链路仍保留 ensureStarted 兜底。
 	// DSH_HOME 可用设置 dshHomeDir 覆盖（用户自己的 ~/.dsh 等），空串 = 应用私有目录。
 	dshHost = new DshHost(
 		() => app.getPath("userData"),
@@ -2987,7 +2988,7 @@ app.whenReady().then(async () => {
 		await dshHost?.dispose();
 	});
 	// DSH 外部会话自动导入改到 projectStore.load 之后（见下方 scheduleDshForeignAutoImport）：
-	// 必须在启动时扫磁盘，不能等 host-ready——host 懒启动，且启动它会与 dsh-web 抢 DSH_HOME。
+	// 必须走只读磁盘扫描，不能依赖 host-ready——否则会与 dsh-web 抢同一份 DSH_HOME。
 	webServiceManager = new WebServiceManager({
 		// dev 模式（electron-vite dev 不产出 out/renderer 构建物）下，静态资源
 		// 代理到 vite dev server，外部 Web 端加载重构后的 React 版页面并支持热更新；
@@ -3219,7 +3220,7 @@ app.whenReady().then(async () => {
 		},
 	);
 	await sessionCatalog.load();
-	// 多后端网关装配：pi + dsh（DSH 懒启动，未使用不 boot）。
+	// 多后端网关装配：pi + dsh（DSH 在窗口创建后后台预热，失败时按需重试）。
 	// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
 	compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 	sessionRuntimeCoordinator = new SessionRuntimeCoordinator(
@@ -3277,6 +3278,8 @@ app.whenReady().then(async () => {
 	registerFeishuIpc();
 	await createWindow();
 	setupTray();
+	// 窗口已可用后再预热 DSH，避免 host boot 拖慢首帧；发送路径仍保留幂等启动兜底。
+	startDshHostInBackground(dshHost, appLogger);
 
 	void syncWslConfig().catch((error) => {
 		void appLogger.warn("app", "WSL config sync failed during startup", error);

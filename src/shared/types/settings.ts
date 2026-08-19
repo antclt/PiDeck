@@ -268,7 +268,7 @@ export type StartupWindowMode =
 	 * 缺省 undefined/空串：优先使用用户真实 ~/.dsh（与 dsh CLI 行为一致，
 	 * 配置/凭证/会话全在同一处，不复制）；仅当 ~/.dsh 不存在（全新用户）
 	 * 才回退应用私有目录 userData/dsh-home。实现见 DshHost.resolveDshHomeDir。
-	 * 变更在 DSH host 下次启动（懒 boot）时生效；已启动时切换需重启 host。
+	 * 启动预热前变更会被新 host 读取；已运行时切换需重启 host。
 	 */
 	dshHomeDir?: string;
 
