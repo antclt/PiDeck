@@ -2543,7 +2543,7 @@ select:focus-visible {
   bottom: -16px;
   cursor: row-resize;
 }
-/* queued-track 与 composer 同宽容器；内部 .queued-panel 再缩成右上角小面板 */
+/* queued-track 与 composer 同列同宽独立卡（todo/goal/queue 一家） */
 .chat-header {
   /* 布局/边框/背景由 SessionHeader Tailwind 承担；保留 overflow 兼容下拉菜单 */
   overflow: visible;

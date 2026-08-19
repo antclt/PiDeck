@@ -701,17 +701,9 @@
   flex: 0 0 auto;
 }
 
-/* ── 待发送：输入框上方右侧紧凑面板（内部行同宽，整体不拉满对话框） ── */
+/* ── 待发送：与 todo/goal 同列独立卡；行高由 Tailwind h-9 承担，这里只留行为色 ── */
 .queued-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 32px;
   min-width: 0;
-  min-height: 32px;
-  padding: 4px 5px 4px 8px;
-  border: 1px solid transparent;
-  border-radius: 7px;
   background: transparent;
   transition:
     border-color 0.1s ease,
@@ -740,28 +732,6 @@
 }
 .queued-row.sending {
   opacity: 0.68;
-}
-.queued-row.failed .queued-text {
-  color: var(--color-danger);
-}
-.queued-row.unknown .queued-text {
-  color: var(--color-warning);
-}
-.queued-meta.failed {
-  color: var(--color-danger);
-}
-.queued-meta.unknown {
-  color: var(--color-warning);
-}
-.queued-icon-btn.danger:hover:not(:disabled) {
-  color: var(--color-danger);
-  background: var(--color-danger-soft);
-}
-@media (hover: none), (pointer: coarse) {
-  .queued-row {
-    flex-basis: 36px;
-    min-height: 36px;
-  }
 }
 
 /* 用户操作栏：hover 显隐，保留 24px 占位 */

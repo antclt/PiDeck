@@ -2,14 +2,16 @@ import {
   AlertTriangle,
   ArrowUp,
   ChevronDown,
+  ChevronUp,
   Clock,
+  ListOrdered,
   LoaderCircle,
   Pencil,
   Square,
   X,
   XCircle,
 } from "lucide-react";
-import type { RefObject } from "react";
+import { useId, useState, type RefObject } from "react";
 import type { ImageContent } from "../../../../shared/types";
 import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
 import {
@@ -95,115 +97,175 @@ export function ExtensionWidgetPanel(props: {
   );
 }
 
+function QueueStatusGlyph(props: { status: QueuedPromptSnapshot["status"] }) {
+  const status = props.status ?? "pending";
+  if (status === "sending") {
+    return <LoaderCircle size={14} strokeWidth={2} className="shrink-0 animate-spin text-text-secondary" aria-hidden="true" />;
+  }
+  if (status === "failed") {
+    return <XCircle size={14} strokeWidth={2} className="shrink-0 text-[var(--color-danger)]" aria-hidden="true" />;
+  }
+  if (status === "unknown") {
+    return <AlertTriangle size={14} strokeWidth={2} className="shrink-0 text-[var(--color-warning)]" aria-hidden="true" />;
+  }
+  return <Clock size={14} strokeWidth={2} className="shrink-0 text-text-tertiary" aria-hidden="true" />;
+}
+
+function QueuedPromptRow(props: {
+  prompt: QueuedPromptSnapshot;
+  index: number;
+  showQueueGlyph: boolean;
+  sessionId: string;
+  onRetract: (sessionId: string, prompt: QueuedPromptSnapshot) => void;
+  onDiscard: (sessionId: string, promptId: string) => void;
+}) {
+  const status = props.prompt.status ?? "pending";
+  const previewText = props.prompt.displayText.trim() || t("app.queuedImageMessage");
+  const retractHint = retractControlHint(status);
+  const discardHint = discardControlHint(status);
+  const retractTitle = [
+    t("app.retractToInput"),
+    !retractHint.disabled
+      ? ""
+      : retractHint.reason === "unknown"
+        ? t("app.queuedRetractDisabledUnknown")
+        : t("app.queuedRetractDisabledSending"),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const discardTitle = discardHint.disabled
+    ? [t("app.retractDiscard"), t("app.queuedDiscardDisabledSending")]
+      .filter(Boolean)
+      .join("\n")
+    : t("app.retractDiscard");
+  const rowTitle = [
+    t("app.queuedOrder", { n: props.index + 1 }),
+    previewText,
+    props.prompt.error,
+    status === "unknown" ? t("app.queuedUnknown") : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    <li
+      className={`queued-row flex h-9 min-h-9 shrink-0 items-center gap-2.5 border-transparent px-3 transition-[border-color,background-color] duration-100 ${status} queued-behavior-${props.prompt.behavior}`}
+      title={rowTitle}
+    >
+      {props.showQueueGlyph ? (
+        <ListOrdered size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+      ) : (
+        <QueueStatusGlyph status={status} />
+      )}
+      <span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-secondary">{previewText}</span>
+      {props.prompt.images?.length ? (
+        <span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">
+          {t("app.queuedImageCount", { count: String(props.prompt.images.length) })}
+        </span>
+      ) : null}
+      {status === "sending" ? (
+        <span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">{t("app.queuedSending")}</span>
+      ) : status === "failed" ? (
+        <span className="shrink-0 font-mono text-micro leading-none text-[var(--color-danger)]">{t("app.queuedFailed")}</span>
+      ) : status === "unknown" ? (
+        <span className="shrink-0 font-mono text-micro leading-none text-[var(--color-warning)]">
+          {t("app.queuedUnknownShort")}
+        </span>
+      ) : null}
+      <div className="inline-flex shrink-0 items-center gap-0.5">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="size-7 rounded-full text-text-tertiary hover:bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)] hover:text-[color:var(--color-accent)]"
+          aria-label={t("app.retractToInput")}
+          title={retractTitle}
+          disabled={!canRetractQueuedPromptToInput(status)}
+          onClick={() => props.onRetract(props.sessionId, props.prompt)}
+        >
+          <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="size-7 rounded-full text-text-tertiary hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+          aria-label={t("app.retractDiscard")}
+          title={discardTitle}
+          disabled={!canDiscardQueuedPrompt(status)}
+          onClick={() => props.onDiscard(props.sessionId, props.prompt.id)}
+        >
+          <X size={14} strokeWidth={2} aria-hidden="true" />
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * composer 上方的排队消息卡（移植自 dsh-web QueueDock 的独立卡形态）。
+ * 与 todo / goal 同列同宽：1 条直接一行；多条默认折叠计数头，展开后 180px 内滚动。
+ * 操作仍是 PiDeck 的撤回进输入框 / 丢弃，不引入 dsh 的行内编辑与 steer。
+ */
 export function QueuedPromptPanel(props: {
   trackRef: RefObject<HTMLDivElement | null>;
   sessionId?: string;
   prompts: QueuedPromptSnapshot[];
+  /** @deprecated 独立卡展示全部排队项并由 180px 列表滚动；保留以免调用点同步炸掉。 */
   visiblePrompts: QueuedPromptSnapshot[];
   onRetract: (sessionId: string, prompt: QueuedPromptSnapshot) => void;
   onDiscard: (sessionId: string, promptId: string) => void;
 }) {
+  const [collapsed, setCollapsed] = useState(true);
+  const listId = useId();
   if (!props.sessionId || !props.prompts.length) return null;
+
+  const multiple = props.prompts.length > 1;
+  const listVisible = !multiple || !collapsed;
+
   return (
-    <div
+    <section
       ref={props.trackRef}
-      className="queued-track flex min-w-0 w-full justify-end p-0 pb-2"
+      className="queued-track w-full shrink-0 overflow-hidden rounded-xl border border-border bg-card"
+      data-testid="session-queue-strip"
       aria-label={t("app.queuedMessagesLabel")}
     >
-      <div className="flex min-w-0 w-[clamp(13.5rem,36%,22.5rem)] max-w-full flex-col gap-1 rounded-[9px] border border-[color-mix(in_srgb,var(--color-border-subtle)_82%,transparent)] bg-[color:color-mix(in_srgb,var(--color-bg-panel)_95%,var(--color-chat-card-bg))] p-[7px] pb-2 shadow-[var(--shadow-border),0_6px_18px_color-mix(in_srgb,#000_5%,transparent)]">
-        <div className="flex items-center justify-between gap-2 px-[3px] pb-[3px] font-mono text-micro font-semibold leading-4 tracking-[0.02em] text-text-tertiary">
-          <span>{t("app.queuedMessagesLabel")}</span>
-          <span className="tabular-nums text-text-secondary">{props.prompts.length}</span>
-        </div>
-        <div className="flex min-w-0 max-h-[102px] flex-col gap-[3px] overflow-x-hidden overflow-y-auto overscroll-contain [scrollbar-width:thin] [scrollbar-color:transparent_transparent] hover:[scrollbar-color:var(--color-border-default)_transparent] focus-within:[scrollbar-color:var(--color-border-default)_transparent]">
-          {props.visiblePrompts.map((prompt, index) => {
-            const status = prompt.status ?? "pending";
-            const previewText =
-              prompt.displayText.trim() || t("app.queuedImageMessage");
-            const retractHint = retractControlHint(status);
-            const discardHint = discardControlHint(status);
-            const retractTitle = [
-              t("app.retractToInput"),
-              !retractHint.disabled
-                ? ""
-                : retractHint.reason === "unknown"
-                  ? t("app.queuedRetractDisabledUnknown")
-                  : t("app.queuedRetractDisabledSending"),
-            ]
-              .filter(Boolean)
-              .join("\n");
-            const discardTitle = discardHint.disabled
-              ? [t("app.retractDiscard"), t("app.queuedDiscardDisabledSending")]
-                .filter(Boolean)
-                .join("\n")
-              : t("app.retractDiscard");
-            const rowTitle = [
-              t("app.queuedOrder", { n: index + 1 }),
-              previewText,
-              prompt.error,
-              status === "unknown" ? t("app.queuedUnknown") : "",
-            ]
-              .filter(Boolean)
-              .join("\n");
-            return (
-              <div
-                key={prompt.id}
-                className={`queued-row flex min-h-8 shrink-0 basis-8 items-center gap-1.5 rounded-[7px] border border-transparent px-[5px] py-1 pl-2 transition-[border-color,background-color] duration-100 ${status} queued-behavior-${prompt.behavior}`}
-                title={rowTitle}
-              >
-                {status === "pending" ? (
-                  <Clock size={13} strokeWidth={2} className="shrink-0 text-text-tertiary" aria-hidden="true" />
-                ) : status === "sending" ? (
-                  <LoaderCircle size={13} strokeWidth={2} className="shrink-0 animate-spin text-text-secondary" aria-hidden="true" />
-                ) : status === "failed" ? (
-                  <XCircle size={13} strokeWidth={2} className="shrink-0 text-[var(--color-danger)]" aria-hidden="true" />
-                ) : (
-                  <AlertTriangle size={13} strokeWidth={2} className="shrink-0 text-[var(--color-warning)]" aria-hidden="true" />
-                )}
-                <span className="w-[1.1em] shrink-0 text-center font-mono text-micro leading-none tabular-nums text-text-tertiary" aria-hidden="true">
-                  {index + 1}
-                </span>
-                <span className="min-w-0 flex-[1_1_auto] truncate text-caption leading-[18px] text-text-primary">{previewText}</span>
-                {prompt.images?.length ? (
-                  <span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">
-                    {t("app.queuedImageCount", {
-                      count: String(prompt.images.length),
-                    })}
-                  </span>
-                ) : null}
-                {status === "sending" ? (
-                  <span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">{t("app.queuedSending")}</span>
-                ) : status === "failed" ? (
-                  <span className="shrink-0 font-mono text-micro leading-none text-[var(--color-danger)]">{t("app.queuedFailed")}</span>
-                ) : status === "unknown" ? (
-                  <span className="shrink-0 font-mono text-micro leading-none text-[var(--color-warning)]">
-                    {t("app.queuedUnknownShort")}
-                  </span>
-                ) : null}
-                <div className="inline-flex shrink-0 items-center gap-px">
-                  <Button variant="ghost" size="icon"
-                    className="size-[26px] rounded-[4px] p-0 text-text-tertiary hover:bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)] hover:text-[color:var(--color-accent)]"
-                    aria-label={t("app.retractToInput")} title={retractTitle}
-                    disabled={!canRetractQueuedPromptToInput(status)}
-                    onClick={() => props.onRetract(props.sessionId!, prompt)}
-                  >
-                    <Pencil size={13} strokeWidth={2} aria-hidden="true" />
-                  </Button>
-                  <Button variant="ghost" size="icon"
-                    className="size-[26px] rounded-[4px] p-0 text-text-tertiary hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-                    aria-label={t("app.retractDiscard")} title={discardTitle}
-                    disabled={!canDiscardQueuedPrompt(status)}
-                    onClick={() => props.onDiscard(props.sessionId!, prompt.id)}
-                  >
-                    <X size={13} strokeWidth={2} aria-hidden="true" />
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
+      {multiple ? (
+        <button
+          type="button"
+          className="flex h-9 w-full items-center gap-2.5 px-3 text-left"
+          aria-controls={listId}
+          aria-expanded={listVisible}
+          onClick={() => { setCollapsed((value) => !value); }}
+        >
+          <ListOrdered size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-6 text-foreground">
+            {t("sessionQueue.count", { n: props.prompts.length })}
+          </span>
+          <span className="shrink-0 text-text-tertiary" aria-hidden="true">
+            {listVisible ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </span>
+        </button>
+      ) : null}
+      {listVisible ? (
+        <ul
+          id={listId}
+          className={multiple
+            ? "mb-1 flex max-h-[180px] flex-col overflow-y-auto"
+            : "flex flex-col"}
+        >
+          {props.prompts.map((prompt, index) => (
+            <QueuedPromptRow
+              key={prompt.id}
+              prompt={prompt}
+              index={index}
+              showQueueGlyph={!multiple}
+              sessionId={props.sessionId!}
+              onRetract={props.onRetract}
+              onDiscard={props.onDiscard}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 

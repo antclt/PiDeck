@@ -2,6 +2,8 @@ import { useRef, type ReactNode } from "react";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { ComposerArea } from "./ComposerArea";
 import { QueuedPromptPanel } from "./ComposerPanels";
+import { SessionGoalStrip } from "./SessionGoalStrip";
+import { SessionTodoStrip } from "./SessionTodoStrip";
 import { LogoMark } from "./SurfaceParts";
 
 /**
@@ -41,6 +43,12 @@ export function SessionStartSurface(props: {
           onOpenFile={services.onOpenFile}
           enqueue={services.enqueueSessionPrompt}
           ensureSessionId={services.ensureSessionId}
+          widgets={
+            <>
+              <SessionTodoStrip sessionId={props.sessionId} />
+              <SessionGoalStrip sessionId={props.sessionId} />
+            </>
+          }
           queuePanel={
             <QueuedPromptPanel
               trackRef={queuedTrackRef}

@@ -32,9 +32,10 @@ import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 export type ComposerAreaProps = {
   sessionId: string;
   gitInfo?: GitBranchInfo;
-  /** 输入框上方常驻扩展条（如 todo 条）；放在 widgets 槽位，高度由
+  /** 输入框上方独立卡（todo / goal）；放在 widgets 槽位，高度由
    *  ComposerMeasuredExtras 测量并驱动面板自适应（同一测量链路）。 */
   widgets?: ReactNode;
+  /** 排队消息独立卡（与 todo/goal 同列同宽，不贴输入框、不右浮）。 */
   queuePanel?: ReactNode;
   onOpenFile?: (path: string) => void;
   /** 受控高度（px）。传入时由外层面板（react-resizable-panels）持有尺寸，
@@ -223,10 +224,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
             }}
             data-session-id={props.sessionId}
           >
-            {/* 扩展 widget（Todo/Plan）统一由常驻 todo 条（SessionTodoStrip）展示，
-                composer 内默认不再有 widget，widgets 槽位默认 null；
-                宿主（SessionView）可传入常驻 todo 条，
-                ComposerMeasuredExtras 负责测量附件/队列/通知高度并驱动 composer 自动增高。 */}
+            {/* 输入区上方独立卡栈：widgets（todo/goal）→ queue → 投递通知，
+                再是附件栏与 composer-box。ComposerMeasuredExtras 测量高度并驱动面板增高。 */}
             <ComposerMeasuredExtras
               widgets={props.widgets ?? null}
               queuePanel={props.queuePanel}

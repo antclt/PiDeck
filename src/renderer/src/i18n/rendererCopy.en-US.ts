@@ -552,6 +552,10 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionTodo.done": "{done} done",
   "sessionTodo.active": "{active} in progress",
   "sessionTodo.pending": "{pending} pending",
+  // Composer-side goal strip (ported from dsh-web GoalBar): hidden when absent/complete
+  "sessionGoal.aria": "Current goal",
+  // Composer-side queue card (dsh QueueDock as a standalone card): collapsed header copy
+  "sessionQueue.count": "{n} queued",
   "app.widgetTitlePlan": "PLAN",
   "app.todoListTitle": "To-dos",
   "app.todoListEmpty": "No tasks yet",

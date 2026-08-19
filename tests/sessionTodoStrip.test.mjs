@@ -104,9 +104,11 @@ test("composer area forwards a widgets slot and session view mounts the strip", 
   // ComposerArea：新增 widgets prop 并透传到 ComposerMeasuredExtras（测量链驱动面板增高）
   assert.match(composer, /widgets\?: ReactNode/);
   assert.match(composer, /widgets=\{props\.widgets \?\? null\}/);
-  // SessionView：底部 composer 挂载 SessionTodoStrip，带 sessionId
+  // SessionView：底部 composer widgets 栈挂 todo → goal，带 sessionId
   assert.match(view, /import \{ SessionTodoStrip \} from "\.\/SessionTodoStrip"/);
-  assert.match(view, /widgets=\{<SessionTodoStrip sessionId=\{sessionId\} \/>\}/);
+  assert.match(view, /import \{ SessionGoalStrip \} from "\.\/SessionGoalStrip"/);
+  assert.match(view, /<SessionTodoStrip sessionId=\{sessionId\} \/>/);
+  assert.match(view, /<SessionGoalStrip sessionId=\{sessionId\} \/>/);
 });
 
 test("strip copy is present in both locale dictionaries", () => {

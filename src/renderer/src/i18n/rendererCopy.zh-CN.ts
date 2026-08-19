@@ -549,6 +549,10 @@ export const zhCN = {
   "sessionTodo.done": "{done} 完成",
   "sessionTodo.active": "{active} 进行中",
   "sessionTodo.pending": "{pending} 待处理",
+  // composer 上方 goal 条（dsh GoalBar）：无目标/已完成不渲染
+  "sessionGoal.aria": "当前目标",
+  // composer 上方排队卡（dsh QueueDock 独立卡）：多条时折叠头文案
+  "sessionQueue.count": "{n} 条待发送",
   "app.widgetTitlePlan": "PLAN",
   "app.todoListTitle": "待办事项",
   "app.todoListEmpty": "暂无任务",

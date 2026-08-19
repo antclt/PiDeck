@@ -93,17 +93,17 @@ test("pending prompts render inside the composer before composer-box", () => {
     queuePanelIndex >= 0,
     "QueuedPromptPanel should exist in SessionRuntimeInjector",
   );
-  assert.match(composerPanelsSource, /className="queued-track flex min-w-0 w-full justify-end p-0 pb-2"/);
+  // 与 todo/goal 同列独立卡：全宽 rounded-xl，不再右浮紧凑面板
+  assert.match(composerPanelsSource, /className="queued-track w-full shrink-0 overflow-hidden rounded-xl border border-border bg-card"/);
 });
 
 test("pending prompts share the native content width constraint without hiding composer", () => {
-  // queued-track 与 composer 同在会话栏宿主的内容盒内，不再自己减 padding
-  assert.match(composerPanelsSource, /queued-track flex min-w-0 w-full justify-end p-0 pb-2/);
-  // Outer track is a full-width anchor; the compact panel sits on the right with proportional width.
-  assert.match(composerPanelsSource, /justify-end p-0 pb-2/);
-  assert.match(composerPanelsSource, /w-\[clamp\(13\.5rem,36%,22\.5rem\)\]/);
-  assert.match(composerPanelsSource, /min-h-8 shrink-0 basis-8/);
-  assert.match(composerPanelsSource, /truncate text-caption leading-\[18px\]/);
+  // queued-track 与 composer 同在会话栏宿主的内容盒内，全宽独立卡（不再右对齐缩宽）
+  assert.match(composerPanelsSource, /queued-track w-full shrink-0 overflow-hidden rounded-xl/);
+  assert.doesNotMatch(composerPanelsSource, /justify-end/);
+  assert.doesNotMatch(composerPanelsSource, /w-\[clamp\(13\.5rem,36%,22\.5rem\)\]/);
+  assert.match(composerPanelsSource, /queued-row flex h-9 min-h-9 shrink-0/);
+  assert.match(composerPanelsSource, /truncate text-\[13px\] leading-5/);
   assert.doesNotMatch(stylesSource, /\.queued-card \{/);
 });
 
@@ -117,8 +117,8 @@ test("compact queue panel exposes retract-to-input and discard only", () => {
   assert.match(composerPanelsSource, /canRetractQueuedPromptToInput\(status\)/);
   assert.match(composerPanelsSource, /canDiscardQueuedPrompt\(status\)/);
   assert.match(appSource, /const activeQueuedPrompts = currentSessionId/);
-  assert.match(composerPanelsSource, /queued-behavior-\$\{prompt\.behavior\}/);
-  assert.match(composerPanelsSource, /max-h-\[102px\]/);
+  assert.match(composerPanelsSource, /queued-behavior-\$\{props\.prompt\.behavior\}/);
+  assert.match(composerPanelsSource, /max-h-\[180px\]/);
   assert.match(stylesSource, /\.queued-row\.queued-behavior-steer \{/);
   assert.match(stylesSource, /\.queued-row\.queued-behavior-followUp \{/);
   assert.match(queuedPromptHookSource, /QUEUED_PROMPT_LIMIT/);

@@ -12,17 +12,16 @@ import {
 } from "../ui-shadcn/resizable";
 import type { AgentRuntimeState, GitBranchInfo, ImageContent, TerminalTarget } from "../../../../shared/types";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
-import type { QueuedPrompt } from "../../hooks/useQueuedPrompt";
 import type { PiDesktopApi } from "../../../../preload";
 import { isLanWeb, desktopApi as api } from "../../desktopApi";
 import { useNotifyLayoutResized } from "../../hooks/useNotifyLayoutResized";
 import { SessionHeader } from "./SessionHeader";
 import { SessionBranchBar } from "./SessionBranchBar";
 import { SessionTodoStrip } from "./SessionTodoStrip";
+import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { SessionRuntimeDock } from "./SessionRuntimeDock";
-import { QueuedPromptPanel } from "./ComposerPanels";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, displayProjectDirectoryName } from "../../rendererUtils";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
@@ -520,9 +519,14 @@ export function SessionView({
                 enqueue={enqueueSessionPrompt}
                 ensureSessionId={ensureSessionId}
                 queuePanel={queuePanel}
-                // 输入框上方常驻 todo 条（dsh TodoPanel 移植）：与输入框同宽同列，
-                // 折叠条形态，高度由 ComposerMeasuredExtras 测量驱动面板自适应
-                widgets={<SessionTodoStrip sessionId={sessionId} />}
+                // 输入框上方独立卡栈（dsh input dock 移植）：todo → goal，与 queue 同列同宽；
+                // 高度由 ComposerMeasuredExtras 测量驱动面板自适应
+                widgets={
+                  <>
+                    <SessionTodoStrip sessionId={sessionId} />
+                    <SessionGoalStrip sessionId={sessionId} />
+                  </>
+                }
               />
             </ResizablePanel>
           </>
