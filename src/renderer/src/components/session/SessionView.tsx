@@ -280,20 +280,21 @@ export function SessionView({
   }
 
   /**
-   * ComposerArea 上报可变内容占用的额外高度（px）。
-   * 目标高度 = 内容所需（默认输入区 + 额外内容），且不低于用户手动拖拽的高度。
+   * ComposerArea 上报独立卡 + 输入卡的内容总高度（px）。
+   * 目标高度 hug 该值，且不低于用户手动拖拽的高度 / COMPOSER_MIN_HEIGHT。
+   * 输入卡本身 shrink-0：面板被终端拖高时剩余空白不撑开输入框。
    * - 内容需要更高 → 自动增高，并记录内容驱动高度；
    * - 内容减少 → 仅当当前高度由内容驱动（未超过内容所需）时回缩，
    *   用户手动拖高的高度不被内容变化回缩。
    */
-  function handleComposerContentHeight(extraHeight: number) {
+  function handleComposerContentHeight(contentHeight: number) {
     const maxAllowed = Math.max(COMPOSER_MIN_HEIGHT, composerMaxHeight);
     const userPreferred = Math.max(
       userComposerHeightRef.current,
       COMPOSER_MIN_HEIGHT,
     );
     const target = Math.min(
-      Math.max(userPreferred, COMPOSER_DEFAULT_HEIGHT + extraHeight),
+      Math.max(userPreferred, contentHeight, COMPOSER_MIN_HEIGHT),
       maxAllowed,
     );
     const current = composerHeightStateRef.current;
@@ -520,7 +521,7 @@ export function SessionView({
                 ensureSessionId={ensureSessionId}
                 queuePanel={queuePanel}
                 // 输入框上方独立卡栈（dsh input dock 移植）：todo → goal，与 queue 同列同宽；
-                // 高度由 ComposerMeasuredExtras 测量驱动面板自适应
+                // 高度由 ComposerMeasuredExtras 测量内容总高，面板 hug 该值
                 widgets={
                   <>
                     <SessionTodoStrip sessionId={sessionId} />

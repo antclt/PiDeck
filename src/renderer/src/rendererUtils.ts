@@ -13,6 +13,10 @@ export const COMPOSER_DEFAULT_HEIGHT = 160;
 const COMPOSER_MIN_HEIGHT = 148;
 export { COMPOSER_MIN_HEIGHT };
 
+/** 输入正文区封顶高度（px），对齐 dsh-web `--dsh-composer-text-max-height`。
+ *  超过后 ProseMirror 内部滚动，不再把输入卡/面板无限撑高。 */
+export const COMPOSER_TEXT_MAX_HEIGHT = 336;
+
 // timeline 面板 minSize（px）：composer 自动增高时只能占用 timeline 可让出的空间，
 // 不能突破该保底线，否则库的 clamp 会把差额压给 terminal 导致终端被收起。
 export const TIMELINE_MIN_HEIGHT = 160;

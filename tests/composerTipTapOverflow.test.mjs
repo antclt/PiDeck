@@ -9,8 +9,7 @@ const composer = readFileSync(
 const timelineCss = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 
 test("TipTap composer keeps EditorContent inside a height-constrained overflow host", () => {
-	// EditorContent 多一层 wrapper：host/surface 都必须 min-h-0 + overflow-hidden，
-	// 否则 ProseMirror 跟着内容无限长高，正文会画出 composer-box。
+	// overflow-hidden 把滚动关进 ProseMirror；host 不能 min-h-0，否则正文无法把 shrink-0 输入卡撑开。
 	assert.match(
 		composer,
 		/tiptap-composer-host[^"]*overflow-hidden/,
@@ -19,10 +18,9 @@ test("TipTap composer keeps EditorContent inside a height-constrained overflow h
 		composer,
 		/tiptap-composer-surface[^"]*overflow-hidden/,
 	);
-	assert.match(composer, /min-h-0/);
 });
 
-test("TipTap ProseMirror fills host height then scrolls instead of growing past the box", () => {
+test("TipTap ProseMirror grows with typed text then scrolls at the composer cap", () => {
 	assert.match(
 		timelineCss,
 		/\.composer \.tiptap-composer-host \{[\s\S]*?overflow:\s*hidden;/,
@@ -33,10 +31,6 @@ test("TipTap ProseMirror fills host height then scrolls instead of growing past 
 	);
 	assert.match(
 		timelineCss,
-		/\.composer \.tiptap-composer-host \.ProseMirror,\s*\.composer \.tiptap-composer-host \.rich-input \{[\s\S]*?max-height:\s*100%;[\s\S]*?overflow-y:\s*auto;/,
-	);
-	assert.match(
-		timelineCss,
-		/\.composer \.tiptap-composer-host \.ProseMirror,\s*\.composer \.tiptap-composer-host \.rich-input \{[\s\S]*?min-height:\s*0;/,
+		/\.composer \.tiptap-composer-host \.ProseMirror,\s*\.composer \.tiptap-composer-host \.rich-input \{[\s\S]*?max-height:\s*var\(--composer-text-max-height,\s*336px\);[\s\S]*?overflow-y:\s*auto;/,
 	);
 });

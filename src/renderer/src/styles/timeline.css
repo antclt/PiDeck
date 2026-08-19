@@ -1806,11 +1806,9 @@ body.ask-dialog-open .ask-question-card.pending {
 /* TipTap 比 RichInput 多一层 EditorContent wrapper。必须把 flex 高度约束
    传到 .ProseMirror，否则 overflow-y:auto 永不触发，继续输入会把正文「顶」出框外。 */
 .composer .tiptap-composer-host {
-  min-height: 0;
   overflow: hidden;
 }
 .composer .tiptap-composer-host .tiptap-composer-surface {
-  min-height: 0;
   min-width: 0;
   flex: 1 1 auto;
   display: flex;
@@ -1821,11 +1819,11 @@ body.ask-dialog-open .ask-question-card.pending {
 .composer .tiptap-composer-host .rich-input {
   outline: none;
   caret-color: var(--color-text-primary);
-  /* 占满 host 可用高度后再滚动；min-height:0 允许低于内容固有高度收缩。 */
+  /* 空态靠 flex 填满输入卡；min-height:auto 让正文把卡撑开，封顶后内部滚动。
+     不能写 min-height:0，否则内容无法把 shrink-0 的输入卡顶高。 */
   flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-  max-height: 100%;
+  height: auto;
+  max-height: var(--composer-text-max-height, 336px);
   overflow-x: hidden;
   overflow-y: auto;
   box-sizing: border-box;

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAtom, useAtomValue, useStore } from "jotai";
 import {
   ComposerBottomBar,
@@ -24,7 +24,7 @@ import { sessionRecordByIdAtomFamily } from "../../atoms";
 import { ComposerRuntimeIntegrations } from "./ComposerRuntimeIntegrations";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { desktopApi } from "../../desktopApi";
-import { COMPOSER_DEFAULT_HEIGHT } from "../../rendererUtils";
+import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_TEXT_MAX_HEIGHT } from "../../rendererUtils";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import type { GitBranchInfo } from "../../../../shared/types";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
@@ -32,8 +32,8 @@ import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 export type ComposerAreaProps = {
   sessionId: string;
   gitInfo?: GitBranchInfo;
-  /** 输入框上方独立卡（todo / goal）；放在 widgets 槽位，高度由
-   *  ComposerMeasuredExtras 测量并驱动面板自适应（同一测量链路）。 */
+  /** 输入框上方独立卡（todo / goal）；放在 widgets 槽位。
+   *  与 queue / 输入卡一并测量，面板 hug 内容总高。 */
   widgets?: ReactNode;
   /** 排队消息独立卡（与 todo/goal 同列同宽，不贴输入框、不右浮）。 */
   queuePanel?: ReactNode;
@@ -45,62 +45,84 @@ export type ComposerAreaProps = {
    *  起始页等需要大输入框的场景传更高值，内容增高时仍自适应。 */
   defaultHeight?: number;
   onHeightChange?: (height: number) => void;
-  /** 输入区上方可变内容（附件栏 / 扩展 widget / 队列 / 投递通知）当前占用的额外高度（px）。
-   *  内容出现时上报给外层，由外层命令式增高 composer 面板，避免固定高度挤压输入区。 */
-  onContentHeightChange?: (extraHeight: number) => void;
+  /** 独立卡栈 + 输入卡 + footer 间距/底 padding 的内容总高度（px）。
+   *  外层面板 hug 该值，避免裁切；输入卡本身 shrink-0，不吃面板剩余高度。 */
+  onContentHeightChange?: (contentHeight: number) => void;
   enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
   ensureSessionId?: (sessionId: string) => Promise<string>;
 };
 
 const CONTENT_GAP_PX = 8;
 
+/** footer 同时带标准 CSS 与自定义封顶变量；交叉类型避免 `as` 强转。 */
+function composerFooterStyle(height: number | string): CSSProperties & {
+  "--composer-text-max-height": string;
+} {
+  return {
+    ...chatContentWidthStyle,
+    height,
+    "--composer-text-max-height": `${COMPOSER_TEXT_MAX_HEIGHT}px`,
+  };
+}
+
 type ComposerMeasuredExtrasProps = {
   widgets: ReactNode;
   queuePanel?: ReactNode;
   deliveryNotice: ReactNode;
   attachmentBar: ReactNode;
-  onHeightChange: (extraHeight: number) => void;
+  composerBox: ReactNode;
+  onHeightChange: (contentHeight: number) => void;
 };
 
 /**
  * 必须作为 ComposerRuntimeIntegrations render-prop 子树中的独立组件存在：
  * widget 的关闭/更新只会重渲染这棵子树，不会重渲染外层 ComposerArea。
- * 测量 effect 放在这里，才能在 widget 变化的同一帧回缩面板，而不是等用户输入。
+ * 测量 effect 放在这里，才能在 widget / 正文变化的同一帧 hug 面板，而不是等下一次输入。
+ *
+ * 上报的是「独立卡 + 附件栏 + 输入卡」总高度，不是 extras 增量：输入卡 shrink-0，
+ * 面板 hug 内容，拉伸 todo / 拖终端都不会把输入框撑高。
  */
 function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
   const widgetsRef = useRef<HTMLDivElement | null>(null);
   const attachmentBarRef = useRef<HTMLDivElement | null>(null);
-  const lastContentExtraRef = useRef(0);
+  const composerBoxRef = useRef<HTMLDivElement | null>(null);
+  const lastContentHeightRef = useRef(0);
   const mountedRef = useRef(false);
   const onHeightChangeRef = useRef(props.onHeightChange);
   onHeightChangeRef.current = props.onHeightChange;
 
-  const measureExtra = () => {
+  const measureContentHeight = () => {
     const widgetsH = widgetsRef.current?.offsetHeight ?? 0;
     const imageBarH = attachmentBarRef.current?.offsetHeight ?? 0;
-    // gap 实测：Tailwind gap-2 是 rem，随根字号变化；用 rowGap 拿到真实 px。
+    const boxH = composerBoxRef.current?.offsetHeight ?? 0;
+    // gap / 底 padding 实测：Tailwind gap-2、pb-3 是 rem，随根字号变化。
     let gapPx = CONTENT_GAP_PX;
+    let paddingBottom = 0;
     const footerEl = widgetsRef.current?.parentElement;
     if (footerEl && typeof window !== "undefined") {
-      const rowGap = parseFloat(window.getComputedStyle(footerEl).rowGap || "");
+      const style = window.getComputedStyle(footerEl);
+      const rowGap = parseFloat(style.rowGap || "");
       if (!Number.isNaN(rowGap) && rowGap > 0) gapPx = rowGap;
+      const pb = parseFloat(style.paddingBottom || "");
+      if (!Number.isNaN(pb) && pb > 0) paddingBottom = pb;
     }
-    return Math.ceil(
-      widgetsH + imageBarH + (imageBarH > 0 ? gapPx : 0),
-    );
+    // 空独立卡用 empty:hidden 从文档流拿掉，避免 0 高节点仍占 gap。
+    const parts = [widgetsH, imageBarH, boxH].filter((h) => h > 0);
+    const gaps = Math.max(0, parts.length - 1) * gapPx;
+    return Math.ceil(parts.reduce((sum, h) => sum + h, 0) + gaps + paddingBottom);
   };
 
-  const reportExtra = () => {
-    const extra = measureExtra();
-    if (extra === lastContentExtraRef.current) return;
-    lastContentExtraRef.current = extra;
-    onHeightChangeRef.current(extra);
+  const reportContentHeight = () => {
+    const contentHeight = measureContentHeight();
+    if (contentHeight === lastContentHeightRef.current) return;
+    lastContentHeightRef.current = contentHeight;
+    onHeightChangeRef.current(contentHeight);
   };
 
-  // props.widgets 变化会重渲染本组件；在 paint 前同步 resize，输入区不会闪高一帧。
+  // props.widgets / 正文高度变化会重渲染本组件；在 paint 前同步 hug，输入区不会闪高一帧。
   useLayoutEffect(() => {
     if (!mountedRef.current) return;
-    reportExtra();
+    reportContentHeight();
   });
 
   const hasAttachmentBar = props.attachmentBar != null;
@@ -111,12 +133,13 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
       rafId = requestAnimationFrame(() => {
         rafId = 0;
         mountedRef.current = true;
-        reportExtra();
+        reportContentHeight();
       });
     };
     const observer = new ResizeObserver(schedule);
     if (widgetsRef.current) observer.observe(widgetsRef.current);
     if (attachmentBarRef.current) observer.observe(attachmentBarRef.current);
+    if (composerBoxRef.current) observer.observe(composerBoxRef.current);
     // 首测延迟到下一帧：此时 ResizablePanel 已注册到 group。
     schedule();
     return () => {
@@ -129,7 +152,7 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
     <>
       <div
         ref={widgetsRef}
-        className="flex shrink-0 min-h-0 min-w-0 flex-col gap-2"
+        className="flex shrink-0 min-h-0 min-w-0 flex-col gap-2 empty:hidden"
       >
         {props.widgets}
         {props.queuePanel}
@@ -140,6 +163,10 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
           {props.attachmentBar}
         </div>
       ) : null}
+      {/* 外层只承担测量；输入卡自身 shrink-0，不吃 footer 剩余高度。 */}
+      <div ref={composerBoxRef} className="w-full min-w-0 shrink-0">
+        {props.composerBox}
+      </div>
     </>
   );
 }
@@ -194,18 +221,17 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
     void desktopApi.sessions.activateRuntime(props.sessionId).catch(() => undefined);
   }, [composer.attachments.length, composer.draft, props.sessionId]);
 
-  // 受控/非受控双模：SessionView 以面板分隔条控制高度时传 height；
-  // 其余场景（测试、嵌入）回退本地默认值，与全局默认高度保持一致；
-  // defaultHeight 允许宿主（如居中起始页）指定更高的起步高度，仍随内容自适应增高。
+  // 受控：SessionView 面板 hug 测得的内容总高。非受控（起始页等）不写死 height，
+  // 由独立卡 + 输入卡 intrinsic 撑开，避免再走 extra+DEFAULT 把输入区算进「被 extras 顶高」。
   const [localHeight, setLocalHeight] = useState(props.defaultHeight ?? COMPOSER_DEFAULT_HEIGHT);
-  const height = props.height ?? localHeight;
-  const handleContentHeightChange = (extra: number) => {
+  const handleContentHeightChange = (contentHeight: number) => {
     if (props.height != null) {
-      props.onContentHeightChange?.(extra);
-    } else if (extra > 0) {
-      setLocalHeight((current) =>
-        Math.max(current, extra + (props.defaultHeight ?? COMPOSER_DEFAULT_HEIGHT)),
-      );
+      props.onContentHeightChange?.(contentHeight);
+      return;
+    }
+    if (contentHeight > 0) {
+      // 非受控保留宿主起步高度（起始页 defaultHeight），只允许内容把框再撑高。
+      setLocalHeight(Math.max(contentHeight, props.defaultHeight ?? COMPOSER_DEFAULT_HEIGHT));
     }
   };
 
@@ -214,22 +240,22 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
       {({ feishuIndicator }) => (
         <>
           {/* overflow-hidden：面板到 minSize 时禁止整块 footer 再出滚动条；
-              文本区自身仍可在 RichInput 内滚动，底栏 shrink-0 始终可见 */}
+              文本区自身仍可在 ProseMirror 内滚动，底栏 shrink-0 始终可见。
+              默认顶对齐：面板被终端拖高时剩余空白落在输入卡与终端之间，
+              输入卡仍贴在时间线/独立卡下方，不被撑开。 */}
           <footer
             ref={footerRef}
             className="composer flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-3"
-            style={{
-              ...chatContentWidthStyle,
-              height: props.height != null ? "100%" : height,
-            }}
+            style={composerFooterStyle(
+              props.height != null ? "100%" : localHeight,
+            )}
             data-session-id={props.sessionId}
           >
-            {/* 输入区上方独立卡栈：widgets（todo/goal）→ queue → 投递通知，
-                再是附件栏与 composer-box。ComposerMeasuredExtras 测量高度并驱动面板增高。 */}
+            {/* 独立卡栈 + 输入卡一并测量：面板 hug 总高，输入卡 shrink-0。 */}
             <ComposerMeasuredExtras
               widgets={props.widgets ?? null}
               queuePanel={props.queuePanel}
-              deliveryNotice={(
+              deliveryNotice={( 
                 <SessionDeliveryNotice
                   status={composer.sendState.status}
                   message={composer.sendState.unknownSnapshot?.message}
@@ -247,10 +273,10 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 />
               ) : null}
               onHeightChange={handleContentHeightChange}
-            />
+              composerBox={
             <div
               // overflow-visible：保留命令面板/建议浮层；面板 minSize 已保证底栏不被裁切
-              className={["composer-box relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-visible rounded-[20px] border border-border bg-card text-card-foreground shadow-[var(--shadow-composer-lifted)] transition-[border-color,box-shadow,background-color]",
+              className={["composer-box relative flex w-full min-w-0 shrink-0 flex-col overflow-visible rounded-[20px] border border-border bg-card text-card-foreground shadow-[var(--shadow-composer-lifted)] transition-[border-color,box-shadow,background-color]",
                 composer.bangMode === "bang-bang"
                   ? "shell-silent-mode"
                   : composer.bangMode === "bang"
@@ -351,6 +377,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 }
               />
             </div>
+              }
+            />
           </footer>
           <ComposerPickerHost
             sessionId={props.sessionId}

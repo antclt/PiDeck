@@ -25,7 +25,8 @@ const sessionTimeline = readFileSync(
  */
 test("composer keeps the editor inside the resizable panel", () => {
   assert.match(composerArea, /className="composer[^\"]*min-h-0[^\"]*overflow-hidden/);
-  assert.match(composerArea, /composer-box relative flex min-h-0[^\"]*flex-1/);
+  // 输入卡 shrink-0：面板剩余高度不撑开输入框（todo/终端拖拽与输入高度解耦）
+  assert.match(composerArea, /composer-box relative flex[^"]*shrink-0/);
   assert.doesNotMatch(composerArea, /runtimeUi/);
   assert.doesNotMatch(composerArea, /AskRegionResizer/);
 });
