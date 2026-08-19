@@ -75,10 +75,10 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
     assert.match(panel, /open: \{ changes: true, graph: false, compare: false \}/);
     assert.match(panel, /\[id\]: !current\.open\[id\]/);
     assert.doesNotMatch(panel, /id === "changes" \? true/);
-    assert.match(panel, /pideck:git-panel:\$\{projectId\}:pane-state:v3/);
-    assert.match(panel, /id="git-pane-changes"/);
-    assert.match(graph, /id="git-pane-graph"/);
-    assert.match(panel, /id="git-pane-compare"/);
+    assert.match(panel, /pideck:git-panel:\$\{projectId\}:\$\{encodeURIComponent\(repoScopeKey\)\}:pane-state:v4/);
+    assert.match(panel, /id=\{`git-pane-\$\{paneIdPrefix\}-changes`\}/);
+    assert.match(graph, /id=\{`git-pane-\$\{props\.paneIdPrefix\}-graph`\}/);
+    assert.match(panel, /id=\{`git-pane-\$\{props\.paneIdPrefix\}-compare`\}/);
     assert.match(styles, /\.git-panel\s*\{[\s\S]*?overflow:\s*hidden/);
     assert.match(panel, /min-h-0 flex-1 overflow-x-hidden overflow-y-auto/);
   });

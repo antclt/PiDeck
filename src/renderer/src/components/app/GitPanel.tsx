@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -19,6 +20,7 @@ import {
   ChevronsUpDown,
   ClipboardPaste,
   FileCode2,
+  FolderGit2,
   GitBranch,
   Loader2,
   Plus,
@@ -72,6 +74,8 @@ type GitPanelProps = {
    * 未传时等同 projectId，单仓行为与改前一致。
    */
   repoScopeKey?: string;
+  /** 多仓模式中的仓库标题；不传时保持单仓面板的紧凑布局。 */
+  repositoryLabel?: string;
   commitLog: (
     projectId: string,
     options?: { maxEntries?: number; ref?: string; allBranches?: boolean },
@@ -191,6 +195,7 @@ function resizePair(
 function fitPaneHeights(
   state: PaneState,
   availableHeight: number,
+  chromeHeight = BRANCH_BAR_HEIGHT,
 ): PaneHeights {
   const visible = visiblePaneIds(state.open);
   const heights = { ...state.heights };
@@ -198,7 +203,7 @@ function fitPaneHeights(
 
   const bodyBudget = Math.max(
     PANE_MIN_BODY_HEIGHT * visible.length,
-    availableHeight - PANE_IDS.length * PANE_HEADER_HEIGHT - BRANCH_BAR_HEIGHT,
+    availableHeight - PANE_IDS.length * PANE_HEADER_HEIGHT - chromeHeight,
   );
   const requestedTotal = visible.reduce((sum, id) => sum + heights[id], 0);
   if (requestedTotal < bodyBudget) {
@@ -246,8 +251,9 @@ function adjacentVisiblePane(
   return null;
 }
 
-function paneStateStorageKey(projectId: string): string {
-  return `pideck:git-panel:${projectId}:pane-state:v3`;
+function paneStateStorageKey(projectId: string, repoScopeKey: string): string {
+  // 多仓同时挂载时，项目级 key 会让其中一个面板覆盖另一个的折叠和高度偏好。
+  return `pideck:git-panel:${projectId}:${encodeURIComponent(repoScopeKey)}:pane-state:v4`;
 }
 
 function smartCommitStorageKey(projectId: string): string {
@@ -290,10 +296,10 @@ function defaultPaneState(): PaneState {
   };
 }
 
-function readPaneState(projectId: string): PaneState {
+function readPaneState(projectId: string, repoScopeKey: string): PaneState {
   const fallback = defaultPaneState();
   try {
-    const raw = localStorage.getItem(paneStateStorageKey(projectId));
+    const raw = localStorage.getItem(paneStateStorageKey(projectId, repoScopeKey));
     if (!raw) return fallback;
     const value = JSON.parse(raw) as Partial<PaneState>;
     const heights = PANE_IDS.reduce((result, id) => {
@@ -430,6 +436,10 @@ export function GitPanel(props: GitPanelProps) {
   const projectIdRef = useRef(props.projectId);
   projectIdRef.current = props.projectId;
   const repoScopeKey = props.repoScopeKey ?? props.projectId;
+  const paneIdPrefix = useId();
+  const panelChromeHeight = props.repositoryLabel
+    ? BRANCH_BAR_HEIGHT + PANE_HEADER_HEIGHT
+    : BRANCH_BAR_HEIGHT;
   const statusRequestRef = useRef(0);
   const statusRunningRequestRef = useRef<{
     projectId: string;
@@ -496,7 +506,7 @@ export function GitPanel(props: GitPanelProps) {
   /** 变更文件树的目录折叠态（merge/staged/working 共享，供「收起/展开全部」） */
   const [collapsedChangeDirs, setCollapsedChangeDirs] = useState<Set<string>>(() => new Set());
   const [paneState, setPaneState] = useState<PaneState>(() =>
-    readPaneState(props.projectId),
+    readPaneState(props.projectId, repoScopeKey),
   );
 
   useEffect(() => {
@@ -520,8 +530,11 @@ export function GitPanel(props: GitPanelProps) {
     // 项目切换会复用同一个 GitPanel 实例；递增序号让旧项目进行中的 status/mutation 结果失效。
     statusRequestRef.current += 1;
     mutationRequestRef.current += 1;
-    const next = readPaneState(props.projectId);
-    setPaneState({ ...next, heights: fitPaneHeights(next, availableHeight) });
+    const next = readPaneState(props.projectId, repoScopeKey);
+    setPaneState({
+      ...next,
+      heights: fitPaneHeights(next, availableHeight, panelChromeHeight),
+    });
     setGroups(EMPTY_GROUPS);
     setError(null);
     setCommitMessage("");
@@ -542,25 +555,25 @@ export function GitPanel(props: GitPanelProps) {
     commitGenProgressRef.current = undefined;
     setNotAGitRepo(false);
     setGitNotInstalled(false);
-  }, [props.projectId, repoScopeKey]);
+  }, [panelChromeHeight, props.projectId, repoScopeKey]);
 
   useEffect(() => {
     setPaneState((current) => ({
       ...current,
-      heights: fitPaneHeights(current, availableHeight),
+      heights: fitPaneHeights(current, availableHeight, panelChromeHeight),
     }));
-  }, [availableHeight]);
+  }, [availableHeight, panelChromeHeight]);
 
   useEffect(() => {
     try {
       localStorage.setItem(
-        paneStateStorageKey(props.projectId),
+        paneStateStorageKey(props.projectId, repoScopeKey),
         JSON.stringify(paneState),
       );
     } catch {
       // Storage can be blocked in preview/web mode; pane interaction must still work for this session.
     }
-  }, [paneState, props.projectId]);
+  }, [paneState, props.projectId, repoScopeKey]);
 
   /**
    * 刷新 push/pull 角标：先 fetch 远程跟踪引用，再对比本地差距。
@@ -690,7 +703,10 @@ export function GitPanel(props: GitPanelProps) {
     setPaneState((current) => {
       const open = { ...current.open, [id]: !current.open[id] };
       const next = { ...current, open };
-      return { ...next, heights: fitPaneHeights(next, availableHeight) };
+      return {
+        ...next,
+        heights: fitPaneHeights(next, availableHeight, panelChromeHeight),
+      };
     });
   };
   const resizePanes = (
@@ -1079,6 +1095,15 @@ export function GitPanel(props: GitPanelProps) {
       className="git-panel flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground"
       aria-label={t("git.sourceControl")}
     >
+      {props.repositoryLabel && (
+        <div
+          className="flex h-8 shrink-0 items-center gap-2 border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] px-2 text-[13px] font-semibold text-[var(--git-panel-fg)]"
+          title={props.repositoryLabel}
+        >
+          <FolderGit2 size={14} className="shrink-0 text-muted-foreground" />
+          <span className="min-w-0 truncate">{props.repositoryLabel}</span>
+        </div>
+      )}
       {/* 当前分支 + 切换下拉（pure official：outline 触发器 + popover 菜单） */}
       <div className="flex shrink-0 items-center gap-1 border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] px-2 py-1.5" ref={branchBarRef}>
         <Button
@@ -1220,12 +1245,12 @@ export function GitPanel(props: GitPanelProps) {
         )}
       </div>
       <section
-        id="git-pane-changes"
+        id={`git-pane-${paneIdPrefix}-changes`}
         className={`flex min-h-0 flex-[0_0_auto] flex-col overflow-hidden border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] last:border-b-0${paneState.open.changes ? " h-[calc(var(--git-pane-height)+32px)]" : " h-[32px]"}`}
         style={paneStyle("changes")}
       >
         <PaneHeader
-          id="changes"
+          id={`${paneIdPrefix}-changes`}
           title={t("git.changes")}
           open={paneState.open.changes}
           onToggle={() => togglePane("changes")}
@@ -1533,6 +1558,7 @@ export function GitPanel(props: GitPanelProps) {
         renderSash("changes", visibleSashAfterChanges)}
 
       <SourceControlGraph
+        paneIdPrefix={paneIdPrefix}
         projectId={props.projectId}
         commitLog={props.commitLog}
         commitDetail={props.commitDetail}
@@ -1553,6 +1579,7 @@ export function GitPanel(props: GitPanelProps) {
         renderSash("graph", visibleSashAfterGraph)}
 
       <CompareChanges
+        paneIdPrefix={paneIdPrefix}
         projectId={props.projectId}
         branches={props.branches}
         branchCompare={props.branchCompare}
@@ -1664,6 +1691,7 @@ export function GitPanel(props: GitPanelProps) {
 }
 
 function CompareChanges(props: {
+  paneIdPrefix: string;
   projectId: string;
   branches: string[];
   branchCompare: GitPanelProps["branchCompare"];
@@ -1721,14 +1749,14 @@ function CompareChanges(props: {
 
   return (
     <section
-      id="git-pane-compare"
+      id={`git-pane-${props.paneIdPrefix}-compare`}
       className={`flex min-h-0 flex-[0_0_auto] flex-col overflow-hidden border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] last:border-b-0${props.open ? " h-[calc(var(--git-pane-height)+32px)]" : " h-[32px]"}`}
       style={
         { "--git-pane-height": `${props.height}px` } as React.CSSProperties
       }
     >
       <PaneHeader
-        id="compare"
+        id={`${props.paneIdPrefix}-compare`}
         title={t("git.compareChanges")}
         count={result?.files.length}
         open={props.open}

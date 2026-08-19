@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   BranchDiffResult,
   CommitDetail,
@@ -6,15 +6,12 @@ import type {
   GitAheadBehind,
   GitBranchInfo,
   GitChangedFile,
-  GitCommitFileDiff,
   GitGenerateCommitMessageResult,
   GitRepoInfo,
   GitResourceGroups,
   GitResourceGroupType,
-  GitWorkspaceFileDiff,
 } from "../../../../shared/types";
 import { GitPanel } from "../app/GitPanel";
-import { GitRepoSwitcher } from "../app/git/GitRepoSwitcher";
 import { useGitRepoScope } from "../../hooks/useGitRepoScope";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
@@ -71,7 +68,7 @@ export type GitDrawerHostProps = {
   projectId: string;
   projectRoot: string | undefined;
   gitApi: GitDrawerApi;
-  /** App 级项目根分支信息，单仓时继续用它，避免多打一轮 IPC */
+  /** App 级项目根分支信息，单根仓库时继续复用，避免多打一轮 IPC。 */
   fallbackGitInfo: GitBranchInfo;
   fallbackSwitchBranch: (branch: string) => void;
   fallbackCreateBranch: (branchName: string) => void;
@@ -95,8 +92,52 @@ function errorText(error: unknown): string {
 }
 
 /**
- * Git 抽屉宿主：发现多仓时挂切换器，并把选中仓库绑到 GitPanel 的全部操作。
- * 单仓不改交互；App 的 composer 分支信息仍读项目根。
+ * 为一个仓库固定全部 Git 调用的 cwd。
+ * 同时挂载多个面板时不能从全局“当前仓库”读取路径，否则异步回调会误操作另一仓库。
+ */
+function createScopedGitApi(
+  gitApi: GitDrawerApi,
+  repoPath: string | undefined,
+  refreshRepos: () => Promise<void>,
+) {
+  return {
+    commitLog: (id: string, options?: { maxEntries?: number; ref?: string; allBranches?: boolean }) =>
+      gitApi.commitLog(id, options, repoPath),
+    commitDetail: (id: string, ref: string) => gitApi.commitDetail(id, ref, repoPath),
+    branchCompare: (id: string, base: string, target: string) =>
+      gitApi.branchCompare(id, base, target, repoPath),
+    getStatus: (id: string) => gitApi.status(id, repoPath),
+    stageFiles: (id: string, paths: string[]) => gitApi.stage(id, paths, repoPath),
+    unstageFiles: (id: string, paths: string[]) => gitApi.unstage(id, paths, repoPath),
+    discardFile: (id: string, group: "workingTree" | "untracked", path: string) =>
+      gitApi.discard(id, group, path, repoPath),
+    commit: (id: string, message: string) => gitApi.commit(id, message, repoPath),
+    cherryPick: (id: string, hash: string) => gitApi.cherryPick(id, hash, repoPath),
+    revert: (id: string, hash: string) => gitApi.revert(id, hash, repoPath),
+    reset: (id: string, hash: string, mode: "soft" | "mixed" | "hard") =>
+      gitApi.reset(id, hash, mode, repoPath),
+    dropCommit: (id: string, hash: string) => gitApi.dropCommit(id, hash, repoPath),
+    generateCommitMessage: (id: string) => gitApi.generateCommitMessage(id, repoPath),
+    gitInit: async (id: string) => {
+      await gitApi.init(id);
+      await refreshRepos();
+    },
+    push: (id: string) => gitApi.push(id, repoPath),
+    pull: (id: string) => gitApi.pull(id, repoPath),
+    fetch: (id: string) => gitApi.fetch(id, repoPath),
+    aheadBehind: (id: string) => gitApi.aheadBehind(id, repoPath),
+    deleteFiles: (id: string, paths: string[]) => gitApi.deleteFiles(id, paths, repoPath),
+  };
+}
+
+function repoLabel(repo: GitRepoInfo): string {
+  // 根仓与嵌套仓统一用目录名，避免“根仓库”说明文案与子仓相对路径看起来像两种控件。
+  return repo.name;
+}
+
+/**
+ * Git 抽屉宿主：多仓时将每个仓库作为独立的 Source Control 区块同时展示。
+ * 单仓继续复用 App 的分支数据；嵌套仓及多仓的分支状态按绝对路径隔离。
  */
 export function GitDrawerHost(props: GitDrawerHostProps) {
   const {
@@ -110,155 +151,141 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
     onOpenWorkspaceFileDiff,
     onOpenFile,
   } = props;
-  const scope = useGitRepoScope({
-    projectId,
-    listRepos: gitApi.listRepos,
-  });
-  const { repoPath, showSwitcher, refreshRepos } = scope;
-  const [scopedGitInfo, setScopedGitInfo] = useState<GitBranchInfo>(EMPTY_GIT_INFO);
+  const scope = useGitRepoScope({ projectId, listRepos: gitApi.listRepos });
+  const [gitInfoByRepoPath, setGitInfoByRepoPath] = useState<Record<string, GitBranchInfo>>({});
+  const singleRepo = scope.repos.length === 1 ? scope.repos[0] : undefined;
+  const needsScopedBranchInfo = scope.hasMultipleRepos || singleRepo?.relativePath !== "";
 
   useEffect(() => {
-    if (!showSwitcher) {
-      setScopedGitInfo(EMPTY_GIT_INFO);
+    if (!needsScopedBranchInfo) {
+      setGitInfoByRepoPath({});
       return;
     }
     let cancelled = false;
-    void gitApi
-      .branches(projectId, repoPath)
-      .then((next) => {
-        if (!cancelled) setScopedGitInfo(next);
-      })
-      .catch(() => {
-        if (!cancelled) setScopedGitInfo(EMPTY_GIT_INFO);
-      });
+    void Promise.all(
+      scope.repos.map(async (repo): Promise<readonly [string, GitBranchInfo]> => {
+        try {
+          return [repo.path, await gitApi.branches(projectId, repo.path)];
+        } catch {
+          return [repo.path, EMPTY_GIT_INFO];
+        }
+      }),
+    ).then((entries) => {
+      if (!cancelled) setGitInfoByRepoPath(Object.fromEntries(entries));
+    });
     return () => {
       cancelled = true;
     };
-  }, [gitApi, projectId, repoPath, showSwitcher]);
+  }, [gitApi, needsScopedBranchInfo, projectId, scope.repos]);
 
-  const gitInfo = showSwitcher ? scopedGitInfo : fallbackGitInfo;
+  const updateGitInfo = useCallback((repoPath: string, next: GitBranchInfo) => {
+    setGitInfoByRepoPath((current) => ({ ...current, [repoPath]: next }));
+  }, []);
 
-  const handleSwitchBranch = useCallback(
-    (branch: string) => {
-      if (!showSwitcher) {
-        fallbackSwitchBranch(branch);
-        return;
-      }
+  const switchScopedBranch = useCallback(
+    (repoPath: string, branch: string) => {
       void gitApi
         .checkout(projectId, branch, repoPath)
-        .then((next) => setScopedGitInfo(next))
+        .then((next) => updateGitInfo(repoPath, next))
         .catch((error: unknown) => {
           showNotice(t("app.branchSwitchFailed", { error: errorText(error) }), 4000, "error");
-          void gitApi.branches(projectId, repoPath).then(setScopedGitInfo).catch(() => undefined);
+          void gitApi.branches(projectId, repoPath).then((next) => updateGitInfo(repoPath, next)).catch(() => undefined);
         });
     },
-    [fallbackSwitchBranch, gitApi, projectId, repoPath, showSwitcher],
+    [gitApi, projectId, updateGitInfo],
   );
 
-  const handleCreateBranch = useCallback(
-    (branchName: string) => {
-      if (!showSwitcher) {
-        fallbackCreateBranch(branchName);
-        return;
-      }
+  const createScopedBranch = useCallback(
+    (repoPath: string, branchName: string) => {
       void gitApi
         .createBranch(projectId, branchName, repoPath)
         .then((next) => {
-          setScopedGitInfo(next);
+          updateGitInfo(repoPath, next);
           showNotice(t("app.branchCreated", { branch: branchName }), 2500);
         })
         .catch((error: unknown) => {
           showNotice(t("app.branchCreateFailed", { error: errorText(error) }), 4000, "error");
         });
     },
-    [fallbackCreateBranch, gitApi, projectId, repoPath, showSwitcher],
+    [gitApi, projectId, updateGitInfo],
   );
 
-  const scopedApi = useMemo(
-    () => ({
-      commitLog: (id: string, options?: { maxEntries?: number; ref?: string; allBranches?: boolean }) =>
-        gitApi.commitLog(id, options, repoPath),
-      commitDetail: (id: string, ref: string) => gitApi.commitDetail(id, ref, repoPath),
-      branchCompare: (id: string, base: string, target: string) =>
-        gitApi.branchCompare(id, base, target, repoPath),
-      getStatus: (id: string) => gitApi.status(id, repoPath),
-      stageFiles: (id: string, paths: string[]) => gitApi.stage(id, paths, repoPath),
-      unstageFiles: (id: string, paths: string[]) => gitApi.unstage(id, paths, repoPath),
-      discardFile: (id: string, group: "workingTree" | "untracked", path: string) =>
-        gitApi.discard(id, group, path, repoPath),
-      commit: (id: string, message: string) => gitApi.commit(id, message, repoPath),
-      cherryPick: (id: string, hash: string) => gitApi.cherryPick(id, hash, repoPath),
-      revert: (id: string, hash: string) => gitApi.revert(id, hash, repoPath),
-      reset: (id: string, hash: string, mode: "soft" | "mixed" | "hard") =>
-        gitApi.reset(id, hash, mode, repoPath),
-      dropCommit: (id: string, hash: string) => gitApi.dropCommit(id, hash, repoPath),
-      generateCommitMessage: (id: string) => gitApi.generateCommitMessage(id, repoPath),
-      gitInit: async (id: string) => {
-        await gitApi.init(id);
-        await refreshRepos();
-      },
-      push: (id: string) => gitApi.push(id, repoPath),
-      pull: (id: string) => gitApi.pull(id, repoPath),
-      fetch: (id: string) => gitApi.fetch(id, repoPath),
-      aheadBehind: (id: string) => gitApi.aheadBehind(id, repoPath),
-      deleteFiles: (id: string, paths: string[]) => gitApi.deleteFiles(id, paths, repoPath),
-    }),
-    [gitApi, refreshRepos, repoPath],
-  );
+  const renderPanel = (repo: GitRepoInfo | undefined, repositoryLabel?: string) => {
+    const repoPath = repo?.path;
+    const scopedApi = createScopedGitApi(gitApi, repoPath, scope.refreshRepos);
+    const useScopedBranches = Boolean(repoPath) && needsScopedBranchInfo;
+    const gitInfo = repoPath && needsScopedBranchInfo
+      ? gitInfoByRepoPath[repoPath] ?? EMPTY_GIT_INFO
+      : fallbackGitInfo;
 
-  const handleOpenWorkspaceFileDiff = useCallback(
-    (group: GitResourceGroupType, path: string) => onOpenWorkspaceFileDiff(group, path, repoPath),
-    [onOpenWorkspaceFileDiff, repoPath],
-  );
+    return (
+      <GitPanel
+        projectId={projectId}
+        projectRoot={repoPath ?? projectRoot}
+        repoScopeKey={repoPath ?? projectRoot}
+        repositoryLabel={repositoryLabel}
+        commitLog={scopedApi.commitLog}
+        commitDetail={scopedApi.commitDetail}
+        onOpenCommitFileDiff={(commit, file) => onOpenCommitFileDiff(commit, file, repoPath)}
+        onOpenWorkspaceFileDiff={(group, path) => onOpenWorkspaceFileDiff(group, path, repoPath)}
+        onOpenFile={onOpenFile}
+        branchCompare={scopedApi.branchCompare}
+        getStatus={scopedApi.getStatus}
+        stageFiles={scopedApi.stageFiles}
+        unstageFiles={scopedApi.unstageFiles}
+        discardFile={scopedApi.discardFile}
+        commit={scopedApi.commit}
+        branches={gitInfo.branches}
+        currentBranch={gitInfo.current}
+        onSwitchBranch={
+          useScopedBranches
+            ? (branch) => {
+                // repoPath exists whenever scoped branches are enabled; keep the guard for TS and stale renders.
+                if (repoPath) switchScopedBranch(repoPath, branch);
+              }
+            : fallbackSwitchBranch
+        }
+        onCreateBranch={
+          useScopedBranches
+            ? (branchName) => {
+                // 同上：异步分支操作必须保留本仓库的路径快照。
+                if (repoPath) createScopedBranch(repoPath, branchName);
+              }
+            : fallbackCreateBranch
+        }
+        cherryPick={scopedApi.cherryPick}
+        revert={scopedApi.revert}
+        reset={scopedApi.reset}
+        dropCommit={scopedApi.dropCommit}
+        generateCommitMessage={scopedApi.generateCommitMessage}
+        gitInit={scopedApi.gitInit}
+        push={scopedApi.push}
+        pull={scopedApi.pull}
+        fetch={scopedApi.fetch}
+        aheadBehind={scopedApi.aheadBehind}
+        deleteFiles={scopedApi.deleteFiles}
+      />
+    );
+  };
 
-  const handleOpenCommitFileDiff = useCallback(
-    (commit: CommitEntry, file: GitChangedFile) => onOpenCommitFileDiff(commit, file, repoPath),
-    [onOpenCommitFileDiff, repoPath],
-  );
+  if (scope.hasMultipleRepos) {
+    return (
+      <div className="git-panel flex h-full min-h-0 flex-col overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+          {scope.repos.map((repo) => (
+            <section key={repo.path} className="h-[420px] min-h-[320px] shrink-0 border-b border-[var(--git-panel-border)] last:border-b-0">
+              {renderPanel(repo, repoLabel(repo))}
+            </section>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    // 切换器与 GitPanel 是同一个抽屉表面；在宿主层挂上 git-panel，
-    // 让它也继承 --git-panel-* token，避免切换仓库后顶部出现另一块底色。
     <div className="git-panel flex h-full min-h-0 flex-col overflow-hidden">
-      {showSwitcher ? (
-        <GitRepoSwitcher
-          repos={scope.repos}
-          activePath={scope.activeRepo?.path}
-          onSelect={scope.selectRepo}
-        />
-      ) : null}
       <div className="min-h-0 flex-1">
-        <GitPanel
-          projectId={projectId}
-          projectRoot={scope.activeRepo?.path ?? projectRoot}
-          repoScopeKey={scope.activeRepo?.path ?? projectRoot}
-          commitLog={scopedApi.commitLog}
-          commitDetail={scopedApi.commitDetail}
-          onOpenCommitFileDiff={handleOpenCommitFileDiff}
-          onOpenWorkspaceFileDiff={handleOpenWorkspaceFileDiff}
-          onOpenFile={onOpenFile}
-          branchCompare={scopedApi.branchCompare}
-          getStatus={scopedApi.getStatus}
-          stageFiles={scopedApi.stageFiles}
-          unstageFiles={scopedApi.unstageFiles}
-          discardFile={scopedApi.discardFile}
-          commit={scopedApi.commit}
-          branches={gitInfo.branches}
-          currentBranch={gitInfo.current}
-          onSwitchBranch={handleSwitchBranch}
-          onCreateBranch={handleCreateBranch}
-          cherryPick={scopedApi.cherryPick}
-          revert={scopedApi.revert}
-          reset={scopedApi.reset}
-          dropCommit={scopedApi.dropCommit}
-          generateCommitMessage={scopedApi.generateCommitMessage}
-          gitInit={scopedApi.gitInit}
-          push={scopedApi.push}
-          pull={scopedApi.pull}
-          fetch={scopedApi.fetch}
-          aheadBehind={scopedApi.aheadBehind}
-          deleteFiles={scopedApi.deleteFiles}
-        />
+        {renderPanel(singleRepo)}
       </div>
     </div>
   );

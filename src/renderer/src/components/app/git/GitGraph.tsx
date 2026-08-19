@@ -30,6 +30,8 @@ import { GitCompactFilter, PaneHeader } from "./GitPanelControls";
 import { Button } from "../../ui-shadcn/button";
 
 export type GitGraphProps = {
+  /** 父 GitPanel 的唯一前缀，防止多仓同时挂载时重复 pane id。 */
+  paneIdPrefix: string;
   projectId: string;
   commitLog: (
     projectId: string,
@@ -841,14 +843,14 @@ export function SourceControlGraph(props: GitGraphProps) {
 
   return (
     <section
-      id="git-pane-graph"
+      id={`git-pane-${props.paneIdPrefix}-graph`}
       className={`flex min-h-0 flex-[0_0_auto] flex-col overflow-hidden border-b border-[var(--git-panel-border)] bg-[var(--git-panel-bg)] last:border-b-0${props.open ? " h-[calc(var(--git-pane-height)+32px)]" : " h-[32px]"}`}
       style={
         { "--git-pane-height": `${props.height}px` } as CSSProperties
       }
     >
       <PaneHeader
-        id="graph"
+        id={`${props.paneIdPrefix}-graph`}
         title={t("git.sourceControlGraph")}
         count={commits.length}
         open={props.open}
