@@ -98,12 +98,12 @@ test("composer area mounts the stats strip under the input card", () => {
   const area = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
   const stats = readFileSync("src/renderer/src/components/session/ComposerStatsLine.tsx", "utf8");
   assert.match(area, /import \{ ComposerStatsLine \} from "\.\/ComposerStatsLine"/);
-  assert.match(area, /statsLine=\{\s*<ComposerStatsLine state=\{composer\.runtime\?\.state\} \/>/);
+  assert.match(area, /statsLine=\{\s*<ComposerStatsLine state=\{composer\.runtime\?\.state\}(?: turnCount=\{props\.turnCount\})? \/>/);
   assert.match(area, /\{props\.statsLine\}/);
   // 无指标时 footer 不垫底距；有数字才由 StatsLine 自带 pt/pb 占位。
   assert.match(area, /className="composer[^\"]*px-0 pb-0"/);
   assert.match(stats, /if \(groups\.length === 0\) return null/);
-  assert.match(stats, /truncate px-1 pb-1 pt-1/);
+  assert.match(stats, /truncate px-1 pb-0 pt-1/);
 });
 
 test("stats copy exists in both locales", () => {

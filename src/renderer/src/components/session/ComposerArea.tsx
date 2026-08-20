@@ -49,6 +49,8 @@ export type ComposerAreaProps = {
   onContentHeightChange?: (contentHeight: number) => void;
   enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
   ensureSessionId?: (sessionId: string) => Promise<string>;
+  /** 当前会话中用户发起的轮次，用于 pi 统计栏；DSH 自带 sessionStats 时不重复显示。 */
+  turnCount?: number;
 };
 
 const CONTENT_GAP_PX = 8;
@@ -263,7 +265,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 />
               ) : null}
               onHeightChange={handleContentHeightChange}
-              statsLine={<ComposerStatsLine state={composer.runtime?.state} />}
+              statsLine={<ComposerStatsLine state={composer.runtime?.state} turnCount={props.turnCount} />}
               composerBox={
             <div
               // overflow-visible：保留命令面板/建议浮层；面板 minSize 已保证底栏不被裁切

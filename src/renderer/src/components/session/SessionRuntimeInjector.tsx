@@ -189,10 +189,8 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
             runtime={currentSessionRuntime}
             ui={currentSessionRuntimeUi}
             responder={runtimeUiResponder}
-            onExpandedChange={(expanded) => {
-              if (!expanded) return;
-              requestAnimationFrame(() => sessionTimeline.scrollToBottom());
-            }}
+            // 展开工具/思考卡片不应抢夺用户当前滚动位置；只有新消息进入时由时间线控制自动贴底。
+            onExpandedChange={() => undefined}
           />
         ) : null
       }

@@ -326,7 +326,7 @@ export function QueuedPromptPanel(props: {
         <ul
           id={listId}
           className={multiple
-            ? "mb-1 flex max-h-[180px] flex-col overflow-y-auto"
+            ? "mb-1 flex max-h-[180px] flex-col overflow-y-auto overscroll-contain [contain:layout_paint]"
             : "flex flex-col"}
         >
           {props.prompts.map((prompt, index) => (

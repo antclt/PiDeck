@@ -565,14 +565,16 @@ export function SessionView({
         {/* 有消息或仍在加载：底部 composer。空会话就绪后卸掉，改由起始页居中输入。 */}
         {bottomComposerVisible && (
           <>
-            <ResizableHandle className="v-splitter" />
+            {/* 输入栏与会话区是一个固定整体；只有终端分隔条允许用户改变垂直空间。 */}
             <ResizablePanel
               id="composer"
+              disabled
               panelRef={composerPanelRef}
               minSize={COMPOSER_MIN_HEIGHT}
               maxSize={composerMaxHeight}
               defaultSize={composerHeightStateRef.current}
               // 窗口缩放时保持输入栏像素高度，避免百分比缓存把栏撑出大块底空隙。
+              // disabled 只禁止用户拖拽该面板；代码仍可通过 panelRef 按内容 hug 高度。
               groupResizeBehavior="preserve-pixel-size"
               onResize={handleComposerResize}
               // 与时间线共享同一条滚动条槽位：面板 overflow-hidden + scrollbar-gutter:stable
@@ -584,6 +586,7 @@ export function SessionView({
               <ComposerArea
                 ref={composerRef}
                 sessionId={sessionId}
+                turnCount={sessionTimeline.messages.filter((message) => message.role === "user").length}
                 gitInfo={gitInfo}
                 height={composerHeight}
                 onContentHeightChange={handleComposerContentHeight}

@@ -560,6 +560,7 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionContext.compacting": "Compacting…",
   // Stats strip under the composer card (dsh-web StatsLine): DSH uses whole-log stats, pi uses last reply
   "composerStats.counts": "{turns} turns · {steps} steps",
+  "composerStats.turns": "{turns} turns",
   "composerStats.llm": "LLM {duration}",
   "composerStats.toolCall": "Tool {duration}",
   "composerStats.ttftAverage": "Avg first token {duration}",

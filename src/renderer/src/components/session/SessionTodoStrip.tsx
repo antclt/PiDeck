@@ -199,7 +199,7 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 				</span>
 			</button>
 			{!collapsed && (
-				<ul className="mb-2 flex max-h-[180px] flex-col gap-2 overflow-y-auto px-3">
+				<ul className="mb-2 flex max-h-[180px] flex-col gap-2 overflow-y-auto overscroll-contain [contain:layout_paint] px-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-100 motion-reduce:animate-none">
 					{items.map((item) => (
 						<li
 							key={item.id}

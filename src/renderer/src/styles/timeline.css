@@ -1662,7 +1662,6 @@ body.ask-dialog-open .ask-question-card.pending {
   padding-inline: 0;
   padding-block: 0;
   min-width: 0;
-  margin-bottom: 10px;
   /* 飞书 Bot 弹框从 toolbar 向上展开，外层不能裁剪浮层。 */
   overflow: visible;
   display: flex;

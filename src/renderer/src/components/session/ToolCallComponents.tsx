@@ -389,7 +389,7 @@ export const ToolCard = memo(function ToolCard(props: {
 				</button>
 			</div>
 			{expanded && (
-				<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in slide-in-from-top-1 duration-150">
+				<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in duration-100 motion-reduce:animate-none">
 					{isAskCard && askCard ? (
 						<div className="ask-question-card-tool-inner">
 							<div className="ask-question-card-title">

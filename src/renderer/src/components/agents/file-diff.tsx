@@ -133,19 +133,14 @@ export function FileDiff({
     const viewport = viewportRef.current;
     if (!viewport || !currentOpen || !streaming) return;
 
+    // 流式 diff 每个 token 都会触发渲染；只在当前帧末尾追底，避免连续 smooth
+    // scroll 互相取消并与外层时间线的 ResizeObserver 争抢布局。
     const frame = requestAnimationFrame(() => {
       if (viewport.scrollHeight <= viewport.clientHeight) return;
-      if (typeof viewport.scrollTo === "function") {
-        viewport.scrollTo({
-          top: viewport.scrollHeight,
-          behavior: reduce ? "auto" : "smooth",
-        });
-      } else {
-        viewport.scrollTop = viewport.scrollHeight;
-      }
+      viewport.scrollTop = viewport.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
-  });
+  }, [currentOpen, streaming, code]);
 
   const handleCopy = useCallback(async () => {
     if (onCopy) await onCopy();

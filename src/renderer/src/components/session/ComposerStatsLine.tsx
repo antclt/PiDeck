@@ -24,6 +24,7 @@ export function buildComposerStatsGroups(
 				| "tps"
 		  >
 		| undefined,
+	turnCount = 0,
 ): string[] {
 	if (!state) return [];
 	const groups: string[] = [];
@@ -52,6 +53,8 @@ export function buildComposerStatsGroups(
 		}
 		if (speeds.length > 0) groups.push(speeds.join(" · "));
 	} else {
+		// pi 没有 DSH 的 sessionStats，轮次按用户消息计算，保证历史和实时会话口径一致。
+		if (turnCount > 0) groups.push(t("composerStats.turns", { turns: turnCount }));
 		// pi 无整段 sessionStats：用最近一条回复的性能组填同一条带，语义在文案里标清。
 		const lastReply: string[] = [];
 		if (state.ttftMs != null) {
@@ -83,8 +86,9 @@ export function buildComposerStatsGroups(
 
 export const ComposerStatsLine = memo(function ComposerStatsLine(props: {
 	state?: AgentRuntimeState;
+	turnCount?: number;
 }) {
-	const groups = buildComposerStatsGroups(props.state);
+	const groups = buildComposerStatsGroups(props.state, props.turnCount);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const [truncated, setTruncated] = useState(false);
 	const line = groups.join(" | ");
@@ -106,7 +110,7 @@ export const ComposerStatsLine = memo(function ComposerStatsLine(props: {
 	return (
 		<div
 			ref={rootRef}
-			className="w-full min-w-0 truncate px-1 pb-1 pt-1 text-center text-[12px] leading-5 text-text-tertiary"
+			className="w-full min-w-0 truncate px-1 pb-0 pt-1 text-center text-[12px] leading-5 text-text-tertiary"
 			title={truncated ? line : undefined}
 			data-testid="composer-stats-line"
 		>

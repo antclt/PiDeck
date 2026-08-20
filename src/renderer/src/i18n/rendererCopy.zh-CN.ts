@@ -557,6 +557,7 @@ export const zhCN = {
   "sessionContext.compacting": "压缩中…",
   // 输入卡正下方指标条（dsh-web StatsLine）：DSH 用整段日志统计，pi 用上次回复
   "composerStats.counts": "{turns} 轮 · {steps} 步",
+  "composerStats.turns": "{turns} 轮",
   "composerStats.llm": "LLM {duration}",
   "composerStats.toolCall": "工具调用 {duration}",
   "composerStats.ttftAverage": "首 token 平均 {duration}",

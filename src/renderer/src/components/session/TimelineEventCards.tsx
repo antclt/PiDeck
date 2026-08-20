@@ -406,7 +406,7 @@ export const ThinkingBlock = memo(
 				)}
 			</button>
 			{expanded && (
-				<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in slide-in-from-top-1 duration-150">
+				<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in duration-100 motion-reduce:animate-none">
 					<div className="markdown-body px-0 pt-1 pb-1 text-text-tertiary">
 						<MarkdownStream
 							text={props.text}

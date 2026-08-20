@@ -50,7 +50,7 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 	const visibleFiles = files.slice(0, visibleFileCount(files.length, pref.showAll));
 	if (files.length === 0) return null;
 	return (
-		<div className="turn-file-changes w-full min-w-0">
+		<div className="turn-file-changes w-full min-w-0 [contain:layout_paint]">
 			<div className="mb-1.5 flex items-center gap-1.5 text-micro font-medium uppercase tracking-wider text-muted-foreground/60">
 				<Files size={12} aria-hidden="true" className="shrink-0" />
 				<span>{t("session.turnFileChangesTitle")}</span>
@@ -69,7 +69,7 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 				</Button>
 			</div>
 			{!pref.collapsed && (
-				<div className="flex flex-col gap-0.5">
+				<div className="flex max-h-[320px] flex-col gap-0.5 overflow-y-auto overscroll-contain">
 					{visibleFiles.map((entry) => (
 						<div key={entry.path} className="flex items-center gap-1">
 							<FileDiff
