@@ -1,11 +1,11 @@
 import { memo } from "react";
-import { AnswerOutput } from "../AnswerOutput";
+import { AnswerOutput, type AnswerOutputVariant } from "../AnswerOutput";
 
 /**
  * 中间回答：执行过程折叠区内的阶段性正文。
  *
- * - live：订阅独立流式通道（AnswerOutput），History 骨架可为空
- * - settled：渲染 message.text 的全量 Markdown
+ * - live：订阅独立流式通道（AnswerOutput），History 骨架可为空；视觉始终按 answer 档
+ * - settled：渲染 message.text 的全量 Markdown；正文尺寸与最终回答相同，process 只加与过程行的间距
  */
 export const InterimAnswer = memo(function InterimAnswer(props: {
 	/** live 时读 streamingTextByIdAtom；settled 时用 text */
@@ -16,6 +16,8 @@ export const InterimAnswer = memo(function InterimAnswer(props: {
 	isStreaming?: boolean;
 	/** live→settled 交接淡入 */
 	settle?: boolean;
+	/** settled 视觉档位；live 忽略。正文同尺寸；process 只多上下间距。 */
+	variant?: AnswerOutputVariant;
 	onOpenExternal: (url: string) => void;
 	onOpenFile?: (path: string) => void;
 }) {
@@ -28,6 +30,7 @@ export const InterimAnswer = memo(function InterimAnswer(props: {
 			hidden={props.hidden}
 			isStreaming={props.isStreaming}
 			settle={props.settle}
+			variant={props.variant}
 			onOpenExternal={props.onOpenExternal}
 			onOpenFile={props.onOpenFile}
 		/>

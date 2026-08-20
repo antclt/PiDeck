@@ -29,7 +29,8 @@ interface DiskCacheFile<V> {
 }
 
 /** Bump when Summary fields change so old caches are discarded and re-scanned. */
-const DISK_SCHEMA_VERSION = 2;
+// 3：摘要不再把 pi JSONL 文件名时间戳当 session name（旧缓存会把侧栏冻成一排日期）。
+const DISK_SCHEMA_VERSION = 3;
 const SAVE_DEBOUNCE_MS = 800;
 
 export class SessionSummaryCache<V> {

@@ -9,6 +9,7 @@ const {
   countRoleMessagesBefore,
   isDefaultAgentTitle,
   inferTitleFromMessages,
+  looksLikePiSessionFileStem,
 } = loadTsCommonJs("src/main/pi/agentUtils.ts");
 
 const message = (role) => ({ role });
@@ -113,6 +114,17 @@ test("isDefaultAgentTitle treats draft placeholder titles as default so first pr
   assert.equal(isDefaultAgentTitle(`${project.name} agent`, project, translateTitle), true);
   assert.equal(isDefaultAgentTitle(`${project.name} DSH`, project, translateTitle), true);
   assert.equal(isDefaultAgentTitle("帮我看看这个报错", project, translateTitle), false);
+  // pi 未 set_session_name 时 sessionName 是 JSONL 文件名：必须当占位，才能用首条消息自动改名。
+  assert.equal(looksLikePiSessionFileStem("2026-08-08T10-47-19-239Z_abc"), true);
+  assert.equal(looksLikePiSessionFileStem("2026-08-08T10:47:19.239Z"), true);
+  assert.equal(looksLikePiSessionFileStem("帮我看看这个报错"), false);
+  assert.equal(
+    isDefaultAgentTitle("2026-08-08T10-47-19-239Z_abc", project, translateTitle),
+    true,
+  );
+  // catalog 把时间戳清成 Untitled 后仍要能自动改名，否则历史会话打开后永远叫 Untitled。
+  assert.equal(isDefaultAgentTitle("Untitled", project, translateTitle), true);
+  assert.equal(isDefaultAgentTitle("Untitled session", project, translateTitle), true);
 });
 
 test("inferTitleFromMessages uses the first user prompt as the session title", () => {
@@ -133,6 +145,8 @@ test("pi runtime title changes notify catalog the same way DSH does", () => {
   assert.match(utils, /session\.dshUntitled/);
   assert.match(agentManager, /setTitleChangedHandler\(/);
   assert.match(agentManager, /this\.onTitleChanged\?\.\(agentId, next\)/);
+  assert.match(agentManager, /looksLikePiSessionFileStem\(next\)/);
+  assert.match(agentManager, /piSessionName/);
   assert.match(agentManager, /return this\.applyRuntimeTitle\(agentId, nextTitle\)/);
   assert.match(index, /agentManager\.setTitleChangedHandler\(/);
   assert.match(index, /sessionCatalog\.update\(sessionId, \{ title \}\)/);

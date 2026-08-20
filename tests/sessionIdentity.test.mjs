@@ -41,6 +41,16 @@ function loadAgentIdentity() {
   return module.exports;
 }
 
+test("treats pi JSONL file-stem timestamps as placeholders, not session titles", () => {
+  const { looksLikePiSessionFileStem } = loadModule();
+  // 文件名把 ISO 的 `:` / `.` 换成 `-`：`19-239Z` 不是 `.239Z`。
+  assert.equal(looksLikePiSessionFileStem("2026-08-08T10-47-19-239Z_abc"), true);
+  assert.equal(looksLikePiSessionFileStem("2026-08-08T10:47:19.239Z"), true);
+  assert.equal(looksLikePiSessionFileStem("2026-08-08T10-47-19Z"), true);
+  assert.equal(looksLikePiSessionFileStem("帮我看看这个报错"), false);
+  assert.equal(looksLikePiSessionFileStem("Untitled"), false);
+});
+
 test("canonicalizes native session paths without collapsing WSL case", () => {
   const { canonicalizeSessionPath } = loadModule();
   assert.equal(

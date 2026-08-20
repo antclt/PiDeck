@@ -8,6 +8,7 @@ import { basename as posixBasename, dirname as posixDirname, isAbsolute as posix
 import type { ChatMessage, ChatRole, SessionSummary } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { getCodexSessionThreadInfo } from "../../shared/codexSessionMeta";
+import { looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
 import { extractMessageText, extractThinkingRaw } from "../pi/messageContent";
 import { toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -1583,6 +1584,7 @@ export class SessionScanner {
 
     // 会话名优先级与 pi getSessionName 一致：最后一条 session_info 为准；
     // 旧版 PiDeck 的 sessionName 私有行及其他字段仅作降级回退。
+    // pi 默认 sessionName / 未改名的 session_info 是 JSONL 文件名时间戳，不能当标题。
     const inferredName = this.cleanTitle(latestSessionInfoName) || this.cleanTitle(name) || this.cleanTitle(firstUserText) || this.cleanTitle(firstAssistantText) || this.translate("session.untitled");
 
     const summary: SessionSummary = {
@@ -1649,7 +1651,8 @@ export class SessionScanner {
 
   private cleanTitle(value?: string) {
     const text = value?.replace(/\s+/g, " ").trim();
-    if (!text || /^untitled$/i.test(text)) return undefined;
+    // 时间戳文件名不是会话名：跳过才能回退到首条 user/assistant 文本。
+    if (!text || /^untitled$/i.test(text) || looksLikePiSessionFileStem(text)) return undefined;
     return text.length > 32 ? `${text.slice(0, 32)}…` : text;
   }
 

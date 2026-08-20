@@ -332,7 +332,7 @@ export const ToolCard = memo(function ToolCard(props: {
 			data-tool-kind={isSkillRead ? "skill" : getToolKind(toolName)}
 			data-message-id={props.message.id}
 		>
-			<div className="relative flex min-h-6 items-center rounded-md transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]">
+			<div className="relative flex min-h-7 items-center rounded-md transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]">
 				{/* 工具运行中整行扫光（dsh-web command-row-sweep 同款，与思考扫光同 keyframes）。
 				    status === "running" 才挂载：stopped/error/done 立即消失（stopped 由 props.stopped 短路）；
 				    pointer-events-none 不挡 trigger 点击展开 */}
@@ -344,14 +344,14 @@ export const ToolCard = memo(function ToolCard(props: {
 				)}
 				<button
 					type="button"
-					className="flex min-h-6 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-0 pr-0.5 pl-1 text-left text-control leading-5 text-text-secondary focus-visible:-outline-offset-2 focus-visible:outline-2"
+					className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-control leading-5 text-text-secondary focus-visible:-outline-offset-2 focus-visible:outline-2"
 					onClick={() => setExpanded((v) => !v)}
 					aria-expanded={expanded}
 				>
 					<span className="tool-card-icon inline-flex shrink-0 items-center justify-center">
 						{isSkillRead ? <Brain size={16} /> : isAskCard ? <MessageCircle size={16} /> : toolIcon(toolName)}
 					</span>
-					<span className="shrink-0 text-caption font-medium lowercase text-text-secondary">
+					<span className="shrink-0 text-control font-medium lowercase text-text-secondary">
 						{isSkillRead ? `skill:${skillName}` : isAskCard ? t("ask.toolName") : toolName}
 					</span>
 					{expanded ? (
@@ -364,7 +364,7 @@ export const ToolCard = memo(function ToolCard(props: {
 					)}
 					{statusBadge}
 					{showDuration && (
-						<span className="shrink-0 font-mono text-micro tabular-nums text-text-tertiary" title={t("tool.durationTitle")}>
+						<span className="shrink-0 font-mono text-caption tabular-nums text-text-tertiary" title={t("tool.durationTitle")}>
 							{status === "running" ? (
 								// 工具执行中：从消息时间戳起实时计时（LiveDuration 每秒刷新）
 								<LiveDuration startedAt={props.message.timestamp} isStreaming />
@@ -374,15 +374,15 @@ export const ToolCard = memo(function ToolCard(props: {
 						</span>
 					)}
 					{isAskCard && askCard?.question ? (
-						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-micro text-text-tertiary" title={askCard.question}>
+						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-tertiary" title={askCard.question}>
 							| {askCard.question}
 						</span>
 					) : displayLabel ? (
-						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-micro text-text-secondary" title={subtitle || displayLabel}>
+						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-secondary" title={subtitle || displayLabel}>
 							{displayLabel}
 						</span>
 					) : subtitle ? (
-						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-micro text-text-tertiary" title={subtitle}>
+						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-tertiary" title={subtitle}>
 							| {subtitle}
 						</span>
 					) : null}

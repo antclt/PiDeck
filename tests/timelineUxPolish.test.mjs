@@ -30,7 +30,7 @@ const timeline = readFileSync(
 test("tool card name uses medium weight like process summary, not bold 650", () => {
   assert.match(
     toolCard,
-    /className="shrink-0 text-caption font-medium lowercase text-text-secondary"/,
+    /className="shrink-0 text-control font-medium lowercase text-text-secondary"/,
   );
   assert.doesNotMatch(toolCard, /font-\[650\]/);
   // ToolActivityCard 也不再用 <strong> 加粗

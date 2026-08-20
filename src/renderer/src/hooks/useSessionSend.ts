@@ -415,10 +415,13 @@ export function useSessionSend(options: UseSessionSendOptions) {
       }
 
       const record = store.get(sessionRecordsAtom)[sessionId];
-      if (record && result.sessionPath) {
+      if (record && result.accepted) {
+        // DSH 的 sessionPath 是 host zstd，不能当 pi JSONL 写进 filePath。
         upsertSession({
           ...record,
-          filePath: result.sessionPath,
+          ...(record.backend === "dsh" || !result.sessionPath
+            ? {}
+            : { filePath: result.sessionPath }),
           status: "active",
           updatedAt: Date.now(),
         });

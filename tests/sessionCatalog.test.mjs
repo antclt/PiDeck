@@ -193,6 +193,7 @@ test("persists DSH session id so a restarted app can attach the same host sessio
     const record = catalog.getRecord(draft.id);
     assert.equal(record?.dshSessionId, "session-host-abc123");
     assert.equal(record?.filePath, undefined, "DSH 会话不落 pi 会话文件");
+    assert.equal(record?.status, "draft", "预热只绑 host id，不能把空草稿抬成 active");
     // 重启后 catalog 重载：dshSessionId 存活，Coordinator 可据此 attach 旧会话。
     const reloaded = new SessionCatalog(join(dir, "sessions.json"));
     await reloaded.load();
@@ -664,6 +665,37 @@ test("maps scanned child parent paths to desktop session IDs and survives reload
   }
 });
 
+test("DSH attachRuntime ignores zstd filePath and only promotes draft when asked", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-dsh-promote-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    const draft = await catalog.createDraft({
+      projectId: "project-1",
+      title: "DSH session",
+      environment: "native",
+      backend: "dsh",
+    });
+    await catalog.attachRuntime({
+      sessionId: draft.id,
+      filePath: "C:\\Users\\me\\.dsh\\sessions\\ws\\session-1\\session.jsonl.zst",
+      dshSessionId: "session-host-abc123",
+    });
+    const warmed = catalog.getRecord(draft.id);
+    assert.equal(warmed?.filePath, undefined, "zstd 不得写入 filePath");
+    assert.equal(warmed?.status, "draft");
+    await catalog.attachRuntime({
+      sessionId: draft.id,
+      dshSessionId: "session-host-abc123",
+      promoteToActive: true,
+    });
+    assert.equal(catalog.getRecord(draft.id)?.status, "active");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("runtime event attachment rejects active origin changes but accepts metadata drafts", () => {
   const { canAttachRuntimeMetadata } = loadCatalog();
   const active = {
@@ -687,6 +719,15 @@ test("runtime event attachment rejects active origin changes but accepts metadat
     sessionSource: "pi",
     sessionEnvironment: "native",
   }), true);
+  assert.equal(canAttachRuntimeMetadata({
+    ...active,
+    backend: "dsh",
+    filePath: undefined,
+    status: "draft",
+  }, {
+    sessionPath: "C:/Users/me/.dsh/sessions/ws/session-1/session.jsonl.zst",
+    backend: "dsh",
+  }), false, "DSH zstd 路径不得走 pi 文件配对");
 });
 
 test("removes an unstarted draft from the durable catalog", async () => {
@@ -944,6 +985,35 @@ test("removeByProjectId drops every catalog entry for a removed sidebar project"
   }
 });
 
+test("load rewrites pi file-stem timestamp titles so the sidebar is not a list of dates", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-ts-title-"));
+  const filePath = join(dir, "sessions.json");
+  try {
+    await writeFile(filePath, JSON.stringify({
+      version: 1,
+      sessions: [{
+        id: "sess-1",
+        projectId: "project-1",
+        title: "2026-08-08T10-47-19-239Z_abc",
+        source: "pi",
+        environment: "native",
+        filePath: "C:/sessions/2026-08-08T10-47-19-239Z_abc.jsonl",
+        status: "active",
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    }), "utf8");
+    const catalog = new SessionCatalog(filePath);
+    await catalog.load();
+    assert.equal(catalog.getRecord("sess-1")?.title, "Untitled");
+    const onDisk = JSON.parse(await readFile(filePath, "utf8"));
+    assert.equal(onDisk.sessions[0].title, "Untitled");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("nameless scanned summaries keep existing titles and use the file stem for new rows", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-stem-title-"));
@@ -972,7 +1042,29 @@ test("nameless scanned summaries keep existing titles and use the file stem for 
       name: undefined,
     })]);
     const fresh = records.find((record) => record.filePath?.includes("2026-08-08T10-47-19-239Z_abc"));
-    assert.equal(fresh?.title, "2026-08-08T10-47-19-239Z_abc");
+    // pi JSONL 文件名是时间戳，不能当侧栏标题（用户看到的是一排日期，不是会话名）。
+    assert.equal(fresh?.title, "Untitled");
+
+    // 扫描器若仍把 sessionName=文件名带进 summary.name，也不能盖掉用户已有标题。
+    const afterStemName = await catalog.mergeScanned("project-1", [summary({
+      filePath: "C:/sessions/known.jsonl",
+      id: "C:/sessions/known.jsonl",
+      name: "2026-08-08T10-47-19-239Z_abc",
+    })]);
+    assert.equal(
+      afterStemName.find((record) => record.filePath === "C:/sessions/known.jsonl")?.title,
+      "Saved title",
+    );
+
+    const withStemName = await catalog.mergeScanned("project-1", [summary({
+      filePath: "C:/sessions/2026-08-08T11-00-00-000Z_def.jsonl",
+      id: "C:/sessions/2026-08-08T11-00-00-000Z_def.jsonl",
+      name: "2026-08-08T11-00-00-000Z_def",
+    })]);
+    assert.equal(
+      withStemName.find((record) => record.filePath?.includes("2026-08-08T11-00-00-000Z_def"))?.title,
+      "Untitled",
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

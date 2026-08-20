@@ -76,6 +76,14 @@ test("timeline controller exposes surface loading for the bottom composer gate",
   assert.match(controllerSource, /isKnownEmptySessionRecord/);
   // 切会话已有缓存或空草稿时不得把 loadState 打成 loading（否则空会话闪骨架）。
   assert.match(controllerSource, /if \(cachedEntry \|\| knownEmpty\) return/);
+  // 预热写 filePath/dshSessionId 后仍粘住空会话，避免起始页 / 历史骨架抽搐。
+  assert.match(controllerSource, /stickyEmptyRef/);
+  const timelineSource = readFileSync(
+    "src/renderer/src/components/session/SessionMessageTimeline.tsx",
+    "utf8",
+  );
+  assert.match(timelineSource, /controller\.knownEmpty/);
+  assert.doesNotMatch(timelineSource, /isKnownEmptySessionRecord\(/);
 });
 
 test("timeline skeleton copy is history loading, not agent starting", () => {
@@ -150,6 +158,16 @@ test("isKnownEmptySessionRecord only treats drafts and file-less empty sessions 
       dshSessionId: "sess_1",
     }),
     false,
+  );
+  // 预热已写 host id，但草稿尚未开聊：仍是空会话，不能去拉历史骨架。
+  assert.equal(
+    isKnownEmptySessionRecord({
+      status: "draft",
+      messageCount: 0,
+      backend: "dsh",
+      dshSessionId: "sess_1",
+    }),
+    true,
   );
 });
 

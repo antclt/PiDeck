@@ -413,8 +413,8 @@ test("deriveSessionSurfaceRuntime hides loading for idle non-activating Session"
     controllerSource,
   );
 
-  // isLoading = true only when messageCount===0 AND (loading or activating)
-  assert.match(fnBody, /isLoading:\s*messageCount\s*===\s*0\s*&&/);
+  // isLoading = true only when not a known-empty draft AND messageCount===0 AND (loading...)
+  assert.match(fnBody, /isLoading:\s*!knownEmpty && messageCount\s*===\s*0\s*&&/);
   assert.match(fnBody, /messageLoadStatus\s*===\s*"loading"/);
   assert.match(fnBody, /activating/);
 

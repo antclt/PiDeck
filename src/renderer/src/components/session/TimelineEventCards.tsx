@@ -360,7 +360,7 @@ export const ThinkingBlock = memo(
 		{/* 整行可点，结构对齐 ToolCard trigger：图标 + 耗时 + chevron + 折叠预览。 */}
 			<button
 				type="button"
-				className="group relative flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-left text-control leading-5 transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+				className="group relative flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left text-control leading-5 transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
 				onClick={() => setExpanded((v) => !v)}
 				aria-expanded={expanded}
 				title={expanded ? t("thinking.collapse") : t("thinking.expand")}
@@ -373,9 +373,9 @@ export const ThinkingBlock = memo(
 						className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]"
 					/>
 				)}
-				<Brain size={15} className="thinking-row-icon shrink-0" aria-hidden="true" />
+				<Brain size={16} className="thinking-row-icon shrink-0" aria-hidden="true" />
 				{(hasEnded || props.isStreaming) && props.startedAt && (
-					<small className="shrink-0 font-mono text-micro tabular-nums text-text-tertiary">
+					<small className="shrink-0 font-mono text-caption tabular-nums text-text-secondary">
 						{hasEnded ? (
 							t("thinking.duration", { duration: durationText })
 						) : (
@@ -401,7 +401,7 @@ export const ThinkingBlock = memo(
 						text={displayedContent}
 						running={props.isStreaming}
 						showSweep={false}
-						className="min-w-0 flex-[1_1_auto] font-mono text-micro text-text-tertiary"
+						className="min-w-0 flex-[1_1_auto] font-mono text-caption text-text-secondary"
 					/>
 				)}
 			</button>

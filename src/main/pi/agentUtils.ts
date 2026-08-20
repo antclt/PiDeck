@@ -4,6 +4,9 @@
  */
 
 import type { ChatMessage, Project } from "../../shared/types";
+import { looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
+
+export { looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
 
 /** 去除 ANSI 转义码，用于清洗 thinking 中的终端颜色控制序列。 */
 export function stripAnsi(text: string): string {
@@ -204,7 +207,8 @@ export function inferTitleFromMessages(messages: ChatMessage[]): string | undefi
 
 /** 判断 Agent 标题是否为默认/占位标题（仅此时允许首轮回话自动改名）。
  *  必须覆盖 catalog 草稿名（session.newTitle：「新会话」/「New session」）和 DSH 占位名，
- *  不能只认 `${project} agent`——漏判则 refreshAutoTitle 直接 return，侧栏一直停在占位名。 */
+ *  不能只认 `${project} agent`——漏判则 refreshAutoTitle 直接 return，侧栏一直停在占位名。
+ *  pi 文件名时间戳 / catalog 清掉时间戳后的 Untitled 也算占位，否则历史会话加载后无法用首条消息补名。 */
 export function isDefaultAgentTitle(
 	title: string,
 	project: Project,
@@ -212,6 +216,9 @@ export function isDefaultAgentTitle(
 ): boolean {
 	const trimmed = title.replace(/\s+/g, " ").trim();
 	if (!trimmed) return true;
+	if (looksLikePiSessionFileStem(trimmed)) return true;
+	// catalog 把时间戳标题写成 Untitled；扫描器默认文案也是 Untitled。
+	if (/^untitled(?: session)?$/i.test(trimmed)) return true;
 	return (
 		trimmed === `${project.name} agent` ||
 		trimmed === `${project.name} DSH` ||

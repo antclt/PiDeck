@@ -129,7 +129,7 @@ test("thinking Brain logo uses thinking-row-icon instead of gray text utilities"
 		/function ThinkingBlock[\s\S]*?\n\t\},\n/,
 	)?.[0] ?? "";
 	assert.ok(block, "ThinkingBlock must exist");
-	assert.match(block, /<Brain size=\{15\} className="thinking-row-icon shrink-0"/);
+	assert.match(block, /<Brain size=\{16\} className="thinking-row-icon shrink-0"/);
 	assert.doesNotMatch(block, /<Brain[^>]*text-text-secondary/);
 });
 
@@ -142,4 +142,22 @@ test("thinking markdown is one size smaller than chat body", () => {
 		timelineCss,
 		/\[data-marker-kind="thinking"\] \.markdown-body[\s\S]*?font-size:\s*var\(--font-size-chat\)/,
 	);
+});
+
+test("interim answers share chat body size; process variant only adds gap from tool/thinking rows", () => {
+	assert.match(
+		timelineCss,
+		/\.execution-interim \{[\s\S]*?font-size:\s*var\(--font-size-chat\)/,
+	);
+	assert.doesNotMatch(
+		timelineCss,
+		/\.execution-interim\[data-variant="process"\]/,
+	);
+	const answer = readFileSync(
+		"src/renderer/src/components/session/AnswerOutput.tsx",
+		"utf8",
+	);
+	assert.match(answer, /execution-interim markdown-body my-3 text-chat/);
+	assert.match(answer, /execution-interim markdown-body text-chat text-text-primary/);
+	assert.doesNotMatch(answer, /mt-3 text-chat/);
 });

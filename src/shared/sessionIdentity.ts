@@ -9,6 +9,19 @@ export type SessionOriginInput = {
 	importedSourceId?: string;
 };
 
+/**
+ * pi 未 set_session_name 时，sessionName 默认是 JSONL 文件名。
+ * 文件名把 ISO 的 `:` / `.` 换成 `-`（如 `2026-08-08T10-47-19-239Z_abc`），
+ * 不能当侧栏标题，否则全是日期，且占位名被盖掉后无法用首条消息自动改名。
+ */
+export function looksLikePiSessionFileStem(title: string): boolean {
+	const trimmed = title.replace(/\s+/g, " ").trim();
+	// 秒后的毫秒在文件名里是 `-239`，不是 ISO 的 `.239`。
+	return /^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}(?:[.,-]\d+)?Z(?:_[A-Za-z0-9]+)?$/.test(
+		trimmed,
+	);
+}
+
 export function canonicalizeSessionPath(
 	filePath: string,
 	environment: SessionEnvironment,

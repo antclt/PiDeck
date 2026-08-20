@@ -139,7 +139,8 @@ export function isUserFacingSessionStart(sendStatus: string | undefined): boolea
   return sendStatus === "activating";
 }
 
-/** catalog 已确认无磁盘历史：空草稿、从未落文件的 pi 会话、尚无 host id 的新 DSH。 */
+/** catalog 已确认无磁盘历史：空草稿、从未落文件的 pi 会话、尚无 host id 的新 DSH。
+ * 预热会写 filePath / dshSessionId，但草稿在真正开聊前仍算空——见控制器 sticky。 */
 export function isKnownEmptySessionRecord(
   record: Pick<SessionRecord, "status" | "filePath" | "messageCount" | "backend" | "dshSessionId"> | undefined,
 ): boolean {
@@ -244,6 +245,8 @@ export type SessionTimelineController = {
    * SessionView 用它在历史会话加载期仍挂底部 composer，避免 1 面板 Group 吃到 2 值布局缓存。
    */
   isSurfaceLoading: boolean;
+  /** 本栏粘住的空会话：预热写 filePath/dshSessionId 后仍不闪历史骨架。 */
+  knownEmpty: boolean;
 };
 
 export function useSessionTimelineController(options: {
@@ -359,7 +362,20 @@ export function useSessionTimelineController(options: {
   const sessionRecord = useAtomValue(
     sessionRecordByIdAtomFamily(options.sessionId ?? ""),
   );
-  const knownEmpty = isKnownEmptySessionRecord(sessionRecord);
+  const knownEmptyFromRecord = isKnownEmptySessionRecord(sessionRecord);
+  // 预热/激活会把草稿抬成 active 并写上 filePath 或 dshSessionId。
+  // 若跟着把 knownEmpty 翻成 false，空会话会立刻去拉历史，起始页和
+  // 「正在加载历史」骨架来回抽，输入框失焦。本栏一旦见过空会话就粘住，
+  // 直到本栏出现消息（真正开聊）或切到别的 sessionId。
+  const stickyEmptyRef = useRef<string | undefined>(undefined);
+  if (!options.sessionId) {
+    stickyEmptyRef.current = undefined;
+  } else if (stickyEmptyRef.current !== options.sessionId) {
+    stickyEmptyRef.current = knownEmptyFromRecord ? options.sessionId : undefined;
+  } else if (messages.length > 0) {
+    stickyEmptyRef.current = undefined;
+  }
+  const knownEmpty = knownEmptyFromRecord || stickyEmptyRef.current === options.sessionId;
   // 与 SessionMessageTimeline 同一套 deriveSessionSurfaceRuntime：历史会话首帧
   // messages 仍为空时视为加载中，底部 composer 不能卸掉。空草稿除外——
   // 新建/切回空会话必须留在起始页，不能先挂底部栏再卸（输入框上跳）。
@@ -1113,5 +1129,6 @@ lastHistoryLoadAtRef.current = now;
     expandWindow,
     windowExpandableRef,
     isSurfaceLoading,
+    knownEmpty,
   };
 }

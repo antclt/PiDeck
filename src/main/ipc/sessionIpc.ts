@@ -1003,7 +1003,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				environment: settingsStore.get().wslEnabled ? "wsl" : "native",
 				backend: "dsh",
 			});
-			await sessionCatalog.attachRuntime({ sessionId: draft.id, dshSessionId });
+			// 归档恢复是找回已有对话：必须 active，否则侧栏当草稿、时间线不拉历史。
+			await sessionCatalog.attachRuntime({
+				sessionId: draft.id,
+				dshSessionId,
+				promoteToActive: true,
+			});
 			const window = getMainWindow();
 			if (window && !window.isDestroyed()) {
 				window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: project.id });

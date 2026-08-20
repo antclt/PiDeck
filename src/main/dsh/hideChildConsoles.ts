@@ -83,16 +83,17 @@ export function installHostHiddenConsole(
 			return true;
 		}
 		if (allocConsole() === 0) return false;
-		const handle = getConsoleWindow();
-		if (handle) showWindow(handle, 0); // SW_HIDE = 0
-		// conhost 窗口创建是异步的（独立 conhost.exe 进程渲染）：AllocConsole 返回时
-		// 窗口可能尚未创建，此刻 ShowWindow 无效，窗口随后出现会「一闪而过」。
-		// 定时重复隐藏覆盖创建窗口期（1s 内每 50ms 一次，过后窗口已稳定隐藏）。
-		if (handle) {
-			const hideTimer = setInterval(() => showWindow(handle, 0), 50);
-			setTimeout(() => clearInterval(hideTimer), 1000);
-			hideTimer.unref?.();
-		}
+		// conhost 窗口创建是异步的：AllocConsole 返回时 GetConsoleWindow 经常仍是 0，
+		// 只在已有句柄时 setInterval 会漏掉随后弹出的窗口（DSH 加载「一闪而过」的框）。
+		// 无论首帧有没有句柄都轮询隐藏，覆盖整段创建窗口期。
+		const hideConsole = () => {
+			const hwnd = getConsoleWindow();
+			if (hwnd) showWindow(hwnd, 0); // SW_HIDE = 0
+		};
+		hideConsole();
+		const hideTimer = setInterval(hideConsole, 16);
+		setTimeout(() => clearInterval(hideTimer), 1000);
+		hideTimer.unref?.();
 		hostHiddenConsoleActive = true;
 		return true;
 	} catch {

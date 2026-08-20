@@ -137,6 +137,9 @@ async function main(): Promise<void> {
 				name: "@deepseek-ai/dsh-session-projection-cache",
 				config: { writeEveryEvents: 200, writeIntervalMs: 5000 },
 			},
+			// 整段日志回合/步骤计数（sessionStats 投影）：dsh-web StatsLine 同源。
+			// 不挂这行，host 不会产出 sessionStats，输入框底下就没有「N 轮 · M 步」。
+			{ id: "session-stats", name: "@deepseek-ai/dsh-session-stats" },
 			{ id: "workspace", name: "@deepseek-ai/dsh-workspace" },
 			{ id: "api-gateway", name: "@deepseek-ai/dsh-host-apiproxy" },
 			{ id: "pideck-directory-picker", name: "./pideck-directory-picker.js" },

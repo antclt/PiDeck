@@ -107,6 +107,11 @@ test("UI: AnswerOutput live path; TurnRow does not subscribe streaming atom", ()
   assert.doesNotMatch(answer, /from "\.\.\/\.\.\/utils\/useSmoothStream"/);
   assert.match(answer, /mode: "live" \| "settled"/);
   assert.match(answer, /execution-interim markdown-body/);
+  // 中间回答分档：过程层弱于最终回答；live 当前正文仍走 answer 档
+  assert.match(answer, /AnswerOutputVariant = "process" \| "answer"/);
+  assert.match(answer, /data-variant=\{props\.variant \?\? "process"\}/);
+  assert.match(answer, /answerOutputClassName\("answer"\)/);
+  assert.match(answer, /data-variant="answer"/);
 
   const interim = readFileSync(
     "src/renderer/src/components/session/turn/InterimAnswer.tsx",

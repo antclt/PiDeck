@@ -36,6 +36,8 @@ test("TurnRow renders a single process summary toggle plus order-preserving flat
   assert.match(turnRowSource, /\/\/ final-answer/);
   // 思考/工具/中间回答共用一个折叠开关
   assert.match(turnRowSource, /hidden=\{!stepsVisible\}/);
+  // 折叠区内 settled 中间段一律 process（同正文尺寸 + my-3 间距）；live 在容器外走 answer
+  assert.match(turnRowSource, /variant="process"/);
   // 中间内容收进执行过程折叠容器（foldableItems），最终回答常驻容器外（finalItems）
   assert.match(turnRowSource, /foldableItems\.map/);
   assert.match(turnRowSource, /finalItems\.map/);

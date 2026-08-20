@@ -66,13 +66,17 @@
   min-width: 0;
 }
 
-/* 中间回答：执行过程条目样式（视觉归属折叠区）。
- * 过程行已无左侧圆点轨，中间回答不再为轨道留缩进；正文主色与最终回答同级可读。 */
+/* 中间回答：与最终回答同主尺寸/主色（它也是回答）。
+ * 与思考/工具的间距由 Tailwind my-3 承担；这里锁正文 token，避免 markdown-body 子选择器把行高拉回过程档。 */
 .execution-interim {
   min-width: 0;
   color: var(--color-text-primary);
   font-size: var(--font-size-chat);
   line-height: var(--line-height-chat);
+}
+.execution-interim.markdown-body,
+.execution-interim.markdown-body p {
+  line-height: inherit;
 }
 
 /* 会话生命周期状态：节点与内容使用同一条节奏，运行中只保留轻微呼吸感，

@@ -350,6 +350,34 @@ export function cacheHitPercentOf(usage: DshUsageTotals | undefined): number | u
 }
 
 /**
+ * 无 host sessionStats 投影时的 StatsLine 兜底（对齐 dsh-web deriveStats）。
+ * 投影插件未挂载、冷缓存还没有该单元、或 mux 帧尚未到达时，用已投影消息估回合/步骤：
+ * 每条 user = 一轮，每条 assistant = 一步。墙钟字段保持 0，UI 只渲染有数字的组。
+ * 还没有 assistant 时返回 undefined（与 dsh-web `steps > 0` 才出「N 轮」一致）。
+ */
+export function deriveSessionStatsFallback(
+	messages: ReadonlyArray<{ role?: string }>,
+): DshSessionStatsProjection | undefined {
+	let turns = 0;
+	let steps = 0;
+	for (const message of messages) {
+		if (message.role === "user") turns += 1;
+		else if (message.role === "assistant") steps += 1;
+	}
+	if (steps <= 0) return undefined;
+	return {
+		turns,
+		steps,
+		llmMs: 0,
+		toolMs: 0,
+		ttftMs: 0,
+		ttftSteps: 0,
+		decodeMs: 0,
+		decodeTokens: 0,
+	};
+}
+
+/**
  * 对话消息 token 估算（与 pi 的 contextMessageTokens 同规则：文本字符数 ÷ 4）。
  * 无 host contextPressure 投影（token-meter 未挂载/adapter 未上报 usage）时的
  * 上下文圆环兜底占用——配合 request/context 的 contextWindow，dsh 会话在首个

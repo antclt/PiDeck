@@ -77,6 +77,7 @@ function loadSessionScanner(homePath) {
 		]),
 	);
 	const wslPaths = loadTranspiledModule("src/main/wsl/WslPaths.ts");
+	const sessionIdentity = loadTranspiledModule("src/shared/sessionIdentity.ts");
 	const sandbox = {
 		AbortController,
 		AbortSignal,
@@ -99,6 +100,7 @@ function loadSessionScanner(homePath) {
 			if (id === "../wsl/WslPaths") return wslPaths;
 			// sessionNameLine 为无依赖纯函数模块，直接编译加载真实实现，保证清理口径一致
 			if (id === "./sessionNameLine") return loadSessionNameLineModule();
+			if (id === "../../shared/sessionIdentity") return sessionIdentity;
 			// sharedLogger 未注册时 getAppLogger 返回 null，SessionScanner 埋点静默跳过
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
 			return require(id);

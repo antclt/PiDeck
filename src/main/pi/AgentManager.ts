@@ -74,6 +74,7 @@ import {
 	cleanTitle,
 	inferTitleFromMessages,
 	isDefaultAgentTitle,
+	looksLikePiSessionFileStem,
 } from "./agentUtils";
 import {
   updateActiveToolCalls,
@@ -1331,9 +1332,13 @@ export class AgentManager {
 				project.path,
 				sessionEnvironment,
 			);
+			const piSessionName =
+				data?.sessionName && !looksLikePiSessionFileStem(data.sessionName)
+					? data.sessionName
+					: undefined;
 			tab.title =
 				input.title ||
-				data?.sessionName ||
+				piSessionName ||
 				(input.sessionPath
 					? this.translate("session.historyTitle", { project: project.name })
 					: `${project.name} agent`);
@@ -3054,6 +3059,9 @@ export class AgentManager {
 		const runtime = this.agents.get(agentId);
 		const next = title.replace(/\s+/g, " ").trim();
 		if (!runtime || !next || next === runtime.tab.title) return false;
+		// pi 未改名时 sessionName = JSONL 文件名（时间戳）。写进 tab/catalog 会：
+		// 1) 侧栏标题变成时间；2) 不再是占位名，refreshAutoTitle 再也不会用首条消息改名。
+		if (looksLikePiSessionFileStem(next)) return false;
 		runtime.tab.title = next;
 		if (emit) this.emitState();
 		this.onTitleChanged?.(agentId, next);

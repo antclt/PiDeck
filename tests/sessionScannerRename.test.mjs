@@ -77,6 +77,7 @@ function loadSessionScanner(homePath) {
 		]),
 	);
 	const wslPaths = loadTranspiledModule("src/main/wsl/WslPaths.ts");
+	const sessionIdentity = loadTranspiledModule("src/shared/sessionIdentity.ts");
 	const sandbox = {
 		AbortController,
 		AbortSignal,
@@ -99,6 +100,7 @@ function loadSessionScanner(homePath) {
 			if (id === "../wsl/WslPaths") return wslPaths;
 			// sessionNameLine 为无依赖纯函数模块，直接编译加载真实实现，保证清理口径一致
 			if (id === "./sessionNameLine") return loadSessionNameLineModule();
+			if (id === "../../shared/sessionIdentity") return sessionIdentity;
 			// sharedLogger 未注册时 getAppLogger 返回 null，SessionScanner 埋点静默跳过
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
 			return require(id);
@@ -238,6 +240,31 @@ test("rename sanitizes newlines in the name like pi appendSessionInfo", async ()
 		const lines = readLines(file);
 		assert.equal(lines.length, healthySession.length + 1);
 		assert.equal(piSessionName(lines), "line1 line2 line3");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("readSummary skips pi file-stem timestamps and uses the first user prompt", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-timestamp-title-"));
+	try {
+		const { SessionScanner } = loadSessionScanner(home);
+		const scanner = new SessionScanner();
+		const file = join(home, "2026-08-08T10-47-19-239Z_abc.jsonl");
+		writeSession(file, [
+			{
+				...healthySession[0],
+				sessionName: "2026-08-08T10-47-19-239Z_abc",
+			},
+			{
+				...healthySession[1],
+				message: { role: "user", content: "帮我看看这个报错" },
+			},
+			healthySession[2],
+		]);
+		// copy() 走 readSummary：时间戳不是标题，复制名应来自首条 user 文本。
+		const summary = await scanner.copy(file);
+		assert.equal(summary.name, "帮我看看这个报错 copy");
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}

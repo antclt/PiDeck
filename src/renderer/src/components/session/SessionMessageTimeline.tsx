@@ -34,7 +34,6 @@ import {
 import {
   canLoadSessionTimelineMore,
   deriveSessionSurfaceRuntime,
-  isKnownEmptySessionRecord,
   isLatestTimelineRunBusy,
   restoreTimelineAnchor,
   useSessionTimelineController,
@@ -191,7 +190,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     // 读取结果未到达 → 钉骨架屏；有条目（即使空）＝读取已返回，空会话起始页合法。
     // 不依赖 catalog messageCount（摘要缺失时兑底为 0，不可靠）。
     Boolean(surfaceCachedEntry),
-    isKnownEmptySessionRecord(session),
+    // 用 controller 的 sticky：预热回写 filePath/dshSessionId 后仍不闪历史骨架。
+    controller.knownEmpty,
   );
   const isConversationLoading = modernSurfaceState.isLoading;
   // 空态（起始页 / 旧 Editorial 空态）时 [role=log] 不套聊天列宽度约束：

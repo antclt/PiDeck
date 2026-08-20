@@ -24,6 +24,7 @@ import {
 	canonicalizeSessionPath,
 	getImportedSessionSourceId,
 	getSessionEnvironment,
+	looksLikePiSessionFileStem,
 } from "../../shared/sessionIdentity";
 
 export type SessionCatalogEntry = {
@@ -81,12 +82,19 @@ export type SessionFilePathResolver = (
 	environment: SessionEnvironment,
 ) => string;
 
-/** 扫描未读正文时没有 session_info；新条目用文件名 stem，避免侧栏全是 Untitled。 */
+/** 扫描未读正文时没有 session_info。pi JSONL 文件名是时间戳，不能当标题，否则侧栏全是日期。 */
 function scannedFileStemTitle(filePath: string): string {
 	const normalized = filePath.replace(/\\/g, "/");
 	const base = normalized.slice(normalized.lastIndexOf("/") + 1);
 	const stem = base.replace(/\.jsonl$/i, "").trim();
-	return stem || "Untitled";
+	if (!stem || looksLikePiSessionFileStem(stem)) return "Untitled";
+	return stem;
+}
+
+/** 侧栏/Tab 展示用：pi 文件名时间戳不是会话名。 */
+function catalogDisplayTitle(title: string | undefined): string | undefined {
+	if (!title) return undefined;
+	return looksLikePiSessionFileStem(title) ? undefined : title;
 }
 
 function cloneEntry(entry: SessionCatalogEntry): SessionCatalogEntry {
@@ -117,6 +125,9 @@ export function canAttachRuntimeMetadata(
 	tab: Partial<AgentTab>,
 ): boolean {
 	if (!entry || !tab.sessionPath) return false;
+	// DSH 的 sessionPath 是 host zstd 日志，不是 pi JSONL。走文件配对会把 zstd
+	// 写进 filePath，渲染层当成有历史去读，空会话输入时整页抽成「正在加载历史」。
+	if (entry.backend === "dsh" || tab.backend === "dsh") return false;
 	if (entry.status === "draft" && !entry.filePath) return true;
 	if (!entry.filePath) return false;
 	const environment = tab.sessionEnvironment ?? entry.environment;
@@ -209,6 +220,18 @@ export class SessionCatalog {
 				await this.writeSnapshot(this.entries);
 			} catch {
 				// 启动清理是 best-effort；内存已经不再暴露草稿，下一次启动仍会重试清理。
+			}
+		}
+
+		// 兼容旧数据：pi 默认 sessionName（JSONL 文件名时间戳）曾被 onTitleChanged 写进 catalog。
+		// 侧栏会显示一排日期，且 refreshAutoTitle 不再把首条消息当标题。加载时清成 Untitled。
+		const timestampTitles = this.entries.filter((entry) => looksLikePiSessionFileStem(entry.title));
+		if (timestampTitles.length > 0) {
+			for (const entry of timestampTitles) entry.title = "Untitled";
+			try {
+				await this.writeSnapshot(this.entries);
+			} catch {
+				// 修复是 best-effort；内存已生效，下一次启动仍会重试。
 			}
 		}
 
@@ -557,6 +580,8 @@ export class SessionCatalog {
 		filePath?: string;
 		piSessionId?: string;
 		dshSessionId?: string;
+		/** 真正开聊后再把 DSH 草稿抬成 active；预热只绑 host id，不抬。 */
+		promoteToActive?: boolean;
 	}): Promise<SessionCatalogEntry> {
 		this.assertLoaded();
 		return this.enqueueMutation((entries) => {
@@ -572,16 +597,25 @@ export class SessionCatalog {
 						)
 					: input.filePath;
 			const previousFilePath = entry.filePath;
-			if (filePath) entry.filePath = filePath;
+			// DSH 的 sessionPath 是 host zstd，不是 pi JSONL；写进 filePath 会让渲染层
+			// 把空会话当成有磁盘历史（起始页 / 骨架来回抽）。
+			if (filePath && entry.backend !== "dsh") entry.filePath = filePath;
 			if (input.piSessionId) entry.piSessionId = input.piSessionId;
 			if (input.dshSessionId) {
 				entry.dshSessionId = input.dshSessionId;
 				// 归档恢复/手动 attach 也是用户找回：清掉删除墓碑。
 				this.dismissedDshSessionIds.delete(input.dshSessionId);
 			}
-			// DSH 会话没有 pi 会话文件：无 filePath 分支，但 attach 到 host 会话后即视为
-			// active（会话持久化在 $DSH_HOME，重启不应被 draft 清理逻辑清掉）。
-			if (input.dshSessionId && !entry.filePath && entry.status === "draft") {
+			// DSH 预热/激活也会 attach host id，但此时还没有用户消息。
+			// 不能把草稿抬成 active：渲染层会把「active + dshSessionId」当成有历史，
+			// 输入一半整页换成「正在加载历史」骨架。导入路径 createDraft({dshSessionId})
+			// 已经是 active；真正开聊后由 prompt dispatch 再 promoteToActive。
+			if (
+				input.promoteToActive &&
+				input.dshSessionId &&
+				!entry.filePath &&
+				entry.status === "draft"
+			) {
 				entry.status = "active";
 			}
 			if (entry.filePath) {
@@ -700,7 +734,8 @@ export class SessionCatalog {
 						id: randomUUID(),
 						projectId,
 						originKey,
-						title: summary.name || scannedFileStemTitle(summary.filePath),
+						// listPathSummary 没有 name；readSummary 若仍带回时间戳文件名，也不能当标题。
+						title: catalogDisplayTitle(summary.name) || scannedFileStemTitle(summary.filePath),
 						source: summary.source ?? "pi",
 						environment: getSessionEnvironment(summary),
 						filePath: summary.filePath,
@@ -716,7 +751,7 @@ export class SessionCatalog {
 					byOrigin.set(originKey, entry);
 					changed = true;
 				} else {
-					const nextTitle = summary.name || entry.title;
+					const nextTitle = catalogDisplayTitle(summary.name) || catalogDisplayTitle(entry.title) || entry.title;
 					if (
 						entry.projectId !== projectId ||
 						entry.filePath !== summary.filePath ||
@@ -786,7 +821,7 @@ export class SessionCatalog {
 		return {
 			id: entry.id,
 			projectId: entry.projectId,
-			title: summary?.name || entry.title,
+			title: catalogDisplayTitle(summary?.name) || catalogDisplayTitle(entry.title) || "Untitled",
 			noSession: entry.noSession,
 			source: summary?.source ?? entry.source,
 			environment: summary ? getSessionEnvironment(summary) : entry.environment,

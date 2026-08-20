@@ -30,6 +30,7 @@ import {
 	collectDshProcessEvent,
 	collectDshProcessEvents,
 	deriveDshSessionStats,
+	deriveSessionStatsFallback,
 	estimateContextTokens,
 	parseContextBreakdownProjection,
 	parseContextPressureProjection,
@@ -324,6 +325,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.runtimes.set(agentId, runtime);
 		this.startMux(runtime);
 		this.emit(ipcChannels.agentsState, this.list());
+		// attach 历史会话：消息/投影已就位，立刻推 runtime，输入框底下就能出「N 轮」。
+		if (attached) this.emitRuntimeState(agentId);
 		return tab;
 	}
 
@@ -505,6 +508,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.runtimes.set(agentId, runtime);
 		this.startMux(runtime);
 		this.emit(ipcChannels.agentsState, this.list());
+		// 重启后历史已投影：立刻推 runtime，输入框底下就能出「N 轮」。
+		this.emitRuntimeState(agentId);
 		return tab;
 	}
 
@@ -770,6 +775,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		// 用量：优先 host tokenUsage 投影（整段日志累计，dsh-web StatsLine 同源），
 		// 缺失（token-meter 未挂载/未推送）时回退最近一步 usage（G16）。
 		const usage = runtime.usageTotals ?? runtime.usage;
+		// 会话统计：优先 host sessionStats；投影未到时用已投影消息估回合/步骤。
+		const sessionStatsRaw = runtime.sessionStats ?? deriveSessionStatsFallback(runtime.messages);
 		return {
 			isStreaming: runtime.isStreaming,
 			isCompacting: runtime.isCompacting === true,
@@ -802,10 +809,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				: undefined,
 			// 缓存命中率：cacheRead ÷ (input + cacheRead + cacheWrite)，与 pi/dsh-web 同公式
 			cacheHitPercent: cacheHitPercentOf(usage),
-			// 会话统计（host sessionStats 投影；回合/步骤/墙钟汇总 → 平均首字/生成速度）
-			dshSessionStats: runtime.sessionStats
-				? deriveDshSessionStats(runtime.sessionStats)
-				: undefined,
+			dshSessionStats: sessionStatsRaw ? deriveDshSessionStats(sessionStatsRaw) : undefined,
 		};
 	}
 
@@ -1794,10 +1798,10 @@ export class DshAgentManager implements SessionAgentGateway {
 				done: true,
 			});
 			this.emitMessages(runtime);
-			if (runtime.isCompacting) {
-				runtime.isCompacting = false;
-				this.emitRuntimeState(runtime.tab.id);
-			}
+			// 回合结束必须推 runtime：sessionStats 投影帧可能稍后才到，
+			// 消息兜底的轮数/步数要在 turn/end 当帧更新输入框底下的 StatsLine。
+			if (runtime.isCompacting) runtime.isCompacting = false;
+			this.emitRuntimeState(runtime.tab.id);
 		}
 		if (p.messagesChanged && !p.turnEnded) {
 			this.emitMessages(runtime);

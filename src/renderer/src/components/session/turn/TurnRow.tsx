@@ -322,6 +322,9 @@ export const TurnRow = memo(
 											hidden={!stepsVisible}
 											isStreaming={false}
 											settle={settleId === item.id}
+											// 折叠区内一律 process：正文已与最终回答同尺寸，process 只负责 my-3 间距。
+											// 无最终回答的末段也要这段间距，否则会贴着上方工具行。
+											variant="process"
 											onOpenExternal={props.onOpenExternal}
 											onOpenFile={props.onOpenFile}
 										/>

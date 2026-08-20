@@ -169,6 +169,7 @@ import {
 import {
 	buildSessionOriginKey,
 	canonicalizeSessionPath,
+	looksLikePiSessionFileStem,
 	toAbsoluteSessionPath,
 } from "../shared/sessionIdentity";
 import type {
@@ -506,13 +507,12 @@ function emitSessionRuntimeEvent(
 				canAttachRuntimeMetadata(entry, tab) &&
 				(entry?.filePath !== tab.sessionPath || entry.piSessionId !== tab.sessionId)
 			) {
-				// DSH 的 agents:state 也带 host 会话文件路径：文件配对分支同步回写
-				// dshSessionId（标题同步 findByDshSessionId / 重开 attach 依赖）。
+				// 仅 pi JSONL 走文件配对。DSH 的 sessionPath 是 zstd，canAttach 已拒绝；
+				// host id 由 Coordinator activate/dispatch 回写 dshSessionId。
 				void sessionCatalog.attachRuntime({
 					sessionId: runtimeBinding.sessionId,
 					filePath: tab.sessionPath,
 					piSessionId: tab.sessionId,
-					dshSessionId: tab.backend === "dsh" ? tab.sessionId : undefined,
 				}).catch(() => undefined);
 			}
 		}
@@ -2637,6 +2637,7 @@ function registerIpc() {
 					await sessionCatalog.attachRuntime({
 						sessionId: target.sessionId,
 						dshSessionId: tab.sessionId,
+						promoteToActive: true,
 					});
 				}
 				return { ...result };
@@ -2649,6 +2650,7 @@ function registerIpc() {
 					await sessionCatalog.attachRuntime({
 						sessionId: target.sessionId,
 						dshSessionId: tab.sessionId,
+						promoteToActive: true,
 					});
 				}
 				return { ...result };
@@ -3288,7 +3290,9 @@ app.whenReady().then(async () => {
 		const sessionId = sessionRuntimeCoordinator?.getSessionId(agentId);
 		if (!sessionId) return;
 		const entry = sessionCatalog.get(sessionId);
+		// pi 默认 sessionName 是文件名时间戳：不能盖掉「新会话」或用户已有标题。
 		if (!entry || entry.title === title) return;
+		if (looksLikePiSessionFileStem(title)) return;
 		void sessionCatalog.update(sessionId, { title }).then(() => {
 			if (mainWindow && !mainWindow.isDestroyed()) {
 				mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, {

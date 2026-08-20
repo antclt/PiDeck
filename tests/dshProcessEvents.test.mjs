@@ -37,6 +37,7 @@ const {
 	parseTokenUsageProjection,
 	parseSessionStatsProjection,
 	deriveDshSessionStats,
+	deriveSessionStatsFallback,
 	cacheHitPercentOf,
 	DSH_PROCESS_EVENTS_LIMIT,
 } = loadModule();
@@ -290,6 +291,28 @@ test("deriveDshSessionStats computes averages and keeps sample-less fields undef
 	const empty = deriveDshSessionStats({ turns: 0, steps: 0, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0 });
 	assert.equal(empty.ttftAvgMs, undefined);
 	assert.equal(empty.tokensPerSecond, undefined);
+});
+
+test("deriveSessionStatsFallback counts user turns and assistant steps", () => {
+	assert.equal(deriveSessionStatsFallback([]), undefined);
+	assert.equal(deriveSessionStatsFallback([{ role: "user" }]), undefined);
+	const one = deriveSessionStatsFallback([
+		{ role: "user" },
+		{ role: "assistant" },
+		{ role: "tool" },
+	]);
+	assert.equal(one.turns, 1);
+	assert.equal(one.steps, 1);
+	assert.equal(one.llmMs, 0);
+	const two = deriveSessionStatsFallback([
+		{ role: "user" },
+		{ role: "assistant" },
+		{ role: "user" },
+		{ role: "assistant" },
+		{ role: "assistant" },
+	]);
+	assert.equal(two.turns, 2);
+	assert.equal(two.steps, 3);
 });
 
 test("cacheHitPercentOf uses the dsh-web/pi shared formula", () => {

@@ -54,7 +54,7 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 		<section className="w-full min-w-0 overflow-hidden rounded-md border-0">
 			<button
 				type="button"
-				className="relative flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 text-left text-control leading-5 text-text-secondary transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 [&_svg]:shrink-0"
+				className="relative flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-1 py-1 text-left text-control leading-5 text-text-secondary transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 [&_svg]:shrink-0"
 				onClick={() => setExpanded((value) => !value)}
 				aria-expanded={expanded}
 				title={expanded ? t("thinking.collapse") : t("thinking.expand")}
@@ -65,8 +65,8 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 						className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]"
 					/>
 				)}
-				<Brain size={15} className="thinking-row-icon" />
-				<span className="shrink-0 font-mono text-micro tabular-nums text-text-tertiary">
+				<Brain size={16} className="thinking-row-icon" />
+				<span className="shrink-0 font-mono text-caption tabular-nums text-text-secondary">
 					{t("thinking.title")}
 				</span>
 				{expanded ? (
@@ -79,7 +79,7 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 						text={props.text}
 						running={props.running}
 						showSweep={false}
-						className="min-w-0 flex-[1_1_auto] font-mono text-micro text-text-tertiary"
+						className="min-w-0 flex-[1_1_auto] font-mono text-caption text-text-secondary"
 					/>
 				)}
 			</button>
@@ -144,7 +144,7 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 			data-status={error ? "error" : running ? "running" : "done"}
 			data-tool-name={toolName}
 		>
-			<div className="relative flex min-h-6 items-center rounded-md px-1 py-0.5">
+			<div className="relative flex min-h-7 items-center rounded-md px-1 py-1">
 				<span className="tool-card-trigger flex min-w-0 items-center gap-2 text-control leading-5 text-text-secondary">
 					<span className="tool-card-icon">
 						<Wrench size={14} aria-hidden="true" />

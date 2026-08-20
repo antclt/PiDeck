@@ -44,6 +44,7 @@ export interface SessionCatalogGateway {
 		filePath?: string;
 		piSessionId?: string;
 		dshSessionId?: string;
+		promoteToActive?: boolean;
 	}): Promise<unknown>;
 }
 
@@ -1032,7 +1033,11 @@ export class SessionRuntimeCoordinator {
 				// Prompt acceptance is the latency-sensitive boundary. Catalog persistence is
 				// recovery metadata and must not keep the composer in a sending state; failures
 				// are intentionally isolated from the already accepted prompt.
-				void this.catalog.attachRuntime(dispatchPatch).catch(() => undefined);
+				// DSH 预热只绑 host id、保持 draft；真正发出去才 promoteToActive。
+				void this.catalog.attachRuntime({
+					...dispatchPatch,
+					promoteToActive: true,
+				}).catch(() => undefined);
 			}
 			if (!this.isCurrentDispatchLease(lease)) {
 				return this.unknownDelivery(input, "Session runtime binding changed after prompt dispatch");
@@ -1112,9 +1117,8 @@ export class SessionRuntimeCoordinator {
 			await this.applyPreferences(entry, tab.id);
 		} catch (error) {
 			if (created) {
-				// 激活失败兜底（非偏好类错误）：DSH 的 host 会话已在 $DSH_HOME 创建，
-				// 先落 catalog 映射（dshSessionId + active）再停运行时——否则 host 会话
-				// 变孤儿，用户每次重试都新建一个（孤儿堆积根因，2026-08 兼容期修复）。
+				// 激活失败兜底：DSH 的 host 会话已在 $DSH_HOME 创建，先落 dshSessionId
+				// 再停运行时，避免每次重试新建孤儿。保持 draft——还没开聊，不能抬成 active。
 				if (tab.backend === "dsh" && tab.sessionId) {
 					await this.catalog
 						.attachRuntime({ sessionId, dshSessionId: tab.sessionId })
@@ -1151,7 +1155,7 @@ export class SessionRuntimeCoordinator {
 		sessionId: string,
 		tab: Pick<AgentTab, "sessionPath" | "sessionId" | "backend">,
 		entry: Pick<SessionCatalogEntry, "noSession" | "backend">,
-	): { sessionId: string; filePath?: string; piSessionId?: string; dshSessionId?: string } | null {
+	): { sessionId: string; filePath?: string; piSessionId?: string; dshSessionId?: string; promoteToActive?: boolean } | null {
 		if (entry.backend === "dsh") {
 			return tab.sessionId && !entry.noSession ? { sessionId, dshSessionId: tab.sessionId } : null;
 		}

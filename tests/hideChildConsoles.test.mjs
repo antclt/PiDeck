@@ -80,6 +80,33 @@ test("installHostHiddenConsole：已有控制台时不再分配（视为成功�
 	assert.equal(calls.showWindow.length, 0);
 });
 
+test("installHostHiddenConsole：AllocConsole 后句柄尚未就绪仍轮询隐藏", async () => {
+	let hwnd = 0;
+	const showWindow = [];
+	const koffi = {
+		load() {
+			return {
+				func(signature) {
+					if (signature.includes("GetConsoleWindow")) return () => hwnd;
+					if (signature.includes("AllocConsole")) return () => 1;
+					if (signature.includes("ShowWindow")) {
+						return (hWnd, nCmdShow) => {
+							showWindow.push([hWnd, nCmdShow]);
+							return 1;
+						};
+					}
+					throw new Error(`unexpected func signature: ${signature}`);
+				},
+			};
+		},
+	};
+	assert.equal(installHostHiddenConsole("win32", koffi), true);
+	assert.equal(showWindow.length, 0, "首帧句柄为 0 时不能放弃隐藏");
+	hwnd = 0xabc;
+	await new Promise((resolve) => setTimeout(resolve, 40));
+	assert.deepEqual(showWindow[0], [0xabc, 0]);
+});
+
 test("installHostHiddenConsole：AllocConsole 失败返回 false（触发 windowsHide 兜底）", () => {
 	const { koffi, calls } = makeFfi({ getResults: [0], allocResult: 0 });
 	assert.equal(installHostHiddenConsole("win32", koffi), false);
