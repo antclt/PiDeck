@@ -48,6 +48,7 @@ export interface DrawerFilesPort {
   onCollapseAllDirectories: () => void;
   setFileMenu: any;
   refreshFiles: any;
+  showToast?: (message: string, duration?: number) => void;
   projects: any[];
   refreshProjectSessions: any;
   runOpenSidebarSession: any;
@@ -159,7 +160,13 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
             }}
             onOpenFolder={() => {
               const p = files.projects.find((p: any) => p.id === git.activeProjectId);
-              if (p) void files.api.files.open(p.path);
+              if (p) {
+                void files.api.files.open(p.path).catch((error: unknown) => {
+                  files.showToast?.(t("app.openFileFailed", {
+                    error: error instanceof Error ? error.message : String(error),
+                  }), 4000);
+                });
+              }
             }}
             projectRoot={files.projectRoot}
             onDropFiles={files.onDropFiles}

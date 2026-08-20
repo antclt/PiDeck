@@ -61,3 +61,30 @@ export async function hydrateExpandedFileTree(
 	}
 	return next;
 }
+
+/** 切项目或新请求发出后，旧 files:list 不得再写入当前抽屉（#159）。 */
+export function shouldApplyFileTreeResult(
+	requestedProjectId: string,
+	currentProjectId: string | undefined,
+	requestGeneration: number,
+	currentGeneration: number,
+): boolean {
+	return requestedProjectId === currentProjectId && requestGeneration === currentGeneration;
+}
+
+/**
+ * 拉浅层根再补齐已展开目录；中途项目切走或请求被取代时返回 null，
+ * 避免慢扫描结果盖住当前项目的文件树。
+ */
+export async function loadProjectFileTree(
+	listRoot: () => Promise<FileTreeNode[]>,
+	expandedDirs: Iterable<string>,
+	isCurrent: () => boolean,
+	listDirectory: (directory: string) => Promise<FileTreeNode[]> = listRoot,
+): Promise<FileTreeNode[] | null> {
+	const tree = await listRoot();
+	if (!isCurrent()) return null;
+	const next = await hydrateExpandedFileTree(listDirectory, tree, expandedDirs);
+	if (!isCurrent()) return null;
+	return next;
+}

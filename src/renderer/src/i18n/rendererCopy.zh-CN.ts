@@ -257,6 +257,8 @@ export const zhCN = {
   "app.exportedPath": "已导出：{path}",
   "app.feedbackCopied": "反馈内容已复制",
   "app.filesRefreshed": "文件列表已刷新",
+  "app.filesRefreshFailed": "刷新文件列表失败：{error}",
+  "app.filesDirectoryTooLarge": "该目录有 {count} 个条目，超过 {max} 上限，已停止加载以免卡死界面",
   "app.openEditorFailed": "打开编辑器失败：{error}",
   "app.openFileFailed": "打开文件失败：{error}",
   "app.noExternalEditors": "未检测到外部编辑器",

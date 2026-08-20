@@ -256,6 +256,8 @@ export const enUS: Record<TranslationKey, string> = {
   "app.exportedPath": "Exported: {path}",
   "app.feedbackCopied": "Feedback copied",
   "app.filesRefreshed": "File list refreshed",
+  "app.filesRefreshFailed": "Failed to refresh file list: {error}",
+  "app.filesDirectoryTooLarge": "This folder has {count} items, over the {max} limit, so it was not loaded",
   "app.openEditorFailed": "Failed to open editor: {error}",
   "app.noExternalEditors": "No external editors detected",
   "app.openFileFailed": "Failed to open file: {error}",

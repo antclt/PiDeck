@@ -85,6 +85,22 @@ test("shallow listing does not recurse and marks expandable directories", async 
   }
 });
 
+test("listTree rejects a directory with too many direct children", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pideck-tree-huge-"));
+  try {
+    for (let index = 0; index < 2001; index += 1) {
+      writeFileSync(join(root, `f-${index}.txt`), "x");
+    }
+    const service = new FileSystemService();
+    await assert.rejects(
+      () => service.listTree(root, 0),
+      /FILE_TREE_DIRECTORY_TOO_LARGE/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("listTree rejects a directory outside the project root", async () => {
   const root = mkdtempSync(join(tmpdir(), "pideck-tree-escape-"));
   try {

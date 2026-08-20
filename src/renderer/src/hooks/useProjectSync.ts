@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { Project, FileTreeNode, GitBranchInfo, WorktreeEntry, SessionSummary, SessionRecord } from "../../../shared/types";
 import type { SessionLoadState } from "../atoms/session-atoms";
 import { sessionRecordToSummary } from "../atoms/session-selectors";
-import { hydrateExpandedFileTree } from "../utils/fileTreeLazy";
+import { loadProjectFileTree } from "../utils/fileTreeLazy";
 
 const SESSION_REFRESH_TIMEOUT_MS = 20_000;
 const SIDEBAR_PROJECT_CHILD_PAGE_SIZE = 5;
@@ -92,6 +92,17 @@ export function useProjectSync(input: UseProjectSyncInput) {
   const sessionRefreshRunningRef = useRef<Set<string>>(new Set());
   const sessionRefreshPendingRef = useRef<Set<string>>(new Set());
   const sessionRefreshCompletionByProjectRef = useRef<Record<string, ProjectSessionRefreshCompletion | undefined>>({});
+  // #159：文件树刷新按代次丢弃，避免旧项目慢扫描覆盖当前抽屉。
+  const fileTreeGenerationRef = useRef(0);
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
+
+  /** 发起新的根树请求；旧代次的 listing 一律丢弃。 */
+  const beginFileTreeRequest = useCallback(() => ++fileTreeGenerationRef.current, []);
+
+  const isFileTreeRequestCurrent = useCallback((generation: number, projectId: string) => {
+    return fileTreeGenerationRef.current === generation && activeProjectIdRef.current === projectId;
+  }, []);
 
   async function refreshProjects() {
     const next = await api.projects.list();
@@ -283,16 +294,30 @@ export function useProjectSync(input: UseProjectSyncInput) {
     expandedDirs: Iterable<string> = [],
   ) {
     if (!projectId) return;
-    // 抽屉刷新只拉浅层根，再按当前展开目录补齐，避免整棵 12 层 IPC。
-    const tree = await api.files.list(projectId, { maxDepth: 0 });
-    const next = await hydrateExpandedFileTree(
-      (directory) => api.files.list(projectId, { maxDepth: 0, directory }),
-      tree,
-      expandedDirs,
-    );
-    setFiles(next);
-    if (!silent) showToast(t("app.filesRefreshed", {}), 1800);
+    const generation = beginFileTreeRequest();
+    try {
+      // 抽屉刷新只拉浅层根，再按当前展开目录补齐，避免整棵 12 层 IPC。
+      const next = await loadProjectFileTree(
+        () => api.files.list(projectId, { maxDepth: 0 }),
+        expandedDirs,
+        () => isFileTreeRequestCurrent(generation, projectId),
+        (directory) => api.files.list(projectId, { maxDepth: 0, directory }),
+      );
+      if (!next) return;
+      setFiles(next);
+      if (!silent) showToast(t("app.filesRefreshed", {}), 1800);
+    } catch (error) {
+      if (!isFileTreeRequestCurrent(generation, projectId)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      const tooLarge = message.match(/FILE_TREE_DIRECTORY_TOO_LARGE:(\d+):(\d+)/);
+      showToast(
+        tooLarge
+          ? t("app.filesDirectoryTooLarge", { count: tooLarge[1], max: tooLarge[2] })
+          : t("app.filesRefreshFailed", { error: message }),
+        4000,
+      );
+    }
   }
 
-  return { worktreesByProject, branchByProject, files, setFiles, gitInfo, setGitInfo, sessionLoadingByProject, setSessionLoadingByProject, visibleProjectChildCountByProject, setVisibleProjectChildCountByProject, refreshProjects, refreshWorktrees, refreshSessions, refreshProjectSessions, refreshFiles, refreshProjectTree, syncDshForeignSessionsIfEnabled };
+  return { worktreesByProject, branchByProject, files, setFiles, gitInfo, setGitInfo, sessionLoadingByProject, setSessionLoadingByProject, visibleProjectChildCountByProject, setVisibleProjectChildCountByProject, refreshProjects, refreshWorktrees, refreshSessions, refreshProjectSessions, refreshFiles, refreshProjectTree, syncDshForeignSessionsIfEnabled, beginFileTreeRequest, isFileTreeRequestCurrent };
 }

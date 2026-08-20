@@ -45,6 +45,7 @@ interface UseDrawerPortsInput {
   onCollapseAllDirectories: () => void;
   setFileMenu: any;
   refreshFiles: any;
+  showToast?: (message: string, duration?: number) => void;
   projects: any[];
   refreshProjectSessions: any;
   runOpenSidebarSession: any;
@@ -111,6 +112,7 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
       onCollapseAllDirectories: input.onCollapseAllDirectories,
       setFileMenu: input.setFileMenu,
       refreshFiles: input.refreshFiles,
+      showToast: input.showToast,
       projects: input.projects,
       refreshProjectSessions: input.refreshProjectSessions,
       runOpenSidebarSession: input.runOpenSidebarSession,
@@ -144,7 +146,7 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
     input.sessionsProject, input.sessionsProjectId,
     input.files, input.sessions, input.sessionSourceFilter, input.sessionHistoryLoading,
     input.expandedDirs, input.onToggleDirectory, input.onCollapseAllDirectories,
-    input.setFileMenu, input.refreshFiles, input.projects, input.refreshProjectSessions,
+    input.setFileMenu, input.refreshFiles, input.showToast, input.projects, input.refreshProjectSessions,
     input.runOpenSidebarSession, input.isSameSessionPath,
     input.runCopySession, input.runExportHistorySession, input.runDeleteHistorySession,
     input.viewFilePath, input.openFilePath, input.openEditorTab, input.api, input.t,

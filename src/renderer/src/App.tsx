@@ -116,7 +116,7 @@ import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
 import { splitLayoutSessionIds } from "./utils/sessionSplitEdge";
-import { findLoadedDirectory, hydrateExpandedFileTree, mergeFileTreeChildren } from "./utils/fileTreeLazy";
+import { findLoadedDirectory, loadProjectFileTree, mergeFileTreeChildren } from "./utils/fileTreeLazy";
 import { SessionTabsBar } from "./components/session/SessionTabsBar";
 import { SessionPaneServicesProvider } from "./components/session/SessionPaneServices";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
@@ -392,6 +392,8 @@ export function App() {
     refreshFiles,
     refreshProjectTree,
     syncDshForeignSessionsIfEnabled,
+    beginFileTreeRequest,
+    isFileTreeRequestCurrent,
   } = useProjectSync({
     projects,
     activeProjectId,
@@ -1726,28 +1728,40 @@ export function App() {
 
   useEffect(() => {
     if (!activeProjectId) {
+      beginFileTreeRequest();
       setFiles([]);
       setGitInfo({ current: null, branches: [] });
       return;
     }
 
     // 只跟项目：切 tab / agent 数量变化不得清空展开目录，也不得整棵重扫文件树。
-    // 抽屉默认浅层 listing（maxDepth=0），已展开目录再按路径补齐。
-    const dirs = loadExpandedDirs(activeProjectId);
+    // 先立刻清空旧树，并抬高代次，避免大仓库扫描期间右侧仍显示上一个项目（#159）。
+    const projectId = activeProjectId;
+    const generation = beginFileTreeRequest();
+    setFiles([]);
+    const dirs = loadExpandedDirs(projectId);
     setExpandedDirs(dirs);
     let cancelled = false;
     void (async () => {
       try {
-        const tree = await api.files.list(activeProjectId, { maxDepth: 0 });
-        if (cancelled) return;
-        const hydrated = await hydrateExpandedFileTree(
-          (directory) => api.files.list(activeProjectId, { maxDepth: 0, directory }),
-          tree,
+        const hydrated = await loadProjectFileTree(
+          () => api.files.list(projectId, { maxDepth: 0 }),
           dirs,
+          () => !cancelled && isFileTreeRequestCurrent(generation, projectId),
+          (directory) => api.files.list(projectId, { maxDepth: 0, directory }),
         );
-        if (!cancelled) setFiles(hydrated);
+        if (!cancelled && hydrated) setFiles(hydrated);
       } catch (error) {
-        if (!cancelled) console.error("[Files] refresh failed", error);
+        if (cancelled) return;
+        console.error("[Files] refresh failed", error);
+        const message = error instanceof Error ? error.message : String(error);
+        const tooLarge = message.match(/FILE_TREE_DIRECTORY_TOO_LARGE:(\d+):(\d+)/);
+        showToast(
+          tooLarge
+            ? t("app.filesDirectoryTooLarge", { count: tooLarge[1], max: tooLarge[2] })
+            : t("app.filesRefreshFailed", { error: message }),
+          4000,
+        );
       }
     })();
     void api.git
@@ -1761,7 +1775,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId, loadExpandedDirs]);
+  }, [activeProjectId, beginFileTreeRequest, isFileTreeRequestCurrent, loadExpandedDirs, showToast]);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -2483,6 +2497,7 @@ export function App() {
       void api.files
         .list(projectId, { maxDepth: 0, directory: path })
         .then((children) => {
+          if (activeProjectIdRef.current !== projectId) return;
           setFiles((tree) => mergeFileTreeChildren(tree, path, children));
         })
         .catch((error) => console.error("[Files] expand failed", error));
@@ -2677,7 +2692,9 @@ export function App() {
         await navigator.clipboard.writeText(path);
         showToast(t("common.copied"));
       },
-      openFile: (session) => api.files.open(session.filePath),
+      openFile: (session) => api.files.open(session.filePath).catch((error) => {
+        showToast(t("app.openFileFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
+      }),
       delete: async (projectId, session) => {
         requestDeleteSidebarSession(projectId, session);
       },
@@ -2698,7 +2715,11 @@ export function App() {
         await navigator.clipboard.writeText(agent.sessionPath);
         showToast(t("common.copied"));
       },
-      openSessionFile: (agent) => agent.sessionPath ? api.files.open(agent.sessionPath) : Promise.resolve(),
+      openSessionFile: (agent) => agent.sessionPath
+        ? api.files.open(agent.sessionPath).catch((error) => {
+          showToast(t("app.openFileFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
+        })
+        : Promise.resolve(),
       close: requestCloseAgent,
     },
     worktrees: {
@@ -3157,6 +3178,7 @@ export function App() {
       }
     },
     refreshFiles: refreshVisibleFiles,
+    showToast,
     projects,
     refreshProjectSessions,
     runOpenSidebarSession: async (projectId: string, session: SessionSummary) => {
@@ -3360,11 +3382,15 @@ export function App() {
         }}
         onClose={() => setFileMenu(null)}
         onOpen={() => {
-          void api.files.open(fileMenu.node.path);
+          void api.files.open(fileMenu.node.path).catch((error) => {
+            showToast(t("app.openFileFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
+          });
           setFileMenu(null);
         }}
         onReveal={() => {
-          void api.files.showInFolder(fileMenu.node.path);
+          void api.files.showInFolder(fileMenu.node.path).catch((error) => {
+            showToast(t("app.openFileFailed", { error: error instanceof Error ? error.message : String(error) }), 4000);
+          });
           setFileMenu(null);
         }}
         onAttach={() => {

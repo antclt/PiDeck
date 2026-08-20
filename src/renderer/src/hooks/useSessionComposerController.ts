@@ -1211,7 +1211,7 @@ export function useSessionComposerController(
       // 引用可能带引号（@"path with space"），统一解包出真实路径
       const path = unwrapFileChipPath(chip.raw);
       if (options.onOpenFile) options.onOpenFile(path);
-      else void desktopApi.files.open(path);
+      else void desktopApi.files.open(path).catch(() => undefined);
       return;
     }
     if (chip.kind === "session") {

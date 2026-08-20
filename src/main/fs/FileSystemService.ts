@@ -8,6 +8,8 @@ const ignoredNames = new Set([".git", "node_modules", "dist", "build", ".next", 
 // composer @ 引用仍需要一棵较深的树；抽屉默认走浅层 listing，不再一次递归 12 层。
 export const DEFAULT_FILE_TREE_MAX_DEPTH = 8;
 export const FILE_TREE_ABSOLUTE_MAX_DEPTH = 12;
+/** 单层直接子项上限：超大目录（数万文件）一次 IPC 会拖垮渲染进程（#159）。 */
+export const FILE_TREE_MAX_DIRECTORY_ENTRIES = 2000;
 
 /** 路径必须落在项目根内（resolve 后比较，防 ../ 逃逸）。 */
 export function isPathInsideProject(root: string, target: string): boolean {
@@ -37,6 +39,10 @@ export class FileSystemService {
 
   private async readDirectory(root: string, current: string, depth: number, maxDepth: number): Promise<FileTreeNode[]> {
     const entries = await readdir(current, { withFileTypes: true });
+    // 单层过大时拒绝构造整层节点：否则 IPC + React 树会把渲染进程打崩。
+    if (entries.length > FILE_TREE_MAX_DIRECTORY_ENTRIES) {
+      throw new Error(`FILE_TREE_DIRECTORY_TOO_LARGE:${entries.length}:${FILE_TREE_MAX_DIRECTORY_ENTRIES}`);
+    }
     // 并行 stat：为排序（名称/更新时间/创建时间/大小）附加元数据。
     // 目录 stat.size 无意义，恒置 0；目录仍保留时间戳用于“按更新时间/创建时间”排序。
     const stats = await Promise.all(
