@@ -272,6 +272,10 @@ export const ipcChannels = {
 	appRestart: "app:restart",
 	/** 进程监控：拉取 Electron 各进程 + pi agent 子进程的内存/CPU 快照 */
 	processMetrics: "system:process-metrics",
+	/** 开发诊断快照（内存 / 事件循环延迟 / 最近关键耗时） */
+	diagnosticsSnapshot: "system:diagnostics-snapshot",
+	/** 打开 userData/diagnostics 目录 */
+	diagnosticsOpenFolder: "system:diagnostics-open-folder",
 	/** 进程监控里手动停止某个 pi agent（按 agentId 走 AgentManager 正常停止流程） */
 	stopAgent: "system:stop-agent",
 	preloadReady: "preload:ready",

@@ -106,6 +106,12 @@ export type StartupWindowMode =
 	/** 是否开启开发者控制台（DevTools） */
 	showDevTools: boolean;
 	/**
+	 * 开发诊断：内存 CSV、事件循环延迟、关键路径耗时。
+	 * 默认 false（生产零开销）；打开后写入 userData/diagnostics/，设置页可看快照。
+	 * 用来追查「点开会话整窗卡死」这类主进程阻塞，不必改环境变量重启。
+	 */
+	developerDiagnostics: boolean;
+	/**
 	 * Electron Chromium 渲染进程沙箱（与 pi Agent 无关）。
 	 * false（默认）：关闭沙箱，兼容 Windows 安全软件/旧 GPU 驱动；
 	 * true：启用 Chromium 沙箱，需重启 PiDeck 后生效。

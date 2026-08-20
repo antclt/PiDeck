@@ -423,6 +423,30 @@ export class AgentManager {
 	}
 
 	/**
+	 * 开发诊断埋点。未开启时 sink 为空，recordTiming 直接返回。
+	 * 用来对照「点 pi 会话卡死」时 create / history.load 是否把主进程堵住。
+	 */
+	setDiagnosticsSink(
+		sink: ((name: string, startedAt: number, detail?: Record<string, string | number | boolean | null>) => void) | undefined,
+	): void {
+		this.diagnosticsSink = sink;
+	}
+
+	private diagnosticsSink?: (
+		name: string,
+		startedAt: number,
+		detail?: Record<string, string | number | boolean | null>,
+	) => void;
+
+	private recordTiming(
+		name: string,
+		startedAt: number,
+		detail?: Record<string, string | number | boolean | null>,
+	): void {
+		this.diagnosticsSink?.(name, startedAt, detail);
+	}
+
+	/**
 	 * 统一构造 PiProcess：注入 PiDeck 内置扩展路径解析 + 安全管理快照/会话身份。
 	 * 内置扩展以 -e 从 app resources 加载，不再依赖用户扩展目录副本。
 	 * 安全管理：确保策略快照已落盘（小 JSON 写，等完成后启动，保证扩展首次拦截即可读到）。
@@ -893,11 +917,17 @@ export class AgentManager {
 		const t0 = Date.now();
 		const runtime = this.requireRuntime(agentId);
 
-		// 并行请求：get_messages 和 get_entries 互不依赖，可以同时发起
-		// 如果已有提前发出的请求（earlyMessagesPromise），直接复用，避免重复发送
-		const messagesPromise = earlyMessagesPromise ?? runtime.process.client.request({
-			type: "get_messages",
-		}, this.rpcTimeoutMs);
+		// 有会话文件时禁止再发 get_messages：pi 会把整段历史打成单行 JSON，
+		// PiRpcClient 在 stdout data 回调里同步 JSON.parse，主进程事件循环被堵住，
+		// 窗口关闭/最小化/设置都点不了。earlyPromise / JSONL 尾部读取才是安全路径。
+		const sessionPath = runtime.tab.sessionPath;
+		const messagesPromise = earlyMessagesPromise
+			?? (sessionPath
+				? this.readRecentMessagesFromSessionFile(
+					sessionPath,
+					AgentManager.MAX_HISTORY_LOAD_TURNS,
+				)
+				: runtime.process.client.request({ type: "get_messages" }, this.rpcTimeoutMs));
 
 		let entriesPromise: Promise<any> | undefined;
 		if (!skipEntries) {
@@ -1028,6 +1058,11 @@ export class AgentManager {
 
 		const messages = this.convertAgentMessages(agentId, finalRaw, activeEntryIds);
 		const t2 = Date.now();
+		this.recordTiming("session.history.load", t0, {
+			agentId,
+			skipEntries,
+			rawMessages: rawMessages.length,
+		});
 		void this.appLogger?.info("agent", "Agent messages loaded", {
 			agentId,
 			skipEntries,
@@ -1245,7 +1280,7 @@ export class AgentManager {
 			this.emitState();
 			return tab;
 		}
-		const { client, process, fallbackFromExtensions } = handshake;
+		const { process, fallbackFromExtensions } = handshake;
 		const t3 = Date.now();
 		const diag = process.getDiagnostics();
 		void this.appLogger?.info("agent", "Pi process spawned", {
@@ -1258,10 +1293,6 @@ export class AgentManager {
 			cwd: diag?.cwd,
 			fallbackFromExtensions,
 		});
-
-		// get_state 已在 handshake 完成；get_messages 必须等状态就绪后再发，避免空历史。
-		const historyLoadDecision = this.getHistoryAutoLoadDecision(input.sessionPath);
-
 
 		try {
 			void this.appLogger?.info("agent", "Agent get_state request completed", { agentId: id });
@@ -1288,56 +1319,20 @@ export class AgentManager {
 					? this.translate("session.historyTitle", { project: project.name })
 					: `${project.name} agent`);
 			tab.status = "idle";
-			// 大历史会话的 get_messages 可能需要十几秒；Agent 可用只依赖 get_state，
-			// 因此历史消息后台加载，避免 40MB+ 会话把“打开 Agent”阻塞到十几秒。
-			// 同时插入一条临时系统消息，给用户明确的加载反馈，避免空白页面看起来像冻结。
-			// preserveMessagesAfter 保护加载期间用户新发的消息/流式回复，防止历史结果回写时覆盖当前会话。
-			// 状态就绪后发送 get_messages，确保 pi 进程已完全加载会话文件，避免竞态。
-			const messagesPromise = historyLoadDecision.shouldLoad
-				? client.request({ type: "get_messages" }, this.rpcTimeoutMs)
-				: undefined;
-			// 回退提示必须落在 preserveMessagesAfter 之后，否则后台历史回写会丢掉这条系统卡。
+			// 历史一律从 JSONL 尾部读最近 N 轮，禁止 get_messages：
+			// pi 会把整段历史打成单行 JSON，主进程 JSON.parse 会冻住窗口按钮。
+			// Agent 可用只依赖 get_state；历史后台加载，加载期间新消息由 preserveMessagesAfter 保护。
+			const historyLoadDecision = this.getHistoryAutoLoadDecision(tab.sessionPath);
 			const preserveMessagesAfter = Date.now();
 			if (fallbackFromExtensions) {
 				this.notifyExtensionFallback(id, handshake.fallbackDebug);
 			}
-			if (messagesPromise) {
-				void this.loadMessages(id, true, messagesPromise, { preserveMessagesAfter })
-					.catch(() =>
-						new Promise<void>((resolve) => setTimeout(resolve, 800))
-							.then(() => this.loadMessages(id, true, undefined, { preserveMessagesAfter })),
-					)
-					.then(() => {
-						void this.appLogger?.info("agent", "Agent history loaded in background", {
-							agentId: id,
-							totalMs: Date.now() - preserveMessagesAfter,
-						});
-					})
-					.catch((error) => {
-						const list = this.messages.get(id) ?? [];
-						const loadingMessage = list.find((message) => message.meta?.historyLoading === true);
-						if (loadingMessage) {
-							loadingMessage.role = "error";
-							loadingMessage.text = "历史会话加载失败，可继续使用当前 Agent 或重新打开会话重试。";
-							loadingMessage.meta = {
-								historyLoading: "failed",
-								i18nKey: "diagnostic.historyLoadFailed",
-								debugDetails: error instanceof Error ? error.message : String(error),
-							};
-							loadingMessage.timestamp = Date.now();
-							this.scheduleMessageEmit(id, true);
-						}
-						void this.appLogger?.warn("agent", "Agent history background load failed", {
-							agentId: id,
-							error: error instanceof Error ? error.message : String(error),
-						});
-					});
-			} else if (input.sessionPath) {
+			if (tab.sessionPath) {
 				void this.loadMessages(
 					id,
 					true,
 					this.readRecentMessagesFromSessionFile(
-						input.sessionPath,
+						tab.sessionPath,
 						AgentManager.MAX_HISTORY_LOAD_TURNS,
 					),
 					{ preserveMessagesAfter },
@@ -1345,7 +1340,7 @@ export class AgentManager {
 					.then(() => {
 						void this.appLogger?.info("agent", "Agent recent history loaded from file", {
 							agentId: id,
-							sessionPath: input.sessionPath,
+							sessionPath: tab.sessionPath,
 							sizeBytes: historyLoadDecision.sizeBytes,
 							totalMs: Date.now() - preserveMessagesAfter,
 						});
@@ -1366,11 +1361,16 @@ export class AgentManager {
 						}
 						void this.appLogger?.warn("agent", "Agent recent history file load failed", {
 							agentId: id,
-							sessionPath: input.sessionPath,
+							sessionPath: tab.sessionPath,
 							error: error instanceof Error ? error.message : String(error),
 						});
 					});
 			}
+			this.recordTiming("agent.create", t0, {
+				agentId: id,
+				historyLoading: "background",
+				fallbackFromExtensions,
+			});
 			void this.appLogger?.info("agent", "Agent create completed", {
 				agentId: id,
 				totalMs: Date.now() - t0,

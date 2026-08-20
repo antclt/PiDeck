@@ -792,51 +792,38 @@ export class SessionHistoryReader {
 
 
 	/**
-	 * 直接从历史会话 JSONL 文件读取最近 N 轮对话的消息条目。
-	 * 用于大会话场景：绕过 get_messages RPC 的整文件 JSON 传输瓶颈，
-	 * 直接在桌面进程解析 JSONL 并只取尾部消息，避免大会话加载导致界面冻结。
-	 * 返回兼容 RpcResponse 格式的对象，可复用 loadMessages 的消息处理管线。
+	 * 直接从历史会话 JSONL 读取最近 N 轮对话。
+	 * 必须走会 yield 的显示索引：attach 时若再整文件 split + JSON.parse，
+	 * 主进程事件循环会被堵住，窗口关闭/最小化都点不了（pi 会话卡死、DSH 没事）。
+	 * 返回兼容 get_messages 的 RpcResponse，供 loadMessages 复用。
 	 */
 	async readRecentMessages(
 		sessionPath: string,
 		maxTurns: number,
 	): Promise<RpcResponse> {
 		const t0 = Date.now();
-		let content: string;
-		try {
-			content = await readFile(this.deps.toHostPath(sessionPath), "utf8");
-		} catch (error) {
-			void this.deps.logger?.warn("agent", "Failed to read session file for recent messages", {
-				sessionPath,
-				error: error instanceof Error ? error.message : String(error),
-			});
-			throw error;
-		}
-
-		const lines = content.split("\n");
-		const messageEntries: unknown[] = [];
-
-		for (const line of lines) {
-			if (!line.trim()) continue;
-			try {
-				const entry = JSON.parse(line);
-				if (entry.type === "message" && entry.message) {
-					messageEntries.push(entry.message);
-				}
-			} catch {
-				// 跳过单行解析失败，不影响后续行
-			}
-		}
-
-		// 只保留最近 maxTurns 轮对话
-		const trimmed = this.deps.trimMessages(messageEntries, maxTurns);
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const total = index.activeMessageEntries.length;
+		const boundedTurns = Number.isFinite(maxTurns) && maxTurns > 0
+			? Math.max(1, Math.floor(maxTurns))
+			: SessionHistoryReader.DEFAULT_TURN_PAGE_SIZE;
+		// 启动窗口要完整保留最近 N 轮，不能被分页字节预算裁掉工具大输出。
+		const start = findTurnPageStart(
+			index.activeMessageEntries,
+			total,
+			boundedTurns,
+			Number.MAX_SAFE_INTEGER,
+		);
+		const entries = index.activeMessageEntries.slice(start);
+		const rawMessages = await this.readIndexedSessionMessages(index.hostPath, entries);
+		const trimmed = this.deps.trimMessages(rawMessages, boundedTurns);
 		const t1 = Date.now();
 
 		void this.deps.logger?.info("agent", "Recent messages read from session file", {
 			sessionPath,
-			totalLines: lines.length,
-			messageEntries: messageEntries.length,
-			trimmedTurns: maxTurns,
+			activeMessages: total,
+			messageEntries: rawMessages.length,
+			trimmedTurns: boundedTurns,
 			trimmedMessages: trimmed.length,
 			readMs: t1 - t0,
 		});
@@ -862,9 +849,25 @@ export class SessionHistoryReader {
 	): Promise<{
 		compactions: Array<{ id: string; summary: string; timestamp: string; firstKeptEntryId?: string; tokensBefore?: number }>;
 	}> {
-		let content: string;
+		// 调用方已把全文放进内存时（离线 viewer）沿用传入字符串，避免再走一遍索引。
+		// attach / loadMessages 不传 content：必须复用会 yield 的显示索引，
+		// 否则刚读完最近 N 轮又整文件 parse 一次，主进程照样卡死。
+		if (sessionContent !== undefined) {
+			return { compactions: collectCompactionsFromJsonl(sessionContent) };
+		}
 		try {
-			content = sessionContent ?? await readFile(this.deps.toHostPath(sessionPath), "utf8");
+			const index = await this.getSessionDisplayIndex(sessionPath);
+			return {
+				compactions: index.activeBranch
+					.filter((entry) => entry.type === "compaction")
+					.map((entry) => ({
+						id: entry.id,
+						summary: entry.summary ?? "",
+						timestamp: entry.timestamp ?? "",
+						firstKeptEntryId: entry.firstKeptEntryId,
+						tokensBefore: entry.tokensBefore,
+					})),
+			};
 		} catch (error) {
 			void this.deps.logger?.warn("agent", "Failed to read session file for archive parsing", {
 				sessionPath,
@@ -872,28 +875,42 @@ export class SessionHistoryReader {
 			});
 			return { compactions: [] };
 		}
-
-		// 单次遍历只收集 compaction 条目（消息全文不解析、不保留）
-		const compactions: Array<{ id: string; summary: string; timestamp: string; firstKeptEntryId?: string; tokensBefore?: number }> = [];
-		for (const line of content.split("\n")) {
-			if (!line.trim()) continue;
-			try {
-				const entry = JSON.parse(line);
-				if (!entry || typeof entry !== "object" || entry.type !== "compaction") continue;
-				compactions.push({
-					id: typeof entry.id === "string" ? entry.id : "",
-					summary: typeof entry.summary === "string" ? entry.summary : "",
-					timestamp: typeof entry.timestamp === "string" ? entry.timestamp : "",
-					firstKeptEntryId: typeof entry.firstKeptEntryId === "string" ? entry.firstKeptEntryId : undefined,
-					tokensBefore: typeof entry.tokensBefore === "number" ? entry.tokensBefore : undefined,
-				});
-			} catch {
-				// 跳过单行解析失败
-			}
-		}
-		return { compactions };
 	}
 
+}
+
+/** 离线 viewer 已持有全文时扫描 compaction，避免再走一遍索引。 */
+function collectCompactionsFromJsonl(content: string): Array<{
+	id: string;
+	summary: string;
+	timestamp: string;
+	firstKeptEntryId?: string;
+	tokensBefore?: number;
+}> {
+	const compactions: Array<{
+		id: string;
+		summary: string;
+		timestamp: string;
+		firstKeptEntryId?: string;
+		tokensBefore?: number;
+	}> = [];
+	for (const line of content.split("\n")) {
+		if (!line.trim()) continue;
+		try {
+			const entry = JSON.parse(line) as Record<string, unknown>;
+			if (!entry || typeof entry !== "object" || entry.type !== "compaction") continue;
+			compactions.push({
+				id: typeof entry.id === "string" ? entry.id : "",
+				summary: typeof entry.summary === "string" ? entry.summary : "",
+				timestamp: typeof entry.timestamp === "string" ? entry.timestamp : "",
+				firstKeptEntryId: typeof entry.firstKeptEntryId === "string" ? entry.firstKeptEntryId : undefined,
+				tokensBefore: typeof entry.tokensBefore === "number" ? entry.tokensBefore : undefined,
+			});
+		} catch {
+			// 跳过单行解析失败
+		}
+	}
+	return compactions;
 }
 
 /**

@@ -54,12 +54,21 @@ function loadAgentManager() {
 		unlink: [],
 		writeFile: [],
 	};
+	const sessionJsonl = `${JSON.stringify({ id: "entry-user", type: "message", message: { role: "user", content: "hello" } })}\n`;
 	const fsPromises = {
 		copyFile: async (...args) => { calls.copyFile.push(args); },
 		readFile: async (...args) => {
 			calls.readFile.push(args);
-			return `${JSON.stringify({ id: "entry-user", type: "message", message: { role: "user", content: "hello" } })}\n`;
+			return sessionJsonl;
 		},
+		stat: async () => ({ size: Buffer.byteLength(sessionJsonl), mtimeMs: 1 }),
+		open: async () => ({
+			read: async (buffer, _offset, length) => {
+				Buffer.from(sessionJsonl).copy(buffer, 0, 0, length);
+				return { bytesRead: length };
+			},
+			close: async () => {},
+		}),
 		readdir: async (...args) => {
 			calls.readdir.push(args);
 			return [];

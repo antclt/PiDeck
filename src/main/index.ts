@@ -327,6 +327,7 @@ import {
 	setFeishuConfigDefaultBotName,
 } from "./feishu/FeishuConfig";
 import { startMemoryProfile, isMemoryProfileEnabled, type MemoryProfileHandle } from "./memory/MemoryMonitor";
+import { DiagnosticsMonitor } from "./diagnostics/DiagnosticsMonitor";
 import { QuitCleanupRegistry } from "./lifecycle/QuitCleanupRegistry";
 import type { FeishuChatBinding } from "../shared/types";
 
@@ -369,6 +370,8 @@ let appLogger: AppLogger;
 let rpcLogger: RpcLogger;
 /** 内存采样句柄（PIDECK_MEMORY_PROFILE=1 时启用），quit 时停止 */
 let memoryProfileHandle: MemoryProfileHandle | null = null;
+/** 设置开关控制的开发诊断（内存 CSV + 事件循环延迟 + 关键耗时） */
+let diagnosticsMonitor: DiagnosticsMonitor | null = null;
 let feishuBridge: FeishuBridge | null = null;
 let usageStatsService: UsageStatsService | null = null;
 
@@ -2722,6 +2725,7 @@ function registerIpc() {
 		setDshRpcLogging: (agentId, enabled) => dshAgentManager.setRpcLogging(agentId, enabled),
 		isDshRpcLogging: (agentId) => dshAgentManager.isRpcLogging(agentId),
 		modelSpecsStore,
+		diagnosticsMonitor: diagnosticsMonitor ?? undefined,
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
 		getDshHostPid: () => dshHost.getHostPid(),
@@ -2969,6 +2973,15 @@ app.whenReady().then(async () => {
 	);
 	// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 	quitCleanup.register("pi-agents", () => agentManager?.stopAll());
+	// 开发诊断必须在 registerIpc 之前创建：systemIpc 闭包捕获这个实例。
+	diagnosticsMonitor = new DiagnosticsMonitor({
+		logger: appLogger,
+		streamingProbe: () => agentManager.hasActiveStreaming(),
+	});
+	agentManager.setDiagnosticsSink((name, startedAt, detail) => {
+		diagnosticsMonitor?.recordTiming(name, startedAt, detail);
+	});
+	quitCleanup.register("diagnostics-monitor", () => diagnosticsMonitor?.stop());
 	// DSH host 在窗口创建后后台预热；此处先完成实例装配，发送链路仍保留 ensureStarted 兜底。
 	// DSH_HOME 可用设置 dshHomeDir 覆盖（用户自己的 ~/.dsh 等），空串 = 应用私有目录。
 	dshHost = new DshHost(
@@ -3390,6 +3403,12 @@ app.whenReady().then(async () => {
 			quitCleanup.register("memory-profile", () => memoryProfileHandle?.stop());
 		}).catch((error) => {
 			console.error("Failed to start memory profile:", error);
+		});
+	}
+	// 设置里的开发诊断：热启停，不必改环境变量重启。默认关，生产零开销。
+	if (settingsStore.get().developerDiagnostics) {
+		void diagnosticsMonitor?.setEnabled(true).catch((error) => {
+			console.error("Failed to start developer diagnostics:", error);
 		});
 	}
 

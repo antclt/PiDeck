@@ -28,7 +28,8 @@ import { fetchModelList, invalidateModelListCache, getCachedModelList, refreshMo
 import type { ModelSpecsStore } from "../pi/modelSpecsStore";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
-import type { AgentProcessMetric, ProcessMetricsSnapshot } from "../../shared/types";
+import type { AgentProcessMetric, DiagnosticsSnapshot, ProcessMetricsSnapshot } from "../../shared/types";
+import type { DiagnosticsMonitor } from "../diagnostics/DiagnosticsMonitor";
 import { getWslExe } from "../wsl/wslExe";
 import { listWebNetworkAddresses } from "../web/WebNetwork";
 import { toggleMainWindowDevTools } from "../devTools";
@@ -69,6 +70,8 @@ export type SystemIpcDeps = {
 	setDshRpcLogging?: (agentId: string, enabled: boolean) => void;
 	/** DSH RPC 日志状态查询（G17）。 */
 	isDshRpcLogging?: (agentId: string) => boolean;
+	/** 开发诊断采样（设置开关热启停） */
+	diagnosticsMonitor?: DiagnosticsMonitor;
 	/** 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送），装配层注入 */
 	stopAgentFromMonitor: (
 		agentId: string,
@@ -201,6 +204,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		RELEASES_URL,
 		devBranch,
 		providerMigration,
+		diagnosticsMonitor,
 	} = deps;
 
 	// ── Pi 检测 ──────────────────────────────────────────────────────
@@ -515,6 +519,29 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	// ── 应用日志 ─────────────────────────────────────────────────────
 
 	// 进程监控：Electron 各进程 + pi agent 子进程内存/CPU 快照（手动刷新，不做高频轮询）
+	ipcMain.handle(ipcChannels.diagnosticsSnapshot, (): DiagnosticsSnapshot => {
+		return diagnosticsMonitor?.snapshot() ?? {
+			enabled: false,
+			sampledAt: Date.now(),
+			main: {
+				rssBytes: 0,
+				heapUsedBytes: 0,
+				heapTotalBytes: 0,
+				externalBytes: 0,
+				arrayBuffersBytes: 0,
+			},
+			eventLoopLagMs: 0,
+			eventLoopLagMaxMs: 0,
+			memoryProfilePath: null,
+			timingsPath: null,
+			recentTimings: [],
+		};
+	});
+	ipcMain.handle(ipcChannels.diagnosticsOpenFolder, async () => {
+		if (!diagnosticsMonitor) return;
+		await diagnosticsMonitor.openFolder();
+	});
+
 	ipcMain.handle(ipcChannels.processMetrics, async (): Promise<ProcessMetricsSnapshot> => {
 		const agents: Array<Pick<AgentProcessMetric, "agentId" | "pid" | "kind" | "sessionId" | "sessionTitle" | "sessionTitles">> =
 			deps.agentManager.listAgentPids().map((agent) => {
@@ -745,6 +772,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.settingsUpdate, async (_event, patch: Partial<AppSettings>) => {
 		const prevSettings = settingsStore.get();
 		const settings = await settingsStore.update(patch);
+		if ("developerDiagnostics" in patch && diagnosticsMonitor) {
+			void diagnosticsMonitor.setEnabled(settings.developerDiagnostics).catch((error) => {
+				void appLogger.warn("diagnostics", "Failed to toggle developer diagnostics", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+		}
 		// 设置变更审计已下沉到 SettingsStore.update 内部统一留痕（覆盖所有直写路径），此处不重复记录
 
 		if (typeof reactToPetSettings === "function") {

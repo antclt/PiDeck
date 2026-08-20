@@ -2315,6 +2315,13 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.devTools": "Developer Console",
   "settings.devToolsDesc":
     "Open DevTools to inspect console logs and debug issues",
+  "settings.developerDiagnostics": "Performance diagnostics",
+  "settings.developerDiagnosticsDesc": "Record main-process memory, event-loop lag, and timings for session start / history load. Files go to the diagnostics folder in app data so you can trace freezes and memory growth. Off by default.",
+  "settings.developerDiagnosticsOpenFolder": "Open diagnostics folder",
+  "settings.developerDiagnosticsRefresh": "Refresh snapshot",
+  "settings.developerDiagnosticsLag": "Event-loop lag {lag} ms (peak {max} ms)",
+  "settings.developerDiagnosticsMemory": "Main RSS {rss} · heap {heap}",
+  "settings.developerDiagnosticsEmpty": "Turn this on, then refresh to see recent critical-path timings.",
   "settings.detectFailed": "Check failed: {error}",
   "settings.detecting": "Checking...",
   "settings.detectEnvironment": "Check environment",

@@ -535,6 +535,7 @@ export function App() {
     expandInterimDuringStream: true,
     collapsePrevRunsOnNewTurn: true,
     showDevTools: false,
+    developerDiagnostics: false,
     // Electron Chromium 沙箱默认关，与主进程历史兼容策略一致
     electronChromiumSandbox: false,
     piProxyEnabled: false,

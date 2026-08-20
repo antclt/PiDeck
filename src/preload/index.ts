@@ -12,6 +12,7 @@ import type {
 	AppLogPage,
 	AppLogQuery,
 	ProcessMetricsSnapshot,
+	DiagnosticsSnapshot,
 	AppSettings,
 	AppUpdateDownloadProgress,
 	AppUpdateDownloadResult,
@@ -1080,6 +1081,11 @@ const api = {
 		/** 停止指定 pi agent（按 agentId），成功后刷新进程快照即可看到消失 */
 		stopAgent: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.stopAgent, agentId) as Promise<void>,
+		/** 开发诊断快照：内存 / 事件循环延迟 / 最近关键耗时 */
+		getDiagnosticsSnapshot: () =>
+			ipcRenderer.invoke(ipcChannels.diagnosticsSnapshot) as Promise<DiagnosticsSnapshot>,
+		openDiagnosticsFolder: () =>
+			ipcRenderer.invoke(ipcChannels.diagnosticsOpenFolder) as Promise<void>,
 	},
 	logs: {
 		list: (query?: AppLogQuery) =>

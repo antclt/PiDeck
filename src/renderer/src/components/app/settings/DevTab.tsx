@@ -24,6 +24,7 @@ import {
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { ExternalEditorsSection } from "./ExternalEditorsSection";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { cn } from "../../../lib/utils";
 
 type DevTabProps = {
@@ -697,6 +698,10 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
             {t("settings.toggle")}
           </Button>
         </SettingRow>
+        <DiagnosticsPanel
+          enabled={draft.developerDiagnostics}
+          onChange={(checked) => updateDraft({ developerDiagnostics: checked })}
+        />
       </SettingsSection>
 
       {/* 隐私 */}

@@ -126,6 +126,7 @@ Gitmoji 对应关系：
   expandInterimDuringStream: true,
   collapsePrevRunsOnNewTurn: true,
   showDevTools: false,
+  developerDiagnostics: false,
   // 默认关闭 Chromium 沙箱：与历史 Windows no-sandbox 兼容策略一致
   electronChromiumSandbox: false,
   piProxyEnabled: false,
