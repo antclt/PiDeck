@@ -87,3 +87,40 @@ test("thinking.duration 文案中英同步", () => {
 	assert.match(zhCN, /"thinking\.duration": "思考了 \{duration\}"/);
 	assert.match(enUS, /"thinking\.duration": "Thought for \{duration\}"/);
 });
+
+test("ThinkingBlock 折叠态把耗时和预览放在同一行，流式默认展开打字机", () => {
+	const block = cardsSource.match(
+		/function ThinkingBlock[\s\S]*?\n\t\},\n/,
+	)?.[0] ?? "";
+	assert.ok(block, "ThinkingBlock must exist");
+	// 流式默认展开；endedAt 出现后收成单行
+	assert.match(block, /props\.defaultExpanded \?\? Boolean\(props\.isStreaming\)/);
+	assert.match(block, /if \(props\.endedAt\)/);
+	assert.match(block, /if \(props\.isStreaming\) setExpanded\(true\)/);
+	// 折叠预览挂在 trigger 行内，展开才渲染 markdown
+	assert.match(block, /!expanded && \(/);
+	assert.match(block, /<SingleLinePreview/);
+	assert.match(block, /showSweep=\{false\}/);
+	assert.match(block, /<ChevronRight/);
+	assert.doesNotMatch(block, /border-dashed/);
+});
+
+test("thinking Brain logo uses thinking-row-icon instead of gray text utilities", () => {
+	const block = cardsSource.match(
+		/function ThinkingBlock[\s\S]*?\n\t\},\n/,
+	)?.[0] ?? "";
+	assert.ok(block, "ThinkingBlock must exist");
+	assert.match(block, /<Brain size=\{15\} className="thinking-row-icon shrink-0"/);
+	assert.doesNotMatch(block, /<Brain[^>]*text-text-secondary/);
+});
+
+test("thinking markdown is one size smaller than chat body", () => {
+	assert.match(
+		timelineCss,
+		/\[data-marker-kind="thinking"\] \.markdown-body[\s\S]*?font-size:\s*var\(--font-size-control\)/,
+	);
+	assert.doesNotMatch(
+		timelineCss,
+		/\[data-marker-kind="thinking"\] \.markdown-body[\s\S]*?font-size:\s*var\(--font-size-chat\)/,
+	);
+});

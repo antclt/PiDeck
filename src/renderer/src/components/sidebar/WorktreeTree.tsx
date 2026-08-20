@@ -40,7 +40,6 @@ export function WorktreeTree(props: {
   project: Project;
   controller: SidebarController;
   actions: SidebarActions;
-  currentProjectId?: string;
   currentSessionId?: string;
   sessions: readonly SessionRecord[];
   agents: readonly AgentTab[];
@@ -79,9 +78,9 @@ export function WorktreeTree(props: {
             variant="ghost"
             size="sm"
             className={cn(
+              // 工作区行是容器，不跟会话抢选中底；选中只画在 SessionTree 叶子上。
               "conversation worktree-workspace-header h-7 justify-start text-left",
               workspaceSelectClass,
-              props.currentProjectId === props.project.id && "active border border-border-strong bg-accent/60 text-foreground shadow-sm",
             )}
             onClick={() => props.actions.projects.select(props.project.id)}
             title={t("app.worktreeMainWorkspace")}
@@ -161,7 +160,6 @@ export function WorktreeTree(props: {
             rootProject={props.project}
             controller={props.controller}
             actions={props.actions}
-            currentProjectId={props.currentProjectId}
             currentSessionId={props.currentSessionId}
           />
         ))}
@@ -179,18 +177,15 @@ function WorkspaceTreeRowView(props: {
   rootProject: Project;
   controller: SidebarController;
   actions: SidebarActions;
-  currentProjectId?: string;
   currentSessionId?: string;
 }) {
   const { row } = props;
   const childProject = row.project;
   const expanded = Boolean(childProject && props.controller.expandedWorktreePaths.has(row.path));
   const rowId = `worktree-sessions-${row.key.replace(/[^a-z0-9]+/gi, "-")}`;
-  const isActive = childProject?.id === props.currentProjectId;
 
   return (
-    // 选中态只高亮分支名行（select 按钮），不能把外层 wrapper 整行压暗——
-    // wrapper 还包着展开的会话列表，整行变色会让整个工作区区块发暗。
+    // 工作区行是容器：选中态只落在叶子会话上，分支名不加底、不加字重区分。
     <div className={cn(workspaceRowClass, "flex-wrap text-muted-foreground")}>
       {/* 标题行单独成相对容器：会话列表（flex-wrap 换到下一行）留在外层，
           操作按钮 absolute 锚定本行，不会压到展开的历史会话上。 */}
@@ -221,7 +216,6 @@ function WorkspaceTreeRowView(props: {
               "text-control",
               // 窄侧栏 hover 压出 3 按钮（78px）留白；transition-all 让压缩动画与配色过渡共存
               "transition-all @max-[255px]:group-hover:pr-[78px] @max-[255px]:group-focus-within:pr-[78px]",
-              isActive && "bg-accent/60 border border-border-strong text-foreground",
             )}
             disabled={!childProject}
             onClick={() => childProject && props.actions.projects.select(childProject.id)}
@@ -237,7 +231,7 @@ function WorkspaceTreeRowView(props: {
             }}
           >
             <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
-            <span className={cn("min-w-0 flex-1 truncate", isActive ? "font-normal" : "font-medium")}>{row.branch}</span>
+            <span className="min-w-0 flex-1 truncate font-medium">{row.branch}</span>
             {row.directory !== row.branch && (
               <span className="workspace-tree-directory max-w-20 shrink-0 truncate text-micro text-muted-foreground">{row.directory}</span>
             )}

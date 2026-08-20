@@ -293,7 +293,9 @@ test("sidebar uses one persisted project accordion without duplicating current p
   assert.match(content, /conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto/);
   assert.match(content, /currentProjectId=\{currentRootProject\?\.id\}/);
   assert.doesNotMatch(content, /max-h-\[38%\]|<WorktreeTree|<SessionTree/);
-  assert.match(content, /selectedProjectId=\{props\.currentProjectId\}/);
+  // 选中高亮只画在会话叶子上，不再把 selectedProjectId 传给工作区行。
+  assert.doesNotMatch(content, /selectedProjectId/);
+
 
   // 项目主行与左侧箭头都可以展开/折叠；名称点击同时保持选择项目语义。
   assert.match(projectTree, /toggleProject\(project\.id\)/);

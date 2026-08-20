@@ -72,7 +72,8 @@ test("user messages fold long text beyond 8 lines with an expand toggle", () => 
 });
 
 test("compaction card matches the thinking-card visual language", () => {
-  // 压缩卡片与思考卡片对齐：lucide 图标标签行 + 虚线内容框 + 左下角展开按钮；
+  // 压缩卡片：lucide 图标标签行 + 虚线内容框 + 左下角展开按钮；
+  // 思考卡已改成工具式单行 trigger，压缩卡仍保留虚线框（摘要更长）。
   // 不再用 emoji 充当功能图标（AGENTS.md 图标规范）。
   const cards = readFileSync(
     "src/renderer/src/components/session/TimelineEventCards.tsx",
@@ -81,7 +82,10 @@ test("compaction card matches the thinking-card visual language", () => {
   assert.doesNotMatch(cards, /📁|📂/);
   assert.match(cards, /Minimize size=\{15\}/);
   assert.match(cards, /border-dashed border-border-subtle/);
-  assert.match(cards, /max-h-\[calc\(var\(--font-size-chat\)\*7\.56\)\]/);
+  assert.match(
+    cards,
+    /max-h-\[calc\(var\(--font-size-chat\)\*var\(--line-height-chat\)\*4\.5\)\]/,
+  );
   assert.match(cards, /t\("app\.compactionExpand"\)/);
   // 展开/收起走左下角按钮，不再整卡可点（与思考卡一致）
   assert.doesNotMatch(cards, /className="flex w-full cursor-pointer/);

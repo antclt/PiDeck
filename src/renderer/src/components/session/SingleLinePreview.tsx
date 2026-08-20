@@ -19,8 +19,11 @@ export const SingleLinePreview = memo(function SingleLinePreview(props: {
 	text: string;
 	/** 思考是否仍在流式：true 显示最新一行并跟随尾部；false 显示第一行并静止 */
 	running?: boolean;
+	/** 流式扫光。嵌进工具式单行头时由外层 trigger 负责扫光，避免叠两道光带。 */
+	showSweep?: boolean;
 	className?: string;
 }) {
+	const showSweep = props.showSweep ?? true;
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const summary = props.running ? latestLine(props.text) : firstLine(props.text);
 
@@ -56,7 +59,7 @@ export const SingleLinePreview = memo(function SingleLinePreview(props: {
 			// hover 看全文；流式中全文每帧在变，tooltip 会闪，只给结束态挂
 			title={props.running ? undefined : props.text.replace(/\s+/g, " ").trim()}
 		>
-			{props.running && (
+			{props.running && showSweep && (
 				// 扫光：仅流式中存在，思考结束即消失；motion-reduce 时关闭
 				<span
 					aria-hidden="true"

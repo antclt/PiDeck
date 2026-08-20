@@ -34,9 +34,8 @@ export const ThinkingStep = memo(function ThinkingStep(props: {
 				endedAt={endedAt}
 				showThinking={props.showThinking}
 				isStreaming={isStreaming}
-				// 执行过程折叠详情里思考以「单步」呈现（标题+折叠预览），
-				// 与工具卡片同为 Chain of Thought 步骤，不默认摊开 markdown。
-				defaultExpanded={false}
+				// 不传 defaultExpanded：流式中默认展开打字机，结束后 ThinkingBlock
+				// 自己收成「思考了 Xs + 预览」单行，与工具卡片同一套 trigger 语言。
 				onOpenExternal={props.onOpenExternal}
 				onOpenFile={props.onOpenFile}
 			/>

@@ -37,6 +37,13 @@
   --font-size-control: 13px;
   --font-size-body: 14px;
   --font-size-chat: 15px;
+  /*
+   * 会话正文行高：无单位倍率，随 --font-size-chat 各档缩放。
+   * 旧值散落写成 1.68（15px → 25.2px），段落偏疏、扫描密度低于 Codex/Cursor
+   *（对话区常见 1.45–1.55）和 Claude Desktop（约 1.6）。取 1.5（15px → 22.5px）
+   * 作为中英混排可读与精致密度的折中；不要对 CJK 正文设负 letter-spacing。
+   */
+  --line-height-chat: 1.5;
   --font-size-input: 14px;
   --font-size-title: 16px;
   --font-size-brand: 18px;
@@ -108,6 +115,9 @@
   --color-success-strong: #166534;
   --color-warning: #b7791f;
   --color-info: #2563eb;
+  /* 过程行图标色：默认 zinc 主题会把 brand-purple 洗成灰，思考/工具 logo 必须单独保色，
+     否则和正文 tertiary 糊成一块。不跟 data-accent 走，身份色不等于主题强调色。 */
+  --color-thinking: #6366f1;
   --color-code-bg: #111418;
   --color-code-text: #d1d5db;
   --color-chat-card-bg: #fafafa;
@@ -286,7 +296,7 @@
 /* 字号预设：拆分为 UI / 会话正文 / 输入框三轨，各自通过 data 属性切换。
    - data-ui-font-size 控制 sidebar、按钮、列表、弹窗等 UI 字号
      （micro / caption / control / body / title / brand / heading / logo）
-   - data-chat-font-size 控制会话正文 --font-size-chat
+   - data-chat-font-size 控制会话正文 --font-size-chat（行高走 --line-height-chat 倍率，不随档位改）
    - data-input-font-size 控制 composer 输入框 --font-size-input
    控件高度 token 不随字号变化。 */
 :root[data-ui-font-size="compact"] {
@@ -434,6 +444,7 @@
   --color-brand-amber: #9ca3af;
   --color-brand-rose: #9ca3af;
   --color-info: #60a5fa;
+  --color-thinking: #818cf8;
   --color-code-bg: #1a1a1a;
   --color-code-text: #d1d5db;
   --color-chat-card-bg: #171717;
@@ -1552,14 +1563,7 @@ select:focus-visible {
 .avatar-status-idle .avatar-status-indicator { background: var(--color-info); }
 .agent-avatar-mark { display: grid; place-items: center; }
 
-.project-group > .conversation.active:first-child .project-avatar {
-  background: color-mix(
-    in srgb,
-    var(--color-accent-soft) 78%,
-    var(--color-bg-panel)
-  );
-  color: var(--color-accent);
-}
+/* 项目行不再有选中态：dsh-web 只给叶子会话灰底，父容器不跟着重色。 */
 .chat-project .project-avatar {
   color: var(--color-accent);
 }
@@ -1695,25 +1699,11 @@ select:focus-visible {
   animation: project-click-flash 0.35s ease-out;
 }
 .project-group > .conversation:first-child .conversation-title strong {
+  /* 项目行是容器不是选中叶子：字重与未选中会话同级，避免父级看起来「被选中」。 */
   color: var(--color-text-primary);
-  font-weight: 600;
+  font-weight: 500;
 }
-.project-group
-  > .conversation:not(.active):first-child
-  .conversation-title
-  strong {
-  color: color-mix(
-    in srgb,
-    var(--color-text-primary) 86%,
-    var(--color-text-secondary)
-  );
-}
-.project-group > .conversation.active:first-child {
-  /* 选中态用较深的主题浅面表达位置，不依赖高饱和色填满整行。 */
-  background: color-mix(in srgb, var(--color-accent-soft) 82%, var(--color-bg-panel));
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--color-border-strong) 86%, transparent);
-}
+/* 项目行无 .active：选中高亮只挂在会话叶子上。 */
 .project-group > .conversation.project-draggable:first-child {
   cursor: grab;
 }
@@ -2088,9 +2078,9 @@ select:focus-visible {
   font-weight: 500;
 }
 .agent-row.active {
-  background: color-mix(in srgb, var(--color-accent-soft) 82%, var(--color-bg-panel));
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--color-border-strong) 86%, transparent);
+  /* 选中比 hover 深一档：--color-bg-active（浅 #dfe3e8 / 暗 #333），无描边、无 accent。 */
+  background: var(--color-bg-active);
+  box-shadow: none;
 }
 .agent-row.active .conversation-title strong {
   color: var(--color-text-primary);
@@ -2144,9 +2134,8 @@ select:focus-visible {
   background: var(--color-bg-hover);
 }
 .session-row.active {
-  background: color-mix(in srgb, var(--color-accent-soft) 82%, var(--color-bg-panel));
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--color-border-strong) 86%, transparent);
+  background: var(--color-bg-active);
+  box-shadow: none;
 }
 .session-row .conversation-title {
   display: flex;

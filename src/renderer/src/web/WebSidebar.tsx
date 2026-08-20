@@ -25,6 +25,9 @@ const projectRowClass =
 const sessionRowClass =
 	"conversation agent-row relative flex min-h-7 w-full items-center gap-1.5 rounded-md border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color] duration-200 hover:border-border-subtle hover:bg-muted/60 hover:text-foreground";
 
+/** 与桌面 SessionTree 一致：只有当前会话灰底，父项目行不加选中态。 */
+const selectedRowClass = "active bg-bg-active text-foreground";
+
 /** 与桌面 ProjectTree 相同的项目目录名展示：chat 项目显示「聊天」，其余取路径末段。 */
 function displayProjectName(project: WebProject): string {
 	if (project.kind === "chat") return t("app.chatProject");
@@ -61,7 +64,7 @@ function SessionRows(props: {
 						className={cn(
 							sessionRowClass,
 							"session-row",
-							session.id === activeSessionId && "active border-border-strong bg-accent/20 text-foreground shadow-sm",
+							session.id === activeSessionId && selectedRowClass,
 						)}
 						title={session.title}
 						onClick={() => onSelect(session.id)}

@@ -36,12 +36,22 @@ const sourceBadge = readFileSync(
 
 test("sidebar child rows use shared official hover/active classes", () => {
   assert.match(sessionTree, /hover:border-border-subtle hover:bg-muted\/60 hover:text-foreground/);
-  assert.match(sessionTree, /active border-border-strong bg-accent\/20 text-foreground/);
+  // 选中态对标 dsh-web：只有叶子会话灰底，无 accent / 描边 / 阴影。
+  assert.match(sessionTree, /selectedRowClass = "active bg-bg-active text-foreground"/);
+  assert.doesNotMatch(sessionTree, /bg-accent\/20/);
   assert.match(sessionTree, /sessionRowClass/);
   assert.match(projectTree, /treeRowClass/);
   assert.match(projectTree, /flex min-h-8 w-full/);
   assert.match(projectTree, /project-fold grid size-6/);
   assert.match(projectTree, /hover:border-border-subtle hover:bg-muted\/60 hover:text-foreground/);
+  // 父项目行永不挂选中底，避免和当前会话双高亮。
+  assert.doesNotMatch(projectTree, /isCurrent && "active/);
+  assert.doesNotMatch(projectTree, /bg-accent\/20/);
+  // legacy 层把会话选中底收成灰，不得再混 accent-soft / 内描边。
+  const sessionActive = styles.match(/\.session-row\.active \{([\s\S]*?)\n\}/)?.[1] ?? "";
+  assert.match(sessionActive, /background:\s*var\(--color-bg-active\)/);
+  assert.match(sessionActive, /box-shadow:\s*none/);
+  assert.doesNotMatch(sessionActive, /accent-soft/);
 });
 
 test("sidebar workspace wrapper stays transparent", () => {

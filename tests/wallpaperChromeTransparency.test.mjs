@@ -58,23 +58,17 @@ test("wallpaper chrome + content blocks become transparent in utilities layer", 
   }
 });
 
-test("project-avatar becomes transparent in legacy layer, active highlight preserved", () => {
+test("project-avatar becomes transparent in legacy layer without a parent selected tint", () => {
   // 文件夹图标底：legacy 层 data-bg-image 透明化
   assert.match(
     foundationCss,
     /:root\[data-bg-image="on"\] \.project-avatar\s*\{\s*background:\s*transparent;/,
     "project-avatar must be transparent under wallpaper mode",
   );
-  // 选中态 accent 高亮仍存在（不得被透明化误杀）
-  assert.match(
+  // 父项目不再有选中 accent：dsh-web 只给叶子会话灰底。
+  assert.doesNotMatch(
     foundationCss,
-    /\.project-group\s*>\s*\.conversation\.active:first-child\s+\.project-avatar\s*\{/,
-    "active project avatar highlight rule must remain",
-  );
-  assert.match(
-    foundationCss,
-    /\.project-group\s*>\s*\.conversation\.active:first-child\s+\.project-avatar\s*\{[\s\S]*?background:\s*color-mix/,
-    "active avatar must keep its accent background",
+    /\.project-group\s*>\s*\.conversation\.active:first-child\s+\.project-avatar/,
   );
 });
 

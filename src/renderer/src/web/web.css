@@ -118,8 +118,9 @@
 }
 
 .web-app .conversation.agent-row.active {
+  /* 与桌面一致：选中会话只铺更深一档灰底，不要描边。 */
   background: var(--color-bg-active);
-  border-color: var(--color-border-strong);
+  border-color: transparent;
 }
 
 /* 头部：细底边框 + 半透明毛玻璃（dsh-web 的浮层头部观感） */

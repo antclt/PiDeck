@@ -10,10 +10,8 @@ import { PathTooltip } from "../ui-shadcn/PathTooltip";
 import { Button } from "../ui-shadcn/button";
 import { cn } from "../../lib/utils";
 
-/** pure official：项目/会话树行共享的 shadcn 风格底（hover=accent 面，active 同系）
- * 默认透明背景，只有激活的行才显示背景色和阴影，避免所有行都像浮层卡片。 */
-// Be UI AI Sidebar 的资源树强调“容器可展开、资源可选中”：项目行保持轻量，
-// 只有当前资源使用 inset surface，避免每个项目都变成独立卡片。
+/** 项目行只做容器：hover 浅灰，永不挂选中底。
+ * 选中态只给叶子会话（对标 dsh-web：.sessionRow.selected = hover 灰，项目行无 selected）。 */
 // 根项目行保留折叠层级，但收窄左右留白，给窄侧栏中的目录名多留出可用宽度。
 const treeRowClass =
   "group conversation relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-1 py-0 text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-border-subtle hover:bg-muted/60 hover:text-foreground";
@@ -58,8 +56,6 @@ export function ProjectTree(props: {
   controller: SidebarController;
   actions: SidebarActions;
   currentProjectId?: string;
-  /** 实际选中的项目（可能是 worktree 子项目），用于高亮工作区行。 */
-  selectedProjectId?: string;
   currentSessionId?: string;
   worktreesByProject: Readonly<Record<string, readonly WorktreeEntry[]>>;
   branchByProject?: Readonly<Record<string, string | null | undefined>>;
@@ -97,9 +93,7 @@ export function ProjectTree(props: {
             !props.controller.search.trim() && "project-draggable",
             dragging && "dragging opacity-60",
             dragOver && "drag-over ring-1 ring-border",
-            isCurrent && "active border-border-strong bg-accent/20 text-foreground shadow-sm",
           )}
-          data-active={isCurrent || undefined}
           onContextMenu={(event) => { event.preventDefault(); void props.controller.openMenu({ kind: "project", projectId: project.id, x: event.clientX, y: event.clientY }); }}
         >
           <button
@@ -198,7 +192,6 @@ export function ProjectTree(props: {
                 project={project}
                 controller={props.controller}
                 actions={props.actions}
-                currentProjectId={props.selectedProjectId}
                 currentSessionId={props.currentSessionId}
                 sessions={rootProjectSessions}
                 agents={props.controller.catalog.agents}

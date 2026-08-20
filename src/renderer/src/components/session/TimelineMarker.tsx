@@ -22,22 +22,28 @@ const TONE_STATUS_ICONS: Partial<Record<TimelineMarkerTone, ReactNode>> = {
   error: <X size={9} strokeWidth={3.5} color="#fff" />,
 };
 
-/** 状态图标是否显示：工具调用（kind="tool"）不放大、不带 ✓/✗——
- *  工具节点统一 8px 空心描边圆（颜色表达状态），与思考的 8px 实心点同级，
- *  避免 14px 大图标节点在工具行上喧宾夺主；诊断等其他事件保留 ✓/✗ 语义节点。 */
+/** 状态图标是否显示：思考/工具过程行默认无轨，此函数只服务仍显示轨道的事件
+ *  （压缩/提问/诊断）。工具即便显式开轨也不放大 ✓/✗，避免 14px 节点喧宾夺主。 */
 function getStatusIcon(
   kind: TimelineMarkerKind,
   tone: TimelineMarkerTone,
 ): ReactNode | undefined {
-  if (kind === "tool") return undefined;
+  if (kind === "tool" || kind === "thinking") return undefined;
   return TONE_STATUS_ICONS[tone];
 }
 
+/** 思考/工具已是「图标+文案」过程行（Codex/Cursor 同款），左侧圆点轨是重复装饰。
+ *  压缩/提问仍用轨道表达事件归属；诊断等临时提示走显式 hideRail。 */
+function shouldHideRail(kind: TimelineMarkerKind, hideRail?: boolean): boolean {
+  if (hideRail != null) return hideRail;
+  return kind === "thinking" || kind === "tool";
+}
+
 /**
- * 时间线事件的统一左侧标记轨道。
+ * 时间线事件的统一外壳。
  *
- * 事件内容本身仍由各业务卡片负责，Marker 只承载类型、状态和归属关系，
- * 这样工具调用、思考、压缩和诊断消息不会因为各自的卡片样式而失去时间线层级。
+ * 事件内容本身仍由各业务卡片负责；Marker 承载类型/状态，并按事件种类决定
+ * 是否画左侧轨道。过程行（思考/工具）默认无轨，避免与行内图标叠两套标记。
  */
 export function TimelineMarker(props: {
   kind: TimelineMarkerKind;
@@ -46,19 +52,19 @@ export function TimelineMarker(props: {
   className?: string;
   /** 内容区（timeline-marker-content）追加类，供具体卡片覆盖默认底距等间距 */
   contentClassName?: string;
-  /** 不渲染左侧轨道（竖线+节点），直接展示内容——用于系统状态/自动重试等
-   *  临时提示，它们不是需要轨道归属关系的步骤节点 */
+  /** 不渲染左侧轨道（竖线+节点）。思考/工具默认已隐藏；诊断等临时提示显式传入。 */
   hideRail?: boolean;
 }) {
   const tone = props.tone ?? "neutral";
-  const statusIcon = getStatusIcon(props.kind, tone);
+  const hideRail = shouldHideRail(props.kind, props.hideRail);
+  const statusIcon = hideRail ? undefined : getStatusIcon(props.kind, tone);
   return (
     <div
-      className={cn("timeline-marker-row flex min-w-0 items-stretch", !props.hideRail && "gap-2.5", props.className)}
+      className={cn("timeline-marker-row flex min-w-0 items-stretch", !hideRail && "gap-2.5", props.className)}
       data-marker-kind={props.kind}
       data-marker-tone={tone}
     >
-      {!props.hideRail && (
+      {!hideRail && (
       <div className="timeline-marker-rail relative flex w-4 shrink-0 justify-center" aria-hidden="true">
         <span className="timeline-marker-line absolute top-0 bottom-0 w-px bg-border-subtle" />
         {/* 轨道只保留状态节点；工具/思考的语义图标已经在内容卡片里，避免左侧重复一套 Logo。 */}

@@ -17,6 +17,9 @@ import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 const sessionRowClass =
 	"group/resource conversation agent-row relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-border-subtle hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
 
+/** 叶子选中态：灰底、无描边。比 hover（muted/60）再用 active 面深一档，否则白底上几乎看不见。 */
+const selectedRowClass = "active bg-bg-active text-foreground";
+
 /** 行右侧「更多操作（三个点）」按钮：absolute 浮层，不参与布局（不挤压标题文字），
  * 默认隐藏（pointer-events 一并关闭防误触），行 hover / 行内聚焦时显现——
  * 与 WorktreeTree 的 workspace-tree-actions 同一套虚化模式。
@@ -188,7 +191,7 @@ export function SessionTree(props: {
             className={cn(
               sessionRowClass,
               "session-row codex-subagent-sidebar-row pl-2",
-              session.id === props.currentSessionId && "active border-border-strong bg-accent/20 text-foreground shadow-sm",
+              session.id === props.currentSessionId && selectedRowClass,
             )}
             onClick={() => openSession(session.id)}
             onDoubleClick={() => openSession(session.id, "permanent")}
@@ -259,7 +262,7 @@ export function SessionTree(props: {
               type="button"
               className={cn(
                 sessionRowClass,
-                agentSession?.id === props.currentSessionId && "active border-border-strong bg-accent/20 text-foreground shadow-sm",
+                agentSession?.id === props.currentSessionId && selectedRowClass,
               )}
               onClick={() => { if (agentSession) openSession(agentSession.id); }}
               onDoubleClick={() => { if (agentSession) openSession(agentSession.id, "permanent"); }}
@@ -313,7 +316,7 @@ export function SessionTree(props: {
               // 历史会话不是运行中的 Agent：只给这一类内容增加层级缩进，避免项目标题与历史记录贴在同一列。
               // 历史会话需要比运行中 Agent 更松的点击区域和行间距，避免连续记录挤成一块。
               "session-row history-session-row mx-0 min-h-8 pl-2 pr-2 py-0",
-              child.session.id === props.currentSessionId && "active border-border-strong bg-accent/20 text-foreground shadow-sm",
+              child.session.id === props.currentSessionId && selectedRowClass,
             )}
             onClick={() => openSession(child.session.id)}
             onDoubleClick={() => openSession(child.session.id, "permanent")}
@@ -371,7 +374,7 @@ export function SessionTree(props: {
               className={cn(
                 sessionRowClass,
                 "session-row draft-session-trigger",
-                session.id === props.currentSessionId && "active border-border-strong bg-accent/20 text-foreground shadow-sm",
+                session.id === props.currentSessionId && selectedRowClass,
               )}
               onClick={() => openSession(session.id)}
               onDoubleClick={() => openSession(session.id, "permanent")}

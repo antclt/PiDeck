@@ -9,7 +9,7 @@
  * - 流式期间底部显示响应指示器；出错显示诊断卡
  */
 import { Fragment, memo, useEffect, useRef, useState } from "react";
-import { ArrowDown, Brain, ChevronDown, ChevronUp, Wrench } from "lucide-react";
+import { ArrowDown, Brain, ChevronDown, ChevronRight, ChevronUp, Wrench } from "lucide-react";
 import type { UIMessage } from "ai";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
@@ -32,7 +32,7 @@ export const WebUserBubble = memo(function WebUserBubble(props: { message: UIMes
 	return (
 		<article className="user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end">
 			<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
-				<div className="text-chat leading-[1.6] text-text-primary whitespace-pre-wrap break-words">
+				<div className="text-chat text-text-primary whitespace-pre-wrap break-words">
 					{text}
 				</div>
 			</div>
@@ -40,67 +40,77 @@ export const WebUserBubble = memo(function WebUserBubble(props: { message: UIMes
 	);
 });
 
-/** 思考折叠卡片（复用桌面 ThinkingBlock 视觉：Brain 图标 + 可折叠正文）。
- * 默认折叠成单行预览（deepseek-harness ReasoningRow 模式：流式中 tail -f 显示最新行 + 扫光，
- * 结束后显示第一行），标题行整行可点击展开/收起。 */
+/** 思考折叠卡片（复用桌面 ThinkingBlock 视觉：Brain + 耗时/标题 + 同行预览）。
+ * 流式默认展开打字机；结束后收成单行（标题 + 首行预览）。 */
 export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 	text: string;
-	/** 思考是否仍在流式：控制 SingleLinePreview 的尾部跟随 + 扫光（Web 端 part 无独立完成标志，用整条消息 isStreaming 近似） */
+	/** 思考是否仍在流式：控制打字机默认展开与折叠预览的尾部跟随 */
 	running?: boolean;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(Boolean(props.running));
+	useEffect(() => {
+		if (props.running) setExpanded(true);
+		else setExpanded(false);
+	}, [props.running]);
 	if (!props.text.trim()) return null;
 	return (
-		<TimelineMarker kind="thinking" tone="neutral">
+		<TimelineMarker kind="thinking" tone={props.running ? "active" : "neutral"} contentClassName="pb-1">
 		<section className="w-full min-w-0 overflow-hidden rounded-md border-0">
 			<button
-				className="flex min-h-8 w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent p-1.5 pl-2.5 text-left text-control leading-5 text-text-secondary transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,var(--color-bg))] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 [&_svg]:shrink-0 [&_svg]:text-[var(--color-info)]"
+				type="button"
+				className="relative flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 text-left text-control leading-5 text-text-secondary transition-[background-color,transform] duration-150 motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 [&_svg]:shrink-0"
 				onClick={() => setExpanded((value) => !value)}
 				aria-expanded={expanded}
 				title={expanded ? t("thinking.collapse") : t("thinking.expand")}
 			>
-				<Brain size={15} />
-				<span className="shrink-0 text-body font-[650] text-text-primary">{t("thinking.title")}</span>
-				{/* 整行可点：chevron 旋转过渡表达展开/收起，不依赖文字按钮 */}
-				<ChevronDown
-					size={15}
-					className={`shrink-0 text-text-tertiary transition-transform duration-200 motion-reduce:transition-none${expanded ? " rotate-180" : ""}`}
-					aria-hidden="true"
-				/>
-			</button>
-			{/* 虚线框内容区（折叠/展开共用容器，与桌面端 ThinkingBlock 一致）：
-			    折叠态单行预览在标题行下方独立一行，不与标题挤在一起 */}
-			<div className="rounded-md border border-dashed border-border-subtle bg-[color:color-mix(in_srgb,var(--color-bg-muted)_45%,transparent)]">
+				{props.running && (
+					<span
+						aria-hidden
+						className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]"
+					/>
+				)}
+				<Brain size={15} className="thinking-row-icon" />
+				<span className="shrink-0 font-mono text-micro tabular-nums text-text-tertiary">
+					{t("thinking.title")}
+				</span>
 				{expanded ? (
-					<div className="markdown-body px-3 pt-2 pb-1 text-text-tertiary">
+					<ChevronDown size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+				) : (
+					<ChevronRight size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+				)}
+				{!expanded && (
+					<SingleLinePreview
+						text={props.text}
+						running={props.running}
+						showSweep={false}
+						className="min-w-0 flex-[1_1_auto] font-mono text-micro text-text-tertiary"
+					/>
+				)}
+			</button>
+			{expanded && (
+				<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in slide-in-from-top-1 duration-150">
+					<div className="markdown-body px-0 pt-1 pb-1 text-text-tertiary">
 						<MarkdownStream
 							text={props.text}
+							isStreaming={props.running}
 							onOpenExternal={(url: string) => {
 								// Web 端无系统浏览器通道，直接新窗口打开
 								window.open(url, "_blank", "noopener");
 							}}
 						/>
-						{/* 长思考展开后，内容尾部提供收起入口（与桌面端 ThinkingBlock 一致）：
-						    滚动到内容末尾即可收起，不必滚回顶部标题行 */}
-						<div className="mt-1.5">
-							<button
-								type="button"
-								className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
-								onClick={() => setExpanded(false)}
-							>
-								<ChevronUp size={12} aria-hidden="true" />
-								{t("thinking.collapse")}
-							</button>
-						</div>
 					</div>
-				) : (
-					<SingleLinePreview
-						text={props.text}
-						running={props.running}
-						className="px-3 pt-2 pb-1 font-mono text-caption text-text-tertiary"
-					/>
-				)}
-			</div>
+					<div className="flex pb-1.5">
+						<button
+							type="button"
+							className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+							onClick={() => setExpanded(false)}
+						>
+							<ChevronUp size={12} aria-hidden="true" />
+							{t("thinking.collapse")}
+						</button>
+					</div>
+				</div>
+			)}
 		</section>
 		</TimelineMarker>
 	);
@@ -131,14 +141,14 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 		<TimelineMarker kind="tool" tone={error ? "error" : running ? "active" : "success"}>
 		<section
 			className={cn(
-				"tool-card w-full min-w-0 overflow-hidden rounded-md border border-border-subtle bg-bg-panel transition-[border-color,background-color] duration-150",
+				"tool-card w-full min-w-0 overflow-hidden",
 				running && "tone-running",
 				error && "tone-error",
 			)}
 			data-status={error ? "error" : running ? "running" : "done"}
 			data-tool-name={toolName}
 		>
-			<div className="flex min-h-8 items-center p-1.5 pl-2.5">
+			<div className="relative flex min-h-6 items-center rounded-md px-1 py-0.5">
 				<span className="tool-card-trigger flex min-w-0 items-center gap-2 text-control leading-5 text-text-secondary">
 					<span className="tool-card-icon">
 						<Wrench size={14} aria-hidden="true" />

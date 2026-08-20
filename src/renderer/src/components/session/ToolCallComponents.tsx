@@ -321,19 +321,18 @@ export const ToolCard = memo(function ToolCard(props: {
 		<TimelineMarker
 			kind="tool"
 			tone={tone === "error" ? "error" : tone === "running" ? "active" : "success"}
-			// 工具行紧凑化：压扁 trigger 行后底距同步收紧（pb-2 → pb-1），
-			// 让工具调用在时间线上保持低调、不喧宾夺主，思考块仍用默认 pb-2
+			// 工具/思考同为过程行：底距都压到 pb-1，不再给工具单独留卡片呼吸空间
 			contentClassName="pb-1"
 		>
 		<section
-			// 圆角不走 Tailwind rounded-md（6px 会压过 .tool-card 的 token 圆角，
-			// 且与系统卡片弧度不一致）；由 timeline.css 的 .tool-card 统一用 --radius-lg 决定
-			className={`tool-card w-full min-w-0 overflow-hidden border border-border-subtle bg-bg-panel transition-[border-color,background-color,box-shadow] duration-200 tone-${tone}${isSkillRead ? " tool-card--skill" : ""}${isAskCard ? " tool-card--ask" : ""}${status === "running" ? " tool-card--running" : ""}`}
+			// 无框过程行（与 ThinkingBlock 同一语言）：边框/面板底由 timeline.css 的
+			// .tool-card 保证为 0/transparent，这里不再叠 border / bg-bg-panel。
+			className={`tool-card w-full min-w-0 overflow-hidden tone-${tone}${isSkillRead ? " tool-card--skill" : ""}${isAskCard ? " tool-card--ask" : ""}${status === "running" ? " tool-card--running" : ""}`}
 			data-status={status}
 			data-tool-kind={isSkillRead ? "skill" : getToolKind(toolName)}
 			data-message-id={props.message.id}
 		>
-			<div className="relative flex min-h-6 items-center transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_55%,var(--color-bg-panel))]">
+			<div className="relative flex min-h-6 items-center rounded-md transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]">
 				{/* 工具运行中整行扫光（dsh-web command-row-sweep 同款，与思考扫光同 keyframes）。
 				    status === "running" 才挂载：stopped/error/done 立即消失（stopped 由 props.stopped 短路）；
 				    pointer-events-none 不挡 trigger 点击展开 */}
@@ -349,7 +348,7 @@ export const ToolCard = memo(function ToolCard(props: {
 					onClick={() => setExpanded((v) => !v)}
 					aria-expanded={expanded}
 				>
-					<span className="tool-card-icon inline-flex shrink-0 items-center justify-center text-text-tertiary">
+					<span className="tool-card-icon inline-flex shrink-0 items-center justify-center">
 						{isSkillRead ? <Brain size={16} /> : isAskCard ? <MessageCircle size={16} /> : toolIcon(toolName)}
 					</span>
 					<span className="shrink-0 text-caption font-medium lowercase text-text-secondary">

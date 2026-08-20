@@ -192,7 +192,6 @@ export function SidebarContent(props: SidebarContentProps) {
             controller={controller}
             actions={actions}
             currentProjectId={currentRootProject?.id}
-            selectedProjectId={props.currentProjectId}
             currentSessionId={props.currentSessionId}
             worktreesByProject={props.worktreesByProject}
             branchByProject={props.branchByProject}

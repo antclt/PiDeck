@@ -8,6 +8,65 @@
  * 视觉目标：代码块与表格共用「单卡片 + 微顶栏」语言，避免盒中盒。
  */
 
+/*
+ * 会话正文密度：Streamdown 根节点默认 space-y-4，标题 mt-6 + text-3xl，
+ * 列表 py-1 / list-inside。这些都在 utilities 层，会压过 timeline.css（legacy）
+ * 的 .markdown-body 排版，表现为「行距/段距都偏疏、标题过大」。
+ * 必须同层后写才能对齐 Codex/Cursor 聊天密度（15px / 行高 1.5 / 段距 ~0.55em）。
+ * 选择器挂 .markdown-body，避免误伤文件预览以外的其它 streamdown 用法。
+ */
+/* 只覆盖普通块（段落等）的 space-y 缝；标题/列表/引用/hr/代码/表格走各自规则。
+   选择器必须比 .space-y-4 > :not(:last-child) 更具体，否则标题上边距会被冲成 0。 */
+.markdown-body :is(.space-y-4) > :not(:last-child):not([data-streamdown^="heading-"]):not([data-streamdown$="-list"]):not([data-streamdown="horizontal-rule"]):not([data-streamdown="blockquote"]):not([data-streamdown="code-block"]):not([data-streamdown="table-wrapper"]) {
+  margin-block-start: 0;
+  margin-block-end: 0.55em;
+}
+.markdown-body :is(.space-y-4) > [data-streamdown^="heading-"] {
+  margin-top: 1.1em;
+  margin-bottom: 0.35em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.012em;
+}
+.markdown-body :is(.space-y-4) > [data-streamdown^="heading-"]:first-child {
+  margin-top: 0;
+}
+.markdown-body [data-streamdown="heading-1"] {
+  font-size: 1.5em;
+}
+.markdown-body [data-streamdown="heading-2"] {
+  font-size: 1.28em;
+}
+.markdown-body [data-streamdown="heading-3"] {
+  font-size: 1.12em;
+}
+.markdown-body [data-streamdown="heading-4"] {
+  font-size: 1.08em;
+}
+.markdown-body [data-streamdown="heading-5"] {
+  font-size: 1em;
+}
+.markdown-body [data-streamdown="heading-6"] {
+  font-size: 0.95em;
+}
+.markdown-body [data-streamdown="ordered-list"],
+.markdown-body [data-streamdown="unordered-list"] {
+  list-style-position: outside;
+  margin: 0.4em 0 0.65em;
+  padding-left: 1.35em;
+}
+.markdown-body [data-streamdown="list-item"] {
+  margin: 0.12em 0;
+  padding-block: 0;
+}
+.markdown-body [data-streamdown="horizontal-rule"] {
+  margin-block: 1.1em;
+}
+.markdown-body [data-streamdown="blockquote"] {
+  margin-block: 0.55em;
+  padding: 0.45em 0.85em;
+}
+
 /* ── 代码块 ─────────────────────────────────────────────── */
 [data-streamdown="code-block"] {
   position: relative;

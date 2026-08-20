@@ -36,6 +36,43 @@ test("tool and thinking disclosure icons use right-for-collapsed down-for-expand
   assert.match(toolCalls, /\{expanded \? \([\s\S]*<ChevronDown[\s\S]*\) : \([\s\S]*<ChevronRight/);
 });
 
+test("tool rows share thinking's borderless process-row chrome", () => {
+  // Codex/Cursor 把思考与工具都做成过程行。卡片边框/面板底会让工具比思考更「块」。
+  assert.doesNotMatch(
+    toolCalls,
+    /className=\{`tool-card[\s\S]*?border border-border-subtle bg-bg-panel/,
+  );
+  const css = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
+  const cardRule = css.match(/\.tool-card \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(cardRule, ".tool-card rule must exist");
+  assert.match(cardRule, /border:\s*0/);
+  assert.match(cardRule, /background:\s*transparent/);
+  assert.doesNotMatch(cardRule, /border:\s*1px/);
+  // skill 身份改走图标色，不再给整行铺紫色底（那是卡片语言）
+  const skillRule = css.match(/\.tool-card--skill \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(skillRule, /background:\s*transparent/);
+  assert.doesNotMatch(skillRule, /border-color/);
+});
+
+test("thinking and tool logos keep a distinct color even on the default zinc theme", () => {
+  // 默认主题会把 brand-purple 洗成灰；过程行 logo 必须用独立 token，否则和 tertiary 糊在一起。
+  const css = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
+  const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
+  const cards = readFileSync("src/renderer/src/components/session/TimelineEventCards.tsx", "utf8");
+  const web = readFileSync("src/renderer/src/web/WebTimeline.tsx", "utf8");
+  assert.match(foundation, /--color-thinking:\s*#6366f1/);
+  assert.match(foundation, /--color-thinking:\s*#818cf8/);
+  assert.match(css, /\.thinking-row-icon \{[\s\S]*?color:\s*var\(--color-thinking\)/);
+  assert.match(css, /\.tool-card-icon \{[\s\S]*?color:\s*var\(--color-info\)/);
+  const skillIcon = css.match(/\.tool-card--skill \.tool-card-icon \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(skillIcon, /color:\s*var\(--color-thinking\)/);
+  assert.doesNotMatch(skillIcon, /--color-brand-purple/);
+  assert.match(cards, /className="thinking-row-icon shrink-0"/);
+  assert.match(web, /className="thinking-row-icon"/);
+  assert.match(toolCalls, /className="tool-card-icon inline-flex shrink-0 items-center justify-center"/);
+  assert.doesNotMatch(toolCalls, /className="tool-card-icon[^"\n]*text-text-tertiary/);
+});
+
 // 状态徽章（借鉴 AI Elements Tool 的 getStatusBadge）：running/error/done 三态
 // 图标+文案 pill，不再只有 running 有视觉反馈、error 只是灰字。
 test("tool card renders tri-state status badges with icons and i18n labels", () => {

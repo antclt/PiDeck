@@ -53,6 +53,28 @@ test("streamdown pipeline delegates to official plugins (code/mermaid/math) and 
   assert.match(stream, /theme: isDark \? "dark" : "default"/);
 });
 
+test("streamdown chat prose density overrides official space-y-4 / heading scale", () => {
+  // Streamdown 根节点 space-y-4、标题 text-3xl/mt-6 在 utilities 层，
+  // 不在同层覆盖就会把会话正文撑成文档站密度。契约：覆盖必须挂 .markdown-body。
+  const streamdownChrome = readFileSync("src/renderer/src/styles/streamdownChrome.css", "utf8");
+  assert.match(
+    streamdownChrome,
+    /\.markdown-body :is\(\.space-y-4\) > :not\(:last-child\):not\(\[data-streamdown\^="heading-"\]\)/,
+  );
+  assert.match(streamdownChrome, /margin-block-end:\s*0\.55em/);
+  assert.match(
+    streamdownChrome,
+    /\.markdown-body :is\(\.space-y-4\) > \[data-streamdown\^="heading-"\]/,
+  );
+  assert.match(streamdownChrome, /\[data-streamdown="heading-1"\][\s\S]*?font-size:\s*1\.5em/);
+  assert.match(streamdownChrome, /list-style-position:\s*outside/);
+  const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
+  assert.match(foundation, /--line-height-chat:\s*1\.5/);
+  const timeline = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
+  assert.match(timeline, /line-height:\s*var\(--line-height-chat\)/);
+  assert.doesNotMatch(timeline, /line-height:\s*1\.68/);
+});
+
 test("streamdown code/table chrome uses faded action controls", () => {
   const streamdownChrome = readFileSync("src/renderer/src/styles/streamdownChrome.css", "utf8");
   assert.match(streamdownChrome, /\[data-streamdown="code-block-actions"\]/);

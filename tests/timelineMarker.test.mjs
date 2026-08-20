@@ -31,13 +31,24 @@ test("tool cards map execution status to marker tone without changing detail beh
   assert.match(toolCard, /tool-card-copy/);
 });
 
-test("thinking, compaction, diagnostic, and ask cards use the same marker rail", () => {
+test("thinking, compaction, diagnostic, and ask cards use the same marker shell", () => {
   for (const kind of ["thinking", "compaction", "diagnostic", "ask"]) {
     assert.match(events, new RegExp(`kind=\\"${kind}\\"`));
   }
   assert.match(events, /setExpanded\(\(v\) => !v\)/);
   // 旧断言 setExpanded(!expanded) 对应已废弃写法（函数式更新等价且更稳），不再断言实现细节
   assert.match(events, /data-message-id=\{props\.message\.id\}/);
+});
+
+test("thinking and tool process rows hide the left dot rail by default", () => {
+  // Codex/Cursor：过程行身份在行内图标，左侧圆点+贯穿竖线是重复装饰。
+  assert.match(marker, /function shouldHideRail/);
+  assert.match(marker, /return kind === "thinking" \|\| kind === "tool"/);
+  assert.match(marker, /const hideRail = shouldHideRail\(props\.kind, props\.hideRail\)/);
+  const css = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
+  assert.doesNotMatch(css, /\.execution-summary-details::before/);
+  assert.doesNotMatch(css, /padding-left:\s*26px/);
+  assert.doesNotMatch(css, /margin-left:\s*26px/);
 });
 
 // Chain of Thought 步骤节点升级：完成/失败不再是同色圆点，轨道节点直接承载
@@ -54,12 +65,10 @@ test("marker rail nodes carry status icons for success and error tones", () => {
   assert.match(marker, /statusIcon && "mt-1 size-3\.5"/);
 });
 
-// 工具调用节点不再放大 14px 图标：与思考同为 8px 一级（工具空心描边、思考实心），
-// 避免工具行左侧大圆球喧宾夺主；诊断等其他事件仍保留 ✓/✗ 语义节点。
+// 思考/工具默认无轨，即便显式开轨也不放大 ✓/✗；诊断等其他事件仍保留语义节点。
 test("tool marker nodes skip the enlarged status icon", () => {
-  assert.match(marker, /if \(kind === "tool"\) return undefined/);
+  assert.match(marker, /if \(kind === "tool" \|\| kind === "thinking"\) return undefined/);
   assert.match(marker, /kind: TimelineMarkerKind,/);
-  // 渲染路径通过 getStatusIcon 取图标，而非直接读 TONE_STATUS_ICONS
-  assert.match(marker, /const statusIcon = getStatusIcon\(props\.kind, tone\);/);
+  assert.match(marker, /const statusIcon = hideRail \? undefined : getStatusIcon\(props\.kind, tone\);/);
   assert.match(marker, /\{statusIcon\}/);
 });

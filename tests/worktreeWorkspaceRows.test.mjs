@@ -37,11 +37,11 @@ test("worktree rows carry the anonymous action next to create-draft", () => {
   assert.match(rowView, /<WorkspaceRowActions>/);
 });
 
-test("active worktree selection only highlights the branch row, not the whole block", () => {
-  // wrapper 不允许再带 isActive 背景（会把展开的会话列表一起压暗）
-  assert.doesNotMatch(worktreeTree, /workspace-tree-row group[\s\S]{0,200}isActive && "bg-accent\/60/);
-  // 窄侧栏注释行插在中间，窗口留到 500 保证断言不依赖注释长度
-  assert.match(worktreeTree, /workspace-tree-select[\s\S]{0,500}isActive && "bg-accent\/60/);
+test("worktree rows never take a selected surface; only session leaves do", () => {
+  // 对标 dsh-web：父工作区/分支是容器，选中灰底只给 SessionTree 叶子。
+  assert.doesNotMatch(worktreeTree, /bg-accent\/60/);
+  assert.doesNotMatch(worktreeTree, /isActive &&/);
+  assert.doesNotMatch(worktreeTree, /currentProjectId/);
 });
 
 test("child worktree labels use a smaller hierarchy than their parent project", () => {
@@ -60,9 +60,11 @@ test("worktree auxiliary labels stay at the compact micro size", () => {
   assert.match(workspaceStyles, /\.worktree-sessions-more[\s\S]*?font-size: var\(--font-size-micro\)/);
 });
 
-test("active child worktree keeps the secondary text weight", () => {
+test("child worktree labels keep a stable weight without a selected-state swap", () => {
   const childRow = worktreeTree.slice(worktreeTree.indexOf("WorkspaceTreeRowView"));
-  assert.match(childRow, /isActive \? "font-normal" : "font-medium"/);
+  // 父分支不再用字重冒充选中；标题始终 font-medium。
+  assert.match(childRow, /className="min-w-0 flex-1 truncate font-medium"/);
+  assert.doesNotMatch(childRow, /isActive \? "font-normal"/);
 });
 
 test("project row hides create/anonymous buttons in worktree mode", () => {
