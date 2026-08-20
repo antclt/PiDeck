@@ -8,6 +8,10 @@ All notable changes to PiDeck are documented here.
 
 ### 🚀 New Features
 
+- **DSH 0.1.0-rc.8** — Bump `@deepseek-ai/dsh*` to the current harness release.
+  Keep the local `dsh-tool-pwsh-persistent` plugin: official persistent PowerShell
+  still uses `ctx.terminals`, registers as `pwsh` (collides with the one-shot
+  sandboxed tool), and is not mounted by default presets.
 - **DSH 0.1.0-rc.7** — Bump `@deepseek-ai/dsh*` to the current harness release
   (plugin settings cards, Job Panel for Codex/Claude Code subagents, durable
   MCP/ACP image attachments, large-history pagination fix, max-token session

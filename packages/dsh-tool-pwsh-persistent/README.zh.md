@@ -3,6 +3,7 @@
 DSH 的持久 PowerShell 工具。每个 agent 复用一个常驻 `pwsh`（`node-pty` + `-NoExit`），避免每次 `pwsh -Command` 冷启动约 350ms。
 
 与官方 `@deepseek-ai/dsh-tool-bash-persistent` 同类，但**不依赖 `ctx.terminals`**。无沙箱。
+官方 rc.8 的 `@deepseek-ai/dsh-tool-pwsh-persistent` 走 `ctx.terminals`、工具名是 `pwsh`（会和一次性沙箱 pwsh 冲突），本插件仍用独立工具名 `pwsh_persistent`。
 
 ## 不要装进 PiDeck 仓库
 
@@ -34,7 +35,7 @@ CLI 会：
 
 `node-pty` 必须在对方 Node ABI 上重建。不要拷贝别人的 `node_modules`。
 
-peer（由宿主提供）：`@deepseek-ai/dsh-tools` / `dsh-timeout` / `cordis` `^0.1.0-rc.7`。
+peer（由宿主提供）：`@deepseek-ai/dsh-tools` / `dsh-timeout` / `cordis` `^0.1.0-rc.8`。
 
 ## 配置
 

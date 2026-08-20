@@ -141,9 +141,11 @@ async function main(): Promise<void> {
 			{ id: "api-gateway", name: "@deepseek-ai/dsh-host-apiproxy" },
 			{ id: "pideck-directory-picker", name: "./pideck-directory-picker.js" },
 			{ id: "pideck-slash-bridge", name: "./pideck-slash-bridge.js" },
-			// 持久 pwsh 工具：独立包 dsh-tool-pwsh-persistent（仿 bash-persistent）。
-			// 自包含 node-pty，不依赖 ctx.terminals。绝对路径：utilityProcess
-			// 的模块锚在 app node_modules，裸名不一定解析到同一目录。
+			// 持久 pwsh 工具：继续用本地 dsh-tool-pwsh-persistent，不要换成官方
+			// `@deepseek-ai/dsh-tool-pwsh-persistent`。官方工具名是 `pwsh`，会和
+			// 一次性沙箱 pwsh 抢名字，且依赖 ctx.terminals + terminal-bash
+			//（shellDialect: pwsh），base/standard/code 预设都没挂。绝对路径：
+			// utilityProcess 的模块锚在 app node_modules，裸名不一定解析到同一目录。
 			{
 				id: "tool-pwsh-persistent",
 				name: require.resolve("dsh-tool-pwsh-persistent"),

@@ -38,6 +38,9 @@ test("hostEntry composition inserts the standalone pwsh plugin by package name",
 	const src = readFileSync(join(repoRoot, "src/main/dsh/hostEntry.ts"), "utf8");
 	assert.match(src, /require\.resolve\("dsh-tool-pwsh-persistent"\)/);
 	assert.doesNotMatch(src, /pideckPwshPersistent\.js/);
+	// 官方 rc.8 持久 pwsh 工具名是 `pwsh`，会和一次性沙箱工具冲突，且依赖
+	// ctx.terminals；升级 harness 时禁止误把官方包挂进 host 组合。
+	assert.doesNotMatch(src, /name:\s*"@deepseek-ai\/dsh-tool-pwsh-persistent"/);
 });
 
 test("electron-vite externalizes the standalone pwsh package", () => {
@@ -50,8 +53,8 @@ test("standalone package peers pin the host rc line, not wildcard", () => {
 	const pkg = JSON.parse(
 		readFileSync(join(repoRoot, "packages/dsh-tool-pwsh-persistent/package.json"), "utf8"),
 	);
-	assert.equal(pkg.peerDependencies["@deepseek-ai/dsh-tools"], "^0.1.0-rc.7");
-	assert.equal(pkg.peerDependencies["@deepseek-ai/dsh-timeout"], "^0.1.0-rc.7");
+	assert.equal(pkg.peerDependencies["@deepseek-ai/dsh-tools"], "^0.1.0-rc.8");
+	assert.equal(pkg.peerDependencies["@deepseek-ai/dsh-timeout"], "^0.1.0-rc.8");
 	assert.notEqual(pkg.peerDependencies["@deepseek-ai/dsh-tools"], "*");
 });
 

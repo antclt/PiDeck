@@ -8,6 +8,9 @@
 
 ### 🚀 新功能
 
+- **DSH 0.1.0-rc.8** — `@deepseek-ai/dsh*` 升到当前 harness 发布版。本地
+  `dsh-tool-pwsh-persistent` 插件继续保留：官方持久 PowerShell 仍走
+  `ctx.terminals`、工具名是 `pwsh`（会和一次性沙箱工具抢名字），默认预设也不挂。
 - **DSH 0.1.0-rc.7** — `@deepseek-ai/dsh*` 升到当前 harness 发布版（插件可注册
   设置卡片、Codex/Claude Code 子代理进 Job Panel、MCP/ACP 持久图片附件、
   大历史分页栈溢出修复、max-tokens 截断后会话可继续）。英文内置预设

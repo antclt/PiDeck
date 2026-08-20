@@ -42,8 +42,10 @@ const require = createRequire(import.meta.url);
  * Windows 适配（与 bash-persistent 的差异）：
  * - pwsh 的 prompt 输出带 ANSI 控制序列（光标移动/标题 OSC），检测前先剥离；
  * - 无 stty -echo 等价物：命令回显行包含 start marker，解析用 lastIndexOf 天然跳过；
- * - node-pty 直接 require（不依赖 ctx.terminals——dsh-terminal-bash 的进程组
- *   空闲检测在 win32 不可用，自包含实现最稳）。
+ * - node-pty 直接 require，不依赖 ctx.terminals。官方 rc.8 虽已有 win32
+ *   process inspector，但 `@deepseek-ai/dsh-tool-pwsh-persistent` 走
+ *   ctx.terminals、工具名是 `pwsh`（会和一次性沙箱 pwsh 冲突），且预设默认
+ *   不挂；本插件保留独立工具名 `pwsh_persistent` 并卸掉 PSReadLine。
  */
 
 const TIMEOUT_CODE = "PERSISTENT_PWSH_TIMEOUT";

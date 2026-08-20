@@ -28,7 +28,7 @@ test("package.json depends on session-projection-cache so electron-builder packs
 	const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
 	assert.equal(
 		pkg.dependencies["@deepseek-ai/dsh-session-projection-cache"],
-		"^0.1.0-rc.7",
+		"^0.1.0-rc.8",
 	);
 });
 
