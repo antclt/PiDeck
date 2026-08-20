@@ -63,6 +63,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   const composerModes = useAtomValue(sessionComposerModeByIdAtom);
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
   const [planModeAvailable, setPlanModeAvailable] = useState(true);
+  const [goalModeAvailable, setGoalModeAvailable] = useState(true);
   /** 模型在本地 models.json 存在但运行中 Agent 未加载：待确认重启的目标。 */
   const [restartTarget, setRestartTarget] = useState<{
     handle: SessionRuntimeTarget;
@@ -96,13 +97,20 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     if (!extensionsApi) return;
     void extensionsApi.list().then((result) => {
       const plan = result.extensions.find((extension) => extension.source === "pi-deck-plan-mode.ts");
-      const available = plan?.enabled !== false;
-      setPlanModeAvailable(available);
-      // 扩展被禁用后清理残留的计划模式状态，避免下拉隐藏但编辑器仍保持计划模式。
-      if (!available && composerModes[sessionId] === "plan") setMode({ sessionId, mode: "normal" });
+      const goal = result.extensions.find((extension) => extension.source === "pi-deck-goal-mode.ts");
+      const planAvailable = plan?.enabled !== false;
+      const goalAvailable = goal?.enabled !== false;
+      setPlanModeAvailable(planAvailable);
+      setGoalModeAvailable(goalAvailable);
+      // 扩展被禁用后清理残留模式，避免下拉隐藏但编辑器仍保持该模式。
+      const current = composerModes[sessionId];
+      if (!planAvailable && current === "plan") setMode({ sessionId, mode: "normal" });
+      if (!goalAvailable && current === "goal") setMode({ sessionId, mode: "normal" });
     }).catch(() => {
       setPlanModeAvailable(false);
-      if (composerModes[sessionId] === "plan") setMode({ sessionId, mode: "normal" });
+      setGoalModeAvailable(false);
+      const current = composerModes[sessionId];
+      if (current === "plan" || current === "goal") setMode({ sessionId, mode: "normal" });
     });
   }, [composerModes, props.picker, sessionId, setMode]);
 
@@ -432,6 +440,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         currentMode={props.currentMode ?? composerModes[sessionId] ?? "normal"}
         onClose={props.onClose}
         planModeAvailable={isDshSession || planModeAvailable}
+        goalModeAvailable={isDshSession || goalModeAvailable}
         imagegenAvailable={!isDshSession}
         onPick={(nextMode) => {
           if (props.onPickMode) props.onPickMode(nextMode);

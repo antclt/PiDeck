@@ -1,6 +1,7 @@
 import { useSetAtom, useStore } from "jotai";
 import { useRef } from "react";
 import type {
+  ComposerAgentMode,
   ImageContent,
   SendSessionPromptInput,
   SendSessionPromptResult,
@@ -22,7 +23,9 @@ import {
   upsertSessionAtom,
 } from "../atoms";
 import {
+  applyDshGoalSendTransform,
   buildComposerPromptSubmission,
+  deriveComposerAgentMode,
   expandPromptTemplates,
 } from "../composerBehavior";
 import { t, translateI18nDescriptor } from "../i18n";
@@ -177,6 +180,17 @@ export function useSessionSend(options: UseSessionSendOptions) {
       : undefined;
     if (!hasComposerSubmission(message, imageSnapshot)) return;
 
+    const resolveSendMode = (targetSessionId: string): ComposerAgentMode => {
+      const record = store.get(sessionRecordsAtom)[targetSessionId];
+      const liveRuntime = store.get(sessionRuntimeByIdAtom)[targetSessionId];
+      return deriveComposerAgentMode({
+        backend: record?.backend === "dsh" || liveRuntime?.backend === "dsh" ? "dsh" : "pi",
+        localMode: store.get(sessionComposerModeByIdAtom)[targetSessionId],
+        planModeActive: liveRuntime?.state?.planModeActive === true,
+        goalPhase: liveRuntime?.state?.goal?.phase,
+      });
+    };
+
     sendingSessionIdsRef.current.add(sourceSessionId);
     const requestId = crypto.randomUUID();
     const trimmedMessage = message.trim();
@@ -286,7 +300,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
         displayText: message,
         message: expandedMessage,
         images: imageSnapshot,
-        agentMode: store.get(sessionComposerModeByIdAtom)[sessionId] ?? "normal",
+        agentMode: resolveSendMode(sessionId),
         behavior: streamingBehavior,
       });
       if (enqueued) {
@@ -356,9 +370,26 @@ export function useSessionSend(options: UseSessionSendOptions) {
       sendingSessionIdsRef.current.delete(sourceSessionId);
       return;
     }
+    const record = store.get(sessionRecordsAtom)[sessionId];
+    const liveRuntime = store.get(sessionRuntimeByIdAtom)[sessionId];
+    const isDshSend = record?.backend === "dsh" || liveRuntime?.backend === "dsh";
+    const sendMode: ComposerAgentMode = deriveComposerAgentMode({
+      backend: isDshSend ? "dsh" : "pi",
+      localMode: store.get(sessionComposerModeByIdAtom)[sessionId],
+      planModeActive: liveRuntime?.state?.planModeActive === true,
+      goalPhase: liveRuntime?.state?.goal?.phase,
+    });
+    // DSH 拒绝 agentMessage：首次目标改写成 /goal；已有目标则原文推进。
+    const visibleMessage = isDshSend
+      ? applyDshGoalSendTransform({
+          message: expandedMessage,
+          mode: sendMode,
+          goal: liveRuntime?.state?.goal,
+        })
+      : expandedMessage;
     const submission = buildComposerPromptSubmission(
-      expandedMessage,
-      store.get(sessionComposerModeByIdAtom)[sessionId] ?? "normal",
+      visibleMessage,
+      isDshSend ? "normal" : sendMode,
     );
 
     try {

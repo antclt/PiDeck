@@ -173,6 +173,66 @@ test("wraps plan composer submissions with the hidden PiDeck plan marker", () =>
 	assert.match(submission.agentMessage, /Plan:/);
 });
 
+test("wraps goal composer submissions with the hidden PiDeck goal marker", () => {
+	const { buildComposerPromptSubmission, PI_DECK_GOAL_MODE_MARKER } = loadComposerBehaviorModule();
+
+	const submission = buildComposerPromptSubmission("Ship the release", "goal");
+
+	assert.equal(submission.message, "Ship the release");
+	assert.equal(submission.agentMessage, `${PI_DECK_GOAL_MODE_MARKER}\nShip the release`);
+});
+
+test("goal and plan modes leave slash commands unmarked", () => {
+	const { buildComposerPromptSubmission } = loadComposerBehaviorModule();
+	assert.equal(buildComposerPromptSubmission("/goal pause", "goal").agentMessage, undefined);
+	assert.equal(buildComposerPromptSubmission("/plan off", "plan").agentMessage, undefined);
+});
+
+test("deriveComposerAgentMode keeps explicit normal over a still-active DSH goal", () => {
+	const { deriveComposerAgentMode } = loadComposerBehaviorModule();
+	assert.equal(deriveComposerAgentMode({
+		backend: "dsh",
+		localMode: "normal",
+		goalPhase: "active",
+	}), "normal");
+	assert.equal(deriveComposerAgentMode({
+		backend: "dsh",
+		goalPhase: "active",
+	}), "goal");
+	assert.equal(deriveComposerAgentMode({
+		backend: "dsh",
+		localMode: "goal",
+		planModeActive: true,
+	}), "plan");
+});
+
+test("applyDshGoalSendTransform prefixes /goal only when creating a new objective", () => {
+	const { applyDshGoalSendTransform } = loadComposerBehaviorModule();
+	assert.equal(applyDshGoalSendTransform({
+		message: "Fix the build",
+		mode: "goal",
+	}), "/goal Fix the build");
+	assert.equal(applyDshGoalSendTransform({
+		message: "keep going",
+		mode: "goal",
+		goal: { phase: "active" },
+	}), "keep going");
+	assert.equal(applyDshGoalSendTransform({
+		message: "/goal pause",
+		mode: "goal",
+	}), "/goal pause");
+});
+
+test("parsePiGoalWidget reads phase, rounds, and objective", () => {
+	const { parsePiGoalWidget } = loadComposerBehaviorModule();
+	const parsed = parsePiGoalWidget(["active · 3/32", "Ship the release"]);
+	assert.equal(parsed?.phase, "active");
+	assert.equal(parsed?.objective, "Ship the release");
+	assert.equal(parsed?.roundsStarted, 3);
+	assert.equal(parsed?.maxGoalRounds, 32);
+	assert.equal(parsePiGoalWidget(["not a header", "x"]), undefined);
+});
+
 // 复现：普通输入不重渲染 App，live ref 已是全文，但闭包里的 renderedPrompt 仍是旧值。
 // ArrowUp 必须快照 live 草稿，否刕 ArrowDown 会丢掉继续输入的部分。
 test("history navigation snapshots the live draft instead of the last rendered prompt", () => {

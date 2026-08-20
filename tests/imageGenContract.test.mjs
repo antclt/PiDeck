@@ -48,8 +48,8 @@ test("resolveProviderCredentials：从 models.json/auth.json 拼 baseUrl/apiKey�
 	assert.match(imagegenIpc, /if \(!baseUrl \|\| !apiKey\) return null;/);
 });
 
-test("ComposerAgentMode 含 imagegen 三种模式", () => {
-	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen"/);
+test("ComposerAgentMode 含 imagegen 与 goal", () => {
+	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "goal"/);
 });
 
 test("composer 模式选择器与底栏三态（含生图图标）", () => {

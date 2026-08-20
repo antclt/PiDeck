@@ -11,6 +11,7 @@ import {
 	ImageIcon,
 	ListChecks,
 	Paperclip,
+	Target,
 	Star,
 	Wrench,
 	X,
@@ -268,11 +269,15 @@ export function ComposerBottomBar(props: {
 		: undefined;
 	const isPlanMode = props.composerAgentMode === "plan";
 	const isImageGenMode = props.composerAgentMode === "imagegen";
+	const isGoalMode = props.composerAgentMode === "goal";
+	const isSpecialMode = isPlanMode || isImageGenMode || isGoalMode;
 	const modeLabel = isPlanMode
 		? t("app.composerModePlan")
 		: isImageGenMode
 			? t("app.composerModeImagegen")
-			: t("app.composerModeNormal");
+			: isGoalMode
+				? t("app.composerModeGoal")
+				: t("app.composerModeNormal");
 	const liveModel = {
 		provider: props.state?.provider ?? props.record?.model?.provider ?? (isDsh ? props.defaultModel?.provider : welcomePreference?.model?.provider) ?? "",
 		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelId : welcomePreference?.model?.modelId) ?? "",
@@ -331,7 +336,7 @@ export function ComposerBottomBar(props: {
 					<Button
 						variant="ghost"
 						size="sm"
-						className={`composer-bar-btn mode h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60${isPlanMode ? " active" : ""}`}
+						className={`composer-bar-btn mode h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60${isSpecialMode ? " active" : ""}`}
 						disabled={props.disabled}
 						onClick={props.onOpenComposerModePicker}
 						aria-haspopup="dialog"
@@ -341,14 +346,15 @@ export function ComposerBottomBar(props: {
 							<ListChecks size={15} strokeWidth={2} aria-hidden="true" />
 						) : isImageGenMode ? (
 							<ImageIcon size={15} strokeWidth={2} aria-hidden="true" />
+						) : isGoalMode ? (
+							<Target size={15} strokeWidth={2} aria-hidden="true" />
 						) : (
 							<Wrench size={15} strokeWidth={2} aria-hidden="true" />
 						)}
-						{/* 模式按钮文案：普通/计划模式均不加粗（font-normal 覆盖父按钮继承的 font-semibold）；
-						    普通模式另用小一号字号 + 斜体做弱化艺术字。 */}
+						{/* 模式按钮文案：特殊模式不加粗；普通模式用小一号斜体弱化。 */}
 						<span
 							className={cn(
-								isPlanMode || isImageGenMode
+								isSpecialMode
 									? "text-control font-normal"
 									: "text-micro italic font-normal text-muted-foreground",
 							)}
@@ -356,10 +362,11 @@ export function ComposerBottomBar(props: {
 							{modeLabel}
 						</span>
 					</Button>
-					{isPlanMode && (
+					{(isPlanMode || isGoalMode) && (
 						<Button variant="ghost" size="icon"
 							className="composer-bar-btn icon mode-cancel size-7 rounded-md"
-							aria-label={t("app.composerModeCancelPlan")} title={t("app.composerModeCancelPlan")}
+							aria-label={isGoalMode ? t("app.composerModeCancelGoal") : t("app.composerModeCancelPlan")}
+							title={isGoalMode ? t("app.composerModeCancelGoal") : t("app.composerModeCancelPlan")}
 							disabled={props.disabled}
 							onClick={props.onCancelPlan}
 						>
@@ -697,6 +704,8 @@ export function ComposerModePicker(props: {
 	planModeAvailable: boolean;
 	/** imagegen 是否可用（F6：DSH 后端无生图能力，隐藏入口）。缺省 true。 */
 	imagegenAvailable?: boolean;
+	/** 目标模式：DSH 恒可用；pi 由内置扩展 pi-deck-goal-mode 提供。缺省 false。 */
+	goalModeAvailable?: boolean;
 	onClose: () => void;
 	onPick: (mode: ComposerAgentMode) => void;
 }) {
@@ -710,6 +719,11 @@ export function ComposerModePicker(props: {
 			value: "plan" as const,
 			labelKey: "app.composerModePlan" as const,
 			descriptionKey: "app.composerModePlanDesc" as const,
+		}] : []),
+		...(props.goalModeAvailable ? [{
+			value: "goal" as const,
+			labelKey: "app.composerModeGoal" as const,
+			descriptionKey: "app.composerModeGoalDesc" as const,
 		}] : []),
 		...(props.imagegenAvailable !== false ? [{
 			value: "imagegen" as const,
@@ -736,7 +750,7 @@ export function ComposerModePicker(props: {
 						className="min-h-9 items-center gap-2 rounded-md px-2.5 py-1"
 					>
 						<span className={`grid size-6 shrink-0 place-items-center rounded-md ${selected ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground"}`}>
-							{item.value === "plan" ? <ListChecks size={14} aria-hidden="true" /> : item.value === "imagegen" ? <ImageIcon size={14} aria-hidden="true" /> : <Wrench size={14} aria-hidden="true" />}
+							{item.value === "plan" ? <ListChecks size={14} aria-hidden="true" /> : item.value === "imagegen" ? <ImageIcon size={14} aria-hidden="true" /> : item.value === "goal" ? <Target size={14} aria-hidden="true" /> : <Wrench size={14} aria-hidden="true" />}
 						</span>
 						{/* 弹窗项文案：普通/计划模式均不加粗，plan 用图标/选中态作为区分。 */}
 						<span className="min-w-0 flex-1 truncate text-control font-normal text-foreground" title={t(item.descriptionKey)}>{t(item.labelKey)}</span>

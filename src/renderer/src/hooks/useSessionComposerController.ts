@@ -41,6 +41,7 @@ import {
   translateBuiltinPromptDescription,
   extractUserPrompts,
   mergePromptHistory,
+  deriveComposerAgentMode,
   type PromptTemplateInfo,
 } from "../composerBehavior";
 import {
@@ -263,16 +264,15 @@ export function useSessionComposerController(
 
   const draft = drafts[sessionId] ?? "";
   const attachments = attachmentsBySession[sessionId] ?? [];
-  // DSH 后端：plan 模式由 host 持有（dsh-plan-mode 的 plan/mode 会话事件），
-  // 本地 mode atom 只承载 imagegen；plan 状态以 runtime state 为准（下一条消息生效）。
+  // DSH：plan 由 host 持有；goal 由本地选择或进行中/阻塞的目标驱动（切回普通会 pause）。
   // F6：DSH 无生图能力，imagegen 残留一律降级 normal（选择器已隐藏入口）。
   const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh";
-  const dshPlanActive = isDshBackend && runtime?.state?.planModeActive === true;
-  const mode: ComposerAgentMode = isDshBackend
-    ? dshPlanActive
-      ? "plan"
-      : "normal"
-    : (modes[sessionId] ?? "normal");
+  const mode: ComposerAgentMode = deriveComposerAgentMode({
+    backend: isDshBackend ? "dsh" : "pi",
+    localMode: modes[sessionId],
+    planModeActive: runtime?.state?.planModeActive === true,
+    goalPhase: runtime?.state?.goal?.phase,
+  });
   const sendState = sendStates[sessionId] ?? { status: "idle" as const };
   // DSH 部署默认模型选择（settings.yaml agent-default-model）：草稿/未激活会话
   // 的底栏与选择器用它展示默认模型/思考档位（host 会话创建前没有 runtime state）。
@@ -358,28 +358,82 @@ export function useSessionComposerController(
     setAttachmentsAtom({ sessionId, value });
   }, [sessionId, setAttachmentsAtom]);
 
-  const setMode = useCallback((nextMode: "normal" | "plan" | "imagegen") => {
-    // DSH 后端：plan 开关走 host /plan 命令（host slash 桥执行，plan/mode 事件
-    // 落会话日志，下一条消息的步骤才生效）；imagegen 仍是本地 UI 模式。
-    if (isDshBackend && (nextMode === "plan" || nextMode === "normal")) {
-      const command = nextMode === "plan" ? "/plan" : "/plan off";
+  const setMode = useCallback((nextMode: ComposerAgentMode) => {
+    // DSH：plan 走 host /plan；goal 走 create/resume/pause IPC（切回普通暂停，不清除）。
+    // 本地 atom 仍写入 goal，让选择器立刻切到目标模式；首条用户消息再 /goal 创建。
+    if (isDshBackend) {
+      const currentPhase = runtime?.state?.goal?.phase;
+      const agentId = runtime?.agentId;
+      if (nextMode === "plan" || (nextMode === "normal" && mode === "plan")) {
+        const command = nextMode === "plan" ? "/plan" : "/plan off";
+        void desktopApi.sessions.sendPrompt({
+          sessionId,
+          requestId: crypto.randomUUID(),
+          message: command,
+        }).then((result) => {
+          if (!result.accepted) {
+            showNotice(result.error ?? t("dshPlan.switchFailed"), 4000);
+          } else if (nextMode === "plan") {
+            showNotice(t("dshPlan.pendingNotice"), 3000);
+          }
+        }).catch((error) => {
+          showNotice(error instanceof Error ? error.message : String(error), 4000);
+        });
+        if (nextMode === "plan") {
+          setModeAtom({ sessionId, mode: "normal" });
+          // 模式选择器互斥：进 plan 时暂停进行中的 goal，不清除。
+          if (agentId && (currentPhase === "active" || currentPhase === "blocked")) {
+            void desktopApi.sessions.runDshGoalAction(agentId, "pause").catch((error) => {
+              showNotice(error instanceof Error ? error.message : String(error), 4000);
+            });
+          }
+        }
+        return;
+      }
+      if (nextMode === "goal") {
+        if (mode === "plan") {
+          void desktopApi.sessions.sendPrompt({
+            sessionId,
+            requestId: crypto.randomUUID(),
+            message: "/plan off",
+          }).catch((error) => {
+            showNotice(error instanceof Error ? error.message : String(error), 4000);
+          });
+        }
+        setModeAtom({ sessionId, mode: "goal" });
+        if (agentId && (currentPhase === "paused" || currentPhase === "blocked")) {
+          void desktopApi.sessions.runDshGoalAction(agentId, "resume").catch((error) => {
+            showNotice(error instanceof Error ? error.message : String(error), 4000);
+          });
+        } else if (!currentPhase || currentPhase === "complete") {
+          showNotice(t("dshGoal.pendingNotice"), 3000);
+        }
+        return;
+      }
+      if (nextMode === "normal" && mode === "goal") {
+        setModeAtom({ sessionId, mode: "normal" });
+        if (agentId && (currentPhase === "active" || currentPhase === "blocked")) {
+          void desktopApi.sessions.runDshGoalAction(agentId, "pause").catch((error) => {
+            showNotice(error instanceof Error ? error.message : String(error), 4000);
+          });
+        }
+        return;
+      }
+    }
+    // pi：切回普通立刻发 /goal pause，不要等下一条无标记消息才停。
+    if (!isDshBackend && nextMode === "normal" && mode === "goal") {
+      setModeAtom({ sessionId, mode: "normal" });
       void desktopApi.sessions.sendPrompt({
         sessionId,
         requestId: crypto.randomUUID(),
-        message: command,
-      }).then((result) => {
-        if (!result.accepted) {
-          showNotice(result.error ?? t("dshPlan.switchFailed"), 4000);
-        } else if (nextMode === "plan") {
-          showNotice(t("dshPlan.pendingNotice"), 3000);
-        }
+        message: "/goal pause",
       }).catch((error) => {
         showNotice(error instanceof Error ? error.message : String(error), 4000);
       });
       return;
     }
     setModeAtom({ sessionId, mode: nextMode });
-  }, [isDshBackend, sessionId, setModeAtom]);
+  }, [isDshBackend, mode, runtime?.agentId, runtime?.state?.goal?.phase, sessionId, setModeAtom]);
 
   const loadTemplates = useCallback(async () => {
     const token = templateRequestGateRef.current.begin(templateKey);
@@ -683,7 +737,21 @@ export function useSessionComposerController(
     sendPrompt: (input) => desktopApi.sessions.sendPrompt(input),
     ensureSessionId,
     templates,
-    prepareMessage: resolveSessionReferences,
+    prepareMessage: async (message) => {
+      const resolved = await resolveSessionReferences(message);
+      // 条上暂停后 composer 仍可能停在目标模式：发送前先 resume，否则 host 不会续轮。
+      if (isDshBackend && mode === "goal") {
+        const phase = runtime?.state?.goal?.phase;
+        if (runtime?.agentId && (phase === "paused" || phase === "blocked")) {
+          try {
+            await desktopApi.sessions.runDshGoalAction(runtime.agentId, "resume");
+          } catch (error) {
+            showNotice(error instanceof Error ? error.message : String(error), 4000);
+          }
+        }
+      }
+      return resolved;
+    },
     onDraftMutation: markDraftMutation,
     compact: async (target, prompt) => {
       // /compact 与 chip 共用同一友好错误映射（nothing-to-do / too-small / 静默取消）

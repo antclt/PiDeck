@@ -693,6 +693,7 @@ export class ExtensionManager {
 export const BUILT_IN_CONFLICT_KEYWORDS = [
 	["pi-deck-todo.ts", "todo"],
 	["pi-deck-plan-mode.ts", "plan"],
+	["pi-deck-goal-mode.ts", "goal"],
 	["pi-deck-ask-question.ts", "ask"],
 ] as const;
 

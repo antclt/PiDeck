@@ -17,6 +17,8 @@ test("goal strip hides when absent or complete and keeps blocked visible", () =>
   assert.match(source, /if \(!goal \|\| goal\.phase === "complete"\) return null/);
   assert.match(source, /goal\.phase === "blocked"/);
   assert.match(source, /runDshGoalAction\(agentId, action\)/);
+  assert.match(source, /parsePiGoalWidget/);
+  assert.match(source, /\/goal pause/);
   assert.match(source, /ConfirmDialog/);
 });
 

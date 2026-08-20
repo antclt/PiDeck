@@ -216,5 +216,5 @@ export type ThinkingUpdate = {
 	done: boolean;
 };
 
-/** 输入框发送模式，决定消息直接执行还是以只读方式触发生成计划。 */
-export type ComposerAgentMode = "normal" | "plan" | "imagegen";
+/** 输入框发送模式：普通执行 / 只读计划 / 生图 / 目标自动推进。 */
+export type ComposerAgentMode = "normal" | "plan" | "imagegen" | "goal";

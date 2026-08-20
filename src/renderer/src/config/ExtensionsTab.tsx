@@ -34,6 +34,7 @@ function formatExtensionError(error: unknown): string {
 const PIDEK_BUILTIN_SOURCE: Record<string, string> = {
 	"pi-deck-todo": "pi-deck-todo.ts",
 	"pi-deck-plan-mode": "pi-deck-plan-mode.ts",
+	"pi-deck-goal-mode": "pi-deck-goal-mode.ts",
 	"pi-deck-ask-question": "pi-deck-ask-question.ts",
 	"pi-deck-nul-redirect-fix": "pi-deck-nul-redirect-fix.ts",
 };
@@ -55,6 +56,16 @@ const RECOMMENDED_PACKAGES: RecommendedPackage[] = [
 		name: "pi-deck-plan-mode",
 		descriptionKey: "config.extRecommended.piDeckPlanMode",
 		installCmd: "npm:@earendil-works/pi-deck-plan-mode",
+		tags: ["extension"],
+		downloads: "",
+		updated: "",
+		npmUrl: "",
+		repoUrl: "https://github.com/ayuayue/PiDeck",
+	},
+	{
+		name: "pi-deck-goal-mode",
+		descriptionKey: "config.extRecommended.piDeckGoalMode",
+		installCmd: "npm:@earendil-works/pi-deck-goal-mode",
 		tags: ["extension"],
 		downloads: "",
 		updated: "",

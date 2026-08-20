@@ -67,8 +67,9 @@ test("listActiveBuiltInExtensionPaths respects removedBuiltIn and missing files"
 		);
 		assert.equal(paths.length, 1);
 		assert.ok(String(paths[0]).endsWith("pi-deck-ask-question.ts"));
-		// 内置扩展清单随版本增长：ask/nul-redirect/plan-mode/security-gate/todo/vision
-		assert.equal(BUILT_IN_EXTENSIONS.length, 6);
+		// 内置扩展清单随版本增长：ask/goal/nul-redirect/plan-mode/security-gate/todo/vision
+		assert.equal(BUILT_IN_EXTENSIONS.length, 7);
+		assert.ok(BUILT_IN_EXTENSIONS.includes("pi-deck-goal-mode.ts"));
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

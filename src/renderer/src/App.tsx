@@ -94,6 +94,7 @@ import {
   upsertSessionAtom,
 } from "./atoms";
 import {
+  applyDshGoalSendTransform,
   buildComposerPromptSubmission,
 } from "./composerBehavior";
 import {
@@ -1616,7 +1617,6 @@ export function App() {
     }
     void api.sessions
       .listRuntimeCommands(target)
-      // goal 模式这版先不公开入口；保留底层实现,等待官方 plan/goal 能力稳定后再决定是否恢复。
       .then((result) => setCommands(requireSessionCommand(result).value))
       .catch(() => setCommands([]));
   }, [activeAgentId, currentSessionId]);
@@ -2084,8 +2084,6 @@ export function App() {
 
   // Session prompt submission is owned by useSessionComposerController.
 
-  // 已删除内置 /goal 与 startNewGoal 实现。
-
   async function dispatchPromptSnapshot(
     sessionId: string,
     message: string,
@@ -2094,7 +2092,20 @@ export function App() {
     agentMode: ComposerAgentMode = "normal",
     templateDescription?: string,
   ) {
-    const submission = buildComposerPromptSubmission(message, agentMode);
+    // 排队投递与输入框同一套规则：DSH 拒绝 agentMessage，首次目标改写成 /goal。
+    const record = store.get(sessionRecordByIdAtomFamily(sessionId));
+    const isDsh = record?.backend === "dsh";
+    const visibleMessage = isDsh
+      ? applyDshGoalSendTransform({
+          message,
+          mode: agentMode,
+          goal: store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))?.state?.goal,
+        })
+      : message;
+    const submission = buildComposerPromptSubmission(
+      visibleMessage,
+      isDsh ? "normal" : agentMode,
+    );
     let result: Awaited<ReturnType<typeof api.sessions.sendPrompt>>;
     try {
       result = await api.sessions.sendPrompt({

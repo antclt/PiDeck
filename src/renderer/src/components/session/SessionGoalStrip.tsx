@@ -1,43 +1,80 @@
 import { useAtomValue } from "jotai";
 import { useCallback, useRef, useState } from "react";
 import { Pause, Play, Target, Trash2 } from "lucide-react";
-import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
+import {
+	sessionRuntimeBySessionIdAtomFamily,
+	sessionRuntimeUiBySessionIdAtomFamily,
+} from "../../atoms";
+import { parsePiGoalWidget } from "../../composerBehavior";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
+import {
+	isCoherentComposerRuntimeUi,
+	type RuntimeHandle,
+} from "./ComposerRuntimeIntegrations";
 
 /**
  * composer 上方的 goal 常驻条（移植自 dsh-web GoalBar）。
  *
  * 形态：与 todo / queue 同列同宽的独立 36px 卡（图标 + 阶段 + 截断目标 + 操作）。
- * 数据来自 DSH runtime.state.goal 投影。无目标、加载中、已完成都不渲染
- * （完成态由工具面板查看，避免输入区上方长期占一条已结束目标）。
- *
- * 创建入口仍是 /goal 与 DSH 工具面板，本条只负责进行中目标的暂停/恢复/清除。
+ * 数据优先 DSH runtime.state.goal；pi 走内置扩展 widget `pi-deck-goal`。
+ * 无目标、已完成都不渲染。创建入口是模式选择器 / `/goal` / DSH 工具面板。
  */
 export function SessionGoalStrip(props: { sessionId: string }) {
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(props.sessionId));
-	const goal = runtime?.state?.goal;
+	const runtimeUi = useAtomValue(sessionRuntimeUiBySessionIdAtomFamily(props.sessionId));
 	const agentId = runtime?.agentId;
+	const isDsh = runtime?.backend === "dsh";
+	const runtimeHandle: RuntimeHandle | undefined = runtime?.agentId
+		? { agentId: runtime.agentId, runtimeGeneration: runtime.runtimeGeneration }
+		: undefined;
+	const coherent = isCoherentComposerRuntimeUi(runtimeHandle, runtimeUi) ? runtimeUi : undefined;
+	const piGoal = parsePiGoalWidget(coherent?.widgets?.["pi-deck-goal"]);
+	const goal = runtime?.state?.goal ?? (piGoal
+		? {
+			phase: piGoal.phase,
+			objective: piGoal.objective,
+			roundsStarted: piGoal.roundsStarted,
+			maxGoalRounds: piGoal.maxGoalRounds,
+		}
+		: undefined);
 	const [busy, setBusy] = useState(false);
 	const [confirmClear, setConfirmClear] = useState(false);
 	const pendingRef = useRef(false);
 
 	const runAction = useCallback(async (action: "pause" | "resume" | "clear") => {
-		if (!agentId || pendingRef.current) return;
+		if (pendingRef.current) return;
 		pendingRef.current = true;
 		setBusy(true);
 		try {
-			await desktopApi.sessions.runDshGoalAction(agentId, action);
+			if (isDsh) {
+				if (!agentId) return;
+				await desktopApi.sessions.runDshGoalAction(agentId, action);
+			} else {
+				const command = action === "pause"
+					? "/goal pause"
+					: action === "resume"
+						? "/goal resume"
+						: "/goal clear";
+				const result = await desktopApi.sessions.sendPrompt({
+					sessionId: props.sessionId,
+					requestId: crypto.randomUUID(),
+					message: command,
+				});
+				if (!result.accepted) {
+					showNotice(result.error ?? t("dshGoal.switchFailed"), 4000);
+				}
+			}
 		} catch (error) {
 			showNotice(error instanceof Error ? error.message : String(error), 4000);
 		} finally {
 			pendingRef.current = false;
 			setBusy(false);
 		}
-	}, [agentId]);
+	}, [agentId, isDsh, props.sessionId]);
 
 	// 无投影 / 已完成：不占输入区。blocked 仍展示，否则用户看不到卡住原因。
 	if (!goal || goal.phase === "complete") return null;
@@ -71,7 +108,7 @@ export function SessionGoalStrip(props: { sessionId: string }) {
 							className="size-7 rounded-full text-text-tertiary"
 							aria-label={t("dshTools.goalPause")}
 							title={t("dshTools.goalPause")}
-							disabled={busy || !agentId}
+							disabled={busy || (isDsh && !agentId)}
 							onClick={() => { void runAction("pause"); }}
 						>
 							<Pause size={14} aria-hidden="true" />
@@ -85,7 +122,7 @@ export function SessionGoalStrip(props: { sessionId: string }) {
 							className="size-7 rounded-full text-text-tertiary"
 							aria-label={t("dshTools.goalResume")}
 							title={t("dshTools.goalResume")}
-							disabled={busy || !agentId}
+							disabled={busy || (isDsh && !agentId)}
 							onClick={() => { void runAction("resume"); }}
 						>
 							<Play size={14} aria-hidden="true" />
@@ -97,7 +134,7 @@ export function SessionGoalStrip(props: { sessionId: string }) {
 						className="size-7 rounded-full text-text-tertiary hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
 						aria-label={t("dshTools.goalClear")}
 						title={t("dshTools.goalClear")}
-						disabled={busy || !agentId}
+						disabled={busy || (isDsh && !agentId)}
 						onClick={() => { setConfirmClear(true); }}
 					>
 						<Trash2 size={14} aria-hidden="true" />

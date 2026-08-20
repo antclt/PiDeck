@@ -694,6 +694,14 @@ function SessionTab(props: {
             {t("app.composerModePlan")}
           </span>
         )}
+        {runtime?.state?.goal && runtime.state.goal.phase !== "complete" && (
+          <span
+            className="shrink-0 rounded bg-accent/15 px-1 text-[10px] font-medium leading-4 text-accent"
+            title={t("app.composerModeGoal")}
+          >
+            {t("app.composerModeGoal")}
+          </span>
+        )}
         <span className={cn("min-w-0 flex-1 truncate", preview && "italic")}>{title}</span>
         {/* 拖拽插入指示线：2px 主题色竖线，贴在目标 Tab 左/右缘 */}
         {props.indicator && (

@@ -1896,6 +1896,16 @@ body.ask-dialog-open .ask-question-card.pending {
   box-shadow: 0 0 0 3px
     color-mix(in srgb, var(--color-brand-green) 7%, transparent);
 }
+.composer-box.goal-mode {
+  border-color: color-mix(
+    in srgb,
+    var(--color-accent) 34%,
+    var(--color-border-subtle)
+  );
+  background: var(--color-bg-panel);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
 .composer-box.shell-mode:focus-within {
   border-color: var(--color-warning);
   box-shadow: 0 0 0 3px
@@ -1910,9 +1920,15 @@ body.ask-dialog-open .ask-question-card.pending {
   box-shadow: 0 0 0 3px
     color-mix(in srgb, var(--color-brand-green) 14%, transparent);
 }
+.composer-box.goal-mode:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
 .composer-box.shell-mode::before,
 .composer-box.shell-silent-mode::before,
-.composer-box.plan-mode::before {
+.composer-box.plan-mode::before,
+.composer-box.goal-mode::before {
   opacity: 1;
 }
 .composer-box.shell-mode::before {
@@ -1923,6 +1939,9 @@ body.ask-dialog-open .ask-question-card.pending {
 }
 .composer-box.plan-mode::before {
   background: var(--color-brand-green);
+}
+.composer-box.goal-mode::before {
+  background: var(--color-accent);
 }
 .composer-box.shell-mode textarea,
 .composer-box.shell-silent-mode textarea {
@@ -1936,6 +1955,9 @@ body.ask-dialog-open .ask-question-card.pending {
 }
 .composer-box.plan-mode .composer-bottom-bar {
   border-top-color: color-mix(in srgb, var(--color-brand-green) 20%, transparent);
+}
+.composer-box.goal-mode .composer-bottom-bar {
+  border-top-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 .extension-widgets-container {
   display: flex;

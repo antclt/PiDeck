@@ -8,6 +8,7 @@ export type ComposerEnterIntent = "ignore" | "newline" | "send";
 import type { ComposerAgentMode } from "@shared/types";
 
 export const PI_DECK_PLAN_MODE_MARKER = "__PI_DECK_PLAN_MODE__";
+export const PI_DECK_GOAL_MODE_MARKER = "__PI_DECK_GOAL_MODE__";
 
 export type ComposerPromptSubmission = {
 	/** 用户在 PiDeck 时间线里看到的原始消息，不能包含桌面端内部控制标记。 */
@@ -194,30 +195,116 @@ export function expandPromptTemplates(
 }
 
 
+/** DSH 当前目标投影（只取派生模式/首轮 /goal 需要的字段）。 */
+export type DshGoalModeSnapshot = {
+	phase?: "active" | "paused" | "blocked" | "complete";
+};
+
+/**
+ * 桌面端派生 composer 模式。DSH：plan 由 host 持有；goal 由本地选择或进行中/阻塞的目标驱动。
+ * 切回普通会把本地 mode 写成 normal，因此 paused 目标不会把选择器锁在目标模式。
+ */
+export function deriveComposerAgentMode(input: {
+	backend?: "pi" | "dsh";
+	localMode?: ComposerAgentMode;
+	planModeActive?: boolean;
+	goalPhase?: DshGoalModeSnapshot["phase"];
+}): ComposerAgentMode {
+	const localMode = input.localMode;
+	if (input.backend !== "dsh") return localMode ?? "normal";
+	if (localMode === "imagegen") return "normal";
+	if (input.planModeActive) return "plan";
+	// 用户刚切回普通时 localMode 为 "normal"：即使 pause IPC 尚未落地，也不要把选择器弹回目标。
+	if (localMode === "normal") return "normal";
+	if (localMode === "goal") return "goal";
+	// 刷新后 atom 为空：进行中/阻塞的目标把选择器恢复为 goal。
+	if (input.goalPhase === "active" || input.goalPhase === "blocked") return "goal";
+	return "normal";
+}
+
+/**
+ * DSH 没有 pi 的隐藏 agentMessage。首次进入目标且还没有 goal 时，把用户原文改写成 host `/goal`。
+ * 已有未完成目标时保持原文，由 resume IPC + 普通 prompt 推进。
+ */
+export function applyDshGoalSendTransform(input: {
+	message: string;
+	mode: ComposerAgentMode;
+	goal?: DshGoalModeSnapshot;
+}): string {
+	if (input.mode !== "goal") return input.message;
+	const trimmed = input.message.trim();
+	if (!trimmed || trimmed.startsWith("/")) return input.message;
+	const phase = input.goal?.phase;
+	if (phase && phase !== "complete") return input.message;
+	return `/goal ${trimmed}`;
+}
+
+/** 解析 pi-deck-goal-mode widget 行：`phase · rounds/max` + 目标 + 可选阻塞原因。 */
+export function parsePiGoalWidget(lines: readonly string[] | undefined): {
+	phase: "active" | "paused" | "blocked" | "complete";
+	objective: string;
+	roundsStarted: number;
+	maxGoalRounds: number;
+	blockReason?: string;
+} | undefined {
+	if (!lines || lines.length < 2) return undefined;
+	const header = lines[0]?.trim() ?? "";
+	const match = header.match(/^(active|paused|blocked|complete)\s*·\s*(\d+)\s*\/\s*(\d+)\s*$/);
+	if (!match) return undefined;
+	const objective = lines[1]?.trim() ?? "";
+	if (!objective) return undefined;
+	const phaseToken = match[1];
+	if (
+		phaseToken !== "active" &&
+		phaseToken !== "paused" &&
+		phaseToken !== "blocked" &&
+		phaseToken !== "complete"
+	) {
+		return undefined;
+	}
+	return {
+		phase: phaseToken,
+		objective,
+		roundsStarted: Number(match[2]),
+		maxGoalRounds: Number(match[3]),
+		...(phaseToken === "blocked" && lines[2]?.trim() ? { blockReason: lines[2].trim() } : {}),
+	};
+}
+
 export function buildComposerPromptSubmission(
 	message: string,
 	mode: ComposerAgentMode,
 ): ComposerPromptSubmission {
-	if (mode !== "plan") return { message };
-
-	// 斜线命令原样发送，让 pi 解析执行——plan 模式下也能用 /plan off、/todos 等，
-	// 否则 plan 标记前缀会让 "/plan off" 变成普通消息发给 LLM，命令无法触发。
 	const trimmed = message.trim();
+	// 斜线命令原样发送，让 pi 解析执行——plan/goal 模式下也能用 /plan off、/goal pause。
+	// 否则隐藏标记前缀会把命令变成普通消息发给 LLM。
 	if (trimmed.startsWith("/")) return { message };
 
-	const visibleInstruction = trimmed || "请根据已附加的图片或上下文先制定实施计划。";
-	return {
-		message,
-		agentMessage: [
-			PI_DECK_PLAN_MODE_MARKER,
-			visibleInstruction,
-			"",
-			"请先只做只读分析，不要修改文件。最后必须输出以 `Plan:` 开头的编号计划，格式如下：",
-			"Plan:",
-			"1. 第一步",
-			"2. 第二步",
-		].join("\n"),
-	};
+	if (mode === "plan") {
+		const visibleInstruction = trimmed || "请根据已附加的图片或上下文先制定实施计划。";
+		return {
+			message,
+			agentMessage: [
+				PI_DECK_PLAN_MODE_MARKER,
+				visibleInstruction,
+				"",
+				"请先只做只读分析，不要修改文件。最后必须输出以 `Plan:` 开头的编号计划，格式如下：",
+				"Plan:",
+				"1. 第一步",
+				"2. 第二步",
+			].join("\n"),
+		};
+	}
+
+	if (mode === "goal") {
+		const visibleInstruction = trimmed || "请继续当前目标。";
+		return {
+			message,
+			agentMessage: [PI_DECK_GOAL_MODE_MARKER, visibleInstruction].join("\n"),
+		};
+	}
+
+	return { message };
 }
 
 type ComposerKeyboardState = {

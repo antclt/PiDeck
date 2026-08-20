@@ -283,7 +283,9 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                     ? "shell-mode"
                     : composer.mode === "plan"
                       ? "plan-mode"
-                      : "",
+                      : composer.mode === "goal"
+                        ? "goal-mode"
+                        : "",
               ].filter(Boolean).join(" ")}
             >
               {/* 扩展 widget（Todo/Plan）由常驻 todo 条（SessionTodoStrip）展示。 */}
@@ -311,7 +313,9 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                         ? t("app.composerShellPlaceholder")
                         : composer.mode === "plan"
                           ? t("app.composerPlanPlaceholder")
-                          : t("app.composerEnterPlaceholder")
+                          : composer.mode === "goal"
+                            ? t("app.composerGoalPlaceholder")
+                            : t("app.composerEnterPlaceholder")
                 }
                 onFocus={composer.editor.onFocus}
                 onChange={composer.editor.onChange}
