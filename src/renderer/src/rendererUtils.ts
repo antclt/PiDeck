@@ -6,12 +6,32 @@ import type {
 } from "../../shared/types";
 import { isSameSessionPath } from "./agentListDisplay";
 
-// 默认高度偏矮，给 timeline 多留正文。
-// 最小高度必须 ≥ composer-box CSS min-height(112) + footer pb(12) + 边框余量，
-// 否则拖到最低会裁切模式/模型底栏并出现多余滚动条。
+// 默认高度只作测量前的首帧占位，测到内容后 hug 回去。
+// 最小高度对齐 composer-box CSS min-height(112)：输入区 + 模式/模型底栏。
+// 指标条不预留：无数字时 footer 无底 padding，面板按实测内容回缩，避免卡下空白。
 export const COMPOSER_DEFAULT_HEIGHT = 160;
-const COMPOSER_MIN_HEIGHT = 148;
+const COMPOSER_MIN_HEIGHT = 112;
 export { COMPOSER_MIN_HEIGHT };
+
+/**
+ * 底部输入栏面板目标高度。
+ *
+ * 业务规则：无指标/无独立卡时 hug 实测内容，不把 DEFAULT(160) 当用户偏好垫高。
+ * 用户拖过才抬楼（userPreferredHeight>0）；contentHeight≤0 视为尚未测到，退回 minHeight。
+ */
+export function resolveComposerPanelHeight(input: {
+	contentHeight: number;
+	userPreferredHeight: number;
+	minHeight: number;
+	maxHeight: number;
+}): number {
+	const measured = input.contentHeight > 0 ? input.contentHeight : input.minHeight;
+	const userFloor = input.userPreferredHeight > 0 ? input.userPreferredHeight : 0;
+	return Math.min(
+		Math.max(measured, userFloor, input.minHeight),
+		Math.max(input.minHeight, input.maxHeight),
+	);
+}
 
 /** 输入正文区封顶高度（px），对齐 dsh-web `--dsh-composer-text-max-height`。
  *  超过后 ProseMirror 内部滚动，不再把输入卡/面板无限撑高。 */
@@ -61,14 +81,46 @@ export function sanitizeSessionPanelLayout(
 ): Record<string, number> {
 	const composer = panels.composer ? layout.composer : undefined;
 	const terminal = panels.terminal ? layout.terminal : undefined;
-	// 键插入顺序必须与 DOM 面板顺序一致（timeline → composer → terminal）。
-	// 库 K() 用 Object.values(layout) 按下标对齐面板，不按 id 查表；
-	// 先写 composer 再写 timeline 会把 16% 分给时间线、84% 分给输入栏。
+	const timeline = Math.max(0, 100 - (composer ?? 0) - (terminal ?? 0));
+	const next: Record<string, number> = {};
+	// 必须沿用 getLayout() 的键序：K() 用 Object.values 下标对齐 panelConstraints，
+	// constraints 顺序 = 当前 layout 键序（He() 会把带 defaultSize 的 composer 排在前面）。
+	// 强行写成 timeline,composer 会把 [84,16] 打到 composer-first 的面板数组上，
+	// 输入栏吃 84%、拖分隔条方向反了。
+	for (const key of Object.keys(layout)) {
+		if (key === "timeline") next.timeline = timeline;
+		else if (key === "composer" && composer !== undefined) next.composer = composer;
+		else if (key === "terminal" && terminal !== undefined) next.terminal = terminal;
+	}
+	// 新挂上的面板按 DOM 顺序追加（timeline → composer → terminal）
+	if (next.timeline === undefined) next.timeline = timeline;
+	if (composer !== undefined && next.composer === undefined) next.composer = composer;
+	if (terminal !== undefined && next.terminal === undefined) next.terminal = terminal;
+	return next;
+}
+
+/**
+ * Group 首帧 defaultLayout（百分比，键序 = DOM：timeline → composer → terminal）。
+ * 不传时库 He() 在 groupSize=0 会均分 → 输入栏占半屏；再被 onResize 当成用户拖高锁死。
+ */
+export function sessionGroupDefaultLayout(
+	panels: SessionPanelSet,
+	composerPx: number,
+	terminalPx: number,
+	groupPx: number,
+): Record<string, number> {
+	const safeGroup = Math.max(groupPx, 1);
+	const composerPct = panels.composer
+		? Math.min(40, Math.max(8, (Math.max(composerPx, 0) / safeGroup) * 100))
+		: 0;
+	const terminalPct = panels.terminal
+		? Math.min(50, Math.max(0, (Math.max(terminalPx, 0) / safeGroup) * 100))
+		: 0;
 	const next: Record<string, number> = {
-		timeline: Math.max(0, 100 - (composer ?? 0) - (terminal ?? 0)),
+		timeline: Math.max(0, 100 - composerPct - terminalPct),
 	};
-	if (composer !== undefined) next.composer = composer;
-	if (terminal !== undefined) next.terminal = terminal;
+	if (panels.composer) next.composer = composerPct;
+	if (panels.terminal) next.terminal = terminalPct;
 	return next;
 }
 

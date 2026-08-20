@@ -58,10 +58,11 @@ test("ask stays out of composer sizing and uses the session timeline as its scro
  * 同时把 Ask 的可变高度交给 timeline，而不是继续用一个无法满足的 312px 组合约束。
  */
 test("composer minimum still fits the editor after ask moves to timeline", () => {
-  const composerMinHeight = 148;
+  const composerMinHeight = 112;
   const composerBoxMinHeight = 112;
-  const composerVerticalPadding = 12;
-  const composerGap = 8;
+  // 无指标时 footer pb-0，独立卡 empty:hidden 不占 gap；最低只需输入卡本身。
+  const composerVerticalPadding = 0;
+  const composerGap = 0;
   const requiredHeight = composerBoxMinHeight + composerVerticalPadding + composerGap;
 
   assert.ok(

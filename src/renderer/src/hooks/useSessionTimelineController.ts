@@ -11,7 +11,7 @@ import { atom, useAtomValue, useSetAtom, useStore } from "jotai";
 import { animateScrollTop, pinScrollDurationMs } from "../lib/pinTurnScroll";
 import { selectAtom } from "jotai/utils";
 import { desktopApi } from "../desktopApi";
-import type { AgentRuntimeState, ChatMessage } from "../../../shared/types";
+import type { AgentRuntimeState, ChatMessage, SessionRecord } from "../../../shared/types";
 import {
 	cacheSessionMessagesAtom,
 	clearSessionHistoryAtom,
@@ -20,6 +20,7 @@ import {
   sessionMessageLoadStateAtom,
   sessionMessagesCacheAtom,
   sessionMessageCacheBySessionIdAtomFamily,
+  sessionRecordByIdAtomFamily,
   saveSessionScrollAnchorAtom,
   sessionScrollAnchorByIdAtom,
   setSessionMessageLoadStateAtom,
@@ -138,6 +139,18 @@ export function isUserFacingSessionStart(sendStatus: string | undefined): boolea
   return sendStatus === "activating";
 }
 
+/** catalog 已确认无磁盘历史：空草稿、从未落文件的 pi 会话、尚无 host id 的新 DSH。 */
+export function isKnownEmptySessionRecord(
+  record: Pick<SessionRecord, "status" | "filePath" | "messageCount" | "backend" | "dshSessionId"> | undefined,
+): boolean {
+  if (!record) return false;
+  if (record.status === "draft") return true;
+  if ((record.messageCount ?? 0) > 0) return false;
+  if (record.filePath) return false;
+  if (record.backend === "dsh" && record.dshSessionId) return false;
+  return true;
+}
+
 export function deriveSessionSurfaceRuntime(
   messageCount: number,
   messageLoadStatus: string | undefined,
@@ -145,12 +158,18 @@ export function deriveSessionSurfaceRuntime(
   runtimeStatus: string | undefined,
   runtimeState: AgentRuntimeState | undefined,
   hasCachedEntry?: boolean,
+  /**
+   * catalog 已确认是空草稿（draft / 无会话文件且 messageCount=0）。
+   * 不能把 undefined/loading 钉成骨架：否则新建会话先挂底部输入栏再卸掉改居中起始页
+   * （输入框上跳），切回空会话还闪「正在加载历史」。有 filePath 的历史仍走下方规则。
+   */
+  knownEmpty?: boolean,
 ) {
   const activating = isUserFacingSessionStart(sendStatus);
   const status = activating ? "starting" : runtimeStatus;
   return {
     status,
-    isLoading: messageCount === 0 && (
+    isLoading: !knownEmpty && messageCount === 0 && (
       messageLoadStatus === "loading" ||
       // 挂载首帧 loadState 尚未写入（passive effect 在 paint 后才置 loading），
       // undefined 一律视为加载中——否则有历史的会话会被误判为「空会话」，
@@ -337,8 +356,13 @@ export function useSessionTimelineController(options: {
   const touchMessages = useSetAtom(touchSessionMessagesAtom);
   const loadStates = useAtomValue(sessionMessageLoadStateAtom);
   const lastLoadedSessionRef = useRef<string | undefined>(undefined);
+  const sessionRecord = useAtomValue(
+    sessionRecordByIdAtomFamily(options.sessionId ?? ""),
+  );
+  const knownEmpty = isKnownEmptySessionRecord(sessionRecord);
   // 与 SessionMessageTimeline 同一套 deriveSessionSurfaceRuntime：历史会话首帧
-  // messages 仍为空时视为加载中，底部 composer 不能卸掉。
+  // messages 仍为空时视为加载中，底部 composer 不能卸掉。空草稿除外——
+  // 新建/切回空会话必须留在起始页，不能先挂底部栏再卸（输入框上跳）。
   const isSurfaceLoading = deriveSessionSurfaceRuntime(
     messages.length,
     options.sessionId ? loadStates[options.sessionId]?.status : undefined,
@@ -346,6 +370,7 @@ export function useSessionTimelineController(options: {
     undefined,
     undefined,
     Boolean(cachedEntry),
+    knownEmpty,
   ).isLoading;
 
 	// useLayoutEffect 而非 useEffect：loading 状态必须在首帧 paint 之前写入，
@@ -359,12 +384,12 @@ export function useSessionTimelineController(options: {
     // 否则已挂载会话永久卡骨架屏（2026-12 回归修复）。
     if (previouslyLoaded && cachedEntry) return;
     if (!previouslyLoaded) lastLoadedSessionRef.current = sessionId;
+    // 切会话复用同一 hook 实例（solo 栏无 sessionId key）：已有缓存时不要把
+    // loadState 打成 loading。空会话 messages=0 + loading 会闪骨架「正在加载历史」。
+    if (cachedEntry || knownEmpty) return;
 
-    const entry = cachedEntry;
     const sequence = ++nextLoadSequence;
     trackLatestLoad(sessionId, sequence);
-    const expectedRevision = entry?.revision ?? 0;
-    if (entry) touchMessages(sessionId);
     setLoadState({ sessionId, state: { status: "loading" } });
 
 		void desktopApi.sessions
@@ -375,7 +400,7 @@ export function useSessionTimelineController(options: {
 					sessionId,
 					messages: page.messages,
 					source: "disk",
-					expectedRevision,
+					expectedRevision: 0,
 					page: { total: page.total, nextBefore: page.nextBefore },
 				});
         setLoadState({ sessionId, state: { status: "ready" } });
@@ -390,7 +415,7 @@ export function useSessionTimelineController(options: {
           },
         });
       });
-  }, [options.sessionId, cachedEntry]);
+  }, [options.sessionId, cachedEntry, knownEmpty]);
 
 	const diskPage = controllerEnabled && cachedEntry?.source === "disk"
 		? cachedEntry.page

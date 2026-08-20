@@ -555,6 +555,16 @@ export const zhCN = {
   "sessionContext.tools": "工具",
   "sessionContext.compact": "压缩上下文",
   "sessionContext.compacting": "压缩中…",
+  // 输入卡正下方指标条（dsh-web StatsLine）：DSH 用整段日志统计，pi 用上次回复
+  "composerStats.counts": "{turns} 轮 · {steps} 步",
+  "composerStats.llm": "LLM {duration}",
+  "composerStats.toolCall": "工具调用 {duration}",
+  "composerStats.ttftAverage": "首 token 平均 {duration}",
+  "composerStats.tps": "{throughput} tok/s",
+  "composerStats.cacheHit": "缓存命中 {percent}%",
+  "composerStats.tokens": "输入 {input} tok · 输出 {output} tok",
+  "composerStats.ttft": "首 token {duration}",
+  "composerStats.reply": "回复 {duration}",
   // composer 上方 todo 常驻条（借鉴 dsh-web TodoPanel）：进度文案零计数省略，
   // 段间用 en-space 连接（HTML 折叠连续 ASCII 空格，需字面宽空格）
   "sessionTodo.title": "待办",

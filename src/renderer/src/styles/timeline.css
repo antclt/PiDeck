@@ -1654,7 +1654,7 @@ body.ask-dialog-open .ask-question-card.pending {
 
 .composer {
   background: var(--color-bg-panel);
-  /* 左右必须为 0：否则输入框比消息区窄一截（旧 space-2 ≈ 8px）。底距由组件 pb-3 承担。 */
+  /* 左右必须为 0：否则输入框比消息区窄一截（旧 space-2 ≈ 8px）。无指标时无底距，有指标由 StatsLine 自带 pb。 */
   padding-inline: 0;
   padding-block: 0;
   min-width: 0;
@@ -1666,7 +1666,7 @@ body.ask-dialog-open .ask-question-card.pending {
   gap: var(--space-2);
 }
 /* pure official：composer-box 布局/边框/阴影由 ComposerArea Tailwind 承担。
-   min-height 与 COMPOSER_MIN_HEIGHT 对齐：输入区 + 模式/模型底栏完整可见。
+   min-height 与 COMPOSER_MIN_HEIGHT(112) 对齐：只保输入区 + 模式/模型底栏，不预留指标空位。
    overflow 保持 visible，避免裁切命令建议浮层。 */
 .composer-box {
   position: relative;

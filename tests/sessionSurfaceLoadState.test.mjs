@@ -73,6 +73,9 @@ test("timeline controller exposes surface loading for the bottom composer gate",
   // SessionView 不能再用 messages.length>0 当挂载条件：历史会话首帧 length=0。
   assert.match(controllerSource, /isSurfaceLoading/);
   assert.match(controllerSource, /deriveSessionSurfaceRuntime\(/);
+  assert.match(controllerSource, /isKnownEmptySessionRecord/);
+  // 切会话已有缓存或空草稿时不得把 loadState 打成 loading（否则空会话闪骨架）。
+  assert.match(controllerSource, /if \(cachedEntry \|\| knownEmpty\) return/);
 });
 
 test("timeline skeleton copy is history loading, not agent starting", () => {
@@ -93,6 +96,61 @@ test("unloaded session with no load state must not flash the start surface", () 
   // 历史会话会被误判为「空会话」→ 起始页闪屏。undefined 一律视为加载中。
   const unloaded = timeline.deriveSessionSurfaceRuntime(0, undefined, "idle", undefined, undefined);
   assert.equal(unloaded.isLoading, true);
+});
+
+test("known-empty drafts stay on the start surface instead of flashing history loading", () => {
+  // 新建/切到空草稿：catalog 已确认无文件无消息。不能把 undefined/loading
+  // 钉成骨架——否则底部 composer 先挂再卸（输入框上跳），切回空会话还闪「正在加载历史」。
+  const unloadedDraft = timeline.deriveSessionSurfaceRuntime(
+    0, undefined, "idle", undefined, undefined, false, true,
+  );
+  assert.equal(unloadedDraft.isLoading, false);
+  const loadingDraft = timeline.deriveSessionSurfaceRuntime(
+    0, "loading", "idle", undefined, undefined, false, true,
+  );
+  assert.equal(loadingDraft.isLoading, false);
+  // 有会话文件的历史仍按原规则：未到缓存前必须钉骨架，禁止闪起始页。
+  const history = timeline.deriveSessionSurfaceRuntime(
+    0, undefined, "idle", undefined, undefined, false, false,
+  );
+  assert.equal(history.isLoading, true);
+});
+
+test("isKnownEmptySessionRecord only treats drafts and file-less empty sessions as empty", () => {
+  const { isKnownEmptySessionRecord } = timeline;
+  assert.equal(isKnownEmptySessionRecord(undefined), false);
+  assert.equal(
+    isKnownEmptySessionRecord({ status: "draft", messageCount: 0 }),
+    true,
+  );
+  assert.equal(
+    isKnownEmptySessionRecord({ status: "active", messageCount: 0 }),
+    true,
+  );
+  assert.equal(
+    isKnownEmptySessionRecord({
+      status: "active",
+      messageCount: 0,
+      filePath: "/tmp/session.jsonl",
+    }),
+    false,
+  );
+  assert.equal(
+    isKnownEmptySessionRecord({
+      status: "active",
+      messageCount: 3,
+    }),
+    false,
+  );
+  assert.equal(
+    isKnownEmptySessionRecord({
+      status: "active",
+      messageCount: 0,
+      backend: "dsh",
+      dshSessionId: "sess_1",
+    }),
+    false,
+  );
 });
 
 test("ready load state with known-history record and empty cache stays loading", () => {

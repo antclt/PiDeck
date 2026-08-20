@@ -24,6 +24,7 @@ import { useSessionPaneServices } from "./SessionPaneServices";
 import { desktopApi } from "../../desktopApi";
 import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_TEXT_MAX_HEIGHT } from "../../rendererUtils";
 import { chatContentWidthStyle } from "./chatContentWidth";
+import { ComposerStatsLine } from "./ComposerStatsLine";
 import type { GitBranchInfo } from "../../../../shared/types";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 
@@ -69,6 +70,8 @@ type ComposerMeasuredExtrasProps = {
   deliveryNotice: ReactNode;
   attachmentBar: ReactNode;
   composerBox: ReactNode;
+  /** 输入卡正下方 StatsLine；与输入卡同一测量块，面板 hug 卡+指标。 */
+  statsLine?: ReactNode;
   onHeightChange: (contentHeight: number) => void;
 };
 
@@ -93,7 +96,7 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
     const widgetsH = widgetsRef.current?.offsetHeight ?? 0;
     const imageBarH = attachmentBarRef.current?.offsetHeight ?? 0;
     const boxH = composerBoxRef.current?.offsetHeight ?? 0;
-    // gap / 底 padding 实测：Tailwind gap-2、pb-3 是 rem，随根字号变化。
+    // gap / 底 padding 实测：Tailwind gap-2 是 rem；无指标时 footer pb-0，有指标才由 StatsLine 占位。
     let gapPx = CONTENT_GAP_PX;
     let paddingBottom = 0;
     const footerEl = widgetsRef.current?.parentElement;
@@ -161,9 +164,10 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
           {props.attachmentBar}
         </div>
       ) : null}
-      {/* 外层只承担测量；输入卡自身 shrink-0，不吃 footer 剩余高度。 */}
-      <div ref={composerBoxRef} className="w-full min-w-0 shrink-0">
+      {/* 外层只承担测量；输入卡 + StatsLine 一并 shrink-0，不吃 footer 剩余高度。 */}
+      <div ref={composerBoxRef} className="flex w-full min-w-0 shrink-0 flex-col">
         {props.composerBox}
+        {props.statsLine}
       </div>
     </>
   );
@@ -216,8 +220,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
       return;
     }
     if (contentHeight > 0) {
-      // 非受控保留宿主起步高度（起始页 defaultHeight），只允许内容把框再撑高。
-      setLocalHeight(Math.max(contentHeight, props.defaultHeight ?? COMPOSER_DEFAULT_HEIGHT));
+      // 非受控同样 hug 实测内容：起始页 defaultHeight 只作首帧占位，不预留指标空位。
+      setLocalHeight(contentHeight);
     }
   };
 
@@ -231,7 +235,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
               输入卡仍贴在时间线/独立卡下方，不被撑开。 */}
           <footer
             ref={footerRef}
-            className="composer flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-3"
+            className="composer flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-0"
             style={composerFooterStyle(
               props.height != null ? "100%" : localHeight,
             )}
@@ -259,6 +263,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 />
               ) : null}
               onHeightChange={handleContentHeightChange}
+              statsLine={<ComposerStatsLine state={composer.runtime?.state} />}
               composerBox={
             <div
               // overflow-visible：保留命令面板/建议浮层；面板 minSize 已保证底栏不被裁切

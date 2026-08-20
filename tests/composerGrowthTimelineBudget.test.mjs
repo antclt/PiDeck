@@ -128,6 +128,57 @@ test("expanding the terminal takes height from the timeline, not the composer", 
   assert.ok(approx(next.terminal, 40), `terminal ${next.terminal} ≈ 40`);
 });
 
+test("composer panel hugs measured content and does not reserve a stats slot", () => {
+  const {
+    resolveComposerPanelHeight,
+    COMPOSER_MIN_HEIGHT,
+    COMPOSER_DEFAULT_HEIGHT,
+  } = loadModule();
+  assert.equal(COMPOSER_MIN_HEIGHT, 112);
+  assert.equal(COMPOSER_DEFAULT_HEIGHT, 160);
+
+  // 未拖过：112 的输入卡不应被 DEFAULT 垫到 160（那就是卡下空白）。
+  assert.equal(
+    resolveComposerPanelHeight({
+      contentHeight: 112,
+      userPreferredHeight: 0,
+      minHeight: COMPOSER_MIN_HEIGHT,
+      maxHeight: 480,
+    }),
+    112,
+  );
+  // 指标出现：实测变高，面板跟着长。
+  assert.equal(
+    resolveComposerPanelHeight({
+      contentHeight: 136,
+      userPreferredHeight: 0,
+      minHeight: COMPOSER_MIN_HEIGHT,
+      maxHeight: 480,
+    }),
+    136,
+  );
+  // 用户拖高后，内容变矮也不回缩到拖高以下。
+  assert.equal(
+    resolveComposerPanelHeight({
+      contentHeight: 112,
+      userPreferredHeight: 200,
+      minHeight: COMPOSER_MIN_HEIGHT,
+      maxHeight: 480,
+    }),
+    200,
+  );
+  // 尚未测到内容：保持 min，避免 hug 到 0。
+  assert.equal(
+    resolveComposerPanelHeight({
+      contentHeight: 0,
+      userPreferredHeight: 0,
+      minHeight: COMPOSER_MIN_HEIGHT,
+      maxHeight: 480,
+    }),
+    COMPOSER_MIN_HEIGHT,
+  );
+});
+
 test("session view uses the budget function in programResize (not raw delta)", () => {
   const sessionView = readFileSync(
     "src/renderer/src/components/session/SessionView.tsx",
@@ -138,7 +189,17 @@ test("session view uses the budget function in programResize (not raw delta)", (
   assert.match(sessionView, /sanitizeSessionPanelLayout/);
   assert.match(sessionView, /sessionResizableGroupKey\(sessionPanels\)/);
   assert.match(sessionView, /shouldMountBottomComposer/);
+  assert.match(sessionView, /sessionGroupDefaultLayout/);
   assert.match(sessionView, /groupResizeBehavior="preserve-pixel-size"/);
+  assert.match(sessionView, /userComposerHeightRef\.current <= 0 &&/);
+  assert.match(sessionView, /px > composerHeightStateRef\.current \+ 40/);
+  assert.match(sessionView, /void programResize\(contentDrivenHeightRef\.current\)/);
+  assert.match(sessionView, /visualPx - target/);
+
+  assert.match(sessionView, /resolveComposerPanelHeight/);
+  assert.match(sessionView, /userComposerHeightRef\.current = 0/);
+  assert.match(sessionView, /useState\(COMPOSER_MIN_HEIGHT\)/);
+
   assert.match(sessionView, /composerHeightSessionRef/);
   assert.match(sessionView, /sessionTimeline\.isSurfaceLoading/);
 
@@ -228,39 +289,50 @@ test("history session loading keeps the bottom composer so the group is never 1-
 });
 
 /**
- * react-resizable-panels 的 K() 按 Object.values(layout) 下标对齐 DOM 面板顺序，
- * 不按 id 查表。键插入顺序必须是 timeline → composer → terminal，否则
- * {composer:16, timeline:84} 会把 16% 分给时间线、84% 分给输入栏——
- * 表现为消息只占半屏、输入框上方大块空白。
+ * K() 用 Object.values(layout) 对齐 panelConstraints 下标，而 constraints 顺序
+ * 等于 Group 当前 getLayout() 的键序。强行重排成 timeline,composer 会把
+ * {composer:16, timeline:84} 写成 {timeline:84, composer:16}，值按新键序
+ * [84,16] 打到仍是 composer-first 的面板数组上 → 输入栏吃 84%、拖拽反向。
  */
-function applyLayoutByInsertionOrder(layout, panelIds) {
-  const values = Object.values(layout);
-  const applied = {};
-  for (let i = 0; i < panelIds.length; i++) {
-    applied[panelIds[i]] = values[i];
-  }
-  return applied;
-}
-
-test("sanitized layout key order matches DOM panel order so percentages are not swapped", () => {
+test("sanitize preserves getLayout key order so percentages are not swapped", () => {
   const { sanitizeSessionPanelLayout } = loadModule();
 
-  const two = sanitizeSessionPanelLayout(
+  const composerFirst = sanitizeSessionPanelLayout(
+    { composer: 16.494, timeline: 83.506 },
+    { composer: true, terminal: false },
+  );
+  assert.equal(Object.keys(composerFirst).join(","), "composer,timeline");
+  assert.equal(composerFirst.composer, 16.494);
+  assert.ok(Math.abs(composerFirst.timeline - 83.506) < 1e-9);
+
+  const timelineFirst = sanitizeSessionPanelLayout(
     { timeline: 83.506, composer: 16.494 },
     { composer: true, terminal: false },
   );
-  assert.equal(Object.keys(two).join(","), "timeline,composer");
-  const twoApplied = applyLayoutByInsertionOrder(two, ["timeline", "composer"]);
-  assert.ok(Math.abs(twoApplied.timeline - 83.506) < 1e-9, `timeline got ${twoApplied.timeline}, not 83.506`);
-  assert.ok(Math.abs(twoApplied.composer - 16.494) < 1e-9, `composer got ${twoApplied.composer}, not 16.494`);
+  assert.equal(Object.keys(timelineFirst).join(","), "timeline,composer");
+  assert.equal(timelineFirst.composer, 16.494);
+  assert.ok(Math.abs(timelineFirst.timeline - 83.506) < 1e-9);
 
-  const three = sanitizeSessionPanelLayout(
-    { timeline: 50, composer: 20, terminal: 30 },
-    { composer: true, terminal: true },
+  const dropTerminal = sanitizeSessionPanelLayout(
+    { composer: 20, timeline: 50, terminal: 30 },
+    { composer: true, terminal: false },
   );
-  assert.equal(Object.keys(three).join(","), "timeline,composer,terminal");
-  const threeApplied = applyLayoutByInsertionOrder(three, ["timeline", "composer", "terminal"]);
-  assert.equal(threeApplied.timeline, 50);
-  assert.equal(threeApplied.composer, 20);
-  assert.equal(threeApplied.terminal, 30);
+  assert.equal(Object.keys(dropTerminal).join(","), "composer,timeline");
+  assert.equal(dropTerminal.composer, 20);
+  assert.equal(dropTerminal.terminal, undefined);
+  assert.ok(Math.abs(dropTerminal.timeline - 80) < 1e-9);
+});
+
+test("session group default layout keeps composer short and keys in DOM order", () => {
+  const { sessionGroupDefaultLayout } = loadModule();
+  const two = sessionGroupDefaultLayout(
+    { composer: true, terminal: false },
+    160,
+    0,
+    800,
+  );
+  assert.equal(Object.keys(two).join(","), "timeline,composer");
+  assert.equal(two.composer, 20);
+  assert.equal(two.timeline, 80);
+  assert.ok(two.composer < 40, "composer must not start at half the group");
 });

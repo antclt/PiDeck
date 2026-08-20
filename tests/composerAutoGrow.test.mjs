@@ -97,7 +97,8 @@ test("session view hugs composer panel to measured content height, not default p
   assert.match(sessionView, /onContentHeightChange=\{handleComposerContentHeight\}/);
   // 面板目标 = 测得的独立卡+输入卡总高，不再用 DEFAULT+extra 把输入区算进「被 extras 顶高」
   assert.doesNotMatch(sessionView, /COMPOSER_DEFAULT_HEIGHT \+ extraHeight/);
-  assert.match(sessionView, /Math\.max\(userPreferred, contentHeight, COMPOSER_MIN_HEIGHT\)/);
+  assert.match(sessionView, /resolveComposerPanelHeight\(/);
+  assert.doesNotMatch(sessionView, /Math\.max\(userPreferred, contentHeight, COMPOSER_MIN_HEIGHT\)/);
   assert.match(sessionView, /group\.setLayout\(next\)/);
   assert.match(sessionView, /growComposerWithinTimelineBudget/);
   assert.match(sessionView, /composerPanelRef\.current\?\.resize\(target\)/);
@@ -129,7 +130,9 @@ test("typed text grows the editor up to a dsh-like cap then scrolls", () => {
 
 test("auto growth does not relax the existing minimum-size constraints", () => {
   assert.match(rendererUtils, /COMPOSER_DEFAULT_HEIGHT = 160/);
-  assert.match(rendererUtils, /COMPOSER_MIN_HEIGHT = 148/);
+  assert.match(rendererUtils, /COMPOSER_MIN_HEIGHT = 112/);
   assert.match(sessionView, /minSize=\{COMPOSER_MIN_HEIGHT\}/);
   assert.match(composerArea, /composer-box[^"]*shrink-0/);
+  // 无指标不垫 footer 底距，避免输入卡下出现预留空白。
+  assert.match(composerArea, /className="composer[^\"]*px-0 pb-0"/);
 });

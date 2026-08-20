@@ -23,7 +23,7 @@ import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { SessionRuntimeDock } from "./SessionRuntimeDock";
 import { useSessionPaneServices } from "./SessionPaneServices";
-import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout } from "../../rendererUtils";
+import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight } from "../../rendererUtils";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 
@@ -177,9 +177,9 @@ export function SessionView({
   // #115 U5 垂直轴：timeline | composer | terminal 三段由 react-resizable-panels 接管。
   // composer 高度本地持有（px），终端高度/折叠仍由 useTerminalDock 的 per-agent
   // 状态持有，拖拽结果经 onResize 回写，外部状态经 imperative API 同步。
-  // 默认高度走 COMPOSER_DEFAULT_HEIGHT（偏矮，给 timeline 留正文）；
-  // Ask 属于会话交互状态，不再参与 composer 的高度分配；它固定在时间线底部，避免把输入框挤出面板。
-  const [composerHeight, setComposerHeight] = useState(COMPOSER_DEFAULT_HEIGHT);
+  // 起步高度走 COMPOSER_MIN_HEIGHT（输入卡本身），测到内容后再 hug；
+  // 不再用 DEFAULT(160) 预留指标空位。Ask 固定在时间线底部，不占输入栏高度。
+  const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
   const notifyLayoutResized = useNotifyLayoutResized();
   const terminalPanelRef = useRef<PanelImperativeHandle | null>(null);
   const sessionGroupRef = useRef<GroupImperativeHandle | null>(null);
@@ -191,12 +191,12 @@ export function SessionView({
   // 内容需要更高 → 自动增高；内容减少（含完全消失）且当前高度由内容驱动 → 回缩，
   // 但用户手动拖高的高度不被内容变化回缩。
   const composerPanelRef = useRef<PanelImperativeHandle | null>(null);
-  const composerHeightStateRef = useRef(COMPOSER_DEFAULT_HEIGHT);
-  // 用户手动拖拽后的面板高度（未拖拽时等于默认值）；内容自适应不会回缩到它以下
-  const userComposerHeightRef = useRef(COMPOSER_DEFAULT_HEIGHT);
+  const composerHeightStateRef = useRef(COMPOSER_MIN_HEIGHT);
+  // 用户手动拖高后的面板高度。0 = 从未拖过，此时 hug 实测内容，不把 DEFAULT 当楼板。
+  const userComposerHeightRef = useRef(0);
   // 内容驱动高度：最近一次内容所需的面板高度。回缩只发生在 current <= 该值
   // （面板高度未超过内容所需，即没有被用户手动拖高）。
-  const contentDrivenHeightRef = useRef(COMPOSER_DEFAULT_HEIGHT);
+  const contentDrivenHeightRef = useRef(COMPOSER_MIN_HEIGHT);
   // resize() 经 ResizeObserver 异步触发 onResize；用「时间窗口 + 内容驱动高度
   // 匹配」双重判断区分程序 resize 与用户拖拽，避免程序增高后的回调被误判为
   // 用户操作（误判会把用户手动高度抬到内容高度，导致内容减少时不再回缩）。
@@ -292,34 +292,28 @@ export function SessionView({
   }
 
   /**
-   * ComposerArea 上报独立卡 + 输入卡的内容总高度（px）。
-   * 目标高度 hug 该值，且不低于用户手动拖拽的高度 / COMPOSER_MIN_HEIGHT。
+   * ComposerArea 上报独立卡 + 输入卡 +（有数字才出现的）指标条总高度。
+   * 未拖过时 hug 实测值，不把 DEFAULT 当用户偏好；指标消失后底空隙一并收回。
    * 输入卡本身 shrink-0：面板被终端拖高时剩余空白不撑开输入框。
-   * - 内容需要更高 → 自动增高，并记录内容驱动高度；
-   * - 内容减少 → 仅当当前高度由内容驱动（未超过内容所需）时回缩，
-   *   用户手动拖高的高度不被内容变化回缩。
    */
   function handleComposerContentHeight(contentHeight: number) {
-    const maxAllowed = Math.max(COMPOSER_MIN_HEIGHT, composerMaxHeight);
-    const userPreferred = Math.max(
-      userComposerHeightRef.current,
-      COMPOSER_MIN_HEIGHT,
-    );
-    const target = Math.min(
-      Math.max(userPreferred, contentHeight, COMPOSER_MIN_HEIGHT),
-      maxAllowed,
-    );
+    const target = resolveComposerPanelHeight({
+      contentHeight,
+      userPreferredHeight: userComposerHeightRef.current,
+      minHeight: COMPOSER_MIN_HEIGHT,
+      maxHeight: composerMaxHeight,
+    });
     const current = composerHeightStateRef.current;
-    if (target === current) return;
+    // 百分比缓存可能把面板撑高，而 state 仍是 min：state 已贴合时仍要对齐视觉高度。
+    const visualPx = Math.round(composerPanelRef.current?.getSize()?.inPixels ?? current);
+    if (target === current && Math.abs(visualPx - target) <= 2) return;
     if (target > current) {
-      // 内容需要更高 → 自动增高，记录内容驱动高度
       contentDrivenHeightRef.current = target;
       if (programResize(target)) applyComposerHeight(target, false);
       return;
     }
-    // 内容减少需要更矮：仅当当前高度由内容驱动（未超过内容所需）时回缩；
-    // 用户手动拖高的高度不被内容变化回缩。
-    if (current <= contentDrivenHeightRef.current) {
+    // 未拖过必须收回空隙（指标消失、独立卡收起）；拖过才用内容驱动闸门，避免拖高被回吞。
+    if (userComposerHeightRef.current <= 0 || current <= contentDrivenHeightRef.current) {
       contentDrivenHeightRef.current = Math.min(
         contentDrivenHeightRef.current,
         target,
@@ -394,6 +388,16 @@ export function SessionView({
       setComposerHeight(px);
       return;
     }
+    // 从未拖过：丢掉首帧均分/百分比缓存的一次跳变（16% 缓存 ≈160px 也会锁住底空隙）。
+    // 真拖分隔条是从当前像素连续变化，允许小步；一次跳过 40px 视为布局噪声。
+    // 必须立刻 hug 回 state：只 return 的话面板已是 160、state 仍是 112，后续测量会以为已经贴合。
+    if (
+      userComposerHeightRef.current <= 0 &&
+      px > composerHeightStateRef.current + 40
+    ) {
+      void programResize(contentDrivenHeightRef.current);
+      return;
+    }
     programmaticResizeTargetRef.current = null;
     applyComposerHeight(px, true);
   }
@@ -430,11 +434,11 @@ export function SessionView({
   const composerHeightSessionRef = useRef(sessionId);
   if (composerHeightSessionRef.current !== sessionId) {
     composerHeightSessionRef.current = sessionId;
-    composerHeightStateRef.current = COMPOSER_DEFAULT_HEIGHT;
-    userComposerHeightRef.current = COMPOSER_DEFAULT_HEIGHT;
-    contentDrivenHeightRef.current = COMPOSER_DEFAULT_HEIGHT;
-    if (composerHeight !== COMPOSER_DEFAULT_HEIGHT) {
-      setComposerHeight(COMPOSER_DEFAULT_HEIGHT);
+    composerHeightStateRef.current = COMPOSER_MIN_HEIGHT;
+    userComposerHeightRef.current = 0;
+    contentDrivenHeightRef.current = COMPOSER_MIN_HEIGHT;
+    if (composerHeight !== COMPOSER_MIN_HEIGHT) {
+      setComposerHeight(COMPOSER_MIN_HEIGHT);
     }
   }
 
@@ -518,6 +522,14 @@ export function SessionView({
         orientation="vertical"
         className="session-v-group"
         groupRef={sessionGroupRef}
+        // groupSize=0 的首帧若不传 defaultLayout，库 He() 会把未设 defaultSize 的面板均分，
+        // 输入栏占半屏；键序必须 timeline → composer → terminal，与 DOM 一致。
+        defaultLayout={sessionGroupDefaultLayout(
+          sessionPanels,
+          composerHeightStateRef.current,
+          terminalCollapsed ? 34 : terminalRowHeight,
+          Math.max(1, window.innerHeight - 120),
+        )}
         // 拖拽命中区放大：输入框（composer-box）顶部边框在 v-splitter 下方约
         // 8px（footer gap-2），默认 fine 10px 覆盖不到——需在输入框框线上就能拖。
         // fine 20 → 命中区上下各 ~9.5px，覆盖输入框上沿。

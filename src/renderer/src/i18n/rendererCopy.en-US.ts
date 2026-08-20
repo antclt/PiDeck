@@ -558,6 +558,16 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionContext.tools": "Tools",
   "sessionContext.compact": "Compact context",
   "sessionContext.compacting": "Compacting…",
+  // Stats strip under the composer card (dsh-web StatsLine): DSH uses whole-log stats, pi uses last reply
+  "composerStats.counts": "{turns} turns · {steps} steps",
+  "composerStats.llm": "LLM {duration}",
+  "composerStats.toolCall": "Tool {duration}",
+  "composerStats.ttftAverage": "Avg first token {duration}",
+  "composerStats.tps": "{throughput} tok/s",
+  "composerStats.cacheHit": "Cache hit {percent}%",
+  "composerStats.tokens": "Input {input} tok · Output {output} tok",
+  "composerStats.ttft": "First token {duration}",
+  "composerStats.reply": "Reply {duration}",
   // Composer-side todo strip (ported from dsh-web TodoPanel): zero-count segments
   // are omitted; segments joined with en-space (HTML collapses runs of ASCII spaces)
   "sessionTodo.title": "Todo",
