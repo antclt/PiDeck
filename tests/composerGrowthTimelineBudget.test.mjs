@@ -86,6 +86,48 @@ test("timeline budget respects the configured min-size constant", () => {
   assertLayout(capped, { composer: 30, timeline: 12 });
 });
 
+test("collapsing the terminal gives leftover height to the timeline, not the composer", () => {
+  const { redistributeTerminalAgainstTimeline } = loadModule();
+  // 用户把终端拉到 40%，再折叠到 34px / 800px = 4.25%。
+  // 腾出的 35.75% 必须还给 timeline，composer 20% 不得被相邻面板吃掉。
+  const next = redistributeTerminalAgainstTimeline(
+    { timeline: 40, composer: 20, terminal: 40 },
+    4.25,
+    20,
+  );
+  assertLayout(
+    { composer: next.composer, timeline: next.timeline },
+    { composer: 20, timeline: 75.75 },
+  );
+  assert.ok(approx(next.terminal, 4.25), `terminal ${next.terminal} ≈ 4.25`);
+
+  // collapse() 之后库已经把高度写进 composer：仍以折叠前的 20% 为准重排。
+  const polluted = redistributeTerminalAgainstTimeline(
+    { timeline: 40, composer: 55.75, terminal: 4.25 },
+    4.25,
+    20,
+  );
+  assertLayout(
+    { composer: polluted.composer, timeline: polluted.timeline },
+    { composer: 20, timeline: 75.75 },
+  );
+});
+
+test("expanding the terminal takes height from the timeline, not the composer", () => {
+  const { redistributeTerminalAgainstTimeline } = loadModule();
+  const next = redistributeTerminalAgainstTimeline(
+    { timeline: 75.75, composer: 20, terminal: 4.25 },
+    40,
+    20,
+    20,
+  );
+  assertLayout(
+    { composer: next.composer, timeline: next.timeline },
+    { composer: 20, timeline: 40 },
+  );
+  assert.ok(approx(next.terminal, 40), `terminal ${next.terminal} ≈ 40`);
+});
+
 test("session view uses the budget function in programResize (not raw delta)", () => {
   const sessionView = readFileSync(
     "src/renderer/src/components/session/SessionView.tsx",
@@ -97,4 +139,11 @@ test("session view uses the budget function in programResize (not raw delta)", (
   assert.match(sessionView, /minSize=\{TIMELINE_MIN_HEIGHT\}/);
   // 折叠阈值判定仍保留（用户拖拽到 35px 以下应折叠），但程序化增长不再触发它
   assert.match(sessionView, /px <= 35/);
+  // 折叠终端必须走 redistribuion：库的 collapse() 会把高度补给相邻 composer
+  assert.match(sessionView, /redistributeTerminalAgainstTimeline/);
+  assert.match(sessionView, /composerHeightStateRef\.current \/ groupPx/);
+  assert.match(
+    sessionView,
+    /if \(now < terminalProgrammaticExpireRef\.current\) return/,
+  );
 });

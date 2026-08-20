@@ -53,6 +53,39 @@ export function growComposerWithinTimelineBudget(
 	};
 }
 
+/**
+ * 折叠/展开终端后重排三面板：composer 百分比锁定，差额全部由 timeline 承担。
+ *
+ * 业务规则：react-resizable-panels 的 collapse() 会把腾出的高度补给相邻的
+ * composer，输入框被撑到半空；切会话会重新 mount 再 collapse 一次，污染高度
+ * 还会回来。关闭终端走卸载路径，不走这里。
+ *
+ * preserveComposerPct 必须传折叠前的输入框占比——collapse() 之后 layout.composer
+ * 往往已经被撑高，不能当源。
+ */
+export function redistributeTerminalAgainstTimeline(
+	layout: Record<string, number>,
+	terminalPct: number,
+	preserveComposerPct: number,
+	timelineMinPct = 0,
+): Record<string, number> | null {
+	if (layout.timeline === undefined || layout.terminal === undefined) return null;
+	const composer = Math.max(0, preserveComposerPct);
+	let terminal = Math.max(0, terminalPct);
+	let timeline = 100 - composer - terminal;
+	// timeline 触底时只能少展开终端，绝不能再去扣 composer。
+	if (timeline < timelineMinPct) {
+		terminal = Math.max(0, terminal - (timelineMinPct - timeline));
+		timeline = 100 - composer - terminal;
+	}
+	return {
+		...layout,
+		composer,
+		terminal,
+		timeline: Math.max(0, timeline),
+	};
+}
+
 // Ask 区域垂直 resize 手把的约束（AskRegionResizer 使用）：
 // 180=紧凑展开时默认高度上限，70=收窄下限，280=可在面板内拉高的最大值，
 // 8=键盘步进（PageUp/PageDown 为 4 倍）。上限不会强迫留白：Ask 折叠时只显示实际内容。

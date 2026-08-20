@@ -23,7 +23,7 @@ import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { SessionRuntimeDock } from "./SessionRuntimeDock";
 import { useSessionPaneServices } from "./SessionPaneServices";
-import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, displayProjectDirectoryName } from "../../rendererUtils";
+import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName } from "../../rendererUtils";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 
@@ -316,15 +316,48 @@ export function SessionView({
     }
   }
 
+  const terminalRowHeightRef = useRef(terminalRowHeight);
+  terminalRowHeightRef.current = terminalRowHeight;
+
   // 终端 Panel 随 terminalOpen 动态挂载，约束注册有一帧延迟（与抽屉同款问题），
-  // imperative 同步统一推迟一帧并容错。
+  // imperative 同步统一推迟一帧并容错。折叠/展开后立刻把差额还给 timeline：
+  // collapse() 会把高度补给相邻 composer，输入框停在半空；切会话会再跑一遍
+  // collapse，必须用 composerHeightStateRef（用户拖拽/内容高度）当锚点，
+  // 不能读已经被撑高的 layout.composer。
   useEffect(() => {
     const panel = terminalPanelRef.current;
+    const group = sessionGroupRef.current;
     if (!panel) return;
     const frame = requestAnimationFrame(() => {
       try {
+        // 先打程序化窗口：collapse() 触发的 composer onResize 既不能记成用户拖高，
+        // 也不能写进 composerHeight——否则切会话再 collapse 会用被污染的锚点。
+        programmaticResizeTargetRef.current = composerHeightStateRef.current;
+        programResizeExpireRef.current = Date.now() + 200;
+        terminalProgrammaticExpireRef.current =
+          Date.now() + TERMINAL_PROGRAMMATIC_PROTECT_MS;
         if (terminalCollapsed) { if (!panel.isCollapsed()) panel.collapse(); }
         else if (panel.isCollapsed()) panel.expand();
+        if (!group) return;
+        const size = composerPanelRef.current?.getSize();
+        if (!size || size.inPixels <= 0 || size.asPercentage <= 0) return;
+        const groupPx = (size.inPixels / size.asPercentage) * 100;
+        const preserveComposerPct = Math.min(
+          100,
+          (composerHeightStateRef.current / groupPx) * 100,
+        );
+        const collapsedPct = (34 / groupPx) * 100;
+        const terminalPct = terminalCollapsed
+          ? collapsedPct
+          : Math.min(100, (terminalRowHeightRef.current / groupPx) * 100);
+        const next = redistributeTerminalAgainstTimeline(
+          group.getLayout(),
+          terminalPct,
+          preserveComposerPct,
+          (TIMELINE_MIN_HEIGHT / groupPx) * 100,
+        );
+        if (!next) return;
+        group.setLayout(next);
       } catch { /* 约束未就绪，下轮状态再同步 */ }
     });
     return () => cancelAnimationFrame(frame);
@@ -336,6 +369,9 @@ export function SessionView({
     // 程序 resize 的异步回调：时间窗口内（刚 programResize），或最终高度与
     // 内容驱动高度一致（即使回调延迟/像素取整）都视为程序化结果，不记为用户
     // 手动高度，避免内容减少时误判导致不回缩。
+    // 折叠/展开终端期间的 onResize 一律丢弃：库会短暂把腾出的高度写进 composer，
+    // 若此时写 state / 用户锚点，切会话再 collapse 会把输入框重新撑到半空。
+    if (now < terminalProgrammaticExpireRef.current) return;
     const isProgrammatic =
       (programmaticResizeTargetRef.current != null &&
         now < programResizeExpireRef.current) ||
