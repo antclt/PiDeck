@@ -203,6 +203,54 @@ export function setPath(root: Record<string, unknown>, path: string[], value: un
 	current[path[path.length - 1]] = value;
 }
 
+/** DSH 省略 retryPolicy 时的默认次数：normal mode、瞬时错误最多再试 5 次。 */
+export const DSH_DEFAULT_RETRY_MAX = 5;
+
+export type DshRetryPolicyView = {
+	mode: "normal" | "always";
+	maxRetries?: number;
+	backoff?: Record<string, unknown>;
+};
+
+/**
+ * 读供应商 retryPolicy。DSH 没有全局重试次数：策略挂在 llm-deepseek /
+ * llm-pi-ai.providers.<id>.retryPolicy。省略 = normal + 5 次。
+ */
+export function readDshRetryPolicy(value: unknown): DshRetryPolicyView {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return { mode: "normal" };
+	}
+	const rec = value as Record<string, unknown>;
+	const mode = rec.mode === "always" ? "always" : "normal";
+	const maxRetries =
+		typeof rec.maxRetries === "number" && Number.isFinite(rec.maxRetries) && rec.maxRetries >= 0
+			? rec.maxRetries
+			: undefined;
+	const backoff =
+		rec.backoff && typeof rec.backoff === "object" && !Array.isArray(rec.backoff)
+			? (rec.backoff as Record<string, unknown>)
+			: undefined;
+	return { mode, ...(maxRetries !== undefined ? { maxRetries } : {}), ...(backoff ? { backoff } : {}) };
+}
+
+/**
+ * 把用户填的次数写成 retryPolicy patch。
+ * 空值：always 保持无限；normal 写成默认 5 次（settings.update 是合并，省略字段删不掉已有策略）。
+ * 填了次数：写成 mode=normal（always 改为有限次数，避免无限打供应商）。
+ */
+export function patchDshRetryMaxRetries(existing: unknown, maxRetries: number | undefined): unknown {
+	const current = readDshRetryPolicy(existing);
+	if (maxRetries === undefined) {
+		if (current.mode === "always") return existing ?? { mode: "always" };
+		const next: Record<string, unknown> = { mode: "normal", maxRetries: DSH_DEFAULT_RETRY_MAX };
+		if (current.backoff) next.backoff = current.backoff;
+		return next;
+	}
+	const next: Record<string, unknown> = { mode: "normal", maxRetries };
+	if (current.backoff) next.backoff = current.backoff;
+	return next;
+}
+
 /** 从嵌套值里移除空对象（patch 提交前清理）。 */
 export function pruneEmptyObjects(value: unknown): unknown {
 	if (Array.isArray(value)) return value.map(pruneEmptyObjects);

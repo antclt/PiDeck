@@ -21,6 +21,8 @@ test("known DSH fields get human labels instead of raw keys or (root)", () => {
 	assert.equal(dshFieldCopy("api").label, "config.dsh.field.api");
 	assert.equal(dshFieldCopy("apiKeyEnv").label, "config.dsh.field.apiKeyEnv");
 	assert.equal(dshFieldCopy("displayName").label, "config.dsh.field.displayName");
+	assert.equal(dshFieldCopy("retryPolicy").label, "config.dsh.field.retryPolicy");
+	assert.equal(dshFieldCopy("maxRetries").label, "config.dsh.field.maxRetries");
 });
 
 test("empty field name does not fall back to (root)", () => {
@@ -31,9 +33,11 @@ test("empty field name does not fall back to (root)", () => {
 test("custom settings hide secret and credential-ref slots so users do not paste keys there", () => {
 	assert.equal(isDshCustomSettingsHiddenField("apiKeyEnv"), true);
 	assert.equal(isDshCustomSettingsHiddenField("models"), true);
+	assert.equal(isDshCustomSettingsHiddenField("retryPolicy"), true);
 	assert.equal(isDshCustomSettingsHiddenField("token", { role: "secret" }), true);
 	assert.equal(isDshCustomSettingsHiddenField("baseURL"), false);
 	assert.equal(isDshCustomSettingsHiddenField("api"), false);
+	assert.equal(isDshCustomSettingsHiddenField("maxRetries"), false);
 });
 
 test("schema form and provider cards use field names plus human labels", () => {
@@ -43,5 +47,6 @@ test("schema form and provider cards use field names plus human labels", () => {
 	assert.doesNotMatch(form, /"\(root\)"/);
 	assert.match(cards, /path=\{\[field\.name\]\}/);
 	assert.match(cards, /isDshCustomSettingsHiddenField/);
+	assert.match(cards, /RetryMaxRetriesField/);
 	assert.doesNotMatch(cards, /path=\{\[\]\}/);
 });

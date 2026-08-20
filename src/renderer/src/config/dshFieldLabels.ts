@@ -38,6 +38,14 @@ const FIELD_COPY: Record<string, {
 		label: "config.dsh.field.headers",
 		hint: "config.dsh.field.headersHint",
 	},
+	retryPolicy: {
+		label: "config.dsh.field.retryPolicy",
+		hint: "config.dsh.field.maxRetriesHint",
+	},
+	maxRetries: {
+		label: "config.dsh.field.maxRetries",
+		hint: "config.dsh.field.maxRetriesHint",
+	},
 };
 
 export type DshFieldCopy = {
@@ -64,6 +72,7 @@ export function dshFieldCopy(name: string): DshFieldCopy {
  * apiKeyEnv 只是凭证槽位名，放在表单里容易被当成「把密钥填这里」。
  */
 export function isDshCustomSettingsHiddenField(name: string, meta?: Record<string, unknown>): boolean {
-	if (name === "models" || name === "apiKeyEnv") return true;
+	// retryPolicy 是 object/union，通用表单只会渲成只读 JSON；次数在卡片上单独编辑。
+	if (name === "models" || name === "apiKeyEnv" || name === "retryPolicy") return true;
 	return meta?.role === "secret" || meta?.role === "credential-ref";
 }

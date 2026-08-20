@@ -8,6 +8,8 @@
 
 ### 🚀 新功能
 
+- **DSH 供应商重试次数** — DSH 没有全局重试项。DeepSeek / OpenAI 兼容供应商的
+  「自定义设置」里可改 `retryPolicy.maxRetries`（默认 5，只对瞬时错误生效）。
 - **DSH 0.1.0-rc.8** — `@deepseek-ai/dsh*` 升到当前 harness 发布版。本地
   `dsh-tool-pwsh-persistent` 插件继续保留：官方持久 PowerShell 仍走
   `ctx.terminals`、工具名是 `pwsh`（会和一次性沙箱工具抢名字），默认预设也不挂。

@@ -13,6 +13,9 @@ const {
 	readPath,
 	setPath,
 	pruneEmptyObjects,
+	readDshRetryPolicy,
+	patchDshRetryMaxRetries,
+	DSH_DEFAULT_RETRY_MAX,
 } = loadTsCommonJs("src/renderer/src/config/dshSchema.ts");
 
 /** 构造最小 schemastery 风格 schema：{ uid, refs: { id: ref } }。 */
@@ -148,6 +151,34 @@ test("readPath/setPath 读写嵌套 path", () => {
 	assert.equal(readPath(root, ["a", "c"]), undefined);
 	setPath(root, ["x", "y"], 2);
 	assert.equal(root.x?.y, 2);
+});
+
+test("readDshRetryPolicy 省略时按 normal 默认，always 不捏造次数", () => {
+	// loadTsCommonJs 在 vm 里编译，对象字面量与测试进程不同 realm，deepEqual 会误报。
+	const omitted = readDshRetryPolicy(undefined);
+	assert.equal(omitted.mode, "normal");
+	assert.equal(omitted.maxRetries, undefined);
+	assert.equal(readDshRetryPolicy({ mode: "normal", maxRetries: 3 }).maxRetries, 3);
+	assert.equal(readDshRetryPolicy({ mode: "always" }).mode, "always");
+	assert.equal(readDshRetryPolicy({ mode: "always" }).maxRetries, undefined);
+});
+
+test("patchDshRetryMaxRetries 把次数写成有限 normal，空值写回默认 5", () => {
+	assert.equal(DSH_DEFAULT_RETRY_MAX, 5);
+	const fromEmpty = patchDshRetryMaxRetries(undefined, 2);
+	assert.equal(fromEmpty.mode, "normal");
+	assert.equal(fromEmpty.maxRetries, 2);
+	const cleared = patchDshRetryMaxRetries({ mode: "normal", maxRetries: 8 }, undefined);
+	assert.equal(cleared.mode, "normal");
+	assert.equal(cleared.maxRetries, 5);
+	const fromAlways = patchDshRetryMaxRetries({ mode: "always" }, 1);
+	assert.equal(fromAlways.mode, "normal");
+	assert.equal(fromAlways.maxRetries, 1);
+	const keepAlways = patchDshRetryMaxRetries({ mode: "always" }, undefined);
+	assert.equal(keepAlways.mode, "always");
+	const withBackoff = patchDshRetryMaxRetries({ mode: "normal", maxRetries: 2, backoff: { initialMs: 800 } }, 4);
+	assert.equal(withBackoff.maxRetries, 4);
+	assert.equal(withBackoff.backoff.initialMs, 800);
 });
 
 test("pruneEmptyObjects 清理空对象（patch 提交前）", () => {

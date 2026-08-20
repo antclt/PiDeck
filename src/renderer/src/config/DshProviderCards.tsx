@@ -20,7 +20,18 @@ import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { isDshCustomSettingsHiddenField } from "./dshFieldLabels";
 import { DshSchemaField, type DshNamespaceView } from "./DshSchemaForm";
-import { dictEntries, normalizeDshSchema, objectFields, pruneEmptyObjects, readPath, setPath, type DshSectionApi } from "./dshSchema";
+import {
+	DSH_DEFAULT_RETRY_MAX,
+	dictEntries,
+	normalizeDshSchema,
+	objectFields,
+	patchDshRetryMaxRetries,
+	pruneEmptyObjects,
+	readDshRetryPolicy,
+	readPath,
+	setPath,
+	type DshSectionApi,
+} from "./dshSchema";
 import { credentialRefFor } from "./dshCredentialRef";
 import { DshModelsEditor } from "./DshModelsEditor";
 import type { DshModelRow } from "./DshModelsTable";
@@ -237,6 +248,62 @@ function ApiKeyField(props: {
 			{!state && <p className="text-micro text-muted-foreground">{t("config.dsh.keyRefHint", { ref })}</p>}
 			{state && !state.writable && <p className="text-micro text-muted-foreground">{t("config.dsh.keyEnvLocked")}</p>}
 		</div>
+	);
+}
+
+/**
+ * 供应商级最大重试次数。DSH 没有全局 retry：策略在每个 provider 的 retryPolicy。
+ * 省略显示默认 5；清空输入 = 恢复默认；always 模式填次数会改成有限 normal。
+ */
+function RetryMaxRetriesField(props: {
+	policy: unknown;
+	onChange: (next: unknown) => void;
+	writable: boolean;
+}) {
+	const view = readDshRetryPolicy(props.policy);
+	const unboundedAlways = view.mode === "always" && view.maxRetries === undefined;
+	const committed = unboundedAlways ? "" : String(view.maxRetries ?? DSH_DEFAULT_RETRY_MAX);
+	// 数字框用本地草稿：清空瞬间若立刻写回默认 5，用户没法从空框再输入。
+	const [draft, setDraft] = useState(committed);
+	useEffect(() => {
+		setDraft(committed);
+	}, [committed]);
+	const commit = (raw: string) => {
+		const trimmed = raw.trim();
+		if (trimmed === "") {
+			props.onChange(patchDshRetryMaxRetries(props.policy, undefined));
+			return;
+		}
+		const next = Number(trimmed);
+		if (!Number.isFinite(next)) return;
+		props.onChange(patchDshRetryMaxRetries(props.policy, Math.max(0, Math.min(50, Math.trunc(next)))));
+	};
+	return (
+		<label className="grid gap-1">
+			<span className="grid min-w-0 gap-0.5">
+				<span className="text-caption font-medium text-foreground">{t("config.dsh.field.maxRetries")}</span>
+				<span className="text-micro text-muted-foreground">{t("config.dsh.field.maxRetriesHint")}</span>
+				{unboundedAlways ? (
+					<span className="text-micro text-amber-600 dark:text-amber-400">{t("config.dsh.field.maxRetriesAlways")}</span>
+				) : null}
+			</span>
+			<Input
+				className="h-8"
+				type="number"
+				min={0}
+				max={50}
+				value={draft}
+				placeholder={String(DSH_DEFAULT_RETRY_MAX)}
+				disabled={!props.writable}
+				onChange={(event) => {
+					const raw = event.target.value;
+					setDraft(raw);
+					if (raw.trim() === "") return;
+					commit(raw);
+				}}
+				onBlur={() => commit(draft)}
+			/>
+		</label>
 	);
 }
 
@@ -599,6 +666,11 @@ export function PiAiProvidersCard(props: {
 									/>
 									<CustomSettings label={t("config.dsh.customSettings")}>
 										<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
+										<RetryMaxRetriesField
+											policy={entryValue(entry.key, ["retryPolicy"])}
+											onChange={(next) => updateEntry(entry.key, ["retryPolicy"], next)}
+											writable={writable}
+										/>
 										{providerProfileFields.map((field) => (
 											<DshSchemaField
 												key={field.name}
@@ -778,6 +850,11 @@ export function DeepseekRouteCard(props: {
 							<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
 							<CustomSettings label={t("config.dsh.customSettings")}>
 								<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
+								<RetryMaxRetriesField
+									policy={value(["retryPolicy"])}
+									onChange={(next) => update(["retryPolicy"], next)}
+									writable={writable}
+								/>
 								{baseFields.map((field) => (
 									<DshSchemaField
 										key={field.name}
