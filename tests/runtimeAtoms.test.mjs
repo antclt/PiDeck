@@ -60,6 +60,36 @@ test("agent inventory is a read-only projection of canonical Session runtimes", 
   assert.equal(atoms.upsertAgentInventoryAtom, undefined);
 });
 
+test("agent inventory keeps the same array when runtime identity is unchanged", () => {
+  const store = createStore();
+  store.set(atoms.replaceProjectSessionsAtom, {
+    projectId: "project-a",
+    sessions: [session("session-a", "project-a", "Stable title")],
+  });
+  store.set(atoms.replaceSessionRuntimesAtom, [
+    runtime("session-a", "agent-a", "project-a"),
+  ]);
+  const first = store.get(atoms.agentInventoryAtom);
+  store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent(
+    "session-a",
+    "agent-a",
+    1,
+    "agents:state",
+    {
+      id: "agent-a",
+      projectId: "project-a",
+      cwd: "C:/project-a",
+      title: "Stable title",
+      status: "idle",
+      createdAt: 1,
+    },
+  ));
+  const second = store.get(atoms.agentInventoryAtom);
+  // 无实质字段变化时不得换新数组：App 的 useEffect([agents]) / displayAgents
+  // 会跟着每帧 setState，把设置弹层和关窗点死。
+  assert.equal(second, first);
+});
+
 test("runtime capabilities merge in the canonical Session runtime without message data", () => {
   const store = createStore();
   store.set(atoms.replaceProjectSessionsAtom, {

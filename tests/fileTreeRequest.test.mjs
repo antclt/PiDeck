@@ -48,7 +48,20 @@ test("project file tree refresh and expand drop stale listings", () => {
   assert.match(sync, /loadProjectFileTree/);
   assert.match(sync, /fileTreeGenerationRef/);
   assert.match(sync, /beginFileTreeRequest/);
-  assert.match(app, /setFiles\(\[\]\)/);
+  assert.match(app, /setFiles\(\(current\) => \(current\.length === 0 \? current : \[\]\)\)/);
   assert.match(app, /beginFileTreeRequest\(\)/);
   assert.match(app, /isFileTreeRequestCurrent\(generation, projectId\)/);
+});
+
+test("project file tree effect does not retrigger on an unstable toast helper", () => {
+  const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+  // 文件树 effect 只应跟当前项目走。showToast 若是每次 render 新建的函数
+  // 又写进 deps，会每帧 setFiles([]) 把 React 更新深度打满——点击会话后
+  // 设置/关窗点不动，正是 applog 里 Maximum update depth 的根因。
+  const effectStart = app.indexOf("先立刻清空旧树");
+  assert.notEqual(effectStart, -1, "file-tree switch effect should still exist");
+  const deps = app.slice(effectStart, effectStart + 2500).match(/\}, \[activeProjectId[^\]]*\]\)/);
+  assert.ok(deps, "file-tree effect should keep an explicit dependency list");
+  assert.doesNotMatch(deps[0], /showToast/);
+  assert.match(app, /const showToast = useCallback\(/);
 });

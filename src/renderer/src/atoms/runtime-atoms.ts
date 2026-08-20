@@ -4,7 +4,32 @@ import type { AgentRuntimeState, AgentStatus, AgentTab } from "../../../shared/t
 import { sessionRecordsAtom, sessionRuntimeByIdAtom } from "./session-atoms";
 import { sessionIdByRuntimeAgentIdAtomFamily } from "./session-selectors";
 
-export const agentInventoryAtom = atom((get) => {
+function areAgentTabsEqual(left: AgentTab[], right: AgentTab[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((tab, index) => {
+    const other = right[index];
+    return tab.id === other.id &&
+      tab.projectId === other.projectId &&
+      tab.cwd === other.cwd &&
+      tab.title === other.title &&
+      tab.status === other.status &&
+      tab.sessionId === other.sessionId &&
+      tab.sessionPath === other.sessionPath &&
+      tab.sessionEnvironment === other.sessionEnvironment &&
+      tab.sessionSource === other.sessionSource &&
+      tab.wslDistro === other.wslDistro &&
+      tab.wslUser === other.wslUser &&
+      tab.importedSourceId === other.importedSourceId &&
+      tab.noSession === other.noSession &&
+      tab.runtimeGeneration === other.runtimeGeneration &&
+      tab.createdAt === other.createdAt &&
+      tab.compactionCount === other.compactionCount &&
+      tab.backend === other.backend;
+  });
+}
+
+const agentInventorySourceAtom = atom((get) => {
   const records = get(sessionRecordsAtom);
   return Object.entries(get(sessionRuntimeByIdAtom))
     .filter((entry): entry is [string, typeof entry[1] & {
@@ -46,6 +71,14 @@ export const agentInventoryAtom = atom((get) => {
       };
     });
 });
+
+// runtime 事件常带 updatedAt 新对象，但库存字段未变。selectAtom 保引用，
+// 避免 App useEffect([agents]) 每帧 setState 把设置/关窗点死。
+export const agentInventoryAtom = selectAtom(
+  agentInventorySourceAtom,
+  (tabs) => tabs,
+  areAgentTabsEqual,
+);
 
 export const agentByIdAtomFamily = atomFamily((agentId: string) =>
   atom((get) => get(agentInventoryAtom).find((agent) => agent.id === agentId)),

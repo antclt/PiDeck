@@ -112,3 +112,12 @@ test("openPermanentSessionTab: 双击升格预览为常驻", () => {
 	assert.equal(json(next.tabs), json(["a", "b"]));
 	assert.equal(next.previewId, null);
 });
+
+test("openPermanentSessionTab: already-open resident tab keeps the same array", () => {
+	const { openPermanentSessionTab } = loadSessionTabs();
+	const tabs = ["a", "b"];
+	const next = openPermanentSessionTab(tabs, [], null, "a");
+	// 侧栏重复打开已常驻会话不得每次 new 一份 tabs，否则 jotai set 会每帧重渲染。
+	assert.equal(next.tabs, tabs);
+	assert.equal(next.previewId, null);
+});

@@ -184,6 +184,33 @@ export function isPendingAgentId(agentId?: string) {
   return Boolean(agentId?.startsWith("pending-"));
 }
 
+/**
+ * 会话时长只在 running → idle 边沿落一次。
+ * 旧实现只要 status===idle 且还有 start 就 Date.now() setState；displayAgents
+ * 每帧换新引用时会把 React 更新深度打满（设置/关窗点不动）。
+ */
+export function stampIdleSessionDuration(input: {
+  previousStatus: AgentTab["status"] | undefined;
+  status: AgentTab["status"];
+  startedAt: number | undefined;
+  now: number;
+}): { startedAt?: number; durationMs?: number; clearStart?: boolean } {
+  if (input.status === "running") {
+    if (input.previousStatus !== "running") {
+      return { startedAt: input.now };
+    }
+    return { startedAt: input.startedAt };
+  }
+  if (input.status === "idle" && input.previousStatus === "running" && input.startedAt) {
+    return {
+      startedAt: input.startedAt,
+      durationMs: input.now - input.startedAt,
+      clearStart: true,
+    };
+  }
+  return { startedAt: input.startedAt };
+}
+
 export function migrateAgentRecord<T>(
   current: Record<string, T>,
   replacementById: Map<string, string>,

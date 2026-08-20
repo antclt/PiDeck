@@ -108,6 +108,7 @@ import {
   isReplacementForPendingAgent,
   isPendingAgentId,
   migrateAgentRecord,
+  stampIdleSessionDuration,
   type PendingAgentTab,
 } from "./rendererUtils";
 import { useResize } from "./hooks/useResize";
@@ -303,7 +304,11 @@ export function App() {
   	Record<string, Set<"pi" | "codex" | "claude" | "opencode"> | null>
   >(() => loadSessionSourceFilter());
   /** 编辑器展示模式：弹框或侧栏 */
-  // showToast 经 showNotice → sonner 全局 toast（#115）
+  // showToast 必须是稳定回调：文件树 / overlay 等 effect 若把它当依赖，
+  // 每次 render 新建函数会把 setFiles([]) 打成无限更新（设置/关窗点不动）。
+  const showToast = useCallback((message: string, duration?: number, kind?: "info" | "warning" | "error") => {
+    showNotice(message, duration, kind);
+  }, []);
   // 历史命令：按 agent 隔离，agent 关闭即清除（不持久化）
   const promptHistoryRef = useRef<Record<string, string[]>>({});
 
@@ -1654,22 +1659,27 @@ export function App() {
     for (const agent of displayAgents) {
       if (agent.id !== activeAgentId) continue;
       const previousStatus = agentStatusByAgentRef.current[agent.id];
-      if (agent.status === "running") {
-        if (previousStatus !== "running") {
-          sessionStartByAgentRef.current[agent.id] = Date.now();
-        }
-      } else if (agent.status === "idle") {
-        const start = sessionStartByAgentRef.current[agent.id];
-        if (start) {
-          setSessionDurationByAgent((d) => ({
-            ...d,
-            [agent.id]: Date.now() - start,
-          }));
-        }
+      const stamped = stampIdleSessionDuration({
+        previousStatus,
+        status: agent.status,
+        startedAt: sessionStartByAgentRef.current[agent.id],
+        now: Date.now(),
+      });
+      // 只在 running→idle 边沿写时长；已 idle 后再被新 displayAgents 引用戳到不得 setState。
+      if (stamped.clearStart) {
+        delete sessionStartByAgentRef.current[agent.id];
+      } else if (stamped.startedAt != null) {
+        sessionStartByAgentRef.current[agent.id] = stamped.startedAt;
+      }
+      if (stamped.durationMs != null) {
+        const durationMs = stamped.durationMs;
+        setSessionDurationByAgent((d) => (
+          d[agent.id] === durationMs ? d : { ...d, [agent.id]: durationMs }
+        ));
       }
       agentStatusByAgentRef.current[agent.id] = agent.status;
     }
-  }, [activeAgentId, displayAgents, modifiedFiles]);
+  }, [activeAgentId, displayAgents]);
 
   // 汇报聚焦会话给主进程：非聚焦会话收到 Ask 请求时触发桌面通知（Task 9）
   useEffect(() => {
@@ -1730,7 +1740,7 @@ export function App() {
   useEffect(() => {
     if (!activeProjectId) {
       beginFileTreeRequest();
-      setFiles([]);
+      setFiles((current) => (current.length === 0 ? current : []));
       setGitInfo({ current: null, branches: [] });
       return;
     }
@@ -1739,7 +1749,8 @@ export function App() {
     // 先立刻清空旧树，并抬高代次，避免大仓库扫描期间右侧仍显示上一个项目（#159）。
     const projectId = activeProjectId;
     const generation = beginFileTreeRequest();
-    setFiles([]);
+    // 空树复用原数组，避免 effect 误触发时用新 [] 把 React 更新打满。
+    setFiles((current) => (current.length === 0 ? current : []));
     const dirs = loadExpandedDirs(projectId);
     setExpandedDirs(dirs);
     let cancelled = false;
@@ -1776,7 +1787,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId, beginFileTreeRequest, isFileTreeRequestCurrent, loadExpandedDirs, showToast]);
+  }, [activeProjectId, beginFileTreeRequest, isFileTreeRequestCurrent, loadExpandedDirs]);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -1805,11 +1816,6 @@ export function App() {
       window.clearInterval(timer);
     };
   }, [activeProjectId]);
-
-  /** 统一通知：普通消息默认 1.5 秒，异常由 kind 映射为 3 秒；Ask 使用持久 warning toast。 */
-  function showToast(message: string, duration?: number, kind?: "info" | "warning" | "error") {
-    showNotice(message, duration, kind);
-  }
 
   /**
    * clone / fork 会把同一个 Agent 换绑到新的 SessionRecord。

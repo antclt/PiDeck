@@ -197,8 +197,11 @@ export function useSessionWorkspaceChrome(options: {
       mode === "preview"
         ? openPreviewSessionTab(tabs, pinned, previewId, sessionId)
         : openPermanentSessionTab(tabs, pinned, previewId, sessionId);
+    // 已打开的常驻 Tab 复用原数组：相同引用写 jotai 会被 Object.is 跳过。
     setSessionTabIds(result.tabs);
-    setPreviewSessionTabId(result.previewId);
+    setPreviewSessionTabId((current) =>
+      current === result.previewId ? current : result.previewId,
+    );
   }, [setSessionTabIds]);
 
   const promotePreview = useCallback((sessionId: string) => {

@@ -18,16 +18,17 @@ export type SessionTabOpenMode = "preview" | "permanent";
  * - 否则：替换旧预览 Tab，并登记为新预览。
  */
 export function openPreviewSessionTab(
-	tabs: readonly string[],
+	tabs: string[],
 	pinned: readonly string[],
 	previewId: string | null,
 	sessionId: string,
 ): { tabs: string[]; previewId: string | null } {
 	if (!sessionId) return { tabs: [...tabs], previewId };
 	const isResident = tabs.includes(sessionId) && sessionId !== previewId;
-	if (isResident) return { tabs: [...tabs], previewId };
+	// 已在列表且无需改 preview 时复用原数组，避免侧栏重复打开把 jotai Tab 列表打成每帧新引用。
+	if (isResident) return { tabs, previewId };
 	if (sessionId === previewId && tabs.includes(sessionId)) {
-		return { tabs: [...tabs], previewId };
+		return { tabs, previewId };
 	}
 
 	let next = tabs.filter((id) => id !== previewId || id === sessionId);
@@ -45,19 +46,24 @@ export function openPreviewSessionTab(
  * - 若正是预览 Tab，则清除 preview 标记（斜体 → 正体）。
  */
 export function openPermanentSessionTab(
-	tabs: readonly string[],
+	tabs: string[],
 	pinned: readonly string[],
 	previewId: string | null,
 	sessionId: string,
 ): { tabs: string[]; previewId: string | null } {
 	if (!sessionId) return { tabs: [...tabs], previewId };
+	const alreadyOpen = tabs.includes(sessionId);
+	const nextPreview = previewId === sessionId ? null : previewId;
+	// 已常驻且预览标记不变：复用原数组，registerOpenSession 才不会每帧写 jotai。
+	if (alreadyOpen && nextPreview === previewId) {
+		return { tabs, previewId: nextPreview };
+	}
 	let next = [...tabs];
-	if (!next.includes(sessionId)) {
+	if (!alreadyOpen) {
 		const pinnedTabs = next.filter((id) => pinned.includes(id));
 		const normalTabs = next.filter((id) => !pinned.includes(id));
 		next = [...pinnedTabs, ...normalTabs, sessionId];
 	}
-	const nextPreview = previewId === sessionId ? null : previewId;
 	return { tabs: next, previewId: nextPreview };
 }
 
