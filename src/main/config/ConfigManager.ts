@@ -14,6 +14,12 @@ import {
 	mainProcessT,
 	type MainProcessTranslationKey,
 } from "../../shared/i18n/mainProcessCopy";
+import type { FetchedModel } from "../../shared/types/fetchedModel";
+import { parseProviderModelsResponse } from "./parseProviderModels";
+import {
+	enrichFetchedModelFromCatalog,
+	getPiAiCatalogIndex,
+} from "../pi/piAiBuiltinCatalog";
 
 /** pi 全局配置目录：~/.pi/agent/ */
 const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
@@ -365,7 +371,7 @@ export class ConfigManager {
 		apiType?: string,
 	): Promise<{
 		success: boolean;
-		models?: Array<{ id: string; name?: string }>;
+		models?: FetchedModel[];
 		error?: string;
 		debugDetails?: string;
 		/** 实际成功/最后一次请求的 URL（脱敏），用于 UI 对比会话侧路径 */
@@ -406,6 +412,7 @@ export class ConfigManager {
 					}
 
 					const body = (await res.json()) as Record<string, unknown>;
+					// listing 有容量就用；缺的再按 pi-ai 内置目录精确匹配，仍缺则空着
 					const models = this.parseModelsResponse(body, apiType);
 
 					if (models.length === 0) {
@@ -539,35 +546,10 @@ export class ConfigManager {
 	private parseModelsResponse(
 		body: Record<string, unknown>,
 		apiType?: string,
-	): Array<{ id: string; name?: string }> {
-		const api = this.normalizeApiType(apiType);
-		const rawData = Array.isArray(body.data) ? body.data : Array.isArray(body)
-			? body
-			: body.models && Array.isArray(body.models)
-				? body.models
-				: [];
-
-		return (rawData as Array<Record<string, unknown>>)
-			.map((model) => {
-				const rawId =
-					typeof model.id === "string"
-						? model.id
-						: typeof model.name === "string"
-							? model.name
-							: "";
-				const id =
-					api === "google-generative-ai"
-						? rawId.replace(/^models\//, "")
-						: rawId;
-				const name =
-					typeof model.displayName === "string"
-						? model.displayName
-						: typeof model.name === "string"
-							? model.name.replace(/^models\//, "")
-							: id;
-				return { id, name };
-			})
-			.filter((model) => model.id.length > 0);
+	): FetchedModel[] {
+		const listing = parseProviderModelsResponse(body, this.normalizeApiType(apiType));
+		const catalog = getPiAiCatalogIndex();
+		return listing.map((model) => enrichFetchedModelFromCatalog(model, catalog));
 	}
 
 	private buildTestRequest(

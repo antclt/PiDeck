@@ -8,6 +8,11 @@ All notable changes to PiDeck are documented here.
 
 ### 🚀 New Features
 
+- **Model spec autofill from listing + pi-ai** — Fetching models now keeps
+  `contextWindow` / `maxTokens` when the endpoint returns them. Missing fields
+  match `@earendil-works/pi-ai` builtins (same catalog DSH uses). Unmatched
+  models stay empty instead of guessing 128k/8k. The OpenRouter/models.dev
+  SQLite table (`model-specs.db`) is gone.
 - **DSH provider retry count** — DSH has no global retry setting. Custom settings
   on each DeepSeek / OpenAI-compatible provider now expose `retryPolicy.maxRetries`
   (default 5, transient errors only).

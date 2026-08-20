@@ -1,62 +1,63 @@
 /**
- * 模型规格自动补全（issue 需求：获取模型列表后保存即补全，无需逐个失焦）。
+ * 模型规格自动补全（与 dsh-web 添加模型语义对齐）。
  *
- * computeModelSpecPatches：单模型 × 规格 → 补丁列表（纯函数，可单测）。
- * collectModelSpecPatches：整个 ModelsFile 批量补全（并行查询，返回新 providers 快照）。
- *
- * 规则（与内置表 lookupModelSpec 语义对齐）：
- * - 只填空字段：contextWindow/maxTokens 为空才填、reasoning 仅在「未设置」时填 true、
- *   input 未配置且规格声明图片才填——用户手填/明确关掉的一律不覆盖。
- * - 兜底：contextWindow/maxTokens 匹配不到或官方未公开（undefined/null）时，
- *   填保守默认值（128000 / 8192），保证字段始终有值，用户可再手动改。
+ * 优先级：listing 已有字段 > pi-ai 内置目录精确匹配 > 留空。
+ * 只填空字段；手填 / 明确关掉的 reasoning=false 一律不覆盖。
+ * 不再写入 128k/8k 猜的默认值。
  */
 
 import type { ModelSpec } from "../../../shared/types/modelSpecs";
 import type { ModelItem, ModelsFile, ProviderConfig } from "../config/configTypes";
 
-/** 兜底默认值：模型匹配不到或规格未公开时使用（与主流长上下文模型对齐，用户可手动改） */
-export const DEFAULT_CONTEXT_WINDOW = 128000;
-export const DEFAULT_MAX_TOKENS = 8192;
-
-/** 单模型补全 patch：返回 [字段, 值] 列表，无空字段可补时返回空数组 */
+/** 单模型补全 patch：返回 [字段, 值] 列表，无可补字段时为空数组 */
 export function computeModelSpecPatches(
 	model: ModelItem,
-	spec: ModelSpec,
+	spec: ModelSpec | null | undefined,
 ): Array<[string, unknown]> {
+	if (!spec) return [];
 	const updates: Array<[string, unknown]> = [];
-	// 兜底逻辑：contextWindow/maxTokens 为空一律填——优先规格值，规格缺失（未匹配/官方未公开）
-	// 时用保守默认值，避免空字段导致上游（如 Web 端模型下拉）显示/校验异常
-	if (model.contextWindow == null) {
-		updates.push(["contextWindow", spec.contextWindow ?? DEFAULT_CONTEXT_WINDOW]);
+	if (model.contextWindow == null && spec.contextWindow != null) {
+		updates.push(["contextWindow", spec.contextWindow]);
 	}
-	if (model.maxTokens == null) {
-		updates.push(["maxTokens", spec.maxTokens ?? DEFAULT_MAX_TOKENS]);
+	if (model.maxTokens == null && spec.maxTokens != null) {
+		updates.push(["maxTokens", spec.maxTokens]);
 	}
 	// reasoning 只在「未设置」时填 true；用户明确关掉的 false 不覆盖
 	if (model.reasoning === undefined && spec.reasoning === true) {
 		updates.push(["reasoning", true]);
 	}
-	// 多模态：未配置 input 且规格声明图片输入时才填
 	if (model.input == null && spec.images === true) {
 		updates.push(["input", ["text", "image"]]);
 	}
 	return updates;
 }
 
+export function applyModelPatches(
+	model: ModelItem,
+	updates: Array<[string, unknown]>,
+): ModelItem {
+	if (updates.length === 0) return model;
+	const next: ModelItem = { ...model };
+	for (const [field, value] of updates) next[field] = value;
+	return next;
+}
+
 export type ModelSpecLookup = (providerName: string, modelId: string) => Promise<ModelSpec | null>;
 
 /**
- * 批量补全整个 ModelsFile：遍历所有 provider 的模型，并行查规格表，
- * 有补丁的模型写回新快照。返回 { providers, filledCount }。
- * 不修改入参（补全数据由调用方决定何时写回 state / 落盘）。
+ * 批量补全整个 ModelsFile：空字段才填，未命中就跳过。
+ * 不修改入参。
  */
 export async function collectModelSpecPatches(
 	models: ModelsFile,
 	lookup: ModelSpecLookup,
 ): Promise<{ providers: Record<string, ProviderConfig>; filledCount: number }> {
+	// 先浅拷贝全部 provider，避免只遍历到「有模型行」的供应商时把空列表冲掉
 	const providers: Record<string, ProviderConfig> = {};
+	for (const [providerName, provider] of Object.entries(models.providers)) {
+		providers[providerName] = { ...provider, models: [...provider.models] };
+	}
 	let filledCount = 0;
-	// 并行查询全部模型（规格表是本地 sql.js 内存索引，数量级为几十个 provider × 个位数模型）
 	const entries = Object.entries(models.providers).flatMap(([providerName, provider]) =>
 		provider.models.map((model, index) => ({ providerName, provider, model, index })),
 	);
@@ -66,23 +67,12 @@ export async function collectModelSpecPatches(
 		),
 	);
 	for (let i = 0; i < entries.length; i++) {
-		const { providerName, provider, model, index } = entries[i];
-		const spec = results[i];
-		const existing = providers[providerName];
-		if (!existing) {
-			// 浅拷贝 provider，仅 models 数组会被替换，其余字段共享引用
-			providers[providerName] = { ...provider, models: [...provider.models] };
-		}
-		// 空 id 模型无意义，跳过（不发查询、不填默认值）
+		const { providerName, model, index } = entries[i];
 		if (!model.id) continue;
-		// 未匹配（null）时用空规格兜底：computeModelSpecPatches 会填保守默认值
-		const fallback: ModelSpec = { source: "models-dev", matchedId: model.id };
-		const updates = computeModelSpecPatches(model, spec ?? fallback);
+		const updates = computeModelSpecPatches(model, results[i]);
 		if (updates.length === 0) continue;
 		filledCount++;
-		const next = { ...model };
-		for (const [field, value] of updates) next[field] = value;
-		providers[providerName].models[index] = next;
+		providers[providerName].models[index] = applyModelPatches(model, updates);
 	}
 	return { providers, filledCount };
 }

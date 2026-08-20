@@ -18,6 +18,7 @@ export * from "./types/diagnostics";
 export * from "./types/vision";
 export * from "./types/security";
 export * from "./types/modelSpecs";
+export * from "./types/fetchedModel";
 export * from "./types/trajectory";
 export * from "./types/dshPlugin";
 export * from "./types/providerMigration";

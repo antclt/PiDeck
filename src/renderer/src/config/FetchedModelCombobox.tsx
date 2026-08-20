@@ -3,8 +3,7 @@ import { Check } from "lucide-react";
 import { t } from "../i18n";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
-
-type FetchedModel = { id: string; name?: string };
+import type { FetchedModel } from "../../../shared/types/fetchedModel";
 
 /**
  * 从 /models 拉回后的多选器（Pi 配置页与 DSH 自定义模型共用）。

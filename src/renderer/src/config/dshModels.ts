@@ -1,3 +1,4 @@
+import type { FetchedModel } from "../../../shared/types/fetchedModel";
 import { KNOWN_PROVIDER_ENDPOINTS } from "./providerHeaders";
 import { buildModelsFromFetchedSelection } from "./modelsUtils";
 
@@ -93,7 +94,7 @@ export function appendFetchedDshModels(input: {
 	draftModels?: unknown;
 	savedModels?: unknown;
 	catalog?: unknown;
-	fetched: Array<{ id: string; name?: string }>;
+	fetched: FetchedModel[];
 	selectedIds: string[];
 }): DshModelLike[] {
 	const existing = seedDshModelsForCustomEdit(input);
@@ -104,10 +105,13 @@ export function appendFetchedDshModels(input: {
 	const added = buildModelsFromFetchedSelection(input.fetched, input.selectedIds, existingItems);
 	return [
 		...existing,
-		...added.map((model) => ({
-			id: model.id,
-			name: model.name,
-		})),
+		...added.map((model) => {
+			const row: DshModelLike = { id: model.id, name: model.name };
+			// 与 Pi 配置页同一套：listing / pi-ai 已给出的容量原样写入，缺的留空
+			if (model.contextWindow != null) row.contextWindow = model.contextWindow;
+			if (model.maxTokens != null) row.maxTokens = model.maxTokens;
+			return row;
+		}),
 	];
 }
 

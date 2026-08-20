@@ -1288,7 +1288,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.dirtyTooltip": "Has unsaved changes",
   "config.modelsSavedRestartHint": "Model configuration saved. Please restart active Agent sessions to apply the new configuration.",
   "config.modelsSaved": "Model configuration saved",
-  "config.modelsSavedWithSpecs": "Saved. Auto-filled specs for {count} models (built-in sync table)",
+  "config.modelsSavedWithSpecs": "Saved. Auto-filled specs for {count} models from the pi-ai catalog",
   "config.modelsRefreshed": "Refreshed model config for {count} Agent(s)",
   "config.modelsRefreshedPartial": "Refreshed {refreshed} Agent(s), {failed} failed",
   "config.skillCreatedToast":
@@ -1510,7 +1510,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.modelDisplayName": "Name",
   "config.modelId": "ID",
   "config.modelList": "Model list",
-  "config.modelSpecAutoFilled": "Auto-filled specs for {model} from {source} (built-in sync table)",
+  "config.modelSpecAutoFilled": "Auto-filled specs for {model} from the pi-ai catalog",
   "config.modelOptionExpand": "Show model options",
   "config.modelSelectPlaceholder": "Choose a model",
   "config.modelSelectedCount": "{count} selected",

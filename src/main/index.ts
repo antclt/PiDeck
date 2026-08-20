@@ -285,7 +285,6 @@ import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
 import { registerSystemIpc } from "./ipc/systemIpc";
 import { fetchModelList, getCachedModelList, refreshModelList } from "./pi/modelListCache";
-import { ModelSpecsStore } from "./pi/modelSpecsStore";
 import { registerFilesIpc } from "./ipc/filesIpc";
 import {
 	BROWSER_PANEL_PARTITION as BROWSER_PANEL_PARTITION_SHARED,
@@ -2703,13 +2702,6 @@ function registerIpc() {
 
 	// Phase 3.7 拆出 systemIpc 后这些可选依赖必须显式注入；
 	// 漏传 extensionManager 会导致 pi:update-check / pi:update 根本不注册。
-	// 模型规格存储：resources/model-specs.db（发版前由 scripts/sync-model-specs.mjs 同步），
-	// 只读 + 懒加载索引；查询供配置界面失焦自动填充模型能力
-	const modelSpecsStore = new ModelSpecsStore(
-		app.isPackaged
-			? join(process.resourcesPath, "model-specs.db")
-			: join(app.getAppPath(), "resources", "model-specs.db"),
-	);
 	registerSystemIpc({
 		piLocator,
 		settingsStore,
@@ -2724,7 +2716,6 @@ function registerIpc() {
 			dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 		setDshRpcLogging: (agentId, enabled) => dshAgentManager.setRpcLogging(agentId, enabled),
 		isDshRpcLogging: (agentId) => dshAgentManager.isRpcLogging(agentId),
-		modelSpecsStore,
 		diagnosticsMonitor: diagnosticsMonitor ?? undefined,
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
@@ -2820,9 +2811,6 @@ function registerIpc() {
 			}
 		}, 500);
 	}
-
-	// 预载模型规格索引（sql.js WASM + 全表读入约数十 ms，后台完成避免首次失焦卡顿）
-	modelSpecsStore.warm();
 
 	registerFilesIpc({
 		fileSystemService,

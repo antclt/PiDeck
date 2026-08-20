@@ -38,6 +38,7 @@ import {
 import { cn } from "./lib/utils";
 import { showNotice } from "./utils/notice";
 import { collectModelSpecPatches } from "./utils/modelSpecAutoFill";
+import type { FetchedModel } from "../../shared/types/fetchedModel";
 import { Component, useRef, useState, useEffect, useCallback, type ReactNode } from "react";
 import type { PiDesktopApi } from "../../preload";
 import { AuthTab } from "./config/AuthTab";
@@ -388,9 +389,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 	const [newAuthName, setNewAuthName] = useState("");
 	// 远程拉取模型列表
 	const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
-	const [fetchedModels, setFetchedModels] = useState<
-		Record<string, Array<{ id: string; name?: string }>>
-	>({});
+	const [fetchedModels, setFetchedModels] = useState<Record<string, FetchedModel[]>>({});
 
 	/**
 	 * 根据 API 类型返回对应的获取模型提示。
@@ -996,9 +995,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 	};
 
 	const handleSaveModels = async (): Promise<boolean> => {
-		// 保存前按内置规格表批量补全空字段（用户无需逐个失焦）：
-		// 查询只读、补全只填空字段；结果写回 state 与落盘数据，保证保存的就是补全后的值
-		// （onSave 闭包读的是旧 modelsData，不能在 setState 之后再取）。
+		// 保存前按 pi-ai 目录批量补全空字段（listing 已写入的不覆盖；未命中留空）。
 		const { providers: filledProviders, filledCount } = await collectModelSpecPatches(
 			modelsData,
 			(providerName, modelId) => api.projects.getModelSpec(providerName, modelId),

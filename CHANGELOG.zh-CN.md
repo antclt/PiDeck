@@ -8,6 +8,10 @@
 
 ### 🚀 新功能
 
+- **模型规格按 listing + pi-ai 补全** — 拉取模型列表时，端点返回的
+  `contextWindow` / `maxTokens` 直接写入；缺的按 `@earendil-works/pi-ai`
+  内置目录匹配（与 DSH 同源）。匹配不到就留空，不再猜 128k/8k。
+  OpenRouter/models.dev 的 SQLite 规格表（`model-specs.db`）已移除。
 - **DSH 供应商重试次数** — DSH 没有全局重试项。DeepSeek / OpenAI 兼容供应商的
   「自定义设置」里可改 `retryPolicy.maxRetries`（默认 5，只对瞬时错误生效）。
 - **DSH 0.1.0-rc.8** — `@deepseek-ai/dsh*` 升到当前 harness 发布版。本地

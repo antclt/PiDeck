@@ -50,10 +50,31 @@ test("builds multiple fetched models and skips duplicates", () => {
 		[{ id: "already-added" }],
 	);
 
-	// 规格字段留空：真实值由「保存所选模型」时按内置规格表补全（硬编码默认值会误导且阻断补全）；
-	// 序列化后 undefined 键被剥除，期望对象不带 contextWindow/maxTokens/reasoning
 	assert.deepEqual(JSON.parse(JSON.stringify(models)), [
 		{ id: "gpt-4o", name: "GPT 4o" },
 		{ id: "gpt-4o-mini", name: "GPT 4o mini" },
+	]);
+});
+
+test("carries listing capacities onto new models and leaves missing fields empty", () => {
+	const { buildModelsFromFetchedSelection } = loadModelsTabModule();
+	const models = buildModelsFromFetchedSelection(
+		[
+			{ id: "listed", name: "Listed", contextWindow: 64000, maxTokens: 4096, reasoning: true, input: ["text", "image"] },
+			{ id: "empty" },
+		],
+		["listed", "empty"],
+		[],
+	);
+	assert.deepEqual(JSON.parse(JSON.stringify(models)), [
+		{
+			id: "listed",
+			name: "Listed",
+			contextWindow: 64000,
+			maxTokens: 4096,
+			reasoning: true,
+			input: ["text", "image"],
+		},
+		{ id: "empty", name: "empty" },
 	]);
 });

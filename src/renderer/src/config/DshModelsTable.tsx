@@ -30,6 +30,8 @@ export function ModelsTable(props: {
 	onUpdate: (index: number, field: string, value: unknown) => void;
 	onAdd: () => void;
 	onRemove: (index: number) => void;
+	/** 模型 id 失焦：由编辑器按 pi-ai 目录补空容量，表格本身不打 IPC */
+	onIdBlur?: (index: number, modelId: string) => void;
 }) {
 	const { models, writable, onUpdate, onAdd, onRemove } = props;
 	/** 当前展开容量编辑的行（同时只展开一行）。 */
@@ -97,6 +99,7 @@ export function ModelsTable(props: {
 											value={id}
 											disabled={!writable}
 											onChange={(event) => onUpdate(index, "id", event.target.value)}
+											onBlur={(event) => props.onIdBlur?.(index, event.target.value)}
 										/>
 									)}
 									{inherited ? (

@@ -25,7 +25,7 @@ import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import type { SkillManager } from "../skills/SkillManager";
 import { fetchModelList, invalidateModelListCache, getCachedModelList, refreshModelList } from "../pi/modelListCache";
-import type { ModelSpecsStore } from "../pi/modelSpecsStore";
+import { getPiAiCatalogIndex, lookupPiAiModelSpec } from "../pi/piAiBuiltinCatalog";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
 import type { AgentProcessMetric, DiagnosticsSnapshot, ProcessMetricsSnapshot } from "../../shared/types";
@@ -84,8 +84,6 @@ export type SystemIpcDeps = {
 	stopDshHostFromMonitor?: () => Promise<SessionCommandResult<undefined>>;
 	/** 单供应商 pi↔DSH 互迁（不为此拉起 host）。 */
 	providerMigration?: ProviderMigrationDeps;
-	/** 模型规格存储（resources/model-specs.db 只读，发版前由 sync-model-specs.mjs 同步） */
-	modelSpecsStore: ModelSpecsStore;
 	getMainWindow: () => Electron.BrowserWindow | null;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	/** Check for app update; defined in index.ts */
@@ -169,7 +167,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		isDshAgent,
 		setDshRpcLogging,
 		isDshRpcLogging,
-		modelSpecsStore,
 		getMainWindow,
 		mainCopy,
 		checkForAppUpdate,
@@ -261,7 +258,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 	});
 
-	// ── 模型规格（resources/model-specs.db，发版前由 sync-model-specs.mjs 同步）──
+	// ── 模型规格（pi-ai 内置目录，按模型 id 精确匹配；未命中返回 null）──
 
 	ipcMain.handle(
 		ipcChannels.projectsGetModelSpec,
@@ -276,7 +273,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				return null;
 			}
 			try {
-				return (await modelSpecsStore.lookup(providerName, modelId)) ?? null;
+				return lookupPiAiModelSpec(getPiAiCatalogIndex(), providerName, modelId) ?? null;
 			} catch (error) {
 				void appLogger.warn("models", "Model spec lookup failed", {
 					error: error instanceof Error ? error.message : String(error),

@@ -26,7 +26,12 @@ function loadDshModelsModule() {
 						const selected = new Set(selectedIds);
 						return fetched
 							.filter((model) => selected.has(model.id) && !existingIds.has(model.id))
-							.map((model) => ({ id: model.id, name: model.name ?? model.id }));
+							.map((model) => ({
+								id: model.id,
+								name: model.name ?? model.id,
+								contextWindow: model.contextWindow,
+								maxTokens: model.maxTokens,
+							}));
 					},
 				};
 			}
@@ -122,21 +127,21 @@ test("removing from inherited catalog keeps the remaining catalog rows", () => {
 	assert.deepEqual(asJson(next), [{ id: "keep", name: "Keep" }]);
 });
 
-test("appending fetched models keeps existing rows and skips duplicates", () => {
+test("appending fetched models keeps existing rows, skips duplicates, and copies listing capacities", () => {
 	const { appendFetchedDshModels } = loadDshModelsModule();
 	const next = appendFetchedDshModels({
 		savedModels: [{ id: "already", name: "Already" }],
 		catalog: [{ id: "catalog-only" }],
 		fetched: [
 			{ id: "already", name: "Already Remote" },
-			{ id: "new-a", name: "New A" },
+			{ id: "new-a", name: "New A", contextWindow: 256000, maxTokens: 32000 },
 			{ id: "new-b", name: "New B" },
 		],
 		selectedIds: ["already", "new-a"],
 	});
 	assert.deepEqual(asJson(next), [
 		{ id: "already", name: "Already" },
-		{ id: "new-a", name: "New A" },
+		{ id: "new-a", name: "New A", contextWindow: 256000, maxTokens: 32000 },
 	]);
 });
 

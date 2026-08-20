@@ -75,7 +75,6 @@
     "test:e2e": "npm run build:fast && playwright test",
     "e2e": "playwright test",
     "verify": "npm run typecheck && npm test && npm run test:e2e",
-    "sync:model-specs": "node scripts/sync-model-specs.mjs",
     "probe:dsh": "node scripts/dsh-embed-probe.mjs"
   },
   "dependencies": {
@@ -100,6 +99,7 @@
     "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-timeout": "^0.1.0-rc.8",
     "@deepseek-ai/dsh-workflow": "^0.1.0-rc.8",
+    "@earendil-works/pi-ai": "^0.82.1",
     "@electron-toolkit/utils": "^4.0.0",
     "@larksuiteoapi/node-sdk": "^1.67.0",
     "@tiptap/core": "^3.29.2",
@@ -169,10 +169,6 @@
       {
         "from": "resources/xueprompts.db",
         "to": "xueprompts.db"
-      },
-      {
-        "from": "resources/model-specs.db",
-        "to": "model-specs.db"
       },
       {
         "from": "build/pets",

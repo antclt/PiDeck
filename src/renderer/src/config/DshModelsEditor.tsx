@@ -10,10 +10,12 @@ import {
 	appendFetchedDshModels,
 	removeDshModelAt,
 	resolveDshFetchEndpoint,
+	seedDshModelsForCustomEdit,
 	updateDshModelAt,
 } from "./dshModels";
-
-type FetchedModel = { id: string; name?: string };
+import type { FetchedModel } from "../../../shared/types/fetchedModel";
+import type { ModelItem } from "./configTypes";
+import { computeModelSpecPatches } from "../utils/modelSpecAutoFill";
 
 /**
  * DSH 自定义模型编辑器：在适配器目录上追加/拉取，而不是从空 draft 起步。
@@ -95,6 +97,40 @@ export function DshModelsEditor(props: {
 		setSelectedIds([]);
 	};
 
+	/** 手动输入 id 失焦：listing 没给的容量按 pi-ai 目录补，仍缺留空 */
+	const fillFromCatalogOnIdBlur = async (index: number, modelId: string) => {
+		const trimmed = modelId.trim();
+		if (!trimmed || !writable) return;
+		const spec = await desktopApi.projects.getModelSpec(props.providerKey ?? "", trimmed).catch(() => null);
+		const current = seedDshModelsForCustomEdit(seedInput);
+		const row = current[index];
+		if (!row) return;
+		const model: ModelItem = {
+			id: typeof row.id === "string" ? row.id : trimmed,
+			name: typeof row.name === "string" ? row.name : undefined,
+			contextWindow: typeof row.contextWindow === "number" ? row.contextWindow : undefined,
+			maxTokens: typeof row.maxTokens === "number" ? row.maxTokens : undefined,
+		};
+		const updates = computeModelSpecPatches(model, spec);
+		if (updates.length === 0) return;
+		let nextRows = current;
+		for (const [field, value] of updates) {
+			nextRows = updateDshModelAt({
+				draftModels: nextRows,
+				savedModels,
+				catalog,
+				index,
+				field,
+				value,
+			});
+		}
+		props.onChange(nextRows);
+		showNotice(
+			t("config.modelSpecAutoFilled", { model: spec?.matchedId ?? trimmed }),
+			3000,
+		);
+	};
+
 	return (
 		<div className="grid gap-2">
 			<div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -142,6 +178,7 @@ export function DshModelsEditor(props: {
 				onAdd={() => props.onChange(appendBlankDshModel(seedInput))}
 				onUpdate={(index, field, value) => props.onChange(updateDshModelAt({ ...seedInput, index, field, value }))}
 				onRemove={(index) => props.onChange(removeDshModelAt({ ...seedInput, index }))}
+				onIdBlur={(index, modelId) => void fillFromCatalogOnIdBlur(index, modelId)}
 			/>
 		</div>
 	);

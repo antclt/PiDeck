@@ -21,8 +21,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui-shadcn/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui-shadcn/popover";
 import { showNotice } from "../utils/notice";
-import { computeModelSpecPatches } from "../utils/modelSpecAutoFill";
-import type { ModelSpec } from "../../../shared/types/modelSpecs";
+import { applyModelPatches, computeModelSpecPatches } from "../utils/modelSpecAutoFill";
+import type { FetchedModel } from "../../../shared/types/fetchedModel";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
 import { isValidProviderName } from "../../../shared/providerName";
 
@@ -60,7 +60,7 @@ export function ModelsTab(props: {
 	renamingProvider: string | null;
 	renameValue: string;
 	fetchingProvider: string | null;
-	fetchedModels: Record<string, Array<{ id: string; name?: string }>>;
+	fetchedModels: Record<string, FetchedModel[]>;
 	fetchModelsErrorByProvider: Record<string, string | undefined>;
 	testingProvider: string | null;
 	testResult: {
@@ -144,30 +144,23 @@ export function ModelsTab(props: {
 	}, [costDialogKey]);
 
 	/**
-	 * 模型 id 失焦时按内置规格表自动填充空字段（contextWindow/maxTokens/reasoning/input）。
-	 * 数据来自 resources/model-specs.db（发版前 scripts/sync-model-specs.mjs 同步），
-	 * 按模型 id 匹配——中转站模型 id 与官方一致即可命中；只填空字段，手填不覆盖。
+	 * 模型 id 失焦时按 pi-ai 内置目录填充空字段。
+	 * listing 没给、目录也没命中就空着，不写猜的默认值；手填不覆盖。
 	 */
 	const applyModelSpecAutoFill = async (providerName: string, index: number, modelId: string) => {
 		const trimmed = modelId.trim();
 		if (!trimmed) return;
 		const spec = await desktopApi.projects.getModelSpec(providerName, trimmed);
-		// 未匹配时用空规格兜底：computeModelSpecPatches 仍会填保守默认值（128000/8192），
-		// 保证空字段始终有值；matchedId 用用户输入，toast 展示命中来源
-		const fallback = spec ?? ({ source: "models-dev", matchedId: trimmed } satisfies ModelSpec);
-		// 失焦时手填已完成：以最新渲染的 model 为准，逐个判断空字段（有值不覆盖）
 		const model = data.providers[providerName]?.models[index];
 		if (!model) return;
-		// 补全规则（只填空字段）集中在 utils/modelSpecAutoFill.ts，保存时的批量补全复用同一套逻辑
-		const updates = computeModelSpecPatches(model, fallback);
+		const updates = computeModelSpecPatches(model, spec);
 		for (const [field, value] of updates) {
 			props.onUpdateModel(providerName, index, field, value);
 		}
 		if (updates.length > 0) {
 			showNotice(
 				t("config.modelSpecAutoFilled", {
-					model: fallback.matchedId ?? trimmed,
-					source: fallback.source === "openrouter" ? "OpenRouter" : "models.dev",
+					model: spec?.matchedId ?? trimmed,
 				}),
 				3000,
 			);
@@ -826,15 +819,13 @@ export function ModelsTab(props: {
 														const currentProvider = data.providers[name];
 														if (!currentProvider) return;
 														const selectedIds = selectedFetchedModelIds[name] ?? [];
-														// 选中模型只带 id/name，规格字段为空；保存的同一时刻按内置规格表补全，
-														// 避免硬编码默认值误导（且非空值会被「只填空字段」规则永久跳过）
+														// listing 已带容量的字段直接写入；其余空字段再按 pi-ai 目录补，仍缺则空着
 														const baseModels = buildModelsFromFetchedSelection(
 															props.fetchedModels[name],
 															selectedIds,
 															currentProvider.models,
 														);
 														if (baseModels.length === 0) return;
-														// 并行查规格表（本地 sql.js 内存索引）；查不到的模型留空字段，不阻断保存
 														const results = await Promise.all(
 															baseModels.map((m) =>
 																desktopApi.projects.getModelSpec(name, m.id).catch(() => null),
@@ -842,14 +833,10 @@ export function ModelsTab(props: {
 														);
 														let filledCount = 0;
 														const newModels = baseModels.map((m, i) => {
-															const spec = results[i];
-															if (!spec) return m;
-															const updates = computeModelSpecPatches(m, spec);
+															const updates = computeModelSpecPatches(m, results[i]);
 															if (updates.length === 0) return m;
 															filledCount++;
-															const next = { ...m };
-															for (const [field, value] of updates) next[field] = value;
-															return next;
+															return applyModelPatches(m, updates);
 														});
 														props.onChangeProvider(name, "models", [
 																...currentProvider.models,
@@ -934,7 +921,7 @@ export function ModelsTab(props: {
 														onChange={(e) =>
 															props.onUpdateModel(name, i, "id", e.target.value)
 														}
-														// 失焦按内置规格表自动填充空字段（仅 model id 变化时生效，见 applyModelSpecAutoFill）
+														// 失焦按 pi-ai 目录填充空字段（未命中留空，见 applyModelSpecAutoFill）
 														onBlur={(e) => void applyModelSpecAutoFill(name, i, e.target.value)}
 														placeholder="model-id"
 														className="h-8 min-w-0"

@@ -19,6 +19,7 @@ import type {
 	AppUpdateInfo,
 	AvailableModel,
 	ChatMessage,
+	FetchedModel,
 	ModelSpec,
 	CodexImportReport,
 	CodexSessionSummary,
@@ -284,7 +285,7 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.projectsListModels, projectId) as Promise<
 				AvailableModel[]
 			>,
-		// 查询模型规格（context window / 能力，内置 model-specs.db，中转站按 id 匹配）
+		// 查询模型规格（pi-ai 内置目录，中转站按 id 精确匹配；未命中返回 null）
 		getModelSpec: (providerName: string, modelId: string) =>
 			ipcRenderer.invoke(ipcChannels.projectsGetModelSpec, providerName, modelId) as Promise<
 				ModelSpec | null
@@ -1365,7 +1366,7 @@ const api = {
 				{ baseUrl, apiKey, apiType },
 			) as Promise<{
 				success: boolean;
-				models?: Array<{ id: string; name?: string }>;
+				models?: FetchedModel[];
 				error?: string;
 				suggestedBaseUrl?: string;
 			}>,
