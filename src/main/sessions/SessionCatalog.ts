@@ -60,6 +60,8 @@ export type SessionCatalogEntry = {
 type SessionCatalogFile = {
 	version: 1;
 	sessions: SessionCatalogEntry[];
+	/** 用户主动删除过的 DSH host 会话。host 目录可能还在，自动同步不得再导入。 */
+	dismissedDshSessionIds?: string[];
 };
 
 type SessionCatalogContext = {
@@ -139,6 +141,8 @@ export class SessionCatalog {
 	private entries: SessionCatalogEntry[] = [];
 	/** Runtime-only records share the catalog lookup contract without durable storage. */
 	private transientEntries = new Map<string, SessionCatalogEntry>();
+	/** 侧栏删除过的 DSH host 会话：刷新/自动导入跳过；手动导入会清掉墓碑。 */
+	private dismissedDshSessionIds = new Set<string>();
 	private loaded = false;
 	private writeQueue: Promise<void> = Promise.resolve();
 	private skipNextBackup = false;
@@ -161,15 +165,20 @@ export class SessionCatalog {
 		if (this.loaded) return;
 		let primaryError: unknown;
 		try {
-			this.entries = await this.readEntries(this.filePath);
+			const snapshot = await this.readCatalogFile(this.filePath);
+			this.entries = snapshot.entries;
+			this.dismissedDshSessionIds = snapshot.dismissedDshSessionIds;
 		} catch (error) {
 			primaryError = error;
 			try {
-				this.entries = await this.readEntries(this.backupFilePath());
+				const snapshot = await this.readCatalogFile(this.backupFilePath());
+				this.entries = snapshot.entries;
+				this.dismissedDshSessionIds = snapshot.dismissedDshSessionIds;
 				this.skipNextBackup = true;
 			} catch (backupError) {
 				if (isMissingFileError(primaryError) && isMissingFileError(backupError)) {
 					this.entries = [];
+					this.dismissedDshSessionIds = new Set();
 				} else {
 					// catalog 主文件与备份同时损坏是数据丢失信号，必须留 error 级日志供审计。
 					// 不再向上抛：打包启动链会 await load()，抛错会让 whenReady 中断、窗口永不出现。
@@ -178,6 +187,7 @@ export class SessionCatalog {
 						backup: backupError instanceof Error ? backupError.message : String(backupError),
 					});
 					this.entries = [];
+					this.dismissedDshSessionIds = new Set();
 				}
 			}
 		}
@@ -282,6 +292,26 @@ export class SessionCatalog {
 		this.assertLoaded();
 		const entry = this.entries.find((candidate) => candidate.dshSessionId === dshSessionId);
 		return entry ? cloneEntry(entry) : undefined;
+	}
+
+	/** 侧栏删除过的 DSH host 会话。自动同步跳过；手动导入会清掉。 */
+	listDismissedDshSessionIds(): Set<string> {
+		this.assertLoaded();
+		return new Set(this.dismissedDshSessionIds);
+	}
+
+	/** 删除 DSH 映射时记下墓碑，避免 host 目录还在时刷新又把会话导回来。 */
+	async rememberDismissedDshSession(dshSessionId: string): Promise<void> {
+		this.assertLoaded();
+		const id = dshSessionId.trim();
+		if (!id) return;
+		await this.enqueueMutation((entries) => {
+			if (this.dismissedDshSessionIds.has(id)) {
+				return { value: undefined, changed: false };
+			}
+			this.dismissedDshSessionIds.add(id);
+			return { value: undefined, changed: true };
+		});
 	}
 
 	createAnonymous(input: {
@@ -432,12 +462,14 @@ export class SessionCatalog {
 			// 不再新建条目，只更新标题/项目归属——否则侧栏出现两条同 host 会话记录，
 			// 且删除其一后另一条仍可加载同一 host 数据（「重复导入」用户问题）。
 			if (input.dshSessionId) {
+				// 手动导入/恢复是用户明确找回：清掉删除墓碑，否则下次同步仍会跳过。
+				const forgotten = this.dismissedDshSessionIds.delete(input.dshSessionId);
 				const existing = entries.find((candidate) => (
 					candidate.dshSessionId === input.dshSessionId
 				));
 				if (existing) {
 					const nextTitle = input.keepExistingTitle ? existing.title : input.title;
-					const changed = (
+					const changed = forgotten || (
 						existing.projectId !== input.projectId ||
 						existing.title !== nextTitle ||
 						existing.backend !== input.backend ||
@@ -542,7 +574,11 @@ export class SessionCatalog {
 			const previousFilePath = entry.filePath;
 			if (filePath) entry.filePath = filePath;
 			if (input.piSessionId) entry.piSessionId = input.piSessionId;
-			if (input.dshSessionId) entry.dshSessionId = input.dshSessionId;
+			if (input.dshSessionId) {
+				entry.dshSessionId = input.dshSessionId;
+				// 归档恢复/手动 attach 也是用户找回：清掉删除墓碑。
+				this.dismissedDshSessionIds.delete(input.dshSessionId);
+			}
 			// DSH 会话没有 pi 会话文件：无 filePath 分支，但 attach 到 host 会话后即视为
 			// active（会话持久化在 $DSH_HOME，重启不应被 draft 清理逻辑清掉）。
 			if (input.dshSessionId && !entry.filePath && entry.status === "draft") {
@@ -859,7 +895,10 @@ export class SessionCatalog {
 		return `${this.filePath}.bak`;
 	}
 
-	private async readEntries(filePath: string): Promise<SessionCatalogEntry[]> {
+	private async readCatalogFile(filePath: string): Promise<{
+		entries: SessionCatalogEntry[];
+		dismissedDshSessionIds: Set<string>;
+	}> {
 		const parsed = JSON.parse(await readFile(filePath, "utf8")) as Partial<SessionCatalogFile>;
 		if (!Array.isArray(parsed.sessions)) {
 			throw new Error(`Invalid Session catalog: ${filePath}`);
@@ -874,13 +913,23 @@ export class SessionCatalog {
 		if (entries.length !== parsed.sessions.length) {
 			throw new Error(`Session catalog contains invalid records: ${filePath}`);
 		}
-		return entries.map(cloneEntry);
+		const dismissed = Array.isArray(parsed.dismissedDshSessionIds)
+			? parsed.dismissedDshSessionIds.filter((id): id is string => (
+				typeof id === "string" && id.trim().length > 0
+			))
+			: [];
+		return {
+			entries: entries.map(cloneEntry),
+			dismissedDshSessionIds: new Set(dismissed),
+		};
 	}
 
 	private async writeSnapshot(entries: SessionCatalogEntry[]): Promise<void> {
 		const snapshot: SessionCatalogFile = {
 			version: 1,
 			sessions: entries.map(cloneEntry),
+			// 旧 catalog 没有该字段；空数组也写出，重启后删除墓碑不丢。
+			dismissedDshSessionIds: [...this.dismissedDshSessionIds],
 		};
 		await mkdir(dirname(this.filePath), { recursive: true });
 		const nonce = randomUUID();

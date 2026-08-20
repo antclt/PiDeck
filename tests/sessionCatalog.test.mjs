@@ -232,6 +232,42 @@ test("imports a foreign DSH session as active (survives restart cleanup, attacha
   }
 });
 
+test("remembered dismissed DSH sessions survive reload and stay out of createDraft", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-dismissed-dsh-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    const imported = await catalog.createDraft({
+      projectId: "project-1",
+      title: "Gone",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-gone",
+    });
+    await catalog.rememberDismissedDshSession("session-gone");
+    await catalog.remove(imported.id);
+    assert.equal(catalog.listDismissedDshSessionIds().has("session-gone"), true);
+
+    const reloaded = new SessionCatalog(join(dir, "sessions.json"));
+    await reloaded.load();
+    assert.equal(reloaded.listDismissedDshSessionIds().has("session-gone"), true);
+    assert.equal(reloaded.listEntries().length, 0);
+    // 手动导入是用户明确找回：createDraft 成功并清掉墓碑。
+    const restored = await reloaded.createDraft({
+      projectId: "project-1",
+      title: "Back again",
+      environment: "native",
+      backend: "dsh",
+      dshSessionId: "session-gone",
+    });
+    assert.equal(restored.dshSessionId, "session-gone");
+    assert.equal(reloaded.listDismissedDshSessionIds().has("session-gone"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 // 回归：外部会话重复导入（自动同步与手动导入并发、配置页重复点击、host-ready 重放）
 // 必须幂等吸收——同一 dshSessionId 只保留一条记录，后续导入只更新标题/项目归属，
 // 否则侧栏出现两条同 host 会话记录（「重复导入」用户问题）。

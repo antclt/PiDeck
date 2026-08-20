@@ -246,6 +246,12 @@ test("uses only the canonical project refresh port", () => {
   assert.equal(unarchive.match(/refreshProjectSessions\(/g)?.length, 1);
 });
 
+test("DSH delete toast no longer claims host data stays mapped", () => {
+  const remove = functionBlock("deleteHistorySession", "archiveHistorySession");
+  assert.doesNotMatch(remove, /session\.deletedDshKeepData/);
+  assert.match(remove, /app\.sessionDeleted/);
+});
+
 test("copy and export address the Catalog by stable Session ID", () => {
   const copy = functionBlock("copySession", "exportHistorySession");
   const historyExport = functionBlock("exportHistorySession", "deleteHistorySession");

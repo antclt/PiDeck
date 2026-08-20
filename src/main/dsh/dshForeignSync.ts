@@ -8,8 +8,9 @@ import type { SessionRecord } from "../../shared/types";
  * - 幂等由 SessionCatalog.createDraft 的 dshSessionId 去重保证（重复导入只更新不新增）；
  * - 目标项目按会话自己的 cwd：已注册则挂入该项目，未注册则按该目录创建项目；
  *   只有没有 cwd 的会话才进入「外部会话」兑底项目（不能把不同目录堆在一起）；
- * - shouldRegisterCwd=false（已删记录 / 临时隔离目录 / 磁盘不存在）时跳过该条，
- *   既不建项目也不兑底，避免侧栏「删了重启又回来」；
+ * - shouldRegisterCwd=false（已删项目 / 临时隔离目录 / 磁盘不存在）时跳过该条，
+ *   既不建项目也不兑底；
+ * - dismissedDshSessionIds（用户删过的 host 会话）批量同步跳过，避免目录还在时刷新复活；
  * - 标题优先官方投影缓存 / 日志 session/title / 首条提示回退；再缺才用 cwd 末段或 i18n。
  * - 批量同步禁止走 resolveHostTitle / sessions.history：那会 attach 冷会话，
  *   与 dsh-web 抢同一份 DSH_HOME（官方不支持双 host）。
@@ -71,6 +72,8 @@ export type DshForeignSyncDeps = {
 	resolveHostTitle?: (dshSessionId: string) => Promise<string | undefined>;
 	/** 单条导入失败回调（不阻断其余会话；缺省静默）。 */
 	onError?: (dshSessionId: string, error: unknown) => void;
+	/** 用户主动删除过的 DSH host 会话。自动同步跳过；手动导入不走这里。 */
+	dismissedDshSessionIds?: () => ReadonlySet<string>;
 };
 
 /** 标题归一：空串/纯空白视为缺失。 */
@@ -256,7 +259,14 @@ export async function syncForeignSessions(
 	let skipped = 0;
 	// 已在 catalog 的也再导入一遍：createDraft 按 dshSessionId 幂等更新项目归属，
 	// 把上一版堆在「外部会话」兑底里的会话拆回各自 cwd 对应的项目。
+	const dismissed = deps.dismissedDshSessionIds?.() ?? new Set<string>();
 	for (const item of items) {
+		// 侧栏删除只去掉 catalog 映射；host 目录还在。墓碑优先于 knownIds，
+		// 否则刷新会把同一条再 createDraft 回来。
+		if (dismissed.has(item.dshSessionId)) {
+			skipped += 1;
+			continue;
+		}
 		const alreadyKnown = Boolean(knownIds?.has(item.dshSessionId));
 		try {
 			await importForeignSession(deps, item.dshSessionId, item, false, alreadyKnown);

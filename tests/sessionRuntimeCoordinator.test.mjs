@@ -159,6 +159,7 @@ function createHarness(options = {}) {
     },
     stop: async (agentId) => {
       calls.stop += 1;
+      if (options.stopDelay) await options.stopDelay;
       const index = tabs.findIndex((tab) => tab.id === agentId);
       if (index >= 0) tabs.splice(index, 1);
     },
@@ -1026,18 +1027,20 @@ test("stop invalidates the target and restart replaces it with a higher generati
   assert.equal(restarted.value.session.id, "session-1");
 });
 
-test("releaseRuntimeForDelete stops a bound runtime so catalog delete can proceed", async () => {
+test("releaseRuntimeForDelete unbinds immediately and stops the agent in the background", async () => {
   const { SessionRuntimeCoordinator } = loadCoordinator();
+  const stopGate = deferred();
   const harness = createHarness({
     tabs: [{
       id: "agent-a",
       projectId: "project-1",
       cwd: "C:/project",
       title: "Session",
-      status: "error",
+      status: "running",
       sessionPath: "C:/sessions/session-1.jsonl",
       createdAt: 1,
     }],
+    stopDelay: stopGate.promise,
   });
   const coordinator = new SessionRuntimeCoordinator(
     harness.catalog,
@@ -1045,10 +1048,13 @@ test("releaseRuntimeForDelete stops a bound runtime so catalog delete can procee
     harness.sender,
   );
   coordinator.bindExistingAgent("session-1", "agent-a");
-  // getTarget 会把 error 当终态解绑；删除仍必须先 stop 进程。
-  await coordinator.releaseRuntimeForDelete("session-1");
+  const pending = coordinator.releaseRuntimeForDelete("session-1");
+  // 删除路径不能等 stop 完成：侧栏要立刻解绑，agent 在后台停。
   assert.equal(coordinator.getTarget("session-1"), undefined);
   assert.equal(harness.calls.stop, 1);
+  stopGate.resolve();
+  await pending;
+  assert.equal(coordinator.getTarget("session-1"), undefined);
 });
 
 test("commandFailure classifies message-not-found separately from session-not-found", () => {

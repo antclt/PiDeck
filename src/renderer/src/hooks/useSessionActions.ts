@@ -136,9 +136,8 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     }
     removeSessionState(session.id);
     removeSessionComposerState(session.id);
-    // G1：DSH 会话删除只删 PiDeck catalog 映射；host 会话数据由 $DSH_HOME 保留
-    // （DSH wire 无 session.delete，删映射后数据仍在，提示用户避免「以为删了」）。
-    showToast(t(session.backend === "dsh" ? "session.deletedDshKeepData" : "app.sessionDeleted"), 3200);
+    // DSH 删除会记墓碑：刷新/自动导入不再把同一 host 会话导回侧栏。
+    showToast(t("app.sessionDeleted"), 3200);
     const projectId = sessionsProjectId ?? activeProjectId;
     if (projectId) await refreshProjectSessions(projectId);
   }

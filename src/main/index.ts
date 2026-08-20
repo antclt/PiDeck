@@ -412,6 +412,8 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 			error: error instanceof Error ? error.message : String(error),
 		});
 	},
+	// 用户删过的 DSH 会话：host 目录可能还在，自动同步不得再导入。
+	dismissedDshSessionIds: () => sessionCatalog.listDismissedDshSessionIds(),
 };
 
 /** 导入/同步落库后向渲染层广播对应项目刷新（侧栏静默重拉，新会话立即可见）。 */
@@ -3131,9 +3133,13 @@ app.whenReady().then(async () => {
 		deleteSessionRecord: async (sessionId) => {
 			const entry = sessionCatalog.get(sessionId);
 			if (!entry) return false;
-			// Web 删除与桌面 IPC 同一策略：先强制停运行时再删 catalog。
+			// Web 删除与桌面 IPC 同一策略：先解绑再删 catalog，agent 后台停。
 			await sessionRuntimeCoordinator.releaseRuntimeForDelete(sessionId);
 			if (entry.filePath) await sessionScanner.delete(entry.filePath);
+			// DSH 没有 session.delete：记下墓碑，避免刷新把 host 目录再导回侧栏。
+			if (entry.backend === "dsh" && entry.dshSessionId) {
+				await sessionCatalog.rememberDismissedDshSession(entry.dshSessionId);
+			}
 			await sessionCatalog.remove(sessionId);
 			return true;
 		},

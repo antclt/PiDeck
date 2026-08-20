@@ -196,6 +196,8 @@ export class SessionRuntimeCoordinator {
 	private dispatchLeaseSequence = 0;
 	/** 渲染层当前聚焦的会话 id；为 undefined 时视为全部会话都需要通知 */
 	private focusedSessionId: string | undefined = undefined;
+	/** 正在删除的会话：先解绑再异步停 agent，禁止激活/bind 把运行时写回 catalog。 */
+	private readonly deletingSessions = new Set<string>();
 
 	constructor(
 		private readonly catalog: SessionCatalogGateway,
@@ -298,15 +300,15 @@ export class SessionRuntimeCoordinator {
 	}
 
 	/**
-	 * 删除前强制释放运行时：等激活结束（如有），再 stop 解绑。
-	 * 失败一次后状态卡在 bound/error 时，旧逻辑会拒绝删除；这里先杀后删，
-	 * stop 失败也尽量解绑，避免用户永远删不掉。
+	 * 删除前强制释放运行时：先解绑让侧栏立刻可删，agent 停在后台。
+	 * 运行中会话也允许删——用户不必先点停止。stop 失败也不挡 catalog 删除。
 	 */
 	async releaseRuntimeForDelete(sessionId: string): Promise<void> {
+		this.deletingSessions.add(sessionId);
 		const activating = this.activationBySession.get(sessionId);
 		if (activating) await activating.catch(() => undefined);
 		// 先读原始映射：getTarget 会把 error/closed 当终态解绑，
-		// 失败一次卡在 error 的会话也必须先 stop 再删。
+		// 失败一次卡在 error 的会话也必须先解绑再杀进程。
 		const mappedAgentId = this.agentIdBySession.get(sessionId);
 		const mappedGeneration = mappedAgentId
 			? this.getRuntimeBinding(mappedAgentId)?.runtimeGeneration ?? 0
@@ -315,10 +317,15 @@ export class SessionRuntimeCoordinator {
 		const target = liveTarget ?? (mappedAgentId
 			? { sessionId, agentId: mappedAgentId, runtimeGeneration: mappedGeneration }
 			: undefined);
-		if (!target) return;
-		// 终态/绑定已漂时 stopRuntime 可能拒绝：删除路径直接杀进程再解绑。
-		await this.agents.stop(target.agentId).catch(() => undefined);
+		if (!target) {
+			this.deletingSessions.delete(sessionId);
+			return;
+		}
 		this.unbindAgentUnchecked(target.agentId);
+		// 先解绑再停：删除 IPC 不必等 pi/DSH 进程退出。stop 完成前禁止重新 activate/bind。
+		void this.agents.stop(target.agentId)
+			.catch(() => undefined)
+			.finally(() => this.deletingSessions.delete(sessionId));
 	}
 
 	getRuntimeMessages(sessionId: string): SessionTargetedValue<ChatMessage[]> | undefined {
@@ -1054,6 +1061,9 @@ export class SessionRuntimeCoordinator {
 	}
 
 	private async activate(sessionId: string): Promise<AgentTab> {
+		if (this.deletingSessions.has(sessionId)) {
+			throw new Error(`Session is being deleted: ${sessionId}`);
+		}
 		const entry = this.catalog.get(sessionId);
 		if (!entry) throw new Error(`Session not found: ${sessionId}`);
 		if (this.replacementBySession.has(sessionId)) {
@@ -1255,6 +1265,9 @@ export class SessionRuntimeCoordinator {
 	}
 
 	private bind(sessionId: string, agentId: string): number {
+		if (this.deletingSessions.has(sessionId)) {
+			throw new Error(`Session is being deleted: ${sessionId}`);
+		}
 		this.assertNoDispatchLease(sessionId, agentId);
 		if (this.replacementByAgent.has(agentId)) {
 			throw new Error(`Session runtime replacement already in progress: ${agentId}`);

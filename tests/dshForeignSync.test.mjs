@@ -204,6 +204,11 @@ test("index foreignSyncDeps must not call mainCopy at module load", () => {
     /getExistingDraft:\s*\(dshSessionId\)/,
     "纠正归属时必须能读到已有标题，才能用官方投影覆盖 cwd 占位名",
   );
+  assert.match(
+    source,
+    /dismissedDshSessionIds:\s*\(\)\s*=>\s*sessionCatalog\.listDismissedDshSessionIds\(\)/,
+    "自动同步必须跳过用户删过的 DSH host 会话",
+  );
 });
 
 test("cwdDisplayName takes the last path segment on both separators", () => {
@@ -438,6 +443,29 @@ test("syncForeignSessions never calls resolveHostTitle so bulk sync cannot attac
     assert.equal(result.imported, 1);
     assert.equal(called, 0, "批量同步禁止 sessions.history 标题补全");
     assert.equal(fixture.catalog.listEntries()[0].title, "alpha");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("syncForeignSessions does not resurrect a deleted DSH session still on disk", async () => {
+  // 用户删的是侧栏映射；host 目录还在 $DSH_HOME。刷新/自动导入若只按
+  // catalog 现有 id 过滤，会把同一条再 createDraft 回来。
+  const fixture = await createFixture([
+    foreignItem({ dshSessionId: "session-deleted", title: "Keep me?", cwd: "C:/repo/alpha" }),
+  ]);
+  try {
+    await fixture.sync.syncForeignSessions(fixture.deps);
+    assert.equal(fixture.catalog.listEntries().length, 1);
+    const id = fixture.catalog.listEntries()[0].id;
+    const dshSessionId = fixture.catalog.listEntries()[0].dshSessionId;
+    await fixture.catalog.rememberDismissedDshSession(dshSessionId);
+    await fixture.catalog.remove(id);
+    assert.equal(fixture.catalog.listEntries().length, 0);
+    fixture.deps.dismissedDshSessionIds = () => fixture.catalog.listDismissedDshSessionIds();
+    const again = await fixture.sync.syncForeignSessions(fixture.deps);
+    assert.equal(again.imported, 0, "已删除的 host 会话不得因磁盘仍在而被重新导入");
+    assert.equal(fixture.catalog.listEntries().length, 0);
   } finally {
     await fixture.cleanup();
   }

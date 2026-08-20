@@ -563,6 +563,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// 仍按路径扫一遍游离 agent，避免只解绑 catalog 却留着进程。
 			await sessionRuntimeCoordinator.releaseRuntimeForDelete(sessionId);
 			try {
+				// DSH 没有 session.delete：host 目录会留在 $DSH_HOME。先记墓碑再删映射，
+				// 否则 refreshProjectTree 的自动同步会把同一条再导入。运行中也允许删。
+				if (entry.backend === "dsh" && entry.dshSessionId) {
+					await sessionCatalog.rememberDismissedDshSession(entry.dshSessionId);
+				}
 				if (entry.filePath) {
 					const normalizedTarget = canonicalizeSessionPath(
 						entry.filePath,
