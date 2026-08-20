@@ -17,9 +17,11 @@ const i18n = loadTsCommonJs("src/renderer/src/i18n.ts");
 const {
 	FLOATING_FAILURE_KEYS,
 	composeFailureNotice,
+	failureRetrySignature,
 	isExtensionErrorMessage,
 	isFailureNoticeMessage,
 	isFloatingFailureMessage,
+	reduceFailureNoticePass,
 } = loadTsCommonJs("src/renderer/src/components/session/timelineFailureNotice.ts", {
 	// 与 composeFailureNotice 共用同一份 i18n 模块，否则 setI18nLocale 改不到 toast 文案。
 	stubs: { "../../i18n": i18n },
@@ -70,6 +72,7 @@ test("floating failure keys: covers retry + failure diagnostics, excludes start/
 	assert.equal(isFailureNoticeMessage(message("diagnostic.extensionError")), true);
 	assert.equal(isFailureNoticeMessage(message("diagnostic.requestFailed")), true);
 	assert.equal(isFailureNoticeMessage(message("diagnostic.agentStartFailed")), false);
+	assert.equal(isFailureNoticeMessage(message("diagnostic.compactReconnected")), false);
 	assert.doesNotMatch(notice, /"diagnostic\.agentStartFailed"/);
 	assert.doesNotMatch(notice, /"diagnostic\.runtimeError"/);
 });
@@ -79,20 +82,178 @@ test("timeline render: failure/retry messages return null, extension errors keep
 	assert.match(timeline, /if \(isFloatingFailureMessage\(message\)\) return null;/);
 	assert.match(timeline, /\/\/ 自动重试状态（retryScheduled\/retrySucceeded\/retryFailed 等）\s*\/\/ 属于「重试提示」/s);
 	assert.match(timeline, /composeFailureNotice\(message\)/);
-	assert.match(timeline, /isFailureNoticeMessage/);
+	assert.match(timeline, /isFloatingFailureMessage/);
 	assert.match(timeline, /from "\.\/timelineFailureNotice"/);
 });
 
-test("toast effect: baseline on load completion, only new failures toast", () => {
-	assert.match(timeline, /const failureBaselineRef = useRef<string\[\] \| null>\(null\);/);
-	assert.match(timeline, /if \(isConversationLoading\) \{\s*failureBaselineRef\.current = null;/s);
-	assert.match(timeline, /failureBaselineRef\.current = floating\.map\(\(message\) => message\.id\);/);
-	assert.match(timeline, /toastedFailureIds\.has\(message\.id\)/);
-	assert.match(timeline, /markFailureToastShown\(message\.id\);/);
-	assert.match(timeline, /showFailureToast\(message\);/);
-	assert.match(timeline, /lastRetryToastRef/);
-	assert.match(notice, /session-retry:\$\{message\.agentId\}/);
+test("toast effect: reducer owns session-aware baseline; retry signatures survive tab switches", () => {
+	assert.match(timeline, /reduceFailureNoticePass/);
+	assert.match(timeline, /const toastedRetrySignatures = new Set<string>\(\);/);
 	assert.match(timeline, /const toastedFailureIds = new Set<string>\(\);/);
+	assert.doesNotMatch(timeline, /const lastRetryToastRef/);
+	assert.doesNotMatch(timeline, /const failureBaselineRef/);
+	assert.match(notice, /session-retry:\$\{message\.agentId\}/);
+});
+
+function emptyNoticeState() {
+	return { sessionId: undefined, baselineIds: null };
+}
+
+function pass(overrides) {
+	return reduceFailureNoticePass({
+		sessionId: "session-a",
+		isLoading: false,
+		messages: [],
+		state: emptyNoticeState(),
+		toastedIds: new Set(),
+		toastedRetrySignatures: new Set(),
+		...overrides,
+	});
+}
+
+/** loadTsCommonJs 在独立 VM 里跑，返回的数组不能和本环境字面量 deepEqual。 */
+function toastIds(result) {
+	return Array.from(result.toasts, (item) => String(item.id)).join(",");
+}
+
+test("reduceFailureNoticePass: live reconnect failure toasts once, switch-back does not replay", () => {
+	const toastedIds = new Set();
+	const toastedRetrySignatures = new Set();
+	const reconnect = message("diagnostic.processReconnectFailed", { id: "fail-1", text: "自动重连失败" });
+
+	const loading = pass({
+		isLoading: true,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(loading), "");
+
+	const baseline = pass({
+		state: loading.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(baseline), "");
+
+	const live = pass({
+		messages: [reconnect],
+		state: baseline.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(live), "fail-1");
+
+	// 切到另一会话再切回：组件会丢掉 ref，但模块级 Set 必须继续挡住同一条失败。
+	const other = pass({
+		sessionId: "session-b",
+		isLoading: true,
+		state: live.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	const backLoading = pass({
+		isLoading: true,
+		state: other.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	const back = pass({
+		messages: [reconnect],
+		state: backLoading.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(back), "");
+});
+
+test("reduceFailureNoticePass: retry toast does not replay after switching sessions", () => {
+	const toastedIds = new Set();
+	const toastedRetrySignatures = new Set();
+	const retry = message("diagnostic.retryScheduled", {
+		id: "retry-1",
+		text: "正在自动重试 1",
+		i18nParams: { count: 1 },
+	});
+
+	const baseline = pass({ toastedIds, toastedRetrySignatures });
+	const live = pass({
+		messages: [retry],
+		state: baseline.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(live), "retry-1");
+	assert.equal(failureRetrySignature(retry), "retry-1:diagnostic.retryScheduled:1");
+
+	const other = pass({
+		sessionId: "session-b",
+		isLoading: true,
+		state: live.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	const back = pass({
+		messages: [retry],
+		state: { sessionId: other.state.sessionId, baselineIds: null },
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(back), "");
+
+	const nextAttempt = message("diagnostic.retryScheduled", {
+		id: "retry-1",
+		text: "正在自动重试 2",
+		i18nParams: { count: 2 },
+	});
+	const next = pass({
+		messages: [nextAttempt],
+		state: back.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(next), "retry-1");
+});
+
+test("reduceFailureNoticePass: cached session switch without a loading flicker still does not replay", () => {
+	// 旧 bug：同一 Timeline 实例切会话时 lastRetryToastRef 被清空，但 baseline 仍是上一会话的 id，
+	// 且 retry 绕过 toastedFailureIds，切回就会把同一条重连 toast 再弹一遍。
+	const toastedIds = new Set();
+	const toastedRetrySignatures = new Set();
+	const retry = message("diagnostic.retryScheduled", {
+		id: "retry-cached",
+		text: "正在自动重试 1",
+		i18nParams: { count: 1 },
+	});
+	const reconnect = message("diagnostic.processReconnectFailed", {
+		id: "fail-cached",
+		text: "自动重连失败",
+	});
+
+	const readyA = pass({ toastedIds, toastedRetrySignatures });
+	const liveA = pass({
+		messages: [retry, reconnect],
+		state: readyA.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(liveA), "retry-cached,fail-cached");
+
+	const readyB = pass({
+		sessionId: "session-b",
+		messages: [],
+		state: liveA.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(readyB), "");
+
+	const backA = pass({
+		messages: [retry, reconnect],
+		state: readyB.state,
+		toastedIds,
+		toastedRetrySignatures,
+	});
+	assert.equal(toastIds(backA), "");
 });
 
 test("composeFailureNotice: retry stays info, request failure stays session-error title", () => {

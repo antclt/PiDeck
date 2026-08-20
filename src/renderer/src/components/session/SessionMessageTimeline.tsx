@@ -45,8 +45,9 @@ import { Loader2 } from "lucide-react";
 import { showNotice } from "../../utils/notice";
 import {
   composeFailureNotice,
-  isFailureNoticeMessage,
   isFloatingFailureMessage,
+  reduceFailureNoticePass,
+  type FailureNoticePassState,
 } from "./timelineFailureNotice";
 import { SessionStartSurface } from "./SessionStartSurface";
 import { MessageScroller } from "../agents/message-scroller";
@@ -68,17 +69,16 @@ const TURN_SETTLE_IDLE_COLLAPSE_MS = 1500;
 /** 折叠高度动画基本结束后再做「拉到中上方」定位，避免用折叠前的高度计算目标。 */
 const TURN_SETTLE_SCROLL_DELAY_MS = 320;
 
-// 失败/重试 toast 去重：模块级 Set，分屏多栏同一条消息只弹一次，
-// 也避免消息重发（re-emit）或重新渲染时重复打扰。
-// 上限裁剪：失败类消息 id 全局唯一且无删除路径，长期运行会无界增长（2026-10）。
+// 失败/重试 toast 去重必须放模块级：分屏多栏、切走再切回都会重挂 effect。
+// 重试签名尤其不能放组件 ref——旧实现 lastRetryToastRef 在 sessionId 变化时被清空，
+// 切回同一会话会把「自动重连 / 自动重试」再播一遍。
 const toastedFailureIds = new Set<string>();
+const toastedRetrySignatures = new Set<string>();
 const TOASTED_FAILURE_IDS_LIMIT = 500;
-function markFailureToastShown(messageId: string) {
-	toastedFailureIds.add(messageId);
-	if (toastedFailureIds.size <= TOASTED_FAILURE_IDS_LIMIT) return;
+function pruneToastedFailureSets() {
 	// 超限：清空重建（Set 无 FIFO；失败 toast 是低频事件，偶发重复提醒可接受）
-	toastedFailureIds.clear();
-	toastedFailureIds.add(messageId);
+	if (toastedFailureIds.size > TOASTED_FAILURE_IDS_LIMIT) toastedFailureIds.clear();
+	if (toastedRetrySignatures.size > TOASTED_FAILURE_IDS_LIMIT) toastedRetrySignatures.clear();
 }
 
 /** 数组按对象身份判断 prefix/suffix：runtime history 的补页与 slideOut 保留旧消息引用。 */
@@ -283,47 +283,27 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     setLatestTurnAutoCollapseTick(0);
   }, [sessionId]);
 
-  // ── 失败/重试 toast：只对「加载完成后新增」的消息弹，历史回放不打扰 ──
-  // 加载中（loading=true）直接返回；加载完成瞬间把已存在的失败消息静默记为基线；
-  // 之后新增的失败/重试消息才弹 toast（模块级 Set 跨栏/跨渲染去重）。
-  const failureBaselineRef = useRef<string[] | null>(null);
-  // 自动重试是同一条系统消息的 upsert：id 不变、attempt 变。按「id:key:count」跟踪最后弹过的状态，
-  // 每次重试都更新 toast，但不重复弹同一次尝试（re-emit / 分屏多栏）。
-  const lastRetryToastRef = useRef<string | undefined>(undefined);
+  // ── 失败/重试 toast：只对「当前会话加载完成后新出现」的诊断弹 ──
+  // 切会话必须重采基线，且重试签名走模块级 Set：组件 ref 会在切走时被清掉，
+  // 切回同一条 processReconnectFailed / retryScheduled 就会重放 toast。
+  const failureNoticeStateRef = useRef<FailureNoticePassState>({
+    sessionId: undefined,
+    baselineIds: null,
+  });
   useEffect(() => {
-    lastRetryToastRef.current = undefined;
-  }, [sessionId]);
-  useEffect(() => {
-    if (isConversationLoading) {
-      failureBaselineRef.current = null;
-      return;
-    }
-    const floating = activeMessages.filter(isFailureNoticeMessage);
-    if (failureBaselineRef.current === null) {
-      // 加载完成基线：本次会话已有的失败消息不弹（历史回放/attach 重连）
-      failureBaselineRef.current = floating.map((message) => message.id);
-      return;
-    }
-    for (const message of floating) {
-      const meta = message.meta as Record<string, unknown> | undefined;
-      const key = typeof meta?.i18nKey === "string" ? meta.i18nKey : "";
-      const isRetry = key.startsWith("diagnostic.retry");
-      if (isRetry) {
-        const count = typeof meta?.i18nParams === "object" && meta.i18nParams
-          ? String((meta.i18nParams as Record<string, unknown>).count ?? meta.attempt ?? "")
-          : String(meta?.attempt ?? "");
-        const signature = `${message.id}:${key}:${count}`;
-        if (lastRetryToastRef.current === signature) continue;
-        lastRetryToastRef.current = signature;
-        showFailureToast(message);
-        continue;
-      }
-      if (failureBaselineRef.current.includes(message.id)) continue;
-      if (toastedFailureIds.has(message.id)) continue;
-      markFailureToastShown(message.id);
-      showFailureToast(message);
-    }
-  }, [activeMessages, isConversationLoading]);
+    if (!sessionId) return;
+    const result = reduceFailureNoticePass({
+      sessionId,
+      isLoading: isConversationLoading,
+      messages: activeMessages,
+      state: failureNoticeStateRef.current,
+      toastedIds: toastedFailureIds,
+      toastedRetrySignatures,
+    });
+    failureNoticeStateRef.current = result.state;
+    pruneToastedFailureSets();
+    for (const message of result.toasts) showFailureToast(message);
+  }, [sessionId, activeMessages, isConversationLoading]);
 
   useEffect(() => {
     const previousTail = seenTailMessageIdRef.current;
