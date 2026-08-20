@@ -202,17 +202,27 @@ export function inferTitleFromMessages(messages: ChatMessage[]): string | undefi
 	return cleanTitle(firstUserText) || cleanTitle(firstAssistantText);
 }
 
-/** 判断 Agent 标题是否为默认标题（项目名 + "agent" / "历史会话" 等变体）。 */
+/** 判断 Agent 标题是否为默认/占位标题（仅此时允许首轮回话自动改名）。
+ *  必须覆盖 catalog 草稿名（session.newTitle：「新会话」/「New session」）和 DSH 占位名，
+ *  不能只认 `${project} agent`——漏判则 refreshAutoTitle 直接 return，侧栏一直停在占位名。 */
 export function isDefaultAgentTitle(
 	title: string,
 	project: Project,
 	translate: (key: string, params?: Record<string, string | number>) => string,
 ): boolean {
+	const trimmed = title.replace(/\s+/g, " ").trim();
+	if (!trimmed) return true;
 	return (
-		title === `${project.name} agent` ||
-		title === translate("session.historyTitle", { project: project.name }) ||
-		title === translate("session.historyFallbackTitle") ||
-		title === `${project.name} 历史会话` ||
-		title === "历史会话"
+		trimmed === `${project.name} agent` ||
+		trimmed === `${project.name} DSH` ||
+		trimmed === translate("session.newTitle") ||
+		trimmed === translate("session.dshUntitled") ||
+		trimmed === translate("session.untitled") ||
+		trimmed === translate("session.historyTitle", { project: project.name }) ||
+		trimmed === translate("session.historyFallbackTitle") ||
+		trimmed === `${project.name} 历史会话` ||
+		trimmed === "历史会话" ||
+		trimmed === "新会话" ||
+		trimmed === "New session"
 	);
 }

@@ -3,9 +3,13 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { trimHistoryMessages, turnTrimStartIndex, countRoleMessagesBefore } = loadTsCommonJs(
-  "src/main/pi/agentUtils.ts",
-);
+const {
+  trimHistoryMessages,
+  turnTrimStartIndex,
+  countRoleMessagesBefore,
+  isDefaultAgentTitle,
+  inferTitleFromMessages,
+} = loadTsCommonJs("src/main/pi/agentUtils.ts");
 
 const message = (role) => ({ role });
 
@@ -84,4 +88,54 @@ test("trim keeps a leading system summary card + last turns (compaction retentio
   // 此处验证 turnTrimStartIndex 不会把卡片当作轮次起点。
   const start = turnTrimStartIndex(input, 1);
   assert.equal(input[start].text, "q2");
+});
+
+const translateTitle = (key, params = {}) => {
+  if (key === "session.newTitle") return params.locale === "en" ? "New session" : "新会话";
+  if (key === "session.historyTitle") return `${params.project} 历史会话`;
+  if (key === "session.historyFallbackTitle") return "历史会话";
+  return key;
+};
+
+const project = { id: "p1", name: "pi-desktop", path: "D:\\proj" };
+
+test("isDefaultAgentTitle treats draft placeholder titles as default so first prompt can auto-rename", () => {
+  // 新建会话 catalog/draft 标题是 session.newTitle（「新会话」/「New session」），
+  // 不是 `${project} agent`。漏判则 refreshAutoTitle 在首轮回话后直接 return，
+  // 侧栏/Tab 一直停在占位名。
+  assert.equal(isDefaultAgentTitle("新会话", project, translateTitle), true);
+  assert.equal(
+    isDefaultAgentTitle("New session", project, (key) => (
+      key === "session.newTitle" ? "New session" : translateTitle(key)
+    )),
+    true,
+  );
+  assert.equal(isDefaultAgentTitle(`${project.name} agent`, project, translateTitle), true);
+  assert.equal(isDefaultAgentTitle(`${project.name} DSH`, project, translateTitle), true);
+  assert.equal(isDefaultAgentTitle("帮我看看这个报错", project, translateTitle), false);
+});
+
+test("inferTitleFromMessages uses the first user prompt as the session title", () => {
+  const title = inferTitleFromMessages([
+    { role: "user", text: "帮我看看这个报错" },
+    { role: "assistant", text: "好的" },
+  ]);
+  assert.equal(title, "帮我看看这个报错");
+});
+
+test("pi runtime title changes notify catalog the same way DSH does", () => {
+  // 侧栏/Tab 读 SessionRecord.title。DSH 已有 onTitleChanged → catalog.update → catalog-refreshed；
+  // pi 必须走同一条，否则 refreshAutoTitle 只改 AgentTab，回话后 UI 仍显示「新会话」。
+  const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+  const index = readFileSync("src/main/index.ts", "utf8");
+  const utils = readFileSync("src/main/pi/agentUtils.ts", "utf8");
+  assert.match(utils, /session\.newTitle/);
+  assert.match(utils, /session\.dshUntitled/);
+  assert.match(agentManager, /setTitleChangedHandler\(/);
+  assert.match(agentManager, /this\.onTitleChanged\?\.\(agentId, next\)/);
+  assert.match(agentManager, /return this\.applyRuntimeTitle\(agentId, nextTitle\)/);
+  assert.match(index, /agentManager\.setTitleChangedHandler\(/);
+  assert.match(index, /sessionCatalog\.update\(sessionId, \{ title \}\)/);
+  assert.match(index, /sessionsCatalogRefreshed/);
+  assert.match(index, /Pi title sync to catalog failed/);
 });

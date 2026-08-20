@@ -3249,6 +3249,29 @@ app.whenReady().then(async () => {
 		sendAgentPromptWithIntegrations,
 		appLogger,
 	);
+	// pi 运行时标题（首轮自动改名 / session_info_changed / rename）写回 catalog：
+	// 侧栏 SessionTree 与 Tab 栏读的是 SessionRecord.title，不是 AgentTab.title。
+	// DSH 已有同语义的 onTitleChanged；pi 以前只 emitState，回话后 UI 仍停在「新会话」。
+	agentManager.setTitleChangedHandler((agentId, title) => {
+		const sessionId = sessionRuntimeCoordinator?.getSessionId(agentId);
+		if (!sessionId) return;
+		const entry = sessionCatalog.get(sessionId);
+		if (!entry || entry.title === title) return;
+		void sessionCatalog.update(sessionId, { title }).then(() => {
+			if (mainWindow && !mainWindow.isDestroyed()) {
+				mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, {
+					projectId: entry.projectId,
+				});
+			}
+		}).catch((error: unknown) => {
+			void appLogger.warn("session", "Pi title sync to catalog failed", {
+				agentId,
+				sessionId,
+				title,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
+	});
 	compositeAgentGateway.onOutput((sourceChannel, payload) => {
 		if (sourceChannel === ipcChannels.agentsState && Array.isArray(payload)) {
 			for (const tab of payload) {

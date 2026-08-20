@@ -334,6 +334,12 @@ export class AgentManager {
 	private readonly abortedDuringAsk = new Set<string>();
 	/** 成功空闲（settled）回调：供 PetStateBridge 等主进程内部模块订阅，携带完成 Agent 身份。 */
 	private readonly settledListeners = new Set<(info: { agentId: string; title: string }) => void>();
+	/**
+	 * 运行时标题变化回调（refreshAutoTitle / session_info_changed / rename）。
+	 * 装配层据此写回 SessionCatalog：侧栏/Tab 读的是 catalog.title，不是 AgentTab.title；
+	 * 只 emitState 时 UI 仍会停在「新会话」占位名。用 setter 注入，避免再拉长构造参数。
+	 */
+	private onTitleChanged?: (agentId: string, title: string) => void;
 	/** 已发送 ask 系统通知的 agent；新一轮 run（agent_start）时清除，避免同一轮多次提问刷屏。 */
 	private readonly notifiedAskAgents = new Set<string>();
 	/** 待处理的项目信任确认请求。key 为 requestId，用于在 Agent 启动前等待用户的信任决策。 */
@@ -1408,7 +1414,7 @@ export class AgentManager {
 			throw new Error(this.translate("mainAgent.renameFailed"));
 		}
 
-		runtime.tab.title = trimmed;
+		this.applyRuntimeTitle(agentId, trimmed, false);
 		const state = await runtime.process.client
 			.request({ type: "get_state" }, 10_000)
 			.catch(() => ({ data: undefined }));
@@ -1421,7 +1427,7 @@ export class AgentManager {
 			this.getProject(runtime.tab.projectId)?.path ?? runtime.tab.cwd,
 			runtime.tab.sessionEnvironment ?? "native",
 		);
-		runtime.tab.title = data?.sessionName || runtime.tab.title;
+		this.applyRuntimeTitle(agentId, data?.sessionName || runtime.tab.title, false);
 		this.emitState();
 		return runtime.tab;
 	}
@@ -1943,7 +1949,7 @@ export class AgentManager {
 				project.path,
 				runtime.tab.sessionEnvironment ?? "native",
 			);
-			runtime.tab.title = data?.sessionName ?? runtime.tab.title;
+			this.applyRuntimeTitle(agentId, data?.sessionName ?? runtime.tab.title, false);
 			runtime.tab.status = "idle";
 			// 进程退出型压缩可能来不及发 compaction_end；重连成功即表示 Pi 已可继续接收消息。
 			this.rpcCompactingAgents.delete(agentId);
@@ -2869,7 +2875,7 @@ export class AgentManager {
 				runtime.tab.sessionEnvironment ?? "native",
 			) ?? runtime.tab.sessionPath;
 		}
-		if (state?.sessionName) runtime.tab.title = state.sessionName;
+		if (state?.sessionName) this.applyRuntimeTitle(agentId, state.sessionName, false);
 		// 重新附加后恢复：保留附加期间用户发送/流式中的消息，避免投影替换吞掉乐观消息
 		await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() }).catch(() => undefined);
 		this.emitState();
@@ -3017,6 +3023,22 @@ export class AgentManager {
 	onAgentSettled(listener: (info: { agentId: string; title: string }) => void): () => void {
 		this.settledListeners.add(listener);
 		return () => { this.settledListeners.delete(listener); };
+	}
+
+	/** 装配层注入：运行时标题变化时写回 catalog（DSH 的 onTitleChanged 同语义）。 */
+	setTitleChangedHandler(handler: (agentId: string, title: string) => void): void {
+		this.onTitleChanged = handler;
+	}
+
+	/** 更新 tab.title；有变化才 emit 并通知 catalog，避免无意义刷新。 */
+	private applyRuntimeTitle(agentId: string, title: string, emit = true): boolean {
+		const runtime = this.agents.get(agentId);
+		const next = title.replace(/\s+/g, " ").trim();
+		if (!runtime || !next || next === runtime.tab.title) return false;
+		runtime.tab.title = next;
+		if (emit) this.emitState();
+		this.onTitleChanged?.(agentId, next);
+		return true;
 	}
 
 	private notifyAgentSettled(agentId: string, title: string) {
@@ -3426,17 +3448,14 @@ export class AgentManager {
 		const runtime = this.agents.get(agentId);
 
 		// 扩展/RPC 调用 setSessionName 后 Pi 会发 session_info_changed；
-		// 同步到 tab.title，使侧边栏与手动 rename 路径看到同一标题。
+		// 同步到 tab.title 并写回 catalog，使侧栏/Tab 与手动 rename 看到同一标题。
 		// 忽略空 name，避免把已有标题抹掉。
 		if (typed.type === "session_info_changed" && runtime) {
 			const name =
 				typeof typed.name === "string"
 					? typed.name.replace(/\s+/g, " ").trim()
 					: "";
-			if (name && name !== runtime.tab.title) {
-				runtime.tab.title = name;
-				this.emitState();
-			}
+			this.applyRuntimeTitle(agentId, name);
 		}
 
 		if (typed.type === "agent_start" && runtime) {
@@ -4806,12 +4825,9 @@ export class AgentManager {
 		if (!project) return false;
 		if (!isDefaultAgentTitle(runtime.tab.title, project, this.translate as (key: string, params?: Record<string, string | number>) => string)) return false;
 		const nextTitle = inferTitleFromMessages(this.messages.get(agentId) ?? []);
-		if (!nextTitle || nextTitle === runtime.tab.title) return false;
-		// Agent 列表标题应和历史会话列表的“摘要名”一致；
-		// 只覆盖默认标题，避免打开/重命名过的历史会话名称被第一条消息反向改掉。
-		runtime.tab.title = nextTitle;
-		this.emitState();
-		return true;
+		if (!nextTitle) return false;
+		// 只覆盖默认/占位标题，避免打开/重命名过的历史会话被第一条消息反向改掉。
+		return this.applyRuntimeTitle(agentId, nextTitle);
 	}
 
 	private addDetailedErrorMessage(agentId: string, errorMessage?: string) {
