@@ -90,6 +90,9 @@ function loadPiProcess() {
 				return { appendBuiltInExtensionArgs: (args) => args };
 			}
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => undefined };
+			if (id === "../sessions/sessionProxyPolicy") {
+				return { applyPiProxyMode: (env) => env };
+			}
 			return require(id);
 		},
 	};

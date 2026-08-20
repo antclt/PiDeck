@@ -5,6 +5,22 @@ import { app } from "electron";
 import type { AppSettings, PiInstallStatus } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 
+/** 进程级 WSL `which pi` 结果：字符串 = 可用的 wsl:// 标记；null = 已探测且未找到。 */
+type WslWhichCacheValue = string | null;
+
+const wslCommandCache = new Map<string, WslWhichCacheValue>();
+const wslCommandInflight = new Map<string, Promise<WslWhichCacheValue>>();
+
+function wslCommandCacheKey(distro: string, user: string): string {
+  return `${distro}\0${user}`;
+}
+
+/** 测试用：每个 VM 用例自带一份模块，生产路径不要调用。 */
+export function resetWslCommandCache(): void {
+  wslCommandCache.clear();
+  wslCommandInflight.clear();
+}
+
 type PiLocatorCopy = (
   key: MainProcessTranslationKey,
   params?: Record<string, string | number>,
@@ -55,7 +71,9 @@ export class PiLocator {
     if (wslEnabled && process.platform === "win32" && wslDistro && wslUser) {
       const wslCustomPath = this.toWslCustomPath(normalizedCustomPath, wslEnabled, wslDistro, wslUser);
       if (wslCustomPath) return wslCustomPath;
-      const wslCommand = this.resolveWslCommand(wslDistro, wslUser);
+      // 热路径只读缓存：同步 `wsl.exe which pi` 最多卡 8 秒，会把关窗/设置点死。
+      // 未预热时先回退 "pi"（可能落到 Windows shim）；warmWslCommand 完成后下次解析才用 wsl://。
+      const wslCommand = this.peekCachedWslCommand(wslDistro, wslUser);
       if (wslCommand) return wslCommand;
     }
     // 用户手动指定路径优先，适用于 npm/pnpm/yarn 全局安装、nvm/volta/asdf/mise 等极端情况。
@@ -76,6 +94,20 @@ export class PiLocator {
     const found = candidates.find(candidate => existsSync(candidate));
     if (found) return found;
     return "pi";
+  }
+
+  /**
+   * 启动/设置变更时异步探测 WSL 内的 `pi`，结果写入进程级缓存。
+   * 热路径 `resolveCommand` 只读缓存，避免同步 `execFileSync` 卡住主进程。
+   * 多次调用同一 distro/user 会合并为一次 in-flight 探测。
+   */
+  async warmWslCommand(distro?: string, user?: string): Promise<string | undefined> {
+    if (process.platform !== "win32" || !distro || !user) return undefined;
+    const cached = wslCommandCache.get(wslCommandCacheKey(distro, user));
+    // null 是负缓存（已探测且没有 pi），不能当成未命中再打 which。
+    if (cached !== undefined) return cached ?? undefined;
+    const probed = await this.probeWslCommand(distro, user);
+    return probed ?? undefined;
   }
 
   getSearchDirs() {
@@ -317,6 +349,10 @@ export class PiLocator {
     ) {
       return this.unsupportedPowerShellStatus(normalizedCustomPath, this.getSearchDirs());
     }
+    // 设置页检测可以等 WSL which：缓存未命中时先异步探测，再 resolve，避免热路径同步 which。
+    if (wslEnabled && process.platform === "win32" && wslDistro && wslUser) {
+      await this.warmWslCommand(wslDistro, wslUser);
+    }
     const command = this.resolveCommand(customPath, wslEnabled, wslDistro, wslUser);
     const searchedDirs = this.getSearchDirs();
 
@@ -502,23 +538,50 @@ export class PiLocator {
     return { distro: match[1], user: match[2], piCommand: match[3] };
   }
 
-  private resolveWslCommand(distro: string, user: string): string | undefined {
-    try {
+  private peekCachedWslCommand(distro: string, user: string): string | undefined {
+    const cached = wslCommandCache.get(wslCommandCacheKey(distro, user));
+    return cached ?? undefined;
+  }
+
+  /**
+   * 异步 `wsl.exe which pi`。成功写入 `wsl://distro/user/pi`，失败写入 null（负缓存，避免反复探测）。
+   * 禁止回到 execFileSync：8s 超时会把 Electron 主进程事件循环堵住。
+   */
+  private probeWslCommand(distro: string, user: string): Promise<WslWhichCacheValue> {
+    const key = wslCommandCacheKey(distro, user);
+    const cached = wslCommandCache.get(key);
+    if (cached !== undefined) return Promise.resolve(cached);
+    const inflight = wslCommandInflight.get(key);
+    if (inflight) return inflight;
+
+    const task = new Promise<WslWhichCacheValue>((resolve) => {
       const wslExe = this.resolveWslExe();
       const wslArgs = ["-d", distro, "-u", user, "which", "pi"];
-      const result = execFileSync(wslExe.command, wslArgs, {
+      execFile(wslExe.command, wslArgs, {
         encoding: "utf8",
         timeout: 8_000,
         windowsHide: true,
         shell: wslExe.shell,
-      }).trim();
-      if (result && result.length > 0 && !result.includes("not found")) {
-        return `wsl://${distro}/${user}/pi`;
-      }
-    } catch {
-      // WSL 不可用或未安装 pi，静默忽略，回退到普通 "pi"
-    }
-    return undefined;
+      }, (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        const result = String(stdout ?? "").trim();
+        if (result && result.length > 0 && !result.includes("not found")) {
+          resolve(`wsl://${distro}/${user}/pi`);
+          return;
+        }
+        resolve(null);
+      });
+    }).then((value) => {
+      wslCommandCache.set(key, value);
+      wslCommandInflight.delete(key);
+      return value;
+    });
+
+    wslCommandInflight.set(key, task);
+    return task;
   }
 
   private checkWslCommand(distro: string, user: string, piCommand: string): Promise<PiInstallStatus> {

@@ -54,3 +54,28 @@ test("pending request is removed after timeout (no double resolve)", async () =>
     : String(error);
   assert.match(message, /timed out/);
 });
+
+test("large JSONL lines parse after the stdout data callback returns", async () => {
+  const { PiRpcClient, LARGE_RPC_LINE_PARSE_CHARS } = loadTsCommonJs("src/main/pi/PiRpcClient.ts");
+  const stdin = new Writable({ write: (_chunk, _enc, cb) => cb() });
+  const stdout = new PassThrough();
+  const client = new PiRpcClient(stdin, stdout);
+  const pending = client.request({ type: "get_entries", id: "big" }, 2000);
+  const payload = {
+    id: "big",
+    type: "response",
+    command: "get_entries",
+    success: true,
+    data: { pad: "x".repeat(LARGE_RPC_LINE_PARSE_CHARS) },
+  };
+  stdout.write(`${JSON.stringify(payload)}\n`);
+  // setImmediate 尚未跑：主进程仍能处理关窗/设置 IPC。
+  const raced = await Promise.race([
+    pending.then(() => "done"),
+    Promise.resolve("pending"),
+  ]);
+  assert.equal(raced, "pending");
+  const response = await pending;
+  assert.equal(response.success, true);
+  assert.equal(response.command, "get_entries");
+});

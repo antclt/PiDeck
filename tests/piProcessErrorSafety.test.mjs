@@ -72,6 +72,9 @@ function loadPiProcess(spawnImpl) {
 			if (id === "../logging/sharedLogger") {
 				return { getAppLogger: () => null };
 			}
+			if (id === "../sessions/sessionProxyPolicy") {
+				return { applyPiProxyMode: (env) => env };
+			}
 			return require(id);
 		},
 	};

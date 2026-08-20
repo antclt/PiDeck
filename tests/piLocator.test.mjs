@@ -300,3 +300,65 @@ test("resolveCommand falls back for unsupported .ps1 shims even when the file ex
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+// ── WSL which 不得同步卡住主进程 ─────────────────────────────────
+
+test("resolveCommand never calls execFileSync to probe WSL which pi", () => {
+	let syncCalls = 0;
+	const { PiLocator, resetWslCommandCache } = loadPiLocatorModule(
+		"win32",
+		{ PATH: "", Path: "" },
+		tmpdir(),
+		{
+			"node:child_process": {
+				execFile: (_command, _args, _options, callback) => callback(null, "/usr/bin/pi\n", ""),
+				execFileSync: () => {
+					syncCalls += 1;
+					return "";
+				},
+			},
+		},
+	);
+	resetWslCommandCache();
+	const resolved = new PiLocator().resolveCommand(undefined, true, "Ubuntu-24.04", "dev");
+	assert.equal(syncCalls, 0);
+	// 缓存未预热时不得同步 which；也不得再走 wsl.exe。本地扫描结果随 PATH 变化，不能是 wsl://。
+	assert.equal(resolved.startsWith("wsl://"), false);
+});
+
+test("warmWslCommand caches wsl:// so later resolveCommand stays off the sync path", async () => {
+	let syncCalls = 0;
+	let whichCalls = 0;
+	const { PiLocator, resetWslCommandCache } = loadPiLocatorModule(
+		"win32",
+		{},
+		tmpdir(),
+		{
+			"node:child_process": {
+				execFile: (_command, args, _options, callback) => {
+					if (Array.isArray(args) && args.includes("which")) {
+						whichCalls += 1;
+						callback(null, "/usr/bin/pi\n", "");
+						return;
+					}
+					callback(null, "0.80.0\n", "");
+				},
+				execFileSync: () => {
+					syncCalls += 1;
+					return "";
+				},
+			},
+		},
+	);
+	resetWslCommandCache();
+	const locator = new PiLocator();
+	const warmed = await locator.warmWslCommand("Ubuntu-24.04", "dev");
+	assert.equal(warmed, "wsl://Ubuntu-24.04/dev/pi");
+	assert.equal(
+		locator.resolveCommand(undefined, true, "Ubuntu-24.04", "dev"),
+		"wsl://Ubuntu-24.04/dev/pi",
+	);
+	await locator.warmWslCommand("Ubuntu-24.04", "dev");
+	assert.equal(whichCalls, 1);
+	assert.equal(syncCalls, 0);
+});

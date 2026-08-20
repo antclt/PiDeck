@@ -212,6 +212,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.forkFailed": "Fork failed: {error}",
   "app.agentStarting": "Starting Agent...",
   "app.agentStartingPlaceholder": "Agent is starting...",
+  "app.historyLoading": "Loading history...",
   "app.abortRequested": "Stop requested",
   "app.abortSlow": "Stop is slow; if it still won't stop, try restarting the session",
   "app.branchCurrent": "Current branch: {branch}; {count} branches total",

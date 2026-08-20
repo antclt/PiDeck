@@ -1,6 +1,5 @@
 import * as pty from "node-pty";
 import { randomUUID } from "node:crypto";
-import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { ipcChannels } from "../../shared/ipc";
 import type { TerminalShell, TerminalTab, TerminalTarget } from "../../shared/types";
@@ -72,12 +71,10 @@ export function getTerminalShellCandidates(
 				break;
 			}
 		}
-		// 检测 WSL：检查 wsl.exe 是否在 PATH 中
-		try {
-			execSync("where wsl.exe", { stdio: "ignore", timeout: 3000 });
-			candidates.push({ shell: "wsl", command: "wsl.exe", args: [] });
-		} catch {
-			// wsl.exe 不可用，跳过 WSL
+		// 检测 WSL：getWslExe 只做 existsSync / PATH 回退，禁止同步 `where wsl.exe`（最多卡 3 秒）。
+		const wslExe = getWslExe();
+		if (wslExe.command === "wsl" || existsSync(wslExe.command)) {
+			candidates.push({ shell: "wsl", command: wslExe.command, args: [] });
 		}
 		return dedupeShellCandidates(candidates);
 	}

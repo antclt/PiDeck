@@ -3332,6 +3332,10 @@ app.whenReady().then(async () => {
 			extensionManager.configureWsl(wslEnv);
 			if (configManager) configManager.configureWsl(wslEnv);
 			if (xuePromptManager) xuePromptManager.configureWsl(wslEnv);
+			// 窗口已起来后再异步探测 WSL which，点会话时 resolveCommand 才能命中 wsl:// 缓存。
+			void piLocator.warmWslCommand(wslDistro, wslUser).catch((error) => {
+				void appLogger?.warn("app", "WSL pi which warmup failed", error);
+			});
 		} else {
 			sessionScanner.clearWsl();
 			agentManager.configureWsl(null);

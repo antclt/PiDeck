@@ -841,7 +841,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
               fontSize: "var(--font-size-small)",
             }}
           >
-            {t("app.agentStarting")}
+            {t("app.historyLoading")}
           </span>
         </div>
       )}

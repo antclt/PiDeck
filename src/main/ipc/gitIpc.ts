@@ -165,6 +165,10 @@ async function quickGenerate(
 	genBusy = true;
 
 	const settings = settingsStore.get();
+	// Git 快生成前异步预热 WSL which，避免 resolveCommand 同步卡住主进程。
+	if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
+		await piLocator.warmWslCommand(settings.wslDistro, settings.wslUser);
+	}
 	const command = piLocator.resolveCommand(
 		settings.customPiPath,
 		settings.wslEnabled,

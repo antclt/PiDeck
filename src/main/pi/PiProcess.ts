@@ -34,7 +34,8 @@ type PiProcessSettings = Pick<
 type PiProcessLocator = Pick<
   PiLocator,
   "resolveCommand" | "createInvocation" | "createProcessEnv"
->;
+> & Partial<Pick<PiLocator, "warmWslCommand">>;
+
 
 /** 可选：覆盖扩展扫描用的用户 home（WSL 映射 Windows home 时传入）。 */
 type PiProcessOptions = {
@@ -104,10 +105,14 @@ export class PiProcess extends EventEmitter {
    * 应用启动时预热 pi --version 缓存，避免首次创建 Agent（尤其 trust 路径）同步等待版本检测。
    * 失败不抛错：仅影响缓存命中与诊断字段，不阻塞主流程。
    */
-  static warmVersionCache(
+  static async warmVersionCache(
     settings?: PiProcessSettings,
     locator: PiProcessLocator = new PiLocator(),
   ): Promise<boolean> {
+    // WSL which 必须先异步预热，否则 resolveCommand 只能回退 Windows "pi"。
+    if (settings?.wslEnabled && settings.wslDistro && settings.wslUser) {
+      await locator.warmWslCommand?.(settings.wslDistro, settings.wslUser);
+    }
     const command = locator.resolveCommand(
       settings?.customPiPath,
       settings?.wslEnabled,
@@ -263,7 +268,11 @@ export class PiProcess extends EventEmitter {
     if (noSession) finalPiArgs.push("--no-session");
     if (sessionPath) finalPiArgs.push("--session", sessionPath);
 
-    // 用户手动指定的 pi 路径优先于自动检测，解决 npm global、nvm 等路径未在 PATH 中的问题
+    // 用户手动指定的 pi 路径优先于自动检测，解决 npm global、nvm 等路径未在 PATH 中的问题。
+    // spawn 前再预热一次 WSL which：启动窗口已显示时异步等待可接受，不能同步 which。
+    if (this.settings?.wslEnabled && this.settings.wslDistro && this.settings.wslUser) {
+      await this.locator.warmWslCommand?.(this.settings.wslDistro, this.settings.wslUser);
+    }
     const command = this.locator.resolveCommand(this.settings?.customPiPath, this.settings?.wslEnabled, this.settings?.wslDistro, this.settings?.wslUser);
 
     // 信任覆盖：用 --approve/--no-approve 覆盖 pi 的 trustStore 决策（本次生效，不落盘）。

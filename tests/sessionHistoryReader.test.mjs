@@ -357,3 +357,37 @@ test("compaction page paging stays in index space when conversion skips messages
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("getRecentActiveEntryIds returns the last N active message ids", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pideck-history-entry-ids-"));
+  const sessionPath = join(directory, "session.jsonl");
+  try {
+    await writeFile(sessionPath, [
+      JSON.stringify({ id: "session", type: "session" }),
+      JSON.stringify({
+        id: "u1", parentId: "session", type: "message",
+        message: { role: "user", content: [{ type: "text", text: "q1" }] },
+      }),
+      JSON.stringify({
+        id: "a1", parentId: "u1", type: "message",
+        message: { role: "assistant", content: [{ type: "text", text: "a1" }] },
+      }),
+      JSON.stringify({
+        id: "u2", parentId: "a1", type: "message",
+        message: { role: "user", content: [{ type: "text", text: "q2" }] },
+      }),
+      JSON.stringify({
+        id: "a2", parentId: "u2", type: "message",
+        message: { role: "assistant", content: [{ type: "text", text: "a2" }] },
+      }),
+    ].join("\n"), "utf8");
+    const reader = createReader((path) => path);
+    const ids = await reader.getRecentActiveEntryIds(sessionPath, 2);
+    // loadTsCommonJs 走另一 realm，Array 不能 deepEqual 字面量。
+    assert.equal(JSON.stringify(ids), JSON.stringify(["u2", "a2"]));
+    const full = await reader.readMessageFullText(sessionPath, "missing", "a1");
+    assert.equal(full.text, "a1");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -929,8 +929,12 @@ export class AgentManager {
 				)
 				: runtime.process.client.request({ type: "get_messages" }, this.rpcTimeoutMs));
 
+		// 有会话文件时禁止 get_entries：pi 把整棵 entry 树打成单行 JSON，
+		// PiRpcClient 同步 JSON.parse 会再冻一次窗口。entryId 从 JSONL 索引取，
+		// 与尾部窗口消息一一对应。skipEntries 仍保留给无文件/显式跳过路径。
 		let entriesPromise: Promise<any> | undefined;
-		if (!skipEntries) {
+		const useFileEntryIds = Boolean(sessionPath);
+		if (!skipEntries && !useFileEntryIds) {
 			entriesPromise = runtime.process.client.request({
 				type: "get_entries",
 			}, 15_000).catch(() => {
@@ -950,7 +954,15 @@ export class AgentManager {
 
 		// 解析 entryId 列表（需要先于 convertAgentMessages，用于把消息关联到 pi 的会话分支）。
 		let activeEntryIds: string[] | undefined;
-		if (entriesResult) {
+		if (useFileEntryIds && sessionPath) {
+			const roleCount = rawMessages.reduce<number>((count, message) => {
+				const role = (message as { role?: unknown } | undefined)?.role;
+				return count + (role === "user" || role === "assistant" || role === "toolResult" ? 1 : 0);
+			}, 0);
+			activeEntryIds = await this.sessionHistoryReader
+				.getRecentActiveEntryIds(sessionPath, roleCount)
+				.catch(() => undefined);
+		} else if (entriesResult) {
 			const entriesData = entriesResult.data as
 				| { entries?: Array<{ id: string; parentId: string | null; type?: string; message?: { role?: string } }>; leafId?: string }
 				| undefined;
@@ -976,7 +988,14 @@ export class AgentManager {
 		// 记录缓存头部在文件消息下标空间中的位置：无 entryId 的窗口（skipEntries 大历史路径）
 		// 需要用它作为首次补历史的数值游标（渲染层 before=windowStartFilePos）。
 		let headOffset: number;
-		if (activeEntryIds) {
+		if (useFileEntryIds && sessionPath && activeEntryIds) {
+			// 文件 entryId 已是尾部窗口，不是全量分支：headOffset 必须用
+			// 文件总数 - 窗口条数，否则「加载更多」会以为已经在文件头。
+			const activeFileCount = await this.sessionHistoryReader
+				.getActiveEntryCount(sessionPath)
+				.catch(() => activeEntryIds.length);
+			headOffset = Math.max(0, activeFileCount - activeEntryIds.length);
+		} else if (activeEntryIds) {
 			headOffset = droppedRoleCount;
 		} else if (runtime.tab.sessionPath) {
 			// get_entries 失败/未启用（skipEntries）时同样尽力提供数值游标：

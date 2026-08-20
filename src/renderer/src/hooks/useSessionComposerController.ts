@@ -564,8 +564,9 @@ export function useSessionComposerController(
       return;
     }
     let current = true;
-    // @ 引用需要一棵有限深度的树；只跟项目，不跟 sessionId，避免切 tab 再扫盘。
-    void desktopApi.files.list(record.projectId, { maxDepth: 8 }).then((next) => {
+    // @ 引用跟文件抽屉同一套懒加载：maxDepth 0 只扫根层，展开再补子目录。
+    // 旧实现扫 8 层会在切项目时把主进程/渲染都拖死（大会话项目尤其明显）。
+    void desktopApi.files.list(record.projectId, { maxDepth: 0 }).then((next) => {
       if (current) setFiles(next);
     }).catch(() => {
       if (current) setFiles([]);

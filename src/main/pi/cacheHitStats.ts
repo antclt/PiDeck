@@ -65,42 +65,85 @@ function messageTextChars(message: {
  * 从 session JSONL 原始文本统计缓存命中率与消息字符数。
  * 逐行解析容忍坏行；命中率只统计带 usage 的 assistant 消息，字符数统计全部消息。
  */
-export function computeCacheHitStats(raw: string): CacheHitStats {
-	const rates: number[] = [];
-	let latest: number | undefined;
-	let messageChars = 0;
+/** 大会话逐行 parse 时每隔这么多行让出事件循环，避免 getRuntimeState 首次扫盘冻窗。 */
+const CACHE_HIT_PARSE_YIELD_EVERY = 400;
 
-	const lines = raw.split(/\r?\n/);
-	for (let i = lines.length - 1; i >= 0; i--) {
-		const line = lines[i].trim();
-		if (!line) continue;
-		try {
-			const entry = JSON.parse(line) as Record<string, unknown>;
-			const message = entry?.message as
-				| { role?: unknown; usage?: unknown; text?: unknown; content?: unknown }
-				| undefined;
-			if (!message) continue;
-			messageChars += messageTextChars(message);
-			if (message.role !== "assistant" || !message.usage) continue;
-			const rate = hitRateFromUsage(message.usage as UsageLike);
-			if (rate === undefined) continue;
-			if (latest === undefined) latest = rate; // 逆序遍历，首个命中即最后一条
-			rates.push(rate);
-		} catch {
-			// 单行解析失败忽略，继续统计其余行
-		}
+function accumulateCacheHitStats(raw: string): {
+	rates: number[];
+	latest: number | undefined;
+	messageChars: number;
+	lines: string[];
+} {
+	return {
+		rates: [],
+		latest: undefined,
+		messageChars: 0,
+		lines: raw.split(/\r?\n/),
+	};
+}
+
+function consumeCacheHitLine(
+	state: { rates: number[]; latest: number | undefined; messageChars: number },
+	line: string,
+): void {
+	const trimmed = line.trim();
+	if (!trimmed) return;
+	try {
+		const entry = JSON.parse(trimmed) as Record<string, unknown>;
+		const message = entry?.message as
+			| { role?: unknown; usage?: unknown; text?: unknown; content?: unknown }
+			| undefined;
+		if (!message) return;
+		state.messageChars += messageTextChars(message);
+		if (message.role !== "assistant" || !message.usage) return;
+		const rate = hitRateFromUsage(message.usage as UsageLike);
+		if (rate === undefined) return;
+		if (state.latest === undefined) state.latest = rate; // 逆序遍历，首个命中即最后一条
+		state.rates.push(rate);
+	} catch {
+		// 单行解析失败忽略，继续统计其余行
 	}
+}
 
+function finishCacheHitStats(state: {
+	rates: number[];
+	latest: number | undefined;
+	messageChars: number;
+}): CacheHitStats {
 	const base: CacheHitStats = {
-		latest,
+		latest: state.latest,
 		average: undefined,
 		sampleCount: 0,
 		/** 全部消息文本字符数：始终返回（可能为 0），渲染层据此估算对话占比 */
-		messageChars,
+		messageChars: state.messageChars,
 	};
-	if (rates.length === 0) return base;
-	const average = rates.reduce((sum, rate) => sum + rate, 0) / rates.length;
-	return { ...base, average, sampleCount: rates.length };
+	if (state.rates.length === 0) return base;
+	const average = state.rates.reduce((sum, rate) => sum + rate, 0) / state.rates.length;
+	return { ...base, average, sampleCount: state.rates.length };
+}
+
+export function computeCacheHitStats(raw: string): CacheHitStats {
+	const parsed = accumulateCacheHitStats(raw);
+	for (let i = parsed.lines.length - 1; i >= 0; i--) {
+		consumeCacheHitLine(parsed, parsed.lines[i]);
+	}
+	return finishCacheHitStats(parsed);
+}
+
+/** 与 computeCacheHitStats 同口径，大会话 parse 时每 N 行 setImmediate 让出主线程。 */
+export async function computeCacheHitStatsAsync(raw: string): Promise<CacheHitStats> {
+	const parsed = accumulateCacheHitStats(raw);
+	let processed = 0;
+	for (let i = parsed.lines.length - 1; i >= 0; i--) {
+		consumeCacheHitLine(parsed, parsed.lines[i]);
+		processed += 1;
+		if (processed % CACHE_HIT_PARSE_YIELD_EVERY === 0) {
+			await new Promise<void>((resolve) => {
+				setImmediate(resolve);
+			});
+		}
+	}
+	return finishCacheHitStats(parsed);
 }
 
 export type CacheHitStatsReader = (sessionPath: string) => Promise<CacheHitStats>;
@@ -131,7 +174,7 @@ export function createCacheHitStatsReader(input: CacheHitStatsReaderInput): Cach
 				return cached.stats;
 			}
 			const raw = await readFile(sessionPath);
-			const stats = computeCacheHitStats(raw);
+			const stats = await computeCacheHitStatsAsync(raw);
 			if (cache.size >= maxEntries) cache.clear();
 			cache.set(sessionPath, { meta, stats });
 			return stats;

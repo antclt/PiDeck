@@ -80,6 +80,16 @@ test("computeCacheHitStats: 多条消息取平均，latest 取最后一条", () 
 	assert.equal(stats.average, (50 + 0 + 37.5) / 3);
 });
 
+test("computeCacheHitStatsAsync matches the sync parser", async () => {
+	const { computeCacheHitStats, computeCacheHitStatsAsync } = loadCacheHitStats();
+	const raw = [
+		assistantLine({ id: 1, usage: { input: 100, cacheRead: 100, cacheWrite: 0 } }),
+		userLine(),
+		assistantLine({ id: 2, usage: { input: 100, cacheRead: 0, cacheWrite: 100 } }),
+	].join("\n");
+	assert.deepEqual(await computeCacheHitStatsAsync(raw), computeCacheHitStats(raw));
+});
+
 test("computeCacheHitStats: 无有效 token 的 usage 跳过", () => {
 	const { computeCacheHitStats } = loadCacheHitStats();
 	const raw = [

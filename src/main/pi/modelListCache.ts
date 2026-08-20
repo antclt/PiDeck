@@ -197,12 +197,16 @@ async function loadModelsFromLocalConfig(
 	}
 }
 
-function execPiListModels(
+async function execPiListModels(
 	piLocator: PiLocator,
 	settingsStore: SettingsStore,
 	args: readonly string[],
 ): Promise<string> {
 	const settings = settingsStore.get();
+	// 拉模型列表可以等 WSL which；不能在 resolveCommand 里同步卡住主进程。
+	if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
+		await piLocator.warmWslCommand(settings.wslDistro, settings.wslUser);
+	}
 	const command = piLocator.resolveCommand(
 		settings.customPiPath,
 		settings.wslEnabled,

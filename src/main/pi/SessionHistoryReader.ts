@@ -200,36 +200,28 @@ export class SessionHistoryReader {
 			this.fullTextCache.set(cacheKey, cached);
 			return { text: cached };
 		}
-		const content = await readFile(this.deps.toHostPath(sessionPath), "utf8");
-		// 定位读取：逐行 parse 直到命中目标 entry（entryId 优先，回退 message.id），
-		// 不做全文件转换，避免大会话展开单条内容时触发整文件解析冻结。
-		for (const line of content.split("\n")) {
-			if (!line.trim()) continue;
-			let entry: unknown;
-			try {
-				entry = JSON.parse(line);
-			} catch {
-				continue; // 跳过单行解析失败
-			}
-			if (!entry || typeof entry !== "object") continue;
-			const e = entry as { id?: unknown; message?: unknown };
-			const match = Boolean(
-				(entryId && e.id === entryId) ||
-				(e.message && typeof e.message === "object" && (e.message as { id?: unknown }).id === messageId),
-			);
-			if (!match) continue;
-			const text = extractEntryResultText(e.message);
-			if (!text) {
-				throw new Error(`Message ${messageId} has no extractable text content`);
-			}
-			if (this.fullTextCache.size >= SessionHistoryReader.FULL_TEXT_CACHE_LIMIT) {
-				const oldest = this.fullTextCache.keys().next().value;
-				if (oldest !== undefined) this.fullTextCache.delete(oldest);
-			}
-			this.fullTextCache.set(cacheKey, text);
-			return { text };
+		// 走会 yield 的显示索引 + offset 读单行，禁止整文件 split+JSON.parse。
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const syntheticId = syntheticHistoryEntryId(messageId);
+		const entry = index.activeMessageEntries.find((candidate) => {
+			if (entryId && candidate.id === entryId) return true;
+			if (candidate.messageId === messageId || candidate.id === messageId) return true;
+			return syntheticId !== undefined && candidate.id === syntheticId;
+		});
+		if (!entry) {
+			throw new Error(`Message ${messageId} not found in session file`);
 		}
-		throw new Error(`Message ${messageId} not found in session file`);
+		const raw = await this.readIndexedSessionMessages(index.hostPath, [entry]);
+		const text = extractEntryResultText(raw[0]);
+		if (!text) {
+			throw new Error(`Message ${messageId} has no extractable text content`);
+		}
+		if (this.fullTextCache.size >= SessionHistoryReader.FULL_TEXT_CACHE_LIMIT) {
+			const oldest = this.fullTextCache.keys().next().value;
+			if (oldest !== undefined) this.fullTextCache.delete(oldest);
+		}
+		this.fullTextCache.set(cacheKey, text);
+		return { text };
 	}
 
 	async readSessionDisplayMessages(
@@ -237,7 +229,17 @@ export class SessionHistoryReader {
 		agentId = "_viewer",
 		sessionContent?: string,
 	): Promise<ChatMessage[]> {
-		const content = sessionContent ?? await readFile(this.deps.toHostPath(sessionPath), "utf8");
+		// 调用方未把全文放进内存时必须走会 yield 的索引 + offset 读，
+		// 否则离线 Viewer 打开大会话会整文件 split+JSON.parse，主进程照样卡死。
+		if (sessionContent === undefined) {
+			const index = await this.getSessionDisplayIndex(sessionPath);
+			const entries = index.activeMessageEntries;
+			const rawMessages = await this.readIndexedSessionMessages(index.hostPath, entries);
+			const entryIds = entries.map((entry) => entry.id);
+			const finalRaw = this.insertCompactionSummaryRaw(index, rawMessages);
+			return this.deps.convertMessages(agentId, finalRaw, entryIds);
+		}
+		const content = sessionContent;
 		const entries: Array<{
 			id: string;
 			parentId: string | null;
@@ -470,6 +472,54 @@ export class SessionHistoryReader {
 	async getActiveEntryCount(sessionPath: string): Promise<number> {
 		const index = await this.getSessionDisplayIndex(sessionPath);
 		return index.activeMessageEntries.length;
+	}
+
+	/**
+	 * 取活动分支末尾 `messageCount` 条消息的 entryId（与 JSONL 尾部窗口一一对应）。
+	 * loadMessages 用它代替 get_entries：pi 会把整棵 entry 树打成单行 JSON，同步 parse 会冻窗。
+	 */
+	async getRecentActiveEntryIds(sessionPath: string, messageCount: number): Promise<string[]> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const total = index.activeMessageEntries.length;
+		const count = Number.isFinite(messageCount) && messageCount > 0
+			? Math.min(Math.floor(messageCount), total)
+			: 0;
+		if (count <= 0) return [];
+		return index.activeMessageEntries.slice(total - count).map((entry) => entry.id);
+	}
+
+	/**
+	 * 把最近一次压缩摘要插进 rawMessages（与离线 Viewer / loadMessages 同一插入点）。
+	 * compactionSummary 不消费 entryId 槽位，插在 firstKeptEntryId 之前。
+	 */
+	private insertCompactionSummaryRaw(
+		index: SessionDisplayIndex,
+		rawMessages: unknown[],
+	): unknown[] {
+		const lastCompaction = index.activeBranch.findLast((entry) => entry.type === "compaction");
+		if (!lastCompaction) return rawMessages;
+		const firstKeptPos = lastCompaction.firstKeptEntryId
+			? index.activeMessageEntries.findIndex((entry) => entry.id === lastCompaction.firstKeptEntryId)
+			: -1;
+		const lastCompactionIndex = index.activeBranch.findIndex((entry) => entry.id === lastCompaction.id);
+		const insertAt = firstKeptPos >= 0
+			? firstKeptPos
+			: lastCompactionIndex >= 0
+				? index.activeBranch.slice(0, lastCompactionIndex + 1)
+					.filter((entry) => entry.type === "message" && entry.hasMessage).length
+				: rawMessages.length;
+		const card = {
+			role: "compactionSummary",
+			summary: lastCompaction.summary || this.deps.translate("session.summaryPlaceholder"),
+			timestamp: lastCompaction.timestamp ? Date.parse(lastCompaction.timestamp) : Date.now(),
+			meta: {
+				compactionId: lastCompaction.id,
+				compactionCount: index.activeBranch.filter((entry) => entry.type === "compaction").length,
+				firstKeptEntryId: lastCompaction.firstKeptEntryId,
+				tokensBefore: lastCompaction.tokensBefore,
+			},
+		};
+		return [...rawMessages.slice(0, insertAt), card, ...rawMessages.slice(insertAt)];
 	}
 
 	/**

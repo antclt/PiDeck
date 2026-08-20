@@ -53,9 +53,10 @@ test("full text read falls back to session file with LRU cache", () => {
   assert.match(agentManager, /async readMessageFullText\(/);
   assert.match(agentManager, /this\.toolFullTextByMessageId\.get\(messageId\)/);
   assert.match(agentManager, /this\.sessionHistoryReader\.readMessageFullText\(sessionPath, messageId, entryId\)/);
-  // 文件读取：逐行 parse 定位（entryId 优先，回退 message.id），LRU 200
+  // 文件读取：显示索引 + offset 读单行（禁止整文件 split），LRU 200
   assert.match(reader, /async readMessageFullText\(/);
-  assert.match(reader, /entryId && e\.id === entryId/);
+  assert.match(reader, /getSessionDisplayIndex/);
+  assert.match(reader, /readIndexedSessionMessages/);
   assert.match(reader, /FULL_TEXT_CACHE_LIMIT = 200/);
 });
 

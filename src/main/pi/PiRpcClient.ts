@@ -17,10 +17,15 @@ type PendingRequest = {
   timer: NodeJS.Timeout;
 };
 
+/** 超过该长度的 JSONL 行延后到 setImmediate 再 JSON.parse，避免 stdout data 回调堵住主进程。 */
+export const LARGE_RPC_LINE_PARSE_CHARS = 256 * 1024;
+
 export class PiRpcClient extends EventEmitter {
   private buffer = "";
   private readonly decoder = new StringDecoder("utf8");
   private readonly pending = new Map<string, PendingRequest>();
+  /** 大行按到达顺序排队，保证同一 client 的 response/event 不乱序。 */
+  private parseQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly stdin: NodeJS.WritableStream,
@@ -100,7 +105,23 @@ export class PiRpcClient extends EventEmitter {
 
   private handleLine(line: string) {
     if (!line.trim()) return;
+    // 小行仍同步解析，保持流式 token 低延迟；大行（get_entries / 巨型事件）让出事件循环，
+    // 关窗/设置 IPC 才能在 JSON.parse 完成前被处理。
+    if (line.length > LARGE_RPC_LINE_PARSE_CHARS) {
+      this.parseQueue = this.parseQueue.then(
+        () => new Promise<void>((resolve) => {
+          setImmediate(() => {
+            this.dispatchParsedLine(line);
+            resolve();
+          });
+        }),
+      );
+      return;
+    }
+    this.dispatchParsedLine(line);
+  }
 
+  private dispatchParsedLine(line: string) {
     let message: unknown;
     try {
       message = JSON.parse(line);

@@ -85,6 +85,9 @@ test("loadMessages falls back to the session file, not get_messages, when a path
   // 编辑/删除/重试若漏 earlyPromise，旧实现会再发 get_messages，大会话二次冻死。
   assert.match(loadMessages, /readRecentMessagesFromSessionFile/);
   assert.match(loadMessages, /runtime\.tab\.sessionPath/);
+  // 有会话文件时禁止 get_entries：整棵 entry 树单行 JSON.parse 同样冻窗。
+  assert.match(loadMessages, /getRecentActiveEntryIds/);
+  assert.match(loadMessages, /useFileEntryIds/);
 });
 
 test("readRecentMessages uses the yielding display index instead of a one-turn full-file parse", () => {

@@ -605,6 +605,10 @@ export class ExtensionManager {
 			finalArgs.push("--no-approve");
 		}
 		const settings = this.getSettings();
+		// 设置页装扩展可以等 WSL which；不能在 resolveCommand 里同步卡住主进程。
+		if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
+			await this.locator.warmWslCommand(settings.wslDistro, settings.wslUser);
+		}
 		const command = this.locator.resolveCommand(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
 		const invocation = this.locator.createInvocation(command, finalArgs);
 		const env = this.locator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl);

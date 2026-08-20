@@ -20,14 +20,14 @@ test("tab switch does not refresh the project file tree or git branches", () => 
     -1,
     "files.list effect must not clear expandedDirs (that belongs to project switch only)",
   );
-  assert.match(appSource, /api\.files\.list\(activeProjectId, \{ maxDepth: 0 \}\)/);
-  assert.match(
-    appSource,
-    /api\.git\s*\.branches\(activeProjectId\)[\s\S]{0,280}\}, \[activeProjectId, loadExpandedDirs\]/,
-  );
+  // 文件抽屉走 loadProjectFileTree（根层 maxDepth 0）；切会话不得把 currentSessionId 绑进扫盘。
+  assert.match(appSource, /loadProjectFileTree\(/);
+  assert.match(appSource, /api\.files\.list\(projectId, \{ maxDepth: 0 \}\)/);
+  assert.match(appSource, /api\.git\.branches\(activeProjectId\)/);
+  assert.match(appSource, /\}, \[activeProjectId\]\);/);
   assert.doesNotMatch(
     appSource,
-    /api\.git\s*\.branches\(activeProjectId\)[\s\S]{0,200}\}, \[activeProjectId, currentSessionId, displayAgents\.length\]/,
+    /api\.git\.branches\(activeProjectId\)[\s\S]{0,400}\}, \[activeProjectId, currentSessionId/,
   );
 });
 
@@ -47,9 +47,9 @@ test("file tree list is shallow by default in the drawer and accepts a scoped di
   assert.match(filesIpcSource, /maxDepth/);
   assert.match(filesIpcSource, /directory/);
   assert.match(appSource, /maxDepth:\s*0/);
-  // composer @ 引用仍要一棵有限深度的树，但只跟 projectId，不跟 sessionId
-  assert.match(composerSource, /maxDepth:\s*8/);
-  assert.match(composerSource, /desktopApi\.files\.list\(record\.projectId, \{ maxDepth: 8 \}\)/);
+  // composer @ 引用跟文件抽屉同一套懒加载，只跟 projectId，不跟 sessionId
+  assert.match(composerSource, /maxDepth:\s*0/);
+  assert.match(composerSource, /desktopApi\.files\.list\(record\.projectId, \{ maxDepth: 0 \}\)/);
   assert.match(composerSource, /\}, \[record\?\.projectId\]\);/);
 });
 

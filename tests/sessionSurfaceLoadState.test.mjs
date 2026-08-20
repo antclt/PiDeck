@@ -22,6 +22,7 @@ function compile(filePath, imports = {}) {
 const sessionAtoms = compile("src/renderer/src/atoms/session-atoms.ts", {
   "../utils/agentRuntimeState": compile("src/renderer/src/utils/agentRuntimeState.ts"),
   "../utils/sessionRecordIdentity": compile("src/renderer/src/utils/sessionRecordIdentity.ts"),
+  "../utils/liveTextHandoff": compile("src/renderer/src/utils/liveTextHandoff.ts"),
 });
 const composerAtoms = compile("src/renderer/src/atoms/composer-atoms.ts", {
   "./session-atoms": sessionAtoms,
@@ -62,6 +63,19 @@ test("modern surface state covers cached loading, activation before binding, and
   assert.equal(unknown.status, undefined);
   assert.equal(unknown.isStarting, false);
   assert.equal(unknown.isBusy, false);
+});
+
+test("timeline skeleton copy is history loading, not agent starting", () => {
+  const timelineSource = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
+  const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
+  const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
+  assert.match(timelineSource, /t\("app\.historyLoading"\)/);
+  assert.doesNotMatch(
+    timelineSource.slice(timelineSource.indexOf("{isConversationLoading && (")),
+    /t\("app\.agentStarting"\)/,
+  );
+  assert.match(zh, /"app\.historyLoading": "正在加载历史…"/);
+  assert.match(en, /"app\.historyLoading": "Loading history\.\.\."/);
 });
 
 test("unloaded session with no load state must not flash the start surface", () => {

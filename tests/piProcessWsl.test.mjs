@@ -79,6 +79,10 @@ function loadPiProcess(spawnCalls) {
 			if (id === "../logging/sharedLogger") {
 				return { getAppLogger: () => null };
 			}
+			// vm 沙箱按 tests/ 相对路径解析，补桩避免拉真实 sessionProxyPolicy。
+			if (id === "../sessions/sessionProxyPolicy") {
+				return { applyPiProxyMode: (env) => env };
+			}
 			return require(id);
 		},
 	};
