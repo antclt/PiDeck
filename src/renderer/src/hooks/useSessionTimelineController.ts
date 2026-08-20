@@ -220,6 +220,11 @@ export type SessionTimelineController = {
    * 滚动监听读它决定「先扩窗口」还是「翻数据页」（方案 C 渐进扩展，2026-12）。
    */
   windowExpandableRef: RefObject<boolean>;
+  /**
+   * 磁盘消息尚未就绪（含挂载首帧 loadStatus 未写入）。
+   * SessionView 用它在历史会话加载期仍挂底部 composer，避免 1 面板 Group 吃到 2 值布局缓存。
+   */
+  isSurfaceLoading: boolean;
 };
 
 export function useSessionTimelineController(options: {
@@ -332,6 +337,16 @@ export function useSessionTimelineController(options: {
   const touchMessages = useSetAtom(touchSessionMessagesAtom);
   const loadStates = useAtomValue(sessionMessageLoadStateAtom);
   const lastLoadedSessionRef = useRef<string | undefined>(undefined);
+  // 与 SessionMessageTimeline 同一套 deriveSessionSurfaceRuntime：历史会话首帧
+  // messages 仍为空时视为加载中，底部 composer 不能卸掉。
+  const isSurfaceLoading = deriveSessionSurfaceRuntime(
+    messages.length,
+    options.sessionId ? loadStates[options.sessionId]?.status : undefined,
+    undefined,
+    undefined,
+    undefined,
+    Boolean(cachedEntry),
+  ).isLoading;
 
 	// useLayoutEffect 而非 useEffect：loading 状态必须在首帧 paint 之前写入，
 	// 否则被动 effect 先于 loading 绘制一帧「空会话」→ 有历史的会话会闪出起始页。
@@ -1072,5 +1087,6 @@ lastHistoryLoadAtRef.current = now;
     scrolledWindowTurns,
     expandWindow,
     windowExpandableRef,
+    isSurfaceLoading,
   };
 }

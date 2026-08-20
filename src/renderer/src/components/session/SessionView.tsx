@@ -23,7 +23,7 @@ import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { SessionRuntimeDock } from "./SessionRuntimeDock";
 import { useSessionPaneServices } from "./SessionPaneServices";
-import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName } from "../../rendererUtils";
+import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout } from "../../rendererUtils";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 
@@ -208,6 +208,22 @@ export function SessionView({
   // 压到折叠阈值），就落在保护窗口外被误判为用户折叠，导致发送消息时终端被收起。
   const terminalProgrammaticExpireRef = useRef(0);
 
+  const composerMaxHeight = Math.max(COMPOSER_MIN_HEIGHT, Math.min(480, window.innerHeight - 260));
+  const terminalPanelVisible =
+    !isLanWeb && !settingsOpen && !configOpen && !environmentDialog &&
+    terminalDockVisible && terminalOpen;
+  // 历史会话加载期 messages 仍为空：仍挂底部栏，避免 1 面板 Group 套用 2 值缓存。
+  // 空会话磁盘就绪后卸底部栏，改由 timeline 内 SessionStartSurface 居中输入。
+  const bottomComposerVisible = shouldMountBottomComposer({
+    hasActiveConversation,
+    messageCount: sessionTimeline.messages.length,
+    isConversationLoading: sessionTimeline.isSurfaceLoading,
+  });
+  const sessionPanels = {
+    composer: bottomComposerVisible,
+    terminal: terminalPanelVisible,
+  };
+
   function applyComposerHeight(px: number, fromUser: boolean) {
     composerHeightStateRef.current = px;
     setComposerHeight(px);
@@ -247,16 +263,12 @@ export function SessionView({
             groupPx,
             TIMELINE_MIN_HEIGHT,
           );
-          // setLayout 要求键与当前面板集合一致：terminal 卸载后 getLayout 仍
-          // 保留其百分比，必须剔除，否则 K() 校验键数不匹配会 throw。
-          const next: Record<string, number> = { ...layout };
-          if (layout.terminal !== undefined && !terminalPanelVisible) {
-            delete next.terminal;
-          }
-          next.composer = budget.composer;
-          if (layout.timeline !== undefined) {
-            next.timeline = budget.timeline;
-          }
+          // setLayout 键必须等于当前已注册面板，否则 K() 抛 Invalid N panel layout。
+          // 关终端 / 历史会话加载期卸 composer 后 getLayout 仍可能带旧键。
+          const next = sanitizeSessionPanelLayout(
+            { ...layout, composer: budget.composer, timeline: budget.timeline },
+            { composer: bottomComposerVisible, terminal: terminalPanelVisible },
+          );
           group.setLayout(next);
           return true;
         }
@@ -412,11 +424,19 @@ export function SessionView({
     }));
   }
 
-  // 与旧拖拽实现一致的上限公式（渲染期快照，与旧行为同为非响应式）
-  const composerMaxHeight = Math.max(COMPOSER_MIN_HEIGHT, Math.min(480, window.innerHeight - 260));
-  const terminalPanelVisible =
-    !isLanWeb && !settingsOpen && !configOpen && !environmentDialog &&
-    terminalDockVisible && terminalOpen;
+  // solo 栏无 sessionId key，切会话复用本组件。必须在 render 阶段重置高度：
+  // useLayoutEffect 太晚，Group 已按旧 defaultSize 注册，输入框会悬在半空。
+  // setState-during-render 是 React 官方「prop 变化重置 state」写法，本轮会被丢弃重渲。
+  const composerHeightSessionRef = useRef(sessionId);
+  if (composerHeightSessionRef.current !== sessionId) {
+    composerHeightSessionRef.current = sessionId;
+    composerHeightStateRef.current = COMPOSER_DEFAULT_HEIGHT;
+    userComposerHeightRef.current = COMPOSER_DEFAULT_HEIGHT;
+    contentDrivenHeightRef.current = COMPOSER_DEFAULT_HEIGHT;
+    if (composerHeight !== COMPOSER_DEFAULT_HEIGHT) {
+      setComposerHeight(COMPOSER_DEFAULT_HEIGHT);
+    }
+  }
 
   // 最近一次三面板布局快照（terminal 可见时持续记录），关闭终端时恢复用。
   const lastThreePanelLayoutRef = useRef<Record<string, number> | null>(null);
@@ -446,9 +466,12 @@ export function SessionView({
     const panel = composerPanelRef.current;
     if (!prev || !group || !panel || prev.composer === undefined) return;
     try {
-      const next: Record<string, number> = { ...prev };
-      delete next.terminal;
-      next.timeline = 100 - prev.composer;
+      // 卸 terminal 时若 composer 也未挂（空会话起始页），只保留 timeline，
+      // 不能把 2 值 layout 打到 1 面板上（Invalid 1 panel layout）。
+      const next = sanitizeSessionPanelLayout(prev, {
+        composer: bottomComposerVisible,
+        terminal: false,
+      });
       const size = panel.getSize();
       if (size.inPixels <= 0 || size.asPercentage <= 0) return;
       const groupPx = size.inPixels / (size.asPercentage / 100);
@@ -458,7 +481,7 @@ export function SessionView({
       group.setLayout(next);
       applyComposerHeight(expectedPx, false);
     } catch { /* Group 未就绪 */ }
-  }, [terminalPanelVisible, terminalOpen]);
+  }, [bottomComposerVisible, terminalPanelVisible, terminalOpen]);
 
   return (
     <div
@@ -488,11 +511,10 @@ export function SessionView({
       {/* 分支导航条：仅当当前会话存在 fork 分支关系（父/兄弟/子分支）时显示 */}
       <SessionBranchBar sessionId={sessionId} onOpenSession={onOpenBranchSession} />
       <ResizablePanelGroup
-        // 面板数变化（terminal 卸载/挂载）时强制重建：旧 Group 的 3 值布局缓存
-        // 不复用，避免 react-resizable-panels 内部 K() 校验「Invalid N panel layout」
-        // 抛错导致 SessionView 崩溃（0.7.0-beta 线上反馈）；重建后由下方
-        // useLayoutEffect 在 paint 前 setLayout 恢复 composer 高度。
-        key={terminalPanelVisible ? "session-group-3p" : "session-group-2p"}
+        // 面板数变化（terminal / composer 卸载）时强制重建：旧 Group 的
+        // layouts["timeline,composer"] 2 值缓存不能套到 1 面板（历史会话加载期
+        // 曾卸底部栏 → Invalid 1 panel layout: 83.506%, 16.494%）。
+        key={`${sessionId}:${sessionResizableGroupKey(sessionPanels)}`}
         orientation="vertical"
         className="session-v-group"
         groupRef={sessionGroupRef}
@@ -528,9 +550,8 @@ export function SessionView({
           />
         </ResizablePanel>
 
-        {/* 无消息时底部 composer 不渲染：起始页（SessionStartSurface）在 timeline 内
-            居中挂同一 ComposerArea，避免同屏两个输入框；发首条消息后底部栏回归 */}
-        {hasActiveConversation && sessionTimeline.messages.length > 0 && (
+        {/* 有消息或仍在加载：底部 composer。空会话就绪后卸掉，改由起始页居中输入。 */}
+        {bottomComposerVisible && (
           <>
             <ResizableHandle className="v-splitter" />
             <ResizablePanel
@@ -538,7 +559,9 @@ export function SessionView({
               panelRef={composerPanelRef}
               minSize={COMPOSER_MIN_HEIGHT}
               maxSize={composerMaxHeight}
-              defaultSize={composerHeight}
+              defaultSize={composerHeightStateRef.current}
+              // 窗口缩放时保持输入栏像素高度，避免百分比缓存把栏撑出大块底空隙。
+              groupResizeBehavior="preserve-pixel-size"
               onResize={handleComposerResize}
               // 与时间线共享同一条滚动条槽位：面板 overflow-hidden + scrollbar-gutter:stable
               // 预留与真实滚动条等宽的右侧槽位（时间线视口由自身 gutter 预留），

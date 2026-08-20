@@ -42,9 +42,13 @@ test("start surface centers the composer", () => {
 });
 
 test("bottom composer is hidden while the start surface is showing", () => {
-  // 无消息时底部栏不渲染，避免同屏两个输入框；有消息后回归
-  assert.match(view, /sessionTimeline\.messages\.length > 0/);
+  // 空会话磁盘就绪后卸底部栏，避免同屏两个输入框；加载中 / 有消息仍挂底部栏，
+  // 避免 1 面板 Group 套用 2 值缓存抛 Invalid 1 panel layout。
+  assert.match(view, /shouldMountBottomComposer/);
+  assert.match(view, /sessionTimeline\.isSurfaceLoading/);
+  assert.match(view, /bottomComposerVisible &&/);
   assert.match(view, /ResizablePanel\s*\n\s*id="composer"/);
+  assert.doesNotMatch(view, /sessionTimeline\.messages\.length > 0 && \(/);
 });
 
 test("empty active sessions render the start surface with the session id", () => {

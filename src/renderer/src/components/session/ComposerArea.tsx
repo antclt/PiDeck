@@ -241,11 +241,11 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
         <>
           {/* overflow-hidden：面板到 minSize 时禁止整块 footer 再出滚动条；
               文本区自身仍可在 ProseMirror 内滚动，底栏 shrink-0 始终可见。
-              默认顶对齐：面板被终端拖高时剩余空白落在输入卡与终端之间，
-              输入卡仍贴在时间线/独立卡下方，不被撑开。 */}
+              底对齐：面板高于内容时（历史会话吃到百分比缓存、终端拖高）空白落在
+              时间线与输入卡之间，输入卡贴窗口/终端底，避免「输入框悬在半空」。 */}
           <footer
             ref={footerRef}
-            className="composer flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-3"
+            className="composer flex min-h-0 min-w-0 flex-col justify-end gap-2 overflow-hidden bg-transparent px-0 pb-3"
             style={composerFooterStyle(
               props.height != null ? "100%" : localHeight,
             )}

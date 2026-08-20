@@ -135,6 +135,13 @@ test("session view uses the budget function in programResize (not raw delta)", (
   );
   // programResize 必须走预算函数：raw delta 在 timeline 触底时会压扁 terminal
   assert.match(sessionView, /growComposerWithinTimelineBudget/);
+  assert.match(sessionView, /sanitizeSessionPanelLayout/);
+  assert.match(sessionView, /sessionResizableGroupKey\(sessionPanels\)/);
+  assert.match(sessionView, /shouldMountBottomComposer/);
+  assert.match(sessionView, /groupResizeBehavior="preserve-pixel-size"/);
+  assert.match(sessionView, /composerHeightSessionRef/);
+  assert.match(sessionView, /sessionTimeline\.isSurfaceLoading/);
+
   // timeline 面板的 minSize 用同一常量，预算函数与 JSX 约束不漂移
   assert.match(sessionView, /minSize=\{TIMELINE_MIN_HEIGHT\}/);
   // 折叠阈值判定仍保留（用户拖拽到 35px 以下应折叠），但程序化增长不再触发它
@@ -146,4 +153,76 @@ test("session view uses the budget function in programResize (not raw delta)", (
     sessionView,
     /if \(now < terminalProgrammaticExpireRef\.current\) return/,
   );
+});
+
+/**
+ * 回归：打开历史会话首帧 messages=[]，旧逻辑卸底部 composer，Group 只剩 timeline，
+ * 但仍用 session-group-2p 复用 layouts["timeline,composer"]（例如 83.506%, 16.494%），
+ * react-resizable-panels K() 抛 `Invalid 1 panel layout`。
+ */
+test("history session loading keeps the bottom composer so the group is never 1-panel", () => {
+  const { shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout } = loadModule();
+
+  assert.equal(
+    shouldMountBottomComposer({
+      hasActiveConversation: true,
+      messageCount: 0,
+      isConversationLoading: true,
+    }),
+    true,
+    "loading history must keep the bottom composer mounted",
+  );
+  assert.equal(
+    shouldMountBottomComposer({
+      hasActiveConversation: true,
+      messageCount: 0,
+      isConversationLoading: false,
+    }),
+    false,
+    "empty ready sessions stay on the start surface",
+  );
+  assert.equal(
+    shouldMountBottomComposer({
+      hasActiveConversation: true,
+      messageCount: 3,
+      isConversationLoading: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldMountBottomComposer({
+      hasActiveConversation: false,
+      messageCount: 0,
+      isConversationLoading: true,
+    }),
+    false,
+  );
+
+  assert.equal(sessionResizableGroupKey({ composer: false, terminal: false }), "session-group-1p");
+  assert.equal(sessionResizableGroupKey({ composer: true, terminal: false }), "session-group-2p");
+  assert.equal(sessionResizableGroupKey({ composer: true, terminal: true }), "session-group-3p");
+  assert.notEqual(
+    sessionResizableGroupKey({ composer: false, terminal: false }),
+    sessionResizableGroupKey({ composer: true, terminal: false }),
+    "1-panel and 2-panel groups must not share a cache key",
+  );
+
+  // 2 值缓存打到 1 面板：只留 timeline=100，丢掉 composer 百分比
+  const onePanel = sanitizeSessionPanelLayout(
+    { timeline: 83.506, composer: 16.494 },
+    { composer: false, terminal: false },
+  );
+  // vm 沙箱对象与测试字面量原型不同，不能 deepEqual；按键/值断言即可。
+  assert.equal(onePanel.timeline, 100);
+  assert.equal(onePanel.composer, undefined);
+  assert.equal(Object.keys(onePanel).join(","), "timeline");
+
+  // 3 值缓存打到 2 面板：丢掉 terminal，composer 保持，timeline 吸收差额
+  const twoPanel = sanitizeSessionPanelLayout(
+    { timeline: 50, composer: 16.494, terminal: 33.506 },
+    { composer: true, terminal: false },
+  );
+  assert.equal(twoPanel.composer, 16.494);
+  assert.equal(twoPanel.terminal, undefined);
+  assert.ok(Math.abs(twoPanel.timeline - (100 - 16.494)) < 1e-9);
 });

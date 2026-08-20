@@ -65,6 +65,16 @@ test("modern surface state covers cached loading, activation before binding, and
   assert.equal(unknown.isBusy, false);
 });
 
+test("timeline controller exposes surface loading for the bottom composer gate", () => {
+  const controllerSource = readFileSync(
+    "src/renderer/src/hooks/useSessionTimelineController.ts",
+    "utf8",
+  );
+  // SessionView 不能再用 messages.length>0 当挂载条件：历史会话首帧 length=0。
+  assert.match(controllerSource, /isSurfaceLoading/);
+  assert.match(controllerSource, /deriveSessionSurfaceRuntime\(/);
+});
+
 test("timeline skeleton copy is history loading, not agent starting", () => {
   const timelineSource = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
   const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");

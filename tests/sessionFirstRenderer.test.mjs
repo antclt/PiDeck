@@ -134,7 +134,7 @@ test("Session messages and composer render without an active Agent", () => {
   // ComposerArea，底部面板不重复渲染
   assert.match(
     sessionViewSource,
-    /\{hasActiveConversation && sessionTimeline\.messages\.length > 0 && \([\s\S]*<ComposerArea[\s\S]*sessionId=\{sessionId\}/,
+    /bottomComposerVisible && \([\s\S]*<ComposerArea[\s\S]*sessionId=\{sessionId\}/,
   );
   assert.match(composerSource, /useSessionComposerController\(/);
   assert.match(composerSource, /sessionId=\{props\.sessionId\}/);

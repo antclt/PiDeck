@@ -40,6 +40,8 @@ test("composer measures extras and the input card as total content height", () =
   );
   // 非受控（起始页）随内容 intrinsic 增高，不再用 extra+DEFAULT 抬本地 height
   assert.doesNotMatch(composerArea, /extra \+ \(props\.defaultHeight \?\? COMPOSER_DEFAULT_HEIGHT\)/);
+  // 面板高于内容时输入卡贴底，避免历史会话输入框悬在半空
+  assert.match(composerArea, /flex-col justify-end gap-2/);
 });
 
 test("extras height sync lives in a child that rerenders when variable content changes", () => {

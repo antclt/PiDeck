@@ -21,6 +21,55 @@ export const COMPOSER_TEXT_MAX_HEIGHT = 336;
 // 不能突破该保底线，否则库的 clamp 会把差额压给 terminal 导致终端被收起。
 export const TIMELINE_MIN_HEIGHT = 160;
 
+/** 当前垂直 Group 实际挂了哪些面板（timeline 始终在）。 */
+export type SessionPanelSet = {
+	composer: boolean;
+	terminal: boolean;
+};
+
+/**
+ * 底部输入栏是否挂到 ResizablePanel。
+ *
+ * 起始页（空会话且磁盘已就绪）在 timeline 内居中挂同一 ComposerArea，底部栏不重复。
+ * 加载中即使 messages 仍为空也要挂底部栏：历史会话首帧 messages=0，卸栏会让
+ * 2 值布局打到 1 面板上，react-resizable-panels 抛 `Invalid 1 panel layout`。
+ */
+export function shouldMountBottomComposer(input: {
+	hasActiveConversation: boolean;
+	messageCount: number;
+	isConversationLoading: boolean;
+}): boolean {
+	if (!input.hasActiveConversation) return false;
+	if (input.messageCount > 0) return true;
+	return input.isConversationLoading;
+}
+
+/** 面板数变化时强制重建 Group，避免 layouts["timeline,composer"] 被套到 1 面板上。 */
+export function sessionResizableGroupKey(panels: SessionPanelSet): string {
+	const count = 1 + (panels.composer ? 1 : 0) + (panels.terminal ? 1 : 0);
+	return `session-group-${count}p`;
+}
+
+/**
+ * setLayout 的键必须与当前已注册面板一致，否则 K() 抛
+ * `Invalid N panel layout: a%, b%`。关终端 / 卸 composer 后 getLayout 仍可能带旧键。
+ * 差额全部还给 timeline，不把卸载面板的百分比留给仍挂着的面板。
+ */
+export function sanitizeSessionPanelLayout(
+	layout: Record<string, number>,
+	panels: SessionPanelSet,
+): Record<string, number> {
+	const next: Record<string, number> = {};
+	if (panels.composer && layout.composer !== undefined) {
+		next.composer = layout.composer;
+	}
+	if (panels.terminal && layout.terminal !== undefined) {
+		next.terminal = layout.terminal;
+	}
+	next.timeline = Math.max(0, 100 - (next.composer ?? 0) - (next.terminal ?? 0));
+	return next;
+}
+
 /**
  * composer 程序化增高时，从 timeline 可让出空间里取预算（百分比）。
  *
