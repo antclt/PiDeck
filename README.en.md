@@ -254,6 +254,16 @@ Join the PiDeck QQ group for discussion and feedback:
 
 This app starts local `pi` processes and exposes limited file operations through Electron IPC. Only run from trusted source code. The app sends an anonymous, low-frequency `app_heartbeat` by default to understand version distribution, platform compatibility, and active installations; it can be disabled in Settings. It does not collect project paths, code, message content, session content, or file names, and it does not upload files. The third-party analytics service receives request metadata. pi agent process proxy and desktop model fetch/test proxy can be configured separately; external links opened in the system browser still follow the browser/system network settings.
 
+---
+
+## Sponsor
+
+If PiDeck is useful to you, you can buy the author a coffee. Scan the WeChat Pay QR code below to tip. Thank you.
+
+<p align="center">
+  <img src="docs/images/wechat_pay.png" alt="WeChat Pay tip QR code" width="280" />
+</p>
+
 ## License
 
 MIT

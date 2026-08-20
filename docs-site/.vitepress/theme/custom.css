@@ -206,6 +206,22 @@
   font-family: var(--pideck-font-display-mono);
 }
 
+/* 赞赏码单独约束宽度，避免套用截图 100% 拉满 */
+.sponsor-block {
+  margin: 24px 0 48px;
+  text-align: center;
+}
+
+.sponsor-qr {
+  display: inline-block;
+  width: 280px;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(20, 33, 31, 0.08);
+}
+
 @media (max-width: 760px) {
   .home-showcase {
     margin-top: 8px;

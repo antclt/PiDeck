@@ -99,3 +99,13 @@ features:
 - 想直接使用：前往 [下载安装](/guide/getting-started#下载安装)。
 - 想从源码运行：查看 [快速开始](/guide/getting-started#从源码运行)。
 - 想了解功能边界：查看 [功能介绍](/guide/features)。
+
+---
+
+## 赞助
+
+如果 PiDeck 对你有帮助，欢迎请作者喝杯咖啡。微信扫码即可赞赏，感谢支持。
+
+<p class="sponsor-block">
+  <img class="sponsor-qr" src="/images/wechat_pay.png" alt="微信赞赏码" />
+</p>

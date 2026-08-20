@@ -55,3 +55,13 @@ features:
 - **Context-Aware Input** — `@` file suggestions, `!` shell execution, `/` slash commands, and command history in a single composer.
 - **Built-in Browser Preview** — Right-drawer browser with tabs, URL bar, fullscreen mode, and PC/mobile/tablet viewport presets.
 - **Cross-Platform** — Windows, macOS, and Linux installers via GitHub Releases. Source install supported via npm.
+
+---
+
+## Sponsor
+
+If PiDeck is useful to you, you can buy the author a coffee. Scan the WeChat Pay QR code below to tip. Thank you.
+
+<p class="sponsor-block">
+  <img class="sponsor-qr" src="/images/wechat_pay.png" alt="WeChat Pay tip QR code" />
+</p>
