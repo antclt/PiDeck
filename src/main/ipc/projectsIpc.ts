@@ -10,6 +10,11 @@ import type { ProjectResourceManager } from "../projects/ProjectResourceManager"
 import type { SessionCatalog } from "../sessions/SessionCatalog";
 import { attachProjectPresence } from "../projects/projectPresence";
 import { registerProjectResourceIpc } from "./projectResourceIpc";
+import {
+	normalizeSelectedWslProjectPath,
+	toWindowsHostPath,
+	type WslEnvironment,
+} from "../wsl/WslPaths";
 
 export type ProjectsIpcDeps = {
 	projectStore: ProjectStore;
@@ -22,6 +27,8 @@ export type ProjectsIpcDeps = {
 	sessionCatalog?: SessionCatalog;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	getMainWindow: () => BrowserWindow | null;
+	/** 添加 WSL 项目前解析当前发行版/用户；缺失时 chooseAndAdd 会拒绝（#155）。 */
+	resolveWslEnvironment?: (distro: string, user: string) => Promise<WslEnvironment>;
 };
 
 export function registerProjectsIpc({
@@ -35,7 +42,44 @@ export function registerProjectsIpc({
 	sessionCatalog,
 	mainCopy,
 	getMainWindow,
+	resolveWslEnvironment,
 }: ProjectsIpcDeps): void {
+	// Windows Node 只能 stat/打开主机路径；WSL 项目在 store 里可能是 Linux 路径。
+	const resolveProjectHostPath = (project: { path: string; environment?: string }) => {
+		const settings = settingsStore.get();
+		if (
+			process.platform !== "win32" ||
+			project.environment !== "wsl" ||
+			!settings.wslEnabled ||
+			!settings.wslDistro
+		) {
+			return project.path;
+		}
+		try {
+			return toWindowsHostPath(project.path, { distro: settings.wslDistro });
+		} catch {
+			// Presence / git 探测不应把临时 WSL 不可用升级成 IPC 硬失败。
+			return project.path;
+		}
+	};
+
+	const resolveProjectStoredPath = (path: string, project: { environment?: string }) => {
+		const settings = settingsStore.get();
+		if (
+			process.platform !== "win32" ||
+			project.environment !== "wsl" ||
+			!settings.wslEnabled ||
+			!settings.wslDistro
+		) {
+			return path;
+		}
+		try {
+			return normalizeSelectedWslProjectPath(path, { distro: settings.wslDistro });
+		} catch {
+			return path;
+		}
+	};
+
 	// 可见项目 = 按环境过滤 + 目录存在性标记（missing 保留记录，见 projectPresence.ts）
 	const getVisibleProjects = async () => {
 		const settings = settingsStore.get();
@@ -43,14 +87,18 @@ export function registerProjectsIpc({
 		const visible = settings.wslEnabled
 			? all.filter((p) => p.kind === "chat" || p.environment === "wsl")
 			: all.filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
-		return attachProjectPresence(visible);
+		return attachProjectPresence(visible, undefined, resolveProjectHostPath);
 	};
 
 	ipcMain.handle(ipcChannels.projectsList, async () => getVisibleProjects());
 	ipcMain.handle(ipcChannels.projectsAdd, async () => {
 		const settings = settingsStore.get();
 		const env = settings.wslEnabled ? "wsl" as const : "windows" as const;
-		const project = await projectStore.chooseAndAdd(env);
+		// #155：WSL 模式下必须带上当前发行版环境，否则 chooseAndAdd 直接抛 INVALID_WSL_PATH。
+		const wslEnvironment = env === "wsl" && settings.wslDistro && settings.wslUser && resolveWslEnvironment
+			? await resolveWslEnvironment(settings.wslDistro, settings.wslUser)
+			: null;
+		const project = await projectStore.chooseAndAdd(env, wslEnvironment);
 		void appLogger.info("project", "Project added", { projectId: project?.id, path: project?.path, environment: env });
 		return project;
 	});
@@ -103,7 +151,7 @@ export function registerProjectsIpc({
 			// 即将启用时先校验是否 git 仓库；非 git 项目开启工作区模式没有意义，
 			// 只会看到空列表并在创建时报错，这里提前给出明确错误让前端提示用户。
 			if (!existing.worktreeEnabled) {
-				const isRepo = await gitService.isGitRepo(existing.path);
+				const isRepo = await gitService.isGitRepo(resolveProjectHostPath(existing));
 				if (!isRepo) {
 					throw new Error("NOT_A_GIT_REPO");
 				}
@@ -113,11 +161,12 @@ export function registerProjectsIpc({
 			// 开启 worktree 模式时，自动注册已有的 git worktree
 			if (project.worktreeEnabled) {
 				try {
-					const entries = await worktreeService.list(project.path);
+					const entries = await worktreeService.list(resolveProjectHostPath(project));
 					for (const wt of entries) {
-						// findByPath 返回 null 表示未注册
-						if (!projectStore.findByPath(wt.path)) {
-							await projectStore.add(wt.path, projectId);
+						// findByPath 必须用 store 里的 Linux/规范化路径，不能拿 git 返回的 UNC。
+						const storedPath = resolveProjectStoredPath(wt.path, project);
+						if (!projectStore.findByPath(storedPath)) {
+							await projectStore.add(storedPath, projectId, project.environment);
 						}
 					}
 				} catch {

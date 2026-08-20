@@ -95,6 +95,7 @@ import type {
 	SessionSummary,
 	TerminalDataEvent,
 	TerminalExitEvent,
+	TerminalShell,
 	TerminalTab,
 	TerminalTarget,
 	WebNetworkAddress,
@@ -1501,8 +1502,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.terminalEnsure, target) as Promise<
 				TerminalTab[]
 			>,
-		create: (target: TerminalTarget) =>
-			ipcRenderer.invoke(ipcChannels.terminalCreate, target) as Promise<
+		create: (target: TerminalTarget, shell?: TerminalShell) =>
+			ipcRenderer.invoke(ipcChannels.terminalCreate, target, shell) as Promise<
 				TerminalTab
 			>,
 		input: (tabId: string, data: string) =>

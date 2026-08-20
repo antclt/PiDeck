@@ -11,6 +11,12 @@ import { PiRpcClient } from "../pi/PiRpcClient";
 import type { ProjectStore } from "../projects/ProjectStore";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { WorktreeService } from "../git/WorktreeService";
+import {
+	normalizeSelectedWslProjectPath,
+	parseWslUncPath,
+	toWindowsHostPath,
+	toWslLinuxPath,
+} from "../wsl/WslPaths";
 
 export type GitIpcDeps = {
 	appLogger: Pick<AppLogger, "warn" | "info" | "error">;
@@ -81,6 +87,10 @@ async function ensureGenProcess(
 	if (genProcess) stopGenProcess();
 
 	const settings = settingsStore.get();
+	// WSL pi 需要 Linux cwd（--cd）；Windows spawn 本身仍必须落在主机路径上。
+	const wslCwd = settings.wslEnabled && settings.wslDistro && command.startsWith("wsl://")
+		? toWslLinuxPath(projectPath, { distro: settings.wslDistro })
+		: undefined;
 	const invocation = piLocator.createInvocation(command, [
 		"--mode", "rpc",
 		"--no-session",
@@ -91,10 +101,13 @@ async function ensureGenProcess(
 		"--no-context-files",
 		"--no-themes",
 		"--thinking", "off",
-	]);
+	], wslCwd ? { wslCwd } : {});
+	const spawnCwd = wslCwd && settings.wslDistro
+		? toWindowsHostPath(projectPath, { distro: settings.wslDistro })
+		: projectPath;
 
 	const childProcess = spawn(invocation.command, invocation.args, {
-		cwd: projectPath,
+		cwd: spawnCwd,
 		env: piLocator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl),
 		stdio: ["pipe", "pipe", "pipe"],
 		shell: invocation.shell,
@@ -102,7 +115,7 @@ async function ensureGenProcess(
 		windowsVerbatimArguments: invocation.windowsVerbatimArguments,
 	});
 	genProcess = childProcess;
-	genProcessCwd = projectPath;
+	genProcessCwd = spawnCwd;
 
 	genRpcClient = new PiRpcClient(childProcess.stdin!, childProcess.stdout!);
 
@@ -221,24 +234,51 @@ export function registerGitIpc({
 	settingsStore,
 	worktreeService,
 }: GitIpcDeps): void {
+	const hostPath = (path: string): string => {
+		const settings = settingsStore.get();
+		if (
+			process.platform !== "win32" ||
+			!settings.wslEnabled ||
+			!settings.wslDistro ||
+			(!path.startsWith("/") && !parseWslUncPath(path))
+		) {
+			return path;
+		}
+		return toWindowsHostPath(path, { distro: settings.wslDistro });
+	};
+
+	const projectHostPath = (project: { path: string }) => hostPath(project.path);
+	const projectStoredPath = (path: string, project: { environment?: string }) => {
+		const settings = settingsStore.get();
+		if (
+			process.platform !== "win32" ||
+			project.environment !== "wsl" ||
+			!settings.wslEnabled ||
+			!settings.wslDistro
+		) {
+			return path;
+		}
+		return normalizeSelectedWslProjectPath(path, { distro: settings.wslDistro });
+	};
+
 	/** 解析项目 + 可选嵌套仓库路径。repoPath 必须落在项目内，缺省仍用项目根。 */
 	const requireGitCwd = (projectId: string, repoPath?: unknown): string => {
 		const project = projectStore.get(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
-		return resolveGitCwd(project.path, repoPath);
+		return resolveGitCwd(projectHostPath(project), repoPath == null || repoPath === "" ? repoPath : hostPath(String(repoPath)));
 	};
 
 	const findGitCwd = (projectId: string, repoPath?: unknown): string | null => {
 		const project = projectStore.get(projectId);
 		if (!project) return null;
-		return resolveGitCwd(project.path, repoPath);
+		return resolveGitCwd(projectHostPath(project), repoPath == null || repoPath === "" ? repoPath : hostPath(String(repoPath)));
 	};
 
 	// 扫描项目内独立仓库（根 + 嵌套）。worktree / git init 仍只作用于项目根。
 	ipcMain.handle(ipcChannels.gitListRepos, async (_event, projectId: string) => {
 		const project = projectStore.get(projectId);
 		if (!project) return [];
-		return listGitRepos(project.path);
+		return listGitRepos(projectHostPath(project));
 	});
 
 	ipcMain.handle(ipcChannels.gitBranches, async (_event, projectId: string, repoPath?: string) => {
@@ -268,7 +308,7 @@ export function registerGitIpc({
 		ipcChannels.gitOriginalContent,
 		async (_event, filePath: string) => {
 			const maxBytes = Math.max(1, settingsStore.get().maxEditorFileSizeMB) * 1024 * 1024;
-			return gitService.getOriginalContent(filePath, maxBytes);
+			return gitService.getOriginalContent(hostPath(filePath), maxBytes);
 		},
 	);
 
@@ -277,12 +317,16 @@ export function registerGitIpc({
 		async (_event, projectId: string) => {
 			const project = projectStore.get(projectId);
 			if (!project) throw new Error(`Project not found: ${projectId}`);
-			const entries = await worktreeService.list(project.path);
+			const entries = await worktreeService.list(projectHostPath(project));
+			const storedEntries = entries.map((entry) => ({
+				...entry,
+				path: projectStoredPath(entry.path, project),
+			}));
 			// 每次扫描都同步注册外部新增 worktree，保证侧栏数据和 git 状态一致。
-			for (const wt of entries) {
-				await projectStore.add(wt.path, projectId);
+			for (const wt of storedEntries) {
+				await projectStore.add(wt.path, projectId, project.environment === "wsl" ? "wsl" : "windows");
 			}
-			return entries;
+			return storedEntries;
 		},
 	);
 
@@ -291,9 +335,10 @@ export function registerGitIpc({
 		async (_event, projectId: string, branchName: string) => {
 			const project = projectStore.get(projectId);
 			if (!project) throw new Error(`Project not found: ${projectId}`);
-			const info = await worktreeService.create(project.path, projectId, branchName);
-			await projectStore.add(info.path, projectId);
-			return info;
+			const info = await worktreeService.create(projectHostPath(project), projectId, branchName);
+			const storedPath = projectStoredPath(info.path, project);
+			await projectStore.add(storedPath, projectId, project.environment === "wsl" ? "wsl" : "windows");
+			return { ...info, path: storedPath };
 		},
 	);
 
@@ -303,19 +348,21 @@ export function registerGitIpc({
 			const project = projectStore.get(projectId);
 			if (!project) throw new Error(`Project not found: ${projectId}`);
 			try {
-				const ok = await worktreeService.remove(worktreePath, project.path);
+				const hostWorktreePath = hostPath(worktreePath);
+				const hostProjectPath = projectHostPath(project);
+				const ok = await worktreeService.remove(hostWorktreePath, hostProjectPath);
 				const normalizeForCompare = (value: string) => {
 					const resolved = resolve(value);
 					return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 				};
-				const normalizedTarget = normalizeForCompare(worktreePath);
-				const stillInGit = (await worktreeService.list(project.path)).some(
+				const normalizedTarget = normalizeForCompare(hostWorktreePath);
+				const stillInGit = (await worktreeService.list(hostProjectPath)).some(
 					(entry) => normalizeForCompare(entry.path) === normalizedTarget,
 				);
 				// 如果 git 已经没有该 worktree（包括用户在外部删过导致 remove 返回 false），
 				// 也要清理 PiDeck 项目记录，否则重启后会从 projects.json 恢复成"删不掉"。
 				if (ok || !stillInGit) {
-					const child = projectStore.findByPath(worktreePath);
+					const child = projectStore.findByPath(projectStoredPath(hostWorktreePath, project));
 					if (child) await projectStore.remove(child.id);
 					// worktree 删除 = 物理目录删除（走回收站），记审计日志便于追踪。
 					void appLogger.info("git", "Worktree removed", {
@@ -348,7 +395,8 @@ export function registerGitIpc({
 		async (_event, projectId: string, options?: { maxEntries?: number; ref?: string; path?: string; allBranches?: boolean }, repoPath?: string) => {
 			const cwd = findGitCwd(projectId, repoPath);
 			if (!cwd) return [];
-			return gitService.getCommitLog(cwd, options);
+			const hostOptions = options?.path ? { ...options, path: hostPath(options.path) } : options;
+			return gitService.getCommitLog(cwd, hostOptions);
 		},
 	);
 
@@ -383,7 +431,13 @@ export function registerGitIpc({
 			const cwd = findGitCwd(projectId, repoPath);
 			if (!cwd) return null;
 			const maxBytes = Math.max(1, settingsStore.get().maxEditorFileSizeMB) * 1024 * 1024;
-			return gitService.getCommitFileDiff(cwd, ref, filePath, originalPath, maxBytes);
+			return gitService.getCommitFileDiff(
+				cwd,
+				ref,
+				hostPath(filePath),
+				originalPath ? hostPath(originalPath) : originalPath,
+				maxBytes,
+			);
 		},
 	);
 
@@ -392,7 +446,7 @@ export function registerGitIpc({
 		async (_event, projectId: string, ref1: string, ref2: string, filePath: string, repoPath?: string) => {
 			const cwd = findGitCwd(projectId, repoPath);
 			if (!cwd) return "";
-			return gitService.diffFileBetweenRefs(cwd, ref1, ref2, filePath);
+			return gitService.diffFileBetweenRefs(cwd, ref1, ref2, hostPath(filePath));
 		},
 	);
 
@@ -413,21 +467,21 @@ export function registerGitIpc({
 			const cwd = findGitCwd(projectId, repoPath);
 			if (!cwd) return null;
 			const maxBytes = Math.max(1, settingsStore.get().maxEditorFileSizeMB) * 1024 * 1024;
-			return gitService.getWorkspaceFileDiff(cwd, group, filePath, maxBytes);
+			return gitService.getWorkspaceFileDiff(cwd, group, hostPath(filePath), maxBytes);
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitStage,
 		async (_event, projectId: string, paths: string[], repoPath?: string) => {
-			await gitService.stageFiles(requireGitCwd(projectId, repoPath), paths);
+			await gitService.stageFiles(requireGitCwd(projectId, repoPath), paths.map(hostPath));
 		},
 	);
 
 	ipcMain.handle(
 		ipcChannels.gitUnstage,
 		async (_event, projectId: string, paths: string[], repoPath?: string) => {
-			await gitService.unstageFiles(requireGitCwd(projectId, repoPath), paths);
+			await gitService.unstageFiles(requireGitCwd(projectId, repoPath), paths.map(hostPath));
 		},
 	);
 
@@ -436,7 +490,7 @@ export function registerGitIpc({
 		async (_event, projectId: string, group: "workingTree" | "untracked", filePath: string, repoPath?: string) => {
 			const cwd = requireGitCwd(projectId, repoPath);
 			try {
-				await gitService.discardFile(cwd, group, filePath);
+				await gitService.discardFile(cwd, group, hostPath(filePath));
 				// untracked 丢弃 = 删除用户文件（走回收站），记审计日志便于追踪。
 				void appLogger.info("git", "Changes discarded", { projectId, group, filePath, repoPath: cwd });
 			} catch (error) {
@@ -468,7 +522,10 @@ export function registerGitIpc({
 				throw new Error("Invalid Git discard resources");
 			}
 			const cwd = requireGitCwd(projectId, repoPath);
-			await gitService.discardFiles(cwd, resources);
+			await gitService.discardFiles(
+				cwd,
+				resources.map((resource) => ({ ...resource, path: hostPath(resource.path) })),
+			);
 			void appLogger.info("git", "Changes discarded in batch", {
 				projectId,
 				count: resources.length,
@@ -599,7 +656,7 @@ export function registerGitIpc({
 			const project = projectStore.get(projectId);
 			if (!project) throw new Error(`Project not found: ${projectId}`);
 			const { execFile } = await import("node:child_process");
-			await execFile("git", ["init"], { cwd: project.path });
+			await execFile("git", ["init"], { cwd: projectHostPath(project) });
 			void appLogger.info("git", "Repository initialized", { projectId, path: project.path });
 		},
 	);
@@ -632,7 +689,7 @@ export function registerGitIpc({
 			if (!Array.isArray(paths) || paths.length === 0 || paths.some((p) => typeof p !== "string" || !p)) {
 				throw new Error("Invalid paths");
 			}
-			await gitService.deleteFiles(cwd, paths);
+			await gitService.deleteFiles(cwd, paths.map(hostPath));
 			// 批量删除文件：最高风险操作之一，完整记录路径清单（含数量）便于误删回溯。
 			void appLogger.warn("git", "Files deleted (recycle bin)", { projectId, count: paths.length, paths, repoPath: cwd });
 		},
