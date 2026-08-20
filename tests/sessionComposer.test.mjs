@@ -121,6 +121,8 @@ function createSendHarness(initial = {}) {
     "../composerBehavior": {
       expandPromptTemplates: (message) => ({ message }),
       buildComposerPromptSubmission: (message) => ({ message }),
+      deriveComposerAgentMode: () => "normal",
+      applyDshGoalSendTransform: (submission) => submission,
     },
     "../i18n": { translateI18nDescriptor: (_descriptor, fallback) => fallback },
   });

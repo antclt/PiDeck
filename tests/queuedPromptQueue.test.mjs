@@ -107,21 +107,28 @@ test("pending prompts share the native content width constraint without hiding c
   assert.doesNotMatch(stylesSource, /\.queued-card \{/);
 });
 
-test("compact queue panel exposes retract-to-input and discard only", () => {
+test("compact queue panel exposes retract, discard, and delivery actions", () => {
   const queuedPromptPanel = componentInvocation(sessionRuntimeInjectorSource, "QueuedPromptPanel");
 
   assert.match(queuedPromptPanel, /onRetract=\{services\.queueRetract\}/);
   assert.match(composerPanelsSource, /app\.retractToInput/);
   assert.match(composerPanelsSource, /app\.retractDiscard/);
   assert.match(sessionRuntimeInjectorSource, /onDiscard=\{services\.queueDiscard\}/);
+  assert.match(sessionRuntimeInjectorSource, /onChangeBehavior=\{services\.queueChangeBehavior\}/);
   assert.match(composerPanelsSource, /canRetractQueuedPromptToInput\(status\)/);
   assert.match(composerPanelsSource, /canDiscardQueuedPrompt\(status\)/);
+  assert.match(composerPanelsSource, /canChangeQueuedPromptBehavior\(status\)/);
+  assert.match(composerPanelsSource, /app\.sendSteerTitle/);
+  assert.match(composerPanelsSource, /app\.sendFollowUpTitle/);
+  assert.match(composerPanelsSource, /app\.sendAskTitle/);
   assert.match(appSource, /const activeQueuedPrompts = currentSessionId/);
+  assert.match(appSource, /queueChangeBehavior: queue\.setQueuedPromptBehavior/);
   assert.match(composerPanelsSource, /queued-behavior-\$\{props\.prompt\.behavior\}/);
   assert.match(composerPanelsSource, /max-h-\[180px\]/);
   assert.match(stylesSource, /\.queued-row\.queued-behavior-steer \{/);
   assert.match(stylesSource, /\.queued-row\.queued-behavior-followUp \{/);
   assert.match(queuedPromptHookSource, /QUEUED_PROMPT_LIMIT/);
+  assert.match(queuedPromptHookSource, /setQueuedPromptBehavior/);
   assert.match(i18nSource, /"app\.queuedFull"/);
   assert.doesNotMatch(composerPanelsSource, /app\.queuedRetry/);
   assert.doesNotMatch(composerPanelsSource, /app\.queuedAcknowledge/);
@@ -130,34 +137,22 @@ test("compact queue panel exposes retract-to-input and discard only", () => {
   assert.match(queueStateSource, /export const QUEUED_PROMPT_VISIBLE = 3/);
 });
 
-test("busy composer keeps stop and queued-send controls separate", () => {
+test("busy composer uses one send circle that becomes stop", () => {
   const composerAreaSource = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
   const sendControls = componentInvocation(composerAreaSource, "ComposerSendControls");
 
   assert.match(sendControls, /onSend=\{composer\.delivery\.send\}/);
-  assert.match(sendControls, /onSendSteer=\{composer\.delivery\.steer\}/);
-  assert.match(sendControls, /onSendFollowUp=\{composer\.delivery\.followUp\}/);
-  assert.match(composerPanelsSource, /composer-bar-btn stop/);
-  assert.match(composerPanelsSource, /send-behavior-toggle/);
-  assert.match(composerPanelsSource, /send-behavior-primary/);
-  assert.match(composerPanelsSource, /send-behavior-chevron/);
-  // 发送 toggle 常显：无需输入内容也展示（busy 与否都能并行发送）
-  assert.match(composerPanelsSource, /disabled=\{props\.isAgentStarting \|\| props\.isGeneratingImage \|\| !props\.canSend\}/);
-  // busy 时显示 stop 圆钮
-  assert.match(composerPanelsSource, /\{props\.isAgentBusy \? \(/);
-  // pure official：toggle/menu 样式由 ComposerSendControls Tailwind 承担
-  assert.match(composerPanelsSource, /send-behavior-toggle inline-flex h-8[\s\S]*bg-primary/);
-  assert.match(composerPanelsSource, /send-behavior-menu w-44/);
-  assert.match(composerPanelsSource, /send-behavior-primary[\s\S]*onClick=\{props\.onSend\}/);
-  // 非受控 DropdownMenu：开关由 Radix 管理，点击外部即时关闭（避免受控+延迟关闭卡住菜单）
-  assert.match(composerPanelsSource, /<DropdownMenu>\s*<DropdownMenuTrigger asChild>/);
-  assert.match(composerAreaSource, /onSend=\{composer\.delivery\.send\}/);
-  // 当前回合/下一轮仅在会话进行中显示（隐藏而非置灰）；并行发送始终可用
-  assert.match(composerPanelsSource, /onClick=\{props\.onSendSteer\}/);
-  assert.match(composerPanelsSource, /props\.isAgentBusy && \(\s*<DropdownMenuItem[\s\S]*send-behavior-option steer/);
-  assert.match(composerPanelsSource, /props\.isAgentBusy && \(\s*<DropdownMenuItem[\s\S]*send-behavior-option follow-up/);
-  assert.doesNotMatch(composerPanelsSource, /<span>\{t\("app\.sendSteerDesc"\)\}<\/span>/);
-  assert.match(composerPanelsSource, /send-behavior-option-dot size-1\.5/);
+  assert.match(sendControls, /onStop=\{composer\.delivery\.abort\}/);
+  assert.doesNotMatch(sendControls, /onSendSteer/);
+  assert.doesNotMatch(sendControls, /onSendFollowUp/);
+  assert.doesNotMatch(sendControls, /onSendAsk/);
+  assert.match(composerPanelsSource, /composer-send-primary/);
+  assert.match(composerPanelsSource, /primaryStops \? t\("app\.stop"\) : t\("app\.send"\)/);
+  assert.match(composerPanelsSource, /onClick=\{primaryStops \? props\.onStop : props\.onSend\}/);
+  assert.doesNotMatch(composerPanelsSource, /send-behavior-toggle/);
+  assert.doesNotMatch(composerPanelsSource, /send-behavior-chevron/);
+  assert.doesNotMatch(composerPanelsSource, /<DropdownMenu>/);
+  assert.doesNotMatch(composerPanelsSource, /composer-bar-btn stop/);
 });
 
 test("composer keeps native typing inside the Session feature root", () => {
@@ -171,11 +166,8 @@ test("composer keeps native typing inside the Session feature root", () => {
   assert.match(queuedPromptHookSource, /const currentDraft = store\.get\(sessionDraftByIdAtom\)\[sessionId\] \?\? ""/);
   assert.doesNotMatch(queuedPromptHookSource, /promptByAgent/);
   assert.match(appSource, /livePromptByAgentRef\.current = migrateAgentRecord/);
-  // 行为菜单非常显受控（Radix 内部状态），菜单项在会话进行中条件渲染
-  assert.doesNotMatch(composerPanelsSource, /open=\{\s*props\.sendBehaviorMenuOpen\}/);
-  assert.doesNotMatch(composerPanelsSource, /props\.hasComposerContent && \(\s*<DropdownMenu/);
-  assert.match(composerPanelsSource, /<DropdownMenuItem[\s\S]*send-behavior-option steer/);
-  assert.match(composerPanelsSource, /<DropdownMenuItem[\s\S]*send-behavior-option follow-up/);
+  assert.doesNotMatch(composerControllerSource, /sendBehaviorMenuOpen/);
+  assert.doesNotMatch(composerPanelsSource, /<DropdownMenuItem/);
 });
 
 test("queue drain is serialized and waits for an ordered canonical Session capability event", () => {

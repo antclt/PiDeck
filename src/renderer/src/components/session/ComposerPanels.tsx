@@ -7,14 +7,17 @@ import {
   ListOrdered,
   LoaderCircle,
   Pencil,
+  Split,
   Square,
   X,
   XCircle,
 } from "lucide-react";
 import { useId, useState, type RefObject } from "react";
+import { useAtomValue } from "jotai";
 import type { ImageContent } from "../../../../shared/types";
 import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
 import {
+  canChangeQueuedPromptBehavior,
   canDiscardQueuedPrompt,
   canRetractQueuedPromptToInput,
   discardControlHint,
@@ -22,12 +25,10 @@ import {
 } from "../../utils/queuedPromptQueue";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../ui-shadcn/dropdown-menu";
+import { sessionRecordByIdAtomFamily } from "../../atoms";
+import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selectors";
+import { useAskPanel } from "../../hooks/useAskPanel";
+import { isSessionRuntimeBusy } from "../../hooks/useSessionTimelineController";
 import { ExtensionWidgetCard } from "./ComposerParts";
 
 export function ComposerAttachmentBar(props: {
@@ -116,13 +117,23 @@ function QueuedPromptRow(props: {
   index: number;
   showQueueGlyph: boolean;
   sessionId: string;
+  agentBusy: boolean;
   onRetract: (sessionId: string, prompt: QueuedPromptSnapshot) => void;
   onDiscard: (sessionId: string, promptId: string) => void;
+  onChangeBehavior: (sessionId: string, promptId: string, behavior: "steer" | "followUp") => void;
+  onSendAsk: (prompt: QueuedPromptSnapshot) => void;
 }) {
   const status = props.prompt.status ?? "pending";
   const previewText = props.prompt.displayText.trim() || t("app.queuedImageMessage");
   const retractHint = retractControlHint(status);
   const discardHint = discardControlHint(status);
+  const canChangeBehavior = canChangeQueuedPromptBehavior(status);
+  const isSteer = props.prompt.behavior === "steer";
+  const isFollowUp = props.prompt.behavior === "followUp" || props.prompt.behavior === "direct";
+  // 并行问询只投递纯文本，带图的排队项不能误丢附件。
+  const canAsk = canChangeBehavior
+    && Boolean((props.prompt.message || props.prompt.displayText).trim())
+    && !props.prompt.images?.length;
   const retractTitle = [
     t("app.retractToInput"),
     !retractHint.disabled
@@ -138,14 +149,27 @@ function QueuedPromptRow(props: {
       .filter(Boolean)
       .join("\n")
     : t("app.retractDiscard");
+  const steerTitle = canChangeBehavior
+    ? (props.agentBusy ? t("app.sendSteerTitle") : t("app.queuedSteerUnavailable"))
+    : t("app.queuedBehaviorLocked");
+  const followUpTitle = canChangeBehavior
+    ? t("app.sendFollowUpTitle")
+    : t("app.queuedBehaviorLocked");
+  const askTitle = !canChangeBehavior
+    ? t("app.queuedBehaviorLocked")
+    : props.prompt.images?.length
+      ? t("app.queuedAskUnsupported")
+      : t("app.sendAskTitle");
   const rowTitle = [
     t("app.queuedOrder", { n: props.index + 1 }),
+    isSteer ? t("app.sendSteerTitle") : t("app.sendFollowUpTitle"),
     previewText,
     props.prompt.error,
     status === "unknown" ? t("app.queuedUnknown") : "",
   ]
     .filter(Boolean)
     .join("\n");
+  const actionClass = "size-7 rounded-full text-text-tertiary hover:bg-muted/70 hover:text-foreground";
 
   return (
     <li
@@ -171,8 +195,45 @@ function QueuedPromptRow(props: {
         <span className="shrink-0 font-mono text-micro leading-none text-[var(--color-warning)]">
           {t("app.queuedUnknownShort")}
         </span>
-      ) : null}
+      ) : (
+        <span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">
+          {isSteer ? t("app.queuedBehaviorSteerShort") : t("app.queuedBehaviorFollowUpShort")}
+        </span>
+      )}
       <div className="inline-flex shrink-0 items-center gap-0.5">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className={`${actionClass}${isSteer ? " text-foreground" : ""}`}
+          aria-label={t("app.sendSteerTitle")}
+          title={steerTitle}
+          disabled={!canChangeBehavior || !props.agentBusy}
+          onClick={() => props.onChangeBehavior(props.sessionId, props.prompt.id, "steer")}
+        >
+          <ArrowUp size={14} strokeWidth={2} aria-hidden="true" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className={`${actionClass}${isFollowUp ? " text-foreground" : ""}`}
+          aria-label={t("app.sendFollowUpTitle")}
+          title={followUpTitle}
+          disabled={!canChangeBehavior}
+          onClick={() => props.onChangeBehavior(props.sessionId, props.prompt.id, "followUp")}
+        >
+          <ListOrdered size={14} strokeWidth={2} aria-hidden="true" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className={actionClass}
+          aria-label={t("app.sendAskTitle")}
+          title={askTitle}
+          disabled={!canAsk}
+          onClick={() => props.onSendAsk(props.prompt)}
+        >
+          <Split size={14} strokeWidth={2} aria-hidden="true" />
+        </Button>
         <Button
           variant="ghost"
           size="icon-xs"
@@ -203,7 +264,7 @@ function QueuedPromptRow(props: {
 /**
  * composer 上方的排队消息卡（移植自 dsh-web QueueDock 的独立卡形态）。
  * 与 todo / goal 同列同宽：1 条直接一行；多条默认折叠计数头，展开后 180px 内滚动。
- * 操作仍是 PiDeck 的撤回进输入框 / 丢弃，不引入 dsh 的行内编辑与 steer。
+ * 行内操作：插入当前回合 / 排队下一轮 / 并行发送，以及撤回进输入框 / 丢弃。
  */
 export function QueuedPromptPanel(props: {
   trackRef: RefObject<HTMLDivElement | null>;
@@ -213,13 +274,29 @@ export function QueuedPromptPanel(props: {
   visiblePrompts: QueuedPromptSnapshot[];
   onRetract: (sessionId: string, prompt: QueuedPromptSnapshot) => void;
   onDiscard: (sessionId: string, promptId: string) => void;
+  onChangeBehavior: (sessionId: string, promptId: string, behavior: "steer" | "followUp") => void;
 }) {
   const [collapsed, setCollapsed] = useState(true);
   const listId = useId();
-  if (!props.sessionId || !props.prompts.length) return null;
+  const sessionId = props.sessionId;
+  const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId ?? ""));
+  const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(sessionId ?? ""));
+  const askPanel = useAskPanel();
+  const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
+  if (!sessionId || !props.prompts.length) return null;
 
   const multiple = props.prompts.length > 1;
   const listVisible = !multiple || !collapsed;
+
+  const sendAsk = (prompt: QueuedPromptSnapshot) => {
+    const projectId = sessionRecord?.projectId;
+    const text = prompt.message.trim() || prompt.displayText.trim();
+    if (!projectId || !text) return;
+    // 并行是立刻开独立会话，不再占着当前会话队列；成功后再从排队区拿掉。
+    void askPanel.sendToAsk(projectId, text).then((ok) => {
+      if (ok) props.onDiscard(sessionId, prompt.id);
+    });
+  };
 
   return (
     <section
@@ -258,9 +335,12 @@ export function QueuedPromptPanel(props: {
               prompt={prompt}
               index={index}
               showQueueGlyph={!multiple}
-              sessionId={props.sessionId!}
+              sessionId={sessionId}
+              agentBusy={agentBusy}
               onRetract={props.onRetract}
               onDiscard={props.onDiscard}
+              onChangeBehavior={props.onChangeBehavior}
+              onSendAsk={sendAsk}
             />
           ))}
         </ul>
@@ -300,94 +380,33 @@ export function ComposerSendControls(props: {
   /** 生图进行中：发送按钮显示转圈并禁用（与 busy 区分，不显示停止按钮） */
   isGeneratingImage?: boolean;
   onSend: () => void;
-  /** 显式插入当前回合；DSH 忙碌默认发送是下一轮，不能复用 onSend。 */
-  onSendSteer: () => void;
-  onSendFollowUp: () => void;
-  /** 并行发送：独立匿名会话后台处理（不打断当前输出），始终可选 */
-  onSendAsk: () => void;
   onStop: () => void;
 }) {
+  // dsh-web 同款：一颗蓝圆钮。空闲发送；忙碌同一颗变停止。插入/排队/并行在排队行上选。
+  const primaryStops = props.isAgentBusy && !props.isGeneratingImage;
+  const label = primaryStops ? t("app.stop") : t("app.send");
+  const disabled = primaryStops
+    ? false
+    : props.isAgentStarting || props.isGeneratingImage || !props.canSend;
   return (
     <div className="composer-send-controls flex items-center">
-      <div className="send-behavior-menu-wrap relative flex items-center gap-1.5">
-        {/* 发送按钮 + 行为下拉常显（无需输入内容）：默认点击发送到当前会话，
-            chevron 展开菜单选择发送行为 */}
-        <div className="send-behavior-toggle inline-flex h-8 overflow-hidden rounded-full bg-primary text-primary-foreground">
-          <Button
-            variant="default"
-            size="icon-sm"
-            className="send-behavior-primary size-8 rounded-none shadow-none hover:bg-primary/90"
-            aria-label={t("app.send")} title={t("app.send")}
-            disabled={props.isAgentStarting || props.isGeneratingImage || !props.canSend}
-            onClick={props.onSend}
-          >
-            {props.isGeneratingImage ? (
-              <LoaderCircle size={15} strokeWidth={2.4} className="animate-spin" aria-hidden="true" />
-            ) : (
-              <ArrowUp size={15} strokeWidth={2.4} aria-hidden="true" />
-            )}
-          </Button>
-          {/* 非受控 DropdownMenu：开关状态由 Radix 内部管理，点击外部/选择菜单项后
-              立即关闭，避免受控 + 延迟关闭导致菜单卡住无法收起 */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="default"
-                size="icon"
-                className="send-behavior-chevron h-8 w-5 rounded-none border-l border-primary-foreground/20 p-0 shadow-none hover:bg-primary/90"
-                aria-label={t("app.sendBehaviorTitle")} title={t("app.sendBehaviorTitle")}
-              >
-                <ChevronDown size={12} strokeWidth={2.2} aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              side="top"
-              align="end"
-              sideOffset={8}
-              className="send-behavior-menu w-44"
-            >
-              {/* 当前回合/下一轮仅在会话进行中显示（隐藏而非置灰）；并行发送始终可用 */}
-              {props.isAgentBusy && (
-                <DropdownMenuItem
-                  className="send-behavior-option steer gap-2"
-                  onClick={props.onSendSteer}
-                >
-                  <span className="send-behavior-option-dot size-1.5 rounded-full bg-foreground" aria-hidden="true" />
-                  <span>{t("app.sendSteerTitle")}</span>
-                </DropdownMenuItem>
-              )}
-              {props.isAgentBusy && (
-                <DropdownMenuItem
-                  className="send-behavior-option follow-up gap-2"
-                  onClick={props.onSendFollowUp}
-                >
-                  <span className="send-behavior-option-dot size-1.5 rounded-full bg-muted-foreground" aria-hidden="true" />
-                  <span>{t("app.sendFollowUpTitle")}</span>
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                className="send-behavior-option ask gap-2"
-                title={t("app.sendAskDesc")}
-                onClick={props.onSendAsk}
-              >
-                <span className="send-behavior-option-dot size-1.5 rounded-full bg-primary" aria-hidden="true" />
-                <span>{t("app.sendAskTitle")}</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        {props.isAgentBusy ? (
-          <Button
-            variant="destructive"
-            size="icon-sm"
-            className="composer-bar-btn stop size-8 rounded-full"
-            aria-label={t("app.stop")} title={t("app.stop")}
-            onClick={props.onStop}
-          >
-            <Square size={15} strokeWidth={0} fill="currentColor" aria-hidden="true" />
-          </Button>
-        ) : null}
-      </div>
+      <Button
+        variant="default"
+        size="icon-sm"
+        className="composer-send-primary size-8 rounded-full bg-[var(--color-info)] text-white shadow-none hover:bg-[color:color-mix(in_srgb,var(--color-info)_88%,black)] disabled:opacity-40"
+        aria-label={label}
+        title={label}
+        disabled={disabled}
+        onClick={primaryStops ? props.onStop : props.onSend}
+      >
+        {props.isGeneratingImage ? (
+          <LoaderCircle size={15} strokeWidth={2.4} className="animate-spin" aria-hidden="true" />
+        ) : primaryStops ? (
+          <Square size={13} strokeWidth={0} fill="currentColor" aria-hidden="true" />
+        ) : (
+          <ArrowUp size={15} strokeWidth={2.4} aria-hidden="true" />
+        )}
+      </Button>
     </div>
   );
 }

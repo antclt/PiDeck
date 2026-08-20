@@ -333,46 +333,58 @@ export function ComposerBottomBar(props: {
 							)}
 						</button>
 					) : null}
-					<Button
-						variant="ghost"
-						size="sm"
-						className={`composer-bar-btn mode h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60${isSpecialMode ? " active" : ""}`}
-						disabled={props.disabled}
-						onClick={props.onOpenComposerModePicker}
-						aria-haspopup="dialog"
-						title={t("app.composerModeTitle")}
-					>
-						{isPlanMode ? (
-							<ListChecks size={15} strokeWidth={2} aria-hidden="true" />
-						) : isImageGenMode ? (
-							<ImageIcon size={15} strokeWidth={2} aria-hidden="true" />
-						) : isGoalMode ? (
-							<Target size={15} strokeWidth={2} aria-hidden="true" />
-						) : (
-							<Wrench size={15} strokeWidth={2} aria-hidden="true" />
+					{/* 特殊模式：模式名 + 退出合成一颗 chip，避免旁边再挂一颗大红 ×。 */}
+					<div
+						className={cn(
+							"composer-mode-cluster inline-flex h-7 min-w-0 items-center rounded-md",
+							isSpecialMode && "bg-bg-hover pr-0.5",
 						)}
-						{/* 模式按钮文案：特殊模式不加粗；普通模式用小一号斜体弱化。 */}
-						<span
+					>
+						<Button
+							variant="ghost"
+							size="sm"
 							className={cn(
-								isSpecialMode
-									? "text-control font-normal"
-									: "text-micro italic font-normal text-muted-foreground",
+								"composer-bar-btn mode h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60",
+								isSpecialMode && "hover:bg-transparent",
 							)}
-						>
-							{modeLabel}
-						</span>
-					</Button>
-					{(isPlanMode || isGoalMode) && (
-						<Button variant="ghost" size="icon"
-							className="composer-bar-btn icon mode-cancel size-7 rounded-md"
-							aria-label={isGoalMode ? t("app.composerModeCancelGoal") : t("app.composerModeCancelPlan")}
-							title={isGoalMode ? t("app.composerModeCancelGoal") : t("app.composerModeCancelPlan")}
 							disabled={props.disabled}
-							onClick={props.onCancelPlan}
+							onClick={props.onOpenComposerModePicker}
+							aria-haspopup="dialog"
+							title={t("app.composerModeTitle")}
 						>
-							<X size={14} strokeWidth={2.2} aria-hidden="true" />
+							{isPlanMode ? (
+								<ListChecks size={15} strokeWidth={2} aria-hidden="true" />
+							) : isImageGenMode ? (
+								<ImageIcon size={15} strokeWidth={2} aria-hidden="true" />
+							) : isGoalMode ? (
+								<Target size={15} strokeWidth={2} aria-hidden="true" />
+							) : (
+								<Wrench size={15} strokeWidth={2} aria-hidden="true" />
+							)}
+							{/* 模式按钮文案：特殊模式不加粗；普通模式用小一号斜体弱化。 */}
+							<span
+								className={cn(
+									isSpecialMode
+										? "text-control font-normal"
+										: "text-micro italic font-normal text-muted-foreground",
+								)}
+							>
+								{modeLabel}
+							</span>
 						</Button>
-					)}
+						{(isPlanMode || isGoalMode) && (
+							<button
+								type="button"
+								className="composer-mode-exit mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-text-tertiary transition-[color,background-color] duration-150 hover:bg-bg-active hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+								aria-label={isGoalMode ? t("app.composerModeCancelGoal") : t("app.composerModeCancelPlan")}
+								title={isGoalMode ? t("app.composerModeCancelGoal") : t("app.composerModeCancelPlan")}
+								disabled={props.disabled}
+								onClick={props.onCancelPlan}
+							>
+								<X size={12} strokeWidth={2} aria-hidden="true" />
+							</button>
+						)}
+					</div>
 					<Button variant="ghost" size="icon"
 						className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60"
 						aria-label={t("app.promptTemplatePickerTitle")} title={t("app.promptTemplatePickerTitle")}

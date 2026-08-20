@@ -314,42 +314,31 @@ export const AskQuestionCard = memo(function AskQuestionCard(props: {
 });
 
 /** 思考过程折叠卡片：与 ToolCard 同一套「单行 trigger」语言。
- * 折叠：Brain +「思考了 Xs」+ chevron + 单行预览，全部挤在同一行（不再把预览
- * 放到下方虚线框，避免「思考了」独占一行、预览再占一行的空疏）。
+ * 折叠：Brain +「思考了 Xs」+ chevron + 单行预览，全部挤在同一行。
  * 展开：同一行标题，下方左竖线正文走打字机（useSmoothStream）。
- * 默认：流式中展开打字机；endedAt 出现后强制收成单行，与执行过程一起收束。
- * 用户在流式中手动收起则保持收起（不跟 isStreaming 抢交互）。 */
+ * 默认永远收成单行（对齐 dsh-web ReasoningRow）：流式时单行打字机 + 尾部跟随，
+ * 不自动撑开正文；只有用户点开才展开。流式结束也不强行改用户的展开态。 */
 export const ThinkingBlock = memo(
 	function ThinkingBlock(props: {
 		text: string;
 		startedAt?: number;
 		endedAt?: number;
 		showThinking?: boolean;
-		/** 初始展开：未传时跟 isStreaming——流式默认打字机，历史默认单行 */
+		/** 仅作初始值；未传则收起。流式过程不再用这个开关自动展开。 */
 		defaultExpanded?: boolean;
-		/** 流式进行中：MarkdownStream 以 isStreaming 实时渲染 */
+		/** 流式进行中：MarkdownStream / 单行预览都以 isStreaming 实时渲染 */
 		isStreaming?: boolean;
 		onOpenExternal: (url: string) => void;
 		onOpenFile?: (path: string) => void;
 	}) {
-	const [expanded, setExpanded] = useState(
-		props.defaultExpanded ?? Boolean(props.isStreaming),
-	);
-	// 流式开始 → 展开打字机；思考结束 → 收成单行。
-	// 只在 endedAt / isStreaming 变化时写回，用户中途点收起不会被下一帧冲掉。
-	useEffect(() => {
-		if (props.endedAt) {
-			setExpanded(false);
-			return;
-		}
-		if (props.isStreaming) setExpanded(true);
-	}, [props.endedAt, props.isStreaming]);
-	// 流式思考走打字机，避免大块 thinking_delta 一次糊上屏幕（「咔」一下）
-	// 折叠态 disabled：内容不可见，不启动 rAF 打字机、不订阅流式增量，展开时全文立现。
+	const [expanded, setExpanded] = useState(props.defaultExpanded ?? false);
+	// 折叠行的打字机：流式中始终推进（预览吃 displayedContent + 尾部跟随 = 跑马灯）。
+	// 展开正文由 MarkdownStream 自己打字，这里不能 disabled 跟 expanded 绑——
+	// 用户中途收起时还要接得上单行预览。非流式关掉 rAF，避免历史卡片空转。
 	const { displayedContent } = useSmoothStream({
 		content: props.text,
 		isStreaming: Boolean(props.isStreaming),
-		disabled: !expanded,
+		disabled: !props.isStreaming,
 	});
 
 	if (!props.showThinking || !props.text.trim()) return null;
@@ -409,7 +398,7 @@ export const ThinkingBlock = memo(
 				    展开后正文在下方，行内预览会抢宽度、和打字机重复。 */}
 				{!expanded && (
 					<SingleLinePreview
-						text={props.text}
+						text={displayedContent}
 						running={props.isStreaming}
 						showSweep={false}
 						className="min-w-0 flex-[1_1_auto] font-mono text-micro text-text-tertiary"
@@ -420,7 +409,7 @@ export const ThinkingBlock = memo(
 				<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in slide-in-from-top-1 duration-150">
 					<div className="markdown-body px-0 pt-1 pb-1 text-text-tertiary">
 						<MarkdownStream
-							text={displayedContent}
+							text={props.text}
 							isStreaming={props.isStreaming}
 							onOpenExternal={props.onOpenExternal}
 							onOpenFile={props.onOpenFile}

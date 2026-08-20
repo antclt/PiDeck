@@ -1674,15 +1674,18 @@ body.ask-dialog-open .ask-question-card.pending {
   min-width: 0;
   overflow: visible;
 }
+/* 特殊模式身份条：画在圆角盒内侧，2px 胶囊，避免贴外沿的 3px 实心条
+   在 20px 圆角 + 默认近黑 accent 下看起来像一根粗棍。 */
 .composer-box::before {
   content: "";
   position: absolute;
-  left: -1px;
-  top: 8px;
-  bottom: 40px;
-  width: 3px;
-  border-radius: 0 999px 999px 0;
+  left: 8px;
+  top: 12px;
+  bottom: 48px;
+  width: 2px;
+  border-radius: 999px;
   opacity: 0;
+  pointer-events: none;
   transition:
     opacity 0.14s ease,
     background 0.14s ease;
@@ -1932,20 +1935,39 @@ body.ask-dialog-open .ask-question-card.pending {
   opacity: 1;
 }
 .composer-box.shell-mode::before {
-  background: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 72%, transparent);
 }
 .composer-box.shell-silent-mode::before {
-  background: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 72%, transparent);
 }
 .composer-box.plan-mode::before {
-  background: var(--color-brand-green);
+  background: color-mix(in srgb, var(--color-brand-green) 72%, transparent);
 }
 .composer-box.goal-mode::before {
-  background: var(--color-accent);
+  /* 默认 zinc 主题 accent 近黑：实心会变成粗黑条，混一点透明才像细强调线。 */
+  background: color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
 .composer-box.shell-mode textarea,
-.composer-box.shell-silent-mode textarea {
+.composer-box.shell-silent-mode textarea,
+.composer-box.plan-mode textarea,
+.composer-box.goal-mode textarea {
   padding-left: 18px;
+}
+.composer-box.shell-mode .rich-input,
+.composer-box.shell-silent-mode .rich-input,
+.composer-box.plan-mode .rich-input,
+.composer-box.goal-mode .rich-input,
+.composer-box.shell-mode .ProseMirror,
+.composer-box.shell-silent-mode .ProseMirror,
+.composer-box.plan-mode .ProseMirror,
+.composer-box.goal-mode .ProseMirror {
+  padding-left: 18px;
+}
+.composer-box.shell-mode .rich-input.is-editor-empty::before,
+.composer-box.shell-silent-mode .rich-input.is-editor-empty::before,
+.composer-box.plan-mode .rich-input.is-editor-empty::before,
+.composer-box.goal-mode .rich-input.is-editor-empty::before {
+  left: 18px;
 }
 .composer-box.shell-mode .composer-bottom-bar {
   border-top-color: color-mix(in srgb, var(--color-warning) 20%, transparent);
@@ -2101,13 +2123,6 @@ body.ask-dialog-open .ask-question-card.pending {
   min-width: 0;
   white-space: nowrap;
 }
-.composer-bottom-bar .composer-bar-btn.active {
-  background: var(--color-bg-active);
-  color: var(--color-text-primary);
-}
-.composer-bottom-bar .composer-bar-btn.mode-cancel {
-  color: var(--color-danger);
-}
 .composer-bottom-bar .composer-bar-btn.compacting {
   background: color-mix(in srgb, var(--color-warning) 16%, var(--color-bg-panel));
   color: var(--color-warning);
@@ -2178,76 +2193,6 @@ body.ask-dialog-open .ask-question-card.pending {
   .composer-bottom-left .feishu-link-indicator {
     display: none;
   }
-}
-.send-behavior-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 120;
-  width: 156px;
-  padding: 4px;
-  border: 1px solid color-mix(in srgb, var(--color-border-default) 72%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-bg-panel) 96%, transparent);
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 16%, transparent), 0 2px 6px color-mix(in srgb, #000 8%, transparent);
-  backdrop-filter: blur(12px);
-  animation: send-behavior-menu-in 0.12s ease-out;
-}
-@keyframes send-behavior-menu-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.composer-bottom-bar .send-behavior-menu .send-behavior-option,
-.composer-bottom-bar .send-behavior-menu .send-behavior-option:not(:disabled) {
-  width: 100%;
-  min-width: 0;
-  height: 32px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--color-text-primary);
-  text-align: left;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  font-size: var(--font-size-caption);
-  font-weight: 520;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.composer-bottom-bar .send-behavior-menu .send-behavior-option {
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-}
-.composer-bottom-bar .send-behavior-menu .send-behavior-option:hover,
-.composer-bottom-bar .send-behavior-menu .send-behavior-option:focus-visible {
-  outline: none;
-  background: var(--color-bg-active);
-}
-.composer-bottom-bar .send-behavior-option-dot {
-  flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
-}
-.composer-bottom-bar .send-behavior-option.steer .send-behavior-option-dot {
-  color: var(--color-info);
-  background: var(--color-info);
-}
-.composer-bottom-bar .send-behavior-option.follow-up .send-behavior-option-dot {
-  color: var(--color-warning);
-  background: var(--color-warning);
 }
 /* ---- 命令面板弹框（已迁 Tailwind：PromptSuggestions / SessionHistoryModal）---- */
 

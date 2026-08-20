@@ -47,6 +47,7 @@ export type SessionPaneServices = {
   queuedPromptsBySession: Record<string, QueuedPrompt[]>;
   queueRetract: (sessionId: string, prompt: QueuedPrompt) => void;
   queueDiscard: (sessionId: string, promptId: string) => void;
+  queueChangeBehavior: (sessionId: string, promptId: string, behavior: "steer" | "followUp") => void;
   queueFlushBySessionRef: MutableRefObject<Set<string>>;
   restartingAgentId: string | null;
   sessionDurationByAgent: Record<string, number>;

@@ -16,6 +16,10 @@ const cardsSource = readFileSync(
 	"src/renderer/src/components/session/TimelineEventCards.tsx",
 	"utf8",
 );
+const webTimeline = readFileSync(
+	"src/renderer/src/web/WebTimeline.tsx",
+	"utf8",
+);
 const timelineCss = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 const zhCN = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const enUS = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
@@ -88,21 +92,36 @@ test("thinking.duration 文案中英同步", () => {
 	assert.match(enUS, /"thinking\.duration": "Thought for \{duration\}"/);
 });
 
-test("ThinkingBlock 折叠态把耗时和预览放在同一行，流式默认展开打字机", () => {
+test("ThinkingBlock 折叠态把耗时和预览放在同一行，流式默认单行打字机", () => {
 	const block = cardsSource.match(
 		/function ThinkingBlock[\s\S]*?\n\t\},\n/,
 	)?.[0] ?? "";
 	assert.ok(block, "ThinkingBlock must exist");
-	// 流式默认展开；endedAt 出现后收成单行
-	assert.match(block, /props\.defaultExpanded \?\? Boolean\(props\.isStreaming\)/);
-	assert.match(block, /if \(props\.endedAt\)/);
-	assert.match(block, /if \(props\.isStreaming\) setExpanded\(true\)/);
-	// 折叠预览挂在 trigger 行内，展开才渲染 markdown
+	// 对齐 dsh-web：默认永远收起；流式不 setExpanded(true)，点开才展开正文
+	assert.match(block, /useState\(props\.defaultExpanded \?\? false\)/);
+	assert.doesNotMatch(block, /defaultExpanded \?\? Boolean\(props\.isStreaming\)/);
+	assert.doesNotMatch(block, /if \(props\.isStreaming\) setExpanded\(true\)/);
+	assert.doesNotMatch(block, /if \(props\.endedAt\)/);
+	// 折叠预览吃打字机输出 + 尾部跟随（一行跑马灯）；展开正文走 MarkdownStream 自己的打字机
+	assert.match(block, /disabled: !props\.isStreaming,/);
+	assert.match(block, /<SingleLinePreview[\s\S]*text=\{displayedContent\}/);
+	assert.match(block, /<MarkdownStream[\s\S]*text=\{props\.text\}/);
 	assert.match(block, /!expanded && \(/);
 	assert.match(block, /<SingleLinePreview/);
 	assert.match(block, /showSweep=\{false\}/);
 	assert.match(block, /<ChevronRight/);
 	assert.doesNotMatch(block, /border-dashed/);
+});
+
+test("WebThinkingBlock stays collapsed by default and does not auto-expand while streaming", () => {
+	const block = webTimeline.match(
+		/function WebThinkingBlock[\s\S]*?^\}\);/m,
+	)?.[0] ?? "";
+	assert.ok(block, "WebThinkingBlock must exist");
+	assert.match(block, /useState\(false\)/);
+	assert.doesNotMatch(block, /Boolean\(props\.running\)/);
+	assert.doesNotMatch(block, /if \(props\.running\) setExpanded\(true\)/);
+	assert.match(block, /<SingleLinePreview/);
 });
 
 test("thinking Brain logo uses thinking-row-icon instead of gray text utilities", () => {

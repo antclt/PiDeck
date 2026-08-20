@@ -41,7 +41,7 @@ test("renders the run as order-preserving flat display without pulling the last 
 test("issue #130: fold concerns process steps and interim answers, final answer stays inline", () => {
   // 思考/工具步骤组件独立：思考走 ThinkingBlock（CoT 单步），工具走 ToolGroupCard
   assert.match(thinkingStepSource, /ThinkingBlock/);
-  // 思考默认展开由 ThinkingBlock 按 isStreaming 决定，步骤层不再写死 false
+  // 思考默认收起由 ThinkingBlock 自己决定，步骤层不传 defaultExpanded
   assert.doesNotMatch(thinkingStepSource, /defaultExpanded=/);
   assert.match(toolStepSource, /ToolGroupCard/);
   // 步骤原位渲染，不受「单个折叠容器」限制（避免折叠容器被回答文本打断）
@@ -80,7 +80,7 @@ test("execution summary toggle radius matches other buttons", () => {
 // Chain of Thought 步骤化：执行过程折叠详情里，思考与工具同为「步骤」——
 // 思考默认收起为单步（标题+首句预览），点击才展开全文；概要行带步骤图标。
 test("execution fold renders thinking as collapsed CoT steps", () => {
-  // 步骤层不写死折叠：流式时 ThinkingBlock 默认打字机，结束后自己收成单行
+  // 步骤层不写死折叠：ThinkingBlock 默认单行跑马灯，用户点开才展开
   assert.doesNotMatch(thinkingStepSource, /defaultExpanded=\{false\}/);
   assert.doesNotMatch(thinkingStepSource, /defaultExpanded=/);
 
@@ -89,7 +89,8 @@ test("execution fold renders thinking as collapsed CoT steps", () => {
     "utf8",
   );
   assert.match(cards, /defaultExpanded\?: boolean/);
-  assert.match(cards, /useState\(\s*props\.defaultExpanded \?\? Boolean\(props\.isStreaming\)/);
+  assert.match(cards, /useState\(props\.defaultExpanded \?\? false\)/);
+  assert.doesNotMatch(cards, /if \(props\.isStreaming\) setExpanded\(true\)/);
   // 折叠预览与「思考了 Xs」同一行，不再落到下方虚线框
   assert.match(cards, /!expanded && \(/);
   assert.match(cards, /<SingleLinePreview/);

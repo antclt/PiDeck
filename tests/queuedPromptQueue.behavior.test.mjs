@@ -9,6 +9,7 @@ import {
   canRetractQueuedPromptToInput,
   claimIdleHead,
   claimNextSteerPrompt,
+  canChangeQueuedPromptBehavior,
   claimPrompt,
   discardControlHint,
   enqueuePrompt,
@@ -17,6 +18,7 @@ import {
   retractControlHint,
   retractPrompt,
   retryFailedPrompt,
+  updateQueuedPromptBehavior,
 } from "../src/renderer/src/utils/queuedPromptQueue.ts";
 import { updateActiveToolCalls } from "../src/shared/toolRuntimeState.ts";
 
@@ -121,6 +123,28 @@ test("control hints explain disabled state for retract and discard", () => {
   assert.deepEqual(discardControlHint("pending"), { disabled: false });
   assert.deepEqual(discardControlHint("unknown"), { disabled: false });
   assert.deepEqual(discardControlHint("sending"), { disabled: true, reason: "sending" });
+  assert.equal(canChangeQueuedPromptBehavior("pending"), true);
+  assert.equal(canChangeQueuedPromptBehavior("failed"), true);
+  assert.equal(canChangeQueuedPromptBehavior("sending"), false);
+  assert.equal(canChangeQueuedPromptBehavior("unknown"), false);
+});
+
+test("pending queue items can switch between steer and followUp", () => {
+  let queues = { agentA: [prompt("one", "followUp"), prompt("two", "steer")] };
+  queues = updateQueuedPromptBehavior(queues, "agentA", "one", "steer");
+  assert.equal(queues.agentA[0].behavior, "steer");
+  assert.equal(queues.agentA[1].behavior, "steer");
+
+  const sending = { agentA: [prompt("live", "followUp", "sending")] };
+  assert.deepEqual(
+    updateQueuedPromptBehavior(sending, "agentA", "live", "steer"),
+    sending,
+  );
+  const unknown = { agentA: [prompt("lost", "followUp", "unknown")] };
+  assert.deepEqual(
+    updateQueuedPromptBehavior(unknown, "agentA", "lost", "steer"),
+    unknown,
+  );
 });
 
 test("unknown delivery cannot be reclaimed or retried after a deferred response fails", async () => {

@@ -9,6 +9,7 @@ const controller = readFileSync("src/renderer/src/hooks/useSessionComposerContro
 const builtIns = readFileSync("src/main/extensions/builtInExtensions.ts", "utf8");
 const extension = readFileSync("resources/extensions/pi-deck-goal-mode.ts", "utf8");
 const sendHook = readFileSync("src/renderer/src/hooks/useSessionSend.ts", "utf8");
+const timelineCss = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 
 test("goal mode is a first-class ComposerAgentMode", () => {
 	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "goal"/);
@@ -38,6 +39,21 @@ test("pi goal extension auto-continues until complete, blocked, or max rounds", 
 	assert.match(extension, /triggerTurn: true, deliverAs: "followUp"/);
 	assert.match(extension, /phase: "paused"/);
 	assert.match(extension, /\["clear", "reset"\]/);
+});
+
+test("goal/plan composer chrome uses an inset accent rail and an in-chip exit", () => {
+	// 身份条画在圆角盒内侧：贴外沿的 3px 实心条在默认近黑 accent 下会像一根粗棍。
+	const rail = timelineCss.match(/\.composer-box::before \{[\s\S]*?\n\}/)?.[0] ?? "";
+	assert.match(rail, /left:\s*8px/);
+	assert.match(rail, /width:\s*2px/);
+	assert.match(rail, /border-radius:\s*999px/);
+	assert.doesNotMatch(rail, /left:\s*-1px/);
+	assert.doesNotMatch(rail, /width:\s*3px/);
+	assert.match(timelineCss, /\.composer-box\.goal-mode::before \{[\s\S]*?color-mix\(in srgb, var\(--color-accent\) 55%/);
+	assert.match(composerComponents, /composer-mode-cluster/);
+	assert.match(composerComponents, /composer-mode-exit/);
+	assert.match(composerComponents, /<X size=\{12\}/);
+	assert.doesNotMatch(composerComponents, /mode-cancel/);
 });
 
 test("send path keeps DSH off agentMessage and uses /goal transform", () => {

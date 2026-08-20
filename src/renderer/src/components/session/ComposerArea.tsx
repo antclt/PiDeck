@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useAtom, useAtomValue, useStore } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import {
   ComposerBottomBar,
   ImagePreviewModal,
@@ -18,9 +18,7 @@ import {
 } from "./ComposerPanels";
 import { ComposerPickerHost } from "./ComposerPickerHost";
 import { SecurityControl } from "./SecurityControl";
-import { useAskPanel } from "../../hooks/useAskPanel";
-import { modelPendingByIdAtom, setSessionDraftAtom, thinkingLevelPendingByIdAtom } from "../../atoms/composer-atoms";
-import { sessionRecordByIdAtomFamily } from "../../atoms";
+import { modelPendingByIdAtom, thinkingLevelPendingByIdAtom } from "../../atoms/composer-atoms";
 import { ComposerRuntimeIntegrations } from "./ComposerRuntimeIntegrations";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { desktopApi } from "../../desktopApi";
@@ -184,10 +182,6 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
     onPromoteSession: useSessionPaneServices().promoteSessionToPermanent,
   });
 
-  // 并行问询：复用发送按钮旁的行为菜单（常显），选择「并行发送」时走后台匿名会话
-  const askPanel = useAskPanel();
-  const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));
-  const store = useStore();
   // 流式生成中切换思考强度产生的「待生效」指示（issue #146）：
   // 飞行中的生成仍用旧档位，新档位下一轮才生效；流式一结束就没有“当前生效”参照，直接清除。
   const [thinkingPendingMap, setThinkingPendingMap] = useAtom(thinkingLevelPendingByIdAtom);
@@ -201,14 +195,6 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
     }
   }, [isStreaming, props.sessionId, setThinkingPendingMap, thinkingPendingMap]);
 
-  /** 并行问询发送：消息投递到独立匿名会话（不打断当前输出），并显示结果胶囊；
-   *  点击发送即清空输入框（与正常发送语义一致），失败由胶囊/toast 反馈 */
-  const handleAskSend = async () => {
-    const text = composer.draft.trim();
-    if (!text || !sessionRecord?.projectId) return;
-    store.set(setSessionDraftAtom, { sessionId: props.sessionId, value: "" });
-    await askPanel.sendToAsk(sessionRecord.projectId, text);
-  };
   const prewarmStartedForSessionRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!props.sessionId || !window.piDesktop) return;
@@ -373,9 +359,6 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                     canSend={composer.delivery.canSend}
                     isGeneratingImage={composer.delivery.generatingImage}
                     onSend={composer.delivery.send}
-                    onSendSteer={composer.delivery.steer}
-                    onSendFollowUp={composer.delivery.followUp}
-                    onSendAsk={() => void handleAskSend()}
                     onStop={composer.delivery.abort}
                   />
                 }

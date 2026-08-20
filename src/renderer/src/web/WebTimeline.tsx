@@ -41,17 +41,13 @@ export const WebUserBubble = memo(function WebUserBubble(props: { message: UIMes
 });
 
 /** 思考折叠卡片（复用桌面 ThinkingBlock 视觉：Brain + 耗时/标题 + 同行预览）。
- * 流式默认展开打字机；结束后收成单行（标题 + 首行预览）。 */
+ * 默认永远单行；流式时预览尾部跟随，不自动撑开正文（对齐 dsh-web ReasoningRow）。 */
 export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 	text: string;
-	/** 思考是否仍在流式：控制打字机默认展开与折叠预览的尾部跟随 */
+	/** 思考是否仍在流式：折叠预览尾部跟随，不驱动自动展开 */
 	running?: boolean;
 }) {
-	const [expanded, setExpanded] = useState(Boolean(props.running));
-	useEffect(() => {
-		if (props.running) setExpanded(true);
-		else setExpanded(false);
-	}, [props.running]);
+	const [expanded, setExpanded] = useState(false);
 	if (!props.text.trim()) return null;
 	return (
 		<TimelineMarker kind="thinking" tone={props.running ? "active" : "neutral"} contentClassName="pb-1">

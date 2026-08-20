@@ -205,6 +205,7 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
             visiblePrompts={activeQueuedPrompts}
             onRetract={services.queueRetract}
             onDiscard={services.queueDiscard}
+            onChangeBehavior={services.queueChangeBehavior}
           />
         ) : undefined
       }

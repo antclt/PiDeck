@@ -34,8 +34,7 @@ export const ThinkingStep = memo(function ThinkingStep(props: {
 				endedAt={endedAt}
 				showThinking={props.showThinking}
 				isStreaming={isStreaming}
-				// 不传 defaultExpanded：流式中默认展开打字机，结束后 ThinkingBlock
-				// 自己收成「思考了 Xs + 预览」单行，与工具卡片同一套 trigger 语言。
+				// 不传 defaultExpanded：永远默认单行跑马灯，用户点开才展开正文。
 				onOpenExternal={props.onOpenExternal}
 				onOpenFile={props.onOpenFile}
 			/>

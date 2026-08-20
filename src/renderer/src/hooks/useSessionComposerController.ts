@@ -313,7 +313,6 @@ export function useSessionComposerController(
     );
     return mergePromptHistory(runtimeHistory, sessionHistory);
   }, [sessionId, store]);
-  const sendBehaviorCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastEditorTextEnvelopeRef = useRef("");
   const [cursor, setCursor] = useState(0);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -321,7 +320,6 @@ export function useSessionComposerController(
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [savedDraft, setSavedDraft] = useState("");
   const [busyDraftLocked, setBusyDraftLocked] = useState(false);
-  const [sendBehaviorMenuOpen, setSendBehaviorMenuOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
   // 生图进行中：置 true 时发送按钮禁用（避免并发多次生图），完成后图片进附件栏
   const [generatingImage, setGeneratingImage] = useState(false);
@@ -473,7 +471,6 @@ export function useSessionComposerController(
     setHistoryIndex(-1);
     setSavedDraft("");
     setBusyDraftLocked(false);
-    setSendBehaviorMenuOpen(false);
     // 注意：这里不再写 caretRef。该写入发生在编辑器 layout effect 之后、且 layout
     // effect 只在 value 变化时重跑，会留下一条过期待消费光标——首次输入（打字/
     // 粘贴/语音）时把选区重置回 0。恢复光标到文末由编辑器在内容同步（setContent）
@@ -550,7 +547,6 @@ export function useSessionComposerController(
     setHistoryIndex(-1);
     setSavedDraft("");
     setBusyDraftLocked(false);
-    setSendBehaviorMenuOpen(false);
     setPreviewImage(null);
     setGeneratingImage(false);
     setPicker(null);
@@ -629,12 +625,6 @@ export function useSessionComposerController(
     void loadTemplates();
   }, [loadTemplates, templateKey]);
 
-  useEffect(() => () => {
-    if (sendBehaviorCloseTimerRef.current) {
-      clearTimeout(sendBehaviorCloseTimerRef.current);
-    }
-  }, []);
-
   const flatFiles = useMemo(() => flattenFiles(files), [files]);
   const mergedCommands = useMemo(() => mergeCommands(commands), [commands]);
   const validCommandNames = useMemo(() => new Set([
@@ -699,7 +689,6 @@ export function useSessionComposerController(
     setHistoryIndex(-1);
     setSavedDraft("");
     setSuggestionsOpen(false);
-    setSendBehaviorMenuOpen(false);
     setBusyDraftLocked(false);
     liveDomDraftRef.current = { sessionId, value: "" };
   }, [sessionId]);
@@ -1299,24 +1288,6 @@ export function useSessionComposerController(
     }
   }, [hasContent, isBusy, sessionId]);
 
-  const keepSendBehaviorMenuOpen = useCallback(() => {
-    if (sendBehaviorCloseTimerRef.current) {
-      clearTimeout(sendBehaviorCloseTimerRef.current);
-      sendBehaviorCloseTimerRef.current = null;
-    }
-    setSendBehaviorMenuOpen(true);
-  }, []);
-
-  const scheduleSendBehaviorMenuClose = useCallback(() => {
-    if (sendBehaviorCloseTimerRef.current) {
-      clearTimeout(sendBehaviorCloseTimerRef.current);
-    }
-    sendBehaviorCloseTimerRef.current = setTimeout(() => {
-      setSendBehaviorMenuOpen(false);
-      sendBehaviorCloseTimerRef.current = null;
-    }, 160);
-  }, []);
-
   const abort = useCallback(async () => {
     const target = toSessionRuntimeTarget(sessionId, runtime);
     if (!target) {
@@ -1492,10 +1463,6 @@ export function useSessionComposerController(
       acknowledgeUnknown: acknowledgeUnknownDelivery,
       canSend: hasContent && !isStarting && !generatingImage,
       generatingImage,
-      sendBehaviorMenuOpen,
-      toggleSendBehaviorMenu: () => setSendBehaviorMenuOpen((open) => !open),
-      keepSendBehaviorMenuOpen,
-      scheduleSendBehaviorMenuClose,
     },
     pickers: {
       open: openPicker,

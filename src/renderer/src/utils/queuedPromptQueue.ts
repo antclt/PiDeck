@@ -96,6 +96,28 @@ export function discardControlHint(status?: QueuedPromptStatus): QueueControlHin
   return { disabled: false };
 }
 
+/** 改投递方式（插入/排队）：sending/unknown 已离开关闭窗口，不能再改。 */
+export function canChangeQueuedPromptBehavior(status?: QueuedPromptStatus): boolean {
+  return status !== "sending" && status !== "unknown";
+}
+
+/** 把尚未投递的条目改成插入当前回合或排队到下一轮；非法状态原样返回。 */
+export function updateQueuedPromptBehavior(
+  current: QueuedPromptMap,
+  sessionId: string,
+  promptId: string,
+  behavior: "steer" | "followUp",
+): QueuedPromptMap {
+  return replaceSessionQueue(current, sessionId, (queue) =>
+    queue.map((prompt) => {
+      if (prompt.id !== promptId) return prompt;
+      if (!canChangeQueuedPromptBehavior(prompt.status)) return prompt;
+      if (prompt.behavior === behavior) return prompt;
+      return { ...prompt, behavior };
+    }),
+  );
+}
+
 export function retryFailedPrompt(
   current: QueuedPromptMap,
   sessionId: string,

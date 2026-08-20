@@ -2925,6 +2925,7 @@ export function App() {
       queuedPromptsBySession: queue.queuedPrompts,
       queueRetract: queue.retractQueuedPromptForEdit,
       queueDiscard: queue.discardQueuedPrompt,
+      queueChangeBehavior: queue.setQueuedPromptBehavior,
       queueFlushBySessionRef,
       restartingAgentId,
       sessionDurationByAgent,

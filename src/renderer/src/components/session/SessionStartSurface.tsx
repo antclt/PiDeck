@@ -57,6 +57,7 @@ export function SessionStartSurface(props: {
               visiblePrompts={activeQueuedPrompts}
               onRetract={services.queueRetract}
               onDiscard={services.queueDiscard}
+              onChangeBehavior={services.queueChangeBehavior}
             />
           }
         />

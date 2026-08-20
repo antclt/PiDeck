@@ -19,6 +19,7 @@ import {
   replaceSessionQueue,
   resolveClaimedPrompt,
   retractPrompt,
+  updateQueuedPromptBehavior,
   type QueuedPromptSnapshot,
 } from "../utils/queuedPromptQueue";
 import {
@@ -323,6 +324,22 @@ export function useQueuedPrompt(options: UseQueuedPromptOptions) {
     }
   }
 
+  function setQueuedPromptBehavior(
+    sessionId: string,
+    promptId: string,
+    behavior: "steer" | "followUp",
+  ) {
+    const live = queuedPromptsRef.current[sessionId]?.find((item) => item.id === promptId);
+    if (!live) return;
+    updateQueuedPrompts((current) =>
+      updateQueuedPromptBehavior(current, sessionId, promptId, behavior),
+    );
+    // 改成插入当前回合后，若 agent 仍忙，立刻走 steer flush，不必等下一轮 tool-end。
+    if (behavior === "steer" && isSessionRuntimeBusy(sessionId)) {
+      void flushQueuedSteerPrompts(sessionId);
+    }
+  }
+
   return {
     queuedPrompts,
     setQueuedPrompts,
@@ -334,6 +351,7 @@ export function useQueuedPrompt(options: UseQueuedPromptOptions) {
     retractQueuedPrompt,
     discardQueuedPrompt,
     retractQueuedPromptForEdit,
+    setQueuedPromptBehavior,
     isSessionRuntimeBusy,
     canFlushQueuedPrompt,
     flushQueuedSteerPrompts,
