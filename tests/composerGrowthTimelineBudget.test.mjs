@@ -226,3 +226,41 @@ test("history session loading keeps the bottom composer so the group is never 1-
   assert.equal(twoPanel.terminal, undefined);
   assert.ok(Math.abs(twoPanel.timeline - (100 - 16.494)) < 1e-9);
 });
+
+/**
+ * react-resizable-panels 的 K() 按 Object.values(layout) 下标对齐 DOM 面板顺序，
+ * 不按 id 查表。键插入顺序必须是 timeline → composer → terminal，否则
+ * {composer:16, timeline:84} 会把 16% 分给时间线、84% 分给输入栏——
+ * 表现为消息只占半屏、输入框上方大块空白。
+ */
+function applyLayoutByInsertionOrder(layout, panelIds) {
+  const values = Object.values(layout);
+  const applied = {};
+  for (let i = 0; i < panelIds.length; i++) {
+    applied[panelIds[i]] = values[i];
+  }
+  return applied;
+}
+
+test("sanitized layout key order matches DOM panel order so percentages are not swapped", () => {
+  const { sanitizeSessionPanelLayout } = loadModule();
+
+  const two = sanitizeSessionPanelLayout(
+    { timeline: 83.506, composer: 16.494 },
+    { composer: true, terminal: false },
+  );
+  assert.equal(Object.keys(two).join(","), "timeline,composer");
+  const twoApplied = applyLayoutByInsertionOrder(two, ["timeline", "composer"]);
+  assert.ok(Math.abs(twoApplied.timeline - 83.506) < 1e-9, `timeline got ${twoApplied.timeline}, not 83.506`);
+  assert.ok(Math.abs(twoApplied.composer - 16.494) < 1e-9, `composer got ${twoApplied.composer}, not 16.494`);
+
+  const three = sanitizeSessionPanelLayout(
+    { timeline: 50, composer: 20, terminal: 30 },
+    { composer: true, terminal: true },
+  );
+  assert.equal(Object.keys(three).join(","), "timeline,composer,terminal");
+  const threeApplied = applyLayoutByInsertionOrder(three, ["timeline", "composer", "terminal"]);
+  assert.equal(threeApplied.timeline, 50);
+  assert.equal(threeApplied.composer, 20);
+  assert.equal(threeApplied.terminal, 30);
+});

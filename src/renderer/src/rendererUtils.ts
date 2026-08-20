@@ -59,14 +59,16 @@ export function sanitizeSessionPanelLayout(
 	layout: Record<string, number>,
 	panels: SessionPanelSet,
 ): Record<string, number> {
-	const next: Record<string, number> = {};
-	if (panels.composer && layout.composer !== undefined) {
-		next.composer = layout.composer;
-	}
-	if (panels.terminal && layout.terminal !== undefined) {
-		next.terminal = layout.terminal;
-	}
-	next.timeline = Math.max(0, 100 - (next.composer ?? 0) - (next.terminal ?? 0));
+	const composer = panels.composer ? layout.composer : undefined;
+	const terminal = panels.terminal ? layout.terminal : undefined;
+	// 键插入顺序必须与 DOM 面板顺序一致（timeline → composer → terminal）。
+	// 库 K() 用 Object.values(layout) 按下标对齐面板，不按 id 查表；
+	// 先写 composer 再写 timeline 会把 16% 分给时间线、84% 分给输入栏。
+	const next: Record<string, number> = {
+		timeline: Math.max(0, 100 - (composer ?? 0) - (terminal ?? 0)),
+	};
+	if (composer !== undefined) next.composer = composer;
+	if (terminal !== undefined) next.terminal = terminal;
 	return next;
 }
 
