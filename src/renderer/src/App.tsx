@@ -2472,40 +2472,46 @@ export function App() {
     }
   }
 
-  async function switchBranch(branch: string) {
-    if (!activeProjectId || !branch || branch === gitInfo.current) return;
-    try {
-      const next = await api.git.checkout(activeProjectId, branch);
-      setGitInfo(next);
-      setBranchByProject((prev) => ({ ...prev, [activeProjectId]: next.current }));
-    } catch (error) {
-      showToast(
-        t("app.branchSwitchFailed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      const refreshed = await api.git
-        .branches(activeProjectId)
-        .catch(() => ({ current: null, branches: [] }));
-      setGitInfo(refreshed);
-    }
-  }
+  const switchBranch = useCallback(
+    async (branch: string) => {
+      if (!activeProjectId || !branch || branch === gitInfo.current) return;
+      try {
+        const next = await api.git.checkout(activeProjectId, branch);
+        setGitInfo(next);
+        setBranchByProject((prev) => ({ ...prev, [activeProjectId]: next.current }));
+      } catch (error) {
+        showToast(
+          t("app.branchSwitchFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        const refreshed = await api.git
+          .branches(activeProjectId)
+          .catch(() => ({ current: null, branches: [] }));
+        setGitInfo(refreshed);
+      }
+    },
+    [activeProjectId, gitInfo.current, showToast],
+  );
 
-  async function createBranch(branchName: string) {
-    if (!activeProjectId || !branchName.trim()) return;
-    try {
-      const next = await api.git.createBranch(activeProjectId, branchName);
-      setGitInfo(next);
-      setBranchByProject((prev) => ({ ...prev, [activeProjectId]: next.current }));
-      showToast(t("app.branchCreated", { branch: branchName }), 2500);
-    } catch (error) {
-      showToast(
-        t("app.branchCreateFailed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  }
+  const createBranch = useCallback(
+    async (branchName: string) => {
+      if (!activeProjectId || !branchName.trim()) return;
+      try {
+        const next = await api.git.createBranch(activeProjectId, branchName);
+        setGitInfo(next);
+        setBranchByProject((prev) => ({ ...prev, [activeProjectId]: next.current }));
+        showToast(t("app.branchCreated", { branch: branchName }), 2500);
+      } catch (error) {
+        showToast(
+          t("app.branchCreateFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    },
+    [activeProjectId, showToast],
+  );
 
   function toggleDirectory(path: string) {
     // 文件树默认折叠,只有用户显式展开目录才显示子项,避免大仓库一打开就产生视觉噪音。

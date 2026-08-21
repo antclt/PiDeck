@@ -463,11 +463,21 @@ export function GitPanel(props: GitPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   // “未配置模型”提示的“去设置”按钮：直接打开设置弹窗（Git 段在常用设置 tab）
   const setSettingsOpen = useSetAtom(settingsOpenAtom);
-  const projectIdRef = useRef(props.projectId);
-  projectIdRef.current = props.projectId;
   const repoScopeKey = props.repoScopeKey ?? props.projectId;
   const layout = props.layout ?? "full";
   const paneIdPrefix = useId();
+  // GitDrawerHost 会随外层 App 的流式渲染重跑，并为同一仓库重新创建函数包装器。
+  // 这些 ref 只跟踪最新实现，避免 API 函数身份变化被误判为仓库变化。
+  const projectIdRef = useRef(props.projectId);
+  projectIdRef.current = props.projectId;
+  const repoScopeKeyRef = useRef(repoScopeKey);
+  repoScopeKeyRef.current = repoScopeKey;
+  const getStatusRef = useRef(props.getStatus);
+  getStatusRef.current = props.getStatus;
+  const fetchRef = useRef(props.fetch);
+  fetchRef.current = props.fetch;
+  const aheadBehindRef = useRef(props.aheadBehind);
+  aheadBehindRef.current = props.aheadBehind;
   // historyOnly 没有独立仓库标题；changesOnly 把仓库名并进分支栏，不再额外预留标题高度。
   const panelChromeHeight = layout === "historyOnly"
     ? 0
@@ -475,6 +485,7 @@ export function GitPanel(props: GitPanelProps) {
   const statusRequestRef = useRef(0);
   const statusRunningRequestRef = useRef<{
     projectId: string;
+    repoScopeKey: string;
     request: number;
   } | null>(null);
   const mutationRequestRef = useRef(0);
@@ -618,19 +629,33 @@ export function GitPanel(props: GitPanelProps) {
   /**
    * 刷新 push/pull 角标：先 fetch 远程跟踪引用，再对比本地差距。
    * 静默失败（无远程/离线/非仓库）时保持上次角标，不打扰用户。
+   *
+   * fetch/aheadBehind 通过 ref 读取：GitDrawerHost 的作用域包装器可能随外层
+   * render 重建，但不应因此重新安排 5 分钟计时器。
    */
   const refreshAheadBehind = useCallback(async () => {
-    if (!props.fetch || !props.aheadBehind) return;
+    const fetch = fetchRef.current;
+    const aheadBehind = aheadBehindRef.current;
+    if (!fetch || !aheadBehind) return;
     const projectId = props.projectId;
+    const currentRepoScopeKey = repoScopeKey;
     try {
-      await props.fetch(projectId);
-      if (projectId !== projectIdRef.current) return;
-      const result = await props.aheadBehind(projectId);
-      if (projectId === projectIdRef.current) setAheadBehind(result);
+      await fetch(projectId);
+      if (
+        projectId !== projectIdRef.current ||
+        currentRepoScopeKey !== repoScopeKeyRef.current
+      )
+        return;
+      const result = await aheadBehind(projectId);
+      if (
+        projectId === projectIdRef.current &&
+        currentRepoScopeKey === repoScopeKeyRef.current
+      )
+        setAheadBehind(result);
     } catch {
       // 静默失败：离线/无远程时角标保持上次已知值，不弹错误
     }
-  }, [props.fetch, props.aheadBehind, props.projectId]);
+  }, [props.projectId, repoScopeKey]);
 
   /**
    * 拉取最新 Git 工作区状态。
@@ -644,22 +669,24 @@ export function GitPanel(props: GitPanelProps) {
       if (
         silent &&
         (mutationRunningRef.current ||
-          statusRunningRequestRef.current?.projectId === props.projectId)
+          (statusRunningRequestRef.current?.projectId === props.projectId &&
+            statusRunningRequestRef.current.repoScopeKey === repoScopeKey))
       )
         return;
       const request = ++statusRequestRef.current;
       const projectId = props.projectId;
-      const runningRequest = { projectId, request };
+      const runningRequest = { projectId, repoScopeKey, request };
       statusRunningRequestRef.current = runningRequest;
       if (!silent) {
         setLoading(true);
         setError(null);
       }
       try {
-        const next = await props.getStatus(projectId);
+        const next = await getStatusRef.current(projectId);
         if (
           request === statusRequestRef.current &&
-          projectId === projectIdRef.current
+          projectId === projectIdRef.current &&
+          repoScopeKey === repoScopeKeyRef.current
         ) {
           setGroups(next);
           // 刷新成功说明当前目录可用，恢复仓库/工具标记（手动 git init 或安装 git 后自动恢复轮询）
@@ -671,7 +698,8 @@ export function GitPanel(props: GitPanelProps) {
       } catch (caught) {
         if (
           request === statusRequestRef.current &&
-          projectId === projectIdRef.current
+          projectId === projectIdRef.current &&
+          repoScopeKey === repoScopeKeyRef.current
         ) {
           const msg = errorMessage(caught);
           // 检测"不是 Git 仓库"的错误，展示初始化提示（无论是否静默都要置位，
@@ -699,12 +727,13 @@ export function GitPanel(props: GitPanelProps) {
         if (
           request === statusRequestRef.current &&
           projectId === projectIdRef.current &&
+          repoScopeKey === repoScopeKeyRef.current &&
           !silent
         )
           setLoading(false);
       }
     },
-    [props.getStatus, props.projectId, refreshAheadBehind],
+    [props.projectId, repoScopeKey, refreshAheadBehind],
   );
 
   // 打开 Git drawer 时首次加载；historyOnly 只看 Graph/Compare，不必轮询工作区。
@@ -729,14 +758,16 @@ export function GitPanel(props: GitPanelProps) {
   // 首次 fetch 改走 refresh 成功路径，避免未确认仓库时立刻 spawn `git fetch`。
   // 非 git 仓库 / 未安装 git 时暂停（fetch 同样会 spawn git 报错）。
   useEffect(() => {
-    if (!props.fetch || !props.aheadBehind) return;
+    if (layout === "historyOnly") return;
+    if (!fetchRef.current || !aheadBehindRef.current) return;
     if (notAGitRepo || gitNotInstalled) return;
     const timer = window.setInterval(() => {
       if (notAGitRepo || gitNotInstalled) return;
+      if (!fetchRef.current || !aheadBehindRef.current) return;
       void refreshAheadBehind();
     }, 5 * 60_000);
     return () => window.clearInterval(timer);
-  }, [refreshAheadBehind, props.fetch, props.aheadBehind, notAGitRepo, gitNotInstalled]);
+  }, [layout, refreshAheadBehind, notAGitRepo, gitNotInstalled]);
 
   const toggleResource = (key: keyof typeof resourceOpen) => {
     setResourceOpen((current) => ({ ...current, [key]: !current[key] }));

@@ -19,8 +19,8 @@ test("非 git 仓库 / 未安装 git 时暂停 5 秒状态轮询", () => {
     source.indexOf("refreshAheadBehind", source.indexOf("每 5 秒拉取一次最新工作区状态")),
   );
   assert.match(intervalBlock, /if \(notAGitRepo \|\| gitNotInstalled\) return;/);
-  // interval 依赖包含两个标记：置位后重建闭包，恢复后自动重启
-  assert.match(intervalBlock, /\[refresh, notAGitRepo, gitNotInstalled\]/);
+  // interval 依赖包含刷新回调和两个标记：项目/仓库作用域变化时重建，错误恢复后自动重启
+  assert.match(intervalBlock, /\[layout, refresh, notAGitRepo, gitNotInstalled\]/);
 });
 
 test("非 git 仓库 / 未安装 git 时暂停 5 分钟 fetch 远程轮询", () => {
@@ -31,10 +31,31 @@ test("非 git 仓库 / 未安装 git 时暂停 5 分钟 fetch 远程轮询", () 
   assert.match(fetchBlock, /if \(notAGitRepo \|\| gitNotInstalled\) return;/);
   assert.match(
     fetchBlock,
-    /\[refreshAheadBehind, props\.fetch, props\.aheadBehind, notAGitRepo, gitNotInstalled\]/,
+    /\[layout, refreshAheadBehind, notAGitRepo, gitNotInstalled\]/,
   );
   // 首次挂载不得立刻 fetch：必须等 refresh 成功确认仓库，否则非 git 项目一打开就 git fetch 报 128
   assert.doesNotMatch(fetchBlock, /void refreshAheadBehind\(\);\s*const timer/);
+});
+
+test("外层 render 重新包装 Git API 时不触发额外 status 刷新", () => {
+  const refreshBlock = source.slice(
+    source.indexOf("const refresh = useCallback"),
+    source.indexOf("// 打开 Git drawer 时首次加载"),
+  );
+  // getStatus 通过 ref 读取，refresh 的身份只随项目/仓库作用域变化。
+  assert.match(refreshBlock, /getStatusRef\.current\(projectId\)/);
+  assert.match(refreshBlock, /\[props\.projectId, repoScopeKey, refreshAheadBehind\]/);
+  assert.doesNotMatch(refreshBlock, /props\.getStatus\(projectId\)/);
+});
+
+test("远程角标计时器不依赖每次 render 新建的 fetch 包装器", () => {
+  const fetchBlock = source.slice(
+    source.indexOf("每 5 分钟刷新一次 ahead/behind 角标"),
+    source.indexOf("toggleResource"),
+  );
+  assert.match(fetchBlock, /fetchRef\.current/);
+  assert.match(fetchBlock, /\[layout, refreshAheadBehind, notAGitRepo, gitNotInstalled\]/);
+  assert.doesNotMatch(fetchBlock, /props\.fetch, props\.aheadBehind/);
 });
 
 test("仅非 silent 的 refresh 成功路径才会 fetch 远程", () => {
