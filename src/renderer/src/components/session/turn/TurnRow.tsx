@@ -7,7 +7,7 @@ import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { Collapsible, CollapsibleContent } from "../../ui-shadcn/collapsible";
-import { formatDuration, formatTime, stripAnsi, stripThinkingTags } from "../TimelineFormat";
+import { formatDuration, stripAnsi, stripThinkingTags } from "../TimelineFormat";
 import { LiveDuration } from "../LiveDuration";
 import { CopyMenu, stripMarkdown } from "../SurfaceComponents";
 import { buildTurnDisplay, hasFoldableContent } from "../timeline/buildTurnDisplay";
@@ -21,6 +21,7 @@ import { sameAgentRunForRender } from "../../app/AppUtils";
 import { FinalAnswer } from "./FinalAnswer";
 import { InterimAnswer } from "./InterimAnswer";
 import { ProcessSummaryToggle } from "./ProcessSummaryToggle";
+import { TurnAuthorHeader } from "./TurnAuthorHeader";
 import { ThinkingStep } from "./ThinkingStep";
 import { ToolStep } from "./ToolStep";
 import { TurnFileChanges } from "./TurnFileChanges";
@@ -261,14 +262,9 @@ export const TurnRow = memo(
 			data-message-id={run.id}
 		>
 			<div className="flex min-w-0 flex-col gap-3">
-				{/* 行头：logo 用字号 token（text-brand 18px），随 data-ui-font-size 整体缩放；
-				    时间用 text-body（14px）。耗时不放行头——回复生成时用户视线在底部，
+				{/* 行头：头像 + Pi/DSH 署名 + 时间。耗时不放行头——回复生成时用户视线在底部，
 				    统一显示在 turn 尾部（见底部耗时行），不用翻回开头看跑了多久。 */}
-				<div className="mb-1 inline-flex items-center gap-2 text-muted-foreground tabular-nums">
-					{/* Pi 是默认运行时无需署名；只有 DSH 回复显示短标签，避免每条普通消息重复占位。 */}
-					{props.backend === "dsh" && <span className="shrink-0 font-mono text-brand font-semibold leading-none text-foreground/80">{t("sessionBackend.dsh")}</span>}
-					<time className="shrink-0 font-mono text-body leading-none">{formatTime(run.endedAt)}</time>
-				</div>
+				<TurnAuthorHeader backend={props.backend} endedAt={run.endedAt} />
 
 				{/* 执行过程折叠栏：中间内容（思考/工具/中间回答）统一收进容器，
 				    由 stepsVisible 整体控制显隐；最终回答在容器外常驻。
@@ -472,7 +468,7 @@ turnRowPropsEqual,
  *
  * 比较项：
  * - run：深度比较内容（sameAgentRunForRender），未变化的 run 不重渲染；
- * - 标量 props（fresh/showThinking/isStreaming/liveThinkingId/agentRunning）：=== 比较；
+ * - 标量 props（backend/fresh/showThinking/isStreaming/liveThinkingId/agentRunning）：=== 比较；
  * - 回调函数（onPreviewImage/onOpenExternal/onOpenFile/onDiffFile/onEditMessage/onDeleteMessage/
  *   onEnterMultiSelect）：行为稳定（读 ref/setState），引用变化不影响渲染结果，忽略（同 FinalAnswer 惯例）。
  */
@@ -482,6 +478,7 @@ function turnRowPropsEqual(prev: TurnRowProps, next: TurnRowProps): boolean {
 	if (!sameAgentRunForRender(prev.run, next.run)) return false;
 	return (
 		prev.sessionId === next.sessionId &&
+		prev.backend === next.backend &&
 		prev.fresh === next.fresh &&
 		prev.topFresh === next.topFresh &&
 		prev.showThinking === next.showThinking &&

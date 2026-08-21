@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const turnRow = readFileSync(
+  "src/renderer/src/components/session/turn/TurnRow.tsx",
+  "utf8",
+);
+const header = readFileSync(
+  "src/renderer/src/components/session/turn/TurnAuthorHeader.tsx",
+  "utf8",
+);
+const backendMark = readFileSync(
+  "src/renderer/src/components/session/SessionSourceBadge.tsx",
+  "utf8",
+);
+
+test("TurnRow always mounts a Pi/DSH author header, not DSH-only text", () => {
+  assert.match(turnRow, /<TurnAuthorHeader backend=\{props\.backend\} endedAt=\{run\.endedAt\} \/>/);
+  // 旧策略：Pi 默认不署名、只给 DSH 短标签。时间线行头已改回两边都署名。
+  assert.doesNotMatch(turnRow, /props\.backend === "dsh" &&/);
+  assert.doesNotMatch(turnRow, /sessionBackend\.dsh/);
+});
+
+test("TurnAuthorHeader uses shadcn Avatar plus Pi and DSH identity", () => {
+  assert.match(header, /from "\.\.\/\.\.\/ui-shadcn\/avatar"/);
+  assert.match(header, /<Avatar aria-hidden="true"/);
+  assert.match(header, /<Avatar /);
+  assert.match(header, /<AvatarFallback/);
+  assert.match(header, /<PiLogo/);
+  assert.match(header, /<DshLogo/);
+  assert.match(header, /sessionBackend\.pi/);
+  assert.match(header, /sessionBackend\.dsh/);
+  assert.match(header, /data-turn-author=\{backend\}/);
+  // 缺省按 pi 处理，兼容旧调用方不传 backend
+  assert.match(header, /props\.backend \?\? "pi"/);
+});
+
+test("sidebar SessionBackendMark still hides Pi to avoid list noise", () => {
+  // 侧栏/Tab 降噪策略保持不变：只有非默认后端才打标。
+  assert.match(backendMark, /if \(props\.backend === "dsh"\) return <SessionBackendBadge/);
+  assert.match(backendMark, /return null;/);
+});

@@ -18,6 +18,18 @@ import { t } from "../i18n";
  */
 export const DEFAULT_AGENT_BACKEND: AgentBackend = "pi";
 
+/** 归档 toast 略加长：路径提示比短句更长，2200ms 不够读完。 */
+export const ARCHIVED_SESSION_TOAST_MS = 4500;
+
+/**
+ * 归档成功提示按后端分流。
+ * pi/jsonl 会话恢复入口在项目右键「会话管理」→「已归档」；
+ * DSH 会话不进该弹窗，要去「配置管理」DSH 页的「归档区」。
+ */
+export function archivedSessionToastMessage(session: { backend?: AgentBackend }): string {
+  return session.backend === "dsh" ? t("app.sessionArchivedDsh") : t("app.sessionArchived");
+}
+
 export type RefreshProjectSessions = (
   projectId: string,
   silent?: boolean,
@@ -147,7 +159,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     await api.sessions.archiveRecord(session.id);
     removeSessionState(session.id);
     removeSessionComposerState(session.id);
-    showToast(t("app.sessionArchived"), 2200);
+    showToast(archivedSessionToastMessage(session), ARCHIVED_SESSION_TOAST_MS);
     const projectId = sessionsProjectId ?? activeProjectId;
     if (projectId) await refreshProjectSessions(projectId);
   }

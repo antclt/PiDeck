@@ -112,7 +112,11 @@ import {
   type PendingAgentTab,
 } from "./rendererUtils";
 import { useResize } from "./hooks/useResize";
-import { useSessionActions } from "./hooks/useSessionActions";
+import {
+  ARCHIVED_SESSION_TOAST_MS,
+  archivedSessionToastMessage,
+  useSessionActions,
+} from "./hooks/useSessionActions";
 import { useScratchPad } from "./hooks/useScratchPad";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
@@ -2556,12 +2560,12 @@ export function App() {
     await refreshProjectSessions(projectId);
   }
 
-  /** 归档会话：从列表移除但不销毁文件，可在会话管理弹窗中恢复 */
+  /** 归档会话：从列表移除但不销毁文件；toast 按后端告知恢复入口（pi 走会话管理，DSH 走配置页归档区） */
   async function archiveSidebarSession(projectId: string, session: SessionSummary) {
     await api.sessions.archiveRecord(session.id);
     removeSessionState(session.id);
     removeSessionComposerState(session.id);
-    showToast(t("app.sessionArchived"), 2200);
+    showToast(archivedSessionToastMessage(session), ARCHIVED_SESSION_TOAST_MS);
     await refreshProjectSessions(projectId);
   }
 

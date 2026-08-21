@@ -114,6 +114,8 @@ test("TurnRow uses custom memo compare so unchanged runs skip re-render", () => 
   // 流式 run 总是重渲染（气泡随独立通道更新）；历史 run 走 memo 跳过
   assert.match(turnRowSource, /if \(prev\.isStreaming \|\| next\.isStreaming\) return false;/);
   assert.match(turnRowSource, /prev\.liveThinkingId === next\.liveThinkingId/);
+  // 行头 Pi/DSH 署名随 backend 变化必须重渲染，不能被 memo 吞掉
+  assert.match(turnRowSource, /prev\.backend === next\.backend/);
   // 深度比较入口来自 AppUtils
   assert.match(
     readFileSync("src/renderer/src/components/app/AppUtils.ts", "utf8"),

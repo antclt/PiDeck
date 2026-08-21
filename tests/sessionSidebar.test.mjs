@@ -149,6 +149,8 @@ test("session context menu exposes archive and restores refresh the manager proj
   assert.match(content, /actions\.sessions\.unarchive\(archived, managerProject\.id\)/);
   assert.match(app, /unarchiveSidebarSession\(archivedPath: string, projectId = activeProjectId\)/);
   assert.match(app, /unarchiveSidebarSession\(archived\.filePath, projectId\)/);
+  assert.match(app, /archivedSessionToastMessage\(session\)/);
+  assert.match(app, /ARCHIVED_SESSION_TOAST_MS/);
 });
 
 test("worktree rows expose their child project context menu and loading projects keep a surface", () => {

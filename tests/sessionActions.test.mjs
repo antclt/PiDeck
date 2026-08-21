@@ -252,6 +252,16 @@ test("DSH delete toast no longer claims host data stays mapped", () => {
   assert.match(remove, /app\.sessionDeleted/);
 });
 
+test("archive toast points users at the restore location by backend", () => {
+  assert.match(source, /export function archivedSessionToastMessage/);
+  assert.match(source, /app\.sessionArchivedDsh/);
+  assert.match(source, /app\.sessionArchived/);
+  const archive = functionBlock("archiveHistorySession", "unarchiveHistorySession");
+  assert.match(archive, /archivedSessionToastMessage\(session\)/);
+  assert.match(archive, /ARCHIVED_SESSION_TOAST_MS/);
+  assert.doesNotMatch(archive, /t\("app\.sessionArchived"\)/);
+});
+
 test("copy and export address the Catalog by stable Session ID", () => {
   const copy = functionBlock("copySession", "exportHistorySession");
   const historyExport = functionBlock("exportHistorySession", "deleteHistorySession");
