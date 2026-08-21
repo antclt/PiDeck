@@ -215,7 +215,7 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
   });
 
   test("runs silent refreshes without overlapping slow status requests", () => {
-    assert.match(panel, /const statusRunningRequestRef = useRef<\{\s*projectId: string;\s*request: number;\s*\} \| null>\(null\)/);
+    assert.match(panel, /const statusRunningRequestRef = useRef<\{\s*projectId: string;\s*repoScopeKey: string;\s*request: number;\s*\} \| null>\(null\)/);
     assert.match(panel, /statusRunningRequestRef\.current\?\.projectId === props\.projectId/);
     assert.match(panel, /statusRunningRequestRef\.current = runningRequest/);
     assert.match(panel, /statusRunningRequestRef\.current = null/);

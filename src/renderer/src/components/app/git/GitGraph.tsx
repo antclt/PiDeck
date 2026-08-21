@@ -524,6 +524,9 @@ export function SourceControlGraph(props: GitGraphProps) {
     Record<string, CommitDetailState>
   >({});
   const [hover, setHover] = useState<CommitHoverState | null>(null);
+  // GitDrawerHost 每次外层 render 都会重新包装 commitLog；读取最新函数但不重跑 Graph。
+  const commitLogRef = useRef(props.commitLog);
+  commitLogRef.current = props.commitLog;
   const loadSequence = useRef(0);
   const detailSequence = useRef(0);
   const detailStateRef = useRef<Record<string, CommitDetailState>>({});
@@ -760,7 +763,7 @@ export function SourceControlGraph(props: GitGraphProps) {
     setError(null);
     resetCommitDetails();
     try {
-      const next = await props.commitLog(projectId, {
+      const next = await commitLogRef.current(projectId, {
         maxEntries: loadCount,
         ref: ref || undefined,
         allBranches: !ref,
@@ -775,7 +778,6 @@ export function SourceControlGraph(props: GitGraphProps) {
         setLoading(false);
     }
   }, [
-    props.commitLog,
     props.open,
     props.projectId,
     ref,

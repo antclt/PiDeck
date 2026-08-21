@@ -32,6 +32,16 @@ function loadExpandedProjectsModule() {
   );
 }
 
+function loadPillsModule() {
+  return loadTsModule(
+    "src/renderer/src/sessionFilterPills.ts",
+    "sessionFilterPills.ts",
+    (specifier) => {
+      throw new Error(`Unexpected import: ${specifier}`);
+    },
+  );
+}
+
 function loadControllerModule() {
   return loadTsModule(
     "src/renderer/src/hooks/useSidebarController.ts",
@@ -41,6 +51,7 @@ function loadControllerModule() {
       if (specifier === "jotai") return {};
       if (specifier === "../atoms") return {};
       if (specifier === "../utils/sidebarExpandedProjects") return loadExpandedProjectsModule();
+      if (specifier === "../sessionFilterPills") return loadPillsModule();
       throw new Error(`Unexpected import: ${specifier}`);
     },
   );
@@ -58,6 +69,28 @@ test("source filters preserve all sources until the user narrows a project", () 
   const storage = { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) };
   storage.setItem("pideck-session-source-filter", serializeSidebarSourceFilters({ project: new Set(["pi", "codex"]) }));
   assert.deepEqual([...readSidebarSourceFilters(storage).project], ["pi", "codex"]);
+});
+
+test("sidebar filter attributes DSH sessions by backend, not by their pi source", () => {
+  const { filterSidebarSessions } = loadControllerModule();
+  const sessions = [
+    { id: "pi-1", source: "pi", backend: "pi" },
+    { id: "dsh-1", source: "pi", backend: "dsh" },
+  ];
+  assert.equal(filterSidebarSessions(sessions, new Set(["pi"])).map((s) => s.id).join(","), "pi-1");
+  assert.equal(filterSidebarSessions(sessions, new Set(["dsh"])).map((s) => s.id).join(","), "dsh-1");
+  assert.equal(filterSidebarSessions(sessions, new Set(["pi", "dsh"])).length, 2);
+});
+
+test("legacy v1 filter storage migrates dsh in for projects that included pi", () => {
+  const { readSidebarSourceFilters } = loadControllerModule();
+  const saved = new Map();
+  const storage = { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) };
+  // v1 格式：{ [projectId]: string[] | null }
+  storage.setItem("pideck-session-source-filter", JSON.stringify({ project: ["pi", "codex"] }));
+  assert.deepEqual([...readSidebarSourceFilters(storage).project].sort(), ["codex", "dsh", "pi"]);
+  storage.setItem("pideck-session-source-filter", JSON.stringify({ project: ["codex"] }));
+  assert.deepEqual([...readSidebarSourceFilters(storage).project], ["codex"]);
 });
 
 test("Sidebar controller derives catalog data from canonical atoms without a writable SessionSummary cache", () => {

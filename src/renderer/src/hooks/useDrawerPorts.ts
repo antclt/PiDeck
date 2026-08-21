@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { WorkspaceDrawerPanel } from "./useWorkspacePanels";
+import type { SessionFilterPill } from "../sessionFilterPills";
 import type {
   DrawerGitPort,
   DrawerChromePort,
@@ -38,7 +39,7 @@ interface UseDrawerPortsInput {
   sessionsProjectId: string | undefined;
   files: any[];
   sessions: any[];
-  sessionSourceFilter: Record<string, Set<string> | null>;
+  sessionSourceFilter: Record<string, Set<SessionFilterPill> | null>;
   sessionHistoryLoading: boolean;
   expandedDirs: Set<string>;
   onToggleDirectory: (dir: string) => void;

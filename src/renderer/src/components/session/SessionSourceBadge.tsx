@@ -143,3 +143,25 @@ export function SessionSourceBadge(props: {
     </Badge>
   );
 }
+
+/**
+ * DSH 过滤徽标（来源过滤菜单用）：与 SessionSourceBadge 同款 logo 徽标，
+ * 承载 DSH 品牌鲸鱼；tone 取 DeepSeek 品牌蓝（与其余来源徽标一致的描边风格）。
+ */
+export function DshSourceBadge(props: { className?: string }) {
+  const label = t("sessionBackend.dsh");
+  return (
+    <Badge
+      variant="outline"
+      aria-label={label}
+      title={label}
+      data-source="dsh"
+      className={cn(
+        "size-5 rounded-md p-0 border-sky-300/70 text-sky-700 dark:border-sky-700/70 dark:text-sky-300",
+        props.className,
+      )}
+    >
+      <DshLogo />
+    </Badge>
+  );
+}

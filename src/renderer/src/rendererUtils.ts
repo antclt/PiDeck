@@ -5,6 +5,11 @@ import type {
   AgentTab,
 } from "../../shared/types";
 import { isSameSessionPath } from "./agentListDisplay";
+import {
+  parseSessionFilterState,
+  serializeSessionFilterState,
+  type SessionFilterPill,
+} from "./sessionFilterPills";
 
 // 默认高度只作测量前的首帧占位，测到内容后 hug 回去。
 // 最小高度对齐 composer-box CSS min-height(112)：输入区 + 模式/模型底栏。
@@ -219,34 +224,19 @@ export function formatPiSubagentName(session: SessionSummary) {
   return session.name || "Pi Subagent";
 }
 
-/** 从 localStorage 恢复会话来源过滤配置 */
-export function loadSessionSourceFilter(): Record<string, Set<"pi" | "codex" | "claude" | "opencode"> | null> {
+/** 从 localStorage 恢复会话来源过滤配置（v2 格式，含旧版迁移，见 sessionFilterPills） */
+export function loadSessionSourceFilter(): Record<string, Set<SessionFilterPill> | null> {
   try {
-    const raw = localStorage.getItem("pideck-session-source-filter");
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    const result: Record<string, Set<"pi" | "codex" | "claude" | "opencode"> | null> = {};
-    for (const [key, val] of Object.entries(parsed)) {
-      if (val === null) {
-        result[key] = null;
-      } else if (Array.isArray(val)) {
-        result[key] = new Set(val);
-      }
-    }
-    return result;
+    return parseSessionFilterState(localStorage.getItem("pideck-session-source-filter"));
   } catch {
     return {};
   }
 }
 
-/** 将会话来源过滤持久化到 localStorage */
-export function saveSessionSourceFilter(filter: Record<string, Set<"pi" | "codex" | "claude" | "opencode"> | null>) {
+/** 将会话来源过滤持久化到 localStorage（与侧栏过滤菜单共用同一份配置） */
+export function saveSessionSourceFilter(filter: Record<string, Set<SessionFilterPill> | null>) {
   try {
-    const obj: Record<string, string[] | null> = {};
-    for (const [key, val] of Object.entries(filter)) {
-      obj[key] = val === null ? null : [...val];
-    }
-    localStorage.setItem("pideck-session-source-filter", JSON.stringify(obj));
+    localStorage.setItem("pideck-session-source-filter", serializeSessionFilterState(filter));
   } catch {
     // 静默失败
   }

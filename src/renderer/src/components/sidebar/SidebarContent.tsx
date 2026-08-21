@@ -14,6 +14,7 @@ import {
 import { RpcLogViewer } from "./RpcLogViewer";
 import { SessionProxyDialog } from "../session/SessionProxyDialog";
 import { sessionRecordToSummary } from "../../atoms";
+import { isManagerSessionSummary } from "../../sessionManagerModel";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
 import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController, type SidebarRpcLog } from "../../hooks/useSidebarController";
@@ -61,7 +62,11 @@ export type SidebarActions = {
     /** 恢复归档会话 */
     unarchive: (session: SessionSummary, projectId?: string) => Promise<void>;
     /** 列出已归档会话 */
-    listArchived: () => Promise<SessionSummary[]>;  };
+    listArchived: () => Promise<SessionSummary[]>;
+    /** 恢复 DSH 归档会话（host 目录移回 sessions 树并重建 catalog 记录） */
+    unarchiveDsh: (dshSessionId: string, projectId?: string) => Promise<void>;
+    /** 列出 DSH 归档会话（会话管理弹窗归档视图用） */
+    listArchivedDsh: () => Promise<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>;  };
   agents: {
     rename: (agent: AgentTab) => void;
     export: (agent: AgentTab) => Promise<void>;
@@ -361,10 +366,9 @@ export function SidebarContent(props: SidebarContentProps) {
       )}
       {managerProject && (
         <SessionManagerModal
-          sessions={(controller.catalog.sessionsByProject[managerProject.id] ?? []).flatMap((record) => record.filePath ? [{
-            id: record.id, filePath: record.filePath, name: record.title, preview: record.preview,
-            updatedAt: record.updatedAt, messageCount: record.messageCount, source: record.source,
-          }] : [])}
+          sessions={(controller.catalog.sessionsByProject[managerProject.id] ?? [])
+            .map(sessionRecordToSummary)
+            .filter((summary): summary is SessionSummary => Boolean(summary && isManagerSessionSummary(summary)))}
           onClose={controller.closeSessionManager}
           onRename={(session) => actions.sessions.rename(managerProject.id, session)}
           onExport={(session) => void actions.sessions.export(managerProject.id, session)}
@@ -372,6 +376,8 @@ export function SidebarContent(props: SidebarContentProps) {
           onArchive={(sessions) => Promise.all(sessions.map((session) => actions.sessions.archive(managerProject.id, session))).then(controller.closeSessionManager)}
           onUnarchive={(archived) => actions.sessions.unarchive(archived, managerProject.id)}
           listArchived={actions.sessions.listArchived}
+          onUnarchiveDsh={(dshSessionId) => actions.sessions.unarchiveDsh(dshSessionId, managerProject.id)}
+          listArchivedDsh={actions.sessions.listArchivedDsh}
         />
       )}
       {controller.worktreeCreateProjectId && (

@@ -78,10 +78,13 @@ export type TurnFlowSettings = {
 	expandInterimDuringStream: boolean;
 	/** 新一轮开始时收起上一轮（默认开：发送新消息后收起所有非最新轮，含手动展开的）。 */
 	collapsePrevRunsOnNewTurn: boolean;
+	/** 本轮修改文件列表默认展开（默认开；关闭后每轮仍可手动展开）。 */
+	expandTurnFileChanges: boolean;
 };
 
 export const turnFlowSettingsAtom = atom<TurnFlowSettings>({
 	expandInterimDuringStream: true,
 	collapsePrevRunsOnNewTurn: true,
+	expandTurnFileChanges: true,
 });
 

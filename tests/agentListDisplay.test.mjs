@@ -18,10 +18,15 @@ function loadModule() {
 	vm.runInNewContext(transpile("src/shared/sessionIdentity.ts"), identitySandbox, {
 		filename: "sessionIdentity.ts",
 	});
+	const pillsSandbox = { exports: {} };
+	vm.runInNewContext(transpile("src/renderer/src/sessionFilterPills.ts"), pillsSandbox, {
+		filename: "sessionFilterPills.ts",
+	});
 	const sandbox = {
 		exports: {},
 		require: (specifier) => {
 			if (specifier === "../../shared/sessionIdentity") return identitySandbox.exports;
+			if (specifier === "./sessionFilterPills") return pillsSandbox.exports;
 			throw new Error(`Unexpected import: ${specifier}`);
 		},
 	};
@@ -150,6 +155,28 @@ test("filters runtime rows by their canonical Session origin before falling back
 		sources: new Set(["pi"]),
 	});
 	assert.deepEqual(visible.map((agent) => agent.id), ["pi-runtime", "unlinked-pi"]);
+});
+
+test("unlinked DSH agents match the dsh filter pill instead of their pi source", () => {
+	const { filterAgentsForSidebarDisplay } = loadModule();
+	const agents = [
+		{ id: "dsh-runtime", backend: "dsh", sessionSource: "pi", createdAt: 1, status: "running" },
+		{ id: "pi-runtime", sessionSource: "pi", createdAt: 2, status: "running" },
+	];
+	const onlyPi = filterAgentsForSidebarDisplay({
+		agents,
+		allSessions: [],
+		visibleSessions: [],
+		sources: new Set(["pi"]),
+	});
+	assert.deepEqual(onlyPi.map((agent) => agent.id), ["pi-runtime"]);
+	const onlyDsh = filterAgentsForSidebarDisplay({
+		agents,
+		allSessions: [],
+		visibleSessions: [],
+		sources: new Set(["dsh"]),
+	});
+	assert.deepEqual(onlyDsh.map((agent) => agent.id), ["dsh-runtime"]);
 });
 
 test("preserves WSL path case while deduplicating native paths", () => {

@@ -113,6 +113,7 @@ import {
   stampIdleSessionDuration,
   type PendingAgentTab,
 } from "./rendererUtils";
+import type { SessionFilterPill } from "./sessionFilterPills";
 import { useResize } from "./hooks/useResize";
 import {
   ARCHIVED_SESSION_TOAST_MS,
@@ -306,9 +307,9 @@ export function App() {
     name: string;
   } | null>(null);
   const [renamingFileInput, setRenamingFileInput] = useState("");
-  /** 历史会话来源过滤（按项目）：undefined=显示全部，Record 含项目ID对应 Set */
+  /** 历史会话来源过滤（按项目）：undefined=显示全部，Record 含项目ID对应 Set（含 DSH 类别） */
   const [sessionSourceFilter] = useState<
-  	Record<string, Set<"pi" | "codex" | "claude" | "opencode"> | null>
+  	Record<string, Set<SessionFilterPill> | null>
   >(() => loadSessionSourceFilter());
   /** 编辑器展示模式：弹框或侧栏 */
   // showToast 必须是稳定回调：文件树 / overlay 等 effect 若把它当依赖，
@@ -546,6 +547,8 @@ export function App() {
     // 流式对话行为：默认自动展开中间过程；新一轮默认收起非最新轮（与 SettingsStore 一致）
     expandInterimDuringStream: true,
     collapsePrevRunsOnNewTurn: true,
+    // 本轮修改文件列表默认展开（与 SettingsStore 一致）
+    expandTurnFileChanges: true,
     showDevTools: false,
     developerDiagnostics: false,
     // Electron Chromium 沙箱默认关，与主进程历史兼容策略一致
@@ -608,10 +611,12 @@ export function App() {
     setTurnFlowSettings({
       expandInterimDuringStream: settings.expandInterimDuringStream,
       collapsePrevRunsOnNewTurn: settings.collapsePrevRunsOnNewTurn,
+      expandTurnFileChanges: settings.expandTurnFileChanges,
     });
   }, [
     settings.expandInterimDuringStream,
     settings.collapsePrevRunsOnNewTurn,
+    settings.expandTurnFileChanges,
     setTurnFlowSettings,
   ]);
 
@@ -2344,40 +2349,46 @@ export function App() {
     }
   }
 
-  async function switchBranch(branch: string) {
-    if (!activeProjectId || !branch || branch === gitInfo.current) return;
-    try {
-      const next = await api.git.checkout(activeProjectId, branch);
-      setGitInfo(next);
-      setBranchByProject((prev) => ({ ...prev, [activeProjectId]: next.current }));
-    } catch (error) {
-      showToast(
-        t("app.branchSwitchFailed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      const refreshed = await api.git
-        .branches(activeProjectId)
-        .catch(() => ({ current: null, branches: [] }));
-      setGitInfo(refreshed);
-    }
-  }
+  const switchBranch = useCallback(
+    async (branch: string) => {
+      if (!activeProjectId || !branch || branch === gitInfo.current) return;
+      try {
+        const next = await api.git.checkout(activeProjectId, branch);
+        setGitInfo(next);
+        setBranchByProject((prev) => ({ ...prev, [activeProjectId]: next.current }));
+      } catch (error) {
+        showToast(
+          t("app.branchSwitchFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        const refreshed = await api.git
+          .branches(activeProjectId)
+          .catch(() => ({ current: null, branches: [] }));
+        setGitInfo(refreshed);
+      }
+    },
+    [activeProjectId, gitInfo.current, showToast],
+  );
 
-  async function createBranch(branchName: string) {
-    if (!activeProjectId || !branchName.trim()) return;
-    try {
-      const next = await api.git.createBranch(activeProjectId, branchName);
-      setGitInfo(next);
-      setBranchByProject((prev) => ({ ...prev, [activeProjectId]: next.current }));
-      showToast(t("app.branchCreated", { branch: branchName }), 2500);
-    } catch (error) {
-      showToast(
-        t("app.branchCreateFailed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  }
+  const createBranch = useCallback(
+    async (branchName: string) => {
+      if (!activeProjectId || !branchName.trim()) return;
+      try {
+        const next = await api.git.createBranch(activeProjectId, branchName);
+        setGitInfo(next);
+        setBranchByProject((prev) => ({ ...prev, [activeProjectId]: next.current }));
+        showToast(t("app.branchCreated", { branch: branchName }), 2500);
+      } catch (error) {
+        showToast(
+          t("app.branchCreateFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    },
+    [activeProjectId, showToast],
+  );
 
   function toggleDirectory(path: string) {
     // 文件树默认折叠,只有用户显式展开目录才显示子项,避免大仓库一打开就产生视觉噪音。
@@ -2454,9 +2465,22 @@ export function App() {
     if (projectId) await refreshProjectSessions(projectId);
   }
 
+  /** 恢复 DSH 归档会话：host 目录移回 sessions 树并由主进程重建 catalog 记录 */
+  async function unarchiveDshSidebarSession(dshSessionId: string, projectId = activeProjectId) {
+    await api.sessions.unarchiveDshSession(dshSessionId);
+    showToast(t("app.sessionRestored"), 2200);
+    // 恢复目标项目由主进程按 manifest 的 cwd 决定；刷新当前弹窗项目即可让 catalog 快照更新。
+    if (projectId) await refreshProjectSessions(projectId);
+  }
+
   /** 列出已归档会话（会话管理弹窗恢复视图用） */
   function listArchivedSidebarSessions() {
     return api.sessions.listArchived();
+  }
+
+  /** 列出 DSH 归档会话（会话管理弹窗归档视图用；与 pi 归档合并展示） */
+  function listArchivedDshSidebarSessions() {
+    return api.sessions.listArchivedDshSessions();
   }
 
   function requestDeleteSidebarSession(projectId: string, session: SessionSummary) {
@@ -2609,6 +2633,10 @@ export function App() {
         await unarchiveSidebarSession(archived.filePath, projectId);
       },
       listArchived: () => listArchivedSidebarSessions(),
+      unarchiveDsh: async (dshSessionId, projectId) => {
+        await unarchiveDshSidebarSession(dshSessionId, projectId);
+      },
+      listArchivedDsh: () => listArchivedDshSidebarSessions(),
     },
     agents: {
       rename: rename.openAgentRename,
