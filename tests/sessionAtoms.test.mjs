@@ -34,9 +34,11 @@ function compileModule(filePath, imports = {}) {
 function loadAtoms() {
   const runtimeState = compileModule("src/renderer/src/utils/agentRuntimeState.ts");
   const sessionRecordIdentity = compileModule("src/renderer/src/utils/sessionRecordIdentity.ts");
+  const liveTextHandoff = compileModule("src/renderer/src/utils/liveTextHandoff.ts");
   const sessions = compileModule("src/renderer/src/atoms/session-atoms.ts", {
     "../utils/agentRuntimeState": runtimeState,
     "../utils/sessionRecordIdentity": sessionRecordIdentity,
+    "../utils/liveTextHandoff": liveTextHandoff,
   });
   const composer = compileModule("src/renderer/src/atoms/composer-atoms.ts", {
     "./session-atoms": sessions,
@@ -137,6 +139,31 @@ test("does not let a stale disk write clobber a live runtime cache", () => {
   assert.equal(
     store.get(atoms.sessionMessagesCacheAtom)["session-a"].messages[0].text,
     "live",
+  );
+});
+
+test("force disk write replaces a live runtime cache after history mutation", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  store.set(atoms.cacheSessionMessagesAtom, {
+    sessionId: "session-a",
+    messages: [
+      { id: "runtime-1", role: "user", text: "old" },
+      { id: "runtime-2", role: "assistant", text: "live" },
+    ],
+    source: "runtime",
+  });
+  const applied = store.set(atoms.cacheSessionMessagesAtom, {
+    sessionId: "session-a",
+    messages: [{ id: "disk", role: "user", text: "edited" }],
+    source: "disk",
+    expectedRevision: 0,
+    force: true,
+  });
+  assert.equal(applied, true);
+  assert.equal(
+    store.get(atoms.sessionMessagesCacheAtom)["session-a"].messages[0].text,
+    "edited",
   );
 });
 

@@ -21,7 +21,8 @@ export type ProviderCredentials = {
  * - 请求响应格式固定为 b64_json（结果直接进时间线，不依赖下载通道）；
  *   服务端仅支持 url 时回退下载并转 base64。
  * - extraParams 决定请求体是否带 size / output_format / watermark。
- * - 失败只回结构化错误码（ImageGenErrorCode），文案由渲染层 i18n 映射。
+ * - 失败回结构化错误码（ImageGenErrorCode）+ detail：detail 带 HTTP 状态码和厂商错误正文
+ *   （已脱敏、截断），文案由渲染层 i18n 映射。
  */
 export class ImageGenService {
 	constructor(private deps: {
@@ -70,7 +71,8 @@ export class ImageGenService {
 				},
 			);
 			if (!response.ok) {
-				this.deps.log("imagegen", "generate failed", { status: response.status });
+				const detail = await readHttpErrorDetail(response);
+				this.deps.log("imagegen", "generate failed", { status: response.status, detail });
 				return {
 					ok: false,
 					error: response.status === 401 || response.status === 403
@@ -78,7 +80,7 @@ export class ImageGenService {
 						: response.status === 404 || response.status === 405
 							? "badBaseUrl"
 							: "http",
-					detail: String(response.status),
+					detail,
 				};
 			}
 			const payload = (await response.json()) as {
@@ -113,6 +115,107 @@ export class ImageGenService {
 			return { ok: false, error: "network" };
 		}
 	}
+}
+
+/** 读取失败响应体上限：避免把超大 HTML 错误页塞进 IPC。 */
+const IMAGE_GEN_ERROR_BODY_LIMIT = 4000;
+/** 回传渲染层的 detail 上限（状态码 + 厂商文案）。 */
+const IMAGE_GEN_ERROR_DETAIL_LIMIT = 800;
+
+/**
+ * 从厂商非 2xx 响应里抽出可读 detail。
+ * 业务规则：用户要看到拒绝原因（审核、尺寸、额度），不能只回 HTTP 状态码；
+ * 同时不能把 API Key / 超长 HTML 原样丢进时间线。
+ */
+async function readHttpErrorDetail(response: {
+	status: number;
+	text: () => Promise<string>;
+}): Promise<string> {
+	let body = "";
+	try {
+		body = await response.text();
+	} catch {
+		body = "";
+	}
+	if (body.length > IMAGE_GEN_ERROR_BODY_LIMIT) {
+		body = body.slice(0, IMAGE_GEN_ERROR_BODY_LIMIT);
+	}
+	const vendor = redactSecrets(extractVendorErrorText(body)).trim();
+	if (!vendor) return String(response.status);
+	const combined = `${response.status}: ${vendor}`;
+	return combined.length > IMAGE_GEN_ERROR_DETAIL_LIMIT
+		? `${combined.slice(0, IMAGE_GEN_ERROR_DETAIL_LIMIT)}…`
+		: combined;
+}
+
+function extractVendorErrorText(raw: string): string {
+	const trimmed = raw.trim();
+	if (!trimmed) return "";
+	try {
+		const parsed: unknown = JSON.parse(trimmed);
+		return collectVendorErrorPieces(parsed).join(" · ");
+	} catch {
+		// 非 JSON（HTML/纯文本）时压成单行，避免把整页错误 HTML 铺进气泡。
+		return trimmed.replace(/\s+/g, " ");
+	}
+}
+
+function collectVendorErrorPieces(value: unknown): string[] {
+	if (typeof value === "string") {
+		const text = value.trim();
+		return text ? [text] : [];
+	}
+	if (typeof value !== "object" || value === null) return [];
+	const pieces: string[] = [];
+	const errorField = Reflect.get(value, "error");
+	if (typeof errorField === "string") {
+		pushIfText(pieces, errorField);
+	} else if (typeof errorField === "object" && errorField !== null) {
+		pushIfText(pieces, Reflect.get(errorField, "message"));
+		pushIfText(pieces, Reflect.get(errorField, "msg"));
+		pushIfText(pieces, Reflect.get(errorField, "code"));
+		pushIfText(pieces, Reflect.get(errorField, "type"));
+	}
+	pushIfText(pieces, Reflect.get(value, "message"));
+	pushIfText(pieces, Reflect.get(value, "msg"));
+	pushIfText(pieces, Reflect.get(value, "code"));
+	// Gemini 等会把补充原因放在 details[]
+	const details = Reflect.get(value, "details");
+	if (Array.isArray(details)) {
+		for (const item of details) {
+			if (typeof item === "string") {
+				pushIfText(pieces, item);
+				continue;
+			}
+			if (typeof item === "object" && item !== null) {
+				pushIfText(pieces, Reflect.get(item, "message"));
+				pushIfText(pieces, Reflect.get(item, "reason"));
+			}
+		}
+	}
+	return uniquePreserve(pieces);
+}
+
+function pushIfText(out: string[], value: unknown): void {
+	if (typeof value === "string" && value.trim()) out.push(value.trim());
+}
+
+function uniquePreserve(items: string[]): string[] {
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const item of items) {
+		if (seen.has(item)) continue;
+		seen.add(item);
+		out.push(item);
+	}
+	return out;
+}
+
+/** 错误正文里偶发夹带 key，回传前打码，避免进时间线/日志。 */
+function redactSecrets(text: string): string {
+	return text
+		.replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***")
+		.replace(/(api[_-]?key|authorization|bearer)\s*[:=]\s*["']?[^"'\s,]+/gi, "$1=***");
 }
 
 /**

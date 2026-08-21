@@ -49,9 +49,11 @@ import { resolveTerminalOwner, terminalOwnerKey } from "./terminalDockState";
 import { useImportFlow } from "./hooks/useImportFlow";
 import { useQueuedPrompt } from "./hooks/useQueuedPrompt";
 import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
+import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
 import { PromptDeliveryUnknownError } from "./utils/promptErrors";
 import {
   requireSessionCommand,
+  sessionCommandFailureToast,
   toSessionRuntimeTarget,
 } from "./utils/sessionCommands";
 import {
@@ -2187,33 +2189,6 @@ export function App() {
     }
   }
 
-  /** 重发防重复：通过 messageId 锁避免同一消息多次重发。
-   *  锁会在 agent 状态切回 idle 时自动清除（下方 useEffect），超时 30s 兜底释放。 */
-  const resendingIdsRef = useRef<Set<string>>(new Set());
-
-  function resendUserMessage(message: ChatMessage) {
-    if (!activeAgentId || message.agentId !== activeAgentId) return;
-    if (resendingIdsRef.current.has(message.id)) return;
-    resendingIdsRef.current.add(message.id);
-    // 30 秒兜底释放，防止锁泄漏
-    setTimeout(() => resendingIdsRef.current.delete(message.id), 30_000);
-
-    const target = getRuntimeTargetForAgent(activeAgentId);
-    if (!target || !currentSessionId) return;
-    // Resend mutates the persisted branch first, then submits the exact returned snapshot.
-    void api.sessions.prepareRuntimeResend(target, message.id)
-      .then((result) => requireSessionCommand(result).value)
-      .then((snapshot) => submitPromptSnapshot(currentSessionId, snapshot.text, snapshot.images))
-      .catch((error) => showToast(error instanceof Error ? error.message : String(error), 5000));
-  }
-
-  /** agent 切回 idle 时释放所有重发锁，允许下次正常重发。 */
-  useEffect(() => {
-    if (activeAgent?.status !== "running" && activeAgent?.status !== "starting") {
-      resendingIdsRef.current.clear();
-    }
-  }, [activeAgent?.status]);
-
   /** 将主进程抛出的错误消息中的 BUSY_ 前缀码转为前端多语言文案 */
   function translateAgentErrorMessage(msg: string): string {
     if (msg.startsWith("BUSY_STREAMING:")) return t("message.busyStreaming");
@@ -2223,135 +2198,37 @@ export function App() {
   }
 
   /**
-   * 编辑消息：修改 JSONL + 重载会话。用户已点击「编辑 + 保存」两步操作，意图明确，不额外弹框确认。
+   * pi 历史消息改写：无 runtime 直接改 JSONL；有 runtime 先确认停止再改文件。
+   * DSH 入口在 Injector 按 backend 隐藏。下次发送才重新激活 Agent。
    */
-  async function editMessage(messageId: string, newText: string) {
-    if (!activeAgentId) return;
-    try {
-      const target = getRuntimeTargetForAgent(activeAgentId);
-      if (!target) return;
-      requireSessionCommand(await api.sessions.editRuntimeMessage(target, messageId, newText));
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      showToast(`${t("message.editFailed")}: ${translateAgentErrorMessage(msg)}`, 5000);
-    }
-  }
-
-  /**
-   * 删除消息：从 JSONL 移除 + 重载会话。使用统一的自定义 ConfirmDialog。
-   */
-  function deleteMessage(messageId: string) {
-    if (!activeAgentId) return;
-    overlays.showConfirm({
-      title: t("message.deleteTitle"),
-      message: t("message.deleteReloadPrompt"),
-      danger: true,
-      confirmLabel: t("common.delete"),
-      onConfirm: async () => {
-        overlays.clearConfirm();
-        try {
-          const target = getRuntimeTargetForAgent(activeAgentId);
-          if (!target) return;
-          requireSessionCommand(await api.sessions.deleteRuntimeMessage(target, messageId));
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          showToast(`${t("message.deleteFailed")}: ${translateAgentErrorMessage(msg)}`, 5000);
-        }
-      },
-    });
-  }
-
-  /** 正在 fork 的用户消息 id；用于按钮 loading，避免连点重复 fork。 */
-  const [forkingMessageId, setForkingMessageId] = useState<string | null>(null);
-
-  /**
-   * 解析用户消息对应的 pi session entryId。
-   * 优先 meta.entryId；其次 id 里的 history 片段；再回退 get_fork_messages 按正文匹配。
-   */
-  async function resolveForkEntryId(
-    agentId: string,
-    message: ChatMessage,
-  ): Promise<string | undefined> {
-    if (typeof message.meta?.entryId === "string" && message.meta.entryId) {
-      return message.meta.entryId;
-    }
-    const historyPrefix = `${agentId}-history-`;
-    if (message.id.startsWith(historyPrefix)) {
-      const fromId = message.id.slice(historyPrefix.length).trim();
-      if (fromId && fromId !== String(message.meta?._piDeckMsgSeq ?? "")) {
-        // 纯数字序号是无 entryId 时的 index 回退，不能当 fork entryId。
-        if (!/^\d+$/.test(fromId)) return fromId;
-      }
-    }
-    try {
-      const target = getRuntimeTargetForAgent(agentId);
-      if (!target) return undefined;
-      const forkMessages = requireSessionCommand(
-        await api.sessions.getRuntimeForkMessages(target),
-      ).value;
-      const targetText = message.text.trim();
-      if (!targetText) return undefined;
-      // 相同文案多条时取最后一次，贴近用户点的“当前这句”。
-      for (let i = forkMessages.length - 1; i >= 0; i -= 1) {
-        const item = forkMessages[i];
-        if (item?.entryId && item.text?.trim() === targetText) return item.entryId;
-      }
-    } catch {
-      // getForkMessages 失败时交给上层 toast
-    }
-    return undefined;
-  }
-
-  /**
-   * 从用户消息 fork 新会话（pi /fork）。
-   * 忙碌中不展示入口；点击时再解析 entryId（meta 缺失时走 getForkMessages 回退）。
-   * 成功后主进程把 Agent 换绑到新 SessionRecord；这里必须切焦点并登记常驻 Tab，
-   * 否则 Tab 栏仍停在原会话，runtime 已在新 id 上，点 Tab 会对不上。
-   */
-  async function forkFromUserMessage(message: ChatMessage) {
-    if (!activeAgentId || isAgentCurrentlyBusy()) return;
-    if (forkingMessageId) return;
-    setForkingMessageId(message.id);
-    try {
-      const entryId = await resolveForkEntryId(activeAgentId, message);
-      if (!entryId) {
-        showToast(t("app.forkMissingEntryId"), 4000);
-        return;
-      }
-      const target = getRuntimeTargetForAgent(activeAgentId);
-      if (!target) return;
-      const result = requireSessionCommand(
-        await api.sessions.forkRuntimeSession(target, entryId),
-      );
-      if (result.cancelled) {
-        showToast(t("app.forkCancelled"), 3500);
-        return;
-      }
-      const promptText =
-        typeof result.text === "string" && result.text.length > 0
-          ? result.text
-          : message.text;
-      const projectId =
-        agents.find((agent) => agent.id === activeAgentId)?.projectId ?? activeProjectId;
-      const targetSessionId = result.targetSessionId;
-      await openReplacedRuntimeSession(projectId, targetSessionId);
-      // 草稿必须写到新会话。selectSession 的 setState 还没刷 ref，
-      // 先改 currentSessionIdRef，后面的 user-message-edit 才不会写回旧会话。
-      const draftTarget =
-        targetSessionId ?? currentSessionIdRef.current ?? activeAgentIdRef.current;
-      if (targetSessionId) currentSessionIdRef.current = targetSessionId;
-      if (draftTarget) setPromptForAgent(draftTarget, promptText);
-      window.dispatchEvent(
-        new CustomEvent("user-message-edit", { detail: { text: promptText } }),
-      );
-      showToast(t("app.forkDone"), 3500);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      showToast(t("app.forkFailed", { error: translateAgentErrorMessage(msg) }), 5000);
-    } finally {
-      setForkingMessageId(null);
-    }
-  }
+  const {
+    editMessage,
+    deleteMessage,
+    resendUserMessage,
+    forkFromUserMessage,
+    forkingMessageId,
+  } = useSessionHistoryMutations({
+    currentSessionId,
+    getRuntimeTargetForSession,
+    getRuntimeTargetForAgent,
+    showConfirm: overlays.showConfirm,
+    clearConfirm: overlays.clearConfirm,
+    showToast,
+    translateAgentErrorMessage,
+    submitPromptSnapshot,
+    openReplacedRuntimeSession,
+    setPromptForAgent,
+    setCurrentSessionIdRef: (sessionId) => {
+      currentSessionIdRef.current = sessionId;
+    },
+    isAgentCurrentlyBusy,
+    resolveProjectId: (sessionId) =>
+      getSessionRecord(sessionId)?.projectId ?? activeProjectId,
+    hasPersistedSessionFile: (sessionId) => {
+      const record = getSessionRecord(sessionId);
+      return Boolean(record?.filePath) && !record?.noSession;
+    },
+  });
 
 
   /**

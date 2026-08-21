@@ -3238,6 +3238,8 @@ app.whenReady().then(async () => {
 			sessionRuntimeCoordinator.setRuntimeModel(target, provider, modelId),
 		setSessionRuntimeThinking: (target, level) =>
 			sessionRuntimeCoordinator.setRuntimeThinking(target, level),
+		setSessionRuntimePermission: (target, preset) =>
+			sessionRuntimeCoordinator.setRuntimePermission(target, preset),
 		cloneSessionRuntime: async (target) => {
 			const validated = sessionRuntimeCoordinator.validateTarget(target);
 			if (!validated.ok) return validated;

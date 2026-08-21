@@ -60,8 +60,33 @@ function loadAgentManager() {
       if (specifier === "./messageContent") return { extractMessageText: () => "" };
       if (specifier === "./historyMessages") return { mergeHistoryWithPreservedMessages: (messages) => messages };
       if (specifier === "./agentSessionIdentity") return { buildAgentSessionKey: () => undefined };
+      if (specifier === "./extensionStartupFallback") {
+        return {
+          formatExtensionFallbackDebug: () => "",
+          shouldRetryWithoutExtensions: () => false,
+        };
+      }
+      if (specifier === "./extensionError") {
+        return { formatExtensionErrorReason: () => "" };
+      }
       if (specifier === "./SessionFileEditor") return { SessionFileEditor: class {} };
-      if (specifier === "./SessionHistoryReader") return { SessionHistoryReader: class {} };
+      if (specifier === "./SessionHistoryReader") {
+        return {
+          SessionHistoryReader: class {
+            async getActiveLeafId() {
+              return "file-leaf";
+            }
+            async readMessageByMessageId(_sessionPath, messageId) {
+              return {
+                entryId: "a1",
+                role: "user",
+                text: "answer",
+                messageId,
+              };
+            }
+          },
+        };
+      }
       if (specifier === "./AgentMessageProjector") {
         return {
           AgentMessageProjector: class {},
@@ -169,6 +194,19 @@ function createHarness(editor, options = {}) {
   return { manager, runtime, commands, loads };
 }
 
+test("edit/delete/resend leaf lookup uses the session file, not get_entries", () => {
+  const source = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+  const start = source.indexOf("private async getActiveSessionLeafId(");
+  const end = source.indexOf("private createSessionEntryTarget(");
+  assert.ok(start >= 0 && end > start, "getActiveSessionLeafId slice must be non-empty");
+  const fn = source.slice(start, end);
+  // 历史会话展示与定位必须同口径：JSONL leaf 优先，RPC 只在无文件时兜底。
+  assert.match(fn, /sessionHistoryReader\.getActiveLeafId/);
+  const rpcIndex = fn.indexOf('type: "get_entries"');
+  const fileIndex = fn.indexOf("getActiveLeafId");
+  assert.ok(fileIndex >= 0 && rpcIndex > fileIndex, "file leaf must be attempted before get_entries");
+});
+
 test("AgentManager validates idle state before invoking SessionFileEditor", async () => {
   let called = false;
   const editor = {
@@ -207,9 +245,12 @@ test("AgentManager passes file, active leaf and legacy identity, then loads mess
   assert.equal(received.target.entryId, "a1");
   assert.equal(received.target.legacyMessageId, "agent-1-history-a1");
   assert.equal(received.target.legacyAgentId, "agent-1");
-  assert.equal(received.target.activeLeafId, "a1");
+  // 有会话文件时 leaf 必须走 JSONL 索引，禁止 get_entries：RPC leaf 可能不在文件里，
+  // 编辑器会报「活动分支已不在文件中」，用户只看到泛化「会话操作失败」。
+  assert.equal(received.target.activeLeafId, "file-leaf");
   assert.equal(received.newText, "changed");
-  assert.deepEqual(commands.map((command) => command.type), ["get_entries", "switch_session"]);
+  assert.deepEqual(commands.map((command) => command.type), ["switch_session"]);
+  assert.equal(commands.some((command) => command.type === "get_entries"), false);
   assert.deepEqual(loads, ["agent-1"]);
 });
 
@@ -267,4 +308,58 @@ test("delete, resend and public reload all route through the injected editor and
   assert.equal(resend.images.length, 1);
   assert.equal(commands.filter((command) => command.type === "switch_session").length, 3);
   assert.deepEqual(loads, ["agent-1", "agent-1", "agent-1"]);
+});
+
+test("mutatePersistedSessionMessage writes the file without switch_session when idle", async () => {
+  const received = [];
+  const editor = {
+    editMessage: async (input) => { received.push(["edit", input]); },
+    deleteMessage: async (input) => { received.push(["delete", input]); },
+    truncateForResend: async (input) => { received.push(["resend", input]); },
+  };
+  const { manager, commands } = createHarness(editor);
+  manager.agents.clear();
+  await manager.mutatePersistedSessionMessage(
+    "C:/sessions/session.jsonl",
+    "agent-1-history-a1",
+    "edit",
+    { newText: "changed" },
+  );
+  await manager.mutatePersistedSessionMessage(
+    "C:/sessions/session.jsonl",
+    "agent-1-history-a1",
+    "delete",
+  );
+  const draft = await manager.mutatePersistedSessionMessage(
+    "C:/sessions/session.jsonl",
+    "agent-1-history-a1",
+    "resend",
+  );
+  assert.equal(received.length, 3);
+  assert.equal(received[0][0], "edit");
+  assert.equal(received[0][1].newText, "changed");
+  assert.equal(received[0][1].target.entryId, "a1");
+  assert.equal(received[0][1].target.activeLeafId, "file-leaf");
+  assert.equal(received[1][0], "delete");
+  assert.equal(received[2][0], "resend");
+  assert.equal(draft.text, "answer");
+  assert.equal(commands.filter((command) => command.type === "switch_session").length, 0);
+});
+
+test("mutatePersistedSessionMessage refuses a live runtime", async () => {
+  let called = false;
+  const editor = {
+    editMessage: async () => { called = true; },
+  };
+  const { manager } = createHarness(editor, { status: "idle" });
+  await assert.rejects(
+    manager.mutatePersistedSessionMessage(
+      "C:/sessions/session.jsonl",
+      "agent-1-history-a1",
+      "edit",
+      { newText: "changed" },
+    ),
+    /BUSY_GENERIC/,
+  );
+  assert.equal(called, false);
 });

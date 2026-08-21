@@ -54,6 +54,7 @@ import { SessionStartSurface } from "./SessionStartSurface";
 import { MessageScroller } from "../agents/message-scroller";
 import { resolveFreshTailIds } from "../../lib/pinTurnScroll";
 import { chatContentWidthStyle } from "./chatContentWidth";
+import { useSessionVisionBridgeExpected } from "../../hooks/useSessionVisionBridgeExpected";
 import {
   selectTimelineTurnWindow,
   shouldWindowTimelineTurns,
@@ -610,6 +611,12 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     };
   }, [controller, displayRuns, followingForTurnWindow, timelineRef, turnWindowActive, turnWindowTurns]);
   // 文件修改展示已下沉到每轮 TurnRow 底部（TurnFileChanges），此处不再做全局汇总
+  // 时间线里已有用户图片才解析模型目录：原生看图时气泡不能显示视觉桥「转换中」。
+  const hasUserImages = useMemo(
+    () => activeMessages.some((message) => message.role === "user" && Boolean(message.images?.length)),
+    [activeMessages],
+  );
+  const visionBridgeExpected = useSessionVisionBridgeExpected(sessionId, hasUserImages);
   const lastUserMessageId = useMemo(() => {
     for (let index = activeMessages.length - 1; index >= 0; index -= 1) {
       if (activeMessages[index].role === "user") {
@@ -930,6 +937,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     validCommandNames={props.validCommandNames}
                     validFilePaths={props.validFilePaths}
                     onEnterMultiSelect={() => setMultiSelectOpen(true)}
+                    visionBridgeExpected={visionBridgeExpected}
                   />
                 );
               }

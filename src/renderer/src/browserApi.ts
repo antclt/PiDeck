@@ -261,6 +261,19 @@ export function createBrowserApi(): PiDesktopApi {
 					`/api/sessions/${encodeURIComponent(sessionId)}/messages/page${suffix}`,
 				);
 			},
+			// Web 端没有 catalog 文件改写通道；编辑/删除/重发仍走 runtime 命令。
+			editCatalogMessage: async () => ({
+				ok: false as const,
+				error: { code: "SESSION_COMMAND_FAILED" as const, debugDetails: "catalog message mutation is desktop-only" },
+			}),
+			deleteCatalogMessage: async () => ({
+				ok: false as const,
+				error: { code: "SESSION_COMMAND_FAILED" as const, debugDetails: "catalog message mutation is desktop-only" },
+			}),
+			prepareCatalogResend: async () => ({
+				ok: false as const,
+				error: { code: "SESSION_COMMAND_FAILED" as const, debugDetails: "catalog message mutation is desktop-only" },
+			}),
 			readProcessEvents: async () => [],
 			readReferenceMessages: async (sessionId) => {
 				const result = await request<{
@@ -321,6 +334,8 @@ export function createBrowserApi(): PiDesktopApi {
 				sessionRuntimeCommand(target, "model", { provider, modelId }),
 			setRuntimeThinking: (target, level) =>
 				sessionRuntimeCommand(target, "thinking", { level }),
+			setRuntimePermission: (target, preset) =>
+				sessionRuntimeCommand(target, "permission", { preset }),
 			cloneRuntime: (target) => sessionRuntimeCommand(target, "clone"),
 			getRuntimeForkMessages: (target) =>
 				sessionRuntimeCommand(target, "get-fork-messages"),

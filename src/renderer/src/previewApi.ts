@@ -456,6 +456,9 @@ export function createPreviewApi(): PiDesktopApi {
 			exportRecordHtml: async () => ({ path: "preview-session.html" }),
 			readRecordMessages: async () => [],
 			readRecordMessagePage: async () => ({ messages: [], total: 0, nextBefore: null }),
+			editCatalogMessage: async () => ({ ok: true as const, value: undefined }),
+			deleteCatalogMessage: async () => ({ ok: true as const, value: undefined }),
+			prepareCatalogResend: async () => ({ ok: true as const, value: { text: "" } }),
 			readProcessEvents: async () => [],
 			readDshSystemPrompt: async () => undefined,
 			readMessageFullText: async () => ({ text: "" }),
@@ -568,6 +571,10 @@ export function createPreviewApi(): PiDesktopApi {
 				value: { target, value: {} },
 			}),
 			setRuntimeThinking: async (target) => ({
+				ok: true,
+				value: { target, value: {} },
+			}),
+			setRuntimePermission: async (target) => ({
 				ok: true,
 				value: { target, value: {} },
 			}),

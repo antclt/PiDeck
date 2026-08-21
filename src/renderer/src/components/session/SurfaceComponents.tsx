@@ -803,6 +803,12 @@ export const UserBubble = memo(function UserBubble(props: {
 	forking?: boolean;
 	/** 打开多选分享弹框 */
 	onEnterMultiSelect?: () => void;
+	/**
+	 * 本会话发图时视觉桥是否会真正跑。
+	 * false = 模型已支持看图 / DSH 不跑 pi 扩展；null = 模型目录尚未解析。
+	 * 未传时保持旧行为（只看视觉桥开关），避免单测/Web 嵌入漏传。
+	 */
+	visionBridgeExpected?: boolean | null;
 }) {
 	const { message } = props;
 	// 空闲时始终展示 fork 入口；entryId 解析放到点击时做（meta 缺失时走 getForkMessages 回退）。
@@ -875,11 +881,25 @@ export const UserBubble = memo(function UserBubble(props: {
 	// 用户才能直观看到「走了视觉桥」以及转换结果/失败原因，而不是一段方括号文本。
 	const vision = extractVisionBridgeBlocks(stripAnsi(message.text));
 	const visionBlocks = vision.blocks;
-	// 先读取开关再轮询事件文件：视觉桥关闭或模型原生支持图片时，不能把普通图片消息误显示为“转换中”。
-	// 配置读取是异步的，null 表示尚未确认，期间保持静默而不是乐观显示动画。
+	// 先读取开关再轮询事件文件：视觉桥关闭、DSH、或当前模型已勾选图片能力时，
+	// 不能把普通图片消息误显示为“转换中”。配置/模型目录都是异步的，
+	// null 表示尚未确认，期间保持静默而不是乐观显示动画。
 	useEffect(() => {
 		const images = message.images ?? [];
-		if (images.length === 0 || visionBlocks.length > 0 || !imageHashes || imageHashes.length === 0) {
+		if (
+			props.visionBridgeExpected === false ||
+			images.length === 0 ||
+			visionBlocks.length > 0 ||
+			!imageHashes ||
+			imageHashes.length === 0
+		) {
+			setVisionBridgeEnabled(false);
+			setVisionPolling(false);
+			return;
+		}
+		if (props.visionBridgeExpected === null) {
+			setVisionBridgeEnabled(null);
+			setVisionPolling(false);
 			return;
 		}
 		let cancelled = false;
@@ -891,13 +911,14 @@ export const UserBubble = memo(function UserBubble(props: {
 		return () => {
 			cancelled = true;
 		};
-	}, [imageHashes, message.images, visionBlocks.length]);
+	}, [imageHashes, message.images, visionBlocks.length, props.visionBridgeExpected]);
 
 	// 发送后短窗口内轮询事件文件（0/700/1800/3200ms），命中即渲染实时卡片，超时静默放弃。
 	// 依赖 visionBlocks.length：历史消息文本里已有标记块时走文本卡片，不再轮询。
 	useEffect(() => {
 		const images = message.images ?? [];
 		if (visionBridgeEnabled !== true || images.length === 0 || visionBlocks.length > 0 || !imageHashes || imageHashes.length === 0) {
+			setVisionPolling(false);
 			return;
 		}
 		let cancelled = false;

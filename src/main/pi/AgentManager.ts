@@ -2350,13 +2350,30 @@ export class AgentManager {
 	}
 
 	/**
-	 * A current Pi leaf constrains every locator, including explicit entry IDs.
-	 * If the RPC is unavailable, SessionFileEditor falls back to the last valid leaf.
+	 * 定位编辑/删除/重发时用的活动分支 leaf。
+	 * 有会话文件时与 loadMessages 一致走 JSONL 索引：历史会话展示的就是文件活动分支，
+	 * get_entries 的 leaf 可能跟文件不一致（陌生 leaf 会让 SessionFileEditor 报
+	 * 「分支不在文件里」，用户只看到泛化「会话操作失败」），
+	 * 且大会话会把整棵 entry 树打成单行 JSON 冻窗。
+	 * 无文件时才回退 RPC；RPC 失败则让 SessionFileEditor 用文件末条 leaf。
 	 */
 	private async getActiveSessionLeafId(
 		agentId: string,
 		runtime: AgentRuntime,
 	): Promise<string | undefined> {
+		const sessionPath = runtime.tab.sessionPath;
+		if (sessionPath) {
+			try {
+				const leafId = await this.sessionHistoryReader.getActiveLeafId(sessionPath);
+				return typeof leafId === "string" && leafId ? leafId : undefined;
+			} catch (error) {
+				void this.appLogger?.warn("agent", "Session file leaf lookup failed", {
+					agentId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				return undefined;
+			}
+		}
 		try {
 			const response = await runtime.process.client.request(
 				{ type: "get_entries" },
@@ -2628,6 +2645,80 @@ export class AgentManager {
 	 * - 无 runtime（生图不依赖 Agent）时：直接落盘，下次激活由 pi 读文件自然吸收。
 	 * reload 失败不阻断落盘（文件已原子写成功），仅记日志——pi 重读失败不影响磁盘记录。
 	 */
+	/**
+	 * 无 runtime 时改 pi 会话 JSONL（编辑 / 删除 / 重发截断）。
+	 * 有运行中 Agent 时禁止走这里：内存树和文件会分叉，必须先停再改。
+	 * reload 空操作，下次发送激活时由 pi 读文件吸收。
+	 */
+	async mutatePersistedSessionMessage(
+		sessionPath: string,
+		messageId: string,
+		operation: "edit" | "delete" | "resend",
+		options?: {
+			newText?: string;
+			environment?: SessionEnvironment;
+			wslDistro?: string;
+		},
+	): Promise<{ text: string; images?: ImageContent[] } | undefined> {
+		const hostPath = this.toSessionHostPath(sessionPath);
+		const live = [...this.agents.values()].find(
+			(candidate) => candidate.tab.sessionPath &&
+				this.toSessionHostPath(candidate.tab.sessionPath) === hostPath,
+		);
+		// 边界防御：协调器已要求先停；这里再拦一次，避免漏调 stop 时静默写文件。
+		if (live && live.tab.status !== "closed" && live.tab.status !== "error") {
+			throw new Error("BUSY_GENERIC: Stop the running agent before mutating the session file");
+		}
+		const environment = options?.environment === "wsl" || this.wslEnvironment
+			? "wsl" as const
+			: "native" as const;
+		const file: SessionFileRef = {
+			protocolPath: this.toSessionProtocolPath(sessionPath),
+			hostPath,
+			environment,
+			wslDistro: options?.wslDistro ?? (environment === "wsl" ? this.wslEnvironment?.distro : undefined),
+		};
+		const activeLeafId = await this.sessionHistoryReader.getActiveLeafId(sessionPath).catch(() => undefined);
+		const located = await this.sessionHistoryReader.readMessageByMessageId(sessionPath, messageId);
+		if (!located) throw new Error("Message not found");
+		const role: "user" | "assistant" = located.role === "user" ? "user" : "assistant";
+		if (operation === "resend" && role !== "user") {
+			throw new Error("Only user messages can be resent");
+		}
+		const target: SessionEntryTarget = {
+			entryId: located.entryId,
+			legacyMessageId: messageId,
+			legacyAgentId: "_viewer",
+			role,
+			text: located.text,
+			activeLeafId,
+		};
+		const reload = async () => undefined;
+		if (operation === "edit") {
+			await this.sessionFileEditor.editMessage({
+				file,
+				target,
+				newText: options?.newText ?? "",
+				reload,
+			});
+		} else if (operation === "delete") {
+			await this.sessionFileEditor.deleteMessage({ file, target, reload });
+		} else {
+			await this.sessionFileEditor.truncateForResend({ file, target, reload });
+		}
+		void this.appLogger?.info("agent", "Persisted session message mutated", {
+			sessionPath,
+			messageId,
+			operation,
+		});
+		return operation === "resend"
+			? {
+				text: located.text,
+				...(located.images?.length ? { images: located.images } : {}),
+			}
+			: undefined;
+	}
+
 	async appendLocalMessagesToSession(
 		sessionPath: string,
 		entries: import("./SessionFileEditor").AppendMessageEntry[],

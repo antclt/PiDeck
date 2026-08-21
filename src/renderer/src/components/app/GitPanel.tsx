@@ -10,7 +10,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { useSetAtom } from "jotai";
+import { useAtom, useSetAtom } from "jotai";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -50,7 +50,14 @@ import type {
   GitResourceGroups,
 } from "../../../../shared/types";
 import { GitStatus } from "../../../../shared/types";
-import { openSettingsAtom } from "../../atoms";
+import {
+  EMPTY_GIT_COMMIT_COMPOSER,
+  gitCommitComposerByScopeAtom,
+  gitCommitScopeKey,
+  openSettingsAtom,
+  patchGitCommitComposer,
+  type GitCommitComposerState,
+} from "../../atoms";
 import { t } from "../../i18n";
 import {
   fileNameOnly,
@@ -63,8 +70,44 @@ import { GitCompactFilter, PaneHeader } from "./git/GitPanelControls";
 import { SourceControlGraph } from "./git/GitGraph";
 import { getViewportBoundMenuPlacement } from "./git/floatingMenuPosition";
 import { Input } from "../ui-shadcn/input";
+import { Progress } from "../ui-shadcn/progress";
 import { Textarea } from "../ui-shadcn/textarea";
 import { Label } from "../../components/ui-shadcn/label";
+
+/** 与主进程 quickGenerate 60s 上限对齐：面板进度条按此时长爬升，避免用户误以为卡住。 */
+const COMMIT_GEN_TIMEOUT_MS = 60_000;
+
+/** 错误 toast 必须有正文：showNotice 会丢掉空串，失败就会看起来像“没反应”。 */
+function commitGenNoticeText(message: string | undefined, fallback: string) {
+  const text = String(message ?? "").trim();
+  return text || fallback;
+}
+
+/** 按仓库锁生成：切项目不能清组件 ref，否则旧请求还在飞、新仓库又会被误拦。 */
+const inflightCommitGenScopes = new Set<string>();
+
+function commitGenToastId(scopeKey: string): NoticeId {
+  return `git-commit-gen:${scopeKey}`;
+}
+
+function showCommitGenProgressToast(scopeKey: string) {
+  // 稳定 id：切走再回来是更新同一条，而不是再堆一条；面板卸载后 finish 也能按 id 关掉。
+  showNotice(
+    t("git.generateCommitMessageProgress"),
+    Number.POSITIVE_INFINITY,
+    undefined,
+    undefined,
+    undefined,
+    commitGenToastId(scopeKey),
+  );
+}
+
+/** 生成结束：解锁、收进度 toast、把结果写回该仓库的 composer（与当前正在看哪个项目无关）。 */
+function finishCommitGen(scopeKey: string, patch: Partial<GitCommitComposerState> = {}) {
+  inflightCommitGenScopes.delete(scopeKey);
+  dismissNotice(commitGenToastId(scopeKey));
+  patchGitCommitComposer(scopeKey, { generating: false, startedAt: undefined, ...patch });
+}
 
 type GitPanelProps = {
   projectId: string;
@@ -466,6 +509,21 @@ export function GitPanel(props: GitPanelProps) {
   const projectIdRef = useRef(props.projectId);
   projectIdRef.current = props.projectId;
   const repoScopeKey = props.repoScopeKey ?? props.projectId;
+  const composerScopeKey = gitCommitScopeKey(props.projectId, repoScopeKey);
+  const [composerByScope, setComposerByScope] = useAtom(gitCommitComposerByScopeAtom);
+  const composer = composerByScope[composerScopeKey] ?? EMPTY_GIT_COMMIT_COMPOSER;
+  const commitMessage = composer.message;
+  const commitGenLoading = composer.generating;
+  const setCommitMessage = useCallback(
+    (value: string | ((current: string) => string)) => {
+      setComposerByScope((all) => {
+        const prev = all[composerScopeKey] ?? EMPTY_GIT_COMMIT_COMPOSER;
+        const message = typeof value === "function" ? value(prev.message) : value;
+        return { ...all, [composerScopeKey]: { ...prev, message } };
+      });
+    },
+    [composerScopeKey, setComposerByScope],
+  );
   const layout = props.layout ?? "full";
   const paneIdPrefix = useId();
   // historyOnly 没有独立仓库标题；changesOnly 把仓库名并进分支栏，不再额外预留标题高度。
@@ -483,7 +541,6 @@ export function GitPanel(props: GitPanelProps) {
   const [groups, setGroups] = useState<GitResourceGroups>(EMPTY_GROUPS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [commitMessage, setCommitMessage] = useState("");
   const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
   /** 右键“粘贴”在光标处插入文本：受控组件用 setRangeText 不触发 onChange，
    *  手动拼 next 值 + 恢复光标位置（rAF 等重渲染后再定位） */
@@ -530,10 +587,6 @@ export function GitPanel(props: GitPanelProps) {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   /** 当前分支相对上游的提交差距：ahead 显示在 push、behind 显示在 pull */
   const [aheadBehind, setAheadBehind] = useState<GitAheadBehind | null>(null);
-  /** 提交摘要生成互斥：ref 同步防抖，连点不发出第二个请求（主进程另有 genBusy 兜底） */
-  const commitGenRequestRef = useRef(false);
-  /** 进行中的“正在生成提交信息”进度 toast id，结束时收起 */
-  const commitGenProgressRef = useRef<NoticeId | undefined>(undefined);
   const [resourceOpen, setResourceOpen] = useState({
     merge: true,
     staged: true,
@@ -576,7 +629,6 @@ export function GitPanel(props: GitPanelProps) {
     });
     setGroups(EMPTY_GROUPS);
     setError(null);
-    setCommitMessage("");
     setCommitting(false);
     mutationRunningRef.current = false;
     setMutating(false);
@@ -587,11 +639,7 @@ export function GitPanel(props: GitPanelProps) {
     setDiscardTarget(null);
     setDeleteTarget(null);
     setAheadBehind(null);
-    // 项目切换：复位摘要生成状态；进行中的旧请求结果带 projectId 校验，不会写入新项目
-    setCommitGenLoading(false);
-    commitGenRequestRef.current = false;
-    dismissNotice(commitGenProgressRef.current);
-    commitGenProgressRef.current = undefined;
+    // 提交框草稿和 AI 生成态按仓库存在 atom 里：切项目只清本面板的 status，不能打断旧仓库还在飞的生成。
     setNotAGitRepo(false);
     setGitNotInstalled(false);
   }, [layout, panelChromeHeight, props.projectId, repoScopeKey]);
@@ -875,8 +923,9 @@ export function GitPanel(props: GitPanelProps) {
         if (paths.length > 0) await props.stageFiles(projectId, paths);
       }
       await props.commit(projectId, message);
+      // 提交成功清的是该仓库草稿，哪怕用户已经切到别的项目。
+      patchGitCommitComposer(gitCommitScopeKey(projectId, repoScopeKey), { message: "" });
       if (projectId !== projectIdRef.current) return;
-      setCommitMessage("");
       await refresh();
     } catch (caught) {
       if (projectId === projectIdRef.current) setError(errorMessage(caught));
@@ -947,10 +996,10 @@ export function GitPanel(props: GitPanelProps) {
 
   /**
    * 生成提交摘要（AI）。
-   * - 防抖：ref 互斥，进行中/连点直接忽略，杜绝启动第二个 agent 导致内存暴涨
-   * - 进度：生成期间展示持久 toast，结束统一收起
+   * - 防抖：按仓库 scope 互斥；切项目不能清锁，否则旧请求还在飞、新仓库又会被误拦
+   * - 进度：粘性 toast + 面板进度条；duration 必须 Infinity（0 会被 sonner 立刻关掉）
+   * - 结束：结果写回发起仓库的 atom，与当前正在看哪个项目无关
    * - 超时：主进程 60s 上限返回 GIT_COMMIT_TIMEOUT，提示更久并带“重试”入口
-   * - 项目保护：切项目后旧请求结果不写入新项目的提交框
    */
   const runGenerateCommitMessage = useCallback(async () => {
     if (!props.generateCommitMessage) return;
@@ -958,52 +1007,74 @@ export function GitPanel(props: GitPanelProps) {
       showNotice(t("git.stageBeforeGenerateCommitMessage"), 3000);
       return;
     }
-    if (commitGenRequestRef.current) return;
-    commitGenRequestRef.current = true;
-    setCommitGenLoading(true);
-    commitGenProgressRef.current = showNotice(
-      t("git.generateCommitMessageProgress"),
-      0,
-    );
     const projectId = props.projectId;
+    const scopeKey = gitCommitScopeKey(projectId, repoScopeKey);
+    if (inflightCommitGenScopes.has(scopeKey)) return;
+    inflightCommitGenScopes.add(scopeKey);
+    patchGitCommitComposer(scopeKey, { generating: true, startedAt: Date.now() });
+    showCommitGenProgressToast(scopeKey);
     try {
       const result = await props.generateCommitMessage(projectId);
-      if (projectId !== projectIdRef.current) return;
       if (result.ok) {
-        if (result.message) setCommitMessage(result.message);
+        const message = result.message.trim();
+        if (message) {
+          finishCommitGen(scopeKey, { message });
+          showNotice(t("git.generateCommitMessageDone"), 2500);
+        } else {
+          // 主进程空 diff / 模型空输出都走 ok+空串；用户侧必须看到失败，否则会以为还在转
+          finishCommitGen(scopeKey);
+          showNotice(t("git.generateCommitMessageEmpty"), 5000, "warning");
+        }
       } else if (result.code === "GIT_COMMIT_MODEL_REQUIRED") {
+        finishCommitGen(scopeKey);
         // 未配置：提示 + “去设置”直达常用设置的 Git 摘要栏（覆盖上次记住的其它 tab）
-        showNotice(result.message, 8000, "error", undefined, {
-          action: {
-            label: t("git.goSettings"),
-            onClick: () => openSettings({ tab: "common", section: "git" }),
+        showNotice(
+          commitGenNoticeText(result.message, t("git.generateCommitMessageFailed")),
+          8000,
+          "error",
+          undefined,
+          {
+            action: {
+              label: t("git.goSettings"),
+              onClick: () => openSettings({ tab: "common", section: "git" }),
+            },
           },
-        });
+        );
       } else if (result.code === "GIT_COMMIT_TIMEOUT") {
+        finishCommitGen(scopeKey);
         // 生成超时（主进程 60s 上限）：提示更久并给重试入口；重试复用同一防抖锁
-        showNotice(result.message, 10000, "error", undefined, {
-          action: {
-            label: t("git.retryGenerate"),
-            onClick: () => void runGenerateCommitMessage(),
+        showNotice(
+          commitGenNoticeText(result.message, t("git.generateCommitMessageFailed")),
+          10000,
+          "error",
+          undefined,
+          {
+            action: {
+              label: t("git.retryGenerate"),
+              onClick: () => void runGenerateCommitMessage(),
+            },
           },
-        });
+        );
       } else {
-        showNotice(result.message, 5000, "error");
+        finishCommitGen(scopeKey);
+        showNotice(
+          commitGenNoticeText(result.message, t("git.generateCommitMessageFailed")),
+          5000,
+          "error",
+        );
       }
     } catch (err) {
-      if (projectId !== projectIdRef.current) return;
+      finishCommitGen(scopeKey);
       showNotice(
-        err instanceof Error ? err.message : t("git.generateCommitMessageFailed"),
+        commitGenNoticeText(
+          err instanceof Error ? err.message : undefined,
+          t("git.generateCommitMessageFailed"),
+        ),
         5000,
         "error",
       );
-    } finally {
-      commitGenRequestRef.current = false;
-      setCommitGenLoading(false);
-      dismissNotice(commitGenProgressRef.current);
-      commitGenProgressRef.current = undefined;
     }
-  }, [openSettings, props.generateCommitMessage, props.projectId, groups.index.length]);
+  }, [openSettings, props.generateCommitMessage, props.projectId, repoScopeKey, groups.index.length]);
 
   const doPush = async () => {
     if (!props.push || mutationRunningRef.current) return;
@@ -1083,8 +1154,28 @@ export function GitPanel(props: GitPanelProps) {
     />
   );
 
-  /** 新建分支弹窗状态 */
-  const [commitGenLoading, setCommitGenLoading] = useState(false);
+  /** 摘要生成进度 0–95：按 atom.startedAt 续跑，切走再回来不会从 0 重开。 */
+  const [commitGenProgress, setCommitGenProgress] = useState(0);
+  useEffect(() => {
+    if (!commitGenLoading) {
+      setCommitGenProgress(0);
+      return;
+    }
+    const startedAt = composer.startedAt ?? Date.now();
+    const tickProgress = () => {
+      const ratio = Math.min(1, (Date.now() - startedAt) / COMMIT_GEN_TIMEOUT_MS);
+      // 封顶 95%，避免还没返回就显示满格；真正结束靠 generating 清零。
+      setCommitGenProgress(Math.max(4, Math.round(ratio * 95)));
+    };
+    tickProgress();
+    const tick = window.setInterval(tickProgress, 200);
+    return () => window.clearInterval(tick);
+  }, [commitGenLoading, composer.startedAt]);
+  useEffect(() => {
+    // 切回仍在生成的仓库：用同一 toast id 续上进度提示（抽屉卸载过也能再挂上）。
+    if (!commitGenLoading) return;
+    showCommitGenProgressToast(composerScopeKey);
+  }, [commitGenLoading, composerScopeKey]);
   const [branchOpen, setBranchOpen] = useState(false);
   const [branchCreating, setBranchCreating] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -1525,6 +1616,13 @@ export function GitPanel(props: GitPanelProps) {
                   {committing ? t("git.committing") : t("git.commit")}
                 </Button>
               </div>
+              {commitGenLoading && (
+                <Progress
+                  value={commitGenProgress}
+                  className="h-1"
+                  aria-label={t("git.generateCommitMessageProgress")}
+                />
+              )}
             </div>
             )}
 

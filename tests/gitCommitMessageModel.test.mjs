@@ -9,6 +9,7 @@ const settingsTypes = readFileSync("src/shared/types/settings.ts", "utf8");
 const settingsModal = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
 const commonTab = readFileSync("src/renderer/src/components/app/settings/CommonTab.tsx", "utf8");
 const gitPanel = readFileSync("src/renderer/src/components/app/GitPanel.tsx", "utf8");
+const gitAtoms = readFileSync("src/renderer/src/atoms/git-atoms.ts", "utf8");
 const settingsAtoms = readFileSync("src/renderer/src/atoms/app-ui-atoms.ts", "utf8");
 const settingsFocusHook = readFileSync("src/renderer/src/components/app/settings/useSettingsFocus.ts", "utf8");
 const gitModelsHook = readFileSync("src/renderer/src/components/app/settings/gitModels.ts", "utf8");
@@ -73,6 +74,39 @@ test("Shared model picker keeps one model line and supports collapse and selecte
   assert.doesNotMatch(projectEmptyState, /<ThinkingPicker/);
 });
 
+
+test("Git summary generation keeps a sticky progress toast and reports success or failure", () => {
+  assert.match(gitPanel, /Number\.POSITIVE_INFINITY/);
+  assert.match(gitPanel, /git\.generateCommitMessageProgress/);
+  assert.match(gitPanel, /git\.generateCommitMessageDone/);
+  assert.match(gitPanel, /git\.generateCommitMessageEmpty/);
+  assert.match(gitPanel, /commitGenNoticeText/);
+  assert.match(gitPanel, /<Progress/);
+  assert.match(gitPanel, /COMMIT_GEN_TIMEOUT_MS/);
+  assert.doesNotMatch(
+    gitPanel,
+    /showNotice\(\s*t\("git\.generateCommitMessageProgress"\),\s*0\s*\)/,
+  );
+  assert.equal(i18n.match(/"git\.generateCommitMessageDone":/g)?.length, 2);
+  assert.equal(i18n.match(/"git\.generateCommitMessageEmpty":/g)?.length, 2);
+});
+
+test("Git summary generation survives leaving and returning to the project", () => {
+  assert.match(gitAtoms, /export const gitCommitComposerByScopeAtom/);
+  assert.match(gitAtoms, /export function gitCommitScopeKey/);
+  assert.match(gitAtoms, /export function patchGitCommitComposer/);
+  assert.match(gitAtoms, /export function getGitCommitComposer/);
+  assert.match(gitPanel, /gitCommitComposerByScopeAtom/);
+  assert.match(gitPanel, /inflightCommitGenScopes/);
+  assert.match(gitPanel, /finishCommitGen\(scopeKey, \{ message \}\)/);
+  assert.match(gitPanel, /composer\.startedAt/);
+  // 切项目只清 status，不能清 composer / 生成锁 / 进度 toast，否则切回来动画和摘要都没了
+  assert.doesNotMatch(
+    gitPanel,
+    /setCommitMessage\(""\)[\s\S]*setCommitGenLoading\(false\)/,
+  );
+  assert.doesNotMatch(gitPanel, /if \(projectId !== projectIdRef\.current\) return;[\s\S]*setCommitMessage\(message\)/);
+});
 
 test("missing Git summary model opens Common settings at the Git section", () => {
   assert.match(gitPanel, /openSettings\(\{ tab: "common", section: "git" \}\)/);

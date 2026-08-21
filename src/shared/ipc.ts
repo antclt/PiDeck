@@ -64,6 +64,12 @@ export const ipcChannels = {
 	sessionsCatalogReadMessageFullText: "sessions:catalog-read-message-full-text",
 	sessionsCatalogCopy: "sessions:catalog-copy",
 	sessionsCatalogExportHtml: "sessions:catalog-export-html",
+	/** 无 runtime 时直接改 pi JSONL（编辑消息）。运行中必须先停 Agent。 */
+	sessionsCatalogEditMessage: "sessions:catalog-edit-message",
+	/** 无 runtime 时直接改 pi JSONL（删除消息）。运行中必须先停 Agent。 */
+	sessionsCatalogDeleteMessage: "sessions:catalog-delete-message",
+	/** 无 runtime 时截断 pi JSONL 供重发。运行中必须先停 Agent。 */
+	sessionsCatalogPrepareResend: "sessions:catalog-prepare-resend",
 	sessionsSendPrompt: "sessions:send-prompt",
 	sessionsRuntimeEvent: "sessions:runtime-event",
 	sessionsUiResponse: "sessions:ui-response",
@@ -83,6 +89,7 @@ export const ipcChannels = {
 	sessionsRuntimePrepareResend: "sessions:runtime-prepare-resend",
 	sessionsRuntimeSetModel: "sessions:runtime-set-model",
 	sessionsRuntimeSetThinking: "sessions:runtime-set-thinking",
+	sessionsRuntimeSetPermission: "sessions:runtime-set-permission",
 	sessionsRuntimeClone: "sessions:runtime-clone",
 	// 从用户消息 fork 新会话（pi /fork）；与 clone 不同，会按 entryId 裁剪会话树
 	sessionsRuntimeGetForkMessages: "sessions:runtime-get-fork-messages",

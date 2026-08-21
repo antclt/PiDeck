@@ -86,8 +86,10 @@ function createHarness(options = {}) {
 	editMessage: 0,
 	deleteMessage: 0,
 	prepareResend: 0,
+	mutatePersisted: [],
     setModel: 0,
     setThinking: 0,
+    setPermission: 0,
     publishRuntimeState: 0,
 	update: 0,
     attach: 0,
@@ -193,12 +195,21 @@ function createHarness(options = {}) {
       calls.prepareResend += 1;
       return { text: "hello" };
     },
+    mutatePersistedSessionMessage: async (sessionPath, messageId, operation, extra) => {
+      calls.mutatePersisted.push({ sessionPath, messageId, operation, extra });
+      if (operation === "resend") return { text: "hello" };
+      return undefined;
+    },
     setModel: async () => {
       calls.setModel += 1;
       if (options.modelError) throw new Error(options.modelError);
     },
     setThinking: async () => {
       calls.setThinking += 1;
+    },
+    setPermission: async (_agentId, _preset) => {
+      calls.setPermission += 1;
+      if (options.permissionError) throw new Error(options.permissionError);
     },
     publishRuntimeState: async () => {
       calls.publishRuntimeState += 1;
@@ -981,6 +992,33 @@ test("runtime model preference is not persisted when AgentManager fails", async 
   assert.equal(harness.calls.setModel, 1);
 });
 
+test("runtime permission preference persists only after the live agent applies it", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness({
+    tabs: [{ id: "agent-a", status: "idle", createdAt: 1 }],
+    permissionError: "permission apply failed",
+  });
+  const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+  const runtimeGeneration = coordinator.bindExistingAgent("session-1", "agent-a");
+  const target = { sessionId: "session-1", agentId: "agent-a", runtimeGeneration };
+
+  const failed = await coordinator.setRuntimePermission(target, "workspace-write");
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error.code, "SESSION_COMMAND_FAILED");
+  assert.equal(harness.calls.setPermission, 1);
+  assert.equal(harness.calls.update, 0);
+  assert.notEqual(harness.entry.permissionPreset, "workspace-write");
+
+  harness.agents.setPermission = async (_agentId, preset) => {
+    harness.calls.setPermission += 1;
+    harness.runtimeState = { permissionPreset: preset };
+  };
+  const applied = await coordinator.setRuntimePermission(target, "workspace-write");
+  assert.equal(applied.ok, true);
+  assert.equal(harness.entry.permissionPreset, "workspace-write");
+  assert.equal(harness.calls.update, 1);
+});
+
 test("stop invalidates the target and restart replaces it with a higher generation", async () => {
   const { SessionRuntimeCoordinator } = loadCoordinator();
   const baseTab = {
@@ -1073,6 +1111,14 @@ test("commandFailure classifies message-not-found separately from session-not-fo
     new Error("Message was not found on the active session branch"),
   );
   assert.equal(fileMiss.error.code, "MESSAGE_NOT_FOUND");
+  // SessionFileEditor 在 RPC leaf 不在 JSONL 时抛这条：文案不含 "message not found"，
+  // 旧实现落到 SESSION_COMMAND_FAILED（「会话操作失败，请重试」）。
+  const staleLeaf = new Error("The active session branch is no longer present in the file");
+  staleLeaf.code = "SESSION_ENTRY_NOT_FOUND";
+  assert.equal(coordinator.commandFailure(staleLeaf).error.code, "MESSAGE_NOT_FOUND");
+  const offBranch = new Error("The requested entry is not part of the active session branch");
+  offBranch.code = "SESSION_ENTRY_NOT_FOUND";
+  assert.equal(coordinator.commandFailure(offBranch).error.code, "MESSAGE_NOT_FOUND");
   // 回归：真正的会话不存在仍归 SESSION_NOT_FOUND
   const sessionMiss = coordinator.commandFailure(new Error("Session not found: session-1"));
   assert.equal(sessionMiss.ok, false);
@@ -1111,6 +1157,51 @@ test("commandFailure classifies model-not-found as SESSION_MODEL_NOT_FOUND (not 
     coordinatorSource,
     /needsRestart: true,[\s\S]*?params: \{ model: this\.extractModelFromNotFound\(error\.message\) \?\? error\.message \}/,
   );
+});
+
+test("catalog message mutation writes the file only after the runtime is stopped", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness({
+    entry: catalogEntry({ filePath: "C:/sessions/session-1.jsonl", status: "active" }),
+    tabs: [{ id: "agent-a", status: "idle", createdAt: 1 }],
+  });
+  const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+  const generation = coordinator.bindExistingAgent("session-1", "agent-a");
+  const liveEdit = await coordinator.editCatalogMessage("session-1", "message-1", "updated");
+  assert.equal(liveEdit.ok, false);
+  assert.equal(liveEdit.error.code, "SESSION_RUNTIME_BUSY");
+  assert.equal(harness.calls.mutatePersisted.length, 0);
+
+  const stopped = await coordinator.stopRuntime({
+    sessionId: "session-1",
+    agentId: "agent-a",
+    runtimeGeneration: generation,
+  });
+  assert.equal(stopped.ok, true);
+  const edited = await coordinator.editCatalogMessage("session-1", "message-1", "updated");
+  const deleted = await coordinator.deleteCatalogMessage("session-1", "message-2");
+  const resend = await coordinator.prepareCatalogResend("session-1", "message-3");
+  assert.equal(edited.ok, true);
+  assert.equal(deleted.ok, true);
+  assert.equal(resend.ok, true);
+  assert.equal(resend.value.text, "hello");
+  assert.deepEqual(
+    harness.calls.mutatePersisted.map((item) => item.operation),
+    ["edit", "delete", "resend"],
+  );
+});
+
+test("catalog message mutation refuses DSH sessions", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness({
+    entry: catalogEntry({ backend: "dsh", dshSessionId: "dsh-1", status: "active" }),
+  });
+  const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+  const result = await coordinator.deleteCatalogMessage("session-1", "message-1");
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "SESSION_COMMAND_FAILED");
+  assert.match(result.error.debugDetails, /dsh/);
+  assert.equal(harness.calls.mutatePersisted.length, 0);
 });
 
 test("SessionCommandIpcError maps MESSAGE_NOT_FOUND to the dedicated copy key", () => {

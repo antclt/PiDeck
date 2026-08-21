@@ -3,6 +3,7 @@ import type {
 	AgentGatewayCapability,
 	AgentRuntimeState,
 	AgentTab,
+	DshPermissionPreset,
 	AvailableModel,
 	ChatMessage,
 	CreateAgentInput,
@@ -14,6 +15,7 @@ import type {
 	SendPromptResult,
 	SessionUiResponseInput,
 } from "../../shared/types";
+import { isDshPermissionPreset } from "../../shared/types/agent";
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
 // DSH 会话 id 品牌类型（零运行时成本，仅类型擦除）
 import type { SessionId } from "@deepseek-ai/dsh-session/types";
@@ -1229,6 +1231,9 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	async setPermission(agentId: string, preset: string): Promise<unknown> {
+		if (!isDshPermissionPreset(preset)) {
+			throw new Error(`Unsupported DSH permission preset: ${preset}`);
+		}
 		// DSH 权限预设切换走 /permission 命令（host 侧 slash 桥在 agent/pre-step
 		// 拦截执行）：sandbox 模式 + approval 策略随命令立即生效，permission/preset
 		// 等事件经 mux 折叠进 runtime state。命令消息不进模型、不上时间线。
@@ -1237,6 +1242,9 @@ export class DshAgentManager implements SessionAgentGateway {
 		// 与 sendPrompt 同一串行化约束：命令回合运行中不允许再 splice 消息
 		// （reject 路径会滞留回合内到达的 followup，见 sendPrompt 注释）。
 		await this.waitForIdle(agentId);
+		// The host-apiproxy client exposes sessions.prompt, not the browser runtime's
+		// high-level session.command API. The refreshed host-side slash bridge consumes
+		// this control message before model dispatch, so it never becomes a timeline item.
 		const sent = await client.sessions.prompt({
 			sessionId: runtime.sessionId,
 			mode: "queue",
@@ -1245,7 +1253,28 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (!sent.result.ok) {
 			throw new Error(`dsh /permission failed: ${JSON.stringify(sent.result.error)}`);
 		}
+		// Prompt admission only means the command reached DSH. Wait for the durable
+		// permission/preset projection before reporting success; otherwise the UI can
+		// persist a restricted preset while the host is still using the old policy.
+		const applied = await this.waitForPermissionPreset(runtime, preset);
+		if (!applied) {
+			throw new Error(`dsh /permission was accepted but preset did not become active: ${preset}`);
+		}
 		return { accepted: true, preset };
+	}
+
+	/** Wait for the host event fold rather than guessing from prompt acceptance. */
+	private async waitForPermissionPreset(
+		runtime: DshAgentRuntime,
+		preset: DshPermissionPreset,
+		timeoutMs = 5_000,
+	): Promise<boolean> {
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			if (runtime.permissionPreset === preset) return true;
+			await new Promise<void>((resolve) => setTimeout(resolve, 50));
+		}
+		return runtime.permissionPreset === preset;
 	}
 
 	async publishRuntimeState(agentId: string): Promise<void> {

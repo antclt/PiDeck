@@ -475,6 +475,17 @@ export class SessionHistoryReader {
 	}
 
 	/**
+	 * 当前 JSONL 活动分支 leaf（最后一条带 id 的记录，含墓碑）。
+	 * 编辑/删除/重发必须与 loadMessages 同口径：不要再走 get_entries，
+	 * RPC leaf 可能与文件活动分支不一致，大历史还会把整棵 entry 树打成单行 JSON 冻窗。
+	 */
+	async getActiveLeafId(sessionPath: string): Promise<string | undefined> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const leaf = index.activeBranch.at(-1);
+		return leaf?.id;
+	}
+
+	/**
 	 * 取活动分支末尾 `messageCount` 条消息的 entryId（与 JSONL 尾部窗口一一对应）。
 	 * loadMessages 用它代替 get_entries：pi 会把整棵 entry 树打成单行 JSON，同步 parse 会冻窗。
 	 */

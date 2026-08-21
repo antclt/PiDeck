@@ -7,6 +7,7 @@ import {
   rollbackSessionRuntimeUiResponseAtom,
 } from "../../atoms/session-atoms";
 import {
+  sessionRecordByIdAtomFamily,
   sessionRuntimeBySessionIdAtomFamily,
   sessionRuntimeUiBySessionIdAtomFamily,
 } from "../../atoms/session-selectors";
@@ -74,6 +75,7 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
 
   const services = useSessionPaneServices();
   const settingsOpen = useAtomValue(settingsOpenAtom);
+  const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(currentSessionId));
   const currentSessionRuntime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(currentSessionId));
   const currentSessionRuntimeUi = useAtomValue(sessionRuntimeUiBySessionIdAtomFamily(currentSessionId));
   const claimSessionUiResponse = useSetAtom(claimSessionRuntimeUiResponseAtom);
@@ -132,11 +134,12 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
     ? services.agents.find((a) => a.id === runtime.activeAgentId)
     : undefined;
   const canMutateActiveMessages = runtime.canMutateActiveMessages;
-  // DSH 后端能力集：支持重发与 fork，不支持编辑/删除历史消息（capabilities 缺失，
-  // 禁止硬造等价物）——入口按能力隐藏，与 CompositeAgentGateway 的能力声明一致。
-  const isDshBackend = activeAgent?.backend === "dsh";
-  const canEditOrDeleteMessages = canMutateActiveMessages && !isDshBackend;
-  const canResendOrFork = canMutateActiveMessages;
+  // 未启动时 activeAgent 为空，必须看 catalog backend，不能只看 live tab。
+  // DSH 本轮不做编辑/删除/重发（无 JSONL 离线改写）；fork 仍要求 live runtime。
+  const isDshBackend = sessionRecord?.backend === "dsh" || activeAgent?.backend === "dsh";
+  const canEditOrDeleteMessages = !isDshBackend;
+  const canResend = !isDshBackend;
+  const canFork = isDshBackend ? canMutateActiveMessages : true;
 
   return (
     <SessionView
@@ -163,10 +166,10 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       onPreviewImage={services.onPreviewImage}
       onOpenFile={services.onOpenFile}
       onDiffFile={services.onDiffFile}
-      onResendUserMessage={canResendOrFork ? services.resendUserMessage : undefined}
+      onResendUserMessage={canResend ? services.resendUserMessage : undefined}
       onEditMessage={canEditOrDeleteMessages ? services.editMessage : undefined}
       onDeleteMessage={canEditOrDeleteMessages ? services.deleteMessage : undefined}
-      onForkMessage={canResendOrFork ? services.forkFromUserMessage : undefined}
+      onForkMessage={canFork ? services.forkFromUserMessage : undefined}
       forkingMessageId={services.forkingMessageId}
       onToast={(message: string) => services.showToast(message)}
       onQuickPrompt={(message) => services.insertQuickPrompt(currentSessionId, message)}

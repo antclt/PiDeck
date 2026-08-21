@@ -172,6 +172,42 @@ export type AgentRunItem = {
 
 export type RenderMessage = MessageItem | ToolGroupItem | ThinkingGroupItem | AgentRunItem;
 
+/**
+ * 生图占位消息的渲染身份：generating → error 往往只改 meta.imageGen，
+ * 文本/图片/时间戳都不变。漏比这项时 reconcileRuns 会复用旧 run，
+ * TurnRow memo 不重绘，界面一直停在「生图中」，直到切标签卸载重挂。
+ */
+function sameImageGenMetaForRender(previous: unknown, next: unknown): boolean {
+	if (previous === next) return true;
+	const prev = readImageGenRenderFields(previous);
+	const nxt = readImageGenRenderFields(next);
+	if (!prev && !nxt) return true;
+	if (!prev || !nxt) return false;
+	return (
+		prev.status === nxt.status &&
+		prev.prompt === nxt.prompt &&
+		prev.size === nxt.size &&
+		prev.errorDetail === nxt.errorDetail
+	);
+}
+
+function readImageGenRenderFields(value: unknown): {
+	status: string;
+	prompt: string;
+	size: string;
+	errorDetail: string;
+} | null {
+	if (typeof value !== "object" || value === null) return null;
+	if (!("status" in value) || !("prompt" in value)) return null;
+	const status = value.status;
+	const prompt = value.prompt;
+	if (typeof status !== "string" || typeof prompt !== "string") return null;
+	const size = "size" in value && typeof value.size === "string" ? value.size : "";
+	const errorDetail =
+		"errorDetail" in value && typeof value.errorDetail === "string" ? value.errorDetail : "";
+	return { status, prompt, size, errorDetail };
+}
+
 export function sameChatMessageForRender(previous: ChatMessage, next: ChatMessage): boolean {
 	if (
 		previous.id !== next.id ||
@@ -181,7 +217,8 @@ export function sameChatMessageForRender(previous: ChatMessage, next: ChatMessag
 		previous.timestamp !== next.timestamp ||
 		// 空文本消息（纯工具回合骨架）的 stopReason 可能是唯一变化（pending→stop/toolUse），
 		// 漏比较会导致 reconcileRuns 复用旧引用、最终/中间分类不更新。
-		previous.stopReason !== next.stopReason
+		previous.stopReason !== next.stopReason ||
+		!sameImageGenMetaForRender(previous.meta?.imageGen, next.meta?.imageGen)
 	) {
 		return false;
 	}

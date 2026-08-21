@@ -394,6 +394,28 @@ const api = {
 				pageSize,
 				options,
 			) as Promise<import("../shared/types").SessionMessagePage>,
+		/** 无 runtime 时直接改 JSONL（编辑）。运行中必须先停 Agent。 */
+		editCatalogMessage: (sessionId: string, messageId: string, newText: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.sessionsCatalogEditMessage,
+				sessionId,
+				messageId,
+				newText,
+			) as Promise<SessionCommandResult<void>>,
+		/** 无 runtime 时直接改 JSONL（删除）。运行中必须先停 Agent。 */
+		deleteCatalogMessage: (sessionId: string, messageId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.sessionsCatalogDeleteMessage,
+				sessionId,
+				messageId,
+			) as Promise<SessionCommandResult<void>>,
+		/** 无 runtime 时截断 JSONL 供重发。运行中必须先停 Agent。 */
+		prepareCatalogResend: (sessionId: string, messageId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.sessionsCatalogPrepareResend,
+				sessionId,
+				messageId,
+			) as Promise<SessionCommandResult<{ text: string; images?: ImageContent[] }>>,
 		/** 会话 JSONL 过程事件（session/model/thinking/custom），轨迹复盘用。 */
 		readProcessEvents: (sessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogReadProcessEvents, sessionId) as Promise<
@@ -618,6 +640,12 @@ const api = {
 				ipcChannels.sessionsRuntimeSetThinking,
 				target,
 				level,
+			) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
+		setRuntimePermission: (target: SessionRuntimeTarget, preset: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.sessionsRuntimeSetPermission,
+				target,
+				preset,
 			) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
 		cloneRuntime: (target: SessionRuntimeTarget) =>
 			ipcRenderer.invoke(ipcChannels.sessionsRuntimeClone, target) as Promise<

@@ -13,6 +13,16 @@ export type AgentBackend = "pi" | "dsh";
  * 后端可选能力（核心接口方法之外的可选扩展）。
  * 能力缺失的后端必须显式声明不持有，UI 按能力禁用入口，禁止硬造等价物。
  */
+export type DshPermissionPreset =
+	| "read-only"
+	| "workspace-write"
+	| "danger-full-access";
+
+/** Keep permission validation at the IPC/runtime boundary, not only in the picker UI. */
+export function isDshPermissionPreset(value: unknown): value is DshPermissionPreset {
+	return value === "read-only" || value === "workspace-write" || value === "danger-full-access";
+}
+
 export type AgentGatewayCapability =
 	| "compact" // 手动压缩
 	| "fork" // 从消息 fork 新会话

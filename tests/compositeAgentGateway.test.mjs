@@ -118,6 +118,10 @@ function makeFakeGateway(backend, { supportsOptional = true } = {}) {
 				async deleteMessage(agentId, messageId) {
 					calls.push(["deleteMessage", backend, agentId, messageId]);
 				},
+				async mutatePersistedSessionMessage(sessionPath, messageId, operation, extra) {
+					calls.push(["mutatePersistedSessionMessage", backend, sessionPath, messageId, operation, extra]);
+					return operation === "resend" ? { text: "hello" } : undefined;
+				},
 			}
 			: {}),
 	};
@@ -202,6 +206,16 @@ test("可选能力存在：转发到所属网关并透传参数", async () => {
 	assert.deepEqual(pi.calls.filter(([name]) => name === "editMessage").at(-1), ["editMessage", "pi", tab.id, "m1", "新文本"]);
 	assert.deepEqual(pi.calls.filter(([name]) => name === "deleteMessage").at(-1), ["deleteMessage", "pi", tab.id, "m1"]);
 	assert.deepEqual(pi.calls.filter(([name]) => name === "exportHtml").at(-1), ["exportHtml", "pi", tab.id]);
+});
+
+test("无 runtime 的 JSONL 改写按 pi 网关转发，不落到 DSH", async () => {
+	const { pi, dsh, composite } = makeComposite();
+	await composite.mutatePersistedSessionMessage("C:/sessions/a.jsonl", "m1", "edit", { newText: "x" });
+	assert.deepEqual(
+		pi.calls.filter(([name]) => name === "mutatePersistedSessionMessage").at(-1),
+		["mutatePersistedSessionMessage", "pi", "C:/sessions/a.jsonl", "m1", "edit", { newText: "x" }],
+	);
+	assert.equal(dsh.calls.some(([name]) => name === "mutatePersistedSessionMessage"), false);
 });
 
 test("restart 走 owner 网关且缓存保持（不因其他网关 list 内容漂移）", async () => {

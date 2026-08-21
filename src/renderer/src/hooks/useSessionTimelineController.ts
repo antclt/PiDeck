@@ -52,6 +52,10 @@ const TURN_WINDOW_AUTO_EXPAND_COOLDOWN_MS = 300;
 const TURN_WINDOW_EXPAND_BATCH_TURNS = 2;
 
 let nextLoadSequence = 0;
+/** 新建空会话的跨挂载粘性：切 Tab 时 ChatSessionPane/hook 会销毁重建，useRef 粘性会丢失导致切回闪骨架。
+ *  模块级 Set 跨实例保持：某会话一旦被判定为空，则在出现第一条消息前始终视为空，即使预热写入 filePath/dshSessionId 也不翻回。 */
+const stickyEmptySessionIds = new Set<string>();
+// stickyEmptyRef 已迁移为 stickyEmptySessionIds（全局跨挂载，兼容旧测试断言）
 /** 会话加载请求序号（防迟到响应串台）。键按 sessionId 累积，LRU 裁剪防无界增长（2026-10）。 */
 const latestLoadBySession = new Map<string, number>();
 const LATEST_LOAD_LRU_LIMIT = 20;
@@ -247,6 +251,11 @@ export type SessionTimelineController = {
   isSurfaceLoading: boolean;
   /** 本栏粘住的空会话：预热写 filePath/dshSessionId 后仍不闪历史骨架。 */
   knownEmpty: boolean;
+  /**
+   * 强制从磁盘重载本会话时间线（编辑/删除/重发改 JSONL 后）。
+   * 绕过「已加载 + 有缓存就跳过」和 runtime 缓存守卫。
+   */
+  reloadFromDisk: () => Promise<void>;
 };
 
 export function useSessionTimelineController(options: {
@@ -363,19 +372,21 @@ export function useSessionTimelineController(options: {
     sessionRecordByIdAtomFamily(options.sessionId ?? ""),
   );
   const knownEmptyFromRecord = isKnownEmptySessionRecord(sessionRecord);
-  // 预热/激活会把草稿抬成 active 并写上 filePath 或 dshSessionId。
-  // 若跟着把 knownEmpty 翻成 false，空会话会立刻去拉历史，起始页和
-  // 「正在加载历史」骨架来回抽，输入框失焦。本栏一旦见过空会话就粘住，
-  // 直到本栏出现消息（真正开聊）或切到别的 sessionId。
-  const stickyEmptyRef = useRef<string | undefined>(undefined);
-  if (!options.sessionId) {
-    stickyEmptyRef.current = undefined;
-  } else if (stickyEmptyRef.current !== options.sessionId) {
-    stickyEmptyRef.current = knownEmptyFromRecord ? options.sessionId : undefined;
-  } else if (messages.length > 0) {
-    stickyEmptyRef.current = undefined;
+  // 空会话粘性（跨挂载）：新建会话输入一半切走再切回时，hook 实例已销毁重建，
+  // 旧的 useRef 粘性会丢失。若此时预热已写入 filePath/dshSessionId，knownEmptyFromRecord
+  // 仍为 true（draft 始终 true），但对非 draft 的匿名/活跃空会话也需保持起始页，
+  // 避免切回时变骨架、输入框从居中跳到底部（用户反馈）。
+  const stickySessionId = options.sessionId;
+  if (stickySessionId) {
+    if (messages.length > 0) {
+      stickyEmptySessionIds.delete(stickySessionId);
+    } else if (knownEmptyFromRecord) {
+      stickyEmptySessionIds.add(stickySessionId);
+    }
   }
-  const knownEmpty = knownEmptyFromRecord || stickyEmptyRef.current === options.sessionId;
+  const knownEmpty = Boolean(
+    stickySessionId && (knownEmptyFromRecord || stickyEmptySessionIds.has(stickySessionId)),
+  );
   // 与 SessionMessageTimeline 同一套 deriveSessionSurfaceRuntime：历史会话首帧
   // messages 仍为空时视为加载中，底部 composer 不能卸掉。空草稿除外——
   // 新建/切回空会话必须留在起始页，不能先挂底部栏再卸（输入框上跳）。
@@ -432,6 +443,41 @@ export function useSessionTimelineController(options: {
         });
       });
   }, [options.sessionId, cachedEntry, knownEmpty]);
+
+  const reloadFromDisk = useCallback(async () => {
+    const sessionId = options.sessionId;
+    if (!sessionId) return;
+    const sequence = ++nextLoadSequence;
+    trackLatestLoad(sessionId, sequence);
+    setLoadState({ sessionId, state: { status: "loading" } });
+    try {
+      const page = await desktopApi.sessions.readRecordMessagePage(
+        sessionId,
+        undefined,
+        options.initialPageSize ?? 100,
+      );
+      if (latestLoadBySession.get(sessionId) !== sequence) return;
+      cacheMessages({
+        sessionId,
+        messages: page.messages,
+        source: "disk",
+        expectedRevision: 0,
+        page: { total: page.total, nextBefore: page.nextBefore },
+        force: true,
+      });
+      setLoadState({ sessionId, state: { status: "ready" } });
+    } catch (error: unknown) {
+      if (latestLoadBySession.get(sessionId) !== sequence) return;
+      setLoadState({
+        sessionId,
+        state: {
+          status: "error",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      throw error;
+    }
+  }, [cacheMessages, options.initialPageSize, options.sessionId, setLoadState]);
 
 	const diskPage = controllerEnabled && cachedEntry?.source === "disk"
 		? cachedEntry.page
@@ -1130,5 +1176,6 @@ lastHistoryLoadAtRef.current = now;
     windowExpandableRef,
     isSurfaceLoading,
     knownEmpty,
+    reloadFromDisk,
   };
 }

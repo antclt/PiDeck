@@ -143,6 +143,41 @@ export const sessionCacheStatsAtom = atom<Record<string, { cacheHitHistory: numb
 export const SESSION_CACHE_STATS_LIMIT = 50;
 export const sessionMessagesCacheAtom = atom<Record<string, SessionMessageCacheEntry>>({});
 
+/** 时间线改写过程遮罩：停 Agent / 写 JSONL / 重载 / 激活 / fork，按 sessionId 隔离。 */
+export type SessionHistoryMutationOverlayKind =
+  | "stopping"
+  | "mutating"
+  | "reloading"
+  | "activating"
+  | "forking";
+
+export const sessionHistoryMutationOverlayByIdAtom = atom<
+  Record<string, SessionHistoryMutationOverlayKind>
+>({});
+
+export const setSessionHistoryMutationOverlayAtom = atom(
+  null,
+  (
+    get,
+    set,
+    input: { sessionId: string; kind: SessionHistoryMutationOverlayKind | null },
+  ) => {
+    const current = get(sessionHistoryMutationOverlayByIdAtom);
+    if (input.kind === null) {
+      if (!(input.sessionId in current)) return;
+      const next = { ...current };
+      delete next[input.sessionId];
+      set(sessionHistoryMutationOverlayByIdAtom, next);
+      return;
+    }
+    if (current[input.sessionId] === input.kind) return;
+    set(sessionHistoryMutationOverlayByIdAtom, {
+      ...current,
+      [input.sessionId]: input.kind,
+    });
+  },
+);
+
 /**
  * 单会话消息缓存条目（selectAtom 隔离）：其它会话的消息到达/分页/失效
  * 都整体重建 cache 对象，但本会话条目引用不变 → Object.is 相等 → 订阅者不重渲染。
@@ -486,6 +521,11 @@ export const cacheSessionMessagesAtom = atom(
 		/** 窗口首条消息的文件消息下标（2026-11）：窗口缺 entryId 时作为首次补历史的数值游标 */
 		windowStartFilePos?: number;
 		history?: SessionMessageCacheEntry["history"];
+		/**
+		 * 强制用 disk 快照覆盖当前缓存（含 runtime 源）。
+		 * 编辑/删除/重发改 JSONL 并停掉 Agent 后必须走这条：否则「disk 条数不多于 runtime」守卫会丢掉刚改过的文件。
+		 */
+		force?: boolean;
   }) => {
     const cache = get(sessionMessagesCacheAtom);
     const current = cache[input.sessionId];
@@ -509,7 +549,9 @@ export const cacheSessionMessagesAtom = atom(
     // 防止空/较少 disk 响应清空或退化已有 runtime 缓存（匿名会话切回场景）：
     // 当 disk 来源的消息数 ≤ cache 中已有消息数时，视为 stale 空读或退化读，直接跳过；
     // 仅当 disk 携带严格更多的消息（如补齐窗口前的历史）时才允许写入。
+    // force：用户刚改过 JSONL（编辑/删除/重发），disk 才是权威，必须覆盖 runtime。
     if (
+      !input.force &&
       input.source === "disk" &&
       current?.source !== "disk" &&
       current?.messages?.length >= input.messages.length

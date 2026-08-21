@@ -110,7 +110,9 @@ function ImageGenMessage(props: {
 				</div>
 			) : null}
 			{status === "error" && props.meta.errorDetail ? (
-				<p className="mt-1.5 text-xs text-destructive">{props.meta.errorDetail}</p>
+				<p className="mt-1.5 max-w-[36rem] whitespace-pre-wrap break-words text-xs leading-relaxed text-destructive">
+					{props.meta.errorDetail}
+				</p>
 			) : null}
 		</div>
 	);

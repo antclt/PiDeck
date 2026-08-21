@@ -6,3 +6,4 @@ export * from "./runtime-atoms";
 export * from "./project-atoms";
 export * from "./app-ui-atoms";
 export * from "./imagegen-atoms";
+export * from "./git-atoms";

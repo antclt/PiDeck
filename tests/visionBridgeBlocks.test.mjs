@@ -23,6 +23,7 @@ test("图片轮询必须先确认视觉桥已开启", () => {
   // 关闭视觉桥或使用原生多模态模型时，普通图片不能显示视觉桥转换动画。
   assert.match(surfaceComponents, /visionBridgeEnabled !== true/);
   assert.match(surfaceComponents, /visionGetConfig\(\)/);
+  assert.match(surfaceComponents, /visionBridgeExpected === false/);
 });
 
 test("无视觉桥标记时原样返回文本", () => {

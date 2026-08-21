@@ -124,8 +124,11 @@ test("controller：生图分支不 send、生图占位消息三态上屏（不�
 	assert.match(controller, /function mapImageGenError\(error: string, detail\?: string\)/);
 	assert.match(controller, /case "notConfigured"/);
 	assert.match(controller, /case "invalidKey"/);
+	assert.match(controller, /imagegen\.error\.invalidKeyDetail/);
 	assert.match(controller, /case "badBaseUrl"/);
+	assert.match(controller, /imagegen\.error\.badBaseUrlDetail/);
 	assert.match(controller, /case "http"/);
+	assert.match(controller, /t\("imagegen\.error\.http", \{ detail: extra \}\)/);
 });
 
 test("发送控件：生图进行中显示转圈并禁用", () => {
@@ -142,6 +145,8 @@ test("生图结果提供原图复制与按 mime 保存", () => {
 	assert.match(finalAnswer, /image\.mimeType === "image\/jpeg" \? "jpg" : "png"/);
 	assert.match(finalAnswer, /imagegen\.copy/);
 	assert.match(finalAnswer, /imagegen\.save/);
+	assert.match(finalAnswer, /whitespace-pre-wrap/);
+	assert.match(finalAnswer, /props.meta.errorDetail/);
 });
 
 test("i18n：zh/en 生图模式与错误文案 key 一致", () => {
@@ -155,4 +160,8 @@ test("i18n：zh/en 生图模式与错误文案 key 一致", () => {
 	assert.doesNotMatch(en, /imagegen\.button/);
 	assert.match(zh, /config\.nav\.imagegen/);
 	assert.match(zh, /config\.imagegen\.paramWatermark/);
+	assert.match(zh, /"imagegen\.error\.http": "生图服务返回错误（\{detail\}）"/);
+	assert.match(en, /"imagegen\.error\.http": "Image service returned an error \(\{detail\}\)"/);
+	assert.match(zh, /imagegen\.error\.invalidKeyDetail/);
+	assert.match(zh, /imagegen\.error\.badBaseUrlDetail/);
 });

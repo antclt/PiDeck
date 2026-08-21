@@ -219,6 +219,21 @@ test("Session command failures map stable codes to localized renderer keys", () 
   }
   assert.match(source, /this\.debugDetails = error\.debugDetails/);
   assert.doesNotMatch(source, /super\(error\.debugDetails \|\| error\.code\)/);
+  assert.match(source, /export function sessionCommandFailureToast/);
+});
+
+test("delete/edit/resend IPC logs SessionCommandResult failures", () => {
+  const source = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
+  // 这些通道直接返回 SessionCommandResult，不走 sessionCommandIpcError 抛错。
+  assert.match(source, /function logSessionCommandFailure/);
+  assert.match(source, /function handleSessionCommandResult/);
+  assert.match(source, /sessionsRuntimeDeleteMessage/);
+  assert.match(source, /sessionsRuntimeEditMessage/);
+  assert.match(source, /sessionsRuntimePrepareResend/);
+  assert.match(source, /deleteRuntimeMessage/);
+  assert.match(source, /handleSessionCommandResult\(\s*appLogger,\s*"deleteRuntimeMessage"/);
+  assert.match(source, /handleSessionCommandResult\(\s*appLogger,\s*"editRuntimeMessage"/);
+  assert.match(source, /handleSessionCommandResult\(\s*appLogger,\s*"prepareRuntimeResend"/);
 });
 
 test("main-process Session IPC errors expose stable copy and retain diagnostics separately", () => {

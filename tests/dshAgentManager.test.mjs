@@ -867,6 +867,36 @@ test("getAvailableModels 透传模型支持的思考档位（reasoningEfforts）
 	assert.equal(models[0].reasoningEfforts?.[1].name, "High");
 });
 
+test("setPermission 只在 permission/preset 事件到达后报告成功，且命令不投影为用户消息", async () => {
+	const { host, client, promptCalls } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+
+	const changing = manager.setPermission(tab.id, "workspace-write");
+	// 事件必须在 prompt 受理之后到达，模拟 host 命令桥完成 apply 后的 mux 推送。
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	client.pushFrames(
+		sessionEventFrame("session-fake-1", event("permission/preset", 2, { preset: "workspace-write" })),
+	);
+	await changing;
+	assert.deepEqual(promptCalls, ["/permission workspace-write"]);
+	assert.equal((await manager.getRuntimeState(tab.id)).permissionPreset, "workspace-write");
+	assert.equal(manager.getMessages(tab.id).some((message) => message.text.includes("/permission")), false);
+});
+
+test("setPermission 拒绝未知预设，避免把非法值送进 DSH 命令桥", async () => {
+	const { host, calls } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+
+	await assert.rejects(
+		() => manager.setPermission(tab.id, "project-write"),
+		/Unsupported DSH permission preset: project-write/,
+	);
+	assert.equal(calls.prompt, 0);
+});
+
 test("setModel 携带已设置的思考档位（先选档位再换模型不被默认值覆盖）", async () => {
 	const { host, client } = makeFakeHost();
 	const manager = new DshAgentManager(host, () => PROJECT);

@@ -426,6 +426,37 @@ test("trimRuntimeCache increments headOffset for file-backed sessions only (M2 r
   }
 });
 
+test("delete uses the JSONL leaf even when get_entries reports a foreign leaf", async () => {
+  const { manager, directory } = await createHarness();
+  const rpcCalls = [];
+  const editorCalls = [];
+  try {
+    const runtime = manager.agents.get("agent-1");
+    runtime.process.client.request = async (command) => {
+      rpcCalls.push(command.type);
+      if (command.type === "get_entries") {
+        return { success: true, data: { leafId: "not-in-file" } };
+      }
+      return { success: true, data: {} };
+    };
+    manager.sessionFileEditor = {
+      deleteMessage: async (input) => {
+        editorCalls.push(input.target);
+        return {};
+      },
+    };
+    manager.loadMessages = async () => {};
+    await manager.deleteMessage("agent-1", "m-e12");
+    assert.equal(editorCalls.length, 1);
+    assert.equal(editorCalls[0].entryId, "e12");
+    // 文件活动分支末条是 e12；RPC 的陌生 leaf 不得传给 SessionFileEditor。
+    assert.equal(editorCalls[0].activeLeafId, "e12");
+    assert.equal(rpcCalls.includes("get_entries"), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("cache-miss delete of a message absent from the file rejects with Message not found", async () => {
   const { manager, sessionPath, directory } = await createHarness();
   try {

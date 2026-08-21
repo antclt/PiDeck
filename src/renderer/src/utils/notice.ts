@@ -170,6 +170,11 @@ function toasterMounted() {
 	return toasterReady;
 }
 
+/**
+ * 弹出全局 toast。duration 省略时 info=1500ms、error/warning=3000ms。
+ * 粘性提示必须传 Number.POSITIVE_INFINITY：sonner 把 duration: 0 当成立刻关闭，
+ * 看起来就像“闪一下就没了”。空 message 会直接丢弃，调用方需保证有正文。
+ */
 export function showNotice(
 	message: string,
 	duration?: number,

@@ -117,6 +117,10 @@ type WebServiceDependencies = {
 		target: SessionRuntimeTarget,
 		level: string,
 	) => Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>;
+	setSessionRuntimePermission: (
+		target: SessionRuntimeTarget,
+		preset: string,
+	) => Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>;
 	cloneSessionRuntime: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<{
 		cancelled?: boolean;
 		targetSessionId?: string;
@@ -649,7 +653,7 @@ export class WebServiceManager {
 				return;
 			}
 			const sessionRuntimeMatch = url.pathname.match(
-				/^\/api\/sessions\/([^/]+)\/runtime\/(stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|clone)$/,
+				/^\/api\/sessions\/([^/]+)\/runtime\/(stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone)$/,
 			);
 			if (sessionRuntimeMatch && request.method === "POST") {
 				const sessionId = decodeURIComponent(sessionRuntimeMatch[1]);
@@ -662,6 +666,7 @@ export class WebServiceManager {
 					provider?: string;
 					modelId?: string;
 					level?: string;
+					preset?: string;
 				}>(request);
 				const target = body.target;
 				if (!target || target.sessionId !== sessionId) {
@@ -721,6 +726,9 @@ export class WebServiceManager {
 						break;
 					case "thinking":
 						result = await this.deps.setSessionRuntimeThinking(target, body.level ?? "");
+						break;
+					case "permission":
+						result = await this.deps.setSessionRuntimePermission(target, body.preset ?? "");
 						break;
 					case "clone":
 						result = await this.deps.cloneSessionRuntime(target);

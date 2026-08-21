@@ -36,7 +36,7 @@ export type ImageGenErrorCode =
 	| "badBaseUrl"
 	/** 网络不可达/代理问题 */
 	| "network"
-	/** 服务端返回其他错误（detail 携带状态码） */
+	/** 服务端返回其他错误（detail 携带状态码 + 厂商错误正文） */
 	| "http"
 	/** 响应里没有图片数据 */
 	| "empty";

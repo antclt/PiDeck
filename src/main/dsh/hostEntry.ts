@@ -14,7 +14,7 @@
  * 注意：本文件被 electron-vite 主进程构建打包（rollup 多入口），产物为 CJS；
  * @deepseek-ai/* 全部 externalize，运行时动态 import() 加载（与 DshHost 一致）。
  */
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
@@ -202,12 +202,13 @@ async function main(): Promise<void> {
 	// command/run + command/done 由执行器落盘，消息不进模型、不上时间线），
 	// 未命中（未知命令/非命令）原样放行。与 dsh-web 的客户端语义一致。
 	const slashBridgePath = join(configDir, "pideck-slash-bridge.js");
-	if (!existsSync(slashBridgePath)) {
-		writeFileSync(
-			slashBridgePath,
-			[
-				"export default {",
-				"  apply(ctx) {",
+	// 该桥是应用修复命令语义的运行时代码，不能只在首次启动时写入；否则已有
+	// ~/.dsh 用户会继续使用旧桥，权限切换仍可能退化成普通 prompt。
+	writeFileSync(
+		slashBridgePath,
+		[
+			"export default {",
+			"  apply(ctx) {",
 				"    ctx.inject(['commands'], (commandCtx) => {",
 				"      commandCtx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {",
 				"        try {",
@@ -223,14 +224,17 @@ async function main(): Promise<void> {
 				"            ? block.text.trim()",
 				"            : '';",
 				"          if (!line.startsWith('/')) return next();",
-				"          // 未知命令 execute 返回 undefined：放行给模型当普通文本；",
-				"          // 已知命令执行成功后 reject 步骤（消息已 claim，不会重入）。",
-				"          const result = await commandCtx.commands.execute(agent, line, signal);",
+				"          // execute 的第三个参数是图片数组，第四个才是取消信号；参数错位会",
+				"          // 让命令执行器把 AbortSignal 当数组处理，权限命令随后退化成普通消息。",
+				"          const result = await commandCtx.commands.execute(agent, line, [], signal);",
+				"          // 未知命令 execute 返回 undefined，只有这种情况才允许模型接管文本。",
+				"          // 已知命令无论成功还是失败都必须 reject，避免 slash 行进入时间线/模型。",
 				"          if (result === undefined) return next();",
 				"          return { kind: 'reject' };",
 				"        } catch (error) {",
-				"          // 执行异常（含用户中止）不吞消息：放行回正常步骤流。",
-				"          return next();",
+				"          // 已解析的命令执行失败也不能作为普通用户问题重试一次；命令执行器",
+				"          // 会记录 command/done error，reject 可以保持 DSH 的命令语义闭环。",
+				"          return { kind: 'reject' };",
 				"        }",
 				"      });",
 				"    });",
@@ -239,7 +243,6 @@ async function main(): Promise<void> {
 				"",
 			].join("\n"),
 		);
-	}
 
 	const startedAt = Date.now();
 	const ctx = await boot(

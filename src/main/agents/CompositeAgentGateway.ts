@@ -162,6 +162,30 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 			gateway.deleteMessage?.(agentId, messageId));
 	}
 
+	/**
+	 * 无 runtime 的 JSONL 改写只属于 pi：按默认后端解析网关，不按 agentId。
+	 * DSH 网关没有该方法，走「不支持」错误，禁止硬造等价物。
+	 */
+	async mutatePersistedSessionMessage(
+		sessionPath: string,
+		messageId: string,
+		operation: "edit" | "delete" | "resend",
+		options?: {
+			newText?: string;
+			environment?: import("../../shared/types").SessionEnvironment;
+			wslDistro?: string;
+		},
+	): Promise<{ text: string; images?: ImageContent[] } | undefined> {
+		const gateway = this.resolveBackend("pi");
+		const mutate = gateway.mutatePersistedSessionMessage;
+		if (!mutate) {
+			throw new Error(
+				`CompositeAgentGateway: backend "${gateway.backend}" does not support persisted session message mutation`,
+			);
+		}
+		return mutate(sessionPath, messageId, operation, options);
+	}
+
 	async prepareResendFromMessage(
 		agentId: string,
 		messageId: string,

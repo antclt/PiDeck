@@ -35,6 +35,7 @@ export interface SessionCatalogGateway {
 			title?: string;
 			model?: { provider: string; modelId: string } | null;
 			thinkingLevel?: string | null;
+			permissionPreset?: string | null;
 			backend?: AgentBackend;
 			updatedAt?: number;
 		},
@@ -73,6 +74,20 @@ export interface SessionAgentGateway {
 	editMessage?(agentId: string, messageId: string, newText: string): Promise<void>;
 	/** 可选能力：删除历史消息（pi 提供；dsh 缺失，capabilities 不含 deleteMessage）。 */
 	deleteMessage?(agentId: string, messageId: string): Promise<void>;
+	/**
+	 * 可选能力：无 runtime 时直接改 pi 会话 JSONL（编辑/删除/重发截断）。
+	 * DSH 无会话文件，不得实现；运行中不得调用（先 stopRuntime）。
+	 */
+	mutatePersistedSessionMessage?(
+		sessionPath: string,
+		messageId: string,
+		operation: "edit" | "delete" | "resend",
+		options?: {
+			newText?: string;
+			environment?: SessionRecord["environment"];
+			wslDistro?: string;
+		},
+	): Promise<{ text: string; images?: ImageContent[] } | undefined>;
 	prepareResendFromMessage(
 		agentId: string,
 		messageId: string,
@@ -500,6 +515,46 @@ export class SessionRuntimeCoordinator {
 		);
 	}
 
+	/**
+	 * catalog 级编辑：只改磁盘 JSONL，不碰运行中 Agent。
+	 * 仍在跑 / 正在激活时拒绝，避免内存与文件分叉；渲染层应先 stop 再调这里。
+	 */
+	editCatalogMessage(
+		sessionId: string,
+		messageId: string,
+		newText: string,
+	): Promise<SessionCommandResult<void>> {
+		return this.mutateCatalogMessage(sessionId, messageId, "edit", newText).then((result) => {
+			if (!result.ok) return result;
+			return { ok: true as const, value: undefined };
+		});
+	}
+
+	/** catalog 级删除：墓碑写入 JSONL，要求 Agent 已停。 */
+	deleteCatalogMessage(
+		sessionId: string,
+		messageId: string,
+	): Promise<SessionCommandResult<void>> {
+		return this.mutateCatalogMessage(sessionId, messageId, "delete").then((result) => {
+			if (!result.ok) return result;
+			return { ok: true as const, value: undefined };
+		});
+	}
+
+	/** catalog 级重发准备：截断该用户消息及其后继，返回原文快照供随后 sendPrompt。 */
+	prepareCatalogResend(
+		sessionId: string,
+		messageId: string,
+	): Promise<SessionCommandResult<{ text: string; images?: ImageContent[] }>> {
+		return this.mutateCatalogMessage(sessionId, messageId, "resend").then((result) => {
+			if (!result.ok) return result;
+			return {
+				ok: true as const,
+				value: result.value ?? { text: "" },
+			};
+		});
+	}
+
 	/** 列出可 fork 的用户消息 entryId（供 UI 在 meta.entryId 缺失时回退匹配）。 */
 	getRuntimeForkMessages(
 		target: SessionRuntimeTarget,
@@ -563,6 +618,37 @@ export class SessionRuntimeCoordinator {
 				sessionId: target.sessionId,
 				agentId,
 				level,
+			});
+			return this.agents.getRuntimeState(agentId);
+		});
+	}
+
+	/**
+	 * Apply a DSH permission preset through the active runtime command path.
+	 * The preset is persisted only after the host accepts it, so catalog state
+	 * cannot claim a restricted mode while the live host is still unrestricted.
+	 */
+	setRuntimePermission(
+		target: SessionRuntimeTarget,
+		preset: string,
+	): Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>> {
+		return this.runTargetCommand(target, async (agentId) => {
+			const setPermission = this.agents.setPermission;
+			if (!setPermission) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support permissions`,
+				);
+			}
+			await setPermission(agentId, preset);
+			await this.catalog.update(target.sessionId, {
+				permissionPreset: preset,
+				updatedAt: Date.now(),
+			});
+			void this.logger?.info("session-runtime", "Runtime permission changed", {
+				sessionId: target.sessionId,
+				agentId,
+				preset,
 			});
 			return this.agents.getRuntimeState(agentId);
 		});
@@ -1524,6 +1610,71 @@ export class SessionRuntimeCoordinator {
 		}
 	}
 
+	/**
+	 * pi 历史会话文件改写：DSH / 未落盘 / 仍在运行一律拒绝。
+	 * 运行中改文件再 switch_session 会和用户「先停再改、下次发送才激活」的产品规则冲突。
+	 */
+	private async mutateCatalogMessage(
+		sessionId: string,
+		messageId: string,
+		operation: "edit" | "delete" | "resend",
+		newText?: string,
+	): Promise<SessionCommandResult<{ text: string; images?: ImageContent[] } | undefined>> {
+		try {
+			const entry = this.catalog.get(sessionId);
+			if (!entry) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_NOT_FOUND",
+					`Session not found: ${sessionId}`,
+				);
+			}
+			if (entry.backend === "dsh") {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "dsh" does not support persisted session message mutation`,
+				);
+			}
+			if (!entry.filePath) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					"Session not persisted",
+				);
+			}
+			this.requireStoppedForFileMutation(sessionId);
+			const mutate = this.agents.mutatePersistedSessionMessage;
+			if (!mutate) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support persisted session message mutation`,
+				);
+			}
+			const value = await mutate(entry.filePath, messageId, operation, {
+				newText,
+				environment: entry.environment,
+				wslDistro: entry.wslDistro,
+			});
+			// 写文件期间若被重新激活，磁盘已改但内存是旧树——拒绝让调用方感知竞态。
+			this.requireStoppedForFileMutation(sessionId);
+			void this.logger?.info("session-runtime", "Catalog session message mutated", {
+				sessionId,
+				messageId,
+				operation,
+			});
+			return { ok: true, value };
+		} catch (error) {
+			return this.commandFailure(error);
+		}
+	}
+
+	private requireStoppedForFileMutation(sessionId: string): void {
+		if (this.getTarget(sessionId) || this.isActivating(sessionId)) {
+			throw new SessionRuntimeCommandError(
+				"SESSION_RUNTIME_BUSY",
+				"Stop the running agent before mutating the session file",
+			);
+		}
+	}
+
 	private commandFailure<T>(error: unknown): SessionCommandResult<T> {
 		if (error instanceof SessionRuntimeCommandError) {
 			return {
@@ -1548,11 +1699,18 @@ export class SessionRuntimeCoordinator {
 		const message = errorMessage(error);
 		const lower = message.toLowerCase();
 		const model = this.extractModelFromNotFound(message);
+		const editorCode = this.sessionFileEditorErrorCode(error);
 		const code: SessionCommandErrorCode =
-			// 消息定位失败（编辑/删除/重发缓存与文件都未命中）先于泛化 "not found" 识别：
-			// 否则会误报成 SESSION_NOT_FOUND（「会话已不存在」），而会话其实还在。
-			lower.includes("message not found")
+			// SessionFileEditor 的 SESSION_ENTRY_NOT_FOUND 包括「不在活动分支」/
+			// 「leaf 不在文件里」/「已删除」，文案并不都带 "message not found"。
+			// 按 code 识别，避免历史会话删消息落到 SESSION_COMMAND_FAILED
+			//（用户只看到「会话操作失败，请重试」且主进程没日志）。
+			editorCode === "SESSION_ENTRY_NOT_FOUND"
+				|| lower.includes("message not found")
 				|| lower.includes("not found on the active session branch")
+				|| lower.includes("not part of the active session branch")
+				|| lower.includes("already been deleted")
+				|| lower.includes("no longer present in the file")
 				? "MESSAGE_NOT_FOUND"
 				// Agent 运行实例已不存在（stop/restart 后立即操作、崩溃清理等）：是
 				// 「没有可用的运行实例」而非「会话不存在」——泛化 not found 会误报成
@@ -1593,6 +1751,13 @@ export class SessionRuntimeCoordinator {
 	private extractModelFromNotFound(message: string): string | undefined {
 		const match = /model not found\s*:?\s*(.+)$/i.exec(message);
 		return match?.[1]?.trim() || undefined;
+	}
+
+	/** SessionFileEditorError.code；非编辑器错误或缺字段返回 undefined。 */
+	private sessionFileEditorErrorCode(error: unknown): string | undefined {
+		if (!error || typeof error !== "object" || !("code" in error)) return undefined;
+		const code = (error as { code?: unknown }).code;
+		return typeof code === "string" && code.startsWith("SESSION_") ? code : undefined;
 	}
 
 	private acquireDispatchLease(sessionId: string, agentId: string): DispatchLease {

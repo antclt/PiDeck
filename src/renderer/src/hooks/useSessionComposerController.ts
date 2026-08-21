@@ -1572,19 +1572,26 @@ export function useSessionComposerController(
 
 export type SessionComposerController = ReturnType<typeof useSessionComposerController>;
 
-/** 生图错误码 → 用户可见文案（http 附 status detail）。文案经 i18n，避免跨层硬编码。 */
+/** 生图错误码 → 用户可见文案。http/鉴权类错误尽量附上厂商 detail（已脱敏）。 */
 function mapImageGenError(error: string, detail?: string): string {
+  const extra = detail?.trim() ?? "";
   switch (error) {
     case "notConfigured":
       return t("imagegen.error.notConfigured");
     case "invalidKey":
-      return t("imagegen.error.invalidKey");
+      return extra
+        ? t("imagegen.error.invalidKeyDetail", { detail: extra })
+        : t("imagegen.error.invalidKey");
     case "badBaseUrl":
-      return t("imagegen.error.badBaseUrl");
+      return extra
+        ? t("imagegen.error.badBaseUrlDetail", { detail: extra })
+        : t("imagegen.error.badBaseUrl");
     case "empty":
       return t("imagegen.error.empty");
     case "http":
-      return t("imagegen.error.http", { detail: detail ?? "" });
+      return extra
+        ? t("imagegen.error.http", { detail: extra })
+        : t("imagegen.status.error");
     default:
       return t("imagegen.error.network");
   }

@@ -99,6 +99,61 @@ test("reconcileRuns detects content changes inside a run", () => {
 	assert.equal(second[0], run1Changed);
 });
 
+function makeImageGenRun(status, errorDetail) {
+	return {
+		kind: "agent-run",
+		id: "run-image",
+		items: [
+			{
+				kind: "message",
+				message: {
+					id: "img-1",
+					agentId: "",
+					role: "assistant",
+					text: "",
+					stopReason: "stop",
+					timestamp: 1,
+					meta: {
+						imageGen: {
+							status,
+							prompt: "a cat",
+							size: "1024x1024",
+							...(errorDetail ? { errorDetail } : {}),
+						},
+					},
+				},
+			},
+		],
+		startedAt: 1,
+		endedAt: 2,
+	};
+}
+
+// 厂商拒绝生图时只改 meta.imageGen.status（文本/图片都不变）。
+// 漏比这项会复用 generating 的旧 run，界面一直转圈，直到切标签卸载重挂。
+test("reconcileRuns does not reuse an image-gen run when status flips to error", () => {
+	const { sameAgentRunForRender, reconcileRuns } = loadAppUtils();
+	const generating = makeImageGenRun("generating");
+	const failed = makeImageGenRun("error", "API refused the request");
+
+	assert.equal(sameAgentRunForRender(generating, generating), true);
+	assert.equal(
+		sameAgentRunForRender(generating, makeImageGenRun("generating")),
+		true,
+		"identical generating placeholders should still compare equal",
+	);
+	assert.equal(
+		sameAgentRunForRender(generating, failed),
+		false,
+		"imageGen status change must be visible to TurnRow memo",
+	);
+
+	const first = reconcileRuns(undefined, [generating]);
+	const second = reconcileRuns(first, [failed]);
+	assert.notEqual(second[0], generating, "error state must not reuse generating run");
+	assert.equal(second[0], failed);
+});
+
 test("reconcileRuns removes stale runs when next shrinks", () => {
 	const { reconcileRuns } = loadAppUtils();
 	const run1 = makeRun("run-1", "a");

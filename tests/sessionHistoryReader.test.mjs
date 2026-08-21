@@ -385,6 +385,7 @@ test("getRecentActiveEntryIds returns the last N active message ids", async () =
     const ids = await reader.getRecentActiveEntryIds(sessionPath, 2);
     // loadTsCommonJs 走另一 realm，Array 不能 deepEqual 字面量。
     assert.equal(JSON.stringify(ids), JSON.stringify(["u2", "a2"]));
+    assert.equal(await reader.getActiveLeafId(sessionPath), "a2");
     const full = await reader.readMessageFullText(sessionPath, "missing", "a1");
     assert.equal(full.text, "a1");
   } finally {

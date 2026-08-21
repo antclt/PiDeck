@@ -5,6 +5,7 @@
 
 import { ipcMain, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import { isDshPermissionPreset } from "../../shared/types/agent";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import type {
 	CreateSessionDraftInput,
@@ -276,13 +277,45 @@ function sessionCommandIpcError(
 	appLogger: Pick<AppLogger, "warn">,
 	mainCopy: (key: string, params?: Record<string, string | number>) => string,
 ): SessionCommandIpcError {
-	if (error.debugDetails) {
-		void appLogger.warn("session-command", "Session command failed", {
-			code: error.code,
-			debugDetails: error.debugDetails,
+	logSessionCommandFailure(appLogger, error);
+	return new SessionCommandIpcError(error, mainCopy);
+}
+
+/**
+ * 会话命令失败日志：edit/delete/resend 等 IPC 直接返回 SessionCommandResult，
+ * 不走 sessionCommandIpcError 抛错，漏打这条就会出现「toast 失败、主进程无日志」。
+ */
+function logSessionCommandFailure(
+	appLogger: Pick<AppLogger, "warn">,
+	error: SessionCommandError,
+	extra?: Record<string, unknown>,
+): void {
+	if (!error.debugDetails && extra === undefined) return;
+	void appLogger.warn("session-command", "Session command failed", {
+		code: error.code,
+		...(error.debugDetails ? { debugDetails: error.debugDetails } : {}),
+		...extra,
+	});
+}
+
+async function handleSessionCommandResult<T>(
+	appLogger: Pick<AppLogger, "warn">,
+	operation: string,
+	target: SessionRuntimeTarget,
+	extra: Record<string, unknown>,
+	run: () => Promise<SessionCommandResult<T>>,
+): Promise<SessionCommandResult<T>> {
+	const result = await run();
+	if (!result.ok) {
+		logSessionCommandFailure(appLogger, result.error, {
+			operation,
+			sessionId: target.sessionId,
+			agentId: target.agentId,
+			runtimeGeneration: target.runtimeGeneration,
+			...extra,
 		});
 	}
-	return new SessionCommandIpcError(error, mainCopy);
+	return result;
 }
 
 export function registerSessionIpc(deps: SessionIpcDeps): void {
@@ -1121,6 +1154,75 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return result;
 		},
 	);
+	// catalog 级消息改写：按 sessionId 操作 JSONL，不要求 live runtime。
+	// 运行中必须先停（coordinator 拒绝 SESSION_RUNTIME_BUSY）；入参在边界校验。
+	ipcMain.handle(
+		ipcChannels.sessionsCatalogEditMessage,
+		async (_event, sessionId: unknown, messageId: unknown, newText: unknown) => {
+			if (typeof sessionId !== "string" || !sessionId.trim()) {
+				throw new Error("Invalid catalog edit-message request");
+			}
+			if (typeof messageId !== "string" || !messageId.trim()) {
+				throw new Error("Invalid catalog edit-message request");
+			}
+			if (typeof newText !== "string") {
+				throw new Error("Invalid catalog edit-message request");
+			}
+			const result = await sessionRuntimeCoordinator.editCatalogMessage(
+				sessionId,
+				messageId,
+				newText,
+			);
+			if (!result.ok) {
+				logSessionCommandFailure(appLogger, result.error, {
+					operation: "editCatalogMessage",
+					sessionId,
+					messageId,
+				});
+			}
+			return result;
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsCatalogDeleteMessage,
+		async (_event, sessionId: unknown, messageId: unknown) => {
+			if (typeof sessionId !== "string" || !sessionId.trim()) {
+				throw new Error("Invalid catalog delete-message request");
+			}
+			if (typeof messageId !== "string" || !messageId.trim()) {
+				throw new Error("Invalid catalog delete-message request");
+			}
+			const result = await sessionRuntimeCoordinator.deleteCatalogMessage(sessionId, messageId);
+			if (!result.ok) {
+				logSessionCommandFailure(appLogger, result.error, {
+					operation: "deleteCatalogMessage",
+					sessionId,
+					messageId,
+				});
+			}
+			return result;
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsCatalogPrepareResend,
+		async (_event, sessionId: unknown, messageId: unknown) => {
+			if (typeof sessionId !== "string" || !sessionId.trim()) {
+				throw new Error("Invalid catalog prepare-resend request");
+			}
+			if (typeof messageId !== "string" || !messageId.trim()) {
+				throw new Error("Invalid catalog prepare-resend request");
+			}
+			const result = await sessionRuntimeCoordinator.prepareCatalogResend(sessionId, messageId);
+			if (!result.ok) {
+				logSessionCommandFailure(appLogger, result.error, {
+					operation: "prepareCatalogResend",
+					sessionId,
+					messageId,
+				});
+			}
+			return result;
+		},
+	);
 	ipcMain.handle(
 		ipcChannels.sessionsSendPrompt,
 		async (_event, input: SendSessionPromptInput) => {
@@ -1329,17 +1431,35 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(
 		ipcChannels.sessionsRuntimeEditMessage,
 		(_event, target: SessionRuntimeTarget, messageId: string, newText: string) =>
-			sessionRuntimeCoordinator.editRuntimeMessage(target, messageId, newText),
+			handleSessionCommandResult(
+				appLogger,
+				"editRuntimeMessage",
+				target,
+				{ messageId },
+				() => sessionRuntimeCoordinator.editRuntimeMessage(target, messageId, newText),
+			),
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsRuntimeDeleteMessage,
 		(_event, target: SessionRuntimeTarget, messageId: string) =>
-			sessionRuntimeCoordinator.deleteRuntimeMessage(target, messageId),
+			handleSessionCommandResult(
+				appLogger,
+				"deleteRuntimeMessage",
+				target,
+				{ messageId },
+				() => sessionRuntimeCoordinator.deleteRuntimeMessage(target, messageId),
+			),
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsRuntimePrepareResend,
 		(_event, target: SessionRuntimeTarget, messageId: string) =>
-			sessionRuntimeCoordinator.prepareRuntimeResend(target, messageId),
+			handleSessionCommandResult(
+				appLogger,
+				"prepareRuntimeResend",
+				target,
+				{ messageId },
+				() => sessionRuntimeCoordinator.prepareRuntimeResend(target, messageId),
+			),
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsRuntimeSetModel,
@@ -1354,6 +1474,23 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		ipcChannels.sessionsRuntimeSetThinking,
 		(_event, target: SessionRuntimeTarget, level: string) =>
 				sessionRuntimeCoordinator.setRuntimeThinking(target, level),
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsRuntimeSetPermission,
+		(_event, target: SessionRuntimeTarget, preset: string) => {
+			// Renderer input is untrusted: reject values outside DSH's finite preset
+			// set before they can reach the backend or be persisted in the catalog.
+			if (!isDshPermissionPreset(preset)) {
+				return Promise.resolve({
+					ok: false as const,
+					error: {
+						code: "SESSION_COMMAND_FAILED" as const,
+						debugDetails: `Unsupported DSH permission preset: ${String(preset)}`,
+					},
+				});
+			}
+			return sessionRuntimeCoordinator.setRuntimePermission(target, preset);
+		},
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsRuntimeClone,

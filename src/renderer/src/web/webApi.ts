@@ -127,6 +127,14 @@ export function setRuntimeThinking(
 	return callRuntimeCommand(target.sessionId, target, "thinking", { level });
 }
 
+/** 运行中的 DSH 权限切换走 runtime 命令，避免 `/permission` 进入普通消息流。 */
+export function setRuntimePermission(
+	target: SessionRuntimeTarget,
+	preset: string,
+): Promise<unknown> {
+	return callRuntimeCommand(target.sessionId, target, "permission", { preset });
+}
+
 /** 手机/Web 端回答 ask_question / confirm / input。 */
 export async function respondToUi(input: {
 	sessionId: string;

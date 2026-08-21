@@ -87,11 +87,13 @@ function createService({ credentials, fetchStub, log = () => {} }) {
 }
 
 /** 极简 Response 替身（只实现 service 用到的字段） */
-function fakeResponse({ ok, status = 200, json, arrayBuffer, headers = new Map() }) {
+function fakeResponse({ ok, status = 200, json, text, arrayBuffer, headers = new Map() }) {
+	const jsonFn = json ?? (async () => ({}));
 	return {
 		ok,
 		status,
-		json: json ?? (async () => ({})),
+		json: jsonFn,
+		text: text ?? (async () => JSON.stringify(await jsonFn())),
 		arrayBuffer: arrayBuffer ?? (async () => new Uint8Array(0)),
 		headers: { get: (name) => headers.get(name) ?? null },
 	};
@@ -259,6 +261,30 @@ test("其他非 2xx → http（detail 带状态码）", async () => {
 	const result = await service.generate({ provider: "p", model: "m", prompt: "x" });
 	assert.equal(result.error, "http");
 	assert.equal(result.detail, "500");
+	restore();
+});
+
+test("非 2xx 时 detail 带厂商错误正文，并脱敏 key", async () => {
+	const { service, restore } = createService({
+		credentials: CREDENTIALS,
+		fetchStub: () => fakeResponse({
+			ok: false,
+			status: 400,
+			json: async () => ({
+				error: {
+					message: "Your prompt was rejected. Use sk-abcdefghijklmnopqrstuvwxyz instead.",
+					code: "content_policy",
+				},
+			}),
+		}),
+	});
+	const result = await service.generate({ provider: "p", model: "m", prompt: "x" });
+	assert.equal(result.error, "http");
+	assert.match(result.detail, /^400: /);
+	assert.match(result.detail, /Your prompt was rejected/);
+	assert.match(result.detail, /content_policy/);
+	assert.doesNotMatch(result.detail, /sk-abcdefghijklmnopqrstuvwxyz/);
+	assert.match(result.detail, /sk-\*\*\*/);
 	restore();
 });
 

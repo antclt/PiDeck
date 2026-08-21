@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import { atomFamily } from "jotai/utils";
 import type { SessionRecord, SessionSummary } from "../../../shared/types";
 import {
+  sessionHistoryMutationOverlayByIdAtom,
   sessionIdsByProjectAtom,
   sessionRecordsAtom,
   sessionRuntimeByIdAtom,
@@ -75,4 +76,8 @@ export const sessionIdByRuntimeAgentIdAtomFamily = atomFamily((agentId: string) 
 
 export const sessionRuntimeUiBySessionIdAtomFamily = atomFamily((sessionId: string) =>
   atom((get) => get(sessionRuntimeUiByIdAtom)[sessionId]),
+);
+
+export const sessionHistoryMutationOverlayBySessionIdAtomFamily = atomFamily((sessionId: string) =>
+  atom((get) => get(sessionHistoryMutationOverlayByIdAtom)[sessionId]),
 );

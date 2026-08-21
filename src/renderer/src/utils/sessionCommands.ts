@@ -37,6 +37,28 @@ export function requireSessionCommand<T>(result: SessionCommandResult<T>): T {
 	throw new SessionCommandFailure(result.error);
 }
 
+const DEBUG_DETAILS_TOAST_MAX = 140;
+
+/**
+ * 会话命令失败 toast：稳定 i18n 文案不够定位时（如「会话操作失败，请重试」），
+ * 附带 debugDetails 原文，避免用户只能看到泛化失败、开发者也看不到日志。
+ */
+export function sessionCommandFailureToast(
+	error: unknown,
+	translateRaw?: (message: string) => string,
+): string {
+	const raw = error instanceof Error ? error.message : String(error);
+	const message = translateRaw ? translateRaw(raw) : raw;
+	const details = error instanceof SessionCommandFailure
+		? error.debugDetails?.trim()
+		: undefined;
+	if (!details || details === raw || details === message) return message;
+	const clipped = details.length > DEBUG_DETAILS_TOAST_MAX
+		? `${details.slice(0, DEBUG_DETAILS_TOAST_MAX)}…`
+		: details;
+	return `${message}（${clipped}）`;
+}
+
 export function toSessionRuntimeTarget(
 	sessionId: string,
 	runtime: { agentId?: string; runtimeGeneration?: number } | undefined,
