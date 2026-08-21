@@ -16,6 +16,7 @@ export * from "./types/usageStats";
 export * from "./types/processMetrics";
 export * from "./types/diagnostics";
 export * from "./types/vision";
+export * from "./types/imagegen";
 export * from "./types/security";
 export * from "./types/modelSpecs";
 export * from "./types/fetchedModel";

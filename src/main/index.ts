@@ -280,8 +280,9 @@ import { registerTerminalIpc } from "./ipc/terminalIpc";
 import { registerScratchPadIpc } from "./ipc/scratchPadIpc";
 import { registerSecurityIpc } from "./ipc/securityIpc";
 import { registerVisionIpc } from "./ipc/visionIpc";
-import { registerImageGenIpc, resolveProviderCredentials } from "./ipc/imagegenIpc";
+import { registerImageGenIpc } from "./ipc/imagegenIpc";
 import { ImageGenService } from "./imagegen/ImageGenService";
+import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
 import { registerSystemIpc } from "./ipc/systemIpc";
@@ -2449,19 +2450,27 @@ function registerIpc() {
 		log: (message, ...args) => appLogger.info("vision", message, ...args),
 	});
 
-	// 生图：复用 pi 已配置的模型供应商（models.json/auth.json），结果回 composer 附件栏
+	// 生图：凭据来自独立 userData/imagegen.json，不读 pi models.json
+	const imageGenConfigStore = new ImageGenConfigStore({
+		getConfigPath: () => join(app.getPath("userData"), "imagegen.json"),
+		log: (message, ...args) => appLogger.info("imagegen", message, ...args),
+	});
 	registerImageGenIpc({
 		imageGen: new ImageGenService({
-			getProviderCredentials: (provider) => resolveProviderCredentials(configManager, provider),
+			getProviderCredentials: async (provider) => {
+				const creds = await imageGenConfigStore.getCredentials(provider);
+				if (!creds) return null;
+				return { baseUrl: creds.baseUrl, apiKey: creds.apiKey, extraParams: creds.extraParams };
+			},
 			log: (message, ...args) => appLogger.info("imagegen", message, ...args),
 		}),
-		configManager,
+		imageGenConfig: imageGenConfigStore,
 		log: (message, ...args) => appLogger.info("imagegen", message, ...args),
 		// 生图记录落盘：user 提示词 + assistant 图片两条消息写入 pi 会话文件，
 		// 让「不走 pi/dsh 直连 API」的生图结果也进会话历史（重启后可见）。
 		// DSH 会话无 pi 会话文件且 host 无消息追加 API，跳过（生图仍正常返回）。
 		// agentManager/sessionCatalog 在此处尚未初始化，闭包延迟引用（IPC 调用时已就绪）。
-		persistImageGen: async ({ sessionId, provider, model, prompt, image }) => {
+		persistImageGen: async ({ sessionId, provider, model, prompt, image, size }) => {
 			const entry = sessionCatalog?.get(sessionId);
 			if (!entry || entry.backend === "dsh" || !entry.filePath) return;
 			await agentManager?.appendLocalMessagesToSession(entry.filePath, [
@@ -2485,7 +2494,7 @@ function registerIpc() {
 						model,
 						// 历史恢复依赖这个标记区分生图结果与普通图片附件，
 						// 否则重启后会退回普通图片渲染，丢失复制/保存操作。
-						imageGen: { status: "complete", prompt },
+						imageGen: { status: "complete", prompt, size },
 					},
 				},
 			]);

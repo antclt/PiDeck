@@ -751,7 +751,11 @@ export class SessionCatalog {
 					byOrigin.set(originKey, entry);
 					changed = true;
 				} else {
-					const nextTitle = catalogDisplayTitle(summary.name) || catalogDisplayTitle(entry.title) || entry.title;
+					// 旧 catalog 可能已经保存了时间戳文件名；不能在清洗失败时用 entry.title 回退，
+					// 否则每次扫描都会把这个错误标题原样保留下来，重启后仍显示时间戳。
+					const nextTitle = catalogDisplayTitle(summary.name)
+						|| catalogDisplayTitle(entry.title)
+						|| scannedFileStemTitle(summary.filePath);
 					if (
 						entry.projectId !== projectId ||
 						entry.filePath !== summary.filePath ||

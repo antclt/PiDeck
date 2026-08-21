@@ -17,7 +17,7 @@ export type SessionOriginInput = {
 export function looksLikePiSessionFileStem(title: string): boolean {
 	const trimmed = title.replace(/\s+/g, " ").trim();
 	// 秒后的毫秒在文件名里是 `-239`，不是 ISO 的 `.239`。
-	return /^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}(?:[.,-]\d+)?Z(?:_[A-Za-z0-9]+)?$/.test(
+	return /^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}(?:[.,-]\d+)?Z(?:_[A-Za-z0-9-]+)?$/.test(
 		trimmed,
 	);
 }

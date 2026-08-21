@@ -164,7 +164,7 @@ let previewSettings: AppSettings = {
 	fontFamilyMono: "system-mono",
 	fontFamilyMonoCustom: "",
 	removedBuiltInExtensions: [],
-	imageGenSize: "1024x1024",
+	imageGenSize: "unset",
 	imageGenWatermark: false,
 	imageGenOutputFormat: "png",
 	disableUpdateCheck: false,
@@ -1107,6 +1107,8 @@ export function createPreviewApi(): PiDesktopApi {
 		// 生图预览桩：预览模式不联网，直接返回未配置
 		imagegen: {
 			generate: async (_request) => ({ ok: false, error: "notConfigured" }),
+			getConfig: async () => ({ providers: [], activeProviderId: "", activeModel: "" }),
+			saveConfig: async (config) => ({ ok: true, config }),
 		},
 	};
 }

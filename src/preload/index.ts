@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
-import type { ImageGenRequest, ImageGenResult } from "../shared/types/imagegen";
+import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
 import type {
 	YaoPromptListResult,
 	YaoPromptDetailResult,
@@ -1515,10 +1515,14 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.scratchPadExport, draftPath) as Promise<boolean>,
 	},
 
-	// ── 生图：OpenAI 兼容 /images/generations，返回 base64 图片（复用模型页已配的供应商）──
+	// ── 生图：独立 imagegen.json 凭据 + OpenAI 兼容 /images/generations ──
 	imagegen: {
 		generate: (request: ImageGenRequest) =>
 			ipcRenderer.invoke(ipcChannels.imagegenGenerate, request) as Promise<ImageGenResult>,
+		getConfig: () =>
+			ipcRenderer.invoke(ipcChannels.imagegenGetConfig) as Promise<ImageGenConfigFile>,
+		saveConfig: (config: ImageGenConfigFile) =>
+			ipcRenderer.invoke(ipcChannels.imagegenSaveConfig, config) as Promise<ImageGenSaveResult>,
 	},
 };
 

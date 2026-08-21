@@ -1,0 +1,177 @@
+/**
+ * 生图独立配置（不进 pi models.json / auth.json）。
+ *
+ * 接口一律按 OpenAI 兼容 /images/generations 发；火山只是换 baseUrl + 额外字段。
+ * 用户不选 API 类型，只配名称 / baseUrl / apiKey / 模型，再勾选该供应商真正支持的字段。
+ */
+
+/** 官方字段名：勾选后 composer 才出对应控件，请求体才带该字段。 */
+export const IMAGE_GEN_EXTRA_PARAMS = ["size", "output_format", "watermark"] as const;
+export type ImageGenExtraParam = (typeof IMAGE_GEN_EXTRA_PARAMS)[number];
+
+export type ImageGenProviderExtraParams = {
+	size: boolean;
+	output_format: boolean;
+	watermark: boolean;
+};
+
+/** 新供应商默认全关：没勾选就不发，避免 OpenAI 官方因未知字段 400。 */
+export const DEFAULT_IMAGE_GEN_EXTRA_PARAMS: ImageGenProviderExtraParams = {
+	size: false,
+	output_format: false,
+	watermark: false,
+};
+
+export type ImageGenProviderConfig = {
+	id: string;
+	name: string;
+	baseUrl: string;
+	apiKey: string;
+	/** 该供应商下可选的生图模型 id（拉取或手填） */
+	models: string[];
+	/** 该供应商支持、需要发送的官方字段 */
+	extraParams: ImageGenProviderExtraParams;
+};
+
+export type ImageGenConfigFile = {
+	providers: ImageGenProviderConfig[];
+	/** composer 上次选中的供应商；空 = 尚未选择 */
+	activeProviderId: string;
+	/** composer 上次选中的模型 id */
+	activeModel: string;
+};
+
+export const EMPTY_IMAGE_GEN_CONFIG: ImageGenConfigFile = {
+	providers: [],
+	activeProviderId: "",
+	activeModel: "",
+};
+
+const MAX_NAME = 64;
+const MAX_URL = 512;
+const MAX_KEY = 512;
+const MAX_MODEL_ID = 128;
+const MAX_MODELS = 80;
+const MAX_PROVIDERS = 20;
+const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$/;
+
+function sanitizeId(value: unknown, fallback: string): string {
+	if (typeof value === "string" && ID_RE.test(value.trim())) return value.trim();
+	return fallback;
+}
+
+function uniqueModels(values: unknown): string[] {
+	if (!Array.isArray(values)) return [];
+	const seen = new Set<string>();
+	const models: string[] = [];
+	for (const item of values) {
+		if (typeof item !== "string") continue;
+		const id = item.trim().slice(0, MAX_MODEL_ID);
+		if (!id || seen.has(id)) continue;
+		seen.add(id);
+		models.push(id);
+		if (models.length >= MAX_MODELS) break;
+	}
+	return models;
+}
+
+/**
+ * 解析 extraParams。旧文件只有 kind=ark、没有 extraParams 时，默认打开火山三项，
+ * 避免升级后底栏参数突然消失。
+ */
+export function sanitizeImageGenExtraParams(
+	value: unknown,
+	legacyKind?: unknown,
+): ImageGenProviderExtraParams {
+	if (value && typeof value === "object" && !Array.isArray(value)) {
+		const raw = value as Record<string, unknown>;
+		return {
+			size: raw.size === true,
+			output_format: raw.output_format === true,
+			watermark: raw.watermark === true,
+		};
+	}
+	if (legacyKind === "ark") {
+		return { size: true, output_format: true, watermark: true };
+	}
+	return { ...DEFAULT_IMAGE_GEN_EXTRA_PARAMS };
+}
+
+/**
+ * 白名单校验生图配置。非法字段丢弃；整份不是对象则返回空配置。
+ * apiKey 允许写入（与 auth.json 同级信任域），调用方禁止记入日志。
+ * 旧 kind 字段只用于 extraParams 迁移，落盘不再写出。
+ */
+export function sanitizeImageGenConfig(input: unknown): ImageGenConfigFile {
+	if (typeof input !== "object" || input === null || Array.isArray(input)) {
+		return { ...EMPTY_IMAGE_GEN_CONFIG };
+	}
+	const raw = input as Record<string, unknown>;
+	const providersIn = Array.isArray(raw.providers) ? raw.providers : [];
+	const providers: ImageGenProviderConfig[] = [];
+	const seenIds = new Set<string>();
+	for (let index = 0; index < providersIn.length && providers.length < MAX_PROVIDERS; index += 1) {
+		const item = providersIn[index];
+		if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+		const row = item as Record<string, unknown>;
+		const fallbackId = `ig-${index + 1}`;
+		const id = sanitizeId(row.id, fallbackId);
+		if (seenIds.has(id)) continue;
+		seenIds.add(id);
+		const name =
+			typeof row.name === "string" && row.name.trim()
+				? row.name.trim().slice(0, MAX_NAME)
+				: "Image";
+		const baseUrl =
+			typeof row.baseUrl === "string" && /^https?:\/\/[^\s]+$/i.test(row.baseUrl.trim())
+				? row.baseUrl.trim().replace(/\/+$/, "").slice(0, MAX_URL)
+				: "";
+		const apiKey = typeof row.apiKey === "string" ? row.apiKey.trim().slice(0, MAX_KEY) : "";
+		providers.push({
+			id,
+			name,
+			baseUrl,
+			apiKey,
+			models: uniqueModels(row.models),
+			extraParams: sanitizeImageGenExtraParams(row.extraParams, row.kind),
+		});
+	}
+	const requestedProvider =
+		typeof raw.activeProviderId === "string" ? raw.activeProviderId.trim() : "";
+	const activeProvider =
+		providers.find((provider) => provider.id === requestedProvider) ?? providers[0];
+	const requestedModel = typeof raw.activeModel === "string" ? raw.activeModel.trim().slice(0, MAX_MODEL_ID) : "";
+	const activeModel = activeProvider
+		? activeProvider.models.includes(requestedModel)
+			? requestedModel
+			: (activeProvider.models[0] ?? "")
+		: "";
+	return {
+		providers,
+		activeProviderId: activeProvider?.id ?? "",
+		activeModel,
+	};
+}
+
+export function findImageGenProvider(
+	config: ImageGenConfigFile,
+	providerId: string,
+): ImageGenProviderConfig | undefined {
+	return config.providers.find((provider) => provider.id === providerId);
+}
+
+/** 底栏合并选择器用：供应商 id 与模型 id 用 ASCII Unit Separator 拼接，避免模型 id 含 `/` 时拆错。 */
+const IMAGE_GEN_SELECTION_SEP = "\u001f";
+
+export function encodeImageGenSelection(providerId: string, modelId: string): string {
+	return `${providerId}${IMAGE_GEN_SELECTION_SEP}${modelId}`;
+}
+
+export function decodeImageGenSelection(value: string): { providerId: string; modelId: string } | null {
+	const index = value.indexOf(IMAGE_GEN_SELECTION_SEP);
+	if (index <= 0) return null;
+	const providerId = value.slice(0, index);
+	const modelId = value.slice(index + 1);
+	if (!providerId || !modelId) return null;
+	return { providerId, modelId };
+}

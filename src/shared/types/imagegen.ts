@@ -1,23 +1,26 @@
 import type { ImageContent } from "./session";
+import type { ImageGenConfigFile } from "../imageGenConfig";
+
+export type { ImageGenConfigFile, ImageGenProviderConfig, ImageGenProviderExtraParams } from "../imageGenConfig";
 
 /**
- * 生图请求：复用 pi 已配置的模型供应商（models.json / auth.json），
- * 不额外维护生图配置——用户在模型页配好 baseUrl/apiKey 后即可用于生图。
+ * 生图请求：凭据来自独立 imagegen.json，不再读 pi models.json。
+ * provider 是生图配置里的供应商 id（不是会话 LLM provider）。
  */
 export type ImageGenRequest = {
-	/** 供应商名（对应 models.json providers 的 key） */
+	/** 生图供应商 id（imagegen.json providers[].id）；空则用上次选中的 */
 	provider: string;
-	/** 生图模型 id（用户在下拉里选中的模型） */
+	/** 生图模型 id */
 	model: string;
 	/** 提示词 */
 	prompt: string;
 	/** 可选：所属会话 id。提供时生图结果会以 user+assistant 消息落盘到该会话的 pi 文件。 */
 	sessionId?: string;
-	/** 尺寸：OpenAI WxH（如 1024x1024）或火山 1K/2K/4K */
+	/** 尺寸：官方 size。仅供应商勾选 extraParams.size 时发送 */
 	size?: string;
-	/** 水印：火山方舟 watermark；OpenAI 官方端点不会发送该字段 */
+	/** 水印：官方 watermark。仅勾选 extraParams.watermark 时发送 */
 	watermark?: boolean;
-	/** 文件编码：火山 output_format png|jpeg；OpenAI 官方端点不会发送 */
+	/** 文件编码：官方 output_format。仅勾选 extraParams.output_format 时发送 */
 	outputFormat?: string;
 };
 
@@ -25,7 +28,7 @@ export type ImageGenRequest = {
  * 生图失败错误码（主进程只回结构化错误码，文案由渲染层 i18n 映射，避免跨层硬编码）。
  */
 export type ImageGenErrorCode =
-	/** 供应商缺少 baseUrl/apiKey（去模型页补配） */
+	/** 独立生图配置缺少供应商 / baseUrl / apiKey / 模型 */
 	| "notConfigured"
 	/** API Key 无效（401/403） */
 	| "invalidKey"
@@ -52,6 +55,12 @@ export type ImageGenMeta = {
 	status: "generating" | "complete" | "error";
 	/** 触发生图的提示词（渲染层展示引用） */
 	prompt: string;
+	/** 实际请求的尺寸；历史消息用它恢复右上角尺寸标记。 */
+	size?: string;
 	/** 失败时的详细错误文案（已 i18n），status=error 时展示 */
 	errorDetail?: string;
 };
+
+export type ImageGenSaveResult =
+	| { ok: true; config: ImageGenConfigFile }
+	| { ok: false; error: string };

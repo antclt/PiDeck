@@ -8,12 +8,8 @@ import {
 	Eye,
 	FileText,
 	GitBranch,
-	ImageIcon,
-	ListChecks,
 	Paperclip,
-	Target,
 	Star,
-	Wrench,
 	X,
 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
@@ -36,6 +32,8 @@ import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
+import { ComposerModeSelect } from "./ComposerModeSelect";
+import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
 import { SessionContextMeter } from "./SessionContextMeter";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
 import {
@@ -235,14 +233,20 @@ export function ComposerBottomBar(props: {
 	onPickPromptTemplate: () => void;
 	onPickThinking: () => void;
 	onCompact: () => void;
-	onOpenComposerModePicker: () => void;
+	onChangeMode: (mode: ComposerAgentMode) => void;
+	/** 会话已有生图消息时锁定生图模式，下拉不可切走。 */
+	imageGenLocked?: boolean;
 	onCancelPlan: () => void;
 	onAttachFile: () => void;
-	/** 生图模式底栏参数；非 imagegen 时不传 */
+	/** 生图模式底栏参数；非 imagegen 时不传。凭据来自独立 imagegen.json。 */
 	imageGenOptions?: {
+		config: ImageGenConfigFile;
+		providerId: string;
+		modelId: string;
 		size: string;
 		outputFormat: string;
 		watermark: boolean;
+		onSelectionChange: (providerId: string, modelId: string) => void;
 		onSizeChange: (size: string) => void;
 		onOutputFormatChange: (format: string) => void;
 		onWatermarkChange: (watermark: boolean) => void;
@@ -281,13 +285,6 @@ export function ComposerBottomBar(props: {
 	const isImageGenMode = props.composerAgentMode === "imagegen";
 	const isGoalMode = props.composerAgentMode === "goal";
 	const isSpecialMode = isPlanMode || isImageGenMode || isGoalMode;
-	const modeLabel = isPlanMode
-		? t("app.composerModePlan")
-		: isImageGenMode
-			? t("app.composerModeImagegen")
-			: isGoalMode
-				? t("app.composerModeGoal")
-				: t("app.composerModeNormal");
 	const liveModel = {
 		provider: props.state?.provider ?? props.record?.model?.provider ?? (isDsh ? props.defaultModel?.provider : welcomePreference?.model?.provider) ?? "",
 		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelId : welcomePreference?.model?.modelId) ?? "",
@@ -350,38 +347,13 @@ export function ComposerBottomBar(props: {
 							isSpecialMode && "bg-bg-hover pr-0.5",
 						)}
 					>
-						<Button
-							variant="ghost"
-							size="sm"
-							className={cn(
-								"composer-bar-btn mode h-7 gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60",
-								isSpecialMode && "hover:bg-transparent",
-							)}
+						<ComposerModeSelect
+							value={props.composerAgentMode}
+							backend={props.backend}
 							disabled={props.disabled}
-							onClick={props.onOpenComposerModePicker}
-							aria-haspopup="dialog"
-							title={t("app.composerModeTitle")}
-						>
-							{isPlanMode ? (
-								<ListChecks size={15} strokeWidth={2} aria-hidden="true" />
-							) : isImageGenMode ? (
-								<ImageIcon size={15} strokeWidth={2} aria-hidden="true" />
-							) : isGoalMode ? (
-								<Target size={15} strokeWidth={2} aria-hidden="true" />
-							) : (
-								<Wrench size={15} strokeWidth={2} aria-hidden="true" />
-							)}
-							{/* 模式按钮文案：特殊模式不加粗；普通模式用小一号斜体弱化。 */}
-							<span
-								className={cn(
-									isSpecialMode
-										? "text-control font-normal"
-										: "text-micro italic font-normal text-muted-foreground",
-								)}
-							>
-								{modeLabel}
-							</span>
-						</Button>
+							imageGenLocked={props.imageGenLocked}
+							onChange={props.onChangeMode}
+						/>
 						{(isPlanMode || isGoalMode) && (
 							<button
 								type="button"
@@ -413,10 +385,14 @@ export function ComposerBottomBar(props: {
 					</Button>
 					{isImageGenMode && props.imageGenOptions ? (
 						<ComposerImageGenOptions
+							config={props.imageGenOptions.config}
+							providerId={props.imageGenOptions.providerId}
+							modelId={props.imageGenOptions.modelId}
 							size={props.imageGenOptions.size}
 							outputFormat={props.imageGenOptions.outputFormat}
 							watermark={props.imageGenOptions.watermark}
 							disabled={props.disabled}
+							onSelectionChange={props.imageGenOptions.onSelectionChange}
 							onSizeChange={props.imageGenOptions.onSizeChange}
 							onOutputFormatChange={props.imageGenOptions.onOutputFormatChange}
 							onWatermarkChange={props.imageGenOptions.onWatermarkChange}
@@ -426,21 +402,20 @@ export function ComposerBottomBar(props: {
 					{props.securityControl}
 				</div>
 				<div className="composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4 overflow-hidden">
-					{/* 模型 + 思考合并为一个 chip（借鉴 dsh ModelSelect 的 trigger 形态）：
-					    模型名（primary tone）· 思考档位（caption tone）+ chevron；
-					    点击弹出 root 菜单（模型/思考两行），drill-in 复用既有 Dialog 选择器。
-					    pending（from→to）语义保留：待生效切换时两段均展示 from → to。 */}
-					<ModelThinkingChip
-						modelLabel={modelLabel}
-						modelPendingTo={modelDisplay.pending && modelTo ? (modelTo.modelName || modelTo.modelId) : undefined}
-						modelPendingTitle={modelPendingTitle}
-						thinkingText={thinkingText}
-						thinkingPendingTitle={thinkingPendingTitle}
-						disabled={props.modelDisabled ?? props.disabled}
-						thinkingDisabled={props.thinkingDisabled}
-						onPickModel={props.onPickModel}
-						onPickThinking={props.onPickThinking}
-					/>
+					{/* 生图模式用独立供应商/模型下拉，不展示会话 LLM chip，避免两套配置混用。 */}
+					{isImageGenMode ? null : (
+						<ModelThinkingChip
+							modelLabel={modelLabel}
+							modelPendingTo={modelDisplay.pending && modelTo ? (modelTo.modelName || modelTo.modelId) : undefined}
+							modelPendingTitle={modelPendingTitle}
+							thinkingText={thinkingText}
+							thinkingPendingTitle={thinkingPendingTitle}
+							disabled={props.modelDisabled ?? props.disabled}
+							thinkingDisabled={props.thinkingDisabled}
+							onPickModel={props.onPickModel}
+							onPickThinking={props.onPickThinking}
+						/>
+					)}
 					{/* DSH 压缩入口与 pi 统一：上下文圆环（右侧）常驻并带压缩按钮。
 					    2026-12 兼容期：dsh runtime state 已由主进程提供 contextPercent 兜底
 					    （request/context 的 contextWindow + 消息估算），圆环不再因缺数据隐藏，
@@ -728,69 +703,6 @@ export function ModelPicker(props: {
 					{groupedModels[provider].map(renderModelRow)}
 				</CommandPickerGroup>
 			))}
-		</CommandPickerDialog>
-	);
-}
-
-export function ComposerModePicker(props: {
-	currentMode: ComposerAgentMode;
-	planModeAvailable: boolean;
-	/** imagegen 是否可用（F6：DSH 后端无生图能力，隐藏入口）。缺省 true。 */
-	imagegenAvailable?: boolean;
-	/** 目标模式：DSH 恒可用；pi 由内置扩展 pi-deck-goal-mode 提供。缺省 false。 */
-	goalModeAvailable?: boolean;
-	onClose: () => void;
-	onPick: (mode: ComposerAgentMode) => void;
-}) {
-	const items = [
-		{
-			value: "normal" as const,
-			labelKey: "app.composerModeNormal" as const,
-			descriptionKey: "app.composerModeNormalDesc" as const,
-		},
-		...(props.planModeAvailable ? [{
-			value: "plan" as const,
-			labelKey: "app.composerModePlan" as const,
-			descriptionKey: "app.composerModePlanDesc" as const,
-		}] : []),
-		...(props.goalModeAvailable ? [{
-			value: "goal" as const,
-			labelKey: "app.composerModeGoal" as const,
-			descriptionKey: "app.composerModeGoalDesc" as const,
-		}] : []),
-		...(props.imagegenAvailable !== false ? [{
-			value: "imagegen" as const,
-			labelKey: "app.composerModeImagegen" as const,
-			descriptionKey: "app.composerModeImagegenDesc" as const,
-		}] : []),
-	];
-
-	return (
-		<CommandPickerDialog
-			title={t("app.composerModeTitle")}
-			onClose={props.onClose}
-			className="composer-mode-picker"
-			value={props.currentMode}
-		>
-			{items.map((item) => {
-				const selected = item.value === props.currentMode;
-				return (
-					<CommandItem
-						key={item.value}
-						value={item.value}
-						data-picker-value={item.value}
-						onSelect={() => props.onPick(item.value)}
-						className="min-h-9 items-center gap-2 rounded-md px-2.5 py-1"
-					>
-						<span className={`grid size-6 shrink-0 place-items-center rounded-md ${selected ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground"}`}>
-							{item.value === "plan" ? <ListChecks size={14} aria-hidden="true" /> : item.value === "imagegen" ? <ImageIcon size={14} aria-hidden="true" /> : item.value === "goal" ? <Target size={14} aria-hidden="true" /> : <Wrench size={14} aria-hidden="true" />}
-						</span>
-						{/* 弹窗项文案：普通/计划模式均不加粗，plan 用图标/选中态作为区分。 */}
-						<span className="min-w-0 flex-1 truncate text-control font-normal text-foreground" title={t(item.descriptionKey)}>{t(item.labelKey)}</span>
-						{selected ? <Check size={15} className="ml-auto shrink-0 text-primary" aria-hidden="true" /> : null}
-					</CommandItem>
-				);
-			})}
 		</CommandPickerDialog>
 	);
 }

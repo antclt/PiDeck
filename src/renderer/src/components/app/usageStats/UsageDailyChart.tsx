@@ -10,7 +10,15 @@ import { useMemo, useState } from "react";
 import type { UsageAggregated, UsageDayRow } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
-import { colorForProvider } from "./providerColors";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { ChartContainer, ChartTooltipContent } from "../../ui-shadcn/chart";
 import { formatTokens } from "./format";
 
 type RangeMode = "day" | "week" | "month";
@@ -85,8 +93,8 @@ const RANGE_LABELS: Record<RangeMode, string> = {
   month: t("usageStats.daily.rangeMonth"),
 };
 
-const CHART_HEIGHT = 140;
-const BAR_MIN_HEIGHT = 1;
+// 给低用量日期保留可悬停的最小柱高，并用透明命中区覆盖整根柱，避免只能点中 1px 图形。
+const CHART_HEIGHT = 240;
 
 export function UsageDailyChart(props: { data: UsageAggregated }) {
   const [mode, setMode] = useState<RangeMode>("day");
@@ -96,13 +104,21 @@ export function UsageDailyChart(props: { data: UsageAggregated }) {
     () => buildBuckets(data.daily, mode, new Date()),
     [data.daily, mode],
   );
-  const maxTokens = useMemo(
-    () => Math.max(1, ...buckets.map((b) => b.tokens)),
-    [buckets],
-  );
-
-  const width = Math.max(320, buckets.length * 22);
-  const barWidth = 14;
+  // provider 名可能包含 `/`、`.` 等字符，不能直接作为 CSS 变量名；使用稳定的
+  // provider key 避免 ChartContainer 生成无效变量后，Recharts 柱体退回黑色。
+  const providers = [...new Set(buckets.flatMap((bucket) => bucket.byProvider.map((item) => item.provider)))];
+  const providerKeys = providers.map((provider, index) => ({ provider, key: `provider_${index}` }));
+  const chartData = buckets.map((bucket) => ({
+    ...bucket,
+    ...Object.fromEntries(providerKeys.map(({ provider, key }) => [
+      key,
+      bucket.byProvider.find((item) => item.provider === provider)?.tokens ?? 0,
+    ])),
+  }));
+  const chartConfig = Object.fromEntries(providerKeys.map(({ provider, key }, index) => [
+    key,
+    { label: provider, color: `hsl(${(index * 67 + 250) % 360} 75% 65%)` },
+  ]));
 
   return (
     <div className="usage-stats-chart">
@@ -121,66 +137,17 @@ export function UsageDailyChart(props: { data: UsageAggregated }) {
       {buckets.length === 0 ? (
         <div className="usage-stats-hint">{t("usageStats.table.empty")}</div>
       ) : (
-        <svg
-          width={width}
-          height={CHART_HEIGHT}
-          viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
-          role="img"
-          aria-label={t("usageStats.daily.title")}
-        >
-          {buckets.map((bucket, index) => {
-            const x = index * 22 + 4;
-            const barHeight = Math.max(
-              BAR_MIN_HEIGHT,
-              (bucket.tokens / maxTokens) * (CHART_HEIGHT - 20),
-            );
-            const y = CHART_HEIGHT - 16 - barHeight;
-            let cursor = y;
-            const segments = bucket.byProvider
-              .slice()
-              .sort((a, b) => b.tokens - a.tokens)
-              .map((p) => {
-                const h = Math.max(
-                  BAR_MIN_HEIGHT,
-                  (p.tokens / maxTokens) * (CHART_HEIGHT - 20),
-                );
-                const seg = { ...p, y: cursor, h };
-                cursor += h;
-                return seg;
-              });
-            return (
-              <g key={index}>
-                <title>
-                  {t("usageStats.daily.tooltip", { label: bucket.label, tokens: formatTokens(bucket.tokens) })}
-                </title>
-                {segments.map((seg, si) => (
-                  <rect
-                    key={si}
-                    x={x}
-                    y={seg.y}
-                    width={barWidth}
-                    height={seg.h}
-                    fill={colorForProvider(seg.provider)}
-                    rx={1}
-                  >
-                    <title>
-                      {t("usageStats.daily.providerTooltip", { provider: seg.provider, tokens: formatTokens(seg.tokens) })}
-                    </title>
-                  </rect>
-                ))}
-                <text
-                  x={x + barWidth / 2}
-                  y={CHART_HEIGHT - 4}
-                  fontSize={8}
-                  fill="rgba(127,127,127,0.8)"
-                  textAnchor="middle"
-                >
-                  {bucket.label}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
+        <ChartContainer config={chartConfig} className="h-[240px] w-full aspect-auto">
+          <BarChart data={chartData} margin={{ top: 12, right: 16, left: 12, bottom: 4 }} barCategoryGap="28%">
+              <CartesianGrid vertical={false} stroke="var(--color-border-subtle)" />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
+              <YAxis tickLine={false} axisLine={false} width={58} tickFormatter={(value: number) => formatTokens(Number(value))} />
+              <Tooltip cursor={{ fill: "var(--color-muted)", opacity: 0.35 }} content={<ChartTooltipContent />} />
+              {providerKeys.map(({ provider, key }) => (
+                <Bar key={provider} dataKey={key} stackId="usage" fill={`var(--color-${key})`} radius={2} minPointSize={3} />
+              ))}
+          </BarChart>
+        </ChartContainer>
       )}
     </div>
   );

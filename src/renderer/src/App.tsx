@@ -27,7 +27,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom } from "./atoms/app-ui-atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, imageGenConfigAtom } from "./atoms";
 // 文件链接路由：图片类型走弹窗预览
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"]);
 const ConfigModal = lazy(() => import("./ConfigModal").then((m) => ({ default: m.ConfigModal })));
@@ -224,6 +224,7 @@ export function App() {
   const setSessionCatalogLoadState = useSetAtom(setSessionCatalogLoadStateAtom);
   const removeSessionState = useSetAtom(removeSessionStateAtom);
   const removeSessionComposerState = useSetAtom(removeSessionComposerStateAtom);
+  const setImageGenConfig = useSetAtom(imageGenConfigAtom);
   const currentSessionIdRef = useRef<string | undefined>(currentSessionId);
   currentSessionIdRef.current = currentSessionId;
   const openSessionRequestRef = useRef(0);
@@ -585,7 +586,7 @@ export function App() {
     fontFamilyMono: "system-mono",
     fontFamilyMonoCustom: "",
     removedBuiltInExtensions: [],
-    imageGenSize: "1024x1024",
+    imageGenSize: "unset",
     imageGenWatermark: false,
     imageGenOutputFormat: "png",
     disableUpdateCheck: false,
@@ -1481,6 +1482,7 @@ export function App() {
         document.title = info.devBranch ? `PiDeck · ${info.devBranch}` : "PiDeck";
       })
       .catch(() => undefined);
+    void api.imagegen.getConfig().then(setImageGenConfig).catch(() => undefined);
     void api.settings.get().then((next) => {
       setSettings(next);
       setSettingsLoaded(true);

@@ -23,9 +23,11 @@ import {
   parseImageGenSize,
   parseImageGenWatermark,
 } from "../../../shared/imageGenParams";
+import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import type { ImageGenMeta } from "../../../shared/types/imagegen";
 import {
   cacheSessionMessagesAtom,
+  imageGenConfigAtom,
   sessionAttachmentsByIdAtom,
   sessionComposerModeByIdAtom,
   sessionDraftByIdAtom,
@@ -127,7 +129,7 @@ function friendlyCompactError(error: unknown): string | null {
     : t("app.compactFailed");
 }
 
-export type ComposerPickerKind = "model" | "mode" | "thinking" | "template";
+export type ComposerPickerKind = "model" | "thinking" | "template";
 
 export type UseSessionComposerControllerOptions = {
   sessionId: string;
@@ -264,6 +266,9 @@ export function useSessionComposerController(
   const attachmentsBySession = useAtomValue(sessionAttachmentsByIdAtom);
   const modes = useAtomValue(sessionComposerModeByIdAtom);
   const sendStates = useAtomValue(sessionSendStateByIdAtom);
+  const messageCache = useAtomValue(sessionMessagesCacheAtom);
+  const imageGenConfig = useAtomValue(imageGenConfigAtom);
+  const setImageGenConfig = useSetAtom(imageGenConfigAtom);
   const setDraftAtom = useSetAtom(setSessionDraftAtom);
   const setAttachmentsAtom = useSetAtom(setSessionAttachmentsAtom);
   const setModeAtom = useSetAtom(setSessionComposerModeAtom);
@@ -275,7 +280,15 @@ export function useSessionComposerController(
   // DSH：plan 由 host 持有；goal 由本地选择或进行中/阻塞的目标驱动（切回普通会 pause）。
   // F6：DSH 无生图能力，imagegen 残留一律降级 normal（选择器已隐藏入口）。
   const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh";
-  const mode: ComposerAgentMode = deriveComposerAgentMode({
+  const hasImageGenHistory = (messageCache[sessionId]?.messages ?? []).some(
+    (message) => Boolean(message.meta?.imageGen),
+  );
+  // 生图供应商/模型来自独立 imagegen.json，与会话 LLM 模型无关。
+  const activeImageGenProviderId = imageGenConfig.activeProviderId;
+  const activeImageGenModelId = imageGenConfig.activeModel;
+  const mode: ComposerAgentMode = hasImageGenHistory
+    ? "imagegen"
+    : deriveComposerAgentMode({
     backend: isDshBackend ? "dsh" : "pi",
     localMode: modes[sessionId],
     planModeActive: runtime?.state?.planModeActive === true,
@@ -369,6 +382,9 @@ export function useSessionComposerController(
   }, [sessionId, setAttachmentsAtom]);
 
   const setMode = useCallback((nextMode: ComposerAgentMode) => {
+    // 生图历史是独立消息协议，普通/计划/目标模式的命令语义不适用；
+    // 同一会话一旦产生生图记录，必须保持生图模式，避免误发普通请求。
+    if (hasImageGenHistory && nextMode !== "imagegen") return;
     // DSH：plan 走 host /plan；goal 走 create/resume/pause IPC（切回普通暂停，不清除）。
     // 本地 atom 仍写入 goal，让选择器立刻切到目标模式；首条用户消息再 /goal 创建。
     if (isDshBackend) {
@@ -443,7 +459,7 @@ export function useSessionComposerController(
       return;
     }
     setModeAtom({ sessionId, mode: nextMode });
-  }, [isDshBackend, mode, runtime?.agentId, runtime?.state?.goal?.phase, sessionId, setModeAtom]);
+  }, [hasImageGenHistory, isDshBackend, mode, runtime?.agentId, runtime?.state?.goal?.phase, sessionId, setModeAtom]);
 
   const loadTemplates = useCallback(async () => {
     const token = templateRequestGateRef.current.begin(templateKey);
@@ -786,16 +802,30 @@ export function useSessionComposerController(
     enqueue,
   });
 
-  // 生图：复用当前会话选中的模型（record.model 来自模型页/模型下拉）。
+  // 生图：凭据来自独立 imagegen.json（供应商 + 模型），不读会话 LLM。
   // 结果按「消息」语义上屏（与 useSessionSend 乐观提交同一约定：写时间线缓存、source=runtime）：
   // 提示词作为 user 消息立即上屏；随后追加一条 assistant「生图占位」消息（meta.imageGen=generating），
   // 生成期间由 FinalAnswer 渲染 beUI ImageGeneration 点阵动画，完成后原地更新为 complete（图片清晰过渡），
   // 失败原地更新为 error。不调用 send、不进附件栏（无运行中 Agent 也能用）。
+  const persistImageGenSelection = useCallback((providerId: string, modelId: string) => {
+    const next = {
+      ...imageGenConfig,
+      activeProviderId: providerId,
+      activeModel: modelId,
+    };
+    setImageGenConfig(next);
+    void desktopApi.imagegen.saveConfig(next).catch(() => undefined);
+  }, [imageGenConfig, setImageGenConfig]);
+
   const generateImage = useCallback(async () => {
     const prompt = draft.trim();
     if (!prompt || generatingImage) return;
-    const model = record?.model;
-    if (!model?.provider || !model?.modelId) {
+    const provider = findImageGenProvider(imageGenConfig, activeImageGenProviderId)
+      ?? imageGenConfig.providers[0];
+    const modelId = provider && provider.models.includes(activeImageGenModelId)
+      ? activeImageGenModelId
+      : (provider?.models[0] ?? "");
+    if (!provider?.id || !modelId || !provider.baseUrl.trim() || !provider.apiKey.trim()) {
       showNotice(t("imagegen.error.notConfigured"), 5000);
       return;
     }
@@ -832,15 +862,15 @@ export function useSessionComposerController(
       stopReason: "stop",
       timestamp: Date.now(),
       meta: {
-        imageGen: { status: "generating", prompt } satisfies ImageGenMeta,
+        imageGen: { status: "generating", prompt, size: imageGenSize } satisfies ImageGenMeta,
       },
     });
     setDraft("");
 
     try {
       const result = await desktopApi.imagegen.generate({
-        provider: model.provider,
-        model: model.modelId,
+        provider: provider.id,
+        model: modelId,
         prompt,
         size: imageGenSize,
         watermark: imageGenWatermark,
@@ -853,7 +883,7 @@ export function useSessionComposerController(
           ...m,
           images: [result.image],
           meta: {
-            imageGen: { status: "complete", prompt } satisfies ImageGenMeta,
+            imageGen: { status: "complete", prompt, size: imageGenSize } satisfies ImageGenMeta,
           },
         }));
         showNotice(t("imagegen.done"), 4000);
@@ -864,6 +894,7 @@ export function useSessionComposerController(
             imageGen: {
               status: "error",
               prompt,
+              size: imageGenSize,
               errorDetail: mapImageGenError(result.error, result.detail),
             } satisfies ImageGenMeta,
           },
@@ -883,7 +914,7 @@ export function useSessionComposerController(
     } finally {
       setGeneratingImage(false);
     }
-  }, [draft, generatingImage, imageGenOutputFormat, imageGenSize, imageGenWatermark, record, sessionId, setCacheMessages, setDraft, store]);
+  }, [activeImageGenModelId, activeImageGenProviderId, draft, generatingImage, imageGenConfig, imageGenOutputFormat, imageGenSize, imageGenWatermark, sessionId, setCacheMessages, setDraft, store]);
 
   // 统一发送入口：先晋升预览 Tab 再投递（幂等，非预览无副作用）。
   // 发送按钮 / 追问按钮 / Enter 键 / 无 Agent 时的 /compact 直发都会走这里，
@@ -1478,9 +1509,18 @@ export function useSessionComposerController(
       },
       abort: () => void abort(),
       compact: () => void compact(),
+      imageGenConfig,
+      imageGenProviderId: activeImageGenProviderId,
+      imageGenModelId: activeImageGenModelId,
       imageGenSize,
       imageGenWatermark,
       imageGenOutputFormat,
+      imageGenModeLocked: hasImageGenHistory,
+      setImageGenSelection: (providerId: string, modelId: string) => {
+        const nextProvider = findImageGenProvider(imageGenConfig, providerId);
+        if (!nextProvider?.models.includes(modelId)) return;
+        persistImageGenSelection(nextProvider.id, modelId);
+      },
       setImageGenSize: (size: string) => {
         const parsed = parseImageGenSize(size);
         if (!parsed) return;

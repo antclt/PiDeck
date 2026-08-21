@@ -4,7 +4,7 @@ import test from "node:test";
 
 const agentTypes = readFileSync("src/shared/types/agent.ts", "utf8");
 const composerComponents = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
-const pickerHost = readFileSync("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8");
+const composerModeSelect = readFileSync("src/renderer/src/components/session/ComposerModeSelect.tsx", "utf8");
 const controller = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
 const builtIns = readFileSync("src/main/extensions/builtInExtensions.ts", "utf8");
 const extension = readFileSync("resources/extensions/pi-deck-goal-mode.ts", "utf8");
@@ -18,11 +18,15 @@ test("goal mode is a first-class ComposerAgentMode", () => {
 });
 
 test("mode picker lists goal between plan and imagegen", () => {
-	assert.match(composerComponents, /value: "goal" as const/);
-	assert.match(composerComponents, /"app\.composerModeGoal"/);
-	assert.match(composerComponents, /goalModeAvailable/);
-	assert.match(pickerHost, /pi-deck-goal-mode\.ts/);
-	assert.match(pickerHost, /goalModeAvailable=\{isDshSession \|\| goalModeAvailable\}/);
+	assert.match(composerModeSelect, /value: "goal"/);
+	assert.match(composerModeSelect, /"app\.composerModeGoal"/);
+	assert.match(composerModeSelect, /goalModeAvailable/);
+	assert.match(composerModeSelect, /pi-deck-goal-mode\.ts/);
+	assert.match(composerModeSelect, /<Select/);
+	const optionOrder = composerModeSelect.indexOf('value: "plan"');
+	const goalOrder = composerModeSelect.indexOf('value: "goal"');
+	const imagegenOrder = composerModeSelect.indexOf('value: "imagegen"');
+	assert.ok(optionOrder >= 0 && goalOrder > optionOrder && imagegenOrder > goalOrder);
 });
 
 test("DSH setMode pauses on normal and resumes paused goals", () => {

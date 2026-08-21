@@ -357,15 +357,20 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 onPickThinking={() => composer.pickers.open("thinking")}
                 onPickPromptTemplate={() => composer.pickers.open("template")}
                 onCompact={composer.delivery.compact}
-                onOpenComposerModePicker={() => composer.pickers.open("mode")}
+                onChangeMode={composer.pickers.setMode}
+                imageGenLocked={composer.delivery.imageGenModeLocked}
                 onCancelPlan={() => composer.pickers.setMode("normal")}
                 onAttachFile={composer.editor.attachFile}
                 imageGenOptions={
                   composer.mode === "imagegen"
                     ? {
+                        config: composer.delivery.imageGenConfig,
+                        providerId: composer.delivery.imageGenProviderId,
+                        modelId: composer.delivery.imageGenModelId,
                         size: composer.delivery.imageGenSize,
                         outputFormat: composer.delivery.imageGenOutputFormat,
                         watermark: composer.delivery.imageGenWatermark,
+                        onSelectionChange: composer.delivery.setImageGenSelection,
                         onSizeChange: composer.delivery.setImageGenSize,
                         onOutputFormatChange: composer.delivery.setImageGenOutputFormat,
                         onWatermarkChange: composer.delivery.setImageGenWatermark,
@@ -393,8 +398,6 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
             templates={composer.templates}
             onClose={composer.pickers.close}
             onInsertTemplate={composer.pickers.insertTemplate}
-            onPickMode={composer.pickers.setMode}
-            currentMode={composer.mode}
             defaultModel={composer.dshDefaultModel}
             defaultThinkingLevel={composer.dshDefaultThinkingLevel}
           />

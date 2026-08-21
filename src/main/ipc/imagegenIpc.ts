@@ -1,9 +1,8 @@
 /**
- * 生图 IPC 域：只做入参校验与装配，业务在 ImageGenService。
- * 通道：imagegen:generate（shared/ipc.ts 定义）。
+ * 生图 IPC 域：只做入参校验与装配。
+ * 通道：imagegen:generate / imagegen:get-config / imagegen:save-config。
  *
- * 复用 pi 已配置的模型供应商：按 provider 从 models.json（providers[].baseUrl/apiKey）
- * 与 auth.json（[provider].key）拼出 baseUrl/apiKey，不新增独立生图配置。
+ * 凭据来自独立 ImageGenConfigStore（userData/imagegen.json），不读 pi models.json。
  */
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
@@ -14,12 +13,12 @@ import {
 	parseImageGenSize,
 	parseImageGenWatermark,
 } from "../../shared/imageGenParams";
-import type { ConfigManager } from "../config/ConfigManager";
 import type { ImageGenService } from "../imagegen/ImageGenService";
+import type { ImageGenConfigStore } from "../imagegen/ImageGenConfigStore";
 
 export function registerImageGenIpc(deps: {
 	imageGen: ImageGenService;
-	configManager: ConfigManager;
+	imageGenConfig: ImageGenConfigStore;
 	log: (message: string, ...args: unknown[]) => void;
 	/** 可选：生图成功后把 user+assistant 消息落盘到指定会话（pi 会话文件）。 */
 	persistImageGen?: (input: {
@@ -28,9 +27,21 @@ export function registerImageGenIpc(deps: {
 		model: string;
 		prompt: string;
 		image: { data: string; mimeType: string };
+		size?: string;
 	}) => Promise<void>;
 }) {
-	const { imageGen, configManager, log, persistImageGen } = deps;
+	const { imageGen, imageGenConfig, log, persistImageGen } = deps;
+
+	ipcMain.handle(ipcChannels.imagegenGetConfig, async () => imageGenConfig.getConfig());
+
+	ipcMain.handle(ipcChannels.imagegenSaveConfig, async (_event, input: unknown) => {
+		const result = await imageGenConfig.saveConfig(input);
+		log("imagegen", "config save", {
+			ok: result.ok,
+			providers: result.ok ? result.config.providers.length : undefined,
+		});
+		return result;
+	});
 
 	ipcMain.handle(ipcChannels.imagegenGenerate, async (_event, input: unknown) => {
 		// 渲染层数据不可信：必填字段必须是有限长度非空字符串；size/watermark 非法则丢弃回默认。
@@ -50,7 +61,7 @@ export function registerImageGenIpc(deps: {
 		const size = parseImageGenSize(candidate?.size) ?? undefined;
 		const watermark = parseImageGenWatermark(candidate?.watermark, DEFAULT_IMAGE_GEN_WATERMARK);
 		const outputFormat = parseImageGenOutputFormat(candidate?.outputFormat, DEFAULT_IMAGE_GEN_OUTPUT_FORMAT) ?? undefined;
-		if (!provider || !model || !prompt || prompt.length > 4000) {
+		if (!model || !prompt || prompt.length > 4000) {
 			return { ok: false, error: "http", detail: "invalid request" } as const;
 		}
 		const result = await imageGen.generate({ provider, model, prompt, size, watermark, outputFormat });
@@ -67,6 +78,7 @@ export function registerImageGenIpc(deps: {
 					model,
 					prompt,
 					image: result.image,
+					size,
 				});
 			} catch (error) {
 				log("imagegen", "persist to session failed", {
@@ -77,23 +89,4 @@ export function registerImageGenIpc(deps: {
 		}
 		return result;
 	});
-}
-
-/**
- * 按供应商名从 models.json / auth.json 拼出凭据（baseUrl + apiKey）。
- * baseUrl 优先取 providers[].baseUrl，其次 providers[].api（部分中转站字段名）；
- * apiKey 优先取 providers[].apiKey，其次 auth.json[].key。两者缺一返回 null。
- */
-export async function resolveProviderCredentials(
-	configManager: ConfigManager,
-	provider: string,
-): Promise<{ baseUrl: string; apiKey: string } | null> {
-	const models = await configManager.getModelsConfig();
-	const auth = await configManager.getAuthConfig();
-	const providerConfig = models.parsed.providers[provider];
-	const baseUrl = (providerConfig?.baseUrl ?? providerConfig?.api ?? "").trim();
-	const authKey = typeof auth.parsed[provider]?.key === "string" ? auth.parsed[provider].key : "";
-	const apiKey = (providerConfig?.apiKey ?? authKey).trim();
-	if (!baseUrl || !apiKey) return null;
-	return { baseUrl, apiKey };
 }

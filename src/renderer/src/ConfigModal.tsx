@@ -29,6 +29,7 @@ import {
 	FileCode2,
 	FileText,
 	KeyRound,
+	ImageIcon,
 	Puzzle,
 	Settings2,
 	Shield,
@@ -51,6 +52,7 @@ import { PromptsTab } from "./config/PromptsTab";
 import { SkillsTab } from "./config/SkillsTab";
 import { ExtensionsTab } from "./config/ExtensionsTab";
 import { SecuritySection, type SecuritySectionHandle } from "./components/config/SecuritySection";
+import { ImageGenSection, type ImageGenSectionHandle } from "./components/config/ImageGenSection";
 import { DshLogo, PiLogo } from "./components/session/SessionSourceBadge";
 import { DshConfigTab, type DshConfigTabHandle } from "./config/DshConfigTab";
 import { t } from "./i18n";
@@ -87,6 +89,7 @@ const DEFAULT_MODEL_CONFIG: Pick<
 type ConfigSection =
 	| "config"
 	| "security"
+	| "imagegen"
 	| "skills"
 	| "prompts"
 	| "extensions";
@@ -102,7 +105,7 @@ function sectionTabValue(section: ConfigSection, tab: ConfigTab): string {
 const CONFIG_LAST_TAB_KEY = "pideck-config-last-tab";
 
 /** 全部合法 section / config 组子 tab，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
-const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "skills", "prompts", "extensions"];
+const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "imagegen", "skills", "prompts", "extensions"];
 const CONFIG_TABS: readonly ConfigTab[] = ["models", "auth", "settings", "trust", "raw"];
 
 /**
@@ -1563,6 +1566,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 
 	/** 安全管理面板句柄（顶部统一保存按钮经 saveByKey 调用其 save） */
 	const securitySectionRef = useRef<SecuritySectionHandle>(null);
+	const imageGenSectionRef = useRef<ImageGenSectionHandle>(null);
 	/** DSH 配置页句柄（顶部统一保存按钮经 saveByKey 调用其 save）。 */
 	const dshConfigRef = useRef<DshConfigTabHandle>(null);
 
@@ -1571,6 +1575,13 @@ function ConfigModalContent(props: ConfigModalProps) {
 		(dirty: boolean) => {
 			if (dirty) markDirty("security");
 			else clearDirty("security");
+		},
+		[markDirty, clearDirty],
+	);
+	const handleImageGenDirtyChange = useCallback(
+		(dirty: boolean) => {
+			if (dirty) markDirty("imagegen");
+			else clearDirty("imagegen");
 		},
 		[markDirty, clearDirty],
 	);
@@ -1601,6 +1612,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 				return handleSaveEditPrompt();
 			case "security":
 				return securitySectionRef.current?.save() ?? false;
+			case "imagegen":
+				return imageGenSectionRef.current?.save() ?? false;
 			default:
 				// extensions 即时生效页无保存语义，无 dirty 时按钮不可点
 				return false;
@@ -1773,6 +1786,10 @@ function ConfigModalContent(props: ConfigModalProps) {
 						<TabsTrigger value="security" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 							<span className="config-nav-icon"><Shield size={14} aria-hidden="true" /></span>
 							{t("config.nav.security")}
+						</TabsTrigger>
+						<TabsTrigger value="imagegen" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
+							<span className="config-nav-icon"><ImageIcon size={14} aria-hidden="true" /></span>
+							{t("config.nav.imagegen")}
 						</TabsTrigger>
 						<TabsTrigger value="extensions" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 							<span className="config-nav-icon"><Puzzle size={14} aria-hidden="true" /></span>
@@ -2016,6 +2033,15 @@ function ConfigModalContent(props: ConfigModalProps) {
 						<SecuritySection
 							ref={securitySectionRef}
 							onDirtyChange={handleSecurityDirtyChange}
+						/>
+						</div>
+					</TabsContent>
+
+					<TabsContent value="imagegen" className="config-main min-w-0">
+						<div className="config-content">
+						<ImageGenSection
+							ref={imageGenSectionRef}
+							onDirtyChange={handleImageGenDirtyChange}
 						/>
 						</div>
 					</TabsContent>

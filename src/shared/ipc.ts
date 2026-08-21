@@ -490,6 +490,10 @@ export const ipcChannels = {
 	// ===== 生图（ImageGen） =====
 	/** 生图：OpenAI 兼容 /images/generations，返回 base64 图片 */
 	imagegenGenerate: "imagegen:generate",
+	/** 读取独立生图配置（userData/imagegen.json，不进 pi models.json） */
+	imagegenGetConfig: "imagegen:get-config",
+	/** 保存独立生图配置（白名单校验后落盘） */
+	imagegenSaveConfig: "imagegen:save-config",
 
 	// ===== 系统剪贴板（必须走主进程；Electron 38 废弃渲染进程/preload 直连 clipboard） =====
 	clipboardReadText: "clipboard:read-text",

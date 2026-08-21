@@ -116,6 +116,8 @@ test("isDefaultAgentTitle treats draft placeholder titles as default so first pr
   assert.equal(isDefaultAgentTitle("帮我看看这个报错", project, translateTitle), false);
   // pi 未 set_session_name 时 sessionName 是 JSONL 文件名：必须当占位，才能用首条消息自动改名。
   assert.equal(looksLikePiSessionFileStem("2026-08-08T10-47-19-239Z_abc"), true);
+  // Pi 新会话通常使用带连字符的 UUID 后缀，必须继续识别为文件名而非用户标题。
+  assert.equal(looksLikePiSessionFileStem("2026-08-21T03-13-27-517Z_01a01e4a-ea07-4f21-9c9a-2a4c4bbd7e91"), true);
   assert.equal(looksLikePiSessionFileStem("2026-08-08T10:47:19.239Z"), true);
   assert.equal(looksLikePiSessionFileStem("帮我看看这个报错"), false);
   assert.equal(

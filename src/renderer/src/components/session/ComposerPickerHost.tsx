@@ -1,19 +1,16 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { useEffect, useRef, useState } from "react";
-import type { AvailableModel, ComposerAgentMode, SessionRuntimeTarget } from "../../../../shared/types";
+import type { AvailableModel, SessionRuntimeTarget } from "../../../../shared/types";
 import {
   modelPendingByIdAtom,
-  sessionComposerModeByIdAtom,
   sessionRecordByIdAtomFamily,
   sessionRuntimeByIdAtom,
   sessionRuntimeBySessionIdAtomFamily,
-  setSessionComposerModeAtom,
   thinkingLevelPendingByIdAtom,
   upsertSessionAtom,
 } from "../../atoms";
 import type { PromptTemplateInfo } from "../../composerBehavior";
 import {
-  ComposerModePicker,
   ModelPicker,
   PromptTemplatePicker,
   ThinkingPicker,
@@ -40,10 +37,6 @@ export type ComposerPickerHostProps = {
   templates: PromptTemplateInfo[];
   onClose: () => void;
   onInsertTemplate: (template: PromptTemplateInfo) => void;
-  /** 模式选择回调（DSH 后端走 controller 的 DSH 分支：plan 发 /plan 命令）；缺省写本地 atom。 */
-  onPickMode?: (mode: ComposerAgentMode) => void;
-  /** 当前派生模式（DSH：planModeActive 驱动的 plan）；缺省读本地 atom。 */
-  currentMode?: ComposerAgentMode;
   /** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期高亮与过滤用。 */
   defaultModel?: { provider?: string; modelId?: string; modelName?: string };
   defaultThinkingLevel?: string;
@@ -54,16 +47,12 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   const store = useStore();
   const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
   const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
-  const setMode = useSetAtom(setSessionComposerModeAtom);
   const upsertSession = useSetAtom(upsertSessionAtom);
   const thinkingPending = useAtomValue(thinkingLevelPendingByIdAtom)[sessionId];
   const setThinkingPendingMap = useSetAtom(thinkingLevelPendingByIdAtom);
   const modelPending = useAtomValue(modelPendingByIdAtom)[sessionId];
   const setModelPendingMap = useSetAtom(modelPendingByIdAtom);
-  const composerModes = useAtomValue(sessionComposerModeByIdAtom);
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
-  const [planModeAvailable, setPlanModeAvailable] = useState(true);
-  const [goalModeAvailable, setGoalModeAvailable] = useState(true);
   /** 模型在本地 models.json 存在但运行中 Agent 未加载：待确认重启的目标。 */
   const [restartTarget, setRestartTarget] = useState<{
     handle: SessionRuntimeTarget;
@@ -88,31 +77,6 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       setFavoriteModels(settings.favoriteModels ?? []);
     }).catch(() => undefined);
   }, []);
-
-  useEffect(() => {
-    // 计划模式由内置扩展提供；每次打开模式选择器读取最新状态，避免禁用扩展后仍显示过期选项。
-    const extensionsApi = (window as unknown as {
-      piDesktop?: { extensions?: { list: () => Promise<{ extensions: Array<{ source: string; enabled?: boolean; builtIn?: boolean }> }> } };
-    }).piDesktop?.extensions;
-    if (!extensionsApi) return;
-    void extensionsApi.list().then((result) => {
-      const plan = result.extensions.find((extension) => extension.source === "pi-deck-plan-mode.ts");
-      const goal = result.extensions.find((extension) => extension.source === "pi-deck-goal-mode.ts");
-      const planAvailable = plan?.enabled !== false;
-      const goalAvailable = goal?.enabled !== false;
-      setPlanModeAvailable(planAvailable);
-      setGoalModeAvailable(goalAvailable);
-      // 扩展被禁用后清理残留模式，避免下拉隐藏但编辑器仍保持该模式。
-      const current = composerModes[sessionId];
-      if (!planAvailable && current === "plan") setMode({ sessionId, mode: "normal" });
-      if (!goalAvailable && current === "goal") setMode({ sessionId, mode: "normal" });
-    }).catch(() => {
-      setPlanModeAvailable(false);
-      setGoalModeAvailable(false);
-      const current = composerModes[sessionId];
-      if (current === "plan" || current === "goal") setMode({ sessionId, mode: "normal" });
-    });
-  }, [composerModes, props.picker, sessionId, setMode]);
 
   // C19：模型目录数据源统一 hook——打开模型选择器即加载（不依赖 record：欢迎页/未启动
   // Agent 时 record 为 undefined，但模型列表是全量的）。思考选择器也要加载：DSH 按当前
@@ -431,25 +395,6 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       />
     );
   }
-  if (props.picker === "mode") {
-    // DSH 后端 plan 模式由 host 持有（/plan 命令）：plan 项恒可用，选中走
-    // controller 的 DSH 分支（发命令而非本地 atom）；currentMode 以派生值为准。
-    const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
-    return (
-      <ComposerModePicker
-        currentMode={props.currentMode ?? composerModes[sessionId] ?? "normal"}
-        onClose={props.onClose}
-        planModeAvailable={isDshSession || planModeAvailable}
-        goalModeAvailable={isDshSession || goalModeAvailable}
-        imagegenAvailable={!isDshSession}
-        onPick={(nextMode) => {
-          if (props.onPickMode) props.onPickMode(nextMode);
-          else setMode({ sessionId, mode: nextMode });
-          props.onClose();
-        }}
-      />
-    );
-  }
   if (props.picker === "thinking") {
     // DSH：只显示当前模型支持的档位。host 的 models catalog 带 reasoningEfforts
     // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——选不支持的档位
@@ -480,7 +425,6 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   }
   return (
     <>
-      {null}
       {restartTarget && (
         <ConfirmDialog
           title={t("app.modelRestartTitle")}

@@ -176,7 +176,7 @@ Gitmoji 对应关系：
   /** 用户手动移除的内置扩展，启动时跳过自动部署 */
   removedBuiltInExtensions: [],
 
-  // 生图参数：记在 composer 底栏，跨会话复用；缺省正方形、不带水印
+  // 生图参数：记在 composer 底栏，跨会话复用；缺省不指定分辨率、不带水印
   imageGenSize: DEFAULT_IMAGE_GEN_SIZE,
   imageGenWatermark: DEFAULT_IMAGE_GEN_WATERMARK,
   imageGenOutputFormat: DEFAULT_IMAGE_GEN_OUTPUT_FORMAT,

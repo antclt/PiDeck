@@ -30,7 +30,7 @@ export type { WorkspaceDrawerPanel as DrawerPanel } from "../../hooks/useWorkspa
 import { PiLogoCanvas } from "./PiLogoCanvas";
 import { Label } from "../../components/ui-shadcn/label";
 export { WorktreeCreateDialog } from "../sidebar/SidebarComponents";
-export { ComposerBottomBar, ModelPicker, PromptTemplatePicker, ThinkingPicker, ComposerModePicker, ExtensionWidgetCard } from "../session/ComposerComponents";
+export { ComposerBottomBar, ModelPicker, PromptTemplatePicker, ThinkingPicker, ExtensionWidgetCard } from "../session/ComposerComponents";
 
 export type SessionModifiedFile = {
 	path: string;

@@ -33,11 +33,23 @@ let fetchStubRef = null;
 
 /** 加载 ImageGenService 类（运行时依赖 shared/imageGenParams，需注入 require） */
 function loadServiceClass() {
-	const paramsSource = readFileSync("src/shared/imageGenParams.ts", "utf8");
+	const configModule = { exports: {} };
+	vm.runInNewContext(
+		transpile(readFileSync("src/shared/imageGenConfig.ts", "utf8")),
+		{ module: configModule, exports: configModule.exports },
+		{ filename: "imageGenConfig.ts" },
+	);
 	const paramsModule = { exports: {} };
 	vm.runInNewContext(
-		transpile(paramsSource),
-		{ module: paramsModule, exports: paramsModule.exports },
+		transpile(readFileSync("src/shared/imageGenParams.ts", "utf8")),
+		{
+			module: paramsModule,
+			exports: paramsModule.exports,
+			require: (id) => {
+				if (id === "./imageGenConfig") return configModule.exports;
+				throw new Error(`unexpected require ${id}`);
+			},
+		},
 		{ filename: "imageGenParams.ts" },
 	);
 	const exported = {};
@@ -48,6 +60,7 @@ function loadServiceClass() {
 		AbortSignal,
 		require: (id) => {
 			if (id === "../../shared/imageGenParams") return paramsModule.exports;
+			if (id === "../../shared/imageGenConfig") return configModule.exports;
 			throw new Error(`unexpected require ${id}`);
 		},
 		// vm 上下文看不到宿主全局，fetch 必须显式注入；经可变引用转发到当前测试的 stub
@@ -84,7 +97,9 @@ function fakeResponse({ ok, status = 200, json, arrayBuffer, headers = new Map()
 	};
 }
 
-const CREDENTIALS = { baseUrl: "https://api.example.com/v1", apiKey: "sk-test" };
+const NO_EXTRA = { size: false, output_format: false, watermark: false };
+const ALL_EXTRA = { size: true, output_format: true, watermark: true };
+const CREDENTIALS = { baseUrl: "https://api.example.com/v1", apiKey: "sk-test", extraParams: NO_EXTRA };
 
 test("notConfigured：凭据缺失时不发网络请求", async () => {
 	let called = false;
@@ -127,10 +142,10 @@ test("请求体与请求头正确（b64_json 优先，Bearer 认证）", async (
 	restore();
 });
 
-test("OpenAI 端点发送 size、不发送 watermark（避免未知字段 400）", async () => {
+test("extraParams.size 开启才发送 size，未勾选的 watermark 不发", async () => {
 	let captured;
 	const { service, restore } = createService({
-		credentials: CREDENTIALS,
+		credentials: { ...CREDENTIALS, extraParams: { size: true, output_format: false, watermark: false } },
 		fetchStub: (_input, init) => {
 			captured = init;
 			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
@@ -149,10 +164,10 @@ test("OpenAI 端点发送 size、不发送 watermark（避免未知字段 400）
 	restore();
 });
 
-test("火山方舟端点同时发送 size 与 watermark", async () => {
+test("extraParams 全开时发送 size / watermark / output_format", async () => {
 	let captured;
 	const { service, restore } = createService({
-		credentials: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "k" },
+		credentials: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "k", extraParams: ALL_EXTRA },
 		fetchStub: (_input, init) => {
 			captured = init;
 			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
@@ -171,10 +186,10 @@ test("火山方舟端点同时发送 size 与 watermark", async () => {
 	restore();
 });
 
-test("火山方舟 jpeg output_format 写入请求体并回填 image/jpeg mime", async () => {
+test("勾选 output_format 时 jpeg 写入请求体并回填 image/jpeg mime", async () => {
 	let captured;
 	const { service, restore } = createService({
-		credentials: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "k" },
+		credentials: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "k", extraParams: ALL_EXTRA },
 		fetchStub: (_input, init) => {
 			captured = init;
 			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
@@ -193,7 +208,7 @@ test("火山方舟 jpeg output_format 写入请求体并回填 image/jpeg mime",
 	restore();
 });
 
-test("OpenAI 端点不发送 output_format，b64 mime 保持 image/png", async () => {
+test("未勾选 output_format 时不发送该字段，b64 mime 保持 image/png", async () => {
 	let captured;
 	const { service, restore } = createService({
 		credentials: CREDENTIALS,

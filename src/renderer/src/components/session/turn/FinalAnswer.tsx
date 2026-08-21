@@ -43,6 +43,9 @@ function ImageGenMessage(props: {
 	// 不能因此让复制入口把有效图片误判为非图片，展示/复制统一使用图片 MIME 兜底。
 	const imageMimeType = image?.mimeType.startsWith("image/") ? image.mimeType : "image/png";
 	const imageDataUrl = image ? `data:${imageMimeType};base64,${image.data}` : "";
+	const sizeMatch = props.meta.size?.match(/^(\d+)x(\d+)$/i);
+	const resolution = sizeMatch ? `${sizeMatch[1]} × ${sizeMatch[2]}` : props.meta.size;
+	const aspectRatio = sizeMatch ? `${sizeMatch[1]} / ${sizeMatch[2]}` : undefined;
 		const copyImage = async () => {
 			try {
 				// 不使用 fetch(data:...)：data URL 会被 CSP 当作网络连接拦截。
@@ -71,7 +74,8 @@ function ImageGenMessage(props: {
 				status={status}
 				prompt={props.meta.prompt}
 				statusText={statusText}
-				resolution={undefined}
+				resolution={resolution}
+				aspectRatio={aspectRatio}
 				size="fluid"
 				className="max-w-[300px]"
 			>

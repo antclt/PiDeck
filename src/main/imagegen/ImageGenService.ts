@@ -1,30 +1,31 @@
 import {
 	buildImageGenApiBody,
-	imageGenEndpointSupportsArkFields,
 	imageGenOutputMimeType,
 	parseImageGenOutputFormat,
 } from "../../shared/imageGenParams";
+import type { ImageGenProviderExtraParams } from "../../shared/imageGenConfig";
 import type { ImageGenRequest, ImageGenResult } from "../../shared/types/imagegen";
 
-/** 供应商凭据（由 imagegenIpc 从 models.json/auth.json 拼出，本服务不关心来源） */
+/** 独立生图配置给出的凭据（不再从 models.json 解析） */
 export type ProviderCredentials = {
 	baseUrl: string;
 	apiKey: string;
+	extraParams: ImageGenProviderExtraParams;
 };
 
 /**
  * 生图服务：调用 OpenAI 兼容的 /images/generations 接口生成图片。
  *
  * 设计要点：
- * - 复用 pi 已配置的模型供应商（models.json providers[].baseUrl/apiKey 与
- *   auth.json[key].key），不新增独立生图配置——用户配好模型即可生图。
- * - 请求响应格式固定为 b64_json（结果直接进附件栏，不依赖下载通道）；
+ * - 凭据来自独立 imagegen.json（ImageGenConfigStore），不读 pi models.json。
+ * - 请求响应格式固定为 b64_json（结果直接进时间线，不依赖下载通道）；
  *   服务端仅支持 url 时回退下载并转 base64。
+ * - extraParams 决定请求体是否带 size / output_format / watermark。
  * - 失败只回结构化错误码（ImageGenErrorCode），文案由渲染层 i18n 映射。
  */
 export class ImageGenService {
 	constructor(private deps: {
-		/** 按供应商名查 baseUrl/apiKey；查不到返回 null（notConfigured） */
+		/** 按生图供应商 id 查 baseUrl/apiKey/extraParams；查不到返回 null（notConfigured） */
 		getProviderCredentials: (provider: string) => Promise<ProviderCredentials | null>;
 		/** 主进程日志（不记录 apiKey） */
 		log: (message: string, ...args: unknown[]) => void;
@@ -38,11 +39,19 @@ export class ImageGenService {
 		}
 		try {
 			const imagesUrl = normalizeImagesUrl(credentials.baseUrl);
-			const outputFormat = parseImageGenOutputFormat(request.outputFormat, null);
+			// extraParams 缺省全关：没勾选就不发可选字段，避免未知字段 400
+			const extraParams = credentials.extraParams ?? {
+				size: false,
+				output_format: false,
+				watermark: false,
+			};
+			const outputFormat = extraParams.output_format
+				? parseImageGenOutputFormat(request.outputFormat, null)
+				: null;
 			const body = buildImageGenApiBody({
 				model: request.model,
 				prompt: request.prompt,
-				baseUrl: imagesUrl,
+				extraParams,
 				size: request.size,
 				watermark: request.watermark,
 				outputFormat: outputFormat ?? undefined,
@@ -77,8 +86,8 @@ export class ImageGenService {
 			};
 			const item = payload.data?.[0];
 			if (item?.b64_json) {
-				// b64 无 content-type：仅 Ark 真正发了 output_format 才按 jpeg/png 标记；OpenAI 保持 png
-				const mimeType = imageGenEndpointSupportsArkFields(imagesUrl)
+				// b64 无 content-type：只有勾选并发送了 output_format 才按 jpeg/png 标记
+				const mimeType = extraParams.output_format
 					? imageGenOutputMimeType(outputFormat)
 					: "image/png";
 				return {
