@@ -8,6 +8,42 @@ import {
 /** Settings overlay visibility is shared by Sidebar, Pi environment flow, and Session surface. */
 export const settingsOpenAtom = atom(false);
 
+/** 与 SettingsModal 侧栏 tab 对齐；深链/焦点目标用同一套 id，避免 Git 去设置落到上次记住的非「常用」页。 */
+export type SettingsTabId =
+	| "common"
+	| "appearance"
+	| "proxy"
+	| "dev"
+	| "im"
+	| "pet"
+	| "storage"
+	| "usage"
+	| "process"
+	| "vision";
+
+/** 常用设置内部可滚动分区；目前只有 Git 摘要需要从面板直达。 */
+export type SettingsSectionId = "git";
+
+export type SettingsFocusTarget = {
+	tab: SettingsTabId;
+	section?: SettingsSectionId;
+};
+
+/**
+ * 打开设置时要落到的 tab/分区。消费方（SettingsModal）应用后必须清空，
+ * 否则下次从侧栏普通打开仍会抢走 tab（上次深链残留）。
+ */
+export const settingsFocusAtom = atom<SettingsFocusTarget | null>(null);
+
+/**
+ * 打开设置并可附带焦点。Git「去设置」走这里；侧栏齿轮仍只写 settingsOpenAtom，
+ * 保留「恢复上次 tab」行为。
+ */
+export const openSettingsAtom = atom(null, (_get, set, target?: SettingsFocusTarget) => {
+	set(settingsFocusAtom, target ?? null);
+	set(settingsOpenAtom, true);
+});
+
 /**
  * 新建会话默认后端（设置项 defaultAgentBackend 的渲染层快照）。
  * App 在 settings 变化时写入；并行问询等不持有 settings props 的根级组件读取。

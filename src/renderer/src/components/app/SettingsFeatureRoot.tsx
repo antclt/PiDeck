@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { AppInfo, AppSettings } from "../../../../shared/types";
-import { settingsOpenAtom } from "../../atoms";
+import { settingsFocusAtom, settingsOpenAtom } from "../../atoms";
 import { desktopApi as api } from "../../desktopApi";
 import type { AppUpdateControllerState } from "../../hooks/useAppUpdateController";
 import type { PiUpdateController } from "../../hooks/usePiUpdate";
@@ -27,6 +27,7 @@ type SettingsFeatureRootProps = {
 export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
   const open = useAtomValue(settingsOpenAtom);
   const setOpen = useSetAtom(settingsOpenAtom);
+  const setFocus = useSetAtom(settingsFocusAtom);
 
   // 按字段级 useMemo 稳定弹窗 props：App 根组件重渲染（低频）不会连带
   // 重渲染 SettingsModal（memo）。piUpdate 内部函数均为 useCallback，
@@ -83,7 +84,11 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
       // forceSystem=true：Web 服务页必须离开内置浏览器面板——面板在 Dialog 下层，
       // 设置弹窗打开时会被遮挡；且外部端按桌面浏览器视口设计，系统浏览器体验更完整。
       onOpenWebService: (port: string) => api.app.openExternal(`http://127.0.0.1:${port}`, true),
-      onClose: () => setOpen(false),
+      onClose: () => {
+        // 关闭时清掉未消费的深链，避免下次从侧栏打开仍跳到 Git 分区。
+        setFocus(null);
+        setOpen(false);
+      },
       onChange: props.onChange,
     }),
     [
@@ -116,6 +121,8 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
       props.piUpdate.updatePiCli,
       props.onRestartWebService,
       props.onChange,
+      setFocus,
+      setOpen,
     ],
   );
 

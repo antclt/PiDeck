@@ -16,13 +16,15 @@ export function SettingsSection(props: {
 	title: ReactNode;
 	description?: ReactNode;
 	children?: ReactNode;
+	/** 锚点 id：设置深链滚动用（如 Git 摘要「去设置」） */
+	id?: string;
 	/** 与上一级之间用淡横线分隔（代替默认的间距分组） */
 	divided?: boolean;
 	/** 二级内容是否入淡色框（默认 true；图表类内容传 false 直接铺开） */
 	boxed?: boolean;
 }) {
 	return (
-		<section className={props.divided ? "mt-2 border-t border-border-subtle pt-4" : "mt-4 first:mt-0"}>
+		<section id={props.id} className={props.divided ? "mt-2 border-t border-border-subtle pt-4" : "mt-4 first:mt-0"}>
 			<SectionHeading
 				className="settings-section-header pb-2"
 				titleClassName="text-body font-bold text-foreground"

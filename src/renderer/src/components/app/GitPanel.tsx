@@ -50,7 +50,7 @@ import type {
   GitResourceGroups,
 } from "../../../../shared/types";
 import { GitStatus } from "../../../../shared/types";
-import { settingsOpenAtom } from "../../atoms";
+import { openSettingsAtom } from "../../atoms";
 import { t } from "../../i18n";
 import {
   fileNameOnly,
@@ -461,8 +461,8 @@ function PaneSash(props: {
 
 export function GitPanel(props: GitPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  // “未配置模型”提示的“去设置”按钮：直接打开设置弹窗（Git 段在常用设置 tab）
-  const setSettingsOpen = useSetAtom(settingsOpenAtom);
+  // “未配置模型”提示的“去设置”：打开设置并落到常用 → Git 摘要（见 openSettingsAtom）
+  const openSettings = useSetAtom(openSettingsAtom);
   const projectIdRef = useRef(props.projectId);
   projectIdRef.current = props.projectId;
   const repoScopeKey = props.repoScopeKey ?? props.projectId;
@@ -972,11 +972,11 @@ export function GitPanel(props: GitPanelProps) {
       if (result.ok) {
         if (result.message) setCommitMessage(result.message);
       } else if (result.code === "GIT_COMMIT_MODEL_REQUIRED") {
-        // 未配置：提示 + “去设置”按钮直达设置弹窗（Git 段在常用设置 tab）
+        // 未配置：提示 + “去设置”直达常用设置的 Git 摘要栏（覆盖上次记住的其它 tab）
         showNotice(result.message, 8000, "error", undefined, {
           action: {
             label: t("git.goSettings"),
-            onClick: () => setSettingsOpen(true),
+            onClick: () => openSettings({ tab: "common", section: "git" }),
           },
         });
       } else if (result.code === "GIT_COMMIT_TIMEOUT") {
@@ -1003,7 +1003,7 @@ export function GitPanel(props: GitPanelProps) {
       dismissNotice(commitGenProgressRef.current);
       commitGenProgressRef.current = undefined;
     }
-  }, [props.generateCommitMessage, props.projectId, groups.index.length]);
+  }, [openSettings, props.generateCommitMessage, props.projectId, groups.index.length]);
 
   const doPush = async () => {
     if (!props.push || mutationRunningRef.current) return;

@@ -288,8 +288,8 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
         />
       </SettingsSection>
 
-      {/* Git */}
-      <SettingsSection title={t("settings.git")}>
+      {/* Git：id 供「去设置」深链滚动到摘要模型，而不是停在常用页顶部 */}
+      <SettingsSection id="settings-section-git" title={t("settings.git")}>
         <SettingSwitchRow
           title={t("settings.gitManagement")}
           description={t("settings.gitManagementDesc")}

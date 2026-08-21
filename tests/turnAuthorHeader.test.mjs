@@ -17,23 +17,25 @@ const backendMark = readFileSync(
 
 test("TurnRow always mounts a Pi/DSH author header, not DSH-only text", () => {
   assert.match(turnRow, /<TurnAuthorHeader backend=\{props\.backend\} endedAt=\{run\.endedAt\} \/>/);
-  // 旧策略：Pi 默认不署名、只给 DSH 短标签。时间线行头已改回两边都署名。
+  // 旧策略：Pi 默认不署名、只给 DSH 短标签。时间线行头已改回两边都用 logo。
   assert.doesNotMatch(turnRow, /props\.backend === "dsh" &&/);
   assert.doesNotMatch(turnRow, /sessionBackend\.dsh/);
 });
 
-test("TurnAuthorHeader uses shadcn Avatar plus Pi and DSH identity", () => {
+test("TurnAuthorHeader uses shadcn Avatar logos without a visible name", () => {
   assert.match(header, /from "\.\.\/\.\.\/ui-shadcn\/avatar"/);
-  assert.match(header, /<Avatar aria-hidden="true"/);
-  assert.match(header, /<Avatar /);
+  assert.match(header, /<Avatar title=\{name\}/);
   assert.match(header, /<AvatarFallback/);
   assert.match(header, /<PiLogo/);
   assert.match(header, /<DshLogo/);
-  assert.match(header, /sessionBackend\.pi/);
-  assert.match(header, /sessionBackend\.dsh/);
   assert.match(header, /data-turn-author=\{backend\}/);
   // 缺省按 pi 处理，兼容旧调用方不传 backend
   assert.match(header, /props\.backend \?\? "pi"/);
+  // 名称只给读屏/悬停，不再跟在 logo 旁边当可见署名
+  assert.match(header, /aria-label=\{name\}/);
+  assert.match(header, /sessionBackend\.pi/);
+  assert.match(header, /sessionBackend\.dsh/);
+  assert.doesNotMatch(header, /<span[^>]*>\{\s*name\s*\}<\/span>/);
 });
 
 test("sidebar SessionBackendMark still hides Pi to avoid list noise", () => {

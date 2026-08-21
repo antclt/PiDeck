@@ -8,6 +8,9 @@ const settingsStore = readFileSync("src/main/settings/SettingsStore.ts", "utf8")
 const settingsTypes = readFileSync("src/shared/types/settings.ts", "utf8");
 const settingsModal = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
 const commonTab = readFileSync("src/renderer/src/components/app/settings/CommonTab.tsx", "utf8");
+const gitPanel = readFileSync("src/renderer/src/components/app/GitPanel.tsx", "utf8");
+const settingsAtoms = readFileSync("src/renderer/src/atoms/app-ui-atoms.ts", "utf8");
+const settingsFocusHook = readFileSync("src/renderer/src/components/app/settings/useSettingsFocus.ts", "utf8");
 const gitModelsHook = readFileSync("src/renderer/src/components/app/settings/gitModels.ts", "utf8");
 const fileSortControl = readFileSync("src/renderer/src/components/session/FileSortControl.tsx", "utf8");
 const composerComponents = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
@@ -70,6 +73,18 @@ test("Shared model picker keeps one model line and supports collapse and selecte
   assert.doesNotMatch(projectEmptyState, /<ThinkingPicker/);
 });
 
+
+test("missing Git summary model opens Common settings at the Git section", () => {
+  assert.match(gitPanel, /openSettings\(\{ tab: "common", section: "git" \}\)/);
+  assert.match(settingsAtoms, /export const openSettingsAtom/);
+  assert.match(settingsAtoms, /settingsFocusAtom/);
+  assert.match(commonTab, /id="settings-section-git"/);
+  assert.match(settingsModal, /useSettingsFocus/);
+  assert.match(settingsModal, /getDefaultStore\(\)\.get\(settingsFocusAtom\)\?\.tab/);
+  assert.match(settingsFocusHook, /settings-section-\$\{section\}/);
+  assert.match(settingsFocusHook, /scrollIntoView/);
+  assert.match(settingsFocusHook, /setFocusTarget\(null\)/);
+});
 
 test("Git summary settings expose the shared command model picker", () => {
   // Git 分区与模型选择器位于常用设置 tab（CommonTab）；数据源 hook 独立成文件（gitModels.ts，
