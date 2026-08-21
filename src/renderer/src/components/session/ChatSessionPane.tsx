@@ -75,7 +75,7 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
       terminalTarget={services.terminalTarget}
       setTerminalOpenForOwner={services.setTerminalOpenForOwner}
       setTerminalCollapsedForOwner={services.setTerminalCollapsedForOwner}
-      setTerminalHeightByOwner={services.setTerminalHeightByOwner}
+      setTerminalHeight={services.setTerminalHeight}
     />
   );
 }

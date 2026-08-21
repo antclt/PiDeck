@@ -43,7 +43,8 @@ export type SessionRuntimeInjectorProps = {
   terminalTarget?: TerminalTarget;
   setTerminalOpenForOwner: (open: boolean) => void;
   setTerminalCollapsedForOwner: (collapsed: boolean) => void;
-  setTerminalHeightByOwner: (updater: (cur: Record<string, number>) => Record<string, number>) => void;
+  /** 回写终端分屏高度（全局单份，useTerminalDock 内部持久化） */
+  setTerminalHeight: (height: number) => void;
 };
 
 /**
@@ -70,7 +71,7 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
     terminalTarget,
     setTerminalOpenForOwner,
     setTerminalCollapsedForOwner,
-    setTerminalHeightByOwner,
+    setTerminalHeight,
   } = props;
 
   const services = useSessionPaneServices();
@@ -219,7 +220,7 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       terminalTarget={terminalTarget}
       setTerminalOpenForOwner={setTerminalOpenForOwner}
       setTerminalCollapsedForOwner={setTerminalCollapsedForOwner}
-      setTerminalHeightByOwner={setTerminalHeightByOwner}
+      setTerminalHeight={setTerminalHeight}
       settingsOpen={settingsOpen}
       configOpen={services.configOpen}
       environmentDialog={services.environmentDialog}

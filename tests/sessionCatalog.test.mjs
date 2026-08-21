@@ -254,16 +254,59 @@ test("remembered dismissed DSH sessions survive reload and stay out of createDra
     await reloaded.load();
     assert.equal(reloaded.listDismissedDshSessionIds().has("session-gone"), true);
     assert.equal(reloaded.listEntries().length, 0);
-    // 手动导入是用户明确找回：createDraft 成功并清掉墓碑。
+    // 自动同步/刷新不得清墓碑：否则删映射后磁盘还在就会写回侧栏。
+    await assert.rejects(
+      () => reloaded.createDraft({
+        projectId: "project-1",
+        title: "Back again",
+        environment: "native",
+        backend: "dsh",
+        dshSessionId: "session-gone",
+      }),
+      { message: "DISMISSED_DSH_SESSION" },
+    );
+    assert.equal(reloaded.listEntries().length, 0);
+    assert.equal(reloaded.listDismissedDshSessionIds().has("session-gone"), true);
+    // 手动导入是用户明确找回：带 restoreDismissed 才成功并清掉墓碑。
     const restored = await reloaded.createDraft({
       projectId: "project-1",
       title: "Back again",
       environment: "native",
       backend: "dsh",
       dshSessionId: "session-gone",
+      restoreDismissed: true,
     });
     assert.equal(restored.dshSessionId, "session-gone");
     assert.equal(reloaded.listDismissedDshSessionIds().has("session-gone"), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachRuntime does not clear a DSH delete tombstone unless restoreDismissed", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-attach-tombstone-"));
+  try {
+    const catalog = new SessionCatalog(join(dir, "sessions.json"));
+    await catalog.load();
+    const draft = await catalog.createDraft({
+      projectId: "project-1",
+      title: "Live",
+      environment: "native",
+      backend: "dsh",
+    });
+    await catalog.rememberDismissedDshSession("session-old");
+    await catalog.attachRuntime({
+      sessionId: draft.id,
+      dshSessionId: "session-old",
+    });
+    assert.equal(catalog.listDismissedDshSessionIds().has("session-old"), true);
+    await catalog.attachRuntime({
+      sessionId: draft.id,
+      dshSessionId: "session-old",
+      restoreDismissed: true,
+    });
+    assert.equal(catalog.listDismissedDshSessionIds().has("session-old"), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -57,6 +57,8 @@ export type DshForeignSyncDeps = {
 		backend: "dsh";
 		dshSessionId: string;
 		keepExistingTitle?: boolean;
+		/** 仅手动导入为 true；批量同步不得清删除墓碑。 */
+		restoreDismissed?: boolean;
 	}) => Promise<SessionRecord>;
 	/** 已映射记录（纠正归属时判断现有标题是不是 cwd 兑底占位）。 */
 	getExistingDraft?: (dshSessionId: string) => { title: string } | undefined;
@@ -191,6 +193,8 @@ export async function importForeignSession(
 	allowHostTitle = true,
 	keepExistingTitle = false,
 ): Promise<SessionRecord> {
+	// 手动单条导入（allowHostTitle）才清墓碑；批量同步与它同开关，避免刷新把刚删的映射写回。
+	const restoreDismissed = allowHostTitle;
 	let target = item;
 	if (!target) {
 		const items = await deps.listForeignSessions();
@@ -219,6 +223,7 @@ export async function importForeignSession(
 		backend: "dsh",
 		dshSessionId,
 		...(retainTitle ? { keepExistingTitle: true } : {}),
+		...(restoreDismissed ? { restoreDismissed: true } : {}),
 	});
 }
 
@@ -259,10 +264,10 @@ export async function syncForeignSessions(
 	let skipped = 0;
 	// 已在 catalog 的也再导入一遍：createDraft 按 dshSessionId 幂等更新项目归属，
 	// 把上一版堆在「外部会话」兑底里的会话拆回各自 cwd 对应的项目。
-	const dismissed = deps.dismissedDshSessionIds?.() ?? new Set<string>();
 	for (const item of items) {
-		// 侧栏删除只去掉 catalog 映射；host 目录还在。墓碑优先于 knownIds，
-		// 否则刷新会把同一条再 createDraft 回来。
+		// 墓碑每次现读：同步开始时拍快照会漏掉循环中途的右键删除，
+		// 再叠上 createDraft 清墓碑，删掉的映射就会写回侧栏。
+		const dismissed = deps.dismissedDshSessionIds?.() ?? new Set<string>();
 		if (dismissed.has(item.dshSessionId)) {
 			skipped += 1;
 			continue;
@@ -273,8 +278,11 @@ export async function syncForeignSessions(
 			if (alreadyKnown) skipped += 1;
 			else imported += 1;
 		} catch (error) {
-			// 主动拒绝注册的 cwd 计入 skipped：不是导入失败，侧栏也不应出现。
-			if (error instanceof Error && error.message === "FOREIGN_CWD_NOT_REGISTERED") {
+			// 主动拒绝注册的 cwd、或用户已删映射：计入 skipped，不是导入失败。
+			if (
+				error instanceof Error &&
+				(error.message === "FOREIGN_CWD_NOT_REGISTERED" || error.message === "DISMISSED_DSH_SESSION")
+			) {
 				skipped += 1;
 				continue;
 			}

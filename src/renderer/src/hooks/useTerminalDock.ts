@@ -6,24 +6,31 @@ import {
   setTerminalDockCollapsed,
   pruneTerminalDockState,
   terminalOwnerKey,
+  loadTerminalHeight,
+  saveTerminalHeight,
+  TERMINAL_HEIGHT_MIN,
 } from "../terminalDockState";
 
 const COMPOSER_DEFAULT_TERMINAL_HEIGHT = 220;
 const TERMINAL_DOCK_MOTION_MS = 180;
 
 /**
- * 终端 Dock 状态机（open / collapsed / 挂载动画 / 高度）按 owner 隔离：
+ * 终端 Dock 状态机（open / collapsed / 挂载动画）按 owner 隔离：
  * - 有 activeAgent → agent owner（`agent:<id>`）
  * - 引导页 / 未激活 agent / 历史会话 → project owner（`project:<id>`）
- * 切换项目或 agent 时，各 owner 的开关、折叠、高度互不串台；
+ * 切换项目或 agent 时，各 owner 的开关、折叠互不串台；
  * 挂载的 Dock 组件也只对「当前 owner」可见，切走即卸载（保留主进程 PTY 与回放）。
+ *
+ * 高度是全局一份（不按 owner 隔离）：与右侧抽屉宽度同策略，拖拽结果
+ * 经 localStorage 持久化，跨重启恢复上次分屏大小。
  */
 export function useTerminalDock(activeOwner: TerminalDockOwner | undefined) {
   const [terminalDockStateByOwner, setTerminalDockStateByOwner] =
     useState<TerminalDockStateByOwner>({});
-  const [terminalHeightByOwner, setTerminalHeightByOwner] = useState<
-    Record<string, number>
-  >({});
+  // 全局终端高度：首帧从 localStorage 读上次拖拽结果，读不到退回默认值
+  const [terminalHeight, setTerminalHeightState] = useState(() =>
+    loadTerminalHeight(COMPOSER_DEFAULT_TERMINAL_HEIGHT),
+  );
   const [terminalDockMounted, setTerminalDockMounted] = useState(false);
   const [terminalDockClosing, setTerminalDockClosing] = useState(false);
   const [terminalDockOwnerKey, setTerminalDockOwnerKey] = useState<string>();
@@ -41,9 +48,7 @@ export function useTerminalDock(activeOwner: TerminalDockOwner | undefined) {
   const terminalCollapsed = Boolean(terminalDockState?.collapsed);
   const terminalDockVisible =
     terminalDockMounted && terminalDockOwnerKey === activeOwnerKey;
-  const terminalRowHeight = activeOwnerKey
-    ? (terminalHeightByOwner[activeOwnerKey] ?? COMPOSER_DEFAULT_TERMINAL_HEIGHT)
-    : COMPOSER_DEFAULT_TERMINAL_HEIGHT;
+  const terminalRowHeight = terminalHeight;
 
   // 轨道尺寸只在开关时变更一次，终端本身用 transform 完成合成动画。
   // 关闭时保留组件至动画结束，避免同步销毁 xterm 阻塞第一帧。
@@ -97,32 +102,26 @@ export function useTerminalDock(activeOwner: TerminalDockOwner | undefined) {
     );
   }
 
-  /** 按 owner key 更新终端高度（拖拽回写） */
-  function updateTerminalHeightByOwner(
-    updater: (current: Record<string, number>) => Record<string, number>,
-  ) {
-    setTerminalHeightByOwner(updater);
+  /**
+   * 回写终端分屏高度（分隔条拖拽 / 程序化 resize 共用入口）：
+   * 内存 state 驱动本帧布局，同时落 localStorage 跨重启恢复。
+   * clamp 到最小高度，避免拖拽异常值写坏布局。
+   */
+  function setTerminalHeight(height: number) {
+    const next = Math.max(TERMINAL_HEIGHT_MIN, Math.round(height));
+    setTerminalHeightState((current) => (current === next ? current : next));
+    saveTerminalHeight(next);
   }
 
   /**
-   * 清理已消失 owner 的终端状态：agent 键对照存活 agent 集合，project 键对照
+   * 清理已消失 owner 的终端开关状态：agent 键对照存活 agent 集合，project 键对照
    * 存活项目集合，两个集合互不误删（流式事件只更新 agent 集合时不能清掉项目终端）。
+   * 高度已改为全局单份并持久化，不再参与 prune。
    */
   function prune(liveAgentIds: Set<string>, liveProjectIds: Set<string>) {
     setTerminalDockStateByOwner((current) =>
       pruneTerminalDockState(current, liveAgentIds, liveProjectIds),
     );
-    setTerminalHeightByOwner((current) => {
-      const liveEntries = Object.entries(current).filter(([key]) => {
-        // 高度键为 agent:<id> / project:<id>，按各自存活集合过滤，互不误删
-        if (key.startsWith("agent:")) return liveAgentIds.has(key.slice(6));
-        if (key.startsWith("project:")) return liveProjectIds.has(key.slice(8));
-        return false;
-      });
-      return liveEntries.length === Object.keys(current).length
-        ? current
-        : Object.fromEntries(liveEntries);
-    });
   }
 
   return {
@@ -130,10 +129,10 @@ export function useTerminalDock(activeOwner: TerminalDockOwner | undefined) {
     terminalCollapsed,
     terminalDockVisible,
     terminalDockClosing,
-    terminalRowHeight,
+    terminalHeight,
     setTerminalOpenForOwner,
     setTerminalCollapsedForOwner,
-    setTerminalHeightByOwner: updateTerminalHeightByOwner,
+    setTerminalHeight,
     terminalDockMounted,
     terminalDockOwnerKey,
     prune,

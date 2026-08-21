@@ -933,7 +933,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					.map((entry) => entry.dshSessionId)
 					.filter((id): id is string => Boolean(id)),
 			);
-			return items.filter((item) => !known.has(item.dshSessionId));
+			const dismissed = sessionCatalog.listDismissedDshSessionIds();
+			// 侧栏删过的 host 会话不要出现在「待导入」：否则看起来像没删掉。
+			// 归档恢复仍走独立入口，会带 restoreDismissed 清墓碑。
+			return items.filter((item) => (
+				!known.has(item.dshSessionId) && !dismissed.has(item.dshSessionId)
+			));
 		},
 	);
 	// DSH 外部会话导入：按 host 会话 id 建 catalog 映射（status=active，重启保留；
@@ -1036,11 +1041,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				environment: settingsStore.get().wslEnabled ? "wsl" : "native",
 				backend: "dsh",
 			});
-			// 归档恢复是找回已有对话：必须 active，否则侧栏当草稿、时间线不拉历史。
+			// 归档恢复是用户明确找回：必须 active，并清掉删除墓碑，否则下次自动同步仍会跳过。
 			await sessionCatalog.attachRuntime({
 				sessionId: draft.id,
 				dshSessionId,
 				promoteToActive: true,
+				restoreDismissed: true,
 			});
 			const window = getMainWindow();
 			if (window && !window.isDestroyed()) {

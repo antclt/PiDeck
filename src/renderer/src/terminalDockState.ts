@@ -148,6 +148,36 @@ export function migrateTerminalDockAgentState(
 	return next;
 }
 
+/** 拖拽分隔条到该像素值及以下视为折叠（与终端面板 collapsedSize=34 配套的判定阈值） */
+export const TERMINAL_COLLAPSE_THRESHOLD_PX = 35;
+
+/**
+ * 终端分屏面板 onResize 的统一裁决（纯函数，会话视图与引导页共用）。
+ *
+ * 业务规则：
+ * - px ≤ 折叠阈值：用户把终端拖到了折叠条高度 → collapsed=true；已折叠则无变化
+ * - px > 阈值：记录新高度（clamp 到 [TERMINAL_HEIGHT_MIN, maxHeight]），
+ *   若此前处于折叠态则顺带展开
+ *
+ * 返回空对象表示状态无变化，调用方可跳过 setState。
+ * 注意：程序化 setLayout 触发的 onResize 是否抑制折叠/展开转换，由调用方
+ * （SessionView 有 composer 联动保护窗口）自行判断，本函数只做几何裁决。
+ */
+export function applyTerminalPanelResize(input: {
+	px: number;
+	collapsed: boolean;
+	maxHeight: number;
+}): { collapsed?: boolean; height?: number } {
+	if (input.px <= TERMINAL_COLLAPSE_THRESHOLD_PX) {
+		return input.collapsed ? {} : { collapsed: true };
+	}
+	const height = Math.max(
+		TERMINAL_HEIGHT_MIN,
+		Math.min(Math.round(input.px), Math.round(input.maxHeight)),
+	);
+	return input.collapsed ? { collapsed: false, height } : { height };
+}
+
 /**
  * 无 agent 时 PTY 会话键按 cwd 隔离，避免多项目共用 `_project_` 串台。
  * Windows 路径统一为正斜杠 + 小写，降低盘符/分隔符差异导致的重复会话。

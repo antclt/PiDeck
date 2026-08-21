@@ -67,4 +67,6 @@ export function registerTerminalIpc({
 		terminalManager.close(tabId);
 		void appLogger.info("terminal", "Terminal closed", { tabId });
 	});
+	// shell 候选列表（供「选择 Shell」下拉）：只读平台探测结果，无入参可校验
+	ipcMain.handle(ipcChannels.terminalShells, () => terminalManager.listShells());
 }

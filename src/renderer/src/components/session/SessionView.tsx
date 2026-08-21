@@ -6,7 +6,6 @@ import {
   type PanelSize,
 } from "react-resizable-panels";
 import {
-  ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "../ui-shadcn/resizable";
@@ -21,7 +20,7 @@ import { SessionTodoStrip } from "./SessionTodoStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
-import { SessionRuntimeDock } from "./SessionRuntimeDock";
+import { TerminalDockPanel } from "../terminal/TerminalDockPanel";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight } from "../../rendererUtils";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
@@ -99,9 +98,8 @@ export type SessionViewProps = {
   terminalTarget?: TerminalTarget;
   setTerminalOpenForOwner: (open: boolean) => void;
   setTerminalCollapsedForOwner: (collapsed: boolean) => void;
-  setTerminalHeightByOwner: (
-    updater: (current: Record<string, number>) => Record<string, number>
-  ) => void;
+  /** 回写终端分屏高度（全局单份，hook 内部持久化） */
+  setTerminalHeight: (height: number) => void;
 
   // ── Other visibility ──
   settingsOpen: boolean;
@@ -161,7 +159,7 @@ export function SessionView({
   terminalTarget,
   setTerminalOpenForOwner,
   setTerminalCollapsedForOwner,
-  setTerminalHeightByOwner,
+  setTerminalHeight,
   settingsOpen,
   configOpen,
   environmentDialog,
@@ -402,32 +400,6 @@ export function SessionView({
     applyComposerHeight(px, true);
   }
 
-  function handleTerminalResize(size: PanelSize) {
-    const px = Math.round(size.inPixels);
-    if (!terminalOwnerKey) return;
-    // 34px 为折叠条高度：拖到折叠阈值视为折叠，拖回展开。
-    // 程序化 setLayout（composer 增高/回缩）触发的 onResize 不算用户折叠意图：
-    // 布局挤压导致的面板变矮不应把 collapsed 状态写死，否则下次打开仍是收起的。
-    // 用独立保护窗口而非共享的 programmaticResizeTargetRef：后者会被 composer 的
-    // onResize 消费清空，terminal 回调后触发时会失去保护。
-    const withinProgrammaticWindow =
-      Date.now() < terminalProgrammaticExpireRef.current;
-    if (px <= 35) {
-      if (!terminalCollapsed && !withinProgrammaticWindow) {
-        setTerminalCollapsedForOwner(true);
-      }
-      return;
-    }
-    if (terminalCollapsed && !withinProgrammaticWindow) {
-      setTerminalCollapsedForOwner(false);
-    }
-    const maxHeight = Math.max(120, availableTerminalHeight);
-    setTerminalHeightByOwner((current) => ({
-      ...current,
-      [terminalOwnerKey]: Math.min(px, maxHeight),
-    }));
-  }
-
   // solo 栏无 sessionId key，切会话复用本组件。必须在 render 阶段重置高度：
   // useLayoutEffect 太晚，Group 已按旧 defaultSize 注册，输入框会悬在半空。
   // setState-during-render 是 React 官方「prop 变化重置 state」写法，本轮会被丢弃重渲。
@@ -608,36 +580,21 @@ export function SessionView({
         )}
 
         {terminalPanelVisible && (
-          <>
-            <ResizableHandle className="v-splitter" />
-            <ResizablePanel
-              id="terminal"
-              panelRef={terminalPanelRef}
-              collapsible
-              collapsedSize={34}
-              minSize={120}
-              maxSize={Math.max(120, availableTerminalHeight)}
-              defaultSize={terminalCollapsed ? 34 : terminalRowHeight}
-              onResize={handleTerminalResize}
-              className="session-v-terminal"
-            >
-              <SessionRuntimeDock
-                key={terminalOwnerKey}
-                target={terminalTarget}
-                mounted={terminalDockVisible}
-                open={terminalOpen}
-                closing={terminalDockClosing}
-                collapsed={terminalCollapsed}
-                height={terminalRowHeight}
-                terminal={api.terminal}
-                onOpenChange={(open) => setTerminalOpenForOwner(open)}
-                onCollapsedChange={(collapsed) => setTerminalCollapsedForOwner(collapsed)}
-                onHeightChange={() => {
-                  // 高度由面板 onResize 统一回写，此回调保留仅为兼容接口
-                }}
-              />
-            </ResizablePanel>
-          </>
+          <TerminalDockPanel
+            target={terminalTarget}
+            panelRef={terminalPanelRef}
+            open={terminalOpen}
+            closing={terminalDockClosing}
+            collapsed={terminalCollapsed}
+            height={terminalRowHeight}
+            maxHeight={availableTerminalHeight}
+            terminal={api.terminal}
+            ownerKey={terminalOwnerKey}
+            isProgrammaticResize={() => Date.now() < terminalProgrammaticExpireRef.current}
+            onOpenChange={setTerminalOpenForOwner}
+            onCollapsedChange={setTerminalCollapsedForOwner}
+            onHeightChange={setTerminalHeight}
+          />
         )}
       </ResizablePanelGroup>
     </div>

@@ -476,6 +476,11 @@ export class SessionCatalog {
 		dshSessionId?: string;
 		/** 纠正归属时保留已有真实标题；占位名（cwd 末段）由调用方决定是否覆盖。 */
 		keepExistingTitle?: boolean;
+		/**
+		 * 手动找回（配置页导入 / 归档恢复）才清删除墓碑。
+		 * 自动同步禁止带这个：否则删映射的同时刷新还在跑，createDraft 会把墓碑清掉再写回侧栏。
+		 */
+		restoreDismissed?: boolean;
 	}): Promise<SessionRecord> {
 		this.assertLoaded();
 		const entry = await this.enqueueMutation((entries) => {
@@ -485,11 +490,17 @@ export class SessionCatalog {
 			// 不再新建条目，只更新标题/项目归属——否则侧栏出现两条同 host 会话记录，
 			// 且删除其一后另一条仍可加载同一 host 数据（「重复导入」用户问题）。
 			if (input.dshSessionId) {
-				// 手动导入/恢复是用户明确找回：清掉删除墓碑，否则下次同步仍会跳过。
-				const forgotten = this.dismissedDshSessionIds.delete(input.dshSessionId);
+				const dismissed = this.dismissedDshSessionIds.has(input.dshSessionId);
 				const existing = entries.find((candidate) => (
 					candidate.dshSessionId === input.dshSessionId
 				));
+				// 用户已删映射、host 目录还在：自动同步不得再建条目。手动找回才允许。
+				if (dismissed && !input.restoreDismissed && !existing) {
+					throw new Error("DISMISSED_DSH_SESSION");
+				}
+				const forgotten = input.restoreDismissed
+					? this.dismissedDshSessionIds.delete(input.dshSessionId)
+					: false;
 				if (existing) {
 					const nextTitle = input.keepExistingTitle ? existing.title : input.title;
 					const changed = forgotten || (
@@ -582,6 +593,8 @@ export class SessionCatalog {
 		dshSessionId?: string;
 		/** 真正开聊后再把 DSH 草稿抬成 active；预热只绑 host id，不抬。 */
 		promoteToActive?: boolean;
+		/** 归档恢复等手动找回才清删除墓碑；激活/fork 回写不得把用户删过的 id 解禁。 */
+		restoreDismissed?: boolean;
 	}): Promise<SessionCatalogEntry> {
 		this.assertLoaded();
 		return this.enqueueMutation((entries) => {
@@ -603,8 +616,11 @@ export class SessionCatalog {
 			if (input.piSessionId) entry.piSessionId = input.piSessionId;
 			if (input.dshSessionId) {
 				entry.dshSessionId = input.dshSessionId;
-				// 归档恢复/手动 attach 也是用户找回：清掉删除墓碑。
-				this.dismissedDshSessionIds.delete(input.dshSessionId);
+				// 只有明确找回才清墓碑。激活回写同一 host id 时如果清掉，
+				// 用户删映射后迟到的 attach 会让下次自动同步再导回来。
+				if (input.restoreDismissed) {
+					this.dismissedDshSessionIds.delete(input.dshSessionId);
+				}
 			}
 			// DSH 预热/激活也会 attach host id，但此时还没有用户消息。
 			// 不能把草稿抬成 active：渲染层会把「active + dshSessionId」当成有历史，

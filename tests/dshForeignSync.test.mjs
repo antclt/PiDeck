@@ -211,6 +211,15 @@ test("index foreignSyncDeps must not call mainCopy at module load", () => {
   );
 });
 
+test("foreign session IPC hides dismissed host sessions from the import list", () => {
+  const sessionIpc = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
+  assert.match(
+    sessionIpc,
+    /listDismissedDshSessionIds\(\)[\s\S]*!dismissed\.has\(item\.dshSessionId\)/,
+  );
+  assert.match(sessionIpc, /restoreDismissed: true/);
+});
+
 test("cwdDisplayName takes the last path segment on both separators", () => {
   const { cwdDisplayName } = loadModules();
   assert.equal(cwdDisplayName("C:/repo/alpha"), "alpha");
@@ -466,6 +475,41 @@ test("syncForeignSessions does not resurrect a deleted DSH session still on disk
     const again = await fixture.sync.syncForeignSessions(fixture.deps);
     assert.equal(again.imported, 0, "已删除的 host 会话不得因磁盘仍在而被重新导入");
     assert.equal(fixture.catalog.listEntries().length, 0);
+    assert.equal(fixture.catalog.listDismissedDshSessionIds().has(dshSessionId), true);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("syncForeignSessions does not resurrect when the tombstone arrives mid-sync", async () => {
+  // 回归：同步已开始、第一条 createDraft 时用户删了后面那条。
+  // 旧逻辑 createDraft 会清墓碑再新建；现在必须跳过且墓碑还在。
+  const fixture = await createFixture([
+    foreignItem({ dshSessionId: "session-a", title: "A", cwd: "C:/repo/alpha" }),
+    foreignItem({ dshSessionId: "session-deleted", title: "Gone", cwd: "C:/repo/alpha" }),
+  ]);
+  try {
+    await fixture.sync.syncForeignSessions(fixture.deps);
+    const doomed = fixture.catalog.listEntries().find((entry) => entry.dshSessionId === "session-deleted");
+    assert.ok(doomed);
+    const originalCreate = fixture.deps.createDraft;
+    fixture.deps.createDraft = async (input) => {
+      if (input.dshSessionId === "session-a") {
+        await fixture.catalog.rememberDismissedDshSession("session-deleted");
+        await fixture.catalog.remove(doomed.id);
+      }
+      assert.equal(input.restoreDismissed, undefined, "批量同步不得清删除墓碑");
+      return originalCreate(input);
+    };
+    fixture.deps.dismissedDshSessionIds = () => fixture.catalog.listDismissedDshSessionIds();
+    const known = fixture.sync.knownForeignSessionIds(fixture.catalog.listEntries());
+    const again = await fixture.sync.syncForeignSessions(fixture.deps, known);
+    assert.equal(again.imported, 0);
+    assert.equal(
+      fixture.catalog.listEntries().some((entry) => entry.dshSessionId === "session-deleted"),
+      false,
+    );
+    assert.equal(fixture.catalog.listDismissedDshSessionIds().has("session-deleted"), true);
   } finally {
     await fixture.cleanup();
   }
