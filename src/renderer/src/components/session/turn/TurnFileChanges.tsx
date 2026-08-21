@@ -9,6 +9,7 @@ import type { DiffFileHandler } from "../ToolCallComponents";
 import {
 	fileChangesPrefKey,
 	MAX_VISIBLE_FILES,
+	defaultFileChangesPref,
 	readFileChangesPref,
 	visibleFileCount,
 	writeFileChangesPref,
@@ -29,14 +30,16 @@ export const TurnFileChanges = memo(function TurnFileChanges(props: {
 	run: AgentRunItem;
 	/** 流式中：FileDiff 呈现 streaming 态（转圈 + 跟随滚动），完成后自动收起 */
 	streaming?: boolean;
+	/** 设置中的默认展示行为；用户在标题行的手动折叠优先按 run 记忆 */
+	expandByDefault?: boolean;
 	onDiffFile?: DiffFileHandler;
 }) {
 	const files = useMemo(() => collectRunFileChanges(props.run), [props.run]);
 	const prefKey = useMemo(() => fileChangesPrefKey(props.run), [props.run]);
-	// 初始偏好从模块级 store 读取（卸载重挂载后恢复），默认展开 + 3 行截断
+	// 初始偏好从模块级 store 读取（卸载重挂载后恢复）；没有手动偏好时跟随设置
 	const [pref, setPref] = useState<TurnFileChangesPref>(() => {
 		const stored = readFileChangesPref(prefKey);
-		return stored ?? { collapsed: false, showAll: false };
+		return stored ?? defaultFileChangesPref(props.expandByDefault);
 	});
 	/** 更新偏好并回写 store（卸载后按同一 key 找回）。 */
 	const updatePref = useCallback((patch: Partial<TurnFileChangesPref>) => {

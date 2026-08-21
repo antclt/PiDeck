@@ -4,6 +4,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const {
 	MAX_VISIBLE_FILES,
+	defaultFileChangesPref,
 	fileChangesPrefKey,
 	readFileChangesPref,
 	writeFileChangesPref,
@@ -11,6 +12,19 @@ const {
 } = loadTsCommonJs("src/renderer/src/components/session/turn/fileChangesUiState.ts");
 
 const run = (id, startedAt) => ({ kind: "agent-run", id, items: [], startedAt, endedAt: startedAt + 1 });
+
+test("defaultFileChangesPref：设置关闭时默认收起，开启时默认展开", () => {
+	const collapsed = defaultFileChangesPref(false);
+	assert.equal(collapsed.collapsed, true);
+	assert.equal(collapsed.showAll, false);
+	const expanded = defaultFileChangesPref(true);
+	assert.equal(expanded.collapsed, false);
+	assert.equal(expanded.showAll, false);
+	// 未传设置时保持历史默认展开行为，兼容旧调用方。
+	const legacy = defaultFileChangesPref();
+	assert.equal(legacy.collapsed, false);
+	assert.equal(legacy.showAll, false);
+});
 
 test("fileChangesPrefKey：同一 run 稳定、不同 run 不冲突", () => {
 	const key = fileChangesPrefKey(run("run-1", 1000));

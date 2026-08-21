@@ -14,6 +14,11 @@ export const MAX_VISIBLE_FILES = 3;
 
 export type TurnFileChangesPref = { collapsed: boolean; showAll: boolean };
 
+/** 根据设置生成单轮初始偏好；用户后续在标题行的手动操作会覆盖它。 */
+export function defaultFileChangesPref(expandByDefault = true): TurnFileChangesPref {
+	return { collapsed: !expandByDefault, showAll: false };
+}
+
 const fileChangesPrefs = new Map<string, TurnFileChangesPref>();
 
 /** run 身份 → 偏好 key（同一 run 稳定，不同 run 不冲突）。 */

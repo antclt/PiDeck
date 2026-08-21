@@ -2406,6 +2406,8 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.expandInterimDuringStreamDesc": "On (default): thinking and tool details auto-expand while the latest turn streams. Off: keep them collapsed to save rendering resources; manually expanded turns are unaffected.",
   "settings.collapsePrevRunsOnNewTurn": "Collapse previous turns on new message",
   "settings.collapsePrevRunsOnNewTurnDesc": "Automatically collapses thinking/tool details of previous turns (including manually expanded ones) after sending a new message, reducing what is rendered at once.",
+  "settings.expandTurnFileChanges": "Expand changed files by default",
+  "settings.expandTurnFileChangesDesc": "On (default): show each turn's changed-file list expanded below the answer. Off: keep it collapsed by default; you can still expand it from the title.",
   "settings.workspaceContentOpenModeDesc": "When opening from the file tree or Git, default to a middle-pane split or fill the middle pane.",
   "settings.workspaceContentOpenMode.split": "Split by default",
   "settings.workspaceContentOpenMode.maximize": "Fill middle pane by default",

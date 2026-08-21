@@ -207,7 +207,7 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
             </SelectContent>
           </Select>
         </SettingRow>
-        {/* 流式对话设置：省渲染资源的两个行为开关（默认值见 SettingsStore）。 */}
+        {/* 流式对话设置：中间过程与本轮修改文件的默认展示行为。 */}
         <SettingSwitchRow
           title={t("settings.expandInterimDuringStream")}
           description={t("settings.expandInterimDuringStreamDesc")}
@@ -219,6 +219,12 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
           description={t("settings.collapsePrevRunsOnNewTurnDesc")}
           checked={draft.collapsePrevRunsOnNewTurn}
           onChange={(checked) => updateDraft({ collapsePrevRunsOnNewTurn: checked })}
+        />
+        <SettingSwitchRow
+          title={t("settings.expandTurnFileChanges")}
+          description={t("settings.expandTurnFileChangesDesc")}
+          checked={draft.expandTurnFileChanges}
+          onChange={(checked) => updateDraft({ expandTurnFileChanges: checked })}
         />
       </SettingsSection>
 

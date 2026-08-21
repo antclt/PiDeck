@@ -454,6 +454,7 @@ export const TurnRow = memo(
 				<TurnFileChanges
 					run={run}
 					streaming={props.isStreaming}
+					expandByDefault={flowSettings.expandTurnFileChanges}
 					onDiffFile={props.onDiffFile}
 				/>
 			</div>
