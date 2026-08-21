@@ -237,7 +237,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
               输入卡仍贴在时间线/独立卡下方，不被撑开。 */}
           <footer
             ref={footerRef}
-            className="composer flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-0"
+            // 历史会话加载时 composer 仍固定在面板底部；保留 8px 底 padding，避免输入卡贴住窗口边缘。
+            className="composer flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-2"
             style={composerFooterStyle(
               props.height != null ? "100%" : localHeight,
             )}
