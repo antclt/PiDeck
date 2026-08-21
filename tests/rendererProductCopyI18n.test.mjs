@@ -63,6 +63,9 @@ test("settings error and unsaved-change copy matches the dev baseline", () => {
 	assert.equal(zhCN["settings.renderCrashedHelp"], "\u53ef\u4ee5\u5148\u5173\u95ed\u8bbe\u7f6e\u5f39\u6846\u7ee7\u7eed\u4f7f\u7528\u3002\u8bf7\u628a\u63a7\u5236\u53f0\u9519\u8bef\u53cd\u9988\u7ed9\u6211\u4eec\uff0c\u4fbf\u4e8e\u5b9a\u4f4d\u3002");
 	assert.equal(zhCN["settings.unsavedTitle"], "\u672a\u4fdd\u5b58\u7684\u66f4\u6539");
 	assert.equal(zhCN["settings.unsavedMessage"], "\u60a8\u6709\u672a\u4fdd\u5b58\u7684\u66f4\u6539\uff0c\u662f\u5426\u5728\u5173\u95ed\u524d\u4fdd\u5b58\uff1f");
+	assert.match(zhCN["settings.unsavedMessageDetail"], /\{tab\}/);
+	assert.match(zhCN["settings.unsavedMessageDetail"], /\{item\}/);
+	assert.match(zhCN["settings.unsavedMessageMore"], /\{count\}/);
 	assert.equal(zhCN["settings.saveAndClose"], "\u4fdd\u5b58\u5e76\u5173\u95ed");
 	assert.equal(zhCN["settings.discardChanges"], "\u653e\u5f03\u66f4\u6539");
 	assert.equal(zhCN["settings.dirtyTooltip"], "\u6b64\u9879\u5df2\u4fee\u6539\uff0c\u5c1a\u672a\u4fdd\u5b58");
@@ -73,6 +76,9 @@ test("settings error and unsaved-change copy matches the dev baseline", () => {
 	assert.equal(enUS["settings.renderCrashedHelp"], "You can close this dialog and continue. Please share the console error so we can fix it.");
 	assert.equal(enUS["settings.unsavedTitle"], "Unsaved Changes");
 	assert.equal(enUS["settings.unsavedMessage"], "You have unsaved changes. Do you want to save before closing?");
+	assert.match(enUS["settings.unsavedMessageDetail"], /\{tab\}/);
+	assert.match(enUS["settings.unsavedMessageDetail"], /\{item\}/);
+	assert.match(enUS["settings.unsavedMessageMore"], /\{count\}/);
 	assert.equal(enUS["settings.saveAndClose"], "Save & Close");
 	assert.equal(enUS["settings.discardChanges"], "Discard Changes");
 	assert.equal(enUS["settings.dirtyTooltip"], "This field has been modified, not saved yet");
@@ -155,6 +161,7 @@ test("reachable renderer surfaces use i18n without changing their UI structure",
 	assert.match(settingRows, /t\("settings\.dirtyTooltip"\)/);
 	assert.match(devTab, /t\("settings\.sectionRuntime"\)/);
 	assert.match(settings, /t\("settings\.unsavedTitle"\)/);
+	assert.match(settings, /formatSettingsUnsavedMessage/);
 	assert.match(settings, /t\("settings\.discardChanges"\)/);
 	assert.match(settings, /t\("settings\.saveAndClose"\)/);
 	assert.match(settingsStorage, /t\("settings\.storage\.clearConfirm"/);

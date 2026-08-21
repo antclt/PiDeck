@@ -14,8 +14,13 @@
  */
 import { useEffect, useState } from "react";
 import { Check, Shield, ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
-import { useAtomValue, useSetAtom } from "jotai";
-import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, upsertSessionAtom } from "../../atoms";
+import { useAtomValue, useSetAtom, useStore } from "jotai";
+import {
+	sessionRecordByIdAtomFamily,
+	sessionRuntimeByIdAtom,
+	sessionRuntimeBySessionIdAtomFamily,
+	upsertSessionAtom,
+} from "../../atoms";
 import { Button } from "../ui-shadcn/button";
 import { Dialog, DialogContent } from "../ui-shadcn/dialog";
 import { CommandItem } from "../ui-shadcn/command";
@@ -24,6 +29,7 @@ import { ConfirmDialog } from "../app/AppParts";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
+import { requireSessionCommand, toSessionRuntimeTarget } from "../../utils/sessionCommands";
 
 /** DSH 权限预设（与 host 预设表一致；顺序即展示顺序）。 */
 export const DSH_PERMISSION_PRESETS = [
@@ -51,6 +57,7 @@ export function DshPermissionMenu(props: { sessionId: string; disabled?: boolean
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(props.sessionId));
 	const record = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));
 	const upsertSession = useSetAtom(upsertSessionAtom);
+	const store = useStore();
 	const [open, setOpen] = useState(false);
 	const [confirmingFull, setConfirmingFull] = useState(false);
 	const [sending, setSending] = useState(false);
@@ -94,12 +101,35 @@ export function DshPermissionMenu(props: { sessionId: string; disabled?: boolean
 		}
 		setSending(true);
 		try {
-			await desktopApi.sessions.sendPrompt({
-				sessionId: props.sessionId,
-				requestId: crypto.randomUUID(),
-				message: `/permission ${preset}`,
-			});
-			// 记录同步为源真相：会话内切换也要持久化，重启/重新激活后保持一致
+			const target = toSessionRuntimeTarget(props.sessionId, runtime);
+			if (!target) {
+				throw new Error(t("sessionCommand.runtimeUnavailable"));
+			}
+			// 权限是 runtime 控制命令，不是聊天 prompt：专用 IPC 会校验 runtime
+			// generation，并等待 DSH 的 permission/preset 事件确认真正生效。
+			const result = requireSessionCommand(
+				await desktopApi.sessions.setRuntimePermission(target, preset),
+			);
+			// Targeted commands wrap the state in { target, value }; only merge the
+			// returned AgentRuntimeState into the session-scoped atom.
+			const agentState = result.value;
+			if (agentState.permissionPreset !== preset) {
+				throw new Error(t("dshPermission.switchFailed"));
+			}
+			const current = store.get(sessionRuntimeByIdAtom)[props.sessionId];
+			if (current) {
+				store.set(sessionRuntimeByIdAtom, {
+					...store.get(sessionRuntimeByIdAtom),
+					[props.sessionId]: {
+						...current,
+						state: current.state
+							? { ...current.state, ...agentState }
+							: agentState,
+					},
+				});
+			}
+			// 协调器已在 host 确认后写 catalog；这里同步 renderer catalog，避免按钮
+			// 在事件推送到达前短暂显示旧预设。
 			const updated = await desktopApi.sessions.updateRecord(props.sessionId, { permissionPreset: preset });
 			upsertSession(updated);
 			showNotice(t("dshPermission.switchNotice", { name: presetLabel(preset) }), 3000);

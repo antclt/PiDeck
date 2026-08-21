@@ -13,8 +13,8 @@ export const TERMINAL_PANEL_COLLAPSED_SIZE = 34;
 export const TERMINAL_PANEL_MIN_SIZE = 120;
 
 export type TerminalDockPanelProps = {
-  /** agent 或 project 终端目标；调用方保证已解析，否则不挂载本组件 */
-  target: TerminalTarget;
+  /** agent 或 project 终端目标；未解析时组件渲染 null（与 SessionRuntimeDock 同契约） */
+  target?: TerminalTarget;
   open: boolean;
   closing: boolean;
   collapsed: boolean;
@@ -52,6 +52,10 @@ export type TerminalDockPanelProps = {
  * 挂载即渲染 Handle 与 Panel。
  */
 export function TerminalDockPanel(props: TerminalDockPanelProps) {
+  // 目标未解析（owner 存在但 runtime target 未就绪）时不渲染面板，
+  // 调用方的可见性判断与这里的判空双保险
+  if (!props.target) return null;
+
   function handleResize(size: PanelSize) {
     const px = Math.round(size.inPixels);
     // 几何裁决（折叠阈值/clamp/展开意图）走共享纯函数，两条入口路径同一套规则

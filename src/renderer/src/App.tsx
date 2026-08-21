@@ -132,7 +132,8 @@ import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
 import { ScratchPadOverlay } from "./components/overlays/ScratchPadOverlay";
 import { AskPanelOverlay } from "./components/overlays/AskPanelOverlay";
-import { SessionRuntimeDock } from "./components/session/SessionRuntimeDock";
+import { TerminalDockPanel } from "./components/terminal/TerminalDockPanel";
+import { ResizablePanel, ResizablePanelGroup } from "./components/ui-shadcn/resizable";
 import { AppShell } from "./components/app/AppShell";
 import { WorkspaceDrawerRail } from "./components/workspace/WorkspaceDrawerRail";
 import { DrawerSurface } from "./components/workspace/DrawerSurface";
@@ -673,17 +674,18 @@ export function App() {
   const setDrawerWidth = workspace.setDrawerWidth;
   const [composerOffsetHeight, setComposerOffsetHeight] = useState(0);
   // 终端归属：有 activeAgent → agent owner；引导页/未激活 agent/历史会话 → project owner。
-  // 终端 open/collapsed/高度/PTY 实例都按 owner 隔离，切换项目或 agent 绝不串台。
+  // 终端 open/collapsed/PTY 实例按 owner 隔离，切换项目或 agent 绝不串台；
+  // 分屏高度是全局单份并持久化（与抽屉宽度同策略），跨重启恢复上次大小。
   const terminalOwner = resolveTerminalOwner(activeAgentId, activeProjectId);
   const {
     terminalOpen,
     terminalCollapsed,
     terminalDockVisible,
     terminalDockClosing,
-    terminalRowHeight: activeTerminalHeight,
+    terminalHeight,
     setTerminalOpenForOwner,
     setTerminalCollapsedForOwner,
-    setTerminalHeightByOwner,
+    setTerminalHeight,
     prune: pruneTerminalDockState,
   } = useTerminalDock(terminalOwner);
   // 终端 IPC 目标：agent owner → 当前会话的 runtime target（须绑定已启动 Agent）；
@@ -915,7 +917,7 @@ export function App() {
 
   // Layout calculation delegated to useSessionLayout (refs + ResizeObserver + math).
   const sessionLayout = useSessionLayout({
-    terminalRequestedHeight: activeTerminalHeight,
+    terminalRequestedHeight: terminalHeight,
     terminalOpen,
     terminalClosing: terminalDockClosing,
     terminalCollapsed,
@@ -2859,7 +2861,7 @@ export function App() {
       terminalTarget,
       setTerminalOpenForOwner,
       setTerminalCollapsedForOwner,
-      setTerminalHeightByOwner,
+      setTerminalHeight,
       configOpen,
       environmentDialog: Boolean(environmentDialog),
       showNotice,
@@ -2903,7 +2905,7 @@ export function App() {
       settings.showThinking,
       setPreviewImage,
       setTerminalCollapsedForOwner,
-      setTerminalHeightByOwner,
+      setTerminalHeight,
       setTerminalOpenForOwner,
       showToast,
       terminalCollapsed,
@@ -2958,9 +2960,15 @@ export function App() {
       ) : (
         // 无当前会话（普通项目点开 / 所有 Tab 关闭）时，普通项目与 Chat 项目
         // 共享统一空态；快捷操作新建 Agent / 匿名聊天，无项目时引导添加项目。
-        // 引导页同样可以打开项目级终端（owner=project），在空态下方渲染 dock。
-        <>
-          <div className="min-h-0 flex-1">
+        // 引导页同样可以打开项目级终端（owner=project）：与有会话视图同构的
+        // 垂直分屏形态，分隔条拖拽调高，高度经 localStorage 持久化跨重启恢复。
+        // key 随终端挂载变化：面板数变化必须重建 Group（同 sessionResizableGroupKey）。
+        <ResizablePanelGroup
+          key={`empty-terminal-${terminalDockVisible ? "docked" : "solo"}`}
+          orientation="vertical"
+          className="min-h-0 flex-1"
+        >
+          <ResizablePanel id="empty-main" minSize={200} className="flex min-h-0 flex-col">
             {/* 无会话空态：引导页 = 新建页面形态（居中 ComposerArea + 虚拟会话），
                 不登记 Tab；首次发送才由 ensureSessionForSend 创建真实会话并落 Tab */}
             <ProjectEmptyState
@@ -2969,30 +2977,23 @@ export function App() {
               onAddProject={() => void addProject()}
               onSelectProject={selectProjectCommand}
             />
-          </div>
+          </ResizablePanel>
           {!isLanWeb && terminalDockVisible && terminalTarget && (
-            <div
-              className="shrink-0"
-              style={{ height: terminalCollapsed ? 34 : activeTerminalHeight }}
-            >
-              <SessionRuntimeDock
-                key={terminalOwner ? terminalOwnerKey(terminalOwner) : undefined}
-                target={terminalTarget}
-                mounted={terminalDockVisible}
-                open={terminalOpen}
-                closing={terminalDockClosing}
-                collapsed={terminalCollapsed}
-                height={activeTerminalHeight}
-                terminal={api.terminal}
-                onOpenChange={(open) => setTerminalOpenForOwner(open)}
-                onCollapsedChange={(collapsed) => setTerminalCollapsedForOwner(collapsed)}
-                onHeightChange={() => {
-                  // 引导页终端高度由外层固定容器持有，不需要回写
-                }}
-              />
-            </div>
+            <TerminalDockPanel
+              target={terminalTarget}
+              open={terminalOpen}
+              closing={terminalDockClosing}
+              collapsed={terminalCollapsed}
+              height={terminalRowHeight}
+              maxHeight={availableTerminalHeight ?? 120}
+              terminal={api.terminal}
+              ownerKey={terminalOwner ? terminalOwnerKey(terminalOwner) : undefined}
+              onOpenChange={setTerminalOpenForOwner}
+              onCollapsedChange={setTerminalCollapsedForOwner}
+              onHeightChange={setTerminalHeight}
+            />
           )}
-        </>
+        </ResizablePanelGroup>
       )}
     </SessionPaneServicesProvider>
   );

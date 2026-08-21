@@ -1,4 +1,4 @@
-import { Component, lazy, memo, Suspense, useCallback, useRef, useState, type ReactNode } from "react";
+import { Component, lazy, memo, Suspense, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { getDefaultStore } from "jotai";
 import { settingsFocusAtom, type SettingsTabId } from "../../atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
@@ -44,6 +44,7 @@ import { cn } from "../../lib/utils";
 import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { useGitModels } from "./settings/gitModels.ts";
+import { formatSettingsUnsavedMessage, summarizeSettingsUnsavedChanges } from "./settings/unsavedChangesSummary.ts";
 import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult } from "../../../../shared/types";
 
 // ── 各 tab 内容 lazy 加载：首开只下载壳 + 当前 tab 的 chunk（qrcode/表格/日志查看器等
@@ -387,6 +388,18 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const hasDirtyChanges = dirtyFields.size > 0;
 	// 视觉桥草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
 	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty;
+	// 关闭确认只点名第一条（按设置页 tab/字段顺序），多项用 count 提示还有别的。
+	const unsavedCloseMessage = useMemo(
+		() =>
+			formatSettingsUnsavedMessage(
+				summarizeSettingsUnsavedChanges({
+					dirtyFields,
+					visionDirty: visionDraft.dirty,
+				}),
+				t,
+			),
+		[dirtyFields, visionDraft.dirty],
+	);
 
 	return (
 		<Dialog open onOpenChange={(next) => !next && handleClose()}>
@@ -581,7 +594,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 					<AlertDialogContent>
 						<AlertDialogHeader>
 							<AlertDialogTitle>{t("settings.unsavedTitle")}</AlertDialogTitle>
-							<AlertDialogDescription>{t("settings.unsavedMessage")}</AlertDialogDescription>
+							<AlertDialogDescription>{unsavedCloseMessage}</AlertDialogDescription>
 						</AlertDialogHeader>
 						<AlertDialogFooter>
 							<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

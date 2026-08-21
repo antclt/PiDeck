@@ -127,8 +127,123 @@ test("terminal dock hook converts owners into canonical owner keys", () => {
   assert.match(hookSource, /setTerminalDockOpen\(current, activeOwnerKey, open\)/);
   assert.match(hookSource, /setTerminalDockCollapsed\(current, activeOwnerKey, collapsed\)/);
   assert.match(hookSource, /activeOwner: TerminalDockOwner \| undefined/);
-  // 高度也按 owner key 分桶：项目终端高度不与 agent 终端互相覆盖
-  assert.match(hookSource, /terminalHeightByOwner\[activeOwnerKey\]/);
+  // 分屏高度是全局单份并持久化（与抽屉宽度同策略）：首帧从 localStorage 恢复
+  // 上次拖拽结果，拖拽回写时落盘；不再按 owner 分桶，项目/agent 终端共享同一高度。
+  assert.match(hookSource, /loadTerminalHeight\(COMPOSER_DEFAULT_TERMINAL_HEIGHT\)/);
+  assert.match(hookSource, /saveTerminalHeight\(next\)/);
+});
+
+function loadTerminalDockStateWithStorage(storage) {
+  const output = ts.transpileModule(
+    readFileSync("src/renderer/src/terminalDockState.ts", "utf8"),
+    {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+      },
+    },
+  ).outputText;
+  const module = { exports: {} };
+  // terminalDockState.ts 直接引用浏览器全局 localStorage，测试用替身注入
+  vm.runInNewContext(output, {
+    module,
+    exports: module.exports,
+    require: () => ({}),
+    localStorage: storage,
+  });
+  return module.exports;
+}
+
+function createMemoryStorage() {
+  const map = new Map();
+  return {
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => map.set(key, String(value)),
+  };
+}
+
+test("terminal panel resize collapses below threshold and expands with height above it", () => {
+  const { applyTerminalPanelResize } = loadTerminalDockStateModule();
+
+  // 注意：对象来自 vm 沙箱，原型与本域不同，不能用 deepEqual，逐属性断言。
+
+  // 展开态拖到折叠条高度 → 折叠，不写高度
+  let intent = applyTerminalPanelResize({ px: 20, collapsed: false, maxHeight: 500 });
+  assert.equal(intent.collapsed, true);
+  assert.equal(intent.height, undefined);
+
+  // 已折叠再收到程序化 resize 到阈值下 → 无变化，调用方可跳过 setState
+  intent = applyTerminalPanelResize({ px: 20, collapsed: true, maxHeight: 500 });
+  assert.equal(intent.collapsed, undefined);
+  assert.equal(intent.height, undefined);
+
+  // 折叠态拖回展开 → 同时给出展开意图与新高度
+  intent = applyTerminalPanelResize({ px: 300, collapsed: true, maxHeight: 500 });
+  assert.equal(intent.collapsed, false);
+  assert.equal(intent.height, 300);
+
+  // 展开态普通拖拽 → 只回写高度，不动折叠态
+  intent = applyTerminalPanelResize({ px: 300, collapsed: false, maxHeight: 500 });
+  assert.equal(intent.collapsed, undefined);
+  assert.equal(intent.height, 300);
+});
+
+test("terminal panel resize clamps height into [min, maxHeight]", () => {
+  const { applyTerminalPanelResize, TERMINAL_HEIGHT_MIN } = loadTerminalDockStateModule();
+
+  // 超过可用上限：clamp 到 maxHeight，防止终端吃掉整个工作区
+  assert.equal(
+    applyTerminalPanelResize({ px: 2000, collapsed: false, maxHeight: 400 }).height,
+    400,
+  );
+  // 高于折叠阈值但低于最小高度：clamp 到 TERMINAL_HEIGHT_MIN
+  assert.equal(
+    applyTerminalPanelResize({ px: 50, collapsed: false, maxHeight: 500 }).height,
+    TERMINAL_HEIGHT_MIN,
+  );
+  // 小数像素四舍五入
+  assert.equal(
+    applyTerminalPanelResize({ px: 299.6, collapsed: false, maxHeight: 500 }).height,
+    300,
+  );
+});
+
+test("terminal height persists across reloads and rejects invalid stored values", () => {
+  const storage = createMemoryStorage();
+  const mod = loadTerminalDockStateWithStorage(storage);
+
+  // 无存档时返回调用方默认值
+  assert.equal(mod.loadTerminalHeight(220), 220);
+
+  // 拖拽回写后重新加载能恢复上次大小（跨重启持久化的核心契约）
+  mod.saveTerminalHeight(280);
+  assert.equal(mod.loadTerminalHeight(220), 280);
+
+  // 写入时 clamp 到最小高度，避免异常值写坏布局
+  mod.saveTerminalHeight(10);
+  assert.equal(Number(storage.getItem(mod.TERMINAL_HEIGHT_STORAGE_KEY)), mod.TERMINAL_HEIGHT_MIN);
+
+  // 存档损坏 / 低于最小高度时退回默认值，不让布局卡死
+  storage.setItem(mod.TERMINAL_HEIGHT_STORAGE_KEY, "not-a-number");
+  assert.equal(mod.loadTerminalHeight(220), 220);
+  storage.setItem(mod.TERMINAL_HEIGHT_STORAGE_KEY, "40");
+  assert.equal(mod.loadTerminalHeight(220), 220);
+});
+
+test("terminal height helpers survive unavailable localStorage", () => {
+  const throwing = {
+    getItem: () => {
+      throw new Error("unavailable");
+    },
+    setItem: () => {
+      throw new Error("quota");
+    },
+  };
+  const mod = loadTerminalDockStateWithStorage(throwing);
+
+  // localStorage 不可用（隐私模式等）时不抛异常，退回默认高度
+  assert.equal(mod.loadTerminalHeight(220), 220);
+  assert.doesNotThrow(() => mod.saveTerminalHeight(300));
 });
 
 test("rapid reopen cancels the closing state without a second timer owner", () => {
