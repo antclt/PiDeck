@@ -1,4 +1,7 @@
 import { Component, lazy, memo, Suspense, useCallback, useRef, useState, type ReactNode } from "react";
+import { getDefaultStore } from "jotai";
+import { settingsFocusAtom, type SettingsTabId } from "../../atoms";
+import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
 import {
 	Settings2,
 	Network,
@@ -57,7 +60,7 @@ const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => 
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
 
 // DSH 配置（HOME / 审批 / 外部会话）只放配置管理，避免设置页再开一个重复 tab
-type SettingsTabId = "common" | "appearance" | "proxy" | "dev" | "im" | "pet" | "storage" | "usage" | "process" | "vision";
+// SettingsTabId 定义在 atoms，深链与侧栏共用同一套合法 tab。
 
 // 注意：修改 SettingsTabId 枚举时需同步更新 SETTINGS_TAB_IDS 校验数组
 
@@ -192,9 +195,19 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
  * 各 tab 内容拆为独立 memo 组件（settings/*Tab.tsx），切换 tab 只挂载目标 tab。
  */
 function SettingsModalContent(props: SettingsModalProps) {
-	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
-	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
-	const [activeTab, setActiveTab] = useState<SettingsTabId>(loadLastSettingsTab);
+	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容）。
+	// 深链（如 Git「去设置」）优先于上次记住的 tab，否则会停在外观/开发等其它页。
+	const [activeTab, setActiveTab] = useState<SettingsTabId>(
+		() => getDefaultStore().get(settingsFocusAtom)?.tab ?? loadLastSettingsTab(),
+	);
+	const persistTab = useCallback((tab: SettingsTabId) => {
+		try {
+			localStorage.setItem(SETTINGS_LAST_TAB_KEY, tab);
+		} catch {
+			/* localStorage 不可用时只影响本次记忆 */
+		}
+	}, []);
+	useSettingsFocus(activeTab, setActiveTab, persistTab);
 	// ── 全局设置草稿：进入弹框时快照 props.settings，所有修改在 draft 上操作，保存时统一提交 ──
 	const [draftSettings, setDraftSettings] = useState<AppSettings>(() => ({ ...props.settings }));
 	const [dirtyFields, setDirtyFields] = useState<Set<string>>(new Set());
@@ -400,7 +413,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 						</DialogClose>
 					</div>
 				</DialogHeader>
-			<Tabs orientation="vertical" value={activeTab} onValueChange={(v) => { const match = tabs.find((t) => t.id === v); if (!match) return; setActiveTab(match.id); try { localStorage.setItem(SETTINGS_LAST_TAB_KEY, match.id); } catch { /* localStorage 不可用时静默失败，仅本次会话内不记忆 */ } }} className="settings-layout flex min-h-0 flex-1 flex-row gap-0 bg-transparent">
+			<Tabs orientation="vertical" value={activeTab} onValueChange={(v) => { const match = tabs.find((t) => t.id === v); if (!match) return; setActiveTab(match.id); persistTab(match.id); }} className="settings-layout flex min-h-0 flex-1 flex-row gap-0 bg-transparent">
 					<TabsList className="settings-tabs flex min-h-0 shrink-0 flex-col items-stretch gap-2.5 overflow-auto border-0 border-r border-border rounded-none bg-transparent p-2.5 data-[orientation=vertical]:w-[196px]" aria-label={t("settings.title")}>
 						{tabs.map((tab) => (
 							<TabsTrigger key={tab.id} value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">

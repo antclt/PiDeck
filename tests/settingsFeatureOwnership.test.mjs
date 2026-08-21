@@ -10,6 +10,7 @@ const sessionRuntime = readFileSync(
   "utf8",
 );
 const piUpdate = readFileSync("src/renderer/src/hooks/usePiUpdate.ts", "utf8");
+const gitPanel = readFileSync("src/renderer/src/components/app/GitPanel.tsx", "utf8");
 
 // Opening Settings must not subscribe or write local overlay state in App.
 test("Settings overlay visibility belongs to feature consumers", () => {
@@ -21,6 +22,9 @@ test("Settings overlay visibility belongs to feature consumers", () => {
   assert.match(sidebar, /useSetAtom\(settingsOpenAtom\)/);
   assert.match(sessionRuntime, /useAtomValue\(settingsOpenAtom\)/);
   assert.match(piUpdate, /useSetAtom\(settingsOpenAtom\)/);
+  // Git「去设置」走带焦点的 openSettingsAtom，避免只开弹窗却停在上次 tab
+  assert.match(gitPanel, /useSetAtom\(openSettingsAtom\)/);
+  assert.match(root, /settingsFocusAtom/);
 });
 
 // AppSettings remains canonical in App; the modal root only consumes it.
