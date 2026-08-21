@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtom, useAtomValue } from "jotai";
-import type { AgentTab, Project, SessionRecord, SessionSource } from "../../../shared/types";
+import type { AgentBackend, AgentTab, Project, SessionRecord } from "../../../shared/types";
 import {
   agentInventoryAtom,
   projectInventoryAtom,
@@ -15,12 +15,20 @@ import {
   sameProjectIdSet,
   writeExpandedSidebarProjects,
 } from "../utils/sidebarExpandedProjects";
+import {
+  SESSION_FILTER_PILLS,
+  parseSessionFilterState,
+  serializeSessionFilterState,
+  sessionPillOf,
+  type SessionFilterPill,
+  type SessionFilterState,
+} from "../sessionFilterPills";
 
 export const SIDEBAR_PROJECT_CHILD_PAGE_SIZE = 5;
-export const SIDEBAR_SESSION_SOURCES = ["pi", "codex", "claude", "opencode"] as const;
 
-export type SidebarSourceFilter = Set<SessionSource> | null;
-export type SidebarSourceFilters = Record<string, SidebarSourceFilter | undefined>;
+/** 侧栏过滤类别：来源 + DSH 后端（会话归属见 sessionFilterPills.sessionPillOf）。 */
+export type SidebarSourceFilter = Set<SessionFilterPill> | null;
+export type SidebarSourceFilters = SessionFilterState;
 export type SidebarSourceFilterMenu = {
   projectId: string;
   x: number;
@@ -76,9 +84,9 @@ export type SidebarController = {
   /** 批量折叠/展开工作区项目：任一展开则全折叠，全折叠则全展开；Chat 由自己标题栏控制。 */
   toggleCollapseAllProjects: () => void;
   sourceFilterFor: (projectId: string) => SidebarSourceFilter;
-  setSourceEnabled: (projectId: string, source: SessionSource, enabled: boolean) => void;
+  setSourceEnabled: (projectId: string, source: SessionFilterPill, enabled: boolean) => void;
   /** Matches the dev filter menu: first source click narrows from All to that source. */
-  toggleSourceFilter: (projectId: string, source: SessionSource) => void;
+  toggleSourceFilter: (projectId: string, source: SessionFilterPill) => void;
   clearSourceFilter: (projectId: string) => void;
   sourceFilterMenu?: SidebarSourceFilterMenu;
   openSourceFilter: (projectId: string, x: number, y: number) => void;
@@ -164,38 +172,29 @@ export function createSidebarRequestGate() {
 export function readSidebarSourceFilters(storage?: StorageLike): SidebarSourceFilters {
   if (!storage) return {};
   try {
-    const parsed: unknown = JSON.parse(storage.getItem(SOURCE_FILTER_STORAGE_KEY) ?? "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const filters: SidebarSourceFilters = {};
-    for (const [projectId, value] of Object.entries(parsed)) {
-      if (value === null) filters[projectId] = null;
-      else if (Array.isArray(value)) {
-        const sources = value.filter((source): source is SessionSource =>
-          typeof source === "string" && SIDEBAR_SESSION_SOURCES.includes(source as SessionSource),
-        );
-        filters[projectId] = new Set(sources);
-      }
-    }
-    return filters;
+    return parseSessionFilterState(storage.getItem(SOURCE_FILTER_STORAGE_KEY));
   } catch {
     return {};
   }
 }
 
 export function serializeSidebarSourceFilters(filters: SidebarSourceFilters) {
-  return JSON.stringify(Object.fromEntries(Object.entries(filters).map(([projectId, filter]) => [
-    projectId,
-    filter === null ? null : [...(filter ?? [])],
-  ])));
+  return serializeSessionFilterState(filters);
 }
 
-export function filterSidebarSessions<T extends { source?: SessionSource }>(
+/**
+ * 按类别过滤侧栏会话：DSH 会话按 backend 判定（source 恒为 pi），
+ * 避免「只选 Pi」时 DSH 会话仍显示 / 只选 DSH 时 pi 会话误显示。
+ */
+export function filterSidebarSessions<
+  T extends { source?: import("../../../shared/types").SessionSource; backend?: AgentBackend },
+>(
   sessions: readonly T[],
   filter: SidebarSourceFilter,
 ) {
   return filter === null || filter === undefined
     ? sessions
-    : sessions.filter((session) => filter.has(session.source ?? "pi"));
+    : sessions.filter((session) => filter.has(sessionPillOf(session)));
 }
 
 export function useSidebarController(options: {
@@ -369,16 +368,16 @@ export function useSidebarController(options: {
     settingsHydratedRef.current = true;
     commitExpandedProjectIds(next);
   }, [commitExpandedProjectIds, projects]);
-  const setSourceEnabled = useCallback((projectId: string, source: SessionSource, enabled: boolean) => {
+  const setSourceEnabled = useCallback((projectId: string, source: SessionFilterPill, enabled: boolean) => {
     setSourceFilters((current) => {
       const previous = current[projectId] ?? null;
-      const next = new Set(previous ?? SIDEBAR_SESSION_SOURCES);
+      const next = new Set(previous ?? SESSION_FILTER_PILLS);
       if (enabled) next.add(source);
       else next.delete(source);
-      return { ...current, [projectId]: next.size === SIDEBAR_SESSION_SOURCES.length ? null : next };
+      return { ...current, [projectId]: next.size === SESSION_FILTER_PILLS.length ? null : next };
     });
   }, []);
-  const toggleSourceFilter = useCallback((projectId: string, source: SessionSource) => {
+  const toggleSourceFilter = useCallback((projectId: string, source: SessionFilterPill) => {
     setSourceFilters((current) => {
       const previous = current[projectId] ?? null;
       if (previous === null) return { ...current, [projectId]: new Set([source]) };

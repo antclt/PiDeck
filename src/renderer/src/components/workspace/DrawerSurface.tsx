@@ -4,6 +4,7 @@ import { DrawerContent } from "../app/AppParts";
 import { SessionTrajectoryPanel } from "../session/trajectory/SessionTrajectoryPanel";
 import { LazyWrapper } from "../../hooks/useLazyComponent";
 import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
+import { sessionPillOf, type SessionFilterPill } from "../../sessionFilterPills";
 import { t } from "../../i18n";
 
 // ── port objects (typed loosely — type tightening is a follow-up task) ──
@@ -41,7 +42,7 @@ export interface DrawerFilesPort {
   sessionsProjectId: string | undefined;
   files: any[];
   sessions: any[];
-  sessionSourceFilter: Record<string, Set<string> | null>;
+  sessionSourceFilter: Record<string, Set<SessionFilterPill> | null>;
   sessionHistoryLoading: boolean;
   expandedDirs: Set<string>;
   onToggleDirectory: (dir: string) => void;
@@ -147,8 +148,8 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
             project={drawer === "sessions" ? files.sessionsProject : undefined}
             files={files.files}
             sessions={(files.sessionsProjectId && files.sessionSourceFilter[files.sessionsProjectId as string]) ? files.sessions.filter(
-              (s: any) => !s.parentSessionPath && (files.sessionSourceFilter[files.sessionsProjectId as string]!)!.has(s.source ?? "pi"),
-            ).concat(files.sessions.filter((s: any) => s.parentSessionPath && (files.sessionSourceFilter[files.sessionsProjectId as string]!)!.has(s.source ?? "pi"))) : files.sessions}
+              (s: any) => !s.parentSessionPath && (files.sessionSourceFilter[files.sessionsProjectId as string]!)!.has(sessionPillOf(s)),
+            ).concat(files.sessions.filter((s: any) => s.parentSessionPath && (files.sessionSourceFilter[files.sessionsProjectId as string]!)!.has(sessionPillOf(s)))) : files.sessions}
             sessionsLoading={files.sessionHistoryLoading}
             expandedDirs={files.expandedDirs}
             onToggleDirectory={files.onToggleDirectory}

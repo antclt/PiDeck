@@ -1,5 +1,6 @@
 import { canonicalizeSessionPath, getSessionEnvironment } from "../../shared/sessionIdentity";
 import type { AgentTab, SessionEnvironment, SessionSummary } from "../../shared/types";
+import { sessionPillOf, type SessionFilterPill } from "./sessionFilterPills";
 
 /**
  * 会话/Agent 行的状态点 Tailwind bg 类（跨 Sidebar SessionTree 与会话 Tab 复用）。
@@ -180,7 +181,8 @@ export function filterAgentsForSidebarDisplay({
 	agents: AgentTab[];
 	allSessions: SessionSummary[];
 	visibleSessions: SessionSummary[];
-	sources: ReadonlySet<NonNullable<SessionSummary["source"]>> | null;
+	/** 过滤类别（来源 + DSH 后端）；DSH agent 按 backend 归属（source 恒为 pi）。 */
+	sources: ReadonlySet<SessionFilterPill> | null;
 }): AgentTab[] {
 	if (sources === null) return agents;
 	const allSessionsByKey = new Map<string, SessionSummary>();
@@ -201,7 +203,7 @@ export function filterAgentsForSidebarDisplay({
 			: findSessionKeyForAgent(agent.sessionPath, allSessionsByKey);
 		return linkedSessionKey
 			? visibleSessionKeys.has(linkedSessionKey)
-			: sources.has(agent.sessionSource ?? "pi");
+			: sources.has(sessionPillOf({ source: agent.sessionSource, backend: agent.backend }));
 	});
 }
 

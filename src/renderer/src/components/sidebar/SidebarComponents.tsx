@@ -32,11 +32,21 @@ import {
 } from "../ui-shadcn/dropdown-menu";
 import { Button } from "../ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui-shadcn/table";
-import type { SessionSource, SessionSummary, Project, AgentTab } from "../../../../shared/types";
-import { SessionSourceBadge } from "../session/SessionSourceBadge";
+import type { SessionSummary, Project, AgentTab } from "../../../../shared/types";
+import { SessionSourceBadge, SessionBackendMark, DshSourceBadge } from "../session/SessionSourceBadge";
 import { Checkbox } from "../ui-shadcn/checkbox";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
+import {
+	SESSION_FILTER_PILLS,
+	filterSessionsByPills,
+	type SessionFilterPill,
+} from "../../sessionFilterPills";
+import {
+	mergeManagerArchived,
+	sessionManagerRowKey,
+	type ManagerArchivedRow,
+} from "../../sessionManagerModel";
 
 export function SessionManagerModal(props: {
 	sessions: SessionSummary[];
@@ -50,27 +60,33 @@ export function SessionManagerModal(props: {
 	onUnarchive: (session: SessionSummary) => Promise<void>;
 	/** 列出已归档会话 */
 	listArchived: () => Promise<SessionSummary[]>;
+	/** 列出 DSH 归档会话（归档视图用；host 目录已移入 .pideck-archive） */
+	listArchivedDsh: () => Promise<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>;
+	/** 恢复 DSH 归档会话（主进程移回 sessions 树并重建 catalog 记录） */
+	onUnarchiveDsh: (dshSessionId: string) => Promise<void>;
 }) {
-	const SOURCES = ["pi", "codex", "claude", "opencode"] as const;
-	const [activeSources, setActiveSources] = useState<Set<string>>(new Set(SOURCES));
+	// 过滤 pill 集合：来源（pi/codex/claude/opencode）+ DSH 后端。
+	// DSH 会话 source 恒为 "pi"，归属判定必须按 backend 优先（见 sessionFilterPills）。
+	const [activePills, setActivePills] = useState<Set<SessionFilterPill>>(new Set(SESSION_FILTER_PILLS));
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [selectAll, setSelectAll] = useState(false);
 	// 已归档视图：true 时展示归档会话并提供恢复；数据打开弹窗时按需拉取。
 	const [showArchived, setShowArchived] = useState(false);
-	const [archivedSessions, setArchivedSessions] = useState<SessionSummary[] | null>(null);
+	const [archivedRows, setArchivedRows] = useState<ManagerArchivedRow[] | null>(null);
 
-	// 按来源过滤
-	const filteredSessions = props.sessions.filter((s) =>
-		activeSources.has(s.source ?? "pi"),
+	// 按 pill 过滤（一个会话只归属一个 pill，DSH 不与 Pi 重复计数）
+	const filteredSessions = useMemo(
+		() => filterSessionsByPills(props.sessions, activePills),
+		[props.sessions, activePills],
 	);
 
-	const toggleSource = (source: string) => {
-		setActiveSources((prev) => {
+	const togglePill = (pill: SessionFilterPill) => {
+		setActivePills((prev) => {
 			const next = new Set(prev);
-			if (next.has(source)) {
-				next.delete(source);
+			if (next.has(pill)) {
+				next.delete(pill);
 			} else {
-				next.add(source);
+				next.add(pill);
 			}
 			return next;
 		});
@@ -78,23 +94,23 @@ export function SessionManagerModal(props: {
 		setSelectAll(false);
 	};
 
-	// 全选/取消全选（只在当前过滤后的范围内）
+	// 全选/取消全选（只在当前过滤后的范围内；行身份用稳定记录 id，DSH 无 filePath 不冲突）
 	const handleToggleAll = () => {
 		if (selectAll) {
 			setSelected(new Set());
 		} else {
-			setSelected(new Set(filteredSessions.map((s) => s.filePath)));
+			setSelected(new Set(filteredSessions.map((s) => s.id)));
 		}
 		setSelectAll(!selectAll);
 	};
 
-	const handleToggle = (filePath: string) => {
+	const handleToggle = (sessionId: string) => {
 		setSelected((prev) => {
 			const next = new Set(prev);
-			if (next.has(filePath)) {
-				next.delete(filePath);
+			if (next.has(sessionId)) {
+				next.delete(sessionId);
 			} else {
-				next.add(filePath);
+				next.add(sessionId);
 			}
 			setSelectAll(next.size === filteredSessions.length);
 			return next;
@@ -102,9 +118,16 @@ export function SessionManagerModal(props: {
 	};
 
 	const handleDeleteSelected = () => {
-		const toDelete = props.sessions.filter((s) => selected.has(s.filePath));
+		const toDelete = props.sessions.filter((s) => selected.has(s.id));
 		if (toDelete.length === 0) return;
 		props.onDelete(toDelete);
+	};
+
+	// 归档视图数据：pi（文件归档）+ DSH（host 目录归档）合并加载，恢复后重新拉取。
+	const loadArchivedRows = () => {
+		void Promise.all([props.listArchived(), props.listArchivedDsh()])
+			.then(([piSessions, dshItems]) => setArchivedRows(mergeManagerArchived(piSessions, dshItems)))
+			.catch(() => setArchivedRows([]));
 	};
 
 	return (
@@ -136,15 +159,15 @@ export function SessionManagerModal(props: {
 									{t("common.selectAll")}
 								</Label>
 								<div className="flex items-center gap-1">
-									{SOURCES.map((source) => (
+									{SESSION_FILTER_PILLS.map((pill) => (
 										<Button
-											key={source}
+											key={pill}
 											variant="outline"
 											size="sm"
-											className={`h-auto rounded-full border border-border-subtle bg-transparent px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-150 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]${activeSources.has(source) ? " border-[var(--color-accent)] bg-bg-active font-semibold text-[var(--color-accent)]" : ""}`}
-											onClick={() => toggleSource(source)}
+											className={`h-auto rounded-full border border-border-subtle bg-transparent px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-150 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]${activePills.has(pill) ? " border-[var(--color-accent)] bg-bg-active font-semibold text-[var(--color-accent)]" : ""}`}
+											onClick={() => togglePill(pill)}
 										>
-											{t(`sessionSource.${source}` as any)}
+											{t(pill === "dsh" ? "sessionBackend.dsh" : `sessionSource.${pill}`)}
 										</Button>
 									))}
 								</div>
@@ -157,7 +180,7 @@ export function SessionManagerModal(props: {
 								variant="outline" size="sm" className="h-auto gap-1 border border-border-subtle px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-150 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
 								onClick={() => {
 									// 批量归档选中行（与删除同粒度）；运行中会话由主进程拒绝并提示
-									const toArchive = props.sessions.filter((s) => selected.has(s.filePath));
+									const toArchive = props.sessions.filter((s) => selected.has(s.id));
 									if (toArchive.length > 0) props.onArchive(toArchive);
 								}}
 							>
@@ -180,10 +203,8 @@ export function SessionManagerModal(props: {
 								if (showArchived) {
 									setShowArchived(false);
 								} else {
-									// 打开归档视图时懒加载归档列表
-									if (archivedSessions === null) {
-										void props.listArchived().then(setArchivedSessions).catch(() => setArchivedSessions([]));
-									}
+									// 打开归档视图时懒加载归档列表（pi 文件归档 + DSH host 目录归档）
+									if (archivedRows === null) loadArchivedRows();
 									setShowArchived(true);
 								}
 							}}
@@ -204,19 +225,30 @@ export function SessionManagerModal(props: {
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{archivedSessions === null ? (
+								{archivedRows === null ? (
 									<TableRow><TableCell colSpan={2} className="py-6 text-center text-caption text-muted-foreground">…</TableCell></TableRow>
-								) : archivedSessions.length === 0 ? (
+								) : archivedRows.length === 0 ? (
 									<TableRow><TableCell colSpan={2} className="py-6 text-center text-caption text-muted-foreground">{t("sessionManager.archivedEmpty")}</TableCell></TableRow>
-								) : archivedSessions.map((session) => (
-									<TableRow key={session.filePath} className="bg-bg-panel">
+								) : archivedRows.map((row) => (
+									<TableRow key={row.kind === "pi" ? sessionManagerRowKey(row.session) : row.dshSessionId} className="bg-bg-panel">
 										<TableCell className="w-full max-w-0">
-											<div className="flex min-w-0 items-center gap-2">
-												<span className="truncate text-control text-text-primary">
-													{session.name || session.preview?.slice(0, 60) || t("common.untitled")}
-												</span>
-												{session.source && session.source !== "pi" && <SessionSourceBadge source={session.source} />}
-											</div>
+											{row.kind === "pi" ? (
+												<div className="flex min-w-0 items-center gap-2">
+													<span className="truncate text-control text-text-primary">
+														{row.session.name || row.session.preview?.slice(0, 60) || t("common.untitled")}
+													</span>
+													{row.session.source && row.session.source !== "pi" && <SessionSourceBadge source={row.session.source} />}
+												</div>
+											) : (
+												// DSH 归档行：manifest 只存 host id 与原 cwd，展示与配置页归档区一致
+												<div className="flex min-w-0 items-center gap-2">
+													<span className="truncate text-control text-text-primary" title={row.cwd}>
+														<span className="font-medium">{row.dshSessionId}</span>
+														{row.cwd && <span className="ml-2 text-caption text-text-secondary">{row.cwd}</span>}
+													</span>
+													<SessionBackendMark backend="dsh" />
+												</div>
+											)}
 										</TableCell>
 										<TableCell className="w-40 text-right">
 											<div className="flex items-center justify-end gap-0.5">
@@ -224,9 +256,10 @@ export function SessionManagerModal(props: {
 														variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-bg-hover hover:text-[var(--color-accent)]"
 														onClick={() => {
 														// 恢复后重新拉取归档列表（主列表由 catalog refresh 自动更新）
-														void props.onUnarchive(session).then(() =>
-															props.listArchived().then(setArchivedSessions).catch(() => setArchivedSessions([]))
-														);
+														const restored = row.kind === "pi"
+															? props.onUnarchive(row.session)
+															: props.onUnarchiveDsh(row.dshSessionId);
+														void restored.then(loadArchivedRows);
 													}}
 														title={t("sessionManager.restore")}
 													>
@@ -249,10 +282,10 @@ export function SessionManagerModal(props: {
 						</TableHeader>
 						<TableBody>
 							{filteredSessions.map((session) => {
-								const isChecked = selected.has(session.filePath);
+								const isChecked = selected.has(session.id);
 								return (
 									<TableRow
-										key={session.filePath}
+										key={sessionManagerRowKey(session)}
 										className="group bg-bg-panel"
 										data-state={isChecked ? "selected" : undefined}
 									>
@@ -260,7 +293,7 @@ export function SessionManagerModal(props: {
 											<Label className="flex shrink-0 cursor-pointer items-center">
 												<Checkbox
 													checked={isChecked}
-													onCheckedChange={() => handleToggle(session.filePath)}
+													onCheckedChange={() => handleToggle(session.id)}
 													className="m-0 size-[15px] cursor-pointer accent-[var(--color-accent)]"
 												/>
 											</Label>
@@ -268,12 +301,15 @@ export function SessionManagerModal(props: {
 										<TableCell className="w-full max-w-0">
 											<div
 												className="flex min-w-0 cursor-pointer items-center gap-2"
-												onClick={() => handleToggle(session.filePath)}
+												onClick={() => handleToggle(session.id)}
 											>
 												<span className="truncate text-control text-text-primary">
 													{session.name || session.preview?.slice(0, 60) || t("common.untitled")}
 												</span>
-												{session.source && session.source !== "pi" && (
+												{session.backend === "dsh" ? (
+													// DSH 会话无来源徽标（source 恒为 pi），用后端徽标区分（与侧栏树一致）
+													<SessionBackendMark backend="dsh" />
+												) : session.source && session.source !== "pi" && (
 													<SessionSourceBadge source={session.source} />
 												)}
 											</div>
@@ -347,12 +383,14 @@ function MenuShell(props: { x: number; y: number; onClose: () => void; className
 
 export function SessionSourceFilterMenu(props: {
 	menu: { projectId: string; x: number; y: number };
-	filter: ReadonlySet<SessionSource> | null;
-	onToggleSource: (source: SessionSource) => void;
+	filter: ReadonlySet<SessionFilterPill> | null;
+	onToggleSource: (source: SessionFilterPill) => void;
 	onClear: () => void;
 	onClose: () => void;
 }) {
-	const sources: SessionSource[] = ["pi", "codex", "claude", "opencode"];
+	// 过滤类别 = 来源 + DSH 后端（DSH 会话 source 恒为 pi，必须按 backend 独立归类，
+	// 否则「只选 Pi」会继续显示 DSH 会话，用户无法单独过滤）。
+	const sources = SESSION_FILTER_PILLS;
 	// 过滤菜单需要连续勾选，onSelect preventDefault 保持菜单打开
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose} className="min-w-44">
@@ -365,14 +403,14 @@ export function SessionSourceFilterMenu(props: {
 				{t("menu.filterSourceAll")}
 			</DropdownMenuCheckboxItem>
 			<DropdownMenuSeparator />
-			{sources.map((source) => (
+			{sources.map((pill) => (
 				<DropdownMenuCheckboxItem
-					key={source}
-					checked={props.filter !== null && props.filter.has(source)}
+					key={pill}
+					checked={props.filter !== null && props.filter.has(pill)}
 					onSelect={(event) => event.preventDefault()}
-					onCheckedChange={() => props.onToggleSource(source)}
+					onCheckedChange={() => props.onToggleSource(pill)}
 				>
-					<SessionSourceBadge source={source} />
+					{pill === "dsh" ? <DshSourceBadge /> : <SessionSourceBadge source={pill} />}
 				</DropdownMenuCheckboxItem>
 			))}
 		</MenuShell>
