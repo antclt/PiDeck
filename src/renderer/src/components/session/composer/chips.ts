@@ -183,12 +183,11 @@ export function parseRichInputChips(
 			const label = isDirectoryRef
 				? `${baseLabel.replace(/[/\\]+$/, "")}/`
 				: baseLabel;
-			// 被延伸过的未加引号路径（含空格）规范化为 @"…" 形式：
-			// 保证发送/回显（序列化）后仍是完整可解析的引用，与选择器插入的格式一致。
-			const raw =
-				rawToken !== m[1]
-					? formatFilePathRef(rawPath, { isDirectory: isDirectoryRef })
-					: rawToken;
+			// 保留用户实际输入的 raw，不在解析阶段改写成 @"…"：原始 token 的
+			// 字符区间必须与 ProseMirror 的纯文本偏移一致，否则 atom 节点长度
+			// 与 caret 映射不一致，后续输入可能落到 chip 内部或把文字插入错误位置。
+			// 文件粘贴/拖拽仍由 formatFilePathRef 在插入边界统一加引号。
+			const raw = rawToken;
 			chips.push({ start, end, raw, kind: "file", label });
 		}
 		if (m.index === atRe.lastIndex) atRe.lastIndex++;

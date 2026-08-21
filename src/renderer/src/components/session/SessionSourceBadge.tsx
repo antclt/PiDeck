@@ -89,9 +89,7 @@ export function DshLogo(props: { className?: string }) {
   );
 }
 
-/** DSH 运行时徽标：官方鲸鱼 logo，与来源徽章同尺寸。
- * 官方品牌为黑白单色（favicon 仅 fill #000/#fff），与 opencode 徽章同一套中性灰策略：
- * 不用品牌色（避免紫色观感），随主题自适应。 */
+/** DSH 运行时标记：使用短文本而不是品牌图标，避免会话列表中出现重复视觉徽标。 */
 export function SessionBackendBadge(props: { className?: string }) {
   const label = t("sessionBackend.dsh");
   return (
@@ -101,41 +99,22 @@ export function SessionBackendBadge(props: { className?: string }) {
       title={label}
       data-backend="dsh"
       className={cn(
-        "size-5 rounded-md p-0 border-muted-foreground/40 text-muted-foreground",
+        "h-4 rounded px-1 text-[9px] font-semibold leading-none tracking-wide border-muted-foreground/40 text-muted-foreground",
         props.className,
       )}
     >
-      <DshLogo className="size-3.5" />
-    </Badge>
-  );
-}
-
-/** pi 运行时徽标：pi 官方 logo，与 DSH 徽章同尺寸同中性灰策略，构成后端徽章对。 */
-export function SessionPiBadge(props: { className?: string }) {
-  const label = t("sessionBackend.pi");
-  return (
-    <Badge
-      variant="outline"
-      aria-label={label}
-      title={label}
-      data-backend="pi"
-      className={cn(
-        "size-5 rounded-md p-0 border-muted-foreground/40 text-muted-foreground",
-        props.className,
-      )}
-    >
-      <PiLogo className="size-3.5" />
+      {label}
     </Badge>
   );
 }
 
 /**
- * 后端标识统一入口（C18）：收敛 `backend === "dsh" ? <SessionBackendBadge/> :
- * <SessionPiBadge/>` 三元。新增后端（如未来 Codex 运行时）只改这里。
+ * 后端标识统一入口：Pi 是默认运行时，不额外显示 logo；只有非默认后端需要提示用户。
+ * 这样保留来源信息的同时，避免每个普通 Pi 会话都增加一个视觉噪点。
  */
 export function SessionBackendMark(props: { backend?: AgentBackend; className?: string }) {
   if (props.backend === "dsh") return <SessionBackendBadge className={props.className} />;
-  return <SessionPiBadge className={props.className} />;
+  return null;
 }
 
 /**

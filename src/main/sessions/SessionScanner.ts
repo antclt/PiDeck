@@ -1131,9 +1131,23 @@ export class SessionScanner {
             ...(images.length > 0 ? { images } : {}),
           });
         } else if (msg.role === "assistant") {
-          const text = extractMessageText(msg.content);
-          if (!text.trim()) continue;
+          const images = this.extractImagesFromContent(msg.content);
+          // SessionFileEditor 将 extra 展开到 message 顶层，因此历史 JSONL
+          // 实际字段是 message.api / message.imageGen，而不是 message.extra。
+          const extraRecord = msg;
+          // 旧历史只保存了 openai-images 标识，没有 imageGen 元数据；补齐标记后
+          // 才能进入生图结果组件，显示复制/保存操作，而不是普通图片预览。
+          const isImageGen = extraRecord.api === "openai-images" ||
+            (extraRecord.imageGen && typeof extraRecord.imageGen === "object");
+          const text = extractMessageText(msg.content) ||
+            (isImageGen ? "[imagegen]" : "");
+          if (!text.trim() && images.length === 0) continue;
           const thinking = extractThinkingRaw(msg.content);
+          const imageGen = isImageGen
+            ? (extraRecord.imageGen && typeof extraRecord.imageGen === "object"
+              ? extraRecord.imageGen
+              : { status: "complete", prompt: "" })
+            : undefined;
           messages.push({
             id: `sv-a-${seq++}`,
             agentId: "_viewer",
@@ -1141,6 +1155,8 @@ export class SessionScanner {
             text,
             timestamp: ts,
             ...(thinking ? { thinking } : {}),
+            ...(images.length > 0 ? { images } : {}),
+            ...(imageGen ? { meta: { imageGen } } : {}),
           });
         } else if (msg.role === "toolResult") {
           const toolCallId = String(msg.toolCallId ?? `sv-tool-${seq}`);

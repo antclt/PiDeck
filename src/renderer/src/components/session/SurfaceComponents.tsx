@@ -817,7 +817,8 @@ export const UserBubble = memo(function UserBubble(props: {
 	const [imageHashes, setImageHashes] = useState<string[] | null>(null);
 	const [visionMatch, setVisionMatch] = useState<VisionBridgeEvent | null>(null);
 	const [visionPolling, setVisionPolling] = useState(false);
-	// 图片哈希与扩展侧 imageHash（sha256 前 24 位）同源，跨进程可匹配
+	const [visionBridgeEnabled, setVisionBridgeEnabled] = useState<boolean | null>(null);
+	// 图片哈希与扩展侧 imageHash（sha256 前 24 位）同源
 	useEffect(() => {
 		const images = message.images ?? [];
 		if (images.length === 0) return;
@@ -854,11 +855,29 @@ export const UserBubble = memo(function UserBubble(props: {
 	// 用户才能直观看到「走了视觉桥」以及转换结果/失败原因，而不是一段方括号文本。
 	const vision = extractVisionBridgeBlocks(stripAnsi(message.text));
 	const visionBlocks = vision.blocks;
+	// 先读取开关再轮询事件文件：视觉桥关闭或模型原生支持图片时，不能把普通图片消息误显示为“转换中”。
+	// 配置读取是异步的，null 表示尚未确认，期间保持静默而不是乐观显示动画。
+	useEffect(() => {
+		const images = message.images ?? [];
+		if (images.length === 0 || visionBlocks.length > 0 || !imageHashes || imageHashes.length === 0) {
+			return;
+		}
+		let cancelled = false;
+		void window.piDesktop.config.visionGetConfig().then(({ config }) => {
+			if (!cancelled) setVisionBridgeEnabled(config?.enabled === true);
+		}).catch(() => {
+			if (!cancelled) setVisionBridgeEnabled(false);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [imageHashes, message.images, visionBlocks.length]);
+
 	// 发送后短窗口内轮询事件文件（0/700/1800/3200ms），命中即渲染实时卡片，超时静默放弃。
 	// 依赖 visionBlocks.length：历史消息文本里已有标记块时走文本卡片，不再轮询。
 	useEffect(() => {
 		const images = message.images ?? [];
-		if (images.length === 0 || visionBlocks.length > 0 || !imageHashes || imageHashes.length === 0) {
+		if (visionBridgeEnabled !== true || images.length === 0 || visionBlocks.length > 0 || !imageHashes || imageHashes.length === 0) {
 			return;
 		}
 		let cancelled = false;
@@ -889,7 +908,7 @@ export const UserBubble = memo(function UserBubble(props: {
 			cancelled = true;
 			if (timer !== undefined) window.clearTimeout(timer);
 		};
-	}, [imageHashes, message.images, message.timestamp, visionBlocks.length]);
+	}, [imageHashes, message.images, message.timestamp, visionBlocks.length, visionBridgeEnabled]);
 	// 提取 pi 展开后的 <skill> 块：渲染为 skill 徽标，并从正文里剥除 XML
 	const { skills, text: bodyText } = extractSkillBlocks(vision.text);
 	const cleanText = bodyText;

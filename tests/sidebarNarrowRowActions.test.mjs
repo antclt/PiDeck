@@ -45,7 +45,7 @@ test("session rows yield to hover actions on narrow sidebar", () => {
 	// agent 行、运行中会话行、历史会话行、普通会话行共 4 处 conversation-body 全部接入
 	// （一个 size-6 更多按钮 → 28px 留白）
 	const matches = src.match(
-		/conversation-body min-w-0 flex-1 transition-\[padding-right\] @max-\[255px\]:group-hover\/row:pr-7 @max-\[255px\]:group-focus-within\/row:pr-7/g,
+		/conversation-body min-w-0 flex-1 transition-\[padding-right\] group-hover\/row:pr-7 group-focus-within\/row:pr-7/g,
 	);
 	assert.ok(matches && matches.length === 4, `expected 4 row bodies, got ${matches?.length ?? 0}`);
 	// 浮层模式不变
@@ -80,6 +80,7 @@ test("narrow-sidebar variants survive tailwind-merge", () => {
 		"min-w-0 flex-1 truncate transition-[padding-right] @max-[255px]:group-hover:pr-29 @max-[255px]:group-focus-within:pr-29",
 	);
 	assert.match(merged, prVariant);
+	// 通用 hover 让位规则必须在普通宽度下同样保留，避免尾部标记被操作按钮遮挡。
 	assert.match(merged, /transition-\[padding-right\]/);
 	// 子行按钮：transition-all 与 transition-colors 同组冲突，后者应胜出（留 padding 动画）
 	const rowMerged = twMerge(

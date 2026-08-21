@@ -115,7 +115,7 @@ test("unquoted absolute path with spaces is extended into one file chip", () => 
 		[
 			{
 				kind: "file",
-				raw: '@"C:/Users/528/Documents/Tencent Files/473812916/nt_qq/nt_data/Pic/2026-08/Ori/455f949b57b937a5491cbb0a6f7bd07a.png"',
+				raw: "@C:/Users/528/Documents/Tencent Files/473812916/nt_qq/nt_data/Pic/2026-08/Ori/455f949b57b937a5491cbb0a6f7bd07a.png",
 				label: "C:/Users/528/Documents/Tencent Files/473812916/nt_qq/nt_data/Pic/2026-08/Ori/455f949b57b937a5491cbb0a6f7bd07a.png",
 			},
 		],
@@ -126,7 +126,7 @@ test("unquoted spaced absolute path stops before following text and URLs", () =>
 	const withText = parseRichInputChips("@C:/Program Files/nodejs 帮我看看");
 	assertJsonEqual(
 		withText.map((c) => ({ raw: c.raw, label: c.label })),
-		[{ raw: '@"C:/Program Files/nodejs"', label: "C:/Program Files/nodejs" }],
+		[{ raw: "@C:/Program Files/nodejs", label: "C:/Program Files/nodejs" }],
 	);
 	// 延伸不跨过 URL：https:// 是正文，不是路径的一部分
 	const withUrl = parseRichInputChips("@C:/foo https://x.com/a");
@@ -142,7 +142,7 @@ test("unquoted spaced absolute path supports backslashes and dir suffix", () => 
 		backslash.map((c) => ({ raw: c.raw, label: c.label })),
 		[
 			{
-				raw: '@"C:\\Users\\Tencent Files\\a.png"',
+				raw: "@C:\\Users\\Tencent Files\\a.png",
 				label: "C:/Users/Tencent Files/a.png",
 			},
 		],
@@ -150,7 +150,7 @@ test("unquoted spaced absolute path supports backslashes and dir suffix", () => 
 	const dir = parseRichInputChips("@C:/Program Files/");
 	assertJsonEqual(
 		dir.map((c) => ({ raw: c.raw, label: c.label })),
-		[{ raw: '@"C:/Program Files/"', label: "C:/Program Files/" }],
+		[{ raw: "@C:/Program Files/", label: "C:/Program Files/" }],
 	);
 });
 
@@ -158,8 +158,15 @@ test("POSIX absolute path with spaces is extended", () => {
 	const chips = parseRichInputChips("@/Users/me/My Documents/a.txt");
 	assertJsonEqual(
 		chips.map((c) => ({ raw: c.raw, label: c.label })),
-		[{ raw: '@"/Users/me/My Documents/a.txt"', label: "/Users/me/My Documents/a.txt" }],
+		[{ raw: "@/Users/me/My Documents/a.txt", label: "/Users/me/My Documents/a.txt" }],
 	);
+});
+
+test("extended unquoted paths preserve raw length for caret mapping", () => {
+	const text = "@C:/Program Files/nodejs next";
+	const chips = parseRichInputChips(text);
+	assert.equal(chips[0].raw.length, chips[0].end - chips[0].start);
+	assert.equal(chips[0].raw, text.slice(chips[0].start, chips[0].end));
 });
 
 test("space-free absolute path keeps raw unquoted", () => {

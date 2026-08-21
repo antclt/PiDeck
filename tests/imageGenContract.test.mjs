@@ -101,6 +101,14 @@ test("发送控件：生图进行中显示转圈并禁用", () => {
 	assert.match(composerPanels, /disabled=\{props\.isAgentStarting \|\| props\.isGeneratingImage \|\| !props\.canSend\}/);
 });
 
+test("生图结果提供原图复制与 PNG 保存操作", () => {
+	const finalAnswer = readFileSync("src/renderer/src/components/session/turn/FinalAnswer.tsx", "utf8");
+	assert.match(finalAnswer, /navigator\.clipboard\.write\(\[new ClipboardItem/);
+	assert.match(finalAnswer, /link\.download = `pideck-image-\$\{Date\.now\(\)\}\.png`/);
+	assert.match(finalAnswer, /imagegen\.copy/);
+	assert.match(finalAnswer, /imagegen\.save/);
+});
+
 test("i18n：zh/en 生图模式与错误文案 key 一致", () => {
 	const extract = (src) => [...src.matchAll(/"(app\.composerModeImagegen|app\.composerModeImagegenDesc|imagegen\.[^"]+)"/g)]
 		.map((m) => m[0].slice(1, -1)).sort();

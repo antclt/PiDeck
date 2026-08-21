@@ -133,6 +133,12 @@ test("sidebar omits the redundant projects heading and tabs shrink to their titl
   assert.doesNotMatch(sourceBadge, /bg-(?:indigo|amber|emerald)-/);
 });
 
+test("text backend badge keeps its width instead of covering tab actions", () => {
+  // DSH 标记是文字徽标，不能继续复用图标徽标的固定正方形宽度；否则文本会溢出并覆盖右侧操作按钮。
+  assert.doesNotMatch(tabBar, /SessionBackendBadge className=\"size-4 shrink-0\"/);
+  assert.match(sourceBadge, /h-4 rounded px-1/);
+});
+
 test("session tabs stay outside SessionView; header is standalone in pane", () => {
   assert.match(tabBar, /actions\?: ReactNode/);
   assert.match(tabBar, /props\.onToggleDrawer \? \(/);

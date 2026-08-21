@@ -1,4 +1,5 @@
-import { memo, type RefObject } from "react";
+import { Download, Copy, Check } from "lucide-react";
+import { memo, type RefObject, useState } from "react";
 import type { ChatMessage, ImageContent } from "../../../../../shared/types";
 import type { ImageGenMeta } from "../../../../../shared/types/imagegen";
 import { t } from "../../../i18n";
@@ -6,6 +7,7 @@ import { Button } from "../../ui-shadcn/button";
 import { Textarea } from "../../ui-shadcn/textarea";
 import { ImageGeneration } from "../../agents/image-generation";
 import { AssistantText } from "../SurfaceComponents";
+import { showNotice } from "../../../utils/notice";
 
 /** 收窄 meta.imageGen（消息数据来自历史会话/缓存，需运行时校验而非盲转）。 */
 function isImageGenMeta(value: unknown): value is ImageGenMeta {
@@ -26,6 +28,7 @@ function ImageGenMessage(props: {
 	images?: ImageContent[];
 	onPreviewImage: (image: ImageContent) => void;
 }) {
+	const [copied, setCopied] = useState(false);
 	const status = props.meta.status;
 	const statusText =
 		status === "generating"
@@ -34,6 +37,26 @@ function ImageGenMessage(props: {
 				? t("imagegen.status.complete")
 				: t("imagegen.status.error");
 	const image = props.images?.[0];
+		const imageDataUrl = image ? `data:${image.mimeType};base64,${image.data}` : "";
+		const copyImage = async () => {
+			if (!imageDataUrl || !navigator.clipboard?.write) return;
+			try {
+				const response = await fetch(imageDataUrl);
+				const blob = await response.blob();
+				await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+				setCopied(true);
+				window.setTimeout(() => setCopied(false), 1600);
+			} catch {
+				showNotice(t("imagegen.copyFailed"), 2000, "error");
+			}
+		};
+		const saveImage = () => {
+			if (!imageDataUrl) return;
+			const link = document.createElement("a");
+			link.href = imageDataUrl;
+			link.download = `pideck-image-${Date.now()}.png`;
+			link.click();
+		};
 	return (
 		<div className="py-1">
 			<ImageGeneration
@@ -53,6 +76,16 @@ function ImageGenMessage(props: {
 					/>
 				) : undefined}
 			</ImageGeneration>
+			{status === "complete" && image ? (
+				<div className="mt-1 flex items-center gap-1">
+					<button type="button" className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => void copyImage()} title={t("imagegen.copy")} aria-label={t("imagegen.copy")}>
+						{copied ? <Check size={14} /> : <Copy size={14} />}
+					</button>
+					<button type="button" className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={saveImage} title={t("imagegen.save")} aria-label={t("imagegen.save")}>
+						<Download size={14} />
+					</button>
+				</div>
+			) : null}
 			{status === "error" && props.meta.errorDetail ? (
 				<p className="mt-1.5 text-xs text-destructive">{props.meta.errorDetail}</p>
 			) : null}

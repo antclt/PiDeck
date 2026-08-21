@@ -2482,6 +2482,9 @@ function registerIpc() {
 						api: "openai-images",
 						provider,
 						model,
+						// 历史恢复依赖这个标记区分生图结果与普通图片附件，
+						// 否则重启后会退回普通图片渲染，丢失复制/保存操作。
+						imageGen: { status: "complete", prompt },
 					},
 				},
 			]);

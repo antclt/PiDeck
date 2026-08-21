@@ -29,6 +29,9 @@ const selectedRowClass = "active bg-bg-active text-foreground";
 const rowMoreActionsClass =
 	"row-more-actions pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100";
 
+// 操作按钮是 absolute 浮层，出现时所有宽度的标题都必须让出一个按钮位，
+// 不能只依赖窄侧栏断点，否则中等宽度下 DSH 等尾部标记仍会被按钮覆盖。
+
 /** 菜单打开期间保持点亮：菜单弹出后行 hover 会丢失（鼠标移向菜单），
  * 若不加此态按钮会瞬间熄灭，用户会误以为菜单与按钮无关。 */
 function rowMoreMenuActiveClass(menuOpen: boolean) {
@@ -197,7 +200,7 @@ export function SessionTree(props: {
             onDoubleClick={() => openSession(session.id, "permanent")}
             {...sessionDragProps(session.id)}
           >
-            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover/row:pr-7 @max-[255px]:group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">{label}</div></div>
+            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">{label}</div></div>
           </button>
         </PathTooltip>
         <Button
@@ -269,7 +272,7 @@ export function SessionTree(props: {
               {...(agentSession ? sessionDragProps(agentSession.id) : {})}
             >
               {renderRuntimeStatusDot(child.agent.status)}
-              <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover/row:pr-7 @max-[255px]:group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+              <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
                 <strong className="min-w-0 flex-1 truncate font-medium">{child.agent.title}</strong>
                 <SessionBackendMark backend={child.agent.backend} />
                 {child.agent.noSession && <span className="anonymous-indicator" title={t("app.anonymousChat")}><HatGlasses size={11} aria-hidden="true" /></span>}
@@ -323,12 +326,10 @@ export function SessionTree(props: {
             {...sessionDragProps(child.session.id)}
           >
           {renderRuntimeStatusDot(runtimeSnapshot?.status)}
-          <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover/row:pr-7 @max-[255px]:group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+          <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
             {/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差 */}
             <strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>{child.session.name || t("common.untitled")}</strong>
-            {child.session.backend === "dsh"
-              ? <SessionBackendMark backend="dsh" />
-              : (!child.session.source || child.session.source === "pi") && <SessionBackendMark backend="pi" />}
+            {child.session.backend === "dsh" && <SessionBackendMark backend="dsh" />}
             {child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
             {renderToggle(groupKey, childCount)}
           </div></div>
@@ -380,7 +381,7 @@ export function SessionTree(props: {
               onDoubleClick={() => openSession(session.id, "permanent")}
               {...sessionDragProps(session.id)}
             >
-              <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover/row:pr-7 @max-[255px]:group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+              <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
                 {renderRuntimeStatusDot(runtime?.status)}
                 <strong className="min-w-0 flex-1 truncate font-medium">{session.title}</strong>
                 <SessionBackendMark backend={session.backend} />

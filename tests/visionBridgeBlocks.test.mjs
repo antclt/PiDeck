@@ -3,6 +3,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+import { readFileSync } from "node:fs";
+
+const surfaceComponents = readFileSync(
+  "src/renderer/src/components/session/SurfaceComponents.tsx",
+  "utf8",
+);
 
 const { extractVisionBridgeBlocks } = loadTsCommonJs(
   "src/renderer/src/utils/visionBridgeBlocks.ts",
@@ -12,6 +18,12 @@ const SUCCESS_BLOCK = (n, desc) =>
   `[图片 #${n}（视觉桥已查看，以下为图片实际内容）]\n${desc}`;
 const FAILED_BLOCK = (n, reason) =>
   `[图片 #${n} 视觉桥转换失败：${reason}。请检查视觉桥设置（模型/接口地址/API Key）后重试，此图片内容不可见]`;
+
+test("图片轮询必须先确认视觉桥已开启", () => {
+  // 关闭视觉桥或使用原生多模态模型时，普通图片不能显示视觉桥转换动画。
+  assert.match(surfaceComponents, /visionBridgeEnabled !== true/);
+  assert.match(surfaceComponents, /visionGetConfig\(\)/);
+});
 
 test("无视觉桥标记时原样返回文本", () => {
   const result = extractVisionBridgeBlocks("看看这张图，帮我分析一下");
