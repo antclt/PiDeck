@@ -82,8 +82,9 @@ test("restores assistant image-only history messages (PiDeck imagegen persistenc
 
   assert.equal(messages.length, 1);
   assert.equal(messages[0].role, "assistant");
-  // 无文本无 thinking 的纯图片 assistant 消息必须保留（生图落盘记录），不能当空消息跳过
-  assert.equal(messages[0].text, "");
+  // 生图落盘记录必须保留 imageGen 元数据，才能进入带复制/保存操作的最终回答。
+  assert.equal(messages[0].text, "[image]");
+  assert.equal(messages[0].meta.imageGen.status, "complete");
   assert.equal(messages[0].images.length, 1);
   assert.equal(messages[0].images[0].type, "image");
   assert.equal(messages[0].images[0].data, "iVBORw0KGgo=");

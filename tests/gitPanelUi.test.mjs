@@ -370,8 +370,8 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
     assert.match(panel, /htmlToPlainText\(html\)/);
     assert.doesNotMatch(panel, /pasteAsPlainText|pasteAsIs/);
     // 剪贴板读取走 preload 同步 API，不依赖 document focus
-    assert.match(preload, /clipboard: \{[\s\S]*?readText: \(\) => clipboard\.readText\(\)/);
-    assert.match(preload, /readHtml: \(\) => clipboard\.readHTML\(\)/);
+    assert.match(preload, /clipboard: \{[\s\S]*?readText: \(\) => clipboardSync\(ipcChannels\.clipboardReadText, ""\)/);
+    assert.match(preload, /readHtml: \(\) => clipboardSync\(ipcChannels\.clipboardReadHtml, ""\)/);
     assert.match(i18n, /"common\.paste"/);
     assert.doesNotMatch(i18n, /"common\.pasteAsPlainText"|"common\.pasteAsIs"/);
   });

@@ -360,6 +360,18 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 onOpenComposerModePicker={() => composer.pickers.open("mode")}
                 onCancelPlan={() => composer.pickers.setMode("normal")}
                 onAttachFile={composer.editor.attachFile}
+                imageGenOptions={
+                  composer.mode === "imagegen"
+                    ? {
+                        size: composer.delivery.imageGenSize,
+                        outputFormat: composer.delivery.imageGenOutputFormat,
+                        watermark: composer.delivery.imageGenWatermark,
+                        onSizeChange: composer.delivery.setImageGenSize,
+                        onOutputFormatChange: composer.delivery.setImageGenOutputFormat,
+                        onWatermarkChange: composer.delivery.setImageGenWatermark,
+                      }
+                    : undefined
+                }
                 sendControls={
                   <ComposerSendControls
                     isAgentBusy={composer.isBusy}

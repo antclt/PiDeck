@@ -15,6 +15,14 @@ import type {
   PiCommand,
   SessionSummary,
 } from "../../../shared/types";
+import {
+  DEFAULT_IMAGE_GEN_OUTPUT_FORMAT,
+  DEFAULT_IMAGE_GEN_SIZE,
+  DEFAULT_IMAGE_GEN_WATERMARK,
+  parseImageGenOutputFormat,
+  parseImageGenSize,
+  parseImageGenWatermark,
+} from "../../../shared/imageGenParams";
 import type { ImageGenMeta } from "../../../shared/types/imagegen";
 import {
   cacheSessionMessagesAtom,
@@ -323,6 +331,10 @@ export function useSessionComposerController(
   const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
   // 生图进行中：置 true 时发送按钮禁用（避免并发多次生图），完成后图片进附件栏
   const [generatingImage, setGeneratingImage] = useState(false);
+  // 生图尺寸/水印记在 AppSettings，跨会话复用；非法磁盘值回落到默认。
+  const [imageGenSize, setImageGenSizeState] = useState<string>(DEFAULT_IMAGE_GEN_SIZE);
+  const [imageGenWatermark, setImageGenWatermarkState] = useState(DEFAULT_IMAGE_GEN_WATERMARK);
+  const [imageGenOutputFormat, setImageGenOutputFormatState] = useState(DEFAULT_IMAGE_GEN_OUTPUT_FORMAT);
   const [picker, setPicker] = useState<ComposerPickerKind | null>(null);
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const [files, setFiles] = useState<FileTreeNode[]>([]);
@@ -535,6 +547,11 @@ export function useSessionComposerController(
   useEffect(() => {
     void desktopApi.settings.get().then((settings) => {
       setSendShortcut(settings.sendShortcut);
+      setImageGenSizeState(parseImageGenSize(settings.imageGenSize) ?? DEFAULT_IMAGE_GEN_SIZE);
+      setImageGenWatermarkState(parseImageGenWatermark(settings.imageGenWatermark));
+      setImageGenOutputFormatState(
+        parseImageGenOutputFormat(settings.imageGenOutputFormat) ?? DEFAULT_IMAGE_GEN_OUTPUT_FORMAT,
+      );
     }).catch(() => undefined);
   }, []);
 
@@ -825,6 +842,9 @@ export function useSessionComposerController(
         provider: model.provider,
         model: model.modelId,
         prompt,
+        size: imageGenSize,
+        watermark: imageGenWatermark,
+        outputFormat: imageGenOutputFormat,
         // 生图记录落盘：主进程成功后把 user+assistant 消息写入当前会话的 pi 文件
         sessionId,
       });
@@ -863,7 +883,7 @@ export function useSessionComposerController(
     } finally {
       setGeneratingImage(false);
     }
-  }, [draft, generatingImage, record, sessionId, setCacheMessages, setDraft, store]);
+  }, [draft, generatingImage, imageGenOutputFormat, imageGenSize, imageGenWatermark, record, sessionId, setCacheMessages, setDraft, store]);
 
   // 统一发送入口：先晋升预览 Tab 再投递（幂等，非预览无副作用）。
   // 发送按钮 / 追问按钮 / Enter 键 / 无 Agent 时的 /compact 直发都会走这里，
@@ -1458,6 +1478,25 @@ export function useSessionComposerController(
       },
       abort: () => void abort(),
       compact: () => void compact(),
+      imageGenSize,
+      imageGenWatermark,
+      imageGenOutputFormat,
+      setImageGenSize: (size: string) => {
+        const parsed = parseImageGenSize(size);
+        if (!parsed) return;
+        setImageGenSizeState(parsed);
+        void desktopApi.settings.update({ imageGenSize: parsed }).catch(() => undefined);
+      },
+      setImageGenWatermark: (watermark: boolean) => {
+        setImageGenWatermarkState(watermark);
+        void desktopApi.settings.update({ imageGenWatermark: watermark }).catch(() => undefined);
+      },
+      setImageGenOutputFormat: (format: string) => {
+        const parsed = parseImageGenOutputFormat(format, null);
+        if (!parsed) return;
+        setImageGenOutputFormatState(parsed);
+        void desktopApi.settings.update({ imageGenOutputFormat: parsed }).catch(() => undefined);
+      },
       unknown: sendState.status === "unknown",
       unknownError: sendState.error,
       acknowledgeUnknown: acknowledgeUnknownDelivery,

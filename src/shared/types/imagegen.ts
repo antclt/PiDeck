@@ -13,6 +13,12 @@ export type ImageGenRequest = {
 	prompt: string;
 	/** 可选：所属会话 id。提供时生图结果会以 user+assistant 消息落盘到该会话的 pi 文件。 */
 	sessionId?: string;
+	/** 尺寸：OpenAI WxH（如 1024x1024）或火山 1K/2K/4K */
+	size?: string;
+	/** 水印：火山方舟 watermark；OpenAI 官方端点不会发送该字段 */
+	watermark?: boolean;
+	/** 文件编码：火山 output_format png|jpeg；OpenAI 官方端点不会发送 */
+	outputFormat?: string;
 };
 
 /**

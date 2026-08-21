@@ -260,6 +260,14 @@ export type StartupWindowMode =
 	 */
 	removedBuiltInExtensions: string[];
 
+	// ── 生图模式（composer 底栏记忆，不是独立设置页） ──
+	/** 生图尺寸：OpenAI WxH 或火山 1K/2K/4K，默认 1024x1024 */
+	imageGenSize: string;
+	/** 生图水印：火山方舟 watermark；默认 false（用户显式打开才带） */
+	imageGenWatermark: boolean;
+	/** 生图文件编码：火山 output_format png|jpeg；默认 png */
+	imageGenOutputFormat: string;
+
 	// ── 安全管理 ──
 	/**
 	 * 安全管理配置（等级/工具动作/目录边界/会话覆盖）。

@@ -227,6 +227,7 @@ export const TurnRow = memo(
 		.map((item) => stripThinkingTags(stripAnsi(item.message.text)).trim())
 		.filter(Boolean)
 		.join("\n\n");
+	const containsImageGen = assistantMessages.some((item) => Boolean(item.message.meta?.imageGen));
 
 	// 本轮没有任何可渲染内容时不输出空容器
 	if (displayItems.length === 0 && allImages.length === 0) return null;
@@ -388,11 +389,11 @@ export const TurnRow = memo(
 				{/* 操作栏 */}
 				{mergedText && !editing && (
 					<div className="flex min-h-6 items-center gap-1 opacity-55 transition-opacity hover:opacity-100 focus-within:opacity-100">
-						<CopyMenu
+						{!containsImageGen && <CopyMenu
 							text={stripMarkdown(mergedText)}
 							markdown={mergedText}
 							targetRef={rowRef}
-						/>
+						/>}
 						<Button
 							type="button"
 							variant="ghost"

@@ -13,6 +13,7 @@ import {
 	type ReactNode,
 } from "react";
 import { toBlob } from "html-to-image";
+import { writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
 import { useAtomValue } from "jotai";
 import "katex/dist/katex.min.css";
@@ -537,7 +538,7 @@ export function EmptyState(props: {
 }
 
 async function copyElementAsPng(element: HTMLElement) {
-	// 截图复制依赖浏览器 ClipboardItem PNG 支持；失败时由调用方提示/回退，不影响文本复制。
+	// 截图后走 writeClipboardImage（Electron nativeImage），不依赖 ClipboardItem。
 	// 使用 toBlob 而非 toPng+fetch 避免 CSP 拒绝连接 data: URL。
 	// 克隆节点 + 内边距 + 临时注入 body 的方式与分享为图片（handleMultiSelectCopy）保持一致，
 	// 避免直接截图导致图片紧贴内容边缘、缺少留白。
@@ -547,6 +548,13 @@ async function copyElementAsPng(element: HTMLElement) {
 		getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || "#fff";
 	// 将 clone 插入到原元素旁边，确保 CSS 样式正确继承（父层选择器、rem 等）
 	if (element.parentElement) {
+		// 克隆节点不能参与原布局，否则插入时会短暂撑开时间线，导致屏幕闪动。
+		// 仍挂在 DOM 中是为了继承应用样式，但移出视口并固定尺寸。
+		clone.style.position = "fixed";
+		clone.style.left = "-100000px";
+		clone.style.top = "0";
+		clone.style.width = `${element.getBoundingClientRect().width}px`;
+		clone.style.zIndex = "-1";
 		element.parentElement.insertBefore(clone, element.nextSibling);
 	}
 	let blob: Blob | null = null;
@@ -565,8 +573,11 @@ async function copyElementAsPng(element: HTMLElement) {
 	} finally {
 		clone.remove();
 	}
-	if (!blob) return;
-	await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+	// html-to-image 在 oklch / canvas / 失焦时可能返回 null 且不抛错；
+	// 这里必须失败给调用方，否则 CopyMenu 会 toast「已复制」但剪贴板是空的。
+	if (!blob) throw new Error("Unable to capture message as PNG");
+	const written = await writeClipboardImage(blob);
+	if (!written) throw new Error("Unable to write PNG to clipboard");
 }
 
 export function CopyMenu(props: {
@@ -580,13 +591,22 @@ export function CopyMenu(props: {
 		try {
 			if (kind === "text") await navigator.clipboard.writeText(props.text);
 			if (kind === "markdown") await navigator.clipboard.writeText(props.markdown);
-			if (kind === "image" && props.targetRef.current) await copyElementAsPng(props.targetRef.current);
+			if (kind === "image") {
+				if (!props.targetRef.current) throw new Error("Copy target is missing");
+				await copyElementAsPng(props.targetRef.current);
+			}
 			setCopied(kind);
-			showNotice(t("copy.success"), 1200);
+			showNotice(kind === "image" ? t("copy.asImageCopied") : t("copy.success"), 1200);
 			window.setTimeout(() => setCopied(null), 1800);
-		} catch {
+		} catch (error) {
 			setCopied(null);
-			showNotice(t("copy.failed"), 2000);
+			showNotice(t("copy.failed"), 2000, "error");
+			// 下拉菜单失焦后 ClipboardItem 失败原先无 log；图片路径现在统一记 renderer 日志便于排查。
+			if (kind === "image") {
+				void window.piDesktop?.app
+					.rendererLog("warn", "clipboard", "copy as image failed", error)
+					.catch(() => undefined);
+			}
 		}
 	};
 	return (

@@ -1,12 +1,14 @@
-import { Download, Copy, Check } from "lucide-react";
+import { Download, Copy, Check, ChevronDown } from "lucide-react";
 import { memo, type RefObject, useState } from "react";
 import type { ChatMessage, ImageContent } from "../../../../../shared/types";
 import type { ImageGenMeta } from "../../../../../shared/types/imagegen";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../ui-shadcn/dropdown-menu";
 import { Textarea } from "../../ui-shadcn/textarea";
 import { ImageGeneration } from "../../agents/image-generation";
 import { AssistantText } from "../SurfaceComponents";
+import { writeClipboardImage } from "../../../utils/clipboard";
 import { showNotice } from "../../../utils/notice";
 
 /** 收窄 meta.imageGen（消息数据来自历史会话/缓存，需运行时校验而非盲转）。 */
@@ -37,13 +39,17 @@ function ImageGenMessage(props: {
 				? t("imagegen.status.complete")
 				: t("imagegen.status.error");
 	const image = props.images?.[0];
-		const imageDataUrl = image ? `data:${image.mimeType};base64,${image.data}` : "";
+	// 部分生图 provider 返回 application/octet-stream，但 data 仍是 PNG/JPEG base64；
+	// 不能因此让复制入口把有效图片误判为非图片，展示/复制统一使用图片 MIME 兜底。
+	const imageMimeType = image?.mimeType.startsWith("image/") ? image.mimeType : "image/png";
+	const imageDataUrl = image ? `data:${imageMimeType};base64,${image.data}` : "";
 		const copyImage = async () => {
-			if (!imageDataUrl || !navigator.clipboard?.write) return;
 			try {
-				const response = await fetch(imageDataUrl);
-				const blob = await response.blob();
-				await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+				// 不使用 fetch(data:...)：data URL 会被 CSP 当作网络连接拦截。
+				// 统一走 writeClipboardImage，避免 Electron 失焦时 ClipboardItem 静默失败。
+				if (!imageDataUrl) throw new Error("Generated image is empty");
+				const written = await writeClipboardImage(imageDataUrl);
+				if (!written) throw new Error("Unable to write generated image to clipboard");
 				setCopied(true);
 				window.setTimeout(() => setCopied(false), 1600);
 			} catch {
@@ -51,10 +57,12 @@ function ImageGenMessage(props: {
 			}
 		};
 		const saveImage = () => {
-			if (!imageDataUrl) return;
+			if (!imageDataUrl || !image) return;
 			const link = document.createElement("a");
 			link.href = imageDataUrl;
-			link.download = `pideck-image-${Date.now()}.png`;
+			// 扩展名跟 mime，避免 jpeg 结果被存成 .png
+			const ext = image.mimeType === "image/jpeg" ? "jpg" : "png";
+			link.download = `pideck-image-${Date.now()}.${ext}`;
 			link.click();
 		};
 	return (
@@ -69,7 +77,7 @@ function ImageGenMessage(props: {
 			>
 				{status === "complete" && image ? (
 					<img
-						src={`data:${image.mimeType};base64,${image.data}`}
+						src={imageDataUrl}
 						alt=""
 						className="cursor-zoom-in"
 						onClick={() => props.onPreviewImage(image)}
@@ -77,13 +85,24 @@ function ImageGenMessage(props: {
 				) : undefined}
 			</ImageGeneration>
 			{status === "complete" && image ? (
-				<div className="mt-1 flex items-center gap-1">
-					<button type="button" className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => void copyImage()} title={t("imagegen.copy")} aria-label={t("imagegen.copy")}>
-						{copied ? <Check size={14} /> : <Copy size={14} />}
-					</button>
-					<button type="button" className="inline-flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={saveImage} title={t("imagegen.save")} aria-label={t("imagegen.save")}>
-						<Download size={14} />
-					</button>
+				<div className="mt-1 flex items-center">
+					{/* 主按钮和下拉菜单共用同一套图片动作，避免生图消息再显示普通文本复制栏。 */}
+					<div className="flex items-center overflow-hidden rounded-sm border border-transparent hover:border-border">
+						<Button variant="ghost" size="icon-sm" className="size-7 rounded-none text-muted-foreground hover:bg-muted hover:text-foreground" type="button" onClick={() => void copyImage()} title={t("imagegen.copy")} aria-label={t("imagegen.copy")}>
+							{copied ? <Check size={14} /> : <Copy size={14} />}
+						</Button>
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button variant="ghost" size="icon-sm" className="size-6 rounded-none border-l border-border/60 px-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" type="button" aria-label={t("copy.moreOptions")} title={t("copy.moreOptions")}>
+									<ChevronDown size={12} />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="start" className="copy-menu-popover min-w-[132px]">
+								<DropdownMenuItem onSelect={() => void copyImage()}>{t("imagegen.copy")}</DropdownMenuItem>
+								<DropdownMenuItem onSelect={saveImage}>{t("imagegen.save")}</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</div>
 				</div>
 			) : null}
 			{status === "error" && props.meta.errorDetail ? (

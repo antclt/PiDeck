@@ -31,17 +31,30 @@ function loadTypescript() {
 /** 当前测试的 fetch stub（vm 沙箱经引用间接调用，隔离宿主全局） */
 let fetchStubRef = null;
 
-/** 加载 ImageGenService 类（模块只有 type import，transpile 后无 require 依赖） */
+/** 加载 ImageGenService 类（运行时依赖 shared/imageGenParams，需注入 require） */
 function loadServiceClass() {
+	const paramsSource = readFileSync("src/shared/imageGenParams.ts", "utf8");
+	const paramsModule = { exports: {} };
+	vm.runInNewContext(
+		transpile(paramsSource),
+		{ module: paramsModule, exports: paramsModule.exports },
+		{ filename: "imageGenParams.ts" },
+	);
+	const exported = {};
 	const sandbox = {
-		exports: {},
+		exports: exported,
+		module: { exports: exported },
 		Buffer,
 		AbortSignal,
+		require: (id) => {
+			if (id === "../../shared/imageGenParams") return paramsModule.exports;
+			throw new Error(`unexpected require ${id}`);
+		},
 		// vm 上下文看不到宿主全局，fetch 必须显式注入；经可变引用转发到当前测试的 stub
 		fetch: (input, init) => fetchStubRef(input, init),
 	};
 	vm.runInNewContext(transpile(source), sandbox, { filename: "ImageGenService.ts" });
-	return sandbox.exports.ImageGenService;
+	return sandbox.module.exports.ImageGenService;
 }
 
 /** 构造服务实例：fetchStub 为 (input, init?) => Response 替身 */
@@ -109,6 +122,95 @@ test("请求体与请求头正确（b64_json 优先，Bearer 认证）", async (
 	assert.equal(body.prompt, "一只猫");
 	assert.equal(body.response_format, "b64_json");
 	assert.equal(body.n, 1);
+	assert.equal(body.size, undefined);
+	assert.equal(body.watermark, undefined);
+	restore();
+});
+
+test("OpenAI 端点发送 size、不发送 watermark（避免未知字段 400）", async () => {
+	let captured;
+	const { service, restore } = createService({
+		credentials: CREDENTIALS,
+		fetchStub: (_input, init) => {
+			captured = init;
+			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
+		},
+	});
+	await service.generate({
+		provider: "p",
+		model: "gpt-image-1",
+		prompt: "x",
+		size: "1024x1536",
+		watermark: true,
+	});
+	const body = JSON.parse(captured.body);
+	assert.equal(body.size, "1024x1536");
+	assert.equal(body.watermark, undefined);
+	restore();
+});
+
+test("火山方舟端点同时发送 size 与 watermark", async () => {
+	let captured;
+	const { service, restore } = createService({
+		credentials: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "k" },
+		fetchStub: (_input, init) => {
+			captured = init;
+			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
+		},
+	});
+	await service.generate({
+		provider: "p",
+		model: "doubao-seedream",
+		prompt: "x",
+		size: "2K",
+		watermark: false,
+	});
+	const body = JSON.parse(captured.body);
+	assert.equal(body.size, "2K");
+	assert.equal(body.watermark, false);
+	restore();
+});
+
+test("火山方舟 jpeg output_format 写入请求体并回填 image/jpeg mime", async () => {
+	let captured;
+	const { service, restore } = createService({
+		credentials: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "k" },
+		fetchStub: (_input, init) => {
+			captured = init;
+			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
+		},
+	});
+	const result = await service.generate({
+		provider: "p",
+		model: "doubao-seedream",
+		prompt: "x",
+		outputFormat: "jpeg",
+	});
+	const body = JSON.parse(captured.body);
+	assert.equal(body.output_format, "jpeg");
+	assert.equal(result.ok, true);
+	assert.equal(result.image.mimeType, "image/jpeg");
+	restore();
+});
+
+test("OpenAI 端点不发送 output_format，b64 mime 保持 image/png", async () => {
+	let captured;
+	const { service, restore } = createService({
+		credentials: CREDENTIALS,
+		fetchStub: (_input, init) => {
+			captured = init;
+			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QQ==" }] }) });
+		},
+	});
+	const result = await service.generate({
+		provider: "p",
+		model: "gpt-image-1",
+		prompt: "x",
+		outputFormat: "jpeg",
+	});
+	const body = JSON.parse(captured.body);
+	assert.equal(body.output_format, undefined);
+	assert.equal(result.image.mimeType, "image/png");
 	restore();
 });
 

@@ -107,10 +107,9 @@ export class AgentMessageProjector {
 					const thinking = this.extractThinking(typed.content);
 					// 生图等 PiDeck 本地落盘的 assistant 消息可能只有图片块、没有文本。
 					const images = this.extractImages(typed.content);
-					const extra = typed.extra;
-					const extraRecord = extra && typeof extra === "object"
-						? extra as Record<string, unknown>
-						: undefined;
+					// SessionFileEditor 将持久化 extra 展开到 assistant 消息顶层，
+					// 因此历史生图标识位于 typed.api / typed.imageGen。
+					const extraRecord = typed;
 					const imageGen = extraRecord?.imageGen;
 					const imageGenMeta = imageGen && typeof imageGen === "object"
 						? imageGen as Record<string, unknown>

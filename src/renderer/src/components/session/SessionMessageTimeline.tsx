@@ -31,6 +31,7 @@ import {
   sessionRuntimeBySessionIdAtomFamily,
   sessionSendStateByIdAtom,
 } from "../../atoms";
+import { writeClipboardImage } from "../../utils/clipboard";
 import {
   canLoadSessionTimelineMore,
   deriveSessionSurfaceRuntime,
@@ -663,7 +664,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
         const source = timelineRef.current?.querySelector(
           ".message-list",
         ) as HTMLElement | null;
-        if (!source) return;
+        if (!source) throw new Error("Timeline capture target is missing");
 
         const captureIds = getMultiSelectImageCaptureIds(reconciledRuns, selectedIds);
         const clone = source.cloneNode(true) as HTMLElement;
@@ -697,14 +698,15 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
         } finally {
           clone.remove();
         }
-        if (blob) {
-          await navigator.clipboard.write([
-            new ClipboardItem({ [blob.type]: blob }),
-          ]);
-          props.onToast(t("copy.asImageCopied"));
-        }
-      } catch {
+        if (!blob) throw new Error("Unable to capture selected messages as PNG");
+        const written = await writeClipboardImage(blob);
+        if (!written) throw new Error("Unable to write PNG to clipboard");
+        props.onToast(t("copy.asImageCopied"));
+      } catch (error) {
         props.onToast(t("copy.failed"));
+        void window.piDesktop?.app
+          .rendererLog("warn", "clipboard", "copy selected messages as image failed", error)
+          .catch(() => undefined);
       }
       setMultiSelectOpen(false);
       return;

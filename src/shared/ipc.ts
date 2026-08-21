@@ -491,4 +491,11 @@ export const ipcChannels = {
 	/** 生图：OpenAI 兼容 /images/generations，返回 base64 图片 */
 	imagegenGenerate: "imagegen:generate",
 
+	// ===== 系统剪贴板（必须走主进程；Electron 38 废弃渲染进程/preload 直连 clipboard） =====
+	clipboardReadText: "clipboard:read-text",
+	clipboardReadHtml: "clipboard:read-html",
+	clipboardReadImage: "clipboard:read-image",
+	clipboardReadFilePaths: "clipboard:read-file-paths",
+	clipboardWriteImage: "clipboard:write-image",
+
 } as const;

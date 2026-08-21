@@ -164,6 +164,9 @@ let previewSettings: AppSettings = {
 	fontFamilyMono: "system-mono",
 	fontFamilyMonoCustom: "",
 	removedBuiltInExtensions: [],
+	imageGenSize: "1024x1024",
+	imageGenWatermark: false,
+	imageGenOutputFormat: "png",
 	disableUpdateCheck: false,
 	piRpcOffline: true,
 	piRpcNoExtensions: false,
@@ -178,6 +181,7 @@ export function createPreviewApi(): PiDesktopApi {
 		readText: () => "",
 		readHtml: () => "",
 		readImage: () => "",
+		writeImage: async () => false,
 	};
 	const createTerminalTab = async (agentId: string, shell?: string, cwd?: string) => {
 		const shellName = shell ?? "powershell";

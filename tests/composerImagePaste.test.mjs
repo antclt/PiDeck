@@ -109,7 +109,7 @@ test("右键粘贴：图片/文件路径走 controller，纯文本返回 false �
 });
 
 test("preload 暴露剪贴板位图读取（readImage，空图返回空串）", () => {
-  assert.match(preload, /readImage: \(\) => \{/);
-  assert.match(preload, /clipboard\.readImage\(\)/);
-  assert.match(preload, /image\.isEmpty\(\) \? "" : image\.toDataURL\(\)/);
+  // Electron 38：preload 不得直连 clipboard，读取走主进程 sendSync。
+  assert.match(preload, /readImage: \(\) => clipboardSync\(ipcChannels\.clipboardReadImage, ""\)/);
+  assert.doesNotMatch(preload, /clipboard\.readImage\(\)/);
 });

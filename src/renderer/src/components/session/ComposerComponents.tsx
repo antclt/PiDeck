@@ -35,6 +35,7 @@ import {
 import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
+import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { SessionContextMeter } from "./SessionContextMeter";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
 import {
@@ -237,6 +238,15 @@ export function ComposerBottomBar(props: {
 	onOpenComposerModePicker: () => void;
 	onCancelPlan: () => void;
 	onAttachFile: () => void;
+	/** 生图模式底栏参数；非 imagegen 时不传 */
+	imageGenOptions?: {
+		size: string;
+		outputFormat: string;
+		watermark: boolean;
+		onSizeChange: (size: string) => void;
+		onOutputFormatChange: (format: string) => void;
+		onWatermarkChange: (watermark: boolean) => void;
+	};
 }) {
 	// 默认模型/思考级别来自主进程按 pi 配置自动填充进会话记录的默认值（props.record），
 	// 不读取渲染层 welcome localStorage 偏好，避免用户偏好覆盖 pi 配置。
@@ -401,6 +411,17 @@ export function ComposerBottomBar(props: {
 					>
 						<Paperclip size={15} strokeWidth={2} aria-hidden="true" />
 					</Button>
+					{isImageGenMode && props.imageGenOptions ? (
+						<ComposerImageGenOptions
+							size={props.imageGenOptions.size}
+							outputFormat={props.imageGenOptions.outputFormat}
+							watermark={props.imageGenOptions.watermark}
+							disabled={props.disabled}
+							onSizeChange={props.imageGenOptions.onSizeChange}
+							onOutputFormatChange={props.imageGenOptions.onOutputFormatChange}
+							onWatermarkChange={props.imageGenOptions.onWatermarkChange}
+						/>
+					) : null}
 					{props.feishuIndicator}
 					{props.securityControl}
 				</div>

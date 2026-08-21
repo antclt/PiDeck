@@ -126,3 +126,92 @@ export async function writeClipboard(text: string): Promise<void> {
     // 所有方式均失败，静默忽略（调用方已处理自己的错误通知）
   }
 }
+
+function desktopClipboard() {
+  // window.piDesktop 类型来自 preload；能力探测走 unknown 中转，避免与 PiDesktopApi 精确类型冲突。
+  // writeImage 在 Electron 38 起是主进程 invoke，必须按 Promise 处理；旧同步实现仍可能返回 boolean。
+  return (
+    window as unknown as {
+      piDesktop?: {
+        clipboard?: { writeImage?: (dataUrl: string) => boolean | Promise<boolean> };
+        app?: {
+          rendererLog?: (
+            level: "info" | "warn" | "error",
+            scope: string,
+            message: string,
+            detail?: unknown,
+          ) => Promise<void>;
+        };
+      };
+    }
+  ).piDesktop;
+}
+
+function logClipboardImageFailure(message: string, detail?: unknown) {
+  // 复制图片失败原先既不 toast 原因也不写 log，排查只能靠猜；这里至少落 renderer 日志。
+  void desktopClipboard()?.app?.rendererLog?.("warn", "clipboard", message, detail).catch(() => undefined);
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunk = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const mime = blob.type && blob.type.startsWith("image/") ? blob.type : "image/png";
+  return `data:${mime};base64,${bytesToBase64(bytes)}`;
+}
+
+/**
+ * 把 PNG/JPEG data URL 或截图 Blob 写入系统剪贴板。
+ * Electron 下优先走 preload writeImage（不依赖 document focus / ClipboardItem 权限）；
+ * 失败才回退 Web ClipboardItem。任一路径失败都返回 false 并写 renderer log。
+ */
+export async function writeClipboardImage(source: string | Blob): Promise<boolean> {
+  let dataUrl = "";
+  try {
+    dataUrl = typeof source === "string" ? source : await blobToDataUrl(source);
+  } catch (error) {
+    logClipboardImageFailure("encode clipboard image failed", error);
+    return false;
+  }
+  if (!dataUrl.startsWith("data:image/")) {
+    logClipboardImageFailure("clipboard image payload is empty or not an image");
+    return false;
+  }
+
+  const writeImage = desktopClipboard()?.clipboard?.writeImage;
+  if (writeImage) {
+    try {
+      // Promise.resolve：兼容主进程异步 IPC 与单测里的同步 stub。
+      // 不能把 Promise 当 boolean，否则会把“还在写”误判成成功。
+      if (await Promise.resolve(writeImage(dataUrl))) return true;
+      logClipboardImageFailure("native writeImage returned false");
+    } catch (error) {
+      logClipboardImageFailure("native writeImage threw", error);
+    }
+  }
+
+  if (!navigator.clipboard?.write) {
+    logClipboardImageFailure("ClipboardItem write is unavailable");
+    return false;
+  }
+  try {
+    const blob =
+      typeof source !== "string"
+        ? source
+        : new Blob([Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(",") + 1)), (char) => char.charCodeAt(0))], {
+            type: dataUrl.slice(5, dataUrl.indexOf(";")) || "image/png",
+          });
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+    return true;
+  } catch (error) {
+    logClipboardImageFailure("ClipboardItem write failed", error);
+    return false;
+  }
+}

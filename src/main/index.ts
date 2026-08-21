@@ -287,6 +287,7 @@ import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/session
 import { registerSystemIpc } from "./ipc/systemIpc";
 import { fetchModelList, getCachedModelList, refreshModelList } from "./pi/modelListCache";
 import { registerFilesIpc } from "./ipc/filesIpc";
+import { registerClipboardIpc } from "./ipc/clipboardIpc";
 import {
 	BROWSER_PANEL_PARTITION as BROWSER_PANEL_PARTITION_SHARED,
 	isAllowedBrowserPanelUrl as isAllowedBrowserPanelUrlShared,
@@ -2827,6 +2828,7 @@ function registerIpc() {
 		getMainWindow: () => mainWindow,
 		openExternalUrl,
 	});
+	registerClipboardIpc({ appLogger });
 }
 
 function sendTelemetryHeartbeat() {

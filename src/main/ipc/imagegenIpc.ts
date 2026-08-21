@@ -7,6 +7,13 @@
  */
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import {
+	DEFAULT_IMAGE_GEN_OUTPUT_FORMAT,
+	DEFAULT_IMAGE_GEN_WATERMARK,
+	parseImageGenOutputFormat,
+	parseImageGenSize,
+	parseImageGenWatermark,
+} from "../../shared/imageGenParams";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { ImageGenService } from "../imagegen/ImageGenService";
 
@@ -26,16 +33,27 @@ export function registerImageGenIpc(deps: {
 	const { imageGen, configManager, log, persistImageGen } = deps;
 
 	ipcMain.handle(ipcChannels.imagegenGenerate, async (_event, input: unknown) => {
-		// 渲染层数据不可信：三个字段都必须是有限长度的非空字符串
-		const candidate = input as { provider?: unknown; model?: unknown; prompt?: unknown; sessionId?: unknown } | null;
+		// 渲染层数据不可信：必填字段必须是有限长度非空字符串；size/watermark 非法则丢弃回默认。
+		const candidate = input as {
+			provider?: unknown;
+			model?: unknown;
+			prompt?: unknown;
+			sessionId?: unknown;
+			size?: unknown;
+			watermark?: unknown;
+			outputFormat?: unknown;
+		} | null;
 		const provider = typeof candidate?.provider === "string" ? candidate.provider.trim() : "";
 		const model = typeof candidate?.model === "string" ? candidate.model.trim() : "";
 		const prompt = typeof candidate?.prompt === "string" ? candidate.prompt.trim() : "";
 		const sessionId = typeof candidate?.sessionId === "string" ? candidate.sessionId.trim() : "";
+		const size = parseImageGenSize(candidate?.size) ?? undefined;
+		const watermark = parseImageGenWatermark(candidate?.watermark, DEFAULT_IMAGE_GEN_WATERMARK);
+		const outputFormat = parseImageGenOutputFormat(candidate?.outputFormat, DEFAULT_IMAGE_GEN_OUTPUT_FORMAT) ?? undefined;
 		if (!provider || !model || !prompt || prompt.length > 4000) {
 			return { ok: false, error: "http", detail: "invalid request" } as const;
 		}
-		const result = await imageGen.generate({ provider, model, prompt });
+		const result = await imageGen.generate({ provider, model, prompt, size, watermark, outputFormat });
 		if (!result.ok) {
 			log("imagegen", "generate rejected", { error: result.error, provider });
 			return result;

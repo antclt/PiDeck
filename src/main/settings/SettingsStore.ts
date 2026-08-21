@@ -2,6 +2,14 @@ import { app, BrowserWindow, Menu } from "electron";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  DEFAULT_IMAGE_GEN_OUTPUT_FORMAT,
+  DEFAULT_IMAGE_GEN_SIZE,
+  DEFAULT_IMAGE_GEN_WATERMARK,
+  parseImageGenOutputFormat,
+  parseImageGenSize,
+  parseImageGenWatermark,
+} from "../../shared/imageGenParams";
 import { createDefaultExternalEditorSettings, type AppSettings } from "../../shared/types";
 import { getAppLogger } from "../logging/sharedLogger";
 
@@ -168,6 +176,11 @@ Gitmoji 对应关系：
   /** 用户手动移除的内置扩展，启动时跳过自动部署 */
   removedBuiltInExtensions: [],
 
+  // 生图参数：记在 composer 底栏，跨会话复用；缺省正方形、不带水印
+  imageGenSize: DEFAULT_IMAGE_GEN_SIZE,
+  imageGenWatermark: DEFAULT_IMAGE_GEN_WATERMARK,
+  imageGenOutputFormat: DEFAULT_IMAGE_GEN_OUTPUT_FORMAT,
+
   // ── 更新检测：默认正常检测，用户可手动关闭忽略更新 ──
   disableUpdateCheck: false,
 
@@ -223,6 +236,15 @@ export class SettingsStore {
       // 语义从「最大宽度 px」变为「占面板百分比」，无法精确换算（面板宽度可变），
       // 用线性映射保留旧值感觉：800→60%、1400→84%、1800(不限)→100%。
       this.migrateContentWidth();
+      // 生图尺寸/水印来自旧 JSON 时可能非法；回落默认，避免底栏和下一次请求带着坏值。
+      this.settings.imageGenSize =
+        parseImageGenSize(this.settings.imageGenSize) ?? DEFAULT_IMAGE_GEN_SIZE;
+      this.settings.imageGenWatermark = parseImageGenWatermark(
+        this.settings.imageGenWatermark,
+        DEFAULT_IMAGE_GEN_WATERMARK,
+      );
+      this.settings.imageGenOutputFormat =
+        parseImageGenOutputFormat(this.settings.imageGenOutputFormat) ?? DEFAULT_IMAGE_GEN_OUTPUT_FORMAT;
     } catch {
       this.settings = { ...defaultSettings };
     }
@@ -270,6 +292,21 @@ export class SettingsStore {
     // showThinking 完全由 pi agent 的 hideThinkingBlock 控制，不允许通过桌面设置修改
     const { showThinking: _, ...safePatch } = patch;
     this.settings = { ...this.settings, ...safePatch };
+    // 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。
+    if ("imageGenSize" in safePatch) {
+      this.settings.imageGenSize =
+        parseImageGenSize(this.settings.imageGenSize) ?? DEFAULT_IMAGE_GEN_SIZE;
+    }
+    if ("imageGenWatermark" in safePatch) {
+      this.settings.imageGenWatermark = parseImageGenWatermark(
+        this.settings.imageGenWatermark,
+        DEFAULT_IMAGE_GEN_WATERMARK,
+      );
+    }
+    if ("imageGenOutputFormat" in safePatch) {
+      this.settings.imageGenOutputFormat =
+        parseImageGenOutputFormat(this.settings.imageGenOutputFormat) ?? DEFAULT_IMAGE_GEN_OUTPUT_FORMAT;
+    }
     await this.save();
     this.applyMenu();
     // 配置变更审计（统一在此留痕，覆盖 IPC 与 pet/extension/editors 等所有直写路径）：

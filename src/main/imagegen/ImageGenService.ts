@@ -1,3 +1,9 @@
+import {
+	buildImageGenApiBody,
+	imageGenEndpointSupportsArkFields,
+	imageGenOutputMimeType,
+	parseImageGenOutputFormat,
+} from "../../shared/imageGenParams";
 import type { ImageGenRequest, ImageGenResult } from "../../shared/types/imagegen";
 
 /** 供应商凭据（由 imagegenIpc 从 models.json/auth.json 拼出，本服务不关心来源） */
@@ -31,15 +37,18 @@ export class ImageGenService {
 			return { ok: false, error: "notConfigured" };
 		}
 		try {
-			const body = {
-				model: request.model.trim(),
+			const imagesUrl = normalizeImagesUrl(credentials.baseUrl);
+			const outputFormat = parseImageGenOutputFormat(request.outputFormat, null);
+			const body = buildImageGenApiBody({
+				model: request.model,
 				prompt: request.prompt,
-				n: 1,
-				// b64_json 优先：结果直接进附件栏，不依赖下载通道
-				response_format: "b64_json",
-			};
+				baseUrl: imagesUrl,
+				size: request.size,
+				watermark: request.watermark,
+				outputFormat: outputFormat ?? undefined,
+			});
 			const response = await fetch(
-				`${normalizeImagesUrl(credentials.baseUrl)}`,
+				imagesUrl,
 				{
 					method: "POST",
 					headers: {
@@ -68,7 +77,14 @@ export class ImageGenService {
 			};
 			const item = payload.data?.[0];
 			if (item?.b64_json) {
-				return { ok: true, image: { type: "image", data: item.b64_json, mimeType: "image/png" } };
+				// b64 无 content-type：仅 Ark 真正发了 output_format 才按 jpeg/png 标记；OpenAI 保持 png
+				const mimeType = imageGenEndpointSupportsArkFields(imagesUrl)
+					? imageGenOutputMimeType(outputFormat)
+					: "image/png";
+				return {
+					ok: true,
+					image: { type: "image", data: item.b64_json, mimeType },
+				};
 			}
 			if (item?.url) {
 				// 服务端不支持 b64_json 时回退下载（url 一般与 baseUrl 同源，直接 fetch）

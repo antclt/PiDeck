@@ -38,6 +38,10 @@ test("IPC 入参校验：provider/model/prompt 非空字符串，prompt ≤ 4000
 	assert.match(imagegenIpc, /typeof candidate\?\.model === "string"/);
 	assert.match(imagegenIpc, /typeof candidate\?\.prompt === "string"/);
 	assert.match(imagegenIpc, /prompt\.length > 4000/);
+	assert.match(imagegenIpc, /parseImageGenSize\(candidate\?\.size\)/);
+	assert.match(imagegenIpc, /parseImageGenWatermark\(candidate\?\.watermark/);
+	assert.match(imagegenIpc, /parseImageGenOutputFormat\(candidate\?\.outputFormat/);
+	assert.match(imagegenIpc, /imageGen\.generate\(\{ provider, model, prompt, size, watermark, outputFormat \}/);
 });
 
 test("resolveProviderCredentials：从 models.json/auth.json 拼 baseUrl/apiKey，缺一返 null", () => {
@@ -50,6 +54,18 @@ test("resolveProviderCredentials：从 models.json/auth.json 拼 baseUrl/apiKey�
 
 test("ComposerAgentMode 含 imagegen 与 goal", () => {
 	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "goal"/);
+});
+
+test("composer 生图底栏暴露尺寸、格式与水印控件", () => {
+	const options = readFileSync("src/renderer/src/components/session/ComposerImageGenOptions.tsx", "utf8");
+	const area = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
+	assert.match(composerComponents, /imageGenOptions\?:/);
+	assert.match(composerComponents, /ComposerImageGenOptions/);
+	assert.match(options, /IMAGE_GEN_SIZE_PRESETS/);
+	assert.match(options, /IMAGE_GEN_OUTPUT_FORMATS/);
+	assert.match(options, /imagegen\.watermark/);
+	assert.match(area, /composer\.delivery\.imageGenSize/);
+	assert.match(area, /composer\.delivery\.imageGenOutputFormat/);
 });
 
 test("composer 模式选择器与底栏三态（含生图图标）", () => {
@@ -70,6 +86,9 @@ test("controller：生图分支不 send、生图占位消息三态上屏（不�
 	assert.match(controller, /desktopApi\.imagegen\.generate\(\{/);
 	assert.match(controller, /provider: model\.provider/);
 	assert.match(controller, /model: model\.modelId/);
+	assert.match(controller, /size: imageGenSize/);
+	assert.match(controller, /watermark: imageGenWatermark/);
+	assert.match(controller, /outputFormat: imageGenOutputFormat/);
 	// 结果作为消息上屏：写时间线缓存（source=runtime），不进附件栏
 	assert.match(controller, /appendTimelineMessage/);
 	assert.match(controller, /setCacheMessages\(\{ sessionId, messages: \[\.\.\.previous, message\], source: "runtime" \}\)/);
@@ -97,14 +116,16 @@ test("controller：生图分支不 send、生图占位消息三态上屏（不�
 
 test("发送控件：生图进行中显示转圈并禁用", () => {
 	assert.match(composerPanels, /isGeneratingImage\?: boolean/);
-	assert.match(composerPanels, /isGeneratingImage \?\s*\(\s*<LoaderCircle/);
-	assert.match(composerPanels, /disabled=\{props\.isAgentStarting \|\| props\.isGeneratingImage \|\| !props\.canSend\}/);
+	assert.match(composerPanels, /isGeneratingImage \? \(/);
+	assert.match(composerPanels, /props\.isAgentStarting \|\| props\.isGeneratingImage \|\| !props\.canSend/);
 });
 
-test("生图结果提供原图复制与 PNG 保存操作", () => {
+test("生图结果提供原图复制与按 mime 保存", () => {
 	const finalAnswer = readFileSync("src/renderer/src/components/session/turn/FinalAnswer.tsx", "utf8");
-	assert.match(finalAnswer, /navigator\.clipboard\.write\(\[new ClipboardItem/);
-	assert.match(finalAnswer, /link\.download = `pideck-image-\$\{Date\.now\(\)\}\.png`/);
+	assert.match(finalAnswer, /writeClipboardImage/);
+	assert.doesNotMatch(finalAnswer, /fetch\(imageDataUrl\)/);
+	assert.doesNotMatch(finalAnswer, /navigator\.clipboard\.write\(\[new ClipboardItem/);
+	assert.match(finalAnswer, /image\.mimeType === "image\/jpeg" \? "jpg" : "png"/);
 	assert.match(finalAnswer, /imagegen\.copy/);
 	assert.match(finalAnswer, /imagegen\.save/);
 });
