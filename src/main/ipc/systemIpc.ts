@@ -788,7 +788,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		) {
 			if (applyDesktopProxy) await applyDesktopProxy(settings);
 		}
-		if ("theme" in patch) {
+		if (
+			"theme" in patch
+			|| "themeScheduleLightStart" in patch
+			|| "themeScheduleDarkStart" in patch
+		) {
 			if (applyNativeThemeSource) applyNativeThemeSource(settings);
 		}
 		if ("language" in patch) {

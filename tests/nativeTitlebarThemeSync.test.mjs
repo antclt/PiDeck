@@ -7,7 +7,9 @@ const source = mainIpcSource;
 
 test("main process syncs native titlebar appearance with app theme", () => {
   assert.match(source, /function applyNativeThemeSource\(settings: AppSettings\)/);
-  assert.match(source, /nativeTheme\.themeSource\s*=\s*settings\.theme === "system" \? "system" : settings\.theme;/);
+  assert.match(source, /nativeTheme\.themeSource = settings\.theme === "system"/);
+  assert.match(source, /resolveAppColorScheme/);
   assert.match(source, /applyNativeThemeSource\(settingsStore\.get\(\)\);[\s\S]*new BrowserWindow/);
-  assert.match(source, /if \("theme" in patch\) \{[\s\S]*applyNativeThemeSource\(settings\);/);
+  assert.match(source, /"theme" in patch[\s\S]*applyNativeThemeSource\(settings\)/);
+  assert.match(source, /themeScheduleLightStart/);
 });

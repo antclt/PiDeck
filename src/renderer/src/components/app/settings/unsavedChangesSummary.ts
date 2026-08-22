@@ -69,6 +69,8 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "gitCommitMessagePrompt", tab: "common", itemKey: "settings.gitCommitMessagePrompt" },
 
 	{ field: "theme", tab: "appearance", itemKey: "settings.theme" },
+	{ field: "themeScheduleLightStart", tab: "appearance", itemKey: "settings.themeScheduleRange" },
+	{ field: "themeScheduleDarkStart", tab: "appearance", itemKey: "settings.themeScheduleRange" },
 	{ field: "accent", tab: "appearance", itemKey: "settings.accent" },
 	{ field: "backgroundImage", tab: "appearance", itemKey: "settings.backgroundImage" },
 	{ field: "backgroundImageOpacity", tab: "appearance", itemKey: "settings.backgroundImage" },
@@ -170,6 +172,20 @@ export function summarizeSettingsUnsavedChanges(input: {
 		itemKey: first.itemKey,
 		totalCount: items.length,
 	};
+}
+
+/** 左侧导航要打黄点的 tab：按字段目录归并，视觉桥草稿单独算 vision。 */
+export function dirtySettingsTabIds(input: {
+	dirtyFields: Iterable<string>;
+	visionDirty?: boolean;
+}): Set<SettingsUnsavedTabId> {
+	const dirty = new Set(input.dirtyFields);
+	const tabs = new Set<SettingsUnsavedTabId>();
+	for (const entry of FIELD_CATALOG) {
+		if (dirty.has(entry.field)) tabs.add(entry.tab);
+	}
+	if (input.visionDirty) tabs.add("vision");
+	return tabs;
 }
 
 export function formatSettingsUnsavedMessage(

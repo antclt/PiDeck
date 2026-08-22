@@ -97,6 +97,8 @@ let previewSettings: AppSettings = {
 	sendShortcut: "enter-send",
 	defaultAgentBackend: "pi",
 	theme: "system",
+	themeScheduleLightStart: "07:00",
+	themeScheduleDarkStart: "19:00",
 	accent: "default",
 	themeSkin: "classic-green",
 	customThemeOverrides: {},

@@ -610,7 +610,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
       turns: turnWindowTurns,
     };
   }, [controller, displayRuns, followingForTurnWindow, timelineRef, turnWindowActive, turnWindowTurns]);
-  // 文件修改展示已下沉到每轮 TurnRow 底部（TurnFileChanges），此处不再做全局汇总
+  // 文件修改由 SessionView 提取最近一轮并放在 composer 上方；时间线只负责渲染消息。
   // 时间线里已有用户图片才解析模型目录：原生看图时气泡不能显示视觉桥「转换中」。
   const hasUserImages = useMemo(
     () => activeMessages.some((message) => message.role === "user" && Boolean(message.images?.length)),

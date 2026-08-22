@@ -213,6 +213,7 @@ import type {
 	YaoPromptListResult,
 	YaoPromptDetailResult,
 } from "../shared/types";
+import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../shared/themeSchedule";
 import { ProjectStore } from "./projects/ProjectStore";
 import { shouldAutoRegisterForeignCwd } from "./projects/projectPathPolicy";
 import { defaultPathCheck } from "./projects/projectPresence";
@@ -1002,9 +1003,38 @@ const feishuSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 	},
 };
 
+let themeScheduleTimer: ReturnType<typeof setTimeout> | undefined;
+
+function clearThemeScheduleTimer(): void {
+	if (themeScheduleTimer !== undefined) {
+		clearTimeout(themeScheduleTimer);
+		themeScheduleTimer = undefined;
+	}
+}
+
 function applyNativeThemeSource(settings: AppSettings) {
 	// 原生标题栏不受 renderer CSS 影响；跟随应用主题，避免暗色界面顶部仍是系统浅色栏。
-	nativeTheme.themeSource = settings.theme === "system" ? "system" : settings.theme;
+	// Electron nativeTheme.themeSource 只认 system/light/dark；跟随时间先解析再写入。
+	nativeTheme.themeSource = settings.theme === "system"
+		? "system"
+		: resolveAppColorScheme({
+			theme: settings.theme,
+			themeScheduleLightStart: settings.themeScheduleLightStart,
+			themeScheduleDarkStart: settings.themeScheduleDarkStart,
+			systemPrefersDark: nativeTheme.shouldUseDarkColors,
+		});
+	clearThemeScheduleTimer();
+	// 跟随时间：睡到下一次浅色/暗色边界再刷标题栏，避免每分钟轮询。
+	if (settings.theme === "schedule") {
+		const delay = msUntilNextThemeBoundary(
+			new Date(),
+			settings.themeScheduleLightStart,
+			settings.themeScheduleDarkStart,
+		);
+		themeScheduleTimer = setTimeout(() => {
+			applyNativeThemeSource(settingsStore.get());
+		}, delay);
+	}
 }
 
 const RELEASES_URL = "https://github.com/ayuayue/pi-desktop/releases";
@@ -1683,10 +1713,13 @@ async function createWindow() {
 
 	// 根据用户的主题设置选择窗口背景色，避免系统标题栏与暗色主题间出现浅色条带。
 	// 色值与 foundation.css 的 light/dark 基底保持一致（暖白 / 暖黑）。
-	const theme = settingsStore.get().theme;
-	const isDark =
-		theme === "dark" ||
-		(theme === "system" && nativeTheme.shouldUseDarkColors);
+	const windowThemeSettings = settingsStore.get();
+	const isDark = resolveAppColorScheme({
+		theme: windowThemeSettings.theme,
+		themeScheduleLightStart: windowThemeSettings.themeScheduleLightStart,
+		themeScheduleDarkStart: windowThemeSettings.themeScheduleDarkStart,
+		systemPrefersDark: nativeTheme.shouldUseDarkColors,
+	}) === "dark";
 	const backgroundColor = isDark ? "#121212" : "#f8f8f5";
 
 	// 按外观设置的启动预设调整初始尺寸；隐藏态先 maximize/fullscreen，减少首帧跳动。
@@ -3263,6 +3296,7 @@ app.whenReady().then(async () => {
 		},
 	});
 	// C12：退出清理登记（before-quit 统一 runAll）
+	quitCleanup.register("theme-schedule", () => clearThemeScheduleTimer());
 	quitCleanup.register("web-service", () => webServiceManager?.stop());
 	terminalManager = new TerminalSessionManager(
 		(agentId) => agentManager.getCwd(agentId),

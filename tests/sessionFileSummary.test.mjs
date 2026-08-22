@@ -124,11 +124,15 @@ test("fileChangeToDiffLines: write yields all-added lines, edit yields removed+a
 	]);
 });
 
-test("file changes are per-turn: TurnRow mounts TurnFileChanges and global summary is gone", () => {
-	// 每轮展示改为固定在 TurnRow 底部（TurnFileChanges），时间线不再做全局汇总
+test("file changes render above the composer as a collapsed latest-run strip", () => {
 	const timeline = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
-	assert.ok(!timeline.includes("SessionFileSummary"), "timeline should not render global summary");
-	assert.ok(!timeline.includes("lastRunMessages"), "timeline should not compute lastRunMessages");
+	assert.ok(!timeline.includes("TurnFileChanges"), "timeline should not own the file strip");
 	const turnRow = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
-	assert.match(turnRow, /TurnFileChanges/);
+	assert.doesNotMatch(turnRow, /TurnFileChanges/);
+	const sessionView = readFileSync("src/renderer/src/components/session/SessionView.tsx", "utf8");
+	assert.match(sessionView, /SessionModifiedFilesStrip/);
+	assert.match(sessionView, /latestAgentRun/);
+	const strip = readFileSync("src/renderer/src/components/session/SessionModifiedFilesStrip.tsx", "utf8");
+	assert.match(strip, /useState\(true\)/, "the strip should start collapsed");
+	assert.match(strip, /data-testid=\"session-modified-files-strip\"/);
 });

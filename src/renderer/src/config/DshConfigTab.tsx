@@ -87,7 +87,9 @@ export type DshConfigTabHandle = {
  * 统一由 ConfigModal 顶部保存按钮保存；关闭弹框时有未保存修改会弹确认。
  */
 export const DshConfigTab = forwardRef<DshConfigTabHandle, {
-	onDirtyChange: (dirty: boolean) => void;
+	onDirtyChange: (dirty: boolean, keys?: string[]) => void;
+	/** 有未保存更改的导航 id 集合（dsh:<nav>），用于左侧导航打黄点。 */
+	dirtyNavIds?: Set<string>;
 }>(function DshConfigTab(props, ref) {
 	const [status, setStatus] = useState<DshStatus | null>(null);
 	const [namespaces, setNamespaces] = useState<DshNamespaceView[]>([]);
@@ -115,6 +117,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 		unregister: registryUnregister,
 		markDirty: registryMarkDirty,
 		isDirty: registryIsDirty,
+		listDirtyKeys: registryListDirtyKeys,
 		saveAll: registrySaveAll,
 	} = useSaveRegistry();
 
@@ -128,8 +131,16 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 
 	const onDirtyChange = useCallback((instanceId: string, dirty: boolean) => {
 		registryMarkDirty(instanceId, dirty);
-		props.onDirtyChange(registryIsDirty());
-	}, [props.onDirtyChange, registryIsDirty, registryMarkDirty]);
+		// 把子分区 instanceId（dsh:models:llm-pi-ai）归并成导航 id（dsh:models），侧栏才能打黄点。
+		const navKeys = [...new Set(
+			registryListDirtyKeys().map((key) => {
+				if (!key.startsWith("dsh:")) return key;
+				const nav = key.slice("dsh:".length).split(":")[0] ?? "";
+				return nav ? `dsh:${nav}` : key;
+			}),
+		)];
+		props.onDirtyChange(registryIsDirty(), navKeys);
+	}, [props.onDirtyChange, registryIsDirty, registryListDirtyKeys, registryMarkDirty]);
 
 	const sectionApi: DshSectionApi = useMemo(() => ({
 		onDirtyChange,
@@ -295,6 +306,8 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 						>
 							<span className="config-nav-icon">{item.icon}</span>
 							{t(item.labelKey)}
+							{/* 未保存标记：与 Pi 管理侧栏黄点同款，提醒用户该分区有草稿 */}
+							{props.dirtyNavIds?.has(`dsh:${item.id}`) ? <span className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 						</button>
 					))}
 				</div>
@@ -343,6 +356,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 														onSave={(patch) => saveNamespace(ns.ns, patch)}
 														sectionApi={sectionApi}
 														onMigrated={() => { void load(); }}
+															instanceKey={`dsh:models:${ns.ns}`}
 													/>
 												) : (
 													<DeepseekRouteCard
@@ -352,6 +366,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 														catalog={modelCatalog["deepseek-official"]}
 														onSave={(patch) => saveNamespace(ns.ns, patch)}
 														sectionApi={sectionApi}
+															instanceKey={`dsh:models:${ns.ns}`}
 														onMigrated={() => { void load(); }}
 													/>
 												)}
@@ -372,6 +387,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 										await load();
 									}}
 									sectionApi={sectionApi}
+										instanceKey="dsh:presets"
 								/>
 							</div>
 						</div>
@@ -384,7 +400,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 									) : (
 										<div className="grid gap-2">
 											{pluginNamespaces.map((ns) => (
-												<PluginCard key={ns.ns} ns={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} />
+												<PluginCard key={ns.ns} ns={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} instanceKey={`dsh:plugins:${ns.ns}`} />
 											))}
 										</div>
 									)}
@@ -395,17 +411,17 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 						</div>
 						<div hidden={activeTab !== "security"}>
 							<div className="p-4">
-								<SecurityTab namespace={permissionNamespace} writable={writable} onSave={(patch) => saveNamespace("permission", patch)} onChanged={() => void load()} sectionApi={sectionApi} />
+								<SecurityTab namespace={permissionNamespace} writable={writable} onSave={(patch) => saveNamespace("permission", patch)} onChanged={() => void load()} sectionApi={sectionApi} instanceKey="dsh:security" />
 							</div>
 						</div>
 						<div hidden={activeTab !== "auth"}>
 							<div className="p-4">
-								<AuthTab refs={credentialRefs} credentials={credentials} onSetKey={setDshKey} onUnsetKey={unsetDshKey} sectionApi={sectionApi} />
+								<AuthTab refs={credentialRefs} credentials={credentials} onSetKey={setDshKey} onUnsetKey={unsetDshKey} sectionApi={sectionApi} instanceKey="dsh:auth" />
 							</div>
 						</div>
 						<div hidden={activeTab !== "raw"}>
 							<div className="p-4">
-								<RawTab homeDir={status?.homeDir ?? ""} sectionApi={sectionApi} />
+								<RawTab homeDir={status?.homeDir ?? ""} sectionApi={sectionApi} instanceKey="dsh:raw" />
 							</div>
 						</div>
 					</>
@@ -849,6 +865,8 @@ function PluginCard(props: {
 	writable: boolean;
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 	sectionApi?: DshSectionApi;
+	/** 稳定脏标记 key（dsh:plugins:<ns>），透传给 DshSchemaForm。 */
+	instanceKey?: string;
 }) {
 	const [open, setOpen] = useState(false);
 	// G13：已知插件走 i18n 标题；host 新注册的插件命名空间回退显示 ns 原名
@@ -868,7 +886,7 @@ function PluginCard(props: {
 			</button>
 			{open && (
 				<div className="border-t border-border/40">
-					<DshSchemaForm namespace={props.ns} writable={props.writable} onSave={props.onSave} sectionApi={props.sectionApi} />
+					<DshSchemaForm namespace={props.ns} writable={props.writable} onSave={props.onSave} sectionApi={props.sectionApi} instanceKey={props.instanceKey} />
 				</div>
 			)}
 		</div>
@@ -887,8 +905,10 @@ function PresetsTab(props: {
 	namespace?: DshNamespaceView;
 	onSave: (id: string) => Promise<void>;
 	sectionApi?: DshSectionApi;
+	instanceKey?: string;
 }) {
-	const instanceId = useId();
+	const generatedId = useId();
+	const instanceId = props.instanceKey ?? generatedId;
 	const [presets, setPresets] = useState<DshAgentPreset[]>([]);
 	const [loading, setLoading] = useState(true);
 	/** 暂存的新默认预设 id（未保存；顶部统一保存时提交）。 */
@@ -1020,8 +1040,10 @@ function SecurityTab(props: {
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 	onChanged: () => void;
 	sectionApi?: DshSectionApi;
+	instanceKey?: string;
 }) {
-	const instanceId = useId();
+	const generatedId = useId();
+	const instanceId = props.instanceKey ?? generatedId;
 	const [draft, setDraft] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -1138,8 +1160,10 @@ function AuthTab(props: {
 	onSetKey: (ref: string, value: string) => Promise<void>;
 	onUnsetKey: (ref: string) => Promise<void>;
 	sectionApi?: DshSectionApi;
+	instanceKey?: string;
 }) {
-	const instanceId = useId();
+	const generatedId = useId();
+	const instanceId = props.instanceKey ?? generatedId;
 	const [values, setValues] = useState<Record<string, string>>({});
 	/** 待清除的凭证 ref 集合（顶部统一保存时执行 unset）。 */
 	const [pendingUnsets, setPendingUnsets] = useState<Set<string>>(new Set());
@@ -1330,8 +1354,9 @@ const RAW_FILES = ["settings.yaml", ".credentials.yaml"];
 
 /** 源文件 tab：与 Pi 管理 RawTab 同款——顶部文件下拉 + 编辑器。
  *  保存语义与 Pi 管理页一致：草稿变化上报脏状态，顶部统一保存提交。 */
-function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi }) {
-	const instanceId = useId();
+function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKey?: string }) {
+	const generatedId = useId();
+	const instanceId = props.instanceKey ?? generatedId;
 	const [fileName, setFileName] = useState(RAW_FILES[0]);
 	const [content, setContent] = useState("");
 	const [loaded, setLoaded] = useState(false);

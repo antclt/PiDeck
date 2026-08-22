@@ -7,7 +7,7 @@ export type SendShortcutMode =
 	| "ctrl-enter-send"
 	| "shift-enter-send";
 
-export type AppThemeMode = "system" | "light" | "dark";
+export type AppThemeMode = "system" | "light" | "dark" | "schedule";
 /** 主题色预设：data-accent 属性驱动 foundation.css 的 accent/logo 变量 */
 export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | "rose";
 /**
@@ -50,8 +50,12 @@ export type StartupWindowMode =
 	useNativeTitleBar: boolean;
 	showNativeMenu: boolean;
 	sendShortcut: SendShortcutMode;
-	/** 界面主题，system 跟随系统浅色/暗色偏好 */
+	/** 界面主题：system 跟随系统；schedule 按本地时钟在浅色/暗色之间切换 */
 	theme: AppThemeMode;
+	/** 跟随时间：浅色开始（HH:mm，含）。仅 theme=schedule 时生效。 */
+	themeScheduleLightStart: string;
+	/** 跟随时间：暗色开始（HH:mm，含）。仅 theme=schedule 时生效。 */
+	themeScheduleDarkStart: string;
 	/** 主题色（accent）预设，data-accent 驱动；新增预设只需扩充 AppAccentMode 与色板 */
 	accent: AppAccentMode;
 	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides */

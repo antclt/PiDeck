@@ -36,6 +36,16 @@ function loadCoordinator() {
   });
 }
 
+test("runtime and catalog message mutations keep gateway this when calling optional methods", () => {
+  const source = readFileSync("src/main/sessions/SessionRuntimeCoordinator.ts", "utf8");
+  assert.doesNotMatch(
+    source,
+    /const (?:editMessage|deleteMessage|exportHtml|getCommands|setPermission|mutate) = this\.agents\./,
+  );
+  assert.match(source, /typeof this\.agents\.editMessage !== "function"/);
+  assert.match(source, /typeof this\.agents\.mutatePersistedSessionMessage !== "function"/);
+});
+
 test("session performance instrumentation keeps activation and dispatch phase markers", () => {
   const source = readFileSync("src/main/sessions/SessionRuntimeCoordinator.ts", "utf8");
   assert.match(source, /Prompt pipeline started/);
@@ -116,6 +126,7 @@ function createHarness(options = {}) {
     },
   };
   const agents = {
+    backend: "pi",
     list: () => tabs,
 	getMessages: (agentId) => {
 	  calls.messages += 1;
@@ -177,25 +188,32 @@ function createHarness(options = {}) {
       calls.runtimeState += 1;
       return options.runtimeState ?? { isStreaming: false };
     },
-    getCommands: async () => {
+    // 这些方法读 this：Coordinator 若抽成 const fn = this.agents.fn 再调用，
+    // 会复现 CompositeAgentGateway 的 resolveBackend 崩溃。
+    async getCommands() {
+      if (!this?.backend) throw new Error("Cannot read properties of undefined (reading 'resolveBackend')");
       calls.commands += 1;
       return options.commands ?? [{ name: "compact" }];
     },
-    exportHtml: async () => {
+    async exportHtml() {
+      if (!this?.backend) throw new Error("Cannot read properties of undefined (reading 'resolveBackend')");
       calls.exportHtml += 1;
       return { path: "C:/export.html" };
     },
-    editMessage: async () => {
+    async editMessage() {
+      if (!this?.backend) throw new Error("Cannot read properties of undefined (reading 'resolveBackend')");
       calls.editMessage += 1;
     },
-    deleteMessage: async () => {
+    async deleteMessage() {
+      if (!this?.backend) throw new Error("Cannot read properties of undefined (reading 'resolveBackend')");
       calls.deleteMessage += 1;
     },
     prepareResendFromMessage: async () => {
       calls.prepareResend += 1;
       return { text: "hello" };
     },
-    mutatePersistedSessionMessage: async (sessionPath, messageId, operation, extra) => {
+    async mutatePersistedSessionMessage(sessionPath, messageId, operation, extra) {
+      if (!this?.backend) throw new Error("Cannot read properties of undefined (reading 'resolveBackend')");
       calls.mutatePersisted.push({ sessionPath, messageId, operation, extra });
       if (operation === "resend") return { text: "hello" };
       return undefined;
@@ -207,7 +225,8 @@ function createHarness(options = {}) {
     setThinking: async () => {
       calls.setThinking += 1;
     },
-    setPermission: async (_agentId, _preset) => {
+    async setPermission(_agentId, _preset) {
+      if (!this?.backend) throw new Error("Cannot read properties of undefined (reading 'resolveBackend')");
       calls.setPermission += 1;
       if (options.permissionError) throw new Error(options.permissionError);
     },

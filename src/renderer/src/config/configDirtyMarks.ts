@@ -20,6 +20,22 @@ export function dirtyKeysClearedByReload(target: ConfigTab): ConfigDirtyKey[] {
 	return [...keys];
 }
 
+/**
+ * 切 tab 触发的 loadConfig 若覆盖了仍有未保存草稿的内存，用户会看到「改完一切就没了」。
+ * 返回本次重载里必须跳过写回的脏 key（调用方对它们既不 setState 也不 clearDirty）。
+ */
+export function dirtyKeysPreservedOnReload(
+	target: ConfigTab,
+	dirtyTabs: Iterable<string>,
+): Set<ConfigDirtyKey> {
+	const dirty = new Set(dirtyTabs);
+	const preserved = new Set<ConfigDirtyKey>();
+	for (const key of dirtyKeysClearedByReload(target)) {
+		if (dirty.has(key)) preserved.add(key);
+	}
+	return preserved;
+}
+
 /** 配置导入会整体替换 models/auth/settings/trust 四个文件，需清掉全部 config 组脏标记（skills/prompts 编辑不涉及配置文件，保留）。 */
 export const ALL_CONFIG_DIRTY_KEYS: readonly ConfigDirtyKey[] = [
 	"config:models",

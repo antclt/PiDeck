@@ -40,7 +40,7 @@ import { cn } from "./lib/utils";
 import { showNotice } from "./utils/notice";
 import { collectModelSpecPatches } from "./utils/modelSpecAutoFill";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
-import { Component, useRef, useState, useEffect, useCallback, type ReactNode } from "react";
+import { Component, useRef, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import type { PiDesktopApi } from "../../preload";
 import { AuthTab } from "./config/AuthTab";
 import { ModelsTab } from "./config/ModelsTab";
@@ -67,7 +67,9 @@ import type {
 } from "./config/configTypes";
 import type { ConfigFileDiagnostic, CreatePiPromptTemplateInput, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary } from "../../shared/types";
 import { getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS } from "./config/providerHeaders";
-import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload } from "./config/configDirtyMarks";
+import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnReload } from "./config/configDirtyMarks";
+import { formatConfigUnsavedMessage, summarizeConfigUnsavedChanges } from "./config/configUnsavedChangesSummary";
+import { DirtyMarker } from "./components/app/settings/SettingRows";
 import { isValidProviderName } from "../../shared/providerName";
 
 const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi })
@@ -304,29 +306,55 @@ function ConfigModalContent(props: ConfigModalProps) {
 	const [error, setError] = useState<string | null>(null);
 	/** 各 tab 未保存修改集合：key 用 sectionTabValue 编码（如 "config:models"/"skills"），顶部保存按钮与关闭确认依赖它 */
 	const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
+	/** loadConfig 不能依赖 dirtyTabs（否则切 tab 会重建回调并误触发重载）；用 ref 读最新脏集合。 */
+	const dirtyTabsRef = useRef(dirtyTabs);
+	dirtyTabsRef.current = dirtyTabs;
 	/** 关闭弹框时存在未保存修改 → 弹出保存确认（借鉴设置页关闭逻辑） */
 	const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
 	const hasDirty = dirtyTabs.size > 0;
+	// DSH/Pi 顶层分页与 DSH 左侧导航的黄点来源：dsh:<nav> 归 DSH，其余归 Pi
+	const dshDirtyNavIds = useMemo(() => {
+		const ids = new Set<string>();
+		for (const key of dirtyTabs) if (key.startsWith("dsh:")) ids.add(key);
+		return ids;
+	}, [dirtyTabs]);
+	const hasDshDirty = dshDirtyNavIds.size > 0;
+	const hasPiDirty = dirtyTabs.size > 0 && !hasDshDirty;
 
 	/** 标记某 tab 存在未保存修改（幂等；只用 setDirtyTabs 函数式更新，引用稳定） */
 	const markDirty = useCallback((tabKey: string) => {
-		setDirtyTabs((prev) => (prev.has(tabKey) ? prev : new Set(prev).add(tabKey)));
+		setDirtyTabs((prev) => {
+			if (prev.has(tabKey)) return prev;
+			const next = new Set(prev).add(tabKey);
+			dirtyTabsRef.current = next;
+			return next;
+		});
 	}, []);
 
 	/** 清除某 tab 的未保存修改标记（保存成功或主动放弃编辑时调用） */
 	const clearDirty = useCallback((tabKey: string) => {
-		setDirtyTabs((prev) =>
-			prev.has(tabKey)
-				? new Set([...prev].filter((k) => k !== tabKey))
-				: prev,
-		);
+		setDirtyTabs((prev) => {
+			if (!prev.has(tabKey)) return prev;
+			const next = new Set([...prev].filter((k) => k !== tabKey));
+			dirtyTabsRef.current = next;
+			return next;
+		});
 	}, []);
 
-	/** DSH 页脏状态上报：转发到 "dsh" 标记（引用稳定，避免 DshConfigTab 的 sectionApi 反复重建）。 */
-	const handleDshDirtyChange = useCallback((dirty: boolean) => {
-		if (dirty) markDirty("dsh");
-		else clearDirty("dsh");
-	}, [markDirty, clearDirty]);
+	/** DSH 页脏状态：保留聚合 "dsh" 给保存按钮，同时记下 dsh:<nav> 供侧栏黄点/关闭文案。 */
+	const handleDshDirtyChange = useCallback((dirty: boolean, keys: string[] = []) => {
+		setDirtyTabs((prev) => {
+			const next = new Set([...prev].filter((key) => key !== "dsh" && !key.startsWith("dsh:")));
+			if (dirty) {
+				next.add("dsh");
+				for (const key of keys) {
+					if (key.startsWith("dsh:")) next.add(key);
+				}
+			}
+			dirtyTabsRef.current = next;
+			return next;
+		});
+	}, []);
 	const [configDiagnostic, setConfigDiagnostic] = useState<ConfigFileDiagnostic | null>(null);
 	/* toast 已改用 sonner 实现 */
 
@@ -447,22 +475,35 @@ function ConfigModalContent(props: ConfigModalProps) {
 	} | null>(null);
 
 	const loadConfig = useCallback(
-		async (target: ConfigTab) => {
+		async (target: ConfigTab, options?: { force?: boolean }) => {
 			setLoading(true);
 			setError(null);
 			setConfigDiagnostic(null);
 			try {
+				// 切 tab 时不要把仍有草稿的内存冲掉；保存/导入传 force 才整页对齐磁盘。
+				const preserved = options?.force
+					? new Set<string>()
+					: dirtyKeysPreservedOnReload(target, dirtyTabsRef.current);
+				const skipModels = preserved.has("config:models");
+				const skipAuth = preserved.has("config:auth");
+				const skipSettings = preserved.has("config:settings");
+				const skipTrust = preserved.has("config:trust");
+				const skipRaw = preserved.has("config:raw");
 				if (target === "models") {
 					const res = await api.config.getModels();
-					setModelsData(normalizeModelsFile(res.parsed));
-					setRawContent(res.raw);
-					setRawFileName("models.json");
+					if (!skipModels) setModelsData(normalizeModelsFile(res.parsed));
+					if (!skipRaw) {
+						setRawContent(res.raw);
+						setRawFileName("models.json");
+					}
 					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "auth") {
 					const res = await api.config.getAuth();
-					setAuthData(res.parsed as AuthFile);
-					setRawContent(res.raw);
-					setRawFileName("auth.json");
+					if (!skipAuth) setAuthData(res.parsed as AuthFile);
+					if (!skipRaw) {
+						setRawContent(res.raw);
+						setRawFileName("auth.json");
+					}
 					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "settings") {
 					// 同时加载 settings、auth 和 models 数据，确保 defaultProvider / defaultModel 下拉能聚合所有可用信息
@@ -471,11 +512,13 @@ function ConfigModalContent(props: ConfigModalProps) {
 						api.config.getAuth(),
 						api.config.getModels(),
 					]);
-					setSettingsData(settingsRes.parsed as SettingsFile);
-					setAuthData(authRes.parsed as AuthFile);
-					setModelsData(normalizeModelsFile(modelsRes.parsed));
-					setRawContent(settingsRes.raw);
-					setRawFileName("settings.json");
+					if (!skipSettings) setSettingsData(settingsRes.parsed as SettingsFile);
+					if (!skipAuth) setAuthData(authRes.parsed as AuthFile);
+					if (!skipModels) setModelsData(normalizeModelsFile(modelsRes.parsed));
+					if (!skipRaw) {
+						setRawContent(settingsRes.raw);
+						setRawFileName("settings.json");
+					}
 					setConfigDiagnostic(settingsRes.diagnostic ?? null);
 
 					// 对于 auth 中有但 models 中没有模型的供应商，自动尝试获取模型列表
@@ -532,9 +575,11 @@ function ConfigModalContent(props: ConfigModalProps) {
 					}
 				} else if (target === "trust") {
 					const res = await api.config.getTrust();
-					setTrustData(res.parsed as Record<string, boolean>);
-					setRawContent(res.raw);
-					setRawFileName("trust.json");
+					if (!skipTrust) setTrustData(res.parsed as Record<string, boolean>);
+					if (!skipRaw) {
+						setRawContent(res.raw);
+						setRawFileName("trust.json");
+					}
 					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "raw") {
 					// 源文件 tab 复用当前 tab 对应的文件
@@ -546,7 +591,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 								: tab === "trust"
 									? "trust.json"
 									: "settings.json";
-					setRawFileName(fileName);
+					if (!skipRaw) setRawFileName(fileName);
 					const res =
 						fileName === "models.json"
 							? await api.config.getModels()
@@ -555,12 +600,13 @@ function ConfigModalContent(props: ConfigModalProps) {
 								: fileName === "trust.json"
 									? await api.config.getTrust()
 									: await api.config.getSettings();
-					setRawContent(res.raw);
+					if (!skipRaw) setRawContent(res.raw);
 					setConfigDiagnostic(res.diagnostic ?? null);
 				}
-				// 加载完成后本地数据与磁盘一致，清除被本次加载覆盖的数据对应的脏标记（含 settings 聚合页顺带重载的 models/auth，以及所有分支都会重写的 rawContent）。
-				// 不清理会残留“假脏”标记：保存后黄点不消失、关闭时误弹未保存确认。
-				for (const key of dirtyKeysClearedByReload(target)) clearDirty(key);
+				// 被跳过的脏草稿保持黄点；其余被磁盘覆盖的 key 必须清掉，否则保存后假脏。
+				for (const key of dirtyKeysClearedByReload(target)) {
+					if (!preserved.has(key)) clearDirty(key);
+				}
 			} catch (e) {
 				setError(e instanceof Error ? e.message : String(e));
 			} finally {
@@ -1032,7 +1078,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 		if (ok && filledCount > 0) {
 			setModelsData(base);
 		}
-		await loadConfig("models");
+		await loadConfig("models", { force: true });
 		return ok;
 	};
 
@@ -1136,7 +1182,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 			undefined,
 			"config:auth",
 		);
-		await loadConfig("auth");
+		await loadConfig("auth", { force: true });
 		return ok;
 	};
 
@@ -1148,7 +1194,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 			undefined,
 			"config:settings",
 		);
-		await loadConfig("settings");
+		await loadConfig("settings", { force: true });
 		return ok;
 	};
 
@@ -1160,7 +1206,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 			undefined,
 			"config:trust",
 		);
-		await loadConfig("trust");
+		await loadConfig("trust", { force: true });
 		return ok;
 	};
 
@@ -1174,10 +1220,10 @@ function ConfigModalContent(props: ConfigModalProps) {
 			"config:raw",
 		);
 		if (isModelsFile) {
-			await loadConfig("models");
-		} else if (rawFileName === "auth.json") await loadConfig("auth");
-		else if (rawFileName === "trust.json") await loadConfig("trust");
-		else await loadConfig("settings");
+			await loadConfig("models", { force: true });
+		} else if (rawFileName === "auth.json") await loadConfig("auth", { force: true });
+		else if (rawFileName === "trust.json") await loadConfig("trust", { force: true });
+		else await loadConfig("settings", { force: true });
 		return ok;
 	};
 
@@ -1555,7 +1601,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 				// 导入会整体替换四个配置文件：当前 tab 由 loadConfig 重载并清标记，其余 tab 的数据在磁盘上已全部变化，
 				// 统一清除它们的脏标记，避免残留黄点/关闭误弹确认（skills/prompts 编辑不涉及配置文件，保留）。
 				for (const key of ALL_CONFIG_DIRTY_KEYS) clearDirty(key);
-				await loadConfig(tab);
+				await loadConfig(tab, { force: true });
 				showToast(t("config.imported"));
 			} catch (e) {
 				setError(e instanceof Error ? e.message : String(e));
@@ -1732,16 +1778,20 @@ function ConfigModalContent(props: ConfigModalProps) {
 					<TabsTrigger value="dsh" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
 						<DshLogo className="size-3.5 shrink-0" />
 						{t("config.backend.dsh")}
+						{/* 顶层分页黄点：该后端任意分区有草稿时提醒 */}
+						{hasDshDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 					</TabsTrigger>
 					<TabsTrigger value="pi" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
 						<PiLogo className="size-3.5 shrink-0" />
 						{t("config.backend.pi")}
+						{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 					</TabsTrigger>
 				</TabsList>
 				<TabsContent value="dsh" className="flex min-h-0 min-w-0 flex-1">
 					<DshConfigTab
 						ref={dshConfigRef}
 						onDirtyChange={handleDshDirtyChange}
+						dirtyNavIds={dshDirtyNavIds}
 					/>
 				</TabsContent>
 				<TabsContent value="pi" className="flex min-h-0 min-w-0 flex-1">
@@ -1777,6 +1827,9 @@ function ConfigModalContent(props: ConfigModalProps) {
 								className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium"
 							>
 								<span className="config-nav-icon">{item.icon}</span>
+								{item.label}
+								{/* 未保存黄点：与 DSH 导航同款 */}
+								{dirtyTabs.has(`config:${item.id}`) || dirtyTabs.has(item.id) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 								{item.label}
 							</TabsTrigger>
 						))}
@@ -2126,7 +2179,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 						<AlertDialogContent>
 							<AlertDialogHeader>
 								<AlertDialogTitle>{t("config.unsavedTitle")}</AlertDialogTitle>
-								<AlertDialogDescription>{t("config.unsavedMessage")}</AlertDialogDescription>
+								<AlertDialogDescription>{formatConfigUnsavedMessage(summarizeConfigUnsavedChanges(dirtyTabs), t)}</AlertDialogDescription>
 							</AlertDialogHeader>
 							<AlertDialogFooter>
 								<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

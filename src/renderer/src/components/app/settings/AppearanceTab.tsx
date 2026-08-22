@@ -40,6 +40,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
   const { draft, updateDraft, isDirty } = props;
   const themeOptions: SelectOption[] = [
     { value: "system", label: t("settings.themeSystem") },
+    { value: "schedule", label: t("settings.themeSchedule") },
     { value: "light", label: t("settings.themeLight") },
     { value: "dark", label: t("settings.themeDark") },
   ];
@@ -103,6 +104,39 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
             </SelectContent>
           </Select>
         </SettingRow>
+        {draft.theme === "schedule" && (
+          <SettingRow
+            title={
+              <>
+                <span>{t("settings.themeScheduleRange")}</span>
+                <DirtyMarker
+                  dirty={isDirty("themeScheduleLightStart") || isDirty("themeScheduleDarkStart")}
+                  label={t("settings.themeScheduleRange")}
+                />
+              </>
+            }
+            description={t("settings.themeScheduleRangeDesc")}
+            alignEnd={false}
+          >
+            <div className="flex items-center gap-1.5">
+              <Input
+                type="time"
+                className="w-[112px] shrink-0"
+                value={draft.themeScheduleLightStart}
+                onChange={(event) => updateDraft({ themeScheduleLightStart: event.target.value })}
+                aria-label={t("settings.themeScheduleLightStart")}
+              />
+              <span className="text-text-tertiary" aria-hidden="true">→</span>
+              <Input
+                type="time"
+                className="w-[112px] shrink-0"
+                value={draft.themeScheduleDarkStart}
+                onChange={(event) => updateDraft({ themeScheduleDarkStart: event.target.value })}
+                aria-label={t("settings.themeScheduleDarkStart")}
+              />
+            </div>
+          </SettingRow>
+        )}
         <SettingRow
           title={
             <>

@@ -75,23 +75,14 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		throw new Error(`CompositeAgentGateway: no gateway owns agent "${agentId}"`);
 	}
 
-	/**
-	 * 可选能力转发：子网关未实现该方法（capabilities 未声明）时抛错，
-	 * 语义与后端自身显式 throw 一致，由 Coordinator 转 SESSION_COMMAND_FAILED。
-	 */
-	private callOptional<T>(
-		agentId: string,
-		capability: string,
-		invoke: (gateway: SessionAgentGateway) => T | undefined,
-	): T {
-		const gateway = this.owner(agentId);
-		const result = invoke(gateway);
-		if (result === undefined) {
-			throw new Error(
-				`CompositeAgentGateway: backend "${gateway.backend}" does not support ${capability}`,
-			);
+	/** 可选能力存在性检查（不抽方法，避免丢 this）；缺失时抛与旧行为一致的错误，由 Coordinator 转 SESSION_COMMAND_FAILED。 */
+	private requireCapability(
+		gateway: SessionAgentGateway,
+		method: "getCommands" | "exportHtml" | "editMessage" | "deleteMessage" | "setPermission",
+	): void {
+		if (typeof gateway[method] !== "function") {
+			throw new Error(`CompositeAgentGateway: backend "${gateway.backend}" does not support ${method}`);
 		}
-		return result;
 	}
 
 	list(): AgentTab[] {
@@ -141,7 +132,9 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 	}
 
 	async getCommands(agentId: string): Promise<unknown[]> {
-		return this.callOptional(agentId, "getCommands", (gateway) => gateway.getCommands?.(agentId));
+		const gateway = this.owner(agentId);
+		this.requireCapability(gateway, "getCommands");
+		return gateway.getCommands!(agentId);
 	}
 
 	async getAvailableModels(agentId: string): Promise<AvailableModel[]> {
@@ -149,17 +142,21 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 	}
 
 	async exportHtml(agentId: string): Promise<unknown> {
-		return this.callOptional(agentId, "exportHtml", (gateway) => gateway.exportHtml?.(agentId));
+		const gateway = this.owner(agentId);
+		this.requireCapability(gateway, "exportHtml");
+		return gateway.exportHtml!(agentId);
 	}
 
 	async editMessage(agentId: string, messageId: string, newText: string): Promise<void> {
-		return this.callOptional(agentId, "editMessage", (gateway) =>
-			gateway.editMessage?.(agentId, messageId, newText));
+		const gateway = this.owner(agentId);
+		this.requireCapability(gateway, "editMessage");
+		await gateway.editMessage?.(agentId, messageId, newText);
 	}
 
 	async deleteMessage(agentId: string, messageId: string): Promise<void> {
-		return this.callOptional(agentId, "deleteMessage", (gateway) =>
-			gateway.deleteMessage?.(agentId, messageId));
+		const gateway = this.owner(agentId);
+		this.requireCapability(gateway, "deleteMessage");
+		await gateway.deleteMessage?.(agentId, messageId);
 	}
 
 	/**
@@ -177,13 +174,14 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		},
 	): Promise<{ text: string; images?: ImageContent[] } | undefined> {
 		const gateway = this.resolveBackend("pi");
-		const mutate = gateway.mutatePersistedSessionMessage;
-		if (!mutate) {
+		// 必须对象调用：抽成 const mutate = gateway.mutatePersistedSessionMessage 会丢 this，
+		// AgentManager 内部读 this.toSessionHostPath 直接崩（「会话操作失败，请重试」）。
+		if (typeof gateway.mutatePersistedSessionMessage !== "function") {
 			throw new Error(
 				`CompositeAgentGateway: backend "${gateway.backend}" does not support persisted session message mutation`,
 			);
 		}
-		return mutate(sessionPath, messageId, operation, options);
+		return gateway.mutatePersistedSessionMessage(sessionPath, messageId, operation, options);
 	}
 
 	async prepareResendFromMessage(
@@ -202,8 +200,9 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 	}
 
 	async setPermission(agentId: string, preset: string): Promise<unknown> {
-		return this.callOptional(agentId, "setPermission", (gateway) =>
-			gateway.setPermission?.(agentId, preset));
+		const gateway = this.owner(agentId);
+		this.requireCapability(gateway, "setPermission");
+		return gateway.setPermission!(agentId, preset);
 	}
 
 	async publishRuntimeState(agentId: string): Promise<void> {

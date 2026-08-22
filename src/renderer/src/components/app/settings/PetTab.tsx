@@ -10,12 +10,14 @@ import {
   SelectValue,
 } from "../../ui-shadcn/select";
 import { SettingsSection } from "./SettingsStorageTab";
-import { SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
+import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { GRID_COLS, CELL_W, CELL_H, MODE_ROW, MODE_FRAMES } from "../../../pet/PetSpriteSheet";
 
 type PetTabProps = {
   draft: AppSettings;
   updateDraft: (patch: Partial<AppSettings>) => void;
+  /** 字段级脏检查（与其它 tab 同一 isDirty 回调），驱动标题旁黄点。 */
+  isDirty?: (field: keyof AppSettings) => boolean;
   /** 壳层「取消」递增；本 tab 借此重置预览模式等局部状态 */
   resetKey: number;
 };
@@ -29,6 +31,7 @@ type SelectOption = { value: string; label: string; disabled?: boolean };
  */
 export const PetTab = memo(function PetTab(props: PetTabProps) {
   const { draft, updateDraft } = props;
+  const isDirty = props.isDirty ?? (() => false);
   // 宠物包列表（进入本 tab 才拉取）
   const [petOptions, setPetOptions] = useState<SelectOption[]>([]);
   const [petList, setPetList] = useState<PetManifest[]>([]);
@@ -69,22 +72,25 @@ export const PetTab = memo(function PetTab(props: PetTabProps) {
           title={t("settings.pet.enable")}
           description={t("settings.pet.enableDesc")}
           checked={draft.petEnabled}
+          dirty={isDirty("petEnabled")}
           onChange={(value) => updateDraft({ petEnabled: value })}
         />
         <SettingSwitchRow
           title={t("settings.pet.alwaysOnTop")}
           description={t("settings.pet.alwaysOnTopDesc")}
           checked={draft.petAlwaysOnTop}
+          dirty={isDirty("petAlwaysOnTop")}
           onChange={(value) => updateDraft({ petAlwaysOnTop: value })}
         />
         <SettingSwitchRow
           title={t("settings.pet.patrol")}
           description={t("settings.pet.patrolDesc")}
           checked={draft.petPatrolEnabled ?? true}
+          dirty={isDirty("petPatrolEnabled")}
           onChange={(value) => updateDraft({ petPatrolEnabled: value })}
         />
         <SettingRow
-          title={<span>{t("settings.pet.patrolPause")}</span>}
+          title={<span className="inline-flex items-center gap-1.5"><DirtyMarker dirty={isDirty("petPatrolPauseMin")} label={t("settings.pet.patrolPause")} />{t("settings.pet.patrolPause")}</span>}
           description={t("settings.pet.patrolPauseDesc")}
         >
           <div className="flex w-full items-center gap-3">
@@ -104,7 +110,7 @@ export const PetTab = memo(function PetTab(props: PetTabProps) {
           </div>
         </SettingRow>
         <SettingRow
-          title={<span>{t("settings.pet.scale")}</span>}
+          title={<span className="inline-flex items-center gap-1.5"><DirtyMarker dirty={isDirty("petScale")} label={t("settings.pet.scale")} />{t("settings.pet.scale")}</span>}
           description={t("settings.pet.scaleDesc")}
         >
           <div className="flex w-full items-center gap-3">
@@ -128,7 +134,7 @@ export const PetTab = memo(function PetTab(props: PetTabProps) {
       <SettingBox>
         <SettingRow
           level={1}
-          title={<span>{t("settings.pet.choose")}</span>}
+          title={<span className="inline-flex items-center gap-1.5"><DirtyMarker dirty={isDirty("petId")} label={t("settings.pet.choose")} />{t("settings.pet.choose")}</span>}
           alignEnd={false}
         >
           <Select value={draft.petId} onValueChange={(value) => {

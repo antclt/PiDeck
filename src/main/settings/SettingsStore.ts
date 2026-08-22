@@ -11,6 +11,7 @@ import {
   parseImageGenWatermark,
 } from "../../shared/imageGenParams";
 import { createDefaultExternalEditorSettings, type AppSettings } from "../../shared/types";
+import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { getAppLogger } from "../logging/sharedLogger";
 
 /** 桌面端 settings.json（userData），与 pi agent settings 分离 */
@@ -88,6 +89,8 @@ const defaultSettings: AppSettings = {
   showNativeMenu: false,
   sendShortcut: "enter-send",
   theme: "system",
+  themeScheduleLightStart: "07:00",
+  themeScheduleDarkStart: "19:00",
   accent: "default",
 	themeSkin: "classic-green",
 	customThemeOverrides: {},
@@ -247,6 +250,13 @@ export class SettingsStore {
       );
       this.settings.imageGenOutputFormat =
         parseImageGenOutputFormat(this.settings.imageGenOutputFormat) ?? DEFAULT_IMAGE_GEN_OUTPUT_FORMAT;
+      this.settings.theme = this.normalizeThemeMode(this.settings.theme);
+      const schedule = normalizeThemeSchedule({
+        lightStart: this.settings.themeScheduleLightStart,
+        darkStart: this.settings.themeScheduleDarkStart,
+      });
+      this.settings.themeScheduleLightStart = schedule.lightStart;
+      this.settings.themeScheduleDarkStart = schedule.darkStart;
     } catch {
       this.settings = { ...defaultSettings };
     }
@@ -309,12 +319,35 @@ export class SettingsStore {
       this.settings.imageGenOutputFormat =
         parseImageGenOutputFormat(this.settings.imageGenOutputFormat) ?? DEFAULT_IMAGE_GEN_OUTPUT_FORMAT;
     }
+    if ("theme" in safePatch) {
+      this.settings.theme = this.normalizeThemeMode(this.settings.theme);
+    }
+    if (
+      "theme" in safePatch
+      || "themeScheduleLightStart" in safePatch
+      || "themeScheduleDarkStart" in safePatch
+    ) {
+      const schedule = normalizeThemeSchedule({
+        lightStart: this.settings.themeScheduleLightStart,
+        darkStart: this.settings.themeScheduleDarkStart,
+      });
+      this.settings.themeScheduleLightStart = schedule.lightStart;
+      this.settings.themeScheduleDarkStart = schedule.darkStart;
+    }
     await this.save();
     this.applyMenu();
     // 配置变更审计（统一在此留痕，覆盖 IPC 与 pet/extension/editors 等所有直写路径）：
     // 只记变更的 key 列表，不记值——避免 proxyUrl 等敏感内容落盘；值变更回查用 save 前的内存态
     void getAppLogger()?.info("settings", "Settings updated", { keys: Object.keys(safePatch) });
     return this.get();
+  }
+
+  /** 旧磁盘可能没有 schedule；非法值回落到 system，避免 data-theme 写成未知值。 */
+  private normalizeThemeMode(theme: AppSettings["theme"]): AppSettings["theme"] {
+    if (theme === "light" || theme === "dark" || theme === "system" || theme === "schedule") {
+      return theme;
+    }
+    return "system";
   }
 
   applyMenu() {
