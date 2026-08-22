@@ -8,6 +8,8 @@
 
 ### 🚀 新功能
 
+- **当前有效计划 Todo 扩展** — 内置 Todo 支持显式替换和恢复计划、按分支持久化，
+  旧任务只会在 Agent 显式清空时移除。
 - **模型规格按 listing + pi-ai 补全** — 拉取模型列表时，端点返回的
   `contextWindow` / `maxTokens` 直接写入；缺的按 `@earendil-works/pi-ai`
   内置目录匹配（与 DSH 同源）。匹配不到就留空，不再猜 128k/8k。

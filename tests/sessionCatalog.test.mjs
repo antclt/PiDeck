@@ -1148,3 +1148,60 @@ test("parentSessionPath survives reload: getRecord/listEntries rebuild keeps the
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// 回归：pi-subagents artifactDir="session"（默认）的产物转储曾被旧版扫描误注册成
+// active 条目，导致每个子代理在侧栏「嵌套 + 顶层平铺」重复显示。扫描端过滤后，
+// mergeScanned 必须按同一路径规则清洗这些存量条目并落盘，否则重启后仍会回流。
+test("mergeScanned drops legacy subagent-artifacts entries", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-artifacts-cleanup-"));
+  const filePath = join(dir, "sessions.json");
+  try {
+    const now = Date.now();
+    const dirtyEntry = {
+      id: "dirty-artifact",
+      projectId: "project-1",
+      title: "31f02534_reviewer_0_transcript",
+      source: "pi",
+      environment: "native",
+      status: "active",
+      originKey:
+        "pi:native:c:/users/x/.pi/agent/sessions/--c--repo--/subagent-artifacts/31f02534_reviewer_0_transcript.jsonl",
+      filePath:
+        "C:\\Users\\X\\.pi\\agent\\sessions\\--C--repo--\\subagent-artifacts\\31f02534_reviewer_0_transcript.jsonl",
+      createdAt: now,
+      updatedAt: now,
+    };
+    const goodEntry = {
+      id: "good-session",
+      projectId: "project-1",
+      title: "Real session",
+      source: "pi",
+      environment: "native",
+      status: "active",
+      originKey: "pi:native:c:/users/x/.pi/agent/sessions/--c--repo--/real.jsonl",
+      filePath: "C:\\Users\\X\\.pi\\agent\\sessions\\--C--repo--\\real.jsonl",
+      createdAt: now,
+      updatedAt: now,
+    };
+    await writeFile(filePath, JSON.stringify({ version: 1, sessions: [dirtyEntry, goodEntry] }), "utf8");
+    const catalog = new SessionCatalog(filePath);
+    await catalog.load();
+
+    // 正常扫描只包含真实会话：脏条目应被移除，正常条目保留
+    const records = await catalog.mergeScanned("project-1", [
+      summary({ id: goodEntry.filePath, filePath: goodEntry.filePath, name: "Real session" }),
+    ]);
+    const recordIds = records.map((record) => record.id);
+    assert.ok(!recordIds.includes("dirty-artifact"), "artifact entry must be dropped from records");
+    assert.ok(recordIds.includes("good-session"), "real session must stay");
+
+    // 清洗必须落盘：重启后不再回流
+    const reloaded = new SessionCatalog(filePath);
+    await reloaded.load();
+    assert.equal(reloaded.getRecord("dirty-artifact"), undefined, "cleanup must persist");
+    assert.ok(reloaded.getRecord("good-session"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -24,6 +24,7 @@ import {
 	canonicalizeSessionPath,
 	getImportedSessionSourceId,
 	getSessionEnvironment,
+	isInSubagentArtifactsDir,
 	looksLikePiSessionFileStem,
 } from "../../shared/sessionIdentity";
 
@@ -736,13 +737,31 @@ export class SessionCatalog {
 		// 显示首条消息标题，而不是永远 Untitled（不再依赖打开/重命名时才补名）。
 		const fetchedNames = await this.collectScannedTitles(summaries, context);
 		return this.enqueueMutation((entries) => {
+			let changed = false;
+
+			// 清洗存量脏数据：pi-subagents artifactDir="session"（默认）的产物转储
+			// 曾被旧版扫描误注册成 active 条目，导致每个子代理在侧栏「嵌套 + 顶层平铺」
+			// 重复显示。扫描端已排除这些文件，但 mergeScanned 只增改不删，存量条目会
+			// 永远留在 catalog 里；这里按同一路径规则移除并落盘（仅 pi 来源，导入会话不受影响）。
+			for (let index = entries.length - 1; index >= 0; index -= 1) {
+				const entry = entries[index]!;
+				if (entry.source !== "pi" || !entry.filePath) continue;
+				if (!isInSubagentArtifactsDir(entry.filePath)) continue;
+				entries.splice(index, 1);
+				changed = true;
+			}
+
+			// 防御性过滤：扫描端漏网时也不得再注册新的产物条目。
+			const acceptedSummaries = summaries.filter(
+				(summary) => summary.source !== "pi" || !isInSubagentArtifactsDir(summary.filePath),
+			);
+
 			const byOrigin = new Map(
 				entries
 					.filter((entry) => entry.originKey)
 					.map((entry) => [entry.originKey!, entry]),
 			);
 			const summaryById = new Map<string, SessionSummary>();
-			let changed = false;
 
 			// Restore model/thinking from the session file when the catalog lacks them.
 			// (Explicit user picks are already stored on the entry and are preserved.)
@@ -757,7 +776,7 @@ export class SessionCatalog {
 				}
 			}
 
-			for (const summary of summaries) {
+			for (const summary of acceptedSummaries) {
 				const originKey = buildSummaryOriginKey(summary, context);
 				const fetchedTitle = fetchedNames.get(originKey);
 				const importedSourceId = getImportedSessionSourceId(summary);

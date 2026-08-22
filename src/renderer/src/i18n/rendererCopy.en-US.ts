@@ -595,6 +595,7 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionTodo.done": "{done} done",
   "sessionTodo.active": "{active} in progress",
   "sessionTodo.pending": "{pending} pending",
+  "sessionTodo.dismiss": "Dismiss todo strip",
   // Composer-side goal strip (ported from dsh-web GoalBar): hidden when absent/complete
   "sessionGoal.aria": "Current goal",
   // Composer-side queue card (dsh QueueDock as a standalone card): collapsed header copy
@@ -1583,7 +1584,7 @@ export const enUS: Record<TranslationKey, string> = {
   // Extension manager: the "(filtered)" marker from pi list (object-form entry in settings, loads resources selectively)
   "config.extensionFiltered": "Filtered install",
   // Localized descriptions for the recommended extension list (ExtensionsTab renders via descriptionKey)
-  "config.extRecommended.piDeckTodo": "Built into PiDeck: a TODO list extension that adds and manages task items in conversations, tracks completion, and persists across sessions.",
+  "config.extRecommended.piDeckTodo": "Built into PiDeck: a current-plan TODO extension with explicit replace and restore actions, branch-scoped persistence, and task-progress tracking.",
   "config.extRecommended.piDeckPlanMode": "Built into PiDeck: a plan-mode extension that makes the AI produce an execution plan before replying, keeping complex tasks clear.",
   "config.extRecommended.piDeckGoalMode": "Built into PiDeck: a goal-mode extension that keeps working toward one objective until it is complete, blocked, or paused.",
   "config.extRecommended.piDeckAskQuestion": "Built into PiDeck: inserts carefully designed question cards into conversations to guide the AI toward more precise answers.",
@@ -2327,7 +2328,7 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.themeScheduleDarkStart": "Dark starts",
   "settings.accent": "Appearance theme",
   "settings.skin": "Skin",
-  "settings.skin.classicGreen": "Classic Green (default)",
+  "settings.skin.classicGreen": "Classic (default)",
   "settings.skin.graphite": "Graphite",
   "settings.skin.seaBlue": "Sea Blue",
   "settings.skin.warmBeige": "Warm Beige",
@@ -2338,7 +2339,13 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.backgroundImageChoose": "Choose image…",
   "settings.backgroundImageClear": "Clear",
   "settings.backgroundImageOpacity": "Background opacity",
-  "settings.accentDesc": "Controls surfaces, borders, dropdown highlights, selection states, and button tone. Neutral white is the default; color themes remain available.",
+  "settings.accentDesc": "An appearance theme controls the whole look — surfaces, borders, hover/selection states and the accent color — and adapts to light/dark automatically. Classic (neutral black/white/gray) is the factory default.",
+  "settings.skin.classicGreenDesc": "Neutral white/gray surfaces with a black/white/gray accent; factory default.",
+  "settings.skin.freshGreen": "Forest green",
+  "settings.skin.freshGreenDesc": "Paper-like sage surfaces with a low-saturation forest green accent; calm and easy on the eyes.",
+  "settings.skin.graphiteDesc": "Cool graphite surfaces with a neutral accent; quiet and understated.",
+  "settings.skin.seaBlueDesc": "Cool sea-blue surfaces with a blue accent; crisp and airy.",
+  "settings.skin.warmBeigeDesc": "Warm paper-beige surfaces with an amber accent; soft and easy on the eyes.",
   "settings.accent.default": "Neutral (default)",
   "settings.accent.green": "Fresh green",
   "settings.accent.blue": "Sky blue",

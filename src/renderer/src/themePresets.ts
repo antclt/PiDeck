@@ -9,6 +9,9 @@ import type { TranslationKey } from "./i18n";
  *    --color-accent/-strong/-soft 与 --color-logo-green* 系列；
  * 2. 在这里的 ACCENT_PRESETS 追加一条（id/label/色值预览）。
  * 两处同步后，设置页「主题色」下拉即自动出现新选项，无需改业务代码。
+ *
+ * 注：外观主题（SKIN_PRESETS）上线后，accent 不再作为独立下拉暴露在设置页，
+ * 仅保留为自定义主题（themeSkin="custom"）与旧版数据的兼容字段。
  */
 export type AccentPreset = {
 	id: AppAccentMode;
@@ -21,7 +24,8 @@ export const ACCENT_PRESETS: readonly AccentPreset[] = [
 	// 出厂默认使用黑白灰；绿色保留为显式可选主题，避免默认界面被高饱和色占据。
 	// preview 与 foundation.css 的默认 --color-accent 保持一致（浅色 zinc-900 近黑）。
 	{ id: "default", labelKey: "settings.accent.default", preview: "#18181b" },
-	{ id: "green", labelKey: "settings.accent.green", preview: "#238636" },
+	// 绿色预览与 foundation.css 的森系绿主色保持一致（#4a7854，参考 Proma 森息配色）。
+	{ id: "green", labelKey: "settings.accent.green", preview: "#4a7854" },
 	{ id: "blue", labelKey: "settings.accent.blue", preview: "#2563eb" },
 	{ id: "purple", labelKey: "settings.accent.purple", preview: "#7c3aed" },
 	{ id: "amber", labelKey: "settings.accent.amber", preview: "#b45309" },
@@ -31,11 +35,24 @@ export const ACCENT_PRESETS: readonly AccentPreset[] = [
 export const DEFAULT_ACCENT: AppAccentMode = "default";
 
 /**
- * 皮肤（换肤）预设：覆盖 foundation.css 的 bg/border 色板，与 accent（主题色）正交。
+ * 外观主题（皮肤）预设：每套主题 = 一套协调的完整外观，
+ * 覆盖表面/边框/文字/会话面板色板 + 自带推荐主色（accent），并自动适配浅色/暗色。
  *
- * 扩展方式：追加一条 SkinPreset（id/labelKey/preview/light/dark 两套变量覆盖），
- * 设置页「皮肤」下拉自动出现。变量键 = foundation.css 的 --color-* 去掉前缀；
- * classic-green 为出厂皮肤（空覆盖，直接使用 :root 默认中性白底 + 默认中性灰主题色）。
+ * 扩展方式：
+ * 1. 在 foundation.css 新增 `:root[data-appearance="<id>"]`（及
+ *    `:root[data-theme="dark"][data-appearance="<id>"]`）表面/文字/边框/会话面板色板块；
+ * 2. 在这里的 SKIN_PRESETS 追加一条（id/labelKey/descKey/accent/preview/previewSurfaces）。
+ * 两处同步后，设置页「外观主题」选择器自动出现新项。
+ *
+ * 渲染分工（保持单一事实源）：
+ * - 表面/边框/文字/会话面板色板：CSS `[data-appearance="<id>"]` 块（foundation.css），
+ *   本文件不再重复存一份色值（避免两份色板漂移）；
+ * - 主色：经 `data-accent` 联动——选择外观主题时设置页同时写入本次的 accent 字段，
+ *   复用既有 `:root[data-accent="…"]` 各主色块；
+ * - classic-green 为出厂默认：无表面覆盖块（= :root 当前中性浅色观感），
+ *   主色 = data-accent="default"（黑白灰），保持旧版出厂观感不变；
+ * - fresh-green 为全屏森系绿主题：纸感浅绿表面 + 鼠尾草绿主色（CSS 覆盖块），
+ *   主色 = data-accent="green"（#4a7854）。
  *
  * 自定义主题：themeSkin="custom" 时，App.tsx 将 customThemeOverrides 叠加应用；
  * 背景图走 backgroundImage / backgroundImageOpacity 设置项。
@@ -43,104 +60,98 @@ export const DEFAULT_ACCENT: AppAccentMode = "default";
 export type SkinPreset = {
 	id: AppSkinId;
 	labelKey: TranslationKey;
-	/** 预览色（设置页色块展示） */
+	/** 主题一句话描述（设置页卡片悬浮提示） */
+	descKey: TranslationKey;
+	/** 外观主题推荐主色（AppAccentMode），选择该主题时 UI 联动写入 settings.accent */
+	accent: AppAccentMode;
+	/** 预览主色（设置页主题卡片主色块） */
 	preview: string;
-	/** 浅色主题变量覆盖：--color-* 键（不含前缀）→ 值 */
-	light: Record<string, string>;
-	/** 暗色主题变量覆盖：--color-* 键（不含前缀）→ 值 */
-	dark: Record<string, string>;
+	/** 设置页主题卡片预览用的表面色块（浅色观感） */
+	previewSurfaces: {
+		background: string;
+		sidebar: string;
+		panel: string;
+		accent: string;
+		border: string;
+	};
 };
 
 export const SKIN_PRESETS: readonly SkinPreset[] = [
 	{
 		id: "classic-green",
 		labelKey: "settings.skin.classicGreen",
+		descKey: "settings.skin.classicGreenDesc",
+		// 出厂默认：中性黑白灰（表面 = :root 默认中性白灰，无 CSS 覆盖块；
+		// 主色 = data-accent="default" 的近黑/近白），与旧版出厂观感一致。
+		accent: "default",
 		preview: "#ffffff",
-		light: {},
-		dark: {},
+		previewSurfaces: {
+			background: "#ffffff",
+			sidebar: "#ffffff",
+			panel: "#fafafa",
+			accent: "#18181b",
+			border: "#dfdfdf",
+		},
+	},
+	{
+		id: "fresh-green",
+		labelKey: "settings.skin.freshGreen",
+		descKey: "settings.skin.freshGreenDesc",
+		// 全屏森系绿：纸感浅绿表面 + 鼠尾草绿主色（参考 Proma theme-forest-light），
+		// 主色 = data-accent="green"（#4a7854）。
+		accent: "green",
+		preview: "#f6f7f2",
+		previewSurfaces: {
+			background: "#f6f7f2",
+			sidebar: "#ecefe6",
+			panel: "#f6f7f2",
+			accent: "#4a7854",
+			border: "#c8cfbf",
+		},
 	},
 	{
 		id: "graphite",
 		labelKey: "settings.skin.graphite",
+		descKey: "settings.skin.graphiteDesc",
+		accent: "default",
 		preview: "#e2e2e2",
-		light: {
-			"bg-app": "#ececec",
-			"bg-sidebar": "#e3e3e3",
-			"bg-panel": "#f8f8f8",
-			"bg-muted": "#e9e9e9",
-			"bg-hover": "#e9e9e9",
-			"bg-active": "#dedede",
-			"border-subtle": "#d8d8d8",
-			"border-default": "#d0d0d0",
-			"border-strong": "#c7c7c7",
-		},
-		dark: {
-			"bg-app": "#1b1b1b",
-			"bg-sidebar": "#222222",
-			"bg-panel": "#262626",
-			"bg-muted": "#303030",
-			"bg-hover": "#303030",
-			"bg-active": "#383838",
-			"border-subtle": "#3a3a3a",
-			"border-default": "#444444",
-			"border-strong": "#4f4f4f",
+		previewSurfaces: {
+			background: "#ececec",
+			sidebar: "#e3e3e3",
+			panel: "#f8f8f8",
+			accent: "#18181b",
+			border: "#d0d0d0",
 		},
 	},
 	{
 		id: "sea-blue",
 		labelKey: "settings.skin.seaBlue",
+		descKey: "settings.skin.seaBlueDesc",
+		accent: "blue",
 		preview: "#eaf3fb",
-		light: {
-			"bg-app": "#eef5fb",
-			"bg-sidebar": "#e4eef7",
-			"bg-panel": "#ffffff",
-			"bg-muted": "#e8f0f7",
-			"bg-hover": "#e8f0f7",
-			"bg-active": "#dfeaf3",
-			"border-subtle": "#dbe7f0",
-			"border-default": "#d3e1ec",
-			"border-strong": "#c9d9e6",
-		},
-		dark: {
-			"bg-app": "#101a24",
-			"bg-sidebar": "#15212d",
-			"bg-panel": "#182634",
-			"bg-muted": "#21303f",
-			"bg-hover": "#21303f",
-			"bg-active": "#2a3a4b",
-			"border-subtle": "#2c3d4e",
-			"border-default": "#36495c",
-			"border-strong": "#415668",
+		previewSurfaces: {
+			background: "#eef5fb",
+			sidebar: "#e4eef7",
+			panel: "#ffffff",
+			accent: "#2563eb",
+			border: "#d3e1ec",
 		},
 	},
 	{
 		id: "warm-beige",
 		labelKey: "settings.skin.warmBeige",
+		descKey: "settings.skin.warmBeigeDesc",
+		accent: "amber",
 		preview: "#f6f1e8",
-		light: {
-			"bg-app": "#f7f2ea",
-			"bg-sidebar": "#f0e9dd",
-			"bg-panel": "#fffdf8",
-			"bg-muted": "#f0e9dd",
-			"bg-hover": "#f0e9dd",
-			"bg-active": "#e8dfd0",
-			"border-subtle": "#e6dccb",
-			"border-default": "#ded2bf",
-			"border-strong": "#d4c6b0",
-		},
-		dark: {
-			"bg-app": "#1e1a15",
-			"bg-sidebar": "#26211a",
-			"bg-panel": "#2b251d",
-			"bg-muted": "#352e24",
-			"bg-hover": "#352e24",
-			"bg-active": "#3e362b",
-			"border-subtle": "#453c2f",
-			"border-default": "#51473a",
-			"border-strong": "#5d5344",
+		previewSurfaces: {
+			background: "#f7f2ea",
+			sidebar: "#f0e9dd",
+			panel: "#fffdf8",
+			accent: "#b45309",
+			border: "#ded2bf",
 		},
 	},
 ];
 
-/** 出厂皮肤：classic-green（中性白底 + 黑白灰默认主题，= :root 默认） */
+/** 出厂外观主题：classic-green（中性黑白灰，与旧版出厂观感一致） */
 export const DEFAULT_SKIN: AppSkinId = "classic-green";

@@ -1,8 +1,9 @@
 import { memo } from "react";
 import type { AppSettings } from "../../../../../shared/types";
+import type { AppSkinId } from "../../../../../shared/types/settings";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
-import { ACCENT_PRESETS } from "../../../themePresets";
+import { SKIN_PRESETS } from "../../../themePresets";
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
 import {
@@ -14,7 +15,8 @@ import {
 } from "../../ui-shadcn/select";
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
-import { Minus, Plus } from "lucide-react";
+import { Check, Minus, Plus } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const ZOOM_FACTOR_MIN = 0.8;
 const ZOOM_FACTOR_MAX = 1.5;
@@ -44,11 +46,8 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
     { value: "light", label: t("settings.themeLight") },
     { value: "dark", label: t("settings.themeDark") },
   ];
-  // 主题色预设来自 themePresets.ts；新增自定义主题 = 扩展色板后这里自动出现
-  const accentOptions: SelectOption[] = ACCENT_PRESETS.map((preset) => ({
-    value: preset.id,
-    label: t(preset.labelKey),
-  }));
+  // 主题色预设来自 themePresets.ts；外观主题选择器中每套主题自带推荐主色，
+  // 保留 ACCENT_PRESETS 仅供自定义主题参考（无独立主色下拉）。
   const fontSizeOptions: SelectOption[] = [
     { value: "compact", label: t("settings.fontSizeCompact") },
     { value: "default", label: t("settings.fontSizeDefault") },
@@ -141,24 +140,20 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
           title={
             <>
               <span>{t("settings.accent")}</span>
-              <DirtyMarker dirty={isDirty("accent")} label={t("settings.accent")} />
+              <DirtyMarker dirty={isDirty("themeSkin") || isDirty("accent")} label={t("settings.accent")} />
             </>
           }
           description={t("settings.accentDesc")}
-          alignEnd={false}
+          stacked
         >
-          <Select value={draft.accent} onValueChange={(value) =>
-              updateDraft({ accent: value as AppSettings["accent"] })
-            }>
-            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {accentOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <AppearanceThemePicker
+            value={draft.themeSkin}
+            onPick={(id) => {
+              const preset = SKIN_PRESETS.find((p) => p.id === id);
+              // 外观主题自带推荐主色：选择主题时联动写入 accent，保证「一套主题 = 完整外观」
+              updateDraft(preset ? { themeSkin: id, accent: preset.accent } : { themeSkin: id });
+            }}
+          />
         </SettingRow>
         {/* 背景图片：pideck-bg:// 协议加载 userData/backgrounds/ 下文件 */}
         <SettingRow
@@ -477,5 +472,96 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
         />
       </SettingsSection>
     </>
+  );
+});
+
+/**
+ * 外观主题选择器：每个主题一张色板预览卡（背景/侧栏/面板/主色/边框五色块），
+ * 选中态用主色描边 + 勾选标记。选择即联动写入 themeSkin + 主题自带主色 accent
+ * （值更新在父级 AppearanceTab 的 onPick 中完成）。
+ * custom 主题没有内置色板（由 customThemeOverrides 驱动），仅当当前值为 custom 时
+ * 显示一个占位卡，避免选中状态丢失；自定义覆盖的高级编辑不在本组件范围。
+ */
+const AppearanceThemePicker = memo(function AppearanceThemePicker(props: {
+  value: AppSkinId;
+  onPick: (id: AppSkinId) => void;
+}) {
+  const { value, onPick } = props;
+  return (
+    <div
+      className="grid w-full grid-cols-2 gap-2 md:grid-cols-5"
+      role="radiogroup"
+      aria-label={t("settings.accent")}
+    >
+      {SKIN_PRESETS.map((preset) => {
+        const selected = preset.id === value;
+        const surface = preset.previewSurfaces;
+        return (
+          <button
+            key={preset.id}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            title={t(preset.descKey)}
+            onClick={() => onPick(preset.id)}
+            className={cn(
+              "group relative flex flex-col gap-1.5 rounded-lg border p-2 text-left transition-colors duration-fast",
+              selected
+                ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+                : "border-border-subtle bg-bg-panel hover:border-border-default",
+            )}
+          >
+            {/* 色板迷你预览：左=侧栏，右=应用区（边框线/主色/面板块） */}
+            <span
+              className="flex h-12 w-full overflow-hidden rounded-[6px] border border-border-subtle"
+              style={{ background: surface.background }}
+              aria-hidden="true"
+            >
+              <span
+                className="h-full w-[32%] border-r border-border-subtle"
+                style={{ background: surface.sidebar }}
+              />
+              <span className="flex-1 p-1.5">
+                <span
+                  className="mb-1 block h-1.5 w-3/4 rounded-sm"
+                  style={{ background: surface.border }}
+                />
+                <span
+                  className="block h-1.5 w-1/2 rounded-sm"
+                  style={{ background: surface.accent }}
+                />
+                <span
+                  className="mt-1 block h-1.5 w-2/3 rounded-sm"
+                  style={{
+                    background: surface.panel,
+                    border: `1px solid ${surface.border}`,
+                  }}
+                />
+              </span>
+            </span>
+            <span className="text-control leading-tight text-foreground">
+              {t(preset.labelKey)}
+            </span>
+            {selected && (
+              <Check
+                className="absolute right-1.5 top-1.5 size-3.5 text-[var(--color-accent)]"
+                strokeWidth={3}
+                aria-hidden="true"
+              />
+            )}
+          </button>
+        );
+      })}
+      {value === "custom" && (
+        <button
+          type="button"
+          role="radio"
+          aria-checked={true}
+          className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-default bg-bg-panel p-2 text-control leading-tight text-muted-foreground"
+        >
+          {t("settings.skin.custom")}
+        </button>
+      )}
+    </div>
   );
 });

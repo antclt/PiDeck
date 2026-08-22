@@ -100,8 +100,9 @@ test("composer area mounts the stats strip under the input card", () => {
   assert.match(area, /import \{ ComposerStatsLine \} from "\.\/ComposerStatsLine"/);
   assert.match(area, /statsLine=\{\s*<ComposerStatsLine state=\{composer\.runtime\?\.state\}(?: turnCount=\{props\.turnCount\})? \/>/);
   assert.match(area, /\{props\.statsLine\}/);
-  // 无指标时 footer 不垫底距；有数字才由 StatsLine 自带 pt/pb 占位。
-  assert.match(area, /className="composer[^\"]*px-0 pb-0"/);
+  // footer 固定保留 8px 底部留白；ComposerMeasuredExtras 会把它计入总高度，
+  // StatsLine 自身仍只在有数字时渲染。
+  assert.match(area, /className="composer[^\"]*px-0 pb-2"/);
   assert.match(stats, /if \(groups\.length === 0\) return null/);
   assert.match(stats, /truncate px-1 pb-0 pt-1/);
 });

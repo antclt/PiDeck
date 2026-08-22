@@ -9,9 +9,11 @@ import {
   useCallback,
 } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
-import { SKIN_PRESETS } from "./themePresets";
+import { applyAppearanceAttributes } from "./themeAppearance";
 // 壁纸模式已注入的 token 键（effect 重跑/清除设置时需要跨运行保留，避免漏清）
 let injectedWallpaperTokens = new Set<string>();
+// 自定义外观主题（customThemeOverrides）已注入的 token 键：切换主题时先清后注，防残留
+let injectedCustomTokens = new Set<string>();
 import {
   Code,
   Activity,
@@ -63,7 +65,7 @@ import {
   resolveChatSessionBootstrap,
 } from "./utils/chatSessionBootstrap";
 import { detectRendererPlatform } from "./lib/detectRendererPlatform";
-import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../../shared/themeSchedule";
+import { msUntilNextThemeBoundary } from "../../shared/themeSchedule";
 
 import { usePiUpdate } from "./hooks/usePiUpdate";
 import { useAppUpdateController } from "./hooks/useAppUpdateController";
@@ -970,17 +972,13 @@ export function App() {
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-color-scheme: dark)");
     const applyTheme = () => {
-      const resolvedTheme = resolveAppColorScheme({
-        theme: settings.theme,
-        themeScheduleLightStart: settings.themeScheduleLightStart,
-        themeScheduleDarkStart: settings.themeScheduleDarkStart,
-        systemPrefersDark: Boolean(media?.matches),
-      });
-      document.documentElement.dataset.theme = resolvedTheme;
-      // 主题色预设：data-accent 驱动 foundation.css 的 accent/logo 变量
-      document.documentElement.dataset.accent = settings.accent;
-      // 皮肤（换肤）：data-skin 记录当前皮肤 id（变量覆盖在下方 effect 注入）
-      document.documentElement.dataset.skin = settings.themeSkin;
+      // 明暗 / 外观主题 / 主色统一经 themeAppearance 应用（与设置弹窗实时预览共用实现）：
+      // data-theme(浅暗) + data-appearance(表面色板) + data-accent(主题自带主色)
+      applyAppearanceAttributes(
+        document.documentElement,
+        settings,
+        Boolean(media?.matches),
+      );
     };
     applyTheme();
     const cleanups: Array<() => void> = [];
@@ -1019,8 +1017,9 @@ export function App() {
     settings.themeSkin,
   ]);
 
-  // 皮肤 + 换肤背景图统一管理（原两个 effect 互相清除：皮肤 effect 清 token 时误清壁纸注入、
-  // 背景 effect 的 else 分支又误清皮肤 bg 键——合并后顺序固定：先皮肤后壁纸覆盖）
+  // 外观主题自定义覆盖 + 换肤背景图统一管理（原两个 effect 互相清除：
+  // 皮肤 effect 清 token 时误清壁纸注入、背景 effect 的 else 分支又误清皮肤 bg 键——
+  // 合并后顺序固定：先自定义覆盖，后壁纸覆盖。内置外观主题色板由 CSS data-appearance 承担。）
   useEffect(() => {
     const root = document.documentElement;
     const isDark = root.dataset.theme === "dark";
@@ -1041,20 +1040,17 @@ export function App() {
       "--color-chat-table-bg",
     ];
 
-    // 1. 皮肤变量：先清所有皮肤预设可能触及的键，再应用当前皮肤（light/dark 色板）+ 自定义覆盖
-    const skinKeys = new Set<string>();
-    for (const p of SKIN_PRESETS) {
-      Object.keys(p.light).forEach((k) => skinKeys.add(k));
-      Object.keys(p.dark).forEach((k) => skinKeys.add(k));
+    // 1. 自定义外观主题覆盖：customThemeOverrides 总是叠加在内置外观主题之上
+    //    （inline 样式优先于 stylesheet 的 [data-appearance] 块，语义=「自定义压过内置」）。
+    //    内置主题（classic-green/graphite/sea-blue/warm-beige）的表面色板由 CSS
+    //    [data-appearance] 块承担，这里不再注入内置皮肤变量，避免 inline 与样式表互相覆盖。
+    //    先清掉上次注入的 custom token，保证切换主题后无残留。
+    for (const k of injectedCustomTokens) root.style.removeProperty(`--color-${k}`);
+    injectedCustomTokens.clear();
+    for (const [k, v] of Object.entries(settings.customThemeOverrides ?? {})) {
+      root.style.setProperty(`--color-${k}`, v);
+      injectedCustomTokens.add(k);
     }
-    Object.keys(settings.customThemeOverrides ?? {}).forEach((k) => skinKeys.add(k));
-    for (const k of skinKeys) root.style.removeProperty(`--color-${k}`);
-    // 内置 skin 选项已合并进 accent 外观主题；只保留 custom override 的兼容读取，
-    // 避免用户同时面对两套互相叠加的背景/边框配置。
-    const merged = {
-      ...(settings.customThemeOverrides ?? {}),
-    };
-    for (const [k, v] of Object.entries(merged)) root.style.setProperty(`--color-${k}`, v);
 
     // 2. 换肤背景图：遮罩同色渐变（浅白/暗黑）+ 壁纸模式 token 半透明注入。
     //    存储语义=图片可见度（0=全遮，1=图全显）；滑块 80% → 遮罩 0.2 → 图 80% 透出。

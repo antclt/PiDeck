@@ -45,7 +45,10 @@ function loadStripHelpers() {
     "lucide-react": {},
     "../../i18n": { t: (key, params = {}) => key + ":" + JSON.stringify(params) },
     "./ComposerRuntimeIntegrations": {},
-    "./agentTodoParser": { parseAgentTodoItems: (lines) => [] },
+    "./agentTodoParser": {
+      parseAgentTodoItems: (lines) => [],
+      stripPiDeckTodoWidgetMetadata: (lines) => lines,
+    },
   });
 }
 
@@ -77,6 +80,9 @@ test("strip reads both todo widgets, respects dismissal, and hides when empty", 
   assert.match(source, /isWidgetDismissed\(dismissed, props\.sessionId, key, widgetLines\)/);
   assert.match(source, /loadDismissedWidgets/);
   assert.match(source, /parseAgentTodoItems\(lines\)/);
+  assert.match(source, /stripPiDeckTodoWidgetMetadata\(widget\.lines\)/);
+  // 原始行先参与 dismiss 指纹，随后才过滤私有元数据，保证 replace 同文本也会复活。
+  assert.match(source, /isWidgetDismissed\(dismissed, props\.sessionId, key, widgetLines\)[\s\S]{0,1200}stripPiDeckTodoWidgetMetadata\(widget\.lines\)/);
   // 无 todo 行整体不渲染（dsh TodoPanel 同款行为）
   assert.match(source, /if \(items\.length === 0\) return null/);
   // 折叠态本地 state
@@ -117,12 +123,13 @@ test("strip copy is present in both locale dictionaries", () => {
     assert.match(locale, /"sessionTodo\.done": "\{done\}/);
     assert.match(locale, /"sessionTodo\.active": "\{active\}/);
     assert.match(locale, /"sessionTodo\.pending": "\{pending\}/);
+    assert.match(locale, /"sessionTodo\.dismiss"/);
   }
 });
 
 // ── dismiss 记录（自 SessionWidgetChips 迁入，2026-08）──
 
-test("widget dismissal is permanent across restarts and revives only on new content", () => {
+test("widget dismissal is permanent across restarts and replacement plan identities revive identical visible content", () => {
   const { isWidgetDismissed, widgetDismissalId, widgetLinesSignature } = loadStripHelpers();
   const lines = ["── 待办 ──", "☐ #1 修复登录页样式"];
   // 用户手动关闭 → 记录当时的内容指纹
@@ -136,9 +143,61 @@ test("widget dismissal is permanent across restarts and revives only on new cont
     isWidgetDismissed(dismissed, "session-a", "pi-deck-todo", [...lines, "☐ #2 补测试"]),
     false,
   );
+  // 计划身份也在原始签名中：即使可见事项/编号完全一致，replace 后也必须复活。
+  const activePlanLines = ["[[pid:todo-plan:7]]", "☐ #1 相同文本"];
+  const planDismissed = {
+    [widgetDismissalId("session-a", "pi-deck-todo")]: widgetLinesSignature(activePlanLines),
+  };
+  assert.equal(isWidgetDismissed(planDismissed, "session-a", "pi-deck-todo", activePlanLines), true);
+  assert.equal(
+    isWidgetDismissed(
+      planDismissed,
+      "session-a",
+      "pi-deck-todo",
+      ["[[pid:todo-plan:8]]", "☐ #1 相同文本"],
+    ),
+    false,
+  );
+  // Branch-scoped metadata prevents branch-local plan #7 with identical text from sharing a dismissal.
+  const branchDismissed = {
+    [widgetDismissalId("session-a", "pi-deck-todo")]: widgetLinesSignature([
+      "[[pid:todo-plan:branch-a:7]]",
+      "☐ #1 相同文本",
+    ]),
+  };
+  assert.equal(
+    isWidgetDismissed(branchDismissed, "session-a", "pi-deck-todo", [
+      "[[pid:todo-plan:branch-b:7]]",
+      "☐ #1 相同文本",
+    ]),
+    false,
+  );
   // dismiss 按 session / widgetKey 隔离
   assert.equal(isWidgetDismissed(dismissed, "session-b", "pi-deck-todo", [...lines]), false);
   assert.equal(isWidgetDismissed(dismissed, "session-a", "pi-deck-plan-todos", [...lines]), false);
+});
+
+test("dismissing the unified strip records every visible raw widget fingerprint", () => {
+  const { dismissWidgetEntries, isWidgetDismissed } = loadStripHelpers();
+  const next = dismissWidgetEntries({}, "session-a", [
+    { key: "pi-deck-todo", lines: ["[[pid:todo-plan:branch-a:1]]", "☐ #1 当前计划"] },
+    { key: "pi-deck-plan-todos", lines: ["计划草案 1 步", "☐ 1. 审查"] },
+  ]);
+
+  assert.equal(
+    isWidgetDismissed(next, "session-a", "pi-deck-todo", [
+      "[[pid:todo-plan:branch-a:1]]",
+      "☐ #1 当前计划",
+    ]),
+    true,
+  );
+  assert.equal(
+    isWidgetDismissed(next, "session-a", "pi-deck-plan-todos", [
+      "计划草案 1 步",
+      "☐ 1. 审查",
+    ]),
+    true,
+  );
 });
 
 test("widgetLinesSignature is stable and order/content sensitive", () => {
@@ -167,6 +226,9 @@ test("chat-header widget chips are removed; header slot and mounts are gone", ()
   assert.doesNotMatch(header, /widgetChips/);
   // dismiss 工具迁入常驻条，保持同一 localStorage 指纹语义
   assert.match(strip, /DISMISSED_WIDGETS_KEY/);
+  assert.match(strip, /dismissWidgetEntries/);
+  assert.match(strip, /localStorage\.setItem/);
+  assert.match(strip, /sessionTodo\.dismiss/);
+  assert.match(strip, /<X size=\{14\}/);
   assert.match(strip, /isWidgetDismissed\(dismissed, props\.sessionId, key, widgetLines\)/);
-  assert.match(strip, /loadDismissedWidgets/);
 });
