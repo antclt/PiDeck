@@ -41,6 +41,7 @@ export type UseTipTapComposerEditorArgs = Pick<
 	| "validCommandNames"
 	| "validFilePaths"
 	| "validSessionRefs"
+	| "validQuotes"
 > & {
 	hostRef: RefObject<HTMLDivElement | null>;
 };
@@ -68,12 +69,13 @@ export function useTipTapComposerEditor(
 		validCommandNames,
 		validFilePaths,
 		validSessionRefs,
+		validQuotes,
 		hostRef,
 	} = args;
 
 	const whitelist = useMemo(
-		() => ({ validCommandNames, validFilePaths, validSessionRefs }),
-		[validCommandNames, validFilePaths, validSessionRefs],
+		() => ({ validCommandNames, validFilePaths, validSessionRefs, validQuotes }),
+		[validCommandNames, validFilePaths, validSessionRefs, validQuotes],
 	);
 	const whitelistRef = useRef(whitelist);
 	whitelistRef.current = whitelist;

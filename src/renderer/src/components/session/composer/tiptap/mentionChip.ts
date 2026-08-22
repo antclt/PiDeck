@@ -44,13 +44,13 @@ export const MentionChip = Node.create({
 					if (!(el instanceof HTMLElement)) return false;
 					const kind = el.getAttribute("data-type");
 					const raw = el.getAttribute("data-raw");
-					if (!raw || (kind !== "file" && kind !== "skill" && kind !== "session")) {
+					if (!raw || (kind !== "file" && kind !== "skill" && kind !== "session" && kind !== "quote")) {
 						return false;
 					}
 					return {
 						kind,
 						raw,
-						label: el.textContent?.replace(/^[@/&]/, "").trim() || raw.slice(1),
+						label: el.textContent?.replace(/^[@/&❝]/, "").trim() || raw.slice(1),
 					};
 				},
 			},
@@ -61,10 +61,20 @@ export const MentionChip = Node.create({
 		const kind = String(node.attrs.kind ?? "file");
 		const raw = String(node.attrs.raw ?? "");
 		const label = String(node.attrs.label ?? raw);
-		const icon = kind === "file" ? "@" : kind === "session" ? "&" : "/";
+		// quote chip 用引号字形而非 @/&/ 前缀：它引用的是对话内容，不是外部资源
+		const icon = kind === "file" ? "@" : kind === "session" ? "&" : kind === "quote" ? "❝" : "/";
+		// 单行省略内联在节点上：chip 是原子装饰节点，关键视觉不依赖样式表加载顺序
+		// （@layer(legacy) + Vite HMR 曾出现更新丢失导致折行，见 quoteChipStyle 契约测试）；
+		// 颜色仍走 timeline.css 的 .input-chip--quote（语义 token，暗色自适应）。
+		const extraAttrs = kind === "quote"
+			? {
+					style:
+						"display:inline-block;max-width:280px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;vertical-align:bottom;",
+			  }
+			: {};
 		return [
 			"span",
-			mergeAttributes(HTMLAttributes, {
+			mergeAttributes(HTMLAttributes, extraAttrs, {
 				class: `input-chip input-chip--${kind}`,
 				"data-type": kind,
 				"data-raw": raw,

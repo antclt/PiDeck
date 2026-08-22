@@ -1865,6 +1865,25 @@ body.ask-dialog-open .ask-question-card.pending {
   background: color-mix(in srgb, var(--color-brand-green) 24%, transparent);
 }
 
+/* 引用 chip（#q<id> 快照指针）：引用的是对话内容，与 markdown 引用块同语义
+   （accent 柔和底 + 中性文字），单行省略号——长划选不能把输入框撑成多行。
+   双类名提高特异性（压过同文件靠后的基类 display:inline/word-break:break-all），
+   ellipsis 需要 inline-block 才生效。 */
+.composer .input-chip.input-chip--quote,
+.user-turn-text .input-chip.input-chip--quote {
+  display: inline-block;
+  max-width: 280px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  line-height: 1.5;
+  word-break: normal;
+  background: color-mix(in srgb, var(--color-accent-soft) 55%, var(--color-bg-panel));
+  color: var(--color-text-secondary);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
 .composer-box:focus-within {
   /* 中性 focus：ring 走 foreground，不再品牌绿 */
   border-color: var(--color-text-primary);

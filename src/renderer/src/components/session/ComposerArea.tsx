@@ -297,6 +297,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 validCommandNames={composer.editor.validCommandNames}
                 validFilePaths={composer.editor.validFilePaths}
                 validSessionRefs={composer.editor.validSessionRefs}
+                validQuotes={composer.editor.validQuotes}
                 caretRef={composer.editor.caretRef}
                 placeholder={
                   composer.isStarting

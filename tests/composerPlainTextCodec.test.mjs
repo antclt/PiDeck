@@ -1,55 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
+// 共享 helper 自动解析 plainTextCodec → chips → quoteChip 依赖图
 function loadCodec() {
-	const chipsSource = readFileSync(
-		"src/renderer/src/components/session/composer/chips.ts",
-		"utf8",
-	);
-	const chipsOut = ts.transpileModule(chipsSource, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-		fileName: "chips.ts",
-	}).outputText;
-	const chipsModule = { exports: {} };
-	vm.runInNewContext(
-		chipsOut,
-		{ module: chipsModule, exports: chipsModule.exports, require: () => ({}), console, Set },
-		{ filename: "chips.ts" },
-	);
-
-	const codecSource = readFileSync(
+	return loadTsCommonJs(
 		"src/renderer/src/components/session/composer/tiptap/plainTextCodec.ts",
-		"utf8",
 	);
-	const codecOut = ts.transpileModule(codecSource, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-		fileName: "plainTextCodec.ts",
-	}).outputText;
-	const codecModule = { exports: {} };
-	vm.runInNewContext(
-		codecOut,
-		{
-			module: codecModule,
-			exports: codecModule.exports,
-			require: (id) => {
-				if (id === "../chips") return chipsModule.exports;
-				return {};
-			},
-			console,
-			Set,
-		},
-		{ filename: "plainTextCodec.ts" },
-	);
-	return codecModule.exports;
 }
 
 const { plainTextToComposerDoc, composerDocToPlainText } = loadCodec();

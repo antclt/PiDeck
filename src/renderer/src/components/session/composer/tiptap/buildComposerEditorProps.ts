@@ -21,7 +21,7 @@ export type ComposerEditorDomHandlers = {
 function readChipFromDom(chipEl: HTMLElement): ComposerChip | null {
 	const raw = chipEl.getAttribute("data-raw") ?? "";
 	const kind = chipEl.getAttribute("data-type");
-	if (kind !== "file" && kind !== "skill" && kind !== "session") return null;
+	if (kind !== "file" && kind !== "skill" && kind !== "session" && kind !== "quote") return null;
 	const label =
 		chipEl.querySelector(".input-chip__label")?.textContent?.trim() || raw.slice(1);
 	return { start: 0, end: raw.length, raw, kind, label };

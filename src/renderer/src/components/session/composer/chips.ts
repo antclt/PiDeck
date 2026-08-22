@@ -3,11 +3,14 @@
  * 纯函数模块：无 React / 无编辑器依赖；与 detectTrigger 规则对齐。
  */
 
+import { createQuoteTokenRe } from "./quoteChip";
+
 export type ComposerChip = {
 	start: number;
 	end: number;
 	raw: string;
-	kind: "file" | "skill" | "session";
+	// quote：会话内「引用追问」chip，raw 是 #q<id> 短 token，全文快照在 session 域 atom
+	kind: "file" | "skill" | "session" | "quote";
 	label: string;
 };
 
@@ -112,6 +115,8 @@ function isAbsoluteLocalPath(body: string): boolean {
  * - @path：无空格路径用 @C:\a\b.txt；含空格路径用 @"C:\Users\a b\c.txt"。
  * - &session：传入 validSessionRefs（含空 Set）时仅白名单命中才成 chip；
  *   未传入时（时间线展示）回退为 & 后首个单词。
+ * - #q<id> 引用 token：仅在传入 validQuotes（id → 展示 label）时解析；
+ *   未传入时保持裸文本（时间线展示的是发送期已展开的文本，不应再出现 token）。
  *
  * URL 中的路径段（如 https://example.com/foo）不会被识别为 chip。
  */
@@ -120,6 +125,7 @@ export function parseRichInputChips(
 	validCommandNames?: Set<string>,
 	validFilePaths?: Set<string>,
 	validSessionRefs?: Set<string>,
+	validQuotes?: Map<string, string>,
 ): ComposerChip[] {
 	const chips: ComposerChip[] = [];
 	const urlSpans = findUrlSpans(text);
@@ -221,6 +227,23 @@ export function parseRichInputChips(
 			chips.push({ start, end, raw, kind: "session", label: name });
 		}
 		ampStartRe.lastIndex = end;
+	}
+
+	// #q<id> 引用 token：白名单命中才成 chip；正则自带边界（前置非 \w/.#、后继非字母数字），
+	// 手工敲出的同形文本只有命中本会话真实快照才会被渲染为引用 chip。
+	if (validQuotes) {
+		const quoteRe = createQuoteTokenRe();
+		while ((m = quoteRe.exec(text)) !== null) {
+			const id = m[1] ?? "";
+			const label = validQuotes.get(id);
+			if (label === undefined) continue;
+			const start = m.index;
+			const end = start + m[0].length;
+			if (!overlapsUrl(start, end, urlSpans)) {
+				chips.push({ start, end, raw: m[0], kind: "quote", label });
+			}
+			quoteRe.lastIndex = end;
+		}
 	}
 
 	// 去重叠：保留先出现的，剔除被包含的

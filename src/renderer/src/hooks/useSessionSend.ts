@@ -15,10 +15,12 @@ import {
   sessionMessagesCacheAtom,
   sessionComposerModeByIdAtom,
   sessionDraftByIdAtom,
+  sessionQuotesByIdAtom,
   sessionRecordsAtom,
   sessionRuntimeByIdAtom,
   setSessionAttachmentsAtom,
   setSessionDraftAtom,
+  setSessionQuotesAtom,
   setSessionSendStateAtom,
   upsertSessionAtom,
 } from "../atoms";
@@ -28,6 +30,10 @@ import {
   deriveComposerAgentMode,
   expandPromptTemplates,
 } from "../composerBehavior";
+import {
+  expandQuoteTokens,
+  stripQuoteTokens,
+} from "../components/session/composer/quoteChip";
 import { t, translateI18nDescriptor } from "../i18n";
 
 export type EnqueuePromptSnapshot = {
@@ -125,6 +131,7 @@ export function useSessionSend(options: UseSessionSendOptions) {
   const store = useStore();
   const setDraft = useSetAtom(setSessionDraftAtom);
   const setAttachments = useSetAtom(setSessionAttachmentsAtom);
+  const setQuotes = useSetAtom(setSessionQuotesAtom);
   const setCacheMessages = useSetAtom(cacheSessionMessagesAtom);
   const setSendState = useSetAtom(setSessionSendStateAtom);
   const bindRuntime = useSetAtom(bindSessionRuntimeAtom);
@@ -135,6 +142,8 @@ export function useSessionSend(options: UseSessionSendOptions) {
     options.onDraftMutation?.(targetSessionId);
     setDraft({ sessionId: targetSessionId, value: "" });
     setAttachments({ sessionId: targetSessionId, value: [] });
+    // 草稿已清空，快照随之清理：避免会话内孤儿引用无限堆积
+    setQuotes({ sessionId: targetSessionId, value: {} });
   }
 
   function restoreRejectedSnapshot(
@@ -173,12 +182,22 @@ export function useSessionSend(options: UseSessionSendOptions) {
     const sourceSessionId = options.sessionId;
     if (sendingSessionIdsRef.current.has(sourceSessionId)) return;
 
-    const message = store.get(sessionDraftByIdAtom)[sourceSessionId] ?? "";
+    const rawDraft = store.get(sessionDraftByIdAtom)[sourceSessionId] ?? "";
     const attachmentSnapshot = store.get(sessionAttachmentsByIdAtom)[sourceSessionId] ?? [];
     const imageSnapshot = attachmentSnapshot.length
       ? [...attachmentSnapshot]
       : undefined;
-    if (!hasComposerSubmission(message, imageSnapshot)) return;
+    if (!hasComposerSubmission(rawDraft, imageSnapshot)) return;
+    // 引用展开唯一咽喉点（审计定稿）：后续乐观缓存/队列快照/历史记录全部消费展开后的文本，
+    // #q token 永不出现在时间线气泡或发给 pi 的内容里。
+    // 注意：展开后文本以 "> " 开头，因此「引用 + 斜杠命令」混写时按普通消息处理（有意为之）。
+    const quoteMap = store.get(sessionQuotesByIdAtom)[sourceSessionId];
+    const message = expandQuoteTokens(rawDraft, (id) => quoteMap?.[id]) ?? rawDraft;
+    // 只有引用没有任何正文/图片：引用是上下文不是消息，拦下并提示先写问题
+    if (!stripQuoteTokens(rawDraft).trim() && !imageSnapshot) {
+      options.showError?.(t("app.quoteNeedsQuestion"), 4000);
+      return;
+    }
 
     const resolveSendMode = (targetSessionId: string): ComposerAgentMode => {
       const record = store.get(sessionRecordsAtom)[targetSessionId];
@@ -346,10 +365,11 @@ export function useSessionSend(options: UseSessionSendOptions) {
         ? await options.prepareMessage(message)
         : message;
     } catch (error) {
-      restoreRejectedSnapshot(sessionId, message, imageSnapshot);
+      // 拒绝时回填原始草稿（含 token），保留 chip 形态供用户修改重发
+      restoreRejectedSnapshot(sessionId, rawDraft, imageSnapshot);
       const errorMessage = error instanceof Error ? error.message : String(error);
       setSendState({
-        sessionId,
+        sessionId: sourceSessionId,
         state: { status: "error", requestId, error: errorMessage },
       });
       options.showError?.(errorMessage, 4000);
@@ -365,7 +385,8 @@ export function useSessionSend(options: UseSessionSendOptions) {
     if (!expandedMessage.trim() && emptyTemplateName) {
       // 模板正文为空（UI 新建模板只写 frontmatter 未填正文）：拦截发送，
       // 给明确提示而不是把空白消息发到主进程被拒为“消息不能为空”。
-      restoreRejectedSnapshot(sessionId, message, imageSnapshot);
+      // 回填原始草稿（含引用 token），保留 chip 形态
+      restoreRejectedSnapshot(sessionId, rawDraft, imageSnapshot);
       rejectEmptyTemplate(emptyTemplateName);
       sendingSessionIdsRef.current.delete(sourceSessionId);
       return;
@@ -459,7 +480,8 @@ export function useSessionSend(options: UseSessionSendOptions) {
         });
         options.showUnknown?.();
       } else {
-        restoreRejectedSnapshot(sessionId, message, imageSnapshot);
+        // 拒绝时回填原始草稿（含 token）保留 chip 形态；unknown 快照仍存展开后文本（已实际投递的内容）
+        restoreRejectedSnapshot(sessionId, rawDraft, imageSnapshot);
         setSendState({
           sessionId,
           state: { status: "error", requestId, error: deliveryError },

@@ -13,6 +13,8 @@ export type ComposerChipWhitelist = {
 	validCommandNames?: Set<string>;
 	validFilePaths?: Set<string>;
 	validSessionRefs?: Set<string>;
+	/** 引用 chip 白名单：id → 展示 label（截断后的快照预览）。 */
+	validQuotes?: Map<string, string>;
 };
 
 function mentionNode(chip: ComposerChip): JSONContent {
@@ -67,6 +69,7 @@ export function plainTextToComposerDoc(
 		whitelist.validCommandNames,
 		whitelist.validFilePaths,
 		whitelist.validSessionRefs,
+		whitelist.validQuotes,
 	);
 	const lines = text.split("\n");
 	const content: JSONContent[] = [];

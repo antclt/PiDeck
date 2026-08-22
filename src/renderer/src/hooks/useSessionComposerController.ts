@@ -35,6 +35,7 @@ import {
   sessionRecordByIdAtomFamily,
   sessionRuntimeBySessionIdAtomFamily,
   sessionRuntimeUiBySessionIdAtomFamily,
+  sessionQuotesByIdAtom,
   sessionSendStateByIdAtom,
   sessionSummariesByProjectIdAtomFamily,
   setSessionAttachmentsAtom,
@@ -97,6 +98,7 @@ import {
   toSessionRuntimeTarget,
 } from "../utils/sessionCommands";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
+import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
 import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
 
 /**
@@ -672,6 +674,16 @@ export function useSessionComposerController(
     () => new Set(projectSessions.map((session) => session.name ?? session.filePath)),
     [projectSessions],
   );
+  // 引用 chip 白名单：id → 截断后的快照预览 label；无快照时返回 undefined，
+  // 解析器直接跳过引用分支（零开销快速路径）
+  const sessionQuotes = useAtomValue(sessionQuotesByIdAtom);
+  const validQuotes = useMemo(() => {
+    const map = sessionQuotes[sessionId];
+    if (!map) return undefined;
+    const entries = Object.entries(map);
+    if (entries.length === 0) return undefined;
+    return new Map(entries.map(([id, snippet]) => [id, truncateQuoteLabel(snippet.text)]));
+  }, [sessionQuotes, sessionId]);
   const suggestionItems = useMemo(
     () => suggestionsOpen
       ? buildSuggestionItems(draft, cursor, commands, flatFiles, projectSessions)
@@ -1455,6 +1467,7 @@ export function useSessionComposerController(
       validCommandNames,
       validFilePaths,
       validSessionRefs,
+      validQuotes,
       onChange,
       onCursorChange: setCursor,
       onKeyDown,

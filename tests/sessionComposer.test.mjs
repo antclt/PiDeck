@@ -39,6 +39,10 @@ function loadSendHelpers() {
   return compile("src/renderer/src/hooks/useSessionSend.ts", {
     react: { useRef: (value) => ({ current: value }) },
     jotai: { useAtomValue: () => undefined, useSetAtom: () => () => undefined },
+    "../components/session/composer/quoteChip": {
+      expandQuoteTokens: () => null,
+      stripQuoteTokens: (text) => text.trim(),
+    },
     "../i18n": { translateI18nDescriptor: (_descriptor, fallback) => fallback },
   });
 }
@@ -68,11 +72,13 @@ function createSendHarness(initial = {}) {
   const atoms = {
     sessionDraftByIdAtom: {},
     sessionAttachmentsByIdAtom: {},
+    sessionQuotesByIdAtom: {},
     sessionComposerModeByIdAtom: {},
     sessionRuntimeByIdAtom: {},
     sessionRecordsAtom: {},
     setSessionDraftAtom: {},
     setSessionAttachmentsAtom: {},
+    setSessionQuotesAtom: {},
     setSessionSendStateAtom: {},
     bindSessionRuntimeAtom: {},
     upsertSessionAtom: {},
@@ -80,6 +86,7 @@ function createSendHarness(initial = {}) {
   const state = new Map([
     [atoms.sessionDraftByIdAtom, { ...(initial.drafts ?? {}) }],
     [atoms.sessionAttachmentsByIdAtom, { ...(initial.attachments ?? {}) }],
+    [atoms.sessionQuotesByIdAtom, { ...(initial.quotes ?? {}) }],
     [atoms.sessionComposerModeByIdAtom, { ...(initial.modes ?? {}) }],
     [atoms.sessionRuntimeByIdAtom, { ...(initial.runtimes ?? {}) }],
     [atoms.sessionRecordsAtom, { ...(initial.records ?? {}) }],
@@ -103,6 +110,16 @@ function createSendHarness(initial = {}) {
       if (value.length) next[input.sessionId] = value;
       else delete next[input.sessionId];
       state.set(atoms.sessionAttachmentsByIdAtom, next);
+    } else if (atom === atoms.setSessionQuotesAtom) {
+      // 引用快照仓写入（发送清屏时随之清空）；与 draft 同构的函数式更新
+      const next = { ...state.get(atoms.sessionQuotesByIdAtom) };
+      const current = next[input.sessionId] ?? {};
+      const value = typeof input.value === "function"
+        ? input.value(current)
+        : input.value;
+      if (Object.keys(value).length > 0) next[input.sessionId] = value;
+      else delete next[input.sessionId];
+      state.set(atoms.sessionQuotesByIdAtom, next);
     } else if (atom === atoms.setSessionSendStateAtom) {
       const next = { ...state.get("sendStates") };
       if (input.state.status === "idle") delete next[input.sessionId];
@@ -123,6 +140,11 @@ function createSendHarness(initial = {}) {
       buildComposerPromptSubmission: (message) => ({ message }),
       deriveComposerAgentMode: () => "normal",
       applyDshGoalSendTransform: (submission) => submission,
+    },
+    // 引用展开桩：无引用场景展开返回 null（沿用原文）、剥离即 trim
+    "../components/session/composer/quoteChip": {
+      expandQuoteTokens: () => null,
+      stripQuoteTokens: (text) => text.trim(),
     },
     "../i18n": { translateI18nDescriptor: (_descriptor, fallback) => fallback },
   });
@@ -274,7 +296,9 @@ test("Composer identity is session-only and send snapshots address the captured 
 test("A/B switching cannot clear or restore the other Session draft", () => {
   const source = sendSource();
   assert.match(source, /clearSnapshot\(sessionId\)/);
-  assert.match(source, /restoreRejectedSnapshot\(sessionId, message, imageSnapshot\)/);
+  // 拒绝恢复用原始草稿（rawDraft，含引用 token）：保留 chip 形态供用户修改重发；
+  // unknown 快照仍存展开后文本（已实际投递的内容）
+  assert.match(source, /restoreRejectedSnapshot\(sessionId, rawDraft, imageSnapshot\)/);
   assert.match(source, /setDraft\(\{\s*sessionId: targetSessionId/);
   assert.match(source, /setAttachments\(\{\s*sessionId: targetSessionId/);
 });
@@ -463,4 +487,12 @@ test("image handling keeps GIFs lossless and rejects unsupported/oversized files
   );
   assert.match(source, /file\.type === "image\/gif"\) return fileToImageContent\(file\)/);
   assert.match(source, /COMPOSER_IMAGE_MAX_BYTES/);
+});
+
+test("quote tokens expand at the send entry before any snapshot is published", () => {
+  const source = sendSource();
+  // 审计定稿：读取草稿后立即展开（乐观缓存/队列/历史全部消费展开后文本），
+  // 且「只有引用没有正文」在发送前被拦截
+  assert.match(source, /expandQuoteTokens\(rawDraft, \(id\) => quoteMap\?\.\[id\]\)/);
+  assert.match(source, /!stripQuoteTokens\(rawDraft\)\.trim\(\) && !imageSnapshot/);
 });

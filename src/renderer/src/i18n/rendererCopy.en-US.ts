@@ -184,6 +184,8 @@ export const enUS: Record<TranslationKey, string> = {
   "app.compactDone": "Context compacted",
   "app.compactFailed": "Compaction failed",
   "app.attachFile": "Attach file reference",
+  "app.quoteAddToPrompt": "Quote and ask",
+  "app.quoteNeedsQuestion": "Type your question before sending the quote",
   "app.startupWindowModeSaved": "Startup window setting saved; applies on next launch",
   "app.singleInstanceSaved": "Single-instance setting saved; restart to apply",
   "app.electronSandboxSaved": "Chromium sandbox setting saved; restart to apply",

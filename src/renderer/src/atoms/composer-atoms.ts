@@ -2,10 +2,14 @@ import { atom } from "jotai";
 import type { ComposerAgentMode, ImageContent } from "../../../shared/types";
 import type { ModelPending } from "../utils/modelPendingDisplay";
 import type { ThinkingLevelPending } from "../utils/thinkingDisplay";
+import type { QuoteSnippet } from "../components/session/composer/quoteChip";
 import { currentSessionIdAtom } from "./session-atoms";
 
 export type SessionComposerMode = ComposerAgentMode;
 export type { ModelPending };
+
+/** 会话内「引用追问」快照仓：id → 划选文本快照（chip 是指针，全文在这里）。 */
+export type SessionQuoteMap = Record<string, QuoteSnippet>;
 
 export type SessionSendState = {
   status: "idle" | "activating" | "sending" | "error" | "unknown";
@@ -20,6 +24,7 @@ export type SessionSendState = {
 
 export const sessionDraftByIdAtom = atom<Record<string, string>>({});
 export const sessionAttachmentsByIdAtom = atom<Record<string, ImageContent[]>>({});
+export const sessionQuotesByIdAtom = atom<Record<string, SessionQuoteMap>>({});
 export const sessionComposerModeByIdAtom = atom<Record<string, SessionComposerMode>>({});
 export const sessionSendStateByIdAtom = atom<Record<string, SessionSendState>>({});
 
@@ -115,6 +120,25 @@ export const setSessionAttachmentsAtom = atom(
     if (nextValue.length) next[input.sessionId] = nextValue;
     else delete next[input.sessionId];
     set(sessionAttachmentsByIdAtom, next);
+  },
+);
+
+/** 写入/清理会话引用快照仓；与草稿同生命周期（运行时态，不落盘）。 */
+export const setSessionQuotesAtom = atom(
+  null,
+  (get, set, input: {
+    sessionId: string;
+    value: SessionQuoteMap | ((current: SessionQuoteMap) => SessionQuoteMap);
+  }) => {
+    const quotes = get(sessionQuotesByIdAtom);
+    const current = quotes[input.sessionId] ?? {};
+    const nextValue = typeof input.value === "function"
+      ? input.value(current)
+      : input.value;
+    const next = { ...quotes };
+    if (Object.keys(nextValue).length > 0) next[input.sessionId] = nextValue;
+    else delete next[input.sessionId];
+    set(sessionQuotesByIdAtom, next);
   },
 );
 

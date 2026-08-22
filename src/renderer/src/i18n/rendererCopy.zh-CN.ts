@@ -184,6 +184,8 @@ export const zhCN = {
   "app.compactDone": "上下文压缩完成",
   "app.compactFailed": "压缩失败",
   "app.attachFile": "加入对话引用",
+  "app.quoteAddToPrompt": "引用并提问",
+  "app.quoteNeedsQuestion": "请先输入你想问的问题，再发送引用内容",
   "app.startupWindowModeSaved": "启动窗口设置已保存，下次启动生效",
   "app.singleInstanceSaved": "单实例设置已保存，重启后生效",
   "app.electronSandboxSaved": "Chromium 沙箱设置已保存，重启后生效",

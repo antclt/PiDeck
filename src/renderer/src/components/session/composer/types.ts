@@ -43,4 +43,6 @@ export type ComposerEditorProps = {
 	validCommandNames?: Set<string>;
 	validFilePaths?: Set<string>;
 	validSessionRefs?: Set<string>;
+	/** 引用 chip 白名单：id → 截断快照预览；undefined = 本会话无快照（解析器跳过引用分支） */
+	validQuotes?: Map<string, string>;
 };

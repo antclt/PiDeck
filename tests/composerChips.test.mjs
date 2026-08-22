@@ -1,34 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /** vm 跨 realm 时 deepEqual 会因原型不同误报，统一 JSON 比较。 */
 function assertJsonEqual(actual, expected) {
 	assert.equal(JSON.stringify(actual), JSON.stringify(expected));
 }
 
+// chips.ts 现在依赖 ./quoteChip，改用共享 helper 加载完整依赖图
 function loadChips() {
-	const source = readFileSync(
-		"src/renderer/src/components/session/composer/chips.ts",
-		"utf8",
-	);
-	const output = ts.transpileModule(source, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-			esModuleInterop: true,
-		},
-		fileName: "chips.ts",
-	}).outputText;
-	const module = { exports: {} };
-	vm.runInNewContext(
-		output,
-		{ module, exports: module.exports, require: () => ({}), console, Set },
-		{ filename: "chips.ts" },
-	);
-	return module.exports;
+	return loadTsCommonJs("src/renderer/src/components/session/composer/chips.ts");
 }
 
 const {
@@ -205,4 +186,33 @@ test("extractPastedPath rejects slash commands that only look like POSIX paths",
 	// 真 POSIX 路径仍要认：多段路径，或空格出现在第二段之后。
 	assert.equal(extractPastedPath("/Users/me/a.txt"), "/Users/me/a.txt");
 	assert.equal(extractPastedPath("/Users/me/My Documents/a.txt"), "/Users/me/My Documents/a.txt");
+});
+
+test("quote token becomes a chip only when whitelisted, with snapshot label", () => {
+	const text = "看 #qabcdef12 为什么不生效";
+	const quotes = new Map([["qabcdef12", "这里的重试逻辑没有生…"]]);
+
+	// 白名单命中：成 chip，label 来自快照预览
+	const chips = parseRichInputChips(text, undefined, undefined, undefined, quotes);
+	assert.equal(chips.length, 1);
+	assertJsonEqual(chips[0], {
+		start: 2,
+		end: 12,
+		raw: "#qabcdef12",
+		kind: "quote",
+		label: "这里的重试逻辑没有生…",
+	});
+
+	// 未传白名单（时间线展示）：保持裸文本
+	assertJsonEqual(parseRichInputChips(text), []);
+
+	// 白名单未命中（手工敲出的同形 token）：不成 chip
+	const miss = parseRichInputChips(
+		text,
+		undefined,
+		undefined,
+		undefined,
+		new Map([["qffffffff", "别的引用"]]),
+	);
+	assertJsonEqual(miss, []);
 });
