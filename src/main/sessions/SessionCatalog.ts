@@ -82,6 +82,10 @@ export type SessionFilePathResolver = (
 	environment: SessionEnvironment,
 ) => string;
 
+/** 占位标题回填：给定会话文件路径返回可从头部推断的标题（无则 undefined）。
+ *  装配层注入（实现为 SessionScanner.inferSessionNameFromFile，见 main/index.ts）。 */
+export type SessionTitleFetcher = (filePath: string) => Promise<string | undefined>;
+
 /** 扫描未读正文时没有 session_info。pi JSONL 文件名是时间戳，不能当标题，否则侧栏全是日期。 */
 function scannedFileStemTitle(filePath: string): string {
 	const normalized = filePath.replace(/\\/g, "/");
@@ -95,6 +99,14 @@ function scannedFileStemTitle(filePath: string): string {
 function catalogDisplayTitle(title: string | undefined): string | undefined {
 	if (!title) return undefined;
 	return looksLikePiSessionFileStem(title) ? undefined : title;
+}
+
+/** 占位标题判定：catalog 无真实名称时落成 Untitled（pi 时间戳 stem 加载时也被清成它），
+ *  只有这类标题才值得读头部补名，否则每次扫描都会重复读盘。 */
+function isPlaceholderCatalogTitle(title: string | undefined): boolean {
+	if (!title) return true;
+	if (looksLikePiSessionFileStem(title)) return true;
+	return /^untitled(?: session)?$/i.test(title);
 }
 
 function cloneEntry(entry: SessionCatalogEntry): SessionCatalogEntry {
@@ -164,6 +176,7 @@ export class SessionCatalog {
 		private readonly filePath: string,
 		identityContext: SessionCatalogContext = {},
 		private readonly resolveFilePath?: SessionFilePathResolver,
+		private readonly fetchTitle?: SessionTitleFetcher,
 	) {
 		this.identityContext = { ...identityContext };
 	}
@@ -718,6 +731,10 @@ export class SessionCatalog {
 		context: SessionCatalogContext = this.identityContext,
 	): Promise<SessionRecord[]> {
 		this.assertLoaded();
+		// 轻量列表扫描的 summary 不带 name（listPathSummary 只 stat，见 SessionScanner）；
+		// 对标题将落成占位符的文件做有界读头部补名，让未打开过的 pi 会话也能在侧栏
+		// 显示首条消息标题，而不是永远 Untitled（不再依赖打开/重命名时才补名）。
+		const fetchedNames = await this.collectScannedTitles(summaries, context);
 		return this.enqueueMutation((entries) => {
 			const byOrigin = new Map(
 				entries
@@ -742,6 +759,7 @@ export class SessionCatalog {
 
 			for (const summary of summaries) {
 				const originKey = buildSummaryOriginKey(summary, context);
+				const fetchedTitle = fetchedNames.get(originKey);
 				const importedSourceId = getImportedSessionSourceId(summary);
 				let entry = byOrigin.get(originKey);
 				if (!entry) {
@@ -751,7 +769,10 @@ export class SessionCatalog {
 						projectId,
 						originKey,
 						// listPathSummary 没有 name；readSummary 若仍带回时间戳文件名，也不能当标题。
-						title: catalogDisplayTitle(summary.name) || scannedFileStemTitle(summary.filePath),
+						// summary.name（全量解析）优先，头部补名次之，最后才回退文件名 stem。
+						title: catalogDisplayTitle(summary.name)
+							|| catalogDisplayTitle(fetchedTitle)
+							|| scannedFileStemTitle(summary.filePath),
 						source: summary.source ?? "pi",
 						environment: getSessionEnvironment(summary),
 						filePath: summary.filePath,
@@ -770,6 +791,7 @@ export class SessionCatalog {
 					// 旧 catalog 可能已经保存了时间戳文件名；不能在清洗失败时用 entry.title 回退，
 					// 否则每次扫描都会把这个错误标题原样保留下来，重启后仍显示时间戳。
 					const nextTitle = catalogDisplayTitle(summary.name)
+						|| catalogDisplayTitle(fetchedTitle)
 						|| catalogDisplayTitle(entry.title)
 						|| scannedFileStemTitle(summary.filePath);
 					if (
@@ -832,6 +854,48 @@ export class SessionCatalog {
 				.map((entry) => this.recordFromEntry(entry)),
 			...records,
 		].sort((left, right) => right.updatedAt - left.updatedAt));
+	}
+
+	/** 只对「该会话当前标题是占位符」的文件读头部补名：已有真实标题的条目不读盘。 */
+	private async collectScannedTitles(
+		summaries: SessionSummary[],
+		context: SessionCatalogContext,
+	): Promise<Map<string, string>> {
+		const names = new Map<string, string>();
+		if (!this.fetchTitle) return names;
+		const byOrigin = new Map(
+			this.entries.filter((entry) => entry.originKey).map((entry) => [entry.originKey!, entry]),
+		);
+		const wanted: Array<{ originKey: string; filePath: string }> = [];
+		for (const summary of summaries) {
+			const originKey = buildSummaryOriginKey(summary, context);
+			// summary 自带真实名称（readSummary 全量路径）或条目已有真实标题时无需补名。
+			if (catalogDisplayTitle(summary.name)) continue;
+			const existing = byOrigin.get(originKey);
+			if (existing && !isPlaceholderCatalogTitle(existing.title)) continue;
+			wanted.push({ originKey, filePath: summary.filePath });
+		}
+		if (wanted.length === 0) return names;
+		// 有界并行读头部；限制并发避免 WSL 环境一次拉起过多 wsl.exe。
+		// 单个失败降级为无标题，不影响扫描结果。
+		const settled: Array<readonly [string, string | undefined]> = [];
+		const CONCURRENCY = 8;
+		let cursor = 0;
+		const workers = Array.from({ length: Math.min(CONCURRENCY, wanted.length) }, async () => {
+			while (cursor < wanted.length) {
+				const item = wanted[cursor++];
+				settled.push(
+					await this.fetchTitle!(item.filePath)
+						.then((title) => [item.originKey, title] as const)
+						.catch(() => [item.originKey, undefined] as const),
+				);
+			}
+		});
+		await Promise.all(workers);
+		for (const [originKey, title] of settled) {
+			if (title) names.set(originKey, title);
+		}
+		return names;
 	}
 
 	private recordFromEntry(

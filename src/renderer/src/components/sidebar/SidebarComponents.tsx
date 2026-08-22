@@ -435,25 +435,30 @@ export function ProjectContextMenu(props: {
 }) {
 	const isWorktreeEnabled = props.menu.project.worktreeEnabled ?? false;
 	return (
-		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
+		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose} className="min-w-56">
+			{/* 打开/定位：使用频率最高的入口置顶（定位、换编辑器、复制路径） */}
+			<DropdownMenuLabel>{t("menu.group.open")}</DropdownMenuLabel>
 			<DropdownMenuItem onSelect={props.onRevealProject}>{t("menu.revealProject")}</DropdownMenuItem>
 			<DropdownMenuItem onSelect={props.onOpenWithEditor}>{t("app.openWithEditor")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onImportCodexSessions}>{t("menu.importCodex")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onImportClaudeSessions}>{t("menu.importClaude")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onImportOpenCodeSessions}>{t("menu.importOpenCode")}</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onCopyProjectPath}>{t("menu.copyProjectPath")}</DropdownMenuItem>
 			<DropdownMenuSeparator />
-			<DropdownMenuItem onSelect={props.onManageProjectResources}>{t("menu.projectResources")}</DropdownMenuItem>
+			{/* 项目管理：会话/资源/过滤/工作区/刷新集中一组，删除式操作不混入 */}
+			<DropdownMenuLabel>{t("menu.group.manage")}</DropdownMenuLabel>
 			<DropdownMenuItem onSelect={props.onManageSessions}>{t("menu.manageSessions")}</DropdownMenuItem>
-			<DropdownMenuSeparator />
+			<DropdownMenuItem onSelect={props.onManageProjectResources}>{t("menu.projectResources")}</DropdownMenuItem>
 			<DropdownMenuItem onSelect={props.onFilterSessions}>{t("menu.filterSessions")}</DropdownMenuItem>
-			<DropdownMenuSeparator />
+			<DropdownMenuItem onSelect={props.onRefreshProject}>{t("app.projectRefresh")}</DropdownMenuItem>
 			<DropdownMenuItem onSelect={props.onToggleWorktree}>
 				{isWorktreeEnabled ? t("menu.disableWorktree") : t("menu.enableWorktree")}
 			</DropdownMenuItem>
 			<DropdownMenuSeparator />
-			<DropdownMenuItem onSelect={props.onCopyProjectPath}>{t("menu.copyProjectPath")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onRefreshProject}>{t("app.projectRefresh")}</DropdownMenuItem>
+			{/* 导入：外部会话迁移入口（Codex/Claude/OpenCode） */}
+			<DropdownMenuLabel>{t("menu.group.import")}</DropdownMenuLabel>
+			<DropdownMenuItem onSelect={props.onImportCodexSessions}>{t("menu.importCodex")}</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onImportClaudeSessions}>{t("menu.importClaude")}</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onImportOpenCodeSessions}>{t("menu.importOpenCode")}</DropdownMenuItem>
 			<DropdownMenuSeparator />
+			{/* 危险区：删除固定在最底部，与普通操作隔开防误触 */}
 			<DropdownMenuItem variant="destructive" onSelect={props.onRemoveProject}>{t("menu.removeProject")}</DropdownMenuItem>
 		</MenuShell>
 	);

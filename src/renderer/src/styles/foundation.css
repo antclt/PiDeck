@@ -2445,9 +2445,13 @@ select:focus-visible {
 
 /* 下拉菜单项级联入场：容器 200ms 淡入的同时，菜单项按序轻微浮起（每项 +30ms，
    上限 180ms，避免长菜单让底部项过晚可见）；动画只在挂载时播放一次，
-   键盘导航移动焦点不会重播，不影响快捷键操作。 */
+   键盘导航移动焦点不会重播，不影响快捷键操作。
+   fill-mode 用 backwards 而非 both：both 会把 to{opacity:1} 永久钉在元素上，
+   动画优先级高于普通声明，压掉 disabled 项的 data-[disabled]:opacity-50 置灰（
+   表现为右键菜单里的禁用项不显示半透明）；backwards 结束后元素恢复正常声明，
+   由于 to 状态与元素默认值（opacity 1 / transform none）一致，视觉无差异。 */
 .dropdown-stagger > * {
-  animation: dropdown-stagger-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: dropdown-stagger-in 180ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 .dropdown-stagger > *:nth-child(1) { animation-delay: 30ms; }
 .dropdown-stagger > *:nth-child(2) { animation-delay: 60ms; }

@@ -181,6 +181,7 @@ export const ipcChannels = {
 	settingsTestPiProxy: "settings:test-pi-proxy",
 	settingsApplyWindow: "settings:apply-window",
 	skillsList: "skills:list",
+	skillsReadContent: "skills:read-content",
 	skillsCreate: "skills:create",
 	skillsToggle: "skills:toggle",
 	skillsDelete: "skills:delete",

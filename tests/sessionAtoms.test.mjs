@@ -920,6 +920,46 @@ test("saveSessionScrollAnchorAtom: identical content skips write (stable referen
   assert.equal(store.get(atoms.sessionScrollAnchorByIdAtom)["session-a"].offsetTop, 300);
 });
 
+test("opened tabs survive cache LRU eviction (switch-back must not re-read disk)", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  // 生图会话：无 runtime 事件持续 touch，切走期间最容易被挤出 8 槽；
+  // 但它的 Tab 仍打开着——被挤出后切回会重读盘并闪「正在加载历史」骨架。
+  store.set(atoms.sessionTabIdsAtom, ["imagegen-session"]);
+  store.set(atoms.cacheSessionMessagesAtom, {
+    sessionId: "imagegen-session",
+    messages: [
+      { id: "img1", role: "assistant", text: "", meta: { imageGen: { status: "complete", prompt: "猫" } } },
+    ],
+    source: "runtime",
+  });
+  // 连续写入 8 个其它会话（模拟分屏常驻 + 预览 + 流式写入），均不在 Tab
+  for (let i = 0; i < 8; i += 1) {
+    const id = `other-${i}`;
+    store.set(atoms.cacheSessionMessagesAtom, {
+      sessionId: id,
+      messages: [{ id: `m${i}`, role: "user", text: String(i) }],
+      source: "runtime",
+    });
+    assert.ok(store.get(atoms.sessionMessagesCacheAtom)[id], `other-${i} cached`);
+  }
+  // 打开着 Tab 的会话不应被挤出：切回时缓存条目仍在，不重新读盘、不闪骨架
+  assert.ok(
+    store.get(atoms.sessionMessagesCacheAtom)["imagegen-session"],
+    "session with an open tab must survive LRU eviction",
+  );
+  // 关闭 Tab 后不再受保护：按普通 LRU 顺序继续写，占满 8 槽后即可被淘汰（缓存可回收）
+  store.set(atoms.sessionTabIdsAtom, []);
+  for (let i = 0; i < 8; i += 1) {
+    store.set(atoms.cacheSessionMessagesAtom, {
+      sessionId: `new-${i}`,
+      messages: [{ id: `n${i}`, role: "user", text: `n${i}` }],
+      source: "runtime",
+    });
+  }
+  assert.ok(!store.get(atoms.sessionMessagesCacheAtom)["imagegen-session"], "closed tab is evictable once cache refills");
+});
+
 test("clearSessionHistoryAtom drops browsed history on bottom-settle, keeps runtime window", () => {
   const atoms = loadAtoms();
   const store = createStore();

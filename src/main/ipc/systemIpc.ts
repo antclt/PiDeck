@@ -137,6 +137,10 @@ export type SystemIpcDeps = {
 	configureAgentManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
 	/** Session command IPC error converter */
 	sessionCommandIpcError?: (error: import("../../shared/types").SessionCommandError) => Error;
+	/** 读取技能 SKILL.md 正文（装配层注入：路径白名单校验由 readSkillContent 完成）。 */
+	readSkillContent?: (
+		skillPath: string,
+	) => Promise<import("../../shared/types").SkillContentResult>;
 	/** Extension manager for pi update */
 	extensionManager?: {
 		checkPiUpdate: () => Promise<import("../../shared/types").PiUpdateCheckResult>;
@@ -194,6 +198,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		configureXuePromptManagerWsl,
 		configureAgentManagerWsl,
 		sessionCommandIpcError,
+		readSkillContent,
 		extensionManager,
 		webServiceManager,
 		terminalManager,
@@ -917,6 +922,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	// ── Skills CRUD ──────────────────────────────────────────────────
 
 	ipcMain.handle(ipcChannels.skillsList, () => skillManager.list());
+	ipcMain.handle(ipcChannels.skillsReadContent, async (_event, skillPath: string) => {
+		if (!readSkillContent) throw new Error("readSkillContent not available");
+		// 渲染层传入的路径不可信：白名单校验（全局/项目技能位置）在 readSkillContent 内完成。
+		return readSkillContent(skillPath);
+	});
 	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput) => {
 		const result = await skillManager.create(input);
 		void appLogger.info("skill", "Skill created", { name: input.name, locationId: input.locationId });

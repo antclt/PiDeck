@@ -84,6 +84,8 @@ export type SessionViewProps = {
   // ── Composer ──
   enqueueSessionPrompt: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
   gitInfo?: GitBranchInfo;
+  /** 底栏分支下拉的切换回调（透传给 ComposerArea，owner 为 App 级 switchBranch） */
+  onSwitchBranch?: (branch: string) => void;
   openFilePath?: (path: string) => void;
   ensureSessionId?: (sessionId: string) => Promise<string>;
   queuePanel?: ReactNode;
@@ -149,6 +151,7 @@ export function SessionView({
   onOpenBranchSession,
   enqueueSessionPrompt,
   gitInfo,
+  onSwitchBranch,
   openFilePath,
   ensureSessionId,
   queuePanel,
@@ -581,6 +584,7 @@ export function SessionView({
                 sessionId={sessionId}
                 turnCount={sessionTimeline.messages.filter((message) => message.role === "user").length}
                 gitInfo={gitInfo}
+                onSwitchBranch={onSwitchBranch}
                 height={composerHeight}
                 onContentHeightChange={handleComposerContentHeight}
                 onOpenFile={openFilePath}

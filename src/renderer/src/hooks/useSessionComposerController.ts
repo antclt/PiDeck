@@ -45,7 +45,9 @@ import {
   upsertSessionAtom,
 } from "../atoms";
 import {
+  appendContentToDraft,
   appendSlashCommandToDraft,
+  stripMarkdownFrontmatter,
   toSkillInvocationToken,
   getComposerEnterIntent,
   isComposingKeyboardEvent,
@@ -1459,6 +1461,28 @@ export function useSessionComposerController(
     requestAnimationFrame(() => editorRef.current?.focus());
   }, [draft, isDshBackend, sessionId, setDraft]);
 
+  // 「一键插入全文」：选择器条目上的插入按钮把提示词/技能正文整段塞进草稿
+  // （不是斜线命令形态），便于用户直接编辑或原文发送；与斜线插入是并列入口。
+  // 插入内容先剥离 YAML frontmatter「描述头」（name/description 元数据是给选择器用的，
+  // 不该出现在输入框里）——预览详情仍显示原文件，只有插入动作做剥离。
+  const insertTemplateContent = useCallback((template: PromptTemplateInfo) => {
+    const next = appendContentToDraft(draft, stripMarkdownFrontmatter(template.content));
+    liveDomDraftRef.current = { sessionId, value: next };
+    setDraft(next);
+    caretRef.current = { pos: next.length, forValue: next };
+    setPicker(null);
+    requestAnimationFrame(() => editorRef.current?.focus());
+  }, [draft, sessionId, setDraft]);
+
+  const insertSkillContent = useCallback((content: string) => {
+    const next = appendContentToDraft(draft, stripMarkdownFrontmatter(content));
+    liveDomDraftRef.current = { sessionId, value: next };
+    setDraft(next);
+    caretRef.current = { pos: next.length, forValue: next };
+    setPicker(null);
+    requestAnimationFrame(() => editorRef.current?.focus());
+  }, [draft, sessionId, setDraft]);
+
   return {
     sessionId,
     record,
@@ -1589,7 +1613,9 @@ export function useSessionComposerController(
       close: () => setPicker(null),
       setMode,
       insertTemplate,
+      insertTemplateContent,
       insertSkillInvocation,
+      insertSkillContent,
     },
     modals: {
       closePreview: () => setPreviewImage(null),

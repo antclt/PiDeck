@@ -92,6 +92,56 @@ function isSessionScanLine(value: unknown): value is SessionScanLine {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/** 清洗会话标题候选：时间戳文件名 / 纯 untitled 不算标题，截断到 32 字符。 */
+function cleanScanTitle(value?: string): string | undefined {
+  const text = value?.replace(/\s+/g, " ").trim();
+  // 时间戳文件名不是会话名：跳过才能回退到首条 user/assistant 文本。
+  if (!text || /^untitled$/i.test(text) || looksLikePiSessionFileStem(text)) return undefined;
+  return text.length > 32 ? `${text.slice(0, 32)}…` : text;
+}
+
+/**
+ * 从已解析的 JSONL 行序列推断会话标题（与 readSummary 的 inferredName 同一优先级：
+ * session_info 名 > 旧版私有 sessionName > 首条 user 文本 > 首条 assistant 文本）。
+ * 推断不出返回 undefined（空文件/只有 tool 消息），由调用方兜底 Untitled。
+ */
+function inferScanNameFromLines(
+  lines: string[],
+  extractText: (content: unknown) => string,
+): string | undefined {
+  let latestSessionInfoName: string | undefined;
+  let name: string | undefined;
+  let firstUserText = "";
+  let firstAssistantText = "";
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      // 头部截断的半行/损坏行：跳过，不影响标题推断。
+      continue;
+    }
+    if (!isSessionScanLine(parsed)) continue;
+    const entry = parsed;
+    if (entry.type === "session_info") {
+      // Forked sessions may contain an older copied name; only the latest marker is authoritative.
+      latestSessionInfoName = typeof entry.name === "string" ? entry.name : entry.data?.name;
+    }
+    name ||= entry.sessionName || entry.name || entry.data?.name || entry.header?.name || entry.session?.name;
+    const nested = entry.message ?? entry.data?.message;
+    const message: SessionScanMessage = nested ?? { role: entry.role, content: entry.content };
+    if (message.role) {
+      const text = extractText(message.content).trim();
+      if (text && message.role === "user" && !firstUserText) firstUserText = text;
+      if (text && message.role === "assistant" && !firstAssistantText) firstAssistantText = text;
+    }
+  }
+  return cleanScanTitle(latestSessionInfoName)
+    || cleanScanTitle(name)
+    || cleanScanTitle(firstUserText)
+    || cleanScanTitle(firstAssistantText);
+}
+
 /**
  * 在文本片段（通常是文件头 4KB）中探测旧版私有 sessionName 行。
  * 只对可解析的行判定；片段末尾可能截断行，解析失败时保守跳过（不影响判定）。
@@ -119,6 +169,8 @@ export class SessionScanner {
   private static readonly SUMMARY_READ_CONCURRENCY = 4;
   /** 摘要只读文件前缀：catalog 不需要整份历史，1MB 足够取 cwd/预览/模型。 */
   private static readonly SUMMARY_PARSE_MAX_BYTES = 1024 * 1024;
+  /** 轻量补名只读文件头部：首条 user/assistant 消息几乎总在头部几 KB 内（标题又被截断到 32 字符），64KB 足够。 */
+  private static readonly SUMMARY_NAME_HEAD_BYTES = 64 * 1024;
   /** 多项目同时 list() 时串行化，避免展开多个项目时并行扫盘把 IPC 打爆。 */
   private listQueue: Promise<void> = Promise.resolve();
   private readonly summaryCache = new SessionSummaryCache<SessionSummary | null>();
@@ -1428,12 +1480,9 @@ export class SessionScanner {
       return null;
     }
 
-    let name: string | undefined;
     let projectPath: string | undefined;
     const emptyPreview = this.translate("session.emptyPreview");
     let preview = emptyPreview;
-    let firstUserText = "";
-    let firstAssistantText = "";
     let messageCount = 0;
     /** 会话来源：扫描前几行检测导入标记 */
     let source: SessionSummary["source"] = "pi";
@@ -1492,7 +1541,6 @@ export class SessionScanner {
         else if (entry.type === "opencode_import") source = "opencode";
       }
 
-      name ||= entry.sessionName || entry.name || entry.data?.name || entry.header?.name || entry.session?.name;
       projectPath ||= entry.cwd || entry.projectPath || entry.header?.cwd || entry.data?.cwd || entry.session?.cwd || entry.data?.session?.cwd;
 
       // Track the last model_change / thinking_level_change so the catalog can
@@ -1515,8 +1563,6 @@ export class SessionScanner {
         messageCount += 1;
         const text = this.extractText(message.content).trim();
         if (text && preview === emptyPreview) preview = text;
-        if (text && message.role === "user" && !firstUserText) firstUserText = text;
-        if (text && message.role === "assistant" && !firstAssistantText) firstAssistantText = text;
         // 旧 JSONL 可能没有 model_change；从最后一条 assistant 消息回退模型。
         if (message.role === "assistant" && typeof message.provider === "string" && typeof message.model === "string") {
           lastAssistantModel = { provider: message.provider, modelId: message.model };
@@ -1607,7 +1653,9 @@ export class SessionScanner {
     // 会话名优先级与 pi getSessionName 一致：最后一条 session_info 为准；
     // 旧版 PiDeck 的 sessionName 私有行及其他字段仅作降级回退。
     // pi 默认 sessionName / 未改名的 session_info 是 JSONL 文件名时间戳，不能当标题。
-    const inferredName = this.cleanTitle(latestSessionInfoName) || this.cleanTitle(name) || this.cleanTitle(firstUserText) || this.cleanTitle(firstAssistantText) || this.translate("session.untitled");
+    // 与轻量补名共用 inferScanNameFromLines，保证两处推断结果一致。
+    const inferredName = inferScanNameFromLines(lines, (content) => this.extractText(content))
+      || this.translate("session.untitled");
 
     const summary: SessionSummary = {
       id: filePath,
@@ -1672,11 +1720,23 @@ export class SessionScanner {
     return "";
   }
 
-  private cleanTitle(value?: string) {
-    const text = value?.replace(/\s+/g, " ").trim();
-    // 时间戳文件名不是会话名：跳过才能回退到首条 user/assistant 文本。
-    if (!text || /^untitled$/i.test(text) || looksLikePiSessionFileStem(text)) return undefined;
-    return text.length > 32 ? `${text.slice(0, 32)}…` : text;
+  /**
+   * 有界读文件头部推断会话标题（不读完整正文、不写摘要缓存）。
+   * 供 SessionCatalog 对「标题仍是占位符」的会话补名——轻量扫描（listPathSummary）不带 name，
+   * 未打开过的 pi 会话若只在打开/重命名时才能获得标题，侧栏会一直 Untitled。
+   */
+  async inferSessionNameFromFile(filePath: string): Promise<string | undefined> {
+    const isWsl = this.isWslPath(filePath);
+    try {
+      const raw = isWsl
+        ? await this.readWslFileHead(filePath, SessionScanner.SUMMARY_NAME_HEAD_BYTES)
+        : await this.readLocalFilePrefix(filePath, SessionScanner.SUMMARY_NAME_HEAD_BYTES);
+      // 头部截断产生的半行解析失败会被 inferScanNameFromLines 跳过，无需额外处理。
+      return inferScanNameFromLines(raw.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content));
+    } catch {
+      // 补名是 best-effort：文件读不到时保持占位标题，不影响扫描主流程。
+      return undefined;
+    }
   }
 
   private inferProjectPathFromFile(filePath: string) {

@@ -6,14 +6,19 @@ import {
 	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
+	CornerDownLeft,
 	Eye,
 	FileText,
 	GitBranch,
+	ImageIcon,
+	ListChecks,
 	Paperclip,
 	Plus,
 	RefreshCw,
 	Sparkles,
 	Star,
+	Target,
+	Wrench,
 	X,
 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
@@ -39,11 +44,12 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
-	DropdownMenuSeparator,
+	DropdownMenuLabel,
 	DropdownMenuTrigger,
 } from "../ui-shadcn/dropdown-menu";
+import { ConfirmDialog } from "../app/AppParts";
 import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
-import { ComposerModeSelect } from "./ComposerModeSelect";
+import { useComposerModeAvailability } from "../../hooks/useComposerModeAvailability";
 import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
 import { SessionContextMeter } from "./SessionContextMeter";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
@@ -77,6 +83,22 @@ import type {
 // widgetKey 由扩展定义且跨重启稳定,可按 widgetKey 持久化折叠状态。
 const EXTENSION_WIDGET_COLLAPSED_KEY_PREFIX =
 	"pid:extension-widget-collapsed:";
+
+/** 模式项标签文案（与旧 ComposerModeSelect 的 MODE_OPTIONS 同源）。 */
+const MODE_LABEL: Record<ComposerAgentMode, TranslationKey> = {
+	normal: "app.composerModeNormal",
+	goal: "app.composerModeGoal",
+	plan: "app.composerModePlan",
+	imagegen: "app.composerModeImagegen",
+};
+
+/** 模式图标：普通=扳手，规划=清单，目标=靶心，生图=图片（与旧 chip 图标一致）。 */
+function modeGlyph(mode: ComposerAgentMode) {
+	if (mode === "plan") return <ListChecks size={14} strokeWidth={2} aria-hidden="true" />;
+	if (mode === "imagegen") return <ImageIcon size={14} strokeWidth={2} aria-hidden="true" />;
+	if (mode === "goal") return <Target size={14} strokeWidth={2} aria-hidden="true" />;
+	return <Wrench size={14} strokeWidth={2} aria-hidden="true" />;
+}
 
 /** 渲染 widget 单行内容，将 ✓/☑ 完成标记高亮为绿色，让 todo/plan 扩展的完成态更醒目。 */
 export function renderWidgetLine(line: string): ReactNode {
@@ -214,6 +236,75 @@ export function ComposerBackendPicker(props: {
 	);
 }
 
+/**
+ * 底栏右侧分支切换器（shadcn 下拉）：当前分支 chip 即触发器，展开分支列表；
+ * 选择目标分支后先弹确认（切换会携带未提交更改、冲突时 git 会拒绝），
+ * 确认后才调 onSwitchBranch——owner 在 App 级（switchBranch 统一刷新
+ * gitInfo/branchByProject），让右侧 Git 面板与底栏分支保持同步，不在此组件内
+ * 再开一条 git 通道。无分支数据时回退为只读 span（由调用方兜底）。
+ */
+function ComposerBranchSwitcher(props: {
+	gitInfo: GitBranchInfo;
+	disabled?: boolean;
+	onSwitchBranch: (branch: string) => void;
+}) {
+	const [pendingBranch, setPendingBranch] = useState<string | null>(null);
+	return (
+		<>
+			{/* Radix DropdownMenu.Root 无 disabled 属性：禁用统一落在 trigger Button（已 disabled） */}
+			<DropdownMenu>
+				<DropdownMenuTrigger asChild>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="composer-bar-btn branch h-7 max-w-[12rem] gap-1 rounded-md px-1.5 text-sm font-semibold text-foreground/75 hover:bg-muted/60"
+						title={t("app.branchCurrent", {
+							branch: props.gitInfo.current,
+							count: props.gitInfo.branches.length,
+						})}
+					>
+						<GitBranch size={14} strokeWidth={1.8} aria-hidden="true" />
+						<span className="composer-bar-branch-name min-w-0 truncate">{props.gitInfo.current}</span>
+						<ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-muted-foreground" />
+					</Button>
+				</DropdownMenuTrigger>
+				<DropdownMenuContent align="end" sideOffset={4} className="min-w-56">
+					{props.gitInfo.branches.map((branch) => {
+						const current = branch === props.gitInfo.current;
+						return (
+							<DropdownMenuItem
+								key={branch}
+								// 当前分支不可再选（切换自身无意义）；选择后不立即切换，先走确认
+								disabled={current}
+								onSelect={() => setPendingBranch(branch)}
+								className="min-h-8 gap-2 px-2.5 py-1"
+							>
+								<span className={`grid size-6 shrink-0 place-items-center rounded-md ${current ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground"}`}>
+									<GitBranch size={13} strokeWidth={2} aria-hidden="true" />
+								</span>
+								<span className="min-w-0 flex-1 truncate font-mono text-caption text-foreground">{branch}</span>
+								{current ? <Check size={14} strokeWidth={2} className="shrink-0 text-primary" aria-hidden="true" /> : null}
+							</DropdownMenuItem>
+						);
+					})}
+				</DropdownMenuContent>
+			</DropdownMenu>
+			{pendingBranch && (
+				<ConfirmDialog
+					title={t("git.branchSwitcherConfirmTitle")}
+					message={t("git.branchSwitcherConfirmMessage", { branch: pendingBranch })}
+					confirmLabel={t("git.branchSwitcherConfirmLabel")}
+					onConfirm={() => {
+						props.onSwitchBranch(pendingBranch);
+						setPendingBranch(null);
+					}}
+					onCancel={() => setPendingBranch(null)}
+				/>
+			)}
+		</>
+	);
+}
+
 export function ComposerBottomBar(props: {
 	state?: AgentRuntimeState;
 	disabled?: boolean;
@@ -228,6 +319,9 @@ export function ComposerBottomBar(props: {
 	modelPending?: ModelPending;
 	composerAgentMode: ComposerAgentMode;
 	gitInfo?: GitBranchInfo;
+	/** 切换分支（右侧分支下拉）：经 App 级 switchBranch 执行，
+	 *  成功后统一刷新 gitInfo/branchByProject，右侧 Git 面板与底栏保持同步。 */
+	onSwitchBranch?: (branch: string) => void;
 	/** Draft sessions do not have a runtime yet, so retain their persisted settings in the bar. */
 	record?: Pick<SessionRecord, "model" | "thinkingLevel">;
 	/** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期展示默认值用，
@@ -299,6 +393,15 @@ export function ComposerBottomBar(props: {
 	const isImageGenMode = props.composerAgentMode === "imagegen";
 	const isGoalMode = props.composerAgentMode === "goal";
 	const isSpecialMode = isPlanMode || isImageGenMode || isGoalMode;
+	// 模式选择收进「+」菜单后，底栏不再常驻模式 chip；可用性（plan/goal 扩展开关、
+	// imagegen 仅 pi、imageGenLocked 锁定）由专用 hook 统一维护（原 ComposerModeSelect 逻辑）。
+	const { visibleModes, refreshAvailability } = useComposerModeAvailability({
+		backend: props.backend,
+		imageGenLocked: props.imageGenLocked,
+		value: props.composerAgentMode,
+		disabled: props.disabled,
+		onChange: props.onChangeMode,
+	});
 	const liveModel = {
 		provider: props.state?.provider ?? props.record?.model?.provider ?? (isDsh ? props.defaultModel?.provider : welcomePreference?.model?.provider) ?? "",
 		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelId : welcomePreference?.model?.modelId) ?? "",
@@ -354,36 +457,37 @@ export function ComposerBottomBar(props: {
 							)}
 						</button>
 					) : null}
-					{/* 特殊模式：模式名 + 退出合成一颗 chip，避免旁边再挂一颗大红 ×。 */}
-					<div
-						className={cn(
-							"composer-mode-cluster inline-flex h-7 min-w-0 items-center rounded-md",
-							isSpecialMode && "bg-bg-hover pr-0.5",
-						)}
-					>
-						<ComposerModeSelect
-							value={props.composerAgentMode}
-							backend={props.backend}
-							disabled={props.disabled}
-							imageGenLocked={props.imageGenLocked}
-							onChange={props.onChangeMode}
-						/>
-						{(isPlanMode || isGoalMode) && (
+					{/* 特殊模式退出×：模式选择已收进「+」菜单，底栏只保留进行中模式的退出入口
+					    （imagegen 同样可退出；imageGenLocked 时无法切走故不显示）。 */}
+					{isSpecialMode && !props.imageGenLocked && (
+						<div className="composer-mode-cluster inline-flex h-7 min-w-0 items-center rounded-md bg-bg-hover pr-0.5">
 							<button
 								type="button"
 								className="composer-mode-exit mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-text-tertiary transition-[color,background-color] duration-150 hover:bg-bg-active hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-								aria-label={isGoalMode ? t("app.composerModeCancelGoal") : t("app.composerModeCancelPlan")}
-								title={isGoalMode ? t("app.composerModeCancelGoal") : t("app.composerModeCancelPlan")}
+								aria-label={
+									isGoalMode
+										? t("app.composerModeCancelGoal")
+										: isImageGenMode
+											? t("app.composerModeCancelImagegen")
+											: t("app.composerModeCancelPlan")
+								}
+								title={
+									isGoalMode
+										? t("app.composerModeCancelGoal")
+										: isImageGenMode
+											? t("app.composerModeCancelImagegen")
+											: t("app.composerModeCancelPlan")
+								}
 								disabled={props.disabled}
 								onClick={props.onCancelPlan}
 							>
 								<X size={12} strokeWidth={2} aria-hidden="true" />
 							</button>
-						)}
-					</div>
-					{/* 三合一「+」入口：附件/技能/Prompt 收起为单个菜单，底栏更简洁；
-					    菜单项 onSelect 后 Radix 自动关闭，无需手动 close。 */}
-					<DropdownMenu>
+						</div>
+					)}
+					{/* 三合一「+」入口：附件/技能/提示词/模式 收起为单个菜单，底栏更简洁；
+					    菜单项 onSelect 后 Radix 自动关闭；打开时刷新模式可用性（扩展开关可能刚改过）。 */}
+					<DropdownMenu onOpenChange={(open) => { if (open) void refreshAvailability(); }}>
 						<DropdownMenuTrigger asChild>
 							<Button variant="ghost" size="icon"
 								className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60"
@@ -402,11 +506,28 @@ export function ComposerBottomBar(props: {
 								<Sparkles size={14} strokeWidth={2} aria-hidden="true" />
 								{t("app.composerAddSkill")}
 							</DropdownMenuItem>
-							<DropdownMenuSeparator />
 							<DropdownMenuItem onSelect={() => props.onPickPromptTemplate()}>
 								<FileText size={14} strokeWidth={2} aria-hidden="true" />
 								{t("app.composerAddPrompt")}
 							</DropdownMenuItem>
+							{/* 模式分组：普通/目标/规划/生图收进「+」，底栏只留进行中模式的退出×。
+							   用 DropdownMenuLabel 分组（附件/技能/提示词与模式不是同一维度）。 */}
+							<DropdownMenuLabel className="mt-1 text-micro font-medium text-muted-foreground">
+								{t("app.composerAddMode")}
+							</DropdownMenuLabel>
+							{visibleModes.map((mode) => (
+								<DropdownMenuItem
+									key={mode}
+									disabled={props.disabled}
+									onSelect={() => props.onChangeMode(mode)}
+								>
+									{modeGlyph(mode)}
+									{t(MODE_LABEL[mode])}
+									{mode === props.composerAgentMode && (
+										<Check size={14} strokeWidth={2} className="ml-auto text-primary" aria-hidden="true" />
+									)}
+								</DropdownMenuItem>
+							))}
 						</DropdownMenuContent>
 					</DropdownMenu>
 					{isImageGenMode && props.imageGenOptions ? (
@@ -455,7 +576,15 @@ export function ComposerBottomBar(props: {
 						state={props.state}
 						onCompact={props.onCompact}
 					/>
-					{props.gitInfo?.current && (
+					{/* 分支只读 chip 升级为可切换下拉：当前分支即触发器，展开列表选目标分支后
+					    先弹确认（切换会携带未提交更改），确认后才调 App 级 switchBranch。 */}
+					{props.gitInfo?.current && props.onSwitchBranch ? (
+						<ComposerBranchSwitcher
+							gitInfo={props.gitInfo}
+							disabled={props.disabled}
+							onSwitchBranch={props.onSwitchBranch}
+						/>
+					) : props.gitInfo?.current ? (
 						<span
 							className="composer-bar-branch inline-flex max-w-[12rem] items-center gap-1.5 truncate px-1.5 text-sm font-semibold text-foreground/75"
 							title={t("app.branchCurrent", {
@@ -466,7 +595,7 @@ export function ComposerBottomBar(props: {
 							<GitBranch size={14} strokeWidth={1.8} aria-hidden="true" />
 							<span className="composer-bar-branch-name truncate">{props.gitInfo.current}</span>
 						</span>
-					)}
+						) : null}
 					{props.sendControls}
 				</div>
 			</div>
@@ -893,6 +1022,15 @@ export function PromptTemplatePicker(props: {
 		scope?: "global" | "project";
 		argumentHint?: string;
 	}) => void;
+	/** 一键插入模板全文到输入框（可选：ComposerPickerHost 传 controller 方法）。 */
+	onInsertContent?: (template: {
+		name: string;
+		path: string;
+		description: string;
+		content: string;
+		scope?: "global" | "project";
+		argumentHint?: string;
+	}) => void;
 }) {
 	type TemplateItem = typeof props.templates[number];
 	const [previewTemplate, setPreviewTemplate] = useState<TemplateItem | null>(null);
@@ -906,16 +1044,32 @@ export function PromptTemplatePicker(props: {
 				className="prompt-template-picker"
 			>
 				<div className="picker-preview-inline">
-					<Button
-						type="button"
-						variant="ghost"
-						className="h-auto gap-1 px-1 text-caption"
-						onClick={() => setPreviewTemplate(null)}
-						title={t("app.promptTemplateBackToPicker")}
-					>
-						<ChevronLeft size={16} strokeWidth={2.2} />
-						{t("app.promptTemplateBackToPicker")}
-					</Button>
+					<div className="flex items-center justify-between gap-2">
+						<Button
+							type="button"
+							variant="ghost"
+							className="h-auto gap-1 px-1 text-caption"
+							onClick={() => setPreviewTemplate(null)}
+							title={t("app.promptTemplateBackToPicker")}
+						>
+							<ChevronLeft size={16} strokeWidth={2.2} />
+							{t("app.promptTemplateBackToPicker")}
+						</Button>
+						{/* 预览里同样可以一键插入全文（与条目上的插入按钮入口并列） */}
+						{props.onInsertContent && (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="h-7 gap-1"
+								onClick={() => props.onInsertContent?.(previewTemplate)}
+								title={t("app.pickerInsertContent")}
+							>
+								<CornerDownLeft size={13} strokeWidth={2} aria-hidden="true" />
+								{t("app.pickerInsertContent")}
+							</Button>
+						)}
+					</div>
 					<pre className="picker-preview-content">{previewTemplate.content}</pre>
 				</div>
 			</PickerDialog>
@@ -923,27 +1077,50 @@ export function PromptTemplatePicker(props: {
 	}
 
 	return (
-		<PickerDialog title={t("app.promptTemplatePickerTitle")} onClose={props.onClose} className="prompt-template-picker">
+		/* 与技能/模型选择器对齐（#115 之后的双行卡片式条目）：
+		   首行图标 + 斜杠命令名 + 参数提示徽标，次行截断的描述；
+		   预览按钮保留（查看模板正文）。旧 picker-palette-* 单行挤排版弃用。 */
+		<PickerDialog
+			title={t("app.promptTemplatePickerTitle")}
+			hint={t("app.pickerInsertSendHint")}
+			onClose={props.onClose}
+			className="prompt-template-picker"
+		>
 			<Command>
 				<CommandInput placeholder={t("app.promptTemplateSearchPlaceholder")} autoFocus />
-				<CommandList>
+				<CommandList className="max-h-[min(420px,55vh)]">
 					<CommandEmpty>{t("app.promptTemplateSearchEmpty")}</CommandEmpty>
 					{props.templates.length === 0 && (
-						<div className="py-6 text-center text-body text-muted-foreground">{t("app.promptTemplateEmpty")}</div>
+						<div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.promptTemplateEmpty")}</div>
 					)}
 					{props.templates.map((template) => (
 						<CommandItem
 							key={template.path}
 							value={`/${template.name}`}
-							keywords={[template.name, template.description]}
+							keywords={[template.name, template.description, template.argumentHint ?? ""]}
 							onSelect={() => props.onPick(template)}
+							className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2"
 						>
-							<FileText size={14} strokeWidth={1.8} aria-hidden="true" />
-							<span className="picker-palette-label">/{template.name}</span>
-							{template.argumentHint && (
-								<code className="picker-palette-arg-hint">{template.argumentHint}</code>
-							)}
-							<span className="picker-palette-desc">{template.description}</span>
+							<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
+								<FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+							</span>
+							<span className="min-w-0 flex-1">
+								<span className="flex items-center gap-1.5">
+									<span className="font-mono text-control font-semibold text-foreground" title={`/${template.name}`}>
+										/{template.name}
+									</span>
+									{template.argumentHint && (
+										<code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[11px] text-accent-foreground">
+											{template.argumentHint}
+										</code>
+									)}
+								</span>
+								{template.description && (
+									<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={template.description}>
+										{template.description}
+									</span>
+								)}
+							</span>
 							<Button
 								type="button"
 								variant="ghost"
@@ -954,8 +1131,24 @@ export function PromptTemplatePicker(props: {
 									setPreviewTemplate(template);
 								}}
 							>
-								<Eye size={14} strokeWidth={1.8} />
+								<Eye size={14} strokeWidth={1.8} aria-hidden="true" />
 							</Button>
+							{/* 一键插入全文：把模板内容整段塞进输入框（不生成斜线命令），
+							    与 onPick（插入 /名称 命令）是并列入口，两者由用户视需要选择。 */}
+							{props.onInsertContent && (
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									title={t("app.pickerInsertContent")}
+									onClick={(e) => {
+										e.stopPropagation();
+										props.onInsertContent?.(template);
+									}}
+								>
+									<CornerDownLeft size={14} strokeWidth={1.8} aria-hidden="true" />
+								</Button>
+							)}
 						</CommandItem>
 					))}
 				</CommandList>

@@ -196,8 +196,9 @@ Gitmoji 对应关系：
   // ── DSH 外部会话：默认启动时只读扫磁盘入侧栏（不 boot host）──
   dshAutoImportSessions: true,
 
-  // ── Agent 启动诊断/加速：offline 默认开；扩展/技能默认加载 ──
-  piRpcOffline: true,
+  // ── Agent 启动诊断/加速：offline 默认关（保证 pi 启动时模型目录走网络刷新，
+  // 用户新增/更新的模型能实时出现在模型列表）；扩展/技能默认加载 ──
+  piRpcOffline: false,
   piRpcNoExtensions: false,
   piRpcNoSkills: false,
 

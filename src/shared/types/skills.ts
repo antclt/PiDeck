@@ -28,6 +28,12 @@ export type PiSkillListResult = {
 	skills: PiSkillSummary[];
 };
 
+/** 技能 SKILL.md 正文读取结果（技能选择器「查看详情 / 插入全文」用）。 */
+export type SkillContentResult = {
+	/** 截断后的正文（超长时由主进程限制大小，避免渲染层拿全量大文件）。 */
+	content: string;
+};
+
 export type CreatePiSkillInput = {
 	name: string;
 	description: string;
