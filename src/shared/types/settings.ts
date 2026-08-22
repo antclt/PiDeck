@@ -11,11 +11,13 @@ export type AppThemeMode = "system" | "light" | "dark" | "schedule";
 /** 主题色预设：data-accent 属性驱动 foundation.css 的 accent/logo 变量 */
 export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | "rose";
 /**
- * 皮肤（换肤）：覆盖背景/border 色板，与 accent（主题色）正交。
- * 内置皮肤在 themePresets.ts SKIN_PRESETS 定义；custom 由 customThemeOverrides 驱动。
+ * 外观主题（皮肤）：覆盖表面/边框/文字色板 + 自带推荐主色，明暗自适应。
+ * 内置主题在 themePresets.ts SKIN_PRESETS 定义；custom 由 customThemeOverrides 驱动。
+ * classic-green 为出厂默认（中性黑白灰）；fresh-green 为全屏绿色主题（表面带绿色调）。
  */
 export type AppSkinId =
 	| "classic-green"
+	| "fresh-green"
 	| "graphite"
 	| "sea-blue"
 	| "warm-beige"

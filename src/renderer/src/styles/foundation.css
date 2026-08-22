@@ -210,18 +210,20 @@
  * 自定义主题：新增一个 data-accent 值 + SettingsModal 色板预设条目即可。
  */
 :root[data-accent="green"] {
-  --color-accent: #238636;
-  --color-accent-strong: #1f7a32;
-  --color-accent-soft: #eaf6ed;
-  --color-brand-green: #0f766e;
+  /* 森系绿（参考同目录 Proma 的 theme-forest-light 森息晨光）：
+     鼠尾草绿主色 #4a7854（hsl 134 24% 38%），不用荧光绿；深部 #36593d。 */
+  --color-accent: #4a7854;
+  --color-accent-strong: #3f6347;
+  --color-accent-soft: #e4ecd9;
+  --color-brand-green: #36593d;
   --color-brand-blue: #2563eb;
   --color-brand-purple: #7c3aed;
   --color-brand-amber: #b45309;
   --color-brand-rose: #e11d48;
-  --color-logo-green: #2cb35c;
-  --color-logo-green-mid: #27a452;
-  --color-logo-green-deep: #1f8f45;
-  --color-chat-link: #2762ea;
+  --color-logo-green: #51855d;
+  --color-logo-green-mid: #4a7854;
+  --color-logo-green-deep: #36593d;
+  --color-chat-link: #366b46;
 }
 :root[data-accent="blue"] {
   --color-accent: #2563eb;
@@ -469,15 +471,16 @@
 
 /* 暗色主题色预设（data-accent），亮色系保证可读性 */
 :root[data-theme="dark"][data-accent="green"] {
-  --color-accent: #4ade80;
-  --color-accent-strong: #22c55e;
-  --color-accent-soft: #1c2b22;
-  --color-brand-green: #34d399;
-  --color-logo-green: #4ade80;
-  --color-logo-green-mid: #22c55e;
-  --color-logo-green-deep: #16a34a;
+  /* 森系绿暗色（参考 Proma theme-forest-dark 森息夜语）：雾绿灰主色 hsl(145,25%,42%) */
+  --color-accent: #508667;
+  --color-accent-strong: #66a380;
+  --color-accent-soft: #26332c;
+  --color-brand-green: #87c5a1;
+  --color-logo-green: #64b486;
+  --color-logo-green-mid: #508667;
+  --color-logo-green-deep: #3d6b4d;
   --color-info: #60a5fa;
-  --color-chat-link: #4ade80;
+  --color-chat-link: #87c5a1;
 }
 :root[data-theme="dark"][data-accent="blue"] {
   --color-accent: #60a5fa;
@@ -522,6 +525,166 @@
   --color-brand-green: #fb7185;
   --color-info: #fb7185;
   --color-chat-link: #fb7185;
+}
+
+/* ===== 外观主题（data-appearance）表面色板 =====
+ * 每套外观主题覆盖「表面/边框/文字/会话面板」色板；主色由 data-accent 提供
+ * （选择外观主题时设置页联动写入 settings.accent → data-accent，复用上方各主色块）。
+ * - 明暗由 data-theme 负责：浅色走 `[data-appearance="…"]`，暗色走 `[data-theme="dark"][data-appearance="…"]`；
+ * - classic-green 为出厂默认（=当前 :root 中性浅色，黑白灰主色），无覆盖块；
+ * - fresh-green 为全屏绿色主题：表面/边框/文字全部带品牌亮绿（#2cb35c 系）调；
+ * - 新增主题需同步 themePresets.ts 的 SKIN_PRESETS（id/预览）与本文件色块，保证 id 集合一致。
+ * 注意：这些是纯自定义属性定义，不包 @layer（契约见 tests/cssCascadeLayers.test.mjs）。
+ */
+/* fresh-green 表面色板（参考同目录 Proma theme-forest-light / theme-forest-dark）：
+   浅色=森息晨光（纸感浅绿 hsl 84-80 系），暗色=森息夜语（深林泥土 + 雾绿灰主色）。 */
+:root[data-appearance="fresh-green"] {
+  --color-bg-app: #f6f7f2;
+  --color-bg-sidebar: #ecefe6;
+  --color-bg-panel: #f6f7f2;
+  --color-bg-popover: #f8f9f5;
+  --color-bg-input: #e7ebe0;
+  --color-bg-muted: #e2e6db;
+  --color-bg-hover: #dbe0d2;
+  --color-bg-active: #c9d0be;
+  --color-text-primary: #273529;
+  --color-text-secondary: #515f4e;
+  --color-text-tertiary: #697463;
+  --color-border-subtle: #d4dacd;
+  --color-border-default: #c8cfbf;
+  --color-border-strong: #bac2ae;
+  --color-chat-card-bg: #f6f7f2;
+  --color-chat-muted-bg: #e2e6db;
+  --color-chat-control-bg: #f6f7f2;
+  --color-chat-table-bg: #f6f7f2;
+}
+:root[data-theme="dark"][data-appearance="fresh-green"] {
+  --color-bg-app: #151917;
+  --color-bg-sidebar: #212724;
+  --color-bg-panel: #1d2420;
+  --color-bg-popover: #2c3530;
+  --color-bg-input: #212724;
+  --color-bg-muted: #27302b;
+  --color-bg-hover: #2e3833;
+  --color-bg-active: #36443d;
+  --color-text-primary: #e9edea;
+  --color-text-secondary: #b2bdb6;
+  --color-text-tertiary: #7b8e83;
+  --color-border-subtle: #2f3a34;
+  --color-border-default: #384740;
+  --color-border-strong: #40544a;
+  --color-chat-card-bg: #212724;
+  --color-chat-muted-bg: #27302b;
+  --color-chat-control-bg: #212724;
+  --color-chat-table-bg: #212724;
+}
+:root[data-appearance="graphite"] {
+  --color-bg-app: #ececec;
+  --color-bg-sidebar: #e3e3e3;
+  --color-bg-panel: #f8f8f8;
+  --color-bg-muted: #e9e9e9;
+  --color-bg-hover: #e9e9e9;
+  --color-bg-active: #dedede;
+  --color-text-primary: #1f1f22;
+  --color-text-secondary: #4a4a4d;
+  --color-text-tertiary: #6e6e72;
+  --color-border-subtle: #d8d8d8;
+  --color-border-default: #d0d0d0;
+  --color-border-strong: #c7c7c7;
+  --color-chat-card-bg: #f4f4f4;
+  --color-chat-muted-bg: #ececec;
+  --color-chat-control-bg: #fafafa;
+  --color-chat-table-bg: #f8f8f8;
+}
+:root[data-theme="dark"][data-appearance="graphite"] {
+  --color-bg-app: #1b1b1b;
+  --color-bg-sidebar: #222222;
+  --color-bg-panel: #262626;
+  --color-bg-muted: #303030;
+  --color-bg-hover: #303030;
+  --color-bg-active: #383838;
+  --color-text-primary: #ecece7;
+  --color-text-secondary: #b8b8b2;
+  --color-text-tertiary: #8a8a84;
+  --color-border-subtle: #3a3a3a;
+  --color-border-default: #444444;
+  --color-border-strong: #4f4f4f;
+  --color-chat-card-bg: #262626;
+  --color-chat-muted-bg: #303030;
+  --color-chat-control-bg: #262626;
+  --color-chat-table-bg: #262626;
+}
+:root[data-appearance="sea-blue"] {
+  --color-bg-app: #eef5fb;
+  --color-bg-sidebar: #e4eef7;
+  --color-bg-panel: #ffffff;
+  --color-bg-muted: #e8f0f7;
+  --color-bg-hover: #e8f0f7;
+  --color-bg-active: #dfeaf3;
+  --color-text-primary: #1c2e3d;
+  --color-text-secondary: #3f586b;
+  --color-text-tertiary: #5f7488;
+  --color-border-subtle: #dbe7f0;
+  --color-border-default: #d3e1ec;
+  --color-border-strong: #c9d9e6;
+  --color-chat-card-bg: #f4f9fd;
+  --color-chat-muted-bg: #eef5fb;
+  --color-chat-control-bg: #ffffff;
+  --color-chat-table-bg: #ffffff;
+}
+:root[data-theme="dark"][data-appearance="sea-blue"] {
+  --color-bg-app: #101a24;
+  --color-bg-sidebar: #15212d;
+  --color-bg-panel: #182634;
+  --color-bg-muted: #21303f;
+  --color-bg-hover: #21303f;
+  --color-bg-active: #2a3a4b;
+  --color-text-primary: #e7eef6;
+  --color-text-secondary: #b6c5d4;
+  --color-text-tertiary: #8ba0b3;
+  --color-border-subtle: #2c3d4e;
+  --color-border-default: #36495c;
+  --color-border-strong: #415668;
+  --color-chat-card-bg: #182634;
+  --color-chat-muted-bg: #21303f;
+  --color-chat-control-bg: #182634;
+  --color-chat-table-bg: #182634;
+}
+:root[data-appearance="warm-beige"] {
+  --color-bg-app: #f7f2ea;
+  --color-bg-sidebar: #f0e9dd;
+  --color-bg-panel: #fffdf8;
+  --color-bg-muted: #f0e9dd;
+  --color-bg-hover: #f0e9dd;
+  --color-bg-active: #e8dfd0;
+  --color-text-primary: #33291c;
+  --color-text-secondary: #5d5140;
+  --color-text-tertiary: #7c6f5a;
+  --color-border-subtle: #e6dccb;
+  --color-border-default: #ded2bf;
+  --color-border-strong: #d4c6b0;
+  --color-chat-card-bg: #fffdf8;
+  --color-chat-muted-bg: #f5eee1;
+  --color-chat-control-bg: #fffdf8;
+  --color-chat-table-bg: #fffdf8;
+}
+:root[data-theme="dark"][data-appearance="warm-beige"] {
+  --color-bg-app: #1e1a15;
+  --color-bg-sidebar: #26211a;
+  --color-bg-panel: #2b251d;
+  --color-bg-muted: #352e24;
+  --color-bg-hover: #352e24;
+  --color-bg-active: #3e362b;
+  --color-text-primary: #f0e9dd;
+  --color-text-secondary: #c2b6a2;
+  --color-text-tertiary: #9a8d77;
+  --color-border-subtle: #453c2f;
+  --color-border-default: #51473a;
+  --color-border-strong: #5d5344;
+  --color-chat-card-bg: #2b251d;
+  --color-chat-muted-bg: #352e24;
+  --color-chat-control-bg: #2b251d;
+  --color-chat-table-bg: #2b251d;
 }
 * {
   box-sizing: border-box;

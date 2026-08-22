@@ -72,6 +72,8 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "themeScheduleLightStart", tab: "appearance", itemKey: "settings.themeScheduleRange" },
 	{ field: "themeScheduleDarkStart", tab: "appearance", itemKey: "settings.themeScheduleRange" },
 	{ field: "accent", tab: "appearance", itemKey: "settings.accent" },
+	// 外观主题选择器同时改 themeSkin + accent（主题自带主色），两项归并到同一摘要
+	{ field: "themeSkin", tab: "appearance", itemKey: "settings.accent" },
 	{ field: "backgroundImage", tab: "appearance", itemKey: "settings.backgroundImage" },
 	{ field: "backgroundImageOpacity", tab: "appearance", itemKey: "settings.backgroundImage" },
 	{ field: "zoomFactor", tab: "appearance", itemKey: "settings.zoomFactor" },

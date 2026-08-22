@@ -1,4 +1,4 @@
-import { Component, lazy, memo, Suspense, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getDefaultStore } from "jotai";
 import { settingsFocusAtom, type SettingsTabId } from "../../atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
@@ -16,6 +16,7 @@ import {
 	X,
 } from "lucide-react";
 import { t } from "../../i18n";
+import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { Button } from "../ui-shadcn/button";
 import {
 	Tabs,
@@ -238,11 +239,40 @@ function SettingsModalContent(props: SettingsModalProps) {
 		});
 	}, []);
 
+	// 外观实时预览：草稿中明暗/外观主题/主色变化时立即写入 <html> 的 data-* 属性，
+	// 与 App.tsx 的持久化应用共用 applyAppearanceAttributes（见 themeAppearance.ts）。
+	// 保存后由 App 的 settings effect 接管；取消时在 cancelAll 里回滚回 baseSnapshot。
+	useEffect(() => {
+		const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+		applyAppearanceAttributes(
+			document.documentElement,
+			draftSettings as AppearanceSettings,
+			Boolean(media?.matches),
+		);
+	}, [
+		draftSettings.theme,
+		draftSettings.themeScheduleLightStart,
+		draftSettings.themeScheduleDarkStart,
+		draftSettings.themeSkin,
+		draftSettings.accent,
+	]);
+
 	/** 检查指定字段在草稿中是否已被修改（与初始快照比较） */
 	const isDirty = useCallback((field: keyof AppSettings): boolean => {
 		// keyof 含 number/symbol 成员，Set 按 string 存储，统一转字符串比较
 		return dirtyFields.has(String(field));
 	}, [dirtyFields]);
+
+	/** 把 <html> 的 data-* 外观属性还原为打开弹窗时的快照（App 的 settings effect
+	 *  只在 settings 实际变化时重跑，取消/放弃不触发，必须在这里显式恢复预览）。 */
+	const restoreAppearanceFromSnapshot = useCallback(() => {
+		const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+		applyAppearanceAttributes(
+			document.documentElement,
+			baseSnapshotRef.current as AppearanceSettings,
+			Boolean(media?.matches),
+		);
+	}, []);
 
 	/** 保存全部已修改内容：全局设置差异提交 + 视觉桥草稿（若有改动）；返回是否全部成功 */
 	const saveAll = async (): Promise<boolean> => {
@@ -268,6 +298,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const cancelAll = () => {
 		setDraftSettings({ ...baseSnapshotRef.current });
 		setDirtyFields(new Set());
+		restoreAppearanceFromSnapshot();
 		visionDraft.reset();
 		setPerAreaFontSize(
 			baseSnapshotRef.current.uiFontSize !== null ||
@@ -300,6 +331,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 	/** 关闭确认弹框时选择放弃更改 */
 	const handleDiscardAndClose = () => {
 		setCloseConfirmOpen(false);
+		// 放弃修改：草稿被丢弃，但外观实时预览已写入 <html>，需显式回滚为快照值
+		restoreAppearanceFromSnapshot();
 		props.onClose();
 	};
 
