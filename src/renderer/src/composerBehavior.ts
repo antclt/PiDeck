@@ -34,6 +34,17 @@ export type PromptTemplateInfo = {
 };
 
 /** 从 frontmatter 中提取 argument-hint 元数据 */
+/**
+ * 把 /命令（技能/Prompt 模板）追加到草稿尾部：
+ * - draft 非空：去掉尾随空白后补一个空格再接 `/${command} `，避免命令 token 与
+ *   已有内容粘连成一体（与文件引用需要空格的语义一致，用户才看得出是独立引用）。
+ * - draft 为空：直接以 `/${command} ` 开头（后续回车即可发送）。
+ */
+export function appendSlashCommandToDraft(draft: string, command: string): string {
+	const token = `/${command} `;
+	return draft.trimEnd() ? `${draft.trimEnd()} ${token}` : token;
+}
+
 export function parseArgumentHint(content: string): string | undefined {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!match) return undefined;

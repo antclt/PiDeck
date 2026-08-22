@@ -356,6 +356,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 onPickModel={() => composer.pickers.open("model")}
                 onPickThinking={() => composer.pickers.open("thinking")}
                 onPickPromptTemplate={() => composer.pickers.open("template")}
+                onPickSkill={() => composer.pickers.open("skill")}
                 onCompact={composer.delivery.compact}
                 onChangeMode={composer.pickers.setMode}
                 imageGenLocked={composer.delivery.imageGenModeLocked}
@@ -398,6 +399,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
             templates={composer.templates}
             onClose={composer.pickers.close}
             onInsertTemplate={composer.pickers.insertTemplate}
+            onInsertSkill={composer.pickers.insertSkillInvocation}
             defaultModel={composer.dshDefaultModel}
             defaultThinkingLevel={composer.dshDefaultThinkingLevel}
           />

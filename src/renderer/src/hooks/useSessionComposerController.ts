@@ -44,6 +44,7 @@ import {
   upsertSessionAtom,
 } from "../atoms";
 import {
+  appendSlashCommandToDraft,
   getComposerEnterIntent,
   isComposingKeyboardEvent,
   isPlanModeSendKey,
@@ -129,7 +130,7 @@ function friendlyCompactError(error: unknown): string | null {
     : t("app.compactFailed");
 }
 
-export type ComposerPickerKind = "model" | "thinking" | "template";
+export type ComposerPickerKind = "model" | "thinking" | "template" | "skill";
 
 export type UseSessionComposerControllerOptions = {
   sessionId: string;
@@ -1409,9 +1410,18 @@ export function useSessionComposerController(
   }, [loadTemplates]);
 
   const insertTemplate = useCallback((template: PromptTemplateInfo) => {
-    const next = draft.trimEnd()
-      ? `${draft.trimEnd()} /${template.name} `
-      : `/${template.name} `;
+    const next = appendSlashCommandToDraft(draft, template.name);
+    liveDomDraftRef.current = { sessionId, value: next };
+    setDraft(next);
+    caretRef.current = { pos: next.length, forValue: next };
+    setPicker(null);
+    requestAnimationFrame(() => editorRef.current?.focus());
+  }, [draft, sessionId, setDraft]);
+
+  // 技能选择器选中后插入 /技能名 到草稿尾（与 insertTemplate 同构）：
+  // 技能经 composer 的斜杠命令调用，插入后光标落在末尾，可直接回车发送。
+  const insertSkillInvocation = useCallback((name: string) => {
+    const next = appendSlashCommandToDraft(draft, name);
     liveDomDraftRef.current = { sessionId, value: next };
     setDraft(next);
     caretRef.current = { pos: next.length, forValue: next };
@@ -1548,6 +1558,7 @@ export function useSessionComposerController(
       close: () => setPicker(null),
       setMode,
       insertTemplate,
+      insertSkillInvocation,
     },
     modals: {
       closePreview: () => setPreviewImage(null),

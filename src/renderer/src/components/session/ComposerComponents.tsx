@@ -9,6 +9,8 @@ import {
 	FileText,
 	GitBranch,
 	Paperclip,
+	Plus,
+	Sparkles,
 	Star,
 	X,
 } from "lucide-react";
@@ -31,6 +33,13 @@ import {
 import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "../ui-shadcn/dropdown-menu";
 import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { ComposerModeSelect } from "./ComposerModeSelect";
 import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
@@ -231,6 +240,7 @@ export function ComposerBottomBar(props: {
 	sendControls: ReactNode;
 	onPickModel: () => void;
 	onPickPromptTemplate: () => void;
+	onPickSkill: () => void;
 	onPickThinking: () => void;
 	onCompact: () => void;
 	onChangeMode: (mode: ComposerAgentMode) => void;
@@ -367,22 +377,34 @@ export function ComposerBottomBar(props: {
 							</button>
 						)}
 					</div>
-					<Button variant="ghost" size="icon"
-						className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60"
-						aria-label={t("app.promptTemplatePickerTitle")} title={t("app.promptTemplatePickerTitle")}
-						disabled={props.disabled}
-						onClick={props.onPickPromptTemplate}
-					>
-						<FileText size={15} strokeWidth={2} aria-hidden="true" />
-					</Button>
-					<Button variant="ghost" size="icon"
-						className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60"
-						aria-label={t("menu.attachFile")} title={t("menu.attachFile")}
-						disabled={props.disabled}
-						onClick={props.onAttachFile}
-					>
-						<Paperclip size={15} strokeWidth={2} aria-hidden="true" />
-					</Button>
+					{/* 三合一「+」入口：附件/技能/Prompt 收起为单个菜单，底栏更简洁；
+					    菜单项 onSelect 后 Radix 自动关闭，无需手动 close。 */}
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button variant="ghost" size="icon"
+								className="composer-bar-btn icon size-7 rounded-md text-foreground hover:bg-muted/60"
+								aria-label={t("app.composerAddTitle")} title={t("app.composerAddTitle")}
+								disabled={props.disabled}
+							>
+								<Plus size={15} strokeWidth={2} aria-hidden="true" />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start" sideOffset={4} className="min-w-44">
+							<DropdownMenuItem onSelect={() => props.onAttachFile()}>
+								<Paperclip size={14} strokeWidth={2} aria-hidden="true" />
+								{t("app.composerAddAttach")}
+							</DropdownMenuItem>
+							<DropdownMenuItem onSelect={() => props.onPickSkill()}>
+								<Sparkles size={14} strokeWidth={2} aria-hidden="true" />
+								{t("app.composerAddSkill")}
+							</DropdownMenuItem>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem onSelect={() => props.onPickPromptTemplate()}>
+								<FileText size={14} strokeWidth={2} aria-hidden="true" />
+								{t("app.composerAddPrompt")}
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 					{isImageGenMode && props.imageGenOptions ? (
 						<ComposerImageGenOptions
 							config={props.imageGenOptions.config}
@@ -538,7 +560,7 @@ function ModelThinkingChip(props: {
  * 旧 Prompt 选择器仍使用统一 shadcn Dialog + cmdk；模型、思考级别和引导页使用 CommandPickerPanel，共享折叠、搜索和选中项定位。
  * 保留此壳是为了支持 Prompt 预览态的特殊头部与返回操作。
  */
-function PickerDialog(props: {
+export function PickerDialog(props: {
 	title: string;
 	hint?: string;
 	onClose: () => void;

@@ -15,6 +15,7 @@ import {
   PromptTemplatePicker,
   ThinkingPicker,
 } from "./ComposerParts";
+import { ComposerSkillPicker } from "./ComposerSkillPicker";
 import { desktopApi } from "../../desktopApi";
 import { showNotice } from "../../utils/notice";
 import { t } from "../../i18n";
@@ -37,6 +38,8 @@ export type ComposerPickerHostProps = {
   templates: PromptTemplateInfo[];
   onClose: () => void;
   onInsertTemplate: (template: PromptTemplateInfo) => void;
+  /** 技能选择：插入 /技能名 到输入框（由 controller 的 insertSkillInvocation 提供）。 */
+  onInsertSkill: (name: string) => void;
   /** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期高亮与过滤用。 */
   defaultModel?: { provider?: string; modelId?: string; modelName?: string };
   defaultThinkingLevel?: string;
@@ -371,6 +374,17 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         templates={props.templates}
         onClose={props.onClose}
         onPick={props.onInsertTemplate}
+      />
+    );
+  }
+  if (props.picker === "skill") {
+    return (
+      <ComposerSkillPicker
+        backend={isDshSession ? "dsh" : "pi"}
+        projectId={record?.projectId}
+        agentId={runtime?.agentId}
+        onClose={props.onClose}
+        onPick={props.onInsertSkill}
       />
     );
   }
