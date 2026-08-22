@@ -22,6 +22,21 @@ export function looksLikePiSessionFileStem(title: string): boolean {
 	);
 }
 
+/** pi-subagents 产物目录名：artifactDir="session"（默认）把子代理输入/输出/转储写进父会话同级目录。 */
+export const SUBAGENT_ARTIFACTS_DIR_NAME = "subagent-artifacts";
+
+/**
+ * 判断文件是否位于 pi-subagents 产物目录内。
+ *
+ * 这些 JSONL（如 `<runId>_<agent>_0_transcript.jsonl`）是扩展私有的 transcript
+ * 转储而非会话文件（无 type:session 头）。扫描与 catalog 若不排除，每个子代理会在
+ * 侧栏出现两条：真子会话嵌套在父会话下 + 产物转储平铺顶层（侧栏重复显示）。
+ * 该规则是 pi-subagents 三种 artifactDir 配置中唯一会落进 sessions 根的布局。
+ */
+export function isInSubagentArtifactsDir(filePath: string): boolean {
+	return filePath.replace(/\\/g, "/").split("/").includes(SUBAGENT_ARTIFACTS_DIR_NAME);
+}
+
 export function canonicalizeSessionPath(
 	filePath: string,
 	environment: SessionEnvironment,

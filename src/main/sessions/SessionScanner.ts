@@ -8,7 +8,7 @@ import { basename as posixBasename, dirname as posixDirname, isAbsolute as posix
 import type { ChatMessage, ChatRole, SessionSummary } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { getCodexSessionThreadInfo } from "../../shared/codexSessionMeta";
-import { looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
+import { isInSubagentArtifactsDir, looksLikePiSessionFileStem, SUBAGENT_ARTIFACTS_DIR_NAME } from "../../shared/sessionIdentity";
 import { extractMessageText, extractThinkingRaw } from "../pi/messageContent";
 import { toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -334,8 +334,10 @@ export class SessionScanner {
       execFile(this.wslExePath, [
         "-d", this.wslConfig!.distro, "-u", this.wslConfig!.user,
         // 跳过归档目录（.pideck-archive）与回收目录（.trash）：归档会话不参与常规扫描。
+        // subagent-artifacts 是 pi-subagents 产物转储，不是会话文件，与本地 collectJsonl 同口径排除。
         "find", sessionsDir, "-name", "*.jsonl", "-type", "f",
-        "-not", "-path", `*/${SessionScanner.ARCHIVE_DIR_NAME}/*`
+        "-not", "-path", `*/${SessionScanner.ARCHIVE_DIR_NAME}/*`,
+        "-not", "-path", `*/${SUBAGENT_ARTIFACTS_DIR_NAME}/*`
       ], {
         encoding: "utf8",
         timeout: 15_000,
@@ -1231,10 +1233,15 @@ export class SessionScanner {
 
     for (const entry of entries) {
       const path = join(dir, entry.name);
+      if (!entry.isDirectory()) {
+        if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
+        continue;
+      }
       // 跳过归档目录：归档会话不参与常规扫描（.trash 同理不扫）。
-      if (entry.isDirectory() && entry.name === SessionScanner.ARCHIVE_DIR_NAME) continue;
-      if (entry.isDirectory()) files.push(...await this.collectJsonl(path));
-      else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
+      // 跳过 subagent-artifacts：pi-subagents 的产物转储目录（transcript 等），
+      // 不是会话文件；混进扫描会让每个子代理在侧栏「嵌套 + 顶层平铺」重复显示。
+      if (entry.name === SessionScanner.ARCHIVE_DIR_NAME || entry.name === SUBAGENT_ARTIFACTS_DIR_NAME) continue;
+      files.push(...await this.collectJsonl(path));
     }
 
     return files;

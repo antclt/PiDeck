@@ -596,3 +596,37 @@ test("only user messages yield undefined model and undefined thinking", async ()
 		rmSync(home, { recursive: true, force: true });
 	}
 });
+
+// 回归：pi-subagents artifactDir="session"（默认）把子代理产物转储写进父会话同级的
+// subagent-artifacts/ 目录。里面的 *_transcript.jsonl 是扩展私有格式（recordType 行），
+// 不是 pi 会话文件；混进扫描会让每个子代理在侧栏出现「嵌套 + 顶层平铺」两条。
+test("excludes pi-subagents artifact dumps from scan results", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-subagent-artifacts-"));
+	try {
+		const projectPath = "C:\\repo\\project";
+		const piDir = join(home, ".pi", "agent", "sessions", "--C--repo-project--");
+		const parentFile = join(piDir, "parent.jsonl");
+		writeSession(parentFile, session("Parent", projectPath));
+
+		// 产物目录与真实子会话并存：子会话仍应正常嵌套，产物必须整体排除。
+		const childFile = join(piDir, "parent", "31f02534-c7dc-457e-a1ca-dc9311027461", "run-0", "session.jsonl");
+		writeSession(childFile, session("subagent-reviewer-31f02534-1", projectPath));
+		writeSession(join(piDir, "subagent-artifacts", "31f02534_reviewer_0_transcript.jsonl"), [
+			{ version: 1, recordType: "message", runId: "31f02534", agent: "reviewer", role: "user", text: "review prompt" },
+		]);
+
+		const { SessionScanner } = loadSessionScanner(home);
+		const summaries = await new SessionScanner().list(projectPath);
+		const paths = summaries.map((summary) => summary.filePath);
+
+		assert.equal(paths.includes(parentFile), true, "parent session must stay visible");
+		assert.equal(paths.includes(childFile), true, "real child session must stay listed for nesting");
+		assert.equal(
+			paths.some((filePath) => filePath.replace(/\\/g, "/").split("/").includes("subagent-artifacts")),
+			false,
+			"artifact dumps must not be scanned as sessions",
+		);
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
