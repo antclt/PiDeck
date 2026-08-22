@@ -382,7 +382,8 @@ export function ComposerSendControls(props: {
   onSend: () => void;
   onStop: () => void;
 }) {
-  // dsh-web 同款：一颗蓝圆钮。空闲发送；忙碌同一颗变停止。插入/排队/并行在排队行上选。
+  // 主题色圆钮（随外观主题主色：经典=近黑、森系绿=鼠尾草绿）。
+  // 空闲发送；忙碌同一颗变停止。插入/排队/并行在排队行上选。
   const primaryStops = props.isAgentBusy && !props.isGeneratingImage;
   const label = primaryStops ? t("app.stop") : t("app.send");
   const disabled = primaryStops
@@ -393,7 +394,7 @@ export function ComposerSendControls(props: {
       <Button
         variant="default"
         size="icon-sm"
-        className="composer-send-primary size-8 rounded-full bg-[var(--color-info)] text-white shadow-none hover:bg-[color:color-mix(in_srgb,var(--color-info)_88%,black)] disabled:opacity-40"
+        className="composer-send-primary size-8 rounded-full bg-[var(--color-accent)] text-[var(--color-text-inverse)] shadow-none hover:bg-[color:color-mix(in_srgb,var(--color-accent)_88%,black)] disabled:opacity-40"
         aria-label={label}
         title={label}
         disabled={disabled}

@@ -1186,17 +1186,17 @@ body.ask-dialog-open .ask-question-card.pending {
   justify-content: center;
   padding: var(--space-2);
   border-radius: 14px;
-  border: 2px solid #68b382;
-  background: #68b382;
-  color: #ffffff;
+  border: 2px solid var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
   cursor: pointer;
   transition:
     background 0.1s,
     border-color 0.1s;
 }
 .ask-question-card-submit:hover {
-  background: color-mix(in srgb, #68b382 85%, #000);
-  border-color: color-mix(in srgb, #68b382 85%, #000);
+  background: color-mix(in srgb, var(--color-accent) 85%, #000);
+  border-color: color-mix(in srgb, var(--color-accent) 85%, #000);
 }
 .ask-question-card-submit:disabled {
   opacity: 0.5;
