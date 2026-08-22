@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import {
+	AlertCircle,
 	Brain,
 	Check,
 	ChevronDown,
@@ -10,6 +11,7 @@ import {
 	GitBranch,
 	Paperclip,
 	Plus,
+	RefreshCw,
 	Sparkles,
 	Star,
 	X,
@@ -65,6 +67,8 @@ import type {
 	AvailableModel,
 	ComposerAgentMode,
 	GitBranchInfo,
+	ModelListFailReason,
+	ModelListReport,
 	SessionRecord,
 } from "../../../../shared/types";
 
@@ -603,6 +607,8 @@ function CommandPickerDialog(props: {
 	emptyLabel?: ReactNode;
 	value?: string;
 	showGroupActions?: boolean;
+	/** 标题栏操作（如模型列表手动刷新按钮）；渲染在折叠/展开按钮之后、关闭按钮之前 */
+	headerAction?: ReactNode;
 	children: ReactNode;
 }) {
 	return (
@@ -621,12 +627,67 @@ function CommandPickerDialog(props: {
 					emptyLabel={props.emptyLabel ?? t("app.commandPickerEmpty")}
 					value={props.value}
 					showGroupActions={props.showGroupActions}
+					headerAction={props.headerAction}
 					onClose={props.onClose}
 				>
 					{props.children}
 				</CommandPickerPanel>
 			</DialogContent>
 		</Dialog>
+	);
+}
+
+/** 模型列表加载失败原因 → 引导文案（硬失败时替换通用空态，给出可操作动作）。 */
+const MODEL_LIST_FAILURE_REASON_TEXT: Record<ModelListFailReason, TranslationKey> = {
+	"pi-not-found": "app.modelListFailPiNotFound",
+	"version-too-old": "app.modelListFailVersionTooOld",
+	"config-invalid": "app.modelListFailConfigInvalid",
+	"cli-failed": "app.modelListFailCliFailed",
+	"empty": "app.modelListFailEmpty",
+};
+
+/**
+ * 模型列表为空时的引导块：按失败原因给出差异化建议（升级 pi / 修配置 / 配 pi 路径 / 添加模型），
+ * 并附手动刷新入口（重新调用 pi --list-models）。
+ * 「加载不出来」最常见两类根因：pi 版本过低（连 --list-models 都不认）与 models.json/auth.json
+ * 配置损坏（CLI 与本地解析双双失败）——此前只显示"没有匹配的模型"，用户无从排查。
+ */
+function ModelListStatusGuide(props: {
+	report: ModelListReport | null;
+	refreshing?: boolean;
+	onRefresh?: () => void;
+}) {
+	const report = props.report;
+	if (!report) return null;
+	const hardFailure = !report.ok && report.reason !== null;
+	const textKey = hardFailure
+		? MODEL_LIST_FAILURE_REASON_TEXT[report.reason as ModelListFailReason]
+		: "app.modelListEmptyGuide";
+	return (
+		<div className="flex flex-col items-start gap-2.5 px-4 py-5" role="alert">
+			<div className="flex items-center gap-2 text-body font-semibold text-foreground">
+				<AlertCircle size={15} className={hardFailure ? "text-destructive" : "text-muted-foreground"} aria-hidden="true" />
+				{hardFailure ? t("app.modelListLoadFailed") : t("app.modelListEmptyTitle")}
+			</div>
+			<p className="text-caption leading-relaxed text-muted-foreground">{t(textKey)}</p>
+			{report.detail && (
+				<pre className="max-h-28 w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
+					{report.detail}
+				</pre>
+			)}
+			{props.onRefresh && (
+				<Button
+					variant="outline"
+					size="sm"
+					className="mt-1"
+					onClick={props.onRefresh}
+					disabled={props.refreshing}
+				>
+					<RefreshCw size={13} className={props.refreshing ? "animate-spin" : ""} aria-hidden="true" />
+					{props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRetry")}
+				</Button>
+			)}
+		</div>
 	);
 }
 
@@ -639,6 +700,12 @@ export function ModelPicker(props: {
 	favoriteModels?: string[];
 	/** 切换收藏状态；引导页不提供收藏操作，因此允许省略。 */
 	onToggleFavorite?: (provider: string, modelId: string) => void;
+	/** 模型列表加载报告：为空时（加载失败/无模型）展示原因引导（版本过低/配置损坏/pi 未安装等）。 */
+	report?: ModelListReport | null;
+	/** 手动刷新进行中（重新调用 pi --list-models） */
+	refreshing?: boolean;
+	/** 手动刷新：绕过缓存重新拉取模型列表 */
+	onRefresh?: () => void;
 }) {
 	const currentModelKey = props.current?.provider && props.current?.modelId
 		? `${props.current.provider}/${props.current.modelId}`
@@ -714,17 +781,43 @@ export function ModelPicker(props: {
 			emptyLabel={t("app.modelPickerEmpty")}
 			value={currentModelKey}
 			showGroupActions
+			// 手动刷新入口：标题栏右上角，任何情况下（含加载失败）都能重新拉取模型列表。
+			headerAction={
+				props.onRefresh ? (
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						className="text-muted-foreground hover:text-foreground"
+						aria-label={t("app.modelPickerRefresh")}
+						title={props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRefresh")}
+						onClick={props.onRefresh}
+						disabled={props.refreshing}
+					>
+						<RefreshCw size={14} className={props.refreshing ? "animate-spin" : ""} aria-hidden="true" />
+					</Button>
+				) : undefined
+			}
 		>
-			{favorites.length > 0 && (
-				<CommandPickerGroup id="favorites" label={t("app.modelFavorites")} count={favorites.length}>
-					{favorites.map(renderModelRow)}
-				</CommandPickerGroup>
+			{props.models.length === 0 && props.report ? (
+				<ModelListStatusGuide
+					report={props.report}
+					refreshing={props.refreshing}
+					onRefresh={props.onRefresh}
+				/>
+			) : (
+				<>
+					{favorites.length > 0 && (
+						<CommandPickerGroup id="favorites" label={t("app.modelFavorites")} count={favorites.length}>
+							{favorites.map(renderModelRow)}
+						</CommandPickerGroup>
+					)}
+					{sortedProviders.map((provider) => (
+						<CommandPickerGroup id={`provider:${provider}`} key={provider} label={provider} count={groupedModels[provider].length}>
+							{groupedModels[provider].map(renderModelRow)}
+						</CommandPickerGroup>
+					))}
+				</>
 			)}
-			{sortedProviders.map((provider) => (
-				<CommandPickerGroup id={`provider:${provider}`} key={provider} label={provider} count={groupedModels[provider].length}>
-					{groupedModels[provider].map(renderModelRow)}
-				</CommandPickerGroup>
-			))}
 		</CommandPickerDialog>
 	);
 }

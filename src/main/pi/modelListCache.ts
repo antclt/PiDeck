@@ -14,13 +14,41 @@
  * - 每次启动 Agent 时强制重取（防用户直接改文件不生效）。
  */
 
-import type { AvailableModel } from "../../shared/types";
+import type { AvailableModel, ModelListFailReason, ModelListReport } from "../../shared/types";
 import type { PiLocator } from "./PiLocator";
 import type { SettingsStore } from "../settings/SettingsStore";
 
-/** 本地 models.json 读取面：只依赖 parsed，避免 modelListCache 反向依赖 ConfigManager 实现。 */
+/** 本地 models.json 读取面：只依赖 parsed（+解析诊断），避免反向依赖 ConfigManager 实现。
+ *
+ *  `diagnostic` 在 models.json JSON 解析失败时存在（ConfigManager.readJsonFile 返回），
+ *  模型列表为空时据此把原因分类为「配置损坏」，而不是笼统的"没有模型"。 */
 export type ModelListConfigSource = {
-	getModelsConfig: () => Promise<{ parsed: unknown }>;
+	getModelsConfig: () => Promise<{
+		parsed: unknown;
+		diagnostic?: {
+			fileName?: string;
+			message?: string;
+			line?: number;
+			column?: number;
+			docsUrl?: string;
+		};
+	}>;
+};
+
+/** 模型列表失败分类的输入信号：CLI 错误 + 配置解析诊断 + pi 安装状态。 */
+export type ModelListFailureSignals = {
+	cliError: Error | null;
+	configDiagnostic: ModelListConfigDiagnostic | null;
+	piInstalled: boolean;
+	version: string | null;
+};
+
+/** models.json 解析诊断的模型列表内部形态。 */
+export type ModelListConfigDiagnostic = {
+	fileName: string;
+	message: string;
+	line?: number;
+	column?: number;
 };
 
 /** 全局缓存：模型列表（null = 未加载/已失效） */
@@ -185,16 +213,86 @@ export function modelsFromPiConfig(modelsFile: unknown): AvailableModel[] {
 	return models;
 }
 
+/** 截断长错误文本，避免详情区撑爆选择器。 */
+function clip(text: string, max = 260): string {
+	if (text.length <= max) return text;
+	return `${text.slice(0, max)}…`;
+}
+
+/**
+ * 把 CLI 失败 + 配置解析诊断 + pi 安装状态分类成可引导的原因（纯函数，可单测）。
+ * 优先级：pi 未安装 > 配置损坏 > 版本过旧 > 其他 CLI 失败 > 配置本身为空。
+ * - pi-not-found：--version 都跑不起来，先解决 pi 安装/路径；
+ * - config-invalid：models.json 解析报错（有行号/列号），或 CLI stderr 出现
+ *   json/config 类关键词——修复配置比升级/重装更直接；
+ * - version-too-old：连兼容参数（仅 --list-models）也被拒（unknown option）——
+ *   老版 pi 不支持该旗标，提示升级而非排查配置；
+ * - empty：pi 正常、配置合法但没有模型——去模型页添加 provider。
+ */
+export function classifyModelListFailure(
+	signals: ModelListFailureSignals,
+): { reason: ModelListFailReason; detail: string } {
+	const first = signals.cliError?.message ?? "";
+	if (!signals.piInstalled) {
+		return { reason: "pi-not-found", detail: clip(first || "pi not installed") };
+	}
+	if (signals.configDiagnostic) {
+		const d = signals.configDiagnostic;
+		const position =
+			d.line !== undefined ? ` at line ${d.line}:${d.column ?? 1}` : "";
+		return {
+			reason: "config-invalid",
+			detail: clip(`${d.fileName} parse failed${position}: ${d.message}`),
+		};
+	}
+	if (isUnknownCliOption(first)) {
+		return {
+			reason: "version-too-old",
+			detail: clip(
+				`pi ${signals.version ?? "unknown"} rejects --list-models: ${first}`,
+			),
+		};
+	}
+	if (/config|json|parse|provider|auth|yaml/i.test(first)) {
+		return { reason: "config-invalid", detail: clip(first) };
+	}
+	if (signals.cliError) {
+		return { reason: "cli-failed", detail: clip(first) };
+	}
+	return { reason: "empty", detail: "no models in models.json / auth.json" };
+}
+
+async function loadModelsFromLocalConfigDetailed(
+	configSource?: ModelListConfigSource,
+): Promise<{ models: AvailableModel[]; diagnostic: ModelListConfigDiagnostic | null }> {
+	if (!configSource) return { models: [], diagnostic: null };
+	try {
+		const result = await configSource.getModelsConfig();
+		const diagnostic = result.diagnostic
+			? {
+					fileName: result.diagnostic.fileName ?? "models.json",
+					message: result.diagnostic.message ?? "parse error",
+					line: result.diagnostic.line,
+					column: result.diagnostic.column,
+				}
+			: null;
+		return { models: modelsFromPiConfig(result.parsed), diagnostic };
+	} catch (error) {
+		// getModelsConfig 内部已捕获 ENOENT；这里兜底异常也视为解析失败，不向调用方抛。
+		return {
+			models: [],
+			diagnostic: {
+				fileName: "models.json",
+				message: error instanceof Error ? error.message : String(error),
+			},
+		};
+	}
+}
+
 async function loadModelsFromLocalConfig(
 	configSource?: ModelListConfigSource,
 ): Promise<AvailableModel[]> {
-	if (!configSource) return [];
-	try {
-		const result = await configSource.getModelsConfig();
-		return modelsFromPiConfig(result.parsed);
-	} catch {
-		return [];
-	}
+	return (await loadModelsFromLocalConfigDetailed(configSource)).models;
 }
 
 async function execPiListModels(
@@ -265,30 +363,57 @@ export async function runPiListModels(
 	return [];
 }
 
+/** resolveModelsDetailed 返回的内部细节：模型 + 失败信号（供诊断报告复用同一趟 CLI 调用）。 */
+type ModelListResolveDetail = {
+	models: AvailableModel[];
+	/** CLI 最后一次失败（未知参数/非 0 退出/命令不存在）；成功返回时置 null */
+	cliError: Error | null;
+	/** CLI 无模型时是否靠本地 models.json 兜底成功（回退可用 = 配置合法） */
+	fellBackToConfig: boolean;
+	configDiagnostic: ModelListConfigDiagnostic | null;
+};
+
+async function resolveModelsDetailed(
+	piLocator: PiLocator,
+	settingsStore: SettingsStore,
+	configSource?: ModelListConfigSource,
+): Promise<ModelListResolveDetail> {
+	let cliError: Error | null = null;
+	// 第一次尝试（内部含未知参数自动降级为仅 --list-models）
+	try {
+		const models = await runPiListModels(piLocator, settingsStore);
+		if (models.length > 0) {
+			return { models, cliError: null, fellBackToConfig: false, configDiagnostic: null };
+		}
+	} catch (error) {
+		cliError = error instanceof Error ? error : new Error(String(error));
+	}
+	// 空结果重试一次：启动早期 pi 冷启动/环境未就绪时可能返回空表头。
+	await new Promise((resolve) => setTimeout(resolve, 500));
+	try {
+		const models = await runPiListModels(piLocator, settingsStore);
+		if (models.length > 0) {
+			return { models, cliError: null, fellBackToConfig: false, configDiagnostic: null };
+		}
+	} catch (error) {
+		cliError = cliError ?? (error instanceof Error ? error : new Error(String(error)));
+	}
+	// CLI 仍无模型：回退本地 models.json（保留解析诊断供失败分类）。
+	const fallback = await loadModelsFromLocalConfigDetailed(configSource);
+	return {
+		models: fallback.models,
+		cliError,
+		fellBackToConfig: fallback.models.length > 0,
+		configDiagnostic: fallback.diagnostic,
+	};
+}
+
 async function resolveModels(
 	piLocator: PiLocator,
 	settingsStore: SettingsStore,
 	configSource?: ModelListConfigSource,
 ): Promise<AvailableModel[]> {
-	let models: AvailableModel[] = [];
-	try {
-		models = await runPiListModels(piLocator, settingsStore);
-	} catch {
-		models = [];
-	}
-	// 空结果重试一次：启动早期 pi 冷启动/环境未就绪时可能返回空表头。
-	if (models.length === 0) {
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		try {
-			models = await runPiListModels(piLocator, settingsStore);
-		} catch {
-			// CLI 仍失败：走本地配置兜底
-		}
-	}
-	if (models.length === 0) {
-		models = await loadModelsFromLocalConfig(configSource);
-	}
-	return models;
+	return (await resolveModelsDetailed(piLocator, settingsStore, configSource)).models;
 }
 
 /**
@@ -366,4 +491,105 @@ export function invalidateModelListCache(): void {
 /** 获取当前缓存的模型列表（不触发新的 fork）。 */
 export function getCachedModelList(): AvailableModel[] | null {
 	return cachedListModels;
+}
+
+/**
+ * 面向模型选择器的诊断报告：模型列表 + 为空时的失败原因分类（纯契约，供渲染层引导用户）。
+ * - 非 force 且有缓存：直接返回缓存（与 fetchModelList 一致，避免每次开选择器都 fork）；
+ * - force（手动刷新）：绕过缓存重新 fork（与 refreshModelList 语义一致）；
+ * - 列表为空时额外执行一次 pi --version 健康检查（仅在失败路径），并据
+ *   CLI 错误/配置诊断分类成 pi-not-found / version-too-old / config-invalid /
+ *   cli-failed / empty，UI 可按原因给出具体引导（升级 pi / 修配置 / 配置 pi 路径）。
+ */
+export async function resolveModelListReport(
+	piLocator: PiLocator,
+	settingsStore: SettingsStore,
+	configSource?: ModelListConfigSource,
+	force = false,
+): Promise<ModelListReport> {
+	const now = Date.now();
+	// 非手动刷新且缓存有数据：直接返回，避免与启动预取并发 fork。
+	if (!force && cachedListModels && cachedListModels.length > 0) {
+		return {
+			models: cachedListModels,
+			ok: true,
+			reason: null,
+			version: null,
+			detail: "",
+			source: "cache",
+			at: now,
+		};
+	}
+	// 已有在途请求（启动预取等）：先等它；结果非空就复用，避免重复 fork。
+	if (!force && cachedListModelsPending) {
+		const models = await cachedListModelsPending.catch(() => [] as AvailableModel[]);
+		if (models.length > 0) {
+			return {
+				models,
+				ok: true,
+				reason: null,
+				version: null,
+				detail: "",
+				source: "cache",
+				at: now,
+			};
+		}
+	}
+	const detail = await resolveModelsDetailed(piLocator, settingsStore, configSource);
+	if (detail.models.length > 0) {
+		// 与 fetchModelList 相同：空结果不写缓存；配置失效期间也不写（避免旧结果覆盖新配置）。
+		if (!configInvalidated) cachedListModels = detail.models;
+		return {
+			models: detail.models,
+			ok: true,
+			reason: null,
+			version: null,
+			// CLI 失败但配置兜底成功：仍能看到列表，附带一句来源说明，不打断使用。
+			detail:
+				detail.fellBackToConfig && detail.cliError
+					? `CLI failed, fell back to local models.json: ${clip(detail.cliError.message)}`
+					: "",
+			source: detail.fellBackToConfig ? "config-fallback" : "cli",
+			at: now,
+		};
+	}
+	// 列表为空：多花一次 --version 健康检查确认 pi 是否可用（仅失败路径）。
+	const settings = settingsStore.get();
+	let installed = true;
+	let version: string | null = null;
+	let checkError: string | null = null;
+	try {
+		const status = await piLocator.check(
+			settings.customPiPath,
+			settings.wslEnabled,
+			settings.wslDistro,
+			settings.wslUser,
+		);
+		installed = status.installed;
+		version = status.installed && status.version ? status.version : null;
+		checkError = status.error ?? null;
+	} catch (error) {
+		installed = false;
+		checkError = error instanceof Error ? error.message : String(error);
+	}
+	const classification = classifyModelListFailure({
+		cliError: detail.cliError,
+		configDiagnostic: detail.configDiagnostic,
+		piInstalled: installed,
+		version,
+	});
+	// pi 未安装时，--version 健康检查的错误文本比 CLI stderr 更可读（"pi: command not found"）。
+	const detailText =
+		classification.reason === "pi-not-found" && checkError
+			? clip(checkError)
+			: classification.detail;
+	return {
+		models: [],
+		ok: false,
+		reason: classification.reason,
+		version,
+		detail: detailText,
+		source: "none",
+		at: now,
+	};
 }

@@ -87,7 +87,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   // 思考选择器时拿不到过滤数据（显示全量档位）。
   const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
   const pickerNeedsModels = props.picker === "model" || (props.picker === "thinking" && isDshSession);
-  const { models } = useBackendModelCatalog({
+  // 模型目录 + 加载诊断报告：report 为空列表时给出失败原因引导（版本过低/配置损坏/pi 未安装），
+  // reload(true) 为手动刷新（绕过缓存重新 fork pi --list-models），选择器右上角提供刷新按钮。
+  const { models, report, refreshing, reload } = useBackendModelCatalog({
     sessionId,
     backend: isDshSession ? "dsh" : "pi",
     projectId: record?.projectId,
@@ -397,6 +399,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     return (
       <ModelPicker
         models={models}
+        report={report}
+        refreshing={refreshing}
+        onRefresh={() => reload(true)}
         current={{
           provider: runtime?.state?.provider ?? record?.model?.provider ?? props.defaultModel?.provider ?? welcomeModel?.provider,
           modelId: runtime?.state?.modelId ?? record?.model?.modelId ?? props.defaultModel?.modelId ?? welcomeModel?.modelId,

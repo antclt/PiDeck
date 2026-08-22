@@ -72,6 +72,8 @@ export function CommandPickerPanel(props: {
 	onValueChange?: (value: string) => void;
 	onClose?: () => void;
 	showGroupActions?: boolean;
+	/** 标题栏操作（模型列表手动刷新等）；置于折叠/展开按钮之后、关闭按钮之前 */
+	headerAction?: ReactNode;
 	children: ReactNode;
 	className?: string;
 }) {
@@ -154,6 +156,7 @@ export function CommandPickerPanel(props: {
 							</Button>
 						</>
 					)}
+					{props.headerAction}
 					{props.onClose && (
 						<Button
 							variant="ghost"

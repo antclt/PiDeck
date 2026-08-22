@@ -145,6 +145,32 @@ export type AvailableModel = {
 	reasoningEfforts?: Array<{ id: string; name?: string; description?: string }>;
 };
 
+/** 模型列表加载失败的成因分类：供模型选择器给出差异化引导（版本过低/配置损坏/pi 未安装）。 */
+export type ModelListFailReason =
+	| "pi-not-found"
+	| "version-too-old"
+	| "config-invalid"
+	| "cli-failed"
+	| "empty";
+
+/** 模型列表加载报告（projects:list-models-report）：模型数组 + 为空时的失败原因与详情。
+ *  旧通道 projects:list-models 只返回数组（失败即空），选择器无法解释"为什么没模型"；
+ *  本报告让渲染层能针对不同成因给出可操作的引导（升级 pi / 修配置 / 配置 pi 路径）。 */
+export type ModelListReport = {
+	models: AvailableModel[];
+	/** 列表非空（含配置兜底成功）时为 true */
+	ok: boolean;
+	reason: ModelListFailReason | null;
+	/** pi 版本（--version 结果）；未知时为 null */
+	version: string | null;
+	/** 失败详情（CLI stderr / 配置解析错误），已截断，可直接展示 */
+	detail: string;
+	/** 数据来源：cache / cli / config-fallback / none */
+	source: "cache" | "cli" | "config-fallback" | "none";
+	/** 报告生成时刻 */
+	at: number;
+};
+
 export type CreateAgentInput = {
 	projectId: string;
 	title?: string;

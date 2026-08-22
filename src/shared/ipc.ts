@@ -317,6 +317,9 @@ export const ipcChannels = {
 	agentsRuntimeState: "agents:runtime-state",
 	agentsState: "agents:state",
 	projectsListModels: "projects:list-models",
+	/** 模型列表诊断报告：模型数组 + 失败原因分类（版本过低/配置损坏/pi 未安装），
+	 *  供模型选择器在列表为空时给出差异化引导；force=true 时绕过缓存重新 fork。 */
+	projectsListModelsReport: "projects:list-models-report",
 	/** 模型规格查询：pi-ai 内置目录按模型 id 精确匹配，中转站通用 */
 	projectsGetModelSpec: "projects:get-model-spec",
 	agentsEvent: "agents:event",

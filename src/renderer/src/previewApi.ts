@@ -273,6 +273,17 @@ export function createPreviewApi(): PiDesktopApi {
 			chooseChatPath: async () => null,
 			setChatPath: async () => projects[0],
 			listModels: async () => [],
+			// 预览 iframe 不需要真实模型目录：构造一个恒空报告（无失败原因），
+			// 与真实通道的 ModelListReport 形状保持一致，避免类型分叉。
+			listModelsReport: async () => ({
+				models: [],
+				ok: false,
+				reason: null,
+				version: null,
+				detail: "",
+				source: "none" as const,
+				at: Date.now(),
+			}),
 			getModelSpec: async () => null,
 			onTrustRequest: noop,
 			respondTrustRequest: async () => undefined,
