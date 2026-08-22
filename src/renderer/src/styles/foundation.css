@@ -211,10 +211,12 @@
  */
 :root[data-accent="green"] {
   /* 森系绿（参考同目录 Proma 的 theme-forest-light 森息晨光）：
-     鼠尾草绿主色 #4a7854（hsl 134 24% 38%），不用荧光绿；深部 #36593d。 */
+     鼠尾草绿主色 #4a7854（hsl 134 24% 38%），不用荧光绿；深部 #36593d。
+     accent-soft 用 Proma 的 --accent（hsl 76 20% 84% = #dadece）——微暖黄绿强调，
+     他们刻意用它做悬停/选中以「减少单一绿调」。 */
   --color-accent: #4a7854;
   --color-accent-strong: #3f6347;
-  --color-accent-soft: #e4ecd9;
+  --color-accent-soft: #dadece;
   --color-brand-green: #36593d;
   --color-brand-blue: #2563eb;
   --color-brand-purple: #7c3aed;
@@ -471,10 +473,11 @@
 
 /* 暗色主题色预设（data-accent），亮色系保证可读性 */
 :root[data-theme="dark"][data-accent="green"] {
-  /* 森系绿暗色（参考 Proma theme-forest-dark 森息夜语）：雾绿灰主色 hsl(145,25%,42%) */
+  /* 森系绿暗色（参考 Proma theme-forest-dark 森息夜语）：雾绿灰主色 hsl(145,25%,42%)；
+     accent-soft 用其 --accent（hsl 150 12% 22% = #313f38）作悬停/选中暖调。 */
   --color-accent: #508667;
   --color-accent-strong: #66a380;
-  --color-accent-soft: #26332c;
+  --color-accent-soft: #313f38;
   --color-brand-green: #87c5a1;
   --color-logo-green: #64b486;
   --color-logo-green-mid: #508667;
@@ -545,7 +548,8 @@
   --color-bg-popover: #f8f9f5;
   --color-bg-input: #e7ebe0;
   --color-bg-muted: #e2e6db;
-  --color-bg-hover: #dbe0d2;
+  /* hover/active 采用 Proma 的暖调黄绿加深（--accent 76 20 84 / 82 16 78） */
+  --color-bg-hover: #dadece;
   --color-bg-active: #c9d0be;
   --color-text-primary: #273529;
   --color-text-secondary: #515f4e;
@@ -565,7 +569,7 @@
   --color-bg-popover: #2c3530;
   --color-bg-input: #212724;
   --color-bg-muted: #27302b;
-  --color-bg-hover: #2e3833;
+  --color-bg-hover: #313f38;
   --color-bg-active: #36443d;
   --color-text-primary: #e9edea;
   --color-text-secondary: #b2bdb6;

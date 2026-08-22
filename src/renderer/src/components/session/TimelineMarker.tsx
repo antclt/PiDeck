@@ -91,7 +91,10 @@ export function TimelineMarker(props: {
 /** 状态完成标记，供详情或完成态卡片复用，避免各域自行拼图标和颜色。 */
 export function TimelineSuccessMarker() {
   return (
-    <span className="grid size-5 place-items-center rounded-full bg-emerald-600 text-white dark:bg-emerald-500" aria-hidden="true">
+    <span
+      className="grid size-5 place-items-center rounded-full bg-[var(--color-accent)] text-[var(--color-text-inverse)]"
+      aria-hidden="true"
+    >
       <Check size={12} strokeWidth={2.5} />
     </span>
   );

@@ -13,6 +13,13 @@ test("credentialRefFor uses explicit env then derived ROUTE_API_KEY", () => {
   assert.equal(mapping.credentialRefFor({}, "opencode-go"), "OPENCODE_GO_API_KEY");
 });
 
+test("legacy provider route names get valid unique credential refs", () => {
+  const first = mapping.credentialRefFor({}, "输入");
+  const second = mapping.credentialRefFor({}, "供应商");
+  assert.match(first, /^PIDECK_[0-9A-F]{8}_API_KEY$/);
+  assert.match(second, /^[A-Za-z_][A-Za-z0-9_]*$/);
+  assert.notEqual(first, second);
+});
 test("pi custom gateway maps into llm-pi-ai with catalog fields only", () => {
   const dsh = mapping.piToDshSnapshot({
     name: "weishiair",
@@ -138,6 +145,48 @@ test("apply pi-to-dsh writes settings.yaml and credentials without starting host
   assert.match(creds, /sk-from-pi/);
 });
 
+test("apply pi-to-dsh uses the same valid legacy credential ref through a ready host", async () => {
+  const calls = { patch: null, ref: null };
+  const deps = {
+    configManager: {
+      getModelsConfig: async () => ({
+        parsed: {
+          providers: {
+            输入: {
+              baseUrl: "https://gateway.example/v1",
+              api: "openai-completions",
+              apiKey: "sk-from-pi",
+              models: [{ id: "legacy-model" }],
+            },
+          },
+        },
+      }),
+      getAuthConfig: async () => ({ parsed: {} }),
+      saveModelsConfig: async () => ({ valid: true }),
+      saveAuthConfig: async () => ({ valid: true }),
+    },
+    dshHost: {
+      getHomeDir: () => "",
+      isHostReady: () => true,
+      updateSettings: async (_ns, patch) => {
+        calls.patch = patch;
+      },
+      setCredential: async (ref) => {
+        calls.ref = ref;
+      },
+      describeSettings: async () => ({
+        namespaces: [{ ns: "llm-pi-ai", revision: 7, value: { providers: {} } }],
+      }),
+      readCredentialValue: async () => undefined,
+    },
+  };
+  const result = await service.applyProviderMigration(deps, "pi-to-dsh", "输入");
+  assert.equal(result.ok, true);
+  assert.equal(result.wroteViaHost, true);
+  const profile = calls.patch.providers["输入"];
+  assert.match(profile.apiKeyEnv, /^PIDECK_[0-9A-F]{8}_API_KEY$/);
+  assert.equal(calls.ref, profile.apiKeyEnv);
+});
 test("apply dsh-to-pi copies credential into auth.json", async () => {
   const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
   await writeFile(
