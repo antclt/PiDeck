@@ -1658,7 +1658,9 @@ body.ask-dialog-open .ask-question-card.pending {
 
 .composer {
   background: var(--color-bg-panel);
-  /* 左右必须为 0：否则输入框比消息区窄一截（旧 space-2 ≈ 8px）。无指标时无底距，有指标由 StatsLine 自带 pb。 */
+  /* 左右必须为 0：否则输入框比消息区窄一截（旧 space-2 ≈ 8px）。这里是 legacy
+     基线；ComposerArea 的 Tailwind `pb-2` 在 utilities 层保留 8px 底部留白，
+     并由内容测量计入面板高度。 */
   padding-inline: 0;
   padding-block: 0;
   min-width: 0;

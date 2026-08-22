@@ -251,7 +251,7 @@ export function SessionView({
     }
   }
 
-  function programResize(target: number): boolean {
+  function programResize(target: number): number | undefined {
     programmaticResizeTargetRef.current = target;
     programResizeExpireRef.current = Date.now() + 200;
     terminalProgrammaticExpireRef.current =
@@ -288,17 +288,35 @@ export function SessionView({
             { ...layout, composer: budget.composer, timeline: budget.timeline },
             { composer: bottomComposerVisible, terminal: terminalPanelVisible },
           );
-          group.setLayout(next);
-          return true;
+          // timeline 已触底时预算会把目标压低。状态必须保存最终可达值，而不是
+          // 原始内容目标，否则下一次相同内容测量会被去重，留下错误的受控高度。
+          const budgetTarget = Math.round((budget.composer / 100) * groupPx);
+          programmaticResizeTargetRef.current = budgetTarget;
+          const appliedLayout = group.setLayout(next);
+          const appliedTarget = Math.round(
+            ((appliedLayout.composer ?? budget.composer) / 100) * groupPx,
+          );
+          programmaticResizeTargetRef.current = appliedTarget;
+          window.setTimeout(() => {
+            if (Date.now() >= programResizeExpireRef.current) {
+              programmaticResizeTargetRef.current = null;
+            }
+          }, 250);
+          return appliedTarget;
         }
       }
       // group 未就绪（挂载早期）回退旧路径：相邻面板（terminal）让出空间。
-      composerPanelRef.current?.resize(target);
+      const panel = composerPanelRef.current;
+      if (!panel) {
+        programmaticResizeTargetRef.current = null;
+        return undefined;
+      }
+      panel.resize(target);
     } catch {
       // 面板尚未注册到 ResizablePanelGroup（挂载早期时序）时 resize 会抛
       // Group not found；静默跳过并清除目标值，下一轮内容测量会再次尝试。
       programmaticResizeTargetRef.current = null;
-      return false;
+      return undefined;
     }
     // 兜底：resize 未触发 onResize（面板未挂载/已卸载）时也清除目标值，
     // 避免残留目标吞掉下一次真实拖拽（与目标恰好一致的极小概率）。
@@ -307,7 +325,7 @@ export function SessionView({
         programmaticResizeTargetRef.current = null;
       }
     }, 250);
-    return true;
+    return target;
   }
 
   /**
@@ -328,7 +346,8 @@ export function SessionView({
     if (target === current && Math.abs(visualPx - target) <= 2) return;
     if (target > current) {
       contentDrivenHeightRef.current = target;
-      if (programResize(target)) applyComposerHeight(target, false);
+      const appliedHeight = programResize(target);
+      if (appliedHeight !== undefined) applyComposerHeight(appliedHeight, false);
       return;
     }
     // 未拖过必须收回空隙（指标消失、独立卡收起）；拖过才用内容驱动闸门，避免拖高被回吞。
@@ -337,7 +356,8 @@ export function SessionView({
         contentDrivenHeightRef.current,
         target,
       );
-      if (programResize(target)) applyComposerHeight(target, false);
+      const appliedHeight = programResize(target);
+      if (appliedHeight !== undefined) applyComposerHeight(appliedHeight, false);
     }
   }
 

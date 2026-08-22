@@ -34,9 +34,18 @@ test("composer measures extras and the input card as total content height", () =
   // 同步测量：layout effect 在绘制前 flush，面板 hug 与内容同帧
   assert.match(composerArea, /useLayoutEffect\(\(\) => \{\n\s*if \(!mountedRef\.current\) return;/);
   assert.match(composerArea, /const contentHeight = measureContentHeight\(\);[\s\S]*onHeightChangeRef\.current\(contentHeight\)/);
+  // 首测仍等 Panel 注册；之后子组件自己的展开/收起只会触发 ResizeObserver。
+  // 观察回调必须在绘制前同步提交，不能再延后一帧。
+  assert.match(composerArea, /import \{ flushSync \} from "react-dom"/);
   assert.match(
     composerArea,
-    /requestAnimationFrame\(\(\) => \{[\s\S]*mountedRef\.current = true;[\s\S]*reportContentHeight\(\);/,
+    /const reportObservedContentHeight = \(\) => \{\n\s*if \(!mountedRef\.current\) return;[\s\S]*?flushSync\(\(\) => \{\n\s*reportContentHeight\(\);\n\s*\}\);\n\s*\};/,
+  );
+  assert.match(composerArea, /new ResizeObserver\(reportObservedContentHeight\)/);
+  assert.match(composerArea, /mountedRef\.current = false;[\s\S]*observer\.disconnect\(\)/);
+  assert.match(
+    composerArea,
+    /initialMeasureFrame = requestAnimationFrame\(\(\) => \{[\s\S]*mountedRef\.current = true;[\s\S]*reportContentHeight\(\);/,
   );
   // 非受控（起始页）随内容 intrinsic 增高，不再用 extra+DEFAULT 抬本地 height
   assert.doesNotMatch(composerArea, /extra \+ \(props\.defaultHeight \?\? COMPOSER_DEFAULT_HEIGHT\)/);
@@ -53,14 +62,21 @@ test("extras height sync lives in a child that rerenders when variable content c
   );
 });
 
-test("content containers are shrink-proof so panel leftover cannot stretch extras or the input card", () => {
-  // widgets / 图片栏 / 输入卡均为 shrink-0：面板被终端拖高时剩余空间留白，
-  // 不反馈到 extra/box 高度，避免「面板变高→输入卡被拉高」。
+test("widget stacks scroll only when the panel is hard-capped, while the input card stays shrink-proof", () => {
+  // 正常高度下 widgets 按内容撑开；timeline/terminal 已到约束时才允许它缩小并内部滚动，
+  // 避免 footer overflow-hidden 把输入卡裁掉。自然 scrollHeight 仍参与 panel 预算。
   const widgetsSlot = composerArea.indexOf("ref={widgetsRef}");
   const attachmentSlot = composerArea.indexOf("ref={attachmentBarRef}");
   const boxSlot = composerArea.indexOf("ref={composerBoxRef}");
   assert.ok(widgetsSlot !== -1 && widgetsSlot < attachmentSlot);
-  assert.match(composerArea, /ref=\{widgetsRef\}[\s\S]*?className="flex shrink-0/);
+  assert.match(
+    composerArea,
+    /Math\.max\(widgetsEl\.offsetHeight, widgetsEl\.scrollHeight\)/,
+  );
+  assert.match(
+    composerArea,
+    /ref=\{widgetsRef\}[\s\S]*?className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden"/,
+  );
   assert.match(composerArea, /ref=\{attachmentBarRef\}[\s\S]*?className="shrink-0"/);
   assert.match(
     composerArea,
@@ -101,7 +117,7 @@ test("session view hugs composer panel to measured content height, not default p
   assert.doesNotMatch(sessionView, /Math\.max\(userPreferred, contentHeight, COMPOSER_MIN_HEIGHT\)/);
   assert.match(sessionView, /group\.setLayout\(next\)/);
   assert.match(sessionView, /growComposerWithinTimelineBudget/);
-  assert.match(sessionView, /composerPanelRef\.current\?\.resize\(target\)/);
+  assert.match(sessionView, /const panel = composerPanelRef\.current;[\s\S]*panel\.resize\(target\)/);
   assert.match(sessionView, /target > current/);
   assert.match(sessionView, /current <= contentDrivenHeightRef\.current/);
   assert.match(sessionView, /contentDrivenHeightRef\.current = Math\.min/);
@@ -109,7 +125,10 @@ test("session view hugs composer panel to measured content height, not default p
   assert.match(sessionView, /programResizeExpireRef\.current = Date\.now\(\) \+ 200/);
   assert.match(sessionView, /Math\.abs\(px - contentDrivenHeightRef\.current\) <= 2/);
   assert.match(sessionView, /applyComposerHeight\(px, true\)/);
-  assert.match(sessionView, /try \{[\s\S]*group\.setLayout\(next\)/);
+  assert.match(sessionView, /const appliedLayout = group\.setLayout\(next\)/);
+  assert.match(sessionView, /const appliedTarget = Math\.round\(/);
+  assert.match(sessionView, /appliedLayout\.composer \?\? budget\.composer/);
+  assert.match(sessionView, /const appliedHeight = programResize\(target\);[\s\S]*applyComposerHeight\(appliedHeight, false\)/);
   assert.match(sessionView, /Group not found/);
 });
 
@@ -133,6 +152,6 @@ test("auto growth does not relax the existing minimum-size constraints", () => {
   assert.match(rendererUtils, /COMPOSER_MIN_HEIGHT = 112/);
   assert.match(sessionView, /minSize=\{COMPOSER_MIN_HEIGHT\}/);
   assert.match(composerArea, /composer-box[^"]*shrink-0/);
-  // 无指标不垫 footer 底距，避免输入卡下出现预留空白。
-  assert.match(composerArea, /className="composer[^\"]*px-0 pb-0"/);
+  // footer 的 8px 底部留白属于可见内容，测量链会把它计进面板高度，避免输入卡贴边。
+  assert.match(composerArea, /className="composer[^\"]*px-0 pb-2"/);
 });

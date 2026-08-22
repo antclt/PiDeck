@@ -54,21 +54,15 @@ test("ask stays out of composer sizing and uses the session timeline as its scro
 });
 
 /**
- * 没有 Ask 时，composer 仍只需要容纳输入框自身；这个数值关系保证保留底部输入栏，
- * 同时把 Ask 的可变高度交给 timeline，而不是继续用一个无法满足的 312px 组合约束。
+ * 没有 Ask 时，composer 仍从输入卡的最小高度起步；footer 的底部留白会进入
+ * ComposerMeasuredExtras 的实测总高，再由 SessionView 在首次绘制前 hug 到正确高度。
+ * 这样 Ask 不参与 composer 分配，也不会把 8px 留白漏算成裁切。
  */
-test("composer minimum still fits the editor after ask moves to timeline", () => {
-  const composerMinHeight = 112;
-  const composerBoxMinHeight = 112;
-  // 无指标时 footer pb-0，独立卡 empty:hidden 不占 gap；最低只需输入卡本身。
-  const composerVerticalPadding = 0;
-  const composerGap = 0;
-  const requiredHeight = composerBoxMinHeight + composerVerticalPadding + composerGap;
-
-  assert.ok(
-    requiredHeight <= composerMinHeight,
-    `editor needs ${requiredHeight}px, but composer minimum is only ${composerMinHeight}px`,
-  );
+test("composer measurement includes the bottom breathing room after ask moves to timeline", () => {
+  assert.match(composerArea, /className="composer[^\"]*px-0 pb-2"/);
+  assert.match(composerArea, /style\.paddingBottom/);
+  assert.match(composerArea, /return Math\.ceil\([\s\S]*\+ paddingBottom\)/);
+  assert.match(sessionView, /resolveComposerPanelHeight\(/);
 });
 
 /**

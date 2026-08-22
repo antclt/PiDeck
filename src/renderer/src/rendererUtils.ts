@@ -13,7 +13,8 @@ import {
 
 // 默认高度只作测量前的首帧占位，测到内容后 hug 回去。
 // 最小高度对齐 composer-box CSS min-height(112)：输入区 + 模式/模型底栏。
-// 指标条不预留：无数字时 footer 无底 padding，面板按实测内容回缩，避免卡下空白。
+// 指标条不再预留独立高度；footer 保留的 8px 底部呼吸空间会被内容测量一并计入，
+// 面板按实测内容回缩，避免输入卡下出现未计入的空白。
 export const COMPOSER_DEFAULT_HEIGHT = 160;
 const COMPOSER_MIN_HEIGHT = 112;
 export { COMPOSER_MIN_HEIGHT };

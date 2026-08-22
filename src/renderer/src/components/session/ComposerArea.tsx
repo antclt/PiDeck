@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useAtom, useAtomValue } from "jotai";
 import {
   ComposerBottomBar,
@@ -79,8 +80,9 @@ type ComposerMeasuredExtrasProps = {
 
 /**
  * 必须作为 ComposerRuntimeIntegrations render-prop 子树中的独立组件存在：
- * widget 的关闭/更新只会重渲染这棵子树，不会重渲染外层 ComposerArea。
- * 测量 effect 放在这里，才能在 widget / 正文变化的同一帧 hug 面板，而不是等下一次输入。
+ * 父级 props 更新时，这里的 layout effect 会在绘制前测量；但待办、队列、文件
+ * 条及 Diff 的展开状态都在更深的子组件本地持有，不会让本组件重新渲染。
+ * 因此还要观察各测量块的实际尺寸，在子树独立改变高度时同步 hug 面板。
  *
  * 上报的是「独立卡 + 附件栏 + 输入卡」总高度，不是 extras 增量：输入卡 shrink-0，
  * 面板 hug 内容，拉伸 todo / 拖终端都不会把输入框撑高。
@@ -95,10 +97,17 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
   onHeightChangeRef.current = props.onHeightChange;
 
   const measureContentHeight = () => {
-    const widgetsH = widgetsRef.current?.offsetHeight ?? 0;
+    const widgetsEl = widgetsRef.current;
+    // 面板碰到 timeline/terminal 的硬约束后，widget 栈可独立滚动以确保输入卡
+    // 不被裁切。此时 offsetHeight 是可见高度，而 scrollHeight 保留内容的自然需求；
+    // 正常状态二者相同，取较大值让 hug 逻辑始终以完整内容预算面板。
+    const widgetsH = widgetsEl
+      ? Math.max(widgetsEl.offsetHeight, widgetsEl.scrollHeight)
+      : 0;
     const imageBarH = attachmentBarRef.current?.offsetHeight ?? 0;
     const boxH = composerBoxRef.current?.offsetHeight ?? 0;
-    // gap / 底 padding 实测：Tailwind gap-2 是 rem；无指标时 footer pb-0，有指标才由 StatsLine 占位。
+    // 从实际 footer 读取 gap / 底部留白，避免 Tailwind token 或视觉留白变更后
+    // 面板高度少算；所有可见内容都必须纳入 hug 高度。
     let gapPx = CONTENT_GAP_PX;
     let paddingBottom = 0;
     const footerEl = widgetsRef.current?.parentElement;
@@ -122,7 +131,7 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
     onHeightChangeRef.current(contentHeight);
   };
 
-  // props.widgets / 正文高度变化会重渲染本组件；在 paint 前同步 hug，输入区不会闪高一帧。
+  // 父级 props / 输入正文变化会重渲染本组件，layout effect 在绘制前同步 hug。
   useLayoutEffect(() => {
     if (!mountedRef.current) return;
     reportContentHeight();
@@ -130,23 +139,31 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
 
   const hasAttachmentBar = props.attachmentBar != null;
   useEffect(() => {
-    let rafId = 0;
-    const schedule = () => {
-      if (rafId) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        mountedRef.current = true;
+    let initialMeasureFrame = 0;
+    const reportObservedContentHeight = () => {
+      if (!mountedRef.current) return;
+      // ResizeObserver 在布局完成、浏览器绘制前投递。这里不能再套 rAF：
+      // 否则子组件先把输入卡挤开，下一帧面板才增高，会产生可见跳动。flushSync
+      // 使由 observer 发起的父级 setState / Group.setLayout 在本次绘制前一并提交。
+      flushSync(() => {
         reportContentHeight();
       });
     };
-    const observer = new ResizeObserver(schedule);
+    const observer = new ResizeObserver(reportObservedContentHeight);
     if (widgetsRef.current) observer.observe(widgetsRef.current);
     if (attachmentBarRef.current) observer.observe(attachmentBarRef.current);
     if (composerBoxRef.current) observer.observe(composerBoxRef.current);
-    // 首测延迟到下一帧：此时 ResizablePanel 已注册到 group。
-    schedule();
+    // 首次挂载时 Panel 仍可能尚未注册到 group；仅这一轮延迟到下一帧。
+    initialMeasureFrame = requestAnimationFrame(() => {
+      initialMeasureFrame = 0;
+      mountedRef.current = true;
+      reportContentHeight();
+    });
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
+      // ResizeObserver 可能已排队回调；先撤销 mounted 标记，避免卸载/重绑后的
+      // 旧观察器向父级写入过期高度。
+      mountedRef.current = false;
+      if (initialMeasureFrame) cancelAnimationFrame(initialMeasureFrame);
       observer.disconnect();
     };
   }, [hasAttachmentBar]);
@@ -155,7 +172,7 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
     <>
       <div
         ref={widgetsRef}
-        className="flex shrink-0 min-h-0 min-w-0 flex-col gap-2 empty:hidden"
+        className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden"
       >
         {props.widgets}
         {props.queuePanel}

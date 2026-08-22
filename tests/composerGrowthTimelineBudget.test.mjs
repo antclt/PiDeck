@@ -184,6 +184,14 @@ test("session view uses the budget function in programResize (not raw delta)", (
     "src/renderer/src/components/session/SessionView.tsx",
     "utf8",
   );
+  const terminalDockPanel = readFileSync(
+    "src/renderer/src/components/terminal/TerminalDockPanel.tsx",
+    "utf8",
+  );
+  const terminalDockState = readFileSync(
+    "src/renderer/src/terminalDockState.ts",
+    "utf8",
+  );
   // programResize 必须走预算函数：raw delta 在 timeline 触底时会压扁 terminal
   assert.match(sessionView, /growComposerWithinTimelineBudget/);
   assert.match(sessionView, /sanitizeSessionPanelLayout/);
@@ -205,8 +213,14 @@ test("session view uses the budget function in programResize (not raw delta)", (
 
   // timeline 面板的 minSize 用同一常量，预算函数与 JSX 约束不漂移
   assert.match(sessionView, /minSize=\{TIMELINE_MIN_HEIGHT\}/);
-  // 折叠阈值判定仍保留（用户拖拽到 35px 以下应折叠），但程序化增长不再触发它
-  assert.match(sessionView, /px <= 35/);
+  // 折叠阈值已收敛在 TerminalDockPanel 的纯状态规则；SessionView 仍要把
+  // composer 的程序化 resize 保护窗口传进去，避免自动增长误写成用户折叠。
+  assert.match(
+    sessionView,
+    /isProgrammaticResize=\{\(\) => Date\.now\(\) < terminalProgrammaticExpireRef\.current\}/,
+  );
+  assert.match(terminalDockPanel, /applyTerminalPanelResize/);
+  assert.match(terminalDockState, /TERMINAL_COLLAPSE_THRESHOLD_PX = 35/);
   // 折叠终端必须走 redistribuion：库的 collapse() 会把高度补给相邻 composer
   assert.match(sessionView, /redistributeTerminalAgainstTimeline/);
   assert.match(sessionView, /composerHeightStateRef\.current \/ groupPx/);
