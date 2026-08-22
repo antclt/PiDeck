@@ -1,9 +1,11 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import type { AppSettings } from "../../../../../shared/types";
+import type { AppSettings, AvailableModel } from "../../../../../shared/types";
+import { Search } from "lucide-react";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { Checkbox } from "../../ui-shadcn/checkbox";
 import { Input } from "../../ui-shadcn/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../ui-shadcn/table";
 import { SettingsSection } from "./SettingsStorageTab";
 import { SettingRow, SettingSwitchRow } from "./SettingRows";
 import { desktopApi } from "../../../desktopApi";
@@ -13,7 +15,7 @@ const PROXY_FIELDS: (keyof AppSettings)[] = [
   "piProxyEnabled",
   "piProxyUrl",
   "piProxyBypass",
-  "piProxyProviders",
+  "piProxyModels",
   "desktopProxyEnabled",
   "desktopProxyUrl",
   "desktopProxyBypass",
@@ -32,36 +34,72 @@ type ProxyTabProps = {
 /**
  * 设置弹框「代理设置」tab：pi / 桌面代理两段（未保存变更提示 + 统一保存/取消）。
  * 独立组件 + memo：切换 tab 或壳层无关状态变化时不重渲染本 tab。
+ * 「按模型走代理」用模型表格（与 Pi 管理 → 模型 同款 Table 展示），搜索按 provider/ID/名称过滤。
  */
 export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
   const { draft, updateDraft, isDirty } = props;
   // 代理 tab 仍展示未保存提示；实际保存/取消统一走全局草稿，避免旧 proxyDirty 局部状态残留。
   const proxyDirty = PROXY_FIELDS.some((field) => isDirty(field));
-  // 按供应商过滤：从 models.json 拉全量模型以展示可选供应商（与会话创建时的 provider 集合一致）。
-  const [availableProviders, setAvailableProviders] = useState<string[] | null>(null);
-  const [providersLoading, setProvidersLoading] = useState(false);
+  // 模型白名单候选：从 models.json 拉全量（与会话模型选择器同一数据源），保留 AvailableModel 结构，
+  // 搜索可同时命中 provider/modelId 与显示名。
+  const [availableModelList, setAvailableModelList] = useState<AvailableModel[] | null>(null);
+  const [modelSearch, setModelSearch] = useState("");
+  const [proxyListLoading, setProxyListLoading] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    setProvidersLoading(true);
+    setProxyListLoading(true);
     void desktopApi.projects.listModels(undefined).then((models) => {
       if (cancelled) return;
-      const providers = [...new Set(models.map((m) => m.provider).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-      setAvailableProviders(providers);
+      // 无 provider 的模型无法参与 provider/modelId 匹配（策略层直接跳过），不进名单候选。
+      setAvailableModelList(models.filter((m) => m.provider && m.id));
     }).catch(() => {
-      if (!cancelled) setAvailableProviders([]);
+      if (!cancelled) setAvailableModelList([]);
     }).finally(() => {
-      if (!cancelled) setProvidersLoading(false);
+      if (!cancelled) setProxyListLoading(false);
     });
     return () => { cancelled = true; };
   }, []);
-  const selectedProviders = useMemo(() => new Set(draft.piProxyProviders ?? []), [draft.piProxyProviders]);
-  // 已选但不在当前 models.json 中的供应商（可能已删模型/改名），仍需展示可取消。
-  const allDisplayProviders = useMemo(() => {
-    const base = availableProviders ?? [];
-    const extras = (draft.piProxyProviders ?? []).filter((p) => !base.includes(p));
-    return [...base, ...extras].sort((a, b) => a.localeCompare(b));
-  }, [availableProviders, draft.piProxyProviders]);
-  const hasProviderFilter = (draft.piProxyProviders?.length ?? 0) > 0;
+  const selectedModels = useMemo(() => new Set(draft.piProxyModels ?? []), [draft.piProxyModels]);
+  const availableModelKeys = useMemo(
+    () => new Set((availableModelList ?? []).map((m) => `${m.provider}/${m.id}`)),
+    [availableModelList],
+  );
+  // 已选但不在当前 models.json 的条目（可能已删模型/改名），单独小节展示可取消，防止坏值残留不可见。
+  const extraModelKeys = useMemo(
+    () => [...selectedModels].filter((key) => !availableModelKeys.has(key)).sort((a, b) => a.localeCompare(b)),
+    [selectedModels, availableModelKeys],
+  );
+  const hasModelFilter = (draft.piProxyModels?.length ?? 0) > 0;
+  // 搜索：本地即时过滤（provider/modelId 与显示名均可命中），仅影响显示，不影响已保存名单。
+  const modelSearchQuery = modelSearch.trim().toLowerCase();
+  const visibleModels = useMemo(() => {
+    const list = availableModelList ?? [];
+    if (!modelSearchQuery) return list;
+    return list.filter((m) => {
+      const key = `${m.provider}/${m.id}`;
+      return key.toLowerCase().includes(modelSearchQuery) || (m.name ?? "").toLowerCase().includes(modelSearchQuery);
+    });
+  }, [availableModelList, modelSearchQuery]);
+  // 勾选/取消：provider/modelId 为原子条目，与策略层 resolveModelProxyMode 的匹配格式一致。
+  const toggleModelKey = (key: string, checked: boolean) => {
+    const nextSet = new Set(selectedModels);
+    if (checked) nextSet.add(key);
+    else nextSet.delete(key);
+    updateDraft({ piProxyModels: [...nextSet] });
+  };
+  /** extras 的紧凑勾选行（无供应商/名称列，整串 key 展示）。 */
+  const renderExtraRow = (key: string) => {
+    const checked = selectedModels.has(key);
+    return (
+      <label key={key} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-control hover:bg-muted/40">
+        <Checkbox
+          checked={checked}
+          onCheckedChange={(next) => toggleModelKey(key, next === true)}
+        />
+        <span className="min-w-0 truncate font-mono text-caption" title={key}>{key}</span>
+      </label>
+    );
+  };
 
   return (
     <>
@@ -123,50 +161,98 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
                 : t("settings.testProxy")}
             </Button>
           </SettingRow>
-          {/* 按供应商走代理：名单非空时仅名单内供应商强制走代理（即使全局关闭也复用下方地址），名单外强制直连。
-              留空=不按供应商过滤（沿用全局开关/会话代理），解决“新建会话首条请求无代理”痛点。 */}
+          {/* 按模型走代理：名单内模型强制走代理（即使全局关闭也复用上方地址），名单外强制直连；
+              留空则跟随全局/会话设置。模型表格与 Pi 管理 → 模型 同款展示，搜索按任意列过滤。 */}
           <SettingRow
-            title={<span>{t("settings.piProxyProviders")}</span>}
-            description={t("settings.piProxyProvidersDesc")}
+            title={<span>{t("settings.piProxyModels")}</span>}
+            description={t("settings.piProxyModelsDesc")}
             stacked
           >
             <div className="flex flex-col gap-2.5">
-              <div className="flex flex-wrap items-center gap-2 text-micro text-muted-foreground/80">
-                {hasProviderFilter ? (
-                  <span>{t("settings.piProxyProvidersSelected", { count: selectedProviders.size })}</span>
-                ) : (
-                  <span>{t("settings.piProxyProvidersAllFollow")}</span>
-                )}
-                {hasProviderFilter && (
-                  <Button variant="ghost" size="sm" className="h-6 px-2 text-micro" onClick={() => updateDraft({ piProxyProviders: [] })}>{t("settings.piProxyProvidersClear")}</Button>
-                )}
+              {/* 顶部操作行：搜索 + 已选计数 + 清空（结构对齐 Pi 管理模型列表头部） */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative min-w-0 flex-1 basis-52">
+                  <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70" aria-hidden="true" />
+                  <Input
+                    type="text"
+                    value={modelSearch}
+                    onChange={(event) => setModelSearch(event.target.value)}
+                    placeholder={t("settings.piProxyModelsSearch")}
+                    className="h-8 pl-8 text-control"
+                    disabled={proxyListLoading}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-micro text-muted-foreground/80">
+                  {hasModelFilter ? (
+                    <span>{t("settings.piProxyModelsSelected", { count: selectedModels.size })}</span>
+                  ) : (
+                    <span>{t("settings.piProxyModelsAllFollow")}</span>
+                  )}
+                  {hasModelFilter && (
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-micro" onClick={() => updateDraft({ piProxyModels: [] })}>{t("settings.piProxyModelsClear")}</Button>
+                  )}
+                </div>
               </div>
-              {providersLoading ? (
-                <span className="text-micro text-muted-foreground">{t("settings.piProxyProvidersLoading")}</span>
-              ) : allDisplayProviders.length === 0 ? (
-                <span className="text-micro text-muted-foreground">{t("settings.piProxyProvidersEmpty")}</span>
-              ) : (
-                <div className="grid max-h-48 grid-cols-2 gap-2 overflow-auto rounded-md border border-border/60 bg-muted/20 p-2.5 sm:grid-cols-3">
-                  {allDisplayProviders.map((provider) => {
-                    const checked = selectedProviders.has(provider);
-                    return (
-                      <label key={provider} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-control hover:bg-muted/60">
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={(next) => {
-                            const nextSet = new Set(selectedProviders);
-                            if (next === true) nextSet.add(provider);
-                            else nextSet.delete(provider);
-                            updateDraft({ piProxyProviders: [...nextSet] });
-                          }}
-                        />
-                        <span className="min-w-0 truncate font-mono text-caption">{provider}</span>
-                      </label>
-                    );
-                  })}
+              {/* 已选但不在当前列表的模型（可能已删/改名）：独立小节防止坏值残留不可见 */}
+              {extraModelKeys.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <span className="px-0.5 text-micro font-medium text-muted-foreground">{t("settings.piProxyModelsExtras")}</span>
+                  <div className="flex flex-col gap-1 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
+                    {extraModelKeys.map(renderExtraRow)}
+                  </div>
                 </div>
               )}
-              <span className="text-micro text-muted-foreground/70">{t("settings.piProxyProvidersHint")}</span>
+              {proxyListLoading ? (
+                <span className="text-micro text-muted-foreground">{t("settings.piProxyModelsLoading")}</span>
+              ) : visibleModels.length === 0 ? (
+                <span className="text-micro text-muted-foreground">{t("settings.piProxyModelsEmpty")}</span>
+              ) : (
+                <div className="max-h-80 overflow-auto rounded-lg border border-border/60 bg-popover/40">
+                  <Table>
+                    <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-10" />
+                        <TableHead className="min-w-0">{t("config.modelId")}</TableHead>
+                        <TableHead className="w-36 max-w-36">{t("settings.proxyProvider")}</TableHead>
+                        <TableHead className="w-48 max-w-48">{t("config.modelDisplayName")}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {visibleModels.map((m) => {
+                        const key = `${m.provider}/${m.id}`;
+                        const checked = selectedModels.has(key);
+                        return (
+                          // 整行可点击切换；勾选列拦截冒泡避免 checkbox 触发两次（onChange + row onClick）。
+                          <TableRow
+                            key={key}
+                            className="cursor-pointer"
+                            onClick={() => toggleModelKey(key, !checked)}
+                          >
+                            <TableCell className="w-10 p-2 pl-3" onClick={(event) => event.stopPropagation()}>
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(next) => toggleModelKey(key, next === true)}
+                                aria-label={key}
+                              />
+                            </TableCell>
+                            <TableCell className="p-2 font-mono text-caption text-foreground" title={key}>{m.id}</TableCell>
+                            <TableCell className="max-w-36 p-2 font-mono text-caption text-muted-foreground">
+                              <span className="block truncate">{m.provider}</span>
+                            </TableCell>
+                            <TableCell className="min-w-0 max-w-48 p-2 text-caption text-muted-foreground">
+                              <span className="block truncate" title={m.name}>{m.name ?? ""}</span>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              {modelSearchQuery && visibleModels.length > 0 && (
+                <span className="text-micro text-muted-foreground/70">{t("settings.piProxyModelsSearchHint")}</span>
+              )}
+              <span className="text-micro text-muted-foreground/70">{t("settings.piProxyModelsHint")}</span>
             </div>
           </SettingRow>
         </div>

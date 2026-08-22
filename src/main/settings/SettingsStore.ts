@@ -146,6 +146,7 @@ Gitmoji 对应关系：
   piProxyUrl: "http://127.0.0.1:7890",
   piProxyBypass: "localhost,127.0.0.1,::1",
   piProxyProviders: [],
+  piProxyModels: [],
   desktopProxyEnabled: false,
   desktopProxyUrl: "http://127.0.0.1:7890",
   desktopProxyBypass: "localhost,127.0.0.1,::1",
@@ -243,8 +244,9 @@ export class SettingsStore {
       // 语义从「最大宽度 px」变为「占面板百分比」，无法精确换算（面板宽度可变），
       // 用线性映射保留旧值感觉：800→60%、1400→84%、1800(不限)→100%。
       this.migrateContentWidth();
-      // 兼容迁移：按供应商过滤的代理白名单，旧数据缺省为 []（不按供应商过滤，保持全局行为）。
+      // 兼容迁移：按供应商/模型过滤的代理白名单，旧数据缺省为 []（不按名单过滤，保持全局行为）。
       this.normalizePiProxyProviders();
+      this.normalizePiProxyModels();
       // 生图尺寸/水印来自旧 JSON 时可能非法；回落默认，避免底栏和下一次请求带着坏值。
       this.settings.imageGenSize =
         parseImageGenSize(this.settings.imageGenSize) ?? DEFAULT_IMAGE_GEN_SIZE;
@@ -307,21 +309,12 @@ export class SettingsStore {
   async update(patch: Partial<AppSettings>) {
     // showThinking 完全由 pi agent 的 hideThinkingBlock 控制，不允许通过桌面设置修改
     const { showThinking: _, ...safePatch } = patch;
-    // 按供应商代理白名单变更时做规范化（去重去空白），避免非法值写入磁盘。
+    // 按供应商/模型代理白名单变更时做规范化（去重去空白），避免非法值写入磁盘。
     if ("piProxyProviders" in safePatch) {
-      const raw = safePatch.piProxyProviders;
-      if (Array.isArray(raw)) {
-        const dedup = new Set<string>();
-        for (const item of raw) {
-          if (typeof item !== "string") continue;
-          const trimmed = item.trim();
-          if (!trimmed) continue;
-          dedup.add(trimmed);
-        }
-        safePatch.piProxyProviders = [...dedup];
-      } else {
-        safePatch.piProxyProviders = [];
-      }
+      safePatch.piProxyProviders = normalizeProxyList(safePatch.piProxyProviders);
+    }
+    if ("piProxyModels" in safePatch) {
+      safePatch.piProxyModels = normalizeProxyList(safePatch.piProxyModels);
     }
     this.settings = { ...this.settings, ...safePatch };
     // 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。
@@ -364,19 +357,12 @@ export class SettingsStore {
 
   /** 规范化按供应商代理白名单：去重、去空白、过滤非字符串。 */
   private normalizePiProxyProviders() {
-    const raw = this.settings.piProxyProviders;
-    if (!Array.isArray(raw)) {
-      this.settings.piProxyProviders = [];
-      return;
-    }
-    const dedup = new Set<string>();
-    for (const item of raw) {
-      if (typeof item !== "string") continue;
-      const trimmed = item.trim();
-      if (!trimmed) continue;
-      dedup.add(trimmed);
-    }
-    this.settings.piProxyProviders = [...dedup];
+    this.settings.piProxyProviders = normalizeProxyList(this.settings.piProxyProviders);
+  }
+
+  /** 规范化按模型代理白名单：去重、去空白、过滤非字符串（旧数据缺省为 []）。 */
+  private normalizePiProxyModels() {
+    this.settings.piProxyModels = normalizeProxyList(this.settings.piProxyModels);
   }
 
   /** 旧磁盘可能没有 schedule；非法值回落到 system，避免 data-theme 写成未知值。 */
@@ -462,4 +448,20 @@ export class SettingsStore {
     this.settings.installationType = installationType;
     await this.save();
   }
+}
+
+/**
+ * 归一化代理白名单（供应商/模型共用）：过滤非字符串、去空白、去重、保留顺序。
+ * 非法值（非数组）一律回落空数组，避免坏数据写入磁盘。
+ */
+function normalizeProxyList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const dedup = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    dedup.add(trimmed);
+  }
+  return [...dedup];
 }

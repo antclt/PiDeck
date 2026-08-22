@@ -93,7 +93,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "piProxyEnabled", tab: "proxy", itemKey: "settings.enablePiProxy" },
 	{ field: "piProxyUrl", tab: "proxy", itemKey: "settings.proxyUrl" },
 	{ field: "piProxyBypass", tab: "proxy", itemKey: "settings.proxyBypass" },
-	{ field: "piProxyProviders", tab: "proxy", itemKey: "settings.piProxyProviders" },
+	{ field: "piProxyModels", tab: "proxy", itemKey: "settings.piProxyModels" },
 	{ field: "desktopProxyEnabled", tab: "proxy", itemKey: "settings.enableDesktopProxy" },
 	{ field: "desktopProxyUrl", tab: "proxy", itemKey: "settings.proxyUrl" },
 	{ field: "desktopProxyBypass", tab: "proxy", itemKey: "settings.proxyBypass" },

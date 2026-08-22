@@ -29,6 +29,8 @@ export function registerImageGenIpc(deps: {
 		prompt: string;
 		image: { data: string; mimeType: string };
 		size?: string;
+		/** 参考图：随 user 消息一并落盘（历史恢复时时间线里能看到参考图） */
+		referenceImages?: Array<{ data: string; mimeType: string }>;
 	}) => Promise<void>;
 }) {
 	const { imageGen, imageGenConfig, log, persistImageGen } = deps;
@@ -83,6 +85,7 @@ export function registerImageGenIpc(deps: {
 					prompt,
 					image: result.image,
 					size,
+					referenceImages: referenceImages ?? undefined,
 				});
 			} catch (error) {
 				log("imagegen", "persist to session failed", {

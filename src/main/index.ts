@@ -2496,7 +2496,7 @@ function registerIpc() {
 			getProviderCredentials: async (provider) => {
 				const creds = await imageGenConfigStore.getCredentials(provider);
 				if (!creds) return null;
-				return { baseUrl: creds.baseUrl, apiKey: creds.apiKey, extraParams: creds.extraParams, referenceMode: creds.provider.referenceMode };
+				return { baseUrl: creds.baseUrl, apiKey: creds.apiKey, extraParams: creds.extraParams, referenceMode: creds.provider.referenceMode, apiStyle: creds.provider.apiStyle };
 			},
 			log: (message, ...args) => appLogger.info("imagegen", message, ...args),
 		}),
@@ -2506,7 +2506,7 @@ function registerIpc() {
 		// 让「不走 pi/dsh 直连 API」的生图结果也进会话历史（重启后可见）。
 		// DSH 会话无 pi 会话文件且 host 无消息追加 API，跳过（生图仍正常返回）。
 		// agentManager/sessionCatalog 在此处尚未初始化，闭包延迟引用（IPC 调用时已就绪）。
-		persistImageGen: async ({ sessionId, provider, model, prompt, image, size }) => {
+		persistImageGen: async ({ sessionId, provider, model, prompt, image, size, referenceImages }) => {
 			const entry = sessionCatalog?.get(sessionId);
 			if (!entry || entry.backend === "dsh") return;
 			// 标题更新不依赖会话文件：生图 draft 会话不启动 pi agent，无 filePath，
@@ -2527,7 +2527,18 @@ function registerIpc() {
 			await agentManager?.appendLocalMessagesToSession(entry.filePath, [
 				{
 					role: "user",
-					content: [{ type: "text", text: prompt }],
+					// 参考图随 user 消息落盘：重启恢复历史时时间线里能看到参考图
+					content: [
+						{ type: "text", text: prompt },
+						...(referenceImages ?? []).map((ref) => ({
+							type: "image" as const,
+							source: {
+								type: "base64" as const,
+								media_type: ref.mimeType,
+								data: ref.data,
+							},
+						})),
+					],
 				},
 				{
 					role: "assistant",
@@ -3046,18 +3057,20 @@ app.whenReady().then(async () => {
 		(key) => Boolean(key && feishuBridge?.hasSessionBinding(key)),
 		// 通知点击跳转需要 record.id（renderer 按它索引会话）；agentId → record.id 由 coordinator 维护。
 		(agentId) => sessionRuntimeCoordinator.getSessionId(agentId),
-		// 会话级代理覆盖（含按供应商过滤）：
-		// 1. 会话显式 on/off 最高优；2. 全局 piProxyProviders 非空时按会话 model.provider 自动映射 on/off
-		//    （force_on：名单内即使全局关闭也复用全局 URL，实现“指定供应商走代理”）；3. 否则跟随全局。
-		// 解决“新建会话首条请求无代理”痛点：无需先激活再手动切会话代理，创建时模型已确定即带正确代理。
+		// 会话级代理覆盖（含按模型/供应商两级白名单过滤）：
+		// 1. 会话显式 on/off 最高优；2. 全局名单非空时按会话 model 自动映射 on/off——
+		//    模型名单（provider/modelId，粒度更细）优先，供应商名单（provider）兜底；
+		//    （force_on：名单内即使全局关闭也复用全局 URL，实现“指定模型/供应商走代理”）；
+		// 3. 否则跟随全局。解决“新建会话首条请求无代理”痛点：创建时模型已确定即带正确代理。
 		(sessionKey) => {
 			if (!sessionKey || !sessionCatalog) return undefined;
 			const entry = sessionCatalog.get(sessionKey);
 			if (!entry) return undefined;
 			const sessionMode = entry.proxy?.mode;
 			const provider = entry.model?.provider;
-			const providers = settingsStore.get().piProxyProviders;
-			return resolveEffectiveSessionProxyMode(sessionMode, provider, providers);
+			const modelId = entry.model?.modelId;
+			const { piProxyProviders, piProxyModels } = settingsStore.get();
+			return resolveEffectiveSessionProxyMode(sessionMode, provider, modelId, piProxyProviders, piProxyModels);
 		},
 	);
 	// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
@@ -3089,7 +3102,13 @@ app.whenReady().then(async () => {
 			const dshOverrides = (sessionCatalog?.listEntries() ?? [])
 				.filter((entry) => entry.backend === "dsh")
 				.map((entry) => {
-					const effectiveMode = resolveEffectiveSessionProxyMode(entry.proxy?.mode, entry.model?.provider, settings.piProxyProviders);
+					const effectiveMode = resolveEffectiveSessionProxyMode(
+						entry.proxy?.mode,
+						entry.model?.provider,
+						entry.model?.modelId,
+						settings.piProxyProviders,
+						settings.piProxyModels,
+					);
 					return effectiveMode === "follow" ? undefined : { mode: effectiveMode } as import("../shared/types/session").SessionProxyOverride;
 				});
 			const mode = aggregateDshProxyMode(dshOverrides);

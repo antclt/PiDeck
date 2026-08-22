@@ -1830,7 +1830,6 @@ function ConfigModalContent(props: ConfigModalProps) {
 								{item.label}
 								{/* 未保存黄点：与 DSH 导航同款 */}
 								{dirtyTabs.has(`config:${item.id}`) || dirtyTabs.has(item.id) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
-								{item.label}
 							</TabsTrigger>
 						))}
 					</div>

@@ -184,6 +184,7 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       }
       enqueueSessionPrompt={services.enqueueSessionPrompt}
       gitInfo={services.gitInfo}
+      onSwitchBranch={services.onSwitchBranch}
       ensureSessionId={services.ensureSessionId}
       openFilePath={services.onOpenFile}
       runtimeUi={

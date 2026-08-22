@@ -32,8 +32,11 @@ export type HostProxyEnvPatch = {
 
 export type PiProxyModeSettings = Pick<AppSettings, "piProxyEnabled" | "piProxyUrl">;
 
-/** 按供应商过滤所需的全局设置子集（代理 URL + 白名单）。 */
-export type PiProxyProviderSettings = Pick<AppSettings, "piProxyEnabled" | "piProxyUrl" | "piProxyProviders">;
+/** 按模型/供应商过滤所需的全局设置子集（代理 URL + 两级白名单；供应商名单为旧版兼容字段）。 */
+export type PiProxyProviderSettings = Pick<
+	AppSettings,
+	"piProxyEnabled" | "piProxyUrl" | "piProxyProviders" | "piProxyModels"
+>;
 
 /**
  * 把会话级覆盖应用到 pi 子进程设置。仅调整 piProxyEnabled 开关：
@@ -55,14 +58,10 @@ export function applyPiProxyMode<T extends PiProxyModeSettings>(
 }
 
 /**
- * 按供应商过滤解析会话级代理模式（纯函数，可单测）。
- * 优先级（高→低）：
- * 1. 会话显式 on/off —— 用户在“会话代理”弹窗手动指定，始终最高优；
- * 2. 按供应商白名单 —— 当全局 piProxyProviders 非空且会话有 provider 时，
- *    名单内 → 强制 on（即使全局 piProxyEnabled 关闭也复用全局 URL），
- *    名单外 → 强制 off（即使全局开启也不走代理），实现“指定供应商走代理”；
- * 3. 全局开关 —— 以上都未命中时沿用全局 piProxyEnabled（缺省行为）。
- * 返回 undefined 表示无需覆盖（跟随全局），返回 on/off 表示需要覆盖。
+ * 按供应商白名单解析会话级代理模式（纯函数，可单测）。
+ * 旧版「按供应商走代理」的匹配函数：设置 UI 已移除供应商选项（由模型白名单承接），
+ * 但升级前已配置的旧数据仍需兼容读取——名单内 → 强制 on（即使全局关闭也复用全局 URL），
+ * 名单外 → 强制 off。返回 undefined 表示无需覆盖（跟随全局）。
  */
 export function resolveProviderProxyMode(
 	provider: string | undefined,
@@ -77,43 +76,97 @@ export function resolveProviderProxyMode(
 }
 
 /**
- * 结合会话级覆盖 + 按供应商白名单，计算本次 spawn 应注入的 pi 代理设置。
+ * 按模型白名单解析会话级代理模式（纯函数，可单测）。
+ * 条目格式 `provider/modelId`：拼接会话的 provider + modelId 比较，避免不同 provider
+ * 下同名模型（如 deepseek-r1 同时在多个网关出现）互相误伤。
+ * 名单空或会话无 model 时返回 undefined（不按模型过滤）；命中 → on，未命中 → off。
+ */
+export function resolveModelProxyMode(
+	provider: string | undefined,
+	modelId: string | undefined,
+	piProxyModels: ReadonlyArray<string> | undefined,
+): SessionProxyMode | undefined {
+	if (!piProxyModels || piProxyModels.length === 0) return undefined;
+	if (!provider || !provider.trim() || !modelId || !modelId.trim()) return undefined;
+	const key = `${provider.trim()}/${modelId.trim()}`;
+	// 白名单大小写敏感（与 models.json 的 model id 一致），空白已在 SettingsStore 归一化。
+	if (piProxyModels.includes(key)) return "on";
+	return "off";
+}
+
+/**
+ * 模型名单 + 供应商名单合并解析（纯函数，可单测）。
+ * 语义：任一名单非空即启用“黑白名单过滤”——
+ * 1. 模型名单（模型级白名单，设置 UI 唯一入口）优先匹配：命中 → on（即使全局关闭也复用全局 URL）；
+ * 2. 模型名单未命中或未启用时看供应商名单（旧版字段，兼容升级前已配置的数据）：命中 → on；
+ * 3. 两级名单都启用但均未命中 → off（强制直连，保持与单一供应商名单一致的黑名单外直连语义）；
+ * 4. 两级名单都为空 → undefined（不按名单过滤，跟随全局/会话设置）。
+ * 兼容性：只配置供应商名单（piProxyModels 为空）时行为与旧版完全一致。
+ */
+export function resolveListedProxyMode(
+	provider: string | undefined,
+	modelId: string | undefined,
+	piProxyProviders: ReadonlyArray<string> | undefined,
+	piProxyModels: ReadonlyArray<string> | undefined,
+): SessionProxyMode | undefined {
+	const providersEnabled = (piProxyProviders?.length ?? 0) > 0;
+	const modelsEnabled = (piProxyModels?.length ?? 0) > 0;
+	if (!providersEnabled && !modelsEnabled) return undefined;
+	// 模型名单粒度更细，先于供应商名单判定（同模型不同 provider 的场景交给供应商名单兜底）。
+	const modelMode = resolveModelProxyMode(provider, modelId, piProxyModels);
+	if (modelMode === "on") return "on";
+	const providerMode = resolveProviderProxyMode(provider, piProxyProviders);
+	if (providerMode === "on") return "on";
+	// 名单已启用但两级都未命中：黑白名单语义下强制直连（名单外的明确意图）。
+	return "off";
+}
+
+/**
+ * 结合会话级覆盖 + 按模型/供应商白名单，计算本次 spawn 应注入的 pi 代理设置。
  * 泛型保留 settings 的完整类型，调用方无需收窄。
  * - 会话显式 on/off 优先；
- * - 否则按 provider 白名单决定 on/off（force_on：名单内即使全局关闭也开启）；
- * - 都未命中则返回原 settings（跟随全局）。
+ * - 否则按模型名单（唯一 UI 入口）→ 旧版供应商名单（兼容读取）决定 on/off；
+ * - 名单未启用或未命中则返回原 settings（跟随全局）。
  */
 export function applyPiProxyModeWithProvider<T extends PiProxyProviderSettings>(
 	settings: T | undefined,
 	mode: SessionProxyMode | undefined,
 	provider: string | undefined,
+	modelId: string | undefined,
 ): T | undefined {
 	if (!settings) return settings;
 	// 1. 会话显式覆盖最高优（用户手动在会话菜单指定的 on/off）。
 	if (mode === "on" || mode === "off") return applyPiProxyMode(settings, mode);
-	// 2. 按供应商白名单（仅当 follow/缺省时生效）：名单内强制 on，名单外强制 off。
-	const providerMode = resolveProviderProxyMode(provider, settings.piProxyProviders);
-	if (providerMode) return applyPiProxyMode(settings, providerMode);
-	// 3. 无覆盖、无白名单命中 → 跟随全局（原样返回，避免创建新对象）。
+	// 2. 按白名单（模型 → 供应商）：名单命中强制 on，名单未命中强制 off。
+	const listedMode = resolveListedProxyMode(
+		provider,
+		modelId,
+		settings.piProxyProviders,
+		settings.piProxyModels,
+	);
+	if (listedMode) return applyPiProxyMode(settings, listedMode);
+	// 3. 无覆盖、无白名单启用 → 跟随全局（原样返回，避免创建新对象）。
 	return settings;
 }
 
 /**
  * 主进程侧统一计算会话最终代理模式（供 AgentManager 的 resolveSessionProxy 复用）。
- * 输入：会话记录的 proxy.mode（可能 follow/缺省）、provider、全局 piProxyProviders。
+ * 输入：会话记录的 proxy.mode（可能 follow/缺省）、provider/modelId、全局两级白名单。
  * 输出：本次 spawn 应生效的模式（on/off/follow）。
  * - 会话显式 on/off 直接返回；
- * - 否则按 provider 白名单映射为 on/off；
- * - 无白名单或无 provider 时返回 follow（沿用全局）。
+ * - 否则按模型名单（UI 唯一入口）→ 旧版供应商名单（兼容读取）映射为 on/off；
+ * - 两级白名单都未启用或无 provider/model 时返回 follow（沿用全局）。
  */
 export function resolveEffectiveSessionProxyMode(
 	sessionMode: SessionProxyMode | undefined,
 	provider: string | undefined,
+	modelId: string | undefined,
 	piProxyProviders: ReadonlyArray<string> | undefined,
+	piProxyModels: ReadonlyArray<string> | undefined,
 ): SessionProxyMode {
 	if (sessionMode === "on" || sessionMode === "off") return sessionMode;
-	const providerMode = resolveProviderProxyMode(provider, piProxyProviders);
-	if (providerMode) return providerMode;
+	const listedMode = resolveListedProxyMode(provider, modelId, piProxyProviders, piProxyModels);
+	if (listedMode) return listedMode;
 	return "follow";
 }
 

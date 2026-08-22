@@ -123,6 +123,51 @@ describe("buildImageGenApiBody", () => {
 		assert.equal("watermark" in body, false);
 		assert.equal("output_format" in body, false);
 	});
+
+	test("siliconflow 方言：image_size 替代 size，不发 watermark/output_format/response_format", () => {
+		const { buildImageGenApiBody } = loadParams();
+		const body = buildImageGenApiBody({
+			model: "Kwai-Kolors/Kolors",
+			prompt: "cat",
+			extraParams: { size: true, output_format: true, watermark: true },
+			size: "1024x1024",
+			watermark: true,
+			outputFormat: "jpeg",
+			apiStyle: "siliconflow",
+		});
+		// 字段名方言差异：尺寸走 image_size
+		assert.equal(body.image_size, "1024x1024");
+		assert.equal("size" in body, false);
+		// 硅基无这些概念：即使 extraParams 全勾也不发
+		assert.equal("watermark" in body, false);
+		assert.equal("output_format" in body, false);
+		assert.equal("response_format" in body, false);
+		assert.equal("n" in body, false);
+	});
+
+	test("siliconflow 方言：参考图取首张转单 dataURI string（不认数组）", () => {
+		const { buildImageGenApiBody } = loadParams();
+		const body = buildImageGenApiBody({
+			model: "Kwai-Kolors/Kolors",
+			prompt: "cat",
+			apiStyle: "siliconflow",
+			referenceImages: [
+				{ type: "image", data: "YWJj", mimeType: "image/png" },
+				{ type: "image", data: "ZGVm", mimeType: "image/jpeg" },
+			],
+		});
+		assert.equal(body.image, "data:image/png;base64,YWJj");
+	});
+
+	test("openai 方言默认：参考图仍是 dataURI 数组（方舟 seedream 官方格式）", () => {
+		const { buildImageGenApiBody } = loadParams();
+		const body = buildImageGenApiBody({
+			model: "doubao-seedream-5-0",
+			prompt: "cat",
+			referenceImages: [{ type: "image", data: "YWJj", mimeType: "image/png" }],
+		});
+		assert.deepEqual(body.image, ["data:image/png;base64,YWJj"]);
+	});
 });
 
 describe("parseImageGenOutputFormat", () => {

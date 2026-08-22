@@ -27,6 +27,48 @@ test("empty / invalid input → empty config", () => {
 	assert.deepEqual(sanitizeImageGenConfig([]), EMPTY_IMAGE_GEN_CONFIG);
 });
 
+test("apiStyle 白名单：siliconflow 保留，非法回退 undefined（语义 openai）", () => {
+	const { sanitizeImageGenConfig } = loadConfig();
+	const next = sanitizeImageGenConfig({
+		providers: [{
+			id: "ig-sf",
+			name: "SiliconFlow",
+			baseUrl: "https://api.siliconflow.cn/v1",
+			apiKey: "k",
+			models: ["Kwai-Kolors/Kolors"],
+			apiStyle: "siliconflow",
+			referenceMode: "image-field",
+		}],
+	});
+	assert.equal(next.providers[0].apiStyle, "siliconflow");
+	assert.equal(next.providers[0].referenceMode, "image-field");
+
+	// 旧配置无 apiStyle → undefined（向 openai 方言兼容）
+	const legacy = sanitizeImageGenConfig({
+		providers: [{
+			id: "ig-legacy",
+			name: "Legacy",
+			baseUrl: "https://x/v1",
+			apiKey: "k",
+			models: ["m"],
+		}],
+	});
+	assert.equal(legacy.providers[0].apiStyle, undefined);
+
+	// 非法值（手改文件/脏数据）→ undefined，不写未知方言
+	const bad = sanitizeImageGenConfig({
+		providers: [{
+			id: "ig-bad",
+			name: "Bad",
+			baseUrl: "https://x/v1",
+			apiKey: "k",
+			models: ["m"],
+			apiStyle: "baidu",
+		}],
+	});
+	assert.equal(bad.providers[0].apiStyle, undefined);
+});
+
 test("strips kind and keeps extraParams flags", () => {
 	const { sanitizeImageGenConfig } = loadConfig();
 	const next = sanitizeImageGenConfig({

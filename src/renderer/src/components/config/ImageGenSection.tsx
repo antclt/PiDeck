@@ -354,9 +354,28 @@ export const ImageGenSection = forwardRef<ImageGenSectionHandle, ImageGenSection
 											>
 												<SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
 												<SelectContent>
-													<SelectItem value="none">{t("config.imagegen.referenceNone")}</SelectItem>
-													<SelectItem value="edits">{t("config.imagegen.referenceEdits")}</SelectItem>
-													<SelectItem value="image-field">{t("config.imagegen.referenceImageField")}</SelectItem>
+												<SelectItem value="none">{t("config.imagegen.referenceNone")}</SelectItem>
+												<SelectItem value="edits">{t("config.imagegen.referenceEdits")}</SelectItem>
+												<SelectItem value="image-field">{t("config.imagegen.referenceImageField")}</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+										{/* 接口方言：字段名/响应结构与 OpenAI 兼容不一致的供应商（如 SiliconFlow）在此声明；
+										   由配置驱动，不按 URL 猜测。 */}
+										<div className="grid gap-1.5">
+											<Label>{t("config.imagegen.apiStyle")}</Label>
+											<p className="text-micro text-muted-foreground">{t("config.imagegen.apiStyleHint")}</p>
+											<Select
+												value={provider.apiStyle ?? "openai"}
+												onValueChange={(value) => updateProvider(provider.id, {
+													// 枚举收窄：未知值回退 openai（旧配置无字段同理）
+													apiStyle: value === "openai" || value === "siliconflow" ? value : undefined,
+												})}
+											>
+												<SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
+												<SelectContent>
+													<SelectItem value="openai">{t("config.imagegen.apiStyleOpenai")}</SelectItem>
+													<SelectItem value="siliconflow">{t("config.imagegen.apiStyleSiliconflow")}</SelectItem>
 												</SelectContent>
 											</Select>
 										</div>

@@ -850,8 +850,10 @@ export function useSessionComposerController(
       showNotice(t("imagegen.error.referenceUnsupported"), 5000);
       return;
     }
-    // 匿名会话（无会话文件，重启即消失）：生图前提醒一次，想保留记录请先建正式会话
-    if (!record?.filePath) {
+    // 仅「启动即匿名」的会话提示（noSession=true，经匿名开聊创建，pi 以 --no-session 启动）：
+    // 生图不落盘、重启即失。普通新建 draft 会话 filePath 同样为空（生图不启动 agent），
+    // 但用户视角它是正式会话，不弹匿名提示打扰（2026 反馈）。
+    if (record?.noSession === true) {
       showNotice(t("imagegen.transientHint"), 6000);
     }
     setGeneratingImage(true);
@@ -877,6 +879,8 @@ export function useSessionComposerController(
       role: "user",
       text: prompt,
       timestamp: Date.now(),
+      // 参考图随 user 消息上屏：发送后附件栏清空，图片要留在时间线气泡里回显
+      images: attachments.length > 0 ? attachments : undefined,
     });
     const imageMessageId = crypto.randomUUID();
     appendTimelineMessage({
@@ -945,7 +949,7 @@ export function useSessionComposerController(
     } finally {
       setGeneratingImage(false);
     }
-  }, [activeImageGenModelId, activeImageGenProviderId, attachments, draft, generatingImage, imageGenConfig, imageGenOutputFormat, imageGenSize, imageGenWatermark, record?.filePath, sessionId, setAttachmentsAtom, setCacheMessages, setDraft, store]);
+  }, [activeImageGenModelId, activeImageGenProviderId, attachments, draft, generatingImage, imageGenConfig, imageGenOutputFormat, imageGenSize, imageGenWatermark, record?.noSession, sessionId, setAttachmentsAtom, setCacheMessages, setDraft, store]);
 
   // 统一发送入口：先晋升预览 Tab 再投递（幂等，非预览无副作用）。
   // 发送按钮 / 追问按钮 / Enter 键 / 无 Agent 时的 /compact 直发都会走这里，

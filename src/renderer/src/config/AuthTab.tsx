@@ -41,12 +41,14 @@ const PRESET_PROVIDERS = [
 	{ value: "xiaomi-token-plan-sgp", label: "Xiaomi MiMo Token (Singapore)", env: "XIAOMI_TOKEN_PLAN_SGP_API_KEY", url: "" },
 ];
 
-// 认证类型选项，用于 type 字段的下拉选择
+// 认证类型选项（auth.json credential.type）：pi 只识别 api_key 与 oauth。
+// - api_key：auth.json 标准 credential（key 支持 $ENV 插值 / !command / 字面量）；
+// - oauth：由 /login 订阅流（Claude/Codex/Copilot/Radius 等）自动写入并刷新，
+//   人工录入无意义但保留选项以反映 pi 真实支持面（避免显示错误值后无法回退）。
+// oauth2/bearer/basic 是 OpenAI SDK 风格的 auth 类型，pi 不识别，已移除。
 const AUTH_TYPE_OPTIONS = [
 	{ value: "api_key", label: "api_key" },
-	{ value: "oauth2", label: "oauth2" },
-	{ value: "bearer", label: "bearer" },
-	{ value: "basic", label: "basic" },
+	{ value: "oauth", label: "oauth" },
 ];
 
 export function AuthTab(props: {

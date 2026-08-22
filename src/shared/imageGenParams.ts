@@ -1,4 +1,4 @@
-import type { ImageGenProviderExtraParams } from "./imageGenConfig";
+import type { ImageGenApiStyle, ImageGenProviderExtraParams } from "./imageGenConfig";
 import { DEFAULT_IMAGE_GEN_EXTRA_PARAMS } from "./imageGenConfig";
 import type { ImageContent } from "./types/session";
 
@@ -151,7 +151,12 @@ function resolveExtraParams(
 	};
 }
 
-/** 组装 OpenAI 兼容 /images/generations JSON body（不含鉴权）。 */
+/**
+ * 组装 /images/generations JSON body（不含鉴权）。
+ * 方言（apiStyle）按供应商声明选择：openai（OpenAI/火山方舟）与 siliconflow 的
+ * 字段名/参考图形态/响应结构不同（见 imageGenConfig.ts 的 IMAGE_GEN_API_STYLES 注释），
+ * 不按 URL 猜测，全部由用户配置驱动。
+ */
 export function buildImageGenApiBody(input: {
 	model: string;
 	prompt: string;
@@ -159,7 +164,12 @@ export function buildImageGenApiBody(input: {
 	size?: string;
 	watermark?: boolean;
 	outputFormat?: string;
+	apiStyle?: ImageGenApiStyle;
+	referenceImages?: Array<{ data: string; mimeType: string }>;
 }): Record<string, unknown> {
+	if ((input.apiStyle ?? "openai") === "siliconflow") {
+		return buildSiliconFlowApiBody(input);
+	}
 	const body: Record<string, unknown> = {
 		model: input.model.trim(),
 		prompt: input.prompt,
@@ -179,6 +189,41 @@ export function buildImageGenApiBody(input: {
 	if (extra.output_format) {
 		const outputFormat = parseImageGenOutputFormat(input.outputFormat, null);
 		if (outputFormat) body.output_format = outputFormat;
+	}
+	// image-field 参考图：OpenAI/方舟用 dataURI 数组（seedream 官方格式）
+	if (input.referenceImages && input.referenceImages.length > 0) {
+		body.image = buildImageGenImageField(input.referenceImages);
+	}
+	return body;
+}
+
+/**
+ * SiliconFlow 方言 body：字段名与 OpenAI 兼容不同，按官方 schema 组装。
+ * - 尺寸字段是 image_size（不是 size），仍受 extraParams.size 开关控制；
+ * - 参考图是单个 string（不认数组），只取第一张 dataURI；
+ * - 无 watermark / output_format / response_format 概念，一律不发；
+ * - 批量默认 1（官方 batch_size 默认值），不额外发送。
+ */
+function buildSiliconFlowApiBody(input: {
+	model: string;
+	prompt: string;
+	extraParams?: Partial<ImageGenProviderExtraParams> | null;
+	size?: string;
+	referenceImages?: Array<{ data: string; mimeType: string }>;
+}): Record<string, unknown> {
+	const body: Record<string, unknown> = {
+		model: input.model.trim(),
+		prompt: input.prompt,
+	};
+	const extra = resolveExtraParams(input.extraParams ?? DEFAULT_IMAGE_GEN_EXTRA_PARAMS);
+	if (extra.size) {
+		const size = resolveImageGenApiSize(input.size);
+		if (size) body.image_size = size;
+	}
+	const first = input.referenceImages?.[0];
+	if (first) {
+		// 硅基官方 image 字段："data:image/png;base64,..." 或 URL，单个 string
+		body.image = `data:${first.mimeType};base64,${first.data}`;
 	}
 	return body;
 }

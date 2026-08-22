@@ -10,6 +10,17 @@ export const IMAGE_GEN_EXTRA_PARAMS = ["size", "output_format", "watermark"] as 
 export type ImageGenExtraParam = (typeof IMAGE_GEN_EXTRA_PARAMS)[number];
 
 /**
+ * 生图接口方言：同一 /images/generations 路径下字段名与响应结构不一致的供应商。
+ * - openai（缺省）：OpenAI / 火山方舟 / GPT-Image——size / watermark / output_format、
+ *   image 参考图为 dataURI 数组、响应 data[0].{b64_json|url}。
+ * - siliconflow：SiliconFlow——尺寸字段是 image_size（不是 size），
+ *   参考图 image 是单个 string（base64/URL，不认数组），
+ *   响应是 images[].url（无 b64_json、无 data 数组）；无 watermark / output_format 概念。
+ */
+export const IMAGE_GEN_API_STYLES = ["openai", "siliconflow"] as const;
+export type ImageGenApiStyle = (typeof IMAGE_GEN_API_STYLES)[number];
+
+/**
  * 参考图输入方式：不同供应商带图输入的 API 形态不同，由用户按供应商声明：
  * - none（缺省）：不支持参考图；附了图的生图请求直接报错提示，不发无效请求。
  * - edits：OpenAI gpt-image-1 风格，走 POST {base}/images/edits multipart（image 可多张）。
@@ -42,6 +53,8 @@ export type ImageGenProviderConfig = {
 	extraParams: ImageGenProviderExtraParams;
 	/** 参考图输入方式；缺省 none（旧配置无此字段时向后兼容为不支持） */
 	referenceMode?: ImageGenReferenceMode;
+	/** 接口方言；缺省 openai（旧配置无此字段时按 OpenAI 兼容理解） */
+	apiStyle?: ImageGenApiStyle;
 };
 
 export type ImageGenConfigFile = {
@@ -93,6 +106,16 @@ export function sanitizeImageGenReferenceMode(value: unknown): ImageGenReference
 	if (typeof value !== "string") return undefined;
 	return (IMAGE_GEN_REFERENCE_MODES as readonly string[]).includes(value)
 		? (value as ImageGenReferenceMode)
+		: undefined;
+}
+
+/**
+ * 解析接口方言：只接受枚举值；缺省/非法返回 undefined（旧配置兼容，语义等同 openai）。
+ */
+export function sanitizeImageGenApiStyle(value: unknown): ImageGenApiStyle | undefined {
+	if (typeof value !== "string") return undefined;
+	return (IMAGE_GEN_API_STYLES as readonly string[]).includes(value)
+		? (value as ImageGenApiStyle)
 		: undefined;
 }
 
@@ -157,6 +180,8 @@ export function sanitizeImageGenConfig(input: unknown): ImageGenConfigFile {
 			extraParams: sanitizeImageGenExtraParams(row.extraParams, row.kind),
 			// 参考图模式：非法值回退 none（不发无效请求）；旧配置无字段 → undefined 同样视为 none
 			referenceMode: sanitizeImageGenReferenceMode(row.referenceMode),
+			// 接口方言：非法值回退 openai（未知字段按 OpenAI 兼容理解，不猜 URL）
+			apiStyle: sanitizeImageGenApiStyle(row.apiStyle),
 		});
 	}
 	const requestedProvider =

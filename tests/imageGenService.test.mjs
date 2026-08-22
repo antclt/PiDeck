@@ -453,6 +453,79 @@ test("referenceMode=image-field：参考图并入 JSON 请求体（dataURI）", 
 	restore();
 });
 
+test("apiStyle=siliconflow：size→image_size、单图参考、images[].url 兜底下载", async () => {
+	let capturedBody;
+	let downloads = 0;
+	const { service, restore } = createService({
+		credentials: {
+		...CREDENTIALS,
+		// 硅基用户勾选了 size：image_size 才随请求发出（与 openai 分支的 size 同一开关）
+		extraParams: { size: true, output_format: false, watermark: false },
+		apiStyle: "siliconflow",
+		referenceMode: "image-field",
+	},
+		fetchStub: (input, init) => {
+			if (String(input).endsWith("/images/generations")) {
+				capturedBody = JSON.parse(String(init.body));
+				// 硅基响应：images[].url（无 data 数组、无 b64_json）
+				return fakeResponse({
+					ok: true,
+					json: async () => ({ images: [{ url: "https://x/img.png" }], seed: 1 }),
+				});
+			}
+			downloads += 1;
+			return fakeResponse({
+				ok: true,
+				arrayBuffer: async () => new TextEncoder().encode("SFIMG").buffer,
+				headers: new Map([["content-type", "image/png"]]),
+			});
+		},
+	});
+	const result = await service.generate({
+		provider: "p",
+		model: "Kwai-Kolors/Kolors",
+		prompt: "x",
+		size: "1024x1024",
+		referenceImages: [{ type: "image", data: "QUJD=", mimeType: "image/png" }],
+	});
+	assert.equal(result.ok, true);
+	// 方言字段差异：size 不发、改发 image_size；参考图取首张单 dataURI string
+	assert.equal(capturedBody.size, undefined);
+	assert.equal(capturedBody.image_size, "1024x1024");
+	assert.equal(capturedBody.image, "data:image/png;base64,QUJD=");
+	// 硅基无 watermark / output_format / response_format 概念，一律不发
+	assert.equal(capturedBody.watermark, undefined);
+	assert.equal(capturedBody.output_format, undefined);
+	assert.equal(capturedBody.response_format, undefined);
+	assert.equal(downloads, 1);
+	assert.equal(result.image.data, Buffer.from("SFIMG").toString("base64"));
+	assert.equal(result.image.mimeType, "image/png");
+	restore();
+});
+
+test("openai 方言下响应 images[].url 同样兜底（通用解析，不依赖 apiStyle）", async () => {
+	let downloads = 0;
+	const { service, restore } = createService({
+		credentials: CREDENTIALS,
+		fetchStub: (input) => {
+			if (String(input).endsWith("/images/generations")) {
+				return fakeResponse({ ok: true, json: async () => ({ images: [{ url: "https://x/y.png" }] }) });
+			}
+			downloads += 1;
+			return fakeResponse({
+				ok: true,
+				arrayBuffer: async () => new TextEncoder().encode("PNG2").buffer,
+				headers: new Map([["content-type", "image/png"]]),
+			});
+		},
+	});
+	const result = await service.generate({ provider: "p", model: "m", prompt: "x" });
+	assert.equal(result.ok, true);
+	assert.equal(result.image.data, Buffer.from("PNG2").toString("base64"));
+	assert.equal(downloads, 1);
+	restore();
+});
+
 test("referenceMode=edits：走 /images/edits multipart 接口", async () => {
 	let captured;
 	const { service, restore } = createService({

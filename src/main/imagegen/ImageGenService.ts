@@ -1,11 +1,14 @@
 import {
 	buildImageGenApiBody,
 	buildImageGenEditsForm,
-	buildImageGenImageField,
 	imageGenOutputMimeType,
 	parseImageGenOutputFormat,
 } from "../../shared/imageGenParams";
-import type { ImageGenProviderExtraParams, ImageGenReferenceMode } from "../../shared/imageGenConfig";
+import type {
+	ImageGenApiStyle,
+	ImageGenProviderExtraParams,
+	ImageGenReferenceMode,
+} from "../../shared/imageGenConfig";
 import type { ImageGenRequest, ImageGenResult } from "../../shared/types/imagegen";
 
 /** 独立生图配置给出的凭据（不再从 models.json 解析） */
@@ -15,6 +18,8 @@ export type ProviderCredentials = {
 	extraParams: ImageGenProviderExtraParams;
 	/** 参考图输入方式；缺省 none */
 	referenceMode?: ImageGenReferenceMode;
+	/** 接口方言（字段名/响应结构）；缺省 openai */
+	apiStyle?: ImageGenApiStyle;
 };
 
 /**
@@ -78,6 +83,8 @@ export class ImageGenService {
 					},
 				);
 			} else {
+				// 方言与参考图形态：image-field 时参考图并入 JSON body，builder 按方言组装
+				// （openai/方舟 → dataURI 数组；siliconflow → 首张单 dataURI string）
 				const body = buildImageGenApiBody({
 					model: request.model,
 					prompt: request.prompt,
@@ -85,11 +92,10 @@ export class ImageGenService {
 					size: request.size,
 					watermark: request.watermark,
 					outputFormat: outputFormat ?? undefined,
+					apiStyle: credentials.apiStyle ?? "openai",
+					referenceImages:
+						refs.length > 0 && referenceMode === "image-field" ? refs : undefined,
 				});
-				// 方舟 seedream 等风格：generations JSON 体加 image:[dataURI...] 传参考图
-				if (refs.length > 0 && referenceMode === "image-field") {
-					body.image = buildImageGenImageField(refs);
-				}
 				response = await fetch(
 					imagesUrl,
 					{
@@ -119,8 +125,12 @@ export class ImageGenService {
 			}
 			const payload = (await response.json()) as {
 				data?: Array<{ b64_json?: string; url?: string }>;
+				// SiliconFlow 方言：响应是 images[].url（无 data 数组、无 b64_json）
+				images?: Array<{ url?: string }>;
 			};
-			const item = payload.data?.[0];
+			// 通用兜底：OpenAI/方舟读 data[0]，硅基读 images[0]，不依赖方言判断
+			const item: { b64_json?: string; url?: string } | undefined =
+				payload.data?.[0] ?? payload.images?.[0];
 			if (item?.b64_json) {
 				// b64 无 content-type：只有勾选并发送了 output_format 才按 jpeg/png 标记
 				const mimeType = extraParams.output_format
