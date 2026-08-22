@@ -591,6 +591,7 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionTodo.done": "{done} done",
   "sessionTodo.active": "{active} in progress",
   "sessionTodo.pending": "{pending} pending",
+  "sessionTodo.dismiss": "Dismiss todo strip",
   // Composer-side goal strip (ported from dsh-web GoalBar): hidden when absent/complete
   "sessionGoal.aria": "Current goal",
   // Composer-side queue card (dsh QueueDock as a standalone card): collapsed header copy
@@ -1564,7 +1565,7 @@ export const enUS: Record<TranslationKey, string> = {
   // Extension manager: the "(filtered)" marker from pi list (object-form entry in settings, loads resources selectively)
   "config.extensionFiltered": "Filtered install",
   // Localized descriptions for the recommended extension list (ExtensionsTab renders via descriptionKey)
-  "config.extRecommended.piDeckTodo": "Built into PiDeck: a TODO list extension that adds and manages task items in conversations, tracks completion, and persists across sessions.",
+  "config.extRecommended.piDeckTodo": "Built into PiDeck: a current-plan TODO extension with explicit replace and restore actions, branch-scoped persistence, and task-progress tracking.",
   "config.extRecommended.piDeckPlanMode": "Built into PiDeck: a plan-mode extension that makes the AI produce an execution plan before replying, keeping complex tasks clear.",
   "config.extRecommended.piDeckGoalMode": "Built into PiDeck: a goal-mode extension that keeps working toward one objective until it is complete, blocked, or paused.",
   "config.extRecommended.piDeckAskQuestion": "Built into PiDeck: inserts carefully designed question cards into conversations to guide the AI toward more precise answers.",

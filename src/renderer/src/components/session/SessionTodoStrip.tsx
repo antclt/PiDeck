@@ -1,16 +1,21 @@
 import { useAtomValue } from "jotai";
 import { useId, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, ListChecks } from "lucide-react";
+import { ChevronDown, ChevronUp, ListChecks, X } from "lucide-react";
 import {
 	sessionRuntimeBySessionIdAtomFamily,
 	sessionRuntimeUiBySessionIdAtomFamily,
 } from "../../atoms";
 import { t } from "../../i18n";
+import { Button } from "../ui-shadcn/button";
 import {
 	isCoherentComposerRuntimeUi,
 	type RuntimeHandle,
 } from "./ComposerRuntimeIntegrations";
-import { parseAgentTodoItems, type AgentTodoItem } from "./agentTodoParser";
+import {
+	parseAgentTodoItems,
+	stripPiDeckTodoWidgetMetadata,
+	type AgentTodoItem,
+} from "./agentTodoParser";
 
 /**
  * composer 上方的 todo 常驻条（移植自 dsh-web 的 TodoPanel）。
@@ -18,7 +23,8 @@ import { parseAgentTodoItems, type AgentTodoItem } from "./agentTodoParser";
  * 形态：与输入框同宽同列的折叠卡（36px 高：图标 + 标题 + 进度文案 + chevron），
  * 点击展开列表（180px 内滚动）。数据 = pi 扩展 widget（pi-deck-todo /
  * pi-deck-plan-todos）的行快照经 parseAgentTodoItems 解析——三态结构与
- * dsh 的 TodoItem 同构，组件可以直接吃现有解析结果。
+ * dsh 的 TodoItem 同构，组件可以直接吃现有解析结果。`pi-deck-todo` 的
+ * 计划身份元数据仅在此处按来源过滤，第三方 widget 不会受该私有协议影响。
  *
  * 取舍：
  * - 挂在 ComposerArea 的 widgets 槽位（ComposerMeasuredExtras 测量高度并驱动
@@ -35,6 +41,7 @@ const DISMISSED_WIDGETS_KEY = "pid:session-dismissed-widgets-v2";
 
 /** 手动关闭记录：key = widgetDismissalId(sessionId, widgetKey)，value = 关闭时的内容指纹。 */
 type DismissedWidgets = Record<string, string>;
+type WidgetLines = { key: string; lines: readonly string[] };
 
 /** 列表内容指纹（djb2）：只需稳定区分「工具是否更新过列表」，不需要密码学强度。 */
 export function widgetLinesSignature(lines: readonly string[]): string {
@@ -65,6 +72,27 @@ export function isWidgetDismissed(
 		dismissed[widgetDismissalId(sessionId, widgetKey)] ===
 		widgetLinesSignature(lines)
 	);
+}
+
+/** Record every raw widget merged into the strip so a manual close is reversible on content changes. */
+export function dismissWidgetEntries(
+	dismissed: DismissedWidgets,
+	sessionId: string,
+	widgets: readonly WidgetLines[],
+): DismissedWidgets {
+	const next = { ...dismissed };
+	for (const widget of widgets) {
+		next[widgetDismissalId(sessionId, widget.key)] = widgetLinesSignature(widget.lines);
+	}
+	return next;
+}
+
+function saveDismissedWidgets(dismissed: DismissedWidgets): void {
+	try {
+		localStorage.setItem(DISMISSED_WIDGETS_KEY, JSON.stringify(dismissed));
+	} catch {
+		// Private browsing or quota failures should not prevent dismissing for this render.
+	}
 }
 
 function loadDismissedWidgets(): DismissedWidgets {
@@ -146,8 +174,8 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 		sessionRuntimeUiBySessionIdAtomFamily(props.sessionId),
 	);
 	const [collapsed, setCollapsed] = useState(true);
-	// dismiss 记录只读一次（chips 的关闭与本条共享同一 localStorage 指纹）
-	const [dismissed] = useState(loadDismissedWidgets);
+	// dismiss records are loaded once, then updated locally when the user closes this strip.
+	const [dismissed, setDismissed] = useState(loadDismissedWidgets);
 
 	const runtimeHandle: RuntimeHandle | undefined = runtime?.agentId
 		? {
@@ -160,18 +188,36 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 		: undefined;
 	const widgets = coherent?.widgets ?? {};
 
-	// 合并 Todo 与 Plan 两个 widget 成一个待办列表（dsh：输入区上方单一 plan strip）；
-	// 被用户 dismiss 过的 widget 跳过。行数组引用每帧变化，用内容解析结果做 memo 依赖。
-	const items = useMemo(() => {
-		const lines: string[] = [];
+	// A widget stays dismissed only while its raw lines stay identical. Keep raw metadata here
+	// until after the decision so a new plan with matching tasks becomes visible again.
+	const visibleWidgets = useMemo(() => {
+		const visible: WidgetLines[] = [];
 		for (const key of ["pi-deck-todo", "pi-deck-plan-todos"]) {
 			const widgetLines = widgets[key];
 			if (!widgetLines?.length) continue;
 			if (isWidgetDismissed(dismissed, props.sessionId, key, widgetLines)) continue;
-			lines.push(...widgetLines);
+			visible.push({ key, lines: widgetLines });
+		}
+		return visible;
+	}, [widgets, dismissed, props.sessionId]);
+
+	const items = useMemo(() => {
+		const lines: string[] = [];
+		for (const widget of visibleWidgets) {
+			lines.push(
+				...(widget.key === "pi-deck-todo"
+					? stripPiDeckTodoWidgetMetadata(widget.lines)
+					: widget.lines),
+			);
 		}
 		return parseAgentTodoItems(lines);
-	}, [widgets, dismissed, props.sessionId]);
+	}, [visibleWidgets]);
+
+	const dismissVisibleWidgets = () => {
+		const next = dismissWidgetEntries(dismissed, props.sessionId, visibleWidgets);
+		saveDismissedWidgets(next);
+		setDismissed(next);
+	};
 
 	if (items.length === 0) return null;
 
@@ -181,23 +227,35 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 			data-testid="session-todo-strip"
 			aria-label={t("sessionTodo.title")}
 		>
-			<button
-				type="button"
-				className="flex h-9 w-full items-center gap-2.5 px-3 text-left"
-				aria-expanded={!collapsed}
-				onClick={() => { setCollapsed((value) => !value); }}
-			>
-				<ListChecks size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-				<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">
-					{t("sessionTodo.title")}
-				</span>
-				<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-tertiary">
-					{progressLabel(items)}
-				</span>
-				<span className="shrink-0 text-text-tertiary" aria-hidden="true">
-					{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-				</span>
-			</button>
+			<div className="flex h-9 w-full items-center gap-2.5 px-3">
+				<button
+					type="button"
+					className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+					aria-expanded={!collapsed}
+					onClick={() => { setCollapsed((value) => !value); }}
+				>
+					<ListChecks size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+					<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">
+						{t("sessionTodo.title")}
+					</span>
+					<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-tertiary">
+						{progressLabel(items)}
+					</span>
+					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
+						{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+					</span>
+				</button>
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					className="size-7 shrink-0 rounded-full text-text-tertiary hover:bg-muted/70 hover:text-foreground"
+					aria-label={t("sessionTodo.dismiss")}
+					title={t("sessionTodo.dismiss")}
+					onClick={dismissVisibleWidgets}
+				>
+					<X size={14} aria-hidden="true" />
+				</Button>
+			</div>
 			{!collapsed && (
 				<ul className="mb-2 flex max-h-[180px] flex-col gap-2 overflow-y-auto overscroll-contain [contain:layout_paint] px-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-100 motion-reduce:animate-none">
 					{items.map((item) => (

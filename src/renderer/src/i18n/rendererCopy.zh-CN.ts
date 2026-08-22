@@ -588,6 +588,7 @@ export const zhCN = {
   "sessionTodo.done": "{done} 完成",
   "sessionTodo.active": "{active} 进行中",
   "sessionTodo.pending": "{pending} 待处理",
+  "sessionTodo.dismiss": "关闭待办条",
   // composer 上方 goal 条（dsh GoalBar）：无目标/已完成不渲染
   "sessionGoal.aria": "当前目标",
   // composer 上方排队卡（dsh QueueDock 独立卡）：多条时折叠头文案
@@ -1550,7 +1551,7 @@ export const zhCN = {
   // 扩展管理：pi list 输出的 "(filtered)" 标记（settings 里对象形式配置，只选择性加载资源）
   "config.extensionFiltered": "过滤式安装",
   // 推荐扩展列表的本地化描述（ExtensionsTab 按 descriptionKey 取文案）
-  "config.extRecommended.piDeckTodo": "PiDeck 内置：TODO 列表扩展，支持在对话中添加和管理任务项，自动追踪完成状态并在会话间持久化。",
+  "config.extRecommended.piDeckTodo": "PiDeck 内置：当前有效计划 TODO 扩展，支持显式替换、恢复和分支级持久化，并在对话中追踪任务进度。",
   "config.extRecommended.piDeckPlanMode": "PiDeck 内置：计划模式扩展，让 AI 在回复前首先生成执行计划，复杂任务一目了然。",
   "config.extRecommended.piDeckGoalMode": "PiDeck 内置：目标模式扩展，围绕一条目标自动连续推进，直到完成、阻塞或你暂停。",
   "config.extRecommended.piDeckAskQuestion": "PiDeck 内置：在对话中插入精心设计的问题卡片，引导 AI 给出更精准的回答。",

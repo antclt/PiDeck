@@ -200,19 +200,28 @@ test("parser maps widget lines to official TodoItem status shape", () => {
 	assert.equal(items[2].status, "completed");
 });
 
-test("parser skips collapsed summaries, plan progress lines and section headers", () => {
-	const { parseAgentTodoItems } = loadParser();
-	// todo 折叠态只回一行 "2/4"
+test("parser skips summaries and keeps pi-deck-todo metadata scoped to its own widget", () => {
+	const { parseAgentTodoItems, stripPiDeckTodoWidgetMetadata } = loadParser();
+	// Generic parser keeps existing summary compatibility.
 	assert.equal(parseAgentTodoItems(["2/4"]).length, 0);
-	// plan 扩展首行 "计划进度 1/3" 不是列表项
 	const plan = parseAgentTodoItems([
 		"计划进度 1/3",
 		"☑ 1. 设计 schema",
 		"☐ 2. 实现迁移",
 	]);
 	assert.equal(plan.length, 2);
-	// 标题行与空行不产生 pending 项（旧实现会误解析成列表项）
+	const draft = parseAgentTodoItems([
+		"计划草案 2 步",
+		"☐ 1. 设计 schema",
+		"☐ 2. 实现迁移",
+	]);
+	assert.equal(draft.length, 2);
 	assert.equal(parseAgentTodoItems(["── 待办 ──", "   ", ""]).length, 0);
+
+	// The plan identity is private to pi-deck-todo. Its filter keeps generic / third-party parsing untouched.
+	const todoLines = ["[[pid:todo-plan:branch-a:7]]", "☐ #1 实现迁移"];
+	assert.deepEqual(stripPiDeckTodoWidgetMetadata(todoLines), ["☐ #1 实现迁移"]);
+	assert.equal(parseAgentTodoItems(todoLines)[0].title, "[[pid:todo-plan:branch-a:7]]");
 });
 
 test("parser strips todo #ids and plan numbering from titles", () => {
@@ -244,18 +253,24 @@ test("parser preserves insertion order for completed items (2027-01 widget contr
 	assert.equal(items[1].id, "写文档");
 });
 
-test("pi-deck-todo extension emits in-order lines, no status grouping or cleanup", () => {
+test("pi-deck-todo extension emits a stable plan identity and in-order item rows", () => {
 	const ext = readFileSync("resources/extensions/pi-deck-todo.ts", "utf8");
 	// 完成项原位保留：不再按状态分组沉底，也不再有「最近完成」区段
 	assert.doesNotMatch(ext, /── 已完成 ──/);
 	assert.doesNotMatch(ext, /── 最近完成 ──/);
 	assert.doesNotMatch(ext, /recentlyDone/);
 	assert.doesNotMatch(ext, /cleanupCompleted/);
+	// 内置 widget 的计划身份进入原始行数组，renderer 可用它区分相同文本的新计划。
+	assert.match(ext, /PLAN_METADATA_PREFIX/);
+	assert.match(ext, /planMetadataLine\(activePlan\.id\)/);
+	// 扩展不再输出自有折叠摘要，展开/折叠统一归 renderer 管理。
+	assert.doesNotMatch(ext, /widgetCollapsed/);
 	// 新契约：按插入顺序输出全部条目，完成态由 ☑ 标记表达
-	assert.match(ext, /for \(const t of todos\)/);
-	assert.match(ext, /`\$\{t\.done \? "☑" : "☐"\} #\$\{t\.id\} \$\{t\.text\}`/);
-	// session_start 不再清理已完成项
+	assert.match(ext, /activePlan\.todos\.map\(\(todo\) => `\$\{todo\.done \? "☑" : "☐"\} #\$\{todo\.id\} \$\{todo\.text\}`\)/);
+	// session_start 不再清理已完成项，只有 replace / clear 显式改变计划边界。
 	assert.doesNotMatch(ext, /cleanupCompleted\(ctx\)/);
+	assert.match(ext, /case "replace"/);
+	assert.match(ext, /case "restore"/);
 });
 
 test("text-widget token is one step smaller than the session status badge", () => {

@@ -8,6 +8,9 @@ All notable changes to PiDeck are documented here.
 
 ### 🚀 New Features
 
+- **Current-plan Todo extension** — The bundled Todo extension now supports explicit
+  plan replacement and restoration, branch-scoped persistence, and retains stale
+  tasks until the agent explicitly clears them.
 - **Model spec autofill from listing + pi-ai** — Fetching models now keeps
   `contextWindow` / `maxTokens` when the endpoint returns them. Missing fields
   match `@earendil-works/pi-ai` builtins (same catalog DSH uses). Unmatched
