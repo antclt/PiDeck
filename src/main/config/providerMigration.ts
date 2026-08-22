@@ -8,7 +8,10 @@
  * 官方 DeepSeek 是独立命名空间 llm-deepseek，对外仍用名字 deepseek。
  */
 import { dump, load } from "js-yaml";
+import { credentialRefFor } from "../../shared/dshCredentialRef";
 import type { PiAuthItem, PiModelItem, PiProviderConfig } from "./ConfigManager";
+
+export { credentialRefFor } from "../../shared/dshCredentialRef";
 
 export type MigrationDirection = "pi-to-dsh" | "dsh-to-pi";
 
@@ -57,15 +60,6 @@ export type DshProviderSnapshot = {
 
 const DEEPSEEK_OFFICIAL_HOST = "api.deepseek.com";
 const DEEPSEEK_DEFAULT_BASE = "https://api.deepseek.com/v1";
-
-/** 与渲染层 dshCredentialRef 同一规则：显式 apiKeyEnv，否则 <ROUTE>_API_KEY。 */
-export function credentialRefFor(profile: { apiKeyEnv?: unknown } | undefined, routeId: string): string {
-	const explicit = typeof profile?.apiKeyEnv === "string" && profile.apiKeyEnv.trim()
-		? profile.apiKeyEnv.trim()
-		: "";
-	if (explicit) return explicit;
-	return `${routeId.toUpperCase().replaceAll("-", "_")}_API_KEY`;
-}
 
 export function isSafeProviderName(name: unknown): name is string {
 	return typeof name === "string"
