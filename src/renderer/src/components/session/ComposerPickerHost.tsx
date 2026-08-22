@@ -38,7 +38,9 @@ export type ComposerPickerHostProps = {
   templates: PromptTemplateInfo[];
   onClose: () => void;
   onInsertTemplate: (template: PromptTemplateInfo) => void;
-  /** 技能选择：插入 /技能名 到输入框（由 controller 的 insertSkillInvocation 提供）。 */
+  /** 技能选择：把技能调用命令插入输入框（由 controller 的 insertSkillInvocation 提供）。
+   *  插入的斜杠形态由后端决定：pi 用 /skill:名称，DSH 用 /名称——保证与各自的
+   *  技能命令解析一致，避免「从列表选了却调不动」（bare 斜杠在 pi 会被过滤）。 */
   onInsertSkill: (name: string) => void;
   /** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期高亮与过滤用。 */
   defaultModel?: { provider?: string; modelId?: string; modelName?: string };

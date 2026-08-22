@@ -756,7 +756,7 @@ export const zhCN = {
   "app.composerAddPrompt": "选择 Prompt",
   // ── 技能选择面板 ──
   "app.skillPickerTitle": "选择技能",
-  "app.skillPickerHint": "点击技能将 /技能名 插入输入框",
+  "app.skillPickerHint": "点击技能插入调用命令（pi 为 /skill:名称，DSH 为 /名称），回车即可执行",
   "app.skillPickerSearchPlaceholder": "搜索技能名称或描述…",
   "app.skillPickerSearchEmpty": "未匹配到技能",
   "app.skillPickerEmpty": "暂无可用技能，可在项目资源面板添加",

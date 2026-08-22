@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
+import { toSkillInvocationToken } from "../../composerBehavior";
 import { t } from "../../i18n";
 import { desktopApi } from "../../desktopApi";
 import type { AgentBackend, DshSkillView, PiSkillSummary } from "../../../../shared/types";
@@ -117,11 +118,13 @@ export function ComposerSkillPicker(props: {
 							<CommandItem
 								key={skill.name}
 								value={`/${skill.name}`}
-								keywords={[skill.name, skill.description, skill.whenToUse ?? ""]}
+								keywords={[skill.name, skill.description, skill.whenToUse ?? "", toSkillInvocationToken(props.backend, skill.name)]}
 								onSelect={() => props.onPick(skill.name)}
 							>
 								<Sparkles size={14} strokeWidth={1.8} aria-hidden="true" />
-								<span className="picker-palette-label">/{skill.name}</span>
+								{/* 展示与真实调用命令一致的斜杠形态：pi 是 /skill:名称，DSH 是 /名称。
+								    让用户看到的就是插入后会在草稿里出现的内容，避免选了却调不动的困惑。 */}
+								<span className="picker-palette-label">/{toSkillInvocationToken(props.backend, skill.name)}</span>
 								{skill.userOnly && (
 									<span className="shrink-0 inline-flex items-center rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400">
 										{t("dshTools.skillUserOnly")}

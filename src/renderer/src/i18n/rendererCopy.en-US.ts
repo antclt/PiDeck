@@ -762,7 +762,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.composerAddPrompt": "Pick a prompt",
   // ── Skill picker panel ──
   "app.skillPickerTitle": "Pick a skill",
-  "app.skillPickerHint": "Click a skill to insert /skill-name into the input",
+  "app.skillPickerHint": "Click a skill to insert its invocation command (pi: /skill:name, DSH: /name), then press Enter to run it",
   "app.skillPickerSearchPlaceholder": "Search skills by name or description...",
   "app.skillPickerSearchEmpty": "No matching skills",
   "app.skillPickerEmpty": "No skills available. You can add them in the project resources panel",

@@ -45,6 +45,7 @@ import {
 } from "../atoms";
 import {
   appendSlashCommandToDraft,
+  toSkillInvocationToken,
   getComposerEnterIntent,
   isComposingKeyboardEvent,
   isPlanModeSendKey,
@@ -1433,16 +1434,18 @@ export function useSessionComposerController(
     requestAnimationFrame(() => editorRef.current?.focus());
   }, [draft, sessionId, setDraft]);
 
-  // 技能选择器选中后插入 /技能名 到草稿尾（与 insertTemplate 同构）：
-  // 技能经 composer 的斜杠命令调用，插入后光标落在末尾，可直接回车发送。
+  // 技能选择器选中后插入技能斜杠命令到草稿尾（与 insertTemplate 同构）：
+  // pi 用 /skill:名称（裸 /名称 pi 当未知命令拒绝——斜线命令与技能冲突的根因），
+  // DSH 由宿主把裸 /名称注册成技能命令；插入后光标落末尾，回车即可发送。
   const insertSkillInvocation = useCallback((name: string) => {
-    const next = appendSlashCommandToDraft(draft, name);
+    const token = toSkillInvocationToken(isDshBackend ? "dsh" : "pi", name);
+    const next = appendSlashCommandToDraft(draft, token);
     liveDomDraftRef.current = { sessionId, value: next };
     setDraft(next);
     caretRef.current = { pos: next.length, forValue: next };
     setPicker(null);
     requestAnimationFrame(() => editorRef.current?.focus());
-  }, [draft, sessionId, setDraft]);
+  }, [draft, isDshBackend, sessionId, setDraft]);
 
   return {
     sessionId,
