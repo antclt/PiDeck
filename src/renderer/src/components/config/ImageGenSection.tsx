@@ -19,6 +19,7 @@ import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../ui-shadcn/label";
 import { Switch } from "../ui-shadcn/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui-shadcn/select";
 import { t } from "../../i18n";
 import { desktopApi } from "../../desktopApi";
 import { showNotice } from "../../utils/notice";
@@ -266,6 +267,25 @@ export const ImageGenSection = forwardRef<ImageGenSectionHandle, ImageGenSection
 										</label>
 									))}
 								</div>
+							</div>
+							{/* 参考图模式：声明供应商是否接受图片输入；composer 据此放行/拦截附件 */}
+							<div className="grid gap-1.5">
+								<Label>{t("config.imagegen.referenceMode")}</Label>
+								<p className="text-micro text-muted-foreground">{t("config.imagegen.referenceModeHint")}</p>
+								<Select
+									value={provider.referenceMode ?? "none"}
+									onValueChange={(value) => updateProvider(provider.id, {
+										// 枚举收窄：未知值回退为不支持，避免脏配置进存储
+										referenceMode: value === "edits" || value === "image-field" ? value : undefined,
+									})}
+								>
+									<SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
+									<SelectContent>
+										<SelectItem value="none">{t("config.imagegen.referenceNone")}</SelectItem>
+										<SelectItem value="edits">{t("config.imagegen.referenceEdits")}</SelectItem>
+										<SelectItem value="image-field">{t("config.imagegen.referenceImageField")}</SelectItem>
+									</SelectContent>
+								</Select>
 							</div>
 							<div className="grid gap-2">
 								<div className="flex flex-wrap items-center justify-between gap-2">

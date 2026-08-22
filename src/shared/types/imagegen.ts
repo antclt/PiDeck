@@ -22,6 +22,11 @@ export type ImageGenRequest = {
 	watermark?: boolean;
 	/** 文件编码：官方 output_format。仅勾选 extraParams.output_format 时发送 */
 	outputFormat?: string;
+	/**
+	 * 参考图（base64，与聊天附件同构）。是否可用由供应商 referenceMode 决定：
+	 * none 时主进程直接拒绝，不发无效 API 请求。
+	 */
+	referenceImages?: ImageContent[];
 };
 
 /**
@@ -39,7 +44,9 @@ export type ImageGenErrorCode =
 	/** 服务端返回其他错误（detail 携带状态码 + 厂商错误正文） */
 	| "http"
 	/** 响应里没有图片数据 */
-	| "empty";
+	| "empty"
+	/** 供应商声明为不支持参考图（referenceMode=none）却附了参考图 */
+	| "referenceUnsupported";
 
 /** 生图结果：ok=true 时 image 为可直接进附件栏的 base64 图片 */
 export type ImageGenResult =

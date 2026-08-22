@@ -63,6 +63,7 @@ import {
   resolveChatSessionBootstrap,
 } from "./utils/chatSessionBootstrap";
 import { detectRendererPlatform } from "./lib/detectRendererPlatform";
+import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../../shared/themeSchedule";
 
 import { usePiUpdate } from "./hooks/usePiUpdate";
 import { useAppUpdateController } from "./hooks/useAppUpdateController";
@@ -525,6 +526,8 @@ export function App() {
     sendShortcut: "enter-send",
     defaultAgentBackend: "pi",
     theme: "system",
+    themeScheduleLightStart: "07:00",
+    themeScheduleDarkStart: "19:00",
     accent: "default",
 	themeSkin: "classic-green",
 	customThemeOverrides: {},
@@ -557,6 +560,7 @@ export function App() {
     piProxyEnabled: false,
     piProxyUrl: "http://127.0.0.1:7890",
     piProxyBypass: "localhost,127.0.0.1,::1",
+    piProxyProviders: [],
     desktopProxyEnabled: false,
     desktopProxyUrl: "http://127.0.0.1:7890",
     desktopProxyBypass: "localhost,127.0.0.1,::1",
@@ -677,6 +681,10 @@ export function App() {
   // 终端 open/collapsed/PTY 实例按 owner 隔离，切换项目或 agent 绝不串台；
   // 分屏高度是全局单份并持久化（与抽屉宽度同策略），跨重启恢复上次大小。
   const terminalOwner = resolveTerminalOwner(activeAgentId, activeProjectId);
+  // 会话所属项目（响应式）：未激活 Agent 的会话回退项目终端时需要它的 projectId
+  const currentSessionRecord = useAtomValue(
+    sessionRecordByIdAtomFamily(currentSessionId ?? ""),
+  );
   const {
     terminalOpen,
     terminalCollapsed,
@@ -688,19 +696,29 @@ export function App() {
     setTerminalHeight,
     prune: pruneTerminalDockState,
   } = useTerminalDock(terminalOwner);
-  // 终端 IPC 目标：agent owner → 当前会话的 runtime target（须绑定已启动 Agent）；
-  // project owner（引导页/未激活 agent/历史会话）→ 项目 cwd，主进程按 cwd 隔离 PTY。
-  // Chat 项目没有可落地的 cwd，不提供项目终端。
+  // 终端 IPC 目标：
+  // - agent owner → 当前会话的 runtime target（须绑定已启动 Agent）；拿不到 runtime
+  //   （从未启动 / 停止后绑定缺失）时回退项目 cwd 目标，主进程按 cwd 隔离 PTY——
+  //   保证普通项目的会话无论 Agent 是否激活都能开项目终端（按钮常显）。
+  // - project owner（引导页/未激活 agent/历史会话）→ 项目 cwd。
+  // - Chat 项目没有可落地的 cwd，不提供终端（激活中的匿名聊天除外，走 agent 目标）。
   const terminalTarget: TerminalTarget | undefined = useMemo(() => {
     if (!terminalOwner) return undefined;
+    const fallbackProject = (() => {
+      const pid = terminalOwner.kind === "project"
+        ? terminalOwner.id
+        : activeProjectId ?? currentSessionRecord?.projectId;
+      return pid ? projects.find((p) => p.id === pid) : undefined;
+    })();
+    const projectTarget = fallbackProject && !isChatProject(fallbackProject)
+      ? { kind: "project" as const, projectId: fallbackProject.id, cwd: fallbackProject.path }
+      : undefined;
     if (terminalOwner.kind === "agent") {
       const runtimeTarget = getRuntimeTargetForSession(currentSessionId);
-      return runtimeTarget ? { kind: "agent", ...runtimeTarget } : undefined;
+      return runtimeTarget ? { kind: "agent", ...runtimeTarget } : projectTarget;
     }
-    const project = projects.find((p) => p.id === terminalOwner.id);
-    if (!project || isChatProject(project)) return undefined;
-    return { kind: "project", projectId: project.id, cwd: project.path };
-  }, [terminalOwner, currentSessionId, projects]);
+    return projectTarget;
+  }, [terminalOwner, currentSessionId, currentSessionRecord, projects, activeProjectId]);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   // 手动刷新/增删改后仍只拉浅层 + 当前展开目录，避免再走整棵 12 层 IPC。
   const refreshVisibleFiles = useCallback(
@@ -951,12 +969,12 @@ export function App() {
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-color-scheme: dark)");
     const applyTheme = () => {
-      const resolvedTheme =
-        settings.theme === "system"
-          ? media?.matches
-            ? "dark"
-            : "light"
-          : settings.theme;
+      const resolvedTheme = resolveAppColorScheme({
+        theme: settings.theme,
+        themeScheduleLightStart: settings.themeScheduleLightStart,
+        themeScheduleDarkStart: settings.themeScheduleDarkStart,
+        systemPrefersDark: Boolean(media?.matches),
+      });
       document.documentElement.dataset.theme = resolvedTheme;
       // 主题色预设：data-accent 驱动 foundation.css 的 accent/logo 变量
       document.documentElement.dataset.accent = settings.accent;
@@ -964,11 +982,41 @@ export function App() {
       document.documentElement.dataset.skin = settings.themeSkin;
     };
     applyTheme();
-    if (settings.theme !== "system" || !media) return;
-    media.addEventListener?.("change", applyTheme);
-    return () => media.removeEventListener?.("change", applyTheme);
+    const cleanups: Array<() => void> = [];
+    if (settings.theme === "system" && media?.addEventListener) {
+      media.addEventListener("change", applyTheme);
+      cleanups.push(() => media.removeEventListener("change", applyTheme));
+    }
+    // 跟随时间：睡到下一次浅色/暗色边界再应用，避免每分钟轮询。
+    if (settings.theme === "schedule") {
+      let timer: number | undefined;
+      const arm = () => {
+        const delay = msUntilNextThemeBoundary(
+          new Date(),
+          settings.themeScheduleLightStart,
+          settings.themeScheduleDarkStart,
+        );
+        timer = window.setTimeout(() => {
+          applyTheme();
+          arm();
+        }, delay);
+      };
+      arm();
+      cleanups.push(() => {
+        if (timer !== undefined) window.clearTimeout(timer);
+      });
+    }
+    return () => {
+      for (const cleanup of cleanups) cleanup();
+    };
     // 依赖 theme 与 accent：只改主题色时也必须重新应用 data-accent（否则界面不变）
-  }, [settings.theme, settings.accent, settings.themeSkin]);
+  }, [
+    settings.theme,
+    settings.themeScheduleLightStart,
+    settings.themeScheduleDarkStart,
+    settings.accent,
+    settings.themeSkin,
+  ]);
 
   // 皮肤 + 换肤背景图统一管理（原两个 effect 互相清除：皮肤 effect 清 token 时误清壁纸注入、
   // 背景 effect 的 else 分支又误清皮肤 bg 键——合并后顺序固定：先皮肤后壁纸覆盖）
@@ -2276,7 +2324,8 @@ export function App() {
       if (
         "piProxyEnabled" in patch ||
         "piProxyUrl" in patch ||
-        "piProxyBypass" in patch
+        "piProxyBypass" in patch ||
+        "piProxyProviders" in patch
       ) {
         notice = next.piProxyEnabled
           ? t("app.shellProxySaved")

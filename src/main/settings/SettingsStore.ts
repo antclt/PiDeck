@@ -11,6 +11,7 @@ import {
   parseImageGenWatermark,
 } from "../../shared/imageGenParams";
 import { createDefaultExternalEditorSettings, type AppSettings } from "../../shared/types";
+import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { getAppLogger } from "../logging/sharedLogger";
 
 /** 桌面端 settings.json（userData），与 pi agent settings 分离 */
@@ -88,6 +89,8 @@ const defaultSettings: AppSettings = {
   showNativeMenu: false,
   sendShortcut: "enter-send",
   theme: "system",
+  themeScheduleLightStart: "07:00",
+  themeScheduleDarkStart: "19:00",
   accent: "default",
 	themeSkin: "classic-green",
 	customThemeOverrides: {},
@@ -142,6 +145,7 @@ Gitmoji 对应关系：
   piProxyEnabled: false,
   piProxyUrl: "http://127.0.0.1:7890",
   piProxyBypass: "localhost,127.0.0.1,::1",
+  piProxyProviders: [],
   desktopProxyEnabled: false,
   desktopProxyUrl: "http://127.0.0.1:7890",
   desktopProxyBypass: "localhost,127.0.0.1,::1",
@@ -238,6 +242,8 @@ export class SettingsStore {
       // 语义从「最大宽度 px」变为「占面板百分比」，无法精确换算（面板宽度可变），
       // 用线性映射保留旧值感觉：800→60%、1400→84%、1800(不限)→100%。
       this.migrateContentWidth();
+      // 兼容迁移：按供应商过滤的代理白名单，旧数据缺省为 []（不按供应商过滤，保持全局行为）。
+      this.normalizePiProxyProviders();
       // 生图尺寸/水印来自旧 JSON 时可能非法；回落默认，避免底栏和下一次请求带着坏值。
       this.settings.imageGenSize =
         parseImageGenSize(this.settings.imageGenSize) ?? DEFAULT_IMAGE_GEN_SIZE;
@@ -247,6 +253,13 @@ export class SettingsStore {
       );
       this.settings.imageGenOutputFormat =
         parseImageGenOutputFormat(this.settings.imageGenOutputFormat) ?? DEFAULT_IMAGE_GEN_OUTPUT_FORMAT;
+      this.settings.theme = this.normalizeThemeMode(this.settings.theme);
+      const schedule = normalizeThemeSchedule({
+        lightStart: this.settings.themeScheduleLightStart,
+        darkStart: this.settings.themeScheduleDarkStart,
+      });
+      this.settings.themeScheduleLightStart = schedule.lightStart;
+      this.settings.themeScheduleDarkStart = schedule.darkStart;
     } catch {
       this.settings = { ...defaultSettings };
     }
@@ -293,6 +306,22 @@ export class SettingsStore {
   async update(patch: Partial<AppSettings>) {
     // showThinking 完全由 pi agent 的 hideThinkingBlock 控制，不允许通过桌面设置修改
     const { showThinking: _, ...safePatch } = patch;
+    // 按供应商代理白名单变更时做规范化（去重去空白），避免非法值写入磁盘。
+    if ("piProxyProviders" in safePatch) {
+      const raw = safePatch.piProxyProviders;
+      if (Array.isArray(raw)) {
+        const dedup = new Set<string>();
+        for (const item of raw) {
+          if (typeof item !== "string") continue;
+          const trimmed = item.trim();
+          if (!trimmed) continue;
+          dedup.add(trimmed);
+        }
+        safePatch.piProxyProviders = [...dedup];
+      } else {
+        safePatch.piProxyProviders = [];
+      }
+    }
     this.settings = { ...this.settings, ...safePatch };
     // 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。
     if ("imageGenSize" in safePatch) {
@@ -309,12 +338,52 @@ export class SettingsStore {
       this.settings.imageGenOutputFormat =
         parseImageGenOutputFormat(this.settings.imageGenOutputFormat) ?? DEFAULT_IMAGE_GEN_OUTPUT_FORMAT;
     }
+    if ("theme" in safePatch) {
+      this.settings.theme = this.normalizeThemeMode(this.settings.theme);
+    }
+    if (
+      "theme" in safePatch
+      || "themeScheduleLightStart" in safePatch
+      || "themeScheduleDarkStart" in safePatch
+    ) {
+      const schedule = normalizeThemeSchedule({
+        lightStart: this.settings.themeScheduleLightStart,
+        darkStart: this.settings.themeScheduleDarkStart,
+      });
+      this.settings.themeScheduleLightStart = schedule.lightStart;
+      this.settings.themeScheduleDarkStart = schedule.darkStart;
+    }
     await this.save();
     this.applyMenu();
     // 配置变更审计（统一在此留痕，覆盖 IPC 与 pet/extension/editors 等所有直写路径）：
     // 只记变更的 key 列表，不记值——避免 proxyUrl 等敏感内容落盘；值变更回查用 save 前的内存态
     void getAppLogger()?.info("settings", "Settings updated", { keys: Object.keys(safePatch) });
     return this.get();
+  }
+
+  /** 规范化按供应商代理白名单：去重、去空白、过滤非字符串。 */
+  private normalizePiProxyProviders() {
+    const raw = this.settings.piProxyProviders;
+    if (!Array.isArray(raw)) {
+      this.settings.piProxyProviders = [];
+      return;
+    }
+    const dedup = new Set<string>();
+    for (const item of raw) {
+      if (typeof item !== "string") continue;
+      const trimmed = item.trim();
+      if (!trimmed) continue;
+      dedup.add(trimmed);
+    }
+    this.settings.piProxyProviders = [...dedup];
+  }
+
+  /** 旧磁盘可能没有 schedule；非法值回落到 system，避免 data-theme 写成未知值。 */
+  private normalizeThemeMode(theme: AppSettings["theme"]): AppSettings["theme"] {
+    if (theme === "light" || theme === "dark" || theme === "system" || theme === "schedule") {
+      return theme;
+    }
+    return "system";
   }
 
   applyMenu() {

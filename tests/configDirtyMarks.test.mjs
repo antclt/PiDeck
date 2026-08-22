@@ -51,9 +51,13 @@ test("ALL_CONFIG_DIRTY_KEYS 覆盖全部 config 组文件键（不含 skills/pro
 
 test("ConfigModal 的 loadConfig 与 handleImport 使用统一核算规则", () => {
 	const source = readFileSync("src/renderer/src/ConfigModal.tsx", "utf8");
-	assert.match(source, /for \(const key of dirtyKeysClearedByReload\(target\)\) clearDirty\(key\)/);
+	// 脏草稿保留：被重载覆盖的 key 若仍是脏的（preserved）则跳过 setState + clearDirty，
+	// 否则切 tab 会丢草稿；保存/导入路径 force:true 时才强制对齐磁盘。
+	assert.match(source, /if \(!preserved\.has\(key\)\) clearDirty\(key\)/);
+	assert.match(source, /dirtyKeysPreservedOnReload\(target, dirtyTabsRef\.current\)/);
+	assert.match(source, /loadConfig\("models", \{ force: true \}\)/);
 	assert.match(source, /for \(const key of ALL_CONFIG_DIRTY_KEYS\) clearDirty\(key\)/);
-	assert.match(source, /import \{ ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload \} from "\.\/config\/configDirtyMarks"/);
+	assert.match(source, /import \{ ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnReload \} from "\.\/config\/configDirtyMarks"/);
 	// 旧的仅清当前 tab 的写法必须移除
 	assert.doesNotMatch(source, /clearDirty\(target === "raw" \? "config:raw" : `config:\$\{target\}`\)/);
 });

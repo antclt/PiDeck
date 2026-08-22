@@ -1836,11 +1836,50 @@ body.ask-dialog-open .ask-question-card.pending {
   overflow: visible;
   word-break: break-all;
 }
-.composer .input-chip--file,
+/* 输入框内文件引用 @path 不加高亮（参考 dsh-web 输入框 textarea 形态：纯文本）。
+   原因：chip 背景会让路径与后续输入视觉粘连成一块，用户需要手动补空格才能
+   区分；纯文本后靠 @ 前缀自然分隔。TipTap atom 属性保留，路径仍是整体 token。 */
+.composer .input-chip--file {
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  line-height: inherit;
+  box-decoration-break: unset;
+  -webkit-box-decoration-break: unset;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.composer .input-chip--file .input-chip__icon {
+  margin-right: 0;
+  opacity: 1;
+  font-weight: inherit;
+}
+/* 消息气泡里文件引用用 dsh-web fileMention 轻链接形态：无背景无边框、
+   品牌蓝文字、hover 下划线；有 onOpenFile 回调时（.clickable）光标 pointer。 */
 .user-turn-text .input-chip--file {
-  background: color-mix(in srgb, var(--color-brand-blue) 14%, transparent);
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
   color: var(--color-brand-blue);
-  border: 1px solid color-mix(in srgb, var(--color-brand-blue) 28%, transparent);
+  text-decoration: none;
+}
+.user-turn-text .input-chip--file:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.user-turn-text .input-chip--file.clickable {
+  cursor: pointer;
+}
+.user-turn-text .input-chip--file .input-chip__icon {
+  margin-right: 0;
+  opacity: 1;
+  font-weight: inherit;
 }
 .composer .input-chip--skill,
 .user-turn-text .input-chip--skill {

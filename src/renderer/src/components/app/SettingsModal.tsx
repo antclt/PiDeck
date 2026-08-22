@@ -43,6 +43,7 @@ import {
 import { cn } from "../../lib/utils";
 import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
+import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
 import { useGitModels } from "./settings/gitModels.ts";
 import { formatSettingsUnsavedMessage, summarizeSettingsUnsavedChanges } from "./settings/unsavedChangesSummary.ts";
 import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult } from "../../../../shared/types";
@@ -216,6 +217,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const baseSnapshotRef = useRef<AppSettings>({ ...props.settings });
 	// ── 视觉桥草稿：独立于全局设置（写 pi-deck-vision.json，走独立 IPC），脏标记/保存/取消由弹框统一管理 ──
 	const visionDraft = useVisionBridgeDraft();
+	// 左侧导航黄点来源：与关闭确认同一套字段目录，避免两处口径不一致
+	const dirtyTabIds = useMemo(
+		() => dirtySettingsTabIds({ dirtyFields, visionDirty: visionDraft.dirty }),
+		[dirtyFields, visionDraft.dirty],
+	);
 	/** 各 tab 的局部编辑态（WSL 输入/Web 端口/宠物预览模式）在取消时通过递增信号重置 */
 	const [devTabResetKey, setDevTabResetKey] = useState(0);
 	const [petTabResetKey, setPetTabResetKey] = useState(0);
@@ -432,6 +438,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 							<TabsTrigger key={tab.id} value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 								<span className="settings-tab-icon">{tab.icon}</span>
 								<strong>{tab.label}</strong>
+							{/* 未保存黄点：按字段目录归并到所属 tab，视觉桥草稿算 vision */}
+							{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 							</TabsTrigger>
 						))}
 					</TabsList>
@@ -540,6 +548,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							<PetTab
 								draft={draftSettings}
 								updateDraft={updateDraft}
+								isDirty={isDirty}
 								resetKey={petTabResetKey}
 							/>
 							</Suspense>

@@ -38,18 +38,19 @@ export function SessionProxyDialog(props: { sessionId: string; onClose: () => vo
   const record = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));
   const upsertSession = useSetAtom(upsertSessionAtom);
   const [saving, setSaving] = useState(false);
-  const [globalProxy, setGlobalProxy] = useState<{ enabled: boolean; url: string } | null>(null);
+  const [globalProxy, setGlobalProxy] = useState<{ enabled: boolean; url: string; providers: string[] } | null>(null);
 
   // 当前生效模式：会话记录覆盖 > 跟随全局（缺省）
   const currentMode: SessionProxyMode = record?.proxy?.mode ?? "follow";
   const isDsh = record?.backend === "dsh";
+  const provider = record?.model?.provider;
 
   useEffect(() => {
     let cancelled = false;
     // 打开时拉一次全局代理状态，用于展示「启用代理」时的地址来源与空地址告警
     void desktopApi.settings.get().then((settings) => {
       if (cancelled) return;
-      setGlobalProxy({ enabled: settings.piProxyEnabled, url: settings.piProxyUrl });
+      setGlobalProxy({ enabled: settings.piProxyEnabled, url: settings.piProxyUrl, providers: settings.piProxyProviders ?? [] });
     }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -124,6 +125,15 @@ export function SessionProxyDialog(props: { sessionId: string; onClose: () => vo
           </p>
           {globalUrlEmpty && (
             <p className="text-warning">{t("sessionProxy.globalEmptyWarn")}</p>
+          )}
+          {/* 按供应商过滤的生效提示：仅当 follow 时才会被白名单覆盖，显式 on/off 最高优 */}
+          {globalProxy && globalProxy.providers.length > 0 && currentMode === "follow" && provider && (
+            globalProxy.providers.includes(provider)
+              ? <p className="text-primary/80">{t("sessionProxy.providerFilterMatched", { provider })}</p>
+              : <p>{t("sessionProxy.providerFilterNotMatched", { provider })}</p>
+          )}
+          {globalProxy && globalProxy.providers.length > 0 && (
+            <p className="text-muted-foreground/60">{t("sessionProxy.providerFilterHint")}</p>
           )}
           {isDsh && <p className="text-muted-foreground/70">{t("sessionProxy.dshShareHint")}</p>}
         </div>

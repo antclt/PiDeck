@@ -7,7 +7,7 @@ export type SendShortcutMode =
 	| "ctrl-enter-send"
 	| "shift-enter-send";
 
-export type AppThemeMode = "system" | "light" | "dark";
+export type AppThemeMode = "system" | "light" | "dark" | "schedule";
 /** 主题色预设：data-accent 属性驱动 foundation.css 的 accent/logo 变量 */
 export type AppAccentMode = "default" | "green" | "blue" | "purple" | "amber" | "rose";
 /**
@@ -50,8 +50,12 @@ export type StartupWindowMode =
 	useNativeTitleBar: boolean;
 	showNativeMenu: boolean;
 	sendShortcut: SendShortcutMode;
-	/** 界面主题，system 跟随系统浅色/暗色偏好 */
+	/** 界面主题：system 跟随系统；schedule 按本地时钟在浅色/暗色之间切换 */
 	theme: AppThemeMode;
+	/** 跟随时间：浅色开始（HH:mm，含）。仅 theme=schedule 时生效。 */
+	themeScheduleLightStart: string;
+	/** 跟随时间：暗色开始（HH:mm，含）。仅 theme=schedule 时生效。 */
+	themeScheduleDarkStart: string;
 	/** 主题色（accent）预设，data-accent 驱动；新增预设只需扩充 AppAccentMode 与色板 */
 	accent: AppAccentMode;
 	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides */
@@ -128,6 +132,13 @@ export type StartupWindowMode =
 	piProxyUrl: string;
 	/** pi agent 代理绕过列表，对应 NO_PROXY 环境变量 */
 	piProxyBypass: string;
+	/**
+	 * 按供应商过滤的 pi 代理白名单：非空时仅名单内 provider 强制走代理（复用 piProxyUrl），
+	 * 名单外强制直连。空数组 = 不按供应商过滤（跟随全局 piProxyEnabled / 会话级覆盖）。
+	 * 解决“新建会话首条请求无代理”痛点：无需先激活会话再手动切“会话代理”，新建时按 model.provider 自动匹配。
+	 * 供应商名与 models.json 的 provider key 一致（如 openai / anthropic / deepseek 等）。
+	 */
+	piProxyProviders: string[];
 	/** 是否给桌面端自身网络请求启用代理，不影响已启动的 pi agent 子进程 */
 	desktopProxyEnabled: boolean;
 	/** 桌面端自身网络请求使用的代理地址，例如 http://127.0.0.1:7890 */

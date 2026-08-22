@@ -91,12 +91,17 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify("目标模式需要一条要达成的目标。", "warning");
 			return;
 		}
+		// 显式传入新目标 = 替换语义：轮次从 0 重新记账。否则上一目标消耗的轮次
+		// 会顶到新目标头上，刚替换的目标直接显示 "active · 5/32" 且提前撞上限。
+		// 恢复（setActive() 不传参）保留原轮次，符合「暂停后从当前进度继续」。
+		const replacing = typeof objective === "string";
 		state = {
 			...state,
 			enabled: true,
 			phase: "active",
 			objective: nextObjective,
 			blockReason: undefined,
+			roundsStarted: replacing ? 0 : state.roundsStarted,
 			maxGoalRounds: state.maxGoalRounds || DEFAULT_MAX_ROUNDS,
 		};
 		updateWidget(ctx);
@@ -178,9 +183,16 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 		const body = event.text.slice(PI_DECK_GOAL_MODE_MARKER.length).replace(/^\s+/, "");
 		if (!state.objective) {
 			setActive(ctx, body);
+		} else if (state.phase === "complete") {
+			// 上一目标已完成：目标模式里发的原文是「替换为新目标」，不是续跑旧目标。
+			// 修复前这里落入末位 else 只把 phase 掰回 active，objective 仍是旧目标——
+			// 新目标既不显示也不执行（2026-08 反馈：目标完成后新目标不更新）。
+			setActive(ctx, body);
 		} else if (state.phase === "paused" || state.phase === "blocked") {
+			// 暂停/阻塞 ≠ 完成：正文保持原文推进同一目标（resume 后由正文驱动继续）。
 			setActive(ctx);
 		} else {
+			// 进行中新目标原文 = 推进当前目标（轮次不清零）。
 			state = { ...state, enabled: true, phase: "active" };
 			updateWidget(ctx);
 			persistState();

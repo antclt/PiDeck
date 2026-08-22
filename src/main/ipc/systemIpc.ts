@@ -24,7 +24,7 @@ import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import type { SkillManager } from "../skills/SkillManager";
-import { fetchModelList, invalidateModelListCache, getCachedModelList, refreshModelList } from "../pi/modelListCache";
+import { fetchModelList, invalidateModelListCache, getCachedModelList, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { getPiAiCatalogIndex, lookupPiAiModelSpec } from "../pi/piAiBuiltinCatalog";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
@@ -255,6 +255,44 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return [];
+		}
+	});
+
+	ipcMain.handle(ipcChannels.projectsListModelsReport, async (_event, projectId: unknown, force: unknown) => {
+		// 边界校验：渲染层入参不可信；projectId 仅透传（当前实现未使用），force 必须为布尔。
+		const projectIdArg =
+			typeof projectId === "string" && projectId.length <= 256 ? projectId : undefined;
+		const forceArg = force === true;
+		try {
+			// 诊断报告：模型数组 + 为空时的失败原因（force=手动刷新，绕过缓存重新 fork）。
+			const report = await resolveModelListReport(
+				piLocator,
+				settingsStore,
+				configManager,
+				forceArg,
+			);
+			void appLogger.info("pi", "Model list report resolved", {
+				ok: report.ok,
+				reason: report.reason,
+				count: report.models.length,
+				source: report.source,
+				forced: forceArg,
+			});
+			return report;
+		} catch (error) {
+			// resolveModelListReport 内部吞掉大部分异常；兜底返回失败报告，不让渲染层拿到裸异常。
+			void appLogger.warn("pi", "Model list report failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return {
+				models: [],
+				ok: false,
+				reason: "cli-failed",
+				version: null,
+				detail: error instanceof Error ? error.message : String(error),
+				source: "none",
+				at: Date.now(),
+			};
 		}
 	});
 
@@ -788,7 +826,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		) {
 			if (applyDesktopProxy) await applyDesktopProxy(settings);
 		}
-		if ("theme" in patch) {
+		if (
+			"theme" in patch
+			|| "themeScheduleLightStart" in patch
+			|| "themeScheduleDarkStart" in patch
+		) {
 			if (applyNativeThemeSource) applyNativeThemeSource(settings);
 		}
 		if ("language" in patch) {

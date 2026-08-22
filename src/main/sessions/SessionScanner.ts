@@ -52,6 +52,9 @@ type SessionScanMessage = {
   content?: unknown;
   provider?: string;
   model?: string;
+  /** 生图消息标识：PiDeck 本地写入的 api=openai-images 或 imageGen 元数据 */
+  api?: string;
+  imageGen?: unknown;
 };
 
 type SessionScanLine = {
@@ -1406,7 +1409,8 @@ export class SessionScanner {
     const info = isWsl
       ? await this.readWslFileVersion(filePath, signal)
       : await stat(filePath);
-    const version = { mtimeMs: info.mtimeMs, size: info.size };
+		// schema v2：摘要新增 hasImageGen；不带 tag 的旧缓存缺字段，会一直不显示角标
+		const version = { mtimeMs: info.mtimeMs, size: info.size, schema: 2 };
     const cached = this.summaryCache.get(filePath, version);
     if (cached !== undefined) return cached;
 
@@ -1446,6 +1450,8 @@ export class SessionScanner {
     let modelProvider: string | undefined;
     let modelId: string | undefined;
     let thinkingLevel: string | undefined;
+    /** 扫描范围内是否出现生图消息（侧栏图片角标用） */
+    let hasImageGen = false;
     /** 最后一条 assistant 消息携带的 provider/model（旧格式兼容回退）。 */
     let lastAssistantModel: { provider: string; modelId: string } | undefined;
 
@@ -1620,6 +1626,7 @@ export class SessionScanner {
       parentSessionPath,
       model: modelProvider && modelId ? { provider: modelProvider, modelId } : undefined,
       thinkingLevel,
+      hasImageGen: hasImageGen || undefined,
       // 标记 WSL 来源，供 rename/delete/copy/readMessages 等操作识别
       wsl: isWsl || undefined,
     };

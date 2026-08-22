@@ -35,6 +35,9 @@ export function useSaveRegistry() {
 	/** 同步读取当前是否有脏标记（markDirty 后立即可用；state 是异步的）。 */
 	const isDirty = useCallback(() => dirtyRef.current.size > 0, []);
 
+	/** 同步列出当前脏 key（侧栏黄点 / 关闭文案按导航归并时用）。 */
+	const listDirtyKeys = useCallback(() => [...dirtyRef.current], []);
+
 	/** 保存单个 key（未注册返回 false）；成功后清除该 key 的脏标记。 */
 	const saveKey = useCallback(async (key: string): Promise<boolean> => {
 		const save = saversRef.current.get(key);
@@ -67,6 +70,7 @@ export function useSaveRegistry() {
 		unregister,
 		markDirty,
 		isDirty,
+		listDirtyKeys,
 		saveKey,
 		saveAll,
 	};

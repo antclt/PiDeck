@@ -440,14 +440,14 @@ export class SessionRuntimeCoordinator {
 	): Promise<SessionCommandResult<SessionTargetedValue<PiCommand[]>>> {
 		return this.runTargetCommand(target, async (agentId) => {
 			// 命令列表是可选能力：后端未声明 getCommands 时按能力缺失拒绝（UI 应已按能力隐藏入口）。
-			const getCommands = this.agents.getCommands;
-			if (!getCommands) {
+			// 必须对象调用：抽成 const fn = this.agents.fn 会丢掉 this（CompositeAgentGateway.resolveBackend 崩）。
+			if (typeof this.agents.getCommands !== "function") {
 				throw new SessionRuntimeCommandError(
 					"SESSION_COMMAND_FAILED",
 					`backend "${this.agents.backend}" does not support getCommands`,
 				);
 			}
-			return await getCommands(agentId) as PiCommand[];
+			return await this.agents.getCommands(agentId) as PiCommand[];
 		});
 	}
 
@@ -461,14 +461,13 @@ export class SessionRuntimeCoordinator {
 		target: SessionRuntimeTarget,
 	): Promise<SessionCommandResult<SessionTargetedValue<unknown>>> {
 		return this.runTargetCommand(target, async (agentId) => {
-			const exportHtml = this.agents.exportHtml;
-			if (!exportHtml) {
+			if (typeof this.agents.exportHtml !== "function") {
 				throw new SessionRuntimeCommandError(
 					"SESSION_COMMAND_FAILED",
 					`backend "${this.agents.backend}" does not support exportHtml`,
 				);
 			}
-			return exportHtml(agentId);
+			return this.agents.exportHtml(agentId);
 		});
 	}
 
@@ -478,14 +477,13 @@ export class SessionRuntimeCoordinator {
 		newText: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<void>>> {
 		return this.runTargetCommand(target, async (agentId) => {
-			const editMessage = this.agents.editMessage;
-			if (!editMessage) {
+			if (typeof this.agents.editMessage !== "function") {
 				throw new SessionRuntimeCommandError(
 					"SESSION_COMMAND_FAILED",
 					`backend "${this.agents.backend}" does not support editMessage`,
 				);
 			}
-			return editMessage(agentId, messageId, newText);
+			return this.agents.editMessage(agentId, messageId, newText);
 		});
 	}
 
@@ -494,14 +492,13 @@ export class SessionRuntimeCoordinator {
 		messageId: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<void>>> {
 		return this.runTargetCommand(target, async (agentId) => {
-			const deleteMessage = this.agents.deleteMessage;
-			if (!deleteMessage) {
+			if (typeof this.agents.deleteMessage !== "function") {
 				throw new SessionRuntimeCommandError(
 					"SESSION_COMMAND_FAILED",
 					`backend "${this.agents.backend}" does not support deleteMessage`,
 				);
 			}
-			return deleteMessage(agentId, messageId);
+			return this.agents.deleteMessage(agentId, messageId);
 		});
 	}
 
@@ -633,14 +630,13 @@ export class SessionRuntimeCoordinator {
 		preset: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>> {
 		return this.runTargetCommand(target, async (agentId) => {
-			const setPermission = this.agents.setPermission;
-			if (!setPermission) {
+			if (typeof this.agents.setPermission !== "function") {
 				throw new SessionRuntimeCommandError(
 					"SESSION_COMMAND_FAILED",
 					`backend "${this.agents.backend}" does not support permissions`,
 				);
 			}
-			await setPermission(agentId, preset);
+			await this.agents.setPermission(agentId, preset);
 			await this.catalog.update(target.sessionId, {
 				permissionPreset: preset,
 				updatedAt: Date.now(),
@@ -1641,14 +1637,15 @@ export class SessionRuntimeCoordinator {
 				);
 			}
 			this.requireStoppedForFileMutation(sessionId);
-			const mutate = this.agents.mutatePersistedSessionMessage;
-			if (!mutate) {
+			// 必须对象调用：抽方法会丢掉 this，CompositeAgentGateway 里 this.resolveBackend 变 undefined。
+			// mutate 合法返回值可以是 undefined（edit/delete），所以不能用返回值判断方法是否存在。
+			if (typeof this.agents.mutatePersistedSessionMessage !== "function") {
 				throw new SessionRuntimeCommandError(
 					"SESSION_COMMAND_FAILED",
 					`backend "${this.agents.backend}" does not support persisted session message mutation`,
 				);
 			}
-			const value = await mutate(entry.filePath, messageId, operation, {
+			const value = await this.agents.mutatePersistedSessionMessage(entry.filePath, messageId, operation, {
 				newText,
 				environment: entry.environment,
 				wslDistro: entry.wslDistro,

@@ -80,7 +80,17 @@ export function TerminalDockPanel(props: TerminalDockPanelProps) {
 
   return (
     <>
-      <ResizableHandle className="v-splitter" />
+      {/* 可见分隔条：终端分屏的视觉边界 + 拖拽手柄。不用 session 视图的
+          .v-splitter（刻意透明、依赖 composer 边框当分界线），这里独立成屏，
+          必须自己画出分屏线；after 扩大上下命中区，贴着终端上沿也能拖。 */}
+      <ResizableHandle
+        className={[
+          "relative h-1 w-full shrink-0 cursor-row-resize rounded-none",
+          "bg-border/60 transition-colors hover:bg-ring data-[separator=active]:bg-ring",
+          // 命中区向消息区/空态延伸，实际可拖范围远大于可见线条
+          "after:absolute after:inset-x-0 after:-top-2 after:h-4 after:content-['']",
+        ].join(" ")}
+      />
       <ResizablePanel
         id="terminal"
         panelRef={props.panelRef}

@@ -88,16 +88,30 @@ export function SettingRow(props: {
 	);
 }
 
-/** 开关行：标题/描述在左，Switch 右对齐控件列 */
+/** 开关行：标题/描述在左，Switch 右对齐控件列；dirty 时标题旁显示黄点。 */
 export function SettingSwitchRow(props: {
 	title: ReactNode;
 	description?: ReactNode;
 	checked: boolean;
 	disabled?: boolean;
+	/** 未保存时在标题旁显示黄点；开关行默认不包 DirtyMarker，不传就没有标识。 */
+	dirty?: boolean;
+	/** 黄点无障碍标签，缺省用字符串 title。 */
+	dirtyLabel?: string;
 	onChange: (checked: boolean) => void;
 }) {
+	const dirtyLabel =
+		props.dirtyLabel ?? (typeof props.title === "string" ? props.title : "");
 	return (
-		<SettingRow title={props.title} description={props.description}>
+		<SettingRow
+			title={
+				<>
+					<span>{props.title}</span>
+					<DirtyMarker dirty={Boolean(props.dirty)} label={dirtyLabel} />
+				</>
+			}
+			description={props.description}
+		>
 			<Switch
 				checked={props.checked}
 				disabled={props.disabled}
@@ -113,9 +127,22 @@ export function SettingTextarea(props: {
 	description?: ReactNode;
 	value: string;
 	onChange: (value: string) => void;
+	dirty?: boolean;
+	dirtyLabel?: string;
 }) {
+	const dirtyLabel =
+		props.dirtyLabel ?? (typeof props.title === "string" ? props.title : "");
 	return (
-		<SettingRow title={props.title} description={props.description} stacked>
+		<SettingRow
+			title={
+				<>
+					<span>{props.title}</span>
+					<DirtyMarker dirty={Boolean(props.dirty)} label={dirtyLabel} />
+				</>
+			}
+			description={props.description}
+			stacked
+		>
 			<Textarea
 				value={props.value}
 				rows={8}

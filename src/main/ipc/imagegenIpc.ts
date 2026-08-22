@@ -10,6 +10,7 @@ import {
 	DEFAULT_IMAGE_GEN_OUTPUT_FORMAT,
 	DEFAULT_IMAGE_GEN_WATERMARK,
 	parseImageGenOutputFormat,
+	parseImageGenReferenceImages,
 	parseImageGenSize,
 	parseImageGenWatermark,
 } from "../../shared/imageGenParams";
@@ -53,6 +54,7 @@ export function registerImageGenIpc(deps: {
 			size?: unknown;
 			watermark?: unknown;
 			outputFormat?: unknown;
+			referenceImages?: unknown;
 		} | null;
 		const provider = typeof candidate?.provider === "string" ? candidate.provider.trim() : "";
 		const model = typeof candidate?.model === "string" ? candidate.model.trim() : "";
@@ -61,10 +63,12 @@ export function registerImageGenIpc(deps: {
 		const size = parseImageGenSize(candidate?.size) ?? undefined;
 		const watermark = parseImageGenWatermark(candidate?.watermark, DEFAULT_IMAGE_GEN_WATERMARK);
 		const outputFormat = parseImageGenOutputFormat(candidate?.outputFormat, DEFAULT_IMAGE_GEN_OUTPUT_FORMAT) ?? undefined;
+		// 参考图：整体校验（数量/mime/base64 体积），非法直接拒绝，不让脏数据进网络层
+		const referenceImages = parseImageGenReferenceImages(candidate?.referenceImages) ?? undefined;
 		if (!model || !prompt || prompt.length > 4000) {
 			return { ok: false, error: "http", detail: "invalid request" } as const;
 		}
-		const result = await imageGen.generate({ provider, model, prompt, size, watermark, outputFormat });
+		const result = await imageGen.generate({ provider, model, prompt, size, watermark, outputFormat, referenceImages });
 		if (!result.ok) {
 			log("imagegen", "generate rejected", { error: result.error, provider });
 			return result;

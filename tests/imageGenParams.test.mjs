@@ -133,3 +133,23 @@ describe("parseImageGenOutputFormat", () => {
 		assert.equal(parseImageGenOutputFormat("webp", null), null);
 	});
 });
+
+describe("parseImageGenReferenceImages", () => {
+	test("accepts valid image contents and rejects bad mime/oversize/extra type", () => {
+		const { parseImageGenReferenceImages } = loadParams();
+		const good = [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }];
+		assert.deepEqual(JSON.parse(JSON.stringify(parseImageGenReferenceImages(good))), good);
+		assert.equal(parseImageGenReferenceImages([{ type: "image", data: "x", mimeType: "application/pdf" }]), null);
+		assert.equal(parseImageGenReferenceImages([{ type: "text", data: "x", mimeType: "image/png" }]), null);
+		// 超过 4 张直接整体拒绝（all-or-null），避免静默截断
+		assert.equal(parseImageGenReferenceImages(new Array(5).fill(good[0])), null);
+	});
+
+	test("buildImageGenImageField converts to dataURI array", () => {
+		const { buildImageGenImageField } = loadParams();
+		assert.deepEqual(
+			buildImageGenImageField([{ type: "image", data: "abc", mimeType: "image/jpeg" }]),
+			["data:image/jpeg;base64,abc"],
+		);
+	});
+});

@@ -41,6 +41,8 @@ export type DshSchemaFormProps = {
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
 	sectionApi?: DshSectionApi;
+	/** 稳定脏标记 key（dsh:<nav>:<sub>）；不传退回 useId，但那样侧栏黄点无法归并到导航。 */
+	instanceKey?: string;
 };
 
 /**
@@ -55,7 +57,9 @@ export type DshSchemaFormProps = {
  */
 export function DshSchemaForm(props: DshSchemaFormProps) {
 	const { namespace, writable, sectionApi } = props;
-	const instanceId = useId();
+	// 稳定 key 优先（跨 tab/收起展开保持同一脏标记），useId 仅作兜底。
+	const generatedId = useId();
+	const instanceId = props.instanceKey ?? generatedId;
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 

@@ -18,9 +18,11 @@ const {
   parseTokenSize,
   modelsFromPiConfig,
   isUnknownCliOption,
+  classifyModelListFailure,
   MODEL_LIST_FAST_ARGS,
   MODEL_LIST_COMPAT_ARGS,
 } = loadTsCommonJs("src/main/pi/modelListCache.ts");
+const preload = readFileSync("src/preload/index.ts", "utf8");
 const cacheSource = readFileSync("src/main/pi/modelListCache.ts", "utf8");
 const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
 const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
@@ -247,8 +249,8 @@ test("ComposerPickerHost loads models on welcome page (no record)", () => {
   );
   assert.match(pickerHost, /const pickerNeedsModels = props\.picker === "model" \|\| \(props\.picker === "thinking" && isDshSession\)/);
   assert.match(pickerHost, /useBackendModelCatalog\(\{[\s\S]*?enabled: pickerNeedsModels/);
-  // 后端分支收敛在 hook 内：DSH 走 host 目录，pi 走 models.json
-  assert.match(hook, /listModels\(options\.projectId\)/);
+  // 后端分支收敛在 hook 内：DSH 走 host 目录，pi 走诊断报告通道（含失败原因分类）
+  assert.match(hook, /listModelsReport\(options\.projectId, force\)/);
   assert.match(hook, /desktopApi\.sessions\.listDshModels\(\)/);
   assert.match(hook, /options\.backend === "dsh"/);
 });
@@ -275,4 +277,125 @@ test("welcome page model/thinking selection persists; draft defaults come from p
   // 共享偏好读取器仅供 ComposerPickerHost 持久化显式选择，不影响 pi 默认值。
   assert.match(bootstrap, /readWelcomeModelPreference/);
   assert.match(bootstrap, /readWelcomeThinkingPreference/);
+});
+
+test("classifyModelListFailure: pi not installed is the most actionable reason", () => {
+  const { reason, detail } = classifyModelListFailure({
+    cliError: new Error("spawn pi ENOENT"),
+    configDiagnostic: null,
+    piInstalled: false,
+    version: null,
+  });
+  assert.equal(reason, "pi-not-found");
+  assert.match(detail, /pi/i);
+});
+
+test("classifyModelListFailure: malformed models.json reports config-invalid with position", () => {
+  const { reason, detail } = classifyModelListFailure({
+    cliError: null,
+    configDiagnostic: {
+      fileName: "models.json",
+      message: "Unexpected token }",
+      line: 4,
+      column: 2,
+    },
+    piInstalled: true,
+    version: "1.2.3",
+  });
+  assert.equal(reason, "config-invalid");
+  assert.match(detail, /models\.json parse failed at line 4:2/);
+});
+
+test("classifyModelListFailure: unknown option on --list-models means pi too old", () => {
+  const { reason, detail } = classifyModelListFailure({
+    cliError: new Error("error: unknown option '--list-models'"),
+    configDiagnostic: null,
+    piInstalled: true,
+    version: "0.5.0",
+  });
+  assert.equal(reason, "version-too-old");
+  assert.match(detail, /pi 0\.5\.0 rejects --list-models/);
+});
+
+test("classifyModelListFailure: auth/json keywords in CLI stderr classify as config-invalid", () => {
+  const { reason } = classifyModelListFailure({
+    cliError: new Error("failed to parse auth.json"),
+    configDiagnostic: null,
+    piInstalled: true,
+    version: "1.2.3",
+  });
+  assert.equal(reason, "config-invalid");
+});
+
+test("classifyModelListFailure: other CLI errors stay cli-failed", () => {
+  const { reason } = classifyModelListFailure({
+    cliError: new Error("exit code 1"),
+    configDiagnostic: null,
+    piInstalled: true,
+    version: "1.2.3",
+  });
+  assert.equal(reason, "cli-failed");
+});
+
+test("classifyModelListFailure: healthy pi + valid config with no models is empty", () => {
+  const { reason, detail } = classifyModelListFailure({
+    cliError: null,
+    configDiagnostic: null,
+    piInstalled: true,
+    version: "1.2.3",
+  });
+  assert.equal(reason, "empty");
+  assert.match(detail, /no models/);
+});
+
+test("model list report channel: manual refresh reruns list models with failure classification", () => {
+  // 主进程：新通道走 resolveModelListReport（force 绕过缓存；空列表分类失败原因）
+  assert.match(systemIpc, /projectsListModelsReport/);
+  assert.match(systemIpc, /resolveModelListReport\(/);
+  assert.match(systemIpc, /Model list report resolved/);
+  assert.match(cacheSource, /export async function resolveModelListReport/);
+  assert.match(cacheSource, /export function classifyModelListFailure/);
+  assert.match(cacheSource, /piLocator\.check\(/);
+  // 共享通道集中定义
+  assert.match(
+    readFileSync("src/shared/ipc.ts", "utf8"),
+    /projectsListModelsReport: "projects:list-models-report"/,
+  );
+  // preload 暴露最小 API（不带业务逻辑）
+  assert.match(preload, /listModelsReport: \(projectId\?: string, force\?: boolean\)/);
+  // 旧通道（数组）保持不动：其他消费方（vision bridge/git models/代理测试）不受影响
+  const plainSection = systemIpc.slice(
+    systemIpc.indexOf("projectsListModels,"),
+    systemIpc.indexOf("projectsListModelsReport"),
+  );
+  assert.doesNotMatch(plainSection, /force/);
+});
+
+test("model picker wires manual refresh + failure guide", () => {
+  const hook = readFileSync(
+    "src/renderer/src/hooks/useBackendModelCatalog.ts",
+    "utf8",
+  );
+  const pickerHost = readFileSync(
+    "src/renderer/src/components/session/ComposerPickerHost.tsx",
+    "utf8",
+  );
+  const components = readFileSync(
+    "src/renderer/src/components/session/ComposerComponents.tsx",
+    "utf8",
+  );
+  // 数据源切到报告通道；reload(true) = 手动刷新（绕过缓存重新 fork）
+  assert.match(hook, /listModelsReport\(options\.projectId, force\)/);
+  assert.match(hook, /reload: load/);
+  assert.match(hook, /refreshing/);
+  // 选择器把报告/刷新状态传给 ModelPicker
+  assert.match(pickerHost, /report=\{report\}/);
+  assert.match(pickerHost, /refreshing=\{refreshing\}/);
+  assert.match(pickerHost, /onRefresh=\{\(\) => reload\(true\)\}/);
+  // 标题栏刷新按钮 + 空列表原因引导（版本过低/配置损坏/pi 未安装等）
+  assert.match(components, /app\.modelPickerRefresh/);
+  assert.match(components, /ModelListStatusGuide/);
+  assert.match(components, /app\.modelListFailVersionTooOld/);
+  assert.match(components, /app\.modelListFailConfigInvalid/);
+  assert.match(components, /app\.modelListFailPiNotFound/);
 });

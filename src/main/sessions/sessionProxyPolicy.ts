@@ -32,6 +32,9 @@ export type HostProxyEnvPatch = {
 
 export type PiProxyModeSettings = Pick<AppSettings, "piProxyEnabled" | "piProxyUrl">;
 
+/** 按供应商过滤所需的全局设置子集（代理 URL + 白名单）。 */
+export type PiProxyProviderSettings = Pick<AppSettings, "piProxyEnabled" | "piProxyUrl" | "piProxyProviders">;
+
 /**
  * 把会话级覆盖应用到 pi 子进程设置。仅调整 piProxyEnabled 开关：
  * on → 强制开启（URL 仍复用全局 piProxyUrl）；off → 强制关闭；follow/缺省 → 原样。
@@ -49,6 +52,69 @@ export function applyPiProxyMode<T extends PiProxyModeSettings>(
 		return { ...settings, piProxyEnabled: true };
 	}
 	return { ...settings, piProxyEnabled: false };
+}
+
+/**
+ * 按供应商过滤解析会话级代理模式（纯函数，可单测）。
+ * 优先级（高→低）：
+ * 1. 会话显式 on/off —— 用户在“会话代理”弹窗手动指定，始终最高优；
+ * 2. 按供应商白名单 —— 当全局 piProxyProviders 非空且会话有 provider 时，
+ *    名单内 → 强制 on（即使全局 piProxyEnabled 关闭也复用全局 URL），
+ *    名单外 → 强制 off（即使全局开启也不走代理），实现“指定供应商走代理”；
+ * 3. 全局开关 —— 以上都未命中时沿用全局 piProxyEnabled（缺省行为）。
+ * 返回 undefined 表示无需覆盖（跟随全局），返回 on/off 表示需要覆盖。
+ */
+export function resolveProviderProxyMode(
+	provider: string | undefined,
+	piProxyProviders: ReadonlyArray<string> | undefined,
+): SessionProxyMode | undefined {
+	if (!piProxyProviders || piProxyProviders.length === 0) return undefined;
+	if (!provider || !provider.trim()) return undefined;
+	const normalized = provider.trim();
+	// 白名单大小写敏感（与 models.json 的 provider key 一致），空白已在 SettingsStore 归一化。
+	if (piProxyProviders.includes(normalized)) return "on";
+	return "off";
+}
+
+/**
+ * 结合会话级覆盖 + 按供应商白名单，计算本次 spawn 应注入的 pi 代理设置。
+ * 泛型保留 settings 的完整类型，调用方无需收窄。
+ * - 会话显式 on/off 优先；
+ * - 否则按 provider 白名单决定 on/off（force_on：名单内即使全局关闭也开启）；
+ * - 都未命中则返回原 settings（跟随全局）。
+ */
+export function applyPiProxyModeWithProvider<T extends PiProxyProviderSettings>(
+	settings: T | undefined,
+	mode: SessionProxyMode | undefined,
+	provider: string | undefined,
+): T | undefined {
+	if (!settings) return settings;
+	// 1. 会话显式覆盖最高优（用户手动在会话菜单指定的 on/off）。
+	if (mode === "on" || mode === "off") return applyPiProxyMode(settings, mode);
+	// 2. 按供应商白名单（仅当 follow/缺省时生效）：名单内强制 on，名单外强制 off。
+	const providerMode = resolveProviderProxyMode(provider, settings.piProxyProviders);
+	if (providerMode) return applyPiProxyMode(settings, providerMode);
+	// 3. 无覆盖、无白名单命中 → 跟随全局（原样返回，避免创建新对象）。
+	return settings;
+}
+
+/**
+ * 主进程侧统一计算会话最终代理模式（供 AgentManager 的 resolveSessionProxy 复用）。
+ * 输入：会话记录的 proxy.mode（可能 follow/缺省）、provider、全局 piProxyProviders。
+ * 输出：本次 spawn 应生效的模式（on/off/follow）。
+ * - 会话显式 on/off 直接返回；
+ * - 否则按 provider 白名单映射为 on/off；
+ * - 无白名单或无 provider 时返回 follow（沿用全局）。
+ */
+export function resolveEffectiveSessionProxyMode(
+	sessionMode: SessionProxyMode | undefined,
+	provider: string | undefined,
+	piProxyProviders: ReadonlyArray<string> | undefined,
+): SessionProxyMode {
+	if (sessionMode === "on" || sessionMode === "off") return sessionMode;
+	const providerMode = resolveProviderProxyMode(provider, piProxyProviders);
+	if (providerMode) return providerMode;
+	return "follow";
 }
 
 /**

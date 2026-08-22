@@ -18,6 +18,8 @@ import type {
 	AppUpdateDownloadResult,
 	AppUpdateInfo,
 	AvailableModel,
+	ModelListFailReason,
+	ModelListReport,
 	ChatMessage,
 	FetchedModel,
 	ModelSpec,
@@ -179,6 +181,12 @@ const api = {
 		listModels: (projectId?: string) =>
 			ipcRenderer.invoke(ipcChannels.projectsListModels, projectId) as Promise<
 				AvailableModel[]
+			>,
+		// 模型列表诊断报告：模型 + 失败原因分类（版本过低/配置损坏/pi 未安装），
+		// 供选择器在空列表时给出引导；force=true 绕过缓存重新 fork（手动刷新）。
+		listModelsReport: (projectId?: string, force?: boolean) =>
+			ipcRenderer.invoke(ipcChannels.projectsListModelsReport, projectId, force) as Promise<
+				ModelListReport
 			>,
 		// 查询模型规格（pi-ai 内置目录，中转站按 id 精确匹配；未命中返回 null）
 		getModelSpec: (providerName: string, modelId: string) =>

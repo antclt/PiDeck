@@ -344,11 +344,14 @@ export function PiAiProvidersCard(props: {
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
 	sectionApi?: DshSectionApi;
+	/** 稳定脏标记 key（dsh:<nav>:<sub>）。 */
+	instanceKey?: string;
 	/** 把供应商迁到 pi 后刷新本页。 */
 	onMigrated?: () => void;
 }) {
 	const { namespace, writable, ops, sectionApi } = props;
-	const instanceId = useId();
+	const generatedId = useId();
+	const instanceId = props.instanceKey ?? generatedId;
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 	const providersField = useMemo(() => {
@@ -720,11 +723,14 @@ export function DeepseekRouteCard(props: {
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
 	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
 	sectionApi?: DshSectionApi;
+	/** 稳定脏标记 key（dsh:<nav>:<sub>）。 */
+	instanceKey?: string;
 	/** 把官方 DeepSeek 迁到 pi 后刷新本页。 */
 	onMigrated?: () => void;
 }) {
 	const { namespace, writable, ops, sectionApi } = props;
-	const instanceId = useId();
+	const generatedId = useId();
+	const instanceId = props.instanceKey ?? generatedId;
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 

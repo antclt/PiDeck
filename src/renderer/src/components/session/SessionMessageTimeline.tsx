@@ -379,26 +379,30 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     let groups: RenderMessage[];
     if (prev && isMessagePrefix(prev, next)) {
       const appended = next.slice(prev.length);
-      groups = [...state.groups, ...groupToolMessages(appended)];
+      groups = [...state.groups, ...groupToolMessages(appended, { agentBusy: isAgentBusy })];
     } else if (prev && isMessageSuffix(prev, next)) {
       const prepended = next.slice(0, next.length - prev.length);
-      groups = [...groupToolMessages(prepended), ...state.groups];
+      groups = [...groupToolMessages(prepended, { agentBusy: isAgentBusy }), ...state.groups];
     } else {
-      groups = groupToolMessages(next);
+      groups = groupToolMessages(next, { agentBusy: isAgentBusy });
     }
     historyGroupStateRef.current = { messages: next, groups };
+    // agentBusy 参与历史分组依赖：忙碌边沿改变时需按新分类重分组
+    // （历史前缀多为空闲态旧内容，忙碌时新追加的窗口段错误卡分类保持一致）
     return groups;
-  }, [runtimeHistoryMessages]);
+  }, [runtimeHistoryMessages, isAgentBusy]);
+  // 注：忙碌边沿切换时历史前缀按当前（多为 idle）状态重算；
+  // 窗口段的 error 卡分类与 timeline 的 agentBusy 保持一致。
   const groupedWindowRuns = useMemo(
-    () => groupToolMessages(controller.messages),
-    [controller.messages],
+    () => groupToolMessages(controller.messages, { agentBusy: isAgentBusy }),
+    [controller.messages, isAgentBusy],
   );
   const renderedRuns = useMemo(() => {
     if (groupedHistoryRuns) {
       return [...groupedHistoryRuns, ...groupedWindowRuns];
     }
-    return groupToolMessages(paginatedMessages);
-  }, [groupedHistoryRuns, groupedWindowRuns, paginatedMessages]);
+    return groupToolMessages(paginatedMessages, { agentBusy: isAgentBusy });
+  }, [groupedHistoryRuns, groupedWindowRuns, paginatedMessages, isAgentBusy]);
   // 阶段0补强：对未变化的 run 复用旧对象引用，历史 run 的 memo 比较退化为 O(1)
   const prevRenderedRunsRef = useRef<RenderMessage[] | undefined>(undefined);
   const reconciledRuns = useMemo(() => {
@@ -614,7 +618,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
       turns: turnWindowTurns,
     };
   }, [controller, displayRuns, followingForTurnWindow, timelineRef, turnWindowActive, turnWindowTurns]);
-  // 文件修改展示已下沉到每轮 TurnRow 底部（TurnFileChanges），此处不再做全局汇总
+  // 文件修改由 SessionView 提取最近一轮并放在 composer 上方；时间线只负责渲染消息。
   // 时间线里已有用户图片才解析模型目录：原生看图时气泡不能显示视觉桥「转换中」。
   const hasUserImages = useMemo(
     () => activeMessages.some((message) => message.role === "user" && Boolean(message.images?.length)),

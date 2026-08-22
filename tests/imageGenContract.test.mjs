@@ -54,7 +54,9 @@ test("IPC 入参校验：model/prompt 非空，prompt ≤ 4000，provider 可空
 	assert.match(imagegenIpc, /parseImageGenSize\(candidate\?\.size\)/);
 	assert.match(imagegenIpc, /parseImageGenWatermark\(candidate\?\.watermark/);
 	assert.match(imagegenIpc, /parseImageGenOutputFormat\(candidate\?\.outputFormat/);
-	assert.match(imagegenIpc, /imageGen\.generate\(\{ provider, model, prompt, size, watermark, outputFormat \}/);
+	assert.match(imagegenIpc, /imageGen\.generate\(\{ provider, model, prompt, size, watermark, outputFormat, referenceImages \}/);
+	// 参考图入参在 IPC 边界整体校验，非法 all-or-null
+	assert.match(imagegenIpc, /parseImageGenReferenceImages/);
 });
 
 test("ComposerAgentMode 含 imagegen 与 goal", () => {

@@ -45,6 +45,8 @@ import {
   upsertSessionAtom,
 } from "../atoms";
 import {
+  appendSlashCommandToDraft,
+  toSkillInvocationToken,
   getComposerEnterIntent,
   isComposingKeyboardEvent,
   isPlanModeSendKey,
@@ -131,7 +133,7 @@ function friendlyCompactError(error: unknown): string | null {
     : t("app.compactFailed");
 }
 
-export type ComposerPickerKind = "model" | "thinking" | "template";
+export type ComposerPickerKind = "model" | "thinking" | "template" | "skill";
 
 export type UseSessionComposerControllerOptions = {
   sessionId: string;
@@ -841,6 +843,15 @@ export function useSessionComposerController(
       showNotice(t("imagegen.error.notConfigured"), 5000);
       return;
     }
+    // 参考图前置门禁：供应商未声明带图输入时直接提示，不发无效请求（主进程也会拦截兑底）
+    if (attachments.length > 0 && (provider.referenceMode ?? "none") === "none") {
+      showNotice(t("imagegen.error.referenceUnsupported"), 5000);
+      return;
+    }
+    // 匿名会话（无会话文件，重启即消失）：生图前提醒一次，想保留记录请先建正式会话
+    if (!record?.filePath) {
+      showNotice(t("imagegen.transientHint"), 6000);
+    }
     setGeneratingImage(true);
 
     // 把本地生图消息追加进时间线缓存（整体替换 messages 数组，source=runtime 沿用乐观提交约定）。
@@ -887,10 +898,16 @@ export function useSessionComposerController(
         size: imageGenSize,
         watermark: imageGenWatermark,
         outputFormat: imageGenOutputFormat,
+        // 参考图：附件栏图片作为参考图传给主进程；是否可用由供应商 referenceMode 决定
+        referenceImages: attachments.length > 0 ? attachments : undefined,
         // 生图记录落盘：主进程成功后把 user+assistant 消息写入当前会话的 pi 文件
         sessionId,
       });
       if (result.ok) {
+        // 成功后清空附件栏：参考图已随请求发出，留在栏里会误导下一次生图
+        if (attachments.length > 0) {
+          setAttachmentsAtom({ sessionId, value: [] });
+        }
         updateTimelineMessage(imageMessageId, (m) => ({
           ...m,
           images: [result.image],
@@ -926,7 +943,7 @@ export function useSessionComposerController(
     } finally {
       setGeneratingImage(false);
     }
-  }, [activeImageGenModelId, activeImageGenProviderId, draft, generatingImage, imageGenConfig, imageGenOutputFormat, imageGenSize, imageGenWatermark, sessionId, setCacheMessages, setDraft, store]);
+  }, [activeImageGenModelId, activeImageGenProviderId, attachments, draft, generatingImage, imageGenConfig, imageGenOutputFormat, imageGenSize, imageGenWatermark, record?.filePath, sessionId, setAttachmentsAtom, setCacheMessages, setDraft, store]);
 
   // 统一发送入口：先晋升预览 Tab 再投递（幂等，非预览无副作用）。
   // 发送按钮 / 追问按钮 / Enter 键 / 无 Agent 时的 /compact 直发都会走这里，
@@ -1421,15 +1438,26 @@ export function useSessionComposerController(
   }, [loadTemplates]);
 
   const insertTemplate = useCallback((template: PromptTemplateInfo) => {
-    const next = draft.trimEnd()
-      ? `${draft.trimEnd()} /${template.name} `
-      : `/${template.name} `;
+    const next = appendSlashCommandToDraft(draft, template.name);
     liveDomDraftRef.current = { sessionId, value: next };
     setDraft(next);
     caretRef.current = { pos: next.length, forValue: next };
     setPicker(null);
     requestAnimationFrame(() => editorRef.current?.focus());
   }, [draft, sessionId, setDraft]);
+
+  // 技能选择器选中后插入技能斜杠命令到草稿尾（与 insertTemplate 同构）：
+  // pi 用 /skill:名称（裸 /名称 pi 当未知命令拒绝——斜线命令与技能冲突的根因），
+  // DSH 由宿主把裸 /名称注册成技能命令；插入后光标落末尾，回车即可发送。
+  const insertSkillInvocation = useCallback((name: string) => {
+    const token = toSkillInvocationToken(isDshBackend ? "dsh" : "pi", name);
+    const next = appendSlashCommandToDraft(draft, token);
+    liveDomDraftRef.current = { sessionId, value: next };
+    setDraft(next);
+    caretRef.current = { pos: next.length, forValue: next };
+    setPicker(null);
+    requestAnimationFrame(() => editorRef.current?.focus());
+  }, [draft, isDshBackend, sessionId, setDraft]);
 
   return {
     sessionId,
@@ -1561,6 +1589,7 @@ export function useSessionComposerController(
       close: () => setPicker(null),
       setMode,
       insertTemplate,
+      insertSkillInvocation,
     },
     modals: {
       closePreview: () => setPreviewImage(null),

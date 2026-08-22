@@ -34,6 +34,28 @@ export type PromptTemplateInfo = {
 };
 
 /** 从 frontmatter 中提取 argument-hint 元数据 */
+/**
+ * 把 /命令（技能/Prompt 模板）追加到草稿尾部：
+ * - draft 非空：去掉尾随空白后补一个空格再接 `/${command} `，避免命令 token 与
+ *   已有内容粘连成一体（与文件引用需要空格的语义一致，用户才看得出是独立引用）。
+ * - draft 为空：直接以 `/${command} ` 开头（后续回车即可发送）。
+ */
+export function appendSlashCommandToDraft(draft: string, command: string): string {
+	const token = `/${command} `;
+	return draft.trimEnd() ? `${draft.trimEnd()} ${token}` : token;
+}
+
+/**
+ * 技能调用的斜杠 token（纯函数，供技能选择器与 controller 共用，单一来源）。
+ * pi 的技能是内建 `/skill:名称` 命令（pi settings 的 enableSkillCommands 开关）：
+ * 裸写 `/名称` pi 会当未知命令拒绝——这正是「斜线命令把技能过滤掉」的根因；
+ * DSH 宿主由 dsh-tool-skill 把裸 `/名称` 注册成技能命令，保持原样即可。
+ * 返回不含斜杠的命令名，由 appendSlashCommandToDraft 统一拼 `/<token> `。
+ */
+export function toSkillInvocationToken(backend: "pi" | "dsh", name: string): string {
+	return backend === "pi" ? `skill:${name}` : name;
+}
+
 export function parseArgumentHint(content: string): string | undefined {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!match) return undefined;

@@ -15,6 +15,7 @@ import {
   PromptTemplatePicker,
   ThinkingPicker,
 } from "./ComposerParts";
+import { ComposerSkillPicker } from "./ComposerSkillPicker";
 import { desktopApi } from "../../desktopApi";
 import { showNotice } from "../../utils/notice";
 import { t } from "../../i18n";
@@ -37,6 +38,10 @@ export type ComposerPickerHostProps = {
   templates: PromptTemplateInfo[];
   onClose: () => void;
   onInsertTemplate: (template: PromptTemplateInfo) => void;
+  /** 技能选择：把技能调用命令插入输入框（由 controller 的 insertSkillInvocation 提供）。
+   *  插入的斜杠形态由后端决定：pi 用 /skill:名称，DSH 用 /名称——保证与各自的
+   *  技能命令解析一致，避免「从列表选了却调不动」（bare 斜杠在 pi 会被过滤）。 */
+  onInsertSkill: (name: string) => void;
   /** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期高亮与过滤用。 */
   defaultModel?: { provider?: string; modelId?: string; modelName?: string };
   defaultThinkingLevel?: string;
@@ -84,7 +89,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   // 思考选择器时拿不到过滤数据（显示全量档位）。
   const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
   const pickerNeedsModels = props.picker === "model" || (props.picker === "thinking" && isDshSession);
-  const { models } = useBackendModelCatalog({
+  // 模型目录 + 加载诊断报告：report 为空列表时给出失败原因引导（版本过低/配置损坏/pi 未安装），
+  // reload(true) 为手动刷新（绕过缓存重新 fork pi --list-models），选择器右上角提供刷新按钮。
+  const { models, report, refreshing, reload } = useBackendModelCatalog({
     sessionId,
     backend: isDshSession ? "dsh" : "pi",
     projectId: record?.projectId,
@@ -374,6 +381,17 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       />
     );
   }
+  if (props.picker === "skill") {
+    return (
+      <ComposerSkillPicker
+        backend={isDshSession ? "dsh" : "pi"}
+        projectId={record?.projectId}
+        agentId={runtime?.agentId}
+        onClose={props.onClose}
+        onPick={props.onInsertSkill}
+      />
+    );
+  }
   if (props.picker === "model") {
     // DSH 会话的模型归属 host（agent-default-model），不读 pi 的欢迎页偏好：
     // 否则 localStorage 里的 pi 模型会被当成「当前模型」高亮，误导用户以为已选中。
@@ -383,6 +401,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     return (
       <ModelPicker
         models={models}
+        report={report}
+        refreshing={refreshing}
+        onRefresh={() => reload(true)}
         current={{
           provider: runtime?.state?.provider ?? record?.model?.provider ?? props.defaultModel?.provider ?? welcomeModel?.provider,
           modelId: runtime?.state?.modelId ?? record?.model?.modelId ?? props.defaultModel?.modelId ?? welcomeModel?.modelId,

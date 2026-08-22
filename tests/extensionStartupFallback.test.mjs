@@ -99,16 +99,25 @@ test("formats fallback debug that users can paste to the AI", () => {
 	assert.match(debug, /@earendil-works\/pi-ai/);
 });
 
-test("AgentManager wires handshake fallback and persists disable only after success", () => {
+test("AgentManager wires handshake fallback but never persists --no-extensions globally", () => {
 	const source = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 	assert.match(source, /private async handshakePiProcess\(/);
 	assert.match(source, /retrying without extensions/);
 	assert.match(source, /piRpcNoExtensions: true/);
-	assert.match(source, /notifyExtensionFallback\(/);
+	assert.match(source, /queueStartupDiagnostic\(/);
+	assert.match(source, /flushStartupDiagnostics\(/);
 	assert.match(source, /diagnostic\.extensionsDisabledFallback/);
 	assert.match(source, /startupHandshakeAgents/);
-	// 先二次 spawn 成功，再写设置：避免回退也失败时误关扩展。
-	const persistAt = source.indexOf('this.settingsStore.update({ piRpcNoExtensions: true })');
-	const secondAt = source.indexOf("const second = await this.spawnAndGetState");
-	assert.ok(secondAt >= 0 && persistAt > secondAt, "persist disable only after successful retry");
+	assert.match(source, /agent_start/);
+	// 回退只针对本次运行时：--no-extensions 只以 settingsOverride 传本次 spawn
+	// （spawnAndGetState 第三参），绝不写进全局设置。否则用户修复扩展后，
+	// 后续所有新 agent 仍无扩展启动，必须手动改回设置才能恢复。
+	assert.doesNotMatch(source, /settingsStore\.update\(\(\{ piRpcNoExtensions: true \}\)\)/);
+	const overrideCall = source.indexOf("spawnAndGetState(agentId, options, { piRpcNoExtensions: true })");
+	assert.ok(overrideCall >= 0, "second spawn carries the per-runtime --no-extensions override");
+	// 回退说明卡不立即写时间线：等首个 agent_start（用户消息已落盘）再 flush。
+	const queueCall = source.indexOf("this.queueStartupDiagnostic(agentId, diagnostic)");
+	const firstRunMark = source.indexOf("this.agentStartedFirstRun.add(agentId)");
+	const flushAt = source.indexOf("this.flushStartupDiagnostics(agentId)");
+	assert.ok(queueCall >= 0 && firstRunMark >= 0 && flushAt >= 0, "startup diagnostic queued and flushed on first run");
 });

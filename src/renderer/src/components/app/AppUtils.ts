@@ -297,7 +297,12 @@ export function getMultiSelectImageCaptureIds(
 
 /* ── 消息分组 ── */
 
-export function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {
+export function groupToolMessages(
+	messages: ChatMessage[],
+	options: { agentBusy?: boolean } = {},
+): RenderMessage[] {
+	// agentBusy 决定 error 诊断卡是否打断当前 run（见下方 error 分支）
+	const { agentBusy = false } = options;
 	const result: RenderMessage[] = [];
 	let currentTools: ChatMessage[] = [];
 	let currentThinking: ChatMessage[] = [];
@@ -418,6 +423,19 @@ export function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {
 				flushRun();
 			}
 			result.push({ kind: "message", message });
+		} else if (message.role === "error" && agentBusy) {
+			// agent 忙碌中的 error 诊断卡（如扩展执行错误）：不中断当前 run。
+			// 旧实现把 error 当用户消息处理（flush 当前 run），一段回答会被拆成
+			// 两个 agent-run、错误卡夹在中间——用户体感「错误提示跑上旧卡片」。
+			// 忙碌中的诊断卡作为独立条目先落盘，回答整体保持一个 run（卡在回答上方）。
+			// 注意：空闲态（agentBusy=false）的 error 仍走 else 分支先 flush——
+			// 此时 run 已结束，诊断卡应排在回答之后而不是之前。
+			if (pendingRun) {
+				currentRun.push(...pendingRun);
+				pendingRun = null;
+				flushRun();
+			}
+			result.push({ kind: "message", message });
 		} else {
 			// 若已有暂存 run（前一次 ask_question 未合并），先 flush 掉
 			if (pendingRun) {
@@ -433,8 +451,11 @@ export function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {
 				currentRun.length > 0 &&
 				currentRun.every((i) => i.kind !== "message" || i.message.role !== "assistant");
 			const lastResult = result[result.length - 1];
+			// error 诊断卡也可能插在 ask 卡片之后（非 busy 路径），
+			// 用户回复时同样视为回答 ask，避免工具/思考串轮。
 			const isAnsweringAskQuestion =
-				lastResult?.kind === "message" && lastResult.message.role === "system";
+				lastResult?.kind === "message" &&
+				(lastResult.message.role === "system" || lastResult.message.role === "error");
 			if (hasToolsWithoutAssistant && isAnsweringAskQuestion) {
 				flushTools();
 				flushThinking();

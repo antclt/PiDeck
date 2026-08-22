@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode, type MutableRefObject } from "react";
 import {
   type GroupImperativeHandle,
   type PanelImperativeHandle,
@@ -18,6 +18,7 @@ import { SessionHeader } from "./SessionHeader";
 import { SessionBranchBar } from "./SessionBranchBar";
 import { SessionTodoStrip } from "./SessionTodoStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
+import { SessionModifiedFilesStrip } from "./SessionModifiedFilesStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { TerminalDockPanel } from "../terminal/TerminalDockPanel";
@@ -25,6 +26,8 @@ import { useSessionPaneServices } from "./SessionPaneServices";
 import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight } from "../../rendererUtils";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
+import { groupToolMessages } from "../app/AppUtils";
+import type { AgentRunItem } from "./timeline/types";
 
 // terminal 程序化布局保护窗口（ms）：programResize 后该窗口内的 terminal
 // onResize 一律视为程序化结果，不写 collapsed 状态。独立于 composer 的共享
@@ -217,6 +220,24 @@ export function SessionView({
     messageCount: sessionTimeline.messages.length,
     isConversationLoading: sessionTimeline.isSurfaceLoading,
   });
+  // 仅显示最近一轮的修改，避免把整个会话历史堆到输入框上方；切换到新一轮后，
+  // strip 会按新的 run 身份重置为默认折叠。
+  const latestAgentRun = useMemo<AgentRunItem | undefined>(() => {
+    const displayItems = groupToolMessages(sessionTimeline.messages);
+    let latestRun: AgentRunItem | undefined;
+    let latestUserTimestamp = 0;
+    for (const item of displayItems) {
+      if (item.kind === "message" && item.message.role === "user") {
+        latestUserTimestamp = Math.max(latestUserTimestamp, item.message.timestamp);
+      } else if (item.kind === "agent-run") {
+        latestRun = item;
+      }
+    }
+    // 新问题已发出但 Agent 尚未产生新 run 时，隐藏上一轮文件，避免误导。
+    return latestRun && latestUserTimestamp <= latestRun.endedAt
+      ? latestRun
+      : undefined;
+  }, [sessionTimeline.messages]);
   const sessionPanels = {
     composer: bottomComposerVisible,
     terminal: terminalPanelVisible,
@@ -572,6 +593,10 @@ export function SessionView({
                   <>
                     <SessionTodoStrip sessionId={sessionId} />
                     <SessionGoalStrip sessionId={sessionId} />
+                    <SessionModifiedFilesStrip
+                      run={latestAgentRun}
+                      onDiffFile={onDiffFile ? (path) => onDiffFile(path) : undefined}
+                    />
                   </>
                 }
               />
