@@ -219,6 +219,8 @@ import { shouldAutoRegisterForeignCwd } from "./projects/projectPathPolicy";
 import { defaultPathCheck } from "./projects/projectPresence";
 import { FileSystemService } from "./fs/FileSystemService";
 import { AgentManager } from "./pi/AgentManager";
+// 生图消息不走 Agent 消息流，改名前需判断标题是否仍是占位名
+import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
 import { DshAgentManager } from "./dsh/DshAgentManager";
@@ -243,7 +245,7 @@ import {
 	SessionCatalog,
 	canAttachRuntimeMetadata,
 } from "./sessions/SessionCatalog";
-import { aggregateDshProxyMode, buildHostProxyEnvPatch } from "./sessions/sessionProxyPolicy";
+import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import {
 	SessionRuntimeCoordinator,
 	type SessionRuntimeBinding,
@@ -2493,7 +2495,7 @@ function registerIpc() {
 			getProviderCredentials: async (provider) => {
 				const creds = await imageGenConfigStore.getCredentials(provider);
 				if (!creds) return null;
-				return { baseUrl: creds.baseUrl, apiKey: creds.apiKey, extraParams: creds.extraParams };
+				return { baseUrl: creds.baseUrl, apiKey: creds.apiKey, extraParams: creds.extraParams, referenceMode: creds.provider.referenceMode };
 			},
 			log: (message, ...args) => appLogger.info("imagegen", message, ...args),
 		}),
@@ -2531,6 +2533,19 @@ function registerIpc() {
 					},
 				},
 			]);
+			// 生图消息不走 Agent 消息流，refreshAutoTitle 不会触发；
+			// 标题仍是占位名时用首行提示词改名，侧栏才能按内容找到会话。
+			// 用户已手动改过名（非占位标题）则不覆盖。
+			const project = projectStore.get(entry.projectId);
+			if (project && isDefaultAgentTitle(entry.title, project, mainCopy as never)) {
+				const firstLine = prompt.split(/\r?\n/, 1)[0]?.trim() ?? "";
+				if (firstLine) {
+					await sessionCatalog.update(sessionId, {
+						title: firstLine.length > 24 ? `${firstLine.slice(0, 24)}…` : firstLine,
+					});
+					mainWindow?.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+				}
+			}
 		},
 	});
 
@@ -3006,9 +3021,19 @@ app.whenReady().then(async () => {
 		(key) => Boolean(key && feishuBridge?.hasSessionBinding(key)),
 		// 通知点击跳转需要 record.id（renderer 按它索引会话）；agentId → record.id 由 coordinator 维护。
 		(agentId) => sessionRuntimeCoordinator.getSessionId(agentId),
-		// 会话级代理覆盖：spawn 时按 SessionRecord.proxy 覆盖全局设置（on → 强制代理 / off → 强制直连）。
-		// sessionKey = SessionRecord.id（新会话 UUID / 历史会话为会话文件路径），匿名会话无记录 → 跟随全局。
-		(sessionKey) => (sessionKey ? sessionCatalog?.get(sessionKey)?.proxy?.mode : undefined),
+		// 会话级代理覆盖（含按供应商过滤）：
+		// 1. 会话显式 on/off 最高优；2. 全局 piProxyProviders 非空时按会话 model.provider 自动映射 on/off
+		//    （force_on：名单内即使全局关闭也复用全局 URL，实现“指定供应商走代理”）；3. 否则跟随全局。
+		// 解决“新建会话首条请求无代理”痛点：无需先激活再手动切会话代理，创建时模型已确定即带正确代理。
+		(sessionKey) => {
+			if (!sessionKey || !sessionCatalog) return undefined;
+			const entry = sessionCatalog.get(sessionKey);
+			if (!entry) return undefined;
+			const sessionMode = entry.proxy?.mode;
+			const provider = entry.model?.provider;
+			const providers = settingsStore.get().piProxyProviders;
+			return resolveEffectiveSessionProxyMode(sessionMode, provider, providers);
+		},
 	);
 	// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 	quitCleanup.register("pi-agents", () => agentManager?.stopAll());
@@ -3035,9 +3060,13 @@ app.whenReady().then(async () => {
 		// 此处仅 best-effort 注入，不保证生效。
 		() => {
 			const settings = settingsStore.get();
+			// DSH 共享 host 的代理需按供应商过滤逐会话计算有效模式，再聚合（与 pi 会话链路一致的 provider 感知）。
 			const dshOverrides = (sessionCatalog?.listEntries() ?? [])
 				.filter((entry) => entry.backend === "dsh")
-				.map((entry) => entry.proxy);
+				.map((entry) => {
+					const effectiveMode = resolveEffectiveSessionProxyMode(entry.proxy?.mode, entry.model?.provider, settings.piProxyProviders);
+					return effectiveMode === "follow" ? undefined : { mode: effectiveMode } as import("../shared/types/session").SessionProxyOverride;
+				});
 			const mode = aggregateDshProxyMode(dshOverrides);
 			return buildHostProxyEnvPatch(mode, {
 				url: settings.piProxyUrl,

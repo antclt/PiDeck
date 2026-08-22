@@ -132,6 +132,13 @@ export type StartupWindowMode =
 	piProxyUrl: string;
 	/** pi agent 代理绕过列表，对应 NO_PROXY 环境变量 */
 	piProxyBypass: string;
+	/**
+	 * 按供应商过滤的 pi 代理白名单：非空时仅名单内 provider 强制走代理（复用 piProxyUrl），
+	 * 名单外强制直连。空数组 = 不按供应商过滤（跟随全局 piProxyEnabled / 会话级覆盖）。
+	 * 解决“新建会话首条请求无代理”痛点：无需先激活会话再手动切“会话代理”，新建时按 model.provider 自动匹配。
+	 * 供应商名与 models.json 的 provider key 一致（如 openai / anthropic / deepseek 等）。
+	 */
+	piProxyProviders: string[];
 	/** 是否给桌面端自身网络请求启用代理，不影响已启动的 pi agent 子进程 */
 	desktopProxyEnabled: boolean;
 	/** 桌面端自身网络请求使用的代理地址，例如 http://127.0.0.1:7890 */

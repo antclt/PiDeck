@@ -1,9 +1,11 @@
 import {
 	buildImageGenApiBody,
+	buildImageGenEditsForm,
+	buildImageGenImageField,
 	imageGenOutputMimeType,
 	parseImageGenOutputFormat,
 } from "../../shared/imageGenParams";
-import type { ImageGenProviderExtraParams } from "../../shared/imageGenConfig";
+import type { ImageGenProviderExtraParams, ImageGenReferenceMode } from "../../shared/imageGenConfig";
 import type { ImageGenRequest, ImageGenResult } from "../../shared/types/imagegen";
 
 /** 独立生图配置给出的凭据（不再从 models.json 解析） */
@@ -11,6 +13,8 @@ export type ProviderCredentials = {
 	baseUrl: string;
 	apiKey: string;
 	extraParams: ImageGenProviderExtraParams;
+	/** 参考图输入方式；缺省 none */
+	referenceMode?: ImageGenReferenceMode;
 };
 
 /**
@@ -49,27 +53,57 @@ export class ImageGenService {
 			const outputFormat = extraParams.output_format
 				? parseImageGenOutputFormat(request.outputFormat, null)
 				: null;
-			const body = buildImageGenApiBody({
-				model: request.model,
-				prompt: request.prompt,
-				extraParams,
-				size: request.size,
-				watermark: request.watermark,
-				outputFormat: outputFormat ?? undefined,
-			});
-			const response = await fetch(
-				imagesUrl,
-				{
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Authorization: `Bearer ${credentials.apiKey.trim()}`,
+			// 参考图门禁：供应商声明 none/未声明时直接拒绝，避免把图发给不认的接口白扣费
+			const refs = request.referenceImages ?? [];
+			const referenceMode = credentials.referenceMode ?? "none";
+			if (refs.length > 0 && referenceMode === "none") {
+				return { ok: false, error: "referenceUnsupported" };
+			}
+			let response: Response;
+			if (refs.length > 0 && referenceMode === "edits") {
+				// OpenAI gpt-image-1 风格：multipart 到 /images/edits；响应结构与 generations 一致
+				response = await fetch(
+					normalizeImagesEditsUrl(credentials.baseUrl),
+					{
+						method: "POST",
+						headers: { Authorization: `Bearer ${credentials.apiKey.trim()}` },
+						body: buildImageGenEditsForm({
+							model: request.model,
+							prompt: request.prompt,
+							images: refs,
+							extraParams,
+							size: request.size,
+						}),
+						signal: AbortSignal.timeout(180_000),
 					},
-					body: JSON.stringify(body),
-					// 生图慢（常见 10-60s），用 AbortSignal.timeout 兜底避免挂死
-					signal: AbortSignal.timeout(180_000),
-				},
-			);
+				);
+			} else {
+				const body = buildImageGenApiBody({
+					model: request.model,
+					prompt: request.prompt,
+					extraParams,
+					size: request.size,
+					watermark: request.watermark,
+					outputFormat: outputFormat ?? undefined,
+				});
+				// 方舟 seedream 等风格：generations JSON 体加 image:[dataURI...] 传参考图
+				if (refs.length > 0 && referenceMode === "image-field") {
+					body.image = buildImageGenImageField(refs);
+				}
+				response = await fetch(
+					imagesUrl,
+					{
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+							Authorization: `Bearer ${credentials.apiKey.trim()}`,
+						},
+						body: JSON.stringify(body),
+						// 生图慢（常见 10-60s），用 AbortSignal.timeout 兜底避免挂死
+						signal: AbortSignal.timeout(180_000),
+					},
+				);
+			}
 			if (!response.ok) {
 				const detail = await readHttpErrorDetail(response);
 				this.deps.log("imagegen", "generate failed", { status: response.status, detail });
@@ -234,4 +268,9 @@ function normalizeImagesUrl(baseUrl: string): string {
 		return `${trimmed}/images/generations`;
 	}
 	return `${trimmed}/v1/images/generations`;
+}
+
+/** edits 端点：与 generations 同规则推导，仅路径换成 /images/edits；用户已配完整 generations 路径时替换尾段。 */
+function normalizeImagesEditsUrl(baseUrl: string): string {
+	return normalizeImagesUrl(baseUrl).replace(/\/images\/generations$/i, "/images/edits");
 }

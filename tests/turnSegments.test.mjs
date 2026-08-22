@@ -290,6 +290,64 @@ test("groupToolMessages 不合并连续 assistant 消息：多段回答各自独
 	assert.equal(run.items[1].message.thinking, "T2");
 });
 
+test("groupToolMessages 忙碌中 error 诊断不打断 agent-run：回答保持一轮，诊断卡落在用户消息之后", () => {
+	const { groupToolMessages } = loadAppUtils();
+	const user = { id: "u2", agentId: "a", role: "user", text: "继续", timestamp: 4 };
+	const err = {
+		id: "e1",
+		agentId: "a",
+		role: "error",
+		text: "扩展执行错误。",
+		timestamp: 5,
+		meta: { i18nKey: "diagnostic.extensionError", debugDetails: "todo: boom" },
+	};
+	const a1 = { id: "a1", agentId: "a", role: "assistant", text: "段1", timestamp: 6 };
+	const a2 = { id: "a2", agentId: "a", role: "assistant", text: "段2", timestamp: 7 };
+	// 扩展报错可能在回答流式途中到达：旧实现（无 agentBusy）把 error 当用户消息处理，
+	// flush 当前 run → 一段回答被拆成两个 agent-run、错误卡夹在中间（用户反馈
+	// 「错误提示跑上上个消息卡片上去了」）。agentBusy=true 时诊断卡独立落盘、不拆 run。
+	const rendered = groupToolMessages([user, err, a1, a2], { agentBusy: true });
+	// 独立条目顺序：用户消息 → error 诊断卡 → 合并后的回答 run
+	assert.equal(rendered[0].kind, "message");
+	assert.equal(rendered[0].message.role, "user");
+	assert.equal(rendered[1].kind, "message");
+	assert.equal(rendered[1].message.role, "error");
+	const runs = rendered.filter((item) => item.kind === "agent-run");
+	assert.equal(runs.length, 1, "忙碌中 error 诊断不得把一段回答拆成两个 run");
+	const texts = runs[0].items
+		.filter((item) => item.kind === "message")
+		.map((item) => item.message.text);
+	assert.equal(JSON.stringify(texts), JSON.stringify(["段1", "段2"]));
+});
+
+test("groupToolMessages 空闲态 error 诊断仍排在完成 run 之后（不回归旧位置语义）", () => {
+	const { groupToolMessages } = loadAppUtils();
+	const user = { id: "u1", agentId: "a", role: "user", text: "问题", timestamp: 1 };
+	const a1 = { id: "a1", agentId: "a", role: "assistant", text: "回答", timestamp: 2 };
+	const err = {
+		id: "e1",
+		agentId: "a",
+		role: "error",
+		text: "扩展执行错误。",
+		timestamp: 5,
+		meta: { i18nKey: "diagnostic.extensionError", debugDetails: "todo: boom" },
+	};
+	// agent 已空闲（agentBusy=false）：error 到达时 run 已结束，
+	// 诊断卡应 flush 当前 run 后排在回答之后，而不是插在问答之间。
+	const rendered = groupToolMessages([user, a1, err], { agentBusy: false });
+	assert.equal(rendered[0].kind, "message");
+	assert.equal(rendered[0].message.role, "user");
+	assert.equal(rendered[1].kind, "agent-run");
+	assert.equal(rendered[2].kind, "message");
+	assert.equal(rendered[2].message.role, "error");
+	// 缺省（未传 agentBusy）保持旧行为：与空闲态一致
+	const renderedDefault = groupToolMessages([user, a1, err]);
+	assert.equal(renderedDefault[0].kind, "message");
+	assert.equal(renderedDefault[1].kind, "agent-run");
+	assert.equal(renderedDefault[2].kind, "message");
+	assert.equal(renderedDefault[2].message.role, "error");
+});
+
 /* ── stopReason 协议信号判定（2026-08 升级）──
  * pi RPC message_end 携带 provider 归一化 stopReason：
  * stop=最终回复 / toolUse=中间回复（工具调用回合）/ pending=message_start 占位。

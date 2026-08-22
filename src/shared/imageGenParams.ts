@@ -1,5 +1,6 @@
 import type { ImageGenProviderExtraParams } from "./imageGenConfig";
 import { DEFAULT_IMAGE_GEN_EXTRA_PARAMS } from "./imageGenConfig";
+import type { ImageContent } from "./types/session";
 
 /**
  * 生图可选参数：OpenAI Images 与火山方舟都走同一套 OpenAI 兼容 /images/generations。
@@ -78,6 +79,66 @@ export function parseImageGenOutputFormat(
 
 export function imageGenOutputMimeType(format: ImageGenOutputFormat | null | undefined): string {
 	return format === "jpeg" ? "image/jpeg" : "image/png";
+}
+
+/** 参考图数量上限：主流供应商（seedream/gpt-image-1）多为 1-10 张，取保守值 */
+export const IMAGE_GEN_REFERENCE_LIMIT = 4;
+/** 单张参考图 base64 上限（约 8MB 原始数据），防止 IPC 载荷失控 */
+export const IMAGE_GEN_REFERENCE_MAX_BASE64 = 11_000_000;
+const REFERENCE_MIME_RE = /^image\/(png|jpeg|webp)$/;
+
+/** 校验渲染层传来的参考图：数量、mime、base64 体积全部受限；非法整体丢弃返回 null。 */
+export function parseImageGenReferenceImages(value: unknown): ImageContent[] | null {
+	if (!Array.isArray(value)) return null;
+	if (value.length > IMAGE_GEN_REFERENCE_LIMIT) return null;
+	const images: ImageContent[] = [];
+	for (const item of value) {
+		if (typeof item !== "object" || item === null) return null;
+		// IPC 边界逐字段收窄；type 必须是 image，防止把任意对象透传进网络层
+		const type = Reflect.get(item, "type");
+		const data = Reflect.get(item, "data");
+		const mimeType = Reflect.get(item, "mimeType");
+		if (type !== "image") return null;
+		if (typeof data !== "string" || typeof mimeType !== "string") return null;
+		if (!REFERENCE_MIME_RE.test(mimeType)) return null;
+		if (!data || data.length > IMAGE_GEN_REFERENCE_MAX_BASE64) return null;
+		images.push({ type: "image", data, mimeType });
+	}
+	return images;
+}
+
+/** image-field 模式：参考图转 dataURI 数组（方舟 seedream 官方格式）。 */
+export function buildImageGenImageField(
+	images: Array<{ data: string; mimeType: string }>,
+): string[] {
+	return images.map((image) => `data:${image.mimeType};base64,${image.data}`);
+}
+
+/**
+ * edits 模式请求体：OpenAI /images/edits 只收 multipart form。
+ * gpt-image-1 支持多张 image[]；size 仅在勾选 extraParams.size 时发送。
+ */
+export function buildImageGenEditsForm(input: {
+	model: string;
+	prompt: string;
+	images: Array<{ data: string; mimeType: string }>;
+	extraParams?: Partial<ImageGenProviderExtraParams> | null;
+	size?: string;
+}): FormData {
+	const form = new FormData();
+	form.append("model", input.model.trim());
+	form.append("prompt", input.prompt);
+	form.append("n", "1");
+	for (const image of input.images) {
+		const bytes = Uint8Array.from(atob(image.data), (ch) => ch.charCodeAt(0));
+		form.append("image[]", new Blob([bytes], { type: image.mimeType }), "reference.png");
+	}
+	const extra = resolveExtraParams(input.extraParams ?? DEFAULT_IMAGE_GEN_EXTRA_PARAMS);
+	if (extra.size) {
+		const size = resolveImageGenApiSize(input.size);
+		if (size) form.append("size", size);
+	}
+	return form;
 }
 
 function resolveExtraParams(

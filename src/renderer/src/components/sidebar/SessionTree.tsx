@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { ChevronDown, Ellipsis, HatGlasses, Trash2 } from "lucide-react";
+import { ChevronDown, Ellipsis, HatGlasses, Image as ImageIcon, Trash2 } from "lucide-react";
 import type { AgentTab, Project, SessionRecord, SessionSummary } from "../../../../shared/types";
 import { collectDisplayedSessionIds, filterAgentsForSidebarDisplay, getProjectAgentSessionDisplay, sessionStatusDotClass, type ProjectChildItem } from "../../agentListDisplay";
 import { sessionRecordToSummary } from "../../atoms";
@@ -330,6 +330,10 @@ export function SessionTree(props: {
             {/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差 */}
             <strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>{child.session.name || t("common.untitled")}</strong>
             {child.session.backend === "dsh" && <SessionBackendMark backend="dsh" />}
+            {/* 生图角标：该会话含生图消息，便于在侧栏快速定位 */}
+            {child.session.hasImageGen && (
+              <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            )}
             {child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
             {renderToggle(groupKey, childCount)}
           </div></div>

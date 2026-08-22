@@ -129,6 +129,7 @@ let previewSettings: AppSettings = {
 	piProxyEnabled: false,
 	piProxyUrl: "http://127.0.0.1:7890",
 	piProxyBypass: "localhost,127.0.0.1,::1",
+	piProxyProviders: [],
 	desktopProxyEnabled: false,
 	desktopProxyUrl: "http://127.0.0.1:7890",
 	desktopProxyBypass: "localhost,127.0.0.1,::1",

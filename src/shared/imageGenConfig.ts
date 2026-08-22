@@ -9,6 +9,15 @@
 export const IMAGE_GEN_EXTRA_PARAMS = ["size", "output_format", "watermark"] as const;
 export type ImageGenExtraParam = (typeof IMAGE_GEN_EXTRA_PARAMS)[number];
 
+/**
+ * 参考图输入方式：不同供应商带图输入的 API 形态不同，由用户按供应商声明：
+ * - none（缺省）：不支持参考图；附了图的生图请求直接报错提示，不发无效请求。
+ * - edits：OpenAI gpt-image-1 风格，走 POST {base}/images/edits multipart（image 可多张）。
+ * - image-field：方舟 seedream 等风格，/images/generations JSON 体里加 image:[dataURI...]。
+ */
+export const IMAGE_GEN_REFERENCE_MODES = ["none", "edits", "image-field"] as const;
+export type ImageGenReferenceMode = (typeof IMAGE_GEN_REFERENCE_MODES)[number];
+
 export type ImageGenProviderExtraParams = {
 	size: boolean;
 	output_format: boolean;
@@ -31,6 +40,8 @@ export type ImageGenProviderConfig = {
 	models: string[];
 	/** 该供应商支持、需要发送的官方字段 */
 	extraParams: ImageGenProviderExtraParams;
+	/** 参考图输入方式；缺省 none（旧配置无此字段时向后兼容为不支持） */
+	referenceMode?: ImageGenReferenceMode;
 };
 
 export type ImageGenConfigFile = {
@@ -73,6 +84,16 @@ function uniqueModels(values: unknown): string[] {
 		if (models.length >= MAX_MODELS) break;
 	}
 	return models;
+}
+
+/**
+ * 解析参考图模式：只接受枚举值；缺省/非法返回 undefined（与旧配置兼容，语义等同 none）。
+ */
+export function sanitizeImageGenReferenceMode(value: unknown): ImageGenReferenceMode | undefined {
+	if (typeof value !== "string") return undefined;
+	return (IMAGE_GEN_REFERENCE_MODES as readonly string[]).includes(value)
+		? (value as ImageGenReferenceMode)
+		: undefined;
 }
 
 /**
@@ -134,6 +155,8 @@ export function sanitizeImageGenConfig(input: unknown): ImageGenConfigFile {
 			apiKey,
 			models: uniqueModels(row.models),
 			extraParams: sanitizeImageGenExtraParams(row.extraParams, row.kind),
+			// 参考图模式：非法值回退 none（不发无效请求）；旧配置无字段 → undefined 同样视为 none
+			referenceMode: sanitizeImageGenReferenceMode(row.referenceMode),
 		});
 	}
 	const requestedProvider =

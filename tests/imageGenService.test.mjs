@@ -45,6 +45,11 @@ function loadServiceClass() {
 		{
 			module: paramsModule,
 			exports: paramsModule.exports,
+			// edits 模式的 multipart 构造需要宿主全局；vm 上下文看不到
+			FormData,
+			Blob,
+			File,
+			atob,
 			require: (id) => {
 				if (id === "./imageGenConfig") return configModule.exports;
 				throw new Error(`unexpected require ${id}`);
@@ -405,5 +410,67 @@ test("normalizeImagesUrl：已配置完整 images/generations 端点原样使用
 	});
 	await service.generate({ provider: "p", model: "m", prompt: "x" });
 	assert.equal(captured, "https://proxy.example.com/v1/images/generations");
+	restore();
+});
+
+test("referenceUnsupported：referenceMode=none 时带参考图直接拒绝", async () => {
+	let called = false;
+	const { service, restore } = createService({
+		credentials: { ...CREDENTIALS, referenceMode: "none" },
+		fetchStub: () => {
+			called = true;
+			return fakeResponse({ ok: true, json: async () => ({ data: [] }) });
+		},
+	});
+	const result = await service.generate({
+		provider: "p",
+		model: "m",
+		prompt: "x",
+		referenceImages: [{ type: "image", data: "QUJD", mimeType: "image/png" }],
+	});
+	assert.equal(result.ok, false);
+	assert.equal(result.error, "referenceUnsupported");
+	assert.equal(called, false);
+	restore();
+});
+
+test("referenceMode=image-field：参考图并入 JSON 请求体（dataURI）", async () => {
+	let body;
+	const { service, restore } = createService({
+		credentials: { ...CREDENTIALS, referenceMode: "image-field" },
+		fetchStub: (input, init) => {
+			body = JSON.parse(String(init.body));
+			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QUJD" }] }) });
+		},
+	});
+	await service.generate({
+		provider: "p",
+		model: "seedream",
+		prompt: "x",
+		referenceImages: [{ type: "image", data: "QUJD", mimeType: "image/png" }],
+	});
+	assert.deepEqual(body.image, ["data:image/png;base64,QUJD"]);
+	restore();
+});
+
+test("referenceMode=edits：走 /images/edits multipart 接口", async () => {
+	let captured;
+	const { service, restore } = createService({
+		credentials: { ...CREDENTIALS, referenceMode: "edits" },
+		fetchStub: (input, init) => {
+			captured = { input, init };
+			return fakeResponse({ ok: true, json: async () => ({ data: [{ b64_json: "QUJD" }] }) });
+		},
+	});
+	const result = await service.generate({
+		provider: "p",
+		model: "gpt-image-1",
+		prompt: "x",
+		referenceImages: [{ type: "image", data: "QUJD", mimeType: "image/png" }],
+	});
+	assert.equal(result.ok, true);
+	// normalizeImagesUrl 追加了 /v1/images/generations，edits 需替换成 /images/edits
+	assert.equal(captured.input, "https://api.example.com/v1/images/edits");
+	assert.ok(captured.init.body instanceof FormData);
 	restore();
 });

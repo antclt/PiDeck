@@ -100,6 +100,8 @@ export type SessionSummary = {
 	/** 从 JSONL 中的 model_change / thinking_level_change 提取的最后值 */
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
+	/** 会话里存在生图消息（openai-images / imageGen 标记）；侧栏显示图片角标便于查找 */
+	hasImageGen?: boolean;
 	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
 	dshSessionId?: string;
 	codexSessionId?: string;

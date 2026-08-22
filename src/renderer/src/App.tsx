@@ -560,6 +560,7 @@ export function App() {
     piProxyEnabled: false,
     piProxyUrl: "http://127.0.0.1:7890",
     piProxyBypass: "localhost,127.0.0.1,::1",
+    piProxyProviders: [],
     desktopProxyEnabled: false,
     desktopProxyUrl: "http://127.0.0.1:7890",
     desktopProxyBypass: "localhost,127.0.0.1,::1",
@@ -2323,7 +2324,8 @@ export function App() {
       if (
         "piProxyEnabled" in patch ||
         "piProxyUrl" in patch ||
-        "piProxyBypass" in patch
+        "piProxyBypass" in patch ||
+        "piProxyProviders" in patch
       ) {
         notice = next.piProxyEnabled
           ? t("app.shellProxySaved")

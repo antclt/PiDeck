@@ -101,6 +101,22 @@ function readAskField(input: unknown, key: string): unknown {
 	return Reflect.get(input, key);
 }
 
+/**
+ * 暂存中的启动期诊断（扩展回退说明 / 首个 run 前的 extension_error）。
+ * 首个 agent_start 到达前不写时间线，避免插进历史轮次与当前消息之间。
+ * 见 AgentManager.pendingStartupDiagnostics / flushStartupDiagnostics。
+ */
+export type QueuedStartupDiagnostic = {
+	role: "system" | "error";
+	i18nKey: string;
+	fallbackText: string;
+	options?: {
+		params?: I18nParams;
+		debugDetails?: string;
+		meta?: Record<string, unknown>;
+	};
+};
+
 export class AgentManager {
 	/** 本网关的运行时后端身份：pi。 */
 	readonly backend: AgentBackend = "pi";
@@ -541,13 +557,10 @@ export class AgentManager {
 				// 停掉已死/将死的带扩展进程，再换无扩展参数重拉。
 				failed?.stop();
 
+				// --no-extensions 只作用于本次运行时：settingsOverride 仅改本次 spawn（见 createPiProcess），
+				// 绝不持久化到全局设置——否则用户修复扩展后，后续所有新 agent 仍沿用无扩展启动，
+				// 必须手动改回设置才能恢复。每个新 agent 独立重试带扩展启动：修复后下次创建自动恢复正常。
 				const second = await this.spawnAndGetState(agentId, options, { piRpcNoExtensions: true });
-				// 仅在回退成功后持久化：避免后续每个会话都先踩同一坑。用户修好后可在开发设置重新打开。
-				void this.settingsStore.update({ piRpcNoExtensions: true }).catch((error) => {
-					void this.appLogger?.warn("agent", "Failed to persist piRpcNoExtensions after fallback", {
-						error: error instanceof Error ? error.message : String(error),
-					});
-				});
 				return {
 					...second,
 					fallbackFromExtensions: true,
@@ -618,15 +631,48 @@ export class AgentManager {
 		return { client, process, state };
 	}
 
-	/** 回退成功后的系统卡：说明已禁用扩展，并附上可粘贴给 AI 的 stderr。 */
+	/**
+	 * 暂存中的启动期诊断（扩展回退说明 / 首个 run 前的 extension_error）。
+	 * 在首个 agent_start 前收到时先不写时间线——用户的触发消息还没落盘，
+	 * 直接 append 会插进历史轮次与当前消息之间（用户体感「错误提示跑上旧卡片」）。
+	 * 首个 run 开始时按序落盘：位于用户消息之后、回答之前，正好在当前活动点上。
+	 */
+	private readonly pendingStartupDiagnostics = new Map<string, QueuedStartupDiagnostic[]>();
+	/** 已发生过首个 agent_start 的 agent：此后的 extension_error 属于运行期间，直接落盘。 */
+	private readonly agentStartedFirstRun = new Set<string>();
+
+	/** 暂存一条启动期诊断，等首个 agent_start 统一落盘（见 pendingStartupDiagnostics）。 */
+	private queueStartupDiagnostic(agentId: string, diagnostic: QueuedStartupDiagnostic): void {
+		const list = this.pendingStartupDiagnostics.get(agentId) ?? [];
+		list.push(diagnostic);
+		this.pendingStartupDiagnostics.set(agentId, list);
+	}
+
+	/** 首个 run 开始：把启动期诊断按序写入时间线（此刻用户消息已就位，位置正确）。 */
+	private flushStartupDiagnostics(agentId: string): void {
+		const list = this.pendingStartupDiagnostics.get(agentId);
+		if (!list || list.length === 0) return;
+		this.pendingStartupDiagnostics.delete(agentId);
+		for (const diagnostic of list) {
+			this.addLocalizedMessage(
+				agentId,
+				diagnostic.role,
+				diagnostic.i18nKey,
+				diagnostic.fallbackText,
+				diagnostic.options,
+			);
+		}
+	}
+
+	/** 回退成功后的系统说明：已禁用扩展，附上可粘贴给 AI 的 stderr。
+	 *  不立即写时间线，等首个 run（用户消息之后）落盘，避免插进历史轮次中间。 */
 	private notifyExtensionFallback(agentId: string, debugDetails?: string): void {
-		this.addLocalizedMessage(
-			agentId,
-			"system",
-			"diagnostic.extensionsDisabledFallback",
-			"扩展加载失败，已禁用扩展运行。可在本会话把下面的错误信息发给 AI，协助排查扩展问题。",
-			{ debugDetails },
-		);
+		this.queueStartupDiagnostic(agentId, {
+			role: "system",
+			i18nKey: "diagnostic.extensionsDisabledFallback",
+			fallbackText: "扩展加载失败，已禁用扩展运行。可在本会话把下面的错误信息发给 AI，协助排查扩展问题。",
+			options: { debugDetails },
+		});
 	}
 
 	/** Windows 主进程文件操作必须使用可由 host 访问的路径。 */
@@ -2807,6 +2853,9 @@ export class AgentManager {
 		this.abortedDuringAsk.delete(agentId);
 		this.pendingUIRequests.delete(agentId);
 		this.startupHandshakeAgents.delete(agentId);
+		// 启动期诊断与首 run 标记随生命周期清理：重启/关闭后新 runtime 重新队列
+		this.pendingStartupDiagnostics.delete(agentId);
+		this.agentStartedFirstRun.delete(agentId);
 		this.clearStreamGate(agentId);
 		// 工具完整结果缓存是运行期性能优化（回退读文件等价），agent 停止时整体释放
 		this.toolFullTextByMessageId.clear();
@@ -3577,6 +3626,10 @@ export class AgentManager {
 		}
 
 		if (typed.type === "agent_start" && runtime) {
+			// 首个 run 开始：此刻用户的触发消息已落盘，把启动期诊断（扩展回退/启动扩展报错）
+			// 按序写入时间线——位于用户消息之后、回答之前，避免插进历史轮次中间。
+			this.flushStartupDiagnostics(agentId);
+			this.agentStartedFirstRun.add(agentId);
 			// agent_start 表示一轮新的 agent run 开始：
 			// 1) 清理 recentlyAborted，允许状态机恢复 running
 			// 2) 推进 stream generation，解封流式闸门（唯一合法解封点）
@@ -3933,13 +3986,25 @@ export class AgentManager {
 			// 扩展报错不等于会话失败：不改 tab.status，只记诊断。
 			// reason 给 toast / 诊断卡展示，避免 String(object) 变成 [object Object]。
 			const reason = formatExtensionErrorReason(typed);
-			this.addLocalizedMessage(
-				agentId,
-				"error",
-				"diagnostic.extensionError",
-				"扩展执行错误。",
-				{ debugDetails: reason },
-			);
+			const diagnostic: QueuedStartupDiagnostic = {
+				role: "error",
+				i18nKey: "diagnostic.extensionError",
+				fallbackText: "扩展执行错误。",
+				options: { debugDetails: reason },
+			};
+			// 首个 agent_start 之前到达 = 启动期扩展报错：按启动诊断暂存，
+			// 首个 run 落盘到用户消息之后；否则是运行期间的报错，直接写时间线。
+			if (!this.agentStartedFirstRun.has(agentId)) {
+				this.queueStartupDiagnostic(agentId, diagnostic);
+			} else {
+				this.addLocalizedMessage(
+					agentId,
+					diagnostic.role,
+					diagnostic.i18nKey,
+					diagnostic.fallbackText,
+					diagnostic.options,
+				);
+			}
 		}
 	}
 
