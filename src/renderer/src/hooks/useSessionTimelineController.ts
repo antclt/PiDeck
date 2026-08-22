@@ -405,6 +405,10 @@ export function useSessionTimelineController(options: {
 	useLayoutEffect(() => {
     const sessionId = options.sessionId;
     if (!sessionId) return;
+    // 触达缓存条目时提升 LRU 活跃度：读缓存不会自 touch（只有写会），
+    // 不 touch 会让显示中的会话长期停在 LRU 尾部，稍几次其它会话写入就被挤出，
+    // 切回时重读盘闪骨架（历史行为 155338e5 引入，缓存结构重建时丢失）。
+    if (cachedEntry) touchMessages(sessionId);
     const previouslyLoaded = lastLoadedSessionRef.current === sessionId;
     // 已加载且缓存条目仍在 → 跳过（正常运行路径）。
     // 缓存条目被 8-LRU 淘汰（条目变 undefined）时重新走磁盘加载自愈——

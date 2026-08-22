@@ -265,6 +265,7 @@ import { TelemetryService } from "./telemetry/TelemetryService";
 import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
 import { SkillManager } from "./skills/SkillManager";
+import { readSkillContent } from "./skills/readSkillContent";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
 import { toWindowsHostPath } from "./wsl/WslPaths";
@@ -2507,7 +2508,22 @@ function registerIpc() {
 		// agentManager/sessionCatalog 在此处尚未初始化，闭包延迟引用（IPC 调用时已就绪）。
 		persistImageGen: async ({ sessionId, provider, model, prompt, image, size }) => {
 			const entry = sessionCatalog?.get(sessionId);
-			if (!entry || entry.backend === "dsh" || !entry.filePath) return;
+			if (!entry || entry.backend === "dsh") return;
+			// 标题更新不依赖会话文件：生图 draft 会话不启动 pi agent，无 filePath，
+			// 但仍要把占位标题（Chat agent）换成首行提示词，否则历史/侧栏永远停在占位名；
+			// 用户已手动改过名（非占位标题）则不覆盖。
+			const project = projectStore.get(entry.projectId);
+			if (project && isDefaultAgentTitle(entry.title, project, mainCopy as never)) {
+				const firstLine = prompt.split(/\r?\n/, 1)[0]?.trim() ?? "";
+				if (firstLine) {
+					await sessionCatalog.update(sessionId, {
+						title: firstLine.length > 24 ? `${firstLine.slice(0, 24)}…` : firstLine,
+					});
+					mainWindow?.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+				}
+			}
+			// 落盘依赖真实会话文件：仅 draft（无 filePath）时消息不入历史文件，图片仍在时间线展示。
+			if (!entry.filePath) return;
 			await agentManager?.appendLocalMessagesToSession(entry.filePath, [
 				{
 					role: "user",
@@ -2533,19 +2549,7 @@ function registerIpc() {
 					},
 				},
 			]);
-			// 生图消息不走 Agent 消息流，refreshAutoTitle 不会触发；
-			// 标题仍是占位名时用首行提示词改名，侧栏才能按内容找到会话。
-			// 用户已手动改过名（非占位标题）则不覆盖。
-			const project = projectStore.get(entry.projectId);
-			if (project && isDefaultAgentTitle(entry.title, project, mainCopy as never)) {
-				const firstLine = prompt.split(/\r?\n/, 1)[0]?.trim() ?? "";
-				if (firstLine) {
-					await sessionCatalog.update(sessionId, {
-						title: firstLine.length > 24 ? `${firstLine.slice(0, 24)}…` : firstLine,
-					});
-					mainWindow?.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
-				}
-			}
+			// 生图消息不走 Agent 消息流，refreshAutoTitle 不会触发，标题更新已在 filePath 判断前完成。
 		},
 	});
 
@@ -2825,6 +2829,27 @@ function registerIpc() {
 		configureSessionScannerWsl: (env) => sessionScanner.configureWsl(env),
 		clearSessionScannerWsl: () => sessionScanner.clearWsl(),
 		configureSkillManagerWsl: (env) => skillManager.configureWsl(env),
+		// 技能正文读取：注入路径白名单上下文（全局技能目录 + 已注册项目根），
+		// 由 readSkillContent 完成校验后读 SKILL.md；WSL 项目按主机路径读取。
+		readSkillContent: (skillPath) => readSkillContent(skillPath, {
+			globalSkillPaths: skillManager.getLocations().map((location) => location.path),
+			projectRootPaths: projectStore.list().map((project) => {
+				const settings = settingsStore.get();
+				if (
+					process.platform === "win32" &&
+					project.environment === "wsl" &&
+					settings.wslEnabled &&
+					settings.wslDistro
+				) {
+					try {
+						return toWindowsHostPath(project.path, { distro: settings.wslDistro });
+					} catch {
+						return project.path;
+					}
+				}
+				return project.path;
+			}),
+		}),
 		configurePromptManagerWsl: (env) => promptManager.configureWsl(env),
 		configureExtensionManagerWsl: (env) => extensionManager.configureWsl(env),
 		configureConfigManagerWsl: (env) => configManager.configureWsl(env),
@@ -3351,6 +3376,9 @@ app.whenReady().then(async () => {
 			if (!project) return filePath;
 			return toAbsoluteSessionPath(filePath, project.path, environment);
 		},
+		// 占位标题回填：未打开过的 pi 会话也能在侧栏显示首条消息标题（不再永远 Untitled）。
+		// 有界读头部推断由 SessionScanner 负责；catalog 只在标题是占位符时才调用它。
+		(filePath) => sessionScanner.inferSessionNameFromFile(filePath),
 	);
 	await sessionCatalog.load();
 	// 多后端网关装配：pi + dsh（DSH 在窗口创建后后台预热，失败时按需重试）。

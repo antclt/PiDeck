@@ -172,7 +172,8 @@ let previewSettings: AppSettings = {
 	imageGenWatermark: false,
 	imageGenOutputFormat: "png",
 	disableUpdateCheck: false,
-	piRpcOffline: true,
+	// 与主进程 defaultSettings 保持一致：offline 默认关，让模型目录随启动刷新
+	piRpcOffline: false,
 	piRpcNoExtensions: false,
 	piRpcNoSkills: false,
 };
@@ -794,8 +795,31 @@ export function createPreviewApi(): PiDesktopApi {
 						path: "C:/Users/preview/.pi/agent/skills",
 						rootMarkdownEnabled: true,
 					},
+					{
+						id: "agents-global" as const,
+						label: "~/.agents/skills",
+						path: "C:/Users/preview/.agents/skills",
+						rootMarkdownEnabled: false,
+					},
 				],
-				skills: [],
+				skills: [
+					{
+						id: "pi-global:preview-skill",
+						name: "preview-skill",
+						description: "A preview skill",
+						path: "C:/Users/preview/.pi/agent/skills/preview-skill/SKILL.md",
+						dir: "C:/Users/preview/.pi/agent/skills/preview-skill",
+						sourceId: "pi-global" as const,
+						sourceLabel: "~/.pi/agent/skills",
+						type: "directory" as const,
+						enabled: true,
+						valid: true,
+						warnings: [],
+					},
+				],
+			}),
+			readContent: async (_path) => ({
+				content: "# preview-skill\n\nPreview skill body used by the browser preview layout.",
 			}),
 			create: async (input) => ({
 				id: `pi-global:${input.name}`,

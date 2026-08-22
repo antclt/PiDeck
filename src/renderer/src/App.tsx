@@ -606,7 +606,8 @@ export function App() {
     imageGenWatermark: false,
     imageGenOutputFormat: "png",
     disableUpdateCheck: false,
-    piRpcOffline: true,
+    // 与主进程 defaultSettings 保持一致：offline 默认关，让模型目录随启动刷新
+    piRpcOffline: false,
     piRpcNoExtensions: false,
     piRpcNoSkills: false,
   });
@@ -2892,6 +2893,7 @@ export function App() {
       sessionDurationByAgent,
       activeProjectId,
       gitInfo,
+      onSwitchBranch: switchBranch,
       showThinking: settings.showThinking,
       validCommandNames,
       validFilePaths,
@@ -2928,6 +2930,7 @@ export function App() {
       displayAgents,
       editMessage,
       enqueueSessionPrompt,
+      switchBranch,
       ensureSessionForSend,
       environmentDialog,
       forkFromUserMessage,

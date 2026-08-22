@@ -38,10 +38,14 @@ export type ComposerPickerHostProps = {
   templates: PromptTemplateInfo[];
   onClose: () => void;
   onInsertTemplate: (template: PromptTemplateInfo) => void;
+  /** 一键插入模板全文（controller insertTemplateContent）：直接塞正文，不走斜线命令。 */
+  onInsertTemplateContent: (template: PromptTemplateInfo) => void;
   /** 技能选择：把技能调用命令插入输入框（由 controller 的 insertSkillInvocation 提供）。
    *  插入的斜杠形态由后端决定：pi 用 /skill:名称，DSH 用 /名称——保证与各自的
    *  技能命令解析一致，避免「从列表选了却调不动」（bare 斜杠在 pi 会被过滤）。 */
   onInsertSkill: (name: string) => void;
+  /** 一键插入技能全文（controller insertSkillContent）：正文由选择器先读 SKILL.md。 */
+  onInsertSkillContent: (content: string) => void;
   /** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期高亮与过滤用。 */
   defaultModel?: { provider?: string; modelId?: string; modelName?: string };
   defaultThinkingLevel?: string;
@@ -378,6 +382,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         templates={props.templates}
         onClose={props.onClose}
         onPick={props.onInsertTemplate}
+        onInsertContent={props.onInsertTemplateContent}
       />
     );
   }
@@ -389,6 +394,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         agentId={runtime?.agentId}
         onClose={props.onClose}
         onPick={props.onInsertSkill}
+        onInsertContent={props.onInsertSkillContent}
       />
     );
   }

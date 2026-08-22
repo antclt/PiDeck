@@ -30,6 +30,27 @@ import {
  */
 export const SESSION_MESSAGE_CACHE_LIMIT = 8;
 
+/**
+ * 会话消息缓存 LRU 裁剪策略：打开着的会话 Tab（预览/常驻）优先保留，
+ * 其余按最近写入顺序补足剩余名额。
+ *
+ * 为什么：渲染层把「缓存条目存在」视为「内容已加载」（见 deriveSessionSurfaceRuntime
+ * 的 ready && !hasCachedEntry 判据）。打开中的会话若因其它会话写入被挤出 8 槽，
+ * 切回瞬间会重读盘并闪「正在加载历史」骨架——生图会话等没有 runtime 事件持续
+ * touch 的会话最容易被挤出。Tab 关闭后不再受保护（用户已不引用），缓存可正常回收。
+ */
+export function selectRetainedCacheEntryIds(
+  lru: readonly string[],
+  openedTabIds: ReadonlySet<string>,
+  limit: number,
+): string[] {
+  // 各按自身 LRU 相对顺序：打开的靠前（保护），未打开的跟在后面按最近写入占名额；
+  // 打开的 Tab 过多（> limit）时同样截断，避免无界内存。
+  const open = lru.filter((id) => openedTabIds.has(id));
+  const closed = lru.filter((id) => !openedTabIds.has(id));
+  return [...open, ...closed].slice(0, limit);
+}
+
 export type SessionRuntimeViewState = {
   agentId?: string;
   runtimeGeneration: number;
@@ -588,7 +609,14 @@ export const cacheSessionMessagesAtom = atom(
       input.sessionId,
       ...get(sessionMessageLruAtom).filter((id) => id !== input.sessionId),
     ];
-    const retainedIds = lru.slice(0, SESSION_MESSAGE_CACHE_LIMIT);
+    // LRU 裁剪提保护：打开着 Tab 的会话（预览/常驻）优先保留，其余按最近写入补足名额。
+    // 打开中的会话若被挤出，切回时缓存条目消失 → 重读盘 + 闪「正在加载历史」骨架
+    // （生图等无 runtime 事件持续 touch 的会话最易中招，2026 用户反馈）。
+    const retainedIds = selectRetainedCacheEntryIds(
+      lru,
+      new Set(get(sessionTabIdsAtom)),
+      SESSION_MESSAGE_CACHE_LIMIT,
+    );
     for (const cachedSessionId of Object.keys(nextCache)) {
       if (!retainedIds.includes(cachedSessionId)) delete nextCache[cachedSessionId];
     }

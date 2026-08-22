@@ -81,7 +81,9 @@ export function buildComposerEditorProps(
 			click: (_view, event) => {
 				if (!handlers.onChipClick) return false;
 				const target = event.target as HTMLElement | null;
-				const chipEl = target?.closest?.(".input-chip") as HTMLElement | null;
+				// 定位引用元素：文件/技能引用已做普通文本化（span[data-raw]，无 chip class），
+				// session/quote 仍是 .input-chip；统一按 [data-raw][data-type] 向上找，两种形态均命中。
+				const chipEl = target?.closest?.("[data-raw][data-type]") as HTMLElement | null;
 				if (!chipEl) return false;
 				const chip = readChipFromDom(chipEl);
 				if (!chip) return false;

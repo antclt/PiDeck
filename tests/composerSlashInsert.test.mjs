@@ -22,7 +22,12 @@ function loadComposerBehaviorModule() {
 	return sandbox.exports;
 }
 
-const { appendSlashCommandToDraft, toSkillInvocationToken } = loadComposerBehaviorModule();
+const {
+  appendContentToDraft,
+  appendSlashCommandToDraft,
+  stripMarkdownFrontmatter,
+  toSkillInvocationToken,
+} = loadComposerBehaviorModule();
 const controller = readFileSync(
   "src/renderer/src/hooks/useSessionComposerController.ts",
   "utf8",
@@ -75,6 +80,49 @@ test("技能名与 pi 内建命令同名时不冲突（/skill: 前缀隔离命�
 	assert.equal(toSkillInvocationToken("pi", "review"), "skill:review");
 	// 而 DSH 由宿主 dsh-tool-skill 把技能注册成裸命令，同名时宿主负责冲突仲裁。
 	assert.equal(toSkillInvocationToken("dsh", "review"), "review");
+});
+
+test("插入完整内容：空草稿直接以正文开头，非空草稿换行衔接不粘连", () => {
+  assert.equal(
+    appendContentToDraft("", "# 帮我审查方案\n按结构逐点给出意见"),
+    "# 帮我审查方案\n按结构逐点给出意见",
+  );
+  assert.equal(
+    appendContentToDraft("先讨论一下", "# 技能指令正文"),
+    "先讨论一下\n# 技能指令正文",
+  );
+  // 草稿尾随空白与新段落之间不应出现多余空行/粘连
+  assert.equal(
+    appendContentToDraft("草稿结尾   ", "第二段正文"),
+    "草稿结尾\n第二段正文",
+  );
+});
+
+test("剥离 frontmatter 描述头：插入全文时不带 name/description 元数据头", () => {
+  // 标准模板：--- 头 + 正文
+  assert.equal(
+    stripMarkdownFrontmatter(
+      "---\nname: review\ndescription: 代码评审\n---\n请帮我做一个代码评审，重点关注：\n1. 边界条件\n2. 异常处理",
+    ),
+    "请帮我做一个代码评审，重点关注：\n1. 边界条件\n2. 异常处理",
+  );
+  // frontmatter 后有空白行：前导空行一并去掉，正文格式不乱
+  assert.equal(
+    stripMarkdownFrontmatter("---\nname: x\n---\n\n正文内容\n"),
+    "正文内容\n",
+  );
+  // 无 frontmatter 的纯正文：原样返回，不受影响
+  assert.equal(stripMarkdownFrontmatter("直接是正文，没有头"), "直接是正文，没有头");
+  // CRLF 文件头同样剥离
+  assert.equal(
+    stripMarkdownFrontmatter("---\r\nname: y\r\n---\r\n\r\nCRLF 正文\r\n"),
+    "CRLF 正文\r\n",
+  );
+});
+
+test("插入完整内容：空正文返回原草稿（幂等，不产生空行残留）", () => {
+  assert.equal(appendContentToDraft("已有草稿", ""), "已有草稿");
+  assert.equal(appendContentToDraft("", ""), "");
 });
 
 test("insertSkillInvocation 与技能面板展示都走后端感知的 token（单一来源）", () => {

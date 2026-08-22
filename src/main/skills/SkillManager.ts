@@ -48,6 +48,11 @@ export class SkillManager {
 		this.locations = this.buildLocations(environment?.windowsHome ?? homedir());
 	}
 
+	/** 当前全局技能位置副本（WSL 配置后为主机路径），供读内容 IPC 的白名单校验。 */
+	getLocations(): PiSkillLocation[] {
+		return this.locations.map((location) => ({ ...location }));
+	}
+
 	private buildLocations(home: string): PiSkillLocation[] {
 		return [
 			{

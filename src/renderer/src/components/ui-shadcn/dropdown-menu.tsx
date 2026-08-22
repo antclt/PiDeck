@@ -144,6 +144,7 @@ function DropdownMenuRadioItem({
 function DropdownMenuLabel({
   className,
   inset,
+  children,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Label> & {
   inset?: boolean
@@ -153,11 +154,18 @@ function DropdownMenuLabel({
       data-slot="dropdown-menu-label"
       data-inset={inset}
       className={cn(
-        "px-2 py-1.5 text-sm font-medium data-[inset]:pl-8",
+        // 分组标题样式：小号大写灰字（text-xs + uppercase + tracking）是通用菜单分组惯例，
+        // 与可点击菜单项（text-sm 正文）明确区分，避免用户误把分组标题当按钮。
+        "flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium tracking-wider text-muted-foreground uppercase data-[inset]:pl-8",
         className
       )}
       {...props}
-    />
+    >
+      {/* 分组竖线：语义标识——标题是分组标签而非可选中的操作项（中文无大小写，
+          只靠字号/竖线仍能一眼区分） */}
+      <span aria-hidden="true" className="h-3.5 w-0.5 shrink-0 rounded-full bg-muted-foreground/40" />
+      {children}
+    </DropdownMenuPrimitive.Label>
   )
 }
 

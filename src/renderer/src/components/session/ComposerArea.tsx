@@ -32,6 +32,8 @@ import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 export type ComposerAreaProps = {
   sessionId: string;
   gitInfo?: GitBranchInfo;
+  /** 底栏分支下拉的切换回调（owner 为 App 级 switchBranch，保持 Git 面板同步） */
+  onSwitchBranch?: (branch: string) => void;
   /** 输入框上方独立卡（todo / goal）；放在 widgets 槽位。
    *  与 queue / 输入卡一并测量，面板 hug 内容总高。 */
   widgets?: ReactNode;
@@ -361,6 +363,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 modelPending={modelPendingMap[props.sessionId]}
                 composerAgentMode={composer.mode}
                 gitInfo={props.gitInfo}
+                onSwitchBranch={props.onSwitchBranch}
                 record={composer.record}
                 defaultModel={composer.dshDefaultModel}
                 defaultThinkingLevel={composer.dshDefaultThinkingLevel}
@@ -417,7 +420,9 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
             templates={composer.templates}
             onClose={composer.pickers.close}
             onInsertTemplate={composer.pickers.insertTemplate}
+            onInsertTemplateContent={composer.pickers.insertTemplateContent}
             onInsertSkill={composer.pickers.insertSkillInvocation}
+            onInsertSkillContent={composer.pickers.insertSkillContent}
             defaultModel={composer.dshDefaultModel}
             defaultThinkingLevel={composer.dshDefaultThinkingLevel}
           />

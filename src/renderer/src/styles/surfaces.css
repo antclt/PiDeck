@@ -1082,38 +1082,6 @@
   left: 18px;
 }
 
-.picker-palette-label {
-  flex: 0 0 auto;
-  min-width: 90px;
-  max-width: 160px;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-control);
-  font-weight: 600;
-  font-family: var(--font-family-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.picker-palette-desc {
-  flex: 1;
-  min-width: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.picker-palette-arg-hint {
-  flex: 0 1 auto;
-  min-width: 30px;
-  color: var(--color-accent);
-  font-size: var(--font-size-caption);
-  font-family: var(--font-family-mono);
-  padding: 0 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 /* 模板预览弹框 */
 .picker-preview-inline {
   flex: 1;

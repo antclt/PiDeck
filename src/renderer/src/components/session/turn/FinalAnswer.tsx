@@ -2,6 +2,7 @@ import { Download, Copy, Check, ChevronDown } from "lucide-react";
 import { memo, type RefObject, useState } from "react";
 import type { ChatMessage, ImageContent } from "../../../../../shared/types";
 import type { ImageGenMeta } from "../../../../../shared/types/imagegen";
+import { IMAGE_GEN_SIZE_UNSET, parseImageGenSize } from "../../../../../shared/imageGenParams";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../ui-shadcn/dropdown-menu";
@@ -43,8 +44,17 @@ function ImageGenMessage(props: {
 	// 不能因此让复制入口把有效图片误判为非图片，展示/复制统一使用图片 MIME 兜底。
 	const imageMimeType = image?.mimeType.startsWith("image/") ? image.mimeType : "image/png";
 	const imageDataUrl = image ? `data:${imageMimeType};base64,${image.data}` : "";
-	const sizeMatch = props.meta.size?.match(/^(\d+)x(\d+)$/i);
-	const resolution = sizeMatch ? `${sizeMatch[1]} × ${sizeMatch[2]}` : props.meta.size;
+	// 未配置分辨率时不渲染右上角尺寸徽标：请求体没发 size，由模型默认决定，
+	// 无法得知实际输出尺寸；"unset" 只是内部哨兵串（历史消息也会带上），不能直接上屏。
+	// 用共享 parser 统一收窄，空/非法值同样隐藏。
+	const parsedSize = parseImageGenSize(props.meta.size);
+	const sizeMatch = parsedSize?.match(/^(\d+)x(\d+)$/i);
+	const resolution =
+		parsedSize && parsedSize !== IMAGE_GEN_SIZE_UNSET
+			? sizeMatch
+				? `${sizeMatch[1]} × ${sizeMatch[2]}`
+				: parsedSize
+			: undefined;
 	const aspectRatio = sizeMatch ? `${sizeMatch[1]} / ${sizeMatch[2]}` : undefined;
 		const copyImage = async () => {
 			try {

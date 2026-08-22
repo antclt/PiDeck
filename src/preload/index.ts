@@ -82,6 +82,7 @@ import type {
 	PiUpdateCheckResult,
 	PiSkillListResult,
 	PiSkillSummary,
+	SkillContentResult,
 	Project,
 	PromptStoreSearchResult,
 	PromptStoreItem,
@@ -1109,6 +1110,9 @@ const api = {
 	skills: {
 		list: () =>
 			ipcRenderer.invoke(ipcChannels.skillsList) as Promise<PiSkillListResult>,
+		// 读技能 SKILL.md 正文（白名单校验在主进程完成），技能选择器详情/全文插入用。
+		readContent: (path: string) =>
+			ipcRenderer.invoke(ipcChannels.skillsReadContent, path) as Promise<SkillContentResult>,
 		create: (input: CreatePiSkillInput) =>
 			ipcRenderer.invoke(ipcChannels.skillsCreate, input) as Promise<PiSkillSummary>,
 		toggle: (path: string, enabled: boolean) =>

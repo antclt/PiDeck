@@ -56,6 +56,27 @@ export function toSkillInvocationToken(backend: "pi" | "dsh", name: string): str
 	return backend === "pi" ? `skill:${name}` : name;
 }
 
+/**
+ * 剥离 Markdown 文件的 YAML frontmatter「描述头」：`---` 元数据是给选择器列表/
+ * 模型目录用的，一键插入全文时应只插正文（否则输入框里会看到 name/description 头）。
+ * 无 frontmatter 的纯正文原样返回；frontmatter 后的首个空行不保留。
+ */
+export function stripMarkdownFrontmatter(content: string): string {
+	const match = content.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/);
+	if (!match) return content;
+	return content.slice(match[0].length).replace(/^\r?\n/, "");
+}
+
+/**
+ * 把完整正文（提示词模板内容 / 技能 SKILL.md 指令）追加到草稿尾部：
+ * 正文是多行文本，不能像斜杠命令那样用空格拼接——draft 非空时换行衔接，
+ * 避免命令 token 与已有草稿内容粘连；空草稿直接以正文开头。
+ */
+export function appendContentToDraft(draft: string, content: string): string {
+	if (!content) return draft;
+	return draft.trimEnd() ? `${draft.trimEnd()}\n${content}` : content;
+}
+
 export function parseArgumentHint(content: string): string | undefined {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!match) return undefined;

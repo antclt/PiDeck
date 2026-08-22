@@ -39,7 +39,9 @@ export const MentionChip = Node.create({
 	parseHTML() {
 		return [
 			{
-				tag: "span.input-chip[data-raw]",
+				// 兼容两种形态：旧 chip（span.input-chip[data-raw]）与新普通文本引用
+				// （span[data-raw][data-type]）——历史记录 load 回编辑器时都能重建原子节点。
+				tag: "span[data-raw][data-type]",
 				getAttrs: (el) => {
 					if (!(el instanceof HTMLElement)) return false;
 					const kind = el.getAttribute("data-type");
@@ -61,7 +63,23 @@ export const MentionChip = Node.create({
 		const kind = String(node.attrs.kind ?? "file");
 		const raw = String(node.attrs.raw ?? "");
 		const label = String(node.attrs.label ?? raw);
-		// quote chip 用引号字形而非 @/&/ 前缀：它引用的是对话内容，不是外部资源
+		// 文件/技能（含提示词模板，同为 slash 命令 token）引用按用户要求做普通文本：
+		// 不再套 .input-chip 徽章外观，与正文同视感。仍保留 data-raw/data-type 与
+		// contenteditable=false——点击定位（closest [data-raw]）与内容再解析都依赖它们。
+		if (kind === "file" || kind === "skill") {
+			return [
+				"span",
+				mergeAttributes(HTMLAttributes, {
+					"data-type": kind,
+					"data-raw": raw,
+					contenteditable: "false",
+					title: raw,
+				}),
+				raw || label,
+			];
+		}
+		// session（& 会话引用）与 quote（❝ 对话引用）保留 chip 外观：它们是跨内容引用，
+		// 徽章化有助于与正文区分，且时间线共用同一渲染。
 		const icon = kind === "file" ? "@" : kind === "session" ? "&" : kind === "quote" ? "❝" : "/";
 		// 单行省略内联在节点上：chip 是原子装饰节点，关键视觉不依赖样式表加载顺序
 		// （@layer(legacy) + Vite HMR 曾出现更新丢失导致折行，见 quoteChipStyle 契约测试）；
