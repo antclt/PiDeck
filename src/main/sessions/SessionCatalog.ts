@@ -691,6 +691,28 @@ export class SessionCatalog {
 	}
 
 	/**
+	 * 将 draft 会话提升为 active：生图草稿已把历史落盘到 ImageSession 独立存储后调用，
+	 * 避免重启时被 staleDrafts 清理逻辑剔掉（否则侧栏没有入口，历史无法恢复）。
+	 * 非 draft / 匿名会话幂等：只更新 updatedAt。
+	 */
+	async promoteToActive(sessionId: string): Promise<SessionRecord | undefined> {
+		this.assertLoaded();
+		const transient = this.transientEntries.get(sessionId);
+		if (transient) {
+			if (transient.status === "draft") transient.status = "active";
+			transient.updatedAt = Date.now();
+			return this.recordFromEntry(transient);
+		}
+		const entry = await this.enqueueMutation((entries) => {
+			const nextEntry = this.requireEntry(entries, sessionId);
+			if (nextEntry.status === "draft") nextEntry.status = "active";
+			nextEntry.updatedAt = Date.now();
+			return { value: cloneEntry(nextEntry), changed: true };
+		});
+		return this.recordFromEntry(entry);
+	}
+
+	/**
 	 * 删除侧栏项目时清掉该项目下全部 catalog 映射（含 DSH 导入）。
 	 * host 会话文件仍在 $DSH_HOME，但不再自动挂回侧栏；用户手动导入才会再出现。
 	 */

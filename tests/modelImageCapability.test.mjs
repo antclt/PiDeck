@@ -61,7 +61,13 @@ test("用户气泡按会话级 visionBridgeExpected 跳过轮询，而不是只�
   assert.match(surface, /visionBridgeExpected === null/);
   assert.match(surface, /visionBridgeEnabled !== true/);
   assert.match(timeline, /useSessionVisionBridgeExpected/);
-  assert.match(timeline, /visionBridgeExpected=\{visionBridgeExpected\}/);
+  // 会话级默认传参 + 生图参考图分支显式禁用（2026-08：生图参考图直接进供应商 API，
+  // 不走 LLM 视觉桥；普通带图消息仍按会话级判定）
+  assert.match(
+    timeline,
+    /visionBridgeExpected=\{\s*imageGenUserMessageIds\.has\(message\.id\) \? false : visionBridgeExpected\s*\}/,
+  );
+  assert.match(timeline, /imageGenUserMessageIds/);
   assert.match(hook, /listModels/);
   assert.match(hook, /getModels/);
   assert.match(hook, /modelSupportsNativeImages/);

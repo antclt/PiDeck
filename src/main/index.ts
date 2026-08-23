@@ -286,6 +286,7 @@ import { registerSecurityIpc } from "./ipc/securityIpc";
 import { registerVisionIpc } from "./ipc/visionIpc";
 import { registerImageGenIpc } from "./ipc/imagegenIpc";
 import { ImageGenService } from "./imagegen/ImageGenService";
+import { ImageSessionStore } from "./imagegen/ImageSessionStore";
 import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
@@ -2491,6 +2492,11 @@ function registerIpc() {
 		getConfigPath: () => join(app.getPath("userData"), "imagegen.json"),
 		log: (message, ...args) => appLogger.info("imagegen", message, ...args),
 	});
+	// 生图 session 独立存储：无 pi 会话文件的纯生图草稿把历史落盘到这里（重启可恢复），
+	// 不依赖 pi 会话文件也不进 pi 的 sessions 目录（PiDeck userData/imagegen/sessions）。
+	const imageSessionStore = new ImageSessionStore({
+		getStorePath: () => join(app.getPath("userData"), "imagegen", "sessions"),
+	});
 	registerImageGenIpc({
 		imageGen: new ImageGenService({
 			getProviderCredentials: async (provider) => {
@@ -2522,8 +2528,40 @@ function registerIpc() {
 					mainWindow?.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
 				}
 			}
-			// 落盘依赖真实会话文件：仅 draft（无 filePath）时消息不入历史文件，图片仍在时间线展示。
-			if (!entry.filePath) return;
+			// 无 pi 会话文件的纯生图草稿：落盘到 ImageSession 独立存储（PiDeck userData 下的
+			// imagegen/sessions），不再依赖 pi 会话文件；并把会话提升为 active，防重启时
+			// staleDrafts 清理丢入口——否则生图历史重启即失（2026 用户反馈）。
+			if (!entry.filePath) {
+				await imageSessionStore.append(sessionId, [
+					{
+						id: randomUUID(),
+						agentId: "",
+						role: "user",
+						text: prompt,
+						timestamp: Date.now(),
+						// 参考图随 user 消息落盘：恢复时时间线里能看到参考图
+						images: (referenceImages ?? []).map((ref) => ({
+							type: "image" as const,
+							data: ref.data,
+							mimeType: ref.mimeType,
+						})),
+					},
+					{
+						id: randomUUID(),
+						agentId: "",
+						role: "assistant",
+						text: "",
+						stopReason: "stop",
+						timestamp: Date.now(),
+						images: [{ type: "image" as const, data: image.data, mimeType: image.mimeType }],
+						// 历史恢复靠这个标记区分生图结果与普通图片附件（渲染层 ImageGenMessage）；
+						// 结构即 shared/types/imagegen 的 ImageGenMeta，渲染层读取时自行收窄
+						meta: { imageGen: { status: "complete", prompt, size } },
+					},
+				]);
+				await sessionCatalog.promoteToActive(sessionId);
+				return;
+			}
 			await agentManager?.appendLocalMessagesToSession(entry.filePath, [
 				{
 					role: "user",
@@ -2585,6 +2623,8 @@ function registerIpc() {
 		stopSessionRuntime,
 		emitReplacementState,
 		readCatalogSessionReferenceMessages,
+		// 无 pi 会话文件（纯生图草稿）历史读取回退：ImageSession 独立存储
+		readImageSessionMessages: (sessionId) => imageSessionStore.readMessages(sessionId),
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,

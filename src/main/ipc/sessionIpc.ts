@@ -263,6 +263,13 @@ export type SessionIpcDeps = {
 	stopSessionRuntime: (target: SessionRuntimeTarget) => void;
 	emitReplacementState: (runtime: SessionRuntimeInfo, includeMessages: boolean) => void;
 	readCatalogSessionReferenceMessages: (sessionId: string) => Promise<unknown[]>;
+	/**
+	 * 无 pi 会话文件的会话（纯生图草稿）历史读取：回退 ImageSession 独立存储。
+	 * 未装配（单测/无生图域）时 undefined；调用处 `?? []` 兜底空页。
+	 */
+	readImageSessionMessages?: (
+		sessionId: string,
+	) => Promise<import("../../shared/types").ChatMessage[]>;
 	copyCatalogSession: (
 		sessionId: string,
 	) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
@@ -340,6 +347,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		stopSessionRuntime,
 		emitReplacementState,
 		readCatalogSessionReferenceMessages,
+		// 无 pi 会话文件（纯生图草稿）历史读取回退：ImageSession 独立存储
+		readImageSessionMessages,
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
@@ -714,29 +723,61 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			if (entry?.backend === "dsh" && entry.dshSessionId && readDshHistoryPage) {
 				return readDshHistoryPage(entry.dshSessionId, before, pageSize ?? 100);
 			}
-			if (!entry?.filePath) return { messages: [], total: 0, nextBefore: null };
-			// unit=turn（2026-08 激活分页）：页边界对齐完整轮次，pageSize 复用为轮次数（上限 10）；
-			// 游标协议不变（before/nextBefore 为绝对消息下标，与运行时数组同一下标空间）；
-			// beforeEntryId 供已激活会话以运行时窗口首条消息为锚点首次补历史。
-			if (options?.unit === "turn") {
-				// 缓存优先（2026-11）：运行中会话翻历史先在主进程内存缓存切片，命中免文件 IO；
-				// 未命中（缓存未覆盖/非活跃会话）回退 SessionHistoryReader 读文件。
-				// 注意：缓存按 transient agentId 键控，必须经 coordinator 把稳定 sessionId
-				// 解析成当前运行时 agentId；解析不到（非活跃/终端绑定）直接走文件路径。
-				if (options.beforeEntryId || typeof before === "number") {
-					const target = sessionRuntimeCoordinator.getTarget(sessionId);
-					if (target) {
-						const cached = await agentManager.tryReadRuntimeTurnPage(entry.filePath, target.agentId, {
-							beforeEntryId: options.beforeEntryId,
-							before,
-							turnCount: pageSize,
-						}).catch(() => null);
-						if (cached) return cached;
-					}
+			if (!entry?.filePath) {
+				// 无 pi 会话文件（纯生图草稿）：回退 ImageSession 独立存储恢复生图历史
+				const imageSessionMessages = (await readImageSessionMessages?.(sessionId)) ?? [];
+				if (imageSessionMessages.length > 0) {
+					return {
+						messages: imageSessionMessages,
+						total: imageSessionMessages.length,
+						nextBefore: null,
+					};
 				}
-				return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, options.beforeEntryId);
+				return { messages: [], total: 0, nextBefore: null };
 			}
-			return agentManager.readSessionDisplayMessagePage(entry.filePath, sessionId, before, pageSize);
+			// 读盘失败（文件被删/路径失效/解析异常）不能静默：渲染层靠 reject 显示明确错误态，
+			// 否则「正在加载历史」骨架无限滞留（2026-08 生图会话文件缺失反馈）。
+			try {
+				// unit=turn（2026-08 激活分页）：页边界对齐完整轮次，pageSize 复用为轮次数（上限 10）；
+				// 游标协议不变（before/nextBefore 为绝对消息下标，与运行时数组同一下标空间）；
+				// beforeEntryId 供已激活会话以运行时窗口首条消息为锚点首次补历史。
+				if (options?.unit === "turn") {
+					// 缓存优先（2026-11）：运行中会话翻历史先在主进程内存缓存切片，命中免文件 IO；
+					// 未命中（缓存未覆盖/非活跃会话）回退 SessionHistoryReader 读文件。
+					// 注意：缓存按 transient agentId 键控，必须经 coordinator 把稳定 sessionId
+					// 解析成当前运行时 agentId；解析不到（非活跃/终端绑定）直接走文件路径。
+					if (options.beforeEntryId || typeof before === "number") {
+						const target = sessionRuntimeCoordinator.getTarget(sessionId);
+						if (target) {
+							const cached = await agentManager.tryReadRuntimeTurnPage(entry.filePath, target.agentId, {
+								beforeEntryId: options.beforeEntryId,
+								before,
+								turnCount: pageSize,
+							}).catch(() => null);
+							if (cached) return cached;
+						}
+					}
+					return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, options.beforeEntryId);
+				}
+				return agentManager.readSessionDisplayMessagePage(entry.filePath, sessionId, before, pageSize);
+			} catch (error) {
+				// 文件读取失败（被删/路径失效）先查 ImageSession 兜底，命中则直接恢复历史；
+				// 都无记录才按失败处理（渲染层显示明确错误态 + 日志）。
+				const imageSessionMessages = (await readImageSessionMessages?.(sessionId)) ?? [];
+				if (imageSessionMessages.length > 0) {
+					return {
+						messages: imageSessionMessages,
+						total: imageSessionMessages.length,
+						nextBefore: null,
+					};
+				}
+				appLogger.warn("session", "Read message page failed", {
+					sessionId,
+					filePath: entry.filePath,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
 		},
 	);
 	ipcMain.handle(

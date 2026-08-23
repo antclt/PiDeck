@@ -895,6 +895,12 @@ export function useSessionComposerController(
       },
     });
     setDraft("");
+    // 乐观清空附件栏：参考图已随 user 消息上屏回显，输入框不再占用
+    // （与普通消息发送同惯例 useSessionSend.clearSnapshot）；
+    // 生成失败时下方失败分支会把附件前插恢复，支持改词重试。
+    if (attachments.length > 0) {
+      setAttachmentsAtom({ sessionId, value: [] });
+    }
 
     try {
       const result = await desktopApi.imagegen.generate({
@@ -910,10 +916,7 @@ export function useSessionComposerController(
         sessionId,
       });
       if (result.ok) {
-        // 成功后清空附件栏：参考图已随请求发出，留在栏里会误导下一次生图
-        if (attachments.length > 0) {
-          setAttachmentsAtom({ sessionId, value: [] });
-        }
+        // 参考图发送时已乐观清空，此处只原地更新结果消息
         updateTimelineMessage(imageMessageId, (m) => ({
           ...m,
           images: [result.image],
@@ -923,6 +926,10 @@ export function useSessionComposerController(
         }));
         showNotice(t("imagegen.done"), 4000);
       } else {
+        // 失败恢复附件：参考图放回输入框便于改词重试；前插不覆盖期间新粘贴的图
+        if (attachments.length > 0) {
+          setAttachmentsAtom({ sessionId, value: (current) => [...attachments, ...current] });
+        }
         updateTimelineMessage(imageMessageId, (m) => ({
           ...m,
           meta: {
@@ -936,6 +943,10 @@ export function useSessionComposerController(
         }));
       }
     } catch {
+      // 网络/超时类失败同样恢复附件，便于原地重试
+      if (attachments.length > 0) {
+        setAttachmentsAtom({ sessionId, value: (current) => [...attachments, ...current] });
+      }
       updateTimelineMessage(imageMessageId, (m) => ({
         ...m,
         meta: {

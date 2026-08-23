@@ -960,6 +960,31 @@ test("opened tabs survive cache LRU eviction (switch-back must not re-read disk)
   assert.ok(!store.get(atoms.sessionMessagesCacheAtom)["imagegen-session"], "closed tab is evictable once cache refills");
 });
 
+test("open tabs are never evicted even when tab count exceeds the cache limit (restart multi-tab recovery)", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  // 重启后恢复大量 Tab（分屏 + 常驻 + 预览），超过 8 槽上限：已打开的会话
+  // 是用户正在引用的，绝不能因其它会话写入被挤出（挤掉 → 重读盘 → 再挤掉 = 闪循环）。
+  const opened = Array.from({ length: 10 }, (_, i) => `tab-${i}`);
+  store.set(atoms.sessionTabIdsAtom, opened);
+  for (const id of opened) {
+    store.set(atoms.cacheSessionMessagesAtom, {
+      sessionId: id,
+      messages: [{ id: `x-${id}`, role: "user", text: id }],
+      source: "runtime",
+    });
+  }
+  // 未打开的会话再写入：只挤未打开的部分，已打开的 10 个全部保留
+  store.set(atoms.cacheSessionMessagesAtom, {
+    sessionId: "not-opened",
+    messages: [{ id: "n1", role: "user", text: "n1" }],
+    source: "runtime",
+  });
+  for (const id of opened) {
+    assert.ok(store.get(atoms.sessionMessagesCacheAtom)[id], `opened tab ${id} must never be evicted`);
+  }
+});
+
 test("clearSessionHistoryAtom drops browsed history on bottom-settle, keeps runtime window", () => {
   const atoms = loadAtoms();
   const store = createStore();

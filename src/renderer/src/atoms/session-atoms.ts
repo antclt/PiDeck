@@ -31,24 +31,28 @@ import {
 export const SESSION_MESSAGE_CACHE_LIMIT = 8;
 
 /**
- * 会话消息缓存 LRU 裁剪策略：打开着的会话 Tab（预览/常驻）优先保留，
- * 其余按最近写入顺序补足剩余名额。
+ * 会话消息缓存 LRU 裁剪策略：打开着的会话 Tab（预览/常驻）永不裁剪，
+ * 其余按最近写入顺序补足剩余名额（未打开部分受 limit 约束）。
  *
  * 为什么：渲染层把「缓存条目存在」视为「内容已加载」（见 deriveSessionSurfaceRuntime
  * 的 ready && !hasCachedEntry 判据）。打开中的会话若因其它会话写入被挤出 8 槽，
  * 切回瞬间会重读盘并闪「正在加载历史」骨架——生图会话等没有 runtime 事件持续
- * touch 的会话最容易被挤出。Tab 关闭后不再受保护（用户已不引用），缓存可正常回收。
+ * touch 的会话最容易被挤出，且重读期间只要再被挤出就会形成「挤掉→重读→再挤掉」
+ * 循环闪（重启后多个 Tab 恢复、大会话读盘慢时最明显）。Tab 关闭后不再受保护
+ * （用户已不引用），按 limit 正常回收。
  */
 export function selectRetainedCacheEntryIds(
   lru: readonly string[],
   openedTabIds: ReadonlySet<string>,
   limit: number,
 ): string[] {
-  // 各按自身 LRU 相对顺序：打开的靠前（保护），未打开的跟在后面按最近写入占名额；
-  // 打开的 Tab 过多（> limit）时同样截断，避免无界内存。
+  // 打开着的 Tab 全部保留（即使数量超过 limit：已打开的会话是用户在看的，
+  // 宁可在内存上稍微超额，也绝不挤掉正在显示的会话）；
+  // 未打开的按最近写入顺序占剩余名额（不足时一个不留）。
   const open = lru.filter((id) => openedTabIds.has(id));
   const closed = lru.filter((id) => !openedTabIds.has(id));
-  return [...open, ...closed].slice(0, limit);
+  const closedBudget = Math.max(0, limit - open.length);
+  return [...open, ...closed.slice(0, closedBudget)];
 }
 
 export type SessionRuntimeViewState = {

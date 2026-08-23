@@ -1057,6 +1057,35 @@ test("load rewrites pi file-stem timestamp titles so the sidebar is not a list o
   }
 });
 
+test("promoteToActive lifts a draft so it survives reload (staleDrafts purge)", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-promote-"));
+  const filePath = join(dir, "sessions.json");
+  try {
+    const catalog = new SessionCatalog(filePath);
+    await catalog.load();
+    const draft = await catalog.createDraft({
+      projectId: "project-1",
+      title: "Imagegen draft",
+      environment: "native",
+      source: "pi",
+    });
+    assert.equal(draft.status, "draft");
+    // 生图草稿已落盘到 ImageSession：提升为 active，防重启时 staleDrafts 清理丢入口
+    const promoted = await catalog.promoteToActive(draft.id);
+    assert.equal(promoted.status, "active");
+    // 重启（重载 catalog）：active 条目不会被 staleDrafts 清理
+    const catalog2 = new SessionCatalog(filePath);
+    await catalog2.load();
+    assert.ok(catalog2.getRecord(draft.id), "promoted draft must survive reload");
+    // 幂等：对 active 再次 promote 不改变状态
+    const again = await catalog2.promoteToActive(draft.id);
+    assert.equal(again.status, "active");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("nameless scanned summaries keep existing titles and use the file stem for new rows", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-stem-title-"));

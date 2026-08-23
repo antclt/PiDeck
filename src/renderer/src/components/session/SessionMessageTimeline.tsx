@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ComponentProps, ReactNode, RefObject } from "react";
 import type { ChatMessage, ImageContent } from "../../../../shared/types";
 import { MarkdownStream } from "./MarkdownStream";
+import { Button } from "../ui-shadcn/button";
 import {
   CompactionCard,
   DiagnosticMessageCard,
@@ -625,6 +626,21 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     [activeMessages],
   );
   const visionBridgeExpected = useSessionVisionBridgeExpected(sessionId, hasUserImages);
+  // 生图轮的 user 消息（紧随其后带 imageGen meta 的 assistant 占位/结果）：参考图直接进
+  // 供应商 image 参数，不走 LLM 视觉桥——必须禁用视觉桥 UI，否则参考图气泡会被误显示
+  // 「转换中/视觉桥已查看」。普通带图消息（下一跳是非 imageGen assistant）不受影响；
+  // 该判定对重启恢复的历史消息同样成立（落盘的 assistant 带 imageGen meta）。
+  const imageGenUserMessageIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (let i = 0; i < activeMessages.length - 1; i += 1) {
+      const current = activeMessages[i];
+      const next = activeMessages[i + 1];
+      if (current.role === "user" && next.role === "assistant" && Boolean(next.meta?.imageGen)) {
+        ids.add(current.id);
+      }
+    }
+    return ids;
+  }, [activeMessages]);
   const lastUserMessageId = useMemo(() => {
     for (let index = activeMessages.length - 1; index >= 0; index -= 1) {
       if (activeMessages[index].role === "user") {
@@ -865,6 +881,28 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
         </div>
       )}
 
+      {/* 读盘失败终态：文件被删/路径失效/解析异常时不能无限滞留骨架，
+          也不裸显示起始页误导——明确错误文案 + 重试（2026-08 生图会话文件缺失）。 */}
+      {messageLoadState?.status === "error" && activeMessages.length === 0 && (
+        <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+          <p className="text-sm font-medium">{t("timeline.loadFailed")}</p>
+          <p
+            className="max-w-[560px] text-xs text-muted-foreground"
+            title={messageLoadState.error ?? ""}
+          >
+            {t("timeline.loadFailedHint")}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void controller.reloadFromDisk()}
+          >
+            {t("common.retry")}
+          </Button>
+        </div>
+      )}
+
       {!hasActiveConversation && (
         <EmptyState
           hasProject={props.hasProject}
@@ -945,7 +983,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     validCommandNames={props.validCommandNames}
                     validFilePaths={props.validFilePaths}
                     onEnterMultiSelect={() => setMultiSelectOpen(true)}
-                    visionBridgeExpected={visionBridgeExpected}
+                    // 生图参考图永远不触发视觉桥（参考图直接进供应商 API）
+                    visionBridgeExpected={imageGenUserMessageIds.has(message.id) ? false : visionBridgeExpected}
                   />
                 );
               }
