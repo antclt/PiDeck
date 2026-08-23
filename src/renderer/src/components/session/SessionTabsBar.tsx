@@ -310,12 +310,16 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
               onDragEnd={handleDragEnd}
             />
           );
-          return tabItems.map(({ sessionId }) => {
+          // 收集顶层 Tab 单元：普通会话 Tab；分屏组「胶囊 + 组内 Tab」整体算一个单元，
+          // 组内不再插分隔线（组颜色标记已表达组归属，插线会把胶囊和组内标签切散）。
+          const units: ReactNode[] = [];
+          tabItems.forEach(({ sessionId }) => {
             if (!hasSplitGroup || !splitGroupSet.has(sessionId)) {
-              return renderTab(sessionId, false);
+              units.push(renderTab(sessionId, false));
+              return;
             }
             // 组内会话：只在组内第一个位置渲染「组头胶囊 +（展开时）组内全部 Tab」
-            if (sessionId !== splitGroupIds[0]) return null;
+            if (sessionId !== splitGroupIds[0]) return;
             const groupHasFocus =
               currentSessionId != null && splitGroupSet.has(currentSessionId);
             const groupName =
@@ -325,7 +329,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
             // role="group" 挂在外层容器（容纳胶囊 + 组内 Tab），按钮保持原生 button 语义；
             // aria-expanded/aria-controls 挂在按钮上；右键打开组管理菜单（Popover），
             // 左键点击仍是展开/收起（与浏览器标签组一致）
-            return (
+            const groupNode = (
               <Popover
                 open={splitGroupMenuOpen}
                 onOpenChange={setSplitGroupMenuOpen}
@@ -464,6 +468,20 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
                 </PopoverContent>
               </Popover>
             );
+            units.push(groupNode);
+          });
+          // 浏览器式分隔竖线：相邻 Tab 单元之间插 1px 细线（与文件 Tab 前分隔线同款视觉）。
+          // 分隔线自身按位置 key，拖拽排序只重挂无状态 span，不影响 Tab 复用。
+          return units.flatMap((node, index) => {
+            if (index === 0) return [node];
+            return [
+              <span
+                key={`tab-sep:${index}`}
+                className="mx-0.5 h-4 w-px shrink-0 bg-border/50"
+                aria-hidden="true"
+              />,
+              node,
+            ];
           });
         })()}
         {/* 浏览器式新建入口：跟在最后一张标签后面，下拉选择新建到哪个项目 */}
@@ -478,15 +496,26 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
               className="mx-0.5 h-4 w-px shrink-0 bg-border/50"
               aria-hidden="true"
             />
-            {props.editorTabs.map((tab) => (
-              <EditorWorkbenchTab
-                key={tab.id}
-                tab={tab}
-                onSelect={props.onSelectEditorTab}
-                onClose={props.onCloseEditorTab}
-                onPromotePreview={props.onPromoteEditorPreview}
-              />
-            ))}
+            {props.editorTabs.flatMap((tab, index) => {
+              const node = (
+                <EditorWorkbenchTab
+                  key={tab.id}
+                  tab={tab}
+                  onSelect={props.onSelectEditorTab}
+                  onClose={props.onCloseEditorTab}
+                  onPromotePreview={props.onPromoteEditorPreview}
+                />
+              );
+              if (index === 0) return [node];
+              return [
+                <span
+                  key={`editor-tab-sep:${tab.id}`}
+                  className="mx-0.5 h-4 w-px shrink-0 bg-border/50"
+                  aria-hidden="true"
+                />,
+                node,
+              ];
+            })}
           </>
         ) : null}
       </div>
