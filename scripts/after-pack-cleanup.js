@@ -9,15 +9,13 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { execSync } = require("node:child_process");
 const asar = require("@electron/asar");
 const { patchSharpIndexCjs } = require("./patch-sharp-index");
 
 /** 要保留的语言包列表（小写，无 .pak 后缀） */
 const KEEP_LOCALES = new Set(["en-us", "zh-cn", "zh-tw"]);
 
-/** asar 工具路径（extract 仍走 CLI；repack 必须走 API 才能保留 unpacked 标记） */
-const ASAR_BIN = path.join(__dirname, "..", "node_modules", ".bin", "asar");
+// asar extract/repack 均使用 @electron/asar API，避免依赖 Windows CLI。
 
 /**
  * 从 asar header 收集 originally unpacked 的相对路径。
@@ -136,57 +134,6 @@ async function dirSize(dir) {
 }
 
 /**
- * 从 asar 中删除指定路径的文件/目录。
- * 利用 asar CLI 的 extract + repack 实现。
- */
-async function stripFromAsar(asarPath, extractDir, removePaths, label) {
-  console.log(`[afterPack] ${label}：正在提取 asar...`);
-
-  // 提取 asar 到临时目录
-  execSync(`"${ASAR_BIN}" extract "${asarPath}" "${extractDir}"`, {
-    stdio: "pipe",
-    timeout: 120_000,
-  });
-
-  let totalRemoved = 0;
-  for (const relPath of removePaths) {
-    const fullPath = path.join(extractDir, relPath);
-    try {
-      const stat = await fs.promises.stat(fullPath);
-      const size = stat.isDirectory() ? await dirSize(fullPath) : stat.size;
-      await fs.promises.rm(fullPath, { recursive: true, force: true });
-      totalRemoved += size;
-      console.log(`  [afterPack] 已删除: ${relPath} (${(size / 1024 / 1024).toFixed(1)} MB)`);
-    } catch {
-      // 路径不存在，忽略
-    }
-  }
-
-  if (totalRemoved > 0) {
-    // 重新打包为 asar, 覆盖原文件（必须保留 unpacked 标记，见 packAsarPreservingUnpacked）
-    const tmpAsar = asarPath + ".tmp";
-    const unpacked = readUnpackedPatterns(asarPath);
-    await packAsarPreservingUnpacked(extractDir, tmpAsar, unpacked);
-    fs.renameSync(tmpAsar, asarPath);
-    await removeAsarRepackArtifacts(asarPath);
-
-    // 清理临时目录
-    await rmDir(extractDir);
-
-    const oldSize = fs.statSync(asarPath).size + totalRemoved;
-    const newSize = fs.statSync(asarPath).size;
-    console.log(
-      `[afterPack] ${label}: 节省 ${(totalRemoved / 1024 / 1024).toFixed(1)} MB (asar ${(oldSize / 1024 / 1024).toFixed(0)} → ${(newSize / 1024 / 1024).toFixed(0)} MB)`,
-    );
-  } else {
-    await rmDir(extractDir);
-    console.log(`[afterPack] ${label}: 无冗余文件可清理`);
-  }
-
-  return totalRemoved;
-}
-
-/**
  * @param {import("electron-builder").AfterPackContext} context
  */
 exports.collectUnpackedPatterns = collectUnpackedPatterns;
@@ -270,10 +217,10 @@ exports.default = async function (context) {
   // 必须在 extract 前读 header：repack 后才知道哪些路径原本是 unpacked。
   const unpackedPatterns = readUnpackedPatterns(asarPath);
   console.log(`[afterPack] 正在提取 asar 进行清理...`);
-  execSync(`"${ASAR_BIN}" extract "${asarPath}" "${extractDir}"`, {
-    stdio: "pipe",
-    timeout: 120_000,
-  });
+  // 直接使用 API，避免通过 Windows cmd.exe 启动 CLI 导致固定超时。
+  // 失败重试时先清掉上一次中断留下的临时目录，避免混入残留文件。
+  await rmDir(extractDir);
+  asar.extractAll(asarPath, extractDir);
 
   let totalRemoved = 0;
 
