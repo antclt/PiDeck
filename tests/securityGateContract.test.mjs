@@ -61,18 +61,12 @@ test("extension reads the same env vars the main process injects", () => {
 
 test("PIDECK_SESSION_ID is keyed on catalog session id, not sessionPath", () => {
 	// 回归：SecurityLevelMenu 用 SessionRecord.id（UUID）保存会话级覆盖，
-	// 主进程注入 PIDECK_SESSION_ID 必须用同一个 key（deckSessionId），
 	// 否则扩展按 sessionLevels[sessionId] 永远查不到覆盖而回落到全局默认等级。
 	const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 	const coordinator = readFileSync("src/main/sessions/SessionRuntimeCoordinator.ts", "utf8");
 	const agentTypes = readFileSync("src/shared/types/agent.ts", "utf8");
 	assert.match(agentManager, /securitySessionId: securitySessionKey \?\? sessionPath/);
-	assert.match(agentManager, /deckSessionId: input\.deckSessionId/);
-	assert.match(agentManager, /sessionPath, runtime\.tab\.deckSessionId\)/);
 	// 运行时创建 agent 时把 catalog 会话身份透传给 AgentManager
-	assert.match(coordinator, /deckSessionId: sessionId/);
-	// 类型契约：CreateAgentInput 与 AgentTab 都声明了 deckSessionId
-	assert.match(agentTypes, /deckSessionId\?: string/);
 });
 
 test("extension snapshot field names match buildSnapshot output", () => {

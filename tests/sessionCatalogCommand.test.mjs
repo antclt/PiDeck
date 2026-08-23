@@ -34,6 +34,8 @@ function createHookForRuntimeTest() {
           useState: (initial) => [initial, () => undefined],
           // catalog-refreshed 订阅的 effect：测试不驱动推送事件，注册后丢弃即可
           useEffect: () => undefined,
+          // useProjectSync 用 useCallback 包装稳定命令；测试透传原函数即可
+          useCallback: (fn) => fn,
         };
       }
       if (request === "../utils/fileTreeLazy") {

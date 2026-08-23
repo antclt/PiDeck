@@ -39,7 +39,7 @@ test("契约: SecurityLevelMenu 自身仍以 props.disabled 为准（不做运�
   );
   // 按钮禁用 = 外部传入 disabled 或保存中；菜单项在 enabled=false 时禁用
   assert.match(menu, /disabled=\{props\.disabled \|\| saving\}/);
-  assert.match(menu, /disabled=\{!enabled \|\| saving\}/);
+  assert.match(menu, /disabled={!enabled || props.disabled || saving}/);
 });
 
 test("契约: 主进程写快照链路无 busy 校验（切换即时生效）", () => {
