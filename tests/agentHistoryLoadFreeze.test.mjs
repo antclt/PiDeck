@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
-import { trimHistoryMessages } from "../src/main/pi/agentUtils.ts";
+const { trimHistoryMessages } = loadTsCommonJs("src/main/pi/agentUtils.ts");
 
 const { SessionHistoryReader } = loadTsCommonJs(
   "src/main/pi/SessionHistoryReader.ts",
