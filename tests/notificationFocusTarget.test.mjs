@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import test from "node:test";
+import ts from "typescript";
+import vm from "node:vm";
+
+const nodeRequire = createRequire(import.meta.url);
 
 // 用户反馈 bug：点击系统通知能激活窗口，但不会跳转到对应会话。
 // 根因：notifySessionEnd 用 tab.sessionId（pi 侧会话 id）嵌入 toast launch，
@@ -12,10 +17,31 @@ import test from "node:test";
 const RECORD_ID = "11111111-2222-3333-4444-555555555555";
 const PI_SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
-test("resolveNotificationSessionId prefers record id over pi session id", async () => {
-  const { resolveNotificationSessionId } = await import(
-    "../src/main/pi/agentUtils.ts"
+test("resolveNotificationSessionId prefers record id over pi session id", () => {
+  // 原生 ESM import 解析不了无扩展名的 TS 包内路径；用 ts.transpileModule 编译后注入
+  const agentUtilsModule = { exports: {} };
+  const ts = nodeRequire("typescript");
+  vm.runInNewContext(
+    ts.transpileModule(
+      readFileSync("src/main/pi/agentUtils.ts", "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+    ).outputText,
+    {
+      module: agentUtilsModule,
+      exports: agentUtilsModule.exports,
+      // agentUtils 顶层依赖 src/shared/sessionIdentity（bundler 根导入）：
+      // 本测试只调 resolveNotificationSessionId，会话身份工具用不到，空导出即可
+      require: (id) => {
+        if (id === "../../shared/sessionIdentity" || id === "src/shared/sessionIdentity") {
+          // looksLikePiSessionFileStem 顶层引用：resolveNotificationSessionId 用不到，空导出
+          return { looksLikePiSessionFileStem: () => false };
+        }
+        return nodeRequire(id);
+      },
+    },
+    { filename: "agentUtils.ts" },
   );
+  const { resolveNotificationSessionId } = agentUtilsModule.exports;
   // record.id 解析成功：用 record.id（renderer 能索引到会话）
   assert.equal(
     resolveNotificationSessionId(() => RECORD_ID, PI_SESSION_ID),

@@ -13,7 +13,7 @@ const mainIndex = readFileSync("src/main/index.ts", "utf8");
 const imagegenIpc = readFileSync("src/main/ipc/imagegenIpc.ts", "utf8");
 const agentTypes = readFileSync("src/shared/types/agent.ts", "utf8");
 const composerComponents = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
-const composerModeSelect = readFileSync("src/renderer/src/components/session/ComposerModeSelect.tsx", "utf8");
+const composerModeSelect = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
 const controller = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
 const composerPanels = readFileSync("src/renderer/src/components/session/ComposerPanels.tsx", "utf8");
 const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
@@ -93,11 +93,13 @@ test("composer 生图底栏用独立配置，不读会话 LLM", () => {
 });
 
 test("composer 模式选择器与底栏三态（含生图图标）", () => {
-	assert.match(composerModeSelect, /value: "imagegen"/);
+	// 模式三态已重构进 ComposerComponents（旧 ComposerModeSelect.tsx 已删）：
+	// 模式项标签文案 modeIconLabel 与 imagegen 图标内联在组件里
+	assert.match(composerModeSelect, /mode === "imagegen"/);
 	assert.match(composerModeSelect, /"app\.composerModeImagegen"/);
 	assert.match(composerModeSelect, /<Select/);
-	assert.match(composerModeSelect, /<ImageIcon size=\{size\}/);
-	assert.match(composerComponents, /ComposerModeSelect/);
+	assert.match(composerModeSelect, /<ImageIcon size=\{14\}/);
+	assert.match(composerComponents, /ComposerPickerHost|composerModeLabel|modeOptions/);
 	assert.match(composerComponents, /const isImageGenMode = props\.composerAgentMode === "imagegen"/);
 	assert.doesNotMatch(composerComponents, /ComposerModePicker|onOpenComposerModePicker|composer-mode-picker/);
 	assert.doesNotMatch(composerComponents, /onGenerateImage/);

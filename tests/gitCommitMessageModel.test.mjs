@@ -64,7 +64,7 @@ test("Shared model picker keeps one model line and supports collapse and selecte
   assert.match(commandPicker, /allCollapsed \? expandedGroups\.has\(props\.id\)/);
   assert.match(commandPicker, /if \(allCollapsed\)/);
   assert.match(composerComponents, /value=\{currentModelKey\}/);
-  assert.match(composerComponents, /value=\{props\.composerAgentMode\}/);
+  assert.match(composerComponents, /value: props\.composerAgentMode/);
   assert.match(composerComponents, /value=\{props\.current\}/);
   assert.match(commandPicker, /search\.trim\(\) \? <CommandEmpty/);
   assert.match(commandPicker, /scrollIntoView\(\{ block: \"center\" \}\)/);

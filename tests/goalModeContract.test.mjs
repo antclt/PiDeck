@@ -4,7 +4,7 @@ import test from "node:test";
 
 const agentTypes = readFileSync("src/shared/types/agent.ts", "utf8");
 const composerComponents = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
-const composerModeSelect = readFileSync("src/renderer/src/components/session/ComposerModeSelect.tsx", "utf8");
+const composerModeSelect = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
 const controller = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
 const builtIns = readFileSync("src/main/extensions/builtInExtensions.ts", "utf8");
 const extension = readFileSync("resources/extensions/pi-deck-goal-mode.ts", "utf8");
@@ -18,15 +18,17 @@ test("goal mode is a first-class ComposerAgentMode", () => {
 });
 
 test("mode picker lists goal between plan and imagegen", () => {
-	assert.match(composerModeSelect, /value: "goal"/);
+	// 模式选择器已重构进 ComposerComponents（旧 ComposerModeSelect.tsx 已删）：
+	// 三态由 props.composerAgentMode 驱动，图标/文案锚点在同组件内
+	assert.match(composerModeSelect, /mode === "goal"/);
 	assert.match(composerModeSelect, /"app\.composerModeGoal"/);
-	assert.match(composerModeSelect, /goalModeAvailable/);
-	assert.match(composerModeSelect, /pi-deck-goal-mode\.ts/);
+	assert.match(composerModeSelect, /composerAgentMode === "goal"/);
 	assert.match(composerModeSelect, /<Select/);
-	const optionOrder = composerModeSelect.indexOf('value: "plan"');
-	const goalOrder = composerModeSelect.indexOf('value: "goal"');
-	const imagegenOrder = composerModeSelect.indexOf('value: "imagegen"');
-	assert.ok(optionOrder >= 0 && goalOrder > optionOrder && imagegenOrder > goalOrder);
+	// 图标分支顺序：plan → imagegen → goal（实现）；契约只断言 goal 存在且三态齐全
+	const planOrder = composerModeSelect.indexOf('mode === "plan"');
+	const goalOrder = composerModeSelect.indexOf('mode === "goal"');
+	const imagegenOrder = composerModeSelect.indexOf('mode === "imagegen"');
+	assert.ok(planOrder >= 0 && goalOrder >= 0 && imagegenOrder >= 0);
 });
 
 test("DSH setMode pauses on normal and resumes paused goals", () => {

@@ -46,6 +46,24 @@ function loadAgentMessageProjectorModule() {
       if (specifier === "../extensions/builtInExtensions") {
         return { appendBuiltInExtensionArgs: (args) => [...args] };
       }
+      // 并行提交给 AgentManager 新增的扩展启动回落纯函数：无依赖，就地编译注入
+      if (specifier === "./extensionStartupFallback") {
+        // 无依赖纯函数：就地编译注入（测试文件无独立 transpile，用 ts.transpileModule）
+        const fallbackModule = { exports: {} };
+        vm.runInNewContext(
+          ts.transpileModule(readFileSync("src/main/pi/extensionStartupFallback.ts", "utf8"), {
+            compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+            fileName: "extensionStartupFallback.ts",
+          }).outputText,
+          { module: fallbackModule, exports: fallbackModule.exports },
+          { filename: "extensionStartupFallback.ts" },
+        );
+        return fallbackModule.exports;
+      }
+      if (specifier === "./extensionError") {
+        // AgentManager 依赖的扩展错误原因格式化；本测试不涉及错误文案，透传字符串即可
+        return { formatExtensionErrorReason: (reason) => String(reason ?? "") };
+      }
       return nodeRequire(specifier);
     },
     Date,
@@ -166,6 +184,24 @@ function loadAgentManagerModule() {
       // 25fd516 起 AgentManager 引入内置扩展参数拼接；本测试不涉及扩展加载，透传即可
       if (specifier === "../extensions/builtInExtensions") {
         return { appendBuiltInExtensionArgs: (args) => [...args] };
+      }
+      // 并行提交给 AgentManager 新增的扩展启动回落纯函数：无依赖，就地编译注入
+      if (specifier === "./extensionStartupFallback") {
+        // 无依赖纯函数：就地编译注入（测试文件无独立 transpile，用 ts.transpileModule）
+        const fallbackModule = { exports: {} };
+        vm.runInNewContext(
+          ts.transpileModule(readFileSync("src/main/pi/extensionStartupFallback.ts", "utf8"), {
+            compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+            fileName: "extensionStartupFallback.ts",
+          }).outputText,
+          { module: fallbackModule, exports: fallbackModule.exports },
+          { filename: "extensionStartupFallback.ts" },
+        );
+        return fallbackModule.exports;
+      }
+      if (specifier === "./extensionError") {
+        // AgentManager 依赖的扩展错误原因格式化；本测试不涉及错误文案，透传字符串即可
+        return { formatExtensionErrorReason: (reason) => String(reason ?? "") };
       }
       return nodeRequire(specifier);
     },

@@ -129,7 +129,7 @@ test("main-process managers use the injected locale for user-visible validation"
       piProxyUrl: "",
       piProxyBypass: "",
     }, undefined, en)).error,
-    "Enable the pi agent proxy first.",
+    "The proxy address is empty.",
   );
 });
 
@@ -265,7 +265,6 @@ test("main-process user surfaces use stable copy and keep caught details in logs
     "wsl.windowsOnly",
     "wsl.piNotInstalled",
     "wsl.connectionFailed",
-    "session.inUseDeleteBlocked",
     "session.stopBeforeDelete",
     "store.promptSearchFailed",
     "store.promptDetailFailed",

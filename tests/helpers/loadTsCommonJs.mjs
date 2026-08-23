@@ -60,6 +60,16 @@ export function loadTsCommonJs(filePath, options = {}) {
       if (specifier.startsWith(".") || specifier.startsWith("/")) {
         return load(resolveLocalModule(absolutePath, specifier));
       }
+      // 项目根相对导入（"src/shared/..."，bundler root 语义）：node 解析不到、
+      // 也不是包名。npm test 以项目根为 cwd，先按项目根解析本地 TS 文件；
+      // 解析不到（node_modules 包）再回退 npm require。
+      let rootResolved;
+      try {
+        rootResolved = resolveLocalModule(process.cwd(), specifier);
+      } catch {
+        rootResolved = null;
+      }
+      if (rootResolved) return load(rootResolved);
       return nodeRequire(specifier);
     };
 

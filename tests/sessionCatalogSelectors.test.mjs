@@ -37,6 +37,9 @@ function loadAtoms() {
     "../utils/sessionRecordIdentity": compileModule(
       "src/renderer/src/utils/sessionRecordIdentity.ts",
     ),
+    "../utils/liveTextHandoff": compileModule(
+      "src/renderer/src/utils/liveTextHandoff.ts",
+    ),
   });
   const selectors = compileModule("src/renderer/src/atoms/session-selectors.ts", {
     "./session-atoms": sessions,

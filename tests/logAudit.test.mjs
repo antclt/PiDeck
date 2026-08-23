@@ -57,15 +57,16 @@ test("SkillManager.delete goes to recycle bin, no rm force on user skills", () =
 });
 
 test("destructive git operations leave audit traces", () => {
-  assert.match(gitIpc, /appLogger\.warn\("git", "Files deleted \(recycle bin\)", \{ projectId, count: paths\.length, paths \}\)/);
-  assert.match(gitIpc, /appLogger\.warn\("git", "Reset to commit", \{ projectId, hash, mode \}\)/);
-  assert.match(gitIpc, /appLogger\.warn\("git", "Commit dropped", \{ projectId, hash \}\)/);
-  assert.match(gitIpc, /appLogger\.warn\("git", "Branch checked out", \{ projectId, branch, changed: result \}\)/);
-  assert.match(gitIpc, /appLogger\.info\("git", "Commit created", \{ projectId, message \}\)/);
-  assert.match(gitIpc, /appLogger\.info\("git", "Commit cherry-picked", \{ projectId, hash \}\)/);
-  assert.match(gitIpc, /appLogger\.info\("git", "Commit reverted", \{ projectId, hash \}\)/);
-  assert.match(gitIpc, /appLogger\.info\("git", "Pushed", \{ projectId \}\)/);
-  assert.match(gitIpc, /appLogger\.info\("git", "Pulled", \{ projectId \}\)/);
+  // git 审计日志带 repoPath: cwd（多仓库支持后统一补字段）
+  assert.match(gitIpc, /appLogger\.warn\("git", "Files deleted \(recycle bin\)", \{ projectId, count: paths\.length, paths, repoPath: cwd \}\)/);
+  assert.match(gitIpc, /appLogger\.warn\("git", "Reset to commit", \{ projectId, hash, mode, repoPath: cwd \}\)/);
+  assert.match(gitIpc, /appLogger\.warn\("git", "Commit dropped", \{ projectId, hash, repoPath: cwd \}\)/);
+  assert.match(gitIpc, /appLogger\.warn\("git", "Branch checked out", \{ projectId, branch, repoPath: cwd, changed: result \}\)/);
+  assert.match(gitIpc, /appLogger\.info\("git", "Commit created", \{ projectId, message, repoPath: cwd \}\)/);
+  assert.match(gitIpc, /appLogger\.info\("git", "Commit cherry-picked", \{ projectId, hash, repoPath: cwd \}\)/);
+  assert.match(gitIpc, /appLogger\.info\("git", "Commit reverted", \{ projectId, hash, repoPath: cwd \}\)/);
+  assert.match(gitIpc, /appLogger\.info\("git", "Pushed", \{ projectId, repoPath: cwd \}\)/);
+  assert.match(gitIpc, /appLogger\.info\("git", "Pulled", \{ projectId, repoPath: cwd \}\)/);
 });
 
 test("LogViewer uses paginated listPage with table and pagination components", () => {

@@ -47,6 +47,8 @@ test("AgentManager records extension_error without flipping session status", () 
 	const start = source.indexOf('if (typed.type === "extension_error")');
 	const end = source.indexOf("handleUIRequest", start);
 	const block = source.slice(start, end);
-	assert.match(block, /addLocalizedMessage\(\s*agentId,\s*"error",\s*"diagnostic\.extensionError"/);
+  // 实现经 QueuedStartupDiagnostic 组装（role/i18nKey 变量传入 addLocalizedMessage）
+  assert.match(block, /addLocalizedMessage/);
+  assert.match(block, /diagnostic.i18nKey/);
 	assert.doesNotMatch(block, /tab\.status\s*=\s*"error"/);
 });

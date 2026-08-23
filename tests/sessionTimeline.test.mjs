@@ -49,6 +49,11 @@ function loadSessionAtoms() {
     "../utils/sessionRecordIdentity": compileModule(
       "src/renderer/src/utils/sessionRecordIdentity.ts",
     ),
+    // 流式正文交接（3f4c252f 起被 session-atoms 依赖）：测试 loader 缺此 stub 时
+    // session-atoms 编译后 require 失败（Cannot find module '../utils/liveTextHandoff'）
+    "../utils/liveTextHandoff": compileModule(
+      "src/renderer/src/utils/liveTextHandoff.ts",
+    ),
   });
 }
 

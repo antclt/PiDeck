@@ -40,6 +40,17 @@ function loadProjectStore(paths, dialog) {
 				return { app: { getPath: () => "/tmp/pideck-test" }, dialog };
 			}
 			if (id === "../wsl/WslPaths") return paths;
+			if (id === "./projectPathPolicy") {
+				// 并行提交给 ProjectStore 新增的路径策略纯函数：宿主 require 相对测试
+				// 文件解析不到（vm filename 是 ProjectStore.ts），显式注入真实编译版
+				const policyModule = { exports: {} };
+				vm.runInNewContext(
+					transpile("src/main/projects/projectPathPolicy.ts"),
+					{ module: policyModule, exports: policyModule.exports },
+					{ filename: "projectPathPolicy.ts" },
+				);
+				return policyModule.exports;
+			}
 			return require(id);
 		},
 	};
