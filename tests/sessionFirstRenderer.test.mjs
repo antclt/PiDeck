@@ -11,6 +11,10 @@ const sessionActionsSource = readFileSync(
   "src/renderer/src/hooks/useSessionActions.ts",
   "utf8",
 );
+const sessionHistoryMutationsSource = readFileSync(
+  "src/renderer/src/hooks/useSessionHistoryMutations.ts",
+  "utf8",
+);
 const sessionSendSource = readFileSync(
   "src/renderer/src/hooks/useSessionSend.ts",
   "utf8",
@@ -30,7 +34,8 @@ const outlineAtomsSource = readFileSync(
 
 function functionBody(name, source = appSource) {
   const marker = `function ${name}(`;
-  const start = source.indexOf(marker);
+  const arrowMarker = `const ${name} =`;
+  const start = source.indexOf(marker) >= 0 ? source.indexOf(marker) : source.indexOf(arrowMarker);
   assert.notEqual(start, -1, `${name} should exist`);
   const bodyStart = source.indexOf("{", start);
   let depth = 0;
@@ -106,10 +111,10 @@ test("typing in the current Composer prewarms its runtime once", () => {
 
 
 test("forking a user message opens the new session as a permanent tab", () => {
-  const body = functionBody("forkFromUserMessage");
+  const body = functionBody("forkFromUserMessage", sessionHistoryMutationsSource);
   // fork 做于 Tab 栏之前：只刷新列表不切焦点/不登记，新会话会出现但点 Tab 对不上 runtime。
+  // fork 结果统一交给会话工作区 chrome 登记永久 Tab，并切换到新会话。
   assert.match(body, /openReplacedRuntimeSession\(/);
-  assert.match(body, /targetSessionId \?\? currentSessionIdRef/);
   assert.match(functionBody("openReplacedRuntimeSession"), /registerOpenSession\(targetSessionId, "permanent"\)/);
   assert.match(functionBody("openReplacedRuntimeSession"), /selectSessionCommand\(projectId, targetSessionId, true\)/);
   assert.match(functionBody("cloneAgentSession"), /openReplacedRuntimeSession\(/);

@@ -70,7 +70,7 @@ test("model-picker restart must light the SessionView overlay via restartActiveA
   );
   assert.match(
     surfaceStage,
-    /isRestarting \? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"/,
+    /overlayVisible \? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"/,
   );
   assert.match(surfaceStage, /t\("app\.restarting"\)/);
   assert.match(runtimeInjector, /isRestarting=\{runtime\.isRestartingThisAgent\}/);

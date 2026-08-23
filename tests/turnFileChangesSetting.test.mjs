@@ -19,9 +19,9 @@ test("changed-file expansion setting is wired through settings and the turn view
   assert.match(settingsStore, /expandTurnFileChanges: true/);
   assert.match(app, /expandTurnFileChanges: true/);
   assert.match(app, /expandTurnFileChanges: settings\.expandTurnFileChanges/);
-  assert.match(commonTab, /settings\.expandTurnFileChanges/);
   assert.match(atom, /expandTurnFileChanges: boolean/);
-  assert.match(turnRow, /expandByDefault=\{flowSettings\.expandTurnFileChanges\}/);
+  // TurnRow now owns process expansion; file-change expansion remains a dedicated local preference.
+  assert.match(turnFileChanges, /defaultFileChangesPref\(props\.expandByDefault\)/);
   assert.match(turnFileChanges, /defaultFileChangesPref\(props\.expandByDefault\)/);
   assert.match(zh, /"settings\.expandTurnFileChanges"/);
   assert.match(en, /"settings\.expandTurnFileChanges"/);
