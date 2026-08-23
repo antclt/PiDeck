@@ -176,7 +176,7 @@ test("renderer: message flush also tries live→History release", () => {
 test("UI: timeline only subscribes liveThinkingId; ThinkingStep uses per-id family", () => {
   assert.match(timeline, /liveThinkingIdBySessionIdAtomFamily/);
   assert.doesNotMatch(timeline, /streamingThinkingByIdAtom/);
-  assert.match(timeline, /thinking=\{liveThinkingId \? "\." : undefined\}/);
+  assert.match(timeline, /liveThinkingId=\{liveThinkingId\}/);
   assert.match(thinkingStep, /streamingThinkingEntryByIdAtomFamily/);
   assert.doesNotMatch(thinkingStep, /useAtomValue\(streamingThinkingByIdAtom\)/);
   assert.match(buildTurn, /liveThinkingId\?:/);

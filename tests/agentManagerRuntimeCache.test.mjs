@@ -263,7 +263,6 @@ test("loadMessages aligns trimmed runtime messages with their real entry ids", a
   const directory = await mkdtemp(join(tmpdir(), "pideck-runtime-cache-align-"));
   const sessionPath = join(directory, "session.jsonl");
   try {
-    await writeFile(sessionPath, "{}", "utf8");
     const messages = [];
     const entries = [];
     let parent = null;
@@ -277,6 +276,16 @@ test("loadMessages aligns trimmed runtime messages with their real entry ids", a
       entries.push({ id: aid, parentId: parent, type: "message", message: { role: "assistant", id: `msg-a${i}` } });
       parent = aid;
     }
+    // 有 sessionPath 的 loadMessages 走 JSONL 安全读取；夹具必须提供真实文件内容，
+    // 否则生产路径会正确读到空历史，而不会使用被禁用的 get_messages mock。
+    await writeFile(
+      sessionPath,
+      entries.map((entry, index) => JSON.stringify({
+        ...entry,
+        message: messages[index],
+      })).join("\n") + "\n",
+      "utf8",
+    );
     const runtime = {
       tab: {
         id: "agent-1",

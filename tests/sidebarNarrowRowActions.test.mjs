@@ -66,7 +66,7 @@ test("worktree rows yield to hover actions on narrow sidebar", () => {
 	assert.doesNotMatch(src, /createDraftDsh\(props\.project\.id\)/);
 	assert.doesNotMatch(src, /createDraftDsh\(childProject\.id\)/);
 	// 子行文本 span 回归原始形态（不再淡出/不再带过渡）
-	assert.match(src, /<span className=\{cn\("min-w-0 flex-1 truncate", isActive/);
+	assert.match(src, /<span className="min-w-0 flex-1 truncate font-medium">\{row\.branch\}<\/span>/);
 	assert.match(src, /workspace-tree-directory max-w-20 shrink-0 truncate text-micro text-muted-foreground\">\{row\.directory\}<\/span>/);
 	// 浮层模式不变
 	assert.match(src, /workspace-tree-actions pointer-events-none absolute top-1\/2 right-0\.5/);
