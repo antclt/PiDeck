@@ -862,7 +862,7 @@ test("saveSessionScrollAnchorAtom: per-session anchor save/clear with out-of-ord
   const anchor = (savedAt, messageId = "m1") => ({
     messageId,
     offsetTop: 120,
-    visibleCount: 240,
+    windowTurns: 9,
     savedAt,
   });
 
@@ -899,7 +899,7 @@ test("saveSessionScrollAnchorAtom: identical content skips write (stable referen
   const anchor = (savedAt) => ({
     messageId: "m1",
     offsetTop: 120,
-    visibleCount: 240,
+    windowTurns: 9,
     savedAt,
   });
 
@@ -911,12 +911,19 @@ test("saveSessionScrollAnchorAtom: identical content skips write (stable referen
   store.set(atoms.saveSessionScrollAnchorAtom, { sessionId: "session-a", anchor: anchor(200) });
   assert.equal(store.get(atoms.sessionScrollAnchorByIdAtom)["session-a"], first);
 
-  // 内容变化（offsetTop 不同）：正常覆盖
+  // 窗口轮数变化同样必须覆盖：否则切回时会继续使用旧窗口，锚点仍可能被裁掉。
   store.set(atoms.saveSessionScrollAnchorAtom, {
     sessionId: "session-a",
-    anchor: { messageId: "m1", offsetTop: 300, visibleCount: 240, savedAt: 300 },
+    anchor: { messageId: "m1", offsetTop: 120, windowTurns: 12, savedAt: 300 },
   });
   assert.notEqual(store.get(atoms.sessionScrollAnchorByIdAtom)["session-a"], first);
+  assert.equal(store.get(atoms.sessionScrollAnchorByIdAtom)["session-a"].windowTurns, 12);
+
+  // 偏移变化仍会覆盖。
+  store.set(atoms.saveSessionScrollAnchorAtom, {
+    sessionId: "session-a",
+    anchor: { messageId: "m1", offsetTop: 300, windowTurns: 12, savedAt: 400 },
+  });
   assert.equal(store.get(atoms.sessionScrollAnchorByIdAtom)["session-a"].offsetTop, 300);
 });
 

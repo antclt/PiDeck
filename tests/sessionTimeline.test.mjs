@@ -63,6 +63,34 @@ test("timeline pagination restores the load-more anchor instead of jumping the v
   assert.equal(restoreTimelineAnchor(0, 0), 0);
 });
 
+test("session switch restores anchored history view state including its turn window", () => {
+  const { resolveSessionTimelineRestoreState } = loadTimelineHelpers();
+
+  const bottom = resolveSessionTimelineRestoreState(undefined);
+  assert.equal(bottom.autoScroll, true);
+  assert.equal(bottom.showScrollToBottom, false);
+  assert.equal(bottom.scrolledWindowTurns, 3);
+
+  const history = resolveSessionTimelineRestoreState({
+    messageId: "run-4",
+    offsetTop: -24,
+    windowTurns: 9,
+    savedAt: 100,
+  });
+  assert.equal(history.autoScroll, false);
+  assert.equal(history.showScrollToBottom, true);
+  assert.equal(history.scrolledWindowTurns, 9);
+
+  // Hot-reload may leave a pre-window anchor in memory; it must safely fall
+  // back to the small base window rather than treating the anchor as invalid.
+  const legacy = resolveSessionTimelineRestoreState({
+    messageId: "run-4",
+    offsetTop: -24,
+    savedAt: 100,
+  });
+  assert.equal(legacy.scrolledWindowTurns, 3);
+});
+
 test("timeline auto-scroll only sticks while the reader remains near the bottom", () => {
   const { isTimelineAtBottom } = loadTimelineHelpers();
   assert.equal(isTimelineAtBottom(980, 1100, 120), true);
@@ -80,6 +108,17 @@ test("timeline owns paging, delegated scroll follow, and outline jump lifecycle"
   // 2026-11：100 条分页器已删除，jump 不再扩渲染窗口（数据全量在 atom）
   assert.doesNotMatch(source, /pagination\.loadUntilIncluded\(index\)/);
   assert.match(source, /restoreTimelineAnchor\(/);
+});
+
+test("anchor restoration expands the turn window before it falls back", () => {
+  assert.match(source, /windowTurns: renderedWindowTurnsRef\.current/);
+  assert.match(
+    source,
+    /if \(windowExpandableRef\.current\) \{\s*setScrolledWindowTurns\(\(turns\) => turns \+ TIMELINE_WINDOW_EXPAND_STEP\);/,
+  );
+  // Even an irrecoverable anchor must unlock stick-to-bottom before showing the
+  // fallback viewport, otherwise ResizeObserver can immediately re-pin it.
+  assert.match(source, /api\.restoreAt\(0\)/);
 });
 
 test("background Session cache changes retain the selected timeline slice", () => {

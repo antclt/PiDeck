@@ -171,8 +171,26 @@ test("timeline controller restores via engine restoreAt and keeps negative offse
   // 恢复走引擎原子 API（引擎未挂上时回退原生定位）
   assert.match(source, /api\?\.restoreAt/);
   assert.match(source, /api\.restoreAt\(targetTop\)/);
-  // autoScroll 初始值按锚点决定：有锚点不跟底，避免第一帧滚底再纠正
-  assert.match(source, /return !store\.get\(sessionScrollAnchorByIdAtom\)\[sessionId\];/);
+  // 会话复用时在 render 阶段重置为锚点对应的 follow/window 状态，确保 child
+  // layout effect 之前就不会跟底；不能只依赖 useState 初始化器。
+  assert.match(source, /resolveSessionTimelineRestoreState\(sessionAnchorSnapshot\)/);
+  assert.match(source, /if \(viewStateOwnerKey !== ownerKey\) \{/);
+});
+
+test("timeline releases the temporary unbudgeted window after anchor restoration", () => {
+  const timelineSource = readFileSync(
+    "src/renderer/src/components/session/SessionMessageTimeline.tsx",
+    "utf8",
+  );
+  // Restoring may temporarily render a wider historical window so the anchor
+  // exists in the DOM. That flag must also invalidate the memo once restoration
+  // finishes, otherwise the large window stays permanently exempt from its item budget.
+  assert.match(timelineSource, /const isRestoringScrollAnchor = controller\.isRestoringScrollAnchor;/);
+  assert.match(timelineSource, /followingForTurnWindow \|\| isRestoringScrollAnchor/);
+  assert.match(
+    timelineSource,
+    /\[followingForTurnWindow, isRestoringScrollAnchor, reconciledRuns, turnWindowTurns\]/,
+  );
 });
 
 // 中间回复「消失→回来」循环的根因修复：live 挂载点必须要求「活动正文流」。

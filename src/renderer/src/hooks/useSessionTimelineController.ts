@@ -107,6 +107,28 @@ export function restoreTimelineAnchor(previousTop: number, heightDelta: number):
   return previousTop + heightDelta;
 }
 
+/**
+ * Session switching reuses the same controller instance in the solo pane. The
+ * restored anchor therefore has to initialize both follow mode and the DOM
+ * window before MessageScroller commits its layout effects.
+ */
+export function resolveSessionTimelineRestoreState(
+  anchor: SessionScrollAnchor | undefined,
+): {
+  autoScroll: boolean;
+  showScrollToBottom: boolean;
+  scrolledWindowTurns: number;
+} {
+  return {
+    autoScroll: anchor === undefined,
+    showScrollToBottom: anchor !== undefined,
+    scrolledWindowTurns: Math.max(
+      TIMELINE_SCROLLED_TURN_LIMIT,
+      anchor?.windowTurns ?? TIMELINE_SCROLLED_TURN_LIMIT,
+    ),
+  };
+}
+
 /** 顶部补偿决策（数据 prepend / turn 窗口扩大共用，2026-02 修复）：
  *  视口在顶部（≤阈值）时不补偿，保持原位让新加载/展开的内容直接出现在视口顶部——
  *  容器 overflow-anchor:none，插入内容不会自动调整滚动位置，补偿反而把新内容推出视口，
@@ -237,6 +259,8 @@ export type SessionTimelineController = {
   /** 上滚查看历史时的渲染窗口轮数（贴底时渲染层用 TIMELINE_MOUNTED_TURN_LIMIT，忽略此值）。
    *  2026-08 黑屏治理：历史不再全量放开挂载，窗口随「显示更早」逐步扩大。 */
   scrolledWindowTurns: number;
+  /** 锚点恢复尚未完成时为 true；渲染层必须优先物化锚点而非施加历史条目预算。 */
+  isRestoringScrollAnchor: boolean;
   /** 扩大上滚渲染窗口（每次最多 +3 轮）；数据翻页与本地 DOM 扩展使用同一 cohort。 */
   expandWindow: () => void;
   /**
@@ -290,6 +314,8 @@ export function useSessionTimelineController(options: {
   // 不能用 cleanup 读 DOM——会话切换复用同一组件实例（无 key），cleanup 执行时
   // timeline 的 children 可能已替换为新会话消息，读 DOM 会串数据。
   const currentAnchorRef = useRef<SessionScrollAnchor | null>(null);
+  /** 与锚点一起保存：DOM 裁剪窗口是阅读位置的一部分，而非瞬时 UI 状态。 */
+  const renderedWindowTurnsRef = useRef(TIMELINE_SCROLLED_TURN_LIMIT);
   const scrollAnchorFrameRef = useRef<number | undefined>(undefined);
   const scrollSaveTimerRef = useRef<number | undefined>(undefined);
 
@@ -318,8 +344,9 @@ export function useSessionTimelineController(options: {
           // 截断为 0 会导致恢复时把行顶对齐视口顶、整体位置偏下（高大行偏差明显）。
           // 恢复侧 scrollTop = max(0, elTop - offsetTop) 已兜底负值。
           offsetTop: rect.top - viewportRect.top,
-          // 2026-11 轮次模型：不再有 100 条分页窗口，visibleCount 恒为 0（兼容字段）
-          visibleCount: 0,
+          // 当前轮次窗口必须随锚点保存。切回时只恢复 scrollTop 而不先挂回这些
+          // turn，会导致 querySelector 找不到锚点并错误降级到底部。
+          windowTurns: renderedWindowTurnsRef.current,
           savedAt: Date.now(),
         };
       }
@@ -508,15 +535,22 @@ export function useSessionTimelineController(options: {
 	// 内存预算由主进程 12 轮缓存 + 回底临时历史清理承担，渲染层不再有第二道条数窗口。
 	const visibleMessages = combinedMessages;
 	const [isLoadingMessagePage, setIsLoadingMessagePage] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(() => {
-    // 会话切换滚动位置保持：切回有锚点的会话时，初始就不跟底（不在底部）。
-    // 若初始 true，MessageScroller 的 followOutput layout effect 会在恢复前滚底，
-    // 造成「先滚到底再纠正」的闪跳（引擎在途动画由 restoreAt 取消，但初始值仍应正确）。
-    const sessionId = options.sessionId;
-    if (!sessionId) return true;
-    return !store.get(sessionScrollAnchorByIdAtom)[sessionId];
-  });
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  // This snapshot is intentionally read during render. In the reused solo pane,
+  // waiting for a passive effect would let MessageScroller commit the previous
+  // session's follow mode before the target session's anchor is materialized.
+  const sessionAnchorSnapshot = options.sessionId
+    ? store.get(sessionScrollAnchorByIdAtom)[options.sessionId]
+    : undefined;
+  const initialRestoreState = resolveSessionTimelineRestoreState(sessionAnchorSnapshot);
+  const [autoScroll, setAutoScroll] = useState(() => initialRestoreState.autoScroll);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(
+    () => initialRestoreState.showScrollToBottom,
+  );
+  /** Anchor snapshot is frozen for one session-switch restoration attempt. */
+  const [restoreAnchor, setRestoreAnchor] = useState<SessionScrollAnchor | undefined>(
+    () => sessionAnchorSnapshot,
+  );
+  const [restorePhase, setRestorePhase] = useState<"pending" | "complete">("pending");
   // 与 autoScroll 初始值保持一致（有锚点的会话首帧即不跟底），避免首帧 ref/state 不一致
   const autoScrollRef = useRef(autoScroll);
   const programmaticScrollRef = useRef(false);
@@ -529,7 +563,27 @@ export function useSessionTimelineController(options: {
   // ── 上滚渲染窗口（2026-08 黑屏治理）──
   // 贴底和上滚初始都只挂 3 轮；每次接近顶部最多扩一个 3 轮 cohort，
   // 先消费 atom 已有的尾部 9 轮，再进入主进程缓存/文件分页。回底开始新的浏览周期。
-  const [scrolledWindowTurns, setScrolledWindowTurns] = useState(TIMELINE_SCROLLED_TURN_LIMIT);
+  const [scrolledWindowTurns, setScrolledWindowTurns] = useState(
+    () => initialRestoreState.scrolledWindowTurns,
+  );
+  const [viewStateOwnerKey, setViewStateOwnerKey] = useState(ownerKey);
+  const isRestoringScrollAnchor = restorePhase === "pending" && restoreAnchor !== undefined;
+  /** 保存旧 owner 时不能读已经指向新会话的 render ref，故保留最后一次 layout 提交值。 */
+  const ownerWindowTurnsRef = useRef(new Map<string, number>());
+  renderedWindowTurnsRef.current = scrolledWindowTurns;
+
+  // React re-renders this owner before committing children, so the target
+  // session's follow mode and turn window reach MessageScroller atomically.
+  if (viewStateOwnerKey !== ownerKey) {
+    const nextRestoreState = resolveSessionTimelineRestoreState(sessionAnchorSnapshot);
+    setViewStateOwnerKey(ownerKey);
+    setRestoreAnchor(sessionAnchorSnapshot);
+    setRestorePhase("pending");
+    autoScrollRef.current = nextRestoreState.autoScroll;
+    setAutoScroll(nextRestoreState.autoScroll);
+    setShowScrollToBottom(nextRestoreState.showScrollToBottom);
+    setScrolledWindowTurns(nextRestoreState.scrolledWindowTurns);
+  }
   /** 窗口是否仍可扩展（由 SessionMessageTimeline 按 turnWindowActive 同步，渲染期写入）。 */
   const windowExpandableRef = useRef(false);
   /** 自动扩窗口冷却时间戳（防惯性滚动接近顶部时连扩多轮）。 */
@@ -565,9 +619,9 @@ export function useSessionTimelineController(options: {
       expandBatchFrameRef.current = window.requestAnimationFrame(consumeExpandBatch);
     }
   }, [consumeExpandBatch, escapeAutoScroll]);
-  // 单栏无 key 复用：切会话时重置上滚窗口，避免把上一会话扩开的轮数带到新会话。
+  // 单栏无 key 复用：切会话时取消上一会话未完成的扩窗任务。窗口值本身由
+  // restoreAnchor 的快照在 render 阶段初始化，不能在此处无条件重置为 3 轮。
   useEffect(() => {
-    setScrolledWindowTurns(TIMELINE_SCROLLED_TURN_LIMIT);
     setIsLoadingMessagePage(false);
     pendingExpandTurnsRef.current = 0;
     lastWindowExpandAtRef.current = 0;
@@ -925,6 +979,11 @@ export function useSessionTimelineController(options: {
     return clearHighlightTimers;
   }, [clearHighlightTimers, ownerKey]);
 
+  useLayoutEffect(() => {
+    if (ownerKey === LEGACY_OWNER_KEY) return;
+    ownerWindowTurnsRef.current.set(ownerKey, scrolledWindowTurns);
+  }, [ownerKey, scrolledWindowTurns]);
+
   // 切走落盘：cleanup 把滚动时已算好的 ref 锚点写入 atom，不读 DOM
   // （会话切换复用同一组件实例，cleanup 时 timeline children 可能已是新会话）。
   // 在底部跟流时 ref 为 null → 清除锚点，切回继续跟底。
@@ -940,78 +999,103 @@ export function useSessionTimelineController(options: {
         scrollSaveTimerRef.current = undefined;
       }
       if (sessionId && sessionId !== LEGACY_OWNER_KEY) {
-        saveScrollAnchor({ sessionId, anchor: currentAnchorRef.current });
+        const anchor = currentAnchorRef.current;
+        const windowTurns = ownerWindowTurnsRef.current.get(sessionId);
+        saveScrollAnchor({
+          sessionId,
+          anchor: anchor && windowTurns !== undefined
+            ? { ...anchor, windowTurns }
+            : anchor,
+        });
+        ownerWindowTurnsRef.current.delete(sessionId);
       }
       currentAnchorRef.current = null;
     };
   }, [ownerKey, saveScrollAnchor]);
 
   useEffect(() => {
-    if (!controllerEnabled) return;
-    // 切换时从 atom 读一次快照（不订阅：恢复后滚动写 atom 不应打扰已恢复的视口）。
-    const sessionId = options.sessionId;
-    const anchor = sessionId
-      ? store.get(sessionScrollAnchorByIdAtom)[sessionId]
-      : undefined;
-    if (anchor) {
-      // 恢复历史查看位置：数据全量在 atom（2026-11 轮次模型无分页窗口），
-      // 直接把视口对齐到锚点行；期间禁止自动跟底，新消息到达不拽走用户，
-      // 只让「回到底部」按钮保持亮起（stay 语义）。
-      autoScrollRef.current = false;
-      setAutoScroll(false);
-      setShowScrollToBottom(true);
+    if (!controllerEnabled || restorePhase !== "pending") return;
+    const anchor = restoreAnchor;
+    if (!anchor) {
+      // 无锚点（切走时在底部或从未保存）：默认滚到底、恢复跟底。
+      autoScrollRef.current = true;
+      setAutoScroll(true);
+      setShowScrollToBottom(false);
+      setRestorePhase("complete");
       const requestOwnerKey = ownerKey;
       const frame = requestAnimationFrame(() => {
         const timeline = timelineRef.current;
         if (!timeline || ownerKeyRef.current !== requestOwnerKey) return;
-        const el = timeline.querySelector(
-          `[data-message-id="${CSS.escape(anchor.messageId)}"]`,
-        ) as HTMLElement | null;
-        if (el) {
-          const elTop =
-            el.getBoundingClientRect().top -
-            timeline.getBoundingClientRect().top +
-            timeline.scrollTop;
-          programmaticScrollRef.current = true;
-          // 原子恢复：定位 + 解锁锁底 + 取消在途动画一次完成。
-          // busy 会话的 ResizeObserver（instant 贴底）看到 isAtBottom=false 不再拽回。
-          const api = scrollerScrollApiRef.current;
-          const targetTop = Math.max(0, elTop - anchor.offsetTop);
-          if (api?.restoreAt) {
-            api.restoreAt(targetTop);
-          } else {
-            // 引擎未挂上（会话切换首帧等）时回退原生定位
-            timeline.scrollTop = targetTop;
-          }
-          // 恢复后的位置即当前锚点：即使恢复后用户未滚动就切走，
-          // cleanup 落盘的也是这份锚点（而不是误判为底部/空）。
-          currentAnchorRef.current = anchor;
-          return;
-        }
-        // 锚点行不存在（期间被压缩清理 / 在渲染窗口之外——上滚窗口化裁剪）：
-        // 对齐渲染窗口顶部（顶部有「显示更早」按钮可继续上溯），保持不跟流，
-        // 避免把查看历史的用户拽回底部（2026-08 黑屏治理）。
-        autoScrollRef.current = false;
-        setAutoScroll(false);
-        setShowScrollToBottom(true);
         programmaticScrollRef.current = true;
-        timeline.scrollTop = 0;
+        timeline.scrollTo({ top: timeline.scrollHeight, behavior: "instant" });
       });
       return () => cancelAnimationFrame(frame);
     }
-    // 无锚点（切走时在底部或从未保存）：默认滚到底、恢复跟底
-    autoScrollRef.current = true;
-    setAutoScroll(true);
-    setShowScrollToBottom(false);
+
+    // 上滚阅读状态必须在首个 child commit 前关闭跟随；窗口尚在读盘时先等待，
+    // 不把「锚点暂未挂载」误判成永久失效。
+    autoScrollRef.current = false;
+    setAutoScroll(false);
+    setShowScrollToBottom(true);
+    if (isSurfaceLoading) return;
+
     const requestOwnerKey = ownerKey;
     const frame = requestAnimationFrame(() => {
       const timeline = timelineRef.current;
       if (!timeline || ownerKeyRef.current !== requestOwnerKey) return;
+      const el = timeline.querySelector(
+        `[data-message-id="${CSS.escape(anchor.messageId)}"]`,
+      ) as HTMLElement | null;
+      if (el) {
+        const elTop =
+          el.getBoundingClientRect().top -
+          timeline.getBoundingClientRect().top +
+          timeline.scrollTop;
+        programmaticScrollRef.current = true;
+        // 原子恢复：定位 + 解锁锁底 + 取消在途动画一次完成。
+        // busy 会话的 ResizeObserver（instant 贴底）看到 isAtBottom=false 不再拽回。
+        const api = scrollerScrollApiRef.current;
+        const targetTop = Math.max(0, elTop - anchor.offsetTop);
+        if (api?.restoreAt) {
+          api.restoreAt(targetTop);
+        } else {
+          // 引擎未挂上（会话切换首帧等）时回退原生定位
+          timeline.scrollTop = targetTop;
+        }
+        // 恢复后的位置即当前锚点：即使恢复后用户未滚动就切走，cleanup
+        // 落盘的也是这份锚点（而不是误判为底部/空）。
+        currentAnchorRef.current = anchor;
+        setRestorePhase("complete");
+        return;
+      }
+
+      // 数据仍在 atom 但被 turn 窗口裁掉时，先扩窗重试。不能立刻回底：
+      // 这正是长历史会话切回后位置丢失的根因。窗口已覆盖当前数据后才降级。
+      if (windowExpandableRef.current) {
+        setScrolledWindowTurns((turns) => turns + TIMELINE_WINDOW_EXPAND_STEP);
+        return;
+      }
+
+      // 锚点确实不可再物化（压缩/删除等）：保留历史阅读语义并通过引擎解锁，
+      // 不能只写原生 scrollTop，否则 ResizeObserver 会重新把视口钉到底部。
       programmaticScrollRef.current = true;
-      timeline.scrollTo({ top: timeline.scrollHeight, behavior: "instant" });
+      const api = scrollerScrollApiRef.current;
+      if (api?.restoreAt) {
+        api.restoreAt(0);
+      } else {
+        timeline.scrollTop = 0;
+      }
+      setRestorePhase("complete");
     });
     return () => cancelAnimationFrame(frame);
-  }, [controllerEnabled, ownerKey]);
+  }, [
+    controllerEnabled,
+    isSurfaceLoading,
+    ownerKey,
+    restoreAnchor,
+    restorePhase,
+    scrolledWindowTurns,
+  ]);
 
 
   // ── 滚动接近顶部自动加载历史（2026-11 轮次模型）──
@@ -1176,6 +1260,7 @@ lastHistoryLoadAtRef.current = now;
     setAutoScrollFromScroller,
     scrollerScrollApiRef,
     scrolledWindowTurns,
+    isRestoringScrollAnchor,
     expandWindow,
     windowExpandableRef,
     isSurfaceLoading,

@@ -66,8 +66,13 @@ if (isDevBuild) {
 	// 默认 userData 会落在 %APPDATA%\PiDeckDev，必须指回 dev 配置目录以复用现有配置。
 	// 例外：命令行显式传入 --user-data-dir（e2e 隔离、多实例调试）时尊重该路径，
 	// 否则 e2e 会读到本机真实开发数据（settings/projects 全部污染测试断言）。
-	const explicitUserDataDir = process.argv.find((arg) => arg.startsWith("--user-data-dir="));
-	if (!explicitUserDataDir) {
+	const explicitUserDataDirArg = process.argv.find((arg) => arg.startsWith("--user-data-dir="));
+	const explicitUserDataDir = explicitUserDataDirArg?.slice("--user-data-dir=".length);
+	if (explicitUserDataDir) {
+		// Chromium accepts this switch independently, but Electron's app storage
+		// APIs need the same path before settings and single-instance state load.
+		app.setPath("userData", explicitUserDataDir);
+	} else {
 		app.setPath("userData", join(app.getPath("appData"), devUserDataDirName));
 	}
 } else {

@@ -408,8 +408,10 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   }, [renderedRuns]);
   // 渲染窗口（2026-08 黑屏治理）：贴底只挂尾部 3 轮；上滚查看历史也裁剪
   // （controller.scrolledWindowTurns，初始 3 轮，接近顶部按 3 轮 cohort 自动扩大）——
-  // 历史全量放开挂载是大会话渲染进程内存峰值/黑屏的来源。数据仍在 atoms。
+  // 历史全量放开挂载是大会话渲染进程内存峰值/黑屏的来源。数据仍在 atoms；
+  // 但切换恢复期间必须暂时取消条目预算，先物化已保存锚点再恢复正常窗口治理。
   const followingForTurnWindow = controller.autoScroll;
+  const isRestoringScrollAnchor = controller.isRestoringScrollAnchor;
   const turnWindowTurns = followingForTurnWindow
     ? TIMELINE_MOUNTED_TURN_LIMIT
     : controller.scrolledWindowTurns;
@@ -417,9 +419,11 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     () => selectTimelineTurnWindow(
       reconciledRuns,
       turnWindowTurns,
-      followingForTurnWindow ? undefined : TIMELINE_SCROLLED_MAX_ITEMS,
+      followingForTurnWindow || isRestoringScrollAnchor
+        ? undefined
+        : TIMELINE_SCROLLED_MAX_ITEMS,
     ),
-    [followingForTurnWindow, reconciledRuns, turnWindowTurns],
+    [followingForTurnWindow, isRestoringScrollAnchor, reconciledRuns, turnWindowTurns],
   );
   // 上滚窗口扩展：对比前后 displayRuns 的 id 序列，找出顶部新增段
   // （窗口扩展 / 数据翻页都在顶部插入内容）。只标记「前缀新增」——
