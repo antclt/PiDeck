@@ -69,7 +69,7 @@ export const CompactionCard = memo(function CompactionCard(props: {
 						{t("app.compactionTokensBefore", { count: Math.round(tokensBefore / 1000) })}
 					</span>
 				)}
-				<time className="font-mono text-micro tabular-nums text-text-tertiary">{time}</time>
+				<time className="text-micro tabular-nums text-text-tertiary">{time}</time>
 			</div>
 			{/* 虚线框内容区（与思考卡片同款）：折叠态最多 4.5 行。
 			    高度 = 字号 × --line-height-chat × 4.5，避免行高从 1.68 收到 1.5 后预览高度漂移。 */}
@@ -137,7 +137,7 @@ export const DiagnosticMessageCard = memo(function DiagnosticMessageCard(props: 
 			data-message-id={props.message.id}
 			data-role={props.message.role}
 		>
-			<div className="flex items-center gap-2 px-2 py-1.5 font-mono text-caption text-text-secondary">
+			<div className="flex items-center gap-2 px-2 py-1.5 text-caption text-text-secondary">
 				<AlertTriangle size={14} aria-hidden="true" />
 				<span className="font-semibold">{title}</span>
 				<time className="ml-auto text-micro tabular-nums text-text-tertiary">{formatTime(props.message.timestamp)}</time>
@@ -375,7 +375,7 @@ export const ThinkingBlock = memo(
 				)}
 				<Brain size={16} className="thinking-row-icon shrink-0" aria-hidden="true" />
 				{(hasEnded || props.isStreaming) && props.startedAt && (
-					<small className="shrink-0 font-mono text-caption tabular-nums text-text-secondary">
+					<small className="shrink-0 text-caption tabular-nums text-text-secondary">
 						{hasEnded ? (
 							t("thinking.duration", { duration: durationText })
 						) : (

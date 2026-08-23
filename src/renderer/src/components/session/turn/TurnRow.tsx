@@ -438,7 +438,8 @@ export const TurnRow = memo(
 				{showDuration && (
 					<div className="flex items-center gap-1.5 text-muted-foreground">
 						<Clock size={12} className="shrink-0" aria-hidden="true" />
-						<span className="font-mono text-body leading-none tabular-nums">
+						{/* 耗时数字与行头时间一致用界面字体（见 TurnAuthorHeader 注释）；tabular-nums 保持跳动不抖 */}
+						<span className="text-body leading-none tabular-nums">
 							{isRunLive ? (
 								<LiveDuration startedAt={run.startedAt} isStreaming />
 							) : (

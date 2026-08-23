@@ -38,7 +38,9 @@ export function TurnAuthorHeader(props: {
 					)}
 				</AvatarFallback>
 			</Avatar>
-			<time className="shrink-0 font-mono text-body leading-none text-muted-foreground tabular-nums">
+			{/* 时间/耗时数字统一走界面字体（与输入框下方统计条一致），不跟代码/路径一起用等宽字体；
+			    数字本身等宽，流式跳动也不会左右抖（Segoe UI 等基数字体实测通过）。 */}
+			<time className="shrink-0 text-body leading-none text-muted-foreground tabular-nums">
 				{formatTime(props.endedAt)}
 			</time>
 		</div>

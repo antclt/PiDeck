@@ -1202,7 +1202,7 @@ export const UserBubble = memo(function UserBubble(props: {
 						{deliveryLabel}
 					</span>
 				)}
-				<time className="font-mono">{formatTime(message.timestamp)}</time>
+				<time>{formatTime(message.timestamp)}</time>
 			</div>
 			<div className="user-turn-actions flex min-h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
 				<CopyMenu text={stripMarkdown(cleanText)} markdown={message.text} targetRef={rowRef} />
