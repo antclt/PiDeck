@@ -25,7 +25,7 @@ import {
 	PANEL_GAP,
 	VIEWPORT_MARGIN,
 } from "../../utils/askPanelGeometry";
-import { SessionMessageTimeline } from "../session/SessionMessageTimeline";
+import { OwnedSessionMessageTimeline } from "../session/OwnedSessionMessageTimeline";
 
 /** 拖动与点击的区分阈值（px）：小于该位移视为点击 */
 const DRAG_THRESHOLD_PX = 4;
@@ -230,7 +230,7 @@ export function AskPanelOverlay() {
               无消息时显示等待占位，消息流式到达后自动切换 */}
           <div className="min-h-0 flex-1">
             {messages.length > 0 ? (
-              <SessionMessageTimeline
+              <OwnedSessionMessageTimeline
                 sessionId={sessionId}
                 hasProject={false}
                 onCreateSession={() => undefined}

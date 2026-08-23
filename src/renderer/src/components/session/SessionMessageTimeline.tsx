@@ -40,7 +40,6 @@ import {
   deriveSessionSurfaceRuntime,
   isLatestTimelineRunBusy,
   restoreTimelineAnchor,
-  useSessionTimelineController,
   type SessionTimelineController,
 } from "../../hooks/useSessionTimelineController";
 import { t } from "../../i18n";
@@ -141,7 +140,8 @@ type TimelineInteractionProps = {
 
 export type SessionMessageTimelineProps = TimelineInteractionProps & {
   sessionId: string;
-  controller?: SessionTimelineController;
+  /** The only controller that may own this timeline's scroll and lifecycle state. */
+  controller: SessionTimelineController;
   timelineRef?: RefObject<HTMLElement | null>;
 };
 
@@ -167,12 +167,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   );
   const messageLoadState = useAtomValue(messageLoadStateSelector);
   const sendState = useAtomValue(sendStateSelector);
-  const internalController = useSessionTimelineController({
-    sessionId,
-    // An injected controller already owns loading and scroll effects; keep this hook inert in that case.
-    messages: props.controller ? [] : undefined,
-  });
-  const controller = props.controller ?? internalController;
+  const controller = props.controller;
   const timelineRef = props.timelineRef ?? controller.timelineRef;
   const activeMessages = controller.messages;
   const paginatedMessages = controller.visibleMessages;
