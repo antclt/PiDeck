@@ -75,8 +75,10 @@ test("widget stacks scroll only when the panel is hard-capped, while the input c
   );
   assert.match(
     composerArea,
-    /ref=\{widgetsRef\}[\s\S]*?className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden"/,
+    /ref=\{widgetsRef\}[\s\S]*?className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain pb-px empty:hidden"/,
   );
+  // 末尾 1px 进入 scrollHeight 与面板预算，避免最后一张卡的下沿贴着裁切面。
+  assert.match(composerArea, /ComposerWidgetLayoutProvider/);
   assert.match(composerArea, /ref=\{attachmentBarRef\}[\s\S]*?className="shrink-0"/);
   assert.match(
     composerArea,

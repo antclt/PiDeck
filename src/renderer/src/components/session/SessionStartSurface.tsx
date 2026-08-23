@@ -22,7 +22,7 @@ export function SessionStartSurface(props: {
   projectSwitcher?: ReactNode;
 }) {
   const services = useSessionPaneServices();
-  const queuedTrackRef = useRef<HTMLDivElement | null>(null);
+  const queuedTrackRef = useRef<HTMLElement | null>(null);
   const activeQueuedPrompts = services.queuedPromptsBySession[props.sessionId] ?? [];
 
   return (

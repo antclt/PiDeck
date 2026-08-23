@@ -35,7 +35,7 @@ export type SessionRuntimeInjectorProps = {
   composerOffsetHeight: number;
   terminalRowHeight: number;
   activeQueuedPrompts: QueuedPrompt[];
-  queuedTrackRef: React.MutableRefObject<HTMLDivElement | null>;
+  queuedTrackRef: React.MutableRefObject<HTMLElement | null>;
 
   // 终端归属（owner 化：agent:<id> / project:<id>），由 App 层解析后传入
   terminalOwnerKey?: string;

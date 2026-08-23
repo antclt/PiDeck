@@ -93,13 +93,14 @@ test("pending prompts render inside the composer before composer-box", () => {
     queuePanelIndex >= 0,
     "QueuedPromptPanel should exist in SessionRuntimeInjector",
   );
-  // 与 todo/goal 同列独立卡：全宽 rounded-xl，不再右浮紧凑面板
-  assert.match(composerPanelsSource, /className="queued-track w-full shrink-0 overflow-hidden rounded-xl border border-border bg-card"/);
+  // 与 todo/goal 同列独立卡：外框由共享 ComposerWidgetFrame 提供，不再右浮紧凑面板。
+  assert.match(composerPanelsSource, /<ComposerWidgetFrame[\s\S]*?className="queued-track"/);
 });
 
 test("pending prompts share the native content width constraint without hiding composer", () => {
   // queued-track 与 composer 同在会话栏宿主的内容盒内，全宽独立卡（不再右对齐缩宽）
-  assert.match(composerPanelsSource, /queued-track w-full shrink-0 overflow-hidden rounded-xl/);
+  assert.match(composerPanelsSource, /ComposerWidgetFrame/);
+  assert.match(composerPanelsSource, /className="queued-track"/);
   assert.doesNotMatch(composerPanelsSource, /justify-end/);
   assert.doesNotMatch(composerPanelsSource, /w-\[clamp\(13\.5rem,36%,22\.5rem\)\]/);
   assert.match(composerPanelsSource, /queued-row flex h-9 min-h-9 shrink-0/);

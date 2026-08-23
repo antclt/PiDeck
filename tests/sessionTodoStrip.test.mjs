@@ -85,8 +85,9 @@ test("strip reads both todo widgets, respects dismissal, and hides when empty", 
   assert.match(source, /isWidgetDismissed\(dismissed, props\.sessionId, key, widgetLines\)[\s\S]{0,1200}stripPiDeckTodoWidgetMetadata\(widget\.lines\)/);
   // 无 todo 行整体不渲染（dsh TodoPanel 同款行为）
   assert.match(source, /if \(items\.length === 0\) return null/);
-  // 折叠态本地 state
-  assert.match(source, /const \[collapsed, setCollapsed\] = useState\(true\)/);
+  // 折叠状态由 composer 统一拥有：点击卡片时父级会在 layout effect 内先测量再改 panel。
+  assert.match(source, /useComposerWidgetCollapsed\([\s\S]*?`todo:\$\{props\.sessionId\}`/);
+  assert.doesNotMatch(source, /const \[collapsed, setCollapsed\] = useState\(true\)/);
 });
 
 test("strip renders a collapsed row with title, progress and three-state glyphs", () => {

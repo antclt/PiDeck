@@ -618,6 +618,7 @@ export function SessionView({
                     <SessionTodoStrip sessionId={sessionId} />
                     <SessionGoalStrip sessionId={sessionId} />
                     <SessionModifiedFilesStrip
+                      sessionId={sessionId}
                       run={latestAgentRun}
                       onDiffFile={onDiffFile ? (path) => onDiffFile(path) : undefined}
                     />

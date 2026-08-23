@@ -25,7 +25,8 @@ test("goal strip hides when absent or complete and keeps blocked visible", () =>
 test("goal strip is a 36px independent card in the same family as todo", () => {
   const source = stripSource();
   assert.match(source, /data-testid="session-goal-strip"/);
-  assert.match(source, /w-full shrink-0 overflow-hidden rounded-xl border border-border bg-card/);
+  assert.match(source, /<ComposerWidgetFrame/);
+  assert.match(source, /from "\.\/ComposerWidgetLayout"/);
   assert.match(source, /flex h-9 w-full items-center/);
   assert.match(source, /t\("sessionGoal\.aria"\)/);
   assert.doesNotMatch(source, /createDshGoal/);

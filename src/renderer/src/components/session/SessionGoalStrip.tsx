@@ -12,6 +12,9 @@ import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import {
+	ComposerWidgetFrame,
+} from "./ComposerWidgetLayout";
+import {
 	isCoherentComposerRuntimeUi,
 	type RuntimeHandle,
 } from "./ComposerRuntimeIntegrations";
@@ -87,8 +90,7 @@ export function SessionGoalStrip(props: { sessionId: string }) {
 				: t("dshTools.goalPhase.active");
 
 	return (
-		<section
-			className="w-full shrink-0 overflow-hidden rounded-xl border border-border bg-card"
+		<ComposerWidgetFrame
 			data-testid="session-goal-strip"
 			aria-label={t("sessionGoal.aria")}
 		>
@@ -154,6 +156,6 @@ export function SessionGoalStrip(props: { sessionId: string }) {
 					onCancel={() => { setConfirmClear(false); }}
 				/>
 			) : null}
-		</section>
+		</ComposerWidgetFrame>
 	);
 }

@@ -26,6 +26,10 @@ import { desktopApi } from "../../desktopApi";
 import { COMPOSER_DEFAULT_HEIGHT, COMPOSER_TEXT_MAX_HEIGHT } from "../../rendererUtils";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
+import {
+  ComposerWidgetLayoutProvider,
+  useComposerWidgetLayoutValue,
+} from "./ComposerWidgetLayout";
 import type { GitBranchInfo } from "../../../../shared/types";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 
@@ -82,9 +86,9 @@ type ComposerMeasuredExtrasProps = {
 
 /**
  * 必须作为 ComposerRuntimeIntegrations render-prop 子树中的独立组件存在：
- * 父级 props 更新时，这里的 layout effect 会在绘制前测量；但待办、队列、文件
- * 条及 Diff 的展开状态都在更深的子组件本地持有，不会让本组件重新渲染。
- * 因此还要观察各测量块的实际尺寸，在子树独立改变高度时同步 hug 面板。
+ * 父级 props、受控 disclosure 和输入正文变化都会使本组件重渲染，layout effect
+ * 会在绘制前同步 hug 面板。Diff 流式、图片加载和字体换行等无法预先表达的变化仍由
+ * ResizeObserver 兜底，避免把观察器作为普通点击交互的第一响应者。
  *
  * 上报的是「独立卡 + 附件栏 + 输入卡」总高度，不是 extras 增量：输入卡 shrink-0，
  * 面板 hug 内容，拉伸 todo / 拖终端都不会把输入框撑高。
@@ -96,6 +100,11 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
   const lastContentHeightRef = useRef(0);
   const mountedRef = useRef(false);
   const onHeightChangeRef = useRef(props.onHeightChange);
+  const [collapsedByWidgetKey, setCollapsedByWidgetKey] = useState<Record<string, boolean>>({});
+  const widgetLayoutValue = useComposerWidgetLayoutValue(
+    collapsedByWidgetKey,
+    setCollapsedByWidgetKey,
+  );
   onHeightChangeRef.current = props.onHeightChange;
 
   const measureContentHeight = () => {
@@ -171,26 +180,33 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
   }, [hasAttachmentBar]);
 
   return (
-    <>
-      <div
-        ref={widgetsRef}
-        className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain empty:hidden"
-      >
-        {props.widgets}
-        {props.queuePanel}
-        {props.deliveryNotice}
-      </div>
-      {hasAttachmentBar ? (
-        <div ref={attachmentBarRef} className="shrink-0">
-          {props.attachmentBar}
+    <ComposerWidgetLayoutProvider value={widgetLayoutValue}>
+      <>
+        {/* Keep a physical raster row after the last card. The panel group can
+            resolve a fractional pixel short under its timeline budget; without
+            this guard the final card's lower border becomes the scrollport edge.
+            scrollHeight includes the padding, so the existing hug measurement
+            reserves it in normal layouts and preserves it at the scroll end. */}
+        <div
+          ref={widgetsRef}
+          className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain pb-px empty:hidden"
+        >
+          {props.widgets}
+          {props.queuePanel}
+          {props.deliveryNotice}
         </div>
-      ) : null}
-      {/* 外层只承担测量；输入卡 + StatsLine 一并 shrink-0，不吃 footer 剩余高度。 */}
-      <div ref={composerBoxRef} className="flex w-full min-w-0 shrink-0 flex-col">
-        {props.composerBox}
-        {props.statsLine}
-      </div>
-    </>
+        {hasAttachmentBar ? (
+          <div ref={attachmentBarRef} className="shrink-0">
+            {props.attachmentBar}
+          </div>
+        ) : null}
+        {/* 外层只承担测量；输入卡 + StatsLine 一并 shrink-0，不吃 footer 剩余高度。 */}
+        <div ref={composerBoxRef} className="flex w-full min-w-0 shrink-0 flex-col">
+          {props.composerBox}
+          {props.statsLine}
+        </div>
+      </>
+    </ComposerWidgetLayoutProvider>
   );
 }
 

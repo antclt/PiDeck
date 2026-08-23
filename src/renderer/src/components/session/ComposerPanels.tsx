@@ -12,7 +12,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { useId, useState, type RefObject } from "react";
+import { useId, type RefObject } from "react";
 import { useAtomValue } from "jotai";
 import type { ImageContent } from "../../../../shared/types";
 import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
@@ -30,6 +30,10 @@ import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selecto
 import { useAskPanel } from "../../hooks/useAskPanel";
 import { isSessionRuntimeBusy } from "../../hooks/useSessionTimelineController";
 import { ExtensionWidgetCard } from "./ComposerParts";
+import {
+  ComposerWidgetFrame,
+  useComposerWidgetCollapsed,
+} from "./ComposerWidgetLayout";
 
 export function ComposerAttachmentBar(props: {
   images: ImageContent[];
@@ -267,7 +271,7 @@ function QueuedPromptRow(props: {
  * 行内操作：插入当前回合 / 排队下一轮 / 并行发送，以及撤回进输入框 / 丢弃。
  */
 export function QueuedPromptPanel(props: {
-  trackRef: RefObject<HTMLDivElement | null>;
+  trackRef: RefObject<HTMLElement | null>;
   sessionId?: string;
   prompts: QueuedPromptSnapshot[];
   /** @deprecated 独立卡展示全部排队项并由 180px 列表滚动；保留以免调用点同步炸掉。 */
@@ -276,9 +280,12 @@ export function QueuedPromptPanel(props: {
   onDiscard: (sessionId: string, promptId: string) => void;
   onChangeBehavior: (sessionId: string, promptId: string, behavior: "steer" | "followUp") => void;
 }) {
-  const [collapsed, setCollapsed] = useState(true);
   const listId = useId();
   const sessionId = props.sessionId;
+  const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(
+    `queue:${sessionId ?? "unbound"}`,
+    true,
+  );
   const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId ?? ""));
   const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(sessionId ?? ""));
   const askPanel = useAskPanel();
@@ -299,9 +306,9 @@ export function QueuedPromptPanel(props: {
   };
 
   return (
-    <section
+    <ComposerWidgetFrame
       ref={props.trackRef}
-      className="queued-track w-full shrink-0 overflow-hidden rounded-xl border border-border bg-card"
+      className="queued-track"
       data-testid="session-queue-strip"
       aria-label={t("app.queuedMessagesLabel")}
     >
@@ -311,7 +318,7 @@ export function QueuedPromptPanel(props: {
           className="flex h-9 w-full items-center gap-2.5 px-3 text-left"
           aria-controls={listId}
           aria-expanded={listVisible}
-          onClick={() => { setCollapsed((value) => !value); }}
+          onClick={toggleCollapsed}
         >
           <ListOrdered size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-6 text-foreground">
@@ -345,7 +352,7 @@ export function QueuedPromptPanel(props: {
           ))}
         </ul>
       ) : null}
-    </section>
+    </ComposerWidgetFrame>
   );
 }
 

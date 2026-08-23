@@ -741,7 +741,7 @@ export function App() {
       // ignore
     }
   }
-  const queuedTrackRef = useRef<HTMLDivElement | null>(null);
+  const queuedTrackRef = useRef<HTMLElement | null>(null);
 
   const composerTextareaRef = useRef<HTMLDivElement | null>(null);
   // RichInput 受控重渲染后,光标应恢复到的纯文本偏移(供建议选中/清除后恢复选区)。

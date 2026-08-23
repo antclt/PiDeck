@@ -12,6 +12,10 @@ import {
 	type RuntimeHandle,
 } from "./ComposerRuntimeIntegrations";
 import {
+	ComposerWidgetFrame,
+	useComposerWidgetCollapsed,
+} from "./ComposerWidgetLayout";
+import {
 	parseAgentTodoItems,
 	stripPiDeckTodoWidgetMetadata,
 	type AgentTodoItem,
@@ -173,9 +177,12 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 	const runtimeUi = useAtomValue(
 		sessionRuntimeUiBySessionIdAtomFamily(props.sessionId),
 	);
-	const [collapsed, setCollapsed] = useState(true);
 	// dismiss records are loaded once, then updated locally when the user closes this strip.
 	const [dismissed, setDismissed] = useState(loadDismissedWidgets);
+	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(
+		`todo:${props.sessionId}`,
+		true,
+	);
 
 	const runtimeHandle: RuntimeHandle | undefined = runtime?.agentId
 		? {
@@ -222,8 +229,7 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 	if (items.length === 0) return null;
 
 	return (
-		<section
-			className="w-full shrink-0 overflow-hidden rounded-xl border border-border bg-card"
+		<ComposerWidgetFrame
 			data-testid="session-todo-strip"
 			aria-label={t("sessionTodo.title")}
 		>
@@ -232,7 +238,7 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 					type="button"
 					className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
 					aria-expanded={!collapsed}
-					onClick={() => { setCollapsed((value) => !value); }}
+					onClick={toggleCollapsed}
 				>
 					<ListChecks size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
 					<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">
@@ -271,6 +277,6 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 					))}
 				</ul>
 			)}
-		</section>
+		</ComposerWidgetFrame>
 	);
 }

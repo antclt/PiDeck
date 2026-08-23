@@ -133,6 +133,7 @@ test("file changes render above the composer as a collapsed latest-run strip", (
 	assert.match(sessionView, /SessionModifiedFilesStrip/);
 	assert.match(sessionView, /latestAgentRun/);
 	const strip = readFileSync("src/renderer/src/components/session/SessionModifiedFilesStrip.tsx", "utf8");
-	assert.match(strip, /useState\(true\)/, "the strip should start collapsed");
-	assert.match(strip, /data-testid=\"session-modified-files-strip\"/);
+	assert.match(strip, /useComposerWidgetCollapsed\([\s\S]*?modified-files:/, "the strip should start collapsed through the composer layout owner");
+	assert.match(strip, /sessionId: string;/);
+	assert.match(strip, /data-testid="session-modified-files-strip"/);
 });

@@ -29,7 +29,7 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
 
   const localHeaderRef = useRef<HTMLDivElement | null>(null);
   const localComposerRef = useRef<HTMLElement | null>(null);
-  const localQueuedTrackRef = useRef<HTMLDivElement | null>(null);
+  const localQueuedTrackRef = useRef<HTMLElement | null>(null);
 
   const layoutRefs = services.layoutRefs;
   const chatHeaderRef = focused ? layoutRefs.chatHeaderRef : localHeaderRef;
