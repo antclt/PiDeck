@@ -247,7 +247,15 @@
      打开的下拉菜单被压到表格内容下面（字重叠）；半隐改由按钮自身承担。 */
 }
 
-[data-streamdown="table-wrapper"] > div:first-child button {
+/* 顶栏图标按钮：复制/下载触发器 + 全屏按钮。
+   注意：不能把「顶栏内全部 button」一把抓 —— 复制/下载的下拉菜单
+   （Copy as Markdown/CSV/TSV、下载 CSV/Markdown）也在顶栏里，会被一起锁成
+   1.6rem 图标尺寸，三个菜单项挤在同一位置文字重叠。菜单项按钮只保留
+   streamdown 官方 class（w-full 等），这里只命中触发器结构：
+   - 全屏：顶栏直接子级 button
+   - 复制/下载：div.relative（菜单面板的兄弟）内的直接子级 button */
+[data-streamdown="table-wrapper"] > div:first-child > button,
+[data-streamdown="table-wrapper"] > div:first-child > div > button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -258,8 +266,7 @@
   background: transparent;
   box-shadow: none;
   color: var(--color-text-tertiary);
-  /* 默认半隐、hover 亮起：透明度只加在按钮上（菜单是按钮的兄弟节点，
-     不受影响），避免整条顶栏建立层叠上下文。 */
+  /* 默认半隐、hover 亮起：透明度只加在触发器上，打开中的下拉菜单不受影响。 */
   opacity: 0.55;
   transition:
     opacity 0.15s ease,
@@ -267,16 +274,20 @@
     background-color 0.12s ease;
 }
 
-[data-streamdown="table-wrapper"]:hover > div:first-child button,
-[data-streamdown="table-wrapper"] > div:first-child:focus-within button,
-[data-streamdown="table-wrapper"] > div:first-child button:focus-visible {
+[data-streamdown="table-wrapper"]:hover > div:first-child > button,
+[data-streamdown="table-wrapper"]:hover > div:first-child > div > button,
+[data-streamdown="table-wrapper"] > div:first-child:focus-within > button,
+[data-streamdown="table-wrapper"] > div:first-child:focus-within > div > button {
   opacity: 1;
 }
 
-[data-streamdown="table-wrapper"] > div:first-child button:hover,
-[data-streamdown="table-wrapper"] > div:first-child button:focus-visible {
+[data-streamdown="table-wrapper"] > div:first-child > button:hover,
+[data-streamdown="table-wrapper"] > div:first-child > div > button:hover,
+[data-streamdown="table-wrapper"] > div:first-child > button:focus-visible,
+[data-streamdown="table-wrapper"] > div:first-child > div > button:focus-visible {
   background: var(--color-bg-hover);
   color: var(--color-accent);
+  opacity: 1;
 }
 
 [data-streamdown="table-wrapper"] > div:last-child {

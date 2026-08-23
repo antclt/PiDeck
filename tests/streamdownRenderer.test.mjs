@@ -84,6 +84,38 @@ test("streamdown code/table chrome uses faded action controls", () => {
   assert.match(streamdownChrome, /\[data-streamdown="code-block-download-button"\][\s\S]*?order:\s*2/);
   // 表格与代码块同皮（utilities 层）
   assert.match(streamdownChrome, /\[data-streamdown="table-wrapper"\]:hover > div:first-child/);
+  // 回归（表格复制/下载下拉菜单文字重叠）：顶栏按钮样式只命中触发器结构
+  // （全屏=顶栏直接子级；复制/下载=div.relative 内直接子级），不能把菜单里的
+  // 格式选项（Copy as Markdown/CSV/TSV）一起锁成 1.6rem 图标尺寸，否则三个
+  // 菜单项挤在同一位置文字重叠。
+  assert.match(
+    streamdownChrome,
+    /\[data-streamdown="table-wrapper"\] > div:first-child > div > button/,
+  );
+  assert.doesNotMatch(
+    streamdownChrome,
+    /\[data-streamdown="table-wrapper"\] > div:first-child button/,
+  );
+  // 顶栏整条 opacity 会建立层叠上下文，鼠标移出后打开的菜单被压到表格内容下面
+  // （按 § 取行规则块再断言，避免 regex 越过块边界误伤按钮里的 opacity）
+  const rowRuleStart = streamdownChrome.indexOf(
+    '[data-streamdown="table-wrapper"] > div:first-child {',
+  );
+  const rowRuleBrace = streamdownChrome.indexOf("{", rowRuleStart);
+  let depth = 0;
+  let rowRuleEnd = rowRuleBrace;
+  for (; rowRuleEnd < streamdownChrome.length; rowRuleEnd++) {
+    if (streamdownChrome[rowRuleEnd] === "{") depth++;
+    else if (streamdownChrome[rowRuleEnd] === "}") {
+      depth--;
+      if (depth === 0) {
+        rowRuleEnd++;
+        break;
+      }
+    }
+  }
+  const rowRule = streamdownChrome.slice(rowRuleStart, rowRuleEnd);
+  assert.doesNotMatch(rowRule, /opacity:/);
   assert.doesNotMatch(surfacesCss, /\.sd-code-collapse\b/);
   assert.doesNotMatch(streamdownChrome, /\.sd-code-collapse\b/);
 });
