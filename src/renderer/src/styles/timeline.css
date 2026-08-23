@@ -465,8 +465,9 @@
   animation: timeline-step-enter 200ms ease-out both;
 }
 .tool-card-icon {
-  /* 默认主题下 text-tertiary 太灰；工具 logo 用 info 蓝，和思考靛紫成对，文案仍走灰字。 */
-  color: var(--color-info);
+  /* 默认主题下 text-tertiary 太灰；工具 logo 走 --color-tool（默认=info 蓝，与思考靛紫成对），
+     文案仍走灰字。身份色与状态色（info/警告/危险）解耦，皮肤可单独覆盖工具色。 */
+  color: var(--color-tool);
 }
 .tool-card--running .tool-card-icon {
   color: var(--color-warning);
@@ -754,10 +755,10 @@
   flex: 0 0 auto;
   padding: 1px 6px;
   border: 1px solid
-    color-mix(in srgb, var(--color-info) 22%, var(--color-border-subtle));
+    color-mix(in srgb, var(--color-tool) 22%, var(--color-border-subtle));
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--color-info) 8%, transparent);
-  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-tool) 8%, transparent);
+  color: var(--color-tool);
   font-family: var(--font-family-business);
   font-size: var(--font-size-micro);
   font-weight: 600;
@@ -767,7 +768,7 @@
 }
 .tool-card[data-tool-kind="mcp-proxy"] .tool-card-icon,
 .tool-card[data-tool-kind="mcp-direct"] .tool-card-icon {
-  color: var(--color-info);
+  color: var(--color-tool);
 }
 
 /* 模型主动调用 skill：read 读取 SKILL.md 被识别为 skill 触发。
@@ -794,10 +795,10 @@ body.ask-dialog-open .ask-question-card.pending {
   display: none;
 }
 .tool-card--ask .tool-card-icon {
-  color: var(--color-info);
+  color: var(--color-tool);
 }
 .tool-card--ask .tool-card-name {
-  color: var(--color-info);
+  color: var(--color-tool);
   font-family: var(--font-family-business);
   text-transform: none;
 }
@@ -815,7 +816,7 @@ body.ask-dialog-open .ask-question-card.pending {
   color: var(--color-text-primary);
 }
 .ask-question-card-tool-inner .ask-question-card-title svg {
-  color: var(--color-info);
+  color: var(--color-tool);
   flex-shrink: 0;
 }
 .ask-question-card-tool-inner .ask-question-card-options-list {

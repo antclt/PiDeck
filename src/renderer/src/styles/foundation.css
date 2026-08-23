@@ -123,6 +123,11 @@
   --color-success-strong: #166534;
   --color-warning: #b7791f;
   --color-info: #2563eb;
+  /* 工具身份色（工具行图标 / MCP 来源徽标 / ask 工具卡）：默认继承 --color-info，
+     保持各主题现有观感不变；皮肤可在自身色板块覆盖（fresh-green 用青绿替换冷蓝），
+     与 --color-thinking 同属「身份色」——状态色（info/警告/危险）与身份色解耦，
+     皮肤只改工具色时不会波及 GitPanel 角标、排队提示等状态用途。 */
+  --color-tool: var(--color-info);
   /* 过程行图标色：默认 zinc 主题会把 brand-purple 洗成灰，思考/工具 logo 必须单独保色，
      否则和正文 tertiary 糊成一块。不跟 data-accent 走，身份色不等于主题强调色。 */
   --color-thinking: #6366f1;
@@ -573,6 +578,9 @@
   --color-chat-muted-bg: #e2e6db;
   --color-chat-control-bg: #f6f7f2;
   --color-chat-table-bg: #f6f7f2;
+  /* 工具身份色：森系主题用青绿 teal-700 取代冷蓝，与鼠尾草主色、思考靛紫都拉开，
+     纸感浅绿底上比 #2563eb 更协调；仅覆盖 --color-tool，不动 --color-info 状态色。 */
+  --color-tool: #0f766e;
 }
 :root[data-theme="dark"][data-appearance="fresh-green"] {
   --color-bg-app: #151917;
@@ -593,6 +601,8 @@
   --color-chat-muted-bg: #27302b;
   --color-chat-control-bg: #212724;
   --color-chat-table-bg: #212724;
+  /* 工具身份色（暗色提亮）：teal-400，与原来暗色 info 蓝 #60a5fa 同一亮度档。 */
+  --color-tool: #2dd4bf;
 }
 :root[data-appearance="graphite"] {
   --color-bg-app: #ececec;

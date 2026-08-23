@@ -215,7 +215,10 @@
   margin: 0.85rem 0;
   padding: 0;
   gap: 0;
-  overflow: hidden;
+  /* 不能用 overflow:hidden 收圆角：顶栏里复制/下载按钮的下拉菜单（复制为
+     Markdown/CSV/TSV、下载为 CSV/Markdown）是 absolute 定位，裁掉一半会与
+     表格内容叠在一起。圆角裁剪下放到顶栏与表格容器各自负责。 */
+  overflow: visible;
   border: 1px solid var(--color-border-subtle);
   border-radius: 12px;
   background: var(--color-chat-muted-bg);
@@ -224,6 +227,10 @@
 
 [data-streamdown="table-wrapper"] > div:first-child {
   display: flex;
+  /* 顶栏参与定位：打开的下拉菜单（内部 z-20）才能盖住表格内容。否则它是
+     普通文档流块，按顺序画在表格容器之下 → 表格文字从菜单底下透出来（字重叠）。 */
+  position: relative;
+  z-index: 1;
   box-sizing: border-box;
   height: 34px;
   min-height: 34px;
@@ -234,15 +241,10 @@
   padding: 0 0.45rem;
   border: 0;
   border-bottom: 1px solid var(--color-border-subtle);
-  border-radius: 0;
+  border-radius: 12px 12px 0 0;
   background: color-mix(in srgb, var(--color-bg-panel) 78%, var(--color-chat-muted-bg));
-  opacity: 0.55;
-  transition: opacity 0.15s ease;
-}
-
-[data-streamdown="table-wrapper"]:hover > div:first-child,
-[data-streamdown="table-wrapper"] > div:first-child:focus-within {
-  opacity: 1;
+  /* 不用 opacity 做整条半隐：opacity<1 会建立层叠上下文，鼠标移出顶栏后
+     打开的下拉菜单被压到表格内容下面（字重叠）；半隐改由按钮自身承担。 */
 }
 
 [data-streamdown="table-wrapper"] > div:first-child button {
@@ -256,6 +258,19 @@
   background: transparent;
   box-shadow: none;
   color: var(--color-text-tertiary);
+  /* 默认半隐、hover 亮起：透明度只加在按钮上（菜单是按钮的兄弟节点，
+     不受影响），避免整条顶栏建立层叠上下文。 */
+  opacity: 0.55;
+  transition:
+    opacity 0.15s ease,
+    color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+[data-streamdown="table-wrapper"]:hover > div:first-child button,
+[data-streamdown="table-wrapper"] > div:first-child:focus-within button,
+[data-streamdown="table-wrapper"] > div:first-child button:focus-visible {
+  opacity: 1;
 }
 
 [data-streamdown="table-wrapper"] > div:first-child button:hover,
@@ -268,7 +283,9 @@
   margin: 0;
   overflow: auto;
   border: 0;
-  border-radius: 0;
+  /* 顶栏已负责顶部圆角，表格容器负责底部圆角（裁剪斑马纹/表头底色，
+     卡片其余部分可视区域允许下拉菜单越界展示）。 */
+  border-radius: 0 0 12px 12px;
   background: transparent;
 }
 
