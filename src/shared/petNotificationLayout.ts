@@ -169,8 +169,14 @@ export function petFontStack(fontBase: AppFontBaseMode, customFont: string): str
 			return "\"Inter\", \"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", \"PingFang SC\", \"HarmonyOS Sans SC\", \"Hiragino Sans GB\", \"Noto Sans CJK SC\", sans-serif";
 		case "serif":
 			return "Georgia, \"Source Han Serif SC\", \"Noto Serif CJK SC\", \"Songti SC\", \"SimSun\", serif";
-		case "custom":
-			return customFont.trim() || DEFAULT_PET_FONT_STACK;
+		case "custom": {
+			// 用户字体通常只填西文字体：必须追加 CJK 回退，否则中文经 FontLink 落到 SimSun
+			//（11px 小字合成粗体后笔画挤压，与主界面 mono 栈同因，见 foundation.css 注释）。
+			const font = customFont.trim();
+			return font
+				? `${font}, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif`
+				: DEFAULT_PET_FONT_STACK;
+		}
 		default:
 			return DEFAULT_PET_FONT_STACK;
 	}

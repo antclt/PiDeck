@@ -128,8 +128,10 @@ test("petFontStack resolves PiDeck font presets", () => {
 	assert.match(L.petFontStack("system", ""), /^-apple-system/);
 	assert.match(L.petFontStack("sans", ""), /^"Inter"/);
 	assert.match(L.petFontStack("serif", ""), /^Georgia/);
-	// custom 使用用户字体，空值回退默认栈
-	assert.equal(L.petFontStack("custom", "MyFont, sans-serif"), "MyFont, sans-serif");
+	// custom 使用用户字体，并追加 CJK 回退；空值回退默认栈
+	const custom = L.petFontStack("custom", "MyFont, sans-serif");
+	assert.match(custom, /^MyFont, sans-serif, "Microsoft YaHei UI"/);
+	assert.match(custom, /"Noto Sans CJK SC", sans-serif$/);
 	assert.match(L.petFontStack("custom", "  "), /^-apple-system/);
 });
 

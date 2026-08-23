@@ -29,8 +29,16 @@
     "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC",
     "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
   --font-family-brand: "PiDeckPlantin", Georgia, "Times New Roman", serif;
+  /*
+   * 等宽字体栈必须带 CJK 回退：栈内西文等宽字体（Consolas/Menlo 等）不含汉字，
+   * 若直接落到通用 monospace，Windows 会经 FontLink 用 SimSun(宋体) 渲染中文，
+   * 11px 小字 + 合成 600 字重时笔画挤压缠在一起（如「下次调用前」投递徽章）。
+   * CJK 字体放在通用 monospace 之前，西文仍命中前面的等宽字体，汉字命中 UI 同款字体。
+   */
   --font-family-mono:
-    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC",
+    "Hiragino Sans GB", "Noto Sans CJK SC", monospace;
   --font-family-business: var(--font-family-mono);
   --font-size-micro: 11px;
   --font-size-caption: 12px;
@@ -293,8 +301,12 @@
 }
 
 :root[data-font-mono="system-mono"] {
+  /* 与默认 --font-family-mono 保持一致：必须带 CJK 回退（见上方注释），
+     否则中文落到 SimSun 后小字合成粗体笔画挤压。 */
   --font-family-mono:
-    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC",
+    "Hiragino Sans GB", "Noto Sans CJK SC", monospace;
 }
 
 /* 字号预设：拆分为 UI / 会话正文 / 输入框三轨，各自通过 data 属性切换。

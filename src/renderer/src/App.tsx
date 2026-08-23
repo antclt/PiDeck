@@ -1120,16 +1120,20 @@ export function App() {
     root.dataset.fontBase = settings.fontFamilyBase;
     root.dataset.fontMono = settings.fontFamilyMono;
 
+    // 自定义字体统一追加 CJK 回退：用户只填西文字体时，中文不能落到 SimSun 小字挤压
+    // （与下方 mono 注入同理，见 foundation.css 注释）。
     const baseCustomFont = settings.fontFamilyBaseCustom.trim();
     if (settings.fontFamilyBase === "custom" && baseCustomFont) {
-      root.style.setProperty("--font-family-base", baseCustomFont);
+      root.style.setProperty("--font-family-base", `${baseCustomFont}, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif`);
     } else {
       root.style.removeProperty("--font-family-base");
     }
 
+    // 自定义等宽字体同样必须追加 CJK 回退：用户一般只填西文字体
+    // （如 JetBrains Mono），不追加时中文会落到 SimSun 小字挤压（见 foundation.css 注释）。
     const monoCustomFont = settings.fontFamilyMonoCustom.trim();
     if (settings.fontFamilyMono === "custom" && monoCustomFont) {
-      root.style.setProperty("--font-family-mono", monoCustomFont);
+      root.style.setProperty("--font-family-mono", `${monoCustomFont}, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB", "Noto Sans CJK SC"`);
     } else {
       root.style.removeProperty("--font-family-mono");
     }
