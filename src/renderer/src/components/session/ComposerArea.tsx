@@ -28,6 +28,7 @@ import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
 import {
   ComposerWidgetLayoutProvider,
+  type ComposerWidgetCollapsedByKey,
   useComposerWidgetLayoutValue,
 } from "./ComposerWidgetLayout";
 import type { GitBranchInfo } from "../../../../shared/types";
@@ -100,7 +101,7 @@ function ComposerMeasuredExtras(props: ComposerMeasuredExtrasProps) {
   const lastContentHeightRef = useRef(0);
   const mountedRef = useRef(false);
   const onHeightChangeRef = useRef(props.onHeightChange);
-  const [collapsedByWidgetKey, setCollapsedByWidgetKey] = useState<Record<string, boolean>>({});
+  const [collapsedByWidgetKey, setCollapsedByWidgetKey] = useState<ComposerWidgetCollapsedByKey>({});
   const widgetLayoutValue = useComposerWidgetLayoutValue(
     collapsedByWidgetKey,
     setCollapsedByWidgetKey,

@@ -29,21 +29,68 @@ export function resolveComposerWidgetCollapsed(
   return collapsedByKey[key] ?? defaultCollapsed;
 }
 
+/**
+ * Stores only deviations from a widget's default state. This keeps a long-lived
+ * composer from retaining records after a user returns a card to its default.
+ */
+export function setComposerWidgetCollapsed(
+  collapsedByKey: ComposerWidgetCollapsedByKey,
+  key: string,
+  collapsed: boolean,
+  defaultCollapsed: boolean,
+): ComposerWidgetCollapsedByKey {
+  if (collapsed === defaultCollapsed) {
+    return clearComposerWidgetCollapsed(collapsedByKey, key);
+  }
+  if (collapsedByKey[key] === collapsed) return collapsedByKey;
+  return { ...collapsedByKey, [key]: collapsed };
+}
+
+/** Removes one disclosure record when its card no longer needs to retain it. */
+export function clearComposerWidgetCollapsed(
+  collapsedByKey: ComposerWidgetCollapsedByKey,
+  key: string,
+): ComposerWidgetCollapsedByKey {
+  if (!Object.prototype.hasOwnProperty.call(collapsedByKey, key)) {
+    return collapsedByKey;
+  }
+  const next = { ...collapsedByKey };
+  delete next[key];
+  return next;
+}
+
+/** Removes a retired family of records, such as Diff disclosures from an old run. */
+export function clearComposerWidgetCollapsedByPrefix(
+  collapsedByKey: ComposerWidgetCollapsedByKey,
+  prefix: string,
+): ComposerWidgetCollapsedByKey {
+  const keysToClear = Object.keys(collapsedByKey).filter((key) => key.startsWith(prefix));
+  if (keysToClear.length === 0) return collapsedByKey;
+
+  const next = { ...collapsedByKey };
+  for (const key of keysToClear) delete next[key];
+  return next;
+}
+
 export function toggleComposerWidgetCollapsed(
   collapsedByKey: ComposerWidgetCollapsedByKey,
   key: string,
   defaultCollapsed: boolean,
-): Record<string, boolean> {
-  return {
-    ...collapsedByKey,
-    [key]: !resolveComposerWidgetCollapsed(collapsedByKey, key, defaultCollapsed),
-  };
+): ComposerWidgetCollapsedByKey {
+  return setComposerWidgetCollapsed(
+    collapsedByKey,
+    key,
+    !resolveComposerWidgetCollapsed(collapsedByKey, key, defaultCollapsed),
+    defaultCollapsed,
+  );
 }
 
 type ComposerWidgetLayoutValue = {
   collapsedByKey: ComposerWidgetCollapsedByKey;
-  setCollapsed: (key: string, collapsed: boolean) => void;
+  setCollapsed: (key: string, collapsed: boolean, defaultCollapsed: boolean) => void;
   toggleCollapsed: (key: string, defaultCollapsed: boolean) => void;
+  clearCollapsed: (key: string) => void;
+  clearCollapsedByPrefix: (prefix: string) => void;
 };
 
 const ComposerWidgetLayoutContext = createContext<ComposerWidgetLayoutValue | null>(null);
@@ -72,15 +119,21 @@ export function useComposerWidgetCollapsed(key: string, defaultCollapsed = true)
     defaultCollapsed,
   );
   const setCollapsed = useCallback(
-    (next: boolean) => layout.setCollapsed(key, next),
-    [key, layout],
+    (next: boolean) => layout.setCollapsed(key, next, defaultCollapsed),
+    [defaultCollapsed, key, layout],
   );
   const toggleCollapsed = useCallback(
     () => layout.toggleCollapsed(key, defaultCollapsed),
     [defaultCollapsed, key, layout],
   );
 
-  return { collapsed, setCollapsed, toggleCollapsed };
+  return {
+    collapsed,
+    setCollapsed,
+    toggleCollapsed,
+    clearCollapsed: layout.clearCollapsed,
+    clearCollapsedByPrefix: layout.clearCollapsedByPrefix,
+  };
 }
 
 /** Shared visual frame for all cards placed in the composer widget scrollport. */
@@ -102,22 +155,42 @@ export const ComposerWidgetFrame = forwardRef<HTMLElement, ComponentPropsWithout
 /** Builds the stable context value owned by ComposerMeasuredExtras. */
 export function useComposerWidgetLayoutValue(
   collapsedByKey: ComposerWidgetCollapsedByKey,
-  setCollapsedByKey: Dispatch<SetStateAction<Record<string, boolean>>>,
+  setCollapsedByKey: Dispatch<SetStateAction<ComposerWidgetCollapsedByKey>>,
 ): ComposerWidgetLayoutValue {
-  const setCollapsed = useCallback((key: string, collapsed: boolean) => {
-    setCollapsedByKey((current) => {
-      if (current[key] === collapsed) return current;
-      return { ...current, [key]: collapsed };
-    });
-  }, [setCollapsedByKey]);
+  const setCollapsed = useCallback(
+    (key: string, collapsed: boolean, defaultCollapsed: boolean) => {
+      setCollapsedByKey((current) =>
+        setComposerWidgetCollapsed(current, key, collapsed, defaultCollapsed),
+      );
+    },
+    [setCollapsedByKey],
+  );
   const toggleCollapsed = useCallback((key: string, defaultCollapsed: boolean) => {
     setCollapsedByKey((current) =>
       toggleComposerWidgetCollapsed(current, key, defaultCollapsed),
     );
   }, [setCollapsedByKey]);
+  const clearCollapsed = useCallback((key: string) => {
+    setCollapsedByKey((current) => clearComposerWidgetCollapsed(current, key));
+  }, [setCollapsedByKey]);
+  const clearCollapsedByPrefix = useCallback((prefix: string) => {
+    setCollapsedByKey((current) => clearComposerWidgetCollapsedByPrefix(current, prefix));
+  }, [setCollapsedByKey]);
 
   return useMemo(
-    () => ({ collapsedByKey, setCollapsed, toggleCollapsed }),
-    [collapsedByKey, setCollapsed, toggleCollapsed],
+    () => ({
+      collapsedByKey,
+      setCollapsed,
+      toggleCollapsed,
+      clearCollapsed,
+      clearCollapsedByPrefix,
+    }),
+    [
+      collapsedByKey,
+      setCollapsed,
+      toggleCollapsed,
+      clearCollapsed,
+      clearCollapsedByPrefix,
+    ],
   );
 }

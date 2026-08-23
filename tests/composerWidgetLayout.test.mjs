@@ -55,7 +55,51 @@ test("widget disclosure state is isolated by identity and preserves defaults", (
 
   const collapsedAgain = toggleComposerWidgetCollapsed(expanded, "todo:session-a", true);
   assert.equal(resolveComposerWidgetCollapsed(collapsedAgain, "todo:session-a", true), true);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(collapsedAgain, "todo:session-a"),
+    false,
+    "returning to the default state must not retain a map entry",
+  );
   assert.equal(resolveComposerWidgetCollapsed(collapsedAgain, "goal:session-a", false), false);
+});
+
+test("default state and retired modified-run records are reclaimed", () => {
+  const {
+    clearComposerWidgetCollapsed,
+    clearComposerWidgetCollapsedByPrefix,
+    resolveComposerWidgetCollapsed,
+    toggleComposerWidgetCollapsed,
+  } = loadLayoutHelpers();
+  const oldStripKey = "modified-files:session-a:run-1";
+  const oldDiffPrefix = "modified-file-diff:session-a:run-1:";
+  const state = {
+    "todo:session-a": false,
+    [oldStripKey]: false,
+    "modified-file-diff:session-a:run-1:src/a.ts": false,
+    "modified-file-diff:session-a:run-1:src/b.ts": false,
+    "modified-files:session-a:run-2": false,
+  };
+
+  const withoutOldStrip = clearComposerWidgetCollapsed(state, oldStripKey);
+  const withoutOldRun = clearComposerWidgetCollapsedByPrefix(withoutOldStrip, oldDiffPrefix);
+  assert.equal(resolveComposerWidgetCollapsed(withoutOldRun, "todo:session-a", true), false);
+  assert.equal(
+    resolveComposerWidgetCollapsed(withoutOldRun, "modified-files:session-a:run-2", true),
+    false,
+  );
+  assert.equal(Object.keys(withoutOldRun).some((key) => key.includes("run-1")), false);
+  assert.strictEqual(
+    clearComposerWidgetCollapsedByPrefix(withoutOldRun, oldDiffPrefix),
+    withoutOldRun,
+    "a no-op cleanup must preserve the existing map and avoid a layout update",
+  );
+
+  const resetTodo = toggleComposerWidgetCollapsed(
+    toggleComposerWidgetCollapsed({}, "todo:session-a", true),
+    "todo:session-a",
+    true,
+  );
+  assert.equal(Object.keys(resetTodo).length, 0);
 });
 
 test("a new modified-files run and each diff start from their own default disclosure state", () => {
@@ -122,6 +166,11 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
   }
   assert.match(todo, /useComposerWidgetCollapsed\([\s\S]*?`todo:\$\{props\.sessionId\}`/);
   assert.match(files, /useComposerWidgetCollapsed\([\s\S]*?modified-files:/);
+  assert.match(files, /previousRunIdentityRef/);
+  assert.match(files, /if \(!runIdentity\) return;/);
+  assert.match(files, /previousRunIdentity && previousRunIdentity !== runIdentity/);
+  assert.match(files, /clearCollapsed\(`modified-files:\$\{previousRunIdentity\}`\)/);
+  assert.match(files, /clearCollapsedByPrefix\(`modified-file-diff:\$\{previousRunIdentity\}:/);
   assert.match(files, /open=\{!collapsed\}/);
   assert.match(files, /onOpenChange=\{\(open\) => \{ setCollapsed\(!open\); \}\}/);
   assert.match(queue, /useComposerWidgetCollapsed\([\s\S]*?queue:/);

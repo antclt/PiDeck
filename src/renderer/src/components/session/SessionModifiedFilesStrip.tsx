@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, ExternalLink, Files } from "lucide-react";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
@@ -74,15 +74,36 @@ export function SessionModifiedFilesStrip(props: {
 		() => (props.run ? collectRunFileChanges(props.run) : []),
 		[props.run],
 	);
-	const runId = String(props.run?.id ?? "pending");
-	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(
-		`modified-files:${props.sessionId}:${runId}`,
+	const runId = props.run ? String(props.run.id) : "pending";
+	const runIdentity = props.run ? `${props.sessionId}:${runId}` : undefined;
+	const stripKey = `modified-files:${runIdentity ?? `${props.sessionId}:pending`}`;
+	const {
+		collapsed,
+		toggleCollapsed,
+		clearCollapsed,
+		clearCollapsedByPrefix,
+	} = useComposerWidgetCollapsed(
+		stripKey,
 		true,
 	);
+	const previousRunIdentityRef = useRef<string | undefined>(runIdentity);
 
 	useEffect(() => {
+		// A runtime reconnect can briefly omit the latest run. Do not treat that
+		// gap as a new run, or a returning run would lose its disclosure state.
+		if (!runIdentity) return;
+
 		setShowAll(false);
-	}, [props.run?.id]);
+		const previousRunIdentity = previousRunIdentityRef.current;
+		if (previousRunIdentity && previousRunIdentity !== runIdentity) {
+			// Only the latest run is rendered here. Once it changes, no old Diff can
+			// return through this strip, so retaining its disclosure records wastes
+			// the composer-owned state map for the rest of the session.
+			clearCollapsed(`modified-files:${previousRunIdentity}`);
+			clearCollapsedByPrefix(`modified-file-diff:${previousRunIdentity}:`);
+		}
+		previousRunIdentityRef.current = runIdentity;
+	}, [clearCollapsed, clearCollapsedByPrefix, runIdentity]);
 
 	if (files.length === 0) return null;
 
