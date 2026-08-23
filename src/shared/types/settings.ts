@@ -109,11 +109,6 @@ export type StartupWindowMode =
 	 * true（默认）：发送新消息后收起所有非最新轮（含手动展开的）；false：保持现状。
 	 */
 	collapsePrevRunsOnNewTurn: boolean;
-	/**
-	 * 本轮修改文件列表是否默认展开。
-	 * true（默认）：每轮回答下直接展示修改文件；false：默认收起，但仍可手动展开。
-	 */
-	expandTurnFileChanges: boolean;
 	/** 是否开启开发者控制台（DevTools） */
 	showDevTools: boolean;
 	/**

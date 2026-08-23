@@ -553,8 +553,6 @@ export function App() {
     // 流式对话行为：默认自动展开中间过程；新一轮默认收起非最新轮（与 SettingsStore 一致）
     expandInterimDuringStream: true,
     collapsePrevRunsOnNewTurn: true,
-    // 本轮修改文件列表默认展开（与 SettingsStore 一致）
-    expandTurnFileChanges: true,
     showDevTools: false,
     developerDiagnostics: false,
     // Electron Chromium 沙箱默认关，与主进程历史兼容策略一致
@@ -620,12 +618,10 @@ export function App() {
     setTurnFlowSettings({
       expandInterimDuringStream: settings.expandInterimDuringStream,
       collapsePrevRunsOnNewTurn: settings.collapsePrevRunsOnNewTurn,
-      expandTurnFileChanges: settings.expandTurnFileChanges,
     });
   }, [
     settings.expandInterimDuringStream,
     settings.collapsePrevRunsOnNewTurn,
-    settings.expandTurnFileChanges,
     setTurnFlowSettings,
   ]);
 

@@ -136,8 +136,6 @@ Gitmoji 对应关系：
   // 新一轮开始默认收起非最新轮（含手动展开的），用户可在设置中关闭。
   expandInterimDuringStream: true,
   collapsePrevRunsOnNewTurn: true,
-  // 本轮修改文件列表默认展开，与现有界面行为保持一致
-  expandTurnFileChanges: true,
   showDevTools: false,
   developerDiagnostics: false,
   // 默认关闭 Chromium 沙箱：与历史 Windows no-sandbox 兼容策略一致

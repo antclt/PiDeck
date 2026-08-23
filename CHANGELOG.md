@@ -31,6 +31,10 @@ All notable changes to PiDeck are documented here.
 
 ### 🐛 Bug Fixes
 
+- **Removed the ineffective "Expand changed files by default" setting** — The
+  changed-file list now lives above the composer and always starts collapsed,
+  so the old toggle that auto-expanded each turn's list had stopped doing
+  anything; the setting and its leftover dead code were removed.
 - **Packaged terminal could not load pty.node (#154)** — afterPack now keeps
   asar unpacked metadata when it repacks, and `node-pty` is listed in
   `asarUnpack`, so `terminal:ensure` can load the native module in the

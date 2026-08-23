@@ -56,7 +56,6 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "workspaceContentOpenMode", tab: "common", itemKey: "settings.workspaceContentOpenMode" },
 	{ field: "expandInterimDuringStream", tab: "common", itemKey: "settings.expandInterimDuringStream" },
 	{ field: "collapsePrevRunsOnNewTurn", tab: "common", itemKey: "settings.collapsePrevRunsOnNewTurn" },
-	{ field: "expandTurnFileChanges", tab: "common", itemKey: "settings.expandTurnFileChanges" },
 	{ field: "enableNotifications", tab: "common", itemKey: "settings.enableNotifications" },
 	{ field: "agentCountReminderEnabled", tab: "common", itemKey: "settings.agentCountReminder" },
 	{ field: "startupWindowMode", tab: "common", itemKey: "settings.startupWindowMode" },

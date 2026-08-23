@@ -220,12 +220,6 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
           checked={draft.collapsePrevRunsOnNewTurn}
           onChange={(checked) => updateDraft({ collapsePrevRunsOnNewTurn: checked })}
         />
-        <SettingSwitchRow
-          title={t("settings.expandTurnFileChanges")}
-          description={t("settings.expandTurnFileChangesDesc")}
-          checked={draft.expandTurnFileChanges}
-          onChange={(checked) => updateDraft({ expandTurnFileChanges: checked })}
-        />
       </SettingsSection>
 
       {/* 通知 */}

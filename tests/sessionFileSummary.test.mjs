@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { collectSessionFileChanges, collectRunFileChanges, fileChangeToDiffLines } from "../src/renderer/src/components/session/TimelineFormat.ts";
+import { MAX_VISIBLE_FILES, visibleFileCount } from "../src/renderer/src/components/session/turn/fileChangesUiState.ts";
 
 /**
  * 会话文件修改汇总收集逻辑测试：
@@ -122,6 +123,14 @@ test("fileChangeToDiffLines: write yields all-added lines, edit yields removed+a
 		{ id: "removed-1", type: "removed", content: "old2" },
 		{ id: "added-0", type: "added", content: "new1" },
 	]);
+});
+
+test("visibleFileCount：默认截断到 MAX_VISIBLE_FILES，展开全部后全量", () => {
+	assert.equal(visibleFileCount(12, false), MAX_VISIBLE_FILES);
+	assert.equal(visibleFileCount(12, true), 12);
+	// 不超过上限时原样返回，不出现无意义的截断按钮
+	assert.equal(visibleFileCount(3, false), 3);
+	assert.equal(visibleFileCount(0, false), 0);
 });
 
 test("file changes render above the composer as a collapsed latest-run strip", () => {
