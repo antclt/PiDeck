@@ -362,10 +362,16 @@ export function useSessionTimelineController(options: {
   }, [saveScrollAnchor]);
 
   /** 透传给 MessageScroller viewport 的滚动回调（SessionMessageTimeline 接线）。
-   *  rAF 合并高频滚动计算锚点（不每帧 getBoundingClientRect），再节流 250ms 落盘 atom。 */
+   *  同步快照保证同一事件帧切走时仍有旧 DOM 的锚点；rAF 只合并后续重算与
+   *  250ms 持久化，避免将性能节流错误地用在跨会话正确性边界上。 */
   const handleTimelineScroll = useCallback(() => {
     const sessionId = ownerKeyRef.current;
     if (!sessionId || sessionId === LEGACY_OWNER_KEY) return;
+    // A tab/sidebar selection can synchronously replace this timeline before the
+    // next animation frame. Capture the old DOM while the scroll event still
+    // owns it; the layout-effect cleanup must never inspect post-switch nodes.
+    // The rAF below still coalesces the settled position and atom persistence.
+    currentAnchorRef.current = computeCurrentAnchor();
     if (scrollAnchorFrameRef.current != null) return;
     scrollAnchorFrameRef.current = requestAnimationFrame(() => {
       scrollAnchorFrameRef.current = undefined;

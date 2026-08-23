@@ -121,6 +121,15 @@ test("anchor restoration expands the turn window before it falls back", () => {
   assert.match(source, /api\.restoreAt\(0\)/);
 });
 
+test("scroll events synchronously retain an anchor before a same-task session switch", () => {
+  // rAF remains the coalesced persistence path, but the last DOM snapshot must
+  // exist before React can commit a tab change and cancel the pending frame.
+  assert.match(
+    source,
+    /currentAnchorRef\.current = computeCurrentAnchor\(\);\s*if \(scrollAnchorFrameRef\.current != null\) return;\s*scrollAnchorFrameRef\.current = requestAnimationFrame/,
+  );
+});
+
 test("background Session cache changes retain the selected timeline slice", () => {
   const { sessionMessagesCacheAtom } = loadSessionAtoms();
   const store = createStore();
