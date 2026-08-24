@@ -358,6 +358,16 @@ const api = {
 		/** DSH settings.update。 */
 		updateDshSettings: (ns: string, patch: Record<string, unknown>, expectedRevision?: number) =>
 			ipcRenderer.invoke(ipcChannels.dshConfigUpdate, ns, patch, expectedRevision) as Promise<unknown>,
+		/** DSH settings.mutate（路径级操作；删除 provider/字段用 unset op）。 */
+		mutateDshSettings: (
+			ns: string,
+			ops: Array<
+				| { op: "set"; path: string[]; value: unknown }
+				| { op: "unset"; path: string[] }
+			>,
+			expectedRevision?: number,
+		) =>
+			ipcRenderer.invoke(ipcChannels.dshConfigMutate, ns, ops, expectedRevision) as Promise<unknown>,
 		/** DSH credentials.describe。 */
 		describeDshCredentials: (refs: string[]) =>
 			ipcRenderer.invoke(ipcChannels.dshCredentialDescribe, refs) as Promise<Record<string, {

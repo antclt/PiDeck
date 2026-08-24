@@ -2642,6 +2642,7 @@ function registerIpc() {
 			getDshStatus: () => dshHost.getStatus(),
 			describeDshSettings: () => dshHost.describeSettings(),
 			updateDshSettings: (ns, patch, expectedRevision) => dshHost.updateSettings(ns, patch, expectedRevision),
+			mutateDshSettings: (ns, ops, expectedRevision) => dshHost.mutateSettings(ns, ops, expectedRevision),
 			describeDshCredentials: (refs) => dshHost.describeCredentials(refs),
 			setDshCredential: (ref, value) => dshHost.setCredential(ref, value),
 			unsetDshCredential: (ref) => dshHost.unsetCredential(ref),

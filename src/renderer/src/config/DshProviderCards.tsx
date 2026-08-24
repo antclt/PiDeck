@@ -365,23 +365,54 @@ export function PiAiProvidersCard(props: {
 	const [addingProvider, setAddingProvider] = useState(false);
 	/** 密钥草稿：providerKey → 输入的新密钥（保存时统一 credentials.set）。 */
 	const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
+	/**
+	 * 待删除的 provider 路由（点删除后本地隐藏，保存时才真正删除）。
+	 * 必须单独记录：settings.update 是 merge，patch 里删 key 不会让 host 删掉
+	 * 现有 provider——删除要走 settings.mutate 的 unset op（merge 语义做不到）。
+	 */
+	const [pendingRemovals, setPendingRemovals] = useState<string[]>([]);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	/** 脏状态：settings 草稿或任一密钥草稿非空。 */
-	const dirty = Object.keys(draft).length > 0 || Object.values(keyDrafts).some((value) => value.trim());
+	/** 脏状态：settings 草稿、任一密钥草稿或待删除 provider 非空。 */
+	const dirty = Object.keys(draft).length > 0 || Object.values(keyDrafts).some((value) => value.trim()) || pendingRemovals.length > 0;
 	useEffect(() => {
 		sectionApi?.onDirtyChange(instanceId, dirty);
 		// 卸载时清掉本实例的脏来源，避免收起/切换后残留黄点
 		return () => sectionApi?.onDirtyChange(instanceId, false);
 	}, [sectionApi, instanceId, dirty]);
 
-	/** 统一保存：先写全部密钥草稿，再提交 settings patch；全部成功返回 true。 */
+	/** 统一保存：先删待移除 provider（凭证 + 配置，对齐 dsh-web removeProviderProfile），
+	 *  再写密钥草稿、提交 settings patch。 */
 	const save = useCallback(async (): Promise<boolean> => {
 		if (!dirty) return true;
 		setSaving(true);
 		setError(null);
 		try {
+			// 删除顺序与 dsh-web 一致：先删凭证、再删 provider 配置——第二步失败时
+			// provider 行仍可见，整个操作可安全重试（两个 unset 都是幂等的）。
+			// 凭证仅当它是「页面管理的派生引用」时联动删除（dsh-web targetOf 语义：
+			// apiKeyEnv 恰好等于派生 ref 且已配置且可写）；显式配置的 apiKeyEnv
+			// 可能被其他 provider 复用，不删。删除配置走 settings.mutate unset，
+			// 因为 settings.update 是 merge，patch 删 key 不会让 host 删掉现有 provider。
+			if (pendingRemovals.length > 0) {
+				for (const key of pendingRemovals) {
+					const currentProfile = (namespace.value as { providers?: Record<string, unknown> } | undefined)?.providers?.[key];
+					const meta = (currentProfile ?? {}) as Record<string, unknown>;
+					const managedRef = credentialRefFor(undefined, key);
+					const explicitRef = typeof meta.apiKeyEnv === "string" && meta.apiKeyEnv.trim() ? meta.apiKeyEnv.trim() : undefined;
+					const ref = explicitRef ?? managedRef;
+					const state = ops.credentials[ref];
+					if (ref === managedRef && state?.configured === true && state.writable) {
+						await ops.unsetKey(ref);
+					}
+					await desktopApi.sessions.mutateDshSettings(
+						namespace.ns,
+						[{ op: "unset", path: ["providers", key] }],
+						namespace.revision,
+					);
+				}
+			}
 			for (const [key, keyValue] of Object.entries(keyDrafts)) {
 				const trimmed = keyValue.trim();
 				if (!trimmed) continue;
@@ -394,6 +425,7 @@ export function PiAiProvidersCard(props: {
 			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
 			setDraft({});
 			setKeyDrafts({});
+			setPendingRemovals([]);
 			return true;
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -401,7 +433,7 @@ export function PiAiProvidersCard(props: {
 		} finally {
 			setSaving(false);
 		}
-	}, [dirty, keyDrafts, draft, namespace.value, ops, props]);
+	}, [dirty, keyDrafts, draft, pendingRemovals, namespace.ns, namespace.revision, namespace.value, ops, props]);
 	useEffect(() => {
 		if (!sectionApi) return;
 		sectionApi.registerSave(instanceId, save);
@@ -418,7 +450,9 @@ export function PiAiProvidersCard(props: {
 		(providersValue ?? {}) as Record<string, unknown>,
 		(draft.providers ?? {}) as Record<string, unknown>,
 	);
-	const entries = dictEntries(mergedProvidersValue);
+	const entries = dictEntries(mergedProvidersValue)
+		// 待删除的 provider 立即从列表隐藏（host 侧删除在保存时经 mutate unset 提交）
+		.filter((entry) => !pendingRemovals.includes(entry.key));
 	const innerRefId = providersField.ref.inner;
 	if (innerRefId === undefined) {
 		return <div className="py-6 text-center text-control text-muted-foreground">{t("config.dsh.schemaUnavailable")}</div>;
@@ -505,6 +539,9 @@ export function PiAiProvidersCard(props: {
 	};
 
 	const removeProvider = (key: string) => {
+		// 本地立即隐藏；真正删除在保存时经 settings.mutate unset 提交
+		// （merge patch 删 key 无效——host 只合并 patch 里出现的字段）。
+		setPendingRemovals((prev) => (prev.includes(key) ? prev : [...prev, key]));
 		setDraft((prev) => {
 			const next = structuredClone(prev) as Record<string, unknown>;
 			const providers = (next.providers ?? {}) as Record<string, unknown>;

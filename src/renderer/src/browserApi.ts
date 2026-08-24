@@ -349,6 +349,7 @@ export function createBrowserApi(): PiDesktopApi {
 			}),
 			describeDshSettings: async () => ({ writable: false, hasDocument: false, namespaces: [] }),
 			updateDshSettings: async () => undefined,
+			mutateDshSettings: async () => undefined,
 			describeDshCredentials: async () => ({}),
 			setDshCredential: async () => undefined,
 			unsetDshCredential: async () => undefined,

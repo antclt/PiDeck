@@ -115,6 +115,15 @@ export type DshBackendIpcDeps = {
 		patch: Record<string, unknown>,
 		expectedRevision?: number,
 	) => Promise<unknown>;
+	/** DSH settings.mutate（路径级操作；删除 provider/字段用 unset op）。 */
+	mutateDshSettings?: (
+		ns: string,
+		ops: Array<
+			| { op: "set"; path: string[]; value: unknown }
+			| { op: "unset"; path: string[] }
+		>,
+		expectedRevision?: number,
+	) => Promise<unknown>;
 	/** DSH credentials.describe。 */
 	describeDshCredentials?: (refs: string[]) => Promise<Record<string, {
 		configured: boolean;
@@ -363,6 +372,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		getDshStatus,
 		describeDshSettings,
 		updateDshSettings,
+		mutateDshSettings,
 		describeDshCredentials,
 		setDshCredential,
 		unsetDshCredential,
@@ -1375,6 +1385,21 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (_event, ns: string, patch: Record<string, unknown>, expectedRevision?: number) => {
 			if (!updateDshSettings) throw new Error("DSH settings are not available");
 			return updateDshSettings(ns, patch, expectedRevision);
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.dshConfigMutate,
+		async (
+			_event,
+			ns: string,
+			ops: Array<
+				| { op: "set"; path: string[]; value: unknown }
+				| { op: "unset"; path: string[] }
+			>,
+			expectedRevision?: number,
+		) => {
+			if (!mutateDshSettings) throw new Error("DSH settings are not available");
+			return mutateDshSettings(ns, ops, expectedRevision);
 		},
 	);
 	ipcMain.handle(

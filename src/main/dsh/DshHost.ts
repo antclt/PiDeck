@@ -175,6 +175,30 @@ export class DshHost {
 		return updated.result.value;
 	}
 
+	/**
+	 * settings.mutate：按路径操作编辑 namespace 用户层。
+	 * 与 update（merge 只能增改、无法删除）互补：`{ op: "unset", path: [...] }`
+	 * 可以删除单个 key（如 llm-pi-ai.providers.<route>），这是配置面删除
+	 * provider/字段的唯一正确路径——merge 空 dict 不会删掉现有 key。
+	 */
+	async mutateSettings(
+		ns: string,
+		ops: Array<
+			| { op: "set"; path: string[]; value: unknown }
+			| { op: "unset"; path: string[] }
+		>,
+		expectedRevision?: number,
+	): Promise<unknown> {
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) throw new Error("DSH host is not started");
+		const updated = await client.settings.mutate({ ns, ops, expectedRevision });
+		if (!updated.result.ok) {
+			throw new Error(`dsh settings.mutate failed: ${JSON.stringify(updated.result.error)}`);
+		}
+		return updated.result.value;
+	}
+
 	/** credentials.describe：refs 必须匹配 env 名格式（^[A-Za-z_][A-Za-z0-9_]*$）。 */
 	async describeCredentials(refs: string[]): Promise<Record<string, {
 		configured: boolean;

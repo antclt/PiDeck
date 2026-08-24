@@ -152,6 +152,8 @@ export const ipcChannels = {
 	dshConfigDescribe: "dsh:config-describe",
 	/** DSH settings.update（合并 patch 到 namespace 用户层）。 */
 	dshConfigUpdate: "dsh:config-update",
+	/** DSH settings.mutate（路径级操作，支持 unset 删除 provider/字段；update 无法删除）。 */
+	dshConfigMutate: "dsh:config-mutate",
 	/** DSH settings.openDocument（把配置文档交给平台打开）。 */
 	dshOpenDocument: "dsh:open-document",
 	/** DSH host 重启（DSH_HOME 切换后立即生效；有活跃 DSH 会话时拒绝）。 */
