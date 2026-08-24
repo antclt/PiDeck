@@ -1021,6 +1021,7 @@ export const zhCN = {
   "config.dsh.modelsInherited": "使用适配器默认模型",
   "config.dsh.modelsCustomized": "已自定义 {count} 个模型",
   "config.dsh.modelsEmptyHint": "留空表示使用适配器默认模型；目录外模型 ID 仍可直接发送。",
+  "config.dsh.defaultImageInput": "新模型默认支持图片输入",
   "config.dsh.addModel": "添加模型",
   "config.dsh.removeModel": "删除此模型",
   "config.dsh.modelCapacity": "容量（上下文窗口 / 最大输出）",

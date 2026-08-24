@@ -110,6 +110,7 @@ export function appendFetchedDshModels(input: {
 			// 与 Pi 配置页同一套：listing / pi-ai 已给出的容量原样写入，缺的留空
 			if (model.contextWindow != null) row.contextWindow = model.contextWindow;
 			if (model.maxTokens != null) row.maxTokens = model.maxTokens;
+			if (Array.isArray(model.input) && model.input.length > 0) row.input = [...model.input];
 			return row;
 		}),
 	];

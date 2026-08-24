@@ -3,6 +3,7 @@ import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { Button } from "../components/ui-shadcn/button";
+import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { ModelsTable, type DshModelRow } from "./DshModelsTable";
 import { FetchedModelCombobox } from "./FetchedModelCombobox";
 import {
@@ -14,8 +15,30 @@ import {
 	updateDshModelAt,
 } from "./dshModels";
 import type { FetchedModel } from "../../../shared/types/fetchedModel";
+import type { ModelSpec } from "../../../shared/types/modelSpecs";
 import type { ModelItem } from "./configTypes";
 import { computeModelSpecPatches } from "../utils/modelSpecAutoFill";
+
+/**
+ * DSH 的 reasoningEfforts 需要“规范档位 → 上游 wire 值”映射；pi-ai catalog 的
+ * ModelSpec 只知道模型是否推理，不能安全构造这份映射。因此自动补全只写容量和图片输入。
+ */
+function dshModelSpecPatches(model: ModelItem, spec: ModelSpec | null) {
+  return computeModelSpecPatches(model, spec).filter(([field]) => field !== "reasoning");
+}
+
+function dshDefaultInputSupportsImages(input: unknown): boolean {
+  return Array.isArray(input) && input.includes("image");
+}
+
+function setDshDefaultImageInput(input: unknown, enabled: boolean): string[] {
+  const current = Array.isArray(input)
+    ? input.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : ["text"];
+  const withoutImage = current.filter((item) => item !== "image");
+  if (!enabled) return withoutImage.includes("text") ? withoutImage : ["text", ...withoutImage];
+  return withoutImage.includes("text") ? [...withoutImage, "image"] : ["text", ...withoutImage, "image"];
+}
 
 /**
  * DSH 自定义模型编辑器：在适配器目录上追加/拉取，而不是从空 draft 起步。
@@ -32,6 +55,9 @@ export function DshModelsEditor(props: {
 	/** 密钥草稿优先；空则按 credentialRef 读已存凭证。 */
 	apiKeyDraft?: string;
 	credentialRef?: string;
+	/** 未单独声明 input 的自定义模型使用的 provider 级模态兜底。 */
+	defaultInput?: unknown;
+	onDefaultInputChange?: (input: string[]) => void;
 	onChange: (models: DshModelRow[]) => void;
 }) {
 	const { models, savedModels, catalog, writable } = props;
@@ -87,13 +113,47 @@ export function DshModelsEditor(props: {
 		}
 	};
 
-	const saveSelected = () => {
+	const saveSelected = async () => {
 		if (!fetched || selectedIds.length === 0) return;
-		props.onChange(appendFetchedDshModels({
+		const existing = seedDshModelsForCustomEdit(seedInput);
+		let nextRows = appendFetchedDshModels({
 			...seedInput,
 			fetched,
 			selectedIds,
-		}));
+		});
+		// `/models` 通常没有模态数据；已知模型再由本地 pi-ai catalog 补图片输入。
+		// reasoning 只有布尔事实时不能构造 DSH 的 wire 映射，故由迁移或用户配置提供。
+		const appended = nextRows.slice(existing.length);
+		const specs = await Promise.all(appended.map((row) =>
+			desktopApi.projects.getModelSpec(
+				props.providerKey ?? "",
+				typeof row.id === "string" ? row.id : "",
+			).catch(() => null),
+		));
+		for (let offset = 0; offset < appended.length; offset += 1) {
+			const row = nextRows[existing.length + offset];
+			if (!row || typeof row.id !== "string") continue;
+			const model: ModelItem = {
+				id: row.id,
+				name: typeof row.name === "string" ? row.name : undefined,
+				contextWindow: typeof row.contextWindow === "number" ? row.contextWindow : undefined,
+				maxTokens: typeof row.maxTokens === "number" ? row.maxTokens : undefined,
+				input: Array.isArray(row.input)
+					? row.input.filter((item): item is string => typeof item === "string")
+					: undefined,
+			};
+			for (const [field, value] of dshModelSpecPatches(model, specs[offset])) {
+				nextRows = updateDshModelAt({
+					draftModels: nextRows,
+					savedModels,
+					catalog,
+					index: existing.length + offset,
+					field,
+					value,
+				});
+			}
+		}
+		props.onChange(nextRows);
 		setSelectedIds([]);
 	};
 
@@ -111,7 +171,7 @@ export function DshModelsEditor(props: {
 			contextWindow: typeof row.contextWindow === "number" ? row.contextWindow : undefined,
 			maxTokens: typeof row.maxTokens === "number" ? row.maxTokens : undefined,
 		};
-		const updates = computeModelSpecPatches(model, spec);
+		const updates = dshModelSpecPatches(model, spec);
 		if (updates.length === 0) return;
 		let nextRows = current;
 		for (const [field, value] of updates) {
@@ -133,6 +193,16 @@ export function DshModelsEditor(props: {
 
 	return (
 		<div className="grid gap-2">
+			{props.onDefaultInputChange && (
+				<label className="flex items-center gap-2 text-micro text-muted-foreground">
+					<Checkbox
+						checked={dshDefaultInputSupportsImages(props.defaultInput)}
+						disabled={!writable}
+						onCheckedChange={(checked) => props.onDefaultInputChange?.(setDshDefaultImageInput(props.defaultInput, checked === true))}
+					/>
+					{t("config.dsh.defaultImageInput")}
+				</label>
+			)}
 			<div className="flex flex-wrap items-center justify-end gap-1.5">
 				<Button
 					type="button"
@@ -164,7 +234,7 @@ export function DshModelsEditor(props: {
 							variant="default"
 							size="sm"
 							disabled={selectedIds.length === 0}
-							onClick={saveSelected}
+							onClick={() => void saveSelected()}
 						>
 							{t("config.saveSelectedModels")}
 						</Button>

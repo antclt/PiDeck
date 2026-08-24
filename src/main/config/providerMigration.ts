@@ -39,6 +39,10 @@ export type DshProviderProfile = {
 		name?: string;
 		contextWindow?: number;
 		maxTokens?: number;
+		/** DSH/pi-ai 模型输入模态，例如 ["text", "image"]。 */
+		input?: string[];
+		/** DSH 的思考档位 → provider wire 值映射；false 表示明确不支持。 */
+		reasoningEfforts?: false | Record<string, string | null>;
 	}>;
 };
 
@@ -82,7 +86,22 @@ function asFiniteNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-/** DSH 模型行只保留目录字段；pi 的 cost/compat/thinking 对端没有对应槽。 */
+function asStringList(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const items = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+	return items.length > 0 ? items : undefined;
+}
+
+function asReasoningEfforts(value: unknown): Record<string, string | null> | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const efforts: Record<string, string | null> = {};
+	for (const [level, wireValue] of Object.entries(value)) {
+		if (typeof wireValue === "string" || wireValue === null) efforts[level] = wireValue;
+	}
+	return Object.keys(efforts).length > 0 ? efforts : undefined;
+}
+
+/** Pi 模型目录 → DSH 模型条目；保留 DSH 可消费的模态与思考档位映射。 */
 export function dshModelsFromPi(models: PiModelItem[] | undefined): DshProviderProfile["models"] {
 	if (!Array.isArray(models) || models.length === 0) return undefined;
 	const rows: NonNullable<DshProviderProfile["models"]> = [];
@@ -94,6 +113,13 @@ export function dshModelsFromPi(models: PiModelItem[] | undefined): DshProviderP
 		if (contextWindow !== undefined) row.contextWindow = contextWindow;
 		const maxTokens = asFiniteNumber(model.maxTokens);
 		if (maxTokens !== undefined) row.maxTokens = maxTokens;
+		const input = asStringList(model.input);
+		if (input) row.input = input;
+		// pi 的 thinkingLevelMap 与 DSH 的 reasoningEfforts 都是「规范档位 → wire 值」；
+		// 迁移时原样保留，不能只搬模型名后让 DSH 丢掉思考能力。
+		const reasoningEfforts = asReasoningEfforts(model.thinkingLevelMap);
+		if (model.reasoning === true && reasoningEfforts) row.reasoningEfforts = reasoningEfforts;
+		else if (model.reasoning === false) row.reasoningEfforts = false;
 		rows.push(row);
 	}
 	return rows.length > 0 ? rows : undefined;
@@ -110,6 +136,16 @@ export function piModelsFromDsh(models: DshProviderProfile["models"]): PiModelIt
 		if (contextWindow !== undefined) row.contextWindow = contextWindow;
 		const maxTokens = asFiniteNumber(model.maxTokens);
 		if (maxTokens !== undefined) row.maxTokens = maxTokens;
+		const input = asStringList(model.input);
+		if (input) row.input = input;
+		if (model.reasoningEfforts === false) row.reasoning = false;
+		else {
+			const thinkingLevelMap = asReasoningEfforts(model.reasoningEfforts);
+			if (thinkingLevelMap) {
+				row.reasoning = true;
+				row.thinkingLevelMap = thinkingLevelMap;
+			}
+		}
 		rows.push(row);
 	}
 	return rows;
@@ -191,6 +227,32 @@ export function parseDshSettingsDocument(raw: unknown): {
 	};
 }
 
+function normalizeDshModels(value: unknown): DshProviderProfile["models"] {
+	if (!Array.isArray(value)) return undefined;
+	const models: NonNullable<DshProviderProfile["models"]> = [];
+	for (const item of value) {
+		if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+		const rec = item as Record<string, unknown>;
+		const id = typeof rec.id === "string" ? rec.id.trim() : "";
+		if (!id) continue;
+		const model: NonNullable<DshProviderProfile["models"]>[number] = { id };
+		if (typeof rec.name === "string" && rec.name.trim()) model.name = rec.name.trim();
+		const contextWindow = asFiniteNumber(rec.contextWindow);
+		if (contextWindow !== undefined) model.contextWindow = contextWindow;
+		const maxTokens = asFiniteNumber(rec.maxTokens);
+		if (maxTokens !== undefined) model.maxTokens = maxTokens;
+		const input = asStringList(rec.input);
+		if (input) model.input = input;
+		if (rec.reasoningEfforts === false) model.reasoningEfforts = false;
+		else {
+			const reasoningEfforts = asReasoningEfforts(rec.reasoningEfforts);
+			if (reasoningEfforts) model.reasoningEfforts = reasoningEfforts;
+		}
+		models.push(model);
+	}
+	return models.length > 0 ? models : undefined;
+}
+
 function normalizeDshProfile(value: unknown): DshProviderProfile {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return {};
 	const rec = value as Record<string, unknown>;
@@ -201,10 +263,8 @@ function normalizeDshProfile(value: unknown): DshProviderProfile {
 	if (typeof rec.apiKeyEnv === "string" && rec.apiKeyEnv.trim()) profile.apiKeyEnv = rec.apiKeyEnv.trim();
 	const headers = asStringRecord(rec.headers);
 	if (headers) profile.headers = headers;
-	if (Array.isArray(rec.models)) {
-		const models = dshModelsFromPi(rec.models as PiModelItem[]);
-		if (models) profile.models = models;
-	}
+	const models = normalizeDshModels(rec.models);
+	if (models) profile.models = models;
 	return profile;
 }
 

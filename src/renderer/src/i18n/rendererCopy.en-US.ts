@@ -1026,6 +1026,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.dsh.modelsInherited": "Using adapter default models",
   "config.dsh.modelsCustomized": "{count} custom models",
   "config.dsh.modelsEmptyHint": "Leave empty to use the adapter's default catalog; model IDs outside it can still be sent.",
+  "config.dsh.defaultImageInput": "New models support image input by default",
   "config.dsh.addModel": "Add model",
   "config.dsh.removeModel": "Remove this model",
   "config.dsh.modelCapacity": "Capacity (context window / max output)",

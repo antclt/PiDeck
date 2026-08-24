@@ -31,6 +31,7 @@ function loadDshModelsModule() {
 								name: model.name ?? model.id,
 								contextWindow: model.contextWindow,
 								maxTokens: model.maxTokens,
+								input: model.input,
 							}));
 					},
 				};
@@ -134,14 +135,14 @@ test("appending fetched models keeps existing rows, skips duplicates, and copies
 		catalog: [{ id: "catalog-only" }],
 		fetched: [
 			{ id: "already", name: "Already Remote" },
-			{ id: "new-a", name: "New A", contextWindow: 256000, maxTokens: 32000 },
+			{ id: "new-a", name: "New A", contextWindow: 256000, maxTokens: 32000, input: ["text", "image"] },
 			{ id: "new-b", name: "New B" },
 		],
 		selectedIds: ["already", "new-a"],
 	});
 	assert.deepEqual(asJson(next), [
 		{ id: "already", name: "Already" },
-		{ id: "new-a", name: "New A", contextWindow: 256000, maxTokens: 32000 },
+		{ id: "new-a", name: "New A", contextWindow: 256000, maxTokens: 32000, input: ["text", "image"] },
 	]);
 });
 

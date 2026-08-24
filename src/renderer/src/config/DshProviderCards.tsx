@@ -743,6 +743,8 @@ export function PiAiProvidersCard(props: {
 										api={api}
 										apiKeyDraft={keyDrafts[entry.key]}
 										credentialRef={keyRef}
+										defaultInput={entryValue(entry.key, ["defaultInput"])}
+										onDefaultInputChange={(input) => updateEntry(entry.key, ["defaultInput"], input)}
 										onChange={(nextModels) => setProviderModels(entry.key, nextModels)}
 									/>
 								</div>

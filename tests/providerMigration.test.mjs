@@ -28,16 +28,48 @@ test("pi custom gateway maps into llm-pi-ai with catalog fields only", () => {
     apiKey: "sk-test",
     headers: { "User-Agent": "pideck" },
     models: [
-      { id: "grok-4.6", name: "grok-4.6", contextWindow: 128000, cost: { input: 1 } },
+      {
+        id: "grok-4.6",
+        name: "grok-4.6",
+        contextWindow: 128000,
+        input: ["text", "image"],
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+        cost: { input: 1 },
+      },
     ],
   });
   assert.equal(dsh.namespace, "llm-pi-ai");
+
+test("dsh custom model round-trips input and reasoningEfforts into Pi metadata", () => {
+  const pi = mapping.dshToPiSnapshot({
+    name: "组",
+    namespace: "llm-pi-ai",
+    profile: {
+      api: "openai-responses",
+      models: [{
+        id: "gpt-5.6-terra",
+        input: ["text", "image"],
+        reasoningEfforts: { xhigh: "xhigh", max: "max" },
+      }],
+    },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(pi.models)), [{
+    id: "gpt-5.6-terra",
+    input: ["text", "image"],
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+  }]);
+});
+
   assert.equal(dsh.profile.baseURL, "https://api.weishiair.de/v1");
   assert.equal(dsh.profile.apiKeyEnv, "WEISHIAIR_API_KEY");
   assert.equal(dsh.profile.models?.length, 1);
   assert.equal(dsh.profile.models?.[0]?.id, "grok-4.6");
   assert.equal(dsh.profile.models?.[0]?.name, "grok-4.6");
   assert.equal(dsh.profile.models?.[0]?.contextWindow, 128000);
+  assert.deepEqual(dsh.profile.models?.[0]?.input, ["text", "image"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(dsh.profile.models?.[0]?.reasoningEfforts)), { xhigh: "xhigh", max: "max" });
   assert.equal(dsh.profile.models?.[0]?.cost, undefined);
 });
 

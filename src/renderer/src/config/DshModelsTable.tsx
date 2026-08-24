@@ -8,6 +8,7 @@
  * 行 key 用 index（id 是行内可编辑字段，用它做 key 会导致每次输入重建行、失焦）。
  */
 import { useState } from "react";
+import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
@@ -18,7 +19,22 @@ export type DshModelRow = {
 	name?: unknown;
 	contextWindow?: unknown;
 	maxTokens?: unknown;
+	input?: unknown;
+	reasoningEfforts?: unknown;
 };
+
+function imageInputEnabled(input: unknown): boolean {
+	return Array.isArray(input) && input.includes("image");
+}
+
+function setImageInput(input: unknown, enabled: boolean): string[] {
+	const current = Array.isArray(input)
+		? input.filter((item): item is string => typeof item === "string" && item.length > 0)
+		: ["text"];
+	const withoutImage = current.filter((item) => item !== "image");
+	if (!enabled) return withoutImage.includes("text") ? withoutImage : ["text", ...withoutImage];
+	return withoutImage.includes("text") ? [...withoutImage, "image"] : ["text", ...withoutImage, "image"];
+}
 
 export function ModelsTable(props: {
 	/** 当前模型数组（现值，行内编辑由父级 draft 覆盖）。 */
@@ -161,6 +177,14 @@ export function ModelsTable(props: {
 													onUpdate(index, "maxTokens", Number.isFinite(next) ? next : undefined);
 												}}
 											/>
+										</label>
+										<label className="col-span-full flex items-center gap-2 text-micro text-muted-foreground">
+											<Checkbox
+												checked={imageInputEnabled(model.input)}
+												disabled={!writable}
+												onCheckedChange={(checked) => onUpdate(index, "input", setImageInput(model.input, checked === true))}
+											/>
+											{t("settings.vision.supportsImages")}
 										</label>
 									</div>
 								)}
