@@ -77,8 +77,9 @@ import {
 } from "../components/app/AppUtils";
 import { SESSION_TAB_DRAG_MIME } from "../utils/sessionSplitEdge";
 import {
-  findDirectoryNodeByRelativePath,
   mergeFileTreeChildren,
+  resolveAtDrillDirectory,
+  shouldLoadFullTreeForAtSearch,
 } from "../utils/fileTreeLazy";
 import {
   extractPastedPath,
@@ -368,6 +369,13 @@ export function useSessionComposerController(
   // 与在途加载集合成对出现；目录不在任一集合才能发新请求。
   const loadedDirPathsRef = useRef<Set<string>>(new Set());
   const loadingDirPathsRef = useRef<Set<string>>(new Set());
+  // @ 纯文件名搜索的整树后台加载：按 projectId 隔离的单个状态，每项目最多触发
+  // 一次（成功或失败都算尝试过），避免用户每敲一个新关键词都重扫整棵目录树。
+  const deepTreeStateRef = useRef<{ projectId: string; loaded: boolean; loading: boolean }>({
+    projectId: "",
+    loaded: false,
+    loading: false,
+  });
   const templateKey = `${sessionId}:${record?.projectPath ?? ""}`;
   const [templateState, setTemplateState] = useState<{
     key: string;
@@ -716,22 +724,11 @@ export function useSessionComposerController(
   // @ 引用向下钻取：随输入懒加载子目录（maxDepth 0 只拉一层，与文件抽屉同语义）。
   // 修复 maxDepth 0 化后只能引用到项目根一层（71d27ed1 为保主进程响应把 8 层递归改成
   // 根层，但没补抽屉那套展开逻辑，导致 @src/xxx 永远匹配不到深层文件）。
-  // 目标目录 = 查询中最后一个 / 之前的相对路径；整段一次性输入（粘贴）时
-  // 回退到顶层目录逐级补，靠 files 依赖在每次 merge 后重新评估，链条自动向前推进。
   useEffect(() => {
     if (!record?.projectId) return;
     const trigger = detectTrigger(draft, cursor, validSessionRefs);
     if (!trigger || trigger.char !== "@") return;
-    const query = trigger.query;
-    const slash = query.lastIndexOf("/");
-    // 查询还没进入子目录（无 / 且整段不是目录名）时不钻取，等用户继续输入
-    const dirRel = slash > 0 ? query.slice(0, slash) : query;
-    if (!dirRel) return;
-    const firstSegment = dirRel.split("/")[0];
-    // 优先精确命中查询目录；一次性输入（粘贴）时先拉顶层目录逐级展开
-    const dirNode =
-      findDirectoryNodeByRelativePath(files, dirRel) ??
-      (slash > 0 ? findDirectoryNodeByRelativePath(files, firstSegment) : undefined);
+    const dirNode = resolveAtDrillDirectory(trigger.query, files);
     if (!dirNode) return;
     // 已有 children 数组 = 子项已加载（含空目录），不重复请求
     if (Array.isArray(dirNode.children) || loadingDirPathsRef.current.has(dirNode.path)) {
@@ -755,6 +752,47 @@ export function useSessionComposerController(
       current = false;
     };
   }, [cursor, draft, files, record?.projectId, validSessionRefs]);
+
+  // @ 纯文件名搜索（无 /，如 @index）：懒加载缺少锚点目录，必须一次性拿到整树
+  // 才能让模糊搜索覆盖深层文件（恢复 71d27ed1 之前的深度搜索能力）。
+  // 只在用户确实在搜索（长度 ≥2）且每项目只触发一次；整树合并后所有目录
+  // 都有 children 数组，下钻 effect 的 Array.isArray 门自然短路，不会重复拉。
+  useEffect(() => {
+    if (!record?.projectId) return;
+    // 切到新项目：重建状态（不 return，继续按新状态评估是否触发）
+    const state = deepTreeStateRef.current;
+    if (state.projectId !== record.projectId) {
+      deepTreeStateRef.current = { projectId: record.projectId, loaded: false, loading: false };
+    }
+    if (deepTreeStateRef.current.loaded || deepTreeStateRef.current.loading) return;
+    const trigger = detectTrigger(draft, cursor, validSessionRefs);
+    if (!trigger || trigger.char !== "@" || !shouldLoadFullTreeForAtSearch(trigger.query)) {
+      return;
+    }
+    // 标记在途后即便本 effect 因继续输入被重新评估，loading 门也会挡住重复请求
+    deepTreeStateRef.current.loading = true;
+    void desktopApi.files.list(record.projectId, { maxDepth: 8 })
+      .then((next) => {
+        // 用项目比对而非 current 标志：输入过程中的每个按键都会触发本 effect
+        // 重新评估并清理旧闭包，但请求仍属于当前项目——数据不该被丢弃，
+        // 否则快速打字会连续浪费整树扫描（重扫风暴）。只有切走项目才丢弃。
+        if (deepTreeStateRef.current.projectId !== record.projectId) return;
+        // 整树是根层清单的超集且目录均带 children，整体替换最省事：
+        // 已下钻目录的数据都在里面（幂等），无需再逐目录 merge。
+        setFiles(next);
+      })
+      .catch(() => {
+        // 超大目录（FILE_TREE_DIRECTORY_TOO_LARGE）/权限问题：保留已加载部分；
+        // 同样标记为已尝试，避免每个关键词都重扫整个项目。
+      })
+      .finally(() => {
+        // 只有请求仍属于当前项目才写状态：切走后的旧闭包不能污染新项目标记。
+        if (deepTreeStateRef.current.projectId === record.projectId) {
+          deepTreeStateRef.current.loading = false;
+          deepTreeStateRef.current.loaded = true;
+        }
+      });
+  }, [cursor, draft, record?.projectId, validSessionRefs]);
   const suggestionAnchorStyle = useMemo<CSSProperties | undefined>(() => {
     if (!suggestionsOpen) return undefined;
     const menuWidth = Math.min(520, window.innerWidth - 120);

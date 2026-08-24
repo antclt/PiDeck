@@ -1083,15 +1083,22 @@
 }
 
 /* 模板预览弹框 */
+/* 预览区占满弹框剩余高度（弹框已受 max-h 约束），按钮行固定、正文内部滚动，
+   避免小窗口下弹框按正文高度撑出屏幕；flex 列布局让 pre 通过 overflow 自管滚动，
+   而不是把滚动交给外层容器（否则会出现双滚动条 / 边框与内容错位的视觉问题）。 */
 .picker-preview-inline {
   flex: 1;
   min-height: 0;
   padding: 12px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .picker-preview-content {
   margin: 0;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 12px;
   font-family: var(--font-family-mono);
   font-size: var(--font-size-caption);

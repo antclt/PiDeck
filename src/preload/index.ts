@@ -1294,11 +1294,16 @@ const api = {
 				ipcChannels.configImport,
 				packageJson,
 			) as Promise<{ valid: boolean; error?: string }>,
-		/** 从 provider 的 baseUrl + apiKey 拉取可用模型列表 */
-		fetchModels: (baseUrl: string, apiKey: string, apiType?: string) =>
+		/** 从 provider 的 baseUrl + apiKey 拉取可用模型列表；headers 允许 provider 自定义（含 User-Agent） */
+		fetchModels: (
+			baseUrl: string,
+			apiKey: string,
+			apiType?: string,
+			headers?: Record<string, string>,
+		) =>
 			ipcRenderer.invoke(
 				ipcChannels.configFetchModels,
-				{ baseUrl, apiKey, apiType },
+				{ baseUrl, apiKey, apiType, headers },
 			) as Promise<{
 				success: boolean;
 				models?: FetchedModel[];

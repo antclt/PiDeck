@@ -55,6 +55,18 @@ export function WebChatApp() {
 	const [connected, setConnected] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
 	const [models, setModels] = useState<AvailableModel[]>([]);
+	const [modelsRefreshing, setModelsRefreshing] = useState(false);
+	// 模型选择器刷新按钮：绕过缓存重新拉取／api/models?force=1；失败保留旧列表，避免误清空。
+	const refreshModels = async () => {
+		setModelsRefreshing(true);
+		try {
+			setModels(await fetchModels(true));
+		} catch {
+			// 刷新失败保留上一次列表，仅结束转圈
+		} finally {
+			setModelsRefreshing(false);
+		}
+	};
 	const [commandError, setCommandError] = useState<string | null>(null);
 	// 首页（无会话）时选择的模型/思考级别：暂存为待用偏好，随下一次新建会话生效
 	const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
@@ -427,6 +439,8 @@ export function WebChatApp() {
 					thinkingLevel={activeSession?.thinkingLevel ?? pendingThinkingLevel ?? undefined}
 					models={models}
 					backend={activeSession?.backend}
+					refreshingModels={modelsRefreshing}
+					onRefreshModels={() => void refreshModels()}
 					onModelChange={(model) => void handleModelChange(model)}
 					onThinkingChange={(level) => void handleThinkingChange(level)}
 					onOpenDshTools={() => setDshToolsOpen(true)}

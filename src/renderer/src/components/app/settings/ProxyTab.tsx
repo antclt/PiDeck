@@ -1,6 +1,6 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { AppSettings, AvailableModel } from "../../../../../shared/types";
-import { Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { Checkbox } from "../../ui-shadcn/checkbox";
@@ -45,6 +45,22 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
   const [availableModelList, setAvailableModelList] = useState<AvailableModel[] | null>(null);
   const [modelSearch, setModelSearch] = useState("");
   const [proxyListLoading, setProxyListLoading] = useState(false);
+  // 手动刷新：绕过缓存重新 fork pi --list-models（白名单候选加载不出来时重试）。
+  const [proxyListRefreshing, setProxyListRefreshing] = useState(false);
+  const refreshModelCandidates = useCallback(async (force = false) => {
+    if (force) setProxyListRefreshing(true);
+    else setProxyListLoading(true);
+    try {
+      const models = await desktopApi.projects.listModelsReport(undefined, force).then((r) => r.models);
+      // 无 provider 的模型无法参与 provider/modelId 匹配（策略层直接跳过），不进名单候选。
+      setAvailableModelList(models.filter((m) => m.provider && m.id));
+    } catch {
+      setAvailableModelList([]);
+    } finally {
+      setProxyListLoading(false);
+      setProxyListRefreshing(false);
+    }
+  }, []);
   useEffect(() => {
     let cancelled = false;
     setProxyListLoading(true);
@@ -182,6 +198,18 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
                     disabled={proxyListLoading}
                   />
                 </div>
+                {/* 刷新候选列表：绕过缓存重新拉取模型列表（与会话模型选择器刷新按钮同源能力） */}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label={t("app.modelPickerRefresh")}
+                  title={proxyListRefreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRefresh")}
+                  disabled={proxyListRefreshing || proxyListLoading}
+                  onClick={() => void refreshModelCandidates(true)}
+                >
+                  <RefreshCw size={14} className={proxyListRefreshing ? "animate-spin" : ""} aria-hidden="true" />
+                </Button>
                 <div className="flex flex-wrap items-center gap-2 text-micro text-muted-foreground/80">
                   {hasModelFilter ? (
                     <span>{t("settings.piProxyModelsSelected", { count: selectedModels.size })}</span>

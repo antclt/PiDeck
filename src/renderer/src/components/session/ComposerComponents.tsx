@@ -708,7 +708,7 @@ export function PickerDialog(props: {
 			<DialogContent
 				showCloseButton={false}
 				className={cn(
-					"flex flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(560px,calc(100vw-48px))]",
+					"flex max-h-[min(680px,calc(100vh-48px))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(560px,calc(100vw-48px))]",
 					props.className,
 				)}
 			>

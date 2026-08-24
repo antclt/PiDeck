@@ -67,13 +67,19 @@ export function VisionBridgeSettingsTab(props: {
 	}, []);
 
 	// 打开模型选择器时拉取全量模型（复用现有 ModelPicker 的数据源）；
-	// 挂载时也拉一次（模型列表有全局缓存，开销小），用于展示当前已选模型的能力
+	// 挂载时也拉一次（模型列表有全局缓存，开销小），用于展示当前已选模型的能力。
+	// refreshing/reload：手动刷新绕过缓存重新 fork pi --list-models，
+	// 模型列表加载不出来时选择器里的刷新按钮可立即重试。
 	const [models, setModels] = useState<AvailableModel[]>([]);
-	const loadModels = useCallback(async () => {
+	const [modelsRefreshing, setModelsRefreshing] = useState(false);
+	const loadModels = useCallback(async (force = false) => {
+		if (force) setModelsRefreshing(true);
 		try {
-			setModels(await desktopApi.projects.listModels(undefined));
+			setModels(await desktopApi.projects.listModelsReport(undefined, force).then((r) => r.models));
 		} catch {
 			setModels([]);
+		} finally {
+			setModelsRefreshing(false);
 		}
 	}, []);
 
@@ -397,6 +403,8 @@ export function VisionBridgeSettingsTab(props: {
 			{pickerOpen && (
 				<ModelPicker
 					models={models}
+					refreshing={modelsRefreshing}
+					onRefresh={() => void loadModels(true)}
 					current={draft?.provider ? { provider: draft.provider, modelId: draft.model } : undefined}
 					favoriteModels={[]}
 					onToggleFavorite={() => undefined}
