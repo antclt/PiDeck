@@ -375,7 +375,7 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 		// 标题前缀 [PI_DECK_PLAN_NEXT]：桌面端识别后换专用 UI/取消提示。
 		// 选项用「标题|说明」编码，桌面端拆成主副文案；前缀仍用于 startsWith 匹配。
 		const PLAN_NEXT_TITLE =
-			"[PI_DECK_PLAN_NEXT] 计划草案已就绪（" + todoItems.length + " 步）";
+			"[PI_DECK_PLAN_NEXT] 计划草案已就绪（" + todoItems.length + " 步）\n\n" + todoListText;
 		const PLAN_OPT_EXECUTE = "开始执行|恢复写权限，按步骤改代码并勾进度";
 		// 「先不执行」只结束本轮、保持只读；不会自动再分析，需用户再发消息。
 		const PLAN_OPT_CONTINUE = "先不执行|结束本轮，保持只读；再发消息后 AI 才继续";

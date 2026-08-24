@@ -108,6 +108,24 @@ test("buildAskResponse: 取消回传 cancelled", () => {
 	assert.equal(json(buildAskResponse("input", undefined, { cancelled: true })), json({ cancelled: true }));
 });
 
+test("splitAskOption: 保留普通选项并拆分标题与说明", () => {
+	const { splitAskOption, formatAskTitle } = loadAskUi();
+	assert.equal(JSON.stringify(splitAskOption("开始执行|恢复写权限，按步骤改代码并勾进度")), JSON.stringify({
+		label: "开始执行",
+		description: "恢复写权限，按步骤改代码并勾进度",
+	}));
+	assert.equal(JSON.stringify(splitAskOption("包含 | 竖线的普通文案")), JSON.stringify({
+		label: "包含",
+		description: "竖线的普通文案",
+	}));
+	assert.equal(JSON.stringify(splitAskOption("普通选项")), JSON.stringify({ label: "普通选项" }));
+	assert.equal(JSON.stringify(splitAskOption("模型 A — 适合长上下文任务")), JSON.stringify({
+		label: "模型 A",
+		description: "适合长上下文任务",
+	}));
+	assert.equal(formatAskTitle("[PI_DECK_PLAN_NEXT] 计划草案已就绪\n\n1. 读取代码"), "计划草案已就绪\n\n1. 读取代码");
+});
+
 test("serializeBatchAnswers: 混合题型序列化并保留 label/wasCustom", () => {
 	const { serializeBatchAnswers, batchAnswerLabel } = loadAskUi();
 	const questions = [

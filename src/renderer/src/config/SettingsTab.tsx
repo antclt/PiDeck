@@ -458,7 +458,7 @@ function EnabledModelsInput(props: {
 
 	return (
 		<div ref={containerRef} className="relative min-w-0 flex-1">
-			<div className="flex min-h-[38px] cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-bg-panel px-2.5 py-[5px] transition-colors duration-150 hover:border-border-strong" onClick={() => setOpen(true)}>
+			<div className="flex min-h-[38px] cursor-pointer flex-wrap items-center gap-1.5 rounded-sm border border-border-subtle bg-popover px-2.5 py-[5px] transition-colors duration-150 hover:border-border-strong" onClick={() => setOpen(true)}>
 				{[...selected].map((fullKey) => (
 					<span key={fullKey} className="inline-flex h-6 items-center gap-[3px] rounded-full border border-[color-mix(in_srgb,var(--color-accent)_24%,var(--color-border-subtle))] bg-[color:color-mix(in_srgb,var(--color-accent)_8%,var(--color-bg-panel))] pl-[9px] pr-[5px] font-mono text-xs leading-[18px] whitespace-nowrap text-text-primary">
 						<span>{fullKey}</span>
@@ -483,14 +483,14 @@ function EnabledModelsInput(props: {
 			</div>
 
 			{open && (
-				<div className="absolute top-[calc(100%+2px)] right-0 left-0 z-[100] overflow-hidden rounded-md border border-border-subtle bg-bg-panel shadow-[var(--shadow-popover)]">
+				<div className="absolute top-[calc(100%+2px)] right-0 left-0 z-[100] overflow-hidden rounded-md border border-border-subtle bg-popover text-popover-foreground shadow-[var(--shadow-popover)]">
 					<div className="border-b border-border-subtle p-2">
 						<Input
 							autoFocus
 							value={filter}
 							onChange={(e) => setFilter(e.target.value)}
 							placeholder={t("config.settings.enabledModelsSearchPlaceholder")}
-							className="h-8 w-full rounded-sm border border-border-subtle bg-bg-panel px-2.5 text-control text-text-primary outline-none placeholder:text-text-tertiary focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+							className="h-8 w-full rounded-sm border border-border-subtle bg-popover px-2.5 text-control text-text-primary outline-none placeholder:text-text-tertiary focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 						/>
 					</div>
 					<div className="max-h-[240px] overflow-y-auto">
@@ -499,7 +499,7 @@ function EnabledModelsInput(props: {
 							<div className="px-2 py-0.5">
 								<button
 									type="button"
-									className={`flex w-full cursor-pointer items-center gap-2 rounded-sm border border-dashed border-[var(--color-accent)] bg-[color:color-mix(in_srgb,var(--color-accent)_6%,transparent)] px-2 py-[7px] text-control text-text-primary transition-colors duration-100 hover:bg-[color:color-mix(in_srgb,var(--color-accent)_12%,transparent)]${selected.has(filter) ? " border-[var(--color-danger)] bg-[color:color-mix(in_srgb,var(--color-danger)_6%,transparent)]" : ""}`}
+									className={`flex w-full cursor-pointer items-center gap-2 rounded-sm border border-dashed border-[var(--color-accent)] bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-popover))] px-2 py-[7px] text-control text-text-primary transition-colors duration-100 hover:bg-[color:color-mix(in_srgb,var(--color-accent)_12%,transparent)]${selected.has(filter) ? " border-[var(--color-danger)] bg-[color:color-mix(in_srgb,var(--color-danger)_6%,var(--color-bg-popover))]" : ""}`}
 									onClick={() => toggleModel(filter)}
 								>
 									<span className="flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border-[1.5px] border-border-strong text-[color:var(--color-accent)] transition-[border-color,background-color] duration-100 group-hover:border-[var(--color-accent)]">

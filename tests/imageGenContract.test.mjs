@@ -66,8 +66,8 @@ test("ComposerAgentMode 含 imagegen 与 goal", () => {
 test("composer 生图底栏用独立配置，不读会话 LLM", () => {
 	const options = readFileSync("src/renderer/src/components/session/ComposerImageGenOptions.tsx", "utf8");
 	const area = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
+	const settingsModal = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
 	const configUi = readFileSync("src/renderer/src/components/config/ImageGenSection.tsx", "utf8");
-	const configModal = readFileSync("src/renderer/src/ConfigModal.tsx", "utf8");
 	assert.match(composerComponents, /imageGenOptions\?:/);
 	assert.match(composerComponents, /ComposerImageGenOptions/);
 	assert.match(composerComponents, /isImageGenMode \? null/);
@@ -86,8 +86,8 @@ test("composer 生图底栏用独立配置，不读会话 LLM", () => {
 	assert.match(controller, /provider: provider\.id/);
 	assert.doesNotMatch(controller, /provider: model\.provider/);
 	assert.doesNotMatch(controller, /imageGenArkFieldsSupported/);
-	assert.match(configModal, /value="imagegen"/);
-	assert.match(configModal, /config\.nav\.imagegen/);
+	assert.match(settingsModal, /value="imagegen"/);
+	assert.match(settingsModal, /settings\.tabs\.imagegen/);
 	assert.match(configUi, /config\.imagegen\.extraParams/);
 	assert.doesNotMatch(configUi, /kindOpenai|kindArk|IMAGE_GEN_KINDS/);
 });
@@ -160,8 +160,10 @@ test("i18n：zh/en 生图模式与错误文案 key 一致", () => {
 	const enKeys = extract(en);
 	assert.ok(zhKeys.length >= 8, `zh imagegen keys: ${zhKeys.length}`);
 	assert.deepEqual(zhKeys, enKeys);
-	assert.doesNotMatch(zh, /settings\.tabs\.imagegen/);
-	assert.doesNotMatch(en, /imagegen\.button/);
+	assert.match(zh, /settings\.tabs\.imagegen/);
+	assert.match(en, /settings\.tabs\.imagegen/);
+	assert.match(zh, /settings\.tabs\.imagegenDesc/);
+	assert.match(en, /settings\.tabs\.imagegenDesc/);
 	assert.match(zh, /config\.nav\.imagegen/);
 	assert.match(zh, /config\.imagegen\.paramWatermark/);
 	assert.match(zh, /"imagegen\.error\.http": "生图服务返回错误（\{detail\}）"/);

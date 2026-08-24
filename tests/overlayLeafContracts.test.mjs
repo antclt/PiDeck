@@ -104,6 +104,8 @@ const askUiMock = {
         : { value: value ?? "" }
   ),
   serializeBatchAnswers: () => "{}",
+  formatAskTitle: (title) => title.replace(/^\[PI_DECK_PLAN_NEXT\]\s*/u, "").trim(),
+  splitAskOption: (option) => ({ label: option }),
 };
 
 test("runtime responder rejects old generation and sends cancelled response with binding", async () => {

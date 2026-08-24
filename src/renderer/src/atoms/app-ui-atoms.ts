@@ -19,7 +19,8 @@ export type SettingsTabId =
 	| "storage"
 	| "usage"
 	| "process"
-	| "vision";
+	| "vision"
+	| "imagegen";
 
 /** 常用设置内部可滚动分区；目前只有 Git 摘要需要从面板直达。 */
 export type SettingsSectionId = "git";

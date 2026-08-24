@@ -30,6 +30,30 @@ const tailwind = readFileSync(
   "src/renderer/src/styles/tailwind.css",
   "utf8",
 );
+const timelineStyles = readFileSync(
+  "src/renderer/src/styles/timeline.css",
+  "utf8",
+);
+const toolCards = readFileSync(
+  "src/renderer/src/components/session/ToolCallComponents.tsx",
+  "utf8",
+);
+const webTimeline = readFileSync(
+  "src/renderer/src/web/WebTimeline.tsx",
+  "utf8",
+);
+
+test("Ask cards keep long content readable in every render path", () => {
+  assert.match(overlay, /whitespace-normal break-words/);
+  assert.match(toolCards, /whitespace-normal break-words font-mono text-caption/);
+  assert.match(toolCards, /formatAskTitle\(item\.question/);
+  assert.match(webTimeline, /formatAskTitle\(props\.request\.title/);
+  assert.match(webTimeline, /flex-col items-start justify-center whitespace-normal/);
+  assert.match(timelineStyles, /\.ask-question-card-option \{[\s\S]*?height: auto;[\s\S]*?min-height: 28px;/);
+  assert.match(timelineStyles, /\.ask-question-card-options-confirm \.ask-question-card-option \{[\s\S]*?width: auto;[\s\S]*?min-width: 80px;/);
+  // Ask 的展开内容必须交给会话时间线滚动，卡片本身不能因固定高度裁掉步骤或说明。
+  assert.match(timelineStyles, /\.tool-card \{[\s\S]*?overflow: visible;/);
+});
 
 /**
  * Ask 是会话级阻塞交互，不应参与 composer 的 flex 高度分配；否则 Ask 展开时会和

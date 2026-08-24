@@ -498,10 +498,13 @@ export function ComposerBottomBar(props: {
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="start" sideOffset={4} className="min-w-44">
-							<DropdownMenuItem onSelect={() => props.onAttachFile()}>
-								<Paperclip size={14} strokeWidth={2} aria-hidden="true" />
-								{t("app.composerAddAttach")}
-							</DropdownMenuItem>
+							{/* 生图模式用图片粘贴添加参考图，不需要文件选择器上传附件 */}
+							{!isImageGenMode && (
+								<DropdownMenuItem onSelect={() => props.onAttachFile()}>
+									<Paperclip size={14} strokeWidth={2} aria-hidden="true" />
+									{t("app.composerAddAttach")}
+								</DropdownMenuItem>
+							)}
 							<DropdownMenuItem onSelect={() => props.onPickSkill()}>
 								<Sparkles size={14} strokeWidth={2} aria-hidden="true" />
 								{t("app.composerAddSkill")}

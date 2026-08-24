@@ -458,7 +458,8 @@
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  overflow: hidden;
+  /* 内容型 Ask 工具卡不能裁掉长问题/答案；展开内容由时间线滚动容器承载。 */
+  overflow: visible;
 }
 .tool-card--running {
   /* 仅淡入：无 translateY，避免与 stick-to-bottom 打架；减轻工具行「咔」一下出现 */
@@ -1107,19 +1108,31 @@ body.ask-dialog-open .ask-question-card.pending {
 }
 .ask-question-card-options {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--space-2);
   margin-top: 10px;
+  min-width: 0;
 }
 .ask-question-card-options-confirm {
   flex-direction: row;
+  flex-wrap: wrap;
+}
+
+/* Plan/Ask 标题可能包含完整步骤，保持换行而不是把后半段折叠到状态胶囊下方。 */
+.ask-inline-bar .ask-inline-bar-option {
+  min-width: 0;
 }
 .ask-question-card-option {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: center;
-  height: 28px;
-  padding: 0 12px;
+  gap: 2px;
+  min-height: 28px;
+  height: auto;
+  padding: 6px 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-subtle);
   background: var(--color-chat-control-bg);
@@ -1144,6 +1157,24 @@ body.ask-dialog-open .ask-question-card.pending {
 .ask-question-card-option:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
+}
+.ask-question-card-option-label,
+.ask-question-card-option-desc {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  text-align: left;
+}
+.ask-question-card-option-label {
+  color: inherit;
+  font-weight: 500;
+}
+.ask-question-card-option-desc {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-caption);
+  font-weight: 400;
+  line-height: var(--line-height-caption);
 }
 .ask-question-card-option-yes {
   border-color: var(--color-accent);
@@ -1375,11 +1406,19 @@ body.ask-dialog-open .ask-question-card.pending {
   margin-top: 6px;
 }
 .ask-question-card-option {
-  height: 26px;
-  padding: 0 10px;
+  height: auto;
+  min-height: 28px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
   font-size: var(--font-size-caption);
   line-height: var(--line-height-caption);
+}
+.ask-question-card-options-confirm .ask-question-card-option {
+  width: auto;
+  min-width: 80px;
+  flex: 0 1 auto;
+  align-items: center;
+  text-align: center;
 }
 .ask-question-card-input-row {
   gap: 6px;

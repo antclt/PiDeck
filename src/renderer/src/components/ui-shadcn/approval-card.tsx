@@ -58,7 +58,7 @@ export function ApprovalCard(props: {
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-auto min-w-0 flex-1 justify-start gap-1.5 px-0 py-0.5 text-left hover:bg-transparent"
+						className="h-auto min-w-0 flex-1 items-start justify-start gap-1.5 whitespace-normal px-0 py-0.5 text-left hover:bg-transparent"
 						aria-label={props.title}
 					>
 						<ChevronDown
@@ -67,8 +67,8 @@ export function ApprovalCard(props: {
 						/>
 						<ClipboardCheck className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
 						<span className="min-w-0 flex-1">
-							<span className="block truncate text-caption font-semibold text-foreground">{props.title}</span>
-							{props.description ? <span className="block truncate text-micro font-normal text-muted-foreground">{props.description}</span> : null}
+							<span className="block whitespace-pre-wrap break-words text-caption font-semibold leading-relaxed text-foreground">{props.title}</span>
+							{props.description ? <span className="block whitespace-pre-wrap break-words text-micro font-normal leading-relaxed text-muted-foreground">{props.description}</span> : null}
 						</span>
 						{props.status ? (
 							<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-px text-micro font-medium text-primary">

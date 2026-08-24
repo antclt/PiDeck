@@ -79,6 +79,34 @@ export function batchAnswerLabel(value: BatchAnswerValue): string {
 }
 
 /**
+ * 解码扩展为桌面端约定的「标题|说明」选项。
+ * Plan Mode 用这个轻量协议给“开始执行/先不执行/修改计划”补充解释；
+ * 普通 ask 选项没有分隔符时保持原文，避免误拆用户输入中的竖线。
+ */
+export function splitAskOption(option: string): { label: string; description?: string } {
+	const pipeSeparator = option.indexOf("|");
+	if (pipeSeparator > 0) {
+		const label = option.slice(0, pipeSeparator).trim();
+		const description = option.slice(pipeSeparator + 1).trim();
+		return description ? { label, description } : { label };
+	}
+
+	// 普通 ask_question 扩展会用「标题 — 说明」把对象选项压成 RPC 字符串；
+	// 只接受两侧都有空白的长横线，避免误拆用户输入中的普通连字符。
+	const dashMatch = option.match(/^(.+?)\s+—\s+(.+)$/u);
+	if (dashMatch) {
+		const [, label, description] = dashMatch;
+		return { label: label.trim(), description: description.trim() };
+	}
+	return { label: option };
+}
+
+/** 移除 Plan Mode 给桌面端识别用的内部标题标记，但保留后面的计划内容。 */
+export function formatAskTitle(title: string): string {
+	return title.replace(/^\[PI_DECK_PLAN_NEXT\]\s*/u, "").trim();
+}
+
+/**
  * 序列化批量提问的答案（BatchAskInlineBar 提交给主进程的 envelope 格式）。
  * 主进程收到后原样作为 input 答案返回给 pi 扩展。
  * meta 提供每个问题的展示 label 与自定义标记（可选）。

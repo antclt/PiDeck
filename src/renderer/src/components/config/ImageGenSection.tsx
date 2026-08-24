@@ -1,6 +1,6 @@
 /**
- * Pi 管理 → Agent 能力 → 生图。
- * 独立供应商，不读写 pi models.json。接口一律 OpenAI 兼容；
+ * 设置 → 生图。
+ * 独立供应商，不属于 pi/dsh 任一后端，不读写 pi models.json。接口一律 OpenAI 兼容；
  * 用户勾选该供应商支持的官方字段（size / output_format / watermark），
  * composer 才展示对应控件。保存走 ConfigModal 顶部统一按钮。
  */

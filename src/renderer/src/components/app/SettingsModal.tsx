@@ -13,6 +13,7 @@ import {
 	ChartColumnBig,
 	Activity,
 	MessageSquare,
+	ImageIcon,
 	X,
 } from "lucide-react";
 import { t } from "../../i18n";
@@ -61,6 +62,7 @@ const StorageTab = lazy(() => import("./settings/SettingsStorageTab").then((m) =
 const ProcessMetricsTab = lazy(() => import("./settings/ProcessMetricsTab").then((m) => ({ default: m.ProcessMetricsTab })));
 const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => ({ default: m.UsageStatsTab })));
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
+const ImageGenSettingsTab = lazy(() => import("./settings/ImageGenSettingsTab").then((m) => ({ default: m.ImageGenSettingsTab })));
 
 // DSH 配置（HOME / 审批 / 外部会话）只放配置管理，避免设置页再开一个重复 tab
 // SettingsTabId 定义在 atoms，深链与侧栏共用同一套合法 tab。
@@ -72,7 +74,7 @@ const SETTINGS_LAST_TAB_KEY = "pideck-settings-last-tab";
 
 /** 全部合法 tab id，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
 const SETTINGS_TAB_IDS: readonly SettingsTabId[] = [
-	"common", "appearance", "proxy", "dev", "im", "pet", "storage", "usage", "process", "vision",
+	"common", "appearance", "proxy", "dev", "im", "pet", "storage", "usage", "process", "vision", "imagegen",
 ];
 
 /**
@@ -218,10 +220,14 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const baseSnapshotRef = useRef<AppSettings>({ ...props.settings });
 	// ── 视觉桥草稿：独立于全局设置（写 pi-deck-vision.json，走独立 IPC），脏标记/保存/取消由弹框统一管理 ──
 	const visionDraft = useVisionBridgeDraft();
+	// ── 生图草稿：独立文件 userData/imagegen.json，不属于 pi/dsh，放在设置页统一管理 ──
+	const imageGenRef = useRef<{ save: () => Promise<boolean> } | null>(null);
+	const [imageGenDirty, setImageGenDirty] = useState(false);
+	const handleImageGenDirtyChange = useCallback((dirty: boolean) => setImageGenDirty(dirty), []);
 	// 左侧导航黄点来源：与关闭确认同一套字段目录，避免两处口径不一致
 	const dirtyTabIds = useMemo(
-		() => dirtySettingsTabIds({ dirtyFields, visionDirty: visionDraft.dirty }),
-		[dirtyFields, visionDraft.dirty],
+		() => dirtySettingsTabIds({ dirtyFields, visionDirty: visionDraft.dirty, imageGenDirty }),
+		[dirtyFields, visionDraft.dirty, imageGenDirty],
 	);
 	/** 各 tab 的局部编辑态（WSL 输入/Web 端口/宠物预览模式）在取消时通过递增信号重置 */
 	const [devTabResetKey, setDevTabResetKey] = useState(0);
@@ -274,7 +280,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 		);
 	}, []);
 
-	/** 保存全部已修改内容：全局设置差异提交 + 视觉桥草稿（若有改动）；返回是否全部成功 */
+	/** 保存全部已修改内容：全局设置差异提交 + 视觉桥/生图草稿（若有改动）；返回是否全部成功 */
 	const saveAll = async (): Promise<boolean> => {
 		let ok = true;
 		if (dirtyFields.size > 0) {
@@ -289,12 +295,18 @@ function SettingsModalContent(props: SettingsModalProps) {
 		}
 		if (visionDraft.dirty) {
 			// 视觉桥保存失败（如 API Key 缺失/接口不可达）时保留脏标记，头部按钮可重试
-			ok = await visionDraft.save();
+			const visionOk = await visionDraft.save();
+			ok = ok && visionOk;
+		}
+		if (imageGenDirty) {
+			const imageGenOk = (await imageGenRef.current?.save()) ?? false;
+			ok = ok && imageGenOk;
+			// 保存成功后脏标记由子组件通过 onDirtyChange 自动清掉
 		}
 		return ok;
 	};
 
-	/** 取消全部修改：将草稿回退到初始快照，丢弃所有未保存变更（含视觉桥草稿与各 tab 局部编辑态） */
+	/** 取消全部修改：将草稿回退到初始快照，丢弃所有未保存变更（含视觉桥/生图草稿与各 tab 局部编辑态） */
 	const cancelAll = () => {
 		setDraftSettings({ ...baseSnapshotRef.current });
 		setDirtyFields(new Set());
@@ -310,9 +322,12 @@ function SettingsModalContent(props: SettingsModalProps) {
 		setPetTabResetKey((k) => k + 1);
 	};
 
-	/** 关闭弹框：有未保存变更（全局设置或视觉桥草稿）时弹出确认对话框，无变更时直接关闭 */
+	// 生图 tab 的取消：脏标记由子组件内部管理，取消时不主动重置（下次打开重新加载）；
+	// 若需强制重置可在子组件暴露 reset 方法，这里仅确保关闭流程不遗漏生图脏检查
+
+	/** 关闭弹框：有未保存变更（全局设置/视觉桥/生图草稿）时弹出确认对话框，无变更时直接关闭 */
 	const handleClose = () => {
-		if (dirtyFields.size > 0 || visionDraft.dirty) {
+		if (dirtyFields.size > 0 || visionDraft.dirty || imageGenDirty) {
 			setCloseConfirmOpen(true);
 		} else {
 			props.onClose();
@@ -422,11 +437,16 @@ function SettingsModalContent(props: SettingsModalProps) {
 			label: t("settings.tabs.vision"),
 			icon: <Eye size={16} />,
 		},
+		{
+			id: "imagegen",
+			label: t("settings.tabs.imagegen"),
+			icon: <ImageIcon size={16} />,
+		},
 	];
 
 	const hasDirtyChanges = dirtyFields.size > 0;
-	// 视觉桥草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
-	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty;
+	// 视觉桥/生图草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
+	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty;
 	// 关闭确认只点名第一条（按设置页 tab/字段顺序），多项用 count 提示还有别的。
 	const unsavedCloseMessage = useMemo(
 		() =>
@@ -434,10 +454,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 				summarizeSettingsUnsavedChanges({
 					dirtyFields,
 					visionDirty: visionDraft.dirty,
+					imageGenDirty,
 				}),
 				t,
 			),
-		[dirtyFields, visionDraft.dirty],
+		[dirtyFields, visionDraft.dirty, imageGenDirty],
 	);
 
 	return (
@@ -629,6 +650,13 @@ function SettingsModalContent(props: SettingsModalProps) {
 							</Suspense>
 						</TabsContent>
 					)}
+					{/* ── 生图 tab：独立 imagegen.json，不属于 pi/dsh，放在设置页统一管理。
+					    草稿保存在 ImageGenSection 内部，切换 tab 时保持挂载（hidden 而非卸载）以免丢失未保存修改。 */}
+					<TabsContent value="imagegen" className="settings-panel min-w-0" hidden={activeTab !== "imagegen"}>
+						<Suspense fallback={<SettingsTabLoading />}>
+							<ImageGenSettingsTab ref={imageGenRef} onDirtyChange={handleImageGenDirtyChange} />
+						</Suspense>
+					</TabsContent>
 				</Tabs>
 			{/* 未保存变更确认对话框 */}
 			{closeConfirmOpen && (

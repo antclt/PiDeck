@@ -17,7 +17,8 @@ export type SettingsUnsavedTabId =
 	| "storage"
 	| "usage"
 	| "process"
-	| "vision";
+	| "vision"
+	| "imagegen";
 
 export type SettingsUnsavedSummary = {
 	tabKey: TranslationKey;
@@ -42,6 +43,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	usage: "settings.tabs.usage",
 	process: "settings.tabs.process",
 	vision: "settings.tabs.vision",
+	imagegen: "settings.tabs.imagegen",
 };
 
 /**
@@ -140,6 +142,7 @@ function itemIdentity(tab: SettingsUnsavedTabId, itemKey: TranslationKey): strin
 export function summarizeSettingsUnsavedChanges(input: {
 	dirtyFields: Iterable<string>;
 	visionDirty?: boolean;
+	imageGenDirty?: boolean;
 }): SettingsUnsavedSummary | null {
 	const dirty = new Set(input.dirtyFields);
 	const seen = new Set<string>();
@@ -167,6 +170,10 @@ export function summarizeSettingsUnsavedChanges(input: {
 		push("vision", "settings.vision.section");
 	}
 
+	if (input.imageGenDirty) {
+		push("imagegen", "settings.tabs.imagegen");
+	}
+
 	const first = items[0];
 	if (!first) return null;
 	return {
@@ -180,6 +187,7 @@ export function summarizeSettingsUnsavedChanges(input: {
 export function dirtySettingsTabIds(input: {
 	dirtyFields: Iterable<string>;
 	visionDirty?: boolean;
+	imageGenDirty?: boolean;
 }): Set<SettingsUnsavedTabId> {
 	const dirty = new Set(input.dirtyFields);
 	const tabs = new Set<SettingsUnsavedTabId>();
@@ -187,6 +195,7 @@ export function dirtySettingsTabIds(input: {
 		if (dirty.has(entry.field)) tabs.add(entry.tab);
 	}
 	if (input.visionDirty) tabs.add("vision");
+	if (input.imageGenDirty) tabs.add("imagegen");
 	return tabs;
 }
 

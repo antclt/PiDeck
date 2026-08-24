@@ -284,7 +284,7 @@ export function useSessionComposerController(
   const draft = drafts[sessionId] ?? "";
   const attachments = attachmentsBySession[sessionId] ?? [];
   // DSH：plan 由 host 持有；goal 由本地选择或进行中/阻塞的目标驱动（切回普通会 pause）。
-  // F6：DSH 无生图能力，imagegen 残留一律降级 normal（选择器已隐藏入口）。
+  // 生图为独立供应商配置，不属于 pi/dsh 任一后端，两种后端均可用。
   const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh";
   const hasImageGenHistory = (messageCache[sessionId]?.messages ?? []).some(
     (message) => Boolean(message.meta?.imageGen),

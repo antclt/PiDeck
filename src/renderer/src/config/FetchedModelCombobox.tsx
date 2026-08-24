@@ -53,7 +53,7 @@ export function FetchedModelCombobox(props: {
 					value={filter}
 					onChange={(e) => setFilter(e.target.value)}
 					placeholder={t("config.modelSearchPlaceholder")}
-					className="h-7 min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-2.5 text-control text-text-primary outline-none transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+					className="h-7 min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-popover px-2.5 text-control text-text-primary outline-none transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 				/>
 				<Button type="button"
 					 variant="outline" size="sm"
@@ -87,7 +87,7 @@ export function FetchedModelCombobox(props: {
 						<button
 							key={model.id}
 							type="button"
-							className={`inline-flex min-h-7 max-w-[260px] cursor-pointer items-center gap-1 rounded-sm border border-border-subtle bg-bg-panel px-2 py-1 text-xs text-text-primary transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-[color-mix(in_srgb,var(--color-accent)_42%,var(--color-border-subtle))] hover:bg-bg-hover focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none${selected ? " border-[color-mix(in_srgb,var(--color-accent)_70%,var(--color-border-subtle))] bg-[color:color-mix(in_srgb,var(--color-accent)_12%,var(--color-bg-panel))] text-[color:var(--color-accent)]" : ""}${configured ? " cursor-not-allowed bg-bg-muted opacity-70" : ""}`}
+							className={`inline-flex min-h-7 max-w-full cursor-pointer items-center gap-1 rounded-sm border border-border-subtle bg-bg-popover px-2 py-1 text-left text-xs text-text-primary transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-[color-mix(in_srgb,var(--color-accent)_42%,var(--color-border-subtle))] hover:bg-bg-hover focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none${selected ? " border-[color-mix(in_srgb,var(--color-accent)_70%,var(--color-border-subtle))] bg-[color:color-mix(in_srgb,var(--color-accent)_12%,var(--color-bg-popover))] text-[color:var(--color-accent)]" : ""}${configured ? " cursor-not-allowed bg-bg-muted opacity-70" : ""}`}
 							onClick={() => toggleModel(model.id)}
 							disabled={configured}
 							aria-pressed={selected}

@@ -254,8 +254,9 @@ export function deriveComposerAgentMode(input: {
 	goalPhase?: DshGoalModeSnapshot["phase"];
 }): ComposerAgentMode {
 	const localMode = input.localMode;
+	// 生图独立于 pi/dsh，不随后端切换被强制降级；保留用户选择的生图模式
+	if (localMode === "imagegen") return "imagegen";
 	if (input.backend !== "dsh") return localMode ?? "normal";
-	if (localMode === "imagegen") return "normal";
 	if (input.planModeActive) return "plan";
 	// 用户刚切回普通时 localMode 为 "normal"：即使 pause IPC 尚未落地，也不要把选择器弹回目标。
 	if (localMode === "normal") return "normal";

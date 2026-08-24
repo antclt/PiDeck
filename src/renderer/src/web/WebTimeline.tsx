@@ -14,6 +14,7 @@ import type { UIMessage } from "ai";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { splitAskOption, formatAskTitle } from "../utils/askUi";
 import { WebAssistantText } from "./WebAssistantText";
 import type { WebPendingUiRequest } from "./webTypes";
 import type { AgentUiResponse } from "../../../shared/types";
@@ -219,23 +220,28 @@ function WebAskCard(props: {
 	return (
 		<section className="mt-3 rounded-lg border border-border bg-card p-3 shadow-sm">
 			<div className="mb-2 text-caption font-medium text-foreground">{t("ask.toolName")}</div>
-			<p className="mb-3 text-sm text-foreground [overflow-wrap:anywhere]">
-				{props.request.title || t("ask.defaultTitle")}
+			<p className="mb-3 whitespace-pre-wrap break-words text-sm text-foreground [overflow-wrap:anywhere]">
+				{formatAskTitle(props.request.title || t("ask.defaultTitle"))}
 			</p>
 			{method === "select" && options.length > 0 ? (
 				<div className="flex flex-col gap-2">
-					{options.map((option) => (
-						<Button
-							key={option}
-							type="button"
-							variant="secondary"
-							size="sm"
-							disabled={props.busy}
-							onClick={() => props.onRespond({ value: option })}
-						>
-							{option}
-						</Button>
-					))}
+					{options.map((option) => {
+						const parsed = splitAskOption(option);
+						return (
+							<Button
+								key={option}
+								type="button"
+								variant="secondary"
+								size="sm"
+								className="h-auto min-h-9 w-full flex-col items-start justify-center whitespace-normal break-words py-2 text-left"
+								disabled={props.busy}
+								onClick={() => props.onRespond({ value: option })}
+							>
+								<span className="whitespace-pre-wrap break-words">{parsed.label}</span>
+								{parsed.description ? <span className="text-xs font-normal leading-relaxed text-muted-foreground">{parsed.description}</span> : null}
+							</Button>
+						);
+					})}
 				</div>
 			) : method === "confirm" ? (
 				<div className="flex gap-2">

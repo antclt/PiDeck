@@ -10,8 +10,10 @@ import type { SessionRuntimeUiState, SessionRuntimeViewState } from "../../atoms
 import { t } from "../../i18n";
 import {
 	buildAskResponse,
+	formatAskTitle,
 	pickActiveAskRequest,
 	serializeBatchAnswers,
+	splitAskOption,
 } from "../../utils/askUi";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
@@ -167,7 +169,7 @@ function BatchAskInlineBar(props: {
 				setExpanded(next);
 				notifyAskExpanded(props.onExpandedChange, next);
 			}}
-			title={t("ask.batchTitle", { count: total })}
+			title={formatAskTitle(props.request.title || t("ask.batchTitle", { count: total }))}
 			description={t("ask.batchProgress", { done: answeredCount, total })}
 			onCancel={props.onCancel}
 			cancelDisabled={props.responding}
@@ -189,7 +191,7 @@ function BatchAskInlineBar(props: {
 							onClick={() => setCurrentTab(index)}
 						>
 							<span className="min-w-[14px] text-center font-mono font-semibold">{index + 1}</span>
-							<span className="max-w-[14ch] truncate">{question.question}</span>
+							<span className="max-w-[28ch] whitespace-normal break-words text-left leading-tight">{question.question}</span>
 							{answered ? <Check size={11} className="shrink-0 text-[var(--color-success)]" aria-hidden="true" /> : null}
 						</Button>
 					);
@@ -328,9 +330,13 @@ function BatchQuestion(props: {
 						{/* 长文案/多选项使用宽卡片并自然增高；外层时间线是唯一滚动容器，避免嵌套滚动。 */}
 						<div className={`grid min-w-0 gap-1.5 ${expandedOptionLayout ? "grid-cols-2 max-[720px]:grid-cols-1" : "grid-cols-4 max-[720px]:grid-cols-2 max-[480px]:grid-cols-1"}`}>
 							{question.options.map((option, index) => {
-								const label = typeof option === "string" ? option : option.label;
-								const value = typeof option === "string" ? option : option.value ?? label;
-								const description = typeof option === "string" ? undefined : option.description;
+								const rawLabel = typeof option === "string" ? option : option.label;
+								const parsed = typeof option === "string"
+									? splitAskOption(option)
+									: { label: rawLabel, description: option.description };
+								const label = parsed.label;
+								const value = typeof option === "string" ? option : option.value ?? rawLabel;
+								const description = parsed.description;
 								return (
 									<Button
 										key={`${question.id}:${index}`}
@@ -339,8 +345,8 @@ function BatchQuestion(props: {
 										disabled={props.responding}
 										onClick={() => props.onAnswer(value, label)}
 									>
-										<span className="min-w-0 max-w-full line-clamp-3 break-words whitespace-normal text-caption font-medium leading-4 text-text-primary" title={label}>{label}</span>
-										{description ? <span className="min-w-0 max-w-full line-clamp-3 break-words whitespace-normal text-micro font-normal leading-4 text-text-tertiary" title={description}>{description}</span> : null}
+										<span className="min-w-0 max-w-full break-words whitespace-normal text-caption font-medium leading-5 text-text-primary" title={label}>{label}</span>
+										{description ? <span className="min-w-0 max-w-full break-words whitespace-normal text-micro font-normal leading-5 text-text-tertiary" title={description}>{description}</span> : null}
 									</Button>
 								);
 							})}
@@ -486,7 +492,7 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 				notifyAskExpanded(onExpandedChange, next);
 			}}
 			title={t("ask.toolName")}
-			description={request.title || t("ask.defaultTitle")}
+			description={formatAskTitle(request.title || t("ask.defaultTitle"))}
 			onCancel={cancel}
 			cancelDisabled={responding}
 			cancelLabel={t("common.close")}
@@ -495,17 +501,21 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 			<div>
 				{request.method === "select" && request.options?.length ? (
 					<div className="grid min-w-0 grid-cols-2 gap-1.5 max-[480px]:grid-cols-1">
-						{request.options.map((option) => (
-							<Button
-								key={`${request.requestId}:${option}`}
-								className="ask-inline-bar-option min-h-[30px] w-full min-w-0 max-w-none items-center justify-start px-2 py-1 text-left break-words whitespace-normal"
-								variant="outline"
-								disabled={responding}
-								onClick={() => submitValue(option)}
-							>
-								<span className="text-caption font-medium leading-[1.5] text-text-primary">{option}</span>
-							</Button>
-						))}
+						{request.options.map((option) => {
+							const parsed = splitAskOption(option);
+							return (
+								<Button
+									key={`${request.requestId}:${option}`}
+									className="ask-inline-bar-option min-h-[30px] w-full min-w-0 max-w-none flex-col items-start justify-center gap-0.5 px-2 py-1 text-left break-words whitespace-normal"
+									variant="outline"
+									disabled={responding}
+									onClick={() => submitValue(option)}
+								>
+									<span className="break-words whitespace-normal text-caption font-medium leading-5 text-text-primary">{parsed.label}</span>
+									{parsed.description ? <span className="break-words whitespace-normal text-micro leading-5 text-text-tertiary">{parsed.description}</span> : null}
+								</Button>
+							);
+						})}
 						{request.allowOther ? (
 							<div className="mt-1 flex w-full min-w-0 items-center gap-1.5">
 								<Input

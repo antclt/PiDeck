@@ -17,7 +17,8 @@ export function computeVisibleModes(options: {
 	goalModeAvailable: boolean;
 }): ComposerAgentMode[] {
 	const available = MODE_ORDER.filter((mode) => {
-		if (mode === "imagegen") return !options.isDsh;
+		// 生图不属于 pi/dsh 任一后端，独立供应商，两种后端均可用
+		if (mode === "imagegen") return true;
 		if (mode === "plan") return options.planModeAvailable;
 		if (mode === "goal") return options.goalModeAvailable;
 		return true;

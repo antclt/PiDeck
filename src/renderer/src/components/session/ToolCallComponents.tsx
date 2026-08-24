@@ -26,6 +26,7 @@ import {
   type ToolGroupItem,
 } from "../app/AppUtils";
 import { t } from "../../i18n";
+import { formatAskTitle } from "../../utils/askUi";
 import { Badge } from "../ui-shadcn/badge";
 import { Button } from "../ui-shadcn/button";
 import type { ChatMessage } from "../../../../shared/types";
@@ -327,7 +328,7 @@ export const ToolCard = memo(function ToolCard(props: {
 		<section
 			// 无框过程行（与 ThinkingBlock 同一语言）：边框/面板底由 timeline.css 的
 			// .tool-card 保证为 0/transparent，这里不再叠 border / bg-bg-panel。
-			className={`tool-card w-full min-w-0 overflow-hidden tone-${tone}${isSkillRead ? " tool-card--skill" : ""}${isAskCard ? " tool-card--ask" : ""}${status === "running" ? " tool-card--running" : ""}`}
+			className={`tool-card w-full min-w-0 tone-${tone}${isSkillRead ? " tool-card--skill" : ""}${isAskCard ? " tool-card--ask" : ""}${status === "running" ? " tool-card--running" : ""}`}
 			data-status={status}
 			data-tool-kind={isSkillRead ? "skill" : getToolKind(toolName)}
 			data-message-id={props.message.id}
@@ -375,7 +376,7 @@ export const ToolCard = memo(function ToolCard(props: {
 						</span>
 					)}
 					{isAskCard && askCard?.question ? (
-						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-tertiary" title={askCard.question}>
+						<span className="min-w-0 flex-[1_1_auto] whitespace-normal break-words font-mono text-caption leading-5 text-text-tertiary" title={askCard.question}>
 							| {askCard.question}
 						</span>
 					) : displayLabel ? (
@@ -403,7 +404,7 @@ export const ToolCard = memo(function ToolCard(props: {
 									<div key={`${item.question ?? "question"}:${index}`} className="ask-question-card-result-row">
 										<span className="ask-question-card-result-index">{(askCard.questions?.length ?? 0) > 1 ? index + 1 : "?"}</span>
 										<div className="ask-question-card-result-copy">
-											<span className="ask-question-card-result-question">{item.question || t("ask.defaultTitle")}</span>
+											<span className="ask-question-card-result-question">{formatAskTitle(item.question || t("ask.defaultTitle"))}</span>
 											<span className={`ask-question-card-result-answer${item.answered ? " answered" : " unanswered"}`}>
 												{item.answered ? <Check size={12} aria-hidden="true" /> : null}
 												{item.answered ? askAnswerText(item.answer, item.answerLabel) : t("ask.unanswered")}

@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, ChevronUp, MessageCircle, Minimize, X } from "lucide-react";
 import type { ChatMessage } from "../../../../shared/types";
 import { t, translateI18nDescriptor } from "../../i18n";
-import { classifyAskCardStatus } from "../../utils/askUi";
+import { classifyAskCardStatus, formatAskTitle, splitAskOption } from "../../utils/askUi";
 import { formatDuration, formatTime, stripAnsi } from "./TimelineFormat";
 import { Textarea } from "../ui-shadcn/textarea";
 import { StackTrace } from "../ui-shadcn/stack-trace";
@@ -218,7 +218,7 @@ export const AskQuestionCard = memo(function AskQuestionCard(props: {
 				open={expanded}
 				onOpenChange={setExpanded}
 				title={t("ask.toolName")}
-				description={title || t("ask.defaultTitle")}
+				description={formatAskTitle(title || t("ask.defaultTitle"))}
 				status={cancelling ? t("ask.cancelling") : t("ask.waiting")}
 				statusTone={cancelling ? "danger" : "active"}
 				onCancel={handleCancel}
@@ -230,16 +230,20 @@ export const AskQuestionCard = memo(function AskQuestionCard(props: {
 					{method === "select" && options && options.length > 0 && (
 						<div className="ask-question-card-options">
 							{/* 过滤掉 Pi 自带的 "✎ 自行输入..." 选项，用下方内联输入框替代。 */}
-							{options.filter((opt) => !opt.startsWith("✎")).map((opt) => (
-								<button
-									key={opt}
-									className="ask-question-card-option"
-									onClick={() => handleSelect(opt)}
-									disabled={cancelling}
-								>
-									{opt}
-								</button>
-							))}
+							{options.filter((opt) => !opt.startsWith("✎")).map((opt) => {
+								const parsed = splitAskOption(opt);
+								return (
+									<button
+										key={opt}
+										className="ask-question-card-option"
+										onClick={() => handleSelect(opt)}
+										disabled={cancelling}
+									>
+										<span className="ask-question-card-option-label">{parsed.label}</span>
+										{parsed.description ? <span className="ask-question-card-option-desc">{parsed.description}</span> : null}
+									</button>
+								);
+							})}
 						</div>
 					)}
 					{method === "confirm" && (
