@@ -627,14 +627,12 @@ export class DshHost {
 	private async start(): Promise<void> {
 		const userData = this.getUserDataDir();
 		const override = this.getDshHomeOverride()?.trim();
-		// DSH_HOME 解析：设置覆盖 > 用户真实 ~/.dsh > 应用私有 dsh-home（全新用户兑底）。
+		// DSH_HOME 解析：设置覆盖 > ~/.dsh（统一入口，新用户也用 ~/.dsh，不另起炉灶）。
 		this.dshHome = resolveDshHomeDir(override, userData);
 		if (override) {
 			this.log("dsh-host", `DSH_HOME 使用用户配置目录：${override}`);
-		} else if (this.dshHome === join(homedir(), ".dsh")) {
-			this.log("dsh-host", "DSH_HOME 使用用户 ~/.dsh（与 dsh CLI 共用配置/会话）");
 		} else {
-			this.log("dsh-host", `DSH_HOME 使用应用私有目录（未发现 ~/.dsh）：${this.dshHome}`);
+			this.log("dsh-host", "DSH_HOME 使用用户 ~/.dsh（与 dsh CLI 共用配置/会话）");
 		}
 		this.configDir = join(userData, "dsh-config");
 		mkdirSync(this.dshHome, { recursive: true });
@@ -771,17 +769,15 @@ function parseBackfillResult(value: unknown): ProjectionCacheBackfillResult {
 /**
  * DSH_HOME 目录解析（纯函数，可单测）：
  * 1. 设置里 dshHomeDir 非空 → 以用户覆盖为准（任意自定义目录）；
- * 2. 否则用户真实 ~/.dsh 存在 → 直接用（与 dsh CLI 共用配置/凭证/会话）；
- * 3. 都没有 → 应用私有 dsh-home（全新用户兑底，避免往 home 目录写东西）。
+ * 2. 否则一律用 ~/.dsh（与 dsh CLI 共用同一目录；不存在时 mkdirSync 会自动创建，
+ *    不再回退应用私有 dsh-home——避免出现两套数据目录漂移）。
  */
 export function resolveDshHomeDir(
 	override: string | undefined,
-	userDataDir: string,
-	realHomeExists: boolean = existsSync(join(homedir(), ".dsh")),
+	_realUserDataDir: string,
 ): string {
 	if (override?.trim()) return override.trim();
-	if (realHomeExists) return join(homedir(), ".dsh");
-	return join(userDataDir, "dsh-home");
+	return join(homedir(), ".dsh");
 }
 
 /** 进程是否存活（B6 锁检测用）：kill(pid, 0) 成功 = 存活；EPERM = 存在但无权限，也算存活。 */
