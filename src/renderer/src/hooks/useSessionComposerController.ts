@@ -23,9 +23,11 @@ import {
   parseImageGenSize,
   parseImageGenWatermark,
 } from "../../../shared/imageGenParams";
+import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import type { ImageGenMeta } from "../../../shared/types/imagegen";
 import {
+  busySendDeliveryAtom,
   cacheSessionMessagesAtom,
   imageGenConfigAtom,
   sessionAttachmentsByIdAtom,
@@ -1160,9 +1162,10 @@ export function useSessionComposerController(
         : getComposerEnterIntent(event, sendShortcut);
     if (intent === "send") {
       event.preventDefault();
-      // Enter 发送也晋升预览 Tab（promoteAndSend 内部统一处理）
-      // DSH 默认下一轮（queue）；插入当前回合走发送菜单「加入当前回合」。
-      void promoteAndSend(isBusy ? (isDshBackend ? "followUp" : "steer") : undefined);
+      // Enter 发送也晋升预览 Tab（promoteAndSend 内部统一处理）。
+      // 忙碌时按「忙碌时投递行为」设置决定语义（pi/dsh 统一，不再按后端分叉）；
+      // 空闲直发（undefined）。设置在常用设置→会话，改后即时生效（App 同步 atom）。
+      void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom)));
     }
   }, [
     closeSuggestions,
@@ -1170,7 +1173,6 @@ export function useSessionComposerController(
     getPromptHistory,
     historyIndex,
     isBusy,
-    isDshBackend,
     mode,
     promoteAndSend,
     savedDraft,
@@ -1179,6 +1181,7 @@ export function useSessionComposerController(
     sendShortcut,
     sessionId,
     setDraft,
+    store,
     suggestionItems,
     suggestionsOpen,
   ]);
@@ -1639,17 +1642,11 @@ export function useSessionComposerController(
       clear: () => setAttachments([]),
     },
     delivery: {
-      // 发送/追问都算主动交互：先把预览 Tab 晋升常驻，再投递（幂等，非预览无副作用）
+      // 发送/追问都算主动交互：先把预览 Tab 晋升常驻，再投递（幂等，非预览无副作用）。
+      // 忙碌时按「忙碌时投递行为」设置决定语义（pi/dsh 统一，不再按后端分叉）；
+      // 空闲直发。排队项的插入/排队切换走输入框上方队列面板的行内按钮。
       send: () => {
-        // pi 忙碌默认插入当前回合；DSH 默认排队下一轮，插入走菜单。
-        void promoteAndSend(isBusy ? (isDshBackend ? "followUp" : "steer") : undefined);
-      },
-      // 菜单「加入当前回合」必须显式 steer：不能复用 send，否则 DSH 忙碌默认会变成 queue。
-      steer: () => {
-        void promoteAndSend("steer");
-      },
-      followUp: () => {
-        void promoteAndSend("followUp");
+        void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom)));
       },
       abort: () => void abort(),
       compact: () => void compact(),

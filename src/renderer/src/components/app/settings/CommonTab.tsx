@@ -45,6 +45,10 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
     { value: "split", label: t("settings.workspaceContentOpenMode.split") },
     { value: "maximize", label: t("settings.workspaceContentOpenMode.maximize") },
   ];
+  const busySendDeliveryOptions: SelectOption[] = [
+    { value: "steer", label: t("settings.busySendDeliverySteer") },
+    { value: "followUp", label: t("settings.busySendDeliveryFollowUp") },
+  ];
   const startupWindowModeOptions: SelectOption[] = [
     { value: "last", label: t("settings.startupWindow.last") },
     { value: "maximized", label: t("settings.startupWindow.maximized") },
@@ -146,6 +150,33 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
             <SelectContent>
               <SelectItem value="pi">{t("settings.defaultAgentBackendPi")}</SelectItem>
               <SelectItem value="dsh">{t("settings.defaultAgentBackendDsh")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        {/* 忙碌时投递行为：Agent 回复期间发送消息的默认语义（pi/dsh 统一）。 */}
+        <SettingRow
+          title={
+            <>
+              <span>{t("settings.busySendDelivery")}</span>
+              <DirtyMarker dirty={isDirty("busySendDelivery")} label={t("settings.busySendDelivery")} />
+            </>
+          }
+          description={t("settings.busySendDeliveryDesc")}
+          alignEnd={false}
+        >
+          <Select
+            value={draft.busySendDelivery}
+            onValueChange={(value) =>
+              updateDraft({ busySendDelivery: value as AppSettings["busySendDelivery"] })
+            }
+          >
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {busySendDeliveryOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </SettingRow>

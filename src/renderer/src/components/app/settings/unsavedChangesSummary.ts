@@ -60,6 +60,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "sessionTabOpenMode", tab: "common", itemKey: "settings.sessionTabOpenMode" },
 	{ field: "sendShortcut", tab: "common", itemKey: "settings.inputShortcut" },
 	{ field: "defaultAgentBackend", tab: "common", itemKey: "settings.defaultAgentBackend" },
+	{ field: "busySendDelivery", tab: "common", itemKey: "settings.busySendDelivery" },
 	{ field: "linkOpenMode", tab: "common", itemKey: "settings.linkOpenMode" },
 	{ field: "workspaceContentOpenMode", tab: "common", itemKey: "settings.workspaceContentOpenMode" },
 	{ field: "expandInterimDuringStream", tab: "common", itemKey: "settings.expandInterimDuringStream" },

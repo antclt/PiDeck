@@ -1,4 +1,5 @@
 import type { AgentBackend } from "./agent";
+import type { BusySendDelivery } from "../busySendDelivery";
 import type { ExternalEditorSettings } from "./project";
 import type { SecurityConfig } from "./security";
 
@@ -86,6 +87,13 @@ export type AppSettings = {
 	piInstall?: { command: string; version: string };
 	/** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 	sessionTabOpenMode: SessionTabOpenMode;
+	/**
+	 * Agent 忙碌时发送消息的默认投递行为。
+	 * "steer"=插入当前回合（模型在本次回合内尽快看到）；"followUp"=排队，当前回合结束后自动发送。
+	 * 仅决定渲染层入队后的默认投递语义；pi/dsh 主进程各自映射到 wire 协议
+	 * （pi streamingBehavior / DSH sessions.prompt mode）。缺省 "steer"，解析见 shared/busySendDelivery.ts。
+	 */
+	busySendDelivery: BusySendDelivery;
 	/** 是否启用会话右侧的 Git 源代码管理入口与面板，默认开启以保持升级前行为。 */
 	enableGitManagement: boolean;
 	/** Git 提交摘要生成提示词模板，{diff} 会被替换为实际 diff 内容 */

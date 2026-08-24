@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import type { BusySendDelivery } from "../../../shared/busySendDelivery";
 import type { AgentBackend } from "../../../shared/types";
 import {
   defaultExpandedSidebarProjects,
@@ -54,6 +55,13 @@ export const openSettingsAtom = atom(null, (_get, set, target?: SettingsFocusTar
  * 默认 "pi"（与 SettingsStore.defaultSettings 保持一致，2026-12 兼容期调整）。
  */
 export const defaultAgentBackendAtom = atom<AgentBackend>("pi");
+
+/**
+ * 忙碌时发送消息的默认投递行为（设置项 busySendDelivery 的渲染层快照）。
+ * App 在 settings 变化时写入；composer/发送链路在决策时刻读取，
+ * 避免把 settings props 一路透传进深层 hook。默认与 main SettingsStore 保持一致。
+ */
+export const busySendDeliveryAtom = atom<BusySendDelivery>("steer");
 
 /**
  * 侧栏展开的项目 id 集合（有 id = 展开）。

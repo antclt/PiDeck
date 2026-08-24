@@ -11,6 +11,7 @@ import {
   parseImageGenWatermark,
 } from "../../shared/imageGenParams";
 import { createDefaultExternalEditorSettings, type AppSettings } from "../../shared/types";
+import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { getAppLogger } from "../logging/sharedLogger";
 
@@ -102,6 +103,9 @@ const defaultSettings: AppSettings = {
   startupWindowMode: "last",
   piEnvironmentChecked: false,
   sessionTabOpenMode: "preview",
+  // 忙碌时发送默认「插入当前回合」（对齐 pi 历史行为）；dsh 会话此前默认排队，
+  // 统一后由本设置项决定，用户可在常用设置→会话中改回。
+  busySendDelivery: "steer",
   enableGitManagement: true,
   gitCommitMessagePrompt: `请根据以下 git diff 生成一条中文 git commit message。
 
@@ -242,6 +246,8 @@ export class SettingsStore {
       if (persistedMonoFont === "commit-mono") {
         this.settings.fontFamilyMono = "system-mono";
       }
+      // 忙碌时投递行为来自旧 JSON 时可能是任意值；回落默认，避免发送链路带着坏语义。
+      this.settings.busySendDelivery = parseBusySendDelivery(this.settings.busySendDelivery);
       // 兼容迁移：旧版 contentMaxWidth(px) → chatContentWidthPct(%)。
       // 语义从「最大宽度 px」变为「占面板百分比」，无法精确换算（面板宽度可变），
       // 用线性映射保留旧值感觉：800→60%、1400→84%、1800(不限)→100%。
@@ -317,6 +323,10 @@ export class SettingsStore {
     }
     if ("piProxyModels" in safePatch) {
       safePatch.piProxyModels = normalizeProxyList(safePatch.piProxyModels);
+    }
+    // 忙碌时投递行为来自渲染层，非法值丢掉，避免发送链路带着坏语义。
+    if ("busySendDelivery" in safePatch) {
+      safePatch.busySendDelivery = parseBusySendDelivery(safePatch.busySendDelivery);
     }
     this.settings = { ...this.settings, ...safePatch };
     // 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。

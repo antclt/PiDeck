@@ -29,7 +29,8 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, imageGenConfigAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
+import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 // 文件链接路由：图片类型走弹窗预览
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"]);
 const ConfigModal = lazy(() => import("./ConfigModal").then((m) => ({ default: m.ConfigModal })));
@@ -543,6 +544,8 @@ export function App() {
     disabledExtensions: [],
     disableExtensionWhitelist: false,
     sessionTabOpenMode: "preview",
+    // 与 main SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
+    busySendDelivery: "steer",
     enableGitManagement: true,
     gitCommitMessagePrompt: "请根据以下 git diff 生成一条中文 git commit message。\n\n变更描述：\n{diff}\n\nGitmoji 对应关系：\n✨ feat - 新功能\n🐛 fix - Bug 修复\n📚 docs - 文档更新\n💎 style - 代码格式\n♻️ refactor - 重构\n🧪 test - 测试\n🔧 chore - 构建/工具",
     gitCommitMessageProvider: "",
@@ -634,6 +637,13 @@ export function App() {
   useEffect(() => {
     setDefaultAgentBackend(settings.defaultAgentBackend);
   }, [settings.defaultAgentBackend, setDefaultAgentBackend]);
+
+  // 忙碌时发送的默认投递行为同步给发送链路（composer/App 决策时刻从 atom 读取，
+  // 设置保存后无需重挂载会话即可生效，与 defaultAgentBackend 同一模式）。
+  const setBusySendDelivery = useSetAtom(busySendDeliveryAtom);
+  useEffect(() => {
+    setBusySendDelivery(settings.busySendDelivery);
+  }, [settings.busySendDelivery, setBusySendDelivery]);
 
   // 更新弹窗（2026-12 兼容期修复）：设置加载完成后自动检查一次，有新版本直接弹窗；
   // 用户禁用更新检查时不触发（设置页手动检查按钮仍可用）。只跑一次，避免
@@ -883,15 +893,13 @@ export function App() {
     snapshot: { displayText: string; message: string; images?: ImageContent[]; agentMode: string; behavior?: "steer" | "followUp" },
   ) => {
     if (!store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))?.agentId) return false;
-    const backend = store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))?.backend
-      ?? store.get(sessionRecordByIdAtomFamily(sessionId))?.backend;
     return queue.enqueueQueuedPrompt(sessionId, {
       id: crypto.randomUUID(),
       message: snapshot.message,
       displayText: snapshot.displayText,
       images: snapshot.images,
-      // 未指定行为时：pi 默认插入当前回合，DSH 默认排队下一轮。
-      behavior: snapshot.behavior ?? (backend === "dsh" ? "followUp" : "steer"),
+      // 未指定行为时按「忙碌时投递行为」设置兜底（pi/dsh 统一，不再按后端分叉）。
+      behavior: snapshot.behavior ?? store.get(busySendDeliveryAtom),
       agentMode: snapshot.agentMode as ComposerAgentMode,
       timestamp: Date.now(),
     });
@@ -2218,15 +2226,15 @@ export function App() {
     /** prompt 模板匹配到的 description，作为元数据发给 pi agent 标识意图 */
     templateDescription?: string,
   ) {
-    // 非队列入口：当前选中 agent 忙碌时，pi 默认插入当前回合，DSH 默认排队下一轮。
-    // 客户端队列 drain 直接调用 dispatchPromptSnapshot，并显式指定其投递语义。
-    const busyDefault = store.get(sessionRecordByIdAtomFamily(sessionId))?.backend === "dsh"
-      || store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))?.backend === "dsh"
-      ? "followUp"
-      : "steer";
+    // 非队列入口：当前选中 agent 忙碌时按「忙碌时投递行为」设置决定投递语义
+    // （pi/dsh 统一）；空闲直发（undefined）。客户端队列 drain 直接调用
+    // dispatchPromptSnapshot，并显式指定其投递语义。
     const behavior =
       streamingBehavior ??
-      (sessionId === currentSessionId && isAgentCurrentlyBusy() ? busyDefault : undefined);
+      resolveBusySendDelivery(
+        sessionId === currentSessionId && isAgentCurrentlyBusy(),
+        store.get(busySendDeliveryAtom),
+      );
     try {
       await dispatchPromptSnapshot(
         sessionId,

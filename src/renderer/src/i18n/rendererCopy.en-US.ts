@@ -2607,6 +2607,11 @@ export const enUS: Record<TranslationKey, string> = {
     "Backend used for new sessions (sidebar \"+\", home surface, parallel ask); existing sessions are unaffected.",
   "settings.defaultAgentBackendPi": "pi (classic backend)",
   "settings.defaultAgentBackendDsh": "dsh (DeepSeek Harness)",
+  "settings.busySendDelivery": "Send While Busy",
+  "settings.busySendDeliveryDesc":
+    "How messages are delivered when the agent is still responding; each queued item can still be switched individually from the queue panel above the composer.",
+  "settings.busySendDeliverySteer": "Insert into current turn (deliver now)",
+  "settings.busySendDeliveryFollowUp": "Queue for next turn (send when the reply finishes)",
   "settings.settingTakesEffectAfterRestart":
     "Changes take effect for newly created or restarted agents",
   "settings.showNativeMenu": "Show native menu",

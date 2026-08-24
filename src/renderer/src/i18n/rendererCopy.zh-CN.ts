@@ -2575,6 +2575,11 @@ export const zhCN = {
     "新建会话（侧栏「+」、引导页、并行问询）使用的后端；已创建的会话不受影响。",
   "settings.defaultAgentBackendPi": "pi（经典后端）",
   "settings.defaultAgentBackendDsh": "dsh（DeepSeek Harness 内嵌）",
+  "settings.busySendDelivery": "忙碌时发送",
+  "settings.busySendDeliveryDesc":
+    "Agent 正在回复时发送消息的默认投递方式；输入框上方的队列面板仍可对每条消息单独切换。",
+  "settings.busySendDeliverySteer": "插入当前回合（立即送达）",
+  "settings.busySendDeliveryFollowUp": "排队到下一轮（回复结束后自动发送）",
   "settings.settingTakesEffectAfterRestart":
     "设置变更后，新建或重启 agent 才会生效",
   "settings.showNativeMenu": "显示原生菜单",
