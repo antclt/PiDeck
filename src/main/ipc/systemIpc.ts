@@ -986,6 +986,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			ok: result.ok,
 			copiedKey: result.copiedKey,
 			wroteViaHost: result.wroteViaHost,
+			// 失败时记录具体原因（OAuth 拒绝 / 对面没有 / catalog 缺失 / provider not found），
+			// 否则“点迁移报错”只能靠打断点查，日志里看不出是哪条失败分支。
+			...(result.error ? { error: result.error } : {}),
 		});
 		return result;
 	});

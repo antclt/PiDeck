@@ -260,16 +260,172 @@ test("apply dsh-to-pi copies credential inline into models.json", async () => {
   assert.equal(saved.auth.weishiair, undefined);
 });
 
+test("apply dsh-to-pi for a pi built-in provider writes the key to auth.json only (layered storage)", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
+  await writeFile(
+    join(home, "settings.yaml"),
+    "llm-pi-ai:\n  providers:\n    openrouter:\n      apiKeyEnv: OPENROUTER_API_KEY\n      baseURL: https://openrouter.ai/api/v1\n      api: openai-completions\n      models:\n        - id: stealth/ox-alpha\n",
+    "utf8",
+  );
+  const calls = { modelsSaved: false, authSaved: null };
+  const deps = {
+    configManager: {
+      getModelsConfig: async () => ({ parsed: { providers: {} } }),
+      getAuthConfig: async () => ({ parsed: { OLD_PROVIDER: { type: "api_key", key: "sk-old" } } }),
+      saveModelsConfig: async (data) => {
+        calls.modelsSaved = true;
+        return { valid: true };
+      },
+      saveAuthConfig: async (data) => {
+        calls.authSaved = data;
+        return { valid: true };
+      },
+    },
+    dshHost: {
+      getHomeDir: () => home,
+      isHostReady: () => false,
+      updateSettings: async () => undefined,
+      setCredential: async () => undefined,
+      describeSettings: async () => ({ namespaces: [] }),
+      readCredentialValue: async (ref) => (ref === "OPENROUTER_API_KEY" ? "sk-or-from-dsh" : undefined),
+    },
+  };
+  const result = await service.applyProviderMigration(deps, "dsh-to-pi", "openrouter");
+  assert.equal(result.ok, true);
+  assert.equal(result.copiedKey, true);
+  // 内置名：key 落 auth.json，且不新建/不碰 models.json 条目
+  assert.equal(calls.modelsSaved, false);
+  assert.equal(calls.authSaved.openrouter.type, "api_key");
+  assert.equal(calls.authSaved.openrouter.key, "sk-or-from-dsh");
+  // 其它 auth 条目保留
+  assert.equal(calls.authSaved.OLD_PROVIDER.key, "sk-old");
+  assert.equal(calls.authSaved.OLD_PROVIDER.type, "api_key");
+});
+
+test("piBuiltinSnapshotFromCatalog builds a Pi snapshot from the catalog view", () => {
+  const catalog = {
+    byProviderId: new Map([
+      ["openrouter", new Map([
+        ["stealth/ox-alpha", { id: "stealth/ox-alpha", name: "Ox Alpha", contextWindow: 1048576, api: "openai-completions", baseUrl: "https://openrouter.ai/api/v1", input: ["text", "image"], reasoning: true }],
+        ["deepseek/deepseek-chat", { id: "deepseek/deepseek-chat" }],
+      ])],
+    ]),
+  };
+  const snapshot = mapping.piBuiltinSnapshotFromCatalog("openrouter", "  sk-or-1  ", catalog);
+  assert.ok(snapshot);
+  assert.equal(snapshot.name, "openrouter");
+  assert.equal(snapshot.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(snapshot.api, "openai-completions");
+  assert.equal(snapshot.apiKey, "sk-or-1");
+  assert.equal(snapshot.models.length, 2);
+  assert.equal(snapshot.models[0].id, "stealth/ox-alpha");
+  assert.equal(snapshot.models[0].contextWindow, 1048576);
+  assert.deepEqual(snapshot.models[0].input, ["text", "image"]);
+});
+
+test("piBuiltinSnapshotFromCatalog returns undefined when the catalog has no models", () => {
+  const catalog = { byProviderId: new Map([["openrouter", new Map()]]) };
+  assert.equal(mapping.piBuiltinSnapshotFromCatalog("openrouter", "sk", catalog), undefined);
+  assert.equal(mapping.piBuiltinSnapshotFromCatalog("unknown", "sk", catalog), undefined);
+});
+
+test("apply pi-to-dsh migrates an auth.json-only builtin provider into DSH (catalog profile)", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
+  await writeFile(
+    join(home, "settings.yaml"),
+    "llm-pi-ai:\n  providers:\n    openrouter:\n      apiKeyEnv: OPENROUTER_API_KEY\n      baseURL: https://openrouter.ai/api/v1\n      api: openai-completions\n",
+    "utf8",
+  );
+  const saved = { settings: null, creds: null };
+  const deps = {
+    configManager: {
+      getModelsConfig: async () => ({ parsed: { providers: {} } }),
+      getAuthConfig: async () => ({ parsed: { openrouter: { type: "api_key", key: "sk-or-from-pi" } } }),
+      saveModelsConfig: async (data) => ({ valid: true }),
+      saveAuthConfig: async (data) => ({ valid: true }),
+    },
+    dshHost: {
+      getHomeDir: () => home,
+      isHostReady: () => false,
+      updateSettings: async () => undefined,
+      setCredential: async () => undefined,
+      describeSettings: async () => ({ namespaces: [] }),
+      readCredentialValue: async () => undefined,
+    },
+  };
+  const result = await service.applyProviderMigration(deps, "pi-to-dsh", "openrouter");
+  assert.equal(result.ok, true);
+  assert.equal(result.copiedKey, true);
+  assert.equal(result.wroteViaHost, false);
+  const settings = await readFile(join(home, "settings.yaml"), "utf8");
+  const creds = await readFile(join(home, ".credentials.yaml"), "utf8");
+  assert.match(settings, /openrouter:/);
+  assert.match(settings, /OPENROUTER_API_KEY/);
+  assert.match(creds, /OPENROUTER_API_KEY:/);
+  assert.match(creds, /sk-or-from-pi/);
+});
+
+test("apply pi-to-dsh rejects an OAuth-only builtin provider", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
+  await writeFile(join(home, "settings.yaml"), "llm-pi-ai:\n  providers: {}\n", "utf8");
+  const deps = {
+    configManager: {
+      getModelsConfig: async () => ({ parsed: { providers: {} } }),
+      getAuthConfig: async () => ({ parsed: { "openai-codex": { type: "oauth", access: "x", refresh: "y", expires: 0 } } }),
+      saveModelsConfig: async (data) => ({ valid: true }),
+      saveAuthConfig: async (data) => ({ valid: true }),
+    },
+    dshHost: {
+      getHomeDir: () => home,
+      isHostReady: () => false,
+      updateSettings: async () => undefined,
+      setCredential: async () => undefined,
+      describeSettings: async () => ({ namespaces: [] }),
+      readCredentialValue: async () => undefined,
+    },
+  };
+  const result = await service.applyProviderMigration(deps, "pi-to-dsh", "openai-codex");
+  assert.equal(result.ok, false);
+  assert.match(result.error || "", /OAuth/);
+});
+
+test("apply pi-to-dsh rejects a builtin provider missing on the DSH side", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
+  await writeFile(join(home, "settings.yaml"), "llm-pi-ai:\n  providers: {}\n", "utf8");
+  const deps = {
+    configManager: {
+      getModelsConfig: async () => ({ parsed: { providers: {} } }),
+      getAuthConfig: async () => ({ parsed: { deepseek: { type: "api_key", key: "sk-ds" } } }),
+      saveModelsConfig: async (data) => ({ valid: true }),
+      saveAuthConfig: async (data) => ({ valid: true }),
+    },
+    dshHost: {
+      getHomeDir: () => home,
+      isHostReady: () => false,
+      updateSettings: async () => undefined,
+      setCredential: async () => undefined,
+      describeSettings: async () => ({ namespaces: [] }),
+      readCredentialValue: async () => undefined,
+    },
+  };
+  const result = await service.applyProviderMigration(deps, "pi-to-dsh", "deepseek");
+  assert.equal(result.ok, false);
+  assert.match(result.error || "", /DSH 没有该内置 provider/);
+});
+
 test("source contracts keep IPC / preload / UI wired", async () => {
   const ipc = await readFile(join(process.cwd(), "src/shared/ipc.ts"), "utf8");
   const preload = await readFile(join(process.cwd(), "src/preload/index.ts"), "utf8");
   const systemIpc = await readFile(join(process.cwd(), "src/main/ipc/systemIpc.ts"), "utf8");
   const modelsTab = await readFile(join(process.cwd(), "src/renderer/src/config/ModelsTab.tsx"), "utf8");
+  const authTab = await readFile(join(process.cwd(), "src/renderer/src/config/AuthTab.tsx"), "utf8");
   const dshCards = await readFile(join(process.cwd(), "src/renderer/src/config/DshProviderCards.tsx"), "utf8");
   assert.match(ipc, /configPreviewProviderMigration/);
   assert.match(preload, /previewProviderMigration/);
   assert.match(systemIpc, /applyProviderMigration/);
   assert.match(modelsTab, /direction="pi-to-dsh"/);
+  assert.match(authTab, /ProviderMigrationButton/);
+  assert.match(authTab, /direction="pi-to-dsh"/);
   assert.match(dshCards, /direction="dsh-to-pi"/);
 });
 

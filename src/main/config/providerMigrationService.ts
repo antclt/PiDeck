@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { ConfigManager, PiAuthFile, PiModelsFile, PiProviderConfig } from "./ConfigManager";
 import type { DshHost } from "../dsh/DshHost";
 import { credentialValueFromDocument, isValidCredentialRef } from "../dsh/dshCredentials";
+import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
 import {
 	credentialRefFor,
 	dshToPiSnapshot,
@@ -25,6 +26,7 @@ import {
 	mergeDshProviderIntoSettings,
 	mergePiProvider,
 	parseDshSettingsDocument,
+	piBuiltinSnapshotFromCatalog,
 	piToDshSnapshot,
 	resolvePiApiKey,
 	type DshProviderProfile,
@@ -75,6 +77,55 @@ async function readDshSettings(homeDir: string): Promise<{ rawText: string; pars
 	return { rawText, parsed: loadYamlObject(rawText) };
 }
 
+/**
+ * pi 内置 provider 名的小写集合（pi-ai catalog）。迁移据此分层：
+ * 内置名 → key 写 pi auth.json（pi 靠内置 catalog 提供 provider/模型）；
+ * 自定义名 → 全套写 pi models.json。
+ * catalog 缺失/读取失败时退化为空集（全部当自定义处理，行为同旧版），绝不抛错。
+ */
+function piBuiltinProviderIds(): Set<string> {
+	const set = new Set<string>();
+	for (const id of getPiAiCatalogIndex().byProviderId.keys()) set.add(id.toLowerCase());
+	return set;
+}
+
+/** 内置 provider 在 catalog 里的模型数与默认端点（preview 行展示用）。 */
+function piBuiltinCatalogMeta(providerId: string): { modelCount: number; baseUrl?: string } {
+	const inner = getPiAiCatalogIndex().byProviderId.get(providerId);
+	if (!inner || inner.size === 0) return { modelCount: 0 };
+	const first = [...inner.values()][0];
+	return {
+		modelCount: inner.size,
+		baseUrl: typeof first?.baseUrl === "string" ? first.baseUrl : undefined,
+	};
+}
+
+/**
+ * auth.json 里、且是 pi 内置名、api_key 类型的条目 → preview 行
+ * （models.json 里没有它们，但反向迁移时可由 catalog 补全后写入 DSH）。
+ */
+function authBuiltinPreviewRows(
+	auth: Record<string, { type?: string }> | undefined,
+	dshNames: Set<string>,
+): MigratableProviderRow[] {
+	if (!auth) return [];
+	const rows: MigratableProviderRow[] = [];
+	for (const [name, item] of Object.entries(auth)) {
+		if (!isSafeProviderName(name)) continue;
+		if (item?.type !== "api_key") continue; // OAuth 等不可用 API Key 迁移的跳过
+		if (!piBuiltinProviderIds().has(name.toLowerCase())) continue; // 只列 pi 内置名
+		const meta = piBuiltinCatalogMeta(name);
+		rows.push({
+			name,
+			modelCount: meta.modelCount,
+			hasKey: true,
+			baseUrl: meta.baseUrl,
+			targetExists: dshNames.has(name),
+		});
+	}
+	return rows;
+}
+
 function listDshRows(
 	parsed: ReturnType<typeof parseDshSettingsDocument>,
 	piNames: Set<string>,
@@ -119,10 +170,9 @@ export async function previewProviderMigration(
 		...Object.keys(dshParsed.piAi),
 		...(dshParsed.deepseek ? ["deepseek"] : []),
 	]);
-	const piNames = new Set(Object.keys(piProviders));
 
 	if (direction === "pi-to-dsh") {
-		const providers: MigratableProviderRow[] = Object.entries(piProviders)
+		const customRows: MigratableProviderRow[] = Object.entries(piProviders)
 			.filter(([name]) => isSafeProviderName(name))
 			.map(([name, provider]) => ({
 				name,
@@ -132,13 +182,23 @@ export async function previewProviderMigration(
 				targetExists: name === "deepseek" && looksLikeOfficialDeepseek(provider.baseUrl)
 					? Boolean(dshParsed.deepseek)
 					: dshNames.has(name),
-			}))
+			}));
+		// 反向也列出 auth.json 中 pi 内置名（api_key）——它们不在 models.json，
+		// 但可由 catalog 补全后写入 DSH；OAuth 一律不列（无法用 API Key 迁移）。
+		const authRows = authBuiltinPreviewRows(auth.parsed, dshNames);
+		const providers = [...customRows, ...authRows]
 			.sort((left, right) => left.name.localeCompare(right.name));
 		return { direction, providers };
 	}
 
 	const credentialText = await readText(join(deps.dshHost.getHomeDir(), ".credentials.yaml"));
-	const providers = listDshRows(dshParsed, piNames, (_ns, name, profile) => {
+	// pi 侧“已有同名”既看 models.json（自定义名）也看 auth.json（内置名），
+	// 否则内置名迁移覆盖 auth.json 已有 key 时不会弹覆盖确认。
+	const piExisting = new Set([
+		...Object.keys(piProviders),
+		...(auth.parsed ? Object.keys(auth.parsed) : []),
+	]);
+	const providers = listDshRows(dshParsed, piExisting, (_ns, name, profile) => {
 		const ref = credentialRefFor(profile, name);
 		// 兼容 dsh-credentials-local v1（version:1 + refs）与旧扁平布局
 		const fromFile = Boolean(credentialValueFromDocument(credentialText, ref));
@@ -198,6 +258,21 @@ async function writePiSnapshot(deps: ProviderMigrationDeps, snapshot: PiProvider
 	if (!authResult.valid) throw new Error(authResult.error ?? "failed to save auth.json");
 }
 
+/**
+ * 分层落点（DSH→pi）：pi 内置 provider 只把 key 写进 auth.json，不新建 models.json 条目。
+ * pi 靠内置 catalog 提供该 provider 的 baseUrl/models，因此无需在 models.json 重复定义。
+ * 其它 auth 条目原样保留，只 upsert 目标内置名的 key。
+ */
+async function writePiProviderAuthOnly(deps: ProviderMigrationDeps, snapshot: PiProviderSnapshot): Promise<void> {
+	if (!snapshot.apiKey) return;
+	const authResult = await deps.configManager.getAuthConfig();
+	const nextAuth = {
+		...authResult.parsed,
+		[snapshot.name]: { type: "api_key" as const, key: snapshot.apiKey },
+	};
+	await deps.configManager.saveAuthConfig(nextAuth as PiAuthFile);
+}
+
 async function writeDshSnapshot(deps: ProviderMigrationDeps, snapshot: DshProviderSnapshot): Promise<boolean> {
 	const hostReady = deps.dshHost.isHostReady();
 	if (hostReady) {
@@ -246,6 +321,59 @@ export async function applyProviderMigration(
 	}
 	try {
 		if (direction === "pi-to-dsh") {
+			// auth.json 里只有 key、models.json 没有条目的 pi 内置名：
+			// 由 catalog 补全端点/模型后写入 DSH，并做两个硬校验（OAuth 拒绝、对称性）。
+			const [models, auth, dshDoc] = await Promise.all([
+				deps.configManager.getModelsConfig(),
+				deps.configManager.getAuthConfig(),
+				readDshSettings(deps.dshHost.getHomeDir()),
+			]);
+			const authItem = auth.parsed[providerName];
+			const inModels = Boolean(models.parsed.providers?.[providerName]);
+			const isBuiltin = piBuiltinProviderIds().has(providerName.toLowerCase());
+			if (!inModels && authItem && isBuiltin) {
+				if (authItem.type !== "api_key") {
+					return {
+						ok: false,
+						provider: providerName,
+						direction,
+						copiedKey: false,
+						wroteViaHost: false,
+						error: "OAuth 无法迁移：仅支持 API Key 认证的 provider",
+					};
+				}
+				const dshParsed = parseDshSettingsDocument(dshDoc.parsed);
+				const dshHas = (providerName === "deepseek" && Boolean(dshParsed.deepseek))
+					|| Boolean(dshParsed.piAi[providerName]);
+				if (!dshHas) {
+					return {
+						ok: false,
+						provider: providerName,
+						direction,
+						copiedKey: false,
+						wroteViaHost: false,
+						error: "DSH 没有该内置 provider，无法迁移：先到 DSH 侧添加同名 provider 再迁",
+					};
+				}
+				const snapshot = piBuiltinSnapshotFromCatalog(
+					providerName,
+					typeof authItem.key === "string" ? authItem.key : undefined,
+					getPiAiCatalogIndex(),
+				);
+				if (!snapshot) {
+					return {
+						ok: false,
+						provider: providerName,
+						direction,
+						copiedKey: false,
+						wroteViaHost: false,
+						error: "pi-ai catalog 无该内置 provider 的可用模型，无法迁移",
+					};
+				}
+				const target = piToDshSnapshot(snapshot);
+				const wroteViaHost = await writeDshSnapshot(deps, target);
+				return { ok: true, provider: providerName, direction, copiedKey: Boolean(target.apiKey), wroteViaHost };
+			}
 			const source = await readPiSnapshot(deps, providerName);
 			const target = piToDshSnapshot(source);
 			const wroteViaHost = await writeDshSnapshot(deps, target);
@@ -253,6 +381,12 @@ export async function applyProviderMigration(
 		}
 		const source = await readDshSnapshot(deps, providerName);
 		const target = dshToPiSnapshot(source);
+		const isPiBuiltin = piBuiltinProviderIds().has(target.name.toLowerCase());
+		if (isPiBuiltin) {
+			// 内置名：key 落 pi auth.json，不建 models.json 条目（pi 靠内置 catalog 提供模型）。
+			await writePiProviderAuthOnly(deps, target);
+			return { ok: true, provider: providerName, direction, copiedKey: Boolean(target.apiKey), wroteViaHost: false };
+		}
 		await writePiSnapshot(deps, target);
 		return { ok: true, provider: providerName, direction, copiedKey: Boolean(target.apiKey), wroteViaHost: false };
 	} catch (error) {

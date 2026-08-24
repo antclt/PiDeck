@@ -7,6 +7,7 @@ import { ConfigComboboxInput, openDocsInSystemBrowser, SecretInput } from "./Con
 import { Input } from "../components/ui-shadcn/input";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Label } from "../components/ui-shadcn/label";
+import { ProviderMigrationButton } from "./ProviderMigrationButton";
 
 // 根据 pi 官方文档支持的供应商列表 (https://pi.dev/docs/latest/providers#auth-file)
 const PRESET_PROVIDERS = [
@@ -313,6 +314,10 @@ export function AuthTab(props: {
 										: t("config.authKeyPreviewEmpty")}
 								</span>
 								<div className="flex items-center gap-1">
+									<ProviderMigrationButton
+										direction="pi-to-dsh"
+										provider={name}
+									/>
 									<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
 										onClick={(e) => {
 											e.stopPropagation();

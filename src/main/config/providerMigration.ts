@@ -151,6 +151,58 @@ export function piModelsFromDsh(models: DshProviderProfile["models"]): PiModelIt
 	return rows;
 }
 
+/**
+ * pi-ai catalog 里一个 provider 的模型条目视图（迁移反向用，防跨层强依赖）。
+ * 只取迁移构造 snapshot 需要的字段。
+ */
+export type PiBuiltinCatalogView = {
+	byProviderId: Map<string, Map<string, {
+		id: string;
+		name?: string;
+		contextWindow?: number;
+		maxTokens?: number;
+		reasoning?: boolean;
+		input?: string[];
+		api?: string;
+		baseUrl?: string;
+	}>>;
+};
+
+/**
+ * 从 pi-ai catalog 构造某个内置 provider 的 snapshot（auth.json 里只有 key、
+ * models.json 无条目时的反向迁移源）。取该 provider 的 catalog 模型清单，
+ * 端点/api 取首个条目的值（catalog 内同 provider 模型条目通常一致）。
+ * catalog 无该 provider / 无可用模型时返回 undefined。
+ */
+export function piBuiltinSnapshotFromCatalog(
+	name: string,
+	apiKey: string | undefined,
+	catalog: PiBuiltinCatalogView,
+): PiProviderSnapshot | undefined {
+	const inner = catalog.byProviderId.get(name);
+	if (!inner || inner.size === 0) return undefined;
+	const entries = [...inner.values()];
+	const first = entries[0];
+	if (!first) return undefined;
+	const models: PiModelItem[] = [];
+	for (const entry of entries) {
+		const row: PiModelItem = { id: entry.id.trim() };
+		if (typeof entry.name === "string" && entry.name.trim()) row.name = entry.name.trim();
+		if (entry.contextWindow != null) row.contextWindow = entry.contextWindow;
+		if (entry.maxTokens != null) row.maxTokens = entry.maxTokens;
+		if (entry.reasoning === true) row.reasoning = true;
+		if (entry.input && entry.input.length > 0) row.input = entry.input;
+		models.push(row);
+	}
+	return {
+		name: name.trim(),
+		baseUrl: typeof first.baseUrl === "string" ? first.baseUrl.trim() : undefined,
+		api: typeof first.api === "string" ? first.api.trim() : "openai-completions",
+		apiKey: apiKey?.trim() || undefined,
+		models,
+	};
+}
+
 export function looksLikeOfficialDeepseek(baseUrl: string | undefined): boolean {
 	if (!baseUrl?.trim()) return true;
 	try {

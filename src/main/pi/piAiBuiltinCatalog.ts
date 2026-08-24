@@ -15,6 +15,10 @@ import type { FetchedModel } from "../../shared/types/fetchedModel";
 /** 目录里一条模型的补全字段（比 FetchedModel 多 provider，供同名歧义消解） */
 export type PiAiCatalogEntry = FetchedModel & {
 	provider?: string;
+	/** pi-ai 内置 provider 的 API 协议（如 "openai-completions"）与默认端点；
+	 *  迁移反向（pi→DSH）时用来补全内置 provider 的 profile。仅在 catalog 条目提供时存在。 */
+	api?: string;
+	baseUrl?: string;
 };
 
 export type PiAiCatalogIndex = {
@@ -142,6 +146,9 @@ type CatalogJsonModel = {
 	maxTokens?: unknown;
 	reasoning?: unknown;
 	input?: unknown;
+	/** 模型级 API 协议与默认端点（某些 provider 的模型条目内联提供）。 */
+	api?: unknown;
+	baseUrl?: unknown;
 };
 
 /**
@@ -202,6 +209,10 @@ export function loadPiAiCatalogEntries(): PiAiCatalogEntry[] {
 					const input = Array.isArray(model.input)
 						? model.input.filter((item): item is string => typeof item === "string")
 						: undefined;
+					const api =
+						typeof model.api === "string" && model.api.length > 0 ? model.api : undefined;
+					const baseUrl =
+						typeof model.baseUrl === "string" && model.baseUrl.length > 0 ? model.baseUrl : undefined;
 					entries.push({
 						id,
 						...(name ? { name } : {}),
@@ -210,6 +221,8 @@ export function loadPiAiCatalogEntries(): PiAiCatalogEntry[] {
 						...(maxTokens != null ? { maxTokens } : {}),
 						...(reasoning ? { reasoning } : {}),
 						...(input && input.length > 0 ? { input } : {}),
+						...(api ? { api } : {}),
+						...(baseUrl ? { baseUrl } : {}),
 					});
 				}
 			}
