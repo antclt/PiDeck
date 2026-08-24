@@ -369,6 +369,7 @@ export class ConfigManager {
 		baseUrl: string,
 		apiKey: string,
 		apiType?: string,
+		headers?: Record<string, string>,
 	): Promise<{
 		success: boolean;
 		models?: FetchedModel[];
@@ -381,7 +382,7 @@ export class ConfigManager {
 		/** 建议写入配置的 baseUrl（含 /v1 等）；UI 可自动改写 */
 		suggestedBaseUrl?: string;
 	}> {
-		const requests = this.buildModelsRequest(baseUrl, apiKey, apiType);
+		const requests = this.buildModelsRequest(baseUrl, apiKey, apiType, headers);
 		let lastError: string | undefined;
 		let lastDebugDetails: string | undefined;
 		let lastRequestUrl: string | undefined;
@@ -491,8 +492,12 @@ export class ConfigManager {
 		baseUrl: string,
 		apiKey: string,
 		apiType?: string,
+		requestHeaders?: Record<string, string>,
 	): TestRequest[] {
 		const api = this.normalizeApiType(apiType);
+		// 与 buildTestRequest 一致：允许 provider 配置的自定义 headers（含 User-Agent）
+		// 覆盖 SDK 默认 UA，保证「获取模型」与「测试连接/真实会话」走同一套网络形象。
+		const extraHeaders = this.normalizeRequestHeaders(requestHeaders);
 
 		if (api === "google-generative-ai") {
 			// Google Gemini：使用独立的 v1beta 路径
@@ -501,7 +506,7 @@ export class ConfigManager {
 			const versioned = needsPrefix ? `${u}/v1beta` : u;
 			return [{
 				url: `${versioned}/models?key=${encodeURIComponent(apiKey)}`,
-				headers: { "Content-Type": "application/json" },
+				headers: { "Content-Type": "application/json", ...extraHeaders },
 			}];
 		}
 
@@ -513,6 +518,7 @@ export class ConfigManager {
 				"x-api-key": apiKey,
 				"anthropic-version": "2023-06-01",
 				"Content-Type": "application/json",
+				...extraHeaders,
 			});
 			const primaryUrl = `${u}/v1/models`;
 			const fallbackUrl = `${u}/models`;
@@ -529,6 +535,7 @@ export class ConfigManager {
 		const headers = this.withOpenAiSdkUserAgent({
 			Authorization: `Bearer ${apiKey}`,
 			"Content-Type": "application/json",
+			...extraHeaders,
 		});
 		const u = baseUrl.replace(/\/+$/, "");
 		const primaryUrl = `${this.ensureVersionPath(baseUrl)}/models`;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { findLoadedDirectory, findDirectoryNodeByRelativePath, mergeFileTreeChildren, hydrateExpandedFileTree } = loadTsCommonJs(
+const { findLoadedDirectory, findDirectoryNodeByRelativePath, mergeFileTreeChildren, hydrateExpandedFileTree, resolveAtDrillDirectory, shouldLoadFullTreeForAtSearch } = loadTsCommonJs(
   "src/renderer/src/utils/fileTreeLazy.ts",
 );
 
@@ -82,4 +82,53 @@ test("findDirectoryNodeByRelativePath cannot see under unloaded directories", ()
 test("findDirectoryNodeByRelativePath returns undefined for unknown path", () => {
   const tree = [dir("src", "/p/src")];
   assert.equal(findDirectoryNodeByRelativePath(tree, "nope"), undefined);
+});
+
+test("resolveAtDrillDirectory drills into last slash prefix directory", () => {
+  const tree = [
+    { ...dir("src", "/p/src"), relativePath: "src" },
+    {
+      ...dir("components", "/p/src/components", [{ ...file("Button.tsx", "/p/src/components/Button.tsx"), relativePath: "src/components/Button.tsx" }]),
+      relativePath: "src/components",
+      children: undefined,
+    },
+  ];
+  // @src/com → 取 src 目录下钻（src/components 未展开，先用已加载的 src）
+  assert.equal(resolveAtDrillDirectory("src/com", tree)?.path, "/p/src");
+  // @src/components/ → 目标本身就是目录，直接命中
+  assert.equal(resolveAtDrillDirectory("src/components/", tree)?.path, "/p/src/components");
+});
+
+test("resolveAtDrillDirectory falls back along loaded-prefix chain on paste", () => {
+  const tree = [dir("src", "/p/src"), dir("tests", "/p/tests")];
+  // 整段粘贴 @src/components/Button.ts：先拉 src 一层，merge 后链条自动推进
+  assert.equal(resolveAtDrillDirectory("src/components/Button.ts", tree)?.path, "/p/src");
+});
+
+test("resolveAtDrillDirectory advances past loaded segments", () => {
+  const tree = [
+    {
+      ...dir("src", "/p/src", [{ ...dir("deep", "/p/src/deep"), relativePath: "src/deep" }]),
+      relativePath: "src",
+    },
+  ];
+  // src 已展开但 deep 未拉：链条停在 deep（下一级待加载目录）
+  assert.equal(resolveAtDrillDirectory("src/deep/nope/I", tree)?.path, "/p/src/deep");
+});
+
+test("resolveAtDrillDirectory returns undefined when nothing to drill", () => {
+  const tree = [dir("src", "/p/src")];
+  assert.equal(resolveAtDrillDirectory("index", tree), undefined);
+  assert.equal(resolveAtDrillDirectory("", tree), undefined);
+});
+
+test("shouldLoadFullTreeForAtSearch requires real search intent", () => {
+  assert.equal(shouldLoadFullTreeForAtSearch("index"), true);
+  assert.equal(shouldLoadFullTreeForAtSearch("in"), true);
+  assert.equal(shouldLoadFullTreeForAtSearch("i"), false); // 太短，可能只是 @ 后随手一敲
+  assert.equal(shouldLoadFullTreeForAtSearch(""), false);
+  assert.equal(shouldLoadFullTreeForAtSearch("src/"), false); // 有 / ，走目录下钻
+  assert.equal(shouldLoadFullTreeForAtSearch("src/com"), false);
+  assert.equal(shouldLoadFullTreeForAtSearch("C:\\Users\\me\\a.ts"), false); // 盘符绝对路径
+  assert.equal(shouldLoadFullTreeForAtSearch("C:/Users/me/a.ts"), false);
 });

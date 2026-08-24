@@ -1038,9 +1038,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configFetchModels, async (
 		_event,
-		payload: { baseUrl: string; apiKey: string; apiType?: string },
+		payload: { baseUrl: string; apiKey: string; apiType?: string; headers?: Record<string, string> },
 	) => {
-		const result = await configManager.fetchProviderModels(payload.baseUrl, payload.apiKey, payload.apiType);
+		const result = await configManager.fetchProviderModels(payload.baseUrl, payload.apiKey, payload.apiType, payload.headers);
 		void appLogger.info("config", "Provider models fetched", {
 			baseUrl: payload.baseUrl,
 			apiType: payload.apiType,
