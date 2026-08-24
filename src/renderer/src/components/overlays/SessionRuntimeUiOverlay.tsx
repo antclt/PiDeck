@@ -191,7 +191,9 @@ function BatchAskInlineBar(props: {
 							onClick={() => setCurrentTab(index)}
 						>
 							<span className="min-w-[14px] text-center font-mono font-semibold">{index + 1}</span>
-							<span className="max-w-[28ch] whitespace-normal break-words text-left leading-tight">{question.question}</span>
+							{/* 单行截断：tab 只做摘要，完整问题在下方详情区展示；
+							    多行会突破胶囊固定高度溢出到下方内容（min-w-0 让 truncate 在 flex 里生效） */}
+							<span className="max-w-[28ch] min-w-0 truncate text-left" title={question.question}>{question.question}</span>
 							{answered ? <Check size={11} className="shrink-0 text-[var(--color-success)]" aria-hidden="true" /> : null}
 						</Button>
 					);
@@ -506,13 +508,18 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 							return (
 								<Button
 									key={`${request.requestId}:${option}`}
-									className="ask-inline-bar-option min-h-[30px] w-full min-w-0 max-w-none flex-col items-start justify-center gap-0.5 px-2 py-1 text-left break-words whitespace-normal"
+									// 单行选项（2026-12 用户反馈：上下两行文本对不齐）：标签+说明同行，
+									// 固定高度 + 说明 truncate（title 兔底全文），等宽等高实现光学对齐。
+									className="ask-inline-bar-option h-[30px] w-full min-w-0 max-w-none items-center justify-start gap-2 px-2 py-0 text-left"
 									variant="outline"
 									disabled={responding}
 									onClick={() => submitValue(option)}
+									title={parsed.description || parsed.label}
 								>
-									<span className="break-words whitespace-normal text-caption font-medium leading-5 text-text-primary">{parsed.label}</span>
-									{parsed.description ? <span className="break-words whitespace-normal text-micro leading-5 text-text-tertiary">{parsed.description}</span> : null}
+									{/* 标签不缩不截：短标签（如「开始执行」）保证两枚按钮说明文案起点对齐；
+									    超长标签兜底 max-w 截断，避免挤压说明列。 */}
+									<span className="max-w-[45%] shrink-0 truncate text-caption font-medium leading-none text-text-primary">{parsed.label}</span>
+									{parsed.description ? <span className="min-w-0 flex-1 truncate text-micro leading-none text-text-tertiary">{parsed.description}</span> : null}
 								</Button>
 							);
 						})}

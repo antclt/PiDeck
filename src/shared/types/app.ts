@@ -129,6 +129,8 @@ export type AppInfo = {
 	platform: NodeJS.Platform;
 	/** 用户 home 目录，供扩展读取本地文件（如 memory-store.json） */
 	homeDir: string;
+	/** PiDeck 数据目录（app.getPath("userData")）：配置、会话、诊断等数据所在，跨平台实际路径由主进程解析 */
+	userDataDir: string;
 	/** 开发态 git 分支名（多 worktree 并行时区分窗口）；正式包/共享分支为空。 */
 	devBranch?: string;
 };

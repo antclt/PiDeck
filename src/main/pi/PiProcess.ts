@@ -13,6 +13,7 @@ import type { AppSettings } from "../../shared/types";
 import type { SessionProxyMode } from "../../shared/types/session";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { appendBuiltInExtensionArgs } from "../extensions/builtInExtensions";
+import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST } from "../extensions/extensionVersionGate";
 import { getAppLogger } from "../logging/sharedLogger";
 import { applyPiProxyMode } from "../sessions/sessionProxyPolicy";
 
@@ -29,6 +30,8 @@ type PiProcessSettings = Pick<
   | "piRpcNoExtensions"
   | "piRpcNoSkills"
   | "removedBuiltInExtensions"
+  | "disabledExtensions"
+  | "disableExtensionWhitelist"
 >;
 
 type PiProcessLocator = Pick<
@@ -45,6 +48,15 @@ type PiProcessOptions = {
    * 未提供时 RPC 不注入内置扩展（兼容测试/探针）。
    */
   resolveBuiltInExtensionPaths?: (settings?: PiProcessSettings) => string[];
+  /**
+   * 白名单模式解析器：user/project packages + 本地扩展 + 内置扩展的启用路径列表。
+   * 返回 null = 无禁用项，不启用白名单（pi 自动发现全部扩展）；
+   * 返回数组（可能为空）= 启用白名单，start() 附加 --no-extensions 并逐条注入。
+   */
+  resolveEnabledExtensionPaths?: (
+    settings?: PiProcessSettings,
+    cwd?: string,
+  ) => string[] | null;
   /**
    * 安全策略快照路径（userData/security-policy.json）。
    * 注入 PIDECK_SECURITY_CONFIG 环境变量，pi-deck-security-gate 扩展据此加载规则。
@@ -230,7 +242,9 @@ export class PiProcess extends EventEmitter {
     args.push("--no-themes");
     // 桌面端模型列表来自本地 models.json；默认 --offline 跳过 pi 启动期模型目录网络刷新。
     if (this.settings?.piRpcOffline !== false) args.push("--offline");
+
     // 诊断开关：坏扩展/技能有时会拖垮 RPC 初始化；用户可在开发设置临时关闭后重试。
+    // piRpcNoExtensions（总开关）优先：关闭后连白名单注入也不做，保证诊断路径干净。
     if (this.settings?.piRpcNoExtensions) args.push("--no-extensions");
     if (this.settings?.piRpcNoSkills) args.push("--no-skills");
 
@@ -247,13 +261,35 @@ export class PiProcess extends EventEmitter {
       );
     }
 
+    // 白名单模式：存在禁用扩展时，--no-extensions 关自动发现 + 逐条 -e 注入未禁用的扩展。
+    // 必须在 parkIncompatibleExtensions 之后调用：黑名单文件已被移走，resolver 的 existsSync
+    // 会自然跳过它们，避免 -e 指向已停放路径导致 pi 报 path does not exist。
+    // disableExtensionWhitelist（UI「禁用 -e 参数」总开关）为 true 时无条件关闭白名单：
+    // 恢复 pi 默认发现加载全部扩展，防御个别扩展的白名单注入导致 RPC 启动失败。
+    // 此处只计算列表，实际注入推迟到版本门槛检查之后（见下方 version gate），
+    // 确保在拿到 command + versionCache 后统一决定。
+    const whitelistPaths = this.options.resolveEnabledExtensionPaths?.(this.settings, this.cwd) ?? null;
+    const useWhitelist =
+      whitelistPaths !== null &&
+      whitelistPaths !== undefined &&
+      !this.settings?.piRpcNoExtensions &&
+      !this.settings?.disableExtensionWhitelist;
+
     // PiDeck 内置扩展：从 app resources 以 -e 注入，不再复制到 ~/.pi/agent/extensions。
-    // piRpcNoExtensions 时连内置也不注入，保证诊断路径干净。
+    // piRpcNoExtensions 或白名单模式时不再单独注入（白名单列表已包含内置扩展）。
     const builtInPaths = this.options.resolveBuiltInExtensionPaths?.(this.settings) ?? [];
-    const argsWithBuiltIns = appendBuiltInExtensionArgs(args, builtInPaths, {
-      noExtensions: Boolean(this.settings?.piRpcNoExtensions),
-    });
-    if (builtInPaths.length > 0 && !this.settings?.piRpcNoExtensions) {
+    const argsWithBuiltIns = useWhitelist
+      ? args
+      : appendBuiltInExtensionArgs(args, builtInPaths, {
+          noExtensions: Boolean(this.settings?.piRpcNoExtensions),
+        });
+    if (useWhitelist) {
+      void getAppLogger()?.info("pi-process", "Extension whitelist mode enabled", {
+        extensions: whitelistPaths.length,
+        cwd: this.cwd,
+      });
+      console.log(`[PiProcess] Extension whitelist mode: ${whitelistPaths.length} extensions via -e`);
+    } else if (builtInPaths.length > 0 && !this.settings?.piRpcNoExtensions) {
       void getAppLogger()?.info("pi-process", "Loading PiDeck built-in extensions via -e", {
         extensions: builtInPaths.map((path) => path.split(/[/\\]/).pop()).join(", "),
       });
@@ -287,6 +323,53 @@ export class PiProcess extends EventEmitter {
         else if (trustOverride === "no-approve") finalPiArgs.push("--no-approve");
       }
       // 版本不支持信任标志时静默跳过：老版本 pi 无 trust 系统，自动加载所有资源。
+    }
+
+    // 扩展白名单的版本门槛：-e 的目录/包源语义从 pi 0.60 起才文档化，过低版本传目录
+    // 可能 unknown option / path not found 导致 RPC 启动失败。白名单模式这里同步确认版本：
+    // - 信任场景 ensureVersionCheck 已 await（versionCache 为 done），无需重复；
+    // - 非信任场景强制 await 一次（--version 探测命中预热缓存，正常为 0 开销；
+    //   未命中时多一次探测，仅白名单模式发生，可接受）；
+    // - 版本已知且低于门槛 → 降级为默认扩展发现（禁用不生效），并补回内置扩展注入，
+    //   保证启动行为与未启用白名单时一致；
+    // - 版本未知（探测失败）→ 不阻塞，照常启用（warmVersionCache 已预热，未知=探测失败）。
+    // 注入延迟到此处还使 --extension 路径处于 wsl 转换（下方 finalPiArgs.map）之前，
+    // WSL 下同样会被正确转成 Linux 路径。
+    if (useWhitelist) {
+      if (!trustOverride) await this.ensureVersionCheck(command);
+      const cachedVersionGate = PiProcess.versionCache.get(command);
+      const minorForGate =
+        cachedVersionGate?.status === "done" ? cachedVersionGate.minorVersion : this.piMinorVersion;
+      if (
+        minorForGate !== null &&
+        minorForGate !== undefined &&
+        minorForGate < MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST
+      ) {
+        // 版本过低：白名单不可用。不注入 --no-extensions/-e，恢复 pi 默认扩展发现，
+        // 并按非白名单路径补回内置扩展，避免降级后连内置扩展都缺失。
+        appendBuiltInExtensionArgs(finalPiArgs, builtInPaths, { noExtensions: false });
+        void getAppLogger()?.warn("pi-process", "pi version too old for extension whitelist; falling back to default discovery", {
+          minorVersion: minorForGate,
+          required: MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST,
+        });
+        console.warn(
+          `[PiProcess] pi ${minorForGate}.x too old for extension disable whitelist (need >= ${MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST}); disabled extensions will still load`,
+        );
+      } else {
+        // 白名单模式即使列表为空也要加 --no-extensions：空列表表示「全部禁用」，不是「不启用」。
+        // 路径经 spawn 参数数组传递（不经 shell），空格/中文/& 等特殊字符无需转义。
+        finalPiArgs.push("--no-extensions");
+        for (const extensionPath of whitelistPaths) {
+          const trimmed = extensionPath.trim();
+          if (!trimmed) continue;
+          finalPiArgs.push("--extension", trimmed);
+        }
+        void getAppLogger()?.info("pi-process", "Extension whitelist mode enabled", {
+          extensions: whitelistPaths.length,
+          cwd: this.cwd,
+        });
+        console.log(`[PiProcess] Extension whitelist mode: ${whitelistPaths.length} extensions via -e`);
+      }
     }
 
     let spawnCwd = this.cwd;

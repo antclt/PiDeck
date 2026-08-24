@@ -48,7 +48,16 @@ export type StartupWindowMode =
 	| "normal-medium"
 	| "normal-compact";
 
-	export type AppSettings = {
+	/**
+ * 一条扩展禁用记录：作用域区分 user/project 同名 source 的独立状态。
+ * scope 与 PiExtensionSummary.scope 对齐（user=全局 pi，project=项目 .pi）。
+ */
+export type DisabledExtensionEntry = {
+	scope: "user" | "project" | "unknown";
+	source: string;
+};
+
+export type AppSettings = {
 	useNativeTitleBar: boolean;
 	showNativeMenu: boolean;
 	sendShortcut: SendShortcutMode;
@@ -278,6 +287,21 @@ export type StartupWindowMode =
 	 * 下次启动跳过自动部署，并清理用户目录残留文件，避免 pi 仍加载导致工具冲突。
 	 */
 	removedBuiltInExtensions: string[];
+
+	/**
+	 * 用户禁用的扩展列表（source 标识 + 作用域），存储于 PiDeck 自身设置（不写 pi settings）。
+	 * pi 0.82.x 不识别 settings.json 的 disabledExtensions，禁用只能靠 PiDeck 启动 RPC 时
+	 * 切「白名单模式」：--no-extensions + 逐条 -e 注入未禁用扩展实现（见 enabledExtensionResolver）。
+	 * 列表为空 = 白名单关闭，pi 自动发现全部扩展（兼容用户在 PiDeck 外手动安装的扩展）。
+	 */
+	disabledExtensions: DisabledExtensionEntry[];
+
+	/**
+	 * 白名单模式总开关（默认 false = 启用白名单机制）。
+	 * true = 不走 -e 注入，pi 按默认方式加载全部扩展（禁用列表暂不生效），
+	 * 用于防御个别扩展的 -e 注入 / 白名单枚举导致 RPC 启动失败的情况。
+	 */
+	disableExtensionWhitelist: boolean;
 
 	// ── 生图模式（composer 底栏记忆，不是独立设置页） ──
 	/** 生图尺寸：unset=不发送 size；或 OpenAI WxH / 火山 1K/2K/4K */

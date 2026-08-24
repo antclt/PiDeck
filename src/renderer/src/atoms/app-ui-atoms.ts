@@ -13,6 +13,8 @@ export type SettingsTabId =
 	| "common"
 	| "appearance"
 	| "proxy"
+	| "web"
+	| "editors"
 	| "dev"
 	| "im"
 	| "pet"

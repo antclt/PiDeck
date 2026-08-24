@@ -4,11 +4,19 @@ import { basename, join } from "node:path";
 import { homedir } from "node:os";
 import { trashPath } from "../fs/trash";
 import { getAppLogger } from "../logging/sharedLogger";
-import type { AppSettings, PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, PiUpdateCheckResult } from "../../shared/types";
+import type {
+	AppSettings,
+	DisabledExtensionEntry,
+	PiCliUpdateResult,
+	PiExtensionListResult,
+	PiExtensionSummary,
+	PiUpdateCheckResult,
+} from "../../shared/types";
 import type { PiLocator } from "../pi/PiLocator";
 import { toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
+import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, parsePiMinorVersion } from "./extensionVersionGate";
 
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
@@ -170,11 +178,21 @@ export class ExtensionManager {
 			}
 		}
 
-		// 通过 PiDeck 桌面设置标记内置扩展移除状态（与 pi disabledExtensions 分离）。
+		// 通过 PiDeck 桌面设置标记启用状态（与 pi disabledExtensions 分离）。
 		// 必须在冲突检测前初始化：后续逻辑会写回 removedBuiltInExtensions 并删磁盘文件。
 		const removedBuiltIn = new Set(this.getPiDeckSettings().removedBuiltInExtensions ?? []);
+		// 用户禁用的非内置扩展：按 scope+source 匹配（同名可在 user/project 两级独立开关）。
+		const disabledExtKeys = new Set(
+			(this.getPiDeckSettings().disabledExtensions ?? []).map(
+				(entry) => `${entry.scope}:${entry.source}`,
+			),
+		);
 		for (const ext of merged) {
-			ext.enabled = !(ext.builtIn && removedBuiltIn.has(ext.source));
+			if (ext.builtIn) {
+				ext.enabled = !removedBuiltIn.has(ext.source);
+			} else {
+				ext.enabled = !disabledExtKeys.has(`${ext.scope}:${ext.source}`);
+			}
 		}
 
 		// 仅检测 todo / plan / ask 固定冲突：三方包名含对应关键词时自动禁用内置版。
@@ -297,18 +315,37 @@ export class ExtensionManager {
 		await trashPath(targetPath, { source: "extension:uninstall" });
 	}
 
-	/** 卸载后从 disabledExtensions 清掉对应项，避免残留无效禁用记录。 */
-	private async clearDisabledEntry(source: string): Promise<void> {
+	/**
+	 * 卸载后清理禁用记录：1) 旧路径遗留的 pi settings.json disabledExtensions（兼容手动写入/旧版，
+	 * 按 source 匹配）；2) PiDeck settings 的 scoped 条目——只清与本次卸载相同作用域的条目，
+	 * 避免「卸载项目版但保留用户版禁用状态」被误清。
+	 */
+	private async clearDisabledEntry(
+		source: string,
+		scope: PiExtensionSummary["scope"] = "user",
+	): Promise<void> {
 		try {
 			const settingsPath = join(this.homeDir, ".pi", "agent", "settings.json");
 			const raw = await readFile(settingsPath, "utf8");
 			const settings = JSON.parse(raw) as { disabledExtensions?: string[] };
 			const disabled = settings.disabledExtensions ?? [];
-			if (!disabled.includes(source)) return;
-			settings.disabledExtensions = disabled.filter((item) => item !== source);
-			await writeFile(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+			if (disabled.includes(source)) {
+				settings.disabledExtensions = disabled.filter((item) => item !== source);
+				await writeFile(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+			}
 		} catch {
 			// settings 不存在或解析失败时忽略；卸载主流程已成功
+		}
+		try {
+			const current = this.getPiDeckSettings().disabledExtensions ?? [];
+			const next = current.filter(
+				(entry) => !(entry.scope === scope && entry.source === source),
+			);
+			if (next.length !== current.length) {
+				await this.patchPiDeckSettings({ disabledExtensions: next });
+			}
+		} catch {
+			// PiDeck 设置写入失败不阻塞卸载主流程
 		}
 	}
 
@@ -392,7 +429,7 @@ export class ExtensionManager {
 				...(scope === "project" ? ["-l"] : []),
 			], 30_000);
 		}
-		await this.clearDisabledEntry(normalized);
+		await this.clearDisabledEntry(normalized, scope);
 		// 列表已变，清缓存，避免 UI 继续读到旧安装态。
 		this.invalidateListCache();
 	}
@@ -529,33 +566,62 @@ export class ExtensionManager {
 		return 0;
 	}
 
-	async setEnabled(source: string, enabled: boolean): Promise<void> {
-		const settingsPath = join(this.homeDir, ".pi", "agent", "settings.json");
-		let raw = "{}";
-		try { raw = await readFile(settingsPath, "utf8"); } catch {}
-		const settings = JSON.parse(raw);
-		const disabled: string[] = settings.disabledExtensions ?? [];
-		if (enabled) {
-			settings.disabledExtensions = disabled.filter((s) => s !== source);
-		} else {
-			if (!disabled.includes(source)) {
-				settings.disabledExtensions = [...disabled, source];
+	/**
+	 * 开关扩展：enabled=false 写入 PiDeck settings 的 disabledExtensions（scope+source），
+	 * 启动 RPC 时由白名单模式生效；enabled=true 从列表移除。
+	 * 不写 pi settings.json：pi 0.82.x 不支持 disabledExtensions，写了也不生效。
+	 */
+	async setEnabled(
+		source: string,
+		enabled: boolean,
+		scope: PiExtensionSummary["scope"] = "user",
+	): Promise<void> {
+		// 禁用动作受版本门槛约束：白名单机制（--no-extensions + -e）依赖 pi >= 0.60
+		// 的目录/包源语义，过低版本禁用不生效（还会导致白名单降级），这里直接拒绝并提示。
+		// 启用/移除禁用条目无风险（只是回到默认发现），不做检查；版本未知（getPiVersion 为
+		// null，如 pi 未安装/探测失败）时放行，避免拦截其他流程。
+		if (!enabled) {
+			const version = await this.getPiVersion();
+			const minor = parsePiMinorVersion(version);
+			if (minor !== null && minor < MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST) {
+				throw new Error(
+					this.translate("mainExtension.piVersionTooOldForDisable", { version: version ?? "?" }),
+				);
 			}
 		}
-		await writeFile(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+		const current = this.getPiDeckSettings().disabledExtensions ?? [];
+		const key = (entry: DisabledExtensionEntry) => `${entry.scope}:${entry.source}`;
+		// 同 scope+source 只保留一条；不同 scope（user/project）相互独立，同名可在一处禁用、另一处启用。
+		const next = current.filter((entry) => key(entry) !== `${scope}:${source.trim()}`);
+		if (!enabled) {
+			next.push({ scope, source: source.trim() });
+		}
+		await this.patchPiDeckSettings({ disabledExtensions: next });
 		// 开关状态变化后同步清缓存，避免 UI 显示旧 enabled。
 		this.invalidateListCache();
 	}
 
-	private async getDisabledExtensions(): Promise<Set<string>> {
-		const settingsPath = join(this.homeDir, ".pi", "agent", "settings.json");
-		try {
-			const raw = await readFile(settingsPath, "utf8");
-			const settings = JSON.parse(raw);
-			return new Set<string>(settings.disabledExtensions ?? []);
-		} catch {
-			return new Set<string>();
-		}
+	/** 当前禁用的扩展条目（PiDeck settings，白名单模式依据）。 */
+	getDisabledExtensions(): DisabledExtensionEntry[] {
+		return this.getPiDeckSettings().disabledExtensions ?? [];
+	}
+
+	/**
+	 * 白名单总开关是否关闭（true = 不走 -e 白名单，默认加载全部扩展）。
+	 * 默认 false：有禁用列表时 PiProcess 才启用白名单模式。
+	 */
+	isWhitelistDisabled(): boolean {
+		return Boolean(this.getPiDeckSettings().disableExtensionWhitelist);
+	}
+
+	/**
+	 * 切换白名单总开关（UI：扩展列表上方「禁用 -e 参数」按钮）。
+	 * 开启后 PiProcess 不再注入 --no-extensions/-e，pi 默认加载全部扩展，
+	 * 禁用列表暂不生效——用于防御个别扩展的白名单注入导致 RPC 启动失败。
+	 * 开关变化不影响扩展列表本身，无需 invalidateListCache。
+	 */
+	async setWhitelistDisabled(enabled: boolean): Promise<void> {
+		await this.patchPiDeckSettings({ disableExtensionWhitelist: Boolean(enabled) });
 	}
 
 	/**

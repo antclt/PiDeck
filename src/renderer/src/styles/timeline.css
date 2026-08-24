@@ -1122,14 +1122,16 @@ body.ask-dialog-open .ask-question-card.pending {
 .ask-inline-bar .ask-inline-bar-option {
   min-width: 0;
 }
+/* 选项改单行（2026-12 用户反馈：上下两行文本对不齐）：标签+说明同行，
+   说明超长时 truncate，与 live 卡（SessionRuntimeUiOverlay）同一视觉语言。 */
 .ask-question-card-option {
   display: flex;
   min-width: 0;
   width: 100%;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
   min-height: 28px;
   height: auto;
   padding: 6px 10px;
@@ -1158,19 +1160,23 @@ body.ask-dialog-open .ask-question-card.pending {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
+/* 标签不缩不截（短标签保证两枚按钮说明起点对齐，超长兑底截断），说明列弹性截断。 */
 .ask-question-card-option-label,
 .ask-question-card-option-desc {
   min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   text-align: left;
 }
 .ask-question-card-option-label {
+  flex: 0 0 auto;
+  max-width: 45%;
   color: inherit;
   font-weight: 500;
 }
 .ask-question-card-option-desc {
+  flex: 0 1 auto;
   color: var(--color-text-tertiary);
   font-size: var(--font-size-caption);
   font-weight: 400;

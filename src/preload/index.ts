@@ -1077,6 +1077,11 @@ const api = {
 		onOpenInBrowser: (callback: (url: string) => void) =>
 			subscribe(ipcChannels.appOpenInBrowser, callback),
 		restart: () => ipcRenderer.invoke(ipcChannels.appRestart) as Promise<void>,
+		// 打开 PiDeck 数据目录（配置/会话/诊断），文件管理器由主进程按平台选择
+		openDataDir: () =>
+			ipcRenderer.invoke(
+				ipcChannels.appOpenDataDir,
+			) as Promise<{ ok: boolean; error?: string }>,
 		rendererLog: (
 			level: AppLogLevel,
 			scope: string,
@@ -1187,8 +1192,10 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.extensionsUninstall, source, scope) as Promise<void>,
 		install: (source: string) =>
 			ipcRenderer.invoke(ipcChannels.extensionsInstall, source) as Promise<string>,
-		toggle: (source: string, enabled: boolean) =>
-			ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled) as Promise<void>,
+		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown") =>
+			ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope) as Promise<void>,
+		setWhitelistDisabled: (enabled: boolean) =>
+			ipcRenderer.invoke(ipcChannels.extensionsSetWhitelistDisabled, enabled) as Promise<void>,
 		removeBuiltIn: (source: string) =>
 			ipcRenderer.invoke(ipcChannels.extensionsRemoveBuiltIn, source) as Promise<void>,
 		restoreBuiltIn: (source: string) =>

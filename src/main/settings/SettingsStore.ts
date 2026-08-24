@@ -180,6 +180,10 @@ Gitmoji 对应关系：
   // ── 扩展管理 ──
   /** 用户手动移除的内置扩展，启动时跳过自动部署 */
   removedBuiltInExtensions: [],
+  /** 用户禁用的扩展（scope+source）；非空时 RPC 启动走白名单模式 */
+  disabledExtensions: [],
+  /** 白名单总开关：true 时不走 -e 注入，默认加载全部扩展（防御启动失败） */
+  disableExtensionWhitelist: false,
 
   // 生图参数：记在 composer 底栏，跨会话复用；缺省不指定分辨率、不带水印
   imageGenSize: DEFAULT_IMAGE_GEN_SIZE,

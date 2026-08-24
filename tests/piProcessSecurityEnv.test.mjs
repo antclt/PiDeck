@@ -29,10 +29,10 @@ function loadWslPaths() {
  */
 function loadPiProcess() {
 	const wslPaths = loadWslPaths();
-	/** spawn 收到的 env；mockSpawn 被调用时写入 */
+	/** spawn 收到的 env/args；mockSpawn 被调用时写入 */
 	let captured = null;
-	const mockSpawn = (_command, _args, opts) => {
-		captured = { env: opts?.env ?? null };
+	const mockSpawn = (_command, args, opts) => {
+		captured = { env: opts?.env ?? null, args: args ?? null };
 		// 返回一个最小 ChildProcess 形状：PiProcess 后续会 new PiRpcClient(proc.stdin/stdout)
 		// 并注册 stderr/error/exit 监听，全部用 stream + noop 满足。
 		return {
@@ -71,9 +71,10 @@ function loadPiProcess() {
 			if (id === "node:child_process") {
 				return {
 					spawn: mockSpawn,
-					// ensureVersionCheck 异步探针：立即回调完成，避免 pending promise 残留
+					// ensureVersionCheck 异步探针：返回 0.82.1（≥ 白名单版本门槛 0.60），
+					// 避免低版本触发白名单降级分支影响注入断言
 					execFile: (_cmd, _args, _opts, cb) => {
-						if (typeof cb === "function") cb(null, "1.2.3\n");
+						if (typeof cb === "function") cb(null, "0.82.1\n");
 					},
 				};
 			}
@@ -88,6 +89,9 @@ function loadPiProcess() {
 			if (id === "../wsl/WslPaths") return wslPaths;
 			if (id === "../extensions/builtInExtensions") {
 				return { appendBuiltInExtensionArgs: (args) => args };
+			}
+			if (id === "../extensions/extensionVersionGate") {
+				return require("../src/main/extensions/extensionVersionGate.ts");
 			}
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => undefined };
 			if (id === "../sessions/sessionProxyPolicy") {
@@ -129,4 +133,46 @@ test("WSL 模式下 PIDECK_SESSION_ID（UUID 身份 key）原样注入，不经 
 		captured.env.PIDECK_SECURITY_CONFIG,
 		"/mnt/c/Users/tester/AppData/Roaming/PiDeck-dev/security-policy.json",
 	);
+});
+
+test("默认（未开启总开关）且存在禁用项时注入 --no-extensions + -e 白名单", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
+	const proc = new PiProcess(
+		"C:\\proj",
+		{ wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" },
+		mockLocator,
+		{
+			resolveEnabledExtensionPaths: () => ["C:\\ext\\a.ts", "C:\\ext\\b.ts"],
+			securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+		},
+	);
+	await proc.start(undefined, undefined, true);
+	const captured = getCaptured();
+	assert.ok(captured?.args, "spawn 应被调用");
+	const idx = captured.args.indexOf("--no-extensions");
+	assert.ok(idx >= 0, "白名单模式应注入 --no-extensions");
+	assert.equal(captured.args[idx + 1], "--extension");
+	// WSL 模式：-e 后的扩展路径被转换为 distro 内 Linux 路径（最终交给 pi 在 distro 内加载）
+	assert.equal(captured.args[idx + 2], "/mnt/c/ext/a.ts");
+	assert.equal(captured.args[idx + 3], "--extension");
+	assert.equal(captured.args[idx + 4], "/mnt/c/ext/b.ts");
+});
+
+test("白名单总开关 disableExtensionWhitelist=true 时不再注入 --no-extensions/-e", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
+	// resolver 返回白名单路径（模拟存在禁用项），但总开关开启时应整体忽略白名单
+	const proc = new PiProcess(
+		"C:\\proj",
+		{ wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root", disableExtensionWhitelist: true },
+		mockLocator,
+		{
+			resolveEnabledExtensionPaths: () => ["C:\\ext\\a.ts"],
+			securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+		},
+	);
+	await proc.start(undefined, undefined, true);
+	const captured = getCaptured();
+	assert.ok(captured?.args, "spawn 应被调用");
+	assert.ok(!captured.args.includes("--no-extensions"), "总开关开启时不应注入 --no-extensions");
+	assert.ok(!captured.args.includes("--extension"), "总开关开启时不应注入 --extension");
 });

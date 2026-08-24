@@ -11,6 +11,8 @@ export type SettingsUnsavedTabId =
 	| "common"
 	| "appearance"
 	| "proxy"
+	| "web"
+	| "editors"
 	| "dev"
 	| "im"
 	| "pet"
@@ -36,6 +38,8 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	common: "settings.tabs.common",
 	appearance: "settings.tabs.appearance",
 	proxy: "settings.tabs.proxy",
+	web: "settings.tabs.web",
+	editors: "settings.tabs.editors",
 	dev: "settings.tabs.dev",
 	im: "settings.tabs.im",
 	pet: "settings.tabs.pet",
@@ -99,6 +103,16 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "desktopProxyUrl", tab: "proxy", itemKey: "settings.proxyUrl" },
 	{ field: "desktopProxyBypass", tab: "proxy", itemKey: "settings.proxyBypass" },
 
+	// 宠物字段块在新侧栏顺序中位于「扩展集成」簇（dev 置底之前），
+	// 目录顺序需与 settingsTabLayout 的展示顺序保持一致，
+	// 关闭确认才能正确点名用户在页面上最先看到的那一项。
+	{ field: "petEnabled", tab: "pet", itemKey: "settings.pet.enable" },
+	{ field: "petAlwaysOnTop", tab: "pet", itemKey: "settings.pet.alwaysOnTop" },
+	{ field: "petPatrolEnabled", tab: "pet", itemKey: "settings.pet.patrol" },
+	{ field: "petPatrolPauseMin", tab: "pet", itemKey: "settings.pet.patrolPause" },
+	{ field: "petScale", tab: "pet", itemKey: "settings.pet.scale" },
+	{ field: "petId", tab: "pet", itemKey: "settings.pet.choose" },
+
 	{ field: "wslEnabled", tab: "dev", itemKey: "settings.piSource.label" },
 	{ field: "wslDistro", tab: "dev", itemKey: "settings.wsl.distro" },
 	{ field: "wslUser", tab: "dev", itemKey: "settings.wsl.user" },
@@ -110,19 +124,12 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "piRpcOffline", tab: "dev", itemKey: "settings.piRpcOffline" },
 	{ field: "piRpcNoExtensions", tab: "dev", itemKey: "settings.piRpcNoExtensions" },
 	{ field: "piRpcNoSkills", tab: "dev", itemKey: "settings.piRpcNoSkills" },
-	{ field: "webServiceEnabled", tab: "dev", itemKey: "settings.enableWebService" },
-	{ field: "webServiceHost", tab: "dev", itemKey: "settings.webServiceHost" },
-	{ field: "webServicePort", tab: "dev", itemKey: "settings.webServicePort" },
-	{ field: "externalEditors", tab: "dev", itemKey: "settings.sectionEditors" },
+	{ field: "webServiceEnabled", tab: "web", itemKey: "settings.enableWebService" },
+	{ field: "webServiceHost", tab: "web", itemKey: "settings.webServiceHost" },
+	{ field: "webServicePort", tab: "web", itemKey: "settings.webServicePort" },
+	{ field: "externalEditors", tab: "editors", itemKey: "settings.sectionEditors" },
 	{ field: "developerDiagnostics", tab: "dev", itemKey: "settings.developerDiagnostics" },
 	{ field: "telemetryEnabled", tab: "dev", itemKey: "settings.telemetry" },
-
-	{ field: "petEnabled", tab: "pet", itemKey: "settings.pet.enable" },
-	{ field: "petAlwaysOnTop", tab: "pet", itemKey: "settings.pet.alwaysOnTop" },
-	{ field: "petPatrolEnabled", tab: "pet", itemKey: "settings.pet.patrol" },
-	{ field: "petPatrolPauseMin", tab: "pet", itemKey: "settings.pet.patrolPause" },
-	{ field: "petScale", tab: "pet", itemKey: "settings.pet.scale" },
-	{ field: "petId", tab: "pet", itemKey: "settings.pet.choose" },
 ];
 
 const UNKNOWN_ITEM: FieldCatalogEntry = {

@@ -214,6 +214,7 @@ export const ipcChannels = {
 	extensionsUninstall: "extensions:uninstall",
 	extensionsInstall: "extensions:install",
 	extensionsToggle: "extensions:toggle",
+	extensionsSetWhitelistDisabled: "extensions:set-whitelist-disabled",
 	extensionsRemoveBuiltIn: "extensions:remove-built-in",
 	extensionsRestoreBuiltIn: "extensions:restore-built-in",
 	extensionsUpdate: "extensions:update",
@@ -278,6 +279,8 @@ export const ipcChannels = {
 	appOpenExternal: "app:open-external",
 	appOpenInBrowser: "app:open-in-browser",
 	appRestart: "app:restart",
+	/** 在系统文件管理器中打开 PiDeck 数据目录（跨平台：explorer / Finder / xdg-open） */
+	appOpenDataDir: "app:open-data-dir",
 	/** 进程监控：拉取 Electron 各进程 + pi agent 子进程的内存/CPU 快照 */
 	processMetrics: "system:process-metrics",
 	/** 开发诊断快照（内存 / 事件循环延迟 / 最近关键耗时） */

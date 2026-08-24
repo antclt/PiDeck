@@ -44,7 +44,11 @@ const webTimeline = readFileSync(
 );
 
 test("Ask cards keep long content readable in every render path", () => {
-  assert.match(overlay, /whitespace-normal break-words/);
+  // 选项卡片/描述必须换行展示（break-words whitespace-normal），不能截断或裁切；
+  // 注意批量问答 tab 胶囊是例外：tab 只做单行摘要（truncate），完整问题在详情区展示。
+  assert.match(overlay, /break-words whitespace-normal/);
+  // 批量问答 tab 胶囊：单行截断 + 悬停 title 看全文，禁止多行溢出胶囊固定高度。
+  assert.match(overlay, /max-w-\[28ch\] min-w-0 truncate text-left" title=\{question\.question\}/);
   assert.match(toolCards, /whitespace-normal break-words font-mono text-caption/);
   assert.match(toolCards, /formatAskTitle\(item\.question/);
   assert.match(webTimeline, /formatAskTitle\(props\.request\.title/);
@@ -53,6 +57,20 @@ test("Ask cards keep long content readable in every render path", () => {
   assert.match(timelineStyles, /\.ask-question-card-options-confirm \.ask-question-card-option \{[\s\S]*?width: auto;[\s\S]*?min-width: 80px;/);
   // Ask 的展开内容必须交给会话时间线滚动，卡片本身不能因固定高度裁掉步骤或说明。
   assert.match(timelineStyles, /\.tool-card \{[\s\S]*?overflow: visible;/);
+});
+
+test("Plan/simple select options render as single-row optically aligned buttons", () => {
+  // 2026-12 用户反馈：上下两行（标签/说明各一行）文本对不齐。
+  // live 卡选项改为单行：固定高度 + 标签不缩 + 说明 truncate，等宽等高光学对齐。
+  assert.match(
+    overlay,
+    /ask-inline-bar-option h-\[30px\] w-full min-w-0 max-w-none items-center justify-start gap-2 px-2 py-0 text-left/,
+  );
+  assert.match(overlay, /max-w-\[45%\] shrink-0 truncate text-caption font-medium leading-none text-text-primary/);
+  assert.match(overlay, /min-w-0 flex-1 truncate text-micro leading-none text-text-tertiary/);
+  // 时间线卡同一视觉语言：flex row + 单行截断，不再是上下两行。
+  assert.match(timelineStyles, /\.ask-question-card-option \{[\s\S]*?flex-direction: row;[\s\S]*?align-items: center;/);
+  assert.match(timelineStyles, /\.ask-question-card-option-label,[\s\S]*?white-space: nowrap;[\s\S]*?text-overflow: ellipsis;/);
 });
 
 /**

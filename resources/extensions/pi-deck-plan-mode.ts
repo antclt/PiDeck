@@ -122,13 +122,16 @@ function getTextContent(message: AssistantMessage): string {
 }
 
 function cleanStepText(text: string): string {
+	// 只做 Markdown 清理（去加粗/行内代码标记、折叠空白），不做长度截断：
+	// 步骤文本会进入「计划草案已就绪」选单标题，桌面端卡片按 pre-wrap 完整换行展示；
+	// 截断会让用户在卡片和悬停提示里都看不到完整步骤（2026-12 用户反馈）。
 	let cleaned = text
 		.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1")
 		.replace(/`([^`]+)`/g, "$1")
 		.replace(/\s+/g, " ")
 		.trim();
 	if (cleaned.length > 0) cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-	return cleaned.length > 64 ? `${cleaned.slice(0, 61)}...` : cleaned;
+	return cleaned;
 }
 
 function extractTodoItems(message: string): TodoItem[] {
@@ -370,7 +373,7 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 		persistState();
 
 		const todoListText = todoItems.map((item) => `${item.step}. ☐ ${item.text}`).join("\n");
-		// 循环展示选单：取消「修改计划」时回到选单，避免用户误点后 agent 空停。
+		// 循环展示选单：仅在选项处理未定夺时重试；关闭选单（X/Esc）走 else 分支退出 plan 模式。
 		// 标题前缀 [PI_DECK_PLAN_NEXT] 给桌面端识别：关闭=退出计划模式，不是「默认第一项」。
 		// 标题前缀 [PI_DECK_PLAN_NEXT]：桌面端识别后换专用 UI/取消提示。
 		// 选项用「标题|说明」编码，桌面端拆成主副文案；前缀仍用于 startsWith 匹配。
@@ -379,13 +382,13 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 		const PLAN_OPT_EXECUTE = "开始执行|恢复写权限，按步骤改代码并勾进度";
 		// 「先不执行」只结束本轮、保持只读；不会自动再分析，需用户再发消息。
 		const PLAN_OPT_CONTINUE = "先不执行|结束本轮，保持只读；再发消息后 AI 才继续";
-		const PLAN_OPT_REVISE = "修改计划|写下修改意见，重新出一版计划";
+		// 只保留两个动作（2026-12 用户反馈：三枚按钮两行摆放对不齐）；
+		// 修改意见走「先不执行」后直接发消息，不再单独提供「修改计划」入口。
 		let actionTaken = false;
 		while (!actionTaken) {
 			const choice = await ctx.ui.select(PLAN_NEXT_TITLE, [
 				PLAN_OPT_EXECUTE,
 				PLAN_OPT_CONTINUE,
-				PLAN_OPT_REVISE,
 			]);
 
 			if (choice?.startsWith("开始执行")) {
@@ -407,18 +410,6 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 					{ triggerTurn: true, deliverAs: "followUp" },
 				);
 				actionTaken = true;
-			} else if (choice?.startsWith("修改计划")) {
-				// 标题前缀 [PI_DECK_PLAN_REVISE]：桌面端显示「返回上一步」而不是误当成退出计划。
-				// 取消/空内容 → refinement 为 undefined/空，循环回到三选一，不会退出 plan。
-				const refinement = await ctx.ui.editor(
-					"[PI_DECK_PLAN_REVISE] 写下你想怎么改这份计划（可返回重选）",
-					"",
-				);
-				if (refinement?.trim()) {
-					pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
-					actionTaken = true;
-				}
-				// 取消或空内容 → 不设 actionTaken，while 循环重新弹出三选一
 			} else if (choice?.startsWith("先不执行") || choice?.startsWith("继续规划")) {
 				// 结束本轮、保持 plan 只读；不 triggerTurn，用户再发消息才会继续
 				actionTaken = true;

@@ -48,34 +48,37 @@ export function DiagnosticsPanel(props: DiagnosticsPanelProps) {
         onChange={props.onChange}
       />
       {props.enabled ? (
-        <SettingRow
-          title={<span>{t("settings.developerDiagnosticsRefresh")}</span>}
-          description={
-            snapshot
-              ? `${t("settings.developerDiagnosticsMemory", {
-                  rss: formatBytes(snapshot.main.rssBytes),
-                  heap: formatBytes(snapshot.main.heapUsedBytes),
-                })} · ${t("settings.developerDiagnosticsLag", {
-                  lag: String(lag),
-                  max: String(maxLag),
-                })}`
-              : t("settings.developerDiagnosticsEmpty")
-          }
-          stacked
-        >
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" loading={loading} onClick={() => void refresh()}>
-              {t("settings.developerDiagnosticsRefresh")}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => void desktopApi.system.openDiagnosticsFolder()}
-            >
-              {t("settings.developerDiagnosticsOpenFolder")}
-            </Button>
-          </div>
+        <>
+          {/* 常规一行式：统计描述左列 + 两个按钮右列，不再上下两行；timings 列表单独放行下 */}
+          <SettingRow
+            title={<span>{t("settings.developerDiagnosticsRefresh")}</span>}
+            description={
+              snapshot
+                ? `${t("settings.developerDiagnosticsMemory", {
+                    rss: formatBytes(snapshot.main.rssBytes),
+                    heap: formatBytes(snapshot.main.heapUsedBytes),
+                  })} · ${t("settings.developerDiagnosticsLag", {
+                    lag: String(lag),
+                    max: String(maxLag),
+                  })}`
+                : t("settings.developerDiagnosticsEmpty")
+            }
+          >
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" loading={loading} onClick={() => void refresh()}>
+                {t("settings.developerDiagnosticsRefresh")}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void desktopApi.system.openDiagnosticsFolder()}
+              >
+                {t("settings.developerDiagnosticsOpenFolder")}
+              </Button>
+            </div>
+          </SettingRow>
           {timings.length > 0 ? (
-            <ul className="mt-2 max-h-48 overflow-auto font-mono text-caption text-muted-foreground">
+            <ul className="mt-1 max-h-48 overflow-auto px-1 font-mono text-caption text-muted-foreground">
               {timings.slice(0, 20).map((item, index) => (
                 <li key={`${item.name}-${item.startedAt}-${index}`}>
                   {item.durationMs}ms {item.name}
@@ -84,7 +87,7 @@ export function DiagnosticsPanel(props: DiagnosticsPanelProps) {
               ))}
             </ul>
           ) : null}
-        </SettingRow>
+        </>
       ) : null}
     </>
   );

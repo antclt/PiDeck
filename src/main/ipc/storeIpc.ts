@@ -440,16 +440,29 @@ export function registerStoreIpc({
 		void appLogger.info("extension", "Extension installed", { source });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean) => {
-		// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi disabledExtensions。
-		if (source.startsWith("pi-deck-") && source.endsWith(".ts")) {
-			if (enabled) await extensionManager.restoreBuiltIn(source);
-			else await extensionManager.disableBuiltIn(source);
-		} else {
-			await extensionManager.setEnabled(source, enabled);
-		}
-		void appLogger.info("extension", "Extension toggled", { source, enabled });
-	});
+	ipcMain.handle(
+		ipcChannels.extensionsToggle,
+		async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => {
+			// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi disabledExtensions。
+			if (source.startsWith("pi-deck-") && source.endsWith(".ts")) {
+				if (enabled) await extensionManager.restoreBuiltIn(source);
+				else await extensionManager.disableBuiltIn(source);
+			} else {
+				// 非内置扩展禁用记录存 PiDeck settings（scope+source），启动 RPC 时走白名单模式生效。
+				await extensionManager.setEnabled(source, enabled, scope);
+			}
+			void appLogger.info("extension", "Extension toggled", { source, enabled, scope });
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.extensionsSetWhitelistDisabled,
+		async (_event, enabled: boolean) => {
+			// 白名单总开关：开启后 PiProcess 不再注入 --no-extensions/-e，pi 默认加载全部扩展，
+			// 禁用列表暂不生效（防御个别扩展的 -e 注入/白名单枚举导致 RPC 启动失败）。
+			await extensionManager.setWhitelistDisabled(Boolean(enabled));
+			void appLogger.info("extension", "Extension whitelist master switch toggled", { whitelistDisabled: !!enabled });
+		},
+	);
 	ipcMain.handle(ipcChannels.extensionsUpdate, async () => {
 		const result = await extensionManager.updateExtensions();
 		void appLogger.info("extension", "Extensions update command completed", { updated: result.updated, bytes: result.output.length });

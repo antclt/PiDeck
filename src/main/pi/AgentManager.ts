@@ -26,6 +26,7 @@ import type {
 import { ipcChannels } from "../../shared/ipc";
 import { PiProcess } from "./PiProcess";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
+import { resolveEnabledExtensionPaths } from "../extensions/enabledExtensionResolver";
 import {
 	formatExtensionFallbackDebug,
 	shouldRetryWithoutExtensions,
@@ -491,6 +492,20 @@ export class AgentManager {
 					},
 					processSettings?.removedBuiltInExtensions ?? settings.removedBuiltInExtensions ?? [],
 				),
+			// 扩展白名单模式：存在禁用扩展（settings.disabledExtensions 非空）时，
+			// 枚举 user/project packages + 本地扩展 + 内置扩展，剔除禁用项后作为 -e 白名单注入。
+			resolveEnabledExtensionPaths: (processSettings) =>
+				resolveEnabledExtensionPaths({
+					cwd,
+					disabled: processSettings?.disabledExtensions ?? settings.disabledExtensions ?? [],
+					removedBuiltInExtensions:
+						processSettings?.removedBuiltInExtensions ?? settings.removedBuiltInExtensions ?? [],
+					builtInRoots: {
+						appPath: app.getAppPath(),
+						resourcesPath: process.resourcesPath,
+						isDev: !app.isPackaged,
+					},
+				}),
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,

@@ -46,6 +46,10 @@ function loadAgentMessageProjectorModule() {
       if (specifier === "../extensions/builtInExtensions") {
         return { appendBuiltInExtensionArgs: (args) => [...args] };
       }
+      // 扩展白名单解析器（禁用功能）；本测试不涉及，返回 null（关闭白名单）
+      if (specifier === "../extensions/enabledExtensionResolver") {
+        return { resolveEnabledExtensionPaths: () => null };
+      }
       // 并行提交给 AgentManager 新增的扩展启动回落纯函数：无依赖，就地编译注入
       if (specifier === "./extensionStartupFallback") {
         // 无依赖纯函数：就地编译注入（测试文件无独立 transpile，用 ts.transpileModule）
@@ -184,6 +188,10 @@ function loadAgentManagerModule() {
       // 25fd516 起 AgentManager 引入内置扩展参数拼接；本测试不涉及扩展加载，透传即可
       if (specifier === "../extensions/builtInExtensions") {
         return { appendBuiltInExtensionArgs: (args) => [...args] };
+      }
+      // 扩展白名单解析器（禁用功能）；本测试不涉及，返回 null（关闭白名单）
+      if (specifier === "../extensions/enabledExtensionResolver") {
+        return { resolveEnabledExtensionPaths: () => null };
       }
       // 并行提交给 AgentManager 新增的扩展启动回落纯函数：无依赖，就地编译注入
       if (specifier === "./extensionStartupFallback") {

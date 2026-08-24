@@ -3,7 +3,7 @@
  * Phase 3.7: extracted from src/main/index.ts registerIpc().
  */
 
-import { app, ipcMain } from "electron";
+import { app, ipcMain, shell } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
 import type {
@@ -535,6 +535,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		version: app.getVersion(),
 		releasesUrl: RELEASES_URL ?? "https://github.com/ayuayue/pi-desktop/releases",
 		platform: process.platform,
+		// 数据目录直接取实际生效路径：便携版（exe 同级 data/）、安装版、dev 模式（-dev 后缀）由主进程统一解析
+		userDataDir: app.getPath("userData"),
 		devBranch: devBranch,
 	}));
 
@@ -740,6 +742,14 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		agentManager?.stopAll();
 		app.relaunch();
 		app.quit();
+	});
+
+	// 打开数据目录：userData 目录必然已存在，无需 mkdir；shell.openPath 是 Electron 跨平台 API，
+	// 会自动选择系统文件管理器（Windows 资源管理器 / macOS Finder / Linux xdg-open），
+	// 不手拼平台命令，避免 Windows 路径空格/分隔符问题。
+	ipcMain.handle(ipcChannels.appOpenDataDir, async (): Promise<{ ok: boolean; error?: string }> => {
+		const error = await shell.openPath(app.getPath("userData"));
+		return error ? { ok: false, error } : { ok: true };
 	});
 
 	const mainWindow = getMainWindow();

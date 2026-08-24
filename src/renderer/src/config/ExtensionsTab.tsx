@@ -1,7 +1,7 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { useEffect, useState } from "react";
-import { Copy, Download, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, Download, Power, RotateCcw, Trash2 } from "lucide-react";
 import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, PiPackageInfo } from "../../../shared/types";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n/rendererCopy.zh-CN";
@@ -12,6 +12,8 @@ type ExtensionsApi = {
 	list: () => Promise<PiExtensionListResult>;
 	uninstall: (source: string, scope?: "user" | "project" | "unknown") => Promise<void>;
 	install: (source: string) => Promise<string>;
+	toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => Promise<void>;
+	setWhitelistDisabled: (enabled: boolean) => Promise<void>;
 	removeBuiltIn: (source: string) => Promise<void>;
 	restoreBuiltIn: (source: string) => Promise<void>;
 	update: () => Promise<PiCliUpdateResult>;
@@ -152,6 +154,27 @@ export function ExtensionsTab(props: {
 	const [installingSources, setInstallingSources] = useState<Set<string>>(() => new Set());
 	const [restoringBuiltIn, setRestoringBuiltIn] = useState<string | null>(null);
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
+	const [togglingSource, setTogglingSource] = useState<string | null>(null);
+	// 白名单总开关（「禁用 -e 参数」）：true = 不注入 --no-extensions/-e，pi 默认加载全部扩展。
+	// 从 PiDeck settings 读取默认状态；切换写入后本地同步，供 RPC 下次启动生效。
+	const [whitelistDisabled, setWhitelistDisabled] = useState(false);
+	const [togglingWhitelist, setTogglingWhitelist] = useState(false);
+
+	// 首次挂载读取白名单总开关状态（读取失败保持默认关闭，不影响禁用列表功能）
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const settings = await window.piDesktop.settings.get();
+				if (!cancelled) setWhitelistDisabled(Boolean(settings.disableExtensionWhitelist));
+			} catch {
+				// 读取失败时保持默认值，不阻塞扩展列表展示
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	// 首次加载或列表刷新时展示扩展冲突通知
 	useEffect(() => {
@@ -201,11 +224,62 @@ export function ExtensionsTab(props: {
 			setRestoringBuiltIn(null);
 		}
 	};
+
+	/** 禁用/启用非内置扩展：写入 PiDeck settings 的 scoped 禁用列表，重启 RPC 时以白名单模式生效。 */
+	const handleToggle = async (extension: PiExtensionSummary) => {
+		if (togglingSource) return;
+		setTogglingSource(extension.source);
+		try {
+			await getExtensionsApi().toggle(extension.source, extension.enabled === false, extension.scope);
+			props.onRefresh();
+			showNotice(
+				t(
+					extension.enabled === false
+						? "config.extensionEnabledToast"
+						: "config.extensionDisabledToast",
+					{ name: shortName(extension.source) },
+				),
+				3500,
+			);
+		} catch (e) {
+			showNotice(
+				t("config.extensionOperationFailed", { error: formatExtensionError(e) }),
+				4500,
+				"error",
+			);
+		} finally {
+			setTogglingSource(null);
+		}
+	};
 	const [updating, setUpdating] = useState<string | null>(null);
 	const [updateResult, setUpdateResult] = useState<PiCliUpdateResult | null>(null);
 	const [showUpdateDialog, setShowUpdateDialog] = useState(false);
 	// 单扩展更新进行中的 source（与批量更新互斥，同一时间只跑一个 pi update）
 	const [updatingOne, setUpdatingOne] = useState<string | null>(null);
+
+	/**
+	 * 切换白名单总开关（「禁用 -e 参数」）：开启后 PiProcess 不再注入 --no-extensions/-e，
+	 * pi 默认加载全部扩展，禁用列表暂不生效——防御个别扩展的 -e 注入导致 RPC 启动失败。
+	 * 写入 PiDeck settings，下次 RPC 启动生效；列表本身不变化，无需刷新。
+	 */
+	const handleToggleWhitelist = async () => {
+		if (togglingWhitelist) return;
+		setTogglingWhitelist(true);
+		const next = !whitelistDisabled;
+		try {
+			await getExtensionsApi().setWhitelistDisabled(next);
+			setWhitelistDisabled(next);
+			showNotice(t(next ? "config.extensionWhitelistOnToast" : "config.extensionWhitelistOffToast"), 3500);
+		} catch (e) {
+			showNotice(
+				t("config.extensionWhitelistToggleFailed", { error: formatExtensionError(e) }),
+				4500,
+				"error",
+			);
+		} finally {
+			setTogglingWhitelist(false);
+		}
+	};
 
 	const handleInstall = async (pkg: Pick<PiPackageInfo, "name" | "installCmd">) => {
 		setInstallingSources((current) => new Set(current).add(pkg.installCmd));
@@ -411,6 +485,17 @@ export function ExtensionsTab(props: {
 						</small>
 					</div>
 					<div className="skills-toolbar-actions flex shrink-0 items-center gap-1.5">
+						{/* 白名单总开关：开启后 -e 白名单失效，pi 默认加载全部扩展（防御个别扩展导致启动失败） */}
+						<Button
+							variant={whitelistDisabled ? "default" : "outline"}
+							size="sm"
+							onClick={() => void handleToggleWhitelist()}
+							disabled={props.loading || togglingWhitelist}
+							title={t("config.extensionWhitelistHint")}
+						>
+							<Power size={14} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />
+							{t(whitelistDisabled ? "config.extensionWhitelistOn" : "config.extensionWhitelistOff")}
+						</Button>
 						{/* 工具栏统一 size=sm，与设置页/会话顶栏控件高度对齐 */}
 						<Button variant="outline" size="sm" onClick={handleUpdateExtensions} disabled={props.loading || Boolean(updating)}>
 							{updating ? t("settings.updating") : t("settings.updateExtensionsAll")}
@@ -446,6 +531,8 @@ export function ExtensionsTab(props: {
 										onRestoreBuiltIn={handleRestoreBuiltIn}
 										removingBuiltIn={removingBuiltIn === extension.source}
 										restoringBuiltIn={restoringBuiltIn === extension.source}
+										toggling={togglingSource === extension.source}
+										onToggle={handleToggle}
 										updatingOne={updatingOne === extension.source}
 										onUpdateOne={handleUpdateOne}
 										onCopyUpdateCommand={handleCopyUpdateCommand}
@@ -468,22 +555,29 @@ function ExtensionTableRow(props: {
 	onRestoreBuiltIn: (extension: PiExtensionSummary) => void;
 	removingBuiltIn?: boolean;
 	restoringBuiltIn?: boolean;
+	toggling?: boolean;
+	onToggle: (extension: PiExtensionSummary) => void;
 	updatingOne: boolean;
 	onUpdateOne: (extension: PiExtensionSummary) => void;
 	onCopyUpdateCommand: (extension: PiExtensionSummary) => void;
 }) {
 	const { extension } = props;
 	const name = extension.source.replace(/^(?:npm|file|github|git):/i, "");
+	const disabled = extension.enabled === false;
 	return (
 		<TableRow aria-busy={props.uninstalling}>
 			<TableCell className="min-w-0">
 				<div className="flex min-w-0 flex-col gap-0.5">
 					<div className="flex min-w-0 items-center gap-2">
-						<strong className="truncate text-control font-medium text-foreground">{name}</strong>
+						{/* 禁用态弱化名称，避免与启用扩展抢视觉层级 */}
+						<strong className={`truncate text-control font-medium text-foreground${disabled ? " opacity-50" : ""}`}>{name}</strong>
 						{extension.builtIn && <span className="text-micro text-muted-foreground">{t("common.builtIn")}</span>}
 						{/* 过滤式安装徽标：source 已在主进程剥离 "(filtered)" 后缀，
 						    版本查询/更新/卸载均用干净 source；此处仅展示标记 */}
 						{extension.filtered && <span className="text-micro text-muted-foreground">{t("config.extensionFiltered")}</span>}
+						{disabled && !extension.builtIn && (
+							<span className="text-micro text-muted-foreground">{t("config.extensionDisabledBadge")}</span>
+						)}
 					</div>
 					<span className="truncate font-mono text-caption text-muted-foreground">{extension.source}</span>
 				</div>
@@ -530,9 +624,30 @@ function ExtensionTableRow(props: {
 						</Button>
 					)}
 					{!extension.builtIn && (
-						<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={props.uninstalling} onClick={() => props.onUninstall(extension)} title={props.uninstalling ? t("config.uninstalling") : t("config.uninstall")}>
-							<Trash2 size={14} strokeWidth={1.8} />
-						</Button>
+						<>
+							{/* 禁用/启用：非内置扩展写 PiDeck settings 禁用列表，重启 RPC 白名单生效；
+							    内置扩展走下方 remove/restore（removedBuiltInExtensions），不复用此按钮 */}
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className={`size-7${disabled ? " text-text-primary" : ""}`}
+								disabled={props.toggling || props.uninstalling}
+								onClick={() => props.onToggle(extension)}
+								title={
+									props.toggling
+										? t("config.extensionToggling")
+										: disabled
+											? t("config.extensionEnable")
+											: t("config.extensionDisable")
+								}
+								aria-busy={props.toggling}
+							>
+								<Power size={14} strokeWidth={1.8} />
+							</Button>
+							<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={props.uninstalling} onClick={() => props.onUninstall(extension)} title={props.uninstalling ? t("config.uninstalling") : t("config.uninstall")}>
+								<Trash2 size={14} strokeWidth={1.8} />
+							</Button>
+						</>
 					)}
 				</div>
 			</TableCell>

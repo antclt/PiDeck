@@ -107,6 +107,10 @@ let previewSettings: AppSettings = {
 	language: "system",
 	startupWindowMode: "last",
 	piEnvironmentChecked: true,
+	/** 扩展禁用白名单：与 SettingsStore 默认一致，预览壳不启用白名单 */
+	/** 扩展禁用白名单：与 SettingsStore 默认一致，预览壳不启用白名单 */
+	disabledExtensions: [],
+	disableExtensionWhitelist: false,
 	sessionTabOpenMode: "preview",
 	enableGitManagement: true,
 	gitCommitMessagePrompt: "",
@@ -737,6 +741,7 @@ export function createPreviewApi(): PiDesktopApi {
 				releasesUrl: "https://github.com/ayuayue/pi-desktop/releases",
 				platform: "win32" as NodeJS.Platform,
 				homeDir: "C:/Users/preview",
+				userDataDir: "C:/Users/preview/AppData/Roaming/pi-desktop",
 			}),
 			preferredSystemLanguages: async () => navigator.languages?.length ? [...navigator.languages] : [navigator.language],
 			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true }],
@@ -772,6 +777,7 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			openExternal: async () => undefined,
 			restart: async () => undefined,
+			openDataDir: async () => ({ ok: true }),
 			rendererLog: async (level, scope, message, detail) => {
 				console[level === "error" ? "error" : level === "warn" ? "warn" : "debug"](
 					`[${scope}] ${message}`,
@@ -878,6 +884,7 @@ export function createPreviewApi(): PiDesktopApi {
 			uninstall: async () => undefined,
 			install: async (_source: string) => "",
 			toggle: async () => undefined,
+			setWhitelistDisabled: async () => undefined,
 			removeBuiltIn: async () => undefined,
 			restoreBuiltIn: async () => undefined,
 			update: async () => ({

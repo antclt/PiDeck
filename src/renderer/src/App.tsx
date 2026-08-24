@@ -538,6 +538,10 @@ export function App() {
     language: "system",
     startupWindowMode: "last",
     piEnvironmentChecked: false,
+    /** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
+    /** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
+    disabledExtensions: [],
+    disableExtensionWhitelist: false,
     sessionTabOpenMode: "preview",
     enableGitManagement: true,
     gitCommitMessagePrompt: "请根据以下 git diff 生成一条中文 git commit message。\n\n变更描述：\n{diff}\n\nGitmoji 对应关系：\n✨ feat - 新功能\n🐛 fix - Bug 修复\n📚 docs - 文档更新\n💎 style - 代码格式\n♻️ refactor - 重构\n🧪 test - 测试\n🔧 chore - 构建/工具",
@@ -659,6 +663,7 @@ export function App() {
     // 同步判定，避免 Mac 首帧在 appInfo IPC 返回前误画 Win 窗口按钮
     platform: detectRendererPlatform(),
     homeDir: "",
+    userDataDir: "",
   });
   const [systemLanguage, setSystemLanguage] = useState<string | null>(null);
   const resolvedLocale = resolveLocale(settings.language, systemLanguage ?? undefined);

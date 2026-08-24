@@ -40,6 +40,9 @@ function loadExtensionManagerModule() {
       if (specifier === "../logging/sharedLogger") {
         return { getAppLogger: () => null };
       }
+      if (specifier === "./extensionVersionGate") {
+        return nodeRequire("../src/main/extensions/extensionVersionGate.ts");
+      }
       return nodeRequire(specifier);
     },
     Promise,

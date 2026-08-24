@@ -115,6 +115,10 @@ function loadAgentManager() {
       if (specifier === "../extensions/builtInExtensions") {
         return { appendBuiltInExtensionArgs: (args) => [...args] };
       }
+      // 扩展白名单解析器（禁用功能）；本测试不涉及，返回 null（关闭白名单）
+      if (specifier === "../extensions/enabledExtensionResolver") {
+        return { resolveEnabledExtensionPaths: () => null };
+      }
       if (specifier === "../wsl/WslPaths") {
         return { toWindowsHostPath: (path) => path, toWslLinuxPath: (path) => path };
       }

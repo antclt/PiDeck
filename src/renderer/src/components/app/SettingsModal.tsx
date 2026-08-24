@@ -1,4 +1,4 @@
-import { Component, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getDefaultStore } from "jotai";
 import { settingsFocusAtom, type SettingsTabId } from "../../atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
@@ -14,9 +14,11 @@ import {
 	Activity,
 	MessageSquare,
 	ImageIcon,
+	Globe,
+	FileCode2,
 	X,
 } from "lucide-react";
-import { t } from "../../i18n";
+import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { Button } from "../ui-shadcn/button";
 import {
@@ -46,6 +48,7 @@ import { cn } from "../../lib/utils";
 import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
+import { SETTINGS_TAB_IDS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLayout";
 import { useGitModels } from "./settings/gitModels.ts";
 import { formatSettingsUnsavedMessage, summarizeSettingsUnsavedChanges } from "./settings/unsavedChangesSummary.ts";
 import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult } from "../../../../shared/types";
@@ -55,6 +58,8 @@ import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateChe
 const CommonTab = lazy(() => import("./settings/CommonTab").then((m) => ({ default: m.CommonTab })));
 const AppearanceTab = lazy(() => import("./settings/AppearanceTab").then((m) => ({ default: m.AppearanceTab })));
 const ProxyTab = lazy(() => import("./settings/ProxyTab").then((m) => ({ default: m.ProxyTab })));
+const WebTab = lazy(() => import("./settings/WebTab").then((m) => ({ default: m.WebTab })));
+const EditorsTab = lazy(() => import("./settings/EditorsTab").then((m) => ({ default: m.EditorsTab })));
 const DevTab = lazy(() => import("./settings/DevTab").then((m) => ({ default: m.DevTab })));
 const PetTab = lazy(() => import("./settings/PetTab").then((m) => ({ default: m.PetTab })));
 const ImTab = lazy(() => import("./settings/ImTab").then((m) => ({ default: m.ImTab })));
@@ -65,17 +70,11 @@ const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettin
 const ImageGenSettingsTab = lazy(() => import("./settings/ImageGenSettingsTab").then((m) => ({ default: m.ImageGenSettingsTab })));
 
 // DSH 配置（HOME / 审批 / 外部会话）只放配置管理，避免设置页再开一个重复 tab
-// SettingsTabId 定义在 atoms，深链与侧栏共用同一套合法 tab。
-
-// 注意：修改 SettingsTabId 枚举时需同步更新 SETTINGS_TAB_IDS 校验数组
+// SettingsTabId 定义在 atoms，深链与侧栏共用同一套合法 tab；
+// 展示顺序与分组分割线统一收敛在 settings/settingsTabLayout.ts。
 
 /** localStorage 键：设置页上次打开的 tab（重开弹窗时恢复位置，跨应用重启保留）。 */
 const SETTINGS_LAST_TAB_KEY = "pideck-settings-last-tab";
-
-/** 全部合法 tab id，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
-const SETTINGS_TAB_IDS: readonly SettingsTabId[] = [
-	"common", "appearance", "proxy", "dev", "im", "pet", "storage", "usage", "process", "vision", "imagegen",
-];
 
 /**
  * 读取上次打开的设置 tab；localStorage 不可用、无记录或值已失效时回退默认值 "common"。
@@ -196,6 +195,26 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 });
 
 /**
+ * 各 tab 的图标与文案 key 元数据：label 渲染时经 t() 取当前语言文案（不能模块级求值，
+ * 否则语言切换后不生效）；展示顺序与分割线由 SETTINGS_TAB_LAYOUT 决定（settingsTabLayout.ts）。
+ */
+const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNode }> = {
+	common: { labelKey: "settings.tabs.common", icon: <Settings2 size={16} /> },
+	appearance: { labelKey: "settings.tabs.appearance", icon: <Brush size={16} /> },
+	proxy: { labelKey: "settings.tabs.proxy", icon: <Network size={16} /> },
+	web: { labelKey: "settings.tabs.web", icon: <Globe size={16} /> },
+	editors: { labelKey: "settings.tabs.editors", icon: <FileCode2 size={16} /> },
+	dev: { labelKey: "settings.tabs.dev", icon: <Wrench size={16} /> },
+	im: { labelKey: "settings.tabs.im", icon: <MessageSquare size={16} /> },
+	pet: { labelKey: "settings.tabs.pet", icon: <PawPrint size={16} /> },
+	storage: { labelKey: "settings.tabs.storage", icon: <Trash2 size={16} /> },
+	usage: { labelKey: "settings.tabs.usage", icon: <ChartColumnBig size={16} /> },
+	process: { labelKey: "settings.tabs.process", icon: <Activity size={16} /> },
+	vision: { labelKey: "settings.tabs.vision", icon: <Eye size={16} /> },
+	imagegen: { labelKey: "settings.tabs.imagegen", icon: <ImageIcon size={16} /> },
+};
+
+/**
  * 设置弹框壳：只持有跨 tab 共享状态（草稿/脏标记/视觉桥/重置信号）与 Tabs 导航，
  * 各 tab 内容拆为独立 memo 组件（settings/*Tab.tsx），切换 tab 只挂载目标 tab。
  */
@@ -231,6 +250,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	);
 	/** 各 tab 的局部编辑态（WSL 输入/Web 端口/宠物预览模式）在取消时通过递增信号重置 */
 	const [devTabResetKey, setDevTabResetKey] = useState(0);
+	const [webTabResetKey, setWebTabResetKey] = useState(0);
 	const [petTabResetKey, setPetTabResetKey] = useState(0);
 
 	/** 更新草稿并标记对应字段为已修改。调用方传入的 patch 中的每个 key 都会追加到 dirtyFields。 */
@@ -319,6 +339,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 		);
 		// tab 局部编辑态（WSL 输入、Web 端口、宠物预览）由各自 tab 监听信号重置
 		setDevTabResetKey((k) => k + 1);
+		setWebTabResetKey((k) => k + 1);
 		setPetTabResetKey((k) => k + 1);
 	};
 
@@ -382,67 +403,13 @@ function SettingsModalContent(props: SettingsModalProps) {
 		});
 	}, [draftSettings.favoriteModels, updateDraft]);
 
-	const tabs: Array<{
-		id: SettingsTabId;
-		label: string;
-		icon: ReactNode;
-	}> = [
-		{
-			id: "common",
-			label: t("settings.tabs.common"),
-			icon: <Settings2 size={16} />,
-		},
-		{
-			id: "appearance",
-			label: t("settings.tabs.appearance"),
-			icon: <Brush size={16} />,
-		},
-		{
-			id: "proxy",
-			label: t("settings.tabs.proxy"),
-			icon: <Network size={16} />,
-		},
-		{
-			id: "dev",
-			label: t("settings.tabs.dev"),
-			icon: <Wrench size={16} />,
-		},
-		{
-			id: "im",
-			label: t("settings.tabs.im"),
-			icon: <MessageSquare size={16} />,
-		},
-		{
-			id: "pet",
-			label: t("settings.tabs.pet"),
-			icon: <PawPrint size={16} />,
-		},
-		{
-			id: "storage",
-			label: t("settings.tabs.storage"),
-			icon: <Trash2 size={16} />,
-		},
-		{
-			id: "usage",
-			label: t("settings.tabs.usage"),
-			icon: <ChartColumnBig size={16} />,
-		},
-		{
-			id: "process",
-			label: t("settings.tabs.process"),
-			icon: <Activity size={16} />,
-		},
-		{
-			id: "vision",
-			label: t("settings.tabs.vision"),
-			icon: <Eye size={16} />,
-		},
-		{
-			id: "imagegen",
-			label: t("settings.tabs.imagegen"),
-			icon: <ImageIcon size={16} />,
-		},
-	];
+	// 侧栏条目 = 布局模块定义的顺序/分组边界 + 上面的图标文案元数据
+	const tabs = SETTINGS_TAB_LAYOUT.map((entry) => ({
+		id: entry.id,
+		dividerBefore: entry.dividerBefore ?? false,
+		label: t(TAB_META[entry.id].labelKey),
+		icon: TAB_META[entry.id].icon,
+	}));
 
 	const hasDirtyChanges = dirtyFields.size > 0;
 	// 视觉桥/生图草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
@@ -489,12 +456,22 @@ function SettingsModalContent(props: SettingsModalProps) {
 			<Tabs orientation="vertical" value={activeTab} onValueChange={(v) => { const match = tabs.find((t) => t.id === v); if (!match) return; setActiveTab(match.id); persistTab(match.id); }} className="settings-layout flex min-h-0 flex-1 flex-row gap-0 bg-transparent">
 					<TabsList className="settings-tabs flex min-h-0 shrink-0 flex-col items-stretch gap-2.5 overflow-auto border-0 border-r border-border rounded-none bg-transparent p-2.5 data-[orientation=vertical]:w-[196px]" aria-label={t("settings.title")}>
 						{tabs.map((tab) => (
-							<TabsTrigger key={tab.id} value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
-								<span className="settings-tab-icon">{tab.icon}</span>
-								<strong>{tab.label}</strong>
-							{/* 未保存黄点：按字段目录归并到所属 tab，视觉桥草稿算 vision */}
-							{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
-							</TabsTrigger>
+							<Fragment key={tab.id}>
+								{/* 分组分割线（纯视觉）：竖排侧栏为横线；≤820px 横排时变竖线，
+								    与 surfaces.css 里 .settings-tabs 转横向布局的媒体查询同条件 */}
+								{tab.dividerBefore ? (
+									<div
+										aria-hidden="true"
+										className="my-1.5 h-px w-auto shrink-0 bg-border-subtle max-[820px]:mx-1 max-[820px]:my-0 max-[820px]:h-auto max-[820px]:w-px"
+									/>
+								) : null}
+								<TabsTrigger value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
+									<span className="settings-tab-icon">{tab.icon}</span>
+									<strong>{tab.label}</strong>
+								{/* 未保存黄点：按字段目录归并到所属 tab，视觉桥草稿算 vision */}
+								{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+								</TabsTrigger>
+							</Fragment>
 						))}
 					</TabsList>
 					{/* ── 常用设置 tab ── */}
@@ -548,7 +525,36 @@ function SettingsModalContent(props: SettingsModalProps) {
 						</TabsContent>
 					)}
 
-					{/* ── 开发设置 tab（含 Web 服务） ── */}
+					{/* ── 局域网 Web 服务 tab（原为开发设置内区块） ── */}
+					{activeTab === "web" && (
+						<TabsContent value="web" className="settings-panel min-w-0">
+							<Suspense fallback={<SettingsTabLoading />}>
+							<WebTab
+								draft={draftSettings}
+								updateDraft={updateDraft}
+								webServiceChanging={props.webServiceChanging}
+								onOpenWebService={props.onOpenWebService}
+								onRestartWebService={props.onRestartWebService}
+								resetKey={webTabResetKey}
+							/>
+							</Suspense>
+						</TabsContent>
+					)}
+
+					{/* ── 外部编辑器 tab（由 Pi 管理界面迁入，原为开发设置内区块） ── */}
+					{activeTab === "editors" && (
+						<TabsContent value="editors" className="settings-panel min-w-0">
+							<Suspense fallback={<SettingsTabLoading />}>
+							<EditorsTab
+								draft={draftSettings}
+								updateDraft={updateDraft}
+								isDirty={isDirty}
+							/>
+							</Suspense>
+						</TabsContent>
+					)}
+
+					{/* ── 开发设置 tab（环境/版本/运行/调试；Web 与外部编辑器已拆独立 tab） ── */}
 					{activeTab === "dev" && (
 						<TabsContent value="dev" className="settings-panel min-w-0">
 							<Suspense fallback={<SettingsTabLoading />}>
@@ -575,9 +581,6 @@ function SettingsModalContent(props: SettingsModalProps) {
 								piUpdateResult={props.piUpdateResult}
 								updateChecking={props.updateChecking}
 								onCheckUpdate={props.onCheckUpdate}
-								webServiceChanging={props.webServiceChanging}
-								onOpenWebService={props.onOpenWebService}
-								onRestartWebService={props.onRestartWebService}
 								onToggleDevTools={props.onToggleDevTools}
 								onRestartApp={props.onRestartApp}
 								resetKey={devTabResetKey}
