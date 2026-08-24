@@ -351,6 +351,8 @@ export const ipcChannels = {
 	configGetAuth: "config:get-auth",
 	configGetSettings: "config:get-settings",
 	configGetTrust: "config:get-trust",
+	/** 只读返回 pi 全局配置目录（渲染层展示源文件实际编辑位置）。 */
+	configGetDir: "config:get-dir",
 	configSaveModels: "config:save-models",
 	configSaveAuth: "config:save-auth",
 	configSaveSettings: "config:save-settings",

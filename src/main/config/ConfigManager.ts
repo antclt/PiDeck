@@ -113,6 +113,11 @@ export class ConfigManager {
 			: PI_AGENT_DIR;
 	}
 
+	/** 当前 pi 全局配置目录（WSL 环境为 windowsHome 映射），供渲染层展示源文件实际编辑位置。 */
+	getConfigDir(): string {
+		return this.configDir;
+	}
+
 	// ── 读取 ──────────────────────────────────────────────
 
 	async getModelsConfig(): Promise<ConfigFileReadResult<PiModelsFile>> {

@@ -402,6 +402,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 	const [uninstallExtensionConfirm, setUninstallExtensionConfirm] = useState<PiExtensionSummary | null>(null);
 	const [rawContent, setRawContent] = useState("");
 	const [rawFileName, setRawFileName] = useState("models.json");
+	// pi 全局配置目录（源文件页标注实际编辑位置）；加载失败时静默降级不显示路径。
+	const [piConfigDir, setPiConfigDir] = useState<string | null>(null);
 
 	// 展开的 provider / auth 项
 	const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
@@ -626,6 +628,17 @@ function ConfigModalContent(props: ConfigModalProps) {
 		window.addEventListener("pideck:provider-migrated", onMigrated);
 		return () => window.removeEventListener("pideck:provider-migrated", onMigrated);
 	}, [open, loadConfig]);
+
+	useEffect(() => {
+		if (!open) return;
+		let cancelled = false;
+		void api.config.getConfigDir()
+			.then((dir) => { if (!cancelled) setPiConfigDir(dir); })
+			.catch(() => {
+				// 获取失败不影响源文件编辑，仅不展示路径
+			});
+		return () => { cancelled = true; };
+	}, [open]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -2097,7 +2110,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 					</TabsContent>
 
 					<TabsContent value="config:raw" className="config-main min-w-0">
-						<div className="config-content">
+						<div className="config-content flex min-h-0 flex-col">
 					{statusBlock}
 					{configDiagnosticBlock}
 					{!loading && (
@@ -2105,6 +2118,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 							fileName={rawFileName}
 							content={rawContent}
 							saving={saving}
+							configDir={piConfigDir ?? undefined}
 							onChangeFileName={handleRawFileChange}
 							onChangeContent={(value) => {
 								setRawContent(value);

@@ -7,7 +7,7 @@ import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } 
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { linter, lintGutter } from "@codemirror/lint";
 import { jsonParseLinter } from "@codemirror/lang-json";
-import { baseEditorExtensions, resolveEditorLanguage } from "../../utils/codemirrorSetup";
+import { baseEditorExtensions, foldMarkerDOM, resolveEditorLanguage } from "../../utils/codemirrorSetup";
 import { t } from "../../i18n";
 import {
   DropdownMenu,
@@ -81,7 +81,7 @@ export const CodeMirrorEditor = memo(function CodeMirrorEditor({
 					...baseEditorExtensions({ readOnly, wordWrap: true, language: resolvedLanguage }),
 					// 与 Monaco 默认一致的编辑体验：行号/折叠/自动换行/括号匹配/补全/查找
 					lineNumbers(),
-					foldGutter(),
+					foldGutter({ markerDOM: foldMarkerDOM }),
 					history(),
 					drawSelection(),
 					dropCursor(),

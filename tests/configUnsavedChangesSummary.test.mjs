@@ -49,7 +49,8 @@ test("装配契约：关闭确认用点名文案，DSH 导航与顶层分页有�
 });
 
 test("DSH 子分区使用稳定脏 key，侧栏黄点才能归并到导航", () => {
-	for (const key of ['instanceKey="dsh:presets"', 'instanceKey="dsh:security"', 'instanceKey="dsh:auth"', 'instanceKey="dsh:raw"']) {
+	// dsh:auth 分区已被重构移除（凭证并入 security），断言只保留现有稳定分区。
+	for (const key of ['instanceKey="dsh:presets"', 'instanceKey="dsh:security"', 'instanceKey="dsh:raw"']) {
 		assert.ok(dshTab.includes(key), `missing ${key}`);
 	}
 	assert.match(dshTab, /instanceKey=\{`dsh:models:\$\{ns\.ns\}`\}/);

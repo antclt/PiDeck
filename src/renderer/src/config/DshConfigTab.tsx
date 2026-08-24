@@ -27,6 +27,7 @@ SelectValue,
 } from "../components/ui-shadcn/select";
 import { AgentPresetLogo, DshLogo } from "../components/session/SessionSourceBadge";
 import { DSH_PERMISSION_PRESETS } from "../components/session/DshPermissionMenu";
+import { CodeMirrorEditor } from "../components/app/CodeMirrorEditor";
 import { useSaveRegistry } from "../hooks/useSaveRegistry";
 import { DshSchemaForm, type DshNamespaceView } from "./DshSchemaForm";
 import { isDshPluginNamespace, dshPluginNamespaceTitleKey, dshPluginNamespaceDescriptionKey } from "./dshPluginNamespaces";
@@ -307,7 +308,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 			</nav>
 
 			{/* 右侧内容区：loading/error 只影响内容，导航与概览保持可用 */}
-			<div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
 				{loading && (
 					<div className="flex min-h-32 items-center justify-center gap-2 text-control text-muted-foreground">
 						<LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
@@ -434,8 +435,8 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 								<SecurityTab namespace={permissionNamespace} writable={writable} onSave={(patch) => saveNamespace("permission", patch)} onChanged={() => void load()} sectionApi={sectionApi} instanceKey="dsh:security" />
 							</div>
 						</div>
-						<div hidden={activeTab !== "raw"}>
-							<div className="p-4">
+						<div hidden={activeTab !== "raw"} className="flex min-h-0 flex-1 flex-col">
+							<div className="flex min-h-0 flex-1 flex-col p-4">
 								<RawTab homeDir={status?.homeDir ?? ""} sectionApi={sectionApi} instanceKey="dsh:raw" />
 							</div>
 						</div>
@@ -1099,8 +1100,8 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 	}, [props.homeDir, fileName]);
 
 	return (
-		<div className="grid gap-3">
-			<div className="flex items-center gap-2">
+		<div className="flex min-h-0 flex-1 flex-col gap-3">
+			<div className="flex shrink-0 items-center gap-2">
 				<Select value={fileName} onValueChange={setFileName}>
 					<SelectTrigger size="sm" className="h-8 w-48 font-mono">
 						<SelectValue />
@@ -1115,12 +1116,12 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 				{saving && <span className="text-micro text-muted-foreground">{t("common.saving")}</span>}
 			</div>
 			{loaded ? (
-				<textarea
-					className="h-[480px] w-full resize-y rounded-md border border-border-subtle bg-bg-panel p-3 font-mono text-micro text-foreground outline-none"
+				<CodeMirrorEditor
 					value={content}
-					spellCheck={false}
-					onChange={(event) => {
-						setContent(event.target.value);
+					language="yaml"
+					height="100%"
+					onChange={(value) => {
+						setContent(value);
 						setDirty(true);
 					}}
 				/>
@@ -1129,8 +1130,15 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 					{t("common.loading")}
 				</div>
 			)}
-			<div className="text-micro text-muted-foreground">
-				{t("config.dsh.rawHint", { dir: props.homeDir })}
+			{/* 编辑位置说明：展示当前正在编辑的具体文件（随下拉切换），保存后由 DSH host 读取 */}
+			<div className="flex shrink-0 flex-col gap-1 rounded-md border border-border-subtle bg-bg-panel px-3 py-2">
+				<div className="flex items-baseline gap-1.5 text-micro text-muted-foreground">
+					<span className="shrink-0">{t("config.dsh.rawEditingAt")}</span>
+					<span className="min-w-0 truncate font-mono text-foreground/80" title={joinConfigPath(props.homeDir, fileName)}>
+						{joinConfigPath(props.homeDir, fileName)}
+					</span>
+				</div>
+				<span className="text-micro text-muted-foreground">{t("config.dsh.rawHostReads")}</span>
 			</div>
 		</div>
 	);

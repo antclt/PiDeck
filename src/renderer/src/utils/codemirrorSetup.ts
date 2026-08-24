@@ -80,6 +80,30 @@ export function resolveEditorLanguage(input?: string): EditorLanguage | null {
   return null;
 }
 
+/** VS Code 风格折叠按钮：展开（⌄）/ 折叠（›）用 lucide chevron 路径的内联 SVG，hover 显示圆角底色。
+ * markerDOM 在 gutter 重渲染时调用（折叠状态切换触发），箭头方向随之自动更新。 */
+export function foldMarkerDOM(open: boolean): HTMLElement {
+	const span = document.createElement("span");
+	span.className = "cm-fold-marker";
+	span.setAttribute("aria-hidden", "true");
+	const SVG_NS = "http://www.w3.org/2000/svg";
+	const svg = document.createElementNS(SVG_NS, "svg");
+	svg.setAttribute("viewBox", "0 0 24 24");
+	svg.setAttribute("width", "14");
+	svg.setAttribute("height", "14");
+	svg.setAttribute("fill", "none");
+	svg.setAttribute("stroke", "currentColor");
+	svg.setAttribute("stroke-width", "2.4");
+	svg.setAttribute("stroke-linecap", "round");
+	svg.setAttribute("stroke-linejoin", "round");
+	const path = document.createElementNS(SVG_NS, "path");
+	// lucide chevron-down / chevron-right 路径
+	path.setAttribute("d", open ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6");
+	svg.appendChild(path);
+	span.appendChild(svg);
+	return span;
+}
+
 /** 编辑器 UI 主题：全部引用应用 CSS 变量，随 data-theme 明暗自动切换，
  * 与侧栏/弹框等 shadcn token 保持一致，不写死色值。 */
 const editorThemeSpec = {
@@ -99,10 +123,22 @@ const editorThemeSpec = {
   ".cm-gutters": { backgroundColor: "transparent", color: "var(--color-text-tertiary)", border: "none", borderRight: "1px solid var(--color-border-subtle)", paddingRight: "2px" },
   ".cm-activeLine": { backgroundColor: "var(--color-bg-active)" },
   ".cm-activeLineGutter": { backgroundColor: "var(--color-bg-active)", color: "var(--color-text-primary)" },
-  // 折叠箭头：加粗 + 放大 + 透明度渐现（hover 时全显）；折叠列宽度由 CM6 自动测量
-  ".cm-foldGutter .cm-gutterElement span": { fontWeight: "700", fontSize: "15px", lineHeight: "1" },
-  ".cm-foldGutter .cm-gutterElement": { cursor: "pointer", opacity: 0.35, transition: "opacity 0.12s, color 0.12s", textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" },
-  ".cm-foldGutter .cm-gutterElement:hover": { opacity: 1, color: "var(--color-accent)" },
+  // 折叠按钮：VS Code 风格 chevron（foldMarkerDOM 内联 SVG），hover 时圆角底色 + 主题色；折叠列宽由 CM6 自动测量
+  ".cm-foldGutter .cm-gutterElement": { cursor: "pointer", textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" },
+  ".cm-foldGutter .cm-gutterElement .cm-fold-marker": {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "16px",
+    height: "16px",
+    borderRadius: "4px",
+    color: "var(--color-text-tertiary)",
+    transition: "background-color 0.12s, color 0.12s",
+  },
+  ".cm-foldGutter .cm-gutterElement:hover .cm-fold-marker": {
+    backgroundColor: "var(--color-bg-muted)",
+    color: "var(--color-accent)",
+  },
   ".cm-foldPlaceholder": { backgroundColor: "color-mix(in srgb, #4C8BF5 10%, transparent)", border: "1px solid color-mix(in srgb, #4C8BF5 20%, transparent)", color: "var(--color-accent)", borderRadius: "3px", padding: "0 4px", cursor: "pointer" },
   ".cm-tooltip": { backgroundColor: "var(--color-bg-panel)", border: "1px solid var(--color-border-subtle)", borderRadius: "var(--radius-sm)" },
   ".cm-tooltip-autocomplete ul li[aria-selected]": { backgroundColor: "var(--color-bg-active)", color: "var(--color-text-primary)" },

@@ -1266,6 +1266,9 @@ const api = {
 				parsed: Record<string, unknown>;
 				diagnostic?: ConfigFileDiagnostic;
 			}>,
+		// 只读：pi 全局配置目录（源文件编辑页标注实际路径用）。
+		getConfigDir: () =>
+			ipcRenderer.invoke(ipcChannels.configGetDir) as Promise<string>,
 		saveModels: (data: unknown) =>
 			ipcRenderer.invoke(ipcChannels.configSaveModels, data) as Promise<{
 				valid: boolean;

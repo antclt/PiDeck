@@ -2459,26 +2459,7 @@
   box-shadow: var(--focus-ring);
 }
 
-.config-raw-editor {
-  width: 100%;
-  min-height: 380px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-caption);
-  line-height: 1.65;
-  color: var(--color-text-primary);
-  background: var(--color-bg-panel);
-  resize: vertical;
-  tab-size: 2;
-}
-
-.config-raw-editor:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: var(--focus-ring);
-}
+/* 源文件编辑已迁移到 CodeMirrorEditor（语法高亮/折叠/JSON lint），旧 textarea 样式随其移除。 */
 
 /* ── 信任目录 ─────────────────────────────────────────── */
 

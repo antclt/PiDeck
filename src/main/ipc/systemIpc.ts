@@ -998,6 +998,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configGetTrust, () =>
 		configManager.getTrustConfig(),
 	);
+	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
+	ipcMain.handle(ipcChannels.configGetDir, () =>
+		configManager.getConfigDir(),
+	);
 	ipcMain.handle(ipcChannels.projectsTrustResponse,
 		(_event, requestId: string, choice: "trust-remember" | "trust-session" | "deny") =>
 			agentManager.respondTrustRequest(requestId, choice),
