@@ -112,6 +112,8 @@ let previewSettings: AppSettings = {
 	disabledExtensions: [],
 	disableExtensionWhitelist: false,
 	sessionTabOpenMode: "preview",
+	// 与 SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
+	busySendDelivery: "steer",
 	enableGitManagement: true,
 	gitCommitMessagePrompt: "",
 	gitCommitMessageProvider: "",
@@ -382,10 +384,6 @@ export function createPreviewApi(): PiDesktopApi {
 				throw new Error("preview mode: DSH session import is not available");
 			},
 			syncDshForeignSessions: async () => ({ imported: 0, skipped: 0 }),
-			listUngroupedAdoptable: async () => [],
-			adoptUngroupedSessions: async () => ({ adopted: 0, failed: 0 }),
-			previewMissingProjectionTitles: async () => ({ missing: 0, titled: 0, samples: [] }),
-			backfillProjectionTitles: async () => ({ attempted: 0, failed: 0 }),
 			listArchivedDshSessions: async () => [],
 			unarchiveDshSession: async () => true,
 			listDshDynamicPlugins: async () => [],

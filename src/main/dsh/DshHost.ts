@@ -14,8 +14,6 @@ import { workspaceDirFor } from "./dshSessionPath";
 import { listForeignSessionsFromDisk, scanDshSessionHeaders } from "./dshForeignSessionScan";
 import { PIDECK_PLUGIN_BRIDGE_PATH } from "./pideckPluginBridge";
 import { PIDECK_COMMANDS_BRIDGE_PATH } from "./pideckCommandsBridge";
-import { PIDECK_PROJECTION_CACHE_BRIDGE_PATH } from "./pideckProjectionCacheBridge";
-import type { ProjectionCacheBackfillResult } from "./dshProjectionCacheBackfill";
 import type { DshFetchMessage } from "./dshHostBridge";
 import type {
 	DshCommandView,
@@ -446,16 +444,6 @@ export class DshHost {
 	}
 
 	/**
-	 * 历史标题回写：启动我们自己的 host，经桥调用官方 coldSnapshot。
-	 * 覆盖缓存缺 title 的根会话（含旧 PiDeck 会话），不是只修新建的。
-	 * dsh-web 还占着同一 DSH_HOME 时不要调——双 host 会抢 session log。
-	 */
-	async backfillProjectionTitles(): Promise<ProjectionCacheBackfillResult> {
-		const value = await this.bridgeRpc(PIDECK_PROJECTION_CACHE_BRIDGE_PATH, "backfill", undefined);
-		return parseBackfillResult(value);
-	}
-
-	/**
 	 * DSH 会话内容搜索（G9）：wire `session.search` 搜索 user/assistant/steering 消息面，
 	 * 结果最多 20 个会话（无游标，hasMore 提示收窄查询）。返回 { sessionId, snippet }，
 	 * 由渲染层按 dshSessionId 映射回 catalog 记录。
@@ -493,28 +481,6 @@ export class DshHost {
 		updatedAt?: number;
 	}>> {
 		return listForeignSessionsFromDisk(this.getHomeDir());
-	}
-
-	/**
-	 * 认领已存在的未分组会话进已有 workspace（官方 adopt）。
-	 * 必须走 sessions.create({ workspaceId, sessionId })：host 对已有日志做
-	 * ensureSession + attachSession，不新建会话文件。cwd 对不上会 workspace-attach-failed。
-	 * 会启动我们自己的 host——dsh-web 还占着同一 DSH_HOME 时不要调用。
-	 */
-	async adoptSessionIntoWorkspace(
-		workspaceId: string,
-		sessionId: string,
-	): Promise<void> {
-		await this.ensureStarted();
-		const client = this.client;
-		if (!client) throw new Error("DSH host is not started");
-		const created = await client.sessions.create({
-			workspaceId: workspaceId as import("@deepseek-ai/dsh-host-apiproxy").WorkspaceId,
-			sessionId: sessionId as import("@deepseek-ai/dsh-session/types").SessionId,
-		});
-		if (!created.result.ok) {
-			throw new Error(JSON.stringify(created.result.error));
-		}
 	}
 
 	/**
@@ -778,16 +744,6 @@ export class DshHost {
 		await this.dispose();
 		this.log("dsh-host", "host 已重置，下次启动将重新 fork");
 	}
-}
-
-/** 桥回写结果只认有限数字；缺字段当 0，避免把非 JSON 信封当成成功。 */
-function parseBackfillResult(value: unknown): ProjectionCacheBackfillResult {
-	if (!value || typeof value !== "object") return { attempted: 0, failed: 0 };
-	const attemptedValue = "attempted" in value ? value.attempted : undefined;
-	const failedValue = "failed" in value ? value.failed : undefined;
-	const attempted = typeof attemptedValue === "number" && Number.isFinite(attemptedValue) ? attemptedValue : 0;
-	const failed = typeof failedValue === "number" && Number.isFinite(failedValue) ? failedValue : 0;
-	return { attempted, failed };
 }
 
 /**

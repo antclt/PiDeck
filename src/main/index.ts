@@ -236,13 +236,6 @@ import {
 	syncForeignSessions,
 	type DshForeignSyncDeps,
 } from "./dsh/dshForeignSync";
-import { scanDshSessionHeaders } from "./dsh/dshForeignSessionScan";
-import {
-	adoptUngroupedSessions,
-	listUngroupedAdoptCandidatesFromDisk,
-} from "./dsh/dshUngroupedAdopt";
-import { previewMissingProjectionTitles } from "./dsh/dshProjectionCacheBackfill";
-import { readWorkspaceRegistry } from "./dsh/dshWorkspaceRegistry";
 import { PiLocator } from "./pi/PiLocator";
 import { testPiProxy } from "./pi/PiProxyTester";
 import { SessionScanner } from "./sessions/SessionScanner";
@@ -2716,27 +2709,6 @@ function registerIpc() {
 			// 外部会话全量同步：catalog 未映射的磁盘根会话全部导入（不启动 host）。
 			// 配置页「全部导入」与启动自动同步共用此入口。
 			syncDshForeignSessions: () => runDshForeignSync(),
-			listUngroupedAdoptable: async () => listUngroupedAdoptCandidatesFromDisk(dshHost.getHomeDir()),
-			previewMissingProjectionTitles: () => previewMissingProjectionTitles(dshHost.getHomeDir()),
-			backfillProjectionTitles: () => dshHost.backfillProjectionTitles(),
-			adoptUngroupedSessions: async () => {
-				// 必须我们自己的 host 来写 workspace 记账。dsh-web 还占着同一
-				// DSH_HOME 时不要点——双 host 会互相覆盖 session log。
-				const result = await adoptUngroupedSessions({
-					scanHeaders: () => scanDshSessionHeaders(dshHost.getHomeDir()),
-					listWorkspaces: () => readWorkspaceRegistry(dshHost.getHomeDir()),
-					adoptIntoWorkspace: ({ workspaceId, sessionId }) =>
-						dshHost.adoptSessionIntoWorkspace(workspaceId, sessionId),
-					onError: (dshSessionId, error) => {
-						void appLogger.warn("session", "Adopt ungrouped DSH session failed", {
-							dshSessionId,
-							error: error instanceof Error ? error.message : String(error),
-						});
-					},
-				});
-				void appLogger.info("session", "Adopted ungrouped DSH sessions", result);
-				return result;
-			},
 			// G14：DSH 归档/恢复（目录移动 + manifest，与 pi 归档同语义，不销毁数据）
 			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),
 			unarchiveDshSession: (dshSessionId) => dshHost.unarchiveSession(dshSessionId),

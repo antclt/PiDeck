@@ -441,23 +441,6 @@ function Overview(props: {
 	const { status } = props;
 	const [picking, setPicking] = useState(false);
 	const [switching, setSwitching] = useState(false);
-	/** dsh-web 未分组、cwd 已匹配现有 workspace 的根会话（官方认领清单）。 */
-	const [ungroupedAdoptable, setUngroupedAdoptable] = useState<Array<{
-		dshSessionId: string;
-		cwd: string;
-		workspaceId: string;
-		workspaceTitle?: string;
-	}>>([]);
-	/** 官方认领进行中。 */
-	const [adopting, setAdopting] = useState(false);
-	/** 投影缓存缺 title 的根会话预览（dsh-web 会显示成目录名）。 */
-	const [titlePreview, setTitlePreview] = useState<{
-		missing: number;
-		titled: number;
-		samples: Array<{ dshSessionId: string; loggedTitle?: string; cwd?: string }>;
-	}>({ missing: 0, titled: 0, samples: [] });
-	/** 官方 coldSnapshot 回写进行中。 */
-	const [backfillingTitles, setBackfillingTitles] = useState(false);
 	/** G14：归档区 DSH 会话清单（目录已移入 .pideck-archive 的 host 会话；恢复入口用）。 */
 	const [archived, setArchived] = useState<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>([]);
 	/** G14：正在恢复的 dshSessionId（按钮转圈防重复点击）。 */
@@ -468,12 +451,6 @@ function Overview(props: {
 
 	useEffect(() => {
 		let cancelled = false;
-		void desktopApi.sessions.listUngroupedAdoptable().then((items) => {
-			if (!cancelled) setUngroupedAdoptable(items);
-		}).catch(() => undefined);
-		void desktopApi.sessions.previewMissingProjectionTitles().then((preview) => {
-			if (!cancelled) setTitlePreview(preview);
-		}).catch(() => undefined);
 		void desktopApi.sessions.listArchivedDshSessions().then((items) => {
 			if (!cancelled) setArchived(items);
 		}).catch(() => undefined);
@@ -500,52 +477,6 @@ function Overview(props: {
 		} catch (saveError) {
 			setAutoImport(prev);
 			showNotice(saveError instanceof Error ? saveError.message : String(saveError), 4000);
-		}
-	};
-
-	/** 官方回写：启动我们自己的 host，把历史会话日志里的标题写进投影缓存。先关 dsh-web。 */
-	const backfillTitles = async () => {
-		if (backfillingTitles || titlePreview.missing === 0) return;
-		setBackfillingTitles(true);
-		try {
-			const result = await desktopApi.sessions.backfillProjectionTitles();
-			if (result.failed > 0) {
-				showNotice(t("config.dsh.projectionTitlesPartial", {
-					attempted: result.attempted,
-					failed: result.failed,
-				}), 4000);
-			} else {
-				showNotice(t("config.dsh.projectionTitlesDone", { attempted: result.attempted }), 4000);
-			}
-			const preview = await desktopApi.sessions.previewMissingProjectionTitles();
-			setTitlePreview(preview);
-		} catch (error) {
-			showNotice(error instanceof Error ? error.message : String(error), 4000);
-		} finally {
-			setBackfillingTitles(false);
-		}
-	};
-
-	/** 官方认领：把 cwd 已匹配现有 workspace 的未分组根会话挂回去。先关 dsh-web。 */
-	const adoptUngrouped = async () => {
-		if (adopting || ungroupedAdoptable.length === 0) return;
-		setAdopting(true);
-		try {
-			const result = await desktopApi.sessions.adoptUngroupedSessions();
-			if (result.failed > 0) {
-				showNotice(t("config.dsh.ungroupedAdoptPartial", {
-					adopted: result.adopted,
-					failed: result.failed,
-				}), 4000);
-			} else {
-				showNotice(t("config.dsh.ungroupedAdopted", { count: result.adopted }), 3000);
-			}
-			const remaining = await desktopApi.sessions.listUngroupedAdoptable();
-			setUngroupedAdoptable(remaining);
-		} catch (error) {
-			showNotice(error instanceof Error ? error.message : String(error), 4000);
-		} finally {
-			setAdopting(false);
 		}
 	};
 
@@ -679,90 +610,6 @@ function Overview(props: {
 					</div>
 					<Switch checked={autoImport} disabled={!autoImportLoaded} onCheckedChange={(checked) => void toggleAutoImport(checked)} />
 				</div>
-			</section>
-			<section className="grid gap-2">
-				<div className="flex items-center gap-2">
-					<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.projectionTitles")}</h3>
-					<Button
-						type="button"
-						variant="secondary"
-						size="sm"
-						className="ml-auto h-7 gap-1"
-						disabled={backfillingTitles || titlePreview.missing === 0}
-						onClick={() => void backfillTitles()}
-					>
-						{backfillingTitles ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
-						{t("config.dsh.projectionTitlesBackfill")}
-					</Button>
-				</div>
-				{titlePreview.missing === 0 ? (
-					<p className="text-micro text-muted-foreground">{t("config.dsh.projectionTitlesEmpty")}</p>
-				) : (
-					<>
-						<p className="text-micro text-muted-foreground">
-							{t("config.dsh.projectionTitlesMissing", {
-								missing: titlePreview.missing,
-								titled: titlePreview.titled,
-							})}
-						</p>
-						<p className="text-micro text-muted-foreground">{t("config.dsh.projectionTitlesHint")}</p>
-						<div className="grid max-h-40 gap-1.5 overflow-y-auto pr-1">
-							{titlePreview.samples.map((item) => (
-								<div
-									key={item.dshSessionId}
-									className="rounded-sm border border-border-subtle bg-bg-panel px-2.5 py-1.5"
-								>
-									<div className="truncate text-control text-foreground" title={item.loggedTitle ?? item.dshSessionId}>
-										{item.loggedTitle ?? item.dshSessionId}
-									</div>
-									{item.cwd ? (
-										<div className="truncate font-mono text-micro text-muted-foreground" title={item.cwd}>
-											{item.cwd}
-										</div>
-									) : null}
-								</div>
-							))}
-						</div>
-					</>
-				)}
-			</section>
-			<section className="grid gap-2">
-				<div className="flex items-center gap-2">
-					<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.ungroupedAdopt")}</h3>
-					<Button
-						type="button"
-						variant="secondary"
-						size="sm"
-						className="ml-auto h-7 gap-1"
-						disabled={adopting || ungroupedAdoptable.length === 0}
-						onClick={() => void adoptUngrouped()}
-					>
-						{adopting ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
-						{t("config.dsh.ungroupedAdoptAll")}
-					</Button>
-				</div>
-				{ungroupedAdoptable.length === 0 ? (
-					<p className="text-micro text-muted-foreground">{t("config.dsh.ungroupedAdoptEmpty")}</p>
-				) : (
-					<>
-						<p className="text-micro text-muted-foreground">{t("config.dsh.ungroupedAdoptHint")}</p>
-						<div className="grid max-h-40 gap-1.5 overflow-y-auto pr-1">
-							{ungroupedAdoptable.map((item) => (
-								<div
-									key={item.dshSessionId}
-									className="rounded-sm border border-border-subtle bg-bg-panel px-2.5 py-1.5"
-								>
-									<div className="truncate text-control text-foreground" title={item.dshSessionId}>
-										{item.workspaceTitle ?? item.workspaceId}
-									</div>
-									<div className="truncate font-mono text-micro text-muted-foreground" title={item.cwd}>
-										{item.cwd}
-									</div>
-								</div>
-							))}
-						</div>
-					</>
-				)}
 			</section>
 			<section className="grid gap-2">
 				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.directories")}</h3>
