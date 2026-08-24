@@ -445,7 +445,11 @@ export function ProjectContextMenu(props: {
 			{/* 项目管理：会话/资源/过滤/工作区/刷新集中一组，删除式操作不混入 */}
 			<DropdownMenuLabel>{t("menu.group.manage")}</DropdownMenuLabel>
 			<DropdownMenuItem onSelect={props.onManageSessions}>{t("menu.manageSessions")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onManageProjectResources}>{t("menu.projectResources")}</DropdownMenuItem>
+			{/* 内置聊天项目没有 .pi/.agents 资源目录，不暴露项目管理入口，避免打开即报
+			    "Chat 项目不支持项目级资源"（由弹窗本体兜底） */}
+			{props.menu.project.kind !== "chat" && (
+				<DropdownMenuItem onSelect={props.onManageProjectResources}>{t("menu.projectResources")}</DropdownMenuItem>
+			)}
 			<DropdownMenuItem onSelect={props.onFilterSessions}>{t("menu.filterSessions")}</DropdownMenuItem>
 			<DropdownMenuItem onSelect={props.onRefreshProject}>{t("app.projectRefresh")}</DropdownMenuItem>
 			<DropdownMenuItem onSelect={props.onToggleWorktree}>

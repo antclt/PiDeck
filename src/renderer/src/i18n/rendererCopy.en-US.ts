@@ -792,6 +792,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.skillPickerEmpty": "No skills available. Add them in the global skill folder (~/.pi/agent/skills) or the project resources panel",
   "app.skillPickerLoading": "Loading skills...",
   "app.skillPickerNoProject": "This session has no project: only global skills are shown. Add more under ~/.pi/agent/skills",
+  "app.skillPickerChatProject": "The Chat project has no project-level skills: only global skills are shown. Add more under ~/.pi/agent/skills",
 
   "app.skillPickerNoAgent": "The skill catalog is available after the session starts",
   "app.skillPickerLoadFailed": "Failed to load skills",
@@ -1597,6 +1598,7 @@ export const enUS: Record<TranslationKey, string> = {
   "projectResources.createPromptAction": "Create Prompt",
   "projectResources.creatingPromptAction": "Creating prompt...",
   "projectResources.deletePromptConfirm": "Delete prompt「{name}」? This will remove the local .md file.",
+  "projectResources.chatUnsupported": "The Chat project has no project-level resource directories (.pi/.agents); only global skills and prompts are available.",
   "config.install": "Install",
   "config.installed": "Installed",
   // Extension manager: the "(filtered)" marker from pi list (object-form entry in settings, loads resources selectively)

@@ -92,8 +92,10 @@ test("Plan mode prompts keep steps concise and visually separated", () => {
   assert.match(planModeExt, /Keep plan steps concise: one short sentence per step/);
   assert.match(planModeExt, /Put each step on its own numbered line/);
   assert.match(planModeExt, /\.join\("\\n\\n"\)/);
-  // 摘要行带「是否执行」提问：卡片默认单行折基时也能看懂下一步待确认的动作。
-  assert.match(planModeExt, /计划草案已就绪（" \+ todoItems\.length \+ " 步），是否执行？/);
+  // 摘要行带「是否执行」提问：卡片默认折叠时也能看懂下一步待确认的动作。
+  assert.match(planModeExt, /是否执行？/);
+  // 摘要第二行引导用户去上方待办条查看详细列表（2026-12 用户反馈：单一提问行不够明显）。
+  assert.match(planModeExt, /具体计划可点击下方待办查看详细列表/);
 });
 
 test("Long ask descriptions collapse to a preview with eye toggle", () => {
@@ -103,9 +105,9 @@ test("Long ask descriptions collapse to a preview with eye toggle", () => {
   assert.match(approvalCard, /descriptionClamped && "line-clamp-2"/);
   assert.match(approvalCard, /title=\{descriptionClamped \? props\.description : undefined\}/);
   assert.match(approvalCard, /descExpanded \? <EyeOff size=\{14\}/);
-  // live 卡与时间线卡都启用 1 行预览：plan 步骤已入上方待办，卡片默认只露摘要行。
-  assert.match(overlay, /descriptionPreviewLines=\{1\}/);
-  assert.match(timelineCards, /descriptionPreviewLines=\{1\}/);
+  // live 卡与时间线卡都用 2 行预览：提问行 + 引导去待办查看详情，步骤默认隐藏。
+  assert.match(overlay, /descriptionPreviewLines=\{2\}/);
+  assert.match(timelineCards, /descriptionPreviewLines=\{2\}/);
   // 「1口」乱码回归：plan 草案步骤前缀不得用 ☐（部分 Windows 字体渲染成空心方框）。
   // widget/进度消息的 ☑/☐ 保留（agentTodoList 测试锁定，完成态语义明确）。
   assert.doesNotMatch(planModeExt, /\$\(item\.step\)\. ☐/);

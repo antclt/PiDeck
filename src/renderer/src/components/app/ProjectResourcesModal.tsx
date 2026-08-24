@@ -4,6 +4,7 @@ import { showNotice } from "../../utils/notice";
 
 import { Check, Code2, FileEdit, FolderOpen, MessageSquareText, Pencil, Puzzle, RefreshCw, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import { CodeMirrorEditor } from "../app/CodeMirrorEditor";
+import { isChatProject } from "../../rendererUtils";
 import {
 	Dialog,
 	DialogClose,
@@ -75,6 +76,9 @@ export function ProjectResourcesModal(props: {
 	const [renameSkillValue, setRenameSkillValue] = useState("");
 	const [renameSkillBusy, setRenameSkillBusy] = useState(false);
 	const api = (window as unknown as { piDesktop: { projectResources: ProjectResourcesApi } }).piDesktop.projectResources;
+	// 内置聊天项目（builtin-chat）没有 .pi/.agents 资源目录：不加载列表、渲染说明占位。
+	// 菜单入口已隐藏，这里兜底其他入口（避免打开即报 "Chat 项目不支持项目级资源"）。
+	const chatProject = isChatProject(props.project);
 
 	const refresh = useMemo(
 		() => async (showToast?: boolean) => {
@@ -113,9 +117,11 @@ export function ProjectResourcesModal(props: {
 	}, [activeTab, loadPrompts]);
 
 	useEffect(() => {
-		void refresh();
-		void loadPrompts();
-	}, [refresh, loadPrompts]);
+		if (!chatProject) {
+			void refresh();
+			void loadPrompts();
+		}
+	}, [refresh, loadPrompts, chatProject]);
 
 	const canCreateSkill = useMemo(
 		() => newName.trim().length > 0 && newDescription.trim().length > 0,
@@ -360,6 +366,14 @@ export function ProjectResourcesModal(props: {
 					</div>
 				</DialogHeader>
 
+				{chatProject ? (
+					<div className="flex min-h-0 flex-1 items-center justify-center px-6">
+						<Alert className="max-w-md">
+							<AlertDescription className="text-center">{t("projectResources.chatUnsupported")}</AlertDescription>
+						</Alert>
+					</div>
+				) : (
+				<>
 				<Tabs
 					value={activeTab}
 					onValueChange={(value) => {
@@ -669,6 +683,8 @@ export function ProjectResourcesModal(props: {
 				)}
 				</ScrollArea>
 				</Tabs>
+				</>
+				)}
 			</DialogContent>
 		</Dialog>
 

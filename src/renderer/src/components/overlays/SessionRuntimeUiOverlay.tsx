@@ -494,9 +494,8 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 				notifyAskExpanded(onExpandedChange, next);
 			}}
 			title={t("ask.toolName")}
-			// plan 步骤已写入上方待办，卡片默认只显示 1 行摘要（含「是否执行」提问）；
-			// 眼睛按钮/悬停展开完整步骤，避免与待办条重复占用高度。
-			descriptionPreviewLines={1}
+			// plan 卡默认显示两行摘要：提问行 + 引导去上方待办看详情；步骤仍折叠，眼睛展开全文。
+			descriptionPreviewLines={2}
 			description={formatAskTitle(request.title || t("ask.defaultTitle"))}
 			onCancel={cancel}
 			cancelDisabled={responding}

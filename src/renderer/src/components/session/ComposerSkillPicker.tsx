@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { useAtomValue } from "jotai";
 import { ChevronLeft, CornerDownLeft, Eye, Loader2, Sparkles } from "lucide-react";
 import { toSkillInvocationToken } from "../../composerBehavior";
 import { t } from "../../i18n";
 import { desktopApi } from "../../desktopApi";
+import { projectByIdAtomFamily } from "../../atoms";
 import type { AgentBackend, DshSkillView, PiSkillSummary } from "../../../../shared/types";
 import {
 	Command,
@@ -60,6 +62,15 @@ export function ComposerSkillPicker(props: {
 	// （全局技能：~/.pi/agent/skills 与 ~/.agents/skills），DSH 走 listDshSkills
 	// （G7 skill.list 只读目录）；只有 DSH 要求 agentId 已激活，pi 无项目时
 	// 仍然能读全局技能（不再整面板阻塞，全局技能本来就不依赖项目）。
+	// 内置聊天项目（builtin-chat）没有项目级资源目录：不发起 project-resources:list
+	// （后端虽已对 chat 返回空结果兜底，前端直接跳过可省一次 IPC 并避免把
+	// 「项目技能」这类概念混进纯聊天上下文）。inventory 未加载时 kind 未知，
+	// 仍按有项目处理，由后端空结果兜底，不会报错。
+	const chatProject = useAtomValue(projectByIdAtomFamily(props.projectId ?? ""));
+	const isChatSessionProject = chatProject?.kind === "chat";
+	// 内置聊天项目没有项目级资源目录，不发起 project-resources:list；inventory 未加载时
+	// kind 未知，仍按有项目处理，由后端对 chat 返回空结果兜底，不会报错。
+	const hasProjectResources = Boolean(props.projectId) && !isChatSessionProject;
 	useEffect(() => {
 		if (props.backend === "dsh" && !props.agentId) {
 			setLoading(false);
@@ -70,8 +81,8 @@ export function ComposerSkillPicker(props: {
 		setError(null);
 		const load = props.backend === "pi"
 			? Promise.all([
-					props.projectId
-						? desktopApi.projectResources.list(props.projectId).then((result) =>
+					hasProjectResources
+						? desktopApi.projectResources.list(props.projectId as string).then((result) =>
 							result.skills
 								.filter((skill) => skill.enabled)
 								.map<SkillItem>((skill: PiSkillSummary) => ({
@@ -222,8 +233,9 @@ export function ComposerSkillPicker(props: {
 
 	// DSH 草稿未启动：Agent 未激活读不到技能目录，给定位原因而非误报为空。
 	const blockedByAgent = props.backend === "dsh" && !props.agentId;
-	// pi 无项目：只显示全局技能（不阻塞）；区分提示语让用户知道当前范围。
-	const globalOnly = props.backend === "pi" && !props.projectId;
+	// pi 无项目资源（无普通项目 / 内置聊天项目）：只显示全局技能，不阻塞；
+	// 区分提示语让用户知道当前范围。
+	const globalOnly = props.backend === "pi" && !hasProjectResources;
 
 	return (
 		<PickerDialog
@@ -258,9 +270,13 @@ export function ComposerSkillPicker(props: {
 					) : blockedByAgent ? (
 						<div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.skillPickerNoAgent")}</div>
 					) : items.length === 0 ? (
-						/* 区分两种空态：pi 无项目时只可能是全局为空；有项目时是项目+全局都为空。 */
+						/* 区分三种空态：chat 项目/无项目时只可能是全局为空；有项目时是项目+全局都为空。 */
 						<div className="px-6 py-10 text-center text-caption text-muted-foreground">
-							{globalOnly ? t("app.skillPickerNoProject") : t("app.skillPickerEmpty")}
+							{globalOnly
+								? isChatSessionProject
+									? t("app.skillPickerChatProject")
+									: t("app.skillPickerNoProject")
+								: t("app.skillPickerEmpty")}
 						</div>
 					) : (
 						items.map((skill) => (

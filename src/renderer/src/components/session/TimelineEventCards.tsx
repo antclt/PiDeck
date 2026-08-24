@@ -218,8 +218,8 @@ export const AskQuestionCard = memo(function AskQuestionCard(props: {
 				open={expanded}
 				onOpenChange={setExpanded}
 				title={t("ask.toolName")}
-				// 与 live 卡一致：默认只显示摘要行，眼睛展开完整步骤。
-				descriptionPreviewLines={1}
+				// 与 live 卡一致：两行摘要（提问 + 引导去待办），眼睛展开完整步骤。
+				descriptionPreviewLines={2}
 				description={formatAskTitle(title || t("ask.defaultTitle"))}
 				status={cancelling ? t("ask.cancelling") : t("ask.waiting")}
 				statusTone={cancelling ? "danger" : "active"}

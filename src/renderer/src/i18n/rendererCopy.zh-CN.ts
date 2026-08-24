@@ -787,6 +787,7 @@ export const zhCN = {
   "app.skillPickerEmpty": "暂无可用技能。可在全局技能目录（~/.pi/agent/skills）或项目资源面板添加",
   "app.skillPickerLoading": "技能加载中…",
   "app.skillPickerNoProject": "当前会话无项目：仅显示全局技能。可在 ~/.pi/agent/skills 添加全局技能",
+  "app.skillPickerChatProject": "Chat 项目没有项目级技能：仅显示全局技能。可在 ~/.pi/agent/skills 添加全局技能",
 
   "app.skillPickerNoAgent": "技能目录需要会话启动后才能读取",
   "app.skillPickerLoadFailed": "技能加载失败",
@@ -1584,6 +1585,7 @@ export const zhCN = {
   "projectResources.createPromptAction": "创建提示词",
   "projectResources.creatingPromptAction": "创建提示词中…",
   "projectResources.deletePromptConfirm": "确认删除提示词「{name}」吗？此操作会删除本地 .md 文件。",
+  "projectResources.chatUnsupported": "Chat 项目没有项目级资源目录（.pi/.agents），仅支持全局技能与全局提示词。",
   "config.install": "安装",
   "config.installed": "已安装",
   // 扩展管理：pi list 输出的 "(filtered)" 标记（settings 里对象形式配置，只选择性加载资源）

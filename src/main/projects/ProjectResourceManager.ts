@@ -38,7 +38,12 @@ export class ProjectResourceManager {
 	}
 
 	async list(projectId: string): Promise<ProjectResourceListResult> {
-		const project = this.requireProject(projectId);
+		const project = this.getProject(projectId);
+		if (!project) throw new Error(this.translate("project.notFound"));
+		// chat 项目没有 .pi/.agents 资源目录，浏览性质从来不适用：list 是纯只读，
+		// 返回空列表而非抛错（抛错会让前端技能面板连同全局技能一起整体失败）。
+		// 写入操作（createSkill/delete/toggle/rename）仍由 requireProject 拒绝。
+		if (project.kind === "chat") return { skills: [], extensions: [] };
 		const [skills, extensions] = await Promise.all([
 			this.listSkills(project),
 			this.listExtensions(project),
