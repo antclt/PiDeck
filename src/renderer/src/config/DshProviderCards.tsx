@@ -36,6 +36,7 @@ import { credentialRefFor } from "./dshCredentialRef";
 import { DshModelsEditor } from "./DshModelsEditor";
 import type { DshModelRow } from "./DshModelsTable";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
+import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
 import { isValidProviderName } from "../../../shared/providerName";
 
 export type DshCredentialState = {
@@ -371,6 +372,8 @@ export function PiAiProvidersCard(props: {
 	 * 现有 provider——删除要走 settings.mutate 的 unset op（merge 语义做不到）。
 	 */
 	const [pendingRemovals, setPendingRemovals] = useState<string[]>([]);
+	/** 正在等待确认删除的 provider 路由（null = 无弹窗；确认后才进 pendingRemovals）。 */
+	const [removingKey, setRemovingKey] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -404,7 +407,9 @@ export function PiAiProvidersCard(props: {
 					const ref = explicitRef ?? managedRef;
 					const state = ops.credentials[ref];
 					if (ref === managedRef && state?.configured === true && state.writable) {
-						await ops.unsetKey(ref);
+						// 静默删凭证（不带 load）：本函数末尾 onSave→saveNamespace 已统一刷新一次，
+						// 若走 ops.unsetKey（内部自带 load）会触发第二次全页重渲染（删除保存闪两下）。
+						await desktopApi.sessions.unsetDshCredential(ref);
 					}
 					await desktopApi.sessions.mutateDshSettings(
 						namespace.ns,
@@ -420,7 +425,8 @@ export function PiAiProvidersCard(props: {
 				const currentProfile = (namespace.value as { providers?: Record<string, unknown> } | undefined)?.providers?.[key];
 				const meta = (draftProfile ?? currentProfile) as Record<string, unknown> | undefined;
 				const ref = credentialRefFor(meta, key);
-				await ops.setKey(ref, trimmed);
+				// 同删除路径：静默写凭证，避免与末尾 onSave 的刷新叠加（保存闪两下）。
+				await desktopApi.sessions.setDshCredential(ref, trimmed);
 			}
 			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
 			setDraft({});
@@ -538,9 +544,17 @@ export function PiAiProvidersCard(props: {
 		setAddingProvider(false);
 	};
 
+	/** 点删除：先弹确认（与 Pi 管理页同款 ConfirmDialog，danger 样式）。 */
 	const removeProvider = (key: string) => {
-		// 本地立即隐藏；真正删除在保存时经 settings.mutate unset 提交
-		// （merge patch 删 key 无效——host 只合并 patch 里出现的字段）。
+		setRemovingKey(key);
+	};
+
+	/** 确认删除：本地立即隐藏 + 记录待删除；host 侧删除在保存时经 settings.mutate
+	 *  unset 提交（merge patch 删 key 无效——host 只合并 patch 里出现的字段）。 */
+	const confirmRemoveProvider = () => {
+		const key = removingKey;
+		if (!key) return;
+		setRemovingKey(null);
 		setPendingRemovals((prev) => (prev.includes(key) ? prev : [...prev, key]));
 		setDraft((prev) => {
 			const next = structuredClone(prev) as Record<string, unknown>;
@@ -743,6 +757,16 @@ export function PiAiProvidersCard(props: {
 				})}
 				{entries.length === 0 && <Empty text={t("config.dsh.providersEmpty")} />}
 			</div>
+			{removingKey && (
+				<ConfirmDialog
+					title={t("common.deleteConfirm")}
+					message={t("common.deleteConfirmMsg", { name: removingKey })}
+					confirmLabel={t("common.delete")}
+					danger
+					onConfirm={confirmRemoveProvider}
+					onCancel={() => setRemovingKey(null)}
+				/>
+			)}
 		</div>
 	);
 }
