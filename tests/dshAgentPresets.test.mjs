@@ -6,7 +6,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const nodeRequire = createRequire(import.meta.url);
-const { agentPresetsRow, shippedPresetRoot } = loadTsCommonJs("src/main/dsh/dshPresetComposition.ts");
+const { agentPresetsRow, shippedPresetRoot, dshWebAgentPlaneDisableRows } = loadTsCommonJs("src/main/dsh/dshPresetComposition.ts");
 
 /** 真实安装的 dsh 包目录（与 hostEntry 运行时解析同一来源）。 */
 const dshPackageDir = dirname(nodeRequire.resolve("@deepseek-ai/dsh/package.json"));
@@ -40,4 +40,28 @@ test("随包预设根真实存在且含 dsh-web 的 4 种模式", () => {
 		assert.ok(statSync(composition).isFile(), `${id} 缺 agent.cordis.yml`);
 		assert.ok(statSync(metadata).isFile(), `${id} 缺 preset.yml`);
 	}
+});
+
+test("dshWebAgentPlaneDisableRows: 对齐 dsh-web-app 的 agent-plan 禁用清单", () => {
+	const rows = dshWebAgentPlaneDisableRows();
+	// dsh-web-app/cordis.patch.yml 的「agent plane moves behind agent presets」段共 23 行。
+	assert.equal(rows.length, 23);
+	const ids = new Set(rows.map((row) => row.id));
+	for (const id of [
+		"tool-bash",
+		"tool-pwsh",
+		"tool-fs",
+		"tool-fs-search",
+		"tool-goal",
+		"tool-todo",
+		"tool-web",
+		"tool-subagent",
+		"tool-subagent-fork",
+		"tool-workflow",
+		"tool-ralph",
+		"agent-instructions",
+	]) {
+		assert.ok(ids.has(id), `缺少基础层禁用行: ${id}`);
+	}
+	assert.ok(rows.every((row) => row.disabled === true));
 });
