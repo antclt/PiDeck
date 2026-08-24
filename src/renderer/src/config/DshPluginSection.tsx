@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
-import { Play, Plus, RefreshCw, Square, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Play, Plus, RefreshCw, Search, Square, Trash2, X } from "lucide-react";
 import type { DshPluginView, DshStaticPluginView } from "../../../shared/types";
 import { sessionRecordsAtom } from "../atoms";
 import { desktopApi } from "../desktopApi";
-import { t } from "../i18n";
+import { t, type TranslationKey } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { Badge } from "../components/ui-shadcn/badge";
 import { Button } from "../components/ui-shadcn/button";
@@ -17,18 +17,10 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../components/ui-shadcn/select";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "../components/ui-shadcn/table";
 import { Textarea } from "../components/ui-shadcn/textarea";
 
 /** 静态 Loader 清单每页行数（合并后一模块一行；分页避免只读长列表刷屏）。 */
-const STATIC_PAGE_SIZE = 15;
+const STATIC_PAGE_SIZE = 20;
 
 /**
  * 动态 Cordis 插件管理区（G13 深化）。
@@ -37,7 +29,7 @@ const STATIC_PAGE_SIZE = 15;
  * - 动态插件是进程内临时扩展：define 不落盘、重启即失、按会话归属；
  * - 运行/停止/卸载都是面板手势（requestId=null，无需审批）；
  * - Host 源码在 DSH host 进程内执行——运行器明示不是安全边界，仅安装自己编写的代码。
- * 下方另附静态 Loader 条目只读清单（moduleName/enabled/fiberPhase）。
+ * 静态 Loader 只读清单已拆到「插件列表」子 tab（PluginInventoryView）。
  */
 export function DshPluginSection() {
 	const records = useAtomValue(sessionRecordsAtom);
@@ -46,22 +38,15 @@ export function DshPluginSection() {
 		[records],
 	);
 	const [dynamicPlugins, setDynamicPlugins] = useState<DshPluginView[]>([]);
-	const [staticPlugins, setStaticPlugins] = useState<DshStaticPluginView[]>([]);
 	const [showInstall, setShowInstall] = useState(false);
 	/** 两步确认卸载：第一次点击进入确认态，第二次执行。 */
 	const [confirmUninstallId, setConfirmUninstallId] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
-	/** 静态 Loader 清单当前页（1 基；数据刷新导致页数收缩时展示层负责收敛）。 */
-	const [staticPage, setStaticPage] = useState(1);
 
 	const loadPlugins = useCallback(async () => {
 		try {
-			const [dynamic, staticList] = await Promise.all([
-				desktopApi.sessions.listDshDynamicPlugins(),
-				desktopApi.sessions.listDshStaticPlugins(),
-			]);
+			const dynamic = await desktopApi.sessions.listDshDynamicPlugins();
 			setDynamicPlugins(dynamic);
-			setStaticPlugins(staticList);
 		} catch {
 			// host 未装配/未启动：保持空
 		}
@@ -129,14 +114,6 @@ export function DshPluginSection() {
 			setBusy(false);
 		}
 	};
-
-	/** 静态清单分页派生：总页数随合并后行数变化；数据刷新导致页号越界时收敛到末页再切片。 */
-	const staticTotalPages = Math.max(1, Math.ceil(staticPlugins.length / STATIC_PAGE_SIZE));
-	const staticPageClamped = Math.min(staticPage, staticTotalPages);
-	const staticPageRows = staticPlugins.slice(
-		(staticPageClamped - 1) * STATIC_PAGE_SIZE,
-		staticPageClamped * STATIC_PAGE_SIZE,
-	);
 
 	return (
 		<section className="grid gap-2">
@@ -220,72 +197,191 @@ export function DshPluginSection() {
 					))}
 				</div>
 			)}
-			<div className="mt-2 flex items-baseline gap-2">
-				<h3 className="text-caption font-semibold text-muted-foreground">{t("config.dsh.staticPlugins")}</h3>
-				{staticPlugins.length > 0 && (
-					<span className="text-micro text-muted-foreground/70">
-						{t("config.dsh.staticPluginsCount", { count: staticPlugins.length })}
-					</span>
-				)}
-			</div>
-			<p className="text-micro text-muted-foreground">{t("config.dsh.staticPluginsHint")}</p>
-			{staticPlugins.length === 0 ? (
-				<p className="text-micro text-muted-foreground">{t("config.dsh.staticPluginsEmpty")}</p>
-			) : (
-				<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead className="w-full">{t("config.dsh.staticPluginsColumnModule")}</TableHead>
-								<TableHead>{t("config.dsh.staticPluginsColumnState")}</TableHead>
-								<TableHead>{t("config.dsh.staticPluginsColumnPhase")}</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{staticPageRows.map((entry) => (
-								<TableRow key={entry.entryId}>
-									<TableCell className="min-w-0">
-										<span className="block truncate font-mono text-control text-foreground" title={entry.moduleName}>
-											{entry.moduleName}
-										</span>
-									</TableCell>
-									<TableCell>
-										<Badge
-											variant="outline"
-											className={
-												entry.enabled
-													? "border-emerald-300/70 bg-emerald-500/10 font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300"
-													: "border-border-subtle text-muted-foreground"
-											}
-										>
-											{entry.enabled ? t("config.dsh.pluginEnabled") : t("config.dsh.pluginDisabled")}
-										</Badge>
-									</TableCell>
-									<TableCell>
-										{entry.fiberPhase ? (
-											<Badge variant="outline" className="border-border-subtle font-mono text-micro text-text-tertiary">
-												{entry.fiberPhase}
-											</Badge>
-										) : (
-											<span className="text-micro text-text-tertiary">—</span>
-										)}
-									</TableCell>
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
-					{staticTotalPages > 1 && (
-						<Pagination page={staticPageClamped} totalPages={staticTotalPages} onPageChange={setStaticPage} className="py-2" />
-					)}
-				</div>
-			)}
 		</section>
 	);
 }
 
+/** 模块短名：去掉 @scope/、cordis:、cordis-plugin-、dsh-host-/dsh-client- 前缀（对齐 dsh-web moduleShortName）。 */
+function moduleShortName(moduleName: string): string {
+	return (moduleName.startsWith("@") ? moduleName.slice(moduleName.indexOf("/") + 1) : moduleName)
+		.replace(/^cordis:/, "")
+		.replace(/^cordis-plugin-/, "")
+		.replace(/^dsh-(?:host-|client-)?/, "");
+}
+
+/** fiberPhase → 本地化文案 key（对齐 dsh-web PHASE_KEYS；null 视为未挂载）。 */
+const PHASE_KEYS: Record<string, TranslationKey> = {
+	pending: "config.dsh.pluginPhasePending",
+	loading: "config.dsh.pluginPhaseLoading",
+	active: "config.dsh.pluginPhaseActive",
+	failed: "config.dsh.pluginPhaseFailed",
+	unloading: "config.dsh.pluginPhaseUnloading",
+};
+
+/** 状态点颜色：启用且已挂载为绿、失败为红、过渡中为黄、其余为灰。 */
+function phaseDotClass(fiberPhase: string | null, enabled: boolean): string {
+	if (!enabled) return "bg-border";
+	switch (fiberPhase) {
+		case "active": return "bg-emerald-500";
+		case "failed": return "bg-danger";
+		case "pending":
+		case "loading":
+		case "unloading": return "bg-amber-500";
+		default: return "bg-border";
+	}
+}
+
+/** fiberPhase 本地化文案（null = 未挂载）。 */
+function phaseLabel(fiberPhase: string | null): string {
+	if (fiberPhase === null) return t("config.dsh.pluginPhaseUnobserved");
+	return t(PHASE_KEYS[fiberPhase] ?? "config.dsh.pluginPhaseUnobserved");
+}
+
+/** 条目是否匹配搜索（对齐 dsh-web：按 moduleName / entryId 不区分大小写包含匹配）。 */
+function matchesEntry(entry: DshStaticPluginView, normalizedQuery: string): boolean {
+	if (normalizedQuery.length === 0) return true;
+	return [entry.moduleName, entry.entryId].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+}
+
+/**
+ * 插件列表视图（对齐 dsh-web 的 plugin-inventory tab）：静态 Loader 清单以 2 列卡片网格展示
+ * （模块短名 + 启用标签 + fiberPhase 状态点），顶部搜索框按 moduleName/entryId 过滤；
+ * 点击卡片展开查看完整 entryId、配置状态与 Cordis 状态。保留分页避免只读长列表刷屏。
+ */
+export function PluginInventoryView() {
+	const [entries, setEntries] = useState<DshStaticPluginView[]>([]);
+	const [query, setQuery] = useState("");
+	const [expandedId, setExpandedId] = useState<string | null>(null);
+	/** 静态 Loader 清单当前页（1 基；数据/搜索变化导致页数收缩时展示层负责收敛）。 */
+	const [page, setPage] = useState(1);
+
+	useEffect(() => {
+		let current = true;
+		desktopApi.sessions
+			.listDshStaticPlugins()
+			.then((list) => {
+				if (current) setEntries(list);
+			})
+			.catch(() => {
+				// host 未装配/未启动：保持空
+			});
+		return () => {
+			current = false;
+		};
+	}, []);
+
+	const normalizedQuery = query.trim().toLocaleLowerCase();
+	const filtered = useMemo(
+		() => entries.filter((entry) => matchesEntry(entry, normalizedQuery)),
+		[entries, normalizedQuery],
+	);
+
+	// 展开项被搜索过滤掉时自动收起（对齐 dsh-web）
+	useEffect(() => {
+		if (expandedId !== null && !filtered.some((entry) => entry.entryId === expandedId)) {
+			setExpandedId(null);
+		}
+	}, [expandedId, filtered]);
+
+	const totalPages = Math.max(1, Math.ceil(filtered.length / STATIC_PAGE_SIZE));
+	const pageClamped = Math.min(page, totalPages);
+	const pageRows = filtered.slice((pageClamped - 1) * STATIC_PAGE_SIZE, pageClamped * STATIC_PAGE_SIZE);
+
+	return (
+		<div className="grid gap-2.5">
+			<label className="relative block">
+				<Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+				<Input
+					type="search"
+					value={query}
+					onChange={(event) => {
+						setQuery(event.currentTarget.value);
+						setPage(1);
+					}}
+					placeholder={t("config.dsh.pluginSearchPlaceholder")}
+					className="h-9 pl-8"
+				/>
+			</label>
+			<div className="flex items-baseline gap-2 px-0.5">
+				<h3 className="text-caption font-semibold text-foreground">{t("config.dsh.tab.pluginList")}</h3>
+				<span className="text-micro tabular-nums text-muted-foreground">{filtered.length}</span>
+			</div>
+			{entries.length === 0 ? (
+				<p className="text-micro text-muted-foreground">{t("config.dsh.staticPluginsEmpty")}</p>
+			) : filtered.length === 0 ? (
+				<p className="text-micro text-muted-foreground">{t("config.dsh.pluginNoMatch")}</p>
+			) : (
+				<ul className="grid grid-cols-2 items-start gap-2.5 max-[900px]:grid-cols-1">
+					{pageRows.map((entry) => {
+						const title = moduleShortName(entry.moduleName);
+						const open = expandedId === entry.entryId;
+						const detailId = `dsh-plugin-inventory-${entry.entryId}`;
+						return (
+							<li key={entry.entryId} className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
+								<button
+									type="button"
+									className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+									aria-expanded={open}
+									aria-controls={detailId}
+									onClick={() => setExpandedId(open ? null : entry.entryId)}
+								>
+									<span className="min-w-0 flex-1 truncate text-control font-semibold text-foreground" title={entry.moduleName}>
+										{title}
+									</span>
+									{entry.enabled ? (
+										<Badge variant="outline" className="shrink-0 border-emerald-300/70 bg-emerald-500/10 font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
+											{t("config.dsh.pluginEnabled")}
+										</Badge>
+									) : (
+										<Badge variant="outline" className="shrink-0 border-border-subtle text-muted-foreground">
+											{t("config.dsh.pluginDisabled")}
+										</Badge>
+									)}
+									<span
+										className={`size-1.5 shrink-0 rounded-full ${phaseDotClass(entry.fiberPhase, entry.enabled)}`}
+										role="img"
+										aria-label={phaseLabel(entry.fiberPhase)}
+										title={phaseLabel(entry.fiberPhase)}
+									/>
+									{open ? (
+										<ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+									) : (
+										<ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+									)}
+								</button>
+								{open && (
+									<div id={detailId} className="border-t border-border/40 px-3 py-2.5">
+										<code className="block truncate font-mono text-micro text-text-secondary" title={entry.entryId}>
+											{entry.entryId}
+										</code>
+										<dl className="mt-2 grid gap-1 text-micro">
+											<div className="flex gap-2">
+												<dt className="shrink-0 text-muted-foreground">{t("config.dsh.pluginConfigStatus")}</dt>
+												<dd>{entry.enabled ? t("config.dsh.pluginEnabled") : t("config.dsh.pluginDisabled")}</dd>
+											</div>
+											{entry.enabled && (
+												<div className="flex gap-2">
+													<dt className="shrink-0 text-muted-foreground">{t("config.dsh.pluginCordisStatus")}</dt>
+													<dd>{phaseLabel(entry.fiberPhase)}</dd>
+												</div>
+											)}
+										</dl>
+									</div>
+								)}
+							</li>
+						);
+					})}
+				</ul>
+			)}
+			{totalPages > 1 && (
+				<Pagination page={pageClamped} totalPages={totalPages} onPageChange={setPage} className="py-1" />
+			)}
+		</div>
+	);
+}
+
 /** 安装表单：选择归属会话 + 语义前缀 + 名称/用途 + Host 源码（define，不运行）。 */
-function InstallPluginForm(props: {
-	sessions: Array<{ sessionId: string; title: string }>;
+function InstallPluginForm(props: {	sessions: Array<{ sessionId: string; title: string }>;
 	onInstalled: () => void;
 }) {
 	const [sessionId, setSessionId] = useState(props.sessions[0]?.sessionId ?? "");

@@ -23,6 +23,13 @@ export const KNOWN_PLUGIN_NAMESPACE_TITLES: Readonly<Record<string, TranslationK
 	"web-search-deepseek": "config.dsh.pluginWebSearch",
 };
 
+/** 已知插件命名空间 → 描述文案 key（对齐 dsh-web 插件卡片描述行）；未收录的新插件不显示描述。 */
+export const KNOWN_PLUGIN_NAMESPACE_DESCRIPTIONS: Readonly<Record<string, TranslationKey>> = {
+	"agent-loop": "config.dsh.pluginAgentLoopDesc",
+	"shell": "config.dsh.pluginShellDesc",
+	"web-search-deepseek": "config.dsh.pluginWebSearchDesc",
+};
+
 /** 是否为插件配置命名空间（G13：插件区动态发现）。 */
 export function isDshPluginNamespace(ns: string): boolean {
 	return !RESERVED_DSH_NAMESPACES.has(ns);
@@ -31,4 +38,9 @@ export function isDshPluginNamespace(ns: string): boolean {
 /** 插件命名空间的 i18n 标题 key；未收录的新插件返回 undefined（组件回退显示 ns 原名）。 */
 export function dshPluginNamespaceTitleKey(ns: string): TranslationKey | undefined {
 	return KNOWN_PLUGIN_NAMESPACE_TITLES[ns];
+}
+
+/** 插件命名空间的 i18n 描述 key；未收录的新插件返回 undefined（卡片不显示描述行）。 */
+export function dshPluginNamespaceDescriptionKey(ns: string): TranslationKey | undefined {
+	return KNOWN_PLUGIN_NAMESPACE_DESCRIPTIONS[ns];
 }

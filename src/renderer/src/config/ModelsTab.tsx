@@ -422,12 +422,8 @@ export function ModelsTab(props: {
 											count: provider.models.length,
 										})}
 									</span>
-									{provider.baseUrl && (
-										<span className="max-w-[240px] truncate text-[11px] text-text-tertiary">
-											{provider.baseUrl}
-										</span>
-									)}
 								</div>
+
 								<div className="flex items-center gap-1">
 									{props.renamingProvider === name ? (
 										<>

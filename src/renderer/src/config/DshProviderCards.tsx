@@ -4,12 +4,9 @@
  * - PiAiProvidersCard：llm-pi-ai（动态 providers dict，每个 provider 一行）；
  * - DeepseekRouteCard：llm-deepseek（官方 DeepSeek 路由，单行形态）。
  *
- * 行式布局（与 dsh-web 的 ProviderEditor 同款）：
- * 收起时一行 = 名称/displayName + API 密钥状态点 + 模型数 + 展开箭头（+ 删除）；
- * 展开后 = 主字段「API 密钥」输入框（credentials.set 只写）+「自定义设置」折叠区
- * （其余 schema 字段）+ 自定义模型编辑器（先铺底再改，避免清空目录）。密钥状态点：
- * 绿 = 已配置、红 = 缺失（仅当名单能提供该 ref 的状态信息时显示），无引用不显示。
+
  */
+
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Copy, Eye, EyeOff, LoaderCircle, Plus, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
@@ -18,7 +15,7 @@ import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
-import { isDshCustomSettingsHiddenField } from "./dshFieldLabels";
+import { isDshCustomSettingsHiddenField, isDshPiAiProfileVisibleField } from "./dshFieldLabels";
 import { DshSchemaField, type DshNamespaceView } from "./DshSchemaForm";
 import {
 	DSH_DEFAULT_RETRY_MAX,
@@ -27,6 +24,7 @@ import {
 	objectFields,
 	patchDshRetryMaxRetries,
 	pruneEmptyObjects,
+	readDshEntryValue,
 	readDshRetryPolicy,
 	readPath,
 	setPath,
@@ -52,9 +50,9 @@ export type DshCredentialOps = {
 	unsetKey: (ref: string) => Promise<void>;
 };
 
-/** 收起行头通用布局：chevron + 标题 + badge + 状态点 + 模型数 + 右侧操作。 */
+/** 收起行头通用布局：chevron + 模型数 + 状态点 + 右侧操作（折叠时不显示名称/URL/协议）。 */
 function ProviderRowHead(props: {
-	title: string;
+	title?: string;
 	subtitle?: string;
 	keyRef?: string;
 	keyDot?: ReactNode;
@@ -74,8 +72,10 @@ function ProviderRowHead(props: {
 				onClick={props.onToggle}
 			>
 				{props.isOpen ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
-				<span className="truncate font-mono text-control font-semibold text-foreground">{props.title}</span>
+				{props.title && <span className="truncate font-mono text-control font-semibold text-foreground">{props.title}</span>}
 				{props.subtitle && <span className="truncate text-micro text-muted-foreground">{props.subtitle}</span>}
+
+
 				{props.badges?.map((badge, index) => (
 					<span key={index} className="shrink-0 rounded-full border border-border-subtle px-1.5 py-px font-mono text-micro text-muted-foreground">
 						{badge}
@@ -308,7 +308,8 @@ function RetryMaxRetriesField(props: {
 	);
 }
 
-/** 「自定义设置」折叠区：收容主字段（密钥）与模型列表之外的其余 schema 字段。 */
+/** 「自定义设置」折叠区：收容模型列表之外的其余 schema 字段。
+ *  默认收起，与 dsh-web 对齐；点开后字段立即平铺显示具体值。 */
 function CustomSettings(props: {
 	label: ReactNode;
 	children: ReactNode;
@@ -332,7 +333,7 @@ function CustomSettings(props: {
 /**
  * llm-pi-ai providers 卡片：每个 provider 一行（可展开），支持添加/删除 provider。
  * 保存语义与 Pi 管理页一致：不自带保存按钮，草稿变化上报脏状态，
- * 由顶部统一保存（先按行 credentials.set 再 settings.update）。
+ * 由顶部统一保存；API 密钥在「自定义设置」折叠区内填写。
  */
 export function PiAiProvidersCard(props: {
 	namespace: DshNamespaceView;
@@ -475,23 +476,9 @@ export function PiAiProvidersCard(props: {
 			.sort((left, right) => left.displayName.localeCompare(right.displayName));
 	}, [props.directory, entries]);
 
-	/** 草稿覆盖读取：draft 优先，否则用现值。 */
-	const entryValue = (key: string, path: string[]) => {
-		const draftPath = ["providers", key, ...path];
-		let current: unknown = draft;
-		for (const segment of draftPath) {
-			if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
-			current = (current as Record<string, unknown>)[segment];
-		}
-		if (current !== undefined) return current;
-		// 回退现值
-		let actual: unknown = (namespace.value as { providers?: Record<string, unknown> } | undefined)?.providers?.[key];
-		for (const segment of path) {
-			if (!actual || typeof actual !== "object" || Array.isArray(actual)) return undefined;
-			actual = (actual as Record<string, unknown>)[segment];
-		}
-		return actual;
-	};
+	/** 草稿覆盖读取：draft 优先，否则用现值（缺失草稿路径必须回退，不能吞已保存值）。 */
+	const entryValue = (key: string, path: string[]) =>
+		readDshEntryValue(draft, namespace.value, key, path);
 
 	const updateEntry = (key: string, path: string[], next: unknown) => {
 		const nextDraft = structuredClone(draft) as Record<string, unknown>;
@@ -588,10 +575,21 @@ export function PiAiProvidersCard(props: {
 		});
 	};
 
-	// 密钥/凭证槽位已在卡片上方单独编辑，自定义设置只留 baseURL、协议、显示名等
+	// API 密钥在「自定义设置」折叠区内填写；profile 默认值/高级字段隐藏——
+	// 折叠区只露 dsh-web pi-ai 家族白名单（baseURL / baseUrl / api / displayName），其余归源文件。
 	const providerProfileFields = objectFields(schema, inner).filter(
-		(field) => !isDshCustomSettingsHiddenField(field.name, field.ref.meta),
+		(field) => isDshPiAiProfileVisibleField(field.name),
 	);
+
+	// 展开区直接平铺的固定顺序：显示名称 → Base URL → 结果协议，其余白名单字段随后。
+	// 不依赖折叠、不依赖 objectFields 顺序：打开卡片即显示具体字段的值。
+	const PROFILE_FIELD_ORDER = ["displayName", "baseURL", "baseUrl", "api"] as const;
+	const orderedProfileFields = [
+		...PROFILE_FIELD_ORDER
+			.map((name) => providerProfileFields.find((field) => field.name === name))
+			.filter((field): field is NonNullable<typeof field> => Boolean(field)),
+		...providerProfileFields.filter((field) => !(PROFILE_FIELD_ORDER as readonly string[]).includes(field.name)),
+	];
 
 	return (
 		<div className="flex min-w-0 flex-col">
@@ -689,13 +687,7 @@ export function PiAiProvidersCard(props: {
 						<div key={entry.key} className="rounded-md border border-border-subtle bg-bg-panel">
 							<ProviderRowHead
 								title={entry.key}
-								subtitle={displayName && displayName !== entry.key ? displayName : undefined}
-								badges={[
-									t("config.dsh.modelsCount", { count: modelCount }),
-									...(api ? [api] : []),
-									...(baseURL ? [baseURL] : []),
-								]}
-								keyRef={keyRef}
+								badges={[t("config.dsh.modelsCount", { count: modelCount })]}
 								keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
 								extraActions={
 									<ProviderMigrationButton
@@ -710,22 +702,20 @@ export function PiAiProvidersCard(props: {
 								removeDisabled={!writable}
 								removeTitle={t("config.dsh.removeProvider")}
 							/>
+
+
 							{isOpen && (
 								<div className="grid gap-3 border-t border-border/40 px-3 py-3">
-									<ApiKeyField
-										ref={keyRef}
-										value={keyDrafts[entry.key] ?? ""}
-										onChange={(next) => setKeyDrafts((prev) => ({ ...prev, [entry.key]: next }))}
-										ops={ops}
-									/>
 									<CustomSettings label={t("config.dsh.customSettings")}>
 										<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
-										<RetryMaxRetriesField
-											policy={entryValue(entry.key, ["retryPolicy"])}
-											onChange={(next) => updateEntry(entry.key, ["retryPolicy"], next)}
-											writable={writable}
+										<ApiKeyField
+											ref={keyRef}
+											value={keyDrafts[entry.key] ?? ""}
+											onChange={(next) => setKeyDrafts((prev) => ({ ...prev, [entry.key]: next }))}
+											ops={ops}
 										/>
-										{providerProfileFields.map((field) => (
+										{/* 固定顺序平铺（显示名称 / Base URL / 结果协议），值同步读取，点开即显示 */}
+										{orderedProfileFields.map((field) => (
 											<DshSchemaField
 												key={field.name}
 												schema={schema}
@@ -737,6 +727,11 @@ export function PiAiProvidersCard(props: {
 												writable={writable}
 											/>
 										))}
+										<RetryMaxRetriesField
+											policy={entryValue(entry.key, ["retryPolicy"])}
+											onChange={(next) => updateEntry(entry.key, ["retryPolicy"], next)}
+											writable={writable}
+										/>
 									</CustomSettings>
 									<DshModelsEditor
 										models={models}
@@ -773,7 +768,7 @@ export function PiAiProvidersCard(props: {
 
 /**
  * llm-deepseek 官方路由卡片：单行形态（无动态 providers dict）。
- * 收起一行 = 路由名 + 密钥状态点 + 模型数；展开 = 密钥主字段 + 自定义设置 + 模型列表。
+ * 收起一行 = 路由名 + 密钥状态点 + 模型数；展开 = 自定义设置 + 模型列表。
  */
 export function DeepseekRouteCard(props: {
 	namespace: DshNamespaceView;
@@ -900,7 +895,6 @@ export function DeepseekRouteCard(props: {
 					<ProviderRowHead
 						title={namespace.ns === "llm-deepseek" ? t("config.dsh.deepseekOfficial") : namespace.ns}
 						badges={[t("config.dsh.modelsCount", { count: models.length > 0 ? models.length : (props.catalog?.length ?? 0) })]}
-						keyRef={keyRef}
 						keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
 						extraActions={
 							<ProviderMigrationButton
@@ -912,11 +906,13 @@ export function DeepseekRouteCard(props: {
 						isOpen={open}
 						onToggle={() => setOpen((prev) => !prev)}
 					/>
+
+
 					{open && (
 						<div className="grid gap-3 border-t border-border/40 px-3 py-3">
-							<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
 							<CustomSettings label={t("config.dsh.customSettings")}>
 								<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
+								<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
 								<RetryMaxRetriesField
 									policy={value(["retryPolicy"])}
 									onChange={(next) => update(["retryPolicy"], next)}

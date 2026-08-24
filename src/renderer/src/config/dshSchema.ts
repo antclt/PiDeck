@@ -189,6 +189,23 @@ export function readPath(value: unknown, path: string[]): unknown {
 	return current;
 }
 
+/**
+ * 读取 llm-pi-ai provider 条目字段：草稿优先，草稿缺失时回退已保存值。
+ *
+ * 不能只沿草稿路径逐段取：新增 provider / 编辑 models 后草稿里往往只有部分字段，
+ * 如果中途遇到 undefined 就返回，会把已保存的 baseURL/api/displayName 全部“吞掉”。
+ */
+export function readDshEntryValue(
+	draft: unknown,
+	saved: unknown,
+	key: string,
+	path: string[],
+): unknown {
+	const draftValue = readPath(draft, ["providers", key, ...path]);
+	if (draftValue !== undefined) return draftValue;
+	return readPath(saved, ["providers", key, ...path]);
+}
+
 /** 写入 path 下的值（创建中间对象；用于 patch 构造）。 */
 export function setPath(root: Record<string, unknown>, path: string[], value: unknown): void {
 	let current = root;

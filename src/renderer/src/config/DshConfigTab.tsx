@@ -1,53 +1,45 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useState, type ReactNode } from "react";
 import {
-	ArchiveRestore,
-	Blocks,
-	ChevronDown,
-	ChevronRight,
-	Copy,
-	Cpu,
-	Eye,
-	EyeOff,
-	FileCode2,
-	FolderOpen,
-	KeyRound,
-	LayoutDashboard,
-	LoaderCircle,
-	Puzzle,
-	RefreshCw,
-	ShieldCheck,
-	Trash2,
+ArchiveRestore,
+ChevronDown,
+Cpu,
+FileCode2,
+FolderOpen,
+LayoutDashboard,
+LoaderCircle,
+Puzzle,
+RefreshCw,
+ShieldCheck,
+Trash2,
 } from "lucide-react";
 import { desktopApi } from "../desktopApi";
 import { t, type TranslationKey } from "../i18n";
 import { showNotice } from "../utils/notice";
-import { writeClipboard } from "../utils/clipboard";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { Switch } from "../components/ui-shadcn/switch";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
+Select,
+SelectContent,
+SelectItem,
+SelectTrigger,
+SelectValue,
 } from "../components/ui-shadcn/select";
-import { DshLogo } from "../components/session/SessionSourceBadge";
+import { AgentPresetLogo, DshLogo } from "../components/session/SessionSourceBadge";
 import { DSH_PERMISSION_PRESETS } from "../components/session/DshPermissionMenu";
 import { useSaveRegistry } from "../hooks/useSaveRegistry";
 import { DshSchemaForm, type DshNamespaceView } from "./DshSchemaForm";
-import { isDshPluginNamespace, dshPluginNamespaceTitleKey } from "./dshPluginNamespaces";
-import { DshPluginSection } from "./DshPluginSection";
+import { isDshPluginNamespace, dshPluginNamespaceTitleKey, dshPluginNamespaceDescriptionKey } from "./dshPluginNamespaces";
+import { DshPluginSection, PluginInventoryView } from "./DshPluginSection";
 import { DeepseekRouteCard, PiAiProvidersCard } from "./DshProviderCards";
 import { collectCredentialRefsWithValue, normalizeDshSchema, type DshSectionApi } from "./dshSchema";
 import { presetDisplayDescription, presetDisplayName } from "./dshPresetDisplay";
 import { credentialRefFor } from "./dshCredentialRef";
 
 type DshStatus = {
-	started: boolean;
-	homeDir: string;
+started: boolean;
+homeDir: string;
 };
-
 type CredentialState = {
 	configured: boolean;
 	source?: string;
@@ -65,11 +57,10 @@ function joinConfigPath(homeDir: string, fileName: string): string {
 const NAV_ITEMS: Array<{ id: string; labelKey: TranslationKey; icon: ReactNode }> = [
 	{ id: "overview", labelKey: "config.dsh.tab.overview", icon: <LayoutDashboard className="size-3.5" aria-hidden="true" /> },
 	{ id: "models", labelKey: "config.dsh.tab.models", icon: <Cpu className="size-3.5" aria-hidden="true" /> },
-	{ id: "presets", labelKey: "config.dsh.tab.presets", icon: <Blocks className="size-3.5" aria-hidden="true" /> },
+	{ id: "presets", labelKey: "config.dsh.tab.presets", icon: <AgentPresetLogo className="size-3.5" aria-hidden="true" /> },
 	{ id: "plugins", labelKey: "config.dsh.tab.plugins", icon: <Puzzle className="size-3.5" aria-hidden="true" /> },
-	{ id: "security", labelKey: "config.dsh.tab.security", icon: <ShieldCheck className="size-3.5" aria-hidden="true" /> },
-	{ id: "auth", labelKey: "config.dsh.tab.auth", icon: <KeyRound className="size-3.5" aria-hidden="true" /> },
-	{ id: "raw", labelKey: "config.dsh.tab.raw", icon: <FileCode2 className="size-3.5" aria-hidden="true" /> },
+{ id: "security", labelKey: "config.dsh.tab.security", icon: <ShieldCheck className="size-3.5" aria-hidden="true" /> },
+{ id: "raw", labelKey: "config.dsh.tab.raw", icon: <FileCode2 className="size-3.5" aria-hidden="true" /> },
 ];
 
 /** DSH 配置页统一保存句柄（ConfigModal 顶部保存按钮经 ref 调用）。 */
@@ -80,7 +71,7 @@ export type DshConfigTabHandle = {
 
 /**
  * DSH 配置管理页：左侧竖排导航 + 右侧内容区（与 Pi 管理同款操作逻辑）。
- * 概览 / 模型 / 认证 / 设置 / 源文件；配置读写走 settings.describe（schema 表单）
+ * 概览 / 模型 / 预设 / 插件 / 安全 / 源文件；配置读写走 settings.describe（schema 表单）
  * 与 credentials.describe，模型 tab 以 provider 卡片 + 模型行管理 llm-pi-ai。
  *
  * 保存语义与 Pi 管理页一致：各分区不再自带保存按钮，草稿变化上报脏状态，
@@ -109,6 +100,8 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [activeTab, setActiveTab] = useState("overview");
+	/** 插件 tab 内部子页（对齐 dsh-web：插件配置 / 插件列表）。 */
+	const [pluginPane, setPluginPane] = useState<"config" | "list">("config");
 
 	/** 子分区保存注册表（C22：公共 hook，instanceId → save；顶部保存按钮统一遍历调用）。
 	 *  脏状态同步维护（isDirty 立即可读），state 仅驱动 UI。 */
@@ -393,30 +386,52 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 						</div>
 						<div hidden={activeTab !== "plugins"}>
 							<div className="grid gap-4 p-4">
-								<div className="grid gap-2">
-									<p className="text-micro text-muted-foreground">{t("config.dsh.pluginsHint")}</p>
-									{pluginNamespaces.length === 0 ? (
-										<Empty text={t("config.dsh.namespacesEmpty")} />
-									) : (
-										<div className="grid gap-2">
-											{pluginNamespaces.map((ns) => (
-												<PluginCard key={ns.ns} ns={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} instanceKey={`dsh:plugins:${ns.ns}`} />
-											))}
-										</div>
-									)}
+								{/* 子 tab 栏（对齐 dsh-web 插件页）：插件配置 / 插件列表 */}
+								<div className="flex items-center gap-4 border-b border-border/60 px-1">
+									{(
+										[
+											{ id: "config", labelKey: "config.dsh.tab.pluginConfig" },
+											{ id: "list", labelKey: "config.dsh.tab.pluginList" },
+										] as const
+									).map((pane) => (
+										<button
+											key={pane.id}
+											type="button"
+											className={`-mb-px border-b-2 pb-2 pt-1 text-caption font-medium transition-colors ${
+												pluginPane === pane.id
+													? "border-foreground text-foreground"
+													: "border-transparent text-muted-foreground hover:text-foreground"
+											}`}
+											onClick={() => setPluginPane(pane.id)}
+										>
+											{t(pane.labelKey)}
+										</button>
+									))}
 								</div>
-								{/* G13 深化：动态 Cordis 插件管理（define/run/stop/undefine）+ 静态 Loader 只读清单 */}
-								<DshPluginSection />
+								<div hidden={pluginPane !== "config"}>
+									<div className="grid gap-2">
+										<p className="text-micro text-muted-foreground">{t("config.dsh.pluginsHint")}</p>
+										{pluginNamespaces.length === 0 ? (
+											<Empty text={t("config.dsh.namespacesEmpty")} />
+										) : (
+											<div className="grid gap-2">
+												{pluginNamespaces.map((ns) => (
+													<PluginCard key={ns.ns} ns={ns} writable={writable} onSave={(patch) => saveNamespace(ns.ns, patch)} sectionApi={sectionApi} instanceKey={`dsh:plugins:${ns.ns}`} />
+												))}
+											</div>
+										)}
+									</div>
+									{/* G13 深化：动态 Cordis 插件管理（define/run/stop/undefine），PiDeck 独有能力保留在配置页 */}
+									<DshPluginSection />
+								</div>
+								<div hidden={pluginPane !== "list"}>
+									<PluginInventoryView />
+								</div>
 							</div>
 						</div>
 						<div hidden={activeTab !== "security"}>
 							<div className="p-4">
 								<SecurityTab namespace={permissionNamespace} writable={writable} onSave={(patch) => saveNamespace("permission", patch)} onChanged={() => void load()} sectionApi={sectionApi} instanceKey="dsh:security" />
-							</div>
-						</div>
-						<div hidden={activeTab !== "auth"}>
-							<div className="p-4">
-								<AuthTab refs={credentialRefs} credentials={credentials} onSetKey={setDshKey} onUnsetKey={unsetDshKey} sectionApi={sectionApi} instanceKey="dsh:auth" />
 							</div>
 						</div>
 						<div hidden={activeTab !== "raw"}>
@@ -430,6 +445,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 		</div>
 	);
 });
+
 
 function Overview(props: {
 	status: DshStatus | null;
@@ -572,7 +588,7 @@ function Overview(props: {
 	};
 
 	return (
-		<div className="grid max-w-2xl gap-4 p-4">
+		<div className="grid gap-4 p-4">
 			<section className="grid gap-2">
 				<h3 className="flex items-center gap-2 text-caption font-semibold text-muted-foreground">
 					<DshLogo className="size-4" />
@@ -703,7 +719,7 @@ type DshAgentPreset = {
 };
 
 /**
- * 插件配置卡片（对齐 dsh-web 的插件设置分区）：收起时一行展示插件名称与
+ * 插件配置卡片（对齐 dsh-web 的插件设置分区）：收起时一行展示插件名称、描述与
  * 生效方式，点击展开后才渲染该插件命名空间的配置表单；避免一进来就是
  * 一堆输入框。卡片持有自己的展开状态与表单草稿（收起再展开不丢草稿）。
  */
@@ -718,18 +734,27 @@ function PluginCard(props: {
 	const [open, setOpen] = useState(false);
 	// G13：已知插件走 i18n 标题；host 新注册的插件命名空间回退显示 ns 原名
 	const titleKey = dshPluginNamespaceTitleKey(props.ns.ns);
+	const descriptionKey = dshPluginNamespaceDescriptionKey(props.ns.ns);
 	return (
-		<div className="rounded-md border border-border-subtle bg-bg-panel">
+		<div className="rounded-xl border border-border-subtle bg-bg-panel transition-colors hover:border-border">
 			<button
 				type="button"
-				className="flex w-full items-center gap-1.5 px-3.5 py-2.5 text-left"
+				className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
 				onClick={() => setOpen((prev) => !prev)}
 			>
-				{open ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
-				<span className="min-w-0 flex-1 truncate text-caption font-semibold text-foreground">{titleKey ? t(titleKey) : props.ns.ns}</span>
+				<span className="min-w-0 flex-1">
+					<span className="block truncate text-sm font-semibold text-foreground">{titleKey ? t(titleKey) : props.ns.ns}</span>
+					{descriptionKey && (
+						<span className="mt-0.5 block truncate text-caption text-muted-foreground">{t(descriptionKey)}</span>
+					)}
+				</span>
 				<span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground">
 					{props.ns.applies === "live" ? t("config.dsh.appliesLive") : t("config.dsh.appliesRestart")}
 				</span>
+				<ChevronDown
+					className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+					aria-hidden="true"
+				/>
 			</button>
 			{open && (
 				<div className="border-t border-border/40">
@@ -825,7 +850,7 @@ function PresetsTab(props: {
 		);
 	}
 	return (
-		<div className="grid max-w-2xl gap-4">
+		<div className="grid gap-4">
 			<p className="text-micro text-muted-foreground">{t("config.dsh.presetsHint")}</p>
 			{presets.length === 0 ? (
 				<Empty text={t("config.dsh.presetsEmpty")} />
@@ -955,7 +980,7 @@ function SecurityTab(props: {
 	}, [props.sectionApi, instanceId, save]);
 
 	return (
-		<div className="grid max-w-2xl gap-4">
+		<div className="grid gap-4">
 			<p className="text-micro text-muted-foreground">{t("config.dsh.securityHint")}</p>
 			<section className="rounded-md border border-border-subtle bg-bg-panel">
 				<div className="flex items-center gap-2 border-b border-border/40 px-4 py-2">
@@ -1001,201 +1026,9 @@ function SecurityTab(props: {
 	);
 }
 
-function AuthTab(props: {
-	refs: string[];
-	credentials: Record<string, CredentialState>;
-	onSetKey: (ref: string, value: string) => Promise<void>;
-	onUnsetKey: (ref: string) => Promise<void>;
-	sectionApi?: DshSectionApi;
-	instanceKey?: string;
-}) {
-	const generatedId = useId();
-	const instanceId = props.instanceKey ?? generatedId;
-	const [values, setValues] = useState<Record<string, string>>({});
-	/** 待清除的凭证 ref 集合（顶部统一保存时执行 unset）。 */
-	const [pendingUnsets, setPendingUnsets] = useState<Set<string>>(new Set());
-	const [revealed, setRevealed] = useState<Record<string, boolean>>({});
-	const [busyRef, setBusyRef] = useState<string | null>(null);
-	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 
-	/** 脏状态：任一凭证草稿非空或存在待清除项。 */
-	const dirty = Object.values(values).some((value) => value.trim()) || pendingUnsets.size > 0;
-	useEffect(() => {
-		props.sectionApi?.onDirtyChange(instanceId, dirty);
-		// 卸载时清掉本实例的脏来源，避免收起/切换后残留黄点
-		return () => props.sectionApi?.onDirtyChange(instanceId, false);
-	}, [props.sectionApi, instanceId, dirty]);
 
-	/** 统一保存：先逐条 set 草稿密钥，再逐条 unset 待清除项；全部成功返回 true。 */
-	const save = useCallback(async (): Promise<boolean> => {
-		if (!dirty) return true;
-		setSaving(true);
-		setError(null);
-		try {
-			for (const [ref, value] of Object.entries(values)) {
-				const trimmed = value.trim();
-				if (trimmed) await props.onSetKey(ref, trimmed);
-			}
-			for (const ref of pendingUnsets) {
-				await props.onUnsetKey(ref);
-			}
-			setValues({});
-			setPendingUnsets(new Set());
-			setRevealed({});
-			return true;
-		} catch (saveError) {
-			setError(saveError instanceof Error ? saveError.message : String(saveError));
-			return false;
-		} finally {
-			setSaving(false);
-		}
-	}, [dirty, values, pendingUnsets, props]);
-	useEffect(() => {
-		if (!props.sectionApi) return;
-		props.sectionApi.registerSave(instanceId, save);
-		return () => props.sectionApi?.unregisterSave(instanceId);
-	}, [props.sectionApi, instanceId, save]);
 
-	/** 眼睛切换：显示时按 ref 取回明文（无值则仅切换输入框类型），隐藏时清空输入。 */
-	const toggleReveal = async (ref: string, configured: boolean) => {
-		if (revealed[ref]) {
-			setRevealed((prev) => ({ ...prev, [ref]: false }));
-			setValues((prev) => ({ ...prev, [ref]: "" }));
-			return;
-		}
-		if (!values[ref] && configured) {
-			setBusyRef(ref);
-			try {
-				const stored = await desktopApi.sessions.readDshCredential(ref);
-				if (stored !== undefined) setValues((prev) => ({ ...prev, [ref]: stored }));
-			} catch {
-				// 读取失败：仅切换输入框类型，不阻断
-			} finally {
-				setBusyRef(null);
-			}
-		}
-		setRevealed((prev) => ({ ...prev, [ref]: true }));
-	};
-
-	/** 复制明文到剪贴板（草稿优先，否则读存储值）。 */
-	const copyValue = async (ref: string, configured: boolean) => {
-		setBusyRef(ref);
-		try {
-			let plain = values[ref]?.trim();
-			if (!plain && configured) {
-				plain = (await desktopApi.sessions.readDshCredential(ref))?.trim() ?? "";
-			}
-			if (plain) {
-				await writeClipboard(plain);
-				showNotice(t("config.dsh.keyCopied"), 2000);
-			}
-		} catch {
-			// 复制失败静默（writeClipboard 内部已有兜底）
-		} finally {
-			setBusyRef(null);
-		}
-	};
-
-	/** 切换待清除标记（顶部统一保存时 unset）。 */
-	const toggleUnset = (ref: string) => {
-		setPendingUnsets((prev) => {
-			const next = new Set(prev);
-			if (next.has(ref)) next.delete(ref);
-			else next.add(ref);
-			return next;
-		});
-	};
-
-	if (props.refs.length === 0) {
-		return <Empty text={t("config.dsh.credentialsEmpty")} />;
-	}
-
-	return (
-		<div className="grid max-w-2xl gap-2">
-			<p className="mb-1 text-micro text-muted-foreground">{t("config.dsh.authHint")}</p>
-			{error && <p className="text-micro text-danger">{error}</p>}
-			{dirty && <p className="text-micro text-amber-500">{t("config.dsh.unsavedHint")}</p>}
-			{props.refs.map((ref) => {
-				const state = props.credentials[ref];
-				const isRevealed = revealed[ref] ?? false;
-				const pendingUnset = pendingUnsets.has(ref);
-				return (
-					<div key={ref} className={`rounded-sm border bg-bg-panel px-3 py-2.5 ${pendingUnset ? "border-danger/40" : "border-border-subtle"}`}>
-						<div className="flex items-center gap-2">
-							<span className="min-w-0 flex-1 truncate font-mono text-control font-medium text-foreground">{ref}</span>
-							{pendingUnset && (
-								<span className="rounded-full border border-danger/40 bg-danger/10 px-1.5 py-px text-micro text-danger">
-									{t("config.dsh.credentialPendingUnset")}
-								</span>
-							)}
-							{state?.configured ? (
-								<span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-1.5 py-px text-micro text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">
-									{t("config.dsh.credentialConfigured", { source: state.source ?? "file" })}
-								</span>
-							) : (
-								<span className="rounded-full border border-border-subtle px-1.5 py-px text-micro text-muted-foreground">
-									{t("config.dsh.credentialUnset")}
-								</span>
-							)}
-						</div>
-						<div className="mt-2 flex items-center gap-2">
-							<div className="relative max-w-sm flex-1">
-								<Input
-									className="h-8 w-full pr-16 font-mono"
-									type={isRevealed ? "text" : "password"}
-									placeholder={t("config.dsh.credentialValuePlaceholder")}
-									value={values[ref] ?? ""}
-									disabled={state?.writable === false || busyRef === ref || saving}
-									onChange={(event) => setValues((prev) => ({ ...prev, [ref]: event.target.value }))}
-								/>
-								<div className="absolute inset-y-0 right-0.5 my-auto flex items-center gap-0.5">
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-sm"
-										className="size-7 text-muted-foreground"
-										title={t("config.dsh.keyCopy")}
-										aria-label={t("config.dsh.keyCopy")}
-										disabled={!state?.configured || busyRef === ref}
-										onClick={() => void copyValue(ref, state?.configured === true)}
-									>
-										<Copy className="size-3.5" aria-hidden="true" />
-									</Button>
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-sm"
-										className="size-7 text-muted-foreground"
-										title={isRevealed ? t("config.dsh.keyHide") : t("config.dsh.keyReveal")}
-										aria-label={isRevealed ? t("config.dsh.keyHide") : t("config.dsh.keyReveal")}
-										disabled={!state?.configured || busyRef === ref}
-										onClick={() => void toggleReveal(ref, state?.configured === true)}
-									>
-										{isRevealed ? <EyeOff className="size-3.5" aria-hidden="true" /> : <Eye className="size-3.5" aria-hidden="true" />}
-									</Button>
-								</div>
-							</div>
-							{state?.configured && (
-								<Button
-									type="button"
-									variant="ghost"
-									size="sm"
-									className={`h-8 shrink-0 ${pendingUnset ? "text-danger" : "text-muted-foreground hover:text-danger"}`}
-									title={t("config.dsh.credentialUnset")}
-									disabled={state?.writable === false || busyRef === ref || saving}
-									onClick={() => toggleUnset(ref)}
-								>
-									{pendingUnset ? t("config.dsh.credentialPendingUnset") : t("config.dsh.keyUnset")}
-								</Button>
-							)}
-						</div>
-					</div>
-				);
-			})}
-		</div>
-	);
-}
 
 const RAW_FILES = ["settings.yaml", ".credentials.yaml"];
 
@@ -1266,7 +1099,7 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 	}, [props.homeDir, fileName]);
 
 	return (
-		<div className="grid max-w-3xl gap-3">
+		<div className="grid gap-3">
 			<div className="flex items-center gap-2">
 				<Select value={fileName} onValueChange={setFileName}>
 					<SelectTrigger size="sm" className="h-8 w-48 font-mono">

@@ -11,6 +11,7 @@ const {
 	collectCredentialRefs,
 	collectCredentialRefsWithValue,
 	readPath,
+	readDshEntryValue,
 	setPath,
 	pruneEmptyObjects,
 	readDshRetryPolicy,
@@ -151,6 +152,35 @@ test("readPath/setPath 读写嵌套 path", () => {
 	assert.equal(readPath(root, ["a", "c"]), undefined);
 	setPath(root, ["x", "y"], 2);
 	assert.equal(root.x?.y, 2);
+});
+
+test("readDshEntryValue 草稿缺中间路径时仍回退已保存值", () => {
+	// 回归：draft 只有 providers.my-gateway.models 时，读 baseURL/api 不能中途返回 undefined，
+	// 否则卡片「自定义设置」打开后不显示已保存的接口地址/协议。
+	const draft = {
+		providers: {
+			"my-gateway": { models: [{ id: "gpt-4o", name: "GPT-4o" }] },
+		},
+	};
+	const saved = {
+		providers: {
+			"my-gateway": {
+				baseURL: "https://gateway.example/v1",
+				api: "openai-completions",
+				displayName: "My Gateway",
+			},
+		},
+	};
+	assert.equal(readDshEntryValue(draft, saved, "my-gateway", ["baseURL"]), "https://gateway.example/v1");
+	assert.equal(readDshEntryValue(draft, saved, "my-gateway", ["api"]), "openai-completions");
+	assert.equal(readDshEntryValue(draft, saved, "my-gateway", ["displayName"]), "My Gateway");
+	// 草稿显式覆盖时仍以草稿为准
+	assert.equal(readDshEntryValue(
+		{ providers: { "my-gateway": { baseURL: "https://draft.example/v1" } } },
+		saved,
+		"my-gateway",
+		["baseURL"],
+	), "https://draft.example/v1");
 });
 
 test("readDshRetryPolicy 省略时按 normal 默认，always 不捏造次数", () => {
