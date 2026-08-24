@@ -33,8 +33,10 @@ test("toDshAvailableModels 透传 reasoningEfforts（按模型过滤思考档位
 	assert.equal(models[0].id, "deepseek-v4-flash");
 	assert.deepEqual(models[0].reasoningEfforts?.map((effort) => effort.id), ["off", "high", "max"]);
 	assert.equal(models[0].reasoningEfforts?.[1].name, "High");
+	assert.equal(models[0].defaultEffort, "high");
 	// 无 reasoning 字段的模型不声明档位（选择器对 pi 语义不适用，DSH 侧原样透传）
 	assert.equal("reasoningEfforts" in models[1], false);
+	assert.equal("defaultEffort" in models[1], false);
 });
 
 test("toDshAvailableModels 过滤掉缺失 id 的档位条目", () => {

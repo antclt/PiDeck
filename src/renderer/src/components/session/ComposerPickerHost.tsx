@@ -441,9 +441,19 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
             : { value: effort.id, label: effort.name ?? effort.id, description: effort.description };
         })
       : undefined;
+    // DSH 的思考档位属于 host 的模型选择，草稿期优先部署默认档位；settings.yaml
+    // 没配 reasoningEffort 时回退到当前模型自己的 defaultEffort（DSH 官方语义），
+    // 不回退到 pi 的欢迎页偏好——否则底栏无值、选择器却勾选 pi 的 max。
+    const welcomeThinking = isDsh ? undefined : readWelcomeThinkingPreference()?.thinkingLevel;
     return (
       <ThinkingPicker
-        current={runtime?.state?.thinkingLevel ?? record?.thinkingLevel ?? props.defaultThinkingLevel ?? readWelcomeThinkingPreference()?.thinkingLevel}
+        current={
+          runtime?.state?.thinkingLevel
+          ?? record?.thinkingLevel
+          ?? props.defaultThinkingLevel
+          ?? currentModel?.defaultEffort
+          ?? welcomeThinking
+        }
         levels={thinkingLevels}
         onClose={props.onClose}
         onPick={(level) => void pickThinking(level)}

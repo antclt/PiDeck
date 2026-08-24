@@ -311,13 +311,41 @@ export function useSessionComposerController(
   const sendState = sendStates[sessionId] ?? { status: "idle" as const };
   // DSH 部署默认模型选择（settings.yaml agent-default-model）：草稿/未激活会话
   // 的底栏与选择器用它展示默认模型/思考档位（host 会话创建前没有 runtime state）。
-  const [dshDefault, setDshDefault] = useState<{ provider: string; model: string; reasoningEffort?: string } | undefined>(undefined);
+  // settings.yaml 未配 reasoningEffort 时，回退到默认模型自身的 defaultEffort
+  // （DSH 官方语义：每个模型都有 reasoning.defaultEffort）。
+  const [dshDefault, setDshDefault] = useState<{
+    provider: string;
+    model: string;
+    reasoningEffort?: string;
+    defaultEffort?: string;
+  } | undefined>(undefined);
   useEffect(() => {
     if (!isDshBackend) return;
     let cancelled = false;
-    void desktopApi.sessions.getDshDefaultModel().then((next) => {
-      if (!cancelled) setDshDefault(next);
-    }).catch(() => undefined);
+    void (async () => {
+      try {
+        const next = await desktopApi.sessions.getDshDefaultModel();
+        if (!next || cancelled) {
+          if (!cancelled) setDshDefault(next);
+          return;
+        }
+        let defaultEffort = next.reasoningEffort;
+        if (!defaultEffort) {
+          try {
+            const models = await desktopApi.sessions.listDshModels();
+            const defaultModel = models.find(
+              (model) => model.provider === next.provider && model.id === next.model,
+            );
+            defaultEffort = defaultModel?.defaultEffort;
+          } catch {
+            // 目录读取失败不影响 settings.yaml 的默认模型展示。
+          }
+        }
+        if (!cancelled) setDshDefault({ ...next, defaultEffort });
+      } catch {
+        if (!cancelled) setDshDefault(undefined);
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -1614,8 +1642,8 @@ export function useSessionComposerController(
     dshDefaultModel: dshDefault
       ? { provider: dshDefault.provider, modelId: dshDefault.model, modelName: dshDefault.model }
       : undefined,
-    /** DSH 部署默认思考档位（agent-default-model.reasoningEffort）。 */
-    dshDefaultThinkingLevel: dshDefault?.reasoningEffort,
+    /** DSH 部署默认思考档位：settings.yaml 的 reasoningEffort 优先，缺省用模型自身 defaultEffort。 */
+    dshDefaultThinkingLevel: dshDefault?.reasoningEffort ?? dshDefault?.defaultEffort,
     draft,
     attachments,
     mode,

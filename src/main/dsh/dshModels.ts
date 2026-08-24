@@ -18,6 +18,7 @@ export type DshModelGroupInput = {
 		name?: string;
 		reasoning?: {
 			efforts?: Array<{ id: string; name?: string; description?: string }>;
+			defaultEffort?: string;
 		};
 	}>;
 };
@@ -44,6 +45,9 @@ export function toDshAvailableModels(groups: DshModelGroupInput[]): AvailableMod
 				name: model.name,
 				provider: group.id,
 				...(efforts && efforts.length > 0 ? { reasoningEfforts: efforts } : {}),
+				...(typeof model.reasoning?.defaultEffort === "string" && model.reasoning.defaultEffort
+					? { defaultEffort: model.reasoning.defaultEffort }
+					: {}),
 			});
 		}
 	}

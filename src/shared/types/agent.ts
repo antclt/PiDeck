@@ -143,6 +143,9 @@ export type AvailableModel = {
 	 *  选择器按它过滤档位——DSH deepseek 适配器只接受 off/high/max，
 	 *  pi-ai provider 按模型声明，选不支持的档位会在下次请求抛 UNSUPPORTED_REASONING_EFFORT）。 */
 	reasoningEfforts?: Array<{ id: string; name?: string; description?: string }>;
+	/** DSH 模型自己的默认思考档位（reasoning.defaultEffort）；settings.yaml 未配
+	 *  agent-default-model.reasoningEffort 时，底栏/选择器应回退到这个值。 */
+	defaultEffort?: string;
 };
 
 /** 模型列表加载失败的成因分类：供模型选择器给出差异化引导（版本过低/配置损坏/pi 未安装）。 */

@@ -1043,23 +1043,129 @@ test("setPermission 拒绝未知预设，避免把非法值送进 DSH 命令桥"
 	assert.equal(calls.prompt, 0);
 });
 
-test("setModel 携带已设置的思考档位（先选档位再换模型不被默认值覆盖）", async () => {
-	const { host, client } = makeFakeHost();
+test("setModel 按官方语义使用新模型默认档位，不携带旧模型的 thinkingLevel", async () => {
+	const { host, client } = makeFakeHost({
+		modelsValue: {
+			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
+			routable: true,
+			failures: [],
+			groups: [
+				{
+					id: "llm-deepseek",
+					name: "DeepSeek",
+					models: [{
+						id: "deepseek-v4-flash",
+						name: "DeepSeek V4 Flash",
+						reasoning: {
+							efforts: [
+								{ id: "off", name: "Off" },
+								{ id: "high", name: "High" },
+								{ id: "max", name: "Max" },
+							],
+							defaultEffort: "high",
+						},
+					}],
+				},
+				{
+					id: "jiyuan",
+					name: "Jiyuan",
+					models: [{
+						id: "jiyuan-model",
+						name: "Jiyuan Model",
+						reasoning: {
+							efforts: [
+								{ id: "off", name: "Off" },
+								{ id: "low", name: "Low" },
+							],
+							defaultEffort: "low",
+						},
+					}],
+				},
+			],
+		},
+	});
 	const manager = new DshAgentManager(host, () => PROJECT);
 	await manager.create({ projectId: "project-1", backend: "dsh" });
 	const agentId = "dsh:session-fake-1";
-	// 先设档位（无模型时只记 runtime.thinkingLevel，不调 selectModel）
-	await manager.setThinking(agentId, "high");
-	// 换模型：selectModel 必须带上 reasoningEffort=high
 	const selectModelCalls = [];
-	const original = client.sessions.selectModel;
 	client.sessions.selectModel = async (input) => {
 		selectModelCalls.push(input);
-		return original(input);
+		const selected = {
+			provider: input.provider,
+			model: input.model,
+			...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+		};
+		return { result: { ok: true, value: { selected } } };
+	};
+	// 先选一个支持 max 的模型，再把思考档位设成 max
+	await manager.setModel(agentId, "llm-deepseek", "deepseek-v4-flash");
+	await manager.setThinking(agentId, "max");
+	selectModelCalls.length = 0;
+	// 切到 jiyuan：不能再带 max，应使用 jiyuan 模型自己的默认档位 low
+	await manager.setModel(agentId, "jiyuan", "jiyuan-model");
+	assert.equal(selectModelCalls.length, 1);
+	assert.equal(selectModelCalls[0].reasoningEffort, "low");
+});
+
+test("setThinking 在 host 拒绝时回滚旧档位并抛出错误", async () => {
+	const { host, client } = makeFakeHost({
+		modelsValue: {
+			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
+			routable: true,
+			failures: [],
+			groups: [{
+				id: "llm-deepseek",
+				name: "DeepSeek",
+				models: [{
+					id: "deepseek-v4-flash",
+					name: "DeepSeek V4 Flash",
+					reasoning: {
+						efforts: [
+							{ id: "off", name: "Off" },
+							{ id: "high", name: "High" },
+							{ id: "max", name: "Max" },
+						],
+						defaultEffort: "high",
+					},
+				}],
+			}],
+		},
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	const agentId = "dsh:session-fake-1";
+	client.sessions.selectModel = async (input) => {
+		if (input.reasoningEffort === "max") {
+			return {
+				result: {
+					ok: false,
+					error: { code: "model-unavailable", message: "does not support reasoning effort max" },
+				},
+			};
+		}
+		const selected = {
+			provider: input.provider,
+			model: input.model,
+			...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+		};
+		return { result: { ok: true, value: { selected } } };
 	};
 	await manager.setModel(agentId, "llm-deepseek", "deepseek-v4-flash");
-	assert.equal(selectModelCalls.length, 1);
-	assert.equal(selectModelCalls[0].reasoningEffort, "high");
+	assert.equal((await manager.getRuntimeState(agentId)).thinkingLevel, "high");
+	await assert.rejects(
+		() => manager.setThinking(agentId, "max"),
+		/Model not found/,
+	);
+	assert.equal((await manager.getRuntimeState(agentId)).thinkingLevel, "high");
+});
+
+test("setThinking 无当前模型时不写入 runtime.thinkingLevel，避免污染后续换模型", async () => {
+	const { host } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	await manager.create({ projectId: "project-1", backend: "dsh" });
+	const agentId = "dsh:session-fake-1";
+	await manager.setThinking(agentId, "high");
+	assert.equal((await manager.getRuntimeState(agentId)).thinkingLevel, undefined);
 });
 
 // ── 停止（abort）竞态回归：旧回合残留事件不得串台、不得重开流式 ───────────────

@@ -1262,18 +1262,47 @@ export class DshAgentManager implements SessionAgentGateway {
 		const runtime = this.runtime(agentId);
 		await this.requireIdleForModelChange(agentId);
 		const client = this.requireClient();
-		const selected = await client.sessions.selectModel({
-			sessionId: runtime.sessionId,
-			provider,
-			model: modelId,
-			// 先选了思考档位再换模型：档位随 selectModel 一起下发，否则会被模型默认档位覆盖。
-			...(runtime.thinkingLevel ? { reasoningEffort: runtime.thinkingLevel } : {}),
-		});
+		// DSH 官方语义：换模型 = 提交一整个新选择（provider/model/reasoningEffort），
+		// 思考档位随目标模型走，而不是把旧模型的 thinkingLevel 带过去。
+		const selected = await this.selectModelWithCatalogEffort(client, runtime, provider, modelId);
 		if (!selected.result.ok) {
 			throw this.selectModelError(selected.result.error, provider, modelId);
 		}
 		runtime.model = selected.result.value.selected;
+		// host 返回的 reasoningEffort 才是真实生效档位；同步内存，避免底栏显示旧档位。
+		runtime.thinkingLevel = selected.result.value.selected.reasoningEffort;
 		return selected.result.value;
+	}
+
+	/**
+	 * 按 DSH 官方模型选择语义执行 selectModel：换模型时优先使用目标模型
+	 * 声明的 reasoning.defaultEffort；目标模型没有声明时省略 reasoningEffort，
+	 * 由 provider 使用自己的默认行为。绝不沿用旧模型的 thinkingLevel，
+	 * 避免新模型不支持旧档位导致“模型切不过去”。
+	 */
+	private async selectModelWithCatalogEffort(
+		client: import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient,
+		runtime: DshAgentRuntime,
+		provider: string,
+		modelId: string,
+	) {
+		let reasoningEffort: string | undefined;
+		try {
+			const catalog = await client.sessions.models({ sessionId: runtime.sessionId });
+			if (catalog.result.ok) {
+				const group = catalog.result.value.groups.find((item) => item.id === provider);
+				const model = group?.models.find((item) => item.id === modelId);
+				reasoningEffort = model?.reasoning?.defaultEffort;
+			}
+		} catch {
+			// 目录读取失败不阻塞换模型：省略档位让 host 按 provider 默认处理。
+		}
+		return client.sessions.selectModel({
+			sessionId: runtime.sessionId,
+			provider,
+			model: modelId,
+			...(reasoningEffort ? { reasoningEffort } : {}),
+		});
 	}
 
 	async setThinking(agentId: string, level: string): Promise<unknown> {
@@ -1281,26 +1310,36 @@ export class DshAgentManager implements SessionAgentGateway {
 		const runtime = this.runtime(agentId);
 		const selected = runtime.model;
 		if (!selected) {
-			runtime.thinkingLevel = level;
+			// 没有当前模型时 DSH 无法把档位落到 host；只作为草稿偏好由 catalog 保存，
+			// 不写入 runtime.thinkingLevel，否则后续换模型会误把它带过去。
 			return { accepted: true, thinkingLevel: level };
 		}
 		this.requireIdleForModelChange(agentId);
+		const previous = runtime.thinkingLevel;
 		runtime.thinkingLevel = level;
 		const client = this.requireClient();
-		const updated = await client.sessions.selectModel({
-			sessionId: runtime.sessionId,
-			provider: selected.provider,
-			model: selected.model,
-			reasoningEffort: level,
-		});
-		if (updated.result.ok) {
-			runtime.model = {
-				provider: updated.result.value.selected.provider,
-				model: updated.result.value.selected.model,
-			};
-			runtime.thinkingLevel = updated.result.value.selected.reasoningEffort ?? level;
+		try {
+			const updated = await client.sessions.selectModel({
+				sessionId: runtime.sessionId,
+				provider: selected.provider,
+				model: selected.model,
+				reasoningEffort: level,
+			});
+			if (updated.result.ok) {
+				runtime.model = {
+					provider: updated.result.value.selected.provider,
+					model: updated.result.value.selected.model,
+				};
+				runtime.thinkingLevel = updated.result.value.selected.reasoningEffort ?? level;
+			} else {
+				runtime.thinkingLevel = previous;
+				throw this.selectModelError(updated.result.error, selected.provider, selected.model);
+			}
+			return this.getRuntimeState(agentId);
+		} catch (error) {
+			runtime.thinkingLevel = previous;
+			throw error;
 		}
-		return this.getRuntimeState(agentId);
 	}
 
 	async setPermission(agentId: string, preset: string): Promise<unknown> {

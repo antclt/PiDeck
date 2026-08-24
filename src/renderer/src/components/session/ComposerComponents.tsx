@@ -868,14 +868,18 @@ export function ModelPicker(props: {
 		return a.localeCompare(b);
 	});
 
-	const renderModelRow = (model: AvailableModel) => {
+	const renderModelRow = (model: AvailableModel, valueOverride?: string) => {
 		const modelKey = `${model.provider}/${model.id}`;
 		const selected = modelKey === currentModelKey;
 		const favorited = favoritesSet.has(modelKey);
+		// cmdk 用 CommandItem.value 作为选中态标识；同一模型在收藏栏和普通提供商
+		// 分组各渲染一行时，value 必须唯一，否则鼠标悬停/键盘选中会让两行同时高亮。
+		// data-picker-value 仍保留模型 key，供面板“当前模型滚动定位”使用。
+		const itemValue = valueOverride ?? modelKey;
 		return (
 			<CommandItem
-				key={modelKey}
-				value={modelKey}
+				key={itemValue}
+				value={itemValue}
 				data-picker-value={modelKey}
 				keywords={[model.name ?? "", model.id, model.provider, modelKey]}
 				onSelect={() => props.onPick(model)}
@@ -940,12 +944,12 @@ export function ModelPicker(props: {
 				<>
 					{favorites.length > 0 && (
 						<CommandPickerGroup id="favorites" label={t("app.modelFavorites")} count={favorites.length}>
-							{favorites.map(renderModelRow)}
+							{favorites.map((model) => renderModelRow(model, `favorites/${model.provider}/${model.id}`))}
 						</CommandPickerGroup>
 					)}
 					{sortedProviders.map((provider) => (
 						<CommandPickerGroup id={`provider:${provider}`} key={provider} label={provider} count={groupedModels[provider].length}>
-							{groupedModels[provider].map(renderModelRow)}
+							{groupedModels[provider].map((model) => renderModelRow(model))}
 						</CommandPickerGroup>
 					))}
 				</>
