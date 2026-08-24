@@ -91,6 +91,26 @@ function isDshImageMediaType(
 	return value === "image/png" || value === "image/jpeg" || value === "image/webp" || value === "image/gif";
 }
 
+/** DSH 历史消息里由投影器登记的持久化图片引用（canonical ImageBlock.attachment）。 */
+type DshImageRef = {
+	attachmentId: string;
+	mediaType: string;
+};
+
+/** 从 ChatMessage.meta 安全读取待回填的 DSH 图片引用。 */
+function dshImageRefsFromMeta(meta: ChatMessage["meta"] | undefined): DshImageRef[] {
+	if (!meta || !Array.isArray(meta.dshImageRefs)) return [];
+	const refs: DshImageRef[] = [];
+	for (const raw of meta.dshImageRefs) {
+		if (!raw || typeof raw !== "object") continue;
+		const candidate = raw as Record<string, unknown>;
+		if (typeof candidate.attachmentId === "string" && candidate.attachmentId && typeof candidate.mediaType === "string" && candidate.mediaType) {
+			refs.push({ attachmentId: candidate.attachmentId, mediaType: candidate.mediaType });
+		}
+	}
+	return refs;
+}
+
 export class DshAgentManager implements SessionAgentGateway {
 	readonly backend: AgentBackend = "dsh";	/** 已支持的可选能力：fork（session.fork 锚 seq 裁剪）、compact（/compact 命令）、getCommands（host 命令注册表枚举桥，D15）、exportHtml（投影式导出，G10）。 */
 	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set([
@@ -292,6 +312,13 @@ export class DshAgentManager implements SessionAgentGateway {
 					runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 				}
 				runtime.messages = runtime.projection.messages;
+				// DSH 历史里的图片以 durable attachment ref 存储：拉取字节回填，主界面才能显示。
+				runtime.messages = await this.hydrateDshImageRefs(
+					client,
+					dshSessionId,
+					runtime.messages,
+					runtime.hydratedImageRefs,
+				);
 				// 轨迹过程事件随历史重放一并恢复（重新打开的 dsh 会话也有 modelChange/权限等记录）
 				runtime.processEvents = collectDshProcessEvents(
 					runtime.processEvents,
@@ -502,6 +529,12 @@ export class DshAgentManager implements SessionAgentGateway {
 				runtime.projection = projectDshEvent(runtime.projection, event, agentId, view);
 			}
 			runtime.messages = runtime.projection.messages;
+			runtime.messages = await this.hydrateDshImageRefs(
+				client,
+				dshSessionId,
+				runtime.messages,
+				runtime.hydratedImageRefs,
+			);
 			runtime.processEvents = collectDshProcessEvents(
 				runtime.processEvents,
 				entries.map(({ event }) => event),
@@ -606,6 +639,12 @@ export class DshAgentManager implements SessionAgentGateway {
 			}
 			runtime.projection = projection;
 			runtime.messages = projection.messages;
+			runtime.messages = await this.hydrateDshImageRefs(
+				client,
+				runtime.sessionId,
+				runtime.messages,
+				runtime.hydratedImageRefs,
+			);
 			runtime.lastProjectedSeq = lastSeq;
 			runtime.goal = projection.goal;
 			// 系统提示随补帧同步（request/header 事件可能落在断连窗口内）
@@ -656,6 +695,12 @@ export class DshAgentManager implements SessionAgentGateway {
 					}
 					runtime.projection = projection;
 					runtime.messages = projection.messages;
+					runtime.messages = await this.hydrateDshImageRefs(
+						client,
+						runtime.sessionId,
+						runtime.messages,
+						runtime.hydratedImageRefs,
+					);
 					// 恢复后推进 lastProjectedSeq（D6 重连补帧跳过基准）。
 					const lastEntry = entries[entries.length - 1];
 					if (lastEntry && typeof lastEntry.event.seq === "number") {
@@ -924,8 +969,13 @@ export class DshAgentManager implements SessionAgentGateway {
 		// 游标语义：下一页传本页最旧事件 seq（DSH history 的 beforeSeq 是排除边界，
 		// 返回 seq < beforeSeq 的事件，与渲染层 prepend 协议「nextBefore 原样回传」对齐）。
 		const nextBefore = hasMore && typeof oldestSeq === "number" ? oldestSeq : null;
+		const messages = await this.hydrateDshImageRefs(
+			client,
+			dshSessionId as SessionId,
+			projection.messages,
+		);
 		return {
-			messages: projection.messages,
+			messages,
 			// 渲染层不消费 total（仅透传）；-1 表示未知（DSH 无总条数概念）。
 			total: -1,
 			nextBefore,
@@ -1016,7 +1066,11 @@ export class DshAgentManager implements SessionAgentGateway {
 		for (const { event, view } of entries) {
 			projection = projectDshEvent(projection, event, agentId, view);
 		}
-		return projection.messages;
+		return this.hydrateDshImageRefs(
+			client,
+			dshSessionId as SessionId,
+			projection.messages,
+		);
 	}
 
 	/** 渲染 + 落盘（导出目录由装配层注入，写入前确保目录存在）。 */
@@ -1367,6 +1421,12 @@ export class DshAgentManager implements SessionAgentGateway {
 				nextRuntime.projection = projectDshEvent(nextRuntime.projection, event, agentId, view);
 			}
 			nextRuntime.messages = nextRuntime.projection.messages;
+			nextRuntime.messages = await this.hydrateDshImageRefs(
+				client,
+				newSessionId,
+				nextRuntime.messages,
+				nextRuntime.hydratedImageRefs,
+			);
 			// fork 会话自带 atSeq 前历史：过程事件一并重放（新会话从零开始收集）
 			nextRuntime.processEvents = collectDshProcessEvents(
 				nextRuntime.processEvents,
@@ -1471,6 +1531,92 @@ export class DshAgentManager implements SessionAgentGateway {
 	private async ensureClient(): Promise<import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient> {
 		await this.dshHost.ensureStarted();
 		return this.requireClient();
+	}
+
+	/**
+	 * 把 DSH 历史里的 durable image refs 回填成 ChatMessage.images。
+	 * host 的 sessions.attachment 会先证明该 attachmentId 属于本会话，再返回 base64 data；
+	 * 失败只记日志并保留 refs（后续页面/重试可再尝试）。
+	 * @param attempted 运行时复用集合，避免 mux 每帧对同一 ref 重复 RPC。
+	 */
+	private async hydrateDshImageRefs(
+		client: import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient,
+		sessionId: SessionId,
+		messages: ChatMessage[],
+		attempted?: Set<string>,
+	): Promise<ChatMessage[]> {
+		const pendingByMessage: Array<{ message: ChatMessage; refs: DshImageRef[] }> = [];
+		for (const message of messages) {
+			const refs = dshImageRefsFromMeta(message.meta);
+			if (refs.length === 0 || (message.images?.length ?? 0) > 0) continue;
+			const missing = refs.filter((ref) => !attempted?.has(ref.attachmentId));
+			if (missing.length > 0) pendingByMessage.push({ message, refs: missing });
+		}
+		if (pendingByMessage.length === 0) return messages;
+		const uniqueRefs = new Map<string, DshImageRef>();
+		for (const item of pendingByMessage) {
+			for (const ref of item.refs) uniqueRefs.set(ref.attachmentId, ref);
+		}
+		const resolved = new Map<string, ImageContent>();
+		for (const [attachmentId, ref] of uniqueRefs) {
+			attempted?.add(attachmentId);
+			try {
+				const result = await client.sessions.attachment({
+					sessionId,
+					attachmentId: ref.attachmentId as import("@deepseek-ai/dsh-attachment").AttachmentIdType,
+				});
+				if (result.result.ok) {
+					resolved.set(attachmentId, {
+						type: "image",
+						data: result.result.value.data,
+						mimeType: result.result.value.attachment.mediaType,
+					});
+				} else {
+					getAppLogger()?.warn("dsh-agent", "attachment resolve rejected", {
+						sessionId: String(sessionId),
+						attachmentId,
+						error: result.result.error,
+					});
+				}
+			} catch (error) {
+				getAppLogger()?.warn("dsh-agent", "attachment resolve failed", {
+					sessionId: String(sessionId),
+					attachmentId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+		if (resolved.size === 0) return messages;
+		let changed = false;
+		const nextMessages = messages.map((message) => {
+			const refs = dshImageRefsFromMeta(message.meta);
+			if (refs.length === 0 || (message.images?.length ?? 0) > 0) return message;
+			const images = refs
+				.map((ref) => resolved.get(ref.attachmentId))
+				.filter((image): image is ImageContent => Boolean(image));
+			if (images.length === 0) return message;
+			changed = true;
+			return { ...message, images: [...(message.images ?? []), ...images] };
+		});
+		return changed ? nextMessages : messages;
+	}
+
+	/** 运行时版：拉取后若消息有变化则重推 agentsMessage（实时 mux 中图片后到）。 */
+	private async hydrateRuntimeDshImages(runtime: DshAgentRuntime): Promise<void> {
+		try {
+			const client = this.requireClient();
+			const attempted = runtime.hydratedImageRefs ??= new Set<string>();
+			const updated = await this.hydrateDshImageRefs(client, runtime.sessionId, runtime.messages, attempted);
+			if (updated !== runtime.messages) {
+				runtime.messages = updated;
+				this.emitMessages(runtime);
+			}
+		} catch (error) {
+			getAppLogger()?.warn("dsh-agent", "runtime image hydration failed", {
+				agentId: runtime.tab.id,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
 	}
 
 	private emitRuntimeState(agentId: string): void {
@@ -1842,6 +1988,10 @@ export class DshAgentManager implements SessionAgentGateway {
 				});
 			}
 		}
+		// 实时 mux 中 canonical 图片只有 attachment ref，先推文本、再异步拉字节补图。
+		if (p.messagesChanged) {
+			void this.hydrateRuntimeDshImages(runtime);
+		}
 	}
 }
 
@@ -1893,6 +2043,8 @@ type DshAgentRuntime = {
 	isCompacting?: boolean;
 	/** 已投影的最大事件 seq（D6：mux 重连补帧时跳过已投影事件，避免重复）。 */
 	lastProjectedSeq?: number;
+	/** 已尝试拉取过的 DSH attachmentId（避免 mux 每帧对同一图片重复 RPC）。 */
+	hydratedImageRefs?: Set<string>;
 	/** 最近一次 assistant 回合的 token 用量（G16；assistant/message 事件投影更新）。 */
 	usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 	/** 会话累计 token 用量（host tokenUsage 投影；整段日志累计，dsh-web StatsLine 同源）。

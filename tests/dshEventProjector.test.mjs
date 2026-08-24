@@ -65,6 +65,35 @@ test("user/message 无 source 字段（旧会话迁移数据）保守投影", ()
 	assert.equal(p.messages[0].text, "迁移消息");
 });
 
+test("user/message 内联 base64 图片直接投影为 images", () => {
+	const p = projectDshEvent(undefined, event("user/message", 6, {
+		content: [
+			{ type: "text", text: "看图" },
+			{ type: "image", mediaType: "image/png", data: "aGVsbG8=" },
+		],
+	}), AGENT);
+	assert.equal(p.messages.length, 1);
+	assert.equal(p.messages[0].images?.length, 1);
+	assert.equal(p.messages[0].images?.[0].type, "image");
+	assert.equal(p.messages[0].images?.[0].mimeType, "image/png");
+	assert.equal(p.messages[0].images?.[0].data, "aGVsbG8=");
+	assert.equal(p.messages[0].meta?.dshImageRefs, undefined);
+});
+
+test("user/message DSH canonical attachment ref 投影为 meta.dshImageRefs 等待回填", () => {
+	const p = projectDshEvent(undefined, event("user/message", 7, {
+		content: [
+			{ type: "text", text: "看图" },
+			{ type: "image", attachment: { attachmentId: "att-123", mediaType: "image/png", bytes: 5, width: 1, height: 1 } },
+		],
+	}), AGENT);
+	assert.equal(p.messages.length, 1);
+	assert.equal(p.messages[0].images, undefined);
+	assert.equal(p.messages[0].meta?.dshImageRefs?.length, 1);
+	assert.equal(p.messages[0].meta?.dshImageRefs?.[0].attachmentId, "att-123");
+	assert.equal(p.messages[0].meta?.dshImageRefs?.[0].mediaType, "image/png");
+});
+
 test("assistant/chunk text-delta 累积进 pending 并给出 deltaText 信号（首次增量创建流式骨架）", () => {
 	let p = projectDshEvent(undefined, event("turn/start", 2), AGENT);
 	p = projectDshEvent(p, event("assistant/chunk", 3, {

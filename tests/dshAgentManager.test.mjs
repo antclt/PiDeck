@@ -34,7 +34,8 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 	const sessions = new Map();
 	let nextSession = 0;
 	const historyBySession = new Map();
-	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0, cancel: 0, workspaceCreate: 0 };
+	const attachments = new Map();
+	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0, cancel: 0, workspaceCreate: 0, attachment: 0 };
 	const createPayloads = [];
 	const promptCalls = [];
 	const promptModes = [];
@@ -97,6 +98,14 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 						},
 					},
 				};
+			},
+			async attachment({ sessionId, attachmentId }) {
+				calls.attachment += 1;
+				const value = attachments.get(`${sessionId}:${attachmentId}`);
+				if (!value) {
+					return { result: { ok: false, error: { code: "attachment-error", message: "missing" } } };
+				}
+				return { result: { ok: true, value } };
 			},
 			async prompt({ content, mode }) {
 				calls.prompt += 1;
@@ -222,7 +231,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 			hostState.ready = true;
 		},
 	};
-	return { host, client, sessions, historyBySession, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls };
+	return { host, client, sessions, historyBySession, attachments, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls };
 }
 
 /**
@@ -331,6 +340,33 @@ test("create 带 dshSessionId 且 host 存在该会话：attach 不新建", asyn
 	assert.equal(messages[1].role, "assistant");
 	assert.equal(messages[1].text, "上一轮的回复");
 	assert.equal(calls.history, 1);
+});
+
+test("create attach 时回填 DSH canonical 图片 attachment（历史主界面可显示）", async () => {
+	const { host, sessions, historyBySession, attachments, calls } = makeFakeHost();
+	sessions.set("session-img-1", { sessionId: "session-img-1", cwd: PROJECT.path, running: false, blank: false });
+	historyBySession.set("session-img-1", [
+		event("user/message", 1, {
+			content: [
+				{ type: "text", text: "看图" },
+				{ type: "image", attachment: { attachmentId: "att-123", mediaType: "image/png", bytes: 5, width: 1, height: 1 } },
+			],
+			source: { kind: "user", rpcId: "rpc-1" },
+		}),
+	]);
+	attachments.set("session-img-1:att-123", {
+		attachment: { attachmentId: "att-123", mediaType: "image/png", bytes: 5, width: 1, height: 1 },
+		data: "aGVsbG8=",
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh", dshSessionId: "session-img-1" });
+	const messages = manager.getMessages(tab.id);
+	assert.equal(messages.length, 1);
+	assert.equal(messages[0].images?.length, 1);
+	assert.equal(messages[0].images?.[0].type, "image");
+	assert.equal(messages[0].images?.[0].mimeType, "image/png");
+	assert.equal(messages[0].images?.[0].data, "aGVsbG8=");
+	assert.equal(calls.attachment, 1);
 });
 
 test("create 带 dshSessionId 但 host 已无该会话：退回新建", async () => {
