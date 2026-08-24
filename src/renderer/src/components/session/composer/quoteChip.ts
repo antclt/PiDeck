@@ -79,17 +79,22 @@ export function stripQuoteTokens(text: string): string {
 }
 
 /**
- * 把草稿中的引用 token 展开为 markdown 引用块（发送前唯一咽喉点调用）。
+ * 把草稿中的引用 token 按原位置展开为 markdown 引用块（发送前唯一咽喉点调用）。
  *
  * 输出形态：
  *   > 引文行1
  *   > 引文行2
  *
- *   用户正文…
+ *   与第一段引文对应的问题…
+ *
+ *   > 第二段引文
+ *
+ *   与第二段引文对应的问题…
  *
  * 规则：
  * - 无 token 时返回 null，调用方沿用原文（零开销快速路径）；
- * - 同一 id 出现多次只产出一份引用块（按首次出现顺序）；
+ * - 引用块替换原 token，保持引用与用户正文的相对位置；
+ * - 同一 id 出现多次只产出一份引用块（按首次出现位置）；
  * - resolve 未命中的孤儿 token 直接丢弃（自愈，不阻断发送）；
  * - 展开后若用户正文为空则只留引用块。
  */
@@ -101,17 +106,23 @@ export function expandQuoteTokens(
 	if (occurrences.length === 0) return null;
 
 	const seen = new Set<string>();
-	const blocks: string[] = [];
+	const parts: string[] = [];
+	let cursor = 0;
 	for (const occurrence of occurrences) {
-		if (seen.has(occurrence.id)) continue;
-		seen.add(occurrence.id);
-		const snippet = resolve(occurrence.id);
-		if (!snippet) continue;
-		blocks.push(formatQuoteBlock(snippet.text));
+		const before = text.slice(cursor, occurrence.start).trim();
+		if (before.length > 0) parts.push(before);
+
+		if (!seen.has(occurrence.id)) {
+			seen.add(occurrence.id);
+			const snippet = resolve(occurrence.id);
+			if (snippet) parts.push(formatQuoteBlock(snippet.text));
+		}
+		cursor = occurrence.end;
 	}
 
-	const rest = stripQuoteTokens(text).trim();
-	return [...blocks, rest].filter((part) => part.length > 0).join("\n\n") || null;
+	const after = text.slice(cursor).trim();
+	if (after.length > 0) parts.push(after);
+	return parts.join("\n\n") || null;
 }
 
 /** 快照文本 → markdown 引用块：逐行加 "> "，空行用 ">" 占位以保持段落结构。 */
@@ -146,7 +157,7 @@ export function truncateQuoteLabel(text: string, maxChars = 18): string {
 
 /**
  * 追加引用 token 到草稿末尾（时间线侧写入无法拿到编辑器 caret，统一追加而非光标处插入；
- * 引用作为上下文块在问题前/后语义等价，发送期展开按出现顺序处理）。
+ * 发送期展开时保留 token 在草稿中的位置，用户可以连续组织多组「引用 + 问题」。
  * token 后补一个空格：chip 是原子节点，无尾随空格时用户紧接着打字会贴住 chip。
  */
 export function buildDraftWithAppendedQuote(draft: string, token: string): string {

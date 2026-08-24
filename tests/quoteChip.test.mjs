@@ -65,14 +65,14 @@ test("expandQuoteTokens returns null when no token present", () => {
 	assert.equal(expandQuoteTokens("普通问题", () => undefined), null);
 });
 
-test("expandQuoteTokens renders one block per unique id in first-seen order", () => {
-	const text = "#qbbbbbb02 对比 #qaaaaaa01，另外 #qbbbbbb02 也算";
+test("expandQuoteTokens preserves quote-question order and dedupes repeated ids", () => {
+	const text = "#qbbbbbb02 问题二 #qaaaaaa01 问题一 #qbbbbbb02 补充";
 	const expanded = expandQuoteTokens(text, (id) =>
 		snippet(id, `${id} 内容`),
 	);
 	assert.equal(
 		expanded,
-		"> qbbbbbb02 内容\n\n> qaaaaaa01 内容\n\n对比 ，另外 也算",
+		"> qbbbbbb02 内容\n\n问题二\n\n> qaaaaaa01 内容\n\n问题一\n\n补充",
 	);
 });
 
