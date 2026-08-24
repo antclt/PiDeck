@@ -13,7 +13,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ConfigManager, PiAuthFile, PiModelsFile, PiProviderConfig } from "./ConfigManager";
 import type { DshHost } from "../dsh/DshHost";
-import { isValidCredentialRef } from "../dsh/dshCredentials";
+import { credentialValueFromDocument, isValidCredentialRef } from "../dsh/dshCredentials";
 import {
 	credentialRefFor,
 	dshToPiSnapshot,
@@ -138,10 +138,10 @@ export async function previewProviderMigration(
 	}
 
 	const credentialText = await readText(join(deps.dshHost.getHomeDir(), ".credentials.yaml"));
-	const credentialDoc = loadYamlObject(credentialText) as Record<string, unknown>;
 	const providers = listDshRows(dshParsed, piNames, (_ns, name, profile) => {
 		const ref = credentialRefFor(profile, name);
-		const fromFile = typeof credentialDoc[ref] === "string" && credentialDoc[ref].length > 0;
+		// 兼容 dsh-credentials-local v1（version:1 + refs）与旧扁平布局
+		const fromFile = Boolean(credentialValueFromDocument(credentialText, ref));
 		const fromEnv = typeof process.env[ref] === "string" && (process.env[ref] ?? "").length > 0;
 		return fromFile || fromEnv;
 	});

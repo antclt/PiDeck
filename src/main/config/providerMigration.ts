@@ -257,14 +257,32 @@ export function dumpYamlObject(value: unknown): string {
 	});
 }
 
-/** 合并 .credentials.yaml 的单个 ref；空文档当空对象。 */
+/**
+ * 合并 .credentials.yaml 的单个 ref；输出始终是 dsh-credentials-local 的
+ * v1 官方格式（`{ version: 1, refs: {...} }`）——扁平旧布局已被官方拒绝，
+ * 直接写扁平会让 host 启动后读不到（"pre-release flat layout" 报错）。
+ * 输入兼容 v1 与扁平两种布局：v1 改 refs 层，扁平则整体迁入 refs。
+ */
 export function mergeCredentialDocument(text: string, ref: string, value: string): string {
 	const parsed = loadYamlObject(text);
-	const map = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-		? { ...(parsed as Record<string, unknown>) }
-		: {};
-	map[ref] = value;
-	return dumpYamlObject(map);
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		// 空/畸形文档：直接建 v1 文档
+		return dumpYamlObject({ version: 1, refs: { [ref]: value } });
+	}
+	const root = parsed as Record<string, unknown>;
+	if (root["version"] === 1 && root["refs"] && typeof root["refs"] === "object" && !Array.isArray(root["refs"])) {
+		const refs = { ...(root["refs"] as Record<string, unknown>) };
+		refs[ref] = value;
+		return dumpYamlObject({
+			version: 1,
+			refs,
+			...(root["records"] && typeof root["records"] === "object" ? { records: root["records"] } : {}),
+		});
+	}
+	// 扁平旧布局：全部 key 视为 ref，整体迁入 refs 层
+	const flat = { ...root };
+	flat[ref] = value;
+	return dumpYamlObject({ version: 1, refs: flat });
 }
 
 export function resolvePiApiKey(

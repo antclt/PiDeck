@@ -236,3 +236,33 @@ test("source contracts keep IPC / preload / UI wired", async () => {
   assert.match(modelsTab, /direction="pi-to-dsh"/);
   assert.match(dshCards, /direction="dsh-to-pi"/);
 });
+
+test("mergeCredentialDocument writes dsh-credentials-local v1 layout (version:1 + refs)", () => {
+  // 空文档 → v1
+  const fromEmpty = mapping.mergeCredentialDocument("", "DEEPSEEK_API_KEY", "sk-abc");
+  const parsedEmpty = JSON.parse(JSON.stringify(mapping.loadYamlObject(fromEmpty)));
+  assert.equal(parsedEmpty.version, 1);
+  assert.equal(parsedEmpty.refs.DEEPSEEK_API_KEY, "sk-abc");
+
+  // 旧扁平布局 → 迁入 refs 层，输出 v1
+  const fromFlat = mapping.mergeCredentialDocument(
+    ["DEEPSEEK_API_KEY: sk-old", "WBX_API_KEY: sk-wbx", ""].join("\n"),
+    "WBX_API_KEY",
+    "sk-wbx-new",
+  );
+  const parsedFlat = JSON.parse(JSON.stringify(mapping.loadYamlObject(fromFlat)));
+  assert.equal(parsedFlat.version, 1);
+  assert.equal(parsedFlat.refs.DEEPSEEK_API_KEY, "sk-old");
+  assert.equal(parsedFlat.refs.WBX_API_KEY, "sk-wbx-new");
+
+  // 已是 v1 → 只改 refs 层，保留 records
+  const fromV1 = mapping.mergeCredentialDocument(
+    ["version: 1", "refs:", "  A_KEY: sk-a", "records:", "  r: x", ""].join("\n"),
+    "A_KEY",
+    "sk-a-new",
+  );
+  const parsedV1 = JSON.parse(JSON.stringify(mapping.loadYamlObject(fromV1)));
+  assert.equal(parsedV1.version, 1);
+  assert.equal(parsedV1.refs.A_KEY, "sk-a-new");
+  assert.equal(parsedV1.records.r, "x");
+});

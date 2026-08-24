@@ -17,6 +17,32 @@ test("credentialValueFromDocument: 解析严格 ref→value 映射", () => {
 	assert.equal(credentialValueFromDocument(doc, "OPENCODE_API_KEY"), "quoted-value");
 });
 
+test("credentialValueFromDocument: 支持 dsh-credentials-local v1（version:1 + refs）", () => {
+	const doc = [
+		"version: 1",
+		"refs:",
+		"  DEEPSEEK_API_KEY: \"sk-v1-value\"",
+		"  PIDECK_41795A93_API_KEY: \"sk-pideck-value\"",
+		"",
+	].join("\n");
+	assert.equal(credentialValueFromDocument(doc, "DEEPSEEK_API_KEY"), "sk-v1-value");
+	assert.equal(credentialValueFromDocument(doc, "PIDECK_41795A93_API_KEY"), "sk-pideck-value");
+	// v1 里不存在的 ref 返回 undefined，不回退到顶层误读
+	assert.equal(credentialValueFromDocument(doc, "OTHER_KEY"), undefined);
+});
+
+test("credentialValueFromDocument: v1 refs 层优先，扁平顶层兜底", () => {
+	// 文档同时有 refs 层与顶层同名键：v1 的 refs 优先
+	const doc = [
+		"version: 1",
+		"refs:",
+		"  DEEPSEEK_API_KEY: \"sk-from-refs\"",
+		"DEEPSEEK_API_KEY: \"sk-flat\"",
+		"",
+	].join("\n");
+	assert.equal(credentialValueFromDocument(doc, "DEEPSEEK_API_KEY"), "sk-from-refs");
+});
+
 test("credentialValueFromDocument: 缺失 ref 返回 undefined", () => {
 	const doc = "DEEPSEEK_API_KEY: sk-abc123\n";
 	assert.equal(credentialValueFromDocument(doc, "OTHER_KEY"), undefined);
