@@ -5,7 +5,7 @@
  * 运行态来自 useChat status（submitted/streaming）与轮询的 runtime.status 兜底。
  */
 import { useState } from "react";
-import { Check, ChevronsUpDown, Menu, Target } from "lucide-react";
+import { Check, ChevronsUpDown, Menu, RefreshCw, Target } from "lucide-react";
 import type { AvailableModel } from "../../../shared/types";
 import { Button } from "@/components/ui-shadcn/button";
 import {
@@ -38,6 +38,8 @@ export function WebHeader(props: {
 	thinkingLevel?: string;
 	models: AvailableModel[];
 	backend?: AgentBackend;
+	refreshingModels?: boolean;
+	onRefreshModels?: () => void;
 	onModelChange: (model: AvailableModel) => void;
 	onThinkingChange: (level: string) => void;
 	onOpenDshTools?: () => void;
@@ -50,6 +52,8 @@ export function WebHeader(props: {
 		thinkingLevel,
 		models,
 		backend,
+		refreshingModels,
+		onRefreshModels,
 		onModelChange,
 		onThinkingChange,
 		onOpenDshTools,
@@ -94,7 +98,13 @@ export function WebHeader(props: {
 						<span className="hidden sm:inline">{t("web.dshTools")}</span>
 					</Button>
 				)}
-				<ModelPicker model={model} models={models} onChange={onModelChange} />
+				<ModelPicker
+					model={model}
+					models={models}
+					refreshing={refreshingModels}
+					onRefresh={onRefreshModels}
+					onChange={onModelChange}
+				/>
 				<Select value={thinkingLevel ?? "off"} onValueChange={onThinkingChange}>
 					<SelectTrigger
 						size="sm"
@@ -132,6 +142,8 @@ export function WebHeader(props: {
 function ModelPicker(props: {
 	model?: { provider: string; modelId: string };
 	models: AvailableModel[];
+	refreshing?: boolean;
+	onRefresh?: () => void;
 	onChange: (model: AvailableModel) => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -155,7 +167,24 @@ function ModelPicker(props: {
 			</PopoverTrigger>
 			<PopoverContent align="end" className="w-[min(360px,calc(100vw-24px))] p-0">
 				<Command>
-					<CommandInput placeholder={t("web.modelSearch")} />
+					{/* 刷新按钮与搜索框同行：绕过缓存重新拉取模型（失败时列表保持不动） */}
+					<div className="relative">
+						<CommandInput placeholder={t("web.modelSearch")} className="pr-9" />
+						{props.onRefresh && (
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-sm"
+								className="absolute right-1 top-1.5 shrink-0 text-muted-foreground hover:text-foreground"
+								aria-label={props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRefresh")}
+								title={props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRefresh")}
+								disabled={props.refreshing}
+								onClick={() => props.onRefresh?.()}
+							>
+								<RefreshCw size={14} className={props.refreshing ? "animate-spin" : ""} aria-hidden="true" />
+							</Button>
+						)}
+					</div>
 					<CommandList className="max-h-[min(360px,55vh)]">
 						<CommandEmpty>{t("web.modelEmpty")}</CommandEmpty>
 						{models.map((item) => {

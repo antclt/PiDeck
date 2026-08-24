@@ -384,7 +384,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	);
 
 	// Git 摘要模型列表与会话 Command 选择器共用 pi --list-models 数据源。
-	const { gitModels, gitModelPickerOpen, openPicker: openGitModelPicker, closePicker: closeGitModelPicker } = useGitModels();
+	const { gitModels, report: gitModelsReport, refreshing: gitModelsRefreshing, reload: reloadGitModels, gitModelPickerOpen, openPicker: openGitModelPicker, closePicker: closeGitModelPicker } = useGitModels();
 
 	/** 选择提交信息模型：写入草稿并关闭选择器 */
 	const handlePickGitModel = useCallback((model: AvailableModel) => {
@@ -560,6 +560,9 @@ function SettingsModalContent(props: SettingsModalProps) {
 								updateDraft={updateDraft}
 								isDirty={isDirty}
 								gitModels={gitModels}
+								gitModelsReport={gitModelsReport}
+								gitModelsRefreshing={gitModelsRefreshing}
+								onRefreshGitModels={() => reloadGitModels(true)}
 								gitModelPickerOpen={gitModelPickerOpen}
 								onOpenGitModelPicker={openGitModelPicker}
 								onCloseGitModelPicker={closeGitModelPicker}

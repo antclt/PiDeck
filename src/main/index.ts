@@ -3231,7 +3231,9 @@ app.whenReady().then(async () => {
 			}
 			return true;
 		},
-		listModels: () => fetchModelList(piLocator, settingsStore, configManager),
+		listModels: (force?: boolean) =>
+			// Web 端模型选择器刷新按钮需要绕过缓存，强刷走 refreshModelList。
+			force ? refreshModelList(piLocator, settingsStore, configManager) : fetchModelList(piLocator, settingsStore, configManager),
 		listSessions: (projectId) => {
 			const project = projectStore.get(projectId);
 			return sessionScanner.list(project?.path);

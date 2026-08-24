@@ -47,9 +47,10 @@ export async function deleteProject(projectId: string): Promise<void> {
 	if (!res.ok) throw new Error(`delete project ${res.status}`);
 }
 
-/** 读取 pi 当前可用模型，草稿会话也可以先选模型再发送第一条消息。 */
-export async function fetchModels(): Promise<AvailableModel[]> {
-	const res = await fetch("/api/models");
+/** 读取 pi 当前可用模型，草稿会话也可以先选模型再发送第一条消息。
+ * force：绕过服务端模型列表缓存（对应选择器刷新按钮）。 */
+export async function fetchModels(force = false): Promise<AvailableModel[]> {
+	const res = await fetch(force ? "/api/models?force=1" : "/api/models");
 	if (!res.ok) throw new Error(`models ${res.status}`);
 	const result = (await res.json()) as { models?: AvailableModel[] };
 	return result.models ?? [];

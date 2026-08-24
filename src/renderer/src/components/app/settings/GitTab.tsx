@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { AppSettings, AvailableModel } from "../../../../../shared/types";
+import type { AppSettings, AvailableModel, ModelListReport } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { ModelPicker } from "../../session/ComposerComponents";
@@ -11,6 +11,9 @@ type GitTabProps = {
   updateDraft: (patch: Partial<AppSettings>) => void;
   isDirty: (field: keyof AppSettings) => boolean;
   gitModels: AvailableModel[];
+  gitModelsReport: ModelListReport | null;
+  gitModelsRefreshing: boolean;
+  onRefreshGitModels: () => void;
   gitModelPickerOpen: boolean;
   onOpenGitModelPicker: () => void;
   onCloseGitModelPicker: () => void;
@@ -66,6 +69,9 @@ export const GitTab = memo(function GitTab(props: GitTabProps) {
           {props.gitModelPickerOpen && (
             <ModelPicker
               models={props.gitModels}
+              report={props.gitModelsReport}
+              refreshing={props.gitModelsRefreshing}
+              onRefresh={props.onRefreshGitModels}
               current={{
                 provider: draft.gitCommitMessageProvider,
                 modelId: draft.gitCommitMessageModel,

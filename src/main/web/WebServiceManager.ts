@@ -56,7 +56,8 @@ type WebServiceDependencies = {
 	listProjects: () => Project[];
 	createProject: (path: string) => Promise<Project>;
 	deleteProject: (projectId: string) => Promise<boolean>;
-	listModels: () => Promise<AvailableModel[]>;
+	// force=true 时绕过缓存重新 fork pi --list-models（Web 端模型选择器刷新按钮）。
+	listModels: (force?: boolean) => Promise<AvailableModel[]>;
 	listSessions: (projectId: string) => Promise<SessionSummary[]>;
 	getSessionRuntimeMessages: (sessionId: string) => SessionTargetedValue<ChatMessage[]> | undefined;
 	listCatalogSessions: (projectId?: string) => Promise<SessionRecord[]>;
@@ -331,7 +332,9 @@ export class WebServiceManager {
 				return;
 			}
 			if (url.pathname === "/api/models" && request.method === "GET") {
-				this.sendJson(response, { models: await this.deps.listModels() });
+				// force=1：目标端 UI 点刷新时绕过模型列表缓存，重新 fork pi --list-models。
+				const force = url.searchParams.get("force") === "1";
+				this.sendJson(response, { models: await this.deps.listModels(force) });
 				return;
 			}
 			if (url.pathname === "/api/projects" && request.method === "POST") {
