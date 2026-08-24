@@ -37,6 +37,7 @@ import {
 } from "../ui-shadcn/context-menu";
 import { ConfirmDialog } from "./AppParts";
 import { dismissNotice, showNotice, type NoticeId } from "../../utils/notice";
+import { writeClipboard } from "../../utils/clipboard";
 import { htmlToPlainText, readClipboardHtmlConsistent, readClipboardText } from "../../utils/clipboard";
 import type {
   BranchDiffResult,
@@ -81,6 +82,27 @@ const COMMIT_GEN_TIMEOUT_MS = 60_000;
 function commitGenNoticeText(message: string | undefined, fallback: string) {
   const text = String(message ?? "").trim();
   return text || fallback;
+}
+
+/**
+ * 剥离 Electron IPC 与 execFile 包装前缀，保留 git 自己的报错文本。
+ * 例："Error invoking remote method 'git:push': Error: Command failed: git push\nfatal: ..."
+ *   → "fatal: The current branch ... has no upstream branch ..."
+ * 剥离后为空（二次包装吃掉全部信息）时由调用方用本地化兜底文案，避免 toast 空白。
+ */
+function gitOperationErrorText(caught: unknown): string {
+  return errorMessage(caught)
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .replace(/^Error:\s+Command failed:\s+[^\n]*\n?/i, "")
+    .trim();
+}
+
+/** 首次推送 "no upstream branch" 的识别：此类失败给“设置上游”引导而非裸报错。 */
+const NO_UPSTREAM_RE = /no upstream branch/i;
+
+/** 操作失败 toast 的稳定 id：同仓库同操作连发时顶掉旧条，避免堆一排。 */
+function gitErrorToastId(scopeKey: string, kind: "push" | "pull" | "commit"): NoticeId {
+  return `git-op:${kind}:${scopeKey}`;
 }
 
 /** 按仓库锁生成：切项目不能清组件 ref，否则旧请求还在飞、新仓库又会被误拦。 */
@@ -749,7 +771,7 @@ export function GitPanel(props: GitPanelProps) {
           projectId === projectIdRef.current &&
           repoScopeKey === repoScopeKeyRef.current
         ) {
-          const msg = errorMessage(caught);
+          const msg = gitOperationErrorText(caught);
           // 检测"不是 Git 仓库"的错误，展示初始化提示（无论是否静默都要置位，
           // 否则面板打开期间仓库状态变化时轮询永远停不下来）
           if (/not a git repository|fatal:/.test(msg)) {
@@ -923,8 +945,16 @@ export function GitPanel(props: GitPanelProps) {
       await operation();
       if (projectId === projectIdRef.current) await refresh();
     } catch (caught) {
-      // Do not let refresh clear the mutation error before the user can read it.
-      if (projectId === projectIdRef.current) setError(errorMessage(caught));
+      if (projectId === projectIdRef.current) {
+        // 变更类操作（放弃更改/重置/拣选等）失败统一走 toast，不再 setError：
+        // 面板错误条会把变更列表顶下去，且错误会在切换后残留；toast 用完即走。
+        showNotice(
+          gitOperationErrorText(caught) || t("git.operationFailed"),
+          8000,
+          "error",
+          t("git.operationFailed"),
+        );
+      }
     } finally {
       if (mutationRequest === mutationRequestRef.current) {
         mutationRunningRef.current = false;
@@ -959,7 +989,18 @@ export function GitPanel(props: GitPanelProps) {
       if (projectId !== projectIdRef.current) return;
       await refresh();
     } catch (caught) {
-      if (projectId === projectIdRef.current) setError(errorMessage(caught));
+      if (projectId === projectIdRef.current) {
+        // 提交失败（hook 拒绝/模板错误等）不再常驻面板错误区，统一 toast；
+        // 保留 git 自己的 stderr 便于排查（如 pre-commit 输出）。
+        showNotice(
+          gitOperationErrorText(caught) || t("git.commitFailed"),
+          8000,
+          "error",
+          t("git.commitFailed"),
+          undefined,
+          gitErrorToastId(repoScopeKey, "commit"),
+        );
+      }
     } finally {
       if (mutationRequest === mutationRequestRef.current) {
         mutationRunningRef.current = false;
@@ -1121,9 +1162,35 @@ export function GitPanel(props: GitPanelProps) {
       await refreshAheadBehind();
     } catch (caught) {
       if (projectId === projectIdRef.current) {
-        const msg = errorMessage(caught);
-        setError(msg);
-        showNotice(msg, 10000, "error");
+        const text = gitOperationErrorText(caught);
+        if (NO_UPSTREAM_RE.test(text) && props.currentBranch) {
+          // 首次推送新分支：给“建立上游”引导而非裸报错；复制按钮可直接粘到终端执行。
+          const command = `git push --set-upstream origin ${props.currentBranch}`;
+          showNotice(
+            t("git.pushNoUpstreamDesc", { branch: props.currentBranch, command }),
+            8000,
+            "error",
+            t("git.pushNoUpstreamTitle"),
+            {
+              action: {
+                label: t("common.copy"),
+                onClick: () => {
+                  void writeClipboard(command);
+                },
+              },
+            },
+            gitErrorToastId(repoScopeKey, "push"),
+          );
+        } else {
+          showNotice(
+            text || t("git.pushFailed"),
+            8000,
+            "error",
+            t("git.pushFailed"),
+            undefined,
+            gitErrorToastId(repoScopeKey, "push"),
+          );
+        }
       }
     } finally {
       if (mutationRequest === mutationRequestRef.current) {
@@ -1147,9 +1214,15 @@ export function GitPanel(props: GitPanelProps) {
       await refreshAheadBehind();
     } catch (caught) {
       if (projectId === projectIdRef.current) {
-        const msg = errorMessage(caught);
-        setError(msg);
-        showNotice(msg, 10000, "error");
+        // 拉取失败同样不常驻面板错误区，避免错误条占位挤压变更列表。
+        showNotice(
+          gitOperationErrorText(caught) || t("git.pullFailed"),
+          8000,
+          "error",
+          t("git.pullFailed"),
+          undefined,
+          gitErrorToastId(repoScopeKey, "pull"),
+        );
       }
     } finally {
       if (mutationRequest === mutationRequestRef.current) {
@@ -1435,7 +1508,13 @@ export function GitPanel(props: GitPanelProps) {
                 setNotAGitRepo(false);
                 void refresh();
               } catch (caught) {
-                setError(errorMessage(caught));
+                // 初始化失败不常驻面板错误区（此时面板本就无变更列表），toast 提示即可。
+                showNotice(
+                  gitOperationErrorText(caught) || t("git.operationFailed"),
+                  8000,
+                  "error",
+                  t("git.operationFailed"),
+                );
               }
               setInitializing(false);
             }}
@@ -1573,7 +1652,12 @@ export function GitPanel(props: GitPanelProps) {
                       // 初始化完成后刷新状态
                       void refresh();
                     } catch (caught) {
-                      setError(errorMessage(caught));
+                      showNotice(
+                        gitOperationErrorText(caught) || t("git.operationFailed"),
+                        8000,
+                        "error",
+                        t("git.operationFailed"),
+                      );
                     }
                     setInitializing(false);
                   }}
@@ -1929,7 +2013,6 @@ function CompareChanges(props: {
   const [target, setTarget] = useState("");
   const [result, setResult] = useState<BranchDiffResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const requestSequence = useRef(0);
 
   useEffect(() => {
@@ -1938,7 +2021,6 @@ function CompareChanges(props: {
     setBase("");
     setTarget("");
     setResult(null);
-    setError(null);
     setLoading(false);
   }, [props.projectId]);
 
@@ -1954,7 +2036,6 @@ function CompareChanges(props: {
     const request = ++requestSequence.current;
     const projectId = props.projectId;
     setLoading(true);
-    setError(null);
     try {
       const next = await props.branchCompare(projectId, base, target);
       if (request === requestSequence.current && projectId === props.projectId)
@@ -1965,7 +2046,13 @@ function CompareChanges(props: {
         projectId === props.projectId
       ) {
         setResult(null);
-        setError(errorMessage(caught));
+        // 对比失败（分支被删/仓库异常）不再占面板错误区，toast 用完即走。
+        showNotice(
+          gitOperationErrorText(caught) || t("git.compareFailed"),
+          8000,
+          "error",
+          t("git.compareFailed"),
+        );
       }
     } finally {
       if (request === requestSequence.current && projectId === props.projectId)
@@ -2047,7 +2134,6 @@ function CompareChanges(props: {
               )}
             </Button>
           </div>
-          {error && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-[13px] text-[var(--git-conflict)]">{error}</div>}
           {result && (
             <>
               <div className="flex-[0_0_auto] border-t border-[var(--git-panel-border)] px-2.5 py-1 text-[11px] text-[var(--git-desc-fg)]">
@@ -2070,7 +2156,7 @@ function CompareChanges(props: {
               </div>
             </>
           )}
-          {!result && !error && (
+          {!result && (
             <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-[9px] text-[13px] text-[var(--git-desc-fg)]">{t("git.compareHint")}</div>
           )}
         </div>
