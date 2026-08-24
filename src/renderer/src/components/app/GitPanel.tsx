@@ -1067,7 +1067,7 @@ export function GitPanel(props: GitPanelProps) {
           {
             action: {
               label: t("git.goSettings"),
-              onClick: () => openSettings({ tab: "common", section: "git" }),
+              onClick: () => openSettings({ tab: "git", section: "git" }),
             },
           },
         );

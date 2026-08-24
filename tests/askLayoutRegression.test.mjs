@@ -14,6 +14,10 @@ const timeline = readFileSync(
   "src/renderer/src/components/session/SessionMessageTimeline.tsx",
   "utf8",
 );
+const timelineCards = readFileSync(
+  "src/renderer/src/components/session/TimelineEventCards.tsx",
+  "utf8",
+);
 const chatContentWidth = readFileSync(
   "src/renderer/src/components/session/chatContentWidth.ts",
   "utf8",
@@ -40,6 +44,14 @@ const toolCards = readFileSync(
 );
 const webTimeline = readFileSync(
   "src/renderer/src/web/WebTimeline.tsx",
+  "utf8",
+);
+const approvalCard = readFileSync(
+  "src/renderer/src/components/ui-shadcn/approval-card.tsx",
+  "utf8",
+);
+const planModeExt = readFileSync(
+  "resources/extensions/pi-deck-plan-mode.ts",
   "utf8",
 );
 
@@ -71,6 +83,32 @@ test("Plan/simple select options render as single-row optically aligned buttons"
   // 时间线卡同一视觉语言：flex row + 单行截断，不再是上下两行。
   assert.match(timelineStyles, /\.ask-question-card-option \{[\s\S]*?flex-direction: row;[\s\S]*?align-items: center;/);
   assert.match(timelineStyles, /\.ask-question-card-option-label,[\s\S]*?white-space: nowrap;[\s\S]*?text-overflow: ellipsis;/);
+});
+
+test("Plan mode prompts keep steps concise and visually separated", () => {
+  // 2026-12 用户反馈：步骤挤在一起难读。两处约束：
+  // 1) 注入模型的 PLAN MODE 提示词要求每步一句短句、独立编号行（从源头控制简洁度）；
+  // 2) 选单标题里每步之间空一行，卡片段落视觉隔离。
+  assert.match(planModeExt, /Keep plan steps concise: one short sentence per step/);
+  assert.match(planModeExt, /Put each step on its own numbered line/);
+  assert.match(planModeExt, /\.join\("\\n\\n"\)/);
+  // 摘要行带「是否执行」提问：卡片默认单行折基时也能看懂下一步待确认的动作。
+  assert.match(planModeExt, /计划草案已就绪（" \+ todoItems\.length \+ " 步），是否执行？/);
+});
+
+test("Long ask descriptions collapse to a preview with eye toggle", () => {
+  // 2026-12 用户反馈：plan 草案步骤太多导致卡片过高。默认折叠为 2 行摘要，
+  // hover（title）可看全文，眼睛按钮显式切换全文/摘要；不传 previewLines 时行为不变。
+  assert.match(approvalCard, /descriptionPreviewLines\?: number/);
+  assert.match(approvalCard, /descriptionClamped && "line-clamp-2"/);
+  assert.match(approvalCard, /title=\{descriptionClamped \? props\.description : undefined\}/);
+  assert.match(approvalCard, /descExpanded \? <EyeOff size=\{14\}/);
+  // live 卡与时间线卡都启用 1 行预览：plan 步骤已入上方待办，卡片默认只露摘要行。
+  assert.match(overlay, /descriptionPreviewLines=\{1\}/);
+  assert.match(timelineCards, /descriptionPreviewLines=\{1\}/);
+  // 「1口」乱码回归：plan 草案步骤前缀不得用 ☐（部分 Windows 字体渲染成空心方框）。
+  // widget/进度消息的 ☑/☐ 保留（agentTodoList 测试锁定，完成态语义明确）。
+  assert.doesNotMatch(planModeExt, /\$\(item\.step\)\. ☐/);
 });
 
 /**

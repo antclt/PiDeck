@@ -15,6 +15,7 @@ export type SettingsTabId =
 	| "proxy"
 	| "web"
 	| "editors"
+	| "git"
 	| "dev"
 	| "im"
 	| "pet"

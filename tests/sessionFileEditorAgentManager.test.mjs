@@ -367,3 +367,43 @@ test("mutatePersistedSessionMessage refuses a live runtime", async () => {
   );
   assert.equal(called, false);
 });
+
+test("mutatePersistedSessionMessage delete accepts a message absent from the file (unpersisted turn)", async () => {
+  // 发送中/刚结束即中断后删除：渲染层先停 agent，stop 已清空内存缓存，文件定位又找不到
+  // 该消息（JSONL 尚未落盘）。删除目标是让消息从会话消失——文件里本来就没有，应返回
+  // 成功而非 MESSAGE_NOT_FOUND（对应活 runtime 路径 removeUnpersistedRuntimeTurn 的语义）。
+  const editor = {
+    editMessage: async () => {},
+    deleteMessage: async () => {},
+    truncateForResend: async () => {},
+  };
+  const { manager } = createHarness(editor);
+  manager.agents.clear();
+  manager.sessionHistoryReader.readMessageByMessageId = async () => undefined;
+
+  const deleted = await manager.mutatePersistedSessionMessage(
+    "C:/sessions/session.jsonl",
+    "agent-1-history-missing",
+    "delete",
+  );
+  assert.equal(deleted, undefined);
+
+  // edit/resend 依赖文件正文，对象缺失必须保留报错（错误映射层会提示 MESSAGE_NOT_FOUND）
+  await assert.rejects(
+    manager.mutatePersistedSessionMessage(
+      "C:/sessions/session.jsonl",
+      "agent-1-history-missing",
+      "edit",
+      { newText: "changed" },
+    ),
+    /Message not found/,
+  );
+  await assert.rejects(
+    manager.mutatePersistedSessionMessage(
+      "C:/sessions/session.jsonl",
+      "agent-1-history-missing",
+      "resend",
+    ),
+    /Message not found/,
+  );
+});

@@ -7,7 +7,7 @@ const mainIndex = readFileSync("src/main/index.ts", "utf8");
 const settingsStore = readFileSync("src/main/settings/SettingsStore.ts", "utf8");
 const settingsTypes = readFileSync("src/shared/types/settings.ts", "utf8");
 const settingsModal = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
-const commonTab = readFileSync("src/renderer/src/components/app/settings/CommonTab.tsx", "utf8");
+const gitTab = readFileSync("src/renderer/src/components/app/settings/GitTab.tsx", "utf8");
 const gitPanel = readFileSync("src/renderer/src/components/app/GitPanel.tsx", "utf8");
 const gitAtoms = readFileSync("src/renderer/src/atoms/git-atoms.ts", "utf8");
 const settingsAtoms = readFileSync("src/renderer/src/atoms/app-ui-atoms.ts", "utf8");
@@ -108,11 +108,11 @@ test("Git summary generation survives leaving and returning to the project", () 
   assert.doesNotMatch(gitPanel, /if \(projectId !== projectIdRef\.current\) return;[\s\S]*setCommitMessage\(message\)/);
 });
 
-test("missing Git summary model opens Common settings at the Git section", () => {
-  assert.match(gitPanel, /openSettings\(\{ tab: "common", section: "git" \}\)/);
+test("missing Git summary model opens Git settings tab at the Git section", () => {
+  assert.match(gitPanel, /openSettings\(\{ tab: "git", section: "git" \}\)/);
   assert.match(settingsAtoms, /export const openSettingsAtom/);
   assert.match(settingsAtoms, /settingsFocusAtom/);
-  assert.match(commonTab, /id="settings-section-git"/);
+  assert.match(gitTab, /id="settings-section-git"/);
   assert.match(settingsModal, /useSettingsFocus/);
   assert.match(settingsModal, /getDefaultStore\(\)\.get\(settingsFocusAtom\)\?\.tab/);
   assert.match(settingsFocusHook, /settings-section-\$\{section\}/);
@@ -121,16 +121,16 @@ test("missing Git summary model opens Common settings at the Git section", () =>
 });
 
 test("Git summary settings expose the shared command model picker", () => {
-  // Git 分区与模型选择器位于常用设置 tab（CommonTab）；数据源 hook 独立成文件（gitModels.ts，
-  // 以便 CommonTab lazy 加载）——listModels 调用在 hook 里
+  // Git 分区与模型选择器位于独立 Git 设置 tab（GitTab）；数据源 hook 独立成文件（gitModels.ts，
+  // 以便 GitTab lazy 加载）——listModels 调用在 hook 里
   assert.match(gitModelsHook, /projects\.listModels\(\)/);
-  assert.match(commonTab, /ModelPicker/);
-  assert.match(commonTab, /gitModelPickerOpen/);
-  assert.doesNotMatch(commonTab, /<datalist/);
-  assert.doesNotMatch(commonTab, /git-commit-message-providers/);
-  assert.doesNotMatch(commonTab, /git-commit-message-models/);
-  assert.match(commonTab, /gitCommitMessageProvider/);
-  assert.match(commonTab, /gitCommitMessageModel/);
+  assert.match(gitTab, /ModelPicker/);
+  assert.match(gitTab, /gitModelPickerOpen/);
+  assert.doesNotMatch(gitTab, /<datalist/);
+  assert.doesNotMatch(gitTab, /git-commit-message-providers/);
+  assert.doesNotMatch(gitTab, /git-commit-message-models/);
+  assert.match(gitTab, /gitCommitMessageProvider/);
+  assert.match(gitTab, /gitCommitMessageModel/);
   assert.equal(i18n.match(/"settings\.gitCommitMessageModel":/g)?.length, 2);
   assert.equal(i18n.match(/"settings\.gitCommitMessageModelUnset":/g)?.length, 2);
   assert.match(i18n, /git\.commitMessageModelRequired/);

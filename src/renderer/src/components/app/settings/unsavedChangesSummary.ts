@@ -13,6 +13,7 @@ export type SettingsUnsavedTabId =
 	| "proxy"
 	| "web"
 	| "editors"
+	| "git"
 	| "dev"
 	| "im"
 	| "pet"
@@ -40,6 +41,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	proxy: "settings.tabs.proxy",
 	web: "settings.tabs.web",
 	editors: "settings.tabs.editors",
+	git: "settings.tabs.git",
 	dev: "settings.tabs.dev",
 	im: "settings.tabs.im",
 	pet: "settings.tabs.pet",
@@ -67,11 +69,6 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "startupWindowMode", tab: "common", itemKey: "settings.startupWindowMode" },
 	{ field: "closeToTray", tab: "common", itemKey: "settings.closeToTray" },
 	{ field: "singleInstance", tab: "common", itemKey: "settings.singleInstance" },
-	{ field: "enableGitManagement", tab: "common", itemKey: "settings.gitManagement" },
-	{ field: "gitCommitMessageProvider", tab: "common", itemKey: "settings.gitCommitMessageModel" },
-	{ field: "gitCommitMessageModel", tab: "common", itemKey: "settings.gitCommitMessageModel" },
-	{ field: "favoriteModels", tab: "common", itemKey: "settings.gitCommitMessageModel" },
-	{ field: "gitCommitMessagePrompt", tab: "common", itemKey: "settings.gitCommitMessagePrompt" },
 
 	{ field: "theme", tab: "appearance", itemKey: "settings.theme" },
 	{ field: "themeScheduleLightStart", tab: "appearance", itemKey: "settings.themeScheduleRange" },
@@ -128,6 +125,12 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "webServiceHost", tab: "web", itemKey: "settings.webServiceHost" },
 	{ field: "webServicePort", tab: "web", itemKey: "settings.webServicePort" },
 	{ field: "externalEditors", tab: "editors", itemKey: "settings.sectionEditors" },
+	// Git 区块原在常用设置，随独立 tab 挪到「开发者」簇（web/editors 之后、dev 之前）
+	{ field: "enableGitManagement", tab: "git", itemKey: "settings.gitManagement" },
+	{ field: "gitCommitMessageProvider", tab: "git", itemKey: "settings.gitCommitMessageModel" },
+	{ field: "gitCommitMessageModel", tab: "git", itemKey: "settings.gitCommitMessageModel" },
+	{ field: "favoriteModels", tab: "git", itemKey: "settings.gitCommitMessageModel" },
+	{ field: "gitCommitMessagePrompt", tab: "git", itemKey: "settings.gitCommitMessagePrompt" },
 	{ field: "developerDiagnostics", tab: "dev", itemKey: "settings.developerDiagnostics" },
 	{ field: "telemetryEnabled", tab: "dev", itemKey: "settings.telemetry" },
 ];
