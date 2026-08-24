@@ -77,7 +77,7 @@ test("dsh settings yaml parse + merge keeps sibling namespaces", () => {
   assert.equal(next["llm-pi-ai"].providers.weishiair.baseURL, "https://api.weishiair.de/v1");
 });
 
-test("mergePiProvider writes auth.json key and strips inline models.json key", () => {
+test("mergePiProvider writes the api key inline into models.json (ModelsTab-compatible)", () => {
   const merged = mapping.mergePiProvider(
     { providers: {} },
     {},
@@ -89,8 +89,10 @@ test("mergePiProvider writes auth.json key and strips inline models.json key", (
       models: [{ id: "grok-4.6" }],
     },
   );
-  assert.equal(merged.models.providers.weishiair.apiKey, undefined);
-  assert.equal(merged.auth.weishiair.key, "sk-test");
+  // 密钥内联进 models.json：PiDeck 的 ModelsTab 只读/写 provider.apiKey，
+  // 若只写 auth.json 会让迁移后的 key 在 Models 页显示为空。
+  assert.equal(merged.models.providers.weishiair.apiKey, "sk-test");
+  assert.equal(merged.auth.weishiair, undefined);
 });
 
 test("unsafe provider names are rejected", () => {
@@ -187,7 +189,7 @@ test("apply pi-to-dsh uses the same valid legacy credential ref through a ready 
   assert.match(profile.apiKeyEnv, /^PIDECK_[0-9A-F]{8}_API_KEY$/);
   assert.equal(calls.ref, profile.apiKeyEnv);
 });
-test("apply dsh-to-pi copies credential into auth.json", async () => {
+test("apply dsh-to-pi copies credential inline into models.json", async () => {
   const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
   await writeFile(
     join(home, "settings.yaml"),
@@ -220,8 +222,10 @@ test("apply dsh-to-pi copies credential into auth.json", async () => {
   const result = await service.applyProviderMigration(deps, "dsh-to-pi", "weishiair");
   assert.equal(result.ok, true);
   assert.equal(result.copiedKey, true);
+  // key 内联进 models.json，ModelsTab 才能读到；auth.json 不再被迁移改动。
   assert.equal(saved.models.providers.weishiair.baseUrl, "https://api.weishiair.de/v1");
-  assert.equal(saved.auth.weishiair.key, "sk-from-dsh");
+  assert.equal(saved.models.providers.weishiair.apiKey, "sk-from-dsh");
+  assert.equal(saved.auth.weishiair, undefined);
 });
 
 test("source contracts keep IPC / preload / UI wired", async () => {
