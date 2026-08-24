@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
-import { Check, ChevronDown, ClipboardCheck, X } from "lucide-react";
+import { useState } from "react";
+import { Check, ChevronDown, ClipboardCheck, Eye, EyeOff, X } from "lucide-react";
 import { Button } from "./button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./collapsible";
 import { cn } from "../../lib/utils";
+import { t } from "../../i18n";
 
 /**
  * ApprovalCard 是 AI 人在回路交互的通用外壳。
@@ -33,6 +35,9 @@ function StatusIndicator({ tone }: { tone: ApprovalCardStatusTone }) {
 export function ApprovalCard(props: {
 	title: string;
 	description?: string;
+	/** description 超过该行数时默认折叠为摘要（对应 plan 草案等超长列表）；
+	 *  不传则保持原样全量展示，兼容权限确认等短描述场景。 */
+	descriptionPreviewLines?: number;
 	status?: string;
 	/** 状态胶囊的语义色；缺省时仅显示纯文本胶囊，不带状态点。 */
 	statusTone?: ApprovalCardStatusTone;
@@ -44,6 +49,9 @@ export function ApprovalCard(props: {
 	children: ReactNode;
 	className?: string;
 }) {
+	// 摘要展开态与卡片整体 open 解耦：点 chevron 折叠的是选项区，点眼睛只控制 description 全文。
+	const [descExpanded, setDescExpanded] = useState(false);
+	const descriptionClamped = Boolean(props.descriptionPreviewLines) && !descExpanded;
 	return (
 		<Collapsible
 			open={props.open}
@@ -68,8 +76,33 @@ export function ApprovalCard(props: {
 						<ClipboardCheck className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
 						<span className="min-w-0 flex-1">
 							<span className="block whitespace-pre-wrap break-words text-caption font-semibold leading-relaxed text-foreground">{props.title}</span>
-							{props.description ? <span className="block whitespace-pre-wrap break-words text-micro font-normal leading-relaxed text-muted-foreground">{props.description}</span> : null}
+							{props.description ? (
+								// 有 previewLines 时默认 line-clamp-2 折叠为摘要（plan 草案等超长列表）；
+								// title 兜底悬停看全文，眼睛按钮显式切换全文/摘要。
+								<span
+									className={cn(
+										"block whitespace-pre-wrap break-words text-micro font-normal leading-relaxed text-muted-foreground",
+										descriptionClamped && "line-clamp-2",
+									)}
+									title={descriptionClamped ? props.description : undefined}
+								>
+									{props.description}
+								</span>
+							) : null}
 						</span>
+						{props.descriptionPreviewLines ? (
+							// 眼睛按钮：仅描述可折叠时出现；放 trigger 外，点它只切换 description，不折叠选项区。
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+								title={descExpanded ? t("ask.collapseDescription") : t("ask.expandDescription")}
+								aria-label={descExpanded ? t("ask.collapseDescription") : t("ask.expandDescription")}
+								onClick={() => setDescExpanded((next) => !next)}
+							>
+								{descExpanded ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
+							</Button>
+						) : null}
 						{props.status ? (
 							<span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-px text-micro font-medium text-primary">
 								{props.statusTone ? <StatusIndicator tone={props.statusTone} /> : null}

@@ -14,9 +14,19 @@ test("关闭确认按设置页顺序点名第一条，Git 模型相关字段合�
 	const summary = summarizeSettingsUnsavedChanges({
 		dirtyFields: ["gitCommitMessageModel", "theme", "gitCommitMessageProvider"],
 	});
-	assert.equal(summary.tabKey, "settings.tabs.common");
-	assert.equal(summary.itemKey, "settings.gitCommitMessageModel");
+	// Git 区块已拆为独立 tab（开发者簇），按目录顺序「外观 → Git」第一条是主题
+	assert.equal(summary.tabKey, "settings.tabs.appearance");
+	assert.equal(summary.itemKey, "settings.theme");
 	assert.equal(summary.totalCount, 2);
+});
+
+test("Git 模型相关字段合成一项并挂到 Git tab", () => {
+	const summary = summarizeSettingsUnsavedChanges({
+		dirtyFields: ["gitCommitMessageModel", "gitCommitMessageProvider"],
+	});
+	assert.equal(summary.tabKey, "settings.tabs.git");
+	assert.equal(summary.itemKey, "settings.gitCommitMessageModel");
+	assert.equal(summary.totalCount, 1);
 });
 
 test("视觉桥脏标记挂到视觉桥 tab，而不是当成未知 AppSettings 字段", () => {

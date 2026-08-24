@@ -318,7 +318,7 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 			return {
 				message: {
 					customType: "pi-deck-plan-mode-context",
-					content: `[PLAN MODE ACTIVE]\nYou are in PiDeck Plan Mode.\n\nRules:\n- Only inspect and reason. Do not edit or write files.\n- Bash is restricted to read-only commands.\n- Ask the user with ask_question when a requirement is ambiguous.\n- End your response with a numbered plan under an exact \"Plan:\" heading.\n\nPlan:\n1. First concrete step\n2. Second concrete step`,
+					content: `[PLAN MODE ACTIVE]\nYou are in PiDeck Plan Mode.\n\nRules:\n- Only inspect and reason. Do not edit or write files.\n- Bash is restricted to read-only commands.\n- Ask the user with ask_question when a requirement is ambiguous.\n- Keep plan steps concise: one short sentence per step; avoid long clauses, parentheticals, or run-on requirements.\n- Put each step on its own numbered line (\"1. ...\", \"2. ...\"). Never nest or merge steps — the UI renders and tracks them line by line.\n- End your response with a numbered plan under an exact \"Plan:\" heading.\n\nPlan:\n1. First concrete step\n2. Second concrete step`,
 					display: false,
 				},
 			};
@@ -372,13 +372,18 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 		updateWidget(ctx);
 		persistState();
 
-		const todoListText = todoItems.map((item) => `${item.step}. ☐ ${item.text}`).join("\n");
+		// 步骤前缀不用 ☐：该字形在部分 Windows 字体下渲染成空心方框（用户看到「1口」似乱码）。
+		// 未完成/已完成语义由已完成进度（widget/plan-todos）表达，选单内无需占位标记。
+		// 每步之间空一行（\n\n）：卡片/消息里步骤段落视觉分离，避免连续行挤在一起难读。
+		const todoListText = todoItems.map((item) => `${item.step}. ${item.text}`).join("\n\n");
 		// 循环展示选单：仅在选项处理未定夺时重试；关闭选单（X/Esc）走 else 分支退出 plan 模式。
 		// 标题前缀 [PI_DECK_PLAN_NEXT] 给桌面端识别：关闭=退出计划模式，不是「默认第一项」。
 		// 标题前缀 [PI_DECK_PLAN_NEXT]：桌面端识别后换专用 UI/取消提示。
 		// 选项用「标题|说明」编码，桌面端拆成主副文案；前缀仍用于 startsWith 匹配。
+		// 摘要行带「是否执行」提问：计划步骤已写入上方待办（pi-deck-plan-todos widget），
+		// 卡片默认只展示摘要行，桌面端眼睛按钮/悬停展开步骤全文，无需重复铺满。
 		const PLAN_NEXT_TITLE =
-			"[PI_DECK_PLAN_NEXT] 计划草案已就绪（" + todoItems.length + " 步）\n\n" + todoListText;
+			"[PI_DECK_PLAN_NEXT] 计划草案已就绪（" + todoItems.length + " 步），是否执行？\n\n" + todoListText;
 		const PLAN_OPT_EXECUTE = "开始执行|恢复写权限，按步骤改代码并勾进度";
 		// 「先不执行」只结束本轮、保持只读；不会自动再分析，需用户再发消息。
 		const PLAN_OPT_CONTINUE = "先不执行|结束本轮，保持只读；再发消息后 AI 才继续";

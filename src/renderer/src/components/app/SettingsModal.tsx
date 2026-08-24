@@ -16,6 +16,7 @@ import {
 	ImageIcon,
 	Globe,
 	FileCode2,
+	GitBranch,
 	X,
 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
@@ -60,6 +61,7 @@ const AppearanceTab = lazy(() => import("./settings/AppearanceTab").then((m) => 
 const ProxyTab = lazy(() => import("./settings/ProxyTab").then((m) => ({ default: m.ProxyTab })));
 const WebTab = lazy(() => import("./settings/WebTab").then((m) => ({ default: m.WebTab })));
 const EditorsTab = lazy(() => import("./settings/EditorsTab").then((m) => ({ default: m.EditorsTab })));
+const GitTab = lazy(() => import("./settings/GitTab").then((m) => ({ default: m.GitTab })));
 const DevTab = lazy(() => import("./settings/DevTab").then((m) => ({ default: m.DevTab })));
 const PetTab = lazy(() => import("./settings/PetTab").then((m) => ({ default: m.PetTab })));
 const ImTab = lazy(() => import("./settings/ImTab").then((m) => ({ default: m.ImTab })));
@@ -204,6 +206,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	proxy: { labelKey: "settings.tabs.proxy", icon: <Network size={16} /> },
 	web: { labelKey: "settings.tabs.web", icon: <Globe size={16} /> },
 	editors: { labelKey: "settings.tabs.editors", icon: <FileCode2 size={16} /> },
+	git: { labelKey: "settings.tabs.git", icon: <GitBranch size={16} /> },
 	dev: { labelKey: "settings.tabs.dev", icon: <Wrench size={16} /> },
 	im: { labelKey: "settings.tabs.im", icon: <MessageSquare size={16} /> },
 	pet: { labelKey: "settings.tabs.pet", icon: <PawPrint size={16} /> },
@@ -482,12 +485,6 @@ function SettingsModalContent(props: SettingsModalProps) {
 								draft={draftSettings}
 								updateDraft={updateDraft}
 								isDirty={isDirty}
-								gitModels={gitModels}
-								gitModelPickerOpen={gitModelPickerOpen}
-								onOpenGitModelPicker={openGitModelPicker}
-								onCloseGitModelPicker={closeGitModelPicker}
-								onPickGitModel={handlePickGitModel}
-								onToggleGitModelFavorite={handleToggleGitModelFavorite}
 							/>
 							</Suspense>
 						</TabsContent>
@@ -549,6 +546,25 @@ function SettingsModalContent(props: SettingsModalProps) {
 								draft={draftSettings}
 								updateDraft={updateDraft}
 								isDirty={isDirty}
+							/>
+							</Suspense>
+						</TabsContent>
+					)}
+
+					{/* ── Git 设置 tab（原为常用设置内区块，由 Git 面板深链直达） ── */}
+					{activeTab === "git" && (
+						<TabsContent value="git" className="settings-panel min-w-0">
+							<Suspense fallback={<SettingsTabLoading />}>
+							<GitTab
+								draft={draftSettings}
+								updateDraft={updateDraft}
+								isDirty={isDirty}
+								gitModels={gitModels}
+								gitModelPickerOpen={gitModelPickerOpen}
+								onOpenGitModelPicker={openGitModelPicker}
+								onCloseGitModelPicker={closeGitModelPicker}
+								onPickGitModel={handlePickGitModel}
+								onToggleGitModelFavorite={handleToggleGitModelFavorite}
 							/>
 							</Suspense>
 						</TabsContent>

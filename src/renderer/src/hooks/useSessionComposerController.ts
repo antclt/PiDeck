@@ -71,8 +71,13 @@ import {
   PI_FILE_NODE_DRAG_MIME,
   PI_FILE_PATH_DRAG_MIME,
   readFileNodeDragPayload,
+  type SuggestionItem,
 } from "../components/app/AppUtils";
 import { SESSION_TAB_DRAG_MIME } from "../utils/sessionSplitEdge";
+import {
+  findDirectoryNodeByRelativePath,
+  mergeFileTreeChildren,
+} from "../utils/fileTreeLazy";
 import {
   extractPastedPath,
   formatFilePathRef,
@@ -357,6 +362,10 @@ export function useSessionComposerController(
   const [picker, setPicker] = useState<ComposerPickerKind | null>(null);
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const [files, setFiles] = useState<FileTreeNode[]>([]);
+  // @ 引用懒加载状态：已按 maxDepth 0 拉过子项的目录绝对路径（防重复请求），
+  // 与在途加载集合成对出现；目录不在任一集合才能发新请求。
+  const loadedDirPathsRef = useRef<Set<string>>(new Set());
+  const loadingDirPathsRef = useRef<Set<string>>(new Set());
   const templateKey = `${sessionId}:${record?.projectPath ?? ""}`;
   const [templateState, setTemplateState] = useState<{
     key: string;
@@ -611,6 +620,13 @@ export function useSessionComposerController(
     };
   }, [record?.projectId]);
 
+  // 切项目时清掉懒加载进度：老项目的目录缓存/在途请求不能让新项目复用。
+  // （真实请求仍受主进程 isPathInsideProject 拦截，这里双保险。）
+  useEffect(() => {
+    loadedDirPathsRef.current = new Set();
+    loadingDirPathsRef.current = new Set();
+  }, [record?.projectId]);
+
   useEffect(() => {
     // D15：DSH 会话的命令补全优先走 live 注册表（host 侧 ctx.commands.list，
     // 含用户/插件注册的命令）；会话未激活（无 live Agent）或桥失败时降级为
@@ -694,6 +710,49 @@ export function useSessionComposerController(
       : [],
     [commands, cursor, draft, flatFiles, projectSessions, suggestionsOpen],
   );
+
+  // @ 引用向下钻取：随输入懒加载子目录（maxDepth 0 只拉一层，与文件抽屉同语义）。
+  // 修复 maxDepth 0 化后只能引用到项目根一层（71d27ed1 为保主进程响应把 8 层递归改成
+  // 根层，但没补抽屉那套展开逻辑，导致 @src/xxx 永远匹配不到深层文件）。
+  // 目标目录 = 查询中最后一个 / 之前的相对路径；整段一次性输入（粘贴）时
+  // 回退到顶层目录逐级补，靠 files 依赖在每次 merge 后重新评估，链条自动向前推进。
+  useEffect(() => {
+    if (!record?.projectId) return;
+    const trigger = detectTrigger(draft, cursor, validSessionRefs);
+    if (!trigger || trigger.char !== "@") return;
+    const query = trigger.query;
+    const slash = query.lastIndexOf("/");
+    // 查询还没进入子目录（无 / 且整段不是目录名）时不钻取，等用户继续输入
+    const dirRel = slash > 0 ? query.slice(0, slash) : query;
+    if (!dirRel) return;
+    const firstSegment = dirRel.split("/")[0];
+    // 优先精确命中查询目录；一次性输入（粘贴）时先拉顶层目录逐级展开
+    const dirNode =
+      findDirectoryNodeByRelativePath(files, dirRel) ??
+      (slash > 0 ? findDirectoryNodeByRelativePath(files, firstSegment) : undefined);
+    if (!dirNode) return;
+    // 已有 children 数组 = 子项已加载（含空目录），不重复请求
+    if (Array.isArray(dirNode.children) || loadingDirPathsRef.current.has(dirNode.path)) {
+      return;
+    }
+    let current = true;
+    loadingDirPathsRef.current.add(dirNode.path);
+    void desktopApi.files.list(record.projectId, { maxDepth: 0, directory: dirNode.path })
+      .then((children) => {
+        if (!current) return;
+        setFiles((prev) => mergeFileTreeChildren(prev, dirNode.path, children));
+        loadedDirPathsRef.current.add(dirNode.path);
+      })
+      .catch(() => {
+        // 目录被删/权限不足：保留已加载部分，下次输入自然重试
+      })
+      .finally(() => {
+        loadingDirPathsRef.current.delete(dirNode.path);
+      });
+    return () => {
+      current = false;
+    };
+  }, [cursor, draft, files, record?.projectId, validSessionRefs]);
   const suggestionAnchorStyle = useMemo<CSSProperties | undefined>(() => {
     if (!suggestionsOpen) return undefined;
     const menuWidth = Math.min(520, window.innerWidth - 120);
@@ -978,12 +1037,17 @@ export function useSessionComposerController(
     [mode, generateImage, options.onPromoteSession, send, sessionId],
   );
 
-  const selectSuggestion = useCallback((value: string) => {
+  const selectSuggestion = useCallback((item: SuggestionItem) => {
     const liveDraft = liveDomDraftRef.current.sessionId === sessionId
       ? liveDomDraftRef.current.value
       : draft;
     const liveCursor = editorRef.current ? getComposerCaretOffset(editorRef.current) : cursor;
-    const result = applySuggestion(liveDraft, liveCursor, value, validSessionRefs);
+    // 目录引用（isDirectory）不带尾随空格：@src/ 之后继续敲路径段时建议框会
+    // 随按键重新打开（onChange → detectTrigger），实现连续的目录下钻引用；
+    // 带空格会让建议框立刻关闭，用户必须回删空格才能继续，容易误以为只能选一层。
+    const result = applySuggestion(liveDraft, liveCursor, item.value, validSessionRefs, {
+      noTrailingSpace: item.isDirectory === true,
+    });
     liveDomDraftRef.current = { sessionId, value: result.text };
     setDraft(result.text);
     setCursor(result.cursor);
@@ -1039,7 +1103,7 @@ export function useSessionComposerController(
         const selected = suggestionItems[
           Math.min(selectedSuggestionIndex, suggestionItems.length - 1)
         ];
-        if (selected) selectSuggestion(selected.value);
+        if (selected) selectSuggestion(selected);
         return;
       }
       if (event.key === "Escape") {

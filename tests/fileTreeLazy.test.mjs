@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { findLoadedDirectory, mergeFileTreeChildren, hydrateExpandedFileTree } = loadTsCommonJs(
+const { findLoadedDirectory, findDirectoryNodeByRelativePath, mergeFileTreeChildren, hydrateExpandedFileTree } = loadTsCommonJs(
   "src/renderer/src/utils/fileTreeLazy.ts",
 );
 
@@ -50,4 +50,36 @@ test("hydrateExpandedFileTree loads shorter parent paths first", async () => {
   );
   assert.deepEqual(listed, ["/p/src", "/p/src/components"]);
   assert.equal(hydrated[0].children[0].children[0].name, "Button.tsx");
+});
+
+test("findDirectoryNodeByRelativePath finds unexpanded directory", () => {
+  const tree = [dir("src", "/p/src"), file("README.md", "/p/README.md")];
+  assert.equal(findDirectoryNodeByRelativePath(tree, "src")?.path, "/p/src");
+  assert.equal(findDirectoryNodeByRelativePath(tree, "README.md"), undefined);
+});
+
+test("findDirectoryNodeByRelativePath finds nested loaded directory", () => {
+  const tree = [
+    {
+      ...dir("src", "/p/src"),
+      children: [
+        { ...dir("components", "/p/src/components"), relativePath: "src/components" },
+      ],
+    },
+  ];
+  assert.equal(
+    findDirectoryNodeByRelativePath(tree, "src/components")?.path,
+    "/p/src/components",
+  );
+});
+
+test("findDirectoryNodeByRelativePath cannot see under unloaded directories", () => {
+  // src 未展开（children 为 undefined），src/deep 不在树中
+  const tree = [dir("src", "/p/src")];
+  assert.equal(findDirectoryNodeByRelativePath(tree, "src/deep"), undefined);
+});
+
+test("findDirectoryNodeByRelativePath returns undefined for unknown path", () => {
+  const tree = [dir("src", "/p/src")];
+  assert.equal(findDirectoryNodeByRelativePath(tree, "nope"), undefined);
 });

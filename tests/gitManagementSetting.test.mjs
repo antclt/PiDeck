@@ -11,6 +11,7 @@ const app = [
 const appParts = readFileSync("src/renderer/src/components/session/SurfaceComponents.tsx", "utf8");
 const settingsModal = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
 const commonTab = readFileSync("src/renderer/src/components/app/settings/CommonTab.tsx", "utf8");
+const gitTab = readFileSync("src/renderer/src/components/app/settings/GitTab.tsx", "utf8");
 const settingsStore = readFileSync("src/main/settings/SettingsStore.ts", "utf8");
 const sharedTypes = [
   readFileSync("src/shared/types.ts", "utf8"),
@@ -32,10 +33,10 @@ describe("optional Git management entry", () => {
   });
 
   test("exposes a localized settings switch", () => {
-    // 开关位于常用设置 tab（CommonTab，自 SettingsModal 拆分）
-    assert.match(commonTab, /title=\{t\("settings\.gitManagement"\)\}/);
-    assert.match(commonTab, /description=\{t\("settings\.gitManagementDesc"\)\}/);
-	assert.match(commonTab, /updateDraft\(\{ enableGitManagement: checked \}\)/);
+    // 开关位于独立 Git 设置 tab（GitTab，自常用设置拆分）
+    assert.match(gitTab, /title=\{t\("settings\.gitManagement"\)\}/);
+    assert.match(gitTab, /description=\{t\("settings\.gitManagementDesc"\)\}/);
+    assert.match(gitTab, /updateDraft\(\{ enableGitManagement: checked \}\)/);
     assert.equal(i18n.match(/"settings\.gitManagement":/g)?.length, 2);
     assert.equal(i18n.match(/"settings\.gitManagementDesc":/g)?.length, 2);
   });

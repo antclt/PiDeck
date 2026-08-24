@@ -89,6 +89,25 @@ test("applySuggestion does not rewrite ordinary ampersand prose", () => {
 	assert.equal(result.cursor, result.text.length);
 });
 
+test("applySuggestion noTrailingSpace keeps directory path continuation", () => {
+	const result = applySuggestion("see @sr", 7, "@src/", sessions, { noTrailingSpace: true });
+	assert.equal(result.text, "see @src/");
+	assert.equal(result.cursor, result.text.length);
+});
+
+test("applySuggestion default still appends trailing space", () => {
+	// 光标在 @ 之后（文本末尾 position 5），触发分支替换整个 @ 段
+	const result = applySuggestion("see @", 5, "@src", sessions);
+	assert.equal(result.text, "see @src ");
+	assert.equal(result.cursor, result.text.length);
+});
+
+test("applySuggestion noTrailingSpace inserts at cursor without trigger", () => {
+	const result = applySuggestion("abc", 1, "@x/", undefined, { noTrailingSpace: true });
+	assert.equal(result.text, "a@x/bc");
+	assert.equal(result.cursor, 4);
+});
+
 test("clearSuggestionTrigger only strips a fresh empty trigger", () => {
 	assertJsonEqual(clearSuggestionTrigger("&", 1, sessions), { text: "", cursor: 0 });
 	assertJsonEqual(clearSuggestionTrigger("see &al", 7, sessions), {

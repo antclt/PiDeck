@@ -10,10 +10,10 @@ import type { SettingsTabId } from "../../../atoms";
  * - 基础：常用 / 外观 / 代理（打开应用必看的全局项）
  * - 扩展集成：飞书机器人 / 桌面宠物 / 视觉桥 / 生图（外部能力与增值功能）
  * - 数据与监控：缓存与日志 / 用量统计 / 进程监控
- * - 开发者：局域网 Web 服务 / 外部编辑器 / 开发设置（环境、版本、调试等低频项，置底）
+ * - 开发者：局域网 Web 服务 / 外部编辑器 / Git / 开发设置（环境、版本、调试等低频项，置底）
  *
- * 局域网 Web 服务与外部编辑器原为开发设置内的区块，因用户频繁使用单独抽为 tab，
- * 仍留在开发者簇（紧随其后的 dev 保持分割线，簇边界不变）。
+ * 局域网 Web 服务、外部编辑器与 Git 设置原为其它 tab 内的区块，因用户频繁使用
+ * 单独抽为 tab，仍留在开发者簇（紧随其后的 dev 保持分割线，簇边界不变）。
  */
 export type SettingsTabLayoutEntry = {
 	id: SettingsTabId;
@@ -34,6 +34,7 @@ export const SETTINGS_TAB_LAYOUT: readonly SettingsTabLayoutEntry[] = [
 	{ id: "process" },
 	{ id: "web" },
 	{ id: "editors" },
+	{ id: "git" },
 	{ id: "dev", dividerBefore: true },
 ];
 

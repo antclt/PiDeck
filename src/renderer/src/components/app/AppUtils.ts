@@ -625,16 +625,21 @@ export function applySuggestion(
 	cursor: number,
 	value: string,
 	validSessionRefs?: Set<string>,
+	options?: { noTrailingSpace?: boolean },
 ): ComposerSuggestionResult {
 	const trigger = detectTrigger(current, cursor, validSessionRefs);
+	// 目录引用（@dir/）不带尾随空格：插入后用户继续输入路径段时，
+	// 建议框会随每次按键重新评估打开，形成连续向下钻取；
+	// 文件/命令引用保持默认空格，避免与后续正文粘连。
+	const suffix = options?.noTrailingSpace ? "" : " ";
 	if (!trigger) {
 		// 无触发时插在光标处，而不是一律拼到文末——否则误开的建议框选中后
 		// 会把光标/正文一起拽到结尾。
-		const text = `${current.slice(0, cursor)}${value} ${current.slice(cursor)}`;
-		return { text, cursor: cursor + value.length + 1 };
+		const text = `${current.slice(0, cursor)}${value}${suffix}${current.slice(cursor)}`;
+		return { text, cursor: cursor + value.length + suffix.length };
 	}
-	const text = `${current.slice(0, trigger.start)}${value} ${current.slice(cursor)}`;
-	return { text, cursor: trigger.start + value.length + 1 };
+	const text = `${current.slice(0, trigger.start)}${value}${suffix}${current.slice(cursor)}`;
+	return { text, cursor: trigger.start + value.length + suffix.length };
 }
 
 /**

@@ -1,5 +1,26 @@
 import type { FileTreeNode } from "../../../shared/types";
 
+/**
+ * 按相对路径查找目录节点（含尚未展开的，children 可为 undefined）。
+ * 供 composer @ 引用懒加载使用：查询前缀命中的目录才按需拉取子项；
+ * 只沿已加载的 children 下钻——父目录未展开时深层目录本就不在树里。
+ */
+export function findDirectoryNodeByRelativePath(
+	nodes: FileTreeNode[],
+	relativePath: string,
+): FileTreeNode | undefined {
+	for (const node of nodes) {
+		if (node.type === "directory" && node.relativePath === relativePath) {
+			return node;
+		}
+		if (node.children && node.children.length > 0) {
+			const nested = findDirectoryNodeByRelativePath(node.children, relativePath);
+			if (nested) return nested;
+		}
+	}
+	return undefined;
+}
+
 /** 目录是否已经拉过子项（有 children 数组即视为已加载，含空目录）。 */
 export function findLoadedDirectory(
 	nodes: FileTreeNode[],

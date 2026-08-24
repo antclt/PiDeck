@@ -2741,7 +2741,22 @@ export class AgentManager {
 		};
 		const activeLeafId = await this.sessionHistoryReader.getActiveLeafId(sessionPath).catch(() => undefined);
 		const located = await this.sessionHistoryReader.readMessageByMessageId(sessionPath, messageId);
-		if (!located) throw new Error("Message not found");
+		if (!located) {
+			// 未落盘删除兜底：发送中/刚结束即中断，再删该轮消息时 JSONL 还没有这条记录——
+			// 渲染层流程是先停 agent 再走 catalog 删除，stop 已清空内存消息缓存，
+			// deleteMessage 的 removeUnpersistedRuntimeTurn（内存定位）在此路径不可用。
+			// 删除的目标就是让消息从会话消失：文件里本来就没有，无需写盘，
+			// 返回成功让渲染层重载时间线，未落盘气泡自然消失（与删后刷新结果一致）。
+			// 仅 delete 放宽：edit/resend 依赖文件正文，找不到条目则无法执行，必须保留报错。
+			if (operation === "delete") {
+				void this.appLogger?.info("agent", "Delete no-op: message not in session file (unpersisted turn)", {
+					sessionPath,
+					messageId,
+				});
+				return undefined;
+			}
+			throw new Error("Message not found");
+		}
 		const role: "user" | "assistant" = located.role === "user" ? "user" : "assistant";
 		if (operation === "resend" && role !== "user") {
 			throw new Error("Only user messages can be resent");

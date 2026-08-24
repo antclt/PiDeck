@@ -1,7 +1,6 @@
 import { memo } from "react";
-import type { AppSettings, AvailableModel } from "../../../../../shared/types";
+import type { AppSettings } from "../../../../../shared/types";
 import { t } from "../../../i18n";
-import { Button } from "../../ui-shadcn/button";
 import {
   Select,
   SelectContent,
@@ -9,27 +8,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../ui-shadcn/select";
-import { ModelPicker } from "../../session/ComposerComponents";
 import { SettingsSection } from "./SettingsStorageTab";
-import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow, SettingTextarea } from "./SettingRows";
+import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
 
 type CommonTabProps = {
   draft: AppSettings;
   updateDraft: (patch: Partial<AppSettings>) => void;
   isDirty: (field: keyof AppSettings) => boolean;
-  gitModels: AvailableModel[];
-  gitModelPickerOpen: boolean;
-  onOpenGitModelPicker: () => void;
-  onCloseGitModelPicker: () => void;
-  onPickGitModel: (model: AvailableModel) => void;
-  onToggleGitModelFavorite: (provider: string, modelId: string) => void;
 };
 
 /** 下拉选项：disabled 可选（SelectItem 透传） */
 type SelectOption = { value: string; label: string; disabled?: boolean };
 
 /**
- * 设置弹框「常用设置」tab：语言/会话/通知/窗口/Git 分区。
+ * 设置弹框「常用设置」tab：语言/会话/通知/窗口（Git 分区已拆为独立 tab）。
  * 独立组件 + memo：切换 tab 或壳层无关状态变化时不重渲染本 tab。
  */
 export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
@@ -286,60 +278,6 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
             updateDraft({ singleInstance: checked })
           }
         />
-      </SettingsSection>
-
-      {/* Git：id 供「去设置」深链滚动到摘要模型，而不是停在常用页顶部 */}
-      <SettingsSection id="settings-section-git" title={t("settings.git")}>
-        <SettingSwitchRow
-          title={t("settings.gitManagement")}
-          description={t("settings.gitManagementDesc")}
-          checked={draft.enableGitManagement}
-          onChange={(checked) =>
-            updateDraft({ enableGitManagement: checked })
-          }
-        />
-        {draft.enableGitManagement && (
-          <>
-            <SettingRow
-              title={
-                <>
-                  <span>{t("settings.gitCommitMessageModel")}</span>
-                  <DirtyMarker dirty={isDirty("gitCommitMessageProvider") || isDirty("gitCommitMessageModel")} label={t("settings.gitCommitMessageModel")} />
-                </>
-              }
-              description={t("settings.gitCommitMessageModelDesc")}
-            >
-              <Button
-                variant="outline"
-                className="w-full justify-start font-mono text-xs"
-                onClick={props.onOpenGitModelPicker}
-              >
-                {draft.gitCommitMessageProvider && draft.gitCommitMessageModel
-                  ? `${draft.gitCommitMessageProvider}/${draft.gitCommitMessageModel}`
-                  : t("settings.gitCommitMessageModelUnset")}
-              </Button>
-            </SettingRow>
-            <SettingTextarea
-              title={t("settings.gitCommitMessagePrompt")}
-              description={t("settings.gitCommitMessagePromptDesc")}
-              value={draft.gitCommitMessagePrompt}
-              onChange={(value) => updateDraft({ gitCommitMessagePrompt: value })}
-            />
-            {props.gitModelPickerOpen && (
-              <ModelPicker
-                models={props.gitModels}
-                current={{
-                  provider: draft.gitCommitMessageProvider,
-                  modelId: draft.gitCommitMessageModel,
-                }}
-                favoriteModels={draft.favoriteModels ?? []}
-                onClose={props.onCloseGitModelPicker}
-                onPick={props.onPickGitModel}
-                onToggleFavorite={props.onToggleGitModelFavorite}
-              />
-            )}
-          </>
-        )}
       </SettingsSection>
     </>
   );
