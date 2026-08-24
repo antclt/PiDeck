@@ -766,6 +766,116 @@ const sessionEventFrame = (sessionId, evt) => ({
 	payload: { type: "session/event", sessionId, event: evt },
 });
 
+/** 构造 DSH 官方 session/projection 帧（每个 key 按 seq higher-seq-wins）。 */
+const projectionFrame = (sessionId, key, value, seq) => ({
+	payload: { type: "session/projection", sessionId, key, value, seq },
+});
+
+test("contextPressure 的零 usage 不得擦掉最后一个有效上下文值", async () => {
+	const { host, client } = makeFakeHost({
+		muxFrames: [projectionFrame("session-fake-1", "contextPressure", {
+			pressureTokens: 120_000,
+			projectedTokens: 120_000,
+			contextWindow: 1_000_000,
+		}, 10)],
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).contextTokens, 120_000);
+
+	// 失败 retry 的 usage 可能把两个 pressure 字段都写成 0；这不是当前会话的真实上下文。
+	client.pushFrames(projectionFrame("session-fake-1", "contextPressure", {
+		pressureTokens: 0,
+		projectedTokens: 0,
+		contextWindow: 1_000_000,
+	}, 11));
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).contextTokens, 120_000);
+});
+
+test("已有消息但首次 contextPressure 为零时使用消息估算，不显示 0", async () => {
+	const { host } = makeFakeHost({
+		muxFrames: [
+			sessionEventFrame("session-fake-1", event("user/message", 1, {
+				content: [{ type: "text", text: "x".repeat(400) }],
+			})),
+			projectionFrame("session-fake-1", "contextPressure", {
+				pressureTokens: 0,
+				projectedTokens: 0,
+				contextWindow: 1_000_000,
+			}, 2),
+		],
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).contextTokens, 100);
+});
+
+test("session/projection 旧 seq 不得覆盖较新的 contextPressure", async () => {
+	const { host, client } = makeFakeHost({
+		muxFrames: [projectionFrame("session-fake-1", "contextPressure", {
+			pressureTokens: 180_000,
+			projectedTokens: 180_000,
+			contextWindow: 1_000_000,
+		}, 20)],
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	client.pushFrames(projectionFrame("session-fake-1", "contextPressure", {
+		pressureTokens: 90_000,
+		projectedTokens: 90_000,
+		contextWindow: 1_000_000,
+	}, 19));
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).contextTokens, 180_000);
+
+	client.pushFrames(projectionFrame("session-fake-1", "contextPressure", {
+		pressureTokens: 210_000,
+		projectedTokens: 210_000,
+		contextWindow: 1_000_000,
+	}, 21));
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).contextTokens, 210_000);
+});
+
+test("attach projection baseline 的 seq 不得被旧实时帧覆盖", async () => {
+	const { host, sessions, historyBySession } = makeFakeHost({
+		muxFrames: [projectionFrame("session-attached", "contextPressure", {
+			pressureTokens: 90_000,
+			projectedTokens: 90_000,
+			contextWindow: 1_000_000,
+		}, 19)],
+	});
+	sessions.set("session-attached", {
+		sessionId: "session-attached",
+		cwd: PROJECT.path,
+		running: false,
+		blank: false,
+		projections: {
+			asOfSeq: 20,
+			values: {
+				contextPressure: {
+					pressureTokens: 180_000,
+					projectedTokens: 180_000,
+					contextWindow: 1_000_000,
+				},
+			},
+		},
+	});
+	historyBySession.set("session-attached", []);
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({
+		projectId: "project-1",
+		backend: "dsh",
+		dshSessionId: "session-attached",
+	});
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).contextTokens, 180_000);
+});
+
 test("流式正文按累积语义发 agents:text-stream（渲染层 streamingTextByIdAtom 按累积存储）", async () => {
 	const { host } = makeFakeHost({
 		muxFrames: [
