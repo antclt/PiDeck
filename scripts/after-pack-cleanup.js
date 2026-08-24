@@ -8,6 +8,7 @@
  */
 
 const fs = require("node:fs");
+const { finished } = require("node:stream");
 const path = require("node:path");
 const asar = require("@electron/asar");
 const { patchSharpIndexCjs } = require("./patch-sharp-index");
@@ -100,7 +101,12 @@ async function packAsarPreservingUnpacked(srcDir, destAsar, unpacked) {
     unpack: unpackGlobFromFiles(unpacked.files),
     unpackDir: unpackDirGlobFromDirs(unpacked.dirs),
   };
-  await asar.createPackageWithOptions(srcDir, destAsar, options);
+  const output = await asar.createPackageWithOptions(srcDir, destAsar, options);
+  // @electron/asar 返回已创建但尚未写完的 WritableStream；必须等待 close，
+  // 否则调用方会提前 rename 临时 archive，留下空/截断的 app.asar。
+  await new Promise((resolve, reject) => {
+    finished(output, (error) => (error ? reject(error) : resolve()));
+  });
 }
 
 /** 运行时当前平台标识，如 win32-x64 */
@@ -220,7 +226,9 @@ exports.default = async function (context) {
   // 直接使用 API，避免通过 Windows cmd.exe 启动 CLI 导致固定超时。
   // 失败重试时先清掉上一次中断留下的临时目录，避免混入残留文件。
   await rmDir(extractDir);
-  asar.extractAll(asarPath, extractDir);
+  // extractAll 返回 Promise；必须等待解包完成后再扫描 node_modules，否则清理阶段
+  // 会看到空目录并把空的临时目录重新打包，最终丢失整个 app.asar 内容。
+  await asar.extractAll(asarPath, extractDir);
 
   let totalRemoved = 0;
 
@@ -328,6 +336,9 @@ exports.default = async function (context) {
     await packAsarPreservingUnpacked(extractDir, tmpAsar, unpackedPatterns);
     const oldSize = fs.statSync(asarPath).size;
     fs.renameSync(tmpAsar, asarPath);
+    // @electron/asar 会按路径缓存 header；重命名新归档后必须失效旧缓存，
+    // 否则同一 afterPack 进程后续读取仍会看到被删除的文档和旧 unpack 标记。
+    asar.uncache(asarPath);
     await removeAsarRepackArtifacts(asarPath);
     const newSize = fs.statSync(asarPath).size;
     console.log(`[afterPack] asar: 节省 ${(totalRemoved / 1024 / 1024).toFixed(1)} MB (${(oldSize / 1024 / 1024).toFixed(0)} → ${(newSize / 1024 / 1024).toFixed(0)} MB)`);

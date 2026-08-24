@@ -197,7 +197,7 @@ test("sendSessionPrompt rejects empty and whitespace-only drafts", () => {
   const body = returnedFunctionBody("sendSessionPrompt", sessionSendSource);
 
   // Empty/whitespace without images must return early before send
-  assert.match(body, /if\s*\(!hasComposerSubmission\(message,\s*imageSnapshot\)\)\s*return/);
+  assert.match(body, /if\s*\(!hasComposerSubmission\(rawDraft,\s*imageSnapshot\)\)\s*return/);
 });
 
 test("hasComposerSubmission correctly rejects empty messages", () => {

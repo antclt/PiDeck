@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
+import { finished } from "node:stream/promises";
 
 const require = createRequire(import.meta.url);
 const asar = require("@electron/asar");
@@ -28,6 +29,20 @@ async function put(path, content) {
 	await writeFile(path, content, "utf8");
 }
 
+/**
+ * @electron/asar 返回写入流而不是完成 Promise；测试必须等待 close，
+ * 否则 afterPack 可能在 archive 尚未落盘时开始 extract，得到空 fixture。
+ */
+async function createAsarPackage(...args) {
+	const stream = await asar.createPackage(...args);
+	await finished(stream);
+}
+
+async function createAsarPackageWithOptions(...args) {
+	const stream = await asar.createPackageWithOptions(...args);
+	await finished(stream);
+}
+
 function normalizedEntries(archive) {
 	return asar.listPackage(archive).map((entry) => entry.replaceAll("\\", "/").replace(/^\//, ""));
 }
@@ -44,7 +59,7 @@ test("afterPack cleanup preserves the Lark SDK package main entry", async () => 
 		await put(join(packageDir, "es", "index.js"), "export {};\n");
 		await put(join(packageDir, "README.md"), "fixture documentation\n");
 		await mkdir(dirname(archive), { recursive: true });
-		await asar.createPackage(sourceDir, archive);
+		await createAsarPackage(sourceDir, archive);
 
 		await afterPackCleanup({ appOutDir });
 
@@ -102,7 +117,7 @@ test("afterPack cleanup keeps node-pty unpacked after asar repack", async () => 
 		await put(join(sourceDir, "out", "main", "index.js"), "module.exports = {};\n");
 		await put(join(ptyDir, "README.md"), "fixture documentation that forces a repack\n");
 		await mkdir(dirname(archive), { recursive: true });
-		await asar.createPackageWithOptions(sourceDir, archive, {
+		await createAsarPackageWithOptions(sourceDir, archive, {
 			unpack: "{**/*.node,hostEntry.js}",
 		});
 
