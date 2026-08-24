@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../../shared/types";
+import type { ChatMessage, ImageContent } from "../../shared/types";
 
 /**
  * DSH SessionEvent → PiDeck ChatMessage 投影（纯函数，无副作用，可单测）。
@@ -21,7 +21,10 @@ export type DshProjection = {
 	pendingAssistantId?: string;
 	pendingAssistantText: string;
 	pendingAssistantThinking: string;
-	/** 最近一次工具调用的名称（执行中）。 */
+	/** 并行工具调用集合：toolCallId → toolName。tool/result 按 callId 精确收口，
+	 *  避免多个并行工具的结果只更新最后一张卡、其余卡永远 running。 */
+	activeToolCalls: Map<string, string>;
+	/** 最近一次工具调用的名称（执行中，用于状态条展示）。 */
 	executingTool?: string;
 	isStreaming: boolean;
 	model?: { provider: string; model: string };
@@ -86,19 +89,36 @@ function textFromBlocks(blocks: unknown): string {
 	return splitBlocks(blocks).text;
 }
 
-/** 从内容块中提取图片（G2：user/message 的 { type: "image", mediaType, data } 块）。 */
-function imageBlocksFromContent(blocks: unknown): Array<{ type: "image"; data: string; mimeType: string }> {
-	if (!Array.isArray(blocks)) return [];
-	const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
+/** DSH 持久化图片引用：host 把用户提交的图片字节提升为 attachment 服务里的 durable ref。 */
+export type DshImageRef = {
+	attachmentId: string;
+	mediaType: string;
+};
+
+/** 从内容块中提取图片。兼容两种形态：
+ *  - 内联 base64：{ type: "image", mediaType, data }（旧格式/直接落盘）；
+ *  - DSH canonical ref：{ type: "image", attachment: { attachmentId, mediaType } }。
+ * canonical ref 只投影引用，具体字节由 DshAgentManager 异步经 sessions.attachment 拉取。 */
+function imagePartsFromContent(blocks: unknown): { images: ImageContent[]; refs: DshImageRef[] } {
+	if (!Array.isArray(blocks)) return { images: [], refs: [] };
+	const images: ImageContent[] = [];
+	const refs: DshImageRef[] = [];
 	for (const block of blocks) {
 		if (!isRecord(block) || block.type !== "image") continue;
 		const data = block.data;
 		const mediaType = block.mediaType;
 		if (typeof data === "string" && data && typeof mediaType === "string" && mediaType) {
 			images.push({ type: "image", data, mimeType: mediaType });
+			continue;
+		}
+		const attachment = isRecord(block.attachment) ? block.attachment : undefined;
+		const attachmentId = attachment?.attachmentId;
+		const refMediaType = attachment?.mediaType;
+		if (typeof attachmentId === "string" && attachmentId && typeof refMediaType === "string" && refMediaType) {
+			refs.push({ attachmentId, mediaType: refMediaType });
 		}
 	}
-	return images;
+	return { images, refs };
 }
 
 /** 归一化模型路由（request/context.data.provider + model）。 */
@@ -125,6 +145,7 @@ export function projectDshEvent(
 		pendingAssistantText: "",
 		pendingAssistantThinking: "",
 		isStreaming: false,
+		activeToolCalls: new Map<string, string>(),
 		planModeActive: false,
 		stateChanged: false,
 		turnEnded: false,
@@ -156,9 +177,11 @@ export function projectDshEvent(
 			const sourceKind = isRecord(data.source) ? data.source.kind : undefined;
 			if (sourceKind !== undefined && sourceKind !== "user") break;
 			const text = textFromBlocks(data.content);
-			// G2：用户消息的图片块（{ type: "image", mediaType, data }）投影为
-			// ChatMessage.images，历史浏览/重发时图片可恢复显示。
-			const images = imageBlocksFromContent(data.content);
+			// G2：用户消息的图片块投影为 ChatMessage.images，历史浏览/重发时图片可恢复显示。
+			// 内联 base64 直接可显示；DSH canonical attachment ref 先放 meta.dshImageRefs，
+			// 由 DshAgentManager 异步拉取字节后回填 images（避免把投影器变成 async）。
+			const { images, refs } = imagePartsFromContent(data.content);
+			const imageMeta = refs.length > 0 ? { dshImageRefs: refs } : undefined;
 			next.messages = [
 				...base.messages,
 				{
@@ -168,6 +191,7 @@ export function projectDshEvent(
 					text,
 					timestamp: eventTime(event.time),
 					...(images.length > 0 ? { images } : {}),
+					...(imageMeta ? { meta: imageMeta } : {}),
 				},
 			];
 			next.messagesChanged = true;
@@ -352,6 +376,12 @@ export function projectDshEvent(
 			} else {
 				args = rawArgs;
 			}
+			// 并行工具按 callId 登记；executingTool 只是状态条使用的“最近一个”，
+			// 真正的收口依据是 activeToolCalls 集合。
+			const activeToolCalls = new Map(base.activeToolCalls ?? new Map<string, string>());
+			const toolId = callId ?? `dsh-tool-${seq}`;
+			activeToolCalls.set(toolId, toolName);
+			next.activeToolCalls = activeToolCalls;
 			next.messages = [
 				...base.messages,
 				{
@@ -362,7 +392,7 @@ export function projectDshEvent(
 					timestamp: eventTime(event.time),
 					// status=running 驱动渲染层工具卡片的旋转动画；tool/result 到达后清掉。
 					meta: {
-						toolCallId: callId,
+						toolCallId: toolId,
 						toolName,
 						status: "running",
 						...(args !== undefined ? { args } : {}),
@@ -376,50 +406,85 @@ export function projectDshEvent(
 			break;
 		}
 		case "tool/result": {
-			const message = (data.message ?? {}) as { content?: unknown };
+			const message = (data.message ?? {}) as { source?: unknown; content?: unknown };
 			const fullText = textFromBlocks(message.content);
 			// 工具结果截断展示（渲染层工具卡展开区 2000 字符内），完整文本保留在
 			// meta.fullText 供「查看完整输出」按需读取（A3：DSH 会话没有 pi 会话
 			// 文件可定位，全文只能随投影消息走内存）。
 			const truncated = fullText.length > TOOL_RESULT_MAX_CHARS;
 			const text = fullText.slice(0, TOOL_RESULT_MAX_CHARS);
-			if (base.executingTool) {
-				// 更新最后一条 tool 消息为「工具名 + 结果摘要」，并摘掉 running 状态
-				// （工具执行已结束，卡片动画停止；getToolStatus 无 running 即 done）。
-				// 耗时 = result 事件时间 - call 事件时间（渲染层工具卡片显示 formatDuration）。
-				const messages = [...base.messages];
-				const last = messages[messages.length - 1];
-				if (last && last.role === "tool") {
-					const resultTime = eventTime(event.time);
-					const callTime = typeof last.timestamp === "number" ? last.timestamp : resultTime;
-					messages[messages.length - 1] = {
-						...last,
-						text: text ? `${last.text}: ${text}` : last.text,
-						meta: last.meta
-							? {
-								...last.meta,
-								status: "done",
-								durationMs: Math.max(0, resultTime - callTime),
-								// host 为结果事件计算的下发 view（dsh-web 历史页同数据）：
-								// 与 call 侧 meta.view 区分存放（resultView），供轨迹/工具卡
-								// 展示输出/退出码/实际 diff 等结果态信息。
-								...(view !== undefined ? { resultView: view } : {}),
-								// 截断标记与完整文本：渲染层 ToolCard 据此显示「查看完整输出」
-								...(truncated ? { truncated: true as const, fullText } : {}),
-							}
-							: last.meta,
-					};
-					next.messages = messages;
-					next.messagesChanged = true;
+			// DSH 的 tool/result 在 message.source.callId 携带对应的工具调用 id。
+			// 必须按 callId 精确匹配工具卡，不能更新“最后一条 tool”——并发/乱序
+			// 结果下会把结果挂错卡，并把先到的卡永远留在 running。
+			const source = isRecord(message.source) ? message.source : undefined;
+			const resultCallId = typeof source?.callId === "string"
+				? source.callId
+				: typeof data.callId === "string"
+					? data.callId
+					: undefined;
+			const activeToolCalls = new Map(base.activeToolCalls ?? new Map<string, string>());
+			if (resultCallId) activeToolCalls.delete(resultCallId);
+
+			const messages = [...base.messages];
+			let targetIndex = -1;
+			if (resultCallId) {
+				for (let index = messages.length - 1; index >= 0; index -= 1) {
+					const candidate = messages[index];
+					if (candidate.role === "tool" && candidate.meta?.toolCallId === resultCallId) {
+						targetIndex = index;
+						break;
+					}
 				}
 			}
-			next.executingTool = undefined;
+			// 兼容无 callId 的异常/旧数据：退化为最后一条 tool，并同时从活跃集合摘除。
+			if (targetIndex === -1) {
+				for (let index = messages.length - 1; index >= 0; index -= 1) {
+					if (messages[index].role === "tool") {
+						targetIndex = index;
+						break;
+					}
+				}
+			}
+			if (targetIndex >= 0) {
+				const target = messages[targetIndex];
+				// 无 callId 的 fallback 路径也要让活跃集合与卡片同步收口。
+				const fallbackCallId = typeof target.meta?.toolCallId === "string"
+					? target.meta.toolCallId
+					: undefined;
+				if (!resultCallId && fallbackCallId) activeToolCalls.delete(fallbackCallId);
+
+				const resultTime = eventTime(event.time);
+				const callTime = typeof target.timestamp === "number" ? target.timestamp : resultTime;
+				messages[targetIndex] = {
+					...target,
+					text: text ? `${target.text}: ${text}` : target.text,
+					meta: target.meta
+						? {
+							...target.meta,
+							status: "done",
+							durationMs: Math.max(0, resultTime - callTime),
+							// host 为结果事件计算的下发 view（dsh-web 历史页同数据）：
+							// 与 call 侧 meta.view 区分存放（resultView），供轨迹/工具卡
+							// 展示输出/退出码/实际 diff 等结果态信息。
+							...(view !== undefined ? { resultView: view } : {}),
+							// 截断标记与完整文本：渲染层 ToolCard 据此显示「查看完整输出」
+							...(truncated ? { truncated: true as const, fullText } : {}),
+						}
+						: target.meta,
+				};
+				next.messages = messages;
+				next.messagesChanged = true;
+			}
+			next.activeToolCalls = activeToolCalls;
+			next.executingTool = Array.from(activeToolCalls.values()).at(-1);
 			next.stateChanged = true;
 			break;
 		}
 		case "turn/start": {
 			// 新回合立刻清上一轮工具名：否则渲染层 isExecutingTool 会粘到本轮开头，
 			// 状态条显示「工具调用中」而其实还在预热/等首 token（与 pi agent_start 对齐）。
+			// 并行工具集合也一并重置，避免上一轮的残留 callId 影响新回合收口。
+			next.activeToolCalls = new Map<string, string>();
 			next.executingTool = undefined;
 			next.isStreaming = true;
 			next.stateChanged = true;
@@ -465,6 +530,9 @@ export function projectDshEvent(
 			next.pendingAssistantId = undefined;
 			next.pendingAssistantText = "";
 			next.pendingAssistantThinking = "";
+			// 回合结束时并行工具集合一律清空：turn/end 是工具阶段的终态边界。
+			next.activeToolCalls = new Map<string, string>();
+			next.executingTool = undefined;
 			// D9：回合结束（含中断/停止）时，仍 running 的工具卡兜底收口——host 崩溃/取消后
 			// tool/result 可能永远不来，卡片不能一直转圈；只清 running 状态不改文案。
 			if (next.messages.some((m) => m.role === "tool" && m.meta?.status === "running")) {

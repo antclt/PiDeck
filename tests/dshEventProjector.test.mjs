@@ -266,6 +266,94 @@ test("tool/call 与 tool/result 投影工具消息（结果拼到工具行）", 
 	assert.equal(p.executingTool, undefined);
 });
 
+test("并行工具结果按 callId 精确收口（乱序到达不串卡）", () => {
+	let p = projectDshEvent(undefined, event("tool/call", 10, {
+		toolName: "read",
+		callId: "a",
+		arguments: "{}",
+	}), AGENT);
+	p = projectDshEvent(p, event("tool/call", 11, {
+		toolName: "read",
+		callId: "b",
+		arguments: "{}",
+	}), AGENT);
+	p = projectDshEvent(p, event("tool/call", 12, {
+		toolName: "read",
+		callId: "c",
+		arguments: "{}",
+	}), AGENT);
+	assert.equal(p.messages.length, 3);
+	assert.equal(p.activeToolCalls.size, 3);
+	assert.equal(p.executingTool, "read");
+
+	// 先回 c：只能把 c 卡置 done，a/b 仍 running，且不会把结果挂到错误的卡上
+	p = projectDshEvent(p, event("tool/result", 13, {
+		message: {
+			source: { kind: "tool", callId: "c" },
+			content: [{ type: "text", text: "C result" }],
+		},
+	}), AGENT);
+	assert.equal(p.messages[0].meta?.status, "running");
+	assert.equal(p.messages[1].meta?.status, "running");
+	assert.equal(p.messages[2].meta?.status, "done");
+	assert.match(p.messages[2].text, /read: C result/);
+	assert.equal(p.activeToolCalls.size, 2);
+
+	// 回 a：只有 a 卡收口
+	p = projectDshEvent(p, event("tool/result", 14, {
+		message: {
+			source: { kind: "tool", callId: "a" },
+			content: [{ type: "text", text: "A result" }],
+		},
+	}), AGENT);
+	assert.equal(p.messages[0].meta?.status, "done");
+	assert.match(p.messages[0].text, /read: A result/);
+	assert.equal(p.messages[1].meta?.status, "running");
+	assert.equal(p.activeToolCalls.size, 1);
+
+	// 回 b：全部 done，活跃集合清空，状态条不再显示工具执行中
+	p = projectDshEvent(p, event("tool/result", 15, {
+		message: {
+			source: { kind: "tool", callId: "b" },
+			content: [{ type: "text", text: "B result" }],
+		},
+	}), AGENT);
+	assert.equal(p.messages.every((m) => m.meta?.status === "done"), true);
+	assert.equal(p.activeToolCalls.size, 0);
+	assert.equal(p.executingTool, undefined);
+});
+
+test("turn/start 清空并行工具集合（上一轮残留不污染新回合）", () => {
+	let p = projectDshEvent(undefined, event("tool/call", 10, {
+		toolName: "read",
+		callId: "a",
+		arguments: "{}",
+	}), AGENT);
+	p = projectDshEvent(p, event("tool/call", 11, {
+		toolName: "read",
+		callId: "b",
+		arguments: "{}",
+	}), AGENT);
+	assert.equal(p.activeToolCalls.size, 2);
+	p = projectDshEvent(p, event("turn/start", 12), AGENT);
+	assert.equal(p.activeToolCalls.size, 0);
+	assert.equal(p.executingTool, undefined);
+});
+
+test("turn/end 兜底清掉未收到 result 的 running 工具卡", () => {
+	let p = projectDshEvent(undefined, event("tool/call", 10, {
+		toolName: "read",
+		callId: "a",
+		arguments: "{}",
+	}), AGENT);
+	assert.equal(p.messages[0].meta?.status, "running");
+	p = projectDshEvent(p, event("turn/end", 11, { reason: { kind: "completed" } }), AGENT);
+	assert.equal(p.messages[0].meta?.status, "done");
+	assert.equal(p.activeToolCalls.size, 0);
+	assert.equal(p.executingTool, undefined);
+});
+
+
 test("tool/call 的 arguments（JSON 字符串）解析进 meta.args，host view 透传进 meta.view", () => {
 	// DSH 的 tool/call.arguments 是 JSON 字符串（host 侧 presentCall 也 JSON.parse 后消费）；
 	// PiDeck 工具卡片的副标题（command/path/pattern/query/url）、详情与 diff 都读 meta.args。
