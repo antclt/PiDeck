@@ -18,6 +18,46 @@ export function shippedPresetRoot(dshPackageDir: string): string {
 }
 
 /**
+ * dsh-web-app/cordis.patch.yml 中「agent plane moves behind agent presets」
+ * 所禁用的基础层行 id 清单。
+ *
+ * 背景：dsh-base 为无 preset 的 TUI/headless 保留进程级全局工具；web 表面必须
+ * 把这些基础行禁用，才能让每个会话由自己的 agent preset 组装工具目录。PiDeck
+ * 自组 host 若只挂 agentPresetsRow 而漏掉这段禁用，minimal/standard/code 都只是
+ * 叠加自己的工具，全局工具仍会泄漏进所有会话（极简模式失效的根因）。
+ */
+export const dshWebAgentPlaneDisabledIds = [
+	"tool-bash",
+	"tool-pwsh",
+	"tool-jobs",
+	"tool-fs",
+	"tool-fs-search",
+	"tool-str-replace-editor",
+	"skill-filesystem",
+	"tool-skill",
+	"tool-goal",
+	"plan-mode",
+	"compaction-basic",
+	"command-compact",
+	"tool-result-pruner",
+	"tool-subagent-control",
+	"tool-subagent-list-agents",
+	"tool-subagent",
+	"tool-subagent-fork",
+	"workflow-worker-thread",
+	"tool-workflow",
+	"tool-ralph",
+	"agent-instructions",
+	"tool-todo",
+	"tool-web",
+] as const;
+
+/** 生成与 dsh-web-app/cordis.patch.yml 同语义的禁用补丁行（装配层直接 push）。 */
+export function dshWebAgentPlaneDisableRows(): Array<{ id: string; disabled: true }> {
+	return dshWebAgentPlaneDisabledIds.map((id) => ({ id, disabled: true }));
+}
+
+/**
  * agent-presets 组合行：默认 standard（标准模式）+ 随包 system 根。
  * 用户根（$DSH_HOME/.agent-presets）由插件 `includeUserRoot` 默认自动追加，
  * 与 dsh-web 的部署形态（web-app cordis.patch.yml）一致。

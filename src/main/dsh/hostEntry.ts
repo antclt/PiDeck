@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { installHiddenConsolePatch, installHostHiddenConsole } from "./hideChildConsoles";
-import { agentPresetsRow } from "./dshPresetComposition";
+import { agentPresetsRow, dshWebAgentPlaneDisableRows } from "./dshPresetComposition";
 import {
 	backfillMissingProjectionTitles,
 	bindProjectionCacheBackfillDeps,
@@ -119,6 +119,12 @@ async function main(): Promise<void> {
 	const patches = loadOverlayPatches("pideck-dsh", basePatchPath);
 	patches.push({ id: "hmr", disabled: true });
 	patches.push({ id: "session-telemetry-otel", disabled: true });
+	// 复刻 dsh-web-app/cordis.patch.yml 的「agent plane moves behind agent presets」：
+	// 基础层工具必须禁用，否则 minimal/standard/code 等 preset 只是叠加自己的工具，
+	// dsh-base 的进程级全局工具仍会对所有会话可见（极简模式失效的根因）。
+	for (const row of dshWebAgentPlaneDisableRows()) {
+		patches.push(row);
+	}
 	patches.push({
 		insert: [
 			{ id: "storage", name: "@deepseek-ai/dsh-storage" },
@@ -174,6 +180,13 @@ async function main(): Promise<void> {
 			// name 用绝对路径：host 的模块解析锚在 app node_modules，裸名在
 			// utilityProcess 里不一定能走到同一目录。
 			{ id: "bill", name: require.resolve("dsh-bill") },
+			// PiDeck 最小化收敛：host 层仍保留 bill_stats / pwsh_persistent 供
+			// 非 minimal 预设使用，但 minimal 会话必须挡掉这两个全局扩展，
+			// 保持与官方 minimal（Windows 为 pwsh + str_replace_editor）一致。
+			{
+				id: "pideck-minimal-tool-filter",
+				name: "./pideck-minimal-tool-filter.js",
+			},
 		],
 	});
 
@@ -243,6 +256,32 @@ async function main(): Promise<void> {
 				"",
 			].join("\n"),
 		);
+
+	// 极简工具过滤插件：挂在 host 组合里，minimal agent 创建时把 PiDeck 全局
+	// 扩展（bill_stats / pwsh_persistent）从继承工具目录中剔除；非 minimal 预设
+	// 仍保留这两个扩展。只拦继承层，不动 minimal 自身注册的 bash/pwsh/editor。
+	const minimalToolFilterPath = join(configDir, "pideck-minimal-tool-filter.js");
+	writeFileSync(
+		minimalToolFilterPath,
+		[
+			"export default {",
+			"  name: 'pideck-minimal-tool-filter',",
+			"  apply(ctx) {",
+			"    ctx.on('agent/created', ({ agent }) => {",
+			"      try {",
+			"        const presets = ctx.get('agentPresets');",
+			"        if (!presets || typeof presets.composedPreset !== 'function') return;",
+			"        if (presets.composedPreset(agent.ctx) !== 'minimal') return;",
+			"        agent.ctx.tools.restrict({ deny: ['bill_stats', 'pwsh_persistent'] });",
+			"      } catch (error) {",
+			"        console.warn('[pideck-minimal-tool-filter] failed:', error?.message ?? String(error));",
+			"      }",
+			"    });",
+			"  }",
+			"};",
+			"",
+		].join("\n"),
+	);
 
 	const startedAt = Date.now();
 	const ctx = await boot(
