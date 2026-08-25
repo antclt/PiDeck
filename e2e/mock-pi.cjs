@@ -63,8 +63,8 @@ const MODELS = [
 ];
 let currentModel = MODELS[0];
 let currentThinking = "medium";
-// 上下文占比：初始 >30% 让 compact chip 显示（桌面端 >30% 才渲染，见
-// ComposerComponents showCompact）；compact 成功后降到 12%，验证 chip 消失。
+// 上下文占比：初始 45% ≥ 30% 门槛，圆环面板压缩按钮可点；compact 成功后降到 12%，
+// 按钮应变为「暂无需压缩」禁用态。
 let contextPercent = 45;
 // 记录收到的用户 prompt：fork 用例的 get_fork_messages 按文本匹配 entryId。
 const userPrompts = [];
@@ -108,6 +108,10 @@ if (fs.existsSync(TMP_SESSION_FILE_PATH)) {
 	sessionFile = TMP_SESSION_FILE_PATH;
 	try { sessionHeaderWritten = fs.statSync(TMP_SESSION_FILE_PATH).size > 0; } catch { /* ignore */ }
 }
+// 启动即落盘：get_state 必须返回真实 sessionFile，桌面端才会给 catalog 记录 attach
+// filePath（canAttachRuntimeMetadata），会话才走「有文件」的编辑/删除/重发路径而非匿名路径。
+// 旧实现等首次 prompt 才建文件，spawn 时 get_state 返回 undefined，整个会话被当成匿名。
+ensureSessionFile();
 let streamTimer = null;
 let streamStep = 0;
 let streamChunks = [];
@@ -179,6 +183,30 @@ function respondFail(cmd, error) {
 let nextEntrySeq = 1;
 let lastEntryId = null;
 
+// 跨进程续接：重启后的新进程（重发/重启 Agent 会 spawn 新进程）必须从既有文件
+// 恢复条目序号与 leaf，否则新写入的 entry 会复用 e1/e2 等旧 id——与文件头/旧消息
+// 撞 id，SessionHistoryReader 的 byId 索引错乱，活动分支投影残缺（重发后时间线
+// 回退成只有第一轮）。
+if (sessionFile && fs.existsSync(sessionFile)) {
+	try {
+		const content = fs.readFileSync(sessionFile, "utf8");
+		let maxSeq = 0;
+		for (const rawLine of content.split("\n")) {
+			const trimmed = rawLine.trim();
+			if (!trimmed) continue;
+			try {
+				const entry = JSON.parse(trimmed);
+				if (typeof entry.id === "string") {
+					const match = /^e(\d+)$/.exec(entry.id);
+					if (match) maxSeq = Math.max(maxSeq, Number(match[1]));
+					lastEntryId = entry.id;
+				}
+			} catch { /* 单行损坏跳过 */ }
+		}
+		if (maxSeq > 0) nextEntrySeq = maxSeq + 1;
+	} catch { /* 读失败保持默认序号 */ }
+}
+
 /** 把对话写成可被 SessionHistoryReader 分页读取的真实 JSONL（#113 3.2-9） */
 function appendSessionMessages(userText, assistantText) {
 	ensureSessionFile();
@@ -188,7 +216,10 @@ function appendSessionMessages(userText, assistantText) {
 	if (!sessionHeaderWritten) {
 		const headerId = `e${nextEntrySeq++}`;
 		lines.push(JSON.stringify({
-			type: "session_info",
+			// 文件头必须是 type "session"：SessionFileEditor 以此统计 header
+			//（type "session_info" 只是追加的改名记录，头用它会报「found 0 headers」）。
+			type: "session",
+			version: 3,
 			id: headerId,
 			parentId: null,
 			name: userText.slice(0, 40) || "mock session",
@@ -332,16 +363,17 @@ function startStream(userText, options = {}) {
 				content: [{ type: "text", text: reply }],
 				stopReason: "stop",
 			};
-			emit({ type: "message_end", message: full });
-			emit({ type: "agent_end", messages: [full] });
-			emit({ type: "agent_settled" });
-			// 落盘 + 内存同步：历史恢复扫文件；fork/reload 走 get_messages
+			// 落盘必须在 agent_settled 之前：桌面端 settled 后会重读 JSONL 重投影
+			// （绑定 entryId 供编辑/删除/重发定位），文件晚写会导致投影缺最后轮。
 			appendSessionMessages(userText, reply);
 			conversationMessages.push(
 				{ role: "user", content: [{ type: "text", text: userText }] },
 				{ role: "assistant", content: [{ type: "text", text: reply }] },
 			);
 			streaming = false;
+			emit({ type: "message_end", message: full });
+			emit({ type: "agent_end", messages: [full] });
+			emit({ type: "agent_settled" });
 			// 排队 prompt 串行开下一轮
 			const next = pendingPrompts.shift();
 			if (next !== undefined) startStream(next);
@@ -430,7 +462,7 @@ function handleCommand(cmd) {
 			}
 			// 模拟 pi 压缩事件序列：compaction_start → RPC success → compaction_end
 			// → agent_settled。桌面端据此 running → 重载消息 → idle；
-			// compaction_end 触发 emitRuntimeState，占比下降后 compact chip 应消失。
+			// compaction_end 触发 emitRuntimeState，占比下降后压缩按钮禁用。
 			emit({ type: "compaction_start", reason: "manual" });
 			setTimeout(() => {
 				respond(cmd, {});

@@ -25,6 +25,12 @@ import {
   parseImageGenWatermark,
 } from "../../../shared/imageGenParams";
 import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
+import {
+  classifyCompactError,
+  resolveCompactUsagePercent,
+  shouldSkipCompactForLowUsage,
+  type CompactNoticeKind,
+} from "../../../shared/compactFeedback";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import type { ImageGenMeta } from "../../../shared/types/imagegen";
 import {
@@ -117,13 +123,31 @@ import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTime
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
 import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
 
+/** 统一压缩结果 → 用户可见文案；silent 不弹 toast。 */
+function compactNotice(kind: CompactNoticeKind, detail?: string): string | null {
+  switch (kind) {
+    case "done":
+      return t("app.compactDone");
+    case "nothingToDo":
+      return t("app.compactNothingToDo");
+    case "tooSmall":
+      return t("app.compactSessionTooSmall");
+    case "inProgress":
+      return t("app.compactInProgress");
+    case "silent":
+      return null;
+    case "failed":
+      return detail
+        ? t("app.compactFailedWithReason", { error: detail })
+        : t("app.compactFailed");
+  }
+}
+
 /**
  * compact 错误友好文案：requireSessionCommand 的 message 是 i18n 通用失败，
- * pi 原错在 debugDetails。优先用 debugDetails 匹配 nothing-to-do / too-small。
- * 返回 null 表示「无需提示」：压缩被取消（自动压缩撞车 / 新消息打断挂起的
- * 请求）时 pi 已经或即将自动完成压缩，toast 只会让用户困惑——尤其取消响应
- * 可能延迟到用户正常对话后返回（compact RPC 最长挂起 120s），表现为
- * 「没点压缩却弹压缩提示」（2026-08 用户反馈）。
+ * pi 原错在 debugDetails。分类走 shared/compactFeedback（按钮 / /compact 共用）。
+ * silent：压缩被取消（自动压缩撞车 / 新消息打断）不弹 toast——取消响应可能
+ * 延迟到正常对话后返回（RPC 最长 120s），表现为「没点压缩却弹提示」。
  */
 function friendlyCompactError(error: unknown): string | null {
   const debugDetails =
@@ -136,15 +160,7 @@ function friendlyCompactError(error: unknown): string | null {
     .replace(/^Error invoking remote method ['"][^'"]+['"]:\s*/i, "")
     .replace(/^Error:\s*/i, "")
     .trim();
-  const lower = detail.toLowerCase();
-  if (/nothing to compact|already compacted/i.test(lower)) return t("app.compactNothingToDo");
-  if (/session too small|too small/i.test(lower)) return t("app.compactSessionTooSmall");
-  // 压缩被取消：静默。自动压缩在进行/刚结束，或挂起请求被新消息打断——
-  // 压缩要么由 pi 自动完成，要么本就不需要，无需打扰用户。
-  if (/compaction cancelled|cancelled/i.test(lower)) return null;
-  return detail
-    ? t("app.compactFailedWithReason", { error: detail })
-    : t("app.compactFailed");
+  return compactNotice(classifyCompactError(detail), detail);
 }
 
 export type ComposerPickerKind = "model" | "thinking" | "template" | "skill";
@@ -912,6 +928,35 @@ export function useSessionComposerController(
     return resolved;
   }, [projectSessions, sessionReferenceSelections]);
 
+  /**
+   * 手动压缩唯一入口：圆环按钮与 /compact 共用。
+   * 未达 30% 门槛不打 RPC（友好 toast）；压缩中拒绝重复点击；成功弹完成。
+   */
+  const runManualCompact = useCallback(async (
+    target: { sessionId: string; agentId: string; runtimeGeneration: number },
+    prompt?: string,
+  ) => {
+    const live = store.get(sessionRuntimeBySessionIdAtomFamily(sessionId));
+    // 与圆环 occupancy 同一套占用数字：percent=0 但 tokens 非 0 时按 tokens/window 重算。
+    const percent = resolveCompactUsagePercent(live?.state);
+    const compacting = live?.state?.isCompacting === true;
+    if (compacting) {
+      showNotice(t("app.compactInProgress"), 4000);
+      return;
+    }
+    if (shouldSkipCompactForLowUsage(percent, compacting)) {
+      showNotice(t("app.compactSessionTooSmall"), 6000);
+      return;
+    }
+    try {
+      requireSessionCommand(await desktopApi.sessions.compactRuntime(target, prompt));
+      showNotice(t("app.compactDone"), 4000);
+    } catch (error) {
+      const message = friendlyCompactError(error);
+      if (message) showNotice(message, 6000);
+    }
+  }, [sessionId, store]);
+
   const send = useSessionSend({
     sessionId,
     sendPrompt: (input) => desktopApi.sessions.sendPrompt(input),
@@ -935,15 +980,7 @@ export function useSessionComposerController(
     onDraftMutation: markDraftMutation,
     createNewSession: options.onCreateSession,
     compact: async (target, prompt) => {
-      // /compact 与 chip 共用同一友好错误映射（nothing-to-do / too-small / 静默取消）
-      try {
-        requireSessionCommand(await desktopApi.sessions.compactRuntime(target, prompt));
-      } catch (error) {
-        // 压缩失败/被拒是一次性操作提示，限时展示即可；
-        // cancelled（自动压缩撞车等）返回 null，静默不打扰（2026-08 用户反馈）。
-        const message = friendlyCompactError(error);
-        if (message) showNotice(message, 6000);
-      }
+      await runManualCompact(target, prompt);
     },
     resetComposerUi: resetEphemeralUi,
     recordPromptHistory: (targetSessionId, message) => {
@@ -1653,15 +1690,8 @@ export function useSessionComposerController(
       void promoteAndSend();
       return;
     }
-    try {
-      requireSessionCommand(await desktopApi.sessions.compactRuntime(target));
-    } catch (error) {
-      // 压缩失败/被拒是一次性操作提示，限时展示（同 /compact 路径语义）；
-      // cancelled 返回 null 静默
-      const message = friendlyCompactError(error);
-      if (message) showNotice(message, 6000);
-    }
-  }, [runtime?.agentId, runtime?.runtimeGeneration, sessionId, setDraft, promoteAndSend]);
+    await runManualCompact(target);
+  }, [runtime?.agentId, runtime?.runtimeGeneration, sessionId, setDraft, promoteAndSend, runManualCompact]);
 
   const openPicker = useCallback((kind: ComposerPickerKind) => {
     if (kind === "template") void loadTemplates();

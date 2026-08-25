@@ -138,6 +138,9 @@ export class PetWindow {
 				sandbox: readElectronChromiumSandboxPreference(),
 				contextIsolation: true,
 				nodeIntegration: false,
+				// 宠物永远浮在桌面、几乎不获焦。默认 backgroundThrottling 会把后台 rAF
+				// 掐到约 1fps 甚至停在第一帧，表现为 idle/running 都静止。
+				backgroundThrottling: false,
 			},
 		});
 		this.win.webContents.on("preload-error", (_event, failedPreloadPath, error) => {

@@ -591,6 +591,10 @@ export class SessionHistoryReader {
 	async readMessageByMessageId(
 		sessionPath: string,
 		messageId: string,
+		/** 渲染层消息携带的文件条目 id（meta.entryId）。流式期间消息 id 是 live randomUUID，
+		 * 文件里没有对应关系；而投影后的消息带 entryId，必须优先按它定位，否则编辑/删除
+		 * 会落空（delete 走 no-op、edit/resend 报 Message not found）。 */
+		entryIdHint?: string,
 	): Promise<{ entryId: string; role?: string; text: string; images?: ImageContent[] } | undefined> {
 		if (!messageId) return undefined;
 		let index: SessionDisplayIndex;
@@ -611,9 +615,11 @@ export class SessionHistoryReader {
 		}
 		// 兼容三种命中：JSONL 原生 message.id、渲染层合成 ID（agentId-history-entryId）、
 		// 裸 entryId（旧会话无 message.id 时渲染 ID 即 `${agentId}-history-${entryId}`）。
+		// entryIdHint 优先：live 随机 ID 在文件里必然不存在，直接按文件条目 id 锚定。
 		const syntheticId = syntheticHistoryEntryId(messageId);
 		const entry = index.activeMessageEntries.find(
 			(candidate) =>
+				(entryIdHint !== undefined && candidate.id === entryIdHint) ||
 				candidate.messageId === messageId ||
 				candidate.id === messageId ||
 				(syntheticId !== undefined && candidate.id === syntheticId),

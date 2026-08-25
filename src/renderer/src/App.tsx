@@ -167,7 +167,7 @@ import {
 } from "./components/app/AppUtils";
 // ProjectResourcesModal 仅在打开资源弹层时加载
 const ProjectResourcesModal = lazy(() => import("./components/app/ProjectResourcesModal").then((m) => ({ default: m.ProjectResourcesModal })));
-import { createDefaultExternalEditorSettings } from "../../shared/types";
+import { createDefaultExternalEditorSettings, DEFAULT_PET_SCALE } from "../../shared/types";
 import type {
   AgentRuntimeState,
   AgentTab,
@@ -592,7 +592,7 @@ export function App() {
     petEnabled: false,
     petId: "clawd",
     petAlwaysOnTop: true,
-    petScale: 1,
+    petScale: DEFAULT_PET_SCALE,
     petPatrolEnabled: true,
     petPatrolPauseMin: 5,
     favoriteModels: [],
@@ -3582,6 +3582,7 @@ export function App() {
     <ConfigModal
       open={configOpen}
       onClose={() => setConfigOpen(false)}
+      projectPath={activeProject?.path}
       onSaved={() => {
         // 配置保存后不再自动 reload,用户可通过 Restart 按钮手动重载
       }}

@@ -34,6 +34,7 @@ import {
 	Shield,
 	ShieldCheck,
 	Sparkles,
+	PlugZap,
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { showNotice } from "./utils/notice";
@@ -46,6 +47,7 @@ import { ModelsTab } from "./config/ModelsTab";
 import { openDocsInSystemBrowser } from "./config/ConfigShared";
 import { RawTab } from "./config/RawTab";
 import { TrustTab } from "./config/TrustTab";
+import { McpTab, type McpTabHandle } from "./config/McpTab";
 import { SettingsTab } from "./config/SettingsTab";
 import { PromptsTab } from "./config/PromptsTab";
 import { SkillsTab } from "./config/SkillsTab";
@@ -83,7 +85,7 @@ const DEFAULT_MODEL_CONFIG: Pick<
 };
 
 // ── 配置弹窗左侧导航 = shadcn Vertical Tabs ──
-// config 组 5 个子页（模型/认证/设置/信任/原始文件）用 "config:<tab>" 复合值，
+// config 组子页（模型/认证/设置/信任/MCP/原始文件）用 "config:<tab>" 复合值，
 // 其余组直接以 section 名作 value；Tabs 受控 value 由此编码，业务仍走 section/tab 双 state，
 // loadConfig 等既有依赖零改动。
 type ConfigSection =
@@ -105,7 +107,7 @@ const CONFIG_LAST_TAB_KEY = "pideck-config-last-tab";
 
 /** 全部合法 section / config 组子 tab，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
 const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "skills", "prompts", "extensions"];
-const CONFIG_TABS: readonly ConfigTab[] = ["models", "auth", "settings", "trust", "raw"];
+const CONFIG_TABS: readonly ConfigTab[] = ["models", "auth", "settings", "trust", "mcp", "raw"];
 
 /**
  * 读取上次打开的 tab；localStorage 不可用、无记录或值已失效时返回 null（由调用方回退默认值）。
@@ -215,6 +217,8 @@ type ConfigModalProps = {
 	open: boolean;
 	onClose: () => void;
 	onSaved: () => void;
+	/** 当前项目路径：有值时合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
+	projectPath?: string;
 };
 
 // 小窗口保留外边距，避免 Pi 管理页完全压住工作区；821px 以上恢复桌面弹框尺寸。
@@ -290,7 +294,7 @@ export function ConfigModal(props: ConfigModalProps) {
 }
 
 function ConfigModalContent(props: ConfigModalProps) {
-	const { open, onClose, onSaved } = props;
+	const { open, onClose, onSaved, projectPath } = props;
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
@@ -306,6 +310,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 	/** loadConfig 不能依赖 dirtyTabs（否则切 tab 会重建回调并误触发重载）；用 ref 读最新脏集合。 */
 	const dirtyTabsRef = useRef(dirtyTabs);
 	dirtyTabsRef.current = dirtyTabs;
+	/** MCP 页句柄：自管加载/保存，顶部统一保存按钮经 saveByKey 转发。 */
+	const mcpTabRef = useRef<McpTabHandle>(null);
 	/** 关闭弹框时存在未保存修改 → 弹出保存确认（借鉴设置页关闭逻辑） */
 	const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
 	const hasDirty = dirtyTabs.size > 0;
@@ -487,6 +493,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 				const skipAuth = preserved.has("config:auth");
 				const skipSettings = preserved.has("config:settings");
 				const skipTrust = preserved.has("config:trust");
+				const skipMcp = preserved.has("config:mcp");
 				const skipRaw = preserved.has("config:raw");
 				if (target === "models") {
 					const res = await api.config.getModels();
@@ -585,6 +592,14 @@ function ConfigModalContent(props: ConfigModalProps) {
 						setRawFileName("trust.json");
 					}
 					setConfigDiagnostic(res.diagnostic ?? null);
+				} else if (target === "mcp") {
+					// MCP 页自己拉盘；这里只同步源文件编辑器和 force 重载。
+					if (!skipRaw) {
+						const res = await api.config.getMcp(projectPath);
+						setRawContent(res.writableRaw);
+						setRawFileName("mcp.json");
+					}
+					if (options?.force && !skipMcp) void mcpTabRef.current?.reload();
 				} else if (target === "raw") {
 					// 源文件 tab 复用当前 tab 对应的文件
 					const fileName =
@@ -594,7 +609,9 @@ function ConfigModalContent(props: ConfigModalProps) {
 								? "auth.json"
 								: tab === "trust"
 									? "trust.json"
-									: "settings.json";
+									: tab === "mcp"
+										? "mcp.json"
+										: "settings.json";
 					if (!skipRaw) setRawFileName(fileName);
 					const res =
 						fileName === "models.json"
@@ -603,7 +620,9 @@ function ConfigModalContent(props: ConfigModalProps) {
 								? await api.config.getAuth()
 								: fileName === "trust.json"
 									? await api.config.getTrust()
-									: await api.config.getSettings();
+									: fileName === "mcp.json"
+										? await api.config.getMcp(projectPath).then((snapshot) => ({ raw: snapshot.writableRaw, diagnostic: undefined }))
+										: await api.config.getSettings();
 					if (!skipRaw) setRawContent(res.raw);
 					setConfigDiagnostic(res.diagnostic ?? null);
 				}
@@ -617,7 +636,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 				setLoading(false);
 			}
 		},
-		[tab, clearDirty],
+		[tab, clearDirty, projectPath],
 	);
 
 	useEffect(() => {
@@ -1239,6 +1258,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 			await loadConfig("models", { force: true });
 		} else if (rawFileName === "auth.json") await loadConfig("auth", { force: true });
 		else if (rawFileName === "trust.json") await loadConfig("trust", { force: true });
+		else if (rawFileName === "mcp.json") await loadConfig("mcp", { force: true });
 		else await loadConfig("settings", { force: true });
 		return ok;
 	};
@@ -1255,7 +1275,9 @@ function ConfigModalContent(props: ConfigModalProps) {
 						? await api.config.getAuth()
 						: fileName === "trust.json"
 							? await api.config.getTrust()
-							: await api.config.getSettings();
+							: fileName === "mcp.json"
+								? await api.config.getMcp(projectPath).then((snapshot) => ({ raw: snapshot.writableRaw }))
+								: await api.config.getSettings();
 			setRawContent(res.raw);
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
@@ -1640,6 +1662,14 @@ function ConfigModalContent(props: ConfigModalProps) {
 		[markDirty, clearDirty],
 	);
 
+	const handleMcpDirtyChange = useCallback(
+		(dirty: boolean) => {
+			if (dirty) markDirty("config:mcp");
+			else clearDirty("config:mcp");
+		},
+		[markDirty, clearDirty],
+	);
+
 	/** 按 tab 编码分发到对应保存 handler；返回是否保存成功（false = 保存失败，由错误提示区展示原因）。 */
 	const saveByKey = async (tabKey: string): Promise<boolean> => {
 		switch (tabKey) {
@@ -1658,6 +1688,15 @@ function ConfigModalContent(props: ConfigModalProps) {
 				return handleSaveSettings();
 			case "config:trust":
 				return handleSaveTrust();
+			case "config:mcp": {
+				const ok = (await mcpTabRef.current?.save()) ?? false;
+				if (ok) {
+					clearDirty("config:mcp");
+					onSaved();
+					showToast(t("config.saved"));
+				}
+				return ok;
+			}
 			case "config:raw":
 				return handleSaveRaw();
 			case "skills":
@@ -1717,6 +1756,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 		{ id: "auth", label: t("config.nav.auth"), icon: <KeyRound size={14} aria-hidden="true" /> },
 		{ id: "settings", label: t("config.nav.settings"), icon: <Settings2 size={14} aria-hidden="true" /> },
 		{ id: "trust", label: t("config.nav.trust"), icon: <ShieldCheck size={14} aria-hidden="true" /> },
+		{ id: "mcp", label: t("config.nav.mcp"), icon: <PlugZap size={14} aria-hidden="true" /> },
 		{ id: "raw", label: t("config.nav.raw"), icon: <FileCode2 size={14} aria-hidden="true" /> },
 	];
 
@@ -2088,6 +2128,13 @@ function ConfigModalContent(props: ConfigModalProps) {
 							ref={securitySectionRef}
 							onDirtyChange={handleSecurityDirtyChange}
 						/>
+						</div>
+					</TabsContent>
+
+					{/* forceMount：MCP 页自管草稿，切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
+					<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
+						<div className="config-content flex min-h-0 flex-col">
+						<McpTab ref={mcpTabRef} projectPath={projectPath} onDirtyChange={handleMcpDirtyChange} />
 						</div>
 					</TabsContent>
 

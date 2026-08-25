@@ -42,5 +42,6 @@ export const ALL_CONFIG_DIRTY_KEYS: readonly ConfigDirtyKey[] = [
 	"config:auth",
 	"config:settings",
 	"config:trust",
+	"config:mcp",
 	"config:raw",
 ];

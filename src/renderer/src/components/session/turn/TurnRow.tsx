@@ -1,3 +1,6 @@
+import {
+  messageEntryId,
+} from "../../../utils/sessionCommands";
 import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronUp, Clock, Share, SquarePen, Trash } from "lucide-react";
 import { atom, useAtomValue } from "jotai";
@@ -63,8 +66,8 @@ export type TurnRowProps = {
 	onOpenFile?: (path: string) => void;
 	onDiffFile?: DiffFileHandler;
 	onResendUserMessage?: (message: never) => void;
-	onEditMessage?: (messageId: string, newText: string) => void;
-	onDeleteMessage?: (messageId: string) => void;
+	onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
+	onDeleteMessage?: (messageId: string, entryId?: string) => void;
 	/** Agent 正在处理请求或流式输出中时禁用编辑/删除等操作按钮 */
 	agentRunning?: boolean;
 	/** 是否时间线最新一轮（非最新不自动收起） */
@@ -238,14 +241,15 @@ export const TurnRow = memo(
 	};
 	const saveEdit = () => {
 		const targetId = assistantMessages.at(-1)?.message.id;
+		// entryId：流式期间消息 id 是 live randomUUID，文件定位必须用投影携带的 entryId
 		if (targetId && props.onEditMessage) {
-			props.onEditMessage(targetId, editText);
+			props.onEditMessage(targetId, editText, messageEntryId(assistantMessages.at(-1)?.message));
 			setEditing(false);
 		}
 	};
 	const deleteMessage = () => {
 		const targetId = assistantMessages.at(-1)?.message.id;
-		if (targetId) props.onDeleteMessage?.(targetId);
+		if (targetId) props.onDeleteMessage?.(targetId, messageEntryId(assistantMessages.at(-1)?.message));
 	};
 
 	return (

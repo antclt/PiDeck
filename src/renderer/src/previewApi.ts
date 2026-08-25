@@ -2,6 +2,7 @@ import type { PiDesktopApi } from "../../preload";
 import {
 	createDefaultExternalEditorSettings,
 	createDefaultSecurityConfig,
+	DEFAULT_PET_SCALE,
 } from "../../shared/types";
 import type {
 	AppSettings,
@@ -159,7 +160,7 @@ let previewSettings: AppSettings = {
 	petEnabled: false,
 	petId: "clawd",
 	petAlwaysOnTop: true,
-	petScale: 1,
+	petScale: DEFAULT_PET_SCALE,
 	petPatrolEnabled: true,
 	petPatrolPauseMin: 5,
 	favoriteModels: [],
@@ -1029,6 +1030,15 @@ export function createPreviewApi(): PiDesktopApi {
 			getAuth: async () => ({ raw: "{}", parsed: {} }),
 			getSettings: async () => ({ raw: "{}", parsed: {} }),
 			getTrust: async () => ({ raw: "{}", parsed: {} }),
+			getMcp: async () => ({
+				writablePath: "",
+				writableFile: { mcpServers: {} },
+				writableRaw: "{\n  \"mcpServers\": {}\n}\n",
+				layers: [],
+				servers: [],
+			}),
+			saveMcp: async () => ({ valid: true }),
+			probeMcp: async () => ({ ok: true, transport: "stdio" as const, detail: "preview" }),
 			// 预览模式无真实 pi 配置目录，返回占位（源文件页不显示路径行）。
 			getConfigDir: async () => "",
 			saveModels: async () => ({ valid: true }),
@@ -1039,7 +1049,7 @@ export function createPreviewApi(): PiDesktopApi {
 				JSON.stringify({
 					version: 1,
 					exportedAt: new Date().toISOString(),
-					files: { "models.json": {}, "auth.json": {}, "settings.json": {} },
+					files: { "models.json": {}, "auth.json": {}, "settings.json": {}, "mcp.json": { mcpServers: {} } },
 				}),
 			import: async () => ({ valid: true }),
 			fetchModels: async () => ({
@@ -1067,6 +1077,10 @@ export function createPreviewApi(): PiDesktopApi {
 			visionClearLog: async () => ({ ok: true }),
 			visionGetEvents: async () => ({ exists: false, size: 0, events: [], truncated: false }),
 			visionClearEvents: async () => ({ ok: true }),
+			fetchUsage: async () => ({
+				success: false,
+				error: "preview",
+			}),
 		},
 		pet: {
 			onState: noop,

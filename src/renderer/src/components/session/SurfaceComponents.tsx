@@ -12,6 +12,7 @@ import {
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
+import { messageEntryId } from "../../utils/sessionCommands";
 import { toBlob } from "html-to-image";
 import { writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
@@ -787,8 +788,8 @@ export const UserBubble = memo(function UserBubble(props: {
 	onPreviewImage: (image: ImageContent) => void;
 	onOpenFile?: (path: string) => void;
 	onResendUserMessage?: (message: ChatMessage) => void;
-	onEditMessage?: (messageId: string, newText: string) => void;
-	onDeleteMessage?: (messageId: string) => void;
+	onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
+	onDeleteMessage?: (messageId: string, entryId?: string) => void;
 	/** 从该用户消息 fork 新会话；忙碌时不展示入口 */
 	onForkMessage?: (message: ChatMessage) => void;
 	/** 是否为最后一条用户消息，用于控制重发按钮的显隐 */
@@ -967,7 +968,7 @@ export const UserBubble = memo(function UserBubble(props: {
 	/** 原地编辑不影响输入框；先提交给确认弹窗。 */
 	const handleSaveEdit = () => {
 		if (props.onEditMessage && editText.trim()) {
-			props.onEditMessage(message.id, editText);
+			props.onEditMessage(message.id, editText, messageEntryId(message));
 			setEditing(false);
 		}
 	};
@@ -1263,7 +1264,7 @@ export const UserBubble = memo(function UserBubble(props: {
 								variant="ghost"
 								size="icon-sm"
 								className="user-turn-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-								onClick={() => props.onDeleteMessage?.(message.id)}
+								onClick={() => props.onDeleteMessage?.(message.id, messageEntryId(message))}
 								title={t("common.delete")}
 							>
 								<Trash size={14} />

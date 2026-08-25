@@ -315,7 +315,12 @@ export function useSessionSend(options: UseSessionSendOptions) {
         const compactPrompt = trimmedMessage.replace(/^\/compact\s*/, "").trim();
         clearSnapshot(sessionId);
         options.resetComposerUi?.();
-        await options.compact(runtimeTarget, compactPrompt || undefined);
+        try {
+          await options.compact(runtimeTarget, compactPrompt || undefined);
+        } finally {
+          // /compact 是 chrome 命令，不能占用 sending 锁；否则后续消息被静默丢掉。
+          sendingSessionIdsRef.current.delete(sourceSessionId);
+        }
         return;
       }
     }

@@ -2,22 +2,11 @@ import { test, expect } from "./mock-pi-fixture";
 import type { Page } from "@playwright/test";
 
 /**
- * 点击欢迎页「启动 Agent」并等待其生效。
- * 启动初期界面存在重渲染竞态（偶发 click 落在被替换的 DOM 节点上丢失），
- * 用户也会双击，这里以「按钮消失 / 会话视图出现」为生效信号做有限重试。
+ * 等待合成器可用（UI 2.0 合成器优先欢迎页）：不再有「启动 Agent」按钮，
+ * 首次输入即预热并激活 runtime（ComposerArea 首键 activateRuntime）。
  */
 async function startAgent(window: Page) {
-	const startButton = window.getByRole("button", { name: "启动 Agent" });
 	const composer = window.locator(".composer .rich-input");
-	for (let attempt = 0; attempt < 4; attempt += 1) {
-		await startButton.click();
-		// agent 启动后欢迎页按钮消失；同时等待 composer 可用
-		const gone = await startButton
-			.waitFor({ state: "hidden", timeout: 5000 })
-			.then(() => true)
-			.catch(() => false);
-		if (gone) break;
-	}
 	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
 	return composer;
 }
@@ -57,8 +46,8 @@ test("agent flow: prompt -> streaming -> done -> prompt -> abort", async ({ wind
 	await stopButton.click();
 
 	// 5. 停止后回到空闲：发送按钮回归；第二段不应出现完整收尾标记
-	const sendButton = window.locator(".composer-bar-btn.send");
-	await expect(sendButton).toBeVisible({ timeout: 10_000 });
+	const sendControl = window.locator(".composer-send-primary");
+	await expect(sendControl).toHaveAttribute("aria-label", "发送", { timeout: 10_000 });
 	await window.waitForTimeout(1500); // 给残留流 1.5s 窗口，验证封印生效
 	await expect(timeline).not.toContainText("SLOW 第二段」流式渲染验证完成");
 });
@@ -108,53 +97,69 @@ test("agent flow: model picker and thinking level switch apply", async ({ window
 	await window.keyboard.press("Enter");
 	await expect(timeline).toContainText("Mock 回复：「热身」流式渲染验证完成", { timeout: 20_000 });
 
-	// 初始模型来自 get_state
-	const modelButton = window.locator(".composer-bar-btn.model");
+	// 初始模型来自 get_state（UI 2.0：模型与思考级别合并为同一颗按钮，打开后 drill-in 到选择器）
+	const modelButton = window.locator(".composer-bar-btn.model-thinking");
 	await expect(modelButton).toContainText("Mock Model", { timeout: 10_000 });
 
-	// 打开模型选择器，切到 Mock Model Pro
+	// 打开模型选择器，切到 Mock Model Pro（popover 里 drill-in 按钮的可用名以「模型 」开头）
 	await modelButton.click();
+	await window.getByRole("button", { name: /^模型 / }).click();
 	const modelPalette = window.locator("[data-slot='dialog-content'].model-picker");
 	await expect(modelPalette).toBeVisible({ timeout: 5000 });
 	await modelPalette.locator("[data-slot='command-item']", { hasText: "mock-model-pro" }).click();
 	await expect(modelButton).toContainText("Mock Model Pro", { timeout: 10_000 });
 
 	// thinking 级别切换：初始值取决于会话配置（可能来自 ~/.pi/agent/settings.json），
-	// 不断言具体档位，切到 low 后验证生效
-	const thinkingButton = window.locator(".composer-bar-btn.thinking");
-	await thinkingButton.click();
+	// 不断言具体档位，切到 low 后验证生效（popover 里 drill-in 按钮的可用名以「思考 」开头）
+	await modelButton.click();
+	await window.getByRole("button", { name: /^思考 / }).click();
 	const thinkingPalette = window.locator("[data-slot='dialog-content'].thinking-picker");
 	await expect(thinkingPalette).toBeVisible({ timeout: 5000 });
 	await thinkingPalette.locator("[data-slot='command-item']", { hasText: "low" }).first().click();
-	await expect(thinkingButton).toContainText("low", { timeout: 10_000 });
+	await expect(modelButton).toContainText("low", { timeout: 10_000 });
 });
 
 /**
- * compact（#113 3.2-7）：上下文占比 >30% 显示压缩 chip；点击后走真实
- * compact RPC + compaction_start/end 事件序列；完成后占比降至 12%，
- * chip 应消失、agent 回到空闲（发送按钮回归）。
+ * compact：上下文圆环常驻；占用 ≥30% 时面板内压缩按钮可点。
+ * 点击后走真实 compact RPC + compaction_start/end；完成后占比降至 12%，
+ * 按钮变为「暂无需压缩」禁用态，并弹出完成 toast。
  */
-test("agent flow: compact chip compacts and disappears", async ({ window }) => {
+async function openContextMeter(window: Page) {
+	const meter = window.getByTestId("session-context-meter");
+	await expect(meter).toBeVisible({ timeout: 10_000 });
+	await meter.locator("button").first().click();
+	const compactButton = window.getByTestId("session-context-compact");
+	await expect(compactButton).toBeVisible({ timeout: 5_000 });
+	return compactButton;
+}
+
+test("agent flow: compact meter button compacts and reports done", async ({ window }) => {
 	test.setTimeout(120_000);
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 	const composer = await startAgent(window);
 	const timeline = window.locator(".message-timeline");
 
-	// 首轮 run 结束后 emitRuntimeState 带上 contextUsage.percent=45 → chip 出现
 	await composer.click();
 	await window.keyboard.type("压缩前消息");
 	await window.keyboard.press("Enter");
 	await expect(timeline).toContainText("Mock 回复：「压缩前消息」流式渲染验证完成", { timeout: 20_000 });
 
-	const compactChip = window.locator(".composer-bar-btn.compact");
-	await expect(compactChip).toBeVisible({ timeout: 10_000 });
-	await compactChip.click();
+	const compactButton = await openContextMeter(window);
+	await expect(compactButton).toBeEnabled();
+	await compactButton.click();
 
-	// 压缩完成：占比降至 12%（≤30%），chip 隐藏；agent 回到空闲可继续发送
-	await expect(compactChip).toBeHidden({ timeout: 15_000 });
-	await expect(window.locator(".composer-bar-btn.send")).toBeVisible({ timeout: 10_000 });
+	await expect(window.getByText("上下文压缩完成")).toBeVisible({ timeout: 15_000 });
+	await expect(compactButton).toBeDisabled({ timeout: 15_000 });
+	await expect(compactButton).toContainText("暂无需压缩");
+	await expect(window.locator(".composer-send-primary")).toHaveAttribute("aria-label", "发送", { timeout: 10_000 });
 
-	// 压缩后会话仍可继续
+	// 占用已降至门槛以下：/compact 不再打 RPC，直接提示暂无需压缩。
+	// 点发送按钮而不是 Enter——斜杠补全打开时 Enter 会选中建议，草稿不会发出。
+	await composer.click();
+	await window.keyboard.type("/compact");
+	await window.locator(".composer-send-primary").click();
+	await expect(window.getByText("会话内容过少，暂无需压缩")).toBeVisible({ timeout: 10_000 });
+
 	await composer.click();
 	await window.keyboard.type("压缩后继续");
 	await window.keyboard.press("Enter");
@@ -177,9 +182,10 @@ test("agent flow: compact nothing-to-do shows friendly notice", async ({ window 
 	await expect(timeline).toContainText("Mock 回复：「nothing 预热」流式渲染验证完成", { timeout: 20_000 });
 
 	// /compact 路径：prompt 带 NOTHING → mock respondFail("nothing to compact")
+	// 点发送按钮而不是 Enter——斜杠补全打开时 Enter 会选中建议，草稿不会发出。
 	await composer.click();
 	await window.keyboard.type("/compact NOTHING");
-	await window.keyboard.press("Enter");
+	await window.locator(".composer-send-primary").click();
 	await expect(window.getByText("上下文还很小，暂无可压缩内容")).toBeVisible({ timeout: 10_000 });
 });
 
@@ -275,7 +281,7 @@ test("agent flow: restart agent keeps session usable", async ({ window }) => {
 	// composer 可用信号：TipTap 可用时不渲染 aria-disabled（只在 disabled 时输出
 	// aria-disabled="true"），可编辑状态用 contenteditable="true" 表示
 	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
-	await expect(window.locator(".composer-bar-btn.send")).toBeVisible({ timeout: 30_000 });
+	await expect(window.locator(".composer-send-primary")).toHaveAttribute("aria-label", "发送", { timeout: 30_000 });
 
 	// 续聊正常
 	await composer.click();

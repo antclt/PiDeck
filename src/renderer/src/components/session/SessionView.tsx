@@ -71,8 +71,8 @@ export type SessionViewProps = {
   onOpenFile?: (path: string) => void;
   onDiffFile?: (path: string) => void;
   onResendUserMessage?: (message: any) => void;
-  onEditMessage?: (messageId: string, newText: string) => void;
-  onDeleteMessage?: (messageId: string) => void;
+  onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
+  onDeleteMessage?: (messageId: string, entryId?: string) => void;
   onForkMessage?: (message: any) => void;
   forkingMessageId?: string | null;
   onToast: (message: string) => void;

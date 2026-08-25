@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { FoldVertical } from "lucide-react";
 import { t } from "../../i18n";
-import type { AgentRuntimeState } from "../../../../shared/types";
+import type { AgentRuntimeState, ProviderUsageResult } from "../../../../shared/types";
+import { desktopApi } from "../../desktopApi";
+import { compactUiState, resolveCompactUsagePercent } from "../../../../shared/compactFeedback";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { buildSessionStatusDetail } from "./SurfaceComponents";
 import { formatPercent } from "./TimelineFormat";
@@ -20,8 +22,9 @@ import { formatPercent } from "./TimelineFormat";
  * - 完整会话详情：复用会话头部 SessionStatus 的明细构建器（buildSessionStatusDetail），
  *   包含上下文/输入输出/缓存读写/命中率/费用，以及「最近一次回复」的性能组
  *   （TTFT 首字、总耗时、tps）——圆环面板与会话头部共用同一份明细，语义一致；
- * - 压缩上下文按钮：从原右上角紧凑徽章移入面板，保留 urgency 色阶
- *   （≥90 红 / ≥70 黄），压缩中禁用并显示进度态。
+ * - 压缩上下文按钮：从原右上角紧凑徽章移入面板。占用未达
+ *   COMPACT_READY_PERCENT（30%）时禁用并说明「未到建议门槛」，避免空 RPC；
+ *   达标后可点，urgency 色阶 ≥90 红 / ≥70 黄；压缩中禁用并显示进度态。
  *
  * 边界：
  * - percent 或 window 缺失时不渲染（模型切换瞬间可能短暂无 capacity，此时也关闭
@@ -39,6 +42,16 @@ const COLOR_SYSTEM_TOOLS = "var(--color-context-system-tools, rgb(167, 139, 250)
 /** host contextBreakdown 三段图例色（dsh-web ROWS 色系）：系统=蓝灰、工具=紫、对话=蓝。 */
 const COLOR_SYSTEM = "var(--color-context-system, #94a3b8)";
 const COLOR_TOOLS = "var(--color-context-tools, rgb(167, 139, 250))";
+
+/** 面板内 provider 用量查询缓存：按 provider 去抖，60s 内不重复请求。 */
+const USAGE_CACHE_TTL_MS = 60_000;
+/** 面板内 provider 用量查询的进程级缓存（模块内一处，避免每次打开都弹请求）。 */
+const usageCache = new Map<string, ProviderUsageResult>();
+
+/** @internal 仅供测试：清空用量缓存。 */
+export function _resetUsageCacheForTests(): void {
+	usageCache.clear();
+}
 
 /** token 数紧凑格式化（dsh StatsLine 同款）：<1K 原样，<1M 用 K，之后用 M；
  *  ≥100 取整，其余保留一位小数。 */
@@ -59,13 +72,11 @@ export function contextOccupancy(
 ): { percent: number; usedTokens?: number; contextWindow?: number } | null {
 	const usedTokens = state?.contextTokens ?? undefined;
 	const contextWindow = state?.contextWindow ?? undefined;
-	if (state?.contextPercent == null || contextWindow == null) return null;
-	let percent = state.contextPercent;
-	if (percent <= 0 && usedTokens != null && usedTokens > 0 && contextWindow > 0) {
-		percent = (usedTokens / contextWindow) * 100;
-	}
+	// 百分比与 /compact 共用 resolveCompactUsagePercent，避免圆环和斜杠门槛分叉。
+	const percent = resolveCompactUsagePercent(state);
+	if (percent == null || contextWindow == null) return null;
 	return {
-		percent: Math.min(100, percent),
+		percent,
 		usedTokens,
 		contextWindow,
 	};
@@ -110,6 +121,7 @@ export function SessionContextMeter(props: {
 		| "inputTokens" | "outputTokens" | "isCompacting"
 		| "cost" | "ttftMs" | "totalMs" | "tps"
 		| "cacheRead" | "cacheWrite" | "cacheTotal"
+		| "provider"
 	>;
 	/** 压缩上下文（原右上角紧凑徽章动作，迁入面板底部） */
 	onCompact?: () => void;
@@ -131,6 +143,39 @@ export function SessionContextMeter(props: {
 		props.state?.cacheHitAveragePercent ?? undefined,
 		props.state?.cacheHitSampleCount ?? 0,
 	);
+
+	// ── 面板内 provider 用量/余额查询 ─────────────────────────────
+	// 打开面板时按当前 provider 查一次用量（滚动/每周/每月三档百分比，opencode-go 等
+	// OpenAI 兼容网关优先）。查询成本是一次主进程 GET，未命名 provider 不查、查失败静默
+	// 展示“用量不可用”，不影响其它面板信息。用模块级缓存按 provider 去抖，避免每次
+	// 打开都弹网络请求（60s 内不重查）。
+	const [usage, setUsage] = useState<ProviderUsageResult | null>(null);
+	const [usageLoading, setUsageLoading] = useState(false);
+	const provider = props.state?.provider?.trim();
+	useEffect(() => {
+		if (!open || !provider) return;
+		const cached = usageCache.get(provider);
+		if (cached && cached.at != null && Date.now() - cached.at < USAGE_CACHE_TTL_MS) {
+			setUsage(cached);
+			return;
+		}
+		let cancelled = false;
+		setUsageLoading(true);
+		desktopApi.config.fetchUsage(provider)
+			.then((result) => {
+				if (cancelled) return;
+				setUsage(result);
+				if (result.success) usageCache.set(provider, result);
+			})
+			.finally(() => { if (!cancelled) setUsageLoading(false); })
+			.catch(() => { if (!cancelled) { setUsageLoading(false); } });
+		return () => { cancelled = true; };
+	}, [open, provider]);
+
+	const usagePeriods = usage?.periods;
+	const usageFailed = usage != null && !usage.success && (usage?.raw ?? "") === "";
+	// 有 provider 名才渲染用量区块：加载中/失败/成功三种态在区块内部切换。
+	const showUsage = provider != null;
 
 	// 模型切换瞬间 capacity 可能暂时消失：不渲染过期面板
 	useEffect(() => {
@@ -231,10 +276,12 @@ export function SessionContextMeter(props: {
 		})()
 		: undefined;
 	const showCompact = props.onCompact !== undefined;
-	// 与旧右上角紧凑徽章一致的 urgency 色阶：≥90 红（危险）/ ≥70 黄（警告）/ 其余默认
+	// 压缩按钮态走共享策略：未达 30% 禁用（点了也不会发 RPC）；压缩中禁用。
+	const compactUi = compactUiState(percent, compacting);
+	const compactDisabled = compactUi.compacting || !compactUi.ready;
 	const compactUrgency =
-		percent >= 90 ? "text-destructive border-destructive/40 hover:bg-destructive/10" :
-		percent >= 70 ? "text-amber-500 border-amber-500/40 hover:bg-amber-500/10" :
+		compactUi.urgency === "danger" ? "text-destructive border-destructive/40 hover:bg-destructive/10" :
+		compactUi.urgency === "warn" ? "text-amber-500 border-amber-500/40 hover:bg-amber-500/10" :
 		"border-border hover:bg-muted/60";
 
 	return (
@@ -432,18 +479,77 @@ export function SessionContextMeter(props: {
 							))}
 						</div>
 					)}
+					{provider && showUsage && (
+						<div className="mt-2.5 space-y-1.5 border-t border-border pt-2" data-testid="session-context-usage">
+							<div className="px-0.5 text-micro font-semibold uppercase tracking-wide text-text-tertiary">
+								{t("sessionContext.usageHeader")}
+							</div>
+							{usageLoading && !usage ? (
+								<div className="px-0.5 text-caption leading-5 text-text-tertiary">
+									{t("sessionContext.usageRefreshing")}
+								</div>
+							) : usageFailed ? (
+								<div className="px-0.5 text-caption leading-5 text-text-tertiary" title={usage?.error ?? undefined}>
+									{t("sessionContext.usageError")}
+								</div>
+							) : usagePeriods ? (
+								<div className="space-y-1">
+									{(["rolling", "weekly", "monthly"] as const).map((key) => {
+										const period = usagePeriods[key];
+										const label = key === "rolling"
+											? t("sessionContext.usageRolling")
+											: key === "weekly"
+												? t("sessionContext.usageWeekly")
+												: t("sessionContext.usageMonthly");
+										if (!period) return null;
+										const pct = period.percent ?? 0;
+										// 用量≥90% 时红字警示（与上下文占用 urgency 同源判断）
+										const urgent = period.percent != null && period.percent >= 90;
+										return (
+											<div key={key} className="flex items-center gap-1.5">
+												<span className="w-12 flex-none shrink-0 text-caption leading-5 text-text-secondary">
+													{label}
+												</span>
+												<span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+													<span
+														className={`block h-full rounded-full ${urgent ? "bg-destructive" : "bg-text-tertiary"}`}
+														style={{ width: `${Math.min(100, pct)}%` }}
+													/>
+												</span>
+												<span className={`w-9 flex-none text-right font-mono tabular-nums ${urgent ? "text-destructive font-semibold" : "text-text-tertiary"}`}>
+													{period.percent != null ? `${Math.round(period.percent)}%` : t("sessionContext.usageUnknown")}
+												</span>
+											</div>
+										);
+									})}
+								</div>
+							) : null}
+						</div>
+					)}
 					{showCompact && (
 						<button
 							type="button"
-							disabled={compacting}
+							data-testid="session-context-compact"
+							disabled={compactDisabled}
+							title={
+								compactUi.compacting
+									? t("sessionContext.compacting")
+									: compactUi.ready
+										? t("sessionContext.compact")
+										: t("sessionContext.compactNotReadyHint")
+							}
 							onClick={props.onCompact}
 							className={`mt-2 flex h-7 w-full items-center justify-center gap-1.5 rounded-md border bg-transparent text-xs font-medium transition-colors disabled:cursor-default disabled:opacity-60 ${compactUrgency}`}
 						>
 							<FoldVertical
 								size={13}
-								className={compacting ? "animate-spin" : undefined}
+								className={compactUi.compacting ? "animate-spin" : undefined}
 							/>
-							{compacting ? t("sessionContext.compacting") : t("sessionContext.compact")}
+							{compactUi.compacting
+								? t("sessionContext.compacting")
+								: compactUi.ready
+									? t("sessionContext.compact")
+									: t("sessionContext.compactNotReady")}
 						</button>
 					)}
 					</div>,

@@ -74,6 +74,17 @@ test("pi goal extension: a new goal typed after complete replaces the old object
   assert.match(extension, /暂停\/阻塞 ≠ 完成：正文保持原文推进同一目标/);
 });
 
+test("pi goal extension: resume kicks off a turn and abort stops the loop", () => {
+  // resume/on/enable 后必须真正派发一轮续跑，而不是只把 phase 置回 active 空转。
+  assert.match(extension, /kickOffContinuation\(\);/);
+  assert.match(extension, /恢复必须真正触发一轮续跑：否则 agent 空闲时 goal 只标 active、不干活/);
+  // 恢复与自动续轮共用同一派发 helper（triggerTurn + followUp）。
+  assert.match(extension, /function kickOffContinuation\(\): void \{[\s\S]*?triggerTurn: true, deliverAs: "followUp"/);
+  // Stop 会话（abort）后 agent_end 不再自动续轮：检查 assistant 的 stopReason。
+  assert.match(extension, /lastAssistant\.stopReason === "aborted" \|\| lastAssistant\.stopReason === "error"/);
+  assert.match(extension, /停止会话却停不下来/);
+});
+
 test("send path keeps DSH off agentMessage and uses /goal transform", () => {
 	assert.match(sendHook, /applyDshGoalSendTransform/);
 	assert.match(sendHook, /isDshSend \? "normal" : sendMode/);

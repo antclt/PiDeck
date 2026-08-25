@@ -54,10 +54,18 @@ export const GitTab = memo(function GitTab(props: GitTabProps) {
               variant="outline"
               className="w-full justify-start font-mono text-xs"
               onClick={props.onOpenGitModelPicker}
+              // title 兜底完整值：长供应商/模型在按钮内被 truncate 省略时，悬停仍可读全。
+              title={
+                draft.gitCommitMessageProvider && draft.gitCommitMessageModel
+                  ? `${draft.gitCommitMessageProvider}/${draft.gitCommitMessageModel}`
+                  : t("settings.gitCommitMessageModelUnset")
+              }
             >
-              {draft.gitCommitMessageProvider && draft.gitCommitMessageModel
-                ? `${draft.gitCommitMessageProvider}/${draft.gitCommitMessageModel}`
-                : t("settings.gitCommitMessageModelUnset")}
+              <span className="min-w-0 truncate">
+                {draft.gitCommitMessageProvider && draft.gitCommitMessageModel
+                  ? `${draft.gitCommitMessageProvider}/${draft.gitCommitMessageModel}`
+                  : t("settings.gitCommitMessageModelUnset")}
+              </span>
             </Button>
           </SettingRow>
           <SettingTextarea

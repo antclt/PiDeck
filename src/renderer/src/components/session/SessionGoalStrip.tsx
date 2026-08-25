@@ -99,7 +99,7 @@ export function SessionGoalStrip(props: { sessionId: string }) {
 				<span className="shrink-0 text-[13px] font-medium leading-6 text-foreground">
 					{phaseLabel}
 				</span>
-				<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-tertiary">
+				<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-tertiary" title={goal.objective}>
 					{goal.objective}
 				</span>
 				<div className="flex shrink-0 items-center gap-0.5">

@@ -5,6 +5,14 @@ import type {
 } from "../../../shared/types";
 import { t, type TranslationKey } from "../i18n";
 
+/**
+ * 取消息携带的文件条目 id（meta.entryId）。meta 是 Record<string, unknown>，
+ * 这里收窄成 string；编辑/删除/重发用它对 JSONL 做锚点定位（live randomUUID 无效）。
+ */
+export function messageEntryId(message: { meta?: Record<string, unknown> | undefined } | undefined): string | undefined {
+	return typeof message?.meta?.entryId === "string" ? message.meta.entryId : undefined;
+}
+
 const SESSION_COMMAND_ERROR_KEYS: Record<SessionCommandError["code"], TranslationKey> = {
 	SESSION_NOT_FOUND: "sessionCommand.sessionNotFound",
 	MESSAGE_NOT_FOUND: "sessionCommand.messageNotFound",

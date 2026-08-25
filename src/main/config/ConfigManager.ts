@@ -4,6 +4,13 @@ import { dirname as posixDirname, normalize as posixNormalize } from "node:path/
 import { homedir } from "node:os";
 import { net } from "electron";
 import type { ConfigFileDiagnostic, ConfigFileReadResult } from "../../shared/types";
+import type { McpConfigFile, McpConfigSnapshot, McpProbeResult, McpServerDefinition } from "../../shared/types/mcp";
+import {
+	loadMcpConfigSnapshot,
+	mcpDocsUrl,
+	probeMcpServer,
+	validateMcpConfigFile,
+} from "./mcpConfig";
 import {
 	ensureOpenAiVersionPath,
 	needsSessionBaseUrlVersionHint,
@@ -15,7 +22,14 @@ import {
 	type MainProcessTranslationKey,
 } from "../../shared/i18n/mainProcessCopy";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
+import type { ProviderUsageResult } from "../../shared/types/providerUsage";
 import { parseProviderModelsResponse } from "./parseProviderModels";
+import {
+	candidateApplies,
+	parseUsageResponseBody,
+	USAGE_PROBE_CANDIDATES,
+	usageProbeUrls,
+} from "./providerUsageProbe";
 import {
 	enrichFetchedModelFromCatalog,
 	getPiAiCatalogIndex,
@@ -93,7 +107,7 @@ type TestRequest = {
 };
 
 /**
- * 管理 pi 全局配置文件（~/.pi/agent/ 下的 models.json、auth.json、settings.json）。
+ * 管理 pi 全局配置文件（~/.pi/agent/ 下的 models.json、auth.json、settings.json、mcp.json）。
  * 按照 pi 实际文件格式解析：models.json 是嵌套 providers 结构，auth.json 是对象映射。
  */
 export class ConfigManager {
@@ -134,6 +148,25 @@ export class ConfigManager {
 
 	async getTrustConfig(): Promise<ConfigFileReadResult<Record<string, boolean>>> {
 		return this.readJsonFile<Record<string, boolean>>("trust.json", {});
+	}
+
+	/**
+	 * 合并 pi-mcp-adapter 各层 mcp.json；可写层固定为当前 configDir/mcp.json。
+	 * projectPath 有值时额外合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。
+	 */
+	async getMcpConfig(projectPath?: string): Promise<McpConfigSnapshot> {
+		return loadMcpConfigSnapshot(this.configDir, projectPath);
+	}
+
+	async saveMcpConfig(file: McpConfigFile): Promise<ConfigValidationResult> {
+		const error = validateMcpConfigFile(file);
+		if (error) return { valid: false, error };
+		await this.writeJsonFile("mcp.json", file);
+		return { valid: true };
+	}
+
+	async probeMcpServer(definition: McpServerDefinition): Promise<McpProbeResult> {
+		return probeMcpServer(definition);
 	}
 
 	async ensureTrustedDirectory(directoryPath: string): Promise<void> {
@@ -250,7 +283,12 @@ export class ConfigManager {
 			};
 		}
 
-		const allowed = ["models.json", "auth.json", "settings.json", "trust.json"];
+		const allowed = ["models.json", "auth.json", "settings.json", "trust.json", "mcp.json"];
+		if (fileName === "mcp.json") {
+			const parsed = JSON.parse(rawJson) as McpConfigFile;
+			const mcpError = validateMcpConfigFile(parsed);
+			if (mcpError) return { valid: false, error: mcpError };
+		}
 		if (!allowed.includes(fileName)) {
 			return {
 				valid: false,
@@ -350,6 +388,7 @@ export class ConfigManager {
 	private docsUrlForFile(fileName: string) {
 		if (fileName === "models.json") return "https://pi.dev/docs/latest/models";
 		if (fileName === "settings.json") return "https://pi.dev/docs/latest/settings";
+		if (fileName === "mcp.json") return mcpDocsUrl();
 		return "https://pi.dev/docs/latest/providers";
 	}
 
@@ -992,12 +1031,13 @@ export class ConfigManager {
 
 	// ── 导出 / 导入 ───────────────────────────────────────
 
-	/** 将三个配置文件打包为单个 JSON 对象，便于用户备份和迁移。 */
+	/** 将 pi 配置文件打包为单个 JSON 对象，便于用户备份和迁移。 */
 	async exportConfig(): Promise<string> {
-		const [models, auth, settings] = await Promise.all([
+		const [models, auth, settings, mcp] = await Promise.all([
 			this.readJsonFile<PiModelsFile>("models.json", { providers: {} }),
 			this.readJsonFile<PiAuthFile>("auth.json", {}),
 			this.readJsonFile<PiSettings>("settings.json", {}),
+			this.readJsonFile<McpConfigFile>("mcp.json", { mcpServers: {} }),
 		]);
 		return JSON.stringify(
 			{
@@ -1007,6 +1047,7 @@ export class ConfigManager {
 					"models.json": models.parsed,
 					"auth.json": auth.parsed,
 					"settings.json": settings.parsed,
+					"mcp.json": mcp.parsed,
 				},
 			},
 			null,
@@ -1036,7 +1077,7 @@ export class ConfigManager {
 			return { valid: false, error: this.translate("mainConfig.importFilesRequired") };
 		}
 
-		// 按需写入，只处理三个已知文件名，忽略其他 key
+		// 按需写入已知文件；mcp.json 走 adapter 校验，避免脏包覆盖可写层。
 		const allowed: Array<[string, string]> = [
 			["models.json", "models.json"],
 			["auth.json", "auth.json"],
@@ -1047,6 +1088,99 @@ export class ConfigManager {
 				await this.writeJsonFile(fileName, files[key]);
 			}
 		}
+		if (files["mcp.json"] != null) {
+			const mcpFile = files["mcp.json"] as McpConfigFile;
+			const mcpError = validateMcpConfigFile(mcpFile);
+			if (mcpError) return { valid: false, error: mcpError };
+			await this.writeJsonFile("mcp.json", mcpFile);
+		}
 		return { valid: true };
+	}
+
+	/**
+	 * 查询 provider 用量/余额（首个适配 opencode-go /v1/usage）。
+	 *
+	 * 设计：从 USAGE_PROBE_CANDIDATES 里按 baseUrl/apiType 匹配适用候选，逐个尝试
+	 * 探测 URL；解析成功的第一个结果即为返回。全部失败时返回结构化错误，并做
+	 * 密钥脱敏，避免把 token 回传给渲染层。后续新增 provider 适配器时只需在
+	 * providerUsageProbe 的候选表里登记录入，无需改本方法。
+	 */
+	async fetchProviderUsage(
+		baseUrl: string,
+		apiKey: string,
+		apiType?: string,
+		requestHeaders?: Record<string, string>,
+	): Promise<ProviderUsageResult> {
+		const api = this.normalizeApiType(apiType);
+		const extraHeaders = this.normalizeRequestHeaders(requestHeaders);
+		const startedAt = Date.now();
+
+		// 过滤出适用于此 provider 的候选端点。
+		const applicable = USAGE_PROBE_CANDIDATES.filter((c) =>
+			candidateApplies(c, baseUrl, api),
+		);
+		if (applicable.length === 0) {
+			return {
+				success: false,
+				error: this.translate("mainConfig.providerUsageUnsupported"),
+			};
+		}
+
+		// 无 key 时只可能 401，快速失败并给出提示。
+		if (!apiKey) {
+			return { success: false, error: this.translate("mainConfig.providerUsageNoKey") };
+		}
+
+		// 逐候选、逐 URL 尝试；命中的首个成功即返回。
+		for (const candidate of applicable) {
+			const urls = usageProbeUrls(candidate, baseUrl, (url) =>
+				this.ensureVersionPath(url),
+			);
+			for (const requestUrl of urls) {
+				const controller = new AbortController();
+				const timeout = setTimeout(
+					() => controller.abort(),
+					PROVIDER_TEST_TIMEOUT_MS,
+				);
+				try {
+					const res = await net.fetch(requestUrl, {
+						method: "GET",
+						headers: this.withOpenAiSdkUserAgent({
+							Authorization: `Bearer ${apiKey}`,
+							...extraHeaders,
+						}),
+						signal: controller.signal,
+					});
+					const raw = await res.text();
+					const safeRaw = this.redactSecret(raw, apiKey);
+					if (!res.ok) {
+						// 非 2xx：可能是端点不存在，换下一个 URL/候选继续。
+						continue;
+					}
+					let body: unknown;
+					try {
+						body = JSON.parse(raw);
+					} catch {
+						body = null;
+					}
+					const parsed = parseUsageResponseBody(body, safeRaw);
+					if (parsed.matched) {
+						return {
+							success: true,
+							periods: parsed.periods,
+							at: startedAt,
+						};
+					}
+					// 2xx 但结构不匹配：不是预期的 usage 端点，继续探测。
+				} finally {
+					clearTimeout(timeout);
+				}
+			}
+		}
+
+		return {
+			success: false,
+			error: this.translate("mainConfig.providerUsageFailed"),
+		};
 	}
 }

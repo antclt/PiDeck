@@ -50,6 +50,9 @@ export const test = base.extend<MockPiFixture & { seedProjects: SeedProject[] | 
 			// %APPDATA%/pi-desktop-dev；但命令行显式传 --user-data-dir 时尊重该路径
 			// （见 main/index.ts「开发态与正式版隔离 userData」注释），
 			// 因此这里预置文件直接写到 --user-data-dir 指定的 profile 目录。
+			// dshHomeDir：DSH_HOME 优先读用户真实 ~/.dsh（DshHost 设计），隔离 userData
+			// 也挡不住它——本机若配过 DSH，foreign sync 会把真实会话的 cwd 注册成项目，
+			// 污染侧栏断言（2026-11 修）。这里指向临时目录下不存在的位置，让 DSH 走全新 home。
 			mkdirSync(join(userDataRoot, "profile"), { recursive: true });
 			writeFileSync(
 				join(userDataRoot, "profile", "settings.json"),
@@ -57,6 +60,7 @@ export const test = base.extend<MockPiFixture & { seedProjects: SeedProject[] | 
 					customPiPath: shimPath,
 					piEnvironmentChecked: true,
 					enableGitManagement: true,
+					dshHomeDir: join(userDataRoot, "dsh-home"),
 					...(seedSettings ?? {}),
 				}),
 			);

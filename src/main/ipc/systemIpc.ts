@@ -38,7 +38,10 @@ import {
 	previewProviderMigration,
 	type ProviderMigrationDeps,
 } from "../config/providerMigrationService";
+import { piBuiltinSnapshotFromCatalog } from "../config/providerMigration";
+import { resolveProviderUsageEndpoint } from "../config/providerUsageResolver";
 import type { ProviderMigrationDirection } from "../../shared/types/providerMigration";
+import type { McpConfigFile, McpServerDefinition } from "../../shared/types/mcp";
 
 /**
  * IPC 边界校验：RPC 日志条目必须字段齐全，防止渲染层传伪造对象写盘。
@@ -1001,6 +1004,31 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configGetTrust, () =>
 		configManager.getTrustConfig(),
 	);
+	// MCP 配置只读合并：projectPath 可选，非法输入当全局层处理。
+	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectPath?: unknown) => {
+		const path =
+			typeof projectPath === "string" && projectPath.trim().length > 0
+				? projectPath.trim()
+				: undefined;
+		return configManager.getMcpConfig(path);
+	});
+	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown) => {
+		if (!data || typeof data !== "object" || Array.isArray(data)) {
+			return { valid: false, error: "mcp.json must be an object" };
+		}
+		const result = await configManager.saveMcpConfig(data as McpConfigFile);
+		void appLogger.info("config", "MCP config saved", {
+			serverCount: Object.keys((data as McpConfigFile).mcpServers ?? {}).length,
+		});
+		return result;
+	});
+	// 轻量探测：不 spawn 用户 command、不连 MCP SDK。
+	ipcMain.handle(ipcChannels.configProbeMcp, async (_event, definition: unknown) => {
+		if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
+			return { ok: false, error: "invalid MCP server definition" };
+		}
+		return configManager.probeMcpServer(definition as McpServerDefinition);
+	});
 	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
 	ipcMain.handle(ipcChannels.configGetDir, () =>
 		configManager.getConfigDir(),
@@ -1071,8 +1099,41 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		});
 		return result;
 	});
+	ipcMain.handle(ipcChannels.configFetchUsage, async (
+		_event,
+		payload: { provider: string },
+	) => {
+		// 1) 边界校验：provider 名必须是有限的非空字符串，避免把任意 IPC 载荷当路径/URL 用。
+		const provider = payload?.provider?.trim() ?? "";
+		if (!provider || provider.length > 128) {
+			return { success: false, error: "Invalid provider name" };
+		}
+		// 2) 主进程按 provider 名解析端点（models.json → catalog 兜底），key 不出主进程。
+		const catalog = getPiAiCatalogIndex();
+		const lookup = {
+			getModelsConfig: () => configManager.getModelsConfig(),
+			getAuthConfig: () => configManager.getAuthConfig(),
+			catalogProvider: (name: string) =>
+				piBuiltinSnapshotFromCatalog(name, undefined, catalog),
+		};
+		const resolved = await resolveProviderUsageEndpoint(lookup, provider);
+		if (!resolved.matched || !resolved.baseUrl) {
+			return { success: false, error: "Unsupported provider" };
+		}
+		const result = await configManager.fetchProviderUsage(
+			resolved.baseUrl, resolved.apiKey ?? "", resolved.apiType, resolved.headers,
+		);
+		void appLogger.info("config", "Provider usage fetched", {
+			provider,
+			baseUrl: resolved.baseUrl,
+			apiType: resolved.apiType,
+			success: result.success,
+			error: result.error,
+		});
+		return { ...result, provider };
+	});
 
-	// ── 开发者控制台 ─────────────────────────────────────────────────
+	// ── 开发者控制台 ───────────────────────────────────────────────
 
 	ipcMain.handle(ipcChannels.appToggleDevTools, () => toggleMainWindowDevTools(getMainWindow()));
 }

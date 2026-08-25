@@ -1,4 +1,4 @@
-export type ConfigTab = "models" | "auth" | "settings" | "trust" | "raw";
+export type ConfigTab = "models" | "auth" | "settings" | "trust" | "mcp" | "raw";
 
 import type { ModelCostTier } from "./modelCostTiers";
 

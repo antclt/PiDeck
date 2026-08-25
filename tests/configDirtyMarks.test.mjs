@@ -27,9 +27,10 @@ test("重载 settings 同时清除被顺带重载的 models/auth 脏标记（假
 	);
 });
 
-test("重载 auth/trust 清除自身与 raw", () => {
+test("重载 auth/trust/mcp 清除自身与 raw", () => {
 	assert.deepEqual(new Set(dirtyKeysClearedByReload("auth")), new Set(["config:auth", "config:raw"]));
 	assert.deepEqual(new Set(dirtyKeysClearedByReload("trust")), new Set(["config:trust", "config:raw"]));
+	assert.deepEqual(new Set(dirtyKeysClearedByReload("mcp")), new Set(["config:mcp", "config:raw"]));
 });
 
 test("重载 raw 只清除自身（去重，不产生重复 key）", () => {
@@ -43,6 +44,7 @@ test("ALL_CONFIG_DIRTY_KEYS 覆盖全部 config 组文件键（不含 skills/pro
 		"config:auth",
 		"config:settings",
 		"config:trust",
+		"config:mcp",
 		"config:raw",
 	]);
 });

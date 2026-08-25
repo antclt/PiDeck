@@ -426,26 +426,29 @@ const api = {
 				options,
 			) as Promise<import("../shared/types").SessionMessagePage>,
 		/** 无 runtime 时直接改 JSONL（编辑）。运行中必须先停 Agent。 */
-		editCatalogMessage: (sessionId: string, messageId: string, newText: string) =>
+		editCatalogMessage: (sessionId: string, messageId: string, newText: string, entryId?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.sessionsCatalogEditMessage,
 				sessionId,
 				messageId,
 				newText,
+				entryId,
 			) as Promise<SessionCommandResult<void>>,
 		/** 无 runtime 时直接改 JSONL（删除）。运行中必须先停 Agent。 */
-		deleteCatalogMessage: (sessionId: string, messageId: string) =>
+		deleteCatalogMessage: (sessionId: string, messageId: string, entryId?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.sessionsCatalogDeleteMessage,
 				sessionId,
 				messageId,
+				entryId,
 			) as Promise<SessionCommandResult<void>>,
 		/** 无 runtime 时截断 JSONL 供重发。运行中必须先停 Agent。 */
-		prepareCatalogResend: (sessionId: string, messageId: string) =>
+		prepareCatalogResend: (sessionId: string, messageId: string, entryId?: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.sessionsCatalogPrepareResend,
 				sessionId,
 				messageId,
+				entryId,
 			) as Promise<SessionCommandResult<{ text: string; images?: ImageContent[] }>>,
 		/** 会话 JSONL 过程事件（session/model/thinking/custom），轨迹复盘用。 */
 		readProcessEvents: (sessionId: string) =>
@@ -1278,6 +1281,19 @@ const api = {
 				parsed: Record<string, unknown>;
 				diagnostic?: ConfigFileDiagnostic;
 			}>,
+		getMcp: (projectPath?: string) =>
+			ipcRenderer.invoke(ipcChannels.configGetMcp, projectPath) as Promise<
+				import("../shared/types/mcp").McpConfigSnapshot
+			>,
+		saveMcp: (data: import("../shared/types/mcp").McpConfigFile) =>
+			ipcRenderer.invoke(ipcChannels.configSaveMcp, data) as Promise<{
+				valid: boolean;
+				error?: string;
+			}>,
+		probeMcp: (definition: import("../shared/types/mcp").McpServerDefinition) =>
+			ipcRenderer.invoke(ipcChannels.configProbeMcp, definition) as Promise<
+				import("../shared/types/mcp").McpProbeResult
+			>,
 		// 只读：pi 全局配置目录（源文件编辑页标注实际路径用）。
 		getConfigDir: () =>
 			ipcRenderer.invoke(ipcChannels.configGetDir) as Promise<string>,
@@ -1397,6 +1413,25 @@ const api = {
 				requestUrl?: string;
 				requestBody?: string;
 				suggestedBaseUrl?: string;
+			}>,
+		/** 查询 provider 用量/余额（如 opencode-go /v1/usage），主进程按 provider 名解析端点并查询 */
+		fetchUsage: (provider: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.configFetchUsage,
+				{ provider },
+			) as Promise<{
+				success: boolean;
+				provider?: string;
+				periods?: Partial<
+					Record<"rolling" | "weekly" | "monthly", {
+						percent?: number;
+						resetsAt?: string;
+						status?: string;
+					}>
+				>;
+				raw?: string;
+				error?: string;
+				at?: number;
 			}>,
 	},
 	pet: {

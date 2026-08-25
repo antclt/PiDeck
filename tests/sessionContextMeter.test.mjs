@@ -4,6 +4,7 @@ import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
 import { formatPercent } from "../src/renderer/src/components/session/TimelineFormat.ts";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // 与 sessionWidgetChips.test.mjs 相同的 TSX 编译替身模式：只测公开 helper 与源码结构。
 function compile(filePath, stubs = {}) {
@@ -40,6 +41,7 @@ function loadMeterHelpers() {
     react: {},
     "../../i18n": { t: (key) => key },
     "../../../../shared/types": {},
+    "../../../../shared/compactFeedback": loadTsCommonJs("src/shared/compactFeedback.ts"),
     "../ui-shadcn/tooltip": {},
   });
 }
@@ -193,14 +195,16 @@ test("panel reuses the SessionStatus detail builder and keeps compact action", (
   assert.doesNotMatch(source, /sessionContext\.cacheHit/);
   assert.doesNotMatch(source, /sessionContext\.inputOutput/);
   assert.doesNotMatch(source, /sessionContext\.cost/);
-  // 压缩按钮：从右上角紧凑徽章迁入面板底部，保留 urgency 色阶 + 压缩中禁用
+  // 压缩按钮：从右上角紧凑徽章迁入面板底部；门槛/紧急色走 compactUiState
   assert.match(source, /t\("sessionContext\.compact"\)/);
   assert.match(source, /t\("sessionContext\.compacting"\)/);
-  assert.match(source, /percent >= 90 \? "text-destructive/);
-  assert.match(source, /percent >= 70 \? "text-amber-500/);
-  assert.match(source, /disabled=\{compacting\}/);
+  assert.match(source, /t\("sessionContext\.compactNotReady"\)/);
+  assert.match(source, /compactUi\.urgency === "danger" \? "text-destructive/);
+  assert.match(source, /compactUi\.urgency === "warn" \? "text-amber-500/);
+  assert.match(source, /disabled=\{compactDisabled\}/);
   assert.match(source, /onClick=\{props\.onCompact\}/);
   assert.match(source, /showCompact = props\.onCompact !== undefined/);
+  assert.match(source, /data-testid="session-context-compact"/);
 });
 
 test("panel re-anchors on scroll instead of closing during streaming", () => {
@@ -266,5 +270,7 @@ test("context meter copy is present in both locale dictionaries", () => {
     assert.doesNotMatch(locale, /"sessionContext\.cost":/);
     assert.match(locale, /"sessionContext\.compact":/);
     assert.match(locale, /"sessionContext\.compacting":/);
+    assert.match(locale, /"sessionContext\.compactNotReady":/);
+    assert.match(locale, /"sessionContext\.compactNotReadyHint":/);
   }
 });

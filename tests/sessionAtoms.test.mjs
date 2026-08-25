@@ -1123,3 +1123,188 @@ test("late continuation page after bottom-settle clear is rejected; fresh first 
   }), true);
   assert.equal(entry().history.messages.length, 1);
 });
+
+test("force disk write bypasses the revision guard on disk-sourced caches (edit/delete regression)", () => {
+  // 回归场景（用户反馈「删除后消息没有删除、还重复了」）：
+  // 运行过的会话继承 runtime 递增的 revision；首次编辑/删除后缓存切到 disk 源但 revision
+  // 不清零（disk 写保留 revision）。reloadTimelineFromDisk 恒传 expectedRevision: 0 + force，
+  // 修复前 revision 守卫不看 force，把之后的每一次编辑/删除重载都吞掉：
+  // 文件已改、时间线永不刷新。force 语义 =「disk 是权威快照」，必须豁免守卫。
+  const atoms = loadAtoms();
+  const store = createStore();
+  const cache = (sessionId) => store.get(atoms.sessionMessagesCacheAtom)[sessionId];
+
+  // 1) 运行中：runtime 快照（revision 递增到 1）
+  store.set(atoms.applySessionRuntimeEventAtom, {
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:message",
+    payload: { agentId: "agent-a", messages: [
+      { id: "m1", role: "user", text: "q1" },
+      { id: "m2", role: "assistant", text: "a1" },
+      { id: "m3", role: "user", text: "q2" },
+      { id: "m4", role: "assistant", text: "a2" },
+    ] },
+  });
+  assert.equal(cache("session-a").revision, 1);
+
+  // 2) 首次删除后的 force disk 重载：文件里 m3/m4 已墓碑，disk 为权威 → 生效
+  assert.equal(store.set(atoms.cacheSessionMessagesAtom, {
+    sessionId: "session-a",
+    messages: [
+      { id: "m1", role: "user", text: "q1" },
+      { id: "m2", role: "assistant", text: "a1" },
+    ],
+    source: "disk",
+    expectedRevision: 0,
+    page: { total: 2, nextBefore: null },
+    force: true,
+  }), true);
+  assert.equal(cache("session-a").source, "disk");
+  assert.equal(cache("session-a").revision, 1, "disk 写保留 revision，不归零");
+
+  // 3) 再删一条（第二次 mutation）：disk→disk、expectedRevision 0 ≠ revision 1。
+  //    修复前守卫返回 false → 时间线停留在旧内容（「删除没反应」）。
+  assert.equal(store.set(atoms.cacheSessionMessagesAtom, {
+    sessionId: "session-a",
+    messages: [{ id: "m1", role: "user", text: "q1" }],
+    source: "disk",
+    expectedRevision: 0,
+    page: { total: 1, nextBefore: null },
+    force: true,
+  }), true, "force disk 写必须绕过 revision 守卫");
+  assert.deepEqual([...cache("session-a").messages.map((m) => m.id)], ["m1"]);
+});
+
+test("late runtime snapshot after detach is dropped (deleted message must not resurrect)", () => {
+  // stop 流程：主进程先发 detach（status→detached、agentId 清除，同代守卫随之失效），
+  // 节流 50ms 的最终 messages flush 可能晚于渲染层对 JSONL 的编辑/删除重载到达。
+  // 迟到快照会覆盖刚写回的 disk 缓存（已删消息复活）——terminal 状态必须拒绝同代写入。
+  const atoms = loadAtoms();
+  const store = createStore();
+  const emit = (event) => store.set(atoms.applySessionRuntimeEventAtom, event);
+
+  // 绑定运行中 runtime（gen 1, agent-a）
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:state",
+    payload: { id: "agent-a", status: "idle" },
+  });
+
+  // detach：agent 停止 → 状态 detached、agentId 移除
+  emit({
+    kind: "detach",
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "sessions:runtime-detach",
+    payload: null,
+  });
+  assert.equal(store.get(atoms.sessionRuntimeByIdAtom)["session-a"].status, "detached");
+
+  // 删除消息已生效：渲染层 force disk 重载写入（缓存内容 = 删除后的文件）
+  assert.equal(store.set(atoms.cacheSessionMessagesAtom, {
+    sessionId: "session-a",
+    messages: [{ id: "m1", role: "user", text: "kept" }],
+    source: "disk",
+    expectedRevision: 0,
+    force: true,
+  }), true);
+
+  // 迟到的同代全量快照（包含已删的 m2）必须被丢弃
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:message",
+    payload: { agentId: "agent-a", messages: [
+      { id: "m1", role: "user", text: "kept" },
+      { id: "m2", role: "assistant", text: "deleted-but-resurrecting" },
+    ] },
+  });
+  const entry = store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+  assert.equal(entry.source, "disk", "迟到快照不得覆盖 disk 缓存");
+  assert.deepEqual([...entry.messages.map((m) => m.id)], ["m1"]);
+
+  // 新代际（restart）的消息快照不受影响：bindingChanged=true → 正常接管
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-b",
+    runtimeGeneration: 2,
+    sourceChannel: "agents:state",
+    payload: { id: "agent-b", status: "running" },
+  });
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-b",
+    runtimeGeneration: 2,
+    sourceChannel: "agents:message",
+    payload: { agentId: "agent-b", messages: [
+      { id: "m1", role: "user", text: "kept" },
+      { id: "n1", role: "assistant", text: "fresh turn" },
+    ] },
+  });
+  const afterRestart = store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+  assert.equal(afterRestart.source, "runtime", "新代际快照正常接管");
+  assert.deepEqual([...afterRestart.messages.map((m) => m.id)], ["m1", "n1"]);
+});
+
+test("same-generation snapshots keep flowing while the binding is alive", () => {
+  // 守卫只针对「绑定已消失（detach 清掉 agentId）+ 同代际」的迟到快照；
+  // 正常流式中绑定仍在（agentId 存在），同代际快照必须照常写入。
+  const atoms = loadAtoms();
+  const store = createStore();
+  const emit = (event) => store.set(atoms.applySessionRuntimeEventAtom, event);
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:state",
+    payload: { id: "agent-a", status: "running" },
+  });
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:message",
+    payload: { agentId: "agent-a", messages: [{ id: "m1", role: "user", text: "q" }] },
+  });
+  // 流式增量（同代际、绑定未消失）：照常合并
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:message",
+    payload: { agentId: "agent-a", upsertFrom: 1, totalLength: 2, messages: [
+      { id: "m2", role: "assistant", text: "a" },
+    ] },
+  });
+  assert.deepEqual(
+    [...store.get(atoms.sessionMessagesCacheAtom)["session-a"].messages.map((m) => m.id)],
+    ["m1", "m2"],
+  );
+
+  // closed 状态但绑定未清除（agentId 仍在）：写入仍被接受——主进程 stop/close 路径
+  // 已通过 cancelMessageEmit 取消节流定时器，不会发出迟到快照，渲染层无需额外拦截。
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:state",
+    payload: { id: "agent-a", status: "closed" },
+  });
+  emit({
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:message",
+    payload: { agentId: "agent-a", messages: [{ id: "m1", role: "user", text: "q" }, { id: "m2", role: "assistant", text: "final" }] },
+  });
+  assert.equal(
+    store.get(atoms.sessionMessagesCacheAtom)["session-a"].messages[1].text,
+    "final",
+  );
+});

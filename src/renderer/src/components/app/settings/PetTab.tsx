@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import type { AppSettings, PetManifest } from "../../../../../shared/types";
+import { DEFAULT_PET_SCALE, type AppSettings, type PetManifest } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import {
@@ -119,13 +119,13 @@ export const PetTab = memo(function PetTab(props: PetTabProps) {
               min="0.3"
               max="2.0"
               step="0.05"
-              value={draft.petScale ?? 1}
+              value={draft.petScale ?? DEFAULT_PET_SCALE}
               onChange={(event) => updateDraft({ petScale: parseFloat(event.target.value) })}
               className="min-w-0 flex-1 accent-[var(--color-accent)]"
               aria-label={t("settings.pet.scale")}
             />
             <span className="min-w-12 shrink-0 text-right font-brand text-sm text-muted-foreground tabular-nums">
-              {((draft.petScale ?? 1) * 100).toFixed(0)}%
+              {((draft.petScale ?? DEFAULT_PET_SCALE) * 100).toFixed(0)}%
             </span>
           </div>
         </SettingRow>
