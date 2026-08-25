@@ -1444,6 +1444,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			sessionRuntimeCoordinator.listRuntimeModels(target),
 	);
 	ipcMain.handle(
+		ipcChannels.sessionsRuntimeThinkingLevels,
+		(_event, target: SessionRuntimeTarget) =>
+			sessionRuntimeCoordinator.listRuntimeThinkingLevels(target),
+	);
+	ipcMain.handle(
 		ipcChannels.sessionsRuntimeExportHtml,
 		async (_event, target: SessionRuntimeTarget) => {
 			const result = await sessionRuntimeCoordinator.exportRuntimeHtml(target);

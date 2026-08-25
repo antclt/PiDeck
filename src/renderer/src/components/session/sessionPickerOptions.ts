@@ -12,6 +12,36 @@ export const THINKING_LEVELS = [
   { value: "max", labelKey: "thinking.levelLabel.max", descriptionKey: "thinking.level.max" },
 ] satisfies Array<{ value: string; labelKey: TranslationKey; descriptionKey: TranslationKey }>;
 
+export type ThinkingPickerLevel = {
+  value: string;
+  labelKey?: TranslationKey;
+  descriptionKey?: TranslationKey;
+  label?: string;
+  description?: string;
+};
+
+/** Map Pi/DSH wire level ids to localized options without dropping future ids. */
+export function toThinkingPickerLevels(levels: readonly string[]): ThinkingPickerLevel[] {
+  const seen = new Set<string>();
+  const options: ThinkingPickerLevel[] = [];
+  for (const value of levels) {
+    const normalized = value.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    const known = THINKING_LEVELS.find((level) => level.value === normalized);
+    if (known) {
+      options.push({
+        value: known.value,
+        labelKey: known.labelKey,
+        descriptionKey: known.descriptionKey,
+      });
+    } else {
+      options.push({ value: normalized, label: normalized });
+    }
+  }
+  return options;
+}
+
 /** Keep provider grouping deterministic so the same model order appears in both pickers. */
 export function groupModelsByProvider(models: AvailableModel[]) {
   const groups = models.reduce<Record<string, AvailableModel[]>>((result, model) => {

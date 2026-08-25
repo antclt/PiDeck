@@ -191,25 +191,30 @@ test("config save must not let stale in-flight list overwrite new cache", () => 
   assert.match(cacheSource, /configInvalidated = false/);
 });
 
-test("config save (models/auth) triggers background refresh", () => {
+test("config save (models/auth) refreshes capability and CLI fallback caches", () => {
+  assert.match(systemIpc, /const refreshPiModelCatalogs = async/);
+  assert.match(systemIpc, /modelCapabilityCache\.refresh\(\)/);
   assert.match(systemIpc, /invalidateModelListCache\(\)/);
   assert.match(systemIpc, /refreshModelList\(piLocator, settingsStore, configManager\)/);
   // auth 保存同样触发（auth 决定可用模型过滤）
   assert.match(systemIpc, /configSaveAuth/);
 });
 
-test("agent spawn refreshes model cache via onBeforeAgentSpawn hook", () => {
+test("agent spawn ensures the shared capability snapshot instead of reforking per picker", () => {
   // AgentManager 构造注入 onBeforeAgentSpawn
   assert.match(agentManager, /onBeforeAgentSpawn/);
   // createUnlocked spawn 前调用
   assert.match(agentManager, /this\.onBeforeAgentSpawn\?\.\(\)/);
-  // index.ts 装配时传 refreshModelList
-  assert.match(indexSource, /refreshModelList\(piLocator, settingsStore, configManager\)/);
+  // index.ts 装配时只 ensure；旧 Pi 才回退 CLI refresh。
+  assert.match(indexSource, /piModelCapabilityCache\?\.ensure\(\)/);
+  assert.match(indexSource, /snapshot \? undefined : refreshModelList/);
 });
 
-test("startup prefetch still present", () => {
-  assert.match(indexSource, /fetchModelList\(piLocator, settingsStore, configManager\)/);
-  assert.match(indexSource, /getCachedModelList\(\)/);
+test("startup prefetch hydrates capabilities after WSL configuration", () => {
+  assert.match(indexSource, /syncWslConfig\(\)\.then\(async \(\) =>/);
+  assert.match(indexSource, /piModelCapabilityCache\?\.watchConfigDirectory\(\)/);
+  assert.match(indexSource, /await piModelCapabilityCache\?\.ensure\(\)/);
+  assert.doesNotMatch(indexSource, /getCachedModelList\(\)/);
 });
 
 test("older pi unknown-option and empty CLI fall back to local models.json", () => {
@@ -242,12 +247,13 @@ test("renderer ComposerPickerHost shows restart confirm on needsRestart", () => 
 test("ComposerPickerHost loads models on welcome page (no record)", () => {
   // 欢迎页/未启动 Agent 时 record 为 undefined，模型列表也必须加载：
   // 加载逻辑收敛到 useBackendModelCatalog（listModels 是全量的，不依赖 projectId），
-  // enabled 由 pickerNeedsModels 驱动（DSH 思考选择器同样触发加载，供档位过滤）。
+  // enabled 由 pickerNeedsModels 驱动；Pi/DSH 思考选择器都要加载，以便 Pi 欢迎页
+  // 读取 startup capability snapshot、DSH 按 reasoningEfforts 过滤。
   const hook = readFileSync(
     "src/renderer/src/hooks/useBackendModelCatalog.ts",
     "utf8",
   );
-  assert.match(pickerHost, /const pickerNeedsModels = props\.picker === "model" \|\| \(props\.picker === "thinking" && isDshSession\)/);
+  assert.match(pickerHost, /const pickerNeedsModels = props\.picker === "model" \|\| props\.picker === "thinking"/);
   assert.match(pickerHost, /useBackendModelCatalog\(\{[\s\S]*?enabled: pickerNeedsModels/);
   // 后端分支收敛在 hook 内：DSH 走 host 目录，pi 走诊断报告通道（含失败原因分类）
   assert.match(hook, /listModelsReport\(options\.projectId, force\)/);

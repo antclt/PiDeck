@@ -50,12 +50,6 @@ function loadConfigManager() {
 			}
 			if (id === "../../shared/i18n/mainProcessCopy") return { mainProcessT: () => "" };
 			if (id === "./parseProviderModels") return { parseProviderModelsResponse: () => [] };
-			if (id === "../pi/piAiBuiltinCatalog") {
-				return {
-					enrichFetchedModelFromCatalog: (model) => model,
-					getPiAiCatalogIndex: () => ({}),
-				};
-			}
 			return require(id);
 		},
 	};

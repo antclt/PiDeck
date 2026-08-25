@@ -64,13 +64,7 @@ function compile() {
 				suggestNormalizedBaseUrl: () => null,
 			};
 		}
-		// 目录富化：返回原样模型即可，不依赖 pi 内置目录数据。
-		if (specifier === "../pi/piAiBuiltinCatalog") {
-			return {
-				getPiAiCatalogIndex: () => [],
-				enrichFetchedModelFromCatalog: (m) => m,
-			};
-		}
+		// 目录富化：已从 fetchProviderModels 移除，测试只关心请求头。
 		if (specifier === "./parseProviderModels") {
 			return {
 				parseProviderModelsResponse: (body) =>

@@ -37,6 +37,30 @@ test("model row uses TableRow/TableCell with edit controls", () => {
   assert.match(source, /onDeleteModel\(name, i\)/);
 });
 
+test("auto-filled models show an explainable capability card bound to current model values", () => {
+  assert.match(source, /modelCapabilitySpecs/);
+  assert.match(source, /setModelCapabilitySpecs/);
+  // 卡片展示模型行当前有效配置 + 模板 + 重置回调，不再传旧 spec 快照
+  assert.match(source, /<ModelCapabilityCard\n\s*model=\{m\}\n\s*template=\{modelCapabilitySpec\}/);
+  assert.match(source, /onReset=\{\(\) => props\.onResetModel\(name, i\)\}/);
+  assert.match(source, /resetting=\{props\.resettingModelKey === getModelInputKey\(name, i\)\}/);
+  const card = readFileSync("src/renderer/src/config/ModelCapabilityCard.tsx", "utf8");
+  assert.match(card, /config\.modelCapabilitySourceCatalog/);
+  assert.match(card, /config\.modelCapabilityMappedLevels/);
+  assert.match(card, /model\.thinkingLevelMap/);
+  assert.match(card, /config\.modelResetAdaptive/);
+  assert.doesNotMatch(card, /config\.modelCapabilitySourceRuntime/);
+});
+
+test("reset-to-adaptive button lives in the model actions column", () => {
+  // 操作列：RotateCcw 重置按钮（显式刷 endpoint）在计费按钮之前
+  assert.match(source, /onClick=\{\(\) => props\.onResetModel\(name, i\)\} disabled=\{props\.resettingModelKey === getModelInputKey\(name, i\)\}/);
+  assert.match(source, /<RotateCcw className="size-3\.5" aria-hidden="true" \/>/);
+  assert.match(source, /title=\{t\("config\.modelResetAdaptive"\)\}/);
+  assert.match(source, /onResetModel: \(providerName: string, index: number\) => void;/);
+  assert.match(source, /resettingModelKey: string \| null;/);
+});
+
 test("reasoning and image checkboxes share one capabilities column", () => {
   // 同列堆叠（flex flex-col），不再各占一列
   assert.match(source, /<div className="flex flex-col gap-1">/);

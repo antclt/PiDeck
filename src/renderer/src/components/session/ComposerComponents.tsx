@@ -978,6 +978,8 @@ export function ThinkingPicker(props: {
 		label?: string;
 		description?: string;
 	}>;
+	/** Pi capability snapshot/runtime RPC 尚未返回时，不用静态档位冒充已确认能力。 */
+	loading?: boolean;
 }) {
 	const levels = props.levels ?? THINKING_LEVELS;
 	return (
@@ -988,7 +990,12 @@ export function ThinkingPicker(props: {
 			className="thinking-picker"
 			value={props.current}
 		>
-			{levels.map((level) => {
+			{props.loading ? (
+				<div className="flex min-h-24 items-center justify-center gap-2 text-caption text-muted-foreground" role="status">
+					<RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+					{t("common.loading")}
+				</div>
+			) : levels.map((level) => {
 				const selected = level.value === props.current;
 				return (
 					<CommandItem

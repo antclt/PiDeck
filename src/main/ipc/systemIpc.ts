@@ -12,6 +12,7 @@ import type {
 	AppSettings,
 	AppUpdateAsset,
 	AvailableModel,
+	ModelListReport,
 	CreatePiSkillInput,
 	SessionCommandResult,
 	SessionRuntimeTarget,
@@ -24,8 +25,10 @@ import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import type { SkillManager } from "../skills/SkillManager";
-import { fetchModelList, invalidateModelListCache, getCachedModelList, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
-import { getPiAiCatalogIndex, lookupPiAiModelSpec } from "../pi/piAiBuiltinCatalog";
+import { fetchModelList, invalidateModelListCache, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
+import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
+import { resolveModelSpecFromPiCatalogs } from "../pi/modelCapabilityResolver";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
 import type { AgentProcessMetric, DiagnosticsSnapshot, ProcessMetricsSnapshot } from "../../shared/types";
@@ -84,6 +87,8 @@ export type SystemIpcDeps = {
 	stopDshHostFromMonitor?: () => Promise<SessionCommandResult<undefined>>;
 	/** 单供应商 pi↔DSH 互迁（不为此拉起 host）。 */
 	providerMigration?: ProviderMigrationDeps;
+	/** 全局 Pi 模型 capability snapshot（启动/配置变更时 hydration，picker 只读）。 */
+	modelCapabilityCache: PiModelCapabilityCache;
 	getMainWindow: () => Electron.BrowserWindow | null;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	/** Check for app update; defined in index.ts */
@@ -206,8 +211,21 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		RELEASES_URL,
 		devBranch,
 		providerMigration,
+		modelCapabilityCache,
 		diagnosticsMonitor,
 	} = deps;
+
+	/**
+	 * Models/auth 的任何写入都必须同时失效 CLI fallback 与 Pi-authoritative
+	 * capability snapshot。cache 自己按 generation 丢弃旧 probe 的迟到结果。
+	 */
+	const refreshPiModelCatalogs = async (): Promise<void> => {
+		invalidateModelListCache();
+		const snapshot = await modelCapabilityCache.refresh();
+		if (snapshot) return;
+		// 旧 Pi 没有 capability RPC 时，仍预热原有的兼容模型列表。
+		await refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
+	};
 
 	// ── Pi 检测 ──────────────────────────────────────────────────────
 
@@ -233,6 +251,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		);
 		if (status.installed && status.command) {
 			await settingsStore.update({ customPiPath: status.command });
+			void refreshPiModelCatalogs().catch(() => undefined);
 		}
 		void appLogger.info("pi", "Custom pi path checked", {
 			installed: status.installed,
@@ -247,16 +266,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	ipcMain.handle(ipcChannels.projectsListModels, async (_event, _projectId?: string) => {
 		try {
-			// 读缓存；无缓存时后台 fork pi --list-models（含加速参数，auth 由 pi 处理）。
-			const models = await fetchModelList(piLocator, settingsStore, configManager);
+			const snapshot = await modelCapabilityCache.ensure();
+			const models = snapshot?.models ?? await fetchModelList(piLocator, settingsStore, configManager);
 			void appLogger.info("pi", "Model list resolved", {
 				count: models.length,
-				cached: getCachedModelList() === models,
+				capabilitiesReady: snapshot !== null,
 				providers: [...new Set(models.map((m) => m.provider))].slice(0, 8),
 			});
 			return models;
 		} catch (error) {
-			void appLogger.warn("pi", "Failed to list models via pi --list-models", {
+			void appLogger.warn("pi", "Failed to resolve model list", {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return [];
@@ -269,13 +288,25 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			typeof projectId === "string" && projectId.length <= 256 ? projectId : undefined;
 		const forceArg = force === true;
 		try {
-			// 诊断报告：模型数组 + 为空时的失败原因（force=手动刷新，绕过缓存重新 fork）。
-			const report = await resolveModelListReport(
-				piLocator,
-				settingsStore,
-				configManager,
-				forceArg,
-			);
+			const snapshot = forceArg
+				? await modelCapabilityCache.refresh()
+				: await modelCapabilityCache.ensure();
+			const report: ModelListReport = snapshot && snapshot.models.length > 0
+				? {
+					models: snapshot.models,
+					ok: true,
+					reason: null,
+					version: null,
+					detail: "",
+					source: "cache",
+					at: Date.now(),
+				}
+				: await resolveModelListReport(
+					piLocator,
+					settingsStore,
+					configManager,
+					forceArg,
+				);
 			void appLogger.info("pi", "Model list report resolved", {
 				ok: report.ok,
 				reason: report.reason,
@@ -301,22 +332,32 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 	});
 
-	// ── 模型规格（pi-ai 内置目录，按模型 id 精确匹配；未命中返回 null）──
+	// ── 模型规格（官方目录 + 当前 Pi 完整目录；第三方 provider 按模型本体匹配）──
 
 	ipcMain.handle(
 		ipcChannels.projectsGetModelSpec,
-		async (_event, providerName: unknown, modelId: unknown) => {
-			// 边界校验：渲染层输入不可信，拒绝非字符串/超长输入
+		async (_event, providerName: unknown, modelId: unknown, modelName: unknown) => {
+			// 边界校验：渲染层输入不可信，拒绝非字符串/超长输入。
 			if (
 				typeof providerName !== "string" ||
 				typeof modelId !== "string" ||
+				(modelName !== undefined && typeof modelName !== "string") ||
 				providerName.length > 128 ||
-				modelId.length > 256
+				modelId.length > 256 ||
+				(typeof modelName === "string" && modelName.length > 256)
 			) {
 				return null;
 			}
 			try {
-				return lookupPiAiModelSpec(getPiAiCatalogIndex(), providerName, modelId) ?? null;
+				// 配置阶段模板只读 PiDeck bundled pi-ai catalog；capability cache 不参与（见 modelCapabilityResolver）。
+				return resolveModelSpecFromPiCatalogs(
+					{
+						providerName,
+						modelId,
+						...(typeof modelName === "string" && modelName.trim() ? { modelName } : {}),
+					},
+					getPiAiCatalogIndex(),
+				);
 			} catch (error) {
 				void appLogger.warn("models", "Model spec lookup failed", {
 					error: error instanceof Error ? error.message : String(error),
@@ -524,6 +565,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		});
 		ipcMain.handle(ipcChannels.piUpdate, async () => {
 			const result = await extensionManager.updatePi();
+			if (result.updated) void refreshPiModelCatalogs().catch(() => undefined);
 			void appLogger.info("pi", "Pi update command completed", { updated: result.updated, bytes: result.output.length });
 			return result;
 		});
@@ -909,6 +951,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				if (configureAgentManagerWsl) configureAgentManagerWsl(null);
 			}
 		}
+		if (
+			"customPiPath" in patch ||
+			"wslEnabled" in patch ||
+			"wslDistro" in patch ||
+			"wslUser" in patch
+		) {
+			// WSL 切换会改变 ConfigManager 的目录；先重新挂 watcher，再启动新 generation。
+			modelCapabilityCache.watchConfigDirectory();
+			void refreshPiModelCatalogs().catch(() => undefined);
+		}
 		return settings;
 	});
 
@@ -976,9 +1028,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (typeof provider !== "string") throw new Error("invalid provider name");
 		if (!providerMigration) throw new Error("provider migration is not available");
 		const result = await applyProviderMigration(providerMigration, direction as ProviderMigrationDirection, provider);
-		if (result.ok && direction === "dsh-to-pi") {
-			invalidateModelListCache();
-			void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
+		if (result.ok) {
+			void refreshPiModelCatalogs().catch(() => undefined);
 		}
 		void appLogger.info("config", "Provider migration applied", {
 			direction,
@@ -1011,17 +1062,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	);
 	ipcMain.handle(ipcChannels.configSaveModels, async (_event, data) => {
 		const result = await configManager.saveModelsConfig(data);
-		invalidateModelListCache();
-		// 配置保存后立即后台重取，下次打开选择器直接命中新缓存。
-		void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
+		if (result.valid) void refreshPiModelCatalogs().catch(() => undefined);
 		void appLogger.info("config", "Models config saved", { providerCount: Object.keys(data?.providers ?? {}).length });
 		return result;
 	});
 	ipcMain.handle(ipcChannels.configSaveAuth, async (_event, data) => {
 		const result = await configManager.saveAuthConfig(data);
-		invalidateModelListCache();
-		// auth 影响「可用模型」过滤（pi 只列已认证 provider），保存后同样后台重取。
-		void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
+		if (result.valid) void refreshPiModelCatalogs().catch(() => undefined);
 		void appLogger.info("config", "Auth config saved", { authCount: Object.keys(data ?? {}).length });
 		return result;
 	});
@@ -1032,6 +1079,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configSaveRaw, async (_event, fileName, rawJson) => {
 		const result = await configManager.saveRawConfig(fileName, rawJson);
+		if (result.valid && (fileName === "models.json" || fileName === "auth.json")) {
+			void refreshPiModelCatalogs().catch(() => undefined);
+		}
 		void appLogger.info("config", "Raw config saved", { fileName, bytes: Buffer.byteLength(rawJson, "utf8") });
 		return result;
 	});
@@ -1040,6 +1090,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	);
 	ipcMain.handle(ipcChannels.configImport, async (_event, packageJson: string) => {
 		const result = await configManager.importConfig(packageJson);
+		if (result.valid) void refreshPiModelCatalogs().catch(() => undefined);
 		void appLogger.info("config", "Config imported", { bytes: Buffer.byteLength(packageJson, "utf8"), valid: result.valid });
 		return result;
 	});

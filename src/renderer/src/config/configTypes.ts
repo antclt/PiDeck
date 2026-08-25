@@ -1,10 +1,11 @@
 export type ConfigTab = "models" | "auth" | "settings" | "trust" | "raw";
 
+import type { ThinkingLevelMap } from "../../../shared/types/modelSpecs";
 import type { ModelCostTier } from "./modelCostTiers";
 
-// ── 匹配 pi 实际文件格式的类型 ────────────────────────
+export type { ThinkingLevelMap };
 
-export type ThinkingLevelMap = Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", string | null>>;
+// ── 匹配 pi 实际文件格式的类型 ────────────────────────
 
 /** 模型计费字段：单价为每百万 token 美元数，与 pi models.json 的 cost 字段一致。 */
 export type ModelCost = {
