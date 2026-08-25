@@ -28,7 +28,7 @@ function loadAppUtils() {
 	return sandbox.exports;
 }
 
-const { detectTrigger, applySuggestion, clearSuggestionTrigger } = loadAppUtils();
+const { detectTrigger, applySuggestion, clearSuggestionTrigger, buildSuggestionItems } = loadAppUtils();
 
 const sessions = new Set(["alpha", "beta long"]);
 
@@ -40,6 +40,44 @@ function assertJsonEqual(actual, expected) {
 function atEnd(text, refs = sessions) {
 	return detectTrigger(text, text.length, refs);
 }
+
+test("file suggestion shows basename in label and parent dir as description", () => {
+	// 无关键词：只展平第一层；根级文件 label 是文件名，description 为 "."
+	const files = [
+		{ name: "main.ts", path: "/p/main.ts", relativePath: "main.ts", type: "file" },
+	];
+	const items = buildSuggestionItems("看 @", 3, [], files);
+	assertJsonEqual(
+		items.map((i) => ({ label: i.label, description: i.description, value: i.value })),
+		[{ label: "@main.ts", description: ".", value: "@main.ts" }],
+	);
+});
+
+test("file suggestion with keyword shows parent dir, root level uses dot", () => {
+	// 关键词搜索：深层文件 description 是父目录而非完整相对路径
+	const files = [{ name: "main.ts", path: "/p/src/main.ts", relativePath: "src/main.ts", type: "file" }];
+	const items = buildSuggestionItems("看 @main", 6, [], files);
+	assertJsonEqual(
+		items.map((i) => ({ label: i.label, description: i.description })),
+		[{ label: "@main.ts", description: "src" }],
+	);
+	// 根级文件：父目录为 "."
+	const rootFiles = [{ name: "readme.md", path: "/p/readme.md", relativePath: "readme.md", type: "file" }];
+	const rootItems = buildSuggestionItems("看 @rea", 6, [], rootFiles);
+	assertJsonEqual(
+		rootItems.map((i) => ({ label: i.label, description: i.description })),
+		[{ label: "@readme.md", description: "." }],
+	);
+	// 深层目录项：description 是父目录（非自身全路径）
+	const deepFiles = [
+		{ name: "constants", path: "/p/src/app/constants", relativePath: "src/app/constants", type: "directory" },
+	];
+	const deepItems = buildSuggestionItems("看 @con", 6, [], deepFiles);
+	assertJsonEqual(
+		deepItems.map((i) => ({ label: i.label, description: i.description })),
+		[{ label: "@constants/", description: "src/app" }],
+	);
+});
 
 test("plain prose ampersand does not open a session trigger", () => {
 	assert.equal(atEnd("Tom & Jerry"), null);

@@ -774,6 +774,17 @@ function formatPathSuggestionValue(node: FileTreeNode): string {
 }
 
 /**
+ * 建议列表的辅助描述：只显示父目录（根层用 .）。
+ * 完整相对路径太长且文件名才是辨识关键——label 已展示文件名，
+ * description 用父目录帮用户确认层级位置即可。
+ */
+function formatPathSuggestionDescription(relativePath: string): string {
+	const parts = relativePath.replace(/\\/g, "/").split("/").filter(Boolean);
+	if (parts.length <= 1) return ".";
+	return parts.slice(0, -1).join("/");
+}
+
+/**
  * 从扁平路径列表（文件 + 目录）重建一级树视图。
  * 目录与文件均可选，便于直接 @src 这类目录引用。
  */
@@ -819,7 +830,7 @@ function buildFileTreeItems(entries: FileTreeNode[]): SuggestionItem[] {
 			result.push({
 				key: dir.dirNode?.path ?? `dir:${dirPath}`,
 				label: `@${dir.name}/`,
-				description: dirPath,
+				description: formatPathSuggestionDescription(dirPath),
 				// 必须插入 @dir/：裸 @dir 无法过 chip 路径规则，也易被模型当成 mention
 				value: formatFilePathRef(dirPath, { isDirectory: true }),
 				treeDepth: depth,
@@ -831,7 +842,7 @@ function buildFileTreeItems(entries: FileTreeNode[]): SuggestionItem[] {
 			result.push({
 				key: file.path,
 				label: formatPathSuggestionLabel(file),
-				description: file.relativePath,
+				description: formatPathSuggestionDescription(file.relativePath),
 				value: formatPathSuggestionValue(file),
 				treeDepth: depth,
 				isDirectory: file.type === "directory",
@@ -894,7 +905,7 @@ export function buildSuggestionItems(
 			.map((item) => ({
 				key: item.file.path,
 				label: formatPathSuggestionLabel(item.file),
-				description: item.file.relativePath,
+				description: formatPathSuggestionDescription(item.file.relativePath),
 				// 相对路径含空格时同样加引号；目录追加 / 以通过 chip 规则并语义化为路径。
 				value: formatPathSuggestionValue(item.file),
 				isDirectory: item.file.type === "directory",

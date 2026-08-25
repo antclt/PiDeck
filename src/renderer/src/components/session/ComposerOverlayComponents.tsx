@@ -67,8 +67,11 @@ export function PromptSuggestions(props: {
 						onMouseEnter={() => props.onSelectedIndexChange(index)}
 						onClick={() => props.onPick(item)}
 					>
-						<span className="min-w-[140px] max-w-[200px] flex-none truncate font-mono text-control font-semibold text-text-primary">{item.label}</span>
-						<span className="min-w-0 flex-1 truncate text-caption text-text-secondary">{item.description}</span>
+						{/* label 优先完整显示（文件名/命令名/会话名），description 只作父目录等辅助信息：
+							之前 description 放完整相对路径会挤占宽度、长路径被截断只剩开头目录，
+							看不出是哪个文件；改为 label flex-1 吃满剩余空间，description 限宽截断。 */}
+						<span className="min-w-0 flex-1 truncate font-mono text-control font-semibold text-text-primary" title={item.label}>{item.label}</span>
+						<span className="max-w-[40%] flex-none truncate text-caption text-text-secondary" title={item.description}>{item.description}</span>
 					</button>
 				))}
 			</div>

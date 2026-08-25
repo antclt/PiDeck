@@ -71,6 +71,15 @@ test("Ask cards keep long content readable in every render path", () => {
   assert.match(timelineStyles, /\.tool-card \{[\s\S]*?overflow: visible;/);
 });
 
+test("Batch ask selected options carry a check mark for low-contrast themes", () => {
+  // 2026-12 用户反馈：部分主题色 accent 对比度低，选框只靠边框/背景变色难分辨已选项。
+  // select 选项与 confirm 按钮在选中态都要渲染 Check 图标；图标色走 success token 而非 accent。
+  assert.match(overlay, /props\.answer === value \? <Check size=\{14\} className="shrink-0 text-\[var\(--color-success\)\]" aria-hidden="true" \/> : null/);
+  assert.match(overlay, /props\.answer === true \? <Check size=\{14\} className="shrink-0 text-\[var\(--color-success\)\]" aria-hidden="true" \/> : null/);
+  assert.match(overlay, /props\.answer === false \? <Check size=\{14\} className="shrink-0 text-\[var\(--color-success\)\]" aria-hidden="true" \/> : null/);
+  assert.match(overlay, /选中态对勾标记：主题色 accent 对比度低时只靠边框\/背景变色难分辨已选项/);
+});
+
 test("Plan/simple select options render as single-row optically aligned buttons", () => {
   // 2026-12 用户反馈：上下两行（标签/说明各一行）文本对不齐。
   // live 卡选项改为单行：固定高度 + 标签不缩 + 说明 truncate，等宽等高光学对齐。

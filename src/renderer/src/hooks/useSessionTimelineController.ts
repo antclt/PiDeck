@@ -77,6 +77,10 @@ const LEGACY_OWNER_KEY = "legacy";
 const RUNTIME_HISTORY_TURN_PAGE_SIZE = 3;
 /** 最新轮自动收起后，把本轮起始消息放在视口约 30% 高度处（中上方，不贴顶不贴底）。 */
 const SETTLED_TURN_VIEWPORT_ANCHOR_RATIO = 0.3;
+/** 收起目标距底 ≤ 该值（与引擎 STICK_TO_BOTTOM_OFFSET_PX=70 同语义）时放弃「安静收起”：
+ *  内容不满一屏或回答本来就贴在底部时收起没有实际位移，若照常弹出底部按钮且引擎
+ *  isAtBottom 状态不变（用户本来就在底部），onFollowChange 不会回调，按钮会残留。 */
+const SETTLED_TURN_KEEP_BOTTOM_EPSILON_PX = 70;
 
 /** 翻页成功后仅开放实际带回的 cohort，防止消息页大小与 DOM 窗口脱节。
  *  disk 消息页不一定以 user 消息开头（可能在长回答中间切断）；只要页非空就至少开放 1 轮，
@@ -175,6 +179,10 @@ export function isKnownEmptySessionRecord(
   if ((record.messageCount ?? 0) > 0) return false;
   if (record.filePath) return false;
   if (record.backend === "dsh" && record.dshSessionId) return false;
+  // imagegen 会话历史独立存 ImageSessionStore，不体现在 filePath/messageCount：
+  // 已 promote 为 active 的生图会话不能判为空，否则重启后打开会跳过历史加载显示空引导页。
+  // 新建生图草稿仍为 draft，已在上面 return true，不受影响。
+  if (record.backend === "imagegen") return false;
   return true;
 }
 
@@ -747,19 +755,16 @@ export function useSessionTimelineController(options: {
     if (!autoScrollRef.current) return;
     const timeline = timelineRef.current;
     if (!timeline) return;
-    // 优先对准最终回答容器（data-final-answer=runId）；异常数据没有最终回答时
-    // 回退到 run 行本身，至少不把视口拽到旧轮次。
-    const element =
-      timeline.querySelector<HTMLElement>(`[data-final-answer="${CSS.escape(runId)}"]`) ??
-      timeline.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(runId)}"]`);
+    // 只认最终回答容器（data-final-answer=runId）：手动停止/异常中断的 run 只有思考与
+    // 工具调用、没有回答 → 该属性不存在 → 直接放弃收起（保持现状跟随）。
+    // 若回退到 data-message-id=runId 把 run 行当锚，会误把视口拽离底部并弹出回底按钮，
+    // 而 abort 后引擎 isAtBottom 不再变化，onFollowChange 不回调，按钮永不消失。
+    const element = timeline.querySelector<HTMLElement>(
+      `[data-final-answer="${CSS.escape(runId)}"]`,
+    );
     if (!element) return;
 
-    settleScrollCancelRef.current?.();
-    scrollerScrollApiRef.current?.stopScroll();
-    autoScrollRef.current = false;
-    setAutoScroll(false);
-    setShowScrollToBottom(true);
-
+    // 先预算收起目标（只读，不改状态）：视口在顶部时 targetTop 会被 clamp 到 0。
     const timelineRect = timeline.getBoundingClientRect();
     const rowTop =
       element.getBoundingClientRect().top -
@@ -769,6 +774,24 @@ export function useSessionTimelineController(options: {
       timeline.clientHeight * SETTLED_TURN_VIEWPORT_ANCHOR_RATIO,
     );
     const targetTop = Math.max(0, rowTop - viewportAnchor);
+    // 收起后视口底距内容底 ≤ 70px（引擎贴底判定带）== 收起没有实际位移：
+    // 内容不满一屏或回答本来就在底部附近。此时照常 setShowScrollToBottom(true) 会让
+    // 底部按钮残留在本就是底部的视口上（引擎 isAtBottom 未变化 → onFollowChange 不回调），
+    // 表现为「已经在底部了，却还显示回底按钮」。这类会话放弃收起、保持锁底跟随。
+    if (
+      timeline.scrollHeight - targetTop - timeline.clientHeight <=
+      SETTLED_TURN_KEEP_BOTTOM_EPSILON_PX
+    ) {
+      settleScrollCancelRef.current?.();
+      return;
+    }
+
+    settleScrollCancelRef.current?.();
+    scrollerScrollApiRef.current?.stopScroll();
+    autoScrollRef.current = false;
+    setAutoScroll(false);
+    setShowScrollToBottom(true);
+
     const reduceMotion =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const duration = pinScrollDurationMs(targetTop - timeline.scrollTop);

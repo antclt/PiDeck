@@ -225,6 +225,10 @@ export function ComposerBackendPicker(props: {
 				)}
 			</SelectTrigger>
 			<SelectContent align="start">
+				<SelectItem value="pi">
+					<PiLogo className="size-3.5 shrink-0" />
+					{t("sessionSource.pi")}
+				</SelectItem>
 				<SelectItem value="dsh">
 					<DshLogo className="size-3.5 shrink-0" />
 					{t("sessionBackend.dsh")}
@@ -232,10 +236,6 @@ export function ComposerBackendPicker(props: {
 				<SelectItem value="imagegen">
 					<ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
 					{t("sessionBackend.imagegen")}
-				</SelectItem>
-				<SelectItem value="pi">
-					<PiLogo className="size-3.5 shrink-0" />
-					{t("sessionSource.pi")}
 				</SelectItem>
 			</SelectContent>
 		</Select>

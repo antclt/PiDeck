@@ -311,19 +311,22 @@ function BatchQuestion(props: {
 				{question.type === "confirm" ? (
 					<div className="flex gap-2">
 						<Button
-							className={`ask-inline-bar-option ask-inline-bar-option-yes flex-none items-center justify-center whitespace-nowrap${props.answer === true ? " selected" : ""}`}
+							className={`ask-inline-bar-option ask-inline-bar-option-yes flex-none items-center justify-center gap-1 whitespace-nowrap${props.answer === true ? " selected" : ""}`}
 							variant="outline"
 							disabled={props.responding}
 							onClick={() => props.onAnswer(true, t("common.true"))}
 						>
+							{/* 选中态对勾：部分主题色 accent 对比度低，光靠变色难分辨已选项 */}
+							{props.answer === true ? <Check size={14} className="shrink-0 text-[var(--color-success)]" aria-hidden="true" /> : null}
 							{t("common.true")}
 						</Button>
 						<Button
-							className={`ask-inline-bar-option ask-inline-bar-option-no flex-none items-center justify-center whitespace-nowrap${props.answer === false ? " selected" : ""}`}
+							className={`ask-inline-bar-option ask-inline-bar-option-no flex-none items-center justify-center gap-1 whitespace-nowrap${props.answer === false ? " selected" : ""}`}
 							variant="outline"
 							disabled={props.responding}
 							onClick={() => props.onAnswer(false, t("common.false"))}
 						>
+							{props.answer === false ? <Check size={14} className="shrink-0 text-[var(--color-success)]" aria-hidden="true" /> : null}
 							{t("common.false")}
 						</Button>
 					</div>
@@ -347,7 +350,11 @@ function BatchQuestion(props: {
 										disabled={props.responding}
 										onClick={() => props.onAnswer(value, label)}
 									>
-										<span className="min-w-0 max-w-full break-words whitespace-normal text-caption font-medium leading-5 text-text-primary" title={label}>{label}</span>
+										{/* 选中态对勾标记：主题色 accent 对比度低时只靠边框/背景变色难分辨已选项 */}
+										<span className="flex min-w-0 max-w-full items-center gap-1">
+											{props.answer === value ? <Check size={14} className="shrink-0 text-[var(--color-success)]" aria-hidden="true" /> : null}
+											<span className="min-w-0 max-w-full break-words whitespace-normal text-caption font-medium leading-5 text-text-primary" title={label}>{label}</span>
+										</span>
 										{description ? <span className="min-w-0 max-w-full break-words whitespace-normal text-micro font-normal leading-5 text-text-tertiary" title={description}>{description}</span> : null}
 									</Button>
 								);

@@ -159,6 +159,25 @@ test("isKnownEmptySessionRecord only treats drafts and file-less empty sessions 
     }),
     false,
   );
+  // imagegen 会话历史独立存 ImageSessionStore，不体现在 filePath/messageCount：
+  // 已 promote 的 active 生图会话不能判空，否则重启后打开跳过历史加载显示空引导页。
+  assert.equal(
+    isKnownEmptySessionRecord({
+      status: "active",
+      messageCount: 0,
+      backend: "imagegen",
+    }),
+    false,
+  );
+  // 尚未生图的 imagegen 草稿仍是空会话，保持起始页。
+  assert.equal(
+    isKnownEmptySessionRecord({
+      status: "draft",
+      messageCount: 0,
+      backend: "imagegen",
+    }),
+    true,
+  );
   // 预热已写 host id，但草稿尚未开聊：仍是空会话，不能去拉历史骨架。
   assert.equal(
     isKnownEmptySessionRecord({
