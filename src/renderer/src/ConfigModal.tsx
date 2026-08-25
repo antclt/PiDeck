@@ -39,7 +39,7 @@ import {
 import { cn } from "./lib/utils";
 import { deepClone, deepEqual } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
-import { collectModelSpecPatches } from "./utils/modelSpecAutoFill";
+import { applyAdaptiveTemplateReset, collectModelSpecPatches, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
 import { Component, useRef, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import type { PiDesktopApi } from "../../preload";
@@ -75,15 +75,6 @@ import { isValidProviderName } from "../../shared/providerName";
 
 const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi })
 	.piDesktop;
-const DEFAULT_MODEL_CONFIG: Pick<
-	ModelItem,
-	"contextWindow" | "maxTokens" | "reasoning" | "input"
-> = {
-	contextWindow: 1000000,
-	maxTokens: 128000,
-	reasoning: true,
-	input: ["text", "image"],
-};
 
 // ── 配置弹窗左侧导航 = shadcn Vertical Tabs ──
 // config 组子页（模型/认证/设置/信任/MCP/原始文件）用 "config:<tab>" 复合值，
@@ -480,6 +471,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 	// 远程拉取模型列表
 	const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
 	const [fetchedModels, setFetchedModels] = useState<Record<string, FetchedModel[]>>({});
+	// 正在重置为自适应的模型行 key（`${providerName}\u0000${index}`），null 表示无。
+	const [resettingModelKey, setResettingModelKey] = useState<string | null>(null);
 
 	/**
 	 * 根据 API 类型返回对应的获取模型提示。
@@ -1059,10 +1052,11 @@ function ConfigModalContent(props: ConfigModalProps) {
 	const handleAddModel = (providerName: string) => {
 		const provider = modelsData.providers[providerName];
 		if (!provider) return;
+		// 新模型先保持未知字段为空：ID 失焦/保存时由端点元数据或唯一 catalog 候选补齐。
+		// 不能在这里写 1M/128K/reasoning/image 这类猜测值，否则真正规格永远无法覆盖。
 		const newModel: ModelItem = {
 			id: "",
 			name: "",
-			...DEFAULT_MODEL_CONFIG,
 		};
 		const updated = {
 			...modelsData,
@@ -1093,6 +1087,57 @@ function ConfigModalContent(props: ConfigModalProps) {
 			},
 		});
 		markDirty("config:models");
+	};
+
+	/**
+	 * 重置为自适应：
+	 * 1. 显式拉取当前 provider 的 /models，取当前 modelId 的实报字段（失败也继续，listing 视为空）；
+	 * 2. 查询 bundled pi-ai catalog 模板（PiDeck 自带，不读 capability cache / 外部 Pi 目录）；
+	 * 3. endpoint 实报优先合并，然后清空五个能力字段，只写模板有值的字段。
+	 * 模板也没有的字段落盘即为空，交还 Pi 默认行为。
+	 */
+	const handleResetModelToAdaptive = async (providerName: string, index: number) => {
+		const provider = modelsData.providers[providerName];
+		const model = provider?.models[index];
+		if (!provider || !model) return;
+		setResettingModelKey(`${providerName}\u0000${index}`);
+		try {
+			let listing: FetchedModel | undefined;
+			if (provider.baseUrl && provider.apiKey) {
+				const result = await api.config.fetchModels(
+					provider.baseUrl,
+					provider.apiKey,
+					provider.api as string | undefined,
+					getProviderHeaders(provider.headers),
+				);
+				if (result.success && result.models) {
+					listing = result.models.find((item) => item.id === model.id);
+				}
+			}
+			const spec = await api.projects
+				.getModelSpec(providerName, model.id, model.name)
+				.catch(() => null);
+			const template = mergeAdaptiveModelTemplate(listing, spec);
+			const nextModel = applyAdaptiveTemplateReset(model, template);
+			const models = [...provider.models];
+			models[index] = nextModel;
+			setModelsData({
+				...modelsData,
+				providers: {
+					...modelsData.providers,
+					[providerName]: { ...provider, models },
+				},
+			});
+			markDirty("config:models");
+			showNotice(
+				template.matchedId
+					? t("config.modelResetAdaptiveDone", { model: template.matchedId })
+					: t("config.modelResetAdaptiveCleared"),
+				3000,
+			);
+		} finally {
+			setResettingModelKey(null);
+		}
 	};
 
 	const handleUpdateModelThinkingLevel = (
@@ -1167,10 +1212,11 @@ function ConfigModalContent(props: ConfigModalProps) {
 	};
 
 	const handleSaveModels = async (): Promise<boolean> => {
-		// 保存前按 pi-ai 目录批量补全空字段（listing 已写入的不覆盖；未命中留空）。
+		// 保存前按能力目录批量补全空字段（端点/用户值不覆盖；未命中留空）。
 		const { providers: filledProviders, filledCount } = await collectModelSpecPatches(
 			modelsData,
-			(providerName, modelId) => api.projects.getModelSpec(providerName, modelId),
+			(providerName, modelId, modelName) =>
+				api.projects.getModelSpec(providerName, modelId, modelName),
 		);
 		const base = filledCount > 0 ? { ...modelsData, providers: filledProviders } : modelsData;
 		// 保存前规范化所有供应商的 compat 字段，确保布尔值显式写入而不依赖后端默认值
@@ -2047,6 +2093,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 							onUpdateModel={handleUpdateModel}
 							onUpdateModelThinkingLevel={handleUpdateModelThinkingLevel}
 							onDeleteModel={handleDeleteModel}
+							onResetModel={handleResetModelToAdaptive}
+							resettingModelKey={resettingModelKey}
 							onFetchModels={handleFetchModels}
 							onTestProvider={handleTestProvider}
 							onChangeTestModelId={(providerName, modelId) =>

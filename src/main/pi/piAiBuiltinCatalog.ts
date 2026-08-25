@@ -9,8 +9,8 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ModelSpec } from "../../shared/types/modelSpecs";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
+import { parseThinkingLevelMap } from "./modelCapabilityMatch";
 
 /** 目录里一条模型的补全字段（比 FetchedModel 多 provider，供同名歧义消解） */
 export type PiAiCatalogEntry = FetchedModel & {
@@ -22,6 +22,8 @@ export type PiAiCatalogEntry = FetchedModel & {
 };
 
 export type PiAiCatalogIndex = {
+	/** 保留扁平可信条目，供第三方别名匹配和能力卡片候选使用。 */
+	entries: readonly PiAiCatalogEntry[];
 	/** 精确 id → 同 id 的全部条目（网关会复用官方 id） */
 	byId: Map<string, PiAiCatalogEntry[]>;
 	/** 小写 id → 同上 */
@@ -65,7 +67,11 @@ export function buildPiAiCatalogIndex(entries: readonly PiAiCatalogEntry[]): PiA
 		// 同一 provider 重复 id 保留第一条（生成 catalog 按 id 唯一）
 		if (!inner.has(id)) inner.set(id, entry);
 	}
-	return { byId, byIdLower, byProviderId };
+	return { entries: [...entries], byId, byIdLower, byProviderId };
+}
+
+export function getPiAiCatalogEntries(index: PiAiCatalogIndex): readonly PiAiCatalogEntry[] {
+	return index.entries;
 }
 
 /** OpenAI 兼容网关常把官方 id 写成 `openai/gpt-4o`；取最后一段做二次精确匹配 */
@@ -117,27 +123,6 @@ export function lookupPiAiCatalogEntry(
 	return undefined;
 }
 
-export function catalogEntryToSpec(entry: PiAiCatalogEntry): ModelSpec {
-	const spec: ModelSpec = {
-		source: "pi-ai",
-		matchedId: entry.id,
-	};
-	if (entry.contextWindow != null) spec.contextWindow = entry.contextWindow;
-	if (entry.maxTokens != null) spec.maxTokens = entry.maxTokens;
-	if (entry.reasoning === true) spec.reasoning = true;
-	if (entry.input?.includes("image")) spec.images = true;
-	return spec;
-}
-
-export function lookupPiAiModelSpec(
-	index: PiAiCatalogIndex,
-	providerName: string,
-	modelId: string,
-): ModelSpec | undefined {
-	const entry = lookupPiAiCatalogEntry(index, providerName, modelId);
-	return entry ? catalogEntryToSpec(entry) : undefined;
-}
-
 type CatalogJsonModel = {
 	id?: unknown;
 	name?: unknown;
@@ -146,6 +131,7 @@ type CatalogJsonModel = {
 	maxTokens?: unknown;
 	reasoning?: unknown;
 	input?: unknown;
+	thinkingLevelMap?: unknown;
 	/** 模型级 API 协议与默认端点（某些 provider 的模型条目内联提供）。 */
 	api?: unknown;
 	baseUrl?: unknown;
@@ -205,10 +191,11 @@ export function loadPiAiCatalogEntries(): PiAiCatalogEntry[] {
 							: undefined;
 					const contextWindow = positiveInt(model.contextWindow);
 					const maxTokens = positiveInt(model.maxTokens);
-					const reasoning = model.reasoning === true ? true : undefined;
+					const reasoning = typeof model.reasoning === "boolean" ? model.reasoning : undefined;
 					const input = Array.isArray(model.input)
-						? model.input.filter((item): item is string => typeof item === "string")
+						? model.input.filter((item): item is "text" | "image" => item === "text" || item === "image")
 						: undefined;
+					const thinkingLevelMap = parseThinkingLevelMap(model.thinkingLevelMap);
 					const api =
 						typeof model.api === "string" && model.api.length > 0 ? model.api : undefined;
 					const baseUrl =
@@ -219,8 +206,9 @@ export function loadPiAiCatalogEntries(): PiAiCatalogEntry[] {
 						...(provider ? { provider } : {}),
 						...(contextWindow != null ? { contextWindow } : {}),
 						...(maxTokens != null ? { maxTokens } : {}),
-						...(reasoning ? { reasoning } : {}),
+						...(reasoning !== undefined ? { reasoning } : {}),
 						...(input && input.length > 0 ? { input } : {}),
+						...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 						...(api ? { api } : {}),
 						...(baseUrl ? { baseUrl } : {}),
 					});
@@ -246,31 +234,3 @@ export function getPiAiCatalogIndex(): PiAiCatalogIndex {
 export function resetPiAiCatalogIndexForTests(index?: PiAiCatalogIndex): void {
 	cachedIndex = index;
 }
-
-/** 用 catalog 填 listing 没给的空字段；已有 listing 值不覆盖 */
-export function enrichFetchedModelFromCatalog(
-	model: FetchedModel,
-	index: PiAiCatalogIndex,
-	providerName = "",
-): FetchedModel {
-	const entry = lookupPiAiCatalogEntry(index, providerName, model.id);
-	if (!entry) return model;
-	const next: FetchedModel = { ...model };
-	if (next.contextWindow == null && entry.contextWindow != null) {
-		next.contextWindow = entry.contextWindow;
-	}
-	if (next.maxTokens == null && entry.maxTokens != null) {
-		next.maxTokens = entry.maxTokens;
-	}
-	if (next.reasoning == null && entry.reasoning === true) {
-		next.reasoning = true;
-	}
-	if (next.input == null && entry.input && entry.input.length > 0) {
-		next.input = entry.input;
-	}
-	if ((next.name == null || next.name === next.id) && entry.name && entry.name !== entry.id) {
-		next.name = entry.name;
-	}
-	return next;
-}
-

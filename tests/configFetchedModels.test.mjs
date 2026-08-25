@@ -60,7 +60,15 @@ test("carries listing capacities onto new models and leaves missing fields empty
 	const { buildModelsFromFetchedSelection } = loadModelsTabModule();
 	const models = buildModelsFromFetchedSelection(
 		[
-			{ id: "listed", name: "Listed", contextWindow: 64000, maxTokens: 4096, reasoning: true, input: ["text", "image"] },
+			{
+				id: "listed",
+				name: "Listed",
+				contextWindow: 64000,
+				maxTokens: 4096,
+				reasoning: true,
+				thinkingLevelMap: { off: null, high: "high", max: "max" },
+				input: ["text", "image"],
+			},
 			{ id: "empty" },
 		],
 		["listed", "empty"],
@@ -73,6 +81,7 @@ test("carries listing capacities onto new models and leaves missing fields empty
 			contextWindow: 64000,
 			maxTokens: 4096,
 			reasoning: true,
+			thinkingLevelMap: { off: null, high: "high", max: "max" },
 			input: ["text", "image"],
 		},
 		{ id: "empty", name: "empty" },

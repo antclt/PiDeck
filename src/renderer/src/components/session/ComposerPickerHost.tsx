@@ -2,7 +2,12 @@ import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { useEffect, useRef, useState } from "react";
 import type { AvailableModel, SessionRuntimeTarget } from "../../../../shared/types";
 import {
+  beginPiRuntimeThinkingLevelsAtom,
+  clearPiRuntimeThinkingLevelsAtom,
+  matchesPiRuntimeThinkingLevelsTarget,
   modelPendingByIdAtom,
+  piRuntimeThinkingLevelsBySessionIdAtomFamily,
+  resolvePiRuntimeThinkingLevelsAtom,
   sessionRecordByIdAtomFamily,
   sessionRuntimeByIdAtom,
   sessionRuntimeBySessionIdAtomFamily,
@@ -30,7 +35,7 @@ import { usePendingModelApply } from "../../hooks/usePendingModelApply";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import type { ComposerPickerKind } from "../../hooks/useSessionComposerController";
 import { WELCOME_MODEL_KEY, WELCOME_THINKING_KEY, readWelcomeModelPreference, readWelcomeThinkingPreference } from "../../utils/chatSessionBootstrap";
-import { THINKING_LEVELS } from "./sessionPickerOptions";
+import { THINKING_LEVELS, toThinkingPickerLevels } from "./sessionPickerOptions";
 
 export type ComposerPickerHostProps = {
   sessionId: string;
@@ -61,6 +66,12 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   const setThinkingPendingMap = useSetAtom(thinkingLevelPendingByIdAtom);
   const modelPending = useAtomValue(modelPendingByIdAtom)[sessionId];
   const setModelPendingMap = useSetAtom(modelPendingByIdAtom);
+  const piRuntimeThinkingEntry = useAtomValue(
+    piRuntimeThinkingLevelsBySessionIdAtomFamily(sessionId),
+  );
+  const beginPiRuntimeThinkingLevels = useSetAtom(beginPiRuntimeThinkingLevelsAtom);
+  const clearPiRuntimeThinkingLevels = useSetAtom(clearPiRuntimeThinkingLevelsAtom);
+  const resolvePiRuntimeThinkingLevels = useSetAtom(resolvePiRuntimeThinkingLevelsAtom);
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
   /** 模型在本地 models.json 存在但运行中 Agent 未加载：待确认重启的目标。 */
   const [restartTarget, setRestartTarget] = useState<{
@@ -87,12 +98,73 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     }).catch(() => undefined);
   }, []);
 
-  // C19：模型目录数据源统一 hook——打开模型选择器即加载（不依赖 record：欢迎页/未启动
-  // Agent 时 record 为 undefined，但模型列表是全量的）。思考选择器也要加载：DSH 按当前
-  // 模型 reasoningEfforts 过滤档位，模型目录只在「打开模型选择器」时加载会导致用户先开
-  // 思考选择器时拿不到过滤数据（显示全量档位）。
+  // C19：模型目录数据源统一 hook——打开模型/思考选择器即加载（不依赖 record：欢迎页/
+  // 未启动 Agent 时 record 为 undefined，但模型列表是全量的）。Pi 欢迎页也要加载，才能
+  // 使用启动 capability snapshot 的精确 thinkingLevels；DSH 继续按 reasoningEfforts 过滤。
   const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
-  const pickerNeedsModels = props.picker === "model" || (props.picker === "thinking" && isDshSession);
+  const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
+  const runtimeThinkingEntryRef = useRef(piRuntimeThinkingEntry);
+  runtimeThinkingEntryRef.current = piRuntimeThinkingEntry;
+
+  useEffect(() => {
+    return () => {
+      // The host is scoped to one mounted session pane; releasing here keeps the
+      // per-session atom map bounded without coupling global session atoms to it.
+      clearPiRuntimeThinkingLevels(sessionId);
+    };
+  }, [sessionId, clearPiRuntimeThinkingLevels]);
+
+  /**
+   * Pi 0.81+ resolves thinkingLevelMap inside the running Agent. Query once when
+   * a runtime first reports its model and again only after that model/agent/generation
+   * changes; menu opening is deliberately not part of this dependency set.
+   */
+  useEffect(() => {
+    const agentId = runtime?.agentId;
+    const runtimeGeneration = runtime?.runtimeGeneration;
+    const provider = runtime?.state?.provider ?? record?.model?.provider;
+    const modelId = runtime?.state?.modelId ?? record?.model?.modelId;
+    if (
+      isDshSession ||
+      !agentId ||
+      typeof runtimeGeneration !== "number" ||
+      !provider ||
+      !modelId
+    ) {
+      return;
+    }
+    const target = { agentId, runtimeGeneration, provider, modelId };
+    if (matchesPiRuntimeThinkingLevelsTarget(runtimeThinkingEntryRef.current, target)) return;
+
+    beginPiRuntimeThinkingLevels({ sessionId, target });
+    void desktopApi.sessions.listRuntimeThinkingLevels({
+      sessionId,
+      agentId,
+      runtimeGeneration,
+    }).then((result) => {
+      // The atom accepts the result only while this exact runtime/model still owns the slot.
+      resolvePiRuntimeThinkingLevels({
+        sessionId,
+        target,
+        levels: result.ok ? result.value.value : undefined,
+      });
+    }).catch(() => {
+      resolvePiRuntimeThinkingLevels({ sessionId, target });
+    });
+  }, [
+    sessionId,
+    isDshSession,
+    runtime?.agentId,
+    runtime?.runtimeGeneration,
+    runtime?.state?.provider,
+    runtime?.state?.modelId,
+    record?.model?.provider,
+    record?.model?.modelId,
+    beginPiRuntimeThinkingLevels,
+    resolvePiRuntimeThinkingLevels,
+  ]);
+
+  const pickerNeedsModels = props.picker === "model" || props.picker === "thinking";
   // 模型目录 + 加载诊断报告：report 为空列表时给出失败原因引导（版本过低/配置损坏/pi 未安装），
   // reload(true) 为手动刷新（绕过缓存重新 fork pi --list-models），选择器右上角提供刷新按钮。
   const { models, report, refreshing, reload } = useBackendModelCatalog({
@@ -402,8 +474,6 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     // DSH 会话的模型归属 host（agent-default-model），不读 pi 的欢迎页偏好：
     // 否则 localStorage 里的 pi 模型会被当成「当前模型」高亮，误导用户以为已选中。
     // 草稿期用部署默认模型（settings.yaml agent-default-model）作当前值。
-    const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
-    const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
     return (
       <ModelPicker
         models={models}
@@ -427,13 +497,18 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——选不支持的档位
     // 不会立即报错，而是在下一次 LLM 请求抛 UNSUPPORTED_REASONING_EFFORT（回合失败）。
     // 草稿期当前模型 = 部署默认模型（settings.yaml agent-default-model）。
-    const isDsh = record?.backend === "dsh" || runtime?.backend === "dsh";
-    const currentProvider = runtime?.state?.provider ?? record?.model?.provider ?? props.defaultModel?.provider;
-    const currentModelId = runtime?.state?.modelId ?? record?.model?.modelId ?? props.defaultModel?.modelId;
+    const currentProvider = runtime?.state?.provider
+      ?? record?.model?.provider
+      ?? props.defaultModel?.provider
+      ?? welcomeModel?.provider;
+    const currentModelId = runtime?.state?.modelId
+      ?? record?.model?.modelId
+      ?? props.defaultModel?.modelId
+      ?? welcomeModel?.modelId;
     const currentModel = models.find(
       (model) => model.provider === currentProvider && model.id === currentModelId,
     );
-    const thinkingLevels = isDsh && currentModel?.reasoningEfforts
+    const thinkingLevels = isDshSession && currentModel?.reasoningEfforts
       ? currentModel.reasoningEfforts.map((effort) => {
           const known = THINKING_LEVELS.find((level) => level.value === effort.id);
           return known
@@ -441,10 +516,43 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
             : { value: effort.id, label: effort.name ?? effort.id, description: effort.description };
         })
       : undefined;
+    const runtimeProvider = runtime?.state?.provider ?? record?.model?.provider;
+    const runtimeModelId = runtime?.state?.modelId ?? record?.model?.modelId;
+    const runtimeThinkingTarget = !isDshSession && runtime?.agentId &&
+      typeof runtime.runtimeGeneration === "number" && runtimeProvider && runtimeModelId
+      ? {
+          agentId: runtime.agentId,
+          runtimeGeneration: runtime.runtimeGeneration,
+          provider: runtimeProvider,
+          modelId: runtimeModelId,
+        }
+      : undefined;
+    const runtimeLevels = runtimeThinkingTarget &&
+      matchesPiRuntimeThinkingLevelsTarget(piRuntimeThinkingEntry, runtimeThinkingTarget) &&
+      piRuntimeThinkingEntry?.status === "resolved"
+      ? piRuntimeThinkingEntry.levels
+      : undefined;
+    const runtimeFellBack = runtimeThinkingTarget &&
+      matchesPiRuntimeThinkingLevelsTarget(piRuntimeThinkingEntry, runtimeThinkingTarget) &&
+      piRuntimeThinkingEntry?.status === "fallback";
+    // 活跃 runtime 一律先等其自身 RPC 结果，不能拿全局 snapshot 冒充当前 Agent。
+    // 欢迎页/草稿没有 runtime 时才用启动 capability cache 的精确模型级结果。
+    const piLevels = !isDshSession
+      ? runtimeThinkingTarget
+        ? runtimeLevels !== undefined ? toThinkingPickerLevels(runtimeLevels) : undefined
+        : currentModel?.thinkingLevels !== undefined
+          ? toThinkingPickerLevels(currentModel.thinkingLevels)
+          : undefined
+      : undefined;
+    const piLevelsLoading = !isDshSession && (
+      runtimeThinkingTarget
+        ? !runtimeFellBack && runtimeLevels === undefined
+        : report === null
+    );
     // DSH 的思考档位属于 host 的模型选择，草稿期优先部署默认档位；settings.yaml
     // 没配 reasoningEffort 时回退到当前模型自己的 defaultEffort（DSH 官方语义），
     // 不回退到 pi 的欢迎页偏好——否则底栏无值、选择器却勾选 pi 的 max。
-    const welcomeThinking = isDsh ? undefined : readWelcomeThinkingPreference()?.thinkingLevel;
+    const welcomeThinking = isDshSession ? undefined : readWelcomeThinkingPreference()?.thinkingLevel;
     return (
       <ThinkingPicker
         current={
@@ -454,7 +562,8 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
           ?? currentModel?.defaultEffort
           ?? welcomeThinking
         }
-        levels={thinkingLevels}
+        levels={isDshSession ? thinkingLevels : piLevels}
+        loading={piLevelsLoading}
         onClose={props.onClose}
         onPick={(level) => void pickThinking(level)}
       />

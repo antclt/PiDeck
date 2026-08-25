@@ -33,10 +33,6 @@ import {
 	usageProbeUrls,
 } from "./providerUsageProbe";
 import { loadUserUsageProbes } from "./userUsageProbes";
-import {
-	enrichFetchedModelFromCatalog,
-	getPiAiCatalogIndex,
-} from "../pi/piAiBuiltinCatalog";
 
 /** pi 全局配置目录：~/.pi/agent/ */
 const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
@@ -632,8 +628,10 @@ export class ConfigManager {
 		apiType?: string,
 	): FetchedModel[] {
 		const listing = parseProviderModelsResponse(body, this.normalizeApiType(apiType));
-		const catalog = getPiAiCatalogIndex();
-		return listing.map((model) => enrichFetchedModelFromCatalog(model, catalog));
+		// 只返回 endpoint 实报字段，不做 bundled catalog 预填：
+		// 预填会让「拉取后新增」与「手动新增」走两套模板优先级，且用户手改字段难以区分来源。
+		// catalog 补空统一由渲染层保存/重置流程经 projects:get-model-spec 完成（endpoint 实报优先）。
+		return listing;
 	}
 
 	private normalizeModelsForPi(data: PiModelsFile): PiModelsFile {

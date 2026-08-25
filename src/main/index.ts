@@ -224,6 +224,8 @@ import { shouldAutoRegisterForeignCwd } from "./projects/projectPathPolicy";
 import { defaultPathCheck } from "./projects/projectPresence";
 import { FileSystemService } from "./fs/FileSystemService";
 import { AgentManager } from "./pi/AgentManager";
+import { PiProcess } from "./pi/PiProcess";
+import { PiModelCapabilityCache, watchPiConfigDirectory } from "./pi/PiModelCapabilityCache";
 // 生图消息不走 Agent 消息流，改名前需判断标题是否仍是占位名
 import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
@@ -290,7 +292,7 @@ import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
 import { registerSystemIpc } from "./ipc/systemIpc";
-import { fetchModelList, getCachedModelList, refreshModelList } from "./pi/modelListCache";
+import { fetchModelList, refreshModelList } from "./pi/modelListCache";
 import { registerFilesIpc } from "./ipc/filesIpc";
 import { registerClipboardIpc } from "./ipc/clipboardIpc";
 import {
@@ -358,6 +360,8 @@ let worktreeService: WorktreeService;
 let gitService: GitService;
 let piLocator: PiLocator;
 let agentManager: AgentManager;
+/** 全局模型 capability snapshot；仅在启动/配置变更时临时拉起 Pi。 */
+let piModelCapabilityCache: PiModelCapabilityCache | undefined;
 /** DSH 深融合宿主与后端网关；窗口创建后后台预热，发送链路仍可按需兜底。 */
 let dshHost: DshHost;
 let dshAgentManager: DshAgentManager;
@@ -2817,6 +2821,7 @@ function registerIpc() {
 
 	// Phase 3.7 拆出 systemIpc 后这些可选依赖必须显式注入；
 	// 漏传 extensionManager 会导致 pi:update-check / pi:update 根本不注册。
+	if (!piModelCapabilityCache) throw new Error("Pi model capability cache is unavailable after settings load");
 	registerSystemIpc({
 		piLocator,
 		settingsStore,
@@ -2839,6 +2844,7 @@ function registerIpc() {
 			configManager,
 			dshHost,
 		},
+		modelCapabilityCache: piModelCapabilityCache,
 		listDshMonitorSessions: () => dshAgentManager.list().map((tab) => ({ title: tab.title })),
 		stopDshHostFromMonitor,
 		getMainWindow: () => mainWindow,
@@ -2934,19 +2940,6 @@ function registerIpc() {
 	});
 
 	// ── 配置管理 ──────────────────────────────────────
-
-	// 后台预取 pi --list-models 缓存：registerIpc 完成后异步执行一次，
-	// 使用户首次打开模型/思考选择器时不需要等待 fork pi 进程。
-	// 已有缓存或在途请求时不会重复 fork。
-	if (typeof piLocator !== "undefined" && typeof settingsStore !== "undefined") {
-		setTimeout(() => {
-			if (!getCachedModelList()) {
-				void fetchModelList(piLocator, settingsStore, configManager).catch(() => {
-					// 预取失败静默；用户首次点击选择器时会自动重试。
-				});
-			}
-		}, 500);
-	}
 
 	registerFilesIpc({
 		fileSystemService,
@@ -3078,11 +3071,12 @@ app.whenReady().then(async () => {
 		appLogger,
 		undefined,
 		mainCopy,
-		// 每次 spawn Agent 前异步刷新模型列表缓存（防用户直接改 models.json/auth.json 不生效）。
+		// 每次 spawn 前只确保已有 capability hydration 已完成；snapshot/失败状态
+		// 都会命中内存，不能因为启动多个 Agent 重复 fork Pi。
 		() => {
-			if (piLocator && settingsStore) {
-				void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
-			}
+			void piModelCapabilityCache?.ensure()
+				.then((snapshot) => snapshot ? undefined : refreshModelList(piLocator, settingsStore, configManager))
+				.catch(() => undefined);
 		},
 		securityStore,
 		// spawn pi 前预检修复会话文件（旧版私有 sessionName 头行会让 pi 拒绝加载，见 #114）
@@ -3222,9 +3216,14 @@ app.whenReady().then(async () => {
 			}
 			return true;
 		},
-		listModels: (force?: boolean) =>
-			// Web 端模型选择器刷新按钮需要绕过缓存，强刷走 refreshModelList。
-			force ? refreshModelList(piLocator, settingsStore, configManager) : fetchModelList(piLocator, settingsStore, configManager),
+		listModels: async (force?: boolean) => {
+			const snapshot = force
+				? await piModelCapabilityCache?.refresh()
+				: await piModelCapabilityCache?.ensure();
+			return snapshot?.models ?? (force
+				? refreshModelList(piLocator, settingsStore, configManager)
+				: fetchModelList(piLocator, settingsStore, configManager));
+		},
 		listSessions: (projectId) => {
 			const project = projectStore.get(projectId);
 			return sessionScanner.list(project?.path);
@@ -3418,6 +3417,23 @@ app.whenReady().then(async () => {
 	quitCleanup.register("terminal", () => terminalManager?.closeAll());
 
 	await settingsStore.load();
+	piModelCapabilityCache = new PiModelCapabilityCache({
+		createProcess: () => new PiProcess(
+			process.cwd(),
+			{
+				...settingsStore.get(),
+				// 全局 picker 与旧 --list-models 使用同一个纯目录范围：不跑扩展、技能或网络刷新。
+				piRpcOffline: true,
+				piRpcNoExtensions: true,
+				piRpcNoSkills: true,
+			},
+			piLocator,
+		),
+		getConfigDirectory: () => configManager.getConfigDir(),
+		watchDirectory: watchPiConfigDirectory,
+		onWarning: (message, detail) => void appLogger.warn("pi-capabilities", message, detail),
+	});
+	quitCleanup.register("pi-model-capabilities", () => piModelCapabilityCache?.dispose());
 	setFeishuConfigDefaultBotName(feishuT(currentFeishuLocale(), "bridge.defaultBotName"));
 	const initialSessionSettings = settingsStore.get();
 	sessionCatalog = new SessionCatalog(
@@ -3537,8 +3553,13 @@ app.whenReady().then(async () => {
 		enabled: settingsStore.get().defaultAgentBackend === "dsh",
 	});
 
-	void syncWslConfig().catch((error) => {
-		void appLogger.warn("app", "WSL config sync failed during startup", error);
+	// 模型 capability cache 的 hydration 在 syncWslConfig 后启动，确保它与 PiProcess
+	// 使用同一套 WSL HOME/config 目录；不阻塞首帧。
+	void syncWslConfig().then(async () => {
+		piModelCapabilityCache?.watchConfigDirectory();
+		await piModelCapabilityCache?.ensure();
+	}).catch((error) => {
+		void appLogger.warn("app", "WSL config sync or Pi capability hydration failed", error);
 	});
 	void migrateLegacyBuiltInExtensions().catch((error) => {
 		console.error("Failed to migrate legacy built-in extensions:", error);

@@ -64,19 +64,29 @@ function compile() {
 				suggestNormalizedBaseUrl: () => null,
 			};
 		}
-		// 目录富化：返回原样模型即可，不依赖 pi 内置目录数据。
-		if (specifier === "../pi/piAiBuiltinCatalog") {
-			return {
-				getPiAiCatalogIndex: () => [],
-				enrichFetchedModelFromCatalog: (m) => m,
-			};
-		}
+		// 目录富化：已从 fetchProviderModels 移除，测试只关心请求头。
 		if (specifier === "./parseProviderModels") {
 			return {
 				parseProviderModelsResponse: (body) =>
 					Array.isArray(body?.data)
 						? body.data.map((m) => ({ id: m.id }))
 						: [],
+			};
+		}
+		if (specifier === "./mcpConfig") {
+			return {
+				loadMcpConfigSnapshot: () => null,
+				mcpDocsUrl: "",
+				probeMcpServer: async () => ({ ok: false }),
+				validateMcpConfigFile: () => undefined,
+			};
+		}
+		if (specifier === "./providerUsageProbe") {
+			return {
+				candidateApplies: () => false,
+				parseUsageResponseBody: () => null,
+				USAGE_PROBE_CANDIDATES: [],
+				usageProbeUrls: () => [],
 			};
 		}
 		// 其余（shared 类型、i18n、parseProviderModels 等）在 fetchProviderModels

@@ -1,8 +1,9 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Brain, Check, ChevronDown, ChevronRight, Coins, Copy, ExternalLink, Plus, SquarePen, Trash2, X } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronRight, Coins, Copy, ExternalLink, Plus, RotateCcw, SquarePen, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
+import type { ModelSpec } from "../../../shared/types/modelSpecs";
 import type { ModelItem, ModelsFile } from "./configTypes";
 import { ApiTypeInput, ConfigSelect, openDocsInSystemBrowser, SecretInput } from "./ConfigShared";
 import { emptyTierDraft, normalizeTiers, toTierDrafts, type CostTierDraft } from "./modelCostTiers";
@@ -22,6 +23,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui-shadcn/popover";
 import { showNotice } from "../utils/notice";
 import { applyModelPatches, computeModelSpecPatches } from "../utils/modelSpecAutoFill";
+import { ModelCapabilityCard } from "./ModelCapabilityCard";
 import type { FetchedModel } from "../../../shared/types/fetchedModel";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
 import { isValidProviderName } from "../../../shared/providerName";
@@ -102,6 +104,10 @@ export function ModelsTab(props: {
 		value: "" | "xhigh" | "max",
 	) => void;
 	onDeleteModel: (providerName: string, index: number) => void;
+	/** 重置为自适应：显式刷新 endpoint /models 后按模板清空并重填能力字段。 */
+	onResetModel: (providerName: string, index: number) => void;
+	/** 正在重置的模型行 key（`${providerName}-${index}`），null 表示无。 */
+	resettingModelKey: string | null;
 	onFetchModels: (providerName: string) => void;
 	onTestProvider: (providerName: string) => void;
 	onChangeTestModelId: (providerName: string, modelId: string) => void;
@@ -113,6 +119,8 @@ export function ModelsTab(props: {
 	const providerNames = Object.keys(data.providers);
 	// 自动获取后的待保存选择：与 provider 分开存储，避免多个 provider 同时展开时选中状态互相污染。
 	const [selectedFetchedModelIds, setSelectedFetchedModelIds] = useState<Record<string, string[]>>({});
+	/** 本次编辑中解析到的规格来源；只做解释卡，不覆盖 models.json 原始字段。 */
+	const [modelCapabilitySpecs, setModelCapabilitySpecs] = useState<Record<string, ModelSpec>>({});
 	// 当前正在弹计费对话框的模型键（`${providerName}-${index}`），null 表示关闭
 	const [costDialogKey, setCostDialogKey] = useState<string | null>(null);
 	// 梯度计费编辑草稿：弹窗打开时从 cost.tiers 初始化；输入即规整落盘（与基础费率行为一致）
@@ -144,15 +152,21 @@ export function ModelsTab(props: {
 	}, [costDialogKey]);
 
 	/**
-	 * 模型 id 失焦时按 pi-ai 内置目录填充空字段。
-	 * listing 没给、目录也没命中就空着，不写猜的默认值；手填不覆盖。
+	 * 模型 ID/名称失焦时按端点元数据、当前 Pi 目录和内置目录补齐空字段。
+	 * 未命中就保持空，手填值不覆盖；唯一名称别名命中也会在能力卡中标注来源。
 	 */
 	const applyModelSpecAutoFill = async (providerName: string, index: number, modelId: string) => {
 		const trimmed = modelId.trim();
 		if (!trimmed) return;
-		const spec = await desktopApi.projects.getModelSpec(providerName, trimmed);
 		const model = data.providers[providerName]?.models[index];
 		if (!model) return;
+		const spec = await desktopApi.projects.getModelSpec(providerName, trimmed, model.name);
+		if (spec) {
+			setModelCapabilitySpecs((current) => ({
+				...current,
+				[getModelInputKey(providerName, index)]: spec,
+			}));
+		}
 		const updates = computeModelSpecPatches(model, spec);
 		for (const [field, value] of updates) {
 			props.onUpdateModel(providerName, index, field, value);
@@ -180,6 +194,15 @@ export function ModelsTab(props: {
 	const modelIdInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 	const getModelInputKey = (providerName: string, index: number) =>
 		`${providerName}\u0000${index}`;
+	const clearModelCapabilitySpec = (providerName: string, index: number) => {
+		setModelCapabilitySpecs((current) => {
+			const key = getModelInputKey(providerName, index);
+			if (!(key in current)) return current;
+			const next = { ...current };
+			delete next[key];
+			return next;
+		});
+	};
 	const getCompat = (providerName: string) => ({
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
@@ -800,7 +823,7 @@ export function ModelsTab(props: {
 														if (baseModels.length === 0) return;
 														const results = await Promise.all(
 															baseModels.map((m) =>
-																desktopApi.projects.getModelSpec(name, m.id).catch(() => null),
+																desktopApi.projects.getModelSpec(name, m.id, m.name).catch(() => null),
 															),
 														);
 														let filledCount = 0;
@@ -810,7 +833,15 @@ export function ModelsTab(props: {
 															filledCount++;
 															return applyModelPatches(m, updates);
 														});
-														props.onChangeProvider(name, "models", [
+														setModelCapabilitySpecs((current) => {
+																					const next = { ...current };
+																					results.forEach((spec, index) => {
+																						if (!spec) return;
+																						next[getModelInputKey(name, currentProvider.models.length + index)] = spec;
+																					});
+																					return next;
+																				});
+																				props.onChangeProvider(name, "models", [
 																...currentProvider.models,
 																...newModels,
 															]);
@@ -876,7 +907,8 @@ export function ModelsTab(props: {
 											const hasOnlyManagedThinkingLevelMap =
 												m.thinkingLevelMap &&
 												Object.keys(m.thinkingLevelMap).every((key) => key === "xhigh" || key === "max");
-											const modelComplexFields = ["api", "baseUrl", "thinkingLevelMap", "cost", "headers", "compat"].filter(
+											const modelCapabilitySpec = modelCapabilitySpecs[getModelInputKey(name, i)];
+															const modelComplexFields = ["api", "baseUrl", "thinkingLevelMap", "cost", "headers", "compat"].filter(
 												(key) => m[key] !== undefined && (key !== "thinkingLevelMap" || !hasOnlyManagedThinkingLevelMap),
 											);
 											return (
@@ -891,7 +923,7 @@ export function ModelsTab(props: {
 														}}
 														value={m.id}
 														onChange={(e) =>
-															props.onUpdateModel(name, i, "id", e.target.value)
+															void (clearModelCapabilitySpec(name, i), props.onUpdateModel(name, i, "id", e.target.value))
 														}
 														// 失焦按 pi-ai 目录填充空字段（未命中留空，见 applyModelSpecAutoFill）
 														onBlur={(e) => void applyModelSpecAutoFill(name, i, e.target.value)}
@@ -903,8 +935,9 @@ export function ModelsTab(props: {
 													<Input
 														value={m.name ?? ""}
 														onChange={(e) =>
-															props.onUpdateModel(name, i, "name", e.target.value)
+															void (clearModelCapabilitySpec(name, i), props.onUpdateModel(name, i, "name", e.target.value))
 														}
+														onBlur={() => void applyModelSpecAutoFill(name, i, m.id)}
 														placeholder={t("config.modelDisplayName")}
 														className="h-8 min-w-0"
 													/>
@@ -1013,14 +1046,20 @@ export function ModelsTab(props: {
 																				</Label>
 																			</div>
 																		</TableCell>
-												{/* 操作列：计费（Dialog）+ 删除 */}
+												{/* 操作列：重置为自适应（显式刷 endpoint）+ 计费（Dialog）+ 删除 */}
 												<TableCell className="p-2">
 													<div className="flex items-center justify-end gap-0.5">
+														<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => props.onResetModel(name, i)} disabled={props.resettingModelKey === getModelInputKey(name, i)} title={t("config.modelResetAdaptive")}>
+															<RotateCcw className="size-3.5" aria-hidden="true" />
+														</Button>
 														<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setCostDialogKey(`${name}-${i}`)} title={t("config.modelCost")}>
 															<Coins className="size-3.5" aria-hidden="true" />
 														</Button>
 														<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-															onClick={() => props.onDeleteModel(name, i)}
+															onClick={() => {
+																			setModelCapabilitySpecs({});
+																			props.onDeleteModel(name, i);
+																		}}
 																			title={t("config.deleteModel")}
 																			>
 																				<Trash2 size={14} />
@@ -1028,7 +1067,20 @@ export function ModelsTab(props: {
 																		</div>
 																	</TableCell>
 											</TableRow>
-											{/* 计费弹框：每行一个受控 Dialog，输入即保存（与表格内编辑行为一致） */}
+											{modelCapabilitySpec && (
+																	<TableRow key={`${name}-${i}-capability`} className="hover:bg-transparent">
+																		<TableCell colSpan={7} className="px-3 pb-2 pt-0">
+																			{/* 卡片展示模型行当前有效配置；重置按钮按当前模板重新填充。 */}
+																			<ModelCapabilityCard
+																				model={m}
+																				template={modelCapabilitySpec}
+																				onReset={() => props.onResetModel(name, i)}
+																				resetting={props.resettingModelKey === getModelInputKey(name, i)}
+																			/>
+																		</TableCell>
+																	</TableRow>
+																)}
+																{/* 计费弹框：每行一个受控 Dialog，输入即保存（与表格内编辑行为一致） */}
 											<Dialog open={costDialogKey === `${name}-${i}`} onOpenChange={(open) => { if (!open) setCostDialogKey(null); }}>
 												<DialogContent className="sm:max-w-3xl">
 													<DialogHeader>

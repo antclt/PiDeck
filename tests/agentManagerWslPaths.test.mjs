@@ -160,6 +160,16 @@ function loadAgentManager() {
 			if (id === "./extensionError") {
 				return { formatExtensionErrorReason: (error) => String(error) };
 			}
+			if (id === "./thinkingLevels") {
+				return { parseAvailableThinkingLevelsResponse: (response) => response?.data?.levels };
+			}
+			if (id === "./compactRpc") {
+				return {
+					createCompactRpcRequest: (prompt) => prompt
+						? { type: "compact", prompt, customInstructions: prompt }
+						: { type: "compact" },
+				};
+			}
 			if (id === "./streamGate") return streamGate;
 			if (id === "./cacheHitStats") return cacheHitStats;
 			if (id === "../../shared/toolRuntimeState") return { updateActiveToolCalls: () => new Map() };

@@ -1,3 +1,5 @@
+import type { ThinkingLevelMap } from "./modelSpecs";
+
 /**
  * `/models` 拉取结果（Pi 配置页与 DSH 自定义模型共用）。
  *
@@ -11,6 +13,8 @@ export type FetchedModel = {
 	maxTokens?: number;
 	/** 仅 pi-ai 目录补全时出现；listing 通常不下发 */
 	reasoning?: boolean;
+	/** 仅 catalog/capability 解析补全时出现，Pi 的规范档位 → provider wire 值映射。 */
+	thinkingLevelMap?: ThinkingLevelMap;
 	/** 仅 pi-ai 目录补全时出现，如 ["text","image"] */
 	input?: string[];
 };

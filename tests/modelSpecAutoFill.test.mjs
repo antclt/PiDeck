@@ -41,6 +41,8 @@ function assertUpdates(updates, expected) {
 			assert.ok(Array.isArray(value), `${expected[i][0]} 应为数组`);
 			assert.equal(value.length, want.length);
 			for (let j = 0; j < want.length; j++) assert.equal(value[j], want[j]);
+		} else if (want && typeof want === "object") {
+			assert.deepEqual(JSON.parse(JSON.stringify(value)), want);
 		} else {
 			assert.equal(value, want);
 		}
@@ -117,6 +119,26 @@ test("computeModelSpecPatches: 纯文本规格不填 input", () => {
 test("computeModelSpecPatches: 非推理模型不下发 reasoning", () => {
 	const updates = computeModelSpecPatches({ id: "x" }, fullSpec({ reasoning: undefined }));
 	assert.equal(updates.some(([field]) => field === "reasoning"), false);
+});
+
+test("computeModelSpecPatches: 完整 thinkingLevelMap 与输入模态只补空字段", () => {
+	const thinkingLevelMap = { off: null, high: "high", xhigh: "xhigh", max: "max" };
+	const updates = computeModelSpecPatches(
+		{ id: "gpt-5.6-luna" },
+		fullSpec({ input: ["text", "image"], thinkingLevelMap }),
+	);
+	assertUpdates(updates, [
+		["contextWindow", 128000],
+		["maxTokens", 16384],
+		["reasoning", true],
+		["thinkingLevelMap", thinkingLevelMap],
+		["input", ["text", "image"]],
+	]);
+	const protectedUpdates = computeModelSpecPatches(
+		{ id: "gpt-5.6-luna", reasoning: false, thinkingLevelMap: { off: null }, input: ["text"] },
+		fullSpec({ input: ["text", "image"], thinkingLevelMap }),
+	);
+	assert.equal(protectedUpdates.some(([field]) => field === "thinkingLevelMap" || field === "input"), false);
 });
 
 test("collectModelSpecPatches: 批量补全、计数、不修改入参、未命中留空", async () => {

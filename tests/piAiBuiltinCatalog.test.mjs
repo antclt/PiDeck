@@ -14,8 +14,6 @@ const { parseProviderModelsResponse } = loadTsCommonJs("src/main/config/parsePro
 const {
 	buildPiAiCatalogIndex,
 	lookupPiAiCatalogEntry,
-	lookupPiAiModelSpec,
-	enrichFetchedModelFromCatalog,
 	getPiAiCatalogIndex,
 	positiveInt,
 } = catalog;
@@ -45,6 +43,7 @@ function sampleIndex() {
 			contextWindow: 1000000,
 			maxTokens: 384000,
 			reasoning: true,
+			thinkingLevelMap: { off: null, low: "low", high: "high", xhigh: "xhigh", max: "max" },
 			input: ["text"],
 		},
 		{
@@ -85,32 +84,6 @@ test("lookup: 大小写与路径尾段命中，contains 不误匹配", () => {
 	assert.equal(lookupPiAiCatalogEntry(index, "relay", "gpt-4"), undefined);
 	assert.equal(lookupPiAiCatalogEntry(index, "relay", "claude"), undefined);
 	assert.equal(lookupPiAiCatalogEntry(index, "relay", ""), undefined);
-});
-
-test("lookupPiAiModelSpec: 映射 reasoning/images，未命中 undefined", () => {
-	const index = sampleIndex();
-	const spec = lookupPiAiModelSpec(index, "relay", "claude-sonnet-4-5");
-	assert.equal(spec?.source, "pi-ai");
-	assert.equal(spec?.contextWindow, 1000000);
-	assert.equal(spec?.reasoning, true);
-	assert.equal(spec?.images, true);
-	const textOnly = lookupPiAiModelSpec(index, "deepseek", "deepseek-v4-pro");
-	assert.equal(textOnly?.images, undefined);
-	assert.equal(lookupPiAiModelSpec(index, "relay", "totally-unknown"), undefined);
-});
-
-test("enrichFetchedModelFromCatalog: listing 容量不覆盖，空字段才补", () => {
-	const index = sampleIndex();
-	const listed = enrichFetchedModelFromCatalog(
-		{ id: "gpt-4o", contextWindow: 200000 },
-		index,
-		"relay",
-	);
-	assert.equal(listed.contextWindow, 200000);
-	assert.equal(listed.maxTokens, 16384);
-	assert.deepEqual(listed.input, ["text", "image"]);
-	const unknown = enrichFetchedModelFromCatalog({ id: "custom-local" }, index, "relay");
-	assert.deepEqual(unknown, { id: "custom-local" });
 });
 
 test("parseProviderModelsResponse: 读 listing 容量字段，缺则省略", () => {
@@ -160,12 +133,11 @@ test("parseProviderModelsResponse: Gemini models/ 前缀与 inputTokenLimit", ()
 });
 
 test("真实 pi-ai catalog：gpt-4o 有 contextWindow", () => {
-	const spec = lookupPiAiModelSpec(getPiAiCatalogIndex(), "openai", "gpt-4o");
-	assert.ok(spec, "gpt-4o 应命中 pi-ai 目录");
-	assert.ok(spec.contextWindow > 0, "gpt-4o 应有 contextWindow");
-	assert.equal(spec.source, "pi-ai");
+	const entry = lookupPiAiCatalogEntry(getPiAiCatalogIndex(), "openai", "gpt-4o");
+	assert.ok(entry, "gpt-4o 应命中 pi-ai 目录");
+	assert.ok(entry.contextWindow != null && entry.contextWindow > 0, "gpt-4o 应有 contextWindow");
 	assert.equal(
-		lookupPiAiModelSpec(getPiAiCatalogIndex(), "myrelay", "definitely-not-a-model-xyz"),
+		lookupPiAiCatalogEntry(getPiAiCatalogIndex(), "myrelay", "definitely-not-a-model-xyz"),
 		undefined,
 	);
 });

@@ -1,3 +1,4 @@
+import type { ThinkingLevelMap } from "./modelSpecs";
 import type { SessionEnvironment, SessionSource } from "./session";
 
 export type AgentStatus = "starting" | "idle" | "running" | "error" | "closed";
@@ -141,8 +142,16 @@ export type AvailableModel = {
 	/** 单次输出上限（token 数，来自 max-out 列） */
 	maxTokens?: number;
 	reasoning?: boolean;
+	/** Pi 已解析的完整输入模态；缺失表示旧 CLI/后端未报告。 */
+	input?: Array<"text" | "image">;
 	/** 是否支持图片输入（来自 images 列；undefined = pi 未提供该列） */
 	images?: boolean;
+	/** Pi capability hydration 已确认的可用思考档位。
+	 * undefined 表示旧 Pi / capability probe 未就绪或失败，不能当作精确能力；
+	 * 空数组则是 Pi 返回的权威空结果，必须原样保留。 */
+	thinkingLevels?: string[];
+	/** Pi capability hydration 返回的模型特有思考映射；保留给配置补全，不能由静态级别表推断。 */
+	thinkingLevelMap?: ThinkingLevelMap;
 	/** 该模型支持的思考档位（DSH models catalog 的 reasoning.efforts；
 	 *  选择器按它过滤档位——DSH deepseek 适配器只接受 off/high/max，
 	 *  pi-ai provider 按模型声明，选不支持的档位会在下次请求抛 UNSUPPORTED_REASONING_EFFORT）。 */

@@ -89,6 +89,8 @@ export const ipcChannels = {
 	sessionsRuntimeCommands: "sessions:runtime-commands",
 	/** 运行中 Agent 启动快照里的模型（get_available_models），用于判断新加模型要不要重启。 */
 	sessionsRuntimeListModels: "sessions:runtime-list-models",
+	/** Pi 当前模型支持的 thinking levels（get_available_thinking_levels）；旧 Pi 返回 undefined 由 UI 回退。 */
+	sessionsRuntimeThinkingLevels: "sessions:runtime-thinking-levels",
 	sessionsRuntimeExportHtml: "sessions:runtime-export-html",
 	sessionsRuntimeEditMessage: "sessions:runtime-edit-message",
 	sessionsRuntimeDeleteMessage: "sessions:runtime-delete-message",

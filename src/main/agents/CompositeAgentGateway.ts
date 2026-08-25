@@ -141,6 +141,12 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		return this.owner(agentId).getAvailableModels(agentId);
 	}
 
+	async getAvailableThinkingLevels(agentId: string): Promise<string[] | undefined> {
+		const gateway = this.owner(agentId);
+		if (typeof gateway.getAvailableThinkingLevels !== "function") return undefined;
+		return gateway.getAvailableThinkingLevels(agentId);
+	}
+
 	async exportHtml(agentId: string): Promise<unknown> {
 		const gateway = this.owner(agentId);
 		this.requireCapability(gateway, "exportHtml");

@@ -27,7 +27,8 @@ export function buildModelsFromFetchedSelection(
 			};
 			if (model.contextWindow != null) item.contextWindow = model.contextWindow;
 			if (model.maxTokens != null) item.maxTokens = model.maxTokens;
-			if (model.reasoning === true) item.reasoning = true;
+			if (model.reasoning !== undefined) item.reasoning = model.reasoning;
+			if (model.thinkingLevelMap) item.thinkingLevelMap = { ...model.thinkingLevelMap };
 			if (model.input && model.input.length > 0) item.input = model.input;
 			return item;
 		});

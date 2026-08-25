@@ -192,9 +192,9 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.projectsListModelsReport, projectId, force) as Promise<
 				ModelListReport
 			>,
-		// 查询模型规格（pi-ai 内置目录，中转站按 id 精确匹配；未命中返回 null）
-		getModelSpec: (providerName: string, modelId: string) =>
-			ipcRenderer.invoke(ipcChannels.projectsGetModelSpec, providerName, modelId) as Promise<
+		// 查询模型规格：优先匹配当前 Pi 目录，第三方中转按 model id/显示名识别模型本体。
+		getModelSpec: (providerName: string, modelId: string, modelName?: string) =>
+			ipcRenderer.invoke(ipcChannels.projectsGetModelSpec, providerName, modelId, modelName) as Promise<
 				ModelSpec | null
 			>,
 		onTrustRequest: (callback: (request: {
@@ -619,6 +619,11 @@ const api = {
 		listRuntimeModels: (target: SessionRuntimeTarget) =>
 			ipcRenderer.invoke(ipcChannels.sessionsRuntimeListModels, target) as Promise<
 				SessionCommandResult<SessionTargetedValue<AvailableModel[]>>
+			>,
+		/** Pi 当前模型支持的 thinking levels；旧 Pi/非 Pi 后端返回 undefined，渲染层回退静态列表。 */
+		listRuntimeThinkingLevels: (target: SessionRuntimeTarget) =>
+			ipcRenderer.invoke(ipcChannels.sessionsRuntimeThinkingLevels, target) as Promise<
+				SessionCommandResult<SessionTargetedValue<string[] | undefined>>
 			>,
 		exportRuntimeHtml: (target: SessionRuntimeTarget) =>
 			ipcRenderer.invoke(ipcChannels.sessionsRuntimeExportHtml, target) as Promise<

@@ -25,6 +25,8 @@ import type {
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
 import { PiProcess } from "./PiProcess";
+import { createCompactRpcRequest } from "./compactRpc";
+import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { resolveEnabledExtensionPaths } from "../extensions/enabledExtensionResolver";
 import {
@@ -1915,7 +1917,7 @@ export class AgentManager {
 
 		try {
 			const response = await runtime.process.client.request(
-				trimmedPrompt ? { type: "compact", prompt: trimmedPrompt } : { type: "compact" },
+				createCompactRpcRequest(trimmedPrompt),
 				120_000,
 			);
 			void this.appLogger?.info("agent", "Compact RPC response received", {
@@ -2265,6 +2267,21 @@ export class AgentManager {
 			60_000,
 		);
 		return ((response.data as any)?.models ?? []) as AvailableModel[];
+	}
+
+	/**
+	 * Ask the running Pi process for levels supported by its current model.
+	 * TODO(remove-compat): once PiDeck's minimum Pi version is >= 0.81 and the
+	 * migration window is over, make an unavailable RPC a hard error instead of
+	 * falling back to the renderer's legacy static list.
+	 */
+	async getAvailableThinkingLevels(agentId: string): Promise<string[] | undefined> {
+		const runtime = this.requireRuntime(agentId);
+		const response = await runtime.process.client.request(
+			{ type: "get_available_thinking_levels" },
+			60_000,
+		);
+		return parseAvailableThinkingLevelsResponse(response);
 	}
 
 	async setModel(agentId: string, provider: string, modelId: string) {

@@ -108,6 +108,16 @@ function loadAgentManager() {
         };
       }
       if (specifier === "./LatestByKeyEmitter") return { LatestByKeyEmitter };
+      if (specifier === "./thinkingLevels") {
+        return { parseAvailableThinkingLevelsResponse: (response) => response?.data?.levels };
+      }
+      if (specifier === "./compactRpc") {
+        return {
+          createCompactRpcRequest: (prompt) => prompt
+            ? { type: "compact", prompt, customInstructions: prompt }
+            : { type: "compact" },
+        };
+      }
       if (specifier === "./streamGate") return streamGateModule.exports;
       if (specifier === "./cacheHitStats") return cacheHitStatsModule.exports;
       if (specifier === "../../shared/toolRuntimeState") return { updateActiveToolCalls: () => undefined };

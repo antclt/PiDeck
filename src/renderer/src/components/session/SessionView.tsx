@@ -24,6 +24,7 @@ import { ComposerArea } from "./ComposerArea";
 import { TerminalDockPanel } from "../terminal/TerminalDockPanel";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight } from "../../rendererUtils";
+import { readPanelPixels } from "./sessionPanelSize";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 import { groupToolMessages } from "../app/AppUtils";
@@ -33,6 +34,10 @@ import type { AgentRunItem } from "./timeline/types";
 // onResize 一律视为程序化结果，不写 collapsed 状态。独立于 composer 的共享
 // 标记，避免 composer onResize 先触发清掉保护后，terminal 回调被误判为折叠。
 const TERMINAL_PROGRAMMATIC_PROTECT_MS = 250;
+
+// composer 高度重试上限：Group 注册竞态通常在 1-2 帧内自愈；超过该帧数仍失败说明
+// 面板已卸载/组不可用，停止重试避免空转（全新的内容测量会重置预算重新尝试）。
+const COMPOSER_HEIGHT_RETRY_LIMIT = 30;
 
 export type SessionViewProps = {
   // ── Session identity ──
@@ -252,6 +257,30 @@ export function SessionView({
     }
   }
 
+  // ── Group 注册竞态兜底（文档全屏 / 工作台布局切换） ──────────────
+  // react-resizable-panels v4 在布局树切换时，Panel ref 可能短暂指向已注销的 Group，
+  // getSize() 抛 `Group ... not found`。ComposerMeasuredExtras 对相同高度会去重，
+  // 若只吞异常，失败的那次测量可能永远不再触发。这里保留待处理高度并在下一帧重试，
+  // 直到 Group 注册完成；面板卸载 / 组件卸载时清理。
+  const pendingComposerHeightRef = useRef<number | null>(null);
+  const composerRetryFrameRef = useRef(0);
+  const composerHeightRetryCountRef = useRef(0);
+  const lastAttemptedComposerHeightRef = useRef<number | null>(null);
+  // 最新回调快照：rAF 重试走最新闭包，避免引用陈旧 state/ref
+  const handleComposerContentHeightRef = useRef<(contentHeight: number) => void>(() => undefined);
+  const scheduleComposerHeightRetry = () => {
+    if (composerRetryFrameRef.current !== 0) return;
+    if (composerHeightRetryCountRef.current >= COMPOSER_HEIGHT_RETRY_LIMIT) return;
+    composerHeightRetryCountRef.current += 1;
+    composerRetryFrameRef.current = requestAnimationFrame(() => {
+      composerRetryFrameRef.current = 0;
+      const pending = pendingComposerHeightRef.current;
+      if (pending === null) return;
+      pendingComposerHeightRef.current = null;
+      handleComposerContentHeightRef.current(pending);
+    });
+  };
+
   function programResize(target: number): number | undefined {
     programmaticResizeTargetRef.current = target;
     programResizeExpireRef.current = Date.now() + 200;
@@ -335,6 +364,13 @@ export function SessionView({
    * 输入卡本身 shrink-0：面板被终端拖高时剩余空白不撑开输入框。
    */
   function handleComposerContentHeight(contentHeight: number) {
+    // 全新测量（与最近一次尝试的高度不同）时重置重试预算：
+    // 若上一次重试链因上限停止，新的内容变化应能重新发起同步。
+    if (contentHeight !== lastAttemptedComposerHeightRef.current) {
+      composerHeightRetryCountRef.current = 0;
+    }
+    lastAttemptedComposerHeightRef.current = contentHeight;
+
     const target = resolveComposerPanelHeight({
       contentHeight,
       userPreferredHeight: userComposerHeightRef.current,
@@ -343,12 +379,26 @@ export function SessionView({
     });
     const current = composerHeightStateRef.current;
     // 百分比缓存可能把面板撑高，而 state 仍是 min：state 已贴合时仍要对齐视觉高度。
-    const visualPx = Math.round(composerPanelRef.current?.getSize()?.inPixels ?? current);
+    // react-resizable-panels v4 在布局树切换（如文档打开→全屏）时，Panel ref 可能短暂
+    // 指向已注销的 Group，getSize() 抛 `Group ... not found`。这里做安全读取：未就绪时
+    // 保留本次内容高度并在下一帧重试——ComposerMeasuredExtras 对相同高度会去重，
+    // 只吞异常会把唯一一次测量永久丢掉。
+    const read = readPanelPixels(composerPanelRef.current, current);
+    if (!read.ready) {
+      pendingComposerHeightRef.current = contentHeight;
+      scheduleComposerHeightRetry();
+      return;
+    }
+    const visualPx = read.pixels;
     if (target === current && Math.abs(visualPx - target) <= 2) return;
     if (target > current) {
       contentDrivenHeightRef.current = target;
       const appliedHeight = programResize(target);
       if (appliedHeight !== undefined) applyComposerHeight(appliedHeight, false);
+      else {
+        pendingComposerHeightRef.current = contentHeight;
+        scheduleComposerHeightRetry();
+      }
       return;
     }
     // 未拖过必须收回空隙（指标消失、独立卡收起）；拖过才用内容驱动闸门，避免拖高被回吞。
@@ -359,8 +409,23 @@ export function SessionView({
       );
       const appliedHeight = programResize(target);
       if (appliedHeight !== undefined) applyComposerHeight(appliedHeight, false);
+      else {
+        pendingComposerHeightRef.current = contentHeight;
+        scheduleComposerHeightRetry();
+      }
     }
   }
+  handleComposerContentHeightRef.current = handleComposerContentHeight;
+
+  // 卸载 / 切会话时取消挂起的 composer 高度重试（生命周期配对）
+  useEffect(() => {
+    return () => {
+      if (composerRetryFrameRef.current !== 0) cancelAnimationFrame(composerRetryFrameRef.current);
+      composerRetryFrameRef.current = 0;
+      pendingComposerHeightRef.current = null;
+      composerHeightRetryCountRef.current = 0;
+    };
+  }, []);
 
   const terminalRowHeightRef = useRef(terminalRowHeight);
   terminalRowHeightRef.current = terminalRowHeight;
