@@ -1115,6 +1115,8 @@ const api = {
 			ipcRenderer.invoke(
 				ipcChannels.appWindowToggleAlwaysOnTop,
 			) as Promise<boolean>,
+		isWindowAlwaysOnTop: () =>
+			ipcRenderer.invoke(ipcChannels.appWindowIsAlwaysOnTop) as Promise<boolean>,
 		closeWindow: () =>
 			ipcRenderer.invoke(ipcChannels.appWindowClose) as Promise<void>,
 		toggleDevTools: () =>

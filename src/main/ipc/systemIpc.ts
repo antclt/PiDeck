@@ -812,6 +812,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		win.setAlwaysOnTop(next, "floating");
 		return next;
 	});
+	// 供渲染层初始化置顶按钮态：读真实状态而非硬编码 false，
+	// 避免「窗口实际置顶、按钮却显示关」的错位（用户反馈的开关需切换一次才正常）。
+	ipcMain.handle(ipcChannels.appWindowIsAlwaysOnTop, () => {
+		const win = getMainWindow();
+		if (!win || win.isDestroyed()) return false;
+		return win.isAlwaysOnTop();
+	});
 	ipcMain.handle(ipcChannels.appWindowClose, () => {
 		const win = getMainWindow();
 		if (!win || win.isDestroyed()) return;

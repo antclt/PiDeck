@@ -7,6 +7,8 @@ type Props = {
   /** mac 用系统红绿灯，不再渲染右侧 Win 风格 min/max/close。 */
   platform: NodeJS.Platform;
   toggleAlwaysOnTop: () => Promise<boolean>;
+  /** 读取主进程当前是否置顶（初始化按钮态，避免与实际状态错位） */
+  isWindowAlwaysOnTop: () => Promise<boolean>;
   minimizeWindow: () => void;
   /** 切换最大化并返回切换后是否最大化 */
   toggleMaximizeWindow: () => Promise<boolean>;
@@ -29,6 +31,7 @@ export function AppHeader({
   useNativeTitleBar,
   platform,
   toggleAlwaysOnTop,
+  isWindowAlwaysOnTop,
   minimizeWindow,
   toggleMaximizeWindow,
   isWindowMaximized,
@@ -41,6 +44,11 @@ export function AppHeader({
   useEffect(() => {
     if (useNativeTitleBar) return;
     let alive = true;
+    // 置顶按钮态必须向主进程读取真实状态：若窗口已置顶而按钮硬编码 false，
+    // 会出现「开关显示关、实际置顶」，且点击一次只是取消置顶却显示仍是关。
+    void isWindowAlwaysOnTop().then((value) => {
+      if (alive) setWindowAlwaysOnTop(value);
+    });
     void isWindowMaximized().then((value) => {
       if (alive) setMaximized(value);
     });
@@ -51,7 +59,7 @@ export function AppHeader({
       alive = false;
       unsubscribe();
     };
-  }, [useNativeTitleBar, isWindowMaximized, onWindowMaximizedChange]);
+  }, [useNativeTitleBar, isWindowAlwaysOnTop, isWindowMaximized, onWindowMaximizedChange]);
 
   if (useNativeTitleBar) return null;
 

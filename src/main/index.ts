@@ -1418,8 +1418,14 @@ function focusMainWindow() {
 	mainWindow.show();
 	mainWindow.focus();
 	if (process.platform === "win32") {
-		mainWindow.setAlwaysOnTop(true);
-		mainWindow.setAlwaysOnTop(false);
+		// Windows 前置窗口用「临时置顶再取消」hack 抢前台（直接 focus 可能被前台锁拦截）。
+		// 必须原样还原用户置顶状态，否则会把用户手动置顶的窗口取消置顶；
+		// 已置顶的窗口本身就在最前，无需重复 hack。
+		const wasAlwaysOnTop = mainWindow.isAlwaysOnTop();
+		if (!wasAlwaysOnTop) {
+			mainWindow.setAlwaysOnTop(true);
+			mainWindow.setAlwaysOnTop(false);
+		}
 	}
 }
 

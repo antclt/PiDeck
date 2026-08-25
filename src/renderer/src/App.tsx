@@ -3363,6 +3363,7 @@ export function App() {
       onDrawerRestore={() => workspace.expandDrawer()}
       onToggleDrawerPin={workspace.toggleDrawerPinned}
       toggleAlwaysOnTop={api.app.toggleAlwaysOnTopWindow}
+      isWindowAlwaysOnTop={api.app.isWindowAlwaysOnTop}
       minimizeWindow={api.app.minimizeWindow}
       toggleMaximizeWindow={api.app.toggleMaximizeWindow}
       isWindowMaximized={api.app.isWindowMaximized}

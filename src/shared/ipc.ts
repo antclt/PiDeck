@@ -317,6 +317,8 @@ export const ipcChannels = {
 	/** 主进程 → 渲染：最大化状态变化（含双击标题栏等非按钮路径） */
 	appWindowMaximizedChanged: "app:window-maximized-changed",
 	appWindowToggleAlwaysOnTop: "app:window-toggle-always-on-top",
+	/** 读取主窗口当前是否置顶（渲染层初始化置顶按钮态用，避免硬编码 false） */
+	appWindowIsAlwaysOnTop: "app:window-is-always-on-top",
 	appWindowClose: "app:window-close",
 	agentsRuntimeState: "agents:runtime-state",
 	agentsState: "agents:state",
