@@ -67,10 +67,23 @@ export function sessionCommandFailureToast(
 	return `${message}（${clipped}）`;
 }
 
+/**
+ * 判定运行时状态是否仍可接受命令（live）。
+ * starting/idle/running 才是「进程仍在、可接收命令」的 live 状态；error/closed 是终态
+ * （进程已失败/已关闭），detached 是已解绑，undefined 表示没有运行时——均不可作为
+ * 重启/停止/重发等运行时命令的目标，也不应显示「重启」入口。
+ */
+export function isLiveRuntimeStatus(status?: string | null): boolean {
+	return status === "starting" || status === "idle" || status === "running";
+}
+
 export function toSessionRuntimeTarget(
 	sessionId: string,
-	runtime: { agentId?: string; runtimeGeneration?: number } | undefined,
+	runtime: { agentId?: string; runtimeGeneration?: number; status?: string | null } | undefined,
 ): SessionRuntimeTarget | undefined {
+	// target 只表达「会话 → 当前绑定运行实例」的句柄，不做 live 判定：
+	// stop/restart 对 error/closed 终态 Agent 仍有效（主进程幂等 stop + 重启重建），
+	// 而「重发是否需要先停」这类 live 判定由各调用点用 isLiveRuntimeStatus 单独判断。
 	if (!runtime?.agentId || runtime.runtimeGeneration === undefined) return undefined;
 	return {
 		sessionId,

@@ -621,6 +621,44 @@ test("restart reapplies catalog preferences before binding a new generation", as
   );
 });
 
+test("restart of a terminal (error) agent recovers a fresh runtime instead of rejecting", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  // 服务商不可用 → 发送失败 → Agent 进入 error 态（仍在 agent 列表与绑定表中）；
+  // 此时用户点重启不应被「会话运行实例已发生变化」误拒。
+  const harness = createHarness({
+    entry: { status: "active", filePath: "C:/sessions/session-1.jsonl" },
+    tabs: [{
+      id: "agent-error",
+      projectId: "project-1",
+      cwd: "C:/project",
+      title: "Session 1",
+      status: "error",
+      sessionPath: "C:/sessions/session-1.jsonl",
+      sessionEnvironment: "native",
+      sessionSource: "pi",
+      createdAt: 1,
+    }],
+  });
+  const coordinator = new SessionRuntimeCoordinator(
+    harness.catalog,
+    harness.agents,
+    harness.sender,
+  );
+  const generation = coordinator.bindExistingAgent("session-1", "agent-error");
+
+  const restarted = await coordinator.restartRuntime({
+    sessionId: "session-1",
+    agentId: "agent-error",
+    runtimeGeneration: generation,
+  });
+
+  assert.equal(restarted.ok, true);
+  assert.equal(restarted.value.runtime.agentId, "agent-restarted");
+  assert.equal(harness.calls.restart, 1);
+  assert.equal(coordinator.getSessionId("agent-error"), undefined);
+  assert.equal(coordinator.getSessionId("agent-restarted"), "session-1");
+});
+
 test("lazy activation publishes runtime state after binding", async () => {
   const { SessionRuntimeCoordinator } = loadCoordinator();
   const harness = createHarness({

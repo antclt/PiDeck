@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { Archive, Check, CircleAlert, CircleDot, Folder, LoaderCircle, MessageCircle } from "lucide-react";
+import { Archive, Check, CircleAlert, CircleDot, Folder, LoaderCircle, MessageCircle, RefreshCw, RotateCw } from "lucide-react";
 import { t } from "../../i18n";
 import {
 	AlertDialog,
@@ -492,6 +492,10 @@ export function AgentContextMenu(props: {
 	/** 打开实时日志查看弹窗（仅开启记录后可用） */
 	onOpenLogs?: () => void;
 	onOpenSessionFile?: () => void;
+	/** 重启会话（仅 live Agent：starting/idle/running 传入）。 */
+	onRestartSession?: () => void;
+	/** 重新加载会话（仅无 live 运行时：未启动/error/closed 传入），从磁盘刷新消息文件。 */
+	onReloadSession?: () => void;
 	onCloseAgent: () => void;
 	/** 运行中也可删：主进程先停后删，不必先关 Agent。 */
 	onDeleteSession?: () => void;
@@ -524,6 +528,24 @@ export function AgentContextMenu(props: {
 						</DropdownMenuItem>
 					)}
 				</>
+			)}
+			{/* 会话运行控制：重启（live）与重新加载（无 live）互斥，由调用方按 agent 状态只传其一 */}
+			{(props.onRestartSession || props.onReloadSession) && <DropdownMenuSeparator />}
+			{props.onRestartSession && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onRestartSession}>
+					<span className="inline-flex items-center gap-2">
+						<RotateCw className="size-3.5" aria-hidden="true" />
+						{t("menu.restartSession")}
+					</span>
+				</DropdownMenuItem>
+			)}
+			{props.onReloadSession && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onReloadSession}>
+					<span className="inline-flex items-center gap-2">
+						<RefreshCw className="size-3.5" aria-hidden="true" />
+						{t("menu.reloadSession")}
+					</span>
+				</DropdownMenuItem>
 			)}
 			<DropdownMenuSeparator />
 			<DropdownMenuItem
@@ -571,6 +593,8 @@ export function SessionContextMenu(props: {
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
 	onOpenSessionFile?: () => void;
+	/** 重新加载会话（未启动的历史会话）：从磁盘刷新消息文件。 */
+	onReloadSession?: () => void;
 	/** 打开会话代理设置弹框（菜单项「会话代理」） */
 	onOpenProxySetting?: () => void;
 	/** 会话是否有文件路径（DSH 会话无 pi 会话文件：隐藏「复制路径/打开文件」） */
@@ -593,6 +617,14 @@ export function SessionContextMenu(props: {
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
 			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>{t("common.rename")}</DropdownMenuItem>
+			{props.onReloadSession && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onReloadSession}>
+					<span className="inline-flex items-center gap-2">
+						<RefreshCw className="size-3.5" aria-hidden="true" />
+						{t("menu.reloadSession")}
+					</span>
+				</DropdownMenuItem>
+			)}
 			{/* DSH 历史会话无宿主文件可复制/导出（主进程显式拒绝，A8/A9）：隐藏入口 */}
 			<DropdownMenuItem disabled={busy} onSelect={props.onOpenProxySetting}>{t("menu.sessionProxy")}</DropdownMenuItem>
 			{props.menu.session.backend !== "dsh" && (

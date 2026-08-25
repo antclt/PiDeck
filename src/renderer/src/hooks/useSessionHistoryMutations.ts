@@ -28,6 +28,8 @@ export interface SessionHistoryMutationsDeps {
   currentSessionId: string | undefined;
   getRuntimeTargetForSession: (sessionId: string | undefined) => SessionRuntimeTarget | undefined;
   getRuntimeTargetForAgent: (agentId: string | undefined) => SessionRuntimeTarget | undefined;
+  /** 会话运行时是否 live（starting/idle/running）：决定改文件前是否需要先停 Agent。 */
+  isSessionRuntimeLive: (sessionId: string) => boolean;
   showConfirm: (config: ConfirmConfig) => void;
   clearConfirm: () => void;
   showToast: (message: string, duration?: number) => void;
@@ -107,8 +109,9 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     setLoadState({ sessionId, state: { status: "ready" } });
   }, [cacheMessages, setLoadState, showOverlay]);
 
-  /** 运行中则先停：产品规则是改文件而不是 switch_session，避免内存树和磁盘分叉。 */
+  /** live 运行时才先停：error/closed 终态进程已死，先 stop 会误报（且产品上无需停）。 */
   const stopIfRunning = useCallback(async (sessionId: string) => {
+    if (!depsRef.current.isSessionRuntimeLive(sessionId)) return;
     const target = depsRef.current.getRuntimeTargetForSession(sessionId);
     if (!target) return;
     showOverlay(sessionId, "stopping");
@@ -121,7 +124,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     onConfirmed: () => Promise<void>,
   ) => {
     const latest = depsRef.current;
-    const live = Boolean(latest.getRuntimeTargetForSession(sessionId));
+    const live = latest.isSessionRuntimeLive(sessionId);
     if (!live) {
       void onConfirmed();
       return;
@@ -156,12 +159,11 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     const latest = depsRef.current;
     const sessionId = latest.currentSessionId;
     if (!sessionId) return;
-    const target = latest.getRuntimeTargetForSession(sessionId);
     // 匿名/--no-session 没有 JSONL：pi 的 editMessage 要求 sessionPath，缺失即报
     // “Session not persisted”，旧逻辑调必然失败的 runtime 命令。这里改为明确告知不支持。
     const path = resolveHistoryMutationPath({
       kind: "edit",
-      target,
+      live: latest.isSessionRuntimeLive(sessionId),
       persisted: latest.hasPersistedSessionFile(sessionId),
     });
     if (path.path === "unsupported-anonymous") {
@@ -189,12 +191,11 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     const latest = depsRef.current;
     const sessionId = latest.currentSessionId;
     if (!sessionId) return;
-    const target = latest.getRuntimeTargetForSession(sessionId);
     // 匿名会话无文件可删：旧逻辑弹「删除后需要重新加载会话才能生效」的误导确认后调
     // deleteRuntimeMessage，必然报 “Session not persisted”。改为明确告知不支持。
     const path = resolveHistoryMutationPath({
       kind: "delete",
-      target,
+      live: latest.isSessionRuntimeLive(sessionId),
       persisted: latest.hasPersistedSessionFile(sessionId),
     });
     if (path.path === "unsupported-anonymous") {
@@ -229,10 +230,9 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     const sessionId = latest.currentSessionId;
     if (!sessionId) return;
     if (resendingIdsRef.current.has(message.id)) return;
-    const target = latest.getRuntimeTargetForSession(sessionId);
     const path = resolveHistoryMutationPath({
       kind: "resend",
-      target,
+      live: latest.isSessionRuntimeLive(sessionId),
       persisted: latest.hasPersistedSessionFile(sessionId),
       isImageGenSession: latest.isImageGenSession?.(sessionId),
     });

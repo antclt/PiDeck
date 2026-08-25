@@ -55,6 +55,7 @@ import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
 import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
 import { PromptDeliveryUnknownError } from "./utils/promptErrors";
 import {
+  isLiveRuntimeStatus,
   requireSessionCommand,
   sessionCommandFailureToast,
   toSessionRuntimeTarget,
@@ -95,6 +96,7 @@ import {
   promoteSessionComposerStateAtom,
   setSessionAttachmentsAtom,
   setSessionCatalogLoadStateAtom,
+  setSessionMessageLoadStateAtom,
   setSessionDraftAtom,
   cacheSessionMessagesAtom,
   upsertSessionAtom,
@@ -234,6 +236,7 @@ export function App() {
   const setSessionAttachments = useSetAtom(setSessionAttachmentsAtom);
   const promoteSessionComposerState = useSetAtom(promoteSessionComposerStateAtom);
   const setSessionCatalogLoadState = useSetAtom(setSessionCatalogLoadStateAtom);
+  const setSessionMessageLoadState = useSetAtom(setSessionMessageLoadStateAtom);
   const removeSessionState = useSetAtom(removeSessionStateAtom);
   const removeSessionComposerState = useSetAtom(removeSessionComposerStateAtom);
   const setImageGenConfig = useSetAtom(imageGenConfigAtom);
@@ -500,6 +503,10 @@ export function App() {
     sessionId
       ? toSessionRuntimeTarget(sessionId, store.get(sessionRuntimeBySessionIdAtomFamily(sessionId)))
       : undefined;
+  // target 存在不代表 live（error/closed 终态仍持有绑定）：改文件前是否要先停 Agent
+  // 必须按 runtime status 判定，避免对已死进程误发 stop。
+  const isSessionRuntimeLive = (sessionId: string) =>
+    isLiveRuntimeStatus(store.get(sessionRuntimeBySessionIdAtomFamily(sessionId))?.status);
   const getRuntimeTargetForAgent = (agentId: string | undefined) => {
     if (!agentId) return undefined;
     const sessionId = store.get(sessionIdByRuntimeAgentIdAtomFamily(agentId));
@@ -2035,6 +2042,41 @@ export function App() {
     if (result?.ok) applyAgentRuntimeState(agentId, result.value.value);
   }
 
+  /**
+   * 从磁盘重新加载会话消息（外部修改会话文件后刷新时间线）。
+   * 仅用于未启动/异常（无 live runtime）的会话：live 会话刷新应走「重启 Agent」，
+   * 直接 force 磁盘会覆盖运行时内存中的流式消息。force 覆盖缓存后，所有展示该会话的
+   * 时间线（含分屏栏）都会通过 sessionMessagesCacheAtom 订阅自动更新。
+   */
+  async function reloadSessionMessages(sessionId: string) {
+    if (!sessionId) return;
+    // live 运行时不能强刷磁盘：菜单虽已按状态隐藏，但保留边界守卫防状态在菜单打开期间变化。
+    if (getRuntimeTargetForSession(sessionId)) return;
+    setSessionMessageLoadState({ sessionId, state: { status: "loading" } });
+    try {
+      const page = await api.sessions.readRecordMessagePage(sessionId, undefined, 100);
+      setCacheMessages({
+        sessionId,
+        messages: page.messages,
+        source: "disk",
+        expectedRevision: 0,
+        page: { total: page.total, nextBefore: page.nextBefore },
+        force: true,
+      });
+      setSessionMessageLoadState({ sessionId, state: { status: "ready" } });
+      showToast(t("app.sessionReloaded"), 2000);
+    } catch (error) {
+      setSessionMessageLoadState({
+        sessionId,
+        state: { status: "error", error: error instanceof Error ? error.message : String(error) },
+      });
+      showToast(
+        t("app.sessionReloadFailed", { error: error instanceof Error ? error.message : String(error) }),
+        5000,
+      );
+    }
+  }
+
   /** 调整菜单位置避免溢出视口 */
   function adjustMenuPos(x: number, y: number, width = 200, height = 260) {
   	const vw = window.innerWidth;
@@ -2097,7 +2139,12 @@ export function App() {
     const restartingAgent = agents.find((agent) => agent.id === agentId) ?? activeAgent;
     if (!restartingAgent) return;
     const target = getRuntimeTargetForAgent(restartingAgent.id);
-    if (!target) return;
+    if (!target) {
+      // 终态（error/closed）或无绑定的 Agent 没有可重启的运行实例：
+      // 菜单按状态隐藏了重启，这里兜底防竞态/其他入口（如模型切换重启）静默无反馈。
+      showToast(t("sessionCommand.runtimeUnavailable"), 4000);
+      return;
+    }
     setRestartingAgentId(restartingAgent.id);
     pendingAgentsRef.current = [
       ...pendingAgentsRef.current.filter(
@@ -2277,6 +2324,7 @@ export function App() {
     currentSessionId,
     getRuntimeTargetForSession,
     getRuntimeTargetForAgent,
+    isSessionRuntimeLive,
     showConfirm: overlays.showConfirm,
     clearConfirm: overlays.clearConfirm,
     showToast,
@@ -2701,6 +2749,9 @@ export function App() {
       delete: async (projectId, session) => {
         requestDeleteSidebarSession(projectId, session);
       },
+      reload: async (_projectId, session) => {
+        await reloadSessionMessages(session.id);
+      },
       archive: async (projectId, session) => {
         await archiveSidebarSession(projectId, session);
       },
@@ -2728,6 +2779,15 @@ export function App() {
         })
         : Promise.resolve(),
       close: requestCloseAgent,
+      // 重启 live Agent（菜单只在 live 状态传入，此处直接走 App 的 restartActiveAgent）
+      restart: (agent) => {
+        restartActiveAgent(agent.id);
+      },
+      // 重新加载会话消息：按 agentId 反查绑定的会话记录 id（error/closed 仍保留绑定）
+      reload: async (agent) => {
+        const sessionId = store.get(sessionIdByRuntimeAgentIdAtomFamily(agent.id));
+        if (sessionId) await reloadSessionMessages(sessionId);
+      },
     },
     worktrees: {
       create: async (projectId, branchName) => {
@@ -2861,11 +2921,20 @@ export function App() {
           if (currentSessionId) workspaceChrome.closeTab(currentSessionId);
         }
       : undefined,
-    canRestartCurrent: Boolean(activeAgentId),
+    // 重启只对 live Agent（starting/idle/running）有意义：error/closed（红叉）重启必失败，
+    // 该类会话改由「重新加载会话」承接（见 canReloadCurrent）。
+    canRestartCurrent: Boolean(activeAgentId) && isLiveRuntimeStatus(activeAgent?.status),
     isRestartingCurrent: restartingAgentId === activeAgentId,
     // 没有绑定运行时的草稿也有会话 ID，但重启只对已启动 Agent 有意义
-    onRestartCurrent: activeAgentId
-      ? () => void restartActiveAgent(activeAgentId)
+    onRestartCurrent:
+      activeAgentId && isLiveRuntimeStatus(activeAgent?.status)
+        ? () => void restartActiveAgent(activeAgentId)
+        : undefined,
+    // 重新加载会话：无 live 运行时（未启动/error/closed）时可用，从磁盘刷新消息文件；
+    // live 会话刷新走重启即可，不做磁盘强刷以免覆盖内存中的流式消息。
+    canReloadCurrent: Boolean(currentSessionId) && !isLiveRuntimeStatus(activeAgent?.status),
+    onReloadCurrent: currentSessionId
+      ? () => void reloadSessionMessages(currentSessionId)
       : undefined,
     onToggleDrawer: toggleRightDrawer,
     drawerOpen: Boolean(drawer && !drawerCollapsed),

@@ -997,8 +997,13 @@ export class SessionRuntimeCoordinator {
 	async restartSession(sessionId: string, agentId: string): Promise<AgentTab> {
 		const entry = this.catalog.get(sessionId);
 		if (!entry) throw new Error(`Session not found: ${sessionId}`);
-		const mappedAgentId = this.getAgentId(sessionId);
-		if (mappedAgentId && mappedAgentId !== agentId) {
+		// 直接读绑定表做「是否被其他 agent 抢占」的校验，不能走 getAgentId：
+		// getAgentId 对终态（error/closed）agent 有解绑副作用，会清掉绑定后导致
+		// 紧随其后的 reserveBoundRuntime 误抛「binding changed」（重启终态 Agent
+		// 时用户看到「会话运行实例已发生变化」）。终态 Agent 的 restart 仍由
+		// agents.restart 内部先 stop 旧进程再 create 新进程完成，不需要提前解绑。
+		const boundAgentId = this.agentIdBySession.get(sessionId);
+		if (boundAgentId && boundAgentId !== agentId) {
 			throw new Error("Session runtime changed before restart");
 		}
 
