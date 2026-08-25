@@ -544,8 +544,21 @@ export class DshHost {
 		const client = this.client;
 		if (!client) return [];
 		const listed = await client.agentPresets.list({});
-		if (!listed.result.ok) return [];
-		return (listed.result.value.presets ?? []).map((preset: {
+		if (!listed.result.ok) {
+			// 目录拉取失败/为空时记日志：会话头模式胶囊与配置页「预设设置」都依赖这份名单，
+			// 空名单 = 部署未装配 agent-presets 组合行（此时胶囊按设计隐藏）。
+			getAppLogger()?.warn("dsh-host", "agentPreset.list failed", {
+				error: JSON.stringify(listed.result.error),
+			});
+			return [];
+		}
+		const presets = listed.result.value.presets ?? [];
+		if (presets.length === 0) {
+			getAppLogger()?.warn("dsh-host", "agentPreset.list returned an empty roster", {
+				hint: "agent-presets 组合行未装配时 PiDeck 隐藏会话头模式胶囊（与 dsh-web 一致）",
+			});
+		}
+		return presets.map((preset: {
 			id: string;
 			trust: "system" | "user";
 			isDefault: boolean;

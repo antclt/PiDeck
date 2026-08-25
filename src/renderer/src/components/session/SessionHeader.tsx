@@ -13,6 +13,7 @@ import { isUserFacingSessionStart } from "../../hooks/useSessionTimelineControll
 import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
 import { Button } from "../ui-shadcn/button";
+import { DshAgentPresetControl } from "./DshAgentPresetControl";
 import { DshAgentToolsPanel } from "./DshAgentToolsPanel";
 
 type HeaderActions = {
@@ -153,13 +154,17 @@ export function SessionHeader(props: SessionHeaderProps) {
         ) : (
           <span className="min-w-0" aria-hidden="true" />
         )}
+        {/* DSH 会话模式胶囊：草稿期可点开选择，激活后只读展示 */}
+        {session?.backend === "dsh" ? <DshAgentPresetControl sessionId={sessionId} /> : null}
       </div>
       {actions}
     </div>
   );
 }
 
-/** DSH 工具按钮（G5/G6：目标 / 子代理面板入口）；仅运行时已激活（有 agentId）时可用。 */
+/**
+ * DSH 工具按钮（G5/G6：目标 / 子代理面板入口）；仅运行时已激活（有 agentId）时可用。
+ */
 function DshToolsButton(props: { sessionId: string }) {
   const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(props.sessionId));
   const [open, setOpen] = useState(false);

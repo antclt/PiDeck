@@ -44,6 +44,13 @@ test("parseHeaderLine accepts a session header and ignores later lines", () => {
   assert.equal(parsed.updatedAt, 99);
 });
 
+test("parseHeaderLine extracts the persisted agent preset (会话「模式」)", () => {
+  const parsed = parseHeaderLine(headerJson({ agentPreset: "cordis" }), 1);
+  assert.equal(parsed.agentPreset, "cordis");
+  // 缺省 header（老版本 host 会话）不携带该字段，解析结果保持 undefined
+  assert.equal(parseHeaderLine(headerJson(), 1).agentPreset, undefined);
+});
+
 test("parseHeaderLine rejects non-session first lines", () => {
   assert.equal(parseHeaderLine("not-json", 1), undefined);
   assert.equal(parseHeaderLine(JSON.stringify({ type: "user", id: "x" }), 1), undefined);
@@ -114,6 +121,22 @@ test("listForeignSessionsFromDisk returns root sessions and skips subagents", ()
     assert.equal(alpha.cwd, "D:/project/alpha");
     assert.equal(typeof alpha.updatedAt, "number");
     assert.equal(alpha.title, undefined, "空日志没有 session/title 也没有首条提示时不得编造标题");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("listForeignSessionsFromDisk passes the persisted agent preset through", () => {
+  const home = mkdtempSync(join(tmpdir(), "pideck-dsh-foreign-preset-"));
+  try {
+    writeSession(home, "D:/project/alpha", "session-preset-a", { agentPreset: "minimal" });
+    writeSession(home, "D:/project/alpha", "session-legacy", {});
+    const items = listForeignSessionsFromDisk(home);
+    const preset = items.find((item) => item.dshSessionId === "session-preset-a");
+    assert.equal(preset.agentPreset, "minimal");
+    // 老版本 host 的会话 header 没有该字段：item 不携带（保持 undefined）
+    const legacy = items.find((item) => item.dshSessionId === "session-legacy");
+    assert.equal(legacy.agentPreset, undefined);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

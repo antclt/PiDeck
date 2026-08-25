@@ -53,6 +53,8 @@ export type SessionCatalogEntry = {
 	dshSessionId?: string;
 	/** DSH 权限预设（read-only/workspace-write/danger-full-access）：草稿期预选，激活时应用。 */
 	permissionPreset?: string;
+	/** DSH agent 预设（会话「模式」）：草稿期预选；激活新建时随 sessions.create 应用，attach 时从 host 回写。 */
+	agentPreset?: string;
 	/** 会话级代理覆盖（缺省 = 跟随全局）。DSH 会话的设置在 host 启动时被聚合应用。 */
 	proxy?: SessionProxyOverride;
 	createdAt: number;
@@ -486,6 +488,8 @@ export class SessionCatalog {
 		model?: { provider: string; modelId: string };
 		thinkingLevel?: string;
 		permissionPreset?: string;
+		/** DSH agent 预设（会话「模式」）草稿期预选；外部会话导入时来自 host 会话 header。 */
+		agentPreset?: string;
 		/** 外部（dsh-web 等）会话导入：host 会话已存在，条目直接置 active（重启不清理）。 */
 		dshSessionId?: string;
 		/** 纠正归属时保留已有真实标题；占位名（cwd 末段）由调用方决定是否覆盖。 */
@@ -517,16 +521,20 @@ export class SessionCatalog {
 					: false;
 				if (existing) {
 					const nextTitle = input.keepExistingTitle ? existing.title : input.title;
+					const agentPresetChanged = input.agentPreset !== undefined && existing.agentPreset !== input.agentPreset;
 					const changed = forgotten || (
 						existing.projectId !== input.projectId ||
 						existing.title !== nextTitle ||
 						existing.backend !== input.backend ||
+						agentPresetChanged ||
 						existing.status !== "active"
 					);
 					existing.projectId = input.projectId;
 					existing.title = nextTitle;
 					existing.backend = input.backend;
 					existing.status = "active";
+					// 外部会话 header 携带的 preset 变化（host 会话 header 是权威）随导入同步
+					if (input.agentPreset !== undefined) existing.agentPreset = input.agentPreset;
 					existing.updatedAt = now;
 					return { value: cloneEntry(existing), changed };
 				}
@@ -550,6 +558,7 @@ export class SessionCatalog {
 				model: input.model,
 				thinkingLevel: input.thinkingLevel,
 				permissionPreset: input.permissionPreset,
+				agentPreset: input.agentPreset,
 				dshSessionId: input.dshSessionId,
 				createdAt: now,
 				updatedAt: now,
@@ -569,6 +578,8 @@ export class SessionCatalog {
 			model?: { provider: string; modelId: string } | null;
 			thinkingLevel?: string | null;
 			permissionPreset?: string | null;
+			/** DSH agent 预设（会话「模式」）：草稿期预选；null = 清除预选。 */
+			agentPreset?: string | null;
 			proxy?: SessionProxyOverride | null;
 			/** 切到生图后端时甩开 pi 会话文件引用（null = 清空）。 */
 			filePath?: string | null;
@@ -582,6 +593,7 @@ export class SessionCatalog {
 			if (patch.model !== undefined) transient.model = patch.model ?? undefined;
 			if (patch.thinkingLevel !== undefined) transient.thinkingLevel = patch.thinkingLevel ?? undefined;
 			if (patch.permissionPreset !== undefined) transient.permissionPreset = patch.permissionPreset ?? undefined;
+			if (patch.agentPreset !== undefined) transient.agentPreset = patch.agentPreset ?? undefined;
 			if (patch.backend !== undefined) transient.backend = patch.backend;
 			// 切到生图后端时需甩开 pi 会话文件（filePath/piSessionId 置空），否则残留文件引用
 			if (patch.filePath !== undefined) transient.filePath = patch.filePath ?? undefined;
@@ -597,6 +609,7 @@ export class SessionCatalog {
 			if (patch.model !== undefined) nextEntry.model = patch.model ?? undefined;
 			if (patch.thinkingLevel !== undefined) nextEntry.thinkingLevel = patch.thinkingLevel ?? undefined;
 			if (patch.permissionPreset !== undefined) nextEntry.permissionPreset = patch.permissionPreset ?? undefined;
+			if (patch.agentPreset !== undefined) nextEntry.agentPreset = patch.agentPreset ?? undefined;
 			if (patch.backend !== undefined) nextEntry.backend = patch.backend;
 			if (patch.filePath !== undefined) nextEntry.filePath = patch.filePath ?? undefined;
 			if (patch.piSessionId !== undefined) nextEntry.piSessionId = patch.piSessionId ?? undefined;
@@ -613,6 +626,8 @@ export class SessionCatalog {
 		filePath?: string;
 		piSessionId?: string;
 		dshSessionId?: string;
+		/** DSH agent 预设（会话「模式」）：attach/新建后 host 回写（host 会话 header 是权威）。 */
+		agentPreset?: string;
 		/** 真正开聊后再把 DSH 草稿抬成 active；预热只绑 host id，不抬。 */
 		promoteToActive?: boolean;
 		/** 归档恢复等手动找回才清删除墓碑；激活/fork 回写不得把用户删过的 id 解禁。 */
@@ -644,6 +659,8 @@ export class SessionCatalog {
 					this.dismissedDshSessionIds.delete(input.dshSessionId);
 				}
 			}
+			// attach/新建时 host 回写的实际 preset（草稿预选可能被 host 修正为部署默认）
+			if (input.agentPreset !== undefined) entry.agentPreset = input.agentPreset;
 			// DSH 预热/激活也会 attach host id，但此时还没有用户消息。
 			// 不能把草稿抬成 active：渲染层会把「active + dshSessionId」当成有历史，
 			// 输入一半整页换成「正在加载历史」骨架。导入路径 createDraft({dshSessionId})
@@ -973,6 +990,7 @@ export class SessionCatalog {
 			model: entry.model ? { ...entry.model } : undefined,
 			thinkingLevel: entry.thinkingLevel,
 			permissionPreset: entry.permissionPreset,
+			agentPreset: entry.agentPreset,
 			dshSessionId: entry.dshSessionId,
 			proxy: entry.proxy ? { ...entry.proxy } : undefined,
 			createdAt: entry.createdAt,

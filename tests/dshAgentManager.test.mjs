@@ -68,7 +68,15 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 				const cwd = String(payload.workspaceId).startsWith("ws:")
 					? String(payload.workspaceId).slice(3)
 					: PROJECT.path;
-				const summary = { sessionId, cwd, running: false, blank: true };
+				// host 行为：agentPreset 随 sessions.create 提交，解析后写入会话 header
+				//（list 行返回；预选 id 无效时 host 回退部署默认并返回解析值）。
+				const summary = {
+					sessionId,
+					cwd,
+					running: false,
+					blank: true,
+					...(payload?.agentPreset ? { agentPreset: payload.agentPreset } : {}),
+				};
 				sessions.set(sessionId, summary);
 				return { result: { ok: true, value: summary } };
 			},
@@ -302,6 +310,44 @@ test("create 新建 DSH 会话并注册 runtime（无 dshSessionId 时）", asyn
 	assert.equal(tab.backend, "dsh");
 	assert.equal(manager.list().length, 1);
 	assert.equal(manager.getMessages(tab.id).length, 0, "新建会话无历史");
+
+test("create 携带草稿期预选的 agentPreset 随 sessions.create 提交并回读解析值", async () => {
+	const { host, calls, createPayloads } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({
+		projectId: "project-1",
+		backend: "dsh",
+		agentPreset: "code",
+	});
+	assert.equal(calls.create, 1);
+	// 预选必须随 create 提交给 host（preset 决定会话工具与提示，创建即固定）
+	assert.equal(createPayloads[0].agentPreset, "code");
+	// host 把解析后的 preset 写进会话 header 并在响应里返回 → tab 携带，供回写 catalog
+	assert.equal(tab.agentPreset, "code");
+});
+
+test("attach 已有会话时从 host list 行读回实际 agentPreset（以 host 为准）", async () => {
+	const { host, sessions, calls } = makeFakeHost();
+	// host 侧已存在的会话：header 持久化了 minimal（外部 dsh-web 创建）
+	sessions.set("session-preset-1", {
+		sessionId: "session-preset-1",
+		cwd: PROJECT.path,
+		running: false,
+		blank: false,
+		agentPreset: "minimal",
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({
+		projectId: "project-1",
+		backend: "dsh",
+		dshSessionId: "session-preset-1",
+		// 草稿期预选与 host 不一致时，attach 必须用 host 实际值（不允许事后改 preset）
+		agentPreset: "standard",
+	});
+	assert.equal(calls.create, 0, "attach 路径不新建 host 会话");
+	assert.equal(tab.sessionId, "session-preset-1");
+	assert.equal(tab.agentPreset, "minimal");
+});
 });
 
 test("create 在 workspace 解析失败时不得降级为 cwd-only（会进 dsh-web 未分组）", async () => {

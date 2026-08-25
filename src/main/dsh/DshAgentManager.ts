@@ -232,10 +232,14 @@ export class DshAgentManager implements SessionAgentGateway {
 		let attached = false;
 		/** attach 时从 host 拿到的会话标题（list 投影的 title 单元，非 draft 占位名）。 */
 		let hostTitle: string | undefined;
+		/** attach 时 host list 行携带的 agent preset（会话创建时组合的「模式」；header 权威）。 */
+		let attachedAgentPreset: string | undefined;
 		/** attach 时 list 投影的 values 块（contextPressure/contextBreakdown 初值，dsh-web 同源）。 */
 		let attachProjectionValues: unknown;
 		/** attach 时 values 共同对应的 host 日志水位；用于 higher-seq-wins。 */
 		let attachProjectionSeq: number | undefined;
+		/** 新建时 sessions.create 响应解析出的 agent preset（host 可能回退部署默认）。 */
+		let createdAgentPreset: string | undefined;
 		if (input.dshSessionId) {
 			const listed = await client.sessions.list({});
 			if (listed.result.ok) {
@@ -245,6 +249,9 @@ export class DshAgentManager implements SessionAgentGateway {
 				if (existing) {
 					sessionId = input.dshSessionId;
 					attached = true;
+					// host list 行带会话实际组合的 agent preset（header passthrough，dsh-web 同源）：
+					// 草稿预选可能被 host 修正为部署默认，这里以 host 为准回写 catalog。
+					attachedAgentPreset = existing.agentPreset;
 					// dsh-session-title 把最新标题 fold 进 list 行的 projections.values.title：
 					// 侧栏显示真实标题（如「打包的体积是否能优化一下呢」）而不是 draft 占位名。
 					const projectionBlock = existing.projections as { values?: unknown; asOfSeq?: unknown } | undefined;
@@ -262,7 +269,8 @@ export class DshAgentManager implements SessionAgentGateway {
 					}
 				} else {
 					// 持久化 id 在 host 里已不存在（DSH_HOME 被清/更换）：退回新建。
-					const created = await this.createHostSession(client, cwd);
+					const created = await this.createHostSession(client, cwd, input.agentPreset);
+					if (created.ok && created.agentPreset) createdAgentPreset = created.agentPreset;
 					if (!created.ok) {
 						throw new Error(`dsh session.create failed: ${created.error}`);
 					}
@@ -272,7 +280,8 @@ export class DshAgentManager implements SessionAgentGateway {
 				throw new Error(`dsh session.list failed: ${JSON.stringify(listed.result.error)}`);
 			}
 		} else {
-			const created = await this.createHostSession(client, cwd);
+			const created = await this.createHostSession(client, cwd, input.agentPreset);
+			if (created.ok && created.agentPreset) createdAgentPreset = created.agentPreset;
 			if (!created.ok) {
 				throw new Error(`dsh session.create failed: ${created.error}`);
 			}
@@ -292,6 +301,9 @@ export class DshAgentManager implements SessionAgentGateway {
 			sessionId,
 			backend: "dsh",
 			noSession: input.noSession,
+			// 会话「模式」：attach 用 host list 行值；新建用 sessions.create 响应解析值
+			//（可能被 host 修正为部署默认）。随 buildAttachPatch 回写 catalog。
+			agentPreset: attachedAgentPreset ?? createdAgentPreset,
 			createdAt: Date.now(),
 			// DSH 会话文件（侧栏右键「复制会话文件路径」；attach 时同步写回 catalog 记录）
 			sessionPath: dshSessionFilePath(this.dshHost.getHomeDir(), cwd, sessionId),
@@ -499,7 +511,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (!exists) sessionId = undefined;
 		}
 		if (!sessionId) {
-			const created = await this.createHostSession(client, cwd);
+			const created = await this.createHostSession(client, cwd, old.tab.agentPreset);
 			if (!created.ok) {
 				throw new Error(`dsh session.create (restart) failed: ${created.error}`);
 			}
@@ -1564,11 +1576,14 @@ export class DshAgentManager implements SessionAgentGateway {
 	 * bad-request 拒绝）——有 workspaceId 时省略 cwd（workspace 路径即 cwd）。
 	 * 禁止降级为只传 cwd：官方规则里 cwd-only 会话永远留在 dsh-web「未分组」，
 	 * 会污染第三方客户端的分组视图。解析失败就让创建失败，由调用方重试/报错。
+	 * agentPreset（可选）：会话「模式」草稿期预选，随 create 提交给 host 解析并持久化。
 	 */
 	private async createHostSession(
 		client: import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient,
 		cwd: string,
-	): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }> {
+		/** DSH agent 预设（会话「模式」）草稿期预选；缺省让 host 用部署默认。 */
+		agentPreset?: string,
+	): Promise<{ ok: true; sessionId: string; agentPreset?: string } | { ok: false; error: string }> {
 		try {
 			const workspaceId = await this.dshHost.resolveWorkspaceId(cwd);
 			if (workspaceId === undefined) {
@@ -1577,11 +1592,21 @@ export class DshAgentManager implements SessionAgentGateway {
 					error: `workspace.resolve failed for cwd: ${cwd}`,
 				};
 			}
-			const created = await client.sessions.create({ workspaceId });
+			// sessions.create 接受 agentPreset：host 解析（预选无效 id 会 agent-preset-not-found）
+			// 并把解析后的 id 持久化到会话 header——preset 决定会话的工具与提示，创建即固定。
+			const created = await client.sessions.create(
+				agentPreset ? { workspaceId, agentPreset } : { workspaceId },
+			);
 			if (!created.result.ok) {
 				return { ok: false, error: JSON.stringify(created.result.error) };
 			}
-			return { ok: true, sessionId: created.result.value.sessionId };
+			return {
+				ok: true,
+				sessionId: created.result.value.sessionId,
+				...(created.result.value.agentPreset
+					? { agentPreset: created.result.value.agentPreset }
+					: {}),
+			};
 		} catch (error) {
 			return { ok: false, error: error instanceof Error ? error.message : String(error) };
 		}

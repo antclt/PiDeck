@@ -38,6 +38,8 @@ export type ScannedDshSessionHeader = {
 	origin?: string;
 	parentSession?: string;
 	delegationDepth?: number;
+	/** 会话创建时组合的 agent preset（header passthrough；随导入落 catalog）。 */
+	agentPreset?: string;
 	/** 日志文件 mtime（ms）；list 投影没有 title 时当 updatedAt）。 */
 	updatedAt: number;
 	/** 日志折叠标题（缓存未命中时的官方 session/title 或首条提示回退）。 */
@@ -98,6 +100,8 @@ export function listForeignSessionsFromDisk(dshHome: string): DshForeignSessionI
 				dshSessionId: header.id,
 				...(header.cwd ? { cwd: header.cwd } : {}),
 				...(title ? { title } : {}),
+				// 会话「模式」：磁盘 header 持久化的 agentPreset（外部会话导入后头部即可展示）
+				...(header.agentPreset ? { agentPreset: header.agentPreset } : {}),
 				updatedAt: header.updatedAt,
 			};
 		});
@@ -255,6 +259,10 @@ export function parseHeaderLine(text: string, updatedAt: number): ScannedDshSess
 			: {}),
 		...(typeof record.delegationDepth === "number" && Number.isFinite(record.delegationDepth)
 			? { delegationDepth: record.delegationDepth }
+			: {}),
+		// 会话「模式」随 header 持久化（dsh-session-persistence-jsonl 的 HeaderLine.agentPreset）
+		...(typeof record.agentPreset === "string" && record.agentPreset
+			? { agentPreset: record.agentPreset }
 			: {}),
 	};
 }
