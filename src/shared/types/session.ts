@@ -140,6 +140,12 @@ export type SessionRecord = {
 	/** DSH 会话权限预设（read-only / workspace-write / danger-full-access）；
 	 *  草稿期预选，激活时经 /permission 命令应用到 host 会话。 */
 	permissionPreset?: string;
+	/**
+	 * DSH agent 预设（会话「模式」：standard/code/minimal/cordis 或用户预设）。
+	 * 草稿期预选，激活新建 host 会话时随 sessions.create 应用（host 持久化到会话 header）；
+	 * attach 已存在会话时从 host 读回实际值回写。会话创建后固定，不可运行时切换。
+	 */
+	agentPreset?: string;
 	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
 	dshSessionId?: string;
 	/** 会话级代理覆盖（缺省 = 跟随全局）；沿用全局代理 URL，仅生效于下次 spawn。 */
@@ -161,6 +167,8 @@ export type CreateSessionDraftInput = {
 	thinkingLevel?: string;
 	/** 运行时后端；缺省 "pi"（旧调用方无需改动）。 */
 	backend?: import("./agent").AgentBackend;
+	/** DSH agent 预设（会话「模式」）草稿期预选；激活时随 sessions.create 应用。 */
+	agentPreset?: string;
 };
 
 /** 启动前选择的模型与思考级别；显式值优先于 pi 配置默认值。 */
@@ -190,6 +198,8 @@ export type UpdateSessionRecordInput = {
 	thinkingLevel?: string | null;
 	/** DSH 会话权限预设（草稿期预选；激活会话经 /permission 命令应用后回写同步）。 */
 	permissionPreset?: string | null;
+	/** DSH agent 预设（会话「模式」）：仅草稿期可改；激活后由 host 会话 header 回写为准。 */
+	agentPreset?: string | null;
 	/** 后端（pi/dsh）：仅草稿期可变更；会话激活（active/有 runtime）后锁定——pi 会话文件
 	 *  与 DSH session log 格式不同，中途切换会导致消息同步渲染不可靠。 */
 	backend?: import("./agent").AgentBackend;

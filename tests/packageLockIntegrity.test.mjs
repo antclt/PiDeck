@@ -14,18 +14,27 @@ function getLockedPackage(packagePath) {
   return lockedPackage;
 }
 
-test("lockfile includes emnapi packages required by bundled native wasm dependencies", () => {
-  const core = getLockedPackage("node_modules/@emnapi/core");
-  const runtime = getLockedPackage("node_modules/@emnapi/runtime");
-
-  assert.equal(core.version, "1.11.3");
-  assert.equal(core.dependencies["@emnapi/wasi-threads"], "1.2.3");
-  assert.equal(core.dependencies.tslib, "^2.4.0");
-  assert.match(core.integrity, /^sha512-/);
-
-  assert.equal(runtime.version, "1.11.3");
-  assert.equal(runtime.dependencies.tslib, "^2.4.0");
-  assert.match(runtime.integrity, /^sha512-/);
+test("lockfile bundles emnapi packages required by native wasm dependencies", () => {
+  // @emnapi/core / @emnapi/runtime 等 wasm 原生依赖以 bundleDependencies 形式随
+  // @tailwindcss/oxide-wasm32-wasi 发布（npm 对 bundled 依赖不单独写入 packages 表，
+  // 也不展开到 node_modules——旧断言期待独立 lockfile 条目已过时，2026 年起改为
+  // 校验 bundle 声明 + 平台变体 optional 标记，打包后才不会缺 wasm 依赖）。
+  const wasmOxide = getLockedPackage("node_modules/@tailwindcss/oxide-wasm32-wasi");
+  assert.equal(wasmOxide.optional, true, "wasm 平台变体必须是 optional（非目标平台不安装）");
+  assert.ok(
+    Array.isArray(wasmOxide.cpu) && wasmOxide.cpu.includes("wasm32"),
+    "wasm 平台变体必须声明 cpu=wasm32",
+  );
+  const bundled = wasmOxide.bundleDependencies ?? [];
+  for (const name of [
+    "@emnapi/core",
+    "@emnapi/runtime",
+    "@emnapi/wasi-threads",
+    "@napi-rs/wasm-runtime",
+    "@tybys/wasm-util",
+  ]) {
+    assert.ok(bundled.includes(name), `wasm bundle missing ${name}`);
+  }
 });
 
 test("lockfile only resolves tarballs from approved npm registries", () => {

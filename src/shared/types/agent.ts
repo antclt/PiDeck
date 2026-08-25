@@ -49,6 +49,8 @@ export type AgentTab = {
 	sessionSource?: SessionSource;
 	/** 运行时后端；缺省 "pi"（旧数据/旧路径兼容）。 */
 	backend?: AgentBackend;
+	/** DSH agent 预设（会话「模式」）：新建/attach 时从 host 解析，回写 catalog 供头部只读展示。 */
+	agentPreset?: string;
 	wslDistro?: string;
 	wslUser?: string;
 	importedSourceId?: string;
@@ -184,6 +186,11 @@ export type CreateAgentInput = {
 	backend?: AgentBackend;
 	/** DSH 会话身份（DSH host 的 sessionId）：backend=dsh 且已持久化时，attach 旧会话而非新建。 */
 	dshSessionId?: string;
+	/**
+	 * DSH agent 预设（会话「模式」）：仅新建 host 会话时随 sessions.create 应用；
+	 * attach 已有会话时由 DshAgentManager 从 host list 行读回，本字段作预选/兜底。
+	 */
+	agentPreset?: string;
 	/**
 	 * PiDeck 会话身份（SessionRecord.id，可能为 UUID 或会话文件路径）。
 	 * 会话级安全覆盖（SecurityStore.sessionOverrides）与 PIDECK_SESSION_ID 注入都使用这个 key；

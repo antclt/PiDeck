@@ -564,6 +564,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			) {
 				throw new Error(mainCopy("session.backendLocked"));
 			}
+			// DSH agent 预设同样创建即固定：激活会话的 preset 由 host 会话 header 权威持有，
+			// 渲染层只读展示，拒绝任何运行时改写（草稿期预选不受限）。
+			if (
+				patch.agentPreset !== undefined &&
+				patch.agentPreset !== entry.agentPreset &&
+				entry.backend === "dsh" &&
+				(entry.status === "active" || sessionRuntimeCoordinator.getTarget(sessionId))
+			) {
+				throw new Error(mainCopy("session.agentPresetLocked"));
+			}
 			const title = patch.title?.trim();
 			if (title && title !== entry.title) {
 				const target = sessionRuntimeCoordinator.getTarget(sessionId);

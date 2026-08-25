@@ -1191,6 +1191,9 @@ export class SessionRuntimeCoordinator {
 				source: entry.source,
 				backend: entry.backend,
 				dshSessionId: entry.backend === "dsh" ? entry.dshSessionId : undefined,
+				// DSH agent 预设（会话「模式」）：草稿期预选，新建 host 会话时随 sessions.create
+				// 应用；attach 已有会话时由 DshAgentManager 从 host list 行读回（本字段被忽略）。
+				agentPreset: entry.backend === "dsh" ? entry.agentPreset : undefined,
 				wslDistro: entry.wslDistro,
 				wslUser: entry.wslUser,
 				importedSourceId: entry.importedSourceId,
@@ -1243,11 +1246,19 @@ export class SessionRuntimeCoordinator {
 	 */
 	private buildAttachPatch(
 		sessionId: string,
-		tab: Pick<AgentTab, "sessionPath" | "sessionId" | "backend">,
+		tab: Pick<AgentTab, "sessionPath" | "sessionId" | "backend" | "agentPreset">,
 		entry: Pick<SessionCatalogEntry, "noSession" | "backend">,
-	): { sessionId: string; filePath?: string; piSessionId?: string; dshSessionId?: string; promoteToActive?: boolean } | null {
+	): { sessionId: string; filePath?: string; piSessionId?: string; dshSessionId?: string; agentPreset?: string; promoteToActive?: boolean } | null {
 		if (entry.backend === "dsh") {
-			return tab.sessionId && !entry.noSession ? { sessionId, dshSessionId: tab.sessionId } : null;
+			return tab.sessionId && !entry.noSession
+				? {
+					sessionId,
+					dshSessionId: tab.sessionId,
+					// DSH 会话的 preset 只在 host 会话 header 里（草稿预选可能被 host 修正），
+					// attach/新建后把实际值回写 catalog，头部胶囊展示真实模式。
+					...(tab.agentPreset ? { agentPreset: tab.agentPreset } : {}),
+				}
+				: null;
 		}
 		if (tab.sessionPath && !entry.noSession) {
 			return {

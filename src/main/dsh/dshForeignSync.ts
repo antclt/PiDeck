@@ -21,6 +21,8 @@ export type DshForeignSessionItem = {
 	dshSessionId: string;
 	title?: string;
 	cwd?: string;
+	/** 会话创建时组合的 agent preset（header passthrough；导入后头部胶囊展示）。 */
+	agentPreset?: string;
 	updatedAt?: number;
 };
 
@@ -56,6 +58,7 @@ export type DshForeignSyncDeps = {
 		environment: "native" | "wsl";
 		backend: "dsh";
 		dshSessionId: string;
+		agentPreset?: string;
 		keepExistingTitle?: boolean;
 		/** 仅手动导入为 true；批量同步不得清删除墓碑。 */
 		restoreDismissed?: boolean;
@@ -222,6 +225,7 @@ export async function importForeignSession(
 		environment: deps.getEnvironment(),
 		backend: "dsh",
 		dshSessionId,
+		...(target.agentPreset ? { agentPreset: target.agentPreset } : {}),
 		...(retainTitle ? { keepExistingTitle: true } : {}),
 		...(restoreDismissed ? { restoreDismissed: true } : {}),
 	});
