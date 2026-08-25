@@ -39,7 +39,8 @@ test("TurnAuthorHeader uses shadcn Avatar logos without a visible name", () => {
 });
 
 test("sidebar SessionBackendMark still hides Pi to avoid list noise", () => {
-  // 侧栏/Tab 降噪策略保持不变：只有非默认后端才打标。
-  assert.match(backendMark, /if \(props\.backend === "dsh"\) return <SessionBackendBadge/);
+  // 侧栏/Tab 降噪策略保持不变：只有非默认后端（dsh/imagegen）才打标。
+  assert.match(backendMark, /if \(props\.backend === "dsh" \|\| props\.backend === "imagegen"\)/);
+  assert.match(backendMark, /<SessionBackendBadge backend=\{props\.backend\}/);
   assert.match(backendMark, /return null;/);
 });

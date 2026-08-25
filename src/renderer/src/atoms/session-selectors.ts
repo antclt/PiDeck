@@ -13,10 +13,11 @@ export function sessionRecordToSummary(
   session: SessionRecord,
 ): SessionSummary | undefined {
   // DSH 会话没有 pi 会话文件（会话由 DSH host 持久化在 $DSH_HOME，catalog 只存映射记录），
-  // 无 filePath 也必须进侧栏列表。空 filePath 在显示管线走 unkeyedSessions 分支
+  // 生图会话无 pi 文件（历史独立存 ImageSessionStore）；两者无 filePath 也必须进侧栏列表。
+  // 空 filePath 在显示管线走 unkeyedSessions 分支
   // （getSummaryKey 对空串归一化为 undefined），不会与其他会话折叠成一行；
   // 右键菜单按 hasFilePath 隐藏「复制路径/打开文件」类文件操作。
-  if (!session.filePath && session.backend !== "dsh") return undefined;
+  if (!session.filePath && session.backend !== "dsh" && session.backend !== "imagegen") return undefined;
   return {
     id: session.id,
     filePath: session.filePath ?? "",

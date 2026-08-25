@@ -75,11 +75,11 @@ export function formatFilePathRef(
 }
 
 /**
- * 从粘贴文本中识别「单条本地绝对路径」：trim 后整段即为一条绝对路径
- * （允许前缀 @、外层成对引号——兼容 Windows 资源管理器「复制为路径」）。
- * 用于 onPaste 拦截：把 QQ「复制路径」等复制的路径文本转成 @"…" 引用插入，
- * 而不是让裸路径留在输入框里（带拼写波浪线且无法形成 chip）。
- * 非纯路径（多行 / 夹杂正文）返回 null，不拦截普通文本粘贴。
+ * 从粘贴文本中识别「单条本地绝对路径」的工具（已不再被 onPaste 自动调用）。
+ * 保留为纯函数/测试契约：若未来需要恢复“复制路径 → @引用”能力可复用。
+ *
+ * 判定规则：trim 后整段即一条绝对路径（允许前缀 @、外层成对引号——兼容 Windows
+ * 资源管理器「复制为路径」）。非纯路径（多行 / 夹杂正文）返回 null。
  */
 export function extractPastedPath(text: string): string | null {
 	if (!text) return null;

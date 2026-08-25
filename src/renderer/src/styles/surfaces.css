@@ -2676,6 +2676,47 @@
   color: var(--color-text-primary);
 }
 
+/* ── 粘贴大文本转文件 chip（与图片预览同栏展示） ────────────── */
+
+.paste-file-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
+  cursor: default;
+}
+
+.paste-file-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-primary);
+}
+
+.paste-file-chip-size {
+  flex-shrink: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-tertiary);
+}
+
+.paste-file-chip .image-remove-btn {
+  position: static;
+  opacity: 0;
+}
+
+.paste-file-chip:hover .image-remove-btn {
+  opacity: 1;
+}
+
 /* ── 消息中的图片显示 ────────────────────────────────── */
 
 .message-images {

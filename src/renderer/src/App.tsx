@@ -2294,6 +2294,19 @@ export function App() {
       const record = getSessionRecord(sessionId);
       return Boolean(record?.filePath) && !record?.noSession;
     },
+    // 生图 draft：会话消息里存在生图占位/结果即判定为生图模式（无 pi runtime、无 pi JSONL）。
+    isImageGenSession: (sessionId) =>
+      (store.get(sessionMessagesCacheAtom)?.[sessionId]?.messages ?? []).some(
+        (message) => message.meta?.imageGen !== undefined,
+      ),
+    // 生图重发：把失败的提示词（+参考图）放回输入框供一键重试。参考图直接整体替换附件栏
+    //（重发目标就是这轮消息自身，不需要前插保留——那是失败后保留用户新粘贴图的场景）。
+    restoreImageGenTurn: (sessionId, text, images) => {
+      setSessionDraft({ sessionId, value: text });
+      if (images?.length) {
+        setSessionAttachments({ sessionId, value: images });
+      }
+    },
   });
 
 

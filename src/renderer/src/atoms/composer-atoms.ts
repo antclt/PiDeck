@@ -5,6 +5,19 @@ import type { ThinkingLevelPending } from "../utils/thinkingDisplay";
 import type { QuoteSnippet } from "../components/session/composer/quoteChip";
 import { currentSessionIdAtom } from "./session-atoms";
 
+/**
+ * 粘贴大文本 → 落盘文件 chip 的元数据（内容只在主进程受管目录，此处仅存指针）。
+ * inProject=true：发送时折叠为 @"path" 引用（pi 可展开读取）；
+ * inProject=false（匿名会话，文件在 userData）：发送时折叠为原样文本内联。
+ */
+export type PastedTextFile = {
+	id: string;
+	path: string;
+	fileName: string;
+	bytes: number;
+	inProject: boolean;
+};
+
 export type SessionComposerMode = ComposerAgentMode;
 export type { ModelPending };
 
@@ -24,6 +37,7 @@ export type SessionSendState = {
 
 export const sessionDraftByIdAtom = atom<Record<string, string>>({});
 export const sessionAttachmentsByIdAtom = atom<Record<string, ImageContent[]>>({});
+export const sessionPasteFilesByIdAtom = atom<Record<string, PastedTextFile[]>>({});
 export const sessionQuotesByIdAtom = atom<Record<string, SessionQuoteMap>>({});
 export const sessionComposerModeByIdAtom = atom<Record<string, SessionComposerMode>>({});
 export const sessionSendStateByIdAtom = atom<Record<string, SessionSendState>>({});
@@ -123,6 +137,25 @@ export const setSessionAttachmentsAtom = atom(
   },
 );
 
+/** 会话内粘贴文件 chip 的写入/清理（与附件同生命周期：运行时态，不落盘）。 */
+export const setSessionPasteFilesAtom = atom(
+  null,
+  (get, set, input: {
+    sessionId: string;
+    value: PastedTextFile[] | ((current: PastedTextFile[]) => PastedTextFile[]);
+  }) => {
+    const files = get(sessionPasteFilesByIdAtom);
+    const current = files[input.sessionId] ?? [];
+    const nextValue = typeof input.value === "function"
+      ? input.value(current)
+      : input.value;
+    const next = { ...files };
+    if (nextValue.length) next[input.sessionId] = nextValue;
+    else delete next[input.sessionId];
+    set(sessionPasteFilesByIdAtom, next);
+  },
+);
+
 /** 写入/清理会话引用快照仓；与草稿同生命周期（运行时态，不落盘）。 */
 export const setSessionQuotesAtom = atom(
   null,
@@ -200,6 +233,7 @@ export const promoteSessionComposerStateAtom = atom(
     };
     set(sessionDraftByIdAtom, move(get(sessionDraftByIdAtom)));
     set(sessionAttachmentsByIdAtom, move(get(sessionAttachmentsByIdAtom)));
+    set(sessionPasteFilesByIdAtom, move(get(sessionPasteFilesByIdAtom)));
     set(sessionComposerModeByIdAtom, move(get(sessionComposerModeByIdAtom)));
     set(sessionSendStateByIdAtom, move(get(sessionSendStateByIdAtom)));
   },
@@ -212,6 +246,9 @@ export const removeSessionComposerStateAtom = atom(null, (get, set, sessionId: s
   const attachments = { ...get(sessionAttachmentsByIdAtom) };
   delete attachments[sessionId];
   set(sessionAttachmentsByIdAtom, attachments);
+  const pasteFiles = { ...get(sessionPasteFilesByIdAtom) };
+  delete pasteFiles[sessionId];
+  set(sessionPasteFilesByIdAtom, pasteFiles);
   const modes = { ...get(sessionComposerModeByIdAtom) };
   delete modes[sessionId];
   set(sessionComposerModeByIdAtom, modes);

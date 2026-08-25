@@ -570,6 +570,9 @@ export class SessionCatalog {
 			thinkingLevel?: string | null;
 			permissionPreset?: string | null;
 			proxy?: SessionProxyOverride | null;
+			/** 切到生图后端时甩开 pi 会话文件引用（null = 清空）。 */
+			filePath?: string | null;
+			piSessionId?: string | null;
 		},
 	): Promise<SessionRecord> {
 		this.assertLoaded();
@@ -580,6 +583,9 @@ export class SessionCatalog {
 			if (patch.thinkingLevel !== undefined) transient.thinkingLevel = patch.thinkingLevel ?? undefined;
 			if (patch.permissionPreset !== undefined) transient.permissionPreset = patch.permissionPreset ?? undefined;
 			if (patch.backend !== undefined) transient.backend = patch.backend;
+			// 切到生图后端时需甩开 pi 会话文件（filePath/piSessionId 置空），否则残留文件引用
+			if (patch.filePath !== undefined) transient.filePath = patch.filePath ?? undefined;
+			if (patch.piSessionId !== undefined) transient.piSessionId = patch.piSessionId ?? undefined;
 			// null = 清除覆盖恢复跟随全局
 			if (patch.proxy !== undefined) transient.proxy = patch.proxy ?? undefined;
 			transient.updatedAt = patch.updatedAt ?? Date.now();
@@ -592,6 +598,8 @@ export class SessionCatalog {
 			if (patch.thinkingLevel !== undefined) nextEntry.thinkingLevel = patch.thinkingLevel ?? undefined;
 			if (patch.permissionPreset !== undefined) nextEntry.permissionPreset = patch.permissionPreset ?? undefined;
 			if (patch.backend !== undefined) nextEntry.backend = patch.backend;
+			if (patch.filePath !== undefined) nextEntry.filePath = patch.filePath ?? undefined;
+			if (patch.piSessionId !== undefined) nextEntry.piSessionId = patch.piSessionId ?? undefined;
 			// null = 清除覆盖恢复跟随全局
 			if (patch.proxy !== undefined) nextEntry.proxy = patch.proxy ?? undefined;
 			nextEntry.updatedAt = patch.updatedAt ?? Date.now();

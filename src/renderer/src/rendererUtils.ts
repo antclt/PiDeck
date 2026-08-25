@@ -43,6 +43,14 @@ export function resolveComposerPanelHeight(input: {
  *  超过后 ProseMirror 内部滚动，不再把输入卡/面板无限撑高。 */
 export const COMPOSER_TEXT_MAX_HEIGHT = 336;
 
+/**
+ * 粘贴大文本转文件的最小字符数（含换行）。
+ * 低于该阈值仍直接插入编辑器（打字/短文本体验不受影响）；
+ * 达到阈值后落盘成文件 + chip 展示，发送时折叠 @引用——
+ * 避免超大文本进入 ProseMirror 文档模型后输入/光标/建议框逐键变卡。
+ */
+export const PASTE_TO_FILE_MIN_CHARS = 5000;
+
 // timeline 面板 minSize（px）：composer 自动增高时只能占用 timeline 可让出的空间，
 // 不能突破该保底线，否则库的 clamp 会把差额压给 terminal 导致终端被收起。
 export const TIMELINE_MIN_HEIGHT = 160;

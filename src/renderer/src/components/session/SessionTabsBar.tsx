@@ -713,8 +713,8 @@ function SessionTab(props: {
           />
         )}
         {pinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />}
-        {/* DSH 是文字标记，保留自然宽度；固定 size-4 会让文字溢出到右侧操作按钮区域。 */}
-        {record?.backend === "dsh" && <SessionBackendBadge className="h-4 shrink-0" />}
+        {/* DSH/生图是文字标记，保留自然宽度；固定 size-4 会让文字溢出到右侧操作按钮区域。 */}
+        {(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />}
         {/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
         {runtime?.state?.planModeActive && (
           <span

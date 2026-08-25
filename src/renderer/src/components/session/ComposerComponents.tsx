@@ -218,6 +218,8 @@ export function ComposerBackendPicker(props: {
 				    16px chevron 与 14px logo 混排导致上下不齐。 */}
 				{props.backend === "dsh" ? (
 					<DshLogo className="size-[15px] shrink-0" />
+				) : props.backend === "imagegen" ? (
+					<ImageIcon className="size-[15px] shrink-0 text-muted-foreground" />
 				) : (
 					<PiLogo className="size-[15px] shrink-0" />
 				)}
@@ -226,6 +228,10 @@ export function ComposerBackendPicker(props: {
 				<SelectItem value="dsh">
 					<DshLogo className="size-3.5 shrink-0" />
 					{t("sessionBackend.dsh")}
+				</SelectItem>
+				<SelectItem value="imagegen">
+					<ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+					{t("sessionBackend.imagegen")}
 				</SelectItem>
 				<SelectItem value="pi">
 					<PiLogo className="size-3.5 shrink-0" />
@@ -452,6 +458,8 @@ export function ComposerBottomBar(props: {
 						>
 							{props.backend === "dsh" ? (
 								<DshLogo className="size-[15px] shrink-0" />
+							) : props.backend === "imagegen" ? (
+								<ImageIcon className="size-[15px] shrink-0 text-muted-foreground" />
 							) : (
 								<PiLogo className="size-[15px] shrink-0" />
 							)}

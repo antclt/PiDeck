@@ -45,6 +45,10 @@ export interface SessionHistoryMutationsDeps {
   resolveProjectId: (sessionId: string) => string | undefined;
   /** 有会话文件才走 catalog JSONL；匿名会话没有文件，仍用 runtime 命令。 */
   hasPersistedSessionFile: (sessionId: string) => boolean;
+  /** 会话是否为生图 draft（无 pi JSONL、直连生图 API，重发目标不是 pi 会话文件）。 */
+  isImageGenSession?: (sessionId: string) => boolean;
+  /** 生图重发：把失败消息的提示词（+参考图）放回输入框供一键重试，代替对不存在的 pi 文件做截断。 */
+  restoreImageGenTurn?: (sessionId: string, text: string, images?: ImageContent[]) => void;
 }
 
 /**
@@ -249,6 +253,23 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     };
     if (target && !persisted) {
       void runAnonymous();
+      return;
+    }
+    // 生图 draft：无 runtime、无 pi JSONL，重发目标不是「截断 pi 文件消息」，而是把失败的
+    // 提示词（+参考图）放回输入框供一键重产生（历史由 ImageSessionStore 兜底，不依赖 pi 文件）。
+    // 若未提供生图专用回调（非生图环境），则回落走下方 catalog 截断路径。
+    if (
+      !target &&
+      latest.isImageGenSession?.(sessionId) &&
+      latest.restoreImageGenTurn
+    ) {
+      resendingIdsRef.current.add(message.id);
+      setTimeout(() => resendingIdsRef.current.delete(message.id), 30_000);
+      try {
+        latest.restoreImageGenTurn(sessionId, message.text ?? "", message.images);
+      } finally {
+        resendingIdsRef.current.delete(message.id);
+      }
       return;
     }
     const run = async () => {

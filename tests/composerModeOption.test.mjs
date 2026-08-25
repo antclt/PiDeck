@@ -1,6 +1,7 @@
 // 「+」菜单模式可见性纯函数测试（useComposerModeAvailability 抽出的 computeVisibleModes）：
-// 模式收进「+」菜单后，普通/目标/规划/生图的可见顺序与过滤规则要与旧底栏 chip 一致——
-// 生图独立于 pi/dsh 两种后端均可见、plan/goal 受扩展开关控制、imageGenLocked 锁死为只显示生图。
+// 生图已从「+」菜单移除（imagegen 是独立后端，不再作为可切模式）；imagegen 会话
+// 或 legacy 含生图消息的 pi 会话（isImageGen=true）模式菜单为空，走专用生图底栏；
+// plan/goal 受扩展开关控制。
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -34,28 +35,22 @@ function loadHookModule() {
 
 const { computeVisibleModes } = loadHookModule();
 
-test("pi 全扩展可用：普通/目标/规划/生图 全量可见（顺序 normal→goal→plan→imagegen）", () => {
-	const result = [...computeVisibleModes({ isDsh: false, planModeAvailable: true, goalModeAvailable: true })];
-	assert.deepEqual(result, ["normal", "goal", "plan", "imagegen"]);
+test("pi 全扩展可用：菜单只有 普通/目标/规划，不再出现生图", () => {
+	const result = [...computeVisibleModes({ isImageGen: false, planModeAvailable: true, goalModeAvailable: true })];
+	assert.deepEqual(result, ["normal", "goal", "plan"]);
 });
 
-test("pi 关闭 plan/goal 扩展：对应模式从菜单消失，普通与生图保留", () => {
-	const result = [...computeVisibleModes({ isDsh: false, planModeAvailable: false, goalModeAvailable: false })];
-	assert.deepEqual(result, ["normal", "imagegen"]);
+test("pi 关闭 plan/goal 扩展：对应模式从菜单消失，仅保留普通", () => {
+	const result = [...computeVisibleModes({ isImageGen: false, planModeAvailable: false, goalModeAvailable: false })];
+	assert.deepEqual(result, ["normal"]);
 });
 
-test("DSH 会话：plan/goal 恒可用、生图同样可用（独立供应商，不随后端隐藏）", () => {
-	// DSH 恒可用意味着 hook 会置 plan/goal 可用；生图为独立供应商，两种后端均可见。
-	const result = [...computeVisibleModes({ isDsh: true, planModeAvailable: true, goalModeAvailable: true })];
-	assert.deepEqual(result, ["normal", "goal", "plan", "imagegen"]);
+test("imagegen 会话（backend=imagegen）：模式菜单为空，不走 LLM 模式", () => {
+	const result = [...computeVisibleModes({ isImageGen: true, planModeAvailable: true, goalModeAvailable: true })];
+	assert.deepEqual(result, []);
 });
 
-test("imageGenLocked：锁定为仅生图（已有生图消息时防误切回 LLM 发送）", () => {
-	const result = [...computeVisibleModes({
-		isDsh: false,
-		planModeAvailable: true,
-		goalModeAvailable: true,
-		imageGenLocked: true,
-	})];
-	assert.deepEqual(result, ["imagegen"]);
+test("legacy 含生图消息的 pi 会话（isImageGen=true）：同样锁定为空菜单（防误切回 LLM）", () => {
+	const result = [...computeVisibleModes({ isImageGen: true, planModeAvailable: true, goalModeAvailable: true })];
+	assert.deepEqual(result, []);
 });

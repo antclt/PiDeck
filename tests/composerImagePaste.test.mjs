@@ -85,16 +85,13 @@ test("粘贴图片读取失败时兜底剪贴板位图，不直接退化成 @pat
   assert.match(controller, /clipboard-image\.png/);
 });
 
-test("位图分支优先于纯文本路径提取（微信/QQ 复制图片 text 槽是缓存路径）", () => {
-  // 微信等复制图片：剪贴板=位图+text 槽缓存路径（无 CF_HDROP）。若路径提取在前，
-  // Ctrl+V 会把附带路径粘成 @C:\... 引用、位图分支永远轮不到（右键粘贴却正常）。
+test("位图分支仍优先；纯文本不再自动提取为 @ 路径引用", () => {
+  // 微信等复制图片：剪贴板=位图+text 槽缓存路径（无 CF_HDROP）。位图分支存在即可。
+  // 用户反馈：粘贴 /foo/bar 等含斜杠文本不应被自动转成引用 chip（无法编辑光标），
+  // 故纯文本路径提取分支已移除，普通粘贴一律按纯文本插入。
   const imageBranch = controller.indexOf("getClipboardImageFiles(event.clipboardData)");
-  const pathExtract = controller.indexOf("extractPastedPath(");
-  assert.ok(imageBranch >= 0 && pathExtract >= 0, "两个分支都应存在");
-  assert.ok(
-    imageBranch < pathExtract,
-    `位图检查应在路径提取之前（实际 image=${imageBranch} path=${pathExtract}）`,
-  );
+  assert.ok(imageBranch >= 0, "位图分支应存在");
+  assert.doesNotMatch(controller, /extractPastedPath\(/, "不应再自动提取纯文本路径");
   assert.match(controller, /paths\.every\(isImageFilePath\)/);
   assert.match(controller, /位图才是用户要的内容/);
 });

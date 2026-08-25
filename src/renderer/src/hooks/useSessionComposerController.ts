@@ -8,6 +8,7 @@ import {
   type CSSProperties,
 } from "react";
 import type {
+  AgentBackend,
   ChatMessage,
   ComposerAgentMode,
   FileTreeNode,
@@ -34,6 +35,7 @@ import {
   sessionComposerModeByIdAtom,
   sessionDraftByIdAtom,
   sessionMessagesCacheAtom,
+  sessionPasteFilesByIdAtom,
   sessionRecordByIdAtomFamily,
   sessionRuntimeBySessionIdAtomFamily,
   sessionRuntimeUiBySessionIdAtomFamily,
@@ -43,8 +45,10 @@ import {
   setSessionAttachmentsAtom,
   setSessionComposerModeAtom,
   setSessionDraftAtom,
+  setSessionPasteFilesAtom,
   setSessionSendStateAtom,
   upsertSessionAtom,
+  type PastedTextFile,
 } from "../atoms";
 import {
   appendContentToDraft,
@@ -82,9 +86,7 @@ import {
   shouldLoadFullTreeForAtSearch,
 } from "../utils/fileTreeLazy";
 import {
-  extractPastedPath,
   formatFilePathRef,
-  unwrapFileChipPath,
   type ComposerChip,
 } from "../components/session/composer/chips";
 import type { ComposerCaretRequest } from "../components/session/composer/types";
@@ -93,6 +95,7 @@ import {
   getComposerCaretOffset,
 } from "../components/session/composer/caretCoords";
 import { desktopApi } from "../desktopApi";
+import { formatBytes } from "../../../shared/formatBytes";
 import { t } from "../i18n";
 import {
   COMPOSER_IMAGE_MAX_BYTES,
@@ -104,6 +107,7 @@ import {
   isImageFilePath,
   processComposerImageFile,
 } from "../utils/composerImages";
+import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { showNotice } from "../utils/notice";
 import {
   requireSessionCommand,
@@ -147,7 +151,6 @@ export type ComposerPickerKind = "model" | "thinking" | "template" | "skill";
 
 export type UseSessionComposerControllerOptions = {
   sessionId: string;
-  onOpenFile?: (path: string) => void;
   ensureSessionId?: (sessionId: string) => Promise<string>;
   /** 用户主动发消息时回调（预览 Tab 晋升常驻）；来自 SessionPaneServices 装配。 */
   onPromoteSession?: (sessionId: string) => void;
@@ -278,6 +281,7 @@ export function useSessionComposerController(
   );
   const drafts = useAtomValue(sessionDraftByIdAtom);
   const attachmentsBySession = useAtomValue(sessionAttachmentsByIdAtom);
+  const pasteFilesBySession = useAtomValue(sessionPasteFilesByIdAtom);
   const modes = useAtomValue(sessionComposerModeByIdAtom);
   const sendStates = useAtomValue(sessionSendStateByIdAtom);
   const messageCache = useAtomValue(sessionMessagesCacheAtom);
@@ -285,12 +289,14 @@ export function useSessionComposerController(
   const setImageGenConfig = useSetAtom(imageGenConfigAtom);
   const setDraftAtom = useSetAtom(setSessionDraftAtom);
   const setAttachmentsAtom = useSetAtom(setSessionAttachmentsAtom);
+  const setPasteFilesAtom = useSetAtom(setSessionPasteFilesAtom);
   const setModeAtom = useSetAtom(setSessionComposerModeAtom);
   const setSendStateAtom = useSetAtom(setSessionSendStateAtom);
   const setCacheMessages = useSetAtom(cacheSessionMessagesAtom);
 
   const draft = drafts[sessionId] ?? "";
   const attachments = attachmentsBySession[sessionId] ?? [];
+  const pasteFiles = pasteFilesBySession[sessionId] ?? [];
   // DSH：plan 由 host 持有；goal 由本地选择或进行中/阻塞的目标驱动（切回普通会 pause）。
   // 生图为独立供应商配置，不属于 pi/dsh 任一后端，两种后端均可用。
   const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh";
@@ -300,7 +306,7 @@ export function useSessionComposerController(
   // 生图供应商/模型来自独立 imagegen.json，与会话 LLM 模型无关。
   const activeImageGenProviderId = imageGenConfig.activeProviderId;
   const activeImageGenModelId = imageGenConfig.activeModel;
-  const mode: ComposerAgentMode = hasImageGenHistory
+  const mode: ComposerAgentMode = record?.backend === "imagegen" || hasImageGenHistory
     ? "imagegen"
     : deriveComposerAgentMode({
     backend: isDshBackend ? "dsh" : "pi",
@@ -434,10 +440,16 @@ export function useSessionComposerController(
     setAttachmentsAtom({ sessionId, value });
   }, [sessionId, setAttachmentsAtom]);
 
+  const setPasteFiles = useCallback((
+    value: PastedTextFile[] | ((current: PastedTextFile[]) => PastedTextFile[]),
+  ) => {
+    setPasteFilesAtom({ sessionId, value });
+  }, [sessionId, setPasteFilesAtom]);
+
   const setMode = useCallback((nextMode: ComposerAgentMode) => {
     // 生图历史是独立消息协议，普通/计划/目标模式的命令语义不适用；
-    // 同一会话一旦产生生图记录，必须保持生图模式，避免误发普通请求。
-    if (hasImageGenHistory && nextMode !== "imagegen") return;
+    // 同一会话一旦产生生图记录（或本身是 imagegen 后端），必须保持生图模式，避免误发普通请求。
+    if ((hasImageGenHistory || record?.backend === "imagegen") && nextMode !== "imagegen") return;
     // DSH：plan 走 host /plan；goal 走 create/resume/pause IPC（切回普通暂停，不清除）。
     // 本地 atom 仍写入 goal，让选择器立刻切到目标模式；首条用户消息再 /goal 创建。
     if (isDshBackend) {
@@ -859,7 +871,7 @@ export function useSessionComposerController(
   const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
   // 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
   const isStarting = isUserFacingSessionStart(sendState.status);
-  const hasContent = Boolean(draft.trim() || attachments.length);
+  const hasContent = Boolean(draft.trim() || attachments.length || pasteFiles.length);
 
   const resetEphemeralUi = useCallback(() => {
     setHistoryIndex(-1);
@@ -1094,15 +1106,37 @@ export function useSessionComposerController(
   // 避免新增发送路径时漏掉 promote 导致预览 Tab 不常驻（曾因此回归）。
   // 生图模式：所有发送入口统一转生图（不晋升预览 Tab、不发消息），避免各入口分支不一致。
   const promoteAndSend = useCallback(
-    (behavior?: "steer" | "followUp") => {
+    async (behavior?: "steer" | "followUp") => {
       if (mode === "imagegen") {
         void generateImage();
         return;
       }
+      // 粘贴文件折叠：把 chip 里的文件引用/内容并进草稿再发送。
+      // 项目内文件（inProject）走 @\"path\" 引用——pi 展开读取，消息体保持轻量；
+      // 匿名会话（文件在 userData，pi 无法读取）折叠原样文本内联，保证内容送达。
+      if (pasteFiles.length) {
+        const refs: string[] = [];
+        for (const file of pasteFiles) {
+          if (file.inProject) {
+            refs.push(formatFilePathRef(file.path));
+          } else {
+            const content = await desktopApi.files.readContent(file.path).catch(() => "");
+            if (content) refs.push(content);
+          }
+        }
+        const liveDraft = liveDomDraftRef.current.sessionId === sessionId
+          ? liveDomDraftRef.current.value
+          : draft;
+        const joined = [liveDraft.trim(), refs.join("\n\n")].filter(Boolean).join("\n\n");
+        liveDomDraftRef.current = { sessionId, value: joined };
+        setDraft(joined);
+        // 已折叠进草稿：立即移除 chip（发送成功/失败都会在 clearSnapshot 兜底清空）
+        setPasteFiles([]);
+      }
       options.onPromoteSession?.(sessionId);
       return send(behavior);
     },
-    [mode, generateImage, options.onPromoteSession, send, sessionId],
+    [draft, mode, generateImage, options.onPromoteSession, pasteFiles, send, sessionId, setDraft, setPasteFiles],
   );
 
   const selectSuggestion = useCallback((item: SuggestionItem) => {
@@ -1298,31 +1332,57 @@ export function useSessionComposerController(
   }, [insertRefTexts]);
 
   /**
-   * 纯文本路径粘贴：把路径规范化为 @"…" 引用并插入。
-   * 若光标前有未完成的 @ 触发（用户先打了 @ 再粘贴路径），替换触发符，
-   * 避免残留孤立的 @；否则与拖拽/选择器插入走同一规则。
+   * 把纯文本插入输入框当前光标处（不带 @ 引用包装）。
+   * 与 insertRefTexts 同一套光标/草稿同步协议；仅用于「转文件失败回退原样粘贴」
+   * 这类需要绕过 TipTap 默认粘贴路径的场景（onPaste 已同步 preventDefault）。
    */
-  const insertPastedPathRef = useCallback((path: string) => {
+  const insertPlainTextAtCursor = useCallback((text: string) => {
+    if (!text) return;
     const liveDraft = liveDomDraftRef.current.sessionId === sessionId
       ? liveDomDraftRef.current.value
       : draft;
-    const liveCursor = editorRef.current
-      ? getComposerCaretOffset(editorRef.current)
-      : cursor;
-    const refText = formatFilePathRef(path);
-    const trigger = detectTrigger(liveDraft, liveCursor, validSessionRefs);
-    if (trigger && trigger.char === "@") {
-      const result = applySuggestion(liveDraft, liveCursor, refText, validSessionRefs);
-      liveDomDraftRef.current = { sessionId, value: result.text };
-      setDraft(result.text);
-      setCursor(result.cursor);
-      caretRef.current = { pos: result.cursor, forValue: result.text };
-    } else {
-      insertRefTexts([refText]);
-    }
-    setSuggestionsOpen(false);
+    const liveCursor = editorRef.current ? getComposerCaretOffset(editorRef.current) : cursor;
+    const next = liveDraft.slice(0, liveCursor) + text + liveDraft.slice(liveCursor);
+    const nextCursor = liveCursor + text.length;
+    liveDomDraftRef.current = { sessionId, value: next };
+    setDraft(next);
+    setCursor(nextCursor);
+    caretRef.current = { pos: nextCursor, forValue: next };
     requestAnimationFrame(() => editorRef.current?.focus());
-  }, [cursor, draft, insertRefTexts, sessionId, setDraft, validSessionRefs]);
+  }, [cursor, draft, sessionId, setDraft]);
+
+  /**
+   * 大段粘贴文本 → 落盘受管文件 + 附件栏 chip。
+   * 触发条件：粘贴纯文本达到 PASTE_TO_FILE_MIN_CHARS（复制长日志/代码/文章是主要场景）。
+   * 有项目：写入 `<project>/.pideck-paste/`，发送时折叠 @"path" 引用（pi 可展开读取）；
+   * 匿名会话：写入 userData/paste-files/，发送时折叠原样文本内联。
+   * 写盘失败（权限/路径异常）回退原样插入，保证粘贴内容不丢。
+   */
+  const pasteTextToFile = useCallback(async (text: string) => {
+    try {
+      const result = await desktopApi.pasteFiles.write({
+        projectPath: record?.projectPath ?? "",
+        content: text,
+      });
+      setPasteFiles((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          path: result.path,
+          fileName: result.fileName,
+          bytes: result.bytes,
+          inProject: result.inProject,
+        },
+      ]);
+      showNotice(
+        t("app.pasteConvertedToFile", { name: result.fileName, size: formatBytes(result.bytes) }),
+        4000,
+      );
+    } catch {
+      showNotice(t("app.pasteConvertFailed"), 3000);
+      insertPlainTextAtCursor(text);
+    }
+  }, [insertPlainTextAtCursor, record?.projectPath, setPasteFiles]);
 
   /** 从 File 列表解析本地路径（Electron 32+ 必须走 webUtils，不能用已移除的 File.path） */
   const resolveLocalPathsFromFiles = useCallback((files: File[]) => {
@@ -1376,7 +1436,7 @@ export function useSessionComposerController(
 
   /**
    * 右键「粘贴」（无 ClipboardEvent）：从 Electron 剪贴板同步读取。
-   * 优先级同 onPaste：文件路径 → 位图；纯文本返回 false，交给编辑器本地插入。
+   * 优先级同 onPaste：文件路径 → 位图 → 大段文本转文件；纯文本返回 false，交给编辑器本地插入。
    */
   const pasteFromClipboard = useCallback(async (): Promise<boolean> => {
     const clipboardPaths = desktopApi.files.getClipboardPaths?.() ?? [];
@@ -1393,8 +1453,14 @@ export function useSessionComposerController(
       await addImageFiles([dataUrlToFile(imageDataUrl, "image/png", "clipboard-image.png")]);
       return true;
     }
+    // 大段文本（右键粘贴菜单无 ClipboardEvent）：同样转文件，避免塞进 ProseMirror 变卡
+    const text = desktopApi.clipboard.readText();
+    if (text.length >= PASTE_TO_FILE_MIN_CHARS) {
+      void pasteTextToFile(text);
+      return true;
+    }
     return false;
-  }, [addImageFiles, insertFilePathRefs, pasteClipboardImages]);
+  }, [addImageFiles, insertFilePathRefs, pasteClipboardImages, pasteTextToFile]);
 
   /**
    * 粘贴：系统文件路径以 @path 引用插入，位图/截图附加为图片。
@@ -1438,28 +1504,29 @@ export function useSessionComposerController(
       }
     }
 
-    // 3) 剪贴板位图（截图/微信QQ/网页复制图片）：必须优先于纯文本路径提取——
+    // 3) 剪贴板位图（截图/微信QQ/网页复制图片）：必须优先于纯文本——
     //    这类复制常同时写位图 + text 槽（微信写图片缓存路径、网页写图片 URL），
-    //    位图才是用户要的内容，把附带文本提取成 @path 引用是错的；
-    //    文件路径场景已在前两步处理，这里只剩纯位图。
+    //    位图才是用户要的内容；文件路径场景已在前两步处理，这里只剩纯位图。
     const imageFiles = getClipboardImageFiles(event.clipboardData);
     if (imageFiles.length) {
       event.preventDefault();
       void addImageFiles(imageFiles);
       return;
     }
-
-    // 4) 纯文本绝对路径粘贴（QQ「复制路径」/ 资源管理器地址栏 / Windows「复制为路径」）：
-    //    规范化为 @"path" 引用插入，而不是留下带拼写波浪线的裸路径文本。
-    const pastedPath = extractPastedPath(
-      event.clipboardData.getData("text/plain"),
-    );
-    if (pastedPath) {
+    // 4) 大段纯文本粘贴（复制日志/代码/长文是主要来源）：直接插入 ProseMirror
+    //    会随文本量级变卡（文档模型 + 逐键建议扫描），改为落盘成文件并在附件栏
+    //    显示文件 chip（与图片粘贴同款形态），发送时自动折叠 @引用/原样文本。
+    const plainText = event.clipboardData.getData("text/plain");
+    if (plainText.length >= PASTE_TO_FILE_MIN_CHARS) {
       event.preventDefault();
-      insertPastedPathRef(pastedPath);
+      void pasteTextToFile(plainText);
       return;
     }
-  }, [addImageFiles, insertFilePathRefs, insertPastedPathRef, pasteClipboardImages, resolveLocalPathsFromFiles]);
+    // 5) 其余纯文本一律交给编辑器原样插入：不做自动路径识别——
+    //    粘贴 /foo/bar、//注释 这类文本时，若自动补 @ 并转成引用 chip，
+    //    文本变成原子节点无法再编辑移动光标（用户反馈的痛点）；
+    //    需要引用文件时走资源管理器复制文件（步骤 1/2）或手动输入 @ 触发补全。
+  }, [addImageFiles, insertFilePathRefs, pasteClipboardImages, pasteTextToFile, resolveLocalPathsFromFiles]);
 
   /**
    * 拖拽：
@@ -1494,21 +1561,31 @@ export function useSessionComposerController(
     }
   }, [insertFilePathRefs]);
 
-  const onChipClick = useCallback((chip: ComposerChip) => {
-    if (chip.kind === "file") {
-      // 引用可能带引号（@"path with space"），统一解包出真实路径
-      const path = unwrapFileChipPath(chip.raw);
-      if (options.onOpenFile) options.onOpenFile(path);
-      else void desktopApi.files.open(path).catch(() => undefined);
-      return;
+  /** 移除粘贴文件 chip：同步删除落盘文件（粘贴产物，不留孤儿文件）。 */
+  const removePasteFile = useCallback((index: number) => {
+    const target = pasteFiles[index];
+    setPasteFiles((current) => current.filter((_, item) => item !== index));
+    if (target) void desktopApi.pasteFiles.delete(target.path).catch(() => undefined);
+  }, [pasteFiles, setPasteFiles]);
+
+  /** 清空全部粘贴文件 chip（附件栏「清空」按钮）：逐个删除落盘文件。 */
+  const clearPasteFiles = useCallback(() => {
+    for (const file of pasteFiles) {
+      void desktopApi.pasteFiles.delete(file.path).catch(() => undefined);
     }
+    setPasteFiles([]);
+  }, [pasteFiles, setPasteFiles]);
+
+  const onChipClick = useCallback((chip: ComposerChip) => {
+    // 文件引用点击不再打开文件/分屏（用户要求阻止点击打开事件）：
+    // 引用 chip 只是一段文本标记，打开文件走时间线链接或文件树等显式入口。
     if (chip.kind === "session") {
       const selected = projectSessions.find(
         (session) => (session.name ?? session.filePath) === chip.label,
       );
       if (selected) setSessionReference(selected);
     }
-  }, [options.onOpenFile, projectSessions]);
+  }, [projectSessions]);
 
   useEffect(() => {
     if (!hasContent) {
@@ -1547,9 +1624,10 @@ export function useSessionComposerController(
    * 会话一旦激活（有 runtime 或 record 已 active）即锁定后端——pi 会话文件（JSONL）
    * 与 DSH 会话（host session log）格式不同，中途切换会导致时间线消息来源混乱、
    * 同步渲染不可靠。激活后 UI 不再渲染切换器（changeBackend 返回 undefined）。
+   * imagegen 后端同样锁定：生图会话不可切回 pi/dsh（互不影响）。
    */
-  const backendLocked = Boolean(runtime?.agentId) || record?.status === "active";
-  const changeBackend = useCallback(async (next: "pi" | "dsh") => {
+  const backendLocked = Boolean(runtime?.agentId) || record?.status === "active" || record?.backend === "imagegen";
+  const changeBackend = useCallback(async (next: AgentBackend) => {
     if (backendLocked) return;
     try {
       const updated = await desktopApi.sessions.updateRecord(sessionId, {
@@ -1707,6 +1785,11 @@ export function useSessionComposerController(
       remove: (index: number) => setAttachments((current) => current.filter((_, item) => item !== index)),
       clear: () => setAttachments([]),
     },
+    pasteFiles: {
+      files: pasteFiles,
+      remove: removePasteFile,
+      clear: clearPasteFiles,
+    },
     delivery: {
       // 发送/追问都算主动交互：先把预览 Tab 晋升常驻，再投递（幂等，非预览无副作用）。
       // 忙碌时按「忙碌时投递行为」设置决定语义（pi/dsh 统一，不再按后端分叉）；
@@ -1722,7 +1805,7 @@ export function useSessionComposerController(
       imageGenSize,
       imageGenWatermark,
       imageGenOutputFormat,
-      imageGenModeLocked: hasImageGenHistory,
+      imageGenModeLocked: hasImageGenHistory || record?.backend === "imagegen",
       setImageGenSelection: (providerId: string, modelId: string) => {
         const nextProvider = findImageGenProvider(imageGenConfig, providerId);
         if (!nextProvider?.models.includes(modelId)) return;

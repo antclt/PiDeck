@@ -75,6 +75,8 @@ import type {
 	PiInstallStatus,
 	PiInstallExecResult,
 	NpmAvailabilityResult,
+	PasteFileWriteInput,
+	PasteFileWriteResult,
 	PiPromptTemplateListResult,
 	PiPromptTemplateSummary,
 	CreatePiPromptTemplateInput,
@@ -264,6 +266,16 @@ const api = {
 		 * 浏览器 ClipboardEvent 通常暴露不出 kind=file，粘贴文件引用依赖此同步 API。
 		 */
 		getClipboardPaths: () => clipboardSync<string[]>(ipcChannels.clipboardReadFilePaths, []),
+	},
+	pasteFiles: {
+		/** 粘贴大文本 → 落盘受管文件，返回路径元数据供 chip 展示与发送引用。 */
+		write: (input: PasteFileWriteInput) =>
+			ipcRenderer.invoke(ipcChannels.pasteFilesWrite, input) as Promise<PasteFileWriteResult>,
+		/** 移除 chip 时同步删除落盘文件（仅限受管目录内路径）。 */
+		delete: (path: string) =>
+			ipcRenderer.invoke(ipcChannels.pasteFilesDelete, path) as Promise<void>,
+		/** 启动清理过期粘贴文件（渲染层一般不调用）。 */
+		cleanup: () => ipcRenderer.invoke(ipcChannels.pasteFilesCleanup) as Promise<number>,
 	},
 	dialog: {
 		/**

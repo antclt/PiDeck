@@ -593,7 +593,22 @@ export class SessionHistoryReader {
 		messageId: string,
 	): Promise<{ entryId: string; role?: string; text: string; images?: ImageContent[] } | undefined> {
 		if (!messageId) return undefined;
-		const index = await this.getSessionDisplayIndex(sessionPath);
+		let index: SessionDisplayIndex;
+		try {
+			index = await this.getSessionDisplayIndex(sessionPath);
+		} catch (error) {
+			// 生图 draft 会话在 catalog 里有 filePath 但从不落盘 pi JSONL（历史由 ImageSessionStore 兜底），
+			// stat 不存在的文件会抛 ENOENT。重发/编辑/删除针对的是「会话里的消息」，文件不存在 = 消息不在文件里，
+			// 按未命中处理（delete 走 no-op、edit/resend 走 MESSAGE_NOT_FOUND），而不是对外抛 ENOENT 崩溃。
+			if (error && typeof error === "object" && (error as NodeJS.ErrnoException).code === "ENOENT") {
+				void this.deps.logger?.warn("session-history", "Message lookup on missing session file", {
+					sessionPath,
+					messageId,
+				});
+				return undefined;
+			}
+			throw error;
+		}
 		// 兼容三种命中：JSONL 原生 message.id、渲染层合成 ID（agentId-history-entryId）、
 		// 裸 entryId（旧会话无 message.id 时渲染 ID 即 `${agentId}-history-${entryId}`）。
 		const syntheticId = syntheticHistoryEntryId(messageId);

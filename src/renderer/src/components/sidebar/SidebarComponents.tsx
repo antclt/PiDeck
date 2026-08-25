@@ -33,7 +33,7 @@ import {
 import { Button } from "../ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui-shadcn/table";
 import type { SessionSummary, Project, AgentTab } from "../../../../shared/types";
-import { SessionSourceBadge, SessionBackendMark, DshSourceBadge } from "../session/SessionSourceBadge";
+import { SessionSourceBadge, SessionBackendMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
 import { Checkbox } from "../ui-shadcn/checkbox";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
@@ -167,7 +167,7 @@ export function SessionManagerModal(props: {
 											className={`h-auto rounded-full border border-border-subtle bg-transparent px-3 py-1 text-caption font-medium text-text-tertiary transition-all duration-150 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]${activePills.has(pill) ? " border-[var(--color-accent)] bg-bg-active font-semibold text-[var(--color-accent)]" : ""}`}
 											onClick={() => togglePill(pill)}
 										>
-											{t(pill === "dsh" ? "sessionBackend.dsh" : `sessionSource.${pill}`)}
+											{t(pill === "dsh" ? "sessionBackend.dsh" : pill === "imagegen" ? "sessionBackend.imagegen" : `sessionSource.${pill}`)}
 										</Button>
 									))}
 								</div>
@@ -306,9 +306,9 @@ export function SessionManagerModal(props: {
 												<span className="truncate text-control text-text-primary">
 													{session.name || session.preview?.slice(0, 60) || t("common.untitled")}
 												</span>
-												{session.backend === "dsh" ? (
-													// DSH 会话无来源徽标（source 恒为 pi），用后端徽标区分（与侧栏树一致）
-													<SessionBackendMark backend="dsh" />
+												{session.backend === "dsh" || session.backend === "imagegen" ? (
+													// DSH/生图会话无来源徽标（source 恒为 pi），用后端徽标区分（与侧栏树一致）
+													<SessionBackendMark backend={session.backend} />
 												) : session.source && session.source !== "pi" && (
 													<SessionSourceBadge source={session.source} />
 												)}
@@ -410,7 +410,13 @@ export function SessionSourceFilterMenu(props: {
 					onSelect={(event) => event.preventDefault()}
 					onCheckedChange={() => props.onToggleSource(pill)}
 				>
-					{pill === "dsh" ? <DshSourceBadge /> : <SessionSourceBadge source={pill} />}
+					{pill === "dsh" ? (
+						<DshSourceBadge />
+					) : pill === "imagegen" ? (
+						<ImageGenSourceBadge />
+					) : (
+						<SessionSourceBadge source={pill} />
+					)}
 				</DropdownMenuCheckboxItem>
 			))}
 		</MenuShell>

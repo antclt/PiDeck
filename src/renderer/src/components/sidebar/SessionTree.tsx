@@ -329,9 +329,9 @@ export function SessionTree(props: {
           <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
             {/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差 */}
             <strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>{child.session.name || t("common.untitled")}</strong>
-            {child.session.backend === "dsh" && <SessionBackendMark backend="dsh" />}
-            {/* 生图角标：该会话含生图消息，便于在侧栏快速定位 */}
-            {child.session.hasImageGen && (
+            {(child.session.backend === "dsh" || child.session.backend === "imagegen") && <SessionBackendMark backend={child.session.backend} />}
+            {/* 生图角标：imagegen 后端会话的徽标已含生图标识，此处仅对遗留 pi 后端含生图消息的会话补图标 */}
+            {child.session.backend !== "imagegen" && child.session.hasImageGen && (
               <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             )}
             {child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}

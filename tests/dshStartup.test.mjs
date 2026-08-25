@@ -33,7 +33,7 @@ test("startDshHostInBackground starts immediately without awaiting host readines
 });
 
 test("startup integration warms DSH after the main window and Overview exposes host restart", () => {
-	assert.match(main, /await createWindow\(\);[\s\S]{0,120}startDshHostInBackground\(dshHost, appLogger\)/);
+	assert.match(main, /await createWindow\(\);[\s\S]{0,400}startDshHostInBackground\(dshHost, appLogger\)/);
 	assert.match(configTab, /const restartHost = async \(\) =>/);
 	assert.match(configTab, /desktopApi\.sessions\.restartDshHost\(\)/);
 	assert.match(configTab, /t\("config\.dsh\.restartHost"\)/);

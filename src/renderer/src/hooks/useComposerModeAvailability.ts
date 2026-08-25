@@ -2,38 +2,35 @@ import { useCallback, useEffect, useState } from "react";
 import type { AgentBackend, ComposerAgentMode } from "../../../shared/types";
 import { desktopApi } from "../desktopApi";
 
-export const MODE_ORDER: ComposerAgentMode[] = ["normal", "goal", "plan", "imagegen"];
+export const MODE_ORDER: ComposerAgentMode[] = ["normal", "goal", "plan"];
 
 /**
  * 计算「+」菜单里可显示的模式（纯函数，供 hook 与单测共用，单一来源）：
- * - imagegen 仅 pi（DSH 会话隐藏）；
- * - plan/goal 由对应内置扩展开关决定（DSH 恒可用）；
- * - imageGenLocked 时锁定为仅 imagegen（会话已有生图消息，避免误切回 LLM 发送）。
+ * - 生图不再是「+」菜单里的可切模式（imagegen 是独立后端，不随后端/模式切换混用）：
+ *   imagegen 会话（isImageGen=true）模式菜单为空，走专用生图底栏，互不影响；
+ *   而 legacy 含生图消息的 pi 会话（imageGenLocked）同样锁定为生图，不展示 LLM 模式；
+ * - plan/goal 由对应内置扩展开关决定；
  */
 export function computeVisibleModes(options: {
-	isDsh: boolean;
-	imageGenLocked?: boolean;
+	isImageGen: boolean;
 	planModeAvailable: boolean;
 	goalModeAvailable: boolean;
 }): ComposerAgentMode[] {
-	const available = MODE_ORDER.filter((mode) => {
-		// 生图不属于 pi/dsh 任一后端，独立供应商，两种后端均可用
-		if (mode === "imagegen") return true;
+	if (options.isImageGen) return [];
+	return MODE_ORDER.filter((mode) => {
 		if (mode === "plan") return options.planModeAvailable;
 		if (mode === "goal") return options.goalModeAvailable;
 		return true;
 	});
-	return options.imageGenLocked
-		? available.filter((mode) => mode === "imagegen")
-		: available;
 }
 
 /**
  * 「+」菜单里的模式可用性（原 ComposerModeSelect 底栏 chip 的逻辑迁到这里）：
- * - DSH 恒可用 plan/goal；imagegen 仅 pi（DSH 会话隐藏）。
+ * - DSH 恒可用 plan/goal。
  * - pi 的 plan/goal 由内置扩展 pi-deck-plan-mode / pi-deck-goal-mode 的启用状态决定；
  *   扩展被关时若当前正处该模式，强制回退到普通模式（与旧 chip 行为对齐）。
- * - imageGenLocked：会话已有生图消息时锁定生图模式——只允许 imagegen，防止误切回 LLM 发送。
+ * - imageGenLocked（legacy pi 会话已有生图消息）或 backend=imagegen：锁定为生图，
+ *   「+」菜单不提供 LLM 模式；imagegen 会话走专用生图底栏。
  */
 export function useComposerModeAvailability(props: {
 	backend?: AgentBackend;
@@ -43,6 +40,7 @@ export function useComposerModeAvailability(props: {
 	onChange: (mode: ComposerAgentMode) => void;
 }) {
 	const isDsh = props.backend === "dsh";
+	const isImageGen = props.backend === "imagegen" || props.imageGenLocked === true;
 	const [planModeAvailable, setPlanModeAvailable] = useState(true);
 	const [goalModeAvailable, setGoalModeAvailable] = useState(true);
 
@@ -68,14 +66,13 @@ export function useComposerModeAvailability(props: {
 	// 打开菜单时刷新（扩展开关可能刚在设置页改过）。不可用且当前正在用则强制回退，
 	// 这属于模式状态流转的边界：不在这里回退，用户会卡在一个扩展已删的模式上。
 	useEffect(() => {
-		if (props.imageGenLocked) return;
+		if (isImageGen) return;
 		if (!planModeAvailable && props.value === "plan") props.onChange("normal");
 		if (!goalModeAvailable && props.value === "goal") props.onChange("normal");
-	}, [goalModeAvailable, planModeAvailable, props.imageGenLocked, props.onChange, props.value]);
+	}, [goalModeAvailable, isImageGen, planModeAvailable, props.onChange, props.value]);
 
 	const visibleModes = computeVisibleModes({
-		isDsh,
-		imageGenLocked: props.imageGenLocked,
+		isImageGen,
 		planModeAvailable,
 		goalModeAvailable,
 	});

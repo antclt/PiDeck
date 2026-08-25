@@ -361,6 +361,14 @@ export function createPreviewApi(): PiDesktopApi {
 			getPathForFile: () => "",
 			getClipboardPaths: () => [],
 		},
+		pasteFiles: {
+			// 预览/浏览器模式无主进程：拒绝写盘（调用方会走「按文本粘贴」回退）
+			write: async () => {
+				throw new Error("preview mode: paste file write is not available");
+			},
+			delete: async () => undefined,
+			cleanup: async () => 0,
+		},
 		dialog: {
 			pickFiles: async () => [],
 			pickBackgroundImage: async () => "",

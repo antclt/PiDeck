@@ -5,7 +5,7 @@ export type SendShortcut =
 
 export type ComposerEnterIntent = "ignore" | "newline" | "send";
 
-import type { ComposerAgentMode } from "@shared/types";
+import type { AgentBackend, ComposerAgentMode } from "@shared/types";
 
 export const PI_DECK_PLAN_MODE_MARKER = "__PI_DECK_PLAN_MODE__";
 export const PI_DECK_GOAL_MODE_MARKER = "__PI_DECK_GOAL_MODE__";
@@ -52,8 +52,9 @@ export function appendSlashCommandToDraft(draft: string, command: string): strin
  * DSH 宿主由 dsh-tool-skill 把裸 `/名称` 注册成技能命令，保持原样即可。
  * 返回不含斜杠的命令名，由 appendSlashCommandToDraft 统一拼 `/<token> `。
  */
-export function toSkillInvocationToken(backend: "pi" | "dsh", name: string): string {
-	return backend === "pi" ? `skill:${name}` : name;
+export function toSkillInvocationToken(backend: AgentBackend, name: string): string {
+	// imagegen 无 LLM 不发技能，这里仅兜底按 pi 形态（不会实际被调用）；仅 dsh 用裸名
+	return backend === "dsh" ? name : `skill:${name}`;
 }
 
 /**
@@ -248,13 +249,15 @@ export type DshGoalModeSnapshot = {
  * 切回普通会把本地 mode 写成 normal，因此 paused 目标不会把选择器锁在目标模式。
  */
 export function deriveComposerAgentMode(input: {
-	backend?: "pi" | "dsh";
+	backend?: AgentBackend;
 	localMode?: ComposerAgentMode;
 	planModeActive?: boolean;
 	goalPhase?: DshGoalModeSnapshot["phase"];
 }): ComposerAgentMode {
 	const localMode = input.localMode;
-	// 生图独立于 pi/dsh，不随后端切换被强制降级；保留用户选择的生图模式
+	// imagegen 是独立后端：会话为生图后端时恒为生图模式（无 LLM mode 概念）
+	if (input.backend === "imagegen") return "imagegen";
+	// 遗留兼容：legacy 生图消息在 pi 会话上，localMode 仍可能是 imagegen，保留
 	if (localMode === "imagegen") return "imagegen";
 	if (input.backend !== "dsh") return localMode ?? "normal";
 	if (input.planModeActive) return "plan";

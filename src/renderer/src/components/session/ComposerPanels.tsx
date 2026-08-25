@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  FileText,
   ListOrdered,
   LoaderCircle,
   Pencil,
@@ -15,6 +16,8 @@ import {
 import { useId, type RefObject } from "react";
 import { useAtomValue } from "jotai";
 import type { ImageContent } from "../../../../shared/types";
+import { formatBytes } from "../../../../shared/formatBytes";
+import type { PastedTextFile } from "../../atoms";
 import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
 import {
   canChangeQueuedPromptBehavior,
@@ -40,8 +43,14 @@ export function ComposerAttachmentBar(props: {
   onPreview: (image: ImageContent) => void;
   onRemove: (index: number) => void;
   onClear: () => void;
+  /** 粘贴大文本转文件 chip（与图片预览同一附件栏展示） */
+  pasteFiles?: PastedTextFile[];
+  onRemovePasteFile?: (index: number) => void;
+  onClearPasteFiles?: () => void;
 }) {
-  if (!props.images.length) return null;
+  const hasImages = props.images.length > 0;
+  const hasPasteFiles = Boolean(props.pasteFiles?.length);
+  if (!hasImages && !hasPasteFiles) return null;
   return (
     <div className="image-preview-area w-full">
       {props.images.map((image, index) => (
@@ -61,14 +70,37 @@ export function ComposerAttachmentBar(props: {
           </Button>
         </div>
       ))}
-      <Button
-        variant="secondary"
-        size="sm"
-        className="image-clear-btn"
-        onClick={props.onClear}
-      >
-        {t("app.clearImages")}
-      </Button>
+      {props.pasteFiles?.map((file, index) => (
+        <div
+          key={file.id}
+          className="paste-file-chip"
+          title={file.path}
+        >
+          <FileText size={14} strokeWidth={2} className="shrink-0" aria-hidden="true" />
+          <span className="paste-file-chip-name">{file.fileName}</span>
+          <span className="paste-file-chip-size">{formatBytes(file.bytes)}</span>
+          <Button variant="ghost" size="icon"
+            className="image-remove-btn paste-file-remove-btn"
+            aria-label={t("app.pasteFileRemove")} title={t("app.pasteFileRemove")}
+            onClick={() => props.onRemovePasteFile?.(index)}
+          >
+            <X size={12} strokeWidth={2.4} aria-hidden="true" />
+          </Button>
+        </div>
+      ))}
+      {(hasImages || hasPasteFiles) && (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="image-clear-btn"
+          onClick={() => {
+            props.onClear();
+            props.onClearPasteFiles?.();
+          }}
+        >
+          {t("app.clearImages")}
+        </Button>
+      )}
     </div>
   );
 }

@@ -10,16 +10,17 @@ import type { AgentBackend, SessionSource } from "../../shared/types";
  * DSH 会话会同时命中 Pi 类别造成过滤重复计数或「关掉 Pi 还在」。
  */
 
-/** 会话过滤类别：来源或 DSH 后端。 */
-export type SessionFilterPill = SessionSource | "dsh";
+/** 会话过滤类别：来源、DSH 后端或生图后端。 */
+export type SessionFilterPill = SessionSource | "dsh" | "imagegen";
 
-/** 类别渲染顺序：来源顺序不变，DSH 追加在末尾（视觉上不打断既有布局）。 */
+/** 类别渲染顺序：来源顺序不变，dsh/imagegen 追加在末尾（视觉上不打断既有布局）。 */
 export const SESSION_FILTER_PILLS: readonly SessionFilterPill[] = [
   "pi",
   "codex",
   "claude",
   "opencode",
   "dsh",
+  "imagegen",
 ];
 
 /** 字符串是否为合法的过滤类别（持久化数据校验用）。 */
@@ -28,13 +29,14 @@ export function isSessionFilterPill(value: unknown): value is SessionFilterPill 
 }
 
 /**
- * 会话归属的类别：DSH 会话按 backend 判定（其 source 恒为 "pi"，
+ * 会话归属的类别：DSH/生图会话按 backend 判定（生图 source 恒为 "pi"、无 pi 文件，
  * 若不优先判定会同时命中 Pi 类别），否则按来源（缺省 "pi"）。
  */
 export function sessionPillOf(
   session: { source?: SessionSource; backend?: AgentBackend },
 ): SessionFilterPill {
   if (session.backend === "dsh") return "dsh";
+  if (session.backend === "imagegen") return "imagegen";
   return session.source ?? "pi";
 }
 
@@ -50,6 +52,7 @@ export function filterSessionsByPills<T extends { source?: SessionSource; backen
  * 过滤配置持久化格式（localStorage key：pideck-session-source-filter）。
  *
  * v2：{ v: 2, filters: { [projectId]: string[] | null } }，数组为 5 个类别。
+ * v3：{ v: 3, filters: { [projectId]: string[] | null } }，数组为 6 个类别（追加 imagegen）。
  * v1（旧版）：{ [projectId]: string[] | null }，数组只有 4 个来源，DSH 会话按
  *   source=pi 显示。读取时迁移：集合含 "pi" 则补 "dsh"——旧用户此前能看到
  *   DSH 会话，升级后必须保持可见，不能静默隐藏；不含 "pi" 说明用户主动
@@ -60,7 +63,7 @@ export function filterSessionsByPills<T extends { source?: SessionSource; backen
  */
 
 /** 持久化格式版本号。 */
-export const SESSION_FILTER_STORAGE_VERSION = 2;
+export const SESSION_FILTER_STORAGE_VERSION = 3;
 
 /** 解析后的过滤配置（projectId → 允许的类别集合；null = 全部）。 */
 export type SessionFilterState = Record<string, Set<SessionFilterPill> | null>;
@@ -72,8 +75,11 @@ export function parseSessionFilterState(raw: string | null | undefined): Session
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const state: SessionFilterState = {};
-    // v2：按 5 个类别校验（跳过未知字符串；null 保留为「全部」）。
-    if ((parsed as { v?: unknown }).v === SESSION_FILTER_STORAGE_VERSION) {
+    // v2/v3：按合法类别校验（跳过未知字符串；null 保留为「全部」）。
+    // imagegen 在 v3 追加，但 v2 结构与校验逻辑一致（isSessionFilterPill 已含 imagegen），
+    // 故两版共用同一解析路径；存量 v2 数据仍有 dsh/pi 等类别，直接沿用。
+    const storedVersion = (parsed as { v?: unknown }).v;
+    if (storedVersion === 2 || storedVersion === SESSION_FILTER_STORAGE_VERSION) {
       const records = (parsed as { filters?: unknown }).filters;
       if (!records || typeof records !== "object" || Array.isArray(records)) return {};
       for (const [projectId, value] of Object.entries(records)) {

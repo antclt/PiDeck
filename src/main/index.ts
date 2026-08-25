@@ -280,6 +280,7 @@ import { registerGitIpc } from "./ipc/gitIpc";
 import { registerStoreIpc } from "./ipc/storeIpc";
 import { registerTerminalIpc } from "./ipc/terminalIpc";
 import { registerScratchPadIpc } from "./ipc/scratchPadIpc";
+import { registerPasteFilesIpc } from "./ipc/pasteFilesIpc";
 import { registerSecurityIpc } from "./ipc/securityIpc";
 import { registerVisionIpc } from "./ipc/visionIpc";
 import { registerImageGenIpc } from "./ipc/imagegenIpc";
@@ -379,6 +380,8 @@ let memoryProfileHandle: MemoryProfileHandle | null = null;
 let diagnosticsMonitor: DiagnosticsMonitor | null = null;
 let feishuBridge: FeishuBridge | null = null;
 let usageStatsService: UsageStatsService | null = null;
+/** 粘贴文件启动清理（registerIpc 阶段赋值；whenReady 后 fire-and-forget 执行） */
+let cleanupPasteFiles: (() => Promise<number>) | undefined;
 
 /** 退出清理登记表（C12）：常驻资源创建处登记，before-quit 统一顺序执行。 */
 const quitCleanup = new QuitCleanupRegistry();
@@ -2473,6 +2476,13 @@ function registerIpc() {
 
 	registerScratchPadIpc({ appLogger });
 
+	// 粘贴大文本 → 落盘文件（受管目录，路径校验 + 启动清理）
+	cleanupPasteFiles = registerPasteFilesIpc({
+		projectStore,
+		settingsStore,
+		appLogger,
+	});
+
 	// 安全管理：配置读写 + 会话等级覆盖（SecurityStore 负责持久化与策略快照）
 	registerSecurityIpc({
 		securityStore,
@@ -2526,10 +2536,11 @@ function registerIpc() {
 					mainWindow?.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
 				}
 			}
-			// 无 pi 会话文件的纯生图草稿：落盘到 ImageSession 独立存储（PiDeck userData 下的
-			// imagegen/sessions），不再依赖 pi 会话文件；并把会话提升为 active，防重启时
-			// staleDrafts 清理丢入口——否则生图历史重启即失（2026 用户反馈）。
-			if (!entry.filePath) {
+			// 生图独立持久化：imagegen 后端会话（可能残留无意义的 pi filePath）与无 pi 会话文件的
+			// 纯生图草稿，都落盘到 ImageSession 独立存储（PiDeck userData 下的 imagegen/sessions），
+			// 不再依赖 pi 会话文件；并把会话提升为 active，防重启时 staleDrafts 清理丢入口——
+			// 否则生图历史重启即失（2026 用户反馈）。只有非 imagegen 且有 filePath 才写 pi 文件。
+			if (entry.backend === "imagegen" || !entry.filePath) {
 				await imageSessionStore.append(sessionId, [
 					{
 						id: randomUUID(),
@@ -3509,6 +3520,10 @@ app.whenReady().then(async () => {
 	registerFeishuIpc();
 	await createWindow();
 	setupTray();
+	// 粘贴文件启动清理：删除超过保留期的落盘文件（fire-and-forget，不挡首帧）
+	void cleanupPasteFiles?.().catch((error: unknown) => {
+		void appLogger.warn("app", "Paste file cleanup failed during startup", error);
+	});
 	// 窗口已可用后再预热 DSH，避免 host boot 拖慢首帧；发送路径仍保留幂等启动兜底。
 	startDshHostInBackground(dshHost, appLogger);
 

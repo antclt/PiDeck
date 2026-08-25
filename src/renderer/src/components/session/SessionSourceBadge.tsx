@@ -1,5 +1,6 @@
 import { useId } from "react";
 import type { AgentBackend, SessionSource } from "../../../../shared/types";
+import { ImageIcon } from "lucide-react";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui-shadcn/badge";
@@ -127,20 +128,26 @@ export function AgentPresetLogo(props: { className?: string }) {
   );
 }
 
-/** DSH 运行时标记：使用短文本而不是品牌图标，避免会话列表中出现重复视觉徽标。 */
-export function SessionBackendBadge(props: { className?: string }) {
-  const label = t("sessionBackend.dsh");
+/** 后端文本标记：DSH=短文本；生图=图片图标+短文本/仅图标，避免与来源徽标重复。 */
+export function SessionBackendBadge(props: { backend?: AgentBackend; className?: string }) {
+  const backend = props.backend ?? "dsh";
+  const isImageGen = backend === "imagegen";
+  const label = isImageGen ? t("sessionBackend.imagegen") : t("sessionBackend.dsh");
   return (
     <Badge
       variant="outline"
       aria-label={label}
       title={label}
-      data-backend="dsh"
+      data-backend={backend}
       className={cn(
-        "h-4 rounded px-1 text-[9px] font-semibold leading-none tracking-wide border-muted-foreground/40 text-muted-foreground",
+        "h-4 rounded px-1 text-[9px] font-semibold leading-none tracking-wide",
+        isImageGen
+          ? "border-violet-300/70 text-violet-700 dark:border-violet-700/70 dark:text-violet-300"
+          : "border-muted-foreground/40 text-muted-foreground",
         props.className,
       )}
     >
+      {isImageGen && <ImageIcon className="mr-0.5 size-2.5" aria-hidden="true" />}
       {label}
     </Badge>
   );
@@ -151,7 +158,9 @@ export function SessionBackendBadge(props: { className?: string }) {
  * 这样保留来源信息的同时，避免每个普通 Pi 会话都增加一个视觉噪点。
  */
 export function SessionBackendMark(props: { backend?: AgentBackend; className?: string }) {
-  if (props.backend === "dsh") return <SessionBackendBadge className={props.className} />;
+  if (props.backend === "dsh" || props.backend === "imagegen") {
+    return <SessionBackendBadge backend={props.backend} className={props.className} />;
+  }
   return null;
 }
 
@@ -183,9 +192,26 @@ export function SessionSourceBadge(props: {
 }
 
 /**
- * DSH 过滤徽标（来源过滤菜单用）：与 SessionSourceBadge 同款 logo 徽标，
- * 承载 DSH 品牌鲸鱼；tone 取 DeepSeek 品牌蓝（与其余来源徽标一致的描边风格）。
+ * 生图过滤徽标（来源过滤菜单用）：与来源徽标同款描边徽标，但用图片图标而非品牌 logo，
+ * 因为是独立后端而非品牌来源；tone 取紫色与 pi/dsh 区分。
  */
+export function ImageGenSourceBadge(props: { className?: string }) {
+  const label = t("sessionBackend.imagegen");
+  return (
+    <Badge
+      variant="outline"
+      aria-label={label}
+      title={label}
+      data-source="imagegen"
+      className={cn(
+        "size-5 rounded-md p-0 border-violet-300/70 text-violet-700 dark:border-violet-700/70 dark:text-violet-300",
+        props.className,
+      )}
+    >
+      <ImageIcon className="size-3" aria-hidden="true" />
+    </Badge>
+  );
+}
 export function DshSourceBadge(props: { className?: string }) {
   const label = t("sessionBackend.dsh");
   return (

@@ -40,7 +40,6 @@ export function SessionStartSurface(props: {
           sessionId={props.sessionId}
           defaultHeight={150}
           gitInfo={services.gitInfo}
-          onOpenFile={services.onOpenFile}
           enqueue={services.enqueueSessionPrompt}
           ensureSessionId={services.ensureSessionId}
           widgets={

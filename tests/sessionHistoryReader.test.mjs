@@ -193,6 +193,22 @@ test("SessionHistoryReader locates message by messageId and reads its content fo
   }
 });
 
+// 回归：生图 draft 会话在 catalog 有 filePath 但从不落盘 pi JSONL，重发/编辑按 messageId 定位时
+// stat 不存在的文件抛 ENOENT。readMessageByMessageId 应把 ENOENT 当作「消息不在文件里」返回 undefined
+// （delete 走 no-op、edit/resend 走 MESSAGE_NOT_FOUND），而不是把 ENOENT 抛给渲染层。
+test("SessionHistoryReader returns undefined instead of throwing ENOENT for a missing session file", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pideck-history-locate-missing-file-"));
+  // 明确的绝对路径但文件从未创建 → stat 必然抛 ENOENT
+  const sessionPath = join(directory, "never-created-session.jsonl");
+  const reader = createReader((path) => path);
+  try {
+    const located = await reader.readMessageByMessageId(sessionPath, "msg-1");
+    assert.equal(located, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("SessionHistoryReader resolves synthetic rendered history ids for cache-miss file lookup", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pideck-history-locate-"));
   const sessionPath = join(directory, "session.jsonl");

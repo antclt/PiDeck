@@ -102,7 +102,7 @@ test("image attachment bar stays glued to the input box", () => {
     measuredCall !== -1 &&
       measuredCall < composerBoxSlot,
   );
-  assert.match(composerArea, /composer\.attachments\.length > 0 \? \(/);
+  assert.match(composerArea, /composer\.attachments\.length > 0 \|\| composer\.pasteFiles\.files\.length > 0 \? \(/);
   assert.match(composerArea, /getComputedStyle\(footerEl\)/);
   assert.match(composerArea, /style\.rowGap/);
   assert.match(composerArea, /style\.paddingBottom/);

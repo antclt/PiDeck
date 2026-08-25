@@ -582,6 +582,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return sessionCatalog.update(sessionId, {
 				...patch,
 				title: title || undefined,
+				// 切到生图后端时甩开 pi 会话文件引用：生图历史独立存 ImageSessionStore，
+				// 残留 filePath 会让生图/重发/历史加载误落到不存在的 pi 文件（ENOENT 根因）。
+				...(patch.backend === "imagegen" ? { filePath: null, piSessionId: null } : {}),
 			});
 		},
 	);
@@ -698,6 +701,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				const page = await readDshHistoryPage(entry.dshSessionId, undefined, 1000);
 				return page.messages;
 			}
+			if (entry?.backend === "imagegen") {
+				// imagegen 后端会话：历史独立存 ImageSessionStore，不走 pi 文件
+				return (await readImageSessionMessages?.(sessionId)) ?? [];
+			}
 			if (!entry?.filePath) return [];
 			const content = await sessionScanner.readSessionRawText(entry.filePath);
 			return agentManager.readSessionDisplayMessages(entry.filePath, sessionId, content);
@@ -712,8 +719,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			if (entry?.backend === "dsh" && entry.dshSessionId && readDshHistoryPage) {
 				return readDshHistoryPage(entry.dshSessionId, before, pageSize ?? 100);
 			}
-			if (!entry?.filePath) {
-				// 无 pi 会话文件（纯生图草稿）：回退 ImageSession 独立存储恢复生图历史
+			if (entry?.backend === "imagegen" || !entry?.filePath) {
+				// imagegen 后端会话（可能残留无意义 pi filePath）或纯生图草稿：
+				// 走 ImageSession 独立存储恢复生图历史，避免落到不存在的 pi 文件
 				const imageSessionMessages = (await readImageSessionMessages?.(sessionId)) ?? [];
 				if (imageSessionMessages.length > 0) {
 					return {

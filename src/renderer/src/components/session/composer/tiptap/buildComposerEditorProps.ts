@@ -87,6 +87,9 @@ export function buildComposerEditorProps(
 				if (!chipEl) return false;
 				const chip = readChipFromDom(chipEl);
 				if (!chip) return false;
+				// 仅 session 引用需要拦截点击（跳转到被引用的会话）；
+				// file/skill/quote 点击放行编辑器默认光标定位（用户反馈：点击不应打开文件/分屏）。
+				if (chip.kind !== "session") return false;
 				handlers.onChipClick(chip);
 				return true;
 			},

@@ -44,7 +44,6 @@ export type ComposerAreaProps = {
   widgets?: ReactNode;
   /** 排队消息独立卡（与 todo/goal 同列同宽，不贴输入框、不右浮）。 */
   queuePanel?: ReactNode;
-  onOpenFile?: (path: string) => void;
   /** 受控高度（px）。传入时由外层面板（react-resizable-panels）持有尺寸，
    *  本地 state 仅作非受控回退（#115 U5 布局换装）。 */
   height?: number;
@@ -217,7 +216,6 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 ) {
   const composer = useSessionComposerController({
     sessionId: props.sessionId,
-    onOpenFile: props.onOpenFile,
     enqueue: props.enqueue,
     ensureSessionId: props.ensureSessionId,
     // 预览 Tab 里发消息 → 自动晋升常驻（由 App 装配的 SessionPaneServices 提供）
@@ -240,14 +238,14 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
   const prewarmStartedForSessionRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!props.sessionId || !window.piDesktop) return;
-    if (!composer.draft.trim() && composer.attachments.length === 0) return;
+    if (!composer.draft.trim() && composer.attachments.length === 0 && composer.pasteFiles.files.length === 0) return;
     if (prewarmStartedForSessionRef.current === props.sessionId) return;
     prewarmStartedForSessionRef.current = props.sessionId;
 
     // 输入是比“打开会话”更可靠的发送意图信号；只在首次输入后预热一次，
     // 避免用户仅浏览历史时创建进程，也避免每个按键重复触发 IPC。
     void desktopApi.sessions.activateRuntime(props.sessionId).catch(() => undefined);
-  }, [composer.attachments.length, composer.draft, props.sessionId]);
+  }, [composer.attachments.length, composer.draft, composer.pasteFiles.files.length, props.sessionId]);
 
   // 受控：SessionView 面板 hug 测得的内容总高。非受控（起始页等）不写死 height，
   // 由独立卡 + 输入卡 intrinsic 撑开，避免再走 extra+DEFAULT 把输入区算进「被 extras 顶高」。
@@ -293,14 +291,19 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                   onAcknowledge={composer.delivery.acknowledgeUnknown}
                 />
               )}
-              attachmentBar={composer.attachments.length > 0 ? (
-                <ComposerAttachmentBar
-                  images={composer.attachments}
-                  onPreview={composer.images.preview}
-                  onRemove={composer.images.remove}
-                  onClear={composer.images.clear}
-                />
-              ) : null}
+              attachmentBar={
+                composer.attachments.length > 0 || composer.pasteFiles.files.length > 0 ? (
+                  <ComposerAttachmentBar
+                    images={composer.attachments}
+                    onPreview={composer.images.preview}
+                    onRemove={composer.images.remove}
+                    onClear={composer.images.clear}
+                    pasteFiles={composer.pasteFiles.files}
+                    onRemovePasteFile={composer.pasteFiles.remove}
+                    onClearPasteFiles={composer.pasteFiles.clear}
+                  />
+                ) : null
+              }
               onHeightChange={handleContentHeightChange}
               statsLine={<ComposerStatsLine state={composer.runtime?.state} turnCount={props.turnCount} />}
               composerBox={

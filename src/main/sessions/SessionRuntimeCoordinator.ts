@@ -1624,10 +1624,10 @@ export class SessionRuntimeCoordinator {
 					`Session not found: ${sessionId}`,
 				);
 			}
-			if (entry.backend === "dsh") {
+			if (entry.backend === "dsh" || entry.backend === "imagegen") {
 				throw new SessionRuntimeCommandError(
 					"SESSION_COMMAND_FAILED",
-					`backend "dsh" does not support persisted session message mutation`,
+					`backend "${entry.backend}" does not support persisted session message mutation`,
 				);
 			}
 			if (!entry.filePath) {
