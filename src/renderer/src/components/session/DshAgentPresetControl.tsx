@@ -14,11 +14,11 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { getDefaultStore, useAtomValue, useSetAtom } from "jotai";
 import {
 	dshAgentPresetsAtom,
-	loadDshAgentPresets,
 	dshDefaultPresetId,
+	type DshAgentPresetIdentity,
 	sessionRecordByIdAtomFamily,
 	sessionRuntimeBySessionIdAtomFamily,
 	upsertSessionAtom,
@@ -33,6 +33,33 @@ import { presetDisplayDescription, presetDisplayName } from "../../config/dshPre
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
+
+/**
+ * 触发一次目录加载（幂等合并）：已缓存（含确认空名单）直接返回；失败不落缓存
+ *（保持 null），调用方可重试。放组件模块而不是 atoms：desktopApi 顶层依赖
+ * window，atoms/index.ts 会被 Node 测试加载，不能引入（见 dsh-atoms.ts 注释）。
+ * 模块级 promise 合并多组件并发首拉；完成后重置，下次调用可再拉。
+ */
+let presetsLoadPromise: Promise<DshAgentPresetIdentity[] | null> | null = null;
+function loadDshAgentPresets(): Promise<DshAgentPresetIdentity[] | null> {
+	const store = getDefaultStore();
+	const cached = store.get(dshAgentPresetsAtom);
+	if (cached) return Promise.resolve(cached);
+	if (presetsLoadPromise) return presetsLoadPromise;
+	presetsLoadPromise = desktopApi.sessions.listDshAgentPresets()
+		.then((list) => {
+			store.set(dshAgentPresetsAtom, list);
+			return list;
+		})
+		.catch(() => {
+			// host 首次启动可能数秒、或 DSH 环境未就绪：失败不缓存，保留重试机会
+			return null;
+		})
+		.finally(() => {
+			presetsLoadPromise = null;
+		});
+	return presetsLoadPromise;
+}
 
 export function DshAgentPresetControl(props: { sessionId: string; disabled?: boolean }) {
 	const record = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));

@@ -122,8 +122,8 @@ test("missing Git summary model opens Git settings tab at the Git section", () =
 
 test("Git summary settings expose the shared command model picker", () => {
   // Git 分区与模型选择器位于独立 Git 设置 tab（GitTab）；数据源 hook 独立成文件（gitModels.ts，
-  // 以便 GitTab lazy 加载）——listModels 调用在 hook 里
-  assert.match(gitModelsHook, /projects\.listModels\(\)/);
+  // 以便 GitTab lazy 加载）——listModels 调用在 hook 里（经 listModelsReport 带缓存报告语义）
+  assert.match(gitModelsHook, /desktopApi\.projects\.listModelsReport\(/);
   assert.match(gitTab, /ModelPicker/);
   assert.match(gitTab, /gitModelPickerOpen/);
   assert.doesNotMatch(gitTab, /<datalist/);
