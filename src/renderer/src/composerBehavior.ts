@@ -131,6 +131,8 @@ const BUILTIN_PROMPT_DESC_CN: Record<string, string> = {
 	doc: "添加或改进文档和注释",
 explain: "用简洁的语言解释代码或架构",
 	commit: "根据暂存更改生成约定式提交信息",
+	"commit-own": "只提交自己修改的文件和代码（跳过无关改动）",
+	"commit-split": "提交所有改动，按功能拆分为多个 commit",
 	"pi-system": "查看 pi 的默认系统提示词（身份、工具、行为准则）",
 	"skill-discipline": "技能执行纪律：何时及如何触发 agent 技能的规则",
 };
@@ -144,6 +146,8 @@ const BUILTIN_PROMPT_DESC_EN: Record<string, string> = {
 	doc: "Add or improve documentation and comments",
 	explain: "Explain code or architecture in simple terms",
 	commit: "Generate a conventional commit message from staged changes",
+	"commit-own": "Commit only the files you modified yourself (skip unrelated changes)",
+	"commit-split": "Commit all changes split into multiple commits grouped by feature",
 	"pi-system": "View pi's default system prompt (identity, tools, guidelines)",
 	"skill-discipline": "Skills execution discipline: rules for when and how to trigger agent skills",
 };

@@ -484,8 +484,17 @@ export const replaceProjectSessionsAtom = atom(
     const nextIds = sessions.map((session) => session.id);
     const nextIdSet = new Set(nextIds);
     const nextRecords = { ...get(sessionRecordsAtom) };
+    // 当前选中会话的记录被目录刷新移除（删除/归档/外部同步）时，同步清空选中：
+    // 否则 stale currentSessionId 会让后续 catalog-update（切换后端/来源、发送）在
+    // 主进程查不到会话而报「会话不存在」。与 removeSessionStateAtom 的清理对齐。
+    const currentSessionId = get(currentSessionIdAtom);
     for (const previousId of previousIds) {
-      if (!nextIdSet.has(previousId)) delete nextRecords[previousId];
+      if (!nextIdSet.has(previousId)) {
+        delete nextRecords[previousId];
+        if (previousId === currentSessionId) {
+          set(currentSessionIdAtom, undefined);
+        }
+      }
     }
     for (const session of sessions) nextRecords[session.id] = session;
     set(sessionRecordsAtom, nextRecords);

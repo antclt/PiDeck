@@ -46,6 +46,7 @@ import {
 	AlertDialogTitle,
 } from "../ui-shadcn/alert-dialog";
 import { cn } from "../../lib/utils";
+import { deepClone, deepEqual } from "../../utils/deepEqual";
 import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
@@ -236,10 +237,28 @@ function SettingsModalContent(props: SettingsModalProps) {
 	}, []);
 	useSettingsFocus(activeTab, setActiveTab, persistTab);
 	// ── 全局设置草稿：进入弹框时快照 props.settings，所有修改在 draft 上操作，保存时统一提交 ──
-	const [draftSettings, setDraftSettings] = useState<AppSettings>(() => ({ ...props.settings }));
-	const [dirtyFields, setDirtyFields] = useState<Set<string>>(new Set());
-	/** 打开弹框时的原始设置快照，用于取消时回退 */
-	const baseSnapshotRef = useRef<AppSettings>({ ...props.settings });
+	const [draftSettings, setDraftSettings] = useState<AppSettings>(() => deepClone(props.settings));
+	/** 打开弹框时的原始设置快照（磁盘基准），用于取消回退与脏检测对比。 */
+	const baseSnapshotRef = useRef<AppSettings>(deepClone(props.settings));
+	/**
+	 * 脏字段 = 草稿与基准快照的真实差异（deepEqual），不再用「touched 集合」记录。
+	 * 好处：改回原值即自动摘掉脏标记，关闭确认 / 左侧黄点 / 保存按钮只反映真实未保存改动。
+	 */
+	const dirtyFields = useMemo(() => {
+		const base = baseSnapshotRef.current;
+		const keys = new Set<string>();
+		for (const key of Object.keys(draftSettings)) {
+			if (
+				!deepEqual(
+					(draftSettings as Record<string, unknown>)[key],
+					(base as Record<string, unknown>)[key],
+				)
+			) {
+				keys.add(key);
+			}
+		}
+		return keys;
+	}, [draftSettings]);
 	// ── 视觉桥草稿：独立于全局设置（写 pi-deck-vision.json，走独立 IPC），脏标记/保存/取消由弹框统一管理 ──
 	const visionDraft = useVisionBridgeDraft();
 	// ── 生图草稿：独立文件 userData/imagegen.json，不属于 pi/dsh，放在设置页统一管理 ──
@@ -256,16 +275,9 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const [webTabResetKey, setWebTabResetKey] = useState(0);
 	const [petTabResetKey, setPetTabResetKey] = useState(0);
 
-	/** 更新草稿并标记对应字段为已修改。调用方传入的 patch 中的每个 key 都会追加到 dirtyFields。 */
+	/** 更新草稿；脏字段由 useMemo 按真实差异推导，无需手动登记（改回原值自动变干净）。 */
 	const updateDraft = useCallback((patch: Partial<AppSettings>) => {
 		setDraftSettings((prev) => ({ ...prev, ...patch }));
-		setDirtyFields((prev) => {
-			const next = new Set(prev);
-			for (const key of Object.keys(patch)) {
-				next.add(key);
-			}
-			return next;
-		});
 	}, []);
 
 	// 外观实时预览：草稿中明暗/外观主题/主色变化时立即写入 <html> 的 data-* 属性，
@@ -286,9 +298,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 		draftSettings.accent,
 	]);
 
-	/** 检查指定字段在草稿中是否已被修改（与初始快照比较） */
+	/** 检查指定字段在草稿中是否已被修改（与基准快照真实差异比较）。 */
 	const isDirty = useCallback((field: keyof AppSettings): boolean => {
-		// keyof 含 number/symbol 成员，Set 按 string 存储，统一转字符串比较
 		return dirtyFields.has(String(field));
 	}, [dirtyFields]);
 
@@ -312,9 +323,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 				(patch as Record<string, unknown>)[key] = (draftSettings as Record<string, unknown>)[key];
 			}
 			props.onChange(patch);
-			// 更新快照基准为当前草稿值，并清除修改标记
-			baseSnapshotRef.current = { ...baseSnapshotRef.current, ...patch };
-			setDirtyFields(new Set());
+			// 提交后把基准推进到当前草稿；脏字段由 useMemo 在下一渲染自动收敛为空
+			baseSnapshotRef.current = deepClone(draftSettings);
 		}
 		if (visionDraft.dirty) {
 			// 视觉桥保存失败（如 API Key 缺失/接口不可达）时保留脏标记，头部按钮可重试
@@ -331,8 +341,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	/** 取消全部修改：将草稿回退到初始快照，丢弃所有未保存变更（含视觉桥/生图草稿与各 tab 局部编辑态） */
 	const cancelAll = () => {
-		setDraftSettings({ ...baseSnapshotRef.current });
-		setDirtyFields(new Set());
+		setDraftSettings(deepClone(baseSnapshotRef.current));
 		restoreAppearanceFromSnapshot();
 		visionDraft.reset();
 		setPerAreaFontSize(

@@ -7,6 +7,8 @@ const seenRuntimeNotificationKeys = new Set<string>();
 const MAX_SEEN_RUNTIME_NOTIFICATIONS = 200;
 const seenBackgroundAskKeys = new Set<string>();
 
+import { formatAskTitle } from "./askUi";
+
 export function getRuntimeNotificationKey(
   sessionId: string,
   runtimeGeneration: number,
@@ -61,6 +63,8 @@ export type BackgroundAskDisplay = {
  * - sessionName：优先会话记录标题，缺失时用 defaultSessionName 兜底；
  * - question：请求自身的标题（即提问内容），无则不提供（调用方选择精简文案）。
  * 纯逻辑，不依赖 React / i18n，便于单测。
+ * 标题先过 formatAskTitle：剥掉 Plan/安全确认的内部标记（如安全确认的 JSON 负载），
+ * 避免后台通知里出现原始标记/JSON 而不是可读的问题。
  */
 export function describeBackgroundAsk(input: {
   sessionName?: string;
@@ -68,6 +72,6 @@ export function describeBackgroundAsk(input: {
   defaultSessionName: string;
 }): BackgroundAskDisplay {
   const sessionName = input.sessionName?.trim() || input.defaultSessionName;
-  const question = input.requestTitle?.trim() || undefined;
+  const question = input.requestTitle ? formatAskTitle(input.requestTitle) || undefined : undefined;
   return { sessionName, question };
 }

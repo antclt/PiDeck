@@ -357,6 +357,16 @@
   box-shadow: var(--shadow-xl);
   overflow: hidden;
 }
+/* 壁纸模式下编辑弹框是「弹框内嵌弹框」，需要独立稳定实底：
+   config-modal 等把 --color-bg-panel/--color-bg-muted 覆盖为 transparent（避免内容
+   在弹窗底色上双层透图），但编辑弹框外壳、头部和 CodeMirror 都引用这两个变量，
+   会随之完全透空。这里局部把它们重新映射到浮层色（--color-bg-popover 在壁纸模式
+   下保持 ≥90% 实底），恢复可读性。 */
+:root[data-bg-image="on"] .prompts-editor-modal {
+  --color-bg-panel: var(--color-bg-popover);
+  --color-bg-muted: var(--color-bg-popover);
+  background: var(--color-bg-popover);
+}
 .prompts-monaco-wrap {
   width: 100%;
   height: 100%;

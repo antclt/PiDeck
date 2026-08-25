@@ -101,9 +101,60 @@ export function splitAskOption(option: string): { label: string; description?: s
 	return { label: option };
 }
 
-/** 移除 Plan Mode 给桌面端识别用的内部标题标记，但保留后面的计划内容。 */
+/**
+ * 安全确认请求的标题前缀（与扩展 resources/extensions/pi-deck-security-gate.ts 一致）。
+ * 前缀后跟 JSON 负载 {tool, level, detail}。
+ */
+export const SECURITY_CONFIRM_MARKER = "[PI_DECK_SECURITY_CONFIRM]";
+
+/** 安全确认请求的结构化字段（解析自标题 JSON 负载）。 */
+export type SecurityConfirmInfo = {
+	tool: string;
+	level: string;
+	detail: string;
+};
+
+/**
+ * 解析安全确认请求标题；非安全确认返回 null。
+ * JSON 损坏时兑底返回原始负载文本（tool/level 为空），避免解析失败让确认卡消失。
+ */
+export function parseSecurityConfirmTitle(title: string): SecurityConfirmInfo | null {
+	const raw = title.trim();
+	if (!raw.startsWith(SECURITY_CONFIRM_MARKER)) return null;
+	const payloadText = raw.slice(SECURITY_CONFIRM_MARKER.length).trim();
+	try {
+		const parsed = JSON.parse(payloadText) as Record<string, unknown>;
+		return {
+			tool: typeof parsed.tool === "string" ? parsed.tool : "",
+			level: typeof parsed.level === "string" ? parsed.level : "",
+			detail: typeof parsed.detail === "string" ? parsed.detail : "",
+		};
+	} catch {
+		return { tool: "", level: "", detail: payloadText };
+	}
+}
+
+/**
+ * 安全确认请求的人类可读摘要（通知/Web/历史兑底用；纯逻辑不依赖 i18n）。
+ * 安全门扩展自身用中文文案，这里保持与之一致。
+ */
+export function formatSecurityConfirmSummary(info: SecurityConfirmInfo): string {
+	return info.tool ? `安全确认：${info.tool}` : "安全确认";
+}
+
+/**
+ * 移除 Plan Mode / 安全确认给桌面端识别用的内部标题标记，兑底为人类可读内容。
+ * - Plan Mode：[PI_DECK_PLAN_NEXT] 前缀剥掉，保留后面的计划内容；
+ * - 安全确认：[PI_DECK_SECURITY_CONFIRM] + JSON 负载，换成「安全确认：<工具>」摘要。
+ */
 export function formatAskTitle(title: string): string {
-	return title.replace(/^\[PI_DECK_PLAN_NEXT\]\s*/u, "").trim();
+	const trimmed = title.trim();
+	if (trimmed.startsWith("[PI_DECK_PLAN_NEXT]")) {
+		return trimmed.slice("[PI_DECK_PLAN_NEXT]".length).trim();
+	}
+	const security = parseSecurityConfirmTitle(trimmed);
+	if (security) return formatSecurityConfirmSummary(security);
+	return trimmed;
 }
 
 /**

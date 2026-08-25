@@ -13,6 +13,7 @@ const {
 	readPath,
 	readDshEntryValue,
 	setPath,
+	deletePath,
 	pruneEmptyObjects,
 	readDshRetryPolicy,
 	patchDshRetryMaxRetries,
@@ -209,6 +210,21 @@ test("patchDshRetryMaxRetries 把次数写成有限 normal，空值写回默认 
 	const withBackoff = patchDshRetryMaxRetries({ mode: "normal", maxRetries: 2, backoff: { initialMs: 800 } }, 4);
 	assert.equal(withBackoff.maxRetries, 4);
 	assert.equal(withBackoff.backoff.initialMs, 800);
+});
+
+test("deletePath 删除叶子并清理空父节点，脏计数不会残留空键", () => {
+	const root = { providers: { "my-gateway": { baseUrl: "x", api: "openai" } }, other: 1 };
+	deletePath(root, ["providers", "my-gateway", "baseUrl"]);
+	assert.equal(Object.hasOwn(root.providers["my-gateway"], "baseUrl"), false);
+	assert.equal(root.providers["my-gateway"].api, "openai");
+	// 删到只剩空对象时，父节点也应被自底向上清掉，避免 Object.keys(draft) 仍算脏
+	deletePath(root, ["providers", "my-gateway", "api"]);
+	assert.deepEqual(Object.keys(root), ["other"]);
+	assert.equal(Object.hasOwn(root, "providers"), false);
+	// 中间路径不是对象时静默返回，不抛异常
+	const flat = { a: 1 };
+	deletePath(flat, ["a", "b"]);
+	assert.deepEqual(flat, { a: 1 });
 });
 
 test("pruneEmptyObjects 清理空对象（patch 提交前）", () => {

@@ -24,12 +24,15 @@ import {
 import type { FetchedModel } from "../../shared/types/fetchedModel";
 import type { ProviderUsageResult } from "../../shared/types/providerUsage";
 import { parseProviderModelsResponse } from "./parseProviderModels";
+import { isSafeProviderName } from "./providerMigration";
 import {
+	buildProbeHeaders,
 	candidateApplies,
 	parseUsageResponseBody,
 	USAGE_PROBE_CANDIDATES,
 	usageProbeUrls,
 } from "./providerUsageProbe";
+import { loadUserUsageProbes } from "./userUsageProbes";
 import {
 	enrichFetchedModelFromCatalog,
 	getPiAiCatalogIndex,
@@ -41,9 +44,17 @@ const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
 // ── models.json 结构 ──────────────────────────────────
 // { providers: { [providerName]: { baseUrl, api, apiKey, models: [...] } } }
 
-// Provider 连接测试面对的是第三方网关和 reasoning 模型，首包可能慢于普通模型；
-// 放宽超时并在错误文案中说明“超时不等于兼容模式不支持”，避免误导用户改错配置。
+// Provider 用量/连接探测面对的是第三方网关，首包可能慢于普通模型；放宽超时避免误判。
 const PROVIDER_TEST_TIMEOUT_MS = 45_000;
+
+// 模型 id 长度上限：过长 id 往往是误填，且可能撑爆某些网关/日志。
+const MODEL_ID_MAX_LENGTH = 256;
+
+/** 判断字符串是否含控制字符（换行/tab 等），防止配置被注入换行破坏 JSON 语义。 */
+function hasControlChar(value: string): boolean {
+	// eslint-disable-next-line no-control-regex
+	return /[\x00-\x1f\x7f]/.test(value);
+}
 
 export type PiModelItem = {
 	id: string;
@@ -307,10 +318,25 @@ export class ConfigManager {
 			return { valid: false, error: this.translate("mainConfig.modelsProvidersRequired") };
 		}
 		for (const [providerName, config] of Object.entries(data.providers)) {
+			// provider 名做宽松安全校验（防路径穿越/控制字符/超长）；严格白名单
+			// （字母开头、无空格特殊字符）只用于前端新增/重命名入口，避免卡历史数据。
+			if (!isSafeProviderName(providerName) || hasControlChar(providerName)) {
+				return {
+					valid: false,
+					error: this.translate("mainConfig.providerNameInvalid", { provider: providerName }),
+				};
+			}
 			if (!config.models || !Array.isArray(config.models)) {
 				return {
 					valid: false,
 					error: this.translate("mainConfig.providerModelsRequired", { provider: providerName }),
+				};
+			}
+			// baseUrl 若填写则禁止控制字符（换行等），防止配置被篡改破坏 JSON 语义。
+			if (typeof config.baseUrl === "string" && hasControlChar(config.baseUrl)) {
+				return {
+					valid: false,
+					error: this.translate("mainConfig.baseUrlInvalid", { provider: providerName }),
 				};
 			}
 			for (let i = 0; i < config.models.length; i++) {
@@ -319,6 +345,13 @@ export class ConfigManager {
 					return {
 						valid: false,
 						error: this.translate("mainConfig.modelIdRequired", { provider: providerName, index: i + 1 }),
+					};
+				}
+				// 模型 id 允许 / . - _ 等（如 deepseek-ai/DeepSeek-V3.2），仅拒绝控制字符与超长。
+				if (hasControlChar(m.id) || m.id.length > MODEL_ID_MAX_LENGTH) {
+					return {
+						valid: false,
+						error: this.translate("mainConfig.modelIdInvalid", { provider: providerName, index: i + 1 }),
 					};
 				}
 			}
@@ -539,8 +572,8 @@ export class ConfigManager {
 		requestHeaders?: Record<string, string>,
 	): TestRequest[] {
 		const api = this.normalizeApiType(apiType);
-		// 与 buildTestRequest 一致：允许 provider 配置的自定义 headers（含 User-Agent）
-		// 覆盖 SDK 默认 UA，保证「获取模型」与「测试连接/真实会话」走同一套网络形象。
+		// 与真实会话一致：允许 provider 配置的自定义 headers（含 User-Agent）
+		// 覆盖 SDK 默认 UA，保证「获取模型」与「真实会话」走同一套网络形象。
 		const extraHeaders = this.normalizeRequestHeaders(requestHeaders);
 
 		if (api === "google-generative-ai") {
@@ -603,115 +636,6 @@ export class ConfigManager {
 		return listing.map((model) => enrichFetchedModelFromCatalog(model, catalog));
 	}
 
-	private buildTestRequest(
-		baseUrl: string,
-		apiKey: string,
-		modelId: string,
-		apiType: string,
-		requestHeaders?: Record<string, string>,
-	): { url: string; headers: Record<string, string>; body: string } {
-		const api = this.normalizeApiType(apiType);
-		const extraHeaders = this.normalizeRequestHeaders(requestHeaders);
-
-		switch (api) {
-			case "openai-responses":
-			case "openai-codex-responses":
-				return {
-					url: `${this.ensureVersionPath(baseUrl)}/responses`,
-					headers: this.withOpenAiSdkUserAgent({
-						Authorization: `Bearer ${apiKey}`,
-						"Content-Type": "application/json",
-						...extraHeaders,
-					}),
-					body: JSON.stringify({
-						model: modelId,
-						// 连接测试只验证接口是否可调用，不测试推理或工具能力；极短输入能减少
-						// reasoning 模型的思考时间，避免把慢响应误判为兼容模式不可用。
-						input: "Hi",
-						max_output_tokens: 1,
-					}),
-				};
-
-			case "anthropic-messages":
-				// Anthropic Messages API 的聊天端点在 /v1/messages
-				// 自动补齐 v1（Anthropic 文档示例：https://api.anthropic.com/v1/messages）
-				return {
-					url: `${this.ensureVersionPath(baseUrl)}/messages`,
-					headers: this.withAnthropicSdkUserAgent({
-						"x-api-key": apiKey,
-						"anthropic-version": "2023-06-01",
-						"Content-Type": "application/json",
-						...extraHeaders,
-					}),
-					body: JSON.stringify({
-						model: modelId,
-						messages: [{ role: "user", content: "Hi" }],
-						// 部分代理与 Claude 模型对 max_tokens 有最低要求，设为 10 避免 400/404。
-						max_tokens: 10,
-					}),
-				};
-
-			case "google-generative-ai":
-				// Gemini 的 API key 作为查询参数
-				// 自动补齐 v1beta（如果 baseUrl 不包含版本路径）
-				// Google 文档示例：https://generativelanguage.googleapis.com/v1beta
-				{
-					const u = baseUrl.replace(/\/+$/, "");
-					const needsPrefix = !/[\/]v\d+(alpha|beta)?$/.test(u);
-					const versioned = needsPrefix ? `${u}/v1beta` : u;
-					return {
-						url: `${versioned}/${this.googleModelPath(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-						headers: {
-							"Content-Type": "application/json",
-							...extraHeaders,
-						},
-						body: JSON.stringify({
-							contents: [
-								{
-									role: "user",
-									parts: [{ text: "Hi" }],
-								},
-							],
-							generationConfig: { maxOutputTokens: 1 },
-						}),
-					};
-				}
-
-			case "mistral-conversations":
-				return {
-					url: `${baseUrl.replace(/\/+$/, "")}/conversations`,
-					headers: {
-						Authorization: `Bearer ${apiKey}`,
-						"Content-Type": "application/json",
-						...extraHeaders,
-					},
-					body: JSON.stringify({
-						model: modelId,
-						inputs: "Hi",
-						store: false,
-					}),
-				};
-
-			default:
-				// openai-completions 是 pi 官方名称，对应 OpenAI Chat Completions 接口。
-				return {
-					url: `${this.ensureVersionPath(baseUrl)}/chat/completions`,
-					headers: {
-						Authorization: `Bearer ${apiKey}`,
-						"Content-Type": "application/json",
-						...extraHeaders,
-					},
-					body: JSON.stringify({
-						model: modelId,
-						// Chat Completions 兼容网关常接入 reasoning 模型，测试时只要拿到
-						// 一个最小响应即可，不要求完整回答，降低超时和 token 消耗。
-						messages: [{ role: "user", content: "Hi" }],
-						max_tokens: 1,
-					}),
-				};
-		}
-	}
-
 	private normalizeModelsForPi(data: PiModelsFile): PiModelsFile {
 		return {
 			...data,
@@ -755,14 +679,10 @@ export class ConfigManager {
 
 	/**
 	 * 确保 OpenAI 兼容 API 的基础 URL 包含 /v1 版本路径。
-	 * 仅用于「获取模型 / 测试连接」；pi 会话不会走此补齐。
+	 * 仅用于「获取模型列表 / 用量探测」；真实会话走 pi，不会用此补齐。
 	 */
 	private ensureVersionPath(baseUrl: string): string {
 		return ensureOpenAiVersionPath(baseUrl);
-	}
-
-	private googleModelPath(modelId: string) {
-		return modelId.startsWith("models/") ? modelId : `models/${modelId}`;
 	}
 
 	private normalizeRequestHeaders(headers?: Record<string, string>) {
@@ -796,237 +716,6 @@ export class ConfigManager {
 	private redactSecret(value: string, apiKey: string) {
 		if (!apiKey) return value;
 		return value.split(apiKey).join("***");
-	}
-
-	/**
-	 * 根据 API 类型从响应中提取模型名、文本片段和 token 用量。
-	 */
-	private parseTestResponse(
-		body: Record<string, unknown>,
-		modelId: string,
-		apiType: string,
-	): { model: string; snippet: string; tokens?: { input?: number; output?: number } } {
-		const api = this.normalizeApiType(apiType);
-		switch (api) {
-			case "openai-completions": {
-				const choices = body.choices as Array<Record<string, unknown>> | undefined;
-				const text = (choices?.[0]?.text as string) ?? this.translate("mainConfig.emptyResponse");
-				const usage = body.usage as Record<string, unknown> | undefined;
-				return {
-					model: (body.model as string) ?? modelId,
-					snippet: text,
-					tokens: {
-						input: usage?.prompt_tokens as number | undefined,
-						output: usage?.completion_tokens as number | undefined,
-					},
-				};
-			}
-
-			case "openai-responses":
-			case "openai-codex-responses": {
-				const output = body.output as Array<Record<string, unknown>> | undefined;
-				const content = output?.[0]?.content as Array<Record<string, unknown>> | undefined;
-				const functionCall = output?.find(
-					(item) => item.type === "function_call",
-				);
-				const text =
-					(content?.[0]?.text as string | undefined) ??
-					(functionCall
-						? this.translate("mainConfig.toolCompatibility", { name: String(functionCall.name ?? "function_call") })
-						: this.translate("mainConfig.emptyResponse"));
-				const usage = body.usage as Record<string, unknown> | undefined;
-				return {
-					model: (body.model as string) ?? modelId,
-					snippet: text,
-					tokens: {
-						input: usage?.input_tokens as number | undefined,
-						output: usage?.output_tokens as number | undefined,
-					},
-				};
-			}
-
-			case "anthropic-messages": {
-				const content = body.content as Array<Record<string, unknown>> | undefined;
-				const text = (content?.[0]?.text as string) ?? this.translate("mainConfig.emptyResponse");
-				const usage = body.usage as Record<string, unknown> | undefined;
-				return {
-					model: (body.model as string) ?? modelId,
-					snippet: text,
-					tokens: {
-						input: usage?.input_tokens as number | undefined,
-						output: usage?.output_tokens as number | undefined,
-					},
-				};
-			}
-
-			case "google-generative-ai": {
-				const candidates = body.candidates as Array<Record<string, unknown>> | undefined;
-				const parts = candidates?.[0]?.content as Record<string, unknown> | undefined;
-				const text = (parts?.parts as Array<Record<string, unknown>>)?.[0]?.text as string ?? this.translate("mainConfig.emptyResponse");
-				const usage = body.usageMetadata as Record<string, unknown> | undefined;
-				return {
-					model: (body.modelVersion as string) ?? modelId,
-					snippet: text,
-					tokens: {
-						input: usage?.promptTokenCount as number | undefined,
-						output: usage?.candidatesTokenCount as number | undefined,
-					},
-				};
-			}
-
-			case "mistral-conversations": {
-				const outputs = body.outputs as Array<Record<string, unknown>> | undefined;
-				const firstOutput = outputs?.[0];
-				const content = firstOutput?.content;
-				const text = Array.isArray(content)
-					? content
-						.map((item) =>
-							item && typeof item === "object"
-								? String((item as Record<string, unknown>).text ?? "")
-								: String(item ?? ""),
-						)
-						.filter(Boolean)
-						.join(" ")
-					: typeof content === "string"
-						? content
-						: (body.response as string | undefined) ?? this.translate("mainConfig.emptyResponse");
-				const usage = body.usage as Record<string, unknown> | undefined;
-				return {
-					model: (body.model as string) ?? modelId,
-					snippet: text,
-					tokens: {
-						input: usage?.prompt_tokens as number | undefined,
-						output: usage?.completion_tokens as number | undefined,
-					},
-				};
-			}
-
-			default:
-				// openai-chat-completions
-			{
-				const choices = body.choices as Array<Record<string, unknown>> | undefined;
-				const message = choices?.[0]?.message as Record<string, unknown> | undefined;
-				const text = (message?.content as string) ?? this.translate("mainConfig.emptyResponse");
-				const usage = body.usage as Record<string, unknown> | undefined;
-				return {
-					model: (body.model as string) ?? modelId,
-					snippet: text,
-					tokens: {
-						input: usage?.prompt_tokens as number | undefined,
-						output: usage?.completion_tokens as number | undefined,
-					},
-				};
-			}
-		}
-	}
-
-	async testProviderConnection(
-		baseUrl: string,
-		apiKey: string,
-		modelId: string,
-		apiType?: string,
-		requestHeaders?: Record<string, string>,
-	): Promise<{
-		success: boolean;
-		model?: string;
-		snippet?: string;
-		tokens?: { input?: number; output?: number };
-		latencyMs?: number;
-		error?: string;
-		requestUrl?: string;
-		requestBody?: string;
-		debugDetails?: string;
-		/** 检测侧补了 /v1，配置仍是根路径 → 会话侧可能失败 */
-		sessionBaseUrlNeedsVersion?: boolean;
-		/** 建议写入配置的 baseUrl；仅 success 时由 UI 自动改写 */
-		suggestedBaseUrl?: string;
-	}> {
-		const startedAt = Date.now();
-		const api = this.normalizeApiType(apiType);
-		const { url: requestUrl, headers, body: requestBody } =
-			this.buildTestRequest(baseUrl, apiKey, modelId, api, requestHeaders);
-		const safeRequestUrl = this.redactSecret(requestUrl, apiKey);
-		const safeRequestBody = this.redactSecret(requestBody, apiKey);
-		// 与 fetch 一致：检测用了补齐路径、配置仍是根路径时给出建议 baseUrl。
-		const sessionBaseUrlNeedsVersion = needsSessionBaseUrlVersionHint(
-			baseUrl,
-			requestUrl,
-		);
-		const suggestedBaseUrl =
-			suggestNormalizedBaseUrl(baseUrl, requestUrl, api) ?? undefined;
-
-		try {
-			const controller = new AbortController();
-			const timeout = setTimeout(() => controller.abort(), PROVIDER_TEST_TIMEOUT_MS);
-
-			let res: Awaited<ReturnType<typeof net.fetch>>;
-			try {
-				res = await net.fetch(requestUrl, {
-					method: "POST",
-					headers,
-					body: requestBody,
-					signal: controller.signal,
-				});
-			} finally {
-				clearTimeout(timeout);
-			}
-
-			const latencyMs = Date.now() - startedAt;
-
-			if (!res.ok) {
-				let detail = `${res.status} ${res.statusText}`;
-				try {
-					const errBody = (await res.json()) as Record<string, unknown>;
-					const errMsg =
-						(errBody.error as Record<string, unknown>)?.message ??
-						errBody.message ??
-						"";
-					if (errMsg) detail += ` — ${String(errMsg)}`;
-				} catch {
-					/* 忽略解析错误 */
-				}
-				// 失败时不自动改写 baseUrl，只保留诊断字段。
-				const debugDetails = this.redactSecret(detail, apiKey);
-				console.warn("[ConfigManager] Provider connection test failed", {
-					status: res.status,
-					requestUrl: safeRequestUrl,
-				});
-				return {
-					success: false,
-					error: this.translate("mainConfig.providerTestFailed"),
-					debugDetails,
-					latencyMs,
-					requestUrl: safeRequestUrl,
-					requestBody: safeRequestBody,
-					sessionBaseUrlNeedsVersion,
-				};
-			}
-
-			const body = (await res.json()) as Record<string, unknown>;
-			const parsed = this.parseTestResponse(body, modelId, api);
-
-			return {
-				success: true,
-				...parsed,
-				latencyMs,
-				requestUrl: safeRequestUrl,
-				requestBody: safeRequestBody,
-				sessionBaseUrlNeedsVersion,
-				suggestedBaseUrl,
-			};
-		} catch (e) {
-			const latencyMs = Date.now() - startedAt;
-			const isTimeout = e instanceof Error && e.name === "AbortError";
-			if (!isTimeout) console.error("[ConfigManager] Provider connection test failed", e);
-			return {
-				success: false,
-				error: this.translate(isTimeout ? "mainConfig.providerTestTimeout" : "mainConfig.providerTestFailed"),
-				latencyMs,
-				requestUrl: safeRequestUrl,
-				requestBody: safeRequestBody,
-				sessionBaseUrlNeedsVersion,
-			};
-		}
 	}
 
 	// ── 导出 / 导入 ───────────────────────────────────────
@@ -1098,12 +787,12 @@ export class ConfigManager {
 	}
 
 	/**
-	 * 查询 provider 用量/余额（首个适配 opencode-go /v1/usage）。
+	 * 查询 provider 用量/余额（内置候选 + 用户自定义探针）。
 	 *
-	 * 设计：从 USAGE_PROBE_CANDIDATES 里按 baseUrl/apiType 匹配适用候选，逐个尝试
-	 * 探测 URL；解析成功的第一个结果即为返回。全部失败时返回结构化错误，并做
-	 * 密钥脱敏，避免把 token 回传给渲染层。后续新增 provider 适配器时只需在
-	 * providerUsageProbe 的候选表里登记录入，无需改本方法。
+	 * 设计：内置候选表（USAGE_PROBE_CANDIDATES）+ 用户探针文件（~/.pi/agent/usage-probes.json）
+	 * 合并后，按 baseUrl/apiType 匹配适用候选，逐个尝试探测 URL；解析成功的第一个结果即返回。
+	 * 全部失败时返回结构化错误，并对响应做密钥脱敏，避免把 token 回传给渲染层。
+	 * 新增内置 provider 在 providerUsageProbe 登记；用户自定义无需改代码，直接写 JSON。
 	 */
 	async fetchProviderUsage(
 		baseUrl: string,
@@ -1115,8 +804,14 @@ export class ConfigManager {
 		const extraHeaders = this.normalizeRequestHeaders(requestHeaders);
 		const startedAt = Date.now();
 
-		// 过滤出适用于此 provider 的候选端点。
-		const applicable = USAGE_PROBE_CANDIDATES.filter((c) =>
+		// 用户自定义探针每次读盘合并（用量查询低频，换取改完立刻生效）。
+		const userProbes = await loadUserUsageProbes(this.configDir);
+		for (const error of userProbes.errors) {
+			console.warn("[ConfigManager] 用户用量探针配置被忽略：", error);
+		}
+
+		// 过滤出适用于此 provider 的候选端点（内置在前，用户探针追加在后）。
+		const applicable = [...USAGE_PROBE_CANDIDATES, ...userProbes.candidates].filter((c) =>
 			candidateApplies(c, baseUrl, api),
 		);
 		if (applicable.length === 0) {
@@ -1144,11 +839,14 @@ export class ConfigManager {
 				);
 				try {
 					const res = await net.fetch(requestUrl, {
-						method: "GET",
+						method: candidate.method ?? "GET",
 						headers: this.withOpenAiSdkUserAgent({
-							Authorization: `Bearer ${apiKey}`,
+							...buildProbeHeaders(candidate.headers, apiKey),
 							...extraHeaders,
 						}),
+						...(candidate.method === "POST" && candidate.body !== undefined
+							? { body: JSON.stringify(candidate.body) }
+							: {}),
 						signal: controller.signal,
 					});
 					const raw = await res.text();
@@ -1163,11 +861,14 @@ export class ConfigManager {
 					} catch {
 						body = null;
 					}
-					const parsed = parseUsageResponseBody(body, safeRaw);
+					const parsed = parseUsageResponseBody(body, safeRaw, candidate.parse);
 					if (parsed.matched) {
 						return {
 							success: true,
+							kind: parsed.kind,
 							periods: parsed.periods,
+							balance: parsed.balance,
+							credits: parsed.credits,
 							at: startedAt,
 						};
 					}

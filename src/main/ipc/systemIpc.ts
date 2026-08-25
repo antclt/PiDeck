@@ -4,6 +4,9 @@
  */
 
 import { app, ipcMain, shell } from "electron";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { ipcChannels } from "../../shared/ipc";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
 import type {
@@ -18,13 +21,14 @@ import type {
 } from "../../shared/types";
 import type { PiLocator } from "../pi/PiLocator";
 import type { SettingsStore } from "../settings/SettingsStore";
-import type { ConfigManager } from "../config/ConfigManager";
+import type { ConfigManager, PiModelsFile } from "../config/ConfigManager";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import type { SkillManager } from "../skills/SkillManager";
 import { fetchModelList, invalidateModelListCache, getCachedModelList, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import { probePiModel } from "../pi/PiModelProber";
 import { getPiAiCatalogIndex, lookupPiAiModelSpec } from "../pi/piAiBuiltinCatalog";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
@@ -1046,11 +1050,31 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	);
 	ipcMain.handle(ipcChannels.configSaveModels, async (_event, data) => {
 		const result = await configManager.saveModelsConfig(data);
+		if (!result.valid) return result;
 		invalidateModelListCache();
-		// 配置保存后立即后台重取，下次打开选择器直接命中新缓存。
-		void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
-		void appLogger.info("config", "Models config saved", { providerCount: Object.keys(data?.providers ?? {}).length });
-		return result;
+		// 保存后同步验证：用真实 pi 重新列出模型，确认配置能被 pi 正常加载。
+		// 只有拿到非空模型列表才算“保存且可用”；空/失败时把原因带回渲染层提示用户检查配置。
+		let modelLoadOk = false;
+		let modelCount = 0;
+		let modelLoadReason: string | null = null;
+		let modelLoadDetail = "";
+		try {
+			const report = await resolveModelListReport(piLocator, settingsStore, configManager, true);
+			modelLoadOk = report.ok && report.models.length > 0;
+			modelCount = report.models.length;
+			modelLoadReason = report.reason;
+			modelLoadDetail = report.detail ?? "";
+		} catch (error) {
+			modelLoadReason = "cli-failed";
+			modelLoadDetail = error instanceof Error ? error.message : String(error);
+		}
+		void appLogger.info("config", "Models config saved", {
+			providerCount: Object.keys(data?.providers ?? {}).length,
+			modelLoadOk,
+			modelCount,
+			modelLoadReason,
+		});
+		return { valid: true, modelLoadOk, modelCount, modelLoadReason, modelLoadDetail };
 	});
 	ipcMain.handle(ipcChannels.configSaveAuth, async (_event, data) => {
 		const result = await configManager.saveAuthConfig(data);
@@ -1092,15 +1116,31 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configTestProvider, async (
 		_event,
-		payload: { baseUrl: string; apiKey: string; modelId: string; apiType?: string; headers?: Record<string, string> },
+		payload: { providerName: string; modelId: string; models: PiModelsFile },
 	) => {
-		const result = await configManager.testProviderConnection(
-			payload.baseUrl, payload.apiKey, payload.modelId, payload.apiType, payload.headers,
-		);
-		void appLogger.info("config", "Provider connection tested", {
-			baseUrl: payload.baseUrl,
-			apiType: payload.apiType,
-			modelId: payload.modelId,
+		// 1) 边界校验：provider/model 名必须是有限的非空字符串；models 交由 saveModelsConfig 做结构校验。
+		const providerName = typeof payload?.providerName === "string" ? payload.providerName.trim() : "";
+		const modelId = typeof payload?.modelId === "string" ? payload.modelId.trim() : "";
+		if (!providerName || providerName.length > 128 || !modelId || modelId.length > 256) {
+			return { success: false, error: "Invalid provider name or model id" };
+		}
+		if (!payload?.models || typeof payload.models !== "object") {
+			return { success: false, error: "Invalid models config" };
+		}
+
+		// 2) 点击测试即保存：把表单里的配置先落盘，pi 只读磁盘上的 models.json/auth.json。
+		const saved = await configManager.saveModelsConfig(payload.models);
+		if (!saved.valid) {
+			return { success: false, error: saved.error ?? "Invalid models config" };
+		}
+		invalidateModelListCache();
+		void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
+
+		// 3) 用真实 pi 做一次最小调用（走 pi 的 provider 解析 + SDK，与真实会话同路径）。
+		const result = await probePiModel(piLocator, settingsStore, providerName, modelId);
+		void appLogger.info("config", "Provider connection tested via pi", {
+			providerName,
+			modelId,
 			success: result.success,
 			error: result.error,
 		});
@@ -1138,6 +1178,29 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			error: result.error,
 		});
 		return { ...result, provider };
+	});
+	// 安装内置「用量查询自定义」技能模板：从 app resources 复制 SKILL.md 到全局技能目录。
+	// 幂等：内容直接覆盖，重复点击不产生副作用；用户随后可自行编辑该 SKILL.md。
+	ipcMain.handle(ipcChannels.configInstallUsageSkill, async () => {
+		try {
+			const root = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
+			const templatePath = join(root, "skills", "usage-probe", "SKILL.md");
+			const content = await readFile(templatePath, "utf8");
+			const targetDir = join(homedir(), ".pi", "agent", "skills", "usage-probe");
+			await mkdir(targetDir, { recursive: true });
+			const targetPath = join(targetDir, "SKILL.md");
+			await writeFile(targetPath, content, "utf8");
+			void appLogger.info("skill", "Usage probe skill template installed", { path: targetPath });
+			return { success: true, path: targetPath };
+		} catch (error) {
+			void appLogger.warn("skill", "Failed to install usage probe skill template", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return {
+				success: false,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
 	});
 
 	// ── 开发者控制台 ───────────────────────────────────────────────

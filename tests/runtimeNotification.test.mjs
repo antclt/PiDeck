@@ -1,30 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const require = createRequire(import.meta.url);
-
-function loadModule(filePath) {
-  const output = ts.transpileModule(readFileSync(filePath, "utf8"), {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-    },
-    fileName: filePath,
-  }).outputText;
-  const module = { exports: {} };
-  vm.runInNewContext(output, {
-    module,
-    exports: module.exports,
-    require: (specifier) => require(specifier),
-  }, { filename: filePath });
-  return module.exports;
-}
-
-const notifications = loadModule("src/renderer/src/utils/runtimeNotification.ts");
+const notifications = loadTsCommonJs("src/renderer/src/utils/runtimeNotification.ts");
 
 test("runtime notifications dedupe the same request across component remounts", () => {
   const key = notifications.getRuntimeNotificationKey("session-a", 3, "notify-a");

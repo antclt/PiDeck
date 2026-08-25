@@ -74,6 +74,54 @@ test("stores catalog records and selection by stable session ID", () => {
   assert.equal(store.get(atoms.sessionIdsByProjectAtom)["project-1"].join(","), "session-a,session-b");
 });
 
+test("clears current selection when a catalog refresh removes the current session", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  store.set(atoms.replaceProjectSessionsAtom, {
+    projectId: "project-1",
+    sessions: [session("session-a"), session("session-b")],
+  });
+  store.set(atoms.currentSessionIdAtom, "session-a");
+  // 目录刷新：session-a 已不在磁盘（删除/归档/外部同步移除）
+  store.set(atoms.replaceProjectSessionsAtom, {
+    projectId: "project-1",
+    sessions: [session("session-b")],
+  });
+  assert.equal(store.get(atoms.currentSessionIdAtom), undefined);
+  assert.equal(store.get(atoms.sessionRecordsAtom)["session-a"], undefined);
+  assert.equal(store.get(atoms.sessionRecordsAtom)["session-b"].id, "session-b");
+});
+
+test("keeps current selection when a catalog refresh removes a different session", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  store.set(atoms.replaceProjectSessionsAtom, {
+    projectId: "project-1",
+    sessions: [session("session-a"), session("session-b")],
+  });
+  store.set(atoms.currentSessionIdAtom, "session-a");
+  store.set(atoms.replaceProjectSessionsAtom, {
+    projectId: "project-1",
+    sessions: [session("session-a")],
+  });
+  assert.equal(store.get(atoms.currentSessionIdAtom), "session-a");
+  assert.equal(store.get(atoms.sessionRecordsAtom)["session-a"].id, "session-a");
+  assert.equal(store.get(atoms.sessionRecordsAtom)["session-b"], undefined);
+});
+
+test("removeSessionState clears the current selection together with the record", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  store.set(atoms.replaceProjectSessionsAtom, {
+    projectId: "project-1",
+    sessions: [session("session-a"), session("session-b")],
+  });
+  store.set(atoms.currentSessionIdAtom, "session-a");
+  store.set(atoms.removeSessionStateAtom, "session-a");
+  assert.equal(store.get(atoms.currentSessionIdAtom), undefined);
+  assert.equal(store.get(atoms.sessionRecordsAtom)["session-a"], undefined);
+});
+
 test("keeps catalog atom identities stable when polling returns equivalent records", () => {
   const atoms = loadAtoms();
   const store = createStore();

@@ -82,9 +82,10 @@ test("extension snapshot field names match buildSnapshot output", () => {
 
 test("extension reads tool_call input fields that PiDeck built-in tools emit", () => {
 	const extSource = readFileSync("resources/extensions/pi-deck-security-gate.ts", "utf8");
-	// read/grep/find/ls 用 path；write/edit 用 filePath；bash 用 command
-	assert.match(extSource, /input\.path/);
-	assert.match(extSource, /input\.filePath/);
+	// read/write/edit 的路径字段是 filePath（与飞书工具摘要一致，不是 path）；
+	// grep/find/ls 的目录字段是 path；bash 用 command。
+	assert.match(extSource, /"filePath"/);
+	assert.match(extSource, /"path"/);
 	assert.match(extSource, /input\.command/);
 });
 

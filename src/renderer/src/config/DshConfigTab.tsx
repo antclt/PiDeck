@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useState, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import {
 ArchiveRestore,
 ChevronDown,
@@ -813,6 +813,8 @@ function PresetsTab(props: {
 		};
 	}, []);
 
+	/** 当前默认预设 id：点选「当前默认」不算修改（与改回原值同语义）。 */
+	const currentDefaultId = presets.find((preset) => preset.isDefault)?.id;
 	const dirty = pendingDefault !== null;
 	useEffect(() => {
 		props.sectionApi?.onDirtyChange(instanceId, dirty);
@@ -881,7 +883,11 @@ function PresetsTab(props: {
 										size="sm"
 										className="h-7"
 										disabled={saving}
-										onClick={() => setPendingDefault(isPending ? null : preset.id)}
+										onClick={() => {
+											const target = isPending ? null : preset.id;
+											// 选回当前默认 = 无实际变化，清掉待保存选择而不是标记脏
+											setPendingDefault(target === currentDefaultId ? null : target);
+										}}
 									>
 										{isPending ? t("config.dsh.presetPending") : t("config.dsh.presetSetDefault")}
 									</Button>
@@ -991,7 +997,7 @@ function SecurityTab(props: {
 					{saving && <span className="ml-auto text-micro text-muted-foreground">{t("common.saving")}</span>}
 				</div>
 				<div className="grid gap-3 p-4">
-					<Select value={selected ?? ""} disabled={!props.writable} onValueChange={(next) => setDraft(next)}>
+					<Select value={selected ?? ""} disabled={!props.writable} onValueChange={(next) => setDraft(next === currentDefault ? null : next)}>
 						<SelectTrigger size="sm" className="h-8 w-72">
 							<SelectValue placeholder={t("config.dsh.selectPlaceholder")} />
 						</SelectTrigger>
@@ -1043,6 +1049,8 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 	const [loaded, setLoaded] = useState(false);
 	const [dirty, setDirty] = useState(false);
 	const [saving, setSaving] = useState(false);
+	/** 当前文件从磁盘读到的内容基准：编辑改回原文即算干净，避免只记「编辑过」造成假脏。 */
+	const loadedContentRef = useRef("");
 
 	// 脏状态上报（顶部统一保存/关闭确认）
 	useEffect(() => {
@@ -1058,6 +1066,8 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 		try {
 			const filePath = joinConfigPath(props.homeDir, fileName);
 			await desktopApi.files.writeContent(filePath, content);
+			// 保存成功：把基准推进到已写盘内容，后续再编辑改回它就自动变干净
+			loadedContentRef.current = content;
 			setDirty(false);
 			return true;
 		} catch (error) {
@@ -1084,6 +1094,7 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 			.then((next) => {
 				if (!cancelled) {
 					setContent(next);
+					loadedContentRef.current = next;
 					setLoaded(true);
 				}
 			})
@@ -1091,6 +1102,7 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 				// 文件不存在时保持空编辑器
 				if (!cancelled) {
 					setContent("");
+					loadedContentRef.current = "";
 					setLoaded(true);
 				}
 			});
@@ -1122,7 +1134,8 @@ function RawTab(props: { homeDir: string; sectionApi?: DshSectionApi; instanceKe
 					height="100%"
 					onChange={(value) => {
 						setContent(value);
-						setDirty(true);
+						// 改回磁盘原文即算干净：脏状态按内容对比，而不是「编辑过就脏」
+						setDirty(value !== loadedContentRef.current);
 					}}
 				/>
 			) : (

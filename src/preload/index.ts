@@ -107,6 +107,7 @@ import type {
 	TerminalTarget,
 	WebNetworkAddress,
 } from "../shared/types";
+import type { ProviderUsageResult } from "../shared/types/providerUsage";
 
 function clipboardSync<T>(channel: string, fallback: T): T {
 	try {
@@ -1303,6 +1304,11 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.configSaveModels, data) as Promise<{
 				valid: boolean;
 				error?: string;
+				/** 保存后用真实 pi 验证：配置是否能正常加载出模型 */
+				modelLoadOk?: boolean;
+				modelCount?: number;
+				modelLoadReason?: string | null;
+				modelLoadDetail?: string;
 			}>,
 		saveAuth: (data: unknown) =>
 			ipcRenderer.invoke(ipcChannels.configSaveAuth, data) as Promise<{
@@ -1394,47 +1400,27 @@ const api = {
 		/** 视觉桥：清空事件文件 */
 		visionClearEvents: () =>
 			ipcRenderer.invoke(ipcChannels.visionClearEvents) as Promise<{ ok: boolean }>,
-		/** 快速测试 provider 连接：发送一条最小请求验证配置是否正常 */
+		/** 测试 provider 连接：先保存配置，再用真实 pi 做一次最小调用验证是否可用 */
 		testProvider: (
-			baseUrl: string,
-			apiKey: string,
+			providerName: string,
 			modelId: string,
-			apiType?: string,
-			headers?: Record<string, string>,
+			models: unknown,
 		) =>
 			ipcRenderer.invoke(
 				ipcChannels.configTestProvider,
-				{ baseUrl, apiKey, modelId, apiType, headers },
-			) as Promise<{
-				success: boolean;
-				model?: string;
-				snippet?: string;
-				tokens?: { input?: number; output?: number };
-				latencyMs?: number;
-				error?: string;
-				requestUrl?: string;
-				requestBody?: string;
-				suggestedBaseUrl?: string;
-			}>,
+				{ providerName, modelId, models },
+			) as Promise<import("../shared/types/fetchedModel").PiModelProbeResult>,
 		/** 查询 provider 用量/余额（如 opencode-go /v1/usage），主进程按 provider 名解析端点并查询 */
 		fetchUsage: (provider: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.configFetchUsage,
 				{ provider },
-			) as Promise<{
-				success: boolean;
-				provider?: string;
-				periods?: Partial<
-					Record<"rolling" | "weekly" | "monthly", {
-						percent?: number;
-						resetsAt?: string;
-						status?: string;
-					}>
-				>;
-				raw?: string;
-				error?: string;
-				at?: number;
-			}>,
+			) as Promise<ProviderUsageResult>,
+		/** 安装内置「用量查询自定义」技能模板到 ~/.pi/agent/skills/usage-probe */
+		installUsageSkill: () =>
+			ipcRenderer.invoke(
+				ipcChannels.configInstallUsageSkill,
+			) as Promise<{ success: boolean; path?: string; error?: string }>,
 	},
 	pet: {
 		/** 宠物窗监听主进程推送的聚合状态 */

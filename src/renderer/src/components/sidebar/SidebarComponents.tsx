@@ -33,6 +33,7 @@ import {
 import { Button } from "../ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui-shadcn/table";
 import type { SessionSummary, Project, AgentTab } from "../../../../shared/types";
+import { worktreeSlugify } from "../../../../shared/worktreeSlug";
 import { SessionSourceBadge, SessionBackendMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
 import { Checkbox } from "../ui-shadcn/checkbox";
 import { Input } from "../ui-shadcn/input";
@@ -735,17 +736,9 @@ export function WorktreeCreateDialog(props: {
 		inputRef.current?.focus();
 	}, []);
 
-	// 预览最终创建的分支名，与后端 WorktreeService.slugify 保持一致：
-	// 保留 Unicode 字母数字，其余字符替换为 -。让用户在提交前看到中文/特殊字符的实际结果，
-	// 避免输入与最终分支名脱节。
-	const previewSlug = useMemo(() => {
-		const slug = name
-			.trim()
-			.replace(/[^\p{L}\p{N}]+/gu, "-")
-			.replace(/^-+/, "")
-			.replace(/-+$/, "");
-		return slug || "workspace";
-	}, [name]);
+	// 预览最终创建的分支名：与后端 WorktreeService 共用 worktreeSlugify（shared 纯函数），
+	// 避免输入与最终分支名脱节（issue #166）。
+	const previewSlug = useMemo(() => worktreeSlugify(name), [name]);
 
 	// #115 U5：外壳换 shadcn Dialog；分支名预览逻辑不变
 	return (

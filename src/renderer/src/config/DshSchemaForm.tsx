@@ -9,9 +9,11 @@ import {
 	SelectValue,
 } from "../components/ui-shadcn/select";
 import { cn } from "../lib/utils";
+import { deepEqual } from "../utils/deepEqual";
 import { dshFieldCopy } from "./dshFieldLabels";
 import type { DshSectionApi } from "./dshSchema";
 import {
+	deletePath,
 	dictEntries,
 	isSecretSet,
 	normalizeDshSchema,
@@ -109,9 +111,10 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 
 	const update = (path: string[], next: unknown) => {
 		const nextDraft = { ...draft };
-		if (next === undefined || next === "") {
-			// 空值 = 未覆盖（沿用默认/现有值）
-			setPath(nextDraft, path, undefined as never);
+		// 改回原值 / 清空输入（沿用默认）都算「撤销覆盖」：彻底删掉该路径，脏标记随之消失，
+		// 而不是 setPath(undefined) 留下空键导致脏状态残留。
+		if (next === undefined || next === "" || deepEqual(next, readPath(namespace.value, path))) {
+			deletePath(nextDraft, path);
 		} else {
 			setPath(nextDraft, path, next);
 		}
