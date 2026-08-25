@@ -2091,6 +2091,7 @@ export const enUS: Record<TranslationKey, string> = {
   "prompt.command.auth.description": "Manage OAuth or API key authentication",
   "prompt.command.clone.description":
     "Copy the current branch into a new session",
+  "prompt.command.new.description": "Start a new Agent session",
   "prompt.command.compact.description":
     "Compact context with an optional custom prompt",
   "prompt.command.copy.description": "Copy the last response to the clipboard",

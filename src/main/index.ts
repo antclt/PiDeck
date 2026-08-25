@@ -3113,7 +3113,8 @@ app.whenReady().then(async () => {
 		diagnosticsMonitor?.recordTiming(name, startedAt, detail);
 	});
 	quitCleanup.register("diagnostics-monitor", () => diagnosticsMonitor?.stop());
-	// DSH host 在窗口创建后后台预热；此处先完成实例装配，发送链路仍保留 ensureStarted 兜底。
+	// DSH host 实例先装配；是否后台预热看 defaultAgentBackend（见 createWindow 后）。
+	// 发送/历史/配置链路仍走 ensureStarted 幂等兜底，不用 DSH 的用户不常驻 host。
 	// DSH_HOME 可用设置 dshHomeDir 覆盖（用户自己的 ~/.dsh 等），空串 = 应用私有目录。
 	dshHost = new DshHost(
 		() => app.getPath("userData"),
@@ -3524,8 +3525,11 @@ app.whenReady().then(async () => {
 	void cleanupPasteFiles?.().catch((error: unknown) => {
 		void appLogger.warn("app", "Paste file cleanup failed during startup", error);
 	});
-	// 窗口已可用后再预热 DSH，避免 host boot 拖慢首帧；发送路径仍保留幂等启动兜底。
-	startDshHostInBackground(dshHost, appLogger);
+	// 窗口已可用后再按需预热 DSH：默认后端是 dsh 才后台 boot，避免纯 pi 用户
+	// 空转 utilityProcess（约 200MB）。发送/历史/配置路径仍由 ensureStarted 兜底。
+	startDshHostInBackground(dshHost, appLogger, {
+		enabled: settingsStore.get().defaultAgentBackend === "dsh",
+	});
 
 	void syncWslConfig().catch((error) => {
 		void appLogger.warn("app", "WSL config sync failed during startup", error);

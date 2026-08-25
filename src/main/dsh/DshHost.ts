@@ -37,7 +37,8 @@ import type {
  * 形态说明（docs/dsh-agent-backend-plan.md §3.2 形态 b）：
  * - host 在 utilityProcess 里 boot（无 web/无 HTTP/无端口），原生 ABI 与崩溃面
  *   不污染主进程；hostEntry 产物经 electron-vite 多入口打包到 out/main/。
- * - 应用启动后后台预热：窗口首帧不等待 fork+boot；发送链路调用 ensureStarted() 幂等兜底。
+ * - 按需启动：默认后端为 dsh 时窗口首帧后后台预热；纯 pi 用户不 fork host。
+ *   发送/历史/配置链路调用 ensureStarted() 幂等兜底。
  * - 桥协议：dshHostBridge.ts（fetch-request/response/chunk/end/error）。
  *
  * DSH_HOME：优先直接使用用户真实 ~/.dsh（与 dsh CLI 行为一致，配置/凭证/会话

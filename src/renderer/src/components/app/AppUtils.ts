@@ -681,8 +681,9 @@ export type SuggestionItem = {
 /* ── 命令管理 ── */
 
 const PINNED_COMMAND_NAMES = new Set<string>();
+// 桌面端已有独立 UI 的 pi 内置命令不进 `/` 菜单，避免点进去却落到 CLI 语义。
+// `/new` 例外：发送时由桌面拦截，走新建 Agent 会话（与侧栏 + 同源），不再藏起来。
 const HIDDEN_DESKTOP_BUILTIN_COMMAND_NAMES = new Set([
-	"new",
 	"model",
 	"resume",
 	"fork",
@@ -706,6 +707,7 @@ function isVisibleDesktopCommand(command: PiCommand) {
 
 function getBuiltinCommands(): PiCommand[] {
 	return [
+		{ name: "new", description: "", source: "builtin" },
 		{ name: "session", description: "", source: "builtin" },
 		{ name: "tree", description: "", source: "builtin" },
 		{ name: "clone", description: "", source: "builtin" },

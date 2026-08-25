@@ -2071,6 +2071,7 @@ export const zhCN = {
   "prompt.closeHint": "Esc 关闭",
   "prompt.command.auth.description": "管理 OAuth 或 API key 认证",
   "prompt.command.clone.description": "复制当前分支到新会话",
+  "prompt.command.new.description": "新建 Agent 会话",
   "prompt.command.compact.description": "压缩上下文，可选自定义提示词",
   "prompt.command.copy.description": "复制最后一条回复到剪贴板",
   "prompt.command.export.description": "导出会话为 HTML 文件",

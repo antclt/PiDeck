@@ -154,6 +154,8 @@ export type UseSessionComposerControllerOptions = {
   ensureSessionId?: (sessionId: string) => Promise<string>;
   /** 用户主动发消息时回调（预览 Tab 晋升常驻）；来自 SessionPaneServices 装配。 */
   onPromoteSession?: (sessionId: string) => void;
+  /** `/new` 拦截后新建会话（与侧栏 + 同源）；来自 SessionPaneServices。 */
+  onCreateSession?: () => Promise<void>;
   /** Passed through to useSessionSend.enqueue. */
   enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
 };
@@ -931,6 +933,7 @@ export function useSessionComposerController(
       return resolved;
     },
     onDraftMutation: markDraftMutation,
+    createNewSession: options.onCreateSession,
     compact: async (target, prompt) => {
       // /compact 与 chip 共用同一友好错误映射（nothing-to-do / too-small / 静默取消）
       try {

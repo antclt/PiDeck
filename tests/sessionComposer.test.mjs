@@ -470,12 +470,10 @@ test("selected Session reference messages zip original indices with compressed m
 test("DSH busy send defaults to followUp; menu insert is explicit steer", () => {
   const controller = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
   const app = readFileSync("src/renderer/src/App.tsx", "utf8");
-  // Enter / 主发送按钮：pi 忙碌默认 steer，DSH 忙碌默认下一轮。
-  assert.match(controller, /isBusy \? \(isDshBackend \? "followUp" : "steer"\) : undefined/);
-  assert.match(controller, /steer: \(\) => \{\s*void promoteAndSend\("steer"\);/);
-  // 客户端队列未指定行为时，DSH 也默认 followUp。
-  assert.match(app, /behavior: snapshot\.behavior \?\? \(backend === "dsh" \? "followUp" : "steer"\)/);
-  assert.match(app, /\? "followUp"\s*: "steer";/);
+  // Enter / 主发送按钮：忙碌投递走统一策略（设置项 busySendDelivery）。
+  assert.match(controller, /resolveBusySendDelivery\(isBusy, store\.get\(busySendDeliveryAtom\)\)/);
+  // 客户端队列未指定行为时，同样走统一策略。
+  assert.match(app, /resolveBusySendDelivery\(/);
 });
 
 test("image handling keeps GIFs lossless and rejects unsupported/oversized files", () => {
@@ -487,6 +485,28 @@ test("image handling keeps GIFs lossless and rejects unsupported/oversized files
   );
   assert.match(source, /file\.type === "image\/gif"\) return fileToImageContent\(file\)/);
   assert.match(source, /COMPOSER_IMAGE_MAX_BYTES/);
+});
+
+test("/new is intercepted as a desktop session create, not sent to pi", async () => {
+  const harness = createSendHarness({ drafts: { "session-a": "/new" } });
+  let sendPromptCalls = 0;
+  let createCalls = 0;
+  const send = harness.send({
+    sessionId: "session-a",
+    templates: [],
+    compact: async () => undefined,
+    createNewSession: async () => {
+      createCalls += 1;
+    },
+    sendPrompt: async () => {
+      sendPromptCalls += 1;
+      return { accepted: true };
+    },
+  });
+  await send();
+  assert.equal(createCalls, 1);
+  assert.equal(sendPromptCalls, 0);
+  assert.equal(harness.state.get(harness.atoms.sessionDraftByIdAtom)["session-a"], undefined);
 });
 
 test("quote tokens expand at the send entry before any snapshot is published", () => {

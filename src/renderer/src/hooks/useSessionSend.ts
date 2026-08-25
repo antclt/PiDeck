@@ -67,6 +67,8 @@ export type UseSessionSendOptions = {
   prepareMessage?: (message: string) => Promise<string>;
   onDraftMutation?: (sessionId: string) => void;
   compact: (target: SessionRuntimeTarget, prompt?: string) => Promise<void>;
+  /** `/new`：桌面拦截后新建 Agent 会话（不发给 pi）。 */
+  createNewSession?: () => Promise<void>;
   resetComposerUi?: () => void;
   recordPromptHistory?: (sessionId: string, message: string) => void;
   refreshProject?: (projectId: string) => void;
@@ -213,7 +215,26 @@ export function useSessionSend(options: UseSessionSendOptions) {
     sendingSessionIdsRef.current.add(sourceSessionId);
     const requestId = crypto.randomUUID();
     const trimmedMessage = message.trim();
+    const isNewCommand = /^\/new\s*$/.test(trimmedMessage);
     const isCompactCommand = /^\/compact(?:\s|$)/.test(trimmedMessage);
+    if (isNewCommand) {
+      // 不写乐观用户气泡、不 ensureSessionId：/new 是桌面 chrome，不是发给模型的消息。
+      clearSnapshot(sourceSessionId);
+      options.resetComposerUi?.();
+      try {
+        await options.createNewSession?.();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        setSendState({
+          sessionId: sourceSessionId,
+          state: { status: "error", error: errorMessage },
+        });
+        options.showError?.(errorMessage, 4000);
+      } finally {
+        sendingSessionIdsRef.current.delete(sourceSessionId);
+      }
+      return;
+    }
     const usesLocalQueue = Boolean(
       options.enqueue &&
       (streamingBehavior === "steer" || streamingBehavior === "followUp"),

@@ -32,8 +32,26 @@ test("startDshHostInBackground starts immediately without awaiting host readines
 	await startup;
 });
 
-test("startup integration warms DSH after the main window and Overview exposes host restart", () => {
-	assert.match(main, /await createWindow\(\);[\s\S]{0,400}startDshHostInBackground\(dshHost, appLogger\)/);
+test("startDshHostInBackground skips warmup when enabled is false", () => {
+	let started = false;
+	startDshHostInBackground(
+		{
+			ensureStarted() {
+				started = true;
+				return Promise.resolve();
+			},
+		},
+		{ warn: () => undefined },
+		{ enabled: false },
+	);
+	assert.equal(started, false, "默认后端为 pi 时不应 fork DSH host");
+});
+
+test("startup integration warms DSH after the main window only when default backend is dsh", () => {
+	assert.match(
+		main,
+		/await createWindow\(\);[\s\S]{0,600}startDshHostInBackground\(dshHost, appLogger, \{\s*enabled: settingsStore\.get\(\)\.defaultAgentBackend === "dsh",\s*\}\)/,
+	);
 	assert.match(configTab, /const restartHost = async \(\) =>/);
 	assert.match(configTab, /desktopApi\.sessions\.restartDshHost\(\)/);
 	assert.match(configTab, /t\("config\.dsh\.restartHost"\)/);

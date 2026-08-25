@@ -28,7 +28,7 @@ function loadAppUtils() {
 	return sandbox.exports;
 }
 
-const { detectTrigger, applySuggestion, clearSuggestionTrigger, buildSuggestionItems } = loadAppUtils();
+const { detectTrigger, applySuggestion, clearSuggestionTrigger, buildSuggestionItems, mergeCommands } = loadAppUtils();
 
 const sessions = new Set(["alpha", "beta long"]);
 
@@ -157,4 +157,12 @@ test("clearSuggestionTrigger only strips a fresh empty trigger", () => {
 		text: prose,
 		cursor: prose.length,
 	});
+});
+
+test("/new is visible in slash suggestions and hidden CLI commands stay out", () => {
+	const names = mergeCommands([]).map((command) => command.name);
+	assert.equal(names.includes("new"), true);
+	assert.equal(names.includes("model"), false);
+	assert.equal(names.includes("resume"), false);
+	assert.equal(names.includes("fork"), false);
 });
