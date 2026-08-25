@@ -16,16 +16,16 @@ test("布局覆盖全部 14 个 tab 且不重复", () => {
 	assert.deepEqual([...SETTINGS_TAB_IDS], ids);
 });
 
-test("展示顺序按 基础 → 扩展集成 → 数据与监控 → 开发者 排列", () => {
+test("展示顺序按 基础 → 扩展集成 → 开发者工具 → 开发与维护 排列", () => {
 	assert.deepEqual([...SETTINGS_TAB_LAYOUT.map((entry) => entry.id)], [
 		"common", "appearance", "proxy",
 		"im", "pet", "vision", "imagegen",
-		"storage", "usage", "process",
-		"web", "editors", "git", "dev",
+		"web", "editors", "git",
+		"dev", "usage", "process", "storage",
 	]);
 });
 
 test("分割线只出现在三个簇边界前，首项不带分割线", () => {
-	assert.deepEqual([...SETTINGS_TAB_LAYOUT.filter((e) => e.dividerBefore).map((e) => e.id)], ["im", "storage", "dev"]);
+	assert.deepEqual([...SETTINGS_TAB_LAYOUT.filter((e) => e.dividerBefore).map((e) => e.id)], ["im", "web", "dev"]);
 	assert.equal(SETTINGS_TAB_LAYOUT[0].dividerBefore, undefined);
 });
