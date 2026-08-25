@@ -27,22 +27,25 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.1** (2026-08-15)
+> **Latest: v0.7.2** (2026-08-25)
 
-### v0.7.1 Release Highlights
-- 🚀 **Session trajectory in the right drawer + process ledger**
-- 🚀 **Markdown incremental rendering**
-- 🚀 **Reading surfaces unified into split view**
-- 🚀 **macOS native traffic lights on the custom title bar**
-- 🚀 **Empty-workspace onboarding**
-- 🚀 **Web ask request cards**
-- 🚀 **Onboarding is now a compose page**
-- 🚀 **Turn file-change list: manual collapse only**
-- 🚀 **Home quick actions removed**
-- ✨ **Desktop pet at native sprite size**
-- ✨ **Streaming conversations expand intermediate steps by default**
-- ✨ **Unified dsh-web look**
-- ✨ **System notification jumps to its session**
+### v0.7.2 Release Highlights
+- 🚀 **DSH dual agent backend**
+- 🚀 **DSH session capabilities**
+- 🚀 **DSH session persistence**
+- 🚀 **DSH config management page**
+- 🚀 **v2 transport**
+- 🚀 **Backend identity & capability sets**
+- 🚀 **DSH command completion from the host registry**
+- 🚀 **DSH session HTML export**
+- 🚀 **DSH skill catalog presentation**
+- 🚀 **Current-plan Todo extension**
+- 🚀 **Model spec autofill from listing + pi-ai**
+- 🚀 **DSH provider retry count**
+- ✨ **DSH session export entry enabled**
+- ✨ **Export runaway guard**
+- ✨ **DSH injected context no longer projected as user messages**
+- ✨ **Files drawer scroll container ownership**
 
 [View Full Changelog →](CHANGELOG.md)
 

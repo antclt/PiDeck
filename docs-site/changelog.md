@@ -5,6 +5,27 @@
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
+## v0.7.2
+
+发布时间：2026-08-25
+
+- 🚀 **DSH 双 Agent 后端**
+- 🚀 **DSH 会话能力**
+- 🚀 **DSH 会话持久化**
+- 🚀 **DSH 配置管理页**
+- 🚀 **v2 传输形态**
+- 🚀 **后端标识与能力集**
+- 🚀 **DSH 命令补全接入 host 注册表**
+- 🚀 **DSH 会话导出 HTML**
+- 🚀 **DSH 技能目录呈现**
+- 🚀 **当前有效计划 Todo 扩展**
+- 🚀 **模型规格按 listing + pi-ai 补全**
+- 🚀 **DSH 供应商重试次数**
+- ✨ **DSH 会话历史导出路径一致**
+- ✨ **导出防失控**
+- ✨ **DSH 注入上下文不再投影为用户消息**
+- ✨ **文件抽屉滚动容器归属**
+
 ## v0.7.1
 
 发布时间：2026-08-15

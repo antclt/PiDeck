@@ -4,10 +4,44 @@
 
 All notable changes to PiDeck are documented here.
 
-## Unreleased
+## v0.7.2 - 2026-08-25
 
 ### 🚀 New Features
 
+- **DSH dual agent backend** — pi / DSH (DeepSeek Harness) sessions coexist in the
+  same project and can be freely created, switched and browsed; DSH is deeply
+  embedded (utilityProcess boot, no `dsh web`, no port, no background HTTP),
+  lazily started so app startup stays fast.
+- **DSH session capabilities** — history paging (`session.history` event-stream
+  pages with seq cursors), fork (`session.fork` anchored at a seq, forked text
+  prefilled into the composer), compact (`/compact` command), and an
+  approval/question bridge (`approval/requested` + `question/requested` →
+  desktop Ask dialog → `respond` receipt).
+- **DSH session persistence** — a `dshSessionId` mapping is written to the
+  catalog; after restart, old sessions are re-attached with a history-tail
+  replay; fork/restart keep the mapping in sync.
+- **DSH config management page** — a DSH pane in Settings: schema-driven
+  settings/credentials forms, host-level model catalog, host status and restart.
+- **v2 transport** — the DSH host moved from an in-process embed into a
+  utilityProcess (MessagePort fetch bridge over the same `AbstractApiClient`
+  contract); native ABI and crash surface no longer touch the main process;
+  the hostEntry is a dedicated build output and is asarUnpacked.
+- **Backend identity & capability sets** — sessions carry a `backend` marker
+  (defaults to `pi`, zero migration for old data); UI hides entry points by
+  declared capability (DSH hides edit/delete of history messages, keeps
+  resend/fork; compact is always visible).
+- **DSH command completion from the host registry** — A new
+  `pideck-command-bridge` (in-process host bridge) feeds the Composer `/` menu
+  from `ctx.commands` in real time (including user/plugin-registered commands),
+  falling back to the static suggestion set while a session is not active.
+- **DSH session HTML export** — Projection-based export: pages the full host
+  history and renders a self-contained HTML file (static inline styles in the
+  dsh-web visual language), returning a file path with the same protocol as
+  pi's `export_html`; live sessions export from memory, history sessions are
+  collected with a runaway guard.
+- **DSH skill catalog presentation** — `skill.list` wired into the session
+  tools panel ("Skills" tab): name/description/when-to-use plus `/name`
+  slash-invocation hints (user-only skills get a badge).
 - **Current-plan Todo extension** — The bundled Todo extension now supports explicit
   plan replacement and restoration, branch-scoped persistence, and retains stale
   tasks until the agent explicitly clears them.
@@ -28,34 +62,6 @@ All notable changes to PiDeck are documented here.
   MCP/ACP image attachments, large-history pagination fix, max-token session
   recovery). English built-in `Code mode` label follows upstream as `PTC mode`.
   `dsh-bill` is 0.13.1.
-
-### 🐛 Bug Fixes
-
-- **Removed the ineffective "Expand changed files by default" setting** — The
-  changed-file list now lives above the composer and always starts collapsed,
-  so the old toggle that auto-expanded each turn's list had stopped doing
-  anything; the setting and its leftover dead code were removed.
-- **Packaged terminal could not load pty.node (#154)** — afterPack now keeps
-  asar unpacked metadata when it repacks, and `node-pty` is listed in
-  `asarUnpack`, so `terminal:ensure` can load the native module in the
-  installed app.
-
-## v0.7.2 - 2026-08-16
-
-### 🚀 New Features
-
-- **DSH command completion from the host registry** — A new
-  `pideck-command-bridge` (in-process host bridge) feeds the Composer `/` menu
-  from `ctx.commands` in real time (including user/plugin-registered commands),
-  falling back to the static suggestion set while a session is not active.
-- **DSH session HTML export** — Projection-based export: pages the full host
-  history and renders a self-contained HTML file (static inline styles in the
-  dsh-web visual language), returning a file path with the same protocol as
-  pi's `export_html`; live sessions export from memory, history sessions are
-  collected with a runaway guard.
-- **DSH skill catalog presentation** — `skill.list` wired into the session
-  tools panel ("Skills" tab): name/description/when-to-use plus `/name`
-  slash-invocation hints (user-only skills get a badge).
 - **Web UI restyled in the dsh-web design language** — The built-in web
   service follows the official dsh-web design tokens: semantic palette
   (background layers, border levels, label hierarchy, state colors) and font
@@ -83,6 +89,32 @@ All notable changes to PiDeck are documented here.
 
 - **Export runaway guard** — History export is page-capped and oversized images
   are skipped to avoid hundred-megabyte HTML files.
+
+### 🐛 Bug Fixes
+
+- **DSH injected context no longer projected as user messages** — AGENTS.md /
+  runtime context / skills injected into DSH sessions are filtered by
+  `source.kind`; the timeline keeps only real conversation.
+- **Files drawer scroll container ownership** — Scrolling is scoped to the
+  drawer container (synced with the dev-baseline fix); `files-panel` no longer
+  scrolls itself vertically.
+- **Removed the ineffective "Expand changed files by default" setting** — The
+  changed-file list now lives above the composer and always starts collapsed,
+  so the old toggle that auto-expanded each turn's list had stopped doing
+  anything; the setting and its leftover dead code were removed.
+- **Packaged terminal could not load pty.node (#154)** — afterPack now keeps
+  asar unpacked metadata when it repacks, and `node-pty` is listed in
+  `asarUnpack`, so `terminal:ensure` can load the native module in the
+  installed app.
+
+### 🙏 Thanks
+
+- **@bfzha** — DSH config management/migration layering, CodeMirror config
+  source-file page, full appearance theme redraw (Classic / Forest Green /
+  Graphite Gray / Seafoam Blue / Warm Sun), selection-to-quote chips, and
+  cross-session scroll anchor preservation (#163).
+- **@ayuayue** — DSH dual-backend core, dedicated imagegen backend, dsh-web
+  restyle, and 40+ fixes.
 
 ## v0.7.1 - 2026-08-15
 
@@ -204,41 +236,6 @@ All notable changes to PiDeck are documented here.
 - **Add-project no longer hijacked by chat (#149)** — The add-project entry
   point is no longer taken over by the session chat area and stays reachable
   from the sidebar.
-
-## Unreleased (DSH dual-backend support — v0.7.2 beta)
-
-### 🚀 New Features
-
-- **DSH dual agent backend** — pi / DSH (DeepSeek Harness) sessions coexist in the
-  same project and can be freely created, switched and browsed; DSH is deeply
-  embedded (utilityProcess boot, no `dsh web`, no port, no background HTTP),
-  lazily started so app startup stays fast.
-- **DSH session capabilities** — history paging (`session.history` event-stream
-  pages with seq cursors), fork (`session.fork` anchored at a seq, forked text
-  prefilled into the composer), compact (`/compact` command), and an
-  approval/question bridge (`approval/requested` + `question/requested` →
-  desktop Ask dialog → `respond` receipt).
-- **DSH session persistence** — a `dshSessionId` mapping is written to the
-  catalog; after restart, old sessions are re-attached with a history-tail
-  replay; fork/restart keep the mapping in sync.
-- **DSH config management page** — a DSH pane in Settings: schema-driven
-  settings/credentials forms, host-level model catalog, host status and restart.
-- **v2 transport** — the DSH host moved from an in-process embed into a
-  utilityProcess (MessagePort fetch bridge over the same `AbstractApiClient`
-  contract); native ABI and crash surface no longer touch the main process;
-  the hostEntry is a dedicated build output and is asarUnpacked.
-- **Backend identity & capability sets** — sessions carry a `backend` marker
-  (defaults to `pi`, zero migration for old data); UI hides entry points by
-  declared capability (DSH hides edit/delete of history messages, keeps
-  resend/fork; compact is always visible).
-
-### 🐛 Fixes
-
-- DSH injected context (AGENTS.md / runtime context / skills) is no longer
-  projected as user messages (filtered by `source.kind`; the timeline keeps
-  only real conversation).
-- Fixed the files drawer scroll container ownership (synced the dev-baseline
-  fix; `files-panel` no longer scrolls itself vertically).
 
 ## v0.7.0 - 2026-08-13
 

@@ -4,10 +4,32 @@
 
 这里记录 PiDeck 各版本的重要变化。
 
-## 未发布
+## v0.7.2 - 2026-08-25
 
 ### 🚀 新功能
 
+- **DSH 双 Agent 后端** — 同一项目下 pi / DSH（DeepSeek Harness）会话并存、自由切换；
+  DSH 深融合（utilityProcess 内嵌引导，无 `dsh web`/无端口/无后台 HTTP），懒启动不拖慢应用启动。
+- **DSH 会话能力** — 历史分页（`session.history` 事件流翻页，seq 游标）、fork（`session.fork`
+  锚 seq 裁剪，fork 点文案回填输入框）、compact（`/compact` 命令）、审批/提问桥
+  （`approval/requested` + `question/requested` → 桌面 Ask 弹窗 → `respond` 回执）。
+- **DSH 会话持久化** — `dshSessionId` 映射写入 catalog，重启后 attach 恢复旧会话（历史尾部回放）；
+  fork/restart 后同步更新映射。
+- **DSH 配置管理页** — 设置页新增 DSH 分页：settings/credentials 可视化编辑（schema 驱动表单）、
+  host 级模型目录、host 状态与重启。
+- **v2 传输形态** — DSH host 从主进程内嵌迁入 utilityProcess（MessagePort fetch 桥 +
+  `AbstractApiClient` 契约），原生 ABI 与崩溃面不污染主进程；hostEntry 独立构建产物并
+  asarUnpack。
+- **后端标识与能力集** — 会话带 `backend` 标识（缺省 pi，旧数据零迁移）；UI 按能力声明
+  禁用入口（DSH 隐藏编辑/删除历史消息，保留重发/fork；compact 常显）。
+- **DSH 命令补全接入 host 注册表** — 新增 `pideck-command-bridge`（host 进程内桥），
+  Composer `/` 菜单从 `ctx.commands` 实时枚举命令（含用户/插件注册的命令），
+  会话未激活时自动降级为静态建议集。
+- **DSH 会话导出 HTML** — 投影式导出：从 host 分页拉全量历史渲染自包含 HTML
+  （dsh-web 视觉的静态内联样式），与 pi 的 `export_html` 同协议返回文件路径；
+  活跃会话直接导出内存消息，历史会话自动分页收集（上限防失控）。
+- **DSH 技能目录呈现** — 接入 `skill.list` 只读目录：会话工具面板新增「技能」tab，
+  展示名称/描述/用途与 `/name` 斜杠调用提示（仅用户可调用的技能带徽标）。
 - **当前有效计划 Todo 扩展** — 内置 Todo 支持显式替换和恢复计划、按分支持久化，
   旧任务只会在 Agent 显式清空时移除。
 - **模型规格按 listing + pi-ai 补全** — 拉取模型列表时，端点返回的
@@ -23,26 +45,6 @@
   设置卡片、Codex/Claude Code 子代理进 Job Panel、MCP/ACP 持久图片附件、
   大历史分页栈溢出修复、max-tokens 截断后会话可继续）。英文内置预设
   `Code mode` 跟随上游改为 `PTC mode`。`dsh-bill` 升到 0.13.1。
-
-### 🐛 Bug 修复
-
-- **移除失效的「默认展开本轮修改的文件」设置** — 本轮修改文件列表已移入输入框上方并固定默认收起，原「每轮回答下自动展开」开关已不再产生任何效果，连同其设置项与遗留死代码一并移除。
-- **打包版终端找不到 pty.node（#154）** — afterPack 重打 asar 时保留
-  unpacked 标记，并显式 unpack `node-pty`，避免 `terminal:ensure` 在
-  安装包里加载原生模块失败。
-
-## v0.7.2 - 2026-08-16
-
-### 🚀 新功能
-
-- **DSH 命令补全接入 host 注册表** — 新增 `pideck-command-bridge`（host 进程内桥），
-  Composer `/` 菜单从 `ctx.commands` 实时枚举命令（含用户/插件注册的命令），
-  会话未激活时自动降级为静态建议集。
-- **DSH 会话导出 HTML** — 投影式导出：从 host 分页拉全量历史渲染自包含 HTML
-  （dsh-web 视觉的静态内联样式），与 pi 的 `export_html` 同协议返回文件路径；
-  活跃会话直接导出内存消息，历史会话自动分页收集（上限防失控）。
-- **DSH 技能目录呈现** — 接入 `skill.list` 只读目录：会话工具面板新增「技能」tab，
-  展示名称/描述/用途与 `/name` 斜杠调用提示（仅用户可调用的技能带徽标）。
 - **Web 端 dsh-web 风格换肤** — 内置 Web 服务 UI 按官方 dsh-web 设计 token 重构：
   语义色板（背景分层/边框层级/文字层级/状态色）与字体栈取自官方产物，暗色近黑
   分层；侧栏/头部/时间线/Composer 结构精修（毛玻璃头部、聚焦品牌环、内容列宽、
@@ -62,6 +64,28 @@
 ### 🔧 性能优化
 
 - **导出防失控** — 历史导出分页上限 + 超大图片跳过（防生成百 MB HTML）。
+
+### 🐛 Bug 修复
+
+- **DSH 注入上下文不再投影为用户消息** — DSH 会话注入的 AGENTS.md / runtime
+  context / skills 按 `source.kind` 分流，时间线只留真实对话。
+- **文件抽屉滚动容器归属** — 滚动层归属收敛到抽屉容器（同步 dev 基底修复），
+  `files-panel` 不再自带纵向滚动。
+- **移除失效的「默认展开本轮修改的文件」设置** — 本轮修改文件列表已移入输入框上方并固定默认收起，原「每轮回答下自动展开」开关已不再产生任何效果，连同其设置项与遗留死代码一并移除。
+- **打包版终端找不到 pty.node（#154）** — afterPack 重打 asar 时保留
+  unpacked 标记，并显式 unpack `node-pty`，避免 `terminal:ensure` 在
+  安装包里加载原生模块失败。
+
+### 🙏 致谢
+
+- **@bfzha** — DSH 双后端配置管理/迁移分层、CodeMirror 配置源文件页、外观主题
+  整套重绘（经典/森系绿/石墨灰/海盐蓝/暖阳米）、会话划选文本引用 chip、时间线
+  滚动锚点跨会话保持（#163），以及大量 UI 打磨与测试基建。
+- **@ayuayue** — DSH 双后端核心、生图独立后端、dsh-web 换肤与 40+ 项修复。
+
+感谢所有群友的建议和问题反馈 🙏
+
+> 💬 **QQ 反馈交流群：1026218644**
 
 ## v0.7.1 - 2026-08-15
 
@@ -147,31 +171,6 @@
 - **思考折叠单行结束态空白** — 思考步骤折叠为单行时，结束态不再残留空白。
 - **添加项目不再被聊天区占用（#149）** — 添加项目入口不再被会话聊天区抢占，始终可从
   侧边栏访问。
-## 未发布（DSH 双后端兼容 — v0.7.2 beta）
-
-### 🚀 新功能
-
-- **DSH 双 Agent 后端** — 同一项目下 pi / DSH（DeepSeek Harness）会话并存、自由切换；
-  DSH 深融合（utilityProcess 内嵌引导，无 `dsh web`/无端口/无后台 HTTP），懒启动不拖慢应用启动。
-- **DSH 会话能力** — 历史分页（`session.history` 事件流翻页，seq 游标）、fork（`session.fork`
-  锚 seq 裁剪，fork 点文案回填输入框）、compact（`/compact` 命令）、审批/提问桥
-  （`approval/requested` + `question/requested` → 桌面 Ask 弹窗 → `respond` 回执）。
-- **DSH 会话持久化** — `dshSessionId` 映射写入 catalog，重启后 attach 恢复旧会话（历史尾部回放）；
-  fork/restart 后同步更新映射。
-- **DSH 配置管理页** — 设置页新增 DSH 分页：settings/credentials 可视化编辑（schema 驱动表单）、
-  host 级模型目录、host 状态与重启。
-- **v2 传输形态** — DSH host 从主进程内嵌迁入 utilityProcess（MessagePort fetch 桥 +
-  `AbstractApiClient` 契约），原生 ABI 与崩溃面不污染主进程；hostEntry 独立构建产物并
-  asarUnpack。
-- **后端标识与能力集** — 会话带 `backend` 标识（缺省 pi，旧数据零迁移）；UI 按能力声明
-  禁用入口（DSH 隐藏编辑/删除历史消息，保留重发/fork；compact 常显）。
-
-### 🐛 修复
-
-- DSH 会话注入上下文（AGENTS.md / runtime context / skills）不再被投影为用户消息
-  （按 `source.kind` 分流，时间线只留真实对话）。
-- 修复文件抽屉滚动容器与滚动层归属（同步 dev 基底修复，`files-panel` 不再自带纵向滚动）。
-
 ## v0.7.0 - 2026-08-13
 
 ### 🚀 新功能
