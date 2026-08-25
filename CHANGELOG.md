@@ -116,6 +116,9 @@ All notable changes to PiDeck are documented here.
 - **@ayuayue** — DSH dual-backend core, dedicated imagegen backend, dsh-web
   restyle, and 40+ fixes.
 
+Special thanks to **微时佬友** for providing the Grok model service used in our
+community testing environment 🎉
+
 ## v0.7.1 - 2026-08-15
 
 ### 🚀 New Features
