@@ -10,7 +10,7 @@ import {
   parseImageGenSize,
   parseImageGenWatermark,
 } from "../../shared/imageGenParams";
-import { createDefaultExternalEditorSettings, type AppSettings } from "../../shared/types";
+import { createDefaultExternalEditorSettings, DEFAULT_PET_SCALE, type AppSettings } from "../../shared/types";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -174,7 +174,7 @@ Gitmoji 对应关系：
   petEnabled: false,
   petId: "clawd",
   petAlwaysOnTop: true,
-  petScale: 1,
+  petScale: DEFAULT_PET_SCALE,
   // 巡游默认开启：宠物 idle 时自动沿屏幕底部左右走动，业务态出现即让位
   petPatrolEnabled: true,
   // 巡游碰边后 idle 停顿默认 5 分钟

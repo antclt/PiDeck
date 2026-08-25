@@ -1,7 +1,7 @@
 import { ipcMain, Menu, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
 import type { AgentManager } from "../pi/AgentManager";
 import type { SettingsStore } from "../settings/SettingsStore";
-import type { AgentTab, AgentUiRequest, AppSettings, PetManifest, PetNotification } from "../../shared/types";
+import { DEFAULT_PET_SCALE, type AgentTab, type AgentUiRequest, type AppSettings, type PetManifest, type PetNotification } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
 import { NOTIFICATION_DURATION_MS, effectiveUIFontSize } from "../../shared/petNotificationLayout";
 import { EMPTY_NOTIFICATION_QUEUE, nextNotificationQueueState, onNotificationTimerElapse, type NotificationQueueState } from "./notificationQueue";
@@ -92,7 +92,7 @@ export class PetSystem {
 
 		const s = this.deps.settingsStore.get();
 		if (s.petEnabled) {
-			await this.petWindow.create(s.petScale ?? 1, effectiveUIFontSize(s.uiFontSize, s.fontSize));
+			await this.petWindow.create(s.petScale ?? DEFAULT_PET_SCALE, effectiveUIFontSize(s.uiFontSize, s.fontSize));
 			// 延迟 600ms 兜底推送初始数据，等待宠物窗 React 挂载并注册 IPC 监听器。
 			// 立即发送会被新窗口丢弃（监听器尚未就绪）。React 初始态为 idle + null sprite，
 			// 即使首次推送丢失也显示降级绘制。主动 petReady 信号到后会再推一次以覆盖兜底。
@@ -316,7 +316,7 @@ export class PetSystem {
 		// petEnabled 翻转
 		if (next.petEnabled !== prev.petEnabled) {
 			if (next.petEnabled) {
-				await this.petWindow.create(next.petScale ?? 1, effectiveUIFontSize(next.uiFontSize, next.fontSize));
+				await this.petWindow.create(next.petScale ?? DEFAULT_PET_SCALE, effectiveUIFontSize(next.uiFontSize, next.fontSize));
 				// 延迟 600ms 兜底推送，petReady 信号到后会再推一次覆盖兜底值
 				setTimeout(() => {
 					this.pushCaps();

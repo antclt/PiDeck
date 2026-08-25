@@ -9,6 +9,7 @@ const RAW_FILE_OPTIONS = [
 	{ value: "auth.json", label: "auth.json" },
 	{ value: "settings.json", label: "settings.json" },
 	{ value: "trust.json", label: "trust.json" },
+	{ value: "mcp.json", label: "mcp.json" },
 ];
 
 export function RawTab(props: {

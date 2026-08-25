@@ -1899,14 +1899,13 @@ export class AgentManager {
 		});
 
 		// 已有压缩在进行（手动请求未返回 / pi 自动压缩中）：拒绝重复请求。
-		// 渲染层按钮在 isCompacting 时禁用，这里是双保险——否则第二个 compact
-		// RPC 会被 pi 以 "Compaction cancelled" 拒绝，用户看到莫名报错
-		// （2026-08 用户反馈：压缩失败：Compaction cancelled）。
+		// 渲染层按钮在 isCompacting 时禁用，这里是双保险。旧实现 return 成功状态，
+		// 用户连点会当成「压缩完成」或完全没反应；改为明确错误，UI 映射 inProgress。
 		if (this.compactingAgents.has(agentId) || this.rpcCompactingAgents.has(agentId)) {
 			void this.appLogger?.info("agent", "Compact skipped: already compacting", {
 				agentId,
 			});
-			return this.getRuntimeState(agentId);
+			throw new Error("already compacting");
 		}
 
 		// 标记压缩中，退出处理器据此区分压缩重启与异常崩溃
@@ -2736,6 +2735,9 @@ export class AgentManager {
 			newText?: string;
 			environment?: SessionEnvironment;
 			wslDistro?: string;
+			/** 渲染层消息携带的文件条目 id（meta.entryId）：live randomUUID 无法在文件里定位，
+			 * 必须用该锚点（见 SessionHistoryReader.readMessageByMessageId）。 */
+			entryId?: string;
 		},
 	): Promise<{ text: string; images?: ImageContent[] } | undefined> {
 		const hostPath = this.toSessionHostPath(sessionPath);
@@ -2757,7 +2759,11 @@ export class AgentManager {
 			wslDistro: options?.wslDistro ?? (environment === "wsl" ? this.wslEnvironment?.distro : undefined),
 		};
 		const activeLeafId = await this.sessionHistoryReader.getActiveLeafId(sessionPath).catch(() => undefined);
-		const located = await this.sessionHistoryReader.readMessageByMessageId(sessionPath, messageId);
+		const located = await this.sessionHistoryReader.readMessageByMessageId(
+			sessionPath,
+			messageId,
+			options?.entryId,
+		);
 		if (!located) {
 			// 未落盘删除兜底：发送中/刚结束即中断，再删该轮消息时 JSONL 还没有这条记录——
 			// 渲染层流程是先停 agent 再走 catalog 删除，stop 已清空内存消息缓存，
@@ -3909,6 +3915,15 @@ export class AgentManager {
 				this.rpcCompactingAgents.delete(agentId);
 				this.emitState();
 				void this.emitRuntimeState(agentId);
+
+				// 终态重投影（2026-11）：本轮消息流式期间是 live 身份（randomUUID、无 entryId），
+				// 编辑/删除/重发需要 meta.entryId 才能在 JSONL 里定位（live id 无法匹配文件条目，
+				// 删除会 no-op、编辑/重发报 Message not found）。settled 是最终稳定点，重读一次
+				// 文件把消息绑定到 entryId 并 flush（loadMessages 尾部 immediate flush 覆盖上面的
+				// 手动 flush）；preserveMessagesAfter 保住附加期间新轮次的乐观消息。
+				// 不阻塞事件循环：新 turn 事件到达时旧投影可能未完成，由 preserve 路径兜底。
+				void this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() })
+					.catch(() => undefined);
 
 				const messages = this.messages.get(agentId) ?? [];
 				const lastMessage = messages[messages.length - 1];

@@ -719,7 +719,7 @@ test("forkSession 拒绝非法 entryId", async () => {
 });
 
 test("compact 以 /compact 提示词触发 host 命令并返回 runtime state", async () => {
-	const { host, sessions, calls, promptCalls } = makeFakeHost();
+	const { host, client, sessions, calls, promptCalls } = makeFakeHost();
 	sessions.set("session-compact", { sessionId: "session-compact", cwd: PROJECT.path, running: false, blank: false });
 	const manager = new DshAgentManager(host, () => PROJECT);
 	const tab = await manager.create({ projectId: "project-1", backend: "dsh", dshSessionId: "session-compact" });
@@ -727,7 +727,16 @@ test("compact 以 /compact 提示词触发 host 命令并返回 runtime state", 
 	assert.equal(calls.prompt, 1);
 	assert.equal(promptCalls[0], "/compact", "无参 compact 发送裸 /compact");
 	assert.equal(state.isStreaming, false);
-	// 带参 compact：/compact <prompt>
+	assert.equal(state.isCompacting, true);
+	await assert.rejects(
+		() => manager.compact(tab.id, "keep focus on refactor"),
+		/already compacting/,
+		"压缩进行中拒绝第二次 compact，避免拼进命令回合",
+	);
+	assert.equal(calls.prompt, 1, "拒绝重复 compact 不得再发 prompt");
+	client.pushFrames(sessionEventFrame("session-compact", event("turn/end", 1)));
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).isCompacting, false);
 	await manager.compact(tab.id, "keep focus on refactor");
 	assert.equal(calls.prompt, 2);
 	assert.equal(promptCalls[1], "/compact keep focus on refactor");

@@ -509,6 +509,34 @@ test("/new is intercepted as a desktop session create, not sent to pi", async ()
   assert.equal(harness.state.get(harness.atoms.sessionDraftByIdAtom)["session-a"], undefined);
 });
 
+test("/compact releases the send lock so a follow-up prompt can send", async () => {
+  const harness = createSendHarness({
+    drafts: { "session-a": "/compact" },
+    runtimes: {
+      "session-a": { agentId: "agent-a", runtimeGeneration: 1 },
+    },
+  });
+  let compactCalls = 0;
+  let sendPromptCalls = 0;
+  const send = harness.send({
+    sessionId: "session-a",
+    templates: [],
+    compact: async () => {
+      compactCalls += 1;
+    },
+    sendPrompt: async () => {
+      sendPromptCalls += 1;
+      return { accepted: true };
+    },
+  });
+  await send();
+  assert.equal(compactCalls, 1);
+  assert.equal(sendPromptCalls, 0);
+  harness.state.set(harness.atoms.sessionDraftByIdAtom, { "session-a": "after compact" });
+  await send();
+  assert.equal(sendPromptCalls, 1, "/compact must not leave sendingSessionIdsRef occupied");
+});
+
 test("quote tokens expand at the send entry before any snapshot is published", () => {
   const source = sendSource();
   // 审计定稿：读取草稿后立即展开（乐观缓存/队列/历史全部消费展开后文本），

@@ -81,6 +81,7 @@ export interface AppShellProps {
   onToggleDrawerPin: () => void;
 
   toggleAlwaysOnTop: () => Promise<boolean>;
+  isWindowAlwaysOnTop: () => Promise<boolean>;
   minimizeWindow: () => void;
   toggleMaximizeWindow: () => Promise<boolean>;
   isWindowMaximized: () => Promise<boolean>;
@@ -106,7 +107,7 @@ export function AppShell(props: AppShellProps) {
     setListCollapsed, setListWidth, setDrawerCollapsed, setDrawerWidth,
     onToggleListCollapsed,
     onDrawerCollapse, onDrawerClose, onDrawerRestore, onToggleDrawerPin,
-    toggleAlwaysOnTop, minimizeWindow, toggleMaximizeWindow, isWindowMaximized, onWindowMaximizedChange, closeWindow,
+    toggleAlwaysOnTop, isWindowAlwaysOnTop, minimizeWindow, toggleMaximizeWindow, isWindowMaximized, onWindowMaximizedChange, closeWindow,
     children,
   } = props;
 
@@ -298,6 +299,7 @@ export function AppShell(props: AppShellProps) {
         useNativeTitleBar={useNativeTitleBar}
         platform={platform}
         toggleAlwaysOnTop={toggleAlwaysOnTop}
+        isWindowAlwaysOnTop={isWindowAlwaysOnTop}
         minimizeWindow={minimizeWindow}
         toggleMaximizeWindow={toggleMaximizeWindow}
         isWindowMaximized={isWindowMaximized}

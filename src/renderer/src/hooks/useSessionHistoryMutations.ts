@@ -13,6 +13,8 @@ import {
   requireSessionCommand,
   sessionCommandFailureToast,
 } from "../utils/sessionCommands";
+import { resolveHistoryMutationPath } from "../utils/sessionHistoryMutationPolicy";
+import { messageEntryId } from "../utils/sessionCommands";
 
 type ConfirmConfig = {
   title: string;
@@ -150,20 +152,20 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     }
   }, [hideOverlay, reloadTimelineFromDisk, showOverlay, stopIfRunning]);
 
-  const editMessage = useCallback(async (messageId: string, newText: string) => {
+  const editMessage = useCallback(async (messageId: string, newText: string, entryId?: string) => {
     const latest = depsRef.current;
     const sessionId = latest.currentSessionId;
     if (!sessionId) return;
     const target = latest.getRuntimeTargetForSession(sessionId);
-    // 匿名/--no-session 没有 JSONL：只能在运行中走 switch_session，不能先停再改文件。
-    if (target && !latest.hasPersistedSessionFile?.(sessionId)) {
-      try {
-        requireSessionCommand(
-          await api.sessions.editRuntimeMessage(target, messageId, newText),
-        );
-      } catch (error) {
-        failToast(t("message.editFailed"), error);
-      }
+    // 匿名/--no-session 没有 JSONL：pi 的 editMessage 要求 sessionPath，缺失即报
+    // “Session not persisted”，旧逻辑调必然失败的 runtime 命令。这里改为明确告知不支持。
+    const path = resolveHistoryMutationPath({
+      kind: "edit",
+      target,
+      persisted: latest.hasPersistedSessionFile(sessionId),
+    });
+    if (path.path === "unsupported-anonymous") {
+      latest.showToast(t("message.anonymousEditUnsupported"), 4000);
       return;
     }
     confirmStopIfRunning(sessionId, {
@@ -174,7 +176,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
       try {
         await runFileMutation(sessionId, async () => {
           requireSessionCommand(
-            await api.sessions.editCatalogMessage(sessionId, messageId, newText),
+            await api.sessions.editCatalogMessage(sessionId, messageId, newText, entryId),
           );
         });
       } catch (error) {
@@ -183,32 +185,25 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     });
   }, [confirmStopIfRunning, failToast, runFileMutation]);
 
-  const deleteMessage = useCallback((messageId: string) => {
+  const deleteMessage = useCallback((messageId: string, entryId?: string) => {
     const latest = depsRef.current;
     const sessionId = latest.currentSessionId;
     if (!sessionId) return;
     const target = latest.getRuntimeTargetForSession(sessionId);
-    const persisted = latest.hasPersistedSessionFile(sessionId);
-    if (target && !persisted) {
-      latest.showConfirm({
-        title: t("message.deleteTitle"),
-        message: t("message.deleteReloadPrompt"),
-        danger: true,
-        confirmLabel: t("common.delete"),
-        onConfirm: async () => {
-          latest.clearConfirm();
-          try {
-            requireSessionCommand(
-              await api.sessions.deleteRuntimeMessage(target, messageId),
-            );
-          } catch (error) {
-            failToast(t("message.deleteFailed"), error);
-          }
-        },
-      });
+    // 匿名会话无文件可删：旧逻辑弹「删除后需要重新加载会话才能生效」的误导确认后调
+    // deleteRuntimeMessage，必然报 “Session not persisted”。改为明确告知不支持。
+    const path = resolveHistoryMutationPath({
+      kind: "delete",
+      target,
+      persisted: latest.hasPersistedSessionFile(sessionId),
+    });
+    if (path.path === "unsupported-anonymous") {
+      latest.showToast(t("message.anonymousDeleteUnsupported"), 4000);
       return;
     }
-    const live = Boolean(target);
+    // kind 为 delete 时策略只会给出 unsupported-anonymous 或 catalog，这里收窄类型
+    if (path.path !== "catalog") return;
+    const live = path.live;
     latest.showConfirm({
       title: t("message.deleteTitle"),
       message: live ? t("message.historyStopToDeleteBody") : t("message.deleteReloadPrompt"),
@@ -219,7 +214,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
         try {
           await runFileMutation(sessionId, async () => {
             requireSessionCommand(
-              await api.sessions.deleteCatalogMessage(sessionId, messageId),
+              await api.sessions.deleteCatalogMessage(sessionId, messageId, entryId),
             );
           });
         } catch (error) {
@@ -235,34 +230,27 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     if (!sessionId) return;
     if (resendingIdsRef.current.has(message.id)) return;
     const target = latest.getRuntimeTargetForSession(sessionId);
-    const persisted = latest.hasPersistedSessionFile(sessionId);
-    const runAnonymous = async () => {
-      if (!target) return;
+    const path = resolveHistoryMutationPath({
+      kind: "resend",
+      target,
+      persisted: latest.hasPersistedSessionFile(sessionId),
+      isImageGenSession: latest.isImageGenSession?.(sessionId),
+    });
+    // 匿名重发：没有文件可截断旧轮次（prepareRuntimeResend 必然报 “Session not
+    // persisted”），直接把原消息文本重新提交（submitPromptSnapshot 会自动激活
+    // runtime）；旧轮次保留为历史，新轮次即新尝试。
+    if (path.path === "runtime-anonymous-resend") {
       resendingIdsRef.current.add(message.id);
       setTimeout(() => resendingIdsRef.current.delete(message.id), 30_000);
-      try {
-        const snapshot = requireSessionCommand(
-          await api.sessions.prepareRuntimeResend(target, message.id),
-        ).value;
-        await latest.submitPromptSnapshot(sessionId, snapshot.text, snapshot.images);
-      } catch (error) {
-        failToast(t("message.resendFailed"), error);
-      } finally {
-        resendingIdsRef.current.delete(message.id);
-      }
-    };
-    if (target && !persisted) {
-      void runAnonymous();
+      void latest.submitPromptSnapshot(sessionId, message.text ?? "", message.images)
+        .catch((error) => failToast(t("message.resendFailed"), error))
+        .finally(() => resendingIdsRef.current.delete(message.id));
       return;
     }
     // 生图 draft：无 runtime、无 pi JSONL，重发目标不是「截断 pi 文件消息」，而是把失败的
     // 提示词（+参考图）放回输入框供一键重产生（历史由 ImageSessionStore 兜底，不依赖 pi 文件）。
-    // 若未提供生图专用回调（非生图环境），则回落走下方 catalog 截断路径。
-    if (
-      !target &&
-      latest.isImageGenSession?.(sessionId) &&
-      latest.restoreImageGenTurn
-    ) {
+    if (path.path === "imagegen-resend") {
+      if (!latest.restoreImageGenTurn) return;
       resendingIdsRef.current.add(message.id);
       setTimeout(() => resendingIdsRef.current.delete(message.id), 30_000);
       try {
@@ -279,7 +267,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
         let snapshot: { text: string; images?: ImageContent[] } | undefined;
         await runFileMutation(sessionId, async () => {
           snapshot = requireSessionCommand(
-            await api.sessions.prepareCatalogResend(sessionId, message.id),
+            await api.sessions.prepareCatalogResend(sessionId, message.id, messageEntryId(message)),
           );
         });
         if (!snapshot) return;

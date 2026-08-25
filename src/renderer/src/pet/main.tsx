@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { useState, useEffect } from "react";
-import type { AppFontBaseMode, AppFontSizeMode, PetAggregateState, PetManifest, PetNotification, PetWindowCaps } from "@shared/types";
+import { DEFAULT_PET_SCALE, type AppFontBaseMode, type AppFontSizeMode, type PetAggregateState, type PetManifest, type PetNotification, type PetWindowCaps } from "@shared/types";
 import { effectiveUIFontSize, petFontStack } from "@shared/petNotificationLayout";
 import { PetOverlay } from "./PetOverlay";
 import { PetInteraction } from "./PetInteraction";
@@ -20,7 +20,7 @@ function readAppearance(s: {
 	fontFamilyBaseCustom?: string;
 }): PetAppearance {
 	return {
-		scale: s.petScale ?? 1,
+		scale: s.petScale ?? DEFAULT_PET_SCALE,
 		fontMode: effectiveUIFontSize(s.uiFontSize, s.fontSize ?? "medium"),
 		fontStack: petFontStack(s.fontFamilyBase ?? "system", s.fontFamilyBaseCustom ?? ""),
 	};

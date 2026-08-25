@@ -1169,7 +1169,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	// 运行中必须先停（coordinator 拒绝 SESSION_RUNTIME_BUSY）；入参在边界校验。
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogEditMessage,
-		async (_event, sessionId: unknown, messageId: unknown, newText: unknown) => {
+		async (_event, sessionId: unknown, messageId: unknown, newText: unknown, entryId: unknown) => {
 			if (typeof sessionId !== "string" || !sessionId.trim()) {
 				throw new Error("Invalid catalog edit-message request");
 			}
@@ -1179,10 +1179,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			if (typeof newText !== "string") {
 				throw new Error("Invalid catalog edit-message request");
 			}
+			if (entryId !== undefined && typeof entryId !== "string") {
+				throw new Error("Invalid catalog edit-message request");
+			}
 			const result = await sessionRuntimeCoordinator.editCatalogMessage(
 				sessionId,
 				messageId,
 				newText,
+				entryId as string | undefined,
 			);
 			if (!result.ok) {
 				logSessionCommandFailure(appLogger, result.error, {
@@ -1196,14 +1200,17 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogDeleteMessage,
-		async (_event, sessionId: unknown, messageId: unknown) => {
+		async (_event, sessionId: unknown, messageId: unknown, entryId: unknown) => {
 			if (typeof sessionId !== "string" || !sessionId.trim()) {
 				throw new Error("Invalid catalog delete-message request");
 			}
 			if (typeof messageId !== "string" || !messageId.trim()) {
 				throw new Error("Invalid catalog delete-message request");
 			}
-			const result = await sessionRuntimeCoordinator.deleteCatalogMessage(sessionId, messageId);
+			if (entryId !== undefined && typeof entryId !== "string") {
+				throw new Error("Invalid catalog delete-message request");
+			}
+			const result = await sessionRuntimeCoordinator.deleteCatalogMessage(sessionId, messageId, entryId as string | undefined);
 			if (!result.ok) {
 				logSessionCommandFailure(appLogger, result.error, {
 					operation: "deleteCatalogMessage",
@@ -1216,14 +1223,17 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogPrepareResend,
-		async (_event, sessionId: unknown, messageId: unknown) => {
+		async (_event, sessionId: unknown, messageId: unknown, entryId: unknown) => {
 			if (typeof sessionId !== "string" || !sessionId.trim()) {
 				throw new Error("Invalid catalog prepare-resend request");
 			}
 			if (typeof messageId !== "string" || !messageId.trim()) {
 				throw new Error("Invalid catalog prepare-resend request");
 			}
-			const result = await sessionRuntimeCoordinator.prepareCatalogResend(sessionId, messageId);
+			if (entryId !== undefined && typeof entryId !== "string") {
+				throw new Error("Invalid catalog prepare-resend request");
+			}
+			const result = await sessionRuntimeCoordinator.prepareCatalogResend(sessionId, messageId, entryId as string | undefined);
 			if (!result.ok) {
 				logSessionCommandFailure(appLogger, result.error, {
 					operation: "prepareCatalogResend",

@@ -88,6 +88,8 @@ export interface SessionAgentGateway {
 			newText?: string;
 			environment?: SessionRecord["environment"];
 			wslDistro?: string;
+			/** 渲染层消息的文件条目 id（meta.entryId），live randomUUID 的文件定位锚点。 */
+			entryId?: string;
 		},
 	): Promise<{ text: string; images?: ImageContent[] } | undefined>;
 	prepareResendFromMessage(
@@ -532,8 +534,10 @@ export class SessionRuntimeCoordinator {
 		sessionId: string,
 		messageId: string,
 		newText: string,
+		/** 渲染层消息的文件条目 id（meta.entryId）：live randomUUID 无法在文件里定位。 */
+		entryId?: string,
 	): Promise<SessionCommandResult<void>> {
-		return this.mutateCatalogMessage(sessionId, messageId, "edit", newText).then((result) => {
+		return this.mutateCatalogMessage(sessionId, messageId, "edit", newText, entryId).then((result) => {
 			if (!result.ok) return result;
 			return { ok: true as const, value: undefined };
 		});
@@ -543,8 +547,10 @@ export class SessionRuntimeCoordinator {
 	deleteCatalogMessage(
 		sessionId: string,
 		messageId: string,
+		/** 渲染层消息的文件条目 id（meta.entryId）：live randomUUID 无法在文件里定位。 */
+		entryId?: string,
 	): Promise<SessionCommandResult<void>> {
-		return this.mutateCatalogMessage(sessionId, messageId, "delete").then((result) => {
+		return this.mutateCatalogMessage(sessionId, messageId, "delete", undefined, entryId).then((result) => {
 			if (!result.ok) return result;
 			return { ok: true as const, value: undefined };
 		});
@@ -554,8 +560,10 @@ export class SessionRuntimeCoordinator {
 	prepareCatalogResend(
 		sessionId: string,
 		messageId: string,
+		/** 渲染层消息的文件条目 id（meta.entryId）：live randomUUID 无法在文件里定位。 */
+		entryId?: string,
 	): Promise<SessionCommandResult<{ text: string; images?: ImageContent[] }>> {
-		return this.mutateCatalogMessage(sessionId, messageId, "resend").then((result) => {
+		return this.mutateCatalogMessage(sessionId, messageId, "resend", undefined, entryId).then((result) => {
 			if (!result.ok) return result;
 			return {
 				ok: true as const,
@@ -1638,6 +1646,8 @@ export class SessionRuntimeCoordinator {
 		messageId: string,
 		operation: "edit" | "delete" | "resend",
 		newText?: string,
+		/** 渲染层消息的文件条目 id（meta.entryId），见 readMessageByMessageId 的锚点语义。 */
+		entryId?: string,
 	): Promise<SessionCommandResult<{ text: string; images?: ImageContent[] } | undefined>> {
 		try {
 			const entry = this.catalog.get(sessionId);
@@ -1672,6 +1682,7 @@ export class SessionRuntimeCoordinator {
 				newText,
 				environment: entry.environment,
 				wslDistro: entry.wslDistro,
+				entryId,
 			});
 			// 写文件期间若被重新激活，磁盘已改但内存是旧树——拒绝让调用方感知竞态。
 			this.requireStoppedForFileMutation(sessionId);

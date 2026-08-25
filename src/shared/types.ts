@@ -23,4 +23,6 @@ export * from "./types/fetchedModel";
 export * from "./types/trajectory";
 export * from "./types/dshPlugin";
 export * from "./types/providerMigration";
+export * from "./types/providerUsage";
 export * from "./types/pasteFile";
+export * from "./types/mcp";

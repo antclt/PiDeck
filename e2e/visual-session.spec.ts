@@ -8,7 +8,7 @@ import { join } from "node:path";
  * 供人工审查。输出 test-results/visual/。
  *
  * 覆盖：流式输出中（含停止按钮）、完整对话 + composer 状态栏
- * （模型/thinking/compact chip）、排队条、模型选择器、thinking 选择器。
+ * （模型/thinking、上下文圆环）、排队条、模型选择器、thinking 选择器。
  */
 
 const OUT_DIR = join(__dirname, "..", "test-results", "visual");
@@ -39,8 +39,8 @@ test("visual tour: live session states", async ({ window }) => {
 	await expect(timeline).toContainText("SLOW 视觉巡检」流式渲染验证完成", { timeout: 20_000 });
 	// 发送按钮已从 composer-bar-btn.send 迁到 send-behavior-primary（ComposerPanels）
 	await expect(window.locator(".send-behavior-primary")).toBeVisible({ timeout: 10_000 });
-	// compact chip 应出现（mock 占比 45%）
-	await expect(window.locator(".composer-bar-btn.compact")).toBeVisible({ timeout: 10_000 });
+	// 上下文圆环常驻（mock 占比 45%）；压缩入口在面板内
+	await expect(window.getByTestId("session-context-meter")).toBeVisible({ timeout: 10_000 });
 	await shot(window, "31-session-idle-composer");
 
 	// 3. 排队条：慢速流中再发一条

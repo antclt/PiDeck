@@ -327,3 +327,12 @@ test("moveTo persists positions converted back to the normal layout", async () =
 	approx(saved.x + 96, feetX, "persisted feet x");
 	approx(saved.y + 208, feetY, "persisted feet y");
 });
+
+test("pet window disables background throttling so sprite rAF keeps running while unfocused", async () => {
+	const { PetWindow, MockBrowserWindow } = loadModule(x11Env);
+	const petWindow = new PetWindow();
+	await petWindow.create(0.3, "medium");
+	// 宠物永远浮在桌面、几乎不获焦。Electron 默认 backgroundThrottling=true
+	// 会把后台 rAF 掐到约 1fps 甚至停在第一帧，表现为 idle/running 都静止。
+	assert.equal(MockBrowserWindow.last.options.webPreferences.backgroundThrottling, false);
+});

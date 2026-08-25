@@ -124,6 +124,22 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 		ctx.ui.notify(`PiDeck 目标已阻塞：${reason}`, "warning");
 	}
 
+	/**
+	 * 派发一轮目标续跑：agent_end 自动续轮与 /goal resume 手动恢复共用。
+	 * deliverAs "followUp"（流式中排队）/ triggerTurn（空闲时直接起一轮）
+	 * 让「恢复」真正驱动一轮模型，而不是只把 phase 标回 active 后空转。
+	 */
+	function kickOffContinuation(): void {
+		pi.sendMessage(
+			{
+				customType: "pi-deck-goal-continue",
+				content: `Continue the current goal.\nObjective: ${state.objective}\nRounds used: ${state.roundsStarted}/${state.maxGoalRounds}\nIf done, write GOAL_COMPLETE. If blocked, write GOAL_BLOCKED: <reason>.`,
+				display: false,
+			},
+			{ triggerTurn: true, deliverAs: "followUp" },
+		);
+	}
+
 	pi.registerCommand("goal", {
 		description: "切换 PiDeck 目标模式（围绕一个目标自动连续推进）",
 		handler: async (args, ctx) => {
@@ -153,6 +169,8 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 					return;
 				}
 				setActive(ctx);
+				// 恢复必须真正触发一轮续跑：否则 agent 空闲时 goal 只标 active、不干活。
+				kickOffContinuation();
 				return;
 			}
 			if (raw) {
@@ -249,6 +267,15 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 			persistState();
 			return;
 		}
+		// 桌面/用户主动中止（Stop 会话）或出错：不推进轮次、不自动续轮。
+		// 若不检查 stopReason，agent_end 会把被中止的那轮当普通续轮再派发 followUp，
+		// 刚被 Stop 的 agent 立刻又跑起来，表现为「点了停止会话却停不下来」。
+		// 中止后保留 active/paused 原阶段，用户可再点恢复从当前进度继续。
+		if (lastAssistant.stopReason === "aborted" || lastAssistant.stopReason === "error") {
+			updateWidget(ctx);
+			persistState();
+			return;
+		}
 		const text = getTextContent(lastAssistant);
 		const terminal = text ? detectTerminal(text) : undefined;
 		if (terminal?.phase === "complete") {
@@ -270,14 +297,7 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 
 		// 同一会话自动续轮：不把续轮指令显示在时间线，避免刷屏。
 		continuing = true;
-		pi.sendMessage(
-			{
-				customType: "pi-deck-goal-continue",
-				content: `Continue the current goal.\nObjective: ${state.objective}\nRounds used: ${state.roundsStarted}/${state.maxGoalRounds}\nIf done, write GOAL_COMPLETE. If blocked, write GOAL_BLOCKED: <reason>.`,
-				display: false,
-			},
-			{ triggerTurn: true, deliverAs: "followUp" },
-		);
+		kickOffContinuation();
 	});
 
 	pi.on("session_start", async (_event, ctx) => {

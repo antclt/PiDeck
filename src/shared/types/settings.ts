@@ -38,6 +38,9 @@ export type WorkspaceContentOpenMode = "split" | "maximize";
 /** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 export type SessionTabOpenMode = "preview" | "permanent";
 export type AppFontSizeMode = "compact" | "default" | "medium" | "large" | "xlarge";
+
+/** 宠物缩放默认值：0.3 = 设置滑块 30%。出厂 100% 太大，新用户/缺省回退都用此值。 */
+export const DEFAULT_PET_SCALE = 0.3;
 export type AppFontBaseMode = "system" | "sans" | "serif" | "custom";
 export type AppFontMonoMode = "system-mono" | "custom";
 /** 主窗口启动尺寸预设：last=上次关闭时的窗口大小（读不到时顺延默认）；fullscreen 占满屏幕，maximized 最大化，其余为固定窗口 */
@@ -219,7 +222,7 @@ export type AppSettings = {
 	petId: string;
 	/** 宠物窗是否始终置顶，默认 true */
 	petAlwaysOnTop: boolean;
-	/** 宠物缩放比例 0.3-2.0，默认 1.0，控制窗口与 sprite 渲染尺寸 */
+	/** 宠物缩放比例 0.3-2.0，默认 DEFAULT_PET_SCALE(0.3=30%)，控制窗口与 sprite 渲染尺寸 */
 	petScale: number;
 	/** 是否启用 idle 巡游（无任务时沿屏幕底部左右走动），默认 true；
 	 *  巡游为低优先级 UI 行为，running/failed/review/逗弄 时自动让位。 */

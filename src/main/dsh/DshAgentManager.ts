@@ -811,6 +811,10 @@ export class DshAgentManager implements SessionAgentGateway {
 		// DSH 的压缩走 host 侧 /compact 命令注册表（dsh-command-compact），
 		// wire 上没有显式 compact RPC（计划 D11）：以 queue 提示词触发，随后返回当前 runtime 状态。
 		const runtime = this.runtime(agentId);
+		// 与 pi 一致：压缩中拒绝重复请求，避免第二次 /compact 拼进命令回合。
+		if (runtime.isCompacting) {
+			throw new Error("already compacting");
+		}
 		const client = this.requireClient();
 		// 与 sendPrompt 同一串行化约束：上一回合（含命令回合）idle 后才发 /compact，
 		// 避免压缩指令被 host 拼进运行中回合（D4）。

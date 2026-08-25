@@ -168,8 +168,8 @@ test("renderer: message flush also tries live→History release", () => {
   const msgIdx = atoms.indexOf('event.sourceChannel === "agents:message"');
   assert.ok(msgIdx >= 0);
   // 切片窗口：windowStartFilePos（2026-11 数值游标）+ cardCount（2026-12 卡片偏移修正）
-  // 解析均位于同一块内，窗口相应放大
-  const msgBlock = atoms.slice(msgIdx, msgIdx + 3600);
+  // + 迟到快照守卫（2026-11 编辑/删除回归）解析均位于同一块内，窗口相应放大
+  const msgBlock = atoms.slice(msgIdx, msgIdx + 4600);
   assert.match(msgBlock, /tryReleaseLiveThinkingAfterHistory/);
 });
 

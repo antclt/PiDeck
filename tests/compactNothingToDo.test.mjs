@@ -30,21 +30,21 @@ test("AgentManager.compact throws when RPC returns success:false", () => {
 test("composer maps compact errors via debugDetails-first friendly helper", () => {
   assert.match(composer, /function friendlyCompactError/);
   assert.match(composer, /debugDetails/);
-  assert.match(composer, /nothing to compact\|already compacted/i);
+  assert.match(composer, /classifyCompactError/);
   assert.match(composer, /app\.compactNothingToDo/);
   assert.match(composer, /app\.compactSessionTooSmall/);
-  // 压缩被取消：静默（返回 null，不弹 toast）——取消响应可能延迟到正常对话后
+  assert.match(composer, /app\.compactInProgress/);
+  // 压缩被取消：静默（compactNotice silent → null）——取消响应可能延迟到正常对话后
   // 返回，表现为「没点压缩却弹提示」（2026-08 用户反馈）
-  assert.match(composer, /compaction cancelled\|cancelled/i);
+  assert.match(composer, /case "silent":/);
   assert.match(composer, /if \(message\) showNotice\(message, 6000\)/);
   assert.doesNotMatch(composer, /app\.compactCancelled/);
-  // chip 与 /compact 共用同一调用模式：null（静默）不弹 toast
+  // 圆环按钮与 /compact 共用 runManualCompact：错误映射只出现一次
   assert.match(composer, /const message = friendlyCompactError\(error\)/);
   assert.equal(
     (composer.match(/const message = friendlyCompactError\(error\)/g) || []).length,
-    2,
+    1,
   );
-  assert.match(composer, /if \(message\) showNotice\(message, 6000\)/);
 });
 
 test("mock pi supports NOTHING compact failure path", () => {

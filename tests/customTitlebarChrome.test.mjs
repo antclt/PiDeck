@@ -47,6 +47,24 @@ test("window controls are compact and match drag-layer inset", () => {
   );
 });
 
+test("pin button syncs initial always-on-top state from main process", () => {
+  // 回归：置顶按钮态曾硬编码 false，窗口实际置顶时按钮却显示「关」，
+  // 需点一次开关才恢复正常。现在必须新增 isWindowAlwaysOnTop 通道并向主进程读真实状态。
+  assert.match(ipc, /appWindowIsAlwaysOnTop:/);
+  assert.match(systemIpc, /appWindowIsAlwaysOnTop/);
+  assert.match(preload, /isWindowAlwaysOnTop:/);
+  assert.match(header, /isWindowAlwaysOnTop: \(\) => Promise<boolean>/);
+  assert.match(header, /isWindowAlwaysOnTop\(\)\.then\(\(value\) => \{/);
+  assert.match(header, /setWindowAlwaysOnTop\(value\)/);
+});
+
+test("focusMainWindow preserves the user's pin on Windows", () => {
+  const mainIndex = readFileSync("src/main/index.ts", "utf8");
+  // 临时置顶 hack 不能无条件 true/false：会把用户已置顶的窗口取消置顶
+  assert.match(mainIndex, /const wasAlwaysOnTop = mainWindow\.isAlwaysOnTop\(\)/);
+  assert.match(mainIndex, /if \(!wasAlwaysOnTop\)/);
+});
+
 test("maximize button tracks window state with restore icon", () => {
   assert.match(header, /function RestoreIcon/);
   assert.match(header, /maximized \? <RestoreIcon/);

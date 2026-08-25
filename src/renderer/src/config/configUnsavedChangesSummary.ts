@@ -42,6 +42,7 @@ const CATALOG: readonly CatalogEntry[] = [
 	{ match: (key) => key === "config:auth", tabKey: "config.backend.pi", itemKeyFor: () => "config.nav.auth" },
 	{ match: (key) => key === "config:settings", tabKey: "config.backend.pi", itemKeyFor: () => "config.nav.settings" },
 	{ match: (key) => key === "config:trust", tabKey: "config.backend.pi", itemKeyFor: () => "config.nav.trust" },
+	{ match: (key) => key === "config:mcp", tabKey: "config.backend.pi", itemKeyFor: () => "config.nav.mcp" },
 	{ match: (key) => key === "config:raw", tabKey: "config.backend.pi", itemKeyFor: () => "config.nav.raw" },
 	{ match: (key) => key === "security", tabKey: "config.backend.pi", itemKeyFor: () => "config.nav.security" },
 	{ match: (key) => key === "extensions", tabKey: "config.backend.pi", itemKeyFor: () => "config.nav.extensions" },

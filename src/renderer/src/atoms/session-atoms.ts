@@ -566,7 +566,14 @@ export const cacheSessionMessagesAtom = atom(
     // - 匿名会话（无 filePath）runtime 消息只从 runtime 事件进 cache，disk 读取永远返回 []
     // - 切走→切回时 disk 空响应会因 revision 相等直接覆盖掉 runtime 已写入的消息，
     //   导致切回显示空引导页
+    //
+    // force 必须豁免：编辑/删除/重发后的 reloadTimelineFromDisk 恒传 expectedRevision: 0
+    // （调用方不追踪 revision），而运行过的会话 disk 缓存继承 runtime 递增的 revision，
+    // 首次 mutation 后 current.source 已切到 disk 但 revision 不清零——若不豁免，
+    // 之后的每一次编辑/删除都会被守卫吞掉：文件已改、时间线永不刷新（「删了没反应」）。
+    // force 语义即「disk 是权威快照」，必须无条件生效。
     if (
+      !input.force &&
       input.expectedRevision !== undefined &&
       input.source === "disk" &&
       current?.source === "disk" &&
@@ -1341,6 +1348,17 @@ export const applySessionRuntimeEventAtom = atom(
       (event.sourceChannel === "agents:message" || event.sourceChannel === "sessions:messages") &&
       payload
     ) {
+      // 迟到快照守卫（2026-11）：stop 后主进程先发 detach（agentId 清除），节流 50ms 的
+      // 最终 messages flush 可能晚于编辑/删除后的 force disk 重载到达，覆盖刚写回的缓存。
+      // 同代际 + 绑定已消失 + terminal 才拦；新代际事件不受影响（detach 清 agentId 后
+      // bindingChanged 会被重算成 true，不能拿它判定）。
+      if (
+        event.runtimeGeneration === currentRuntime.runtimeGeneration &&
+        !currentRuntime.agentId &&
+        (currentRuntime.status === "detached" || currentRuntime.status === "closed")
+      ) {
+        return;
+      }
       const messages = payload.messages;
       // 增量 flush 协议（2026-08 渲染卡顿优化）：主进程节流 flush 只发尾部增量
       // （upsertFrom + totalLength），终态 immediate flush 永远全量。

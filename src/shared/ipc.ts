@@ -319,6 +319,8 @@ export const ipcChannels = {
 	/** 主进程 → 渲染：最大化状态变化（含双击标题栏等非按钮路径） */
 	appWindowMaximizedChanged: "app:window-maximized-changed",
 	appWindowToggleAlwaysOnTop: "app:window-toggle-always-on-top",
+	/** 读取主窗口当前是否置顶（渲染层初始化置顶按钮态用，避免硬编码 false） */
+	appWindowIsAlwaysOnTop: "app:window-is-always-on-top",
 	appWindowClose: "app:window-close",
 	agentsRuntimeState: "agents:runtime-state",
 	agentsState: "agents:state",
@@ -359,6 +361,12 @@ export const ipcChannels = {
 	configGetAuth: "config:get-auth",
 	configGetSettings: "config:get-settings",
 	configGetTrust: "config:get-trust",
+	/** 读取合并后的 MCP 服务列表 + Pi 可写层（pi-mcp-adapter mcp.json）。 */
+	configGetMcp: "config:get-mcp",
+	/** 整份写入 ~/.pi/agent/mcp.json（可视化保存）。 */
+	configSaveMcp: "config:save-mcp",
+	/** 轻量探测：stdio 命令是否在 PATH、HTTP URL 是否可达；不 spawn MCP SDK。 */
+	configProbeMcp: "config:probe-mcp",
 	/** 只读返回 pi 全局配置目录（渲染层展示源文件实际编辑位置）。 */
 	configGetDir: "config:get-dir",
 	configSaveModels: "config:save-models",
@@ -371,6 +379,8 @@ export const ipcChannels = {
 	configFetchModels: "config:fetch-models",
 	/** 快速测试 provider 连接：发送一条最小请求验证 baseUrl/apiKey/模型 是否正常 */
 	configTestProvider: "config:test-provider",
+	/** 查询 provider 用量/余额（如 opencode-go /v1/usage） */
+	configFetchUsage: "config:fetch-usage",
 
 	// ===== 安全管理（SecurityStore + pi-deck-security-gate 扩展） =====
 	/** 拉取完整安全配置（等级/默认等级/会话覆盖） */

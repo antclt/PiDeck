@@ -50,6 +50,22 @@ function loadConfigManager() {
 			}
 			if (id === "../../shared/i18n/mainProcessCopy") return { mainProcessT: () => "" };
 			if (id === "./parseProviderModels") return { parseProviderModelsResponse: () => [] };
+			if (id === "./mcpConfig") {
+				return {
+					loadMcpConfigSnapshot: () => null,
+					mcpDocsUrl: "",
+					probeMcpServer: async () => ({ ok: false }),
+					validateMcpConfigFile: () => undefined,
+				};
+			}
+			if (id === "./providerUsageProbe") {
+				return {
+					candidateApplies: () => false,
+					parseUsageResponseBody: () => null,
+					USAGE_PROBE_CANDIDATES: [],
+					usageProbeUrls: () => [],
+				};
+			}
 			return require(id);
 		},
 	};

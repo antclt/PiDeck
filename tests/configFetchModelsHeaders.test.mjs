@@ -73,6 +73,22 @@ function compile() {
 						: [],
 			};
 		}
+		if (specifier === "./mcpConfig") {
+			return {
+				loadMcpConfigSnapshot: () => null,
+				mcpDocsUrl: "",
+				probeMcpServer: async () => ({ ok: false }),
+				validateMcpConfigFile: () => undefined,
+			};
+		}
+		if (specifier === "./providerUsageProbe") {
+			return {
+				candidateApplies: () => false,
+				parseUsageResponseBody: () => null,
+				USAGE_PROBE_CANDIDATES: [],
+				usageProbeUrls: () => [],
+			};
+		}
 		// 其余（shared 类型、i18n、parseProviderModels 等）在 fetchProviderModels
 		// 路径里要么已被擦除、要么被上面的桩/传入的 translate 覆盖。
 		return {};
