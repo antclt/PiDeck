@@ -5,6 +5,21 @@
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
+## v0.7.3
+
+发布时间：2026-08-26
+
+- 🚀 **模型能力自适应与思考强度链路**
+- 🚀 **模型目录手动刷新**
+- 🚀 **用量查询扩展**
+- 🚀 **会话重启与重新加载**
+- 🚀 **DSH 会话头 Agent 模式胶囊**
+- 🚀 **内置扩展 pi-deck-retry-no-body**
+- ✨ **会话历史运行时操作遮罩**
+- ✨ **Tab 栏操作 loading 状态**
+- ✨ **模型能力解释卡移除**
+- ✨ **设置页分组调整**
+
 ## v0.7.2
 
 发布时间：2026-08-25
