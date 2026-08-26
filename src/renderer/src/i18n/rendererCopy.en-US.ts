@@ -2844,6 +2844,7 @@ export const enUS: Record<TranslationKey, string> = {
   "agent.loading.responding1": "Thinking",
   "agent.loading.responding2": "Drafting",
   "agent.loading.responding3": "Writing reply",
+  "agent.loading.compacting": "Compacting context",
   "agent.loading.waiting": "Processing",
   "agent.loading.aria": "Agent is working",
   "message.editReloadPrompt": "The edit will be written to the session record and take effect immediately. Continue?",

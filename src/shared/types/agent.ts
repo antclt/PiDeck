@@ -83,6 +83,12 @@ export type AgentRuntimeState = {
 		roundsStarted: number;
 	};
 	isStreaming?: boolean;
+	/**
+	 * pi 的逻辑模型回合状态（agent_start → true，agent_end → false）。
+	 * false 表示本轮回答已结束；runtime 仍可能因为上下文压缩、自动重试收尾或
+	 * 队列检查保持 busy。undefined 兼容不提供该边界的旧 pi / DSH 快照。
+	 */
+	isTurnActive?: boolean;
 	isCompacting?: boolean;
 	/** 是否正在执行工具调用（read/write/bash 等） */
 	isExecutingTool?: boolean;

@@ -35,6 +35,7 @@ import {
 import { writeClipboardImage } from "../../utils/clipboard";
 import { useTimelineSelection } from "../../hooks/useTimelineSelection";
 import { SelectionToolbar } from "./timeline/SelectionToolbar";
+import { deriveTimelineRunActivity } from "./timeline/timelineRunActivity";
 import {
   canLoadSessionTimelineMore,
   deriveSessionSurfaceRuntime,
@@ -215,7 +216,14 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   // 状态条只订 streaming 位（boolean），不订正文 atom，避免 50ms 重渲整条 timeline。
   const liveTextStreaming = useAtomValue(liveTextStreamingBySessionAtom(sessionId ?? ""));
   const liveThinkingStreaming = useAtomValue(liveThinkingStreamingBySessionAtom(sessionId ?? ""));
-  const isAgentBusy = modernSurfaceState.isBusy;
+  const sessionRuntimeBusy = modernSurfaceState.isBusy;
+  // Pi can compact immediately after agent_end. Keep the session busy during that
+  // file rewrite, but finalize the just-completed model turn in the timeline.
+  const { isCompacting, isRuntimeBusy, isTurnRunning } = deriveTimelineRunActivity({
+    isRuntimeBusy: sessionRuntimeBusy,
+    isCompacting: activeRuntimeState?.isCompacting,
+    isTurnActive: activeRuntimeState?.isTurnActive,
+  });
   const cancellingUi = false;
   const loadMoreMessages = controller.loadMoreMessages;
   // ── 滚动接近顶部自动加载历史（2026-11 轮次模型）──
@@ -269,7 +277,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     // 否则切会话后新旧 id 序列会被拿去比较，可能误播顶部入场动画。
     if (lastSessionIdRef.current === sessionId) return;
     lastSessionIdRef.current = sessionId;
-    wasAgentBusyRef.current = isAgentBusy;
+    wasRuntimeBusyRef.current = isRuntimeBusy;
     seenTailMessageIdRef.current = undefined;
     setFreshMessageIds(new Set());
     for (const timer of freshTimersRef.current.values()) window.clearTimeout(timer);
@@ -375,30 +383,29 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     let groups: RenderMessage[];
     if (prev && isMessagePrefix(prev, next)) {
       const appended = next.slice(prev.length);
-      groups = [...state.groups, ...groupToolMessages(appended, { agentBusy: isAgentBusy })];
+      groups = [...state.groups, ...groupToolMessages(appended, { agentBusy: isTurnRunning })];
     } else if (prev && isMessageSuffix(prev, next)) {
       const prepended = next.slice(0, next.length - prev.length);
-      groups = [...groupToolMessages(prepended, { agentBusy: isAgentBusy }), ...state.groups];
+      groups = [...groupToolMessages(prepended, { agentBusy: isTurnRunning }), ...state.groups];
     } else {
-      groups = groupToolMessages(next, { agentBusy: isAgentBusy });
+      groups = groupToolMessages(next, { agentBusy: isTurnRunning });
     }
     historyGroupStateRef.current = { messages: next, groups };
-    // agentBusy 参与历史分组依赖：忙碌边沿改变时需按新分类重分组
-    // （历史前缀多为空闲态旧内容，忙碌时新追加的窗口段错误卡分类保持一致）
+    // Turn activity participates in history grouping: when context compaction
+    // starts after agent_end, the preceding assistant reply becomes final.
     return groups;
-  }, [runtimeHistoryMessages, isAgentBusy]);
-  // 注：忙碌边沿切换时历史前缀按当前（多为 idle）状态重算；
-  // 窗口段的 error 卡分类与 timeline 的 agentBusy 保持一致。
+  }, [runtimeHistoryMessages, isTurnRunning]);
+  // The window segment follows the same turn-level activity rule as history.
   const groupedWindowRuns = useMemo(
-    () => groupToolMessages(controller.messages, { agentBusy: isAgentBusy }),
-    [controller.messages, isAgentBusy],
+    () => groupToolMessages(controller.messages, { agentBusy: isTurnRunning }),
+    [controller.messages, isTurnRunning],
   );
   const renderedRuns = useMemo(() => {
     if (groupedHistoryRuns) {
       return [...groupedHistoryRuns, ...groupedWindowRuns];
     }
-    return groupToolMessages(paginatedMessages, { agentBusy: isAgentBusy });
-  }, [groupedHistoryRuns, groupedWindowRuns, paginatedMessages, isAgentBusy]);
+    return groupToolMessages(paginatedMessages, { agentBusy: isTurnRunning });
+  }, [groupedHistoryRuns, groupedWindowRuns, paginatedMessages, isTurnRunning]);
   // 阶段0补强：对未变化的 run 复用旧对象引用，历史 run 的 memo 比较退化为 O(1)
   const prevRenderedRunsRef = useRef<RenderMessage[] | undefined>(undefined);
   const reconciledRuns = useMemo(() => {
@@ -486,7 +493,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   // ── 最新轮结束后的 1.5s idle 自动收起 ──
   // 用户动鼠标/滚轮/键盘会取消；仅仍在跟底时安排。真正收起由 TurnRow 的
   // useTurnExecution 完成，收完后回调这里，把本轮起始消息拉到视口中上方。
-  const wasAgentBusyRef = useRef(isAgentBusy);
+  const wasRuntimeBusyRef = useRef(isRuntimeBusy);
 
   useEffect(() => {
     const latestRun = lastAgentRunIndex >= 0 ? displayRuns[lastAgentRunIndex] : undefined;
@@ -533,8 +540,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   }, [scrollFinalAnswerToUpperMiddle]);
 
   useEffect(() => {
-    const wasBusy = wasAgentBusyRef.current;
-    wasAgentBusyRef.current = isAgentBusy;
+    const wasBusy = wasRuntimeBusyRef.current;
+    wasRuntimeBusyRef.current = isRuntimeBusy;
 
     const clearIdle = () => {
       if (turnSettleIdleTimerRef.current !== undefined) {
@@ -546,7 +553,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
       idleActivityCleanupRef.current = undefined;
     };
 
-    if (isAgentBusy || !controller.autoScroll) {
+    if (isRuntimeBusy || !controller.autoScroll) {
       clearIdle();
       return;
     }
@@ -574,7 +581,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     }, TURN_SETTLE_IDLE_COLLAPSE_MS);
 
     return clearIdle;
-  }, [controller.autoScroll, isAgentBusy, sessionId]);
+  }, [controller.autoScroll, isRuntimeBusy, sessionId]);
   const turnWindowActive = shouldWindowTimelineTurns(
     countAgentRunItems(reconciledRuns),
     turnWindowTurns,
@@ -680,7 +687,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   const isAwaitingAssistant = Boolean(
     hasActiveConversation &&
       !cancellingUi &&
-      isAgentBusy &&
+      isTurnRunning &&
       activeMessages.at(-1)?.role !== "assistant",
   );
 
@@ -790,7 +797,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
       smooth
       // busy 只驱动 aria-busy 和结束后的 150ms instant 窗口；流式增高是否弹簧
       // 由 MessageScroller 的 resize + 28px 阈值决定，不再整段忙碌硬贴底。
-      busy={isAgentBusy || isAwaitingAssistant}
+      busy={isRuntimeBusy || isAwaitingAssistant}
       onFollowChange={controller.setAutoScrollFromScroller}
       viewportProps={{
         // 会话切换滚动位置保持：滚动时维护 per-session 锚点（rAF 合并，不触发渲染）
@@ -925,9 +932,10 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
           <div className="message-list min-w-0 w-full mx-auto transition-opacity duration-150">
             {displayRuns.map((item, index) => {
               if (item.kind === "agent-run") {
-                // Controls：忙碌中的末行 run 视为 live（isStreaming 补丁可能略滞后于正文 atom）。
+                // Only an active model turn keeps its latest run live. Context
+                // compaction happens after agent_end, so it must not fold the answer.
                 const isRunStreaming = isLatestTimelineRunBusy(
-                  isAgentBusy,
+                  isTurnRunning,
                   index,
                   displayRuns.length,
                 );
@@ -946,6 +954,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     // 始终下发 live id（按 message id 命中）；勿绑 isRunStreaming，
                     // 否则流结束而 History 未到时会提前卸思考步导致 remount dump。
                     liveThinkingId={liveThinkingId}
+                    isRuntimeBusy={isRuntimeBusy}
                     agentRunning={isRunStreaming}
                     isLatestRun={index === displayRuns.length - 1}
                     isLastAgentRun={index === lastAgentRunIndex}
@@ -976,7 +985,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     onDeleteMessage={props.onDeleteMessage}
                     onForkMessage={props.onForkMessage}
                     forking={props.forkingMessageId === message.id}
-                    agentRunning={isAgentBusy}
+                    agentRunning={isRuntimeBusy}
                     isLastUserMessage={message.id === lastUserMessageId}
                     showResendButton={resendableMessageIds.has(message.id)}
                     validCommandNames={props.validCommandNames}
@@ -1013,8 +1022,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 
             {hasActiveConversation &&
               !cancellingUi &&
-              isAgentBusy && (
+              isRuntimeBusy && (
                 <RespondingIndicator
+                  isCompacting={isCompacting}
                   isStarting={activeConversationStatus === "starting"}
                   isExecutingTool={activeRuntimeState?.isExecutingTool}
                   liveTextStreaming={liveTextStreaming}

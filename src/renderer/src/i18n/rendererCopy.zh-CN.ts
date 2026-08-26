@@ -2811,6 +2811,7 @@ export const zhCN = {
   "agent.loading.responding1": "思考中",
   "agent.loading.responding2": "组织回答",
   "agent.loading.responding3": "撰写回复",
+  "agent.loading.compacting": "正在压缩",
   "agent.loading.waiting": "正在处理",
   "agent.loading.aria": "Agent 运行中",
   "message.editReloadPrompt": "修改将写入会话记录并立即生效，确定继续？",

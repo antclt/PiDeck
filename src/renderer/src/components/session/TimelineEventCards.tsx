@@ -453,10 +453,11 @@ export const ThinkingBlock = memo(
  * 流式响应指示器（三点脉动动画 + 状态文案），在 agent 运行/流式期间显示。
  *
  * 状态优先级：
- *  1. Agent 启动中 → “正在启动 Agent”（琥珀色）
- *  2. 工具执行中 → “正在工具调用”（琥珀色）
- *  3. 有思考文本 / 流式回答中 → “正在回应”
- *  4. 过渡等待 → 单条静态文案
+ *  1. 上下文压缩中 → “正在压缩”（压缩发生在上一轮结束后）
+ *  2. Agent 启动中 → “正在启动 Agent”（琥珀色）
+ *  3. 工具执行中 → “正在工具调用”（琥珀色）
+ *  4. 有思考文本 / 流式回答中 → “正在回应”
+ *  5. 过渡等待 → 单条静态文案
  *
  * 启动状态单独展示，避免用户发消息后 Agent 尚未完成预热时看起来像“没有响应”。
  * 视觉实现：beUI ReasoningText（swap 整句淡入淡出 + ascii-line 终端指示器），
@@ -465,6 +466,7 @@ export const ThinkingBlock = memo(
 
 /** 每种状态对应的轮播短语组（i18n；waiting 单条即不轮播）。 */
 const RESPONDING_PHRASES: Record<RespondingKind, string[]> = {
+	compacting: [t("agent.loading.compacting")],
 	starting: [
 		t("agent.loading.starting1"),
 		t("agent.loading.starting2"),
@@ -484,6 +486,7 @@ const RESPONDING_PHRASES: Record<RespondingKind, string[]> = {
 };
 
 export function RespondingIndicator(props: {
+	isCompacting?: boolean;
 	isStarting?: boolean;
 	isExecutingTool?: boolean;
 	liveTextStreaming?: boolean;
@@ -491,6 +494,7 @@ export function RespondingIndicator(props: {
 }) {
 	// 判定抽到 deriveRespondingKind：pi / DSH 共用，状态条跟「此刻有没有字/工具」对齐。
 	const kind = deriveRespondingKind({
+		isCompacting: props.isCompacting,
 		isStarting: props.isStarting,
 		isExecutingTool: props.isExecutingTool,
 		liveTextStreaming: props.liveTextStreaming,
