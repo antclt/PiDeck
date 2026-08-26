@@ -45,6 +45,7 @@ import { Component, useRef, useState, useEffect, useCallback, useMemo, type Reac
 import type { PiDesktopApi } from "../../preload";
 import { AuthTab } from "./config/AuthTab";
 import { ModelsTab } from "./config/ModelsTab";
+import { removeSelectedModelIndexes } from "./config/modelBatchSelection";
 import { openDocsInSystemBrowser } from "./config/ConfigShared";
 import { RawTab } from "./config/RawTab";
 import { TrustTab } from "./config/TrustTab";
@@ -1211,6 +1212,41 @@ function ConfigModalContent(props: ConfigModalProps) {
 		});
 	};
 
+	const handleDeleteModels = (providerName: string, indexes: number[]) => {
+		const provider = modelsData.providers[providerName];
+		if (!provider) return;
+		const validIndexes = [...new Set(indexes)].filter(
+			(index) => Number.isInteger(index) && index >= 0 && index < provider.models.length,
+		);
+		if (validIndexes.length === 0) return;
+		setDeleteConfirm({
+			type: "batch",
+			title: t("common.deleteConfirm"),
+			message: t("config.deleteModelsBatchConfirm", {
+				provider: providerName,
+				count: validIndexes.length,
+			}),
+			onConfirm: () => {
+				setModelsData((current) => {
+					const currentProvider = current.providers[providerName];
+					if (!currentProvider) return current;
+					return {
+						...current,
+						providers: {
+							...current.providers,
+							[providerName]: {
+								...currentProvider,
+								models: removeSelectedModelIndexes(currentProvider.models, new Set(validIndexes)),
+							},
+						},
+					};
+				});
+				markDirty("config:models");
+				setDeleteConfirm(null);
+			},
+		});
+	};
+
 	const handleSaveModels = async (): Promise<boolean> => {
 		// 保存前按能力目录批量补全空字段（端点/用户值不覆盖；未命中留空）。
 		const { providers: filledProviders, filledCount } = await collectModelSpecPatches(
@@ -2090,6 +2126,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 							onUpdateModel={handleUpdateModel}
 							onUpdateModelThinkingLevel={handleUpdateModelThinkingLevel}
 							onDeleteModel={handleDeleteModel}
+							onDeleteModels={handleDeleteModels}
 							onResetModel={handleResetModelToAdaptive}
 							resettingModelKey={resettingModelKey}
 							onFetchModels={handleFetchModels}

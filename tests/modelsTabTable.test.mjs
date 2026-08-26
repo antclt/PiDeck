@@ -9,7 +9,7 @@ test("ModelsTab renders model list as shadcn Table (header + body)", () => {
   assert.match(source, /<Table>/);
   assert.match(source, /<TableHeader>/);
   assert.match(source, /<TableBody>/);
-  // 表头 7 列：id/name/context/maxTokens/thinkingLevels/capabilities/actions（能力列在操作列前）
+  // 常规表头 7 列：id/name/context/maxTokens/thinkingLevels/capabilities/actions；批量模式在最前追加选择列。
   assert.match(source, /<TableHead className="w-48 min-w-0">\{t\("config\.modelId"\)\}/);
   assert.match(source, /<TableHead className="w-24">\{t\("config\.thinkingLevels"\)\}/);
   assert.match(source, /<TableHead className="w-24">\{t\("config\.capabilities"\)\}/);
@@ -26,8 +26,8 @@ test("ModelsTab renders model list as shadcn Table (header + body)", () => {
 });
 
 test("model row uses TableRow/TableCell with edit controls", () => {
-  assert.match(source, /<TableRow key=\{`\$\{name\}-\$\{i\}`\} className="align-middle">/);
-  // 7 个数据单元格 + 空态行 = 8
+  assert.match(source, /<TableRow[\s\S]*?key=\{`\$\{name\}-\$\{i\}`\}[\s\S]*?data-state=\{isModelBatchMode/);
+  // 7 个常规数据单元格；批量模式额外增加一个选择列。
   const cellCount = (source.match(/<TableCell/g) ?? []).length;
   assert.ok(cellCount >= 8, `expected >= 8 TableCells, got ${cellCount}`);
   assert.match(source, /<Input[\s\S]*?placeholder="model-id"[\s\S]*?className="h-8 min-w-0"/);
@@ -35,6 +35,19 @@ test("model row uses TableRow/TableCell with edit controls", () => {
   assert.match(source, /placeholder="128000"[\s\S]*?className="h-8 min-w-0"/);
   // 删除按钮在操作列
   assert.match(source, /onDeleteModel\(name, i\)/);
+});
+
+test("model batch mode uses a tri-state select column and one confirmation callback", () => {
+  assert.match(source, /onDeleteModels: \(providerName: string, indexes: number\[\]\) => void;/);
+  assert.match(source, /t\("common\.deleteBatch"\)/);
+  assert.match(source, /t\("common\.deleteSelected"\)/);
+  assert.match(source, /t\("config\.modelBatchSelected"/);
+  assert.match(source, /t\("config\.selectAllModels"\)/);
+  assert.match(source, /t\("config\.selectModel"/);
+  assert.match(source, /toggleAllModelIndexes/);
+  assert.match(source, /checked=\{modelSelectionState === "checked"[\s\S]*?"indeterminate"/);
+  assert.match(source, /onDeleteModels\(name, \[\.\.\.selectedModelIndexes\]\)/);
+  assert.match(source, /clearModelBatch\(\);/);
 });
 
 test("adaptive auto-fill writes fields directly, no capability card", () => {
@@ -111,7 +124,7 @@ test("popover z-index follows project variable so it stays above ConfigModal Dia
 
 test("empty state is a colSpan row inside TableBody", () => {
   assert.match(source, /provider\.models\.length === 0 && \(/);
-  assert.match(source, /<TableRow className="hover:bg-transparent">[\s\S]*?colSpan=\{8\}[\s\S]*?config\.emptyModels/);
+  assert.match(source, /<TableRow className="hover:bg-transparent">[\s\S]*?colSpan=\{isModelBatchMode \? 8 : 7\}[\s\S]*?config\.emptyModels/);
 });
 
 test("dead CSS rules removed, kept rules intact", () => {
