@@ -1878,7 +1878,8 @@ export function useSessionComposerController(
       unknown: sendState.status === "unknown",
       unknownError: sendState.error,
       acknowledgeUnknown: acknowledgeUnknownDelivery,
-      canSend: hasContent && !isStarting && !generatingImage,
+      // DSH 只在 host 明确报告 routable=false 时锁住发送；undefined 代表尚未确认或目录加载失败。
+      canSend: hasContent && !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
       generatingImage,
     },
     pickers: {

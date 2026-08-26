@@ -54,10 +54,11 @@ test("RespondingIndicator 使用 beUI ReasoningText（swap）轮播状态短语"
 		cardsSource.indexOf("\nexport ", fnStart + 10) || undefined,
 	);
 	assert.ok(fn, "RespondingIndicator must exist");
-	// 四种状态各有 i18n 短语组（waiting 单条 = 不轮播）
+	// 五种状态各有 i18n 短语组（compacting/waiting 单条 = 不轮播）
 	assert.match(phrases, /agent\.loading\.starting1/);
 	assert.match(phrases, /agent\.loading\.executing1/);
 	assert.match(phrases, /agent\.loading\.responding1/);
+	assert.match(phrases, /agent\.loading\.compacting/);
 	assert.match(phrases, /agent\.loading\.waiting/);
 	// 组件使用 beUI ReasoningText + swap 变体；状态切换 key 重建从第一条重新轮播
 	assert.match(fn, /ReasoningText/);
@@ -70,7 +71,7 @@ test("RespondingIndicator 使用 beUI ReasoningText（swap）轮播状态短语"
 });
 
 test("RespondingIndicator 轮播短语文案中英同步", () => {
-	for (const suffix of ["starting1", "starting2", "starting3", "executing1", "executing2", "executing3", "responding1", "responding2", "responding3", "waiting"]) {
+	for (const suffix of ["starting1", "starting2", "starting3", "executing1", "executing2", "executing3", "responding1", "responding2", "responding3", "compacting", "waiting"]) {
 		const key = `agent.loading.${suffix}`;
 		assert.match(zhCN, new RegExp(`"${key}":`));
 		assert.match(enUS, new RegExp(`"${key}":`));

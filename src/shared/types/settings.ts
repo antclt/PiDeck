@@ -286,6 +286,15 @@ export type AppSettings = {
 
 	// ── 侧栏 UI 状态 ──
 	/**
+	 * 左侧边栏的展开宽度（px）。可选以兼容旧 settings.json；渲染层仍以 localStorage
+	 * 作首屏缓存，应用设置作为跨 renderer origin 的可靠恢复来源。
+	 */
+	sidebarWidth?: number;
+	/**
+	 * 右侧工作区抽屉的展开宽度（px）。可选以兼容旧 settings.json，取值由渲染层 clamp。
+	 */
+	drawerWidth?: number;
+	/**
 	 * 左侧边栏处于展开状态的项目 id 列表（含 builtin-chat）。
 	 * 写入 settings.json，避免 dev 模式强杀进程时 localStorage 来不及落盘而丢失。
 	 * 缺省时由渲染层按「仅展开 chat」处理。

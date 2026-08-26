@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePersistedPanelWidth } from "./usePersistedPanelWidth";
 import type {
   BranchDiffResult,
   CommitDetail,
@@ -104,6 +105,10 @@ export type WorkspacePanelOptions = {
   editors?: WorkspaceExternalEditorAdapter;
   storage?: Pick<Storage, "getItem" | "setItem">;
   drawerStoragePrefix?: string;
+  /** durable settings 读取器；localStorage 只作为首屏缓存/旧版本迁移来源。 */
+  loadPersistedWidth?: () => Promise<unknown>;
+  /** durable settings 写入器；失败不应影响拖拽布局。 */
+  persistWidth?: (width: number) => void | Promise<unknown>;
 };
 
 function readDrawerState(storage: WorkspacePanelOptions["storage"], key: string) {
@@ -145,6 +150,12 @@ export const DRAWER_WIDTH_MAX = 560;
 /** 抽屉宽度是全局布局偏好（与项目无关），不按项目拆分存储键。 */
 export const DRAWER_WIDTH_STORAGE_KEY = "pid:drawer-width";
 
+/** 将外部设置中的抽屉宽度规范化到面板可拖拽范围；非法值返回 null。 */
+export function parseDrawerWidth(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(value)));
+}
+
 /** 读取持久化抽屉宽度：无存储/损坏/越界一律回退默认值，并 clamp 到可调范围。 */
 export function readDrawerWidth(storage: WorkspacePanelOptions["storage"]): number {
   if (!storage) return DEFAULT_DRAWER_WIDTH;
@@ -153,7 +164,7 @@ export function readDrawerWidth(storage: WorkspacePanelOptions["storage"]): numb
     if (raw === null) return DEFAULT_DRAWER_WIDTH;
     const width = Number(raw);
     if (!Number.isFinite(width)) return DEFAULT_DRAWER_WIDTH;
-    return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(width)));
+    return parseDrawerWidth(width) ?? DEFAULT_DRAWER_WIDTH;
   } catch {
     return DEFAULT_DRAWER_WIDTH;
   }
@@ -196,13 +207,21 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 
   const [drawer, setDrawer] = useState<WorkspaceDrawerPanel | null>(null);
   const [drawerCollapsed, setDrawerCollapsed] = useState(false);
-  // 抽屉宽度：全局布局偏好（与项目无关），初始值从 localStorage 恢复并 clamp 到可调范围。
+  // 抽屉宽度：全局布局偏好（与项目无关），先从 localStorage 恢复并 clamp，
+  // 再由应用设置异步校准，解决开发 renderer origin 变化导致的缓存丢失。
   // 写入方：AppShell onLayoutChanged 经 shouldCommitPanelPixels 过滤——拖拽、缩放后的真实像素。
-  // 折叠 0 与 expand()→minSize 的瞬时值不写，避免与 resize(保存宽) 互顶闪动。
+  // 折叠 0 与 expand()→minSize 的瞬时值不写，避免与 resize(保存宽)互顶闪动。
   const [drawerWidth, setDrawerWidth] = useState(() => readDrawerWidth(storageRef.current));
   useEffect(() => {
     writeDrawerWidth(storageRef.current, drawerWidth);
   }, [drawerWidth]);
+  usePersistedPanelWidth({
+    width: drawerWidth,
+    setWidth: setDrawerWidth,
+    normalize: parseDrawerWidth,
+    loadPersistedWidth: options.loadPersistedWidth,
+    persistWidth: options.persistWidth,
+  });
   const [drawerPinnedByProject, setDrawerPinnedByProject] = useState<Record<string, WorkspaceDrawerPanel>>({});
   const drawerRef = useRef<WorkspaceDrawerPanel | null>(null);
   const drawerPinnedByProjectRef = useRef<Record<string, WorkspaceDrawerPanel>>({});

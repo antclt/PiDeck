@@ -342,6 +342,36 @@ export function App() {
   // 历史命令：按 agent 隔离，agent 关闭即清除（不持久化）
   const promptHistoryRef = useRef<Record<string, string[]>>({});
 
+  // 面板宽度的 localStorage 只按 renderer origin 隔离；开发端口变化时会读不到旧值。
+  // 复用一次 settings 请求作为 durable fallback，避免左右面板各自再发一遍 get IPC。
+  const layoutSettingsRequestRef = useRef<Promise<AppSettings> | null>(null);
+  const getLayoutSettings = useCallback(() => {
+    const cached = layoutSettingsRequestRef.current;
+    if (cached) return cached;
+    const request = api.settings.get();
+    layoutSettingsRequestRef.current = request;
+    void request.catch(() => {
+      if (layoutSettingsRequestRef.current === request) layoutSettingsRequestRef.current = null;
+    });
+    return request;
+  }, []);
+  const loadSidebarWidth = useCallback(
+    async () => (await getLayoutSettings()).sidebarWidth,
+    [getLayoutSettings],
+  );
+  const loadDrawerWidth = useCallback(
+    async () => (await getLayoutSettings()).drawerWidth,
+    [getLayoutSettings],
+  );
+  const persistSidebarWidth = useCallback(
+    (width: number) => api.settings.update({ sidebarWidth: width }),
+    [],
+  );
+  const persistDrawerWidth = useCallback(
+    (width: number) => api.settings.update({ drawerWidth: width }),
+    [],
+  );
+
   // Drawer state delegated to useWorkspacePanels.
   // 外部编辑器适配器：将 desktopApi 包装为 WorkspaceExternalEditorAdapter，
   // 供 useWorkspacePanels 的 loadExternalEditors / openProjectInExternalEditor 使用。
@@ -349,7 +379,12 @@ export function App() {
     list: () => api.editors.list(),
     openProject: (editor, projectPath) => api.editors.openProject(editor, projectPath),
   }), []);
-  const workspace = useWorkspacePanels({ projectId: activeProjectId, editors: editorsAdapter });
+  const workspace = useWorkspacePanels({
+    projectId: activeProjectId,
+    editors: editorsAdapter,
+    loadPersistedWidth: loadDrawerWidth,
+    persistWidth: persistDrawerWidth,
+  });
   const drawer = workspace.drawer;
   const drawerCollapsed = workspace.drawerCollapsed;
   // 右侧栏总开关：已打开则关闭，否则打开 files（默认关闭，手动打开）
@@ -730,6 +765,9 @@ export function App() {
     setTerminalOpenForOwner,
     setTerminalCollapsedForOwner,
     setTerminalHeight,
+    setTerminalOpenByOwnerKey,
+    setTerminalCollapsedByOwnerKey,
+    terminalStatesByOwner,
     prune: pruneTerminalDockState,
   } = useTerminalDock(terminalOwner);
   // 终端 IPC 目标：
@@ -968,10 +1006,20 @@ export function App() {
   // Runtime editor text is applied by useSessionComposerController, which owns the draft guard.
 
   // Layout calculation delegated to useSessionLayout (refs + ResizeObserver + math).
+  // 布局的 terminalRequestedHeight 只看「是否有任一 owner 的终端展开」：分屏下非聚焦栏
+  // 的 dock 也按各自 owner 持续显示，不能随聚焦会话的 open 状态把全局行高打成 0
+  // （否则非聚焦栏的终端面板 defaultSize 变成 0）。
+  const anyTerminalDockOpen = useMemo(
+    () =>
+      Object.values(terminalStatesByOwner).some((state) => state.open),
+    [terminalStatesByOwner],
+  );
   const sessionLayout = useSessionLayout({
     terminalRequestedHeight: terminalHeight,
-    terminalOpen,
-    terminalClosing: terminalDockClosing,
+    terminalOpen: anyTerminalDockOpen,
+    // 关闭信号不再让布局行高归零：分屏下其它栏的 dock 仍需要高度；关闭动画期间
+    // 该栏面板已随 open=false 立即卸载，行高保留到 180ms 动画结束不影响布局。
+    terminalClosing: false,
     terminalCollapsed,
     queuedPromptCount: activeQueuedPrompts.length,
   });
@@ -995,7 +1043,10 @@ export function App() {
     listCollapsed,
     setListCollapsed,
     toggleListCollapsed,
-  } = useResize();
+  } = useResize({
+    loadPersistedWidth: loadSidebarWidth,
+    persistWidth: persistSidebarWidth,
+  });
   useEffect(() => {
     document.documentElement.lang = resolvedLocale;
   }, [resolvedLocale]);
@@ -3111,6 +3162,11 @@ export function App() {
     }),
     [composerOffsetHeight, terminalRowHeight],
   );
+  // App 级激活 owner 键（聚焦会话/runtime 对应桶）：分屏各栏用它做“同 owner 去重”参照；
+  // 先算成稳定字符串再进 memo 依赖，避免 terminalOwner 每次渲染新建对象把 memo 打穿。
+  const activeTerminalOwnerKey = terminalOwner
+    ? terminalOwnerKey(terminalOwner)
+    : undefined;
 
   const sessionPaneServices = useMemo(
     () => ({
@@ -3149,17 +3205,11 @@ export function App() {
       showThinking: settings.showThinking,
       validCommandNames,
       validFilePaths,
-      terminalOpen,
-      terminalDockClosing,
-      terminalDockVisible,
-      terminalCollapsed,
+      terminalStatesByOwner,
+      activeTerminalOwnerKey,
       availableTerminalHeight: availableTerminalHeight ?? 120,
-      terminalOwnerKey: terminalOwner
-        ? terminalOwnerKey(terminalOwner)
-        : undefined,
-      terminalTarget,
-      setTerminalOpenForOwner,
-      setTerminalCollapsedForOwner,
+      setTerminalOpenByOwnerKey,
+      setTerminalCollapsedByOwnerKey,
       setTerminalHeight,
       configOpen,
       environmentDialog: Boolean(environmentDialog),
@@ -3172,6 +3222,7 @@ export function App() {
     }),
     [
       abortAgent,
+      activeTerminalOwnerKey,
       activeProjectId,
       availableTerminalHeight,
       configOpen,
@@ -3204,16 +3255,12 @@ export function App() {
       sessionDurationByAgent,
       settings.showThinking,
       setPreviewImage,
-      setTerminalCollapsedForOwner,
+      setTerminalCollapsedByOwnerKey,
       setTerminalHeight,
-      setTerminalOpenForOwner,
+      setTerminalOpenByOwnerKey,
       showToast,
-      terminalCollapsed,
-      terminalDockClosing,
-      terminalDockVisible,
-      terminalOpen,
-      terminalOwnerKey,
-      terminalTarget,
+      terminalStatesByOwner,
+      availableTerminalHeight,
       validCommandNames,
       validFilePaths,
       workspaceChrome.exitSplit,

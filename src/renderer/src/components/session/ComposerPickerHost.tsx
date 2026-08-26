@@ -11,7 +11,6 @@ import {
   sessionRecordByIdAtomFamily,
   sessionRuntimeByIdAtom,
   sessionRuntimeBySessionIdAtomFamily,
-  thinkingLevelPendingByIdAtom,
   upsertSessionAtom,
 } from "../../atoms";
 import type { PromptTemplateInfo } from "../../composerBehavior";
@@ -65,8 +64,6 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
   const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
   const upsertSession = useSetAtom(upsertSessionAtom);
-  const thinkingPending = useAtomValue(thinkingLevelPendingByIdAtom)[sessionId];
-  const setThinkingPendingMap = useSetAtom(thinkingLevelPendingByIdAtom);
   const modelPending = useAtomValue(modelPendingByIdAtom)[sessionId];
   const setModelPendingMap = useSetAtom(modelPendingByIdAtom);
   const piRuntimeThinkingEntry = useAtomValue(
@@ -281,8 +278,8 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   });
 
   /**
-   * 生成进行中：pi 不支持运行中切模型。快照里已有的模型只写会话记录，
-   * 本轮结束后由本组件再调 setRuntimeModel；不在快照里的新加模型走重启确认。
+   * 后端明确返回 busy 时才排队模型切换；支持运行中选择的 Pi/DSH 会直接在当前 runtime
+   * 入口应用，已发出的请求继续使用原配置，后续 step 使用新配置。
    */
   async function pickModelWhileBusy(handle: SessionRuntimeTarget, model: AvailableModel) {
     try {
@@ -317,14 +314,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       return;
     }
     const handle = currentHandle();
-    const generationInFlight =
-      Boolean(handle) &&
-      (runtime?.status === "running" || Boolean(runtime?.state?.isStreaming));
     try {
-      if (handle && generationInFlight) {
-        await pickModelWhileBusy(handle, model);
-        return;
-      }
       if (handle) {
         try {
           const result = requireSessionCommand(await desktopApi.sessions.setRuntimeModel(
@@ -332,9 +322,12 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
             model.provider,
             model.id,
           ));
+          const appliedModel = result.value.provider && result.value.modelId
+            ? { provider: result.value.provider, modelId: result.value.modelId }
+            : { provider: model.provider, modelId: model.id };
           upsertSession({
             ...record,
-            model: { provider: model.provider, modelId: model.id },
+            model: appliedModel,
             updatedAt: Date.now(),
           });
           setModelPendingMap((prev) => ({ ...prev, [sessionId]: undefined }));
@@ -342,6 +335,10 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
           // 使底部栏的模型名称、provider 即刻刷新，无需等待 emitState 事件
           applyRuntimeModelState(result.value);
         } catch (error) {
+          if (error instanceof SessionCommandFailure && error.code === "SESSION_RUNTIME_BUSY") {
+            await pickModelWhileBusy(handle, model);
+            return;
+          }
           // 运行时代理不可用（Agent 已关/绑定已换）时降级写记录，
           // 保证「先选模型、后启动 Agent」的流程始终可用。
           if (!isStaleRuntimeFailure(error)) throw error;
@@ -407,18 +404,13 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       if (handle) {
         try {
           const result = requireSessionCommand(await desktopApi.sessions.setRuntimeThinking(handle, level));
-          upsertSession({ ...record, thinkingLevel: level, updatedAt: Date.now() });
-          // 生成进行中：飞行中的生成仍用旧档位，新档位下一轮才生效。
-          // 记录待生效指示（issue #146：xhigh->max），由 ComposerArea 在流式结束时清除。
-          if (runtime?.state?.isStreaming) {
-            const from = thinkingPending?.from ?? runtime.state.thinkingLevel ?? record.thinkingLevel;
-            if (from && from !== level) {
-              setThinkingPendingMap((prev) => ({ ...prev, [sessionId]: { from, to: level } }));
-            }
-          }
+          const agentState = result.value;
+          // runtime state carries the host-confirmed effort (DSH may normalize it);
+          // fall back to the requested value only for runtimes without a selected model.
+          const appliedThinkingLevel = agentState.thinkingLevel ?? level;
+          upsertSession({ ...record, thinkingLevel: appliedThinkingLevel, updatedAt: Date.now() });
           // 立即将返回的 AgentRuntimeState 合并到 runtime state atom，
           // 使底部栏的思考强度即刻刷新
-          const agentState = result.value;
           const current = store.get(sessionRuntimeByIdAtom)[sessionId];
           if (current) {
             store.set(sessionRuntimeByIdAtom, {

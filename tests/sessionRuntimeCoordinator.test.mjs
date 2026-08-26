@@ -1117,6 +1117,25 @@ test("runtime model preference is not persisted when AgentManager fails", async 
   assert.equal(harness.calls.setModel, 1);
 });
 
+test("runtime thinking persists the backend-confirmed level in the session catalog", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness({
+    entry: { thinkingLevel: "off" },
+    tabs: [{ id: "agent-a", status: "idle", createdAt: 1 }],
+    runtimeState: { thinkingLevel: "max" },
+  });
+  const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+  const runtimeGeneration = coordinator.bindExistingAgent("session-1", "agent-a");
+
+  const result = await coordinator.setRuntimeThinking(
+    { sessionId: "session-1", agentId: "agent-a", runtimeGeneration },
+    "high",
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.value.value.thinkingLevel, "max");
+  assert.equal(harness.entry.thinkingLevel, "max");
+});
 test("runtime permission preference persists only after the live agent applies it", async () => {
   const { SessionRuntimeCoordinator } = loadCoordinator();
   const harness = createHarness({

@@ -145,7 +145,6 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 				before ?? (anchorFilePos !== undefined ? anchorFilePos : undefined),
 				RUNTIME_HISTORY_TURN_PAGE_SIZE,
 				{
-					unit: "turn",
 					beforeEntryId: anchorEntryId ?? runtimeHistory?.nextBeforeEntryId ?? undefined,
 				},
 			)

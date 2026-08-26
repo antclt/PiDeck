@@ -645,8 +645,12 @@ export class SessionRuntimeCoordinator {
 			// 且 ConfirmDialog 点确定也会走 onCancel，回滚与确认会互相踩。
 			// needsRestart 由渲染层在用户确认后再 updateRecord + 重启。
 			await this.agents.setModel(agentId, provider, modelId);
+			const runtimeState = await this.agents.getRuntimeState(agentId);
+			const appliedModel = runtimeState.provider && runtimeState.modelId
+				? { provider: runtimeState.provider, modelId: runtimeState.modelId }
+				: { provider, modelId };
 			await this.catalog.update(target.sessionId, {
-				model: { provider, modelId },
+				model: appliedModel,
 				updatedAt: Date.now(),
 			});
 			void this.logger?.info("session-runtime", "Runtime model changed", {
@@ -654,8 +658,12 @@ export class SessionRuntimeCoordinator {
 				agentId,
 				provider,
 				modelId,
+				requestedProvider: provider,
+				requestedModelId: modelId,
+				appliedProvider: appliedModel.provider,
+				appliedModelId: appliedModel.modelId,
 			});
-			return this.agents.getRuntimeState(agentId);
+			return runtimeState;
 		});
 	}
 
@@ -668,16 +676,22 @@ export class SessionRuntimeCoordinator {
 			// 原先先写 catalog 再调 agent：DSH 无模型选中时 setThinking 只记内存不落 host，
 			// catalog 已更新但 host 未生效，重启/attach 后对账漂移。
 			await this.agents.setThinking(agentId, level);
+			// DSH 的 selectModel 可能规范化或回退 reasoningEffort；runtime state 是
+			// host 接受后的权威值。没有当前模型时 DSH 不会产生 runtime thinking，
+			// 此时保留用户请求值作为下一次启动时应用的 catalog 偏好。
+			const runtimeState = await this.agents.getRuntimeState(agentId);
+			const appliedLevel = runtimeState.thinkingLevel ?? level;
 			await this.catalog.update(target.sessionId, {
-				thinkingLevel: level,
+				thinkingLevel: appliedLevel,
 				updatedAt: Date.now(),
 			});
 			void this.logger?.info("session-runtime", "Runtime thinking changed", {
 				sessionId: target.sessionId,
 				agentId,
-				level,
+				requestedLevel: level,
+				appliedLevel,
 			});
-			return this.agents.getRuntimeState(agentId);
+			return runtimeState;
 		});
 	}
 

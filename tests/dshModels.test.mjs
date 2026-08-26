@@ -2,10 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { toDshAvailableModels } = loadTsCommonJs("src/main/dsh/dshModels.ts");
+const { toDshAvailableModels, toDshFetchedModels } = loadTsCommonJs("src/main/dsh/dshModels.ts");
 
 /** 与 DSH host llm.models / session.models 实测一致的组形状。 */
 const group = (id, models) => ({ id, name: id, models });
+
+
+test("toDshFetchedModels preserves discovery metadata and drops malformed ids", () => {
+	const models = toDshFetchedModels([
+		{ id: "  gateway-model ", name: "Gateway Model", contextWindow: 128000, maxTokens: 8192 },
+		{ id: "" },
+	]);
+	assert.deepEqual(JSON.parse(JSON.stringify(models)), [
+		{ id: "gateway-model", name: "Gateway Model", contextWindow: 128000, maxTokens: 8192 },
+	]);
+});
 
 test("toDshAvailableModels 透传 reasoningEfforts（按模型过滤思考档位）", () => {
 	const models = toDshAvailableModels([

@@ -13,6 +13,12 @@ import {
 	setHeaderValue,
 } from "./providerHeaders";
 import { buildModelsFromFetchedSelection } from "./modelsUtils";
+import {
+	countSelectedModelIndexes,
+	getModelSelectionState,
+	toggleAllModelIndexes,
+	toggleModelIndex,
+} from "./modelBatchSelection";
 import { FetchedModelCombobox } from "./FetchedModelCombobox";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Input } from "../components/ui-shadcn/input";
@@ -102,6 +108,7 @@ export function ModelsTab(props: {
 		value: "" | "xhigh" | "max",
 	) => void;
 	onDeleteModel: (providerName: string, index: number) => void;
+	onDeleteModels: (providerName: string, indexes: number[]) => void;
 	/** 重置为自适应：显式刷新 endpoint /models 后按模板清空并重填能力字段。 */
 	onResetModel: (providerName: string, index: number) => void;
 	/** 正在重置的模型行 key（`${providerName}-${index}`），null 表示无。 */
@@ -174,7 +181,10 @@ export function ModelsTab(props: {
 	const [pendingModelFocusKey, setPendingModelFocusKey] = useState<string | null>(null);
 	const [showGuide, setShowGuide] = useState(false);
 	const [batchMode, setBatchMode] = useState(false);
-	const [selectedProviders, setSelectedProviders] = useState(new Set());
+	const [selectedProviders, setSelectedProviders] = useState<Set<string>>(() => new Set());
+	// 模型批量删除只作用于当前展开的 provider，避免不同 provider 的同一行索引互相污染。
+	const [modelBatchProvider, setModelBatchProvider] = useState<string | null>(null);
+	const [selectedModelIndexes, setSelectedModelIndexes] = useState<Set<number>>(() => new Set());
 	const setSelectedFetchedModels = (providerName: string, modelIds: string[]) => {
 		setSelectedFetchedModelIds((current) => ({
 			...current,
@@ -184,6 +194,27 @@ export function ModelsTab(props: {
 	const modelIdInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 	const getModelInputKey = (providerName: string, index: number) =>
 		`${providerName}\u0000${index}`;
+	const clearModelBatch = () => {
+		setModelBatchProvider(null);
+		setSelectedModelIndexes(new Set<number>());
+	};
+	const toggleModelBatch = (providerName: string) => {
+		if (modelBatchProvider === providerName) {
+			clearModelBatch();
+			return;
+		}
+		setModelBatchProvider(providerName);
+		setSelectedModelIndexes(new Set<number>());
+	};
+	const toggleAllModels = (total: number) => {
+		setSelectedModelIndexes((current) => toggleAllModelIndexes(current, total));
+	};
+
+	// 切换 provider 时不保留上一个表格的索引选择，避免删除确认中的索引指向另一家 provider。
+	useEffect(() => {
+		setModelBatchProvider(null);
+		setSelectedModelIndexes(new Set<number>());
+	}, [expandedProvider]);
 	const getCompat = (providerName: string) => ({
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
@@ -239,7 +270,7 @@ export function ModelsTab(props: {
 						<Button size="sm" variant="destructive"
 							onClick={() => {
 								if (selectedProviders.size > 0) {
-									props.onDeleteProviders([...selectedProviders] as string[]);
+									props.onDeleteProviders([...selectedProviders]);
 									setSelectedProviders(new Set());
 									setBatchMode(false);
 								}
@@ -363,6 +394,15 @@ export function ModelsTab(props: {
 				{providerNames.map((name) => {
 					const provider = data.providers[name];
 					const isExpanded = expandedProvider === name;
+					const isModelBatchMode = modelBatchProvider === name;
+					const selectedModelCount = countSelectedModelIndexes(
+						selectedModelIndexes,
+						provider.models.length,
+					);
+					const modelSelectionState = getModelSelectionState(
+						selectedModelIndexes,
+						provider.models.length,
+					);
 					const userAgentValue = getHeaderValue(provider.headers, "User-Agent");
 					const providerAdvancedFields = Object.keys(provider).filter(
 						(key) => !KNOWN_PROVIDER_FIELDS.has(key),
@@ -752,9 +792,19 @@ export function ModelsTab(props: {
 									</div>
 
 									<div className="config-models-section">
-										<div className="config-models-header">
-											<span>{t("config.modelList")}</span>
-											<div className="flex min-w-0 items-center gap-1.5">
+										<div className="config-models-header flex-wrap gap-2">
+											<div className="flex min-w-0 flex-wrap items-center gap-2">
+												<span>{t("config.modelList")}</span>
+												{isModelBatchMode && (
+													<span className="rounded-full bg-[color:var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-medium tabular-nums text-[color:var(--color-accent)]">
+														{t("config.modelBatchSelected", {
+															selected: selectedModelCount,
+															total: provider.models.length,
+														})}
+													</span>
+												)}
+											</div>
+											<div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
 												<Button variant="outline" size="sm"
 													onClick={() => props.onFetchModels(name)}
 													disabled={props.fetchingProvider === name}
@@ -773,6 +823,35 @@ export function ModelsTab(props: {
 												>
 													{t("config.addModelManual")}
 												</Button>
+												<Button
+													variant={isModelBatchMode ? "secondary" : "outline"}
+													size="sm"
+													className={!isModelBatchMode ? "text-destructive hover:bg-destructive/10 hover:text-destructive" : undefined}
+													onClick={() => toggleModelBatch(name)}
+													disabled={saving || provider.models.length === 0}
+												>
+													{isModelBatchMode ? (
+														<X className="size-3.5" aria-hidden="true" />
+													) : (
+														<Trash2 className="size-3.5" aria-hidden="true" />
+													)}
+													{isModelBatchMode ? t("common.cancel") : t("common.deleteBatch")}
+												</Button>
+												{isModelBatchMode && (
+													<Button
+														variant="destructive"
+														size="sm"
+														onClick={() => {
+															if (selectedModelCount === 0) return;
+															props.onDeleteModels(name, [...selectedModelIndexes]);
+															clearModelBatch();
+														}}
+														disabled={selectedModelCount === 0}
+													>
+														<Trash2 className="size-3.5" aria-hidden="true" />
+														{t("common.deleteSelected")} ({selectedModelCount})
+													</Button>
+												)}
 											</div>
 										</div>
 
@@ -834,7 +913,22 @@ export function ModelsTab(props: {
 											<Table>
 												<TableHeader>
 													<TableRow className="hover:bg-transparent">
-														<TableHead className="w-48 min-w-0">{t("config.modelId")}</TableHead>
+														{isModelBatchMode && (
+														<TableHead className="w-10 px-2 text-center">
+															<Label className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md hover:bg-bg-hover">
+																<Checkbox
+																	checked={modelSelectionState === "checked"
+																		? true
+																		: modelSelectionState === "indeterminate"
+																			? "indeterminate"
+																			: false}
+																	onCheckedChange={() => toggleAllModels(provider.models.length)}
+																	aria-label={t("config.selectAllModels")}
+																/>
+															</Label>
+														</TableHead>
+													)}
+													<TableHead className="w-48 min-w-0">{t("config.modelId")}</TableHead>
 														<TableHead className="w-40 min-w-0">{t("config.modelDisplayName")}</TableHead>
 														<TableHead className="w-24">{t("config.contextWindow")}</TableHead>
 														<TableHead className="w-24">{t("config.maxTokens")}</TableHead>
@@ -885,8 +979,27 @@ export function ModelsTab(props: {
 											);
 											return (
 											<>
-											<TableRow key={`${name}-${i}`} className="align-middle">
-												<TableCell className="min-w-0 p-2 pl-3">
+											<TableRow
+														key={`${name}-${i}`}
+														className="align-middle"
+														data-state={isModelBatchMode && selectedModelIndexes.has(i) ? "selected" : undefined}
+													>
+												{isModelBatchMode && (
+															<TableCell className="w-10 p-2 text-center">
+																<Label className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md hover:bg-bg-hover">
+																	<Checkbox
+																		checked={selectedModelIndexes.has(i)}
+																		onCheckedChange={() =>
+																		setSelectedModelIndexes((current) => toggleModelIndex(current, i))
+																	}
+																		aria-label={t("config.selectModel", {
+																			model: m.name || m.id || String(i + 1),
+																		})}
+																	/>
+																</Label>
+															</TableCell>
+															)}
+															<TableCell className="min-w-0 p-2 pl-3">
 													{/* 模型 ID 是可编辑字段，不能作为 key；否则每次输入都会重建行并导致输入框失焦。 */}
 													<Input
 														ref={(element) => {
@@ -1022,8 +1135,11 @@ export function ModelsTab(props: {
 															<Coins className="size-3.5" aria-hidden="true" />
 														</Button>
 														<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-																			onClick={() => props.onDeleteModel(name, i)}
-																			title={t("config.deleteModel")}
+																			onClick={() => {
+																			clearModelBatch();
+																			props.onDeleteModel(name, i);
+																		}}
+																		title={t("config.deleteModel")}
 																			>
 																				<Trash2 size={14} />
 																			</Button>
@@ -1110,7 +1226,7 @@ export function ModelsTab(props: {
 										})}
 										{provider.models.length === 0 && (
 											<TableRow className="hover:bg-transparent">
-												<TableCell colSpan={8} className="py-5 text-center text-xs text-text-tertiary">
+												<TableCell colSpan={isModelBatchMode ? 8 : 7} className="py-5 text-center text-xs text-text-tertiary">
 													{t("config.emptyModels")}
 												</TableCell>
 											</TableRow>

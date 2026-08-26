@@ -1,5 +1,4 @@
 import type { FetchedModel } from "../../../shared/types/fetchedModel";
-import { KNOWN_PROVIDER_ENDPOINTS } from "./providerHeaders";
 import { buildModelsFromFetchedSelection } from "./modelsUtils";
 
 /** DSH 模型行：自定义覆盖适配器目录时写入 settings.yaml 的条目。 */
@@ -116,34 +115,4 @@ export function appendFetchedDshModels(input: {
 	];
 }
 
-/** 内置目录 provider key → KNOWN_PROVIDER_ENDPOINTS 的别名（DSH 官方路由不写 baseURL）。 */
-const FETCH_ENDPOINT_ALIASES: Record<string, string> = {
-	"deepseek-official": "deepseek",
-	"llm-deepseek": "deepseek",
-};
-
-/**
- * 解析 DSH provider 拉模型列表用的端点。
- * 优先用配置里的 baseURL/api；没有则按 provider key 回退到 Pi 那套已知端点。
- */
-export function resolveDshFetchEndpoint(input: {
-	providerKey?: string;
-	baseURL?: string;
-	api?: string;
-}): { baseUrl: string; apiType?: string } | undefined {
-	const configured = input.baseURL?.trim();
-	if (configured) {
-		return {
-			baseUrl: configured,
-			apiType: input.api?.trim() || undefined,
-		};
-	}
-	const rawKey = input.providerKey?.trim() ?? "";
-	const mapped = FETCH_ENDPOINT_ALIASES[rawKey] ?? rawKey;
-	const known = mapped ? KNOWN_PROVIDER_ENDPOINTS[mapped] : undefined;
-	if (!known) return undefined;
-	return {
-		baseUrl: known.baseUrl,
-		apiType: input.api?.trim() || known.apiType,
-	};
-}
+/** DSH 配置页应通过 host 的 llm.discoverModels 取候选，不在 renderer 解析 provider 端点。 */

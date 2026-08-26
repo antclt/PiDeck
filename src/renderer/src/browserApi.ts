@@ -342,6 +342,7 @@ export function createBrowserApi(): PiDesktopApi {
 			forkRuntimeSession: (target, entryId) =>
 				sessionRuntimeCommand(target, "fork", { entryId }),
 			listDshModels: async () => [],
+			discoverDshModels: async () => [],
 			listDshProviders: async () => [],
 			getDshStatus: async () => ({
 				started: false,

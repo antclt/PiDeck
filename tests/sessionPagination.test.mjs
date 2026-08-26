@@ -66,3 +66,10 @@ test("renderer runtime code reads historical messages only through the bounded p
   assert.doesNotMatch(rendererRuntime, /readRecordMessages\(/);
   assert.match(rendererRuntime, /readRecordMessagePage\(/);
 });
+
+test("Pi desktop history IPC always routes persisted pages through complete-turn reader", () => {
+  const ipc = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
+  assert.match(ipc, /readSessionDisplayTurnPage/);
+  assert.doesNotMatch(ipc, /readSessionDisplayMessagePage/);
+  assert.doesNotMatch(ipc, /unit\?: "message"/);
+});

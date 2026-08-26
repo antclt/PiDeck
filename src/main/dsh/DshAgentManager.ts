@@ -381,10 +381,11 @@ export class DshAgentManager implements SessionAgentGateway {
 			this.onTitleChanged?.(sessionId, hostTitle);
 		}
 		this.runtimes.set(agentId, runtime);
+		await this.refreshModelDirectory(runtime, client).catch(() => undefined);
 		this.startMux(runtime);
 		this.emit(ipcChannels.agentsState, this.list());
 		// attach 历史会话：消息/投影已就位，立刻推 runtime，输入框底下就能出「N 轮」。
-		if (attached) this.emitRuntimeState(agentId);
+		this.emitRuntimeState(agentId);
 		return tab;
 	}
 
@@ -415,6 +416,19 @@ export class DshAgentManager implements SessionAgentGateway {
 				error: "DSH host instructions are not supported",
 				delivery: "rejected",
 				i18nKey: "session.sendDshUnsupportedPayload",
+			};
+		}
+		const modelDirectory = await this.refreshModelDirectory(runtime, client).catch(() => undefined);
+		if (modelDirectory?.result.ok) {
+			this.emitRuntimeState(input.agentId);
+		}
+		if (modelDirectory?.result.ok && modelDirectory.result.value.routable === false) {
+			runtime.modelRoutable = false;
+			return {
+				accepted: false,
+				error: "DSH provider route is unavailable",
+				delivery: "rejected",
+				i18nKey: "session.sendDshModelRouteUnavailable",
 			};
 		}
 		// 复用 composer 的 steer / followUp：host prompt.mode 是 queue|steer。
@@ -463,19 +477,6 @@ export class DshAgentManager implements SessionAgentGateway {
 		while (runtime.control.status !== "idle" || runtime.control.cancelled) {
 			if (Date.now() - startedAt >= timeoutMs) return;
 			await new Promise((resolve) => setTimeout(resolve, 100));
-		}
-	}
-
-	/**
-	 * 换模型/思考档必须在本会话非流式时发 selectModel。
-	 * 回合中 host 常回非 busy 字样的错误，会被映射成「会话操作失败」；
-	 * 这里先本地拒绝，让 UI 走 SESSION_RUNTIME_BUSY。
-	 * 已 abort、只等 turn/end 的 cancelled 不挡——用户停完就想换模型。
-	 */
-	private requireIdleForModelChange(agentId: string): void {
-		const runtime = this.runtime(agentId);
-		if (runtime.control.status === "running" || runtime.isStreaming) {
-			throw new Error("dsh selectModel busy: session turn in progress");
 		}
 	}
 
@@ -571,6 +572,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			);
 		}
 		this.runtimes.set(agentId, runtime);
+		await this.refreshModelDirectory(runtime, client).catch(() => undefined);
 		this.startMux(runtime);
 		this.emit(ipcChannels.agentsState, this.list());
 		// 重启后历史已投影：立刻推 runtime，输入框底下就能出「N 轮」。
@@ -748,6 +750,7 @@ export class DshAgentManager implements SessionAgentGateway {
 						entries.map(({ event }) => event),
 					);
 				}
+				await this.refreshModelDirectory(runtime, client).catch(() => undefined);
 				this.emit(ipcChannels.agentsState, this.list());
 				this.emitMessages(runtime);
 				this.emitRuntimeState(agentId);
@@ -867,6 +870,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			modelName: runtime.model?.model,
 			provider: runtime.model?.provider,
 			modelId: runtime.model?.model,
+			modelRoutable: runtime.modelRoutable,
 			thinkingLevel: runtime.thinkingLevel,
 			permissionPreset: runtime.permissionPreset,
 			planModeActive: runtime.planModeActive,
@@ -1017,15 +1021,33 @@ export class DshAgentManager implements SessionAgentGateway {
 		};
 	}
 
+	private syncModelDirectoryState(
+		runtime: DshAgentRuntime,
+		models: { current: { provider: string; model: string; reasoningEffort?: string }; routable: boolean },
+	): void {
+		runtime.modelRoutable = models.routable;
+		runtime.model = { provider: models.current.provider, model: models.current.model };
+		runtime.thinkingLevel = models.current.reasoningEffort;
+	}
+
+	private async refreshModelDirectory(
+		runtime: DshAgentRuntime,
+		client: import("@deepseek-ai/dsh-host-apiproxy").AbstractApiClient,
+	) {
+		const listed = await client.sessions.models({ sessionId: runtime.sessionId });
+		if (listed.result.ok) this.syncModelDirectoryState(runtime, listed.result.value);
+		return listed;
+	}
+
 	async getAvailableModels(agentId: string): Promise<AvailableModel[]> {
 		const runtime = this.runtime(agentId);
 		const client = this.requireClient();
-		const models = await client.sessions.models({ sessionId: runtime.sessionId });
-		if (!models.result.ok) return [];
-		// host 的 models catalog 带每个模型的 reasoning.efforts（支持的思考档位）：
-		// 透传给选择器按模型过滤——llm-deepseek 只接受 off/high/max，
-		// llm-pi-ai 按模型声明，选不支持的档位会在下次请求抛 UNSUPPORTED_REASONING_EFFORT。
-		// 与 DshHost.listModels 共用同一映射（目录数据同源）。
+		const models = await this.refreshModelDirectory(runtime, client);
+		if (!models.result.ok) {
+			throw new Error(`dsh sessions.models failed: ${models.result.error.code}: ${models.result.error.message}`);
+		}
+		// 选择器打开时同步 host 当前选择和 routable，目录成员资格仍只用于展示。
+		this.emitRuntimeState(agentId);
 		return toDshAvailableModels(models.result.value.groups ?? []);
 	}
 
@@ -1276,7 +1298,9 @@ export class DshAgentManager implements SessionAgentGateway {
 
 	async setModel(agentId: string, provider: string, modelId: string): Promise<unknown> {
 		const runtime = this.runtime(agentId);
-		await this.requireIdleForModelChange(agentId);
+		// 普通 DSH session 的 model selection 是 host 级可变状态：运行中切换时，
+		// 已经发出的 provider request 保持原配置，后续 step 读取新的完整选择。
+		// 若某类后端/会话不接受该操作，让 selectModel 返回 busy，由上层排队到下一轮。
 		const client = this.requireClient();
 		// DSH 官方语义：换模型 = 提交一整个新选择（provider/model/reasoningEffort），
 		// 思考档位随目标模型走，而不是把旧模型的 thinkingLevel 带过去。
@@ -1285,6 +1309,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			throw this.selectModelError(selected.result.error, provider, modelId);
 		}
 		runtime.model = selected.result.value.selected;
+		runtime.modelRoutable = true;
 		// host 返回的 reasoningEffort 才是真实生效档位；同步内存，避免底栏显示旧档位。
 		runtime.thinkingLevel = selected.result.value.selected.reasoningEffort;
 		return selected.result.value;
@@ -1330,7 +1355,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			// 不写入 runtime.thinkingLevel，否则后续换模型会误把它带过去。
 			return { accepted: true, thinkingLevel: level };
 		}
-		this.requireIdleForModelChange(agentId);
+		// 不在 PiDeck 侧预先拒绝运行中的回合：如果 host 支持动态切换，
+		// 当前回合可以直接使用；如果 host 不支持，由 selectModel 返回 busy/error。
 		const previous = runtime.thinkingLevel;
 		runtime.thinkingLevel = level;
 		const client = this.requireClient();
@@ -1346,6 +1372,7 @@ export class DshAgentManager implements SessionAgentGateway {
 					provider: updated.result.value.selected.provider,
 					model: updated.result.value.selected.model,
 				};
+				runtime.modelRoutable = true;
 				runtime.thinkingLevel = updated.result.value.selected.reasoningEffort ?? level;
 			} else {
 				runtime.thinkingLevel = previous;
@@ -2166,6 +2193,7 @@ type DshAgentRuntime = {
 	control: DshControlState;
 	executingTool?: string;
 	model?: { provider: string; model: string };
+	modelRoutable?: boolean;
 	thinkingLevel?: string;
 	/** DSH 权限预设（permission/preset 事件折叠；read-only/workspace-write/danger-full-access）。 */
 	permissionPreset?: string;

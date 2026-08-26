@@ -739,10 +739,10 @@ export function PiAiProvidersCard(props: {
 										catalog={providerCatalog}
 										writable={writable}
 										providerKey={entry.key}
+										settingsNs={namespace.ns}
 										baseURL={baseURL}
 										api={api}
 										apiKeyDraft={keyDrafts[entry.key]}
-										credentialRef={keyRef}
 										defaultInput={entryValue(entry.key, ["defaultInput"])}
 										onDefaultInputChange={(input) => updateEntry(entry.key, ["defaultInput"], input)}
 										onChange={(nextModels) => setProviderModels(entry.key, nextModels)}
@@ -939,10 +939,10 @@ export function DeepseekRouteCard(props: {
 								catalog={props.catalog}
 								writable={writable}
 								providerKey="deepseek-official"
+								settingsNs={namespace.ns}
 								baseURL={baseURL}
 								api={api}
 								apiKeyDraft={keyDraft}
-								credentialRef={keyRef}
 								onChange={setModels}
 							/>
 						</div>

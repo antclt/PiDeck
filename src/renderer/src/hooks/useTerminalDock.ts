@@ -89,16 +89,32 @@ export function useTerminalDock(activeOwner: TerminalDockOwner | undefined) {
   /** 开关当前 owner 的终端（无 owner 时静默忽略，避免写坏 key） */
   function setTerminalOpenForOwner(open: boolean) {
     if (!activeOwnerKey) return;
-    setTerminalDockStateByOwner((current) =>
-      setTerminalDockOpen(current, activeOwnerKey, open),
-    );
+    setTerminalOpenByOwnerKey(activeOwnerKey, open);
   }
 
   /** 折叠/展开当前 owner 的终端 */
   function setTerminalCollapsedForOwner(collapsed: boolean) {
     if (!activeOwnerKey) return;
+    setTerminalCollapsedByOwnerKey(activeOwnerKey, collapsed);
+  }
+
+  /**
+   * 按 owner key 开关终端（分屏各栏解析自己的 owner 后调用）：
+   * 状态表本身按 owner 隔离，这里只是把「写哪个桶」的权交给调用方。
+   */
+  function setTerminalOpenByOwnerKey(ownerKey: string, open: boolean) {
     setTerminalDockStateByOwner((current) =>
-      setTerminalDockCollapsed(current, activeOwnerKey, collapsed),
+      setTerminalDockOpen(current, ownerKey, open),
+    );
+  }
+
+  /** 按 owner key 折叠/展开终端（分屏各栏独立折叠互不串台） */
+  function setTerminalCollapsedByOwnerKey(
+    ownerKey: string,
+    collapsed: boolean,
+  ) {
+    setTerminalDockStateByOwner((current) =>
+      setTerminalDockCollapsed(current, ownerKey, collapsed),
     );
   }
 
@@ -133,6 +149,9 @@ export function useTerminalDock(activeOwner: TerminalDockOwner | undefined) {
     setTerminalOpenForOwner,
     setTerminalCollapsedForOwner,
     setTerminalHeight,
+    setTerminalOpenByOwnerKey,
+    setTerminalCollapsedByOwnerKey,
+    terminalStatesByOwner: terminalDockStateByOwner,
     terminalDockMounted,
     terminalDockOwnerKey,
     prune,

@@ -1,6 +1,10 @@
 import React from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import type { TerminalTarget } from "../../../../shared/types";
+import {
+	resolvePaneTerminal,
+	terminalOwnerKey,
+	shouldMountPaneTerminalDock,
+} from "../../terminalDockState";
 import { settingsOpenAtom } from "../../atoms";
 import {
   claimSessionRuntimeUiResponseAtom,
@@ -11,6 +15,7 @@ import {
   sessionRuntimeBySessionIdAtomFamily,
   sessionRuntimeUiBySessionIdAtomFamily,
 } from "../../atoms/session-selectors";
+import { projectByIdAtomFamily } from "../../atoms/project-atoms";
 import { useSessionRuntimeController } from "../../hooks/useSessionRuntimeController";
 import {
   createSessionRuntimeUiResponder,
@@ -36,15 +41,6 @@ export type SessionRuntimeInjectorProps = {
   terminalRowHeight: number;
   activeQueuedPrompts: QueuedPrompt[];
   queuedTrackRef: React.MutableRefObject<HTMLElement | null>;
-
-  // 终端归属（owner 化：agent:<id> / project:<id>），由 App 层解析后传入
-  terminalOwnerKey?: string;
-  /** agent 或 project 终端目标（App 层按 owner 解析） */
-  terminalTarget?: TerminalTarget;
-  setTerminalOpenForOwner: (open: boolean) => void;
-  setTerminalCollapsedForOwner: (collapsed: boolean) => void;
-  /** 回写终端分屏高度（全局单份，useTerminalDock 内部持久化） */
-  setTerminalHeight: (height: number) => void;
 };
 
 /**
@@ -67,11 +63,6 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
     terminalRowHeight,
     activeQueuedPrompts,
     queuedTrackRef,
-    terminalOwnerKey,
-    terminalTarget,
-    setTerminalOpenForOwner,
-    setTerminalCollapsedForOwner,
-    setTerminalHeight,
   } = props;
 
   const services = useSessionPaneServices();
@@ -83,6 +74,48 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
   const rollbackSessionUiResponse = useSetAtom(rollbackSessionRuntimeUiResponseAtom);
   const runtimeRef = React.useRef(currentSessionRuntime);
   runtimeRef.current = currentSessionRuntime;
+
+  // 本栏终端归属：从本会话自身的 runtime/record 解析（分屏各栏独立，不再跟随 App 聚焦态）；
+  // owner 解析失败或目标不可落地时该栏不挂 dock。
+  const paneProject = useAtomValue(
+    projectByIdAtomFamily(sessionRecord?.projectId ?? ""),
+  );
+  const paneTerminal = React.useMemo(
+    () =>
+      resolvePaneTerminal({
+        sessionId: currentSessionId,
+        runtime: currentSessionRuntime,
+        projectId: sessionRecord?.projectId,
+        project: paneProject,
+      }),
+    [currentSessionId, currentSessionRuntime, sessionRecord?.projectId, paneProject],
+  );
+  const paneOwnerKey = paneTerminal ? terminalOwnerKey(paneTerminal.owner) : undefined;
+  const paneTerminalState = paneOwnerKey
+    ? services.terminalStatesByOwner[paneOwnerKey]
+    : undefined;
+  const paneTerminalOpen = Boolean(paneTerminalState?.open) && Boolean(paneTerminal);
+  const paneTerminalCollapsed = Boolean(paneTerminalState?.collapsed);
+  const paneTerminalDockVisible = shouldMountPaneTerminalDock({
+    ownerKey: paneOwnerKey,
+    activeOwnerKey: services.activeTerminalOwnerKey,
+    focused,
+    open: paneTerminalOpen,
+  });
+  // 本栏 dock 的开关回调绑定本栏自己的 owner key：非聚焦栏也能关自己的终端，
+  // 不会写到当前聚焦会话的桶里（分屏双栏状态互不串台）。
+  const setPaneTerminalOpen = React.useCallback(
+    (open: boolean) => {
+      if (paneOwnerKey) services.setTerminalOpenByOwnerKey(paneOwnerKey, open);
+    },
+    [paneOwnerKey, services.setTerminalOpenByOwnerKey],
+  );
+  const setPaneTerminalCollapsed = React.useCallback(
+    (collapsed: boolean) => {
+      if (paneOwnerKey) services.setTerminalCollapsedByOwnerKey(paneOwnerKey, collapsed);
+    },
+    [paneOwnerKey, services.setTerminalCollapsedByOwnerKey],
+  );
 
   const runtimeUiResponder = React.useMemo(() => {
     if (!currentSessionRuntime?.agentId) return undefined;
@@ -213,16 +246,17 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
           />
         ) : undefined
       }
-      terminalDockVisible={focused && services.terminalDockVisible}
-      terminalOpen={focused && services.terminalOpen}
-      terminalDockClosing={focused && services.terminalDockClosing}
-      terminalCollapsed={services.terminalCollapsed}
+      terminalDockVisible={paneTerminalDockVisible}
+      terminalOpen={paneTerminalOpen}
+      // 本栏 dock 卸载不播关闭动画（面板随 open 立即卸载，closing 只在 App 级空态路径有意义）
+      terminalDockClosing={false}
+      terminalCollapsed={paneTerminalCollapsed}
       availableTerminalHeight={services.availableTerminalHeight ?? 120}
-      terminalOwnerKey={terminalOwnerKey}
-      terminalTarget={terminalTarget}
-      setTerminalOpenForOwner={setTerminalOpenForOwner}
-      setTerminalCollapsedForOwner={setTerminalCollapsedForOwner}
-      setTerminalHeight={setTerminalHeight}
+      terminalOwnerKey={paneOwnerKey}
+      terminalTarget={paneTerminal?.target}
+      setTerminalOpenForOwner={setPaneTerminalOpen}
+      setTerminalCollapsedForOwner={setPaneTerminalCollapsed}
+      setTerminalHeight={services.setTerminalHeight}
       settingsOpen={settingsOpen}
       configOpen={services.configOpen}
       environmentDialog={services.environmentDialog}

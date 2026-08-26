@@ -908,7 +908,6 @@ export function useSessionTimelineController(options: {
 			setIsLoadingMessagePage(true);
 			void desktopApi.sessions
 				.readRecordMessagePage(sessionId, before ?? (anchorFilePos !== undefined ? anchorFilePos : undefined), RUNTIME_HISTORY_TURN_PAGE_SIZE, {
-					unit: "turn",
 					beforeEntryId: anchorEntryId ?? runtimeHistory?.nextBeforeEntryId ?? undefined,
 				})
 				.then((page) => {

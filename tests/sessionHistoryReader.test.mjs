@@ -86,10 +86,109 @@ test("SessionHistoryReader pages only the active branch and tolerates malformed 
     ].join("\n"), "utf8");
     const reader = createReader((path) => path);
 
-    const page = await reader.readSessionDisplayMessagePage(sessionPath, "viewer", undefined, 100);
+    const page = await reader.readSessionDisplayTurnPage(sessionPath, "viewer", undefined, 100);
     assert.equal(page.total, 2);
     assert.deepEqual(Array.from(page.messages, (message) => message.text), ["active one", "active two"]);
     assert.equal(page.nextBefore, null);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("SessionHistoryReader returns model and thinking metadata from the active history index", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pideck-history-metadata-"));
+  const sessionPath = join(directory, "session.jsonl");
+  try {
+    await writeFile(sessionPath, [
+      JSON.stringify({ id: "session", type: "session" }),
+      JSON.stringify({
+        id: "detached-model",
+        parentId: "session",
+        type: "model_change",
+        provider: "wrong-provider",
+        modelId: "wrong-model",
+      }),
+      JSON.stringify({
+        id: "user-1",
+        parentId: "session",
+        type: "message",
+        message: { role: "user", content: [{ type: "text", text: "hello" }] },
+      }),
+      JSON.stringify({
+        id: "model-1",
+        parentId: "user-1",
+        type: "model_change",
+        provider: "anthropic",
+        modelId: "claude-sonnet-4",
+      }),
+      JSON.stringify({
+        id: "thinking-1",
+        parentId: "model-1",
+        type: "thinking_level_change",
+        thinkingLevel: "high",
+      }),
+      JSON.stringify({
+        id: "assistant-1",
+        parentId: "thinking-1",
+        type: "message",
+        message: {
+          role: "assistant",
+          provider: "stale-provider",
+          model: "stale-model",
+          content: [{ type: "text", text: "done" }],
+        },
+      }),
+    ].join("\n"), "utf8");
+
+    const reader = createReader((path) => path);
+    const page = await reader.readSessionDisplayTurnPage(sessionPath, "viewer", undefined, 100);
+    assert.equal(page.model?.provider, "anthropic");
+    assert.equal(page.model?.modelId, "claude-sonnet-4");
+    assert.equal(page.thinkingLevel, "high");
+
+    // The public metadata read must reuse the already-built display index.
+    const metadata = await reader.readSessionMetadata(sessionPath);
+    assert.equal(metadata.model?.provider, "anthropic");
+    assert.equal(metadata.model?.modelId, "claude-sonnet-4");
+    assert.equal(metadata.thinkingLevel, "high");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("SessionHistoryReader updates metadata when incremental history append changes the model", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pideck-history-metadata-append-"));
+  const sessionPath = join(directory, "session.jsonl");
+  try {
+    const line = (id, parentId, role, text) => JSON.stringify({
+      id,
+      parentId,
+      type: "message",
+      message: { role, content: [{ type: "text", text }] },
+    });
+    await writeFile(sessionPath, [
+      JSON.stringify({ id: "session", type: "session" }),
+      JSON.stringify({ id: "model-1", parentId: "session", type: "model_change", provider: "openai", modelId: "gpt-4o" }),
+      line("e1", "model-1", "user", "first question"),
+      line("e2", "e1", "assistant", "first answer"),
+    ].join("\n") + "\n", "utf8");
+    const reader = createReader((path) => path);
+
+    const first = await reader.readSessionDisplayTurnPage(sessionPath, "viewer", undefined, 10);
+    assert.equal(first.model?.modelId, "gpt-4o");
+    assert.equal(first.thinkingLevel, "off");
+
+    await appendFile(sessionPath, [
+      JSON.stringify({ id: "model-2", parentId: "e2", type: "model_change", provider: "anthropic", modelId: "claude-sonnet-4" }),
+      JSON.stringify({ id: "thinking-2", parentId: "model-2", type: "thinking_level_change", thinkingLevel: "max" }),
+      line("e3", "thinking-2", "user", "second question"),
+      line("e4", "e3", "assistant", "second answer"),
+    ].join("\n") + "\n", "utf8");
+
+    const after = await reader.readSessionDisplayTurnPage(sessionPath, "viewer", undefined, 10);
+    assert.equal(after.model?.provider, "anthropic");
+    assert.equal(after.model?.modelId, "claude-sonnet-4");
+    assert.equal(after.thinkingLevel, "max");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -357,7 +456,7 @@ test("compaction page paging stays in index space when conversion skips messages
       translate: () => "",
     });
 
-    const page = await reader.readSessionDisplayMessagePage(sessionPath, "viewer", undefined, 100);
+    const page = await reader.readSessionDisplayTurnPage(sessionPath, "viewer", 120, 10);
     assert.ok(page.messages.length > 0, "page must not be empty when conversion skips messages");
     assert.equal(page.total, 150);
     // 页内应含压缩卡片（插入点在 e101，位于本页）
@@ -365,10 +464,10 @@ test("compaction page paging stays in index space when conversion skips messages
     assert.ok(card, "compaction card must be inserted inside the page");
     assert.equal(card.role, "system");
     // 游标续页不重不漏：nextBefore 指向本页最旧条目
-    assert.equal(page.nextBefore, 50);
-    const p2 = await reader.readSessionDisplayMessagePage(sessionPath, "viewer", page.nextBefore, 100);
+    assert.equal(page.nextBefore, 100);
+    const p2 = await reader.readSessionDisplayTurnPage(sessionPath, "viewer", page.nextBefore ?? undefined, 10);
     assert.ok(p2.messages.length > 0);
-    assert.equal(p2.nextBefore, null); // 剩余 50 条一页取完，到顶
+    assert.equal(p2.nextBefore, 80); // 再向前一页仍按完整轮次推进游标
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

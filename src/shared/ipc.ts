@@ -144,6 +144,8 @@ export const ipcChannels = {
 	dshPluginUninstall: "dsh:plugin-uninstall",
 	/** DSH host 级模型目录（llm.models），不依赖已启动的会话。 */
 	dshListModels: "dsh:list-models",
+	/** DSH 配置页模型发现（llm.discoverModels；只返回候选，不写配置）。 */
+	dshDiscoverModels: "dsh:discover-models",
 	/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由；添加提供方用）。 */
 	dshListProviders: "dsh:list-providers",
 	/** DSH 配置管理页状态（host 启动状态 + 目录 + providers + 模型目录）。 */

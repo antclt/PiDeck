@@ -68,8 +68,10 @@ export type TurnRowProps = {
 	onResendUserMessage?: (message: never) => void;
 	onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
 	onDeleteMessage?: (messageId: string, entryId?: string) => void;
-	/** Agent 正在处理请求或流式输出中时禁用编辑/删除等操作按钮 */
+	/** 当前模型回合活跃时为 true，驱动正文/过程的 live 渲染与完成判定。 */
 	agentRunning?: boolean;
+	/** 会话 runtime 仍被占用（如压缩）；仅阻止会改写历史的操作，不把已结束回答重置为 live。 */
+	isRuntimeBusy?: boolean;
 	/** 是否时间线最新一轮（非最新不自动收起） */
 	isLatestRun?: boolean;
 	/** 是否为时间线上最后一个 agent-run（live 正文挂载门：仅它可挂会话级流式槽） */
@@ -404,7 +406,7 @@ export const TurnRow = memo(
 							<Share size={14} />
 						</Button>
 						{!props.isStreaming &&
-							!props.agentRunning &&
+							!props.isRuntimeBusy &&
 							assistantMessages.at(-1)?.message.id && (
 								<>
 									{props.onEditMessage && (
@@ -465,7 +467,7 @@ turnRowPropsEqual,
  *
  * 比较项：
  * - run：深度比较内容（sameAgentRunForRender），未变化的 run 不重渲染；
- * - 标量 props（backend/fresh/showThinking/isStreaming/liveThinkingId/agentRunning）：=== 比较；
+ * - 标量 props（backend/fresh/showThinking/isStreaming/liveThinkingId/agentRunning/isRuntimeBusy）：=== 比较；
  * - 回调函数（onPreviewImage/onOpenExternal/onOpenFile/onDiffFile/onEditMessage/onDeleteMessage/
  *   onEnterMultiSelect）：行为稳定（读 ref/setState），引用变化不影响渲染结果，忽略（同 FinalAnswer 惯例）。
  */
@@ -481,6 +483,7 @@ function turnRowPropsEqual(prev: TurnRowProps, next: TurnRowProps): boolean {
 		prev.showThinking === next.showThinking &&
 		prev.liveThinkingId === next.liveThinkingId &&
 		prev.agentRunning === next.agentRunning &&
+		prev.isRuntimeBusy === next.isRuntimeBusy &&
 		prev.isLatestRun === next.isLatestRun &&
 		prev.isLastAgentRun === next.isLastAgentRun &&
 		prev.autoCollapseTick === next.autoCollapseTick

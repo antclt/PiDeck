@@ -18,6 +18,7 @@ import type {
 	AppUpdateDownloadResult,
 	AppUpdateInfo,
 	AvailableModel,
+	DshModelDiscoveryInput,
 	ModelListFailReason,
 	ModelListReport,
 	ChatMessage,
@@ -322,6 +323,9 @@ const api = {
 		/** DSH host 级模型目录（llm.models），未装配时返回空列表。 */
 		listDshModels: () =>
 			ipcRenderer.invoke(ipcChannels.dshListModels) as Promise<AvailableModel[]>,
+		/** DSH 配置页模型发现：只返回候选，apiKey 仅本次探测使用。 */
+		discoverDshModels: (input: DshModelDiscoveryInput) =>
+			ipcRenderer.invoke(ipcChannels.dshDiscoverModels, input) as Promise<FetchedModel[]>,
 		/** DSH 可配置提供方目录（llm.providers：内置 catalog + 已注册路由）。 */
 		listDshProviders: () =>
 			ipcRenderer.invoke(ipcChannels.dshListProviders) as Promise<Array<{
@@ -418,7 +422,7 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogReadMessages, sessionId) as Promise<
 				import("../shared/types").ChatMessage[]
 			>,
-		readRecordMessagePage: (sessionId: string, before?: number, pageSize?: number, options?: { unit?: "message" | "turn"; beforeEntryId?: string }) =>
+		readRecordMessagePage: (sessionId: string, before?: number, pageSize?: number, options?: { beforeEntryId?: string }) =>
 			ipcRenderer.invoke(
 				ipcChannels.sessionsCatalogReadMessagePage,
 				sessionId,

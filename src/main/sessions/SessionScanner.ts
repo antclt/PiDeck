@@ -452,7 +452,7 @@ export class SessionScanner {
         this.summaryCacheFileSetKey = fileSetKey;
       }
 
-      // 侧栏列表只认路径 + stat：正文留给点击后的 readRecordMessagePage。
+      // 侧栏列表只认路径 + stat：正文留给点击后的轮次历史页。
       // 打包目录可有数百 JSONL，再在 list() 里 parse 会占满主进程，点击/输入跟着卡。
       const summaries = await this.mapLimited(
         files,
@@ -1415,7 +1415,7 @@ export class SessionScanner {
 
   /**
    * 侧栏 list() 专用：只 stat + 路径推断，不读 JSONL 正文。
-   * 标题/预览/模型留给 catalog 已有条目；点开会话走 readRecordMessagePage。
+   * 标题/预览留给 catalog；模型/思考在历史读取完成后回填；点开会话走轮次历史页。
    * 不写入 summaryCache——空标题一旦进缓存，会把后续真正的 readSummary 结果冻住。
    */
   private async listPathSummary(filePath: string, signal?: AbortSignal): Promise<SessionSummary | null> {

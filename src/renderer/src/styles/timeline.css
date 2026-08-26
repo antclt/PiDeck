@@ -589,11 +589,12 @@
   line-height: 1.2;
 }
 
-/* ── 三种状态变体：只差异颜色，容器尺寸不变，避免布局跳动 ── */
+/* ── 四种状态变体：只差异颜色，容器尺寸不变，避免布局跳动 ── */
 
 /* 状态色只作用于前置指示器（Loader 用 currentColor）与文字基调；无框后不再有边框/背景色 */
 .responding-indicator[data-kind="starting"],
-.responding-indicator[data-kind="executing"] {
+.responding-indicator[data-kind="executing"],
+.responding-indicator[data-kind="compacting"] {
   color: var(--color-warning, #d97706);
 }
 

@@ -56,7 +56,10 @@ function makeHarness() {
     get: (sessionId) => records.has(sessionId) ? { id: sessionId } : undefined,
     attachRuntime: async () => undefined,
   };
-  const agents = { list: () => tabs };
+  const agents = {
+    list: () => tabs,
+    publishRuntimeState: async () => undefined,
+  };
   return { catalog, agents, records, tabs };
 }
 

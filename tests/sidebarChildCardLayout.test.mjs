@@ -87,7 +87,8 @@ test("session status indicators stay on the concrete session row", () => {
   assert.match(sessionTree, /renderRuntimeStatusDot\(child\.agent\.status\)/);
   assert.match(sessionTree, /renderRuntimeStatusDot\(runtimeSnapshot\?\.status\)/);
   // Tab 同样未启动不显示徽章，已启动按状态映射渲染（beui AnimatedBadge 替换裸圆点）。
-  assert.match(tabBar, /function sessionStatusBadge\(/);
+  assert.match(tabBar, /import \{ sessionStatusBadge \} from "\.\.\/\.\.\/utils\/sessionStatusBadge"/);
+  assert.match(tabBar, /const badge = sessionStatusBadge\(status, \{/);
   assert.match(tabBar, /AnimatedBadge/);
   assert.match(tabBar, /badge &&/);
   assert.doesNotMatch(tabBar, /dotClass &&/);

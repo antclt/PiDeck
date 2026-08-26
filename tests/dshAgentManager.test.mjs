@@ -1040,7 +1040,7 @@ test("getAvailableModels 透传模型支持的思考档位（reasoningEfforts）
 	const { host } = makeFakeHost({
 		modelsValue: {
 			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
-			routable: [],
+			routable: true,
 			failures: [],
 			groups: [{
 				id: "llm-deepseek",
@@ -1066,6 +1066,25 @@ test("getAvailableModels 透传模型支持的思考档位（reasoningEfforts）
 	assert.equal(models.length, 1);
 	assert.deepEqual(models[0].reasoningEfforts?.map((effort) => effort.id), ["off", "high", "max"]);
 	assert.equal(models[0].reasoningEfforts?.[1].name, "High");
+});
+
+
+test("sendPrompt rejects only when DSH sessions.models reports routable=false", async () => {
+	const { host, calls } = makeFakeHost({
+		modelsValue: {
+			current: { provider: "gone-provider", model: "gone-model" },
+			routable: false,
+			groups: [],
+			failures: [],
+		},
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "should not be sent" });
+	assert.equal(result.accepted, false);
+	assert.equal(result.i18nKey, "session.sendDshModelRouteUnavailable");
+	assert.equal(calls.prompt, 0);
+	assert.equal((await manager.getRuntimeState(tab.id)).modelRoutable, false);
 });
 
 test("setPermission 只在 permission/preset 事件到达后报告成功，且命令不投影为用户消息", async () => {
@@ -1434,15 +1453,39 @@ test("sendPrompt 仍拒绝 DSH 不支持的宿主指令", async () => {
 	assert.equal(calls.prompt, 0, "宿主指令不得发给 host");
 });
 
-test("setModel 在回合进行中拒绝，错误带 busy", async () => {
-	const { host, client } = makeFakeHost();
+test("模型与思考强度在运行中交给后端，后续 step 使用已接受的选择", async () => {
+	const { host, client } = makeFakeHost({
+		modelsValue: {
+			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
+			routable: true,
+			groups: [],
+		},
+	});
 	const manager = new DshAgentManager(host, () => PROJECT);
 	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
 	await flush();
 	client.pushFrames(sessionEventFrame("session-fake-1", event("turn/start", 1)));
 	await flush();
-	await assert.rejects(
-		() => manager.setModel(tab.id, "llm-deepseek", "deepseek-v4-flash"),
-		/busy/,
-	);
+	const selectModelCalls = [];
+	client.sessions.selectModel = async (input) => {
+		selectModelCalls.push(input);
+		return {
+			result: {
+				ok: true,
+				value: {
+					selected: {
+						provider: input.provider,
+						model: input.model,
+						...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+					},
+				},
+			},
+		};
+	};
+
+	await manager.setThinking(tab.id, "max");
+	await manager.setModel(tab.id, "llm-deepseek", "deepseek-v4-flash");
+	assert.equal(selectModelCalls[0].reasoningEffort, "max");
+	assert.equal(selectModelCalls[1].provider, "llm-deepseek");
+	assert.equal(selectModelCalls[1].model, "deepseek-v4-flash");
 });

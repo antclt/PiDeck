@@ -14,28 +14,18 @@ function assertDisplay(actual, expected) {
 }
 
 /**
- * issue #146：运行中切换思考强度。
- * pi 的 set_thinking_level 在流式生成中也生效（下一轮生成），
- * 因此 UI 需要「xhigh->max」式的待生效指示。本测试锁定：
- * 1) 纯推导函数的行为；
- * 2) 渲染层关键接线（thinking 按钮 busy 时可用、pending 设置/清除契约）。
+ * 运行中切换思考强度：renderer 不预设“下一轮”语义，
+ * 只展示后端返回的最新 runtime state；是否作用于当前回合由后端决定。
  */
-test("computeThinkingDisplay: 无待生效切换时展示当前档位", () => {
-  assertDisplay(computeThinkingDisplay("xhigh", undefined), {
+test("computeThinkingDisplay: 有当前档位时展示当前档位", () => {
+  assertDisplay(computeThinkingDisplay("xhigh"), {
     levels: ["xhigh"],
     pending: false,
   });
 });
 
-test("computeThinkingDisplay: 有待生效切换时展示 from->to", () => {
-  assertDisplay(
-    computeThinkingDisplay("max", { from: "xhigh", to: "max" }),
-    { levels: ["xhigh", "max"], pending: true },
-  );
-});
-
 test("computeThinkingDisplay: 无任何档位信息时返回空序列", () => {
-  assertDisplay(computeThinkingDisplay(undefined, undefined), {
+  assertDisplay(computeThinkingDisplay(undefined), {
     levels: [],
     pending: false,
   });
@@ -65,16 +55,7 @@ test("resolveComposerThinkingLevel: 非 live 时忽略残留 state，展示 cata
   );
 });
 
-test("computeThinkingDisplay: 待生效切换优先于当前档位展示", () => {
-  // 切换成功后 runtime state 立即变为新档位（pi 的 get_state 返回新值），
-  // 但飞行中的生成仍用旧档位——展示必须用 pending 的 from/to，而不是 current。
-  assertDisplay(
-    computeThinkingDisplay("max", { from: "xhigh", to: "max" }),
-    { levels: ["xhigh", "max"], pending: true },
-  );
-});
-
-test("契约: thinking 按钮 busy 时可点（仅 Agent 启动中禁用）", () => {
+test("契约: thinking 按钮运行中可点，启动中禁用", () => {
   const components = readFileSync(
     "src/renderer/src/components/session/ComposerComponents.tsx",
     "utf8",
@@ -83,37 +64,26 @@ test("契约: thinking 按钮 busy 时可点（仅 Agent 启动中禁用）", ()
   assert.match(components, /disabled=\{props\.disabled\}/);
   assert.match(components, /disabled=\{props\.thinkingDisabled\}/);
   assert.match(components, /disabled=\{props\.modelDisabled \?\? props\.disabled\}/);
-  // 待生效指示必须接入底栏展示
-  assert.match(components, /thinkingPending\?: ThinkingLevelPending/);
-  assert.match(components, /thinkingDisplay\.levels\.map/);
+  assert.doesNotMatch(components, /thinkingPending|ThinkingLevelPending|thinkingDisplay\.levels\.map/);
 });
 
-test("契约: ComposerArea 传 thinkingDisabled=isStarting（不含 isBusy）", () => {
+test("契约: ComposerArea 不预先限制运行中的思考强度修改", () => {
   const area = readFileSync(
     "src/renderer/src/components/session/ComposerArea.tsx",
     "utf8",
   );
-  const components = readFileSync(
-    "src/renderer/src/components/session/ComposerComponents.tsx",
-    "utf8",
-  );
-  // 全局禁用仍含 isBusy（模板/附件等）；思考与模型按钮只被启动中禁用
+  // Pi/DSH 是否支持当前回合由后端决定，renderer 只在启动中禁用入口。
   assert.match(area, /disabled=\{composer\.isBusy \|\| composer\.isStarting\}/);
   assert.match(area, /thinkingDisabled=\{composer\.isStarting\}/);
   assert.match(area, /modelDisabled=\{composer\.isStarting\}/);
-  // 流式结束（没有进行中的生成）时清除待生效指示
-  assert.match(area, /!isStreaming && thinkingPendingMap\[props\.sessionId\]/);
-  // 非 live 残留 state 不能盖住 catalog 思考档位
-  assert.match(components, /resolveComposerThinkingLevel/);
 });
 
-test("契约: 流式生成中切换才记录待生效指示", () => {
+test("契约: runtime 返回的思考档位用于同步 SessionRecord", () => {
   const picker = readFileSync(
     "src/renderer/src/components/session/ComposerPickerHost.tsx",
     "utf8",
   );
-  assert.match(picker, /if \(runtime\?\.state\?\.isStreaming\)/);
-  assert.match(picker, /setThinkingPendingMap\(\(prev\) => \(\{ \.\.\.prev, \[sessionId\]: \{ from, to: level \} \}\)/);
-  // 连续切换时保留首次 from（当前生效档位不变，仍是最初的旧档位）
-  assert.match(picker, /thinkingPending\?\.from \?\? runtime\.state\.thinkingLevel/);
+  assert.match(picker, /const appliedThinkingLevel = agentState\.thinkingLevel \?\? level/);
+  assert.match(picker, /thinkingLevel: appliedThinkingLevel/);
+  assert.doesNotMatch(picker, /thinkingPending|setThinkingPending/);
 });

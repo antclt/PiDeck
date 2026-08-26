@@ -97,7 +97,7 @@ test("timeline marks scroller busy for full agent run", () => {
     "src/renderer/src/components/session/SessionMessageTimeline.tsx",
     "utf8",
   );
-  assert.match(timelineSource, /busy=\{isAgentBusy \|\| isAwaitingAssistant\}/);
+  assert.match(timelineSource, /busy=\{isRuntimeBusy \|\| isAwaitingAssistant\}/);
 });
 
 // 工具卡入场仅淡入（可有 opacity animation），禁止位移。

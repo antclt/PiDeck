@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { usePersistedPanelWidth } from "./usePersistedPanelWidth";
 
 // Keep the default workbench geometry aligned with the main dev branch. The
 // Session-first change only affects when a runtime begins, not sidebar width.
@@ -11,7 +12,17 @@ export const LIST_WIDTH_STORAGE_KEY = "pid:list-width";
 
 export type UseResizeOptions = {
   storage?: Pick<Storage, "getItem" | "setItem">;
+  /** durable settings 读取器；localStorage 只作为首屏缓存/旧版本迁移来源。 */
+  loadPersistedWidth?: () => Promise<unknown>;
+  /** durable settings 写入器；失败不应影响拖拽布局。 */
+  persistWidth?: (width: number) => void | Promise<unknown>;
 };
+
+/** 将外部设置中的侧栏宽度规范化到面板可拖拽范围；非法值返回 null。 */
+export function parseListWidth(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(LIST_WIDTH_MAX, Math.max(LIST_WIDTH_MIN, Math.round(value)));
+}
 
 /**
  * 读取持久化侧栏宽度：
@@ -26,7 +37,7 @@ export function readListWidth(storage: UseResizeOptions["storage"] | undefined):
     if (raw === null) return DEFAULT_LIST_WIDTH;
     const width = Number(raw);
     if (!Number.isFinite(width)) return DEFAULT_LIST_WIDTH;
-    return Math.min(LIST_WIDTH_MAX, Math.max(LIST_WIDTH_MIN, Math.round(width)));
+    return parseListWidth(width) ?? DEFAULT_LIST_WIDTH;
   } catch {
     return DEFAULT_LIST_WIDTH;
   }
@@ -48,7 +59,8 @@ export function writeListWidth(storage: UseResizeOptions["storage"] | undefined,
  * 持久化约定：
  * - 只记忆展开宽度（拖拽提交路径回写，AppShell 拖拽折叠时不会调用 setListWidth），
  *   从不记忆折叠状态——重启后侧栏总是展开，避免“上次折叠成 0 → 这次找不到侧栏”。
- * - 初始宽度从 localStorage 恢复（clamp 到可调范围），宽度变化即写回，无需节流。
+ * - 初始宽度先从 localStorage 恢复（clamp 到可调范围），随后由应用设置异步校准；
+ *   宽度变化同步更新缓存，并延迟写入 durable settings。
  */
 export function useResize(options: UseResizeOptions = {}) {
   const storageRef = useRef(options.storage ?? (typeof window !== "undefined" ? window.localStorage : undefined));
@@ -58,10 +70,16 @@ export function useResize(options: UseResizeOptions = {}) {
   useEffect(() => {
     writeListWidth(storageRef.current, listWidth);
   }, [listWidth]);
+  usePersistedPanelWidth({
+    width: listWidth,
+    setWidth: setListWidth,
+    normalize: parseListWidth,
+    loadPersistedWidth: options.loadPersistedWidth,
+    persistWidth: options.persistWidth,
+  });
 
   function toggleListCollapsed() {
     const nextCollapsed = !listCollapsed;
-    if (!nextCollapsed) setListWidth(DEFAULT_LIST_WIDTH);
     if (nextCollapsed) {
       // 收起后焦点仍可能留在侧栏中的控件上；先释放，避免隐藏内容保留键盘焦点。
       (document.activeElement as HTMLElement | null)?.blur();

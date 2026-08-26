@@ -295,7 +295,7 @@ test("offline Session Viewer preserves the full active branch for renderer pagin
 	assert.equal(messages.at(-1).text, "fixture message 99");
 });
 
-test("offline Session Viewer reads only the requested historical page", async () => {
+test("offline Session Viewer reads complete historical turns only", async () => {
 	const { AgentManager } = loadAgentManagerModule();
 	const manager = new AgentManager(
 		() => undefined,
@@ -323,23 +323,23 @@ test("offline Session Viewer reads only the requested historical page", async ()
 	}
 	try {
 		await writeFile(sessionPath, `${lines.join("\n")}\n`, "utf8");
-		const newest = await manager.readSessionDisplayMessagePage(sessionPath, "viewer", undefined, 25);
+		const newest = await manager.readSessionDisplayTurnPage(sessionPath, "viewer", undefined, 25);
 		assert.equal(newest.total, 150);
-		assert.equal(newest.messages.length, 25);
-		assert.equal(newest.messages[0].text, "fixture message 125");
+		assert.equal(newest.messages.length, 20);
+		assert.equal(newest.messages[0].text, "fixture message 130");
 		assert.equal(newest.messages.at(-1).text, "fixture message 149");
-		assert.equal(newest.nextBefore, 125);
+		assert.equal(newest.nextBefore, 130);
 
-		const older = await manager.readSessionDisplayMessagePage(sessionPath, "viewer", newest.nextBefore, 25);
-		assert.equal(older.messages[0].text, "fixture message 100");
-		assert.equal(older.messages.at(-1).text, "fixture message 124");
-		assert.equal(older.nextBefore, 100);
+		const older = await manager.readSessionDisplayTurnPage(sessionPath, "viewer", newest.nextBefore ?? undefined, 25);
+		assert.equal(older.messages[0].text, "fixture message 110");
+		assert.equal(older.messages.at(-1).text, "fixture message 129");
+		assert.equal(older.nextBefore, 110);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
 });
 
-test("offline Session Viewer caps a large-text page by bytes without dropping the newest entry", async () => {
+test("offline Session Viewer caps a large-text turn page by bytes without splitting the newest turn", async () => {
 	const { AgentManager } = loadAgentManagerModule();
 	const manager = new AgentManager(() => undefined, () => null, { get: () => ({}) }, {});
 	const directory = await mkdtemp(join(tmpdir(), "pideck-history-page-bytes-"));
@@ -347,21 +347,29 @@ test("offline Session Viewer caps a large-text page by bytes without dropping th
 	const lines = [JSON.stringify({ id: "session", type: "session" })];
 	let parentId = "session";
 	for (let index = 0; index < 10; index += 1) {
-		const id = `message-${index}`;
+		const userId = `user-${index}`;
 		lines.push(JSON.stringify({
-			id,
+			id: userId,
+			parentId,
+			type: "message",
+			message: { role: "user", content: [{ type: "text", text: "x" }] },
+		}));
+		parentId = userId;
+		const assistantId = `assistant-${index}`;
+		lines.push(JSON.stringify({
+			id: assistantId,
 			parentId,
 			type: "message",
 			message: { role: "assistant", content: [{ type: "text", text: "x".repeat(100_000) }] },
 		}));
-		parentId = id;
+		parentId = assistantId;
 	}
 	try {
 		await writeFile(sessionPath, `${lines.join("\n")}\n`, "utf8");
-		const page = await manager.readSessionDisplayMessagePage(sessionPath, "viewer", undefined, 100);
+		const page = await manager.readSessionDisplayTurnPage(sessionPath, "viewer", undefined, 100);
 		assert.equal(page.messages.at(-1).text.length, 100_000);
-		assert.ok(page.messages.length < 10, "a byte budget should constrain the requested message count");
-		assert.equal(page.nextBefore, 8);
+		assert.equal(page.messages.length, 4, "a byte budget should drop older complete turns without splitting the newest turns");
+		assert.equal(page.nextBefore, 16);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}

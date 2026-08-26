@@ -17,8 +17,8 @@ type RuntimeLike = {
 } | undefined;
 
 /**
- * 生成结束后把「待生效」模型套到仍活着的 Agent。
- * 只写 catalog 不够：applyPreferences 只在启动/重启时跑，同一会话继续聊会仍用旧模型。
+ * 当后端明确拒绝运行中模型切换时，把待选模型在 runtime 空闲后重新提交；
+ * 支持 live selection 的后端不会进入这条 fallback 路径。
  */
 export function usePendingModelApply(input: {
   sessionId: string;

@@ -6,9 +6,10 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { AgentTab, AgentUiResponse, ChatMessage, GitBranchInfo, ImageContent, Project, TerminalTarget } from "../../../../shared/types";
+import type { AgentTab, AgentUiResponse, ChatMessage, GitBranchInfo, ImageContent, Project } from "../../../../shared/types";
 import type { QueuedPrompt } from "../../hooks/useQueuedPrompt";
 import type { NoticeId } from "../../utils/notice";
+import type { TerminalDockStateByOwner } from "../../terminalDockState";
 
 /**
  * 会话栏共享服务：跨分屏双栏稳定不变的回调与资源。
@@ -58,17 +59,13 @@ export type SessionPaneServices = {
   showThinking: boolean;
   validCommandNames: Set<string>;
   validFilePaths: Set<string>;
-  terminalOpen: boolean;
-  terminalDockClosing: boolean;
-  terminalDockVisible: boolean;
-  terminalCollapsed: boolean;
+  terminalStatesByOwner: TerminalDockStateByOwner;
   availableTerminalHeight: number;
-  /** 终端归属键（agent:<id> / project:<id>）：dock 实例与状态回写按它隔离 */
-  terminalOwnerKey?: string;
-  /** agent 或 project 终端目标（App 层按 owner 解析） */
-  terminalTarget?: TerminalTarget;
-  setTerminalOpenForOwner: (open: boolean) => void;
-  setTerminalCollapsedForOwner: (collapsed: boolean) => void;
+  /** App 级激活 owner 键（agent:<id> / project:<id>）：分屏去重参照 + 大纲按钮状态） */
+  activeTerminalOwnerKey?: string;
+  /** 按 owner key 开关终端（分屏各栏用自己的 owner 调，不再只写「当前激活 owner」） */
+  setTerminalOpenByOwnerKey: (ownerKey: string, open: boolean) => void;
+  setTerminalCollapsedByOwnerKey: (ownerKey: string, collapsed: boolean) => void;
   /** 回写终端分屏高度（全局单份，useTerminalDock 内部持久化） */
   setTerminalHeight: (height: number) => void;
   configOpen: boolean;

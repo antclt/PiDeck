@@ -38,6 +38,10 @@ export type SessionMessagePage = {
 	messages: ChatMessage[];
 	total: number;
 	nextBefore: number | null;
+	/** 当前活动分支最后使用的模型；由历史索引读取时顺手提取。 */
+	model?: { provider: string; modelId: string };
+	/** 当前活动分支最后记录的思考档位；无显式记录但有模型时回退为 off。 */
+	thinkingLevel?: string;
 	/**
 	 * 下一页锚点（entryId，2026-11 缓存优先）：页最旧条目的 entryId。
 	 * 主进程缓存命中路径用它做续页游标（跨下标空间稳定）；文件路径同义于 nextBefore 指向的条目。

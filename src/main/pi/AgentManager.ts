@@ -293,6 +293,11 @@ export class AgentManager {
 	 * 用户随后发送的新消息可能撞上 Pi 内部 compaction，表现为“会话中断”。
 	 */
 	private readonly rpcCompactingAgents = new Set<string>();
+	/**
+	 * pi 的逻辑模型回合边界（agent_start → true，agent_end → false）。
+	 * 与 tab.status 分离：压缩/重试收尾时 runtime 仍 busy，但上一轮回答已经完成。
+	 */
+	private readonly agentTurnActiveById = new Map<string, boolean>();
 	/** 正在执行模型配置刷新的 agent，用于退出处理器中忽略进程退出事件 */
 	private readonly modelRefreshingAgents = new Set<string>();
 	/** 用户主动停止的 agent，用于退出处理器中跳过自动重连 */
@@ -869,21 +874,6 @@ export class AgentManager {
 		);
 	}
 
-	async readSessionDisplayMessagePage(
-		sessionPath: string,
-		agentId = "_viewer",
-		before?: number,
-		pageSize?: number,
-	): Promise<SessionMessagePage> {
-		const page = await this.sessionHistoryReader.readSessionDisplayMessagePage(
-			sessionPath,
-			agentId,
-			before,
-			pageSize,
-		);
-		return { ...page, messages: stripToolResultForDelivery(page.messages) };
-	}
-
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
 	async readSessionDisplayTurnPage(
 		sessionPath: string,
@@ -900,6 +890,13 @@ export class AgentManager {
 			beforeEntryId,
 		);
 		return { ...page, messages: stripToolResultForDelivery(page.messages) };
+	}
+
+	/** 从同一份历史显示索引读取模型/思考元数据，避免再次走 SessionScanner 摘要读取。 */
+	async readSessionDisplayMetadata(
+		sessionPath: string,
+	): Promise<Pick<SessionMessagePage, "model" | "thinkingLevel">> {
+		return this.sessionHistoryReader.readSessionMetadata(sessionPath);
 	}
 
 	/**
@@ -1869,6 +1866,7 @@ export class AgentManager {
 		// 必须在发送 abort RPC 之前加入集合，避免事件处理函数在 RPC 发出后、
 		// handlePiEvent 返回前收到管道中的旧事件并重建 assistant 消息。
 		this.recentlyAborted.add(agentId);
+		this.setAgentTurnActive(agentId, false);
 		// 封印当前 stream generation：比 recentlyAborted 更硬，不依赖 activeAssistantMessageIds 例外条件，
 		// 残留 thinking/text/tool 事件在 abort settled 前一律丢弃。
 		this.sealAgentStream(agentId);
@@ -2207,6 +2205,9 @@ export class AgentManager {
 		modelId: model?.id,
 		thinkingLevel: state?.thinkingLevel,
 		isStreaming: state?.isStreaming || this.streamingAgents.has(agentId),
+		...(this.agentTurnActiveById.has(agentId)
+			? { isTurnActive: this.agentTurnActiveById.get(agentId) }
+			: {}),
 		isCompacting:
 			state?.isCompacting ||
 			this.rpcCompactingAgents.has(agentId) ||
@@ -2336,6 +2337,8 @@ export class AgentManager {
 
 	async setModel(agentId: string, provider: string, modelId: string) {
 		const runtime = this.requireRuntime(agentId);
+		// Pi RPC 没有运行中 busy 门禁：set_model 立即更新 Agent state；已经发出的
+		// provider request 不可改写，后续同一 turn step/下一次 request 会读取新模型。
 		const response = await runtime.process.client.request(
 			{ type: "set_model", provider, modelId },
 			60_000,
@@ -2461,6 +2464,8 @@ export class AgentManager {
 
 	async setThinking(agentId: string, level: string) {
 		const runtime = this.requireRuntime(agentId);
+		// 与 set_model 相同：Pi 允许运行中更新 state，具体 request 是否已经发出
+		// 由 Agent 自己决定；PiDeck 不把它预先降级成下一轮 pending。
 		await runtime.process.client.request(
 			{ type: "set_thinking_level", level },
 			60_000,
@@ -2956,6 +2961,7 @@ export class AgentManager {
 		this.lastSentThinkingByAgent.delete(agentId);
 		this.thinkingPushCountByAgent.delete(agentId);
 		this.rpcCompactingAgents.delete(agentId);
+		this.agentTurnActiveById.delete(agentId);
 		this.autoRestartAttempted.delete(agentId);
 		this.messagePerfByAgent.delete(agentId);
 		this.lastPerfByAgent.delete(agentId);
@@ -3769,6 +3775,7 @@ export class AgentManager {
 			this.recentlyAborted.delete(agentId);
 			this.notifiedAskAgents.delete(agentId);
 			this.openAgentStream(agentId);
+			this.setAgentTurnActive(agentId, true);
 			runtime.tab.status = "running";
 			this.activeAssistantMessageIds.delete(agentId);
 			this.toolMessageIds.delete(agentId);
@@ -3887,6 +3894,9 @@ export class AgentManager {
 		}
 
 		if (typed.type === "agent_end") {
+			// agent_end closes the logical response turn even when Pi continues with
+			// compaction/retry bookkeeping and keeps the runtime busy.
+			this.setAgentTurnActive(agentId, false);
 			// agent_end 只表示一次底层 run 结束；Pi 之后仍可能执行自动重试、自动压缩，
 			// 或压缩后继续 queued follow-up。最终空闲必须等 agent_settled，避免中途误判 idle。
 			if (runtime) {
@@ -5362,6 +5372,7 @@ export class AgentManager {
 		};
 		if (state.isStreaming || state.isCompacting || (state.pendingMessageCount ?? 0) > 0) return;
 
+		this.setAgentTurnActive(agentId, false);
 		runtime.tab.status = "idle";
 		this.finalizeThinkingIntoMessage(agentId);
 		this.flushMessageEmit(agentId);
@@ -5731,6 +5742,17 @@ export class AgentManager {
 				executingToolName: this.toolExecutingByAgent.get(agentId) ?? undefined,
 				toolStateSequence: this.toolStateSequenceByAgent.get(agentId) ?? 0,
 			} as AgentRuntimeState,
+		});
+	}
+
+	private setAgentTurnActive(agentId: string, isTurnActive: boolean) {
+		if (this.agentTurnActiveById.get(agentId) === isTurnActive) return;
+		this.agentTurnActiveById.set(agentId, isTurnActive);
+		// agent_start/agent_end are protocol edges, so publish immediately instead
+		// of waiting for the next asynchronous get_state snapshot.
+		this.emit(ipcChannels.agentsRuntimeState, {
+			agentId,
+			state: { isTurnActive },
 		});
 	}
 

@@ -7,6 +7,8 @@
  * 避免 agents 刷新时被错误 prune 导致流式输出中途自动隐藏。
  */
 
+import type { TerminalTarget } from "../../shared/types";
+
 export type TerminalDockOwnerKind = "agent" | "project";
 
 export type TerminalDockOwner = {
@@ -150,6 +152,79 @@ export function migrateTerminalDockAgentState(
 
 /** 拖拽分隔条到该像素值及以下视为折叠（与终端面板 collapsedSize=34 配套的判定阈值） */
 export const TERMINAL_COLLAPSE_THRESHOLD_PX = 35;
+
+/**
+ * 分屏下某会话栏是否挂载自己的终端面板（纯函数，可单测）。
+ *
+ * 业务规则：终端 open 状态按 owner（agent:<id> / project:<id>）隔离，分屏双栏各自
+ * 解析自己会话的 owner 并独立取状态；唯一冲突点是「同一 owner 同时出现在两个栏」
+ * （共享项目终端：同项目的两条历史会话都回退 project owner）——此时只允许聚焦栏挂载，
+ * 避免同一 owner 的两个 TerminalDock 实例订阅同一 PTY 数据、双份回放同一缓冲区。
+ *
+ * - owner 未解析（无 agent 也无 project）→ 不挂载
+ * - 该 owner 终端未打开 → 不挂载
+ * - owner 与当前激活 owner 相同 → 仅聚焦栏挂载（随焦点走，仍是同一份终端）
+ * - owner 与激活 owner 不同（分屏双栏各有自己的 agent）→ 不随焦点消失，持续显示
+ */
+export function shouldMountPaneTerminalDock(input: {
+	ownerKey: string | undefined;
+	activeOwnerKey: string | undefined;
+	focused: boolean;
+	open: boolean;
+}): boolean {
+	if (!input.ownerKey || !input.open) return false;
+	if (input.ownerKey === input.activeOwnerKey) return input.focused;
+	return true;
+}
+
+/**
+ * 单栏视角的终端归属 + 目标解析（纯函数，可单测）：
+ * 会话栏把自家会话的 runtime/record 喂进来，得到本栏自己的 owner 与 target，
+ * 不再读取 App 级聚焦态（分屏双栏各挂各的 dock，焦点切换不清非聚焦栏终端）。
+ * - agent runtime 可用 → agent 目标；绑定缺失 → 回退本会话项目的 cwd 目标。
+ * - Chat 项目没有可落地的 cwd，不提供终端。
+ * - owner 未解析（无 agent 也无 project）→ undefined。
+ */
+export function resolvePaneTerminal(input: {
+	sessionId: string;
+	runtime: {
+		agentId?: string;
+		runtimeGeneration?: number;
+		status?: string | null;
+	} | undefined;
+	projectId?: string;
+	project?: { id: string; path: string; kind?: string } | undefined;
+}): { owner: TerminalDockOwner; target: TerminalTarget } | undefined {
+	const owner = resolveTerminalOwner(input.runtime?.agentId, input.projectId);
+	if (!owner) return undefined;
+	if (owner.kind === "agent") {
+		// 与 shared 层 toSessionRuntimeTarget 同构：target 只表达「会话→当前绑定运行实例」句柄
+		const agentId = input.runtime?.agentId;
+		const runtimeGeneration = input.runtime?.runtimeGeneration;
+		if (agentId && runtimeGeneration !== undefined) {
+			return {
+				owner,
+				target: {
+					kind: "agent",
+					sessionId: input.sessionId,
+					agentId,
+					runtimeGeneration,
+				},
+			};
+		}
+	}
+	if (input.project && input.project.kind !== "chat") {
+		return {
+			owner,
+			target: {
+				kind: "project",
+				projectId: input.project.id,
+				cwd: input.project.path,
+			},
+		};
+	}
+	return undefined;
+}
 
 /**
  * 终端分屏面板 onResize 的统一裁决（纯函数，会话视图与引导页共用）。

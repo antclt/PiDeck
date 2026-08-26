@@ -71,11 +71,6 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
       terminalRowHeight={layout.terminalRowHeight}
       activeQueuedPrompts={activeQueuedPrompts}
       queuedTrackRef={localQueuedTrackRef}
-      terminalOwnerKey={services.terminalOwnerKey}
-      terminalTarget={services.terminalTarget}
-      setTerminalOpenForOwner={services.setTerminalOpenForOwner}
-      setTerminalCollapsedForOwner={services.setTerminalCollapsedForOwner}
-      setTerminalHeight={services.setTerminalHeight}
     />
   );
 }
