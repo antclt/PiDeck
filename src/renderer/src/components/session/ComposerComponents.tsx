@@ -66,7 +66,7 @@ import {
   readWelcomeThinkingPreference,
 } from "../../utils/chatSessionBootstrap";
 import { CommandPickerGroup, CommandPickerPanel } from "../ui-shadcn/command-picker";
-import { THINKING_LEVELS, groupModelsByProvider } from "./sessionPickerOptions";
+import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider } from "./sessionPickerOptions";
 import type {
 	AgentBackend,
 	AgentRuntimeState,
@@ -747,6 +747,8 @@ function CommandPickerDialog(props: {
 	emptyLabel?: ReactNode;
 	value?: string;
 	showGroupActions?: boolean;
+	/** 初始折叠的分组 id 集合；透传给 CommandPickerPanel（模型选择器用它实现「仅当前模型可见」的默认态）。 */
+	defaultCollapsedGroupIds?: string[];
 	/** 标题栏操作（如模型列表手动刷新按钮）；渲染在折叠/展开按钮之后、关闭按钮之前 */
 	headerAction?: ReactNode;
 	children: ReactNode;
@@ -767,6 +769,7 @@ function CommandPickerDialog(props: {
 					emptyLabel={props.emptyLabel ?? t("app.commandPickerEmpty")}
 					value={props.value}
 					showGroupActions={props.showGroupActions}
+					defaultCollapsedGroupIds={props.defaultCollapsedGroupIds}
 					headerAction={props.headerAction}
 					onClose={props.onClose}
 				>
@@ -876,6 +879,18 @@ export function ModelPicker(props: {
 		return a.localeCompare(b);
 	});
 
+	// 初始折叠规则（「当前选中模型可见」）：默认只展开收藏栏 + 当前模型所在提供商，
+	// 其余提供商全部折叠；无收藏且无当前模型时回退第一个提供商，避免空列表。
+	// 收藏栏 id "favorites" 不在初始折叠集合里，天然保持展开。
+	const defaultExpandedGroupIds = computeModelPickerDefaultExpanded({
+		favorites,
+		current: props.current,
+		providers: sortedProviders,
+	});
+	const defaultCollapsedGroupIds = sortedProviders
+		.map((provider) => `provider:${provider}`)
+		.filter((id) => !defaultExpandedGroupIds.includes(id));
+
 	const renderModelRow = (model: AvailableModel, valueOverride?: string) => {
 		const modelKey = `${model.provider}/${model.id}`;
 		const selected = modelKey === currentModelKey;
@@ -925,6 +940,7 @@ export function ModelPicker(props: {
 			emptyLabel={t("app.modelPickerEmpty")}
 			value={currentModelKey}
 			showGroupActions
+			defaultCollapsedGroupIds={defaultCollapsedGroupIds}
 			// 手动刷新入口：标题栏右上角，任何情况下（含加载失败）都能重新拉取模型列表。
 			headerAction={
 				props.onRefresh ? (

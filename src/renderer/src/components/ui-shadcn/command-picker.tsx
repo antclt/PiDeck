@@ -74,12 +74,16 @@ export function CommandPickerPanel(props: {
 	showGroupActions?: boolean;
 	/** 标题栏操作（模型列表手动刷新等）；置于折叠/展开按钮之后、关闭按钮之前 */
 	headerAction?: ReactNode;
+	/** 初始折叠的分组 id 集合。选择器每次打开重新挂载，该值即每次打开时的默认折叠态；缺省全部展开（历史行为）。 */
+	defaultCollapsedGroupIds?: string[];
 	children: ReactNode;
 	className?: string;
 }) {
 	const [search, setSearch] = useState("");
 	const [allCollapsed, setAllCollapsed] = useState(false);
-	const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+	const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+		() => new Set(props.defaultCollapsedGroupIds ?? []),
+	);
 	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 	const listHostRef = useRef<HTMLDivElement | null>(null);
 
