@@ -9,8 +9,15 @@ import type { SeedProject } from "./fixtures";
  * 创建真实存在的临时项目目录（ProjectStore 需要路径有效），
  * 返回可传给 test.use({ seedProjects }) 的种子项目。
  */
+/**
+ * 生成 e2e 预置项目：临时目录 + 稳定 id。
+ * 注意：目录前缀必须避开 projectPathPolicy.isEphemeralProjectPath 的过滤名单
+ * （pideck-mockpi-/pideck-e2e-/pideck-fv- 等），否则 ProjectStore.load 启动时
+ * 会把种子项目当 e2e 残留清掉，侧栏只剩内置 Chat（layout/drawer/file-viewer
+ * 等点击项目行的 spec 会因项目行缺失而失败）。
+ */
 export function makeSeedProject(name: string, id = `e2e-${name.toLowerCase().replace(/\s+/g, "-")}`): SeedProject {
-	const dir = mkdtempSync(join(tmpdir(), `pideck-e2e-${name.toLowerCase().replace(/\s+/g, "-")}-`));
+	const dir = mkdtempSync(join(tmpdir(), `pideck-seed-${name.toLowerCase().replace(/\s+/g, "-")}-`));
 	mkdirSync(dir, { recursive: true });
 	return { id, name, path: dir };
 }

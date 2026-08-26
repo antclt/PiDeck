@@ -80,7 +80,7 @@ export const SPLIT_GROUP_COLOR_PALETTE = [
  *
  * 操作入口（融合对方收敛方案）：
  * - 每个会话 Tab 的下拉按钮（或右键）打开操作菜单：切换到该会话、固定、
- *   停止（关闭会话，仅当前 Tab）、重启（仅当前 Tab）、关闭/关闭其他/关闭全部；
+ *   停止 Agent（仅当前 Tab，保留会话与 Tab）、重启（仅当前 Tab）、关闭/关闭其他/关闭全部；
  * - 当前 Tab 识别：背景浮起（bg-accent/20 + shadow-sm + 强边框），
  *   与左侧 SessionTree 选中态同一套语义，不再画底部横条（曾因过粗被弃用）。
 
@@ -180,7 +180,7 @@ export type SessionTabsBarProps = {
   onSelectEditorTab?: (tabId: string) => void;
   onCloseEditorTab?: (tabId: string) => void;
   onPromoteEditorPreview?: (tabId: string) => void;
-  /** 当前会话的停止（关闭会话）能力：只对当前会话 Tab 生效。 */
+  /** 当前会话的停止 Agent 能力（停掉绑定的 pi/DSH 进程，保留会话与 Tab）：只对当前会话 Tab 生效。 */
   canStopCurrent?: boolean;
   onStopCurrent?: () => void;
   /** 当前会话的重启能力：只对当前会话 Tab 生效。 */
@@ -624,7 +624,7 @@ function SessionTab(props: {
   dragging: boolean;
   /** 拖拽插入指示：before=左缘竖线，after=右缘竖线 */
   indicator?: "before" | "after" | null;
-  /** 停止（关闭会话）入口（仅当前会话 Tab 传入）：canStop=false 时禁用 */
+  /** 停止 Agent 入口（仅当前会话 Tab 传入）：canStop=false 时禁用 */
   canStop?: boolean;
   onStop?: () => void;
   /** 重启入口（仅当前会话 Tab 传入）：canRestart=false 时禁用，isRestarting 时显示“重启中…” */
@@ -791,7 +791,7 @@ function SessionTab(props: {
         )}
       </div>
       <DropdownMenuContent align="start" side="bottom" className="min-w-40">
-        {/* 停止/重启按 agent 状态置灰：用内联 style 而非 className——
+        {/* 停止按 agent 状态置灰、重启在重启中置灰：用内联 style 而非 className——
             shadcn 默认 data-[disabled]:opacity-50 在部分主题/层序下不显眼，
             内联样式特异性最高，任何 CSS 都覆盖不了，保证灰化可见。 */}
         <DropdownMenuItem onSelect={() => props.onTogglePin(sessionId)}>
@@ -808,7 +808,7 @@ function SessionTab(props: {
           >
             <span className="inline-flex items-center gap-2">
               <CircleStop className="size-3.5" aria-hidden="true" />
-              {t("tabs.closeSession")}
+              {t("tabs.stopAgent")}
             </span>
           </DropdownMenuItem>
         )}
@@ -824,7 +824,7 @@ function SessionTab(props: {
             </span>
           </DropdownMenuItem>
         )}
-        {/* 重新加载会话：与重启互斥（无 live 运行时才显示），从磁盘刷新被外部修改的消息文件。 */}
+        {/* 重新加载会话：无 live 运行时可用（从磁盘刷新被外部修改的消息文件，不启动进程）；重启现全状态可用，二者可并存 */}
         {active && props.onReload && (
           <DropdownMenuItem
             disabled={!props.canReload}

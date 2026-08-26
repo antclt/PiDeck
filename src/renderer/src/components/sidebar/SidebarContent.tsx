@@ -60,6 +60,8 @@ export type SidebarActions = {
     delete: (projectId: string, session: SessionSummary) => Promise<void>;
     /** 重新加载会话消息文件（未启动/异常的历史会话，从磁盘刷新） */
     reload: (projectId: string, session: SessionSummary) => Promise<void>;
+    /** 重启会话（全状态：失败/未启动/空闲/运行中，按绑定状态分派 restart/activate） */
+    restart: (projectId: string, session: SessionSummary) => Promise<void>;
     /** 归档会话（可恢复） */
     archive: (projectId: string, session: SessionSummary) => Promise<void>;
     /** 恢复归档会话 */
@@ -77,7 +79,7 @@ export type SidebarActions = {
     copyPath: (agent: AgentTab) => Promise<void>;
     openSessionFile: (agent: AgentTab) => Promise<void>;
     close: (agent: AgentTab) => Promise<void>;
-    /** 重启会话（仅 live Agent） */
+    /** 重启会话（全状态：live/error/closed/未启动，按绑定状态分派） */
     restart: (agent: AgentTab) => void;
     /** 重新加载会话消息文件（无 live 运行时） */
     reload: (agent: AgentTab) => Promise<void>;
@@ -262,8 +264,8 @@ export function SidebarContent(props: SidebarContentProps) {
           onCopySession={() => { void actions.agents.copySession(menuAgent); controller.closeMenu(); }}
           onCopySessionFilePath={() => { void actions.agents.copyPath(menuAgent); controller.closeMenu(); }}
           onOpenSessionFile={() => { void actions.agents.openSessionFile(menuAgent); controller.closeMenu(); }}
-          // 重启/重新加载按 live 状态二选一传入：live 显示重启，非 live 显示重新加载（见 SidebarComponents 渲染）
-          onRestartSession={menuAgentLive ? () => { actions.agents.restart(menuAgent); controller.closeMenu(); } : undefined}
+          // 重启会话对所有状态开放（actions.agents.restart 内部按绑定状态分派）；重新加载保留给无 live 运行时
+          onRestartSession={() => { actions.agents.restart(menuAgent); controller.closeMenu(); }}
           onReloadSession={!menuAgentLive ? () => { controller.closeMenu(); void actions.agents.reload(menuAgent); } : undefined}
           onToggleRpcLogging={() => {
             // 兜底：置灰的菜单项点击不触发 onSelect，这里防御 agent 状态在菜单打开期间变化的情况
@@ -327,6 +329,8 @@ export function SidebarContent(props: SidebarContentProps) {
           onClose={controller.closeMenu}
           onRename={() => { actions.sessions.rename(menu.projectId, menuSession); controller.closeMenu(); }}
           onOpenProxySetting={() => { controller.closeMenu(); setProxyDialogSessionId(menuSession.id); }}
+          // 重启会话（未启动的历史会话走 activateRuntime 启动；有绑定则走 restartRuntime）
+          onRestartSession={() => { controller.closeMenu(); void actions.sessions.restart(menu.projectId, menuSession); }}
           // 未启动的历史会话：从磁盘重新加载会话消息文件（外部修改后刷新）
           onReloadSession={() => { controller.closeMenu(); void actions.sessions.reload(menu.projectId, menuSession); }}
           onExport={() => { void actions.sessions.export(menu.projectId, menuSession); controller.closeMenu(); }}

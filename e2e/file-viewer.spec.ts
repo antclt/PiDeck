@@ -11,8 +11,8 @@ import { test, expect } from "./mock-pi-fixture";
  * （分屏比例与最大化/恢复的回归由 workbench-split.spec.ts 覆盖。）
  */
 
-// 预置带文件的项目目录
-const projectDir = mkdtempSync(join(tmpdir(), "pideck-fv-"));
+// 预置带文件的项目目录（前缀避开 isEphemeralProjectPath 过滤名单，否则种子项目启动时被清掉）
+const projectDir = mkdtempSync(join(tmpdir(), "pideck-seed-fv-"));
 writeFileSync(join(projectDir, "hello.ts"), "export const hello = 1;\n");
 
 test.use({
@@ -22,13 +22,13 @@ test.use({
 test("file viewer opens in workbench split and closes back to the drawer", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
-	// 进入预置项目：侧栏项目显示目录名（pideck-fv-*）
-	const projectItem = window.locator(".conversation", { hasText: "pideck-fv-" }).first();
+	// 进入预置项目：侧栏项目显示目录名（pideck-seed-fv-*）
+	const projectItem = window.locator(".conversation", { hasText: "pideck-seed-fv-" }).first();
 	await expect(projectItem).toBeVisible({ timeout: 20_000 });
 	await projectItem.click();
 	// 项目 select 后：点项目行的「新建 Agent」进入会话视图（main 无会话时空）
 	// 注：项目行按钮已迁移为 aria-label 定位（旧 .project-action 类已随侧栏重构移除）
-	const projectRow = window.locator(".conversation", { hasText: "pideck-fv-" }).first();
+	const projectRow = window.locator(".conversation", { hasText: "pideck-seed-fv-" }).first();
 	await projectRow.hover();
 	await projectRow.getByRole("button", { name: "新建 Agent" }).first().click();
 

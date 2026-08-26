@@ -63,6 +63,6 @@ test("layout: project present in sidebar hides the add-directory guide", async (
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 	await expect(window.getByText("添加你的项目目录")).toHaveCount(0, { timeout: 10_000 });
 	await expect(
-		window.locator(".conversation", { hasText: "pideck-e2e-layoute2e-" }).first(),
+		window.locator(".conversation", { hasText: "pideck-seed-layoute2e-" }).first(),
 	).toBeVisible({ timeout: 20_000 });
 });

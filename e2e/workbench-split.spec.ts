@@ -13,7 +13,8 @@ import { test, expect } from "./mock-pi-fixture";
  *
  * 同时覆盖：文件预览（view）与 DIFF 右上角始终有「关闭」按钮（chromeTabsExternal 不再隐藏）。
  */
-const projectDir = mkdtempSync(join(tmpdir(), "pideck-wb-"));
+// 项目目录避开 isEphemeralProjectPath 过滤名单（pideck-wb- 会被启动时清掉）
+const projectDir = mkdtempSync(join(tmpdir(), "pideck-seed-wb-"));
 writeFileSync(join(projectDir, "hello.ts"), "export const hello = 1;\n");
 
 test.use({
@@ -24,7 +25,7 @@ test("workbench: split → maximize → split 恢复会话面板宽度", async (
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
 	// 进入预置项目，打开右侧抽屉文件树
-	const projectItem = window.locator(".conversation", { hasText: "pideck-wb-" }).first();
+	const projectItem = window.locator(".conversation", { hasText: "pideck-seed-wb-" }).first();
 	await expect(projectItem).toBeVisible({ timeout: 20_000 });
 	await projectItem.click();
 	const toggle = window.locator(".header-drawer-toggle").first();
@@ -70,7 +71,7 @@ test("workbench: split → maximize → split 恢复会话面板宽度", async (
 test("workbench: 文件预览右上角始终有关闭按钮", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
-	const projectItem = window.locator(".conversation", { hasText: "pideck-wb-" }).first();
+	const projectItem = window.locator(".conversation", { hasText: "pideck-seed-wb-" }).first();
 	await expect(projectItem).toBeVisible({ timeout: 20_000 });
 	await projectItem.click();
 	const toggle = window.locator(".header-drawer-toggle").first();

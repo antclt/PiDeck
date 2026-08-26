@@ -19,16 +19,37 @@ export type SeedProject = { id: string; name: string; path: string; pinned?: boo
 /** 测试文件可通过 test.use({ seedFeishuBots }) 预置飞书 Bot 配置（写入 pi-desktop/feishu.json） */
 export type SeedFeishuBot = { id: string; name: string; appId: string };
 
+/** 测试文件可通过 test.use({ seedSessionFiles }) 预置历史会话文件（未启动 agent 场景）：
+ *  写入 <projectPath>/.pi/sessions/<encode>.jsonl + .pi/settings.json（sessionDir 配置），
+ *  SessionScanner 扫描后侧栏出现历史会话；打开时不 spawn agent，即「从未启动」状态。 */
+export type SeedSessionFile = {
+	projectPath: string;
+	/** JSONL 行（header + message entries），格式与 mock-pi.cjs appendSessionMessages 一致 */
+	entries: unknown[];
+};
+
+/** 把 cwd 编码成 pi sessions 目录名（与 mock-pi.cjs encodeSessionDir / SessionScanner.decodeSessionDir 对偶） */
+function encodeSessionDir(cwd: string): string {
+	const norm = cwd.replace(/\\/g, "/");
+	if (/^[A-Za-z]:/.test(norm)) {
+		const drive = norm[0].toUpperCase();
+		const rest = norm.slice(2).replace(/^\//, "").replace(/\//g, "-");
+		return `--${drive}--${rest}--`;
+	}
+	return `--${norm.replace(/^\//, "").replace(/\//g, "-")}--`;
+}
+
 /** 测试文件可通过 test.use({ seedSettings }) 追加预置设置项（合并进 settings.json） */
 export type SeedSettings = Record<string, unknown>;
 
 const repoRoot = resolve(__dirname, "..");
 
-export const test = base.extend<MockPiFixture & { seedProjects: SeedProject[] | undefined; seedFeishuBots: SeedFeishuBot[] | undefined; seedSettings: SeedSettings | undefined }>({
+export const test = base.extend<MockPiFixture & { seedProjects: SeedProject[] | undefined; seedFeishuBots: SeedFeishuBot[] | undefined; seedSessionFiles: SeedSessionFile[] | undefined; seedSettings: SeedSettings | undefined }>({
 	seedProjects: [undefined, { option: true }],
 	seedFeishuBots: [undefined, { option: true }],
+	seedSessionFiles: [undefined, { option: true }],
 	seedSettings: [undefined, { option: true }],
-	app: async ({ seedProjects, seedFeishuBots, seedSettings }, use) => {
+	app: async ({ seedProjects, seedFeishuBots, seedSessionFiles, seedSettings }, use) => {
 		const userDataRoot = mkdtempSync(join(tmpdir(), "pideck-mockpi-"));
 		try {
 			// Windows 桌面端通过 cmd shim 调起自定义 pi（见 PiLocator.createInvocation），
@@ -97,11 +118,40 @@ export const test = base.extend<MockPiFixture & { seedProjects: SeedProject[] | 
 				);
 			}
 
+			// 可选：预置历史会话文件（未启动 agent 场景）。mock-pi 的会话文件名 = encodeSessionDir(cwd) + ".jsonl"，
+			// 与 SessionScanner.decodeSessionDir 对偶；必须同时写 .pi/settings.json（sessionDir: ".pi/sessions"）
+			// 否则扫描根只有全局 ~/.pi/agent/sessions，项目级文件不会被发现。
+			if (seedSessionFiles && seedSessionFiles.length > 0) {
+				for (const seedFile of seedSessionFiles) {
+					const sessionsDir = join(seedFile.projectPath, ".pi", "sessions");
+					mkdirSync(sessionsDir, { recursive: true });
+					writeFileSync(
+						join(sessionsDir, encodeSessionDir(seedFile.projectPath) + ".jsonl"),
+						seedFile.entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+					);
+					writeFileSync(
+						join(seedFile.projectPath, ".pi", "settings.json"),
+						JSON.stringify({ sessionDir: ".pi/sessions" }, null, 2),
+					);
+				}
+			}
+
+			// 项目信任静默：seed 项目写 .pi/settings.json 会被 AgentManager 判定为「含 pi 配置资源」，
+			// spawn pi 时弹「项目信任确认」（60s 未点默认拒绝）。ConfigManager 用 os.homedir() 定位
+			// ~/.pi/agent/trust.json（Windows homedir() 读 USERPROFILE，见下 env 隔离）。
+			// 预写 trust.json 信任临时目录根，findNearestTrustEntry 沿父目录链继承 → 所有 seed 项目
+			// （mkdtempSync 在 tmpdir 下）直接放行，弹框根本不出现，也不污染真实 ~/.pi/agent。
+			const trustDir = join(userDataRoot, ".pi", "agent");
+			mkdirSync(trustDir, { recursive: true });
+			writeFileSync(join(trustDir, "trust.json"), JSON.stringify({ [tmpdir()]: true }));
+
 			const env = {
 				...process.env,
 				CI: "1",
+				// PIDECK_E2E：主进程 isE2E 开关，窗口 showInactive 不抢焦点、不最大化（见 main/index.ts）
+				PIDECK_E2E: "1",
 				...(process.platform === "win32"
-					? { APPDATA: userDataRoot }
+					? { APPDATA: userDataRoot, USERPROFILE: userDataRoot }
 					: process.platform === "darwin"
 						? { HOME: userDataRoot }
 						: { XDG_CONFIG_HOME: userDataRoot, HOME: userDataRoot }),
