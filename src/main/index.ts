@@ -296,7 +296,7 @@ import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
 import { registerSystemIpc } from "./ipc/systemIpc";
-import { fetchModelList, refreshModelList } from "./pi/modelListCache";
+import { fetchModelList, refreshModelCatalogIfStale, refreshModelList } from "./pi/modelListCache";
 import { registerFilesIpc } from "./ipc/filesIpc";
 import { registerClipboardIpc } from "./ipc/clipboardIpc";
 import {
@@ -3112,6 +3112,23 @@ app.whenReady().then(async () => {
 			const { piProxyProviders, piProxyModels } = settingsStore.get();
 			return resolveEffectiveSessionProxyMode(sessionMode, provider, modelId, piProxyProviders, piProxyModels);
 		},
+		// set_model 失败时判断模型是否在 pi 目录中（选择器同源）：模型在目录而 Agent
+		// 快照没有 → 目录是 Agent 启动后才更新的，标记 needsRestart 引导用户重启 Agent。
+		// 覆盖 auth.json 官方 provider 的目录模型（models.json 无此 provider 也能选能用）。
+		async (provider, modelId) => {
+			try {
+				const snapshot = await piModelCapabilityCache?.ensure();
+				const models =
+					snapshot && snapshot.models.length > 0
+						? snapshot.models
+						: await fetchModelList(piLocator, settingsStore, configManager);
+				return models.some((m) => m.provider === provider && m.id === modelId);
+			} catch {
+				// 目录查询失败（pi 缺失/CLI 异常等）时退回旧行为：不标 needsRestart，
+				// 保持错误形态不变，避免把可诊断错误变成误导性的“重启即可”。
+				return false;
+			}
+		},
 	);
 	// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 	quitCleanup.register("pi-agents", () => agentManager?.stopAll());
@@ -3568,6 +3585,24 @@ app.whenReady().then(async () => {
 	// 使用同一套 WSL HOME/config 目录；不阻塞首帧。
 	void syncWslConfig().then(async () => {
 		piModelCapabilityCache?.watchConfigDirectory();
+		// 冷启动先刷 pi 模型目录缓存（models-store.json）再 hydration：PiDeck 的 RPC
+		// 进程都带 --offline，pi 启动时的自动目录网络刷新被跳过；目录若不主动刷新
+		// 只能靠 TUI 更新，可能长期滞后（官方 provider 新模型导致「列表有、Agent
+		// 快照没有」的选择失败，2026-08 deepseek 场景）。目录过期才刷（mtime 节流），
+		// 过期时刷新失败也不挡启动——下次冷启动再试，watcher 兜底失效已发布快照。
+		await refreshModelCatalogIfStale(
+			piLocator,
+			settingsStore,
+			configManager.getConfigDir(),
+		).then((result) => {
+			if (result.ran) {
+				void appLogger.info("app", "Pi model catalog refresh at startup", {
+					ok: result.ok,
+				});
+			} else if (result.ok) {
+				void appLogger.debug("app", "Pi model catalog is fresh; skip refresh");
+			}
+		});
 		await piModelCapabilityCache?.ensure();
 	}).catch((error) => {
 		void appLogger.warn("app", "WSL config sync or Pi capability hydration failed", error);

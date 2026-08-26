@@ -132,13 +132,19 @@ export function parseAvailableModelsResponse(response: {
   return [...unique.values()];
 }
 
+// models-store.json 是 pi 的模型目录缓存（auth.json 官方 provider 的模型列表），
+// 由 pi update --models / TUI 网络刷新写入。目录更新后必须失效快照，否则选择器
+// 继续展示旧目录——与「运行中 Agent 启动快照」的错位正是 DeepSeek 新模型
+// 选择失败的根因（目录 09:39 更新，Agent 01:53 启动，快照只有旧模型）。
 function isRelevantConfigFile(fileName: string | Buffer | null): boolean {
   const normalized = typeof fileName === "string"
     ? fileName
     : Buffer.isBuffer(fileName)
       ? fileName.toString("utf8")
       : "";
-  return normalized === "models.json" || normalized === "auth.json";
+  return normalized === "models.json"
+    || normalized === "auth.json"
+    || normalized === "models-store.json";
 }
 
 /**
