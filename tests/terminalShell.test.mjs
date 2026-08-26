@@ -231,3 +231,20 @@ test("ensure returns existing tabs for the same owner instead of duplicating", (
 	assert.equal(second.length, 1);
 	assert.equal(spawns.length, 1);
 });
+
+test("terminal manager wiring resolves agent cwd through the composite gateway (multi-backend)", () => {
+  // 回归防护：终端 cwd 只从 pi agentManager 解析会让 DSH 会话（backend=dsh，runtime 在
+  // dshAgentManager）的终端在创建时抛 `Agent not found`，表现为「DSH 后端终端打不开」。
+  const source = readFileSync("src/main/index.ts", "utf8");
+  const start = source.indexOf("new TerminalSessionManager(");
+  assert.notEqual(start, -1);
+  const block = source.slice(
+    start,
+    source.indexOf("quitCleanup.register(\"terminal\"", start),
+  );
+  // 合成网关（pi + dsh）按 agentId 找 tab 拿 cwd；找不到时再退回 pi 管理器抛同语义错误
+  assert.match(block, /compositeAgentGateway/);
+  assert.match(block, /\.list\(\)/);
+  assert.match(block, /candidate\.id === agentId/);
+  assert.match(block, /return tab\.cwd/);
+});

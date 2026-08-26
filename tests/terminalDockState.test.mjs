@@ -124,8 +124,12 @@ test("terminal dock hook converts owners into canonical owner keys", () => {
   // agent/历史会话）与 agent owner 共用同一套键模型，保证不串台。
   assert.match(hookSource, /terminalOwnerKey\(activeOwner\)/);
   assert.match(hookSource, /terminalDockStateByOwner\[activeOwnerKey\]/);
-  assert.match(hookSource, /setTerminalDockOpen\(current, activeOwnerKey, open\)/);
-  assert.match(hookSource, /setTerminalDockCollapsed\(current, activeOwnerKey, collapsed\)/);
+  // 分屏各栏按自己的 owner key 写入状态表（per-owner setter），
+  // 激活 owner 的开关仍走同一入口，键模型不变。
+  assert.match(hookSource, /setTerminalDockOpen\(current, ownerKey, open\)/);
+  assert.match(hookSource, /setTerminalDockCollapsed\(current, ownerKey, collapsed\)/);
+  assert.match(hookSource, /setTerminalOpenByOwnerKey\(activeOwnerKey, open\)/);
+  assert.match(hookSource, /setTerminalCollapsedByOwnerKey\(activeOwnerKey, collapsed\)/);
   assert.match(hookSource, /activeOwner: TerminalDockOwner \| undefined/);
   // 分屏高度是全局单份并持久化（与抽屉宽度同策略）：首帧从 localStorage 恢复
   // 上次拖拽结果，拖拽回写时落盘；不再按 owner 分桶，项目/agent 终端共享同一高度。
@@ -266,4 +270,133 @@ test("runtime replacement mounts B directly and close completion cannot retain s
   assertMotion(agentB, { mounted: true, closing: false, agentId: "B" });
   assertMotion(closed, { mounted: false, closing: false, agentId: undefined });
   assertMotion(disposeSessionRuntimeDock(), { mounted: false, closing: false, agentId: undefined });
+});
+
+test("pane terminal dock stays mounted when its owner differs from the active owner", () => {
+  const { shouldMountPaneTerminalDock, terminalOwnerKey } = loadTerminalDockStateModule();
+  const agentA = terminalOwnerKey({ kind: "agent", id: "agentA" });
+  const agentB = terminalOwnerKey({ kind: "agent", id: "agentB" });
+  const projectP = terminalOwnerKey({ kind: "project", id: "projP" });
+
+  // 分屏双栏各有自己的 agent：聚焦切到 B 后，A 的终端不再消失（本次修复的核心契约）
+  assert.equal(
+    shouldMountPaneTerminalDock({
+      ownerKey: agentA,
+      activeOwnerKey: agentB,
+      focused: false,
+      open: true,
+    }),
+    true,
+  );
+  // 聚焦栏（owner 与激活 owner 相同）始终挂载
+  assert.equal(
+    shouldMountPaneTerminalDock({
+      ownerKey: agentA,
+      activeOwnerKey: agentA,
+      focused: true,
+      open: true,
+    }),
+    true,
+  );
+  // 终端没开 → 不挂载
+  assert.equal(
+    shouldMountPaneTerminalDock({
+      ownerKey: agentA,
+      activeOwnerKey: agentA,
+      focused: true,
+      open: false,
+    }),
+    false,
+  );
+  // owner 未解析（无 agent 也无 project）→ 不挂载
+  assert.equal(
+    shouldMountPaneTerminalDock({
+      ownerKey: undefined,
+      activeOwnerKey: agentA,
+      focused: true,
+      open: true,
+    }),
+    false,
+  );
+});
+
+test("shared project owner dereplicates against the focused pane", () => {
+  const { shouldMountPaneTerminalDock, terminalOwnerKey } = loadTerminalDockStateModule();
+  const projectP = terminalOwnerKey({ kind: "project", id: "projP" });
+
+  // 同一项目终端（两条历史会话都回退 project owner）：只允许聚焦栏挂载，
+  // 避免同一 owner 的两个 TerminalDock 双份订阅同一 PTY。
+  assert.equal(
+    shouldMountPaneTerminalDock({
+      ownerKey: projectP,
+      activeOwnerKey: projectP,
+      focused: true,
+      open: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldMountPaneTerminalDock({
+      ownerKey: projectP,
+      activeOwnerKey: projectP,
+      focused: false,
+      open: true,
+    }),
+    false,
+  );
+});
+
+test("pane terminal resolves agent target from its own runtime and project fallback", () => {
+  const { resolvePaneTerminal, terminalOwnerKey } = loadTerminalDockStateModule();
+
+  // agent runtime 可用 → agent 目标（runtimeGeneration 必须存在才算绑定句柄）
+  const withAgent = resolvePaneTerminal({
+    sessionId: "session-1",
+    runtime: { agentId: "agentA", runtimeGeneration: 3, status: "running" },
+    projectId: "projP",
+    project: { id: "projP", path: "C:/work/projP", kind: undefined },
+  });
+  assert.equal(withAgent.owner.kind, "agent");
+  assert.equal(withAgent.owner.id, "agentA");
+  assert.equal(withAgent.target.kind, "agent");
+  assert.equal(withAgent.target.agentId, "agentA");
+  assert.equal(withAgent.target.sessionId, "session-1");
+  assert.equal(withAgent.target.runtimeGeneration, 3);
+
+  // 无 runtime（历史会话）→ project 目标，owner 落 project
+  const history = resolvePaneTerminal({
+    sessionId: "session-2",
+    runtime: undefined,
+    projectId: "projP",
+    project: { id: "projP", path: "C:/work/projP" },
+  });
+  assert.equal(history.owner.kind, "project");
+  assert.equal(terminalOwnerKey(history.owner), "project:projP");
+  assert.equal(history.target.kind, "project");
+  assert.equal(history.target.cwd, "C:/work/projP");
+
+  // Chat 项目没有可落地的 cwd → 不提供终端
+  const chat = resolvePaneTerminal({
+    sessionId: "session-3",
+    runtime: undefined,
+    projectId: "chatP",
+    project: { id: "chatP", path: "chat", kind: "chat" },
+  });
+  assert.equal(chat, undefined);
+
+  // pending-* 只是渲染层占位 id，不能当作 agent owner
+  const pending = resolvePaneTerminal({
+    sessionId: "session-4",
+    runtime: { agentId: "pending-1", runtimeGeneration: 1 },
+    projectId: "projP",
+    project: { id: "projP", path: "C:/work/projP" },
+  });
+  assert.equal(pending.owner.kind, "project");
+  assert.equal(pending.target.kind, "project");
+
+  // 既无 agent 也无 project → undefined
+  assert.equal(
+    resolvePaneTerminal({ sessionId: "session-5", runtime: undefined }),
+    undefined,
+  );
 });

@@ -3437,7 +3437,18 @@ app.whenReady().then(async () => {
 	quitCleanup.register("theme-schedule", () => clearThemeScheduleTimer());
 	quitCleanup.register("web-service", () => webServiceManager?.stop());
 	terminalManager = new TerminalSessionManager(
-		(agentId) => agentManager.getCwd(agentId),
+		(agentId) => {
+			// 多后端：pi 与 DSH runtime 各持自己的 tab 表，终端工作目录必须经合成网关
+			// 按 agentId 解析。只查 pi agentManager 会让 DSH 会话的终端在创建时抛
+			// `Agent not found`，表现为「DSH 后端终端打不开」（渲染层静默吞掉该错误）。
+			const tab = compositeAgentGateway
+				?.list()
+				.find((candidate) => candidate.id === agentId);
+			if (tab) return tab.cwd;
+			// 网关未装配完成（启动极早期）时退回 pi 管理器；DSH agent 不在 pi 表里时
+			// 同样抛出与原来一致的 `Agent not found` 语义。
+			return agentManager.getCwd(agentId);
+		},
 		(channel, payload) => mainWindow?.webContents.send(channel, payload),
 		() => settingsStore.get(),
 	);
