@@ -1,4 +1,4 @@
-import type { AvailableModel } from "../../shared/types";
+import type { AvailableModel, DshDiscoveredModel, FetchedModel } from "../../shared/types";
 
 /**
  * DSH host 模型目录 → PiDeck AvailableModel 列表（纯函数，可单测）。
@@ -23,6 +23,8 @@ export type DshModelGroupInput = {
 	}>;
 };
 
+
+/** DSH host 模型目录 → PiDeck AvailableModel 列表（纯函数，可单测）。 */
 export function toDshAvailableModels(groups: DshModelGroupInput[]): AvailableModel[] {
 	const result: AvailableModel[] = [];
 	for (const group of groups) {
@@ -50,6 +52,22 @@ export function toDshAvailableModels(groups: DshModelGroupInput[]): AvailableMod
 					: {}),
 			});
 		}
+	}
+	return result;
+}
+
+/** DSH discovery candidates → the shared config-page fetched-model shape. */
+export function toDshFetchedModels(models: DshDiscoveredModel[]): FetchedModel[] {
+	const result: FetchedModel[] = [];
+	for (const model of models) {
+		const id = model.id.trim();
+		if (!id) continue;
+		result.push({
+			id,
+			...(typeof model.name === "string" && model.name ? { name: model.name } : {}),
+			...(typeof model.contextWindow === "number" ? { contextWindow: model.contextWindow } : {}),
+			...(typeof model.maxTokens === "number" ? { maxTokens: model.maxTokens } : {}),
+		});
 	}
 	return result;
 }

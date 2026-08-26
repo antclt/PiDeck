@@ -1,8 +1,8 @@
 /**
- * 生成进行中切换模型的「待生效」展示推导。
+ * 后端拒绝运行中模型切换时的 fallback 展示推导。
  *
- * pi 不支持运行中 set_model：本轮仍用旧模型，选择只写入会话记录。
- * 本轮结束后再套到 Agent。新加、不在启动快照里的模型不走这条路径（走重启确认）。
+ * 支持 live selection 的后端直接更新 runtime，不会设置 pending；只有 busy/error
+ * 路径才会把选择保留到后续空闲时重试。
  */
 
 export type ModelPendingRef = {

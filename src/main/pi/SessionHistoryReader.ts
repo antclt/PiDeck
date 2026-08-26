@@ -4,6 +4,25 @@ import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCop
 import type { RpcResponse } from "./PiRpcClient";
 import type { AppLogger } from "../logging/AppLogger";
 
+type SessionModelSelection = {
+	provider: string;
+	modelId: string;
+};
+
+type SessionHistoryMetadata = {
+	model?: SessionModelSelection;
+	thinkingLevel?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(record: Record<string, unknown> | undefined, key: string): string | undefined {
+	const value = record?.[key];
+	return typeof value === "string" ? value : undefined;
+}
+
 type SessionDisplayEntry = {
 	id: string;
 	parentId: string | null;
@@ -11,6 +30,13 @@ type SessionDisplayEntry = {
 	offset: number;
 	byteLength: number;
 	hasMessage: boolean;
+	/** model_change 的字段；模型回退按活动分支在 finishIndex() 中计算 */
+	modelChangeProvider?: string;
+	modelChangeId?: string;
+	/** assistant 消息上的旧格式 provider/model 回退字段 */
+	assistantModel?: SessionModelSelection;
+	/** thinking_level_change 的最后值候选 */
+	thinkingLevel?: string;
 	/** 消息角色（user/assistant/…）：轮次分页按 user 消息切轮次边界，建索引时顺手捕获 */
 	role?: string;
 	/** 消息条目的 message.id：编辑/删除/重发缓存未命中时按 messageId 定位文件条目 */
@@ -32,6 +58,8 @@ type SessionDisplayIndex = {
 	activeBranch: SessionDisplayEntry[];
 	/** 活动分支中的消息条目（分页/轮次计算用，派生自 activeBranch） */
 	activeMessageEntries: SessionDisplayEntry[];
+	/** 活动分支模型与思考档位；与索引一起生成，避免历史页读取后再次扫描摘要 */
+	metadata: SessionHistoryMetadata;
 	/** 构建时文件是否以完整行（\n）结尾：false 时禁止增量追加（旧最后一行可能被拼接污染） */
 	endsWithNewline: boolean;
 };
@@ -158,6 +186,35 @@ function syntheticHistoryEntryId(messageId: string): string | undefined {
 	return entryId || undefined;
 }
 
+function deriveSessionHistoryMetadata(
+	activeBranch: readonly SessionDisplayEntry[],
+): SessionHistoryMetadata {
+	let modelProvider: string | undefined;
+	let modelId: string | undefined;
+	let lastAssistantModel: SessionModelSelection | undefined;
+	let thinkingLevel: string | undefined;
+
+	for (const entry of activeBranch) {
+		if (entry.type === "model_change") {
+			modelProvider = entry.modelChangeProvider ?? modelProvider;
+			modelId = entry.modelChangeId ?? modelId;
+		} else if (entry.type === "thinking_level_change") {
+			thinkingLevel = entry.thinkingLevel ?? thinkingLevel;
+		}
+		if (entry.assistantModel) lastAssistantModel = entry.assistantModel;
+	}
+
+	const model = modelProvider && modelId
+		? { provider: modelProvider, modelId }
+		: lastAssistantModel;
+	if (thinkingLevel === undefined && model) thinkingLevel = "off";
+
+	return {
+		...(model ? { model } : {}),
+		...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+	};
+}
+
 /**
  * Reads persisted Session JSONL without starting Pi. Runtime ownership remains in
  * AgentManager; this reader owns bounded display paging and compaction recovery.
@@ -167,7 +224,6 @@ export class SessionHistoryReader {
 	private static readonly SESSION_DISPLAY_INDEX_LIMIT = 32;
 	/** 全量重建时每隔这么多行让出事件循环，避免几十 MB JSONL 同步 parse 卡死主进程。 */
 	private static readonly INDEX_PARSE_YIELD_EVERY = 400;
-	private static readonly MAX_SESSION_DISPLAY_PAGE_SIZE = 100;
 	private static readonly MAX_SESSION_DISPLAY_PAGE_BYTES = 256 * 1024;
 	/** 完整消息文本 LRU 缓存（「查看完整输出」按需读取结果）：键 `${sessionPath}#${messageId}`。 */
 	private readonly fullTextCache = new Map<string, string>();
@@ -329,71 +385,9 @@ export class SessionHistoryReader {
 		return this.deps.convertMessages(agentId, finalRaw, activeEntryIds);
 	}
 
-	async readSessionDisplayMessagePage(
-		sessionPath: string,
-		agentId = "_viewer",
-		before?: number,
-		pageSize = SessionHistoryReader.MAX_SESSION_DISPLAY_PAGE_SIZE,
-	): Promise<SessionMessagePage> {
-		const index = await this.getSessionDisplayIndex(sessionPath);
-		const total = index.activeMessageEntries.length;
-		const boundedBefore = Number.isSafeInteger(before)
-			? Math.min(Math.max(0, before!), total)
-			: total;
-		const requestedPageSize = Number.isFinite(pageSize)
-			? Math.floor(pageSize)
-			: SessionHistoryReader.MAX_SESSION_DISPLAY_PAGE_SIZE;
-		const limit = Math.min(
-			Math.max(1, requestedPageSize),
-			SessionHistoryReader.MAX_SESSION_DISPLAY_PAGE_SIZE,
-		);
-		let start = boundedBefore;
-		let selectedBytes = 0;
-		let selectedCount = 0;
-		while (start > 0 && selectedCount < limit) {
-			const candidate = index.activeMessageEntries[start - 1];
-			if (
-				selectedCount > 0 &&
-				selectedBytes + candidate.byteLength > SessionHistoryReader.MAX_SESSION_DISPLAY_PAGE_BYTES
-			) {
-				break;
-			}
-			selectedBytes += candidate.byteLength;
-			selectedCount += 1;
-			start -= 1;
-		}
-
-		// Compaction cards contain archived child messages. Preserve their existing
-		// semantics until archive data gets its own cursor protocol; normal Sessions,
-		// including the 50 MiB fixture, use the bounded offset reader below.
-		if (index.hasCompaction) {
-			// 分页必须与 normal 分支同空间：按索引 activeMessageEntries 切片后读取原始消息再转换。
-			// 旧实现用 readSessionDisplayMessages 的全量数组按索引坐标 slice——转换会跳过空消息
-			// （thinking-only/空 user），数组比索引短，slice 越界返回空页（打开大会话起始页误显根因）。
-			const entries = index.activeMessageEntries.slice(start, boundedBefore);
-			const rawMessages = await this.readIndexedSessionMessages(index.hostPath, entries);
-			const messages = await this.convertCompactionPageMessages(
-				index, agentId, rawMessages, entries.map((entry) => entry.id), start,
-			);
-			return {
-				messages,
-				total,
-				nextBefore: start > 0 ? start : null,
-			};
-		}
-		const entries = index.activeMessageEntries.slice(start, boundedBefore);
-		const rawMessages = await this.readIndexedSessionMessages(index.hostPath, entries);
-		return {
-			messages: this.deps.convertMessages(agentId, rawMessages, entries.map((entry) => entry.id)),
-			total,
-			nextBefore: start > 0 ? start : null,
-		};
-	}
-
 	/**
-	 * 轮次维度的显示分页（2026-08 激活分页）：与 readSessionDisplayMessagePage 同一游标协议
-	 * （before/nextBefore 都是绝对消息下标，与运行时 messages 数组同一下标空间），
-	 * 但页边界对齐完整轮次——渲染层「加载更多对话」不会切到半个回答。
+	 * 轮次维度的显示分页：游标仍使用活动分支消息下标，页边界对齐完整轮次。
+	 * 这样无论历史会话是否已经启动 Agent，时间线都不会切开一个 user/assistant 回合。
 	 */
 	async readSessionDisplayTurnPage(
 		sessionPath: string,
@@ -425,9 +419,9 @@ export class SessionHistoryReader {
 			SessionHistoryReader.MAX_SESSION_DISPLAY_PAGE_BYTES,
 		);
 
-		// 与消息分页一致：压缩会话的归档语义未游标化前走全量读取 + 切片
+		// 与普通轮次页一致：压缩会话的归档语义未游标化前走索引切片
 		if (index.hasCompaction) {
-			// 同空间分页（见 readSessionDisplayMessagePage 注释）：索引切片 + 转换 + 页内卡片
+			// 同一索引空间：索引切片 + 转换 + 页内卡片。
 			const entries = index.activeMessageEntries.slice(start, boundedBefore);
 			const rawMessages = await this.readIndexedSessionMessages(index.hostPath, entries);
 			const messages = await this.convertCompactionPageMessages(
@@ -439,6 +433,7 @@ export class SessionHistoryReader {
 				nextBefore: start > 0 ? start : null,
 				nextBeforeEntryId: start > 0 ? index.activeMessageEntries[start]?.id : undefined,
 				indexVersion: `${index.mtimeMs}:${index.size}`,
+				...index.metadata,
 			};
 		}
 
@@ -450,6 +445,7 @@ export class SessionHistoryReader {
 			nextBefore: start > 0 ? start : null,
 			nextBeforeEntryId: start > 0 ? index.activeMessageEntries[start]?.id : undefined,
 			indexVersion: `${index.mtimeMs}:${index.size}`,
+			...index.metadata,
 		};
 	}
 
@@ -472,6 +468,12 @@ export class SessionHistoryReader {
 	async getActiveEntryCount(sessionPath: string): Promise<number> {
 		const index = await this.getSessionDisplayIndex(sessionPath);
 		return index.activeMessageEntries.length;
+	}
+
+	/** 返回与当前历史索引一致的模型/思考元数据，调用方不得再次扫描 JSONL 摘要。 */
+	async readSessionMetadata(sessionPath: string): Promise<SessionHistoryMetadata> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		return index.metadata;
 	}
 
 	/**
@@ -701,24 +703,51 @@ export class SessionHistoryReader {
 	): SessionDisplayEntry | null {
 		const jsonLine = sourceLine.endsWith("\r") ? sourceLine.slice(0, -1) : sourceLine;
 		try {
-			const entry = JSON.parse(jsonLine) as Record<string, unknown>;
-			if (typeof entry.id !== "string") return null;
-			const message = entry.message as Record<string, unknown> | null | undefined;
+			const parsed: unknown = JSON.parse(jsonLine);
+			if (!isRecord(parsed) || typeof parsed.id !== "string") return null;
+			const data = isRecord(parsed.data) ? parsed.data : undefined;
+			const nestedMessage = isRecord(parsed.message)
+				? parsed.message
+				: data && isRecord(data.message)
+					? data.message
+					: undefined;
+			const message = nestedMessage ?? (typeof parsed.role === "string" ? parsed : undefined);
+			const type = typeof parsed.type === "string" ? parsed.type : "";
+			const modelChangeProvider = type === "model_change"
+				? readString(parsed, "provider") ?? readString(data, "provider")
+				: undefined;
+			const modelChangeId = type === "model_change"
+				? readString(parsed, "modelId") ?? readString(data, "modelId")
+				: undefined;
+			const thinkingLevel = type === "thinking_level_change"
+				? readString(parsed, "thinkingLevel") ?? readString(data, "thinkingLevel")
+				: undefined;
+			const assistantModel = message?.role === "assistant"
+				? (() => {
+					const provider = readString(message, "provider");
+					const modelId = readString(message, "model");
+					return provider && modelId ? { provider, modelId } : undefined;
+				})()
+				: undefined;
 			return {
-				id: entry.id,
-				parentId: typeof entry.parentId === "string" ? entry.parentId : null,
-				type: typeof entry.type === "string" ? entry.type : "",
+				id: parsed.id,
+				parentId: typeof parsed.parentId === "string" ? parsed.parentId : null,
+				type,
 				offset,
 				byteLength,
-				hasMessage: entry.message !== undefined && entry.message !== null,
+				hasMessage: parsed.message !== undefined && parsed.message !== null,
+				modelChangeProvider,
+				modelChangeId,
+				assistantModel,
+				thinkingLevel,
 				role: typeof message?.role === "string" ? message.role : undefined,
 				messageId: typeof message?.id === "string" ? message.id : undefined,
-				summary: typeof entry.summary === "string" ? entry.summary : undefined,
-				firstKeptEntryId: typeof entry.firstKeptEntryId === "string"
-					? entry.firstKeptEntryId
+				summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
+				firstKeptEntryId: typeof parsed.firstKeptEntryId === "string"
+					? parsed.firstKeptEntryId
 					: undefined,
-				timestamp: typeof entry.timestamp === "string" ? entry.timestamp : undefined,
-				tokensBefore: typeof entry.tokensBefore === "number" ? entry.tokensBefore : undefined,
+				timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
+				tokensBefore: typeof parsed.tokensBefore === "number" ? parsed.tokensBefore : undefined,
 			};
 		} catch {
 			return null;
@@ -760,6 +789,7 @@ export class SessionHistoryReader {
 			entries,
 			activeBranch,
 			activeMessageEntries: activeBranch.filter((entry) => entry.type === "message" && entry.hasMessage),
+			metadata: deriveSessionHistoryMetadata(activeBranch),
 			endsWithNewline,
 		};
 	}

@@ -10,7 +10,6 @@ import {
 	appendBlankDshModel,
 	appendFetchedDshModels,
 	removeDshModelAt,
-	resolveDshFetchEndpoint,
 	seedDshModelsForCustomEdit,
 	updateDshModelAt,
 } from "./dshModels";
@@ -42,7 +41,7 @@ function setDshDefaultImageInput(input: unknown, enabled: boolean): string[] {
 
 /**
  * DSH 自定义模型编辑器：在适配器目录上追加/拉取，而不是从空 draft 起步。
- * 获取列表复用 Pi 配置页的 fetchModels + FetchedModelCombobox。
+ * 获取列表走 DSH host 的 llm.discoverModels；结果只作为待采纳候选。
  */
 export function DshModelsEditor(props: {
 	models: DshModelRow[];
@@ -50,11 +49,12 @@ export function DshModelsEditor(props: {
 	catalog?: DshModelRow[];
 	writable: boolean;
 	providerKey?: string;
+	/** DSH adapter settings namespace（如 llm-pi-ai / llm-deepseek）。 */
+	settingsNs: string;
 	baseURL?: string;
 	api?: string;
-	/** 密钥草稿优先；空则按 credentialRef 读已存凭证。 */
+	/** 只作为本次 discovery 的一次性密钥；为空时由 DSH 读取已存凭证。 */
 	apiKeyDraft?: string;
-	credentialRef?: string;
 	/** 未单独声明 input 的自定义模型使用的 provider 级模态兜底。 */
 	defaultInput?: unknown;
 	onDefaultInputChange?: (input: string[]) => void;
@@ -65,6 +65,9 @@ export function DshModelsEditor(props: {
 	const [fetched, setFetched] = useState<FetchedModel[] | null>(null);
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const [fetchError, setFetchError] = useState<string | undefined>(undefined);
+	// 当前 DSH 包只有 llm-pi-ai 注册了 llm.discoverModels；llm-deepseek 的官方配置面
+	// 只编辑适配器 catalog，不能伪造一个必然返回 NO_DISCOVERY 的 endpoint 按钮。
+	const canDiscoverModels = props.settingsNs === "llm-pi-ai";
 
 	const seedInput = {
 		draftModels: models,
@@ -77,35 +80,26 @@ export function DshModelsEditor(props: {
 		.map((model) => (typeof model.id === "string" ? model.id : ""))
 		.filter(Boolean);
 
-	const resolveApiKey = async (): Promise<string> => {
-		const draft = props.apiKeyDraft?.trim();
-		if (draft) return draft;
-		if (!props.credentialRef) return "";
-		return (await desktopApi.sessions.readDshCredential(props.credentialRef).catch(() => undefined))?.trim() ?? "";
-	};
-
 	const fetchModels = async () => {
-		const endpoint = resolveDshFetchEndpoint({
-			providerKey: props.providerKey,
-			baseURL: props.baseURL,
-			api: props.api,
-		});
-		const apiKey = await resolveApiKey();
-		if (!endpoint || !apiKey) {
-			setFetchError(t("config.missingBaseUrlApiKey"));
+		const settingsNs = props.settingsNs.trim();
+		if (!settingsNs) {
+			setFetchError(t("config.fetchModelsFailed"));
 			return;
 		}
 		setFetching(true);
 		setFetchError(undefined);
 		try {
-			const result = await desktopApi.config.fetchModels(endpoint.baseUrl, apiKey, endpoint.apiType);
-			if (result.success && result.models) {
-				setFetched(result.models);
-				setSelectedIds([]);
-				showNotice(t("config.fetchedModels", { count: result.models.length }), 3000);
-			} else {
-				setFetchError(result.error ?? t("config.fetchModelsFailed"));
-			}
+			const apiKey = props.apiKeyDraft?.trim();
+			const result = await desktopApi.sessions.discoverDshModels({
+				settingsNs,
+				...(props.providerKey?.trim() ? { provider: props.providerKey.trim() } : {}),
+				...(props.baseURL?.trim() ? { baseURL: props.baseURL.trim() } : {}),
+				...(props.api?.trim() ? { api: props.api.trim() } : {}),
+				...(apiKey ? { apiKey } : {}),
+			});
+			setFetched(result);
+			setSelectedIds([]);
+			showNotice(t("config.fetchedModels", { count: result.length }), 3000);
 		} catch (error) {
 			setFetchError(error instanceof Error ? error.message : String(error));
 		} finally {
@@ -121,8 +115,8 @@ export function DshModelsEditor(props: {
 			fetched,
 			selectedIds,
 		});
-		// `/models` 通常没有模态数据；已知模型再由本地 pi-ai catalog 补图片输入。
-		// reasoning 只有布尔事实时不能构造 DSH 的 wire 映射，故由迁移或用户配置提供。
+		// DSH discovery 只返回 endpoint/catalog 可确认的容量；已知模型再由本地 pi-ai catalog 补图片输入。
+		// reasoning 只有 DSH 明确返回的 wire 映射才可信，不能从 Pi 的布尔事实构造。
 		const appended = nextRows.slice(existing.length);
 		const specs = await Promise.all(appended.map((row) =>
 			desktopApi.projects.getModelSpec(
@@ -203,18 +197,20 @@ export function DshModelsEditor(props: {
 					{t("config.dsh.defaultImageInput")}
 				</label>
 			)}
-			<div className="flex flex-wrap items-center justify-end gap-1.5">
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					className="h-7"
-					disabled={!writable || fetching}
-					onClick={() => void fetchModels()}
-				>
-					{fetching ? t("config.fetchingModels") : t("config.fetchModels")}
-				</Button>
-			</div>
+			{canDiscoverModels && (
+				<div className="flex flex-wrap items-center justify-end gap-1.5">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="h-7"
+						disabled={!writable || fetching}
+						onClick={() => void fetchModels()}
+					>
+						{fetching ? t("config.fetchingModels") : t("config.fetchModels")}
+					</Button>
+				</div>
+			)}
 			{fetchError && (
 				<div className="rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">
 					{fetchError}

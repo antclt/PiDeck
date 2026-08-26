@@ -146,21 +146,12 @@ test("appending fetched models keeps existing rows, skips duplicates, and copies
 	]);
 });
 
-test("fetch endpoint prefers configured baseURL then known provider aliases", () => {
-	const { resolveDshFetchEndpoint } = loadDshModelsModule();
-	assert.deepEqual(
-		asJson(resolveDshFetchEndpoint({
-			providerKey: "deepseek-official",
-			baseURL: "https://gateway.example/v1",
-			api: "openai-completions",
-		})),
-		{ baseUrl: "https://gateway.example/v1", apiType: "openai-completions" },
-	);
-	assert.deepEqual(asJson(resolveDshFetchEndpoint({ providerKey: "deepseek-official" })), {
-		baseUrl: "https://api.deepseek.com/v1",
-		apiType: "openai-completions",
-	});
-	assert.equal(resolveDshFetchEndpoint({ providerKey: "unknown-local" }), undefined);
+test("DSH model fetching delegates draft discovery to the host API", () => {
+	const editor = readFileSync("src/renderer/src/config/DshModelsEditor.tsx", "utf8");
+	assert.match(editor, /desktopApi\.sessions\.discoverDshModels/);
+	assert.match(editor, /canDiscoverModels = props\.settingsNs === "llm-pi-ai"/);
+	assert.doesNotMatch(editor, /desktopApi\.config\.fetchModels/);
+	assert.doesNotMatch(editor, /readDshCredential/);
 });
 
 test("DSH cards seed custom models instead of starting from an empty draft array", () => {
@@ -169,7 +160,7 @@ test("DSH cards seed custom models instead of starting from an empty draft array
 	assert.match(cards, /DshModelsEditor/);
 	assert.match(editor, /appendBlankDshModel/);
 	assert.match(editor, /appendFetchedDshModels/);
-	assert.match(editor, /desktopApi\.config\.fetchModels/);
+	assert.match(editor, /desktopApi\.sessions\.discoverDshModels/);
 	assert.doesNotMatch(
 		cards,
 		/const models = Array.isArray\((?:provider|next)\.models\) \? \[\.\.\.(?:provider|next)\.models\] : \[\];\s*models\.push\(\{ id: ""/,

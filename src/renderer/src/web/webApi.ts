@@ -4,7 +4,7 @@
  * 覆盖范围（与桌面端对齐但收窄）：
  * - /api/state：项目/会话/运行态轮询
  * - /api/sessions（POST）：按项目新建会话
- * - /api/sessions/:id/messages/page：历史消息分页
+ * - /api/sessions/:id/messages/page：历史完整轮次分页（URL 保持兼容）
  * - 发送消息走 useChat（/api/chat 流式），不在此处重复实现
  */
 import type { UIMessage } from "ai";

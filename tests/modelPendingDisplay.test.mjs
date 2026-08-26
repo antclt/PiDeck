@@ -46,7 +46,7 @@ test("formatModelRef 带 provider", () => {
   );
 });
 
-test("契约: 生成中可选模型，快照内只记下一轮，新加模型仍重启", () => {
+test("契约: 运行中优先直接切换模型，后端 busy 时才排到下一轮", () => {
   const area = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
   const components = readFileSync(
     "src/renderer/src/components/session/ComposerComponents.tsx",
@@ -66,19 +66,21 @@ test("契约: 生成中可选模型，快照内只记下一轮，新加模型仍
   assert.match(components, /disabled=\{props\.modelDisabled \?\? props\.disabled\}/);
   assert.match(components, /app\.modelPendingTitle/);
 
+  assert.match(picker, /setRuntimeModel/);
+  assert.match(picker, /error\.code === "SESSION_RUNTIME_BUSY"/);
   assert.match(picker, /pickModelWhileBusy/);
   assert.match(picker, /listRuntimeModels\(handle\)/);
-  assert.match(picker, /generationInFlight/);
+  assert.doesNotMatch(picker, /if \(handle && generationInFlight\)/);
   assert.match(picker, /usePendingModelApply/);
   assert.doesNotMatch(picker, /desktopApi\.sessions\.restartRuntime/);
 
-  // 快照里没有的模型：生成中也走重启确认，不先写 catalog。
+  // 只有后端明确报告 busy 时才排队；不支持直接切换的新模型仍走重启确认。
   assert.match(
     picker,
     /if \(!snapshotHasModel\) \{\s*offerModelRestart\(handle, model\);\s*return;/,
   );
 
-  // 本轮结束后套到仍活着的 Agent，避免同一会话下一轮仍用旧模型。
+  // 后端拒绝即时切换后，才由 pending hook 在可用时重试。
   assert.match(hook, /setRuntimeModel/);
   assert.match(hook, /needsRestart/);
 

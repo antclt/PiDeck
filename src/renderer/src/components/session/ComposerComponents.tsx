@@ -60,7 +60,6 @@ import {
 	SelectTrigger,
 } from "../ui-shadcn/select";
 import { computeModelDisplay, formatModelRef, type ModelPending } from "../../utils/modelPendingDisplay";
-import { computeThinkingDisplay, type ThinkingLevelPending } from "../../utils/thinkingDisplay";
 import {
   readWelcomeModelPreference,
   readWelcomeThinkingPreference,
@@ -314,13 +313,10 @@ function ComposerBranchSwitcher(props: {
 export function ComposerBottomBar(props: {
 	state?: AgentRuntimeState;
 	disabled?: boolean;
-	/** thinking 按钮专用禁用：与 disabled 不同，busy（生成进行中）时仍可切换思考强度
-	 *  （issue #146：pi 的 set_thinking_level 支持下一轮生成生效）。 */
+	/** thinking 按钮专用禁用：仅在 Agent 启动中禁用，运行中由后端决定是否接受修改。 */
 	thinkingDisabled?: boolean;
-	/** 模型按钮专用禁用：生成进行中仍可选（pi 不支持运行中切模型，只记下下一轮）。 */
+	/** 模型按钮专用禁用：仅启动中禁用；运行中优先直接交给后端，busy 时才排到下一轮。 */
 	modelDisabled?: boolean;
-	/** 流式生成中已请求、下一轮才生效的思考档位切换（显示为 from→to）。 */
-	thinkingPending?: ThinkingLevelPending;
 	/** 生成进行中已选定、本轮结束后才套到 Agent 的模型（显示为 from→to）。 */
 	modelPending?: ModelPending;
 	composerAgentMode: ComposerAgentMode;
@@ -380,21 +376,13 @@ export function ComposerBottomBar(props: {
 	const currentThinkingLevel = props.state?.thinkingLevel
 		?? props.record?.thinkingLevel
 		?? (isDsh ? props.defaultThinkingLevel : welcomePreference?.thinking);
-	// 有待生效切换时展示 from→to（新档位尚未被任何生成使用），否则展示当前档位
-	const thinkingDisplay = computeThinkingDisplay(currentThinkingLevel, props.thinkingPending);
 	const thinkingLevelLabel = (level: string) => {
 		const labelKey = THINKING_LEVELS.find((item) => item.value === level)?.labelKey;
 		return labelKey ? t(labelKey) : level;
 	};
-	const thinkingText = thinkingDisplay.levels.length > 0
-		? thinkingDisplay.levels.map(thinkingLevelLabel).join(" → ")
+	const thinkingText = currentThinkingLevel
+		? thinkingLevelLabel(currentThinkingLevel)
 		: t("app.think");
-	const thinkingPendingTitle = props.thinkingPending
-		? t("app.thinkingPendingTitle", {
-			from: thinkingLevelLabel(props.thinkingPending.from),
-			to: thinkingLevelLabel(props.thinkingPending.to),
-		})
-		: undefined;
 	const isPlanMode = props.composerAgentMode === "plan";
 	const isImageGenMode = props.composerAgentMode === "imagegen";
 	const isGoalMode = props.composerAgentMode === "goal";
@@ -567,7 +555,6 @@ export function ComposerBottomBar(props: {
 							modelPendingTo={modelDisplay.pending && modelTo ? (modelTo.modelName || modelTo.modelId) : undefined}
 							modelPendingTitle={modelPendingTitle}
 							thinkingText={thinkingText}
-							thinkingPendingTitle={thinkingPendingTitle}
 							disabled={props.modelDisabled ?? props.disabled}
 							thinkingDisabled={props.thinkingDisabled}
 							onPickModel={props.onPickModel}
@@ -617,7 +604,7 @@ export function ComposerBottomBar(props: {
 /**
  * 模型 + 思考合并选择 chip（借鉴 dsh ModelSelect 的 trigger 形态）。
  *
- * 显示：`模型名 · 思考档位 + chevron` 一体；待生效切换（from→to）语义保留。
+ * 显示：`模型名 · 思考档位 + chevron` 一体。
  * 交互：点击弹出 root 菜单两行（模型 / 思考），drill-in 复用现有 Dialog 选择器
  * （onPickModel / onPickThinking），列表 UI 不重做。
  */
@@ -627,7 +614,6 @@ function ModelThinkingChip(props: {
 	modelPendingTo?: string;
 	modelPendingTitle?: string;
 	thinkingText: string;
-	thinkingPendingTitle?: string;
 	disabled?: boolean;
 	thinkingDisabled?: boolean;
 	onPickModel: () => void;
@@ -654,7 +640,7 @@ function ModelThinkingChip(props: {
 					<span className="flex-none text-muted-foreground/70" aria-hidden="true">·</span>
 					<span
 						className="flex-none truncate text-muted-foreground"
-						title={props.thinkingPendingTitle ?? t("app.thinkingPickerTitle")}
+						title={t("app.thinkingPickerTitle")}
 					>
 						{props.thinkingText}
 					</span>

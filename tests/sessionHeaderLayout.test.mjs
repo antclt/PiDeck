@@ -44,11 +44,11 @@ test("session status and new-session controls use the shared medium radius", () 
   assert.doesNotMatch(foundation, /\.session-combo-trigger/);
 });
 
-test("restart is offered only when the current session has a bound Agent", () => {
-  // 运行控制已迁入外置 Tab 栏的 Tab 下拉：App 装配 canStopCurrent/canRestartCurrent
+test("restart is offered for the current session, including an unbound session", () => {
+  // 重启会话对所有状态开放：有绑定运行实例或未绑定会话都可由 App 分派。
   assert.match(
     app,
-    /onRestartCurrent: activeAgentId\s*\n\s*\? \(\) => void restartActiveAgent\(activeAgentId\)/,
+    /canRestartCurrent: Boolean\(currentSessionId\)/,
   );
 });
 

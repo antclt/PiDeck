@@ -551,6 +551,7 @@ export function createPreviewApi(): PiDesktopApi {
 				value: { cancelled: false, text: "", targetSessionId: `${target.sessionId}:fork` },
 			}),
 			listDshModels: async () => [],
+			discoverDshModels: async () => [],
 			listDshProviders: async () => [],
 			getDshStatus: async () => ({
 				started: false,

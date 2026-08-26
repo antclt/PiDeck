@@ -1,7 +1,6 @@
 import { atom } from "jotai";
 import type { ComposerAgentMode, ImageContent } from "../../../shared/types";
 import type { ModelPending } from "../utils/modelPendingDisplay";
-import type { ThinkingLevelPending } from "../utils/thinkingDisplay";
 import type { QuoteSnippet } from "../components/session/composer/quoteChip";
 import { currentSessionIdAtom } from "./session-atoms";
 
@@ -41,14 +40,6 @@ export const sessionPasteFilesByIdAtom = atom<Record<string, PastedTextFile[]>>(
 export const sessionQuotesByIdAtom = atom<Record<string, SessionQuoteMap>>({});
 export const sessionComposerModeByIdAtom = atom<Record<string, SessionComposerMode>>({});
 export const sessionSendStateByIdAtom = atom<Record<string, SessionSendState>>({});
-
-/**
- * 流式生成中切换思考强度产生的「待生效」指示（issue #146，xhigh->max）。
- * 只在生成进行中设置；流式结束（没有进行中的生成）时由 ComposerArea 清除。
- */
-export const thinkingLevelPendingByIdAtom = atom<
-	Record<string, ThinkingLevelPending | undefined>
->({});
 
 /**
  * 生成进行中切换模型：pi 不支持运行中 set_model，只写入会话记录；
@@ -255,9 +246,6 @@ export const removeSessionComposerStateAtom = atom(null, (get, set, sessionId: s
   const sendStates = { ...get(sessionSendStateByIdAtom) };
   delete sendStates[sessionId];
   set(sessionSendStateByIdAtom, sendStates);
-  const thinkingPending = { ...get(thinkingLevelPendingByIdAtom) };
-  delete thinkingPending[sessionId];
-  set(thinkingLevelPendingByIdAtom, thinkingPending);
   const modelPending = { ...get(modelPendingByIdAtom) };
   delete modelPending[sessionId];
   set(modelPendingByIdAtom, modelPending);

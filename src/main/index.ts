@@ -2661,6 +2661,7 @@ function registerIpc() {
 		// C1：DSH 后端专用 IPC 依赖按后端分组（注册表化铺路；未来新增后端各自提供一份）
 		dshBackend: {
 			listDshModels: () => dshHost.listModels(),
+			discoverDshModels: (input) => dshHost.discoverModels(input),
 			listDshProviders: () => dshHost.listProviders(),
 			listDshAgentPresets: () => dshHost.listAgentPresets(),
 			getDshDefaultModel: () => Promise.resolve(dshHost.getDefaultModelSelection()),
@@ -3354,7 +3355,7 @@ app.whenReady().then(async () => {
 				return dshAgentManager.readHistoryPage(entry.dshSessionId, before, pageSize ?? 100);
 			}
 			if (!entry?.filePath) return { messages: [], total: 0, nextBefore: null };
-			return agentManager.readSessionDisplayMessagePage(entry.filePath, sessionId, before, pageSize);
+			return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize);
 		},
 		sendSessionPrompt: async (input) => {
 			const result = await sessionRuntimeCoordinator.send(input);

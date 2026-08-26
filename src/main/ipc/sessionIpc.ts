@@ -24,10 +24,24 @@ import type {
 	SendPromptResult,
 	SessionRecord,
 	SessionProcessEvent,
+	DshModelDiscoveryInput,
+	FetchedModel,
+	SessionMessagePage,
 } from "../../shared/types";
 import { parseSessionProcessEvents } from "../sessions/sessionProcessEvents";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 
+function isDshModelDiscoveryInput(input: unknown): input is DshModelDiscoveryInput {
+	if (!isRecord(input) || typeof input.settingsNs !== "string" || !input.settingsNs.trim()) return false;
+	return ["provider", "baseURL", "api", "apiKey"].every((key) => {
+		const value = input[key];
+		return value === undefined || typeof value === "string";
+	});
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+	return typeof input === "object" && input !== null && !Array.isArray(input);
+}
 /**
  * 已扫描过项目的集合（模块级）：决定 catalogList 走「首次同步扫描」还是
  * 「缓存先回显 + 后台扫描推送」。进程生命周期内单调增长，无需清理。
@@ -68,6 +82,8 @@ import type { AppLogger } from "../logging/AppLogger";
 export type DshBackendIpcDeps = {
 	/** DSH host 级模型目录；未装配时返回空列表。 */
 	listDshModels?: () => Promise<import("../../shared/types").AvailableModel[]>;
+	/** DSH 配置页模型发现（llm.discoverModels；只返回候选，不写配置）。 */
+	discoverDshModels?: (input: DshModelDiscoveryInput) => Promise<FetchedModel[]>;
 	/** DSH 可配置提供方目录（内置 catalog + 已注册路由）；未装配时返回空列表。 */
 	listDshProviders?: () => Promise<Array<{
 		provider: string;
@@ -349,6 +365,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	// C1：DSH 后端依赖从 dshBackend 分组解构（未装配 = 空对象，相关通道降级）。
 	const {
 		listDshModels,
+		discoverDshModels,
 		listDshProviders,
 		listDshAgentPresets,
 		getDshDefaultModel,
@@ -390,6 +407,48 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		forkDshAgentSession,
 		cloneDshAgentSession,
 	} = dshBackend ?? {};
+
+	/**
+	 * 历史页读取后把文件里的最后模型/思考档位补回 catalog。
+	 * 仅补缺失字段，避免旧历史读取覆盖用户后来明确选择的值；运行中 runtime
+	 * 有自己的 state，历史回放不参与覆盖。
+	 */
+	const backfillHistoricalSessionMetadata = async (
+		sessionId: string,
+		metadata: Pick<SessionMessagePage, "model" | "thinkingLevel">,
+	): Promise<void> => {
+		if (sessionRuntimeCoordinator.getTarget(sessionId)) return;
+		const entry = sessionCatalog.get(sessionId);
+		if (!entry || entry.backend === "dsh" || !entry.filePath) return;
+		if (entry.model && entry.thinkingLevel) return;
+		if (!metadata.model && !metadata.thinkingLevel) return;
+		try {
+			const current = sessionCatalog.get(sessionId);
+			if (!current || current.backend === "dsh" || !current.filePath) return;
+			const patch: {
+				model?: { provider: string; modelId: string };
+				thinkingLevel?: string;
+				updatedAt: number;
+			} = { updatedAt: current.updatedAt };
+			if (!current.model && metadata.model) patch.model = { ...metadata.model };
+			if (!current.thinkingLevel && metadata.thinkingLevel) {
+				patch.thinkingLevel = metadata.thinkingLevel;
+			}
+			if (!patch.model && patch.thinkingLevel === undefined) return;
+			const updated = await sessionCatalog.update(sessionId, patch);
+			const window = getMainWindow();
+			if (window && !window.isDestroyed()) {
+				window.webContents.send(ipcChannels.sessionsCatalogRefreshed, {
+					projectId: updated.projectId,
+				});
+			}
+		} catch (error) {
+			void appLogger.warn("session", "Historical session metadata backfill failed", {
+				sessionId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	};
 
 	ipcMain.handle(
 		ipcChannels.sessionsList,
@@ -716,13 +775,15 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				return (await readImageSessionMessages?.(sessionId)) ?? [];
 			}
 			if (!entry?.filePath) return [];
-			const content = await sessionScanner.readSessionRawText(entry.filePath);
-			return agentManager.readSessionDisplayMessages(entry.filePath, sessionId, content);
+			const messages = await agentManager.readSessionDisplayMessages(entry.filePath, sessionId);
+			const metadata = await agentManager.readSessionDisplayMetadata(entry.filePath);
+			await backfillHistoricalSessionMetadata(sessionId, metadata);
+			return messages;
 		},
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogReadMessagePage,
-		async (_event, sessionId: string, before?: number, pageSize?: number, options?: { unit?: "message" | "turn"; beforeEntryId?: string }) => {
+		async (_event, sessionId: string, before?: number, pageSize?: number, options?: { beforeEntryId?: string }) => {
 			const entry = sessionCatalog.get(sessionId);
 			// DSH 会话没有 pi 会话文件：历史浏览走 host 的 session.history 事件流翻页
 			// （游标 = 事件 seq），与 pi 的磁盘分页同形状（messages/total/nextBefore）。
@@ -745,28 +806,33 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// 读盘失败（文件被删/路径失效/解析异常）不能静默：渲染层靠 reject 显示明确错误态，
 			// 否则「正在加载历史」骨架无限滞留（2026-08 生图会话文件缺失反馈）。
 			try {
-				// unit=turn（2026-08 激活分页）：页边界对齐完整轮次，pageSize 复用为轮次数（上限 10）；
-				// 游标协议不变（before/nextBefore 为绝对消息下标，与运行时数组同一下标空间）；
-				// beforeEntryId 供已激活会话以运行时窗口首条消息为锚点首次补历史。
-				if (options?.unit === "turn") {
-					// 缓存优先（2026-11）：运行中会话翻历史先在主进程内存缓存切片，命中免文件 IO；
-					// 未命中（缓存未覆盖/非活跃会话）回退 SessionHistoryReader 读文件。
-					// 注意：缓存按 transient agentId 键控，必须经 coordinator 把稳定 sessionId
-					// 解析成当前运行时 agentId；解析不到（非活跃/终端绑定）直接走文件路径。
-					if (options.beforeEntryId || typeof before === "number") {
-						const target = sessionRuntimeCoordinator.getTarget(sessionId);
-						if (target) {
-							const cached = await agentManager.tryReadRuntimeTurnPage(entry.filePath, target.agentId, {
-								beforeEntryId: options.beforeEntryId,
-								before,
-								turnCount: pageSize,
-							}).catch(() => null);
-							if (cached) return cached;
-						}
+				let page: SessionMessagePage;
+				// Pi 历史统一按完整轮次分页：磁盘会话首次打开、继续上翻、
+				// 以及运行时窗口补历史都共享同一页边界和游标协议。
+				// 缓存优先（2026-11）：运行中会话翻历史先在主进程内存缓存切片，命中免文件 IO；
+				// 未命中（缓存未覆盖/非活跃会话）回退 SessionHistoryReader 读文件。
+				// 注意：缓存按 transient agentId 键控，必须经 coordinator 把稳定 sessionId
+				// 解析成当前运行时 agentId；解析不到（非活跃/终端绑定）直接走文件路径。
+				if (options?.beforeEntryId || typeof before === "number") {
+					const target = sessionRuntimeCoordinator.getTarget(sessionId);
+					if (target) {
+						const cached = await agentManager.tryReadRuntimeTurnPage(entry.filePath, target.agentId, {
+							beforeEntryId: options?.beforeEntryId,
+							before,
+							turnCount: pageSize,
+						}).catch(() => null);
+						if (cached) return cached;
 					}
-					return agentManager.readSessionDisplayTurnPage(entry.filePath, sessionId, before, pageSize, options.beforeEntryId);
 				}
-				return agentManager.readSessionDisplayMessagePage(entry.filePath, sessionId, before, pageSize);
+				page = await agentManager.readSessionDisplayTurnPage(
+					entry.filePath,
+					sessionId,
+					before,
+					pageSize,
+					options?.beforeEntryId,
+				);
+				await backfillHistoricalSessionMetadata(sessionId, page);
+				return page;
 			} catch (error) {
 				// 文件读取失败（被删/路径失效）先查 ImageSession 兜底，命中则直接恢复历史；
 				// 都无记录才按失败处理（渲染层显示明确错误态 + 日志）。
@@ -1319,6 +1385,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(
 		ipcChannels.dshListModels,
 		async () => (listDshModels ? listDshModels() : []),
+	);
+	ipcMain.handle(
+		ipcChannels.dshDiscoverModels,
+		async (_event, input: unknown) => {
+			if (!isDshModelDiscoveryInput(input)) {
+				throw new Error("Invalid DSH model discovery input");
+			}
+			if (!discoverDshModels) throw new Error("DSH model discovery is not available");
+			return discoverDshModels(input);
+		},
 	);
 	ipcMain.handle(
 		ipcChannels.dshListProviders,

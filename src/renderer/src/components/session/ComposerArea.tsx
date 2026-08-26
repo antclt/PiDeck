@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import {
   ComposerBottomBar,
   ImagePreviewModal,
@@ -19,7 +19,7 @@ import {
 } from "./ComposerPanels";
 import { ComposerPickerHost } from "./ComposerPickerHost";
 import { SecurityControl } from "./SecurityControl";
-import { modelPendingByIdAtom, thinkingLevelPendingByIdAtom } from "../../atoms/composer-atoms";
+import { modelPendingByIdAtom } from "../../atoms/composer-atoms";
 import { ComposerRuntimeIntegrations } from "./ComposerRuntimeIntegrations";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { desktopApi } from "../../desktopApi";
@@ -223,18 +223,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
     onCreateSession: useSessionPaneServices().runCreateSessionDraft,
   });
 
-  // 流式生成中切换思考强度产生的「待生效」指示（issue #146）：
-  // 飞行中的生成仍用旧档位，新档位下一轮才生效；流式一结束就没有“当前生效”参照，直接清除。
-  const [thinkingPendingMap, setThinkingPendingMap] = useAtom(thinkingLevelPendingByIdAtom);
   const modelPendingMap = useAtomValue(modelPendingByIdAtom);
-  const isStreaming = Boolean(composer.runtime?.state?.isStreaming);
-  useEffect(() => {
-    if (!isStreaming && thinkingPendingMap[props.sessionId]) {
-      setThinkingPendingMap((prev) =>
-        prev[props.sessionId] ? { ...prev, [props.sessionId]: undefined } : prev,
-      );
-    }
-  }, [isStreaming, props.sessionId, setThinkingPendingMap, thinkingPendingMap]);
 
   const prewarmStartedForSessionRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -374,13 +363,12 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                   onPick={composer.suggestions.pick}
                 />
               ) : null}
-              {/* 运行中仍可切换思考强度（下一轮生效）和模型（本轮结束后套上）；仅启动中禁用 */}
+              {/* 运行中允许后端尝试切换思考强度；是否能作用于当前回合由具体 Agent 后端决定。 */}
               <ComposerBottomBar
                 state={composer.runtime?.state}
                 disabled={composer.isBusy || composer.isStarting}
                 thinkingDisabled={composer.isStarting}
                 modelDisabled={composer.isStarting}
-                thinkingPending={thinkingPendingMap[props.sessionId]}
                 modelPending={modelPendingMap[props.sessionId]}
                 composerAgentMode={composer.mode}
                 gitInfo={props.gitInfo}

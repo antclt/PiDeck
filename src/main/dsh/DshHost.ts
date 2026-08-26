@@ -7,7 +7,7 @@ import { getAppLogger } from "../logging/sharedLogger";
 import { applyProxyEnvPatch, type HostProxyEnvPatch } from "../sessions/sessionProxyPolicy";
 import { DshHostProcess, resolveHostEntryPath } from "./DshHostProcess";
 import { DshApiClient, type DshFetchTransport } from "./DshApiClient";
-import { toDshAvailableModels } from "./dshModels";
+import { toDshAvailableModels, toDshFetchedModels } from "./dshModels";
 import { parseAgentDefaultModel } from "./dshDefaultModel";
 import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
 import { workspaceDirFor } from "./dshSessionPath";
@@ -298,6 +298,32 @@ export class DshHost {
 		const listed = await client.llm.models({});
 		if (!listed.result.ok) return [];
 		return toDshAvailableModels(listed.result.value.groups ?? []);
+	}
+
+	/**
+	 * DSH 原生模型发现：配置页传入仍在编辑的草稿，结果只作为候选返回。
+	 * apiKey 仅在调用方有未保存草稿时出现；已保存凭证由 DSH 的 adapter/credentials
+	 * seam 自己解析，避免 PiDeck 读取并转运密钥。settingsNs 是 adapter 选择的必要契约。
+	 */
+	async discoverModels(
+		input: import("../../shared/types").DshModelDiscoveryInput,
+	): Promise<import("../../shared/types").FetchedModel[]> {
+		await this.ensureStarted();
+		const client = this.client;
+		if (!client) throw new Error("DSH host is not started");
+		const settingsNs = input.settingsNs.trim();
+		if (!settingsNs) throw new Error("DSH model discovery requires settingsNs");
+		const discovered = await client.llm.discoverModels({
+			settingsNs,
+			...(input.provider?.trim() ? { provider: input.provider.trim() } : {}),
+			...(input.baseURL?.trim() ? { baseURL: input.baseURL.trim() } : {}),
+			...(input.api?.trim() ? { api: input.api.trim() } : {}),
+			...(input.apiKey?.trim() ? { apiKey: input.apiKey.trim() } : {}),
+		});
+		if (!discovered.result.ok) {
+			throw new Error(`dsh llm.discoverModels failed: ${discovered.result.error.code}: ${discovered.result.error.message}`);
+		}
+		return toDshFetchedModels(discovered.result.value.models ?? []);
 	}
 
 	/**

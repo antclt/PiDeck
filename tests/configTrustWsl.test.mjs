@@ -50,6 +50,12 @@ function loadConfigManager() {
 			}
 			if (id === "../../shared/i18n/mainProcessCopy") return { mainProcessT: () => "" };
 			if (id === "./parseProviderModels") return { parseProviderModelsResponse: () => [] };
+			if (id === "./providerMigration") {
+				return { isSafeProviderName: () => true };
+			}
+			if (id === "./userUsageProbes") {
+				return { loadUserUsageProbes: async () => [] };
+			}
 			if (id === "./mcpConfig") {
 				return {
 					loadMcpConfigSnapshot: () => null,

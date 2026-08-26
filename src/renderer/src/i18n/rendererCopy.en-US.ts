@@ -657,7 +657,6 @@ export const enUS: Record<TranslationKey, string> = {
   "app.highAgentCountSnooze": "Don't remind again this session",
   "app.thinkingPickerTitle": "Select thinking level",
   "app.thinkingPickerHint": "Some models may not support all levels. The system will automatically adjust to the closest supported level",
-  "app.thinkingPendingTitle": "Thinking level switches on the next generation: {from} → {to}",
   "app.thinkingSwitchFailed": "Failed to change thinking level: {error}",
   "app.thinkingUnsupported":
     "Current model does not support {level}; fell back to {fallback}",
@@ -890,6 +889,7 @@ export const enUS: Record<TranslationKey, string> = {
   "session.backendLockedHint": "Backend locked (cannot switch after the session is created)",
   "session.backendLockedNotice": "The agent has started and the backend is locked; pi / dsh can no longer be switched. Create a new session to change the backend.",
   "session.sendDshImagesUnsupported": "Image attachments are not supported by DSH yet",
+  "session.sendDshModelRouteUnavailable": "The selected DSH provider route is unavailable. Select another model or restore the provider configuration.",
   "session.sendDshUnsupportedPayload": "Host instructions are not supported by DSH",
   "dshCommand.permission": "Switch permission preset (read-only / workspace-write / danger-full-access)",
   "dshCommand.plan": "Enable plan mode",

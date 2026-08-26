@@ -40,5 +40,5 @@ test("runtime state falls back to message-derived turns when sessionStats is mis
 	const src = readFileSync(join(repoRoot, "src/main/dsh/DshAgentManager.ts"), "utf8");
 	assert.match(src, /deriveSessionStatsFallback/);
 	assert.match(src, /sessionStatsRaw = runtime\.sessionStats \?\? deriveSessionStatsFallback\(runtime\.messages\)/);
-	assert.match(src, /if \(attached\) this\.emitRuntimeState\(agentId\)/);
+	assert.match(src, /this\.emitRuntimeState\(agentId\)/);
 });

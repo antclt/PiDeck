@@ -874,21 +874,6 @@ export class AgentManager {
 		);
 	}
 
-	async readSessionDisplayMessagePage(
-		sessionPath: string,
-		agentId = "_viewer",
-		before?: number,
-		pageSize?: number,
-	): Promise<SessionMessagePage> {
-		const page = await this.sessionHistoryReader.readSessionDisplayMessagePage(
-			sessionPath,
-			agentId,
-			before,
-			pageSize,
-		);
-		return { ...page, messages: stripToolResultForDelivery(page.messages) };
-	}
-
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
 	async readSessionDisplayTurnPage(
 		sessionPath: string,
@@ -905,6 +890,13 @@ export class AgentManager {
 			beforeEntryId,
 		);
 		return { ...page, messages: stripToolResultForDelivery(page.messages) };
+	}
+
+	/** 从同一份历史显示索引读取模型/思考元数据，避免再次走 SessionScanner 摘要读取。 */
+	async readSessionDisplayMetadata(
+		sessionPath: string,
+	): Promise<Pick<SessionMessagePage, "model" | "thinkingLevel">> {
+		return this.sessionHistoryReader.readSessionMetadata(sessionPath);
 	}
 
 	/**
@@ -2345,6 +2337,8 @@ export class AgentManager {
 
 	async setModel(agentId: string, provider: string, modelId: string) {
 		const runtime = this.requireRuntime(agentId);
+		// Pi RPC 没有运行中 busy 门禁：set_model 立即更新 Agent state；已经发出的
+		// provider request 不可改写，后续同一 turn step/下一次 request 会读取新模型。
 		const response = await runtime.process.client.request(
 			{ type: "set_model", provider, modelId },
 			60_000,
@@ -2470,6 +2464,8 @@ export class AgentManager {
 
 	async setThinking(agentId: string, level: string) {
 		const runtime = this.requireRuntime(agentId);
+		// 与 set_model 相同：Pi 允许运行中更新 state，具体 request 是否已经发出
+		// 由 Agent 自己决定；PiDeck 不把它预先降级成下一轮 pending。
 		await runtime.process.client.request(
 			{ type: "set_thinking_level", level },
 			60_000,
