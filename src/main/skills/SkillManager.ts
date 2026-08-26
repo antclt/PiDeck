@@ -136,7 +136,7 @@ export class SkillManager {
 	 *
 	 * 为什么启动时自动安装：usage-probe 模板是 pideck 打包产物（resources/skills），
 	 * 而 pi 加载 skill 只扫用户全局目录（~/.pi/agent/skills、~/.agents/skills），
-	 * 不读 pideck 资源目录——必须落到用户技能目录，pi 才能发现并 @usage-probe 触发。
+	 * 不读 pideck 资源目录——必须落到用户技能目录，pi 才能发现并 /skill:usage-probe 触发。
 	 * 幂等覆盖：模板随应用更新同步；用户自定义配置写在 usage-probes.json，不在此文件。
 	 */
 	async installUsageProbeTemplate(): Promise<

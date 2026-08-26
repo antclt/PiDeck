@@ -400,6 +400,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 onPickPromptTemplate={() => composer.pickers.open("template")}
                 onPickSkill={() => composer.pickers.open("skill")}
                 onCompact={composer.delivery.compact}
+                onInsertUsageProbePrompt={composer.pickers.insertUsageProbePrompt}
                 onChangeMode={composer.pickers.setMode}
                 imageGenLocked={composer.delivery.imageGenModeLocked}
                 onCancelPlan={() => composer.pickers.setMode("normal")}

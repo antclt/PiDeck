@@ -7,6 +7,12 @@
  *     { usage: { rolling|weekly|monthly: { status, percent, resetsAt } } }
  *   - DeepSeek（baseUrl 含 api.deepseek.com）：GET /user/balance →
  *     { balance_infos: [{ currency, total_balance }] }（total_balance 可能是数字或字符串）
+ *   - OpenRouter（baseUrl 含 openrouter.ai）：GET /credits →
+ *     { data: { total_credits, total_usage } }（remaining 由 total-used 反推）
+ *   - Moonshot / Kimi（baseUrl 含 api.moonshot.ai / api.moonshot.cn）：GET /users/me/balance →
+ *     { data: { available_balance, voucher_balance, cash_balance } }（无 currency 字段，.ai=USD/.cn=CNY）
+ *   - 通用 OpenAI 兼容网关（api 归一化为 openai-completions / openai-responses / openai-codex-responses）：
+ *     GET /usage → { balance, unit }（OpenAI 官方 /usage 结构；不限定 baseUrl，兜底所有 OpenAI 协议站点）
  *
  * 除内置候选外，ConfigManager 还会合并用户自定义探针（~/.pi/agent/usage-probes.json），
  * 两者共用同一套候选结构与解析器。
@@ -71,6 +77,40 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 			kind: "balance",
 			valuePath: "balance_infos[0].total_balance",
 			currencyPath: "balance_infos[0].currency",
+		},
+	},
+	// OpenRouter：/credits 给出总额度与已用额度（需 Management key）。
+	// baseUrl 已含 /api/v1，path 相对其拼接；remaining 由 total-used 反推。
+	{
+		path: "/credits",
+		baseUrlContains: ["openrouter.ai"],
+		parse: {
+			kind: "credits",
+			totalPath: "data.total_credits",
+			usedPath: "data.total_usage",
+		},
+	},
+	// Moonshot / Kimi（国内 .cn 与国际 .ai 是同一个 balance 端点）：/users/me/balance
+	// 返回 { data: { available_balance, voucher_balance, cash_balance } }，available_balance=现金+赠送券，
+	// ≤0 不可调用推理 API；无 currency 字段（.ai 计 USD、.cn 计 CNY），故不标币种。
+	{
+		path: "/users/me/balance",
+		baseUrlContains: ["api.moonshot.ai", "api.moonshot.cn"],
+		parse: {
+			kind: "balance",
+			valuePath: "data.available_balance",
+		},
+	},
+	// 通用 OpenAI 兼容网关：多数 OpenAI 兼容中转站实现官方 /v1/usage 端点
+	// （{ balance, unit } 结构）。不限定 baseUrl，仅靠 apiTypes 收窄到 OpenAI 协议，
+	// 放在数组末尾——前面带 baseUrlContains 的专有候选优先命中，不会被此条抢走。
+	{
+		path: "/usage",
+		apiTypes: ["openai-completions", "openai-responses", "openai-codex-responses"],
+		parse: {
+			kind: "balance",
+			valuePath: "balance",
+			currencyPath: "unit",
 		},
 	},
 ];

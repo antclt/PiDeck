@@ -609,7 +609,8 @@ export const zhCN = {
   "sessionContext.usageCreditsRemaining": "剩余额度",
   "sessionContext.usageCreditsUsed": "已用额度",
   "sessionContext.usageCustomHint": "查不到用量？点此添加你的供应商",
-  "sessionContext.usageCustomInstalled": "用量查询技能模板已安装（usage-probe）。去聊天里 @usage-probe，让 AI 引导你写配置即可。",
+  "sessionContext.usageCustomInstalled": "用量查询技能模板已安装（usage-probe）。已在输入框放入 /skill:usage-probe 命令，填好供应商信息发送即可。",
+  "sessionContext.usageProbePrompt": "请帮我为以下供应商添加用量查询配置：\n供应商名称：\n接口 baseUrl：\n用量/余额接口文档链接（可选）：",
   // 输入卡正下方指标条（dsh-web StatsLine）：DSH 用整段日志统计，pi 用上次回复
   "composerStats.counts": "{turns} 轮 · {steps} 步",
   "composerStats.turns": "{turns} 轮",

@@ -612,7 +612,8 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionContext.usageCreditsRemaining": "Remaining credits",
   "sessionContext.usageCreditsUsed": "Used credits",
   "sessionContext.usageCustomHint": "No usage shown? Add your provider",
-  "sessionContext.usageCustomInstalled": "Usage skill template installed (usage-probe). Open a chat and type @usage-probe to let the AI walk you through writing the config.",
+  "sessionContext.usageCustomInstalled": "Usage skill template installed (usage-probe). The /skill:usage-probe command is now in the composer — fill in your provider details and send.",
+  "sessionContext.usageProbePrompt": "Please help me add a usage probe for this provider:\nProvider name:\nBase URL:\nUsage/balance API docs link (optional):",
   // Stats strip under the composer card (dsh-web StatsLine): DSH uses whole-log stats, pi uses last reply
   "composerStats.counts": "{turns} turns · {steps} steps",
   "composerStats.turns": "{turns} turns",

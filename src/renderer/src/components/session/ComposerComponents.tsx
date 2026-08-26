@@ -347,6 +347,8 @@ export function ComposerBottomBar(props: {
 	onPickSkill: () => void;
 	onPickThinking: () => void;
 	onCompact: () => void;
+	/** 一键插入 /skill:usage-probe + 占位符模板（由圆环面板触发，透传给 controller）。 */
+	onInsertUsageProbePrompt: (placeholder: string) => void;
 	onChangeMode: (mode: ComposerAgentMode) => void;
 	/** 会话已有生图消息时锁定生图模式，下拉不可切走。 */
 	imageGenLocked?: boolean;
@@ -586,6 +588,7 @@ export function ComposerBottomBar(props: {
 					<SessionContextMeter
 						state={props.state}
 						onCompact={props.onCompact}
+						onInsertUsageProbePrompt={props.onInsertUsageProbePrompt}
 					/>
 					{/* 分支只读 chip 升级为可切换下拉：当前分支即触发器，展开列表选目标分支后
 					    先弹确认（切换会携带未提交更改），确认后才调 App 级 switchBranch。 */}

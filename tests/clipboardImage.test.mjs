@@ -179,6 +179,19 @@ test("copy-as-image paths use writeClipboardImage instead of ClipboardItem", () 
 	assert.doesNotMatch(finalAnswer, /if \(!imageDataUrl \|\| !navigator\.clipboard\?\.write\) return/);
 });
 
+test("copy-as-image clone hides via .multi-select-image-export, not off-viewport offsets", () => {
+	// html-to-image 会把 clone 的 computed style 复制进 SVG foreignObject 再渲染。
+	// 若用 left:-100000px / position:fixed 隐藏 clone，内容会整体渲染到 viewBox 外 → 截图空白。
+	// 必须复用 .multi-select-image-export（absolute + left/top 归零 + z-index:-1），与多选分享一致。
+	const surface = read("src/renderer/src/components/session/SurfaceComponents.tsx");
+
+	// 根因守卫：单条「复制为图片」的 clone 不得再用负偏移或 fixed 定位隐藏
+	assert.doesNotMatch(surface, /style\.left\s*=\s*"-100000px"/);
+	assert.doesNotMatch(surface, /style\.position\s*=\s*"fixed"/);
+	// 正向：copyElementAsPng 复用多选分享的隐藏类
+	assert.match(surface, /classList\.add\("multi-select-image-export"\)/);
+});
+
 test("native clipboard image write lives in main and preload only invokes IPC", () => {
 	const preload = read("src/preload/index.ts");
 	const native = read("src/main/clipboard/nativeClipboard.ts");

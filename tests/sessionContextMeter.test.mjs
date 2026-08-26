@@ -229,7 +229,7 @@ test("bottom bar wires the meter next to send controls and merges model + thinki
   const source = bottomBarSource();
   // ContextMeter 挂在右侧组（git 分支之前、发送控件同组）
   assert.match(source, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-  assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}/);
+  assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*onInsertUsageProbePrompt=\{props\.onInsertUsageProbePrompt\}/);
   assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
   // 模型/思考合并 chip：模型名 · 思考档位 + chevron（dsh ModelSelect trigger 形态）
   assert.match(source, /composer-bar-btn model-thinking/);

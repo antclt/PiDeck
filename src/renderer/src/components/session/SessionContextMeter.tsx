@@ -158,6 +158,8 @@ export function SessionContextMeter(props: {
 	>;
 	/** 压缩上下文（原右上角紧凑徽章动作，迁入面板底部） */
 	onCompact?: () => void;
+	/** 一键插入 /skill:usage-probe + 占位符模板（安装成功后由圆环面板触发）。 */
+	onInsertUsageProbePrompt?: (placeholder: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLSpanElement | null>(null);
@@ -213,12 +215,16 @@ export function SessionContextMeter(props: {
 	// 有 provider 名才渲染用量区块：加载中/失败/成功三种态在区块内部切换。
 	const showUsage = provider != null;
 
-	// 用量查不到时一键安装内置技能模板，引导用户让 AI 写自定义探针配置。
+	// 用量查不到时一键安装内置技能模板，并把 /skill:usage-probe + 占位符模板放入
+	// 输入框（用户填空后发送，AI 引导写自定义探针配置），避免用户手打斜线命令。
 	const installUsageSkillHint = useCallback(() => {
 		void desktopApi.config.installUsageSkill().then((result) => {
-			if (result?.success) showNotice(t("sessionContext.usageCustomInstalled"), 6000, "info");
+			if (result?.success) {
+				showNotice(t("sessionContext.usageCustomInstalled"), 6000, "info");
+				props.onInsertUsageProbePrompt?.(t("sessionContext.usageProbePrompt"));
+			}
 		});
-	}, []);
+	}, [props.onInsertUsageProbePrompt]);
 
 	// 模型切换瞬间 capacity 可能暂时消失：不渲染过期面板
 	useEffect(() => {
