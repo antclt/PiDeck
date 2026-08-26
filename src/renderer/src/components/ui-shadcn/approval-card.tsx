@@ -66,7 +66,9 @@ export function ApprovalCard(props: {
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-auto min-w-0 flex-1 items-start justify-start gap-1.5 whitespace-normal px-0 py-0.5 text-left hover:bg-transparent"
+						// select-text 覆盖浏览器对 <button> 的 UA 默认 user-select:none，
+						// 让标题/描述文本可被选中复制（ask 卡片、权限审批卡等全靠这行）。
+						className="h-auto min-w-0 flex-1 items-start justify-start gap-1.5 whitespace-normal px-0 py-0.5 text-left hover:bg-transparent select-text"
 						aria-label={props.title}
 					>
 						<ChevronDown
