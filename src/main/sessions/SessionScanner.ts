@@ -8,7 +8,7 @@ import { basename as posixBasename, dirname as posixDirname, isAbsolute as posix
 import type { ChatMessage, ChatRole, SessionSummary } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { getCodexSessionThreadInfo } from "../../shared/codexSessionMeta";
-import { isInSubagentArtifactsDir, looksLikePiSessionFileStem, SUBAGENT_ARTIFACTS_DIR_NAME } from "../../shared/sessionIdentity";
+import { isInSubagentArtifactsDir, isValidPiSessionFileHead, looksLikePiSessionFileStem, SUBAGENT_ARTIFACTS_DIR_NAME } from "../../shared/sessionIdentity";
 import { extractMessageText, extractThinkingRaw } from "../pi/messageContent";
 import { toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -1728,22 +1728,47 @@ export class SessionScanner {
   }
 
   /**
-   * 有界读文件头部推断会话标题（不读完整正文、不写摘要缓存）。
-   * 供 SessionCatalog 对「标题仍是占位符」的会话补名——轻量扫描（listPathSummary）不带 name，
-   * 未打开过的 pi 会话若只在打开/重命名时才能获得标题，侧栏会一直 Untitled。
+   * 有界读文件头部，返回原文与推断标题（不读完整正文、不写摘要缓存）。
+   * 供占位标题回填与会话头有效性校验共用，避免对同一文件重复读盘。
    */
-  async inferSessionNameFromFile(filePath: string): Promise<string | undefined> {
+  private async readHeadAndInfer(
+    filePath: string,
+  ): Promise<{ raw: string; name: string | undefined } | null> {
     const isWsl = this.isWslPath(filePath);
     try {
       const raw = isWsl
         ? await this.readWslFileHead(filePath, SessionScanner.SUMMARY_NAME_HEAD_BYTES)
         : await this.readLocalFilePrefix(filePath, SessionScanner.SUMMARY_NAME_HEAD_BYTES);
       // 头部截断产生的半行解析失败会被 inferScanNameFromLines 跳过，无需额外处理。
-      return inferScanNameFromLines(raw.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content));
+      const name = inferScanNameFromLines(raw.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content));
+      return { raw, name };
     } catch {
-      // 补名是 best-effort：文件读不到时保持占位标题，不影响扫描主流程。
-      return undefined;
+      // 读不到（权限/锁定/不存在）：返回 null，调用方按 best-effort 处理，不拒绝文件。
+      return null;
     }
+  }
+
+  /**
+   * 有界读文件头部推断会话标题（不读完整正文、不写摘要缓存）。
+   * 供 SessionCatalog 对「标题仍是占位符」的会话补名——轻量扫描（listPathSummary）不带 name，
+   * 未打开过的 pi 会话若只在打开/重命名时才能获得标题，侧栏会一直 Untitled。
+   */
+  async inferSessionNameFromFile(filePath: string): Promise<string | undefined> {
+    return (await this.readHeadAndInfer(filePath))?.name;
+  }
+
+  /**
+   * 读有界头部并同时校验会话头有效性：transcript 等无 type 头的产物会被标记
+   * valid:false，供 catalog 在 mergeScanned 时拒绝索引（#168）。读不到文件时
+   * 返回空对象（valid 缺省 = 不拒绝），兼容权限/锁定文件不被误删。
+   * 与 inferSessionNameFromFile 共用同一次有界读头部，补名与校验不重复读盘。
+   */
+  async inferSessionNameAndValidity(
+    filePath: string,
+  ): Promise<{ name?: string; valid?: boolean }> {
+    const head = await this.readHeadAndInfer(filePath);
+    if (!head) return {};
+    return { name: head.name, valid: isValidPiSessionFileHead(head.raw) };
   }
 
   private inferProjectPathFromFile(filePath: string) {

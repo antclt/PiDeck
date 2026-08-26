@@ -630,3 +630,61 @@ test("excludes pi-subagents artifact dumps from scan results", async () => {
 		rmSync(home, { recursive: true, force: true });
 	}
 });
+
+// 回归 #168：即便 transcript 转储落在非 subagent-artifacts 目录（目录过滤够不到），
+// 会话头校验也应把它挡下。inferSessionNameAndValidity 在补名读头部时顺带校验，
+// 把无 type 头的产物标记 valid:false，供 catalog mergeScanned 拒绝索引。
+test("inferSessionNameAndValidity flags transcript dumps without a type header as invalid", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-transcript-validity-"));
+	try {
+		const projectPath = "C:\\repo\\project";
+		const piDir = join(home, ".pi", "agent", "sessions", "--C--repo-project--");
+		// 真实会话：首条记录 type:"session" → valid:true。
+		const realFile = join(piDir, "real.jsonl");
+		writeSession(realFile, [
+			{ type: "session", version: 3, id: "real1234", timestamp: "2026-08-26T08:00:00.000Z", cwd: projectPath },
+			{ type: "session_info", name: "Real", cwd: projectPath },
+			{ type: "message", message: { role: "user", content: "hello" } },
+		]);
+		// transcript 转储：首条记录用 recordType 而无 type → valid:false。
+		// 放在普通目录（非 subagent-artifacts），目录过滤够不到，只能靠会话头校验。
+		const transcriptFile = join(piDir, "stray_abc_worker_0_transcript.jsonl");
+		writeFileSync(transcriptFile, `${JSON.stringify({
+			version: 1,
+			recordType: "message",
+			source: "foreground",
+			runId: "abc",
+			agent: "worker",
+			cwd: projectPath,
+			sourceEventType: "initial_prompt",
+			role: "user",
+			message: { role: "user", content: [{ type: "text", text: "review prompt" }] },
+		})}\n`, "utf8");
+		// 旧版私有 sessionName 头行（#114 存量损坏）：跳过后首条真实记录带 type → valid:true。
+		const legacyFile = join(piDir, "legacy-renamed.jsonl");
+		writeSession(legacyFile, [
+			{ sessionName: "Legacy rename", ts: 1 },
+			{ type: "session_info", name: "Legacy rename", cwd: projectPath },
+			{ type: "message", message: { role: "user", content: "hi" } },
+		]);
+
+		const { SessionScanner } = loadSessionScanner(home);
+		const scanner = new SessionScanner();
+
+		const real = await scanner.inferSessionNameAndValidity(realFile);
+		assert.equal(real.valid, true, "real pi session header must be valid");
+		assert.equal(real.name, "Real");
+
+		const transcript = await scanner.inferSessionNameAndValidity(transcriptFile);
+		assert.equal(transcript.valid, false, "transcript without type header must be flagged invalid");
+
+		const legacy = await scanner.inferSessionNameAndValidity(legacyFile);
+		assert.equal(legacy.valid, true, "legacy sessionName head must be skipped, not rejected");
+
+		// 读不到的文件不应被误判为无效（valid 缺省），避免权限/锁定文件被从 catalog 清掉。
+		const missing = await scanner.inferSessionNameAndValidity(join(piDir, "missing.jsonl"));
+		assert.equal(missing.valid, undefined, "unreadable files must not be flagged invalid");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});

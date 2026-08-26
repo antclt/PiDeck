@@ -3500,9 +3500,10 @@ app.whenReady().then(async () => {
 			if (!project) return filePath;
 			return toAbsoluteSessionPath(filePath, project.path, environment);
 		},
-		// 占位标题回填：未打开过的 pi 会话也能在侧栏显示首条消息标题（不再永远 Untitled）。
-		// 有界读头部推断由 SessionScanner 负责；catalog 只在标题是占位符时才调用它。
-		(filePath) => sessionScanner.inferSessionNameFromFile(filePath),
+		// 占位标题回填 + 会话头有效性校验：未打开过的 pi 会话也能在侧栏显示首条消息标题
+		// （不再永远 Untitled）；同一次有界读头部顺带校验首条记录是否带 type 头，
+		// 把 pi-subagents transcript 等无 type 头的产物挡在 catalog 之外（#168）。
+		(filePath) => sessionScanner.inferSessionNameAndValidity(filePath),
 	);
 	await sessionCatalog.load();
 	// 多后端网关装配：pi + dsh（DSH 在窗口创建后后台预热，失败时按需重试）。

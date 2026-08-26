@@ -88,6 +88,56 @@ test("keeps source and WSL identity in the session origin key", () => {
   assert.match(wsl, /^pi:wsl:Ubuntu:dev:/);
 });
 
+// 回归 #168：扫描索引前校验会话头，拒绝无 type 头的产物转储（transcript 用 recordType）。
+test("isValidPiSessionFileHead accepts real pi session headers", () => {
+  const { isValidPiSessionFileHead } = loadModule();
+  // pi 原生会话头：首条记录 type:"session"。
+  const real = `${JSON.stringify({
+    type: "session",
+    version: 3,
+    id: "abc12345",
+    timestamp: "2026-08-26T08:00:00.000Z",
+    cwd: "C:/repo",
+  })}\n${JSON.stringify({ type: "message", message: { role: "user", content: "hi" } })}\n`;
+  assert.equal(isValidPiSessionFileHead(real), true);
+  // session_info 作为首条（带 type）亦接受，兼容历史格式与导入会话。
+  assert.equal(
+    isValidPiSessionFileHead(`${JSON.stringify({ type: "session_info", name: "x", cwd: "C:/repo" })}\n`),
+    true,
+  );
+});
+
+test("isValidPiSessionFileHead rejects pi-subagents transcript dumps without a type header", () => {
+  const { isValidPiSessionFileHead } = loadModule();
+  // transcript 首条记录用 recordType 而非 type——pi 无法作为会话加载。
+  const transcript = `${JSON.stringify({
+    version: 1,
+    recordType: "message",
+    source: "foreground",
+    runId: "abc",
+    agent: "worker",
+    cwd: "C:/repo",
+    sourceEventType: "initial_prompt",
+    role: "user",
+    message: { role: "user", content: [{ type: "text", text: "review prompt" }] },
+  })}\n`;
+  assert.equal(isValidPiSessionFileHead(transcript), false, "transcript without type header must be rejected");
+});
+
+test("isValidPiSessionFileHead skips legacy sessionName heads before judging the first real record", () => {
+  const { isValidPiSessionFileHead } = loadModule();
+  // 旧版 PiDeck 私有 sessionName 头行（#114 存量损坏）：跳过后首条真实记录带 type → 接受。
+  const legacyHead = `${JSON.stringify({ sessionName: "老版私有头", ts: 1 })}\n${JSON.stringify({
+    type: "session_info",
+    name: "老版私有头",
+    cwd: "C:/repo",
+  })}\n`;
+  assert.equal(isValidPiSessionFileHead(legacyHead), true);
+  // 空/损坏内容不接受。
+  assert.equal(isValidPiSessionFileHead(""), false);
+  assert.equal(isValidPiSessionFileHead("not json\n"), false);
+});
+
 test("AgentManager keys preserve WSL case and identity at the process boundary", () => {
   const { buildAgentSessionKey } = loadAgentIdentity();
   const defaults = {

@@ -26,6 +26,40 @@ export function looksLikePiSessionFileStem(title: string): boolean {
 export const SUBAGENT_ARTIFACTS_DIR_NAME = "subagent-artifacts";
 
 /**
+ * 校验 JSONL 文件头部是否为有效 Pi 会话：跳过旧版私有 sessionName 行后，
+ * 首条可解析记录必须带 type 字段（pi 会话头 type:"session"；session_info /
+ * *_import 等元数据行亦带 type）。
+ *
+ * 用于扫描索引前过滤掉非会话 JSONL——pi-subagents 的 transcript 转储首条记录
+ * 用 recordType 而非 type（无 type 头），会被本校验拒绝，防止其在侧栏出现无法
+ * 打开的条目（#168）。旧版 PiDeck 私有 sessionName 头行（#114 存量损坏）会被
+ * 跳过——这类文件由 repairCorruptSessionHeader 在打开时修复，扫描期不应隐藏。
+ *
+ * 与 pi 严格的「首条记录 type==="session" && typeof id==="string"」相比略宽容：
+ * 接受 session_info / *_import 等带 type 的元数据行作为首条，兼容历史格式与导入
+ * 会话；但足以拒绝无 type 头的产物转储。只检查首条记录（而非前 N 行任一），
+ * 避免 transcript 后续行中偶然出现的 type 字段导致误判。
+ */
+export function isValidPiSessionFileHead(raw: string): boolean {
+	for (const line of raw.split(/\r?\n/).filter(Boolean).slice(0, 12)) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch {
+			// 截断半行/损坏行跳过，不影响后续记录判定
+			continue;
+		}
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+		const record = parsed as Record<string, unknown>;
+		// 跳过旧版私有 sessionName 行（有 sessionName 无 type）——存量损坏，打开时修复
+		if (typeof record.sessionName === "string" && typeof record.type !== "string") continue;
+		// 首条有效记录必须带 type 字段；transcript 用 recordType 而无 type → 拒绝
+		return typeof record.type === "string";
+	}
+	return false;
+}
+
+/**
  * 判断文件是否位于 pi-subagents 产物目录内。
  *
  * 这些 JSONL（如 `<runId>_<agent>_0_transcript.jsonl`）是扩展私有的 transcript

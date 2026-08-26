@@ -238,7 +238,7 @@ test("agent flow: fork from user message prefills composer", async ({ window }) 
 	await window.keyboard.press("Enter");
 	await expect(timeline).toContainText("Mock 回复：「fork 源句」流式渲染验证完成", { timeout: 20_000 });
 
-	// 悬停用户气泡出现 Fork 操作（忙碌中不显示，此处已空闲）
+	// 悬停用户气泡出现 Fork 操作（忙碌中禁用，此处已空闲可直接点击）
 	const userBubble = timeline.locator("article.user-turn", { hasText: "fork 源句" }).first();
 	await userBubble.hover();
 	const forkBtn = userBubble.getByRole("button", { name: "Fork" });

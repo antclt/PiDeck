@@ -296,9 +296,17 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     }, run);
   }, [confirmStopIfRunning, failToast, hideOverlay, runFileMutation, showOverlay]);
 
+  /**
+   * 解析 fork 锚点 entryId。
+   * - pi：优先 meta.entryId，其次消息 id 的 "-history-" 后缀，最后 getForkMessages 文本回退匹配。
+   * - DSH：消息 id 形如 "dsh:<seq>"，seq 即 fork 锚点（session.fork 的 atSeq），直接解析，
+   *   不依赖文本匹配（重复/空文本消息也能 fork）。
+   * target 由调用方传入（而非按 agentId 反查），避免「刚 activateRuntime 完、
+   * 渲染层 agentId→sessionId 映射尚未落库」的竞态导致回退匹配拿不到 target。
+   */
   const resolveForkEntryId = useCallback(async (
     message: ChatMessage,
-    agentId?: string,
+    target?: SessionRuntimeTarget,
   ): Promise<string | undefined> => {
     if (typeof message.meta?.entryId === "string" && message.meta.entryId) {
       return message.meta.entryId;
@@ -311,8 +319,9 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
         return fromId;
       }
     }
-    if (!agentId) return undefined;
-    const target = depsRef.current.getRuntimeTargetForAgent(agentId);
+    // DSH：直接按消息 id 解析 seq 锚点（乐观上屏的 randomUUID id 不命中，走下方文本回退）。
+    const dshMatch = /^dsh:(\d+)$/.exec(message.id);
+    if (dshMatch) return `seq:${dshMatch[1]}`;
     if (!target) return undefined;
     try {
       const wrapped = requireSessionCommand(
@@ -350,7 +359,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
         };
       }
       showOverlay(sessionId, "forking");
-      const entryId = await resolveForkEntryId(message, target.agentId);
+      const entryId = await resolveForkEntryId(message, target);
       if (!entryId) {
         latest.showToast(t("app.forkMissingEntryId"), 4000);
         return;

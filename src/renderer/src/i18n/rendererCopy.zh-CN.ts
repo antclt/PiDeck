@@ -221,6 +221,7 @@ export const zhCN = {
   "app.compactInProgress": "正在压缩，请稍候",
   "app.forkFromMessage": "Fork",
   "app.forkFromMessageTitle": "从此消息 fork 为新会话（可改后重发）",
+  "app.forkBusyTitle": "回复结束后即可 fork 为新会话",
   "app.forkDone": "已 fork 为新会话，原文已放入输入框",
   "app.forkCancelled": "Fork 已取消",
   "app.forkMissingEntryId": "该消息无法 fork（缺少会话 entryId）",
