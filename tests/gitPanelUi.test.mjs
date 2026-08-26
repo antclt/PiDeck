@@ -226,7 +226,7 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
     assert.doesNotMatch(panel, /setTimeout\([\s\S]*?mutationRunningRef\.current = false/);
     assert.match(gitService, /const GIT_MUTATION_TIMEOUT_MS = 30_000;/);
     assert.ok(
-      (gitService.match(/timeout: GIT_MUTATION_TIMEOUT_MS/g) ?? []).length >= 7,
+      (gitService.match(/timeout(?:Ms)?: GIT_MUTATION_TIMEOUT_MS/g) ?? []).length >= 7,
       "all mutation and mutation-validation git commands should have a process timeout",
     );
   });

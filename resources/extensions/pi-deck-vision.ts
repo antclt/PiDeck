@@ -738,6 +738,22 @@ function truncateText(text: string, max: number): string {
  */
 /** 并发描述多张图片并汇总批次事件。
  * 导出仅用于测试覆盖（批次事件与 per-image 计时逻辑）；运行时入口是 default export 的 hooks。 */
+/**
+ * 生成「图片不可见」占位文本（复用视觉桥失败标记格式，渲染层据此渲染红卡）。
+ * 模型不支持图片时，视觉桥未配置/接口解析失败若放行原图，openai-completions 等
+ * provider 会无条件把用户图片编码进 payload，模型 API 直接 400 → 会话失败。
+ * 这里把图片替换成明确占位，模型仍能知道「有图但看不到」，不阻断主流程。
+ */
+export function buildOmittedImagesText(images: ImageContent[], reason: string): string {
+	return images
+		.slice(0, MAX_IMAGES_PER_TURN)
+		.map((_, i) => {
+			const n = i + 1;
+			return `[图片 #${n} 视觉桥转换失败：${reason}。请检查视觉桥设置（模型/接口地址/API Key）后重试，此图片内容不可见]`;
+		})
+		.join("\n\n");
+}
+
 export async function describeImages(
 	endpoint: ResolvedEndpoint,
 	images: ImageContent[],
@@ -877,14 +893,20 @@ export default function (pi: ExtensionAPI) {
 				return undefined;
 			}
 			if (!config?.enabled || !config.provider || !config.model) {
-				// 有图片但桥未就绪：这是“配置了没走”最常见的表现，必须留痕
-				log("warn", `${images.length} image(s) but vision bridge not configured（enabled/provider/model 不完整），已放行原图`);
-				return undefined;
+				// 有图片但桥未就绪：模型不支持图片时，放行原图会进 provider 触发 API 400（会话失败），
+				// 因此替换为明确占位文本，模型仍知道「有图但看不到」，不阻断主流程。
+				log("warn", `${images.length} image(s) but vision bridge not configured（enabled/provider/model 不完整），替换为占位文本`);
+				const placeholder = buildOmittedImagesText(images, "视觉桥未配置（enabled/provider/model 不完整）");
+				const text = typed.text ? `${typed.text}\n\n${placeholder}` : placeholder;
+				return { action: "transform", text, images: [] };
 			}
 			const endpoint = await resolveEndpoint(config, ctx);
 			if (!endpoint) {
-				log("error", `endpoint resolve failed for ${config.provider}/${config.model}：解析不到接口地址，请在设置页填写“接口地址”或改用 pi 内置供应商`);
-				return undefined;
+				// 端点解析失败：同上，替换占位文本，避免原图进 provider 导致会话失败
+				log("error", `endpoint resolve failed for ${config.provider}/${config.model}：解析不到接口地址，请在设置页填写"接口地址"或改用 pi 内置供应商`);
+				const placeholder = buildOmittedImagesText(images, "视觉桥接口地址解析失败");
+				const text = typed.text ? `${typed.text}\n\n${placeholder}` : placeholder;
+				return { action: "transform", text, images: [] };
 			}
 			const desc = await describeImages(
 				endpoint,
@@ -902,7 +924,12 @@ export default function (pi: ExtensionAPI) {
 						prompt: truncateText(config.promptTemplate ?? DEFAULT_PROMPT, 300),
 					}),
 			);
-			if (!desc) return undefined;
+			if (!desc) {
+				// describeImages 在 images 非空时正常不返回 null；防御：同样替换占位，不放行原图
+				const placeholder = buildOmittedImagesText(images, "视觉桥转换失败");
+				const text = typed.text ? `${typed.text}\n\n${placeholder}` : placeholder;
+				return { action: "transform", text, images: [] };
+			}
 			// 描述文本附到消息文本后，图片清空（已转为文字）
 			const text = typed.text ? `${typed.text}\n\n${desc}` : desc;
 			return { action: "transform", text, images: [] };

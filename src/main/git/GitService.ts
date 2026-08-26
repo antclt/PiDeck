@@ -4,6 +4,7 @@ import { lstat, open, readlink, realpath, unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { trashPath } from "../fs/trash";
+import { runGit } from "./gitProcess";
 import type { GitBranchInfo, CommitDetail, CommitEntry, GitRef, BranchDiffResult, GitChangedFile, GitFileStatus, GitCommitFileDiff, GitResourceGroupType, GitWorkspaceFileDiff, GitAheadBehind } from "../../shared/types";
 import { GitStatus } from "../../shared/types";
 import type { GitResource, GitResourceGroups } from "../../shared/types";
@@ -124,9 +125,9 @@ export class GitService {
 		try {
 			if (!branch || branch.startsWith("-")) throw new Error("Invalid branch name");
 			const fullRef = `refs/heads/${branch}`;
-			await execFileAsync("git", ["check-ref-format", fullRef], { cwd });
-			await execFileAsync("git", ["show-ref", "--verify", "--quiet", fullRef], { cwd });
-			await execFileAsync("git", ["checkout", "--end-of-options", branch], { cwd });
+			await runGit(["check-ref-format", fullRef], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
+			await runGit(["show-ref", "--verify", "--quiet", fullRef], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
+			await runGit(["checkout", "--end-of-options", branch], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 		} catch (e: unknown) {
 			const msg = e instanceof Error ? e.message : String(e);
 			// execFile 默认只输出 stdout；checkout 失败时 stderr 包含真正原因。
@@ -141,8 +142,8 @@ export class GitService {
 	 */
 	async createBranch(cwd: string, branchName: string): Promise<GitBranchInfo> {
 		if (!branchName || branchName.startsWith("-")) throw new Error("Invalid branch name");
-		await execFileAsync("git", ["check-ref-format", `refs/heads/${branchName}`], { cwd });
-		await execFileAsync("git", ["checkout", "-b", branchName], { cwd });
+		await runGit(["check-ref-format", `refs/heads/${branchName}`], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
+		await runGit(["checkout", "-b", branchName], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 		return this.getBranches(cwd);
 	}
 
@@ -699,7 +700,7 @@ export class GitService {
 	async stageFiles(cwd: string, paths: string[]): Promise<void> {
 		const safePaths = await this.resolveMutationPaths(cwd, paths, "stage");
 		if (safePaths.length === 0) return;
-		await execFileAsync("git", ["--literal-pathspecs", "add", "--", ...safePaths], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
+		await runGit(["--literal-pathspecs", "add", "--", ...safePaths], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 	}
 
 	/** Unstage 文件（git restore --staged） */
@@ -708,10 +709,10 @@ export class GitService {
 		if (safePaths.length === 0) return;
 		const head = await this.resolveCommitHash(cwd, "HEAD");
 		if (head) {
-			await execFileAsync("git", ["--literal-pathspecs", "restore", "--staged", "--", ...safePaths], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
+			await runGit(["--literal-pathspecs", "restore", "--staged", "--", ...safePaths], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 		} else {
 			// Unborn repository 没有 HEAD，restore --staged 无基线；从 index 移除但保留工作区文件。
-			await execFileAsync("git", ["--literal-pathspecs", "rm", "--cached", "--ignore-unmatch", "--", ...safePaths], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
+			await runGit(["--literal-pathspecs", "rm", "--cached", "--ignore-unmatch", "--", ...safePaths], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 		}
 	}
 
@@ -750,7 +751,7 @@ export class GitService {
 			return;
 		}
 
-		await execFileAsync("git", ["--literal-pathspecs", "restore", "--worktree", "--", resource.path], { cwd: repoRoot, timeout: GIT_MUTATION_TIMEOUT_MS });
+		await runGit(["--literal-pathspecs", "restore", "--worktree", "--", resource.path], { cwd: repoRoot, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 	}
 
 	/**
@@ -781,10 +782,9 @@ export class GitService {
 			}
 		}
 		if (trackedPaths.length > 0) {
-			await execFileAsync(
-				"git",
+			await runGit(
 				["--literal-pathspecs", "restore", "--worktree", "--", ...[...new Set(trackedPaths)]],
-				{ cwd: repoRoot, timeout: GIT_MUTATION_TIMEOUT_MS },
+				{ cwd: repoRoot, timeoutMs: GIT_MUTATION_TIMEOUT_MS },
 			);
 		}
 		for (const filePath of [...new Set(untrackedPaths)]) {
@@ -799,17 +799,17 @@ export class GitService {
 
 	/** 创建提交 */
 	async commit(cwd: string, message: string): Promise<void> {
-		await execFileAsync("git", ["commit", "-m", message], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
+		await runGit(["commit", "-m", message], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 	}
 
 	/** Cherry-pick：将指定提交应用到当前分支 */
 	async cherryPick(cwd: string, hash: string): Promise<void> {
-		await execFileAsync("git", ["cherry-pick", hash], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
+		await runGit(["cherry-pick", hash], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 	}
 
 	/** Revert：创建一个反向提交撤销指定提交的变更 */
 	async revertCommit(cwd: string, hash: string): Promise<void> {
-		await execFileAsync("git", ["revert", "--no-edit", hash], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
+		await runGit(["revert", "--no-edit", hash], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 	}
 
 	/**
@@ -817,7 +817,7 @@ export class GitService {
 	 * @param mode soft｜mixed｜hard，默认 soft
 	 */
 	async resetToCommit(cwd: string, hash: string, mode: "soft" | "mixed" | "hard" = "soft"): Promise<void> {
-		await execFileAsync("git", ["reset", `--${mode}`, hash], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
+		await runGit(["reset", `--${mode}`, hash], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 	}
 
 	/**
@@ -826,18 +826,18 @@ export class GitService {
 	 */
 	async dropCommit(cwd: string, hash: string): Promise<void> {
 		// 先获取 parent hash
-		const { stdout: parentHash } = await execFileAsync("git", ["rev-parse", `${hash}^`], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
-		await execFileAsync("git", ["rebase", "--onto", parentHash.trim(), hash], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS });
+		const { stdout: parentHash } = await runGit(["rev-parse", `${hash}^`], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
+		await runGit(["rebase", "--onto", parentHash.trim(), hash], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS });
 	}
 
 	/** Push：将当前分支推送到远程 */
 	async push(cwd: string): Promise<void> {
-		await execFileAsync("git", ["push"], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS * 4 });
+		await runGit(["push"], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS * 4 });
 	}
 
 	/** Pull：从远程拉取并合并到当前分支 */
 	async pull(cwd: string): Promise<void> {
-		await execFileAsync("git", ["pull"], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS * 4 });
+		await runGit(["pull"], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS * 4 });
 	}
 
 	/** Fetch：从远程获取最新数据但不合并。
@@ -845,7 +845,7 @@ export class GitService {
 	 * `fatal: not a git repository` 打进主进程 unhandledRejection。 */
 	async fetch(cwd: string): Promise<void> {
 		try {
-			await execFileAsync("git", ["fetch"], { cwd, timeout: GIT_MUTATION_TIMEOUT_MS * 4 });
+			await runGit(["fetch"], { cwd, timeoutMs: GIT_MUTATION_TIMEOUT_MS * 4 });
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			if (/not a git repository|fatal:|command not found|ENOENT|spawn.*git.*ENOENT/i.test(msg)) {

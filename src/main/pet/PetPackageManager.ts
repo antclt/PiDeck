@@ -19,10 +19,6 @@ function petResourcesDir(): string {
 /** 内置宠物清单，spritePath 为运行时路径，构建时通过 extraResources 分发出 asar */
 const BUILTIN_PETS = [
 	{ id: "clawd", displayName: "Clawd", description: "A tiny pixel Clawd companion made from your sticker GIFs.", dir: "clawd-3", file: "spritesheet.webp" },
-	{ id: "cache-capy", displayName: "Cache Capy", description: "A calm capybara carrying a tiny cache box for patient builds.", dir: "cache-capy", file: "spritesheet.webp" },
-	{ id: "duo", displayName: "Duo", description: "Learning companion with expressive chibi sprite poses.", dir: "duo", file: "spritesheet.webp" },
-	{ id: "octohack", displayName: "OctoHack", description: "A tiny Octocat-inspired chibi digital pet with a black cat head, cream face, whiskers, tentacle limbs, and a blue-dotted tentacle tail.", dir: "octohack", file: "spritesheet.webp" },
-	{ id: "fangjia", displayName: "FangJia", description: "FangJia is the mascot of switchbase.vip.", dir: "fangjia", file: "spritesheet.webp" },
 ];
 
 /**

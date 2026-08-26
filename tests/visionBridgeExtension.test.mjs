@@ -132,6 +132,21 @@ test("imageHash: same data same hash, different data different hash", () => {
 	assert.match(ext.imageHash("x"), /^[0-9a-f]{24}$/);
 });
 
+test("buildOmittedImagesText: placeholder matches renderer failed-mark parser", () => {
+	// 未配置视觉桥时 input hook 把图片替换成占位文本；该文本必须能被
+	// 渲染层 extractVisionBridgeBlocks 的 FAILED_MARK_RE 识别（失败红卡），否则用户看不到提示。
+	const text = ext.buildOmittedImagesText([imageA, imageB], "视觉桥未配置");
+	const failedMark = /\[图片 #(\d+)\s+视觉桥转换失败：([\s\S]*?)。请检查视觉桥设置[\s\S]*?此图片内容不可见\]/g;
+	const matches = [...text.matchAll(failedMark)];
+	assert.equal(matches.length, 2, "两张图各生成一条失败标记");
+	assert.equal(matches[0][1], "1");
+	assert.equal(matches[1][1], "2");
+	assert.match(matches[0][2], /视觉桥未配置/);
+	// 占位文本不含原图 base64 数据，模型只看到文字
+	assert.ok(!text.includes("AAAA"));
+	assert.ok(!text.includes("BBBB"));
+});
+
 // ── 图片收集 ─────────────────────────────────────────────
 
 // ── 图片提取与 note 替换 ──────────────────────────────────────

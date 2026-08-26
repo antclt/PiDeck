@@ -5491,6 +5491,7 @@ export class AgentManager {
       <text>${esc(body)}</text>
     </binding>
   </visual>
+  <audio src="ms-winsoundevent:Notification.Default" />
 </toast>`;
 	}
 

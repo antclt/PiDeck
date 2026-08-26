@@ -1,7 +1,7 @@
 /**
  * 宠物包扫描器（纯逻辑，无 electron 依赖，可单测）。
  *
- * 性能背景：宠物 spritesheet 是 webp（内置 5 张合计约 7.4MB）。旧实现把整图
+ * 性能背景：宠物 spritesheet 是 webp（内置 clawd 一张）。旧实现把整图
  * base64 成 data URL 放进 manifest，经 IPC 传输给渲染层——设置页每次打开/进入
  * 宠物 tab、以及切换宠物时推送宠物窗，都要搬运 ~10MB 字符串。
  *
