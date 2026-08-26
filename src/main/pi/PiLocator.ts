@@ -266,6 +266,20 @@ export class PiLocator {
       };
     }
 
+    // JS 源文件（.js/.mjs/.cjs）通常无 shebang/可执行位，不能直接 execve 或被 cmd
+    // 关联执行；统一改用 node 启动，兼容用户通过 alias "node /path/pi.js" 方式安装
+    // pi 的场景（#169）。仅对实际指向 .js 文件的路径生效，不误拦裸命令名 "pi"。
+    if (/\.(?:m?js|cjs)$/i.test(command) && existsSync(command)) {
+      const nodeBin = process.platform === "win32" ? "node.exe" : "node";
+      return {
+        command: nodeBin,
+        args: [command, ...args],
+        shell: false,
+        // JS 文件同目录一般没有 node；靠 createProcessEnv 的搜索目录解析 node。
+        pathPrefix: this.getCommandBinDir(command),
+      };
+    }
+
     if (process.platform !== "win32") {
       return { command, args, shell: false, pathPrefix: this.getCommandBinDir(command) };
     }
@@ -656,7 +670,11 @@ export class PiLocator {
 
   private getCandidates() {
     // Windows 不再自动检测 pi.ps1：PowerShell shim 与 .cmd 指向同一入口，但执行策略/编码/引号规则更复杂。
-    const names = process.platform === "win32" ? ["pi.cmd", "pi.exe", "pi"] : ["pi"];
+    // Linux 另追加 pi.js/pi.mjs/pi.cjs：部分用户通过 alias "node /path/pi.js" 直接运行 JS 源文件而非
+    // npm 装出的 shim（#169）；pi 排在前，存在标准 shim 时仍优先命中，不会被同名 JS 误拦。
+    const names = process.platform === "win32"
+      ? ["pi.cmd", "pi.exe", "pi"]
+      : ["pi", "pi.js", "pi.mjs", "pi.cjs"];
     return this.getSearchDirs().flatMap(dir => names.map(name => join(dir, name)));
   }
 

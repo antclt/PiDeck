@@ -86,9 +86,14 @@ export type SessionFilePathResolver = (
 	environment: SessionEnvironment,
 ) => string;
 
-/** 占位标题回填：给定会话文件路径返回可从头部推断的标题（无则 undefined）。
- *  装配层注入（实现为 SessionScanner.inferSessionNameFromFile，见 main/index.ts）。 */
-export type SessionTitleFetcher = (filePath: string) => Promise<string | undefined>;
+/** 占位标题回填与有效性校验的合并结果：name 缺省时保留占位标题；valid:false 表示
+ *  文件非有效 Pi 会话（如 pi-subagents transcript 转储，首条记录用 recordType 而无 type 头），
+ *  mergeScanned 应拒绝索引该文件（#168）。 */
+export type SessionTitleFetchResult = { name?: string; valid?: boolean };
+
+/** 占位标题回填 + 会话头有效性校验：装配层注入（实现为 SessionScanner.inferSessionNameAndValidity，
+ *  见 main/index.ts）。合并到一次有界读头部，避免补名与校验分别读盘。 */
+export type SessionTitleFetcher = (filePath: string) => Promise<SessionTitleFetchResult>;
 
 /** 扫描未读正文时没有 session_info。pi JSONL 文件名是时间戳，不能当标题，否则侧栏全是日期。 */
 function scannedFileStemTitle(filePath: string): string {
@@ -826,7 +831,9 @@ export class SessionCatalog {
 		// 轻量列表扫描的 summary 不带 name（listPathSummary 只 stat，见 SessionScanner）；
 		// 对标题将落成占位符的文件做有界读头部补名，让未打开过的 pi 会话也能在侧栏
 		// 显示首条消息标题，而不是永远 Untitled（不再依赖打开/重命名时才补名）。
-		const fetchedNames = await this.collectScannedTitles(summaries, context);
+		// 同一次读头部顺带校验会话头有效性：invalidOrigins 收集被判定为非有效会话
+		// 的 originKey（transcript 等无 type 头的产物，#168），下面据此清洗与拒绝。
+		const { names: fetchedNames, invalid: invalidOrigins } = await this.collectScannedTitles(summaries, context);
 		return this.enqueueMutation((entries) => {
 			let changed = false;
 
@@ -842,10 +849,25 @@ export class SessionCatalog {
 				changed = true;
 			}
 
-			// 防御性过滤：扫描端漏网时也不得再注册新的产物条目。
-			const acceptedSummaries = summaries.filter(
-				(summary) => summary.source !== "pi" || !isInSubagentArtifactsDir(summary.filePath),
-			);
+			// 清洗会话头校验失败的存量条目：本轮补名读取判定为非有效会话的文件
+			// （transcript 等无 type 头的产物，即便不在 subagent-artifacts 目录）。
+			// 仅 pi 来源；导入会话由各自导入器保证格式，不参与本校验。
+			if (invalidOrigins.size > 0) {
+				for (let index = entries.length - 1; index >= 0; index -= 1) {
+					const entry = entries[index]!;
+					if (entry.source !== "pi") continue;
+					if (!entry.originKey || !invalidOrigins.has(entry.originKey)) continue;
+					entries.splice(index, 1);
+					changed = true;
+				}
+			}
+
+			// 防御性过滤：扫描端漏网（subagent-artifacts）或会话头校验失败的产物不得注册新条目。
+			const acceptedSummaries = summaries.filter((summary) => {
+				if (summary.source === "pi" && isInSubagentArtifactsDir(summary.filePath)) return false;
+				if (invalidOrigins.has(buildSummaryOriginKey(summary, context))) return false;
+				return true;
+			});
 
 			const byOrigin = new Map(
 				entries
@@ -966,13 +988,16 @@ export class SessionCatalog {
 		].sort((left, right) => right.updatedAt - left.updatedAt));
 	}
 
-	/** 只对「该会话当前标题是占位符」的文件读头部补名：已有真实标题的条目不读盘。 */
+	/** 只对「该会话当前标题是占位符」的文件读头部补名：已有真实标题的条目不读盘。
+	 *  同一次读头部顺带校验会话头有效性（#168）：transcript 等无 type 头的产物
+	 *  被标记 invalid，mergeScanned 据此拒绝索引并清洗存量条目。 */
 	private async collectScannedTitles(
 		summaries: SessionSummary[],
 		context: SessionCatalogContext,
-	): Promise<Map<string, string>> {
+	): Promise<{ names: Map<string, string>; invalid: Set<string> }> {
 		const names = new Map<string, string>();
-		if (!this.fetchTitle) return names;
+		const invalid = new Set<string>();
+		if (!this.fetchTitle) return { names, invalid };
 		const byOrigin = new Map(
 			this.entries.filter((entry) => entry.originKey).map((entry) => [entry.originKey!, entry]),
 		);
@@ -985,27 +1010,23 @@ export class SessionCatalog {
 			if (existing && !isPlaceholderCatalogTitle(existing.title)) continue;
 			wanted.push({ originKey, filePath: summary.filePath });
 		}
-		if (wanted.length === 0) return names;
+		if (wanted.length === 0) return { names, invalid };
 		// 有界并行读头部；限制并发避免 WSL 环境一次拉起过多 wsl.exe。
-		// 单个失败降级为无标题，不影响扫描结果。
-		const settled: Array<readonly [string, string | undefined]> = [];
+		// 单个失败降级为无标题/不拒绝，不影响扫描结果。
 		const CONCURRENCY = 8;
 		let cursor = 0;
 		const workers = Array.from({ length: Math.min(CONCURRENCY, wanted.length) }, async () => {
 			while (cursor < wanted.length) {
 				const item = wanted[cursor++];
-				settled.push(
-					await this.fetchTitle!(item.filePath)
-						.then((title) => [item.originKey, title] as const)
-						.catch(() => [item.originKey, undefined] as const),
-				);
+				const result = await this.fetchTitle!(item.filePath).catch(() => undefined);
+				if (!result) continue;
+				if (result.name) names.set(item.originKey, result.name);
+				// valid 显式为 false 才拒绝；缺省（读不到/未校验）保留原行为
+				if (result.valid === false) invalid.add(item.originKey);
 			}
 		});
 		await Promise.all(workers);
-		for (const [originKey, title] of settled) {
-			if (title) names.set(originKey, title);
-		}
-		return names;
+		return { names, invalid };
 	}
 
 	private recordFromEntry(

@@ -72,11 +72,11 @@ test("placeholder titles get backfilled from the injected fetcher on first scan"
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-title-backfill-"));
   try {
-    // 只对本测试的文件返回标题；其他文件返回 undefined 模拟「读不到正文」。
+    // 只对本测试的文件返回标题；其他文件返回空对象模拟「读不到正文」。
     const fetcher = async (filePath) =>
       filePath === "C:/sessions/2026-08-22T04-22-29-162Z_abc.jsonl"
-        ? "修复侧栏标题：未打开的会话显示首条消息"
-        : undefined;
+        ? { name: "修复侧栏标题：未打开的会话显示首条消息" }
+        : {};
     const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
     await catalog.load();
     const [record] = await catalog.mergeScanned("project-1", [lightSummary()]);
@@ -100,7 +100,7 @@ test("an existing Untitled entry is upgraded once the fetcher can infer a title"
     // 第二次合并注入 fetcher：占位标题应被升级为真实标题。
     const fetcher = async (filePath) =>
       filePath === "C:/sessions/2026-08-22T04-22-29-162Z_abc.jsonl"
-        ? "升级后的标题" : undefined;
+        ? { name: "升级后的标题" } : {};
     const upgraded = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
     await upgraded.load();
     const [record] = await upgraded.mergeScanned("project-1", [lightSummary()]);
@@ -118,7 +118,7 @@ test("files with real titles never trigger the fetcher (no pointless reads)", as
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-title-no-call-"));
   try {
     let fetcherCalls = 0;
-    const fetcher = async () => { fetcherCalls += 1; return "不该被调用"; };
+    const fetcher = async () => { fetcherCalls += 1; return { name: "不该被调用" }; };
     const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
     await catalog.load();
     // summary 自带真实名称（readSummary 全量路径的场景）：不触发补名。
@@ -141,6 +141,45 @@ test("without an injected fetcher the placeholder behavior stays intact", async 
     const [record] = await catalog.mergeScanned("project-1", [lightSummary()]);
     // 未注入 fetcher（例如单元测试/无扫描器的安装点）：保持 Untitled 兜底，不回退。
     assert.equal(record.title, "Untitled");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// 回归 #168：pi-subagents 的 transcript 转储首条记录用 recordType 而非 type（无 type 头），
+// 不是有效 Pi 会话。fetcher 校验会话头时返回 valid:false，mergeScanned 必须拒绝索引该文件。
+// 存量 subagent-artifacts 目录内的脏条目由路径清洗（已有「drops legacy subagent-artifacts
+// entries」测试覆盖）；此处覆盖更一般的情况——产物落在目录过滤够不到的位置时，
+// 会话头校验仍能把它挡在 catalog 之外。
+test("rejects files whose header fails session validation", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-transcript-reject-"));
+  try {
+    const realPath = "C:/sessions/2026-08-22T04-22-29-162Z_abc.jsonl";
+    const transcriptPath = "C:/sessions/abc_worker_0_transcript.jsonl";
+    // fetcher 对真实会话返回 name（valid 缺省），对 transcript 返回 valid:false。
+    const fetcher = async (filePath) =>
+      filePath === transcriptPath
+        ? { valid: false }
+        : filePath === realPath
+          ? { name: "真实会话", valid: true }
+          : {};
+    const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
+    await catalog.load();
+    const records = await catalog.mergeScanned("project-1", [
+      lightSummary({ id: realPath, filePath: realPath }),
+      lightSummary({ id: transcriptPath, filePath: transcriptPath }),
+    ]);
+    assert.equal(
+      records.some((record) => record.filePath === transcriptPath),
+      false,
+      "transcript without a valid session header must not be indexed",
+    );
+    assert.equal(
+      records.some((record) => record.filePath === realPath && record.title === "真实会话"),
+      true,
+      "valid session must stay indexed with its inferred title",
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

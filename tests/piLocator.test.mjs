@@ -95,6 +95,80 @@ test("uses the pi cmd shim bin directory as PATH prefix on Windows when node.exe
 	}
 });
 
+// 回归 #169：Linux 下部分用户通过 alias "node /path/pi.js" 直接运行 JS 源文件（而非 npm shim）。
+// createInvocation 必须把指向真实 .js 文件的路径改用 node 启动（无 shebang/可执行位不能直接 execve），
+// 同时不能误拦裸命令名 "pi"（existsSync 对相对路径返回 false）。
+test("createInvocation routes a .js pi entry through node on Linux", () => {
+	const root = join(tmpdir(), `pi-desktop-locator-js-${process.pid}-${Date.now()}`);
+	const jsPath = join(root, "pi.js");
+	mkdirSync(root, { recursive: true });
+	writeFileSync(jsPath, "#!/usr/bin/env node\nconsole.log('hi')\n", "utf8");
+	try {
+		const { PiLocator } = loadPiLocatorModule("linux", {}, root);
+		const invocation = new PiLocator().createInvocation(jsPath, ["--version"]);
+		assert.equal(invocation.command, "node", "JS source must run via node, not direct execve");
+		// VM 跨 realm：args 是沙箱内 Array，与宿主 Array 原型不同，用 JSON 文本比较。
+		assert.equal(JSON.stringify(invocation.args), JSON.stringify([jsPath, "--version"]));
+		assert.equal(invocation.shell, false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("createInvocation leaves bare pi command alone (no .js routing without a real file)", () => {
+	const { PiLocator } = loadPiLocatorModule("linux", {}, tmpdir());
+	const invocation = new PiLocator().createInvocation("pi", ["--version"]);
+	assert.equal(invocation.command, "pi", "bare pi must not be rerouted to node");
+	assert.equal(JSON.stringify(invocation.args), JSON.stringify(["--version"]));
+});
+
+test("createInvocation routes a .js pi entry through node.exe on Windows", () => {
+	const root = join(tmpdir(), `pi-desktop-locator-js-win-${process.pid}-${Date.now()}`);
+	const jsPath = join(root, "pi.js");
+	mkdirSync(root, { recursive: true });
+	writeFileSync(jsPath, "console.log('hi')", "utf8");
+	try {
+		const { PiLocator } = loadPiLocatorModule("win32", { APPDATA: join(root, "Roaming") }, root);
+		const invocation = new PiLocator().createInvocation(jsPath, ["--version"]);
+		assert.equal(invocation.command, "node.exe");
+		assert.equal(JSON.stringify(invocation.args), JSON.stringify([jsPath, "--version"]));
+		assert.equal(invocation.shell, false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// 自动发现：Linux 下若没有标准 pi shim，扫描应回退到 pi.js/mjs/cjs（#169 的 alias-JS 场景）；
+// 存在标准 pi 时仍优先命中 pi，不被同名 JS 误拦。
+test("resolveCommand auto-detects pi.js on Linux when no pi shim exists", () => {
+	const root = join(tmpdir(), `pi-desktop-locator-jsdetect-${process.pid}-${Date.now()}`);
+	const npmGlobal = join(root, ".npm-global", "bin");
+	mkdirSync(npmGlobal, { recursive: true });
+	writeFileSync(join(npmGlobal, "pi.js"), "console.log('pi')", "utf8");
+	try {
+		const { PiLocator } = loadPiLocatorModule("linux", { PATH: "" }, root);
+		const resolved = new PiLocator().resolveCommand(undefined, false, undefined, undefined);
+		assert.equal(resolved, join(npmGlobal, "pi.js"));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("resolveCommand prefers a real pi shim over a sibling pi.js on Linux", () => {
+	const root = join(tmpdir(), `pi-desktop-locator-shimprio-${process.pid}-${Date.now()}`);
+	const npmGlobal = join(root, ".npm-global", "bin");
+	mkdirSync(npmGlobal, { recursive: true });
+	writeFileSync(join(npmGlobal, "pi"), "#!/bin/sh\nexec node x\n", "utf8");
+	writeFileSync(join(npmGlobal, "pi.js"), "console.log('pi')", "utf8");
+	try {
+		const { PiLocator } = loadPiLocatorModule("linux", { PATH: "" }, root);
+		const resolved = new PiLocator().resolveCommand(undefined, false, undefined, undefined);
+		assert.equal(resolved, join(npmGlobal, "pi"), "standard shim must win over pi.js");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("getSearchDirs honors MISE_DATA_DIR and MISE_INSTALL_PATH on Windows", () => {
 	const root = join(tmpdir(), `pi-desktop-locator-mise-${process.pid}-${Date.now()}`);
 	const miseData = join(root, "mise-data");

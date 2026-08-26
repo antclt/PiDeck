@@ -813,8 +813,9 @@ export const UserBubble = memo(function UserBubble(props: {
 	visionBridgeExpected?: boolean | null;
 }) {
 	const { message } = props;
-	// 空闲时始终展示 fork 入口；entryId 解析放到点击时做（meta 缺失时走 getForkMessages 回退）。
-	const canFork = Boolean(props.onForkMessage) && !props.agentRunning;
+	// fork 入口始终展示（hover 可见）；忙碌/进行中仅禁用而非隐藏，避免用户误以为入口「时有时无」。
+	// entryId 解析放到点击时做（meta 缺失时走 getForkMessages 回退）。
+	const canFork = Boolean(props.onForkMessage);
 	const rowRef = useRef<HTMLElement | null>(null);
 	const [editing, setEditing] = useState(false);
 	const [editText, setEditText] = useState("");
@@ -1218,22 +1219,23 @@ export const UserBubble = memo(function UserBubble(props: {
 				>
 					<Share size={14} />
 				</Button>
+				{/* fork 忙碌时也不隐藏、仅禁用：入口稳定可见，避免用户误以为「时有时无」 */}
+				{!editing && canFork && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						className="user-turn-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+						disabled={props.agentRunning || props.forking}
+						onClick={() => props.onForkMessage?.(message)}
+						title={props.agentRunning ? t("app.forkBusyTitle") : t("app.forkFromMessageTitle")}
+						aria-label={t("app.forkFromMessage")}
+					>
+						<GitFork size={14} strokeWidth={1.8} aria-hidden="true" />
+					</Button>
+				)}
 				{!editing && !props.agentRunning && (
 					<>
-						{canFork && (
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								className="user-turn-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-								disabled={props.forking}
-								onClick={() => props.onForkMessage?.(message)}
-								title={t("app.forkFromMessageTitle")}
-								aria-label={t("app.forkFromMessage")}
-							>
-								<GitFork size={14} strokeWidth={1.8} aria-hidden="true" />
-							</Button>
-						)}
 						{props.onEditMessage && (
 							<Button
 								type="button"

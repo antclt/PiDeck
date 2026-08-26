@@ -136,11 +136,13 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
     : undefined;
   const canMutateActiveMessages = runtime.canMutateActiveMessages;
   // 未启动时 activeAgent 为空，必须看 catalog backend，不能只看 live tab。
-  // DSH 本轮不做编辑/删除/重发（无 JSONL 离线改写）；fork 仍要求 live runtime。
+  // DSH 本轮不做编辑/删除/重发（无 JSONL 离线改写）；
+  // fork 对 pi/DSH 都始终提供入口：DSH 未激活时由 forkFromUserMessage 内部
+  // 先 activateRuntime 再 fork，不再用 canMutateActiveMessages 门控——否则打开
+  // 历史 DSH 会话（runtime 懒启动）时 fork 入口时有时无。
   const isDshBackend = sessionRecord?.backend === "dsh" || activeAgent?.backend === "dsh";
   const canEditOrDeleteMessages = !isDshBackend;
   const canResend = !isDshBackend;
-  const canFork = isDshBackend ? canMutateActiveMessages : true;
 
   return (
     <SessionView
@@ -170,7 +172,7 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       onResendUserMessage={canResend ? services.resendUserMessage : undefined}
       onEditMessage={canEditOrDeleteMessages ? services.editMessage : undefined}
       onDeleteMessage={canEditOrDeleteMessages ? services.deleteMessage : undefined}
-      onForkMessage={canFork ? services.forkFromUserMessage : undefined}
+      onForkMessage={services.forkFromUserMessage}
       forkingMessageId={services.forkingMessageId}
       onToast={(message: string) => services.showToast(message)}
       onQuickPrompt={(message) => services.insertQuickPrompt(currentSessionId, message)}

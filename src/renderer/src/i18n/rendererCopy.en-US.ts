@@ -221,6 +221,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.compactInProgress": "Compaction already in progress",
   "app.forkFromMessage": "Fork",
   "app.forkFromMessageTitle": "Fork a new session from this message (edit then resend)",
+  "app.forkBusyTitle": "Fork becomes available once the reply finishes",
   "app.forkDone": "Forked into a new session; prompt filled in the composer",
   "app.forkCancelled": "Fork cancelled",
   "app.forkMissingEntryId": "Cannot fork this message (missing session entryId)",
