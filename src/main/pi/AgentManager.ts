@@ -1564,6 +1564,16 @@ export class AgentManager {
 				"diagnostic.agentStopped",
 				errorMessage,
 			);
+			// 进程已退出但 tab 仍是旧状态：用户发送被拒是「状态非正常」的触发点之一。
+			// 进程 exit 事件另有「Pi process exit」日志，这里补记录发送动作被拒时的
+			// 状态快照与退出码，便于确认置 error 的确切时机与原因。
+			const diag = runtime.process.getDiagnostics() ?? null;
+			void this.appLogger?.warn("agent", "Prompt rejected: process not running", {
+				agentId: input.agentId,
+				statusBeforeReject: runtime.tab.status,
+				exitCode: diag?.exitCode ?? null,
+				exitSignal: diag?.exitSignal ?? null,
+			});
 			this.emitState();
 			return { accepted: false, error: errorMessage, i18nKey: "diagnostic.agentStopped" };
 		}
@@ -1636,6 +1646,13 @@ export class AgentManager {
 					"消息发送失败。",
 					{ debugDetails: errorMessage },
 				);
+				// pi 侧前置校验拒绝（模型不支持图片/队列参数缺失等）：气泡只展示给用户，
+				// 记一条 warn 便于核对「同一消息反复被拒」是否与 RPC 参数/模型能力相关。
+				void this.appLogger?.warn("agent", "Prompt rejected by pi RPC", {
+					agentId: input.agentId,
+					requestId: input.requestId,
+					error: errorMessage,
+				});
 				this.emitState();
 				return {
 					accepted: false,
@@ -1666,6 +1683,13 @@ export class AgentManager {
 				"消息接收结果未知。请先检查当前会话，避免重复发送；必要时重启 Agent。",
 				{ debugDetails: errorMessage },
 			);
+			// prompt RPC 抛异常（超时/连接断开/响应丢失）：状态可能被置 error，必须留痕，
+			// 与 session-perf 的 request started 配对才能还原「请求发出→无响应」链路。
+			void this.appLogger?.error("agent", "Prompt RPC threw", {
+				agentId: input.agentId,
+				requestId: input.requestId,
+				error: errorMessage,
+			});
 			this.emitState();
 			return {
 				accepted: false,
@@ -1694,6 +1718,16 @@ export class AgentManager {
 			const errorMessage = "Agent 进程已停止，请重启 Agent 后重试";
 			runtime.tab.status = "error";
 			this.addLocalizedMessage(agentId, "error", "diagnostic.agentStopped", errorMessage);
+			// 与 sendPrompt 同款留痕：!/!! 命令被拒时记下进程诊断快照，
+			// 避免「终端命令无效」在 applog 里无迹可寻。
+			const diag = runtime.process.getDiagnostics() ?? null;
+			void this.appLogger?.warn("agent", "Command rejected: process not running", {
+				agentId,
+				command,
+				statusBeforeReject: runtime.tab.status,
+				exitCode: diag?.exitCode ?? null,
+				exitSignal: diag?.exitSignal ?? null,
+			});
 			this.emitState();
 			return { accepted: false, error: errorMessage, i18nKey: "diagnostic.agentStopped" };
 		}
@@ -1831,8 +1865,13 @@ export class AgentManager {
 
 		runtime.process.client
 			.request({ type: "abort" }, 10_000)
-			.catch(() => {
-				// abort 超时或失败不影响前端状态切换
+			.catch((error) => {
+				// abort 超时或失败不影响前端状态切换，但必须留痕：abort 失败后
+				// pi 可能仍在流式输出而 UI 已显示停止，是排查状态错位的关键线索。
+				void this.appLogger?.warn("agent", "Abort RPC failed", {
+					agentId,
+					error: error instanceof Error ? error.message : String(error),
+				});
 			});
 
 		// Pending dialogs are runtime-only, so clearing their request map is enough.
@@ -3541,6 +3580,11 @@ export class AgentManager {
 			this.userInitiatedStop.delete(agentId);
 			runtime.tab.status = "closed";
 			this.emitState();
+			void this.appLogger?.info("agent", "Agent process exit handled: user-initiated stop (reattach)", {
+				agentId,
+				code: payload.code,
+				signal: payload.signal,
+			});
 			return;
 		}
 		// 自动压缩也可能发生在重连后的进程中；继续复用同一会话文件重附加，
@@ -3558,6 +3602,11 @@ export class AgentManager {
 						"diagnostic.compactReconnected",
 						"会话压缩完成，Agent 已自动重连",
 					);
+					void this.appLogger?.info("agent", "Agent reattach auto-restart succeeded", {
+						agentId,
+						code: payload.code,
+						sessionPath: runtime.tab.sessionPath,
+					});
 					this.emitState();
 				})
 				.catch(() => {
@@ -3568,13 +3617,26 @@ export class AgentManager {
 						"diagnostic.processReconnectFailed",
 						"Agent 进程意外退出，自动重连失败",
 					);
+					void this.appLogger?.error("agent", "Agent reattach auto-restart failed", {
+						agentId,
+						code: payload.code,
+						signal: payload.signal,
+						sessionPath: runtime.tab.sessionPath,
+					});
 					this.clearAgentState(agentId);
 					this.emitState();
 				});
 			return;
 		}
 		runtime.tab.status = "closed";
-		// 最终停止（无重连路径）：统一清理该 agent 的运行态键
+		// 最终停止（无重连路径）：统一清理该 agent 的运行态键。
+		// 异常退出（非 0 码）与正常退出在此汇合，warn 记录退出码便于与 exit 事件区分。
+		void this.appLogger?.warn("agent", "Agent process exited; no reconnect (reattach path)", {
+			agentId,
+			code: payload.code,
+			signal: payload.signal,
+			sessionPath: runtime.tab.sessionPath,
+		});
 		this.clearAgentState(agentId);
 		this.emitState();
 	}
@@ -3743,6 +3805,14 @@ export class AgentManager {
 				runtime.tab.status = "error";
 				const reason = typed.finalError ?? typed.errorMessage ?? "API 请求失败";
 				this.addMessage(agentId, "error", `请求失败：${String(reason)}`);
+				// 自动重试最终失败：原因只写会话气泡无法离线排查，这里同步留痕 applog。
+				// 记录剩余重试次数与最终错误原文，供 Issue 排查 API 可用性/配额问题。
+				void this.appLogger?.error("agent", "Auto retry exhausted", {
+					agentId,
+					attempt: typed.attempt,
+					maxAttempts: typed.maxAttempts,
+					reason: String(reason),
+				});
 				this.emitState();
 			}
 		}
@@ -3860,12 +3930,26 @@ export class AgentManager {
 				// 有错误且不会重试 → Agent 进入 error 态，宠物聚合为 failed（行5），
 				// 否则会被误置为 idle 触发"所有任务完成"通知
 				if (runtime) runtime.tab.status = "error";
+				// agent_end 携带错误且不重试：错误原文（API 400/模型报错等）必须进 applog，
+				// 会话气泡只面向用户，排查时依赖这里的结构化记录。
+				void this.appLogger?.error("agent", "Agent run ended with error", {
+					agentId,
+					error: String(errorMsg),
+					stopReason: typed.stopReason,
+				});
 			} else if (
 				typed.stopReason === "error" ||
 				errorMessages.length > 0
 			) {
 				this.addDetailedErrorMessage(agentId);
 				if (runtime) runtime.tab.status = "error";
+				// 与上一分支同款留痕：无显式错误文本时也记下 stopReason 与最后一条
+				// error 消息的 errorMessage，避免「会话失败但原因未知」完全不可追溯。
+				void this.appLogger?.error("agent", "Agent run ended with error", {
+					agentId,
+					error: topMsg?.errorMessage ?? typed.error ?? typed.stopReason,
+					stopReason: typed.stopReason,
+				});
 			}
 			if (runtime) this.emitState();
 			// agent_end 后 runtimeState 可能暂时仍显示后续 compaction/retry；立即同步一次，
