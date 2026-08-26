@@ -416,6 +416,17 @@ export class AgentManager {
 		 * 同一 key（securitySessionKey ?? sessionPath），保证 create/reattach/临时会话行为一致。
 		 */
 		private readonly resolveSessionProxy?: (sessionKey: string | undefined) => import("../../shared/types/session").SessionProxyMode | undefined,
+		/**
+		 * provider/modelId 是否在 pi 的模型目录中（选择器展示的 pi --list-models 结果，
+		 * 含 models.json + auth.json + 内置目录 + models-store.json 缓存）。
+		 * 由 main/index.ts 注入 modelListCache 查询。
+		 *
+		 * set_model 被 pi 拒绝（快照无此模型）时，若模型在目录中但不在运行中 Agent 的
+		 * 启动快照里，说明是「Agent 启动后目录才更新」——应引导用户重启 Agent 而非
+		 * 误报「模型未在 models.json 配置」（如 auth.json 官方 provider 的目录模型：
+		 * 选择器可见、TUI 可用，但 PiDeck 运行中的 Agent 快照没有）。
+		 */
+		private readonly resolveModelInCatalog?: (provider: string, modelId: string) => Promise<boolean>,
 	) {
 		this.messageProjector = new AgentMessageProjector({
 			translate: this.translate,
@@ -2292,13 +2303,20 @@ export class AgentManager {
 		);
 		if (!response.success) {
 			// pi 对 set_model 用启动时加载的模型快照校验；模型不在快照中返回
-			// "Model not found: provider/model"。若本地 models.json 确实有该模型，
-			// 说明是运行中 Agent 未加载新配置——抛带 needsRestart 标记的错误，
-			// 渲染层据此引导用户重启 Agent（新进程会重新加载 models.json）。
+			// "Model not found: provider/model"。此时分两种情况：
+			// 1. 本地 models.json 确实有该模型 → 运行中 Agent 未加载新配置，抛带
+			//    needsRestart 标记的错误，渲染层据此引导用户重启 Agent；
+			// 2. 模型不在 models.json 但 pi 目录（--list-models，含 auth.json 官方
+			//    provider 目录模型与 models-store.json 缓存）能识别 → 同样是
+			//    「Agent 启动后目录才更新」，快照过期而非模型不存在，也应 needsRestart
+			//    （否则用户看到误导性的「模型未在 models.json 配置」，重启 Agent 即可用）。
 			const errorText = response.error ?? "";
 			if (/model not found/i.test(errorText)) {
-				const localHasModel = await this.localModelsContains(provider, modelId);
-				if (localHasModel) {
+				const [localHasModel, catalogHasModel] = await Promise.all([
+					this.localModelsContains(provider, modelId),
+					this.resolveModelInCatalog?.(provider, modelId) ?? Promise.resolve(false),
+				]);
+				if (localHasModel || catalogHasModel) {
 					const err = new Error(errorText) as Error & { needsRestart?: boolean };
 					err.needsRestart = true;
 					throw err;

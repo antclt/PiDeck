@@ -12,8 +12,17 @@
  * - 启动时异步预加载（应用 ready 后后台 fork 一次）；
  * - 界面保存 models.json/auth.json 后失效并后台重取；
  * - 每次启动 Agent 时强制重取（防用户直接改文件不生效）。
+ *
+ * 目录缓存（models-store.json）刷新：
+ * PiDeck 的 RPC 进程一律带 --offline，pi 启动时的自动目录网络刷新（非 offline 时
+ * main() 会异步 modelRuntime.refresh 并写 models-store.json）被跳过，目录只能靠 TUI
+ * 更新 → 长期滞后会让选择器显示「目录有但运行中 Agent 快照没有」的模型（如官方
+ * provider 的新模型）。冷启动时用 pi update --models（唯一显式刷新入口，内置 15s
+ * 超时）主动刷一次，节流由 models-store.json 的 mtime 判断（见 MODEL_CATALOG_STALE_MS）。
  */
 
+import { join } from "node:path";
+import { stat } from "node:fs/promises";
 import type { AvailableModel, ModelListFailReason, ModelListReport } from "../../shared/types";
 import type { PiLocator } from "./PiLocator";
 import type { SettingsStore } from "../settings/SettingsStore";
@@ -295,7 +304,8 @@ async function loadModelsFromLocalConfig(
 	return (await loadModelsFromLocalConfigDetailed(configSource)).models;
 }
 
-async function execPiListModels(
+/** 执行 pi CLI 命令并返回 stdout（WSL/customPath 解析与进程环境同 execPiListModels）。 */
+async function runPiCliCommand(
 	piLocator: PiLocator,
 	settingsStore: SettingsStore,
 	args: readonly string[],
@@ -336,6 +346,14 @@ async function execPiListModels(
 			);
 		}).catch(reject);
 	});
+}
+
+async function execPiListModels(
+	piLocator: PiLocator,
+	settingsStore: SettingsStore,
+	args: readonly string[],
+): Promise<string> {
+	return runPiCliCommand(piLocator, settingsStore, args);
 }
 
 /** fork pi --list-models 并解析。新旗标不被认时回退到只传 --list-models。 */
@@ -491,6 +509,74 @@ export function invalidateModelListCache(): void {
 /** 获取当前缓存的模型列表（不触发新的 fork）。 */
 export function getCachedModelList(): AvailableModel[] | null {
 	return cachedListModels;
+}
+
+/** pi update --models：强制刷新模型目录缓存（models-store.json）并退出。
+ *
+ * pi 内部实现（chunk-E5KXRMZK.js refreshModelCatalogs2）：
+ *   ModelRuntime.create({ allowModelNetwork: !1 }).refresh({ allowNetwork: !0, force: !0 })
+ * 内置 15s 超时，成功输出 "Model catalogs refreshed"；不启动常驻 RPC 进程。
+ * 这是 pi 提供的唯一显式目录刷新入口（--offline 时 RPC 启动自动刷新被跳过）。 */
+export const MODEL_CATALOG_REFRESH_ARGS = ["update", "--models"] as const;
+
+/**
+ * 目录缓存过期阈值：models-store.json 的 mtime 距今超过该值才值得冷启动刷新。
+ * 与 pi 内置 withRemoteCatalog 的远程目录刷新节流（REMOTE_CATALOG_REFRESH_INTERVAL_MS=4h）
+ * 保持一致：4h 内任何来源（TUI / 手动 pi update --models / 上次冷启动）更新过目录，
+ * PiDeck 就不再出手；超过 4h 无人管过才兜底刷一次（force 网络请求，内置 15s 超时）。
+ */
+export const MODEL_CATALOG_STALE_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * 执行 pi update --models，强制刷新模型目录缓存。
+ * 失败不抛出（网络/pi 未安装/超时都返回 false），由调用方按需记日志：
+ * 目录刷新是尽力而为的后台任务，不应影响模型列表主流程。
+ */
+export async function refreshModelCatalogStore(
+	piLocator: PiLocator,
+	settingsStore: SettingsStore,
+): Promise<boolean> {
+	try {
+		await runPiCliCommand(piLocator, settingsStore, MODEL_CATALOG_REFRESH_ARGS);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * 判断模型目录缓存是否已过期：models-store.json 不存在（首次使用、从未开过 TUI）
+ * 或 mtime 距今超过 maxAgeMs 都视为需要刷新。
+ */
+export async function isModelCatalogStale(
+	configDir: string,
+	maxAgeMs: number = MODEL_CATALOG_STALE_MS,
+	now: () => number = Date.now,
+): Promise<boolean> {
+	try {
+		const mtimeMs = (await stat(join(configDir, "models-store.json"))).mtimeMs;
+		return now() - mtimeMs >= maxAgeMs;
+	} catch {
+		// 文件不存在 / stat 失败：视为需要刷新（刷新无害，失败也不影响启动）。
+		return true;
+	}
+}
+
+/**
+ * 冷启动节流版目录刷新：目录过期才跑 pi update --models，否则跳过。
+ * 返回 { ran: 是否实际执行, ok: 执行是否成功 }，不抛错。
+ */
+export async function refreshModelCatalogIfStale(
+	piLocator: PiLocator,
+	settingsStore: SettingsStore,
+	configDir: string,
+	options?: { maxAgeMs?: number; now?: () => number },
+): Promise<{ ran: boolean; ok: boolean }> {
+	if (!(await isModelCatalogStale(configDir, options?.maxAgeMs, options?.now))) {
+		return { ran: false, ok: true };
+	}
+	const ok = await refreshModelCatalogStore(piLocator, settingsStore);
+	return { ran: true, ok };
 }
 
 /**
