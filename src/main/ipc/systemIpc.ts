@@ -28,7 +28,7 @@ import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import type { SkillManager } from "../skills/SkillManager";
-import { fetchModelList, invalidateModelListCache, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import { fetchModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { probePiModel } from "../pi/PiModelProber";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
 import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
@@ -295,6 +295,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			typeof projectId === "string" && projectId.length <= 256 ? projectId : undefined;
 		const forceArg = force === true;
 		try {
+			// 手动刷新（force）：先强制刷新 pi 模型目录缓存（pi update --models，
+			// force 绕过 4h 磁盘节流——官方 provider 新模型立刻可见），成功后再重新
+			// hydration。目录刷新失败（无网络/超时）不阻塞：退回读盘 hydration，
+			// 旧目录也能刷新列表，刷新按钮不因网络问题报错。
+			if (forceArg) {
+				const catalogRefreshed = await refreshModelCatalogStore(piLocator, settingsStore);
+				void appLogger.info("pi", "Model catalog force refresh on manual reload", {
+					ok: catalogRefreshed,
+				});
+			}
 			const snapshot = forceArg
 				? await modelCapabilityCache.refresh()
 				: await modelCapabilityCache.ensure();

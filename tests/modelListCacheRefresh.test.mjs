@@ -125,3 +125,21 @@ test("pi update --models entry: args are array form (spawn safety) and startup w
   assert.match(capabilitySource, /models-store\.json/);
   assert.match(capabilitySource, /isRelevantConfigFile/);
 });
+
+test("manual picker reload (force) refreshes catalog before re-hydration", () => {
+  // 选择器“手动刷新”按钮 = listModelsReport(force=true)：先 pi update --models
+  // （force 绕过 4h 节流，官方 provider 新模型立刻可见），成功后重新 hydration。
+  const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
+  assert.match(systemIpc, /refreshModelCatalogStore\(piLocator, settingsStore\)/);
+  assert.match(systemIpc, /Model catalog force refresh on manual reload/);
+  // 刷新失败不阻塞：目录刷新在 hydration 之前，失败仅记日志，列表仍走读盘刷新。
+  const refreshCall = systemIpc.slice(
+    systemIpc.indexOf("// 手动刷新（force）"),
+    systemIpc.indexOf("modelCapabilityCache.refresh()", systemIpc.indexOf("// 手动刷新（force）")),
+  );
+  assert.match(refreshCall, /if \(forceArg\)/);
+  assert.match(refreshCall, /await refreshModelCatalogStore/);
+  // 渲染层已有 refreshing 转圈状态（失败也不打断选择器使用）。
+  const hook = readFileSync("src/renderer/src/hooks/useBackendModelCatalog.ts", "utf8");
+  assert.match(hook, /if \(force\) setRefreshing\(true\)/);
+});
