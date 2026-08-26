@@ -14,32 +14,29 @@ test("collapsed pixels are never committed", () => {
     shouldCommitPanelPixels({
       px: 0,
       savedWidth: 320,
-      minSize: 180,
-      isUserInteraction: false,
+      isUserInteraction: true,
     }),
     null,
   );
 });
 
-test("expand-to-min does not overwrite the saved drawer width", () => {
-  // 清缓存后默认 320；expand() 落到 min 180，写回去就会和 resize(320) 对打。
+test("programmatic layout changes never overwrite the saved width", () => {
+  // 缩放、窗口拉伸、expand/resize 都不是用户调整，不能把临时布局像素写入缓存。
   assert.equal(
     shouldCommitPanelPixels({
       px: 180,
       savedWidth: 320,
-      minSize: 180,
       isUserInteraction: false,
     }),
     null,
   );
   assert.equal(
     shouldCommitPanelPixels({
-      px: 234,
+      px: 400,
       savedWidth: 320,
-      minSize: 180,
       isUserInteraction: false,
     }),
-    234,
+    null,
   );
 });
 
@@ -48,20 +45,18 @@ test("user drag to min size is still committed", () => {
     shouldCommitPanelPixels({
       px: 180,
       savedWidth: 320,
-      minSize: 180,
       isUserInteraction: true,
     }),
     180,
   );
 });
 
-test("zoom or window resize commits the new pixel width", () => {
+test("user resize commits the new pixel width", () => {
   assert.equal(
     shouldCommitPanelPixels({
       px: 400,
       savedWidth: 320,
-      minSize: 180,
-      isUserInteraction: false,
+      isUserInteraction: true,
     }),
     400,
   );
@@ -69,8 +64,7 @@ test("zoom or window resize commits the new pixel width", () => {
     shouldCommitPanelPixels({
       px: 280,
       savedWidth: 320,
-      minSize: 180,
-      isUserInteraction: false,
+      isUserInteraction: true,
     }),
     280,
   );
@@ -81,8 +75,7 @@ test("equal sizes are ignored to keep resize effects idle", () => {
     shouldCommitPanelPixels({
       px: 320,
       savedWidth: 320,
-      minSize: 180,
-      isUserInteraction: false,
+      isUserInteraction: true,
     }),
     null,
   );
@@ -90,8 +83,7 @@ test("equal sizes are ignored to keep resize effects idle", () => {
     shouldCommitPanelPixels({
       px: 321,
       savedWidth: 320,
-      minSize: 180,
-      isUserInteraction: false,
+      isUserInteraction: true,
     }),
     null,
   );

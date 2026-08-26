@@ -26,8 +26,10 @@ import { shouldCommitPanelPixels } from "../../lib/shellPanelLayout";
  * 工作台外壳（#115 U5 布局换装）：三栏水平布局由 react-resizable-panels 接管。
  *
  * 状态归属约定：
- * - App 侧的 px 状态（listWidth/drawerWidth/listCollapsed/drawerCollapsed）仍是
- *   单一事实源，同时驱动 CSS 变量（hover 宽度、抽屉内部动画等旧样式仍依赖它们）。
+ * - App 侧的 px 状态（listWidth/drawerWidth/listCollapsed/drawerCollapsed）是保存的
+ *   布局偏好和面板控制值；实际受约束宽度只同步到 CSS 定位变量，不污染持久化状态。
+ * - 侧栏/抽屉使用 preserve-pixel-size：窗口或页面缩放只改变聊天区可用空间，
+ *   不会把布局换算后的临时像素宽度误当成用户偏好写入缓存。
  * - 面板库负责拖拽交互；拖拽**过程中不回写 React 状态**（每个 pointermove 都
  *   setState 会让整个工作台每帧重渲染，且 defaultSize 随动会触发库重布局，
  *   两者叠加就是肉眼可见的抖动）；拖拽释放/键盘调整完成时经 Group 的
@@ -93,6 +95,34 @@ export interface AppShellProps {
 
 /** 侧栏收起后保留的边缘提示条宽度（对齐旧 grid 实现） */
 const LIST_COLLAPSED_SIZE = 0;
+
+/** 将面板库的实际布局宽度同步给只读 CSS 变量，不触发 React 状态/持久化回写。 */
+function writeListLayoutVariables(shell: HTMLElement, width: number, visible: boolean) {
+  shell.style.setProperty("--list-width", `${visible ? width : 0}px`);
+  shell.style.setProperty("--list-expanded-width", `${width}px`);
+  shell.style.setProperty("--list-hover-width", `${Math.max(190, width)}px`);
+}
+
+/** 将抽屉的实际布局宽度同步给悬浮入口定位变量。 */
+function writeDrawerLayoutVariables(shell: HTMLElement, width: number, visible: boolean) {
+  const renderedWidth = visible ? width : 0;
+  shell.style.setProperty("--drawer-width", `${renderedWidth}px`);
+  shell.style.setProperty("--drawer-col-w", `${renderedWidth}px`);
+  shell.style.setProperty("--drawer-splitter-w", `${visible ? 6 : 0}px`);
+}
+
+/**
+ * 读取与外壳 CSS 坐标一致的面板宽度。PanelImperativeHandle 的 inPixels 基于
+ * 外层 offsetWidth，在 Electron 页面缩放时会按 zoom 比例放大；内层可视容器的
+ * bounding rect 才是 --drawer-* / --list-* 所使用的 CSS 坐标。
+ */
+function readPanelLayoutWidth(
+  element: HTMLDivElement | null,
+  panel: PanelImperativeHandle,
+): number {
+  return Math.round(element?.getBoundingClientRect().width ?? panel.getSize().inPixels);
+}
+
 // 侧栏宽度上下限由 useResize 统一导出（LIST_WIDTH_MIN/MAX），
 // 与 localStorage 持久化读取时的 clamp 范围同源，避免两处漂移。
 
@@ -111,20 +141,20 @@ export function AppShell(props: AppShellProps) {
     children,
   } = props;
 
+  const shellRef = useRef<HTMLDivElement | null>(null);
   const listPanelRef = useRef<PanelImperativeHandle | null>(null);
   const drawerPanelRef = useRef<PanelImperativeHandle | null>(null);
-  const groupRef = useRef<HTMLDivElement | null>(null);
+  const listPanelElementRef = useRef<HTMLDivElement | null>(null);
+  const drawerPanelElementRef = useRef<HTMLDivElement | null>(null);
+  // 这两个 ref 表示当前实际布局宽度，只用于 CSS 定位；不进入持久化状态。
+  const listLayoutWidthRef = useRef(listWidth);
+  const drawerLayoutWidthRef = useRef(drawerWidth);
   // 开合 effect 不把 width 放进依赖（否则每次回写都会再 expand/resize 一轮）。
   // 打开折叠面板时用 ref 读最新保存宽度，避免 expand() 落到 minSize。
   const listWidthRef = useRef(listWidth);
   const drawerWidthRef = useRef(drawerWidth);
   listWidthRef.current = listWidth;
   drawerWidthRef.current = drawerWidth;
-  // RO 同步回调只读 ref，避免每次回写触发 effect 重订阅
-  const drawerOpenRef = useRef(false);
-  const listOpenRef = useRef(false);
-  drawerOpenRef.current = Boolean(drawer) && !drawerCollapsed;
-  listOpenRef.current = !listCollapsed;
   const notifyLayoutResized = useNotifyLayoutResized();
 
   // 抽屉/侧栏“刚打开”标志：closed→open 时给内容容器挂一次进入动画类；
@@ -192,59 +222,79 @@ export function AppShell(props: AppShellProps) {
     return () => cancelAnimationFrame(frame);
   }, [drawerWidth, drawer, drawerCollapsed]);
 
-  // ── 容器缩放（zoomFactor / 窗口拉伸 / 全屏切换）→ 面板像素回写 ──
-  // 库的 onLayoutChanged 只报告百分比布局变化：preserve-relative-size 下
-  // zoom 前后百分比不变，W(上次,本次) 判定相同直接跳过，AppShell 收不到通知，
-  // outline-hover 的 --drawer-* 就停在旧像素（表现为“缩放后悬浮菜单不跟随”）。
-  // 这里用 ResizeObserver 直察 Group 容器：容器尺寸变化必触发，且回调排在库的
-  // RO 之后（库先 observe），getSize() 读到的已是新布局；列表/抽屉折叠时跳过。
+  // 水合或用户拖拽改变保存宽度后，先让定位变量跟随保存值；面板若受到约束，
+  // 下方 ResizeObserver 会再用实际 DOM 宽度校正。observer 只改 CSS，不触发每帧 React 重渲染。
   useEffect(() => {
-    const el = groupRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      if (drawerOpenRef.current) {
-        const drawerPanel = drawerPanelRef.current;
-        if (drawerPanel) {
-          const px = Math.round(drawerPanel.getSize().inPixels);
-          if (px > 1 && Math.abs(px - drawerWidthRef.current) > 1)
-            setDrawerWidth(px);
+    listLayoutWidthRef.current = listWidth;
+    const shell = shellRef.current;
+    if (shell) writeListLayoutVariables(shell, listWidth, !listCollapsed);
+  }, [listWidth, listCollapsed]);
+  useEffect(() => {
+    drawerLayoutWidthRef.current = drawerWidth;
+    const shell = shellRef.current;
+    if (shell) writeDrawerLayoutVariables(shell, drawerWidth, Boolean(drawer) && !drawerCollapsed);
+  }, [drawerWidth, drawer, drawerCollapsed]);
+
+  // 面板受窗口约束、钉住状态或拖拽影响时，实际 DOM 宽度可能与保存偏好不同。
+  // 只把这个瞬时值写入 CSS 定位变量，绝不写回 listWidth/drawerWidth 缓存。
+  useEffect(() => {
+    const shell = shellRef.current;
+    const listElement = listPanelElementRef.current;
+    const drawerElement = drawerPanelElementRef.current;
+    if (!shell || typeof ResizeObserver === "undefined") return;
+
+    const syncActualWidths = () => {
+      if (listElement && !listCollapsed) {
+        const width = Math.round(listElement.getBoundingClientRect().width);
+        if (width > 1) {
+          listLayoutWidthRef.current = width;
+          writeListLayoutVariables(shell, width, true);
         }
       }
-      if (listOpenRef.current) {
-        const listPanel = listPanelRef.current;
-        if (listPanel) {
-          const px = Math.round(listPanel.getSize().inPixels);
-          if (px > LIST_COLLAPSED_SIZE && Math.abs(px - listWidthRef.current) > 1)
-            setListWidth(px);
+      if (drawerElement && drawer && !drawerCollapsed) {
+        const width = Math.round(drawerElement.getBoundingClientRect().width);
+        if (width > 1) {
+          drawerLayoutWidthRef.current = width;
+          writeDrawerLayoutVariables(shell, width, true);
         }
       }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    };
+
+    const observer = new ResizeObserver(syncActualWidths);
+    if (listElement) observer.observe(listElement);
+    if (drawerElement) observer.observe(drawerElement);
+    syncActualWidths();
+    return () => observer.disconnect();
+  }, [drawer, drawerCollapsed, drawerPinned, listCollapsed]);
 
   // ── 布局落定 → 状态回写 ──
   // onLayoutChanged 在一次布局变更“完成”时触发（拖拽释放、分隔条键盘调整、容器缩放）。
-  // 折叠状态只在用户交互时回写。抽屉像素宽走 shouldCommitPanelPixels：缩放后跟像素，
-  // 折叠 0 / expand→min 的瞬时值不写。
+  // 窗口/页面缩放不是用户调整宽度，只有真实拖拽/键盘交互才回写持久化偏好；否则
+  // preserve-relative-size 的换算结果会污染缓存，下一次启动又把错误宽度恢复出来。
   function handleLayoutChanged(_layout: Layout, meta: LayoutChangedMeta) {
     // 无论交互还是程序化变更，布局落定后都通知悬浮层重算一次。
     notifyLayoutResized();
+    if (!meta.isUserInteraction) return;
+
     const drawerPanel = drawerPanelRef.current;
-    const drawerMin = drawerPinned ? DRAWER_WIDTH_MIN_PINNED : DRAWER_WIDTH_MIN;
     if (drawerPanel && drawer && !drawerCollapsed) {
-      // 缩放后 --drawer-* 仍要跟像素走；但 expand→min 的瞬时值不能盖掉保存宽度。
+      const px = readPanelLayoutWidth(drawerPanelElementRef.current, drawerPanel);
       const next = shouldCommitPanelPixels({
-        px: drawerPanel.getSize().inPixels,
+        px,
         savedWidth: drawerWidth,
-        minSize: drawerMin,
-        isUserInteraction: meta.isUserInteraction,
+        isUserInteraction: true,
       });
       if (next !== null) setDrawerWidth(next);
     }
 
-    if (!meta.isUserInteraction) return;
     const listPanel = listPanelRef.current;
+    if (listPanel && !listCollapsed) {
+      const px = readPanelLayoutWidth(listPanelElementRef.current, listPanel);
+      if (px > 1) {
+        listLayoutWidthRef.current = px;
+        if (shellRef.current) writeListLayoutVariables(shellRef.current, px, true);
+      }
+    }
     if (listPanel) {
       const px = Math.round(listPanel.getSize().inPixels);
       const collapsed = listPanel.isCollapsed() || px <= LIST_COLLAPSED_SIZE + 1;
@@ -253,7 +303,6 @@ export function AppShell(props: AppShellProps) {
         const next = shouldCommitPanelPixels({
           px,
           savedWidth: listWidth,
-          minSize: LIST_WIDTH_MIN,
           isUserInteraction: true,
         });
         if (next !== null) setListWidth(next);
@@ -273,6 +322,7 @@ export function AppShell(props: AppShellProps) {
 
   return (
     <div
+      ref={shellRef}
       className={[
         "wechat-shell",
         drawer && !drawerCollapsed ? "drawer-open" : "",
@@ -286,11 +336,11 @@ export function AppShell(props: AppShellProps) {
         .join(" ")}
       style={
         {
-          "--list-width": `${listCollapsed ? 0 : listWidth}px`,
-          "--list-expanded-width": `${listWidth}px`,
-          "--list-hover-width": `${Math.max(190, listWidth)}px`,
-          "--drawer-width": `${drawer && !drawerCollapsed ? drawerWidth : 0}px`,
-          "--drawer-col-w": `${drawer && !drawerCollapsed ? drawerWidth : 0}px`,
+          "--list-width": `${listCollapsed ? 0 : listLayoutWidthRef.current}px`,
+          "--list-expanded-width": `${listLayoutWidthRef.current}px`,
+          "--list-hover-width": `${Math.max(190, listLayoutWidthRef.current)}px`,
+          "--drawer-width": `${drawer && !drawerCollapsed ? drawerLayoutWidthRef.current : 0}px`,
+          "--drawer-col-w": `${drawer && !drawerCollapsed ? drawerLayoutWidthRef.current : 0}px`,
           "--drawer-splitter-w": `${drawer && !drawerCollapsed ? 6 : 0}px`,
         } as CSSProperties
       }
@@ -306,7 +356,7 @@ export function AppShell(props: AppShellProps) {
         onWindowMaximizedChange={onWindowMaximizedChange}
         closeWindow={closeWindow}
       />
-      <ResizablePanelGroup orientation="horizontal" className="shell-panel-group" elementRef={groupRef} onLayoutChanged={handleLayoutChanged}>
+      <ResizablePanelGroup orientation="horizontal" className="shell-panel-group" onLayoutChanged={handleLayoutChanged}>
         <ResizablePanel
           id="list"
           panelRef={listPanelRef}
@@ -314,10 +364,12 @@ export function AppShell(props: AppShellProps) {
           collapsedSize={LIST_COLLAPSED_SIZE}
           minSize={LIST_WIDTH_MIN}
           maxSize={LIST_WIDTH_MAX}
+          groupResizeBehavior="preserve-pixel-size"
           defaultSize={listCollapsed ? LIST_COLLAPSED_SIZE : listWidth}
           className="shell-panel-list"
         >
           <div
+            ref={listPanelElementRef}
             className={cn("h-full min-w-0", listEntering && "list-content-enter")}
             onAnimationEnd={(event) => {
               if (event.target === event.currentTarget) setListEntering(false);
@@ -366,10 +418,12 @@ export function AppShell(props: AppShellProps) {
           collapsedSize={0}
           minSize={drawerPinned ? DRAWER_WIDTH_MIN_PINNED : DRAWER_WIDTH_MIN}
           maxSize={DRAWER_WIDTH_MAX}
+          groupResizeBehavior="preserve-pixel-size"
           defaultSize={0}
           className="shell-panel-drawer"
         >
           <div
+            ref={drawerPanelElementRef}
             className={cn("h-full min-w-0", drawerEntering && "drawer-content-enter")}
             onAnimationEnd={(event) => {
               if (event.target === event.currentTarget) setDrawerEntering(false);

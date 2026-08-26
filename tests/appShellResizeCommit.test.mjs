@@ -13,22 +13,31 @@ test("resize state commits via Group onLayoutChanged, not per-frame Panel onResi
   assert.doesNotMatch(shell, /onResize=\{handle/);
 });
 
-test("container zoom/resize syncs panel pixels via ResizeObserver", () => {
-  // 库 onLayoutChanged 在 preserve-relative-size 下 zoom 前后百分比不变，W 深比较
-  // 判定相同跳过 → AppShell 收不到通知。必须直察 Group 容器：RO 回调排库之后，
-  // getSize() 已更新，把 drawer/list 实际像素写回 --drawer-*/listWidth。
-  assert.match(shell, /elementRef=\{groupRef\}/);
-  assert.match(shell, /new ResizeObserver\(\(\) => \{/);
-  assert.match(shell, /ro\.observe\(el\)/);
-  assert.match(shell, /setDrawerWidth\(px\)/);
-  assert.match(shell, /setListWidth\(px\)/);
-  assert.match(shell, /drawerOpenRef\.current/);
+test("viewport zoom/resize keeps sidebar and drawer widths in pixel mode", () => {
+  // 容器变化不能按相对比例放大/缩小两侧面板；否则测得的临时像素会污染缓存。
+  assert.match(
+    shell,
+    /id="list"[\s\S]*?groupResizeBehavior="preserve-pixel-size"/,
+  );
+  assert.match(
+    shell,
+    /id="drawer"[\s\S]*?groupResizeBehavior="preserve-pixel-size"/,
+  );
+  assert.match(shell, /new ResizeObserver\(syncActualWidths\)/);
+  // ResizeObserver 只更新 CSS 定位变量，不能在窗口/缩放变化时写回持久化 state。
+  assert.match(shell, /writeListLayoutVariables\(shell, width, true\)/);
+  assert.match(shell, /writeDrawerLayoutVariables\(shell, width, true\)/);
+  assert.doesNotMatch(shell, /setListWidth\(px\)/);
+  assert.doesNotMatch(shell, /setDrawerWidth\(px\)/);
 });
 
-test("programmatic layout changes do not write collapsed or expand-to-min width", () => {
-  // isUserInteraction=false 仍须在折叠状态回写前 return，避免 effect → resize → 回写回路。
-  // 抽屉像素宽走 shouldCommitPanelPixels：折叠 0 与 expand→min 都不写，缩放后的真实像素才写。
+test("programmatic layout changes do not overwrite persisted widths", () => {
+  // 缩放/窗口拉伸/程序化开合都不能走持久化 setter；只有用户交互才提交宽度。
   assert.match(shell, /if \(!meta\.isUserInteraction\) return;/);
+  assert.match(
+    shell,
+    /if \(!meta\.isUserInteraction\) return;[\s\S]*?const drawerPanel[\s\S]*?const next = shouldCommitPanelPixels\(/,
+  );
   assert.match(shell, /shouldCommitPanelPixels/);
 });
 
