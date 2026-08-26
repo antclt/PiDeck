@@ -1,4 +1,4 @@
-import { shell } from "electron";
+import { app, shell } from "electron";
 import { existsSync, type Dirent } from "node:fs";
 import {
 	mkdir,
@@ -128,6 +128,32 @@ export class SkillManager {
 		}
 		const skill = await this.findByPath(skillPath);
 		await shell.openPath(skill.dir);
+	}
+
+	/**
+	 * 把打包内置的「用量查询自定义」技能模板复制到全局技能目录
+	 * （~/.pi/agent/skills/usage-probe/SKILL.md）。
+	 *
+	 * 为什么启动时自动安装：usage-probe 模板是 pideck 打包产物（resources/skills），
+	 * 而 pi 加载 skill 只扫用户全局目录（~/.pi/agent/skills、~/.agents/skills），
+	 * 不读 pideck 资源目录——必须落到用户技能目录，pi 才能发现并 @usage-probe 触发。
+	 * 幂等覆盖：模板随应用更新同步；用户自定义配置写在 usage-probes.json，不在此文件。
+	 */
+	async installUsageProbeTemplate(): Promise<
+		{ success: true; path: string } | { success: false; error: string }
+	> {
+		try {
+			const root = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
+			const templatePath = join(root, "skills", "usage-probe", SKILL_FILE);
+			const content = await readFile(templatePath, "utf8");
+			const targetDir = join(this.locations[0].path, "usage-probe");
+			await mkdir(targetDir, { recursive: true });
+			const targetPath = join(targetDir, SKILL_FILE);
+			await writeFile(targetPath, content, "utf8");
+			return { success: true, path: targetPath };
+		} catch (error) {
+			return { success: false, error: error instanceof Error ? error.message : String(error) };
+		}
 	}
 
 	private async scanLocation(location: PiSkillLocation): Promise<PiSkillSummary[]> {

@@ -29,7 +29,13 @@ function loadSkillManagerModule() {
 	const sandbox = {
 		exports: {},
 		require: (id) => {
-			if (id === "electron") return { shell: { openPath: async () => "" } };
+			if (id === "electron")
+				return {
+					shell: { openPath: async () => "" },
+					// installUsageProbeTemplate 需要 app：dev 模式读 <appPath>/resources/skills/usage-probe/SKILL.md。
+					// 测试跑在项目根，该模板真实存在，用 cwd 作为 appPath 即可测通「读模板→写目标」链路。
+					app: { isPackaged: false, getAppPath: () => process.cwd() },
+				};
 			// 删除统一入口：测试环境无回收站，noop stub（本测试不触达删除路径）
 			if (id === "../fs/trash") return { trashPath: async () => {} };
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
@@ -185,5 +191,22 @@ test("does not recurse forever through a directory symlink cycle", async () => {
 			new Promise((_, reject) => setTimeout(() => reject(new Error("scan timed out")), 1000)),
 		]);
 		assert.ok(result.skills.some((item) => item.name === "visible-skill"));
+	});
+});
+
+test("installUsageProbeTemplate copies the bundled template into the global skills dir", async () => {
+	await withTemporaryHome(async (home) => {
+		const { SkillManager } = loadSkillManagerModule();
+		const manager = new SkillManager(home);
+		const result = await manager.installUsageProbeTemplate();
+		assert.equal(result.success, true);
+		const target = join(home, ".pi", "agent", "skills", "usage-probe", "SKILL.md");
+		const written = readFileSync(target, "utf8");
+		assert.match(written, /name: usage-probe/);
+		assert.match(written, /usage-probes\.json/);
+		// 幂等覆盖：重复安装不报错、内容一致（用户自定义配置在 usage-probes.json，不在此模板文件）
+		const again = await manager.installUsageProbeTemplate();
+		assert.equal(again.success, true);
+		assert.equal(readFileSync(target, "utf8"), written);
 	});
 });

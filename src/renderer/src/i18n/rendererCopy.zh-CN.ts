@@ -2337,6 +2337,7 @@ export const zhCN = {
   "settings.pet.previewMode": "预览模式",
   "settings.pet.previewAuto": "自动（聚合状态）",
   "settings.pet.petdexHint": "运行 npx petdex install <名字> 安装社区宠物，重启后可在列表选择",
+  "settings.pet.petdexSite": "前往 petdex.dev 官网搜索更多宠物",
   "settings.pet.noPets": "暂无可用宠物",
   "settings.pet.scale": "宠物大小",
   "settings.pet.scaleDesc": "拖拽滑块调整宠物在桌面上的显示尺寸",

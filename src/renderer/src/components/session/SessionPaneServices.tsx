@@ -38,8 +38,8 @@ export type SessionPaneServices = {
   insertQuickPrompt: (sessionId: string, message: string) => void;
   ensureSessionId?: (sessionId: string) => Promise<string>;
   resendUserMessage?: (message: ChatMessage) => void;
-  editMessage?: (messageId: string, newText: string) => void;
-  deleteMessage?: (messageId: string) => void;
+  editMessage?: (messageId: string, newText: string, entryId?: string) => void;
+  deleteMessage?: (messageId: string, entryId?: string) => void;
   forkFromUserMessage?: (message: ChatMessage) => void;
   forkingMessageId?: string | null;
   openSidebarSessionById?: (projectId: string, sessionId: string) => Promise<void>;

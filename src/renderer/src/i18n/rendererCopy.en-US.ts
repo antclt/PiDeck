@@ -2361,6 +2361,7 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.pet.previewMode": "Preview mode",
   "settings.pet.previewAuto": "Auto (aggregate state)",
   "settings.pet.petdexHint": "Run npx petdex install <name> to add community pets, then restart",
+  "settings.pet.petdexSite": "Visit petdex.dev to browse more pets",
   "settings.pet.noPets": "No pets available",
   "settings.pet.scale": "Pet size",
   "settings.pet.scaleDesc": "Drag the slider to adjust the pet's display size on desktop",

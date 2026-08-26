@@ -3046,6 +3046,17 @@ app.whenReady().then(async () => {
 	promptManager = new PromptManager(undefined, mainCopy);
 	xuePromptManager = new XuePromptManager();
 	skillManager = new SkillManager(undefined, mainCopy);
+	// 启动时自动安装内置 usage-probe 技能模板到用户全局技能目录：
+	// pi 只扫 ~/.pi/agent/skills、~/.agents/skills，不读 pideck 打包资源目录（resources/skills），
+	// 必须落到用户目录，用户才能在聊天里 @usage-probe 让 AI 引导写用量探针配置。
+	// fire-and-forget：安装失败不阻塞启动，仅记日志（手动入口 configInstallUsageSkill 仍可兑底）。
+	void skillManager.installUsageProbeTemplate().then((result) => {
+		if (result.success) {
+			void appLogger?.info("skill", "Usage probe skill template auto-installed", { path: result.path });
+		} else {
+			void appLogger?.warn("skill", "Usage probe skill template auto-install failed", { error: result.error });
+		}
+	});
 	extensionManager = new ExtensionManager(
 		piLocator,
 		() => settingsStore.get(),

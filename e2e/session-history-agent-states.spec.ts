@@ -216,6 +216,16 @@ test("never-started session: delete confirms, edit applies directly, resend auto
 	await expect(window.getByRole("alertdialog")).toHaveCount(0, { timeout: 5_000 });
 	await expect(timeline).toContainText("未启动编辑后的回复", { timeout: 30_000 });
 
+	// ── 编辑 user 消息：同样无 runtime → 直接改文件生效（回归：曾出现「编辑框关了但没变」）──
+	const firstUserTurn = timeline.locator(".user-turn").filter({ hasText: "未启动会话锚点" });
+	await firstUserTurn.locator(".user-turn-actions").getByTitle("编辑", { exact: true }).click();
+	await expect(timeline.locator("textarea")).toBeVisible({ timeout: 10_000 });
+	await timeline.locator("textarea").fill("未启动编辑后的用户消息");
+	await timeline.getByRole("button", { name: "保存" }).click();
+	await expect(window.getByRole("alertdialog")).toHaveCount(0, { timeout: 5_000 });
+	await expect(timeline).toContainText("未启动编辑后的用户消息", { timeout: 30_000 });
+	await expect(timeline.getByText("未启动会话锚点")).toHaveCount(0, { timeout: 10_000 });
+
 	// ── 重发：无 runtime → 直接截断 + 自动激活 runtime（spawn mock pi）→ 恰好一份新回复 ──
 	const lastUser = timeline.locator(".user-turn").filter({ hasText: "未启动第二问" });
 	await lastUser.locator(".user-turn-actions").getByTitle("用同一条用户消息再次发送给 AI").click();
