@@ -39,7 +39,7 @@ import {
 import { cn } from "./lib/utils";
 import { deepClone, deepEqual } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
-import { applyAdaptiveTemplateReset, collectModelSpecPatches, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
+import { applyAdaptiveTemplateReset, collectModelSpecPatches, deriveProviderCompat, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
 import { Component, useRef, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import type { PiDesktopApi } from "../../preload";
@@ -1219,7 +1219,8 @@ function ConfigModalContent(props: ConfigModalProps) {
 				api.projects.getModelSpec(providerName, modelId, modelName),
 		);
 		const base = filledCount > 0 ? { ...modelsData, providers: filledProviders } : modelsData;
-		// 保存前规范化所有供应商的 compat 字段，确保布尔值显式写入而不依赖后端默认值
+		// 保存前规范化所有供应商的 compat 字段，确保布尔值显式写入而不依赖后端默认值；
+		// supportsReasoningEffort 联动档位映射（见 deriveProviderCompat）。
 		const normalizedData = {
 			...base,
 			providers: Object.fromEntries(
@@ -1227,11 +1228,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 					name,
 					{
 						...provider,
-						compat: {
-							supportsDeveloperRole: false,
-							supportsReasoningEffort: false,
-							...(provider.compat as Record<string, unknown> | undefined),
-						},
+						compat: deriveProviderCompat(provider),
 					},
 				]),
 			),

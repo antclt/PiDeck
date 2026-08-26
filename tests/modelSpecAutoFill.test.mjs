@@ -2,6 +2,7 @@
  * 模型规格自动补全纯函数测试（utils/modelSpecAutoFill.ts）。
  *
  * 与 dsh-web 对齐：只填空字段；listing/pi-ai 没给的容量留空，不写 128k/8k。
+ * 例外：自适应未匹配时默认开放思考（reasoning:true + 全部档位），用户至少有得选。
  */
 
 import { readFileSync } from "node:fs";
@@ -29,7 +30,7 @@ function compileModule(filePath) {
 }
 
 const mod = compileModule("src/renderer/src/utils/modelSpecAutoFill.ts");
-const { computeModelSpecPatches, collectModelSpecPatches } = mod;
+const { computeModelSpecPatches, collectModelSpecPatches, deriveProviderCompat } = mod;
 
 function assertUpdates(updates, expected) {
 	assert.equal(updates.length, expected.length);
@@ -49,6 +50,8 @@ function assertUpdates(updates, expected) {
 	}
 }
 
+const DEFAULT_MAP = { xhigh: "xhigh", max: "max" };
+
 function fullSpec(overrides = {}) {
 	return {
 		contextWindow: 128000,
@@ -66,17 +69,21 @@ test("computeModelSpecPatches: 全空字段填满", () => {
 	assertUpdates(updates, [
 		["contextWindow", 128000],
 		["maxTokens", 16384],
-		["reasoning", true],
 		["input", ["text", "image"]],
+		["reasoning", true],
+		["thinkingLevelMap", DEFAULT_MAP],
 	]);
 });
 
-test("computeModelSpecPatches: 手填值不覆盖", () => {
+test("computeModelSpecPatches: 手填值不覆盖（未填思考档位时补默认开放）", () => {
 	const updates = computeModelSpecPatches(
 		{ id: "gpt-4o", contextWindow: 999, maxTokens: 111, input: ["text"] },
 		fullSpec(),
 	);
-	assertUpdates(updates, [["reasoning", true]]);
+	assertUpdates(updates, [
+		["reasoning", true],
+		["thinkingLevelMap", DEFAULT_MAP],
+	]);
 });
 
 test("computeModelSpecPatches: 用户明确关掉的 reasoning=false 不覆盖", () => {
@@ -94,16 +101,23 @@ test("computeModelSpecPatches: 规格缺 context/maxTokens → 留空，不填�
 		fullSpec({ contextWindow: undefined, maxTokens: undefined }),
 	);
 	assertUpdates(updates, [
-		["reasoning", true],
 		["input", ["text", "image"]],
+		["reasoning", true],
+		["thinkingLevelMap", DEFAULT_MAP],
 	]);
 });
 
-test("computeModelSpecPatches: 规格完全未命中 → 不填任何字段", () => {
-	assert.equal(computeModelSpecPatches({ id: "my-custom-model" }, null).length, 0);
-	assert.equal(
-		computeModelSpecPatches({ id: "my-custom-model" }, { source: "pi-ai", matchedId: "my-custom-model" }).length,
-		0,
+test("computeModelSpecPatches: 规格完全未命中 → 默认开放思考档位（不猜容量）", () => {
+	assertUpdates(computeModelSpecPatches({ id: "my-custom-model" }, null), [
+		["reasoning", true],
+		["thinkingLevelMap", DEFAULT_MAP],
+	]);
+	assertUpdates(
+		computeModelSpecPatches({ id: "my-custom-model" }, { source: "pi-ai", matchedId: "my-custom-model" }),
+		[
+			["reasoning", true],
+			["thinkingLevelMap", DEFAULT_MAP],
+		],
 	);
 });
 
@@ -113,12 +127,20 @@ test("computeModelSpecPatches: 纯文本规格不填 input", () => {
 		["contextWindow", 128000],
 		["maxTokens", 16384],
 		["reasoning", true],
+		["thinkingLevelMap", DEFAULT_MAP],
 	]);
 });
 
-test("computeModelSpecPatches: 非推理模型不下发 reasoning", () => {
+test("computeModelSpecPatches: 规格未声明推理 → 默认支持思考并开放档位", () => {
 	const updates = computeModelSpecPatches({ id: "x" }, fullSpec({ reasoning: undefined }));
-	assert.equal(updates.some(([field]) => field === "reasoning"), false);
+	assert.equal(updates.some(([field, value]) => field === "reasoning" && value === true), true);
+	assert.equal(updates.some(([field]) => field === "thinkingLevelMap"), true);
+});
+
+test("computeModelSpecPatches: 规格明确非推理 → reasoning:false 且不开放档位", () => {
+	const updates = computeModelSpecPatches({ id: "x" }, fullSpec({ reasoning: false }));
+	assert.equal(updates.some(([field]) => field === "thinkingLevelMap"), false);
+	assert.equal(updates.find(([field]) => field === "reasoning")?.[1], false);
 });
 
 test("computeModelSpecPatches: 完整 thinkingLevelMap 与输入模态只补空字段", () => {
@@ -130,9 +152,9 @@ test("computeModelSpecPatches: 完整 thinkingLevelMap 与输入模态只补空�
 	assertUpdates(updates, [
 		["contextWindow", 128000],
 		["maxTokens", 16384],
+		["input", ["text", "image"]],
 		["reasoning", true],
 		["thinkingLevelMap", thinkingLevelMap],
-		["input", ["text", "image"]],
 	]);
 	const protectedUpdates = computeModelSpecPatches(
 		{ id: "gpt-5.6-luna", reasoning: false, thinkingLevelMap: { off: null }, input: ["text"] },
@@ -140,6 +162,73 @@ test("computeModelSpecPatches: 完整 thinkingLevelMap 与输入模态只补空�
 	);
 	assert.equal(protectedUpdates.some(([field]) => field === "thinkingLevelMap" || field === "input"), false);
 });
+
+test("deriveProviderCompat: 有档位映射的 provider 自动开启 reasoning_effort", () => {
+	const compat = deriveProviderCompat({
+		models: [{ id: "m", reasoning: true, thinkingLevelMap: { xhigh: "xhigh" } }],
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify(compat)), {
+		supportsDeveloperRole: false,
+		supportsReasoningEffort: true,
+	});
+	// reasoning 未声明（默认支持）同样联动
+	const compat2 = deriveProviderCompat({
+		models: [{ id: "m", thinkingLevelMap: { off: null } }],
+	});
+	assert.equal(compat2.supportsReasoningEffort, true);
+});
+
+test("deriveProviderCompat: 无映射或明确非推理时不开启", () => {
+	assert.equal(
+		deduceSupportsReasoningEffort(deriveProviderCompat({ models: [{ id: "m" }] })),
+		false,
+	);
+	assert.equal(
+		deduceSupportsReasoningEffort(
+			deriveProviderCompat({ models: [{ id: "m", reasoning: false, thinkingLevelMap: { xhigh: "xhigh" } }] }),
+		),
+		false,
+	);
+	assert.equal(
+		deduceSupportsReasoningEffort(
+			deriveProviderCompat({ models: [{ id: "m", thinkingLevelMap: {} }] }),
+		),
+		false,
+	);
+});
+
+test("deriveProviderCompat: 旧保存写入的陈旧 false 被联动覆盖，显式 true 保留", () => {
+	// 旧版本无条件写 false → 现在有映射时应自动纠正为 true
+	assert.equal(
+		deduceSupportsReasoningEffort(
+			deriveProviderCompat({
+				models: [{ id: "m", thinkingLevelMap: { high: "high" } }],
+				compat: { supportsReasoningEffort: false },
+			}),
+		),
+		true,
+	);
+	// 无映射时显式 true 保留
+	assert.equal(
+		deduceSupportsReasoningEffort(
+			deriveProviderCompat({
+				models: [{ id: "m" }],
+				compat: { supportsReasoningEffort: true },
+			}),
+		),
+		true,
+	);
+	// 其他 compat 键原样透传
+	const compat = deriveProviderCompat({
+		models: [{ id: "m", thinkingLevelMap: { high: "high" } }],
+		compat: { customFlag: "keep", supportsReasoningEffort: false },
+	});
+	assert.equal(compat.customFlag, "keep");
+});
+
+function deduceSupportsReasoningEffort(compat) {
+	return compat.supportsReasoningEffort === true;
+}
 
 test("collectModelSpecPatches: 批量补全、计数、不修改入参、未命中留空", async () => {
 	const models = {
@@ -166,9 +255,13 @@ test("collectModelSpecPatches: 批量补全、计数、不修改入参、未命�
 	assert.deepEqual(lookedUp, ["relay:gpt-4o", "relay:filled", "other:glm-5"]);
 	assert.equal(providers.relay.models[0].contextWindow, 128000);
 	assert.equal(providers.relay.models[0].input[1], "image");
+	assert.equal(providers.relay.models[0].reasoning, true);
+	assert.equal(providers.relay.models[0].maxTokens, 16384);
+	// 用户明确 reasoning:false 且未命中规格 → 不补任何字段
 	assert.equal(providers.relay.models[1].contextWindow, 999);
 	assert.equal(providers.relay.models[1].reasoning, false);
 	assert.equal(providers.relay.models[1].maxTokens, undefined);
+	assert.equal(providers.relay.models[1].thinkingLevelMap, undefined);
 	assert.equal(providers.relay.models[2].id, "");
 	assert.equal(providers.other.models[0].reasoning, true);
 	assert.equal(providers.other.models[0].contextWindow, undefined);
@@ -177,13 +270,17 @@ test("collectModelSpecPatches: 批量补全、计数、不修改入参、未命�
 	assert.equal(providers.relay.baseUrl, "https://relay.example");
 });
 
-test("collectModelSpecPatches: lookup 抛错按未命中处理，不阻断保存、不填默认值", async () => {
+test("collectModelSpecPatches: lookup 抛错按未命中处理，不阻断保存，只补默认思考开放", async () => {
 	const models = { providers: { a: { models: [{ id: "x" }, { id: "y" }] } } };
 	const { providers, filledCount } = await collectModelSpecPatches(models, async (p, id) => {
 		if (id === "x") throw new Error("boom");
 		return fullSpec();
 	});
-	assert.equal(filledCount, 1);
+	assert.equal(filledCount, 2);
+	// 抛错模型：容量/模态不猜，但默认开放思考档位
 	assert.equal(providers.a.models[0].contextWindow, undefined);
+	assert.equal(providers.a.models[0].reasoning, true);
+	assert.deepEqual(JSON.parse(JSON.stringify(providers.a.models[0].thinkingLevelMap)), DEFAULT_MAP);
 	assert.equal(providers.a.models[1].contextWindow, 128000);
+	assert.equal(providers.a.models[1].reasoning, true);
 });

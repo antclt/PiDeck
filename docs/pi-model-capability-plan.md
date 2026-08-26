@@ -460,6 +460,9 @@ Pi 上游从 **0.81.0** 开始提供 `get_available_thinking_levels`，但它只
 
 ### 已知取舍
 
-- bundled `pi-ai` 为 PiDeck 自身依赖版本（当前 `0.82.1`），新于它的外部 Pi 新增模型（如 MiMo）不会出现在 bundled catalog 中；未配置/未匹配的模型保持空字段，由 endpoint 实报或用户手填，不猜默认值。
+- bundled `pi-ai` 为 PiDeck 自身依赖版本（当前 `0.82.1`），新于它的外部 Pi 新增模型（如 MiMo）不会出现在 bundled catalog 中；未配置/未匹配的模型保持空字段，由 endpoint 实报或用户手填，不猜容量默认值。
+- **自适应未匹配时的思考兜底（2026-08 决策）**：目录/端点都没声明推理时，自适应模板与保存补全默认写 `reasoning: true` 并开放全部档位（`DEFAULT_OPEN_THINKING_MAP = {xhigh, max}`，`utils/modelSpecAutoFill.ts`），否则 Pi 按 `!reasoning → ["off"]` 只给 off，用户没有思考强度可选。端点/catalog 显式声明的 `reasoning: false` 或档位映射（含 null 禁用语义，如 MiniMax-M2.7）始终优先，不被默认值覆盖。
+- 端点 `/models` 实报的 `reasoning / input / thinkingLevelMap` 在 `parseProviderModelsResponse` 完整保留（`parseProviderModels.ts`），参与自适应模板合并，不再被丢弃。
+- **provider compat 联动（2026-08 决策）**：保存时 `deriveProviderCompat`（`utils/modelSpecAutoFill.ts`）检测该 provider 任一模型存在非空档位映射且 `reasoning !== false` → 自动写 `compat.supportsReasoningEffort: true`，否则 false。否则 pi 用 provider 级 compat 覆盖模型定义，用户选了思考强度也不发 `reasoning_effort`；旧版本无条件写 false，因此自动判定优先于已存在的 false（陈旧值非用户意图），显式 true 保留。UI 上的 supportsReasoningEffort 开关为显示/手动覆盖，下次保存仍按联动归一。
 - capability cache 继续保留 Pi RPC 返回的完整模型字段（不只 provider/id/thinkingLevels），供视觉桥等既有消费方读取；配置模板计算不再消费它。
 - 移除了 `enrichFetchedModelFromCatalog` / `lookupPiAiModelSpec` 等不再有调用方的 bundled catalog 导出。

@@ -37,19 +37,11 @@ test("model row uses TableRow/TableCell with edit controls", () => {
   assert.match(source, /onDeleteModel\(name, i\)/);
 });
 
-test("auto-filled models show an explainable capability card bound to current model values", () => {
-  assert.match(source, /modelCapabilitySpecs/);
-  assert.match(source, /setModelCapabilitySpecs/);
-  // 卡片展示模型行当前有效配置 + 模板 + 重置回调，不再传旧 spec 快照
-  assert.match(source, /<ModelCapabilityCard\n\s*model=\{m\}\n\s*template=\{modelCapabilitySpec\}/);
-  assert.match(source, /onReset=\{\(\) => props\.onResetModel\(name, i\)\}/);
-  assert.match(source, /resetting=\{props\.resettingModelKey === getModelInputKey\(name, i\)\}/);
-  const card = readFileSync("src/renderer/src/config/ModelCapabilityCard.tsx", "utf8");
-  assert.match(card, /config\.modelCapabilitySourceCatalog/);
-  assert.match(card, /config\.modelCapabilityMappedLevels/);
-  assert.match(card, /model\.thinkingLevelMap/);
-  assert.match(card, /config\.modelResetAdaptive/);
-  assert.doesNotMatch(card, /config\.modelCapabilitySourceRuntime/);
+test("adaptive auto-fill writes fields directly, no capability card", () => {
+  // 自适应只把值填进对应输入框，不再展示“匹配到什么/来源/能力清单”解释卡
+  assert.doesNotMatch(source, /ModelCapabilityCard/);
+  assert.doesNotMatch(source, /modelCapabilitySpecs/);
+  assert.doesNotMatch(source, /modelCapabilitySpec\b/);
 });
 
 test("reset-to-adaptive button lives in the model actions column", () => {

@@ -4,39 +4,85 @@
  * 优先级：listing 已有字段 > 当前 Pi/内置能力目录匹配 > 留空。
  * 只填空字段；手填 / 明确关掉的 reasoning=false 一律不覆盖。
  * 不再写入 128k/8k 猜的默认值。
+ *
+ * 例外（用户决策）：自适应未匹配到任何推理声明时，默认支持思考并开放全部档位
+ * （reasoning: true + DEFAULT_OPEN_THINKING_MAP），否则 Pi 只会给 off，用户没得选。
  */
 
 import type { ThinkingLevelMap } from "../../../shared/types/modelSpecs";
 import type { ModelSpec } from "../../../shared/types/modelSpecs";
 import type { FetchedModel } from "../../../shared/types/fetchedModel";
-import type { ModelItem, ModelsFile, ProviderConfig } from "../config/configTypes";
+import type { ModelItem, ModelsFile, ProviderCompat, ProviderConfig } from "../config/configTypes";
+
+/** 自适应未匹配到任何档位声明时的默认开放映射。
+ *
+ * Pi 的档位算法：reasoning:true 时基础五档（off~high）默认可用，
+ * xhigh/max 必须存在非 null 映射才提供。这里用档位原串映射开放全部七档，
+ * 让用户至少有得选；openai 兼容网关多把 reasoning_effort 原样透传。
+ */
+export const DEFAULT_OPEN_THINKING_MAP: ThinkingLevelMap = {
+	xhigh: "xhigh",
+	max: "max",
+};
+
+/**
+ * 保存时的 provider compat 归一化：布尔值显式落盘（不依赖后端默认）。
+ *
+ * supportsReasoningEffort 联动：该 provider 任一模型存在非空档位映射且未显式
+ * 关掉推理（reasoning !== false）时自动写 true——否则用户选了思考强度，pi 也
+ * 不会真正发送 reasoning_effort 参数（pi 用 provider 级 compat 覆盖模型定义）。
+ * 旧版本保存会无条件写 false，配置里已存的 false 是 PiDeck 自己写的陈旧值而非
+ * 用户意图，因此自动判定优先于已存在的 false；用户显式写的 true 始终保留。
+ */
+export function deriveProviderCompat(provider: ProviderConfig): ProviderCompat {
+	const anyThinking = (provider.models ?? []).some(
+		(model) =>
+			model.thinkingLevelMap != null &&
+			Object.keys(model.thinkingLevelMap).length > 0 &&
+			model.reasoning !== false,
+	);
+	const compat: ProviderCompat = { ...(provider.compat ?? {}) };
+	if (compat.supportsDeveloperRole !== true) compat.supportsDeveloperRole = false;
+	compat.supportsReasoningEffort = compat.supportsReasoningEffort === true || anyThinking;
+	return compat;
+}
 
 /** 单模型补全 patch：返回 [字段, 值] 列表，无可补字段时为空数组 */
 export function computeModelSpecPatches(
 	model: ModelItem,
 	spec: ModelSpec | null | undefined,
 ): Array<[string, unknown]> {
-	if (!spec) return [];
 	const updates: Array<[string, unknown]> = [];
-	if (model.contextWindow == null && spec.contextWindow != null) {
-		updates.push(["contextWindow", spec.contextWindow]);
-	}
-	if (model.maxTokens == null && spec.maxTokens != null) {
-		updates.push(["maxTokens", spec.maxTokens]);
+	if (spec) {
+		if (model.contextWindow == null && spec.contextWindow != null) {
+			updates.push(["contextWindow", spec.contextWindow]);
+		}
+		if (model.maxTokens == null && spec.maxTokens != null) {
+			updates.push(["maxTokens", spec.maxTokens]);
+		}
+		if (model.input == null && spec.input && spec.input.length > 0) {
+			updates.push(["input", [...spec.input]]);
+		} else if (model.input == null && spec.images === true) {
+			// 兼容尚未返回完整 input 的旧目录。
+			updates.push(["input", ["text", "image"]]);
+		}
 	}
 	// reasoning / thinkingLevelMap 是一组：目录明确给出时同时填空，用户明确关掉的 false
 	// 或手写映射始终优先，避免代理特有 wire 值被目录覆盖。
-	if (model.reasoning === undefined && spec.reasoning !== undefined) {
-		updates.push(["reasoning", spec.reasoning]);
+	// 目录/端点都没声明时默认支持思考（reasoning: true）并开放全部档位，
+	// 否则 Pi 按 `if (!model.reasoning) return ["off"]` 只给 off，用户没有任何思考强度可选。
+	const specReasoning = spec?.reasoning;
+	if (model.reasoning === undefined) {
+		updates.push(["reasoning", specReasoning !== undefined ? specReasoning : true]);
 	}
-	if (model.thinkingLevelMap == null && model.reasoning !== false && spec.thinkingLevelMap) {
-		updates.push(["thinkingLevelMap", { ...spec.thinkingLevelMap }]);
-	}
-	if (model.input == null && spec.input && spec.input.length > 0) {
-		updates.push(["input", [...spec.input]]);
-	} else if (model.input == null && spec.images === true) {
-		// 兼容尚未返回完整 input 的旧目录。
-		updates.push(["input", ["text", "image"]]);
+	const reasoningIsOff = model.reasoning === false || specReasoning === false;
+	if (model.thinkingLevelMap == null && !reasoningIsOff) {
+		updates.push([
+			"thinkingLevelMap",
+			spec?.thinkingLevelMap
+				? { ...spec.thinkingLevelMap }
+				: { ...DEFAULT_OPEN_THINKING_MAP },
+		]);
 	}
 	return updates;
 }
@@ -58,7 +104,8 @@ export type ModelSpecLookup = (
 ) => Promise<ModelSpec | null>;
 
 /**
- * 批量补全整个 ModelsFile：空字段才填，未命中就跳过。
+ * 批量补全整个 ModelsFile：空字段才填，未命中时仅补默认思考开放（reasoning/map），
+ * 其余容量/模态字段不猜。
  * 不修改入参。
  */
 export async function collectModelSpecPatches(
@@ -141,6 +188,15 @@ export function mergeAdaptiveModelTemplate(
 	}
 	if (!template.thinkingLevelMap && spec?.thinkingLevelMap) {
 		template.thinkingLevelMap = { ...spec.thinkingLevelMap };
+	}
+	// 自适应未匹配到任何推理声明时，默认开放思考档位（用户至少有得选）：
+	// reasoning 缺省视为 true；xhigh/max 用默认映射开放全部七档。
+	// 端点/目录显式声明的 reasoning:false 或档位映射仍然优先，不被默认值覆盖。
+	if (template.reasoning === undefined) {
+		template.reasoning = true;
+	}
+	if (!template.thinkingLevelMap && template.reasoning !== false) {
+		template.thinkingLevelMap = { ...DEFAULT_OPEN_THINKING_MAP };
 	}
 	if (spec?.matchedId) template.matchedId = spec.matchedId;
 	return template;
