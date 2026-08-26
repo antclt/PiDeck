@@ -314,18 +314,18 @@ function SettingsModalContent(props: SettingsModalProps) {
 		);
 	}, []);
 
-	/** 保存全部已修改内容：全局设置差异提交 + 视觉桥/生图草稿（若有改动）；返回是否全部成功 */
+	/** 保存全部内容：全局设置差异提交（无差异也提交空 patch，触发「已保存」反馈）+ 视觉桥/生图草稿（若有改动）；返回是否全部成功 */
 	const saveAll = async (): Promise<boolean> => {
 		let ok = true;
-		if (dirtyFields.size > 0) {
-			const patch: Partial<AppSettings> = {};
-			for (const key of dirtyFields) {
-				(patch as Record<string, unknown>)[key] = (draftSettings as Record<string, unknown>)[key];
-			}
-			props.onChange(patch);
-			// 提交后把基准推进到当前草稿；脏字段由 useMemo 在下一渲染自动收敛为空
-			baseSnapshotRef.current = deepClone(draftSettings);
+		// 无修改也支持再次保存：始终提交当前草稿差异（无差异即空 patch），
+		// updateSettings 会走 api.settings.update 并提示「设置已保存」，因此保存按钮无需因「无修改」禁用。
+		const patch: Partial<AppSettings> = {};
+		for (const key of dirtyFields) {
+			(patch as Record<string, unknown>)[key] = (draftSettings as Record<string, unknown>)[key];
 		}
+		props.onChange(patch);
+		// 提交后把基准推进到当前草稿；脏字段由 useMemo 在下一渲染自动收敛为空
+		baseSnapshotRef.current = deepClone(draftSettings);
 		if (visionDraft.dirty) {
 			// 视觉桥保存失败（如 API Key 缺失/接口不可达）时保留脏标记，头部按钮可重试
 			const visionOk = await visionDraft.save();
@@ -446,8 +446,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 				<DialogHeader className="flex-row items-center justify-between px-4 py-3">
 					<DialogTitle>{t("settings.title")}</DialogTitle>
 					<div className="flex items-center gap-2">
-						{/* 保存按钮常驻：无未保存改动时禁用，避免用户改完直接关窗丢改动；视觉桥保存中禁用防重复提交 */}
-						<Button variant="default" size="sm" onClick={saveAll} disabled={!hasAnyDirtyChanges || visionDraft.saving}>
+						{/* 保存按钮常驻且不因「无修改」禁用：无修改也允许再次保存；视觉桥保存中禁用防重复提交 */}
+						<Button variant="default" size="sm" onClick={saveAll} disabled={visionDraft.saving}>
 							{t("common.save")}
 						</Button>
 						{hasAnyDirtyChanges ? (

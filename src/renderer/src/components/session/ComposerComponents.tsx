@@ -59,7 +59,8 @@ import {
 	SelectItem,
 	SelectTrigger,
 } from "../ui-shadcn/select";
-import { computeModelDisplay, formatModelRef, type ModelPending } from "../../utils/modelPendingDisplay";
+import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, type ModelPending } from "../../utils/modelPendingDisplay";
+import { resolveComposerThinkingLevel } from "../../utils/thinkingDisplay";
 import {
   readWelcomeModelPreference,
   readWelcomeThinkingPreference,
@@ -326,6 +327,8 @@ export function ComposerBottomBar(props: {
 	onSwitchBranch?: (branch: string) => void;
 	/** Draft sessions do not have a runtime yet, so retain their persisted settings in the bar. */
 	record?: Pick<SessionRecord, "model" | "thinkingLevel">;
+	/** 当前绑定 runtime 仍 live（starting/idle/running）时，底栏才优先展示 state。 */
+	runtimeLive?: boolean;
 	/** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期展示默认值用，
 	 *  不写入记录（激活后 runtime state 覆盖）。 */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
@@ -343,6 +346,8 @@ export function ComposerBottomBar(props: {
 	onPickSkill: () => void;
 	onPickThinking: () => void;
 	onCompact: () => void;
+	/** 一键插入 /skill:usage-probe + 占位符模板（由圆环面板触发，透传给 controller）。 */
+	onInsertUsageProbePrompt: (placeholder: string) => void;
 	onChangeMode: (mode: ComposerAgentMode) => void;
 	/** 会话已有生图消息时锁定生图模式，下拉不可切走。 */
 	imageGenLocked?: boolean;
@@ -372,10 +377,15 @@ export function ComposerBottomBar(props: {
 		thinking: readWelcomeThinkingPreference()?.thinkingLevel,
 	};
 	const isDsh = props.backend === "dsh";
+	const runtimeLive = Boolean(props.runtimeLive);
 	// DSH 草稿：记录未填默认时用部署默认（settings.yaml agent-default-model）兜底展示。
-	const currentThinkingLevel = props.state?.thinkingLevel
-		?? props.record?.thinkingLevel
-		?? (isDsh ? props.defaultThinkingLevel : welcomePreference?.thinking);
+	// 非 live runtime 的残留 state 不能盖住 catalog：Agent 未启动时改模型/思考档位要立刻反映在底栏。
+	const currentThinkingLevel = resolveComposerThinkingLevel({
+		state: props.state?.thinkingLevel,
+		record: props.record?.thinkingLevel,
+		fallback: isDsh ? props.defaultThinkingLevel : welcomePreference?.thinking,
+		isLive: runtimeLive,
+	});
 	const thinkingLevelLabel = (level: string) => {
 		const labelKey = THINKING_LEVELS.find((item) => item.value === level)?.labelKey;
 		return labelKey ? t(labelKey) : level;
@@ -396,11 +406,12 @@ export function ComposerBottomBar(props: {
 		disabled: props.disabled,
 		onChange: props.onChangeMode,
 	});
-	const liveModel = {
-		provider: props.state?.provider ?? props.record?.model?.provider ?? (isDsh ? props.defaultModel?.provider : welcomePreference?.model?.provider) ?? "",
-		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelId : welcomePreference?.model?.modelId) ?? "",
-		modelName: props.state?.modelName ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelName : undefined),
-	};
+	const liveModel = resolveComposerLiveModel({
+		state: props.state,
+		record: props.record?.model,
+		fallback: isDsh ? props.defaultModel : welcomePreference?.model,
+		isLive: runtimeLive,
+	});
 	const modelDisplay = computeModelDisplay(
 		liveModel.modelId ? liveModel : undefined,
 		props.modelPending,
@@ -573,6 +584,7 @@ export function ComposerBottomBar(props: {
 					<SessionContextMeter
 						state={props.state}
 						onCompact={props.onCompact}
+						onInsertUsageProbePrompt={props.onInsertUsageProbePrompt}
 					/>
 					{/* 分支只读 chip 升级为可切换下拉：当前分支即触发器，展开列表选目标分支后
 					    先弹确认（切换会携带未提交更改），确认后才调 App 级 switchBranch。 */}

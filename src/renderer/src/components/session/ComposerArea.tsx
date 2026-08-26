@@ -33,6 +33,7 @@ import {
 } from "./ComposerWidgetLayout";
 import type { GitBranchInfo } from "../../../../shared/types";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
+import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 
 export type ComposerAreaProps = {
   sessionId: string;
@@ -366,6 +367,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
               {/* 运行中允许后端尝试切换思考强度；是否能作用于当前回合由具体 Agent 后端决定。 */}
               <ComposerBottomBar
                 state={composer.runtime?.state}
+                runtimeLive={isLiveRuntimeStatus(composer.runtime?.status)}
                 disabled={composer.isBusy || composer.isStarting}
                 thinkingDisabled={composer.isStarting}
                 modelDisabled={composer.isStarting}
@@ -388,6 +390,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 onPickPromptTemplate={() => composer.pickers.open("template")}
                 onPickSkill={() => composer.pickers.open("skill")}
                 onCompact={composer.delivery.compact}
+                onInsertUsageProbePrompt={composer.pickers.insertUsageProbePrompt}
                 onChangeMode={composer.pickers.setMode}
                 imageGenLocked={composer.delivery.imageGenModeLocked}
                 onCancelPlan={() => composer.pickers.setMode("normal")}

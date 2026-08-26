@@ -170,3 +170,77 @@ test("内置候选包含 DeepSeek balance 与 opencode periods", () => {
   assert.ok(deepseek);
   assert.equal(deepseek.parse.kind, "balance");
 });
+
+test("内置候选包含 OpenRouter credits 与 Moonshot balance", () => {
+  const openrouter = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("openrouter.ai"));
+  const moonshot = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.moonshot.ai"));
+  assert.ok(openrouter);
+  assert.ok(moonshot);
+  assert.equal(openrouter.parse.kind, "credits");
+  assert.equal(moonshot.parse.kind, "balance");
+});
+
+test("OpenRouter 候选解析真实 /credits 响应，remaining 由 total-used 反推", () => {
+  const cand = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("openrouter.ai"));
+  assert.equal(probe.candidateApplies(cand, "https://openrouter.ai/api/v1", "openai-completions"), true);
+  assert.equal(probe.candidateApplies(cand, "https://api.deepseek.com", "openai-completions"), false);
+  const res = probe.parseUsageResponseBody(
+    { data: { total_credits: 100.5, total_usage: 25.75 } },
+    "{}",
+    cand.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "credits");
+  assert.equal(res.credits.total, 100.5);
+  assert.equal(res.credits.used, 25.75);
+  assert.equal(res.credits.remaining, 74.75);
+});
+
+test("Moonshot 候选国内/国际 baseUrl 都命中，解析真实 balance 响应（无币种）", () => {
+  const cand = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.moonshot.ai"));
+  assert.equal(probe.candidateApplies(cand, "https://api.moonshot.ai/v1", "openai-completions"), true);
+  assert.equal(probe.candidateApplies(cand, "https://api.moonshot.cn/v1", "openai-completions"), true);
+  assert.equal(probe.candidateApplies(cand, "https://api.openai.com/v1", "openai-completions"), false);
+  const res = probe.parseUsageResponseBody(
+    { code: 0, data: { available_balance: 12.34, voucher_balance: 2.0, cash_balance: 10.34 } },
+    "{}",
+    cand.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "balance");
+  assert.equal(res.balance.value, 12.34);
+  assert.equal(res.balance.currency, undefined);
+});
+
+test("内置候选包含通用 OpenAI /usage 兑底候选（不限 baseUrl，仅限 OpenAI 协议）", () => {
+  const generic = probe.USAGE_PROBE_CANDIDATES.find((c) => c.path === "/usage" && c.apiTypes);
+  assert.ok(generic, "候选表应包含通用 OpenAI /usage 候选");
+  assert.equal(generic.baseUrlContains, undefined);
+  assert.ok(generic.apiTypes.includes("openai-completions"));
+  assert.ok(generic.apiTypes.includes("openai-responses"));
+  assert.ok(generic.apiTypes.includes("openai-codex-responses"));
+  assert.equal(generic.parse.kind, "balance");
+  assert.equal(generic.parse.valuePath, "balance");
+  assert.equal(generic.parse.currencyPath, "unit");
+});
+
+test("通用 OpenAI /usage 候选：任意 OpenAI 协议 baseUrl 命中，非 OpenAI 协议不命中", () => {
+  const generic = probe.USAGE_PROBE_CANDIDATES.find((c) => c.path === "/usage" && c.apiTypes);
+  assert.equal(probe.candidateApplies(generic, "https://open.mwy.asia/v1", "openai-responses"), true);
+  assert.equal(probe.candidateApplies(generic, "https://any-gateway.example.com/v1", "openai-completions"), true);
+  assert.equal(probe.candidateApplies(generic, "https://api.anthropic.com", "anthropic-messages"), false);
+  assert.equal(probe.candidateApplies(generic, "https://generativelanguage.googleapis.com", "google-generative-ai"), false);
+});
+
+test("通用 OpenAI /usage 候选解析真实 /usage 响应（balance+unit）", () => {
+  const generic = probe.USAGE_PROBE_CANDIDATES.find((c) => c.path === "/usage" && c.apiTypes);
+  const res = probe.parseUsageResponseBody(
+    { balance: 1.69525969, unit: "USD", planName: "钱包余额", remaining: 1.69525969 },
+    "{}",
+    generic.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "balance");
+  assert.equal(res.balance.value, 1.69525969);
+  assert.equal(res.balance.currency, "USD");
+});

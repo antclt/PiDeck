@@ -41,24 +41,31 @@ test("session tab uses AnimatedBadge instead of raw pulse dot", () => {
 		"src/renderer/src/components/session/SessionTabsBar.tsx",
 		"utf8",
 	);
-	assert.match(source, /import \{ AnimatedBadge, type AnimatedBadgeStatus \} from "\.\.\/motion\/animated-badge";/);
+	const statusSource = readFileSync(
+		"src/renderer/src/utils/sessionStatusBadge.ts",
+		"utf8",
+	);
+	assert.match(source, /import \{ AnimatedBadge \} from "\.\.\/motion\/animated-badge";/);
+	assert.match(source, /import \{ sessionStatusBadge \} from "\.\.\/\.\.\/utils\/sessionStatusBadge";/);
 	// 旧的裸圆点渲染已移除
 	assert.doesNotMatch(source, /size-1\.5 shrink-0 rounded-full/);
-	assert.doesNotMatch(source, /animate-pulse/);
+	// AnimatedBadge 自身关闭脉冲；停止操作图标仍可使用独立的 animate-pulse 提示进行中。
+	assert.match(source, /pulse=\{false\}/);
 	// 新渲染：bare 裸图标模式（无胶囊）+ [&_svg] 缩图标 + 运行中黄色覆盖
 	assert.match(source, /<AnimatedBadge/);
 	assert.match(source, /size="sm"/);
 	assert.match(source, /bare/);
 	assert.match(source, /pulse=\{false\}/);
 	assert.match(source, /\[&_svg\]:h-2\.5 \[&_svg\]:w-2\.5/);
-	assert.match(source, /text-amber-500 dark:text-amber-400/);
+	assert.match(statusSource, /text-amber-500 dark:text-amber-400/);
 	// 状态映射（颜色语义：启动蓝旋转 / 运行黄旋转 / 未启动白 / 失败红）
-	assert.match(source, /function sessionStatusBadge\(/);
-	assert.match(source, /case "error":\s*\n\s*return \{ status: "danger" \};/);
-	assert.match(source, /case "idle":\s*\n\s*return \{ status: "neutral" \};/);
-	assert.match(source, /case "starting":\s*\n\s*return \{ status: "loading" \};/);
-	assert.match(source, /case "running":\s*\n\s*case "pending":\s*\n\s*case "waiting":\s*\n\s*return \{\s*\n\s*status: "loading",/);
-	assert.match(source, /if \(!status \|\| status === "detached"\) return undefined;/);
+	assert.match(statusSource, /export function sessionStatusBadge\(/);
+	assert.match(statusSource, /case "error":\s*\n\s*return \{ status: "danger" \};/);
+	assert.match(statusSource, /case "idle":\s*\n\s*return \{ status: "neutral" \};/);
+	assert.match(statusSource, /case "starting":\s*\n\s*return \{ status: "loading" \};/);
+	assert.match(statusSource, /case "running":\s*\n\s*case "pending":\s*\n\s*case "waiting":\s*\n\s*return \{\s*\n\s*status: "loading",/);
+	assert.match(statusSource, /if \(!status \|\| status === "detached"\) return undefined;/);
+	assert.match(source, /const badge = sessionStatusBadge\(status, \{/);
 	// 激活指示条（tab 下方弧形横条）已移除
 	assert.doesNotMatch(source, /session-tabs-indicator/);
 	assert.doesNotMatch(source, /measureIndicator/);
@@ -79,8 +86,8 @@ test("tab dropdown menu: no switch-to item, state-based disable with visible gra
 	assert.doesNotMatch(source, /tabs\.switchTo/);
 	assert.doesNotMatch(source, /MousePointerClick/);
 	// 停止：仅 running/idle 可点，其余状态（starting/error 等）disabled + 内联置灰
-	assert.match(source, /disabled=\{!props\.canStop\}/);
-	assert.match(source, /style=\{!props\.canStop \? \{ opacity: 0\.4 \} : undefined\}/);
+	assert.match(source, /disabled=\{!props\.canStop \|\| props\.isStopping\}/);
+	assert.match(source, /style=\{!props\.canStop \|\| props\.isStopping \? \{ opacity: 0\.4 \} : undefined\}/);
 	// 重启：无 agent 或正在重启时 disabled + 置灰
 	assert.match(source, /disabled=\{!props\.canRestart \|\| props\.isRestarting\}/);
 	assert.match(source, /style=\{!props\.canRestart \|\| props\.isRestarting \? \{ opacity: 0\.4 \} : undefined\}/);

@@ -132,3 +132,88 @@ export function toAbsoluteSessionPath(
 	// native 统一反斜杠风格，与 node:path resolve 输出一致；WSL 保持正斜杠。
 	return environment === "wsl" ? joined : joined.replace(/\//g, "\\");
 }
+
+/** 归档/删除子树识别用的最小会话节点（catalog 条目与渲染层 record 都满足）。 */
+export type SessionTreeNode = {
+	id: string;
+	filePath?: string;
+	parentSessionPath?: string;
+	environment?: SessionEnvironment;
+};
+
+/**
+ * 父会话 `<stem>.jsonl` 旁边的子会话目录 `<stem>/`。
+ * pi-subagents / Claude 式子会话都落在这个 sibling-dir 里；扫描器归档/删除父文件时
+ * 会把整个目录一起搬走，但 catalog.remove(id) 以前只摘父条目，目录里的子条目会变成幽灵行。
+ */
+function sessionSiblingDirPrefix(
+	filePath: string,
+	environment: SessionEnvironment,
+): string | undefined {
+	const canonical = canonicalizeSessionPath(filePath, environment);
+	const jsonl = canonical.match(/\.jsonl$/i);
+	if (!jsonl) return undefined;
+	return `${canonical.slice(0, -jsonl[0].length)}/`;
+}
+
+/**
+ * 判断 candidate 是否属于 ancestor 的子树。
+ *
+ * 两条独立规则（满足任一即为后代，且不含自身）：
+ * 1. parentSessionPath 指向 ancestor 的会话文件（显式父子链接，大小写/分隔符已规范化）；
+ * 2. candidate 文件落在 ancestor 的 sibling-dir `<stem>/` 下（含多层嵌套）。
+ *
+ * 匿名会话/草稿没有 filePath，不能仅凭同项目就当成子会话，否则归档父会话会误伤它们。
+ */
+export function isSessionDescendantOf(
+	candidate: SessionTreeNode,
+	ancestor: SessionTreeNode,
+): boolean {
+	if (candidate.id === ancestor.id) return false;
+	if (!ancestor.filePath) return false;
+	const environment = ancestor.environment ?? candidate.environment ?? "native";
+	const ancestorPath = canonicalizeSessionPath(ancestor.filePath, environment);
+	if (
+		candidate.parentSessionPath &&
+		canonicalizeSessionPath(candidate.parentSessionPath, environment) === ancestorPath
+	) {
+		return true;
+	}
+	if (!candidate.filePath) return false;
+	const siblingPrefix = sessionSiblingDirPrefix(ancestor.filePath, environment);
+	if (!siblingPrefix) return false;
+	return canonicalizeSessionPath(candidate.filePath, environment).startsWith(siblingPrefix);
+}
+
+/**
+ * 收集 parent 及其全部后代 id（含 parent 自身）。
+ * 闭包迭代：parentSessionPath 链接的孙会话即使不在 sibling-dir 里也能被收进来。
+ */
+export function collectSessionSubtreeIds(
+	sessions: SessionTreeNode[],
+	parent: SessionTreeNode,
+): string[] {
+	const byId = new Map<string, SessionTreeNode>();
+	for (const session of sessions) {
+		if (session.id) byId.set(session.id, session);
+	}
+	byId.set(parent.id, parent);
+
+	const collected = new Set<string>([parent.id]);
+	let grew = true;
+	while (grew) {
+		grew = false;
+		for (const session of byId.values()) {
+			if (collected.has(session.id)) continue;
+			for (const ancestorId of collected) {
+				const ancestor = byId.get(ancestorId);
+				if (ancestor && isSessionDescendantOf(session, ancestor)) {
+					collected.add(session.id);
+					grew = true;
+					break;
+				}
+			}
+		}
+	}
+	return [...collected];
+}

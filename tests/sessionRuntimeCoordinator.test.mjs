@@ -98,6 +98,7 @@ function createHarness(options = {}) {
 	prepareResend: 0,
 	mutatePersisted: [],
     setModel: 0,
+    setModelArgs: [],
     setThinking: 0,
     setPermission: 0,
     publishRuntimeState: 0,
@@ -136,6 +137,7 @@ function createHarness(options = {}) {
     create: async (input) => {
       calls.create += 1;
       calls.createInputs.push(input);
+      if (options.createHold) await options.createHold.promise;
       if (options.createDelay) {
         await new Promise((resolve) => setTimeout(resolve, options.createDelay));
       }
@@ -218,8 +220,9 @@ function createHarness(options = {}) {
       if (operation === "resend") return { text: "hello" };
       return undefined;
     },
-    setModel: async () => {
+    setModel: async (_agentId, provider, modelId) => {
       calls.setModel += 1;
+      calls.setModelArgs.push({ provider, modelId });
       if (options.modelError) throw new Error(options.modelError);
     },
     setThinking: async () => {
@@ -682,6 +685,71 @@ test("lazy activation publishes runtime state after binding", async () => {
   assert.equal(harness.calls.setThinking, 1);
   // attach 有两次（activate 内 + dispatch 成功后），这里只断言本测试关注的行为
   assert.equal(harness.calls.publishRuntimeState, 1);
+});
+
+// 用户在 Agent 未启动时改模型：输入会预热 activateRuntime，catalog.update 可能发生在
+// activate() 已 snapshot 旧 entry 之后。套模型必须再读一次 catalog，否则发送仍走旧模型。
+test("applies the latest catalog model when the user changes it during activation", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const createHold = deferred();
+  const harness = createHarness({
+    entry: { model: { provider: "openai", modelId: "old-model" } },
+    createHold,
+  });
+  const coordinator = new SessionRuntimeCoordinator(
+    harness.catalog,
+    harness.agents,
+    harness.sender,
+  );
+
+  const activating = coordinator.activateRuntime("session-1");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await harness.catalog.update("session-1", {
+    model: { provider: "anthropic", modelId: "new-model" },
+  });
+  createHold.resolve();
+  const result = await activating;
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.calls.setModel, 1);
+  assert.deepEqual(harness.calls.setModelArgs[0], {
+    provider: "anthropic",
+    modelId: "new-model",
+  });
+});
+
+// 预热已把 Agent 绑上后，用户再改 catalog 模型然后发送：activate 对已绑定 runtime 直接
+// 返回，必须在发送前再套一次最新偏好，否则本轮仍用预热时的旧模型。
+test("send applies a catalog model change made after the runtime is already bound", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness({
+    entry: { model: { provider: "openai", modelId: "old-model" } },
+  });
+  const coordinator = new SessionRuntimeCoordinator(
+    harness.catalog,
+    harness.agents,
+    harness.sender,
+  );
+
+  const activated = await coordinator.activateRuntime("session-1");
+  assert.equal(activated.ok, true);
+  assert.deepEqual(harness.calls.setModelArgs[0], {
+    provider: "openai",
+    modelId: "old-model",
+  });
+
+  await harness.catalog.update("session-1", {
+    model: { provider: "anthropic", modelId: "new-model" },
+  });
+  const sent = await coordinator.send(prompt());
+
+  assert.equal(sent.accepted, true);
+  assert.equal(harness.calls.create, 1);
+  assert.equal(harness.calls.setModel, 2);
+  assert.deepEqual(harness.calls.setModelArgs[1], {
+    provider: "anthropic",
+    modelId: "new-model",
+  });
 });
 
 test("does not send or bind a new runtime when model setup fails", async () => {

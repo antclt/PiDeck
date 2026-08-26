@@ -261,9 +261,10 @@ export function buildSessionStatusDetail(
 		});
 	}
 	if (state.inputTokens != null || state.outputTokens != null) {
+		// 标签已是「输入/输出」，不再套 ↑/↓：箭头加长字符串，且 `/ ↓` 会在窄面板里被折成两行。
 		detailRows.push({
 			label: t("ctx.detail.tokens"),
-			value: `↑ ${formatCompact(state.inputTokens)} / ↓ ${formatCompact(state.outputTokens)}`,
+			value: `${formatCompact(state.inputTokens)} / ${formatCompact(state.outputTokens)}`,
 		});
 	}
 	if (state.cacheRead != null || state.cacheWrite != null) {
@@ -411,7 +412,7 @@ export function SessionStatus(props: {
 								className={`flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}
 							>
 								<span className="shrink-0 text-muted-foreground">{row.label}</span>
-								<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
+								<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 							</div>
 						))}
 					</div>
@@ -423,7 +424,7 @@ export function SessionStatus(props: {
 							{replyPerfRows.map((row) => (
 								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>
@@ -436,7 +437,7 @@ export function SessionStatus(props: {
 							{sessionStatRows.map((row) => (
 								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>
@@ -547,15 +548,15 @@ async function copyElementAsPng(element: HTMLElement) {
 	clone.style.padding = "24px";
 	clone.style.background =
 		getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || "#fff";
-	// 将 clone 插入到原元素旁边，确保 CSS 样式正确继承（父层选择器、rem 等）
+	// 将 clone 插入到原元素旁边，确保 CSS 样式正确继承（父层选择器、CSS 变量、rem 等）
 	if (element.parentElement) {
-		// 克隆节点不能参与原布局，否则插入时会短暂撑开时间线，导致屏幕闪动。
-		// 仍挂在 DOM 中是为了继承应用样式，但移出视口并固定尺寸。
-		clone.style.position = "fixed";
-		clone.style.left = "-100000px";
-		clone.style.top = "0";
+		// 克隆节点不能参与原布局，否则插入时会短暂撑开时间线导致闪动。
+		// 复用多选分享的隐藏方式（.multi-select-image-export：absolute + left/top 归零 + z-index:-1）：
+		// absolute 脱离文档流、不撑开布局；不能用 left:-100000px 把节点推出视口——
+		// html-to-image 会把 clone 的 computed style 复制进 SVG foreignObject，负偏移会让
+		// 内容整体渲染到 viewBox 之外，导致截图空白（「复制为图片空白」的根因）。
+		clone.classList.add("multi-select-image-export");
 		clone.style.width = `${element.getBoundingClientRect().width}px`;
-		clone.style.zIndex = "-1";
 		element.parentElement.insertBefore(clone, element.nextSibling);
 	}
 	let blob: Blob | null = null;

@@ -7,6 +7,10 @@ import type {
   SessionLaunchPreferences,
   SessionSummary,
 } from "../../../shared/types";
+import {
+  collectSessionSubtreeIds,
+  getSessionEnvironment,
+} from "../../../shared/sessionIdentity";
 import { isSameSessionPath } from "../agentListDisplay";
 import { t } from "../i18n";
 
@@ -48,6 +52,8 @@ export interface UseSessionActionsOptions {
   upsertSession: (session: SessionRecord) => void;
   removeSessionState: (sessionId: string) => void;
   removeSessionComposerState: (sessionId: string) => void;
+  /** 归档/删除前批量关 Tab；必须在清 session state 之前调用，否则焦点切不到邻居。 */
+  closeTabs: (sessionIds: string[]) => void;
   refreshProjectSessions: RefreshProjectSessions;
   /** 新建会话默认后端（设置项 defaultAgentBackend；缺省走 DEFAULT_AGENT_BACKEND）。 */
   defaultBackend?: AgentBackend;
@@ -84,6 +90,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     upsertSession,
     removeSessionState,
     removeSessionComposerState,
+    closeTabs,
     refreshProjectSessions,
     api,
     showToast,
@@ -132,6 +139,34 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     showToast(t("app.exportedPath", { path: result.path }), 3500);
   }
 
+  /**
+   * 关掉会话树对应的聊天框：先批量关 Tab（此时 currentSessionId 还在，才能切到邻居），
+   * 再清 record/composer。只摘父 id 会留下子 agent Tab，或在 current 被清空后露出空态输入框。
+   */
+  function dismissSessionTree(
+    session: {
+      id: string;
+      filePath?: string;
+      parentSessionPath?: string;
+      environment?: SessionRecord["environment"];
+      wsl?: boolean;
+    },
+    projectId = sessionsProjectId ?? activeProjectId,
+  ) {
+    const records = projectId ? getProjectSessionRecords(projectId) : [];
+    const ids = collectSessionSubtreeIds(records, {
+      id: session.id,
+      filePath: session.filePath,
+      parentSessionPath: session.parentSessionPath,
+      environment: session.environment ?? getSessionEnvironment(session),
+    });
+    closeTabs(ids);
+    for (const id of ids) {
+      removeSessionState(id);
+      removeSessionComposerState(id);
+    }
+  }
+
   async function deleteHistorySession(session: SessionSummary) {
     try {
       await api.sessions.deleteRecord(session.id);
@@ -146,8 +181,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
       showToast(reason || t("app.sessionDeleteFailed"), 5000);
       return;
     }
-    removeSessionState(session.id);
-    removeSessionComposerState(session.id);
+    dismissSessionTree(session);
     // DSH 删除会记墓碑：刷新/自动导入不再把同一 host 会话导回侧栏。
     showToast(t("app.sessionDeleted"), 3200);
     const projectId = sessionsProjectId ?? activeProjectId;
@@ -157,8 +191,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
   /** 归档历史会话：文件移入归档目录并从列表移除（可恢复，区别于删除） */
   async function archiveHistorySession(session: SessionSummary) {
     await api.sessions.archiveRecord(session.id);
-    removeSessionState(session.id);
-    removeSessionComposerState(session.id);
+    dismissSessionTree(session);
     showToast(archivedSessionToastMessage(session), ARCHIVED_SESSION_TOAST_MS);
     const projectId = sessionsProjectId ?? activeProjectId;
     if (projectId) await refreshProjectSessions(projectId);
@@ -323,5 +356,6 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     exportSidebarSession,
     createSessionDraft,
     createAnonymousSession,
+    dismissSessionTree,
   };
 }

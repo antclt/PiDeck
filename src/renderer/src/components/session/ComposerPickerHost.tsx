@@ -25,9 +25,12 @@ import { showNotice } from "../../utils/notice";
 import { t } from "../../i18n";
 import {
   SessionCommandFailure,
+  isLiveRuntimeStatus,
   requireSessionCommand,
   toSessionRuntimeTarget,
 } from "../../utils/sessionCommands";
+import { resolveComposerLiveModel } from "../../utils/modelPendingDisplay";
+import { resolveComposerThinkingLevel } from "../../utils/thinkingDisplay";
 import { ConfirmDialog } from "../app/AppParts";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { usePendingModelApply } from "../../hooks/usePendingModelApply";
@@ -100,6 +103,18 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   // 使用启动 capability snapshot 的精确 thinkingLevels；DSH 继续按 reasoningEfforts 过滤。
   const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
   const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
+  // 非 live 残留 state 不能盖住 catalog：Agent 未启动时改模型，选择器高亮必须跟记录走。
+  const runtimeLive = isLiveRuntimeStatus(runtime?.status);
+  const resolvedLiveModel = resolveComposerLiveModel({
+    state: runtime?.state,
+    record: record?.model,
+    fallback: {
+      provider: props.defaultModel?.provider ?? welcomeModel?.provider,
+      modelId: props.defaultModel?.modelId ?? welcomeModel?.modelId,
+      modelName: props.defaultModel?.modelName,
+    },
+    isLive: runtimeLive,
+  });
   const runtimeThinkingEntryRef = useRef(piRuntimeThinkingEntry);
   runtimeThinkingEntryRef.current = piRuntimeThinkingEntry;
 
@@ -119,10 +134,12 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   useEffect(() => {
     const agentId = runtime?.agentId;
     const runtimeGeneration = runtime?.runtimeGeneration;
-    const provider = runtime?.state?.provider ?? record?.model?.provider;
-    const modelId = runtime?.state?.modelId ?? record?.model?.modelId;
+    // 只向仍 live 的 Agent 查 thinkingLevelMap；已关闭/解绑的残留绑定不能拿 catalog 新模型去打 RPC。
+    const provider = resolvedLiveModel.provider;
+    const modelId = resolvedLiveModel.modelId;
     if (
       isDshSession ||
+      !runtimeLive ||
       !agentId ||
       typeof runtimeGeneration !== "number" ||
       !provider ||
@@ -151,12 +168,11 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   }, [
     sessionId,
     isDshSession,
+    runtimeLive,
     runtime?.agentId,
     runtime?.runtimeGeneration,
-    runtime?.state?.provider,
-    runtime?.state?.modelId,
-    record?.model?.provider,
-    record?.model?.modelId,
+    resolvedLiveModel.provider,
+    resolvedLiveModel.modelId,
     beginPiRuntimeThinkingLevels,
     resolvePiRuntimeThinkingLevels,
   ]);
@@ -195,11 +211,12 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   }
 
   function currentLiveModel() {
-    return {
-      provider: runtime?.state?.provider ?? record?.model?.provider ?? "",
-      modelId: runtime?.state?.modelId ?? record?.model?.modelId ?? "",
-      modelName: runtime?.state?.modelName,
-    };
+    // pending「from」只取 live state / catalog，不掺欢迎页兜底，避免把草稿偏好当成已生效模型。
+    return resolveComposerLiveModel({
+      state: runtime?.state,
+      record: record?.model,
+      isLive: runtimeLive,
+    });
   }
 
   function markModelPending(model: AvailableModel) {
@@ -472,11 +489,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         report={report}
         refreshing={refreshing}
         onRefresh={() => reload(true)}
-        current={{
-          provider: runtime?.state?.provider ?? record?.model?.provider ?? props.defaultModel?.provider ?? welcomeModel?.provider,
-          modelId: runtime?.state?.modelId ?? record?.model?.modelId ?? props.defaultModel?.modelId ?? welcomeModel?.modelId,
-          modelName: runtime?.state?.modelName,
-        }}
+        current={resolvedLiveModel}
         onClose={props.onClose}
         onPick={(model) => void pickModel(model)}
         favoriteModels={favoriteModels}
@@ -489,14 +502,8 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——选不支持的档位
     // 不会立即报错，而是在下一次 LLM 请求抛 UNSUPPORTED_REASONING_EFFORT（回合失败）。
     // 草稿期当前模型 = 部署默认模型（settings.yaml agent-default-model）。
-    const currentProvider = runtime?.state?.provider
-      ?? record?.model?.provider
-      ?? props.defaultModel?.provider
-      ?? welcomeModel?.provider;
-    const currentModelId = runtime?.state?.modelId
-      ?? record?.model?.modelId
-      ?? props.defaultModel?.modelId
-      ?? welcomeModel?.modelId;
+    const currentProvider = resolvedLiveModel.provider;
+    const currentModelId = resolvedLiveModel.modelId;
     const currentModel = models.find(
       (model) => model.provider === currentProvider && model.id === currentModelId,
     );
@@ -508,15 +515,13 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
             : { value: effort.id, label: effort.name ?? effort.id, description: effort.description };
         })
       : undefined;
-    const runtimeProvider = runtime?.state?.provider ?? record?.model?.provider;
-    const runtimeModelId = runtime?.state?.modelId ?? record?.model?.modelId;
-    const runtimeThinkingTarget = !isDshSession && runtime?.agentId &&
-      typeof runtime.runtimeGeneration === "number" && runtimeProvider && runtimeModelId
+    const runtimeThinkingTarget = !isDshSession && runtimeLive && runtime?.agentId &&
+      typeof runtime.runtimeGeneration === "number" && currentProvider && currentModelId
       ? {
           agentId: runtime.agentId,
           runtimeGeneration: runtime.runtimeGeneration,
-          provider: runtimeProvider,
-          modelId: runtimeModelId,
+          provider: currentProvider,
+          modelId: currentModelId,
         }
       : undefined;
     const runtimeLevels = runtimeThinkingTarget &&
@@ -547,13 +552,12 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     const welcomeThinking = isDshSession ? undefined : readWelcomeThinkingPreference()?.thinkingLevel;
     return (
       <ThinkingPicker
-        current={
-          runtime?.state?.thinkingLevel
-          ?? record?.thinkingLevel
-          ?? props.defaultThinkingLevel
-          ?? currentModel?.defaultEffort
-          ?? welcomeThinking
-        }
+        current={resolveComposerThinkingLevel({
+          state: runtime?.state?.thinkingLevel,
+          record: record?.thinkingLevel,
+          fallback: props.defaultThinkingLevel ?? currentModel?.defaultEffort ?? welcomeThinking,
+          isLive: runtimeLive,
+        })}
         levels={isDshSession ? thinkingLevels : piLevels}
         loading={piLevelsLoading}
         onClose={props.onClose}

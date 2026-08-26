@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, ChevronUp, MessageCircle, Minimize, X } from "lucide-react";
 import type { ChatMessage } from "../../../../shared/types";
 import { t, translateI18nDescriptor } from "../../i18n";
-import { classifyAskCardStatus, formatAskTitle, splitAskOption } from "../../utils/askUi";
+import { classifyAskCardStatus, formatAskTitle, hasTextSelection, splitAskOption } from "../../utils/askUi";
 import { formatDuration, formatTime, stripAnsi } from "./TimelineFormat";
 import { Textarea } from "../ui-shadcn/textarea";
 import { StackTrace } from "../ui-shadcn/stack-trace";
@@ -182,10 +182,13 @@ export const AskQuestionCard = memo(function AskQuestionCard(props: {
 	}, [uiRequest?.prefill, props.message.id]);
 
 	const handleSelect = (value: string) => {
+		// 划选复制的 mouseup 落在选项按钮上会冒充 click；有选区时不提交。
+		if (hasTextSelection()) return;
 		props.onRespond?.({ value });
 	};
 
 	const handleConfirm = (value: boolean) => {
+		if (hasTextSelection()) return;
 		props.onRespond?.({ confirmed: value });
 	};
 

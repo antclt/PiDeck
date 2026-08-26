@@ -691,7 +691,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					}
 					await sessionScanner.delete(entry.filePath);
 				}
-				await sessionCatalog.remove(sessionId);
+				// 磁盘会把 sibling `<stem>/` 一并删掉；catalog 必须同步摘掉整棵子树，
+				// 否则 mergeScanned 只增改不删，子会话会孤儿提升成顶层行。
+				await sessionCatalog.removeWithDescendants(sessionId);
 				void appLogger.info("session", "Catalog session deleted", { sessionId, filePath: entry.filePath });
 				return true;
 			} catch (error) {
@@ -722,7 +724,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				if (!cwd) throw new Error(mainCopy("project.notFound"));
 				const archivedPath = await archiveDshSession(entry.dshSessionId, cwd);
 				if (!archivedPath) throw new Error(mainCopy("session.invalidArchivePath"));
-				await sessionCatalog.remove(sessionId);
+				await sessionCatalog.removeWithDescendants(sessionId);
 				void appLogger.info("session", "DSH session archived", {
 					sessionId,
 					dshSessionId: entry.dshSessionId,
@@ -739,7 +741,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				throw new Error(mainCopy("session.stopBeforeDelete"));
 			}
 			const archivedPath = await sessionScanner.archive(entry.filePath);
-			await sessionCatalog.remove(sessionId);
+			// scanner.archive 会把 sibling `<stem>/` 一并移走；catalog 同步清子树，避免幽灵子会话。
+			await sessionCatalog.removeWithDescendants(sessionId);
 			void appLogger.info("session", "Session archived", { sessionId, archivedPath });
 			return true;
 		},

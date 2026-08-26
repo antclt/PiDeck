@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { computeThinkingDisplay } = loadTsCommonJs(
+const { computeThinkingDisplay, resolveComposerThinkingLevel } = loadTsCommonJs(
   "src/renderer/src/utils/thinkingDisplay.ts",
 );
 
@@ -29,6 +29,30 @@ test("computeThinkingDisplay: 无任何档位信息时返回空序列", () => {
     levels: [],
     pending: false,
   });
+});
+
+test("resolveComposerThinkingLevel: live 时优先 runtime state", () => {
+  assert.equal(
+    resolveComposerThinkingLevel({
+      state: "xhigh",
+      record: "max",
+      fallback: "off",
+      isLive: true,
+    }),
+    "xhigh",
+  );
+});
+
+test("resolveComposerThinkingLevel: 非 live 时忽略残留 state，展示 catalog", () => {
+  assert.equal(
+    resolveComposerThinkingLevel({
+      state: "xhigh",
+      record: "max",
+      fallback: "off",
+      isLive: false,
+    }),
+    "max",
+  );
 });
 
 test("契约: thinking 按钮运行中可点，启动中禁用", () => {

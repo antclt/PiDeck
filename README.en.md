@@ -27,25 +27,19 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.2** (2026-08-25)
+> **Latest: v0.7.3** (2026-08-26)
 
-### v0.7.2 Release Highlights
-- 🚀 **DSH dual agent backend**
-- 🚀 **DSH session capabilities**
-- 🚀 **DSH session persistence**
-- 🚀 **DSH config management page**
-- 🚀 **v2 transport**
-- 🚀 **Backend identity & capability sets**
-- 🚀 **DSH command completion from the host registry**
-- 🚀 **DSH session HTML export**
-- 🚀 **DSH skill catalog presentation**
-- 🚀 **Current-plan Todo extension**
-- 🚀 **Model spec autofill from listing + pi-ai**
-- 🚀 **DSH provider retry count**
-- ✨ **DSH session export entry enabled**
-- ✨ **Export runaway guard**
-- ✨ **DSH injected context no longer projected as user messages**
-- ✨ **Files drawer scroll container ownership**
+### v0.7.3 Release Highlights
+- 🚀 **Model capability auto-adaptation & thinking-effort pipeline**
+- 🚀 **Manual model catalog refresh**
+- 🚀 **Usage query expanded**
+- 🚀 **Session restart & reload**
+- 🚀 **DSH session-header agent mode pill**
+- 🚀 **Built-in pi-deck-retry-no-body extension**
+- ✨ **History runtime-operation overlay**
+- ✨ **Tab-bar loading state**
+- ✨ **Model capability explainer card removed**
+- ✨ **Settings grouping**
 
 [View Full Changelog →](CHANGELOG.md)
 

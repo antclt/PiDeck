@@ -1,6 +1,8 @@
 import { memo, useEffect, useRef, useState } from "react";
+import { ExternalLink } from "lucide-react";
 import { DEFAULT_PET_SCALE, type AppSettings, type PetManifest } from "../../../../../shared/types";
 import { t } from "../../../i18n";
+import { openInSystemBrowser } from "../../../utils/openExternal";
 import { Button } from "../../ui-shadcn/button";
 import {
   Select,
@@ -153,6 +155,17 @@ export const PetTab = memo(function PetTab(props: PetTabProps) {
           </Select>
         </SettingRow>
         <small className="setting-status">{t("settings.pet.petdexHint")}</small>
+        <a
+          href="https://petdex.dev/"
+          className="config-link-like inline-flex items-center gap-1"
+          onClick={(event) => {
+            event.preventDefault();
+            openInSystemBrowser("https://petdex.dev/");
+          }}
+        >
+          <ExternalLink size={12} aria-hidden="true" />
+          {t("settings.pet.petdexSite")}
+        </a>
         {(() => {
           const selected = petList.find((pet) => pet.id === draft.petId);
           return (

@@ -4,6 +4,66 @@
 
 All notable changes to PiDeck are documented here.
 
+## v0.7.3 - 2026-08-26
+
+### 🚀 New Features
+
+- **Model capability auto-adaptation & thinking-effort pipeline** — Compatible
+  with pi 0.84.3: endpoint-reported `contextWindow` / `maxTokens` / thinking
+  levels drive model adaptation, and the capability cache is invalidated per
+  runtime generation; `get_available_thinking_levels` is cached through the
+  runtime IPC keyed by `sessionId + agentId + generation + provider + modelId`
+  (DSH keeps its own reasoningEfforts); models unmatched by the endpoint
+  default to open thinking levels instead of guessing.
+- **Manual model catalog refresh** — The model selector now has a manual
+  refresh that force-pulls the model catalog (instead of relying on cache),
+  so newly added models show up.
+- **Usage query expanded** — Built-in usage/balance queries for OpenRouter,
+  Moonshot-Kimi and generic OpenAI-compatible gateways, one-click
+  usage-probes config generation, a new `usage-probe` skill and
+  `/skill:usage-probe` entry point for custom providers to author their own
+  probes.
+- **Session restart & reload** — The session context menu and tab bar now
+  expose "Restart" and "Reload", fixing terminal-state agents that could no
+  longer issue runtime commands.
+- **DSH session-header agent mode pill** — The DSH session header shows an
+  agent-mode pill: selectable during draft, read-only once activated
+  (agentPresetLocked).
+- **Built-in pi-deck-retry-no-body extension** — Empty-response errors now
+  reuse pi's retry mechanism, reducing session interruption from occasional
+  empty bodies.
+
+### ✨ UX Improvements
+
+- **History runtime-operation overlay** — Running operations on history
+  sessions shows a loading overlay over the message area, preventing
+  double-clicks and misclicks.
+- **Tab-bar loading state** — Fixed the loading display and session-reload
+  logic for tab-bar operations for more accurate feedback.
+- **Model capability explainer card removed** — The capability explainer card
+  is gone; adapted results go straight into the composer, one less step.
+- **Settings grouping** — Cache and log settings moved into the "Developer
+  settings" group for clearer categorization.
+
+### 🐛 Bug Fixes
+
+- **Unstarted-session editing & bundled skill auto-install** — Fixed editing
+  for unstarted sessions and the bundled-skill auto-install flow.
+- **Vision-bridge misconfig image handling** — No more uncaught exceptions
+  when the vision bridge is misconfigured; also fixed Git operation timeouts.
+- **Official provider new-model false alarm** — Selecting a newly added model
+  on an official provider no longer falsely reports "not configured".
+- **Approval card text selection** — Fixed text in approval cards being
+  unselectable.
+- **Session error-state logging** — Completed applog records for abnormal
+  session states to aid troubleshooting.
+- **Always-on-top button state sync** — The button now mirrors the main
+  process's real always-on-top state.
+- **Docs fullscreen toggle crash** — Fixed the composer panel
+  `Group not found` crash when toggling docs fullscreen.
+- **DSH host warmup & `/new` command** — Improved DSH host warmup strategy and
+  fixed `/new` commands being wrongly intercepted.
+
 ## v0.7.2 - 2026-08-25
 
 ### 🚀 New Features

@@ -2,14 +2,17 @@ import { readdir, rename as fsRename, mkdir, writeFile, stat } from "node:fs/pro
 import { join, relative, dirname, resolve, sep } from "node:path";
 import { trashPath } from "./trash";
 import type { FileTreeNode } from "../../shared/types";
+import {
+  DEFAULT_FILE_TREE_MAX_DEPTH,
+  FILE_TREE_ABSOLUTE_MAX_DEPTH,
+  FILE_TREE_MAX_DIRECTORY_ENTRIES,
+} from "../../shared/fileTree";
 
-const ignoredNames = new Set([".git", "node_modules", "dist", "build", ".next", "coverage", ".venv", "__pycache__"]);
-
-// composer @ 引用仍需要一棵较深的树；抽屉默认走浅层 listing，不再一次递归 12 层。
-export const DEFAULT_FILE_TREE_MAX_DEPTH = 8;
-export const FILE_TREE_ABSOLUTE_MAX_DEPTH = 12;
-/** 单层直接子项上限：超大目录（数万文件）一次 IPC 会拖垮渲染进程（#159）。 */
-export const FILE_TREE_MAX_DIRECTORY_ENTRIES = 2000;
+// target 是 Maven/Gradle 构建产物目录，与 build/dist 同类；不忽略会让 composer @
+// 整树搜索深挖进 target/（含大量 class 文件），既拖慢又污染引用候选。
+const ignoredNames = new Set([
+  ".git", "node_modules", "dist", "build", "target", ".next", "coverage", ".venv", "__pycache__",
+]);
 
 /** 路径必须落在项目根内（resolve 后比较，防 ../ 逃逸）。 */
 export function isPathInsideProject(root: string, target: string): boolean {

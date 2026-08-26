@@ -25,6 +25,7 @@ import {
   parseImageGenWatermark,
 } from "../../../shared/imageGenParams";
 import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
+import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
 import {
   classifyCompactError,
   resolveCompactUsagePercent,
@@ -829,7 +830,7 @@ export function useSessionComposerController(
     }
     // 标记在途后即便本 effect 因继续输入被重新评估，loading 门也会挡住重复请求
     deepTreeStateRef.current.loading = true;
-    void desktopApi.files.list(record.projectId, { maxDepth: 8 })
+    void desktopApi.files.list(record.projectId, { maxDepth: FILE_TREE_ABSOLUTE_MAX_DEPTH })
       .then((next) => {
         // 用项目比对而非 current 标志：输入过程中的每个按键都会触发本 effect
         // 重新评估并清理旧闭包，但请求仍属于当前项目——数据不该被丢弃，
@@ -1742,6 +1743,20 @@ export function useSessionComposerController(
     requestAnimationFrame(() => editorRef.current?.focus());
   }, [draft, sessionId, setDraft]);
 
+  // 「一键添加供应商」：把 /skill:usage-probe 斜线命令 + 占位符模板（供应商名称/baseUrl/
+  // 文档）整段放入草稿，用户填空后发送，AI 按 usage-probe skill 引导写 usage-probes.json。
+  // placeholder 由调用方（圆环面板）用 i18n 生成后传入，controller 保持不引 i18n。
+  const insertUsageProbePrompt = useCallback((placeholder: string) => {
+    const token = toSkillInvocationToken(isDshBackend ? "dsh" : "pi", "usage-probe");
+    const content = `/${token} ${placeholder}`;
+    const next = appendContentToDraft(draft, content);
+    liveDomDraftRef.current = { sessionId, value: next };
+    setDraft(next);
+    caretRef.current = { pos: next.length, forValue: next };
+    setPicker(null);
+    requestAnimationFrame(() => editorRef.current?.focus());
+  }, [draft, isDshBackend, sessionId, setDraft]);
+
   return {
     sessionId,
     record,
@@ -1875,6 +1890,7 @@ export function useSessionComposerController(
       insertTemplateContent,
       insertSkillInvocation,
       insertSkillContent,
+      insertUsageProbePrompt,
     },
     modals: {
       closePreview: () => setPreviewImage(null),

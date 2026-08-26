@@ -44,6 +44,11 @@ const COLOR_SYSTEM_TOOLS = "var(--color-context-system-tools, rgb(167, 139, 250)
 const COLOR_SYSTEM = "var(--color-context-system, #94a3b8)";
 const COLOR_TOOLS = "var(--color-context-tools, rgb(167, 139, 250))";
 
+/** 弹出面板宽度：原 264px 对「输入/输出 tokens / 命中率快照」过窄会折行；
+ *  320 仍贴 composer 不挡主栏。style.width 与定位回退必须用同一常量，
+ *  避免首帧 offsetWidth=0 时按旧宽度错位。 */
+const PANEL_WIDTH = 320;
+
 /** 面板内 provider 用量查询缓存：按 provider 去抖，60s 内不重复请求。 */
 const USAGE_CACHE_TTL_MS = 60_000;
 /** 面板内 provider 用量查询的进程级缓存（模块内一处，避免每次打开都弹请求）。 */
@@ -158,6 +163,8 @@ export function SessionContextMeter(props: {
 	>;
 	/** 压缩上下文（原右上角紧凑徽章动作，迁入面板底部） */
 	onCompact?: () => void;
+	/** 一键插入 /skill:usage-probe + 占位符模板（安装成功后由圆环面板触发）。 */
+	onInsertUsageProbePrompt?: (placeholder: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLSpanElement | null>(null);
@@ -213,12 +220,16 @@ export function SessionContextMeter(props: {
 	// 有 provider 名才渲染用量区块：加载中/失败/成功三种态在区块内部切换。
 	const showUsage = provider != null;
 
-	// 用量查不到时一键安装内置技能模板，引导用户让 AI 写自定义探针配置。
+	// 用量查不到时一键安装内置技能模板，并把 /skill:usage-probe + 占位符模板放入
+	// 输入框（用户填空后发送，AI 引导写自定义探针配置），避免用户手打斜线命令。
 	const installUsageSkillHint = useCallback(() => {
 		void desktopApi.config.installUsageSkill().then((result) => {
-			if (result?.success) showNotice(t("sessionContext.usageCustomInstalled"), 6000, "info");
+			if (result?.success) {
+				showNotice(t("sessionContext.usageCustomInstalled"), 6000, "info");
+				props.onInsertUsageProbePrompt?.(t("sessionContext.usageProbePrompt"));
+			}
 		});
-	}, []);
+	}, [props.onInsertUsageProbePrompt]);
 
 	// 模型切换瞬间 capacity 可能暂时消失：不渲染过期面板
 	useEffect(() => {
@@ -235,7 +246,7 @@ export function SessionContextMeter(props: {
 		const panel = panelRef.current;
 		if (!trigger || !panel) return;
 		const rect = trigger.getBoundingClientRect();
-		const panelWidth = panel.offsetWidth || 264;
+		const panelWidth = panel.offsetWidth || PANEL_WIDTH;
 		const panelHeight = panel.offsetHeight;
 		const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
 		let top = rect.top - 8 - panelHeight;
@@ -362,10 +373,11 @@ export function SessionContextMeter(props: {
 						ref={panelRef}
 						role="dialog"
 						aria-label={reading}
-						className="fixed z-[100] w-[264px] cursor-default rounded-xl border border-border bg-popover p-3 text-xs leading-5 text-text-secondary shadow-lg"
+						className="fixed z-[100] cursor-default rounded-xl border border-border bg-popover p-3 text-xs leading-5 text-text-secondary shadow-lg"
 						style={{
 							left: placement?.left,
 							top: placement?.top,
+							width: PANEL_WIDTH,
 							visibility: placement === null ? "hidden" : "visible",
 						}}
 					>
@@ -485,7 +497,7 @@ export function SessionContextMeter(props: {
 									className={`flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}
 								>
 									<span className="shrink-0 text-text-secondary">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>
@@ -501,7 +513,7 @@ export function SessionContextMeter(props: {
 									className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5"
 								>
 									<span className="shrink-0 text-text-secondary">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>
@@ -517,7 +529,7 @@ export function SessionContextMeter(props: {
 									className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5"
 								>
 									<span className="shrink-0 text-text-secondary">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>

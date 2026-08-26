@@ -208,55 +208,81 @@ export function useSessionWorkspaceChrome(options: {
     registerOpenSession(sessionId, "permanent");
   }, [registerOpenSession]);
 
-  const closeTab = useCallback((sessionId: string) => {
+  /**
+   * 一次关掉一组 Tab。归档/删除父会话时必须批量关，因为连续调用 closeTab
+   * 会读到同一份 tabsSnapshotRef，第二下仍按「未关」的旧列表算邻居。
+   * 焦点规则与单 Tab 关闭一致：当前会话被关掉才切邻居 / 分屏幸存者 / 项目空态。
+   */
+  const closeTabs = useCallback((sessionIds: string[]) => {
+    if (sessionIds.length === 0) return;
+    const closing = new Set(sessionIds);
     const snap = tabsSnapshotRef.current;
-    const remaining = snap.tabs.filter((id) => id !== sessionId);
+    const remaining = snap.tabs.filter((id) => !closing.has(id));
     setSessionTabIds(remaining);
-    if (snap.previewId === sessionId) setPreviewSessionTabId(null);
+    if (snap.previewId && closing.has(snap.previewId)) setPreviewSessionTabId(null);
 
-    if (snap.split) {
-      const resolved = resolveSplitAfterClose(snap.split, sessionId);
-      if (!resolved) {
-        setSplitLayout(null);
-      } else if ("soloSessionId" in resolved) {
-        setSplitLayout(null);
-        if (snap.currentSessionId === sessionId) {
-          const record = store.get(sessionRecordByIdAtomFamily(resolved.soloSessionId));
-          if (record) focusHandlersRef.current.focusSession(record.projectId, resolved.soloSessionId);
+    let layout = snap.split;
+    let soloSessionId: string | undefined;
+    if (layout) {
+      for (const sessionId of sessionIds) {
+        if (!layout) break;
+        const resolved = resolveSplitAfterClose(layout, sessionId);
+        if (!resolved) {
+          layout = null;
+          soloSessionId = undefined;
+          break;
         }
-        if (remaining.length === 0 && snap.activeProjectId) {
-          focusHandlersRef.current.focusProject(snap.activeProjectId);
-        }
-        return;
-      } else {
-        setSplitLayout(resolved.layout);
-        // 分屏仍存在且关闭的是当前聚焦会话：焦点优先留在分屏内幸存会话，
-        // 避免焦点游离到 Tab 邻居导致分屏视图隐藏
-        if (snap.currentSessionId === sessionId && remaining.length > 0) {
-          const splitSurvivors = splitLayoutSessionIds(resolved.layout).filter((id) =>
-            remaining.includes(id),
-          );
-          if (splitSurvivors.length > 0) {
-            const record = store.get(sessionRecordByIdAtomFamily(splitSurvivors[0]));
-            if (record) {
-              focusHandlersRef.current.focusSession(record.projectId, splitSurvivors[0]);
-              return;
-            }
+        if ("soloSessionId" in resolved) {
+          // 唯一幸存者也在关闭集合里时，分屏整体消失，不能再把焦点交给它。
+          if (closing.has(resolved.soloSessionId)) {
+            layout = null;
+            soloSessionId = undefined;
+          } else {
+            layout = null;
+            soloSessionId = resolved.soloSessionId;
           }
+          break;
+        }
+        layout = resolved.layout;
+      }
+      setSplitLayout(layout);
+    }
+
+    const currentId = snap.currentSessionId;
+    if (!currentId || !closing.has(currentId)) return;
+
+    if (soloSessionId && remaining.includes(soloSessionId)) {
+      const record = store.get(sessionRecordByIdAtomFamily(soloSessionId));
+      if (record) {
+        focusHandlersRef.current.focusSession(record.projectId, soloSessionId);
+        return;
+      }
+    }
+
+    if (layout && remaining.length > 0) {
+      const splitSurvivors = splitLayoutSessionIds(layout).filter((id) => remaining.includes(id));
+      if (splitSurvivors.length > 0) {
+        const record = store.get(sessionRecordByIdAtomFamily(splitSurvivors[0]));
+        if (record) {
+          focusHandlersRef.current.focusSession(record.projectId, splitSurvivors[0]);
+          return;
         }
       }
     }
 
-    if (snap.currentSessionId !== sessionId) return;
     if (remaining.length > 0) {
-      const index = snap.tabs.indexOf(sessionId);
-      const next = remaining[Math.min(index, remaining.length - 1)];
+      const index = snap.tabs.indexOf(currentId);
+      const next = remaining[Math.min(Math.max(index, 0), remaining.length - 1)];
       const record = store.get(sessionRecordByIdAtomFamily(next));
       if (record) focusHandlersRef.current.focusSession(record.projectId, next);
     } else if (snap.activeProjectId) {
       focusHandlersRef.current.focusProject(snap.activeProjectId);
     }
   }, [setSessionTabIds, store]);
+
+  const closeTab = useCallback((sessionId: string) => {
+    closeTabs([sessionId]);
+  }, [closeTabs]);
 
   const closeOtherTabs = useCallback((sessionId: string) => {
     setSessionTabIds((current) => current.filter((id) => id === sessionId));
@@ -435,6 +461,7 @@ export function useSessionWorkspaceChrome(options: {
     registerOpenSession,
     // commands
     promotePreview,
+    closeTabs,
     closeTab,
     closeOtherTabs,
     closeAllTabs,

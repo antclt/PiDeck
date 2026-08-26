@@ -2,6 +2,7 @@ import { Button } from "../ui-shadcn/button";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { LogoMark } from "../app/AppParts";
 import { t } from "../../i18n";
+import { isLanWeb } from "../../desktopApi";
 import { showNotice } from "../../utils/notice";
 import { StackTrace } from "../ui-shadcn/stack-trace";
 
@@ -56,11 +57,20 @@ export class AppErrorBoundary extends Component<
 		window.location.reload();
 	};
 
+	private handleQuit = () => {
+		// 全局边界会整页替换 App，自定义标题栏随之卸载；无框窗口若只留「重试/刷新」，
+		// 用户无法退出。必须走 app.quit 而不是 closeWindow：开启 closeToTray 时关窗只会隐藏，
+		// 崩溃页再藏起来就退不掉。preload 缺失时静默跳过，避免再抛一层。
+		void window.piDesktop?.app.quit().catch(() => undefined);
+	};
+
 	override render() {
 		if (!this.state.error) return this.props.children;
 
 		const title = this.props.title ?? t("app.renderErrorTitle");
 		const message = this.state.error.message || t("app.renderErrorUnknown");
+		// LAN Web / 无 preload：浏览器自己有标签栏，desktopApi.quit 也不是真进程退出。
+		const canQuitApp = Boolean(window.piDesktop) && !isLanWeb;
 
 		return (
 			<div className="app-error-boundary" role="alert">
@@ -93,6 +103,15 @@ export class AppErrorBoundary extends Component<
 						>
 							{t("app.renderErrorReload")}
 						</Button>
+						{canQuitApp ? (
+							<Button
+								type="button"
+								variant="outline"
+								onClick={this.handleQuit}
+							>
+								{t("app.quit")}
+							</Button>
+						) : null}
 					</div>
 					<small className="app-error-boundary-help">
 						{t("app.renderErrorHelp")}

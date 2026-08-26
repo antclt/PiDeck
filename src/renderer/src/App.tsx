@@ -31,6 +31,7 @@ import {
 } from "./desktopApi";
 import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
+import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"]);
 const ConfigModal = lazy(() => import("./ConfigModal").then((m) => ({ default: m.ConfigModal })));
@@ -90,6 +91,7 @@ import {
   sessionIdByRuntimeAgentIdAtomFamily,
   sessionRuntimeBySessionIdAtomFamily,
   sidebarExpandedProjectIdsAtom,
+  compactMiddlePackagesAtom,
   sessionCatalogLoadStateAtom,
   sessionMessagesCacheAtom,
   sessionSummariesByProjectIdAtomFamily,
@@ -98,6 +100,7 @@ import {
   setSessionAttachmentsAtom,
   setSessionCatalogLoadStateAtom,
   setSessionMessageLoadStateAtom,
+  setSessionHistoryMutationOverlayAtom,
   setSessionDraftAtom,
   cacheSessionMessagesAtom,
   upsertSessionAtom,
@@ -239,6 +242,8 @@ export function App() {
   const promoteSessionComposerState = useSetAtom(promoteSessionComposerStateAtom);
   const setSessionCatalogLoadState = useSetAtom(setSessionCatalogLoadStateAtom);
   const setSessionMessageLoadState = useSetAtom(setSessionMessageLoadStateAtom);
+  // 会话消息区域遮罩（SessionSurfaceStage）：重启/停止/重载等运行时操作据此显示「正在…」加载动画
+  const setMutationOverlay = useSetAtom(setSessionHistoryMutationOverlayAtom);
   const removeSessionState = useSetAtom(removeSessionStateAtom);
   const removeSessionComposerState = useSetAtom(removeSessionComposerStateAtom);
   const setImageGenConfig = useSetAtom(imageGenConfigAtom);
@@ -269,6 +274,7 @@ export function App() {
   const agentsRef = useRef<AgentTab[]>(agents);
   agentsRef.current = agents;
   const expandedProjects = useAtomValue(sidebarExpandedProjectIdsAtom);
+  const compactMiddlePackagesEnabled = useAtomValue(compactMiddlePackagesAtom);
 
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const [promptTemplateList] = useState<
@@ -285,6 +291,10 @@ export function App() {
   const [restartingAgentId, setRestartingAgentId] = useState<string | null>(null);
   /** 当前正在激活（首次启动）的会话：未绑定 Agent 时「重启会话」走 activateRuntime，用会话 id 标记 loading。 */
   const [activatingSessionId, setActivatingSessionId] = useState<string | null>(null);
+  /** 当前正在停止的 Agent：Tab 栏「停止」/侧栏关闭 Agent 时给对应会话 tab 徽章显示 loading。 */
+  const [stoppingAgentId, setStoppingAgentId] = useState<string | null>(null);
+  /** 当前正在从磁盘重载消息的会话：Tab 栏「重载」时给对应会话 tab 徽章显示 loading。 */
+  const [reloadingSessionId, setReloadingSessionId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
 
   // composerAgentModes legacy mirror removed — mode restore uses Session atom in useQueuedPrompt.
@@ -1364,6 +1374,7 @@ export function App() {
     exportSidebarSession: runExportSidebarSession,
     createSessionDraft: runCreateSessionDraft,
     createAnonymousSession: runCreateAnonymousSession,
+    dismissSessionTree,
   } = useSessionActions({
     openSessionRequestRef,
     creatingSessionDraftRef,
@@ -1377,6 +1388,7 @@ export function App() {
     upsertSession,
     removeSessionState,
     removeSessionComposerState,
+    closeTabs: workspaceChrome.closeTabs,
     refreshProjectSessions,
     api,
     showToast,
@@ -2105,8 +2117,13 @@ export function App() {
    */
   async function reloadSessionMessages(sessionId: string) {
     if (!sessionId) return;
-    // live 运行时不能强刷磁盘：菜单虽已按状态隐藏，但保留边界守卫防状态在菜单打开期间变化。
-    if (getRuntimeTargetForSession(sessionId)) return;
+    // live 运行时（starting/idle/running）不能强刷磁盘，会覆盖内存中的流式消息；
+    // error/closed 终态仍持有绑定（getRuntimeTargetForSession 有 target），但进程已死，
+    // 应当允许从磁盘刷新——这里必须按 status 判 live，不能用 target 判（否则 error/closed 的重载入口会被静默吞掉）。
+    if (isSessionRuntimeLive(sessionId)) return;
+    // 标记重载中：Tab 栏「重载」菜单项/tab 徽章 + 会话消息区域遮罩据此显示 loading 动画
+    setReloadingSessionId(sessionId);
+    setMutationOverlay({ sessionId, kind: "reloading" });
     setSessionMessageLoadState({ sessionId, state: { status: "loading" } });
     try {
       const page = await api.sessions.readRecordMessagePage(sessionId, undefined, 100);
@@ -2129,6 +2146,9 @@ export function App() {
         t("app.sessionReloadFailed", { error: error instanceof Error ? error.message : String(error) }),
         5000,
       );
+    } finally {
+      setReloadingSessionId((current) => (current === sessionId ? null : current));
+      setMutationOverlay({ sessionId, kind: null });
     }
   }
 
@@ -2146,7 +2166,15 @@ export function App() {
     if (isPendingAgentId(agentId)) return;
     const target = getRuntimeTargetForAgent(agentId);
     if (!target) return;
-    requireSessionCommand(await api.sessions.stopRuntime(target));
+    // 标记停止中：Tab 栏「停止」菜单项/tab 徽章 + 会话消息区域遮罩据此显示 loading 动画
+    setStoppingAgentId(agentId);
+    setMutationOverlay({ sessionId: target.sessionId, kind: "stopping" });
+    try {
+      requireSessionCommand(await api.sessions.stopRuntime(target));
+    } finally {
+      setStoppingAgentId((current) => (current === agentId ? null : current));
+      setMutationOverlay({ sessionId: target.sessionId, kind: null });
+    }
   }
 
   function requestCloseAgent(agent: AgentTab): Promise<void> {
@@ -2289,8 +2317,11 @@ export function App() {
         setPendingAgents(pendingAgentsRef.current);
       }
     }
-    // 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）
+    // 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）。
+    // 重启活会话走 restartRuntimeTarget→restartingAgentId→SessionSurfaceStage 的 isRestarting 遮罩；
+    // 这里（无绑定）没有 restartingAgentId，需显式设置 activating 遮罩，让会话消息区域也有加载动画。
     setActivatingSessionId(sessionId);
+    setMutationOverlay({ sessionId, kind: "activating" });
     try {
       const activated = requireSessionCommand(
         await api.sessions.activateRuntime(sessionId),
@@ -2303,6 +2334,7 @@ export function App() {
       setActivatingSessionId((current) =>
         current === sessionId ? null : current,
       );
+      setMutationOverlay({ sessionId, kind: null });
     }
   }
 
@@ -2638,6 +2670,43 @@ export function App() {
     [activeProjectId, showToast],
   );
 
+  /**
+   * 折叠中间包模式下的「自动下钻」：展开一个目录时，若它是一条
+   * 「单子目录且无文件」的链（Java/Maven、NestJS 等深包结构），
+   * 一次把它加载到链尾，让折叠后的点分节点直接展开到真实内容，
+   * 避免用户逐层点 11 次。
+   */
+  async function drillCompactChain(projectId: string, startPath: string) {
+    let current = startPath;
+    const chain = new Set<string>([startPath]);
+    for (let i = 0; i < FILE_TREE_ABSOLUTE_MAX_DEPTH; i++) {
+      let children: FileTreeNode[];
+      try {
+        children = await api.files.list(projectId, { maxDepth: 0, directory: current });
+      } catch {
+        // 超大目录 / 权限问题：停止下钻，保留已加载部分，避免整条链卡死。
+        break;
+      }
+      if (activeProjectIdRef.current !== projectId) return;
+      setFiles((tree) => mergeFileTreeChildren(tree, current, children));
+      // 恰 1 个子目录且无文件 → 继续沿链下钻，并把该子目录也标记展开。
+      if (children.length === 1 && children[0].type === "directory") {
+        current = children[0].path;
+        chain.add(current);
+        continue;
+      }
+      break;
+    }
+    // 整条链（含链尾）一次性并入展开集合：折叠模式下只有链尾 path 可见，
+    // 但关闭折叠后整条链仍需保持展开；持久化保证重新打开项目能重建。
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      for (const p of chain) next.add(p);
+      if (activeProjectIdRef.current === projectId) saveExpandedDirs(projectId, next);
+      return next;
+    });
+  }
+
   function toggleDirectory(path: string) {
     // 文件树默认折叠,只有用户显式展开目录才显示子项,避免大仓库一打开就产生视觉噪音。
     let expanding = false;
@@ -2654,9 +2723,14 @@ export function App() {
     });
     // 首次展开时按需拉这一层；收起或已有 children 只改展开态，避免重复 IPC。
     if (!expanding || !activeProjectId) return;
+    const projectId = activeProjectId;
+    if (compactMiddlePackagesEnabled) {
+      // 折叠模式下沿单子目录链自动下钻，一次展开整条包链
+      void drillCompactChain(projectId, path);
+      return;
+    }
     setFiles((current) => {
       if (findLoadedDirectory(current, path)) return current;
-      const projectId = activeProjectId;
       void api.files
         .list(projectId, { maxDepth: 0, directory: path })
         .then((children) => {
@@ -2690,8 +2764,8 @@ export function App() {
       showToast(reason || t("app.sessionDeleteFailed"), 5000, "error");
       return;
     }
-    removeSessionState(session.id);
-    removeSessionComposerState(session.id);
+    // 先关 Tab 再清状态，并带走 sibling-dir / parentSessionPath 子会话，避免空态 Composer 残留。
+    dismissSessionTree(session, projectId);
     showToast(t("app.sessionDeleted"), 2200);
     await refreshProjectSessions(projectId);
   }
@@ -2699,8 +2773,7 @@ export function App() {
   /** 归档会话：从列表移除但不销毁文件；toast 按后端告知恢复入口（pi 走会话管理，DSH 走配置页归档区） */
   async function archiveSidebarSession(projectId: string, session: SessionSummary) {
     await api.sessions.archiveRecord(session.id);
-    removeSessionState(session.id);
-    removeSessionComposerState(session.id);
+    dismissSessionTree(session, projectId);
     showToast(archivedSessionToastMessage(session), ARCHIVED_SESSION_TOAST_MS);
     await refreshProjectSessions(projectId);
   }
@@ -3046,6 +3119,7 @@ export function App() {
     // 停止 Agent = 停掉当前会话绑定的 pi/DSH 进程（保留会话与 Tab，可随时重启/重载），
     // 与「关闭标签页」仅移除 Tab 不同；无绑定或已终态（error/closed）的会话隐藏停止入口。
     canStopCurrent: isLiveRuntimeStatus(activeAgent?.status),
+    isStoppingCurrent: stoppingAgentId === activeAgentId,
     onStopCurrent: activeAgentId
       ? () => {
           void closeAgent(activeAgentId).catch((error) => {
@@ -3065,6 +3139,7 @@ export function App() {
     // 重新加载会话：无 live 运行时（未启动/error/closed）时可用，从磁盘刷新消息文件；
     // live 会话刷新走重启即可，不做磁盘强刷以免覆盖内存中的流式消息。
     canReloadCurrent: Boolean(currentSessionId) && !isLiveRuntimeStatus(activeAgent?.status),
+    isReloadingCurrent: reloadingSessionId === currentSessionId,
     onReloadCurrent: currentSessionId
       ? () => void reloadSessionMessages(currentSessionId)
       : undefined,

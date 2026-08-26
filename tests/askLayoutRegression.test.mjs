@@ -50,6 +50,10 @@ const approvalCard = readFileSync(
   "src/renderer/src/components/ui-shadcn/approval-card.tsx",
   "utf8",
 );
+const securityCard = readFileSync(
+  "src/renderer/src/components/overlays/SecurityConfirmCard.tsx",
+  "utf8",
+);
 const planModeExt = readFileSync(
   "resources/extensions/pi-deck-plan-mode.ts",
   "utf8",
@@ -120,6 +124,43 @@ test("Long ask descriptions collapse to a preview with eye toggle", () => {
   // 「1口」乱码回归：plan 草案步骤前缀不得用 ☐（部分 Windows 字体渲染成空心方框）。
   // widget/进度消息的 ☑/☐ 保留（agentTodoList 测试锁定，完成态语义明确）。
   assert.doesNotMatch(planModeExt, /\$\(item\.step\)\. ☐/);
+
+  // 折叠触发器只能包 chevron：标题/描述若包进 trigger，划选结束后的 mouseup 会把选项折起来。
+  const triggerBlocks = [...approvalCard.matchAll(/<CollapsibleTrigger asChild>[\s\S]*?<\/CollapsibleTrigger>/g)];
+  assert.equal(triggerBlocks.length, 1);
+  const triggerBlock = triggerBlocks[0][0];
+  assert.match(triggerBlock, /<ChevronDown/);
+  assert.doesNotMatch(triggerBlock, /props\.title/);
+  assert.doesNotMatch(triggerBlock, /props\.description/);
+  assert.doesNotMatch(triggerBlock, /<Eye[\s\S]*EyeOff|EyeOff[\s\S]*<Eye/);
+  // 标题/描述是普通 select-text 节点，不是 button，才能原生划选复制。
+  assert.match(approvalCard, /text-foreground select-text"\s*>\s*\{props\.title\}/);
+  assert.match(approvalCard, /text-muted-foreground select-text"/);
+  // 眼睛是 trigger 的兄弟，只切 descExpanded，不得改 open。
+  assert.match(approvalCard, /onClick=\{\(\) => setDescExpanded\(\(next\) => !next\)\}/);
+  assert.match(approvalCard, /<\/CollapsibleTrigger>[\s\S]*descExpanded \? <EyeOff size=\{14\}/);
+  // 一键复制未折叠全文（clamp 只影响展示）。
+  assert.match(approvalCard, /from "\.\.\/\.\.\/utils\/clipboard"/);
+  assert.match(approvalCard, /props\.description \? `\$\{props\.title\}\\n\\n\$\{props\.description\}` : props\.title/);
+  assert.match(approvalCard, /writeClipboard\(text\)/);
+  assert.match(approvalCard, /ask\.copyPrompt/);
+  assert.match(approvalCard, /ask\.expandOptions/);
+  assert.match(approvalCard, /ask\.collapseOptions/);
+});
+
+test("Ask option clicks skip submit while text is selected", () => {
+  // 选项/允许/拒绝是 button：划选结束后 mouseup 落在按钮上会冒充 click。
+  // overlay submitValue + BatchQuestion true/false/select、timeline handleSelect/handleConfirm、
+  // 安全卡 allow/deny 都必须在提交前探测 window 划选并跳过。
+  assert.match(overlay, /hasTextSelection/);
+  assert.match(timelineCards, /hasTextSelection/);
+  assert.match(securityCard, /hasTextSelection/);
+  const overlayGuards = overlay.match(/if \(hasTextSelection\(\)\) return;/g);
+  const timelineGuards = timelineCards.match(/if \(hasTextSelection\(\)\) return;/g);
+  const securityGuards = securityCard.match(/if \(hasTextSelection\(\)\) return;/g);
+  assert.ok(overlayGuards && overlayGuards.length >= 4);
+  assert.ok(timelineGuards && timelineGuards.length >= 2);
+  assert.ok(securityGuards && securityGuards.length >= 2);
 });
 
 /**

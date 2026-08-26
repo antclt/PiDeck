@@ -1234,3 +1234,86 @@ test("mergeScanned drops legacy subagent-artifacts entries", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// 回归：归档/删除父会话时磁盘会把 sibling `<stem>/` 一并移走，但 catalog.remove(id)
+// 只摘一条。mergeScanned 只增改不删，列表缓存会立刻把子会话孤儿提升成顶层行，
+// 再点开就是残留聊天框。removeWithDescendants 必须清掉整棵子树，且不得误伤
+// 匿名会话、草稿、其它项目。
+test("removeWithDescendants drops nested subagent catalog entries with the parent", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-archive-descendants-"));
+  const filePath = join(dir, "sessions.json");
+  try {
+    const catalog = new SessionCatalog(filePath);
+    await catalog.load();
+    const records = await catalog.mergeScanned("project-1", [
+      summary({ filePath: "C:/sessions/parent.jsonl", id: "C:/sessions/parent.jsonl", name: "Parent" }),
+      summary({
+        filePath: "C:/sessions/parent/child.jsonl",
+        id: "C:/sessions/parent/child.jsonl",
+        name: "Child",
+        parentSessionPath: "c:/sessions/parent.jsonl",
+      }),
+      summary({
+        filePath: "C:/sessions/parent/child/nested.jsonl",
+        id: "C:/sessions/parent/child/nested.jsonl",
+        name: "Grandchild",
+        parentSessionPath: "C:/sessions/parent/child.jsonl",
+      }),
+      summary({ filePath: "C:/sessions/other.jsonl", id: "C:/sessions/other.jsonl", name: "Unrelated" }),
+    ]);
+    await catalog.mergeScanned("project-2", [
+      summary({ filePath: "C:/other-project/keep.jsonl", id: "C:/other-project/keep.jsonl", name: "Other project" }),
+    ]);
+    const parent = records.find((record) => record.title === "Parent");
+    const child = records.find((record) => record.title === "Child");
+    const grandchild = records.find((record) => record.title === "Grandchild");
+    const unrelated = records.find((record) => record.title === "Unrelated");
+    assert.ok(parent && child && grandchild && unrelated);
+
+    const anonymous = catalog.createAnonymous({
+      projectId: "project-1",
+      title: "Anonymous Chat",
+      environment: "native",
+    });
+    const draft = await catalog.createDraft({
+      projectId: "project-1",
+      title: "Saved draft",
+      environment: "native",
+    });
+
+    const oneId = await catalog.remove(unrelated.id);
+    assert.equal(oneId, true, "remove() remains a single-id operation");
+    await catalog.mergeScanned("project-1", [
+      summary({ filePath: "C:/sessions/other.jsonl", id: "C:/sessions/other.jsonl", name: "Unrelated" }),
+    ]);
+    const restoredUnrelated = catalog.listEntries().find((entry) => entry.title === "Unrelated");
+    assert.ok(restoredUnrelated, "unrelated session can still be merged back");
+
+    const removedIds = await catalog.removeWithDescendants(parent.id);
+    assert.ok(removedIds.includes(parent.id));
+    assert.ok(removedIds.includes(child.id));
+    assert.ok(removedIds.includes(grandchild.id));
+    assert.equal(catalog.get(parent.id), undefined);
+    assert.equal(catalog.get(child.id), undefined);
+    assert.equal(catalog.get(grandchild.id), undefined);
+    assert.ok(catalog.get(restoredUnrelated.id), "unrelated file-backed session must stay");
+    assert.ok(catalog.get(anonymous.id), "anonymous sessions must survive parent archive");
+    assert.ok(catalog.get(draft.id), "drafts must survive parent archive");
+    assert.ok(
+      catalog.listEntries().some((entry) => entry.title === "Other project"),
+      "other-project sessions must stay",
+    );
+
+    const persisted = JSON.parse(await readFile(filePath, "utf8"));
+    const persistedTitles = persisted.sessions.map((entry) => entry.title);
+    assert.ok(!persistedTitles.includes("Parent"));
+    assert.ok(!persistedTitles.includes("Child"));
+    assert.ok(!persistedTitles.includes("Grandchild"));
+    assert.ok(persistedTitles.includes("Unrelated"));
+    assert.ok(persistedTitles.includes("Saved draft"));
+    assert.ok(persistedTitles.includes("Other project"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

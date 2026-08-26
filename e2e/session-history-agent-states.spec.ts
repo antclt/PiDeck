@@ -216,6 +216,16 @@ test("never-started session: delete confirms, edit applies directly, resend auto
 	await expect(window.getByRole("alertdialog")).toHaveCount(0, { timeout: 5_000 });
 	await expect(timeline).toContainText("未启动编辑后的回复", { timeout: 30_000 });
 
+	// ── 编辑 user 消息：同样无 runtime → 直接改文件生效（回归：曾出现「编辑框关了但没变」）──
+	const firstUserTurn = timeline.locator(".user-turn").filter({ hasText: "未启动会话锚点" });
+	await firstUserTurn.locator(".user-turn-actions").getByTitle("编辑", { exact: true }).click();
+	await expect(timeline.locator("textarea")).toBeVisible({ timeout: 10_000 });
+	await timeline.locator("textarea").fill("未启动编辑后的用户消息");
+	await timeline.getByRole("button", { name: "保存" }).click();
+	await expect(window.getByRole("alertdialog")).toHaveCount(0, { timeout: 5_000 });
+	await expect(timeline).toContainText("未启动编辑后的用户消息", { timeout: 30_000 });
+	await expect(timeline.getByText("未启动会话锚点")).toHaveCount(0, { timeout: 10_000 });
+
 	// ── 重发：无 runtime → 直接截断 + 自动激活 runtime（spawn mock pi）→ 恰好一份新回复 ──
 	const lastUser = timeline.locator(".user-turn").filter({ hasText: "未启动第二问" });
 	await lastUser.locator(".user-turn-actions").getByTitle("用同一条用户消息再次发送给 AI").click();
@@ -232,4 +242,81 @@ test("never-started session: delete confirms, edit applies directly, resend auto
 	await expect(timeline.getByText("未启动回复一")).toHaveCount(0, { timeout: 10_000 });
 	// 旧回复（已被删除）绝不再出现
 	await expect(timeline.getByText("未启动回复二")).toHaveCount(0, { timeout: 10_000 });
+});
+
+// ──────────────────────────────────────────────────────────────
+// 状态三补：从未启动 → tab 栏「重启」激活时，会话消息区域显示加载遮罩
+// （回归：曾只给 Tab 徽章/菜单项加动画，会话消息区域无任何加载反馈）
+// ──────────────────────────────────────────────────────────────
+const overlayRestartProject = makeSeedProject("never-started-overlay");
+
+// 用 test.describe 块内 test.use 而非模块级 test.use：模块级 test.use 对同文件多次调用
+// 会合并且后者覆盖前者（seedProjects/seedSessionFiles 均被本用例覆盖），导致前面
+// 「never-started」用例的侧栏拿到 overlay 项目而失败。块内作用域互不干扰。
+test.describe("content-area loading overlay", () => {
+	test.use({
+		seedProjects: [overlayRestartProject],
+		seedSessionFiles: [
+			{
+				projectPath: overlayRestartProject.path,
+				entries: [
+					{
+						type: "session",
+						version: 3,
+						id: "o1",
+						parentId: null,
+						name: "遮罩验证会话",
+						cwd: overlayRestartProject.path,
+						timestamp: new Date(Date.now() - 60_000).toISOString(),
+					},
+					{
+						type: "message",
+						id: "o2",
+						parentId: "o1",
+						timestamp: new Date(Date.now() - 59_000).toISOString(),
+						message: { role: "user", content: [{ type: "text", text: "遮罩验证提问" }] },
+					},
+					{
+						type: "message",
+						id: "o3",
+						parentId: "o2",
+						timestamp: new Date(Date.now() - 58_000).toISOString(),
+						message: { role: "assistant", content: [{ type: "text", text: "遮罩验证回复" }] },
+					},
+				],
+			},
+		],
+	});
+
+	test("never-started session: tab restart shows content-area loading overlay while activating", async ({ window }) => {
+		test.setTimeout(180_000);
+		await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
+
+		// 进入预置项目并打开历史会话（agent 从未 spawn）
+		const projectRow = window.locator(".conversation", {
+			hasText: "pideck-seed-never-started-overlay-",
+		}).first();
+		await expect(projectRow).toBeVisible({ timeout: 30_000 });
+		await projectRow.click();
+		const historyRow = window.locator(".conversation", { hasText: "遮罩验证会话" }).first();
+		await expect(historyRow).toBeVisible({ timeout: 15_000 });
+		await historyRow.click();
+		const timeline = window.locator(".message-timeline");
+		await expect(timeline).toContainText("遮罩验证回复", { timeout: 20_000 });
+
+		// tab 栏「重启」：当前激活 tab 的菜单触发器（role=tab-menu，aria-label=更多操作）
+		const activeTab = window.locator('.session-tab[aria-selected="true"]').first();
+		await activeTab.locator('button[role="tab-menu"]').click();
+		const menu = window.getByRole("menu");
+		await menu.getByText("重启", { exact: true }).click();
+
+		// 激活 runtime 需 spawn mock pi（数百 ms～1s）：会话消息区域遮罩（role=status，仅可见时挂载 role）应显示「正在启动会话…」
+		await expect(
+			window.locator('[role="status"]').filter({ hasText: "正在启动会话…" }),
+		).toBeVisible({ timeout: 10_000 });
+		// 激活完成：遮罩消失（role 被摘除），会话进入 live
+		await expect(
+			window.locator('[role="status"]').filter({ hasText: "正在启动会话…" }),
+		).toHaveCount(0, { timeout: 30_000 });
+	});
 });

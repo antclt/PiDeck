@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { computeModelDisplay, formatModelRef } = loadTsCommonJs(
+const { computeModelDisplay, formatModelRef, resolveComposerLiveModel } = loadTsCommonJs(
   "src/renderer/src/utils/modelPendingDisplay.ts",
 );
 
@@ -39,6 +39,41 @@ test("computeModelDisplay: 有待生效时展示 from→to", () => {
   );
 });
 
+test("resolveComposerLiveModel: live 时优先 runtime state", () => {
+  assertDisplay(
+    resolveComposerLiveModel({
+      state: { provider: "openai", modelId: "old-model", modelName: "Old" },
+      record: { provider: "anthropic", modelId: "new-model" },
+      fallback: { provider: "welcome", modelId: "welcome-model" },
+      isLive: true,
+    }),
+    { provider: "openai", modelId: "old-model", modelName: "Old" },
+  );
+});
+
+test("resolveComposerLiveModel: 非 live 时忽略残留 state，展示 catalog", () => {
+  assertDisplay(
+    resolveComposerLiveModel({
+      state: { provider: "openai", modelId: "old-model", modelName: "Old" },
+      record: { provider: "anthropic", modelId: "new-model" },
+      fallback: { provider: "welcome", modelId: "welcome-model" },
+      isLive: false,
+    }),
+    { provider: "anthropic", modelId: "new-model", modelName: "new-model" },
+  );
+});
+
+test("resolveComposerLiveModel: 非 live 且无 record 时走 fallback", () => {
+  assertDisplay(
+    resolveComposerLiveModel({
+      state: { provider: "openai", modelId: "old-model" },
+      fallback: { provider: "welcome", modelId: "welcome-model", modelName: "Welcome" },
+      isLive: false,
+    }),
+    { provider: "welcome", modelId: "welcome-model", modelName: "Welcome" },
+  );
+});
+
 test("formatModelRef 带 provider", () => {
   assert.equal(
     formatModelRef({ provider: "grok.weishiair.de copy", modelId: "grok-4.6" }),
@@ -63,8 +98,12 @@ test("契约: 运行中优先直接切换模型，后端 busy 时才排到下一
 
   assert.match(area, /modelDisabled=\{composer\.isStarting\}/);
   assert.match(area, /modelPending=\{modelPendingMap\[props\.sessionId\]\}/);
+  assert.match(area, /runtimeLive=\{isLiveRuntimeStatus\(composer\.runtime\?\.status\)\}/);
   assert.match(components, /disabled=\{props\.modelDisabled \?\? props\.disabled\}/);
   assert.match(components, /app\.modelPendingTitle/);
+  assert.match(components, /resolveComposerLiveModel/);
+  assert.match(picker, /resolveComposerLiveModel/);
+  assert.match(picker, /isLiveRuntimeStatus\(runtime\?\.status\)/);
 
   assert.match(picker, /setRuntimeModel/);
   assert.match(picker, /error\.code === "SESSION_RUNTIME_BUSY"/);

@@ -4,9 +4,6 @@
  */
 
 import { app, ipcMain, shell } from "electron";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { ipcChannels } from "../../shared/ipc";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
 import type {
@@ -803,6 +800,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		app.quit();
 	});
 
+	// 与托盘「退出 PiDeck」同语义：先置 isQuitting，再 app.quit()。
+	// 不能复用 appWindowClose——开启 closeToTray 时 win.close() 只 hide，崩溃页再藏起来用户就退不掉。
+	ipcMain.handle(ipcChannels.appQuit, () => {
+		if (isQuitting) isQuitting.value = true;
+		app.quit();
+	});
+
 	// 打开数据目录：userData 目录必然已存在，无需 mkdir；shell.openPath 是 Electron 跨平台 API，
 	// 会自动选择系统文件管理器（Windows 资源管理器 / macOS Finder / Linux xdg-open），
 	// 不手拼平台命令，避免 Windows 路径空格/分隔符问题。
@@ -1245,27 +1249,15 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		return { ...result, provider };
 	});
 	// 安装内置「用量查询自定义」技能模板：从 app resources 复制 SKILL.md 到全局技能目录。
-	// 幂等：内容直接覆盖，重复点击不产生副作用；用户随后可自行编辑该 SKILL.md。
+	// 幂等：内容直接覆盖；启动时也会自动安装（见 index.ts），此处保留手动触发兑底。
 	ipcMain.handle(ipcChannels.configInstallUsageSkill, async () => {
-		try {
-			const root = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
-			const templatePath = join(root, "skills", "usage-probe", "SKILL.md");
-			const content = await readFile(templatePath, "utf8");
-			const targetDir = join(homedir(), ".pi", "agent", "skills", "usage-probe");
-			await mkdir(targetDir, { recursive: true });
-			const targetPath = join(targetDir, "SKILL.md");
-			await writeFile(targetPath, content, "utf8");
-			void appLogger.info("skill", "Usage probe skill template installed", { path: targetPath });
-			return { success: true, path: targetPath };
-		} catch (error) {
-			void appLogger.warn("skill", "Failed to install usage probe skill template", {
-				error: error instanceof Error ? error.message : String(error),
-			});
-			return {
-				success: false,
-				error: error instanceof Error ? error.message : String(error),
-			};
+		const result = await skillManager.installUsageProbeTemplate();
+		if (result.success) {
+			void appLogger.info("skill", "Usage probe skill template installed", { path: result.path });
+			return { success: true, path: result.path };
 		}
+		void appLogger.warn("skill", "Failed to install usage probe skill template", { error: result.error });
+		return { success: false, error: result.error };
 	});
 
 	// ── 开发者控制台 ───────────────────────────────────────────────

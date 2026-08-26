@@ -109,8 +109,12 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     setLoadState({ sessionId, state: { status: "ready" } });
   }, [cacheMessages, setLoadState, showOverlay]);
 
-  /** live 运行时才先停：error/closed 终态进程已死，先 stop 会误报（且产品上无需停）。 */
+  /** live 运行时（starting/idle/running）才先停：error/closed 终态进程已死，先 stop 会误报（且产品上无需停）。 */
   const stopIfRunning = useCallback(async (sessionId: string) => {
+    // 按 runtime status 而非 target 判定：主进程 requireStoppedForFileMutation 的 getTarget
+    // 对 error/closed 有解绑副作用（返回 undefined），即终态不 BUSY、无需停。渲染层
+    // getRuntimeTargetForSession 对 error/closed 仍保留 agentId（有 target），若用它判定
+    // 会对已死进程误发 stop，并让删除文案误显「先停止 Agent」（见 after-crash e2e 回归）。
     if (!depsRef.current.isSessionRuntimeLive(sessionId)) return;
     const target = depsRef.current.getRuntimeTargetForSession(sessionId);
     if (!target) return;
@@ -124,6 +128,8 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     onConfirmed: () => Promise<void>,
   ) => {
     const latest = depsRef.current;
+    // live 运行时（starting/idle/running）才需先停：error/closed 终态进程已死，直接改文件即可。
+    // 主进程 getTarget 对 error/closed 有解绑副作用（返回 undefined）→ 不会 BUSY，无需停。
     const live = latest.isSessionRuntimeLive(sessionId);
     if (!live) {
       void onConfirmed();
@@ -204,7 +210,10 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     }
     // kind 为 delete 时策略只会给出 unsupported-anonymous 或 catalog，这里收窄类型
     if (path.path !== "catalog") return;
-    const live = path.live;
+    // 文案与 stopIfRunning 同口径：按 runtime status 判定是否需先停。error/closed 终态进程
+    // 已死（主进程 getTarget 对终态有解绑副作用，返回 undefined 不 BUSY），直接删除即可；
+    // live（starting/idle/running）才提示「先停止 Agent」。
+    const live = latest.isSessionRuntimeLive(sessionId);
     latest.showConfirm({
       title: t("message.deleteTitle"),
       message: live ? t("message.historyStopToDeleteBody") : t("message.deleteReloadPrompt"),
