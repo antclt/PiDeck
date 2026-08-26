@@ -145,7 +145,11 @@ test("contextSegments prefers host breakdown and falls back to estimate split", 
 
 test("meter panel shows the localized reading and ~used/window figures", () => {
   const source = meterSource();
-  assert.match(source, /w-\[264px\]/);
+  // 面板 320px：style.width 与定位回退共用 PANEL_WIDTH，避免首帧 offsetWidth=0 时按旧 264 错位
+  assert.match(source, /const PANEL_WIDTH = 320/);
+  assert.match(source, /width: PANEL_WIDTH/);
+  assert.match(source, /panel\.offsetWidth \|\| PANEL_WIDTH/);
+  assert.doesNotMatch(source, /w-\[264px\]/);
   assert.match(source, /t\("sessionContext\.used", \{ percent: formatPercent\(percent\) \}\)/);
   assert.match(source, /formatTokens\(context\.usedTokens!\)\} \/ \$\{formatTokens\(context\.contextWindow!\)\}/);
   // 面板占用条：4px 圆角条，宽度按 percent
@@ -175,6 +179,26 @@ test("panel adds dsh-style segments legend when message estimate exists", () => 
   assert.match(source, /size-2 flex-none rounded-\[2px\]/);
   assert.match(source, /~\{formatTokens\(segments\.conversation\)\}/);
   assert.match(source, /~\{formatTokens\(segments\.system\)\}/);
+});
+
+test("input/output token row drops arrows and keeps values on one line", () => {
+  const surface = readFileSync("src/renderer/src/components/session/SurfaceComponents.tsx", "utf8");
+  const meter = meterSource();
+  // 标签已是「输入/输出 tokens」，数值不再套 ↑/↓（箭头加长字符串，且 `/ ↓` 会在窄面板折行）
+  assert.match(
+    surface,
+    /label: t\("ctx\.detail\.tokens"\),\s*value: `\$\{formatCompact\(state\.inputTokens\)\} \/ \$\{formatCompact\(state\.outputTokens\)\}`,/,
+  );
+  assert.doesNotMatch(surface, /↑ \$\{formatCompact\(state\.inputTokens\)\} \/ ↓/);
+  // 详情数值禁止折行：tooltip 与上下文面板共用同一 builder 文案，窄宽下必须 nowrap
+  assert.match(
+    surface,
+    /min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground/,
+  );
+  assert.match(
+    meter,
+    /min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground/,
+  );
 });
 
 test("panel reuses the SessionStatus detail builder and keeps compact action", () => {

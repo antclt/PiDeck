@@ -261,9 +261,10 @@ export function buildSessionStatusDetail(
 		});
 	}
 	if (state.inputTokens != null || state.outputTokens != null) {
+		// 标签已是「输入/输出」，不再套 ↑/↓：箭头加长字符串，且 `/ ↓` 会在窄面板里被折成两行。
 		detailRows.push({
 			label: t("ctx.detail.tokens"),
-			value: `↑ ${formatCompact(state.inputTokens)} / ↓ ${formatCompact(state.outputTokens)}`,
+			value: `${formatCompact(state.inputTokens)} / ${formatCompact(state.outputTokens)}`,
 		});
 	}
 	if (state.cacheRead != null || state.cacheWrite != null) {
@@ -411,7 +412,7 @@ export function SessionStatus(props: {
 								className={`flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}
 							>
 								<span className="shrink-0 text-muted-foreground">{row.label}</span>
-								<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
+								<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 							</div>
 						))}
 					</div>
@@ -423,7 +424,7 @@ export function SessionStatus(props: {
 							{replyPerfRows.map((row) => (
 								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>
@@ -436,7 +437,7 @@ export function SessionStatus(props: {
 							{sessionStatRows.map((row) => (
 								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>

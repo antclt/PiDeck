@@ -1091,6 +1091,7 @@ const api = {
 		onOpenInBrowser: (callback: (url: string) => void) =>
 			subscribe(ipcChannels.appOpenInBrowser, callback),
 		restart: () => ipcRenderer.invoke(ipcChannels.appRestart) as Promise<void>,
+		quit: () => ipcRenderer.invoke(ipcChannels.appQuit) as Promise<void>,
 		// 打开 PiDeck 数据目录（配置/会话/诊断），文件管理器由主进程按平台选择
 		openDataDir: () =>
 			ipcRenderer.invoke(

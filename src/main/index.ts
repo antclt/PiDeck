@@ -3338,7 +3338,7 @@ app.whenReady().then(async () => {
 			if (entry.backend === "dsh" && entry.dshSessionId) {
 				await sessionCatalog.rememberDismissedDshSession(entry.dshSessionId);
 			}
-			await sessionCatalog.remove(sessionId);
+			await sessionCatalog.removeWithDescendants(sessionId);
 			return true;
 		},
 		copySessionRecord: (sessionId) => copyCatalogSession(sessionId),

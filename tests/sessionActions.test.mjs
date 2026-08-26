@@ -285,3 +285,30 @@ test("history drawer copies the Catalog record by stable Session ID", () => {
     /runCopySession\(\s*session\.filePath/,
   );
 });
+
+// 归档/删除必须先关 Tab（closeTab 依赖 currentSessionId 仍指向被归档会话才能切到邻居），
+// 再清 session/composer；并且要把 parentSessionPath / sibling-dir 子会话一起清掉。
+// 否则聚焦会话被 removeSessionState 置空后只剩 ProjectEmptyState 的残留聊天框，
+// 子 agent 还会以孤儿顶层行重新打开。
+test("archive and delete dismiss the session tree and close tabs before dropping state", () => {
+  assert.match(source, /closeTabs: \(sessionIds: string\[\]\) => void/);
+  assert.match(source, /collectSessionSubtreeIds/);
+  assert.match(source, /dismissSessionTree/);
+
+  const dismiss = syncFunctionBlock("dismissSessionTree", "deleteHistorySession");
+  assertInOrder(
+    dismiss,
+    [
+      "closeTabs(ids)",
+      "removeSessionState",
+      "removeSessionComposerState",
+    ],
+    "dismissSessionTree must close tabs before dropping session state",
+  );
+
+  const remove = functionBlock("deleteHistorySession", "archiveHistorySession");
+  const archive = functionBlock("archiveHistorySession", "unarchiveHistorySession");
+  for (const [name, block] of [["delete", remove], ["archive", archive]]) {
+    assert.match(block, /dismissSessionTree\(/, `${name} should dismiss the whole session tree`);
+  }
+});

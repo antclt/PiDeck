@@ -789,6 +789,7 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			openExternal: async () => undefined,
 			restart: async () => undefined,
+			quit: async () => undefined,
 			openDataDir: async () => ({ ok: true }),
 			rendererLog: async (level, scope, message, detail) => {
 				console[level === "error" ? "error" : level === "warn" ? "warn" : "debug"](

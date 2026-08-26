@@ -33,6 +33,7 @@ import {
 } from "./ComposerWidgetLayout";
 import type { GitBranchInfo } from "../../../../shared/types";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
+import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 
 export type ComposerAreaProps = {
   sessionId: string;
@@ -377,6 +378,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
               {/* 运行中仍可切换思考强度（下一轮生效）和模型（本轮结束后套上）；仅启动中禁用 */}
               <ComposerBottomBar
                 state={composer.runtime?.state}
+                runtimeLive={isLiveRuntimeStatus(composer.runtime?.status)}
                 disabled={composer.isBusy || composer.isStarting}
                 thinkingDisabled={composer.isStarting}
                 modelDisabled={composer.isStarting}

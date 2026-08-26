@@ -51,7 +51,8 @@ function DayCard(props: { label: string; value: React.ReactNode; sub?: string })
 function ProviderBar(props: {
   providers: Array<{ provider: string; tokens: number; cost: number }>;
 }) {
-  const { providers } = props;
+  // 0 tokens 的供应商不占色块；去掉 1% 保底，避免空用量也被画出来。
+  const providers = props.providers.filter((p) => p.tokens > 0);
   const total = providers.reduce((acc, p) => acc + p.tokens, 0);
   if (total <= 0) return null;
   return (
@@ -63,7 +64,7 @@ function ProviderBar(props: {
         <div
           key={p.provider}
           style={{
-            width: `${Math.max(1, (p.tokens / total) * 100)}%`,
+            width: `${(p.tokens / total) * 100}%`,
             backgroundColor: colorForProvider(p.provider),
           }}
           title={`${p.provider} · ${formatTokens(p.tokens)} · ${formatCost(p.cost)}`}
@@ -108,6 +109,8 @@ export function UsageDayDetail(props: { rows: UsageDayRow[]; costKnown: boolean 
   const isToday = selected === today;
 
   const row = useMemo(() => rows.find((r) => r.day === selected), [rows, selected]);
+  // 0 tokens 的供应商不进堆叠条/图例，避免空色块占位。
+  const visibleProviders = row?.byProvider.filter((p) => p.tokens > 0) ?? [];
 
   return (
     <SettingsSection
@@ -172,10 +175,10 @@ export function UsageDayDetail(props: { rows: UsageDayRow[]; costKnown: boolean 
             />
           </div>
 
-          {row.byProvider.length > 1 && (
+          {visibleProviders.length > 1 && (
             <>
-              <ProviderBar providers={row.byProvider} />
-              <ProviderLegend providers={row.byProvider} costKnown={costKnown} />
+              <ProviderBar providers={visibleProviders} />
+              <ProviderLegend providers={visibleProviders} costKnown={costKnown} />
             </>
           )}
 

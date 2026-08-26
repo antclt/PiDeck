@@ -800,6 +800,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		app.quit();
 	});
 
+	// 与托盘「退出 PiDeck」同语义：先置 isQuitting，再 app.quit()。
+	// 不能复用 appWindowClose——开启 closeToTray 时 win.close() 只 hide，崩溃页再藏起来用户就退不掉。
+	ipcMain.handle(ipcChannels.appQuit, () => {
+		if (isQuitting) isQuitting.value = true;
+		app.quit();
+	});
+
 	// 打开数据目录：userData 目录必然已存在，无需 mkdir；shell.openPath 是 Electron 跨平台 API，
 	// 会自动选择系统文件管理器（Windows 资源管理器 / macOS Finder / Linux xdg-open），
 	// 不手拼平台命令，避免 Windows 路径空格/分隔符问题。

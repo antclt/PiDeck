@@ -44,6 +44,11 @@ const COLOR_SYSTEM_TOOLS = "var(--color-context-system-tools, rgb(167, 139, 250)
 const COLOR_SYSTEM = "var(--color-context-system, #94a3b8)";
 const COLOR_TOOLS = "var(--color-context-tools, rgb(167, 139, 250))";
 
+/** 弹出面板宽度：原 264px 对「输入/输出 tokens / 命中率快照」过窄会折行；
+ *  320 仍贴 composer 不挡主栏。style.width 与定位回退必须用同一常量，
+ *  避免首帧 offsetWidth=0 时按旧宽度错位。 */
+const PANEL_WIDTH = 320;
+
 /** 面板内 provider 用量查询缓存：按 provider 去抖，60s 内不重复请求。 */
 const USAGE_CACHE_TTL_MS = 60_000;
 /** 面板内 provider 用量查询的进程级缓存（模块内一处，避免每次打开都弹请求）。 */
@@ -241,7 +246,7 @@ export function SessionContextMeter(props: {
 		const panel = panelRef.current;
 		if (!trigger || !panel) return;
 		const rect = trigger.getBoundingClientRect();
-		const panelWidth = panel.offsetWidth || 264;
+		const panelWidth = panel.offsetWidth || PANEL_WIDTH;
 		const panelHeight = panel.offsetHeight;
 		const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
 		let top = rect.top - 8 - panelHeight;
@@ -368,10 +373,11 @@ export function SessionContextMeter(props: {
 						ref={panelRef}
 						role="dialog"
 						aria-label={reading}
-						className="fixed z-[100] w-[264px] cursor-default rounded-xl border border-border bg-popover p-3 text-xs leading-5 text-text-secondary shadow-lg"
+						className="fixed z-[100] cursor-default rounded-xl border border-border bg-popover p-3 text-xs leading-5 text-text-secondary shadow-lg"
 						style={{
 							left: placement?.left,
 							top: placement?.top,
+							width: PANEL_WIDTH,
 							visibility: placement === null ? "hidden" : "visible",
 						}}
 					>
@@ -491,7 +497,7 @@ export function SessionContextMeter(props: {
 									className={`flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}
 								>
 									<span className="shrink-0 text-text-secondary">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>
@@ -507,7 +513,7 @@ export function SessionContextMeter(props: {
 									className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5"
 								>
 									<span className="shrink-0 text-text-secondary">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>
@@ -523,7 +529,7 @@ export function SessionContextMeter(props: {
 									className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5"
 								>
 									<span className="shrink-0 text-text-secondary">{row.label}</span>
-									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
+									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 								</div>
 							))}
 						</div>

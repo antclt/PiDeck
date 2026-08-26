@@ -201,6 +201,37 @@ function isInteractiveUiMethod(method: unknown): boolean {
 		method === "batch_ask";
 }
 
+/** catalog 里会在激活后被用户改写的偏好；lastApplied 用这份快照判断要不要再 setModel。 */
+type AppliedSessionPreferences = {
+	model?: { provider: string; modelId: string };
+	thinkingLevel?: string;
+	permissionPreset?: string;
+};
+
+function snapshotPreferences(entry: SessionCatalogEntry): AppliedSessionPreferences {
+	return {
+		...(entry.model
+			? { model: { provider: entry.model.provider, modelId: entry.model.modelId } }
+			: {}),
+		...(entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
+		...(entry.permissionPreset ? { permissionPreset: entry.permissionPreset } : {}),
+	};
+}
+
+function sameAppliedPreferences(
+	a: AppliedSessionPreferences | undefined,
+	b: AppliedSessionPreferences,
+): boolean {
+	if (!a) return false;
+	const aModel = a.model;
+	const bModel = b.model;
+	if (Boolean(aModel) !== Boolean(bModel)) return false;
+	if (aModel && bModel && (aModel.provider !== bModel.provider || aModel.modelId !== bModel.modelId)) {
+		return false;
+	}
+	return a.thinkingLevel === b.thinkingLevel && a.permissionPreset === b.permissionPreset;
+}
+
 export class SessionRuntimeCoordinator {
 	private readonly activationBySession = new Map<string, Promise<AgentTab>>();
 	private readonly deliveryByRequest = new Map<string, DeliveryCacheEntry>();
@@ -218,6 +249,16 @@ export class SessionRuntimeCoordinator {
 	private focusedSessionId: string | undefined = undefined;
 	/** 正在删除的会话：先解绑再异步停 agent，禁止激活/bind 把运行时写回 catalog。 */
 	private readonly deletingSessions = new Set<string>();
+	/**
+	 * 上次成功应用到该会话当前 agent 的偏好。catalog.get 返回 clone，activate 开头的
+	 * 快照会过期；预热绑定后用户仍可改模型。用这份记录跳过「catalog 没变」的重复
+	 * setModel，保住并发 send / 历史 attach / 懒启动 publish 的 setModel==1 约束。
+	 * agentId 必须纳入：新进程（restart）即使 catalog 没变也要再应用。
+	 */
+	private readonly lastAppliedBySession = new Map<string, {
+		agentId: string;
+		preferences: AppliedSessionPreferences;
+	}>();
 
 	constructor(
 		private readonly catalog: SessionCatalogGateway,
@@ -1002,6 +1043,12 @@ export class SessionRuntimeCoordinator {
 		if (sessionId) {
 			this.agentIdBySession.delete(sessionId);
 			this.clearPendingUiRequests(sessionId, agentId);
+			// restart 会先 applyLatestPreferences(新 agent) 再 unbind 旧 agent；
+			// 只清「属于这个旧进程」的记录，别把刚写上的新 agent 快照删掉。
+			const last = this.lastAppliedBySession.get(sessionId);
+			if (last?.agentId === agentId) {
+				this.lastAppliedBySession.delete(sessionId);
+			}
 		}
 		this.sessionIdByAgent.delete(agentId);
 	}
@@ -1028,7 +1075,8 @@ export class SessionRuntimeCoordinator {
 				throw new Error(`Failed to restart session runtime (${tab.status})`);
 			}
 			try {
-				await this.applyPreferences(entry, tab.id);
+				// 必须重读 catalog：开头的 entry 是 clone，重启等待期间用户可能已改模型。
+				await this.applyLatestPreferences(sessionId, tab.id);
 			} catch (error) {
 				await this.agents.stop(tab.id).catch(() => undefined);
 				this.unbindAgentUnchecked(agentId);
@@ -1185,7 +1233,21 @@ export class SessionRuntimeCoordinator {
 		const mappedAgentId = this.getAgentId(sessionId);
 		if (mappedAgentId) {
 			const mappedTab = this.agents.list().find((candidate) => candidate.id === mappedAgentId);
-			if (mappedTab) return this.waitUntilReady(mappedTab);
+			if (mappedTab) {
+				const ready = await this.waitUntilReady(mappedTab);
+				// 预热已经 bind 后，用户仍可能改 catalog 模型再点发送。旧逻辑直接
+				// waitUntilReady 返回，跳过 applyPreferences，发送就会带着旧模型走。
+				try {
+					const applied = await this.applyLatestPreferences(sessionId, ready.id);
+					if (applied) {
+						await this.agents.publishRuntimeState(ready.id).catch(() => undefined);
+					}
+				} catch (error) {
+					// 进程已在跑：应用失败只拒绝本次激活/发送，不停掉现有 runtime。
+					throw new Error(`Failed to apply session preferences: ${errorMessage(error)}`);
+				}
+				return ready;
+			}
 		}
 
 		let tab = entry.filePath ? this.findAgentBySessionPath(entry) : undefined;
@@ -1224,7 +1286,9 @@ export class SessionRuntimeCoordinator {
 		}
 
 		try {
-			await this.applyPreferences(entry, tab.id);
+			// 用最新 catalog，不用开头的 entry clone——create/waitUntilReady 期间
+			// 用户改模型必须在第一次 setModel 就生效。
+			await this.applyLatestPreferences(sessionId, tab.id);
 		} catch (error) {
 			if (created) {
 				// 激活失败兜底：DSH 的 host 会话已在 $DSH_HOME 创建，先落 dshSessionId
@@ -1309,6 +1373,24 @@ export class SessionRuntimeCoordinator {
 				importedSourceId: tab.importedSourceId,
 			}) === target
 		));
+	}
+
+	/**
+	 * 重读 catalog 再应用偏好。activate 开头的 entry 是 clone，等待期间用户改模型
+	 * 不能再用那份快照。lastApplied 按 agentId+prefs 去重，避免每次 send 都 setModel。
+	 * @returns 是否真正调用了 applyPreferences（绑定路径据此决定要不要再 publish）。
+	 */
+	private async applyLatestPreferences(sessionId: string, agentId: string): Promise<boolean> {
+		const latest = this.catalog.get(sessionId);
+		if (!latest) throw new Error(`Session not found: ${sessionId}`);
+		const preferences = snapshotPreferences(latest);
+		const last = this.lastAppliedBySession.get(sessionId);
+		if (last?.agentId === agentId && sameAppliedPreferences(last.preferences, preferences)) {
+			return false;
+		}
+		await this.applyPreferences(latest, agentId);
+		this.lastAppliedBySession.set(sessionId, { agentId, preferences });
+		return true;
 	}
 
 	private async applyPreferences(

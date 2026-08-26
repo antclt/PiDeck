@@ -281,6 +281,8 @@ export const ipcChannels = {
 	appOpenExternal: "app:open-external",
 	appOpenInBrowser: "app:open-in-browser",
 	appRestart: "app:restart",
+	/** 真正退出应用（置 isQuitting 后 app.quit）。异常页不能走 window-close：closeToTray 会把关窗吞成隐藏。 */
+	appQuit: "app:quit",
 	/** 在系统文件管理器中打开 PiDeck 数据目录（跨平台：explorer / Finder / xdg-open） */
 	appOpenDataDir: "app:open-data-dir",
 	/** 进程监控：拉取 Electron 各进程 + pi agent 子进程的内存/CPU 快照 */

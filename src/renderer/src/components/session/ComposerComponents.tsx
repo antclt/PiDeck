@@ -59,8 +59,8 @@ import {
 	SelectItem,
 	SelectTrigger,
 } from "../ui-shadcn/select";
-import { computeModelDisplay, formatModelRef, type ModelPending } from "../../utils/modelPendingDisplay";
-import { computeThinkingDisplay, type ThinkingLevelPending } from "../../utils/thinkingDisplay";
+import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, type ModelPending } from "../../utils/modelPendingDisplay";
+import { computeThinkingDisplay, resolveComposerThinkingLevel, type ThinkingLevelPending } from "../../utils/thinkingDisplay";
 import {
   readWelcomeModelPreference,
   readWelcomeThinkingPreference,
@@ -330,6 +330,8 @@ export function ComposerBottomBar(props: {
 	onSwitchBranch?: (branch: string) => void;
 	/** Draft sessions do not have a runtime yet, so retain their persisted settings in the bar. */
 	record?: Pick<SessionRecord, "model" | "thinkingLevel">;
+	/** 当前绑定 runtime 仍 live（starting/idle/running）时，底栏才优先展示 state。 */
+	runtimeLive?: boolean;
 	/** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期展示默认值用，
 	 *  不写入记录（激活后 runtime state 覆盖）。 */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
@@ -378,10 +380,15 @@ export function ComposerBottomBar(props: {
 		thinking: readWelcomeThinkingPreference()?.thinkingLevel,
 	};
 	const isDsh = props.backend === "dsh";
+	const runtimeLive = Boolean(props.runtimeLive);
 	// DSH 草稿：记录未填默认时用部署默认（settings.yaml agent-default-model）兜底展示。
-	const currentThinkingLevel = props.state?.thinkingLevel
-		?? props.record?.thinkingLevel
-		?? (isDsh ? props.defaultThinkingLevel : welcomePreference?.thinking);
+	// 非 live runtime 的残留 state 不能盖住 catalog：Agent 未启动时改模型/思考档位要立刻反映在底栏。
+	const currentThinkingLevel = resolveComposerThinkingLevel({
+		state: props.state?.thinkingLevel,
+		record: props.record?.thinkingLevel,
+		fallback: isDsh ? props.defaultThinkingLevel : welcomePreference?.thinking,
+		isLive: runtimeLive,
+	});
 	// 有待生效切换时展示 from→to（新档位尚未被任何生成使用），否则展示当前档位
 	const thinkingDisplay = computeThinkingDisplay(currentThinkingLevel, props.thinkingPending);
 	const thinkingLevelLabel = (level: string) => {
@@ -410,11 +417,12 @@ export function ComposerBottomBar(props: {
 		disabled: props.disabled,
 		onChange: props.onChangeMode,
 	});
-	const liveModel = {
-		provider: props.state?.provider ?? props.record?.model?.provider ?? (isDsh ? props.defaultModel?.provider : welcomePreference?.model?.provider) ?? "",
-		modelId: props.state?.modelId ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelId : welcomePreference?.model?.modelId) ?? "",
-		modelName: props.state?.modelName ?? props.record?.model?.modelId ?? (isDsh ? props.defaultModel?.modelName : undefined),
-	};
+	const liveModel = resolveComposerLiveModel({
+		state: props.state,
+		record: props.record?.model,
+		fallback: isDsh ? props.defaultModel : welcomePreference?.model,
+		isLive: runtimeLive,
+	});
 	const modelDisplay = computeModelDisplay(
 		liveModel.modelId ? liveModel : undefined,
 		props.modelPending,

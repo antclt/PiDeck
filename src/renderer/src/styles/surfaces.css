@@ -3887,6 +3887,7 @@ div.fixed.inset-0.z-50 {
 
 .app-error-boundary-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
   margin-top: 26px;

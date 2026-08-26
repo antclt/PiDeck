@@ -180,3 +180,15 @@ export function serializeBatchAnswers(
 	});
 	return JSON.stringify({ answers: result });
 }
+
+/**
+ * 页面上是否有未折叠的划选文本。
+ * 选项 / 允许 / 拒绝是 `<button>`：划选结束后 mouseup 落在按钮上会冒充 click，误答提问。
+ * 提交前若检测到划选则跳过，让用户先完成复制。
+ * 不复用 messageSelection.ts：那是消息树多选，不是 window 划选探测。
+ * input/textarea 内的选区走 selectionStart，不会进入 window.getSelection，故键盘 Enter 提交不受影响。
+ */
+export function hasTextSelection(): boolean {
+	if (typeof window === "undefined") return false;
+	return Boolean(window.getSelection()?.toString().trim());
+}

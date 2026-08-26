@@ -16,6 +16,22 @@ test("AppErrorBoundary renders a system-consistent error card", () => {
   assert.match(boundary, /renderErrorStack/);
   assert.match(boundary, /handleReset/);
   assert.match(boundary, /handleReload/);
+  // 全局边界会整页替换 AppHeader：卡片必须提供真正退出，且不要再叠一套 min/max/pin 挂件。
+  // 不能走 closeWindow——closeToTray 会把关窗吞成隐藏，崩溃页再藏起来就退不掉。
+  assert.match(boundary, /handleQuit/);
+  assert.match(boundary, /app\.quit\(\)/);
+  assert.match(boundary, /t\("app\.quit"\)/);
+  assert.doesNotMatch(boundary, /app\.closeWindow\(/);
+  assert.doesNotMatch(boundary, /handleClose/);
+  assert.doesNotMatch(boundary, /t\("app\.windowClose"\)/);
+  assert.doesNotMatch(boundary, /AppHeader/);
+  assert.doesNotMatch(boundary, /ErrorBoundaryWindowChrome/);
+  assert.doesNotMatch(boundary, /minimizeWindow/);
+  assert.doesNotMatch(boundary, /toggleMaximizeWindow/);
+  assert.doesNotMatch(css, /app-error-boundary-chrome/);
+  assert.doesNotMatch(css, /\.app-error-boundary \.window-controls/);
+  assert.match(css, /\.app-error-boundary-actions \{[\s\S]*?flex-wrap/);
+
 
   // 与系统一致的卡片语言：token 颜色 + shadcn 圆角/阴影；状态胶囊用 danger 语义色
   assert.match(css, /\.app-error-boundary-card \{/);

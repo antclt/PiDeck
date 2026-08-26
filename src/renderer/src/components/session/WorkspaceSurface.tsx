@@ -1,4 +1,5 @@
 import { cn } from "../../lib/utils";
+import { useAtom } from "jotai";
 import {
 	useCallback,
 	useEffect,
@@ -16,6 +17,7 @@ import {
 	FileText,
 	Folder,
 	FolderOpen,
+	FolderTree,
 	RefreshCw,
 	X,
 } from "lucide-react";
@@ -27,6 +29,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui-shadc
 import { FileSortControl } from "./FileSortControl";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { sortFileNodes, FILE_SORT_OPTIONS, FILE_SORT_DEFAULT_DIRECTION, type FileSortMode, type FileSortDirection } from "../../utils/fileTreeSort";
+import { compactMiddlePackages } from "../../utils/fileTreeCompact";
+import { compactMiddlePackagesAtom } from "../../atoms/app-ui-atoms";
 import { writeFileNodeDragPayload } from "../app/AppUtils";
 import { t } from "../../i18n";
 import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
@@ -189,10 +193,17 @@ function FilesPanel(props: {
 	useEffect(() => {
 		localStorage.setItem(FILE_SORT_DIR_KEY, sortDirection);
 	}, [sortDirection]);
+	// 折叠中间包开关：IDEA 式把单子目录链合并成点分节点，深包结构一行展示。
+	const [compactPackages, setCompactPackages] = useAtom(compactMiddlePackagesAtom);
 	// 排序是纯展示层变换：不改变 props.files 引用，只影响渲染次序
 	const sortedFiles = useMemo(
 		() => sortFileNodes(props.files, sortMode, sortDirection),
 		[props.files, sortMode, sortDirection],
+	);
+	// 折叠中间包是排序之后的另一层纯展示变换：开启时把单子目录链压成一行。
+	const displayFiles = useMemo(
+		() => (compactPackages ? compactMiddlePackages(sortedFiles) : sortedFiles),
+		[sortedFiles, compactPackages],
 	);
 	/** 拖入高亮的目标目录路径（null = 拖在面板空白区域） */
 	const [dragOverDir, setDragOverDir] = useState<string | null>(null);
@@ -257,6 +268,24 @@ function FilesPanel(props: {
 						onSortModeChange={setSortMode}
 						onToggleDirection={() => setSortDirection((d) => (d === "asc" ? "desc" : "asc"))}
 					/>
+					{/* 折叠中间包：开启时深包目录链合并成一行（默认开），与排序互不影响 */}
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						className={cn(
+							"icon-only inline-grid size-6 place-items-center rounded-md",
+							compactPackages
+								? "bg-accent text-foreground"
+								: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+						)}
+						onClick={() => setCompactPackages((v) => !v)}
+						title={t("drawer.compactPackages")}
+						aria-label={t("drawer.compactPackages")}
+						aria-pressed={compactPackages}
+					>
+						<FolderTree size={13} aria-hidden="true" />
+					</Button>
 					{props.onOpenFolder && (
 						<Button type="button" variant="ghost" size="icon-sm" className="icon-only inline-grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground" onClick={props.onOpenFolder} title={t("drawer.openFolder")} aria-label={t("drawer.openFolder")}>
 							<Folder size={13} />
@@ -290,7 +319,7 @@ function FilesPanel(props: {
 					)}
 				</div>
 			</div>
-			{sortedFiles.map((node) => (
+			{displayFiles.map((node) => (
 				<FileNode
 					key={node.path}
 					node={node}

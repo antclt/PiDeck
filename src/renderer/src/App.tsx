@@ -31,6 +31,7 @@ import {
 } from "./desktopApi";
 import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
+import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"]);
 const ConfigModal = lazy(() => import("./ConfigModal").then((m) => ({ default: m.ConfigModal })));
@@ -90,6 +91,7 @@ import {
   sessionIdByRuntimeAgentIdAtomFamily,
   sessionRuntimeBySessionIdAtomFamily,
   sidebarExpandedProjectIdsAtom,
+  compactMiddlePackagesAtom,
   sessionCatalogLoadStateAtom,
   sessionMessagesCacheAtom,
   sessionSummariesByProjectIdAtomFamily,
@@ -272,6 +274,7 @@ export function App() {
   const agentsRef = useRef<AgentTab[]>(agents);
   agentsRef.current = agents;
   const expandedProjects = useAtomValue(sidebarExpandedProjectIdsAtom);
+  const compactMiddlePackagesEnabled = useAtomValue(compactMiddlePackagesAtom);
 
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const [promptTemplateList] = useState<
@@ -1320,6 +1323,7 @@ export function App() {
     exportSidebarSession: runExportSidebarSession,
     createSessionDraft: runCreateSessionDraft,
     createAnonymousSession: runCreateAnonymousSession,
+    dismissSessionTree,
   } = useSessionActions({
     openSessionRequestRef,
     creatingSessionDraftRef,
@@ -1333,6 +1337,7 @@ export function App() {
     upsertSession,
     removeSessionState,
     removeSessionComposerState,
+    closeTabs: workspaceChrome.closeTabs,
     refreshProjectSessions,
     api,
     showToast,
@@ -2614,6 +2619,43 @@ export function App() {
     [activeProjectId, showToast],
   );
 
+  /**
+   * 折叠中间包模式下的「自动下钻」：展开一个目录时，若它是一条
+   * 「单子目录且无文件」的链（Java/Maven、NestJS 等深包结构），
+   * 一次把它加载到链尾，让折叠后的点分节点直接展开到真实内容，
+   * 避免用户逐层点 11 次。
+   */
+  async function drillCompactChain(projectId: string, startPath: string) {
+    let current = startPath;
+    const chain = new Set<string>([startPath]);
+    for (let i = 0; i < FILE_TREE_ABSOLUTE_MAX_DEPTH; i++) {
+      let children: FileTreeNode[];
+      try {
+        children = await api.files.list(projectId, { maxDepth: 0, directory: current });
+      } catch {
+        // 超大目录 / 权限问题：停止下钻，保留已加载部分，避免整条链卡死。
+        break;
+      }
+      if (activeProjectIdRef.current !== projectId) return;
+      setFiles((tree) => mergeFileTreeChildren(tree, current, children));
+      // 恰 1 个子目录且无文件 → 继续沿链下钻，并把该子目录也标记展开。
+      if (children.length === 1 && children[0].type === "directory") {
+        current = children[0].path;
+        chain.add(current);
+        continue;
+      }
+      break;
+    }
+    // 整条链（含链尾）一次性并入展开集合：折叠模式下只有链尾 path 可见，
+    // 但关闭折叠后整条链仍需保持展开；持久化保证重新打开项目能重建。
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      for (const p of chain) next.add(p);
+      if (activeProjectIdRef.current === projectId) saveExpandedDirs(projectId, next);
+      return next;
+    });
+  }
+
   function toggleDirectory(path: string) {
     // 文件树默认折叠,只有用户显式展开目录才显示子项,避免大仓库一打开就产生视觉噪音。
     let expanding = false;
@@ -2630,9 +2672,14 @@ export function App() {
     });
     // 首次展开时按需拉这一层；收起或已有 children 只改展开态，避免重复 IPC。
     if (!expanding || !activeProjectId) return;
+    const projectId = activeProjectId;
+    if (compactMiddlePackagesEnabled) {
+      // 折叠模式下沿单子目录链自动下钻，一次展开整条包链
+      void drillCompactChain(projectId, path);
+      return;
+    }
     setFiles((current) => {
       if (findLoadedDirectory(current, path)) return current;
-      const projectId = activeProjectId;
       void api.files
         .list(projectId, { maxDepth: 0, directory: path })
         .then((children) => {
@@ -2666,8 +2713,8 @@ export function App() {
       showToast(reason || t("app.sessionDeleteFailed"), 5000, "error");
       return;
     }
-    removeSessionState(session.id);
-    removeSessionComposerState(session.id);
+    // 先关 Tab 再清状态，并带走 sibling-dir / parentSessionPath 子会话，避免空态 Composer 残留。
+    dismissSessionTree(session, projectId);
     showToast(t("app.sessionDeleted"), 2200);
     await refreshProjectSessions(projectId);
   }
@@ -2675,8 +2722,7 @@ export function App() {
   /** 归档会话：从列表移除但不销毁文件；toast 按后端告知恢复入口（pi 走会话管理，DSH 走配置页归档区） */
   async function archiveSidebarSession(projectId: string, session: SessionSummary) {
     await api.sessions.archiveRecord(session.id);
-    removeSessionState(session.id);
-    removeSessionComposerState(session.id);
+    dismissSessionTree(session, projectId);
     showToast(archivedSessionToastMessage(session), ARCHIVED_SESSION_TOAST_MS);
     await refreshProjectSessions(projectId);
   }

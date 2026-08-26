@@ -1,7 +1,7 @@
 import { ShieldAlert } from "lucide-react";
 import type { AgentUiRequest } from "../../../../shared/types";
 import { t, type TranslationKey } from "../../i18n";
-import { parseSecurityConfirmTitle } from "../../utils/askUi";
+import { hasTextSelection, parseSecurityConfirmTitle } from "../../utils/askUi";
 import { Button } from "../ui-shadcn/button";
 import { ApprovalCard } from "../ui-shadcn/approval-card";
 
@@ -99,7 +99,11 @@ export function SecurityConfirmCard(props: {
 						className="h-8 px-3"
 						disabled={props.responding}
 						title={t("security.confirmAllowHint")}
-						onClick={() => props.onRespond(allowValue)}
+						onClick={() => {
+						// 划选详情的 mouseup 落在允许/拒绝上会冒充 click；有选区时不提交。
+						if (hasTextSelection()) return;
+						props.onRespond(allowValue);
+					}}
 					>
 						{t("security.confirmAllow")}
 					</Button>
@@ -108,7 +112,10 @@ export function SecurityConfirmCard(props: {
 						className="h-8 px-3"
 						disabled={props.responding}
 						title={t("security.confirmDenyHint")}
-						onClick={() => props.onRespond(denyValue)}
+						onClick={() => {
+						if (hasTextSelection()) return;
+						props.onRespond(denyValue);
+					}}
 					>
 						{t("security.confirmDeny")}
 					</Button>

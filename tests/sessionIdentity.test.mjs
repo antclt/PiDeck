@@ -171,3 +171,54 @@ test("relative and absolute forms canonicalize to the same origin key", () => {
   });
   assert.equal(relative, absolute);
 });
+
+// 归档/删除父会话时必须能认出 sibling-dir 与 parentSessionPath 两种子会话，
+// 否则 catalog 缓存里会留下幽灵子会话，侧栏孤儿提升后再打开就是残留聊天框。
+test("treats sibling-dir and parentSessionPath sessions as descendants of the parent", () => {
+  const { isSessionDescendantOf, collectSessionSubtreeIds } = loadModule();
+  const parent = {
+    id: "parent",
+    filePath: "C:\\sessions\\parent.jsonl",
+    environment: "native",
+  };
+  const linkedChild = {
+    id: "linked-child",
+    filePath: "C:\\sessions\\parent\\child.jsonl",
+    parentSessionPath: "c:/sessions/parent.jsonl",
+    environment: "native",
+  };
+  const siblingOnly = {
+    id: "sibling-only",
+    filePath: "C:/sessions/parent/run/session.jsonl",
+    environment: "native",
+  };
+  const grandchild = {
+    id: "grandchild",
+    filePath: "C:/sessions/parent/child/nested.jsonl",
+    parentSessionPath: "C:/sessions/parent/child.jsonl",
+    environment: "native",
+  };
+  const unrelated = {
+    id: "unrelated",
+    filePath: "C:/sessions/other.jsonl",
+    environment: "native",
+  };
+  const anonymous = { id: "anon", environment: "native" };
+
+  assert.equal(isSessionDescendantOf(linkedChild, parent), true);
+  assert.equal(isSessionDescendantOf(siblingOnly, parent), true);
+  assert.equal(isSessionDescendantOf(grandchild, linkedChild), true);
+  assert.equal(isSessionDescendantOf(unrelated, parent), false);
+  assert.equal(isSessionDescendantOf(anonymous, parent), false);
+  assert.equal(isSessionDescendantOf(parent, parent), false);
+
+  const subtree = collectSessionSubtreeIds(
+    [linkedChild, siblingOnly, grandchild, unrelated, anonymous],
+    parent,
+  );
+  // vm 沙箱里的 Array 与宿主 Array 不是同一构造器，deepEqual 会误报；按值比较即可。
+  assert.equal(
+    [...subtree].sort().join(","),
+    "grandchild,linked-child,parent,sibling-only",
+  );
+});

@@ -186,6 +186,35 @@ test("session context menu exposes archive and restores refresh the manager proj
   assert.match(app, /ARCHIVED_SESSION_TOAST_MS/);
 });
 
+function appFunctionBlock(source, name, nextName) {
+  const start = source.indexOf(`  async function ${name}(`);
+  const end = source.indexOf(`  async function ${nextName}(`, start + 1);
+  assert.notEqual(start, -1, `${name} implementation should be discoverable`);
+  assert.notEqual(end, -1, `${nextName} boundary should be discoverable`);
+  return source.slice(start, end);
+}
+
+// 侧栏归档/删除与历史抽屉同一契约：先关 Tab 再清状态，并带走子 agent 树。
+// 只 removeSessionState(session.id) 会在 currentSessionId 被清空后留下空态 Composer。
+test("sidebar archive and delete dismiss nested subagent chats instead of leaving a composer", () => {
+  const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+  const chrome = readFileSync("src/renderer/src/hooks/useSessionWorkspaceChrome.ts", "utf8");
+  const ipc = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
+
+  assert.match(chrome, /const closeTabs = useCallback\(\(sessionIds: string\[\]\)/);
+  assert.match(chrome, /closeTab = useCallback\(\(sessionId: string\) => \{\s*closeTabs\(\[sessionId\]\)/);
+  assert.match(app, /closeTabs: workspaceChrome\.closeTabs/);
+
+  const remove = appFunctionBlock(app, "deleteSidebarSession", "archiveSidebarSession");
+  const archive = appFunctionBlock(app, "archiveSidebarSession", "unarchiveSidebarSession");
+  for (const [name, block] of [["delete", remove], ["archive", archive]]) {
+    assert.match(block, /dismissSessionTree\(/, `${name} should dismiss the whole session tree`);
+  }
+
+  assert.match(ipc, /sessionsCatalogArchive[\s\S]*removeWithDescendants\(sessionId\)/);
+  assert.match(ipc, /sessionsCatalogDelete[\s\S]*removeWithDescendants\(sessionId\)/);
+});
+
 test("worktree rows expose their child project context menu and loading projects keep a surface", () => {
   const worktree = readFileSync("src/renderer/src/components/sidebar/WorktreeTree.tsx", "utf8");
   const sessionTree = readFileSync("src/renderer/src/components/sidebar/SessionTree.tsx", "utf8");

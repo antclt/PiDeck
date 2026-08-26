@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { atomWithStorage } from "jotai/utils";
 import type { BusySendDelivery } from "../../../shared/busySendDelivery";
 import type { AgentBackend } from "../../../shared/types";
 import {
@@ -68,6 +69,16 @@ export const busySendDeliveryAtom = atom<BusySendDelivery>("steer");
  * Shared because project collapse also pauses App-level session polling.
  * 初值取 localStorage 首屏缓存，随后由 settings.json 覆盖为权威值。
  */
+/**
+ * 文件树「折叠中间包」开关（IDEA 式：单子目录且无文件的目录链合并成点分节点）。
+ * 默认开，跨会话持久化（localStorage）。深包结构（Java/Maven、NestJS 等）用户反馈
+ * 层级太深时树很丑，折叠后一行展示整条包链。
+ */
+export const compactMiddlePackagesAtom = atomWithStorage<boolean>(
+	"pi-desktop:compact-middle-packages",
+	true,
+);
+
 export const sidebarExpandedProjectIdsAtom = atom<ReadonlySet<string>>(
   (() => {
     const cached = readExpandedSidebarProjects(

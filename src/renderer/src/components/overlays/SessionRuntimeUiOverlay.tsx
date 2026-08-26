@@ -11,6 +11,7 @@ import { t } from "../../i18n";
 import {
 	buildAskResponse,
 	formatAskTitle,
+	hasTextSelection,
 	parseSecurityConfirmTitle,
 	pickActiveAskRequest,
 	serializeBatchAnswers,
@@ -316,7 +317,11 @@ function BatchQuestion(props: {
 							className={`ask-inline-bar-option ask-inline-bar-option-yes flex-none items-center justify-center gap-1 whitespace-nowrap${props.answer === true ? " selected" : ""}`}
 							variant="outline"
 							disabled={props.responding}
-							onClick={() => props.onAnswer(true, t("common.true"))}
+							onClick={() => {
+								// 划选复制的 mouseup 落在按钮上会冒充 click；有选区时不记答案。
+								if (hasTextSelection()) return;
+								props.onAnswer(true, t("common.true"));
+							}}
 						>
 							{/* 选中态对勾：部分主题色 accent 对比度低，光靠变色难分辨已选项 */}
 							{props.answer === true ? <Check size={14} className="shrink-0 text-[var(--color-success)]" aria-hidden="true" /> : null}
@@ -326,7 +331,10 @@ function BatchQuestion(props: {
 							className={`ask-inline-bar-option ask-inline-bar-option-no flex-none items-center justify-center gap-1 whitespace-nowrap${props.answer === false ? " selected" : ""}`}
 							variant="outline"
 							disabled={props.responding}
-							onClick={() => props.onAnswer(false, t("common.false"))}
+							onClick={() => {
+								if (hasTextSelection()) return;
+								props.onAnswer(false, t("common.false"));
+							}}
 						>
 							{props.answer === false ? <Check size={14} className="shrink-0 text-[var(--color-success)]" aria-hidden="true" /> : null}
 							{t("common.false")}
@@ -350,7 +358,10 @@ function BatchQuestion(props: {
 										className={`ask-inline-bar-option h-auto min-h-[30px] w-full min-w-0 max-w-none flex-col items-start justify-center gap-0.5 px-2 py-1 text-left break-words whitespace-normal${expandedOptionLayout ? " min-h-[72px] py-2" : ""}${props.answer === value ? " selected" : ""}`}
 										variant="outline"
 										disabled={props.responding}
-										onClick={() => props.onAnswer(value, label)}
+										onClick={() => {
+										if (hasTextSelection()) return;
+										props.onAnswer(value, label);
+									}}
 									>
 										{/* 选中态对勾标记：主题色 accent 对比度低时只靠边框/背景变色难分辨已选项 */}
 										<span className="flex min-w-0 max-w-full items-center gap-1">
@@ -480,8 +491,12 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 		if (!accepted) setBusy(false);
 	};
 	const cancel = () => void answer(request.method, buildAskResponse(request.method, undefined, { cancelled: true }));
-	const submitValue = (value: string | boolean | undefined, confirmed?: boolean) =>
+	const submitValue = (value: string | boolean | undefined, confirmed?: boolean) => {
+		// 划选复制的 mouseup 落在选项/提交按钮上会冒充 click，误答提问。
+		// Enter 键也走这里：input/textarea 选区不进 window.getSelection，键盘提交不受影响。
+		if (hasTextSelection()) return;
 		void answer(request.method, buildAskResponse(request.method, value, { confirmed }));
+	};
 
 	if (request.method === "batch_ask") {
 		return (

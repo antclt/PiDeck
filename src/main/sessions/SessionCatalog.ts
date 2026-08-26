@@ -22,6 +22,7 @@ import {
 	buildSessionOriginKey,
 	buildSummaryOriginKey,
 	canonicalizeSessionPath,
+	collectSessionSubtreeIds,
 	getImportedSessionSourceId,
 	getSessionEnvironment,
 	isInSubagentArtifactsDir,
@@ -723,6 +724,39 @@ export class SessionCatalog {
 			entries.splice(index, 1);
 			return { value: true, changed: true };
 		});
+	}
+
+	/**
+	 * 归档/删除父会话时清掉整棵子树。
+	 *
+	 * 磁盘侧 `SessionScanner.archive/delete` 会把 sibling `<stem>/` 一并移走，但
+	 * `remove(id)` 只摘一条；`mergeScanned` 只增改不删，列表缓存会把失去父节点的
+	 * 子会话孤儿提升成顶层行，再点开就是残留聊天框。匿名会话和草稿没有 filePath，
+	 * 不会被当成后代。其它项目即使路径碰巧相似，也按 projectId 隔离。
+	 */
+	async removeWithDescendants(id: string): Promise<string[]> {
+		this.assertLoaded();
+		const parent = this.transientEntries.get(id) ?? this.entries.find((entry) => entry.id === id);
+		if (!parent) return [];
+		const projectEntries = this.listEntries().filter((entry) => entry.projectId === parent.projectId);
+		const ids = collectSessionSubtreeIds(projectEntries, parent);
+
+		const removed: string[] = [];
+		for (const sessionId of ids) {
+			if (this.transientEntries.delete(sessionId)) removed.push(sessionId);
+		}
+		const persistedIds = ids.filter((sessionId) => !removed.includes(sessionId));
+		if (persistedIds.length === 0) return removed;
+
+		const persistedRemoved = await this.enqueueMutation((entries) => {
+			const idSet = new Set(persistedIds);
+			const next = entries.filter((entry) => !idSet.has(entry.id));
+			const actuallyRemoved = entries.filter((entry) => idSet.has(entry.id)).map((entry) => entry.id);
+			if (actuallyRemoved.length === 0) return { value: [] as string[], changed: false };
+			entries.splice(0, entries.length, ...next);
+			return { value: actuallyRemoved, changed: true };
+		});
+		return [...removed, ...persistedRemoved];
 	}
 
 	/**

@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { computeThinkingDisplay } = loadTsCommonJs(
+const { computeThinkingDisplay, resolveComposerThinkingLevel } = loadTsCommonJs(
   "src/renderer/src/utils/thinkingDisplay.ts",
 );
 
@@ -41,6 +41,30 @@ test("computeThinkingDisplay: 无任何档位信息时返回空序列", () => {
   });
 });
 
+test("resolveComposerThinkingLevel: live 时优先 runtime state", () => {
+  assert.equal(
+    resolveComposerThinkingLevel({
+      state: "xhigh",
+      record: "max",
+      fallback: "off",
+      isLive: true,
+    }),
+    "xhigh",
+  );
+});
+
+test("resolveComposerThinkingLevel: 非 live 时忽略残留 state，展示 catalog", () => {
+  assert.equal(
+    resolveComposerThinkingLevel({
+      state: "xhigh",
+      record: "max",
+      fallback: "off",
+      isLive: false,
+    }),
+    "max",
+  );
+});
+
 test("computeThinkingDisplay: 待生效切换优先于当前档位展示", () => {
   // 切换成功后 runtime state 立即变为新档位（pi 的 get_state 返回新值），
   // 但飞行中的生成仍用旧档位——展示必须用 pending 的 from/to，而不是 current。
@@ -69,12 +93,18 @@ test("契约: ComposerArea 传 thinkingDisabled=isStarting（不含 isBusy）", 
     "src/renderer/src/components/session/ComposerArea.tsx",
     "utf8",
   );
+  const components = readFileSync(
+    "src/renderer/src/components/session/ComposerComponents.tsx",
+    "utf8",
+  );
   // 全局禁用仍含 isBusy（模板/附件等）；思考与模型按钮只被启动中禁用
   assert.match(area, /disabled=\{composer\.isBusy \|\| composer\.isStarting\}/);
   assert.match(area, /thinkingDisabled=\{composer\.isStarting\}/);
   assert.match(area, /modelDisabled=\{composer\.isStarting\}/);
   // 流式结束（没有进行中的生成）时清除待生效指示
   assert.match(area, /!isStreaming && thinkingPendingMap\[props\.sessionId\]/);
+  // 非 live 残留 state 不能盖住 catalog 思考档位
+  assert.match(components, /resolveComposerThinkingLevel/);
 });
 
 test("契约: 流式生成中切换才记录待生效指示", () => {

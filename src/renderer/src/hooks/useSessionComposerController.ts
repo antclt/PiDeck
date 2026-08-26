@@ -25,6 +25,7 @@ import {
   parseImageGenWatermark,
 } from "../../../shared/imageGenParams";
 import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
+import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
 import {
   classifyCompactError,
   resolveCompactUsagePercent,
@@ -829,7 +830,7 @@ export function useSessionComposerController(
     }
     // 标记在途后即便本 effect 因继续输入被重新评估，loading 门也会挡住重复请求
     deepTreeStateRef.current.loading = true;
-    void desktopApi.files.list(record.projectId, { maxDepth: 8 })
+    void desktopApi.files.list(record.projectId, { maxDepth: FILE_TREE_ABSOLUTE_MAX_DEPTH })
       .then((next) => {
         // 用项目比对而非 current 标志：输入过程中的每个按键都会触发本 effect
         // 重新评估并清理旧闭包，但请求仍属于当前项目——数据不该被丢弃，

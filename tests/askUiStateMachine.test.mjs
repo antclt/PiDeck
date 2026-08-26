@@ -6,18 +6,19 @@ import vm from "node:vm";
 
 /**
  * Ask 提问 UI 状态机与应答构造（#ask-ui）：
- * - 纯逻辑：pickActiveAskRequest / buildAskResponse / serializeBatchAnswers
+ * - 纯逻辑：pickActiveAskRequest / buildAskResponse / serializeBatchAnswers / hasTextSelection
  * - 静态契约：渲染层使用提取的纯逻辑 + shadcn 组件与语义字号 token；
- *   主进程 select 无选项降级为 input（不再静默取消）。
+ *   主进程 select 无选项降级为 input（不再静默取消）；
+ *   overlay / timeline / 安全卡在选项点击前调 hasTextSelection，避免划选复制误答。
  */
 
-function loadAskUi() {
+function loadAskUi(sandboxExtras = {}) {
 	const source = readFileSync("src/renderer/src/utils/askUi.ts", "utf8");
 	const output = ts.transpileModule(source, {
 		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 		fileName: "askUi.ts",
 	}).outputText;
-	const sandbox = { exports: {}, require: () => ({}) };
+	const sandbox = { exports: {}, require: () => ({}), ...sandboxExtras };
 	vm.runInNewContext(output, sandbox, { filename: "askUi.ts" });
 	return sandbox.exports;
 }
@@ -185,6 +186,29 @@ test("serializeBatchAnswers: 混合题型序列化并保留 label/wasCustom", ()
 	assert.equal(batchAnswerLabel(undefined), "");
 });
 
+function mockSelection(text) {
+	return {
+		window: {
+			getSelection: () => (text === null ? null : { toString: () => text }),
+		},
+	};
+}
+
+test("hasTextSelection: 无 window 视为没有划选", () => {
+	const { hasTextSelection } = loadAskUi();
+	assert.equal(hasTextSelection(), false);
+});
+
+test("hasTextSelection: 空选区 / 纯空白 / null 视为没有划选", () => {
+	assert.equal(loadAskUi(mockSelection("")).hasTextSelection(), false);
+	assert.equal(loadAskUi(mockSelection("  \n\t  ")).hasTextSelection(), false);
+	assert.equal(loadAskUi(mockSelection(null)).hasTextSelection(), false);
+});
+
+test("hasTextSelection: 非空划选返回 true", () => {
+	assert.equal(loadAskUi(mockSelection("提问内容")).hasTextSelection(), true);
+});
+
 // ── 静态契约 ──
 
 test("SessionRuntimeUiOverlay 使用提取的纯逻辑与语义字号 token", () => {
@@ -192,6 +216,7 @@ test("SessionRuntimeUiOverlay 使用提取的纯逻辑与语义字号 token", ()
 	assert.match(source, /import \{[^}]*pickActiveAskRequest[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
 	assert.match(source, /import \{[^}]*buildAskResponse[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
 	assert.match(source, /import \{[^}]*serializeBatchAnswers[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
+	assert.match(source, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
 	// 不再直接构造应答 payload（统一走 askUi.buildAskResponse）
 	assert.doesNotMatch(source, /void answer\(\{ value/);
 	assert.doesNotMatch(source, /void answer\(\{ confirmed/);
@@ -199,6 +224,20 @@ test("SessionRuntimeUiOverlay 使用提取的纯逻辑与语义字号 token", ()
 	assert.match(source, /variant="outline"/);
 	assert.doesNotMatch(source, /text-\[13px\]/);
 	assert.doesNotMatch(source, /text-\[11px\]/);
+	// submitValue 与 BatchQuestion 的 true/false/select 都要守卫划选（后者不走 submitValue）
+	const guards = source.match(/if \(hasTextSelection\(\)\) return;/g);
+	assert.ok(guards && guards.length >= 4);
+});
+
+test("Timeline 与安全卡在选项点击前调 hasTextSelection", () => {
+	const timeline = readFileSync("src/renderer/src/components/session/TimelineEventCards.tsx", "utf8");
+	const security = readFileSync("src/renderer/src/components/overlays/SecurityConfirmCard.tsx", "utf8");
+	assert.match(timeline, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
+	assert.match(security, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
+	const timelineGuards = timeline.match(/if \(hasTextSelection\(\)\) return;/g);
+	const securityGuards = security.match(/if \(hasTextSelection\(\)\) return;/g);
+	assert.ok(timelineGuards && timelineGuards.length >= 2);
+	assert.ok(securityGuards && securityGuards.length >= 2);
 });
 
 test("AgentManager select 无选项降级为 input（不静默取消）", () => {
