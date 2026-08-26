@@ -11,10 +11,12 @@ import { t } from "../../i18n";
 import {
 	buildAskResponse,
 	formatAskTitle,
+	parseSecurityConfirmTitle,
 	pickActiveAskRequest,
 	serializeBatchAnswers,
 	splitAskOption,
 } from "../../utils/askUi";
+import { SecurityConfirmCard } from "./SecurityConfirmCard";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
 import { Textarea } from "../ui-shadcn/textarea";
@@ -489,6 +491,25 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 				onCancel={cancel}
 				onSubmit={(answers) => submitValue(answers)}
 				onExpandedChange={onExpandedChange}
+			/>
+		);
+	}
+
+	// 安全确认（pi-deck-security-gate 的「ask」动作）：用专用卡片展开工具/等级/详情，
+	// 而不是把命令/路径压进普通 Ask 卡的两行摘要，让用户看清「审批什么」。
+	const securityConfirm = request.method === "select" ? parseSecurityConfirmTitle(request.title) : null;
+	if (securityConfirm) {
+		return (
+			<SecurityConfirmCard
+				request={request}
+				responding={responding}
+				open={expanded}
+				onOpenChange={(next) => {
+					setExpanded(next);
+					notifyAskExpanded(onExpandedChange, next);
+				}}
+				onRespond={(value) => submitValue(value)}
+				onCancel={cancel}
 			/>
 		);
 	}

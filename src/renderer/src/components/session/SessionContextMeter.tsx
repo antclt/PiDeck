@@ -4,6 +4,7 @@ import { FoldVertical } from "lucide-react";
 import { t } from "../../i18n";
 import type { AgentRuntimeState, ProviderUsageResult } from "../../../../shared/types";
 import { desktopApi } from "../../desktopApi";
+import { showNotice } from "../../utils/notice";
 import { compactUiState, resolveCompactUsagePercent } from "../../../../shared/compactFeedback";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { buildSessionStatusDetail } from "./SurfaceComponents";
@@ -61,6 +62,38 @@ export function formatTokens(n: number): string {
 	if (n < 1_000) return String(n);
 	if (n < 1_000_000) return `${scaled(n / 1_000)}K`;
 	return `${scaled(n / 1_000_000)}M`;
+}
+
+/** 币种代码 → 常用符号（未知代码原样展示，避免硬编码映射丢失币种）。 */
+function currencySymbol(code?: string): string {
+	switch ((code ?? "").toUpperCase()) {
+		case "CNY":
+		case "RMB":
+			return "¥";
+		case "USD":
+			return "$";
+		case "EUR":
+			return "€";
+		case "GBP":
+			return "£";
+		default:
+			return (code ?? "").trim();
+	}
+}
+
+/** 金额/点数格式化：最多两位小数，整数不显示小数点。 */
+function formatAmount(n: number): string {
+	const rounded = Math.round(n * 100) / 100;
+	return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+/** 余额展示：有符号用「¥110」，无符号用「110 CNY」，无币种只用数字。 */
+function formatBalance(balance: { value: number; currency?: string }): string {
+	const symbol = currencySymbol(balance.currency);
+	const amount = formatAmount(balance.value);
+	if (symbol) return `${symbol}${amount}`;
+	if (balance.currency) return `${amount} ${balance.currency}`;
+	return amount;
 }
 
 /** 由 runtime 状态计算占用（dsh contextOccupancy 同款语义）：
@@ -174,8 +207,18 @@ export function SessionContextMeter(props: {
 
 	const usagePeriods = usage?.periods;
 	const usageFailed = usage != null && !usage.success && (usage?.raw ?? "") === "";
+	// 余额/credits 形态：kind 显式标注，按形态渲染成「剩余额度」行而不是三档百分比。
+	const usageBalance = usage?.kind === "balance" ? usage.balance : undefined;
+	const usageCredits = usage?.kind === "credits" ? usage.credits : undefined;
 	// 有 provider 名才渲染用量区块：加载中/失败/成功三种态在区块内部切换。
 	const showUsage = provider != null;
+
+	// 用量查不到时一键安装内置技能模板，引导用户让 AI 写自定义探针配置。
+	const installUsageSkillHint = useCallback(() => {
+		void desktopApi.config.installUsageSkill().then((result) => {
+			if (result?.success) showNotice(t("sessionContext.usageCustomInstalled"), 6000, "info");
+		});
+	}, []);
 
 	// 模型切换瞬间 capacity 可能暂时消失：不渲染过期面板
 	useEffect(() => {
@@ -488,6 +531,38 @@ export function SessionContextMeter(props: {
 								<div className="px-0.5 text-caption leading-5 text-text-tertiary">
 									{t("sessionContext.usageRefreshing")}
 								</div>
+							) : usageBalance ? (
+								<div className="flex items-center justify-between gap-4 px-0.5">
+									<span className="shrink-0 text-caption leading-5 text-text-secondary">
+										{t("sessionContext.usageBalance")}
+									</span>
+									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">
+										{formatBalance(usageBalance)}
+									</span>
+								</div>
+							) : usageCredits ? (
+								<div className="space-y-1">
+									{usageCredits.remaining != null && (
+										<div className="flex items-center justify-between gap-4 px-0.5">
+											<span className="shrink-0 text-caption leading-5 text-text-secondary">
+												{t("sessionContext.usageCreditsRemaining")}
+											</span>
+											<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">
+												{formatAmount(usageCredits.remaining)}
+											</span>
+										</div>
+									)}
+									{usageCredits.used != null && (
+										<div className="flex items-center justify-between gap-4 px-0.5">
+											<span className="shrink-0 text-caption leading-5 text-text-secondary">
+												{t("sessionContext.usageCreditsUsed")}
+											</span>
+											<span className="min-w-0 text-right font-mono tabular-nums text-text-tertiary">
+												{formatAmount(usageCredits.used)}
+											</span>
+										</div>
+									)}
+								</div>
 							) : usageFailed ? (
 								<div className="px-0.5 text-caption leading-5 text-text-tertiary" title={usage?.error ?? undefined}>
 									{t("sessionContext.usageError")}
@@ -524,6 +599,16 @@ export function SessionContextMeter(props: {
 									})}
 								</div>
 							) : null}
+							{usage != null && !usage.success && (
+								<button
+									type="button"
+									data-testid="session-context-usage-customize"
+									onClick={installUsageSkillHint}
+									className="mt-1 flex w-full items-center justify-center gap-1 rounded-md border border-border/60 bg-transparent px-2 py-1 text-caption text-text-secondary transition-colors hover:bg-muted/60"
+								>
+									{t("sessionContext.usageCustomHint")}
+								</button>
+							)}
 						</div>
 					)}
 					{showCompact && (

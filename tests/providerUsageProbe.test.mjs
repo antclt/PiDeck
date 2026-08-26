@@ -87,3 +87,86 @@ test("候选表首个条目的 URL 生成命中 /usage", () => {
   const urls = probe.usageProbeUrls(cand, "https://opencode.ai/zen/go/v1/", ensureVersion);
   assert.ok(urls.some((u) => u.endsWith("/usage")));
 });
+
+test("getByPath 支持点号/下标混合路径", () => {
+  const body = { data: { balance: 12.5 }, balance_infos: [{ currency: "CNY", total_balance: "110.00" }] };
+  assert.equal(probe.getByPath(body, "data.balance"), 12.5);
+  assert.equal(probe.getByPath(body, "balance_infos[0].total_balance"), "110.00");
+  assert.equal(probe.getByPath(body, "balance_infos[0].currency"), "CNY");
+  assert.equal(probe.getByPath(body, "data.missing"), undefined);
+  assert.equal(probe.getByPath(body, "balance_infos[5].x"), undefined);
+  assert.equal(probe.getByPath(null, "a.b"), undefined);
+  assert.equal(probe.getByPath(body, ""), undefined);
+});
+
+test("toNumber 兼容数字与数字字符串", () => {
+  assert.equal(probe.toNumber(110), 110);
+  assert.equal(probe.toNumber("110.00"), 110);
+  assert.equal(probe.toNumber(" 12.5 "), 12.5);
+  assert.equal(probe.toNumber("abc"), undefined);
+  assert.equal(probe.toNumber(""), undefined);
+  assert.equal(probe.toNumber(null), undefined);
+  assert.equal(probe.toNumber(Number.NaN), undefined);
+});
+
+test("buildProbeHeaders 缺省补 Bearer，自定义 Authorization 覆盖，{{apiKey}} 替换", () => {
+  const j = (v) => JSON.stringify(v);
+  assert.equal(j(probe.buildProbeHeaders(undefined, "sk-1")), j({ Authorization: "Bearer sk-1" }));
+  assert.equal(j(probe.buildProbeHeaders({}, "sk-1")), j({ Authorization: "Bearer sk-1" }));
+  assert.equal(j(probe.buildProbeHeaders({ Authorization: "Bearer {{apiKey}}" }, "sk-2")), j({ Authorization: "Bearer sk-2" }));
+  assert.equal(j(probe.buildProbeHeaders({ "X-API-Key": "{{apiKey}}" }, "sk-3")), j({ Authorization: "Bearer sk-3", "X-API-Key": "sk-3" }));
+  // 空 key 时缺省 Bearer 不生成（上层会快速失败），但显式占位仍替换成空串
+  assert.equal(j(probe.buildProbeHeaders(undefined, "")), j({}));
+});
+
+test("parseUsageResponseBody 解析 balance 形态", () => {
+  const res = probe.parseUsageResponseBody(
+    { balance_infos: [{ currency: "CNY", total_balance: "110.00" }] },
+    "{}",
+    { kind: "balance", valuePath: "balance_infos[0].total_balance", currencyPath: "balance_infos[0].currency" },
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "balance");
+  assert.equal(res.balance.value, 110);
+  assert.equal(res.balance.currency, "CNY");
+});
+
+test("parseUsageResponseBody balance 取不到数值时退化 raw", () => {
+  const res = probe.parseUsageResponseBody(
+    { balance_infos: [] },
+    "RAW",
+    { kind: "balance", valuePath: "balance_infos[0].total_balance" },
+  );
+  assert.equal(res.matched, false);
+  assert.equal(res.raw, "RAW");
+});
+
+test("parseUsageResponseBody 解析 credits 形态，remaining 自动 total-used 反推", () => {
+  const res = probe.parseUsageResponseBody(
+    { data: { total_credits: 100, total_usage: 42.5 } },
+    "{}",
+    { kind: "credits", totalPath: "data.total_credits", usedPath: "data.total_usage" },
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "credits");
+  assert.equal(res.credits.total, 100);
+  assert.equal(res.credits.used, 42.5);
+  assert.equal(res.credits.remaining, 57.5);
+});
+
+test("parseUsageResponseBody credits 显式 remainingPath 优先", () => {
+  const res = probe.parseUsageResponseBody(
+    { data: { total: 100, used: 42.5, remaining: 60 } },
+    "{}",
+    { kind: "credits", totalPath: "data.total", usedPath: "data.used", remainingPath: "data.remaining" },
+  );
+  assert.equal(res.credits.remaining, 60);
+});
+
+test("内置候选包含 DeepSeek balance 与 opencode periods", () => {
+  const opencode = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("opencode.ai/zen"));
+  const deepseek = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.deepseek.com"));
+  assert.ok(opencode);
+  assert.ok(deepseek);
+  assert.equal(deepseek.parse.kind, "balance");
+});

@@ -220,6 +220,34 @@ export function setPath(root: Record<string, unknown>, path: string[], value: un
 	current[path[path.length - 1]] = value;
 }
 
+/**
+ * 删除 patch 里 path 指向的叶子字段，并自底向上清掉变成空对象的父节点。
+ * 用于「改回原值 / 清空输入」时移除覆盖：setPath(root, path, undefined) 会留下
+ * undefined 键导致 Object.keys 仍算脏，这里彻底删键，脏标记才能正确消失。
+ */
+export function deletePath(root: Record<string, unknown>, path: string[]): void {
+	if (path.length === 0) return;
+	const chain: Array<[Record<string, unknown>, string]> = [];
+	let current = root;
+	for (let index = 0; index < path.length - 1; index += 1) {
+		const segment = path[index];
+		const existing = current[segment];
+		if (!existing || typeof existing !== "object" || Array.isArray(existing)) return;
+		chain.push([current, segment]);
+		current = existing as Record<string, unknown>;
+	}
+	delete current[path[path.length - 1]];
+	for (let index = chain.length - 1; index >= 0; index -= 1) {
+		const [parent, key] = chain[index];
+		const child = parent[key];
+		if (child && typeof child === "object" && !Array.isArray(child) && Object.keys(child).length === 0) {
+			delete parent[key];
+		} else {
+			break;
+		}
+	}
+}
+
 /** DSH 省略 retryPolicy 时的默认次数：normal mode、瞬时错误最多再试 5 次。 */
 export const DSH_DEFAULT_RETRY_MAX = 5;
 

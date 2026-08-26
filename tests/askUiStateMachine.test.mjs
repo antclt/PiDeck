@@ -126,6 +126,38 @@ test("splitAskOption: 保留普通选项并拆分标题与说明", () => {
 	assert.equal(formatAskTitle("[PI_DECK_PLAN_NEXT] 计划草案已就绪\n\n1. 读取代码"), "计划草案已就绪\n\n1. 读取代码");
 });
 
+test("parseSecurityConfirmTitle: 解析安全确认 JSON 负载，非安全标题返回 null", () => {
+	const { parseSecurityConfirmTitle } = loadAskUi();
+	const parsed = parseSecurityConfirmTitle(
+		"[PI_DECK_SECURITY_CONFIRM]{\"tool\":\"bash\",\"level\":\"standard\",\"detail\":\"rm -rf node_modules\"}",
+	);
+	assert.equal(JSON.stringify(parsed), JSON.stringify({
+		tool: "bash",
+		level: "standard",
+		detail: "rm -rf node_modules",
+	}));
+	// 非安全确认标题不误判
+	assert.equal(parseSecurityConfirmTitle("普通提问"), null);
+	assert.equal(parseSecurityConfirmTitle("[PI_DECK_PLAN_NEXT] 计划草案"), null);
+});
+
+test("parseSecurityConfirmTitle: JSON 损坏兑底返回原始负载，不丢确认卡", () => {
+	const { parseSecurityConfirmTitle } = loadAskUi();
+	const parsed = parseSecurityConfirmTitle("[PI_DECK_SECURITY_CONFIRM]not-json");
+	assert.equal(parsed.tool, "");
+	assert.equal(parsed.level, "");
+	assert.equal(parsed.detail, "not-json");
+});
+
+test("formatAskTitle: 安全确认标记兑换底为可读摘要，不泄露 JSON", () => {
+	const { formatAskTitle, formatSecurityConfirmSummary } = loadAskUi();
+	assert.equal(
+		formatAskTitle("[PI_DECK_SECURITY_CONFIRM]{\"tool\":\"bash\",\"level\":\"strict\",\"detail\":\"sudo rm\"}"),
+		"安全确认：bash",
+	);
+	assert.equal(formatSecurityConfirmSummary({ tool: "", level: "", detail: "" }), "安全确认");
+});
+
 test("serializeBatchAnswers: 混合题型序列化并保留 label/wasCustom", () => {
 	const { serializeBatchAnswers, batchAnswerLabel } = loadAskUi();
 	const questions = [

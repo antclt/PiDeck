@@ -627,15 +627,6 @@ export function ModelsTab(props: {
 																<span className="basis-12 shrink-0 text-xs text-text-secondary">{t("config.response")}</span>
 																<span className="break-all text-text-primary">{props.testResult.snippet}</span>
 															</div>
-															{props.testResult.requestUrl && (
-																<div className="flex items-baseline gap-4 text-control">
-																	<span className="basis-12 shrink-0 text-xs text-text-secondary">{t("config.request")}</span>
-																	<code className="config-test-request-url">
-																		POST{" "}
-																		{props.testResult.requestUrl}
-																	</code>
-																</div>
-															)}
 															{props.testResult.tokens &&
 																(props.testResult.tokens.input != null ||
 																	props.testResult.tokens.output != null) && (
@@ -681,23 +672,6 @@ export function ModelsTab(props: {
 																	</span>
 																</div>
 															)}
-															{props.testResult.requestUrl && (
-																<div className="flex items-baseline gap-4 text-control">
-																	<span className="basis-12 shrink-0 text-xs text-text-secondary">{t("config.request")}</span>
-																	<code className="config-test-request-url">
-																		POST{" "}
-																		{props.testResult.requestUrl}
-																	</code>
-																</div>
-															)}
-															{props.testResult.requestBody && (
-																<div className="flex items-baseline gap-4 text-control">
-																	<span className="basis-12 shrink-0 text-xs text-text-secondary">{t("config.requestBody")}</span>
-																	<code className="config-test-request-body">
-																		{props.testResult.requestBody}
-																	</code>
-																</div>
-															)}
 														</div>
 													)}
 												</div>
@@ -705,7 +679,9 @@ export function ModelsTab(props: {
 
 								{(props.testResult && !props.testResult.success && props.testResult.providerName === name) && (
 									<div className="config-test-hint">
-										💡 {t("config.testConnectionHint")}
+										{/* 测试现在走真实 pi 调用（与会话同路径）：获取模型列表成功但真实调用失败，
+										    通常是模型 ID 不匹配，给出更精确的排查引导。 */}
+										💡 {t((props.fetchedModels[name]?.length ?? 0) > 0 ? "config.testFailedButModelsFetched" : "config.testConnectionHint")}
 									</div>
 								)}
 

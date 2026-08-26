@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { Archive, Check, CircleAlert, CircleDot, Folder, LoaderCircle, MessageCircle } from "lucide-react";
+import { Archive, Check, CircleAlert, CircleDot, Folder, LoaderCircle, MessageCircle, RefreshCw, RotateCw } from "lucide-react";
 import { t } from "../../i18n";
 import {
 	AlertDialog,
@@ -33,6 +33,7 @@ import {
 import { Button } from "../ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui-shadcn/table";
 import type { SessionSummary, Project, AgentTab } from "../../../../shared/types";
+import { worktreeSlugify } from "../../../../shared/worktreeSlug";
 import { SessionSourceBadge, SessionBackendMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
 import { Checkbox } from "../ui-shadcn/checkbox";
 import { Input } from "../ui-shadcn/input";
@@ -492,6 +493,10 @@ export function AgentContextMenu(props: {
 	/** 打开实时日志查看弹窗（仅开启记录后可用） */
 	onOpenLogs?: () => void;
 	onOpenSessionFile?: () => void;
+	/** 重启会话（仅 live Agent：starting/idle/running 传入）。 */
+	onRestartSession?: () => void;
+	/** 重新加载会话（仅无 live 运行时：未启动/error/closed 传入），从磁盘刷新消息文件。 */
+	onReloadSession?: () => void;
 	onCloseAgent: () => void;
 	/** 运行中也可删：主进程先停后删，不必先关 Agent。 */
 	onDeleteSession?: () => void;
@@ -524,6 +529,24 @@ export function AgentContextMenu(props: {
 						</DropdownMenuItem>
 					)}
 				</>
+			)}
+			{/* 会话运行控制：重启（live）与重新加载（无 live）互斥，由调用方按 agent 状态只传其一 */}
+			{(props.onRestartSession || props.onReloadSession) && <DropdownMenuSeparator />}
+			{props.onRestartSession && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onRestartSession}>
+					<span className="inline-flex items-center gap-2">
+						<RotateCw className="size-3.5" aria-hidden="true" />
+						{t("menu.restartSession")}
+					</span>
+				</DropdownMenuItem>
+			)}
+			{props.onReloadSession && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onReloadSession}>
+					<span className="inline-flex items-center gap-2">
+						<RefreshCw className="size-3.5" aria-hidden="true" />
+						{t("menu.reloadSession")}
+					</span>
+				</DropdownMenuItem>
 			)}
 			<DropdownMenuSeparator />
 			<DropdownMenuItem
@@ -571,6 +594,8 @@ export function SessionContextMenu(props: {
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
 	onOpenSessionFile?: () => void;
+	/** 重新加载会话（未启动的历史会话）：从磁盘刷新消息文件。 */
+	onReloadSession?: () => void;
 	/** 打开会话代理设置弹框（菜单项「会话代理」） */
 	onOpenProxySetting?: () => void;
 	/** 会话是否有文件路径（DSH 会话无 pi 会话文件：隐藏「复制路径/打开文件」） */
@@ -593,6 +618,14 @@ export function SessionContextMenu(props: {
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
 			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>{t("common.rename")}</DropdownMenuItem>
+			{props.onReloadSession && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onReloadSession}>
+					<span className="inline-flex items-center gap-2">
+						<RefreshCw className="size-3.5" aria-hidden="true" />
+						{t("menu.reloadSession")}
+					</span>
+				</DropdownMenuItem>
+			)}
 			{/* DSH 历史会话无宿主文件可复制/导出（主进程显式拒绝，A8/A9）：隐藏入口 */}
 			<DropdownMenuItem disabled={busy} onSelect={props.onOpenProxySetting}>{t("menu.sessionProxy")}</DropdownMenuItem>
 			{props.menu.session.backend !== "dsh" && (
@@ -703,17 +736,9 @@ export function WorktreeCreateDialog(props: {
 		inputRef.current?.focus();
 	}, []);
 
-	// 预览最终创建的分支名，与后端 WorktreeService.slugify 保持一致：
-	// 保留 Unicode 字母数字，其余字符替换为 -。让用户在提交前看到中文/特殊字符的实际结果，
-	// 避免输入与最终分支名脱节。
-	const previewSlug = useMemo(() => {
-		const slug = name
-			.trim()
-			.replace(/[^\p{L}\p{N}]+/gu, "-")
-			.replace(/^-+/, "")
-			.replace(/-+$/, "");
-		return slug || "workspace";
-	}, [name]);
+	// 预览最终创建的分支名：与后端 WorktreeService 共用 worktreeSlugify（shared 纯函数），
+	// 避免输入与最终分支名脱节（issue #166）。
+	const previewSlug = useMemo(() => worktreeSlugify(name), [name]);
 
 	// #115 U5：外壳换 shadcn Dialog；分支名预览逻辑不变
 	return (

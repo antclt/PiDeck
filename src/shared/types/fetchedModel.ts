@@ -20,3 +20,16 @@ export type FetchedModel = {
 	/** 端点 /models 或 pi-ai 目录补全时出现，如 ["text","image"] */
 	input?: string[];
 };
+
+/**
+ * 真实 pi 探测 provider/model 的结果（用 pi --mode json --print 做一次最小调用）。
+ * 字段与旧 net.fetch 测试结果对齐，渲染层测试结果卡片可直接复用。
+ */
+export type PiModelProbeResult = {
+	success: boolean;
+	model?: string;
+	snippet?: string;
+	tokens?: { input?: number; output?: number };
+	latencyMs?: number;
+	error?: string;
+};

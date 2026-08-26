@@ -113,6 +113,28 @@ const BUILTIN_TEMPLATES: PiPromptTemplateSummary[] = [
 		scope: "global",
 	},
 	{
+		name: "commit-own",
+		path: "builtin://commit-own",
+		description: "Commit only the files you modified yourself (skip unrelated changes)",
+		content: makeBuiltinContent(
+			"Commit only the files you modified yourself",
+			"Commit only the files and code that I modified myself. Do not stage or commit unrelated changes (e.g. files changed by others, pre-existing edits, generated files, lockfiles you did not touch).\n\nSteps:\n1. Run `git status --short` and `git diff` to inspect all changes.\n2. Identify which changes belong to my own work.\n3. Stage only those specific paths (`git add <file>...`), never a blanket `git add -A`.\n4. Review the staged diff (`git diff --cached`) and confirm it matches my changes.\n5. Write a conventional commit message and commit.\n\nFormat: `type(scope): description`\nTypes: feat, fix, refactor, docs, style, test, chore, perf, ci, build, revert",
+		),
+		userCreated: false,
+		scope: "global",
+	},
+	{
+		name: "commit-split",
+		path: "builtin://commit-split",
+		description: "Commit all changes split into multiple commits grouped by feature",
+		content: makeBuiltinContent(
+			"Commit all changes split by feature",
+			"Commit all current changes, splitting them into multiple commits grouped by feature or concern. Each commit must be self-contained and serve a single purpose.\n\nSteps:\n1. Run `git status --short` and `git diff` to list every change.\n2. Group the changed files into logical, independent units (one feature / fix / refactor / chore per group).\n3. Commit each group separately, so no commit mixes unrelated changes.\n4. Order commits sensibly: foundational or refactor work first, then features and fixes, then docs and chore last.\n5. For each group: `git add` only its files, review `git diff --cached`, then commit with a conventional message.\n\nFormat: `type(scope): description`\nTypes: feat, fix, refactor, docs, style, test, chore, perf, ci, build, revert",
+		),
+		userCreated: false,
+		scope: "global",
+	},
+	{
 		name: "skill-discipline",
 		path: "builtin://skill-discipline",
 		description: "Skills execution discipline: rules for when and how to trigger agent skills",

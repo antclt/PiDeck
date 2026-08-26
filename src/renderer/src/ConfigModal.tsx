@@ -37,6 +37,7 @@ import {
 	PlugZap,
 } from "lucide-react";
 import { cn } from "./lib/utils";
+import { deepClone, deepEqual } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
 import { applyAdaptiveTemplateReset, collectModelSpecPatches, deriveProviderCompat, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
@@ -130,6 +131,21 @@ function parseSectionTabValue(value: string): {
 		};
 	}
 	return { section: value as ConfigSection };
+}
+
+/**
+ * 按基准快照对比单条 Pi 配置脏标记：当前数据与基准相等则移除 key，否则加入。
+ * 用于取代「改了就 markDirty」的 touched 语义——改回原值后脏标记自动消失，
+ * 顶部保存按钮 / 左侧黄点 / 关闭确认只反映真实未保存改动。
+ */
+function reconcileConfigDirty(
+	keys: Set<string>,
+	dirtyKey: string,
+	current: unknown,
+	baseline: unknown,
+): void {
+	if (deepEqual(current, baseline)) keys.delete(dirtyKey);
+	else keys.add(dirtyKey);
 }
 
 /**
@@ -291,8 +307,9 @@ function ConfigModalContent(props: ConfigModalProps) {
 	const [lastTab] = useState(loadLastConfigTab);
 	const [section, setSection] = useState<ConfigSection>(lastTab?.section ?? "config");
 	const [tab, setTab] = useState<ConfigTab>(lastTab?.tab ?? "models");
-	/** 配置管理顶层后端分页：默认 DSH（新建会话默认 dsh），pi 页复用原有全部导航。 */
-	const [backendPane, setBackendPane] = useState<"dsh" | "pi">("dsh");
+	/** 配置管理顶层后端分页：以 Pi 为主（默认 Pi，且 Pi 标签在左），dsh 页在右。
+	 *  新建会话仍默认 dsh 是运行态偏好，与此处配置管理入口默认值相互独立。 */
+	const [backendPane, setBackendPane] = useState<"dsh" | "pi">("pi");
 	const [loading, setLoading] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -402,6 +419,43 @@ function ConfigModalContent(props: ConfigModalProps) {
 	// pi 全局配置目录（源文件页标注实际编辑位置）；加载失败时静默降级不显示路径。
 	const [piConfigDir, setPiConfigDir] = useState<string | null>(null);
 
+	// ── Pi 配置数据基准快照：脏检测改为「当前数据 vs 基准」真实差异，改回原值自动摘掉脏标记 ──
+	// 仅在 loadConfig 真正覆盖内存数据时同步更新；被 preserve（脏草稿保留）时不动基准，脏标记保持。
+	const baselineModelsRef = useRef<ModelsFile>({ providers: {} });
+	const baselineAuthRef = useRef<AuthFile>({});
+	const baselineSettingsRef = useRef<SettingsFile>({});
+	const baselineTrustRef = useRef<Record<string, boolean>>({});
+	const baselineRawRef = useRef<{ fileName: string; content: string }>({
+		fileName: "models.json",
+		content: "",
+	});
+
+	/**
+	 * Pi 配置脏状态由数据与基准的真实差异推导（models/auth/settings/trust/raw 这 5 个
+	 * 由本组件 state 承载的文件）。MCP/DSH/security/skills/prompts 仍由各自注册表维护，
+	 * 这里只增删对应的 config:* key，不动其它来源的脏标记。
+	 */
+	useEffect(() => {
+		// 以 ref 为源（markDirty/clearDirty/handleDshDirtyChange 都同步维护它），
+		// 只增删这 5 个 config:* key，其它来源的脏标记原样保留。
+		const before = new Set(dirtyTabsRef.current);
+		const next = new Set(dirtyTabsRef.current);
+		reconcileConfigDirty(next, "config:models", modelsData, baselineModelsRef.current);
+		reconcileConfigDirty(next, "config:auth", authData, baselineAuthRef.current);
+		reconcileConfigDirty(next, "config:settings", settingsData, baselineSettingsRef.current);
+		reconcileConfigDirty(next, "config:trust", trustData, baselineTrustRef.current);
+		reconcileConfigDirty(
+			next,
+			"config:raw",
+			{ fileName: rawFileName, content: rawContent },
+			baselineRawRef.current,
+		);
+		dirtyTabsRef.current = next;
+		// 只有真正增删了 key 才提交 state，避免每次键入都重建相同 Set 触发无关重渲染
+		const changed = next.size !== before.size || [...next].some((key) => !before.has(key));
+		if (changed) setDirtyTabs(next);
+	}, [modelsData, authData, settingsData, trustData, rawContent, rawFileName]);
+
 	// 展开的 provider / auth 项
 	const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 	const [expandedAuth, setExpandedAuth] = useState<string | null>(null);
@@ -458,8 +512,6 @@ function ConfigModalContent(props: ConfigModalProps) {
 		tokens?: { input?: number; output?: number };
 		latencyMs?: number;
 		error?: string;
-		requestUrl?: string;
-		requestBody?: string;
 	} | null>(null);
 	const [testModelIdByProvider, setTestModelIdByProvider] = useState<
 		Record<string, string>
@@ -490,18 +542,27 @@ function ConfigModalContent(props: ConfigModalProps) {
 				const skipRaw = preserved.has("config:raw");
 				if (target === "models") {
 					const res = await api.config.getModels();
-					if (!skipModels) setModelsData(normalizeModelsFile(res.parsed));
+					if (!skipModels) {
+						const parsed = normalizeModelsFile(res.parsed);
+						setModelsData(parsed);
+						baselineModelsRef.current = deepClone(parsed);
+					}
 					if (!skipRaw) {
 						setRawContent(res.raw);
 						setRawFileName("models.json");
+						baselineRawRef.current = { fileName: "models.json", content: res.raw };
 					}
 					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "auth") {
 					const res = await api.config.getAuth();
-					if (!skipAuth) setAuthData(res.parsed as AuthFile);
+					if (!skipAuth) {
+						setAuthData(res.parsed as AuthFile);
+						baselineAuthRef.current = deepClone(res.parsed as AuthFile);
+					}
 					if (!skipRaw) {
 						setRawContent(res.raw);
 						setRawFileName("auth.json");
+						baselineRawRef.current = { fileName: "auth.json", content: res.raw };
 					}
 					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "settings") {
@@ -511,12 +572,23 @@ function ConfigModalContent(props: ConfigModalProps) {
 						api.config.getAuth(),
 						api.config.getModels(),
 					]);
-					if (!skipSettings) setSettingsData(settingsRes.parsed as SettingsFile);
-					if (!skipAuth) setAuthData(authRes.parsed as AuthFile);
-					if (!skipModels) setModelsData(normalizeModelsFile(modelsRes.parsed));
+					if (!skipSettings) {
+						setSettingsData(settingsRes.parsed as SettingsFile);
+						baselineSettingsRef.current = deepClone(settingsRes.parsed as SettingsFile);
+					}
+					if (!skipAuth) {
+						setAuthData(authRes.parsed as AuthFile);
+						baselineAuthRef.current = deepClone(authRes.parsed as AuthFile);
+					}
+					if (!skipModels) {
+						const parsed = normalizeModelsFile(modelsRes.parsed);
+						setModelsData(parsed);
+						baselineModelsRef.current = deepClone(parsed);
+					}
 					if (!skipRaw) {
 						setRawContent(settingsRes.raw);
 						setRawFileName("settings.json");
+						baselineRawRef.current = { fileName: "settings.json", content: settingsRes.raw };
 					}
 					setConfigDiagnostic(settingsRes.diagnostic ?? null);
 
@@ -579,10 +651,14 @@ function ConfigModalContent(props: ConfigModalProps) {
 					}
 				} else if (target === "trust") {
 					const res = await api.config.getTrust();
-					if (!skipTrust) setTrustData(res.parsed as Record<string, boolean>);
+					if (!skipTrust) {
+						setTrustData(res.parsed as Record<string, boolean>);
+						baselineTrustRef.current = deepClone(res.parsed as Record<string, boolean>);
+					}
 					if (!skipRaw) {
 						setRawContent(res.raw);
 						setRawFileName("trust.json");
+						baselineRawRef.current = { fileName: "trust.json", content: res.raw };
 					}
 					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "mcp") {
@@ -591,6 +667,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 						const res = await api.config.getMcp(projectPath);
 						setRawContent(res.writableRaw);
 						setRawFileName("mcp.json");
+						baselineRawRef.current = { fileName: "mcp.json", content: res.writableRaw };
 					}
 					if (options?.force && !skipMcp) void mcpTabRef.current?.reload();
 				} else if (target === "raw") {
@@ -606,6 +683,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 										? "mcp.json"
 										: "settings.json";
 					if (!skipRaw) setRawFileName(fileName);
+					// 基准快照随内容一起更新：切文件后新旧草稿都以新文件为比较基准
 					const res =
 						fileName === "models.json"
 							? await api.config.getModels()
@@ -616,7 +694,10 @@ function ConfigModalContent(props: ConfigModalProps) {
 									: fileName === "mcp.json"
 										? await api.config.getMcp(projectPath).then((snapshot) => ({ raw: snapshot.writableRaw, diagnostic: undefined }))
 										: await api.config.getSettings();
-					if (!skipRaw) setRawContent(res.raw);
+					if (!skipRaw) {
+						setRawContent(res.raw);
+						baselineRawRef.current = { fileName, content: res.raw };
+					}
 					setConfigDiagnostic(res.diagnostic ?? null);
 				}
 				// 被跳过的脏草稿保持黄点；其余被磁盘覆盖的 key 必须清掉，否则保存后假脏。
@@ -760,6 +841,15 @@ function ConfigModalContent(props: ConfigModalProps) {
 		delete providers[oldName];
 		setModelsData({ ...modelsData, providers });
 		markDirty("config:models");
+		// 重命名 provider 时同步 auth.json 里的同名 key，否则 pi 按新名称
+		// 查不到认证 → 模型列表加载为空（用户反馈的“改名称后模型空”根因）。
+		if (authData[oldName]) {
+			const updatedAuth = { ...authData };
+			updatedAuth[newName] = updatedAuth[oldName];
+			delete updatedAuth[oldName];
+			setAuthData(updatedAuth);
+			markDirty("config:auth");
+		}
 		if (expandedProvider === oldName) setExpandedProvider(newName);
 		setRenamingProvider(null);
 		setRenameValue("");
@@ -790,15 +880,15 @@ function ConfigModalContent(props: ConfigModalProps) {
 		const sourceProvider = modelsData.providers[name];
 		if (!sourceProvider) return;
 		
-		// 生成新名称：原名称 + " copy" 或 " copy 2" 依此类推
-		let newName = `${name} copy`;
+		// 生成新名称：用连字符后缀（符合 provider 名严格白名单，避免空格/特殊字符）。
+		let newName = `${name}-copy`;
 		let counter = 2;
 		while (modelsData.providers[newName]) {
-			newName = `${name} copy ${counter}`;
+			newName = `${name}-copy-${counter}`;
 			counter++;
 		}
 		
-		// 深拷贝 provider 配置，包括 models 数组
+		// 深拷贝 provider 配置，包括 models 数组（含 apiKey）。
 		const duplicatedProvider = JSON.parse(JSON.stringify(sourceProvider));
 		
 		setModelsData({
@@ -809,6 +899,12 @@ function ConfigModalContent(props: ConfigModalProps) {
 			},
 		});
 		markDirty("config:models");
+		// 同步 auth.json：复制后的 provider 若有独立 auth key，也需要复制，
+		// 否则 pi 按新名称查不到认证 → 模型列表加载为空。
+		if (authData[name]) {
+			setAuthData({ ...authData, [newName]: { ...authData[name] } });
+			markDirty("config:auth");
+		}
 		
 		// 展开新复制的 provider
 		setExpandedProvider(newName);
@@ -908,7 +1004,9 @@ function ConfigModalContent(props: ConfigModalProps) {
 		}
 	};
 
-	// 快速测试 provider 连接
+	// 测试 provider 连接：先落盘表单配置，再用真实 pi 做一次最小调用。
+	// 保存的目的：pi 只读磁盘上的 models.json（baseUrl/apiKey 都从那里解析），
+	// 用真实 pi 测试才能与会话结果一致（不再用 net.fetch 模拟请求）。
 	const handleTestProvider = async (providerName: string) => {
 		const provider = modelsData.providers[providerName];
 		if (!provider?.baseUrl || !provider?.apiKey) {
@@ -929,26 +1027,16 @@ function ConfigModalContent(props: ConfigModalProps) {
 		setError(null);
 		try {
 			const result = await api.config.testProvider(
-				provider.baseUrl,
-				provider.apiKey,
+				providerName,
 				modelId,
-				provider.api as string | undefined,
-				getProviderHeaders(provider.headers),
+				modelsData,
 			);
 			setTestResult({ providerName, ...result });
-			// 测试成功且走通版本路径时，自动把根路径 baseUrl 改成 /v1 等，避免会话侧失败。
-			if (result.success && result.suggestedBaseUrl) {
-				const normalized = applySuggestedBaseUrl(
-					providerName,
-					result.suggestedBaseUrl,
-				);
-				if (normalized) {
-					showToast(
-						t("config.baseUrlAutoNormalized", {
-							url: result.suggestedBaseUrl,
-						}),
-					);
-				}
+			if (result.success) {
+				// 测试即保存：清除脏标记并回读磁盘，保持表单与磁盘、baseline 一致。
+				clearDirty("config:models");
+				await loadConfig("models", { force: true });
+				onSaved();
 			}
 		} catch (e) {
 			setTestResult({
@@ -1145,19 +1233,35 @@ function ConfigModalContent(props: ConfigModalProps) {
 				]),
 			),
 		};
-		const ok = await saveAndReload(
-			() => api.config.saveModels(normalizedData),
-			filledCount > 0
-				? t("config.modelsSavedWithSpecs", { count: filledCount })
-				: t("config.modelsSaved"),
-			"config:models",
-		);
-		// 保存成功后才把补全值写回 UI：失败时保留原值，下次保存会重新补全（幂等）
-		if (ok && filledCount > 0) {
-			setModelsData(base);
+		setSaving(true);
+		setError(null);
+		try {
+			const result = await api.config.saveModels(normalizedData);
+			if (!result.valid) {
+				setError(result.error ?? t("config.saveFailed"));
+				return false;
+			}
+			onSaved();
+			clearDirty("config:models");
+			// 保存成功后才把补全值写回 UI：失败时保留原值，下次保存会重新补全（幂等）
+			if (filledCount > 0) {
+				setModelsData(base);
+			}
+			// 保存后用真实 pi 验证配置能否正常加载模型：加载为空/失败时给醒目警告，
+			// 避免用户以为“保存成功=一切正常”，实际模型列表却是空的。
+			if (result.modelLoadOk) {
+				showToast(t("config.modelsSavedVerified", { count: result.modelCount ?? 0 }));
+			} else {
+				showNotice(t("config.modelsSavedButLoadFailed"), 6000, "warning");
+			}
+			await loadConfig("models", { force: true });
+			return true;
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+			return false;
+		} finally {
+			setSaving(false);
 		}
-		await loadConfig("models", { force: true });
-		return ok;
 	};
 
 	// ── Auth 操作 ────────────────────────────────────────
@@ -1308,7 +1412,6 @@ function ConfigModalContent(props: ConfigModalProps) {
 
 	// 切换源文件时重新加载对应文件内容
 	const handleRawFileChange = async (fileName: string) => {
-		setRawFileName(fileName);
 		setLoading(true);
 		try {
 			const res =
@@ -1321,7 +1424,9 @@ function ConfigModalContent(props: ConfigModalProps) {
 							: fileName === "mcp.json"
 								? await api.config.getMcp(projectPath).then((snapshot) => ({ raw: snapshot.writableRaw }))
 								: await api.config.getSettings();
+			setRawFileName(fileName);
 			setRawContent(res.raw);
+			baselineRawRef.current = { fileName, content: res.raw };
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
 		} finally {
@@ -1861,29 +1966,31 @@ function ConfigModalContent(props: ConfigModalProps) {
 						</DialogClose>
 					</div>
 				</DialogHeader>
-			{/* 顶层后端分页：DSH 配置管理（默认）/ Pi 配置管理（复用原有全部导航） */}
+			{/* 顶层后端分页：Pi 配置管理（默认，在左）/ DSH 配置管理（在右） */}
 			<Tabs value={backendPane} onValueChange={(value) => setBackendPane(value === "pi" ? "pi" : "dsh")} className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<TabsList className="config-backend-switch flex h-9 shrink-0 items-center gap-1 border-b border-border/60 px-3">
+					<TabsTrigger value="pi" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
+						<PiLogo className="size-3.5 shrink-0" />
+						{t("config.backend.pi")}
+						{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+					</TabsTrigger>
 					<TabsTrigger value="dsh" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
 						<DshLogo className="size-3.5 shrink-0" />
 						{t("config.backend.dsh")}
 						{/* 顶层分页黄点：该后端任意分区有草稿时提醒 */}
 						{hasDshDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 					</TabsTrigger>
-					<TabsTrigger value="pi" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
-						<PiLogo className="size-3.5 shrink-0" />
-						{t("config.backend.pi")}
-						{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
-					</TabsTrigger>
 				</TabsList>
-				<TabsContent value="dsh" className="flex min-h-0 min-w-0 flex-1">
+				{/* forceMount + inactive hidden：Pi/DSH 两个后端页都保持挂载，切换后端不会丢草稿；
+				    与 config:mcp 同款做法，inactive 必须 hidden 避免叠在另一页上。 */}
+				<TabsContent value="dsh" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
 					<DshConfigTab
 						ref={dshConfigRef}
 						onDirtyChange={handleDshDirtyChange}
 						dirtyNavIds={dshDirtyNavIds}
 					/>
 				</TabsContent>
-				<TabsContent value="pi" className="flex min-h-0 min-w-0 flex-1">
+				<TabsContent value="pi" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
 			{/* 默认浅色主题整页同底（bg-background），避免顶栏白 / 下方多层灰的割裂感。
 			  左侧导航 = shadcn Vertical Tabs：TabsList 竖排（orientation=vertical），
 			  组标题是非 trigger 的普通 div；窄屏（<820px）回退为横向导航。 */}

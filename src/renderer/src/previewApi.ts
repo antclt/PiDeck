@@ -1046,7 +1046,7 @@ export function createPreviewApi(): PiDesktopApi {
 			probeMcp: async () => ({ ok: true, transport: "stdio" as const, detail: "preview" }),
 			// 预览模式无真实 pi 配置目录，返回占位（源文件页不显示路径行）。
 			getConfigDir: async () => "",
-			saveModels: async () => ({ valid: true }),
+			saveModels: async () => ({ valid: true, modelLoadOk: true, modelCount: 2, modelLoadReason: null, modelLoadDetail: "" }),
 			saveAuth: async () => ({ valid: true }),
 			saveSettings: async () => ({ valid: true }),
 			saveRaw: async () => ({ valid: true }),
@@ -1070,8 +1070,6 @@ export function createPreviewApi(): PiDesktopApi {
 				snippet: "Hello! How can I help you today?",
 				tokens: { input: 8, output: 7 },
 				latencyMs: 320,
-				requestUrl: "https://api.openai.com/v1/chat/completions",
-				requestBody: '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}],"max_tokens":10}',
 			}),
 			visionGetConfig: async () => ({
 				config: null,
@@ -1086,6 +1084,7 @@ export function createPreviewApi(): PiDesktopApi {
 				success: false,
 				error: "preview",
 			}),
+			installUsageSkill: async () => ({ success: false, error: "preview" }),
 		},
 		pet: {
 			onState: noop,

@@ -215,18 +215,33 @@ function fileToolAction(
 	return level.toolActions[tool] ?? level.defaultAction;
 }
 
-/** 从工具入参中提取文件路径（read/write/edit 有路径字段；grep/find/ls 可选 path） */
+/**
+ * 从工具入参中提取文件路径（read/write/edit 有路径字段；grep/find/ls 可选 path）。
+ *
+ * 注意 pi 各工具的文件字段名不一致：read 与 write/edit 一样用 filePath（见
+ * main/feishu 对真实工具事件的解析 toolInputPreview / toolInputSummary），
+ * 不是 path。这里做白名单 + 多字段兑底：漏提取 = 目录边界策略被跳过 =
+ * 工作目录外的读写被放行（严格等级形同虚设）。
+ */
 function extractFilePath(tool: string, input: Record<string, unknown>): string | undefined {
+	const firstString = (...keys: string[]): string | undefined => {
+		for (const key of keys) {
+			const value = input[key];
+			if (typeof value === "string" && value.length > 0) return value;
+		}
+		return undefined;
+	};
 	switch (tool) {
 		case "read":
-			return typeof input.path === "string" ? input.path : undefined;
+			return firstString("filePath", "path", "file");
 		case "write":
 		case "edit":
-			return typeof input.filePath === "string" ? input.filePath : undefined;
+			return firstString("filePath", "path", "file");
 		case "grep":
 		case "find":
 		case "ls":
-			return typeof input.path === "string" ? input.path : undefined;
+			// grep/find/ls 的目录字段为 path（可选，缺省搜工作目录）
+			return firstString("path", "directory", "filePath");
 		default:
 			return undefined;
 	}
@@ -242,20 +257,33 @@ function absolutize(p: string, cwd: string): string {
 
 const UI_ALLOW = "允许执行";
 const UI_DENY = "拒绝";
+/**
+ * 桌面端识别安全确认请求的标题前缀：渲染层据此渲染专用确认卡（工具名 + 等级 +
+ * 详情 + 允许/拒绝），而不是把它当成普通 ask 摘要折叠。前缀后跟 JSON 负载
+ * {tool, level, detail}，避免详情里的换行/竖线干扰解析。
+ */
+const SECURITY_CONFIRM_MARKER = "[PI_DECK_SECURITY_CONFIRM]";
 
 /**
  * 弹窗确认。RPC 模式下取消/无 UI 一律拒绝（fail-safe）。
  * 返回 true = 放行。
+ * 结构化负载（非拼接多行字符串）：桌面端能把「审批什么」展开成独立详情区，
+ * 而不是被两行摘要吞掉；旧版/非桌面客户端仍能用 options 兜底。
  */
 async function confirmAction(
 	ctx: ExtensionContext,
-	title: string,
+	tool: string,
 	detail: string,
 	levelName: string,
 ): Promise<boolean> {
 	if (!ctx.hasUI) return false;
 	try {
-		const choice = await ctx.ui.select(`${title}\n${detail}\n\n[等级: ${levelName}]`, [
+		const payload = JSON.stringify({
+			tool,
+			level: levelName,
+			detail: detail.slice(0, 2000),
+		});
+		const choice = await ctx.ui.select(`${SECURITY_CONFIRM_MARKER}${payload}`, [
 			UI_ALLOW,
 			UI_DENY,
 		]);
@@ -356,12 +384,7 @@ export default async function securityGateExtension(pi: ExtensionAPI) {
 			: (typeof input.filePath === "string" || typeof input.path === "string"
 				? String(input.filePath ?? input.path)
 				: "");
-		const allowed = await confirmAction(
-			ctx,
-			`PiDeck 安全确认：允许 ${tool} 调用吗？`,
-			target.slice(0, 500),
-			level.name,
-		);
+		const allowed = await confirmAction(ctx, tool, target, level.name);
 		if (allowed) return undefined;
 		return {
 			block: true,

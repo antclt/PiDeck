@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { trashPath } from "../fs/trash";
+import { worktreeSlugify } from "../../shared/worktreeSlug";
 import type { WorktreeEntry } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 
@@ -57,7 +58,7 @@ export class WorktreeService {
 		projectId: string,
 		branchName: string,
 	): Promise<{ path: string; branch: string }> {
-		const baseSlug = this.slugify(branchName);
+		const baseSlug = worktreeSlugify(branchName);
 		// worktree 放在项目目录的同级位置：{dirname(projectPath)}/{slug}
 		// 这样用户可以在项目同级目录下直接找到 worktree 文件，符合标准 git worktree 习惯。
 		const parentDir = resolve(projectPath, "..");
@@ -157,20 +158,6 @@ export class WorktreeService {
 			throw new Error(this.translate("mainWorktree.branchExists"));
 		}
 		return { worktreeDir, branch };
-	}
-
-	/**
-	 * 把用户输入转换为合法的 worktree 目录名 / 分支名 slug。
-	 * 保留 Unicode 字母与数字（如中文、日文），只把空格、/、~、: 等 git 分支
-	 * 非法字符以及文件系统不友好的字符替换为 -，避免中文分支名被吞成 workspace。
-	 */
-	private slugify(input: string): string {
-		return input
-			.trim()
-			.replace(/[^\p{L}\p{N}]+/gu, "-")
-			.replace(/^-+/, "")
-			.replace(/-+$/, "")
-			|| "workspace";
 	}
 
 

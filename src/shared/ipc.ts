@@ -381,6 +381,8 @@ export const ipcChannels = {
 	configTestProvider: "config:test-provider",
 	/** 查询 provider 用量/余额（如 opencode-go /v1/usage） */
 	configFetchUsage: "config:fetch-usage",
+	/** 安装内置「用量查询自定义」技能模板到 ~/.pi/agent/skills/usage-probe */
+	configInstallUsageSkill: "config:install-usage-skill",
 
 	// ===== 安全管理（SecurityStore + pi-deck-security-gate 扩展） =====
 	/** 拉取完整安全配置（等级/默认等级/会话覆盖） */

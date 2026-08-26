@@ -161,6 +161,13 @@
         ]
       },
       {
+        "from": "resources/skills",
+        "to": "skills",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "node_modules/undici",
         "to": "extensions/node_modules/undici"
       },

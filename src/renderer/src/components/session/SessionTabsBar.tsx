@@ -11,6 +11,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  RefreshCw,
   RotateCw,
   X,
 } from "lucide-react";
@@ -186,6 +187,9 @@ export type SessionTabsBarProps = {
   canRestartCurrent?: boolean;
   isRestartingCurrent?: boolean;
   onRestartCurrent?: () => void;
+  /** 当前会话的重新加载能力（无 live 运行时）：从磁盘刷新消息文件，只对当前会话 Tab 生效。 */
+  canReloadCurrent?: boolean;
+  onReloadCurrent?: () => void;
 };
 
 export function SessionTabsBar(props: SessionTabsBarProps) {
@@ -282,7 +286,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
                   ? dragIndicator.position
                   : null
               }
-              // 停止/重启只对当前会话有意义（作用于其绑定的 Agent 运行时），非当前 Tab 不显示
+              // 停止/重启/重新加载只对当前会话有意义（作用于其绑定的 Agent 运行时），非当前 Tab 不显示
               canStop={sessionId === currentSessionId ? props.canStopCurrent : undefined}
               onStop={sessionId === currentSessionId ? props.onStopCurrent : undefined}
               canRestart={sessionId === currentSessionId ? props.canRestartCurrent : undefined}
@@ -290,6 +294,8 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
                 sessionId === currentSessionId ? props.isRestartingCurrent : undefined
               }
               onRestart={sessionId === currentSessionId ? props.onRestartCurrent : undefined}
+              canReload={sessionId === currentSessionId ? props.canReloadCurrent : undefined}
+              onReload={sessionId === currentSessionId ? props.onReloadCurrent : undefined}
               onSelect={props.onSelect}
               onPromotePreview={props.onPromotePreview}
               onClose={props.onClose}
@@ -625,6 +631,9 @@ function SessionTab(props: {
   canRestart?: boolean;
   isRestarting?: boolean;
   onRestart?: () => void;
+  /** 重新加载入口（仅当前会话 Tab 传入）：无 live 运行时从磁盘刷新消息文件。 */
+  canReload?: boolean;
+  onReload?: () => void;
   onSelect: (sessionId: string) => void;
   onPromotePreview?: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
@@ -812,6 +821,19 @@ function SessionTab(props: {
             <span className="inline-flex items-center gap-2">
               <RotateCw className={cn("size-3.5", props.isRestarting && "animate-spin")} aria-hidden="true" />
               {props.isRestarting ? t("app.restarting") : t("app.restart")}
+            </span>
+          </DropdownMenuItem>
+        )}
+        {/* 重新加载会话：与重启互斥（无 live 运行时才显示），从磁盘刷新被外部修改的消息文件。 */}
+        {active && props.onReload && (
+          <DropdownMenuItem
+            disabled={!props.canReload}
+            style={!props.canReload ? { opacity: 0.4 } : undefined}
+            onSelect={props.onReload}
+          >
+            <span className="inline-flex items-center gap-2">
+              <RefreshCw className="size-3.5" aria-hidden="true" />
+              {t("menu.reloadSession")}
             </span>
           </DropdownMenuItem>
         )}
