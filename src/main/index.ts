@@ -50,6 +50,10 @@ declare const __PIDECK_DEV_BUILD__: boolean;
 // 避免与正式版（pi-desktop / phids）的数据、单实例锁和通知归属互相污染。
 const isDevBuild = !app.isPackaged || __PIDECK_DEV_BUILD__;
 
+// E2E（Playwright 驱动）静默运行：窗口显示但不抢焦点、不最大化铺满屏，
+// 避免打断用户在其他软件的输入。fixture 通过 env PIDECK_E2E=1 标识。
+const isE2E = process.env.PIDECK_E2E === "1";
+
 // 开发态与正式版隔离 userData。
 // 否则 npm run dev 会与已安装的 PiDeck 共用数据/锁，表现为「开发启动被复用到正式版窗口」。
 // 未打包的 npm run dev：功能分支再按 git 分支名拆目录（pi-desktop-dev-<branch>），
@@ -1783,8 +1787,13 @@ async function createWindow() {
 	function showMainWindowOnce() {
 		if (createdWindow.isDestroyed() || hasShownMainWindow) return;
 		hasShownMainWindow = true;
-		createdWindow.show();
-		createdWindow.focus();
+		if (isE2E) {
+			// E2E 静默：showInactive 显示但不激活，不抢用户焦点
+			createdWindow.showInactive();
+		} else {
+			createdWindow.show();
+			createdWindow.focus();
+		}
 		// 向开发者工具输出启动信息
 		printStartupInfo();
 	}
@@ -1977,6 +1986,8 @@ function applyStartupWindowMode(
 	mode: StartupWindowMode,
 	showImmediately: boolean,
 ) {
+	// E2E 静默：不 maximize/fullscreen，保持默认尺寸（1480x960）避免铺满屏遮挡用户
+	if (isE2E) return;
 	if (mode === "fullscreen") {
 		// setFullScreen 在某些平台要求窗口已 show；隐藏态先 maximize 再在 show 后补全屏。
 		if (showImmediately) {

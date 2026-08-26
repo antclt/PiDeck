@@ -493,7 +493,7 @@ export function AgentContextMenu(props: {
 	/** 打开实时日志查看弹窗（仅开启记录后可用） */
 	onOpenLogs?: () => void;
 	onOpenSessionFile?: () => void;
-	/** 重启会话（仅 live Agent：starting/idle/running 传入）。 */
+	/** 重启会话（全状态：starting/idle/running/error/closed/未启动，调用方按绑定状态分派）。 */
 	onRestartSession?: () => void;
 	/** 重新加载会话（仅无 live 运行时：未启动/error/closed 传入），从磁盘刷新消息文件。 */
 	onReloadSession?: () => void;
@@ -530,7 +530,7 @@ export function AgentContextMenu(props: {
 					)}
 				</>
 			)}
-			{/* 会话运行控制：重启（live）与重新加载（无 live）互斥，由调用方按 agent 状态只传其一 */}
+			{/* 会话运行控制：重启全状态可用；重新加载仅无 live 运行时提供（轻量磁盘刷新，不启动进程） */}
 			{(props.onRestartSession || props.onReloadSession) && <DropdownMenuSeparator />}
 			{props.onRestartSession && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onRestartSession}>
@@ -594,6 +594,8 @@ export function SessionContextMenu(props: {
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
 	onOpenSessionFile?: () => void;
+	/** 重启会话（未启动的历史会话走激活启动；有绑定则走重启）。 */
+	onRestartSession?: () => void;
 	/** 重新加载会话（未启动的历史会话）：从磁盘刷新消息文件。 */
 	onReloadSession?: () => void;
 	/** 打开会话代理设置弹框（菜单项「会话代理」） */
@@ -618,6 +620,14 @@ export function SessionContextMenu(props: {
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
 			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>{t("common.rename")}</DropdownMenuItem>
+			{props.onRestartSession && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onRestartSession}>
+					<span className="inline-flex items-center gap-2">
+						<RotateCw className="size-3.5" aria-hidden="true" />
+						{t("menu.restartSession")}
+					</span>
+				</DropdownMenuItem>
+			)}
 			{props.onReloadSession && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onReloadSession}>
 					<span className="inline-flex items-center gap-2">

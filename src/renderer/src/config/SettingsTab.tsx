@@ -49,6 +49,21 @@ function collectModels(
 
 // ── Settings Tab ────────────────────────────────────────
 
+/**
+ * pi 支持的默认思考档位枚举（与 pi 文档 settings.md 的 defaultThinkingLevel 取值一致，
+ * 直接用原值作 label，避免翻译后大小写/拼写与 pi 内部枚举对不上）。
+ */
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((v) => ({ value: v, label: v }));
+
+/** pi 支持的传输协议枚举（transport 设置项，websocket-cached 为新协议，auto 为默认自动选择）。 */
+const TRANSPORT_OPTIONS = ["sse", "websocket", "websocket-cached", "auto"].map((v) => ({ value: v, label: v }));
+
+/** steering / follow-up 消息发送模式（pi 文档："all" 一次全部发送，"one-at-a-time" 逐条，默认 one-at-a-time）。 */
+const SEND_MODE_OPTIONS = ["all", "one-at-a-time"].map((v) => ({ value: v, label: v }));
+
+/** 项目信任兜底策略（pi 文档：ask/always/never，仅全局设置生效；RPC 模式不弹信任询问，靠此值决定是否加载项目 .pi 资源）。 */
+const PROJECT_TRUST_OPTIONS = ["ask", "always", "never"].map((v) => ({ value: v, label: v }));
+
 export function SettingsTab(props: {
 	data: SettingsFile;
 	saving: boolean;
@@ -237,6 +252,160 @@ export function SettingsTab(props: {
 					/>
 				</div>
 
+				{/* ── 默认供应商 / 默认模型：始终显示，不依赖 settings.json 中是否已存在这两个 key ── */}
+				<div className="config-retry-group">
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong flex flex-col items-start gap-0.5 rounded-none border-none px-4 pb-1 pt-2.5 hover:border-transparent">
+						<SectionHeading
+							className="config-settings-section-heading"
+							title={t("config.defaults.title")}
+							description={t("config.defaults.hint")}
+						/>
+					</div>
+					{/* defaultProvider / defaultModel 未配置时 value 为 undefined，SettingsValueInput 按空串处理
+					    （combobox 空态 + 隐藏清除按钮）；选中后写入 key 本身；清空则保留 key 值为 ""，消费方按默认行为兜底 */}
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary">{configLabel("defaultProvider")}</span>
+						<SettingsValueInput
+							value={data.defaultProvider}
+							fieldKey="defaultProvider"
+							modelsData={props.modelsData}
+							authData={props.authData}
+							discoveredModels={props.discoveredModels}
+							allSettings={data}
+							onChange={(v) => props.onChange({ ...data, defaultProvider: typeof v === "string" ? v : "" })}
+						/>
+					</div>
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary">{configLabel("defaultModel")}</span>
+						<SettingsValueInput
+							value={data.defaultModel}
+							fieldKey="defaultModel"
+							modelsData={props.modelsData}
+							authData={props.authData}
+							discoveredModels={props.discoveredModels}
+							allSettings={data}
+							onChange={(v) => props.onChange({ ...data, defaultModel: typeof v === "string" ? v : "" })}
+						/>
+					</div>
+				</div>
+
+				{/* ── 通用行为：高频 pi 配置常驻显示，未写入时也可见可编辑 ── */}
+				<div className="config-retry-group">
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong flex flex-col items-start gap-0.5 rounded-none border-none px-4 pb-1 pt-2.5 hover:border-transparent">
+						<SectionHeading
+							className="config-settings-section-heading"
+							title={t("config.general.title")}
+							description={t("config.general.hint")}
+						/>
+					</div>
+
+					{/* 默认思考档位：枚举下拉，空值表示不设置（pi 按模型/上下文自行决定） */}
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary" title={t("config.general.thinkingLevelHint")}>{configLabel("defaultThinkingLevel")}</span>
+						<ClearableSettingsInput
+							empty={typeof data.defaultThinkingLevel !== "string" || !data.defaultThinkingLevel}
+							onClear={() => props.onChange({ ...data, defaultThinkingLevel: "" })}
+						>
+							<ConfigComboboxInput
+								value={typeof data.defaultThinkingLevel === "string" ? data.defaultThinkingLevel : ""}
+								options={THINKING_LEVELS}
+								onChange={(v) => props.onChange({ ...data, defaultThinkingLevel: v })}
+								placeholder={t("config.general.thinkingLevelPlaceholder")}
+								clearSpace
+							/>
+						</ClearableSettingsInput>
+					</div>
+
+					{/* 布尔开关行：hideThinkingBlock / quietStartup，直接写 true/false */}
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary" title={t("config.general.hideThinkingBlockHint")}>{configLabel("hideThinkingBlock")}</span>
+						<Label className="config-checkbox-label">
+							<Checkbox
+								checked={data.hideThinkingBlock === true}
+								onCheckedChange={(checked) => props.onChange({ ...data, hideThinkingBlock: checked === true })}
+							/>
+							<span>{data.hideThinkingBlock === true ? t("common.true") : t("common.false")}</span>
+						</Label>
+					</div>
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary" title={t("config.general.quietStartupHint")}>{configLabel("quietStartup")}</span>
+						<Label className="config-checkbox-label">
+							<Checkbox
+								checked={data.quietStartup === true}
+								onCheckedChange={(checked) => props.onChange({ ...data, quietStartup: checked === true })}
+							/>
+							<span>{data.quietStartup === true ? t("common.true") : t("common.false")}</span>
+						</Label>
+					</div>
+
+					{/* steeringMode / followUpMode：steering 与 follow-up 消息的发送模式，
+					    all 一次全部发送，one-at-a-time 逐条（pi 默认），RPC 场景下影响 API 调用方式 */}
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary" title={t("config.general.steeringModeHint")}>{configLabel("steeringMode")}</span>
+						<ClearableSettingsInput
+							empty={typeof data.steeringMode !== "string" || !data.steeringMode}
+							onClear={() => props.onChange({ ...data, steeringMode: "" })}
+						>
+							<ConfigComboboxInput
+								value={typeof data.steeringMode === "string" ? data.steeringMode : ""}
+								options={SEND_MODE_OPTIONS}
+								onChange={(v) => props.onChange({ ...data, steeringMode: v })}
+								placeholder={t("config.general.steeringModePlaceholder")}
+								clearSpace
+							/>
+						</ClearableSettingsInput>
+					</div>
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary" title={t("config.general.followUpModeHint")}>{configLabel("followUpMode")}</span>
+						<ClearableSettingsInput
+							empty={typeof data.followUpMode !== "string" || !data.followUpMode}
+							onClear={() => props.onChange({ ...data, followUpMode: "" })}
+						>
+							<ConfigComboboxInput
+								value={typeof data.followUpMode === "string" ? data.followUpMode : ""}
+								options={SEND_MODE_OPTIONS}
+								onChange={(v) => props.onChange({ ...data, followUpMode: v })}
+								placeholder={t("config.general.followUpModePlaceholder")}
+								clearSpace
+							/>
+						</ClearableSettingsInput>
+					</div>
+
+					{/* defaultProjectTrust：RPC 模式不弹信任询问，靠它在加载项目的 .pi/settings.json 等资源时兜底 */}
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary" title={t("config.general.projectTrustHint")}>{configLabel("defaultProjectTrust")}</span>
+						<ClearableSettingsInput
+							empty={typeof data.defaultProjectTrust !== "string" || !data.defaultProjectTrust}
+							onClear={() => props.onChange({ ...data, defaultProjectTrust: "" })}
+						>
+							<ConfigComboboxInput
+								value={typeof data.defaultProjectTrust === "string" ? data.defaultProjectTrust : ""}
+								options={PROJECT_TRUST_OPTIONS}
+								onChange={(v) => props.onChange({ ...data, defaultProjectTrust: v })}
+								placeholder={t("config.general.projectTrustPlaceholder")}
+								clearSpace
+							/>
+						</ClearableSettingsInput>
+					</div>
+
+					{/* 传输协议：多协议供应商选 sse/websocket/websocket-cached，默认 auto 自动选择 */}
+					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
+						<span className="min-w-[180px] text-control font-medium text-text-primary" title={t("config.general.transportHint")}>{configLabel("transport")}</span>
+						<ClearableSettingsInput
+							empty={typeof data.transport !== "string" || !data.transport}
+							onClear={() => props.onChange({ ...data, transport: "" })}
+						>
+							<ConfigComboboxInput
+								value={typeof data.transport === "string" ? data.transport : ""}
+								options={TRANSPORT_OPTIONS}
+								onChange={(v) => props.onChange({ ...data, transport: v })}
+								placeholder={t("config.general.transportPlaceholder")}
+								clearSpace
+							/>
+						</ClearableSettingsInput>
+					</div>
+				</div>
+
 				{/* ── 全局会话目录（仅编辑 ~/.pi/agent/settings.json 的 sessionDir） ── */}
 				<div className="config-retry-group">
 					<div className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong flex flex-col items-start gap-0.5 rounded-none border-none px-4 pb-1 pt-2.5 hover:border-transparent">
@@ -340,8 +509,8 @@ export function SettingsTab(props: {
 				</div>
 
 				{entries
-					// sessionDir / retry / enabledModels 已有专用区块，避免列表里重复一行
-					.filter(([key]) => key !== "enabledModels" && key !== "retry" && key !== "sessionDir")
+					// sessionDir / retry / enabledModels / defaultProvider / defaultModel 及通用行为区块已占用，避免列表里重复一行
+					.filter(([key]) => key !== "enabledModels" && key !== "retry" && key !== "sessionDir" && key !== "defaultProvider" && key !== "defaultModel" && key !== "defaultThinkingLevel" && key !== "hideThinkingBlock" && key !== "quietStartup" && key !== "steeringMode" && key !== "followUpMode" && key !== "defaultProjectTrust" && key !== "transport")
 					.map(([key, value]) => (
 					<div key={key} className="flex items-center gap-3.5 rounded-sm border border-border-subtle px-4 py-2 transition-colors hover:border-border-strong">
 						<span className="min-w-[180px] text-control font-medium text-text-primary">{configLabel(key)}</span>
@@ -375,7 +544,7 @@ export function SettingsTab(props: {
 						</Button>
 					</div>
 				)}
-				{entries.length === 0 && <div className="py-12 text-center text-control text-text-tertiary">{t("config.emptyConfig")}</div>}
+				{/* 页面恒有 enabledModels / 默认供应商 / 默认模型常驻区块，不再需要空态提示 */}
 			</div>
 		</div>
 	);

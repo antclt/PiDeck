@@ -55,6 +55,12 @@ function log(direction, payload) {
 const crypto = require("node:crypto");
 const sessionId =
 	"mock-" + crypto.createHash("md5").update(process.cwd()).digest("hex").slice(0, 10);
+// 桌面端 resume 历史会话时会传 --session <path>（PiProcess.start:305 → finalPiArgs.push("--session", sessionPath)）。
+// 真实 pi 会加载该文件续写；mock 必须同样尊重它，否则「未启动会话重发」会在 mock 自己的
+// mock-<hash>.jsonl 里另起炉灶，丢掉截断前保留的历史（编辑后的首轮回复从时间线消失）。
+const sessionArgIndex = process.argv.indexOf("--session");
+const resumeSessionPath =
+	sessionArgIndex >= 0 && process.argv[sessionArgIndex + 1] ? process.argv[sessionArgIndex + 1] : null;
 // 模型/思考级别有状态跟踪：桌面端 set_model/set_thinking_level 后会重新
 // get_state 拉取（AgentManager.getRuntimeState），mock 必须返回更新后的值。
 const MODELS = [
@@ -85,7 +91,7 @@ function encodeSessionDir(cwd) {
 // 会话文件双写：
 // 1) tmp 路径作为 get_state.sessionFile（fork/reattach 原语义，不绑项目路径）
 // 2) 项目 cwd/.pi/sessions 镜像，SessionScanner 扫历史（#113 3.2-9）
-let sessionFile = null;
+let sessionFile = resumeSessionPath;
 let sessionHeaderWritten = false;
 const TMP_SESSION_FILE_PATH = path.join(require("node:os").tmpdir(), sessionId + ".jsonl");
 const PROJECT_SESSIONS_DIR = path.join(process.cwd(), ".pi", "sessions");
@@ -103,8 +109,9 @@ function ensureSessionFile() {
 	} catch { /* 写失败仅影响 fork/历史恢复类用例 */ }
 	sessionFile = TMP_SESSION_FILE_PATH;
 }
-// 重启后的新进程：tmp 文件已存在则恢复 sessionFile（桌面端 reattach 语义）
-if (fs.existsSync(TMP_SESSION_FILE_PATH)) {
+// 重启后的新进程：tmp 文件已存在则恢复 sessionFile（桌面端 reattach 语义）。
+// resume 模式下 sessionFile 已指向 --session 传入的文件，不能被残留的 tmp 文件覆盖。
+if (!resumeSessionPath && fs.existsSync(TMP_SESSION_FILE_PATH)) {
 	sessionFile = TMP_SESSION_FILE_PATH;
 	try { sessionHeaderWritten = fs.statSync(TMP_SESSION_FILE_PATH).size > 0; } catch { /* ignore */ }
 }
@@ -186,7 +193,7 @@ let lastEntryId = null;
 // 跨进程续接：重启后的新进程（重发/重启 Agent 会 spawn 新进程）必须从既有文件
 // 恢复条目序号与 leaf，否则新写入的 entry 会复用 e1/e2 等旧 id——与文件头/旧消息
 // 撞 id，SessionHistoryReader 的 byId 索引错乱，活动分支投影残缺（重发后时间线
-// 回退成只有第一轮）。
+// 回退成只有第一轮）。resume（--session）时读的是截断/编辑后的真实文件，同样适用。
 if (sessionFile && fs.existsSync(sessionFile)) {
 	try {
 		const content = fs.readFileSync(sessionFile, "utf8");
@@ -196,10 +203,28 @@ if (sessionFile && fs.existsSync(sessionFile)) {
 			if (!trimmed) continue;
 			try {
 				const entry = JSON.parse(trimmed);
+				if (entry.type === "session") sessionHeaderWritten = true;
 				if (typeof entry.id === "string") {
 					const match = /^e(\d+)$/.exec(entry.id);
 					if (match) maxSeq = Math.max(maxSeq, Number(match[1]));
-					lastEntryId = entry.id;
+					// 活动分支 leaf = 最后一条「非墓碑」记录；deleted 行（删除/resend 截断）
+					// 不在父链上，新写入的 user 消息不能 parent 到它们。
+					if (entry.type !== "deleted") lastEntryId = entry.id;
+				}
+				// 重建内存对话：get_messages 在 fork/reload 后要返回既有历史（对齐真实 pi 的 resume）。
+				if (entry.type === "message" && entry.message) {
+					const role = entry.message.role;
+					if (role === "user" || role === "assistant") {
+						const text = Array.isArray(entry.message.content)
+							? entry.message.content
+								.filter((b) => b && b.type === "text")
+								.map((b) => b.text)
+								.join("")
+							: (entry.message.content ?? "");
+						if (text) {
+							conversationMessages.push({ role, content: [{ type: "text", text }] });
+						}
+					}
 				}
 			} catch { /* 单行损坏跳过 */ }
 		}
@@ -248,12 +273,16 @@ function appendSessionMessages(userText, assistantText) {
 	}));
 	lastEntryId = assistantId;
 	const payload = lines.join("\n") + "\n";
-	// 双写：tmp（runtime sessionFile）+ 项目 sessions（历史扫描）
+	// 双写：tmp（runtime sessionFile）+ 项目 sessions（历史扫描）。
+	// resume 模式下 sessionFile 已在项目 sessions 目录（--session 指向），
+	// 项目镜像就是同一文件，再写一次会把整段对话重复一遍。
 	try { fs.appendFileSync(sessionFile, payload); } catch { /* ignore */ }
-	try {
-		fs.mkdirSync(PROJECT_SESSIONS_DIR, { recursive: true });
-		fs.appendFileSync(PROJECT_SESSION_FILE_PATH, payload);
-	} catch { /* ignore */ }
+	if (PROJECT_SESSION_FILE_PATH !== sessionFile) {
+		try {
+			fs.mkdirSync(PROJECT_SESSIONS_DIR, { recursive: true });
+			fs.appendFileSync(PROJECT_SESSION_FILE_PATH, payload);
+		} catch { /* ignore */ }
+	}
 }
 
 function emit(event) {
@@ -444,6 +473,26 @@ function handleCommand(cmd) {
 				.sort((left, right) => right.length - left.length)[0];
 			if (askMarker) {
 				emitAsk(askMarker, ASK_MARKERS[askMarker]);
+				return;
+			}
+			// CRASH 模拟（E2E：崩溃后消息编辑/删除场景）：先推一个 chunk 再异常退出，
+			// 不发送 agent_end/agent_settled（真实异常中断语义）；桌面端应识别进程退出
+			// 并清理 runtime，后续历史操作走「无 runtime 直接改文件」路径。
+			if (text.includes("CRASH")) {
+				streaming = true;
+				emit({ type: "agent_start" });
+				emit({
+					type: "message_start",
+					message: { role: "assistant", content: [{ type: "text", text: "" }] },
+				});
+				setTimeout(() => {
+					emit({
+						type: "message_update",
+						message: { role: "assistant", content: [{ type: "text", text: "崩溃前最后输出" }] },
+						assistantMessageEvent: { type: "text_delta", delta: "崩溃前最后输出" },
+					});
+					setTimeout(() => process.exit(1), 80);
+				}, 80);
 				return;
 			}
 			if (streaming) {

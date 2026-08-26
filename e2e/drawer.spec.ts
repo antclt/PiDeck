@@ -52,7 +52,7 @@ test("right drawer opens on files and the activity rail switches panels", async 
 test("drawer content width stays constant across tab switches (no scrollbar jitter)", async ({ window }) => {
 	// 进入预置项目（有 300 个文件的超高文件树），打开抽屉
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
-	const projectItem = window.locator(".conversation", { hasText: "pideck-e2e-drawere2e-" }).first();
+	const projectItem = window.locator(".conversation", { hasText: "pideck-seed-drawere2e-" }).first();
 	await expect(projectItem).toBeVisible({ timeout: 20_000 });
 	await projectItem.click();
 	await window.locator(".header-drawer-toggle").first().click();

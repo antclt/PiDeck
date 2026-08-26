@@ -10,7 +10,8 @@ import { join } from "node:path";
  * 并在仓库侧用 git log 复核提交真实落盘。
  */
 
-const repoDir = join(tmpdir(), "pideck-git-e2e-repo");
+// 仓库路径避开 isEphemeralProjectPath 过滤名单（pideck-git-e2e 会被启动时清掉）
+const repoDir = join(tmpdir(), "pideck-seed-git-repo");
 
 function git(args: string) {
 	return execSync(`git ${args}`, { cwd: repoDir, encoding: "utf8" }).trim();
@@ -37,23 +38,27 @@ test("git panel: status -> diff -> stage -> commit", async ({ window }) => {
 	// 选中种子项目（项目行显示目录 basename），并在该项目下新建会话草案
 	// （头部抽屉开关只在有会话视图时渲染；注意「新建 Agent」图标每个项目行都有，
 	//  必须限定在目标项目行内点击，否则会落到聊天项目上）
-	const projectRow = window.locator(".conversation", { hasText: "pideck-git-e2e" }).first();
+	const projectRow = window.locator(".conversation", { hasText: "pideck-seed-git-repo" }).first();
 	await projectRow.click();
-	await projectRow.locator('.project-action[title="新建 Agent"]').click();
+	await projectRow.getByTitle("新建 Agent").first().click();
 	await expect(window.locator(".composer .rich-input")).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
 
 	// 先展开抽屉（rail 只在抽屉打开期间渲染），再切到 Git tab
 	await window.locator(".header-drawer-toggle").first().click();
 	await expect(window.locator(".detail-drawer")).toHaveAttribute("data-open", "true", { timeout: 5000 });
 	await window.locator('[data-testid="drawer-rail-git"]').click();
-	const panel = window.locator(".git-panel");
+	// GitPanel 新组件（bg-background）与旧 GitDrawerHost 都带 .git-panel class，
+	// 用 .bg-background 精确定位新面板（detail-drawer git tab 渲染的是它）。
+	const panel = window.locator(".git-panel.bg-background");
 	await expect(panel).toBeVisible({ timeout: 15_000 });
 	// 分支标签反映真实仓库状态
 	await expect(panel.locator(".git-branch-label")).toHaveText("main", { timeout: 15_000 });
 
 	// 制造一处工作区改动并刷新状态
 	appendFileSync(join(repoDir, "a.txt"), "changed by e2e\n");
-	await panel.locator("#git-pane-changes").getByRole("button", { name: "刷新" }).click();
+	// 刷新按钮在 changes 面板 PaneHeader 的 changeToolbar 里（aria-label="刷新"），
+	// 旧的 #git-pane-changes id 已改为 useId 动态 id（git-pane-:rN:-changes），无法硬编码。
+	await panel.getByRole("button", { name: "刷新" }).first().click();
 	const changedFile = panel.locator(".git-resource-name", { hasText: "a.txt" }).first();
 	await expect(changedFile).toBeVisible({ timeout: 15_000 });
 
@@ -61,8 +66,11 @@ test("git panel: status -> diff -> stage -> commit", async ({ window }) => {
 	await panel.locator(".git-resource-open", { hasText: "a.txt" }).first().click();
 	const diffHeader = window.locator(".file-diff-header");
 	await expect(diffHeader).toBeVisible({ timeout: 10_000 });
-	await expect(diffHeader).toContainText("a.txt");
-	await window.locator(".file-diff-close").click();
+	// 文件名已移到外置 chrome Tab 栏（chromeTabsExternal，tab 文本 “a.txt (更改)”），
+	// FileDiffViewer 内嵌 .file-diff-tab 只在非外置（showInlineTabs）时渲染。
+	await expect(window.locator('[role="tab"]', { hasText: "a.txt" })).toBeVisible({ timeout: 10_000 });
+	// 关闭按钮已从 .file-diff-close class 改为 aria-label="关闭"（FileDiffViewer header 区）
+	await window.locator(".file-diff-header-actions").getByRole("button", { name: "关闭" }).click();
 	await expect(diffHeader).toBeHidden();
 
 	// 全部暂存 → 提交

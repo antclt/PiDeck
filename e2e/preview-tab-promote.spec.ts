@@ -10,7 +10,8 @@ import { join } from "node:path";
  * Tab 应自动常驻（斜体消失）。用户反馈：发送后不再常驻，需双击。
  */
 
-const projectDir = join(tmpdir(), "pideck-preview-promote-e2e");
+// 项目目录避开 isEphemeralProjectPath 过滤名单（pideck-preview-promote-e2e 会被启动时清掉）
+const projectDir = join(tmpdir(), "pideck-seed-preview-promote");
 rmSync(projectDir, { recursive: true, force: true });
 mkdirSync(projectDir, { recursive: true });
 
@@ -23,7 +24,7 @@ test("preview tab becomes permanent after send", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
 	// 打开项目 → 新建 Agent → composer 可用（侧栏项目行按路径目录名匹配）
-	const projectRow = window.locator(".conversation", { hasText: "pideck-preview-promote-e2e" }).first();
+	const projectRow = window.locator(".conversation", { hasText: "pideck-seed-preview-promote" }).first();
 	await projectRow.click();
 	await projectRow.getByTitle("新建 Agent").first().click();
 	const composer = window.locator(".composer .rich-input");
@@ -42,8 +43,9 @@ test("preview tab becomes permanent after send", async ({ window }) => {
 	await window.locator('[role="tab"]').first().locator('[role="tab-close"]').click();
 	await expect(window.locator('[role="tab"]')).toHaveCount(0, { timeout: 10_000 });
 
-	// 关闭 Tab 后 agent 仍在运行：侧栏显示为 agent 行（绑定该会话），点击同样走 preview 模式
-	const row = window.locator(".session-row", { hasText: "PreviewE2E agent" }).first();
+	// 关闭 Tab 后 agent 仍在运行：侧栏显示为 agent 行（状态点 + 会话标题，标题已更新为首条消息内容，
+	// 不再是 draft 时的「项目名 agent」），点击同样走 preview 模式
+	const row = window.locator(".agent-row", { hasText: "预览会话一号" }).first();
 	await row.click();
 	const previewTab = window.locator('[role="tab"]').first();
 	await expect(previewTab).toBeVisible({ timeout: 10_000 });

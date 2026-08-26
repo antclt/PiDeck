@@ -57,6 +57,7 @@ import { PromptDeliveryUnknownError } from "./utils/promptErrors";
 import {
   isLiveRuntimeStatus,
   requireSessionCommand,
+  SessionCommandFailure,
   sessionCommandFailureToast,
   toSessionRuntimeTarget,
 } from "./utils/sessionCommands";
@@ -173,6 +174,7 @@ import { createDefaultExternalEditorSettings, DEFAULT_PET_SCALE } from "../../sh
 import type {
   AgentRuntimeState,
   AgentTab,
+  SessionRuntimeTarget,
   AppInfo,
   AppSettings,
   ChatMessage,
@@ -281,6 +283,8 @@ export function App() {
 
   /** 当前正在重启的 Agent，用于仅给对应会话显示 loading，避免切到其他 Agent 后仍被全局禁用。 */
   const [restartingAgentId, setRestartingAgentId] = useState<string | null>(null);
+  /** 当前正在激活（首次启动）的会话：未绑定 Agent 时「重启会话」走 activateRuntime，用会话 id 标记 loading。 */
+  const [activatingSessionId, setActivatingSessionId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
 
   // composerAgentModes legacy mirror removed — mode restore uses Session atom in useQueuedPrompt.
@@ -2134,49 +2138,119 @@ export function App() {
     // 避免后端 get_state 返回过时的 isStreaming: true 覆盖前端立刻设的 false。
   }
 
+  /**
+   * restartRuntime 的核心流程：pending（重启中）动画 + 替换回调 + toast。
+   * restartingAgent 仅用于侧栏/tab 的重启中反馈；找不到时（如已 detach 的终态
+   * agent 不在 inventory）也照常重启，不因缺少展示对象而阻断。
+   */
+  async function restartRuntimeTarget(target: SessionRuntimeTarget, restartingAgent?: AgentTab) {
+    if (restartingAgent) {
+      setRestartingAgentId(restartingAgent.id);
+      pendingAgentsRef.current = [
+        ...pendingAgentsRef.current.filter((agent) => agent.id !== restartingAgent.id),
+        {
+          ...restartingAgent,
+          status: "starting",
+          pendingKind: "restart",
+          pendingStartedAt: Date.now(),
+        },
+      ];
+      setPendingAgents(pendingAgentsRef.current);
+    }
+    try {
+      const replacement = requireSessionCommand(await api.sessions.restartRuntime(target));
+      if (restartingAgent) {
+        pendingAgentsRef.current = pendingAgentsRef.current.filter(
+          (agent) => agent.id !== restartingAgent.id,
+        );
+        setPendingAgents(pendingAgentsRef.current);
+      }
+      void refreshRuntimeState(replacement.runtime.agentId);
+      showToast(t("app.agentRestarted"), 2000);
+    } catch (error) {
+      if (restartingAgent) {
+        pendingAgentsRef.current = pendingAgentsRef.current.map((agent) =>
+          agent.id === restartingAgent.id ? { ...agent, status: "error" } : agent,
+        );
+        setPendingAgents(pendingAgentsRef.current);
+      }
+      throw error;
+    } finally {
+      if (restartingAgent) {
+        setRestartingAgentId((current) =>
+          current === restartingAgent.id ? null : current,
+        );
+      }
+    }
+  }
+
   async function restartActiveAgent(agentId = activeAgentId) {
     if (!agentId) return;
     const restartingAgent = agents.find((agent) => agent.id === agentId) ?? activeAgent;
     if (!restartingAgent) return;
     const target = getRuntimeTargetForAgent(restartingAgent.id);
     if (!target) {
-      // 终态（error/closed）或无绑定的 Agent 没有可重启的运行实例：
-      // 菜单按状态隐藏了重启，这里兜底防竞态/其他入口（如模型切换重启）静默无反馈。
+      // error/closed 终态仍保留 agentId+runtimeGeneration（target 存在，可幂等重启）；
+      // 只有 detached/无绑定（无 target）才会走到这里。该场景由 restartSessionAnyState
+      // 改走 activateRuntime 启动，这里兜底防竞态/其他入口（如模型切换重启）静默无反馈。
       showToast(t("sessionCommand.runtimeUnavailable"), 4000);
       return;
     }
-    setRestartingAgentId(restartingAgent.id);
-    pendingAgentsRef.current = [
-      ...pendingAgentsRef.current.filter(
-        (agent) => agent.id !== restartingAgent.id,
-      ),
-      {
-        ...restartingAgent,
-        status: "starting",
-        pendingKind: "restart",
-        pendingStartedAt: Date.now(),
-      },
-    ];
-    setPendingAgents(pendingAgentsRef.current);
     try {
-      const replacement = requireSessionCommand(await api.sessions.restartRuntime(target));
-      pendingAgentsRef.current = pendingAgentsRef.current.filter(
-        (agent) => agent.id !== restartingAgent.id,
-      );
-      setPendingAgents(pendingAgentsRef.current);
-      void refreshRuntimeState(replacement.runtime.agentId);
-      showToast(t("app.agentRestarted"), 2000);
+      await restartRuntimeTarget(target, restartingAgent);
     } catch (error) {
-      pendingAgentsRef.current = pendingAgentsRef.current.map((agent) =>
-        agent.id === restartingAgent.id
-          ? { ...agent, status: "error" }
-          : agent,
+      showToast(error instanceof Error ? error.message : String(error), 5000);
+    }
+  }
+
+  /**
+   * 按会话状态分派「重启会话」：失败/未启动/空闲/运行中的统一入口。
+   * - 有绑定（runtime.agentId 仍在）→ restartRuntimeTarget；error/closed 终态也能幂等重启。
+   * - 无绑定（未启动/detached）→ activateRuntime 启动新 Agent。
+   * - restartRuntime 若因「主进程已惰性解绑」抛 SESSION_RUNTIME_UNAVAILABLE/CHANGED
+   *   （agent crash 后发消息激活触发主进程 unbindTerminalAgent 但不推事件，前端未同步），
+   *   降级 activateRuntime 重新绑定启动——根治「右键重启没反应」。
+   */
+  async function restartSessionAnyState(sessionId: string) {
+    if (!sessionId) return;
+    const runtime = store.get(sessionRuntimeBySessionIdAtomFamily(sessionId));
+    const target = toSessionRuntimeTarget(sessionId, runtime);
+    if (target) {
+      try {
+        await restartRuntimeTarget(
+          target,
+          agents.find((agent) => agent.id === target.agentId),
+        );
+        return;
+      } catch (error) {
+        const canFallback =
+          error instanceof SessionCommandFailure &&
+          (error.code === "SESSION_RUNTIME_UNAVAILABLE" || error.code === "SESSION_RUNTIME_CHANGED");
+        if (!canFallback) {
+          showToast(error instanceof Error ? error.message : String(error), 5000);
+          return;
+        }
+        // 主进程绑定已解绑（前端未同步）：降级为重新激活启动，不重复报错。
+        // 先清掉 restart 失败残留的 error pending，避免激活成功后侧栏出现两个同会话 agent。
+        pendingAgentsRef.current = pendingAgentsRef.current.filter(
+          (agent) => agent.id !== target.agentId,
+        );
+        setPendingAgents(pendingAgentsRef.current);
+      }
+    }
+    // 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）
+    setActivatingSessionId(sessionId);
+    try {
+      const activated = requireSessionCommand(
+        await api.sessions.activateRuntime(sessionId),
       );
-      setPendingAgents(pendingAgentsRef.current);
+      void refreshRuntimeState(activated.agentId);
+      showToast(t("app.sessionStarted"), 2000);
+    } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 5000);
     } finally {
-      setRestartingAgentId((current) =>
-        current === restartingAgent.id ? null : current,
+      setActivatingSessionId((current) =>
+        current === sessionId ? null : current,
       );
     }
   }
@@ -2752,6 +2826,10 @@ export function App() {
       reload: async (_projectId, session) => {
         await reloadSessionMessages(session.id);
       },
+      // 重启会话（全状态：失败/未启动/空闲/运行中，按绑定状态分派 restart/activate）
+      restart: async (_projectId, session) => {
+        await restartSessionAnyState(session.id);
+      },
       archive: async (projectId, session) => {
         await archiveSidebarSession(projectId, session);
       },
@@ -2779,9 +2857,12 @@ export function App() {
         })
         : Promise.resolve(),
       close: requestCloseAgent,
-      // 重启 live Agent（菜单只在 live 状态传入，此处直接走 App 的 restartActiveAgent）
+      // 重启会话（全状态）：反查绑定会话走统一分派（live/error/closed 重启，未启动激活）；
+      // 反查不到会话（罕见：已 detach 且无绑定）退回 restartActiveAgent 兜底。
       restart: (agent) => {
-        restartActiveAgent(agent.id);
+        const sessionId = store.get(sessionIdByRuntimeAgentIdAtomFamily(agent.id));
+        if (sessionId) void restartSessionAnyState(sessionId);
+        else restartActiveAgent(agent.id);
       },
       // 重新加载会话消息：按 agentId 反查绑定的会话记录 id（error/closed 仍保留绑定）
       reload: async (agent) => {
@@ -2910,26 +2991,26 @@ export function App() {
     onSplitGroupColorChange: (color: string) =>
       workspaceChrome.setSplitGroupConfig((config) => ({ ...config, color })),
     onExitAllSplit: workspaceChrome.exitAllSplit,
-    // Tab 下拉运行控制（织入对方收敛方案）：只对当前会话 Tab 生效。
-    // 关闭会话 = 停止 Agent 运行 + 移除会话 Tab（与“关闭标签页”仅移除 Tab 不同）
-    canStopCurrent:
-      activeAgent?.status === "running" || activeAgent?.status === "idle",
-    // 会话从未启动（无绑定 agent）时隐藏“关闭会话”：停止无意义，关闭走“关闭标签页”
+    // Tab 下拉运行控制：只对当前会话 Tab 生效。
+    // 停止 Agent = 停掉当前会话绑定的 pi/DSH 进程（保留会话与 Tab，可随时重启/重载），
+    // 与「关闭标签页」仅移除 Tab 不同；无绑定或已终态（error/closed）的会话隐藏停止入口。
+    canStopCurrent: isLiveRuntimeStatus(activeAgent?.status),
     onStopCurrent: activeAgentId
       ? () => {
-          void abortAgent(activeAgentId);
-          if (currentSessionId) workspaceChrome.closeTab(currentSessionId);
+          void closeAgent(activeAgentId).catch((error) => {
+            showToast(error instanceof Error ? error.message : String(error), 5000);
+          });
         }
       : undefined,
-    // 重启只对 live Agent（starting/idle/running）有意义：error/closed（红叉）重启必失败，
-    // 该类会话改由「重新加载会话」承接（见 canReloadCurrent）。
-    canRestartCurrent: Boolean(activeAgentId) && isLiveRuntimeStatus(activeAgent?.status),
-    isRestartingCurrent: restartingAgentId === activeAgentId,
-    // 没有绑定运行时的草稿也有会话 ID，但重启只对已启动 Agent 有意义
-    onRestartCurrent:
-      activeAgentId && isLiveRuntimeStatus(activeAgent?.status)
-        ? () => void restartActiveAgent(activeAgentId)
-        : undefined,
+    // 重启会话对所有状态开放：有绑定运行实例（starting/idle/running/error/closed）走
+    // restartRuntime（主进程幂等 stop+重建）；未绑定（未启动/detached）走 activateRuntime。
+    // 分派逻辑统一收敛在 restartSessionAnyState（不再用 isLiveRuntimeStatus 挡 error/closed）。
+    canRestartCurrent: Boolean(currentSessionId),
+    isRestartingCurrent:
+      restartingAgentId === activeAgentId || activatingSessionId === currentSessionId,
+    onRestartCurrent: currentSessionId
+      ? () => void restartSessionAnyState(currentSessionId)
+      : undefined,
     // 重新加载会话：无 live 运行时（未启动/error/closed）时可用，从磁盘刷新消息文件；
     // live 会话刷新走重启即可，不做磁盘强刷以免覆盖内存中的流式消息。
     canReloadCurrent: Boolean(currentSessionId) && !isLiveRuntimeStatus(activeAgent?.status),

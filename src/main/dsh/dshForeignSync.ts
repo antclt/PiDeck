@@ -58,6 +58,12 @@ export type DshForeignSyncDeps = {
 		environment: "native" | "wsl";
 		backend: "dsh";
 		dshSessionId: string;
+		/**
+		 * 会话真实活跃时间（磁盘日志文件 mtime）。批量同步每轮都会全量重导所有外部会话，
+		 * 不带这个就用 Date.now()，DSH 会话每次重启被顶到启动时刻、永远排在 pi 会话上面。
+		 * 语义与 pi 会话一致（扫描器用文件 mtime 当 updatedAt）。
+		 */
+		updatedAt?: number;
 		agentPreset?: string;
 		keepExistingTitle?: boolean;
 		/** 仅手动导入为 true；批量同步不得清删除墓碑。 */
@@ -225,6 +231,9 @@ export async function importForeignSession(
 		environment: deps.getEnvironment(),
 		backend: "dsh",
 		dshSessionId,
+		// 排序语义：updatedAt 用磁盘日志文件 mtime，而不是导入时刻——
+		// 否则每轮全量重导都会把 DSH 会话顶到“现在”，重启后永远排在 pi 会话上面。
+		...(target.updatedAt !== undefined ? { updatedAt: target.updatedAt } : {}),
 		...(target.agentPreset ? { agentPreset: target.agentPreset } : {}),
 		...(retainTitle ? { keepExistingTitle: true } : {}),
 		...(restoreDismissed ? { restoreDismissed: true } : {}),

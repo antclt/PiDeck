@@ -60,7 +60,8 @@ function foreignItem(overrides = {}) {
 async function createFixture(foreignItems, knownIds = new Set()) {
   const { SessionCatalog, ...sync } = loadModules();
   const dir = await mkdtemp(join(tmpdir(), "pideck-dsh-foreign-sync-"));
-  const catalog = new SessionCatalog(join(dir, "catalog.json"));
+  const catalogPath = join(dir, "catalog.json");
+  const catalog = new SessionCatalog(catalogPath);
   await catalog.load();
   const fallbackProject = { id: "builtin-external" };
   let fallbackCreated = 0;
@@ -95,6 +96,7 @@ async function createFixture(foreignItems, knownIds = new Set()) {
   };
   return {
     catalog,
+    catalogPath,
     sync,
     deps,
     get fallbackCreated() { return fallbackCreated; },
@@ -278,6 +280,61 @@ test("re-importing the same dshSessionId updates in place instead of duplicating
     const persisted = fixture.catalog.listEntries()[0];
     assert.equal(persisted.title, "新标题");
     assert.equal(persisted.projectId, "project-beta");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("importForeignSession uses disk file mtime as updatedAt instead of import time", async () => {
+  const fixture = await createFixture([]);
+  try {
+    // 远早于导入时刻的 mtime：模拟一条几天前活跃的 DSH 会话
+    const mtime = 1_700_000_000_000;
+    const record = await fixture.sync.importForeignSession(
+      fixture.deps,
+      "session-web-1",
+      foreignItem({ title: "wc 周会", cwd: "C:/repo/alpha", updatedAt: mtime }),
+    );
+    assert.equal(record.updatedAt, mtime, "updatedAt 必须来自磁盘日志文件 mtime，而不是 Date.now()");
+    // 重启全量重导场景：同一 mtime 重复导入，updatedAt 不得被顶到“现在”
+    const again = await fixture.sync.importForeignSession(
+      fixture.deps,
+      "session-web-1",
+      foreignItem({ title: "wc 周会", cwd: "C:/repo/alpha", updatedAt: mtime }),
+    );
+    assert.equal(again.updatedAt, mtime, "重复导入（重启重导）不得顶高 updatedAt");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("re-import with an older mtime corrects a previously bumped updatedAt and persists it", async () => {
+  const fixture = await createFixture([]);
+  try {
+    const mtime = 1_700_000_000_000;
+    const record = await fixture.sync.importForeignSession(
+      fixture.deps,
+      "session-web-1",
+      foreignItem({ title: "wc 周会", cwd: "C:/repo/alpha", updatedAt: mtime }),
+    );
+    // 模拟旧版本 bug：启动/attach 把 updatedAt 顶到“现在”
+    await fixture.catalog.update(record.id, { updatedAt: Date.now() });
+    // 本轮带真实 mtime 重导，应把被顶高的时间拉回磁盘活跃时刻
+    const corrected = await fixture.sync.importForeignSession(
+      fixture.deps,
+      "session-web-1",
+      foreignItem({ title: "wc 周会", cwd: "C:/repo/alpha", updatedAt: mtime }),
+    );
+    assert.equal(corrected.updatedAt, mtime, "旧的错误顶高值必须被 mtime 拉回");
+    // updatedAt 单独变化也必须落盘：重开 catalog 从磁盘读回验证
+    const { SessionCatalog } = loadModules();
+    const reloaded = new SessionCatalog(fixture.catalogPath);
+    await reloaded.load();
+    assert.equal(
+      reloaded.listEntries().find((entry) => entry.id === record.id).updatedAt,
+      mtime,
+      "mtime 修正必须写入 catalog.json（不能只改内存不落盘）",
+    );
   } finally {
     await fixture.cleanup();
   }

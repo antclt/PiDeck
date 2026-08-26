@@ -492,6 +492,12 @@ export class SessionCatalog {
 		agentPreset?: string;
 		/** 外部（dsh-web 等）会话导入：host 会话已存在，条目直接置 active（重启不清理）。 */
 		dshSessionId?: string;
+		/**
+		 * DSH 外部会话的真实活跃时间（磁盘日志文件 mtime）。自动同步每轮全量重导，
+		 * 不带这个就用 Date.now()，会话每次重启被顶到启动时刻、永远排在 pi 会话上面。
+		 * 语义与 pi 会话一致（扫描器用文件 mtime 当 updatedAt）。
+		 */
+		updatedAt?: number;
 		/** 纠正归属时保留已有真实标题；占位名（cwd 末段）由调用方决定是否覆盖。 */
 		keepExistingTitle?: boolean;
 		/**
@@ -527,7 +533,9 @@ export class SessionCatalog {
 						existing.title !== nextTitle ||
 						existing.backend !== input.backend ||
 						agentPresetChanged ||
-						existing.status !== "active"
+						existing.status !== "active" ||
+						// mtime 变化也落盘：修正历史被顶高的 updatedAt，否则排序永远错
+						existing.updatedAt !== (input.updatedAt ?? now)
 					);
 					existing.projectId = input.projectId;
 					existing.title = nextTitle;
@@ -535,7 +543,8 @@ export class SessionCatalog {
 					existing.status = "active";
 					// 外部会话 header 携带的 preset 变化（host 会话 header 是权威）随导入同步
 					if (input.agentPreset !== undefined) existing.agentPreset = input.agentPreset;
-					existing.updatedAt = now;
+					// 排序语义：用磁盘日志文件 mtime（真实活跃时间），不再顶到导入时刻
+					existing.updatedAt = input.updatedAt ?? now;
 					return { value: cloneEntry(existing), changed };
 				}
 			}
@@ -561,7 +570,8 @@ export class SessionCatalog {
 				agentPreset: input.agentPreset,
 				dshSessionId: input.dshSessionId,
 				createdAt: now,
-				updatedAt: now,
+				// 外部会话导入带 mtime（真实活跃时间）；pi 草稿没有该字段，仍用当前时刻
+				updatedAt: input.updatedAt ?? now,
 			};
 			entries.push(nextEntry);
 			return { value: cloneEntry(nextEntry), changed: true };
