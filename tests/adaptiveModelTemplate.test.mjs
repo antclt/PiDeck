@@ -75,17 +75,62 @@ test("merge: 无 endpoint listing 时全部来自 catalog", () => {
 	assert.equal(template.reasoning, true);
 });
 
-test("merge: 无 catalog 模板时只用 endpoint 实报字段", () => {
+test("merge: 无 catalog 模板时只用 endpoint 实报字段，缺省推理默认开放", () => {
 	const template = mergeAdaptiveModelTemplate(listing({ contextWindow: 64000 }), null);
 	assert.equal(template.contextWindow, 64000);
 	assert.equal(template.maxTokens, undefined);
-	assert.equal(template.reasoning, undefined);
+	// 端点未声明推理 → 默认支持思考并开放全部档位（用户有得选）
+	assert.equal(template.reasoning, true);
+	assert.deepEqual(JSON.parse(JSON.stringify(template.thinkingLevelMap)), {
+		xhigh: "xhigh",
+		max: "max",
+	});
 	assert.equal(template.matchedId, undefined);
 });
 
-test("merge: 都无数据时空模板，不猜默认值", () => {
+test("merge: 都无数据时默认开放思考档位，不猜容量", () => {
 	const template = mergeAdaptiveModelTemplate(undefined, null);
-	assert.deepEqual(JSON.parse(JSON.stringify(template)), {});
+	assert.deepEqual(JSON.parse(JSON.stringify(template)), {
+		reasoning: true,
+		thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+	});
+});
+
+test("merge: 端点明确 reasoning=false 不被默认值覆盖", () => {
+	const template = mergeAdaptiveModelTemplate(listing({ reasoning: false }), null);
+	assert.equal(template.reasoning, false);
+	// 非推理模型不开放档位映射
+	assert.equal(template.thinkingLevelMap, undefined);
+});
+
+test("merge: 端点已声明档位映射时默认映射不覆盖", () => {
+	const template = mergeAdaptiveModelTemplate(
+		listing({ reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: null, medium: null } }),
+		null,
+	);
+	assert.equal(template.reasoning, true);
+	// 端点的 null 禁用语义完整保留（MiniMax-M2.7 只支持 high 的场景）
+	assert.deepEqual(JSON.parse(JSON.stringify(template.thinkingLevelMap)), {
+		off: null,
+		minimal: null,
+		low: null,
+		medium: null,
+	});
+});
+
+test("merge: 端点 reasoning=true 未声明档位 → 默认开放 xhigh/max", () => {
+	const template = mergeAdaptiveModelTemplate(listing({ reasoning: true }), null);
+	assert.equal(template.reasoning, true);
+	assert.deepEqual(JSON.parse(JSON.stringify(template.thinkingLevelMap)), {
+		xhigh: "xhigh",
+		max: "max",
+	});
+});
+
+test("merge: catalog 明确非推理 → 不开放档位", () => {
+	const template = mergeAdaptiveModelTemplate(undefined, catalogSpec({ reasoning: false, thinkingLevelMap: undefined }));
+	assert.equal(template.reasoning, false);
+	assert.equal(template.thinkingLevelMap, undefined);
 });
 
 test("reset: 清空五个能力字段后写模板有值字段", () => {
@@ -109,12 +154,18 @@ test("reset: 清空五个能力字段后写模板有值字段", () => {
 	assert.equal(next.contextWindow, 200000);
 });
 
-test("reset: 模板缺失的字段不写入（落盘即空）", () => {
+test("reset: 模板缺失的字段不写入（落盘即空，推理默认除外）", () => {
+	const template = mergeAdaptiveModelTemplate(undefined, null);
 	const next = applyAdaptiveTemplateReset(
 		{ id: "unknown-model", contextWindow: 100, maxTokens: 200, reasoning: true, input: ["text"] },
-		{},
+		template,
 	);
-	assert.deepEqual(plainModel(next), { id: "unknown-model" });
+	// 模板为空时：容量/模态清空交还 Pi 默认，但推理默认开放（自适应未匹配的兜底策略）
+	assert.deepEqual(plainModel(next), {
+		id: "unknown-model",
+		reasoning: true,
+		thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+	});
 });
 
 test("reset: 纯文本模板显式清掉图片输入与 reasoning", () => {

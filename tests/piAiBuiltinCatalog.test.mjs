@@ -108,6 +108,57 @@ test("parseProviderModelsResponse: 读 listing 容量字段，缺则省略", () 
 	]);
 });
 
+test("parseProviderModelsResponse: 读端点实报的推理/模态/档位声明", () => {
+	const models = parseProviderModelsResponse({
+		data: [
+			{
+				id: "minimax-m2.7",
+				contextWindow: 200000,
+				maxTokens: 131072,
+				reasoning: true,
+				input: ["text"],
+				thinkingLevelMap: { off: null, minimal: null, low: null, medium: null },
+			},
+			{
+				id: "vision",
+				reasoning: false,
+				input: ["text", "image"],
+				thinkingLevelMap: { high: "high", xhigh: "xhigh", junk: "drop" },
+			},
+			{
+				id: "weird",
+				reasoning: "yes", // 非法布尔 → 丢弃
+				input: ["audio", "image", 42], // 过滤后只留 image
+				thinkingLevelMap: { medium: 7 }, // 非法值 → 丢弃
+			},
+		],
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify(models)), [
+		{
+			id: "minimax-m2.7",
+			contextWindow: 200000,
+			maxTokens: 131072,
+			reasoning: true,
+			input: ["text"],
+			thinkingLevelMap: { off: null, minimal: null, low: null, medium: null },
+		},
+		{
+			id: "vision",
+			reasoning: false,
+			input: ["text", "image"],
+			thinkingLevelMap: { high: "high", xhigh: "xhigh" },
+		},
+		{ id: "weird", input: ["image"] },
+	]);
+});
+
+test("parseProviderModelsResponse: 空/非法声明不出现（不猜默认值）", () => {
+	const models = parseProviderModelsResponse({
+		data: [{ id: "plain", input: [], thinkingLevelMap: {} }],
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify(models)), [{ id: "plain" }]);
+});
+
 test("parseProviderModelsResponse: Gemini models/ 前缀与 inputTokenLimit", () => {
 	const models = parseProviderModelsResponse(
 		{
