@@ -2388,9 +2388,9 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.storage.clearAllDesc": "Clear both app logs and RPC log files at once",
   "settings.storage.clearAllButton": "Clear All Logs",
   "settings.storage.clearLocalStorage": "Clear UI Local Cache",
-  "settings.storage.clearLocalStorageDesc": "Reset UI preferences such as sidebar/drawer width, collapse state, and file sort. Settings, sessions, and logs are not affected.",
+  "settings.storage.clearLocalStorageDesc": "Clear renderer UI cache such as filters and file sort; sidebar/drawer width is restored from app settings. Settings, sessions, and logs are not affected.",
   "settings.storage.clearLocalStorageButton": "Clear UI Cache",
-  "settings.storage.clearLocalStorageConfirm": "Clear UI local cache? Layout and collapse preferences will reset and the page will reload. Settings and session data are unaffected.",
+  "settings.storage.clearLocalStorageConfirm": "Clear UI local cache? Filters and sort preferences will reset; sidebar/drawer width will be restored from app settings. The page will reload. Settings and session data are unaffected.",
   "settings.storage.openFolder": "Open Log Folder",
   "settings.storage.openFolderDesc": "View log files in file manager",
   // ===== Usage stats (usage-stats) =====

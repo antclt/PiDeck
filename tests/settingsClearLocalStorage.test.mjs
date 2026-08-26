@@ -1,6 +1,6 @@
 // 缓存与日志设置页「清理界面本地缓存」：
 // - 操作走 ConfirmDialog 确认（danger），确认后 localStorage.clear() + 整页刷新
-// - 只清理渲染层 localStorage（纯 UI 偏好），不触碰主进程日志/设置
+// - 只清理渲染层 localStorage（缓存类 UI 偏好），不触碰主进程日志/设置；面板宽度由 settings 兜底
 // - i18n 中英文案成对存在
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

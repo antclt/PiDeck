@@ -1,4 +1,4 @@
-// 侧栏宽度持久化（全局 localStorage）：
+// 侧栏宽度持久化（localStorage 首屏缓存 + settings durable fallback）：
 // - readListWidth/writeListWidth 纯函数：默认值回退、越界 clamp
 // - 防呆重点：即使存储了 0（折叠态）或极小值，恢复宽度也至少是
 //   LIST_WIDTH_MIN——绝不出现“重启后侧栏窄到拖不动”的情况
@@ -97,6 +97,17 @@ test("hook hydrates and persists list width, but never the collapsed state", () 
   // 折叠状态不持久化：重启后侧栏总是展开，不存在“折叠成 0 找不到侧栏”
   assert.doesNotMatch(hook, /writeListWidth[^;]*listCollapsed/);
   assert.match(hook, /const \[listCollapsed, setListCollapsed\] = useState\(false\)/);
+});
+
+test("reopening the collapsed sidebar keeps the last expanded width", () => {
+  // 展开不能再把用户宽度重置为默认值；否则一次折叠/展开就会覆盖持久化值。
+  assert.doesNotMatch(hook, /if \(!nextCollapsed\) setListWidth\(DEFAULT_LIST_WIDTH\)/);
+});
+
+test("sidebar width can hydrate from durable settings when the renderer origin changes", () => {
+  assert.match(hook, /loadPersistedWidth\?: \(\) => Promise<unknown>/);
+  assert.match(hook, /persistWidth\?: \(width: number\) => void \| Promise<unknown>/);
+  assert.match(hook, /usePersistedPanelWidth\(\{/);
 });
 
 test("AppShell shares the list width bounds with the persistence clamp", () => {

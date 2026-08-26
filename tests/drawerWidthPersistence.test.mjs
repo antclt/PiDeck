@@ -1,4 +1,4 @@
-// 抽屉宽度持久化（全局 localStorage）：
+// 抽屉宽度持久化（localStorage 首屏缓存 + settings durable fallback）：
 // - readDrawerWidth/writeDrawerWidth 纯函数：默认值回退、越界 clamp、损坏数据容错
 // - App 不再持有独立 drawerWidth useState，状态单一归属 useWorkspacePanels
 // - AppShell 宽度上下限与持久化 clamp 范围同源（DRAWER_WIDTH_MIN/MAX 从 hook 导入）
@@ -13,6 +13,7 @@ const typescript = require("typescript");
 const hook = readFileSync("src/renderer/src/hooks/useWorkspacePanels.ts", "utf8");
 const app = readFileSync("src/renderer/src/App.tsx", "utf8");
 const appShell = readFileSync("src/renderer/src/components/app/AppShell.tsx", "utf8");
+const settingsTypes = readFileSync("src/shared/types/settings.ts", "utf8");
 
 async function loadPureExports(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -94,6 +95,22 @@ test("hook hydrates and persists drawer width through its storage option", () =>
   assert.match(hook, /const \[drawerWidth, setDrawerWidth\] = useState\(\(\) => readDrawerWidth\(storageRef\.current\)\)/);
   assert.match(hook, /writeDrawerWidth\(storageRef\.current, drawerWidth\)/);
   assert.match(hook, /drawerWidth,\n\s+setDrawerWidth,/);
+});
+
+test("drawer width can hydrate from durable settings when the renderer origin changes", () => {
+  assert.match(hook, /loadPersistedWidth\?: \(\) => Promise<unknown>/);
+  assert.match(hook, /persistWidth\?: \(width: number\) => void \| Promise<unknown>/);
+  assert.match(hook, /usePersistedPanelWidth\(\{/);
+});
+
+test("App supplies one durable settings fallback for both panel widths", () => {
+  assert.match(app, /const getLayoutSettings = useCallback\(\(\) =>/);
+  assert.match(app, /loadPersistedWidth: loadDrawerWidth/);
+  assert.match(app, /persistWidth: persistDrawerWidth/);
+  assert.match(app, /loadPersistedWidth: loadSidebarWidth/);
+  assert.match(app, /persistWidth: persistSidebarWidth/);
+  assert.match(settingsTypes, /sidebarWidth\?: number/);
+  assert.match(settingsTypes, /drawerWidth\?: number/);
 });
 
 test("AppShell shares the drawer width bounds with the persistence clamp", () => {
