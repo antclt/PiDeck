@@ -29,7 +29,8 @@ import {
   sessionRuntimeBySessionIdAtomFamily,
 } from "../../atoms";
 import { t } from "../../i18n";
-import { AnimatedBadge, type AnimatedBadgeStatus } from "../motion/animated-badge";
+import { AnimatedBadge } from "../motion/animated-badge";
+import { sessionStatusBadge } from "../../utils/sessionStatusBadge";
 import { Button } from "../ui-shadcn/button";
 import {
   DropdownMenu,
@@ -83,38 +84,6 @@ export const SPLIT_GROUP_COLOR_PALETTE = [
  *   停止 Agent（仅当前 Tab，保留会话与 Tab）、重启（仅当前 Tab）、关闭/关闭其他/关闭全部；
  * - 当前 Tab 识别：背景浮起（bg-accent/20 + shadow-sm + 强边框），
  *   与左侧 SessionTree 选中态同一套语义，不再画底部横条（曾因过粗被弃用）。
-
-/**
- * 会话状态 → AnimatedBadge 状态映射（颜色语义与用户约定一致）：
- * - starting=loading（启动中：蓝色旋转徽章）
- * - running/pending/waiting=loading + 黄色覆盖（运行/等待中：黄色旋转徽章）
- * - idle=neutral（未启动：白色/灰色图标）
- * - error=danger（失败：红色图标）
- * detached/closed/未启动返回 undefined，不渲染徽章（避免把“未运行”误读成某种状态）。
- */
-function sessionStatusBadge(
-	status?: string | null,
-): { status: AnimatedBadgeStatus; colorClass?: string } | undefined {
-	if (!status || status === "detached") return undefined;
-	switch (status) {
-		case "error":
-			return { status: "danger" };
-		case "idle":
-			return { status: "neutral" };
-		// 启动中：官方 loading（primary 蓝）旋转；运行/等待：同 loading 旋转但覆盖为黄色
-		case "starting":
-			return { status: "loading" };
-		case "running":
-		case "pending":
-		case "waiting":
-			return {
-				status: "loading",
-				colorClass: "text-amber-500 dark:text-amber-400",
-			};
-		default:
-			return undefined;
-	}
-}
 
 /** “+” 下拉里的新建目标：聊天对话区或已打开项目 */
 export type NewSessionTarget = {
@@ -182,6 +151,7 @@ export type SessionTabsBarProps = {
   onPromoteEditorPreview?: (tabId: string) => void;
   /** 当前会话的停止 Agent 能力（停掉绑定的 pi/DSH 进程，保留会话与 Tab）：只对当前会话 Tab 生效。 */
   canStopCurrent?: boolean;
+  isStoppingCurrent?: boolean;
   onStopCurrent?: () => void;
   /** 当前会话的重启能力：只对当前会话 Tab 生效。 */
   canRestartCurrent?: boolean;
@@ -189,6 +159,7 @@ export type SessionTabsBarProps = {
   onRestartCurrent?: () => void;
   /** 当前会话的重新加载能力（无 live 运行时）：从磁盘刷新消息文件，只对当前会话 Tab 生效。 */
   canReloadCurrent?: boolean;
+  isReloadingCurrent?: boolean;
   onReloadCurrent?: () => void;
 };
 
@@ -288,6 +259,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
               }
               // 停止/重启/重新加载只对当前会话有意义（作用于其绑定的 Agent 运行时），非当前 Tab 不显示
               canStop={sessionId === currentSessionId ? props.canStopCurrent : undefined}
+              isStopping={sessionId === currentSessionId ? props.isStoppingCurrent : undefined}
               onStop={sessionId === currentSessionId ? props.onStopCurrent : undefined}
               canRestart={sessionId === currentSessionId ? props.canRestartCurrent : undefined}
               isRestarting={
@@ -295,6 +267,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
               }
               onRestart={sessionId === currentSessionId ? props.onRestartCurrent : undefined}
               canReload={sessionId === currentSessionId ? props.canReloadCurrent : undefined}
+              isReloading={sessionId === currentSessionId ? props.isReloadingCurrent : undefined}
               onReload={sessionId === currentSessionId ? props.onReloadCurrent : undefined}
               onSelect={props.onSelect}
               onPromotePreview={props.onPromotePreview}
@@ -624,15 +597,17 @@ function SessionTab(props: {
   dragging: boolean;
   /** 拖拽插入指示：before=左缘竖线，after=右缘竖线 */
   indicator?: "before" | "after" | null;
-  /** 停止 Agent 入口（仅当前会话 Tab 传入）：canStop=false 时禁用 */
+  /** 停止 Agent 入口（仅当前会话 Tab 传入）：canStop=false 时禁用，isStopping 时显示“停止中…” */
   canStop?: boolean;
+  isStopping?: boolean;
   onStop?: () => void;
   /** 重启入口（仅当前会话 Tab 传入）：canRestart=false 时禁用，isRestarting 时显示“重启中…” */
   canRestart?: boolean;
   isRestarting?: boolean;
   onRestart?: () => void;
-  /** 重新加载入口（仅当前会话 Tab 传入）：无 live 运行时从磁盘刷新消息文件。 */
+  /** 重新加载入口（仅当前会话 Tab 传入）：无 live 运行时从磁盘刷新消息文件，isReloading 时显示“重载中…” */
   canReload?: boolean;
+  isReloading?: boolean;
   onReload?: () => void;
   onSelect: (sessionId: string) => void;
   onPromotePreview?: (sessionId: string) => void;
@@ -650,8 +625,13 @@ function SessionTab(props: {
   const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
   const status = runtime?.status;
   // 状态徽章语义与侧栏 SessionTree 状态点一致（idle=蓝、running/starting=黄、error=红）；
-  // 未启动（无 runtime）不显示徽章，避免把“未运行”误读成某种状态。
-  const badge = sessionStatusBadge(status);
+  // 重启/停止/重载进行中时统一显示 loading（旋转）；未启动（无 runtime）且无操作不显示徽章，
+  // 避免把“未运行”误读成某种状态。
+  const badge = sessionStatusBadge(status, {
+    isRestarting: props.isRestarting,
+    isStopping: props.isStopping,
+    isReloading: props.isReloading,
+  });
   const title = record?.title || t("common.untitled");
   // 操作菜单（受控）：下拉按钮点击或右键 Tab 打开；Tab 本体点击仍是切换，
   // 拖拽排序与中键关闭与菜单互不干扰（drag/auxclick 不触发 click）。
@@ -802,13 +782,13 @@ function SessionTab(props: {
         </DropdownMenuItem>
         {active && props.onStop && (
           <DropdownMenuItem
-            disabled={!props.canStop}
-            style={!props.canStop ? { opacity: 0.4 } : undefined}
+            disabled={!props.canStop || props.isStopping}
+            style={!props.canStop || props.isStopping ? { opacity: 0.4 } : undefined}
             onSelect={props.onStop}
           >
             <span className="inline-flex items-center gap-2">
-              <CircleStop className="size-3.5" aria-hidden="true" />
-              {t("tabs.stopAgent")}
+              <CircleStop className={cn("size-3.5", props.isStopping && "animate-pulse")} aria-hidden="true" />
+              {props.isStopping ? t("app.stopping") : t("tabs.stopAgent")}
             </span>
           </DropdownMenuItem>
         )}
@@ -827,13 +807,13 @@ function SessionTab(props: {
         {/* 重新加载会话：无 live 运行时可用（从磁盘刷新被外部修改的消息文件，不启动进程）；重启现全状态可用，二者可并存 */}
         {active && props.onReload && (
           <DropdownMenuItem
-            disabled={!props.canReload}
-            style={!props.canReload ? { opacity: 0.4 } : undefined}
+            disabled={!props.canReload || props.isReloading}
+            style={!props.canReload || props.isReloading ? { opacity: 0.4 } : undefined}
             onSelect={props.onReload}
           >
             <span className="inline-flex items-center gap-2">
-              <RefreshCw className="size-3.5" aria-hidden="true" />
-              {t("menu.reloadSession")}
+              <RefreshCw className={cn("size-3.5", props.isReloading && "animate-spin")} aria-hidden="true" />
+              {props.isReloading ? t("app.reloading") : t("menu.reloadSession")}
             </span>
           </DropdownMenuItem>
         )}

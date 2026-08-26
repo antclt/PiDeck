@@ -112,6 +112,8 @@ export const enUS: Record<TranslationKey, string> = {
   "app.shellSwitched": "Switched to {shell}",
   "app.restart": "Restart",
   "app.restarting": "Restarting...",
+  "app.stopping": "Stopping...",
+  "app.reloading": "Reloading...",
   "app.sessionReloaded": "Session reloaded",
   "app.sessionReloadFailed": "Failed to reload session: {error}",
   "app.scrollToBottom": "Scroll to bottom",

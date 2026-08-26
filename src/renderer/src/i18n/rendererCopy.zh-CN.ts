@@ -112,6 +112,8 @@ export const zhCN = {
   "app.shellSwitched": "已切换到 {shell}",
   "app.restart": "重启",
   "app.restarting": "重启中…",
+  "app.stopping": "停止中…",
+  "app.reloading": "重载中…",
   "app.sessionReloaded": "会话已重新加载",
   "app.sessionReloadFailed": "重新加载会话失败：{error}",
   "app.scrollToBottom": "移动到最新",

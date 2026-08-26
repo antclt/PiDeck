@@ -285,6 +285,10 @@ export function App() {
   const [restartingAgentId, setRestartingAgentId] = useState<string | null>(null);
   /** 当前正在激活（首次启动）的会话：未绑定 Agent 时「重启会话」走 activateRuntime，用会话 id 标记 loading。 */
   const [activatingSessionId, setActivatingSessionId] = useState<string | null>(null);
+  /** 当前正在停止的 Agent：Tab 栏「停止」/侧栏关闭 Agent 时给对应会话 tab 徽章显示 loading。 */
+  const [stoppingAgentId, setStoppingAgentId] = useState<string | null>(null);
+  /** 当前正在从磁盘重载消息的会话：Tab 栏「重载」时给对应会话 tab 徽章显示 loading。 */
+  const [reloadingSessionId, setReloadingSessionId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
 
   // composerAgentModes legacy mirror removed — mode restore uses Session atom in useQueuedPrompt.
@@ -2054,8 +2058,12 @@ export function App() {
    */
   async function reloadSessionMessages(sessionId: string) {
     if (!sessionId) return;
-    // live 运行时不能强刷磁盘：菜单虽已按状态隐藏，但保留边界守卫防状态在菜单打开期间变化。
-    if (getRuntimeTargetForSession(sessionId)) return;
+    // live 运行时（starting/idle/running）不能强刷磁盘，会覆盖内存中的流式消息；
+    // error/closed 终态仍持有绑定（getRuntimeTargetForSession 有 target），但进程已死，
+    // 应当允许从磁盘刷新——这里必须按 status 判 live，不能用 target 判（否则 error/closed 的重载入口会被静默吞掉）。
+    if (isSessionRuntimeLive(sessionId)) return;
+    // 标记重载中：Tab 栏「重载」菜单项/tab 徽章据此显示 loading 动画
+    setReloadingSessionId(sessionId);
     setSessionMessageLoadState({ sessionId, state: { status: "loading" } });
     try {
       const page = await api.sessions.readRecordMessagePage(sessionId, undefined, 100);
@@ -2078,6 +2086,8 @@ export function App() {
         t("app.sessionReloadFailed", { error: error instanceof Error ? error.message : String(error) }),
         5000,
       );
+    } finally {
+      setReloadingSessionId((current) => (current === sessionId ? null : current));
     }
   }
 
@@ -2095,7 +2105,13 @@ export function App() {
     if (isPendingAgentId(agentId)) return;
     const target = getRuntimeTargetForAgent(agentId);
     if (!target) return;
-    requireSessionCommand(await api.sessions.stopRuntime(target));
+    // 标记停止中：Tab 栏「停止」菜单项/tab 徽章据此显示 loading 动画
+    setStoppingAgentId(agentId);
+    try {
+      requireSessionCommand(await api.sessions.stopRuntime(target));
+    } finally {
+      setStoppingAgentId((current) => (current === agentId ? null : current));
+    }
   }
 
   function requestCloseAgent(agent: AgentTab): Promise<void> {
@@ -2995,6 +3011,7 @@ export function App() {
     // 停止 Agent = 停掉当前会话绑定的 pi/DSH 进程（保留会话与 Tab，可随时重启/重载），
     // 与「关闭标签页」仅移除 Tab 不同；无绑定或已终态（error/closed）的会话隐藏停止入口。
     canStopCurrent: isLiveRuntimeStatus(activeAgent?.status),
+    isStoppingCurrent: stoppingAgentId === activeAgentId,
     onStopCurrent: activeAgentId
       ? () => {
           void closeAgent(activeAgentId).catch((error) => {
@@ -3014,6 +3031,7 @@ export function App() {
     // 重新加载会话：无 live 运行时（未启动/error/closed）时可用，从磁盘刷新消息文件；
     // live 会话刷新走重启即可，不做磁盘强刷以免覆盖内存中的流式消息。
     canReloadCurrent: Boolean(currentSessionId) && !isLiveRuntimeStatus(activeAgent?.status),
+    isReloadingCurrent: reloadingSessionId === currentSessionId,
     onReloadCurrent: currentSessionId
       ? () => void reloadSessionMessages(currentSessionId)
       : undefined,
