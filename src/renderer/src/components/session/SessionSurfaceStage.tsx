@@ -1,4 +1,4 @@
-import { ArrowDown } from "lucide-react";
+import { CircleArrowDown } from "lucide-react";
 import { useAtomValue } from "jotai";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import type { SessionMessageTimelineProps } from "./SessionMessageTimeline";
@@ -50,14 +50,14 @@ export function SessionSurfaceStage(props: {
 				<div className="pointer-events-none absolute inset-0 z-20" aria-hidden="true">
 					<div style={chatContentWidthStyle} className="relative h-full">
 						<Button
-							variant="outline"
+							variant="ghost"
 							size="icon"
-							className="pointer-events-auto absolute right-0 bottom-1.5 size-7 rounded-full border-border-subtle bg-bg-panel/95 text-text-tertiary shadow-md backdrop-blur-sm transition-colors hover:border-accent hover:bg-bg-hover hover:text-accent"
+							className="pointer-events-auto absolute left-1/2 bottom-1.5 size-7 -translate-x-1/2 text-text-secondary hover:bg-transparent hover:text-text-secondary"
 							onClick={sessionTimeline.scrollToBottom}
 							title={t("app.scrollToBottom")}
 							aria-label={t("app.scrollToBottom")}
 						>
-							<ArrowDown size={14} />
+							<CircleArrowDown size={28} className="size-7" />
 						</Button>
 					</div>
 				</div>

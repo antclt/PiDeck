@@ -1496,7 +1496,6 @@ export const enUS: Record<TranslationKey, string> = {
     ", then send us the console error and config snippet.",
   "config.saveFailed": "Save failed",
   "config.saved": "Configuration saved",
-  "config.noUnsavedChangesCurrentTab": "No unsaved changes on this page",
   "config.unsavedTitle": "Unsaved Changes",
   "config.unsavedMessage": "You have unsaved changes. Do you want to save before closing?",
   "config.saveAndClose": "Save and Close",

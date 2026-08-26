@@ -1490,7 +1490,6 @@ export const zhCN = {
   "config.renderCrashedHelpSuffix": "，并把控制台错误和配置片段反馈给我们。",
   "config.saveFailed": "保存失败",
   "config.saved": "配置已保存",
-  "config.noUnsavedChangesCurrentTab": "当前页面没有未保存的修改",
   "config.unsavedTitle": "未保存的更改",
   "config.unsavedMessage": "您有未保存的更改，是否在关闭前保存？",
   "config.saveAndClose": "保存并关闭",

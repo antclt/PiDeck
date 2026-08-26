@@ -1862,15 +1862,12 @@ function ConfigModalContent(props: ConfigModalProps) {
 	/** 当前后端分页下的 tab 编码（DSH 页固定 "dsh"，Pi 页按 section:tab）。 */
 	const currentTabKey = backendPane === "dsh" ? "dsh" : sectionTabValue(section, tab);
 
-	/** 顶部统一保存按钮：保存当前 tab 的未保存修改（不关闭弹框）。 */
+	/** 顶部统一保存按钮：保存当前 tab（无修改也允许再次保存，重新写盘当前 tab；不关闭弹框）。 */
 	const handleSaveCurrent = async () => {
-		const tabKey = currentTabKey;
-		if (saving || !dirtyTabs.has(tabKey)) {
-			// 当前 tab 无修改但其他 tab 有：提示而不是静默，避免用户以为保存成功了
-			if (dirtyTabs.size > 0) showToast(t("config.noUnsavedChangesCurrentTab"));
-			return;
-		}
-		await saveByKey(tabKey);
+		if (saving) return;
+		// 无修改也放开再次保存；skills/prompts/extensions 等无保存语义的页
+		// 由各自 save 方法（如 saveGlobalSkillEditor 的 !editingGlobalSkill 守卫）返回 false，不产生副作用。
+		await saveByKey(currentTabKey);
 	};
 
 	/** 关闭弹框：有未保存修改时先弹保存确认（借鉴设置页），无修改直接关闭。 */
@@ -1936,12 +1933,12 @@ function ConfigModalContent(props: ConfigModalProps) {
 					<DialogTitle className="text-sm font-semibold tracking-tight">{t("config.title")}</DialogTitle>
 					<div className="flex items-center gap-1.5">
 						{/* 顶部统一保存：各 tab 内部保存按钮可能被滚动藏住，这里常驻可见；
-						    有未保存修改时按钮带黄点标记，无修改时禁用 */}
+						    有未保存修改时按钮带黄点标记；无修改也放开再次保存，不再禁用 */}
 						<Button
 							variant="default"
 							size="sm"
 							onClick={() => void handleSaveCurrent()}
-							disabled={!hasDirty || saving}
+							disabled={saving}
 							title={hasDirty ? t("config.dirtyTooltip") : undefined}
 						>
 							{hasDirty && (

@@ -98,6 +98,7 @@ import {
   setSessionAttachmentsAtom,
   setSessionCatalogLoadStateAtom,
   setSessionMessageLoadStateAtom,
+  setSessionHistoryMutationOverlayAtom,
   setSessionDraftAtom,
   cacheSessionMessagesAtom,
   upsertSessionAtom,
@@ -239,6 +240,8 @@ export function App() {
   const promoteSessionComposerState = useSetAtom(promoteSessionComposerStateAtom);
   const setSessionCatalogLoadState = useSetAtom(setSessionCatalogLoadStateAtom);
   const setSessionMessageLoadState = useSetAtom(setSessionMessageLoadStateAtom);
+  // 会话消息区域遮罩（SessionSurfaceStage）：重启/停止/重载等运行时操作据此显示「正在…」加载动画
+  const setMutationOverlay = useSetAtom(setSessionHistoryMutationOverlayAtom);
   const removeSessionState = useSetAtom(removeSessionStateAtom);
   const removeSessionComposerState = useSetAtom(removeSessionComposerStateAtom);
   const setImageGenConfig = useSetAtom(imageGenConfigAtom);
@@ -2062,8 +2065,9 @@ export function App() {
     // error/closed 终态仍持有绑定（getRuntimeTargetForSession 有 target），但进程已死，
     // 应当允许从磁盘刷新——这里必须按 status 判 live，不能用 target 判（否则 error/closed 的重载入口会被静默吞掉）。
     if (isSessionRuntimeLive(sessionId)) return;
-    // 标记重载中：Tab 栏「重载」菜单项/tab 徽章据此显示 loading 动画
+    // 标记重载中：Tab 栏「重载」菜单项/tab 徽章 + 会话消息区域遮罩据此显示 loading 动画
     setReloadingSessionId(sessionId);
+    setMutationOverlay({ sessionId, kind: "reloading" });
     setSessionMessageLoadState({ sessionId, state: { status: "loading" } });
     try {
       const page = await api.sessions.readRecordMessagePage(sessionId, undefined, 100);
@@ -2088,6 +2092,7 @@ export function App() {
       );
     } finally {
       setReloadingSessionId((current) => (current === sessionId ? null : current));
+      setMutationOverlay({ sessionId, kind: null });
     }
   }
 
@@ -2105,12 +2110,14 @@ export function App() {
     if (isPendingAgentId(agentId)) return;
     const target = getRuntimeTargetForAgent(agentId);
     if (!target) return;
-    // 标记停止中：Tab 栏「停止」菜单项/tab 徽章据此显示 loading 动画
+    // 标记停止中：Tab 栏「停止」菜单项/tab 徽章 + 会话消息区域遮罩据此显示 loading 动画
     setStoppingAgentId(agentId);
+    setMutationOverlay({ sessionId: target.sessionId, kind: "stopping" });
     try {
       requireSessionCommand(await api.sessions.stopRuntime(target));
     } finally {
       setStoppingAgentId((current) => (current === agentId ? null : current));
+      setMutationOverlay({ sessionId: target.sessionId, kind: null });
     }
   }
 
@@ -2254,8 +2261,11 @@ export function App() {
         setPendingAgents(pendingAgentsRef.current);
       }
     }
-    // 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）
+    // 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）。
+    // 重启活会话走 restartRuntimeTarget→restartingAgentId→SessionSurfaceStage 的 isRestarting 遮罩；
+    // 这里（无绑定）没有 restartingAgentId，需显式设置 activating 遮罩，让会话消息区域也有加载动画。
     setActivatingSessionId(sessionId);
+    setMutationOverlay({ sessionId, kind: "activating" });
     try {
       const activated = requireSessionCommand(
         await api.sessions.activateRuntime(sessionId),
@@ -2268,6 +2278,7 @@ export function App() {
       setActivatingSessionId((current) =>
         current === sessionId ? null : current,
       );
+      setMutationOverlay({ sessionId, kind: null });
     }
   }
 

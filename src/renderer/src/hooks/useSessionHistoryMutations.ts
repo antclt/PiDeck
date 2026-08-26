@@ -109,11 +109,13 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     setLoadState({ sessionId, state: { status: "ready" } });
   }, [cacheMessages, setLoadState, showOverlay]);
 
-  /** live 运行时才先停：error/closed 终态进程已死，先 stop 会误报（且产品上无需停）。 */
+  /** live 运行时（starting/idle/running）才先停：error/closed 终态进程已死，先 stop 会误报（且产品上无需停）。 */
   const stopIfRunning = useCallback(async (sessionId: string) => {
-    // 与主进程 requireStoppedForFileMutation 的 getTarget 对齐：有 target 就停（stop 幂等），
-    // 不再依赖渲染层 status。渲染层 status 未同步（detached/undefined）而主进程仍有绑定时，
-    // 原逻辑会跳过 stop 直接改文件，被主进程 SESSION_RUNTIME_BUSY 拒绝（编辑/删除静默失败）。
+    // 按 runtime status 而非 target 判定：主进程 requireStoppedForFileMutation 的 getTarget
+    // 对 error/closed 有解绑副作用（返回 undefined），即终态不 BUSY、无需停。渲染层
+    // getRuntimeTargetForSession 对 error/closed 仍保留 agentId（有 target），若用它判定
+    // 会对已死进程误发 stop，并让删除文案误显「先停止 Agent」（见 after-crash e2e 回归）。
+    if (!depsRef.current.isSessionRuntimeLive(sessionId)) return;
     const target = depsRef.current.getRuntimeTargetForSession(sessionId);
     if (!target) return;
     showOverlay(sessionId, "stopping");
@@ -126,11 +128,10 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     onConfirmed: () => Promise<void>,
   ) => {
     const latest = depsRef.current;
-    // 与主进程 requireStoppedForFileMutation 对齐：有 runtime target 即视为需先停。
-    // 用 target（agentId+runtimeGeneration）而非 status 判定：status 未同步时原逻辑会
-    // 漏停、直接改文件被主进程 BUSY 拒绝；stop 对终态幂等，多停一次无害。
-    const hasTarget = Boolean(latest.getRuntimeTargetForSession(sessionId));
-    if (!hasTarget) {
+    // live 运行时（starting/idle/running）才需先停：error/closed 终态进程已死，直接改文件即可。
+    // 主进程 getTarget 对 error/closed 有解绑副作用（返回 undefined）→ 不会 BUSY，无需停。
+    const live = latest.isSessionRuntimeLive(sessionId);
+    if (!live) {
       void onConfirmed();
       return;
     }
@@ -209,9 +210,10 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
     }
     // kind 为 delete 时策略只会给出 unsupported-anonymous 或 catalog，这里收窄类型
     if (path.path !== "catalog") return;
-    // 文案与 stopIfRunning 同口径：用 target 判定是否需先停（stop 幂等），
-    // 避免 status 未同步时文案说“直接删”但实际会先停，造成用户困惑。
-    const live = Boolean(latest.getRuntimeTargetForSession(sessionId));
+    // 文案与 stopIfRunning 同口径：按 runtime status 判定是否需先停。error/closed 终态进程
+    // 已死（主进程 getTarget 对终态有解绑副作用，返回 undefined 不 BUSY），直接删除即可；
+    // live（starting/idle/running）才提示「先停止 Agent」。
+    const live = latest.isSessionRuntimeLive(sessionId);
     latest.showConfirm({
       title: t("message.deleteTitle"),
       message: live ? t("message.historyStopToDeleteBody") : t("message.deleteReloadPrompt"),
