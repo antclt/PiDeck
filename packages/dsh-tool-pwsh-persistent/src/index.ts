@@ -56,8 +56,12 @@ const require = createRequire(import.meta.url);
 const TIMEOUT_CODE = "PERSISTENT_PWSH_TIMEOUT";
 const POLL_INTERVAL_MS = 25;
 const SCROLLBACK_MAX_CHARS = 512 * 1024;
+// 模型可见的默认描述：刻意只讲持久会话的收益（复用进程、状态保留），
+// 不再写「沙箱下请用普通 pwsh」这类取舍——那条引导会让模型几乎永不选本工具
+// （见 2026-08 会话实测：15 次调用全是 one-shot pwsh）。沙箱语义仍由权限预设
+// 在工具准入层把关，描述层不替模型做"该不该用"的决策。
 const DEFAULT_DESCRIPTION =
-	"Run PowerShell commands in a persistent pwsh shell (much faster than the regular pwsh tool: the shell process is reused, avoiding ~350ms cold start per call). State, including the current directory and exported environment variables, persists across calls for this agent — use `Set-Location` and read it back, or pass `workdir`-independent absolute paths when you need a known location. Runs with full permissions (no sandbox): prefer the regular `pwsh` tool when the file policy requires a sandbox. Non-zero exits are reported as `[exit code: N]`. If the shell crashes or times out it is reset automatically and the next call starts fresh.";
+	"Run PowerShell commands in a persistent pwsh shell: prefer this tool for PowerShell work. The shell is reused across calls, so there is no per-call cold start. State — the current directory and exported environment variables — persists between calls; use `Set-Location` to change directory or pass absolute paths. Non-zero exits are reported as `[exit code: N]`; after a crash or timeout the shell resets automatically.";
 
 function markers(): { start: string; end: string } {
 	const nonce = randomUUID();
