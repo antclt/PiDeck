@@ -1603,6 +1603,7 @@ export class SessionScanner {
       customMarker: 0,       // customType: "*.child-session"
       namePattern: 0,        // sessionName 以 "subagent-" 开头
       parentHeader: 0,       // session header 中的 parentSession
+      tintinwebMarker: 0,    // tintinweb 平铺子代理：会话名 <agent>#<8hex> + parentSession header
     };
 
     const pathInferredParent = isWsl
@@ -1612,12 +1613,19 @@ export class SessionScanner {
     subagentScore.customMarker = hasSubagentChildMarker ? 2 : 0;
     subagentScore.namePattern = latestSessionInfoName?.startsWith("subagent-") ? 1 : 0;
     subagentScore.parentHeader = forkParentSession ? 1 : 0;
+    // @tintinweb/pi-subagents 持久化的子代理会话是 pi 原生平铺文件（与父同目录，
+    // 文件名 <timestamp>_<sessionId>.jsonl），路径推断与 subagent- 前缀都不命中；
+    // 它 setSessionName("<agent>#<id 前 8 位>")（UUID 片段，8 位 16 进制），
+    // 且 header 带 parentSession——该形态与 pi 原生 fork 同构，仅靠名字模式区分。
+    subagentScore.tintinwebMarker =
+      Boolean(forkParentSession) && /^[^#]+#[0-9a-f]{8}$/i.test(latestSessionInfoName ?? "") ? 2 : 0;
 
     const confidenceScore =
       subagentScore.pathInferred +
       subagentScore.customMarker +
       subagentScore.namePattern +
-      subagentScore.parentHeader;
+      subagentScore.parentHeader +
+      subagentScore.tintinwebMarker;
 
     let parentSessionPath: string | undefined;
     if (source === "pi" && confidenceScore >= 2) {
@@ -1625,25 +1633,7 @@ export class SessionScanner {
       parentSessionPath = pathInferredParent;
       // 路径推断失败时，尝试使用 forkParentSession header 引用的父路径
       if (!parentSessionPath && forkParentSession) {
-        const normalizedForkParent = forkParentSession.replace(/\\/g, "/");
-        const resolved = isWsl
-          ? posixJoin(posixDirname(filePath), normalizedForkParent)
-          // forkParentSession 可能来自 fork header 的绝对 Windows 路径；
-          // path.join 在 Windows 上不会以盘符根路径重置，需用 resolve。
-          : resolve(dirname(filePath), forkParentSession);
-        const normalizedResolved = this.normalize(resolved);
-        const normalizedSessionsRoot = this.normalize(this.findSessionsRootForFile(filePath));
-        // header 来自外部 JSONL；仅允许引用当前 sessions 根目录内的现有文件，避免路径穿越或误挂载。
-        const isInsideSessionsRoot =
-          normalizedResolved !== normalizedSessionsRoot &&
-          normalizedResolved.startsWith(`${normalizedSessionsRoot}/`);
-        const resolvedExists = isInsideSessionsRoot && (
-          isWsl ? await this.existsWslFile(resolved, signal) : existsSync(resolved)
-        );
-        if (resolvedExists) {
-          parentSessionPath = resolved;
-        } else {
-        }
+        parentSessionPath = await this.resolveForkParentPath(filePath, forkParentSession, isWsl, signal);
       }
     }
 
@@ -1765,10 +1755,88 @@ export class SessionScanner {
    */
   async inferSessionNameAndValidity(
     filePath: string,
-  ): Promise<{ name?: string; valid?: boolean }> {
+  ): Promise<{ name?: string; valid?: boolean; parentSessionPath?: string }> {
     const head = await this.readHeadAndInfer(filePath);
     if (!head) return {};
-    return { name: head.name, valid: isValidPiSessionFileHead(head.raw) };
+    const parentSessionPath = await this.detectFlatSubagentParentFromHead(filePath, head.raw);
+    return { name: head.name, valid: isValidPiSessionFileHead(head.raw), parentSessionPath };
+  }
+
+  /**
+   * 由 fork/branch/tintinweb 子代理的 parentSession header 解析父会话路径。
+   * 仅允许引用当前 sessions 根目录内的现有文件（防路径穿越/误挂载），
+   * 本地/WSL 分别按平台语义拼接（绝对 Windows 路径用 resolve 而非 join，
+   * 否则盘符路径会在 join 时被重置）。解析失败返回 undefined，不抛异常。
+   */
+  private async resolveForkParentPath(
+    filePath: string,
+    forkParentSession: string,
+    isWsl: boolean,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const normalizedForkParent = forkParentSession.replace(/\\/g, "/");
+    const resolved = isWsl
+      ? posixJoin(posixDirname(filePath), normalizedForkParent)
+      : resolve(dirname(filePath), forkParentSession);
+    const normalizedResolved = this.normalize(resolved);
+    const normalizedSessionsRoot = this.normalize(this.findSessionsRootForFile(filePath));
+    const isInsideSessionsRoot =
+      normalizedResolved !== normalizedSessionsRoot &&
+      normalizedResolved.startsWith(`${normalizedSessionsRoot}/`);
+    const resolvedExists = isInsideSessionsRoot && (
+      isWsl ? await this.existsWslFile(resolved, signal) : existsSync(resolved)
+    );
+    return resolvedExists ? resolved : undefined;
+  }
+
+  /**
+   * 从有界头部 JSONL 文本中探测平铺子代理（@tintinweb/pi-subagents 形态）的父会话路径。
+   * 判定：session header 带 parentSession 且会话名匹配 <agent>#<8hex>。
+   * 只有该形态的平铺文件会命中；用户 fork（名字是用户命名）、普通会话不被误判。
+   */
+  private async detectFlatSubagentParentFromHead(
+    filePath: string,
+    raw: string,
+  ): Promise<string | undefined> {
+    // 头部截断产生的半行会被 JSON.parse 跳过，不影响本次探测。
+    let forkParentSession: string | undefined;
+    let latestSessionInfoName: string | undefined;
+    for (const line of raw.split(/\r?\n/).filter(Boolean)) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!isSessionScanLine(parsed)) continue;
+      const entry = parsed;
+      if (entry.type === "session") {
+        forkParentSession ||= this.optionalString(entry.parentSession ?? entry.header?.parentSession);
+      } else if (entry.type === "session_info") {
+        latestSessionInfoName = this.optionalString(entry.name ?? entry.data?.name);
+      }
+    }
+    if (!forkParentSession || !latestSessionInfoName) return undefined;
+    // tintinweb 会话名 <agent>#<8hex>：名字必须落在 #8 位十六进制后缀，
+    // 否则视为用户 fork / 普通会话（fork 名由用户命名，通常不含该模式）。
+    if (!/^[^#]+#[0-9a-f]{8}$/i.test(latestSessionInfoName)) return undefined;
+    const isWsl = this.isWslPath(filePath);
+    return this.resolveForkParentPath(filePath, forkParentSession, isWsl);
+  }
+
+  /**
+   * 有界探测平铺子代理会话（@tintinweb/pi-subagents 形态）：
+   * 会话文件与父会话同目录平铺、文件名 <timestamp>_<sessionId>.jsonl，
+   * 路径推断（looksLikeNestedSessionPath）无法识别；它与 pi 原生 fork/branch
+   * 的文件形态完全一致（都带 parentSession header），唯一区分是 tintinweb 会
+   * setSessionName("<agent>#<id前8位>")，会话名以 #8 位十六进制结尾。
+   * 返回解析后的父会话路径；非 tintinweb 形态（fork/普通会话）返回 undefined。
+   * 仅读头部（SUMMARY_NAME_HEAD_BYTES），不触碰完整正文。
+   */
+  async probeTintinwebSubagentParent(filePath: string): Promise<string | undefined> {
+    const head = await this.readHeadAndInfer(filePath);
+    if (!head) return undefined;
+    return this.detectFlatSubagentParentFromHead(filePath, head.raw);
   }
 
   private inferProjectPathFromFile(filePath: string) {
