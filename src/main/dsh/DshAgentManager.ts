@@ -481,7 +481,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/** 把 host selectModel 错误收成 commandFailure 能识别的文案。 */
-	private selectModelError(error: unknown, provider: string, modelId: string): Error {
+	private selectModelError(error: unknown, _provider: string, _modelId: string): Error {
 		const code = error && typeof error === "object" && "code" in error
 			? String((error as { code?: unknown }).code ?? "")
 			: "";
@@ -489,8 +489,14 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (lower.includes("busy") || lower.includes("in progress")) {
 			return new Error(`dsh selectModel busy: ${JSON.stringify(error)}`);
 		}
+		// DSH 会把档位错误（如 reasoning effort 不被目标模型支持）折叠成
+		// model-unavailable：保留原始 error.message（缺失时 JSON 兜底），
+		// 不转译成笼统的 Model not found，真实拒绝原因才能透传给用户。
 		if (lower.includes("model-unavailable") || lower.includes("unavailable")) {
-			return new Error(`Model not found: ${provider}/${modelId}`);
+			const message = error && typeof error === "object" && "message" in error
+				? String((error as { message?: unknown }).message ?? "")
+				: "";
+			return new Error(message || JSON.stringify(error));
 		}
 		return new Error(`dsh selectModel failed: ${JSON.stringify(error)}`);
 	}

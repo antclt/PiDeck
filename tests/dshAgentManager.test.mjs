@@ -1226,9 +1226,16 @@ test("setThinking 在 host 拒绝时回滚旧档位并抛出错误", async () =>
 	};
 	await manager.setModel(agentId, "llm-deepseek", "deepseek-v4-flash");
 	assert.equal((await manager.getRuntimeState(agentId)).thinkingLevel, "high");
+	// host 拒绝必须保留原始错误文案（档位错误折叠成 model-unavailable 时
+	// 不能转译成笼统的 Model not found）：断言真实原因透传、且不出现笼统文案。
 	await assert.rejects(
 		() => manager.setThinking(agentId, "max"),
-		/Model not found/,
+		(error) => {
+			const message = error instanceof Error ? error.message : String(error);
+			assert.match(message, /does not support reasoning effort max/);
+			assert.doesNotMatch(message, /Model not found/);
+			return true;
+		},
 	);
 	assert.equal((await manager.getRuntimeState(agentId)).thinkingLevel, "high");
 });
