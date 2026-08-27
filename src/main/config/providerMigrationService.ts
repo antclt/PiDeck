@@ -322,11 +322,13 @@ export async function applyProviderMigration(
 	try {
 		if (direction === "pi-to-dsh") {
 			// auth.json 里只有 key、models.json 没有条目的 pi 内置名：
-			// 由 catalog 补全端点/模型后写入 DSH，并做两个硬校验（OAuth 拒绝、对称性）。
-			const [models, auth, dshDoc] = await Promise.all([
+			// 由 catalog 补全端点/模型后写入 DSH。OAuth 拒绝；其余无条件迁移——
+			// DSH 内置匹配的 provider（official deepseek）由 piToDshSnapshot 路由到
+			// 对应 namespace（llm-deepseek），DSH 不认识的按普通 API Key provider
+			// 落 llm-pi-ai.providers.<name>。不再要求 DSH settings.yaml 预先存在同名条目。
+			const [models, auth] = await Promise.all([
 				deps.configManager.getModelsConfig(),
 				deps.configManager.getAuthConfig(),
-				readDshSettings(deps.dshHost.getHomeDir()),
 			]);
 			const authItem = auth.parsed[providerName];
 			const inModels = Boolean(models.parsed.providers?.[providerName]);
@@ -342,19 +344,7 @@ export async function applyProviderMigration(
 						error: "OAuth 无法迁移：仅支持 API Key 认证的 provider",
 					};
 				}
-				const dshParsed = parseDshSettingsDocument(dshDoc.parsed);
-				const dshHas = (providerName === "deepseek" && Boolean(dshParsed.deepseek))
-					|| Boolean(dshParsed.piAi[providerName]);
-				if (!dshHas) {
-					return {
-						ok: false,
-						provider: providerName,
-						direction,
-						copiedKey: false,
-						wroteViaHost: false,
-						error: "DSH 没有该内置 provider，无法迁移：先到 DSH 侧添加同名 provider 再迁",
-					};
-				}
+				// 无条件迁移：不要求 DSH settings.yaml 预先存在同名条目。
 				const snapshot = piBuiltinSnapshotFromCatalog(
 					providerName,
 					typeof authItem.key === "string" ? authItem.key : undefined,
