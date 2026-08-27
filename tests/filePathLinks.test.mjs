@@ -4,6 +4,7 @@ import {
 	FILE_PATH_RE,
 	isAbsoluteFilePath,
 	matchPlainFilePaths,
+	normalizeFileLinkPath,
 	resolveFileLinkPath,
 } from "../src/renderer/src/utils/filePathLinks.ts";
 
@@ -48,6 +49,25 @@ test("isAbsoluteFilePath covers win drive, posix root and tilde only", () => {
 	assert.equal(isAbsoluteFilePath("~/a.ts"), true);
 	assert.equal(isAbsoluteFilePath("src/a.ts"), false);
 	assert.equal(isAbsoluteFilePath("https://x.com"), false);
+});
+
+test("normalizes Markdown Windows file URLs and strips line locations", () => {
+	assert.equal(
+		normalizeFileLinkPath("/C:/Users/Test/project/src/App.tsx:392"),
+		"C:/Users/Test/project/src/App.tsx",
+	);
+	assert.equal(
+		normalizeFileLinkPath("/home/user/project/src/app.py:12:4"),
+		"/home/user/project/src/app.py",
+	);
+	assert.equal(
+		normalizeFileLinkPath("C%3A%2FUsers%2FTest%2FMy%20File.ts%3A9"),
+		"C:/Users/Test/My File.ts",
+	);
+	assert.equal(
+		resolveFileLinkPath("/C:/Users/Test/project/src/App.tsx:392"),
+		"C:/Users/Test/project/src/App.tsx",
+	);
 });
 
 test("resolveFileLinkPath joins relatives against base with matching separator and passes absolutes through", () => {

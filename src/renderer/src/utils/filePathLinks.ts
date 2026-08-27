@@ -50,6 +50,25 @@ function isTildePath(path: string): boolean {
 	return path === "~" || path.startsWith("~/") || path.startsWith("~\\");
 }
 
+/**
+ * 规范化 Markdown 显式本地链接的目标。
+ *
+ * AI 常把 Windows 绝对路径写成 Markdown URL 形式 `/C:/...:42`；前导 `/`
+ * 是 URL 表示法的一部分，不是 Windows 路径的一部分，末尾 `:42`/`:42:7`
+ * 是位置标记，也不能参与 stat 或文件打开。校验与点击必须共用此结果，
+ * 否则链接会先以未知状态显示，随后因 stat 错误降级成不可点击文本。
+ */
+export function normalizeFileLinkPath(path: string): string {
+	let normalized = path;
+	try {
+		normalized = decodeURIComponent(path);
+	} catch {
+		// 非完整 URI 编码时保留原文；主流程仍会按原路径做安全校验。
+	}
+	if (/^\/[A-Za-z]:[\\/]/.test(normalized)) normalized = normalized.slice(1);
+	return normalized.replace(/:\d+(?::\d+)?$/, "");
+}
+
 export function isAbsoluteFilePath(path: string): boolean {
 	return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || isTildePath(path);
 }
@@ -62,9 +81,10 @@ export function isAbsoluteFilePath(path: string): boolean {
  * 与 App.handleOpenLinkedFile 点击链路同源，保证「校验的路径」=「点击打开的路径」。
  */
 export function resolveFileLinkPath(path: string, basePath?: string): string | null {
-	if (!path) return null;
-	if (isAbsoluteFilePath(path)) return path;
+	const normalized = normalizeFileLinkPath(path);
+	if (!normalized) return null;
+	if (isAbsoluteFilePath(normalized)) return normalized;
 	if (!basePath) return null;
 	const separator = basePath.includes("\\") ? "\\" : "/";
-	return `${basePath.replace(/[\\/]+$/, "")}${separator}${path.replace(/^[\\/]+/, "")}`;
+	return `${basePath.replace(/[\\/]+$/, "")}${separator}${normalized.replace(/^[\\/]+/, "")}`;
 }

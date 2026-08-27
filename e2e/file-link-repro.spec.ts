@@ -20,6 +20,7 @@ writeFileSync(join(projectDir, "docs", "ui-2.0-revamp-plan.md"), "# Revamp Plan\
 
 const fsAbsPath = join(projectDir, "docs", "ui-2.0-revamp-plan.md"); // C:\...\ui-2.0-revamp-plan.md
 const fsAbsFwd = fsAbsPath.replace(/\\/g, "/");
+const fsAbsMarkdown = `/${fsAbsFwd}:1`;
 const fsAbsDead = join(projectDir, "no-such-file.ts");
 
 test.use({
@@ -54,7 +55,7 @@ test.use({
 						content: [
 							{
 								type: "text",
-								text: `绝对路径巡检：\n反斜杠 ${fsAbsPath}\n正斜杠 ${fsAbsFwd}\n相对 src/main/index.ts\n不存在 ${fsAbsDead}`,
+								text: `绝对路径巡检：\n反斜杠 ${fsAbsPath}\n正斜杠 ${fsAbsFwd}\n显式行号链接：[ui-2.0-revamp-plan.md](${fsAbsMarkdown})\n相对 src/main/index.ts\n不存在 ${fsAbsDead}`,
 							},
 						],
 					},
@@ -121,6 +122,14 @@ test("B/C: history session absolute-path links show content; dead link downgrade
 	await backslash.click();
 	const stage = window.locator(".workbench-stage-split").first();
 	await expect(stage).toBeVisible({ timeout: 15_000 });
+	await expect(stage).toContainText("link-repro marker-b", { timeout: 10_000 });
+
+	// 显式 Markdown 链接 `/C:/.../file.md:1`：等待存在性校验后仍应保持可点击，
+	// 不能先显示胶囊再因错误路径被降级成普通文本。
+	const explicit = timeline.getByRole("link", { name: "ui-2.0-revamp-plan.md", exact: true }).first();
+	await expect(explicit).toBeVisible({ timeout: 15_000 });
+	await expect(explicit).toHaveCount(1, { timeout: 2_000 });
+	await explicit.click();
 	await expect(stage).toContainText("link-repro marker-b", { timeout: 10_000 });
 
 	// 相对路径链接（历史会话 baseDir=项目路径）→ 打开有内容
