@@ -4,6 +4,7 @@ import {
 	isLocalPathRef,
 	remarkLinkifyPaths,
 } from "./MarkdownLinkCore";
+import { useFilePathExists } from "./FileLinkBase";
 export {
 	isLocalPathRef,
 	markdownUrlTransform,
@@ -25,6 +26,14 @@ export function MarkdownLink(
 	// 无协议 href（[text](path) 形式）也是本地路径引用，同样走 onOpenFile
 	const isFileLink = props.href?.startsWith("file://") ?? false;
 	const isLocalRef = !isFileLink && isLocalPathRef(props.href ?? "");
+	// 存在性判定只针对本地路径锚点：模型提到的路径经常不存在（幻觉/已删/跨项目），
+	// VS Code 同款策略——校验不存在时降级为纯文本，不再渲染成点开后空白的死链。
+	const fileLinkRawPath = props.href?.startsWith("file://")
+		? decodeURIComponent(props.href.slice(7))
+		: isLocalRef
+			? (props.href ?? undefined)
+			: undefined;
+	const pathExists = useFilePathExists(fileLinkRawPath);
 	const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
 		e.preventDefault();
 		if (!props.href) return;
@@ -47,6 +56,12 @@ export function MarkdownLink(
 			void onOpenExternal(props.href, e.ctrlKey || e.metaKey || undefined);
 		}
 	};
+	// false=已确认不存在：渲染纯文本（无图标/无 hover/title）；undefined=未知或校验中：维持链接现状
+	if (isFileLink || isLocalRef) {
+		if (pathExists === false) {
+			return <span className="text-text-tertiary">{children}</span>;
+		}
+	}
 	const linkClass =
 		[className, isFileLink || isLocalRef ? "markdown-link-file" : undefined]
 			.filter(Boolean)

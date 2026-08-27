@@ -1,10 +1,11 @@
+import { matchPlainFilePaths } from "../../utils/filePathLinks.ts";
+
 /**
  * 本地复刻 react-markdown 的 defaultUrlTransform（迁移 streamdown 后不再依赖 react-markdown 包）：
  * 无协议/相对链接原样返回；非白名单协议清空（javascript:/data: 等危险协议被拦截）。
  * 白名单与 react-markdown 一致：http/https/irc/ircs/mailto/xmpp。
  */
 const SAFE_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
-
 export function defaultUrlTransform(value: string): string {
 	const colon = value.indexOf(":");
 	const questionMark = value.indexOf("?");
@@ -36,18 +37,10 @@ export function markdownUrlTransform(url: string): string {
 }
 
 /**
- * 裸文件路径识别正则（修复误判/特殊字符问题）：
- * - 排除空白 + ASCII 标点 + 全角标点/符号（，。；：！？、（）【】《》「」『』“”‘’·…—～￥×÷→←↑↓⇒／）
- * - 排除全角区（\u{FF00}-\u{FFEF}）、连字符/破折号区（\u{2010}-\u{2027}）、
- *   一般标点区（\u{2030}-\u{205E}）——避免 "src/a.ts，" 把全角逗号吞进路径
- * - 目录段与扩展名支持 Unicode 字母（中文/日文文件名）
- */
-export const FILE_PATH_RE =
-	/(?:[A-Z]:[\\/]|(?:\.\.?[\\/]|[\\/])|(?:[\p{L}_][\p{L}\p{N}_.-]*[\\/])+)[^\s<>"'`|?*\[\](){}，。；：！？、（）【】《》「」『』“”‘’·…—～￥×÷→←↑↓⇒／\u{FF00}-\u{FFEF}\u{2010}-\u{2027}\u{2030}-\u{205E}]+\.[\p{L}\p{N}]+/gu;
-
-/**
  * mdast 插件：把裸文件路径转成 file:// 链接。
  * 只处理 type === "text" 的叶子节点，天然跳过 code / inlineCode / link 内的文本。
+ * 匹配规则与存在性校验共用 utils/filePathLinks 的 matchPlainFilePaths（含 URL 尾巴排除），
+ * 保证「渲染出的链接」与「后续 stat 校验的对象」永远同一份字符串。
  */
 export const remarkLinkifyPaths = () => {
 	return (tree: any) => {
@@ -57,27 +50,20 @@ export const remarkLinkifyPaths = () => {
 			if (type === "code" || type === "inlineCode" || type === "link") return;
 			if (type === "text" && typeof node.value === "string") {
 				const text: string = node.value;
-				FILE_PATH_RE.lastIndex = 0;
+				const matches = matchPlainFilePaths(text);
+				if (matches.length === 0) return;
 				const segs: any[] = [];
 				let last = 0;
-				let m: RegExpExecArray | null;
-				let touched = false;
-				while ((m = FILE_PATH_RE.exec(text)) !== null) {
-					const start = m.index;
-					const end = start + m[0].length;
-					if (start > last) segs.push({ type: "text", value: text.slice(last, start) });
+				for (const match of matches) {
+					if (match.start > last) segs.push({ type: "text", value: text.slice(last, match.start) });
 					segs.push({
 						type: "link",
-						url: `file://${encodeURIComponent(m[0]).replace(/%2F/g, "/").replace(/%3A/g, ":")}`,
-						children: [{ type: "text", value: m[0] }],
+						url: `file://${encodeURIComponent(match.path).replace(/%2F/g, "/").replace(/%3A/g, ":")}`,
+						children: [{ type: "text", value: match.path }],
 					});
-					last = end;
-					touched = true;
+					last = match.end;
 				}
-				if (touched) {
-					if (last < text.length) segs.push({ type: "text", value: text.slice(last) });
-					node.__segs = segs;
-				}
+				node.__segs = segs;
 				return;
 			}
 			const children: any[] | undefined = node.children;

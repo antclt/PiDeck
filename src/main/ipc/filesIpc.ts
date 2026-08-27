@@ -106,6 +106,31 @@ export function registerFilesIpc({
 		}
 	});
 
+	ipcMain.handle(ipcChannels.filesPathsExist, async (_event, paths: unknown): Promise<boolean[]> => {
+		// 渲染层输入不可信：仅接受字符串数组且限量限长，防大包/超长路径滥用 stat。
+		// 上限与渲染层 verdict store 的 BATCH_MAX(96) 对齐并留余量。
+		if (!Array.isArray(paths) || paths.length === 0 || paths.length > 128) {
+			throw new Error("paths must be a non-empty array (max 128)");
+		}
+		const normalized: string[] = [];
+		for (const raw of paths) {
+			if (typeof raw !== "string" || !raw.trim() || raw.length > 1024) {
+				throw new Error("each path must be a non-empty string (max 1024 chars)");
+			}
+			normalized.push(raw);
+		}
+		// Promise.all 并行 stat（VS Code filePathLinkifier 同策略）；逐项 catch：
+		// ENOENT/权限等单点失败只影响自身，不能让整批 rejects。
+		return Promise.all(normalized.map(async (path) => {
+			try {
+				const fileStat = await stat(toWindowsPath(path));
+				return fileStat.isFile() || fileStat.isDirectory();
+			} catch {
+				return false;
+			}
+		}));
+	});
+
 	ipcMain.handle(ipcChannels.filesWriteContent, async (_event, path: string, content: string) => {
 		await writeFile(toWindowsPath(path), content, "utf8");
 		void appLogger.info("file", "File written", { path, bytes: Buffer.byteLength(content, "utf8") });

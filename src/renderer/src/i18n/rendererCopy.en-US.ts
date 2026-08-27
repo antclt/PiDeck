@@ -1635,6 +1635,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.emptyProviders": "No provider config yet",
   "config.fileDeletedOrEmpty": "File may have been deleted or is empty. Please check if the file still exists in the filesystem.",
   "editor.binaryFileNotSupported": "{ext} is a binary file and cannot be edited",
+  "editor.fileNotFound": "File not found or has been moved: {path}",
   "editor.fileTooLarge": "File size {size}MB exceeds {max}MB limit, cannot open editor",
   "editor.preview": "Preview",
   "editor.source": "Source",

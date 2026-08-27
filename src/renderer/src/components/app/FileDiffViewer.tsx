@@ -149,6 +149,24 @@ export function FileDiffViewer(props: {
 					// 自动保存基准快照：加载完成即视为「已落盘」状态，避免打开后无改动就触发写盘
 					lastSavedRef.current = result;
 					setOriginal(originalResult);
+					// 空内容二次校验（仅绝对路径 + 查看/编辑模式）：主进程 readContent 对
+					// ENOENT 返回 ""（为「新建文件」流程保留的语义），死链直接渲染就是
+					// 一片空白。但 AI 回复链接打开的路径必须给明确反馈——已解析成绝对路径
+					// 仍读到空串，大概率是模型给的路径本就不存在；再确认一次并展示错误态。
+					if (
+						result === "" &&
+						!isDiffMode &&
+						/^([A-Za-z]:[\\/]|\/)/.test(props.filePath)
+					) {
+						try {
+							const [exists] = await window.piDesktop.files.pathsExist([props.filePath]);
+							if (!exists && !cancelled) {
+								setError(t("editor.fileNotFound", { path: props.filePath }));
+							}
+						} catch {
+							// 校验通道不可用（预览模式）：维持原状不额外报错。
+						}
+					}
 				}
 			} catch (e) {
 				if (!cancelled) setError(e instanceof Error ? e.message : String(e));

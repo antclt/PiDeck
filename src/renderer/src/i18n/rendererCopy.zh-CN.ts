@@ -1622,6 +1622,7 @@ export const zhCN = {
   "config.emptyProviders": "暂无供应商配置",
   "config.fileDeletedOrEmpty": "文件可能已被删除或为空，请检查文件系统中该文件是否仍然存在。",
   "editor.binaryFileNotSupported": "{ext} 是二进制文件，不支持编辑",
+  "editor.fileNotFound": "文件不存在或已被移动：{path}",
   "editor.fileTooLarge": "文件大小为 {size}MB，超过 {max}MB 限制，无法打开编辑",
   "editor.preview": "预览",
   "editor.source": "源码",

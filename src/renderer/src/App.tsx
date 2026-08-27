@@ -139,6 +139,7 @@ import { findLoadedDirectory, loadProjectFileTree, mergeFileTreeChildren } from 
 import { SessionTabsBar } from "./components/session/SessionTabsBar";
 import { SessionPaneServicesProvider } from "./components/session/SessionPaneServices";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
+import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
 import { ScratchPadOverlay } from "./components/overlays/ScratchPadOverlay";
 import { AskPanelOverlay } from "./components/overlays/AskPanelOverlay";
@@ -3517,6 +3518,9 @@ export function App() {
 
 
   return (
+    // 文件链接存在性校验的 baseDir 与 handleOpenLinkedFile 同口径
+    // （activeAgent cwd 优先，回退项目路径），让 markdown 内链接按同一基准解析。
+    <FileLinkBaseProvider baseDir={activeAgent?.cwd ?? activeProject?.path}>
     <>
       <AppBootstrap {...bootstrapProps} />
     <AppShell
@@ -3881,6 +3885,7 @@ export function App() {
 
     </AppShell>
     </>
+    </FileLinkBaseProvider>
   );
 }
 

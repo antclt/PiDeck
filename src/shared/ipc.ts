@@ -27,6 +27,8 @@ export const ipcChannels = {
 	filesOpen: "files:open",
 	filesShowInFolder: "files:show-in-folder",
 	filesReadContent: "files:read-content",
+	/** 批量校验路径是否存在（fs.stat）：AI 回复内文件链接的存在性判定用 */
+	filesPathsExist: "files:paths-exist",
 	filesWriteContent: "files:write-content",
 	filesCreate: "files:create",
 	filesDelete: "files:delete",
