@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { ChevronDown, Ellipsis, HatGlasses, Image as ImageIcon, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Ellipsis, HatGlasses, Image as ImageIcon, Trash2 } from "lucide-react";
 import type { AgentTab, Project, SessionRecord, SessionSummary } from "../../../../shared/types";
 import { collectDisplayedSessionIds, filterAgentsForSidebarDisplay, getProjectAgentSessionDisplay, sessionStatusDotClass, type ProjectChildItem } from "../../agentListDisplay";
 import { sessionRecordToSummary } from "../../atoms";
@@ -130,6 +130,11 @@ export function SessionTree(props: {
     .filter((session) => filter === null || filter.has(session.source))
     .sort((left, right) => right.updatedAt - left.updatedAt);
   const catalogLoading = props.controller.catalog.catalogLoadStateByProject[props.project.id]?.status === "loading";
+  const canCollapseChildren = props.controller.hasExpandedChildren(props.project.id);
+  const showMoreLabel = props.nested
+    ? t("app.worktreeShowMoreSessions", { count: display.hiddenChildCount })
+    : t("app.projectShowMoreChildren", { count: display.hiddenChildCount });
+  const collapseLabel = t("app.projectCollapseChildren");
   const hasRows = catalogLoading || draftSessions.length > 0 || display.visibleChildren.length > 0 || display.hiddenChildCount > 0;
   if (!hasRows) return null;
 
@@ -405,25 +410,35 @@ export function SessionTree(props: {
       {catalogLoading && <div className="project-session-loading"><div className="loader" /><span>{t("app.projectSessionsLoading")}</span></div>}
       {display.visibleChildren.map(renderChild)}
 
-      {display.hiddenChildCount > 0 ? (
-        <Button
-          variant="ghost" size="sm" className={`h-auto justify-start px-2 text-micro opacity-80 transition-opacity hover:opacity-100 ${props.nested ? "worktree-sessions-more" : "session-more-row"}`}
-          onClick={props.onShowMore ?? (() => props.controller.showMoreChildren(props.project.id))}
-        >
-          <span>{props.nested
-            ? t("app.worktreeShowMoreSessions", { count: display.hiddenChildCount })
-            : t("app.projectShowMoreChildren", { count: display.hiddenChildCount })}
-          </span>
-        </Button>
-      ) : props.controller.hasExpandedChildren(props.project.id) ? (
-        /* 展开过「查看更多」后提供收起入口，与展开按钮同款样式 */
-        <Button
-          variant="ghost" size="sm" className={`h-auto justify-start px-2 text-micro opacity-80 transition-opacity hover:opacity-100 ${props.nested ? "worktree-sessions-more" : "session-more-row"}`}
-          onClick={() => props.controller.collapseChildren(props.project.id)}
-        >
-          <span>{t("app.projectCollapseChildren")}</span>
-        </Button>
-      ) : null}
+      {(display.hiddenChildCount > 0 || canCollapseChildren) && (
+        <div className="flex min-w-0 items-center gap-1">
+          {display.hiddenChildCount > 0 && (
+            <Button
+              variant="ghost" size="sm"
+              className={`h-auto min-w-0 w-auto flex-1 justify-start px-2 text-micro opacity-80 transition-opacity hover:opacity-100 ${props.nested ? "worktree-sessions-more" : "session-more-row"}`}
+              aria-label={showMoreLabel}
+              title={showMoreLabel}
+              onClick={props.onShowMore ?? (() => props.controller.showMoreChildren(props.project.id))}
+            >
+              <ChevronDown size={12} aria-hidden="true" />
+              <span className="truncate">{showMoreLabel}</span>
+            </Button>
+          )}
+          {canCollapseChildren && (
+            /* 只要用户展开过，就和「查看更多」并列保留收起入口；不用等所有子项都加载完。 */
+            <Button
+              variant="ghost" size="sm"
+              className={`h-auto shrink-0 w-auto justify-start px-2 text-micro opacity-80 transition-opacity hover:opacity-100 ${props.nested ? "worktree-sessions-more" : "session-more-row"}`}
+              aria-label={collapseLabel}
+              title={collapseLabel}
+              onClick={() => props.controller.collapseChildren(props.project.id)}
+            >
+              <ChevronUp size={12} aria-hidden="true" />
+              <span>{collapseLabel}</span>
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

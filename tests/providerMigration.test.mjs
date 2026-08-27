@@ -389,7 +389,7 @@ test("apply pi-to-dsh rejects an OAuth-only builtin provider", async () => {
   assert.match(result.error || "", /OAuth/);
 });
 
-test("apply pi-to-dsh rejects a builtin provider missing on the DSH side", async () => {
+test("apply pi-to-dsh migrates an auth.json-only builtin provider even when DSH settings has no matching entry", async () => {
   const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
   await writeFile(join(home, "settings.yaml"), "llm-pi-ai:\n  providers: {}\n", "utf8");
   const deps = {
@@ -408,9 +408,18 @@ test("apply pi-to-dsh rejects a builtin provider missing on the DSH side", async
       readCredentialValue: async () => undefined,
     },
   };
+  // 无条件迁移：DSH settings.yaml 没有 llm-deepseek 段也照迁，official deepseek
+  // 由 piToDshSnapshot 路由到 llm-deepseek 内置 namespace，key 写 .credentials.yaml。
   const result = await service.applyProviderMigration(deps, "pi-to-dsh", "deepseek");
-  assert.equal(result.ok, false);
-  assert.match(result.error || "", /DSH 没有该内置 provider/);
+  assert.equal(result.ok, true);
+  assert.equal(result.copiedKey, true);
+  assert.equal(result.wroteViaHost, false);
+  const settings = await readFile(join(home, "settings.yaml"), "utf8");
+  const creds = await readFile(join(home, ".credentials.yaml"), "utf8");
+  assert.match(settings, /llm-deepseek:/);
+  assert.match(settings, /DEEPSEEK_API_KEY/);
+  assert.match(creds, /DEEPSEEK_API_KEY:/);
+  assert.match(creds, /sk-ds/);
 });
 
 test("source contracts keep IPC / preload / UI wired", async () => {

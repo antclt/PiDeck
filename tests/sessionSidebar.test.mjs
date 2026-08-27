@@ -400,9 +400,13 @@ test("expanded children can be collapsed back via sidebar controller", () => {
   // 展开过「查看更多」（存在显式计数）才显示收起入口，避免无谓的收起按钮。
   assert.match(controller, /hasExpandedChildren/);
   assert.match(controller, /visibleChildCountByProject\[projectId\] !== undefined/);
-  // SessionTree 在展开满后渲染收起按钮，点击走 controller.collapseChildren。
-  assert.match(sessionTree, /hasExpandedChildren\(props\.project\.id\)/);
-  assert.match(sessionTree, /collapseChildren\(props\.project\.id\)/);
+  // 还有隐藏项时也必须同时保留「查看更多」和「收起」，不能等到全部加载完才出现收起。
+  assert.match(sessionTree, /const canCollapseChildren = props\.controller\.hasExpandedChildren\(props\.project\.id\)/);
+  assert.match(sessionTree, /display\.hiddenChildCount > 0 \|\| canCollapseChildren/);
+  assert.match(sessionTree, /const showMoreLabel = props\.nested[\s\S]*?app\.projectShowMoreChildren/);
+  assert.match(sessionTree, /display\.hiddenChildCount > 0 && \([\s\S]*?onClick=\{props\.onShowMore/);
+  assert.match(sessionTree, /canCollapseChildren && \([\s\S]*?collapseChildren\(props\.project\.id\)/);
+  assert.match(sessionTree, /<ChevronUp size=\{12\}/);
   assert.match(sessionTree, /app\.projectCollapseChildren/);
   // 双语文案同步。
   assert.match(zh, /"app\.projectCollapseChildren": "收起"/);
