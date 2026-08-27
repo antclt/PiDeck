@@ -34,6 +34,9 @@ interface EditorTab {
   tabKey?: string;
   label?: string;
   preserveDrawer?: boolean;
+  /** 打开后滚动定位的目标行（1 起，来自 `path:line` 链接位置标记）；
+   * 仅显式携带时写入，普通重复点击不覆盖已有定位。 */
+  initialLine?: number;
   lastAccess: number;
 }
 
@@ -128,7 +131,7 @@ export interface UseFileEditorOutput {
   previewEditorTabId: string | null;
   openFilePath: (path: string) => void;
   /** 单击默认 preview；双击传 permanent */
-  viewFilePath: (path: string, openMode?: EditorTabOpenMode) => void;
+  viewFilePath: (path: string, openMode?: EditorTabOpenMode, initialLine?: number) => void;
   diffFilePath: (path: string, originalContent?: string, content?: string) => void;
   openWorkspaceFileDiff: (
     group: GitResourceGroupType,
@@ -290,6 +293,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
       label?: string,
       preserveDrawer = false,
       openMode: EditorTabOpenMode = "permanent",
+      initialLine?: number,
     ) => {
       // updater 纯化：StrictMode 双调用下，updater 内 crypto.randomUUID/嵌套
       // setState 会产生两个不同 id → activeTabId 与 editorTabs 不一致 → 首次空白。
@@ -307,6 +311,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
         tabKey,
         label,
         preserveDrawer,
+        ...(initialLine !== undefined ? { initialLine } : {}),
         lastAccess: ++editorTabAccessSequenceRef.current,
       };
       const strategy =
@@ -325,6 +330,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
               tabKey,
               label,
               preserveDrawer,
+              ...(initialLine !== undefined ? { initialLine } : {}),
               lastAccess: candidate.lastAccess,
             }
           : tab,
@@ -427,7 +433,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
   );
 
   const viewFilePath = useCallback(
-    (path: string, openMode: EditorTabOpenMode = "preview") => {
+    (path: string, openMode: EditorTabOpenMode = "preview", initialLine?: number) => {
       // 只清 Git Diff，保留已有文件 tab——否则预览/多 tab 无法成立
       dismissGitDiffOnly();
       openEditorTab(
@@ -440,6 +446,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
         undefined,
         false,
         openMode,
+        initialLine,
       );
       const mode = contentOpenModeRef.current;
       editorModeRef.current = mode;

@@ -54,6 +54,8 @@ export function FileDiffViewer(props: {
 	theme?: "light" | "dark";
 	/** 单个文件超过此大小（MB）时不加载编辑器。默认 5MB。 */
 	maxFileSizeMB?: number;
+	/** 打开文件后滚动定位的目标行（1 起，来自 `path:line` 链接位置标记）。 */
+	initialLine?: number;
 	/**
 	 * Tab 已上收到 SessionTabsBar 时为 true：不再渲染内容区内嵌 Tab 栏/重复文件名，
 	 * 只保留右侧动作钮（预览/分屏/关闭）。
@@ -500,6 +502,7 @@ export function FileDiffViewer(props: {
 									value={content}
 									language={language}
 									readOnly={false}
+									initialLine={props.initialLine}
 									onChange={handleEditorChange}
 									onAttachSelection={handleAttachSelection}
 								/>

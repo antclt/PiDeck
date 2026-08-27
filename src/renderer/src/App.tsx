@@ -1319,8 +1319,9 @@ export function App() {
   // 图片 → 弹窗预览（readBase64 → ImagePreviewModal）；markdown/html → 中间栏查看
   //（FileDiffViewer 对 .md 默认 preview、.html 用 HtmlPreview 内置渲染）；其他文件 → 编辑器打开。
   // 替代原先的"系统默认应用打开"（.md 会被浏览器接管、体验割裂）
+  // line 为可选 `path:line` 位置标记：编辑器打开后滚动定位到该行。
   const handleOpenLinkedFile = useCallback(
-    (path: string) => {
+    (path: string, line?: number) => {
       const resolved = resolveFileLinkPath(
         path,
         activeAgent?.cwd ?? activeProject?.path,
@@ -1343,8 +1344,8 @@ export function App() {
           .catch(() => showToast(t("app.openFileFailed", { error: ext })));
         return;
       }
-      // markdown / html / 其他文本文件：统一抽屉查看
-      viewFilePath(resolved);
+      // markdown / html / 其他文本文件：统一抽屉查看；带行号链接打开后滚动定位
+      viewFilePath(resolved, undefined, line);
     },
     [activeAgent?.cwd, activeProject?.path, viewFilePath, showToast],
   );

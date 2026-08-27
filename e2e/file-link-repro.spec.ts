@@ -16,11 +16,27 @@ const projectDir = mkdtempSync(join(tmpdir(), "pideck-linkrepro-"));
 mkdirSync(join(projectDir, "src", "main"), { recursive: true });
 mkdirSync(join(projectDir, "docs"), { recursive: true });
 writeFileSync(join(projectDir, "src", "main", "index.ts"), "export const seedContent = 42;\n// link-repro marker-a\n");
+// 40 行的跳转目标：第 25 行为特征行 "// line 25"，用于断言「打开后滚动定位到指定行」
+writeFileSync(
+	join(projectDir, "src", "main", "jump.ts"),
+	Array.from({ length: 40 }, (_, i) => `// line ${i + 1}`).join("\n") + "\n",
+);
 writeFileSync(join(projectDir, "docs", "ui-2.0-revamp-plan.md"), "# Revamp Plan\n\nlink-repro marker-b content.\n");
+
+const isWin32 = process.platform === "win32";
+const fsJumpPath = join(projectDir, "src", "main", "jump.ts");
+const fsJumpFwd = fsJumpPath.replace(/\\/g, "/");
+// 显式链接 href：Windows 盘符绝对路径用 URL 表示法 /C:/...（裸盘符 F:/ 曾被
+// defaultUrlTransform 当未知协议清空 href → 点击无反应，已修复后两种形态都要覆盖）；
+// POSIX 路径本身以 / 开头，不能再前置 /（否则变成协议相对 //var/... 同样点不开）。
+const fsJumpMarkdown = `${isWin32 ? "/" : ""}${fsJumpFwd}:25`;
+
 
 const fsAbsPath = join(projectDir, "docs", "ui-2.0-revamp-plan.md"); // C:\...\ui-2.0-revamp-plan.md
 const fsAbsFwd = fsAbsPath.replace(/\\/g, "/");
-const fsAbsMarkdown = `/${fsAbsFwd}:1`;
+const fsAbsMarkdown = `${isWin32 ? "/" : ""}${fsAbsFwd}:1`;
+// 裸 absolute href（不带前导斜杠）：Windows 为 C:/...，POSIX 为 /...——跨端都应可点
+const fsNakedMarkdown = `${fsAbsFwd}:1`;
 const fsAbsDead = join(projectDir, "no-such-file.ts");
 
 test.use({
@@ -55,7 +71,7 @@ test.use({
 						content: [
 							{
 								type: "text",
-								text: `绝对路径巡检：\n反斜杠 ${fsAbsPath}\n正斜杠 ${fsAbsFwd}\n显式行号链接：[ui-2.0-revamp-plan.md](${fsAbsMarkdown})\n相对 src/main/index.ts\n不存在 ${fsAbsDead}`,
+								text: `绝对路径巡检：\n反斜杠 ${fsAbsPath}\n正斜杠 ${fsAbsFwd}\n显式行号链接：[ui-2.0-revamp-plan.md](${fsAbsMarkdown})\n裸 href 链接：[naked-drive-link](${fsNakedMarkdown})\n跳行链接：[jump.ts](${fsJumpMarkdown})\n相对 src/main/index.ts\n不存在 ${fsAbsDead}`,
 							},
 						],
 					},
@@ -131,6 +147,23 @@ test("B/C: history session absolute-path links show content; dead link downgrade
 	await expect(explicit).toHaveCount(1, { timeout: 2_000 });
 	await explicit.click();
 	await expect(stage).toContainText("link-repro marker-b", { timeout: 10_000 });
+
+	// 裸 absolute href（不带前导斜杠显式链接）：Windows 为 C:/... 裸盘符、POSIX 为 /... 根路径。
+	// 回归：裸盘符 href 曾被 defaultUrlTransform 当未知协议清空 → 点击无反应。
+	const nakedLink = timeline.getByRole("link", { name: "naked-drive-link", exact: true }).first();
+	await expect(nakedLink).toBeVisible({ timeout: 15_000 });
+	await expect(nakedLink).toHaveCount(1, { timeout: 2_000 });
+	await nakedLink.click();
+	await expect(stage).toContainText("link-repro marker-b", { timeout: 10_000 });
+
+	// 行号链接：打开文件后应滚动定位到第 25 行（光标所在行 = .cm-activeLine）
+	const jumpLink = timeline.getByRole("link", { name: "jump.ts", exact: true }).first();
+	await expect(jumpLink).toBeVisible({ timeout: 15_000 });
+	await jumpLink.click();
+	await expect(stage).toContainText("line 25", { timeout: 10_000 });
+	const activeLine = window.locator(".cm-activeLine").first();
+	await expect(activeLine).toBeVisible({ timeout: 10_000 });
+	await expect(activeLine).toContainText("// line 25", { timeout: 10_000 });
 
 	// 相对路径链接（历史会话 baseDir=项目路径）→ 打开有内容
 	const rel = timeline.locator('a[href^="file://"]', { hasText: "src/main/index.ts" }).first();

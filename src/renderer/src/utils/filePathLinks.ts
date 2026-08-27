@@ -51,7 +51,7 @@ function isTildePath(path: string): boolean {
 }
 
 /**
- * 规范化 Markdown 显式本地链接的目标。
+ * 规范化 Markdown 显式本地链接的目标（仅返回路径）。
  *
  * AI 常把 Windows 绝对路径写成 Markdown URL 形式 `/C:/...:42`；前导 `/`
  * 是 URL 表示法的一部分，不是 Windows 路径的一部分，末尾 `:42`/`:42:7`
@@ -59,6 +59,23 @@ function isTildePath(path: string): boolean {
  * 否则链接会先以未知状态显示，随后因 stat 错误降级成不可点击文本。
  */
 export function normalizeFileLinkPath(path: string): string {
+	return extractFileLinkLocation(path).path;
+}
+
+/** 解析结果：路径 + 可选行号/列号（1 起，位置标记来自 `path:line[:col]`）。 */
+export interface FileLinkLocation {
+	path: string;
+	line?: number;
+	column?: number;
+}
+
+/**
+ * 解析 Markdown 显式本地链接的目标：分开「真实文件路径」与「行[:列] 位置标记」。
+ * 调用方既能用 path 做存在性校验/打开文件，也能用 line 打开后滚动定位
+ * （对齐 Claude Code / VS Code 的 file.ts:42 语义）。normalizeFileLinkPath
+ * 委托本函数，保证「校验的路径」=「点击打开的路径」= 本函数返回的 path。
+ */
+export function extractFileLinkLocation(path: string): FileLinkLocation {
 	let normalized = path;
 	try {
 		normalized = decodeURIComponent(path);
@@ -66,7 +83,14 @@ export function normalizeFileLinkPath(path: string): string {
 		// 非完整 URI 编码时保留原文；主流程仍会按原路径做安全校验。
 	}
 	if (/^\/[A-Za-z]:[\\/]/.test(normalized)) normalized = normalized.slice(1);
-	return normalized.replace(/:\d+(?::\d+)?$/, "");
+	const locationMatch = /:(\d+)(?::(\d+))?$/.exec(normalized);
+	if (!locationMatch) return { path: normalized };
+	const line = Number(locationMatch[1]);
+	const column = locationMatch[2] === undefined ? undefined : Number(locationMatch[2]);
+	const result: FileLinkLocation = { path: normalized.slice(0, locationMatch.index) };
+	if (Number.isFinite(line)) result.line = line;
+	if (column !== undefined && Number.isFinite(column)) result.column = column;
+	return result;
 }
 
 export function isAbsoluteFilePath(path: string): boolean {

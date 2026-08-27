@@ -136,3 +136,29 @@ test("isLocalPathRef: protocol-less hrefs are local paths, real URLs are not", (
 	assert.equal(isLocalPathRef("//cdn.example.com/x"), false);
 	assert.equal(isLocalPathRef(""), false);
 });
+
+test("defaultUrlTransform keeps local file hrefs on win/mac/linux and clears unsafe protocols", () => {
+	const { defaultUrlTransform } = markdownCore;
+	// Windows：裸盘符（F:/、F:\\）+ 行号不能当协议清空（回归：href 被清 → 点击无反应）
+	assert.equal(
+		defaultUrlTransform("F:/PiDeck/packages/dsh-tool-pwsh-persistent/src/index.ts:309"),
+		"F:/PiDeck/packages/dsh-tool-pwsh-persistent/src/index.ts:309",
+	);
+	assert.equal(
+		defaultUrlTransform("C:\\Users\\x\\a.ts:12"),
+		"C:\\Users\\x\\a.ts:12",
+	);
+	// mac/linux：POSIX 绝对路径（/ 开头 + 行号）本就被「首个冒号在斜杠后」规则放行
+	assert.equal(
+		defaultUrlTransform("/Users/x/proj/src/app.py:12:4"),
+		"/Users/x/proj/src/app.py:12:4",
+	);
+	assert.equal(defaultUrlTransform("/home/u/proj/a.md"), "/home/u/proj/a.md");
+	// 相对路径与行号
+	assert.equal(defaultUrlTransform("src/main/index.ts"), "src/main/index.ts");
+	assert.equal(defaultUrlTransform("docs/guide.md:8"), "docs/guide.md:8");
+	// 外链照常、危险协议照常拦截
+	assert.equal(defaultUrlTransform("https://example.com/a.md"), "https://example.com/a.md");
+	assert.equal(defaultUrlTransform("javascript:alert(1)"), "");
+	assert.equal(defaultUrlTransform("ftp://x/y"), "");
+});

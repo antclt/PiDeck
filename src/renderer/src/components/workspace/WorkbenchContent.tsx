@@ -10,6 +10,8 @@ type EditorTabLike = {
 	allowSave: boolean;
 	label?: string;
 	preserveDrawer?: boolean;
+	/** 打开文件后滚动定位的目标行（来自 `path:line` 链接）。 */
+	initialLine?: number;
 };
 
 type GitDiffLike = {
@@ -79,6 +81,7 @@ export function WorkbenchContent(props: WorkbenchContentProps) {
 					? props.activeTab.originalContent
 					: undefined
 			}
+			initialLine={props.activeTab.initialLine}
 			modifiedContent={props.activeTab.modifiedContent}
 			onClose={props.onCloseEditor}
 			readContent={props.readContent}

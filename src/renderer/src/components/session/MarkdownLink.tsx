@@ -4,7 +4,7 @@ import {
 	remarkLinkifyPaths,
 } from "./MarkdownLinkCore";
 import { useFilePathExists } from "./FileLinkBase";
-import { normalizeFileLinkPath } from "../../utils/filePathLinks";
+import { extractFileLinkLocation } from "../../utils/filePathLinks";
 export {
 	isLocalPathRef,
 	markdownUrlTransform,
@@ -18,7 +18,7 @@ export {
 export function MarkdownLink(
 	props: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
 		onOpenExternal: (url: string, forceSystem?: boolean) => void;
-		onOpenFile?: (path: string) => void;
+		onOpenFile?: (path: string, line?: number) => void;
 	},
 ) {
 	const { onOpenExternal, onOpenFile, children, className, title, ...anchorProps } = props;
@@ -27,15 +27,17 @@ export function MarkdownLink(
 	const isFileLink = props.href?.startsWith("file://") ?? false;
 	const isLocalRef = !isFileLink && isLocalPathRef(props.href ?? "");
 	// 显式 Markdown 链接可能写成 /C:/path/file.ts:42：先还原 Windows 盘符，
-	// 再去掉行/列号。校验和点击都使用同一个规范化路径，避免链接状态闪烁。
+	// 再把行号从路径里拆出来。校验用纯路径，点击带上行号（打开后滚动定位）。
 	const fileLinkRawPath = isFileLink
 		? props.href!.slice(7)
 		: isLocalRef
 			? props.href
 			: undefined;
-	const fileLinkPath = fileLinkRawPath === undefined
+	const fileLinkLocation = fileLinkRawPath === undefined
 		? undefined
-		: normalizeFileLinkPath(fileLinkRawPath);
+		: extractFileLinkLocation(fileLinkRawPath);
+	const fileLinkPath = fileLinkLocation?.path;
+	const fileLinkLine = fileLinkLocation?.line;
 	const pathExists = useFilePathExists(fileLinkPath);
 	const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
 		e.preventDefault();
@@ -44,7 +46,7 @@ export function MarkdownLink(
 		// 处理文件路径链接（file:// 协议 + 无协议的本地路径引用）
 		if (isFileLink || isLocalRef) {
 			if (onOpenFile && fileLinkPath) {
-				void onOpenFile(fileLinkPath);
+				void onOpenFile(fileLinkPath, fileLinkLine);
 			}
 		} else {
 			// 普通 URL 链接：修饰键点击（Ctrl/Cmd）强制走系统浏览器。
