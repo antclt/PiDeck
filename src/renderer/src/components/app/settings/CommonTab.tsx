@@ -255,6 +255,14 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
           }
         />
         <SettingSwitchRow
+          title={t("settings.askNotification")}
+          description={t("settings.askNotificationDesc")}
+          checked={draft.askNotificationEnabled}
+          onChange={(checked) =>
+            updateDraft({ askNotificationEnabled: checked })
+          }
+        />
+        <SettingSwitchRow
           title={t("settings.agentCountReminder")}
           description={t("settings.agentCountReminderDesc")}
           checked={draft.agentCountReminderEnabled}

@@ -2629,7 +2629,9 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.detectEnvironment": "Check environment",
   "settings.enableDesktopProxy": "Enable desktop network proxy",
   "settings.enableNotifications":
-    "Send system notifications when agents finish or ask you a question",
+    "Send system notifications when agents finish responding",
+  "settings.askNotification": "Ask question notifications",
+  "settings.askNotificationDesc": "When an agent in a background session asks you a question, also send a system notification (default off; the in-app toast always shows)",
   "settings.agentCountReminder": "Active agent count reminder",
   "settings.agentCountReminderDesc": "When 15+ agents are active, remind at launch to close idle sessions and free memory",
   "settings.enablePiProxy": "Enable pi agent proxy",

@@ -72,6 +72,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "expandInterimDuringStream", tab: "common", itemKey: "settings.expandInterimDuringStream" },
 	{ field: "collapsePrevRunsOnNewTurn", tab: "common", itemKey: "settings.collapsePrevRunsOnNewTurn" },
 	{ field: "enableNotifications", tab: "common", itemKey: "settings.enableNotifications" },
+	{ field: "askNotificationEnabled", tab: "common", itemKey: "settings.askNotification" },
 	{ field: "agentCountReminderEnabled", tab: "common", itemKey: "settings.agentCountReminder" },
 	{ field: "startupWindowMode", tab: "common", itemKey: "settings.startupWindowMode" },
 	{ field: "closeToTray", tab: "common", itemKey: "settings.closeToTray" },

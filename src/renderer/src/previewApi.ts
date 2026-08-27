@@ -122,6 +122,8 @@ let previewSettings: AppSettings = {
 	closeToTray: true,
 	singleInstance: true,
 	enableNotifications: true,
+	// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致
+	askNotificationEnabled: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
 	agentCountReminderEnabled: true,
 	// showThinking 由 pi agent 的 hideThinkingBlock 控制，运行时从主进程加载

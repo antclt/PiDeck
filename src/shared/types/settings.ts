@@ -114,6 +114,11 @@ export type AppSettings = {
 	singleInstance: boolean;
 	/** 会话结束时发送系统通知 */
 	enableNotifications: boolean;
+	/**
+	 * 非聚焦会话收到 Ask 提问（select/confirm/input/editor/batch_ask）时发送系统通知。
+	 * 默认关闭：与通用 enableNotifications 解耦，用户可单独控制提问提醒，避免打扰。
+	 */
+	askNotificationEnabled: boolean;
 	/** 激活 Agent 数量提醒（人文关怀）：激活数达到阈值时，启动时提示关闭空闲会话释放内存。默认开启。 */
 	agentCountReminderEnabled: boolean;
 	/** 是否在会话中显示模型思考过程，默认开启 */

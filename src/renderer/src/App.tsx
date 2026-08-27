@@ -610,6 +610,8 @@ export function App() {
     closeToTray: true,
     singleInstance: true,
     enableNotifications: true,
+    // Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致（默认不打扰）
+    askNotificationEnabled: false,
     // 人文关怀提醒默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不关闭提醒
     agentCountReminderEnabled: true,
     // showThinking 由 pi agent 的 hideThinkingBlock 控制，启动后从主进程加载的真实值会覆盖此处

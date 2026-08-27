@@ -133,6 +133,8 @@ Gitmoji 对应关系：
   // 默认单实例：托盘隐藏后再次点击快捷方式会唤起原窗口，而不是再开一个进程
   singleInstance: true,
   enableNotifications: true,
+  // Ask 提问系统通知默认关闭：与通用通知解耦，避免非聚焦会话每次提问都打扰
+  askNotificationEnabled: false,
   // 人文关怀提醒默认开启：用户可在设置中随时关闭
   agentCountReminderEnabled: true,
   showThinking: readPiAgentShowThinking() ?? true,
