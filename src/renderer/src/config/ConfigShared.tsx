@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { MouseEvent } from "react";
 import { Check, Eye, EyeOff, ChevronDown } from "lucide-react";
 import { t } from "../i18n";
@@ -113,6 +114,8 @@ export function ConfigSelect(props: {
 /**
  * 通用 combobox 输入框：支持下拉选择 + 手动输入，选项支持文本过滤。
  * 用于 settings 中 defaultProvider / defaultModel 等需要从已有配置选取但又允许自定义的场景。
+ * 面板 portal 到 body 并 fixed 定位（--z-popover 层）：内容区 .config-content 是 overflow-y:auto
+ * 滚动容器，绝对定位面板会被它裁剪/遮挡；跟随输入框的视口坐标则不受任何滚动容器影响。
  */
 export function ConfigComboboxInput(props: {
 	value: string;
@@ -126,12 +129,19 @@ export function ConfigComboboxInput(props: {
 	const [open, setOpen] = useState(false);
 	const [filter, setFilter] = useState("");
 	const containerRef = useRef<HTMLDivElement>(null);
+	const panelRef = useRef<HTMLDivElement>(null);
+	/** 面板锚点（视口坐标）与展开方向：null = 面板关闭。滚动/缩放时同步更新。 */
+	const [anchor, setAnchor] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
+	/** 面板最大高度（向上展开时按此预留视口空间，保证不溢出） */
+	const PANEL_MAX_HEIGHT = 220;
 
-	// 点击外部时立即关闭下拉，避免多个 combobox 同时展开重叠
+	// 点击外部时立即关闭下拉，避免多个 combobox 同时展开重叠。
+	// 面板已 portal 到 body，需把面板自身也视为「容器内部」参与判断。
 	useEffect(() => {
 		if (!open) return;
 		const handlePointerDown = (event: PointerEvent) => {
-			if (!containerRef.current?.contains(event.target as Node)) {
+			const target = event.target as Node;
+			if (!containerRef.current?.contains(target) && !panelRef.current?.contains(target)) {
 				setOpen(false);
 			}
 		};
@@ -143,6 +153,33 @@ export function ConfigComboboxInput(props: {
 		return () => {
 			document.removeEventListener("pointerdown", handlePointerDown);
 			document.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [open]);
+
+	// 打开时计算面板锚点：优先向下展开，视口底部放不下（且顶部空间足够）时向上翻转；
+	// scroll 用 capture 捕获任意滚动容器（.config-content 等）的滚动并同步位置。
+	useEffect(() => {
+		if (!open) {
+			setAnchor(null);
+			return;
+		}
+		const updateAnchor = () => {
+			const el = containerRef.current;
+			if (!el) return;
+			const rect = el.getBoundingClientRect();
+			const spaceBelow = window.innerHeight - rect.bottom - 8;
+			const spaceAbove = rect.top - 8;
+			const openUp = spaceBelow < PANEL_MAX_HEIGHT + 8 && spaceAbove >= PANEL_MAX_HEIGHT + 8;
+			setAnchor(openUp
+				? { top: rect.top - 4 - PANEL_MAX_HEIGHT, left: rect.left, width: rect.width, openUp: true }
+				: { top: rect.bottom + 4, left: rect.left, width: rect.width, openUp: false });
+		};
+		updateAnchor();
+		window.addEventListener("scroll", updateAnchor, true);
+		window.addEventListener("resize", updateAnchor);
+		return () => {
+			window.removeEventListener("scroll", updateAnchor, true);
+			window.removeEventListener("resize", updateAnchor);
 		};
 	}, [open]);
 
@@ -191,8 +228,21 @@ export function ConfigComboboxInput(props: {
 			>
 				<ChevronDown size={14} />
 			</Button>
-			{open && (
-				<div className="absolute top-[calc(100%+4px)] right-0 left-0 z-30 max-h-[220px] overflow-y-auto rounded-lg border border-border-subtle bg-bg-panel p-[5px] shadow-[var(--shadow-popover)]">
+			{/* 面板 portal 到 body + fixed 锚定输入框：任何滚动容器（.config-content overflow-y:auto）
+			   都无法裁剪它；z-index 提到 --z-popover（960，与 Radix Select 同级）保证盖过后续兄弟节点。 */}
+			{open && anchor && createPortal(
+				<div
+					ref={panelRef}
+					style={{
+						position: "fixed",
+						top: anchor.top,
+						left: anchor.left,
+						width: anchor.width,
+						zIndex: "var(--z-popover)",
+						maxHeight: PANEL_MAX_HEIGHT,
+					}}
+					className="overflow-y-auto rounded-lg border border-border-subtle bg-bg-panel p-[5px] shadow-[var(--shadow-popover)]"
+				>
 					{filtered.length === 0 && (
 						<div className="config-combobox-empty">{t("config.noMatchingOptions")}</div>
 					)}
@@ -212,7 +262,8 @@ export function ConfigComboboxInput(props: {
 							{option.label ?? option.value}
 						</Button>
 					))}
-				</div>
+				</div>,
+				document.body,
 			)}
 		</div>
 	);

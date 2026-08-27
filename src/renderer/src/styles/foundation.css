@@ -2627,8 +2627,12 @@ select:focus-visible {
     transform: translateY(6px);
   }
   to {
+    /* 用 transform: none 收尾（视觉等同 translateY(0)）而不是显式 translateY(0)：
+       fill-mode: both 会保留末帧，translateY(0) 仍是非 none 的 transform，
+       会给 DialogContent 每个直子元素永久创建 stacking context，
+       导致内部绝对定位的下拉/浮层（非 portal 实现）被后面兄弟元素遮挡。 */
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 

@@ -29,7 +29,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, openSettingsAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -229,8 +229,6 @@ export function App() {
   // Streaming subscriptions are in SessionRuntimeInjector.
   // Timeline 由各 ChatSessionPane 自持；大纲只读当前聚焦会话的消息缓存。
   const activeMessages = useAtomValue(currentSessionMessagesAtom);
-// 打开设置窗口并可附带焦点分区（Git「去设置」/侧栏「配置管理」共用 openSettingsAtom）
-const setOpenSettings = useSetAtom(openSettingsAtom);
   const projects = useAtomValue(projectInventoryAtom);
   const agents = useAtomValue(agentInventoryAtom);
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
@@ -3033,7 +3031,6 @@ const setOpenSettings = useSetAtom(openSettingsAtom);
       branchByProject={branchByProject}
       creatingWorktree={worktreeCreating}
       isLanWeb={isLanWeb}
-      onOpenConfig={() => setOpenSettings({ tab: "common", pane: "config" })}
       onOpenFeedback={() => overlays.setFeedbackOpen(true)}
       settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
       settingsLoaded={settingsLoaded}

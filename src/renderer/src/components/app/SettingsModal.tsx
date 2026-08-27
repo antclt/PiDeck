@@ -18,6 +18,7 @@ import {
 	FileCode2,
 	GitBranch,
 	SlidersHorizontal,
+	MonitorCog,
 	X,
 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
@@ -580,7 +581,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 				    不再套自定义 tab 条样式，只做外边距/自定宽定位。 */}
 				<TabsList className="mx-3 mt-2.5 w-auto justify-start gap-0.5 self-start" aria-label={t("settings.title")}>
 					<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-[13px]">
-						<Settings2 className="size-4" aria-hidden="true" />
+						<MonitorCog className="size-4" aria-hidden="true" />
 						{t("settings.panes.system")}
 						{/* 系统设置分区黄点：全局设置/视觉桥/生图草稿任一有未保存 */}
 						{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
