@@ -617,3 +617,73 @@ test("request/header 折叠系统提示（EpochHeader.system，last wins）", ()
 	assert.equal(p.messagesChanged, false);
 	assert.equal(p.turnEnded, false);
 });
+
+test("todo/write 折叠为当前计划（整表 last-wins，不进消息时间线）", () => {
+	let p = projectDshEvent(undefined, event("todo/write", 10, {
+		todos: [
+			{ content: "定位根因", status: "completed" },
+			{ content: "补齐接线", status: "in_progress" },
+			{ content: "验证恢复", status: "pending" },
+		],
+	}), AGENT);
+	// vm 跨 realm 对象与测试字面量 prototype 不同，deepStrictEqual 需 JSON 往返归一
+	assert.deepEqual(JSON.parse(JSON.stringify(p.todos)), [
+		{ content: "定位根因", status: "completed" },
+		{ content: "补齐接线", status: "in_progress" },
+		{ content: "验证恢复", status: "pending" },
+	]);
+	assert.equal(p.stateChanged, true);
+	assert.equal(p.messages.length, 0, "todo/write 不投影消息（避免与工具卡重复）");
+
+	// 整表替换：第二次写入覆盖上一次（last-wins）
+	p = projectDshEvent(p, event("todo/write", 12, {
+		todos: [{ content: "只剩一项", status: "pending" }],
+	}), AGENT);
+	assert.deepEqual(JSON.parse(JSON.stringify(p.todos)), [{ content: "只剩一项", status: "pending" }]);
+
+	// 同值重复写入不产生 stateChanged 信号（避免无谓 emitRuntimeState）
+	p = projectDshEvent(p, event("todo/write", 13, {
+		todos: [{ content: "只剩一项", status: "pending" }],
+	}), AGENT);
+	assert.equal(p.stateChanged, false);
+});
+
+test("todo/write 非法数据保持原值（whole-value：脏数据不清计划也不渲染半截）", () => {
+	let p = projectDshEvent(undefined, event("todo/write", 10, {
+		todos: [{ content: "有效项", status: "pending" }],
+	}), AGENT);
+	assert.deepEqual(JSON.parse(JSON.stringify(p.todos)), [{ content: "有效项", status: "pending" }]);
+	// 空 content / 非法 status / 非对象项：整表判非法，保持旧计划
+	for (const bad of [
+		[{ content: "", status: "pending" }],
+		[{ content: "好", status: "wat" }],
+		["not-an-object"],
+	]) {
+		p = projectDshEvent(p, event("todo/write", 11, { todos: bad }), AGENT);
+		assert.deepEqual(JSON.parse(JSON.stringify(p.todos)), [{ content: "有效项", status: "pending" }], "非法整表不得覆盖");
+		assert.equal(p.stateChanged, false);
+	}
+	// 非数组值同样忽略
+	p = projectDshEvent(p, event("todo/write", 12, { todos: { content: "x", status: "pending" } }), AGENT);
+	assert.deepEqual(JSON.parse(JSON.stringify(p.todos)), [{ content: "有效项", status: "pending" }]);
+});
+
+test("turn/start 清空上一轮计划（standing plan：turn/end 保留，下一轮开始清）", () => {
+	let p = projectDshEvent(undefined, event("todo/write", 5, {
+		todos: [{ content: "写测试", status: "in_progress" }],
+	}), AGENT);
+	assert.deepEqual(JSON.parse(JSON.stringify(p.todos)), [{ content: "写测试", status: "in_progress" }]);
+	// turn/end 保留刚完成的清单
+	p = projectDshEvent(p, event("turn/end", 6, { reason: { kind: "stop" } }), AGENT);
+	assert.deepEqual(JSON.parse(JSON.stringify(p.todos)), [{ content: "写测试", status: "in_progress" }]);
+	// 下一轮 turn/start：计划清空（null = 显式清空，与官方 projection 单元一致）
+	p = projectDshEvent(p, event("turn/start", 7), AGENT);
+	assert.equal(p.todos, null);
+	assert.equal(p.stateChanged, true);
+
+	// 从未写入（undefined）的 turn/start 不引入「已清空」信号，保持能力未到达语义
+	const fresh = projectDshEvent(undefined, event("turn/start", 1), AGENT);
+	assert.equal(fresh.todos, undefined);
+	assert.equal(fresh.stateChanged, true);
+});
+

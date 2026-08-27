@@ -1,5 +1,6 @@
 import type { ThinkingLevelMap } from "./modelSpecs";
 import type { SessionEnvironment, SessionSource } from "./session";
+import type { TodoItem } from "./todo";
 
 export type AgentStatus = "starting" | "idle" | "running" | "error" | "closed";
 
@@ -84,6 +85,13 @@ export type AgentRuntimeState = {
 		maxGoalRounds: number;
 		roundsStarted: number;
 	};
+	/**
+	 * 当前待办计划（DSH 官方 `todos` projection / `todo/write` 快照的归一化形态）：
+	 * 最新一次 `todo/write` 的整表（last-wins），下一轮 `turn/start` 清为 `null`
+	 * （standing plan 语义，与 dsh-web 一致）；`undefined` 表示投影未到达/插件未挂载。
+	 * pi 后端无此字段（仍走 widget 行快照），渲染层按后端数据源分别消费。
+	 */
+	todos?: TodoItem[] | null;
 	isStreaming?: boolean;
 	/**
 	 * pi 的逻辑模型回合状态（agent_start → true，agent_end → false）。

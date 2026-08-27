@@ -77,6 +77,10 @@ test("strip reads both todo widgets, respects dismissal, and hides when empty", 
   // 数据链路：合并 pi-deck-todo + pi-deck-plan-todos 两个 widget 为一个待办列表
   assert.match(source, /pi-deck-todo/);
   assert.match(source, /pi-deck-plan-todos/);
+  // DSH 官方 todo 经 runtime state 归一化成同构行式进入同一 todo 条（typed 数据源，
+  // 不伪装成第二个 Pi widget；主进程侧由 todos projection / todo/write 折叠）
+  assert.match(source, /dsh-todos/);
+  assert.match(source, /runtime\?\.state\?\.todos/);
   assert.match(source, /isWidgetDismissed\(dismissed, props\.sessionId, key, widgetLines\)/);
   assert.match(source, /loadDismissedWidgets/);
   assert.match(source, /parseAgentTodoItems\(lines\)/);

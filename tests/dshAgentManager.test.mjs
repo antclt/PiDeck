@@ -34,6 +34,8 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 	const sessions = new Map();
 	let nextSession = 0;
 	const historyBySession = new Map();
+	// 可选：history 尾页的 projections baseline（官方 host 在尾页携带完整投影折叠）
+	const historyProjections = new Map();
 	const attachments = new Map();
 	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0, cancel: 0, workspaceCreate: 0, attachment: 0 };
 	const createPayloads = [];
@@ -103,6 +105,9 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 						value: {
 							events: log.slice(start, end).map((entry) => ({ event: entry })),
 							hasMore: start > 0,
+							...(historyProjections.has(sessionId)
+								? { projections: historyProjections.get(sessionId) }
+								: {}),
 						},
 					},
 				};
@@ -239,7 +244,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 			hostState.ready = true;
 		},
 	};
-	return { host, client, sessions, historyBySession, attachments, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls };
+	return { host, client, sessions, historyBySession, historyProjections, attachments, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls };
 }
 
 /**
@@ -1496,3 +1501,179 @@ test("模型与思考强度在运行中交给后端，后续 step 使用已接�
 	assert.equal(selectModelCalls[1].provider, "llm-deepseek");
 	assert.equal(selectModelCalls[1].model, "deepseek-v4-flash");
 });
+
+test("todos projection 帧 → runtime state.todos（整表快照 + higher-seq-wins + 清空）", async () => {
+	const { host, client } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).todos, undefined, "未推送前无 todo");
+
+	// 官方 tool-todo 的 session/projection 帧（value 是整表快照，seq 用于 higher-seq-wins）
+	client.pushFrames({
+		payload: {
+			type: "session/projection",
+			sessionId: "session-fake-1",
+			key: "todos",
+			value: [
+				{ content: "定位根因", status: "completed" },
+				{ content: "补齐接线", status: "in_progress" },
+				{ content: "验证恢复", status: "pending" },
+			],
+			seq: 2,
+		},
+	});
+	await flush();
+	// vm 跨 realm 对象与测试字面量 prototype 不同，deepStrictEqual 需 JSON 往返归一
+	assert.deepEqual(JSON.parse(JSON.stringify((await manager.getRuntimeState(tab.id)).todos)), [
+		{ content: "定位根因", status: "completed" },
+		{ content: "补齐接线", status: "in_progress" },
+		{ content: "验证恢复", status: "pending" },
+	]);
+
+	// 低 seq 迟到帧按 higher-seq-wins 丢弃
+	client.pushFrames({
+		payload: {
+			type: "session/projection",
+			sessionId: "session-fake-1",
+			key: "todos",
+			value: [{ content: "过期", status: "pending" }],
+			seq: 1,
+		},
+	});
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).todos.length, 3, "低 seq 不得覆盖");
+
+	// null = 显式清空（standing plan / 首写前），较高 seq 生效
+	client.pushFrames({
+		payload: {
+			type: "session/projection",
+			sessionId: "session-fake-1",
+			key: "todos",
+			value: null,
+			seq: 3,
+		},
+	});
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).todos, null, "高 seq null 清空");
+
+	// 非法值（非数组/null）不改变已有状态
+	client.pushFrames({
+		payload: {
+			type: "session/projection",
+			sessionId: "session-fake-1",
+			key: "todos",
+			value: [{ content: "", status: "pending" }],
+			seq: 4,
+		},
+	});
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).todos, null, "非法整表保持原值");
+});
+
+test("历史重放恢复 todo（todo/write + turn/start standing plan 语义）", async () => {
+	const { host, sessions, historyBySession } = makeFakeHost();
+	sessions.set("session-todo-1", { sessionId: "session-todo-1", cwd: PROJECT.path, running: false, blank: false });
+	// 上一轮写完清单、本轮 turn/start 已开（旧计划清空）；list 无 projections 兜底
+	historyBySession.set("session-todo-1", [
+		event("turn/start", 1),
+		event("todo/write", 2, { todos: [{ content: "第一轮计划", status: "completed" }] }),
+		event("turn/end", 3, { reason: { kind: "stop" } }),
+		event("turn/start", 4),
+	]);
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({
+		projectId: "project-1",
+		backend: "dsh",
+		dshSessionId: "session-todo-1",
+	});
+	assert.equal((await manager.getRuntimeState(tab.id)).todos, null, "新一轮已开 → 计划清空");
+
+	// 活跃一轮内写入清单（无后续 turn/start）→ 恢复为有效计划
+	historyBySession.set("session-todo-2", [
+		event("turn/start", 1),
+		event("todo/write", 2, { todos: [{ content: "当前计划", status: "in_progress" }] }),
+	]);
+	sessions.set("session-todo-2", { sessionId: "session-todo-2", cwd: PROJECT.path, running: false, blank: false });
+	const tab2 = await manager.create({
+		projectId: "project-1",
+		backend: "dsh",
+		dshSessionId: "session-todo-2",
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify((await manager.getRuntimeState(tab2.id)).todos)), [
+		{ content: "当前计划", status: "in_progress" },
+	]);
+});
+
+test("attach 用 host list projections.values.todos 兜底（历史窗口截断时仍恢复计划）", async () => {
+	const { host, sessions } = makeFakeHost();
+	// 官方 list 行携带 projections values（history 尾部截断时，最早 todo/write 可能不在窗口内）
+	sessions.set("session-todo-base", {
+		sessionId: "session-todo-base",
+		cwd: PROJECT.path,
+		running: false,
+		blank: false,
+		projections: {
+			asOfSeq: 500,
+			values: {
+				todos: [
+					{ content: "窗口外写入的计划", status: "completed" },
+					{ content: "窗口外进行中项", status: "in_progress" },
+				],
+			},
+		},
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({
+		projectId: "project-1",
+		backend: "dsh",
+		dshSessionId: "session-todo-base",
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify((await manager.getRuntimeState(tab.id)).todos)), [
+		{ content: "窗口外写入的计划", status: "completed" },
+		{ content: "窗口外进行中项", status: "in_progress" },
+	]);
+});
+
+test("history 尾页 projections baseline 恢复 todo（无 list projections 的 attach 路径）", async () => {
+	const { host, sessions, historyBySession, historyProjections } = makeFakeHost();
+	sessions.set("session-todo-tail", { sessionId: "session-todo-tail", cwd: PROJECT.path, running: false, blank: false });
+	// 事件窗口里没有 todo/write（计划在截断窗口之前，已被后续多轮对话挤出尾页）
+	historyBySession.set("session-todo-tail", [
+		event("turn/start", 10),
+		event("user/message", 11, { content: [{ type: "text", text: "继续" }], source: { kind: "user", rpcId: "rpc-tail" } }),
+		event("assistant/message", 12, { message: { content: [{ type: "text", text: "好的" }] } }),
+	]);
+	// 但尾页 projections baseline 携带完整折叠（官方 host 行为）
+	historyProjections.set("session-todo-tail", {
+		asOfSeq: 12,
+		values: {
+			todos: [{ content: "尾页基线计划", status: "in_progress" }],
+		},
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({
+		projectId: "project-1",
+		backend: "dsh",
+		dshSessionId: "session-todo-tail",
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify((await manager.getRuntimeState(tab.id)).todos)), [
+		{ content: "尾页基线计划", status: "in_progress" },
+	]);
+});
+
+test("todo/write 实时事件折叠进 runtime state（mux 事件 < projection 帧优先级）", async () => {
+	const { host, client } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+
+	client.pushFrames(sessionEventFrame("session-fake-1", event("todo/write", 2, {
+		todos: [{ content: "事件源计划", status: "in_progress" }],
+	})));
+	await flush();
+	assert.deepEqual(JSON.parse(JSON.stringify((await manager.getRuntimeState(tab.id)).todos)), [
+		{ content: "事件源计划", status: "in_progress" },
+	]);
+});
+

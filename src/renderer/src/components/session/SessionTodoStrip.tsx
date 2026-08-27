@@ -25,10 +25,11 @@ import {
  * composer 上方的 todo 常驻条（移植自 dsh-web 的 TodoPanel）。
  *
  * 形态：与输入框同宽同列的折叠卡（36px 高：图标 + 标题 + 进度文案 + chevron），
- * 点击展开列表（180px 内滚动）。数据 = pi 扩展 widget（pi-deck-todo /
- * pi-deck-plan-todos）的行快照经 parseAgentTodoItems 解析——三态结构与
- * dsh 的 TodoItem 同构，组件可以直接吃现有解析结果。`pi-deck-todo` 的
- * 计划身份元数据仅在此处按来源过滤，第三方 widget 不会受该私有协议影响。
+ * 点击展开列表（180px 内滚动）。数据两源：
+ * - pi 扩展 widget（pi-deck-todo / pi-deck-plan-todos）的行快照经 parseAgentTodoItems 解析；
+ * - DSH 官方 todo（AgentRuntimeState.todos 的 TodoItem[]）归一化成同构行式（dsh-todos
+ *   合成源），与 Pi 源共用整套 dismiss/解析/字形逻辑，主进程不伪装 widget、渲染层不区分后端。
+ * `pi-deck-todo` 的计划身份元数据仅在此处按来源过滤，第三方 widget 不会受该私有协议影响。
  *
  * 取舍：
  * - 挂在 ComposerArea 的 widgets 槽位（ComposerMeasuredExtras 测量高度并驱动
@@ -195,6 +196,21 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 		: undefined;
 	const widgets = coherent?.widgets ?? {};
 
+	// DSH 官方 todo 不是 widget：主进程把 todos projection / todo/write 折叠成
+	// AgentRuntimeState.todos（TodoItem[] | null | undefined）。这里归一化成与 Pi
+	// widget 相同的行式（☑/◐/☐ 前缀），复用同一套 dismiss/解析/字形链路；空/清空
+	// 都不产生行 → 不渲染（与 dsh-web 一致）。
+	const dshWidget = useMemo<WidgetLines | undefined>(() => {
+		const todos = runtime?.state?.todos;
+		if (!Array.isArray(todos) || todos.length === 0) return undefined;
+		return {
+			key: "dsh-todos",
+			lines: todos.map((item) => (
+				`${item.status === "completed" ? "☑" : item.status === "in_progress" ? "◐" : "☐"} ${item.content}`
+			)),
+		};
+	}, [runtime?.state?.todos]);
+
 	// A widget stays dismissed only while its raw lines stay identical. Keep raw metadata here
 	// until after the decision so a new plan with matching tasks becomes visible again.
 	const visibleWidgets = useMemo(() => {
@@ -205,8 +221,13 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 			if (isWidgetDismissed(dismissed, props.sessionId, key, widgetLines)) continue;
 			visible.push({ key, lines: widgetLines });
 		}
+		if (dshWidget) {
+			if (!isWidgetDismissed(dismissed, props.sessionId, dshWidget.key, dshWidget.lines)) {
+				visible.push(dshWidget);
+			}
+		}
 		return visible;
-	}, [widgets, dismissed, props.sessionId]);
+	}, [widgets, dshWidget, dismissed, props.sessionId]);
 
 	const items = useMemo(() => {
 		const lines: string[] = [];
