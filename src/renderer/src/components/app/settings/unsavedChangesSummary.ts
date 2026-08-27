@@ -1,10 +1,9 @@
 import { t, type TranslationKey } from "../../../i18n";
 
 /**
- * 设置关闭确认里要指出「哪个 tab 的哪一项」。
+ * 设置关闭确认里要指出「哪个 tab 的哪一项」，且**列出全部**变更项（不再是只点第一条）。
  * 字段按设置页从左到右、从上到下排列，而不是 dirty Set 的插入顺序——
  * 用户可能先改外观再改语言，但「常用设置」里的项更容易对上导航。
- * 多项只展示第一条，另用 totalCount 提示还有别的。
  */
 
 export type SettingsUnsavedTabId =
@@ -23,9 +22,16 @@ export type SettingsUnsavedTabId =
 	| "vision"
 	| "imagegen";
 
-export type SettingsUnsavedSummary = {
+/** 单条变更项：tab 名 + 字段名（均为 i18n key，渲染时再翻译）。 */
+export type SettingsUnsavedItem = {
 	tabKey: TranslationKey;
 	itemKey: TranslationKey;
+};
+
+export type SettingsUnsavedSummary = {
+	/** 完整去重后的变更项列表（按设置页 tab/字段目录顺序）。 */
+	items: SettingsUnsavedItem[];
+	/** 变更项总数（恒等于 items.length）。 */
 	totalCount: number;
 };
 
@@ -185,11 +191,12 @@ export function summarizeSettingsUnsavedChanges(input: {
 		push("imagegen", "settings.tabs.imagegen");
 	}
 
-	const first = items[0];
-	if (!first) return null;
+	if (items.length === 0) return null;
 	return {
-		tabKey: TAB_LABEL_KEYS[first.tab],
-		itemKey: first.itemKey,
+		items: items.map((item) => ({
+			tabKey: TAB_LABEL_KEYS[item.tab],
+			itemKey: item.itemKey,
+		})),
 		totalCount: items.length,
 	};
 }
@@ -214,9 +221,10 @@ export function formatSettingsUnsavedMessage(
 	summary: SettingsUnsavedSummary | null,
 	translate: typeof t = t,
 ): string {
-	if (!summary) return translate("settings.unsavedMessage");
-	const tab = translate(summary.tabKey);
-	const item = translate(summary.itemKey);
+	if (!summary || summary.items.length === 0) return translate("settings.unsavedMessage");
+	const first = summary.items[0];
+	const tab = translate(first.tabKey);
+	const item = translate(first.itemKey);
 	if (summary.totalCount <= 1) {
 		return translate("settings.unsavedMessageDetail", { tab, item });
 	}

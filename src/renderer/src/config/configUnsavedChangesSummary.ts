@@ -1,14 +1,21 @@
 import { t, type TranslationKey } from "../i18n";
 
 /**
- * Pi / DSH 配置关闭确认：点名第一个脏 tab。
+ * Pi / DSH 配置关闭确认：列出**全部**脏 tab（不再只点第一个）。
  * 配置页大多是整页草稿（没有设置页那样的字段黄点目录），所以 item 用该 tab 自己的导航名。
  * DSH 子页脏标记是 `dsh:<navId>`；Pi 侧与 dirtyTabs 编码一致。
  */
 
-export type ConfigUnsavedSummary = {
+/** 单条变更项：后端名 + 导航项名（均为 i18n key，渲染时再翻译）。 */
+export type ConfigUnsavedItem = {
 	tabKey: TranslationKey;
 	itemKey: TranslationKey;
+};
+
+export type ConfigUnsavedSummary = {
+	/** 完整去重后的变更项列表。 */
+	items: ConfigUnsavedItem[];
+	/** 变更项总数（恒等于 items.length）。 */
 	totalCount: number;
 };
 
@@ -71,11 +78,9 @@ export function summarizeConfigUnsavedChanges(dirtyTabs: Iterable<string>): Conf
 		}
 	}
 
-	const first = items[0];
-	if (!first) return null;
+	if (items.length === 0) return null;
 	return {
-		tabKey: first.tabKey,
-		itemKey: first.itemKey,
+		items,
 		totalCount: items.length,
 	};
 }
@@ -84,9 +89,10 @@ export function formatConfigUnsavedMessage(
 	summary: ConfigUnsavedSummary | null,
 	translate: typeof t = t,
 ): string {
-	if (!summary) return translate("config.unsavedMessage");
-	const tab = translate(summary.tabKey);
-	const item = translate(summary.itemKey);
+	if (!summary || summary.items.length === 0) return translate("config.unsavedMessage");
+	const first = summary.items[0];
+	const tab = translate(first.tabKey);
+	const item = translate(first.itemKey);
 	if (summary.totalCount <= 1) {
 		return translate("settings.unsavedMessageDetail", { tab, item });
 	}

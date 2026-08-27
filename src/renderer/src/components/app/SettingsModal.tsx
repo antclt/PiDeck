@@ -46,10 +46,11 @@ import {
 	AlertDialogTitle,
 } from "../ui-shadcn/alert-dialog";
 import { cn } from "../../lib/utils";
-import { deepClone, deepEqual } from "../../utils/deepEqual";
+import { deepClone } from "../../utils/deepEqual";
 import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
+import { computeDirtyFields } from "./settings/settingsDirtyFields.ts";
 import { SETTINGS_TAB_IDS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLayout";
 import { useGitModels } from "./settings/gitModels.ts";
 import { formatSettingsUnsavedMessage, summarizeSettingsUnsavedChanges } from "./settings/unsavedChangesSummary.ts";
@@ -243,22 +244,12 @@ function SettingsModalContent(props: SettingsModalProps) {
 	/**
 	 * 脏字段 = 草稿与基准快照的真实差异（deepEqual），不再用「touched 集合」记录。
 	 * 好处：改回原值即自动摘掉脏标记，关闭确认 / 左侧黄点 / 保存按钮只反映真实未保存改动。
+	 * 遍历键并集（computeDirtyFields）而非仅草稿键，避免漏掉「字段被删除」的差异。
 	 */
-	const dirtyFields = useMemo(() => {
-		const base = baseSnapshotRef.current;
-		const keys = new Set<string>();
-		for (const key of Object.keys(draftSettings)) {
-			if (
-				!deepEqual(
-					(draftSettings as Record<string, unknown>)[key],
-					(base as Record<string, unknown>)[key],
-				)
-			) {
-				keys.add(key);
-			}
-		}
-		return keys;
-	}, [draftSettings]);
+	const dirtyFields = useMemo(
+		() => computeDirtyFields(draftSettings as Record<string, unknown>, baseSnapshotRef.current as Record<string, unknown>),
+		[draftSettings],
+	);
 	// ── 视觉桥草稿：独立于全局设置（写 pi-deck-vision.json，走独立 IPC），脏标记/保存/取消由弹框统一管理 ──
 	const visionDraft = useVisionBridgeDraft();
 	// ── 生图草稿：独立文件 userData/imagegen.json，不属于 pi/dsh，放在设置页统一管理 ──
@@ -426,18 +417,19 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const hasDirtyChanges = dirtyFields.size > 0;
 	// 视觉桥/生图草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
 	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty;
-	// 关闭确认只点名第一条（按设置页 tab/字段顺序），多项用 count 提示还有别的。
-	const unsavedCloseMessage = useMemo(
+	// 关闭确认：列出全部变更项（不再只点第一条），多项按设置页 tab/字段顺序逐条展示。
+	const unsavedSummary = useMemo(
 		() =>
-			formatSettingsUnsavedMessage(
-				summarizeSettingsUnsavedChanges({
-					dirtyFields,
-					visionDirty: visionDraft.dirty,
-					imageGenDirty,
-				}),
-				t,
-			),
+			summarizeSettingsUnsavedChanges({
+				dirtyFields,
+				visionDirty: visionDraft.dirty,
+				imageGenDirty,
+			}),
 		[dirtyFields, visionDraft.dirty, imageGenDirty],
+	);
+	const unsavedCloseMessage = useMemo(
+		() => formatSettingsUnsavedMessage(unsavedSummary, t),
+		[unsavedSummary],
 	);
 
 	return (
@@ -695,7 +687,26 @@ function SettingsModalContent(props: SettingsModalProps) {
 					<AlertDialogContent>
 						<AlertDialogHeader>
 							<AlertDialogTitle>{t("settings.unsavedTitle")}</AlertDialogTitle>
-							<AlertDialogDescription>{unsavedCloseMessage}</AlertDialogDescription>
+							<AlertDialogDescription asChild>
+								<div className="grid max-h-56 gap-1.5 overflow-auto text-left">
+									{unsavedSummary && unsavedSummary.totalCount === 1 ? (
+										/* 单项：沿用带「是否在关闭前保存？」的单行提示，不需要列表 */
+										<p>{unsavedCloseMessage}</p>
+									) : (
+										<>
+											{/* 多项：先给总数，再逐条列出变更项（footer 按钮承担保存/放弃语义） */}
+											<p>{t("settings.unsavedListIntro", { count: unsavedSummary?.totalCount ?? 0 })}</p>
+											<ul className="grid gap-0.5 pl-4 list-disc">
+												{unsavedSummary?.items.map((item) => (
+													<li key={`${item.tabKey}\u0000${item.itemKey}`}>
+														{t(item.tabKey)} · {t(item.itemKey)}
+													</li>
+												))}
+											</ul>
+										</>
+									)}
+								</div>
+							</AlertDialogDescription>
 						</AlertDialogHeader>
 						<AlertDialogFooter>
 							<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>

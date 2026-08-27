@@ -1,4 +1,5 @@
 import type { ConfigTab } from "./configTypes";
+import { deepEqual } from "../utils/deepEqual";
 
 /** 脏标记 key：与 ConfigModal 的 sectionTabValue 编码一致（"config:<tab>" 或 section 名）。 */
 export type ConfigDirtyKey = `config:${ConfigTab}` | "skills" | "prompts";
@@ -45,3 +46,18 @@ export const ALL_CONFIG_DIRTY_KEYS: readonly ConfigDirtyKey[] = [
 	"config:mcp",
 	"config:raw",
 ];
+
+/**
+ * 按基准快照核算单条 Pi 配置脏标记（纯函数，可单测）。
+ * 当前数据与基准相等则移除 key，否则加入——取代「改了就 markDirty」的 touched 语义，
+ * 改回原值后脏标记自动消失，顶部保存按钮 / 左侧黄点 / 关闭确认只反映真实未保存改动。
+ */
+export function reconcileConfigDirty(
+	keys: Set<string>,
+	dirtyKey: string,
+	current: unknown,
+	baseline: unknown,
+): void {
+	if (deepEqual(current, baseline)) keys.delete(dirtyKey);
+	else keys.add(dirtyKey);
+}

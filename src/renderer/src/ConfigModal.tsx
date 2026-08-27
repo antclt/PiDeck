@@ -37,7 +37,7 @@ import {
 	PlugZap,
 } from "lucide-react";
 import { cn } from "./lib/utils";
-import { deepClone, deepEqual } from "./utils/deepEqual";
+import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
 import { applyAdaptiveTemplateReset, collectModelSpecPatches, deriveProviderCompat, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
@@ -69,7 +69,7 @@ import type {
 } from "./config/configTypes";
 import type { ConfigFileDiagnostic, CreatePiPromptTemplateInput, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary } from "../../shared/types";
 import { getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS } from "./config/providerHeaders";
-import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnReload } from "./config/configDirtyMarks";
+import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnReload, reconcileConfigDirty } from "./config/configDirtyMarks";
 import { formatConfigUnsavedMessage, summarizeConfigUnsavedChanges } from "./config/configUnsavedChangesSummary";
 import { DirtyMarker } from "./components/app/settings/SettingRows";
 import { isValidProviderName } from "../../shared/providerName";
@@ -132,21 +132,6 @@ function parseSectionTabValue(value: string): {
 		};
 	}
 	return { section: value as ConfigSection };
-}
-
-/**
- * 按基准快照对比单条 Pi 配置脏标记：当前数据与基准相等则移除 key，否则加入。
- * 用于取代「改了就 markDirty」的 touched 语义——改回原值后脏标记自动消失，
- * 顶部保存按钮 / 左侧黄点 / 关闭确认只反映真实未保存改动。
- */
-function reconcileConfigDirty(
-	keys: Set<string>,
-	dirtyKey: string,
-	current: unknown,
-	baseline: unknown,
-): void {
-	if (deepEqual(current, baseline)) keys.delete(dirtyKey);
-	else keys.add(dirtyKey);
 }
 
 /**
@@ -332,6 +317,15 @@ function ConfigModalContent(props: ConfigModalProps) {
 	}, [dirtyTabs]);
 	const hasDshDirty = dshDirtyNavIds.size > 0;
 	const hasPiDirty = dirtyTabs.size > 0 && !hasDshDirty;
+	/** 关闭确认摘要：列出全部脏 tab（不再只点第一条），供 AlertDialog 逐条展示。 */
+	const configUnsavedSummary = useMemo(
+		() => summarizeConfigUnsavedChanges(dirtyTabs),
+		[dirtyTabs],
+	);
+	const configUnsavedMessage = useMemo(
+		() => formatConfigUnsavedMessage(configUnsavedSummary, t),
+		[configUnsavedSummary],
+	);
 
 	/** 标记某 tab 存在未保存修改（幂等；只用 setDirtyTabs 函数式更新，引用稳定） */
 	const markDirty = useCallback((tabKey: string) => {
@@ -1915,11 +1909,17 @@ function ConfigModalContent(props: ConfigModalProps) {
 		}
 	};
 
-	/** 关闭确认框选择保存并关闭：保存当前 tab 成功才关；失败留在弹框（错误已展示在内容区）。 */
+	/**
+	 * 关闭确认框选择保存并关闭：汇总**全部**脏来源逐个保存（不是只存当前 tab），
+	 * dsh:<nav> 归并到 dsh 一个保存入口；任一保存失败则留下重试（错误已展示在内容区）。
+	 */
 	const handleSaveAndClose = async () => {
-		const tabKey = currentTabKey;
-		if (dirtyTabs.has(tabKey)) {
-			const ok = await saveByKey(tabKey);
+		const roots = new Set<string>();
+		for (const key of dirtyTabs) {
+			roots.add(key.startsWith("dsh:") ? "dsh" : key);
+		}
+		for (const key of roots) {
+			const ok = await saveByKey(key);
 			if (!ok) return;
 		}
 		setCloseConfirmOpen(false);
@@ -2405,7 +2405,26 @@ function ConfigModalContent(props: ConfigModalProps) {
 						<AlertDialogContent>
 							<AlertDialogHeader>
 								<AlertDialogTitle>{t("config.unsavedTitle")}</AlertDialogTitle>
-								<AlertDialogDescription>{formatConfigUnsavedMessage(summarizeConfigUnsavedChanges(dirtyTabs), t)}</AlertDialogDescription>
+								<AlertDialogDescription asChild>
+									<div className="grid max-h-56 gap-1.5 overflow-auto text-left">
+										{configUnsavedSummary && configUnsavedSummary.totalCount === 1 ? (
+											/* 单项：沿用带「是否在关闭前保存？」的单行提示，不需要列表 */
+											<p>{configUnsavedMessage}</p>
+										) : (
+											<>
+												{/* 多项：先给总数，再逐条列出变更项（footer 按钮承担保存/放弃语义） */}
+												<p>{t("config.unsavedListIntro", { count: configUnsavedSummary?.totalCount ?? 0 })}</p>
+												<ul className="grid gap-0.5 pl-4 list-disc">
+													{configUnsavedSummary?.items.map((item) => (
+														<li key={`${item.tabKey}\u0000${item.itemKey}`}>
+															{t(item.tabKey)} · {t(item.itemKey)}
+														</li>
+													))}
+												</ul>
+											</>
+										)}
+									</div>
+								</AlertDialogDescription>
 							</AlertDialogHeader>
 							<AlertDialogFooter>
 								<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
