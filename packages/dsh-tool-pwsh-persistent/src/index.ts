@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { deadline, timeoutOf } from "@deepseek-ai/dsh-timeout";
 import z from "@deepseek-ai/schemastery";
@@ -11,6 +11,7 @@ import {
 	stripPwshControl,
 	wrapPwshCommand,
 } from "./protocol.js";
+import { formatPwshStartupError, resolvePwshPath } from "./pwshResolver.js";
 
 export {
 	parsePwshCommandOutput,
@@ -19,6 +20,7 @@ export {
 	stripPwshControl,
 	wrapPwshCommand,
 } from "./protocol.js";
+export { formatPwshStartupError, resolvePwshPath } from "./pwshResolver.js";
 
 /** ESM 下解析 CJS 原生模块（node-pty 无 ESM 入口）。 */
 const require = createRequire(import.meta.url);
@@ -186,6 +188,9 @@ function persistentSessions(
 			} catch (error) {
 				await close(owner);
 				pending.delete(owner);
+				// Cancellation is expected control flow; only startup failures should
+				// carry the executable path and installation guidance to the user.
+				if (!combined.aborted) throw formatPwshStartupError(error, config.pwshPath);
 				throw error;
 			}
 		})();
@@ -333,9 +338,12 @@ const Config = z.object({
 
 function apply(ctx: { tools: { register(def: unknown): void }; effect(fn: () => (() => void | Promise<void>) | void, label: string): void }, config: Record<string, unknown>) {
 	const resolved = {
-		pwshPath: typeof config.pwshPath === "string" && config.pwshPath.trim().length > 0
-			? config.pwshPath
-			: resolveDefaultPwshPath(),
+		pwshPath: resolvePwshPath({
+			configuredPath: typeof config.pwshPath === "string" ? config.pwshPath : undefined,
+			platform: process.platform,
+			programFiles: process.env.ProgramFiles,
+			fileExists: existsSync,
+		}),
 		timeoutMs: typeof config.timeoutMs === "number" && config.timeoutMs > 0 ? config.timeoutMs : 300_000,
 		maxOutputChars: typeof config.maxOutputChars === "number" && config.maxOutputChars > 0 ? config.maxOutputChars : 16_000,
 		startupTimeoutMs: typeof config.startupTimeoutMs === "number" && config.startupTimeoutMs > 0 ? config.startupTimeoutMs : 15_000,
@@ -344,13 +352,6 @@ function apply(ctx: { tools: { register(def: unknown): void }; effect(fn: () => 
 			: DEFAULT_DESCRIPTION,
 	};
 	registerPersistentPwsh(ctx, resolved);
-}
-
-/** 默认 pwsh：Windows 用 Program Files 的 PowerShell 7；其它平台走 PATH 里的 `pwsh`。 */
-function resolveDefaultPwshPath(): string {
-	if (process.platform !== "win32") return "pwsh";
-	const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
-	return join(programFiles, "PowerShell", "7", "pwsh.exe");
 }
 
 export { Config, apply, inject, name };

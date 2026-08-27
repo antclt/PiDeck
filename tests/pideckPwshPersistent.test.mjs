@@ -8,6 +8,77 @@ const {
   stripPwshControl,
   wrapPwshCommand,
 } = loadTsCommonJs("packages/dsh-tool-pwsh-persistent/src/protocol.ts");
+const {
+  formatPwshStartupError,
+  resolvePwshPath,
+} = loadTsCommonJs("packages/dsh-tool-pwsh-persistent/src/pwshResolver.ts");
+
+test("resolvePwshPath：显式配置优先且不读取标准安装路径", () => {
+  let checked = false;
+  const configuredPath = "D:\\portable\\pwsh.exe";
+  assert.equal(
+    resolvePwshPath({
+      configuredPath,
+      platform: "win32",
+      programFiles: "C:\\Program Files",
+      fileExists: () => {
+        checked = true;
+        return true;
+      },
+    }),
+    configuredPath,
+  );
+  assert.equal(checked, false);
+});
+
+test("resolvePwshPath：Windows 标准 PS7 路径存在时直接使用", () => {
+  const checkedPaths = [];
+  assert.equal(
+    resolvePwshPath({
+      platform: "win32",
+      programFiles: "C:\\Program Files",
+      fileExists: (path) => {
+        checkedPaths.push(path);
+        return true;
+      },
+    }),
+    "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  );
+  assert.deepEqual(checkedPaths, ["C:\\Program Files\\PowerShell\\7\\pwsh.exe"]);
+});
+
+test("resolvePwshPath：标准安装不存在时回退到 PATH/App Execution Alias 的 pwsh", () => {
+  assert.equal(
+    resolvePwshPath({
+      platform: "win32",
+      programFiles: "C:\\Program Files",
+      fileExists: () => false,
+    }),
+    "pwsh",
+  );
+});
+
+test("resolvePwshPath：非 Windows 平台使用 PATH 中的 pwsh", () => {
+  let checked = false;
+  assert.equal(
+    resolvePwshPath({
+      platform: "linux",
+      fileExists: () => {
+        checked = true;
+        return true;
+      },
+    }),
+    "pwsh",
+  );
+  assert.equal(checked, false);
+});
+
+test("formatPwshStartupError：启动失败包含实际路径和 winget 修复命令", () => {
+  const error = formatPwshStartupError(new Error("spawn pwsh ENOENT"), "pwsh");
+  assert.match(error.message, /pwshPath: pwsh/);
+  assert.match(error.message, /spawn pwsh ENOENT/);
+  assert.match(error.message, /winget install --id Microsoft\.PowerShell --source winget/);
+});
 
 test("wrapPwshCommand：start/end marker + Invoke-Expression 包裹 + 单引号转义", () => {
   const marker = { start: "__DSH_PWSH_START_x__", end: "__DSH_PWSH_END_x:" };

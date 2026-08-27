@@ -41,8 +41,14 @@ peer（由宿主提供）：`@deepseek-ai/dsh-tools` / `dsh-timeout` / `cordis` 
 
 | 键 | 默认 | 含义 |
 |---|---|---|
-| `pwshPath` | Windows 上 PS7，其它平台 `pwsh` | 可执行文件 |
+| `pwshPath` | 显式配置优先；Windows 标准 PS7 文件存在时使用，否则使用 `pwsh`（交给 PATH/App Execution Alias）；其它平台使用 `pwsh` | 可执行文件 |
 | `timeoutMs` | `300000` | 单条命令超时 |
 | `startupTimeoutMs` | `15000` | 首次等到自定义提示符 |
 | `maxOutputChars` | `16000` | 输出截断 |
 | `description` | 内置英文说明 | 给模型看的工具描述 |
+
+如果启动仍然失败，错误信息会显示实际使用的 `pwshPath`，并给出安装 PowerShell 7 的命令：
+
+```powershell
+winget install --id Microsoft.PowerShell --source winget
+```
