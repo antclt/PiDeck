@@ -1007,6 +1007,7 @@ export function ModelsTab(props: {
 																element;
 														}}
 														value={m.id}
+														onChange={(e) => props.onUpdateModel(name, i, "id", e.target.value)}
 														// 失焦按 pi-ai 目录填充空字段（未命中留空，见 applyModelSpecAutoFill）
 														onBlur={(e) => void applyModelSpecAutoFill(name, i, e.target.value)}
 														placeholder="model-id"
@@ -1016,6 +1017,7 @@ export function ModelsTab(props: {
 												<TableCell className="min-w-0 p-2">
 													<Input
 														value={m.name ?? ""}
+														onChange={(e) => props.onUpdateModel(name, i, "name", e.target.value)}
 														onBlur={() => void applyModelSpecAutoFill(name, i, m.id)}
 														placeholder={t("config.modelDisplayName")}
 														className="h-8 min-w-0"

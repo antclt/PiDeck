@@ -1,9 +1,9 @@
 /**
- * AppShell 侧栏/抽屉像素回写策略。
+ * AppShell 侧栏/抽屉持久化宽度回写策略。
  *
- * react-resizable-panels 的 expand() 在没有上次展开宽度时会落到 minSize。
- * 若把这个瞬时值写进 React 状态，会与「外部宽度 → panel.resize(saved)」互顶：
- * min ↔ saved，表现为抽屉打开后一直闪，点一下页面才停。
+ * 只有用户主动拖拽/键盘调整时才提交宽度偏好。窗口尺寸或页面缩放属于容器布局
+ * 变化，不应把 react-resizable-panels 的临时换算结果写入缓存，否则下次启动会
+ * 恢复错误的侧栏/抽屉宽度。
  */
 
 export type PanelPixelCommitInput = {
@@ -11,8 +11,6 @@ export type PanelPixelCommitInput = {
   px: number;
   /** React / localStorage 里的保存宽度 */
   savedWidth: number;
-  /** 面板 minSize（抽屉未钉住 180、钉住 220；侧栏 100） */
-  minSize: number;
   /** 用户拖拽/键盘调分隔条为 true；窗口缩放、expand/resize effect 为 false */
   isUserInteraction: boolean;
 };
@@ -30,18 +28,10 @@ export function isCollapsedPanelPixels(px: number): boolean {
  * 返回要写入的像素；null 表示忽略本轮，避免覆盖保存值或形成回路。
  */
 export function shouldCommitPanelPixels(input: PanelPixelCommitInput): number | null {
+  if (!input.isUserInteraction) return null;
   const px = Math.round(input.px);
   const saved = Math.round(input.savedWidth);
   if (isCollapsedPanelPixels(px)) return null;
   if (Math.abs(px - saved) <= 1) return null;
-  // expand() 无历史宽度时落到 minSize。这是程序化瞬时值，不能盖掉默认/用户宽度。
-  // 用户真把抽屉拖到下限时 isUserInteraction=true，允许写入。
-  if (
-    !input.isUserInteraction &&
-    px <= input.minSize + 1 &&
-    saved > input.minSize + 1
-  ) {
-    return null;
-  }
   return px;
 }
