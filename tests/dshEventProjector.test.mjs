@@ -687,3 +687,24 @@ test("turn/start 清空上一轮计划（standing plan：turn/end 保留，下�
 	assert.equal(fresh.stateChanged, true);
 });
 
+
+test("assistant/message 终态图片不会覆盖/丢失", () => {
+let p = projectDshEvent(undefined, event("assistant/chunk", 1, {
+chunk: { type: "text-delta", text: "回答" },
+}), AGENT);
+p = projectDshEvent(p, event("assistant/message", 2, {
+message: {
+content: [
+{ type: "text", text: "回答" },
+{ type: "image", attachment: { attachmentId: "att-assistant", mediaType: "image/png" } },
+],
+},
+}), AGENT);
+assert.equal(p.messages[0].images, undefined, "canonical ref 先保留在 meta，等待附件回填");
+assert.equal(p.messages[0].meta.dshImageRefs[0].attachmentId, "att-assistant");
+
+const direct = projectDshEvent(undefined, event("assistant/message", 3, {
+message: { content: [{ type: "image", mediaType: "image/png", data: "aGVsbG8=" }] },
+}), AGENT);
+assert.equal(direct.messages[0].images[0].data, "aGVsbG8=");
+});

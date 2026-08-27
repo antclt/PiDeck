@@ -283,6 +283,12 @@ export function projectDshEvent(
 		case "assistant/message": {
 			// 终态：以组装后的完整内容块为准（delta 可能因适配器差异与终态不完全一致）
 			const message = (data.message ?? {}) as { content?: unknown };
+			const { images: assistantImages, refs: assistantImageRefs } = imagePartsFromContent(message.content);
+			const assistantImageMeta = assistantImageRefs.length > 0
+				? { dshImageRefs: assistantImageRefs }
+				: undefined;
+			// G2：assistant 终态也必须保留图片块，避免终态更新流式骨架时把图片覆盖掉。
+			const assistantImagesPresent = assistantImages.length > 0 || assistantImageRefs.length > 0;
 			// G16：usage 统计——adapter 报告 token 用量时 assistant/message 携带 usage，
 			// 投影进 projection（渲染层 runtime state 的 token/缓存指标），并写入本条
 			// assistant 消息的 meta.usage（轨迹账本按消息展示 token 用量，dsh-web 同源）。
@@ -307,6 +313,7 @@ export function projectDshEvent(
 			})();
 			const { text, reasoning } = splitBlocks(message.content);
 			const finalText = text.trim() ? text : base.pendingAssistantText;
+			// 终态内容可能暂时缺 image 块；保留流式骨架已有图片，避免更新时闪退。
 			// 流式累积兜底：终态 content 缺失 thinking 时用已流式渲染的累积文本
 			// （打包行/短 run 差异下终态块可能不含 reasoning）。
 			const finalThinking = reasoning.trim() ? reasoning : base.pendingAssistantThinking;
@@ -318,7 +325,7 @@ export function projectDshEvent(
 			const hasToolCalls = Array.isArray(message.content) && message.content.some(
 				(block) => block !== null && typeof block === "object" && (block as { type?: unknown }).type === "tool-call",
 			);
-			if (hasToolCalls && !finalText.trim() && !finalThinking.trim() && !base.pendingAssistantId) {
+			if (hasToolCalls && !finalText.trim() && !finalThinking.trim() && !assistantImagesPresent && !base.pendingAssistantId) {
 				next.pendingAssistantId = undefined;
 				next.pendingAssistantText = "";
 				next.pendingAssistantThinking = "";
@@ -343,6 +350,7 @@ export function projectDshEvent(
 						thinking: finalThinking.trim() ? finalThinking : undefined,
 						timestamp: eventTime(event.time),
 						stopReason: "stop",
+						...(assistantImages.length > 0 ? { images: assistantImages } : (previous.images ? { images: previous.images } : {})),
 						// 思考耗时：终态时间作为结束点（startedAt 已在骨架创建时记录）
 						...((finalThinking.trim() || previous.thinkingStartedAt !== undefined)
 							? { thinkingEndedAt: eventTime(event.time) }
@@ -353,6 +361,7 @@ export function projectDshEvent(
 						// 保留骨架已有 meta（工具视图等），并写入本条 usage（轨迹 token 用量）
 						meta: {
 							...(previous.meta ?? {}),
+							...(assistantImageMeta ?? {}),
 							...(usageForMessage ? { usage: usageForMessage } : {}),
 						},
 					};
@@ -369,7 +378,8 @@ export function projectDshEvent(
 							thinking: finalThinking.trim() ? finalThinking : undefined,
 							timestamp: eventTime(event.time),
 							stopReason: "stop",
-							...(usageForMessage ? { meta: { usage: usageForMessage } } : {}),
+							...(assistantImages.length > 0 ? { images: assistantImages } : {}),
+							...(assistantImageMeta || usageForMessage ? { meta: { ...(assistantImageMeta ?? {}), ...(usageForMessage ? { usage: usageForMessage } : {}) } } : {}),
 						},
 					];
 				}
@@ -385,7 +395,8 @@ export function projectDshEvent(
 						thinking: finalThinking.trim() ? finalThinking : undefined,
 						timestamp: eventTime(event.time),
 						stopReason: "stop",
-						...(usageForMessage ? { meta: { usage: usageForMessage } } : {}),
+						...(assistantImages.length > 0 ? { images: assistantImages } : {}),
+						...(assistantImageMeta || usageForMessage ? { meta: { ...(assistantImageMeta ?? {}), ...(usageForMessage ? { usage: usageForMessage } : {}) } } : {}),
 					},
 				];
 				next.messagesChanged = true;

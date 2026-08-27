@@ -1699,7 +1699,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const pendingByMessage: Array<{ message: ChatMessage; refs: DshImageRef[] }> = [];
 		for (const message of messages) {
 			const refs = dshImageRefsFromMeta(message.meta);
-			if (refs.length === 0 || (message.images?.length ?? 0) > 0) continue;
+			if (refs.length === 0) continue;
 			const missing = refs.filter((ref) => !attempted?.has(ref.attachmentId));
 			if (missing.length > 0) pendingByMessage.push({ message, refs: missing });
 		}
@@ -1710,13 +1710,13 @@ export class DshAgentManager implements SessionAgentGateway {
 		}
 		const resolved = new Map<string, ImageContent>();
 		for (const [attachmentId, ref] of uniqueRefs) {
-			attempted?.add(attachmentId);
 			try {
 				const result = await client.sessions.attachment({
 					sessionId,
 					attachmentId: ref.attachmentId as import("@deepseek-ai/dsh-attachment").AttachmentIdType,
 				});
 				if (result.result.ok) {
+					attempted?.add(attachmentId);
 					resolved.set(attachmentId, {
 						type: "image",
 						data: result.result.value.data,
@@ -1741,7 +1741,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		let changed = false;
 		const nextMessages = messages.map((message) => {
 			const refs = dshImageRefsFromMeta(message.meta);
-			if (refs.length === 0 || (message.images?.length ?? 0) > 0) return message;
+			if (refs.length === 0) return message;
 			const images = refs
 				.map((ref) => resolved.get(ref.attachmentId))
 				.filter((image): image is ImageContent => Boolean(image));

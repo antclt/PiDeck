@@ -1677,3 +1677,27 @@ test("todo/write 实时事件折叠进 runtime state（mux 事件 < projection �
 	]);
 });
 
+
+test("create attach 混合内联图片与 durable ref 时会补齐缺失图片", async () => {
+	const { host, sessions, historyBySession, attachments, calls } = makeFakeHost();
+	sessions.set("session-img-mixed", { sessionId: "session-img-mixed", cwd: PROJECT.path, running: false, blank: false });
+	historyBySession.set("session-img-mixed", [event("user/message", 1, {
+		content: [
+			{ type: "text", text: "两张图" },
+			{ type: "image", mediaType: "image/png", data: "inline-data" },
+			{ type: "image", attachment: { attachmentId: "att-mixed", mediaType: "image/jpeg" } },
+		],
+		source: { kind: "user", rpcId: "rpc-mixed" },
+	})]);
+	attachments.set("session-img-mixed:att-mixed", {
+		attachment: { attachmentId: "att-mixed", mediaType: "image/jpeg" },
+		data: "durable-data",
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh", dshSessionId: "session-img-mixed" });
+	const images = manager.getMessages(tab.id)[0].images;
+	assert.equal(images.length, 2);
+	assert.equal(images[0].data, "inline-data");
+	assert.equal(images[1].data, "durable-data");
+	assert.equal(calls.attachment, 1);
+});
