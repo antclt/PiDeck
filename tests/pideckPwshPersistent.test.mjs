@@ -80,11 +80,11 @@ test("formatPwshStartupError：启动失败包含实际路径和 winget 修复�
   assert.match(error.message, /winget install --id Microsoft\.PowerShell --source winget/);
 });
 
-test("wrapPwshCommand：start/end marker + Invoke-Expression 包裹 + 单引号转义", () => {
+test("wrapPwshCommand：start/end marker + Invoke-Expression 包裹 + 双引号转义", () => {
   const marker = { start: "__DSH_PWSH_START_x__", end: "__DSH_PWSH_END_x:" };
   const wrapped = wrapPwshCommand("Write-Output 'hello'", marker);
   assert.match(wrapped, new RegExp(`Write-Output '${marker.start}'`));
-  assert.match(wrapped, /Invoke-Expression -Command 'Write-Output ''hello'''/);
+  assert.match(wrapped, /Invoke-Expression -Command "Write-Output 'hello'"/);
   // end marker 与退出码用独立语句输出（conpty 折行鲁棒：拆开也能解析）
   assert.match(wrapped, new RegExp(`Write-Output '${marker.end}'`));
   assert.match(wrapped, /Write-Output \$global:LASTEXITCODE$/);
@@ -92,10 +92,29 @@ test("wrapPwshCommand：start/end marker + Invoke-Expression 包裹 + 单引号�
   assert.match(wrapped, /if \(\$null -eq \$global:LASTEXITCODE\) \{ \$global:LASTEXITCODE = if \(\$\?\) \{ 0 \} else \{ 1 \} \}/);
 });
 
-test("wrapPwshCommand：命令内的单引号全部转义（'' 表示字面 '）", () => {
+test("wrapPwshCommand：双引号字符串转义（$ 不展开、双引号/反引号保留字面）", () => {
   const marker = { start: "S", end: "E:" };
-  const wrapped = wrapPwshCommand("git log --format='%h' it's", marker);
-  assert.match(wrapped, /Invoke-Expression -Command 'git log --format=''%h'' it''s'/);
+  const wrapped = wrapPwshCommand('git log --format="%h" $HOME it\'s', marker);
+  // 单引号在双引号字符串内是字面量、无需转义；$ 与 " 必须反引号转义
+  assert.match(wrapped, /Invoke-Expression -Command "git log --format=`"%h`" `\$HOME it's"/);
+});
+
+test("wrapPwshCommand：多行命令压成单行物理输入（换行转义为 `n）", () => {
+  // 回归：ConPTY 行输入会吞掉字面 LF（实测 `$a = 1\n$b = 2` 被压成 `1$b` 报错），
+  // wrapper 必须不含任何字面换行，多行脚本经 `n 转义后交由 Invoke-Expression 还原。
+  const marker = { start: "S", end: "E:" };
+  const wrapped = wrapPwshCommand("$a = 1\n$b = 2\n$a + $b", marker);
+  assert.ok(!wrapped.includes("\n"), "wrapper 不得包含字面换行");
+  assert.ok(!wrapped.includes("\r"), "wrapper 不得包含字面回车");
+  assert.match(wrapped, /`\$a = 1`n`\$b = 2`n`\$a \+ `\$b/);
+  assert.ok(wrapped.includes('`$a = 1`n`$b = 2`n`$a + `$b'), "换行已转义为 `n、$ 已转义为 `$");
+});
+
+test("wrapPwshCommand：CR 删除、ESC 转义为 `e（控制字符不落进 ConPTY 输入）", () => {
+  const marker = { start: "S", end: "E:" };
+  const wrapped = wrapPwshCommand('Write-Output "a\rb\x1b[c"', marker);
+  assert.ok(!wrapped.includes("\r"));
+  assert.ok(wrapped.includes('Write-Output `"ab`e[c`"'), '双引号/ESC 均反引号转义且 CR 被删除');
 });
 
 test("parsePwshCommandOutput：提取 start~end 区间文本与退出码", () => {
