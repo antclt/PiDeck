@@ -310,6 +310,7 @@ export const TurnRow = memo(
 												hidden={!stepsVisible}
 												stopped={props.agentRunning !== true}
 												sessionId={props.sessionId}
+												onOpenFile={props.onOpenFile}
 											/>
 										);
 									}

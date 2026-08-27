@@ -13,10 +13,12 @@ export const ToolStep = memo(function ToolStep(props: {
 	stopped: boolean;
 	/** 所属会话 id（转交 ToolCard「查看完整输出」的历史会话文件回退） */
 	sessionId?: string;
+	/** 工具结果输出中的文件路径点击打开回调（转交 ToolGroupCard） */
+	onOpenFile?: (path: string) => void;
 }) {
 	return (
 		<div style={{ display: props.hidden ? "none" : undefined }}>
-			<ToolGroupCard group={props.group} stopped={props.stopped} sessionId={props.sessionId} />
+			<ToolGroupCard group={props.group} stopped={props.stopped} sessionId={props.sessionId} onOpenFile={props.onOpenFile} />
 		</div>
 	);
-});
+	});
