@@ -34,7 +34,6 @@ import { TimelineMarker } from "./TimelineMarker";
 import { LiveDuration } from "./LiveDuration";
 import { getToolPhraseFromArgs } from "./timeline/toolPhrase";
 import { ToolResult } from "../agents/tool-result";
-import { ToolResultText } from "./ToolResultText";
 import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
 import {
@@ -227,8 +226,6 @@ export const ToolCard = memo(function ToolCard(props: {
 	stopped?: boolean;
 	/** 所属会话 id：运行期绑定不可用时（历史会话 _viewer 投影）回退会话文件定位 */
 	sessionId?: string;
-	/** 工具结果输出中的文件路径点击打开回调（与会话正文同口径） */
-	onOpenFile?: (path: string) => void;
 }) {
 	const [expanded, setExpanded] = useState(props.defaultOpen ?? false);
 	const messageStatus = getToolStatus(props.message);
@@ -445,7 +442,7 @@ export const ToolCard = memo(function ToolCard(props: {
 								copyClassName="tool-card-copy"
 								contentClassName="text-text-tertiary"
 							>
-								<ToolResultText text={displayText} onOpenFile={props.onOpenFile} />
+								{displayText}
 							</ToolResult>
 						</>
 					)}
@@ -495,14 +492,12 @@ export const ToolGroupCard = memo(function ToolGroupCard(props: {
 	stopped?: boolean;
 	/** 所属会话 id（转交 ToolCard「查看完整输出」的历史会话文件回退） */
 	sessionId?: string;
-	/** 工具结果输出中的文件路径点击打开回调（转交 ToolCard） */
-	onOpenFile?: (path: string) => void;
 }) {
 	return (
 		<section className="tool-group-card w-full min-w-0 overflow-hidden rounded-none border-0 bg-transparent" data-message-id={props.group.id}>
 			<div className="flex flex-col gap-0 p-0">
 				{props.group.messages.map((message) => (
-					<ToolCard key={message.id} message={message} stopped={props.stopped} sessionId={props.sessionId} onOpenFile={props.onOpenFile} />
+					<ToolCard key={message.id} message={message} stopped={props.stopped} sessionId={props.sessionId} />
 				))}
 			</div>
 		</section>
