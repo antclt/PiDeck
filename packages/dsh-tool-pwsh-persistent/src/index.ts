@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { createRequire } from "node:module";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { deadline, timeoutOf } from "@deepseek-ai/dsh-timeout";
@@ -20,7 +20,12 @@ export {
 	stripPwshControl,
 	wrapPwshCommand,
 } from "./protocol.js";
-export { formatPwshStartupError, resolvePwshPath } from "./pwshResolver.js";
+export {
+	candidatePwshPathExists,
+	candidatePwshPaths,
+	formatPwshStartupError,
+	resolvePwshPath,
+} from "./pwshResolver.js";
 
 /** ESM 下解析 CJS 原生模块（node-pty 无 ESM 入口）。 */
 const require = createRequire(import.meta.url);
@@ -342,7 +347,9 @@ function apply(ctx: { tools: { register(def: unknown): void }; effect(fn: () => 
 			configuredPath: typeof config.pwshPath === "string" ? config.pwshPath : undefined,
 			platform: process.platform,
 			programFiles: process.env.ProgramFiles,
-			fileExists: existsSync,
+			systemRoot: process.env.SystemRoot,
+			pathEnv: process.env.PATH,
+			lstat: lstatSync,
 		}),
 		timeoutMs: typeof config.timeoutMs === "number" && config.timeoutMs > 0 ? config.timeoutMs : 300_000,
 		maxOutputChars: typeof config.maxOutputChars === "number" && config.maxOutputChars > 0 ? config.maxOutputChars : 16_000,
