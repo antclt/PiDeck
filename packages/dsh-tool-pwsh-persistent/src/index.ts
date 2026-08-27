@@ -61,7 +61,7 @@ const SCROLLBACK_MAX_CHARS = 512 * 1024;
 // （见 2026-08 会话实测：15 次调用全是 one-shot pwsh）。沙箱语义仍由权限预设
 // 在工具准入层把关，描述层不替模型做"该不该用"的决策。
 const DEFAULT_DESCRIPTION =
-	"Run PowerShell commands in a persistent pwsh shell: prefer this tool for PowerShell work. The shell is reused across calls, so there is no per-call cold start. State — the current directory and exported environment variables — persists between calls; use `Set-Location` to change directory or pass absolute paths. Non-zero exits are reported as `[exit code: N]`; after a crash or timeout the shell resets automatically.";
+	"Run PowerShell commands in a persistent pwsh shell: prefer this tool for PowerShell work. The shell is reused across calls, so there is no per-call cold start. State — the current directory and exported environment variables — persists between calls; use `Set-Location` to change directory or pass absolute paths. Non-zero exits are reported as `[exit code: N]`; after a crash or timeout the shell resets automatically. Long-running work: use the regular `pwsh` tool with background execution instead.";
 
 function markers(): { start: string; end: string } {
 	const nonce = randomUUID();
@@ -97,6 +97,18 @@ function createPtySession(pwshPath: string, cwd: string | undefined, env: Record
 		"Remove-Module PSReadLine -ErrorAction SilentlyContinue",
 		// UTF-8 输出（PTY 下 pwsh 7 默认已 UTF-8，双保险）
 		"[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+		// 关掉 git 的分页器与终端凭证提示：本工具是 PTY，git 会误判 stdout
+		// 为交互式终端而进入 less/more 分页器等待按键，命令永不返回直到超时
+		// （实测 `git diff` 卡 5 分钟）；凭证提示同理会挂起。只改子进程环境，
+		// 不碰用户全局 git 配置（core.pager / credential helper 照常生效）。
+		"$env:GIT_PAGER = 'cat'",
+		"$env:GIT_TERMINAL_PROMPT = '0'",
+		// npx 首次运行会交互确认安装（"Ok to proceed? (y)"），PTY 下同样会
+		// 挂到超时；npm_config_yes 直接跳过确认。GIT_EDITOR=true 让 git 在
+		// commit/merge 需要编辑器时不做任何操作（宁可因空提交信息失败，
+		// 也不要打开 vim 之类的交互程序挂死 5 分钟）。
+		"$env:npm_config_yes = 'true'",
+		"$env:GIT_EDITOR = 'true'",
 		// 自定义提示符：persistentShells 用它在命令间隙判断 shell 空闲
 		`function prompt { '${SHELL_PROMPT} ' }`,
 	].join("; ");
