@@ -1701,3 +1701,28 @@ test("create attach 混合内联图片与 durable ref 时会补齐缺失图片",
 	assert.equal(images[1].data, "durable-data");
 	assert.equal(calls.attachment, 1);
 });
+
+
+test("运行中 mux 后续事件不会清掉已回填图片", async () => {
+	const { host, client, attachments } = makeFakeHost();
+	attachments.set("session-fake-1:att-live", {
+		attachment: { attachmentId: "att-live", mediaType: "image/png" },
+		data: "runtime-data",
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+
+	client.pushFrames(sessionEventFrame("session-fake-1", event("user/message", 1, {
+		content: [{ type: "image", attachment: { attachmentId: "att-live", mediaType: "image/png" } }],
+		source: { kind: "user", rpcId: "rpc-live" },
+	})));
+	await flush();
+	assert.equal(manager.getMessages(tab.id)[0].images?.[0]?.data, "runtime-data");
+
+	client.pushFrames(sessionEventFrame("session-fake-1", event("assistant/chunk", 2, {
+		chunk: { type: "text-delta", text: "正在回答" },
+	})));
+	await flush();
+	assert.equal(manager.getMessages(tab.id)[0].images?.[0]?.data, "runtime-data");
+});

@@ -1757,9 +1757,13 @@ export class DshAgentManager implements SessionAgentGateway {
 		try {
 			const client = this.requireClient();
 			const attempted = runtime.hydratedImageRefs ??= new Set<string>();
-			const updated = await this.hydrateDshImageRefs(client, runtime.sessionId, runtime.messages, attempted);
-			if (updated !== runtime.messages) {
-				runtime.messages = updated;
+			const snapshot = runtime.messages;
+			const updated = await this.hydrateDshImageRefs(client, runtime.sessionId, snapshot, attempted);
+			const merged = runtime.messages === snapshot
+				? updated
+				: mergeDshHydratedMessages(runtime.messages, updated);
+			if (merged !== runtime.messages) {
+				runtime.messages = merged;
 				this.emitMessages(runtime);
 			}
 		} catch (error) {
@@ -2122,7 +2126,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (event?.type === "turn/end") {
 				// D8：停止后的迟到 turn/end 不追加 error 气泡（停止 ≠ 回合失败）
 				runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, undefined, { skipErrorTurnEnd: true });
-				runtime.messages = runtime.projection.messages;
+				runtime.messages = mergeDshProjectedMessages(runtime.messages, runtime.projection.messages);
 				// 收口时带上已累积正文，避免空 done 把渲染层 live 槽抹成空白。
 				this.emit(ipcChannels.agentsTextStream, {
 					agentId: runtime.tab.id,
@@ -2138,7 +2142,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			return;
 		}
 		runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, eventView);
-		runtime.messages = runtime.projection.messages;
+		runtime.messages = mergeDshProjectedMessages(runtime.messages, runtime.projection.messages);
 		// todo/write / turn/start 折叠进 projection.todos：实时同步到 runtime，
 		// 随 p.stateChanged 的 emitRuntimeState 一起推给渲染层 todo 条。
 		runtime.todos = runtime.projection.todos;
@@ -2226,6 +2230,61 @@ export class DshAgentManager implements SessionAgentGateway {
 		}
 	}
 }
+
+/** Merge image bytes already available in a newer runtime snapshot into projection messages. */
+function mergeDshProjectedMessages(previous: ChatMessage[], projected: ChatMessage[]): ChatMessage[] {
+	const previousImagesById = new Map<string, ImageContent[]>();
+	for (const message of previous) {
+		if (message.images && message.images.length > 0) previousImagesById.set(message.id, message.images);
+	}
+	if (previousImagesById.size === 0) return projected;
+	let changed = false;
+	const merged = projected.map((message) => {
+		const previousImages = previousImagesById.get(message.id);
+		if (!previousImages) return message;
+		const images = mergeDshImageArrays(message.images, previousImages);
+		if (images === message.images) return message;
+		changed = true;
+		return { ...message, images };
+	});
+	return changed ? merged : projected;
+}
+
+/** Merge attachment hydration into the newest runtime list without dropping newer messages. */
+function mergeDshHydratedMessages(current: ChatMessage[], hydrated: ChatMessage[]): ChatMessage[] {
+	const hydratedById = new Map(hydrated.map((message) => [message.id, message]));
+	let changed = false;
+	const merged = current.map((message) => {
+		const hydratedMessage = hydratedById.get(message.id);
+		if (!hydratedMessage?.images) return message;
+		const images = mergeDshImageArrays(message.images, hydratedMessage.images);
+		if (images === message.images) return message;
+		changed = true;
+		return { ...message, images };
+	});
+	return changed ? merged : current;
+}
+
+function mergeDshImageArrays(existing: ImageContent[] | undefined, additions: ImageContent[]): ImageContent[] | undefined {
+	if (additions.length === 0) return existing;
+	const merged = [...(existing ?? [])];
+	let changed = false;
+	for (const image of additions) {
+		let duplicate = false;
+		for (const known of merged) {
+			if (known.mimeType !== image.mimeType) continue;
+			if (known.data !== image.data) continue;
+			duplicate = true;
+			break;
+		}
+		if (!duplicate) {
+			merged.push(image);
+			changed = true;
+		}
+	}
+	return changed ? merged : existing;
+}
+
 
 /** 本轮最后一条助手正文；收口 text-stream 时带上，避免空 done 抹掉 live 槽。 */
 function lastAssistantText(messages: ChatMessage[]): string {
