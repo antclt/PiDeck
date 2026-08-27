@@ -746,8 +746,8 @@ function CommandPickerDialog(props: {
 	emptyLabel?: ReactNode;
 	value?: string;
 	showGroupActions?: boolean;
-	/** 初始折叠的分组 id 集合；透传给 CommandPickerPanel（模型选择器用它实现「仅当前模型可见」的默认态）。 */
-	defaultCollapsedGroupIds?: string[];
+	/** 默认展开的分组 id 集合（null = 默认全展开）；透传给 CommandPickerPanel。 */
+	defaultExpandedIds?: ReadonlySet<string> | null;
 	/** 标题栏操作（如模型列表手动刷新按钮）；渲染在折叠/展开按钮之后、关闭按钮之前 */
 	headerAction?: ReactNode;
 	children: ReactNode;
@@ -768,7 +768,7 @@ function CommandPickerDialog(props: {
 					emptyLabel={props.emptyLabel ?? t("app.commandPickerEmpty")}
 					value={props.value}
 					showGroupActions={props.showGroupActions}
-					defaultCollapsedGroupIds={props.defaultCollapsedGroupIds}
+					defaultExpandedIds={props.defaultExpandedIds}
 					headerAction={props.headerAction}
 					onClose={props.onClose}
 				>
@@ -878,17 +878,14 @@ export function ModelPicker(props: {
 		return a.localeCompare(b);
 	});
 
-	// 初始折叠规则（「当前选中模型可见」）：默认只展开收藏栏 + 当前模型所在提供商，
-	// 其余提供商全部折叠；无收藏且无当前模型时回退第一个提供商，避免空列表。
-	// 收藏栏 id "favorites" 不在初始折叠集合里，天然保持展开。
-	const defaultExpandedGroupIds = computeModelPickerDefaultExpanded({
+	// 默认展开集合（「当前选中模型可见」驱动）：只展开收藏栏 + 当前模型所在提供商，
+	// 其余提供商折叠；无收藏且无当前模型时回退第一个提供商。折叠是派生状态，
+	// 模型目录/收藏异步到达后，未覆盖的分组会自动按新集合生效，不再有“打开时全展开”的时序问题。
+	const defaultExpandedIds = new Set(computeModelPickerDefaultExpanded({
 		favorites,
 		current: props.current,
 		providers: sortedProviders,
-	});
-	const defaultCollapsedGroupIds = sortedProviders
-		.map((provider) => `provider:${provider}`)
-		.filter((id) => !defaultExpandedGroupIds.includes(id));
+	}));
 
 	const renderModelRow = (model: AvailableModel, valueOverride?: string) => {
 		const modelKey = `${model.provider}/${model.id}`;
@@ -939,7 +936,7 @@ export function ModelPicker(props: {
 			emptyLabel={t("app.modelPickerEmpty")}
 			value={currentModelKey}
 			showGroupActions
-			defaultCollapsedGroupIds={defaultCollapsedGroupIds}
+			defaultExpandedIds={defaultExpandedIds}
 			// 手动刷新入口：标题栏右上角，任何情况下（含加载失败）都能重新拉取模型列表。
 			headerAction={
 				props.onRefresh ? (

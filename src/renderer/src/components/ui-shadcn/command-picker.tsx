@@ -10,26 +10,30 @@ import {
 	CommandList,
 } from "./command";
 import { cn } from "../../lib/utils";
+import {
+	INITIAL_PICKER_GROUP_SELECTION,
+	applyPickerGroupAction,
+	resolveGroupExpanded,
+	type PickerGroupSelection,
+} from "./commandPickerExpansion";
 
 type CommandPickerContextValue = {
 	searchActive: boolean;
-	allCollapsed: boolean;
-	collapsedGroups: Set<string>;
-	expandedGroups: Set<string>;
+	selection: PickerGroupSelection;
+	defaultExpandedIds: ReadonlySet<string> | null;
 	toggleGroup: (id: string) => void;
 };
 
 const CommandPickerContext = createContext<CommandPickerContextValue>({
 	searchActive: false,
-	allCollapsed: false,
-	collapsedGroups: new Set(),
-	expandedGroups: new Set(),
+	selection: INITIAL_PICKER_GROUP_SELECTION,
+	defaultExpandedIds: null,
 	toggleGroup: () => undefined,
 });
 
 /**
- * 可折叠的 Command 分组。折叠状态由共享面板统一持有，保证“全部展开/全部折叠”与单组操作一致。
- * 搜索期间强制展开，避免用户搜到隐藏分组中的项目却看不到结果。
+ * 可折叠的 Command 分组。折叠状态是「派生状态 + 用户覆盖」：未覆盖的分组跟随面板的
+ * 默认展开集合（defaultExpandedIds，数据异步到达后自动生效），用户切换过的分组优先。
  */
 export function CommandPickerGroup(props: {
 	id: string;
@@ -39,8 +43,13 @@ export function CommandPickerGroup(props: {
 	children: ReactNode;
 	className?: string;
 }) {
-	const { searchActive, allCollapsed, collapsedGroups, expandedGroups, toggleGroup } = useContext(CommandPickerContext);
-	const expanded = searchActive || (allCollapsed ? expandedGroups.has(props.id) : !collapsedGroups.has(props.id));
+	const { searchActive, selection, defaultExpandedIds, toggleGroup } = useContext(CommandPickerContext);
+	const expanded = resolveGroupExpanded({
+		selection,
+		defaultExpandedIds,
+		searchActive,
+		groupId: props.id,
+	});
 
 	return (
 		<div className={cn("border-b border-border/45 last:border-b-0", props.className)}>
@@ -74,36 +83,28 @@ export function CommandPickerPanel(props: {
 	showGroupActions?: boolean;
 	/** 标题栏操作（模型列表手动刷新等）；置于折叠/展开按钮之后、关闭按钮之前 */
 	headerAction?: ReactNode;
-	/** 初始折叠的分组 id 集合。选择器每次打开重新挂载，该值即每次打开时的默认折叠态；缺省全部展开（历史行为）。 */
-	defaultCollapsedGroupIds?: string[];
+	/** 默认展开的分组 id 集合；null（缺省）= 默认全展开。未覆盖的分组始终跟随该集合（数据异步到达后自动生效）。 */
+	defaultExpandedIds?: ReadonlySet<string> | null;
 	children: ReactNode;
 	className?: string;
 }) {
 	const [search, setSearch] = useState("");
-	const [allCollapsed, setAllCollapsed] = useState(false);
-	const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
-		() => new Set(props.defaultCollapsedGroupIds ?? []),
-	);
-	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+	// 折叠是派生状态 + 用户覆盖：mount 时数据（模型目录）可能未就绪，
+	// 不能再像旧实现那样把折叠集合固化成一次快照，否则数据到达后分组全展开且不再响应。
+	const [selection, setSelection] = useState<PickerGroupSelection>(() => ({
+		mode: "default",
+		overrides: new Map(INITIAL_PICKER_GROUP_SELECTION.overrides),
+	}));
 	const listHostRef = useRef<HTMLDivElement | null>(null);
-
+	const defaultExpandedIds = props.defaultExpandedIds ?? null;
 	const toggleGroup = (id: string) => {
-		if (allCollapsed) {
-			// 全部折叠后点击单组只展开这一组；保持 allCollapsed 语义，避免其他分组一起展开。
-			setExpandedGroups((current) => {
-				const next = new Set(current);
-				if (next.has(id)) next.delete(id);
-				else next.add(id);
-				return next;
-			});
-			return;
-		}
-		setCollapsedGroups((current) => {
-			const next = new Set(current);
-			if (next.has(id)) next.delete(id);
-			else next.add(id);
-			return next;
-		});
+		setSelection((current) =>
+			applyPickerGroupAction({
+				selection: current,
+				defaultExpandedIds,
+				action: { kind: "toggle", groupId: id },
+			}),
+		);
 	};
 
 	// cmdk 会选中当前值，但不会保证它在 Portal 内的滚动容器中居中；这里统一补上定位。
@@ -137,23 +138,30 @@ export function CommandPickerPanel(props: {
 								aria-label={t("app.modelExpandAllProviders")}
 								title={t("app.modelExpandAllProviders")}
 								onClick={() => {
-									setAllCollapsed(false);
-									setCollapsedGroups(new Set());
-									setExpandedGroups(new Set());
+									setSelection((current) =>
+										applyPickerGroupAction({
+											selection: current,
+											defaultExpandedIds,
+											action: { kind: "expandAll" },
+										}),
+									);
 								}}
 							>
 								<ChevronsUpDown size={14} aria-hidden="true" />
 							</Button>
 							<Button
 								variant="ghost"
-								size="icon-xs"
 								className="text-muted-foreground hover:text-foreground"
 								aria-label={t("app.modelCollapseAllProviders")}
 								title={t("app.modelCollapseAllProviders")}
 								onClick={() => {
-									setAllCollapsed(true);
-									setCollapsedGroups(new Set());
-									setExpandedGroups(new Set());
+									setSelection((current) =>
+										applyPickerGroupAction({
+											selection: current,
+											defaultExpandedIds,
+											action: { kind: "collapseAll" },
+										}),
+									);
 								}}
 							>
 								<ChevronsDownUp size={14} aria-hidden="true" />
@@ -184,7 +192,7 @@ export function CommandPickerPanel(props: {
 				<div ref={listHostRef} className="min-h-0">
 					<CommandList className="max-h-[min(440px,55vh)] min-h-0">
 						{search.trim() ? <CommandEmpty>{props.emptyLabel}</CommandEmpty> : null}
-						<CommandPickerContext.Provider value={{ searchActive: search.trim().length > 0, allCollapsed, collapsedGroups, expandedGroups, toggleGroup }}>
+						<CommandPickerContext.Provider value={{ searchActive: search.trim().length > 0, selection, defaultExpandedIds, toggleGroup }}>
 							{props.children}
 						</CommandPickerContext.Provider>
 					</CommandList>
