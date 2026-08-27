@@ -41,13 +41,13 @@ peer（由宿主提供）：`@deepseek-ai/dsh-tools` / `dsh-timeout` / `cordis` 
 
 | 键 | 默认 | 含义 |
 |---|---|---|
-| `pwshPath` | 显式配置优先；Windows 依次扫描标准 PS7、PATH 中每项的绝对 `pwsh.exe`（含 WindowsApps App Execution Alias）、Windows PowerShell 5.1，最后才回退 `pwsh`；其它平台使用 `pwsh` | 可执行文件 |
+| `pwshPath` | 显式配置优先；复用官方 `@deepseek-ai/dsh-pwsh-local` 的 resolver（与普通 pwsh 工具同一来源）：Windows 依次扫描标准 PS7、PATH 中每项的绝对 `pwsh.exe`（Store payload 由此命中；WindowsApps App Execution Alias 经 `lstat` 接受）、Windows PowerShell 5.1，最后才回退裸 `pwsh`；其它平台直接使用 `pwsh` | 可执行文件 |
 | `timeoutMs` | `300000` | 单条命令超时 |
 | `startupTimeoutMs` | `15000` | 首次等到自定义提示符 |
 | `maxOutputChars` | `16000` | 输出截断 |
 | `description` | 内置英文说明 | 给模型看的工具描述 |
 
-Windows 候选用 `lstat` 检查目录项本身，因此即使 Store alias 的目标因 ACL 无法 `stat`，也能把完整的 WindowsApps `pwsh.exe` 路径交给 `node-pty` 启动。
+Windows 候选复用官方 `@deepseek-ai/dsh-pwsh-local` 的 `lstat` 检查：检查目录项本身，因此即使 Store alias 的目标因 ACL 无法 `stat`，也能把完整的 `pwsh.exe` 路径交给 `node-pty` 启动。
 
 如果启动仍然失败，错误信息会显示实际使用的 `pwshPath`，并给出安装 PowerShell 7 的命令：
 

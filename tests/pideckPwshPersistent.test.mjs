@@ -9,46 +9,56 @@ const {
   wrapPwshCommand,
 } = loadTsCommonJs("packages/dsh-tool-pwsh-persistent/src/protocol.ts");
 const {
-  candidatePwshPathExists,
   candidatePwshPaths,
   formatPwshStartupError,
   resolvePwshPath,
-} = loadTsCommonJs("packages/dsh-tool-pwsh-persistent/src/pwshResolver.ts");
-
-const fileStat = () => ({
-  isFile: () => true,
-  isSymbolicLink: () => false,
+} = loadTsCommonJs("packages/dsh-tool-pwsh-persistent/src/pwshResolver.ts", {
+  stubs: {
+    "@deepseek-ai/dsh-pwsh-local": {
+      resolvePwshPath: (configured, env, platform) => {
+        // 官方 resolver 的纯逻辑代理：configured 优先；win32 委托候选扫描。
+        if (configured !== undefined && configured.length > 0) return configured;
+        if (platform === "win32") return "win32-resolved";
+        return "pwsh";
+      },
+      candidatePwshPaths: (env) => {
+        // 与官方同序的纯函数：标准 PS7 → PATH 每个绝对 pwsh.exe → PS5.1
+        const programs = env.ProgramFiles ?? "C:\\Program Files";
+        const system = env.SystemRoot ?? "C:\\Windows";
+        const candidates = [`${programs}\\PowerShell\\7\\pwsh.exe`];
+        for (const entry of (env.PATH ?? "").split(";")) {
+          const trimmed = entry.trim().replace(/^"|"$/g, "");
+          if (trimmed.length > 0) candidates.push(`${trimmed}\\pwsh.exe`);
+        }
+        candidates.push(`${system}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`);
+        return candidates;
+      },
+    },
+  },
 });
 
-const symlinkStat = () => ({
-  isFile: () => false,
-  isSymbolicLink: () => true,
-});
-
-test("resolvePwshPath：显式配置优先且不读取候选路径", () => {
-  let checked = false;
+test("resolvePwshPath：显式配置优先且委托官方 resolver 不读磁盘", () => {
   const configuredPath = "D:\\portable\\pwsh.exe";
   assert.equal(
-    resolvePwshPath({
-      configuredPath,
-      platform: "win32",
-      programFiles: "C:\\Program Files",
-      lstat: () => {
-        checked = true;
-        return fileStat();
-      },
-    }),
+    resolvePwshPath({ configuredPath, platform: "win32" }),
     configuredPath,
   );
-  assert.equal(checked, false);
+});
+
+test("resolvePwshPath：win32 委托官方 resolver", () => {
+  assert.equal(resolvePwshPath({ platform: "win32" }), "win32-resolved");
+});
+
+test("resolvePwshPath：非 Windows 平台委托官方返回 pwsh", () => {
+  assert.equal(resolvePwshPath({ platform: "linux" }), "pwsh");
 });
 
 test("candidatePwshPaths：按 PS7、PATH 和 Windows PowerShell 5.1 的顺序构造绝对候选", () => {
   assert.deepEqual(
     [...candidatePwshPaths({
-      programFiles: "C:\\Program Files",
-      pathEnv: " C:\\tools ;\"C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps\";;",
-      systemRoot: "C:\\Windows",
+      ProgramFiles: "C:\\Program Files",
+      PATH: " C:\\tools ;\"C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps\";;",
+      SystemRoot: "C:\\Windows",
     })],
     [
       "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
@@ -59,101 +69,8 @@ test("candidatePwshPaths：按 PS7、PATH 和 Windows PowerShell 5.1 的顺序�
   );
 });
 
-test("resolvePwshPath：Windows 标准 PS7 路径存在时直接使用", () => {
-  const checkedPaths = [];
-  assert.equal(
-    resolvePwshPath({
-      platform: "win32",
-      programFiles: "C:\\Program Files",
-      lstat: (path) => {
-        checkedPaths.push(path);
-        return fileStat();
-      },
-    }),
-    "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-  );
-  assert.deepEqual(checkedPaths, ["C:\\Program Files\\PowerShell\\7\\pwsh.exe"]);
-});
-
-test("resolvePwshPath：使用 PATH 内 WindowsApps alias 的绝对 pwsh.exe", () => {
-  const windowsApps = "C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe";
-  const checkedPaths = [];
-  assert.equal(
-    resolvePwshPath({
-      platform: "win32",
-      programFiles: "C:\\Program Files",
-      pathEnv: "C:\\tools;C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps",
-      lstat: (path) => {
-        checkedPaths.push(path);
-        if (path === windowsApps) return symlinkStat();
-        throw new Error("ENOENT");
-      },
-    }),
-    windowsApps,
-  );
-  assert.deepEqual(checkedPaths, [
-    "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-    "C:\\tools\\pwsh.exe",
-    windowsApps,
-  ]);
-});
-
-test("candidatePwshPathExists：lstat 接受 alias link，拒绝目录与不可访问路径", () => {
-  assert.equal(candidatePwshPathExists("C:\\WindowsApps\\pwsh.exe", symlinkStat), true);
-  assert.equal(candidatePwshPathExists("C:\\directory", () => ({
-    isFile: () => false,
-    isSymbolicLink: () => false,
-  })), false);
-  assert.equal(candidatePwshPathExists("C:\\missing\\pwsh.exe", () => {
-    throw new Error("EACCES");
-  }), false);
-});
-
-test("resolvePwshPath：PATH 未命中后回退 Windows PowerShell 5.1", () => {
-  const powershell51 = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-  assert.equal(
-    resolvePwshPath({
-      platform: "win32",
-      programFiles: "C:\\Program Files",
-      pathEnv: "C:\\tools",
-      systemRoot: "C:\\Windows",
-      lstat: (path) => {
-        if (path === powershell51) return fileStat();
-        throw new Error("ENOENT");
-      },
-    }),
-    powershell51,
-  );
-});
-
-test("resolvePwshPath：所有 Windows 候选不存在时最后回退裸 pwsh", () => {
-  assert.equal(
-    resolvePwshPath({
-      platform: "win32",
-      programFiles: "C:\\Program Files",
-      pathEnv: "C:\\tools",
-      systemRoot: "C:\\Windows",
-      lstat: () => {
-        throw new Error("ENOENT");
-      },
-    }),
-    "pwsh",
-  );
-});
-
-test("resolvePwshPath：非 Windows 平台使用 PATH 中的 pwsh", () => {
-  let checked = false;
-  assert.equal(
-    resolvePwshPath({
-      platform: "linux",
-      lstat: () => {
-        checked = true;
-        return fileStat();
-      },
-    }),
-    "pwsh",
-  );
-  assert.equal(checked, false);
+test("resolvePwshPath：显式配置空串时回退官方解析", () => {
+  assert.equal(resolvePwshPath({ configuredPath: "  ", platform: "win32" }), "win32-resolved");
 });
 
 test("formatPwshStartupError：启动失败包含实际路径和 winget 修复命令", () => {

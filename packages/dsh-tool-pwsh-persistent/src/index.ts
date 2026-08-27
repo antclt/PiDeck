@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { lstatSync } from "node:fs";
 import { createRequire } from "node:module";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { deadline, timeoutOf } from "@deepseek-ai/dsh-timeout";
@@ -21,7 +20,6 @@ export {
 	wrapPwshCommand,
 } from "./protocol.js";
 export {
-	candidatePwshPathExists,
 	candidatePwshPaths,
 	formatPwshStartupError,
 	resolvePwshPath,
@@ -130,7 +128,10 @@ function waitForPrompt(session: PersistentSession, signal: AbortSignal, timeoutM
 		const timer = setInterval(() => {
 			if (signal.aborted) {
 				clearInterval(timer);
-				reject(signal.reason);
+				// signal.reason 不保证是 Error（如 AbortSignal.any 的聚合对象）；
+				// 统一包装，避免工具层把启动异常渲染成 "[object Object]"。
+				const reason = signal.reason;
+				reject(reason instanceof Error ? reason : new Error(String(reason ?? "aborted")));
 				return;
 			}
 			if (session.dead) {
@@ -195,8 +196,12 @@ function persistentSessions(
 				pending.delete(owner);
 				// Cancellation is expected control flow; only startup failures should
 				// carry the executable path and installation guidance to the user.
-				if (!combined.aborted) throw formatPwshStartupError(error, config.pwshPath);
-				throw error;
+				if (combined.aborted) {
+					// 取消 reason 可能是非 Error 对象；包装成可读 Error 再抛。
+					const reason = signal.reason;
+					throw reason instanceof Error ? reason : new Error(String(reason ?? "aborted during shell creation"));
+				}
+				throw formatPwshStartupError(error, config.pwshPath);
 			}
 		})();
 		pending.set(owner, tracked);
@@ -346,10 +351,6 @@ function apply(ctx: { tools: { register(def: unknown): void }; effect(fn: () => 
 		pwshPath: resolvePwshPath({
 			configuredPath: typeof config.pwshPath === "string" ? config.pwshPath : undefined,
 			platform: process.platform,
-			programFiles: process.env.ProgramFiles,
-			systemRoot: process.env.SystemRoot,
-			pathEnv: process.env.PATH,
-			lstat: lstatSync,
 		}),
 		timeoutMs: typeof config.timeoutMs === "number" && config.timeoutMs > 0 ? config.timeoutMs : 300_000,
 		maxOutputChars: typeof config.maxOutputChars === "number" && config.maxOutputChars > 0 ? config.maxOutputChars : 16_000,

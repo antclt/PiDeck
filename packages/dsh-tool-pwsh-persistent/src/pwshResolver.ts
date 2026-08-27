@@ -1,83 +1,36 @@
-import { lstatSync } from "node:fs";
-import { win32 } from "node:path";
-
-/** The subset of fs.Stats needed to accept files and Windows App Execution Aliases. */
-export type PwshPathStat = {
-	isFile(): boolean;
-	isSymbolicLink(): boolean;
-};
+import {
+	candidatePwshPaths as officialCandidatePwshPaths,
+	resolvePwshPath as officialResolvePwshPath,
+} from "@deepseek-ai/dsh-pwsh-local";
 
 export type PwshPathResolverOptions = {
 	configuredPath?: string;
-	platform: string;
-	programFiles?: string;
-	systemRoot?: string;
-	pathEnv?: string;
-	lstat?: (path: string) => PwshPathStat;
+	platform: NodeJS.Platform;
 };
 
-export type PwshPathCandidateOptions = Pick<
-	PwshPathResolverOptions,
-	"programFiles" | "systemRoot" | "pathEnv"
->;
-
-const DEFAULT_PROGRAM_FILES = "C:\\Program Files";
-const DEFAULT_SYSTEM_ROOT = "C:\\Windows";
 const WINGET_INSTALL_COMMAND = "winget install --id Microsoft.PowerShell --source winget";
 
 /**
- * Build the Windows executable candidates in the same order as DSH's local
- * pwsh resolver. Resolving PATH entries to absolute paths avoids node-pty's
- * incomplete bare-command PATH scan and lets it launch WindowsApps aliases.
+ * 直通官方 @deepseek-ai/dsh-pwsh-local 的候选路径构建（纯函数，无磁盘访问）。
+ * 与普通 pwsh 工具共用同一份候选顺序，避免两套 resolver 行为漂移。
  */
-export function candidatePwshPaths(options: PwshPathCandidateOptions = {}): string[] {
-	const programFiles = options.programFiles ?? DEFAULT_PROGRAM_FILES;
-	const systemRoot = options.systemRoot ?? DEFAULT_SYSTEM_ROOT;
-	const candidates = [win32.join(programFiles, "PowerShell", "7", "pwsh.exe")];
-
-	for (const entry of (options.pathEnv ?? "").split(";")) {
-		const trimmed = entry.trim().replace(/^"|"$/g, "");
-		if (trimmed.length > 0) candidates.push(win32.join(trimmed, "pwsh.exe"));
-	}
-
-	candidates.push(win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"));
-	return candidates;
+export function candidatePwshPaths(env: NodeJS.ProcessEnv): string[] {
+	return officialCandidatePwshPaths(env);
 }
 
 /**
- * Check the directory entry itself instead of following its target. Windows
- * Store App Execution Aliases can be reparse points whose target rejects stat
- * with EACCES, while lstat still identifies a file or symlink CreateProcess
- * can launch. Directories are deliberately rejected.
- */
-export function candidatePwshPathExists(
-	candidate: string,
-	lstat: (path: string) => PwshPathStat = lstatSync,
-): boolean {
-	try {
-		const stat = lstat(candidate);
-		return stat.isFile() || stat.isSymbolicLink();
-	} catch {
-		return false;
-	}
-}
-
-/**
- * Resolve the executable passed to node-pty without assuming a fixed Windows
- * installation layout. The lstat dependency is injectable so candidate order
- * and WindowsApps alias handling are covered without touching the real disk.
+ * 直接复用官方 @deepseek-ai/dsh-pwsh-local 的 resolver：显式 pwshPath 优先，
+ * Windows 依次扫描标准 PS7、PATH 内绝对 pwsh.exe（lstat 接受 Store alias）、
+ * Windows PowerShell 5.1，最后回退裸 `pwsh`；其它平台返回 `pwsh`。
+ * 持久 shell 与普通 pwsh 因此永远解析到同一个可执行文件。
  */
 export function resolvePwshPath(options: PwshPathResolverOptions): string {
-	if (options.configuredPath !== undefined && options.configuredPath.trim().length > 0) {
-		return options.configuredPath;
-	}
-	if (options.platform !== "win32") return "pwsh";
-
-	const lstat = options.lstat ?? lstatSync;
-	for (const candidate of candidatePwshPaths(options)) {
-		if (candidatePwshPathExists(candidate, lstat)) return candidate;
-	}
-	return "pwsh";
+	const configured = options.configuredPath?.trim();
+	return officialResolvePwshPath(
+		configured !== undefined && configured.length > 0 ? configured : undefined,
+		process.env,
+		options.platform,
+	);
 }
 
 /** Add an actionable diagnostic to errors raised while the shell starts. */
