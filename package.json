@@ -54,7 +54,8 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
-    "build": "tsc --noEmit --skipLibCheck --incremental && electron-vite build",
+    "build": "npm run build:packages && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
+    "build:packages": "node scripts/build-local-packages.js",
     "build:fast": "electron-vite build",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

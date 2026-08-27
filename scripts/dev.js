@@ -86,6 +86,13 @@ function getElectronViteInvocation({
 }
 
 function runDev() {
+	// 先构建本地 workspace 包（如 dsh-tool-pwsh-persistent 的 lib/），
+	// 否则 DSH host 启动时 require.resolve 命中缺失的 lib/index.js 会以 code=1 退出。
+	require("node:child_process").execSync("npm run build:packages", {
+		cwd: path.join(__dirname, ".."),
+		stdio: "inherit",
+		shell: true,
+	});
 	const invocation = getElectronViteInvocation();
 	// Windows 下切换到 UTF-8 代码页，使终端能正确显示中文输出
 	if (process.platform === "win32") {
