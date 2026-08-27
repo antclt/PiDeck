@@ -1097,6 +1097,8 @@ export const zhCN = {
   "config.dsh.field.maxRetries": "最大重试次数",
   "config.dsh.field.maxRetriesHint": "供应商请求失败后的重试次数（默认 5）。只对瞬时错误生效；填 0 表示失败后不再重试。每个供应商单独配置，没有全局项。",
   "config.dsh.field.maxRetriesAlways": "当前为无限重试。填写次数后改为有限重试。",
+  "config.dsh.field.reasoningEffort": "Reasoning effort",
+  "config.dsh.field.reasoningEffortHint": "档位随供应商/模型而定：DeepSeek 官方支持 off / low / high / max；OpenAI 兼容网关常见 off / minimal / low / medium / high / xhigh / max（以模型声明为准）。留空使用模型默认档位。",
   "config.dsh.deepseekOfficial": "DeepSeek 官方",
   "config.dsh.tab.overview": "概览",
   "config.dsh.tab.models": "模型",

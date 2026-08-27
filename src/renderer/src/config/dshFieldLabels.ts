@@ -6,7 +6,8 @@ import { t, type TranslationKey } from "../i18n";
  * 会显示 raw key / "(root)"，用户不知道密钥和 Base URL 该怎么填。
  */
 const FIELD_COPY: Record<string, {
-	label: TranslationKey;
+	/** 可读标签；缺省时回退 schema 原始字段名（与 provider/model 等英文原名对齐）。 */
+	label?: TranslationKey;
 	hint?: TranslationKey;
 	placeholder?: TranslationKey;
 }> = {
@@ -46,6 +47,11 @@ const FIELD_COPY: Record<string, {
 		label: "config.dsh.field.maxRetries",
 		hint: "config.dsh.field.maxRetriesHint",
 	},
+	reasoningEffort: {
+		// label 保持英文（与 provider/model 等 schema 原名一致），只补档位说明
+		label: "config.dsh.field.reasoningEffort",
+		hint: "config.dsh.field.reasoningEffortHint",
+	},
 };
 
 export type DshFieldCopy = {
@@ -59,7 +65,7 @@ export function dshFieldCopy(name: string): DshFieldCopy {
 	const known = FIELD_COPY[name];
 	if (known) {
 		return {
-			label: t(known.label),
+			label: known.label ? t(known.label) : name,
 			hint: known.hint ? t(known.hint) : undefined,
 			placeholder: known.placeholder ? t(known.placeholder) : undefined,
 		};

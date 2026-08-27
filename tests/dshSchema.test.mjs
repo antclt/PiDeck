@@ -12,6 +12,9 @@ const {
 	collectCredentialRefsWithValue,
 	readPath,
 	readDshEntryValue,
+	readDshDraftValue,
+	hasDshDraftChanges,
+	normalizeDshNumberDraft,
 	setPath,
 	deletePath,
 	pruneEmptyObjects,
@@ -210,6 +213,69 @@ test("patchDshRetryMaxRetries 把次数写成有限 normal，空值写回默认 
 	const withBackoff = patchDshRetryMaxRetries({ mode: "normal", maxRetries: 2, backoff: { initialMs: 800 } }, 4);
 	assert.equal(withBackoff.maxRetries, 4);
 	assert.equal(withBackoff.backoff.initialMs, 800);
+});
+
+test("readDshDraftValue 草稿显式空串不被吞（清空输入停留空串，不弹回已保存值）", () => {
+	const saved = { reasoningEffort: "max" };
+	// 用户清空：草稿存空串，读值必须返回空串（否则输入框立刻弹回 "max"）
+	assert.equal(readDshDraftValue({ reasoningEffort: "" }, saved, ["reasoningEffort"]), "");
+	// 草稿缺失：回退已保存值
+	assert.equal(readDshDraftValue({}, saved, ["reasoningEffort"]), "max");
+	// 草稿覆盖：优先草稿
+	assert.equal(readDshDraftValue({ reasoningEffort: "high" }, saved, ["reasoningEffort"]), "high");
+	// 嵌套路径同样生效
+	assert.equal(readDshDraftValue({ a: { b: "" } }, { a: { b: 1 } }, ["a", "b"]), "");
+});
+
+test("hasDshDraftChanges 只按「草稿 vs 已保存」判脏（等于原值不打断输入）", () => {
+	// 回归：旧策略在「输入等于已保存值」时删除覆盖，导致打到一半的值被吞掉/弹回。
+	// 新策略：覆盖保留在草稿里，脏状态由逐路径比较决定。
+	assert.equal(hasDshDraftChanges({}, { reasoningEffort: "max" }), false);
+	assert.equal(hasDshDraftChanges({ reasoningEffort: "max" }, { reasoningEffort: "max" }), false);
+	assert.equal(hasDshDraftChanges({ reasoningEffort: "high" }, { reasoningEffort: "max" }), true);
+	// 清空已保存的非空字段：空串 ≠ 已保存值 → 脏
+	assert.equal(hasDshDraftChanges({ reasoningEffort: "" }, { reasoningEffort: "max" }), true);
+	// 嵌套对象按顶层键深比较（草稿里没碰的键不参与）
+	assert.equal(hasDshDraftChanges({ a: { b: 1 } }, { a: { b: 1 }, c: 2 }), false);
+	assert.equal(hasDshDraftChanges({ a: { b: 2 } }, { a: { b: 1 } }), true);
+});
+
+test("normalizeDshNumberDraft 保存前把字符串草稿转回数值（非法/空串删键）", () => {
+	const schema = normalizeDshSchema({
+		uid: 1,
+		refs: {
+			1: { type: "object", dict: { retries: 2, note: 3, providers: 4 } },
+			2: { type: "number" },
+			3: { type: "string" },
+			4: { type: "dict", inner: 5 },
+			5: { type: "object", dict: { maxRetries: 6 } },
+			6: { type: "number" },
+		},
+	});
+	const root = schema.refs[1];
+	// vm 编译模块构造的对象与测试进程跨 realm，经 JSON 归一化后比较
+	const toJson = (value) => JSON.parse(JSON.stringify(value));
+	// 数值转 number；字符串字段原样保留
+	assert.deepEqual(
+		toJson(normalizeDshNumberDraft(schema, root, { retries: "5", note: "hello" })),
+		{ retries: 5, note: "hello" },
+	);
+	// 清空/非法输入删键（patch 省略该字段，host 保持已保存值）
+	assert.deepEqual(
+		toJson(normalizeDshNumberDraft(schema, root, { retries: "", note: "x" })),
+		{ note: "x" },
+	);
+	assert.deepEqual(
+		toJson(normalizeDshNumberDraft(schema, root, { retries: "abc", note: "x" })),
+		{ note: "x" },
+	);
+	// 嵌套 dict 条目：内部 number 字段同样转换
+	assert.deepEqual(
+		toJson(normalizeDshNumberDraft(schema, root, { providers: { gw: { maxRetries: "8" } } })),
+		{ providers: { gw: { maxRetries: 8 } } },
+	);
+	// 已是数值的不动
+	assert.deepEqual(toJson(normalizeDshNumberDraft(schema, root, { retries: 3 })), { retries: 3 });
 });
 
 test("deletePath 删除叶子并清理空父节点，脏计数不会残留空键", () => {

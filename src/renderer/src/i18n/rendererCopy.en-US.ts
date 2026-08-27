@@ -1102,6 +1102,8 @@ export const enUS: Record<TranslationKey, string> = {
   "config.dsh.field.maxRetries": "Max retries",
   "config.dsh.field.maxRetriesHint": "Retries after a provider request failure (default 5). Only transient errors; 0 means do not retry. This is per provider — DSH has no global retry setting.",
   "config.dsh.field.maxRetriesAlways": "Currently unbounded. Enter a number to switch to a finite budget.",
+  "config.dsh.field.reasoningEffort": "Reasoning effort",
+  "config.dsh.field.reasoningEffortHint": "Supported tiers depend on the provider/model: DeepSeek official accepts off / low / high / max; OpenAI-compatible gateways typically accept off / minimal / low / medium / high / xhigh / max (per the model declared tiers). Leave empty to use the model default.",
   "config.dsh.deepseekOfficial": "DeepSeek Official",
   "config.dsh.tab.overview": "Overview",
   "config.dsh.tab.models": "Models",
