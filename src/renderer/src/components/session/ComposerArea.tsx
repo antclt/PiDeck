@@ -59,6 +59,8 @@ export type ComposerAreaProps = {
   ensureSessionId?: (sessionId: string) => Promise<string>;
   /** 当前会话中用户发起的轮次，用于 pi 统计栏；DSH 自带 sessionStats 时不重复显示。 */
   turnCount?: number;
+  /** 引导页虚拟会话没有 SessionRecord，用它兑底确定文件树/模型目录所属项目。 */
+  bootstrapProjectId?: string;
 };
 
 const CONTENT_GAP_PX = 8;
@@ -219,6 +221,9 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
     sessionId: props.sessionId,
     enqueue: props.enqueue,
     ensureSessionId: props.ensureSessionId,
+    // 引导页虚拟会话（GUIDE_BOOTSTRAP_SESSION_ID）无 record：用选中项目加载
+    // @ 引用文件树；真实会话忽略该字段（record.projectId 优先）。
+    bootstrapProjectId: props.bootstrapProjectId,
     // 预览 Tab 里发消息 → 自动晋升常驻（由 App 装配的 SessionPaneServices 提供）
     onPromoteSession: useSessionPaneServices().promoteSessionToPermanent,
     onCreateSession: useSessionPaneServices().runCreateSessionDraft,
@@ -376,8 +381,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                 gitInfo={props.gitInfo}
                 onSwitchBranch={props.onSwitchBranch}
                 record={composer.record}
-                defaultModel={composer.dshDefaultModel}
-                defaultThinkingLevel={composer.dshDefaultThinkingLevel}
+                defaultModel={composer.dshDefaultModel ?? composer.bootstrapDefaultModel}
+                defaultThinkingLevel={composer.dshDefaultThinkingLevel ?? composer.bootstrapDefaultThinkingLevel}
                 backend={composer.backend}
                 onChangeBackend={composer.changeBackend}
                 feishuIndicator={feishuIndicator}
@@ -435,8 +440,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
             onInsertTemplateContent={composer.pickers.insertTemplateContent}
             onInsertSkill={composer.pickers.insertSkillInvocation}
             onInsertSkillContent={composer.pickers.insertSkillContent}
-            defaultModel={composer.dshDefaultModel}
-            defaultThinkingLevel={composer.dshDefaultThinkingLevel}
+            defaultModel={composer.dshDefaultModel ?? composer.bootstrapDefaultModel}
+            defaultThinkingLevel={composer.dshDefaultThinkingLevel ?? composer.bootstrapDefaultThinkingLevel}
           />
           {composer.previewImage ? (
             <ImagePreviewModal

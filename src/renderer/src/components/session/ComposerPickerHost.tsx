@@ -109,8 +109,10 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     state: runtime?.state,
     record: record?.model,
     fallback: {
-      provider: props.defaultModel?.provider ?? welcomeModel?.provider,
-      modelId: props.defaultModel?.modelId ?? welcomeModel?.modelId,
+      // 无 record（引导页）时优先用户上次欢迎页选择（welcomeModel），
+      // 其次主进程解析的启动默认（pi 时由 props.defaultModel 透传）。
+      provider: welcomeModel?.provider ?? props.defaultModel?.provider,
+      modelId: welcomeModel?.modelId ?? props.defaultModel?.modelId,
       modelName: props.defaultModel?.modelName,
     },
     isLive: runtimeLive,
@@ -555,7 +557,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         current={resolveComposerThinkingLevel({
           state: runtime?.state?.thinkingLevel,
           record: record?.thinkingLevel,
-          fallback: props.defaultThinkingLevel ?? currentModel?.defaultEffort ?? welcomeThinking,
+          // 无 record（引导页）时：用户上次欢迎页选择 > 启动默认 > 模型自身 defaultEffort；
+          // DSH 下 welcomeThinking 为 undefined，仍保持部署默认优原语义。
+          fallback: welcomeThinking ?? props.defaultThinkingLevel ?? currentModel?.defaultEffort,
           isLive: runtimeLive,
         })}
         levels={isDshSession ? thinkingLevels : piLevels}

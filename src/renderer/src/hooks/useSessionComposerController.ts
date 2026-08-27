@@ -14,6 +14,7 @@ import type {
   FileTreeNode,
   ImageContent,
   PiCommand,
+  ResolvedLaunchDefaults,
   SessionSummary,
 } from "../../../shared/types";
 import {
@@ -37,6 +38,7 @@ import type { ImageGenMeta } from "../../../shared/types/imagegen";
 import {
   busySendDeliveryAtom,
   cacheSessionMessagesAtom,
+  defaultAgentBackendAtom,
   imageGenConfigAtom,
   sessionAttachmentsByIdAtom,
   sessionComposerModeByIdAtom,
@@ -168,6 +170,13 @@ export type ComposerPickerKind = "model" | "thinking" | "template" | "skill";
 
 export type UseSessionComposerControllerOptions = {
   sessionId: string;
+  /**
+   * 引导页等无 record 虚拟会话的项目上下文（ProjectEmptyState 经
+   * SessionStartSurface 传选中的 activeProject.id）。有 record 时一律以
+   * record.projectId 为准；仅给 @ 文件引用/默认偏好提供项目来源，不参与
+   * 会话创建（发送仍由 App.ensureSessionForSend 落地）。
+   */
+  bootstrapProjectId?: string;
   ensureSessionId?: (sessionId: string) => Promise<string>;
   /** 用户主动发消息时回调（预览 Tab 晋升常驻）；来自 SessionPaneServices 装配。 */
   onPromoteSession?: (sessionId: string) => void;
@@ -293,10 +302,13 @@ export function useSessionComposerController(
   const { sessionId, enqueue, ensureSessionId } = options;
   const store = useStore();
   const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
+  // 引导页虚拟会话没有 record：文件树/@ 引用回退到引导页选中的项目，
+  // 否则 files 恒为空、@ 输入永远匹配不到任何文件。
+  const effectiveProjectId = record?.projectId ?? options.bootstrapProjectId;
   const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
   const runtimeUi = useAtomValue(sessionRuntimeUiBySessionIdAtomFamily(sessionId));
   const projectSessions = useAtomValue(
-    sessionSummariesByProjectIdAtomFamily(record?.projectId ?? ""),
+    sessionSummariesByProjectIdAtomFamily(effectiveProjectId ?? ""),
   );
   const drafts = useAtomValue(sessionDraftByIdAtom);
   const attachmentsBySession = useAtomValue(sessionAttachmentsByIdAtom);
@@ -375,6 +387,27 @@ export function useSessionComposerController(
       cancelled = true;
     };
   }, [isDshBackend]);
+  // 引导页虚拟会话（无 record）：预取主进程解析的启动默认（与 createDraft 缺省
+  // 同一解析器 launchDefaults），让底栏/选择器在用户从未设置欢迎页偏好时也能
+  // 显示当前默认模型/思考档位。真实会话的默认值写在 record 里走原链路，
+  // 不需要这里重复解析。
+  const defaultAgentBackend = useAtomValue(defaultAgentBackendAtom);
+  const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
+  useEffect(() => {
+    if (record) return;
+    let cancelled = false;
+    void desktopApi.sessions.resolveLaunchDefaults({ backend: defaultAgentBackend })
+      .then((next) => {
+        if (!cancelled) setBootstrapDefaults(next);
+      })
+      .catch(() => {
+        // 解析失败退回“无预选”形态：底栏不显示默认模型，但不影响发送。
+        if (!cancelled) setBootstrapDefaults(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [defaultAgentBackend, record]);
   const editorRef = useRef<HTMLDivElement | null>(null);
   // 程序化光标请求（带归属 forValue，见 composer/types.ts 的 ComposerCaretRequest）；
   // 编辑器只在内容同步到 forValue 的同一趟 layout pass 配对消费，过期请求会被丢弃。
@@ -672,14 +705,15 @@ export function useSessionComposerController(
   }, [sessionId]);
 
   useEffect(() => {
-    if (!record?.projectId) {
+    if (!effectiveProjectId) {
       setFiles([]);
       return;
     }
     let current = true;
     // @ 引用跟文件抽屉同一套懒加载：maxDepth 0 只扫根层，展开再补子目录。
     // 旧实现扫 8 层会在切项目时把主进程/渲染都拖死（大会话项目尤其明显）。
-    void desktopApi.files.list(record.projectId, { maxDepth: 0 }).then((next) => {
+    // 引导页虚拟会话没有 record，靠 bootstrapProjectId 兑底加载文件树。
+    void desktopApi.files.list(effectiveProjectId, { maxDepth: 0 }).then((next) => {
       if (current) setFiles(next);
     }).catch(() => {
       if (current) setFiles([]);
@@ -687,14 +721,14 @@ export function useSessionComposerController(
     return () => {
       current = false;
     };
-  }, [record?.projectId]);
+  }, [effectiveProjectId]);
 
   // 切项目时清掉懒加载进度：老项目的目录缓存/在途请求不能让新项目复用。
   // （真实请求仍受主进程 isPathInsideProject 拦截，这里双保险。）
   useEffect(() => {
     loadedDirPathsRef.current = new Set();
     loadingDirPathsRef.current = new Set();
-  }, [record?.projectId]);
+  }, [effectiveProjectId]);
 
   useEffect(() => {
     // D15：DSH 会话的命令补全优先走 live 注册表（host 侧 ctx.commands.list，
@@ -784,7 +818,7 @@ export function useSessionComposerController(
   // 修复 maxDepth 0 化后只能引用到项目根一层（71d27ed1 为保主进程响应把 8 层递归改成
   // 根层，但没补抽屉那套展开逻辑，导致 @src/xxx 永远匹配不到深层文件）。
   useEffect(() => {
-    if (!record?.projectId) return;
+    if (!effectiveProjectId) return;
     const trigger = detectTrigger(draft, cursor, validSessionRefs);
     if (!trigger || trigger.char !== "@") return;
     const dirNode = resolveAtDrillDirectory(trigger.query, files);
@@ -795,7 +829,7 @@ export function useSessionComposerController(
     }
     let current = true;
     loadingDirPathsRef.current.add(dirNode.path);
-    void desktopApi.files.list(record.projectId, { maxDepth: 0, directory: dirNode.path })
+    void desktopApi.files.list(effectiveProjectId, { maxDepth: 0, directory: dirNode.path })
       .then((children) => {
         if (!current) return;
         setFiles((prev) => mergeFileTreeChildren(prev, dirNode.path, children));
@@ -810,18 +844,18 @@ export function useSessionComposerController(
     return () => {
       current = false;
     };
-  }, [cursor, draft, files, record?.projectId, validSessionRefs]);
+  }, [cursor, draft, effectiveProjectId, files, validSessionRefs]);
 
   // @ 纯文件名搜索（无 /，如 @index）：懒加载缺少锚点目录，必须一次性拿到整树
   // 才能让模糊搜索覆盖深层文件（恢复 71d27ed1 之前的深度搜索能力）。
   // 只在用户确实在搜索（长度 ≥2）且每项目只触发一次；整树合并后所有目录
   // 都有 children 数组，下钻 effect 的 Array.isArray 门自然短路，不会重复拉。
   useEffect(() => {
-    if (!record?.projectId) return;
+    if (!effectiveProjectId) return;
     // 切到新项目：重建状态（不 return，继续按新状态评估是否触发）
     const state = deepTreeStateRef.current;
-    if (state.projectId !== record.projectId) {
-      deepTreeStateRef.current = { projectId: record.projectId, loaded: false, loading: false };
+    if (state.projectId !== effectiveProjectId) {
+      deepTreeStateRef.current = { projectId: effectiveProjectId, loaded: false, loading: false };
     }
     if (deepTreeStateRef.current.loaded || deepTreeStateRef.current.loading) return;
     const trigger = detectTrigger(draft, cursor, validSessionRefs);
@@ -830,12 +864,12 @@ export function useSessionComposerController(
     }
     // 标记在途后即便本 effect 因继续输入被重新评估，loading 门也会挡住重复请求
     deepTreeStateRef.current.loading = true;
-    void desktopApi.files.list(record.projectId, { maxDepth: FILE_TREE_ABSOLUTE_MAX_DEPTH })
+    void desktopApi.files.list(effectiveProjectId, { maxDepth: FILE_TREE_ABSOLUTE_MAX_DEPTH })
       .then((next) => {
         // 用项目比对而非 current 标志：输入过程中的每个按键都会触发本 effect
         // 重新评估并清理旧闭包，但请求仍属于当前项目——数据不该被丢弃，
         // 否则快速打字会连续浪费整树扫描（重扫风暴）。只有切走项目才丢弃。
-        if (deepTreeStateRef.current.projectId !== record.projectId) return;
+        if (deepTreeStateRef.current.projectId !== effectiveProjectId) return;
         // 整树是根层清单的超集且目录均带 children，整体替换最省事：
         // 已下钻目录的数据都在里面（幂等），无需再逐目录 merge。
         setFiles(next);
@@ -846,12 +880,12 @@ export function useSessionComposerController(
       })
       .finally(() => {
         // 只有请求仍属于当前项目才写状态：切走后的旧闭包不能污染新项目标记。
-        if (deepTreeStateRef.current.projectId === record.projectId) {
+        if (deepTreeStateRef.current.projectId === effectiveProjectId) {
           deepTreeStateRef.current.loading = false;
           deepTreeStateRef.current.loaded = true;
         }
       });
-  }, [cursor, draft, record?.projectId, validSessionRefs]);
+  }, [cursor, draft, effectiveProjectId, validSessionRefs]);
   const suggestionAnchorStyle = useMemo<CSSProperties | undefined>(() => {
     if (!suggestionsOpen) return undefined;
     const menuWidth = Math.min(520, window.innerWidth - 120);
@@ -1770,6 +1804,9 @@ export function useSessionComposerController(
       : undefined,
     /** DSH 部署默认思考档位：settings.yaml 的 reasoningEffort 优先，缺省用模型自身 defaultEffort。 */
     dshDefaultThinkingLevel: dshDefault?.reasoningEffort ?? dshDefault?.defaultEffort,
+    /** 引导页（无 record）启动默认：pi 配置/模型目录解析出的第一个可用项，展示用。 */
+    bootstrapDefaultModel: bootstrapDefaults?.model,
+    bootstrapDefaultThinkingLevel: bootstrapDefaults?.thinkingLevel,
     draft,
     attachments,
     mode,

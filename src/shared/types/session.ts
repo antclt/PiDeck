@@ -181,6 +181,20 @@ export type SessionLaunchPreferences = {
 	thinkingLevel?: string;
 };
 
+/**
+ * 主进程按当前 pi 配置实时解析出的「默认启动偏好」。与 createDraft 的缺省填充同源：
+ * 引导页（无 record 虚拟会话）用它预先高亮真正会生效的模型/思考档位。
+ */
+export type ResolvedLaunchDefaults = {
+	model?: { provider: string; modelId: string };
+	thinkingLevel?: string;
+};
+
+/** sessions.resolve-launch-defaults 入参：只需声明后端；缺省按非 DSH 解析。 */
+export type ResolveLaunchDefaultsInput = {
+	backend?: import("./agent").AgentBackend;
+};
+
 /** Creates a live `--no-session` runtime without writing a session file. */
 export type CreateAnonymousSessionInput = {
 	projectId: string;

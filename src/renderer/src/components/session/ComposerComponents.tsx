@@ -383,7 +383,8 @@ export function ComposerBottomBar(props: {
 	const currentThinkingLevel = resolveComposerThinkingLevel({
 		state: props.state?.thinkingLevel,
 		record: props.record?.thinkingLevel,
-		fallback: isDsh ? props.defaultThinkingLevel : welcomePreference?.thinking,
+		// pi 引导页：用户上次欢迎页选择 > 主进程解析的启动默认（经 defaultModel/defaultThinkingLevel 透传）。
+		fallback: isDsh ? props.defaultThinkingLevel : (welcomePreference?.thinking ?? props.defaultThinkingLevel),
 		isLive: runtimeLive,
 	});
 	const thinkingLevelLabel = (level: string) => {
@@ -409,7 +410,7 @@ export function ComposerBottomBar(props: {
 	const liveModel = resolveComposerLiveModel({
 		state: props.state,
 		record: props.record?.model,
-		fallback: isDsh ? props.defaultModel : welcomePreference?.model,
+		fallback: isDsh ? props.defaultModel : (welcomePreference?.model ?? props.defaultModel),
 		isLive: runtimeLive,
 	});
 	const modelDisplay = computeModelDisplay(

@@ -27,8 +27,11 @@ import type {
 	DshModelDiscoveryInput,
 	FetchedModel,
 	SessionMessagePage,
+	ResolveLaunchDefaultsInput,
+	ResolvedLaunchDefaults,
 } from "../../shared/types";
 import { parseSessionProcessEvents } from "../sessions/sessionProcessEvents";
+import { resolveLaunchDefaultOptions } from "../sessions/launchDefaults";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 
 function isDshModelDiscoveryInput(input: unknown): input is DshModelDiscoveryInput {
@@ -545,35 +548,18 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 						configManager.getSettingsConfig(),
 						configManager.getModelsConfig(),
 					]);
-					const settings = settingsResult.parsed;
+					// 缺省填充与引导页展示共用同一解析器（launchDefaults），
+					// 保证「预选的默认」与「创建时真正套用的默认」永远同源。
+					const defaults = resolveLaunchDefaultOptions({
+						backend: input.backend,
+						settings: settingsResult.parsed,
+						models: modelsResult.parsed,
+					});
 					if (input.backend !== "dsh" && !model) {
-						const defaultProvider = typeof settings.defaultProvider === "string"
-							? settings.defaultProvider
-							: undefined;
-						const defaultModelId = typeof settings.defaultModel === "string"
-							? settings.defaultModel
-							: undefined;
-						if (defaultProvider && defaultModelId) {
-							model = { provider: defaultProvider, modelId: defaultModelId };
-						} else {
-							// Fallback: first provider's first model from models.json
-							const providers = modelsResult.parsed?.providers;
-							if (providers) {
-								const firstProviderName = Object.keys(providers)[0];
-								const firstProvider = firstProviderName ? providers[firstProviderName] : undefined;
-								const firstModel = firstProvider?.models?.[0];
-								if (firstProviderName && firstModel?.id) {
-									model = { provider: firstProviderName, modelId: firstModel.id };
-								}
-							}
-						}
+						model = defaults.model;
 					}
 					if (!thinkingLevel) {
-						const level = typeof settings.defaultThinkingLevel === "string"
-							? settings.defaultThinkingLevel
-							: undefined;
-						// pi's schema uses underscore; the runtime and UI use camelCase.
-						thinkingLevel = level;
+						thinkingLevel = defaults.thinkingLevel;
 					}
 				} catch {
 					// Config read is best-effort; draft creation must never block.
@@ -595,6 +581,28 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				model: draft.model,
 			});
 			return draft;
+		},
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsResolveLaunchDefaults,
+		async (_event, input?: ResolveLaunchDefaultsInput): Promise<ResolvedLaunchDefaults> => {
+			// 渲染层输入不可信：backend 只认白名单枚举，其余按非 DSH（pi）解析。
+			const backend = input?.backend === "dsh" ? "dsh" : undefined;
+			try {
+				const [settingsResult, modelsResult] = await Promise.all([
+					configManager.getSettingsConfig(),
+					configManager.getModelsConfig(),
+				]);
+				return resolveLaunchDefaultOptions({
+					backend,
+					settings: settingsResult.parsed,
+					models: modelsResult.parsed,
+				});
+			} catch {
+				// 配置读取失败返回空默认：引导页退回「无预选」形态，不阻塞 UI；
+				// 创建会话链路自身仍会 best-effort 重试。
+				return {};
+			}
 		},
 	);
 	ipcMain.handle(

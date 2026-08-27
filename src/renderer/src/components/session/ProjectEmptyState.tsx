@@ -58,6 +58,8 @@ export function ProjectEmptyState(props: {
   return (
     <SessionStartSurface
       sessionId={GUIDE_BOOTSTRAP_SESSION_ID}
+      // 虚拟会话无 record：用选中项目加载 @ 引用文件树与模型目录。
+      bootstrapProjectId={props.activeProject.id}
       projectSwitcher={
         <Select
           value={props.activeProject.id}

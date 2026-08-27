@@ -20,6 +20,8 @@ export function SessionStartSurface(props: {
   sessionId: string;
   /** 可选项目切换器：引导页（无会话空态）传入，标明并可切换下一次发送将会话创建到哪个项目 */
   projectSwitcher?: ReactNode;
+  /** 引导页虚拟会话没有 SessionRecord，用选中项目兑底加载 @ 引用文件树。 */
+  bootstrapProjectId?: string;
 }) {
   const services = useSessionPaneServices();
   const queuedTrackRef = useRef<HTMLElement | null>(null);
@@ -42,6 +44,7 @@ export function SessionStartSurface(props: {
           gitInfo={services.gitInfo}
           enqueue={services.enqueueSessionPrompt}
           ensureSessionId={services.ensureSessionId}
+          bootstrapProjectId={props.bootstrapProjectId}
           widgets={
             <>
               <SessionTodoStrip sessionId={props.sessionId} />

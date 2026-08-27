@@ -33,6 +33,8 @@ import type {
 	ConfigFileDiagnostic,
 	DraftMeta,
 	CreateSessionDraftInput,
+	ResolveLaunchDefaultsInput,
+	ResolvedLaunchDefaults,
 	CreateAnonymousSessionInput,
 	CreateAnonymousSessionResult,
 	UpdateSessionRecordInput,
@@ -312,6 +314,9 @@ const api = {
 		},
 		createDraft: (input: CreateSessionDraftInput) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogCreateDraft, input) as Promise<SessionRecord>,
+		/** 按当前 pi 配置解析默认启动偏好（引导页预选展示用，与 createDraft 缺省同源）。 */
+		resolveLaunchDefaults: (input: ResolveLaunchDefaultsInput = {}) =>
+			ipcRenderer.invoke(ipcChannels.sessionsResolveLaunchDefaults, input) as Promise<ResolvedLaunchDefaults>,
 		createAnonymous: (input: CreateAnonymousSessionInput) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCreateAnonymous, input) as Promise<CreateAnonymousSessionResult>,
 		updateRecord: (sessionId: string, patch: UpdateSessionRecordInput) =>

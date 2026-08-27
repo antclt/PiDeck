@@ -352,6 +352,8 @@ export function createPreviewApi(): PiDesktopApi {
 			open: async () => undefined,
 			showInFolder: async () => undefined,
 			readContent: async () => "",
+			// 预览模式无法 stat 真实磁盘：返回空数组，校验方按「未知」处理维持链接现状
+			pathsExist: async () => [],
 			readBase64: async () => "",
 			create: async () => "/mock/created",
 			writeContent: async () => undefined,
@@ -380,6 +382,8 @@ export function createPreviewApi(): PiDesktopApi {
 			// 预览模式无 DSH host：空预设目录满足接口契约
 			listDshAgentPresets: async () => [],
 			getDshDefaultModel: async () => undefined,
+			// 预览模式无主进程配置可解析：无启动默认（底栏不预选，不影响其它功能）
+			resolveLaunchDefaults: async () => ({}),
 			getDshSessionPath: async () => undefined,
 			searchDshSessions: async () => [],
 			createDshGoal: async () => undefined,

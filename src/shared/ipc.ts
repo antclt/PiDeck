@@ -49,6 +49,8 @@ export const ipcChannels = {
 	/** 后台扫描完成后主进程 → 渲染层的推送（目录缓存已合并，渲染层应重新拉取）。 */
 	sessionsCatalogRefreshed: "sessions:catalog-refreshed",
 	sessionsCatalogCreateDraft: "sessions:catalog-create-draft",
+	/** 引导页/新会话展示用：按当前 pi 配置解析「创建会话时会套用的默认模型/思考档位」。 */
+	sessionsResolveLaunchDefaults: "sessions:resolve-launch-defaults",
 	/** Starts an in-memory `--no-session` conversation. */
 	sessionsCreateAnonymous: "sessions:create-anonymous",
 	sessionsCatalogUpdate: "sessions:catalog-update",
