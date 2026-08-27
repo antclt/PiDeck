@@ -44,7 +44,8 @@ import { useProjectRuntimeCapabilities } from "./hooks/useRuntimeCapabilities";
 import { useSessionRuntimeBridge } from "./hooks/useSessionRuntimeBridge";
 import { useAgentLoadNotice } from "./hooks/useAgentLoadNotice";
 import { useSessionLayout } from "./hooks/useSessionLayout";
-import { useFileEditor , resolveFileLinkPath } from "./hooks/useFileEditor";
+import { useFileEditor } from "./hooks/useFileEditor";
+import { resolveFileLinkPath } from "./utils/filePathLinks";
 import { useOverlayActions } from "./hooks/useOverlayActions";
 import { useWorkspacePanels, type WorkspaceDrawerPanel, type WorkspaceExternalEditorAdapter } from "./hooks/useWorkspacePanels";
 import { useDrawerPorts } from "./hooks/useDrawerPorts";
@@ -1326,6 +1327,12 @@ export function App() {
         path,
         activeAgent?.cwd ?? activeProject?.path,
       );
+      // 相对路径且无基准目录（无 agent cwd / 无项目）时解析器返回 null：
+      // 直接提示，而不是把原样相对路径丢给主进程按进程 cwd 乱猜 → 静默空白文件。
+      if (!resolved) {
+        showToast(t("app.fileLinkCannotResolve", { path }));
+        return;
+      }
       const ext = resolved.split(".").pop()?.toLowerCase() ?? "";
       if (IMAGE_EXTENSIONS.has(ext)) {
         // 图片：读取二进制 → 弹窗预览

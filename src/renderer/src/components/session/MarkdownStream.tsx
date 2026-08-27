@@ -5,6 +5,7 @@ import { mermaid } from "@streamdown/mermaid";
 import { createMathPlugin } from "@streamdown/math";
 import { MarkdownLink, remarkLinkifyPaths } from "./MarkdownLink";
 import { markdownUrlTransform } from "./MarkdownLinkCore";
+import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
 import {
@@ -214,7 +215,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	const resolvedRemarkPlugins = isStreamingNow
 		? NO_STREAM_REMARK_PLUGINS
 		: (props.remarkPlugins ?? [
-				defaultRemarkPlugins.gfm,
+				remarkGfmNoSingleTilde,
 				defaultRemarkPlugins.codeMeta,
 				remarkLinkifyPaths,
 			]);

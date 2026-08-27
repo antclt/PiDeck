@@ -289,6 +289,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.openEditorFailed": "Failed to open editor: {error}",
   "app.noExternalEditors": "No external editors detected",
   "app.openFileFailed": "Failed to open file: {error}",
+  "app.fileLinkCannotResolve": "Cannot open file link: relative path has no base directory (no agent cwd / no active project): {path}",
   "app.openProjectInEditor": "Open project in editor",
   "app.openWithEditor": "Open with",
   "app.browser": "Browser",
