@@ -80,11 +80,12 @@ test("中文关闭文案带 tab 和项名；多项只展开第一条并带总数
 	);
 });
 
-test("SettingsModal 关闭确认渲染完整变更列表（intro + items 映射）", () => {
+test("SettingsModal 关闭确认渲染完整变更列表（intro + 两区分区 items 合并）", () => {
 	assert.match(settingsModal, /formatSettingsUnsavedMessage/);
 	assert.match(settingsModal, /summarizeSettingsUnsavedChanges/);
 	assert.match(settingsModal, /settings\.unsavedListIntro/);
-	assert.match(settingsModal, /unsavedSummary\?\.items\.map/);
+	// 合并列表：系统设置 + 配置管理两区未保存项统一渲染（不允许回退到只显示单条）
+	assert.match(settingsModal, /mergedUnsavedItems\.map/);
 	assert.match(settingsModal, /computeDirtyFields/);
 	// 旧的「只显示单条 + totalCount」描述不再作为列表唯一来源
 	assert.doesNotMatch(

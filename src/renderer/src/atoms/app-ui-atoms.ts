@@ -30,9 +30,14 @@ export type SettingsTabId =
 /** 常用设置内部可滚动分区；目前只有 Git 摘要需要从面板直达。 */
 export type SettingsSectionId = "git";
 
+/** 设置窗口顶层分区：系统设置 / 配置管理（顶部 tab，样式同配置页 Pi/DSH 分页）。 */
+export type SettingsPaneId = "settings" | "config";
+
 export type SettingsFocusTarget = {
 	tab: SettingsTabId;
 	section?: SettingsSectionId;
+	/** 打开时落在设置窗口的顶层分区；缺省为系统设置。侧栏「配置管理」入口带 "config"。 */
+	pane?: "config";
 };
 
 /**

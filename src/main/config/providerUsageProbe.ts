@@ -17,15 +17,34 @@
  * 除内置候选外，ConfigManager 还会合并用户自定义探针（~/.pi/agent/usage-probes.json），
  * 两者共用同一套候选结构与解析器。
  */
-import type { ProviderUsageKind, ProviderUsagePeriod } from "../../shared/types/providerUsage";
+import type {
+	ProviderUsageCredits,
+	ProviderUsageKind,
+	ProviderUsagePeriod,
+} from "../../shared/types/providerUsage";
 
 export type UsageProbeParse =
 	/** 三档百分比（默认；不填 parse 即此形态）。 */
 	| { kind: "periods" }
 	/** 剩余额度：valuePath 必填，currencyPath 可选。 */
 	| { kind: "balance"; valuePath: string; currencyPath?: string }
-	/** 额度点数：三个路径至少给一个；remaining 缺省由 total-used 反推。 */
-	| { kind: "credits"; totalPath?: string; usedPath?: string; remainingPath?: string };
+	/**
+	 * 额度点数：三个路径至少给一个；remaining 缺省由 total-used 反推。
+	 * windows 可选：同一响应里的并列限额窗口（如智谱 5h 窗 + 周窗），
+	 * 逐条解析进 credits.windows；主 total/used/remaining 仍由三个 path 解析。
+	 */
+	| {
+			kind: "credits";
+			totalPath?: string;
+			usedPath?: string;
+			remainingPath?: string;
+			windows?: {
+				key: string;
+				totalPath: string;
+				usedPath: string;
+				remainingPath?: string;
+			}[];
+	  };
 
 export type UsageProbeCandidate = {
 	/** 相对 baseUrl 的路径（如 "/usage"），探测时会先拼版本化 baseUrl。 */
@@ -43,6 +62,12 @@ export type UsageProbeCandidate = {
 	baseUrlContains?: string[];
 	/** 判定适用的 api 类型（normalizeApiType 归一化后；缺省任意）。 */
 	apiTypes?: string[];
+	/**
+	 * 端点挂在 host 根而非 baseUrl 路径下（如智谱监控 API /api/monitor/…，与
+	 * OpenAI 兼容端点 /api/paas/v4 不在同一 base）：true 时只取 baseUrl 的 origin
+	 * 拼接 path，跳过版本化补齐与路径段拼接。
+	 */
+	rootPath?: boolean;
 	/** 响应解析规格；缺省走 periods（opencode-go 兼容）。 */
 	parse?: UsageProbeParse;
 };
@@ -56,8 +81,8 @@ export type UsageProbeResponse = {
 	periods?: Partial<Record<"rolling" | "weekly" | "monthly", ProviderUsagePeriod>>;
 	/** kind=balance 的剩余额度。 */
 	balance?: { value: number; currency?: string };
-	/** kind=credits 的额度点数。 */
-	credits?: { total?: number; used?: number; remaining?: number };
+	/** kind=credits 的额度点数（含可选的多窗口并列限额）。 */
+	credits?: ProviderUsageCredits;
 	/** 未命中或解析失败时保留的原始文本（脱敏后），供 UI 兜底展示。 */
 	raw?: string;
 };
@@ -101,6 +126,28 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 			valuePath: "data.available_balance",
 		},
 	},
+	// 智谱 GLM Coding Plan：监控 API 挂在 host 根（/api/monitor/…），与 OpenAI 兼容端点
+	// /api/paas/v4 不在同一 base 下，故用 rootPath 只取 baseUrl 的 origin 拼接。
+	// 认证要求裸 apiKey（Authorization 不加 Bearer 前缀）；取主 Token 额度窗口 limits[0]
+	// （usage=总配额、currentValue=已用；percentage 只是百分比，不能当 used 参与计算）。
+	// 放在通用 OpenAI 候选之前：命中 open.bigmodel.cn 时优先走本候选。
+	{
+		path: "/api/monitor/usage/quota/limit",
+		rootPath: true,
+		baseUrlContains: ["open.bigmodel.cn"],
+		headers: { Authorization: "{{apiKey}}" },
+		parse: {
+			kind: "credits",
+			totalPath: "data.limits[0].usage",
+			usedPath: "data.limits[0].currentValue",
+			// 双限额窗口并列展示：limits[0]=5h 滚动窗（unit:3,number:5）、limits[1]=周窗
+			// （unit:6,number:1，自下单起 7 天周期重置）。任一耗尽都可能 429，两个都要给用户看到。
+			windows: [
+				{ key: "fiveHour", totalPath: "data.limits[0].usage", usedPath: "data.limits[0].currentValue" },
+				{ key: "weekly", totalPath: "data.limits[1].usage", usedPath: "data.limits[1].currentValue" },
+			],
+		},
+	},
 	// 通用 OpenAI 兼容网关：多数 OpenAI 兼容中转站实现官方 /v1/usage 端点
 	// （{ balance, unit } 结构）。不限定 baseUrl，仅靠 apiTypes 收窄到 OpenAI 协议，
 	// 放在数组末尾——前面带 baseUrlContains 的专有候选优先命中，不会被此条抢走。
@@ -136,6 +183,15 @@ export function usageProbeUrls(
 	baseUrl: string,
 	ensureVersionPath: (url: string) => string,
 ): string[] {
+	// host 根端点（rootPath）：不拼 baseUrl 的路径段，只取 origin，避免把
+	// /api/paas/v4 之类 OpenAI 兼容路径拼进不存在的地址。
+	if (candidate.rootPath) {
+		try {
+			return [new URL(baseUrl).origin.replace(/\/+$/, "") + candidate.path];
+		} catch {
+			// baseUrl 非法：退回常规拼接，由请求层 404 兜底
+		}
+	}
 	const u = baseUrl.replace(/\/+$/, "");
 	const versioned = ensureVersionPath(baseUrl);
 	const primary = `${versioned.replace(/\/+$/, "")}${candidate.path}`;
@@ -227,9 +283,29 @@ export function parseUsageResponseBody(
 	if (parse.kind === "credits") {
 		const total = parse.totalPath ? toNumber(getByPath(body, parse.totalPath)) : undefined;
 		const used = parse.usedPath ? toNumber(getByPath(body, parse.usedPath)) : undefined;
-		const remaining = parse.remainingPath ? toNumber(getByPath(body, parse.remainingPath)) : undefined;
+		const remaining = parse.remainingPath
+			? toNumber(getByPath(body, parse.remainingPath))
+			: undefined;
 		if (total === undefined && used === undefined && remaining === undefined) {
 			return { matched: false, raw };
+		}
+		// windows（多窗口并列限额，如智谱 5h 窗+周窗）逐条解析：单窗缺值跳过，不拖垮整条。
+		const windows: NonNullable<ProviderUsageCredits["windows"]> = [];
+		for (const window of parse.windows ?? []) {
+			const wTotal = toNumber(getByPath(body, window.totalPath));
+			const wUsed = toNumber(getByPath(body, window.usedPath));
+			const wRemaining = window.remainingPath
+				? toNumber(getByPath(body, window.remainingPath))
+				: wTotal !== undefined && wUsed !== undefined
+					? wTotal - wUsed
+					: undefined;
+			if (wTotal === undefined && wUsed === undefined && wRemaining === undefined) continue;
+			windows.push({
+				key: window.key,
+				...(wTotal !== undefined ? { total: wTotal } : {}),
+				...(wUsed !== undefined ? { used: wUsed } : {}),
+				...(wRemaining !== undefined ? { remaining: wRemaining } : {}),
+			});
 		}
 		return {
 			matched: true,
@@ -242,6 +318,7 @@ export function parseUsageResponseBody(
 					: total !== undefined && used !== undefined
 						? { remaining: total - used }
 						: {}),
+				...(windows.length > 0 ? { windows } : {}),
 			},
 		};
 	}

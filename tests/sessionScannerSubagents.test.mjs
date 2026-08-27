@@ -688,3 +688,86 @@ test("inferSessionNameAndValidity flags transcript dumps without a type header a
 		rmSync(home, { recursive: true, force: true });
 	}
 });
+
+test("probes tintinweb flat subagent parent via <agent>#<8hex> session name", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-tintinweb-scanner-"));
+	try {
+		const projectPath = "C:\repo\project";
+		const piDir = join(home, ".pi", "agent", "sessions", "--C--repo-project--");
+		const parentFile = join(piDir, "2026-08-22T04-22-29-162Z_parent.jsonl");
+		const childFile = join(piDir, "2026-08-22T04-23-00-162Z_child.jsonl");
+
+		writeSession(parentFile, session("Parent", projectPath));
+		// tintinweb 子代理：平铺文件 + session header 的 parentSession + 会话名 <agent>#<8hex>
+		writeSession(childFile, [
+			{ type: "session", id: "child-1", parentSession: "2026-08-22T04-22-29-162Z_parent.jsonl", cwd: projectPath },
+			{ type: "session_info", name: "Explore#a1b2c3d4", cwd: projectPath },
+			{ type: "message", message: { role: "user", content: "setup" } },
+		]);
+
+		const { SessionScanner } = loadSessionScanner(home);
+		const scanner = new SessionScanner();
+		const parent = await scanner.probeTintinwebSubagentParent(childFile);
+		assert.equal(parent, parentFile);
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("does not treat user forks or ordinary flat sessions as tintinweb subagents", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-fork-not-tintinweb-"));
+	try {
+		const projectPath = "C:\repo\project";
+		const piDir = join(home, ".pi", "agent", "sessions", "--C--repo-project--");
+		const parentFile = join(piDir, "2026-08-22T04-22-29-162Z_parent.jsonl");
+		// fork：名字是用户命名（不匹配 <agent>#<8hex>），即使带 parentSession 也不应判为 tintinweb
+		const forkFile = join(piDir, "2026-08-22T04-23-00-162Z_fork.jsonl");
+		const ordinaryFile = join(piDir, "2026-08-22T04-24-00-162Z_ordinary.jsonl");
+
+		writeSession(parentFile, session("Parent", projectPath));
+		writeSession(forkFile, [
+			{ type: "session", id: "fork-1", parentSession: "2026-08-22T04-22-29-162Z_parent.jsonl", cwd: projectPath },
+			{ type: "session_info", name: "My manual fork", cwd: projectPath },
+			{ type: "message", message: { role: "user", content: "hi" } },
+		]);
+		writeSession(ordinaryFile, session("Ordinary", projectPath));
+
+		const { SessionScanner } = loadSessionScanner(home);
+		const scanner = new SessionScanner();
+		assert.equal(await scanner.probeTintinwebSubagentParent(forkFile), undefined);
+		assert.equal(await scanner.probeTintinwebSubagentParent(ordinaryFile), undefined);
+		// 父文件本身（无 parentSession header、无 #8hex 名）也不应误判
+		assert.equal(await scanner.probeTintinwebSubagentParent(parentFile), undefined);
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("inferSessionNameAndValidity returns parentSessionPath for tintinweb subagents (catalog backfill path)", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-tintinweb-backfill-"));
+	try {
+		const projectPath = "C:\repo\project";
+		const piDir = join(home, ".pi", "agent", "sessions", "--C--repo-project--");
+		const parentFile = join(piDir, "2026-08-22T04-22-29-162Z_parent.jsonl");
+		const childFile = join(piDir, "2026-08-22T04-23-00-162Z_child.jsonl");
+
+		writeSession(parentFile, session("Parent", projectPath));
+		writeSession(childFile, [
+			{ type: "session", id: "child-1", parentSession: parentFile, cwd: projectPath },
+			{ type: "session_info", name: "Plan#deadbeef", cwd: projectPath },
+			{ type: "message", message: { role: "user", content: "inspect" } },
+		]);
+
+		const { SessionScanner } = loadSessionScanner(home);
+		const scanner = new SessionScanner();
+		const result = await scanner.inferSessionNameAndValidity(childFile);
+		assert.equal(result.name, "Plan#deadbeef");
+		assert.equal(result.valid, true);
+		assert.equal(result.parentSessionPath, parentFile);
+		// 普通会话路径不返回 parentSessionPath
+		const ordinary = await scanner.inferSessionNameAndValidity(parentFile);
+		assert.equal(ordinary.parentSessionPath, undefined);
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});

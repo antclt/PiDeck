@@ -68,7 +68,6 @@ export type SessionPaneServices = {
   setTerminalCollapsedByOwnerKey: (ownerKey: string, collapsed: boolean) => void;
   /** 回写终端分屏高度（全局单份，useTerminalDock 内部持久化） */
   setTerminalHeight: (height: number) => void;
-  configOpen: boolean;
   environmentDialog: boolean;
   /** 修改内置对话区（Chat）的聊天记录保存目录（弹选择器 + 主进程写入 + 重扫会话） */
   changeChatPath: (project: Project) => Promise<void>;

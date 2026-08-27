@@ -18,7 +18,6 @@ interface AppSidebarProps {
   branchByProject: Record<string, string | null>;
   creatingWorktree: boolean;
   isLanWeb: boolean;
-  onOpenConfig: () => void;
   onOpenFeedback: () => void;
   onOpenHomepage: () => void;
   /** 左侧栏折叠态与开关（main 布局：按钮在品牌文字右侧） */
@@ -78,7 +77,6 @@ export function AppSidebar(props: AppSidebarProps) {
         </div>
       </>}
       onOpenSettings={() => setSettingsOpen(true)}
-      onOpenConfig={props.onOpenConfig}
       onOpenFeedback={props.onOpenFeedback}
       onOpenHomepage={props.onOpenHomepage}
     />

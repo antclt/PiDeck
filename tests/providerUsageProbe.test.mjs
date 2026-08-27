@@ -244,3 +244,87 @@ test("通用 OpenAI /usage 候选解析真实 /usage 响应（balance+unit）", 
   assert.equal(res.balance.value, 1.69525969);
   assert.equal(res.balance.currency, "USD");
 });
+
+test("智谱 GLM 候选：rootPath 挂 host 根、在通用 OpenAI 候选之前", () => {
+  const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
+  assert.ok(zhipu, "候选表应包含智谱适配器");
+  assert.equal(zhipu.path, "/api/monitor/usage/quota/limit");
+  assert.equal(zhipu.rootPath, true);
+  // 认证是裸 apiKey（不带 Bearer 前缀，智谱监控 API 要求）
+  assert.equal(zhipu.headers.Authorization, "{{apiKey}}");
+  assert.equal(zhipu.parse.kind, "credits");
+  assert.equal(zhipu.parse.totalPath, "data.limits[0].usage");
+  assert.equal(zhipu.parse.usedPath, "data.limits[0].currentValue");
+  // 必须排在通用 OpenAI /usage 候选之前，避免被兜底候选半路劫走
+  const zhipuIdx = probe.USAGE_PROBE_CANDIDATES.indexOf(zhipu);
+  const genericIdx = probe.USAGE_PROBE_CANDIDATES.findIndex((c) => c.path === "/usage" && c.apiTypes);
+  assert.ok(zhipuIdx >= 0 && genericIdx > zhipuIdx, "智谱候选应先于通用 OpenAI 候选");
+});
+
+test("智谱候选命中 open.bigmodel.cn 的 OpenAI/Anthropic 两种 base，不误伤其它域名", () => {
+  const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
+  assert.equal(probe.candidateApplies(zhipu, "https://open.bigmodel.cn/api/paas/v4/", "openai-completions"), true);
+  assert.equal(probe.candidateApplies(zhipu, "https://open.bigmodel.cn/api/anthropic", "anthropic-messages"), true);
+  assert.equal(probe.candidateApplies(zhipu, "https://api.deepseek.com", "openai-completions"), false);
+  assert.equal(probe.candidateApplies(zhipu, "https://openrouter.ai/api/v1", "openai-completions"), false);
+});
+
+test("usageProbeUrls rootPath：只取 baseUrl origin，不拼 /api/paas/v4 路径段", () => {
+  const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
+  const urls = probe.usageProbeUrls(zhipu, "https://open.bigmodel.cn/api/paas/v4/", ensureVersion);
+  // loadTsCommonJs 经 vm.runInNewContext 执行，返回跨 realm 的 Array，deepStrictEqual
+  // 会因原型不同误报 "same structure but not reference-equal"，故逐元素断言
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0], "https://open.bigmodel.cn/api/monitor/usage/quota/limit");
+});
+
+test("智谱真实响应样例解析为 credits（usage=总配额、currentValue=已用、剩余反推、双窗口齐全）", () => {
+  const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
+  const res = probe.parseUsageResponseBody(
+    {
+      code: 200,
+      msg: "success",
+      success: true,
+      data: {
+        limits: [
+          { type: "CREDIT_LIMIT", unit: 3, number: 5, usage: 10000000, currentValue: 500000, percentage: 5, nextResetTime: 1706200000000 },
+          { type: "CREDIT_LIMIT", unit: 6, number: 1, usage: 100000, currentValue: 20000, percentage: 20 },
+        ],
+      },
+    },
+    "{}",
+    zhipu.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "credits");
+  // 主值 = limits[0]（5h 滚动窗）：usage=总配额、currentValue=已用、剩余反推
+  assert.equal(res.credits.total, 10000000);
+  assert.equal(res.credits.used, 500000);
+  // remaining 由 total-used 反推，不采信 percentage（那只是展示百分比）
+  assert.equal(res.credits.remaining, 9500000);
+  // 双窗口并列：5h 窗 + 周窗各自独立解析（周窗 currentValue=20000 / usage=100000）；
+  // loadTsCommonJs 经 vm 执行跨 realm，对象原型不同，deepEqual 会误报，故逐字段断言
+  assert.equal(res.credits.windows.length, 2);
+  assert.equal(res.credits.windows[0].key, "fiveHour");
+  assert.equal(res.credits.windows[0].total, 10000000);
+  assert.equal(res.credits.windows[0].used, 500000);
+  assert.equal(res.credits.windows[0].remaining, 9500000);
+  assert.equal(res.credits.windows[1].key, "weekly");
+  assert.equal(res.credits.windows[1].total, 100000);
+  assert.equal(res.credits.windows[1].used, 20000);
+  assert.equal(res.credits.windows[1].remaining, 80000);
+});
+
+test("智谱响应缺周窗条目时 windows 只给 5h 一条，主值仍正常", () => {
+  const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
+  const res = probe.parseUsageResponseBody(
+    { data: { limits: [{ type: "CREDIT_LIMIT", unit: 3, number: 5, usage: 2000, currentValue: 1145 }] } },
+    "{}",
+    zhipu.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.credits.total, 2000);
+  // 单窗：windows 只含 5h，周窗缺值被跳过而不是使整条解析失败
+  assert.equal(res.credits.windows.length, 1);
+  assert.equal(res.credits.windows[0].key, "fiveHour");
+});

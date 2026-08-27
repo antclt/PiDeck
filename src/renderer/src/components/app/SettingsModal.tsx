@@ -1,6 +1,6 @@
 import { Component, Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getDefaultStore } from "jotai";
-import { settingsFocusAtom, type SettingsTabId } from "../../atoms";
+import { getDefaultStore, useAtom } from "jotai";
+import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
 import {
 	Settings2,
@@ -17,6 +17,8 @@ import {
 	Globe,
 	FileCode2,
 	GitBranch,
+	SlidersHorizontal,
+	MonitorCog,
 	X,
 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
@@ -73,12 +75,21 @@ const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => 
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
 const ImageGenSettingsTab = lazy(() => import("./settings/ImageGenSettingsTab").then((m) => ({ default: m.ImageGenSettingsTab })));
 
+// 配置管理分区（pi 配置文件管理）作为独立 chunk 懒加载：首开设置窗口不加载 ConfigModal 数组。
+const ConfigPane = lazy(() =>
+	import("../../ConfigModal").then((m) => ({ default: m.ConfigPane })),
+);
+import type { ConfigPaneHandle, ConfigPaneState } from "../../ConfigModal";
+
 // DSH 配置（HOME / 审批 / 外部会话）只放配置管理，避免设置页再开一个重复 tab
 // SettingsTabId 定义在 atoms，深链与侧栏共用同一套合法 tab；
 // 展示顺序与分组分割线统一收敛在 settings/settingsTabLayout.ts。
 
 /** localStorage 键：设置页上次打开的 tab（重开弹窗时恢复位置，跨应用重启保留）。 */
 const SETTINGS_LAST_TAB_KEY = "pideck-settings-last-tab";
+
+/** localStorage 键：设置窗口上次打开的顶层分区（系统设置/配置管理，重开时恢复位置）。 */
+const SETTINGS_LAST_PANE_KEY = "pideck-settings-last-pane";
 
 /**
  * 读取上次打开的设置 tab；localStorage 不可用、无记录或值已失效时回退默认值 "common"。
@@ -92,6 +103,17 @@ function loadLastSettingsTab(): SettingsTabId {
 		/* localStorage 不可用（隐私模式等）时静默失败 */
 	}
 	return "common";
+}
+
+/** 读取上次打开的顶层分区；无记录或值已失效时回退 "settings"。 */
+function loadLastSettingsPane(): SettingsPaneId {
+	try {
+		const raw = localStorage.getItem(SETTINGS_LAST_PANE_KEY);
+		if (raw === "config") return "config";
+	} catch {
+		/* localStorage 不可用（隐私模式等）时静默失败 */
+	}
+	return "settings";
 }
 
 type SettingsModalProps = {
@@ -126,6 +148,8 @@ type SettingsModalProps = {
 	onOpenWebService: (port: string) => void;
 	onClose: () => void;
 	onChange: (patch: Partial<AppSettings>) => void;
+	/** 当前项目路径：有值时配置管理分区合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
+	projectPath?: string;
 };
 
 /**
@@ -236,11 +260,33 @@ function SettingsModalContent(props: SettingsModalProps) {
 			/* localStorage 不可用时只影响本次记忆 */
 		}
 	}, []);
+	const persistPane = useCallback((value: SettingsPaneId) => {
+		try {
+			localStorage.setItem(SETTINGS_LAST_PANE_KEY, value);
+		} catch {
+			/* localStorage 不可用时只影响本次记忆 */
+		}
+	}, []);
+	// 顶层分区（系统设置 / 配置管理）：重开时恢复上次位置；深链（侧栏「配置管理」）优先
+	const [pane, setPane] = useState<SettingsPaneId>(() => {
+		const target = getDefaultStore().get(settingsFocusAtom);
+		return target?.pane === "config" ? "config" : loadLastSettingsPane();
+	});
+	// 深链：窗口已在打开状态时点侧栏「配置管理」→ 切到配置管理分区。
+	// 本 effect 定义在 useSettingsFocus 之前（其 effect 会消费并清空 focus），保证先读到带 pane 的焦点。
+	const [focusPaneTarget] = useAtom(settingsFocusAtom);
+	useEffect(() => {
+		if (focusPaneTarget?.pane === "config") setPane("config");
+	}, [focusPaneTarget]);
 	useSettingsFocus(activeTab, setActiveTab, persistTab);
 	// ── 全局设置草稿：进入弹框时快照 props.settings，所有修改在 draft 上操作，保存时统一提交 ──
 	const [draftSettings, setDraftSettings] = useState<AppSettings>(() => deepClone(props.settings));
 	/** 打开弹框时的原始设置快照（磁盘基准），用于取消回退与脏检测对比。 */
 	const baseSnapshotRef = useRef<AppSettings>(deepClone(props.settings));
+	// baseSnapshotRef 是 ref（lint 规范不入 useMemo 依赖），saveAll 推进基准后 draftSettings
+	// 引用不变，dirtyFields useMemo 会返回缓存的旧非空集合 → 保存后关闭仍误报"有未保存"。
+	// baselineToken 在基准被推进时 bump，让 useMemo 重算为空集。
+	const [baselineToken, setBaselineToken] = useState(0);
 	/**
 	 * 脏字段 = 草稿与基准快照的真实差异（deepEqual），不再用「touched 集合」记录。
 	 * 好处：改回原值即自动摘掉脏标记，关闭确认 / 左侧黄点 / 保存按钮只反映真实未保存改动。
@@ -248,7 +294,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	 */
 	const dirtyFields = useMemo(
 		() => computeDirtyFields(draftSettings as Record<string, unknown>, baseSnapshotRef.current as Record<string, unknown>),
-		[draftSettings],
+		[draftSettings, baselineToken],
 	);
 	// ── 视觉桥草稿：独立于全局设置（写 pi-deck-vision.json，走独立 IPC），脏标记/保存/取消由弹框统一管理 ──
 	const visionDraft = useVisionBridgeDraft();
@@ -315,8 +361,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 			(patch as Record<string, unknown>)[key] = (draftSettings as Record<string, unknown>)[key];
 		}
 		props.onChange(patch);
-		// 提交后把基准推进到当前草稿；脏字段由 useMemo 在下一渲染自动收敛为空
+		// 提交后把基准推进到当前草稿；脏字段由 useMemo 在下一渲染自动收敛为空。
 		baseSnapshotRef.current = deepClone(draftSettings);
+		// baseSnapshotRef 是 ref 不在 useMemo 依赖里：仅推进基准而不 bump token，
+		// dirtyFields 会停在保存前的非空集合（draftSettings 引用未变），关闭弹框误报未保存。
+		setBaselineToken((v) => v + 1);
 		if (visionDraft.dirty) {
 			// 视觉桥保存失败（如 API Key 缺失/接口不可达）时保留脏标记，头部按钮可重试
 			const visionOk = await visionDraft.save();
@@ -346,23 +395,44 @@ function SettingsModalContent(props: SettingsModalProps) {
 		setPetTabResetKey((k) => k + 1);
 	};
 
+	// ── 配置管理分区（ConfigPane）标题栏状态：保存禁用 / 黄点 / 确认清单由嵌入分区上报 ──
+	const configPaneRef = useRef<ConfigPaneHandle>(null);
+	const [configPaneState, setConfigPaneState] = useState<ConfigPaneState>({
+		saving: false,
+		hasDirty: false,
+		unsaved: { totalCount: 0, items: [] },
+	});
+	const handleConfigPaneStateChange = useCallback(
+		(state: ConfigPaneState) => setConfigPaneState(state),
+		[],
+	);
+	/** 当前顶层分区是否为「配置管理」（标题栏按钮/关闭确认都按此切换）。 */
+	const isConfigPane = pane === "config";
+
 	// 生图 tab 的取消：脏标记由子组件内部管理，取消时不主动重置（下次打开重新加载）；
 	// 若需强制重置可在子组件暴露 reset 方法，这里仅确保关闭流程不遗漏生图脏检查
 
-	/** 关闭弹框：有未保存变更（全局设置/视觉桥/生图草稿）时弹出确认对话框，无变更时直接关闭 */
+	/** 关闭弹框：系统设置草稿与配置管理草稿任一有未保存变化都统一弹确认（不再按分区委托），
+	 *  配置分区的脏状态由 ConfigPane 上报（onStateChange.hasDirty）；无任何脏直接关闭。 */
 	const handleClose = () => {
-		if (dirtyFields.size > 0 || visionDraft.dirty || imageGenDirty) {
+		const settingsDirty = dirtyFields.size > 0 || visionDraft.dirty || imageGenDirty;
+		if (settingsDirty || configPaneState.hasDirty) {
 			setCloseConfirmOpen(true);
 		} else {
 			props.onClose();
 		}
 	};
 
-	/** 关闭确认弹框时选择保存并关闭：视觉桥保存失败则留在弹框内（脏标记保留，可重试） */
+	/** 关闭确认弹框时选择保存并关闭：系统设置与配置管理的脏来源都保存成功才关闭；
+	 *  设置侧走 saveAll（视觉桥保存失败返回 false 留在窗口），配置侧走 ConfigPane.saveAllDirty。 */
 	const handleSaveAndClose = async () => {
 		setCloseConfirmOpen(false);
-		const ok = await saveAll();
-		if (ok) {
+		const settingsDirty = dirtyFields.size > 0 || visionDraft.dirty || imageGenDirty;
+		const settingsOk = settingsDirty ? await saveAll() : true;
+		const configOk = configPaneState.hasDirty
+			? ((await configPaneRef.current?.saveAllDirty()) ?? false)
+			: true;
+		if (settingsOk && configOk) {
 			props.onClose();
 		}
 	};
@@ -431,6 +501,13 @@ function SettingsModalContent(props: SettingsModalProps) {
 		() => formatSettingsUnsavedMessage(unsavedSummary, t),
 		[unsavedSummary],
 	);
+	// 关闭确认清单 = 系统设置 + 配置管理两区未保存项合并（配置项由 ConfigPane 上报）
+	const mergedUnsavedItems = useMemo(
+		() => [...(unsavedSummary?.items ?? []), ...configPaneState.unsaved.items],
+		[unsavedSummary, configPaneState.unsaved],
+	);
+	const mergedUnsavedCount =
+		(unsavedSummary?.totalCount ?? 0) + configPaneState.unsaved.totalCount;
 
 	return (
 		<Dialog open onOpenChange={(next) => !next && handleClose()}>
@@ -438,18 +515,54 @@ function SettingsModalContent(props: SettingsModalProps) {
 				<DialogHeader className="flex-row items-center justify-between px-4 py-3">
 					<DialogTitle>{t("settings.title")}</DialogTitle>
 					<div className="flex items-center gap-2">
-						{/* 保存按钮常驻且不因「无修改」禁用：无修改也允许再次保存；视觉桥保存中禁用防重复提交 */}
-						<Button variant="default" size="sm" onClick={saveAll} disabled={visionDraft.saving}>
-							{t("common.save")}
-						</Button>
-						{hasAnyDirtyChanges ? (
-							/* 放弃更改用 outline（白底描边）而非灰底 secondary：与黑色主按钮形成
-							    清晰的主次层级（shadcn dialog 的 confirm/cancel 惯例），避免一对按钮
-							    都是灰色填充分不出哪个是提交。 */
-							<Button variant="outline" size="sm" onClick={cancelAll}>
-								{t("common.cancel")}
-							</Button>
-						) : undefined}
+						{isConfigPane ? (
+							/* 配置管理分区：按钮与独立 ConfigModal 标题栏同源（ConfigPane ref 委托同一个 handler），
+							   黄点/禁用态由配置页内部脏集合与保存状态上报 */
+							<>
+								<Button
+									variant="default"
+									size="sm"
+									onClick={() => void configPaneRef.current?.saveCurrent()}
+									disabled={configPaneState.saving}
+									title={configPaneState.hasDirty ? t("config.dirtyTooltip") : undefined}
+								>
+									{configPaneState.hasDirty && (
+										<span className="size-2 rounded-full bg-amber-400" aria-hidden="true" />
+									)}
+									{configPaneState.saving ? t("common.saving") : t("common.save")}
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => configPaneRef.current?.exportConfig()}
+								>
+									{t("common.export")}
+								</Button>
+								<Button
+									variant="secondary"
+									size="sm"
+									onClick={() => configPaneRef.current?.importConfig()}
+								>
+									{t("common.import")}
+								</Button>
+							</>
+						) : (
+							/* 应用设置分区：保存常驻且不因「无修改」禁用（无修改也允许再次保存）；
+							   视觉桥保存中禁用防重复提交；有未保存变更时显示「放弃更改」 */
+							<>
+								<Button variant="default" size="sm" onClick={saveAll} disabled={visionDraft.saving}>
+									{t("common.save")}
+								</Button>
+								{hasAnyDirtyChanges ? (
+									/* 放弃更改用 outline（白底描边）而非灰底 secondary：与黑色主按钮形成
+									   清晰的主次层级（shadcn dialog 的 confirm/cancel 惯例），避免一对按钮
+									   都是灰色填充分不出哪个是提交。 */
+									<Button variant="outline" size="sm" onClick={cancelAll}>
+										{t("common.cancel")}
+									</Button>
+								) : undefined}
+							</>
+						)}
 						<DialogClose asChild>
 							<Button variant="ghost" size="icon" aria-label={t("common.close")} title={t("common.close")}>
 								<X size={18} strokeWidth={2.2} aria-hidden="true" />
@@ -457,6 +570,40 @@ function SettingsModalContent(props: SettingsModalProps) {
 						</DialogClose>
 					</div>
 				</DialogHeader>
+			{/* 顶层分区：系统设置 / 配置管理。样式对齐配置页 Pi/DSH 分页（config-backend-switch），
+			    黄点 = 对应分区的未保存草稿；两个分区都保持挂载（forceMount + hidden）不丢草稿 */}
+			<Tabs value={pane} onValueChange={(v) => {
+				const next: SettingsPaneId = v === "config" ? "config" : "settings";
+				setPane(next);
+				persistPane(next);
+			}} className="flex min-h-0 min-w-0 flex-1 flex-col">
+				{/* 顶层分区 tab：直接用 shadcn Tabs 默认观感（bg-muted p-1 圆角条），与全局组件统一；
+				    不再套自定义 tab 条样式，只做外边距/自定宽定位。 */}
+				<TabsList className="mx-3 mt-2.5 w-auto justify-start gap-0.5 self-start" aria-label={t("settings.title")}>
+					<TabsTrigger value="settings" className="h-8 gap-1.5 px-3 text-[13px]">
+						<MonitorCog className="size-4" aria-hidden="true" />
+						{t("settings.panes.system")}
+						{/* 系统设置分区黄点：全局设置/视觉桥/生图草稿任一有未保存 */}
+						{hasAnyDirtyChanges ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+					</TabsTrigger>
+					<TabsTrigger value="config" className="h-8 gap-1.5 px-3 text-[13px]">
+						<SlidersHorizontal className="size-4" aria-hidden="true" />
+						{t("settings.panes.config")}
+						{/* 配置管理分区黄点：由 ConfigPane 内部脏集合上报 */}
+						{configPaneState.hasDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="config" forceMount hidden={pane !== "config"} className="flex min-h-0 min-w-0 flex-1 flex-col">
+					<Suspense fallback={<SettingsTabLoading />}>
+						<ConfigPane
+							ref={configPaneRef}
+							onClose={props.onClose}
+							projectPath={props.projectPath}
+							onStateChange={handleConfigPaneStateChange}
+						/>
+					</Suspense>
+				</TabsContent>
+				<TabsContent value="settings" forceMount hidden={pane !== "settings"} className="flex min-h-0 min-w-0 flex-1 flex-col">
 			<Tabs orientation="vertical" value={activeTab} onValueChange={(v) => { const match = tabs.find((t) => t.id === v); if (!match) return; setActiveTab(match.id); persistTab(match.id); }} className="settings-layout flex min-h-0 flex-1 flex-row gap-0 bg-transparent">
 					<TabsList className="settings-tabs flex min-h-0 shrink-0 flex-col items-stretch gap-2.5 overflow-auto border-0 border-r border-border rounded-none bg-transparent p-2.5 data-[orientation=vertical]:w-[196px]" aria-label={t("settings.title")}>
 						{tabs.map((tab) => (
@@ -681,6 +828,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 						</Suspense>
 					</TabsContent>
 				</Tabs>
+				</TabsContent>
+			</Tabs>
 			{/* 未保存变更确认对话框 */}
 			{closeConfirmOpen && (
 				<AlertDialog open onOpenChange={(open) => { if (!open) setCloseConfirmOpen(false); }}>
@@ -689,15 +838,15 @@ function SettingsModalContent(props: SettingsModalProps) {
 							<AlertDialogTitle>{t("settings.unsavedTitle")}</AlertDialogTitle>
 							<AlertDialogDescription asChild>
 								<div className="grid max-h-56 gap-1.5 overflow-auto text-left">
-									{unsavedSummary && unsavedSummary.totalCount === 1 ? (
-										/* 单项：沿用带「是否在关闭前保存？」的单行提示，不需要列表 */
+									{unsavedSummary && unsavedSummary.totalCount === 1 && !configPaneState.hasDirty ? (
+										/* 单项且仅设置区：沿用带「是否在关闭前保存？」的单行提示，不需要列表 */
 										<p>{unsavedCloseMessage}</p>
 									) : (
 										<>
-											{/* 多项：先给总数，再逐条列出变更项（footer 按钮承担保存/放弃语义） */}
-											<p>{t("settings.unsavedListIntro", { count: unsavedSummary?.totalCount ?? 0 })}</p>
+											{/* 多项或跨分区：先给总数，再逐条列出两区变更项（footer 按钮承担保存/放弃语义） */}
+											<p>{t("settings.unsavedListIntro", { count: mergedUnsavedCount })}</p>
 											<ul className="grid gap-0.5 pl-4 list-disc">
-												{unsavedSummary?.items.map((item) => (
+												{mergedUnsavedItems.map((item) => (
 													<li key={`${item.tabKey}\u0000${item.itemKey}`}>
 														{t(item.tabKey)} · {t(item.itemKey)}
 													</li>

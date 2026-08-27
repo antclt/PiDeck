@@ -28,8 +28,8 @@ import { formatPercent } from "./TimelineFormat";
  *   达标后可点，urgency 色阶 ≥90 红 / ≥70 黄；压缩中禁用并显示进度态。
  *
  * 边界：
- * - percent 或 window 缺失时不渲染（模型切换瞬间可能短暂无 capacity，此时也关闭
- *   已打开的面板，不保留过期 UI）。
+ * - 圆环常驻：percent 或 window 缺失（会话未运行/模型切换瞬间）时渲染 0% 占位环，
+ *   面板内容降级为「上下文数据暂不可用」，不再整环隐藏。
  * - 命中率/输入输出行按数据存在性渲染，缺字段不占位。
  */
 
@@ -165,6 +165,11 @@ export function SessionContextMeter(props: {
 	onCompact?: () => void;
 	/** 一键插入 /skill:usage-probe + 占位符模板（安装成功后由圆环面板触发）。 */
 	onInsertUsageProbePrompt?: (placeholder: string) => void;
+	/**
+	 * 运行时缺省时的 provider 兜底（由会话记录/默认 model 推导）：用量查询只依赖
+	 * provider 配置解析端点、不依赖 agent 运行，未激活/未启动会话也可查用量。
+	 */
+	fallbackProvider?: string;
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLSpanElement | null>(null);
@@ -191,7 +196,9 @@ export function SessionContextMeter(props: {
 	// 打开都弹网络请求（60s 内不重查）。
 	const [usage, setUsage] = useState<ProviderUsageResult | null>(null);
 	const [usageLoading, setUsageLoading] = useState(false);
-	const provider = props.state?.provider?.trim();
+	// 用量查询不依赖 agent 运行：未激活/未启动会话用会话记录/默认 model 推导的
+	// provider 兜底（ComposerComponents 已按 liveState → record → defaultModel 顺序解析）。
+	const provider = props.state?.provider?.trim() || props.fallbackProvider?.trim() || undefined;
 	useEffect(() => {
 		if (!open || !provider) return;
 		const cached = usageCache.get(provider);
@@ -231,10 +238,8 @@ export function SessionContextMeter(props: {
 		});
 	}, [props.onInsertUsageProbePrompt]);
 
-	// 模型切换瞬间 capacity 可能暂时消失：不渲染过期面板
-	useEffect(() => {
-		if (!available && open) setOpen(false);
-	}, [available, open]);
+	// 圆环常驻：无 capacity 时也渲染占位环，不再因模型切换瞬间关闭面板
+	// （原：不渲染过期面板；用户要求非激活会话也常驻圆环）。
 
 	// 面板定位：fixed 相对 viewport（portal 到 body，脱离 composer 的 overflow 裁剪）。
 	// 向上弹出（面板底边贴 trigger 顶），顶部空间不足时翻转到 trigger 下方；
@@ -259,15 +264,15 @@ export function SessionContextMeter(props: {
 	}, []);
 
 	useLayoutEffect(() => {
-		if (!open || !available) return;
+		if (!open) return;
 		positionPanel();
 		// 依赖只用原始值（对象引用每次渲染都变，会导致定位循环）：
 		// 数据更新（占用/费用/压缩态变化）或尺寸变化时重新测量定位
-	}, [open, available, context?.percent, context?.usedTokens, context?.contextWindow, props.state?.cost, props.state?.cacheHitPercent, props.state?.cacheHitAveragePercent, props.state?.isCompacting, positionPanel]);
+	}, [open, context?.percent, context?.usedTokens, context?.contextWindow, props.state?.cost, props.state?.cacheHitPercent, props.state?.cacheHitAveragePercent, props.state?.isCompacting, positionPanel]);
 
 	// 外点 / Escape 关闭（open 期间挂一个 document 监听，dsh Menu 同款模式）
 	useEffect(() => {
-		if (!open || !available) return;
+		if (!open) return;
 		const onPointerDown = (e: PointerEvent): void => {
 			const inside =
 				e.target instanceof Node &&
@@ -285,14 +290,14 @@ export function SessionContextMeter(props: {
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [available, open]);
+	}, [open]);
 
 	// fixed 面板本身不随滚动移动，滚动/resize 会导致 trigger 相对 viewport 变化：
 	// 重新锚定面板到 trigger 当前位置而不是关闭——流式渲染追底滚动（弹簧/instant
 	// 跳转）期间面板保持打开且贴 trigger，不再「点开就关」（2026-08 用户反馈）。
 	// 外点 / Escape 仍是关闭面板的唯一途径。
 	useEffect(() => {
-		if (!open || !available) return;
+		if (!open) return;
 		let raf = 0;
 		const reanchor = (): void => {
 			cancelAnimationFrame(raf);
@@ -305,15 +310,19 @@ export function SessionContextMeter(props: {
 			window.removeEventListener("scroll", reanchor, true);
 			window.removeEventListener("resize", reanchor);
 		};
-	}, [open, available, positionPanel]);
+	}, [open, positionPanel]);
 
-	if (context === null) return null;
-	const percent = context.percent;
+	// 无 capacity 数据（会话未运行/模型切换瞬间）也渲染占位环：0% 空环 +「暂不可用」提示，
+	// 保证底部栏圆环常驻。contextOccupancy 语义不变（仍返回 null 供面板内部判断）。
+	const percent = context?.percent ?? 0;
 	// 低占用保留有效数字（1M 窗口下 408 tokens ≈ 0.04%，不显示成「0%」）
-	const reading = t("sessionContext.used", { percent: formatPercent(percent) });
-	const figures = [context.usedTokens, context.contextWindow].every((v) => v != null)
-		? `~${formatTokens(context.usedTokens!)} / ${formatTokens(context.contextWindow!)}`
-		: undefined;
+	const reading = context !== null
+		? t("sessionContext.used", { percent: formatPercent(percent) })
+		: t("sessionContext.unavailable");
+	const figures =
+		context !== null && [context.usedTokens, context.contextWindow].every((v) => v != null)
+			? `~${formatTokens(context.usedTokens!)} / ${formatTokens(context.contextWindow!)}`
+			: undefined;
 	// host contextBreakdown 三段占用条（dsh-web 同宽算法：各自占 breakdownTotal 份额 × percent）
 	const breakdownSegments = segments?.kind === "breakdown"
 		? (() => {
@@ -382,8 +391,8 @@ export function SessionContextMeter(props: {
 						}}
 					>
 					<div className="flex items-center gap-1.5">
-						<span className="text-text-tertiary">{t("sessionContext.used", { percent: formatPercent(percent) })}</span>
-						{figures !== undefined && (
+						<span className="text-text-tertiary">{reading}</span>
+						{available && figures !== undefined && (
 							<span className="ml-auto font-medium tabular-nums text-foreground">
 								{figures}
 							</span>
@@ -413,21 +422,21 @@ export function SessionContextMeter(props: {
 								<div
 									className="h-full"
 									style={{
-										width: `${Math.min(100, (segments.conversation / context.contextWindow!) * 100)}%`,
+										width: `${Math.min(100, (segments.conversation / (context?.contextWindow ?? 1)) * 100)}%`,
 										backgroundColor: COLOR_CONVERSATION,
 									}}
 								/>
 								<div
 									className="h-full"
 									style={{
-										width: `${Math.min(100, (segments.systemTools / context.contextWindow!) * 100)}%`,
+										width: `${Math.min(100, (segments.systemTools / (context?.contextWindow ?? 1)) * 100)}%`,
 										backgroundColor: COLOR_SYSTEM_TOOLS,
 									}}
 								/>
 							</div>
 						)}
 					</div>
-					{segments !== null && (
+					{available && segments !== null && (
 						<div className="mt-2 space-y-0.5">
 							{segments.kind === "breakdown" ? (
 								// host breakdown 三段图例（dsh-web ROWS 同序）：系统 / 工具 / 对话
@@ -551,6 +560,54 @@ export function SessionContextMeter(props: {
 									<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">
 										{formatBalance(usageBalance)}
 									</span>
+								</div>
+							) : usageCredits?.windows != null && usageCredits.windows.length > 0 ? (
+								<div className="space-y-1">
+									{/* 多窗口并列限额（如智谱 5h 滚动窗 + 周窗）：逐窗口一条进度条，仿 periods
+									   版式但带剩余小字；不再重复渲染主值两行，避免数字冗余。 */}
+									{usageCredits.windows.map((window) => {
+										const total = window.total;
+										const used = window.used;
+										const remaining =
+											window.remaining ??
+											(total != null && used != null ? Math.max(0, total - used) : undefined);
+										// 百分比 = 已用/总额；用超（used>total）封顶 100。total 缺失时不显示百分比。
+										const pct =
+											total != null && used != null && total > 0
+												? Math.min(100, Math.round((used / total) * 100))
+												: undefined;
+										// 用量≥90% 红字警示（与 context occupancy / periods 同源判断）
+										const urgent = pct != null && pct >= 90;
+										const label =
+											window.key === "fiveHour"
+												? t("sessionContext.usageWindowFiveHour")
+												: window.key === "weekly"
+													? t("sessionContext.usageWindowWeekly")
+													: window.key;
+										return (
+											<div key={window.key} className="flex items-center gap-1.5">
+												<span className="w-14 flex-none shrink-0 text-caption leading-5 text-text-secondary">
+													{label}
+												</span>
+												<span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+													<span
+															className={`block h-full rounded-full ${urgent ? "bg-destructive" : "bg-text-tertiary"}`}
+															style={{ width: `${pct ?? 0}%` }}
+														/>
+												</span>
+												<span
+														className={`w-9 flex-none text-right font-mono tabular-nums ${urgent ? "font-semibold text-destructive" : "text-text-tertiary"}`}
+													>
+													{pct != null ? `${pct}%` : t("sessionContext.usageUnknown")}
+												</span>
+												{remaining != null && (
+													<span className="min-w-0 flex-none text-right font-mono text-micro text-text-tertiary">
+														{t("sessionContext.usageWindowRemaining", { n: formatAmount(remaining) })}
+													</span>
+												)}
+											</div>
+										);
+									})}
 								</div>
 							) : usageCredits ? (
 								<div className="space-y-1">

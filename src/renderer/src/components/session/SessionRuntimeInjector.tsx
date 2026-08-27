@@ -258,7 +258,6 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       setTerminalCollapsedForOwner={setPaneTerminalCollapsed}
       setTerminalHeight={services.setTerminalHeight}
       settingsOpen={settingsOpen}
-      configOpen={services.configOpen}
       environmentDialog={services.environmentDialog}
       runCreateSessionDraft={services.runCreateSessionDraft}
       abortAgent={services.abortAgent}

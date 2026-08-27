@@ -88,8 +88,10 @@ export type SessionFilePathResolver = (
 
 /** 占位标题回填与有效性校验的合并结果：name 缺省时保留占位标题；valid:false 表示
  *  文件非有效 Pi 会话（如 pi-subagents transcript 转储，首条记录用 recordType 而无 type 头），
- *  mergeScanned 应拒绝索引该文件（#168）。 */
-export type SessionTitleFetchResult = { name?: string; valid?: boolean };
+ *  mergeScanned 应拒绝索引该文件（#168）；parentSessionPath 仅供平铺子代理形态
+ * （@tintinweb/pi-subagents：parentSession header + 会话名 <agent>#<8hex>）回填父关系，
+ *  用户 fork / 普通会话 / nicobailon 嵌套形态不返回该值。 */
+export type SessionTitleFetchResult = { name?: string; valid?: boolean; parentSessionPath?: string };
 
 /** 占位标题回填 + 会话头有效性校验：装配层注入（实现为 SessionScanner.inferSessionNameAndValidity，
  *  见 main/index.ts）。合并到一次有界读头部，避免补名与校验分别读盘。 */
@@ -833,7 +835,8 @@ export class SessionCatalog {
 		// 显示首条消息标题，而不是永远 Untitled（不再依赖打开/重命名时才补名）。
 		// 同一次读头部顺带校验会话头有效性：invalidOrigins 收集被判定为非有效会话
 		// 的 originKey（transcript 等无 type 头的产物，#168），下面据此清洗与拒绝。
-		const { names: fetchedNames, invalid: invalidOrigins } = await this.collectScannedTitles(summaries, context);
+		const { names: fetchedNames, invalid: invalidOrigins, parents: fetchedParents } =
+			await this.collectScannedTitles(summaries, context);
 		return this.enqueueMutation((entries) => {
 			let changed = false;
 
@@ -892,6 +895,10 @@ export class SessionCatalog {
 			for (const summary of acceptedSummaries) {
 				const originKey = buildSummaryOriginKey(summary, context);
 				const fetchedTitle = fetchedNames.get(originKey);
+				// 平铺子代理（tintinweb 形态）父关系回补：轻量扫描不带 parentSessionPath，
+				// 标题回读时若探测到父（<agent>#<8hex> + parentSession header）则用拾取值；
+				// 普通会话/用户 fork 不探测到该值，保持 summary/旧值原样。
+				const fetchedParent = fetchedParents.get(originKey);
 				const importedSourceId = getImportedSessionSourceId(summary);
 				let entry = byOrigin.get(originKey);
 				if (!entry) {
@@ -912,7 +919,7 @@ export class SessionCatalog {
 						wslUser: summary.wsl ? context.wslUser : undefined,
 						importedSourceId,
 						status: "active",
-						parentSessionPath: summary.parentSessionPath,
+						parentSessionPath: summary.parentSessionPath ?? fetchedParent,
 						createdAt: now,
 						updatedAt: now,
 					};
@@ -926,6 +933,8 @@ export class SessionCatalog {
 						|| catalogDisplayTitle(fetchedTitle)
 						|| catalogDisplayTitle(entry.title)
 						|| scannedFileStemTitle(summary.filePath);
+					// 父关系最终值：新探测值优先，缺失时保留旧值（轻量扫描恒缺省，不能清掉已持久化的父）。
+					const nextParent = summary.parentSessionPath ?? fetchedParent ?? entry.parentSessionPath;
 					if (
 						entry.projectId !== projectId ||
 						entry.filePath !== summary.filePath ||
@@ -936,7 +945,7 @@ export class SessionCatalog {
 						entry.wslUser !== (summary.wsl ? context.wslUser : undefined) ||
 						entry.importedSourceId !== importedSourceId ||
 						entry.status !== "active" ||
-						entry.parentSessionPath !== summary.parentSessionPath ||
+						entry.parentSessionPath !== nextParent ||
 						entry.updatedAt !== summary.updatedAt
 					) {
 						entry.projectId = projectId;
@@ -950,7 +959,11 @@ export class SessionCatalog {
 						entry.status = "active";
 						// 子会话的父子关系可能随后续扫描才被识别（parent 文件出现/路径推断补全），
 						// 变化必须计入 changed 才会落盘，否则重拉后仍以孤儿平铺。
-						entry.parentSessionPath = summary.parentSessionPath;
+						// 平铺子代理（tintinweb 形态）的父来自头部探测（fetchedParent，见上方）。
+						// 注意：轻量扫描（listPathSummary）不读正文、parentSessionPath 恒为缺省，
+						// 直接用缺省值覆盖会清掉上轮探测/持久化的父关系（重启后孤儿平铺）；
+						// 故此处只增补、不清空——新值优先，其次保留旧值。
+						entry.parentSessionPath = summary.parentSessionPath ?? fetchedParent ?? entry.parentSessionPath;
 						entry.updatedAt = summary.updatedAt;
 						changed = true;
 					}
@@ -990,14 +1003,19 @@ export class SessionCatalog {
 
 	/** 只对「该会话当前标题是占位符」的文件读头部补名：已有真实标题的条目不读盘。
 	 *  同一次读头部顺带校验会话头有效性（#168）：transcript 等无 type 头的产物
-	 *  被标记 invalid，mergeScanned 据此拒绝索引并清洗存量条目。 */
+	 *  被标记 invalid，mergeScanned 据此拒绝索引并清洗存量条目。
+	 *  tintinweb 平铺子代理（@tintinweb/pi-subagents）会话名固定 <agent>#<8hex>：
+	 *  一旦标题回填该形态而条目仍无父关系，说明它是历史扫描遗留的孤儿（旧版 catalog
+	 *  不含 parentSessionPath），需要重新读头部回补（见 fetchTitle 返回的 parentSessionPath）。
+	 *  用户 fork 的名字由用户命名、通常不匹配该模式，不会被额外唤醒读盘。 */
 	private async collectScannedTitles(
 		summaries: SessionSummary[],
 		context: SessionCatalogContext,
-	): Promise<{ names: Map<string, string>; invalid: Set<string> }> {
+	): Promise<{ names: Map<string, string>; invalid: Set<string>; parents: Map<string, string> }> {
 		const names = new Map<string, string>();
 		const invalid = new Set<string>();
-		if (!this.fetchTitle) return { names, invalid };
+		const parents = new Map<string, string>();
+		if (!this.fetchTitle) return { names, invalid, parents };
 		const byOrigin = new Map(
 			this.entries.filter((entry) => entry.originKey).map((entry) => [entry.originKey!, entry]),
 		);
@@ -1007,10 +1025,19 @@ export class SessionCatalog {
 			// summary 自带真实名称（readSummary 全量路径）或条目已有真实标题时无需补名。
 			if (catalogDisplayTitle(summary.name)) continue;
 			const existing = byOrigin.get(originKey);
-			if (existing && !isPlaceholderCatalogTitle(existing.title)) continue;
+			if (existing) {
+				// 已有真实标题的条目默认不读盘；但 tintinweb 嫌疑名 + 无父关系的孤儿例外：
+				// 需回读头部补 parentSessionPath（见上方 JSDoc），否则永远在历史列表顶层平铺。
+				if (!isPlaceholderCatalogTitle(existing.title)) {
+					const tintinwebOrphan = existing.source === "pi"
+						&& !existing.parentSessionPath
+						&& /^[^#]+#[0-9a-f]{8}$/i.test(existing.title);
+					if (!tintinwebOrphan) continue;
+				}
+			}
 			wanted.push({ originKey, filePath: summary.filePath });
 		}
-		if (wanted.length === 0) return { names, invalid };
+		if (wanted.length === 0) return { names, invalid, parents };
 		// 有界并行读头部；限制并发避免 WSL 环境一次拉起过多 wsl.exe。
 		// 单个失败降级为无标题/不拒绝，不影响扫描结果。
 		const CONCURRENCY = 8;
@@ -1023,10 +1050,13 @@ export class SessionCatalog {
 				if (result.name) names.set(item.originKey, result.name);
 				// valid 显式为 false 才拒绝；缺省（读不到/未校验）保留原行为
 				if (result.valid === false) invalid.add(item.originKey);
+				// 平铺子代理（tintinweb 形态）回补父关系：来源只推断自 filename，
+				// 不以 summary 的 source 过滤，避免引用文件与扫描来源不一致时漏补。
+				if (result.parentSessionPath) parents.set(item.originKey, result.parentSessionPath);
 			}
 		});
 		await Promise.all(workers);
-		return { names, invalid };
+		return { names, invalid, parents };
 	}
 
 	private recordFromEntry(
