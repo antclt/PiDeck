@@ -109,9 +109,10 @@ test("meter ring follows the dsh geometry: 14px viewBox, r=5.5, 2px stroke, top-
   assert.match(source, /viewBox="0 0 14 14" width="14" height="14"/);
   assert.match(source, /strokeDasharray=\{`\$\{CIRCUMFERENCE \* percent \/ 100\} \$\{CIRCUMFERENCE\}\`\}/);
   assert.match(source, /transform="rotate\(-90 7 7\)"/);
-  // 28px 圆形点击区（与附件按钮同族）+ 无 capacity 不渲染
+  // 28px 圆形点击区（与附件按钮同族）+ 无 capacity 时渲染 0% 占位环常驻
   assert.match(source, /size-7 flex-none place-items-center rounded-full/);
-  assert.match(source, /if \(context === null\) return null/);
+  assert.match(source, /const percent = context\?\.percent \?\? 0;/);
+  assert.match(source, /t\("sessionContext\.unavailable"\)/);
   // 打开期间挂 document 监听（外点/Escape 关闭）
   assert.match(source, /addEventListener\("pointerdown", onPointerDown\)/);
   assert.match(source, /addEventListener\("keydown", onKeyDown\)/);
@@ -168,9 +169,10 @@ test("panel adds dsh-style segments legend when message estimate exists", () => 
   // host breakdown 三段条：宽度 = percent × 份额 / breakdownTotal（dsh-web 同宽算法）
   assert.match(source, /breakdownSegments/);
   assert.match(source, /percent \* part\.tokens\) \/ breakdownTotal/);
-  // 估算两段条：宽度按占 contextWindow 比例（与单段总占用条同一容器）
-  assert.match(source, /segments\.conversation \/ context\.contextWindow!/);
-  assert.match(source, /segments\.systemTools \/ context\.contextWindow!/);
+  // 估算两段条：宽度按占 contextWindow 比例（与单段总占用条同一容器；
+  // context 可能为 null（占位环）时 ?? 1 兜底，避免除零）
+  assert.match(source, /segments\.conversation \/ \(context\?\.contextWindow \?\? 1\)/);
+  assert.match(source, /segments\.systemTools \/ \(context\?\.contextWindow \?\? 1\)/);
   // 图例行：swatch + 文案 + 右侧 ~tokens（dsh rows 形态）
   assert.match(source, /t\("sessionContext\.conversation"\)/);
   assert.match(source, /t\("sessionContext\.systemTools"\)/);
@@ -253,7 +255,7 @@ test("bottom bar wires the meter next to send controls and merges model + thinki
   const source = bottomBarSource();
   // ContextMeter 挂在右侧组（git 分支之前、发送控件同组）
   assert.match(source, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-  assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*onInsertUsageProbePrompt=\{props\.onInsertUsageProbePrompt\}/);
+  assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*onInsertUsageProbePrompt=\{props\.onInsertUsageProbePrompt\}\s*\/\/ [^\n]+\n\s*fallbackProvider=\{modelProvider\}/);
   assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
   // 模型/思考合并 chip：模型名 · 思考档位 + chevron（dsh ModelSelect trigger 形态）
   assert.match(source, /composer-bar-btn model-thinking/);
@@ -297,4 +299,66 @@ test("context meter copy is present in both locale dictionaries", () => {
     assert.match(locale, /"sessionContext\.compactNotReady":/);
     assert.match(locale, /"sessionContext\.compactNotReadyHint":/);
   }
+});
+
+test("usage credits windows render each window as a labeled progress row", () => {
+  const source = meterSource();
+  // 多窗口分支在普通 credits 分支之前命中（优先走 windows 渲染）
+  assert.match(
+    source,
+    /usageCredits\?\.windows != null && usageCredits\.windows\.length > 0 \? \(/,
+  );
+  // 每个窗口一行：label（5h/周）+ 进度条 + 百分比 + 剩余小字
+  assert.match(source, /window\.key === "fiveHour"/);
+  assert.match(source, /window\.key === "weekly"/);
+  assert.match(source, /t\("sessionContext\.usageWindowRemaining", \{ n: formatAmount\(remaining\) \}\)/);
+  // 用超封顶 100、≥90% 红字警示（与 periods 同判断）
+  assert.match(source, /Math\.min\(100, Math\.round\(\(used \/ total\) \* 100\)\)/);
+  assert.match(source, /pct != null && pct >= 90/);
+});
+
+test("usage windows copy is present in both locale dictionaries", () => {
+  for (const locale of [zh(), en()]) {
+    assert.match(locale, /"sessionContext\.usageWindowFiveHour":/);
+    assert.match(locale, /"sessionContext\.usageWindowWeekly":/);
+    assert.match(locale, /"sessionContext\.usageWindowRemaining":/);
+  }
+  assert.match(zh(), /"sessionContext\.usageWindowFiveHour": "5小时"/);
+  assert.match(en(), /"sessionContext\.usageWindowFiveHour": "5h"/);
+});
+
+// 圆环常驻：无 capacity 数据（会话未运行/模型切换瞬间）也渲染 0% 占位环，
+// 面板内容降级为「暂不可用」，不再整环隐藏（用户要求非激活会话也要常驻）。
+test("meter stays visible without capacity: placeholder ring + unavailable panel", () => {
+  const source = meterSource();
+  // percent 兜底 0：环照画（strokeDasharray 按 percent 计算），不 return null
+  assert.match(source, /const percent = context\?\.percent \?\? 0;/);
+  assert.doesNotMatch(source, /if \(context === null\) return null/);
+  // 面板标题走 reading（占位时显示 unavailable 文案），figures 仅在可用时渲染
+  assert.match(source, /<span className="text-text-tertiary">\{reading\}<\/span>/);
+  assert.match(source, /\{available && figures !== undefined && \(/);
+  // 不再因 capacity 消失自动关闭面板
+  assert.doesNotMatch(source, /if \(!available && open\) setOpen\(false\)/);
+  // 面板定位/外点/滚动监听不再受可用性限制
+  assert.doesNotMatch(source, /if \(!open \|\| !available\) return;/);
+  // 占用条/图例在无可用时隐藏；压缩按钮因 percent=0 自动禁用（compactUiState not ready）
+  assert.match(source, /\{available && segments !== null && \(/);
+  assert.match(source, /t\("sessionContext\.unavailable"\)/);
+});
+
+test("placeholder copy is present in both locale dictionaries", () => {
+  assert.match(zh(), /"sessionContext\.unavailable": "上下文数据暂不可用"/);
+  assert.match(en(), /"sessionContext\.unavailable": "Context data unavailable"/);
+});
+
+test("usage provider falls back to session/default model so idle sessions can still probe usage", () => {
+  const meterSource = readFileSync(meterPath, "utf8");
+  // 非激活会话没有 runtime state，组件用会话记录/默认 model 推导的 provider 兜底查用量
+  assert.match(meterSource, /fallbackProvider\?: string/);
+  assert.match(
+    meterSource,
+    /const provider = props\.state\?\.provider\?\.trim\(\) \|\| props\.fallbackProvider\?\.trim\(\) \|\| undefined;/
+  );
+  // 用量查询不依赖 agent 运行（注释里明示设计意图）
+  assert.match(meterSource, /用量查询不依赖 agent 运行/);
 });

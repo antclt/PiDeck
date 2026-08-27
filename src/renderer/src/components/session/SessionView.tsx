@@ -112,7 +112,6 @@ export type SessionViewProps = {
 
   // ── Other visibility ──
   settingsOpen: boolean;
-  configOpen: boolean;
   environmentDialog: boolean;
 
   // ── Session actions ──
@@ -170,7 +169,6 @@ export function SessionView({
   setTerminalCollapsedForOwner,
   setTerminalHeight,
   settingsOpen,
-  configOpen,
   environmentDialog,
   runCreateSessionDraft,
   abortAgent,
@@ -217,7 +215,7 @@ export function SessionView({
 
   const composerMaxHeight = Math.max(COMPOSER_MIN_HEIGHT, Math.min(480, window.innerHeight - 260));
   const terminalPanelVisible =
-    !isLanWeb && !settingsOpen && !configOpen && !environmentDialog &&
+    !isLanWeb && !settingsOpen && !environmentDialog &&
     terminalDockVisible && terminalOpen;
   // 历史会话加载期 messages 仍为空：仍挂底部栏，避免 1 面板 Group 套用 2 值缓存。
   // 空会话磁盘就绪后卸底部栏，改由 timeline 内 SessionStartSurface 居中输入。

@@ -18,6 +18,17 @@ export type ProviderUsagePeriod = {
 
 export type ProviderUsageKind = "periods" | "balance" | "credits";
 
+export type ProviderUsageCredits = {
+	total?: number;
+	used?: number;
+	remaining?: number;
+	/**
+	 * 多窗口额度：同一 provider 的并列限额（如智谱 5h 滚动窗 + 周窗），
+	 * 各窗口是独立配额。有则 UI 逐窗口展示（条 + 百分比）；无则仅主值。
+	 */
+	windows?: { key: string; total?: number; used?: number; remaining?: number }[];
+};
+
 export type ProviderUsageResult = {
 	success: boolean;
 	/** provider 名（渲染层传入，原样带回，用于面板标题）。 */
@@ -29,7 +40,7 @@ export type ProviderUsageResult = {
 	/** kind=balance：剩余额度（数值 + 可选币种）。 */
 	balance?: { value: number; currency?: string };
 	/** kind=credits：额度点数。remaining 优先展示；缺 remaining 时由 total-used 反推。 */
-	credits?: { total?: number; used?: number; remaining?: number };
+	credits?: ProviderUsageCredits;
 	/** 无法结构化解析时保留的原始响应体（已脱敏/截断，可安全展示）。 */
 	raw?: string;
 	/** 失败原因（主进程本地文案或 HTTP 错误摘要）。 */

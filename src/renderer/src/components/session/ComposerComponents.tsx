@@ -586,6 +586,8 @@ export function ComposerBottomBar(props: {
 						state={props.state}
 						onCompact={props.onCompact}
 						onInsertUsageProbePrompt={props.onInsertUsageProbePrompt}
+						// 未激活会话用会话记录/默认 model 推导的 provider 查用量（用量不依赖 agent 运行）
+						fallbackProvider={modelProvider}
 					/>
 					{/* 分支只读 chip 升级为可切换下拉：当前分支即触发器，展开列表选目标分支后
 					    先弹确认（切换会携带未提交更改），确认后才调 App 级 switchBranch。 */}

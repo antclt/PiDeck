@@ -1478,28 +1478,45 @@
   text-rendering: auto;
 }
 
-.config-modal [data-slot="button"] {
+/* 嵌入设置窗口的配置管理分区（ConfigPane）：对话框外壳由宿主承担，这里继承同款控件密度 */
+.config-pane {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-control);
+  line-height: var(--line-height-control);
+  /* 与 .config-modal 保持一致：Windows/Electron 下不要强制 grayscale antialiasing */
+  -webkit-font-smoothing: subpixel-antialiased;
+  text-rendering: auto;
+}
+
+.config-modal [data-slot="button"],
+.config-pane [data-slot="button"] {
   font-family: var(--font-family-base);
   font-size: var(--font-size-control);
 }
 .config-modal [data-slot="input"],
-.config-modal [data-slot="textarea"] {
+.config-pane [data-slot="input"],
+.config-modal [data-slot="textarea"],
+.config-pane [data-slot="textarea"] {
   font-family: var(--font-family-base);
   font-size: var(--font-size-control);
   line-height: var(--line-height-control);
 }
-.config-modal [data-slot="input"] {
+.config-modal [data-slot="input"],
+.config-pane [data-slot="input"] {
   height: var(--control-height-md);
 }
-.config-modal [data-slot="button"][data-size="default"] {
+.config-modal [data-slot="button"][data-size="default"],
+.config-pane [data-slot="button"][data-size="default"] {
   min-height: var(--control-height-md);
   height: var(--control-height-md);
 }
-.config-modal [data-slot="button"][data-size="sm"] {
+.config-modal [data-slot="button"][data-size="sm"],
+.config-pane [data-slot="button"][data-size="sm"] {
   min-height: var(--control-height-sm);
   height: var(--control-height-sm);
 }
-.config-modal .config-content {
+.config-modal .config-content,
+.config-pane .config-content {
   padding: var(--space-4);
 }
 

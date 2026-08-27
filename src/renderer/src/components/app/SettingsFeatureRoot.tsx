@@ -21,6 +21,8 @@ type SettingsFeatureRootProps = {
   appInfo: AppInfo;
   onChange: (patch: Partial<AppSettings>) => void | Promise<void>;
   onCurrentVersion: (version: string) => void;
+  /** 当前项目路径：有值时配置管理分区合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
+  projectPath?: string;
 };
 
 /** Owns Settings overlay visibility and modal-only commands without mirroring AppSettings. */
@@ -90,6 +92,7 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
         setOpen(false);
       },
       onChange: props.onChange,
+      projectPath: props.projectPath,
     }),
     [
       props.settings,
@@ -121,6 +124,7 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
       props.piUpdate.updatePiCli,
       props.onRestartWebService,
       props.onChange,
+      props.projectPath,
       setFocus,
       setOpen,
     ],

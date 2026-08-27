@@ -34,6 +34,25 @@ export function Toaster() {
 		setToasterReady(true);
 		return () => setToasterReady(false);
 	}, []);
+	// 禁掉 sonner 的拖动取消手势：桌面端用鼠标拖选 toast 文本复制时，
+	// 快速拖动会被判定为 swipe（velocity > 0.11 / 位移超阈值即取消），
+	// 表现为“想复制却把 toast 拖没了”，且 setPointerCapture 会干扰选区。
+	// 在 document 捕获阶段拦掉 toast 非按钮区的 pointerdown，sonner 的
+	// onPointerDown 收不到事件就不会进入 swipe 状态；关闭/操作/取消按钮
+	// 走 click 事件不受影响，文本选区默认行为也保留（不 preventDefault）。
+	useEffect(() => {
+		const blockToastSwipe = (event: PointerEvent) => {
+			const target = event.target;
+			if (!(target instanceof Element)) return;
+			// 按钮（data-button / data-close-button 等）放行，保持 sonner 原交互
+			if (target.closest("button")) return;
+			if (target.closest("[data-sonner-toast]")) {
+				event.stopImmediatePropagation();
+			}
+		};
+		document.addEventListener("pointerdown", blockToastSwipe, true);
+		return () => document.removeEventListener("pointerdown", blockToastSwipe, true);
+	}, []);
 	return createPortal(
 		<SonnerToaster
 			theme={theme}
@@ -49,7 +68,9 @@ export function Toaster() {
 				right: "16px",
 			}}
 			toastOptions={{
-				className: "app-sonner-toast",
+				// select-text：显式允许选中 toast 文本（sonner 自身只在 swiped 后关选中，
+				// 这里与上方 pointerdown 拦截配合，保证“拖选复制”始终可用）
+				className: "app-sonner-toast select-text",
 				style: {
 					// 中性面板卡片：与弹窗/抽屉同一套 token，类型语义只体现在图标色（见 surfaces.css）
 					background: "var(--color-bg-panel)",

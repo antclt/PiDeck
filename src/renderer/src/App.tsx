@@ -29,12 +29,11 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, openSettingsAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"]);
-const ConfigModal = lazy(() => import("./ConfigModal").then((m) => ({ default: m.ConfigModal })));
 import { type SidebarActions } from "./components/sidebar/SidebarContent";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import { AppBootstrap } from "./components/app/AppBootstrap";
@@ -230,6 +229,8 @@ export function App() {
   // Streaming subscriptions are in SessionRuntimeInjector.
   // Timeline 由各 ChatSessionPane 自持；大纲只读当前聚焦会话的消息缓存。
   const activeMessages = useAtomValue(currentSessionMessagesAtom);
+// 打开设置窗口并可附带焦点分区（Git「去设置」/侧栏「配置管理」共用 openSettingsAtom）
+const setOpenSettings = useSetAtom(openSettingsAtom);
   const projects = useAtomValue(projectInventoryAtom);
   const agents = useAtomValue(agentInventoryAtom);
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
@@ -573,7 +574,6 @@ export function App() {
 
   // upToDateVersion: hook does not expose this; used by AppUpdateOverlay for "up to date" toast.
   const [upToDateVersion, setUpToDateVersion] = useState<string | null>(null);
-  const [configOpen, setConfigOpen] = useState(false);
 
   const PROJECT_EXPANDED_DIRS_KEY_PREFIX = "pid:project-expanded-dirs:";
 
@@ -3033,7 +3033,7 @@ export function App() {
       branchByProject={branchByProject}
       creatingWorktree={worktreeCreating}
       isLanWeb={isLanWeb}
-      onOpenConfig={() => setConfigOpen(true)}
+      onOpenConfig={() => setOpenSettings({ tab: "common", pane: "config" })}
       onOpenFeedback={() => overlays.setFeedbackOpen(true)}
       settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
       settingsLoaded={settingsLoaded}
@@ -3214,7 +3214,6 @@ export function App() {
       setTerminalOpenByOwnerKey,
       setTerminalCollapsedByOwnerKey,
       setTerminalHeight,
-      configOpen,
       environmentDialog: Boolean(environmentDialog),
       showNotice,
       api,
@@ -3228,7 +3227,6 @@ export function App() {
       activeTerminalOwnerKey,
       activeProjectId,
       availableTerminalHeight,
-      configOpen,
       createSessionDraftWithTab,
       changeChatPath,
       deleteMessage,
@@ -3839,6 +3837,7 @@ export function App() {
       appInfo={appInfo}
       onChange={updateSettings}
       onCurrentVersion={setUpToDateVersion}
+      projectPath={activeProject?.path}
     />
     <SessionActionOverlays {...overlays.overlayProps} />
     <AppUpdateOverlay
@@ -3857,16 +3856,6 @@ export function App() {
     {codexImportProject && <ImportOverlayHost kind="codex" project={codexImportProject} controller={codexImportController} onClose={() => setCodexImportProject(null)} />}
     {claudeImportProject && <ImportOverlayHost kind="claude" project={claudeImportProject} controller={claudeImportController} onClose={() => setClaudeImportProject(null)} />}
     {openCodeImportProject && <ImportOverlayHost kind="opencode" project={openCodeImportProject} controller={openCodeImportController} onClose={() => setOpenCodeImportProject(null)} />}
-    <Suspense fallback={null}>
-    <ConfigModal
-      open={configOpen}
-      onClose={() => setConfigOpen(false)}
-      projectPath={activeProject?.path}
-      onSaved={() => {
-        // 配置保存后不再自动 reload,用户可通过 Restart 按钮手动重载
-      }}
-    />
-    </Suspense>
 
     {/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}
     <ScratchPadOverlay controller={scratchPad} />

@@ -52,6 +52,73 @@ export type McpTabHandle = {
 	reload: () => Promise<void>;
 };
 
+const ADAPTER_EXTENSION_ID = "pi-mcp-adapter";
+const ADAPTER_INSTALL_SOURCE = "npm:pi-mcp-adapter";
+
+/**
+ * 未安装 pi-mcp-adapter 时的引导卡（参考用量查询页 NotInstalledCard 模式）。
+ * mcp.json 只有被 pi 进程里的 adapter 扩展加载才有意义，缺扩展时先引导安装，
+ * 避免用户以为改完配置立刻生效。
+ */
+function McpAdapterGuide(props: { onInstalled: () => void }) {
+	const [installing, setInstalling] = useState(false);
+	const [installFailed, setInstallFailed] = useState(false);
+	const [copied, setCopied] = useState(false);
+	const installCmd = `pi install ${ADAPTER_INSTALL_SOURCE}`;
+
+	const install = async () => {
+		setInstalling(true);
+		setInstallFailed(false);
+		try {
+			await window.piDesktop.extensions.install(ADAPTER_INSTALL_SOURCE);
+			// 装完重新探测：扩展列表此时应已包含 adapter，切回配置编辑器
+			props.onInstalled();
+		} catch (error) {
+			console.error("[McpTab] install pi-mcp-adapter failed", error);
+			setInstallFailed(true);
+		} finally {
+			setInstalling(false);
+		}
+	};
+
+	const copyCommand = async () => {
+		try {
+			await navigator.clipboard.writeText(installCmd);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		} catch {
+			// 剪贴板不可用时静默失败（命令仍可手选复制）
+		}
+	};
+
+	return (
+		<div className="rounded-md border border-border-subtle bg-bg-panel p-4">
+			<p className="text-control text-muted-foreground">{t("config.mcp.notInstalled.desc")}</p>
+			<div className="mt-3 flex flex-wrap items-center gap-2">
+				<Button
+					variant="default"
+					size="sm"
+					onClick={() => void install()}
+					disabled={installing}
+					loading={installing}
+				>
+					{installing ? t("config.mcp.notInstalled.installing") : t("config.mcp.notInstalled.install")}
+				</Button>
+				<code className="rounded-sm border border-border-subtle bg-bg-hover px-2 py-1 font-mono text-micro">
+					{installCmd}
+				</code>
+				<Button variant="ghost" size="sm" onClick={() => void copyCommand()}>
+					{copied ? t("config.mcp.notInstalled.copied") : t("config.mcp.notInstalled.copyCmd")}
+				</Button>
+			</div>
+			{installFailed ? (
+				<p className="mt-2 text-micro text-danger">{t("config.mcp.notInstalled.installFailed")}</p>
+			) : null}
+			<p className="mt-2 text-micro text-muted-foreground">{t("config.mcp.notInstalled.restartHint")}</p>
+		</div>
+	);
+}
+
 function inferTransport(def: McpServerDefinition): McpServerTransport {
 	if (typeof def.url === "string" && def.url.trim()) return "http";
 	if (typeof def.socket === "string" && def.socket.trim()) return "socket";
@@ -82,16 +149,41 @@ export const McpTab = forwardRef<McpTabHandle, {
 	const [creating, setCreating] = useState<{ name: string; definition: McpServerDefinition } | null>(null);
 	const [probe, setProbe] = useState<McpProbeResult | null>(null);
 	const [probing, setProbing] = useState(false);
+	/** pi-mcp-adapter 扩展是否已安装；null = 探测失败/不可用（不阻塞编辑，预览环境等场景降级）。 */
+	const [adapterInstalled, setAdapterInstalled] = useState<boolean | null>(null);
 
 	const markDirty = useCallback(() => {
 		onDirtyChange(true);
 	}, [onDirtyChange]);
+
+	/**
+	 * 探测 pi-mcp-adapter 扩展是否已安装（扩展列表）；失败返回 null 由调用方降级。
+	 * mcp.json 依赖该扩展被 pi 加载，缺扩展时配置页改为引导安装。
+	 */
+	const probeAdapter = useCallback(async (): Promise<boolean | null> => {
+		try {
+			const list = await window.piDesktop.extensions.list();
+			const found = list.extensions.some((ext) => {
+				const source = ext.source ?? "";
+				const id = ext.id ?? "";
+				return id === ADAPTER_EXTENSION_ID || source.includes(ADAPTER_EXTENSION_ID);
+			});
+			setAdapterInstalled(found);
+			return found;
+		} catch {
+			// 扩展 API 不可用时（如预览环境）不阻塞配置编辑
+			setAdapterInstalled(null);
+			return null;
+		}
+	}, []);
 
 	const load = useCallback(async () => {
 		setLoading(true);
 		setError(null);
 		setProbe(null);
 		try {
+			// 先探测扩展再拉配置：未装扩展时整页切为引导卡，配置放不放入负载
+			await probeAdapter();
 			const next = await api.config.getMcp(projectPath);
 			setSnapshot(next);
 			setWritable(next.writableFile.mcpServers ? next.writableFile : { ...next.writableFile, mcpServers: {} });
@@ -104,7 +196,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 		} finally {
 			setLoading(false);
 		}
-	}, [onDirtyChange, projectPath]);
+	}, [onDirtyChange, projectPath, probeAdapter]);
 
 	useEffect(() => {
 		void load();
@@ -316,10 +408,12 @@ export const McpTab = forwardRef<McpTabHandle, {
 						<RefreshCw size={14} />
 						{t("common.refresh")}
 					</Button>
-					<Button size="sm" onClick={startCreate} disabled={saving || Boolean(creating)}>
-						<Plus size={14} />
-						{t("config.mcp.add")}
-					</Button>
+					{adapterInstalled !== false ? (
+						<Button size="sm" onClick={startCreate} disabled={saving || Boolean(creating)}>
+							<Plus size={14} />
+							{t("config.mcp.add")}
+						</Button>
+					) : null}
 				</div>
 			</div>
 
@@ -332,26 +426,33 @@ export const McpTab = forwardRef<McpTabHandle, {
 				</div>
 			) : null}
 
-			<div className="flex flex-wrap gap-1.5">
-				{(snapshot?.layers ?? []).map((layer) => (
-					<span
-						key={layer.kind}
-						className={`rounded-sm border px-1.5 py-0.5 font-mono text-micro ${layer.exists ? "border-border-subtle text-text-secondary" : "border-dashed border-border-subtle text-muted-foreground"}`}
-						title={layer.path}
-					>
-						{layerLabel[layer.kind]}
-						{layer.writable ? ` · ${t("config.mcp.writable")}` : ""}
-						{layer.exists ? "" : ` · ${t("config.mcp.missing")}`}
-					</span>
-				))}
-			</div>
-			{snapshot?.writablePath ? (
-				<p className="truncate font-mono text-micro text-muted-foreground" title={snapshot.writablePath}>
-					{t("config.mcp.writingTo")}: {snapshot.writablePath}
-				</p>
-			) : null}
+			{adapterInstalled === false ? (
+				<McpAdapterGuide onInstalled={load} />
+			) : (
+				<>
+					<div className="flex flex-wrap gap-1.5">
+						{(snapshot?.layers ?? []).map((layer) => (
+							<span
+								key={layer.kind}
+								className={`rounded-sm border px-1.5 py-0.5 font-mono text-micro ${layer.exists ? "border-border-subtle text-text-secondary" : "border-dashed border-border-subtle text-muted-foreground"}`}
+								title={layer.path}
+							>
+								{layerLabel[layer.kind]}
+								{layer.writable ? ` · ${t("config.mcp.writable")}` : ""}
+								{layer.exists ? "" : ` · ${t("config.mcp.missing")}`}
+							</span>
+						))}
+					</div>
+					{snapshot?.writablePath ? (
+						<p className="truncate font-mono text-micro text-muted-foreground" title={snapshot.writablePath}>
+							{t("config.mcp.writingTo")}: {snapshot.writablePath}
+						</p>
+					) : null}
+				</>
+			)}
 
-			<div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
+			{adapterInstalled === false ? null : (
+				<div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
 				<div className="flex min-h-0 flex-col gap-1 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-1.5">
 					{displayServers.length === 0 && !creating ? (
 						<div className="px-2 py-6 text-center text-micro text-muted-foreground">{t("config.mcp.empty")}</div>
@@ -534,6 +635,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 					)}
 				</div>
 			</div>
+			)}
 		</div>
 	);
 });

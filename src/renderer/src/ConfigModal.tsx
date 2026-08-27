@@ -41,7 +41,18 @@ import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
 import { applyAdaptiveTemplateReset, collectModelSpecPatches, deriveProviderCompat, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
-import { Component, useRef, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import {
+	Component,
+	forwardRef,
+	useRef,
+	useState,
+	useEffect,
+	useCallback,
+	useImperativeHandle,
+	useMemo,
+	type ReactNode,
+	type Ref,
+} from "react";
 import type { PiDesktopApi } from "../../preload";
 import { AuthTab } from "./config/AuthTab";
 import { ModelsTab } from "./config/ModelsTab";
@@ -70,7 +81,7 @@ import type {
 import type { ConfigFileDiagnostic, CreatePiPromptTemplateInput, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary } from "../../shared/types";
 import { getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS } from "./config/providerHeaders";
 import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnReload, reconcileConfigDirty } from "./config/configDirtyMarks";
-import { formatConfigUnsavedMessage, summarizeConfigUnsavedChanges } from "./config/configUnsavedChangesSummary";
+import { formatConfigUnsavedMessage, summarizeConfigUnsavedChanges, type ConfigUnsavedItem } from "./config/configUnsavedChangesSummary";
 import { DirtyMarker } from "./components/app/settings/SettingRows";
 import { isValidProviderName } from "../../shared/providerName";
 
@@ -214,6 +225,61 @@ type ConfigModalProps = {
 	projectPath?: string;
 };
 
+/**
+ * 嵌入设置窗口的配置管理分区句柄：外壳（SettingsModal）标题栏的「保存/导出/导入」按钮经 ref 调用。
+ * 与独立 ConfigModal 顶部按钮共用同一套 handler（saveByKey/export/import/close），保证两个入口逻辑一致。
+ */
+export type ConfigPaneHandle = {
+	/** 保存当前 tab（内部与 ConfigModal 顶部保存按钮同源）。 */
+	saveCurrent: () => Promise<void>;
+	/** 导出三个配置文件为 JSON 下载。 */
+	exportConfig: () => void;
+	/** 从 JSON 文件导入配置。 */
+	importConfig: () => void;
+	/** 保存全部脏来源（外壳统一关闭确认的「保存并关闭」委托；任一失败返回 false 留在窗口）。 */
+	saveAllDirty: () => Promise<boolean>;
+};
+
+/** 外壳标题栏所需的状态快照：保存禁用 / 黄点 / 关闭确认清单。 */
+export type ConfigPaneState = {
+	saving: boolean;
+	hasDirty: boolean;
+	/** 未保存清单（tabKey/itemKey 为 i18n key，关闭确认整体展示）。 */
+	unsaved: { totalCount: number; items: ConfigUnsavedItem[] };
+};
+
+export type ConfigPaneProps = {
+	onClose: () => void;
+	onSaved?: () => void;
+	/** 当前项目路径：有值时合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
+	projectPath?: string;
+	/**
+	 * 头部按钮状态上报（saving 禁用保存 / hasDirty 黄点 / unsaved 关闭确认清单）。
+	 * 外壳把这些 UI 细节呈现在自己的标题栏，因此 ConfigPane 需要把内部状态同步给外壳。
+	 */
+	onStateChange?: (state: ConfigPaneState) => void;
+};
+
+/**
+ * 配置管理嵌入分区：供设置窗口内嵌渲染（共享同一窗口/标题栏，不再各自弹 Dialog）。
+ * 不包错误边界——宿主 SettingsModal 的 ErrorBoundary 已兜底整个窗口。
+ */
+export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
+	function ConfigPane({ onClose, onSaved, projectPath, onStateChange }, ref) {
+		return (
+			<ConfigModalContent
+				open
+				onClose={onClose}
+				onSaved={onSaved ?? (() => {})}
+				projectPath={projectPath}
+				embedded
+				paneRef={ref}
+				onPaneStateChange={onStateChange}
+			/>
+		);
+	},
+);
+
 // 小窗口保留外边距，避免 Pi 管理页完全压住工作区；821px 以上恢复桌面弹框尺寸。
 // DialogContent 默认带 sm:max-w-lg，必须显式覆盖它，否则小窗口会变成窄高条。
 const configModalSizeClass = "w-[80vw] max-w-[80vw] h-[80vh] max-h-[80vh] sm:max-w-[min(1300px,80vw)]";
@@ -286,8 +352,17 @@ export function ConfigModal(props: ConfigModalProps) {
 	);
 }
 
-function ConfigModalContent(props: ConfigModalProps) {
-	const { open, onClose, onSaved, projectPath } = props;
+type ConfigModalContentProps = ConfigModalProps & {
+	/** 嵌入模式：不渲染 Dialog 外壳与标题栏按钮（宿主提供窗口），自身仍维护全部状态/保存/关闭确认逻辑 */
+	embedded?: boolean;
+	/** embedded 时暴露给宿主标题栏按钮的句柄 */
+	paneRef?: Ref<ConfigPaneHandle> | undefined;
+	/** embedded 时上报标题栏按钮所需状态（保存 disabled / 未保存黄点 / 关闭确认清单） */
+	onPaneStateChange?: (state: ConfigPaneState) => void;
+};
+
+function ConfigModalContent(props: ConfigModalContentProps) {
+	const { open, onClose, onSaved, projectPath, embedded } = props;
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
@@ -1789,10 +1864,22 @@ function ConfigModalContent(props: ConfigModalProps) {
 			showToast(t("config.extensionUninstalledToast"));
 		} catch (e) {
 			// 配置页顶部红字容易被滚出视口；卸载失败用 error toast，用户能立刻看到。
+			// 附带一条终端可手动执行的卸载命令（pi uninstall 与主进程内部执行的
+			// pi remove 是同一命令的别名），并提供一键复制按钮；命令本身也在正文里。
+			const uninstallCmd = `pi uninstall ${target.source}${target.scope === "project" ? " -l" : ""}`;
 			showNotice(
-				t("config.extensionUninstallFailed", { error: formatIpcError(e) }),
-				4500,
+				t("config.extensionUninstallFailed", { error: formatIpcError(e) }) +
+					" " +
+					t("config.extensionUninstallManual", { command: uninstallCmd }),
+				6000,
 				"error",
+				undefined,
+				{
+					action: {
+						label: t("config.copyUninstallCmd"),
+						onClick: () => void navigator.clipboard.writeText(uninstallCmd),
+					},
+				},
 			);
 		} finally {
 			setUninstallingExtensionSource(null);
@@ -1909,6 +1996,41 @@ function ConfigModalContent(props: ConfigModalProps) {
 		}
 	};
 
+	// ── 嵌入模式句柄与状态上报（ConfigPane） ──
+	// 外壳标题栏的保存/导出/导入/关闭按钮直接委托给这里的同一个 handler；
+	// saving/hasDirty 同步到外壳，驱动保存按钮禁用与黄点，避免两处按钮行为分叉。
+	useImperativeHandle(
+		props.paneRef,
+		() => ({
+			saveCurrent: () => handleSaveCurrent(),
+			exportConfig: handleExport,
+			importConfig: handleImport,
+			// 外壳统一关闭确认时调用：把配置分区全部脏来源逐个保存（dsh:<nav> 归并 dsh），
+			// 与独立 ConfigModal「保存并关闭」走同一套 saveByKey 分发，任一失败返回 false 留在窗口。
+			saveAllDirty: async () => {
+				const roots = new Set<string>();
+				for (const key of dirtyTabs) {
+					roots.add(key.startsWith("dsh:") ? "dsh" : key);
+				}
+				for (const key of roots) {
+					const ok = await saveByKey(key);
+					if (!ok) return false;
+				}
+				return true;
+			},
+		}),
+		[handleSaveCurrent, handleExport, handleImport, saveByKey, dirtyTabs],
+	);
+	useEffect(() => {
+		props.onPaneStateChange?.({
+			saving,
+			hasDirty,
+			unsaved: configUnsavedSummary
+				? { totalCount: configUnsavedSummary.totalCount, items: configUnsavedSummary.items }
+				: { totalCount: 0, items: [] },
+		});
+	}, [saving, hasDirty, configUnsavedSummary, props.onPaneStateChange]);
+
 	/**
 	 * 关闭确认框选择保存并关闭：汇总**全部**脏来源逐个保存（不是只存当前 tab），
 	 * dsh:<nav> 归并到 dsh 一个保存入口；任一保存失败则留下重试（错误已展示在内容区）。
@@ -1959,58 +2081,47 @@ function ConfigModalContent(props: ConfigModalProps) {
 		/>
 	) : null;
 
-	if (!open) return null;
+	if (!open && !embedded) return null;
 
-	return (
-		<Dialog open={open} onOpenChange={(next) => !next && handleClose()}>
-			<DialogContent showCloseButton={false} className={cn("flex flex-col gap-0 overflow-hidden p-0", configModalSizeClass, "config-modal", "[--wallpaper-dialog-alpha:var(--wallpaper-panel-alpha,30%)]")}>
-				{/* 顶栏/侧栏控件与设置弹窗、会话顶栏统一到 sm / text-sm 密度 */}
-				<DialogHeader className="flex-row items-center justify-between px-4 py-2.5">
-					<DialogTitle className="text-sm font-semibold tracking-tight">{t("config.title")}</DialogTitle>
-					<div className="flex items-center gap-1.5">
-						{/* 顶部统一保存：各 tab 内部保存按钮可能被滚动藏住，这里常驻可见；
-						    有未保存修改时按钮带黄点标记；无修改也放开再次保存，不再禁用 */}
-						<Button
-							variant="default"
-							size="sm"
-							onClick={() => void handleSaveCurrent()}
-							disabled={saving}
-							title={hasDirty ? t("config.dirtyTooltip") : undefined}
-						>
-							{hasDirty && (
-								<span className="size-2 rounded-full bg-amber-400" aria-hidden="true" />
-							)}
-							{saving ? t("common.saving") : t("common.save")}
-						</Button>
-						{backendPane === "pi" && section === "config" ? (
-							<>
-								<Button variant="outline" size="sm" onClick={handleExport}>
-									{t("common.export")}
-								</Button>
-								<Button variant="secondary" size="sm" onClick={handleImport}>
-									{t("common.import")}
-								</Button>
-							</>
-						) : undefined}
-						<DialogClose asChild>
-							<Button variant="ghost" size="icon-sm" className="size-7" aria-label={t("common.close")} title={t("common.close")}>
-								<X size={16} strokeWidth={2.2} aria-hidden="true" />
-							</Button>
-						</DialogClose>
-					</div>
-				</DialogHeader>
+	// 对话框主体（后端分页 + 各种确认弹窗）：独立 ConfigModal 与嵌入分区共用同一份，
+	// 唯一的差别是外壳（Dialog/标题栏按钮）由谁提供——embedded 时宿主 SettingsModal 承担。
+	const modalBody = (
+		<>
 			{/* 顶层后端分页：Pi 配置管理（默认，在左）/ DSH 配置管理（在右） */}
 			<Tabs value={backendPane} onValueChange={(value) => setBackendPane(value === "pi" ? "pi" : "dsh")} className="flex min-h-0 min-w-0 flex-1 flex-col">
-				<TabsList className="config-backend-switch flex h-9 shrink-0 items-center gap-1 border-b border-border/60 px-3">
-					<TabsTrigger value="pi" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
+				<TabsList
+					// 嵌入设置窗口时 Pi/DSH 用 shadcn line variant（下划线式）：与顶层「系统设置/配置管理」
+					// 的分段条（default variant）区分层级——上层页面级、下层内容级，避免两条同款 tab 冲突。
+					variant={embedded ? "line" : "default"}
+					className={cn(
+						"shrink-0",
+						embedded
+							? "justify-start gap-1 px-3"
+							: "config-backend-switch h-9 justify-start gap-1 border-b border-border/60 px-3",
+					)}>
+					<TabsTrigger
+						variant={embedded ? "line" : "default"}
+						value="pi"
+						className={cn(
+							"h-8 gap-1.5 px-3 text-[13px] font-medium",
+							!embedded && "config-backend-tab",
+						)}
+					>
 						<PiLogo className="size-3.5 shrink-0" />
 						{t("config.backend.pi")}
 						{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 					</TabsTrigger>
-					<TabsTrigger value="dsh" className="config-backend-tab h-7 gap-1.5 rounded-md px-2.5 text-control font-medium data-[state=active]:bg-accent/50">
+					<TabsTrigger
+						variant={embedded ? "line" : "default"}
+						value="dsh"
+						className={cn(
+							"h-8 gap-1.5 px-3 text-[13px] font-medium",
+							!embedded && "config-backend-tab",
+						)}
+					>
 						<DshLogo className="size-3.5 shrink-0" />
 						{t("config.backend.dsh")}
-						{/* 顶层分页黄点：该后端任意分区有草稿时提醒 */}
+						{/* 后端分页黄点：该后端任意分区有草稿时提醒 */}
 						{hasDshDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
 					</TabsTrigger>
 				</TabsList>
@@ -2450,7 +2561,60 @@ function ConfigModalContent(props: ConfigModalProps) {
 						onCancel={() => setDeleteConfirm(null)}
 					/>
 				)}
-				</DialogContent>
+		</>
+	);
+
+	if (embedded) {
+		// 嵌入模式：宿主提供 Dialog 外壳与标题栏，这里只渲染内容；
+		// 外层 config-pane 继承 .config-modal 同款控件密度（font/button/input 尺寸）。
+		return (
+			<div className="config-pane flex min-h-0 min-w-0 flex-1 flex-col">
+				{modalBody}
+			</div>
+		);
+	}
+
+	// 独立模式：完整 Dialog（标题栏含保存/导出/导入/关闭；内容与嵌入模式完全一致）
+	return (
+		<Dialog open={open} onOpenChange={(next) => !next && handleClose()}>
+			<DialogContent showCloseButton={false} className={cn("flex flex-col gap-0 overflow-hidden p-0", configModalSizeClass, "config-modal", "[--wallpaper-dialog-alpha:var(--wallpaper-panel-alpha,30%)]")}>
+				{/* 顶栏/侧栏控件与设置弹窗、会话顶栏统一到 sm / text-sm 密度 */}
+				<DialogHeader className="flex-row items-center justify-between px-4 py-2.5">
+					<DialogTitle className="text-sm font-semibold tracking-tight">{t("config.title")}</DialogTitle>
+					<div className="flex items-center gap-1.5">
+						{/* 顶部统一保存：各 tab 内部保存按钮可能被滚动藏住，这里常驻可见；
+						    有未保存修改时按钮带黄点标记；无修改也放开再次保存，不再禁用 */}
+						<Button
+							variant="default"
+							size="sm"
+							onClick={() => void handleSaveCurrent()}
+							disabled={saving}
+							title={hasDirty ? t("config.dirtyTooltip") : undefined}
+						>
+							{hasDirty && (
+								<span className="size-2 rounded-full bg-amber-400" aria-hidden="true" />
+							)}
+							{saving ? t("common.saving") : t("common.save")}
+						</Button>
+						{backendPane === "pi" && section === "config" ? (
+							<>
+								<Button variant="outline" size="sm" onClick={handleExport}>
+									{t("common.export")}
+								</Button>
+								<Button variant="secondary" size="sm" onClick={handleImport}>
+									{t("common.import")}
+								</Button>
+							</>
+						) : undefined}
+						<DialogClose asChild>
+							<Button variant="ghost" size="icon-sm" className="size-7" aria-label={t("common.close")} title={t("common.close")}>
+								<X size={16} strokeWidth={2.2} aria-hidden="true" />
+							</Button>
+						</DialogClose>
+					</div>
+				</DialogHeader>
+			{modalBody}
+			</DialogContent>
 		</Dialog>
 	);
 }
