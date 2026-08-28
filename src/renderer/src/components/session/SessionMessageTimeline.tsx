@@ -48,7 +48,7 @@ import { Loader2 } from "lucide-react";
 import { showNotice } from "../../utils/notice";
 import {
   composeFailureNotice,
-  isFloatingFailureMessage,
+  isToastOnlyFailureMessage,
   reduceFailureNoticePass,
   type FailureNoticePassState,
 } from "./timelineFailureNotice";
@@ -1017,9 +1017,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                 );
               }
               if (message.role === "error") {
-                // 失败/重试类提示已转 toast（见 FLOATING_FAILURE_KEYS），
-                // 时间线不再渲染卡片；pi 启动失败/运行时诊断仍走诊断卡片。
-                if (isFloatingFailureMessage(message)) return null;
+                // 重试状态提示（retryScheduled/retrySucceeded 等）仍只弹 toast；
+                // 其余失败类同 toast 一起渲染诊断卡片，错误信息留痕可排查（见 TOAST_ONLY_FAILURE_KEYS）。
+                if (isToastOnlyFailureMessage(message)) return null;
                 return <DiagnosticMessageCard key={message.id} message={message} />;
               }
               if (message.role === "system") {
@@ -1032,9 +1032,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                 if (meta?.type === "compaction") {
                   return <CompactionCard key={message.id} message={message} sessionId={sessionId} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />;
                 }
-                // 自动重试状态（retryScheduled/retrySucceeded/retryFailed 等）
-                // 属于「重试提示」，与失败类一样转 toast、不占时间线。
-                if (isFloatingFailureMessage(message)) return null;
+                // 重试状态提示（retryScheduled/retrySucceeded 等）
+                // 属于「重试提示」，只弹 toast、不占时间线；失败类系统诊断照常渲染卡片。
+                if (isToastOnlyFailureMessage(message)) return null;
                 return <DiagnosticMessageCard key={message.id} message={message} />;
               }
               return null;

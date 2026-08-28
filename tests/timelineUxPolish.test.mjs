@@ -15,7 +15,7 @@ const controller = readFileSync(
   "utf8",
 );
 const scroller = readFileSync(
-  "src/renderer/src/components/agents/message-scroller.tsx",
+  "src/renderer/src/components/agents/message-scroller.custom.tsx",
   "utf8",
 );
 const turnRow = readFileSync(

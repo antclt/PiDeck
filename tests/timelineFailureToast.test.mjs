@@ -16,11 +16,13 @@ const notice = readFileSync(
 const i18n = loadTsCommonJs("src/renderer/src/i18n.ts");
 const {
 	FLOATING_FAILURE_KEYS,
+	TOAST_ONLY_FAILURE_KEYS,
 	composeFailureNotice,
 	failureRetrySignature,
 	isExtensionErrorMessage,
 	isFailureNoticeMessage,
 	isFloatingFailureMessage,
+	isToastOnlyFailureMessage,
 	reduceFailureNoticePass,
 } = loadTsCommonJs("src/renderer/src/components/session/timelineFailureNotice.ts", {
 	// 与 composeFailureNotice 共用同一份 i18n 模块，否则 setI18nLocale 改不到 toast 文案。
@@ -77,13 +79,31 @@ test("floating failure keys: covers retry + failure diagnostics, excludes start/
 	assert.doesNotMatch(notice, /"diagnostic\.runtimeError"/);
 });
 
-test("timeline render: failure/retry messages return null, extension errors keep the card", () => {
-	assert.match(timeline, /if \(message\.role === "error"\) \{\s*\/\/ 失败\/重试类提示已转 toast/s);
-	assert.match(timeline, /if \(isFloatingFailureMessage\(message\)\) return null;/);
-	assert.match(timeline, /\/\/ 自动重试状态（retryScheduled\/retrySucceeded\/retryFailed 等）\s*\/\/ 属于「重试提示」/s);
+test("timeline render: retry progress stays toast-only, failures render the diagnostic card", () => {
+	assert.match(timeline, /if \(message\.role === "error"\) \{\s*\/\/ 重试状态提示（retryScheduled\/retrySucceeded 等）仍只弹 toast；/s);
+	assert.match(timeline, /if \(isToastOnlyFailureMessage\(message\)\) return null;/);
+	assert.match(timeline, /\/\/ 重试状态提示（retryScheduled\/retrySucceeded 等）\s*\/\/ 属于「重试提示」，只弹 toast、不占时间线；失败类系统诊断照常渲染卡片。/s);
 	assert.match(timeline, /composeFailureNotice\(message\)/);
-	assert.match(timeline, /isFloatingFailureMessage/);
+	// 失败类消息恢复时间线渲染诊断卡片（错误留痕），不再是 return null
+	assert.match(timeline, /return <DiagnosticMessageCard key=\{message\.id\} message=\{message\} \/>;/);
+	assert.match(timeline, /isToastOnlyFailureMessage/);
 	assert.match(timeline, /from "\.\/timelineFailureNotice"/);
+});
+
+test("toast-only keys: retry progress only, excludes failure diagnostics", () => {
+	assert.equal(TOAST_ONLY_FAILURE_KEYS.has("diagnostic.retryScheduled"), true);
+	assert.equal(TOAST_ONLY_FAILURE_KEYS.has("diagnostic.retryScheduledAfterDelay"), true);
+	assert.equal(TOAST_ONLY_FAILURE_KEYS.has("diagnostic.retrySucceeded"), true);
+	// retryFailed 是失败，必须走时间线留痕
+	assert.equal(TOAST_ONLY_FAILURE_KEYS.has("diagnostic.retryFailed"), false);
+	// 失败类全部渲染卡片（不在 toast-only 集合）
+	assert.equal(TOAST_ONLY_FAILURE_KEYS.has("diagnostic.requestFailed"), false);
+	assert.equal(TOAST_ONLY_FAILURE_KEYS.has("diagnostic.agentStopped"), false);
+	assert.equal(isToastOnlyFailureMessage(message("diagnostic.retryScheduled")), true);
+	assert.equal(isToastOnlyFailureMessage(message("diagnostic.retrySucceeded")), true);
+	assert.equal(isToastOnlyFailureMessage(message("diagnostic.requestFailed")), false);
+	// toast 层不受影响：重试失败仍然弹 toast
+	assert.equal(isFloatingFailureMessage(message("diagnostic.retryFailed")), true);
 });
 
 test("toast effect: reducer owns session-aware baseline; retry signatures survive tab switches", () => {

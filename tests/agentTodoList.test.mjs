@@ -31,7 +31,7 @@ function compile(filePath, stubs = {}) {
 	return module.exports;
 }
 
-const todoListPath = "src/renderer/src/components/agents/todo-list.tsx";
+const todoListPath = "src/renderer/src/components/agents/todo-list.custom.tsx";
 const parserPath = "src/renderer/src/components/session/agentTodoParser.ts";
 const source = (path) => readFileSync(path, "utf8");
 const todoListSource = () => source(todoListPath);
@@ -160,7 +160,7 @@ test("official sibling helpers exist with required exports", () => {
 	assert.match(disclosure, /export function AgentDisclosure/);
 	assert.match(disclosure, /inert=\{!open\}/);
 
-	const swap = source("src/renderer/src/components/motion/action-swap.tsx");
+	const swap = source("src/renderer/src/components/motion/action-swap.custom.tsx");
 	assert.match(swap, /export function ActionSwapButton/);
 	assert.match(swap, /export function ActionSwapText/);
 	assert.match(swap, /export function ActionSwapIcon/);

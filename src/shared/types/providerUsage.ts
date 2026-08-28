@@ -23,10 +23,31 @@ export type ProviderUsageCredits = {
 	used?: number;
 	remaining?: number;
 	/**
-	 * 多窗口额度：同一 provider 的并列限额（如智谱 5h 滚动窗 + 周窗），
-	 * 各窗口是独立配额。有则 UI 逐窗口展示（条 + 百分比）；无则仅主值。
+	 * 多窗口额度：同一 provider 的并列限额（如智谱 5h 滚动窗 + 周窗、
+	 * xAI 套餐内额度 + 按需用量），各窗口是独立配额。
+	 * 有则 UI 逐窗口展示（条 + 百分比）；无则仅主值。
 	 */
 	windows?: { key: string; total?: number; used?: number; remaining?: number }[];
+};
+
+/**
+ * 独立货币额度（如 Kimi Coding 的 Boost 点数）：与主额度同响应、不同语义，
+ * 单独展示而不混进主 credits 数值，避免误导用户当成同一单位的余额。
+ * 所有金额字段统一为「元」或「点数主单位」的浮点数。
+ */
+export type ProviderUsageBooster = {
+	/** 剩余余额（主单位，如元）。 */
+	balance: number;
+	/** 总额（主单位）；未知时省略。 */
+	total?: number;
+	/** 币种（如 CNY）；未知时省略。 */
+	currency?: string;
+	/** 本月已用（主单位）。 */
+	monthlyUsed?: number;
+	/** 月限额（主单位）；未启用或未知时省略。 */
+	monthlyChargeLimit?: number;
+	/** 月限额明确未启用（服务端返回 unlimited）。 */
+	unlimitedMonthly?: boolean;
 };
 
 export type ProviderUsageResult = {
@@ -41,6 +62,8 @@ export type ProviderUsageResult = {
 	balance?: { value: number; currency?: string };
 	/** kind=credits：额度点数。remaining 优先展示；缺 remaining 时由 total-used 反推。 */
 	credits?: ProviderUsageCredits;
+	/** 与主额度并存的独立货币（如 Kimi Boost 点数）；有则 UI 追加展示。 */
+	booster?: ProviderUsageBooster;
 	/** 无法结构化解析时保留的原始响应体（已脱敏/截断，可安全展示）。 */
 	raw?: string;
 	/** 失败原因（主进程本地文案或 HTTP 错误摘要）。 */

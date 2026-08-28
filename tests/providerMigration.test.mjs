@@ -467,3 +467,17 @@ test("mergeCredentialDocument writes dsh-credentials-local v1 layout (version:1 
   assert.equal(parsedV1.refs.A_KEY, "sk-a-new");
   assert.equal(parsedV1.records.r, "x");
 });
+test("resolvePiApiKey 优先内联 key，其次 auth.key，OAuth 凭据兜底读 access", () => {
+  // 内联 apiKey 优先
+  assert.equal(mapping.resolvePiApiKey({ apiKey: "inline-key" }, undefined), "inline-key");
+  // auth.key 次之
+  assert.equal(mapping.resolvePiApiKey({}, { type: "api_key", key: "auth-key" }), "auth-key");
+  // OAuth 凭据（type:oauth）没有 key 时兜底 access（Codex/xAI/Copilot 消费者订阅用量查询用）
+  assert.equal(mapping.resolvePiApiKey({}, { type: "oauth", access: "oauth-access", refresh: "r", expires: 1 }), "oauth-access");
+  // 非 oauth 类型没有 access 不误读
+  assert.equal(mapping.resolvePiApiKey({}, { type: "api_key", key: "k" }), "k");
+  // oauth 凭据缺 access 返回 undefined
+  assert.equal(mapping.resolvePiApiKey({}, { type: "oauth", refresh: "r", expires: 1 }), undefined);
+  // 无任何凭据返回 undefined
+  assert.equal(mapping.resolvePiApiKey(undefined, undefined), undefined);
+});

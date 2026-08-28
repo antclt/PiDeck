@@ -139,14 +139,19 @@ export class SkillManager {
 	 * 不读 pideck 资源目录——必须落到用户技能目录，pi 才能发现并 /skill:usage-probe 触发。
 	 * 幂等覆盖：模板随应用更新同步；用户自定义配置写在 usage-probes.json，不在此文件。
 	 */
-	async installUsageProbeTemplate(): Promise<
+	/**
+	 * 把打包内置的技能模板（resources/skills/<name>/SKILL.md）复制到用户全局技能目录。
+	 * 为什么抽公共实现：内置技能不止一个（usage-probe、image-gen 等），复制逻辑完全一致，
+	 * 只有技能名不同——单一 helper 避免每个技能重复一段一样的文件复制代码。
+	 */
+	private async installTemplate(skillName: string): Promise<
 		{ success: true; path: string } | { success: false; error: string }
 	> {
 		try {
 			const root = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
-			const templatePath = join(root, "skills", "usage-probe", SKILL_FILE);
+			const templatePath = join(root, "skills", skillName, SKILL_FILE);
 			const content = await readFile(templatePath, "utf8");
-			const targetDir = join(this.locations[0].path, "usage-probe");
+			const targetDir = join(this.locations[0].path, skillName);
 			await mkdir(targetDir, { recursive: true });
 			const targetPath = join(targetDir, SKILL_FILE);
 			await writeFile(targetPath, content, "utf8");
@@ -154,6 +159,18 @@ export class SkillManager {
 		} catch (error) {
 			return { success: false, error: error instanceof Error ? error.message : String(error) };
 		}
+	}
+
+	async installUsageProbeTemplate(): Promise<
+		{ success: true; path: string } | { success: false; error: string }
+	> {
+		return this.installTemplate("usage-probe");
+	}
+
+	async installImageGenTemplate(): Promise<
+		{ success: true; path: string } | { success: false; error: string }
+	> {
+		return this.installTemplate("image-gen");
 	}
 
 	private async scanLocation(location: PiSkillLocation): Promise<PiSkillSummary[]> {

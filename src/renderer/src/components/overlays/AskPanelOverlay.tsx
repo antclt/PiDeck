@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Check, ChevronDown, ChevronRight, Loader2, MessageSquarePlus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Clipboard, CornerDownLeft, Loader2, MessageSquarePlus, Send, X } from "lucide-react";
 import removeMarkdown from "remove-markdown";
 import { useAskPanel } from "../../hooks/useAskPanel";
 import {
@@ -12,9 +12,11 @@ import {
   sessionRuntimeBySessionIdAtomFamily,
   sessionRuntimeUiBySessionIdAtomFamily,
 } from "../../atoms/session-selectors";
+import { setSessionDraftAtom } from "../../atoms/composer-atoms";
+import { Input } from "../ui-shadcn/input";
 import {
-  createSessionRuntimeUiResponder,
-  SessionRuntimeUiOverlay,
+	createSessionRuntimeUiResponder,
+	SessionRuntimeUiOverlay,
 } from "../overlays/SessionRuntimeUiOverlay";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
@@ -40,6 +42,9 @@ const DRAG_THRESHOLD_PX = 4;
 export function AskPanelOverlay() {
   const panel = useAskPanel();
   const [expanded, setExpanded] = useState(false);
+  // 追问输入框内容（详情浮层底部，复用同一条匿名会话继续对话）
+  const [followUpText, setFollowUpText] = useState("");
+  const setInsertComposer = useSetAtom(setSessionDraftAtom);
   // 拖拽位置：null 表示未拖动（使用默认定位，会话区域右上方）；拖动后切换为自由定位
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   // 拖动会话快照：起点坐标 + 起始容器坐标 + 是否已超过点击阈值
@@ -118,7 +123,8 @@ export function AskPanelOverlay() {
 
   if (!panel.isOpen || !sessionId) return null;
 
-  // 胶囊摘要：取最新一条非空 assistant 正文，去掉 markdown 后截断；问题摘要取首条 user 消息
+  // 胶囊摘要：取最新一条非空 assistant 正文，去掉 markdown 后截断；问题摘要取最新一条 user 消息
+  // （追问会追加新的 user 消息，取最新才能反映当前在问什么）
   const messages = cache?.messages ?? [];
   const lastAssistant = [...messages].reverse().find(
     (m) => m.role === "assistant" && m.text.trim().length > 0,
@@ -126,14 +132,48 @@ export function AskPanelOverlay() {
   const summary = lastAssistant
     ? removeMarkdown(lastAssistant.text).replace(/\s+/g, " ").trim().slice(0, 36)
     : "";
-  const firstUser = messages.find((m) => m.role === "user" && m.text.trim().length > 0);
-  const questionSummary = firstUser
-    ? removeMarkdown(firstUser.text).replace(/\s+/g, " ").trim().slice(0, 36)
+  const lastUser = [...messages].reverse().find((m) => m.role === "user" && m.text.trim().length > 0);
+  const questionSummary = lastUser
+    ? removeMarkdown(lastUser.text).replace(/\s+/g, " ").trim().slice(0, 36)
     : "";
+  // 完整答案文本（复制/插入主会话 composer 用）：汇聚全部 assistant 正文，保留 markdown 供插入带格式
+  const fullAnswer = messages
+    .filter((m) => m.role === "assistant" && m.text.trim().length > 0)
+    .map((m) => m.text.trim())
+    .join("\n\n");
   // 就绪态 = idle（空闲）或 running（处理中）：agent 启动完成后为 idle，发送后才变 running
   const running = runtime?.status === "running" || runtime?.status === "idle";
   // 有响应文本且 runtime 不在运行 → 视为已完成（可安全查看完整结果）
   const done = !running && summary.length > 0;
+
+  // 复制完整答案到剪贴板（带回主线最轻量的一步）
+  const copyAnswer = () => {
+    if (!fullAnswer) return;
+    void navigator.clipboard.writeText(fullAnswer)
+      .then(() => showNotice(t("askPanel.copyAnswerDone"), 3000))
+      .catch((error) => showNotice(error instanceof Error ? error.message : String(error), 4000, "error"));
+  };
+
+  // 把完整答案插入发起并行问询的主会话输入框：不改写主会话时间线，只填 composer draft
+  //（对齐 pi-btw 的 bring-to-main：答案回到主线程 draft 供预览/继续编辑，不自动发送）
+  const insertToComposer = () => {
+    const origin = panel.originSessionId;
+    if (!origin || !fullAnswer) return;
+    setInsertComposer({
+      sessionId: origin,
+      value: (current) => (current ? `${current}\n\n${fullAnswer}` : fullAnswer),
+    });
+    showNotice(t("askPanel.insertToComposerDone"), 3000);
+  };
+
+  // 追问提交：复用同一条匿名会话（sendFollowUp 不经 ensureSession/setCreating）
+  const submitFollowUp = () => {
+    const text = followUpText.trim();
+    if (!text) return;
+    void panel.sendFollowUp(text).then((ok) => {
+      if (ok) setFollowUpText("");
+    });
+  };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
     // 只响应左键拖动
@@ -218,6 +258,24 @@ export function AskPanelOverlay() {
             ) : null}
             <span className="flex-1" />
             <button
+              className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
+              aria-label={t("askPanel.copyAnswer")}
+              title={t("askPanel.copyAnswer")}
+              disabled={!fullAnswer}
+              onClick={copyAnswer}
+            >
+              <Clipboard size={13} aria-hidden="true" />
+            </button>
+            <button
+              className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
+              aria-label={t("askPanel.insertToComposer")}
+              title={panel.originSessionId ? t("askPanel.insertToComposer") : t("askPanel.insertToComposerUnavailable")}
+              disabled={!fullAnswer || !panel.originSessionId}
+              onClick={insertToComposer}
+            >
+              <CornerDownLeft size={13} aria-hidden="true" />
+            </button>
+            <button
               className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               aria-label={t("askPanel.minimize")}
               title={t("askPanel.minimize")}
@@ -258,6 +316,32 @@ export function AskPanelOverlay() {
               </div>
             )}
           </div>
+          {/* 追问输入：复用同一条匿名会话继续对话；禁用条件 = 无会话 / 正在创建 */}
+          <form
+            className="flex shrink-0 items-center gap-1.5 border-t px-3 py-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitFollowUp();
+            }}
+          >
+            <Input
+              className="min-w-0 flex-1 h-8 rounded-md px-2.5 py-1 text-sm focus-visible:ring-0"
+              value={followUpText}
+              onChange={(event) => setFollowUpText(event.target.value)}
+              placeholder={t("askPanel.followUpPlaceholder")}
+              aria-label={t("askPanel.followUpPlaceholder")}
+              disabled={panel.creating}
+            />
+            <button
+              type="submit"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
+              aria-label={t("askPanel.sendFollowUp")}
+              title={t("askPanel.sendFollowUp")}
+              disabled={panel.creating || !followUpText.trim()}
+            >
+              <Send size={13} aria-hidden="true" />
+            </button>
+          </form>
         </div>
       )}
       {/* 胶囊本体：状态点 + 摘要 + 关闭 + 展开指示；整条可拖拽（touch-none 避免触屏滚动抢占指针） */}

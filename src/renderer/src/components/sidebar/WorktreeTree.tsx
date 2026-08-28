@@ -1,11 +1,11 @@
-import { ChevronDown, ChevronRight, GitBranch, HatGlasses, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, GitBranch, Plus, Trash2 } from "lucide-react";
 import type { AgentTab, Project, SessionRecord, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import { t } from "../../i18n";
 import type { SidebarActions } from "./SidebarContent";
 import { SessionTree } from "./SessionTree";
+import { NewSessionMenu } from "./NewSessionMenu";
 import { Button } from "../ui-shadcn/button";
-import { PathTooltip } from "../ui-shadcn/PathTooltip";
 import { cn } from "../../lib/utils";
 import { mergeWorkspaceTreeRows, type WorkspaceTreeRow } from "./workspaceTreeModel";
 
@@ -97,28 +97,13 @@ export function WorktreeTree(props: {
               根项目行在 worktree 模式下不再承担 +/匿名，避免入口藏得深。
               主工作区的会话列表在行外（section 内），行容器高度只有标题行，锚定安全。 */}
           <WorkspaceRowActions>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className={workspaceActionClass}
-              title={t("app.projectNewAgent")}
-              aria-label={t("app.projectNewAgent")}
-              onClick={() => void props.actions.sessions.createDraft(props.project.id)}
-            >
-              <Plus size={13} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className={workspaceActionClass}
-              title={t("app.anonymousChat")}
-              aria-label={t("app.anonymousChat")}
-              onClick={() => void props.actions.sessions.createAnonymous(props.project.id)}
-            >
-              <HatGlasses size={13} />
-            </Button>
+            <NewSessionMenu
+              projectId={props.project.id}
+              actions={props.actions}
+              size={13}
+              buttonClassName={cn(workspaceActionClass, "grid size-6 place-items-center rounded-md")}
+              chevronClassName={cn(workspaceActionClass, "grid size-3.5 place-items-center rounded-md")}
+            />
           </WorkspaceRowActions>
         </div>
         {/* Worktree 模式下主工作区是默认展开的第一项；根项目历史必须挂在这里，
@@ -205,63 +190,45 @@ function WorkspaceTreeRowView(props: {
           {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </Button>
 
-        {/* 悬浮展示完整分支名 + 工作区路径（分支名在行内常被 truncate） */}
-        <PathTooltip content={`${row.branch}${row.directory !== row.branch ? ` (${row.directory})` : ""}\n${row.path}`}>
-          <button
-            type="button"
-            className={cn(
-              "workspace-tree-select",
-              workspaceSelectClass,
-              // 子 worktree 是父项目下的分支入口，不应与父项目/主工作区争夺视觉层级。
-              "text-control",
-              // 窄侧栏 hover 压出 3 按钮（78px）留白；transition-all 让压缩动画与配色过渡共存
-              "transition-all @max-[255px]:group-hover:pr-[78px] @max-[255px]:group-focus-within:pr-[78px]",
-            )}
-            disabled={!childProject}
-            onClick={() => childProject && props.actions.projects.select(childProject.id)}
-            onContextMenu={(event) => {
-              if (!childProject) return;
-              event.preventDefault();
-              void props.controller.openMenu({
-                kind: "project",
-                projectId: childProject.id,
-                x: event.clientX,
-                y: event.clientY,
-              });
-            }}
-          >
-            <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate font-medium">{row.branch}</span>
-            {row.directory !== row.branch && (
-              <span className="workspace-tree-directory max-w-20 shrink-0 truncate text-micro text-muted-foreground">{row.directory}</span>
-            )}
-          </button>
-        </PathTooltip>
+        <button
+          type="button"
+          className={cn(
+            "workspace-tree-select",
+            workspaceSelectClass,
+            // 子 worktree 是父项目下的分支入口，不应与父项目/主工作区争夺视觉层级。
+            "text-control",
+            // 窄侧栏 hover 压出 3 按钮（78px）留白；transition-all 让压缩动画与配色过渡共存
+            "transition-all @max-[255px]:group-hover:pr-[78px] @max-[255px]:group-focus-within:pr-[78px]",
+          )}
+          disabled={!childProject}
+          onClick={() => childProject && props.actions.projects.select(childProject.id)}
+          onContextMenu={(event) => {
+            if (!childProject) return;
+            event.preventDefault();
+            void props.controller.openMenu({
+              kind: "project",
+              projectId: childProject.id,
+              x: event.clientX,
+              y: event.clientY,
+            });
+          }}
+        >
+          <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate font-medium">{row.branch}</span>
+          {row.directory !== row.branch && (
+            <span className="workspace-tree-directory max-w-20 shrink-0 truncate text-micro text-muted-foreground">{row.directory}</span>
+          )}
+        </button>
 
         {childProject && (
           <WorkspaceRowActions>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className={workspaceActionClass}
-              title={t("app.projectNewAgent")}
-              aria-label={t("app.projectNewAgent")}
-              onClick={() => void props.actions.sessions.createDraft(childProject.id)}
-            >
-              <Plus size={13} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className={workspaceActionClass}
-              title={t("app.anonymousChat")}
-              aria-label={t("app.anonymousChat")}
-              onClick={() => void props.actions.sessions.createAnonymous(childProject.id)}
-            >
-              <HatGlasses size={13} />
-            </Button>
+            <NewSessionMenu
+              projectId={childProject.id}
+              actions={props.actions}
+              size={13}
+              buttonClassName={cn(workspaceActionClass, "grid size-6 place-items-center rounded-md")}
+              chevronClassName={cn(workspaceActionClass, "grid size-3.5 place-items-center rounded-md")}
+            />
             <Button
               type="button"
               variant="ghost"

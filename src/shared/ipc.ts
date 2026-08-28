@@ -397,6 +397,8 @@ export const ipcChannels = {
 	configFetchUsage: "config:fetch-usage",
 	/** 安装内置「用量查询自定义」技能模板到 ~/.pi/agent/skills/usage-probe */
 	configInstallUsageSkill: "config:install-usage-skill",
+	/** 安装内置「图片生成」技能模板到 ~/.pi/agent/skills/image-gen */
+	configInstallImageGenSkill: "config:install-image-gen-skill",
 
 	// ===== 安全管理（SecurityStore + pi-deck-security-gate 扩展） =====
 	/** 拉取完整安全配置（等级/默认等级/会话覆盖） */

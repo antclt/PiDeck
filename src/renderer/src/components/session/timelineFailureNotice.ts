@@ -3,9 +3,10 @@ import { t, translateI18nDescriptor } from "../../i18n";
 import { stripAnsi } from "./TimelineFormat";
 
 /**
- * 失败/重试提示：时间线不再渲染卡片，改为 toast。
- * 主进程以 role=error / role=system 消息携带这些 i18nKey（见 AgentManager）。
- * pi 启动失败、runtimeError，以及扩展执行错误（带 debugDetails）保留诊断卡片。
+ * 失败/重试提示：主进程以 role=error / role=system 消息携带这些 i18nKey（见 AgentManager）。
+ * 失败类保留时间线诊断卡片（留痕可排查），同时弹 toast（即时提醒）；
+ * 仅重试状态提示类保持 toast-only，见 TOAST_ONLY_FAILURE_KEYS。
+ * pi 启动失败、runtimeError，以及扩展执行错误（带 debugDetails）本就保留诊断卡片。
  */
 export const FLOATING_FAILURE_KEYS = new Set([
 	"diagnostic.requestFailed",
@@ -28,6 +29,17 @@ export const FLOATING_FAILURE_KEYS = new Set([
 
 export const EXTENSION_ERROR_I18N_KEY = "diagnostic.extensionError";
 
+/**
+ * 只弹 toast、不渲染时间线卡片的 key：
+ * 重试状态提示（已调度/成功）不是失败，每次重试都刷新同一条消息，铺到面板会反复跳动刷屏。
+ * retryFailed 本身是失败，走时间线留痕。
+ */
+export const TOAST_ONLY_FAILURE_KEYS = new Set([
+	"diagnostic.retryScheduled",
+	"diagnostic.retryScheduledAfterDelay",
+	"diagnostic.retrySucceeded",
+]);
+
 /** toast 里附带的 debugDetails 上限，避免整段堆栈撑爆通知。 */
 const MAX_TOAST_DETAIL_CHARS = 280;
 
@@ -46,9 +58,14 @@ function messageI18nKey(message: ChatMessage): string {
 	return typeof key === "string" ? key : "";
 }
 
-/** 判断消息是否为「失败/重试类」提示（时间线不渲染、改 toast）。 */
+/** 判断消息是否为「失败/重试类」提示（toast 层用：全部失败/重试都弹 toast）。 */
 export function isFloatingFailureMessage(message: ChatMessage): boolean {
 	return FLOATING_FAILURE_KEYS.has(messageI18nKey(message));
+}
+
+/** 判断消息是否为「只弹 toast、不渲染时间线卡片」的重试状态提示。 */
+export function isToastOnlyFailureMessage(message: ChatMessage): boolean {
+	return TOAST_ONLY_FAILURE_KEYS.has(messageI18nKey(message));
 }
 
 /** 扩展执行错误：时间线保留诊断卡，同时对新发生的错误弹一次带详情的 toast。 */

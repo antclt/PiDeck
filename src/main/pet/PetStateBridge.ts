@@ -12,7 +12,7 @@ import { ipcChannels } from "../../shared/ipc";
  * - 已完成：AgentManager 成功 settled 事件（带 Agent 身份与标题）
  * - 出现问题：AgentTab.status 首次进入 error 的边沿
  *
- * 过渡态：closed→waving→hidden，running→review→idle，error→failed→idle。
+ * 过渡态：closed→waving→hidden，running→review→业务态，error→failed（错误持续期间保持，清除后回落真实状态）。
  */
 
 const PRIORITY: AgentStatus[] = ["error", "running", "starting", "idle"];
@@ -107,8 +107,6 @@ export class PetStateBridge {
 
 	/** 统一的过渡定时器（替代 waving/review/failed/tease 四个独立 timer） */
 	private transTimer: NodeJS.Timeout | null = null;
-	/** 错误动画冷却：展示后 N ms 内抑制重复推送 failed 动画 */
-	private errorCooldownUntil = 0;
 
 	private currentTabs: AgentTab[] = [];
 	private unsubscribe: (() => void) | null = null;
@@ -310,20 +308,20 @@ export class PetStateBridge {
 			return;
 		}
 
-		// ⚠️ 过渡恢复定时器（review→idle / failed→idle / tease 恢复）只能在「确定要落地新状态」时取消。
-		// 原实现在此无条件 clearTransition()，而下方冷却/锁/重叠检查又会提前 return：
+		// ⚠️ 过渡恢复定时器（review→业务态 / failed→业务态 / tease 恢复）只能在「确定要落地新状态」时取消。
+		// 原实现在此无条件 clearTransition()，而下方动画锁/重叠检查又会提前 return：
 		// 恢复定时器被取消、状态却不变 → 宠物永远卡在 review/failed/jumping
 		// （用户反馈：成功后一直跳舞、一直重复一个动作不停下来，根因在此）。
 
-		// ── running→review→idle（完成动画；完成提醒由 onAgentSettled 事件驱动，带准确标题） ──
+		// ── running→review→业务态（完成动画；完成提醒由 onAgentSettled 事件驱动，带准确标题） ──
 		if (target === "idle" && prev?.mode === "running") {
 			this.applyState({ ...state, mode: "review" });
 			this.lastChangeAt = Date.now();
 			this.setTransition(4000, () => {
 				// 双保险：定时器触发时若状态已被其它推送切走，不强行归位
 				if (this.lastState?.mode !== "review") return;
-				this.applyState({ ...state, mode: "idle" });
-				this.maybeStartPatrol();
+				// 重新聚合当前业务状态：庆祝期间可能已有新任务启动，不能按旧快照强制回 idle
+				this.settleFromOverlay();
 			});
 			return;
 		}
@@ -331,20 +329,22 @@ export class PetStateBridge {
 		// review 进行中忽略重叠 idle 推送（恢复定时器会把它带回 idle，绝不能取消）
 		if (target === "idle" && prev?.mode === "review") return;
 
-		// ── failed 过渡（提醒由 detectErrorEdges 驱动，动画在此） ──
+		// ── failed（提醒由 detectErrorEdges 驱动，动画在此） ──
 		if (target === "failed") {
-			const now = Date.now();
-			// 冷却期内的重复 error 推送：忽略且保留恢复定时器（否则会永远卡在 failed）
-			if (this.errorCooldownUntil > now) return;
-			this.errorCooldownUntil = now + 10000;
-			if (prev?.mode !== "failed") {
-				this.applyState(state);
-				this.setTransition(4000, () => {
-					if (this.lastState?.mode !== "failed") return;
-					this.applyState({ ...state, mode: "idle" });
-					this.maybeStartPatrol();
-				});
-			}
+			// 已在 failed：保持现状（错误持续期间宠物保持警示动画，不重复闪播）。
+			// 注：早期实现用 10s 冷却整体吞掉重复错误推送，导致错误清除后再出错时
+			// 宠物停留在 idle/巡游，与业务状态脱节（多任务并发场景），已移除。
+			if (prev?.mode === "failed") return;
+			// 巡游与业务态互斥：落地 failed 立即停巡游，防止散步帧每 50ms 覆盖错误动画
+			this.patrol?.stop();
+			this.applyState(state);
+			this.setTransition(4000, () => {
+				// 双保险：定时器触发时若状态已被其它推送切走，不强行归位
+				if (this.lastState?.mode !== "failed") return;
+				// 重新聚合当前业务状态：错误已清除 → 回落真实状态（running/idle）；
+				// 错误仍存在 → push(failed) 因 prev 已是 failed 直接 return，保持 failed
+				this.settleFromOverlay();
+			});
 			return;
 		}
 
@@ -371,6 +371,28 @@ export class PetStateBridge {
 		this.patrol?.stop();
 		this.applyState({ ...saved, mode: "jumping" });
 		this.setTransition(2500, () => this.push(aggregate(this.currentTabs, this.pendingRequests)));
+	}
+
+	/**
+	 * 过渡动画（review/failed）到期后的归位：按当前业务聚合状态重新落地，
+	 * 而不是回旧快照——过渡期间任务可能已恢复/新启动，强制回 idle 会造成宠物与业务脱节
+	 * （多任务场景：A 在跑、B 出错时，failed 闪播后宠物不能闲下来散步）。
+	 */
+	private settleFromOverlay() {
+		const real = aggregate(this.currentTabs, this.pendingRequests);
+		if (real.mode === "idle" && this.lastState?.mode === "review") {
+			// review 的「重叠 idle 忽略」只放行过渡自身归位，这里直接落地并恢复巡游
+			this.applyState(real);
+			this.maybeStartPatrol();
+			return;
+		}
+		this.push(real, true);
+	}
+
+	/** 当前业务聚合模式（不含 review/failed 等过渡 overlay）。巡游据此判断是否该走：
+	 *  业务非 idle（有任务运行/出错/待输入）时，巡逻帧不得抢占动画通道。 */
+	businessMode(): PetMode {
+		return aggregate(this.currentTabs, this.pendingRequests).mode;
 	}
 
 	// ── 巡游 ──

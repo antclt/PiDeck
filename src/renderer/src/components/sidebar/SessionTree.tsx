@@ -6,7 +6,6 @@ import { sessionRecordToSummary } from "../../atoms";
 import { t } from "../../i18n";
 import { filterSidebarSessions, getBoundSidebarRuntimeAgent, type SidebarController } from "../../hooks/useSidebarController";
 import { Button } from "../ui-shadcn/button";
-import { PathTooltip } from "../ui-shadcn/PathTooltip";
 import type { SidebarActions } from "./SidebarContent";
 import { SessionBackendMark, SessionSourceBadge } from "../session/SessionSourceBadge";
 import { cn } from "../../lib/utils";
@@ -193,21 +192,19 @@ export function SessionTree(props: {
         className={rowContainerClass}
         onContextMenu={(event) => openContext(event, session)}
       >
-        <PathTooltip content={session.filePath}>
-          <button
-            type="button"
-            className={cn(
-              sessionRowClass,
-              "session-row codex-subagent-sidebar-row pl-2",
-              session.id === props.currentSessionId && selectedRowClass,
-            )}
-            onClick={() => openSession(session.id)}
-            onDoubleClick={() => openSession(session.id, "permanent")}
-            {...sessionDragProps(session.id)}
-          >
-            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">{label}</div></div>
-          </button>
-        </PathTooltip>
+        <button
+          type="button"
+          className={cn(
+            sessionRowClass,
+            "session-row codex-subagent-sidebar-row pl-2",
+            session.id === props.currentSessionId && selectedRowClass,
+          )}
+          onClick={() => openSession(session.id)}
+          onDoubleClick={() => openSession(session.id, "permanent")}
+          {...sessionDragProps(session.id)}
+        >
+          <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">{label}</div></div>
+        </button>
         <Button
           type="button"
           variant="ghost"
@@ -265,26 +262,24 @@ export function SessionTree(props: {
           className={rowContainerClass}
           onContextMenu={(event) => { event.preventDefault(); void props.controller.openMenu({ kind: "agent", agentId: child.agent.id, x: event.clientX, y: event.clientY }); }}
         >
-          <PathTooltip content={child.agent.title}>
-            <button
-              type="button"
-              className={cn(
-                sessionRowClass,
-                agentSession?.id === props.currentSessionId && selectedRowClass,
-              )}
-              onClick={() => { if (agentSession) openSession(agentSession.id); }}
-              onDoubleClick={() => { if (agentSession) openSession(agentSession.id, "permanent"); }}
-              {...(agentSession ? sessionDragProps(agentSession.id) : {})}
-            >
-              {renderRuntimeStatusDot(child.agent.status)}
-              <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
-                <strong className="min-w-0 flex-1 truncate font-medium">{child.agent.title}</strong>
-                <SessionBackendMark backend={child.agent.backend} />
-                {child.agent.noSession && <span className="anonymous-indicator" title={t("app.anonymousChat")}><HatGlasses size={11} aria-hidden="true" /></span>}
-                {renderToggle(groupKey, childCount)}
-              </div></div>
-            </button>
-          </PathTooltip>
+          <button
+            type="button"
+            className={cn(
+              sessionRowClass,
+              agentSession?.id === props.currentSessionId && selectedRowClass,
+            )}
+            onClick={() => { if (agentSession) openSession(agentSession.id); }}
+            onDoubleClick={() => { if (agentSession) openSession(agentSession.id, "permanent"); }}
+            {...(agentSession ? sessionDragProps(agentSession.id) : {})}
+          >
+            {renderRuntimeStatusDot(child.agent.status)}
+            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+              <strong className="min-w-0 flex-1 truncate font-medium">{child.agent.title}</strong>
+              <SessionBackendMark backend={child.agent.backend} />
+              {child.agent.noSession && <span className="anonymous-indicator" title={t("app.anonymousChat")}><HatGlasses size={11} aria-hidden="true" /></span>}
+              {renderToggle(groupKey, childCount)}
+            </div></div>
+          </button>
           <Button
             type="button"
             variant="ghost"
@@ -309,27 +304,23 @@ export function SessionTree(props: {
     const runtime = getBoundSidebarRuntimeAgent(props.controller.catalog, child.session.id);
     const runtimeSnapshot = props.controller.catalog.runtimeBySessionId[child.session.id];
     return <Fragment key={child.session.id}>
-      {/* 悬浮第一行展示完整会话名（行内常被 truncate），第二行展示文件路径 */}
       <div
         className={rowContainerClass}
         onContextMenu={(event) => openContext(event, child.session)}
       >
-        <PathTooltip content={child.session.filePath
-          ? `${child.session.name || t("common.untitled")}\n${child.session.filePath}`
-          : (child.session.name || t("common.untitled"))}>
-          <button
-            type="button"
-            className={cn(
-              sessionRowClass,
-              // 历史会话不是运行中的 Agent：只给这一类内容增加层级缩进，避免项目标题与历史记录贴在同一列。
-              // 历史会话需要比运行中 Agent 更松的点击区域和行间距，避免连续记录挤成一块。
-              "session-row history-session-row mx-0 min-h-8 pl-2 pr-2 py-0",
-              child.session.id === props.currentSessionId && selectedRowClass,
-            )}
-            onClick={() => openSession(child.session.id)}
-            onDoubleClick={() => openSession(child.session.id, "permanent")}
-            {...sessionDragProps(child.session.id)}
-          >
+        <button
+          type="button"
+          className={cn(
+            sessionRowClass,
+            // 历史会话不是运行中的 Agent：只给这一类内容增加层级缩进，避免项目标题与历史记录贴在同一列。
+            // 历史会话需要比运行中 Agent 更松的点击区域和行间距，避免连续记录挤成一块。
+            "session-row history-session-row mx-0 min-h-8 pl-2 pr-2 py-0",
+            child.session.id === props.currentSessionId && selectedRowClass,
+          )}
+          onClick={() => openSession(child.session.id)}
+          onDoubleClick={() => openSession(child.session.id, "permanent")}
+          {...sessionDragProps(child.session.id)}
+        >
           {renderRuntimeStatusDot(runtimeSnapshot?.status)}
           <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
             {/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差 */}
@@ -343,7 +334,6 @@ export function SessionTree(props: {
             {renderToggle(groupKey, childCount)}
           </div></div>
         </button>
-        </PathTooltip>
         <Button
           type="button"
           variant="ghost"
@@ -378,25 +368,23 @@ export function SessionTree(props: {
             className={cn("draft-session-row group/draft grid items-center gap-1", "grid-cols-[minmax(0,1fr)_2rem]")}
             onContextMenu={(event) => openDraftContext(event, session)}
           >
-          <PathTooltip content={session.title}>
-            <button
-              type="button"
-              className={cn(
-                sessionRowClass,
-                "session-row draft-session-trigger",
-                session.id === props.currentSessionId && selectedRowClass,
-              )}
-              onClick={() => openSession(session.id)}
-              onDoubleClick={() => openSession(session.id, "permanent")}
-              {...sessionDragProps(session.id)}
-            >
-              <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
-                {renderRuntimeStatusDot(runtime?.status)}
-                <strong className="min-w-0 flex-1 truncate font-medium">{session.title}</strong>
-                <SessionBackendMark backend={session.backend} />
-              </div></div>
-            </button>
-          </PathTooltip>
+          <button
+            type="button"
+            className={cn(
+              sessionRowClass,
+              "session-row draft-session-trigger",
+              session.id === props.currentSessionId && selectedRowClass,
+            )}
+            onClick={() => openSession(session.id)}
+            onDoubleClick={() => openSession(session.id, "permanent")}
+            {...sessionDragProps(session.id)}
+          >
+            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+              {renderRuntimeStatusDot(runtime?.status)}
+              <strong className="min-w-0 flex-1 truncate font-medium">{session.title}</strong>
+              <SessionBackendMark backend={session.backend} />
+            </div></div>
+          </button>
             <Button variant="ghost" size="icon"
               className="draft-session-delete"
               aria-label={t("common.delete")} title={t("common.delete")}

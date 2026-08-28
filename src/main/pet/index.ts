@@ -59,6 +59,8 @@ export class PetSystem {
 			(key, params) => this.translate(key, params),
 			(n) => this.handleNotification(n),
 		);
+		// 巡游只在业务态为 idle 时进行；业务转 running/出错/待输入时立即让位（多任务并发保护）
+		this.patrol.setBusinessIdleCheck(() => this.bridge.businessMode() === "idle");
 	}
 
 	private isPatrolEnabled() {

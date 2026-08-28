@@ -148,6 +148,18 @@ test("systemIpc validates save payloads and merges into the auto file", () => {
   assert.doesNotMatch(systemIpc, /showSaveDialog/);
 });
 
+test("systemIpc rpc logging toggle fails loudly when runtime target is invalid", () => {
+	// 此前 validateTarget 失败时 rpcLoggingSet 静默返回 enabled（假成功）：前端弹「已打开」
+	// 提醒框、本地 Map 置位，主进程却从未开启记录 → 弹窗永远无数据。
+	assert.match(systemIpc, /RPC log runtime target invalid/);
+	assert.match(systemIpc, /code: error\.code/);
+	// 校验失败返回 false（而非 enabled）：渲染层 .then(false) 走 showNotice(loggingEnableFailed)
+	assert.match(systemIpc, /\/\/ target 校验失败时返回 false（而非 enabled）/);
+	assert.match(systemIpc, /if \(!agentId\) return false;/);
+	// 渲染层两个右键入口对 reject 补 catch，防止 invoke 异常造成静默无反馈
+	assert.match(sidebarContent, /\.catch\(\(\) => showNotice\(t\("rpc\.loggingEnableFailed"\), 2500\)\)/);
+});
+
 test("preload exposes getLive/save/onLog with unsubscribe", () => {
   assert.match(preload, /rpcLogsGetLive/);
   assert.match(preload, /rpcLogsSave/);

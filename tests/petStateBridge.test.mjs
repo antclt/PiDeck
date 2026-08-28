@@ -69,7 +69,14 @@ function createHarness(timers) {
 			},
 		},
 	};
-	const patrol = { start: () => {}, stop: () => {}, active: false, setDragging: () => {} };
+	// 记录 start/stop 调用，供多任务/巡游互斥断言使用
+	const patrol = {
+		calls: [],
+		start() { this.calls.push("start"); },
+		stop() { this.calls.push("stop"); },
+		active: false,
+		setDragging: () => {},
+	};
 	const bridge = new Bridge(
 		() => win,
 		patrol,
@@ -231,4 +238,82 @@ test("review animation still runs on aggregate running->idle without notifying",
 	assert.equal(notifs.filter((n) => n && n.type === "done").length, 0);
 	await fake.advance(4000);
 	assert.equal(states.at(-1).mode, "idle");
+});
+
+// ── 多任务并发：failed/review 过渡必须重新聚合业务状态，巡游与业务态互斥 ──
+
+test("failed overlay persists while an agent stays errored instead of forcing idle", async () => {
+	const fake = createFakeTimers();
+	const { bridge, states, patrol } = createHarness(fake);
+	// 任务 A 仍在运行、任务 B 出错（多任务并发）
+	bridge.pushNow([
+		tab({ id: "A", title: "A", status: "running", createdAt: 1 }),
+		tab({ id: "B", title: "B", status: "error", createdAt: 2 }),
+	]);
+	assert.equal(states.at(-1).mode, "failed");
+	await fake.advance(4100);
+	// A 仍在 running、B 仍在 error：过渡到期必须保持 failed，而不是回旧快照的 idle
+	assert.equal(states.at(-1).mode, "failed");
+	assert.equal(patrol.calls.includes("start"), false, "业务非 idle 时不得启动巡游");
+});
+
+test("failed overlay settles back to running once the error clears", async () => {
+	const fake = createFakeTimers();
+	const { bridge, states } = createHarness(fake);
+	bridge.pushNow([
+		tab({ id: "A", title: "A", status: "running", createdAt: 1 }),
+		tab({ id: "B", title: "B", status: "error", createdAt: 2 }),
+	]);
+	assert.equal(states.at(-1).mode, "failed");
+	// 错误清除（B 恢复运行）：非 force 推送在动画锁内被抑制，failed 闪播完成后再回落
+	bridge.update([
+		tab({ id: "A", title: "A", status: "running", createdAt: 1 }),
+		tab({ id: "B", title: "B", status: "running", createdAt: 2 }),
+	]);
+	await fake.advance(200);
+	assert.equal(states.at(-1).mode, "failed");
+	await fake.advance(3900);
+	assert.equal(states.at(-1).mode, "running");
+});
+
+test("patrol walking stops immediately when an agent errors", async () => {
+	const fake = createFakeTimers();
+	const { bridge, states, patrol } = createHarness(fake);
+	// 业务 idle → 巡游启动
+	bridge.pushNow([tab({ id: "A", title: "A", status: "idle", createdAt: 1 })]);
+	assert.equal(patrol.calls.at(-1), "start");
+	// 巡游中 A 出错：failed 必须立即停巡游（否则散步帧每 50ms 覆盖 failed 动画）
+	bridge.pushNow([tab({ id: "A", title: "A", status: "error", createdAt: 1 })]);
+	assert.equal(states.at(-1).mode, "failed");
+	assert.equal(patrol.calls.at(-1), "stop");
+});
+
+test("a fresh error after recovery re-triggers failed instead of being swallowed by cooldown", async () => {
+	const fake = createFakeTimers();
+	const { bridge, states } = createHarness(fake);
+	bridge.pushNow([tab({ id: "A", title: "A", status: "error", createdAt: 1 })]);
+	await fake.advance(4100);
+	assert.equal(states.at(-1).mode, "failed"); // 错误持续期间保持 failed
+	// 错误清除 → 回落 idle
+	bridge.pushNow([]);
+	assert.equal(states.at(-1).mode, "idle");
+	// 紧接新错误：必须再次进入 failed（旧实现的 10s 冷却会整体吞掉 → 宠物与业务脱节）
+	bridge.pushNow([tab({ id: "B", title: "B", status: "error", createdAt: 2 })]);
+	assert.equal(states.at(-1).mode, "failed");
+});
+
+test("review overlay settles back to running if a new task starts during celebration", async () => {
+	const fake = createFakeTimers();
+	const { bridge, states, patrol } = createHarness(fake);
+	bridge.pushNow([tab({ id: "A", title: "A", status: "running", createdAt: 1 })]);
+	bridge.pushNow([tab({ id: "A", title: "A", status: "idle", createdAt: 1 })]);
+	assert.equal(states.at(-1).mode, "review");
+	// 庆祝期间（动画锁内）A 重新运行：非 force 推送被锁抑制，review 过渡保留
+	bridge.update([tab({ id: "A", title: "A", status: "running", createdAt: 1 })]);
+	await fake.advance(200);
+	assert.equal(states.at(-1).mode, "review");
+	// 过渡到期重新聚合 → running，而不是旧实现的强制 idle + 起巡游
+	await fake.advance(3900);
+	assert.equal(states.at(-1).mode, "running");
+	assert.equal(patrol.calls.includes("start"), false);
 });

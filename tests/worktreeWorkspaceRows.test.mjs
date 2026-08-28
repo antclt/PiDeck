@@ -19,22 +19,23 @@ test("main workspace is collapsible via the shared worktree expand set", () => {
   assert.match(worktreeTree, /\{!mainCollapsed && \(/);
 });
 
-test("main workspace row carries create-draft and anonymous actions", () => {
+test("main workspace row carries the merged new-session menu", () => {
   const mainSection = worktreeTree.slice(
     worktreeTree.indexOf("workspace-tree-main"),
     worktreeTree.indexOf("workspace-tree-list"),
   );
-  assert.match(mainSection, /createDraft\(props\.project\.id\)/);
-  assert.match(mainSection, /createAnonymous\(props\.project\.id\)/);
+  assert.match(mainSection, /<NewSessionMenu/);
+  assert.match(mainSection, /projectId=\{props\.project\.id\}/);
 });
 
-test("worktree rows carry the anonymous action next to create-draft", () => {
-  // 行视图必须同时提供「新建/匿名」两个入口。操作浮层已抽成共享组件
-  // WorkspaceRowActions（类名不再内联在行视图里），故按行视图定义切片断言行为。
+test("worktree rows carry the merged new-session menu next to remove", () => {
+  // 行视图必须同时提供「新建（普通/匿名合并下拉）」入口。操作浮层已抽成共享组件
+  // WorkspaceRowActions，故按行视图定义切片断言行为。
   const rowView = worktreeTree.slice(worktreeTree.lastIndexOf("WorkspaceTreeRowView"));
-  assert.match(rowView, /createDraft\(childProject\.id\)/);
-  assert.match(rowView, /createAnonymous\(childProject\.id\)/);
+  assert.match(rowView, /<NewSessionMenu/);
+  assert.match(rowView, /projectId=\{childProject\.id\}/);
   assert.match(rowView, /<WorkspaceRowActions>/);
+  assert.match(rowView, /worktrees\.remove\(props\.rootProject\.id/);
 });
 
 test("worktree rows never take a selected surface; only session leaves do", () => {
@@ -69,8 +70,9 @@ test("child worktree labels keep a stable weight without a selected-state swap",
   assert.doesNotMatch(childRow, /isActive \? "font-normal"/);
 });
 
-test("project row hides create/anonymous buttons in worktree mode", () => {
-  // worktree 模式下入口挪到主工作区行，项目行不再重复提供
-  assert.match(projectTree, /isCurrent && !project\.worktreeEnabled/);
+test("project row shows the merged new-session menu only outside worktree mode", () => {
+  // worktree 模式下入口挪到主工作区行；普通/匿名合并为单个 NewSessionMenu 下拉
   assert.match(projectTree, /!project\.worktreeEnabled && \(/);
+  assert.match(projectTree, /<NewSessionMenu/);
+  assert.match(projectTree, /projectId=\{project\.id\}/);
 });
