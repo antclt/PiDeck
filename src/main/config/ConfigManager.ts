@@ -28,6 +28,7 @@ import { isSafeProviderName } from "./providerMigration";
 import {
 	buildProbeHeaders,
 	candidateApplies,
+	getByPath,
 	parseUsageResponseBody,
 	USAGE_PROBE_CANDIDATES,
 	usageProbeUrls,
@@ -42,6 +43,45 @@ const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
 
 // Provider 用量/连接探测面对的是第三方网关，首包可能慢于普通模型；放宽超时避免误判。
 const PROVIDER_TEST_TIMEOUT_MS = 45_000;
+
+// Provider 用量探针响应体上限：用量接口返回 JSON，正常远小于此值；超限截断
+// （而非整体丢弃），防止恶意/异常网关用超大响应体拖垮内存，同时保留诊断信息。
+const MAX_USAGE_RESPONSE_BYTES = 64 * 1024;
+
+/** 流式读取响应体，最多读 maxBytes 字节后截断（多读的部分丢弃）。 */
+async function readBoundedResponseBody(
+	response: Response,
+	maxBytes: number,
+): Promise<string> {
+	if (!response.body) return "";
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const remaining = maxBytes - total;
+			if (value.byteLength > remaining) {
+				if (remaining > 0) chunks.push(value.subarray(0, remaining));
+				total = maxBytes;
+				await reader.cancel();
+				break;
+			}
+			chunks.push(value);
+			total += value.byteLength;
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	const merged = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) {
+		merged.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return new TextDecoder().decode(merged);
+}
 
 // 模型 id 长度上限：过长 id 往往是误填，且可能撑爆某些网关/日志。
 const MODEL_ID_MAX_LENGTH = 256;
@@ -835,6 +875,51 @@ export class ConfigManager {
 
 		// 逐候选、逐 URL 尝试；命中的首个成功即返回。
 		for (const candidate of applicable) {
+			// 链式预检（如 xAI 需先查 identity 拿 userId）：先请求预检端点，把响应里
+			// 的字段注入主请求头（x-userid）。预检失败（不可达/非 JSON/无字段）则整个候选跳过。
+			const preflightHeaders: Record<string, string> = {};
+			if (candidate.preflight) {
+				const preflightUrls = usageProbeUrls(
+					{ path: candidate.preflight.path, absoluteUrl: candidate.preflight.absoluteUrl, rootPath: false },
+					baseUrl,
+					(url) => this.ensureVersionPath(url),
+				);
+				let captured: unknown;
+				for (const preflightUrl of preflightUrls) {
+					const preflightController = new AbortController();
+					const preflightTimeout = setTimeout(
+						() => preflightController.abort(),
+						PROVIDER_TEST_TIMEOUT_MS,
+					);
+					try {
+						const preflightRes = await net.fetch(preflightUrl, {
+							method: "GET",
+							headers: this.withOpenAiSdkUserAgent(
+								buildProbeHeaders(candidate.preflight.headers, apiKey),
+							),
+							redirect: "error",
+							signal: preflightController.signal,
+						});
+						if (!preflightRes.ok) continue;
+						const preflightRaw = await readBoundedResponseBody(preflightRes, MAX_USAGE_RESPONSE_BYTES);
+						let preflightBody: unknown = null;
+						try {
+							preflightBody = JSON.parse(preflightRaw);
+						} catch {
+							// 非 JSON：不是预期的预检端点，换下一个 URL。
+						}
+						captured = getByPath(preflightBody, candidate.preflight.capture.path);
+						if (typeof captured === "string" && captured.trim() !== "") break;
+					} catch {
+						// 预检端点不可达/超时/重定向拒绝：换下一个 URL 尝试。
+					} finally {
+						clearTimeout(preflightTimeout);
+					}
+				}
+				if (typeof captured !== "string" || captured.trim() === "") continue;
+				preflightHeaders[candidate.preflight.capture.header] = captured.trim();
+			}
+
 			const urls = usageProbeUrls(candidate, baseUrl, (url) =>
 				this.ensureVersionPath(url),
 			);
@@ -849,14 +934,18 @@ export class ConfigManager {
 						method: candidate.method ?? "GET",
 						headers: this.withOpenAiSdkUserAgent({
 							...buildProbeHeaders(candidate.headers, apiKey),
+							...preflightHeaders,
 							...extraHeaders,
 						}),
 						...(candidate.method === "POST" && candidate.body !== undefined
 							? { body: JSON.stringify(candidate.body) }
 							: {}),
+						// 拒绝重定向：带凭据的探针请求不允许被 3xx 带到第三方域（fail-closed），
+						// 与 pi-usage 对官方用量端点的处理一致；用量端点本身不应重定向。
+						redirect: "error",
 						signal: controller.signal,
 					});
-					const raw = await res.text();
+					const raw = await readBoundedResponseBody(res, MAX_USAGE_RESPONSE_BYTES);
 					const safeRaw = this.redactSecret(raw, apiKey);
 					if (!res.ok) {
 						// 非 2xx：可能是端点不存在，换下一个 URL/候选继续。
@@ -876,10 +965,14 @@ export class ConfigManager {
 							periods: parsed.periods,
 							balance: parsed.balance,
 							credits: parsed.credits,
+							booster: parsed.booster,
 							at: startedAt,
 						};
 					}
 					// 2xx 但结构不匹配：不是预期的 usage 端点，继续探测。
+				} catch {
+					// 网络错误/超时/重定向拒绝：单个候选失败不阻断其它候选，记录后继续。
+					// （此前此循环无 catch，net.fetch 拒绝会直接冒泡到 IPC 层炸掉整次查询。）
 				} finally {
 					clearTimeout(timeout);
 				}

@@ -404,7 +404,15 @@ export function resolvePiApiKey(
 	const inline = typeof provider?.apiKey === "string" ? provider.apiKey.trim() : "";
 	if (inline) return inline;
 	const fromAuth = typeof auth?.key === "string" ? auth.key.trim() : "";
-	return fromAuth || undefined;
+	if (fromAuth) return fromAuth;
+	// OAuth 凭据（type:"oauth"，Codex/xAI/Copilot 等消费者订阅）：access token 就是 pi
+	// 会话里实际使用的凭据，用量/余额端点接受同一 Bearer token。放在最后兜底，避免
+	// 覆盖有显式 key 的 provider；凭据不完整（无 access）时返回 undefined，由上层快速失败。
+	if (auth && typeof auth === "object" && auth.type === "oauth") {
+		const access = typeof auth.access === "string" ? auth.access.trim() : "";
+		if (access) return access;
+	}
+	return undefined;
 }
 
 export function mergePiProvider(
