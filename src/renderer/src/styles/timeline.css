@@ -553,8 +553,8 @@
 }
 /* 思考正文比回答小一档（control / 13px），随 UI 字号档位联动、不跟 chat 正文抢视觉。
    思考是过程草稿，不是最终回答；标题行已是 text-control，正文同档才精致。
-   字重 350（比回答的 400 轻一档）：Windows 上 YaHei UI 会命中 Light、Segoe UI Variable
-   直接可变渲染，让思考在字重维度也退到回答之后，与 tertiary 颜色一起形成「过程层」。 */
+   字重保持 350（比正文 400 略轻，不再降档——过轻在 CJK 下会有锯齿/发虚），
+   与正文的差异主要由 tertiary 浅色承担：颜色浅一档已足够把思考退到回答之后。 */
 [data-marker-kind="thinking"] .markdown-body,
 .thinking-card.markdown-body {
   font-size: var(--font-size-control);

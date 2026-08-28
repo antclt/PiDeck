@@ -303,22 +303,22 @@ export const ToolCard = memo(function ToolCard(props: {
 				)}
 				<button
 					type="button"
-					className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-control leading-5 text-text-secondary focus-visible:-outline-offset-2 focus-visible:outline-2"
+					className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-control leading-5 text-text-faint focus-visible:-outline-offset-2 focus-visible:outline-2"
 					onClick={() => setExpanded((v) => !v)}
 					aria-expanded={expanded}
 				>
 					<span className="tool-card-icon inline-flex shrink-0 items-center justify-center">
 						{isSkillRead ? <Brain size={16} /> : isAskCard ? <MessageCircle size={16} /> : toolIcon(toolName)}
 					</span>
-					{/* 工具名标签：与正文同级字重（不再用 font-medium 抢权重），
-					    工具调用属于过程层，字重/颜色都应退到正文回答之后。 */}
-					<span className="shrink-0 text-control lowercase text-text-secondary">
+					{/* 工具名标签：过程层文字，用 faint 浅色（比 tertiary 更贴近背景）退到正文之后；
+					    字重保持 normal（不降档），过轻在 CJK 下会有锯齿/发虚。 */}
+					<span className="shrink-0 text-control lowercase text-text-faint">
 						{isSkillRead ? `skill:${skillName}` : isAskCard ? t("ask.toolName") : toolName}
 					</span>
 					{expanded ? (
-						<ChevronDown size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+						<ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
 					) : (
-						<ChevronRight size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+						<ChevronRight size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
 					)}
 					{!isSkillRead && kindLabel && (
 						<span className="tool-card-kind">{kindLabel}</span>
@@ -336,15 +336,15 @@ export const ToolCard = memo(function ToolCard(props: {
 						</span>
 					)}
 					{isAskCard && askCard?.question ? (
-						<span className="min-w-0 flex-[1_1_auto] whitespace-normal break-words font-mono text-caption leading-5 text-text-tertiary" title={askCard.question}>
+						<span className="min-w-0 flex-[1_1_auto] whitespace-normal break-words font-mono text-caption leading-5 text-text-faint" title={askCard.question}>
 							| {askCard.question}
 						</span>
 					) : displayLabel ? (
-						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-secondary" title={subtitle || displayLabel}>
+						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-faint" title={subtitle || displayLabel}>
 							{displayLabel}
 						</span>
 					) : subtitle ? (
-						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-tertiary" title={subtitle}>
+						<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-faint" title={subtitle}>
 							| {subtitle}
 						</span>
 					) : null}
