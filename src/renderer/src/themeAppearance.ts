@@ -1,5 +1,5 @@
 import { resolveAppColorScheme } from "../../shared/themeSchedule";
-import type { AppSettings } from "../../shared/types";
+import type { AppSettings, AppThemeMode } from "../../shared/types";
 import { SKIN_PRESETS } from "./themePresets";
 
 /** 外观相关设置子集：明暗（含跟随时间）、外观主题、主色 */
@@ -7,6 +7,17 @@ export type AppearanceSettings = Pick<
   AppSettings,
   "theme" | "themeScheduleLightStart" | "themeScheduleDarkStart" | "themeSkin" | "accent"
 >;
+
+/**
+ * 底栏 dock 主题按钮的点击循环：浅色 → 暗色 → 跟随系统 → 浅色。
+ * 「跟随时间」(schedule) 不进循环——它由设置弹窗里的时段规则管理，
+ * 在 dock 上点击视为退出自动模式、手动落到浅色。
+ */
+export function nextThemeMode(mode: AppThemeMode): AppThemeMode {
+  if (mode === "light") return "dark";
+  if (mode === "dark") return "system";
+  return "light";
+}
 
 /**
  * 把外观设置应用到 <html> 的 data-* 属性（data-theme / data-appearance / data-accent）。

@@ -1,6 +1,6 @@
-import { Activity, Bolt, CirclePlus, Folder, Globe, MessageSquare, Search } from "lucide-react";
+import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { AgentTab, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
+import type { AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import {
   AgentContextMenu,
   DraftSessionContextMenu,
@@ -24,6 +24,7 @@ import { DshSearchResults } from "./DshSearchResults";
 import { ProjectTree } from "./ProjectTree";
 import { Button } from "../ui-shadcn/button";
 import { Tabs, TabsList, TabsTrigger } from "../motion/tabs";
+import { Dock, DockItem } from "../motion/dock";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
@@ -114,6 +115,9 @@ export type SidebarContentProps = {
   onOpenSettings?: () => void;
   onOpenFeedback?: () => void;
   onOpenHomepage?: () => void;
+  /** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
+  themeMode?: AppThemeMode;
+  onToggleTheme?: () => void;
 };
 
 export function SidebarContent(props: SidebarContentProps) {
@@ -125,6 +129,21 @@ export function SidebarContent(props: SidebarContentProps) {
   const menuAgent = menu?.kind === "agent"
     ? controller.catalog.agents.find((agent) => agent.id === menu.agentId)
     : undefined;
+
+  // 底栏主题按钮：图标与文案反映当前主题模式；点击循环切换（循环规则见 themeAppearance.nextThemeMode）
+  const ThemeModeIcon =
+    props.themeMode === "dark" ? Moon
+    : props.themeMode === "system" ? Monitor
+    : props.themeMode === "schedule" ? Clock
+    : Sun;
+  const themeToggleTitle = t("app.themeDockTooltip", {
+    mode: t(
+      props.themeMode === "dark" ? "settings.themeDark"
+      : props.themeMode === "system" ? "settings.themeSystem"
+      : props.themeMode === "schedule" ? "settings.themeSchedule"
+      : "settings.themeLight",
+    ),
+  });
   // agent 是否有 live runtime：没有运行中的 pi 子进程时，RPC 日志记录无法开启
   // （记录靠主进程旁路拦截子进程通信，进程不存在则无日志可记）。
   // 注意不能拿 menuAgent.sessionId 直接查 runtimeBySessionId：AgentTab.sessionId
@@ -336,14 +355,25 @@ export function SidebarContent(props: SidebarContentProps) {
           />
         </section>
       </div>
-      {/* 底栏贴侧栏左下角：无垂直内边距，水平仅留 2px 防贴边裁切。 */}
+      {/* 底栏 dock（beUI Dock）：设置/反馈/官网/主题切换收进浮动卡片，铺满底栏宽度
+          （w-full + justify-between 让四个动作均匀分布，侧栏最小宽 208px 时也不溢出）。
+          DockItem 只提供尺寸与居中容器，按钮本体仍是 shadcn ghost（title/aria 不丢）。 */}
       {!props.isLanWeb && (
-        <div className="toolbar-actions sidebar-bottom-actions flex shrink-0 items-center gap-0 border-t border-border/40 px-0.5 py-0">
-          <div className="sidebar-bottom-primary-actions flex min-w-0 flex-1 items-center gap-0">
-            <Button type="button" variant="ghost" size="icon-sm" className="icon-button settings-icon size-8 rounded-none text-muted-foreground hover:bg-muted hover:text-foreground" title={t("settings.title")} aria-label={t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
-            <Button type="button" variant="ghost" size="icon-sm" className="icon-button feedback-icon size-8 rounded-none text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>
-            <Button type="button" variant="ghost" size="icon-sm" className="icon-button homepage-icon size-8 rounded-none text-muted-foreground hover:bg-muted hover:text-foreground" title={t("app.homepage")} aria-label={t("app.homepage")} onClick={props.onOpenHomepage}><Globe className="size-4" /></Button>
-          </div>
+        <div className="flex shrink-0 items-center px-2 pb-2 pt-1">
+          <Dock size={32} className="w-full justify-between">
+            <DockItem>
+              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("settings.title")} aria-label={t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
+            </DockItem>
+            <DockItem>
+              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>
+            </DockItem>
+            <DockItem>
+              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("app.homepage")} aria-label={t("app.homepage")} onClick={props.onOpenHomepage}><Globe className="size-4" /></Button>
+            </DockItem>
+            <DockItem>
+              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={themeToggleTitle} aria-label={themeToggleTitle} onClick={props.onToggleTheme}><ThemeModeIcon className="size-4" /></Button>
+            </DockItem>
+          </Dock>
         </div>
       )}
 

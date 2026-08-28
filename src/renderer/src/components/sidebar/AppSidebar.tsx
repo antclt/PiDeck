@@ -2,7 +2,7 @@ import React, { useRef } from "react";
 import { useSetAtom } from "jotai";
 import { PanelLeft } from "lucide-react";
 import { SidebarContent, type SidebarActions } from "./SidebarContent";
-import type { WorktreeEntry } from "../../../../shared/types";
+import type { AppThemeMode, WorktreeEntry } from "../../../../shared/types";
 import { useSidebarController } from "../../hooks/useSidebarController";
 import type { SidebarNavTab } from "../../utils/sidebarNavTab";
 import { BrandLockup } from "../app/AppParts";
@@ -23,6 +23,9 @@ interface AppSidebarProps {
   onOpenNewTask: () => void;
   onOpenFeedback: () => void;
   onOpenHomepage: () => void;
+  /** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
+  themeMode: AppThemeMode;
+  onToggleTheme: () => void;
   /** 左侧栏折叠态与开关（main 布局：按钮在品牌文字右侧） */
   listCollapsed: boolean;
   toggleListCollapsed: () => void;
@@ -94,6 +97,8 @@ export function AppSidebar(props: AppSidebarProps) {
       onOpenSettings={() => setSettingsOpen(true)}
       onOpenFeedback={props.onOpenFeedback}
       onOpenHomepage={props.onOpenHomepage}
+      themeMode={props.themeMode}
+      onToggleTheme={props.onToggleTheme}
     />
     </>
   );
