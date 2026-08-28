@@ -3049,6 +3049,7 @@ export function App() {
       isLanWeb={isLanWeb}
       onOpenFeedback={() => overlays.setFeedbackOpen(true)}
       settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
+      settingsNavTab={settings.sidebarNavTab}
       settingsLoaded={settingsLoaded}
       onExpandedProjectsReady={() => setExpandedProjectsReady(true)}
       // 官网主页是品牌入口，强制系统浏览器打开：不受「链接打开方式=内置浏览器」设置影响

@@ -312,6 +312,11 @@ export type AppSettings = {
 	 * 缺省时由渲染层按「仅展开 chat」处理。
 	 */
 	sidebarExpandedProjectIds?: string[];
+	/**
+	 * 侧栏 Chats/项目分段。可选以兼容旧 settings.json；localStorage 作首屏缓存，
+	 * settings.json 作跨 renderer origin / dev 强杀的可靠恢复来源。缺省为 chats。
+	 */
+	sidebarNavTab?: "chats" | "projects";
 
 	// ── 扩展管理 ──
 	/**

@@ -6,6 +6,11 @@ import {
   defaultExpandedSidebarProjects,
   readExpandedSidebarProjects,
 } from "../utils/sidebarExpandedProjects";
+import {
+  DEFAULT_SIDEBAR_NAV_TAB,
+  readSidebarNavTab,
+  type SidebarNavTab,
+} from "../utils/sidebarNavTab";
 
 /** Settings overlay visibility is shared by Sidebar, Pi environment flow, and Session surface. */
 export const settingsOpenAtom = atom(false);
@@ -91,6 +96,13 @@ export const sidebarExpandedProjectIdsAtom = atom<ReadonlySet<string>>(
     );
     return cached ? new Set(cached) : defaultExpandedSidebarProjects();
   })(),
+);
+
+/** 侧栏 Chats/项目分段：localStorage 首屏缓存，settings.json 作权威来源。 */
+export const sidebarNavTabAtom = atom<SidebarNavTab>(
+  readSidebarNavTab(
+    typeof window === "undefined" ? undefined : window.localStorage,
+  ) ?? DEFAULT_SIDEBAR_NAV_TAB,
 );
 
 // useStreamdownRendererAtom 已移除：Streamdown 转正为唯一 markdown 引擎（迁移 react-markdown 完成）。
