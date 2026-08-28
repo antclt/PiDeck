@@ -19,8 +19,8 @@ test("start surface reuses the session bottom composer, not a second input imple
   assert.match(surface, /import \{ ComposerArea \} from "\.\/ComposerArea"/);
   assert.match(surface, /import \{ QueuedPromptPanel \} from "\.\/ComposerPanels"/);
   assert.match(surface, /import \{ SessionGoalStrip \} from "\.\/SessionGoalStrip"/);
-  assert.match(surface, /import \{ SessionTodoStrip \} from "\.\/SessionTodoStrip"/);
-  assert.match(surface, /<SessionTodoStrip sessionId=\{props\.sessionId\} \/>/);
+  assert.match(surface, /import \{ SessionWidgetsCard \} from "\.\/SessionWidgetsCard"/);
+  assert.match(surface, /<SessionWidgetsCard sessionId=\{props\.sessionId\} \/>/);
   assert.match(surface, /<SessionGoalStrip sessionId=\{props\.sessionId\} \/>/);
   assert.match(surface, /useSessionPaneServices\(\)/);
   assert.match(surface, /queuedPromptsBySession\[props\.sessionId\]/);

@@ -50,6 +50,12 @@ export interface FileDiffProps {
   copyText?: string;
   onCopy?: () => void | Promise<void>;
   className?: string;
+  /**
+   * [PiDeck local] 展开/收起是否播放高度动画（默认 true，保持 beui 原行为）。
+   * 放在高度受外部 hug 测量（如 composer 卡）的容器内时传 false：折叠瞬时完成，
+   * 避免 0.14s 连续高度变化被 ResizeObserver 逐帧上报导致外层面板/时间线抖动。
+   */
+  animateHeight?: boolean;
 }
 
 function ChangeCount({ value, type }: { value: number; type: "added" | "removed" }) {
@@ -82,6 +88,8 @@ export function FileDiff({
   copyText,
   onCopy,
   className,
+
+  animateHeight = true,
 }: FileDiffProps) {
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
@@ -191,6 +199,7 @@ export function FileDiff({
         role="region"
         aria-labelledby={triggerId}
         open={currentOpen}
+        transition={animateHeight ? undefined : { duration: 0 }}
       >
         <div className="pl-6 pt-1.5">
           <div className="overflow-hidden rounded-xl bg-muted/80">

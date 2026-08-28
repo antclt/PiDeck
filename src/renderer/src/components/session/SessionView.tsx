@@ -16,9 +16,8 @@ import { isLanWeb, desktopApi as api } from "../../desktopApi";
 import { useNotifyLayoutResized } from "../../hooks/useNotifyLayoutResized";
 import { SessionHeader } from "./SessionHeader";
 import { SessionBranchBar } from "./SessionBranchBar";
-import { SessionTodoStrip } from "./SessionTodoStrip";
+import { SessionWidgetsCard } from "./SessionWidgetsCard";
 import { SessionGoalStrip } from "./SessionGoalStrip";
-import { SessionModifiedFilesStrip } from "./SessionModifiedFilesStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { TerminalDockPanel } from "../terminal/TerminalDockPanel";
@@ -617,6 +616,9 @@ export function SessionView({
             sessionId={sessionId}
             sessionTimeline={sessionTimeline}
             isRestarting={isRestarting}
+            latestAgentRun={latestAgentRun}
+            onDiffFile={onDiffFile ? (path: string) => onDiffFile(path) : undefined}
+            onOpenChildSession={onOpenBranchSession}
             timelineProps={{
               hasProject,
               onCreateSession: runCreateSessionDraft,
@@ -675,13 +677,11 @@ export function SessionView({
                 // 高度由 ComposerMeasuredExtras 测量内容总高，面板 hug 该值
                 widgets={
                   <>
-                    <SessionTodoStrip sessionId={sessionId} />
+                    <SessionWidgetsCard
+                        sessionId={sessionId}
+                        run={latestAgentRun}
+                      />
                     <SessionGoalStrip sessionId={sessionId} />
-                    <SessionModifiedFilesStrip
-                      sessionId={sessionId}
-                      run={latestAgentRun}
-                      onDiffFile={onDiffFile ? (path) => onDiffFile(path) : undefined}
-                    />
                   </>
                 }
               />

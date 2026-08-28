@@ -7,6 +7,9 @@ import { sessionHistoryMutationOverlayBySessionIdAtomFamily } from "../../atoms"
 import { Button } from "../ui-shadcn/button";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { t, type TranslationKey } from "../../i18n";
+import { SessionWidgetsPopover } from "./SessionWidgetsPopover";
+import type { AgentRunItem } from "./timeline/types";
+import type { DiffFileHandler } from "./ToolCallComponents";
 
 const HISTORY_OVERLAY_COPY: Record<string, TranslationKey> = {
 	stopping: "message.historyOverlay.stopping",
@@ -24,6 +27,11 @@ export function SessionSurfaceStage(props: {
 	sessionTimeline: SessionTimelineController;
 	timelineProps: Omit<SessionMessageTimelineProps, "sessionId" | "controller">;
 	isRestarting: boolean;
+	/** 最新 agent-run（文件汇总按 run 归组）：透传给 widgets 弹层 */
+	latestAgentRun?: AgentRunItem;
+	onDiffFile?: DiffFileHandler;
+	/** 打开子会话只读视图：子代理条目跳转子会话用 */
+	onOpenChildSession?: (sessionId: string) => void;
 }) {
 	const { sessionId, sessionTimeline, timelineProps, isRestarting } = props;
 	const mutationKind = useAtomValue(
@@ -41,6 +49,15 @@ export function SessionSurfaceStage(props: {
 				sessionId={sessionId}
 				controller={sessionTimeline}
 				{...timelineProps}
+			/>
+
+			{/* widgets 弹层悬浮在 timeline 面板底部：不参与 composer 面板布局，
+				开合不影响滚动视口（详见 SessionWidgetsPopover 头注释） */}
+			<SessionWidgetsPopover
+				sessionId={sessionId}
+				run={props.latestAgentRun}
+				onDiffFile={props.onDiffFile}
+				onOpenChildSession={props.onOpenChildSession}
 			/>
 
 			{sessionTimeline.showScrollToBottom && (

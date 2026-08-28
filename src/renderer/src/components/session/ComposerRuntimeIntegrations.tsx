@@ -97,7 +97,7 @@ export function ComposerRuntimeIntegrations(props: {
     return result;
   }
 
-  // 扩展 widget（Todo/Plan）统一由常驻 todo 条（SessionTodoStrip）展示，
+  // 扩展 widget（Todo/Plan）统一由会话组件卡展示，
   // composer 只保留飞书指示器槽位。
   // main 对齐：只要有已配置的 Bot 就显示飞书入口。Agent 未启动时点连接会由主进程
   // 自动启动 runtime 并绑定（feishuSessionBotSet 内 activateRuntime），不再需要先手动启动。

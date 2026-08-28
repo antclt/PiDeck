@@ -3,7 +3,7 @@ import { useSessionPaneServices } from "./SessionPaneServices";
 import { ComposerArea } from "./ComposerArea";
 import { QueuedPromptPanel } from "./ComposerPanels";
 import { SessionGoalStrip } from "./SessionGoalStrip";
-import { SessionTodoStrip } from "./SessionTodoStrip";
+import { SessionWidgetsCard } from "./SessionWidgetsCard";
 import { LogoMark } from "./SurfaceParts";
 
 /**
@@ -47,7 +47,7 @@ export function SessionStartSurface(props: {
           bootstrapProjectId={props.bootstrapProjectId}
           widgets={
             <>
-              <SessionTodoStrip sessionId={props.sessionId} />
+              <SessionWidgetsCard sessionId={props.sessionId} />
               <SessionGoalStrip sessionId={props.sessionId} />
             </>
           }

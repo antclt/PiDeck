@@ -317,7 +317,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                         : "",
               ].filter(Boolean).join(" ")}
             >
-              {/* 扩展 widget（Todo/Plan）由常驻 todo 条（SessionTodoStrip）展示。 */}
+              {/* 扩展 widget（Todo/Plan）由统一会话组件卡展示。 */}
               <TipTapComposer
                 ref={composer.editor.ref}
                 value={composer.draft}

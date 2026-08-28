@@ -3063,7 +3063,9 @@ select:focus-visible {
   scroll-margin-top: 28px;
 }
 .message-timeline:has(.session-runtime-ui:not(:empty)) {
-  padding-bottom: 8px;
+  /* 运行中/时长 meta 紧贴底部 composer widgets 长条时视觉重叠；
+     与基础留白 (24px) 拉开差距，留出呼吸间距 */
+  padding-bottom: 20px;
 }
 /* RespondingIndicator（消息流末尾的 Agent 运行动画）与 ask 卡片（runtimeUi）相邻：
    消息占满滚动区时两者只剩 8px 底部留白，视觉上贴死；给动画块单独留出呼吸间距 */
