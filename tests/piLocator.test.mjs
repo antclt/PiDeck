@@ -39,6 +39,10 @@ function loadPiLocatorModule(platform = process.platform, envOverrides = {}, hom
 	// 未显式覆盖时剔除，保证每个用例从“干净环境”出发验证默认路径逻辑。
 	if (!("MISE_DATA_DIR" in envOverrides)) delete sandbox.process.env.MISE_DATA_DIR;
 	if (!("MISE_INSTALL_PATH" in envOverrides)) delete sandbox.process.env.MISE_INSTALL_PATH;
+	// 非 win32 用例不应看到宿主的 APPDATA/LOCALAPPDATA：PiLocator 会用它们拼
+	// %APPDATA%\npm 候选目录，Windows 开发机上真实 npm 全局会提前命中（环境泄漏）。
+	if (platform !== "win32" && !("APPDATA" in envOverrides)) delete sandbox.process.env.APPDATA;
+	if (platform !== "win32" && !("LOCALAPPDATA" in envOverrides)) delete sandbox.process.env.LOCALAPPDATA;
 	vm.runInNewContext(outputText, sandbox, {
 		filename: "PiLocator.ts",
 	});
