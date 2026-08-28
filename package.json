@@ -108,6 +108,7 @@
     "@tiptap/pm": "^3.29.2",
     "@tiptap/react": "^3.29.2",
     "@tiptap/starter-kit": "^3.29.2",
+    "app-builder-bin": "^5.0.0-alpha.12",
     "dsh-bill": "^0.13.1",
     "dsh-tool-pwsh-persistent": "file:packages/dsh-tool-pwsh-persistent",
     "motion": "^13.0.0",
