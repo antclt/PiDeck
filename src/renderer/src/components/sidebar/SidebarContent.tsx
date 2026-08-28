@@ -323,7 +323,7 @@ export function SidebarContent(props: SidebarContentProps) {
               void actions.rpc.setLogging(menuAgent.id, false).then((enabled) => {
                 controller.setAgentRpcLogging(menuAgent.id, enabled);
                 showNotice(enabled ? t("rpc.loggingDisableFailed") : t("rpc.loggingDisabled"), 2500);
-              });
+              }).catch(() => showNotice(t("rpc.loggingDisableFailed"), 2500));
               return;
             }
             void actions.rpc.setLogging(menuAgent.id, true).then((enabled) => {
@@ -334,7 +334,7 @@ export function SidebarContent(props: SidebarContentProps) {
               } else {
                 showNotice(t("rpc.loggingEnableFailed"), 2500);
               }
-            });
+            }).catch(() => showNotice(t("rpc.loggingEnableFailed"), 2500));
           }}
           isRpcLogging={controller.isAgentRpcLogging(menuAgent.id)}
           rpcToggleDisabled={!menuAgentCanRpcLog}
@@ -398,7 +398,7 @@ export function SidebarContent(props: SidebarContentProps) {
               void actions.rpc.setLogging(menuSessionRuntimeAgent.id, false).then((enabled) => {
                 controller.setAgentRpcLogging(menuSessionRuntimeAgent.id, enabled);
                 showNotice(enabled ? t("rpc.loggingDisableFailed") : t("rpc.loggingDisabled"), 2500);
-              });
+              }).catch(() => showNotice(t("rpc.loggingDisableFailed"), 2500));
               return;
             }
             void actions.rpc.setLogging(menuSessionRuntimeAgent.id, true).then((enabled) => {
@@ -408,7 +408,7 @@ export function SidebarContent(props: SidebarContentProps) {
               } else {
                 showNotice(t("rpc.loggingEnableFailed"), 2500);
               }
-            });
+            }).catch(() => showNotice(t("rpc.loggingEnableFailed"), 2500));
           }}
           onOpenLogs={() => {
             if (menuSessionRuntimeAgent) controller.openRpcLogs(menuSessionRuntimeAgent.id);

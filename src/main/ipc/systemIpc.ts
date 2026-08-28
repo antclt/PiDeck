@@ -713,7 +713,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (!target) return undefined;
 		const validated = sessionRuntimeCoordinator.validateTarget(target);
 		if (!validated.ok) {
-			if (sessionCommandIpcError) throw sessionCommandIpcError((validated as { ok: false; error: import("../../shared/types").SessionCommandError }).error);
+			// 失败原因落日志：rpc 日志开关/查询/保存都会走这里，静默失败会让渲染层
+			// 误以为开关已生效（此前 handler 在 undefined 时直接 return enabled 假成功）。
+			const error = (validated as { ok: false; error: import("../../shared/types").SessionCommandError }).error;
+			void appLogger.warn("agent", "RPC log runtime target invalid", {
+				sessionId: target.sessionId,
+				agentId: target.agentId,
+				runtimeGeneration: target.runtimeGeneration,
+				code: error.code,
+			});
+			if (sessionCommandIpcError) throw sessionCommandIpcError(error);
 			return undefined;
 		}
 		return target.agentId;
@@ -746,7 +755,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	);
 	ipcMain.handle(ipcChannels.rpcLoggingSet, async (_event, target: SessionRuntimeTarget, enabled: boolean) => {
 		const agentId = resolveRpcRuntimeAgent(target);
-		if (!agentId) return enabled;
+		// target 校验失败时返回 false（而非 enabled）：此前静默返回 enabled 会让渲染层
+		// 弹「RPC 日志已打开」提醒框，实际主进程从未开启记录，导致弹窗永远无数据。
+		if (!agentId) return false;
 		// G17：DSH 会话的 RPC 日志走 DshAgentManager（领域调用记录），pi 走 AgentManager。
 		if (isDshAgent?.(agentId)) {
 			setDshRpcLogging?.(agentId, enabled);
