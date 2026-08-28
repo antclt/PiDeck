@@ -277,3 +277,43 @@ test("late events from runtime A cannot revive its inventory or capabilities aft
   assert.equal(store.get(atoms.runtimeCapabilityByAgentIdAtomFamily("agent-a")), undefined);
   assert.equal(store.get(atoms.runtimeCapabilityByAgentIdAtomFamily("agent-b")).modelName, "B");
 });
+
+test("terminal status (error/closed) drops runtime state and rejects late runtime-state refills", () => {
+  const store = createStore();
+  store.set(atoms.replaceProjectSessionsAtom, {
+    projectId: "project-a",
+    sessions: [session("session-a", "project-a")],
+  });
+  store.set(atoms.replaceSessionRuntimesAtom, [
+    runtime("session-a", "agent-a", "project-a", 1, "running"),
+  ]);
+  // 先填入运行时状态，模拟 agent 运行期 goal/todos/model 已就绪
+  store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent(
+    "session-a", "agent-a", 1,
+    "agents:runtime-state",
+    { agentId: "agent-a", state: { modelName: "Model A", isStreaming: true } },
+  ));
+  assert.equal(store.get(atoms.sessionRuntimeByIdAtom)["session-a"].state.modelName, "Model A");
+
+  // 进入终态：error。终态后 state 应被清空（仅保留 status 等轻量身份字段）。
+  store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent(
+    "session-a", "agent-a", 1,
+    "agents:state",
+    { id: "agent-a", projectId: "project-a", cwd: "C:/project-a", title: "t", status: "error", createdAt: 1 },
+  ));
+  const terminal = store.get(atoms.sessionRuntimeByIdAtom)["session-a"];
+  assert.equal(terminal.status, "error");
+  assert.equal(terminal.state, undefined, "terminal status must drop runtime state");
+
+  // 同绑定迟到的 runtime-state 事件不得把 state 填回（否则回收失效）。
+  store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent(
+    "session-a", "agent-a", 1,
+    "agents:runtime-state",
+    { agentId: "agent-a", state: { modelName: "Late Model" } },
+  ));
+  assert.equal(
+    store.get(atoms.sessionRuntimeByIdAtom)["session-a"].state,
+    undefined,
+    "late runtime-state must not revive state after terminal status",
+  );
+});
