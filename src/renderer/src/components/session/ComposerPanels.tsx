@@ -14,11 +14,12 @@ import {
   XCircle,
 } from "lucide-react";
 import { useId, type RefObject } from "react";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useStore } from "jotai";
 import type { ImageContent } from "../../../../shared/types";
 import { formatBytes } from "../../../../shared/formatBytes";
 import type { PastedTextFile } from "../../atoms";
 import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
+import { buildAskContextBlock } from "../../utils/askPanelContext";
 import {
   canChangeQueuedPromptBehavior,
   canDiscardQueuedPrompt,
@@ -31,6 +32,7 @@ import { Button } from "../ui-shadcn/button";
 import { sessionRecordByIdAtomFamily } from "../../atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selectors";
 import { useAskPanel } from "../../hooks/useAskPanel";
+import { sessionMessageCacheBySessionIdAtomFamily } from "../../atoms/session-atoms";
 import { isSessionRuntimeBusy } from "../../hooks/useSessionTimelineController";
 import { ExtensionWidgetCard } from "./ComposerParts";
 import {
@@ -321,6 +323,7 @@ export function QueuedPromptPanel(props: {
   const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId ?? ""));
   const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(sessionId ?? ""));
   const askPanel = useAskPanel();
+  const store = useStore();
   const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
   if (!sessionId || !props.prompts.length) return null;
 
@@ -331,8 +334,22 @@ export function QueuedPromptPanel(props: {
     const projectId = sessionRecord?.projectId;
     const text = prompt.message.trim() || prompt.displayText.trim();
     if (!projectId || !text) return;
+    // 上下文继承：把发起排队的主会话最近对话（纯函数生成，见 askPanelContext.ts）
+    // 随并行问询一并带上（经 agentMessage 注入，只有模型可见），让独立会话
+    // 能回答需要主会话前因后果的问题（对齐 pi-btw 的 side thread 上下文继承）。
+    const mainMessages = store.get(sessionMessageCacheBySessionIdAtomFamily(sessionId))?.messages ?? [];
+    const context = buildAskContextBlock(mainMessages, {
+      title: t("askPanel.contextTitle"),
+      userLabel: t("askPanel.contextUser"),
+      assistantLabel: t("askPanel.contextAssistant"),
+    });
     // 并行是立刻开独立会话，不再占着当前会话队列；成功后再从排队区拿掉。
-    void askPanel.sendToAsk(projectId, text).then((ok) => {
+    void askPanel.sendToAsk(projectId, text, {
+      // 携带主会话上下文：并行会话能理解前因后果（null 表示无上下文可带，自动跳过）
+      ...(context ? { context } : {}),
+      // 记录来源主会话：详情浮层「插入主会话 composer」时把回答送回这个会话
+      originSessionId: sessionId,
+    }).then((ok) => {
       if (ok) props.onDiscard(sessionId, prompt.id);
     });
   };
