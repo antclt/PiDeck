@@ -88,6 +88,8 @@ export type SessionProxyOverride = {
 export type SessionSummary = {
 	id: string;
 	filePath: string;
+	/** 会话归属项目 id（渲染层 worktree 家族区分用；扫描摘要恒缺省，catalog 记录回填）。 */
+	projectId?: string;
 	projectPath?: string;
 	name?: string;
 	/** 子会话：关联的父会话文件路径。有该字段时不在会话列表顶层显示，而是嵌套在父会话下。 */
@@ -113,6 +115,28 @@ export type SessionSummary = {
 	codexParentThreadId?: string;
 	codexAgentRole?: string;
 	codexAgentNickname?: string;
+};
+
+/**
+ * DSH 归档区会话清单行（G14）：host 目录已移入 .pideck-archive 的会话。
+ * title 可选：归档 manifest 自 G14+ 起携带，旧归档缺省时由主进程
+ * 从归档目录的会话日志前缀只读折叠补全；仍缺省则 UI 回退 cwd 末段/id。
+ */
+export type ArchivedDshSession = {
+	dshSessionId: string;
+	cwd: string;
+	archivedAt: number;
+	title?: string;
+};
+
+/**
+ * pi 归档区会话清单行：会话摘要 + 归档前的原始路径（index.json 反查）。
+ * originalPath 用于把归档会话按项目归属过滤（弹窗归档视图不再全量）；
+ * 索引缺失/损坏的极旧归档为 undefined，弹窗不展示（配置页仍全局可恢复）。
+ */
+export type ArchivedPiSession = {
+	summary: SessionSummary;
+	originalPath?: string;
 };
 
 /** PiDeck-owned session identity, independent from a running Pi process. */

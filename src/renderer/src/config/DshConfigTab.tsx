@@ -36,6 +36,8 @@ import { DeepseekRouteCard, PiAiProvidersCard } from "./DshProviderCards";
 import { collectCredentialRefsWithValue, normalizeDshSchema, type DshSectionApi } from "./dshSchema";
 import { presetDisplayDescription, presetDisplayName } from "./dshPresetDisplay";
 import { credentialRefFor } from "./dshCredentialRef";
+import { managerArchivedDshLabel } from "../sessionManagerModel";
+import type { ArchivedDshSession } from "../../../shared/types";
 
 type DshStatus = {
 started: boolean;
@@ -504,8 +506,8 @@ function Overview(props: {
 	const { status } = props;
 	const [picking, setPicking] = useState(false);
 	const [switching, setSwitching] = useState(false);
-	/** G14：归档区 DSH 会话清单（目录已移入 .pideck-archive 的 host 会话；恢复入口用）。 */
-	const [archived, setArchived] = useState<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>([]);
+	/** G14：归档区 DSH 会话清单（目录已移入 .pideck-archive 的 host 会话；恢复入口用，含标题）。 */
+	const [archived, setArchived] = useState<ArchivedDshSession[]>([]);
 	/** G14：正在恢复的 dshSessionId（按钮转圈防重复点击）。 */
 	const [restoring, setRestoring] = useState<string | null>(null);
 	/** 启动时是否自动导入外部会话：原设置页 DSH tab 独有项，收口到配置管理概览。 */
@@ -715,8 +717,9 @@ function Overview(props: {
 								key={item.dshSessionId}
 								className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-panel px-2 py-1.5"
 							>
-								<span className="min-w-0 flex-1 truncate text-control text-foreground" title={item.cwd}>
-									<span className="font-medium">{item.dshSessionId}</span>
+								<span className="min-w-0 flex-1 truncate text-control text-foreground" title={item.cwd || item.dshSessionId}>
+									{/* 标题（manifest/日志折叠）> cwd 末段 > host id：与会话管理弹窗归档视图同一策略 */}
+									<span className="font-medium">{managerArchivedDshLabel({ kind: "dsh", item })}</span>
 									<span className="ml-2 text-caption text-text-secondary">{item.cwd}</span>
 								</span>
 								<Button

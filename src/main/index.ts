@@ -2743,7 +2743,7 @@ function registerIpc() {
 			// 配置页「全部导入」与启动自动同步共用此入口。
 			syncDshForeignSessions: () => runDshForeignSync(),
 			// G14：DSH 归档/恢复（目录移动 + manifest，与 pi 归档同语义，不销毁数据）
-			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),
+			archiveDshSession: (dshSessionId, cwd, title) => dshHost.archiveSession(dshSessionId, cwd, title),
 			unarchiveDshSession: (dshSessionId) => dshHost.unarchiveSession(dshSessionId),
 			listArchivedDshSessions: () => dshHost.listArchivedSessions(),
 			// G13 深化：动态 Cordis 插件管理（进程内临时扩展，define/run/stop/undefine）

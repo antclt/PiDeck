@@ -1,8 +1,9 @@
-import type { SessionSummary } from "../../shared/types";
+import type { ArchivedDshSession, ArchivedPiSession, Project, SessionSummary } from "../../shared/types";
 
 /**
- * 会话管理弹窗（SessionManagerModal）的纯策略层：收录条件、行身份与归档视图合并。
- * 全部为纯函数，便于 tests/*.test.mjs 直接单测。
+ * 会话管理弹窗（SessionManagerModal）的纯策略层：收录条件、行身份、
+ * worktree 家族聚合与归档视图的项目归属过滤。全部为纯函数，便于
+ * tests/*.test.mjs 直接单测。
  *
  * 过滤类别（pill）的共享模型在 sessionFilterPills.ts（侧栏来源过滤菜单同款），
  * 弹窗侧只保留自身专属策略。
@@ -27,23 +28,188 @@ export function sessionManagerRowKey(summary: SessionSummary): string {
   return summary.id;
 }
 
+// ── worktree 家族：弹窗「项目上下文」= 根项目 + 全部子工作区 ──────────────
+
+/**
+ * 会话管理弹窗的项目上下文 = 整个 worktree 家族（根 + 全部子工作区）：
+ * 从家族任意成员（父项目或 worktree 行）打开弹窗，主列表与归档列表都覆盖
+ * 整个家族，行按所属工作区打标签。与侧栏 WorktreeTree「家族一棵树」语义对齐。
+ */
+export function worktreeFamilyProjects(
+  projects: readonly Project[],
+  openedProjectId: string,
+): Project[] {
+  const opened = projects.find((project) => project.id === openedProjectId);
+  if (!opened) return [];
+  const root = opened.worktreeParentId
+    ? projects.find((project) => project.id === opened.worktreeParentId)
+    : opened;
+  if (!root) return [opened];
+  const children = projects.filter((project) => project.worktreeParentId === root.id);
+  return [root, ...children];
+}
+
+/** 家族根项目：第一个无 worktreeParentId 的成员；全缺（异构数据）时回退首个成员。 */
+export function familyRootProject(family: readonly Project[]): Project | undefined {
+  return family.find((project) => !project.worktreeParentId) ?? family[0];
+}
+
+/**
+ * 会话所属工作区标签：主工作区（家族根）返回 undefined（不标记、避免视觉噪）；
+ * worktree 子项目返回其目录名（project.name = 路径末段），供主列表行打标签。
+ */
+export function sessionWorkspaceLabel(
+  projectId: string | undefined,
+  family: readonly Project[],
+): string | undefined {
+  if (!projectId) return undefined;
+  const root = familyRootProject(family);
+  const project = family.find((candidate) => candidate.id === projectId);
+  if (!project || !root || project.id === root.id) return undefined;
+  return project.name || undefined;
+}
+
+// ── 归档视图：按家族归属过滤 + 工作区标签 ─────────────────────────────────
+
+/**
+ * 路径规范化（纯字符串，渲染层安全）：统一分隔符、去尾斜杠；
+ * WSL（/ 开头）区分大小写，native 不区分（与 shared canonicalizeSessionPath 同语义）。
+ */
+export function canonicalWorkspacePath(path: string, wsl: boolean): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return wsl ? normalized : normalized.toLowerCase();
+}
+
+function isWslLikePath(path: string): boolean {
+  return path.startsWith("/");
+}
+
+/** 家族成员路径集合（按环境各自算一次，供归档归属判定）。 */
+function familyPathSet(family: readonly Project[], wsl: boolean): ReadonlySet<string> {
+  return new Set(
+    family
+      .map((project) => project.path)
+      .filter((path): path is string => Boolean(path))
+      .map((path) => canonicalWorkspacePath(path, wsl)),
+  );
+}
+
+/** canonical 路径是否落在某成员目录内（等于或子路径；边界用 / 分隔避免 `C:/a` 误中 `C:/ab`）。 */
+function isPathWithinMember(canonical: string, memberPaths: ReadonlySet<string>): boolean {
+  for (const member of memberPaths) {
+    if (canonical === member || canonical.startsWith(`${member}/`)) return true;
+  }
+  return false;
+}
+
+/**
+ * pi 归档按家族过滤：以归档前原始路径（index.json 反查）前缀归属。
+ * 原始路径缺失（索引缺失/损坏的极旧归档）→ 无法归属 → 不显示在弹窗归档页
+ * （配置页「归档区」仍全局可见可恢复，不丢数据）。
+ */
+export function filterArchivedPiByFamily(
+  items: readonly ArchivedPiSession[],
+  family: readonly Project[],
+): ArchivedPiSession[] {
+  const nativeMembers = familyPathSet(family, false);
+  const wslMembers = familyPathSet(family, true);
+  return items.filter((item) => {
+    if (!item.originalPath) return false;
+    const wsl = item.summary.wsl === true;
+    const members = wsl ? wslMembers : nativeMembers;
+    return isPathWithinMember(canonicalWorkspacePath(item.originalPath, wsl), members);
+  });
+}
+
+/**
+ * DSH 归档按家族过滤：manifest cwd 精确匹配家族成员路径
+ * （DSH 会话 cwd 恒等于创建/归属时刻的某项目 path，含 worktree 目录）。
+ */
+export function filterArchivedDshByFamily(
+  items: readonly ArchivedDshSession[],
+  family: readonly Project[],
+): ArchivedDshSession[] {
+  const nativeMembers = familyPathSet(family, false);
+  const wslMembers = familyPathSet(family, true);
+  return items.filter((item) => {
+    const wsl = isWslLikePath(item.cwd);
+    const members = wsl ? wslMembers : nativeMembers;
+    return members.has(canonicalWorkspacePath(item.cwd, wsl));
+  });
+}
+
+/** canonical 路径归属到的家族非根成员（最长成员路径优先：worktree 目录可能嵌套在主项目下）。 */
+function workspaceMemberForPath(
+  canonical: string,
+  wsl: boolean,
+  family: readonly Project[],
+): Project | undefined {
+  const root = familyRootProject(family);
+  if (!root) return undefined;
+  let best: Project | undefined;
+  let bestLength = -1;
+  for (const project of family) {
+    if (project.id === root.id || !project.path) continue;
+    const member = canonicalWorkspacePath(project.path, wsl);
+    if (isPathWithinMember(canonical, new Set([member])) && member.length > bestLength) {
+      best = project;
+      bestLength = member.length;
+    }
+  }
+  return best;
+}
+
+/** pi 归档行工作区标签：原始路径归属 worktree 子项目时返回目录名；主工作区/无法归属返回 undefined。 */
+export function archivedPiWorkspaceLabel(
+  item: ArchivedPiSession,
+  family: readonly Project[],
+): string | undefined {
+  if (!item.originalPath) return undefined;
+  const wsl = item.summary.wsl === true;
+  return workspaceMemberForPath(canonicalWorkspacePath(item.originalPath, wsl), wsl, family)?.name;
+}
+
+/** DSH 归档行工作区标签：cwd 归属 worktree 子项目时返回目录名；主工作区返回 undefined。 */
+export function archivedDshWorkspaceLabel(
+  item: ArchivedDshSession,
+  family: readonly Project[],
+): string | undefined {
+  const wsl = isWslLikePath(item.cwd);
+  return workspaceMemberForPath(canonicalWorkspacePath(item.cwd, wsl), wsl, family)?.name;
+}
+
+/**
+ * DSH 归档行标签（纯策略）：manifest/日志折叠标题 > cwd 末段 > 裸 host id。
+ * 标题仍缺省（极老归档、日志无折叠结果）时也要比裸 id 可读。
+ */
+export function managerArchivedDshLabel(row: Extract<ManagerArchivedRow, { kind: "dsh" }>): string {
+  const title = row.item.title?.trim();
+  if (title) return title;
+  const cwd = row.item.cwd.replace(/[\\/]+$/, "").trim();
+  if (cwd) {
+    const last = cwd.split(/[\\/]/).pop()?.trim();
+    if (last) return last;
+  }
+  return row.item.dshSessionId;
+}
+
 /** 归档视图合并行：pi 会话按文件恢复；DSH 会话按 host id 恢复。 */
 export type ManagerArchivedRow =
-  | { kind: "pi"; session: SessionSummary }
-  | { kind: "dsh"; dshSessionId: string; cwd: string; archivedAt: number };
+  | { kind: "pi"; item: ArchivedPiSession }
+  | { kind: "dsh"; item: ArchivedDshSession };
 
 /** 归档行时间戳（排序用）：pi 用 updatedAt，DSH 用 archivedAt。 */
 function managerArchivedTimestamp(row: ManagerArchivedRow): number {
-  return row.kind === "pi" ? row.session.updatedAt : row.archivedAt;
+  return row.kind === "pi" ? row.item.summary.updatedAt : row.item.archivedAt;
 }
 
-/** 合并 pi / DSH 归档清单为一个视图，按时间倒序（pi 列表已排序，DSH 按归档时间排序）。 */
+/** 合并 pi / DSH 归档清单为一个视图，按时间倒序（调用方应先按家族过滤）。 */
 export function mergeManagerArchived(
-  piSessions: readonly SessionSummary[],
-  dshItems: readonly { dshSessionId: string; cwd: string; archivedAt: number }[],
+  piSessions: readonly ArchivedPiSession[],
+  dshItems: readonly ArchivedDshSession[],
 ): ManagerArchivedRow[] {
   return [
-    ...piSessions.map((session) => ({ kind: "pi" as const, session })),
-    ...dshItems.map((item) => ({ kind: "dsh" as const, ...item })),
+    ...piSessions.map((item) => ({ kind: "pi" as const, item })),
+    ...dshItems.map((item) => ({ kind: "dsh" as const, item })),
   ].sort((a, b) => managerArchivedTimestamp(b) - managerArchivedTimestamp(a));
 }
