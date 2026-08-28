@@ -34,11 +34,11 @@ test("drawer motion is delegated to resizable panels, not CSS grid transition", 
 test("drawer keeps its content mounted through the layout transition", () => {
   assert.match(appShell, /WorkspaceDrawerHost/);
   assert.match(appShell, /renderPanel=\{\(panel\) => drawerContent\(panel\)\}/);
-  assert.match(appShell, /drawer && !drawerCollapsed \? drawerWidth : 0/);
-  assert.match(
-    appShell,
-    /"--drawer-col-w": `\$\{drawer && !drawerCollapsed \? drawerWidth : 0\}px`/,
-  );
+  // #115 U5 常驻挂载：drawer=null 时折叠 0 宽而不是条件卸载；宽度变量由
+  // writeDrawerLayoutVariables 统一写入（visible ? width : 0）
+  assert.match(appShell, /writeDrawerLayoutVariables/);
+  assert.match(appShell, /const renderedWidth = visible \? width : 0/);
+  assert.match(appShell, /"--drawer-col-w", `\$\{renderedWidth\}px`/);
 });
 
 test("closed drawer does not reserve horizontal gutter", () => {
