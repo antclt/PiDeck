@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { Archive, Check, CircleAlert, CircleDot, Folder, GitBranch, LoaderCircle, MessageCircle, RefreshCw, RotateCw } from "lucide-react";
+import { Archive, Boxes, Check, CircleAlert, CircleDot, Code2, Copy, Download, FileDown, FileText, Filter, Folder, FolderSearch, GitBranch, Link2, List, LoaderCircle, MessageCircle, Pencil, Plus, Power, Radio, RefreshCw, RotateCw, ScrollText, Settings2, SquarePen, Trash2, UserPlus, XCircle } from "lucide-react";
 import { t } from "../../i18n";
 import {
 	AlertDialog,
@@ -475,6 +475,8 @@ export function SessionSourceFilterMenu(props: {
 export function ProjectContextMenu(props: {
 	menu: { x: number; y: number; project: Project };
 	onClose: () => void;
+	onNewSession: () => void;
+	onNewAnonymousSession: () => void;
 	onRevealProject: () => void;
 	onOpenWithEditor: () => void;
 	onImportCodexSessions: () => void;
@@ -491,34 +493,79 @@ export function ProjectContextMenu(props: {
 	const isWorktreeEnabled = props.menu.project.worktreeEnabled ?? false;
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose} className="min-w-56">
+			{/* 新建：把原先项目行上的 + 下拉并入「⋯」菜单，收敛为统一的总操作入口 */}
+			<DropdownMenuLabel>{t("menu.group.create")}</DropdownMenuLabel>
+			<DropdownMenuItem onSelect={props.onNewSession}>
+				<SquarePen className="size-3.5" aria-hidden="true" />
+				{t("app.newNormalSession")}
+			</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onNewAnonymousSession}>
+				<UserPlus className="size-3.5" aria-hidden="true" />
+				{t("app.newAnonymousSession")}
+			</DropdownMenuItem>
+			<DropdownMenuSeparator />
 			{/* 打开/定位：使用频率最高的入口置顶（定位、换编辑器、复制路径） */}
 			<DropdownMenuLabel>{t("menu.group.open")}</DropdownMenuLabel>
-			<DropdownMenuItem onSelect={props.onRevealProject}>{t("menu.revealProject")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onOpenWithEditor}>{t("app.openWithEditor")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onCopyProjectPath}>{t("menu.copyProjectPath")}</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onRevealProject}>
+				<FolderSearch className="size-3.5" aria-hidden="true" />
+				{t("menu.revealProject")}
+			</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onOpenWithEditor}>
+				<Code2 className="size-3.5" aria-hidden="true" />
+				{t("app.openWithEditor")}
+			</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onCopyProjectPath}>
+				<Link2 className="size-3.5" aria-hidden="true" />
+				{t("menu.copyProjectPath")}
+			</DropdownMenuItem>
 			<DropdownMenuSeparator />
 			{/* 项目管理：会话/资源/过滤/工作区/刷新集中一组，删除式操作不混入 */}
 			<DropdownMenuLabel>{t("menu.group.manage")}</DropdownMenuLabel>
-			<DropdownMenuItem onSelect={props.onManageSessions}>{t("menu.manageSessions")}</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onManageSessions}>
+				<List className="size-3.5" aria-hidden="true" />
+				{t("menu.manageSessions")}
+			</DropdownMenuItem>
 			{/* 内置聊天项目没有 .pi/.agents 资源目录，不暴露项目管理入口，避免打开即报
 			    "Chat 项目不支持项目级资源"（由弹窗本体兜底） */}
 			{props.menu.project.kind !== "chat" && (
-				<DropdownMenuItem onSelect={props.onManageProjectResources}>{t("menu.projectResources")}</DropdownMenuItem>
+				<DropdownMenuItem onSelect={props.onManageProjectResources}>
+					<Boxes className="size-3.5" aria-hidden="true" />
+					{t("menu.projectResources")}
+				</DropdownMenuItem>
 			)}
-			<DropdownMenuItem onSelect={props.onFilterSessions}>{t("menu.filterSessions")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onRefreshProject}>{t("app.projectRefresh")}</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onFilterSessions}>
+				<Filter className="size-3.5" aria-hidden="true" />
+				{t("menu.filterSessions")}
+			</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onRefreshProject}>
+				<RefreshCw className="size-3.5" aria-hidden="true" />
+				{t("app.projectRefresh")}
+			</DropdownMenuItem>
 			<DropdownMenuItem onSelect={props.onToggleWorktree}>
+				<GitBranch className="size-3.5" aria-hidden="true" />
 				{isWorktreeEnabled ? t("menu.disableWorktree") : t("menu.enableWorktree")}
 			</DropdownMenuItem>
 			<DropdownMenuSeparator />
 			{/* 导入：外部会话迁移入口（Codex/Claude/OpenCode） */}
 			<DropdownMenuLabel>{t("menu.group.import")}</DropdownMenuLabel>
-			<DropdownMenuItem onSelect={props.onImportCodexSessions}>{t("menu.importCodex")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onImportClaudeSessions}>{t("menu.importClaude")}</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onImportOpenCodeSessions}>{t("menu.importOpenCode")}</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onImportCodexSessions}>
+				<Download className="size-3.5" aria-hidden="true" />
+				{t("menu.importCodex")}
+			</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onImportClaudeSessions}>
+				<Download className="size-3.5" aria-hidden="true" />
+				{t("menu.importClaude")}
+			</DropdownMenuItem>
+			<DropdownMenuItem onSelect={props.onImportOpenCodeSessions}>
+				<Download className="size-3.5" aria-hidden="true" />
+				{t("menu.importOpenCode")}
+			</DropdownMenuItem>
 			<DropdownMenuSeparator />
 			{/* 危险区：删除固定在最底部，与普通操作隔开防误触 */}
-			<DropdownMenuItem variant="destructive" onSelect={props.onRemoveProject}>{t("menu.removeProject")}</DropdownMenuItem>
+			<DropdownMenuItem variant="destructive" onSelect={props.onRemoveProject}>
+				<Trash2 className="size-3.5" aria-hidden="true" />
+				{t("menu.removeProject")}
+			</DropdownMenuItem>
 		</MenuShell>
 	);
 }
@@ -552,27 +599,34 @@ export function AgentContextMenu(props: {
 	const busy = Boolean(props.actionLoading);
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
-			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>{t("common.rename")}</DropdownMenuItem>
+			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>
+				<Pencil className="size-3.5" aria-hidden="true" />
+				{t("common.rename")}
+			</DropdownMenuItem>
 			{/* DSH 运行中会话的复制走 clone 分流（fork 无锚点完整副本），保留入口；
 			    导出 HTML 无 DSH 实现（G10 待决策），对 dsh agent 隐藏 */}
 			<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
 				{props.actionLoading === "copy" && <span className="mini-loader" />}
+				<Copy className="size-3.5" aria-hidden="true" />
 				{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
 			</DropdownMenuItem>
 			{props.menu.agent.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
 					{props.actionLoading === "export" && <span className="mini-loader" />}
+					<FileDown className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</DropdownMenuItem>
 			)}
 			{props.menu.agent.sessionPath && (
 				<>
 					<DropdownMenuItem disabled={busy} onSelect={props.onCopySessionFilePath}>
+						<Link2 className="size-3.5" aria-hidden="true" />
 						{t("menu.copySessionFilePath")}
 					</DropdownMenuItem>
 					{/* DSH 会话文件是 zstd 压缩的持久化日志，系统默认程序打开无意义：只留复制 */}
 					{props.menu.agent.backend !== "dsh" && (
 						<DropdownMenuItem disabled={busy} onSelect={props.onOpenSessionFile}>
+							<FileText className="size-3.5" aria-hidden="true" />
 							{t("menu.openAgentSessionFile")}
 						</DropdownMenuItem>
 					)}
@@ -603,17 +657,23 @@ export function AgentContextMenu(props: {
 				title={props.rpcToggleDisabled ? t("menu.rpcLoggingRequiresRuntime") : undefined}
 				onSelect={props.onToggleRpcLogging ?? props.onOpenRpcLogging}
 			>
+				<Radio className="size-3.5" aria-hidden="true" />
 				{props.isRpcLogging ? t("menu.rpcLoggingOn") : t("menu.rpcLogging")}
 			</DropdownMenuItem>
 			{props.isRpcLogging && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onOpenLogs}>
+					<ScrollText className="size-3.5" aria-hidden="true" />
 					{t("menu.rpcLogView")}
 				</DropdownMenuItem>
 			)}
 			<DropdownMenuSeparator />
-			<DropdownMenuItem variant="destructive" onSelect={props.onCloseAgent}>{t("menu.closeAgent")}</DropdownMenuItem>
+			<DropdownMenuItem variant="destructive" onSelect={props.onCloseAgent}>
+				<XCircle className="size-3.5" aria-hidden="true" />
+				{t("menu.closeAgent")}
+			</DropdownMenuItem>
 			{props.onDeleteSession && (
 				<DropdownMenuItem variant="destructive" disabled={busy} onSelect={props.onDeleteSession}>
+					<Trash2 className="size-3.5" aria-hidden="true" />
 					{t("common.delete")}
 				</DropdownMenuItem>
 			)}
@@ -628,7 +688,10 @@ export function DraftSessionContextMenu(props: {
 }) {
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
-			<DropdownMenuItem variant="destructive" onSelect={props.onDelete}>{t("common.delete")}</DropdownMenuItem>
+			<DropdownMenuItem variant="destructive" onSelect={props.onDelete}>
+				<Trash2 className="size-3.5" aria-hidden="true" />
+				{t("common.delete")}
+			</DropdownMenuItem>
 		</MenuShell>
 	);
 }
@@ -667,7 +730,10 @@ export function SessionContextMenu(props: {
 	const showRpcGroup = Boolean(props.canRpcLog);
 	return (
 		<MenuShell x={props.menu.x} y={props.menu.y} onClose={props.onClose}>
-			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>{t("common.rename")}</DropdownMenuItem>
+			<DropdownMenuItem disabled={busy} onSelect={props.onRename}>
+				<Pencil className="size-3.5" aria-hidden="true" />
+				{t("common.rename")}
+			</DropdownMenuItem>
 			{props.onRestartSession && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onRestartSession}>
 					<span className="inline-flex items-center gap-2">
@@ -685,16 +751,21 @@ export function SessionContextMenu(props: {
 				</DropdownMenuItem>
 			)}
 			{/* DSH 历史会话无宿主文件可复制/导出（主进程显式拒绝，A8/A9）：隐藏入口 */}
-			<DropdownMenuItem disabled={busy} onSelect={props.onOpenProxySetting}>{t("menu.sessionProxy")}</DropdownMenuItem>
+			<DropdownMenuItem disabled={busy} onSelect={props.onOpenProxySetting}>
+				<Settings2 className="size-3.5" aria-hidden="true" />
+				{t("menu.sessionProxy")}
+			</DropdownMenuItem>
 			{props.menu.session.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
 					{props.actionLoading === "copy" && <span className="mini-loader" />}
+					<Copy className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
 				</DropdownMenuItem>
 			)}
 			{props.menu.session.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
 					{props.actionLoading === "export" && <span className="mini-loader" />}
+					<FileDown className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</DropdownMenuItem>
 			)}
@@ -702,11 +773,13 @@ export function SessionContextMenu(props: {
 				<>
 					<DropdownMenuSeparator />
 					<DropdownMenuItem disabled={busy} onSelect={props.onCopySessionFilePath}>
+						<Link2 className="size-3.5" aria-hidden="true" />
 						{t("menu.copySessionFilePath")}
 					</DropdownMenuItem>
 					{/* DSH 会话文件是 zstd 压缩的持久化日志，系统默认程序打开无意义：只留复制 */}
 					{props.menu.session.backend !== "dsh" && (
 						<DropdownMenuItem disabled={busy} onSelect={props.onOpenSessionFile}>
+							<FileText className="size-3.5" aria-hidden="true" />
 							{t("menu.openSessionFile")}
 						</DropdownMenuItem>
 					)}
@@ -720,10 +793,12 @@ export function SessionContextMenu(props: {
 						title={props.rpcToggleDisabled ? t("menu.rpcLoggingRequiresRuntime") : undefined}
 						onSelect={props.onToggleRpcLogging ?? props.onOpenRpcLogging}
 					>
+						<Radio className="size-3.5" aria-hidden="true" />
 						{props.isRpcLogging ? t("menu.rpcLoggingOn") : t("menu.rpcLogging")}
 					</DropdownMenuItem>
 					{props.isRpcLogging && (
 						<DropdownMenuItem disabled={busy} onSelect={props.onOpenLogs}>
+							<ScrollText className="size-3.5" aria-hidden="true" />
 							{t("menu.rpcLogView")}
 						</DropdownMenuItem>
 					)}
@@ -731,9 +806,11 @@ export function SessionContextMenu(props: {
 			)}
 			<DropdownMenuSeparator />
 			<DropdownMenuItem disabled={busy} onSelect={props.onArchiveSession}>
+				<Archive className="size-3.5" aria-hidden="true" />
 				{t("menu.archiveSession")}
 			</DropdownMenuItem>
 			<DropdownMenuItem variant="destructive" disabled={busy} onSelect={props.onDeleteSession}>
+				<Trash2 className="size-3.5" aria-hidden="true" />
 				{t("common.delete")}
 			</DropdownMenuItem>
 		</MenuShell>

@@ -302,13 +302,17 @@ test("Chat section keeps an independent collapse control after the parent projec
     projectTree.indexOf("    {workspaceProjects.length > 0"),
   );
 
-  // 内置 Chat 没有可点击的父项目行，标题自身必须成为唯一的折叠入口。
+  // 内置 Chat 没有可点击的父项目行，折叠入口必须外露为显式按钮（否则展开后无法从标题栏恢复）。
   assert.match(chatSection, /isProjectCollapsed\(project\.id\)/);
+  assert.match(chatSection, /aria-expanded=\{!collapsed\}/);
   assert.match(chatSection, /onClick=\{\(\) => props\.controller\.toggleProject\(project\.id\)\}/);
   assert.match(chatSection, /title=\{collapsed \? t\("app\.projectExpand"\) : t\("app\.projectCollapse"\)\}/);
   assert.match(chatSection, /<ChevronsDownUp size=\{14\} aria-hidden="true" \/>/);
+  // 显式「+ 新建会话」按钮外露（最常用入口），匿名会话收进 ⋯ 菜单
+  assert.match(chatSection, /aria-label=\{t\("app\.newNormalSession"\)\}/);
+  assert.match(chatSection, /void props\.actions\.sessions\.createDraft\(project\.id\)/);
+  assert.match(chatSection, /createAnonymous\(project\.id\)/);
   assert.match(chatSection, /changeChatPath/);
-  assert.match(chatSection, /FolderCog size=\{13\} aria-hidden="true" \/>/);
   assert.match(chatSection, /t\("app\.chatProjectSettings"\)/);
   // 新建 DSH 会话入口已收敛到会话内的后端选择器，Chat 标题栏不再提供独立机器人按钮
   assert.doesNotMatch(chatSection, /createDraftDsh\(project\.id\)/);
@@ -320,11 +324,14 @@ test("Projects section header provides batch collapse wired to the controller", 
   const projectTree = readFileSync("src/renderer/src/components/sidebar/ProjectTree.tsx", "utf8");
   const controller = readFileSync("src/renderer/src/hooks/useSidebarController.ts", "utf8");
 
-  // 标题栏折叠按钮调用 controller 的批量切换，并给出折叠/展开文案（与 Chat 标题栏同款图标）。
+  // 标题栏全部折叠/展开按钮外露，调用 controller 的批量切换，并给出折叠/展开文案。
   assert.match(projectTree, /toggleCollapseAllProjects\(\)/);
   assert.match(projectTree, /anyWorkspaceExpanded/);
   assert.match(projectTree, /title=\{anyWorkspaceExpanded \? t\("app\.projectCollapseAll"\) : t\("app\.projectExpandAll"\)\}/);
   assert.match(projectTree, /<ChevronsDownUp size=\{14\} aria-hidden="true" \/>/);
+  // 显式「+ 添加项目」按钮外露（最常用入口）
+  assert.match(projectTree, /aria-label=\{t\("app\.addProject"\)\}/);
+  assert.match(projectTree, /void props\.actions\.projects\.add\(\)/);
   // controller 批量切换只作用于根工作区项目（排除 chat 与 worktree 子项目）。
   assert.match(controller, /toggleCollapseAllProjects/);
   assert.match(controller, /project\.kind !== "chat" && !project\.worktreeParentId/);
@@ -406,7 +413,8 @@ test("sidebar splits Chats/Projects by navTab without duplicating list logic", (
   assert.match(content, /parseSidebarNavTab\(value\)/);
   assert.match(content, /value="chats"/);
   assert.match(content, /value="projects"/);
-  // ProjectTree 按 navTab 分流：chats 渲染 Chat 区，projects 渲染项目区（共用同一套渲染）
+  // ProjectTree 按 navTab 分流：active 渲染活动 Agent 页，chats 渲染 Chat 区，projects 渲染项目区
+  assert.match(projectTree, /navTab === "active" \? \(\s*<ActiveSessionsTree/);
   assert.match(projectTree, /navTab === "chats" \? chatSection : projectsSection/);
   assert.match(projectTree, /const chatSection = chatProjects\.map/);
   assert.match(projectTree, /const projectsSection = \(/);

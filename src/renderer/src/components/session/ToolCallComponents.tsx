@@ -310,7 +310,9 @@ export const ToolCard = memo(function ToolCard(props: {
 					<span className="tool-card-icon inline-flex shrink-0 items-center justify-center">
 						{isSkillRead ? <Brain size={16} /> : isAskCard ? <MessageCircle size={16} /> : toolIcon(toolName)}
 					</span>
-					<span className="shrink-0 text-control font-medium lowercase text-text-secondary">
+					{/* 工具名标签：与正文同级字重（不再用 font-medium 抢权重），
+					    工具调用属于过程层，字重/颜色都应退到正文回答之后。 */}
+					<span className="shrink-0 text-control lowercase text-text-secondary">
 						{isSkillRead ? `skill:${skillName}` : isAskCard ? t("ask.toolName") : toolName}
 					</span>
 					{expanded ? (

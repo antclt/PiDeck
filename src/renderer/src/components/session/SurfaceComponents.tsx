@@ -16,6 +16,7 @@ import { messageEntryId } from "../../utils/sessionCommands";
 import { toBlob } from "html-to-image";
 import { writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
+import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
 import { useAtomValue } from "jotai";
 import "katex/dist/katex.min.css";
 
@@ -1405,6 +1406,22 @@ export function ConversationOutline(props: {
 	const topRef = useRef(top);
 	const visibleItems = expanded ? props.items : props.items.slice(-15);
 	const hasMore = props.items.length > 15;
+	// 刻度导航（beUI PreviewRail）：与折叠大纲列表同源，封顶最近 15 条；
+	// 点击刻度直接复用 onJump 跳转，hover 预览卡展示消息摘要与时间。
+	const railItems = useMemo<PreviewRailItem[]>(
+		() =>
+			props.items.slice(-15).map((item) => ({
+				id: item.id,
+				label: item.title,
+				ariaLabel: item.title,
+				description: item.time,
+			})),
+		[props.items],
+	);
+	// 跳转目标只作高亮反馈；会话切换后旧 id 不在新条目里时不高亮，避免错误落在第一条
+	const [railActiveId, setRailActiveId] = useState<string | undefined>(undefined);
+	const railActiveVisible =
+		railActiveId !== undefined && railItems.some((item) => item.id === railActiveId);
 
 	useEffect(() => {
 		topRef.current = top;
@@ -1448,6 +1465,26 @@ export function ConversationOutline(props: {
 			className={`outline-hover${dragging ? " dragging" : ""}`}
 			style={{ "--outline-top": `${top}px` } as React.CSSProperties}
 		>
+			{railItems.length > 0 && (
+				<PreviewRail
+					orientation="vertical"
+					items={railItems}
+					label={t("outline.title")}
+					itemSize={14}
+					previewSide="before"
+					activeId={railActiveId}
+					highlightActive={railActiveVisible}
+					onItemSelect={(item) => {
+						setRailActiveId(item.id);
+						props.onJump(item.id);
+					}}
+					/* 宽度对齐 outline-trigger（30px），min-h-0 抵消组件自带的演示高度 */
+					className="min-h-0 w-[30px]"
+					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
+					previewContainerClassName="inset-y-0 right-7 left-auto w-64"
+					previewClassName="[&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-1 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
+				/>
+			)}
 			<div className="outline-zone">
 				<button
 					className={`outline-trigger${props.items.length > 0 ? "" : " is-disabled"}`}

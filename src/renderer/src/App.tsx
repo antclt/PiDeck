@@ -29,7 +29,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, beuiOfficialComponentsAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -618,8 +618,6 @@ export function App() {
     // 流式对话行为：默认自动展开中间过程；新一轮默认收起非最新轮（与 SettingsStore 一致）
     expandInterimDuringStream: true,
     collapsePrevRunsOnNewTurn: true,
-    // 与主进程默认一致：默认用 PiDeck 定制 beUI 变体
-    useOfficialBeuiComponents: false,
     showDevTools: false,
     developerDiagnostics: false,
     // Electron Chromium 沙箱默认关，与主进程历史兼容策略一致
@@ -692,12 +690,6 @@ export function App() {
     setTurnFlowSettings,
   ]);
 
-  // beUI 官方原版 vs 定制变体切换：同步给 beUI 组件（直接订阅 atom，避免 props 透传）。
-  const setBeuiOfficialComponents = useSetAtom(beuiOfficialComponentsAtom);
-  useEffect(() => {
-    setBeuiOfficialComponents(settings.useOfficialBeuiComponents);
-  }, [settings.useOfficialBeuiComponents, setBeuiOfficialComponents]);
-
   // 新建会话默认后端同步给根级组件（并行问询 AskPanel 等不持有 settings props）。
   const setDefaultAgentBackend = useSetAtom(defaultAgentBackendAtom);
   useEffect(() => {
@@ -711,16 +703,9 @@ export function App() {
     setBusySendDelivery(settings.busySendDelivery);
   }, [settings.busySendDelivery, setBusySendDelivery]);
 
-  // 更新弹窗（2026-12 兼容期修复）：设置加载完成后自动检查一次，有新版本直接弹窗；
-  // 用户禁用更新检查时不触发（设置页手动检查按钮仍可用）。只跑一次，避免
-  // settings 变化（如用户保存其它设置项）触发重复检查。
-  const autoCheckedUpdateRef = useRef(false);
-  useEffect(() => {
-    if (!settingsLoaded || autoCheckedUpdateRef.current) return;
-    if (settings.disableUpdateCheck) return;
-    autoCheckedUpdateRef.current = true;
-    void appUpdate.check("auto");
-  }, [settingsLoaded, settings.disableUpdateCheck, appUpdate.check]);
+  // 应用更新检查只允许设置页「版本与更新」手动触发，这里不做任何自动检查：
+  // 启动自动检查曾导致一进应用就检测、且自动检查在途时手动按钮被 checking 门控
+  // 吞掉（有更新也不弹）。新版本提示完全依赖手动按钮（AppUpdateOverlay）。
 
   // Guard: hide git drawer when git management is disabled.
   // Equivalent to: if (panel === "git" && !settings.enableGitManagement) return
@@ -3047,6 +3032,9 @@ export function App() {
       branchByProject={branchByProject}
       creatingWorktree={worktreeCreating}
       isLanWeb={isLanWeb}
+      // 「新建任务」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
+      // 用户选择项目后可直接输入对话（首次发送才创建真实会话）。无项目时保持引导页「添加项目」空态。
+      onOpenNewTask={() => { if (activeProjectId) selectProjectCommand(activeProjectId); }}
       onOpenFeedback={() => overlays.setFeedbackOpen(true)}
       settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
       settingsNavTab={settings.sidebarNavTab}

@@ -552,11 +552,14 @@
   transform: rotate(180deg);
 }
 /* 思考正文比回答小一档（control / 13px），随 UI 字号档位联动、不跟 chat 正文抢视觉。
-   思考是过程草稿，不是最终回答；标题行已是 text-control，正文同档才精致。 */
+   思考是过程草稿，不是最终回答；标题行已是 text-control，正文同档才精致。
+   字重 350（比回答的 400 轻一档）：Windows 上 YaHei UI 会命中 Light、Segoe UI Variable
+   直接可变渲染，让思考在字重维度也退到回答之后，与 tertiary 颜色一起形成「过程层」。 */
 [data-marker-kind="thinking"] .markdown-body,
 .thinking-card.markdown-body {
   font-size: var(--font-size-control);
   line-height: var(--line-height-control);
+  font-weight: 350;
 }
 /* 流式思考卡片：实时展示推理过程 */
 

@@ -115,7 +115,7 @@ test("sidebar omits the redundant projects heading and tabs shrink to their titl
   assert.doesNotMatch(tabBar, /pinned \? "w-20"/);
   assert.match(tabBar, /session-tabs-scroll (?:relative )?flex min-w-0 flex-1/);
   assert.match(tabBar, /session-tabs-actions flex shrink-0/);
-  assert.match(sidebarContent, /sidebar-body flex min-h-0 flex-1 flex-col gap-2 px-2 pt-1 pb-1/);
+  assert.match(sidebarContent, /sidebar-body flex min-h-0 flex-1 flex-col gap-2 px-2 pt-2 pb-1/);
   assert.match(sessionTree, /min-h-8 w-full/);
   assert.match(sessionTree, /history-session-row mx-0 min-h-8 pl-2 pr-2 py-0/);
   assert.match(sessionTree, /历史会话不是运行中的 Agent/);
