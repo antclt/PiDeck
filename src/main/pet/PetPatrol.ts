@@ -29,12 +29,23 @@ export class PetPatrol {
 	private lastTickAt = 0;
 	/** 拖拽中：阻塞 start/tick，避免巡游与手动移动争抢窗口位置造成瞬移 */
 	private dragging = false;
+	/** 业务空闲检查（由 PetStateBridge 注入）：业务非 idle（任务运行/出错/待输入）时巡游必须让位 */
+	private businessIdleCheck: (() => boolean) | null = null;
 
 	constructor(
 		private readonly getPetWindow: () => BrowserWindow | null,
 		private readonly getPauseMin: () => number = () => 5,
 		private readonly movePetWindow?: (x: number, y: number) => void,
 	) {}
+
+	/** 注入业务空闲检查（PetSystem 装配时接 bridge.businessMode）；null 表示不检查（测试/缺省） */
+	setBusinessIdleCheck(fn: (() => boolean) | null) {
+		this.businessIdleCheck = fn;
+	}
+
+	private isBusinessIdle(): boolean {
+		return this.businessIdleCheck ? this.businessIdleCheck() : true;
+	}
 
 	get active(): boolean { return this.tickTimer !== null || this.pauseTimer !== null; }
 
@@ -44,6 +55,8 @@ export class PetPatrol {
 		// → 出现「继续跑 + 闪到边界 + 闪回鼠标」的双重瞬移。
 		if (this.dragging) return;
 		if (this.active) return;
+		// 业务非 idle 不起巡游：状态由桥接层接管
+		if (!this.isBusinessIdle()) return;
 		this.pushState("idle");
 		this.scheduleWalk();
 	}
@@ -63,6 +76,8 @@ export class PetPatrol {
 
 	private beginWalk() {
 		if (this.pauseTimer) { clearTimeout(this.pauseTimer); this.pauseTimer = null; }
+		// 业务非 idle（任务运行/出错/待输入）时不起步：散步帧不得抢占动画通道
+		if (!this.isBusinessIdle()) { this.stop(); return; }
 		const wa = this.resolveWorkArea();
 		if (!wa) return; // 无法确定坐标系则不开始，避免用错边界位移
 		this.walkWorkArea = wa;
@@ -110,6 +125,8 @@ export class PetPatrol {
 	private tick() {
 		// 双保险：即便因时序问题 tick 仍被触发，拖拽中也绝不移动窗口
 		if (this.dragging) { this.stop(); return; }
+		// 业务态检查：过渡期间（failed/review）或任务恢复运行时，散步帧立即让位
+		if (!this.isBusinessIdle()) { this.stop(); return; }
 		const win = this.getPetWindow();
 		if (!win || win.isDestroyed()) { this.stop(); return; }
 		const wa = this.walkWorkArea;
