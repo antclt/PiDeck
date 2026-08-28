@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import { basename, delimiter, dirname, extname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { shell } from "electron";
@@ -19,6 +19,14 @@ type EditorCandidate = {
 	windowsExecutableNames?: string[];
 	windowsRegistryNames?: string[];
 	args?: string[];
+	/**
+	 * JetBrains 系安装目录带版本号（IntelliJ IDEA 2026.1 / Community 等），
+	 * 且用户可装在 $LOCALAPPDATA\Programs 根下（不带 JetBrains 父目录）。
+	 * 提供这两个字段后，常规路径未命中时扫描 Programs 根下的
+	 * `{prefix}*\bin\{exe}` 与 `JetBrains\{prefix}*\bin\{exe}` 通配目录。
+	 */
+	programsNamePrefixes?: string[];
+	programsExeName?: string;
 };
 
 const WINDOWS_PROGRAM_FILES = [
@@ -92,6 +100,9 @@ const CANDIDATES: EditorCandidate[] = [
 		],
 		windowsExecutableNames: ["idea64.exe", "idea.bat"],
 		windowsRegistryNames: ["intellij idea"],
+		// 版本号目录通配扫描：覆盖 2026.x/Community 等非固定版本路径
+		programsNamePrefixes: ["IntelliJ IDEA"],
+		programsExeName: "idea64.exe",
 	},
 	{
 		id: "webstorm",
@@ -109,6 +120,8 @@ const CANDIDATES: EditorCandidate[] = [
 		],
 		windowsExecutableNames: ["webstorm64.exe", "webstorm.bat"],
 		windowsRegistryNames: ["webstorm"],
+		programsNamePrefixes: ["WebStorm"],
+		programsExeName: "webstorm64.exe",
 	},
 	{
 		id: "phpstorm",
@@ -126,6 +139,8 @@ const CANDIDATES: EditorCandidate[] = [
 		],
 		windowsExecutableNames: ["phpstorm64.exe", "phpstorm.bat"],
 		windowsRegistryNames: ["phpstorm"],
+		programsNamePrefixes: ["PhpStorm"],
+		programsExeName: "phpstorm64.exe",
 	},
 	{
 		id: "pycharm",
@@ -142,6 +157,8 @@ const CANDIDATES: EditorCandidate[] = [
 		],
 		windowsExecutableNames: ["pycharm64.exe", "pycharm.bat"],
 		windowsRegistryNames: ["pycharm"],
+		programsNamePrefixes: ["PyCharm"],
+		programsExeName: "pycharm64.exe",
 	},
 ];
 
@@ -238,6 +255,52 @@ async function findInWindowsRegistry(candidate: EditorCandidate) {
 	return null;
 }
 
+/**
+ * 从 Programs 根目录条目里匹配安装目录名（大小写不敏感前缀匹配）。
+ * 抽出为纯函数便于单测：传入 readdir 结果即可断言匹配规则。
+ * 返回第一个匹配的目录名；无匹配返回 null。
+ */
+export function matchProgramsDirName(
+	entries: string[],
+	namePrefixes: string[],
+): string | null {
+	for (const entry of entries) {
+		if (namePrefixes.some((prefix) => entry.toLowerCase().startsWith(prefix.toLowerCase()))) {
+			return entry;
+		}
+	}
+	return null;
+}
+
+/**
+ * 扫描 Programs 根目录（含 $LOCALAPPDATA\Programs / ProgramFiles(x86)）下的
+ * JetBrains 系安装：直接子目录 `{prefix}*` 或 `JetBrains\{prefix}*`，
+ * 命中后校验 `bin\{exeName}` 是否存在。
+ */
+async function findInProgramsByPrefix(
+	candidate: EditorCandidate,
+): Promise<string | null> {
+	const prefixes = candidate.programsNamePrefixes ?? [];
+	const exeName = candidate.programsExeName;
+	if (prefixes.length === 0 || !exeName) return null;
+	for (const root of WINDOWS_PROGRAM_FILES) {
+		for (const dir of [root, join(root, "JetBrains")]) {
+			let entries: string[];
+			try {
+				entries = await readdir(dir);
+			} catch {
+				// 目录不存在/无权限：跳过该扫描点
+				continue;
+			}
+			const matched = matchProgramsDirName(entries, prefixes);
+			if (!matched) continue;
+			const executablePath = join(dir, matched, "bin", exeName);
+			if (await exists(executablePath)) return executablePath;
+		}
+	}
+	return null;
+}
+
 /** 检测本机常见编辑器，优先 PATH，其次常见安装目录。 */
 export async function detectExternalEditors(): Promise<ExternalEditor[]> {
 	const editors: ExternalEditor[] = [];
@@ -260,6 +323,12 @@ export async function detectExternalEditors(): Promise<ExternalEditor[]> {
 		}
 		if (!command) {
 			command = await findInWindowsRegistry(candidate);
+			if (command) detectedFrom = "common-path";
+		}
+		// JetBrains 系版本目录不固定：常规路径/注册表未命中时，
+		// 扫描 Programs 根下 `{产品名}*\bin\{exe}` 通配目录（如 IntelliJ IDEA 2026.1）。
+		if (!command && candidate.programsNamePrefixes) {
+			command = await findInProgramsByPrefix(candidate);
 			if (command) detectedFrom = "common-path";
 		}
 		if (!command) {

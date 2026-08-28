@@ -2,6 +2,8 @@ import { dialog, ipcMain, shell, type BrowserWindow } from "electron";
 import { cp, readFile, rename as fsRename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
+import type { FileManagerInfo } from "../../shared/types/project";
+import { detectFileManager, openFileManagerAt } from "../files/FileManager";
 import type { FileSystemService } from "../fs/FileSystemService";
 import type { ProjectStore } from "../projects/ProjectStore";
 import type { SettingsStore } from "../settings/SettingsStore";
@@ -77,6 +79,16 @@ export function registerFilesIpc({
 		// 回归修复（30b6954b 误删）：渲染层「在文件夹中显示」依赖此通道，
 		// 缺失时 invoke 会抛 No handler registered。WSL 路径先转 Windows 再定位。
 		shell.showItemInFolder(toWindowsPath(path));
+	});
+
+	ipcMain.handle(ipcChannels.filesDetectFileManager, async (): Promise<FileManagerInfo | null> => {
+		// 「打开方式」下拉补充入口：返回当前平台可用的文件管理器信息（含 logo id 与启动命令）
+		return detectFileManager();
+	});
+
+	ipcMain.handle(ipcChannels.filesOpenFileManager, async (_event, path: string) => {
+		// 打开方式 → 文件管理器：目录交给系统文件管理器（explorer / dolphin 等）
+		await openFileManagerAt(toWindowsPath(path));
 	});
 
 	ipcMain.handle(ipcChannels.browserOpenExternal, async (_event, url: string) => {

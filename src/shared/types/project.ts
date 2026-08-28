@@ -60,3 +60,22 @@ export type ExternalEditor = {
 	args?: string[];
 	detectedFrom: ExternalEditorDetectedFrom;
 };
+
+/**
+ * 平台可用的文件管理器（「打开方式」下拉的补充入口）。
+ * id 供渲染层选择 logo 与本地化名称；command 为启动命令；
+ * name 为 Linux 文件管理器本名（Dolphin/Files/Thunar 等专名不翻译）。
+ */
+export type FileManagerInfo = {
+	id:
+		| "windows-explorer"
+		| "finder"
+		| "nautilus"
+		| "dolphin"
+		| "nemo"
+		| "thunar"
+		| "pcmanfm"
+		| "konqueror";
+	name: string;
+	command: string;
+};
