@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const scrollerSource = readFileSync(
-  "src/renderer/src/components/agents/message-scroller.tsx",
+  "src/renderer/src/components/agents/message-scroller.custom.tsx",
   "utf8",
 );
 const engineSource = readFileSync(

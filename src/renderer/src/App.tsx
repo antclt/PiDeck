@@ -29,7 +29,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, beuiOfficialComponentsAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -618,6 +618,8 @@ export function App() {
     // 流式对话行为：默认自动展开中间过程；新一轮默认收起非最新轮（与 SettingsStore 一致）
     expandInterimDuringStream: true,
     collapsePrevRunsOnNewTurn: true,
+    // 与主进程默认一致：默认用 PiDeck 定制 beUI 变体
+    useOfficialBeuiComponents: false,
     showDevTools: false,
     developerDiagnostics: false,
     // Electron Chromium 沙箱默认关，与主进程历史兼容策略一致
@@ -689,6 +691,12 @@ export function App() {
     settings.collapsePrevRunsOnNewTurn,
     setTurnFlowSettings,
   ]);
+
+  // beUI 官方原版 vs 定制变体切换：同步给 beUI 组件（直接订阅 atom，避免 props 透传）。
+  const setBeuiOfficialComponents = useSetAtom(beuiOfficialComponentsAtom);
+  useEffect(() => {
+    setBeuiOfficialComponents(settings.useOfficialBeuiComponents);
+  }, [settings.useOfficialBeuiComponents, setBeuiOfficialComponents]);
 
   // 新建会话默认后端同步给根级组件（并行问询 AskPanel 等不持有 settings props）。
   const setDefaultAgentBackend = useSetAtom(defaultAgentBackendAtom);

@@ -134,6 +134,13 @@ export type AppSettings = {
 	 * true（默认）：发送新消息后收起所有非最新轮（含手动展开的）；false：保持现状。
 	 */
 	collapsePrevRunsOnNewTurn: boolean;
+	/**
+	 * 使用 beUI 官方原版组件（开关关闭时用 PiDeck 定制的本地变体）。
+	 * 用于 A/B 对比「官方原版 vs 定制版」的视觉/行为差异，默认 false=定制版。
+	 * 仅覆盖 5 个有实质分歧的组件（file-diff / message-scroller / todo-list /
+	 * tool-result / action-swap）；agent-code 仅懒加载差异（无视觉差异）不参与切换。
+	 */
+	useOfficialBeuiComponents: boolean;
 	/** 是否开启开发者控制台（DevTools） */
 	showDevTools: boolean;
 	/**

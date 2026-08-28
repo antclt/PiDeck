@@ -2563,6 +2563,8 @@ export const zhCN = {
   "settings.piRpcStartup": "Agent 启动诊断",
   "settings.electronSandboxDesc": "控制 Electron 渲染进程沙箱（与 pi Agent 无关）。默认关闭以兼容 Windows 安全软件/旧 GPU 驱动；开启后需重启 PiDeck。若启动异常请改回关闭。",
   "settings.electronSandbox": "启用 Chromium 沙箱",
+  "settings.useOfficialBeuiDesc": "使用 beUI 官方原版组件（关闭时用 PiDeck 定制变体）。用于对比官方与定制版的视觉/行为差异：file-diff、message-scroller、todo-list、tool-result、action-swap。",
+  "settings.useOfficialBeui": "使用 beUI 官方组件",
   "settings.startupWindow.last": "上次窗口大小",
   "settings.startupWindow.compact": "窗口 · 紧凑 (1100×720)",
   "settings.startupWindow.medium": "窗口 · 中 (1280×840)",

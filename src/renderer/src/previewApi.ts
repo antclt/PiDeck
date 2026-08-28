@@ -131,6 +131,7 @@ let previewSettings: AppSettings = {
 	// 流式对话行为：与主进程 SettingsStore 默认一致（预览窗口保持相同观感）
 	expandInterimDuringStream: true,
 	collapsePrevRunsOnNewTurn: true,
+	useOfficialBeuiComponents: false,
 	showDevTools: false,
 	developerDiagnostics: false,
 	electronChromiumSandbox: false,
