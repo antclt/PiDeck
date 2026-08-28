@@ -817,6 +817,17 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return records;
 		},
 	);
+	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划（历史会话任务 tab）。 */
+	ipcMain.handle(
+		ipcChannels.sessionsListSessionTodo,
+		async (_event, sessionId: string) => {
+			if (typeof sessionId !== "string" || !sessionId) return undefined;
+			const entry = sessionCatalog.get(sessionId);
+			// DSH/生图会话无 pi 会话文件，无 todo 快照
+			if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return undefined;
+			return agentManager.readSessionTodo(entry.filePath);
+		},
+	);
 
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogReadMessagePage,

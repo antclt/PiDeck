@@ -1,5 +1,6 @@
 import { open, readFile, stat } from "node:fs/promises";
-import type { ChatMessage, ImageContent, PiSubagentEntry, SessionMessagePage } from "../../shared/types";
+import type { ChatMessage, ImageContent, PiSubagentEntry, SessionMessagePage, SessionTodoSnapshot } from "../../shared/types";
+import { parseTodoSnapshotData } from "../../shared/sessionTodo";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import type { RpcResponse } from "./PiRpcClient";
 import type { AppLogger } from "../logging/AppLogger";
@@ -1063,6 +1064,30 @@ export class SessionHistoryReader {
 		return entries.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
 	}
 
+	/**
+	 * 读取会话分支上最新的 pi-deck-todo 快照（todo 工具变更时 appendEntry 持久化）。
+	 * 只取最后一条：分支顺序即变更顺序，末条即当前计划；clear 后的快照无 activePlan → undefined。
+	 */
+	async readTodoSnapshot(sessionPath: string): Promise<SessionTodoSnapshot | undefined> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		// 从尾部向前找，避免读出全部 custom 行只为取最后一条
+		const customEntries = [...index.activeBranch].reverse().filter((entry) => entry.type === "custom");
+		for (const entry of customEntries) {
+			const rawLines = await this.readIndexedRawLines(index.hostPath, [entry]);
+			const parsed = rawLines[0];
+			try {
+				if (!isRecord(parsed)) continue;
+				if (parsed.customType !== "pi-deck-todo") continue;
+				return parseTodoSnapshotData(parsed.data);
+			} catch {
+				void this.deps.logger?.warn("agent", "Failed to parse pi-deck-todo snapshot, skipped", {
+					sessionPath,
+					entryId: entry.id,
+				});
+			}
+		}
+		return undefined;
+	}
 
 
 

@@ -22,6 +22,7 @@ import type {
 	SessionEnvironment,
 	SessionMessagePage,
 	ThinkingUpdate,
+	SessionTodoSnapshot,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
 import { PiProcess } from "./PiProcess";
@@ -882,6 +883,12 @@ export class AgentManager {
 
 
 
+	/**
+	 * 会话级 todo 快照：读会话分支上最新 pi-deck-todo custom 条目（历史会话重建任务 tab）。
+	 */
+	async readSessionTodo(sessionPath: string): Promise<SessionTodoSnapshot | undefined> {
+		return this.sessionHistoryReader.readTodoSnapshot(sessionPath);
+	}
 
 
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */

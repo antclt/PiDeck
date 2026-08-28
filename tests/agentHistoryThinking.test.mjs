@@ -114,7 +114,11 @@ function loadAgentManagerModule() {
 	vm.runInNewContext(historyReaderOutput, {
 		module: historyReaderModule,
 		exports: historyReaderModule.exports,
-		require: nodeRequire,
+		require: (specifier) => {
+			// todo 快照解析纯函数：本测试不覆盖，空实现满足依赖契约
+			if (specifier === "../../shared/sessionTodo") return { parseTodoSnapshotData: () => undefined };
+			return nodeRequire(specifier);
+		},
 		Buffer,
 		Date,
 		Map,

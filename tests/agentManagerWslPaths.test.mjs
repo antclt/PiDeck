@@ -83,7 +83,10 @@ function loadAgentManager() {
 		exports: historyReaderModule.exports,
 		module: historyReaderModule,
 		Promise,
-		require: (id) => id === "node:fs/promises" ? fsPromises : require(id),
+		require: (id) => id === "node:fs/promises" ? fsPromises : id === "../../shared/sessionTodo"
+			// todo 快照解析纯函数：本测试不覆盖，空实现满足依赖契约
+			? { parseTodoSnapshotData: () => undefined }
+			: require(id),
 	}, { filename: "SessionHistoryReader.ts" });
 	class SessionFileEditor {
 		async truncateForResend({ file }) {

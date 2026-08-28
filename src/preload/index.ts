@@ -546,6 +546,11 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.sessionsListSubagents, sessionId) as Promise<
 				import("../shared/types").PiSubagentEntry[]
 			>,
+		/** 会话级 todo 快照（pi-deck-todo custom 条目重建，历史会话任务 tab）。 */
+		listSessionTodo: (sessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsListSessionTodo, sessionId) as Promise<
+				import("../shared/types").SessionTodoSnapshot | undefined
+			>,
 		/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */
 		listDshSkills: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshListSkills, agentId) as Promise<import("../shared/types").DshSkillView[]>,
