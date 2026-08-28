@@ -69,8 +69,6 @@ test("Ask cards keep long content readable in every render path", () => {
   assert.match(toolCards, /formatAskTitle\(item\.question/);
   assert.match(webTimeline, /formatAskTitle\(props\.request\.title/);
   assert.match(webTimeline, /flex-col items-start justify-center whitespace-normal/);
-  assert.match(timelineStyles, /\.ask-question-card-option \{[\s\S]*?height: auto;[\s\S]*?min-height: 28px;/);
-  assert.match(timelineStyles, /\.ask-question-card-options-confirm \.ask-question-card-option \{[\s\S]*?width: auto;[\s\S]*?min-width: 80px;/);
   // Ask 的展开内容必须交给会话时间线滚动，卡片本身不能因固定高度裁掉步骤或说明。
   assert.match(timelineStyles, /\.tool-card \{[\s\S]*?overflow: visible;/);
 });
@@ -87,15 +85,14 @@ test("Batch ask selected options carry a check mark for low-contrast themes", ()
 test("Plan/simple select options render as single-row optically aligned buttons", () => {
   // 2026-12 用户反馈：上下两行（标签/说明各一行）文本对不齐。
   // live 卡选项改为单行：固定高度 + 标签不缩 + 说明 truncate，等宽等高光学对齐。
+  // TimelineEventCards 的 AskQuestionCard 死代码与其专属 CSS 已删除（2026-08 清理），
+  // 该视觉语言现只由 SessionRuntimeUiOverlay 的 ask-inline-bar-option 承载。
   assert.match(
     overlay,
     /ask-inline-bar-option h-\[30px\] w-full min-w-0 max-w-none items-center justify-start gap-2 px-2 py-0 text-left/,
   );
   assert.match(overlay, /max-w-\[45%\] shrink-0 truncate text-caption font-medium leading-none text-text-primary/);
   assert.match(overlay, /min-w-0 flex-1 truncate text-micro leading-none text-text-tertiary/);
-  // 时间线卡同一视觉语言：flex row + 单行截断，不再是上下两行。
-  assert.match(timelineStyles, /\.ask-question-card-option \{[\s\S]*?flex-direction: row;[\s\S]*?align-items: center;/);
-  assert.match(timelineStyles, /\.ask-question-card-option-label,[\s\S]*?white-space: nowrap;[\s\S]*?text-overflow: ellipsis;/);
 });
 
 test("Plan mode prompts keep steps concise and visually separated", () => {
@@ -119,8 +116,8 @@ test("Long ask descriptions collapse to a preview with eye toggle", () => {
   assert.match(approvalCard, /title=\{descriptionClamped \? props\.description : undefined\}/);
   assert.match(approvalCard, /descExpanded \? <EyeOff size=\{14\}/);
   // live 卡与时间线卡都用 2 行预览：提问行 + 引导去待办查看详情，步骤默认隐藏。
+  // （TimelineEventCards 的 AskQuestionCard 死代码已删除，交互卡统一由 overlay 承载）
   assert.match(overlay, /descriptionPreviewLines=\{2\}/);
-  assert.match(timelineCards, /descriptionPreviewLines=\{2\}/);
   // 「1口」乱码回归：plan 草案步骤前缀不得用 ☐（部分 Windows 字体渲染成空心方框）。
   // widget/进度消息的 ☑/☐ 保留（agentTodoList 测试锁定，完成态语义明确）。
   assert.doesNotMatch(planModeExt, /\$\(item\.step\)\. ☐/);
@@ -150,16 +147,14 @@ test("Long ask descriptions collapse to a preview with eye toggle", () => {
 
 test("Ask option clicks skip submit while text is selected", () => {
   // 选项/允许/拒绝是 button：划选结束后 mouseup 落在按钮上会冒充 click。
-  // overlay submitValue + BatchQuestion true/false/select、timeline handleSelect/handleConfirm、
-  // 安全卡 allow/deny 都必须在提交前探测 window 划选并跳过。
+  // overlay submitValue + BatchQuestion true/false/select、安全卡 allow/deny
+  // 都必须在提交前探测 window 划选并跳过。TimelineEventCards 的 AskQuestionCard
+  // 死代码已删除（2026-08 清理），交互卡片统一由 SessionRuntimeUiOverlay 承载。
   assert.match(overlay, /hasTextSelection/);
-  assert.match(timelineCards, /hasTextSelection/);
   assert.match(securityCard, /hasTextSelection/);
   const overlayGuards = overlay.match(/if \(hasTextSelection\(\)\) return;/g);
-  const timelineGuards = timelineCards.match(/if \(hasTextSelection\(\)\) return;/g);
   const securityGuards = securityCard.match(/if \(hasTextSelection\(\)\) return;/g);
   assert.ok(overlayGuards && overlayGuards.length >= 4);
-  assert.ok(timelineGuards && timelineGuards.length >= 2);
   assert.ok(securityGuards && securityGuards.length >= 2);
 });
 

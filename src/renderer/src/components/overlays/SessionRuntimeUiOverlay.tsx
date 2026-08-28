@@ -81,11 +81,18 @@ export type SessionRuntimeUiOverlayProps = {
 	onExpandedChange?: (expanded: boolean) => void;
 };
 
-type BatchAnswer = string | boolean | undefined;
+type BatchAnswer = string | boolean | string[] | undefined;
 
+/** 批量答案 label：布尔转是/否，数组 join「、」，其余原样 */
 function batchAnswerLabel(value: BatchAnswer): string {
 	if (typeof value === "boolean") return value ? t("common.true") : t("common.false");
+	if (Array.isArray(value)) return value.join("、");
 	return value ?? "";
+}
+
+/** 是否已作答：multi_select 空数组视为未作答 */
+function isBatchAnswered(value: BatchAnswer): boolean {
+	return value !== undefined && (!Array.isArray(value) || value.length > 0);
 }
 
 /** Ask 展开后由时间线 owner 重新定位到底部，确保新展开的内容不会落在视口下方。 */
@@ -127,7 +134,7 @@ function BatchAskInlineBar(props: {
 		setExpanded(true);
 	}, [requestKey]);
 
-	const answeredCount = questions.filter((question) => answers[question.id] !== undefined).length;
+	const answeredCount = questions.filter((question) => isBatchAnswered(answers[question.id])).length;
 	const allAnswered = total > 0 && answeredCount === total;
 	const reviewTab = props.request.batchReview === true && currentTab === total;
 	const currentQuestion = reviewTab ? undefined : questions[currentTab];
@@ -181,7 +188,7 @@ function BatchAskInlineBar(props: {
 		>
 			<div className="mb-1 flex min-w-0 gap-1 overflow-x-auto border-b border-border-subtle pb-1" role="tablist">
 				{questions.map((question, index) => {
-					const answered = answers[question.id] !== undefined;
+					const answered = isBatchAnswered(answers[question.id]);
 					const active = index === currentTab;
 					return (
 						<Button
@@ -227,7 +234,7 @@ function BatchAskInlineBar(props: {
 						<div className="flex flex-col gap-1 rounded-sm bg-bg-muted p-2">
 							{questions.map((question, index) => {
 								const value = answers[question.id];
-								const answered = value !== undefined;
+								const answered = isBatchAnswered(value);
 								return (
 									<div key={question.id} className="grid grid-cols-[20px_minmax(0,1fr)_minmax(0,30ch)] items-start gap-2 text-caption leading-[1.6] text-text-primary">
 										<span className="font-mono font-semibold">{index + 1}</span>
@@ -296,7 +303,7 @@ function BatchQuestion(props: {
 	finalLabel?: string;
 }) {
 	const { question } = props;
-	const selectOptions = question.type === "select" ? question.options ?? [] : [];
+	const selectOptions = question.type === "select" || question.type === "multi_select" ? question.options ?? [] : [];
 	const hasOptionDescriptions = selectOptions.some((option) => typeof option !== "string" && Boolean(option.description));
 	const hasLongOptionText = selectOptions.some((option) => {
 		const label = typeof option === "string" ? option : option.label;
@@ -398,6 +405,47 @@ function BatchQuestion(props: {
 							</div>
 						) : null}
 					</>
+				) : question.type === "multi_select" && question.options?.length ? (
+					<>
+						{/* 多选：checkbox 语义（选中打勾，再点取消），选完走底部的下一题/提交全部 */}
+						<div className={`grid min-w-0 gap-1.5 ${expandedOptionLayout ? "grid-cols-2 max-[720px]:grid-cols-1" : "grid-cols-4 max-[720px]:grid-cols-2 max-[480px]:grid-cols-1"}`}>
+							{question.options.map((option, index) => {
+								const rawLabel = typeof option === "string" ? option : option.label;
+								const parsed = typeof option === "string"
+									? splitAskOption(option)
+									: { label: rawLabel, description: option.description };
+								const label = parsed.label;
+								const value = typeof option === "string" ? option : option.value ?? rawLabel;
+								const description = parsed.description;
+								const selectedValues = Array.isArray(props.answer) ? props.answer : [];
+								const selected = selectedValues.includes(value);
+								return (
+									<Button
+										key={`${question.id}:${index}`}
+										className={`ask-inline-bar-option h-auto min-h-[30px] w-full min-w-0 max-w-none flex-col items-start justify-center gap-0.5 px-2 py-1 text-left break-words whitespace-normal${expandedOptionLayout ? " min-h-[72px] py-2" : ""}${selected ? " selected" : ""}`}
+										variant="outline"
+										disabled={props.responding}
+										onClick={() => {
+											if (hasTextSelection()) return;
+											// 切换选中项：multi_select 答案始终是数组
+											const next = selected
+												? selectedValues.filter((v) => v !== value)
+												: [...selectedValues, value];
+											props.onAnswer(next, next.join("、"));
+										}}
+									>
+										{/* 选中态对勾标记：主题色 accent 对比度低时只靠边框/背景变色难分辨已选项 */}
+										<span className="flex min-w-0 max-w-full items-center gap-1">
+											{selected ? <Check size={14} className="shrink-0 text-[var(--color-success)]" aria-hidden="true" /> : null}
+											<span className="min-w-0 max-w-full break-words whitespace-normal text-caption font-medium leading-5 text-text-primary" title={label}>{label}</span>
+										</span>
+										{description ? <span className="min-w-0 max-w-full break-words whitespace-normal text-micro font-normal leading-5 text-text-tertiary" title={description}>{description}</span> : null}
+									</Button>
+								);
+							})}
+						</div>
+						<div className="mt-1 text-micro text-text-tertiary">{t("ask.multiSelectHint")}</div>
+					</>
 				) : question.type === "editor" ? (
 					<Textarea
 						className="h-auto min-h-[60px] w-full flex-1 resize-y rounded-sm border border-border-subtle bg-bg-panel p-2 text-caption leading-[1.5] text-text-primary outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
@@ -475,9 +523,12 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 	const [value, setValue] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [expanded, setExpanded] = useState(true);
+	// 单问题 select 集中提交：选项点击只改选中态，确认后才提交（2026-08 用户反馈：即点即提交易误触）
+	const [selectedOption, setSelectedOption] = useState("");
 
 	useEffect(() => {
 		setValue(request?.prefill ?? (typeof request?.value === "string" ? request.value : ""));
+		setSelectedOption("");
 		setBusy(false);
 		setExpanded(true);
 	}, [requestKey, request?.prefill, request?.value]);
@@ -555,10 +606,13 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 									key={`${request.requestId}:${option}`}
 									// 单行选项（2026-12 用户反馈：上下两行文本对不齐）：标签+说明同行，
 									// 固定高度 + 说明 truncate（title 兔底全文），等宽等高实现光学对齐。
-									className="ask-inline-bar-option h-[30px] w-full min-w-0 max-w-none items-center justify-start gap-2 px-2 py-0 text-left"
+									className={`ask-inline-bar-option h-[30px] w-full min-w-0 max-w-none items-center justify-start gap-2 px-2 py-0 text-left${selectedOption === option ? " selected" : ""}`}
 									variant="outline"
 									disabled={responding}
-									onClick={() => submitValue(option)}
+									onClick={() => {
+										if (hasTextSelection()) return;
+										setSelectedOption(option);
+									}}
 									title={parsed.description || parsed.label}
 								>
 									{/* 标签不缩不截：短标签（如「开始执行」）保证两枚按钮说明文案起点对齐；
@@ -589,6 +643,16 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 								</Button>
 							</div>
 						) : null}
+					</div>
+				) : null}
+				{selectedOption ? (
+					<div className="mt-1 flex w-full min-w-0 items-center gap-1.5">
+						<span className="min-w-0 flex-1 truncate text-caption text-text-secondary">
+							{t("ask.selectedPrefix")}{splitAskOption(selectedOption).label}
+						</span>
+						<Button variant="default" disabled={responding} onClick={() => submitValue(selectedOption)}>
+							{t("ask.submit")}
+						</Button>
 					</div>
 				) : null}
 				{request.method === "confirm" ? (

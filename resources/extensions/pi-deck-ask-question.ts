@@ -40,7 +40,7 @@ interface NormalizedOption {
 // 归一化后的问题
 interface NormalizedQuestion {
 	id: string;
-	type: "select" | "confirm" | "input" | "editor";
+	type: "select" | "multi_select" | "confirm" | "input" | "editor";
 	question: string;
 	options?: NormalizedOption[];
 	allowOther?: boolean;
@@ -52,7 +52,8 @@ interface NormalizedQuestion {
 interface Answer {
 	id: string;
 	type: string;
-	value: string | boolean | null;
+	/** multi_select 的 value 为选中项数组 */
+	value: string | boolean | string[] | null;
 	label?: string;
 	wasCustom?: boolean;
 }
@@ -89,9 +90,11 @@ const OptionSchema = Type.Union([
 
 const QuestionSchema = Type.Object({
 	id: Type.String({ description: "Unique identifier for this question" }),
-	type: StringEnum(["select", "confirm", "input", "editor"], { description: "Type of question to ask" }),
+	type: StringEnum(["select", "multi_select", "confirm", "input", "editor"], {
+		description: "Type of question to ask; multi_select renders checkbox options and returns an array of selected values",
+	}),
 	question: Type.String({ description: "The question or prompt to display" }),
-	options: Type.Optional(Type.Array(OptionSchema, { description: "Options for select type questions" })),
+	options: Type.Optional(Type.Array(OptionSchema, { description: "Options for select / multi_select type questions" })),
 	allowOther: Type.Optional(
 		Type.Boolean({ description: "Allow custom text input for select (default: true)" }),
 	),
@@ -115,12 +118,12 @@ const AskQuestionParams = Type.Object({
 	),
 	// 单问题模式（向后兼容）
 	type: Type.Optional(
-		StringEnum(["select", "confirm", "input", "editor"], {
+		StringEnum(["select", "multi_select", "confirm", "input", "editor"], {
 			description: "Type of question (single-question mode; ignored when `questions` is provided)",
 		}),
 	),
 	question: Type.Optional(Type.String({ description: "The question to show (single-question mode)" })),
-	options: Type.Optional(Type.Array(OptionSchema, { description: "Options (single select mode)" })),
+	options: Type.Optional(Type.Array(OptionSchema, { description: "Options (single select / multi_select mode)" })),
 	allowOther: Type.Optional(
 		Type.Boolean({ description: "Allow custom text input for select (single mode, default: true)" }),
 	),
@@ -155,12 +158,13 @@ function toQuestions(params: Record<string, unknown>): NormalizedQuestion[] {
 		return rawQuestions.map((q, i) => {
 			const r = (q ?? {}) as Record<string, unknown>;
 			const type = (r.type as NormalizedQuestion["type"]) ?? "input";
+			const isPickList = type === "select" || type === "multi_select";
 			return {
 				id: String(r.id ?? `q${i + 1}`),
 				type,
 				question: String(r.question ?? ""),
-				options: type === "select" ? normalizeOptions(r.options) : undefined,
-				// allowOther 仅对 select 有意义；未显式传 false 时按 true 处理
+				options: isPickList ? normalizeOptions(r.options) : undefined,
+				// allowOther 仅对 select 有意义（multi_select 多选即自由组合，不追加自定义项）；未显式传 false 时按 true 处理
 				allowOther: type === "select" ? r.allowOther !== false : undefined,
 				placeholder: r.placeholder as string | undefined,
 				prefill: r.prefill as string | undefined,
@@ -169,12 +173,13 @@ function toQuestions(params: Record<string, unknown>): NormalizedQuestion[] {
 	}
 	// 单问题模式：顶层字段
 	const type = (params.type as NormalizedQuestion["type"]) ?? "input";
+	const isPickList = type === "select" || type === "multi_select";
 	return [
 		{
 			id: "default",
 			type,
 			question: String(params.question ?? ""),
-			options: type === "select" ? normalizeOptions(params.options) : undefined,
+			options: isPickList ? normalizeOptions(params.options) : undefined,
 			allowOther: type === "select" ? params.allowOther !== false : undefined,
 			placeholder: params.placeholder as string | undefined,
 			prefill: params.prefill as string | undefined,
@@ -209,7 +214,12 @@ function singleResult(q: NormalizedQuestion, a: Answer, cancelled: boolean) {
 /** 批量结果：返回结构化 questions/answers，便于 LLM 按 id 取值 */
 function batchResult(qs: NormalizedQuestion[], answers: Answer[], cancelled: boolean) {
 	const lines = answers.map((a) => {
-		const v = typeof a.value === "boolean" ? (a.value ? "是" : "否") : String(a.value ?? "");
+		// multi_select 的 value 是数组，拼接展示（如「A、C」）
+		const v = Array.isArray(a.value)
+			? a.value.join("、")
+			: typeof a.value === "boolean"
+				? (a.value ? "是" : "否")
+				: String(a.value ?? "");
 		return `${a.id}: ${a.wasCustom ? "(自行输入) " : ""}${v}`;
 	});
 	return {
@@ -309,7 +319,12 @@ async function askBatch(
 		const complete =
 			!parsed.cancelled &&
 			answers.length >= questions.length &&
-			answers.every((answer) => answer?.value !== null && answer?.value !== undefined);
+			answers.every((answer) => {
+				const value = answer?.value;
+				// multi_select 空数组视为未作答
+				if (value === null || value === undefined) return false;
+				return !Array.isArray(value) || value.length > 0;
+			});
 		return { answers, cancelled: !complete };
 	} catch {
 		return { answers: [], cancelled: true };
@@ -338,6 +353,7 @@ export default function (pi: ExtensionAPI) {
 				"Single question: use type/question/options/placeholder/prefill.",
 				"Multiple questions: use questions:[{id,type,question,options,allowOther,...}] to ask all at once in a tabbed batch UI.",
 				"For batch mode, set review:true to require a Submit/review tab before final submit.",
+				"Use type:multi_select when the user should pick MULTIPLE items from a list — it renders checkboxes and returns an array of selected values.",
 			].join(" "),
 		promptSnippet: feishuLinked
 			? "Ask the user a question directly in the reply text (Feishu session: ask_question is disabled)"
@@ -351,6 +367,7 @@ export default function (pi: ExtensionAPI) {
 			: [
 				"IMPORTANT RULE: Whenever you need ANY input from the user (a choice, confirmation, text, or multi-line content), you MUST use the ask_question tool. Do NOT write questions in plain text — that forces the user to type free-form replies and breaks the desktop UI interaction flow.",
 				"Use type:select with options when the user should pick from predefined choices. Options may be strings or {label, value?, description?} objects; use description to explain long options.",
+				"Use type:multi_select with options when the user should pick MULTIPLE choices — checkboxes are rendered and the answer is an array of selected values.",
 				"Use type:confirm when you need a yes/no decision before proceeding (e.g. destructive operations, irreversible changes).",
 				"Use type:input for short free-text responses, and type:editor for multi-line content like code or long explanations.",
 				"For multiple related questions, pass a questions array instead of calling the tool repeatedly — desktop shows a tabbed batch UI and returns all answers at once.",
@@ -363,6 +380,9 @@ export default function (pi: ExtensionAPI) {
 			const record = params as Record<string, unknown>;
 			const isBatch = Array.isArray(record.questions) && (record.questions as unknown[]).length > 0;
 			const questions = toQuestions(record);
+			// multi_select 的选项多选无法用 RPC 单选表达：单问题 multi_select 也强制走批量 envelope，
+			// 桌面端展开为带多选框的单个 tab，复用同一批应答协议。
+			const needsBatchEnvelope = isBatch || questions.some((q) => q.type === "multi_select");
 
 			// 飞书绑定会话：不弹交互卡片，直接返回指引（agent 会把问题写进回复转述给用户）
 			if (feishuLinked) {
@@ -398,10 +418,10 @@ export default function (pi: ExtensionAPI) {
 						};
 			}
 
-			// select 必须有非空 options，否则桌面端无法渲染选择卡片
+			// select / multi_select 必须有非空 options，否则桌面端无法渲染选择卡片
 			for (const q of questions) {
-				if (q.type === "select" && (!q.options || q.options.length === 0)) {
-					const msg = `ask_question 未执行：select 类型必须提供 options（问题: ${q.question}）`;
+				if ((q.type === "select" || q.type === "multi_select") && (!q.options || q.options.length === 0)) {
+					const msg = `ask_question 未执行：${q.type === "multi_select" ? "multi_select" : "select"} 类型必须提供 options（问题: ${q.question}）`;
 					return isBatch
 						? batchResult(questions, [], true)
 						: {
@@ -411,13 +431,13 @@ export default function (pi: ExtensionAPI) {
 									type: q.type,
 									answer: null,
 									answered: false,
-									error: "select requires non-empty options",
+									error: `${q.type} requires non-empty options`,
 								},
 							};
 				}
 			}
 
-			if (isBatch) {
+			if (needsBatchEnvelope) {
 				try {
 					const { answers, cancelled } = await askBatch(questions, record.review === true, ctx);
 					return batchResult(questions, answers, cancelled);

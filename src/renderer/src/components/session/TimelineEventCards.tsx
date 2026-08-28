@@ -1,12 +1,9 @@
-import { memo, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, ChevronUp, MessageCircle, Minimize, X } from "lucide-react";
+import { memo, useState } from "react";
+import { AlertTriangle, Brain, ChevronDown, ChevronRight, ChevronUp, MessageCircle, Minimize, X } from "lucide-react";
 import type { ChatMessage } from "../../../../shared/types";
 import { t, translateI18nDescriptor } from "../../i18n";
-import { classifyAskCardStatus, formatAskTitle, hasTextSelection, splitAskOption } from "../../utils/askUi";
 import { formatDuration, formatTime, stripAnsi } from "./TimelineFormat";
-import { Textarea } from "../ui-shadcn/textarea";
 import { StackTrace } from "../ui-shadcn/stack-trace";
-import { ApprovalCard } from "../ui-shadcn/approval-card";
 import { TimelineMarker } from "./TimelineMarker";
 import { LiveDuration } from "./LiveDuration";
 import { MarkdownStream } from "./MarkdownStream";
@@ -18,9 +15,7 @@ import { SingleLinePreview } from "./SingleLinePreview";
 import { deriveRespondingKind, type RespondingKind } from "./timeline/respondingKind";
 
 // Button 收口状态（P0）：本文件按钮全部保留原生——
-// compaction-card-header / thinking-card-trigger 是折叠触发器 + 内容排版容器（内部 span/small/em 结构）；
-// ask-question-card-option 是选项卡片；ask-question-card-submit/cancel 是品牌视觉按钮
-// （30px 圆角 14px + 2px 边框 + 硬编码品牌绿/危险色，非 token 值，换装会丢失品牌感）。
+// compaction-card-header / thinking-card-trigger 是折叠触发器 + 内容排版容器（内部 span/small/em 结构）。
 // 迁移路径见 P2 CSS 收口。
 
 function getDiagnosticTone(message: ChatMessage): "error" | "warning" | "success" | "info" {
@@ -151,176 +146,6 @@ export const DiagnosticMessageCard = memo(function DiagnosticMessageCard(props: 
 	);
 });
 
-/**
- * 内联提问卡片：渲染 Extension UI 请求（select/confirm/input/editor）作为 system 消息。
- * 用于实时会话中模型通过 ask_question 扩展向用户发起交互。
- */
-export const AskQuestionCard = memo(function AskQuestionCard(props: {
-	message: ChatMessage;
-	onRespond?: (response: { value?: string | boolean; cancelled?: boolean; confirmed?: boolean }) => void;
-}) {
-	const meta = props.message.meta as Record<string, unknown> | undefined;
-	const uiRequest = meta?.uiRequest as Record<string, unknown> | undefined;
-	const status = String(meta?.status ?? "pending");
-	const response = meta?.response as Record<string, unknown> | undefined;
-	const askState = classifyAskCardStatus(status, Boolean(response?.cancelled));
-	const answered = askState === "answered";
-	const cancelled = askState === "cancelled";
-
-	const [inputValue, setInputValue] = useState("");
-	const [cancelling, setCancelling] = useState(false);
-	const [expanded, setExpanded] = useState(true);
-	const inputRef = useRef<HTMLTextAreaElement>(null);
-
-	// 编辑器输入 ref
-	const editorRef = useRef<HTMLTextAreaElement>(null);
-
-	// 当 prefill 变化时同步到 inputValue
-	useEffect(() => {
-		if (uiRequest?.prefill) setInputValue(String(uiRequest.prefill));
-		setExpanded(true);
-	}, [uiRequest?.prefill, props.message.id]);
-
-	const handleSelect = (value: string) => {
-		// 划选复制的 mouseup 落在选项按钮上会冒充 click；有选区时不提交。
-		if (hasTextSelection()) return;
-		props.onRespond?.({ value });
-	};
-
-	const handleConfirm = (value: boolean) => {
-		if (hasTextSelection()) return;
-		props.onRespond?.({ confirmed: value });
-	};
-
-	const handleInputSubmit = () => {
-		if (inputValue.trim()) {
-			props.onRespond?.({ value: inputValue });
-		}
-	};
-
-	const handleCancel = () => {
-		setCancelling(true);
-		props.onRespond?.({ cancelled: true });
-	};
-
-	// 已回答/取消的卡片：信息已在 ToolCard 的 _askCard 中展示，此处不再重复渲染
-	if (answered || cancelled) {
-		return null;
-	}
-
-	// pending 卡片：显示交互界面
-	const cancellingLabel = t("ask.cancelling");
-	const method = String(uiRequest?.method ?? "input");
-	const title = String(uiRequest?.title ?? "");
-	const placeholder = String(uiRequest?.placeholder ?? "");
-	const options = uiRequest?.options as string[] | undefined;
-
-	return (
-		<TimelineMarker kind="ask" tone="active">
-			<ApprovalCard
-				open={expanded}
-				onOpenChange={setExpanded}
-				title={t("ask.toolName")}
-				// 与 live 卡一致：两行摘要（提问 + 引导去待办），眼睛展开完整步骤。
-				descriptionPreviewLines={2}
-				description={formatAskTitle(title || t("ask.defaultTitle"))}
-				status={cancelling ? t("ask.cancelling") : t("ask.waiting")}
-				statusTone={cancelling ? "danger" : "active"}
-				onCancel={handleCancel}
-				cancelDisabled={cancelling}
-				cancelLabel={t("common.cancel")}
-				className="ask-question-card pending"
-			>
-				<div className="ask-question-card-body">
-					{method === "select" && options && options.length > 0 && (
-						<div className="ask-question-card-options">
-							{/* 过滤掉 Pi 自带的 "✎ 自行输入..." 选项，用下方内联输入框替代。 */}
-							{options.filter((opt) => !opt.startsWith("✎")).map((opt) => {
-								const parsed = splitAskOption(opt);
-								return (
-									<button
-										key={opt}
-										className="ask-question-card-option"
-										onClick={() => handleSelect(opt)}
-										disabled={cancelling}
-									>
-										<span className="ask-question-card-option-label">{parsed.label}</span>
-										{parsed.description ? <span className="ask-question-card-option-desc">{parsed.description}</span> : null}
-									</button>
-								);
-							})}
-						</div>
-					)}
-					{method === "confirm" && (
-						<div className="ask-question-card-options ask-question-card-options-confirm">
-							<button
-								className="ask-question-card-option ask-question-card-option-yes"
-								onClick={() => handleConfirm(true)}
-								disabled={cancelling}
-							>
-								{t("common.true")}
-							</button>
-							<button
-								className="ask-question-card-option ask-question-card-option-no"
-								onClick={() => handleConfirm(false)}
-								disabled={cancelling}
-							>
-								{t("common.false")}
-							</button>
-						</div>
-					)}
-					{method === "input" && (
-						<div className="ask-question-card-input-row">
-							<Textarea
-								ref={inputRef}
-								className="ask-question-card-input"
-								placeholder={placeholder || t("ask.inputPlaceholder")}
-								value={inputValue}
-								onChange={(e) => setInputValue(e.target.value)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter" && !e.shiftKey) {
-										e.preventDefault();
-										handleInputSubmit();
-									}
-								}}
-								disabled={cancelling}
-							/>
-							<button
-								className="ask-question-card-submit"
-								onClick={handleInputSubmit}
-								disabled={!inputValue.trim() || cancelling}
-								title={t("ask.submit")}
-							>
-								<Check size={14} />
-							</button>
-						</div>
-					)}
-					{method === "editor" && (
-						<div className="ask-question-card-editor-area">
-							<Textarea
-								ref={editorRef}
-								className="ask-question-card-editor"
-								placeholder={placeholder || t("ask.editorPlaceholder")}
-								value={inputValue}
-								onChange={(e) => setInputValue(e.target.value)}
-								disabled={cancelling}
-							/>
-							<div className="ask-question-card-editor-actions">
-								<button
-									className="ask-question-card-submit"
-									onClick={handleInputSubmit}
-									disabled={!inputValue.trim() || cancelling}
-								>
-									{t("ask.submit")}
-								</button>
-							</div>
-						</div>
-					)}
-				</div>
-			</ApprovalCard>
-		</TimelineMarker>
-	);
-});
 
 /** 思考过程折叠卡片：与 ToolCard 同一套「单行 trigger」语言。
  * 折叠：Brain +「思考了 Xs」+ chevron + 单行预览，全部挤在同一行。

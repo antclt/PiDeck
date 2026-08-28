@@ -758,6 +758,8 @@ export const enUS: Record<TranslationKey, string> = {
   "ask.batchSubmitAll": "Submit all",
   "ask.batchIncomplete": "Some questions are still unanswered",
   "ask.batchGoReview": "Go to review",
+  "ask.multiSelectHint": "Select multiple",
+  "ask.selectedPrefix": "Selected: ",
   "common.add": "Add",
   "common.all": "All",
   "common.builtIn": "Built-in",

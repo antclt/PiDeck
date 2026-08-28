@@ -436,7 +436,6 @@ export {
   ToolGroupCard,
   CompactionCard,
   DiagnosticMessageCard,
-  AskQuestionCard,
   ThinkingBlock,
   RespondingIndicator,
   AssistantText,

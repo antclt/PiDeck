@@ -751,6 +751,8 @@ export const zhCN = {
   "ask.batchSubmitAll": "确认提交",
   "ask.batchIncomplete": "还有题目未回答",
   "ask.batchGoReview": "去审阅",
+  "ask.multiSelectHint": "可多选",
+  "ask.selectedPrefix": "已选择：",
   "common.add": "添加",
   "common.all": "全部",
   "common.builtIn": "内置",

@@ -68,6 +68,8 @@ function askAnswerText(answer: unknown, label?: string): string {
   if (label?.trim()) return label;
   if (typeof answer === "string") return answer;
   if (typeof answer === "boolean") return answer ? t("common.true") : t("common.false");
+  // multi_select 的 answer 是选中项数组；label 缺失时拼接展示而非误标未回答
+  if (Array.isArray(answer)) return answer.join("、");
   return t("ask.unanswered");
 }
 

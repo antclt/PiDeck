@@ -5347,7 +5347,7 @@ export class AgentManager {
 					return (
 						typeof typed.id === "string" &&
 						typeof typed.question === "string" &&
-						["select", "confirm", "input", "editor"].includes(String(typed.type))
+						["select", "multi_select", "confirm", "input", "editor"].includes(String(typed.type))
 					);
 				},
 			);

@@ -175,7 +175,6 @@ import { extractVisionBridgeBlocks, matchVisionBridgeEvent } from "../../utils/v
 import { visionImageHashes } from "../../utils/visionImageHash";
 import { ToolCard, ToolGroupCard, type DiffFileHandler } from "./ToolCallComponents";
 import {
-	AskQuestionCard,
 	CompactionCard,
 	DiagnosticMessageCard,
 	RespondingIndicator,
@@ -1372,7 +1371,6 @@ function renderChipText(text: string, onOpenFile?: (path: string) => void, valid
 
 export { ToolCard, ToolGroupCard };
 export {
-	AskQuestionCard,
 	CompactionCard,
 	DiagnosticMessageCard,
 	RespondingIndicator,
