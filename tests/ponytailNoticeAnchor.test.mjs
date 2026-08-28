@@ -31,14 +31,18 @@ test("通知统一走 sonner 全局 toast（不再有 app-notice 锚点浮层）
   );
   assert.match(runtimeController, /showNotice\(\s*notification\.message/);
   assert.match(notice, /from "sonner"/);
-  assert.match(notice, /toast\.(error|warning|info|\()/);
+  assert.match(notice, /toast\.custom/);
   assert.match(notice, /duration \?\? .*1500/);
   assert.match(runtimeController, /backgroundPending/);
   assert.match(runtimeController, /Number\.POSITIVE_INFINITY/);
 
-  // Toaster 使用官方右上角布局并显示可关闭按钮；兜底 DOM toast 也保持同一视觉位置。
+  // Toaster 使用官方右上角布局；关闭/复制按钮由自定义卡片渲染（NoticeToastCard）
   assert.match(sonner, /position="top-right"/);
-  assert.match(sonner, /closeButton/);
+  const card = readFileSync(
+    "src/renderer/src/components/ui-shadcn/notice-toast.tsx",
+    "utf8",
+  );
+  assert.match(card, /toast\.dismiss/);
   // fallback toast must align with Sonner while leaving the custom title-bar drag region.
   assert.match(notice, /"top:calc\(var\(--window-drag-height, 0px\) \+ 12px\)"/);
   assert.doesNotMatch(notice, /"top:16px"/);

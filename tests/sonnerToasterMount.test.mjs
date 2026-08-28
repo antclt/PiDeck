@@ -8,27 +8,32 @@ import assert from "node:assert/strict";
 
 const notice = readFileSync("src/renderer/src/utils/notice.ts", "utf8");
 const toaster = readFileSync("src/renderer/src/components/ui-shadcn/sonner.tsx", "utf8");
+const card = readFileSync("src/renderer/src/components/ui-shadcn/notice-toast.tsx", "utf8");
 const surfaces = readFileSync("src/renderer/src/styles/surfaces.css", "utf8");
 
 test("toaster mounted state is reported explicitly, not probed via DOM", () => {
   assert.match(notice, /export function setToasterReady/);
   assert.doesNotMatch(notice, /querySelector\("\[data-sonner-toaster\]"\)/);
   assert.match(toaster, /setToasterReady\(true\)/);
-  assert.match(toaster, /closeButton/);
   // 顶部 offset 必须让开自定义标题栏拖拽区，否则关闭按钮点击被 drag 命中测试吞掉
   assert.match(toaster, /var\(--window-drag-height/);
 });
 
 test("sonner toast uses neutral panel tokens instead of the dark pill", () => {
-  assert.match(toaster, /background:\s*"var\(--color-bg-panel\)"/);
-  assert.match(toaster, /var\(--shadow-popover\)/);
+  // 单条 toast 外观由自定义卡片 NoticeToastCard 承担，走同一套面板 token
+  assert.match(card, /bg-bg-panel/);
+  assert.match(card, /shadow-\[var\(--shadow-popover\)\]/);
+  assert.match(card, /border-border-subtle/);
   // 兜底 DOM toast 也不再使用黑色背景
   assert.doesNotMatch(notice, /rgba\(17,19,21/);
 });
 
 test("typed toast icons carry semantic colors", () => {
-  assert.match(surfaces, /\[data-sonner-toast\]\[data-type="error"\] \[data-icon\]/);
-  assert.match(surfaces, /\[data-sonner-toast\]\[data-type="warning"\] \[data-icon\]/);
+  assert.match(card, /CircleAlert/);
+  assert.match(card, /TriangleAlert/);
+  assert.match(card, /text-danger/);
+  assert.match(card, /text-warning/);
+  assert.match(card, /text-info/);
 });
 
 test("dialogs ignore outside interactions coming from the toast region", () => {

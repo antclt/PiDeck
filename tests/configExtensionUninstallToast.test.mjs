@@ -35,8 +35,9 @@ test("sonner Toaster 拦截 toast 非按钮区的 pointerdown（防拖选文本�
 	assert.match(source, /target\.closest\("\[data-sonner-toast\]"\)/);
 	// 不 preventDefault：保留文本选区默认行为
 	assert.match(source, /stopImmediatePropagation\(\)/);
-	// toast 内容显式允许选中
-	assert.match(source, /className: "app-sonner-toast select-text"/);
+	// toast 内容显式允许选中（自定义卡片根节点 select-text）
+	const card = read("src/renderer/src/components/ui-shadcn/notice-toast.tsx");
+	assert.match(card, /select-text/);
 });
 
 test("卸载命令提示与复制按钮 i18n 双语文案齐全", () => {
