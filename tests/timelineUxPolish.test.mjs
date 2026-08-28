@@ -72,9 +72,11 @@ test("auto-collapse uses run-start positioning without breaking follow semantics
   assert.match(controller, /SETTLED_TURN_VIEWPORT_ANCHOR_RATIO/);
   // isLatestRun（自动收起）保持按「最后一条显示条目」判定；
   // live 挂载门用单独的 isLastAgentRun（最后一个 agent-run）判定——
-  // 两者语义不同，不能合并（见 liveMountDecision 回归）
-  assert.match(timeline, /isLatestRun=\{index === displayRuns\.length - 1\}/);
-  assert.match(timeline, /isLastAgentRun=\{index === lastAgentRunIndex\}/);
+  // 两者语义不同，不能合并（见 liveMountDecision 回归）。
+  // 2026-08 perf：判定方式从 index 改为 run id（滚动窗口切片不再翻转位置 props），
+  // 语义保持：isLatestRun 用 lastDisplayedItemId、isLastAgentRun 用 latestAgentRunId。
+  assert.match(timeline, /isLatestRun=\{item\.id === lastDisplayedItemId\}/);
+  assert.match(timeline, /isLastAgentRun=\{item\.id === latestAgentRunId\}/);
   assert.match(timeline, /lastAgentRunIndex/);
 });
 

@@ -74,3 +74,7 @@ beui-todo-list.tmp.json
 
 # DSH 排查临时目录（测试日志/会话 jsonl/脚本）
 .dsh-tmp/
+
+# 临时编辑/测试脚本
+scratch-edit-samples/
+scripts/tmp-*
