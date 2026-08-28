@@ -158,6 +158,20 @@
   transition-duration: 320ms;
 }
 
+/* Spinner 统一走此 animation token：显式拥有 keyframe，避免依赖 Tailwind
+   `animate-spin` 的按需生成副作用。加载态是进行中操作的功能反馈，不能被
+   prefers-reduced-motion 静态化；仅使用线性 transform 旋转，不引入位移或闪烁。 */
+@theme {
+  --animate-pideck-spin: pideck-spin 1s linear infinite;
+
+  @keyframes pideck-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+
 /* 文件预览 Markdown 容器专属 chrome（挂 markdown-body 之上，仅作用于预览场景）：
  * 阅读宽度居中、任务列表 checkbox、kbd/mark、表格斑马纹、图片描边、details 折叠块。
  * 排版主体复用 timeline.css 的 .markdown-body 体系（标题/段落/列表/代码/引用/表格），

@@ -791,9 +791,11 @@ select:focus-visible {
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  /* Spinner 是进行中操作的功能反馈，不是装饰性动效；保留其线性旋转，
+     其余动画仍按系统偏好压缩为单帧。 */
+  *:not(.animate-pideck-spin),
+  *:not(.animate-pideck-spin)::before,
+  *:not(.animate-pideck-spin)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
@@ -3365,12 +3367,6 @@ select:focus-visible {
   border: 3px solid var(--color-border-subtle);
   border-top-color: var(--color-accent);
   border-radius: var(--radius-pill);
-  animation: spin 0.85s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 @keyframes fadeIn {
   from {
