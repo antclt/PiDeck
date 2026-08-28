@@ -1136,9 +1136,14 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		let modelLoadDetail = "";
 		try {
 			const report = await resolveModelListReport(piLocator, settingsStore, configManager, true);
-			modelLoadOk = report.ok && report.models.length > 0;
+			// 只有 pi 自己成功列出非空模型列表才算“保存且可用”。source 为 config-fallback
+			// 说明 pi 实际没能列出模型（CLI 空 → 回退读本地 models.json 兑底，且兑底会把空
+			// name 自动补成 ${provider}/${id}），此时报“已加载”是假绿灯。
+			modelLoadOk = report.ok && report.models.length > 0 && report.source !== "config-fallback";
 			modelCount = report.models.length;
 			modelLoadReason = report.reason;
+			// config-fallback 时 report.reason 为 null，补充一个可诊断原因，避免日志/UI 拿到空 reason。
+			if (report.source === "config-fallback") modelLoadReason = "config-fallback";
 			modelLoadDetail = report.detail ?? "";
 		} catch (error) {
 			modelLoadReason = "cli-failed";

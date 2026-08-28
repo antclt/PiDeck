@@ -643,12 +643,21 @@ export class ConfigManager {
 					{
 						...provider,
 						api: this.normalizeApiType(provider.api),
-						models: provider.models.map((model) => ({
-							...model,
-							api: typeof model.api === "string"
-								? this.normalizeApiType(model.api)
-								: model.api,
-						})),
+						models: provider.models.map((model) => {
+							const normalized: PiModelItem = {
+								...model,
+								api: typeof model.api === "string"
+									? this.normalizeApiType(model.api)
+									: model.api,
+							};
+							// pi schema 中 name 可选但需 minLength:1，空 name 会让 pi 整文件拒绝。
+							// 与拉取供应商列表的 parseProviderModelsResponse 行为对齐：name 为空
+							// 就删掉该键（可选字段缺省反而合法），避免手动新增模型留空时写坏文件。
+							if (typeof normalized.name === "string" && normalized.name.length === 0) {
+								delete normalized.name;
+							}
+							return normalized;
+						}),
 					},
 				]),
 			),

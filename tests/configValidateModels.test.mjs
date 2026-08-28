@@ -122,3 +122,24 @@ test("model id 含 / 与 - 等常见字符仍合法", async () => {
 	const result = await manager.saveModelsConfig(makeModels("openai", "deepseek-ai/DeepSeek-V3.2"));
 	assert.equal(result.valid, true);
 });
+
+test("normalizeModelsForPi 剥离空 name 键（对齐 pi schema minLength:1）", () => {
+	const data = {
+		providers: {
+			openai: {
+				baseUrl: "https://api.example.com/v1",
+				api: "openai-completions",
+				models: [
+					{ id: "gpt-4o", name: "" },
+					{ id: "gpt-4o-mini", name: "GPT-4o mini" },
+				],
+			},
+		},
+	};
+	// TS 的 private 只是编译期可见性，transpile 后是可调用普通方法，可直接断言归一结果。
+	const result = manager.normalizeModelsForPi(data);
+	const models = result.providers.openai.models;
+	// 空 name 应删键（可选字段缺省，pi 视为合法），非空 name 原样保留。
+	assert.equal(Object.hasOwn(models[0], "name"), false);
+	assert.equal(models[1].name, "GPT-4o mini");
+});
