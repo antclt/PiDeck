@@ -18,7 +18,6 @@ import { DshAgentToolsPanel } from "./DshAgentToolsPanel";
 
 type HeaderActions = {
   headerRef: RefObject<HTMLDivElement | null>;
-  compactionCount?: number;
   isAnonymous?: boolean;
   duration?: number;
   /** 将状态/操作区嵌入 Tab 栏，避免当前会话再单独占一行。 */

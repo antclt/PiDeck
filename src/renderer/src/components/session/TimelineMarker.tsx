@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Check, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 
-export type TimelineMarkerKind = "thinking" | "tool" | "compaction" | "diagnostic" | "ask";
+export type TimelineMarkerKind = "thinking" | "tool" | "diagnostic" | "ask";
 export type TimelineMarkerTone = "neutral" | "active" | "success" | "warning" | "error";
 
 const TONE_CLASSES: Record<TimelineMarkerTone, string> = {
@@ -23,7 +23,7 @@ const TONE_STATUS_ICONS: Partial<Record<TimelineMarkerTone, ReactNode>> = {
 };
 
 /** 状态图标是否显示：思考/工具过程行默认无轨，此函数只服务仍显示轨道的事件
- *  （压缩/提问/诊断）。工具即便显式开轨也不放大 ✓/✗，避免 14px 节点喧宾夺主。 */
+ *  （提问/诊断）。工具即便显式开轨也不放大 ✓/✗，避免 14px 节点喧宾夺主。 */
 function getStatusIcon(
   kind: TimelineMarkerKind,
   tone: TimelineMarkerTone,
@@ -33,7 +33,7 @@ function getStatusIcon(
 }
 
 /** 思考/工具已是「图标+文案」过程行（Codex/Cursor 同款），左侧圆点轨是重复装饰。
- *  压缩/提问仍用轨道表达事件归属；诊断等临时提示走显式 hideRail。 */
+ *  提问仍用轨道表达事件归属；诊断等临时提示走显式 hideRail。 */
 function shouldHideRail(kind: TimelineMarkerKind, hideRail?: boolean): boolean {
   if (hideRail != null) return hideRail;
   return kind === "thinking" || kind === "tool";

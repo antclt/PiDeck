@@ -7,7 +7,6 @@ import type { ChatMessage, ImageContent } from "../../../../shared/types";
 import { MarkdownStream } from "./MarkdownStream";
 import { Button } from "../ui-shadcn/button";
 import {
-  CompactionCard,
   DiagnosticMessageCard,
   EmptyState,
   MultiSelectModal,
@@ -1009,8 +1008,12 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                   // Legacy in-memory messages may still contain this placeholder.
                   return null;
                 }
+                // 压缩摘要卡片已按产品决策下线（与 dsh 后端行为对齐）：
+                // 压缩进行态由 RespondingIndicator「正在压缩」承担，压缩完成后
+                // 时间线直接呈现保留消息。pi 投影出的 compaction system 消息
+                // 仍会进入时间线数据（主进程继续维护），这里仅不渲染。
                 if (meta?.type === "compaction") {
-                  return <CompactionCard key={message.id} message={message} sessionId={sessionId} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />;
+                  return null;
                 }
                 // 重试状态提示（retryScheduled/retrySucceeded 等）
                 // 属于「重试提示」，只弹 toast、不占时间线；失败类系统诊断照常渲染卡片。

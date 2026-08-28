@@ -507,12 +507,6 @@ export const enUS: Record<TranslationKey, string> = {
   "app.preloadMissing": "Desktop preload API is not available. Restart PiDeck.",
   "app.projectChatGuide": "Built-in chat area. Click settings to change the chat directory.",
   "app.openSessionFile": "Click to open this session file in system editor",
-  "app.compactionEvent": "Session compacted",
-  "app.compactionCount": "Compacted {count} times",
-  "app.compactionTokensBefore": "~{count}k tokens before",
-  "app.compactionTooltip": "Compacted {count} times — only post-compaction messages are shown",
-  "app.compactionExpand": "Expand to view full summary",
-  "app.compactionCollapse": "Click to collapse",
   "app.messageExpand": "Show full message",
   "app.messageCollapse": "Collapse",
   "app.projectChatInfo":
@@ -1552,6 +1546,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.modelsSavedButLoadFailed": "Configuration saved, but pi loaded no models or failed to load them. Check the provider name, base URL and API key, or use \"Fetch models\" on the Models page.",
   "config.modelsRefreshed": "Refreshed model config for {count} Agent(s)",
   "config.modelsRefreshedPartial": "Refreshed {refreshed} Agent(s), {failed} failed",
+  "config.usage.refresh": "Refresh usage",
   "config.skillCreatedToast":
     "Skill created. Restart agents for it to take effect.",
   "config.skillDeletedToast":

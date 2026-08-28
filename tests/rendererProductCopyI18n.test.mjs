@@ -127,7 +127,6 @@ test("remaining renderer product copy is available in Chinese and English", () =
 	assert.equal(i18n.t("config.yaoNoMatches"), "未匹配到提示词");
 	assert.equal(i18n.t("config.skillHubCopyInstallCommand"), "复制安装命令");
 	assert.equal(i18n.t("app.queuedDeliveryUnknown"), "消息可能未送达");
-	assert.equal(i18n.t("app.compactionTokensBefore", { count: 24 }), "压缩前约 24k tokens");
 	assert.equal(i18n.t("mermaid.renderFailed"), "Mermaid 图表渲染失败");
 
 	i18n.setI18nLocale("en-US");
@@ -147,7 +146,6 @@ test("remaining renderer product copy is available in Chinese and English", () =
 	assert.equal(i18n.t("config.yaoNoMatches"), "No matching prompts");
 	assert.equal(i18n.t("config.skillHubCopyInstallCommand"), "Copy install command");
 	assert.equal(i18n.t("app.queuedDeliveryUnknown"), "The message may not have been delivered");
-	assert.equal(i18n.t("app.compactionTokensBefore", { count: 24 }), "~24k tokens before");
 	assert.equal(i18n.t("mermaid.renderFailed"), "Failed to render Mermaid diagram");
 });
 
@@ -166,7 +164,6 @@ test("reachable renderer surfaces use i18n without changing their UI structure",
 	assert.match(settings, /t\("settings\.saveAndClose"\)/);
 	assert.match(settingsStorage, /t\("settings\.storage\.clearConfirm"/);
 	assert.match(surface, /t\("activity\.executionSummary", \{ summary:/);
-	assert.match(surface, /t\("app\.compactionTokensBefore", \{ count:/);
 	assert.match(skillStore, /className="prompt-store-tab"[\s\S]*?t\("config\.skillStoreSearchPlaceholder"\)/);
 	assert.match(yaoStore, /className="store-sub-tab"[\s\S]*?t\("config\.yaoSearchPlaceholder"\)/);
 	assert.match(skillHub, /className="skillhub-installed-badge"[\s\S]*?t\("config\.installed"\)/);

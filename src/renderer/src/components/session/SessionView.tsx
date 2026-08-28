@@ -50,7 +50,6 @@ export type SessionViewProps = {
   onFocusPane?: () => void;
   activeAgentId?: string;
   activeAgent?: {
-    compactionCount?: number;
     noSession?: boolean;
     status?: string;
   } | null;
@@ -584,7 +583,6 @@ export function SessionView({
         onExitSplit={
           splitPane ? () => paneServices.exitSessionSplit(sessionId) : undefined
         }
-        compactionCount={activeAgent?.compactionCount}
         isAnonymous={activeAgent?.noSession}
         duration={sessionDuration}
         isStarting={isAgentStarting}
