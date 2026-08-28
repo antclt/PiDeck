@@ -1381,33 +1381,18 @@ export {
 };
 export { MultiSelectModal };
 
-/** 将毫秒数格式化为短可读形式,如 "3.2s" "1m23s" */
-type EntryAction = {
-	active?: boolean;
-	label: string;
-	onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
-	icon: ReactNode;
-};
-
+/**
+ * 会话定位轴（beUI PreviewRail）：右缘一列 1px 刻度对应最近 15 条用户消息，
+ * hover 出预览卡、点击跳转。工具开关已上收会话 Tab 栏（SessionToolAction），
+ * 此处不再承载其他入口；容器沿用 .outline-hover 的贴右缘偏移规则（有测试守护）。
+ */
 export function ConversationOutline(props: {
 	items: Array<{ id: string; role: string; title: string; time: string }>;
 	onJump: (id: string) => void;
-	extraAction?: EntryAction;
-	terminalAction?: EntryAction;
-	filesAction?: EntryAction;
-	gitAction?: EntryAction;
-	editorsAction?: EntryAction & { anchorRef?: React.RefObject<HTMLButtonElement | null> };
-	browserAction?: EntryAction;
 }) {
-	const [expanded, setExpanded] = useState(false);
-	const [dragging, setDragging] = useState(false);
-	const [top, setTop] = useState(() => getInitialOutlineTop());
-	const dragRef = useRef<{ startY: number; startTop: number } | null>(null);
-	const topRef = useRef(top);
-	const visibleItems = expanded ? props.items : props.items.slice(-15);
-	const hasMore = props.items.length > 15;
-	// 刻度导航（beUI PreviewRail）：与折叠大纲列表同源，封顶最近 15 条；
-	// 点击刻度直接复用 onJump 跳转，hover 预览卡展示消息摘要与时间。
+	// 跳转目标只作高亮反馈；会话切换后旧 id 不在新条目里时不高亮，避免错误落在第一条
+	const [railActiveId, setRailActiveId] = useState<string | undefined>(undefined);
+	// 刻度导航：与原大纲列表同源，封顶最近 15 条；点击刻度复用 onJump 跳转
 	const railItems = useMemo<PreviewRailItem[]>(
 		() =>
 			props.items.slice(-15).map((item) => ({
@@ -1418,53 +1403,11 @@ export function ConversationOutline(props: {
 			})),
 		[props.items],
 	);
-	// 跳转目标只作高亮反馈；会话切换后旧 id 不在新条目里时不高亮，避免错误落在第一条
-	const [railActiveId, setRailActiveId] = useState<string | undefined>(undefined);
 	const railActiveVisible =
 		railActiveId !== undefined && railItems.some((item) => item.id === railActiveId);
 
-	useEffect(() => {
-		topRef.current = top;
-	}, [top]);
-
-	useEffect(() => {
-		if (!dragging) return;
-		function onMove(event: PointerEvent) {
-			const drag = dragRef.current;
-			if (!drag) return;
-			setTop(clampOutlineTop(drag.startTop + event.clientY - drag.startY));
-		}
-		function onUp() {
-			setDragging(false);
-			dragRef.current = null;
-			localStorage.setItem(OUTLINE_TOP_STORAGE_KEY, String(topRef.current));
-		}
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-		return () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-		};
-	}, [dragging]);
-
-	useEffect(() => {
-		const onResize = () => setTop((value) => clampOutlineTop(value));
-		window.addEventListener("resize", onResize);
-		return () => window.removeEventListener("resize", onResize);
-	}, []);
-
-	function startDrag(event: ReactPointerEvent<HTMLElement>) {
-		event.preventDefault();
-		event.stopPropagation();
-		dragRef.current = { startY: event.clientY, startTop: topRef.current };
-		setDragging(true);
-	}
-
 	return (
-		<div
-			className={`outline-hover${dragging ? " dragging" : ""}`}
-			style={{ "--outline-top": `${top}px` } as React.CSSProperties}
-		>
+		<div className="outline-hover">
 			{railItems.length > 0 && (
 				<PreviewRail
 					orientation="vertical"
@@ -1478,141 +1421,15 @@ export function ConversationOutline(props: {
 						setRailActiveId(item.id);
 						props.onJump(item.id);
 					}}
-					/* 宽度对齐 outline-trigger（30px），min-h-0 抵消组件自带的演示高度 */
+					/* 宽度对齐原触发按钮（30px），min-h-0 抵消组件自带的演示高度 */
 					className="min-h-0 w-[30px]"
 					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
 					previewContainerClassName="inset-y-0 right-7 left-auto w-64"
 					previewClassName="[&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-1 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
 				/>
 			)}
-			<div className="outline-zone">
-				<button
-					className={`outline-trigger${props.items.length > 0 ? "" : " is-disabled"}`}
-					disabled={props.items.length === 0}
-					title={t("outline.trigger", { count: props.items.length })}
-					onPointerDown={props.items.length > 0 ? startDrag : undefined}
-				>
-					☰
-				</button>
-				{props.items.length > 0 && (
-				<nav className="conversation-outline">
-				<div className="outline-title">
-					<span
-						className="outline-drag-handle"
-						title={t("outline.drag")}
-						onPointerDown={startDrag}
-					>
-						⋮⋮
-					</span>
-					<span>{t("outline.title")}</span>
-					<span className="outline-count">{props.items.length}</span>
-				</div>
-				<div className="outline-list">
-					{hasMore && !expanded && (
-						<button
-							className="outline-expand"
-							onClick={() => setExpanded(true)}
-						>
-							{t("outline.showAll", { count: props.items.length })}
-						</button>
-					)}
-					{visibleItems.map((item) => (
-						<button
-							key={item.id}
-							className={
-								item.role === "user" ? "outline-user" : "outline-assistant"
-							}
-							onClick={() => props.onJump(item.id)}
-						>
-							<strong>{item.title}</strong>
-							<span>{item.time}</span>
-						</button>
-					))}
-				</div>
-				</nav>
-				)}
-			</div>
-			{props.extraAction && (
-				<button
-					type="button"
-					className={`scratch-pad-entry${props.extraAction.active ? " active" : ""}`}
-					title={props.extraAction.label}
-					aria-label={props.extraAction.label}
-					onClick={props.extraAction.onClick}
-				>
-					{props.extraAction.icon}
-				</button>
-			)}
-			{props.terminalAction && (
-				<button
-					type="button"
-					className={`terminal-entry${props.terminalAction.active ? " active" : ""}`}
-					title={props.terminalAction.label}
-					aria-label={props.terminalAction.label}
-					onClick={props.terminalAction.onClick}
-				>
-					{props.terminalAction.icon}
-				</button>
-			)}
-			{props.filesAction && (
-				<button
-					type="button"
-					className={`files-entry${props.filesAction.active ? " active" : ""}`}
-					title={props.filesAction.label}
-					aria-label={props.filesAction.label}
-					onClick={props.filesAction.onClick}
-				>
-					{props.filesAction.icon}
-				</button>
-			)}
-			{props.gitAction && (
-				<button
-					type="button"
-					className={`git-entry${props.gitAction.active ? " active" : ""}`}
-					title={props.gitAction.label}
-					aria-label={props.gitAction.label}
-					onClick={props.gitAction.onClick}
-				>
-					{props.gitAction.icon}
-				</button>
-			)}
-			{props.editorsAction && (
-				<button
-					type="button"
-					className={`editors-entry${props.editorsAction.active ? " active" : ""}`}
-					title={props.editorsAction.label}
-					aria-label={props.editorsAction.label}
-					onClick={props.editorsAction.onClick}
-				>
-					{props.editorsAction.icon}
-				</button>
-			)}
-			{props.browserAction && (
-				<button
-					type="button"
-					className={`browser-entry${props.browserAction.active ? " active" : ""}`}
-					title={props.browserAction.label}
-					aria-label={props.browserAction.label}
-					onClick={props.browserAction.onClick}
-				>
-					{props.browserAction.icon}
-				</button>
-			)}
 		</div>
 	);
-}
-
-const OUTLINE_TOP_STORAGE_KEY = "pi-desktop:outline-top";
-function getInitialOutlineTop() {
-	if (typeof window === "undefined") return 180;
-	const saved = Number(localStorage.getItem(OUTLINE_TOP_STORAGE_KEY));
-	if (Number.isFinite(saved) && saved > 0) return clampOutlineTop(saved);
-	return clampOutlineTop(Math.round(window.innerHeight * 0.32));
-}
-
-function clampOutlineTop(value: number) {
-	if (typeof window === "undefined") return value;
-	return Math.min(window.innerHeight - 92, Math.max(76, value));
 }
 
 export { DrawerContent, SessionFileSummary, SessionHistoryModal } from "./WorkspaceSurface";
