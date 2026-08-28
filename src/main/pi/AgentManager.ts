@@ -22,9 +22,11 @@ import type {
 	SessionEnvironment,
 	SessionMessagePage,
 	ThinkingUpdate,
+	SessionFileChange,
 	SessionTodoSnapshot,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
+import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { PiProcess } from "./PiProcess";
 import { createCompactRpcRequest } from "./compactRpc";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
@@ -882,6 +884,13 @@ export class AgentManager {
 	}
 
 
+	/**
+	 * 会话级文件修改汇总：从会话显示消息全量聚合 write/edit/create/patch。
+	 * 与渲染层 TimelineFormat 共用 shared/fileChanges 解析，历史/活会话通用。
+	 */
+	async readSessionFileChanges(sessionPath: string): Promise<SessionFileChange[]> {
+		return collectSessionFileChanges(await this.readSessionDisplayMessages(sessionPath, "_viewer"));
+	}
 
 	/**
 	 * 会话级 todo 快照：读会话分支上最新 pi-deck-todo custom 条目（历史会话重建任务 tab）。

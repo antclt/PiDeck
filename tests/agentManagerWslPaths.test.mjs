@@ -86,6 +86,9 @@ function loadAgentManager() {
 		require: (id) => id === "node:fs/promises" ? fsPromises : id === "../../shared/sessionTodo"
 			// todo 快照解析纯函数：本测试不覆盖，空实现满足依赖契约
 			? { parseTodoSnapshotData: () => undefined }
+			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
+			: id === "../../shared/fileChanges"
+			? { collectSessionFileChanges: () => [] }
 			: require(id),
 	}, { filename: "SessionHistoryReader.ts" });
 	class SessionFileEditor {
@@ -185,6 +188,8 @@ function loadAgentManager() {
 			if (id === "../extensions/enabledExtensionResolver") {
 				return { resolveEnabledExtensionPaths: () => null };
 			}
+			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
+			if (id === "../../shared/fileChanges") return { collectSessionFileChanges: () => [] };
 			return require(id);
 		},
 	};

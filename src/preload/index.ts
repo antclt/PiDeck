@@ -546,6 +546,11 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.sessionsListSubagents, sessionId) as Promise<
 				import("../shared/types").PiSubagentEntry[]
 			>,
+		/** 会话级文件修改汇总（write/edit/create/patch 聚合，历史/活会话通用）。 */
+		listSessionFileChanges: (sessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsListFileChanges, sessionId) as Promise<
+				import("../shared/types").SessionFileChange[]
+			>,
 		/** 会话级 todo 快照（pi-deck-todo custom 条目重建，历史会话任务 tab）。 */
 		listSessionTodo: (sessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.sessionsListSessionTodo, sessionId) as Promise<

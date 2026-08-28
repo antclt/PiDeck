@@ -817,6 +817,17 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return records;
 		},
 	);
+	/** 会话级文件修改汇总：从会话文件全量显示消息聚合（历史/活会话通用）。 */
+	ipcMain.handle(
+		ipcChannels.sessionsListFileChanges,
+		async (_event, sessionId: string) => {
+			if (typeof sessionId !== "string" || !sessionId) return [];
+			const entry = sessionCatalog.get(sessionId);
+			// DSH/生图会话无 pi 会话文件，文件汇总无意义
+			if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return [];
+			return agentManager.readSessionFileChanges(entry.filePath);
+		},
+	);
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划（历史会话任务 tab）。 */
 	ipcMain.handle(
 		ipcChannels.sessionsListSessionTodo,
