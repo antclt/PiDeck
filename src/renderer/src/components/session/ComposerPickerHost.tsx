@@ -100,7 +100,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
 
   // C19：模型目录数据源统一 hook——打开模型/思考选择器即加载（不依赖 record：欢迎页/
   // 未启动 Agent 时 record 为 undefined，但模型列表是全量的）。Pi 欢迎页也要加载，才能
-  // 使用启动 capability snapshot 的精确 thinkingLevels；DSH 继续按 reasoningEfforts 过滤。
+  // 使用启动 capability snapshot 的精确 thinkingLevels；DSH 的 catalog 提供默认档位与
+  // 当前模型信息（思考档位按当前模型 reasoningEfforts 裁剪，模型未知/未声明时回退全量，
+  // host 负责最终能力校验）。
   const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
   const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
   // 非 live 残留 state 不能盖住 catalog：Agent 未启动时改模型，选择器高亮必须跟记录走。
@@ -500,23 +502,21 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     );
   }
   if (props.picker === "thinking") {
-    // DSH：只显示当前模型支持的档位。host 的 models catalog 带 reasoningEfforts
-    // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——选不支持的档位
-    // 不会立即报错，而是在下一次 LLM 请求抛 UNSUPPORTED_REASONING_EFFORT（回合失败）。
+    // DSH：当前模型在 host catalog 中且声明了 reasoningEfforts 时，只展示该模型声明的档位
+    // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——档位列表按模型裁剪。
+    // 当前模型未知、或目录未声明 reasoningEfforts 时回退全量 THINKING_LEVELS。
+    // host 仍负责最终能力校验——选到不支持的档位不在选择器层预判失败，而在
+    // setRuntimeThinking / 下一次 LLM 请求由 host 抛 UNSUPPORTED_REASONING_EFFORT（回合失败）。
     // 草稿期当前模型 = 部署默认模型（settings.yaml agent-default-model）。
     const currentProvider = resolvedLiveModel.provider;
     const currentModelId = resolvedLiveModel.modelId;
     const currentModel = models.find(
       (model) => model.provider === currentProvider && model.id === currentModelId,
     );
-    const thinkingLevels = isDshSession && currentModel?.reasoningEfforts
-      ? currentModel.reasoningEfforts.map((effort) => {
-          const known = THINKING_LEVELS.find((level) => level.value === effort.id);
-          return known
-            ? { value: known.value, labelKey: known.labelKey, descriptionKey: known.descriptionKey }
-            : { value: effort.id, label: effort.name ?? effort.id, description: effort.description };
-        })
-      : undefined;
+    // currentModel 用于 DSH 档位裁剪与 defaultEffort 兜底。
+    const dshLevels = currentModel?.reasoningEfforts && currentModel.reasoningEfforts.length > 0
+      ? toThinkingPickerLevels(currentModel.reasoningEfforts.map((effort) => effort.id))
+      : THINKING_LEVELS;
     const runtimeThinkingTarget = !isDshSession && runtimeLive && runtime?.agentId &&
       typeof runtime.runtimeGeneration === "number" && currentProvider && currentModelId
       ? {
@@ -562,7 +562,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
           fallback: welcomeThinking ?? props.defaultThinkingLevel ?? currentModel?.defaultEffort,
           isLive: runtimeLive,
         })}
-        levels={isDshSession ? thinkingLevels : piLevels}
+        levels={isDshSession ? dshLevels : piLevels}
         loading={piLevelsLoading}
         onClose={props.onClose}
         onPick={(level) => void pickThinking(level)}

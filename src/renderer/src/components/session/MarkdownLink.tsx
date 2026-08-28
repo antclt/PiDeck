@@ -1,10 +1,10 @@
 import type React from "react";
-import { FileText } from "lucide-react";
 import {
 	isLocalPathRef,
 	remarkLinkifyPaths,
 } from "./MarkdownLinkCore";
 import { useFilePathExists } from "./FileLinkBase";
+import { extractFileLinkLocation } from "../../utils/filePathLinks";
 export {
 	isLocalPathRef,
 	markdownUrlTransform,
@@ -18,7 +18,7 @@ export {
 export function MarkdownLink(
 	props: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
 		onOpenExternal: (url: string, forceSystem?: boolean) => void;
-		onOpenFile?: (path: string) => void;
+		onOpenFile?: (path: string, line?: number) => void;
 	},
 ) {
 	const { onOpenExternal, onOpenFile, children, className, title, ...anchorProps } = props;
@@ -26,28 +26,27 @@ export function MarkdownLink(
 	// 无协议 href（[text](path) 形式）也是本地路径引用，同样走 onOpenFile
 	const isFileLink = props.href?.startsWith("file://") ?? false;
 	const isLocalRef = !isFileLink && isLocalPathRef(props.href ?? "");
-	// 存在性判定只针对本地路径锚点：模型提到的路径经常不存在（幻觉/已删/跨项目），
-	// VS Code 同款策略——校验不存在时降级为纯文本，不再渲染成点开后空白的死链。
-	const fileLinkRawPath = props.href?.startsWith("file://")
-		? decodeURIComponent(props.href.slice(7))
+	// 显式 Markdown 链接可能写成 /C:/path/file.ts:42：先还原 Windows 盘符，
+	// 再把行号从路径里拆出来。校验用纯路径，点击带上行号（打开后滚动定位）。
+	const fileLinkRawPath = isFileLink
+		? props.href!.slice(7)
 		: isLocalRef
-			? (props.href ?? undefined)
+			? props.href
 			: undefined;
-	const pathExists = useFilePathExists(fileLinkRawPath);
+	const fileLinkLocation = fileLinkRawPath === undefined
+		? undefined
+		: extractFileLinkLocation(fileLinkRawPath);
+	const fileLinkPath = fileLinkLocation?.path;
+	const fileLinkLine = fileLinkLocation?.line;
+	const pathExists = useFilePathExists(fileLinkPath);
 	const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
 		e.preventDefault();
 		if (!props.href) return;
 
 		// 处理文件路径链接（file:// 协议 + 无协议的本地路径引用）
-		if (props.href.startsWith("file://")) {
-			const filePath = decodeURIComponent(props.href.slice(7));
-			if (onOpenFile) {
-				void onOpenFile(filePath);
-			}
-		} else if (isLocalPathRef(props.href)) {
-			// [text](docs/guide.md) 这类 markdown 本地文档链接：按相对 cwd 解析打开
-			if (onOpenFile) {
-				void onOpenFile(props.href);
+		if (isFileLink || isLocalRef) {
+			if (onOpenFile && fileLinkPath) {
+				void onOpenFile(fileLinkPath, fileLinkLine);
 			}
 		} else {
 			// 普通 URL 链接：修饰键点击（Ctrl/Cmd）强制走系统浏览器。
@@ -56,14 +55,20 @@ export function MarkdownLink(
 			void onOpenExternal(props.href, e.ctrlKey || e.metaKey || undefined);
 		}
 	};
-	// false=已确认不存在：渲染纯文本（无图标/无 hover/title）；undefined=未知或校验中：维持链接现状
+	// false=已确认不存在：渲染纯文本；undefined=未知或校验中：维持普通文本链接，
+	// 等存在性结果回来后只改变是否可点击，不引入胶囊式视觉跳变。
 	if (isFileLink || isLocalRef) {
 		if (pathExists === false) {
 			return <span className="text-text-tertiary">{children}</span>;
 		}
 	}
 	const linkClass =
-		[className, isFileLink || isLocalRef ? "markdown-link-file" : undefined]
+		[
+			className,
+			isFileLink || isLocalRef
+				? "cursor-pointer font-mono text-[var(--color-accent)] underline decoration-[var(--color-accent)]/50 underline-offset-2 hover:decoration-[var(--color-accent)]"
+				: undefined,
+		]
 			.filter(Boolean)
 			.join(" ") || undefined;
 	return (
@@ -73,16 +78,9 @@ export function MarkdownLink(
 			onClick={handleClick}
 			// 文件链接 hover 展示解码后的完整路径，便于确认目标文件；
 			// 普通链接不传 title，保留 markdown 自带 title 语法的原行为
-			title={isFileLink ? decodeURIComponent(props.href!.slice(7)) : title}
+			title={isFileLink ? fileLinkPath : title}
 		>
-			{isFileLink ? (
-				<>
-					<FileText size={12} className="markdown-link-file-icon" />
-					<span>{children}</span>
-				</>
-			) : (
-				children
-			)}
+			{children}
 		</a>
 	);
 }

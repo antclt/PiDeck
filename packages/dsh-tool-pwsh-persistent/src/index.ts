@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { join } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { deadline, timeoutOf } from "@deepseek-ai/dsh-timeout";
 import z from "@deepseek-ai/schemastery";
@@ -11,6 +10,7 @@ import {
 	stripPwshControl,
 	wrapPwshCommand,
 } from "./protocol.js";
+import { formatPwshStartupError, resolvePwshPath } from "./pwshResolver.js";
 
 export {
 	parsePwshCommandOutput,
@@ -19,6 +19,11 @@ export {
 	stripPwshControl,
 	wrapPwshCommand,
 } from "./protocol.js";
+export {
+	candidatePwshPaths,
+	formatPwshStartupError,
+	resolvePwshPath,
+} from "./pwshResolver.js";
 
 /** ESM 下解析 CJS 原生模块（node-pty 无 ESM 入口）。 */
 const require = createRequire(import.meta.url);
@@ -51,8 +56,12 @@ const require = createRequire(import.meta.url);
 const TIMEOUT_CODE = "PERSISTENT_PWSH_TIMEOUT";
 const POLL_INTERVAL_MS = 25;
 const SCROLLBACK_MAX_CHARS = 512 * 1024;
+// 模型可见的默认描述：刻意只讲持久会话的收益（复用进程、状态保留），
+// 不再写「沙箱下请用普通 pwsh」这类取舍——那条引导会让模型几乎永不选本工具
+// （见 2026-08 会话实测：15 次调用全是 one-shot pwsh）。沙箱语义仍由权限预设
+// 在工具准入层把关，描述层不替模型做"该不该用"的决策。
 const DEFAULT_DESCRIPTION =
-	"Run PowerShell commands in a persistent pwsh shell (much faster than the regular pwsh tool: the shell process is reused, avoiding ~350ms cold start per call). State, including the current directory and exported environment variables, persists across calls for this agent — use `Set-Location` and read it back, or pass `workdir`-independent absolute paths when you need a known location. Runs with full permissions (no sandbox): prefer the regular `pwsh` tool when the file policy requires a sandbox. Non-zero exits are reported as `[exit code: N]`. If the shell crashes or times out it is reset automatically and the next call starts fresh.";
+	"Run PowerShell commands in a persistent pwsh shell: prefer this tool for PowerShell work. The shell is reused across calls, so there is no per-call cold start. State — the current directory and exported environment variables — persists between calls; use `Set-Location` to change directory or pass absolute paths. Non-zero exits are reported as `[exit code: N]`; after a crash or timeout the shell resets automatically. Long-running work: use the regular `pwsh` tool with background execution instead.";
 
 function markers(): { start: string; end: string } {
 	const nonce = randomUUID();
@@ -88,6 +97,18 @@ function createPtySession(pwshPath: string, cwd: string | undefined, env: Record
 		"Remove-Module PSReadLine -ErrorAction SilentlyContinue",
 		// UTF-8 输出（PTY 下 pwsh 7 默认已 UTF-8，双保险）
 		"[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+		// 关掉 git 的分页器与终端凭证提示：本工具是 PTY，git 会误判 stdout
+		// 为交互式终端而进入 less/more 分页器等待按键，命令永不返回直到超时
+		// （实测 `git diff` 卡 5 分钟）；凭证提示同理会挂起。只改子进程环境，
+		// 不碰用户全局 git 配置（core.pager / credential helper 照常生效）。
+		"$env:GIT_PAGER = 'cat'",
+		"$env:GIT_TERMINAL_PROMPT = '0'",
+		// npx 首次运行会交互确认安装（"Ok to proceed? (y)"），PTY 下同样会
+		// 挂到超时；npm_config_yes 直接跳过确认。GIT_EDITOR=true 让 git 在
+		// commit/merge 需要编辑器时不做任何操作（宁可因空提交信息失败，
+		// 也不要打开 vim 之类的交互程序挂死 5 分钟）。
+		"$env:npm_config_yes = 'true'",
+		"$env:GIT_EDITOR = 'true'",
 		// 自定义提示符：persistentShells 用它在命令间隙判断 shell 空闲
 		`function prompt { '${SHELL_PROMPT} ' }`,
 	].join("; ");
@@ -123,7 +144,10 @@ function waitForPrompt(session: PersistentSession, signal: AbortSignal, timeoutM
 		const timer = setInterval(() => {
 			if (signal.aborted) {
 				clearInterval(timer);
-				reject(signal.reason);
+				// signal.reason 不保证是 Error（如 AbortSignal.any 的聚合对象）；
+				// 统一包装，避免工具层把启动异常渲染成 "[object Object]"。
+				const reason = signal.reason;
+				reject(reason instanceof Error ? reason : new Error(String(reason ?? "aborted")));
 				return;
 			}
 			if (session.dead) {
@@ -186,7 +210,14 @@ function persistentSessions(
 			} catch (error) {
 				await close(owner);
 				pending.delete(owner);
-				throw error;
+				// Cancellation is expected control flow; only startup failures should
+				// carry the executable path and installation guidance to the user.
+				if (combined.aborted) {
+					// 取消 reason 可能是非 Error 对象；包装成可读 Error 再抛。
+					const reason = signal.reason;
+					throw reason instanceof Error ? reason : new Error(String(reason ?? "aborted during shell creation"));
+				}
+				throw formatPwshStartupError(error, config.pwshPath);
 			}
 		})();
 		pending.set(owner, tracked);
@@ -333,9 +364,10 @@ const Config = z.object({
 
 function apply(ctx: { tools: { register(def: unknown): void }; effect(fn: () => (() => void | Promise<void>) | void, label: string): void }, config: Record<string, unknown>) {
 	const resolved = {
-		pwshPath: typeof config.pwshPath === "string" && config.pwshPath.trim().length > 0
-			? config.pwshPath
-			: resolveDefaultPwshPath(),
+		pwshPath: resolvePwshPath({
+			configuredPath: typeof config.pwshPath === "string" ? config.pwshPath : undefined,
+			platform: process.platform,
+		}),
 		timeoutMs: typeof config.timeoutMs === "number" && config.timeoutMs > 0 ? config.timeoutMs : 300_000,
 		maxOutputChars: typeof config.maxOutputChars === "number" && config.maxOutputChars > 0 ? config.maxOutputChars : 16_000,
 		startupTimeoutMs: typeof config.startupTimeoutMs === "number" && config.startupTimeoutMs > 0 ? config.startupTimeoutMs : 15_000,
@@ -344,13 +376,6 @@ function apply(ctx: { tools: { register(def: unknown): void }; effect(fn: () => 
 			: DEFAULT_DESCRIPTION,
 	};
 	registerPersistentPwsh(ctx, resolved);
-}
-
-/** 默认 pwsh：Windows 用 Program Files 的 PowerShell 7；其它平台走 PATH 里的 `pwsh`。 */
-function resolveDefaultPwshPath(): string {
-	if (process.platform !== "win32") return "pwsh";
-	const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
-	return join(programFiles, "PowerShell", "7", "pwsh.exe");
 }
 
 export { Config, apply, inject, name };

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	FILE_PATH_RE,
+	extractFileLinkLocation,
 	isAbsoluteFilePath,
 	matchPlainFilePaths,
+	normalizeFileLinkPath,
 	resolveFileLinkPath,
 } from "../src/renderer/src/utils/filePathLinks.ts";
 
@@ -48,6 +50,47 @@ test("isAbsoluteFilePath covers win drive, posix root and tilde only", () => {
 	assert.equal(isAbsoluteFilePath("~/a.ts"), true);
 	assert.equal(isAbsoluteFilePath("src/a.ts"), false);
 	assert.equal(isAbsoluteFilePath("https://x.com"), false);
+});
+
+test("extractFileLinkLocation splits path and line/column markers", () => {
+	assert.deepEqual(extractFileLinkLocation("/C:/Users/Test/project/src/App.tsx:392"), {
+		path: "C:/Users/Test/project/src/App.tsx",
+		line: 392,
+	});
+	assert.deepEqual(extractFileLinkLocation("/home/u/project/src/app.py:12:4"), {
+		path: "/home/u/project/src/app.py",
+		line: 12,
+		column: 4,
+	});
+	assert.deepEqual(extractFileLinkLocation("src/main/index.ts"), { path: "src/main/index.ts" });
+	assert.deepEqual(extractFileLinkLocation("C%3A%2FUsers%2FTest%2FMy%20File.ts%3A9"), {
+		path: "C:/Users/Test/My File.ts",
+		line: 9,
+	});
+	// normalizeFileLinkPath 与 extract 的 path 永远一致
+	assert.equal(
+		normalizeFileLinkPath("/C:/Users/Test/a.ts:42"),
+		extractFileLinkLocation("/C:/Users/Test/a.ts:42").path,
+	);
+});
+
+test("normalizes Markdown Windows file URLs and strips line locations", () => {
+	assert.equal(
+		normalizeFileLinkPath("/C:/Users/Test/project/src/App.tsx:392"),
+		"C:/Users/Test/project/src/App.tsx",
+	);
+	assert.equal(
+		normalizeFileLinkPath("/home/user/project/src/app.py:12:4"),
+		"/home/user/project/src/app.py",
+	);
+	assert.equal(
+		normalizeFileLinkPath("C%3A%2FUsers%2FTest%2FMy%20File.ts%3A9"),
+		"C:/Users/Test/My File.ts",
+	);
+	assert.equal(
+		resolveFileLinkPath("/C:/Users/Test/project/src/App.tsx:392"),
+		"C:/Users/Test/project/src/App.tsx",
+	);
 });
 
 test("resolveFileLinkPath joins relatives against base with matching separator and passes absolutes through", () => {

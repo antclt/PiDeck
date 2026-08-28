@@ -1,4 +1,4 @@
-import type { ChatMessage, ImageContent } from "../../shared/types";
+import type { ChatMessage, ImageContent, TodoItem } from "../../shared/types";
 
 /**
  * DSH SessionEvent → PiDeck ChatMessage 投影（纯函数，无副作用，可单测）。
@@ -53,6 +53,12 @@ export type DshProjection = {
 		maxGoalRounds: number;
 		roundsStarted: number;
 	};
+	/**
+	 * 当前待办计划（官方 `todos` projection 的等价折叠：`todo/write` 整表 last-wins，
+	 * `turn/start` 清为 null 的 standing-plan 语义）。undefined = 从未写入 / 无此能力；
+	 * null = 已清空；数组 = 当前有效计划。history/backfill 重放据此恢复 UI 状态。
+	 */
+	todos?: TodoItem[] | null;
 	/** 本条事件的增量信号（供调用方逐帧转发）。 */
 	deltaText?: string;
 	deltaReasoning?: string;
@@ -69,6 +75,43 @@ const TOOL_RESULT_MAX_CHARS = 2000;
 /** 运行时收窄：仅当值是对象且非数组时返回（用于可选字段的安全读取）。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** 两版 TodoItem 列表是否等价（长度 + content/status 逐一比对，避免无谓的 stateChanged）。 */
+function sameTodoList(left: TodoItem[] | null | undefined, right: TodoItem[] | null | undefined): boolean {
+	if (left === right) return true;
+	if (!Array.isArray(left) || !Array.isArray(right)) return false;
+	if (left.length !== right.length) return false;
+	for (let index = 0; index < left.length; index += 1) {
+		if (left[index].content !== right[index].content || left[index].status !== right[index].status) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * DSH `todo/write` / `todos` projection 的整表解析（whole-value 规则）。
+ * - null：显式清空（官方投影 init 与 turn/start 的取值）；
+ * - 合法数组：逐项收窄 content（trim 后非空）+ 三态 status，返回归一化 TodoItem[]；
+ * - 其余（非数组 / 任一项非法）：返回 undefined，调用方保持原值——脏数据不得把
+ *   已有计划误清成空、也不得渲染半截列表（与官方 schema 的 fail-loud 等价语义）。
+ */
+export function parseDshTodoList(value: unknown): TodoItem[] | null | undefined {
+	if (value === null) return null;
+	if (!Array.isArray(value)) return undefined;
+	const items: TodoItem[] = [];
+	for (const raw of value) {
+		if (!isRecord(raw)) return undefined;
+		const content = typeof raw.content === "string" ? raw.content.trim() : "";
+		const status = raw.status;
+		if (!content) return undefined;
+		if (status !== "pending" && status !== "in_progress" && status !== "completed") {
+			return undefined;
+		}
+		items.push({ content, status });
+	}
+	return items;
 }
 
 /** 按类型拆分内容块：text 与 reasoning 分开提取（两者不能混在同一条正文里）。 */
@@ -240,6 +283,12 @@ export function projectDshEvent(
 		case "assistant/message": {
 			// 终态：以组装后的完整内容块为准（delta 可能因适配器差异与终态不完全一致）
 			const message = (data.message ?? {}) as { content?: unknown };
+			const { images: assistantImages, refs: assistantImageRefs } = imagePartsFromContent(message.content);
+			const assistantImageMeta = assistantImageRefs.length > 0
+				? { dshImageRefs: assistantImageRefs }
+				: undefined;
+			// G2：assistant 终态也必须保留图片块，避免终态更新流式骨架时把图片覆盖掉。
+			const assistantImagesPresent = assistantImages.length > 0 || assistantImageRefs.length > 0;
 			// G16：usage 统计——adapter 报告 token 用量时 assistant/message 携带 usage，
 			// 投影进 projection（渲染层 runtime state 的 token/缓存指标），并写入本条
 			// assistant 消息的 meta.usage（轨迹账本按消息展示 token 用量，dsh-web 同源）。
@@ -264,6 +313,7 @@ export function projectDshEvent(
 			})();
 			const { text, reasoning } = splitBlocks(message.content);
 			const finalText = text.trim() ? text : base.pendingAssistantText;
+			// 终态内容可能暂时缺 image 块；保留流式骨架已有图片，避免更新时闪退。
 			// 流式累积兜底：终态 content 缺失 thinking 时用已流式渲染的累积文本
 			// （打包行/短 run 差异下终态块可能不含 reasoning）。
 			const finalThinking = reasoning.trim() ? reasoning : base.pendingAssistantThinking;
@@ -275,7 +325,7 @@ export function projectDshEvent(
 			const hasToolCalls = Array.isArray(message.content) && message.content.some(
 				(block) => block !== null && typeof block === "object" && (block as { type?: unknown }).type === "tool-call",
 			);
-			if (hasToolCalls && !finalText.trim() && !finalThinking.trim() && !base.pendingAssistantId) {
+			if (hasToolCalls && !finalText.trim() && !finalThinking.trim() && !assistantImagesPresent && !base.pendingAssistantId) {
 				next.pendingAssistantId = undefined;
 				next.pendingAssistantText = "";
 				next.pendingAssistantThinking = "";
@@ -300,6 +350,7 @@ export function projectDshEvent(
 						thinking: finalThinking.trim() ? finalThinking : undefined,
 						timestamp: eventTime(event.time),
 						stopReason: "stop",
+						...(assistantImages.length > 0 ? { images: assistantImages } : (previous.images ? { images: previous.images } : {})),
 						// 思考耗时：终态时间作为结束点（startedAt 已在骨架创建时记录）
 						...((finalThinking.trim() || previous.thinkingStartedAt !== undefined)
 							? { thinkingEndedAt: eventTime(event.time) }
@@ -310,6 +361,7 @@ export function projectDshEvent(
 						// 保留骨架已有 meta（工具视图等），并写入本条 usage（轨迹 token 用量）
 						meta: {
 							...(previous.meta ?? {}),
+							...(assistantImageMeta ?? {}),
 							...(usageForMessage ? { usage: usageForMessage } : {}),
 						},
 					};
@@ -326,7 +378,8 @@ export function projectDshEvent(
 							thinking: finalThinking.trim() ? finalThinking : undefined,
 							timestamp: eventTime(event.time),
 							stopReason: "stop",
-							...(usageForMessage ? { meta: { usage: usageForMessage } } : {}),
+							...(assistantImages.length > 0 ? { images: assistantImages } : {}),
+							...(assistantImageMeta || usageForMessage ? { meta: { ...(assistantImageMeta ?? {}), ...(usageForMessage ? { usage: usageForMessage } : {}) } } : {}),
 						},
 					];
 				}
@@ -342,7 +395,8 @@ export function projectDshEvent(
 						thinking: finalThinking.trim() ? finalThinking : undefined,
 						timestamp: eventTime(event.time),
 						stopReason: "stop",
-						...(usageForMessage ? { meta: { usage: usageForMessage } } : {}),
+						...(assistantImages.length > 0 ? { images: assistantImages } : {}),
+						...(assistantImageMeta || usageForMessage ? { meta: { ...(assistantImageMeta ?? {}), ...(usageForMessage ? { usage: usageForMessage } : {}) } } : {}),
 					},
 				];
 				next.messagesChanged = true;
@@ -487,6 +541,12 @@ export function projectDshEvent(
 			next.activeToolCalls = new Map<string, string>();
 			next.executingTool = undefined;
 			next.isStreaming = true;
+			// standing plan 语义（与官方 todos projection 单元的 turn/start 分支一致）：
+			// 新一轮开始清掉上一轮的计划，turn/end 保留刚完成的清单作为本轮收尾展示。
+			// 仅在确实有值时清（undefined = 从未写入，保持「能力未到达」与「已清空」可区分）。
+			if (base.todos !== undefined && base.todos !== null) {
+				next.todos = null;
+			}
 			next.stateChanged = true;
 			break;
 		}
@@ -546,6 +606,17 @@ export function projectDshEvent(
 			next.isStreaming = false;
 			next.turnEnded = true;
 			next.stateChanged = true;
+			break;
+		}
+		case "todo/write": {
+			// 官方 @deepseek-ai/dsh-tool-todo 的持久化快照（整表 last-wins）：
+			// 不进消息时间线（避免与工具卡重复），只折叠成「当前计划」供 todo 条展示。
+			// 非法数据返回 undefined → 保持原值，不误清已有计划（whole-value 规则）。
+			const parsed = parseDshTodoList(data.todos);
+			if (parsed !== undefined && !sameTodoList(base.todos, parsed)) {
+				next.todos = parsed;
+				next.stateChanged = true;
+			}
 			break;
 		}
 		case "request/context": {

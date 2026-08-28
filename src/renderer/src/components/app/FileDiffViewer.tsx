@@ -5,8 +5,9 @@ import { Button } from "../ui-shadcn/button";
 import { cn } from "../../lib/utils";
 import { MarkdownStream } from "../session/MarkdownStream";
 import { defaultUrlTransform } from "../session/MarkdownLinkCore";
-import { defaultRemarkPlugins, defaultRehypePlugins } from "streamdown";
+import { defaultRehypePlugins } from "streamdown";
 import rehypeKatex from "rehype-katex";
+import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
 // CodeDiffView 静态链上挂着 @pierre/diffs + shiki（WASM 重库），懒加载后这些模块
 // 移出首屏初始 chunk（约 -500KB 解析量），仅在用户打开 diff 时才拉取。
@@ -53,6 +54,8 @@ export function FileDiffViewer(props: {
 	theme?: "light" | "dark";
 	/** 单个文件超过此大小（MB）时不加载编辑器。默认 5MB。 */
 	maxFileSizeMB?: number;
+	/** 打开文件后滚动定位的目标行（1 起，来自 `path:line` 链接位置标记）。 */
+	initialLine?: number;
 	/**
 	 * Tab 已上收到 SessionTabsBar 时为 true：不再渲染内容区内嵌 Tab 栏/重复文件名，
 	 * 只保留右侧动作钮（预览/分屏/关闭）。
@@ -483,7 +486,7 @@ export function FileDiffViewer(props: {
 								<MarkdownStream
 									text={content}
 									onOpenExternal={() => undefined}
-									remarkPlugins={[defaultRemarkPlugins.gfm]}
+									remarkPlugins={[remarkGfmNoSingleTilde]}
 									rehypePlugins={[defaultRehypePlugins.raw, rehypeKatex]}
 									urlTransform={defaultUrlTransform}
 								/>
@@ -499,6 +502,7 @@ export function FileDiffViewer(props: {
 									value={content}
 									language={language}
 									readOnly={false}
+									initialLine={props.initialLine}
 									onChange={handleEditorChange}
 									onAttachSelection={handleAttachSelection}
 								/>

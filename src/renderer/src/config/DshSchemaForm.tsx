@@ -9,16 +9,17 @@ import {
 	SelectValue,
 } from "../components/ui-shadcn/select";
 import { cn } from "../lib/utils";
-import { deepEqual } from "../utils/deepEqual";
 import { dshFieldCopy } from "./dshFieldLabels";
 import type { DshSectionApi } from "./dshSchema";
 import {
-	deletePath,
 	dictEntries,
+	hasDshDraftChanges,
 	isSecretSet,
+	normalizeDshNumberDraft,
 	normalizeDshSchema,
 	objectFields,
 	pruneEmptyObjects,
+	readDshDraftValue,
 	readPath,
 	setPath,
 	unionConstOptions,
@@ -65,12 +66,19 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 	const schema = useMemo(() => normalizeDshSchema(namespace.schema), [namespace.schema]);
 	const root = schema?.refs[schema.uid];
 
-	/** 表单草稿：只记录「从默认值改动的字段」，patch 按需展开。 */
+	/** 表单草稿：只记录「被编辑过的字段」，patch 按需展开。 */
 	const [draft, setDraft] = useState<Record<string, unknown>>({});
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const dirty = Object.keys(draft).length > 0;
+	/** 保存视角的草稿：number 字段的原始字符串草稿归一化为数值（脏判定与提交同源）。 */
+	const effectiveDraft = useMemo(
+		() => (schema && root ? normalizeDshNumberDraft(schema, root, draft) : draft),
+		[schema, root, draft],
+	);
+
+	/** 脏 = 草稿里存在与已保存值不同的字段（草稿保留编辑轨迹，不因「等于原值」删键）。 */
+	const dirty = hasDshDraftChanges(effectiveDraft as Record<string, unknown>, namespace.value);
 
 	// 脏状态上报 + 保存函数注册（顶部统一保存）
 	useEffect(() => {
@@ -79,8 +87,12 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 		return () => sectionApi?.onDirtyChange(instanceId, false);
 	}, [sectionApi, instanceId, dirty]);
 	const save = useCallback(async (): Promise<boolean> => {
-		if (Object.keys(draft).length === 0) return true;
-		const patch = pruneEmptyObjects(draft) as Record<string, unknown>;
+		if (!hasDshDraftChanges(effectiveDraft as Record<string, unknown>, props.namespace.value)) {
+			// 草稿全是「改回原值」的无操作：清掉覆盖，避免提交等值空 patch
+			setDraft({});
+			return true;
+		}
+		const patch = pruneEmptyObjects(effectiveDraft) as Record<string, unknown>;
 		setSaving(true);
 		setError(null);
 		try {
@@ -93,7 +105,7 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 		} finally {
 			setSaving(false);
 		}
-	}, [draft, props]);
+	}, [effectiveDraft, props]);
 	useEffect(() => {
 		if (!sectionApi) return;
 		sectionApi.registerSave(instanceId, save);
@@ -104,20 +116,13 @@ export function DshSchemaForm(props: DshSchemaFormProps) {
 		return <div className="py-6 text-center text-control text-muted-foreground">{t("config.dsh.schemaUnavailable")}</div>;
 	}
 
-	const value = (path: string[]) => {
-		const overridden = readPath(draft, path);
-		return overridden !== undefined ? overridden : readPath(namespace.value, path);
-	};
+	const value = (path: string[]) => readDshDraftValue(draft, namespace.value, path);
 
 	const update = (path: string[], next: unknown) => {
 		const nextDraft = { ...draft };
-		// 改回原值 / 清空输入（沿用默认）都算「撤销覆盖」：彻底删掉该路径，脏标记随之消失，
-		// 而不是 setPath(undefined) 留下空键导致脏状态残留。
-		if (next === undefined || next === "" || deepEqual(next, readPath(namespace.value, path))) {
-			deletePath(nextDraft, path);
-		} else {
-			setPath(nextDraft, path, next);
-		}
+		// 覆盖始终写入草稿（含空串/等于已存值）：输入框显示恒等于用户输入，
+		// 只有「保存时与已保存值不同」才算脏；否则打到一半的值会被当作改回原值清掉。
+		setPath(nextDraft, path, next);
 		setDraft(nextDraft);
 	};
 
@@ -292,7 +297,9 @@ function Field(props: {
 	}
 
 	if (ref.type === "number") {
-		const current = typeof value === "number" ? String(value) : "";
+		// 草稿存原始输入字符串（编辑中间态如 "5e"/空串不被误转换），保存时经
+		// normalizeDshNumberDraft 转回数值；显示也优先草稿原文，避免清空瞬间弹回已存值。
+		const current = typeof value === "string" ? value : typeof value === "number" ? String(value) : "";
 		return (
 			<Labeled name={path[path.length - 1] ?? ""} meta={meta}>
 				<Input
@@ -300,10 +307,7 @@ function Field(props: {
 					type="number"
 					value={current}
 					disabled={!writable}
-					onChange={(event) => {
-						const next = Number(event.target.value);
-						onChange(path, Number.isFinite(next) ? next : undefined);
-					}}
+					onChange={(event) => onChange(path, event.target.value)}
 				/>
 			</Labeled>
 		);

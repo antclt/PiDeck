@@ -14,6 +14,7 @@ import type {
 	SendPromptInput,
 	SendPromptResult,
 	SessionUiResponseInput,
+	TodoItem,
 } from "../../shared/types";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
@@ -26,7 +27,7 @@ import { getAppLogger } from "../logging/sharedLogger";
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
 import type { DshHost } from "./DshHost";
 import { renderDshSessionHtml, sanitizeExportFileName } from "./dshSessionHtmlExport";
-import { projectDshEvent, type DshProjection } from "./dshEventProjector";
+import { projectDshEvent, parseDshTodoList, type DshProjection } from "./dshEventProjector";
 import {
 	cacheHitPercentOf,
 	collectDshProcessEvent,
@@ -61,7 +62,7 @@ import {
 // DSH 会话持久化路径编码（与 DshHost 归档共用同一 workspace 目录名规则）
 import { dshSessionFilePath } from "./dshSessionPath";
 
-const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats"];
+const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats", "todos"];
 
 /**
  * DSH 后端网关：实现 SessionAgentGateway，把 DSH host（DshHost）的会话/事件
@@ -353,6 +354,10 @@ export class DshAgentManager implements SessionAgentGateway {
 				}
 				// G5：attach 后从投影恢复 goal 状态（goal/change 事件随历史重放）
 				runtime.goal = runtime.projection.goal;
+				// 待办计划随历史重放恢复（todo/write / turn/start 事件折叠；standing plan 语义）
+				if (runtime.projection.todos !== undefined) runtime.todos = runtime.projection.todos;
+				// 尾页 projections baseline 兜底：底层完整折叠不受事件窗口截断影响
+				this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
 				// 轨迹系统提示随历史重放恢复（request/header 事件随历史投影）
 				if (runtime.projection.systemPrompt !== undefined) {
 					runtime.systemPrompt = runtime.projection.systemPrompt;
@@ -367,6 +372,14 @@ export class DshAgentManager implements SessionAgentGateway {
 			runtime.contextBreakdown = parseContextBreakdownProjection(attachProjectionValues);
 			runtime.usageTotals = parseTokenUsageProjection(attachProjectionValues);
 			runtime.sessionStats = parseSessionStatsProjection(attachProjectionValues);
+			// attach 初值兜底：list projections.values.todos 是底层完整折叠（和原始文件同源，
+			// 但不受 history 尾部截断影响——最早 todo/write 在窗口前也拿得到）。注册 seq
+			// 后与 mux 实时帧按 higher-seq-wins 收敛；解析失败保持 history 重放结果。
+			const baselineTodos = attachProjectionValues !== null && typeof attachProjectionValues === "object"
+				? (attachProjectionValues as Record<string, unknown>).todos
+				: undefined;
+			const parsedBaselineTodos = parseDshTodoList(baselineTodos);
+			if (parsedBaselineTodos !== undefined) runtime.todos = parsedBaselineTodos;
 			if (attachProjectionSeq !== undefined && attachProjectionValues !== null && typeof attachProjectionValues === "object") {
 				for (const key of DSH_PROJECTION_KEYS) {
 					if (Object.prototype.hasOwnProperty.call(attachProjectionValues, key)) {
@@ -481,7 +494,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/** 把 host selectModel 错误收成 commandFailure 能识别的文案。 */
-	private selectModelError(error: unknown, provider: string, modelId: string): Error {
+	private selectModelError(error: unknown, _provider: string, _modelId: string): Error {
 		const code = error && typeof error === "object" && "code" in error
 			? String((error as { code?: unknown }).code ?? "")
 			: "";
@@ -489,8 +502,14 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (lower.includes("busy") || lower.includes("in progress")) {
 			return new Error(`dsh selectModel busy: ${JSON.stringify(error)}`);
 		}
+		// DSH 会把档位错误（如 reasoning effort 不被目标模型支持）折叠成
+		// model-unavailable：保留原始 error.message（缺失时 JSON 兜底），
+		// 不转译成笼统的 Model not found，真实拒绝原因才能透传给用户。
 		if (lower.includes("model-unavailable") || lower.includes("unavailable")) {
-			return new Error(`Model not found: ${provider}/${modelId}`);
+			const message = error && typeof error === "object" && "message" in error
+				? String((error as { message?: unknown }).message ?? "")
+				: "";
+			return new Error(message || JSON.stringify(error));
 		}
 		return new Error(`dsh selectModel failed: ${JSON.stringify(error)}`);
 	}
@@ -548,6 +567,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			contextWindow: old.contextWindow,
 			usageTotals: old.usageTotals,
 			sessionStats: old.sessionStats,
+			// 重启瞬间先续上旧值：history 补帧成功后被投影结果覆盖；失败也不丢当前计划
+			todos: old.todos,
 		};
 		// 拉历史尾部投影为初始消息（重启后时间线恢复旧对话，同 create attach 路径）
 		const history = await client.sessions.history({ sessionId: dshSessionId, maxMessages: 200 }).catch(() => null);
@@ -570,6 +591,10 @@ export class DshAgentManager implements SessionAgentGateway {
 				runtime.processEvents,
 				entries.map(({ event }) => event),
 			);
+			// 重启后从历史投影恢复待办计划（todo/write 折叠；与 goal 同源恢复）
+			if (runtime.projection.todos !== undefined) runtime.todos = runtime.projection.todos;
+			// 尾页 projections baseline 兜底（历史事件窗口截断时仍恢复完整计划）
+			this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
 		}
 		this.runtimes.set(agentId, runtime);
 		await this.refreshModelDirectory(runtime, client).catch(() => undefined);
@@ -679,11 +704,16 @@ export class DshAgentManager implements SessionAgentGateway {
 			);
 			runtime.lastProjectedSeq = lastSeq;
 			runtime.goal = projection.goal;
+			// 断连窗口内的 todo/write 折叠一并补账（history 尾部重放；standing plan 语义）
+			if (projection.todos !== undefined) runtime.todos = projection.todos;
+			// 尾页 projections baseline：断连窗口内可能缺 todo 事件帧，baseline 完整兜底
+			this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
 			// 系统提示随补帧同步（request/header 事件可能落在断连窗口内）
 			if (projection.systemPrompt !== undefined) runtime.systemPrompt = projection.systemPrompt;
 			// 断连窗口内的过程事件（modelChange/权限/plan/压缩）一并补账
 			runtime.processEvents = collectDshProcessEvents(runtime.processEvents, freshEvents);
 			this.emitMessages(runtime);
+			this.emitRuntimeState(runtime.tab.id);
 		} catch (error) {
 			getAppLogger()?.warn("dsh-agent", "mux backfill failed", {
 				sessionId: String(runtime.sessionId),
@@ -740,6 +770,10 @@ export class DshAgentManager implements SessionAgentGateway {
 						runtime.lastProjectedSeq = lastEntry.event.seq;
 					}
 					runtime.goal = runtime.projection.goal;
+					// 待办计划随恢复重放补齐（host 崩溃窗口内的 todo/write 事件）
+					if (runtime.projection.todos !== undefined) runtime.todos = runtime.projection.todos;
+					// 尾页 projections baseline 兜底（新 host 的 registry 折叠与窗口无关）
+					this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
 					// 系统提示随恢复重放补齐（host 崩溃窗口内的 request/header 事件）
 					if (runtime.projection.systemPrompt !== undefined) {
 						runtime.systemPrompt = runtime.projection.systemPrompt;
@@ -876,6 +910,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			planModeActive: runtime.planModeActive,
 			// G5：当前 goal（goal/change 事件投影）
 			goal: runtime.goal,
+			// 当前待办计划（官方 todos projection / todo/write 快照；渲染层 todo 条数据源）
+			todos: runtime.todos,
 			// 上下文占用（host contextPressure/contextBreakdown 投影；缺失时消息估算兜底）
 			contextTokens: typeof contextTokens === "number" ? contextTokens : undefined,
 			contextWindow: typeof contextWindow === "number" ? contextWindow : undefined,
@@ -1663,7 +1699,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const pendingByMessage: Array<{ message: ChatMessage; refs: DshImageRef[] }> = [];
 		for (const message of messages) {
 			const refs = dshImageRefsFromMeta(message.meta);
-			if (refs.length === 0 || (message.images?.length ?? 0) > 0) continue;
+			if (refs.length === 0) continue;
 			const missing = refs.filter((ref) => !attempted?.has(ref.attachmentId));
 			if (missing.length > 0) pendingByMessage.push({ message, refs: missing });
 		}
@@ -1674,13 +1710,13 @@ export class DshAgentManager implements SessionAgentGateway {
 		}
 		const resolved = new Map<string, ImageContent>();
 		for (const [attachmentId, ref] of uniqueRefs) {
-			attempted?.add(attachmentId);
 			try {
 				const result = await client.sessions.attachment({
 					sessionId,
 					attachmentId: ref.attachmentId as import("@deepseek-ai/dsh-attachment").AttachmentIdType,
 				});
 				if (result.result.ok) {
+					attempted?.add(attachmentId);
 					resolved.set(attachmentId, {
 						type: "image",
 						data: result.result.value.data,
@@ -1705,7 +1741,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		let changed = false;
 		const nextMessages = messages.map((message) => {
 			const refs = dshImageRefsFromMeta(message.meta);
-			if (refs.length === 0 || (message.images?.length ?? 0) > 0) return message;
+			if (refs.length === 0) return message;
 			const images = refs
 				.map((ref) => resolved.get(ref.attachmentId))
 				.filter((image): image is ImageContent => Boolean(image));
@@ -1721,9 +1757,13 @@ export class DshAgentManager implements SessionAgentGateway {
 		try {
 			const client = this.requireClient();
 			const attempted = runtime.hydratedImageRefs ??= new Set<string>();
-			const updated = await this.hydrateDshImageRefs(client, runtime.sessionId, runtime.messages, attempted);
-			if (updated !== runtime.messages) {
-				runtime.messages = updated;
+			const snapshot = runtime.messages;
+			const updated = await this.hydrateDshImageRefs(client, runtime.sessionId, snapshot, attempted);
+			const merged = runtime.messages === snapshot
+				? updated
+				: mergeDshHydratedMessages(runtime.messages, updated);
+			if (merged !== runtime.messages) {
+				runtime.messages = merged;
 				this.emitMessages(runtime);
 			}
 		} catch (error) {
@@ -1830,6 +1870,40 @@ export class DshAgentManager implements SessionAgentGateway {
 			}
 			return;
 		}
+		if (key === "todos") {
+			// 官方 tool-todo 的 todos 投影：整表快照（null = 清空）。seq 已在
+			// acceptsProjectionFrame 做 higher-seq-wins；解析失败（undefined）保持原值。
+			const parsed = parseDshTodoList(payload.value);
+			if (parsed !== undefined) {
+				runtime.todos = parsed;
+				this.emitRuntimeState(runtime.tab.id);
+			}
+			return;
+		}
+	}
+
+	/**
+	 * 消费 `session.history` 尾页携带的 projections baseline（官方 ProjectionValueStore
+	 * 播种语义）：attach/restart/重连补帧/崩溃恢复都拉同一尾页，baseline 是底层完整折叠，
+	 * 不受 200 条事件窗口截断影响。与 mux 实时帧共用 acceptsProjectionFrame 的
+	 * higher-seq-wins，历史基线晚于实时帧到达时会被拒绝（不回退）。
+	 */
+	private applyHistoryProjectionBaseline(
+		runtime: DshAgentRuntime,
+		projections: unknown,
+	): void {
+		if (projections === null || typeof projections !== "object") return;
+		const block = projections as { asOfSeq?: unknown; values?: unknown };
+		const asOfSeq = typeof block.asOfSeq === "number" && Number.isSafeInteger(block.asOfSeq) && block.asOfSeq >= -1
+			? block.asOfSeq
+			: undefined;
+		const values = block.values !== null && typeof block.values === "object"
+			? block.values as Record<string, unknown>
+			: undefined;
+		const parsed = parseDshTodoList(values?.todos);
+		if (parsed === undefined) return;
+		if (asOfSeq !== undefined && !this.acceptsProjectionFrame(runtime, "todos", asOfSeq)) return;
+		runtime.todos = parsed;
 	}
 
 	private applyControl(runtime: DshAgentRuntime, next: DshControlState): void {
@@ -2052,7 +2126,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			if (event?.type === "turn/end") {
 				// D8：停止后的迟到 turn/end 不追加 error 气泡（停止 ≠ 回合失败）
 				runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, undefined, { skipErrorTurnEnd: true });
-				runtime.messages = runtime.projection.messages;
+				runtime.messages = mergeDshProjectedMessages(runtime.messages, runtime.projection.messages);
 				// 收口时带上已累积正文，避免空 done 把渲染层 live 槽抹成空白。
 				this.emit(ipcChannels.agentsTextStream, {
 					agentId: runtime.tab.id,
@@ -2068,7 +2142,10 @@ export class DshAgentManager implements SessionAgentGateway {
 			return;
 		}
 		runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, eventView);
-		runtime.messages = runtime.projection.messages;
+		runtime.messages = mergeDshProjectedMessages(runtime.messages, runtime.projection.messages);
+		// todo/write / turn/start 折叠进 projection.todos：实时同步到 runtime，
+		// 随 p.stateChanged 的 emitRuntimeState 一起推给渲染层 todo 条。
+		runtime.todos = runtime.projection.todos;
 		if (typeof event?.seq === "number" && event.seq > (runtime.lastProjectedSeq ?? 0)) {
 			runtime.lastProjectedSeq = event.seq;
 		}
@@ -2154,6 +2231,61 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 }
 
+/** Merge image bytes already available in a newer runtime snapshot into projection messages. */
+function mergeDshProjectedMessages(previous: ChatMessage[], projected: ChatMessage[]): ChatMessage[] {
+	const previousImagesById = new Map<string, ImageContent[]>();
+	for (const message of previous) {
+		if (message.images && message.images.length > 0) previousImagesById.set(message.id, message.images);
+	}
+	if (previousImagesById.size === 0) return projected;
+	let changed = false;
+	const merged = projected.map((message) => {
+		const previousImages = previousImagesById.get(message.id);
+		if (!previousImages) return message;
+		const images = mergeDshImageArrays(message.images, previousImages);
+		if (images === message.images) return message;
+		changed = true;
+		return { ...message, images };
+	});
+	return changed ? merged : projected;
+}
+
+/** Merge attachment hydration into the newest runtime list without dropping newer messages. */
+function mergeDshHydratedMessages(current: ChatMessage[], hydrated: ChatMessage[]): ChatMessage[] {
+	const hydratedById = new Map(hydrated.map((message) => [message.id, message]));
+	let changed = false;
+	const merged = current.map((message) => {
+		const hydratedMessage = hydratedById.get(message.id);
+		if (!hydratedMessage?.images) return message;
+		const images = mergeDshImageArrays(message.images, hydratedMessage.images);
+		if (images === message.images) return message;
+		changed = true;
+		return { ...message, images };
+	});
+	return changed ? merged : current;
+}
+
+function mergeDshImageArrays(existing: ImageContent[] | undefined, additions: ImageContent[]): ImageContent[] | undefined {
+	if (additions.length === 0) return existing;
+	const merged = [...(existing ?? [])];
+	let changed = false;
+	for (const image of additions) {
+		let duplicate = false;
+		for (const known of merged) {
+			if (known.mimeType !== image.mimeType) continue;
+			if (known.data !== image.data) continue;
+			duplicate = true;
+			break;
+		}
+		if (!duplicate) {
+			merged.push(image);
+			changed = true;
+		}
+	}
+	return changed ? merged : existing;
+}
+
+
 /** 本轮最后一条助手正文；收口 text-stream 时带上，避免空 done 抹掉 live 槽。 */
 function lastAssistantText(messages: ChatMessage[]): string {
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -2237,6 +2369,12 @@ type DshAgentRuntime = {
 		maxGoalRounds: number;
 		roundsStarted: number;
 	};
+	/**
+	 * 当前待办计划（官方 todos projection / todo/write 快照的归一化折叠）：
+	 * 实时 mux、attach/restart/backfill/recover 的多来源恢复都收敛到这一个字段，
+	 * 经 runtime-state 推给渲染层 todo 条；null = 已清空（standing plan 语义）。
+	 */
+	todos?: TodoItem[] | null;
 	/** 进行中的思考段 id（turn 内首个 reasoning-delta 起登记；终态清空）。 */
 	thinkingId?: string;
 	thinkingStartedAt?: number;

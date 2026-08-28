@@ -109,6 +109,18 @@ function sectionTabValue(section: ConfigSection, tab: ConfigTab): string {
 /** localStorage 键：Pi 管理页上次打开的 tab（重开弹窗时恢复位置，跨应用重启保留）。 */
 const CONFIG_LAST_TAB_KEY = "pideck-config-last-tab";
 
+/** localStorage 键：配置管理顶层后端分页（Pi/DSH）上次选择（重开弹窗时恢复）。 */
+const CONFIG_BACKEND_PANE_KEY = "pideck-config-backend-pane";
+
+/** 读取上次选定的配置管理后端分页；无记录/值失效时回退 Pi（默认后端，Pi 标签在左）。 */
+function loadLastConfigBackendPane(): "dsh" | "pi" {
+	try {
+		return localStorage.getItem(CONFIG_BACKEND_PANE_KEY) === "dsh" ? "dsh" : "pi";
+	} catch {
+		return "pi";
+	}
+}
+
 /** 全部合法 section / config 组子 tab，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
 const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "skills", "prompts", "extensions"];
 const CONFIG_TABS: readonly ConfigTab[] = ["models", "auth", "settings", "trust", "mcp", "raw"];
@@ -369,8 +381,19 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const [section, setSection] = useState<ConfigSection>(lastTab?.section ?? "config");
 	const [tab, setTab] = useState<ConfigTab>(lastTab?.tab ?? "models");
 	/** 配置管理顶层后端分页：以 Pi 为主（默认 Pi，且 Pi 标签在左），dsh 页在右。
-	 *  新建会话仍默认 dsh 是运行态偏好，与此处配置管理入口默认值相互独立。 */
-	const [backendPane, setBackendPane] = useState<"dsh" | "pi">("pi");
+	 *  新建会话仍默认 dsh 是运行态偏好，与此处配置管理入口默认值相互独立。
+	 *  弹窗每次打开都会重建 state，这里从 localStorage 恢复上次选定的后端分页。 */
+	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(loadLastConfigBackendPane);
+	/** 切换后端分页并持久化：退出配置管理再进入时停留在上次选定的后端。 */
+	const selectBackendPane = useCallback((value: string) => {
+		const next = value === "pi" ? "pi" : "dsh";
+		setBackendPane(next);
+		try {
+			localStorage.setItem(CONFIG_BACKEND_PANE_KEY, next);
+		} catch {
+			/* localStorage 不可用（隐私模式等）时静默失败，仅本次会话内不记忆 */
+		}
+	}, []);
 	const [loading, setLoading] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -2088,7 +2111,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const modalBody = (
 		<>
 			{/* 顶层后端分页：Pi 配置管理（默认，在左）/ DSH 配置管理（在右） */}
-			<Tabs value={backendPane} onValueChange={(value) => setBackendPane(value === "pi" ? "pi" : "dsh")} className="flex min-h-0 min-w-0 flex-1 flex-col">
+			<Tabs value={backendPane} onValueChange={selectBackendPane} className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<TabsList
 					// 嵌入设置窗口时 Pi/DSH 用 shadcn line variant（下划线式）：与顶层「系统设置/配置管理」
 					// 的分段条（default variant）区分层级——上层页面级、下层内容级，避免两条同款 tab 冲突。

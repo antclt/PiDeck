@@ -2,8 +2,8 @@ import { memo, useCallback, useRef, useState, type ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
-import { defaultRemarkPlugins } from "streamdown";
 import { Download, Eye, FilePlus, PanelRightOpen, Pencil, Trash2, X } from "lucide-react";
+import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
 import { MarkdownStream } from "../session/MarkdownStream";
 import { continueListOnNewline, normalizeOrderedLists, prepareTaskListPreview } from "./scratchPadLists";
 import type { Plugin } from "unified";
@@ -272,7 +272,7 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 										key={`scratch-pad-${content}`}
 										text={prepareTaskListPreview(content)}
 										onOpenExternal={() => undefined}
-										remarkPlugins={[defaultRemarkPlugins.gfm, remarkMath, remarkBreaks]}
+										remarkPlugins={[remarkGfmNoSingleTilde, remarkMath, remarkBreaks]}
 										rehypePlugins={[rehypeKatex, rehypeHighlightMark]}
 										components={{
 											/* GFM task list：用 AST 节点行号直接定位源码行，避免 render-order 计数器漂移 */

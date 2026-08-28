@@ -64,6 +64,29 @@ const NAV_ITEMS: Array<{ id: string; labelKey: TranslationKey; icon: ReactNode }
 { id: "raw", labelKey: "config.dsh.tab.raw", icon: <FileCode2 className="size-3.5" aria-hidden="true" /> },
 ];
 
+/** localStorage 键：DSH 配置页上次打开的导航子页（重开配置弹窗/应用重启后恢复位置，与 Pi 管理页同款记忆）。 */
+const DSH_LAST_TAB_KEY = "pideck-dsh-config-last-tab";
+const DSH_LAST_PLUGIN_PANE_KEY = "pideck-dsh-config-plugin-pane";
+
+/** 读取上次打开的 DSH 导航 id；无记录或值已失效时回退概览。 */
+function loadDshLastTab(): string {
+	try {
+		const raw = localStorage.getItem(DSH_LAST_TAB_KEY);
+		return raw && NAV_ITEMS.some((item) => item.id === raw) ? raw : "overview";
+	} catch {
+		return "overview";
+	}
+}
+
+/** 读取上次打开的插件子页（插件配置/插件列表）；默认插件配置。 */
+function loadDshLastPluginPane(): "config" | "list" {
+	try {
+		return localStorage.getItem(DSH_LAST_PLUGIN_PANE_KEY) === "list" ? "list" : "config";
+	} catch {
+		return "config";
+	}
+}
+
 /** DSH 配置页统一保存句柄（ConfigModal 顶部保存按钮经 ref 调用）。 */
 export type DshConfigTabHandle = {
 	/** 保存全部未保存修改；返回是否全部成功。 */
@@ -100,9 +123,29 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 	}>>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
-	const [activeTab, setActiveTab] = useState("overview");
+	const [activeTab, setActiveTab] = useState(loadDshLastTab);
 	/** 插件 tab 内部子页（对齐 dsh-web：插件配置 / 插件列表）。 */
-	const [pluginPane, setPluginPane] = useState<"config" | "list">("config");
+	const [pluginPane, setPluginPane] = useState<"config" | "list">(loadDshLastPluginPane);
+
+	/** 切换导航子页并持久化：退出配置弹窗/重启应用后再进入，回到上次选定的界面。 */
+	const selectTab = useCallback((id: string) => {
+		setActiveTab(id);
+		try {
+			localStorage.setItem(DSH_LAST_TAB_KEY, id);
+		} catch {
+			// 隐私模式等 localStorage 不可用：仅本次会话生效
+		}
+	}, []);
+
+	/** 切换插件子页并持久化（与 selectTab 同款记忆）。 */
+	const selectPluginPane = useCallback((pane: "config" | "list") => {
+		setPluginPane(pane);
+		try {
+			localStorage.setItem(DSH_LAST_PLUGIN_PANE_KEY, pane);
+		} catch {
+			// 同上：不可用时仅本次生效
+		}
+	}, []);
 
 	/** 子分区保存注册表（C22：公共 hook，instanceId → save；顶部保存按钮统一遍历调用）。
 	 *  脏状态同步维护（isDirty 立即可读），state 仅驱动 UI。 */
@@ -296,7 +339,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 							key={item.id}
 							type="button"
 							className={`config-nav-btn flex h-8 items-center justify-start gap-1.5 rounded-md px-2.5 text-control font-medium ${activeTab === item.id ? "bg-accent/50 text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
-							onClick={() => setActiveTab(item.id)}
+							onClick={() => selectTab(item.id)}
 						>
 							<span className="config-nav-icon">{item.icon}</span>
 							{t(item.labelKey)}
@@ -403,7 +446,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 													? "border-foreground text-foreground"
 													: "border-transparent text-muted-foreground hover:text-foreground"
 											}`}
-											onClick={() => setPluginPane(pane.id)}
+											onClick={() => selectPluginPane(pane.id)}
 										>
 											{t(pane.labelKey)}
 										</button>
@@ -422,8 +465,11 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 											</div>
 										)}
 									</div>
-									{/* G13 深化：动态 Cordis 插件管理（define/run/stop/undefine），PiDeck 独有能力保留在配置页 */}
-									<DshPluginSection />
+									{/* G13 深化：动态 Cordis 插件管理（define/run/stop/undefine），PiDeck 独有能力保留在配置页。
+									    与上方静态插件配置卡片分区：横线 + 间距隔开，避免两区视觉粘连。 */}
+									<div className="mt-6 border-t border-border/60 pt-4">
+										<DshPluginSection />
+									</div>
 								</div>
 								<div hidden={pluginPane !== "list"}>
 									<PluginInventoryView />

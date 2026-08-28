@@ -5,6 +5,7 @@ import { mermaid } from "@streamdown/mermaid";
 import { createMathPlugin } from "@streamdown/math";
 import { MarkdownLink, remarkLinkifyPaths } from "./MarkdownLink";
 import { markdownUrlTransform } from "./MarkdownLinkCore";
+import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
 import {
@@ -138,7 +139,11 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	text: string;
 	isStreaming?: boolean;
 	onOpenExternal: (url: string, forceSystem?: boolean) => void;
-	onOpenFile?: (path: string) => void;
+	/**
+	 * 会话内文件链接打开（path 为规范化后的绝对/可解析路径；line 为可选的
+	 * `path:line` 位置标记，打开后应滚动定位到该行）。
+	 */
+	onOpenFile?: (path: string, line?: number) => void;
 	/** 静态场景（FileDiffViewer/AppUpdateOverlay/ScratchPad）可覆盖默认插件 */
 	remarkPlugins?: Parameters<typeof Streamdown>[0]["remarkPlugins"];
 	rehypePlugins?: Parameters<typeof Streamdown>[0]["rehypePlugins"];
@@ -214,7 +219,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	const resolvedRemarkPlugins = isStreamingNow
 		? NO_STREAM_REMARK_PLUGINS
 		: (props.remarkPlugins ?? [
-				defaultRemarkPlugins.gfm,
+				remarkGfmNoSingleTilde,
 				defaultRemarkPlugins.codeMeta,
 				remarkLinkifyPaths,
 			]);

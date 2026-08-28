@@ -12,6 +12,8 @@
  * - string/number/boolean：meta 携带 default/min/max/role(secret|credential-ref)
  */
 
+import { deepEqual } from "../utils/deepEqual";
+
 export type DshSchemaRef = {
 	type: string;
 	meta?: Record<string, unknown>;
@@ -177,6 +179,85 @@ export function collectCredentialRefsWithValue(
 			if (child) collectCredentialRefsWithValue(schema, child, value, out);
 		}
 	}
+}
+
+/**
+ * 表单草稿覆盖读取：路径在草稿里（含空串）即用草稿值，否则回退已保存值。
+ *
+ * 空串必须视为「用户显式清空」而不是「未覆盖」——若草稿读值在这里吞掉空串，
+ * 用户删掉输入后输入框会立刻弹回已保存值（清不掉的经典体验）。
+ */
+export function readDshDraftValue(draft: unknown, saved: unknown, path: string[]): unknown {
+	const overridden = readPath(draft, path);
+	return overridden !== undefined ? overridden : readPath(saved, path);
+}
+
+/**
+ * 草稿相对已保存值是否有实际改动：沿草稿叶子路径逐点与已保存值比较。
+ *
+ * 与「值等于已保存就删除覆盖」策略不同：覆盖始终保留在草稿里，输入框显示就恒等于用户的
+ * 输入（逐字符变化时不会因为打到与已存值相等就跳回/清空）；脏状态只由「草稿 != 已保存」
+ * 的叶子决定，构造中的 "max" 不会被当作「改回原值」打断。
+ */
+export function hasDshDraftChanges(draft: Record<string, unknown>, saved: unknown): boolean {
+	const leaves: Array<{ path: string[]; value: unknown }> = [];
+	const walk = (node: unknown, path: string[]): void => {
+		if (node && typeof node === "object" && !Array.isArray(node)) {
+			const entries = Object.entries(node as Record<string, unknown>);
+			// 空对象视为无编辑（草稿不会产生「编辑成空对象」的叶子）
+			if (entries.length === 0) return;
+			for (const [key, value] of entries) walk(value, [...path, key]);
+			return;
+		}
+		leaves.push({ path, value: node });
+	};
+	walk(draft, []);
+	return leaves.some((leaf) => !deepEqual(leaf.value, readPath(saved, leaf.path)));
+}
+
+/**
+ * number 字段草稿的保存前归一化：草稿里的原始字符串转回数值。
+ *
+ * 数字输入框在编辑中间态（如 "5e"、清空）会给非数字字符串，若草稿直接存字符串，
+ * 提交的 patch 会带 string 而 host schema 是 number。这里按 schema 叶子类型转换：
+ * - number 叶子：trim 后为空/非法 → 返回 undefined（patch 删除该键，host 保持已保存值）；
+ * - object/dict/array：按字段/元素递归，容器叶子之外原样保留。
+ */
+export function normalizeDshNumberDraft(
+	schema: DshSchema,
+	ref: DshSchemaRef,
+	draft: unknown,
+): unknown {
+	if (ref.type === "number" && typeof draft === "string") {
+		const trimmed = draft.trim();
+		if (trimmed === "") return undefined;
+		const next = Number(trimmed);
+		return Number.isFinite(next) ? next : undefined;
+	}
+	if (ref.type === "object" && ref.dict && draft && typeof draft === "object" && !Array.isArray(draft)) {
+		const next: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(draft as Record<string, unknown>)) {
+			const fieldRef = schema.refs[ref.dict[key]];
+			const cleaned = fieldRef ? normalizeDshNumberDraft(schema, fieldRef, value) : value;
+			if (cleaned !== undefined) next[key] = cleaned;
+		}
+		return next;
+	}
+	if ((ref.type === "dict" || ref.type === "array") && ref.inner && draft && typeof draft === "object") {
+		const inner = schema.refs[ref.inner];
+		if (inner) {
+			if (Array.isArray(draft)) {
+				return draft.map((item) => normalizeDshNumberDraft(schema, inner, item) ?? item);
+			}
+			const next: Record<string, unknown> = {};
+			for (const [key, value] of Object.entries(draft as Record<string, unknown>)) {
+				const cleaned = normalizeDshNumberDraft(schema, inner, value);
+				if (cleaned !== undefined) next[key] = cleaned;
+			}
+			return next;
+		}
+	}
+	return draft;
 }
 
 /** 读取 path 下的当前值（未设置返回 undefined）。 */

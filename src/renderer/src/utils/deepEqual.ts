@@ -8,8 +8,9 @@
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	if (value === null || typeof value !== "object") return false;
-	const proto = Object.getPrototypeOf(value);
-	return proto === Object.prototype || proto === null;
+	// 用 toString 标签而不是原型比较：Node 测试通过 vm 加载本模块时，测试进程构造的
+	// 对象与模块内 Object.prototype 分属不同 realm，原型 === 会误判「不是普通对象」。
+	return Object.prototype.toString.call(value) === "[object Object]";
 }
 
 /** 深比较两个值结构是否相等（数组/对象逐项递归）。

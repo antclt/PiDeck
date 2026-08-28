@@ -25,6 +25,10 @@ export type CodeMirrorEditorProps = {
 	readOnly?: boolean;
 	/** 鼠标选中文本后右键菜单「引用选中内容」：携带选区起止行号（1 起），由调用方插入输入框。 */
 	onAttachSelection?: (startLine: number, endLine: number) => void;
+	/** 挂载/变化时滚动定位到该行（1 起），并把光标移动到行首。
+	 * 用于 `path:line` 链接（对齐 VS Code/Claude Code 的行内跳转）；
+	 * 行号超界时钳制到最近行。 */
+	initialLine?: number;
 };
 
 /** 右键选区菜单状态：无选区时保持 null（不接管浏览器右键菜单） */
@@ -45,6 +49,7 @@ export const CodeMirrorEditor = memo(function CodeMirrorEditor({
 	height = "100%",
 	readOnly = false,
 	onAttachSelection,
+	initialLine,
 }: CodeMirrorEditorProps) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const viewRef = useRef<EditorView | null>(null);
@@ -54,6 +59,9 @@ export const CodeMirrorEditor = memo(function CodeMirrorEditor({
 	onAttachSelectionRef.current = onAttachSelection;
 	// 外部 value 快照：仅用于跳过「onChange 已同步过」的重复 dispatch
 	const lastValueRef = useRef(value);
+	// 目标行最新值：挂载 effect 与变化 effect 都读 ref，memo 组件不因 props 重建函数
+	const initialLineRef = useRef(initialLine);
+	initialLineRef.current = initialLine;
 	const [selectionMenu, setSelectionMenu] = useState<SelectionMenu | null>(null);
 
 	// 右键：存在文本选区时接管默认菜单，弹出「引用选中内容」；无选区不拦截（保留浏览器菜单）。
@@ -122,6 +130,15 @@ export const CodeMirrorEditor = memo(function CodeMirrorEditor({
 		});
 		viewRef.current = view;
 		lastValueRef.current = value;
+		// 文档就绪即定位（值为空时跳过：真实内容到达后由 value effect 再定位一次）
+		const targetLine = initialLineRef.current;
+		if (targetLine !== undefined && view.state.doc.lines > 0) {
+			const line = view.state.doc.line(Math.min(targetLine, view.state.doc.lines));
+			view.dispatch({
+				selection: { anchor: line.from },
+				effects: [EditorView.scrollIntoView(line.from, { y: "center" })],
+			});
+		}
 		return () => {
 			view.destroy();
 			viewRef.current = null;
@@ -129,11 +146,32 @@ export const CodeMirrorEditor = memo(function CodeMirrorEditor({
 	// 语言/只读变化需重建实例（CM6 无热切换语言的标准路径，重建成本低且简单可靠）
 	}, [language, readOnly]);
 
+	// initialLine 变化（重新点击同文件链接/切换 tab）：文档未变时重新定位
+	useEffect(() => {
+		const view = viewRef.current;
+		const targetLine = initialLineRef.current;
+		if (!view || targetLine === undefined) return;
+		const line = view.state.doc.line(Math.min(targetLine, view.state.doc.lines));
+		view.dispatch({
+			selection: { anchor: line.from },
+			effects: [EditorView.scrollIntoView(line.from, { y: "center" })],
+		});
+	}, [initialLine]);
+
 	// 外部 value 同步：只在文档确实不同时替换（防止覆盖用户输入、防止 onChange 回环）
 	useEffect(() => {
 		const view = viewRef.current;
 		if (!view || view.state.doc.toString() === value) return;
 		view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+		// 内容替换完成后再定位：mount 时 doc 可能为空，这里拿走目标行
+		const targetLine = initialLineRef.current;
+		if (targetLine !== undefined) {
+			const line = view.state.doc.line(Math.min(targetLine, view.state.doc.lines));
+			view.dispatch({
+				selection: { anchor: line.from },
+				effects: [EditorView.scrollIntoView(line.from, { y: "center" })],
+			});
+		}
 	}, [value]);
 
 	return <div ref={hostRef} style={{ height, minHeight: 60 }} className="codemirror-host" onContextMenu={handleContextMenu}>

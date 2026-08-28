@@ -7,6 +7,10 @@ import { matchPlainFilePaths } from "../../utils/filePathLinks.ts";
  */
 const SAFE_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
 export function defaultUrlTransform(value: string): string {
+	// Windows 盘符路径（F:/... 或 F:\\...）是本地文件链接，不是协议：必须先放行，
+	// 否则 "F:" 会被当作未知协议清空 href → 显式本地链接点了无反应。
+	// 与 isLocalPathRef 的盘符判定同一口径。
+	if (/^[a-zA-Z]:[\\/]/.test(value)) return value;
 	const colon = value.indexOf(":");
 	const questionMark = value.indexOf("?");
 	const numberSign = value.indexOf("#");

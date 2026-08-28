@@ -184,3 +184,75 @@ test("rejects files whose header fails session validation", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+// 平铺子代理（@tintinweb/pi-subagents 形态）首次落库：轻量扫描 summary 不带
+// parentSessionPath，但在标题回填的同一次读头中探测到父（<agent>#<8hex> 名 +
+// parentSession header），新条目必须直接带上 parentSessionPath，而不是孤儿平铺。
+test("new tintinweb flat subagent entries carry parentSessionPath from the title fetcher", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-tintinweb-new-"));
+  try {
+    const parentPath = "C:/sessions/2026-08-22T04-22-29-162Z_parent.jsonl";
+    const childPath = "C:/sessions/2026-08-22T04-23-00-162Z_child.jsonl";
+    // fetcher 模拟 SessionScanner.inferSessionNameAndValidity：tintinweb 会话返回父路径。
+    const fetcher = async (filePath) =>
+      filePath === childPath
+        ? { name: "Explore#a1b2c3d4", valid: true, parentSessionPath: parentPath }
+        : filePath === parentPath
+          ? { name: "Parent", valid: true }
+          : {};
+    const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
+    await catalog.load();
+    const records = await catalog.mergeScanned("project-1", [
+      lightSummary({ id: childPath, filePath: childPath }),
+      lightSummary({ id: parentPath, filePath: parentPath }),
+    ]);
+    const child = records.find((record) => record.filePath === childPath);
+    assert.ok(child, "tintinweb child must be indexed");
+    assert.equal(child.parentSessionPath, parentPath, "child must link to its parent, not orphan at top level");
+    // 父会话本身不应带父。
+    const parent = records.find((record) => record.filePath === parentPath);
+    assert.equal(parent.parentSessionPath, undefined);
+    // 持久化：重启后父关系仍在。
+    const reloaded = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
+    await reloaded.load();
+    const [survived] = await reloaded.mergeScanned("project-1", [
+      lightSummary({ id: childPath, filePath: childPath }),
+    ]);
+    assert.equal(survived.parentSessionPath, parentPath, "parentSessionPath must survive reload");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// 存量孤儿升级：旧版 catalog 已经索引了 tintinweb 子代理（标题是 <agent>#<8hex>，
+// 但 parentSessionPath 为空）。collectScannedTitles 的嫌疑名回检要重新读头，
+// 把父关系补上并落盘——否则重启后仍以孤儿平铺在历史列表。
+test("legacy tintinweb orphans get parentSessionPath backfilled and persisted", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-tintinweb-orphan-"));
+  try {
+    const childPath = "C:/sessions/2026-08-22T04-23-00-162Z_child.jsonl";
+    const parentPath = "C:/sessions/2026-08-22T04-22-29-162Z_parent.jsonl";
+    // 无 fetcher 首次合并：孤儿条目落库（无父关系，旧版行为）。
+    const plain = new SessionCatalog(join(dir, "sessions.json"));
+    await plain.load();
+    const [orphan] = await plain.mergeScanned("project-1", [lightSummary({ id: childPath, filePath: childPath })]);
+    assert.equal(orphan.parentSessionPath, undefined, "legacy index has no parent link yet");
+
+    // 升级后的 fetcher（会探测到父）：嫌疑名回检应重新读头并补父关系。
+    const fetcher = async (filePath) =>
+      filePath === childPath
+        ? { name: "Explore#a1b2c3d4", valid: true, parentSessionPath: parentPath }
+        : { name: "Parent" };
+    const upgraded = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
+    await upgraded.load();
+    const [repaired] = await upgraded.mergeScanned("project-1", [lightSummary({ id: childPath, filePath: childPath })]);
+    assert.equal(repaired.parentSessionPath, parentPath, "orphan parent link must be backfilled");
+    // 落入磁盘：下次扫描无需再探测读盘。
+    const onDisk = JSON.parse(await nodeRequire("node:fs/promises").readFile(join(dir, "sessions.json"), "utf8"));
+    const persisted = onDisk.sessions?.find((entry) => entry.filePath === childPath);
+    assert.equal(persisted?.parentSessionPath, parentPath, "backfilled parent link must persist to disk");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

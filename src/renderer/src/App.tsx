@@ -43,7 +43,8 @@ import { useProjectRuntimeCapabilities } from "./hooks/useRuntimeCapabilities";
 import { useSessionRuntimeBridge } from "./hooks/useSessionRuntimeBridge";
 import { useAgentLoadNotice } from "./hooks/useAgentLoadNotice";
 import { useSessionLayout } from "./hooks/useSessionLayout";
-import { useFileEditor , resolveFileLinkPath } from "./hooks/useFileEditor";
+import { useFileEditor } from "./hooks/useFileEditor";
+import { resolveFileLinkPath } from "./utils/filePathLinks";
 import { useOverlayActions } from "./hooks/useOverlayActions";
 import { useWorkspacePanels, type WorkspaceDrawerPanel, type WorkspaceExternalEditorAdapter } from "./hooks/useWorkspacePanels";
 import { useDrawerPorts } from "./hooks/useDrawerPorts";
@@ -1318,12 +1319,19 @@ export function App() {
   // 图片 → 弹窗预览（readBase64 → ImagePreviewModal）；markdown/html → 中间栏查看
   //（FileDiffViewer 对 .md 默认 preview、.html 用 HtmlPreview 内置渲染）；其他文件 → 编辑器打开。
   // 替代原先的"系统默认应用打开"（.md 会被浏览器接管、体验割裂）
+  // line 为可选 `path:line` 位置标记：编辑器打开后滚动定位到该行。
   const handleOpenLinkedFile = useCallback(
-    (path: string) => {
+    (path: string, line?: number) => {
       const resolved = resolveFileLinkPath(
         path,
         activeAgent?.cwd ?? activeProject?.path,
       );
+      // 相对路径且无基准目录（无 agent cwd / 无项目）时解析器返回 null：
+      // 直接提示，而不是把原样相对路径丢给主进程按进程 cwd 乱猜 → 静默空白文件。
+      if (!resolved) {
+        showToast(t("app.fileLinkCannotResolve", { path }));
+        return;
+      }
       const ext = resolved.split(".").pop()?.toLowerCase() ?? "";
       if (IMAGE_EXTENSIONS.has(ext)) {
         // 图片：读取二进制 → 弹窗预览
@@ -1336,8 +1344,8 @@ export function App() {
           .catch(() => showToast(t("app.openFileFailed", { error: ext })));
         return;
       }
-      // markdown / html / 其他文本文件：统一抽屉查看
-      viewFilePath(resolved);
+      // markdown / html / 其他文本文件：统一抽屉查看；带行号链接打开后滚动定位
+      viewFilePath(resolved, undefined, line);
     },
     [activeAgent?.cwd, activeProject?.path, viewFilePath, showToast],
   );

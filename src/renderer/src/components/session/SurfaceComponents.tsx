@@ -131,6 +131,7 @@ import {
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { normalizeSessionPathForCompare } from "../../agentListDisplay";
 import { t } from "../../i18n";
+import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
 import {
@@ -729,7 +730,7 @@ function VisionBridgeDetail(props: { events: VisionEventsInfo | null; loading: b
 		return <p className="mt-2 text-[11px] text-muted-foreground">{t("app.visionNoEvents")}</p>;
 	}
 	return (
-		<div className="mt-2 border-t border-border/60 pt-2 text-[11px] leading-relaxed text-muted-foreground">
+		<div className="mt-2 max-h-56 overflow-y-auto border-t border-border/60 pt-2 text-[11px] leading-relaxed text-muted-foreground">
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
 				<span className="font-mono text-foreground/80">{batch.model}</span>
 				<span>{formatDuration(batch.totalDurationMs)}</span>
@@ -737,7 +738,7 @@ function VisionBridgeDetail(props: { events: VisionEventsInfo | null; loading: b
 			</div>
 			<ul className="mt-1 space-y-0.5">
 				{batch.items.map((it) => (
-					<li key={it.index} className={it.ok ? "" : "text-danger"}>
+					<li key={it.index} className={cn(it.ok ? "" : "text-danger", "break-words")}>
 						{t("app.visionRequestItem", {
 							index: it.index,
 							duration: it.cached ? "" : `${formatDuration(it.durationMs)} · `,
@@ -754,7 +755,8 @@ function VisionBridgeDetail(props: { events: VisionEventsInfo | null; loading: b
 					</li>
 				))}
 			</ul>
-			<p className="mt-1 truncate" title={batch.prompt}>
+			{/* 提示词完整显示：长模板换行展示，不再单行省略（用户反馈展开后内容看不全） */}
+			<p className="mt-1 break-words whitespace-pre-wrap" title={batch.prompt}>
 				{t("app.visionRequestPrompt")}：{batch.prompt}
 			</p>
 		</div>
