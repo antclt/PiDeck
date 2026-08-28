@@ -78,4 +78,6 @@ export type FileManagerInfo = {
 		| "konqueror";
 	name: string;
 	command: string;
+	/** 系统图标 data URL（Windows 取 explorer.exe 真实图标；其余平台缺省走内联 SVG） */
+	iconDataUrl?: string;
 };

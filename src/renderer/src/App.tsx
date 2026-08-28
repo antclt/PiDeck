@@ -3429,6 +3429,12 @@ export function App() {
           (activeProject && !isChatProject(activeProject)
             ? activeProject.path
             : null);
+        // 无项目目录（聊天会话 / agent 未绑定 cwd）时打开方式无从打开：
+        // 给出提示而不是弹一个所有选项都点不动的死气泡
+        if (!projectPath) {
+          showToast(t("app.openWithEditorNeedsProject"), 3000);
+          return;
+        }
         // 锚定触发元素下方；气泡内部还会按实测尺寸做视口内钳制/翻转
         const anchor = adjustMenuPos(
           e.currentTarget.getBoundingClientRect().left - 4,
@@ -3436,7 +3442,7 @@ export function App() {
           240,
           240,
         );
-        workspace.openExternalEditorChooser(projectPath || "", anchor);
+        workspace.openExternalEditorChooser(projectPath, anchor);
       },
     },
   ];

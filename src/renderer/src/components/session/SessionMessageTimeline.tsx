@@ -417,6 +417,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   // （controller.scrolledWindowTurns，初始 3 轮，接近顶部按 3 轮 cohort 自动扩大）——
   // 历史全量放开挂载是大会话渲染进程内存峰值/黑屏的来源。数据仍在 atoms；
   // 但切换恢复期间必须暂时取消条目预算，先物化已保存锚点再恢复正常窗口治理。
+  // 跳转导航（刻度/消息定位）同理：条目预算按条目数封顶，轮数扩得再大也挂不出
+  // 预算外的旧消息，跳转会永远找不到目标行——挂起期间解除预算，回底/切会话恢复。
   const followingForTurnWindow = controller.autoScroll;
   const isRestoringScrollAnchor = controller.isRestoringScrollAnchor;
   const turnWindowTurns = followingForTurnWindow
@@ -426,11 +428,11 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     () => selectTimelineTurnWindow(
       reconciledRuns,
       turnWindowTurns,
-      followingForTurnWindow || isRestoringScrollAnchor
+      followingForTurnWindow || isRestoringScrollAnchor || controller.jumpNavigationActive
         ? undefined
         : TIMELINE_SCROLLED_MAX_ITEMS,
     ),
-    [followingForTurnWindow, isRestoringScrollAnchor, reconciledRuns, turnWindowTurns],
+    [followingForTurnWindow, isRestoringScrollAnchor, controller.jumpNavigationActive, reconciledRuns, turnWindowTurns],
   );
   // 上滚窗口扩展：对比前后 displayRuns 的 id 序列，找出顶部新增段
   // （窗口扩展 / 数据翻页都在顶部插入内容）。只标记「前缀新增」——

@@ -314,6 +314,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.fileLinkCannotResolve": "Cannot open file link: relative path has no base directory (no agent cwd / no active project): {path}",
   "app.openProjectInEditor": "Open project in editor",
   "app.openWithEditor": "Open with",
+  "app.openWithEditorNeedsProject": "Open-with needs a project directory: open a workspace project in the sidebar first",
   "app.fileManager": "File Manager",
   "app.fileManager.windowsExplorer": "File Explorer",
   "app.openInFileManager": "Open project in file manager",

@@ -1,4 +1,5 @@
-import { dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import { homedir } from "node:os";
 import { cp, readFile, rename as fsRename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
@@ -82,13 +83,22 @@ export function registerFilesIpc({
 	});
 
 	ipcMain.handle(ipcChannels.filesDetectFileManager, async (): Promise<FileManagerInfo | null> => {
-		// 「打开方式」下拉补充入口：返回当前平台可用的文件管理器信息（含 logo id 与启动命令）
-		return detectFileManager();
+		// 「打开方式」下拉补充入口：返回当前平台可用的文件管理器信息（含 logo id 与启动命令）。
+		// Windows 用系统资源管理器真实图标（explorer.exe 的 ICO），渲染层直接展示。
+		const info = detectFileManager();
+		if (info?.id === "windows-explorer") {
+			const explorerPath = join(process.env.SystemRoot ?? "C:\\Windows", "explorer.exe");
+			const icon = await app.getFileIcon(explorerPath, { size: "large" });
+			if (!icon.isEmpty()) info.iconDataUrl = icon.toDataURL();
+		}
+		return info;
 	});
 
 	ipcMain.handle(ipcChannels.filesOpenFileManager, async (_event, path: string) => {
-		// 打开方式 → 文件管理器：目录交给系统文件管理器（explorer / dolphin 等）
-		await openFileManagerAt(toWindowsPath(path));
+		// 打开方式 → 文件管理器：目录交给系统文件管理器（explorer / dolphin 等）。
+		// 空路径（未绑定激活项目）回退用户主目录：文件管理器是常驻快捷入口，不依赖项目。
+		const target = typeof path === "string" && path.trim() ? toWindowsPath(path) : homedir();
+		await openFileManagerAt(target);
 	});
 
 	ipcMain.handle(ipcChannels.browserOpenExternal, async (_event, url: string) => {

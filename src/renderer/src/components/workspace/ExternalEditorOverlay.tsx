@@ -27,15 +27,19 @@ export type ExternalEditorOverlayProps = {
  * Windows 资源管理器风格 logo（内联 SVG，避免新增图片资源）：
  * 蓝色窗口 + 四窗格，对应系统资源管理器图标观感。
  */
+/**
+ * Windows 文件资源管理器 fallback logo（内联 SVG）：Windows 11 风格黄色文件夹，
+ * 主路径优先使用系统 explorer.exe 的真实图标（见 FileManagerLogo）。
+ */
 function WindowsExplorerLogo() {
 	return (
 		<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-			<rect x="3" y="4" width="18" height="16" rx="1.5" fill="#0a84ff" />
-			<rect x="3" y="8" width="18" height="2" fill="#ffffff" opacity="0.9" />
-			<rect x="5" y="11.5" width="5" height="3" rx="0.5" fill="#ffffff" opacity="0.85" />
-			<rect x="14" y="11.5" width="5" height="3" rx="0.5" fill="#ffffff" opacity="0.85" />
-			<rect x="5" y="16" width="5" height="2.5" rx="0.5" fill="#ffffff" opacity="0.7" />
-			<rect x="14" y="16" width="5" height="2.5" rx="0.5" fill="#ffffff" opacity="0.7" />
+			{/* 后层折叠盖（深黄） */}
+			<path d="M4 7a2 2 0 0 1 2-2h3.6l1.6 1.8H18a2 2 0 0 1 2 2v8.2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" fill="#d4a017" />
+			{/* 前层文件夹主体（亮黄） */}
+			<path d="M4 9a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9z" fill="#fbc02d" />
+			{/* 高光 */}
+			<path d="M5 9.2h14v1H5z" fill="#ffe082" opacity="0.9" />
 		</svg>
 	);
 }
@@ -57,8 +61,14 @@ function LinuxFileManagerLogo() {
 	);
 }
 
-/** 文件管理器 logo：Windows 用资源管理器风格，其它平台用文件夹造型 */
+/**
+ * 文件管理器 logo：Windows 优先用系统 explorer.exe 的真实图标（iconDataUrl），
+ * 获取失败时回退内联黄色文件夹；其它平台用文件夹造型。
+ */
 function FileManagerLogo({ info }: { info: FileManagerInfo }) {
+	if (info.iconDataUrl) {
+		return <img src={info.iconDataUrl} alt="" className="size-[14px] object-contain" />;
+	}
 	return info.id === "windows-explorer" ? <WindowsExplorerLogo /> : <LinuxFileManagerLogo />;
 }
 
@@ -136,18 +146,21 @@ export function ExternalEditorOverlay(props: ExternalEditorOverlayProps) {
 
   if (!props.open || !props.anchor) return null;
   const logoFor = (editor: ExternalEditor) => EDITOR_LOGO_URLS[editor.id];
+  // 无目标目录时所有入口无从打开：禁用而不是静默 return（否则表现为「点击没反应」）
+  const canOpen = Boolean(props.projectPath);
   const choose = (editor: ExternalEditor) => {
-    if (!props.projectPath || openingId) return;
+    if (!canOpen || openingId) return;
     setOpeningId(editor.id);
-    Promise.resolve(props.onOpenProject(editor, props.projectPath))
+    Promise.resolve(props.onOpenProject(editor, props.projectPath ?? ""))
       .catch((error) => props.onError?.(error))
       .finally(() => setOpeningId(null));
   };
   const chooseFileManager = () => {
-    if (!props.projectPath || !fileManager || fileManagerOpening) return;
+    // 文件管理器不依赖项目目录：空路径由主进程回退用户主目录（常驻快捷入口）
+    if (!fileManager || fileManagerOpening) return;
     setFileManagerOpening(true);
     desktopApi.files
-      .openFileManager(props.projectPath)
+      .openFileManager(props.projectPath ?? "")
       .catch((error) => props.onError?.(error))
       .finally(() => setFileManagerOpening(false));
   };
@@ -167,12 +180,17 @@ export function ExternalEditorOverlay(props: ExternalEditorOverlayProps) {
     >
       <div className="border-b border-border/60 px-3 pb-2 pt-2">
         <p className="text-xs font-medium text-foreground">{t("app.openWithEditor")}</p>
-        {pathName && (
+        {pathName ? (
           <p
             className="mt-0.5 truncate text-[11px] leading-4 text-muted-foreground"
             title={props.projectPath ?? undefined}
           >
             {pathName}
+          </p>
+        ) : (
+          // 未绑定项目目录：编辑器打开不可用；文件管理器回退主目录仍可用
+          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+            {t("app.openWithEditorNoProject")}
           </p>
         )}
       </div>
@@ -187,7 +205,7 @@ export function ExternalEditorOverlay(props: ExternalEditorOverlayProps) {
                 type="button"
                 key={editor.id}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground/90 transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                disabled={Boolean(openingId)}
+                disabled={!canOpen || Boolean(openingId)}
                 onClick={() => choose(editor)}
                 role="menuitem"
                 title={t("app.openProjectInEditor")}

@@ -260,6 +260,8 @@ export type SessionTimelineController = {
   showScrollToBottom: boolean;
   /** 由 MessageScroller 汇报用户是否仍在实时尾部，避免两套滚动监听互相抢占。 */
   setAutoScrollFromScroller: (following: boolean) => void;
+  /** 跳转导航进行中：时间线据此解除上滚窗口的条目预算（jumpNavigationActive）。 */
+  jumpNavigationActive: boolean;
   /**
    * 挂到 MessageScroller 的 stick-to-bottom 引擎 API（回底弹簧）。
    * 未挂上时 scrollToBottom 退化为原生 scrollTo。
@@ -575,6 +577,14 @@ export function useSessionTimelineController(options: {
   const loadMoreAnchorRef = useRef<Tagged<TimelineAnchor> | undefined>(undefined);
   /** 挂起的跳转：attempts 驱动指数扩窗与补页防呆（策略见 timeline/jumpWindowPolicy）。 */
   const pendingJumpRef = useRef<Tagged<{ messageId: string; attempts: number }> | undefined>(undefined);
+  /**
+   * 跳转导航进行中：解除上滚窗口的条目预算（TIMELINE_SCROLLED_MAX_ITEMS）。
+   * 预算按条目数封顶渲染，轮数扩得再大也挂不出预算外的旧消息——跳转会因此
+   * 永远找不到目标行（表现即「点前面的刻度没反应」）。解除后扩窗才能真正
+   * 挂载目标；跳转完成后保持解除（避免预算恢复瞬间把刚定位到的内容裁掉），
+   * 回底（窗口重置 3 轮）或切换会话时恢复。
+   */
+  const [jumpNavigationActive, setJumpNavigationActive] = useState(false);
   const highlightTimersRef = useRef(new Map<number, number>());
   // ── 上滚渲染窗口（2026-08 黑屏治理）──
   // 贴底和上滚初始都只挂 3 轮；每次接近顶部最多扩一个 3 轮 cohort，
@@ -667,6 +677,8 @@ export function useSessionTimelineController(options: {
       }
       // 回底 = 新的浏览周期：冷却清零，避免「刚到底又立刻上滚」被上一次扩窗冷却吞掉。
       lastWindowExpandAtRef.current = 0;
+      // 跳转导航结束：条目预算随窗口重置一并恢复（见 jumpNavigationActive 注释）
+      setJumpNavigationActive(false);
       setScrolledWindowTurns(TIMELINE_SCROLLED_TURN_LIMIT);
     }
   }, [autoScroll]);
@@ -995,12 +1007,15 @@ export function useSessionTimelineController(options: {
     autoScrollRef.current = false;
     setAutoScroll(false);
     setShowScrollToBottom(true);
+    setJumpNavigationActive(true);
     pendingJumpRef.current = { ownerKey: requestOwnerKey, value: { messageId, attempts: 0 } };
   }, [highlightMessage, combinedMessages, diskPage, historyHasMore, ownerKey]);
 
   useEffect(() => {
     loadMoreAnchorRef.current = undefined;
     pendingJumpRef.current = undefined;
+    // 切会话：跳转导航结束，条目预算恢复
+    setJumpNavigationActive(false);
     programmaticScrollRef.current = false;
     programmaticScrollUntilRef.current = 0;
     settleScrollCancelRef.current?.();
@@ -1270,6 +1285,7 @@ lastHistoryLoadAtRef.current = now;
     });
     if (action.kind === "give-up") {
       pendingJumpRef.current = undefined;
+      setJumpNavigationActive(false);
       return;
     }
     if (action.kind === "wait") return;
@@ -1312,5 +1328,7 @@ lastHistoryLoadAtRef.current = now;
     isSurfaceLoading,
     knownEmpty,
     reloadFromDisk,
+    /** 跳转导航进行中：时间线据此解除条目预算（见 jumpNavigationActive 注释） */
+    jumpNavigationActive,
   };
 }
