@@ -38,6 +38,8 @@ type SessionDisplayEntry = {
 	assistantModel?: SessionModelSelection;
 	/** thinking_level_change 的最后值候选 */
 	thinkingLevel?: string;
+	/** custom 条目的 customType（subagents:record / pi-deck-todo 等）：按类型过滤时免读行 */
+	customType?: string;
 	/** 消息角色（user/assistant/…）：轮次分页按 user 消息切轮次边界，建索引时顺手捕获 */
 	role?: string;
 	/** 消息条目的 message.id：编辑/删除/重发缓存未命中时按 messageId 定位文件条目 */
@@ -723,6 +725,9 @@ export class SessionHistoryReader {
 			const thinkingLevel = type === "thinking_level_change"
 				? readString(parsed, "thinkingLevel") ?? readString(data, "thinkingLevel")
 				: undefined;
+			// custom 条目的 customType 在建索引时捕获：readSubagentRecords 等读者
+			// 按 customType 过滤后只对目标行发起磁盘 IO，todo/om 等高频快照零读取。
+			const customType = type === "custom" ? readString(parsed, "customType") : undefined;
 			const assistantModel = message?.role === "assistant"
 				? (() => {
 					const provider = readString(message, "provider");
@@ -734,6 +739,7 @@ export class SessionHistoryReader {
 				id: parsed.id,
 				parentId: typeof parsed.parentId === "string" ? parsed.parentId : null,
 				type,
+				customType,
 				offset,
 				byteLength,
 				hasMessage: parsed.message !== undefined && parsed.message !== null,
@@ -1015,36 +1021,48 @@ export class SessionHistoryReader {
 	 *
 	 * sit downAppendEntry("subagents:record", data) 写入的条目格式为
 	 * {type:"custom", customType:"subagents:record", data:{id, type, description, status, …}}。
-	 * 本方法遍历显示索引中 type="custom" 的条目，读取原始行，过滤 customType="subagents:record"，
-	 * 将 data 投影为 PiSubagentEntry。status 不在白名单的条目丢弃并记日志。
+	 *
+	 * 子代理记录是会话级运行审计，不随对话分支回退而丢失：fork/编辑重发后，
+	 * 旁支上已完成的 record 会掉出 activeBranch（2026-08-28 实测：会话有 2 个子代理，
+	 * fork 后面板只剩 1 个）。因此这里扫全量条目表（含非活跃分支），而非 activeBranch。
+	 *
+	 * IO 约束：customType 已在建索引时捕获，只对 subagents:record 行发起磁盘读，
+	 * pi-deck-todo / om.* 等高频 custom 快照零读取，IO 量恒等于 record 行数（每次
+	 * 子代理完成才写一条）。同一子代理 id 可能有多条 record（resume 完成时再写），
+	 * 按文件 offset 升序（= 写入顺序）后写覆盖先写，保留最新状态。
+	 * status 不在白名单的条目丢弃并记日志。
 	 */
 	async readSubagentRecords(sessionPath: string): Promise<PiSubagentEntry[]> {
 		const index = await this.getSessionDisplayIndex(sessionPath);
-		const customEntries = index.activeBranch.filter((entry) => entry.type === "custom");
-		if (customEntries.length === 0) return [];
+		const recordEntries = [...index.entries.values()]
+			.filter((entry) => entry.type === "custom" && entry.customType === "subagents:record")
+			.sort((a, b) => a.offset - b.offset);
+		if (recordEntries.length === 0) return [];
 
-		const rawLines = await this.readIndexedRawLines(index.hostPath, customEntries);
+		const rawLines = await this.readIndexedRawLines(index.hostPath, recordEntries);
 		const validStatuses = new Set<string>([
 			"queued", "running", "completed", "steered", "aborted", "stopped", "error",
 		]);
-		const entries: PiSubagentEntry[] = [];
+		const byAgentId = new Map<string, PiSubagentEntry>();
 		for (let i = 0; i < rawLines.length; i++) {
 			const parsed = rawLines[i];
 			try {
 				if (!isRecord(parsed)) continue;
-				if (parsed.customType !== "subagents:record") continue;
 				const data = isRecord(parsed.data) ? parsed.data : parsed;
+				const agentId = String(data.id ?? "");
+				if (!agentId) continue;
 				const status = String(data.status ?? "");
 				if (!validStatuses.has(status)) {
 					void this.deps.logger?.warn("agent", "Invalid subagent status in subagents:record, skipped", {
 						sessionPath,
-						entryId: customEntries[i].id,
+						entryId: recordEntries[i].id,
 						status,
 					});
 					continue;
 				}
-				entries.push({
-					id: String(data.id ?? ""),
+				// 同 id 后写覆盖先写：文件 offset 升序遍历，循环尾的 set 自然保留最新一条
+				byAgentId.set(agentId, {
+					id: agentId,
 					type: String(data.type ?? ""),
 					description: String(data.description ?? ""),
 					status: status as PiSubagentEntry["status"],
@@ -1057,11 +1075,11 @@ export class SessionHistoryReader {
 			} catch {
 				void this.deps.logger?.warn("agent", "Failed to parse subagents:record, skipped", {
 					sessionPath,
-					entryId: customEntries[i].id,
+					entryId: recordEntries[i].id,
 				});
 			}
 		}
-		return entries.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+		return [...byAgentId.values()].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
 	}
 
 	/**
