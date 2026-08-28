@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { Archive, Check, CircleAlert, CircleDot, Folder, LoaderCircle, MessageCircle, RefreshCw, RotateCw } from "lucide-react";
+import { Archive, Check, CircleAlert, CircleDot, Folder, GitBranch, LoaderCircle, MessageCircle, RefreshCw, RotateCw } from "lucide-react";
 import { t } from "../../i18n";
 import {
 	AlertDialog,
@@ -32,7 +32,7 @@ import {
 } from "../ui-shadcn/dropdown-menu";
 import { Button } from "../ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui-shadcn/table";
-import type { SessionSummary, Project, AgentTab } from "../../../../shared/types";
+import type { SessionSummary, Project, AgentTab, ArchivedDshSession, ArchivedPiSession } from "../../../../shared/types";
 import { worktreeSlugify } from "../../../../shared/worktreeSlug";
 import { SessionSourceBadge, SessionBackendMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
 import { Checkbox } from "../ui-shadcn/checkbox";
@@ -44,13 +44,40 @@ import {
 	type SessionFilterPill,
 } from "../../sessionFilterPills";
 import {
+	archivedDshWorkspaceLabel,
+	archivedPiWorkspaceLabel,
+	filterArchivedDshByFamily,
+	filterArchivedPiByFamily,
+	managerArchivedDshLabel,
 	mergeManagerArchived,
 	sessionManagerRowKey,
+	sessionWorkspaceLabel,
+	worktreeFamilyProjects,
 	type ManagerArchivedRow,
 } from "../../sessionManagerModel";
 
+/**
+ * 工作区标签（会话管理弹窗内复用）：worktree 家族聚合后，非主工作区会话
+ * 用它标注所属工作区目录名，让用户在列表里一眼区分。
+ */
+function WorkspaceTag(props: { label: string }) {
+	return (
+		<span
+			className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] border border-border-subtle bg-bg-muted px-1 py-px text-micro text-muted-foreground"
+			title={t("sessionManager.workspaceTag", { name: props.label })}
+		>
+			<GitBranch size={10} strokeWidth={2} aria-hidden="true" />
+			<span className="max-w-24 truncate">{props.label}</span>
+		</span>
+	);
+}
+
 export function SessionManagerModal(props: {
 	sessions: SessionSummary[];
+	/** 弹窗项目上下文（worktree 家族聚合 + 归档按家族过滤 + 行工作区标签所需）。 */
+	projects: readonly Project[];
+	/** 触发打开弹窗的项目 id（家族根或 worktree 子项目均可）。 */
+	projectId: string;
 	onClose: () => void;
 	onRename: (session: SessionSummary) => void;
 	onExport: (session: SessionSummary) => void;
@@ -59,13 +86,18 @@ export function SessionManagerModal(props: {
 	onArchive: (sessions: SessionSummary[]) => void;
 	/** 恢复归档会话 */
 	onUnarchive: (session: SessionSummary) => Promise<void>;
-	/** 列出已归档会话 */
-	listArchived: () => Promise<SessionSummary[]>;
-	/** 列出 DSH 归档会话（归档视图用；host 目录已移入 .pideck-archive） */
-	listArchivedDsh: () => Promise<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>;
+	/** 列出已归档会话（含归档前原始路径，供按家族归属过滤） */
+	listArchived: () => Promise<ArchivedPiSession[]>;
+	/** 列出 DSH 归档会话（归档视图用；host 目录已移入 .pideck-archive，含标题） */
+	listArchivedDsh: () => Promise<ArchivedDshSession[]>;
 	/** 恢复 DSH 归档会话（主进程移回 sessions 树并重建 catalog 记录） */
 	onUnarchiveDsh: (dshSessionId: string) => Promise<void>;
 }) {
+	// 弹窗项目上下文 = 整个 worktree 家族（根 + 全部子工作区），与侧栏工作区树语义一致。
+	const family = useMemo(
+		() => worktreeFamilyProjects(props.projects, props.projectId),
+		[props.projects, props.projectId],
+	);
 	// 过滤 pill 集合：来源（pi/codex/claude/opencode）+ DSH 后端。
 	// DSH 会话 source 恒为 "pi"，归属判定必须按 backend 优先（见 sessionFilterPills）。
 	const [activePills, setActivePills] = useState<Set<SessionFilterPill>>(new Set(SESSION_FILTER_PILLS));
@@ -124,10 +156,14 @@ export function SessionManagerModal(props: {
 		props.onDelete(toDelete);
 	};
 
-	// 归档视图数据：pi（文件归档）+ DSH（host 目录归档）合并加载，恢复后重新拉取。
+	// 归档视图数据：pi（文件归档）+ DSH（host 目录归档）按家族归属过滤后合并，恢复后重新拉取。
+	// 弹窗按项目上下文（整个 worktree 家族）展示归档，不再全量跨项目。
 	const loadArchivedRows = () => {
 		void Promise.all([props.listArchived(), props.listArchivedDsh()])
-			.then(([piSessions, dshItems]) => setArchivedRows(mergeManagerArchived(piSessions, dshItems)))
+			.then(([piSessions, dshItems]) => setArchivedRows(mergeManagerArchived(
+				filterArchivedPiByFamily(piSessions, family),
+				filterArchivedDshByFamily(dshItems, family),
+			)))
 			.catch(() => setArchivedRows([]));
 	};
 
@@ -230,46 +266,54 @@ export function SessionManagerModal(props: {
 									<TableRow><TableCell colSpan={2} className="py-6 text-center text-caption text-muted-foreground">…</TableCell></TableRow>
 								) : archivedRows.length === 0 ? (
 									<TableRow><TableCell colSpan={2} className="py-6 text-center text-caption text-muted-foreground">{t("sessionManager.archivedEmpty")}</TableCell></TableRow>
-								) : archivedRows.map((row) => (
-									<TableRow key={row.kind === "pi" ? sessionManagerRowKey(row.session) : row.dshSessionId} className="bg-bg-panel">
-										<TableCell className="w-full max-w-0">
-											{row.kind === "pi" ? (
-												<div className="flex min-w-0 items-center gap-2">
-													<span className="truncate text-control text-text-primary">
-														{row.session.name || row.session.preview?.slice(0, 60) || t("common.untitled")}
-													</span>
-													{row.session.source && row.session.source !== "pi" && <SessionSourceBadge source={row.session.source} />}
-												</div>
-											) : (
-												// DSH 归档行：manifest 只存 host id 与原 cwd，展示与配置页归档区一致
-												<div className="flex min-w-0 items-center gap-2">
-													<span className="truncate text-control text-text-primary" title={row.cwd}>
-														<span className="font-medium">{row.dshSessionId}</span>
-														{row.cwd && <span className="ml-2 text-caption text-text-secondary">{row.cwd}</span>}
-													</span>
-													<SessionBackendMark backend="dsh" />
-												</div>
-											)}
-										</TableCell>
-										<TableCell className="w-40 text-right">
-											<div className="flex items-center justify-end gap-0.5">
-												<Button
-														variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-bg-hover hover:text-[var(--color-accent)]"
-														onClick={() => {
-														// 恢复后重新拉取归档列表（主列表由 catalog refresh 自动更新）
-														const restored = row.kind === "pi"
-															? props.onUnarchive(row.session)
-															: props.onUnarchiveDsh(row.dshSessionId);
-														void restored.then(loadArchivedRows);
-													}}
-														title={t("sessionManager.restore")}
-													>
-														{t("sessionManager.restore")}
-													</Button>
-											</div>
-										</TableCell>
-									</TableRow>
-								))}
+								) : archivedRows.map((row) => {
+						// 归档行工作区标签：worktree 子项目会话打「目录名」标（与主列表同策略），主工作区不打。
+						const workspaceLabel = row.kind === "pi"
+							? archivedPiWorkspaceLabel(row.item, family)
+							: archivedDshWorkspaceLabel(row.item, family);
+						return (
+						<TableRow key={row.kind === "pi" ? sessionManagerRowKey(row.item.summary) : row.item.dshSessionId} className="bg-bg-panel">
+							<TableCell className="w-full max-w-0">
+								{row.kind === "pi" ? (
+									<div className="flex min-w-0 items-center gap-2">
+										<span className="truncate text-control text-text-primary">
+											{row.item.summary.name || row.item.summary.preview?.slice(0, 60) || t("common.untitled")}
+										</span>
+										{workspaceLabel && <WorkspaceTag label={workspaceLabel} />}
+										{row.item.summary.source && row.item.summary.source !== "pi" && <SessionSourceBadge source={row.item.summary.source} />}
+									</div>
+								) : (
+									// DSH 归档行：manifest/日志折叠标题 > cwd 末段 > host id（managerArchivedDshLabel 纯策略）。
+									// 不展示 cwd 路径（同家族下路径信息无益；cwd 末段兜底已含区分能力）。
+									<div className="flex min-w-0 items-center gap-2">
+										<span className="truncate text-control text-text-primary">
+											<span className="font-medium">{managerArchivedDshLabel(row)}</span>
+										</span>
+										{workspaceLabel && <WorkspaceTag label={workspaceLabel} />}
+										<SessionBackendMark backend="dsh" />
+									</div>
+								)}
+							</TableCell>
+							<TableCell className="w-40 text-right">
+								<div className="flex items-center justify-end gap-0.5">
+									<Button
+											variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-bg-hover hover:text-[var(--color-accent)]"
+											onClick={() => {
+											// 恢复后重新拉取归档列表（主列表由 catalog refresh 自动更新）
+											const restored = row.kind === "pi"
+												? props.onUnarchive(row.item.summary)
+												: props.onUnarchiveDsh(row.item.dshSessionId);
+											void restored.then(loadArchivedRows);
+										}}
+											title={t("sessionManager.restore")}
+										>
+											{t("sessionManager.restore")}
+										</Button>
+								</div>
+							</TableCell>
+						</TableRow>
+					);
+					})}
 							</TableBody>
 						</Table>
 					) : (
@@ -307,6 +351,10 @@ export function SessionManagerModal(props: {
 												<span className="truncate text-control text-text-primary">
 													{session.name || session.preview?.slice(0, 60) || t("common.untitled")}
 												</span>
+												{/* worktree 家族聚合：非主工作区会话打目录名标签，让用户一眼区分会话属于哪个工作区 */}
+												{sessionWorkspaceLabel(session.projectId, family) && (
+													<WorkspaceTag label={sessionWorkspaceLabel(session.projectId, family)!} />
+												)}
 												{session.backend === "dsh" || session.backend === "imagegen" ? (
 													// DSH/生图会话无来源徽标（source 恒为 pi），用后端徽标区分（与侧栏树一致）
 													<SessionBackendMark backend={session.backend} />

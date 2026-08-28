@@ -17,6 +17,7 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionManager.restore": "Restore",
   "sessionManager.archivedEmpty": "No archived sessions",
   "sessionManager.archivedCount": "{count} archived",
+  "sessionManager.workspaceTag": "Session belongs to workspace {name}",
   "app.sidebarProjects": "Projects",
   "app.sidebarWorkspaces": "Workspaces",
   "app.sidebarSessions": "Sessions",

@@ -1,6 +1,7 @@
 import type { MutableRefObject } from "react";
 import type {
   AgentBackend,
+  ArchivedPiSession,
   CreateAnonymousSessionResult,
   Project,
   SessionRecord,
@@ -64,7 +65,7 @@ export interface UseSessionActionsOptions {
       deleteRecord: (sessionId: string) => Promise<boolean>;
       archiveRecord: (sessionId: string) => Promise<boolean>;
       unarchiveRecord: (archivedPath: string) => Promise<boolean>;
-      listArchived: () => Promise<SessionSummary[]>;
+      listArchived: () => Promise<ArchivedPiSession[]>;
       createDraft: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<SessionRecord>;
       createAnonymous: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<CreateAnonymousSessionResult>;
     };

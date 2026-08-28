@@ -21,6 +21,8 @@ export function sessionRecordToSummary(
   return {
     id: session.id,
     filePath: session.filePath ?? "",
+    // 会话归属项目 id：会话管理弹窗 worktree 家族聚合后按它打工作区标签。
+    projectId: session.projectId,
     projectPath: session.projectPath,
     name: session.title,
     parentSessionPath: session.parentSessionPath,
