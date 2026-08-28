@@ -648,43 +648,6 @@
   border-color: var(--color-accent);
 }
 
-.editors-popover {
-  position: absolute;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-2);
-  background: var(--color-bg-panel);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  max-height: 240px;
-  overflow-y: auto;
-}
-.editors-popover-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 6px 10px;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: var(--font-size-control);
-  width: 100%;
-  text-align: left;
-}
-.editors-popover-item:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-.editors-popover-empty {
-  padding: 8px 12px;
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-caption);
-}
-
 /* ===== 内置浏览器面板 ===== */
 .browser-panel {
   display: flex;
@@ -3748,8 +3711,8 @@ div.fixed.inset-0.z-50 {
   background: var(--color-bg-panel);
 }
 
-/* sonner 全局 toast：卡片本体保持中性面板色（见 ui-shadcn/sonner.tsx），
-   类型语义只通过图标色区分，避免整块彩色背景破坏工作台的中性视觉 */
+/* sonner 全局 toast：卡片外观由 notice.ts 经 toast.custom 渲染的自定义卡片（NoticeToastCard）承担，
+   这里只保留 toaster 层的命中测试修复（详见下方两条） */
 /* Radix Dialog 模态打开时会给 body 设 pointer-events:none（react-remove-scroll），
    toast 不属于 dialog 内容，必须显式恢复事件，否则弹框期间 toast 连同关闭按钮全部点不到 */
 [data-sonner-toaster],
@@ -3762,18 +3725,6 @@ div.fixed.inset-0.z-50 {
 [data-sonner-toaster],
 [data-sonner-toaster] * {
   -webkit-app-region: no-drag;
-}
-[data-sonner-toast][data-type="error"] [data-icon] {
-  color: var(--color-danger);
-}
-[data-sonner-toast][data-type="warning"] [data-icon] {
-  color: var(--color-warning);
-}
-[data-sonner-toast][data-type="info"] [data-icon] {
-  color: var(--color-info);
-}
-[data-sonner-toast][data-type="success"] [data-icon] {
-  color: var(--color-logo-green-deep);
 }
 
 
