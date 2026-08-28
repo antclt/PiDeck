@@ -392,6 +392,7 @@ export function createPreviewApi(): PiDesktopApi {
 			runDshGoalAction: async () => undefined,
 			listDshSubagents: async () => [],
 			readDshSubagentHistory: async () => ({ messages: [], hasMore: false }),
+			listSessionSubagents: async () => [],
 			listDshSkills: async () => [],
 			listDshOrphans: async () => [],
 			listDshForeignSessions: async () => [],

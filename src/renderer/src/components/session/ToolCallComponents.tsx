@@ -28,6 +28,7 @@ import {
 import { t } from "../../i18n";
 import { formatAskTitle } from "../../utils/askUi";
 import { Badge } from "../ui-shadcn/badge";
+import { detectSubagentFailure } from "./subagentStatus";
 import { Button } from "../ui-shadcn/button";
 import type { ChatMessage } from "../../../../shared/types";
 import { TimelineMarker } from "./TimelineMarker";
@@ -190,6 +191,14 @@ export const ToolCard = memo(function ToolCard(props: {
 	const status = props.stopped && messageStatus === "running" ? "stopped" : messageStatus;
 	const toolName = getToolName(props.message);
 	const detailText = getToolDetailText(props.message);
+	// pi-subagents 的 Agent/get_subagent_result 失败时返回普通文本结果（无 isError 标记），
+	// 失败只能从结果头部的 "Status: error|stopped|aborted" 探测；探测到则整卡按失败渲染。
+	const subagentFailure =
+		toolName === "Agent" || toolName === "get_subagent_result"
+			? detectSubagentFailure(
+				`${typeof props.message.meta?.result === "string" ? props.message.meta.result : ""}\n${detailText}`,
+			)
+			: undefined;
 	// 工具结果截断标记（主进程 truncateDetailWithMeta 写入）：展开区可「查看完整输出」
 	// 按需读取（运行期走主进程内存缓存，历史会话定位读会话文件）。
 	const isTruncated = props.message.meta?.truncated === true;
@@ -215,7 +224,7 @@ export const ToolCard = memo(function ToolCard(props: {
 			setFullLoading(false);
 		}
 	};
-	const tone = status === "stopped" ? "ok" : getToolTone(props.message);
+	const tone = subagentFailure ? "error" : status === "stopped" ? "ok" : getToolTone(props.message);
 	const subtitle = getToolSubtitle(props.message);
 	const kindLabel = getToolKindLabel(toolName);
 	// write/edit/create/patch 工具：从参数直接取 diff 目标（写整文件新内容 /
@@ -255,6 +264,19 @@ export const ToolCard = memo(function ToolCard(props: {
 				<Badge variant="outline" className="gap-1 border-border-subtle px-1 py-0 text-micro text-text-tertiary">
 					<Square size={8} aria-hidden="true" />
 					{t("tool.statusStopped")}
+				</Badge>
+			);
+		}
+		if (subagentFailure) {
+			// 子代理失败：插件返回普通文本结果（无 isError），此处按探测出的终态渲染失败徽标
+			const label =
+				subagentFailure === "stopped" ? t("tool.statusStopped")
+				: subagentFailure === "aborted" ? t("tool.statusAborted")
+				: t("tool.statusError");
+			return (
+				<Badge variant="outline" className="gap-1 border-danger/40 bg-danger-soft px-1 py-0 text-micro text-danger">
+					<CircleX size={9} aria-hidden="true" />
+					{label}
 				</Badge>
 			);
 		}

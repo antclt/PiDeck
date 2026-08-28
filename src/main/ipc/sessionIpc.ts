@@ -792,6 +792,32 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return messages;
 		},
 	);
+	/** 子代理列表：从会话文件 subagents:record + catalog 子会话回填合成。 */
+	ipcMain.handle(
+		ipcChannels.sessionsListSubagents,
+		async (_event, sessionId: string) => {
+			if (typeof sessionId !== "string" || !sessionId) return [];
+			const entry = sessionCatalog.get(sessionId);
+			if (!entry?.filePath) return [];
+			const records = await agentManager.readSessionSubagentRecords(entry.filePath);
+			// 回填 childSessionPath：按 parentSessionPath === 本会话 filePath 收集所有子会话，
+			// 再按子会话名 `${type}#${id前8位}` 精确匹配。
+			const children = sessionCatalog.listEntries()
+				.filter(
+					(e) => e.parentSessionPath === entry.filePath,
+				)
+				.map((e) => sessionCatalog.getRecord(e.id))
+				.filter((r): r is NonNullable<typeof r> => r != null);
+			for (const record of records) {
+				const namePrefix = `${record.type}#${record.id.slice(0, 8)}`;
+				const child = children.find((s) => (s.title ?? "").startsWith(namePrefix));
+				if (child?.filePath) record.childSessionPath = child.filePath;
+				if (child) record.childSessionId = child.id;
+			}
+			return records;
+		},
+	);
+
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogReadMessagePage,
 		async (_event, sessionId: string, before?: number, pageSize?: number, options?: { beforeEntryId?: string }) => {

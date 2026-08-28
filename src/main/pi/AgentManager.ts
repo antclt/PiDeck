@@ -873,6 +873,16 @@ export class AgentManager {
 			await this.sessionHistoryReader.readSessionDisplayMessages(sessionPath, agentId, sessionContent),
 		);
 	}
+	/**
+	 * 读取会话文件中的子代理记录（subagents:record custom 条目）。
+	 */
+	async readSessionSubagentRecords(sessionPath: string) {
+		return this.sessionHistoryReader.readSubagentRecords(sessionPath);
+	}
+
+
+
+
 
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
 	async readSessionDisplayTurnPage(

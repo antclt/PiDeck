@@ -541,6 +541,11 @@ const api = {
 				messages: import("../shared/types").ChatMessage[];
 				hasMore: boolean;
 			}>,
+		/** pi-subagents 扩展子代理列表（record + 子会话回填）。 */
+		listSessionSubagents: (sessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsListSubagents, sessionId) as Promise<
+				import("../shared/types").PiSubagentEntry[]
+			>,
 		/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */
 		listDshSkills: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshListSkills, agentId) as Promise<import("../shared/types").DshSkillView[]>,

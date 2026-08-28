@@ -1,5 +1,5 @@
 import { open, readFile, stat } from "node:fs/promises";
-import type { ChatMessage, ImageContent, SessionMessagePage } from "../../shared/types";
+import type { ChatMessage, ImageContent, PiSubagentEntry, SessionMessagePage } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import type { RpcResponse } from "./PiRpcClient";
 import type { AppLogger } from "../logging/AppLogger";
@@ -901,6 +901,27 @@ export class SessionHistoryReader {
 			await handle.close();
 		}
 	}
+	/**
+	 * 与 readIndexedSessionMessages 同 IO 模式，但返回整行解析后的 JSON 对象
+	 *（而非仅 .message）。供 readSubagentRecords 等需要完整自定义条目的读者使用。
+	 */
+	private async readIndexedRawLines(
+		hostPath: string,
+		entries: SessionDisplayEntry[],
+	): Promise<unknown[]> {
+		const handle = await open(hostPath, "r");
+		try {
+			return await Promise.all(entries.map(async (entry) => {
+				const buffer = Buffer.allocUnsafe(entry.byteLength);
+				await handle.read(buffer, 0, buffer.length, entry.offset);
+				const line = buffer.toString("utf8").replace(/\r$/, "");
+				return JSON.parse(line);
+			}));
+		} finally {
+			await handle.close();
+		}
+	}
+
 
 
 	/**
@@ -988,6 +1009,62 @@ export class SessionHistoryReader {
 			return { compactions: [] };
 		}
 	}
+	/**
+	 * 从会话文件读取 pi-subagents 插件持久化的子代理记录。
+	 *
+	 * sit downAppendEntry("subagents:record", data) 写入的条目格式为
+	 * {type:"custom", customType:"subagents:record", data:{id, type, description, status, …}}。
+	 * 本方法遍历显示索引中 type="custom" 的条目，读取原始行，过滤 customType="subagents:record"，
+	 * 将 data 投影为 PiSubagentEntry。status 不在白名单的条目丢弃并记日志。
+	 */
+	async readSubagentRecords(sessionPath: string): Promise<PiSubagentEntry[]> {
+		const index = await this.getSessionDisplayIndex(sessionPath);
+		const customEntries = index.activeBranch.filter((entry) => entry.type === "custom");
+		if (customEntries.length === 0) return [];
+
+		const rawLines = await this.readIndexedRawLines(index.hostPath, customEntries);
+		const validStatuses = new Set<string>([
+			"queued", "running", "completed", "steered", "aborted", "stopped", "error",
+		]);
+		const entries: PiSubagentEntry[] = [];
+		for (let i = 0; i < rawLines.length; i++) {
+			const parsed = rawLines[i];
+			try {
+				if (!isRecord(parsed)) continue;
+				if (parsed.customType !== "subagents:record") continue;
+				const data = isRecord(parsed.data) ? parsed.data : parsed;
+				const status = String(data.status ?? "");
+				if (!validStatuses.has(status)) {
+					void this.deps.logger?.warn("agent", "Invalid subagent status in subagents:record, skipped", {
+						sessionPath,
+						entryId: customEntries[i].id,
+						status,
+					});
+					continue;
+				}
+				entries.push({
+					id: String(data.id ?? ""),
+					type: String(data.type ?? ""),
+					description: String(data.description ?? ""),
+					status: status as PiSubagentEntry["status"],
+					result: typeof data.result === "string" ? data.result : undefined,
+					error: typeof data.error === "string" ? data.error : undefined,
+					startedAt: typeof data.startedAt === "number" ? data.startedAt : undefined,
+					completedAt: typeof data.completedAt === "number" ? data.completedAt : undefined,
+					source: "record",
+				});
+			} catch {
+				void this.deps.logger?.warn("agent", "Failed to parse subagents:record, skipped", {
+					sessionPath,
+					entryId: customEntries[i].id,
+				});
+			}
+		}
+		return entries.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+	}
+
+
+
 
 }
 

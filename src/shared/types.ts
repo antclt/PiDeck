@@ -10,6 +10,7 @@ export * from "./types/settings";
 export * from "./types/git";
 export * from "./types/prompts";
 export * from "./types/skills";
+export * from "./types/subagents";
 export * from "./types/imports";
 export * from "./types/app";
 export * from "./types/usageStats";

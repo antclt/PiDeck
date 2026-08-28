@@ -2888,6 +2888,7 @@ export const zhCN = {
   "tool.statusError": "失败",
   "tool.statusRunning": "运行中",
   "tool.statusStopped": "已停止",
+  "tool.statusAborted": "已中止",
   "tool.pending": "等待工具执行...",
   "tool.durationTitle": "工具调用耗时",
   "tool.viewFullOutput": "查看完整输出",
