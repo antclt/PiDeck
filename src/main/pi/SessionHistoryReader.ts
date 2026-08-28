@@ -234,6 +234,12 @@ export class SessionHistoryReader {
 	/** 轮次分页默认/上限：默认最近一次激活带 3 轮，单页最多 10 轮（防恶意参数撑爆 IPC） */
 	static readonly DEFAULT_TURN_PAGE_SIZE = 3;
 	private static readonly MAX_TURN_PAGE_SIZE = 10;
+	/**
+	 * 子代理 start 锚点条目类型：pi-deck-subagents 桥接扩展在 subagents:created 时
+	 * 落盘（写入侧见 resources/extensions/pi-deck-subagents.ts 的 START_ENTRY_TYPE）。
+	 * 残留锚点（无更晚 record 覆盖）合成 stopped 条目，保留被重启终止子代理的审计痕迹。
+	 */
+	private static readonly SUBAGENT_START_ENTRY = "pi-deck-subagent-start";
 
 	/** 单页轮次上限（AgentManager 缓存优先路径复用，避免翻页超预算） */
 	static maxTurnPageSize(): number {
@@ -1026,16 +1032,22 @@ export class SessionHistoryReader {
 	 * 旁支上已完成的 record 会掉出 activeBranch（2026-08-28 实测：会话有 2 个子代理，
 	 * fork 后面板只剩 1 个）。因此这里扫全量条目表（含非活跃分支），而非 activeBranch。
 	 *
-	 * IO 约束：customType 已在建索引时捕获，只对 subagents:record 行发起磁盘读，
-	 * pi-deck-todo / om.* 等高频 custom 快照零读取，IO 量恒等于 record 行数（每次
-	 * 子代理完成才写一条）。同一子代理 id 可能有多条 record（resume 完成时再写），
-	 * 按文件 offset 升序（= 写入顺序）后写覆盖先写，保留最新状态。
-	 * status 不在白名单的条目丢弃并记日志。
+	 * 同时读取 pi-deck-subagents 桥接扩展落盘的 start 锚点（pi-deck-subagent-start）：
+	 * 运行中被会话重启终止的子代理没有 record（插件只在完成时写），无锚点则重启后
+	 * 从面板彻底消失。锚点残留（同 id 无更晚的 record 覆盖）合成 stopped 条目。
+	 *
+	 * IO 约束：customType 已在建索引时捕获，只对目标两类行发起磁盘读，
+	 * pi-deck-todo / om.* 等高频 custom 快照零读取，IO 量恒等于目标行数（每次
+	 * 子代理创建/完成才写一条）。同一子代理 id 多条时按文件 offset 升序
+	 * （= 写入顺序）后写覆盖先写：start 锚点（spawn 时写）自然被 record（完成时写）
+	 * 覆盖。status 不在白名单的 record 条目丢弃并记日志。
 	 */
 	async readSubagentRecords(sessionPath: string): Promise<PiSubagentEntry[]> {
 		const index = await this.getSessionDisplayIndex(sessionPath);
 		const recordEntries = [...index.entries.values()]
-			.filter((entry) => entry.type === "custom" && entry.customType === "subagents:record")
+			.filter((entry) => entry.type === "custom"
+				&& (entry.customType === "subagents:record"
+					|| entry.customType === SessionHistoryReader.SUBAGENT_START_ENTRY))
 			.sort((a, b) => a.offset - b.offset);
 		if (recordEntries.length === 0) return [];
 
@@ -1051,7 +1063,10 @@ export class SessionHistoryReader {
 				const data = isRecord(parsed.data) ? parsed.data : parsed;
 				const agentId = String(data.id ?? "");
 				if (!agentId) continue;
-				const status = String(data.status ?? "");
+				// start 锚点无 status 字段：残留（未被更晚的 record 覆盖）说明子代理
+				// 运行中被会话重启终止，合成 stopped；record 条目沿用真实 status。
+				const isStartAnchor = recordEntries[i].customType === SessionHistoryReader.SUBAGENT_START_ENTRY;
+				const status = isStartAnchor ? "stopped" : String(data.status ?? "");
 				if (!validStatuses.has(status)) {
 					void this.deps.logger?.warn("agent", "Invalid subagent status in subagents:record, skipped", {
 						sessionPath,

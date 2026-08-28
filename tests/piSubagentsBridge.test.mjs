@@ -258,3 +258,67 @@ test("reduceSnapshot: failed carries error text to snapshot", () => {
 	assert.equal(agent?.status, "error");
 	assert.equal(agent?.error, "boom: tool timeout");
 });
+
+/** mock pi API：捕获事件订阅与 appendEntry 调用，驱动扩展默认导出的完整链路。 */
+function createMockPi() {
+	const handlers = new Map();
+	const appendedEntries = [];
+	return {
+		pi: {
+			events: { on: (name, cb) => { handlers.set(name, cb); } },
+			on: () => {},
+			appendEntry: (type, data) => { appendedEntries.push({ type, data }); },
+		},
+		handlers,
+		appendedEntries,
+	};
+}
+
+test("bridge extension: subagents:created persists pi-deck-subagent-start anchor", () => {
+	const { default: bridge } = loadBridgeModule();
+	const { pi, handlers, appendedEntries } = createMockPi();
+	bridge(pi);
+
+	// created 事件 → 快照入库 + start 锚点落盘（审计痕迹，防运行中被重启终止后消失）
+	handlers.get("subagents:created")({ id: "agent-anchor1", type: "Explore", description: "find files" });
+
+	assert.equal(appendedEntries.length, 1);
+	assert.equal(appendedEntries[0].type, "pi-deck-subagent-start");
+	assert.equal(appendedEntries[0].data.id, "agent-anchor1");
+	assert.equal(appendedEntries[0].data.type, "Explore");
+	assert.equal(appendedEntries[0].data.description, "find files");
+	assert.equal(typeof appendedEntries[0].data.startedAt, "number");
+
+	// 幂等 created（重复事件）不重复落盘
+	handlers.get("subagents:created")({ id: "agent-anchor1", type: "Explore", description: "find files" });
+	assert.equal(appendedEntries.length, 1);
+
+	// 无 id 的 created 事件不落盘
+	handlers.get("subagents:created")({ type: "code", description: "no id" });
+	assert.equal(appendedEntries.length, 1);
+
+	// 终态事件不写锚点（record 由插件侧负责）
+	handlers.get("subagents:completed")({ id: "agent-anchor1", status: "completed", result: "ok" });
+	assert.equal(appendedEntries.length, 1);
+});
+
+test("bridge extension: appendEntry throw does not break snapshot flow", () => {
+	const { default: bridge } = loadBridgeModule();
+	const handlers = new Map();
+	const pi = {
+		events: { on: (name, cb) => { handlers.set(name, cb); } },
+		on: () => {},
+		appendEntry: () => { throw new Error("session closed"); },
+	};
+	bridge(pi);
+
+	// 持久化失败仅损失审计锚点：事件处理不抛错，后续事件继续工作
+	handlers.get("subagents:created")({ id: "agent-throw1", type: "code", description: "d" });
+	let threw = false;
+	try {
+		handlers.get("subagents:started")({ id: "agent-throw1" });
+	} catch {
+		threw = true;
+	}
+	assert.equal(threw, false);
+});

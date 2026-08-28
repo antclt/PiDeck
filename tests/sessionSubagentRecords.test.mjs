@@ -7,6 +7,7 @@
  * - 排序（startedAt 降序）
  * - fork 旁支上的 record 不丢失（全量条目表扫描）
  * - 同一子代理 id 多条 record 时保留文件序最新一条
+ * - start 锚点（pi-deck-subagent-start）残留时合成 stopped；被 record 覆盖时以 record 为准
  */
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -352,6 +353,92 @@ test("readSubagentRecords keeps the latest record per agent id", async () => {
     // 排序仍按 startedAt 降序：resumed（09:00）在前，other（05:00）在后
     assert.equal(entries[0].id, "agent-sameid11");
     assert.equal(entries[1].id, "agent-other2222");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// start 锚点：created 时落盘的 pi-deck-subagent-start 条目。
+// 场景 1：子代理运行中被会话重启终止 → 只剩锚点，合成 stopped（保留审计痕迹）。
+// 场景 2：子代理正常完成 → 锚点被更晚的 record 覆盖，以 record 为准。
+const startAnchorSession = JSON.stringify({
+  type: "session",
+  id: "ss1",
+  cwd: "/tmp",
+  timestamp: new Date().toISOString(),
+}) + "\n" +
+  JSON.stringify({
+    type: "message",
+    id: "su1",
+    parentId: "ss1",
+    message: { role: "user", content: [{ type: "text", text: "spawn" }] },
+  }) + "\n" +
+  // 被 termination 杀掉的子代理：只有 start 锚点，无 record
+  JSON.stringify({
+    type: "custom",
+    customType: "pi-deck-subagent-start",
+    id: "srec-1",
+    parentId: "su1",
+    data: {
+      id: "agent-killed77",
+      type: "Explore",
+      description: "killed by restart",
+      startedAt: 1700000300000,
+    },
+  }) + "\n" +
+  // 正常完成的子代理：start 锚点（文件序靠前）+ record（文件序靠后）
+  JSON.stringify({
+    type: "custom",
+    customType: "pi-deck-subagent-start",
+    id: "srec-2",
+    parentId: "srec-1",
+    data: {
+      id: "agent-finished8",
+      type: "code",
+      description: "finished normally",
+      startedAt: 1700000400000,
+    },
+  }) + "\n" +
+  JSON.stringify({
+    type: "custom",
+    customType: "subagents:record",
+    id: "srec-3",
+    parentId: "srec-2",
+    data: {
+      id: "agent-finished8",
+      type: "code",
+      description: "finished normally",
+      status: "completed",
+      result: "done",
+      startedAt: 1700000400000,
+      completedAt: 1700000410000,
+    },
+  }) + "\n";
+
+test("readSubagentRecords synthesizes stopped from residual start anchors and prefers record", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pid-subagent-start-"));
+  const sessionPath = join(dir, "session.jsonl");
+  try {
+    writeSession(sessionPath, startAnchorSession);
+    const reader = createReader();
+    const entries = await reader.readSubagentRecords(sessionPath);
+
+    assert.equal(entries.length, 2);
+
+    // 只剩锚点的子代理：合成 stopped（无 result/error/completedAt）
+    const killed = entries.find((e) => e.id === "agent-killed77");
+    assert.equal(killed.status, "stopped");
+    assert.equal(killed.type, "Explore");
+    assert.equal(killed.description, "killed by restart");
+    assert.equal(killed.startedAt, 1700000300000);
+    assert.equal(killed.result, undefined);
+    assert.equal(killed.completedAt, undefined);
+
+    // 有 record 的子代理：record 覆盖锚点，状态为真实终态
+    const finished = entries.find((e) => e.id === "agent-finished8");
+    assert.equal(finished.status, "completed");
+    assert.equal(finished.result, "done");
+    assert.equal(finished.completedAt, 1700000410000);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
