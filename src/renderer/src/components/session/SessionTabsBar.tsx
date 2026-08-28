@@ -799,7 +799,7 @@ function SessionTab(props: {
             onSelect={props.onRestart}
           >
             <span className="inline-flex items-center gap-2">
-              <RotateCw className={cn("size-3.5", props.isRestarting && "animate-spin")} aria-hidden="true" />
+              <RotateCw className={cn("size-3.5", props.isRestarting && "animate-pideck-spin")} aria-hidden="true" />
               {props.isRestarting ? t("app.restarting") : t("app.restart")}
             </span>
           </DropdownMenuItem>
@@ -812,7 +812,7 @@ function SessionTab(props: {
             onSelect={props.onReload}
           >
             <span className="inline-flex items-center gap-2">
-              <RefreshCw className={cn("size-3.5", props.isReloading && "animate-spin")} aria-hidden="true" />
+              <RefreshCw className={cn("size-3.5", props.isReloading && "animate-pideck-spin")} aria-hidden="true" />
               {props.isReloading ? t("app.reloading") : t("menu.reloadSession")}
             </span>
           </DropdownMenuItem>

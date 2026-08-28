@@ -359,7 +359,7 @@ export function WebSidebar(props: {
 											onClick={() => props.onCreateSession(project.id)}
 										>
 											{creating ? (
-												<span className="size-3 animate-spin rounded-full border border-current border-t-transparent" aria-hidden="true" />
+												<span className="size-3 animate-pideck-spin rounded-full border border-current border-t-transparent" aria-hidden="true" />
 											) : (
 												<Plus className="size-3.5" aria-hidden="true" />
 											)}

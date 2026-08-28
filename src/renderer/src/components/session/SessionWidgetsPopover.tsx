@@ -92,7 +92,7 @@ function CompletedGlyph() { /* ... same as SessionTodoStrip */ return <svg width
 function SubagentStatusIcon({ status }: { status: string }) {
   const kind = subagentIconKind(status);
   if (kind === "completed") return <CompletedGlyph />;
-  if (kind === "active") return <Loader2 size={14} className="pideck-spin text-[var(--color-accent)]" />;
+  if (kind === "active") return <Loader2 size={14} className="animate-pideck-spin text-[var(--color-accent)]" />;
   if (kind === "error") return <X size={14} className="text-[var(--color-danger)]" />;
   // 非成功终态必须可明确区分：stopped/aborted 用红色系图形，绝不允许看起来像完成/未知
   if (kind === "stopped") return <Square size={11} strokeWidth={2.5} className="text-[var(--color-danger)]" />;
@@ -163,7 +163,7 @@ const TasksPane = (props: { sessionId: string; snapshotItems: AgentTodoItem[] })
         {items.map((item) => (
           <li key={item.id} className="flex min-w-0 items-center gap-2.5 text-[13px] leading-5 text-text-secondary">
             <span className="grid size-4 shrink-0 place-items-center">
-              {item.status === "completed" ? <CompletedGlyph /> : item.status === "in-progress" ? <Loader2 size={14} className="pideck-spin text-[var(--color-accent)]" /> : <svg width={14} height={14} viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2.4 2.4" className="text-text-tertiary" /></svg>}
+              {item.status === "completed" ? <CompletedGlyph /> : item.status === "in-progress" ? <Loader2 size={14} className="animate-pideck-spin text-[var(--color-accent)]" /> : <svg width={14} height={14} viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2.4 2.4" className="text-text-tertiary" /></svg>}
             </span>
             <span className="min-w-0 truncate">{item.title}</span>
           </li>

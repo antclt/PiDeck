@@ -1344,7 +1344,7 @@ export function GitPanel(props: GitPanelProps) {
       {loading && (
         <Loader2
           size={14}
-          className="animate-spin"
+          className="animate-pideck-spin"
           aria-label={t("common.loading")}
         />
       )}
@@ -1395,7 +1395,7 @@ export function GitPanel(props: GitPanelProps) {
             onClick={() => void doPush()}
           >
             {pushing ? (
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={14} className="animate-pideck-spin" />
             ) : (
               <ArrowUpFromLine size={14} />
             )}
@@ -1428,7 +1428,7 @@ export function GitPanel(props: GitPanelProps) {
             onClick={() => void doPull()}
           >
             {pulling ? (
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={14} className="animate-pideck-spin" />
             ) : (
               <ArrowDownToLine size={14} />
             )}
@@ -1520,7 +1520,7 @@ export function GitPanel(props: GitPanelProps) {
             }}
           >
             {initializing ? (
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={14} className="animate-pideck-spin" />
             ) : (
               <Plus size={14} />
             )}
@@ -1663,7 +1663,7 @@ export function GitPanel(props: GitPanelProps) {
                   }}
                 >
                   {initializing ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : (
                     t("git.initRepo")
                   )}
@@ -1716,7 +1716,7 @@ export function GitPanel(props: GitPanelProps) {
                   onClick={() => void runGenerateCommitMessage()}
                 >
                   {commitGenLoading ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : (
                     <Sparkles size={14} />
                   )}
@@ -2128,7 +2128,7 @@ function CompareChanges(props: {
               onClick={() => void run()}
             >
               {loading ? (
-                <Loader2 size={14} className="animate-spin" />
+                <Loader2 size={14} className="animate-pideck-spin" />
               ) : (
                 t("git.compare")
               )}

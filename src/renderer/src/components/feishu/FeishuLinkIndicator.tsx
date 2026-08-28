@@ -209,7 +209,7 @@ export function FeishuLinkIndicator({
 									</div>
 									{(isSelecting || isSessionConnectedBot || isSessionPinned) && (
 										<span className="feishu-link-bot-check" aria-hidden="true">
-											{isSelecting ? <span className="feishu-link-spinner" /> : "✓"}
+											{isSelecting ? <span className="feishu-link-spinner animate-pideck-spin" /> : "✓"}
 										</span>
 									)}
 								</button>

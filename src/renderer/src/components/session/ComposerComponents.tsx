@@ -827,7 +827,7 @@ function ModelListStatusGuide(props: {
 					onClick={props.onRefresh}
 					disabled={props.refreshing}
 				>
-					<RefreshCw size={13} className={props.refreshing ? "animate-spin" : ""} aria-hidden="true" />
+					<RefreshCw size={13} className={props.refreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
 					{props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRetry")}
 				</Button>
 			)}
@@ -951,7 +951,7 @@ export function ModelPicker(props: {
 						onClick={props.onRefresh}
 						disabled={props.refreshing}
 					>
-						<RefreshCw size={14} className={props.refreshing ? "animate-spin" : ""} aria-hidden="true" />
+						<RefreshCw size={14} className={props.refreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
 					</Button>
 				) : undefined
 			}
@@ -1006,7 +1006,7 @@ export function ThinkingPicker(props: {
 		>
 			{props.loading ? (
 				<div className="flex min-h-24 items-center justify-center gap-2 text-caption text-muted-foreground" role="status">
-					<RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+					<RefreshCw size={14} className="animate-pideck-spin" aria-hidden="true" />
 					{t("common.loading")}
 				</div>
 			) : levels.map((level) => {

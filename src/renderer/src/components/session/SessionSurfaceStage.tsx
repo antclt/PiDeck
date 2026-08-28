@@ -85,7 +85,7 @@ export function SessionSurfaceStage(props: {
 				role={overlayVisible ? "status" : undefined}
 				aria-hidden={!overlayVisible}
 			>
-				<div className="loader" />
+				<div className="loader animate-pideck-spin" />
 				<span className="text-body text-text-secondary">{overlayLabel}</span>
 			</div>
 		</div>

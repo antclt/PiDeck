@@ -396,7 +396,7 @@ export function ResourceRow(props: {
         </div>
       )}
       <span className="ml-[5px] flex w-4 shrink-0 justify-end text-xs font-semibold text-right text-[var(--git-desc-fg)]" aria-hidden="true">
-        {opening ? <Loader2 size={13} className="animate-spin" /> : letter}
+        {opening ? <Loader2 size={13} className="animate-pideck-spin" /> : letter}
       </span>
     </div>
   );

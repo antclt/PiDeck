@@ -137,7 +137,7 @@ export function ExtensionWidgetPanel(props: {
 function QueueStatusGlyph(props: { status: QueuedPromptSnapshot["status"] }) {
   const status = props.status ?? "pending";
   if (status === "sending") {
-    return <LoaderCircle size={14} strokeWidth={2} className="shrink-0 animate-spin text-text-secondary" aria-hidden="true" />;
+    return <LoaderCircle size={14} strokeWidth={2} className="shrink-0 animate-pideck-spin text-text-secondary" aria-hidden="true" />;
   }
   if (status === "failed") {
     return <XCircle size={14} strokeWidth={2} className="shrink-0 text-[var(--color-danger)]" aria-hidden="true" />;
@@ -440,7 +440,7 @@ export function ComposerSendControls(props: {
         onClick={primaryStops ? props.onStop : props.onSend}
       >
         {props.isGeneratingImage ? (
-          <LoaderCircle size={15} strokeWidth={2.4} className="animate-spin" aria-hidden="true" />
+          <LoaderCircle size={15} strokeWidth={2.4} className="animate-pideck-spin" aria-hidden="true" />
         ) : primaryStops ? (
           <Square size={13} strokeWidth={0} fill="currentColor" aria-hidden="true" />
         ) : (

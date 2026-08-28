@@ -473,7 +473,7 @@ export function AgentAvatar(props: { status: string }) {
 			</svg>
 			</span>
 			<span className="avatar-status-indicator" aria-label={normalizedStatus}>
-				{normalizedStatus === "error" ? <CircleAlert size={8} strokeWidth={2.5} /> : normalizedStatus === "starting" ? <CircleDot size={8} strokeWidth={2.5} /> : normalizedStatus === "running" ? <LoaderCircle size={8} strokeWidth={2.5} className="animate-spin" /> : <Check size={8} strokeWidth={2.5} />}
+				{normalizedStatus === "error" ? <CircleAlert size={8} strokeWidth={2.5} /> : normalizedStatus === "starting" ? <CircleDot size={8} strokeWidth={2.5} /> : normalizedStatus === "running" ? <LoaderCircle size={8} strokeWidth={2.5} className="animate-pideck-spin" /> : <Check size={8} strokeWidth={2.5} />}
 			</span>
 		</div>
 	);
@@ -1072,7 +1072,7 @@ export const UserBubble = memo(function UserBubble(props: {
 			{visionBlocks.length === 0 && visionPolling && !visionMatch && (
 				<div className="mb-2 flex w-full max-w-[min(82%,64ch)] flex-col items-end">
 					<div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-						<Loader2 size={11} className="animate-spin" />
+						<Loader2 size={11} className="animate-pideck-spin" />
 						<span>{t("app.visionConverting")}</span>
 					</div>
 				</div>

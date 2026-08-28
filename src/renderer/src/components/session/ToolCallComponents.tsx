@@ -455,7 +455,7 @@ export const ToolCard = memo(function ToolCard(props: {
 									onClick={() => void loadFullText()}
 								>
 									{fullLoading ? (
-										<Loader2 size={12} className="animate-spin" aria-hidden="true" />
+										<Loader2 size={12} className="animate-pideck-spin" aria-hidden="true" />
 									) : null}
 									{fullLoading ? t("tool.loadingFullOutput") : t("tool.viewFullOutput")}
 								</Button>

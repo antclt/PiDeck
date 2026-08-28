@@ -407,7 +407,7 @@ export function SessionTree(props: {
           </div>
         );
       })}
-      {catalogLoading && <div className="project-session-loading"><div className="loader" /><span>{t("app.projectSessionsLoading")}</span></div>}
+      {catalogLoading && <div className="project-session-loading"><div className="loader animate-pideck-spin" /><span>{t("app.projectSessionsLoading")}</span></div>}
       {display.visibleChildren.map(renderChild)}
 
       {(display.hiddenChildCount > 0 || canCollapseChildren) && (

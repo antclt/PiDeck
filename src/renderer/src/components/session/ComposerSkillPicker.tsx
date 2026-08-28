@@ -213,7 +213,7 @@ export function ComposerSkillPicker(props: {
 					</div>
 					{detail.loading ? (
 						<div className="flex items-center justify-center gap-2 py-6 text-caption text-muted-foreground">
-							<Loader2 size={14} className="animate-spin" aria-hidden="true" />
+							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 							{t("app.skillPickerLoading")}
 						</div>
 					) : detail.error ? (
@@ -254,7 +254,7 @@ export function ComposerSkillPicker(props: {
 					)}
 					{loading ? (
 						<div className="flex items-center justify-center gap-2 py-6 text-caption text-muted-foreground">
-							<Loader2 size={14} className="animate-spin" aria-hidden="true" />
+							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 							{t("app.skillPickerLoading")}
 						</div>
 					) : error ? (

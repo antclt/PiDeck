@@ -359,12 +359,6 @@
   border: 2px solid color-mix(in srgb, var(--color-accent) 28%, transparent);
   border-top-color: var(--color-accent);
   border-radius: 50%;
-  animation: feishu-link-spin 0.75s linear infinite;
-}
-@keyframes feishu-link-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 .feishu-link-popover-hint {
   font-size: var(--font-size-micro);

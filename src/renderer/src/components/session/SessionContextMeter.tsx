@@ -697,7 +697,7 @@ export function SessionContextMeter(props: {
 						>
 							<FoldVertical
 								size={13}
-								className={compactUi.compacting ? "animate-spin" : undefined}
+								className={compactUi.compacting ? "animate-pideck-spin" : undefined}
 							/>
 							{compactUi.compacting
 								? t("sessionContext.compacting")

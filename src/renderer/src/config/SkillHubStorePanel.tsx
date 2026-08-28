@@ -339,7 +339,7 @@ export function SkillHubStorePanel() {
 											await handleInstallFromList(item.slug, item.name);
 										}}
 									>
-										{installingSlugs.has(item.slug) ? <span className="skillhub-installing-dot" /> : <Download size={14} />}
+										{installingSlugs.has(item.slug) ? <span className="skillhub-installing-dot animate-pideck-spin" /> : <Download size={14} />}
 									</button>
 								)}
 							</div>

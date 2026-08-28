@@ -253,7 +253,7 @@ export function AskPanelOverlay() {
               />
             ) : (
               <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
-                <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                <Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" />
                 {t("askPanel.waiting")}
               </div>
             )}
@@ -276,7 +276,7 @@ export function AskPanelOverlay() {
         }}
       >
         {panel.creating ? (
-          <Loader2 size={14} className="animate-spin text-muted-foreground" aria-hidden="true" />
+          <Loader2 size={14} className="animate-pideck-spin text-muted-foreground" aria-hidden="true" />
         ) : running ? (
           <span className="relative flex size-2" aria-hidden="true">
             <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
