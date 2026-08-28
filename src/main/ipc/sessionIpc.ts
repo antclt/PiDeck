@@ -29,6 +29,7 @@ import type {
 	SessionMessagePage,
 	ResolveLaunchDefaultsInput,
 	ResolvedLaunchDefaults,
+	ArchivedDshSession,
 } from "../../shared/types";
 import { parseSessionProcessEvents } from "../sessions/sessionProcessEvents";
 import { resolveLaunchDefaultOptions } from "../sessions/launchDefaults";
@@ -222,12 +223,12 @@ export type DshBackendIpcDeps = {
 	importDshForeignSession?: (dshSessionId: string) => Promise<import("../../shared/types").SessionRecord>;
 	/** DSH 外部会话全量同步（磁盘扫描：catalog 未映射的根会话全部导入）；未装配时返回空统计。 */
 	syncDshForeignSessions?: () => Promise<{ imported: number; skipped: number }>;
-	/** DSH 会话归档（G14：host 目录移入 .pideck-archive + manifest）；未装配时抛错。 */
-	archiveDshSession?: (dshSessionId: string, cwd: string) => Promise<string | undefined>;
-	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树，返回恢复路径与原 cwd）；未装配时抛错。 */
-	unarchiveDshSession?: (dshSessionId: string) => Promise<{ restoredPath: string; cwd: string } | undefined>;
-	/** DSH 归档区会话清单（G14：恢复入口用）；未装配时返回空列表。 */
-	listArchivedDshSessions?: () => Array<{ dshSessionId: string; cwd: string; archivedAt: number }>;
+	/** DSH 会话归档（G14：host 目录移入 .pideck-archive + manifest，title 随归档写入）；未装配时抛错。 */
+	archiveDshSession?: (dshSessionId: string, cwd: string, title?: string) => Promise<string | undefined>;
+	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树，返回恢复路径、原 cwd 与标题）；未装配时抛错。 */
+	unarchiveDshSession?: (dshSessionId: string) => Promise<{ restoredPath: string; cwd: string; title?: string } | undefined>;
+	/** DSH 归档区会话清单（G14：恢复入口用；含标题，旧归档由日志折叠补全）；未装配时返回空列表。 */
+	listArchivedDshSessions?: () => Array<ArchivedDshSession>;
 	/** DSH 动态插件清单（G13 深化）；未装配时返回空列表。 */
 	listDshDynamicPlugins?: () => Promise<import("../../shared/types").DshPluginView[]>;
 	/** DSH 静态 Loader 条目清单（只读）；未装配时返回空列表。 */
@@ -730,7 +731,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				}
 				const cwd = projectStore.get(entry.projectId)?.path ?? "";
 				if (!cwd) throw new Error(mainCopy("project.notFound"));
-				const archivedPath = await archiveDshSession(entry.dshSessionId, cwd);
+				// 归档时刻把 catalog 标题写进 manifest：归档区列表与恢复后都靠它显示真实会话名
+				// （旧归档缺省时由 DshHost 从日志折叠兜底，见 listArchivedSessions/unarchiveSession）。
+				const archivedPath = await archiveDshSession(entry.dshSessionId, cwd, entry.title);
 				if (!archivedPath) throw new Error(mainCopy("session.invalidArchivePath"));
 				await sessionCatalog.removeWithDescendants(sessionId);
 				void appLogger.info("session", "DSH session archived", {
@@ -1135,10 +1138,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return syncDshForeignSessions();
 		},
 	);
-	// DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用）
+	// DSH 归档区会话清单（G14：目录已移入 .pideck-archive 的 host 会话，恢复入口用；含标题）
 	ipcMain.handle(
 		ipcChannels.dshListArchived,
-		async (): Promise<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>> => {
+		async (): Promise<ArchivedDshSession[]> => {
 			if (!listArchivedDshSessions) return [];
 			return listArchivedDshSessions();
 		},
@@ -1167,7 +1170,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				: await projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions"));
 			const draft = await sessionCatalog.createDraft({
 				projectId: project.id,
-				title: mainCopy("session.newTitle"),
+				// 恢复时优先用 manifest 里的原标题（旧归档由 DshHost 日志折叠补全），
+				// 缺省才落「新会话」占位——否则侧栏恢复后显示不了真实会话名。
+				title: restored.title ?? mainCopy("session.newTitle"),
 				environment: settingsStore.get().wslEnabled ? "wsl" : "native",
 				backend: "dsh",
 			});

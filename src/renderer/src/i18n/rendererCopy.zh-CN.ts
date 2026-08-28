@@ -16,6 +16,7 @@ export const zhCN = {
   "sessionManager.restore": "恢复",
   "sessionManager.archivedEmpty": "暂无已归档会话",
   "sessionManager.archivedCount": "已归档 {count} 个",
+  "sessionManager.workspaceTag": "该会话属于工作区 {name}",
   "app.sidebarProjects": "项目",
   "app.sidebarWorkspaces": "工作区",
   "app.sidebarSessions": "会话",

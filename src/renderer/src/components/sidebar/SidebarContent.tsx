@@ -1,6 +1,6 @@
 import { Search, Bolt, MessageSquare, Globe, FolderPlus } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import type { AgentTab, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
+import type { AgentTab, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import {
   AgentContextMenu,
   DraftSessionContextMenu,
@@ -14,7 +14,7 @@ import {
 import { RpcLogViewer } from "./RpcLogViewer";
 import { SessionProxyDialog } from "../session/SessionProxyDialog";
 import { sessionRecordToSummary } from "../../atoms";
-import { isManagerSessionSummary } from "../../sessionManagerModel";
+import { isManagerSessionSummary, worktreeFamilyProjects } from "../../sessionManagerModel";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
 import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
@@ -66,12 +66,12 @@ export type SidebarActions = {
     archive: (projectId: string, session: SessionSummary) => Promise<void>;
     /** 恢复归档会话 */
     unarchive: (session: SessionSummary, projectId?: string) => Promise<void>;
-    /** 列出已归档会话 */
-    listArchived: () => Promise<SessionSummary[]>;
+    /** 列出已归档会话（恢复 UI 用；带原始路径，弹窗按项目归属过滤） */
+    listArchived: () => Promise<ArchivedPiSession[]>;
     /** 恢复 DSH 归档会话（host 目录移回 sessions 树并重建 catalog 记录） */
     unarchiveDsh: (dshSessionId: string, projectId?: string) => Promise<void>;
-    /** 列出 DSH 归档会话（会话管理弹窗归档视图用） */
-    listArchivedDsh: () => Promise<Array<{ dshSessionId: string; cwd: string; archivedAt: number }>>;  };
+    /** 列出 DSH 归档会话（会话管理弹窗归档视图用；含标题） */
+    listArchivedDsh: () => Promise<ArchivedDshSession[]>;  };
   agents: {
     rename: (agent: AgentTab) => void;
     export: (agent: AgentTab) => Promise<void>;
@@ -381,10 +381,16 @@ export function SidebarContent(props: SidebarContentProps) {
         />
       )}
       {managerProject && (
+        /* 弹窗项目上下文 = 整个 worktree 家族（根 + 全部子工作区）：主列表并集展示，
+           归档按家族过滤，worktree 会话打工作区标签（策略见 sessionManagerModel）。 */
         <SessionManagerModal
-          sessions={(controller.catalog.sessionsByProject[managerProject.id] ?? [])
+          projects={controller.catalog.projects}
+          projectId={managerProject.id}
+          sessions={(worktreeFamilyProjects(controller.catalog.projects, managerProject.id)
+            .flatMap((project) => controller.catalog.sessionsByProject[project.id] ?? [])
             .map(sessionRecordToSummary)
-            .filter((summary): summary is SessionSummary => Boolean(summary && isManagerSessionSummary(summary)))}
+            .filter((summary): summary is SessionSummary => Boolean(summary && isManagerSessionSummary(summary)))
+            .sort((a, b) => b.updatedAt - a.updatedAt))}
           onClose={controller.closeSessionManager}
           onRename={(session) => actions.sessions.rename(managerProject.id, session)}
           onExport={(session) => void actions.sessions.export(managerProject.id, session)}

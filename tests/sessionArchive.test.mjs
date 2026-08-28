@@ -142,9 +142,33 @@ test("archive moves the session into .pideck-archive and list no longer returns 
 		const summaries = await scanner.list();
 		assert.ok(!summaries.some((s) => s.filePath === sessionPath), "archived session must not appear in list");
 
-		// 归档列表能看到它
+		// 归档列表能看到它（带归档前原始路径，供弹窗按项目归属过滤）
 		const archivedList = await scanner.listArchived();
-		assert.ok(archivedList.some((s) => s.filePath === archived), "archived session must appear in listArchived");
+		assert.ok(archivedList.some((s) => s.summary.filePath === archived), "archived session must appear in listArchived");
+		const item = archivedList.find((s) => s.summary.filePath === archived);
+		assert.equal(item?.originalPath, sessionPath, "listArchived must carry the original path from index.json");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("listArchived without index.json entries still lists sessions without originalPath", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-archive-noindex-"));
+	try {
+		const sessionsRoot = join(home, ".pi", "agent", "sessions");
+		const sessionPath = join(sessionsRoot, "noindex.jsonl");
+		writeSession(sessionPath, healthySession);
+
+		const { SessionScanner } = loadSessionScanner(home);
+		const scanner = new SessionScanner();
+		await scanner.list();
+		await scanner.archive(sessionPath);
+		// 删除索引模拟「极旧归档/索引损坏」：归档仍在，但无法反查原路径
+		rmSync(join(home, ".pi", "agent", "sessions", ".pideck-archive", "index.json"), { force: true });
+
+		const archivedList = await scanner.listArchived();
+		assert.equal(archivedList.length, 1);
+		assert.equal(archivedList[0]?.originalPath, undefined, "索引缺失时 originalPath 应为 undefined（弹窗不展示，配置页仍可恢复）");
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}

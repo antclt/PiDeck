@@ -107,6 +107,16 @@ export function listForeignSessionsFromDisk(dshHome: string): DshForeignSessionI
 		});
 }
 
+/**
+ * 从单个会话目录只读折叠标题（归档区复用：.pideck-archive/<sessionId>/ 与
+ * sessions 树同构——同目录名/同 session.jsonl[.zstd] 布局）。
+ * 只读 header/前缀，不启动 host、不写缓存；无日志/折叠失败返回 undefined。
+ */
+export function foldSessionTitleFromDir(sessionDir: string): string | undefined {
+	const header = readSessionHeader(sessionDir);
+	return header?.loggedTitle;
+}
+
 /** 读单个会话目录的 header；优先 zstd，其次未压缩 jsonl。读失败/损坏返回 undefined。 */
 function readSessionHeader(sessionDir: string): ScannedDshSessionHeader | undefined {
 	const zstdPath = join(sessionDir, "session.jsonl.zstd");

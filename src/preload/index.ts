@@ -423,9 +423,9 @@ const api = {
 		/** 恢复归档会话（移回原路径并重新入目录） */
 		unarchiveRecord: (archivedPath: string) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogUnarchive, archivedPath) as Promise<boolean>,
-		/** 列出已归档会话摘要（恢复 UI 用） */
+		/** 列出已归档会话（恢复 UI 用；带归档前原始路径供按项目归属过滤） */
 		listArchived: () =>
-			ipcRenderer.invoke(ipcChannels.sessionsCatalogListArchived) as Promise<SessionSummary[]>,
+			ipcRenderer.invoke(ipcChannels.sessionsCatalogListArchived) as Promise<import("../shared/types").ArchivedPiSession[]>,
 		readRecordMessages: (sessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogReadMessages, sessionId) as Promise<
 				import("../shared/types").ChatMessage[]
@@ -576,13 +576,9 @@ const api = {
 		/** DSH 外部会话全量同步（自动发现：catalog 未映射的 host 根会话全部导入）。 */
 		syncDshForeignSessions: () =>
 			ipcRenderer.invoke(ipcChannels.dshSyncForeignSessions) as Promise<{ imported: number; skipped: number }>,
-		/** DSH 归档区会话清单（G14：恢复入口用；目录已移入 .pideck-archive 的 host 会话）。 */
+		/** DSH 归档区会话清单（G14：恢复入口用；目录已移入 .pideck-archive 的 host 会话，含标题）。 */
 		listArchivedDshSessions: () =>
-			ipcRenderer.invoke(ipcChannels.dshListArchived) as Promise<Array<{
-				dshSessionId: string;
-				cwd: string;
-				archivedAt: number;
-			}>>,
+			ipcRenderer.invoke(ipcChannels.dshListArchived) as Promise<import("../shared/types").ArchivedDshSession[]>,
 		/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
 		unarchiveDshSession: (dshSessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshUnarchive, dshSessionId) as Promise<boolean>,

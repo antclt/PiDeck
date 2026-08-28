@@ -5,7 +5,7 @@ import { closeSync, existsSync, openSync, readSync } from "node:fs";
 import { mkdir, open as openFile, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { basename as posixBasename, dirname as posixDirname, isAbsolute as posixIsAbsolute, join as posixJoin } from "node:path/posix";
-import type { ChatMessage, ChatRole, SessionSummary } from "../../shared/types";
+import type { ArchivedPiSession, ChatMessage, ChatRole, SessionSummary } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { getCodexSessionThreadInfo } from "../../shared/codexSessionMeta";
 import { isInSubagentArtifactsDir, isValidPiSessionFileHead, looksLikePiSessionFileStem, SUBAGENT_ARTIFACTS_DIR_NAME } from "../../shared/sessionIdentity";
@@ -891,8 +891,8 @@ export class SessionScanner {
     return originalPath;
   }
 
-  /** 列出当前环境全部已归档会话摘要（供恢复 UI 展示） */
-  async listArchived(): Promise<SessionSummary[]> {
+  /** 列出当前环境全部已归档会话（供恢复 UI 展示；带归档前原始路径供按项目归属过滤） */
+  async listArchived(): Promise<ArchivedPiSession[]> {
     // 归档目录可能分布在任意扫描根下（默认全局根 + 项目 sessionDir），
     // 用最近一次 list() 记录的扫描根集合遍历；未扫描过时退回默认根。
     const roots = this.activeScanRoots.length > 0
@@ -900,7 +900,9 @@ export class SessionScanner {
       : this.wslConfig
         ? [this.wslSessionsDir]
         : [this.root];
-    const results: SessionSummary[] = [];
+    // 归档索引一次读齐（archivedPath → originalPath），避免逐文件反查重复读盘。
+    const index = await this.readArchiveIndex(Boolean(this.wslConfig)).catch(() => ({} as Record<string, string>));
+    const results: ArchivedPiSession[] = [];
     const seen = new Set<string>();
     for (const root of roots) {
       const archiveDir = this.joinRuntimePath(root, SessionScanner.ARCHIVE_DIR_NAME);
@@ -911,10 +913,15 @@ export class SessionScanner {
         if (seen.has(this.normalize(file))) continue;
         seen.add(this.normalize(file));
         const summary = await this.readSummary(file).catch(() => null);
-        if (summary) results.push(summary);
+        if (!summary) continue;
+        results.push({
+          summary,
+          // 索引缺失/损坏的极旧归档没有原始路径：弹窗不展示（配置页仍可全局恢复）。
+          ...(index[file] ? { originalPath: index[file] } : {}),
+        });
       }
     }
-    return results.sort((a, b) => b.updatedAt - a.updatedAt);
+    return results.sort((a, b) => b.summary.updatedAt - a.summary.updatedAt);
   }
 
   /** 通过 wsl.exe 移动文件/目录 */

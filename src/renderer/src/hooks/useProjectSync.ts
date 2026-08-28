@@ -129,7 +129,9 @@ export function useProjectSync(input: UseProjectSyncInput) {
     const refreshed: ProjectSessionRefreshResult = await refreshProjectSessions(projectId, true);
     if (!refreshed) return [];
     return refreshed
-      .map((session) => "projectId" in session ? sessionRecordToSummary(session) : session)
+      // SessionSummary 已带 projectId（会话管理弹窗工作区标签用），不能再以
+      // "projectId" in session 区分 Record/Summary；用 Record 独有的 title 判定。
+      .map((session) => "title" in session ? sessionRecordToSummary(session) : session)
       .filter((session): session is SessionSummary => Boolean(session))
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
