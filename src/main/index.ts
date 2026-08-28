@@ -3058,6 +3058,15 @@ app.whenReady().then(async () => {
 			void appLogger?.warn("skill", "Usage probe skill template auto-install failed", { error: result.error });
 		}
 	});
+	// 生图技能同样启动时自动落到用户全局技能目录（pi 只扫 ~/.pi/agent/skills 等，不读 resources/），
+	// 否则用户无法 /skill:image-gen 触发生图。fire-and-forget，失败不阻塞启动。
+	void skillManager.installImageGenTemplate().then((result) => {
+		if (result.success) {
+			void appLogger?.info("skill", "Image-gen skill template auto-installed", { path: result.path });
+		} else {
+			void appLogger?.warn("skill", "Image-gen skill template auto-install failed", { error: result.error });
+		}
+	});
 	extensionManager = new ExtensionManager(
 		piLocator,
 		() => settingsStore.get(),

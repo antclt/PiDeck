@@ -1276,6 +1276,17 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		return { success: false, error: result.error };
 	});
 
+	// 内置生图技能手动安装入口：与 usage-probe 同理，供 UI/调试触发兑底（启动时已自动装，此处幂等覆盖）。
+	ipcMain.handle(ipcChannels.configInstallImageGenSkill, async () => {
+		const result = await skillManager.installImageGenTemplate();
+		if (result.success) {
+			void appLogger.info("skill", "Image-gen skill template installed", { path: result.path });
+			return { success: true, path: result.path };
+		}
+		void appLogger.warn("skill", "Failed to install image-gen skill template", { error: result.error });
+		return { success: false, error: result.error };
+	});
+
 	// ── 开发者控制台 ───────────────────────────────────────────────
 
 	ipcMain.handle(ipcChannels.appToggleDevTools, () => toggleMainWindowDevTools(getMainWindow()));

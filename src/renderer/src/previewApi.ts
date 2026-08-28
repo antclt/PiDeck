@@ -1094,6 +1094,7 @@ export function createPreviewApi(): PiDesktopApi {
 				error: "preview",
 			}),
 			installUsageSkill: async () => ({ success: false, error: "preview" }),
+			installImageGenSkill: async () => ({ success: false, error: "preview" }),
 		},
 		pet: {
 			onState: noop,

@@ -70,3 +70,6 @@ beui-todo-list.tmp.json
 
 # DSH 排查临时目录（测试日志/会话 jsonl/脚本）
 .dsh-tmp/
+
+# beUI 官方源码提取的临时对比目录（不应提交）
+.beui-official/
