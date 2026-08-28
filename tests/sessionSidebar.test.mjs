@@ -42,6 +42,16 @@ function loadPillsModule() {
   );
 }
 
+function loadNavTabModule() {
+  return loadTsModule(
+    "src/renderer/src/utils/sidebarNavTab.ts",
+    "sidebarNavTab.ts",
+    (specifier) => {
+      throw new Error(`Unexpected import: ${specifier}`);
+    },
+  );
+}
+
 function loadControllerModule() {
   return loadTsModule(
     "src/renderer/src/hooks/useSidebarController.ts",
@@ -51,6 +61,7 @@ function loadControllerModule() {
       if (specifier === "jotai") return {};
       if (specifier === "../atoms") return {};
       if (specifier === "../utils/sidebarExpandedProjects") return loadExpandedProjectsModule();
+      if (specifier === "../utils/sidebarNavTab") return loadNavTabModule();
       if (specifier === "../sessionFilterPills") return loadPillsModule();
       throw new Error(`Unexpected import: ${specifier}`);
     },
@@ -271,10 +282,12 @@ test("sidebar uses the dev-style source filter overlay and anonymous Session ent
   const sessionTree = readFileSync("src/renderer/src/components/sidebar/SessionTree.tsx", "utf8");
   const content = readFileSync("src/renderer/src/components/sidebar/SidebarContent.tsx", "utf8");
   const controller = readFileSync("src/renderer/src/hooks/useSidebarController.ts", "utf8");
+  const newSessionMenu = readFileSync("src/renderer/src/components/sidebar/NewSessionMenu.tsx", "utf8");
   const header = readFileSync("src/renderer/src/components/session/SessionHeader.tsx", "utf8");
   assert.doesNotMatch(projectTree, /sourceFilterOpenProjectId|session-source-filter-menu/);
   assert.match(projectTree, /sourceFilter !== null/);
-  assert.match(projectTree, /createAnonymous\(project\.id\)/);
+  // 普通/匿名新建已合并到 NewSessionMenu 下拉按钮，匿名入口在其中保留
+  assert.match(newSessionMenu, /createAnonymous\(projectId\)/);
   assert.match(content, /SessionSourceFilterMenu/);
   assert.match(controller, /toggleSourceFilter/);
   assert.match(sessionTree, /anonymous-indicator/);
@@ -324,8 +337,8 @@ test("narrow project tree keeps root names from losing avoidable width", () => {
   // 展开后的 SessionTree 不在这里断言，避免改变会话层级的视觉语义。
   assert.match(projectTree, /treeRowClass =\n  "[^"]*items-center[^\"]*px-1 /);
   assert.match(projectTree, /className="flex min-w-0 flex-1 items-center gap-1 py-0 pr-1 text-left"/);
-  // 标题栏整行可点击（切换全部展开/折叠），但保持 px-1 pb-1 布局：不把名称向右推一档
-  assert.match(projectTree, /className="flex cursor-pointer select-none items-center justify-between rounded-md px-1 pb-1/);
+  // 无标题父块：工具行保持 px-1 pb-1 布局，不把名称向右推一档
+  assert.match(projectTree, /className="flex items-center justify-between px-1 pb-1"/);
 });
 
 test("ProjectTree shows the project directory name like the dev reference", () => {
@@ -333,14 +346,9 @@ test("ProjectTree shows the project directory name like the dev reference", () =
   assert.match(projectTree, /function displayProjectDirectoryName\(project: Project\)/);
   assert.match(projectTree, /project\.path\.replace\(/);
   assert.match(projectTree, /const projectDirectoryName = displayProjectDirectoryName\(project\)/);
-  // 代码实际实现：tooltip 显示「目录名 + 换行 + 完整路径」两行（fork 测试断言滞后于其代码演进）
-  assert.match(projectTree, /<PathTooltip content=\{`\$\{projectDirectoryName\}\\n\$\{project\.path\}`\}>/);
-  const pathTooltip = readFileSync("src/renderer/src/components/ui-shadcn/PathTooltip.tsx", "utf8");
-  assert.match(pathTooltip, /disableHoverableContent/);
-  assert.match(pathTooltip, /pointer-events-none/);
-  assert.match(pathTooltip, /hideDelay/);
-  assert.match(pathTooltip, /animate-none/);
-  assert.match(projectTree, /PathTooltip content=\{`\$\{projectDirectoryName\}\\n\$\{project\.path\}`\}>[\s\S]*?<button[\s\S]*projectDirectoryName/);
+  // 悬浮路径气泡已移除（仅能展示不能复制，且 bug 多）；项目行直接渲染目录名。
+  assert.doesNotMatch(projectTree, /<PathTooltip/);
+  assert.doesNotMatch(projectTree, /PathTooltip/);
   assert.match(projectTree, /\{projectDirectoryName\}/);
   assert.match(projectTree, /const relatedProjects = controller\.catalog\.projects\.filter/);
   assert.match(projectTree, /const rootProjectSessions = props\.controller\.catalog\.sessionsByProject\[project\.id\]/);
@@ -386,6 +394,27 @@ test("sidebar uses one persisted project accordion without duplicating current p
   assert.match(sessionTree, /renderRuntimeStatusDot\(runtimeSnapshot\?\.status\)/);
   assert.match(sessionTree, /display\.visibleChildren\.map\(renderChild\)/);
   assert.match(sessionTree, /renderSubagents\(groupKey, child\.codexSubagents, child\.piSubagents\)/);
+});
+
+test("sidebar splits Chats/Projects by navTab without duplicating list logic", () => {
+  const content = readFileSync("src/renderer/src/components/sidebar/SidebarContent.tsx", "utf8");
+  const projectTree = readFileSync("src/renderer/src/components/sidebar/ProjectTree.tsx", "utf8");
+  const controller = readFileSync("src/renderer/src/hooks/useSidebarController.ts", "utf8");
+
+  // 分段切换入口：SidebarContent 的 Tabs 按 controller.navTab 驱动，值经 parseSidebarNavTab 收窄
+  assert.match(content, /value=\{controller\.navTab\}/);
+  assert.match(content, /parseSidebarNavTab\(value\)/);
+  assert.match(content, /value="chats"/);
+  assert.match(content, /value="projects"/);
+  // ProjectTree 按 navTab 分流：chats 渲染 Chat 区，projects 渲染项目区（共用同一套渲染）
+  assert.match(projectTree, /navTab === "chats" \? chatSection : projectsSection/);
+  assert.match(projectTree, /const chatSection = chatProjects\.map/);
+  assert.match(projectTree, /const projectsSection = \(/);
+  // 两区都不复制列表逻辑：会话树/项目行只出现一份
+  assert.match(projectTree, /renderProject/);
+  // controller 暴露 navTab + setNavTab
+  assert.match(controller, /navTab: SidebarNavTab;/);
+  assert.match(controller, /setNavTab: \(tab: SidebarNavTab\) => void/);
 });
 
 test("expanded children can be collapsed back via sidebar controller", () => {

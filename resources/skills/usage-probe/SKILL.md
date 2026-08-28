@@ -8,8 +8,9 @@ description: 为 PiDeck 的「用量查询」功能编写自定义供应商配�
 ## 这是什么
 
 PiDeck 输入框旁的「圆环」面板会显示当前供应商的用量/余额。内置已支持少数供应商
-（opencode-go、DeepSeek、OpenRouter、Moonshot/Kimi，以及实现了 OpenAI 官方 `/v1/usage` 端点的
-通用 OpenAI 兼容网关）。如果你的供应商不在内置列表里，可以通过一个**纯 JSON 配置文件**
+（opencode-go、DeepSeek、OpenRouter、Moonshot/Kimi、智谱 GLM、xAI Grok 订阅、OpenAI Codex，以及实现了
+OpenAI 官方 `/v1/usage` 端点的通用 OpenAI 兼容网关；Kimi 还会额外展示 Boost 独立点数，智谱会展示 5h 窗、
+周窗与 MCP 月额度）。如果你的供应商不在内置列表里，可以通过一个**纯 JSON 配置文件**
 让它也能显示用量，**不需要写任何代码**。
 
 配置文件位置（和 models.json 同一个目录）：

@@ -171,29 +171,116 @@ test("内置候选包含 DeepSeek balance 与 opencode periods", () => {
   assert.equal(deepseek.parse.kind, "balance");
 });
 
-test("内置候选包含 OpenRouter credits 与 Moonshot balance", () => {
+test("内置候选包含 OpenRouter、Kimi For Coding 与 Moonshot balance", () => {
   const openrouter = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("openrouter.ai"));
   const moonshot = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.moonshot.ai"));
+  const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
   assert.ok(openrouter);
   assert.ok(moonshot);
+  assert.ok(kimi, "候选表应包含 Kimi For Coding 适配器");
   assert.equal(openrouter.parse.kind, "credits");
+  assert.equal(openrouter.path, "/key");
   assert.equal(moonshot.parse.kind, "balance");
+  assert.equal(kimi.parse.kind, "credits");
 });
 
-test("OpenRouter 候选解析真实 /credits 响应，remaining 由 total-used 反推", () => {
+test("OpenRouter 候选：普通 inference key 走 /api/v1/key 而非 /credits", () => {
+  const cand = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("openrouter.ai"));
+  // /credits 需要 Management key，已改用 /key（普通 key 即可用）
+  assert.notEqual(cand.path, "/credits");
+  assert.equal(cand.parse.totalPath, "data.limit");
+  assert.equal(cand.parse.usedPath, "data.usage");
+  assert.equal(cand.parse.remainingPath, "data.limit_remaining");
+});
+
+test("OpenRouter 候选解析真实 /api/v1/key 响应，remaining 直接用 API 给的值", () => {
   const cand = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("openrouter.ai"));
   assert.equal(probe.candidateApplies(cand, "https://openrouter.ai/api/v1", "openai-completions"), true);
   assert.equal(probe.candidateApplies(cand, "https://api.deepseek.com", "openai-completions"), false);
   const res = probe.parseUsageResponseBody(
-    { data: { total_credits: 100.5, total_usage: 25.75 } },
+    { data: { limit: 100, usage: 25.5, limit_remaining: 74.5, limit_reset: "monthly" } },
     "{}",
     cand.parse,
   );
   assert.equal(res.matched, true);
   assert.equal(res.kind, "credits");
-  assert.equal(res.credits.total, 100.5);
-  assert.equal(res.credits.used, 25.75);
-  assert.equal(res.credits.remaining, 74.75);
+  assert.equal(res.credits.total, 100);
+  assert.equal(res.credits.used, 25.5);
+  // remaining 采信 API 返回的 limit_remaining，不反推
+  assert.equal(res.credits.remaining, 74.5);
+});
+
+test("OpenRouter 免费层 limit/limit_remaining 为 null 时仍命中（仅 used）", () => {
+  const cand = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("openrouter.ai"));
+  const res = probe.parseUsageResponseBody(
+    { data: { limit: null, usage: 3.2, limit_remaining: null } },
+    "{}",
+    cand.parse,
+  );
+  // total/remaining 都取不到，但 used 有值 → 仍命中小数余额展示，不整体退化 raw
+  assert.equal(res.matched, true);
+  assert.equal(res.credits.total, undefined);
+  assert.equal(res.credits.used, 3.2);
+  assert.equal(res.credits.remaining, undefined);
+});
+
+test("Kimi For Coding 候选：命中 api.kimi.com，解析真实 /usages 响应", () => {
+  const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
+  assert.equal(kimi.path, "/usages");
+  assert.equal(probe.candidateApplies(kimi, "https://api.kimi.com/coding/v1", "openai-completions"), true);
+  assert.equal(probe.candidateApplies(kimi, "https://api.moonshot.ai/v1", "openai-completions"), false);
+  const res = probe.parseUsageResponseBody(
+    { usage: { limit: "2048", used: "214", remaining: "1834", resetTime: "2026-01-09T15:23:13Z" } },
+    "{}",
+    kimi.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "credits");
+  assert.equal(res.credits.total, 2048);
+  assert.equal(res.credits.used, 214);
+  // remainingPath 命中 → 直接用 usage.remaining（字符串数字也会被 toNumber 收窄）
+  assert.equal(res.credits.remaining, 1834);
+});
+
+test("Kimi For Coding：字段漂移下只给 limit+remaining 或 limit+used 都能解析", () => {
+  const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
+  // 漂移形态 A：没有 used，只有 remaining
+  const onlyRemaining = probe.parseUsageResponseBody(
+    { usage: { limit: "100", remaining: "74" } },
+    "{}",
+    kimi.parse,
+  );
+  assert.equal(onlyRemaining.matched, true);
+  assert.equal(onlyRemaining.credits.total, 100);
+  assert.equal(onlyRemaining.credits.used, undefined);
+  assert.equal(onlyRemaining.credits.remaining, 74);
+  // 漂移形态 B：只有 used，remaining 由 total-used 反推
+  const onlyUsed = probe.parseUsageResponseBody(
+    { usage: { limit: "100", used: "40" } },
+    "{}",
+    kimi.parse,
+  );
+  assert.equal(onlyUsed.matched, true);
+  assert.equal(onlyUsed.credits.total, 100);
+  assert.equal(onlyUsed.credits.used, 40);
+  assert.equal(onlyUsed.credits.remaining, 60);
+});
+
+test("Kimi For Coding：boosterWallet 带独立货币字段不干扰主额度解析", () => {
+  const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
+  // boosterWallet 是独立 Boost 点数货币，主额度 usage 之外；确认解析只取 usage.*
+  const res = probe.parseUsageResponseBody(
+    {
+      usage: { limit: "1000", used: "100", resetTime: "2026-02-01T00:00:00Z" },
+      boosterWallet: { balance: { type: "BOOSTER", amount: "5000000", amountLeft: "1000000" } },
+    },
+    "{}",
+    kimi.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.credits.total, 1000);
+  assert.equal(res.credits.used, 100);
+  assert.equal(res.credits.remaining, 900);
 });
 
 test("Moonshot 候选国内/国际 baseUrl 都命中，解析真实 balance 响应（无币种）", () => {
@@ -269,6 +356,17 @@ test("智谱候选命中 open.bigmodel.cn 的 OpenAI/Anthropic 两种 base，不
   assert.equal(probe.candidateApplies(zhipu, "https://openrouter.ai/api/v1", "openai-completions"), false);
 });
 
+test("智谱候选追加 api.z.ai 国际版 origin，同样命中根路径监控端点", () => {
+  const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
+  // api.z.ai 是 GLM Coding Plan 国际版 origin，与 open.bigmodel.cn 同一监控 API
+  assert.ok(zhipu.baseUrlContains.includes("api.z.ai"), "候选 baseUrlContains 应包含 api.z.ai");
+  assert.equal(probe.candidateApplies(zhipu, "https://api.z.ai/api/paas/v4/", "openai-completions"), true);
+  // rootPath 只取 origin，拼接出 api.z.ai 的监控端点而非 /api/paas/v4 兼容路径
+  const urls = probe.usageProbeUrls(zhipu, "https://api.z.ai/api/paas/v4/", ensureVersion);
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0], "https://api.z.ai/api/monitor/usage/quota/limit");
+});
+
 test("usageProbeUrls rootPath：只取 baseUrl origin，不拼 /api/paas/v4 路径段", () => {
   const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
   const urls = probe.usageProbeUrls(zhipu, "https://open.bigmodel.cn/api/paas/v4/", ensureVersion);
@@ -327,4 +425,205 @@ test("智谱响应缺周窗条目时 windows 只给 5h 一条，主值仍正常"
   // 单窗：windows 只含 5h，周窗缺值被跳过而不是使整条解析失败
   assert.equal(res.credits.windows.length, 1);
   assert.equal(res.credits.windows[0].key, "fiveHour");
+});
+
+test("智谱 MCP 月度额度窗口：按 type=TIME_LIMIT 遍历匹配，与 5h/周窗并存", () => {
+  const zhipu = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("open.bigmodel.cn"));
+  const res = probe.parseUsageResponseBody(
+    {
+      data: {
+        limits: [
+          { type: "TIME_LIMIT", usage: 300, currentValue: 120, usageDetails: [{ modelCode: "glm-4.5", usage: 60 }] },
+          { type: "CREDIT_LIMIT", unit: 3, number: 5, usage: 10000000, currentValue: 500000 },
+          { type: "CREDIT_LIMIT", unit: 6, number: 1, usage: 100000, currentValue: 20000 },
+        ],
+      },
+    },
+    "{}",
+    zhipu.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.credits.windows.length, 3);
+  const byKey = Object.fromEntries(res.credits.windows.map((w) => [w.key, w]));
+  // MCP 月额度（TIME_LIMIT）：usage=总配额、currentValue=已用
+  assert.equal(byKey.mcpMonthly.total, 300);
+  assert.equal(byKey.mcpMonthly.used, 120);
+  assert.equal(byKey.mcpMonthly.remaining, 180);
+  // 5h 窗与周窗仍按 unit 匹配，不受 MCP 条目插队影响
+  assert.equal(byKey.fiveHour.total, 10000000);
+  assert.equal(byKey.weekly.total, 100000);
+});
+
+test("Kimi booster 独立货币解析：定点余额/分钱换算成元，unlimited 标记", () => {
+  const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
+  const res = probe.parseUsageResponseBody(
+    {
+      usage: { limit: "1000", used: "100", resetTime: "2026-02-01T00:00:00Z" },
+      boosterWallet: {
+        balance: { type: "BOOSTER", amount: "5000000", amountLeft: "1000000" },
+        monthlyChargeLimit: { priceInCents: 2000, currency: "CNY" },
+        monthlyUsed: { priceInCents: 450, currency: "CNY" },
+        monthlyChargeLimitEnabled: true,
+      },
+    },
+    "{}",
+    kimi.parse,
+  );
+  assert.equal(res.matched, true);
+  // 主额度不受影响
+  assert.equal(res.credits.total, 1000);
+  // booster：1,000,000 定点 = 1 分 → amountLeft 1000000 = 1 分 = 0.01 元；amount 5000000 = 0.05 元
+  assert.ok(res.booster, "booster 应解析出来");
+  assert.equal(res.booster.balance, 0.01);
+  assert.equal(res.booster.total, 0.05);
+  assert.equal(res.booster.currency, "CNY");
+  assert.equal(res.booster.monthlyUsed, 4.5); // 450 分 = 4.5 元
+  assert.equal(res.booster.monthlyChargeLimit, 20); // 2000 分 = 20 元
+  assert.equal(res.booster.unlimitedMonthly, undefined);
+});
+
+test("Kimi booster 月限额未启用（monthlyChargeLimitEnabled=false）时标记 unlimited 且不给数值", () => {
+  const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
+  const res = probe.parseUsageResponseBody(
+    {
+      usage: { limit: "1000", used: "100" },
+      boosterWallet: {
+        balance: { type: "BOOSTER", amount: "5000000", amountLeft: "2000000" },
+        monthlyChargeLimitEnabled: false,
+      },
+    },
+    "{}",
+    kimi.parse,
+  );
+  assert.equal(res.booster.unlimitedMonthly, true);
+  assert.equal(res.booster.monthlyChargeLimit, undefined);
+});
+
+test("Kimi booster 缺 balance 时 booster 不输出（主额度仍正常）", () => {
+  const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
+  const res = probe.parseUsageResponseBody(
+    { usage: { limit: "100", used: "10" } },
+    "{}",
+    kimi.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.booster, undefined);
+});
+
+test("xAI 候选：absoluteUrl 固定官方域、baseUrlContains api.x.ai、带 Grok 客户端头与 preflight", () => {
+  const xai = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.x.ai"));
+  assert.ok(xai, "候选表应包含 xAI 适配器");
+  assert.equal(xai.absoluteUrl, "https://cli-chat-proxy.grok.com/v1/billing?format=credits");
+  assert.equal(probe.candidateApplies(xai, "https://api.x.ai", "openai-completions"), true);
+  assert.equal(probe.candidateApplies(xai, "https://api.deepseek.com", "openai-completions"), false);
+  assert.equal(xai.headers["X-XAI-Token-Auth"], "xai-grok-cli");
+  assert.ok(xai.preflight, "xAI 需要 identity 预检");
+  assert.equal(xai.preflight.absoluteUrl, "https://cli-chat-proxy.grok.com/v1/user?include=subscription");
+  // loadTsCommonJs 经 vm 执行，跨 realm 对象 deepEqual 会误报，故逐字段断言
+  assert.equal(xai.preflight.capture.path, "userId");
+  assert.equal(xai.preflight.capture.header, "x-userid");
+  assert.equal(xai.parse.kind, "custom");
+  assert.equal(xai.parse.resolver, "xai-billing");
+  // absoluteUrl 生效：usageProbeUrls 只返回该官方 URL，不拼 baseUrl 也不走版本化
+  const urls = probe.usageProbeUrls(xai, "https://api.x.ai", ensureVersion);
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0], "https://cli-chat-proxy.grok.com/v1/billing?format=credits");
+});
+
+test("xAI billing 专用解析：percent 优先，否则 cent-wrapper 美元桶，含按需用量", () => {
+  const xai = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.x.ai"));
+  // percent 形态：creditUsagePercent 直接是占用百分比
+  const percentRes = probe.parseUsageResponseBody(
+    {
+      config: {
+        creditUsagePercent: 25,
+        currentPeriod: { type: "USAGE_PERIOD_TYPE_MONTHLY", start: "2026-01-01T00:00:00Z", end: "2026-02-01T00:00:00Z" },
+        onDemandCap: { val: 10000 },
+        onDemandUsed: { val: 1000 },
+        prepaidBalance: { val: 5000 },
+      },
+    },
+    "{}",
+    xai.parse,
+  );
+  assert.equal(percentRes.matched, true);
+  assert.equal(percentRes.kind, "credits");
+  const byKey = Object.fromEntries(percentRes.credits.windows.map((w) => [w.key, w]));
+  assert.equal(byKey.included.used, 25);
+  assert.equal(byKey.included.total, 100);
+  assert.equal(byKey.onDemand.used, 10); // 1000 分 = 10 元
+  assert.equal(byKey.onDemand.total, 100); // 10000 分 = 100 元
+
+  // 无 percent 时回退 monthlyLimit/used（cent wrapper → 美元）
+  const usdRes = probe.parseUsageResponseBody(
+    { config: { monthlyLimit: { val: 3000 }, used: { val: 750 } } },
+    "{}",
+    xai.parse,
+  );
+  assert.equal(usdRes.matched, true);
+  const usdByKey = Object.fromEntries(usdRes.credits.windows.map((w) => [w.key, w]));
+  assert.equal(usdByKey.included.used, 7.5);
+  assert.equal(usdByKey.included.total, 30);
+
+  // 既无 percent 也无美元字段 → 不匹配
+  assert.equal(probe.parseUsageResponseBody({ config: {} }, "{}", xai.parse).matched, false);
+});
+
+test("Codex 候选：命中 chatgpt.com 的 codex 协议，走 wham/usage 相对路径", () => {
+  const codex = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("chatgpt.com"));
+  assert.ok(codex, "候选表应包含 OpenAI Codex 适配器");
+  assert.equal(codex.path, "/wham/usage");
+  assert.equal(probe.candidateApplies(codex, "https://chatgpt.com/backend-api", "openai-codex-responses"), true);
+  assert.equal(probe.candidateApplies(codex, "https://chatgpt.com/backend-api", "openai-completions"), false);
+  assert.equal(probe.candidateApplies(codex, "https://api.openai.com/v1", "openai-codex-responses"), false);
+  // 相对 baseUrl 拼接（pi 的 openai-codex baseUrl 就是 chatgpt.com/backend-api）
+  const urls = probe.usageProbeUrls(codex, "https://chatgpt.com/backend-api", ensureVersion);
+  assert.ok(urls.some((u) => u === "https://chatgpt.com/backend-api/wham/usage"));
+});
+
+test("Codex 专用解析：primary/secondary percent 窗 + credits 余额", () => {
+  const codex = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("chatgpt.com"));
+  const res = probe.parseUsageResponseBody(
+    {
+      rate_limit: {
+        primary_window: { used_percent: 62, limit_window_seconds: 3600, reset_at: 1706200000 },
+        secondary_window: { used_percent: 15, limit_window_seconds: 86400, reset_at: 1706200000 },
+      },
+      credits: { has_credits: true, balance: 12 },
+      rate_limit_reset_credits: { available_count: 2 },
+      plan_type: "codex-pro",
+    },
+    "{}",
+    codex.parse,
+  );
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "credits");
+  assert.equal(res.credits.remaining, 12); // credits.balance
+  const byKey = Object.fromEntries(res.credits.windows.map((w) => [w.key, w]));
+  assert.equal(byKey.primary.used, 62);
+  assert.equal(byKey.primary.total, 100);
+  assert.equal(byKey.secondary.used, 15);
+  assert.equal(byKey.secondary.total, 100);
+  // 全空响应不匹配
+  assert.equal(probe.parseUsageResponseBody({}, "{}", codex.parse).matched, false);
+});
+
+test("preflight 子结构 URL 生成：absoluteUrl 优先、普通 path 走版本化拼接", () => {
+  // xAI preflight 有 absoluteUrl → 只返回官方 URL
+  const xai = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.x.ai"));
+  const preflightUrls = probe.usageProbeUrls(
+    { path: xai.preflight.path, absoluteUrl: xai.preflight.absoluteUrl, rootPath: false },
+    "https://api.x.ai",
+    ensureVersion,
+  );
+  assert.equal(preflightUrls.length, 1);
+  assert.equal(preflightUrls[0], "https://cli-chat-proxy.grok.com/v1/user?include=subscription");
+  // 普通 path（无 absoluteUrl）：版本化 + 原样两条
+  const plain = probe.usageProbeUrls(
+    { path: "/v1/user", rootPath: false },
+    "https://api.x.ai",
+    ensureVersion,
+  );
+  assert.ok(plain.length >= 1 && plain.length <= 2);
+  assert.ok(plain.some((u) => u.includes("/v1/user")));
 });

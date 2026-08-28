@@ -6,6 +6,11 @@ import {
   defaultExpandedSidebarProjects,
   readExpandedSidebarProjects,
 } from "../utils/sidebarExpandedProjects";
+import {
+  DEFAULT_SIDEBAR_NAV_TAB,
+  readSidebarNavTab,
+  type SidebarNavTab,
+} from "../utils/sidebarNavTab";
 
 /** Settings overlay visibility is shared by Sidebar, Pi environment flow, and Session surface. */
 export const settingsOpenAtom = atom(false);
@@ -93,6 +98,13 @@ export const sidebarExpandedProjectIdsAtom = atom<ReadonlySet<string>>(
   })(),
 );
 
+/** 侧栏 Chats/项目分段：localStorage 首屏缓存，settings.json 作权威来源。 */
+export const sidebarNavTabAtom = atom<SidebarNavTab>(
+  readSidebarNavTab(
+    typeof window === "undefined" ? undefined : window.localStorage,
+  ) ?? DEFAULT_SIDEBAR_NAV_TAB,
+);
+
 // useStreamdownRendererAtom 已移除：Streamdown 转正为唯一 markdown 引擎（迁移 react-markdown 完成）。
 
 /**
@@ -112,4 +124,11 @@ export const turnFlowSettingsAtom = atom<TurnFlowSettings>({
 	expandInterimDuringStream: true,
 	collapsePrevRunsOnNewTurn: true,
 });
+
+/**
+ * 是否使用 beUI 官方原版组件（false=PiDeck 定制变体）。
+ * 与 turnFlowSettingsAtom 同模式：App 从 settings 同步写入，组件直接订阅。
+ * 默认 false 与 SettingsStore.defaultSettings 保持一致。
+ */
+export const beuiOfficialComponentsAtom = atom(false);
 

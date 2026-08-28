@@ -1184,6 +1184,9 @@ export const applySessionRuntimeEventAtom = atom(
         nextRuntime = {
           ...nextRuntime,
           status,
+          // 终态（error/closed）会话不再需要运行时状态（goal/todos/model 上下文等），
+          // 清空以释放渲染进程内存；历史消息在 sessionMessagesCacheAtom 中不受影响。
+          state: status === "error" || status === "closed" ? undefined : nextRuntime.state,
           projectId: typeof payload.projectId === "string" ? payload.projectId : nextRuntime.projectId,
           cwd: typeof payload.cwd === "string" ? payload.cwd : nextRuntime.cwd,
           title: typeof payload.title === "string" ? payload.title : nextRuntime.title,
@@ -1198,28 +1201,34 @@ export const applySessionRuntimeEventAtom = atom(
         };
       }
     } else if (event.sourceChannel === "agents:runtime-state" && payload?.state) {
-      nextRuntime = {
-        ...nextRuntime,
-        state: mergeAgentRuntimeState(
-          nextRuntime.state,
-          payload.state as AgentRuntimeState,
-        ),
-      };
-      // 缓存命中率快照入列：供「会话平均命中率」展示。
-      // 只记有效百分比，避免把 undefined/瞬时抖动计入平均；
-      // 连续相同的快照值跳过（流式期间 get_state 轮询会重复返回同一统计）。
-      const hitPercent = (payload.state as AgentRuntimeState).cacheHitPercent;
-      if (typeof hitPercent === "number" && Number.isFinite(hitPercent)) {
-        const currentStats = get(sessionCacheStatsAtom)[event.sessionId] ?? { cacheHitHistory: [] };
-        const history = currentStats.cacheHitHistory;
-        if (history[history.length - 1] === hitPercent) {
-          // 值未变化：不写 atom，避免 SessionHeader 无谓重渲染
-        } else {
-          const nextHistory = [...history, hitPercent].slice(-SESSION_CACHE_STATS_LIMIT);
-          set(sessionCacheStatsAtom, {
-            ...get(sessionCacheStatsAtom),
-            [event.sessionId]: { cacheHitHistory: nextHistory },
-          });
+      // 终态之后主进程仍可能有迟到的 runtime-state 事件回填旧 state；
+      // 此时跳过 merge，避免刚被清空的 state 又被旧事件重新填回（占用内存）。
+      // isSessionRuntimeBusy 已按 status 早退、不读 state，跳过不改变任何 UI 判断。
+      const terminal = nextRuntime.status === "error" || nextRuntime.status === "closed";
+      if (!terminal) {
+        nextRuntime = {
+          ...nextRuntime,
+          state: mergeAgentRuntimeState(
+            nextRuntime.state,
+            payload.state as AgentRuntimeState,
+          ),
+        };
+        // 缓存命中率快照入列：供「会话平均命中率」展示。
+        // 只记有效百分比，避免把 undefined/瞬时抖动计入平均；
+        // 连续相同的快照值跳过（流式期间 get_state 轮询会重复返回同一统计）。
+        const hitPercent = (payload.state as AgentRuntimeState).cacheHitPercent;
+        if (typeof hitPercent === "number" && Number.isFinite(hitPercent)) {
+          const currentStats = get(sessionCacheStatsAtom)[event.sessionId] ?? { cacheHitHistory: [] };
+          const history = currentStats.cacheHitHistory;
+          if (history[history.length - 1] === hitPercent) {
+            // 值未变化：不写 atom，避免 SessionHeader 无谓重渲染
+          } else {
+            const nextHistory = [...history, hitPercent].slice(-SESSION_CACHE_STATS_LIMIT);
+            set(sessionCacheStatsAtom, {
+              ...get(sessionCacheStatsAtom),
+              [event.sessionId]: { cacheHitHistory: nextHistory },
+            });
+          }
         }
       }
     } else if (event.sourceChannel === "agents:thinking" && payload) {

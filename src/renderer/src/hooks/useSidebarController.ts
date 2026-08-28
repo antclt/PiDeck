@@ -8,6 +8,7 @@ import {
   sessionIdsByProjectAtom,
   sessionRecordsAtom,
   sidebarExpandedProjectIdsAtom,
+  sidebarNavTabAtom,
   sidebarRuntimeAtom,
 } from "../atoms";
 import {
@@ -15,6 +16,11 @@ import {
   sameProjectIdSet,
   writeExpandedSidebarProjects,
 } from "../utils/sidebarExpandedProjects";
+import {
+  parseSidebarNavTab,
+  writeSidebarNavTab,
+  type SidebarNavTab,
+} from "../utils/sidebarNavTab";
 import {
   SESSION_FILTER_PILLS,
   parseSessionFilterState,
@@ -76,6 +82,9 @@ export type SidebarController = {
   catalog: SidebarCatalog;
   search: string;
   setSearch: (search: string) => void;
+  /** 侧栏 Chats/项目分段当前选中；记忆上次选择，双写到 localStorage 与 settings.json */
+  navTab: SidebarNavTab;
+  setNavTab: (tab: SidebarNavTab) => void;
   expandedProjectIds: ReadonlySet<string>;
   isProjectCollapsed: (projectId: string) => boolean;
   toggleProject: (projectId: string) => void;
@@ -205,6 +214,10 @@ export function useSidebarController(options: {
   persistExpandedProjectIds?: (projectIds: string[]) => void;
   /** settings.json 中的权威展开集合，首次拿到时覆盖本地缓存 */
   settingsExpandedProjectIds?: readonly string[];
+  /** 侧栏分段切换状态变更时写入 settings.json；dev 强杀丢 localStorage 时靠它恢复 */
+  persistNavTab?: (tab: SidebarNavTab) => void;
+  /** settings.json 中的权威侧栏分段，首次拿到时覆盖本地缓存 */
+  settingsNavTab?: SidebarNavTab;
   /** 初始 settings.get 已完成；旧 key 迁移必须等此时才允许落盘。 */
   settingsLoaded?: boolean;
   /** 权威 settings 已应用且旧 key 已完成迁移后通知 App 开始懒加载会话。 */
@@ -219,6 +232,7 @@ export function useSidebarController(options: {
   const pageSize = options.pageSize ?? SIDEBAR_PROJECT_CHILD_PAGE_SIZE;
   const [search, setSearch] = useState("");
   const [expandedProjectIds, setExpandedProjectIds] = useAtom(sidebarExpandedProjectIdsAtom);
+  const [navTab, setNavTabState] = useAtom(sidebarNavTabAtom);
   const [sourceFilters, setSourceFilters] = useState<SidebarSourceFilters>(() =>
     readSidebarSourceFilters(options.storage ?? (typeof window === "undefined" ? undefined : window.localStorage)),
   );
@@ -252,6 +266,41 @@ export function useSidebarController(options: {
       // Local preferences are optional and must not make the Sidebar unusable.
     }
   }, [options.storage, sourceFilters]);
+
+  // ── 侧栏 Chats/项目分段：localStorage 首屏缓存 + settings.json 可靠落盘（与展开集合同策略） ──
+
+  const navTabRef = useRef(navTab);
+  navTabRef.current = navTab;
+  /** 已合并过 settings.json 的分段状态，避免迟到的 settings 覆盖用户在首屏刚切的标签 */
+  const navTabHydratedRef = useRef(false);
+  const persistNavTabRef = useRef(options.persistNavTab);
+  persistNavTabRef.current = options.persistNavTab;
+
+  /** 更新分段并双写：localStorage 同步落盘 + settings.json 交调用方写入 */
+  const commitNavTab = useCallback((tab: SidebarNavTab) => {
+    navTabRef.current = tab;
+    setNavTabState(tab);
+    writeSidebarNavTab(storageRef.current, tab);
+    persistNavTabRef.current?.(tab);
+  }, [setNavTabState]);
+
+  const setNavTab = useCallback((tab: SidebarNavTab) => {
+    // 用户点选即视为权威已应用，防止迟到的 settings 回盖
+    navTabHydratedRef.current = true;
+    commitNavTab(tab);
+  }, [commitNavTab]);
+
+  // settings.json 为权威来源：首次拿到时覆盖 localStorage 缓存值；缺省/非法保留本地默认 chats
+  const settingsNavTab = options.settingsNavTab;
+  useEffect(() => {
+    if (navTabHydratedRef.current || !options.settingsLoaded) return;
+    navTabHydratedRef.current = true;
+    const parsed = parseSidebarNavTab(settingsNavTab);
+    if (parsed === null || parsed === navTabRef.current) return;
+    navTabRef.current = parsed;
+    setNavTabState(parsed);
+    writeSidebarNavTab(storageRef.current, parsed);
+  }, [options.settingsLoaded, settingsNavTab, setNavTabState]);
 
   // ── 侧栏展开状态：localStorage 首屏缓存 + settings.json 可靠落盘 ──
 
@@ -443,6 +492,8 @@ export function useSidebarController(options: {
     catalog,
     search,
     setSearch,
+    navTab,
+    setNavTab,
     expandedProjectIds,
     isProjectCollapsed: (projectId) => !expandedProjectIds.has(projectId),
     toggleProject,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { FoldVertical } from "lucide-react";
 import { t } from "../../i18n";
+import type { TranslationKey } from "../../i18n";
 import type { AgentRuntimeState, ProviderUsageResult } from "../../../../shared/types";
 import { desktopApi } from "../../desktopApi";
 import { showNotice } from "../../utils/notice";
@@ -53,6 +54,18 @@ const PANEL_WIDTH = 320;
 const USAGE_CACHE_TTL_MS = 60_000;
 /** 面板内 provider 用量查询的进程级缓存（模块内一处，避免每次打开都弹请求）。 */
 const usageCache = new Map<string, ProviderUsageResult>();
+
+/**
+ * 内置候选的多窗口 key → i18n key（xAI 套餐/按需、智谱 MCP 等）；
+ * 未知 key（用户自定义探针的 windows）原样展示 key，不做硬编码文案。
+ */
+const WINDOW_LABEL_I18N: Record<string, TranslationKey> = {
+	fiveHour: "sessionContext.usageWindowFiveHour",
+	weekly: "sessionContext.usageWindowWeekly",
+	mcpMonthly: "sessionContext.usageWindowMcpMonthly",
+	included: "sessionContext.usageWindowIncluded",
+	onDemand: "sessionContext.usageWindowOnDemand",
+};
 
 /** @internal 仅供测试：清空用量缓存。 */
 export function _resetUsageCacheForTests(): void {
@@ -224,6 +237,52 @@ export function SessionContextMeter(props: {
 	// 余额/credits 形态：kind 显式标注，按形态渲染成「剩余额度」行而不是三档百分比。
 	const usageBalance = usage?.kind === "balance" ? usage.balance : undefined;
 	const usageCredits = usage?.kind === "credits" ? usage.credits : undefined;
+	// 与主额度并存的独立货币（如 Kimi Boost 点数）：只在主额度区块内追加展示，
+	// 不参与 kind 判断（主额度仍是 periods/balance/credits 三态之一）。
+	const usageBooster = usage?.booster;
+	// 主额度区块下方追加的独立货币块（windows/credits 两个分支都带，避免三态 if/else 链重复）。
+	const boosterBlock =
+		usageBooster != null ? (
+			<div className="mt-1 space-y-0.5 border-t border-border/60 pt-1.5" data-testid="session-context-usage-booster">
+				<div className="flex items-center justify-between gap-4 px-0.5">
+					<span className="shrink-0 text-caption leading-5 text-text-secondary">
+						{t("sessionContext.usageBoosterBalance")}
+					</span>
+					<span className="min-w-0 text-right font-mono font-semibold tabular-nums text-foreground">
+						{formatBalance({ value: usageBooster.balance, currency: usageBooster.currency })}
+					</span>
+				</div>
+				{usageBooster.monthlyUsed != null && (
+					<div className="flex items-center justify-between gap-4 px-0.5">
+						<span className="shrink-0 text-caption leading-5 text-text-secondary">
+							{t("sessionContext.usageBoosterMonthlyUsed")}
+						</span>
+						<span className="min-w-0 text-right font-mono tabular-nums text-text-tertiary">
+							{formatBalance({ value: usageBooster.monthlyUsed, currency: usageBooster.currency })}
+						</span>
+					</div>
+				)}
+				{usageBooster.unlimitedMonthly ? (
+					<div className="flex items-center justify-between gap-4 px-0.5">
+						<span className="shrink-0 text-caption leading-5 text-text-secondary">
+							{t("sessionContext.usageBoosterMonthlyLimit")}
+						</span>
+						<span className="min-w-0 text-right font-mono tabular-nums text-text-tertiary">
+							{t("sessionContext.usageBoosterUnlimited")}
+						</span>
+					</div>
+				) : usageBooster.monthlyChargeLimit != null ? (
+					<div className="flex items-center justify-between gap-4 px-0.5">
+						<span className="shrink-0 text-caption leading-5 text-text-secondary">
+							{t("sessionContext.usageBoosterMonthlyLimit")}
+						</span>
+						<span className="min-w-0 text-right font-mono tabular-nums text-text-tertiary">
+							{formatBalance({ value: usageBooster.monthlyChargeLimit, currency: usageBooster.currency })}
+						</span>
+					</div>
+				) : null}
+			</div>
+		) : null;
 	// 有 provider 名才渲染用量区块：加载中/失败/成功三种态在区块内部切换。
 	const showUsage = provider != null;
 
@@ -579,11 +638,9 @@ export function SessionContextMeter(props: {
 										// 用量≥90% 红字警示（与 context occupancy / periods 同源判断）
 										const urgent = pct != null && pct >= 90;
 										const label =
-											window.key === "fiveHour"
-												? t("sessionContext.usageWindowFiveHour")
-												: window.key === "weekly"
-													? t("sessionContext.usageWindowWeekly")
-													: window.key;
+											WINDOW_LABEL_I18N[window.key] != null
+												? t(WINDOW_LABEL_I18N[window.key])
+												: window.key;
 										return (
 											<div key={window.key} className="flex items-center gap-1.5">
 												<span className="w-14 flex-none shrink-0 text-caption leading-5 text-text-secondary">
@@ -608,7 +665,8 @@ export function SessionContextMeter(props: {
 											</div>
 										);
 									})}
-								</div>
+								{boosterBlock}
+							</div>
 							) : usageCredits ? (
 								<div className="space-y-1">
 									{usageCredits.remaining != null && (
@@ -631,7 +689,8 @@ export function SessionContextMeter(props: {
 											</span>
 										</div>
 									)}
-								</div>
+								{boosterBlock}
+							</div>
 							) : usageFailed ? (
 								<div className="px-0.5 text-caption leading-5 text-text-tertiary" title={usage?.error ?? undefined}>
 									{t("sessionContext.usageError")}

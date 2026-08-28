@@ -126,6 +126,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "rpcTimeout", tab: "dev", itemKey: "settings.rpcTimeout" },
 	{ field: "maxEditorFileSizeMB", tab: "dev", itemKey: "settings.maxEditorFileSize" },
 	{ field: "electronChromiumSandbox", tab: "dev", itemKey: "settings.electronSandbox" },
+	{ field: "useOfficialBeuiComponents", tab: "dev", itemKey: "settings.useOfficialBeui" },
 	{ field: "piRpcOffline", tab: "dev", itemKey: "settings.piRpcOffline" },
 	{ field: "piRpcNoExtensions", tab: "dev", itemKey: "settings.piRpcNoExtensions" },
 	{ field: "piRpcNoSkills", tab: "dev", itemKey: "settings.piRpcNoSkills" },

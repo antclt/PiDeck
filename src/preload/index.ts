@@ -1435,6 +1435,11 @@ const api = {
 			ipcRenderer.invoke(
 				ipcChannels.configInstallUsageSkill,
 			) as Promise<{ success: boolean; path?: string; error?: string }>,
+		/** 安装内置「图片生成」技能模板到 ~/.pi/agent/skills/image-gen */
+		installImageGenSkill: () =>
+			ipcRenderer.invoke(
+				ipcChannels.configInstallImageGenSkill,
+			) as Promise<{ success: boolean; path?: string; error?: string }>,
 	},
 	pet: {
 		/** 宠物窗监听主进程推送的聚合状态 */

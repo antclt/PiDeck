@@ -1,4 +1,4 @@
-import { Search, Bolt, MessageSquare, Globe, FolderPlus } from "lucide-react";
+import { Bolt, Folder, MessageSquare, Globe } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { AgentTab, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import {
@@ -16,13 +16,17 @@ import { SessionProxyDialog } from "../session/SessionProxyDialog";
 import { sessionRecordToSummary } from "../../atoms";
 import { isManagerSessionSummary, worktreeFamilyProjects } from "../../sessionManagerModel";
 import { t } from "../../i18n";
+import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController, type SidebarRpcLog } from "../../hooks/useSidebarController";
 import { DshSearchResults } from "./DshSearchResults";
 import { ProjectTree } from "./ProjectTree";
 import { Button } from "../ui-shadcn/button";
-import { Input } from "../ui-shadcn/input";
+import { Tabs, TabsList, TabsTrigger } from "../motion/tabs";
+import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
+import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
+import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
 
 export type SidebarActions = {
   projects: {
@@ -151,6 +155,31 @@ export function SidebarContent(props: SidebarContentProps) {
     ? controller.catalog.projects.find((project) => project.id === currentProject.worktreeParentId) ?? currentProject
     : currentProject;
 
+  // MorphingSearch 检索项：扁平化所有项目 + 会话，供命令面板跳转。
+  // 项目项用目录名（chat 用「Chat」），会话项用标题 + 预览；选中即打开/选中目标。
+  const searchItems: MorphingSearchItem[] = [];
+  for (const project of controller.catalog.projects) {
+    searchItems.push({
+      id: `project:${project.id}`,
+      title: displayProjectDirectoryName(project),
+      description: project.path,
+      icon: isChatProject(project) ? MessageSquare : Folder,
+      onSelect: () => {
+        actions.projects.select(project.id);
+        controller.setProjectExpanded(project.id, true);
+      },
+    });
+    for (const session of controller.catalog.sessionsByProject[project.id] ?? []) {
+      searchItems.push({
+        id: `session:${session.id}`,
+        title: session.title,
+        description: session.preview,
+        icon: MessageSquare,
+        onSelect: () => { void actions.sessions.open(project.id, session.id); },
+      });
+    }
+  }
+
   return (
     <aside
       // @container：侧栏宽度容器查询基准——行操作按钮（绝对浮层）按侧栏实际宽度
@@ -162,33 +191,49 @@ export function SidebarContent(props: SidebarContentProps) {
       {/* 品牌区提到 body 外：贴侧栏顶边，不被 sidebar-body 的 px/py 顶开（logo 怼左上）。 */}
       {props.chrome}
       <div className="sidebar-body flex min-h-0 flex-1 flex-col gap-2 px-2 pt-1 pb-1">
-        {/* 搜索只过滤导航和当前项目内容；会话加载仍由 controller/App 的懒加载策略负责。 */}
-        <div className="search-row grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] bg-muted/25 p-1">
-          <div className="search-box relative min-w-0">
-            <Search
-              size={12}
-              className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              value={controller.search}
-              onChange={(event) => controller.setSearch(event.target.value)}
-              placeholder={t("app.search")}
-              className="h-6 pl-7 text-caption"
-            />
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="round-add size-6 shrink-0"
-            onClick={() => void actions.projects.add()}
-            title={t("app.addProject")}
-            aria-label={t("app.addProject")}
-          >
-            <FolderPlus className="size-3.5" />
-          </Button>
-        </div>
+        {/* 搜索：全局会话搜索（跨项目），MorphingSearch 命令面板；onQueryChange 同步 controller.search，
+            保持原有「过滤树 + DSH 全文搜索」行为，onSelect 打开选中会话/项目 */}
+        <MorphingSearch
+          items={searchItems}
+          placeholder={t("app.searchSessions")}
+          shortcut=""
+          emptyMessage={t("app.searchNoResults")}
+          className="h-8 w-full shrink-0"
+          onQueryChange={(query) => controller.setSearch(query)}
+        />
+
+        {/* 聊天 / 项目分段：beUI pill 分段（凹槽轨道 + 凸起高亮胶囊）。
+            轨道：muted 弱化底 + hairline 边框；高亮块盖掉 beUI 默认的 bg-primary 色块，
+            换成 background 浮起面（细描边 + 投影；暗色用 bg-active 提亮一档做「抬起」感）。
+            激活文字显式给 text-foreground 压掉 beUI 的 text-primary-foreground
+            （反白色落在浅色胶囊上不可见）。选择即记忆（双写 localStorage + settings.json）。 */}
+        <Tabs
+          value={controller.navTab}
+          onValueChange={(value) => {
+            const tab = parseSidebarNavTab(value);
+            if (tab) controller.setNavTab(tab);
+          }}
+          variant="pill"
+        >
+          <TabsList className="w-full rounded-full border border-border-subtle bg-muted/60 p-0.5">
+            <TabsTrigger
+              value="chats"
+              className={cn("w-full gap-1.5 px-2 py-1.5 text-xs", controller.navTab === "chats" && "text-foreground")}
+              indicatorClassName="bg-background shadow-sm ring-1 ring-border-subtle dark:bg-bg-active dark:ring-border-default"
+            >
+              <MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />
+              {t("app.sidebarChats")}
+            </TabsTrigger>
+            <TabsTrigger
+              value="projects"
+              className={cn("w-full gap-1.5 px-2 py-1.5 text-xs", controller.navTab === "projects" && "text-foreground")}
+              indicatorClassName="bg-background shadow-sm ring-1 ring-border-subtle dark:bg-bg-active dark:ring-border-default"
+            >
+              <Folder className="size-3.5 shrink-0" aria-hidden="true" />
+              {t("app.sidebarProjects")}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {/* G9：DSH 全文搜索结果（搜索词非空时展示；结果按 dshSessionId 映射回 catalog） */}
         {controller.search.trim() && (
@@ -278,7 +323,7 @@ export function SidebarContent(props: SidebarContentProps) {
               void actions.rpc.setLogging(menuAgent.id, false).then((enabled) => {
                 controller.setAgentRpcLogging(menuAgent.id, enabled);
                 showNotice(enabled ? t("rpc.loggingDisableFailed") : t("rpc.loggingDisabled"), 2500);
-              });
+              }).catch(() => showNotice(t("rpc.loggingDisableFailed"), 2500));
               return;
             }
             void actions.rpc.setLogging(menuAgent.id, true).then((enabled) => {
@@ -289,7 +334,7 @@ export function SidebarContent(props: SidebarContentProps) {
               } else {
                 showNotice(t("rpc.loggingEnableFailed"), 2500);
               }
-            });
+            }).catch(() => showNotice(t("rpc.loggingEnableFailed"), 2500));
           }}
           isRpcLogging={controller.isAgentRpcLogging(menuAgent.id)}
           rpcToggleDisabled={!menuAgentCanRpcLog}
@@ -353,7 +398,7 @@ export function SidebarContent(props: SidebarContentProps) {
               void actions.rpc.setLogging(menuSessionRuntimeAgent.id, false).then((enabled) => {
                 controller.setAgentRpcLogging(menuSessionRuntimeAgent.id, enabled);
                 showNotice(enabled ? t("rpc.loggingDisableFailed") : t("rpc.loggingDisabled"), 2500);
-              });
+              }).catch(() => showNotice(t("rpc.loggingDisableFailed"), 2500));
               return;
             }
             void actions.rpc.setLogging(menuSessionRuntimeAgent.id, true).then((enabled) => {
@@ -363,7 +408,7 @@ export function SidebarContent(props: SidebarContentProps) {
               } else {
                 showNotice(t("rpc.loggingEnableFailed"), 2500);
               }
-            });
+            }).catch(() => showNotice(t("rpc.loggingEnableFailed"), 2500));
           }}
           onOpenLogs={() => {
             if (menuSessionRuntimeAgent) controller.openRpcLogs(menuSessionRuntimeAgent.id);

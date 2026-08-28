@@ -434,6 +434,14 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
             updateDraft({ electronChromiumSandbox: checked })
           }
         />
+        <SettingSwitchRow
+          title={t("settings.useOfficialBeui")}
+          description={t("settings.useOfficialBeuiDesc")}
+          checked={draft.useOfficialBeuiComponents}
+          onChange={(checked) =>
+            updateDraft({ useOfficialBeuiComponents: checked })
+          }
+        />
         <div className="px-0.5 pb-1 pt-3">
           <span className="text-caption font-semibold tracking-[0.06em] text-muted-foreground">{t("settings.piRpcStartup")}</span>
           <p className="mt-0.5 text-caption text-muted-foreground">{t("settings.piRpcStartupDesc")}</p>

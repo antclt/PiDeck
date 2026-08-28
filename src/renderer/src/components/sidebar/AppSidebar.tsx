@@ -4,6 +4,7 @@ import { PanelLeft } from "lucide-react";
 import { SidebarContent, type SidebarActions } from "./SidebarContent";
 import type { WorktreeEntry } from "../../../../shared/types";
 import { useSidebarController } from "../../hooks/useSidebarController";
+import type { SidebarNavTab } from "../../utils/sidebarNavTab";
 import { BrandLockup } from "../app/AppParts";
 import { settingsOpenAtom } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
@@ -25,6 +26,8 @@ interface AppSidebarProps {
   toggleListCollapsed: () => void;
   /** settings.json 中已保存的展开项目 id，权威来源 */
   settingsExpandedProjectIds?: readonly string[];
+  /** settings.json 中已保存的侧栏分段（Chats/项目），权威来源 */
+  settingsNavTab?: SidebarNavTab;
   /** 首次 settings.get 已完成，controller 可安全处理旧 key 迁移。 */
   settingsLoaded: boolean;
   /** 展开集合完成权威 hydration 后，允许 App 按它懒加载会话。 */
@@ -34,15 +37,24 @@ interface AppSidebarProps {
 export function AppSidebar(props: AppSidebarProps) {
   const setSettingsOpen = useSetAtom(settingsOpenAtom);  // 快速连续点击展开/折叠会触发多次 IPC；按顺序写入可避免旧请求最后完成后覆盖新集合。
   const expandedProjectsSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const navTabSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const controller = useSidebarController({
     getRpcLogging: props.actions.rpc.getLogging,
     settingsExpandedProjectIds: props.settingsExpandedProjectIds,
+    settingsNavTab: props.settingsNavTab,
     settingsLoaded: props.settingsLoaded,
     onExpandedProjectsReady: props.onExpandedProjectsReady,
     persistExpandedProjectIds: (projectIds) => {
       expandedProjectsSaveQueueRef.current = expandedProjectsSaveQueueRef.current
         .catch(() => undefined)
         .then(() => desktopApi.settings.update({ sidebarExpandedProjectIds: projectIds }))
+        .catch(() => undefined);
+    },
+    persistNavTab: (tab) => {
+      // 与展开集合同款串行队列：快速切换标签时避免旧请求最后完成覆盖新值
+      navTabSaveQueueRef.current = navTabSaveQueueRef.current
+        .catch(() => undefined)
+        .then(() => desktopApi.settings.update({ sidebarNavTab: tab }))
         .catch(() => undefined);
     },
   });

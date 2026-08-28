@@ -713,7 +713,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (!target) return undefined;
 		const validated = sessionRuntimeCoordinator.validateTarget(target);
 		if (!validated.ok) {
-			if (sessionCommandIpcError) throw sessionCommandIpcError((validated as { ok: false; error: import("../../shared/types").SessionCommandError }).error);
+			// 失败原因落日志：rpc 日志开关/查询/保存都会走这里，静默失败会让渲染层
+			// 误以为开关已生效（此前 handler 在 undefined 时直接 return enabled 假成功）。
+			const error = (validated as { ok: false; error: import("../../shared/types").SessionCommandError }).error;
+			void appLogger.warn("agent", "RPC log runtime target invalid", {
+				sessionId: target.sessionId,
+				agentId: target.agentId,
+				runtimeGeneration: target.runtimeGeneration,
+				code: error.code,
+			});
+			if (sessionCommandIpcError) throw sessionCommandIpcError(error);
 			return undefined;
 		}
 		return target.agentId;
@@ -746,7 +755,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	);
 	ipcMain.handle(ipcChannels.rpcLoggingSet, async (_event, target: SessionRuntimeTarget, enabled: boolean) => {
 		const agentId = resolveRpcRuntimeAgent(target);
-		if (!agentId) return enabled;
+		// target 校验失败时返回 false（而非 enabled）：此前静默返回 enabled 会让渲染层
+		// 弹「RPC 日志已打开」提醒框，实际主进程从未开启记录，导致弹窗永远无数据。
+		if (!agentId) return false;
 		// G17：DSH 会话的 RPC 日志走 DshAgentManager（领域调用记录），pi 走 AgentManager。
 		if (isDshAgent?.(agentId)) {
 			setDshRpcLogging?.(agentId, enabled);
@@ -1125,9 +1136,14 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		let modelLoadDetail = "";
 		try {
 			const report = await resolveModelListReport(piLocator, settingsStore, configManager, true);
-			modelLoadOk = report.ok && report.models.length > 0;
+			// 只有 pi 自己成功列出非空模型列表才算“保存且可用”。source 为 config-fallback
+			// 说明 pi 实际没能列出模型（CLI 空 → 回退读本地 models.json 兑底，且兑底会把空
+			// name 自动补成 ${provider}/${id}），此时报“已加载”是假绿灯。
+			modelLoadOk = report.ok && report.models.length > 0 && report.source !== "config-fallback";
 			modelCount = report.models.length;
 			modelLoadReason = report.reason;
+			// config-fallback 时 report.reason 为 null，补充一个可诊断原因，避免日志/UI 拿到空 reason。
+			if (report.source === "config-fallback") modelLoadReason = "config-fallback";
 			modelLoadDetail = report.detail ?? "";
 		} catch (error) {
 			modelLoadReason = "cli-failed";
@@ -1257,6 +1273,17 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { success: true, path: result.path };
 		}
 		void appLogger.warn("skill", "Failed to install usage probe skill template", { error: result.error });
+		return { success: false, error: result.error };
+	});
+
+	// 内置生图技能手动安装入口：与 usage-probe 同理，供 UI/调试触发兑底（启动时已自动装，此处幂等覆盖）。
+	ipcMain.handle(ipcChannels.configInstallImageGenSkill, async () => {
+		const result = await skillManager.installImageGenTemplate();
+		if (result.success) {
+			void appLogger.info("skill", "Image-gen skill template installed", { path: result.path });
+			return { success: true, path: result.path };
+		}
+		void appLogger.warn("skill", "Failed to install image-gen skill template", { error: result.error });
 		return { success: false, error: result.error };
 	});
 
