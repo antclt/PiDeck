@@ -9,14 +9,20 @@ export type AppearanceSettings = Pick<
 >;
 
 /**
- * 底栏 dock 主题按钮的点击循环：浅色 → 暗色 → 跟随系统 → 浅色。
- * 「跟随时间」(schedule) 不进循环——它由设置弹窗里的时段规则管理，
- * 在 dock 上点击视为退出自动模式、手动落到浅色。
+ * 底栏 dock 主题按钮：点击在浅色/暗色之间翻转。
+ * 手动模式直接对翻；跟随系统/跟随时间点击视为退出自动模式，
+ * 按「当前实际解析出的明暗」翻到对面——保证每次点击都有可见变化
+ * （system 的解析结果可能与刚离开的手动主题相同，若进循环会出现「点了没反应」）。
  */
-export function nextThemeMode(mode: AppThemeMode): AppThemeMode {
-  if (mode === "light") return "dark";
-  if (mode === "dark") return "system";
-  return "light";
+export function toggleThemeMode(
+	appearance: Pick<AppSettings, "theme" | "themeScheduleLightStart" | "themeScheduleDarkStart">,
+	systemPrefersDark: boolean,
+	now: Date = new Date(),
+): AppThemeMode {
+	if (appearance.theme === "light") return "dark";
+	if (appearance.theme === "dark") return "light";
+	const resolved = resolveAppColorScheme({ ...appearance, systemPrefersDark, now });
+	return resolved === "dark" ? "light" : "dark";
 }
 
 /**

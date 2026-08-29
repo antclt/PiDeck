@@ -52,12 +52,12 @@ export function SessionSurfaceStage(props: {
 						<Button
 							variant="ghost"
 							size="icon"
-							className="pointer-events-auto absolute left-1/2 bottom-1.5 size-7 -translate-x-1/2 text-text-secondary hover:bg-transparent hover:text-text-secondary"
+							className="pointer-events-auto absolute left-1/2 bottom-1.5 size-8 -translate-x-1/2 border border-border-strong bg-bg-panel text-text-secondary shadow-md backdrop-blur-sm transition-[background-color,color,border-color,box-shadow] hover:border-accent hover:bg-bg-hover hover:text-foreground hover:shadow-lg"
 							onClick={sessionTimeline.scrollToBottom}
 							title={t("app.scrollToBottom")}
 							aria-label={t("app.scrollToBottom")}
 						>
-							<CircleArrowDown size={28} className="size-7" />
+							<CircleArrowDown size={18} className="size-4.5" />
 						</Button>
 					</div>
 				</div>

@@ -9,7 +9,7 @@ import {
   useCallback,
 } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
-import { applyAppearanceAttributes, nextThemeMode } from "./themeAppearance";
+import { applyAppearanceAttributes, toggleThemeMode } from "./themeAppearance";
 // 壁纸模式已注入的 token 键（effect 重跑/清除设置时需要跨运行保留，避免漏清）
 let injectedWallpaperTokens = new Set<string>();
 // 自定义外观主题（customThemeOverrides）已注入的 token 键：切换主题时先清后注，防残留
@@ -3042,12 +3042,17 @@ export function App() {
       onExpandedProjectsReady={() => setExpandedProjectsReady(true)}
       // 官网主页是品牌入口，强制系统浏览器打开：不受「链接打开方式=内置浏览器」设置影响
       onOpenHomepage={() => void api.app.openExternal("https://ayuayue.github.io/PiDeck/", true)}
-      // 底栏主题按钮：循环 light→dark→system（schedule 不进循环）；落库后只合并 theme 字段，
-      // 避免覆盖其它刚保存的设置项；data-theme 由外观 effect 依赖 settings.theme 自动重应用。
+      // 底栏主题按钮：点击在浅/暗之间翻转；跟随系统/跟随时间退出自动时按当前实际明暗翻到对面，
+      // 保证每次点击都有可见变化。落库后只合并 theme 字段，data-theme 由外观 effect 依赖 settings.theme 重应用。
       themeMode={settings.theme}
       onToggleTheme={() => {
         void api.settings
-          .update({ theme: nextThemeMode(settings.theme) })
+          .update({
+            theme: toggleThemeMode(
+              settings,
+              window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false,
+            ),
+          })
           .then((saved) => setSettings((current) => ({ ...current, theme: saved.theme })))
           .catch(() => undefined);
       }}
@@ -3429,20 +3434,15 @@ export function App() {
           (activeProject && !isChatProject(activeProject)
             ? activeProject.path
             : null);
-        // 无项目目录（聊天会话 / agent 未绑定 cwd）时打开方式无从打开：
-        // 给出提示而不是弹一个所有选项都点不动的死气泡
-        if (!projectPath) {
-          showToast(t("app.openWithEditorNeedsProject"), 3000);
-          return;
-        }
-        // 锚定触发元素下方；气泡内部还会按实测尺寸做视口内钳制/翻转
+        // 无项目目录也允许打开：编辑器入口在气泡内禁用并提示，
+        // 文件管理器不依赖项目（空路径由主进程回退用户主目录）
         const anchor = adjustMenuPos(
           e.currentTarget.getBoundingClientRect().left - 4,
           e.currentTarget.getBoundingClientRect().bottom + 4,
           240,
           240,
         );
-        workspace.openExternalEditorChooser(projectPath, anchor);
+        workspace.openExternalEditorChooser(projectPath || "", anchor);
       },
     },
   ];

@@ -6,7 +6,7 @@ import test from "node:test";
  * 底栏动作（设置/反馈/官网/主题切换）迁移为 beUI Dock（motion/dock）：
  * 浮动卡片容器铺满底栏宽度（w-full + justify-between 均匀分布四个动作）；
  * 按钮本体仍是 shadcn ghost Button，title/aria-label 与 onClick 回调保持原契约；
- * 主题按钮的图标/文案反映当前模式，循环规则由 themeAppearance.nextThemeMode 承担。
+ * 主题按钮的图标/文案反映当前模式，翻转规则由 themeAppearance.toggleThemeMode 承担。
  */
 
 const sidebar = readFileSync(

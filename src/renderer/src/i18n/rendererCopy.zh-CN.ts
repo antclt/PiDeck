@@ -315,7 +315,7 @@ export const zhCN = {
   "app.noExternalEditors": "未检测到外部编辑器",
   "app.openProjectInEditor": "在编辑器中打开项目",
   "app.openWithEditor": "打开方式",
-  "app.openWithEditorNeedsProject": "打开方式需要项目目录：请先在侧栏打开一个工作区项目",
+  "app.openWithEditorNoProject": "未绑定项目目录：编辑器打开不可用，文件管理器将打开主目录",
   "app.fileManager": "文件管理器",
   "app.fileManager.windowsExplorer": "文件资源管理器",
   "app.openInFileManager": "在文件管理器中打开项目",

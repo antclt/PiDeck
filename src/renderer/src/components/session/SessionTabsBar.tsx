@@ -637,12 +637,12 @@ function EditorWorkbenchTab(props: {
       aria-selected={Boolean(tab.active)}
       title={tab.title ?? tab.label}
       className={cn(
-        "session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 text-caption transition-colors",
+        "session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 text-caption transition-[color,background-color,border-color,box-shadow,transform] duration-200",
         "w-fit max-w-40",
         // 选中态与侧栏 SessionTree 一致：背景浮起 + 强边框 + 轻阴影（浏览器 Tab 惯例）
         tab.active
           ? "border-border-strong bg-accent/20 font-medium text-foreground shadow-sm"
-          : "border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+          : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent/50 hover:text-foreground",
         tab.preview && "italic font-normal text-muted-foreground",
       )}
       onClick={() => props.onSelect?.(tab.id)}
@@ -660,6 +660,14 @@ function EditorWorkbenchTab(props: {
       <span className={cn("min-w-0 flex-1 truncate", tab.preview && "italic")}>
         {tab.label}
       </span>
+      {/* 选中指示条：切换/选中 Tab 时从中间展开（origin-center scale-x），避免瞬间换底 */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute inset-x-2 bottom-0 h-0.5 origin-center rounded-full bg-accent transition-transform duration-200 ease-out",
+          tab.active ? "scale-x-100" : "scale-x-0",
+        )}
+      />
       <button
         type="button"
         role="tab-close"
@@ -753,15 +761,16 @@ function SessionTab(props: {
           if (event.button === 1 && !pinned) close();
         }}
         className={cn(
-          "session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 text-caption transition-colors",
+          "session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 text-caption transition-[color,background-color,border-color,box-shadow,transform] duration-200",
           // 固定 Tab 与普通 Tab 同宽策略（按内容收缩，上限 128px）：固定 Tab 无关闭按钮，
           // hover 不会因按钮出现而跳动，无需 w-20 占位；固定宽度反而让 Pin 图标挤占标题空间
           "w-fit max-w-32",
           dragging && "opacity-50",
-          // 选中态与侧栏 SessionTree 一致：背景浮起 + 强边框 + 轻阴影
+          // 选中态与侧栏 SessionTree 一致：背景浮起 + 强边框 + 轻阴影；
+          // hover 轻微上浮 1px + 背景渐显，让鼠标移入有明确动效
           active
             ? "border-border-strong bg-accent/20 font-medium text-foreground shadow-sm"
-            : "border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+            : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent/50 hover:text-foreground",
           preview && "italic font-normal text-muted-foreground",
         )}
       >
@@ -836,6 +845,15 @@ function SessionTab(props: {
             <X className="size-3" />
           </button>
         )}
+        {/* 选中指示条：切换会话 Tab 时从中间展开（origin-center scale-x），替代瞬间换底；
+            拖拽插入线（props.indicator）是竖线且仅拖拽期存在，二者位置不重叠 */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-x-2 bottom-0 h-0.5 origin-center rounded-full bg-accent transition-transform duration-200 ease-out",
+            active ? "scale-x-100" : "scale-x-0",
+          )}
+        />
       </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-40">

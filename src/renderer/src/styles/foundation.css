@@ -84,10 +84,11 @@
      secondary 7.5:1 / tertiary 4.8:1，均达 WCAG AA。 */
   --color-text-secondary: #4b5563;
   --color-text-tertiary: #6b7280;
-  /* 过程层文字（思考/工具调用）：比 tertiary 更浅，向背景混 45%——
+  /* 过程层文字（思考/工具调用）：比 tertiary 更浅，向背景混 35%——
      与正文（primary）的差异主要由颜色承担，字重保持可读不降档。
-     color-mix 引用 tertiary/bg-app 两个主题变量，dark 与 accent 主题自动跟随。 */
-  --color-text-faint: color-mix(in srgb, var(--color-text-tertiary) 55%, var(--color-bg-app));
+     亮色显式 #9fa3ac（tertiary 65% + 白 35% 的实测值），避免 color-mix 在
+     主题切换/变量解析时序上引入不确定性；暗色由下方 dark 块显式覆盖。 */
+  --color-text-faint: #9fa3ac;
   --color-text-inverse: #ffffff;
   --color-border-subtle: #e5e5e5;
   --color-border-default: #dfdfdf;
@@ -435,6 +436,10 @@
   --color-text-primary: #ecece7;
   --color-text-secondary: #b8b8b2;
   --color-text-tertiary: #8a8a84;
+  /* 暗色下 faint 显式定义：color-mix 会把 tertiary 向 bg-app(#121212) 混，
+     算出来约 #595c59，在暗底上对比不足看不清；暗色「浅」= 比 tertiary 更亮，
+     取 #a0a09a（比正文 tertiary 亮一档但仍低于 secondary，保持过程层语义）。 */
+  --color-text-faint: #a0a09a;
   --color-text-inverse: #121212;
   --color-border-subtle: #262626;
   --color-border-default: #2e2e2e;

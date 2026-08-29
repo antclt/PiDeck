@@ -130,7 +130,7 @@ export function SidebarContent(props: SidebarContentProps) {
     ? controller.catalog.agents.find((agent) => agent.id === menu.agentId)
     : undefined;
 
-  // 底栏主题按钮：图标与文案反映当前主题模式；点击循环切换（循环规则见 themeAppearance.nextThemeMode）
+  // 底栏主题按钮：图标与文案反映当前主题模式；点击翻转浅/暗（规则见 themeAppearance.toggleThemeMode）
   const ThemeModeIcon =
     props.themeMode === "dark" ? Moon
     : props.themeMode === "system" ? Monitor
