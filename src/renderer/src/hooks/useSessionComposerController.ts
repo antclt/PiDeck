@@ -1777,20 +1777,6 @@ export function useSessionComposerController(
     requestAnimationFrame(() => editorRef.current?.focus());
   }, [draft, sessionId, setDraft]);
 
-  // 「一键添加供应商」：把 /skill:usage-probe 斜线命令 + 占位符模板（供应商名称/baseUrl/
-  // 文档）整段放入草稿，用户填空后发送，AI 按 usage-probe skill 引导写 usage-probes.json。
-  // placeholder 由调用方（圆环面板）用 i18n 生成后传入，controller 保持不引 i18n。
-  const insertUsageProbePrompt = useCallback((placeholder: string) => {
-    const token = toSkillInvocationToken(isDshBackend ? "dsh" : "pi", "usage-probe");
-    const content = `/${token} ${placeholder}`;
-    const next = appendContentToDraft(draft, content);
-    liveDomDraftRef.current = { sessionId, value: next };
-    setDraft(next);
-    caretRef.current = { pos: next.length, forValue: next };
-    setPicker(null);
-    requestAnimationFrame(() => editorRef.current?.focus());
-  }, [draft, isDshBackend, sessionId, setDraft]);
-
   return {
     sessionId,
     record,
@@ -1927,7 +1913,6 @@ export function useSessionComposerController(
       insertTemplateContent,
       insertSkillInvocation,
       insertSkillContent,
-      insertUsageProbePrompt,
     },
     modals: {
       closePreview: () => setPreviewImage(null),

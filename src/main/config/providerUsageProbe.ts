@@ -75,6 +75,7 @@ export type UsageProbeParse =
 	| { kind: "balance"; valuePath: string; currencyPath?: string }
 	/**
 	 * 额度点数：三个路径至少给一个；remaining 缺省由 total-used 反推。
+	 * scale 可选：命中值先除以它（New API 等中转站的 quota 是原始积分，500000 积分 = 1 美元）。
 	 * windows 可选：同一响应里的并列限额窗口（如智谱 5h 窗 + 周窗），
 	 * 逐条解析进 credits.windows；主 total/used/remaining 仍由三个 path 解析。
 	 * booster 可选：同响应里的独立货币（如 Kimi Boost 点数），解析进结果 booster。
@@ -84,6 +85,7 @@ export type UsageProbeParse =
 			totalPath?: string;
 			usedPath?: string;
 			remainingPath?: string;
+			scale?: number;
 			windows?: UsageProbeWindow[];
 			booster?: UsageProbeBooster;
 	  }
@@ -137,6 +139,11 @@ export type UsageProbeCandidate = {
 	preflight?: UsageProbePreflight;
 	/** 响应解析规格；缺省走 periods（opencode-go 兼容）。 */
 	parse?: UsageProbeParse;
+	/**
+	 * 内置候选的模板 id：识别命中后作为 per-provider 配置的默认模板（enabled 门控据此路由），
+	 * 类别登记见 usageProbeTemplates.USAGE_PROBE_CATEGORY_BY_TEMPLATE_ID（新增候选需同步登记）。
+	 */
+	templateId?: string;
 };
 
 export type UsageProbeResponse = {
@@ -162,11 +169,13 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 	{
 		path: "/usage",
 		baseUrlContains: ["opencode.ai/zen"],
+		templateId: "opencode-usage",
 	},
 	// DeepSeek：/user/balance 给出余额信息（total_balance 在部分部署里是字符串，解析器已兼容）。
 	{
 		path: "/user/balance",
 		baseUrlContains: ["api.deepseek.com"],
+		templateId: "deepseek-balance",
 		parse: {
 			kind: "balance",
 			valuePath: "balance_infos[0].total_balance",
@@ -180,6 +189,7 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 	{
 		path: "/key",
 		baseUrlContains: ["openrouter.ai"],
+		templateId: "openrouter-credits",
 		parse: {
 			kind: "credits",
 			totalPath: "data.limit",
@@ -196,6 +206,7 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 	{
 		path: "/usages",
 		baseUrlContains: ["api.kimi.com"],
+		templateId: "kimi-credits",
 		parse: {
 			kind: "credits",
 			totalPath: "usage.limit",
@@ -217,6 +228,7 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 	{
 		path: "/users/me/balance",
 		baseUrlContains: ["api.moonshot.ai", "api.moonshot.cn"],
+		templateId: "moonshot-balance",
 		parse: {
 			kind: "balance",
 			valuePath: "data.available_balance",
@@ -233,6 +245,7 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 	{
 		path: "/api/monitor/usage/quota/limit",
 		rootPath: true,
+		templateId: "zhipu-quota",
 		// api.z.ai 是 GLM Coding Plan 的国际版 origin，与 open.bigmodel.cn 同一监控端点。
 		baseUrlContains: ["open.bigmodel.cn", "api.z.ai"],
 		headers: { Authorization: "{{apiKey}}" },
@@ -261,6 +274,7 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 		path: "/wham/usage",
 		baseUrlContains: ["chatgpt.com"],
 		apiTypes: ["openai-codex-responses"],
+		templateId: "codex-usage",
 		parse: { kind: "custom", resolver: "codex-usage" },
 	},
 	// xAI（Grok 消费者订阅）：用量端点在 Grok CLI 代理 cli-chat-proxy.grok.com，与官方
@@ -288,11 +302,14 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 			},
 			capture: { path: "userId", header: "x-userid" },
 		},
+		templateId: "xai-billing",
 		parse: { kind: "custom", resolver: "xai-billing" },
 	},
 	// 通用 OpenAI 兼容网关：多数 OpenAI 兼容中转站实现官方 /v1/usage 端点
 	// （{ balance, unit } 结构）。不限定 baseUrl，仅靠 apiTypes 收窄到 OpenAI 协议，
 	// 放在数组末尾——前面带 baseUrlContains 的专有候选优先命中，不会被此条抢走。
+	// 不标 templateId：用户探针强制 baseUrlContains（无域名的全局兜底探针是危险配置），
+	// 且该兜底已内置生效，无需用户配置。
 	{
 		path: "/usage",
 		apiTypes: ["openai-completions", "openai-responses", "openai-codex-responses"],
@@ -389,16 +406,20 @@ export function parseUsageResponseBody(
 		};
 	}
 
-	// 额度点数形态：三个路径至少命中一个；remaining 由 total-used 反推。
+	// 额度点数形态：主值三路径 / windows / booster 至少命中一处；remaining 由 total-used 反推。
 	if (parse.kind === "credits") {
+		// scale（原始积分 → 主单位）：命中值先除以它；非法 scale 视作 1（不缩放）。
+		const scale =
+			parse.scale != null && Number.isFinite(parse.scale) && parse.scale > 0 ? parse.scale : 1;
+		const scaled = (value: number): number => (scale === 1 ? value : value / scale);
 		const total = parse.totalPath ? toNumber(getByPath(body, parse.totalPath)) : undefined;
 		const used = parse.usedPath ? toNumber(getByPath(body, parse.usedPath)) : undefined;
 		const remaining = parse.remainingPath
 			? toNumber(getByPath(body, parse.remainingPath))
 			: undefined;
-		if (total === undefined && used === undefined && remaining === undefined) {
-			return { matched: false, raw };
-		}
+		const scaledTotal = total !== undefined ? scaled(total) : undefined;
+		const scaledUsed = used !== undefined ? scaled(used) : undefined;
+		const scaledRemaining = remaining !== undefined ? scaled(remaining) : undefined;
 		// windows（多窗口并列限额，如智谱 5h 窗+周窗、xAI 套餐+按需）逐条解析：单窗缺值跳过，不拖垮整条。
 		// 两种条目形态：绝对路径单窗（scope=body），或 listPath 数组遍历 + where 匹配（scope=命中的元素，
 		// 字段路径相对元素，智谱按 unit/type 分类）。
@@ -426,16 +447,27 @@ export function parseUsageResponseBody(
 		}
 		// booster（独立货币，如 Kimi Boost 点数）：与主 credits 并存，解析失败不拖垮主值。
 		const booster = parse.booster ? parseBooster(body, parse.booster) : undefined;
+		// 命中门槛覆盖三种取值来源：部分网关只给并列限额（windows-only）或独立货币（booster-only），
+		// 主值三路径全空也是合法命中，不能误判为「结构不匹配」。
+		if (
+			scaledTotal === undefined &&
+			scaledUsed === undefined &&
+			scaledRemaining === undefined &&
+			windows.length === 0 &&
+			booster === undefined
+		) {
+			return { matched: false, raw };
+		}
 		return {
 			matched: true,
 			kind: "credits",
 			credits: {
-				...(total !== undefined ? { total } : {}),
-				...(used !== undefined ? { used } : {}),
-				...(remaining !== undefined
-					? { remaining }
-					: total !== undefined && used !== undefined
-						? { remaining: total - used }
+				...(scaledTotal !== undefined ? { total: scaledTotal } : {}),
+				...(scaledUsed !== undefined ? { used: scaledUsed } : {}),
+				...(scaledRemaining !== undefined
+					? { remaining: scaledRemaining }
+					: scaledTotal !== undefined && scaledUsed !== undefined
+						? { remaining: scaledTotal - scaledUsed }
 						: {}),
 				...(windows.length > 0 ? { windows } : {}),
 			},

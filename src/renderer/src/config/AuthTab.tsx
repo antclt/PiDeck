@@ -1,6 +1,6 @@
 import { Button } from "../components/ui-shadcn/button";
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Copy, ExternalLink, Trash2 } from "lucide-react";
+import { BarChart3, ChevronDown, ChevronRight, Copy, ExternalLink, Trash2 } from "lucide-react";
 import { t } from "../i18n";
 import type { AuthFile, ModelsFile } from "./configTypes";
 import { ConfigComboboxInput, openDocsInSystemBrowser, SecretInput } from "./ConfigShared";
@@ -8,6 +8,7 @@ import { Input } from "../components/ui-shadcn/input";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Label } from "../components/ui-shadcn/label";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
+import { ProviderUsageRow } from "../components/app/ProviderUsageInline";
 
 // 根据 pi 官方文档支持的供应商列表 (https://pi.dev/docs/latest/providers#auth-file)
 const PRESET_PROVIDERS = [
@@ -70,6 +71,8 @@ export function AuthTab(props: {
 	onDeleteAuths: (providers: string[]) => void;
 	onUpdate: (provider: string, field: string, value: string) => void;
 	onSave: () => void;
+	/** 打开用量查询配置弹窗（与模型页共用同一个 per-provider 弹窗；认证展开区的探查设置入口）。 */
+	onOpenUsageProbeDialog: (providerName: string) => void;
 }) {
 	const { data, expandedAuth, saving } = props;
 	const providers = Object.keys(data);
@@ -318,6 +321,18 @@ export function AuthTab(props: {
 										direction="pi-to-dsh"
 										provider={name}
 									/>
+									{/* 用量查询配置（柱状图图标在行头图标组，与模型页/DSH 同款） */}
+									<Button variant="ghost" size="icon-sm" className="size-7"
+										onClick={(e) => {
+											e.stopPropagation();
+											props.onOpenUsageProbeDialog(name);
+										}}
+										title={t("config.usageProbe.entry")}
+										aria-label={t("config.usageProbe.entry")}
+										data-testid="provider-usage-configure-icon"
+									>
+										<BarChart3 size={14} />
+									</Button>
 									<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
 										onClick={(e) => {
 											e.stopPropagation();
@@ -355,9 +370,10 @@ export function AuthTab(props: {
 											onChange={(v) => props.onUpdate(name, "key", v)}
 										/>
 									</div>
-
 								</div>
 							)}
+							{/* 用量行（与模型页/DSH 同一版式：卡片右下角）= 金额/百分比 + 柱状图「用量查询」按钮 */}
+							<ProviderUsageRow provider={name} />
 						</div>
 					);
 				})}

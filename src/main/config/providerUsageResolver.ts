@@ -3,8 +3,9 @@
  *
  * 会话运行时 provider 名可能是两种来源：
  * - pi 侧：models.json 的 provider key（如 "oc"，含 baseUrl/apiKey/api/models）；
- * - DSH 侧：网关/route 名（如 "opencode-go"），settings.yaml 常无内联 baseURL，
- *   但从 pi-ai catalog 能取到与该网关配套的默认端点。
+ * - DSH 侧：网关/route 名（如 "opencode-go"）。DSH 端点以 settings.yaml 的
+ *   profile 优先（见 ConfigManager.resolveUsageEndpoint 的 dsh 分支），本解析是
+ *   其兜底——pi 精确命中后回退 pi-ai catalog 默认端点。
  *
  * 同一网关可能同时存在两套名字（models.json 的 "oc" 与 catalog 的
  * "opencode-go"），因此解析顺序固定为：先 models.json 精确命中，再无 catalog

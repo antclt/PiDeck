@@ -54,7 +54,22 @@ function loadConfigManager() {
 				return { isSafeProviderName: () => true };
 			}
 			if (id === "./userUsageProbes") {
-				return { loadUserUsageProbes: async () => [] };
+				return {
+					loadUserUsageProbes: async () => [],
+					loadUsageProbeSettings: async () => ({ errors: [] }),
+				};
+			}
+			if (id === "./providerUsageResolver") {
+				return { resolveProviderUsageEndpoint: async () => ({ provider: "", matched: false }) };
+			}
+			if (id === "./usageProbeTemplates") {
+				return {
+					buildDeclarativeUsageProbeTemplate: () => ({ error: "stub" }),
+					USAGE_PROBE_CATEGORY_BY_TEMPLATE_ID: {},
+				};
+			}
+			if (id === "../pi/piAiBuiltinCatalog") {
+				return { getPiAiCatalogIndex: () => ({}) };
 			}
 			if (id === "./mcpConfig") {
 				return {
@@ -71,6 +86,12 @@ function loadConfigManager() {
 					USAGE_PROBE_CANDIDATES: [],
 					usageProbeUrls: () => [],
 				};
+			}
+			if (id === "../../shared/dshCredentialRef") {
+				return { credentialRefFor: () => "STUB_API_KEY" };
+			}
+			if (id === "../dsh/pideckDshHome") {
+				return { pideckUsageProbesDir: (value) => value };
 			}
 			return require(id);
 		},

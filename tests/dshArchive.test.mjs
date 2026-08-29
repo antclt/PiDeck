@@ -28,14 +28,14 @@ function makeSessionDir(home, cwd, sessionId) {
 	return dir;
 }
 
-test("DshHost.archiveSession：目录移入 .pideck-archive 并写 manifest（含标题）", async () => {
+test("DshHost.archiveSession：目录移入 .pideck/archive 并写 manifest（含标题）", async () => {
 	const { host, home } = makeHost();
 	try {
 		const cwd = "C:/work/project";
 		const sessionId = "session-abc-123";
 		const sourceDir = makeSessionDir(home, cwd, sessionId);
 		const archived = await host.archiveSession(sessionId, cwd, "打包的体积是否能优化");
-		assert.ok(archived.endsWith(join(".pideck-archive", sessionId)), `归档路径: ${archived}`);
+		assert.ok(archived.endsWith(join(".pideck", "archive", sessionId)), `归档路径: ${archived}`);
 		assert.ok(!existsSync(sourceDir), "原 sessions 树目录应已移走");
 		const manifest = JSON.parse(readFileSync(join(archived, "pideck-manifest.json"), "utf8"));
 		assert.equal(manifest.dshSessionId, sessionId);
@@ -57,7 +57,7 @@ test("DshHost.archiveSession：无标题时不写 title 字段（旧归档兼容
 		const sessionId = "session-no-title";
 		makeSessionDir(home, cwd, sessionId);
 		await host.archiveSession(sessionId, cwd);
-		const manifest = JSON.parse(readFileSync(join(home, ".pideck-archive", sessionId, "pideck-manifest.json"), "utf8"));
+		const manifest = JSON.parse(readFileSync(join(home, ".pideck", "archive", sessionId, "pideck-manifest.json"), "utf8"));
 		assert.ok(!("title" in manifest), "未提供标题时 manifest 不应写 title");
 	} finally {
 		rmSync(home, { recursive: true, force: true });
@@ -69,7 +69,7 @@ test("DshHost.archiveSession：会话不存在返回 undefined（不产生归档
 	try {
 		const archived = await host.archiveSession("session-missing", "C:/work/project");
 		assert.equal(archived, undefined);
-		assert.ok(!existsSync(join(home, ".pideck-archive")), "不应创建归档根目录");
+		assert.ok(!existsSync(join(home, ".pideck", "archive")), "不应创建归档根目录");
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}
@@ -88,7 +88,7 @@ test("DshHost.unarchiveSession：按 manifest 的 cwd 移回原 workspace 目录
 		assert.equal(restored.cwd, cwd, "应返回 manifest 中的原 workspace cwd（重建 catalog 记录用）");
 		assert.equal(restored.title, "恢复后要显示的名字", "应返回 manifest 中归档时刻的标题（重建 catalog 记录用）");
 		assert.ok(existsSync(join(expected, "session.jsonl.zstd")), "会话日志应回到 sessions 树");
-		assert.ok(!existsSync(join(home, ".pideck-archive", sessionId)), "归档目录应已移走");
+		assert.ok(!existsSync(join(home, ".pideck", "archive", sessionId)), "归档目录应已移走");
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}
@@ -118,7 +118,7 @@ test("DshHost.unarchiveSession：manifest 损坏时不移动目录并返回 unde
 	const { host, home } = makeHost();
 	try {
 		const sessionId = "session-bad-manifest";
-		const archiveDir = join(home, ".pideck-archive", sessionId);
+		const archiveDir = join(home, ".pideck", "archive", sessionId);
 		mkdirSync(archiveDir, { recursive: true });
 		writeFileSync(join(archiveDir, "pideck-manifest.json"), "{ not json");
 		const restored = await host.unarchiveSession(sessionId);
@@ -147,7 +147,7 @@ test("DshHost.listArchivedSessions：返回归档清单（id/cwd/archivedAt/标�
 		].join("\n"), "utf8");
 		await host.archiveSession("session-b", "D:/other");
 		// 一个无 manifest 的目录（不属于 PiDeck 归档，应被跳过）
-		mkdirSync(join(home, ".pideck-archive", "not-a-pideck-archive"), { recursive: true });
+		mkdirSync(join(home, ".pideck", "archive", "not-a-pideck-archive"), { recursive: true });
 
 		const listed = host.listArchivedSessions();
 		assert.equal(listed.length, 2);
@@ -180,7 +180,7 @@ test("DshHost 归档往返：编码含不安全字符的 cwd 也能恢复", asyn
 		makeSessionDir(home, cwd, sessionId);
 		await host.archiveSession(sessionId, cwd);
 		// 模拟外部改写 manifest（换机迁移等），恢复仍以 manifest 的 cwd 为准
-		const manifestPath = join(home, ".pideck-archive", sessionId, "pideck-manifest.json");
+		const manifestPath = join(home, ".pideck", "archive", sessionId, "pideck-manifest.json");
 		const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 		manifest.cwd = "C:\\work\\项目 dir~1";
 		writeFileSync(manifestPath, JSON.stringify(manifest));

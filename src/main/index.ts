@@ -234,6 +234,7 @@ import { PiModelCapabilityCache, watchPiConfigDirectory } from "./pi/PiModelCapa
 import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
+import { credentialValueFromDocument } from "./dsh/dshCredentials";
 import { DshAgentManager } from "./dsh/DshAgentManager";
 import { startDshHostInBackground } from "./dsh/startDshHostInBackground";
 import {
@@ -3049,7 +3050,27 @@ app.whenReady().then(async () => {
 	gitService = new GitService();
 	worktreeService = new WorktreeService(mainCopy);
 	piLocator = new PiLocator(mainCopy);
-	configManager = new ConfigManager(undefined, mainCopy);
+	// DSH 用量链路（backend="dsh"）：配置落 $DSH_HOME/usage-probes.json、凭据从
+	// $DSH_HOME/.credentials.yaml 读，与 pi 侧链路（~/.pi/agent）完全同构、互不干扰。
+	// DSH_HOME 解析与 DshHost 同一套（设置覆盖 > ~/.dsh > 应用私有目录），getter 每次求值，
+	// 用户改设置立即生效；readCredential 环境层优先、文件层兜底（与 DshHost 相同优先级）。
+	configManager = new ConfigManager(undefined, mainCopy, {
+		getHomeDir: () =>
+			resolveDshHomeDir(settingsStore.get().dshHomeDir ?? "", app.getPath("userData")),
+		readCredential: async (ref) => {
+			const envValue = process.env[ref]?.trim();
+			if (envValue) return envValue;
+			try {
+				const filePath = join(
+					resolveDshHomeDir(settingsStore.get().dshHomeDir ?? "", app.getPath("userData")),
+					".credentials.yaml",
+				);
+				return credentialValueFromDocument(await readFile(filePath, "utf8"), ref);
+			} catch {
+				return undefined;
+			}
+		},
+	});
 	promptManager = new PromptManager(undefined, mainCopy);
 	xuePromptManager = new XuePromptManager();
 	skillManager = new SkillManager(undefined, mainCopy);

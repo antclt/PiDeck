@@ -61,8 +61,10 @@ test("Shared model picker keeps one model line and supports collapse and selecte
   assert.match(composerComponents, /<CommandPickerGroup id=\"favorites\"/);
   assert.doesNotMatch(composerComponents, /picker-palette-label.*model\.name/);
   assert.match(commandPicker, /showGroupActions/);
-  assert.match(commandPicker, /allCollapsed \? expandedGroups\.has\(props\.id\)/);
-  assert.match(commandPicker, /if \(allCollapsed\)/);
+  // 折叠策略已抽为纯函数：分组展开态经 resolveGroupExpanded（defaultExpandedIds +
+  // 用户 toggle 的 selection 合成），批量展开/收起走 applyPickerGroupAction。
+  assert.match(commandPicker, /resolveGroupExpanded\(\{/);
+  assert.match(commandPicker, /action: \{ kind: "expandAll" \}/);
   assert.match(composerComponents, /value=\{currentModelKey\}/);
   assert.match(composerComponents, /value: props\.composerAgentMode/);
   assert.match(composerComponents, /value=\{props\.current\}/);

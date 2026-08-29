@@ -387,8 +387,14 @@ export const ipcChannels = {
 	configFetchModels: "config:fetch-models",
 	/** 快速测试 provider 连接：发送一条最小请求验证 baseUrl/apiKey/模型 是否正常 */
 	configTestProvider: "config:test-provider",
-	/** 查询 provider 用量/余额（如 opencode-go /v1/usage） */
+	/** 查询 provider 用量/余额（主进程按 provider 名路由：门控 → 端点解析 → 模板探测） */
 	configFetchUsage: "config:fetch-usage",
+	/** 读取单个 provider 的用量查询配置（usage-probes.json）+ 内置模板自动识别 */
+	configGetUsageProbes: "config:get-usage-probes",
+	/** 按 provider 合并保存用量查询配置（校验后落盘，保留其它 providers 与旧 probes） */
+	configSaveUsageProbes: "config:save-usage-probes",
+	/** 单条模板测试（模板 id + 覆盖字段；配置弹窗「测试」按钮，key 不出主进程） */
+	configTestUsageProbe: "config:test-usage-probe",
 	/** 安装内置「用量查询自定义」技能模板到 ~/.pi/agent/skills/usage-probe */
 	configInstallUsageSkill: "config:install-usage-skill",
 	/** 安装内置「图片生成」技能模板到 ~/.pi/agent/skills/image-gen */

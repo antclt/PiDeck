@@ -52,6 +52,8 @@ import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { useComposerModeAvailability } from "../../hooks/useComposerModeAvailability";
 import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
 import { SessionContextMeter } from "./SessionContextMeter";
+import { ProviderUsageInline } from "../app/ProviderUsageInline";
+import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
 import {
 	Select,
@@ -346,8 +348,6 @@ export function ComposerBottomBar(props: {
 	onPickSkill: () => void;
 	onPickThinking: () => void;
 	onCompact: () => void;
-	/** 一键插入 /skill:usage-probe + 占位符模板（由圆环面板触发，透传给 controller）。 */
-	onInsertUsageProbePrompt: (placeholder: string) => void;
 	onChangeMode: (mode: ComposerAgentMode) => void;
 	/** 会话已有生图消息时锁定生图模式，下拉不可切走。 */
 	imageGenLocked?: boolean;
@@ -585,7 +585,6 @@ export function ComposerBottomBar(props: {
 					<SessionContextMeter
 						state={props.state}
 						onCompact={props.onCompact}
-						onInsertUsageProbePrompt={props.onInsertUsageProbePrompt}
 						// 未激活会话用会话记录/默认 model 推导的 provider 查用量（用量不依赖 agent 运行）
 						fallbackProvider={modelProvider}
 					/>
@@ -889,6 +888,14 @@ export function ModelPicker(props: {
 		providers: sortedProviders,
 	}));
 
+	// 供应商用量行（cc-switch inline）：打开选择器时批量触发 TTL 去重查询，行尾显示
+	// 彩色剩余/百分比；查不到（不支持/失败/查询中）的分组保持干净不渲染。
+	const batchRefreshUsage = useProviderUsageBatchRefresh();
+	const providerKey = sortedProviders.join("\n");
+	useEffect(() => {
+		if (providerKey) batchRefreshUsage(providerKey.split("\n"));
+	}, [providerKey, batchRefreshUsage]);
+
 	const renderModelRow = (model: AvailableModel, valueOverride?: string) => {
 		const modelKey = `${model.provider}/${model.id}`;
 		const selected = modelKey === currentModelKey;
@@ -970,7 +977,14 @@ export function ModelPicker(props: {
 						</CommandPickerGroup>
 					)}
 					{sortedProviders.map((provider) => (
-						<CommandPickerGroup id={`provider:${provider}`} key={provider} label={provider} count={groupedModels[provider].length}>
+						<CommandPickerGroup
+							id={`provider:${provider}`}
+							key={provider}
+							label={provider}
+							count={groupedModels[provider].length}
+							countText={t("config.count.models", { count: groupedModels[provider].length })}
+							trailing={<ProviderUsageInline provider={provider} variant="row" />}
+						>
 							{groupedModels[provider].map((model) => renderModelRow(model))}
 						</CommandPickerGroup>
 					))}

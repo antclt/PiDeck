@@ -42,8 +42,7 @@ test("parseUsageResponseBody 解析 rolling/weekly/monthly 三档百分比", () 
   assert.equal(res.periods.rolling.status, "ok");
   assert.equal(res.periods.weekly.percent, 18);
   assert.equal(res.periods.monthly.percent, 68);
-  assert.equal(res.periods.ignored, undefined);
-});
+  assert.equal(res.periods.ignored, undefined);});
 
 test("parseUsageResponseBody 无 usage 字段时不匹配并保留 raw", () => {
   const res = probe.parseUsageResponseBody({ foo: 1 }, "RAW_TEXT");
@@ -626,4 +625,32 @@ test("preflight 子结构 URL 生成：absoluteUrl 优先、普通 path 走版�
   );
   assert.ok(plain.length >= 1 && plain.length <= 2);
   assert.ok(plain.some((u) => u.includes("/v1/user")));
+});
+
+test("credits parse 的 scale 把原始积分换算成主单位（New API quota/500000）", () => {
+  const body = { data: { quota: 2_500_000, used_quota: 500_000, success: true } };
+  const res = probe.parseUsageResponseBody(body, "{}", {
+    kind: "credits",
+    remainingPath: "data.quota",
+    usedPath: "data.used_quota",
+    scale: 500_000,
+  });
+  assert.equal(res.matched, true);
+  assert.equal(res.credits.remaining, 5, "2500000 / 500000 = 5 USD");
+  assert.equal(res.credits.used, 1, "500000 / 500000 = 1 USD");
+  assert.equal(res.credits.total, undefined);
+});
+
+test("credits parse 无 scale 或非法 scale 不缩放（行为不变）", () => {
+  const body = { data: { limit: 100, usage: 30 } };
+  const res = probe.parseUsageResponseBody(body, "{}", {
+    kind: "credits",
+    totalPath: "data.limit",
+    usedPath: "data.usage",
+    scale: 0,
+  });
+  assert.equal(res.matched, true);
+  assert.equal(res.credits.total, 100);
+  assert.equal(res.credits.used, 30);
+  assert.equal(res.credits.remaining, 70);
 });

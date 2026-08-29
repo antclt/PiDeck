@@ -1,17 +1,31 @@
 ---
 name: usage-probe
-description: 为 PiDeck 的「用量查询」功能编写自定义供应商配置。当用户想让某个供应商/中转站显示用量、余额或额度点数，而 PiDeck 内置支持里没有时，使用此技能引导用户写出 usage-probes.json 配置，或帮用户搜索该供应商的用量/余额接口文档。
+description: 为 PiDeck 的「用量查询」功能排查/扩展供应商支持。当用户想显示某个供应商的用量、余额或额度点数时，先判断是否已内置支持（内置无需配置）；不在内置时引导用户使用「用量查询」弹窗里的通用模板 / New API 模板；两种模板都覆盖不了的接口，帮用户写出 usage-probes.json 的旧版探针数组。
 ---
 
-# 用量查询自定义（usage-probe）
+# 用量查询辅助（usage-probe）
 
 ## 这是什么
 
-PiDeck 输入框旁的「圆环」面板会显示当前供应商的用量/余额。内置已支持少数供应商
-（opencode-go、DeepSeek、OpenRouter、Moonshot/Kimi、智谱 GLM、xAI Grok 订阅、OpenAI Codex，以及实现了
-OpenAI 官方 `/v1/usage` 端点的通用 OpenAI 兼容网关；Kimi 还会额外展示 Boost 独立点数，智谱会展示 5h 窗、
-周窗与 MCP 月额度）。如果你的供应商不在内置列表里，可以通过一个**纯 JSON 配置文件**
-让它也能显示用量，**不需要写任何代码**。
+供应商的用量/余额显示在「设置 → 配置管理 → 模型/认证」的 **供应商卡片底部**
+（学 cc-switch：所有卡片同一位置、右对齐：相对时间 + 彩色数值 + 刷新按钮）。
+支持分三层：
+
+1. **内置模板（零配置）**：命中内置候选的供应商开箱即用，弹窗里已识别、无需配置。
+   当前内置：
+   - 官方余额：DeepSeek（`/user/balance`）、OpenRouter（`/api/v1/key` per-key 额度）、
+     Moonshot 官方余额（`/users/me/balance`）；
+   - 套餐额度：Kimi For Coding（`/usages`，含 Boost 点数）、智谱 GLM Coding Plan
+     （5h 滚动窗 / 周窗 / MCP 月度窗）、OpenCode Go（`/usage` 三档百分比）；
+   - 官方订阅（登录态 OAuth，凭据来自 auth.json）：Codex/ChatGPT（`/wham/usage`）、
+     xAI Grok（billing 预检链）；
+   - 通用 OpenAI 兼容网关兜底：实现了官方 `/v1/usage`（`{ balance, unit }`）的中转站自动显示余额。
+2. **声明式模板（弹窗内可选）**：不在内置列表时，弹窗提供两个模板——
+   - **通用模板**：请求 `/usage`（OpenAI 兼容），API Key / 请求地址可覆盖（留空用供应商的）；
+   - **New API**：New API / OneAPI 中转站，填 访问令牌 + 用户 ID（积分自动换算）。
+3. **旧版探针数组（AI 兜底）**：上面都覆盖不了的接口（如自建网关的自定义余额端点），
+   由 AI 写 `~/.pi/agent/usage-probes.json` 的 `probes` 数组（见下文），运行时按
+   baseUrl 关键字匹配合入探测。
 
 配置文件位置（和 models.json 同一个目录）：
 
@@ -19,29 +33,26 @@ OpenAI 官方 `/v1/usage` 端点的通用 OpenAI 兼容网关；Kimi 还会额�
 ~/.pi/agent/usage-probes.json
 ```
 
-改完立刻生效（无需重启），下次打开圆环面板就会读到新配置。
+改完立刻生效（无需重启）。顶层 `providers` 映射由弹窗维护，**AI 不要手改**；
+`probes` 数组才是开放给 AI 写的部分。
+
+改完立刻生效（无需重启），下次打开供应商卡片就能读到新配置。
 
 ## 你（AI）的工作流程
 
 当用户说「帮我让 XX 供应商显示用量」时，按下面顺序做：
 
-1. **先看用户的供应商信息**：读 `~/.pi/agent/models.json`，找到该 provider 的
-   `baseUrl`（就是匹配用的关键字）和 `api` 类型。apiKey 的位置不用读出来，也不要把
-   key 贴到任何地方——请求是主进程用 Bearer 自动带的。
-2. **确认用量/余额接口**：询问或搜索该供应商的「余额 / usage / balance / credits」
-   接口。常见的搜索词：
-   - `<供应商名> API 余额接口`、`<供应商名> balance API`
-   - `<供应商名> usage endpoint`、`<供应商名> credits endpoint`
-   - OpenRouter 是 `GET /api/v1/credits`；DeepSeek 是 `GET /user/balance`；
-     Kimi/Moonshot 是 `GET /v1/users/me/balance`（以官方文档为准）。
-   - 如果用户拿不到文档，让用户用浏览器打开供应商控制台的「用量/账单」页面，
-     按 F12 看 Network 里那个返回数字的请求，把 URL 路径和返回的 JSON 结构发给你。
-3. **确定响应里哪个字段是「剩余额度」**：看接口返回的 JSON，找到表示余额/剩余点数的
-   字段（路径写法见下面「字段路径怎么写」）。
-4. **生成 JSON 并让用户保存**：按下面的结构写出一份 `usage-probes.json`，让用户保存到
-   `~/.pi/agent/usage-probes.json`（或直接告诉用户复制粘贴）。
-5. **验证**：让用户打开圆环面板看是否显示。如果不显示，让用户把接口返回的**脱敏后**
-   JSON 发给你（记得提醒用户抹掉 key/token），继续调整字段路径。
+1. **先判断是否已内置**：读 `~/.pi/agent/models.json` 找到该 provider 的 `baseUrl`，
+   对照上面的内置清单。命中就直接告诉用户「已内置，无需配置，卡片底部会自动显示」，
+   不需要写任何文件。apiKey 的位置不用读出来，也不要把 key 贴到任何地方。
+2. **没内置 → 引导弹窗模板**：让用户在供应商卡片点「用量查询」打开弹窗：
+   - OpenAI 兼容站点（有 `/usage` 端点）→ 选「通用模板」，必要时填请求地址（留空用供应商的）；
+   - New API / OneAPI 中转站 → 选「New API」，填访问令牌和用户 ID；
+   - 两个模板都覆盖不了 → 继续第 3 步。
+3. **写旧版 probes 数组**：确认该供应商的「余额 / usage / balance / credits」接口
+   （拿不到文档时让用户 F12 抓包，把 URL 路径和返回 JSON 发给你；记得提醒用户
+   抹掉 key/token），确定「剩余额度」字段后按下面结构生成 `probes` 数组。
+4. **验证**：让用户打开供应商卡片看底部用量行。不显示就继续对齐字段路径。
 
 > 重要安全边界：配置文件里**不要**写 apiKey。鉴权统一走 `Authorization: Bearer <key>`，
 > 主进程自动从 auth.json/models.json 取 key；只有个别接口用非标准鉴权头时才用
@@ -49,7 +60,8 @@ OpenAI 官方 `/v1/usage` 端点的通用 OpenAI 兼容网关；Kimi 还会额�
 
 ## 配置文件结构
 
-顶层是一个 `probes` 数组，每条是一个供应商。字段含义：
+顶层 `providers` 映射由弹窗维护（开关/模板/超时/间隔），**AI 不要手改**。
+下面这个 `probes` 数组是开放给 AI 写的兜底部分，每条是一个供应商。字段含义：
 
 ```jsonc
 {
@@ -170,8 +182,9 @@ periods 形态不需要写字段路径：解析器会自动找响应里的
 
 ## 排查清单
 
-- 圆环面板显示「用量暂时不可用」但没有报错：多半是接口返回的字段路径没对上，
-  把脱敏后的响应 JSON 发给 AI 帮你对齐路径。
+- 供应商卡片底部用量行完全没显示：先看弹窗是否命中「已内置」；未命中就看模板选对没有；
+- 显示「用量暂时不可用」：接口字段路径没对上，把脱敏后的响应 JSON 发给 AI 帮你对齐；
+- 显示「用量查询未开启」：弹窗里的启用开关没开（或之前显式关闭过），打开即可；
 - 显示「当前 provider 暂不支持用量查询」：说明没有匹配到任何探针。检查
   `match.baseUrlContains` 里的关键字，是不是和 `models.json` 里那个 provider 的
   `baseUrl` 完全不一致（注意大小写、是否带 `/v1`）。

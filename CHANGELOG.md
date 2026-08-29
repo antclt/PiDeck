@@ -1,3 +1,10 @@
+## Unreleased
+
+### 🚀 New Features
+- **Usage query rebuild (aligned with cc-switch)** — Unified usage display across Models / Auth / DSH (amount or percentage at the bottom-right of the card + bar-chart icon entry in the header); per-provider enable switch + built-in template auto-detection + generic / New API declarative templates + timeout / auto-query interval (default 5 min, 0 = manual only); no automatic probing when disabled or unsupported.
+- **DSH usage query pipeline** — Same usage display and probe configuration on the DSH model config page: config stored at `$DSH_HOME/.pideck/usage-probes.json`, credentials read from the DSH credential store (`.credentials.yaml`); identical to the pi side and fully isolated.
+- **PiDeck-specific files consolidated** — Session archives / host mutex lock / usage config under DSH_HOME now live in `~/.dsh/.pideck/` (one-time migration; the migration logic will be removed in the next release once the legacy layout is confirmed gone).
+
 ## v0.7.2 - 2026-08-26
 
 

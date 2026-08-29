@@ -22,9 +22,17 @@ import {
 	type MainProcessTranslationKey,
 } from "../../shared/i18n/mainProcessCopy";
 import type { FetchedModel } from "../../shared/types/fetchedModel";
-import type { ProviderUsageResult } from "../../shared/types/providerUsage";
+import type {
+	ProviderUsageResult,
+	UsageProbeBackend,
+	UsageProbeProviderConfig,
+	UsageProbeRecognition,
+	UsageProbeSettingsResult,
+	UsageProbeTestInput,
+} from "../../shared/types/providerUsage";
+import { credentialRefFor } from "../../shared/dshCredentialRef";
 import { parseProviderModelsResponse } from "./parseProviderModels";
-import { isSafeProviderName } from "./providerMigration";
+import { isSafeProviderName, piBuiltinSnapshotFromCatalog, resolvePiApiKey } from "./providerMigration";
 import {
 	buildProbeHeaders,
 	candidateApplies,
@@ -33,16 +41,39 @@ import {
 	USAGE_PROBE_CANDIDATES,
 	usageProbeUrls,
 } from "./providerUsageProbe";
-import { loadUserUsageProbes } from "./userUsageProbes";
+import type { UsageProbeCandidate } from "./providerUsageProbe";
+import { resolveProviderUsageEndpoint } from "./providerUsageResolver";
+import {
+	buildDeclarativeUsageProbeTemplate,
+	USAGE_PROBE_CATEGORY_BY_TEMPLATE_ID,
+} from "./usageProbeTemplates";
+import { loadUsageProbeSettings, loadUserUsageProbes } from "./userUsageProbes";
+import { pideckUsageProbesDir } from "../dsh/pideckDshHome";
+import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
+import { loadDshUsageProviderProfile } from "./dshUsageEndpoint";
 
 /** pi 全局配置目录：~/.pi/agent/ */
 const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
+
+/** DSH 用量链路的外部读取能力（装配层注入；见 ConfigManager 构造注释）。 */
+export type DshUsageLookup = {
+	/** 生效 DSH_HOME（设置覆盖 > ~/.dsh > 应用私有目录，与 DshHost/resolveDshHomeDir 同一解析）。 */
+	getHomeDir: () => string;
+	/** 按 credential ref 读 DSH 凭据（$DSH_HOME/.credentials.yaml，环境层兜底）；无值返回 undefined。 */
+	readCredential: (ref: string) => Promise<string | undefined>;
+};
 
 // ── models.json 结构 ──────────────────────────────────
 // { providers: { [providerName]: { baseUrl, api, apiKey, models: [...] } } }
 
 // Provider 用量/连接探测面对的是第三方网关，首包可能慢于普通模型；放宽超时避免误判。
 const PROVIDER_TEST_TIMEOUT_MS = 45_000;
+
+// 用量查询默认超时（学 cc-switch：10 秒；可被 per-provider 配置覆盖）。
+const USAGE_PROBE_DEFAULT_TIMEOUT_MS = 10_000;
+
+// 用量查询默认自动间隔（学 cc-switch：5 分钟；可被 per-provider 配置覆盖，0 = 不自动）。
+const USAGE_PROBE_DEFAULT_INTERVAL_MINUTES = 5;
 
 // Provider 用量探针响应体上限：用量接口返回 JSON，正常远小于此值；超限截断
 // （而非整体丢弃），防止恶意/异常网关用超大响应体拖垮内存，同时保留诊断信息。
@@ -163,6 +194,13 @@ export class ConfigManager {
 	constructor(
 		configDir?: string,
 		private readonly translate: ConfigCopy = (key, params) => mainProcessT("zh-CN", key, params),
+		/**
+		 * DSH 用量链路注入（backend="dsh" 时使用）：
+		 * - 配置落盘在 $DSH_HOME/usage-probes.json（与 pi 侧 ~/.pi/agent/usage-probes.json 同构）；
+		 * - 凭据从 $DSH_HOME/.credentials.yaml 按 credential ref 读取（与 DshHost 同一解析规则）。
+		 * 不注入时 DSH backend 请求按「无凭据」回落（提示未配置 key），不影响 pi 链路。
+		 */
+		private readonly dshUsage?: DshUsageLookup,
 	) {
 		this.configDir = configDir ?? PI_AGENT_DIR;
 	}
@@ -834,47 +872,297 @@ export class ConfigManager {
 	}
 
 	/**
-	 * 查询 provider 用量/余额（内置候选 + 用户自定义探针）。
-	 *
-	 * 设计：内置候选表（USAGE_PROBE_CANDIDATES）+ 用户探针文件（~/.pi/agent/usage-probes.json）
-	 * 合并后，按 baseUrl/apiType 匹配适用候选，逐个尝试探测 URL；解析成功的第一个结果即返回。
+	 * 查询 provider 用量/余额（学 cc-switch 的三层模型，全部按 provider 名路由）：
+	 * 1. 门控：providers[name].enabled === false → 不查（返回「未启用」结构化结果，
+	 *    UI 据此显示小按钮引导配置）；
+	 * 2. 模板路由：配置了声明式模板（general/newapi）→ 用模板构建候选（覆盖字段生效）；
+	 *    未配置 → 内置候选表 + 旧 probes 数组按 baseUrl/apiType 自动匹配（内置默认开）；
+	 * 3. 超时：per-provider timeoutSecs（默认 10s，学 cc-switch）。
+	 * backend="dsh" 时配置/凭据走 DSH 链路（$DSH_HOME），与 pi 完全同构、互不干扰。
 	 * 全部失败时返回结构化错误，并对响应做密钥脱敏，避免把 token 回传给渲染层。
-	 * 新增内置 provider 在 providerUsageProbe 登记；用户自定义无需改代码，直接写 JSON。
 	 */
-	async fetchProviderUsage(
-		baseUrl: string,
-		apiKey: string,
-		apiType?: string,
-		requestHeaders?: Record<string, string>,
-	): Promise<ProviderUsageResult> {
-		const api = this.normalizeApiType(apiType);
-		const extraHeaders = this.normalizeRequestHeaders(requestHeaders);
-		const startedAt = Date.now();
-
-		// 用户自定义探针每次读盘合并（用量查询低频，换取改完立刻生效）。
-		const userProbes = await loadUserUsageProbes(this.configDir);
-		for (const error of userProbes.errors) {
-			console.warn("[ConfigManager] 用户用量探针配置被忽略：", error);
+	async fetchProviderUsage(provider: string, backend: UsageProbeBackend = "pi"): Promise<ProviderUsageResult> {
+		const settingsDir = this.usageProbeSettingsDir(backend);
+		// 1) 门控：用户显式关闭（enabled=false）→ 快速返回，不发请求。
+		const settings = await loadUsageProbeSettings(settingsDir, provider);
+		for (const error of settings.errors) {
+			console.warn("[ConfigManager] 用量探针配置被忽略：", error);
 		}
-
-		// 过滤出适用于此 provider 的候选端点（内置在前，用户探针追加在后）。
-		const applicable = [...USAGE_PROBE_CANDIDATES, ...userProbes.candidates].filter((c) =>
-			candidateApplies(c, baseUrl, api),
-		);
-		if (applicable.length === 0) {
+		if (settings.config?.enabled === false) {
 			return {
 				success: false,
-				error: this.translate("mainConfig.providerUsageUnsupported"),
+				disabled: true,
+				error: this.translate("mainConfig.providerUsageDisabled"),
 			};
 		}
 
+		// 2) 解析 provider 端点（models.json → catalog 兜底；DSH backend 额外读 DSH 凭据库）。
+		const resolved = await this.resolveUsageEndpoint(provider, backend);
+		if (!resolved.matched || !resolved.baseUrl) {
+			return { success: false, error: this.translate("mainConfig.providerUsageUnsupported") };
+		}
+		// 属性收窄在 await 后失效：立即取局部 const 供后续模板路由使用。
+		const resolvedBaseUrl = resolved.baseUrl;
+		const resolvedApiKey = resolved.apiKey ?? "";
+		const api = this.normalizeApiType(resolved.apiType);
+		const timeoutMs = (settings.config?.timeoutSecs ?? 10) * 1000;
+		const intervalMinutes = settings.config?.intervalMinutes ?? USAGE_PROBE_DEFAULT_INTERVAL_MINUTES;
+
+		// 3) 模板路由：声明式模板优先（用户显式选择），否则内置 + 旧探针自动匹配。
+		const template = settings.config?.template;
+		if (template === "general" || template === "newapi") {
+			const built = buildDeclarativeUsageProbeTemplate(template, settings.config ?? {}, {
+				baseUrl: resolvedBaseUrl,
+				apiKey: resolvedApiKey,
+			});
+			if ("error" in built) {
+				return { success: false, error: built.error };
+			}
+			return this.runProviderUsageProbes(
+				built.baseUrl,
+				built.apiKey,
+				resolved.headers,
+				[built.candidate],
+				timeoutMs,
+				intervalMinutes,
+			);
+		}
+
+		const userProbes = await loadUserUsageProbes(settingsDir);
+		for (const error of userProbes.errors) {
+			console.warn("[ConfigManager] 用户用量探针配置被忽略：", error);
+		}
+		const applicable = [...USAGE_PROBE_CANDIDATES, ...userProbes.candidates].filter((c) =>
+			candidateApplies(c, resolvedBaseUrl, api),
+		);
+		if (applicable.length === 0) {
+			return { success: false, error: this.translate("mainConfig.providerUsageUnsupported") };
+		}
+		return this.runProviderUsageProbes(
+			resolvedBaseUrl,
+			resolvedApiKey,
+			resolved.headers,
+			applicable,
+			timeoutMs,
+			intervalMinutes,
+		);
+	}
+
+	/**
+	 * 打开探针配置弹窗时的数据：该 provider 已保存配置 + 内置模板自动识别结果。
+	 * 识别 = 解析端点后按 baseUrl/apiType 匹配内置候选（带 templateId 的），
+	 * 未命中返回 null（弹窗回落到声明式模板选择）。backend 决定配置目录（pi/dsh）。
+	 */
+	async getUsageProbeSettings(
+		provider: string,
+		backend: UsageProbeBackend = "pi",
+	): Promise<UsageProbeSettingsResult> {
+		const loaded = await loadUsageProbeSettings(this.usageProbeSettingsDir(backend), provider);
+		return {
+			...(loaded.config ? { config: loaded.config } : {}),
+			recognized: await this.recognizeUsageTemplate(provider, backend),
+			templates: [],
+			errors: loaded.errors,
+		};
+	}
+
+	/** 内置模板自动识别（零配置生效路径）：命中返回 templateId + 面向用户的类别。 */
+	async recognizeUsageTemplate(
+		provider: string,
+		backend: UsageProbeBackend = "pi",
+	): Promise<UsageProbeRecognition | null> {
+		const resolved = await this.resolveUsageEndpoint(provider, backend);
+		if (!resolved.matched || !resolved.baseUrl) return null;
+		const api = this.normalizeApiType(resolved.apiType);
+		for (const candidate of USAGE_PROBE_CANDIDATES) {
+			if (!candidate.templateId) continue;
+			if (candidateApplies(candidate, resolved.baseUrl, api)) {
+				const category = USAGE_PROBE_CATEGORY_BY_TEMPLATE_ID[candidate.templateId];
+				return { templateId: candidate.templateId, category: category ?? "balance" };
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * 单条模板测试（配置弹窗「测试」按钮）：按模板 id 构建候选后直接探测。
+	 * template 省略 = 自动识别内置模板；无内置且未给模板时返回错误。
+	 * 密钥只在主进程发请求（配置覆盖字段经 buildDeclarativeUsageProbeTemplate 合并）。
+	 */
+	async testUsageProbe(input: UsageProbeTestInput): Promise<ProviderUsageResult> {
+		const backend = input.backend ?? "pi";
+		const resolved = await this.resolveUsageEndpoint(input.provider, backend);
+		if (!resolved.matched || !resolved.baseUrl) {
+			return { success: false, error: this.translate("mainConfig.providerUsageUnsupported") };
+		}
+		// 属性收窄在 await 后失效：立即取局部 const。
+		const resolvedBaseUrl = resolved.baseUrl;
+		const resolvedApiKey = resolved.apiKey ?? "";
+		const timeoutMs = (input.timeoutSecs ?? 10) * 1000;
+
+		// 显式模板优先；否则走内置自动识别（测「识别命中」这条零配置路径）。
+		// 注意 backend 必须透传：DSH 弹窗测的是 DSH 链路的识别结果。
+		const template =
+			input.template?.trim() ||
+			(await this.recognizeUsageTemplate(input.provider, backend))?.templateId;
+		if (!template) {
+			return { success: false, error: this.translate("mainConfig.providerUsageUnsupported") };
+		}
+
+		// 声明式模板（general/newapi）：构建候选时可携带覆盖字段。
+		if (template === "general" || template === "newapi") {
+			const built = buildDeclarativeUsageProbeTemplate(
+				template,
+				{
+					apiKey: input.apiKey,
+					baseUrl: input.baseUrl,
+					accessToken: input.accessToken,
+					userId: input.userId,
+				},
+				{ baseUrl: resolvedBaseUrl, apiKey: resolvedApiKey },
+			);
+			if ("error" in built) {
+				return { success: false, error: built.error };
+			}
+			return this.runProviderUsageProbes(
+				built.baseUrl,
+				built.apiKey,
+				resolved.headers,
+				[built.candidate],
+				timeoutMs,
+				0,
+			);
+		}
+
+		// 内置模板：按 templateId 找候选（不可改写结构，测的是零配置路径本身）。
+		const candidate = USAGE_PROBE_CANDIDATES.find((c) => c.templateId === template);
+		if (!candidate) {
+			return { success: false, error: this.translate("mainConfig.providerUsageUnsupported") };
+		}
+		return this.runProviderUsageProbes(
+			resolvedBaseUrl,
+			resolvedApiKey,
+			resolved.headers,
+			[candidate],
+			timeoutMs,
+			0,
+		);
+	}
+
+	/**
+	 * 用量查询配置目录：pi = ~/.pi/agent；dsh = $DSH_HOME（与 DSH 自己的配置/凭据同目录，
+	 * 文件名仍为 usage-probes.json，与 pi 侧同构）。
+	 */
+	private usageProbeSettingsDir(backend: UsageProbeBackend): string {
+		if (backend === "dsh") {
+			// DSH 链路配置统一落 $DSH_HOME/.pideck/（PiDeck 特有文件收拢目录）。
+			const dshHome = this.dshUsage?.getHomeDir() ?? this.configDir;
+			return pideckUsageProbesDir(dshHome);
+		}
+		return this.configDir;
+	}
+
+	/** 供 IPC 保存路径使用：backend 对应的用量查询配置目录。 */
+	getUsageProbeConfigDir(backend: UsageProbeBackend = "pi"): string {
+		return this.usageProbeSettingsDir(backend);
+	}
+
+	/**
+	 * 解析 provider 端点（models.json 精确命中 → pi-ai catalog 兜底；API key 不出主进程）。
+	 * backend="dsh" 时以 DSH 自身 profile（settings.yaml 的 llm-pi-ai.providers / llm-deepseek）
+	 * 为准——自定义 route 的 baseURL/api/headers 与 pi 侧或 catalog 默认可能不同，只靠兜底
+	 * 会出现「时而查得对、时而判不支持」；凭据优先 DSH 凭据库（.credentials.yaml，
+	 * ref = profile.apiKeyEnv 或 <ROUTE>_API_KEY），缺省回退 pi auth（迁移/同步场景兼容）。
+	 * 无 DSH profile（文件缺失/无该 route）时回落 models.json → pi-ai catalog 兜底。
+	 */
+	private async resolveUsageEndpoint(provider: string, backend: UsageProbeBackend = "pi") {
+		const catalog = getPiAiCatalogIndex();
+		if (backend === "dsh") {
+			const home = this.dshUsage?.getHomeDir();
+			if (home) {
+				const profile = await loadDshUsageProviderProfile(home, provider);
+				if (profile) {
+					const catalogSnapshot = piBuiltinSnapshotFromCatalog(provider, undefined, catalog);
+					const [modelsRes, authRes] = await Promise.all([
+						this.getModelsConfig(),
+						this.getAuthConfig(),
+					]);
+					const fromDsh = this.dshUsage
+						? await this.dshUsage.readCredential(profile.credentialRef)
+						: undefined;
+					const baseUrl = profile.baseUrl ?? catalogSnapshot?.baseUrl;
+					const piKey = resolvePiApiKey(modelsRes.parsed?.providers?.[provider], authRes.parsed?.[provider]);
+					return {
+						provider,
+						// profile 缺 baseURL/api（如 opencode route 未写）时由 pi-ai catalog 兜底。
+						...(baseUrl ? { baseUrl } : {}),
+						...(fromDsh ?? piKey ? { apiKey: fromDsh ?? piKey } : {}),
+						apiType: profile.api ?? catalogSnapshot?.api ?? "openai-completions",
+						headers: profile.headers,
+						matched: baseUrl != null,
+					};
+				}
+			}
+		}
+		const lookup = {
+			getModelsConfig: () => this.getModelsConfig(),
+			getAuthConfig: () => this.getAuthConfig(),
+			catalogProvider: (name: string) => piBuiltinSnapshotFromCatalog(name, undefined, catalog),
+		};
+		const resolved = await resolveProviderUsageEndpoint(lookup, provider);
+		// DSH 兜底路径（settings.yaml 无该 route）：DSH 凭据库仍然是本链路的优先密钥来源
+		// （路由的 key 状态点以它为准，pi auth 只是迁移/同步场景的回退）。
+		if (backend === "dsh" && this.dshUsage) {
+			const fromDsh = await this.dshUsage.readCredential(credentialRefFor({}, provider));
+			if (fromDsh) resolved.apiKey = fromDsh;
+		}
+		return resolved;
+	}
+
+	/** 带统一错误包装的探测执行：无 key 快速失败，其余走 runUsageProbes；成功时带上生效间隔。 */
+	private async runProviderUsageProbes(
+		baseUrl: string,
+		apiKey: string,
+		requestHeaders: Record<string, string> | undefined,
+		candidates: UsageProbeCandidate[],
+		timeoutMs: number,
+		intervalMinutes: number,
+	): Promise<ProviderUsageResult> {
 		// 无 key 时只可能 401，快速失败并给出提示。
 		if (!apiKey) {
 			return { success: false, error: this.translate("mainConfig.providerUsageNoKey") };
 		}
+		const result =
+			(await this.runUsageProbes(
+				baseUrl,
+				apiKey,
+				this.normalizeRequestHeaders(requestHeaders),
+				candidates,
+				timeoutMs,
+			)) ?? {
+				success: false,
+				error: this.translate("mainConfig.providerUsageFailed"),
+			};
+		return result.success ? { ...result, intervalMinutes } : result;
+	}
 
+	/**
+	 * 逐候选、逐 URL 尝试探测；命中的首个成功结果即返回，全部未命中返回 undefined
+	 * （文案由调用方决定：整体查询 vs 单条测试）。链式 preflight、64KB 响应截断、
+	 * redirect:"error" fail-closed 与单候选异常捕获都在此层，探测行为对两条入口完全一致。
+	 * timeoutMs 由 per-provider 配置（默认 10s）传入：用量查询首包超时按用户设定收紧，
+	 * 不再固定 45s（那只对模型连接探测合理）。
+	 */
+	private async runUsageProbes(
+		baseUrl: string,
+		apiKey: string,
+		extraHeaders: Record<string, string>,
+		candidates: UsageProbeCandidate[],
+		timeoutMs: number,
+	): Promise<ProviderUsageResult | undefined> {
+		const startedAt = Date.now();
 		// 逐候选、逐 URL 尝试；命中的首个成功即返回。
-		for (const candidate of applicable) {
+		for (const candidate of candidates) {
 			// 链式预检（如 xAI 需先查 identity 拿 userId）：先请求预检端点，把响应里
 			// 的字段注入主请求头（x-userid）。预检失败（不可达/非 JSON/无字段）则整个候选跳过。
 			const preflightHeaders: Record<string, string> = {};
@@ -889,7 +1177,7 @@ export class ConfigManager {
 					const preflightController = new AbortController();
 					const preflightTimeout = setTimeout(
 						() => preflightController.abort(),
-						PROVIDER_TEST_TIMEOUT_MS,
+						timeoutMs,
 					);
 					try {
 						const preflightRes = await net.fetch(preflightUrl, {
@@ -927,7 +1215,7 @@ export class ConfigManager {
 				const controller = new AbortController();
 				const timeout = setTimeout(
 					() => controller.abort(),
-					PROVIDER_TEST_TIMEOUT_MS,
+					timeoutMs,
 				);
 				try {
 					const res = await net.fetch(requestUrl, {
@@ -979,9 +1267,7 @@ export class ConfigManager {
 			}
 		}
 
-		return {
-			success: false,
-			error: this.translate("mainConfig.providerUsageFailed"),
-		};
+		// 全部候选未命中：undefined 交由调用方决定最终文案（整体查询 vs 单条测试）。
+		return undefined;
 	}
 }

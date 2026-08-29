@@ -275,8 +275,17 @@ function SettingsModalContent(props: SettingsModalProps) {
 	// 深链：窗口已在打开状态时点侧栏「配置管理」→ 切到配置管理分区。
 	// 本 effect 定义在 useSettingsFocus 之前（其 effect 会消费并清空 focus），保证先读到带 pane 的焦点。
 	const [focusPaneTarget] = useAtom(settingsFocusAtom);
+	// 深链的配置分页/供应商定位：快照进本地 state（focus atom 随后会被 useSettingsFocus 清空，
+	// 配置分区深链「圆球 → 去配置用量」需要在整个设置会话期间保持可投递给 ConfigPane）。
+	const [configFocus, setConfigFocus] = useState<{ configTab?: "models" | "auth" | "settings" | "trust" | "mcp" | "raw"; provider?: string } | null>(() => {
+		const target = getDefaultStore().get(settingsFocusAtom);
+		return target?.pane === "config" ? { configTab: target.configTab, provider: target.provider } : null;
+	});
 	useEffect(() => {
-		if (focusPaneTarget?.pane === "config") setPane("config");
+		if (focusPaneTarget?.pane === "config") {
+			setPane("config");
+			setConfigFocus({ configTab: focusPaneTarget.configTab, provider: focusPaneTarget.provider });
+		}
 	}, [focusPaneTarget]);
 	useSettingsFocus(activeTab, setActiveTab, persistTab);
 	// ── 全局设置草稿：进入弹框时快照 props.settings，所有修改在 draft 上操作，保存时统一提交 ──
@@ -599,6 +608,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 							ref={configPaneRef}
 							onClose={props.onClose}
 							projectPath={props.projectPath}
+							focusConfigTab={configFocus?.configTab}
+							focusProvider={configFocus?.provider}
 							onStateChange={handleConfigPaneStateChange}
 						/>
 					</Suspense>

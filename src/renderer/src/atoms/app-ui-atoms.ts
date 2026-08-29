@@ -43,6 +43,13 @@ export type SettingsFocusTarget = {
 	section?: SettingsSectionId;
 	/** 打开时落在设置窗口的顶层分区；缺省为系统设置。侧栏「配置管理」入口带 "config"。 */
 	pane?: "config";
+	/**
+	 * pane="config" 时要落在的配置管理内部分页（ConfigTab，如 "models"）；
+	 * 深链（如圆球面板「去配置用量」）直达模型页，缺省保持上次位置。
+	 */
+	configTab?: "models" | "auth" | "settings" | "trust" | "mcp" | "raw";
+	/** configTab="models" 时要定位的供应商名：ModelsTab 展开该卡片并滚动高亮。 */
+	provider?: string;
 };
 
 /**

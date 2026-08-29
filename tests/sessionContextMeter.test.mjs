@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
@@ -255,7 +255,7 @@ test("bottom bar wires the meter next to send controls and merges model + thinki
   const source = bottomBarSource();
   // ContextMeter 挂在右侧组（git 分支之前、发送控件同组）
   assert.match(source, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-  assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*onInsertUsageProbePrompt=\{props\.onInsertUsageProbePrompt\}\s*\/\/ [^\n]+\n\s*fallbackProvider=\{modelProvider\}/);
+  assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*\/\/ [^\n]+\n\s*fallbackProvider=\{modelProvider\}/);
   assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
   // 模型/思考合并 chip：模型名 · 思考档位 + chevron（dsh ModelSelect trigger 形态）
   assert.match(source, /composer-bar-btn model-thinking/);
@@ -301,16 +301,87 @@ test("context meter copy is present in both locale dictionaries", () => {
   }
 });
 
-test("usage credits windows render each window as a labeled progress row", () => {
+test("usage block is delegated to the shared ProviderUsageDetails with settings deep-link on failure", () => {
   const source = meterSource();
-  // 多窗口分支在普通 credits 分支之前命中（优先走 windows 渲染）
+  // 圆球面板用量区块 = 共享 ProviderUsageDetails（与模型卡片/选择器徽标同一份数据源与视觉，
+  // 本组件只决定「是否渲染」与「失败跳转」，不再自持 fetch/缓存/展示逻辑）
+  assert.match(source, /import \{ ProviderUsageDetails \} from "\.\.\/app\/ProviderUsageDetails"/);
+  assert.match(source, /<ProviderUsageDetails provider=\{provider\} onConfigureUsage=\{onConfigureUsage\} \/>/);
+  // 失败态入口 = 跳「设置 → 配置管理 → 模型」并定位该供应商（openSettingsAtom 深链）
+  assert.match(source, /openSettingsAtom/);
+  assert.match(source, /configTab: "models", provider \}/);
+  // 旧的「装 skill + 预填输入框」链路已整体删除（配置唯一入口在模型页）
+  assert.doesNotMatch(source, /onInsertUsageProbePrompt/);
+  assert.doesNotMatch(source, /installUsageSkill/);
+  assert.doesNotMatch(source, /usageCache/);
+});
+
+test("picker rows and provider cards use the cc-switch style inline usage", () => {
+  const picker = bottomBarSource();
+  // 选择器分组行：trailing 插槽挂 inline（不往 label 里塞元素），打开时批量 TTL 去重查询
+  assert.match(picker, /trailing=\{<ProviderUsageInline provider=\{provider\} variant="row" \/>\}/);
+  assert.match(picker, /useProviderUsageBatchRefresh/);
+  // command-picker 提供 trailing 插槽（渲染在 label 与 count 之间）
+  const commandPicker = readFileSync("src/renderer/src/components/ui-shadcn/command-picker.tsx", "utf8");
+  assert.match(commandPicker, /trailing\?: ReactNode/);
+  // 模型卡片底部 = cc-switch 卡底形态（统一位置、右对齐：时间 + 彩色数值 + 刷新）
+  const modelsTab = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
+  assert.match(modelsTab, /ProviderUsageRow\s+provider=\{name\}/);
+  // 用量行与卡头/卡底内容分离：inline 组件（时间+数值+刷新）在提供商卡片底部渲染
+  const inlineSource = readFileSync("src/renderer/src/components/app/ProviderUsageInline.tsx", "utf8");
+  assert.match(inlineSource, /export function ProviderUsageFooter/);
+  assert.match(inlineSource, /variant="card" backend=\{props\.backend\} \/>/);
+  // 三处（模型页 / 认证页 / DSH）共用同一个「卡片右下角」用量行组件：
+  // 右对齐 + 固定行高；柱状图「用量查询」按钮在各卡片**头部图标组**（不在用量行里单列）。
+  assert.match(inlineSource, /export function ProviderUsageRow/);
+  assert.match(inlineSource, /justify-end/);
+  assert.match(inlineSource, /h-9/);
+  assert.doesNotMatch(inlineSource, /provider-usage-configure-icon/);
+  const authTab = readFileSync("src/renderer/src/config/AuthTab.tsx", "utf8");
+  assert.match(authTab, /ProviderUsageRow\s+provider=\{name\}/);
+  assert.match(authTab, /provider-usage-configure-icon/);
+  const dshCards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
+  assert.match(dshCards, /ProviderUsageRow\s+provider=\{entry\.key\}/);
+  assert.match(dshCards, /provider-usage-configure-icon/);
+  const modelsTab2 = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
+  assert.match(modelsTab2, /provider-usage-configure-icon/);
+  // 旧胶囊徽标组件已删除（cc-switch 风格无胶囊）
+  assert.equal(existsSync("src/renderer/src/components/app/ProviderUsageBadge.tsx"), false);
+});
+
+test("provider card footer keeps alignment and stays silent when usage not enabled", () => {
+  const source = readFileSync("src/renderer/src/components/app/ProviderUsageInline.tsx", "utf8");
+  // 未开启/失败/不支持 → 空占位保持行高，不渲染任何文案（查不到就不显示）。
+  assert.match(source, /空占位/);
+  // 未开启不再给「用量查询未开启 → 去配置」广告位（用户反馈：没开启的功能不该有引导条）；
+  // 配置入口统一在卡片头部柱状图按钮，由用户主动发起。
+  assert.doesNotMatch(source, /provider-usage-not-enabled/);
+  assert.doesNotMatch(source, /provider-usage-footer-configure/);
+  assert.doesNotMatch(source, /config\.usage\.notEnabled/);
+  // 三处共用行组件（ProviderUsageRow）：右对齐、行高固定、柱状图按钮（对齐 cc-switch 卡片列表）
+  assert.match(source, /justify-end/);
+  assert.match(source, /h-9/);
+});
+
+test("usage probe dialog lives outside all TabsContent (tab switch must not unmount it)", () => {
+  // 回归契约：弹窗曾放在 config:models TabsContent 内，Radix Tabs 默认卸载非激活内容，
+  // 导致切到认证 tab / DSH 页时弹窗被卸载、点击柱状图按钮「没反应」。
+  const configModal = readFileSync("src/renderer/src/ConfigModal.tsx", "utf8");
   assert.match(
-    source,
-    /usageCredits\?\.windows != null && usageCredits\.windows\.length > 0 \? \(/,
+    configModal,
+    /<\/TabsContent>\s*<\/Tabs>\s*\{\/\* 用量查询配置弹窗[\s\S]*?<UsageProbeConfigDialog/,
+    "用量查询弹窗必须挂在最外层 Tabs（Pi/DSH 分页）之外",
   );
+});
+
+test("ProviderUsageDetails renders each usage window as a labeled progress row", () => {
+  const source = readFileSync("src/renderer/src/components/app/ProviderUsageDetails.tsx", "utf8");
+  // 多窗口分支优先命中（windows.length > 0 在普通 credits 分支之前）
+  assert.match(source, /windows\.length > 0 \? \(/);
   // 每个窗口一行：label（5h/周）+ 进度条 + 百分比 + 剩余小字
-  assert.match(source, /window\.key === "fiveHour"/);
-  assert.match(source, /window\.key === "weekly"/);
+  // 窗口 label 走 WINDOW_LABEL_I18N 映射表（65fe5e31 起内置窗口 key 统一 i18n，未知 key 原样展示）
+  assert.match(source, /WINDOW_LABEL_I18N\[window\.key\] != null/);
+  assert.match(source, /t\(WINDOW_LABEL_I18N\[window\.key\]\)/);
   assert.match(source, /t\("sessionContext\.usageWindowRemaining", \{ n: formatAmount\(remaining\) \}\)/);
   // 用超封顶 100、≥90% 红字警示（与 periods 同判断）
   assert.match(source, /Math\.min\(100, Math\.round\(\(used \/ total\) \* 100\)\)/);

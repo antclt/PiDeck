@@ -107,6 +107,8 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 	onDirtyChange: (dirty: boolean, keys?: string[]) => void;
 	/** 有未保存更改的导航 id 集合（dsh:<nav>），用于左侧导航打黄点。 */
 	dirtyNavIds?: Set<string>;
+	/** 打开用量查询配置弹窗（与 Pi 模型页共用同一个 per-provider 弹窗）。 */
+	onOpenUsageProbeDialog: (provider: string) => void;
 }>(function DshConfigTab(props, ref) {
 	const [status, setStatus] = useState<DshStatus | null>(null);
 	const [namespaces, setNamespaces] = useState<DshNamespaceView[]>([]);
@@ -396,6 +398,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 														sectionApi={sectionApi}
 														onMigrated={() => { void load(); }}
 															instanceKey={`dsh:models:${ns.ns}`}
+														onOpenUsageProbeDialog={props.onOpenUsageProbeDialog}
 													/>
 												) : (
 													<DeepseekRouteCard
@@ -407,6 +410,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 														sectionApi={sectionApi}
 															instanceKey={`dsh:models:${ns.ns}`}
 														onMigrated={() => { void load(); }}
+														onOpenUsageProbeDialog={props.onOpenUsageProbeDialog}
 													/>
 												)}
 											</section>

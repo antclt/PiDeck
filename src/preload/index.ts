@@ -110,7 +110,13 @@ import type {
 	TerminalTarget,
 	WebNetworkAddress,
 } from "../shared/types";
-import type { ProviderUsageResult } from "../shared/types/providerUsage";
+import type {
+	ProviderUsageResult,
+	UsageProbeSaveInput,
+	UsageProbeSaveResult,
+	UsageProbeSettingsResult,
+	UsageProbeTestInput,
+} from "../shared/types/providerUsage";
 
 function clipboardSync<T>(channel: string, fallback: T): T {
 	try {
@@ -1424,17 +1430,35 @@ const api = {
 				ipcChannels.configTestProvider,
 				{ providerName, modelId, models },
 			) as Promise<import("../shared/types/fetchedModel").PiModelProbeResult>,
-		/** 查询 provider 用量/余额（如 opencode-go /v1/usage），主进程按 provider 名解析端点并查询 */
-		fetchUsage: (provider: string) =>
+		/** 查询 provider 用量/余额（主进程按 provider 名 + backend 路由；backend=dsh 走 $DSH_HOME 链路） */
+		fetchUsage: (provider: string, backend?: "pi" | "dsh") =>
 			ipcRenderer.invoke(
 				ipcChannels.configFetchUsage,
-				{ provider },
+				{ provider, backend },
 			) as Promise<ProviderUsageResult>,
 		/** 安装内置「用量查询自定义」技能模板到 ~/.pi/agent/skills/usage-probe */
 		installUsageSkill: () =>
 			ipcRenderer.invoke(
 				ipcChannels.configInstallUsageSkill,
 			) as Promise<{ success: boolean; path?: string; error?: string }>,
+		/** 读取该 provider 的用量查询配置 + 内置模板自动识别（探针配置弹窗数据源；backend=dsh 走 DSH 链路） */
+		getUsageProbes: (provider: string, backend?: "pi" | "dsh") =>
+			ipcRenderer.invoke(
+				ipcChannels.configGetUsageProbes,
+				{ provider, backend },
+			) as Promise<UsageProbeSettingsResult>,
+		/** 按 provider 合并保存用量查询配置（主进程校验后落盘，保留其它 providers 与旧 probes） */
+		saveUsageProbes: (payload: UsageProbeSaveInput) =>
+			ipcRenderer.invoke(
+				ipcChannels.configSaveUsageProbes,
+				payload,
+			) as Promise<UsageProbeSaveResult>,
+		/** 单条模板测试（模板 id + 覆盖字段；provider 端点与密钥由主进程解析，不回传渲染层） */
+		testUsageProbe: (payload: UsageProbeTestInput) =>
+			ipcRenderer.invoke(
+				ipcChannels.configTestUsageProbe,
+				payload,
+			) as Promise<ProviderUsageResult>,
 		/** 安装内置「图片生成」技能模板到 ~/.pi/agent/skills/image-gen */
 		installImageGenSkill: () =>
 			ipcRenderer.invoke(

@@ -1,6 +1,6 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Brain, Check, ChevronDown, ChevronRight, Coins, Copy, ExternalLink, Plus, RotateCcw, SquarePen, Trash2, X } from "lucide-react";
+import { BarChart3, Brain, Check, ChevronDown, ChevronRight, Coins, Copy, ExternalLink, Plus, RotateCcw, SquarePen, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import type { ModelItem, ModelsFile } from "./configTypes";
@@ -30,6 +30,8 @@ import { showNotice } from "../utils/notice";
 import { applyModelPatches, computeModelSpecPatches } from "../utils/modelSpecAutoFill";
 import type { FetchedModel } from "../../../shared/types/fetchedModel";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
+import { ProviderUsageRow } from "../components/app/ProviderUsageInline";
+import { ProviderUsageDetails } from "../components/app/ProviderUsageDetails";
 import { isValidProviderName } from "../../../shared/providerName";
 
 const KNOWN_PROVIDER_FIELDS = new Set([
@@ -61,6 +63,10 @@ const KNOWN_MODEL_FIELDS = new Set([
 export function ModelsTab(props: {
 	data: ModelsFile;
 	expandedProvider: string | null;
+	/** 深链聚焦的供应商：展开由父级处理，这里负责滚动到卡片并短暂高亮。 */
+	focusProvider?: string;
+	/** 打开用量探针配置弹窗（配置唯一入口在模型页）。 */
+	onOpenUsageProbeDialog: (providerName: string) => void;
 	addingProvider: boolean;
 	newProviderName: string;
 	renamingProvider: string | null;
@@ -213,8 +219,24 @@ export function ModelsTab(props: {
 	// 切换 provider 时不保留上一个表格的索引选择，避免删除确认中的索引指向另一家 provider。
 	useEffect(() => {
 		setModelBatchProvider(null);
-		setSelectedModelIndexes(new Set<number>());
+		setSelectedModelIndexes(new Set());
 	}, [expandedProvider]);
+
+	// 深链聚焦：滚动到目标供应商卡片并短暂高亮（展开由父级 ConfigModalContent 处理）。
+	const providerCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const [highlightProvider, setHighlightProvider] = useState<string | null>(null);
+	useEffect(() => {
+		if (!props.focusProvider) return;
+		setHighlightProvider(props.focusProvider);
+		const frameId = window.requestAnimationFrame(() => {
+			providerCardRefs.current[props.focusProvider!]?.scrollIntoView({ block: "start", behavior: "smooth" });
+		});
+		const timer = window.setTimeout(() => setHighlightProvider(null), 2400);
+		return () => {
+			window.cancelAnimationFrame(frameId);
+			window.clearTimeout(timer);
+		};
+	}, [props.focusProvider]);
 	const getCompat = (providerName: string) => ({
 		supportsDeveloperRole: false,
 		supportsReasoningEffort: false,
@@ -416,11 +438,14 @@ export function ModelsTab(props: {
 					)
 						? userAgentValue
 						: CUSTOM_USER_AGENT_VALUE;
-					return (
-						<div
-							key={name}
-							className={`config-provider-card overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-150${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)] overflow-visible" : ""}`}
-						>
+						return (
+							<div
+								key={name}
+								ref={(element) => {
+									providerCardRefs.current[name] = element;
+								}}
+								className={`config-provider-card overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-150${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)] overflow-visible" : ""}${highlightProvider === name ? " ring-2 ring-[color:var(--color-accent)]" : ""}`}
+							>
 							<div
 								className="flex cursor-pointer items-center justify-between px-3.5 py-2 transition-colors duration-150 hover:bg-bg-hover"
 								onClick={() => {
@@ -445,7 +470,7 @@ export function ModelsTab(props: {
 									/>
 								</Label>
 							)}
-							<div className="flex min-w-0 flex-1 items-center gap-2.5">
+								<div className="flex min-w-0 flex-1 items-center gap-2.5">
 									{props.renamingProvider === name ? (
 										<Input
 											className="h-[30px] min-w-[120px] rounded-sm border border-border-subtle bg-bg-panel px-2.5 text-sm font-semibold text-text-primary outline-none transition-colors duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
@@ -461,10 +486,9 @@ export function ModelsTab(props: {
 									) : (
 										<span className="text-control font-semibold text-text-primary">{name}</span>
 									)}
-									<span className="rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 font-mono text-[11px] font-medium tabular-nums text-[color:var(--color-accent)]">
-										{t("config.count.models", {
-											count: provider.models.length,
-										})}
+									{/* 模型数量：低调文本跟在名称右侧（替代旧胶囊），用量在最右侧 */}
+									<span className="flex-none text-caption text-text-tertiary">
+										{t("config.count.models", { count: provider.models.length })}
 									</span>
 								</div>
 
@@ -505,6 +529,18 @@ export function ModelsTab(props: {
 										direction="pi-to-dsh"
 										provider={name}
 									/>
+									{/* 用量查询配置（cc-switch 同款：柱状图图标放在卡片头部图标组，不在用量行里单列） */}
+									<Button variant="ghost" size="icon-sm" className="size-7"
+										onClick={(e) => {
+											e.stopPropagation();
+											props.onOpenUsageProbeDialog(name);
+										}}
+										title={t("config.usageProbe.entry")}
+										aria-label={t("config.usageProbe.entry")}
+										data-testid="provider-usage-configure-icon"
+									>
+										<BarChart3 size={14} />
+									</Button>
 									<Button variant="ghost" size="icon-sm" className="size-7"
 										onClick={(e) => {
 											e.stopPropagation();
@@ -613,6 +649,12 @@ export function ModelsTab(props: {
 											</div>
 										</div>
 
+
+										{/* 用量/余额明细（与圆球面板/选择器徽标同一数据源）；失败态按钮打开探针配置弹窗 */}
+										<ProviderUsageDetails
+											provider={name}
+											onConfigureUsage={() => props.onOpenUsageProbeDialog(name)}
+										/>
 
 										{/* 快速测试连接 */}
 										<div className="grid grid-cols-[90px_1fr] items-center gap-2.5">
@@ -1239,6 +1281,9 @@ export function ModelsTab(props: {
 									</div>
 								</div>
 							)}
+							{/* 用量行（cc-switch 卡片右下角）：用量显示 + 柱状图「用量查询」按钮同一行，
+								所有卡片同一位置、右对齐、行高一致；查不到 = 空占位（不显示文案） */}
+							<ProviderUsageRow provider={name} />
 						</div>
 					);
 				})}

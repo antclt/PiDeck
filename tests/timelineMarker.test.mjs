@@ -16,7 +16,8 @@ const events = readFileSync(
 );
 
 test("TimelineMarker keeps event kinds and tones explicit", () => {
-  assert.match(marker, /TimelineMarkerKind = "thinking" \| "tool" \| "compaction" \| "diagnostic" \| "ask"/);
+  // compaction 已随「压缩摘要卡片下线」从 kind 联合中移除（压缩进行态由 RespondingIndicator 承担）
+  assert.match(marker, /TimelineMarkerKind = "thinking" \| "tool" \| "diagnostic" \| "ask"/);
   assert.match(marker, /TimelineMarkerTone = "neutral" \| "active" \| "success" \| "warning" \| "error"/);
   assert.match(marker, /data-marker-kind=\{props\.kind\}/);
   assert.match(marker, /data-marker-tone=\{tone\}/);
@@ -31,10 +32,14 @@ test("tool cards map execution status to marker tone without changing detail beh
   assert.match(toolCard, /tool-card-copy/);
 });
 
-test("thinking, compaction, diagnostic, and ask cards use the same marker shell", () => {
-  for (const kind of ["thinking", "compaction", "diagnostic", "ask"]) {
+test("thinking, diagnostic, and ask cards use the same marker shell (compaction card retired)", () => {
+  for (const kind of ["thinking", "diagnostic", "ask"]) {
     assert.match(events, new RegExp(`kind=\\"${kind}\\"`));
   }
+  // 压缩摘要卡片按产品决策下线（与 dsh 后端行为对齐）：压缩进行态由 RespondingIndicator
+  // 「正在压缩」承担，compaction system 消息在 SessionMessageTimeline 里直接不渲染。
+  // 此断言固化下线事实，防止卡片悄悄回来而没有走同一次评审。
+  assert.doesNotMatch(events, /kind=\\"compaction\\"/);
   assert.match(events, /setExpanded\(\(v\) => !v\)/);
   // 旧断言 setExpanded(!expanded) 对应已废弃写法（函数式更新等价且更稳），不再断言实现细节
   assert.match(events, /data-message-id=\{props\.message\.id\}/);
