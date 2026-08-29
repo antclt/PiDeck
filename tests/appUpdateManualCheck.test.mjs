@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-// 更新检查策略：只允许设置页「版本与更新」手动触发，应用启动/进入设置页均不得自动检查。
-// 历史：f7a58852 曾改为纯手动，d348cc5a 又加回「启动自动检查一次」导致一进应用就检测、
-// 且自动检查在途时手动按钮被 checking 门控吞掉（有更新也不弹）；此处回归断言纯手动策略。
-test("app update check is manual-only and never runs automatically", () => {
+// 更新检查调度已迁移到主进程 UpdateService（启动延迟 + 每 2h 后台自动检查，无配额方案）。
+// 渲染层不得自建定时器或独立自动检查入口：自动弹窗/提示只由主进程 app:update-status-changed
+// 快照推送触发（useBackgroundUpdateWatch）。历史：f7a58852 曾改为纯手动，d348cc5a 又加回
+// 「启动自动检查一次」导致一进应用就检测、且自动检查在途时手动按钮被 checking 门控吞掉
+//（有更新也不弹）；此处回归断言渲染层不再持有任何调度逻辑。
+test("app update scheduling lives in main-process UpdateService; renderer must not self-schedule", () => {
   const appSource = readFileSync("src/renderer/src/App.tsx", "utf8");
 
   // 旧实现：启动 5s + 每 6h 自动检测；中间态：启动后单次自动检查。
-  // 现策略：无任何自动检查入口（含 startup 单次），弹窗/提示只来自设置页手动按钮。
+  // 现策略：调度全部在主进程 UpdateService，渲染层只消费快照推送。
   assert.doesNotMatch(
     appSource,
     /1000 \* 60 \* 60 \* 6/,

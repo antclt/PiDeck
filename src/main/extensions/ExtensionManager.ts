@@ -17,6 +17,8 @@ import { toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, parsePiMinorVersion } from "./extensionVersionGate";
+// 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
+import { compareVersions } from "../update/githubFeed";
 
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
@@ -456,7 +458,7 @@ export class ExtensionManager {
 			return {
 				currentVersion: status.version,
 				latestVersion,
-				hasUpdate: this.compareVersions(latestVersion, status.version ?? "0.0.0") > 0,
+				hasUpdate: compareVersions(latestVersion, status.version ?? "0.0.0") > 0,
 			};
 		} catch (error) {
 			console.error("[ExtensionManager] Pi update check failed", error);
@@ -507,7 +509,7 @@ export class ExtensionManager {
 				...extension,
 				currentVersion,
 				latestVersion,
-				hasUpdate: Boolean(currentVersion && latestVersion && this.compareVersions(latestVersion, currentVersion) > 0),
+				hasUpdate: Boolean(currentVersion && latestVersion && compareVersions(latestVersion, currentVersion) > 0),
 			};
 		} catch (error) {
 			console.error("[ExtensionManager] Extension version check failed", error);
@@ -553,17 +555,6 @@ export class ExtensionManager {
 
 	private toUpdateResult(command: string, output: string, updated: boolean): PiCliUpdateResult {
 		return { command, output: output.trim(), updated };
-	}
-
-	private compareVersions(a: string, b: string) {
-		const left = a.replace(/^v/i, "").split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
-		const right = b.replace(/^v/i, "").split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
-		const len = Math.max(left.length, right.length);
-		for (let index = 0; index < len; index += 1) {
-			const diff = (left[index] ?? 0) - (right[index] ?? 0);
-			if (diff !== 0) return diff;
-		}
-		return 0;
 	}
 
 	/**

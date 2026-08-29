@@ -16,7 +16,7 @@ import type { AppSettings } from "../../shared/types/settings";
 import type { AppUpdateStatusSnapshot } from "../../shared/types/app";
 import type { PiUpdateCheckResult } from "../../shared/types";
 import type { SettingsStore } from "../settings/SettingsStore";
-import { checkAppUpdate } from "./appUpdateCheck";
+import { checkAppUpdate, UPDATE_REPO, UPDATE_REPO_OWNER } from "./appUpdateCheck";
 
 export type UpdateServiceDeps = {
 	settingsStore: Pick<SettingsStore, "get" | "update">;
@@ -146,8 +146,9 @@ export class UpdateService {
 
 	private async checkApp(): Promise<AppCheckResult> {
 		const info = await checkAppUpdate({
-			owner: this.deps.owner ?? "ayuayue",
-			repo: this.deps.repo ?? "pi-desktop",
+			// 默认坐标从 appUpdateCheck 的常量取（仓库更名后唯一事实来源），deps 仍可覆盖便于测试。
+			owner: this.deps.owner ?? UPDATE_REPO_OWNER,
+			repo: this.deps.repo ?? UPDATE_REPO,
 			currentVersion: this.deps.getCurrentVersion(),
 			installationType: this.deps.getInstallationType(),
 			log: this.deps.log,

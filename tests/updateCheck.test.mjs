@@ -133,6 +133,14 @@ test("compareVersions / 资产 URL 构造", () => {
 	assert.equal(compareVersions("v1.9.0", "v1.9.0"), 0);
 	assert.equal(compareVersions("1.9.0", "2.0.0"), -1);
 	assert.equal(compareVersions("1.9.0", "1.10.0"), -1);
+	// 预发布语义（semver 对齐）：同版本号下正式版 > 测试版，
+	// beta 客户端（如 0.7.2-beta）在正式版发布后必须收到更新提示。
+	assert.equal(compareVersions("0.7.2", "0.7.2-beta"), 1);
+	assert.equal(compareVersions("0.7.2-beta", "0.7.2"), -1);
+	// 更新核心号的 beta 仍高于旧正式版；beta 迭代之间按数字比
+	assert.equal(compareVersions("0.7.2-beta", "0.7.1"), 1);
+	assert.equal(compareVersions("0.7.2-beta.2", "0.7.2-beta.1"), 1);
+	assert.equal(compareVersions("0.7.2-beta", "0.7.2-beta"), 0);
 	const repo = createGithubRepo("ayuayue", "PiDeck");
 	const assets = latestYmlAssets(
 		{ version: "2.0.0", files: [{ url: "PiDeck-2.0.0-setup.exe", size: 100 }] },
@@ -146,11 +154,12 @@ test("compareVersions / 资产 URL 构造", () => {
 // ── checkAppUpdate 编排 ──────────────────────────────────────────────
 
 function mockFetch(routes) {
-	return async (url) => {
+	return async (url, init) => {
+		const method = init?.method ?? "GET";
 		for (const [prefix, handler] of routes) {
-			if (url.startsWith(prefix)) return handler(url);
+			if (url.startsWith(prefix)) return handler(url, method);
 		}
-		throw new Error(`unexpected fetch: ${url}`);
+		throw new Error(`unexpected fetch: ${method} ${url}`);
 	};
 }
 function okResponse(body, url = "") {
@@ -186,9 +195,16 @@ const ATOM_XML = `<?xml version="1.0" encoding="UTF-8"?>
 
 test("checkAppUpdate: 主路径 latest.yml + atom 补齐说明", async () => {
 	const calls = [];
+	const headCalls = [];
 	const fetchImpl = mockFetch([
 		["https://github.com/ayuayue/PiDeck/releases/latest", () => okResponse("", "https://github.com/ayuayue/PiDeck/releases/tag/v2.0.0")],
 		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/latest.yml", () => { calls.push("yml"); return okResponse(LATEST_YML); }],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/PiDeck-2.0.0", (url, method) => {
+			// 推荐资产可用性 HEAD 探测（原名可用 → URL 不变）
+			if (method !== "HEAD") throw new Error(`unexpected GET: ${url}`);
+			headCalls.push(url);
+			return okResponse("", url);
+		}],
 		["https://github.com/ayuayue/PiDeck/releases.atom", () => { calls.push("atom"); return okResponse(ATOM_XML); }],
 	]);
 	const info = await checkAppUpdate({
@@ -203,8 +219,10 @@ test("checkAppUpdate: 主路径 latest.yml + atom 补齐说明", async () => {
 	assert.equal(info.releaseNotes, "Release notes here");
 	assert.equal(info.assets.length, 2);
 	assert.equal(info.recommendedAsset?.name, "PiDeck-2.0.0-setup.exe");
+	assert.equal(info.recommendedAsset?.url, "https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/PiDeck-2.0.0-setup.exe");
+	assert.equal(headCalls.length, 1);
 	assert.deepEqual(calls.sort(), ["atom", "yml"]);
-	// 无更新时不提示
+	// 无更新时不提示，也不做推荐资产 HEAD 探测
 	const upToDate = await checkAppUpdate({
 		owner: "ayuayue",
 		repo: "PiDeck",
@@ -213,6 +231,67 @@ test("checkAppUpdate: 主路径 latest.yml + atom 补齐说明", async () => {
 		fetchImpl,
 	});
 	assert.equal(upToDate.hasUpdate, false);
+	assert.equal(headCalls.length, 1);
+});
+
+test("checkAppUpdate: 推荐资产原名 404 时回退命名变体（GitHub 空格→点号）", async () => {
+	// v0.7.1 实测场景：latest.yml 写连字符名，GitHub 真实资产是点号名（空格被 GitHub 替换）。
+	const headUrls = [];
+	const fetchImpl = mockFetch([
+		["https://github.com/ayuayue/PiDeck/releases/latest", () => okResponse("", "https://github.com/ayuayue/PiDeck/releases/tag/v2.0.0")],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/latest.yml", () => okResponse(LATEST_YML)],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/PiDeck-2.0.0", (url, method) => {
+			if (method !== "HEAD") throw new Error(`unexpected GET: ${url}`);
+			headUrls.push(url);
+			return notFound(url);
+		}],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/PiDeck.2.0.0", (url, method) => {
+			if (method !== "HEAD") throw new Error(`unexpected GET: ${url}`);
+			headUrls.push(url);
+			return okResponse("", url);
+		}],
+		["https://github.com/ayuayue/PiDeck/releases.atom", () => okResponse(ATOM_XML)],
+	]);
+	const info = await checkAppUpdate({
+		owner: "ayuayue",
+		repo: "PiDeck",
+		currentVersion: "1.9.0",
+		installationType: "installed",
+		fetchImpl,
+	});
+	assert.ok(info.hasUpdate);
+	// URL 修正为点号变体；展示名保持 latest.yml 的原名
+	assert.equal(info.recommendedAsset?.url, "https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/PiDeck.2.0.0.setup.exe");
+	assert.equal(info.recommendedAsset?.name, "PiDeck-2.0.0-setup.exe");
+	assert.equal(headUrls.length, 2);
+});
+
+test("checkAppUpdate: 推荐资产全部变体不可用时放弃（UI 回退浏览器下载）", async () => {
+	const fetchImpl = mockFetch([
+		["https://github.com/ayuayue/PiDeck/releases/latest", () => okResponse("", "https://github.com/ayuayue/PiDeck/releases/tag/v2.0.0")],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/latest.yml", () => okResponse(LATEST_YML)],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/PiDeck-2.0.0", (url, method) => {
+			if (method !== "HEAD") throw new Error(`unexpected GET: ${url}`);
+			return notFound(url);
+		}],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/PiDeck.2.0.0", (url, method) => {
+			if (method !== "HEAD") throw new Error(`unexpected GET: ${url}`);
+			return notFound(url);
+		}],
+		["https://github.com/ayuayue/PiDeck/releases.atom", () => okResponse(ATOM_XML)],
+	]);
+	const info = await checkAppUpdate({
+		owner: "ayuayue",
+		repo: "PiDeck",
+		currentVersion: "1.9.0",
+		installationType: "installed",
+		fetchImpl,
+	});
+	// 检查本身不失败：hasUpdate/说明/资产清单保留，仅放弃应用内下载推荐
+	assert.ok(info.hasUpdate);
+	assert.equal(info.recommendedAsset, undefined);
+	assert.equal(info.assets.length, 2);
+	assert.ok(info.releaseUrl);
 });
 
 test("checkAppUpdate: latest.yml 404 时降级 atom + API 资产兜底", async () => {
@@ -246,6 +325,27 @@ test("checkAppUpdate: 全部失败时抛错（上层转用户可读文案）", a
 		checkAppUpdate({ owner: "ayuayue", repo: "PiDeck", currentVersion: "1.9.0", installationType: "installed", fetchImpl }),
 		/GitHub latest release redirect failed/,
 	);
+});
+
+test("checkAppUpdate: 正式版发布后，同版本号 beta 客户端能收到提示", async () => {
+	const fetchImpl = mockFetch([
+		["https://github.com/ayuayue/PiDeck/releases/latest", () => okResponse("", "https://github.com/ayuayue/PiDeck/releases/tag/v2.0.0")],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/latest.yml", () => okResponse(LATEST_YML)],
+		["https://github.com/ayuayue/PiDeck/releases/download/v2.0.0/PiDeck-2.0.0", (url, method) => {
+			if (method !== "HEAD") throw new Error(`unexpected GET: ${url}`);
+			return okResponse("", url);
+		}],
+		["https://github.com/ayuayue/PiDeck/releases.atom", () => okResponse(ATOM_XML)],
+	]);
+	const info = await checkAppUpdate({
+		owner: "ayuayue",
+		repo: "PiDeck",
+		currentVersion: "2.0.0-beta",
+		installationType: "installed",
+		fetchImpl,
+	});
+	// 0.7.2-beta < 0.7.2：beta 测试客户端在正式版发布后必须收到更新提示
+	assert.ok(info.hasUpdate);
 });
 
 test("selectRecommendedAsset: 安装版优先 Setup exe", () => {

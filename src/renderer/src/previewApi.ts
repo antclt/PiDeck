@@ -760,7 +760,7 @@ export function createPreviewApi(): PiDesktopApi {
 		app: {
 			info: async () => ({
 				version: "preview",
-				releasesUrl: "https://github.com/ayuayue/pi-desktop/releases",
+				releasesUrl: "https://github.com/ayuayue/PiDeck/releases",
 				platform: "win32" as NodeJS.Platform,
 				homeDir: "C:/Users/preview",
 				userDataDir: "C:/Users/preview/AppData/Roaming/pi-desktop",
@@ -773,7 +773,7 @@ export function createPreviewApi(): PiDesktopApi {
 				hasUpdate: false,
 				releaseName: "preview",
 				releaseNotes: "",
-				releaseUrl: "https://github.com/ayuayue/pi-desktop/releases",
+				releaseUrl: "https://github.com/ayuayue/PiDeck/releases",
 				assets: [],
 			}),
 			onUpdateStatus: () => () => undefined,

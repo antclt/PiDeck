@@ -564,19 +564,26 @@ export function App() {
     return getRuntimeTargetForSession(sessionId);
   };
   const [sessionHistoryLoading, setSessionHistoryLoading] = useState(false);
-  const appUpdate = useAppUpdateController({
-    checkUpdate: api.app.checkUpdate,
-    downloadUpdate: (asset) => api.app.downloadUpdate(asset),
-    installUpdate: (filePath) => api.app.installUpdate(filePath),
-    onUpdateProgress: (cb) => api.app.onUpdateProgress(cb),
-    openExternal: (url) => api.app.openExternal(url),
-  }, false);
+  // controller 的 api 对象必须 useMemo 稳定：内联字面量会让 useAppUpdateController 内部
+  // 依赖 api 的 useCallback/effect（含下载进度订阅）每次 App 重渲染都重建/重订。
+  const appUpdateApi = useMemo(
+    () => ({
+      checkUpdate: api.app.checkUpdate,
+      downloadUpdate: (asset: Parameters<typeof api.app.downloadUpdate>[0]) => api.app.downloadUpdate(asset),
+      installUpdate: (filePath: string) => api.app.installUpdate(filePath),
+      onUpdateProgress: (cb: Parameters<typeof api.app.onUpdateProgress>[0]) => api.app.onUpdateProgress(cb),
+      openExternal: (url: string) => api.app.openExternal(url),
+    }),
+    [api],
+  );
+  const appUpdate = useAppUpdateController(appUpdateApi, false);
 
   // 后台更新状态订阅：主进程每 2h 自动检查（无配额方案），有更新且未跳过/未提示
   // 时自动弹窗；Pi CLI 有更新时 toast 一次并引导去设置页。
+  // appUpdateCheck 直传稳定引用：内联箭头会作为 effect 依赖导致推送订阅每次渲染重订。
   useBackgroundUpdateWatch({
     api,
-    appUpdateCheck: (source) => appUpdate.check(source),
+    appUpdateCheck: appUpdate.check,
     showToast,
   });
 
@@ -735,7 +742,7 @@ export function App() {
   const [webServiceChanging, setWebServiceChanging] = useState(false);
   const [appInfo, setAppInfo] = useState<AppInfo>({
     version: "-",
-    releasesUrl: "https://github.com/ayuayue/pi-desktop/releases",
+    releasesUrl: "https://github.com/ayuayue/PiDeck/releases",
     // 同步判定，避免 Mac 首帧在 appInfo IPC 返回前误画 Win 窗口按钮
     platform: detectRendererPlatform(),
     homeDir: "",

@@ -27,6 +27,14 @@ export type { GithubRepo, HttpFetch } from "./githubFeed";
 /** 每次 GitHub 请求的默认超时（ms）：本地网络异常时手动/后台检查都不会永远挂起。 */
 export const DEFAULT_CHECK_TIMEOUT_MS = 10_000;
 
+/**
+ * 更新检查/发布/issue 链接指向的 GitHub 仓库坐标（唯一事实来源）。
+ * 仓库已由 pi-desktop 更名为 PiDeck：旧坐标目前只能靠 GitHub 改名重定向工作，
+ * 一旦重定向失效（旧名被他人注册/回收）更新检查会直接 404，禁止再回填旧名。
+ */
+export const UPDATE_REPO_OWNER = "ayuayue";
+export const UPDATE_REPO = "PiDeck";
+
 /** 按当前平台/架构/安装形态挑选推荐资产（从原 src/main/index.ts 迁移）。 */
 export function selectRecommendedAsset(
 	assets: AppUpdateAsset[],
@@ -197,6 +205,51 @@ async function enrichFromAtom(
 }
 
 /**
+ * 校验「推荐资产」的下载 URL 真实可用，并把 URL 修正为第一个可用变体。
+ *
+ * 为什么需要（v0.7.1 实测）：GitHub 保存资产时把文件名中的空格替换为点号，electron-builder
+ * 的 latest.yml 又可能写连字符安全名——latest.yml 里的文件名与真实资产名不一致时，
+ * 按 latest.yml 拼出的下载 URL「检查正常、点下载 404」。此处按已知命名变换依次 HEAD 探测
+ * （原名 → 空格→点号 → 连字符→点号），命中即修正 URL；全部不可用则返回 undefined，
+ * UI 禁用应用内下载并回退浏览器打开 release 页。代价仅 1~3 次 HEAD（无配额，检查周期 2h）。
+ */
+async function verifyRecommendedAsset(
+	asset: AppUpdateAsset | undefined,
+	fetchImpl: HttpFetch,
+	log?: CheckAppUpdateOptions["log"],
+): Promise<AppUpdateAsset | undefined> {
+	if (!asset?.url) return asset;
+	const lastSegment = asset.url.slice(asset.url.lastIndexOf("/") + 1);
+	let decoded = lastSegment;
+	try {
+		decoded = decodeURIComponent(lastSegment);
+	} catch {
+		// 非法编码时保持原样，仅按原 URL 探测
+	}
+	const candidates = [...new Set([decoded, decoded.replace(/ /g, "."), decoded.replace(/-/g, ".")])];
+	const prefix = asset.url.slice(0, asset.url.length - lastSegment.length);
+	for (const name of candidates) {
+		const url = `${prefix}${encodeURIComponent(name)}`;
+		try {
+			const response = await fetchImpl(url, { method: "HEAD" });
+			if (response.ok) {
+				if (url !== asset.url) {
+					log?.("warn", "Recommended asset URL corrected to the real GitHub asset name", { from: asset.url, to: url });
+				}
+				return { ...asset, url };
+			}
+		} catch (error) {
+			log?.("warn", "Recommended asset availability probe failed", {
+				url,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+	log?.("warn", "Recommended asset URL unavailable, falling back to browser download", { url: asset.url });
+	return undefined;
+}
+
+/**
  * 无配额更新检查：latest.yml 主路径 + atom/API 降级。
  * 失败时抛出（上层转成用户可读错误）。
  */
@@ -230,24 +283,29 @@ export async function checkAppUpdate(options: CheckAppUpdateOptions): Promise<Ap
 	const tag = await resolveLatestTag(repo, fetchImpl);
 	log?.("info", "Resolved latest release tag", { tag });
 
-	let info: AppUpdateInfo;
-	try {
-		// 2) 主路径：下载 latest.yml（Release 资产，无 REST 配额）。
-		const yml = await fetchLatestYml(tag, repo, fetchImpl);
-		if (!yml) throw new Error("latest.yml is empty");
-		const assets = latestYmlAssets(yml, repo, tag);
-		const atom = await enrichFromAtom(repo, fetchImpl, log);
-		info = {
-			currentVersion,
-			latestVersion: yml.version,
-			hasUpdate: compareVersions(yml.version, currentVersion) > 0,
-			releaseName: atom.releaseName ?? `v${yml.version}`,
-			releaseNotes: atom.releaseNotes ?? "",
-			releaseUrl: atom.releaseUrl ?? `https://github.com/${owner}/${repoName}/releases/tag/${tag}`,
-			publishedAt: atom.publishedAt ?? yml.releaseDate,
-			assets,
-			recommendedAsset: selectRecommendedAsset(assets, installationType),
-		};
+		let info: AppUpdateInfo;
+		try {
+			// 2) 主路径：下载 latest.yml（Release 资产，无 REST 配额）。
+			const yml = await fetchLatestYml(tag, repo, fetchImpl);
+			if (!yml) throw new Error("latest.yml is empty");
+			const assets = latestYmlAssets(yml, repo, tag);
+			const atom = await enrichFromAtom(repo, fetchImpl, log);
+			const hasUpdate = compareVersions(yml.version, currentVersion) > 0;
+			// 仅在确有更新时校验推荐资产可用性（无更新时用户不会走下载按钮，省一次 HEAD）。
+			const recommendedAsset = hasUpdate
+				? await verifyRecommendedAsset(selectRecommendedAsset(assets, installationType), fetchImpl, log)
+				: selectRecommendedAsset(assets, installationType);
+			info = {
+				currentVersion,
+				latestVersion: yml.version,
+				hasUpdate,
+				releaseName: atom.releaseName ?? `v${yml.version}`,
+				releaseNotes: atom.releaseNotes ?? "",
+				releaseUrl: atom.releaseUrl ?? `https://github.com/${owner}/${repoName}/releases/tag/${tag}`,
+				publishedAt: atom.publishedAt ?? yml.releaseDate,
+				assets,
+				recommendedAsset,
+			};
 		log?.("info", "App update check completed (latest.yml)", {
 			currentVersion,
 			latestVersion: yml.version,

@@ -76,7 +76,7 @@ export function FeedbackOverlay({ open, project, appInfo, loadEnvironment, onClo
 	if (!open) return null;
 	const summary = description.trim().split("\n")[0].slice(0, 60);
 	const issueTitle = `${t("feedback.issueTitle")}${summary || t("feedback.issueTitleEmpty")}`;
-	const issueUrl = `https://github.com/ayuayue/pi-desktop/issues/new?title=${encodeURIComponent(issueTitle)}&body=${encodeURIComponent(report)}`;
+	const issueUrl = `https://github.com/ayuayue/PiDeck/issues/new?title=${encodeURIComponent(issueTitle)}&body=${encodeURIComponent(report)}`;
 	const copyReport = async () => { await navigator.clipboard.writeText(report); onCopy?.(); };
 	return (
 		<Dialog open onOpenChange={(next) => !next && onClose()}>

@@ -343,7 +343,7 @@ import { startMemoryProfile, isMemoryProfileEnabled, type MemoryProfileHandle } 
 import { DiagnosticsMonitor } from "./diagnostics/DiagnosticsMonitor";
 import { QuitCleanupRegistry } from "./lifecycle/QuitCleanupRegistry";
 import type { FeishuChatBinding } from "../shared/types";
-import { checkAppUpdate as checkForAppUpdate } from "./update/appUpdateCheck";
+import { checkAppUpdate as checkForAppUpdate, UPDATE_REPO, UPDATE_REPO_OWNER } from "./update/appUpdateCheck";
 import { UpdateService } from "./update/UpdateService";
 
 let mainWindow: BrowserWindow | null = null;
@@ -1061,7 +1061,7 @@ function applyNativeThemeSource(settings: AppSettings) {
 	}
 }
 
-const RELEASES_URL = "https://github.com/ayuayue/pi-desktop/releases";
+const RELEASES_URL = `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases`;
 const POSTHOG_PROJECT_KEY =
 	process.env.POSTHOG_PROJECT_KEY ??
 	"phc_xgJ8gFUMgExZEEPzZ7VRa7698ENcaDRquWZVGYb2dCFK";
@@ -2682,8 +2682,8 @@ function registerIpc() {
 		// 适配层：registerSystemIpc 的旧签名 (installationType?) → 新无配额检查 (options)。
 		checkForAppUpdate: (installationType?: string) =>
 			checkForAppUpdate({
-				owner: "ayuayue",
-				repo: "pi-desktop",
+				owner: UPDATE_REPO_OWNER,
+				repo: UPDATE_REPO,
 				currentVersion: app.getVersion(),
 				installationType:
 					installationType === "portable" ? "portable" : installationType === "installed" ? "installed" : undefined,
