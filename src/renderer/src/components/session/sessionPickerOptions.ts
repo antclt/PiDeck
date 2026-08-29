@@ -44,9 +44,10 @@ export function toThinkingPickerLevels(levels: readonly string[]): ThinkingPicke
 
 /**
  * Resolve selectable thinking levels without making menu availability depend on an
- * asynchronous capability probe. Runtime data wins when available; otherwise the
- * hydrated model cache wins. Missing DSH metadata and an unavailable Pi probe are
- * deliberately compatibility fallbacks: the backend remains the final validator.
+ * asynchronous capability probe. 统一标准：capability cache 是唯一展示源，runtime
+ * RPC 仅在 cache 未覆盖该模型时兑底（其值只会来自 idle + cache-miss 的后台探测）；
+ * 两者同时存在时（cache 后来才刷新）以 cache 为准。缺失 DSH 元数据与 Pi probe
+ * 不可用都属兼容 fallback：后端始终是最终能力裁决者。
  */
 export function resolveThinkingPickerLevels(input: {
   backend: "pi" | "dsh";
@@ -60,11 +61,11 @@ export function resolveThinkingPickerLevels(input: {
     );
     return declaredLevels.length > 0 ? declaredLevels : [...THINKING_LEVELS];
   }
-  if (input.runtimePiLevels !== undefined) {
-    return toThinkingPickerLevels(input.runtimePiLevels);
-  }
   if (input.cachedPiLevels !== undefined) {
     return toThinkingPickerLevels(input.cachedPiLevels);
+  }
+  if (input.runtimePiLevels !== undefined) {
+    return toThinkingPickerLevels(input.runtimePiLevels);
   }
   return [...THINKING_LEVELS];
 }

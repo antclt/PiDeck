@@ -95,6 +95,11 @@ test("thinking picker immediately uses cache or compatibility levels while Pi ru
   assert.deepEqual(values({ backend: "pi" }), ["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
   // 只有后端明确返回空数组时才表示没有可选档位。
   assert.deepEqual(values({ backend: "pi", runtimePiLevels: [] }), []);
+  // 统一标准：cache 是唯一展示源；两者同时存在（runtime 探测后 cache 才刷新）时以 cache 为准。
+  assert.deepEqual(
+    values({ backend: "pi", cachedPiLevels: ["off", "high", "max"], runtimePiLevels: ["off"] }),
+    ["off", "high", "max"],
+  );
 });
 
 test("DSH missing reasoning metadata falls back to selectable full levels", () => {

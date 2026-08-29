@@ -542,9 +542,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       piRuntimeThinkingEntry?.status === "resolved"
       ? piRuntimeThinkingEntry.levels
       : undefined;
-    // 正在运行的 Agent 不能把后台 RPC 当成弹窗的前置条件：优先复用全局 capability
-    // cache，runtime RPC 返回后再以其结果覆盖。缓存/元数据尚不可用时也要保留全量
-    // 兼容档位；后端才是最终能力裁决者。
+    // 正在运行的 Agent 不能把后台 RPC 当成弹窗的前置条件：统一以 capability cache
+    // 为唯一展示源，runtime RPC 仅在 cache 未覆盖该模型时兑底。缓存/元数据尚不可用
+    // 时保留全量兼容档位；后端才是最终能力裁决者。
     const pickerLevels = resolveThinkingPickerLevels({
       backend: isDshSession ? "dsh" : "pi",
       runtimePiLevels: runtimeLevels,
