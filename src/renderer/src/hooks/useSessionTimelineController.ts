@@ -37,7 +37,10 @@ import {
   TIMELINE_SCROLLED_TURN_LIMIT,
   TIMELINE_WINDOW_EXPAND_STEP,
 } from "../components/session/timeline/turnRenderWindow";
-import { resolveJumpPendingAction } from "../components/session/timeline/jumpWindowPolicy";
+import {
+  estimateJumpExpandTurns,
+  resolveJumpPendingAction,
+} from "../components/session/timeline/jumpWindowPolicy";
 
 /** 滚动接近顶部自动加载历史的阈值（px，2026-11 轮次模型）：
  *  贴顶（≤8px）才触发翻页——「滑到底才翻」，避免在顶部附近任何滚动都连翻历史页。
@@ -575,8 +578,16 @@ export function useSessionTimelineController(options: {
   const settleScrollCancelRef = useRef<(() => void) | undefined>(undefined);
   const scrollerScrollApiRef = useRef<MessageScrollerScrollApi | null>(null);
   const loadMoreAnchorRef = useRef<Tagged<TimelineAnchor> | undefined>(undefined);
-  /** 挂起的跳转：attempts 驱动指数扩窗与补页防呆（策略见 timeline/jumpWindowPolicy）。 */
-  const pendingJumpRef = useRef<Tagged<{ messageId: string; attempts: number }> | undefined>(undefined);
+  /**
+   * 挂起的跳转：expandAttempts/loadAttempts 分别驱动指数兜底扩窗与补页防呆
+   * （策略见 timeline/jumpWindowPolicy）。必须是 state 而非 ref——ref 赋值不会
+   * 调度 effect，第二跳时（autoScroll 已断、状态无变化）点击会完全无反应；
+   * nonce 保证连续点击同一目标也会重跑。
+   */
+  const [pendingJump, setPendingJump] = useState<
+    Tagged<{ messageId: string; expandAttempts: number; loadAttempts: number; nonce: number }> | undefined
+  >(undefined);
+  const jumpNonceRef = useRef(0);
   /**
    * 跳转导航进行中：解除上滚窗口的条目预算（TIMELINE_SCROLLED_MAX_ITEMS）。
    * 预算按条目数封顶渲染，轮数扩得再大也挂不出预算外的旧消息——跳转会因此
@@ -616,8 +627,9 @@ export function useSessionTimelineController(options: {
   const lastWindowExpandAtRef = useRef(0);
   /** 分批扩展（2026-12 层次 1）：滚动触发的扩展拆成多帧小批挂载，避免 3 轮 cohort 同步渲染掉帧。
    *  pendingTurns = 待消费的扩展轮数；rAF 每帧消费一小批直到归零；
-   *  新请求到来时累加（不丢、不重复计数）。仅滚动监听使用——
-   *  按钮点击 / 跳转定位（pendingJump）仍走原子 expandWindow（低频操作，需立即挂载目标）。 */
+   *  新请求到来时累加（不丢、不重复计数）。滚动监听与刻度跳转共用：
+   *  跳转按目标轮次一次排满批次（estimateJumpExpandTurns）分帧挂载，不卡单帧，
+   *  批次消费完前 pendingJump effect 挂起等待；「显示更早」按钮仍走原子 expandWindow（低频操作）。 */
   const pendingExpandTurnsRef = useRef(0);
   const expandBatchFrameRef = useRef<number | undefined>(undefined);
   const consumeExpandBatch = useCallback(() => {
@@ -987,15 +999,39 @@ export function useSessionTimelineController(options: {
 		}
 	}, [autoScroll, clearHistory, controllerEnabled, options.sessionId, runtimeHistory]);
 
+  /**
+   * 跳转落位：计算目标相对时间线的偏移并原子定位（restoreAt = 定位 + 解锁锁底
+   * + 取消在途动画）。不用 scrollIntoView：它会级联滚动所有祖先容器，且 smooth
+   * 动画会与贴底引擎/扩窗布局竞争——跟随态下点刻度「看似没反应、再点一次才生效」
+   * 的直接根因就是贴底引擎把 smooth 滚动拽了回去。
+   */
+  const scrollJumpTargetIntoView = useCallback((timeline: HTMLElement, element: HTMLElement) => {
+    const elementTop =
+      element.getBoundingClientRect().top -
+      timeline.getBoundingClientRect().top +
+      timeline.scrollTop;
+    programmaticScrollRef.current = true;
+    const api = scrollerScrollApiRef.current;
+    if (api?.restoreAt) {
+      api.restoreAt(Math.max(0, elementTop));
+    } else {
+      // 引擎尚未挂上（会话切换首帧等）时回退原生定位
+      timeline.scrollTop = Math.max(0, elementTop);
+    }
+  }, []);
+
   const jumpToMessage = useCallback((messageId: string) => {
     const requestOwnerKey = ownerKey;
     const timeline = timelineRef.current;
     if (!timeline || ownerKeyRef.current !== requestOwnerKey) return;
+    // 跟随态点击刻度必须先解锁贴底：目标已在挂载窗口内时（如最新一条）引擎
+    // 会把滚动拽回底部；目标在窗口外时 unlock 也是扩窗生效的前提。
+    escapeAutoScroll();
     const existing = timeline.querySelector(
       `[data-message-id="${CSS.escape(messageId)}"]`,
     ) as HTMLElement | null;
     if (existing) {
-      existing.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollJumpTargetIntoView(timeline, existing);
       highlightMessage(existing, requestOwnerKey);
       return;
     }
@@ -1004,17 +1040,24 @@ export function useSessionTimelineController(options: {
     if (index < 0 && !hasMorePages) return;
     // 目标可能在贴底 turn 窗口外（先取消跟随以展开挂载），也可能在尚未加载的
     // 历史页里：挂起跳转，由 pendingJump effect 按策略补页/扩窗直到完成。
-    autoScrollRef.current = false;
-    setAutoScroll(false);
     setShowScrollToBottom(true);
     setJumpNavigationActive(true);
-    pendingJumpRef.current = { ownerKey: requestOwnerKey, value: { messageId, attempts: 0 } };
-  }, [highlightMessage, combinedMessages, diskPage, historyHasMore, ownerKey]);
+    if (index >= 0) {
+      // 一次到位：按目标轮次估算窗口需求并整批排入分帧扩窗（避免单帧全量渲染）。
+      // 批次消费完前 pendingJump effect 挂起等待（见 effect 内 pendingExpandTurnsRef 守卫）。
+      expandWindowBatched(estimateJumpExpandTurns(combinedMessages, index));
+    }
+    jumpNonceRef.current += 1;
+    setPendingJump({
+      ownerKey: requestOwnerKey,
+      value: { messageId, expandAttempts: 0, loadAttempts: 0, nonce: jumpNonceRef.current },
+    });
+  }, [combinedMessages, diskPage, escapeAutoScroll, expandWindowBatched, highlightMessage, historyHasMore, ownerKey, scrollJumpTargetIntoView]);
 
   useEffect(() => {
     loadMoreAnchorRef.current = undefined;
-    pendingJumpRef.current = undefined;
     // 切会话：跳转导航结束，条目预算恢复
+    setPendingJump(undefined);
     setJumpNavigationActive(false);
     programmaticScrollRef.current = false;
     programmaticScrollUntilRef.current = 0;
@@ -1259,21 +1302,23 @@ lastHistoryLoadAtRef.current = now;
   }, [controllerEnabled, ownerKey, visibleMessages.length]);
 
   useEffect(() => {
-    if (!controllerEnabled) return;
-    const pendingJump = pendingJumpRef.current;
+    if (!controllerEnabled || !pendingJump) return;
+    if (!matchesTimelineOwner(pendingJump.ownerKey, ownerKey)) return;
     const timeline = timelineRef.current;
-    if (!pendingJump || !timeline || !matchesTimelineOwner(pendingJump.ownerKey, ownerKey)) return;
+    if (!timeline) return;
+    // 分批扩窗在途（点击时一次到位排满的批次 / 补页增长）：等批次消费完再评估，
+    // 避免目标刚挂载就落位、随后被后续批次推移。
+    if (pendingExpandTurnsRef.current > 0) return;
     const element = timeline.querySelector(
       `[data-message-id="${CSS.escape(pendingJump.value.messageId)}"]`,
     ) as HTMLElement | null;
     if (element) {
-      pendingJumpRef.current = undefined;
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
+      setPendingJump(undefined);
+      scrollJumpTargetIntoView(timeline, element);
       highlightMessage(element, ownerKey);
-      // autoScroll：贴底 turn 窗口展开后 DOM 才出现目标行，需再跑一轮。
       return;
     }
-    // 目标未挂载：按策略扩窗（指数步长）/ 跳转驱动补页 / 放弃（防呆上限）。
+    // 目标未挂载：按策略兜底扩窗（指数步长）/ 跳转驱动补页 / 放弃（防呆上限）。
     // give-up 保留旧行为兜底：目标已不在数据（压缩清理/删除）时不无限扩窗（2026-08 黑屏治理）。
     const stillInData = combinedMessages.some((message) => message.id === pendingJump.value.messageId);
     const hasMorePages = diskPage ? diskPage.nextBefore !== null : historyHasMore;
@@ -1281,24 +1326,32 @@ lastHistoryLoadAtRef.current = now;
       targetInLoadedData: stillInData,
       hasMorePages,
       isLoadingPage: isLoadingMessagePage,
-      attempts: pendingJump.value.attempts,
+      expandAttempts: pendingJump.value.expandAttempts,
+      loadAttempts: pendingJump.value.loadAttempts,
     });
     if (action.kind === "give-up") {
-      pendingJumpRef.current = undefined;
+      setPendingJump(undefined);
       setJumpNavigationActive(false);
       return;
     }
     if (action.kind === "wait") return;
-    pendingJumpRef.current = {
+    setPendingJump({
       ownerKey: pendingJump.ownerKey,
-      value: { messageId: pendingJump.value.messageId, attempts: pendingJump.value.attempts + 1 },
-    };
+      value: {
+        messageId: pendingJump.value.messageId,
+        expandAttempts:
+          action.kind === "expand" ? pendingJump.value.expandAttempts + 1 : pendingJump.value.expandAttempts,
+        loadAttempts:
+          action.kind === "load-page" ? pendingJump.value.loadAttempts + 1 : pendingJump.value.loadAttempts,
+        nonce: pendingJump.value.nonce + 1,
+      },
+    });
     if (action.kind === "load-page") {
       loadMoreMessages("button");
       return;
     }
     expandWindow(action.turns);
-  }, [autoScroll, combinedMessages, controllerEnabled, diskPage, expandWindow, highlightMessage, historyHasMore, isLoadingMessagePage, loadMoreMessages, ownerKey, scrolledWindowTurns, visibleMessages.length]);
+  }, [combinedMessages, controllerEnabled, diskPage, expandWindow, highlightMessage, historyHasMore, isLoadingMessagePage, loadMoreMessages, ownerKey, pendingJump, scrollJumpTargetIntoView, scrolledWindowTurns]);
 
   return {
     timelineRef,

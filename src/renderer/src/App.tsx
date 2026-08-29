@@ -105,6 +105,7 @@ import {
   setSessionDraftAtom,
   cacheSessionMessagesAtom,
   upsertSessionAtom,
+  outlineItemsAtom,
 } from "./atoms";
 import {
   applyDshGoalSendTransform,
@@ -166,7 +167,6 @@ import {
 import { ExternalEditorOverlay } from "./components/workspace/ExternalEditorOverlay";
 import { navigateTo } from "./components/app/BrowserPanel";
 import {
-  buildOutline,
   flattenFiles,
   mergeCommands,
   getToolFilePath,
@@ -1278,11 +1278,10 @@ export function App() {
     }
     return Array.from(byPath.values());
   }, [activeMessages.length, activeAgentId]);
-  // 优化:轮廓项计算仅在消息数量变化时触发,减少不必要的重计算
-  const outlineItems = useMemo(
-    () => buildOutline(activeMessages),
-    [activeMessages.length, activeAgentId],
-  );
+  // 大纲刻度数据源：必须用「落盘历史前缀 + 运行时窗口段」全量消息（outlineItemsAtom）。
+  // 旧实现只看 runtime 窗口段（currentSessionMessagesAtom），上翻加载过的历史
+  // 没有刻度，长会话刻度轴顶部缺最早的用户消息。
+  const outlineItems = useAtomValue(outlineItemsAtom);
   const flatFiles = useMemo(() => flattenFiles(files), [files]);
   // === file editor hook ===
   const {

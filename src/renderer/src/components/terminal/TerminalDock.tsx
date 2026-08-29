@@ -449,6 +449,9 @@ export function TerminalDock(props: {
 			style={{ height: "100%" }}
 		>
 		<header className="terminal-dock-header flex shrink-0 items-center justify-between gap-2 border-b px-2">
+			{/* Shell 下拉菜单 absolute 向上弹出会超出 terminal-tabs（overflow-hidden）而被裁剪，
+			    所以左侧整体包一层无 overflow 的容器，选择器独立于 tabs 滚动域之外 */}
+			<div className="flex min-w-0 items-center">
 			<div className="terminal-tabs flex min-w-0 items-center gap-0.5 overflow-hidden">
 				{tabs.map((tab) => (
 					<div
@@ -489,7 +492,8 @@ export function TerminalDock(props: {
 				>
 					<Plus size={14} />
 				</Button>
-				{/* Shell 选择器：点击创建指定 shell 的终端 */}
+			</div>
+				{/* Shell 选择器：点击创建指定 shell 的终端（位于 tabs 之外，避免 overflow-hidden 裁剪弹出菜单） */}
 				<div
 					className="relative grid place-items-center"
 				>

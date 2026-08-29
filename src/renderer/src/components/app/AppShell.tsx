@@ -342,6 +342,9 @@ export function AppShell(props: AppShellProps) {
           "--drawer-width": `${drawer && !drawerCollapsed ? drawerLayoutWidthRef.current : 0}px`,
           "--drawer-col-w": `${drawer && !drawerCollapsed ? drawerLayoutWidthRef.current : 0}px`,
           "--drawer-splitter-w": `${drawer && !drawerCollapsed ? 6 : 0}px`,
+          // 右缘刻度定位轴（.outline-hover）的底部边界：终端坞打开时让出其高度，
+          // 避免刻度铺到终端上；关闭时保底 16px 边距。
+          "--outline-bottom": `${Math.max(terminalRowHeight, 0) + 16}px`,
         } as CSSProperties
       }
     >
