@@ -528,51 +528,17 @@ export class SessionRuntimeCoordinator {
 	listRuntimeModels(
 		target: SessionRuntimeTarget,
 	): Promise<SessionCommandResult<SessionTargetedValue<AvailableModel[]>>> {
-		return this.traceRuntimeCapabilityRequest("models", target, (agentId) =>
-			this.agents.getAvailableModels(agentId),
-		);
+		return this.runTargetCommand(target, (agentId) => this.agents.getAvailableModels(agentId));
 	}
 
 	listRuntimeThinkingLevels(
 		target: SessionRuntimeTarget,
 	): Promise<SessionCommandResult<SessionTargetedValue<string[] | undefined>>> {
-		return this.traceRuntimeCapabilityRequest("thinking-levels", target, async (agentId) => {
+		return this.runTargetCommand(target, async (agentId) => {
 			// DSH does not own this Pi-specific RPC; callers use its host catalog instead.
 			if (typeof this.agents.getAvailableThinkingLevels !== "function") return undefined;
 			return this.agents.getAvailableThinkingLevels(agentId);
 		});
-	}
-
-	/**
-	 * 能力查询本身应是轻量 RPC，但它跨越 renderer、会话绑定和 pi 子进程三层。
-	 * 记录起止与绑定变化，才能区分「pi 没回包」「运行时已换代」和「renderer 状态未接住」；
-	 * 只记结构化身份与耗时，不记录模型配置或请求内容。
-	 */
-	private async traceRuntimeCapabilityRequest<T>(
-		capability: "models" | "thinking-levels",
-		target: SessionRuntimeTarget,
-		operation: (agentId: string) => Promise<T>,
-	): Promise<SessionCommandResult<SessionTargetedValue<T>>> {
-		const startedAt = Date.now();
-		void this.logger?.info("session-runtime", "Runtime capability request started", {
-			capability,
-			...target,
-		});
-		const result = await this.runTargetCommand(target, operation);
-		const detail = {
-			capability,
-			...target,
-			durationMs: Date.now() - startedAt,
-		};
-		if (result.ok) {
-			void this.logger?.info("session-runtime", "Runtime capability request completed", detail);
-		} else {
-			void this.logger?.warn("session-runtime", "Runtime capability request failed", {
-				...detail,
-				errorCode: result.error.code,
-			});
-		}
-		return result;
 	}
 
 	exportRuntimeHtml(
@@ -702,12 +668,6 @@ export class SessionRuntimeCoordinator {
 		provider: string,
 		modelId: string,
 	): Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>> {
-		const startedAt = Date.now();
-		void this.logger?.info("session-runtime", "Runtime model change started", {
-			...target,
-			provider,
-			modelId,
-		});
 		return this.runTargetCommand(target, async (agentId) => {
 			// 先调运行中 Agent；成功后再写 catalog。
 			// 若先写后失败：用户点「取消重启」时 catalog 已是新模型，下次启动会误套上；
@@ -736,22 +696,6 @@ export class SessionRuntimeCoordinator {
 				appliedModelId: appliedModel.modelId,
 			});
 			return runtimeState;
-		}).then((result) => {
-			const detail = {
-				...target,
-				provider,
-				modelId,
-				durationMs: Date.now() - startedAt,
-			};
-			if (result.ok) {
-				void this.logger?.info("session-runtime", "Runtime model change completed", detail);
-			} else {
-				void this.logger?.warn("session-runtime", "Runtime model change failed", {
-					...detail,
-					errorCode: result.error.code,
-				});
-			}
-			return result;
 		});
 	}
 

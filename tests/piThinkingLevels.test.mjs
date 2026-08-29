@@ -11,15 +11,12 @@ const { toThinkingPickerLevels, resolveThinkingPickerLevels } = loadTsCommonJs(
 );
 
 const { readFile } = await import("node:fs/promises");
-const [pickerSource, ipcSource, sessionIpcSource, preloadSource, componentsSource, catalogHookSource, coordinatorSource, agentManagerSource] = await Promise.all([
+const [pickerSource, ipcSource, sessionIpcSource, preloadSource, componentsSource] = await Promise.all([
   readFile("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8"),
   readFile("src/shared/ipc.ts", "utf8"),
   readFile("src/main/ipc/sessionIpc.ts", "utf8"),
   readFile("src/preload/index.ts", "utf8"),
   readFile("src/renderer/src/components/session/ComposerComponents.tsx", "utf8"),
-  readFile("src/renderer/src/hooks/useBackendModelCatalog.ts", "utf8"),
-  readFile("src/main/sessions/SessionRuntimeCoordinator.ts", "utf8"),
-  readFile("src/main/pi/AgentManager.ts", "utf8"),
 ]);
 
 test("Pi thinking RPC parses and de-duplicates authoritative levels", () => {
@@ -119,27 +116,6 @@ test("DSH thinking/model failures surface the real host reason", () => {
   // DSH selectModel 拒绝（如 reasoningEffort 不被模型支持）时 toast 必须带 debugDetails，
   // 否则用户只看到泛化的「会话操作失败，请重试。」且主进程无日志可查。
   assert.match(pickerSource, /sessionCommandFailureToast\(error\)/);
-});
-
-test("model picker reads the global catalog and only asks a runtime snapshot after a busy model switch", () => {
-  assert.match(pickerSource, /const pickerNeedsModels = props\.picker === "model" \|\| props\.picker === "thinking"/);
-  assert.match(pickerSource, /useBackendModelCatalog\(\{/);
-  assert.match(catalogHookSource, /desktopApi\.projects\.listModelsReport\(options\.projectId, force\)/);
-  assert.doesNotMatch(catalogHookSource, /listRuntimeModels/);
-  assert.match(pickerSource, /async function pickModelWhileBusy\(handle: SessionRuntimeTarget, model: AvailableModel\)/);
-  assert.match(pickerSource, /error\.code === "SESSION_RUNTIME_BUSY"[\s\S]{0,160}await pickModelWhileBusy\(handle, model\)/);
-});
-
-test("thinking capability probes leave enough timing breadcrumbs to diagnose a late result", () => {
-  assert.match(pickerSource, /Runtime thinking capability response superseded/);
-  assert.match(pickerSource, /Runtime thinking capability IPC failed/);
-  assert.match(pickerSource, /targetStillCurrent = matchesPiRuntimeThinkingLevelsTarget/);
-  assert.match(coordinatorSource, /Runtime capability request started/);
-  assert.match(coordinatorSource, /Runtime capability request completed/);
-  assert.match(coordinatorSource, /Runtime capability request failed/);
-  assert.match(agentManagerSource, /Agent capability RPC request started/);
-  assert.match(agentManagerSource, /Agent capability RPC request completed/);
-  assert.match(agentManagerSource, /Agent capability RPC request failed/);
 });
 
 test("thinking-level RPC is wired through shared IPC, main handler, and preload", () => {

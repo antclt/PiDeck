@@ -2313,39 +2313,11 @@ export class AgentManager {
 
 	async getAvailableModels(agentId: string): Promise<AvailableModel[]> {
 		const runtime = this.requireRuntime(agentId);
-		const startedAt = Date.now();
-		const statusAtStart = runtime.tab.status;
-		void this.appLogger?.info("agent", "Agent capability RPC request started", {
-			agentId,
-			capability: "models",
-			statusAtStart,
-		});
-		try {
-			const response = await runtime.process.client.request(
-				{ type: "get_available_models" },
-				60_000,
-			);
-			const models = ((response.data as any)?.models ?? []) as AvailableModel[];
-			void this.appLogger?.info("agent", "Agent capability RPC request completed", {
-				agentId,
-				capability: "models",
-				statusAtStart,
-				statusAtCompletion: runtime.tab.status,
-				rpcMs: Date.now() - startedAt,
-				success: response.success,
-				count: models.length,
-			});
-			return models;
-		} catch (error) {
-			void this.appLogger?.warn("agent", "Agent capability RPC request failed", {
-				agentId,
-				capability: "models",
-				statusAtStart,
-				rpcMs: Date.now() - startedAt,
-				errorKind: error instanceof Error ? error.name : typeof error,
-			});
-			throw error;
-		}
+		const response = await runtime.process.client.request(
+			{ type: "get_available_models" },
+			60_000,
+		);
+		return ((response.data as any)?.models ?? []) as AvailableModel[];
 	}
 
 	/**
@@ -2356,39 +2328,11 @@ export class AgentManager {
 	 */
 	async getAvailableThinkingLevels(agentId: string): Promise<string[] | undefined> {
 		const runtime = this.requireRuntime(agentId);
-		const startedAt = Date.now();
-		const statusAtStart = runtime.tab.status;
-		void this.appLogger?.info("agent", "Agent capability RPC request started", {
-			agentId,
-			capability: "thinking-levels",
-			statusAtStart,
-		});
-		try {
-			const response = await runtime.process.client.request(
-				{ type: "get_available_thinking_levels" },
-				60_000,
-			);
-			const levels = parseAvailableThinkingLevelsResponse(response);
-			void this.appLogger?.info("agent", "Agent capability RPC request completed", {
-				agentId,
-				capability: "thinking-levels",
-				statusAtStart,
-				statusAtCompletion: runtime.tab.status,
-				rpcMs: Date.now() - startedAt,
-				success: response.success,
-				count: levels?.length ?? null,
-			});
-			return levels;
-		} catch (error) {
-			void this.appLogger?.warn("agent", "Agent capability RPC request failed", {
-				agentId,
-				capability: "thinking-levels",
-				statusAtStart,
-				rpcMs: Date.now() - startedAt,
-				errorKind: error instanceof Error ? error.name : typeof error,
-			});
-			throw error;
-		}
+		const response = await runtime.process.client.request(
+			{ type: "get_available_thinking_levels" },
+			60_000,
+		);
+		return parseAvailableThinkingLevelsResponse(response);
 	}
 
 	async setModel(agentId: string, provider: string, modelId: string) {

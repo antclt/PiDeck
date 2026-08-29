@@ -91,8 +91,6 @@ function createHarness(options = {}) {
 	compact: 0,
 	runtimeState: 0,
 	commands: 0,
-	runtimeModels: 0,
-	runtimeThinkingLevels: 0,
 	messages: 0,
 	exportHtml: 0,
 	editMessage: 0,
@@ -191,16 +189,6 @@ function createHarness(options = {}) {
     getRuntimeState: async () => {
       calls.runtimeState += 1;
       return options.runtimeState ?? { isStreaming: false };
-    },
-    getAvailableModels: async () => {
-      calls.runtimeModels += 1;
-      if (options.runtimeModelsError) throw new Error(options.runtimeModelsError);
-      return options.runtimeModels ?? [{ provider: "test", id: "model-a" }];
-    },
-    getAvailableThinkingLevels: async () => {
-      calls.runtimeThinkingLevels += 1;
-      if (options.runtimeThinkingLevelsError) throw new Error(options.runtimeThinkingLevelsError);
-      return options.runtimeThinkingLevels ?? ["off", "high"];
     },
     // 这些方法读 this：Coordinator 若抽成 const fn = this.agents.fn 再调用，
     // 会复现 CompositeAgentGateway 的 resolveBackend 崩溃。
@@ -1529,90 +1517,6 @@ test("catalog message mutation refuses DSH sessions", async () => {
   assert.equal(result.error.code, "SESSION_COMMAND_FAILED");
   assert.match(result.error.debugDetails, /dsh/);
   assert.equal(harness.calls.mutatePersisted.length, 0);
-});
-
-test("runtime capability and model-change diagnostics retain timing and runtime identity", async () => {
-  const { SessionRuntimeCoordinator } = loadCoordinator();
-  const harness = createHarness();
-  const entries = [];
-  const logger = {
-    info: (scope, message, detail) => entries.push({ level: "info", scope, message, detail }),
-    warn: (scope, message, detail) => entries.push({ level: "warn", scope, message, detail }),
-    error: (scope, message, detail) => entries.push({ level: "error", scope, message, detail }),
-  };
-  const coordinator = new SessionRuntimeCoordinator(
-    harness.catalog,
-    harness.agents,
-    harness.sender,
-    logger,
-  );
-  const activated = await coordinator.activateRuntime("session-1");
-  assert.equal(activated.ok, true);
-  const target = activated.value;
-
-  const levels = await coordinator.listRuntimeThinkingLevels(target);
-  assert.equal(levels.ok, true);
-  assert.deepEqual(levels.value.value, ["off", "high"]);
-  assert.equal(harness.calls.runtimeThinkingLevels, 1);
-
-  // 运行中不应由 Coordinator 自己制造 busy 门禁；后端若拒绝会由结果日志带错误码。
-  harness.tabs[0].status = "running";
-  const model = await coordinator.setRuntimeModel(target, "test", "model-b");
-  assert.equal(model.ok, true);
-  assert.equal(harness.calls.setModel, 1);
-
-  const capabilityLogs = entries.filter((entry) => entry.message.startsWith("Runtime capability request"));
-  assert.deepEqual(
-    capabilityLogs.map((entry) => `${entry.level}:${entry.message}`),
-    [
-      "info:Runtime capability request started",
-      "info:Runtime capability request completed",
-    ],
-  );
-  assert.equal(capabilityLogs[0].detail.sessionId, "session-1");
-  assert.equal(capabilityLogs[0].detail.agentId, target.agentId);
-  assert.equal(capabilityLogs[0].detail.runtimeGeneration, target.runtimeGeneration);
-  assert.equal(capabilityLogs[0].detail.capability, "thinking-levels");
-  assert.equal(typeof capabilityLogs[1].detail.durationMs, "number");
-
-  const modelLogs = entries.filter((entry) => entry.message.startsWith("Runtime model change"));
-  assert.deepEqual(
-    modelLogs.map((entry) => `${entry.level}:${entry.message}`),
-    [
-      "info:Runtime model change started",
-      "info:Runtime model changed",
-      "info:Runtime model change completed",
-    ],
-  );
-  const modelCompletion = modelLogs.find((entry) => entry.message === "Runtime model change completed");
-  assert.equal(typeof modelCompletion?.detail.durationMs, "number");
-});
-
-test("failed capability requests leave a structured failure breadcrumb", async () => {
-  const { SessionRuntimeCoordinator } = loadCoordinator();
-  const harness = createHarness({ runtimeThinkingLevelsError: "Pi pipe closed" });
-  const entries = [];
-  const logger = {
-    info: (scope, message, detail) => entries.push({ level: "info", scope, message, detail }),
-    warn: (scope, message, detail) => entries.push({ level: "warn", scope, message, detail }),
-    error: (scope, message, detail) => entries.push({ level: "error", scope, message, detail }),
-  };
-  const coordinator = new SessionRuntimeCoordinator(
-    harness.catalog,
-    harness.agents,
-    harness.sender,
-    logger,
-  );
-  const activated = await coordinator.activateRuntime("session-1");
-  assert.equal(activated.ok, true);
-
-  const result = await coordinator.listRuntimeThinkingLevels(activated.value);
-  assert.equal(result.ok, false);
-  const failure = entries.find((entry) => entry.message === "Runtime capability request failed");
-  assert.equal(failure?.level, "warn");
-  assert.equal(failure?.detail.capability, "thinking-levels");
-  assert.equal(failure?.detail.errorCode, "SESSION_COMMAND_FAILED");
-  assert.equal(typeof failure?.detail.durationMs, "number");
 });
 
 test("SessionCommandIpcError maps MESSAGE_NOT_FOUND to the dedicated copy key", () => {
