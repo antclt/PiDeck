@@ -23,7 +23,7 @@ import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { TerminalDockPanel } from "../terminal/TerminalDockPanel";
 import { useSessionPaneServices } from "./SessionPaneServices";
-import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight } from "../../rendererUtils";
+import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight, shouldRestoreComposerPanelHeight } from "../../rendererUtils";
 import { readPanelPixels } from "./sessionPanelSize";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
@@ -187,6 +187,8 @@ export function SessionView({
   const notifyLayoutResized = useNotifyLayoutResized();
   const terminalPanelRef = useRef<PanelImperativeHandle | null>(null);
   const sessionGroupRef = useRef<GroupImperativeHandle | null>(null);
+  // 三面板快照只属于当前会话的 Group；solo 会话切换会复用 SessionView，不能跨会话沿用。
+  const lastThreePanelLayoutRef = useRef<Record<string, number> | null>(null);
 
   // ── composer 面板自适应高度（#115 U5 布局换装） ──────────────
   // 面板高度由 react-resizable-panels 持有；输入区上方出现可变内容（Todo/记忆
@@ -414,15 +416,21 @@ export function SessionView({
   }
   handleComposerContentHeightRef.current = handleComposerContentHeight;
 
-  // 卸载 / 切会话时取消挂起的 composer 高度重试（生命周期配对）
-  useEffect(() => {
+  // 卸载 / 切会话时取消挂起的 composer 高度重试。solo 栏会复用 SessionView：
+  // 必须用 layout-effect cleanup 在新 Group 提交前撤销旧 rAF，否则旧会话的测量会
+  // 通过最新 callback 写进新会话，导致输入栏突然上浮。
+  useLayoutEffect(() => {
     return () => {
       if (composerRetryFrameRef.current !== 0) cancelAnimationFrame(composerRetryFrameRef.current);
       composerRetryFrameRef.current = 0;
       pendingComposerHeightRef.current = null;
       composerHeightRetryCountRef.current = 0;
+      lastAttemptedComposerHeightRef.current = null;
+      programmaticResizeTargetRef.current = null;
+      programResizeExpireRef.current = 0;
+      terminalProgrammaticExpireRef.current = 0;
     };
-  }, []);
+  }, [sessionId]);
 
   const terminalRowHeightRef = useRef(terminalRowHeight);
   terminalRowHeightRef.current = terminalRowHeight;
@@ -474,9 +482,6 @@ export function SessionView({
   function handleComposerResize(size: PanelSize) {
     const px = Math.round(size.inPixels);
     const now = Date.now();
-    // 程序 resize 的异步回调：时间窗口内（刚 programResize），或最终高度与
-    // 内容驱动高度一致（即使回调延迟/像素取整）都视为程序化结果，不记为用户
-    // 手动高度，避免内容减少时误判导致不回缩。
     // 折叠/展开终端期间的 onResize 一律丢弃：库会短暂把腾出的高度写进 composer，
     // 若此时写 state / 用户锚点，切会话再 collapse 会把输入框重新撑到半空。
     if (now < terminalProgrammaticExpireRef.current) return;
@@ -484,24 +489,27 @@ export function SessionView({
       (programmaticResizeTargetRef.current != null &&
         now < programResizeExpireRef.current) ||
       Math.abs(px - contentDrivenHeightRef.current) <= 2;
-    if (isProgrammatic) {
+    if (!shouldRestoreComposerPanelHeight(
+      px,
+      contentDrivenHeightRef.current,
+      isProgrammatic,
+    )) {
       programmaticResizeTargetRef.current = null;
       composerHeightStateRef.current = px;
       setComposerHeight(px);
       return;
     }
-    // 从未拖过：丢掉首帧均分/百分比缓存的一次跳变（16% 缓存 ≈160px 也会锁住底空隙）。
-    // 真拖分隔条是从当前像素连续变化，允许小步；一次跳过 40px 视为布局噪声。
-    // 必须立刻 hug 回 state：只 return 的话面板已是 160、state 仍是 112，后续测量会以为已经贴合。
-    if (
-      userComposerHeightRef.current <= 0 &&
-      px > composerHeightStateRef.current + 40
-    ) {
-      void programResize(contentDrivenHeightRef.current);
+
+    // composer Panel 是 disabled，未匹配的尺寸不是用户拖拽，而是 Group 在分屏/历史
+    // 切换时回放了旧百分比或刚经历重注册。恢复到内容锚点；若 Group 尚未就绪，沿用
+    // 内容测量链的重试机制，不能像旧逻辑那样静默留下错误高度。
+    const appliedHeight = programResize(contentDrivenHeightRef.current);
+    if (appliedHeight !== undefined) {
+      applyComposerHeight(appliedHeight, false);
       return;
     }
-    programmaticResizeTargetRef.current = null;
-    applyComposerHeight(px, true);
+    pendingComposerHeightRef.current = contentDrivenHeightRef.current;
+    scheduleComposerHeightRetry();
   }
 
   // solo 栏无 sessionId key，切会话复用本组件。必须在 render 阶段重置高度：
@@ -513,13 +521,14 @@ export function SessionView({
     composerHeightStateRef.current = COMPOSER_MIN_HEIGHT;
     userComposerHeightRef.current = 0;
     contentDrivenHeightRef.current = COMPOSER_MIN_HEIGHT;
+    // 新 Group 不能拿旧会话终端存在时的三面板布局反推 composer 高度。
+    lastThreePanelLayoutRef.current = null;
     if (composerHeight !== COMPOSER_MIN_HEIGHT) {
       setComposerHeight(COMPOSER_MIN_HEIGHT);
     }
   }
 
   // 最近一次三面板布局快照（terminal 可见时持续记录），关闭终端时恢复用。
-  const lastThreePanelLayoutRef = useRef<Record<string, number> | null>(null);
   useEffect(() => {
     if (!terminalPanelVisible) return;
     try {

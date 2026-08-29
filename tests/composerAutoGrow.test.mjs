@@ -125,8 +125,12 @@ test("session view hugs composer panel to measured content height, not default p
   assert.match(sessionView, /contentDrivenHeightRef\.current = Math\.min/);
   assert.match(sessionView, /programmaticResizeTargetRef/);
   assert.match(sessionView, /programResizeExpireRef\.current = Date\.now\(\) \+ 200/);
-  assert.match(sessionView, /Math\.abs\(px - contentDrivenHeightRef\.current\) <= 2/);
-  assert.match(sessionView, /applyComposerHeight\(px, true\)/);
+  // composer Panel 禁止直接拖拽；未对齐回调是 Group 重建噪声，必须恢复内容锚点，
+  // 不可再写成 user height 让输入框在错误位置停留。
+  assert.match(sessionView, /shouldRestoreComposerPanelHeight/);
+  assert.match(sessionView, /id="composer"[\s\S]*?disabled/);
+  assert.match(sessionView, /const appliedHeight = programResize\(contentDrivenHeightRef\.current\);/);
+  assert.doesNotMatch(sessionView, /applyComposerHeight\(px, true\)/);
   assert.match(sessionView, /const appliedLayout = group\.setLayout\(next\)/);
   assert.match(sessionView, /const appliedTarget = Math\.round\(/);
   assert.match(sessionView, /appliedLayout\.composer \?\? budget\.composer/);
