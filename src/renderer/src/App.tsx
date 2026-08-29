@@ -1133,6 +1133,12 @@ export function App() {
     //    存储语义=图片可见度（0=全遮，1=图全显）；滑块 80% → 遮罩 0.2 → 图 80% 透出。
     root.dataset.bgImage = settings.backgroundImage ? "on" : "off";
     if (settings.backgroundImage) {
+      // 采样前先摘掉上一轮注入的壁纸 token：inline style 在 cascade 上压过
+      // :root[data-theme="dark"] 样式表，不摘的话 getComputedStyle 读到的是
+      // 上一轮主题烤进的旧值，重注入又基于旧值——背景被永久焊死在注入时的
+      // 明暗（暗色启动后亮色坏、亮色启动后暗色坏，即主题互相「打架」的根因）。
+      for (const k of injectedWallpaperTokens) root.style.removeProperty(k);
+      injectedWallpaperTokens.clear();
       root.style.setProperty(
         "--app-bg-image",
         `url("pideck-bg://local/${encodeURIComponent(settings.backgroundImage)}")`,
