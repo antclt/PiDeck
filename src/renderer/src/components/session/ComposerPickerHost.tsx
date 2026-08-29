@@ -142,9 +142,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   }, [sessionId, clearPiRuntimeThinkingLevels]);
 
   /**
-   * Pi 运行态的 RPC 仅在用户打开思考档位、capability cache 已尝试加载但没有结果、
-   * 且 Agent 空闲时做后台校验。生成中的 Agent 可能延后处理请求；选择器始终优先
-   * 使用 cache / 静态兼容档位，不能被这条非关键校验卡成 loading。
+   * Pi 运行态 RPC 仅在用户打开思考档位、capability cache 已尝试加载但没有结果、
+   * 且 Agent 空闲时做后台校验。它是非关键校验：无论请求是否返回，选择器都优先
+   * 使用 cache / 静态兼容档位，绝不能被后台往返卡成 loading。
    */
   useEffect(() => {
     const agentId = runtime?.agentId;
@@ -172,19 +172,23 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     const target = { agentId, runtimeGeneration, provider, modelId };
     if (matchesPiRuntimeThinkingLevelsTarget(runtimeThinkingEntryRef.current, target)) return;
 
+    const probeStartedAt = Date.now();
     beginPiRuntimeThinkingLevels({ sessionId, target });
     void desktopApi.sessions.listRuntimeThinkingLevels({
       sessionId,
       agentId,
       runtimeGeneration,
     }).then((result) => {
-      // The atom accepts the result only while this exact runtime/model still owns the slot.
+      const targetStillCurrent = matchesPiRuntimeThinkingLevelsTarget(runtimeThinkingEntryRef.current, target);
+      // A late result is harmless, but leave a breadcrumb when a model/runtime change superseded it.
+      if (!targetStillCurrent) void desktopApi.app.rendererLog("debug", "thinking-picker", "Runtime thinking capability response superseded", { sessionId, ...target, elapsedMs: Date.now() - probeStartedAt, outcome: result.ok ? "response" : "command-failure" }).catch(() => undefined);
       resolvePiRuntimeThinkingLevels({
         sessionId,
         target,
         levels: result.ok ? result.value.value : undefined,
       });
-    }).catch(() => {
+    }).catch((error) => {
+      void desktopApi.app.rendererLog("warn", "thinking-picker", "Runtime thinking capability IPC failed", { sessionId, ...target, elapsedMs: Date.now() - probeStartedAt, errorKind: error instanceof Error ? error.name : typeof error }).catch(() => undefined);
       resolvePiRuntimeThinkingLevels({ sessionId, target });
     });
   }, [
