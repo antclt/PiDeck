@@ -27,15 +27,21 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.3** (2026-08-26)
+> **Latest: v0.7.2** (2026-08-29)
 
-### v0.7.3 Release Highlights
+### v0.7.2 Release Highlights
 - 🚀 **Model capability auto-adaptation & thinking-effort pipeline**
 - 🚀 **Manual model catalog refresh**
 - 🚀 **Usage query expanded**
 - 🚀 **Session restart & reload**
 - 🚀 **DSH session-header agent mode pill**
 - 🚀 **Built-in pi-deck-retry-no-body extension**
+- 🚀 **Ask queries carry main-session context**
+- 🚀 **Sidebar Chats / projects segmentation**
+- 🚀 **Session right-edge ruler rail**
+- 🚀 **Theme cycling from the sidebar footer**
+- 🚀 **Global notifications as card toasts**
+- 🚀 **JetBrains editor scan & system file-manager detection**
 - ✨ **History runtime-operation overlay**
 - ✨ **Tab-bar loading state**
 - ✨ **Model capability explainer card removed**
