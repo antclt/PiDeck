@@ -211,9 +211,19 @@ exports.default = async function (context) {
   // ====================================
   // 3. asar 内 node_modules 冗余清理
   //    一次提取 → 集中清理 → 一次打包，避免反复 extract/repack。
+  //
+  //    PI_FAST_PACK=1（dist:fast）时整体跳过：这一步只省 ~4MB 体积，
+  //    但 243MB asar 的 extract + repack 是打包耗时大头（实测可达数分钟）。
+  //    跳过是安全的：asarUnpack 命中的文件（.node/wasm/hostEntry.js/sharp 目录）
+  //    在原始 asar 中只存 unpacked 标记、不存内容，运行时透明读取磁盘镜像，
+  //    所以第 4/5/6 节对镜像的清理与 sharp 补丁仍然生效。
+  //    发布正式版必须走完整流程（不设该变量）。
   // ====================================
   const asarPath = path.join(appOutDir, "resources", "app.asar");
 
+  if (process.env.PI_FAST_PACK === "1") {
+    console.log("[afterPack] PI_FAST_PACK=1：跳过 asar 解包清理/重打包（仅快速验证用，勿对外发布）");
+  } else {
   if (!fs.existsSync(asarPath)) {
     console.log("[afterPack] 未找到 app.asar，跳过 node_modules 清理");
     return;
@@ -349,6 +359,7 @@ exports.default = async function (context) {
   // 清理临时目录，以及 createPackageWithOptions 写 dest=app.asar.tmp 时留下的影子目录。
   await rmDir(extractDir);
   await removeAsarRepackArtifacts(asarPath);
+  } // end of 非 PI_FAST_PACK 分支
 
   // ====================================
   // 4. node-pty 跨平台 prebuild 清理（asar.unpacked）

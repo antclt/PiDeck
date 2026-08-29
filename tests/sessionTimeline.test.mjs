@@ -38,6 +38,12 @@ function loadTimelineHelpers() {
       TIMELINE_SCROLLED_TURN_LIMIT: 3,
       TIMELINE_WINDOW_EXPAND_STEP: 3,
     },
+    // 控制器 import 的跳转策略必须真实加载：shim 缺失时编译后 require 直接
+    // MODULE_NOT_FOUND（285bc919 引入策略模块时漏补，4 个用例一直没跑起来）
+    "../components/session/timeline/jumpWindowPolicy": compileModule(
+      "src/renderer/src/components/session/timeline/jumpWindowPolicy.ts",
+      { "./turnRenderWindow": { TIMELINE_WINDOW_EXPAND_STEP: 3 } },
+    ),
   });
 }
 

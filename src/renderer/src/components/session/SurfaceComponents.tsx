@@ -17,6 +17,7 @@ import { toBlob } from "html-to-image";
 import { writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
 import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
+import { planRailTicks } from "./timeline/outlineRailTicks";
 import { useAtomValue } from "jotai";
 import "katex/dist/katex.min.css";
 
@@ -1380,9 +1381,13 @@ export {
 export { MultiSelectModal };
 
 /**
- * 会话定位轴（beUI PreviewRail）：右缘一列 1px 刻度对应最近 15 条用户消息，
+ * 会话定位轴（beUI PreviewRail）：右缘一列 1px 刻度对应全部已加载的用户消息
+ * （不再封顶 15 条——长会话此前「最上面的刻度不是第一条消息、很多消息没有刻度」），
  * hover 出预览卡、点击跳转。工具开关已上收会话 Tab 栏（SessionToolAction），
  * 此处不再承载其他入口；容器沿用 .outline-hover 的贴右缘偏移规则（有测试守护）。
+ *
+ * 高度自适应：容器被 .outline-hover 的 top/bottom 双向夹持出可用高度，刻度间距
+ * 按条数收缩；间距压到下限仍放不下时均匀抽稀，但首尾刻度强制保留（planRailTicks）。
  */
 export function ConversationOutline(props: {
 	items: Array<{ id: string; role: string; title: string; time: string }>;
@@ -1390,28 +1395,44 @@ export function ConversationOutline(props: {
 }) {
 	// 跳转目标只作高亮反馈；会话切换后旧 id 不在新条目里时不高亮，避免错误落在第一条
 	const [railActiveId, setRailActiveId] = useState<string | undefined>(undefined);
-	// 刻度导航：与原大纲列表同源，封顶最近 15 条；点击刻度复用 onJump 跳转
+	const containerRef = useRef<HTMLDivElement>(null);
+	const [availableHeight, setAvailableHeight] = useState(0);
+	// 容器高度由 top/bottom 夹持（不随内容变化），ResizeObserver 重测不会形成反馈环；
+	// 窗口缩放、--outline-top 变化都会反映为容器尺寸变化，统一在这里重算刻度规划。
+	useLayoutEffect(() => {
+		const element = containerRef.current;
+		if (!element) return;
+		const update = () => setAvailableHeight(element.clientHeight);
+		update();
+		const observer = new ResizeObserver(update);
+		observer.observe(element);
+		return () => observer.disconnect();
+	}, []);
+	const plan = useMemo(
+		() => planRailTicks(props.items, availableHeight),
+		[props.items, availableHeight],
+	);
 	const railItems = useMemo<PreviewRailItem[]>(
 		() =>
-			props.items.slice(-15).map((item) => ({
+			plan.items.map((item) => ({
 				id: item.id,
 				label: item.title,
 				ariaLabel: item.title,
 				description: item.time,
 			})),
-		[props.items],
+		[plan.items],
 	);
 	const railActiveVisible =
 		railActiveId !== undefined && railItems.some((item) => item.id === railActiveId);
 
 	return (
-		<div className="outline-hover">
+		<div ref={containerRef} className="outline-hover">
 			{railItems.length > 0 && (
 				<PreviewRail
 					orientation="vertical"
 					items={railItems}
 					label={t("outline.title")}
-					itemSize={14}
+					itemSize={plan.itemSize}
 					previewSide="before"
 					activeId={railActiveId}
 					highlightActive={railActiveVisible}
