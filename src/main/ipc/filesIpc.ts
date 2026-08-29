@@ -95,9 +95,19 @@ export function registerFilesIpc({
 	});
 
 	ipcMain.handle(ipcChannels.filesOpenFileManager, async (_event, path: string) => {
-		// 打开方式 → 文件管理器：目录交给系统文件管理器（explorer / dolphin 等）。
+		// 打开方式 → 文件管理器：目录交给系统文件管理器（explorer / Finder 等）。
 		// 空路径（未绑定激活项目）回退用户主目录：文件管理器是常驻快捷入口，不依赖项目。
+		// Windows/macOS 必须走 shell.openPath：直接 spawn explorer.exe 时，新进程把
+		// 「打开目录」转交给已在运行的 Explorer shell，既不继承前台激活权限也不弹窗，
+		// 窗口落在后台/根本不出现（表现就是「点了没反应」，用户侧还会越点堆越多
+		// 后台窗口）；shell.openPath 经 ShellExecute 打开，前台语义正确。
+		// Linux 保留检测到的文件管理器直启（xdg-open 可能被 MIME 误路由到浏览器）。
 		const target = typeof path === "string" && path.trim() ? toWindowsPath(path) : homedir();
+		if (process.platform !== "linux") {
+			const error = await shell.openPath(target);
+			if (error) throw new Error(error);
+			return;
+		}
 		await openFileManagerAt(target);
 	});
 

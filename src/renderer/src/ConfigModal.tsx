@@ -2680,7 +2680,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 								<Button variant="outline" size="sm" onClick={handleExport}>
 									{t("common.export")}
 								</Button>
-								<Button variant="secondary" size="sm" onClick={handleImport}>
+								{/* 导入与导出统一 outline 白底描边：与深色「保存」主按钮形成主次层级，避免并排按钮一描边一填充的不一致（对齐 SettingsModal 同款按钮组） */}
+								<Button variant="outline" size="sm" onClick={handleImport}>
 									{t("common.import")}
 								</Button>
 							</>

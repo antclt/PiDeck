@@ -101,6 +101,25 @@ export function openFileManagerAt(path: string): Promise<void> {
 			resolve();
 			return;
 		}
+		if (process.platform === "win32") {
+			// explorer.exe 是 GUI 子系统程序：SystemRoot 未必在 PATH 里，裸命令
+			// spawn 会 ENOENT 静默失败（表现就是「点了没反应」）；用绝对路径启动。
+			const explorer = joinPath(
+				process.env.SystemRoot ?? "C:\\Windows",
+				"explorer.exe",
+			);
+			const winChild = spawn(explorer, [path], {
+				detached: true,
+				stdio: "ignore",
+				windowsHide: true,
+			});
+			winChild.once("error", (error) => reject(error));
+			winChild.once("spawn", () => {
+				winChild.unref();
+				resolve();
+			});
+			return;
+		}
 		const child = spawn(info.command, [path], {
 			detached: true,
 			stdio: "ignore",

@@ -218,6 +218,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.singleInstanceSaved": "Single-instance setting saved; restart to apply",
   "app.electronSandboxSaved": "Chromium sandbox setting saved; restart to apply",
   "terminal.shellNotAvailable": "Shell not available",
+  "terminal.shellEmpty": "No shells detected",
   "terminal.selectShell": "Select shell",
   "config.restoreBuiltIn": "Restore built-in",
   "config.extensionConflict": "Extension conflict detected; built-in disabled: {builtIn} (conflicts with {thirdParty})",
@@ -698,6 +699,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.highAgentCountSnooze": "Don't remind again this session",
   "app.thinkingPickerTitle": "Select thinking level",
   "app.thinkingPickerHint": "Some models may not support all levels. The system will automatically adjust to the closest supported level",
+  "app.thinkingPickerUnsupported": "This model does not declare thinking levels; thinking level cannot be selected",
   "app.thinkingSwitchFailed": "Failed to change thinking level: {error}",
   "app.thinkingUnsupported":
     "Current model does not support {level}; fell back to {fallback}",

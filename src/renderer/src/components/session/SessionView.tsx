@@ -21,9 +21,9 @@ import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionModifiedFilesStrip } from "./SessionModifiedFilesStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
-import { TerminalDockPanel } from "../terminal/TerminalDockPanel";
+import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SIZE } from "../terminal/TerminalDockPanel";
 import { useSessionPaneServices } from "./SessionPaneServices";
-import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, redistributeTerminalAgainstTimeline, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight, shouldRestoreComposerPanelHeight } from "../../rendererUtils";
+import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight, shouldRestoreComposerPanelHeight } from "../../rendererUtils";
 import { readPanelPixels } from "./sessionPanelSize";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
@@ -432,17 +432,13 @@ export function SessionView({
     };
   }, [sessionId]);
 
-  const terminalRowHeightRef = useRef(terminalRowHeight);
-  terminalRowHeightRef.current = terminalRowHeight;
-
   // 终端 Panel 随 terminalOpen 动态挂载，约束注册有一帧延迟（与抽屉同款问题），
-  // imperative 同步统一推迟一帧并容错。折叠/展开后立刻把差额还给 timeline：
-  // collapse() 会把高度补给相邻 composer，输入框停在半空；切会话会再跑一遍
-  // collapse，必须用 composerHeightStateRef（用户拖拽/内容高度）当锚点，
+  // imperative 同步统一推迟一帧并容错。折叠/展开后立刻用像素 resize 把 composer
+  // 钳回锚点（collapse() 会把高度补给相邻 composer，输入框停在半空）；切会话会
+  // 再跑一遍 collapse，锚点用 composerHeightStateRef（用户拖拽/内容高度），
   // 不能读已经被撑高的 layout.composer。
   useEffect(() => {
     const panel = terminalPanelRef.current;
-    const group = sessionGroupRef.current;
     if (!panel) return;
     const frame = requestAnimationFrame(() => {
       try {
@@ -452,28 +448,39 @@ export function SessionView({
         programResizeExpireRef.current = Date.now() + 200;
         terminalProgrammaticExpireRef.current =
           Date.now() + TERMINAL_PROGRAMMATIC_PROTECT_MS;
-        if (terminalCollapsed) { if (!panel.isCollapsed()) panel.collapse(); }
-        else if (panel.isCollapsed()) panel.expand();
-        if (!group) return;
-        const size = composerPanelRef.current?.getSize();
-        if (!size || size.inPixels <= 0 || size.asPercentage <= 0) return;
-        const groupPx = (size.inPixels / size.asPercentage) * 100;
-        const preserveComposerPct = Math.min(
+        // 先稳态读数，再一次性 setLayout——顺序是硬性约束：
+        // - 不能先调库的 collapse/resize 命令再读 getSize()/getLayout()：库的命令是
+        //   异步提交，刚动过面板时 inPixels/asPercentage 落在过渡态（实测换算 groupPx
+        //   虚高 ~1.7 倍），垃圾百分比会被 K() 按约束重新钳制，composer 反被撑出大段
+        //   空白（视觉上「折叠后高度没释放」）。
+        // - 不能用面板 resize 命令折叠：终端是末位面板，库对末位收缩走 le() 增量重排，
+        //   在 composer disabled + 终端 collapsible 组合下校验失败会静默返回原布局。
+        //   setLayout 是 K() 直接按约束赋值，不经 pivot 重排，行为确定。
+        // composer 锁内容锚点，终端到折叠/记忆高度，差额全部给 timeline。
+        const composerSize = composerPanelRef.current?.getSize();
+        if (!composerSize || composerSize.inPixels <= 0 || composerSize.asPercentage <= 0) return;
+        const groupPx = (composerSize.inPixels / composerSize.asPercentage) * 100;
+        const composerPct = Math.min(
           100,
           (composerHeightStateRef.current / groupPx) * 100,
         );
-        const collapsedPct = (34 / groupPx) * 100;
-        const terminalPct = terminalCollapsed
-          ? collapsedPct
-          : Math.min(100, (terminalRowHeightRef.current / groupPx) * 100);
-        const next = redistributeTerminalAgainstTimeline(
-          group.getLayout(),
-          terminalPct,
-          preserveComposerPct,
-          (TIMELINE_MIN_HEIGHT / groupPx) * 100,
-        );
-        if (!next) return;
-        group.setLayout(next);
+        const terminalTargetPx = terminalCollapsed
+          ? TERMINAL_PANEL_COLLAPSED_SIZE
+          : Math.max(
+              TERMINAL_PANEL_MIN_SIZE,
+              Math.min(terminalRowHeight, availableTerminalHeight),
+            );
+        const terminalPct = Math.min(100, (terminalTargetPx / groupPx) * 100);
+        const layout = sessionGroupRef.current?.getLayout();
+        if (!layout || layout.timeline === undefined || layout.terminal === undefined || layout.composer === undefined) return;
+        // 键序必须沿用 getLayout()（K() 按下标对齐约束，见 sanitizeSessionPanelLayout），
+        // 只覆写值不增删键。
+        sessionGroupRef.current?.setLayout({
+          ...layout,
+          composer: composerPct,
+          terminal: terminalPct,
+          timeline: Math.max(0, 100 - composerPct - terminalPct),
+        });
       } catch { /* 约束未就绪，下轮状态再同步 */ }
     });
     return () => cancelAnimationFrame(frame);

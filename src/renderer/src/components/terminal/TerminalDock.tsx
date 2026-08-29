@@ -16,6 +16,7 @@ import { writeClipboard } from "../../utils/clipboard";
 import { ChevronDown, ChevronUp, MoreHorizontal, Plus, X } from "lucide-react";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Button } from "../ui-shadcn/button";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import type { PiDesktopApi } from "../../../../preload";
 import type { TerminalShell, TerminalTab, TerminalTarget } from "../../../../shared/types";
 import { t } from "../../i18n";
@@ -493,91 +494,78 @@ export function TerminalDock(props: {
 					<Plus size={14} />
 				</Button>
 			</div>
-				{/* Shell 选择器：点击创建指定 shell 的终端（位于 tabs 之外，避免 overflow-hidden 裁剪弹出菜单） */}
-				<div
-					className="relative grid place-items-center"
-				>
-					<Button
-						type="button"
-						variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 place-items-center rounded-md"
-						onClick={() => setShellMenuOpen((open) => !open)}
-						title={t("terminal.selectShell")}
-						disabled={loading || !contentReady}
-					>
-						<ChevronDown size={12} />
-					</Button>
-					{shellMenuOpen && (
-						<div className="terminal-shell-menu absolute bottom-[calc(100%+6px)] left-0 z-[120] grid w-44 gap-0.5 rounded-lg border bg-popover p-1.5 text-popover-foreground shadow-md">
-							<strong className="px-1 text-xs">{t("terminal.selectShell")}</strong>
-							{shells.length === 0 && (
-								<span className="terminal-shell-menu-empty" />
-							)}
-							{shells.map((s) => (
-								<Button
-									key={s.shell}
-									type="button"
-									variant="ghost"
-									size="sm"
-									className={`h-auto w-full justify-start rounded-md px-2 py-1 px-2 py-1 text-left text-xs hover:bg-accent${s.available ? "" : " unavailable opacity-50"}`}
-									onClick={() => {
-										if (!s.available) return;
-										void addTabWithShell(s.shell);
-									}}
-									title={s.available ? undefined : t("terminal.shellNotAvailable")}
-								>
-									{s.label}
-								</Button>
-							))}
-						</div>
-					)}
-					{/* 点击菜单外部关闭 */}
-					{shellMenuOpen && (
-						<div
-							className="fixed inset-0 z-[119]"
-							onClick={() => setShellMenuOpen(false)}
-						/>
-					)}
-				</div>
+				{/* Shell 选择器：点击创建指定 shell 的终端。必须用 Portal 化的 Popover——
+				    dock 挂在 react-resizable-panels 的 Panel 里，Panel 内层是 overflow:auto
+				    容器，菜单向上弹出会被裁剪（表现为「下拉没有值」）；Popover 渲染到 body，
+				    不受任何祖先 overflow 影响，且自带碰撞翻转与外部点击关闭。 */}
+				<Popover open={shellMenuOpen} onOpenChange={setShellMenuOpen}>
+					<PopoverTrigger asChild>
+						<Button
+							type="button"
+							variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 place-items-center rounded-md"
+							title={t("terminal.selectShell")}
+							disabled={loading || !contentReady}
+						>
+							<ChevronDown size={12} />
+						</Button>
+					</PopoverTrigger>
+					<PopoverContent side="top" align="start" className="w-44 gap-0.5 p-1.5">
+						<strong className="px-1 py-0.5 text-xs">{t("terminal.selectShell")}</strong>
+						{shells.length === 0 && (
+							<span className="block px-1 py-1 text-[11px] text-muted-foreground">
+								{t("terminal.shellEmpty")}
+							</span>
+						)}
+						{shells.map((s) => (
+							<Button
+								key={s.shell}
+								type="button"
+								variant="ghost"
+								size="sm"
+								className={`h-auto w-full justify-start rounded-md px-2 py-1 text-left text-xs hover:bg-accent${s.available ? "" : " unavailable opacity-50"}`}
+								onClick={() => {
+									if (!s.available) return;
+									void addTabWithShell(s.shell);
+								}}
+								title={s.available ? undefined : t("terminal.shellNotAvailable")}
+							>
+								{s.label}
+							</Button>
+						))}
+					</PopoverContent>
+				</Popover>
 			</div>
 			<div className="terminal-actions flex shrink-0 items-center gap-0.5">
-				<div
-					className="terminal-more-menu relative grid place-items-center"
-					onBlur={() => window.setTimeout(() => setThemeMenuOpen(false), 80)}
-				>
-					<Button
-						type="button"
-						variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 place-items-center rounded-md"
-						onMouseDown={(event) => {
-							event.preventDefault();
-							setThemeMenuOpen((open) => !open);
-						}}
-						title={t("terminal.more")}
-					>
-						<MoreHorizontal size={14} />
-					</Button>
-					{themeMenuOpen && (
-						<div className="terminal-theme-menu absolute right-0 bottom-[calc(100%+6px)] z-[120] grid w-48 gap-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-md">
-							<strong className="px-1 text-xs">{t("terminal.theme")}</strong>
-							<span className="px-1 text-[11px] text-muted-foreground">{t("terminal.themeCurrent")}: {theme.label}</span>
-							{Object.entries(TERMINAL_THEMES).map(([id, item]) => (
-								<Button
-									key={id}
-									type="button"
-									variant="ghost"
-									size="sm"
-									className={`h-auto w-full justify-start rounded-md px-2 py-1 px-2 py-1 text-left text-xs hover:bg-accent${id === themeId ? " active bg-accent" : ""}`}
-									onMouseDown={(event) => {
-										event.preventDefault();
-										setThemeId(id as TerminalThemeId);
-										setThemeMenuOpen(false);
-									}}
-								>
-									{item.label}
-								</Button>
-							))}
-						</div>
-					)}
-				</div>
+				<Popover open={themeMenuOpen} onOpenChange={setThemeMenuOpen}>
+					<PopoverTrigger asChild>
+						<Button
+							type="button"
+							variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 place-items-center rounded-md"
+							title={t("terminal.more")}
+						>
+							<MoreHorizontal size={14} />
+						</Button>
+					</PopoverTrigger>
+					<PopoverContent side="top" align="end" className="w-48 gap-1 p-2">
+						<strong className="px-1 text-xs">{t("terminal.theme")}</strong>
+						<span className="px-1 text-[11px] text-muted-foreground">{t("terminal.themeCurrent")}: {theme.label}</span>
+						{Object.entries(TERMINAL_THEMES).map(([id, item]) => (
+							<Button
+								key={id}
+								type="button"
+								variant="ghost"
+								size="sm"
+								className={`h-auto w-full justify-start rounded-md px-2 py-1 text-left text-xs hover:bg-accent${id === themeId ? " active bg-accent" : ""}`}
+								onClick={() => {
+									setThemeId(id as TerminalThemeId);
+									setThemeMenuOpen(false);
+								}}
+							>
+								{item.label}
+							</Button>
+						))}
+					</PopoverContent>
+				</Popover>
 				<Button
 					type="button"
 					variant="ghost" size="icon-xs" className="terminal-icon-btn size-6 inline-grid size-6 place-items-center rounded-md"
