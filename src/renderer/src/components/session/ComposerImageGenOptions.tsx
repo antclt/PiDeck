@@ -78,7 +78,7 @@ export function ComposerImageGenOptions(props: {
 	}
 
 	return (
-		<div className="inline-flex h-7 min-w-0 items-center gap-0.5">
+		<div className="inline-flex h-7 min-w-0 shrink-0 items-center gap-0.5">
 			<Select
 				value={selectionValue || undefined}
 				disabled={props.disabled}

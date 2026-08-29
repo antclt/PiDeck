@@ -2,6 +2,7 @@ import { test as base, expect, _electron as electron, type ElectronApplication, 
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { ImageGenConfigFile } from "../src/shared/types/imagegen";
 
 /**
  * Mock pi fixture（#115 U6）：在隔离 userData 中预置 settings.json，
@@ -42,14 +43,18 @@ function encodeSessionDir(cwd: string): string {
 /** 测试文件可通过 test.use({ seedSettings }) 追加预置设置项（合并进 settings.json） */
 export type SeedSettings = Record<string, unknown>;
 
+/** 测试文件可预置独立 imagegen.json，使首帧 Composer 读取真实供应商配置。 */
+export type SeedImageGenConfig = ImageGenConfigFile;
+
 const repoRoot = resolve(__dirname, "..");
 
-export const test = base.extend<MockPiFixture & { seedProjects: SeedProject[] | undefined; seedFeishuBots: SeedFeishuBot[] | undefined; seedSessionFiles: SeedSessionFile[] | undefined; seedSettings: SeedSettings | undefined }>({
+export const test = base.extend<MockPiFixture & { seedProjects: SeedProject[] | undefined; seedFeishuBots: SeedFeishuBot[] | undefined; seedSessionFiles: SeedSessionFile[] | undefined; seedSettings: SeedSettings | undefined; seedImageGenConfig: SeedImageGenConfig | undefined }>({
 	seedProjects: [undefined, { option: true }],
 	seedFeishuBots: [undefined, { option: true }],
 	seedSessionFiles: [undefined, { option: true }],
 	seedSettings: [undefined, { option: true }],
-	app: async ({ seedProjects, seedFeishuBots, seedSessionFiles, seedSettings }, use) => {
+	seedImageGenConfig: [undefined, { option: true }],
+	app: async ({ seedProjects, seedFeishuBots, seedSessionFiles, seedSettings, seedImageGenConfig }, use) => {
 		const userDataRoot = mkdtempSync(join(tmpdir(), "pideck-mockpi-"));
 		try {
 			// Windows 桌面端通过 cmd shim 调起自定义 pi（见 PiLocator.createInvocation），
@@ -85,6 +90,13 @@ export const test = base.extend<MockPiFixture & { seedProjects: SeedProject[] | 
 					...(seedSettings ?? {}),
 				}),
 			);
+			if (seedImageGenConfig) {
+				writeFileSync(
+					join(userDataRoot, "profile", "imagegen.json"),
+					JSON.stringify(seedImageGenConfig),
+				);
+			}
+
 			// 可选：预置项目列表。ProjectStore.load 会保留种子项目并追加内置聊天项目。
 			if (seedProjects && seedProjects.length > 0) {
 				writeFileSync(

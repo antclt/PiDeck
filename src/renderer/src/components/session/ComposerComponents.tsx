@@ -439,7 +439,7 @@ export function ComposerBottomBar(props: {
 	return (
 		<div className="composer-bottom-bar min-h-10 shrink-0 border-t border-transparent px-2.5 py-2">
 			<div className="composer-bottom-layout flex min-w-0 items-center gap-2">
-				<div className="composer-bottom-left flex min-w-0 flex-wrap items-center gap-0.5">
+				<div className="composer-bottom-left flex min-w-0 flex-nowrap items-center gap-0.5 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 					{props.onChangeBackend ? (
 						<ComposerBackendPicker
 							backend={props.backend ?? "pi"}
@@ -545,6 +545,16 @@ export function ComposerBottomBar(props: {
 							))}
 						</DropdownMenuContent>
 					</DropdownMenu>
+					{props.feishuIndicator}
+					{props.securityControl}
+				</div>
+				<div
+					className={`composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4${
+						isImageGenMode
+							? " overflow-x-auto overflow-y-hidden [scrollbar-width:none]"
+							: " overflow-hidden"
+					}`}
+				>
 					{isImageGenMode && props.imageGenOptions ? (
 						<ComposerImageGenOptions
 							config={props.imageGenOptions.config}
@@ -560,10 +570,6 @@ export function ComposerBottomBar(props: {
 							onWatermarkChange={props.imageGenOptions.onWatermarkChange}
 						/>
 					) : null}
-					{props.feishuIndicator}
-					{props.securityControl}
-				</div>
-				<div className="composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4 overflow-hidden">
 					{/* 生图模式用独立供应商/模型下拉，不展示会话 LLM chip，避免两套配置混用。 */}
 					{isImageGenMode ? null : (
 						<ModelThinkingChip
