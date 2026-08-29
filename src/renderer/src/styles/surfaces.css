@@ -380,7 +380,7 @@
 }
 .outline-hover {
   position: absolute;
-  right: calc(11px + var(--drawer-splitter-w) + max(var(--drawer-col-w), min(var(--drawer-width), 38vw)));
+  right: calc(11px + var(--drawer-splitter-w) + max(var(--drawer-col-w), min(var(--drawer-width), 38vw)) + var(--outline-content-w, 0px));
   top: calc(var(--outline-top, 180px) + var(--window-drag-height, 0px));
   /* top/bottom 双向夹持出刻度轴的可用高度（终端打开时由 --outline-bottom 让位），
      ConversationOutline 用 ResizeObserver 测量它并按条数收缩刻度间距 */

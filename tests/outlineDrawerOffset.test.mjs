@@ -13,6 +13,6 @@ test("right-side entries keep the same gap to the drawer splitter", () => {
   assert.ok(outlineHover, "right-side entry container styles must exist");
   assert.match(
     outlineHover,
-    /right:\s*calc\(11px \+ var\(--drawer-splitter-w\) \+ max\(var\(--drawer-col-w\), min\(var\(--drawer-width\), 38vw\)\)\);/,
+    /right:\s*calc\(11px \+ var\(--drawer-splitter-w\) \+ max\(var\(--drawer-col-w\), min\(var\(--drawer-width\), 38vw\)\) \+ var\(--outline-content-w, 0px\)\);/,
   );
 });

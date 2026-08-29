@@ -6,6 +6,7 @@
  * - 查询失败/无可用数值 → null（三处统一「不渲染」，避免报错噪音）。
  */
 import type { TranslationKey } from "../i18n";
+import type { I18nParams } from "../../../shared/types";
 import type { ProviderUsageResult } from "../../../shared/types/providerUsage";
 
 /** 用量状态档位（cc-switch utilizationColor 语义）。 */
@@ -168,6 +169,141 @@ export function formatUsageBadgeText(result: ProviderUsageResult): string | null
 		return null;
 	}
 	return null;
+}
+
+// ── 多段用量徽标（卡片底部 inline 行）：百分比/金额自带语义标签，多档全部展示 ──
+
+/** 翻译函数形态（与 renderer i18n 的 t 同签名子集）；纯函数不直接依赖 i18n 模块，测试可注入替身。 */
+export type UsageTranslate = (key: TranslationKey, params?: I18nParams) => string;
+
+/**
+ * 内置候选多窗口 key → i18n key（与详情面板同表——inline 与详情的窗口叫法保持一致）。
+ * 未知 key（用户自定义探针的 windows）由 usageWindowLabel 原样展示。
+ */
+const USAGE_WINDOW_LABEL_KEYS: Record<string, TranslationKey> = {
+	fiveHour: "sessionContext.usageWindowFiveHour",
+	weekly: "sessionContext.usageWindowWeekly",
+	mcpMonthly: "sessionContext.usageWindowMcpMonthly",
+	included: "sessionContext.usageWindowIncluded",
+	onDemand: "sessionContext.usageWindowOnDemand",
+};
+
+/** 窗口 key → 标签：内置 key 给 i18n key，未知 key 原样文本（用户自定义窗口名）。 */
+export function usageWindowLabel(key: string): { key: TranslationKey } | { text: string } {
+	const mapped = USAGE_WINDOW_LABEL_KEYS[key];
+	return mapped ? { key: mapped } : { text: key };
+}
+
+/** 窗口 key → 已翻译标签文本（inline 段渲染用）。 */
+export function usageWindowLabelText(key: string, translate: UsageTranslate): string {
+	const label = usageWindowLabel(key);
+	return "key" in label ? translate(label.key) : label.text;
+}
+
+/** periods 三档 → 标签 i18n key（复用详情面板的「滚动/本周/本月」叫法）。 */
+const PERIOD_LABEL_KEYS: Record<"rolling" | "weekly" | "monthly", TranslationKey> = {
+	rolling: "sessionContext.usageRolling",
+	weekly: "sessionContext.usageWeekly",
+	monthly: "sessionContext.usageMonthly",
+};
+
+/** 一段带语义标签的用量展示：label（已用/剩/余额/窗口名）+ 数值 + 档位色。 */
+export type UsageBadgeSegment = {
+	/** i18n key 与原样文本二选一（未知窗口名没有对应 key）。 */
+	labelKey?: TranslationKey;
+	labelText?: string;
+	text: string;
+	tone: UsageTone;
+};
+
+/** 档位严重度（主段挑选用）：红 > 橙 > 绿 > 灰——选择器行只放一段时优先示警。 */
+const TONE_SEVERITY: Record<UsageTone, number> = { empty: 3, low: 2, ok: 1, neutral: 0 };
+
+/** 单窗口的已用百分比（0-100 封顶）：used 缺失时用 total-remaining 反推；无 total 不产生百分比。 */
+function usageWindowPercent(window: { total?: number; used?: number; remaining?: number }): number | null {
+	const used = window.used ??
+		(window.remaining != null && window.total != null ? window.total - window.remaining : undefined);
+	if (window.total == null || used == null || window.total <= 0) return null;
+	return Math.min(100, (used / window.total) * 100);
+}
+
+/**
+ * inline 用量段列表（卡片底部多档全展示、选择器行取主段，共用同一份数据形状）：
+ * - periods / credits-windows：逐档「窗口名 + 已用百分比」，各档独立档位色；
+ *   窗口无总额但有剩余量时退化为「窗口名 + 剩余数值」（灰，避免臆造百分比）；
+ * - balance：「余额 + 金额」；
+ * - credits 主值：「剩 + 剩余量」（total-used 反推），只有已用量时「已用 + 已用」；
+ * booster 不进 inline（点数明细在详情面板展示，inline 保持单行紧凑）。
+ * 返回 null = 无可展示数值（调用方不渲染）。
+ */
+export function usageBadgeSegments(
+	result: ProviderUsageResult,
+	translate: UsageTranslate,
+): UsageBadgeSegment[] | null {
+	if (!result.success) return null;
+	if (result.kind === "periods" && result.periods) {
+		const segments: UsageBadgeSegment[] = [];
+		for (const key of ["rolling", "weekly", "monthly"] as const) {
+			const period = result.periods[key];
+			if (!period || period.percent == null) continue;
+			segments.push({
+				labelKey: PERIOD_LABEL_KEYS[key],
+				text: `${Math.round(Math.min(100, period.percent))}%`,
+				tone: usageToneForPercent(period.percent),
+			});
+		}
+		return segments.length > 0 ? segments : null;
+	}
+	if (result.kind === "balance" && result.balance) {
+		return [{ labelKey: "config.usage.balanceShort", text: formatBalance(result.balance), tone: usageTone(result) }];
+	}
+	if (result.kind === "credits" && result.credits) {
+		const credits = result.credits;
+		// 逐窗口段：算得出百分比出「窗口名+百分比」；无总额但有剩余量退化为「窗口名+剩余」；
+		// 两者都算不出的窗口直接跳过（展示「窗口名 —」是噪音）。
+		const windowSegments = (credits.windows ?? []).flatMap((window): UsageBadgeSegment[] => {
+			const label = usageWindowLabel(window.key);
+			const labelField = "key" in label
+				? { labelKey: label.key }
+				: { labelText: label.text };
+			const percent = usageWindowPercent(window);
+			if (percent != null) {
+				return [{ ...labelField, text: `${Math.round(percent)}%`, tone: usageToneForPercent(percent) }];
+			}
+			if (window.remaining == null) return [];
+			// 无总额（算不出百分比）但有剩余量：退化为剩余数值（灰），不臆造百分比。
+			return [{ ...labelField, text: formatAmount(window.remaining), tone: "neutral" }];
+		});
+		if ((credits.windows?.length ?? 0) > 0) {
+			// 窗口全跳过时落到主值分支（有剩余/已用就别整行消失）。
+			if (windowSegments.length > 0) return windowSegments;
+		}
+		const remaining = credits.remaining ??
+			(credits.total != null && credits.used != null ? credits.total - credits.used : undefined);
+		if (remaining != null) {
+			return [{ labelKey: "config.usage.remainingShort", text: formatAmount(remaining), tone: usageTone(result) }];
+		}
+		if (credits.used != null) {
+			return [{ labelKey: "config.usage.usedShort", text: formatAmount(credits.used), tone: "neutral" }];
+		}
+		return null;
+	}
+	return null;
+}
+
+/**
+ * inline 主段（选择器分组行的单值位）：多档里挑档位最严重的一段示警
+ * （与旧「取最高百分比」语义一致——任一窗口吃紧都要先看到）。
+ */
+export function usageBadgePrimarySegment(
+	result: ProviderUsageResult,
+	translate: UsageTranslate,
+): UsageBadgeSegment | null {
+	const segments = usageBadgeSegments(result, translate);
+	if (!segments || segments.length === 0) return null;
+	return segments.reduce((worst, segment) =>
+		TONE_SEVERITY[segment.tone] > TONE_SEVERITY[worst.tone] ? segment : worst,
+	segments[0]);
 }
 
 /**

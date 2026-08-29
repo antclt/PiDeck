@@ -3406,6 +3406,15 @@ export function App() {
   );
   const workbenchHasEditor = Boolean(activeTab) && !workbenchHasGitDiff;
   const workbenchHasContent = workbenchHasGitDiff || workbenchHasEditor;
+  // 工作台内容区宽度：分屏（文件/Diff 在右）时右缘刻度轴需贴消息区右缘，
+  // 由 WorkbenchStage 实时上报（split 分屏才上报；solo/maximize 归零）。
+  const [workbenchContentWidth, setWorkbenchContentWidth] = useState(0);
+  const handleWorkbenchContentWidth = useCallback((width: number) => {
+    setWorkbenchContentWidth((current) =>
+      // 相同宽度跳过，避免拖拽分隔条时反复重渲染
+      current === width ? current : width,
+    );
+  }, []);
   const workbenchLayout = workbenchHasGitDiff ? gitDiffDisplayMode : editorMode;
 
   // 文件/Diff Tab 挂进总 SessionTabsBar：与会话共用一条栏，内容区不再另起绿条 Tab
@@ -3525,6 +3534,7 @@ export function App() {
       hasContent={workbenchHasContent}
       session={chatPaneSessionNode}
       content={workbenchContentNode}
+      onContentWidthChange={handleWorkbenchContentWidth}
     />
   );
 
@@ -3633,6 +3643,7 @@ export function App() {
       chatPaneRef={chatPaneRef}
       terminalRowHeight={terminalRowHeight}
       chatContentWidthPct={settings.chatContentWidthPct}
+      outlineContentOffset={workbenchContentWidth}
       sidebarContent={sidebarContentNode}
       chatPaneContent={chatPaneContentNode}
       drawerRail={

@@ -279,6 +279,11 @@ export type ConfigPaneProps = {
 	 * 外壳把这些 UI 细节呈现在自己的标题栏，因此 ConfigPane 需要把内部状态同步给外壳。
 	 */
 	onStateChange?: (state: ConfigPaneState) => void;
+	/**
+	 * 宿主（设置窗口）的统一关闭入口（含未保存确认）：嵌套弹层需要整窗关闭时走这里，
+	 * 不直接调 onClose（那是外壳的裸关闭，会跳过未保存确认）。
+	 */
+	onRequestClose?: () => void;
 };
 
 /**
@@ -286,7 +291,7 @@ export type ConfigPaneProps = {
  * 不包错误边界——宿主 SettingsModal 的 ErrorBoundary 已兜底整个窗口。
  */
 export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
-	function ConfigPane({ onClose, onSaved, projectPath, focusConfigTab, focusProvider, onStateChange }, ref) {
+	function ConfigPane({ onClose, onSaved, projectPath, focusConfigTab, focusProvider, onStateChange, onRequestClose }, ref) {
 		return (
 			<ConfigModalContent
 				open
@@ -298,6 +303,7 @@ export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
 				embedded
 				paneRef={ref}
 				onPaneStateChange={onStateChange}
+				onRequestHostClose={onRequestClose}
 			/>
 		);
 	},
@@ -382,6 +388,11 @@ type ConfigModalContentProps = ConfigModalProps & {
 	paneRef?: Ref<ConfigPaneHandle> | undefined;
 	/** embedded 时上报标题栏按钮所需状态（保存 disabled / 未保存黄点 / 关闭确认清单） */
 	onPaneStateChange?: (state: ConfigPaneState) => void;
+	/**
+	 * embedded 时宿主（设置窗口）的统一关闭入口（含未保存确认）；
+	 * 「让 AI 帮我查」写入输入框后经它整窗关闭，未提供时退回自身 handleClose。
+	 */
+	onRequestHostClose?: () => void;
 };
 
 function ConfigModalContent(props: ConfigModalContentProps) {
@@ -2554,6 +2565,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				onClose={() => setUsageProbeDialog(null)}
 				provider={usageProbeDialog?.provider ?? ""}
 				backend={usageProbeDialog?.backend}
+				// 「让 AI 帮我查」写入输入框后关宿主窗口：内嵌分区优先走宿主设置窗口的
+				// 统一关闭确认（含系统设置草稿），独立弹窗退回自身的未保存确认流程。
+				onCloseHost={props.onRequestHostClose ?? handleClose}
 			/>
 
 				{deleteSkillConfirm && (

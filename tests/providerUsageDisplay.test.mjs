@@ -111,6 +111,94 @@ test("formatBalance：已知币种符号前缀、未知代码后缀、无币种�
   assert.equal(display.currencySymbol("rmb"), "¥", "币种代码大小写不敏感");
 });
 
+test("usageBadgeSegments：periods 三档逐段出「标签+百分比」，档位逐段独立", () => {
+  const t = (key) => `#${key}`;
+  const json = (value) => JSON.stringify(value);
+  assert.equal(
+    json(display.usageBadgeSegments(periodsResult({ rolling: 32.6, weekly: 86, monthly: 95 }), t)),
+    json([
+      { labelKey: "sessionContext.usageRolling", text: "33%", tone: "ok" },
+      { labelKey: "sessionContext.usageWeekly", text: "86%", tone: "low" },
+      { labelKey: "sessionContext.usageMonthly", text: "95%", tone: "empty" },
+    ]),
+  );
+  // 百分比缺省的档位跳过；全部缺省 → null（调用方不渲染）
+  assert.equal(display.usageBadgeSegments(periodsResult({}), t), null);
+});
+
+test("usageBadgeSegments：balance 出「余额+金额」；credits 出「剩+剩余」或「已用+已用」", () => {
+  const t = (key) => `#${key}`;
+  const json = (value) => JSON.stringify(value);
+  assert.equal(
+    json(display.usageBadgeSegments(balanceResult(6.58, "CNY"), t)),
+    json([{ labelKey: "config.usage.balanceShort", text: "¥6.58", tone: "ok" }]),
+  );
+  assert.equal(
+    json(display.usageBadgeSegments(creditsResult({ remaining: 120.5 }), t)),
+    json([{ labelKey: "config.usage.remainingShort", text: "120.5", tone: "ok" }]),
+  );
+  // 只有已用量：已用标签 + 中性灰
+  assert.equal(
+    json(display.usageBadgeSegments(creditsResult({ used: 42 }), t)),
+    json([{ labelKey: "config.usage.usedShort", text: "42", tone: "neutral" }]),
+  );
+  // total-used 反推剩余
+  assert.equal(
+    json(display.usageBadgeSegments(creditsResult({ total: 200, used: 50 }), t)),
+    json([{ labelKey: "config.usage.remainingShort", text: "150", tone: "ok" }]),
+  );
+});
+
+test("usageBadgeSegments：credits windows 逐窗出「窗口名+百分比」，剩余可反推已用", () => {
+  const t = (key) => `#${key}`;
+  const json = (value) => JSON.stringify(value);
+  assert.equal(
+    json(display.usageBadgeSegments(
+      creditsResult({
+        windows: [
+          { key: "fiveHour", total: 100, used: 45 },
+          { key: "weekly", total: 100, remaining: 90 },
+          { key: "customGateway", remaining: 3.5 },
+          { key: "emptyWindow" },
+        ],
+      }),
+      t,
+    )),
+    json([
+      { labelKey: "sessionContext.usageWindowFiveHour", text: "45%", tone: "ok" },
+      { labelKey: "sessionContext.usageWindowWeekly", text: "10%", tone: "ok" },
+      // 未知窗口 key 原样做标签；无总额 → 退化为剩余数值（灰），不臆造百分比
+      { labelText: "customGateway", text: "3.5", tone: "neutral" },
+      // 百分比与剩余都算不出的窗口直接跳过（「窗口名 —」是噪音）
+    ]),
+  );
+  // 窗口全部不可展示时落到主值分支，而不是整行消失
+  assert.equal(
+    json(display.usageBadgeSegments(
+      creditsResult({ windows: [{ key: "emptyWindow" }], remaining: 12 }),
+      t,
+    )),
+    json([{ labelKey: "config.usage.remainingShort", text: "12", tone: "ok" }]),
+  );
+});
+
+test("usageBadgePrimarySegment：多档取档位最严重的一段（选择器行单值位示警）", () => {
+  const t = (key) => `#${key}`;
+  const worst = display.usageBadgePrimarySegment(periodsResult({ rolling: 32, weekly: 95 }), t);
+  assert.equal(worst.text, "95%");
+  assert.equal(worst.tone, "empty");
+  // balance 单段原样返回
+  assert.equal(display.usageBadgePrimarySegment(balanceResult(6.58, "CNY"), t).text, "¥6.58");
+  // 无可展示数值 → null
+  assert.equal(display.usageBadgePrimarySegment({ success: false, error: "x" }, t), null);
+});
+
+test("usageWindowLabel：内置 key 走 i18n，未知 key 原样文本", () => {
+  assert.equal(display.usageWindowLabel("mcpMonthly").key, "sessionContext.usageWindowMcpMonthly");
+  const custom = display.usageWindowLabel("myGateway");
+  assert.equal("text" in custom ? custom.text : undefined, "myGateway");
+});
+
 test("relativeTimeParts：刚刚/分钟/小时/天/过期 五档（cc-switch Clock 行语义）", () => {
   const now = 1_000_000_000_000;
   const json = (value) => JSON.stringify(value);

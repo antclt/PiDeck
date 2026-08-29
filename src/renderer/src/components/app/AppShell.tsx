@@ -64,6 +64,8 @@ export interface AppShellProps {
   terminalRowHeight: number;
   /** 聊天内容区占面板百分比（60–100），注入 --chat-content-pct-set，由 CSS 容器查询自适应分屏 */
   chatContentWidthPct: number;
+  /** 工作台内容区宽度（文件/Diff 分屏时 >0）：右缘刻度轴需右移该宽度贴到消息区右缘 */
+  outlineContentOffset: number;
 
   sidebarContent: ReactNode;
   chatPaneContent: ReactNode;
@@ -132,7 +134,7 @@ export function AppShell(props: AppShellProps) {
     drawer, drawerCollapsed, drawerWidth, drawerPinned,
     useNativeTitleBar,
     platform,
-    chatPaneRef, terminalRowHeight, chatContentWidthPct,
+    chatPaneRef, terminalRowHeight, chatContentWidthPct, outlineContentOffset,
     sidebarContent, chatPaneContent, drawerContent, drawerRail, outlineContent,
     setListCollapsed, setListWidth, setDrawerCollapsed, setDrawerWidth,
     onToggleListCollapsed,
@@ -345,6 +347,9 @@ export function AppShell(props: AppShellProps) {
           // 右缘刻度定位轴（.outline-hover）的底部边界：终端坞打开时让出其高度，
           // 避免刻度铺到终端上；关闭时保底 16px 边距。
           "--outline-bottom": `${Math.max(terminalRowHeight, 0) + 16}px`,
+          // 工作台分屏（文件/Diff 在右）时右移内容区宽度，让刻度落在消息区右缘；
+          // solo/maximize 时为 0（消息区独占或收起），刻度回窗口右缘。
+          "--outline-content-w": `${Math.max(outlineContentOffset, 0)}px`,
         } as CSSProperties
       }
     >

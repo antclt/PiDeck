@@ -612,6 +612,9 @@ function SettingsModalContent(props: SettingsModalProps) {
 							focusConfigTab={configFocus?.configTab}
 							focusProvider={configFocus?.provider}
 							onStateChange={handleConfigPaneStateChange}
+							// 嵌套弹层（用量查询「让 AI 帮我查」）整窗关闭走统一关闭确认，
+							// 不直连 onClose 裸关闭——系统设置/配置管理草稿都不能被静默丢弃。
+							onRequestClose={handleClose}
 						/>
 					</Suspense>
 				</TabsContent>

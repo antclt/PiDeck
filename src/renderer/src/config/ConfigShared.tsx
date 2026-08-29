@@ -229,7 +229,9 @@ export function ConfigComboboxInput(props: {
 				<ChevronDown size={14} />
 			</Button>
 			{/* 面板 portal 到 body + fixed 锚定输入框：任何滚动容器（.config-content overflow-y:auto）
-			   都无法裁剪它；z-index 提到 --z-popover（960，与 Radix Select 同级）保证盖过后续兄弟节点。 */}
+			   都无法裁剪它；z-index 提到 --z-popover（960，与 Radix Select 同级）保证盖过后续兄弟节点。
+			   必须显式 pointerEvents: auto——Radix Dialog 模态（react-remove-scroll）会给 body 设内联
+			   pointer-events: none，面板作为 body 直接子元素会继承该值导致点击穿透、选项无法选中。 */}
 			{open && anchor && createPortal(
 				<div
 					ref={panelRef}
@@ -240,6 +242,7 @@ export function ConfigComboboxInput(props: {
 						width: anchor.width,
 						zIndex: "var(--z-popover)",
 						maxHeight: PANEL_MAX_HEIGHT,
+						pointerEvents: "auto",
 					}}
 					className="overflow-y-auto rounded-lg border border-border-subtle bg-bg-panel p-[5px] shadow-[var(--shadow-popover)]"
 				>

@@ -18,6 +18,8 @@ export type WorkbenchStageProps = {
 	chrome?: ReactNode;
 	session: ReactNode;
 	content: ReactNode | null;
+	/** 内容区宽度上报（split 分屏时右缘刻度轴需贴消息区右缘，而非窗口右缘） */
+	onContentWidthChange?: (width: number) => void;
 };
 
 /**
@@ -32,6 +34,29 @@ export type WorkbenchStageProps = {
  */
 export function WorkbenchStage(props: WorkbenchStageProps) {
 	const sessionPanelRef = useRef<PanelImperativeHandle>(null);
+	const contentFrameRef = useRef<HTMLDivElement>(null);
+
+	// 内容区宽度上报：右缘刻度轴（.outline-hover）默认贴窗口右缘，工作台分屏时
+	// 需右移内容区宽度才能落在消息区右缘。maximize 会话区收起，按 0 偏移回窗口右缘。
+	useEffect(() => {
+		const element = contentFrameRef.current;
+		if (!element) return;
+		const update = () => {
+			props.onContentWidthChange?.(
+				props.hasContent && props.layout !== "maximize"
+					? Math.round(element.getBoundingClientRect().width)
+					: 0,
+			);
+		};
+		update();
+		const observer = new ResizeObserver(update);
+		observer.observe(element);
+		return () => {
+			observer.disconnect();
+			// 卸载时归零，避免残留旧内容区宽度
+			props.onContentWidthChange?.(0);
+		};
+	}, [props.onContentWidthChange, props.hasContent, props.layout]);
 
 	useEffect(() => {
 		if (!props.hasContent) return;
@@ -77,7 +102,7 @@ export function WorkbenchStage(props: WorkbenchStageProps) {
 					defaultSize="52%"
 					className="workbench-content-pane"
 				>
-					<div className="workbench-content-frame">
+					<div ref={contentFrameRef} className="workbench-content-frame">
 						{props.content}
 					</div>
 				</ResizablePanel>

@@ -401,9 +401,9 @@ test("ProviderUsageDetails renders each usage window as a labeled progress row",
   // 多窗口分支优先命中（windows.length > 0 在普通 credits 分支之前）
   assert.match(source, /windows\.length > 0 \? \(/);
   // 每个窗口一行：label（5h/周）+ 进度条 + 百分比 + 剩余小字
-  // 窗口 label 走 WINDOW_LABEL_I18N 映射表（65fe5e31 起内置窗口 key 统一 i18n，未知 key 原样展示）
-  assert.match(source, /WINDOW_LABEL_I18N\[window\.key\] != null/);
-  assert.match(source, /t\(WINDOW_LABEL_I18N\[window\.key\]\)/);
+  // 窗口 label 走 providerUsageDisplay.usageWindowLabelText 统一映射
+  // （与 inline 多段行同源；内置 key 统一 i18n，未知 key 原样展示）
+  assert.match(source, /usageWindowLabelText\(window\.key, t\)/);
   assert.match(source, /t\("sessionContext\.usageWindowRemaining", \{ n: formatAmount\(remaining\) \}\)/);
   // 用超封顶 100、≥90% 红字警示（与 periods 同判断）
   assert.match(source, /Math\.min\(100, Math\.round\(\(used \/ total\) \* 100\)\)/);

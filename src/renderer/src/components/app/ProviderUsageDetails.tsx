@@ -13,7 +13,6 @@
  */
 import { AlertCircle, Clock, RefreshCw } from "lucide-react";
 import { t } from "../../i18n";
-import type { TranslationKey } from "../../i18n";
 import type {
 	ProviderUsageResult,
 	UsageProbeBackend,
@@ -26,20 +25,9 @@ import {
 	USAGE_TONE_BAR_CLASS,
 	USAGE_TONE_TEXT_CLASS,
 	usageToneForPercent,
+	usageWindowLabelText,
 	type UsageTone,
 } from "../../utils/providerUsageDisplay";
-
-/**
- * 内置候选的多窗口 key → i18n key（xAI 套餐/按需、智谱 MCP 等）；
- * 未知 key（用户自定义探针的 windows）原样展示 key，不做硬编码文案。
- */
-const WINDOW_LABEL_I18N: Record<string, TranslationKey> = {
-	fiveHour: "sessionContext.usageWindowFiveHour",
-	weekly: "sessionContext.usageWindowWeekly",
-	mcpMonthly: "sessionContext.usageWindowMcpMonthly",
-	included: "sessionContext.usageWindowIncluded",
-	onDemand: "sessionContext.usageWindowOnDemand",
-};
 
 /** cc-switch TierBar 行：label + 圆角进度条 + 彩色粗体百分比 + 右侧小字。 */
 function UsageBarRow(props: {
@@ -209,10 +197,8 @@ export function ProviderUsageDetails(props: {
 								: null;
 						// 用量≥90% 红、≥70% 橙、其余绿（cc-switch utilizationColor 阈值）
 						const urgent = pct != null && pct >= 90;
-						const label =
-							WINDOW_LABEL_I18N[window.key] != null
-								? t(WINDOW_LABEL_I18N[window.key])
-								: window.key;
+						// 窗口名与 inline 行共用 providerUsageDisplay 的统一映射（未知 key 原样展示）。
+						const label = usageWindowLabelText(window.key, t);
 						return (
 							<UsageBarRow
 								key={window.key}

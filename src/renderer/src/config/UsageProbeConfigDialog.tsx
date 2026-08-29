@@ -12,7 +12,7 @@
  * - 无字段级自定义：脚本/JSON 编辑不开放（用户和我们都不需要）。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { Bot, Eye, EyeOff } from "lucide-react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
@@ -24,6 +24,9 @@ import type {
 import { desktopApi } from "../desktopApi";
 import { showNotice } from "../utils/notice";
 import { invalidateAllProviderUsageAtom, resolveProviderUsageAtom } from "../atoms/provider-usage-atoms";
+import { currentSessionIdAtom } from "../atoms/session-atoms";
+import { setSessionDraftAtom } from "../atoms/composer-atoms";
+import { appendContentToDraft } from "../composerBehavior";
 import { usageCacheKey } from "../hooks/useProviderUsage";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui-shadcn/dialog";
 import { Button } from "../components/ui-shadcn/button";
@@ -125,9 +128,17 @@ export function UsageProbeConfigDialog(props: {
 	provider: string;
 	/** 配置宿主：pi（缺省，~/.pi/agent/usage-probes.json）或 dsh（$DSH_HOME/usage-probes.json）。 */
 	backend?: "pi" | "dsh";
+	/**
+	 * 关闭宿主窗口（设置窗口或独立配置弹窗）：走宿主自己的未保存确认流程，
+	 * 供「让 AI 帮我查」写入输入框后回到主会话（缺省只关本弹窗）。
+	 */
+	onCloseHost?: () => void;
 }) {
 	const invalidateAll = useSetAtom(invalidateAllProviderUsageAtom);
 	const resolveUsage = useSetAtom(resolveProviderUsageAtom);
+	// 「让 AI 帮我查」：把提示词写进当前会话的 composer 草稿（无活动会话则回退剪贴板）。
+	const currentSessionId = useAtomValue(currentSessionIdAtom);
+	const setDraft = useSetAtom(setSessionDraftAtom);
 	// 缓存 key：与 useProviderUsage.usageCacheKey 同规则（DSH 链路 dsh: 前缀 + 官方
 	// DeepSeek 名归一），保证弹窗「测试成功」写进的缓存与卡片/选择器/圆球的查询共用一份。
 	const cacheKey = usageCacheKey(props.provider, props.backend ?? "pi");
@@ -312,15 +323,29 @@ export function UsageProbeConfigDialog(props: {
 		}
 	};
 
+	/**
+	 * 「让 AI 帮我查接口文档」：装技能 → 关闭弹窗与宿主窗口 → 提示词写进主会话输入框
+	 * （复用并行问询「插入主会话输入框」同一条 setSessionDraftAtom 通道，只填草稿不发送）。
+	 * 提示词模板带 provider 与配置路径（pi/DSH 的 usage-probes.json 位置不同），AI 拿到即可开工；
+	 * 无活动会话（引导页）退回剪贴板兜底，不关窗口。
+	 */
 	const aiAssist = async () => {
+		const prompt = t("config.usageProbe.aiPrompt", {
+			provider: props.provider,
+			configPath: props.backend === "dsh" ? "$DSH_HOME/usage-probes.json" : "~/.pi/agent/usage-probes.json",
+		});
 		try {
-			const result = await desktopApi.config.installUsageSkill();
-			await navigator.clipboard.writeText(t("config.usageProbe.aiPrompt"));
-			showNotice(
-				result?.success ? t("config.usageProbe.aiAssistDone") : t("config.usageProbe.aiAssistCopiedOnly"),
-				6000,
-				"info",
-			);
+			await desktopApi.config.installUsageSkill();
+			const sessionId = currentSessionId;
+			if (!sessionId) {
+				await navigator.clipboard.writeText(prompt);
+				showNotice(t("config.usageProbe.aiAssistCopiedOnly"), 6000, "info");
+				return;
+			}
+			setDraft({ sessionId, value: (current) => appendContentToDraft(current, prompt) });
+			props.onClose();
+			props.onCloseHost?.();
+			showNotice(t("config.usageProbe.aiAssistInserted"), 5000, "info");
 		} catch {
 			showNotice(t("config.usageProbe.saveFailed"), 4000, "error");
 		}
