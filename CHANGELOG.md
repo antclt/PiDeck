@@ -1,19 +1,28 @@
-## Unreleased
+## v0.7.2 - 2026-08-30
 
 ### 🚀 New Features
 - **Usage query rebuild (aligned with cc-switch)** — Unified usage display across Models / Auth / DSH (amount or percentage at the bottom-right of the card + bar-chart icon entry in the header); per-provider enable switch + built-in template auto-detection + generic / New API declarative templates + timeout / auto-query interval (default 5 min, 0 = manual only); no automatic probing when disabled or unsupported.
+- **Multi-segment usage badges** — Usage now renders multi-window segments (5h / weekly / MCP, three-tier percentages): cards show all segments dot-separated, model-selector rows show the most severe segment for alerting; segment labels share one table with the detail panel, and custom probe window names are shown as-is.
 - **DSH usage query pipeline** — Same usage display and probe configuration on the DSH model config page: config stored at `$DSH_HOME/.pideck/usage-probes.json`, credentials read from the DSH credential store (`.credentials.yaml`); identical to the pi side and fully isolated.
+- **Usage query AI assist** — The usage dialog gains an AI-assist button that drops a prepared prompt (driving the usage-probe skill) into the main session composer to look up unsupported providers; without an active session it copies the prompt to the clipboard instead.
 - **PiDeck-specific files consolidated** — Session archives / host mutex lock / usage config under DSH_HOME now live in `~/.dsh/.pideck/` (one-time migration; the migration logic will be removed in the next release once the legacy layout is confirmed gone).
 - **Proactive update notifications (quota-free)** — PiDeck and Pi CLI now auto-check for updates every 2h in the background (first check 30s after launch). When a new version is found, a dot badge appears on the Settings gear and the update dialog opens automatically (once per version, with "Skip this version" support). The check source switched from the GitHub REST API to the `releases/latest` redirect + `latest.yml` (aligned with electron-updater's strategy): no more 60/hour/IP quota limit and no authentication required.
 - **Release pipeline now ships latest.yml** — electron-builder gains `publish` (provider: github); `dist:win` prints the asset list to upload with the Release. Channel metadata is platform-specific (Windows: `latest.yml` / macOS: `latest-mac.yml` / Linux: `latest-linux.yml`) and each client reads its own platform file; when missing, the client falls back to the atom/API path automatically.
 - **Check timeout protection** — Every GitHub check request has a 10s timeout: with a broken local network, manual "Check for Updates" spins at most 10s then shows an error and can be retried; background checks keep scheduling the next round after failure (eliminating the historical "infinite spinner, manual update blocked" issue).
 - **Pi CLI background check** — Pi CLI version is checked every 2h alongside the app; a toast notifies about new versions and the "Version & Updates" settings section shows current → latest.
 - **Manual check no longer swallowed** — Clicking "Check for Updates" while an auto-check is in flight now shares the same in-flight request instead of being gated away (the historical root cause of "new version but no prompt").
+- **Session ruler rail completions** — The session right-edge ruler rail now covers all loaded messages (the 15-item cap is gone), tick spacing auto-shrinks as messages grow, ticks are evenly thinned out when space is tight (first/last always kept), and the rail yields bottom space when the terminal dock is open.
+- **Ruler rail offsets for split view** — When a file/diff workspace pane is open, the right-edge ruler rail shifts right to hug the message area's right edge; it returns to the window edge in solo/maximized views.
 
 ### 🐛 Fixes
 - **Update check fallback path** — When a Release lacks latest.yml, the check now degrades to the atom feed + REST fallback instead of failing outright.
-
-## v0.7.2 - 2026-08-29
+- **Update check pipeline hardening** — Repo coordinates unified into PiDeck constants (no longer relying on GitHub rename redirects); recommended download assets get a HEAD availability check with automatic naming-variant correction on 404 (falling back to opening the release page in a browser when all variants fail); version comparison now honors semver pre-release semantics (beta < same-number stable, so beta clients get notified about stable releases); a pre/post-release end-to-end self-check script was added.
+- **DSH usage query provider normalization** — `deepseek-official` / `llm-deepseek` are now normalized to `deepseek` on both main process and renderer, fixing usage/balance missing in the model selector and the orb panel while the DSH card row still showed it (all three now share one cache key, so refreshing one refreshes all).
+- **File manager open & terminal ownership fixes** — Windows now launches explorer.exe via absolute path and uses `shell.openPath` to open directories (macOS too), so the window properly activates to the foreground; the terminal button falls back to the current session's project when `activeProjectId` isn't synced, so cross-project sessions keep showing "Open terminal".
+- **Session panel terminal fold height sync** — The fold/expand height sync was reworked to read the composer's steady-state size before `setLayout`, fixing the fold-then-height-not-released and floating-input issues.
+- **Composer stability** — The send button stays visible when the input has content during busy state; composer height stays stable after switching history; image-gen composer controls keep a single row.
+- **Thinking picker no longer blocked by capability probes** — Opening the thinking-level picker no longer waits on capability probes.
+- **Usage display polish** — Empty provider usage rows are hidden and spacing above the usage toggle is adjusted.
 
 ### 🚀 New Features
 

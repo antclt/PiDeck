@@ -79,25 +79,25 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.2** (2026-08-29)
+> **Latest: v0.7.2** (2026-08-30)
 
 ### v0.7.2 Release Highlights
-- 🚀 **Model capability auto-adaptation & thinking-effort pipeline**
-- 🚀 **Manual model catalog refresh**
-- 🚀 **Usage query expanded**
-- 🚀 **Session restart & reload**
-- 🚀 **DSH session-header agent mode pill**
-- 🚀 **Built-in pi-deck-retry-no-body extension**
-- 🚀 **Ask queries carry main-session context**
-- 🚀 **Sidebar Chats / projects segmentation**
-- 🚀 **Session right-edge ruler rail**
-- 🚀 **Theme cycling from the sidebar footer**
-- 🚀 **Global notifications as card toasts**
-- 🚀 **JetBrains editor scan & system file-manager detection**
-- ✨ **History runtime-operation overlay**
-- ✨ **Tab-bar loading state**
-- ✨ **Model capability explainer card removed**
-- ✨ **Settings grouping**
+- 🚀 **Usage query rebuild (aligned with cc-switch)**
+- 🚀 **Multi-segment usage badges**
+- 🚀 **DSH usage query pipeline**
+- 🚀 **Usage query AI assist**
+- 🚀 **PiDeck-specific files consolidated**
+- 🚀 **Proactive update notifications (quota-free)**
+- 🚀 **Release pipeline now ships latest.yml**
+- 🚀 **Check timeout protection**
+- 🚀 **Pi CLI background check**
+- 🚀 **Manual check no longer swallowed**
+- 🚀 **Session ruler rail completions**
+- 🚀 **Ruler rail offsets for split view**
+- ✨ **Update check fallback path**
+- ✨ **Update check pipeline hardening**
+- ✨ **DSH usage query provider normalization**
+- ✨ **File manager open & terminal ownership fixes**
 
 [View Full Changelog →](CHANGELOG.md)
 
