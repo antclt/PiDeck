@@ -340,7 +340,7 @@ export function UsageProbeConfigDialog(props: {
 	return (
 		<Dialog open onOpenChange={(next) => !next && handleClose()}>
 			<DialogContent className="max-h-[85vh] flex flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
-				<DialogHeader className="px-5 pt-4">
+				<DialogHeader className="px-5 pt-4 pb-2">
 					<DialogTitle>
 						{t("config.usageProbe.titleWithProvider", { provider: props.provider })}
 						{props.backend === "dsh" ? t("config.usageProbe.dshSuffix") : null}

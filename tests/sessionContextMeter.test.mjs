@@ -379,6 +379,12 @@ test("provider card footer keeps alignment and stays silent when usage not enabl
   assert.match(source, /h-9/);
 });
 
+test("usage probe dialog separates title from enable row", () => {
+  const source = readFileSync("src/renderer/src/config/UsageProbeConfigDialog.tsx", "utf8");
+  // 标题与启用开关是两个视觉层级，标题下必须保留稳定的呼吸间距。
+  assert.match(source, /<DialogHeader className="px-5 pt-4 pb-2">/);
+});
+
 test("usage probe dialog lives outside all TabsContent (tab switch must not unmount it)", () => {
   // 回归契约：弹窗曾放在 config:models TabsContent 内，Radix Tabs 默认卸载非激活内容，
   // 导致切到认证 tab / DSH 页时弹窗被卸载、点击柱状图按钮「没反应」。
