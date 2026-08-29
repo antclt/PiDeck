@@ -218,6 +218,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.singleInstanceSaved": "Single-instance setting saved; restart to apply",
   "app.electronSandboxSaved": "Chromium sandbox setting saved; restart to apply",
   "terminal.shellNotAvailable": "Shell not available",
+  "terminal.shellEmpty": "No shells detected",
   "terminal.selectShell": "Select shell",
   "config.restoreBuiltIn": "Restore built-in",
   "config.extensionConflict": "Extension conflict detected; built-in disabled: {builtIn} (conflicts with {thirdParty})",

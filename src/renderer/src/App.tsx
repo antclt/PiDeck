@@ -768,10 +768,16 @@ export function App() {
   // 终端归属：有 activeAgent → agent owner；引导页/未激活 agent/历史会话 → project owner。
   // 终端 open/collapsed/PTY 实例按 owner 隔离，切换项目或 agent 绝不串台；
   // 分屏高度是全局单份并持久化（与抽屉宽度同策略），跨重启恢复上次大小。
-  const terminalOwner = resolveTerminalOwner(activeAgentId, activeProjectId);
   // 会话所属项目（响应式）：未激活 Agent 的会话回退项目终端时需要它的 projectId
   const currentSessionRecord = useAtomValue(
     sessionRecordByIdAtomFamily(currentSessionId ?? ""),
+  );
+  // 终端归属：有 activeAgent → agent owner；未激活 agent/历史会话 → project owner。
+  // activeProjectId 未同步（如 Tab 直切跨项目会话）时用当前会话所属项目兜底，
+  // 保证未激活 agent 的会话也常显「打开终端」按钮。
+  const terminalOwner = resolveTerminalOwner(
+    activeAgentId,
+    activeProjectId ?? currentSessionRecord?.projectId,
   );
   const {
     terminalOpen,

@@ -239,8 +239,16 @@ test("session view uses the budget function in programResize (not raw delta)", (
   );
   assert.match(terminalDockPanel, /applyTerminalPanelResize/);
   assert.match(terminalDockState, /TERMINAL_COLLAPSE_THRESHOLD_PX = 35/);
-  // 折叠终端必须走 redistribuion：库的 collapse() 会把高度补给相邻 composer
-  assert.match(sessionView, /redistributeTerminalAgainstTimeline/);
+  // 折叠/展开终端必须走「稳态读数 + 一次性 setLayout」：
+  // - 库的 collapse() 在本约束组合下会静默失效（调用后 size 不变）；
+  // - panel.resize() 对末位面板收缩走 le() 增量重排，composer disabled + collapsible
+  //   组合下校验失败直接返回原布局；
+  // - 任何先 mutate 面板再读 getSize()/getLayout() 的写法都会拿到过渡态百分比
+  //   （实测 groupPx 虚高 ~1.7 倍），setLayout 被 K() 钳成 composer 撑高的坏布局。
+  assert.doesNotMatch(sessionView, /panel\.collapse\(\)/);
+  assert.doesNotMatch(sessionView, /panel\.expand\(\)/);
+  assert.match(sessionView, /composerPanelRef\.current\?\.getSize\(\)/);
+  assert.match(sessionView, /setLayout\(\{\s*\.\.\.layout,/);
   assert.match(sessionView, /composerHeightStateRef\.current \/ groupPx/);
   assert.match(
     sessionView,

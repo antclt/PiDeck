@@ -218,6 +218,7 @@ export const zhCN = {
   "app.singleInstanceSaved": "单实例设置已保存，重启后生效",
   "app.electronSandboxSaved": "Chromium 沙箱设置已保存，重启后生效",
   "terminal.shellNotAvailable": "该 Shell 不可用",
+  "terminal.shellEmpty": "未检测到可用 Shell",
   "terminal.selectShell": "选择 Shell",
   "config.restoreBuiltIn": "恢复内置",
   "config.extensionConflict": "检测到扩展冲突，已自动禁用内置扩展：{builtIn}（与 {thirdParty} 冲突）",

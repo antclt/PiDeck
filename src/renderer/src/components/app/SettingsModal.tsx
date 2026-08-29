@@ -547,8 +547,9 @@ function SettingsModalContent(props: SettingsModalProps) {
 								>
 									{t("common.export")}
 								</Button>
+								{/* 导入与导出统一 outline 白底描边（与独立 ConfigModal 同款），避免一描边一填充的不一致 */}
 								<Button
-									variant="secondary"
+									variant="outline"
 									size="sm"
 									onClick={() => configPaneRef.current?.importConfig()}
 								>

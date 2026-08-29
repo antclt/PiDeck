@@ -157,8 +157,20 @@ export function ProjectTree(props: {
                 <Filter size={12} />
               </button>
             )}
-            {/* 新建会话/匿名入口已并入右侧「⋯」更多操作菜单（ProjectContextMenu），
-                项目行不再单独提供 + 下拉，避免入口零散且视觉上与搜索/分段重复。 */}
+            {/* 新建会话入口外露为 + 号（hover 项目行可见），匿名会话保留在 ⋯ 菜单 */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t("app.newNormalSession")}
+              title={t("app.newNormalSession")}
+              onClick={(event) => {
+                event.stopPropagation();
+                void props.actions.sessions.createDraft(project.id);
+              }}
+            >
+              <Plus className="size-3.5" aria-hidden="true" />
+            </Button>
             {/* 三个点：把项目右键菜单变成可见入口，让用户知道项目行还有更多操作 */}
             <Button
               type="button"
