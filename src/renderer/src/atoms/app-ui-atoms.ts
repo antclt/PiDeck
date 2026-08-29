@@ -6,6 +6,11 @@ import {
   defaultExpandedSidebarProjects,
   readExpandedSidebarProjects,
 } from "../utils/sidebarExpandedProjects";
+import {
+  DEFAULT_SIDEBAR_NAV_TAB,
+  readSidebarNavTab,
+  type SidebarNavTab,
+} from "../utils/sidebarNavTab";
 
 /** Settings overlay visibility is shared by Sidebar, Pi environment flow, and Session surface. */
 export const settingsOpenAtom = atom(false);
@@ -38,6 +43,13 @@ export type SettingsFocusTarget = {
 	section?: SettingsSectionId;
 	/** 打开时落在设置窗口的顶层分区；缺省为系统设置。侧栏「配置管理」入口带 "config"。 */
 	pane?: "config";
+	/**
+	 * pane="config" 时要落在的配置管理内部分页（ConfigTab，如 "models"）；
+	 * 深链（如圆球面板「去配置用量」）直达模型页，缺省保持上次位置。
+	 */
+	configTab?: "models" | "auth" | "settings" | "trust" | "mcp" | "raw";
+	/** configTab="models" 时要定位的供应商名：ModelsTab 展开该卡片并滚动高亮。 */
+	provider?: string;
 };
 
 /**
@@ -91,6 +103,13 @@ export const sidebarExpandedProjectIdsAtom = atom<ReadonlySet<string>>(
     );
     return cached ? new Set(cached) : defaultExpandedSidebarProjects();
   })(),
+);
+
+/** 侧栏 Chats/项目分段：localStorage 首屏缓存，settings.json 作权威来源。 */
+export const sidebarNavTabAtom = atom<SidebarNavTab>(
+  readSidebarNavTab(
+    typeof window === "undefined" ? undefined : window.localStorage,
+  ) ?? DEFAULT_SIDEBAR_NAV_TAB,
 );
 
 // useStreamdownRendererAtom 已移除：Streamdown 转正为唯一 markdown 引擎（迁移 react-markdown 完成）。

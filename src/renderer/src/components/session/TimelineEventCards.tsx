@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, ChevronUp, MessageCircle, Minimize, X } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
 import type { ChatMessage } from "../../../../shared/types";
 import { t, translateI18nDescriptor } from "../../i18n";
 import { classifyAskCardStatus, formatAskTitle, hasTextSelection, splitAskOption } from "../../utils/askUi";
@@ -18,7 +18,7 @@ import { SingleLinePreview } from "./SingleLinePreview";
 import { deriveRespondingKind, type RespondingKind } from "./timeline/respondingKind";
 
 // Button 收口状态（P0）：本文件按钮全部保留原生——
-// compaction-card-header / thinking-card-trigger 是折叠触发器 + 内容排版容器（内部 span/small/em 结构）；
+// thinking-card-trigger 是折叠触发器 + 内容排版容器（内部 span/small/em 结构）；
 // ask-question-card-option 是选项卡片；ask-question-card-submit/cancel 是品牌视觉按钮
 // （30px 圆角 14px + 2px 边框 + 硬编码品牌绿/危险色，非 token 值，换装会丢失品牌感）。
 // 迁移路径见 P2 CSS 收口。
@@ -31,79 +31,6 @@ function getDiagnosticTone(message: ChatMessage): "error" | "warning" | "success
 	if (status === "success") return "success";
 	return "info";
 }
-
-/** 压缩事件卡片：对话流中的一条普通消息，标记会话被压缩过。
- * 视觉与思考卡片（ThinkingBlock）对齐：lucide 图标标签行 + 虚线内容框，
- * 折叠态最多 4.5 行轻渲染纯文本预览，展开态挂 Markdown 全文；
- * 展开/收起走左下角按钮（不整体可点，与思考/工具卡一致）。
- * 压缩前的归档消息由翻页像正常对话流一样逐条可见（磁盘分页包含归档历史）。 */
-export const CompactionCard = memo(function CompactionCard(props: {
-	message: ChatMessage;
-	sessionId: string;
-	onOpenExternal: (url: string, forceSystem?: boolean) => void;
-	onOpenFile?: (path: string) => void;
-}) {
-	const [expanded, setExpanded] = useState(false);
-	// 学 ThinkingBlock 折叠轻渲染：折叠态只挂 200 字符截断预览，
-	// 全文（Markdown DOM）仅在展开时挂载、收起即卸载；溢出判断用字符阈值替代 DOM 测量。
-	const summaryText = stripAnsi(props.message.text);
-	const PREVIEW_CHARS = 200;
-	const overflowing = summaryText.length > PREVIEW_CHARS;
-	const tokensBefore = (props.message.meta as any)?.tokensBefore;
-	const compactionCount = (props.message.meta as any)?.compactionCount;
-	const time = formatTime(props.message.timestamp);
-
-	return (
-		<TimelineMarker kind="compaction" tone="active">
-		<section data-message-id={props.message.id} className="w-full min-w-0 overflow-hidden rounded-md border-0">
-			{/* 标签行：纯展示，不可点击；展开/收起走左下角按钮（与思考卡片同构） */}
-			<div className="flex min-h-6 flex-wrap items-center gap-2 px-1">
-				<Minimize size={15} className="shrink-0 text-text-secondary" aria-hidden="true" />
-				{typeof compactionCount === "number" && compactionCount > 0 && (
-					<span className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--color-accent)_16%,transparent)] bg-[color:color-mix(in_srgb,var(--color-accent)_8%,transparent)] px-1.5 font-mono text-micro text-text-tertiary">
-						{t("app.compactionCount", { count: compactionCount })}
-					</span>
-				)}
-				{typeof tokensBefore === "number" && (
-					<span className="font-mono text-micro text-text-tertiary">
-						{t("app.compactionTokensBefore", { count: Math.round(tokensBefore / 1000) })}
-					</span>
-				)}
-				<time className="text-micro tabular-nums text-text-tertiary">{time}</time>
-			</div>
-			{/* 虚线框内容区（与思考卡片同款）：折叠态最多 4.5 行。
-			    高度 = 字号 × --line-height-chat × 4.5，避免行高从 1.68 收到 1.5 后预览高度漂移。 */}
-			<div className="rounded-md border border-dashed border-border-subtle bg-[color:color-mix(in_srgb,var(--color-bg-muted)_45%,transparent)]">
-				{expanded ? (
-					<div className="markdown-body px-3 pt-2 pb-1 text-text-tertiary">
-						<MarkdownStream
-							text={summaryText}
-							onOpenExternal={props.onOpenExternal}
-							onOpenFile={props.onOpenFile}
-						/>
-					</div>
-				) : (
-					// 折叠态轻渲染：只显示截断纯文本预览，不跑 streamdown、不建全文 DOM
-					<div className="max-h-[calc(var(--font-size-chat)*var(--line-height-chat)*4.5)] overflow-hidden whitespace-pre-wrap break-words px-3 pt-2 pb-1 text-chat text-text-tertiary">
-						{overflowing ? summaryText.slice(0, PREVIEW_CHARS) + "…" : summaryText}
-					</div>
-				)}
-				<div className="flex px-1 pb-1">
-					<button
-						type="button"
-						className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
-						onClick={() => setExpanded((v) => !v)}
-						aria-expanded={expanded}
-					>
-						{expanded ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
-						{expanded ? t("app.compactionCollapse") : t("app.compactionExpand")}
-					</button>
-				</div>
-			</div>
-		</section>
-		</TimelineMarker>
-	);
-});
 
 /** 错误/RPC/系统诊断消息使用独立卡片，避免和普通 AI 正文混在一起难以扫读。 */
 export const DiagnosticMessageCard = memo(function DiagnosticMessageCard(props: {
@@ -384,7 +311,7 @@ export const ThinkingBlock = memo(
 				)}
 				<Brain size={16} className="thinking-row-icon shrink-0" aria-hidden="true" />
 				{(hasEnded || props.isStreaming) && props.startedAt && (
-					<small className="shrink-0 text-caption tabular-nums text-text-secondary">
+					<small className="shrink-0 text-caption tabular-nums text-text-faint">
 						{hasEnded ? (
 							t("thinking.duration", { duration: durationText })
 						) : (
@@ -399,9 +326,9 @@ export const ThinkingBlock = memo(
 				)}
 				{/* chevron 语言对齐工具行：折叠 ChevronRight，展开 ChevronDown */}
 				{expanded ? (
-					<ChevronDown size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+					<ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
 				) : (
-					<ChevronRight size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+					<ChevronRight size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
 				)}
 				{/* 折叠才挂预览：与工具 displayLabel 一样 truncate 在同一行；
 				    展开后正文在下方，行内预览会抢宽度、和打字机重复。 */}
@@ -410,7 +337,7 @@ export const ThinkingBlock = memo(
 						text={displayedContent}
 						running={props.isStreaming}
 						showSweep={false}
-						className="min-w-0 flex-[1_1_auto] font-mono text-caption text-text-secondary"
+						className="min-w-0 flex-[1_1_auto] font-mono text-caption text-text-faint"
 					/>
 				)}
 			</button>

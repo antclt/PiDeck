@@ -1008,6 +1008,40 @@ test("anonymous runtime binds an existing --no-session process without attaching
   assert.equal(harness.calls.attach, 0);
 });
 
+test("concurrent activation waits for an anonymous runtime already being created", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness({
+    entry: { noSession: true, status: "active" },
+  });
+  const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+  const pending = deferred();
+  const tab = {
+    id: "anonymous-agent",
+    projectId: "project-1",
+    cwd: "C:/project",
+    title: "Anonymous Chat",
+    status: "idle",
+    noSession: true,
+    createdAt: 1,
+  };
+  const pendingActivation = pending.promise.then(() => {
+    harness.tabs.push(tab);
+    coordinator.bindAnonymousRuntime("session-1", tab.id);
+    return tab;
+  });
+
+  coordinator.registerPendingRuntime("session-1", pendingActivation);
+  const activation = coordinator.activateRuntime("session-1");
+  assert.equal(harness.calls.create, 0);
+  pending.resolve();
+
+  const result = await activation;
+  assert.equal(result.ok, true);
+  assert.equal(result.value.agentId, tab.id);
+  assert.equal(harness.calls.create, 0);
+  assert.equal(coordinator.isActivating("session-1"), false);
+});
+
 test("stale generation is rejected before a runtime command reaches AgentManager", async () => {
   const { SessionRuntimeCoordinator } = loadCoordinator();
   const harness = createHarness({

@@ -33,6 +33,19 @@ test("FileDiffViewer: debounced auto-save with Ctrl+S immediate save", () => {
   assert.match(viewer, /clearTimeout\(saveTimerRef\.current\)/);
 });
 
+test("FileDiffViewer: auto-save reads the latest edit and never reapplies a stale snapshot", () => {
+  const viewer = readFileSync("src/renderer/src/components/app/FileDiffViewer.tsx", "utf8");
+  // 编辑器回调与 debounce timer 之间不能捕获旧 render 的 content，否则停顿 500ms
+  // 后会把最后一个字符回滚，CodeMirror 随后将光标带回文档开头。
+  assert.match(viewer, /const contentRef = useRef\(content\)/);
+  assert.match(viewer, /contentRef\.current = result;\n\s*setContent\(result\)/);
+  assert.match(viewer, /const getLatestContent = useCallback\(\(\) => contentRef\.current, \[\]\)/);
+  assert.match(viewer, /contentRef\.current = value;\n\s*setContent\(value\)/);
+  // 保存完成后若用户已继续输入，不得用保存开始时的快照覆盖当前编辑内容。
+  assert.match(viewer, /if \(contentRef\.current === latest\) \{\n\s*setDirty\(false\);\n\s*\}/);
+  assert.doesNotMatch(viewer, /lastSavedRef\.current = latest;\n\s*setContent\(latest\)/);
+});
+
 test("editors bind Ctrl+/ comment toggle and JSON lint", () => {
   const editor = readFileSync("src/renderer/src/components/app/CodeMirrorEditor.tsx", "utf8");
   // Ctrl+/ 注释/取消注释（@codemirror/commands 的 toggleComment）

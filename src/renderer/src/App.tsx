@@ -9,7 +9,7 @@ import {
   useCallback,
 } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
-import { applyAppearanceAttributes } from "./themeAppearance";
+import { applyAppearanceAttributes, toggleThemeMode } from "./themeAppearance";
 // 壁纸模式已注入的 token 键（effect 重跑/清除设置时需要跨运行保留，避免漏清）
 let injectedWallpaperTokens = new Set<string>();
 // 自定义外观主题（customThemeOverrides）已注入的 token 键：切换主题时先清后注，防残留
@@ -136,7 +136,7 @@ import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
 import { splitLayoutSessionIds } from "./utils/sessionSplitEdge";
 import { findLoadedDirectory, loadProjectFileTree, mergeFileTreeChildren } from "./utils/fileTreeLazy";
-import { SessionTabsBar } from "./components/session/SessionTabsBar";
+import { SessionTabsBar, type SessionToolAction } from "./components/session/SessionTabsBar";
 import { SessionPaneServicesProvider } from "./components/session/SessionPaneServices";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
 import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
@@ -703,16 +703,9 @@ export function App() {
     setBusySendDelivery(settings.busySendDelivery);
   }, [settings.busySendDelivery, setBusySendDelivery]);
 
-  // 更新弹窗（2026-12 兼容期修复）：设置加载完成后自动检查一次，有新版本直接弹窗；
-  // 用户禁用更新检查时不触发（设置页手动检查按钮仍可用）。只跑一次，避免
-  // settings 变化（如用户保存其它设置项）触发重复检查。
-  const autoCheckedUpdateRef = useRef(false);
-  useEffect(() => {
-    if (!settingsLoaded || autoCheckedUpdateRef.current) return;
-    if (settings.disableUpdateCheck) return;
-    autoCheckedUpdateRef.current = true;
-    void appUpdate.check("auto");
-  }, [settingsLoaded, settings.disableUpdateCheck, appUpdate.check]);
+  // 应用更新检查只允许设置页「版本与更新」手动触发，这里不做任何自动检查：
+  // 启动自动检查曾导致一进应用就检测、且自动检查在途时手动按钮被 checking 门控
+  // 吞掉（有更新也不弹）。新版本提示完全依赖手动按钮（AppUpdateOverlay）。
 
   // Guard: hide git drawer when git management is disabled.
   // Equivalent to: if (panel === "git" && !settings.enableGitManagement) return
@@ -1140,6 +1133,12 @@ export function App() {
     //    存储语义=图片可见度（0=全遮，1=图全显）；滑块 80% → 遮罩 0.2 → 图 80% 透出。
     root.dataset.bgImage = settings.backgroundImage ? "on" : "off";
     if (settings.backgroundImage) {
+      // 采样前先摘掉上一轮注入的壁纸 token：inline style 在 cascade 上压过
+      // :root[data-theme="dark"] 样式表，不摘的话 getComputedStyle 读到的是
+      // 上一轮主题烤进的旧值，重注入又基于旧值——背景被永久焊死在注入时的
+      // 明暗（暗色启动后亮色坏、亮色启动后暗色坏，即主题互相「打架」的根因）。
+      for (const k of injectedWallpaperTokens) root.style.removeProperty(k);
+      injectedWallpaperTokens.clear();
       root.style.setProperty(
         "--app-bg-image",
         `url("pideck-bg://local/${encodeURIComponent(settings.backgroundImage)}")`,
@@ -3039,12 +3038,30 @@ export function App() {
       branchByProject={branchByProject}
       creatingWorktree={worktreeCreating}
       isLanWeb={isLanWeb}
+      // 「新建任务」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
+      // 用户选择项目后可直接输入对话（首次发送才创建真实会话）。无项目时保持引导页「添加项目」空态。
+      onOpenNewTask={() => { if (activeProjectId) selectProjectCommand(activeProjectId); }}
       onOpenFeedback={() => overlays.setFeedbackOpen(true)}
       settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
+      settingsNavTab={settings.sidebarNavTab}
       settingsLoaded={settingsLoaded}
       onExpandedProjectsReady={() => setExpandedProjectsReady(true)}
       // 官网主页是品牌入口，强制系统浏览器打开：不受「链接打开方式=内置浏览器」设置影响
       onOpenHomepage={() => void api.app.openExternal("https://ayuayue.github.io/PiDeck/", true)}
+      // 底栏主题按钮：点击在浅/暗之间翻转；跟随系统/跟随时间退出自动时按当前实际明暗翻到对面，
+      // 保证每次点击都有可见变化。落库后只合并 theme 字段，data-theme 由外观 effect 依赖 settings.theme 重应用。
+      themeMode={settings.theme}
+      onToggleTheme={() => {
+        void api.settings
+          .update({
+            theme: toggleThemeMode(
+              settings,
+              window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false,
+            ),
+          })
+          .then((saved) => setSettings((current) => ({ ...current, theme: saved.theme })))
+          .catch(() => undefined);
+      }}
     />
   );
 
@@ -3387,9 +3404,59 @@ export function App() {
         }))
       : [];
 
+  // 工具开关上收会话 Tab 栏（原右侧悬浮工具条入口的唯一挂载点）：
+  // 草稿纸 / 终端 / 外部编辑器，与抽屉开关同排。
+  // 终端按钮绑定 owner（agent 或项目），不再要求 agent 已激活；
+  // web 预览 / 无可用目标（纯聊天无项目）时隐藏，避免指向无处可开的终端。
+  const sessionToolActions: SessionToolAction[] = [
+    {
+      id: "scratch",
+      label: t("scratchPad.openTooltip"),
+      icon: <Pencil size={14} />,
+      active: scratchPad.isOpen,
+      onClick: () => scratchPad.toggle(),
+    },
+    ...(!isLanWeb && terminalTarget
+      ? [
+          {
+            id: "terminal",
+            label: t("app.terminal"),
+            icon: <Terminal size={14} />,
+            active: terminalOpen,
+            onClick: () => {
+              setTerminalOpenForOwner(!terminalOpen);
+            },
+          },
+        ]
+      : []),
+    {
+      id: "editors",
+      label: t("app.openWithEditor"),
+      icon: <Code size={14} />,
+      active: editorsOpen,
+      onClick: (e) => {
+        const projectPath =
+          activeAgent?.cwd ||
+          (activeProject && !isChatProject(activeProject)
+            ? activeProject.path
+            : null);
+        // 无项目目录也允许打开：编辑器入口在气泡内禁用并提示，
+        // 文件管理器不依赖项目（空路径由主进程回退用户主目录）
+        const anchor = adjustMenuPos(
+          e.currentTarget.getBoundingClientRect().left - 4,
+          e.currentTarget.getBoundingClientRect().bottom + 4,
+          240,
+          240,
+        );
+        workspace.openExternalEditorChooser(projectPath || "", anchor);
+      },
+    },
+  ];
+
   const sessionTabsBarNode = (
     <SessionTabsBar
       {...sessionTabsProps}
+      toolActions={sessionToolActions}
       editorTabs={workbenchEditorTabs}
       onSelectEditorTab={(tabId) => {
         if (workbenchHasGitDiff) return;
@@ -3589,48 +3656,12 @@ export function App() {
         />
       )}
       outlineContent={
-        /* 悬浮工具条常驻：引导页（无会话）/未激活 agent 也保留草稿纸、终端、编辑器入口。
-           大纲导航列表在无消息时自动 disabled，不影响工具按钮使用。 */
+        /* 右缘刻度定位轴（beUI PreviewRail）：点击刻度跳转消息，hover 出预览卡；
+           无消息时轴自动隐藏。工具开关已上收会话 Tab 栏（sessionToolActions）。 */
         <ConversationOutline
           items={outlineItems}
           // 分屏下由聚焦 pane 的 timeline 注入 jump 回调（ChatSessionPane 写入 services）
           onJump={(messageId) => jumpToMessageRef.current?.(messageId)}
-          extraAction={{
-            active: scratchPad.isOpen,
-            label: t("scratchPad.openTooltip"),
-            onClick: () => scratchPad.toggle(),
-            icon: <Pencil size={14} />,
-          }}
-          // 终端按钮绑定 owner（agent 或项目），不再要求 agent 已激活；
-          // web 预览 / 无可用目标（纯聊天无项目）时隐藏，避免指向无处可开的终端
-          terminalAction={!isLanWeb && terminalTarget ? {
-            active: terminalOpen,
-            label: t("app.terminal"),
-            onClick: () => {
-              setTerminalOpenForOwner(!terminalOpen);
-            },
-            icon: <Terminal size={14} />,
-          } : undefined}
-          filesAction={undefined}
-          gitAction={undefined}
-          editorsAction={{
-            active: editorsOpen,
-            label: t("app.openWithEditor"),
-            onClick: (e) => {
-              const projectPath =
-                activeAgent?.cwd ||
-                (activeProject && !isChatProject(activeProject)
-                  ? activeProject.path
-                  : null);
-              const btn = (e?.currentTarget as HTMLElement)?.closest("button");
-              const anchor = btn
-                ? adjustMenuPos(btn.getBoundingClientRect().left - 4, btn.getBoundingClientRect().top, 220, 280)
-                : undefined;
-              workspace.openExternalEditorChooser(projectPath || "", anchor);
-            },
-            icon: <Code size={14} />,
-          }}
-          browserAction={undefined}
         />
       }
       setListCollapsed={setListCollapsed}

@@ -32,13 +32,13 @@ test("drawer motion is delegated to resizable panels, not CSS grid transition", 
 });
 
 test("drawer keeps its content mounted through the layout transition", () => {
+  // #115 U5：三栏宽度交给 react-resizable-panels（px 状态只同步 CSS 变量，不进 grid 轨道）；
+  // 抽屉内容经 renderPanel 持续挂载，折叠/展开只动面板宽度不卸载内容。
   assert.match(appShell, /WorkspaceDrawerHost/);
   assert.match(appShell, /renderPanel=\{\(panel\) => drawerContent\(panel\)\}/);
-  assert.match(appShell, /drawer && !drawerCollapsed \? drawerWidth : 0/);
-  assert.match(
-    appShell,
-    /"--drawer-col-w": `\$\{drawer && !drawerCollapsed \? drawerWidth : 0\}px`/,
-  );
+  // CSS 变量仍承担「受约束渲染宽度」同步（--drawer-col-w 由面板 onLayoutChanged 提交值驱动）
+  assert.match(appShell, /"--drawer-col-w": /);
+  assert.match(appShell, /renderedWidth/);
 });
 
 test("closed drawer does not reserve horizontal gutter", () => {

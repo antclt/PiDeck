@@ -7,7 +7,6 @@ import type { ChatMessage, ImageContent } from "../../../../shared/types";
 import { MarkdownStream } from "./MarkdownStream";
 import { Button } from "../ui-shadcn/button";
 import {
-  CompactionCard,
   DiagnosticMessageCard,
   EmptyState,
   MultiSelectModal,
@@ -49,7 +48,7 @@ import { Loader2 } from "lucide-react";
 import { showNotice } from "../../utils/notice";
 import {
   composeFailureNotice,
-  isFloatingFailureMessage,
+  isToastOnlyFailureMessage,
   reduceFailureNoticePass,
   type FailureNoticePassState,
 } from "./timelineFailureNotice";
@@ -417,6 +416,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   // （controller.scrolledWindowTurns，初始 3 轮，接近顶部按 3 轮 cohort 自动扩大）——
   // 历史全量放开挂载是大会话渲染进程内存峰值/黑屏的来源。数据仍在 atoms；
   // 但切换恢复期间必须暂时取消条目预算，先物化已保存锚点再恢复正常窗口治理。
+  // 跳转导航（刻度/消息定位）同理：条目预算按条目数封顶，轮数扩得再大也挂不出
+  // 预算外的旧消息，跳转会永远找不到目标行——挂起期间解除预算，回底/切会话恢复。
   const followingForTurnWindow = controller.autoScroll;
   const isRestoringScrollAnchor = controller.isRestoringScrollAnchor;
   const turnWindowTurns = followingForTurnWindow
@@ -426,11 +427,11 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     () => selectTimelineTurnWindow(
       reconciledRuns,
       turnWindowTurns,
-      followingForTurnWindow || isRestoringScrollAnchor
+      followingForTurnWindow || isRestoringScrollAnchor || controller.jumpNavigationActive
         ? undefined
         : TIMELINE_SCROLLED_MAX_ITEMS,
     ),
-    [followingForTurnWindow, isRestoringScrollAnchor, reconciledRuns, turnWindowTurns],
+    [followingForTurnWindow, isRestoringScrollAnchor, controller.jumpNavigationActive, reconciledRuns, turnWindowTurns],
   );
   // 上滚窗口扩展：对比前后 displayRuns 的 id 序列，找出顶部新增段
   // （窗口扩展 / 数据翻页都在顶部插入内容）。只标记「前缀新增」——
@@ -997,9 +998,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                 );
               }
               if (message.role === "error") {
-                // 失败/重试类提示已转 toast（见 FLOATING_FAILURE_KEYS），
-                // 时间线不再渲染卡片；pi 启动失败/运行时诊断仍走诊断卡片。
-                if (isFloatingFailureMessage(message)) return null;
+                // 重试状态提示（retryScheduled/retrySucceeded 等）仍只弹 toast；
+                // 其余失败类同 toast 一起渲染诊断卡片，错误信息留痕可排查（见 TOAST_ONLY_FAILURE_KEYS）。
+                if (isToastOnlyFailureMessage(message)) return null;
                 return <DiagnosticMessageCard key={message.id} message={message} />;
               }
               if (message.role === "system") {
@@ -1009,12 +1010,16 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                   // Legacy in-memory messages may still contain this placeholder.
                   return null;
                 }
+                // 压缩摘要卡片已按产品决策下线（与 dsh 后端行为对齐）：
+                // 压缩进行态由 RespondingIndicator「正在压缩」承担，压缩完成后
+                // 时间线直接呈现保留消息。pi 投影出的 compaction system 消息
+                // 仍会进入时间线数据（主进程继续维护），这里仅不渲染。
                 if (meta?.type === "compaction") {
-                  return <CompactionCard key={message.id} message={message} sessionId={sessionId} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />;
+                  return null;
                 }
-                // 自动重试状态（retryScheduled/retrySucceeded/retryFailed 等）
-                // 属于「重试提示」，与失败类一样转 toast、不占时间线。
-                if (isFloatingFailureMessage(message)) return null;
+                // 重试状态提示（retryScheduled/retrySucceeded 等）
+                // 属于「重试提示」，只弹 toast、不占时间线；失败类系统诊断照常渲染卡片。
+                if (isToastOnlyFailureMessage(message)) return null;
                 return <DiagnosticMessageCard key={message.id} message={message} />;
               }
               return null;

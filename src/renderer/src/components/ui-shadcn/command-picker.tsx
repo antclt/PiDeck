@@ -39,6 +39,13 @@ export function CommandPickerGroup(props: {
 	id: string;
 	label: ReactNode;
 	count?: number;
+	/** 数量的解释文案（如「3 个模型」）；缺省显示裸数字。 */
+	countText?: ReactNode;
+	/**
+	 * 行尾附加内容（渲染在最右端）：供应商用量等「属于整行」的次要信息放这里，
+	 * 不要塞进 label（label 是截断主体）。布局：名称 · 数量 …… 用量（最右）。
+	 */
+	trailing?: ReactNode;
 	defaultOpen?: boolean;
 	children: ReactNode;
 	className?: string;
@@ -59,9 +66,16 @@ export function CommandPickerGroup(props: {
 				aria-expanded={expanded}
 				onClick={() => toggleGroup(props.id)}
 			>
-				{expanded ? <ChevronDown className="size-3.5" aria-hidden="true" /> : <ChevronRight className="size-3.5" aria-hidden="true" />}
-				<span className="min-w-0 flex-1 truncate">{props.label}</span>
-				{props.count != null && <span className="font-mono text-caption text-muted-foreground/75">{props.count}</span>}
+				{expanded ? <ChevronDown className="size-3.5 flex-none" aria-hidden="true" /> : <ChevronRight className="size-3.5 flex-none" aria-hidden="true" />}
+				<span className="max-w-[45%] flex-none truncate">{props.label}</span>
+				{props.count != null && (
+					<span className="flex-none font-mono text-caption text-muted-foreground/70">
+						{props.countText ?? props.count}
+					</span>
+				)}
+				{/* 弹性空隙：把 trailing（用量等）推到行最右，与名称/数量分开，避免挤在一起 */}
+				<span className="min-w-4 flex-1" />
+				{props.trailing}
 			</button>
 			{expanded && <CommandGroup className="p-1">{props.children}</CommandGroup>}
 		</div>

@@ -1,13 +1,16 @@
 /**
- * 全局通知（#115 U5 收尾）：统一走 sonner（shadcn 官方 toast）。
- * 保留 showNotice(message, duration, kind) 旧 API，调用点零改动；
- * kind 映射 sonner 的 error/warning/info 变体。
+ * 全局通知（#115 U5 收尾）：统一走 sonner 全局 toast。
+ * 保留 showNotice(message, duration, kind, title, actions, id) 旧 API，调用点零改动；
+ * 单条 toast 由 toast.custom 渲染的自定义卡片 NoticeToastCard 承载
+ * （图标 + 标题/正文 + 复制/关闭 + 操作按钮），kind 映射 error/warning/info/neutral 图标。
  *
  * Toaster 未挂载（App 尚未启动 / 渲染树崩溃）时回退到 DOM toast，
  * 保证全局错误处理仍能给用户可见反馈。
  */
 
-import { toast, type Action as SonnerAction, type ExternalToast } from "sonner";
+import { createElement } from "react";
+import { toast } from "sonner";
+import { NoticeToastCard, writeClipboardText } from "../components/ui-shadcn/notice-toast";
 import { t } from "../i18n";
 
 type NoticeData = {
@@ -30,6 +33,8 @@ export type NoticeActions = {
 
 let fallbackHost: HTMLDivElement | null = null;
 let nextFallbackNoticeId = 0;
+/** 自定义卡片 toast 的自增 id：toast.custom 不返回 id，需自行生成并回传（用于 dismissNotice 精准关闭）。 */
+let nextSonnerNoticeId = 0;
 export type NoticeId = string | number;
 
 // sonner 2.x 在没有可见 toast 时不会渲染任何 DOM（源码里 `if (!filteredToasts.length) return null`），
@@ -39,6 +44,14 @@ let toasterReady = false;
 
 export function setToasterReady(ready: boolean) {
 	toasterReady = ready;
+}
+
+/**
+ * sonner 的 toast()/toast.custom() 在 Toaster 未挂载（启动早期/渲染树崩溃）时静默丢弃，
+ * 此时走 DOM 兜底，保证全局异常仍能给用户可见反馈。
+ */
+function toasterMounted() {
+	return toasterReady;
 }
 
 function ensureFallbackHost() {
@@ -90,7 +103,7 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeData[
 	item.style.cssText = [
 		"position:relative",
 		"pointer-events:auto",
-		"padding:12px 40px 12px 14px",
+		"padding:12px 72px 12px 14px",
 		"border-radius:10px",
 		"background:var(--color-bg-panel, #ffffff)",
 		"color:var(--color-text-primary, #1f2328)",
@@ -127,6 +140,28 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeData[
 		"cursor:pointer",
 	].join(";");
 	close.addEventListener("click", () => dismissFallbackNotice(item, host));
+	// 复制按钮：与自定义卡片一致，把「标题 + 正文」一并复制（兑底路径同样可复制）
+	const copyBtn = document.createElement("button");
+	copyBtn.type = "button";
+	copyBtn.textContent = "⧉";
+	copyBtn.setAttribute("aria-label", t("common.copy"));
+	copyBtn.title = t("common.copy");
+	copyBtn.style.cssText = [
+		"position:absolute",
+		"top:8px",
+		"right:34px",
+		"width:24px",
+		"height:24px",
+		"border:0",
+		"border-radius:6px",
+		"background:transparent",
+		"color:var(--color-text-tertiary,#8b8f94)",
+		"font:600 14px/1 system-ui,sans-serif",
+		"cursor:pointer",
+	].join(";");
+	copyBtn.addEventListener("click", () => {
+		void writeClipboardText(title ? `${title}\n${message}` : message);
+	});
 	item.appendChild(document.createTextNode(message));
 	if (actions) {
 		// 按钮区：次按钮（cancel）在左、主按钮（action）在右，点击后先执行回调再收起 toast
@@ -149,25 +184,13 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeData[
 		}
 		item.appendChild(buttons);
 	}
+	item.appendChild(copyBtn);
 	item.appendChild(close);
 	host.appendChild(item);
 	if (Number.isFinite(duration)) {
 		window.setTimeout(() => dismissFallbackNotice(item, host), Math.max(1200, duration));
 	}
 	return noticeId;
-}
-
-/** 将项目的可选 onClick 语义转换为 sonner 需要的必填 Action（未提供回调时传空函数）。 */
-function toSonnerAction(action: NoticeAction): SonnerAction {
-	return { label: action.label, onClick: () => action.onClick?.() };
-}
-
-/**
- * sonner 的 toast() 在 Toaster 未挂载（启动早期/渲染树崩溃）时静默丢弃，
- * 此时走 DOM 兜底，保证全局异常仍能给用户可见反馈。
- */
-function toasterMounted() {
-	return toasterReady;
 }
 
 /**
@@ -190,31 +213,25 @@ export function showNotice(
 	if (!toasterMounted()) {
 		return showFallbackNotice(text, resolvedDuration, kind, title, actions, id);
 	}
-	// 带标题/操作按钮的提示：sonner 以 title 为主文案、正文放 description，视觉层级更清晰
-	const options: ExternalToast = {
-		duration: resolvedDuration,
-		description: text,
-		...(id !== undefined ? { id } : {}),
-	};
-	if (actions?.action) options.action = toSonnerAction(actions.action);
-	if (actions?.cancel) options.cancel = toSonnerAction(actions.cancel);
-	if (title) {
-		if (kind === "error") return toast.error(title, options);
-		if (kind === "warning") return toast.warning(title, options);
-		if (kind === "info") return toast.info(title, options);
-		return toast(title, options);
-	}
-	// 无标题：保持历史行为，整段作为主文案
-	const plainOptions: ExternalToast = {
-		duration: resolvedDuration,
-		...(id !== undefined ? { id } : {}),
-	};
-	if (actions?.action) plainOptions.action = toSonnerAction(actions.action);
-	if (actions?.cancel) plainOptions.cancel = toSonnerAction(actions.cancel);
-	if (kind === "error") return toast.error(text, plainOptions);
-	if (kind === "warning") return toast.warning(text, plainOptions);
-	if (kind === "info") return toast.info(text, plainOptions);
-	return toast(text, plainOptions);
+	// 统一走自定义卡片（toast.custom）：一张卡片承载「图标 + 标题/正文 + 复制/关闭 + 操作按钮」，
+	// 不再依赖 sonner 内置 title/description/action 布局——后者把按钮塞在正文右侧同一行，
+	// 长文案 + 双按钮时会挤成一团（历史 issue）。卡片内容见 NoticeToastCard。
+	// 有标题时标题为主文案、正文退为描述；无标题（含空字符串）时整段作为主文案。
+	const noticeId = id !== undefined ? id : `notice-${++nextSonnerNoticeId}`;
+	const cardTitle = title ? title : text;
+	const cardDescription = title ? text : undefined;
+	toast.custom(
+		(toastId) =>
+			createElement(NoticeToastCard, {
+				toastId,
+				kind: kind ?? "neutral",
+				title: cardTitle,
+				description: cardDescription,
+				actions,
+			}),
+		{ id: noticeId, duration: resolvedDuration },
+	);
+	return noticeId;
 }
 
 /** 精准关闭由 showNotice 返回的通知，不影响其他全局 toast。 */

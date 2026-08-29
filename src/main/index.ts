@@ -234,6 +234,7 @@ import { PiModelCapabilityCache, watchPiConfigDirectory } from "./pi/PiModelCapa
 import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
+import { credentialValueFromDocument } from "./dsh/dshCredentials";
 import { DshAgentManager } from "./dsh/DshAgentManager";
 import { startDshHostInBackground } from "./dsh/startDshHostInBackground";
 import {
@@ -622,7 +623,11 @@ async function createAnonymousSession(
 	});
 	// Agent 启动可能包含 spawn/get_state/历史准备；匿名会话先返回可选中的 Session，
 	// 再后台绑定 runtime。这样欢迎页点击后能立即进入输入框，启动失败仍通过 detach/日志收敛。
-	void activateAnonymousRuntime(session, project, input).catch(() => undefined);
+	// 先把后台启动 Promise 放进 Coordinator 的 Session 锁，再把 Session 返回给
+	// renderer；用户若立即输入，activateRuntime 会等待这次启动而不会再 spawn 一个 pi。
+	const activation = activateAnonymousRuntime(session, project, input);
+	sessionRuntimeCoordinator.registerPendingRuntime(session.id, activation);
+	void activation.catch(() => undefined);
 	return { session };
 }
 
@@ -630,7 +635,7 @@ async function activateAnonymousRuntime(
 	session: SessionRecord,
 	project: Project,
 	input: CreateAnonymousSessionInput,
-): Promise<void> {
+): Promise<AgentTab> {
 	let agentId: string | undefined;
 	try {
 		const tab = await agentManager.create({
@@ -655,6 +660,7 @@ async function activateAnonymousRuntime(
 			if (!result.ok) throw new Error(result.error.code);
 		}
 		emitReplacementState(runtime, true);
+		return tab;
 	} catch (error) {
 		if (agentId) await agentManager.stop(agentId).catch(() => undefined);
 		sessionCatalog.removeTransient(session.id);
@@ -668,6 +674,7 @@ async function activateAnonymousRuntime(
 			platform: process.platform,
 			arch: process.arch,
 		});
+		throw error;
 	}
 }
 
@@ -2743,7 +2750,7 @@ function registerIpc() {
 			// 配置页「全部导入」与启动自动同步共用此入口。
 			syncDshForeignSessions: () => runDshForeignSync(),
 			// G14：DSH 归档/恢复（目录移动 + manifest，与 pi 归档同语义，不销毁数据）
-			archiveDshSession: (dshSessionId, cwd) => dshHost.archiveSession(dshSessionId, cwd),
+			archiveDshSession: (dshSessionId, cwd, title) => dshHost.archiveSession(dshSessionId, cwd, title),
 			unarchiveDshSession: (dshSessionId) => dshHost.unarchiveSession(dshSessionId),
 			listArchivedDshSessions: () => dshHost.listArchivedSessions(),
 			// G13 深化：动态 Cordis 插件管理（进程内临时扩展，define/run/stop/undefine）
@@ -3043,7 +3050,27 @@ app.whenReady().then(async () => {
 	gitService = new GitService();
 	worktreeService = new WorktreeService(mainCopy);
 	piLocator = new PiLocator(mainCopy);
-	configManager = new ConfigManager(undefined, mainCopy);
+	// DSH 用量链路（backend="dsh"）：配置落 $DSH_HOME/usage-probes.json、凭据从
+	// $DSH_HOME/.credentials.yaml 读，与 pi 侧链路（~/.pi/agent）完全同构、互不干扰。
+	// DSH_HOME 解析与 DshHost 同一套（设置覆盖 > ~/.dsh > 应用私有目录），getter 每次求值，
+	// 用户改设置立即生效；readCredential 环境层优先、文件层兜底（与 DshHost 相同优先级）。
+	configManager = new ConfigManager(undefined, mainCopy, {
+		getHomeDir: () =>
+			resolveDshHomeDir(settingsStore.get().dshHomeDir ?? "", app.getPath("userData")),
+		readCredential: async (ref) => {
+			const envValue = process.env[ref]?.trim();
+			if (envValue) return envValue;
+			try {
+				const filePath = join(
+					resolveDshHomeDir(settingsStore.get().dshHomeDir ?? "", app.getPath("userData")),
+					".credentials.yaml",
+				);
+				return credentialValueFromDocument(await readFile(filePath, "utf8"), ref);
+			} catch {
+				return undefined;
+			}
+		},
+	});
 	promptManager = new PromptManager(undefined, mainCopy);
 	xuePromptManager = new XuePromptManager();
 	skillManager = new SkillManager(undefined, mainCopy);
@@ -3056,6 +3083,15 @@ app.whenReady().then(async () => {
 			void appLogger?.info("skill", "Usage probe skill template auto-installed", { path: result.path });
 		} else {
 			void appLogger?.warn("skill", "Usage probe skill template auto-install failed", { error: result.error });
+		}
+	});
+	// 生图技能同样启动时自动落到用户全局技能目录（pi 只扫 ~/.pi/agent/skills 等，不读 resources/），
+	// 否则用户无法 /skill:image-gen 触发生图。fire-and-forget，失败不阻塞启动。
+	void skillManager.installImageGenTemplate().then((result) => {
+		if (result.success) {
+			void appLogger?.info("skill", "Image-gen skill template auto-installed", { path: result.path });
+		} else {
+			void appLogger?.warn("skill", "Image-gen skill template auto-install failed", { error: result.error });
 		}
 	});
 	extensionManager = new ExtensionManager(
@@ -3608,12 +3644,13 @@ app.whenReady().then(async () => {
 	// 模型 capability cache 的 hydration 在 syncWslConfig 后启动，确保它与 PiProcess
 	// 使用同一套 WSL HOME/config 目录；不阻塞首帧。
 	void syncWslConfig().then(async () => {
-		piModelCapabilityCache?.watchConfigDirectory();
 		// 冷启动先刷 pi 模型目录缓存（models-store.json）再 hydration：PiDeck 的 RPC
 		// 进程都带 --offline，pi 启动时的自动目录网络刷新被跳过；目录若不主动刷新
 		// 只能靠 TUI 更新，可能长期滞后（官方 provider 新模型导致「列表有、Agent
 		// 快照没有」的选择失败，2026-08 deepseek 场景）。目录过期才刷（mtime 节流），
 		// 过期时刷新失败也不挡启动——下次冷启动再试，watcher 兜底失效已发布快照。
+		// watcher 必须在这两步之后安装：否则启动目录刷新或 Pi 初始化期间的文件事件
+		// 会立刻 invalidate 正在进行的 hydration，造成同一启动周期重复 spawn 临时 Pi。
 		await refreshModelCatalogIfStale(
 			piLocator,
 			settingsStore,
@@ -3628,6 +3665,7 @@ app.whenReady().then(async () => {
 			}
 		});
 		await piModelCapabilityCache?.ensure();
+		piModelCapabilityCache?.watchConfigDirectory();
 	}).catch((error) => {
 		void appLogger.warn("app", "WSL config sync or Pi capability hydration failed", error);
 	});

@@ -2,6 +2,7 @@ import { Button } from "../components/ui-shadcn/button";
 import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
 import { X, Plus, Check } from "lucide-react";
 import type { AuthFile, SettingsFile, ModelsFile } from "./configTypes";
+import { collectProviderOptions } from "./providerOptions";
 import { ConfigComboboxInput } from "./ConfigShared";
 import { t } from "../i18n";
 import { Input } from "../components/ui-shadcn/input";
@@ -761,20 +762,9 @@ function SettingsValueInput(props: {
 }) {
 	const { value, fieldKey, modelsData, authData, discoveredModels, allSettings } = props;
 
-	// defaultProvider: 从 modelsData.providers + authData 的 key 列表聚合所有可用的供应商
+	// defaultProvider: 从 modelsData.providers + authData + discoveredModels 聚合所有可用的供应商
 	if (fieldKey === "defaultProvider") {
-		const providerSet = new Set<string>();
-		if (modelsData) {
-			for (const name of Object.keys(modelsData.providers)) {
-				providerSet.add(name);
-			}
-		}
-		if (authData) {
-			for (const name of Object.keys(authData)) {
-				providerSet.add(name);
-			}
-		}
-		const providerOptions = [...providerSet].map((name) => ({ value: name }));
+		const providerOptions = collectProviderOptions(modelsData, authData, discoveredModels);
 		const current = typeof value === "string" ? value : "";
 		return (
 			<ClearableSettingsInput

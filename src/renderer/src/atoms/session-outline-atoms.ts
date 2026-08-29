@@ -29,6 +29,20 @@ function currentSessionMessages(get: Getter): ChatMessage[] {
 }
 
 /**
+ * 当前聚焦会话「全部已加载」的消息：落盘历史前缀 + 运行时窗口段，
+ * 与时间线 combinedMessages 同构。大纲刻度必须用这一份——
+ * 只读 .messages 的话，上翻加载的历史没有刻度，runtime 窗口会话
+ * （主进程 12 轮缓存）的长会话只剩尾部几轮可定位。
+ */
+function currentLoadedSessionMessages(get: Getter): ChatMessage[] {
+  const sessionId = get(currentSessionIdAtom);
+  if (!sessionId) return [];
+  const entry = get(sessionMessagesCacheAtom)[sessionId];
+  if (!entry) return [];
+  return entry.history ? [...entry.history.messages, ...entry.messages] : entry.messages;
+}
+
+/**
  * 当前会话中 agent 修改过的文件（从 tool 消息 meta 中提取）。
  * 同一路径再次被修改时移到列表末尾，右侧修改清单按「最新修改」展示；
  * diff 展示使用工具参数（oldText/newText）计算变动区域。
@@ -60,7 +74,7 @@ export const modifiedFilesAtom = atom((get) => {
   return Array.from(byPath.values());
 });
 
-/** 当前聚焦会话的大纲条目（用户消息摘要），供右侧悬浮大纲导航列表展示。 */
+/** 当前聚焦会话的大纲条目（用户消息摘要），供右侧刻度定位轴展示。 */
 export const outlineItemsAtom = atom((get) => {
-  return buildOutline(currentSessionMessages(get));
+  return buildOutline(currentLoadedSessionMessages(get));
 });

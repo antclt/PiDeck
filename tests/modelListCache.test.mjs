@@ -377,6 +377,18 @@ test("model list report channel: manual refresh reruns list models with failure 
   assert.doesNotMatch(plainSection, /force/);
 });
 
+test("save models verification excludes config-fallback (empty name proven via local read)", () => {
+	// 保存后验证不能把 config-fallback 当成“pi 已加载模型”：CLI 空时回退本地 models.json
+	// 会把空 name 自动补成 `${provider}/${id}`，看似列表非空实则是假绿灯。
+	assert.match(systemIpc, /report\.source !== "config-fallback"/);
+	assert.match(systemIpc, /modelLoadReason = "config-fallback"/);
+	// 归一化侧同步根治：空 name 在写盘前被剥离，不再产出非法 models.json。
+	assert.match(
+		readFileSync("src/main/config/ConfigManager.ts", "utf8"),
+		/normalized\.name\.length === 0/,
+	);
+});
+
 test("model picker wires manual refresh + failure guide", () => {
   const hook = readFileSync(
     "src/renderer/src/hooks/useBackendModelCatalog.ts",

@@ -210,3 +210,20 @@ test("installUsageProbeTemplate copies the bundled template into the global skil
 		assert.equal(readFileSync(target, "utf8"), written);
 	});
 });
+
+test("installImageGenTemplate copies the bundled image-gen skill into the global skills dir", async () => {
+	await withTemporaryHome(async (home) => {
+		const { SkillManager } = loadSkillManagerModule();
+		const manager = new SkillManager(home);
+		const result = await manager.installImageGenTemplate();
+		assert.equal(result.success, true);
+		const target = join(home, ".pi", "agent", "skills", "image-gen", "SKILL.md");
+		const written = readFileSync(target, "utf8");
+		assert.match(written, /name: image-gen/);
+		assert.match(written, /images\/generations/);
+		// 幂等覆盖：重复安装不报错、内容一致
+		const again = await manager.installImageGenTemplate();
+		assert.equal(again.success, true);
+		assert.equal(readFileSync(target, "utf8"), written);
+	});
+});

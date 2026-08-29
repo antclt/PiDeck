@@ -42,8 +42,12 @@ import {
 	previewProviderMigration,
 	type ProviderMigrationDeps,
 } from "../config/providerMigrationService";
-import { piBuiltinSnapshotFromCatalog } from "../config/providerMigration";
-import { resolveProviderUsageEndpoint } from "../config/providerUsageResolver";
+import { USAGE_PROBE_CANDIDATES } from "../config/providerUsageProbe";
+import { saveUsageProbeForProvider } from "../config/userUsageProbes";
+import type {
+	UsageProbeProviderConfig,
+	UsageProbeTestInput,
+} from "../../shared/types/providerUsage";
 import type { ProviderMigrationDirection } from "../../shared/types/providerMigration";
 import type { McpConfigFile, McpServerDefinition } from "../../shared/types/mcp";
 
@@ -713,7 +717,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (!target) return undefined;
 		const validated = sessionRuntimeCoordinator.validateTarget(target);
 		if (!validated.ok) {
-			if (sessionCommandIpcError) throw sessionCommandIpcError((validated as { ok: false; error: import("../../shared/types").SessionCommandError }).error);
+			// 失败原因落日志：rpc 日志开关/查询/保存都会走这里，静默失败会让渲染层
+			// 误以为开关已生效（此前 handler 在 undefined 时直接 return enabled 假成功）。
+			const error = (validated as { ok: false; error: import("../../shared/types").SessionCommandError }).error;
+			void appLogger.warn("agent", "RPC log runtime target invalid", {
+				sessionId: target.sessionId,
+				agentId: target.agentId,
+				runtimeGeneration: target.runtimeGeneration,
+				code: error.code,
+			});
+			if (sessionCommandIpcError) throw sessionCommandIpcError(error);
 			return undefined;
 		}
 		return target.agentId;
@@ -746,7 +759,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	);
 	ipcMain.handle(ipcChannels.rpcLoggingSet, async (_event, target: SessionRuntimeTarget, enabled: boolean) => {
 		const agentId = resolveRpcRuntimeAgent(target);
-		if (!agentId) return enabled;
+		// target 校验失败时返回 false（而非 enabled）：此前静默返回 enabled 会让渲染层
+		// 弹「RPC 日志已打开」提醒框，实际主进程从未开启记录，导致弹窗永远无数据。
+		if (!agentId) return false;
 		// G17：DSH 会话的 RPC 日志走 DshAgentManager（领域调用记录），pi 走 AgentManager。
 		if (isDshAgent?.(agentId)) {
 			setDshRpcLogging?.(agentId, enabled);
@@ -1125,9 +1140,14 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		let modelLoadDetail = "";
 		try {
 			const report = await resolveModelListReport(piLocator, settingsStore, configManager, true);
-			modelLoadOk = report.ok && report.models.length > 0;
+			// 只有 pi 自己成功列出非空模型列表才算“保存且可用”。source 为 config-fallback
+			// 说明 pi 实际没能列出模型（CLI 空 → 回退读本地 models.json 兑底，且兑底会把空
+			// name 自动补成 ${provider}/${id}），此时报“已加载”是假绿灯。
+			modelLoadOk = report.ok && report.models.length > 0 && report.source !== "config-fallback";
 			modelCount = report.models.length;
 			modelLoadReason = report.reason;
+			// config-fallback 时 report.reason 为 null，补充一个可诊断原因，避免日志/UI 拿到空 reason。
+			if (report.source === "config-fallback") modelLoadReason = "config-fallback";
 			modelLoadDetail = report.detail ?? "";
 		} catch (error) {
 			modelLoadReason = "cli-failed";
@@ -1217,36 +1237,95 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configFetchUsage, async (
 		_event,
-		payload: { provider: string },
+		payload: { provider: string; backend?: "pi" | "dsh" },
 	) => {
 		// 1) 边界校验：provider 名必须是有限的非空字符串，避免把任意 IPC 载荷当路径/URL 用。
 		const provider = payload?.provider?.trim() ?? "";
 		if (!provider || provider.length > 128) {
 			return { success: false, error: "Invalid provider name" };
 		}
-		// 2) 主进程按 provider 名解析端点（models.json → catalog 兜底），key 不出主进程。
-		const catalog = getPiAiCatalogIndex();
-		const lookup = {
-			getModelsConfig: () => configManager.getModelsConfig(),
-			getAuthConfig: () => configManager.getAuthConfig(),
-			catalogProvider: (name: string) =>
-				piBuiltinSnapshotFromCatalog(name, undefined, catalog),
-		};
-		const resolved = await resolveProviderUsageEndpoint(lookup, provider);
-		if (!resolved.matched || !resolved.baseUrl) {
-			return { success: false, error: "Unsupported provider" };
-		}
-		const result = await configManager.fetchProviderUsage(
-			resolved.baseUrl, resolved.apiKey ?? "", resolved.apiType, resolved.headers,
-		);
+		// backend 白名单：pi（缺省）/ dsh（DSH 链路：$DSH_HOME 配置 + 凭据库）。
+		const backend = payload?.backend === "dsh" ? "dsh" : "pi";
+		// 2) 主进程按 provider 名路由：门控（未开启）→ 端点解析 → 模板探测，key 不出主进程。
+		const result = await configManager.fetchProviderUsage(provider, backend);
 		void appLogger.info("config", "Provider usage fetched", {
 			provider,
-			baseUrl: resolved.baseUrl,
-			apiType: resolved.apiType,
+			backend,
 			success: result.success,
 			error: result.error,
 		});
 		return { ...result, provider };
+	});
+	// ── 用量查询配置（usage-probes.json；学 cc-switch：per-provider 开关 + 模板） ──
+	// 读取：该 provider 已保存配置 + 内置模板自动识别（弹窗打开时拉取）。
+	ipcMain.handle(ipcChannels.configGetUsageProbes, async (_event, payload: unknown) => {
+		const raw = payload && typeof payload === "object" ? (payload as { provider?: unknown; backend?: unknown }) : {};
+		const provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
+		if (!provider || provider.length > 128) {
+			return { success: false, error: "Invalid provider name" };
+		}
+		const backend = raw.backend === "dsh" ? "dsh" : "pi";
+		return configManager.getUsageProbeSettings(provider, backend);
+	});
+	// 按 provider 合并保存：入口校验与落盘同一套规则，零错误才写（保留文件里其它 providers 与旧 probes）。
+	ipcMain.handle(ipcChannels.configSaveUsageProbes, async (_event, payload: unknown) => {
+		const input =
+			payload && typeof payload === "object" && !Array.isArray(payload)
+				? (payload as { provider?: unknown; config?: unknown; backend?: unknown })
+				: {};
+		const provider = typeof input.provider === "string" ? input.provider.trim() : "";
+		if (!provider || provider.length > 128) {
+			return { ok: false, error: "Invalid provider name" };
+		}
+		const backend = input.backend === "dsh" ? "dsh" : "pi";
+		const result = await saveUsageProbeForProvider(
+			configManager.getUsageProbeConfigDir(backend),
+			provider,
+			input.config as UsageProbeProviderConfig,
+		);
+		// 日志只记 provider 与结果；apiKey/accessToken 等字段一律不落日志。
+		void appLogger.info("config", "Usage probe config saved", {
+			provider,
+			backend,
+			ok: result.ok,
+		});
+		return result;
+	});
+	// 单条模板测试（弹窗「测试」按钮）：按模板 id + 覆盖字段构建候选，主进程解析端点与密钥。
+	ipcMain.handle(ipcChannels.configTestUsageProbe, async (_event, payload: unknown) => {
+		const input =
+			payload && typeof payload === "object" && !Array.isArray(payload)
+				? (payload as UsageProbeTestInput)
+				: ({} as UsageProbeTestInput);
+		const provider = typeof input.provider === "string" ? input.provider.trim() : "";
+		if (!provider || provider.length > 128) {
+			return { success: false, error: "Invalid provider name" };
+		}
+		const template = typeof input.template === "string" ? input.template.trim() : undefined;
+		if (template && template !== "general" && template !== "newapi") {
+			// 内置模板 id 也接受（识别命中后的「测试」按钮走这条路径）。
+			const knownBuiltin = USAGE_PROBE_CANDIDATES.some((c) => c.templateId === template);
+			if (!knownBuiltin) {
+				return { success: false, error: "Unknown template" };
+			}
+		}
+		const result = await configManager.testUsageProbe({
+			provider,
+			backend: input.backend === "dsh" ? "dsh" : "pi",
+			...(template ? { template } : {}),
+			...(typeof input.apiKey === "string" ? { apiKey: input.apiKey } : {}),
+			...(typeof input.baseUrl === "string" ? { baseUrl: input.baseUrl } : {}),
+			...(typeof input.accessToken === "string" ? { accessToken: input.accessToken } : {}),
+			...(typeof input.userId === "string" ? { userId: input.userId } : {}),
+			...(typeof input.timeoutSecs === "number" ? { timeoutSecs: input.timeoutSecs } : {}),
+		});
+		void appLogger.info("config", "Usage probe tested", {
+			provider,
+			backend: input.backend === "dsh" ? "dsh" : "pi",
+			template: template ?? "(auto)",
+			success: result.success,
+		});
+		return result;
 	});
 	// 安装内置「用量查询自定义」技能模板：从 app resources 复制 SKILL.md 到全局技能目录。
 	// 幂等：内容直接覆盖；启动时也会自动安装（见 index.ts），此处保留手动触发兑底。
@@ -1257,6 +1336,17 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { success: true, path: result.path };
 		}
 		void appLogger.warn("skill", "Failed to install usage probe skill template", { error: result.error });
+		return { success: false, error: result.error };
+	});
+
+	// 内置生图技能手动安装入口：与 usage-probe 同理，供 UI/调试触发兑底（启动时已自动装，此处幂等覆盖）。
+	ipcMain.handle(ipcChannels.configInstallImageGenSkill, async () => {
+		const result = await skillManager.installImageGenTemplate();
+		if (result.success) {
+			void appLogger.info("skill", "Image-gen skill template installed", { path: result.path });
+			return { success: true, path: result.path };
+		}
+		void appLogger.warn("skill", "Failed to install image-gen skill template", { error: result.error });
 		return { success: false, error: result.error };
 	});
 

@@ -1,11 +1,13 @@
 import { useAtomValue } from "jotai";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   CircleStop,
   CircleX,
   Folder,
   MessagesSquare,
+  MoreHorizontal,
   PanelLeft,
   PanelRight,
   Pin,
@@ -33,9 +35,17 @@ import { AnimatedBadge } from "../motion/animated-badge";
 import { sessionStatusBadge } from "../../utils/sessionStatusBadge";
 import { Button } from "../ui-shadcn/button";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "../ui-shadcn/context-menu";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui-shadcn/dropdown-menu";
@@ -101,6 +111,16 @@ export type WorkbenchEditorTabItem = {
   active?: boolean;
 };
 
+/** Tab 栏工具开关项：App 层装配（与抽屉活动栏动作同构），本栏只负责渲染与激活态展示。 */
+export type SessionToolAction = {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  active?: boolean;
+  /** 参数放宽到 HTMLElement：按钮既可直渲染也可作为下拉菜单项挂载。 */
+  onClick: (event: React.MouseEvent<HTMLElement>) => void;
+};
+
 export type SessionTabsBarProps = {
   tabs: readonly string[];
   pinnedTabs: readonly string[];
@@ -126,6 +146,8 @@ export type SessionTabsBarProps = {
   onToggleListCollapsed?: () => void;
   /** 当前会话的状态/操作区；嵌入 Tab 栏后不再单独占用标题行。 */
   actions?: ReactNode;
+  /** 工具开关（草稿纸/终端/外部编辑器等）：原右侧悬浮工具条上收至此，排在抽屉开关左侧。 */
+  toolActions?: readonly SessionToolAction[];
   /** 开始/结束拖拽会话 Tab 时通知外层（用于分屏落点预览）。 */
   onDragSessionChange?: (sessionId: string | null) => void;
   /** 分屏组：分屏内会话聚合为组（浏览器标签组风格：颜色标记 + 展开/收起）。 */
@@ -257,18 +279,13 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
                   ? dragIndicator.position
                   : null
               }
-              // 停止/重启/重新加载只对当前会话有意义（作用于其绑定的 Agent 运行时），非当前 Tab 不显示
-              canStop={sessionId === currentSessionId ? props.canStopCurrent : undefined}
+              // 运行中反馈徽章只对当前会话有意义（作用于其绑定的 Agent 运行时），非当前 Tab 不显示；
+              // 运行控制菜单项已上收右上角 ⋯ 菜单，Tab 只保留转动态展示
               isStopping={sessionId === currentSessionId ? props.isStoppingCurrent : undefined}
-              onStop={sessionId === currentSessionId ? props.onStopCurrent : undefined}
-              canRestart={sessionId === currentSessionId ? props.canRestartCurrent : undefined}
               isRestarting={
                 sessionId === currentSessionId ? props.isRestartingCurrent : undefined
               }
-              onRestart={sessionId === currentSessionId ? props.onRestartCurrent : undefined}
-              canReload={sessionId === currentSessionId ? props.canReloadCurrent : undefined}
               isReloading={sessionId === currentSessionId ? props.isReloadingCurrent : undefined}
-              onReload={sessionId === currentSessionId ? props.onReloadCurrent : undefined}
               onSelect={props.onSelect}
               onPromotePreview={props.onPromotePreview}
               onClose={props.onClose}
@@ -463,7 +480,8 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
             ];
           });
         })()}
-        {/* 浏览器式新建入口：跟在最后一张标签后面，下拉选择新建到哪个项目 */}
+        {/* 浏览器式新建入口：跟在最后一张标签后面，下拉选择新建到哪个项目。
+            （新建会话保留独立「+」按钮；⋯ 菜单只收运行控制与工具） */}
         <NewSessionMenu
           targets={props.newSessionTargets}
           onSelect={props.onNewSessionInProject}
@@ -498,25 +516,104 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
           </>
         ) : null}
       </div>
-      {/* 右侧抽屉总开关：固定在会话 Tab 栏最右侧；面板切换图标在抽屉内活动栏。 */}
-      {props.onToggleDrawer ? (
+      {/* 右侧抽屉总开关：固定在会话 Tab 栏最右侧；面板切换图标在抽屉内活动栏。
+          ⋯ 菜单收运行控制（当前会话）与工具开关两组（新建会话保留独立「+」按钮）；
+          Tab 级操作（固定/关闭等）保留在 Tab 右键菜单。 */}
+      {props.onToggleDrawer ||
+      props.actions != null ||
+      (props.toolActions && props.toolActions.length > 0) ||
+      props.onStopCurrent ||
+      props.onRestartCurrent ||
+      props.onReloadCurrent ? (
         <div className="session-tabs-actions flex shrink-0 items-center gap-1 border-l border-border/30 pl-1">
           {props.actions}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={`header-drawer-toggle size-7${props.drawerOpen ? " active" : ""}`}
-            title={props.drawerOpen ? t("app.closeDrawer") : t("app.openDrawer")}
-            aria-label={props.drawerOpen ? t("app.closeDrawer") : t("app.openDrawer")}
-            onClick={props.onToggleDrawer}
-          >
-            <PanelRight className="size-3.5" aria-hidden="true" />
-          </Button>
-        </div>
-      ) : props.actions != null ? (
-        <div className="session-tabs-actions flex shrink-0 items-center gap-1 border-l border-border/30 pl-1">
-          {props.actions}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className={`size-7${props.toolActions?.some((action) => action.active) ? " text-[var(--color-accent)]" : ""}`}
+                title={t("tabs.moreActions")}
+                aria-label={t("tabs.moreActions")}
+              >
+                <MoreHorizontal className="size-3.5" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44">
+              {/* 运行控制只作用于当前会话；无当前会话（onStop 等为空）时整组不显示。
+                  置灰用内联 style 而非 className——特异性最高，任何 CSS 都覆盖不了。 */}
+              {(props.onStopCurrent || props.onRestartCurrent || props.onReloadCurrent) && (
+                <>
+                  <DropdownMenuLabel>{t("tabs.currentSessionGroup")}</DropdownMenuLabel>
+                  {props.onStopCurrent && (
+                    <DropdownMenuItem
+                      disabled={!props.canStopCurrent || props.isStoppingCurrent}
+                      style={!props.canStopCurrent || props.isStoppingCurrent ? { opacity: 0.4 } : undefined}
+                      onSelect={props.onStopCurrent}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <CircleStop className={cn("size-3.5", props.isStoppingCurrent && "animate-pulse")} aria-hidden="true" />
+                        {props.isStoppingCurrent ? t("app.stopping") : t("tabs.stopAgent")}
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                  {props.onRestartCurrent && (
+                    <DropdownMenuItem
+                      disabled={!props.canRestartCurrent || props.isRestartingCurrent}
+                      style={!props.canRestartCurrent || props.isRestartingCurrent ? { opacity: 0.4 } : undefined}
+                      onSelect={props.onRestartCurrent}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <RotateCw className={cn("size-3.5", props.isRestartingCurrent && "animate-spin")} aria-hidden="true" />
+                        {props.isRestartingCurrent ? t("app.restarting") : t("app.restart")}
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                  {props.onReloadCurrent && (
+                    <DropdownMenuItem
+                      disabled={!props.canReloadCurrent || props.isReloadingCurrent}
+                      style={!props.canReloadCurrent || props.isReloadingCurrent ? { opacity: 0.4 } : undefined}
+                      onSelect={props.onReloadCurrent}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <RefreshCw className={cn("size-3.5", props.isReloadingCurrent && "animate-spin")} aria-hidden="true" />
+                        {props.isReloadingCurrent ? t("app.reloading") : t("menu.reloadSession")}
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              {props.toolActions && props.toolActions.length > 0 && (
+                <>
+                  <DropdownMenuLabel>{t("tabs.toolsGroup")}</DropdownMenuLabel>
+                  {props.toolActions.map((action) => (
+                    <DropdownMenuItem key={action.id} onClick={action.onClick}>
+                      {action.icon}
+                      <span>{action.label}</span>
+                      {action.active ? (
+                        <Check className="ml-auto size-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                      ) : null}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {props.onToggleDrawer ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className={`header-drawer-toggle size-7${props.drawerOpen ? " active" : ""}`}
+              title={props.drawerOpen ? t("app.closeDrawer") : t("app.openDrawer")}
+              aria-label={props.drawerOpen ? t("app.closeDrawer") : t("app.openDrawer")}
+              onClick={props.onToggleDrawer}
+            >
+              <PanelRight className="size-3.5" aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -540,12 +637,12 @@ function EditorWorkbenchTab(props: {
       aria-selected={Boolean(tab.active)}
       title={tab.title ?? tab.label}
       className={cn(
-        "session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 text-caption transition-colors",
+        "session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 text-caption transition-[color,background-color,border-color,box-shadow,transform] duration-200",
         "w-fit max-w-40",
         // 选中态与侧栏 SessionTree 一致：背景浮起 + 强边框 + 轻阴影（浏览器 Tab 惯例）
         tab.active
           ? "border-border-strong bg-accent/20 font-medium text-foreground shadow-sm"
-          : "border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+          : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent/50 hover:text-foreground",
         tab.preview && "italic font-normal text-muted-foreground",
       )}
       onClick={() => props.onSelect?.(tab.id)}
@@ -563,6 +660,14 @@ function EditorWorkbenchTab(props: {
       <span className={cn("min-w-0 flex-1 truncate", tab.preview && "italic")}>
         {tab.label}
       </span>
+      {/* 选中指示条：切换/选中 Tab 时从中间展开（origin-center scale-x），避免瞬间换底 */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute inset-x-2 bottom-0 h-0.5 origin-center rounded-full bg-accent transition-transform duration-200 ease-out",
+          tab.active ? "scale-x-100" : "scale-x-0",
+        )}
+      />
       <button
         type="button"
         role="tab-close"
@@ -597,18 +702,11 @@ function SessionTab(props: {
   dragging: boolean;
   /** 拖拽插入指示：before=左缘竖线，after=右缘竖线 */
   indicator?: "before" | "after" | null;
-  /** 停止 Agent 入口（仅当前会话 Tab 传入）：canStop=false 时禁用，isStopping 时显示“停止中…” */
-  canStop?: boolean;
+  /** 运行操作反馈（仅当前会话 Tab 传入）：Tab 徽章显示 停止中/重启中/重载中 转动。
+   *  运行控制菜单项（停止/重启/重新加载）已上收右上角 ⋯ 菜单，Tab 上不再提供。 */
   isStopping?: boolean;
-  onStop?: () => void;
-  /** 重启入口（仅当前会话 Tab 传入）：canRestart=false 时禁用，isRestarting 时显示“重启中…” */
-  canRestart?: boolean;
   isRestarting?: boolean;
-  onRestart?: () => void;
-  /** 重新加载入口（仅当前会话 Tab 传入）：无 live 运行时从磁盘刷新消息文件，isReloading 时显示“重载中…” */
-  canReload?: boolean;
   isReloading?: boolean;
-  onReload?: () => void;
   onSelect: (sessionId: string) => void;
   onPromotePreview?: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
@@ -633,15 +731,16 @@ function SessionTab(props: {
     isReloading: props.isReloading,
   });
   const title = record?.title || t("common.untitled");
-  // 操作菜单（受控）：下拉按钮点击或右键 Tab 打开；Tab 本体点击仍是切换，
+  // Tab 级操作（固定/关闭等）改为右键菜单（ContextMenu，光标处弹出）；Tab 本体点击仍是切换，
   // 拖拽排序与中键关闭与菜单互不干扰（drag/auxclick 不触发 click）。
-  const [menuOpen, setMenuOpen] = useState(false);
+  // 运行控制（停止/重启/重新加载）只作用于当前会话，已上收右上角 ⋯ 更多操作菜单。
 
   const select = () => props.onSelect(sessionId);
   const close = () => props.onClose(sessionId);
 
   return (
-    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
       <div
         role="tab"
         aria-selected={active}
@@ -661,21 +760,17 @@ function SessionTab(props: {
           // 中键关闭（固定 Tab 忽略，需先取消固定），与浏览器 Tab 行为一致
           if (event.button === 1 && !pinned) close();
         }}
-        onContextMenu={(event) => {
-          // 右键打开操作菜单（与下拉按钮一致）
-          event.preventDefault();
-          setMenuOpen(true);
-        }}
         className={cn(
-          "session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 text-caption transition-colors",
+          "session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 text-caption transition-[color,background-color,border-color,box-shadow,transform] duration-200",
           // 固定 Tab 与普通 Tab 同宽策略（按内容收缩，上限 128px）：固定 Tab 无关闭按钮，
           // hover 不会因按钮出现而跳动，无需 w-20 占位；固定宽度反而让 Pin 图标挤占标题空间
           "w-fit max-w-32",
           dragging && "opacity-50",
-          // 选中态与侧栏 SessionTree 一致：背景浮起 + 强边框 + 轻阴影
+          // 选中态与侧栏 SessionTree 一致：背景浮起 + 强边框 + 轻阴影；
+          // hover 轻微上浮 1px + 背景渐显，让鼠标移入有明确动效
           active
             ? "border-border-strong bg-accent/20 font-medium text-foreground shadow-sm"
-            : "border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+            : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent/50 hover:text-foreground",
           preview && "italic font-normal text-muted-foreground",
         )}
       >
@@ -732,25 +827,6 @@ function SessionTab(props: {
             )}
           />
         )}
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            role="tab-menu"
-            aria-label={t("tabs.moreActions")}
-            title={t("tabs.moreActions")}
-            className={cn(
-              "inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 hover:bg-accent hover:text-foreground",
-              // 与关闭按钮同规则：非激活 Tab 悬停才显示；菜单打开时保持可见
-              active || menuOpen ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60",
-            )}
-            onClick={(event) => {
-              // 下拉按钮只打开菜单、不触发 Tab 切换：阻断冒泡（Radix 的 toggle 在同一元素上仍会执行）
-              event.stopPropagation();
-            }}
-          >
-            <ChevronDown className="size-3" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
         {!pinned && (
           <button
             type="button"
@@ -769,77 +845,48 @@ function SessionTab(props: {
             <X className="size-3" />
           </button>
         )}
+        {/* 选中指示条：切换会话 Tab 时从中间展开（origin-center scale-x），替代瞬间换底；
+            拖拽插入线（props.indicator）是竖线且仅拖拽期存在，二者位置不重叠 */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-x-2 bottom-0 h-0.5 origin-center rounded-full bg-accent transition-transform duration-200 ease-out",
+            active ? "scale-x-100" : "scale-x-0",
+          )}
+        />
       </div>
-      <DropdownMenuContent align="start" side="bottom" className="min-w-40">
-        {/* 停止按 agent 状态置灰、重启在重启中置灰：用内联 style 而非 className——
-            shadcn 默认 data-[disabled]:opacity-50 在部分主题/层序下不显眼，
-            内联样式特异性最高，任何 CSS 都覆盖不了，保证灰化可见。 */}
-        <DropdownMenuItem onSelect={() => props.onTogglePin(sessionId)}>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-40">
+        {/* 固定/关闭等 Tab 级操作；运行控制在右上角 ⋯ 菜单 */}
+        <ContextMenuItem onSelect={() => props.onTogglePin(sessionId)}>
           <span className="inline-flex items-center gap-2">
             {pinned ? <PinOff className="size-3.5" aria-hidden="true" /> : <Pin className="size-3.5" aria-hidden="true" />}
             {pinned ? t("tabs.unpin") : t("tabs.pin")}
           </span>
-        </DropdownMenuItem>
-        {active && props.onStop && (
-          <DropdownMenuItem
-            disabled={!props.canStop || props.isStopping}
-            style={!props.canStop || props.isStopping ? { opacity: 0.4 } : undefined}
-            onSelect={props.onStop}
-          >
-            <span className="inline-flex items-center gap-2">
-              <CircleStop className={cn("size-3.5", props.isStopping && "animate-pulse")} aria-hidden="true" />
-              {props.isStopping ? t("app.stopping") : t("tabs.stopAgent")}
-            </span>
-          </DropdownMenuItem>
-        )}
-        {active && props.onRestart && (
-          <DropdownMenuItem
-            disabled={!props.canRestart || props.isRestarting}
-            style={!props.canRestart || props.isRestarting ? { opacity: 0.4 } : undefined}
-            onSelect={props.onRestart}
-          >
-            <span className="inline-flex items-center gap-2">
-              <RotateCw className={cn("size-3.5", props.isRestarting && "animate-spin")} aria-hidden="true" />
-              {props.isRestarting ? t("app.restarting") : t("app.restart")}
-            </span>
-          </DropdownMenuItem>
-        )}
-        {/* 重新加载会话：无 live 运行时可用（从磁盘刷新被外部修改的消息文件，不启动进程）；重启现全状态可用，二者可并存 */}
-        {active && props.onReload && (
-          <DropdownMenuItem
-            disabled={!props.canReload || props.isReloading}
-            style={!props.canReload || props.isReloading ? { opacity: 0.4 } : undefined}
-            onSelect={props.onReload}
-          >
-            <span className="inline-flex items-center gap-2">
-              <RefreshCw className={cn("size-3.5", props.isReloading && "animate-spin")} aria-hidden="true" />
-              {props.isReloading ? t("app.reloading") : t("menu.reloadSession")}
-            </span>
-          </DropdownMenuItem>
-        )}
+        </ContextMenuItem>
         {!pinned && (
-          <DropdownMenuItem onSelect={close}>
+          <ContextMenuItem onSelect={close}>
             <span className="inline-flex items-center gap-2">
               <X className="size-3.5" aria-hidden="true" />
               {t("tabs.close")}
             </span>
-          </DropdownMenuItem>
+          </ContextMenuItem>
         )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => props.onCloseOthers(sessionId)}>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => props.onCloseOthers(sessionId)}>
           <span className="inline-flex items-center gap-2">
             <CircleX className="size-3.5" aria-hidden="true" />
             {t("tabs.closeOthers")}
           </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={props.onCloseAll}>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={props.onCloseAll}>
           <span className="inline-flex items-center gap-2">
             <X className="size-3.5" aria-hidden="true" />
             {t("tabs.closeAll")}
           </span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -847,6 +894,8 @@ function SessionTab(props: {
  * 新建会话入口（浏览器式 “+”）：固定在标签带末端，下拉选择新建目标。
  * 聊天对话区置顶，之后是已打开的工作区项目；目标列表由 App 装配好传入，
  * 这里只做展示与选择回调，不接触项目库存。
+ * （2026-08 收敛调整：仅 Tab 上的小箭头下拉被移除，运行控制上收 ⋯ 菜单；
+ *   「+」新建是高频入口，保留独立按钮。）
  */
 function NewSessionMenu(props: {
   targets: readonly NewSessionTarget[];

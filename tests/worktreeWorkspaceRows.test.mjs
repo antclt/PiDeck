@@ -19,22 +19,23 @@ test("main workspace is collapsible via the shared worktree expand set", () => {
   assert.match(worktreeTree, /\{!mainCollapsed && \(/);
 });
 
-test("main workspace row carries create-draft and anonymous actions", () => {
+test("main workspace row carries the merged new-session menu", () => {
   const mainSection = worktreeTree.slice(
     worktreeTree.indexOf("workspace-tree-main"),
     worktreeTree.indexOf("workspace-tree-list"),
   );
-  assert.match(mainSection, /createDraft\(props\.project\.id\)/);
-  assert.match(mainSection, /createAnonymous\(props\.project\.id\)/);
+  assert.match(mainSection, /<NewSessionMenu/);
+  assert.match(mainSection, /projectId=\{props\.project\.id\}/);
 });
 
-test("worktree rows carry the anonymous action next to create-draft", () => {
-  // 行视图必须同时提供「新建/匿名」两个入口。操作浮层已抽成共享组件
-  // WorkspaceRowActions（类名不再内联在行视图里），故按行视图定义切片断言行为。
+test("worktree rows carry the merged new-session menu next to remove", () => {
+  // 行视图必须同时提供「新建（普通/匿名合并下拉）」入口。操作浮层已抽成共享组件
+  // WorkspaceRowActions，故按行视图定义切片断言行为。
   const rowView = worktreeTree.slice(worktreeTree.lastIndexOf("WorkspaceTreeRowView"));
-  assert.match(rowView, /createDraft\(childProject\.id\)/);
-  assert.match(rowView, /createAnonymous\(childProject\.id\)/);
+  assert.match(rowView, /<NewSessionMenu/);
+  assert.match(rowView, /projectId=\{childProject\.id\}/);
   assert.match(rowView, /<WorkspaceRowActions>/);
+  assert.match(rowView, /worktrees\.remove\(props\.rootProject\.id/);
 });
 
 test("worktree rows never take a selected surface; only session leaves do", () => {
@@ -54,7 +55,7 @@ test("worktree auxiliary labels stay at the compact micro size", () => {
   // 这些是层级提示而非主要导航项；使用 caption 会随 medium 档位放大到 13px，
   // 导致“其他工作区”和“还有 N 个会话/查看更多子项”抢过会话行的视觉层级。
   assert.match(worktreeTree, /workspace-tree-section-header[^\n]*text-micro/);
-  assert.match(sessionTree, /className=\{`h-auto justify-start px-2 text-micro /);
+  assert.match(sessionTree, /className=\{`h-auto [^\`]*justify-start px-2 text-micro /);
   assert.match(sessionTree, /worktree-sessions-more/);
   assert.match(workspaceStyles, /\.session-more-row,[\s\S]*?font-size: var\(--font-size-micro\)/);
   assert.match(workspaceStyles, /\.worktree-sessions-more[\s\S]*?font-size: var\(--font-size-micro\)/);
@@ -67,8 +68,9 @@ test("child worktree labels keep a stable weight without a selected-state swap",
   assert.doesNotMatch(childRow, /isActive \? "font-normal"/);
 });
 
-test("project row hides create/anonymous buttons in worktree mode", () => {
-  // worktree 模式下入口挪到主工作区行，项目行不再重复提供
-  assert.match(projectTree, /isCurrent && !project\.worktreeEnabled/);
-  assert.match(projectTree, /!project\.worktreeEnabled && \(/);
+test("project row routes new-session into the more-actions menu", () => {
+  // 新建会话/匿名从项目行的 + 下拉收敛进右侧「⋯」更多操作菜单（ProjectContextMenu），
+  // 项目行不再单独渲染 NewSessionMenu，避免入口零散且视觉上与搜索/分段重复。
+  assert.doesNotMatch(projectTree, /<NewSessionMenu/);
+  assert.match(projectTree, /<Ellipsis/);
 });

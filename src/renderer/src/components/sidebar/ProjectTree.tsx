@@ -1,13 +1,20 @@
-import { ChevronsDownUp, ChevronRight, Ellipsis, Filter, Folder, FolderCog, FolderOpen, FolderPlus, HatGlasses, Plus } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, Plus, Settings2, UserPlus } from "lucide-react";
 import type { DragEvent } from "react";
 import type { Project, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import { t } from "../../i18n";
 import type { SidebarActions } from "./SidebarContent";
+import { ActiveSessionsTree } from "./ActiveSessionsTree";
 import { SessionTree } from "./SessionTree";
 import { WorktreeTree } from "./WorktreeTree";
-import { PathTooltip } from "../ui-shadcn/PathTooltip";
 import { Button } from "../ui-shadcn/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "../ui-shadcn/dropdown-menu";
 import { cn } from "../../lib/utils";
 
 /** 项目行只做容器：hover 浅灰，永不挂选中底。
@@ -78,7 +85,6 @@ export function ProjectTree(props: {
   };
   const renderProject = (project: Project) => {
       const collapsed = props.controller.isProjectCollapsed(project.id);
-      const isCurrent = props.currentProjectId === project.id;
       const projectDirectoryName = displayProjectDirectoryName(project);
       const sourceFilter = props.controller.sourceFilterFor(project.id);
       const dragging = props.controller.drag.sourceProjectId === project.id;
@@ -105,43 +111,40 @@ export function ProjectTree(props: {
           >
             <ChevronRight size={14} className={cn("transition-transform", !collapsed && "rotate-90")} />
           </button>
-          {/* 触发区包整行选择按钮：只包截断的 <strong> 时，快划过右侧气泡会立刻离开关闭。 */}
-          <PathTooltip content={`${projectDirectoryName}\n${project.path}`}>
-            <button
-              type="button"
-              className="flex min-w-0 flex-1 items-center gap-1 py-0 pr-1 text-left"
-              draggable={!props.controller.search.trim()}
-              onDragStart={(event) => dragStart(event, project.id)}
-              onDragOver={(event) => { if (props.controller.drag.sourceProjectId && props.controller.drag.sourceProjectId !== project.id) { event.preventDefault(); props.controller.setProjectDropTarget(project.id); } }}
-              onDragLeave={() => props.controller.setProjectDropTarget(undefined)}
-              onDrop={(event) => drop(event, project.id)}
-              onDragEnd={props.controller.finishProjectDrag}
-              onClick={() => {
-                // 项目主行同时承担选择和手风琴切换，让项目卡片本身保持唯一且明确的导航入口。
-                props.controller.toggleProject(project.id);
-                props.actions.projects.select(project.id);
-              }}
-            >
-              <span className="grid size-5 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
-                {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
-              </span>
-              <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-29 @max-[255px]:group-focus-within:pr-29">
-                <div className="conversation-title flex min-w-0 items-center">
-                  <strong className={`min-w-0 flex-1 truncate font-medium${project.missing ? " text-muted-foreground" : ""}`}>{projectDirectoryName}</strong>
-                  {/* 目录已被删除/移动/未挂载：保留记录并标记，用户可右键移除或恢复目录 */}
-                  {project.missing && (
-                    <span
-                      className="shrink-0 rounded bg-destructive/10 px-1 text-[10px] font-medium leading-4 text-destructive"
-                      title={t("app.projectMissingHint")}
-                    >
-                      {t("app.projectMissing")}
-                    </span>
-                  )}
-                </div>
-                {/* 项目名称只承担导航信息；详细会话状态由下方的 Agent/历史会话行承担。 */}
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-1 py-0 pr-1 text-left"
+            draggable={!props.controller.search.trim()}
+            onDragStart={(event) => dragStart(event, project.id)}
+            onDragOver={(event) => { if (props.controller.drag.sourceProjectId && props.controller.drag.sourceProjectId !== project.id) { event.preventDefault(); props.controller.setProjectDropTarget(project.id); } }}
+            onDragLeave={() => props.controller.setProjectDropTarget(undefined)}
+            onDrop={(event) => drop(event, project.id)}
+            onDragEnd={props.controller.finishProjectDrag}
+            onClick={() => {
+              // 项目主行同时承担选择和手风琴切换，让项目卡片本身保持唯一且明确的导航入口。
+              props.controller.toggleProject(project.id);
+              props.actions.projects.select(project.id);
+            }}
+          >
+            <span className="grid size-5 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
+              {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
+            </span>
+            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-29 @max-[255px]:group-focus-within:pr-29">
+              <div className="conversation-title flex min-w-0 items-center">
+                <strong className={`min-w-0 flex-1 truncate font-medium${project.missing ? " text-muted-foreground" : ""}`}>{projectDirectoryName}</strong>
+                {/* 目录已被删除/移动/未挂载：保留记录并标记，用户可右键移除或恢复目录 */}
+                {project.missing && (
+                  <span
+                    className="shrink-0 rounded bg-destructive/10 px-1 text-[10px] font-medium leading-4 text-destructive"
+                    title={t("app.projectMissingHint")}
+                  >
+                    {t("app.projectMissing")}
+                  </span>
+                )}
               </div>
-            </button>
-          </PathTooltip>
+              {/* 项目名称只承担导航信息；详细会话状态由下方的 Agent/历史会话行承担。 */}
+            </div>
+          </button>
           <div className={cn(dimmedActionsClass, "pr-1", props.controller.menu?.kind === "project" && props.controller.menu.projectId === project.id && "pointer-events-auto opacity-100")}>
             {sourceFilter !== null && (
               <button
@@ -154,19 +157,8 @@ export function ProjectTree(props: {
                 <Filter size={12} />
               </button>
             )}
-            {/* worktree 模式下新建/匿名入口已挪到主工作区行（WorktreeTree），
-                项目行不再重复提供，避免入口分散 */}
-            {isCurrent && !project.worktreeEnabled && (
-              <button type="button" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-background/80 hover:text-foreground" title={t("app.projectNewAgent")} aria-label={t("app.projectNewAgent")} onClick={() => void props.actions.sessions.createDraft(project.id)}><Plus size={14} /></button>
-            )}
-            {!project.worktreeEnabled && (
-              <div className="flex items-center gap-1">
-                {!isCurrent && (
-                  <button type="button" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-background/80 hover:text-foreground" title={t("app.projectNewAgent")} aria-label={t("app.projectNewAgent")} onClick={() => void props.actions.sessions.createDraft(project.id)}><Plus size={14} /></button>
-                )}
-                <button type="button" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-background/80 hover:text-foreground" title={t("app.anonymousChat")} aria-label={t("app.anonymousChat")} onClick={() => void props.actions.sessions.createAnonymous(project.id)}><HatGlasses size={14} /></button>
-              </div>
-            )}
+            {/* 新建会话/匿名入口已并入右侧「⋯」更多操作菜单（ProjectContextMenu），
+                项目行不再单独提供 + 下拉，避免入口零散且视觉上与搜索/分段重复。 */}
             {/* 三个点：把项目右键菜单变成可见入口，让用户知道项目行还有更多操作 */}
             <Button
               type="button"
@@ -220,181 +212,164 @@ export function ProjectTree(props: {
   const anyWorkspaceExpanded = props.controller.catalog.projects.some(
     (project) => !project.worktreeParentId && !isChatProject(project) && !props.controller.isProjectCollapsed(project.id),
   );
-  return <>
-    {chatProjects.map((project) => {
-      const collapsed = props.controller.isProjectCollapsed(project.id);
-      const sessions = props.controller.catalog.sessionsByProject[project.id] ?? [];
-      return (
-        <section key={project.id} className="mb-4" aria-label={t("app.chatProject")} role="treeitem" aria-expanded={!collapsed}>
-          {/* 与下方「项目」标题栏共用：同 px-2 + text-caption，避免 section p-1 / 标题 px-1 叠出明显错位。
-              整行可点击切换折叠：折叠态下只看到标题栏时，点标题区即可展开，避免「不知道下面还有会话」；
-              行为与右侧折叠按钮一致（右侧按钮需 stopPropagation 防止二次触发）。 */}
-          <div
-            className="flex cursor-pointer select-none items-center justify-between rounded-md px-2 pb-1 transition-colors hover:bg-muted/30"
-            title={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
-            role="button"
-            tabIndex={0}
-            onClick={() => props.controller.toggleProject(project.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                props.controller.toggleProject(project.id);
-              }
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              void props.controller.openMenu({ kind: "project", projectId: project.id, x: event.clientX, y: event.clientY });
-            }}
-          >
-            <span className="text-caption font-medium text-muted-foreground">{t("app.chatProject")}</span>
-            <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
-                aria-label={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
-                aria-expanded={!collapsed}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.controller.toggleProject(project.id);
-                }}
-              >
-                {/* Chat 没有可点击的父项目行，折叠入口固定放在标题栏，避免展开后无法恢复。 */}
-                <ChevronsDownUp size={14} aria-hidden="true" />
-              </button>
-              {props.actions.projects.changeChatPath && (
-                <button
+
+  // 聊天/项目分段：chats 只显示内置 Chat 的会话；projects 显示所有工作区项目及其嵌套会话。
+  // Tab 已承担「聊天/项目」文案，下面不再重复标题父块；两个区只保留各自必需的操作入口。
+  const chatSection = chatProjects.map((project) => {
+    const collapsed = props.controller.isProjectCollapsed(project.id);
+    const sessions = props.controller.catalog.sessionsByProject[project.id] ?? [];
+    return (
+      <section key={project.id} className="mb-4" aria-label={t("app.chatProject")} role="treeitem" aria-expanded={!collapsed}>
+        {/* 分组标题栏：左侧「聊天」标题，右侧 = 「+ 新建会话」+ 折叠（高频操作外露）
+            + 「⋯ 更多操作」下拉（匿名会话/目录设置收纳其中）。
+            新建与折叠都是最常用入口，直接外露；匿名会话使用率低，收进更多菜单。 */}
+        <div className="flex items-center justify-between px-1 pb-1">
+          <span className="text-caption font-medium text-muted-foreground">{t("app.sidebarChats")}</span>
+          <div className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label={t("app.newNormalSession")}
+              title={t("app.newNormalSession")}
+              onClick={() => void props.actions.sessions.createDraft(project.id)}
+            >
+              <Plus className="size-3.5" aria-hidden="true" />
+            </Button>
+            {/* Chat 无父项目行，折叠入口必须外露，否则展开后无法从标题栏恢复。 */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              title={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
+              aria-label={collapsed ? t("app.projectExpand") : t("app.projectCollapse")}
+              aria-expanded={!collapsed}
+              onClick={() => props.controller.toggleProject(project.id)}
+            >
+              <ChevronsDownUp size={14} aria-hidden="true" />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
                   type="button"
-                  className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  title={`${t("app.chatProjectSettings")}\n${project.path}`}
-                  aria-label={t("app.chatProjectSettings")}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void props.actions.projects.changeChatPath?.(project);
-                  }}
+                  variant="ghost"
+                  size="icon-xs"
+                  className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label={t("sidebar.moreActions")}
+                  title={t("sidebar.moreActions")}
                 >
-                  {/* Chat 是固定父项目，设置入口必须挂在父标题栏，不能依赖当前是否已有会话。 */}
-                  <FolderCog size={13} aria-hidden="true" />
-                </button>
-              )}
-              <button
+                  <Ellipsis size={14} aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4} className="min-w-36">
+                <DropdownMenuItem onSelect={() => void props.actions.sessions.createAnonymous(project.id)}>
+                  <UserPlus className="size-3.5" aria-hidden="true" />
+                  {t("app.newAnonymousSession")}
+                </DropdownMenuItem>
+                {props.actions.projects.changeChatPath && (
+                  <DropdownMenuItem onSelect={() => { void props.actions.projects.changeChatPath?.(project); }}>
+                    <Settings2 className="size-3.5" aria-hidden="true" />
+                    {t("app.chatProjectSettings")}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+        {!collapsed && (
+          <div className="relative ml-3 space-y-0.5 pl-2">
+            <SessionTree
+              project={project}
+              sessions={sessions}
+              agents={props.controller.catalog.agents}
+              currentSessionId={props.currentSessionId}
+              controller={props.controller}
+              actions={props.actions}
+            />
+          </div>
+        )}
+      </section>
+    );
+  });
+
+  const projectsSection = (
+    <>
+      {workspaceProjects.length > 0 && (
+        <section aria-label={t("app.sidebarProjects")} role="tree">
+        {/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）。
+            不设空 ⋯ 菜单（无低频入口时纯装饰，易被误认成搜索残留）。 */}
+          <div className="flex items-center justify-between px-1 pb-1">
+            <span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
+            <div className="flex items-center gap-0.5">
+              {/* 添加项目是最常用入口，外露为显式「+」按钮 */}
+              <Button
                 type="button"
-                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title={t("app.newSession")}
-                aria-label={t("app.newSession")}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void props.actions.sessions.createDraft(project.id);
-                }}
+                variant="ghost"
+                size="icon-xs"
+                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label={t("app.addProject")}
+                title={t("app.addProject")}
+                onClick={() => void props.actions.projects.add()}
               >
-                <Plus size={13} aria-hidden="true" />
-              </button>
-              <button
+                <Plus className="size-3.5" aria-hidden="true" />
+              </Button>
+              {/* 全部折叠/展开：批量收起所有工作区项目，批量展开/折叠入口外露（与聊天折叠同策略） */}
+              <Button
                 type="button"
-                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title={t("app.anonymousChat")}
-                aria-label={t("app.anonymousChat")}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void props.actions.sessions.createAnonymous(project.id);
-                }}
+                variant="ghost"
+                size="icon-xs"
+                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                title={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
+                aria-label={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
+                onClick={() => props.controller.toggleCollapseAllProjects()}
               >
-                <HatGlasses size={13} aria-hidden="true" />
-              </button>
+                <ChevronsDownUp size={14} aria-hidden="true" />
+              </Button>
             </div>
           </div>
-          {!collapsed && (
-            <div className="relative ml-3 space-y-0.5 pl-2">
-              <SessionTree
-                project={project}
-                sessions={sessions}
-                agents={props.controller.catalog.agents}
-                currentSessionId={props.currentSessionId}
-                controller={props.controller}
-                actions={props.actions}
-              />
-            </div>
-          )}
+          {workspaceProjects.map(renderProject)}
         </section>
-      );
-    })}
-    {workspaceProjects.length > 0 && (
-      <section aria-label={t("app.sidebarProjects")} role="tree">
-        {/* 标题栏右侧提供添加项目与批量折叠入口，行为与搜索框旁的 FolderPlus 按钮一致；
-            与 Chat 标题栏按钮（size-6 圆角悬浮层）同款视觉，避免层级混乱。 */}
-        {/* 标题栏整行可点击：切换全部项目展开/折叠（与右侧批量折叠按钮一致），
-            避免项目全折叠时点击无反应、不知道下面还有项目。 */}
-        <div
-          className="flex cursor-pointer select-none items-center justify-between rounded-md px-1 pb-1 transition-colors hover:bg-muted/30"
-          title={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
-          role="button"
-          tabIndex={0}
-          onClick={() => props.controller.toggleCollapseAllProjects()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              props.controller.toggleCollapseAllProjects();
-            }
-          }}
-        >
-          <span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
-          <div className="flex items-center gap-0.5">
-            <button
+      )}
+      {/* 无任何工作区项目（新用户只有内置 Chat）：显式渲染空态引导。
+          此前该分组整体不渲染，用户不知道可以添加项目目录，误以为只能聊天（issue #149）。 */}
+      {workspaceProjects.length === 0 && (
+        <section aria-label={t("app.sidebarProjects")} className="mt-1">
+          <div className="px-1 pb-1 text-caption font-medium text-muted-foreground">
+            {t("app.sidebarProjects")}
+          </div>
+          <div className="mx-1 rounded-lg border border-dashed border-border-subtle bg-muted/20 px-3 py-4 text-center">
+            <FolderPlus className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden="true" />
+            <div className="text-body font-medium text-foreground">{t("sidebar.emptyProjectsTitle")}</div>
+            <p className="mt-1 text-caption text-muted-foreground">{t("sidebar.emptyProjectsDesc")}</p>
+            <Button
               type="button"
-              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
-              aria-label={anyWorkspaceExpanded ? t("app.projectCollapseAll") : t("app.projectExpandAll")}
-              aria-expanded={anyWorkspaceExpanded}
-              onClick={(event) => {
-                event.stopPropagation();
-                props.controller.toggleCollapseAllProjects();
-              }}
-            >
-              {/* 与 Chat 标题栏同款折叠图标：点击在「全部折叠/全部展开」之间切换 */}
-              <ChevronsDownUp size={14} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              variant="secondary"
+              size="sm"
+              className="mt-3"
               title={t("app.addProject")}
               aria-label={t("app.addProject")}
-              onClick={(event) => {
-                event.stopPropagation();
-                void props.actions.projects.add();
-              }}
+              onClick={() => void props.actions.projects.add()}
             >
-              <FolderPlus size={13} aria-hidden="true" />
-            </button>
+              <FolderPlus className="size-3.5" aria-hidden="true" />
+              {t("app.addProject")}
+            </Button>
           </div>
-        </div>
-        {workspaceProjects.map(renderProject)}
-      </section>
-    )}
-    {/* 无任何工作区项目（新用户只有内置 Chat）：显式渲染「项目」分组 + 空态引导。
-        此前该分组整体不渲染，侧边栏只剩搜索行一个 24px + 图标，用户不知道可以
-        添加自己的项目目录，误以为 PiDeck 只能聊天（issue #149 同类反馈）。
-        对标 dsh-web 侧边栏：无工作区时给出显眼的目录添加引导。 */}
-    {workspaceProjects.length === 0 && (
-      <section aria-label={t("app.sidebarProjects")} className="mt-1">
-        <div className="px-1 pb-1 text-caption font-medium text-muted-foreground">
-          {t("app.sidebarProjects")}
-        </div>
-        <div className="mx-1 rounded-lg border border-dashed border-border-subtle bg-muted/20 px-3 py-4 text-center">
-          <FolderPlus className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden="true" />
-          <div className="text-body font-medium text-foreground">{t("sidebar.emptyProjectsTitle")}</div>
-          <p className="mt-1 text-caption text-muted-foreground">{t("sidebar.emptyProjectsDesc")}</p>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="mt-3"
-            onClick={() => void props.actions.projects.add()}
-          >
-            <FolderPlus className="size-3.5" aria-hidden="true" />
-            {t("app.addProject")}
-          </Button>
-        </div>
-      </section>
-    )}
-  </>;
+        </section>
+      )}
+    </>
+  );
+
+  return (
+    <>
+      {props.controller.navTab === "active" ? (
+        <ActiveSessionsTree
+          controller={props.controller}
+          actions={props.actions}
+          currentSessionId={props.currentSessionId}
+        />
+      ) : props.controller.navTab === "chats" ? chatSection : projectsSection}
+    </>
+  );
 }

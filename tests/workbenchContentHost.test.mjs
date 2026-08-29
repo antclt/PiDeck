@@ -107,6 +107,21 @@ test("closing git diff dismisses the whole workbench reading surface", () => {
   assert.match(openWorkspace, /setEditorTabs\(\[\]\)/);
 });
 
+test("file viewer header repeats the current filename beside the actions", () => {
+  const viewer = readFileSync(
+    "src/renderer/src/components/app/FileDiffViewer.tsx",
+    "utf8",
+  );
+  const headerStart = viewer.indexOf('<div className="file-diff-header">');
+  const actionsStart = viewer.indexOf('<div className="file-diff-header-actions">', headerStart);
+  assert.ok(headerStart >= 0 && actionsStart > headerStart, "file header must contain its action area");
+  const header = viewer.slice(headerStart, actionsStart);
+  // Tab 栏仍负责切换，但蓝色操作区也要给当前文件一个稳定的标题锚点。
+  assert.match(header, /\{fileName\}/);
+  assert.doesNotMatch(header, /FileTypeIcon|fileIcon|dangerouslySetInnerHTML/);
+  assert.doesNotMatch(header, /props\.chromeTabsExternal \|\| showInlineTabs \?/);
+});
+
 test("file tabs use preview/permanent strategy owned by useFileEditor", () => {
   // 策略在 utils/editorTabs；hook 拥有 previewEditorTabId；打开文件不清掉已有 tab
   assert.match(fileEditor, /from "\.\.\/utils\/editorTabs"/);

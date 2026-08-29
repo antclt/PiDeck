@@ -2,8 +2,9 @@ import React, { useRef } from "react";
 import { useSetAtom } from "jotai";
 import { PanelLeft } from "lucide-react";
 import { SidebarContent, type SidebarActions } from "./SidebarContent";
-import type { WorktreeEntry } from "../../../../shared/types";
+import type { AppThemeMode, WorktreeEntry } from "../../../../shared/types";
 import { useSidebarController } from "../../hooks/useSidebarController";
+import type { SidebarNavTab } from "../../utils/sidebarNavTab";
 import { BrandLockup } from "../app/AppParts";
 import { settingsOpenAtom } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
@@ -18,13 +19,20 @@ interface AppSidebarProps {
   branchByProject: Record<string, string | null>;
   creatingWorktree: boolean;
   isLanWeb: boolean;
+  /** 「新建任务」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
+  onOpenNewTask: () => void;
   onOpenFeedback: () => void;
   onOpenHomepage: () => void;
+  /** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
+  themeMode: AppThemeMode;
+  onToggleTheme: () => void;
   /** 左侧栏折叠态与开关（main 布局：按钮在品牌文字右侧） */
   listCollapsed: boolean;
   toggleListCollapsed: () => void;
   /** settings.json 中已保存的展开项目 id，权威来源 */
   settingsExpandedProjectIds?: readonly string[];
+  /** settings.json 中已保存的侧栏分段（Chats/项目），权威来源 */
+  settingsNavTab?: SidebarNavTab;
   /** 首次 settings.get 已完成，controller 可安全处理旧 key 迁移。 */
   settingsLoaded: boolean;
   /** 展开集合完成权威 hydration 后，允许 App 按它懒加载会话。 */
@@ -34,15 +42,24 @@ interface AppSidebarProps {
 export function AppSidebar(props: AppSidebarProps) {
   const setSettingsOpen = useSetAtom(settingsOpenAtom);  // 快速连续点击展开/折叠会触发多次 IPC；按顺序写入可避免旧请求最后完成后覆盖新集合。
   const expandedProjectsSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const navTabSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const controller = useSidebarController({
     getRpcLogging: props.actions.rpc.getLogging,
     settingsExpandedProjectIds: props.settingsExpandedProjectIds,
+    settingsNavTab: props.settingsNavTab,
     settingsLoaded: props.settingsLoaded,
     onExpandedProjectsReady: props.onExpandedProjectsReady,
     persistExpandedProjectIds: (projectIds) => {
       expandedProjectsSaveQueueRef.current = expandedProjectsSaveQueueRef.current
         .catch(() => undefined)
         .then(() => desktopApi.settings.update({ sidebarExpandedProjectIds: projectIds }))
+        .catch(() => undefined);
+    },
+    persistNavTab: (tab) => {
+      // 与展开集合同款串行队列：快速切换标签时避免旧请求最后完成覆盖新值
+      navTabSaveQueueRef.current = navTabSaveQueueRef.current
+        .catch(() => undefined)
+        .then(() => desktopApi.settings.update({ sidebarNavTab: tab }))
         .catch(() => undefined);
     },
   });
@@ -58,6 +75,7 @@ export function AppSidebar(props: AppSidebarProps) {
       branchByProject={props.branchByProject}
       creatingWorktree={props.creatingWorktree}
       isLanWeb={props.isLanWeb}
+      onOpenNewTask={props.onOpenNewTask}
       chrome={<>
         <div className="list-toolbar flex h-10 shrink-0 items-center gap-1 border-b border-border/40 pr-2.5 pl-[max(0.625rem,var(--traffic-lights-width,0px))]">
           <div className="app-badge flex min-w-0 flex-1 items-center">
@@ -79,6 +97,8 @@ export function AppSidebar(props: AppSidebarProps) {
       onOpenSettings={() => setSettingsOpen(true)}
       onOpenFeedback={props.onOpenFeedback}
       onOpenHomepage={props.onOpenHomepage}
+      themeMode={props.themeMode}
+      onToggleTheme={props.onToggleTheme}
     />
     </>
   );

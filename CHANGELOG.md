@@ -1,7 +1,60 @@
-## v0.7.2 - 2026-08-26
-
+## Unreleased
 
 ### 🚀 New Features
+- **Usage query rebuild (aligned with cc-switch)** — Unified usage display across Models / Auth / DSH (amount or percentage at the bottom-right of the card + bar-chart icon entry in the header); per-provider enable switch + built-in template auto-detection + generic / New API declarative templates + timeout / auto-query interval (default 5 min, 0 = manual only); no automatic probing when disabled or unsupported.
+- **DSH usage query pipeline** — Same usage display and probe configuration on the DSH model config page: config stored at `$DSH_HOME/.pideck/usage-probes.json`, credentials read from the DSH credential store (`.credentials.yaml`); identical to the pi side and fully isolated.
+- **PiDeck-specific files consolidated** — Session archives / host mutex lock / usage config under DSH_HOME now live in `~/.dsh/.pideck/` (one-time migration; the migration logic will be removed in the next release once the legacy layout is confirmed gone).
+
+## v0.7.2 - 2026-08-29
+
+### 🚀 New Features
+
+- **Model capability auto-adaptation & thinking-effort pipeline** — Compatible
+  with pi 0.84.3: endpoint-reported `contextWindow` / `maxTokens` / thinking
+  levels drive model adaptation, and the capability cache is invalidated per
+  runtime generation; `get_available_thinking_levels` is cached through the
+  runtime IPC keyed by `sessionId + agentId + generation + provider + modelId`
+  (DSH keeps its own reasoningEfforts); models unmatched by the endpoint
+  default to open thinking levels instead of guessing.
+- **Manual model catalog refresh** — The model selector now has a manual
+  refresh that force-pulls the model catalog (instead of relying on cache),
+  so newly added models show up.
+- **Usage query expanded** — Built-in usage/balance queries for OpenRouter,
+  Moonshot-Kimi and generic OpenAI-compatible gateways, one-click
+  usage-probes config generation, a new `usage-probe` skill and
+  `/skill:usage-probe` entry point for custom providers; probe cards now also
+  show balance / Boost points.
+- **Session restart & reload** — The session context menu and tab bar now
+  expose "Restart" and "Reload", fixing terminal-state agents that could no
+  longer issue runtime commands.
+- **DSH session-header agent mode pill** — The DSH session header shows an
+  agent-mode pill: selectable during draft, read-only once activated
+  (agentPresetLocked).
+- **Built-in pi-deck-retry-no-body extension** — Empty-response errors now
+  reuse pi's retry mechanism, reducing session interruption from occasional
+  empty bodies.
+- **Ask queries carry main-session context** — Parallel Ask queries read the
+  main conversation context and bring answers back to the main thread
+  (quote-into-composer), so background questions stay in sync with the
+  conversation.
+- **Sidebar Chats / projects segmentation** — The sidebar splits Chats and
+  projects, adds a New-session menu and session search for faster navigation.
+- **Session right-edge ruler rail** — A beUI PreviewRail on the session right
+  edge maps timeline positions for quick jump-to-message navigation.
+- **Theme cycling from the sidebar footer** — Light → dark → follow-system
+  cycling with a beUI dock in the footer.
+- **Global notifications as card toasts** — System notice delivery upgraded to
+  custom card toasts.
+- **JetBrains editor scan & system file-manager detection** — Deeper
+  JetBrains editor directory scanning and automatic system file-manager
+  detection for "open in editor / reveal in explorer" actions.
+- **Bundled image-gen skill template** — One-click install of the built-in
+  image generation skill template.
+- **Markdown file-link line jumps** — Explicit file links jump to the target
+  line (`path:line`); bare drive-letter hrefs are no longer stripped by the
+  URL filter, and clickable links keep working outside capsules.
+- **DSH official todo bridged** — DSH's native todo feeds the existing todo
+  bar.
 - **Ask panel notification toggle** — New standalone notification switch for
   Ask (parallel-query) responses, so background questions can stay silent.
 - **Guide page @-file reference & default picks** — The onboarding guide now
@@ -10,7 +63,6 @@
 - **Usage probe multi-account & standalone endpoints** — Provider usage
   probing supports multi-account / multi-role balances (e.g. Zhipu) and
   per-provider standalone endpoint configuration.
-
 
 - **DSH dual agent backend** — pi / DSH (DeepSeek Harness) sessions coexist in the
   same project and can be freely created, switched and browsed; DSH is deeply
@@ -85,22 +137,92 @@
   SessionBackendMark), so both backends are instantly distinguishable.
 
 ### ✨ UX Improvements
+
+- **History runtime-operation overlay** — Running operations on history
+  sessions shows a loading overlay over the message area, preventing
+  double-clicks and misclicks.
+- **Tab-bar loading state** — Fixed the loading display and session-reload
+  logic for tab-bar operations for more accurate feedback.
+- **Model capability explainer card removed** — The capability explainer card
+  is gone; adapted results go straight into the composer, one less step.
+- **Settings grouping** — Cache and log settings moved into the "Developer
+  settings" group for clearer categorization.
+- **Tab-bar run controls converge into a ⋯ menu** — Run controls moved into a
+  grouped ⋯ menu, decluttering the session tab bar.
+- **Scratch-pad panel re-layout & editor picker redesign** — The scratch-pad
+  panel is re-arranged and the external-editor picker dialog rebuilt.
+- **Timeline process-layer text dimming** — Process-layer text uses the dimmer
+  `text-faint` token with tool-card polish.
+- **Startup auto-update check removed** — The app no longer pings the update
+  endpoint on startup, keeping startup snappier.
+- **Persistent PowerShell terminal hardening** — The persistent `pwsh` tool
+  keeps multi-line command line breaks (ConPTY LF fix), resolves PowerShell
+  installs via winget / WindowsApps, and injects git/npx environment variables
+  to prevent interactive prompts.
 - **Sidebar expanded-session collapse control** — Expanded project sessions in
   the sidebar can now be collapsed / expanded individually via a control.
 - **Model default-collapse derived state** — The model directory default
   collapse is derived state now, so collapsed groups survive async catalog
   loads instead of flashing open.
 
-
 - **DSH session export entry enabled** — Sidebar/drawer "Export HTML" now works
   for dsh sessions instead of reporting "not supported yet".
 
 ### 🔧 Performance
 
+- **Terminal-session runtime memory released** — Terminal-state sessions now
+  free their runtime state memory.
 - **Export runaway guard** — History export is page-capped and oversized images
   are skipped to avoid hundred-megabyte HTML files.
 
 ### 🐛 Bug Fixes
+
+- **Unstarted-session editing & bundled skill auto-install** — Fixed editing
+  for unstarted sessions and the bundled-skill auto-install flow.
+- **Vision-bridge misconfig image handling** — No more uncaught exceptions
+  when the vision bridge is misconfigured; also fixed Git operation timeouts.
+- **Official provider new-model false alarm** — Selecting a newly added model
+  on an official provider no longer falsely reports "not configured".
+- **Approval card text selection** — Fixed text in approval cards being
+  unselectable.
+- **Session error-state logging** — Completed applog records for abnormal
+  session states to aid troubleshooting.
+- **Always-on-top button state sync** — The button now mirrors the main
+  process's real always-on-top state.
+- **Docs fullscreen toggle crash** — Fixed the composer panel
+  `Group not found` crash when toggling docs fullscreen.
+- **DSH host warmup & `/new` command** — Improved DSH host warmup strategy and
+  fixed `/new` commands being wrongly intercepted.
+- **App background wallpaper token injection** — Wallpaper token injection no
+  longer makes light/dark themes override each other.
+- **File-manager open action & navigation** — Fixed file-manager open modes
+  and related navigation defects.
+- **PreviewRail jump on partially loaded messages** — Ruler jumps are now
+  reachable while messages are still loading.
+- **Pet state desync under concurrent tasks** — Pet failed/review transitions
+  re-aggregate by business state; patrol and business states are mutually
+  exclusive.
+- **Model save validation** — Saving a model no longer treats config-fallback
+  as a false green light.
+- **Failed-message diagnostic cards** — Failed messages render diagnostic
+  cards; retry progress only pops a toast.
+- **RPC log toggle silent failure** — The log toggle no longer fails silently.
+- **DSH archive name loss & cross-project archive view** — Archive names
+  survive and the archive view no longer over-collects across projects.
+- **Local packages built before pack/start** — Packaging/startup builds local
+  packages first, fixing the DSH host crash from a missing `lib/index.js`.
+- **Settings modal scrolling & child-session parent backfill** — The settings
+  modal scrolls properly and flat subagent parents are backfilled to avoid
+  orphaned tiles.
+- **DSH live image rendering** — Streaming DSH images render again (hydrated
+  bytes kept during live streaming).
+- **False MCP badges on ordinary tools** — Ordinary tools no longer get MCP
+  badges.
+- **Markdown `~` path split by strikethrough** — `~`-prefixed file links no
+  longer get split by the single-tilde strikethrough, and unresolvable links
+  show a hint instead of silently opening an empty file.
+- **DSH plugin config input** — Plugin config inputs are no longer interrupted
+  mid-typing; plugin-area layout and config-page position are remembered.
 - **pi→DSH provider migration no longer requires pre-seeded DSH entries** —
   Migrating a built-in provider to DSH works even when the DSH side has no
   same-name entry yet.
@@ -117,7 +239,6 @@
   history display in sync.
 - **Session delete/archive cleanup** — Deleting or archiving a session no
   longer leaves stray child sessions behind.
-
 
 - **DSH injected context no longer projected as user messages** — AGENTS.md /
   runtime context / skills injected into DSH sessions are filtered by
@@ -136,12 +257,20 @@
 
 ### 🙏 Thanks
 
-- **@bfzha** — DSH config management/migration layering, CodeMirror config
-  source-file page, full appearance theme redraw (Classic / Forest Green /
-  Graphite Gray / Seafoam Blue / Warm Sun), selection-to-quote chips, and
-  cross-session scroll anchor preservation (#163).
-- **@ayuayue** — DSH dual-backend core, dedicated imagegen backend, dsh-web
-  restyle, and 40+ fixes.
+- **@bfzha** — Persistent PowerShell terminal hardening, pet-state fixes, DSH
+  archive / live-image / plugin-input fixes, markdown link line-jumps &
+  clickability, build/startup packaging fixes, plus the earlier round: DSH
+  config management/migration layering, CodeMirror config source-file page,
+  full appearance theme redraw (Classic / Forest Green / Graphite Gray /
+  Seafoam Blue / Warm Sun), selection-to-quote chips, and cross-session scroll
+  anchor preservation (#163).
+- **@ayuayue** — Usage-probe enhancements with balance/Boost, Ask
+  main-context, sidebar segmentation & search, PreviewRail ruler, theme
+  cycling, card toasts, editor/file-manager detection, image-gen skill
+  template, tab-bar & timeline polish, plus the model capability pipeline,
+  usage query, restart/reload, agent-mode pill, retry-no-body, the DSH
+  dual-backend core, dedicated imagegen backend, dsh-web restyle and 40+
+  fixes.
 
 Special thanks to **微时佬友** for providing the Grok model service used in our
 community testing environment 🎉

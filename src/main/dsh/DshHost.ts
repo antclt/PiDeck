@@ -11,7 +11,13 @@ import { toDshAvailableModels, toDshFetchedModels } from "./dshModels";
 import { parseAgentDefaultModel } from "./dshDefaultModel";
 import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
 import { workspaceDirFor } from "./dshSessionPath";
-import { listForeignSessionsFromDisk, scanDshSessionHeaders } from "./dshForeignSessionScan";
+import {
+	migrateLegacyPideckDshFiles,
+	pideckArchivePath,
+	pideckDshHome,
+	pideckHostLockPath,
+} from "./pideckDshHome";
+import { foldSessionTitleFromDir, listForeignSessionsFromDisk, scanDshSessionHeaders } from "./dshForeignSessionScan";
 import { PIDECK_PLUGIN_BRIDGE_PATH } from "./pideckPluginBridge";
 import { PIDECK_COMMANDS_BRIDGE_PATH } from "./pideckCommandsBridge";
 import type { DshFetchMessage } from "./dshHostBridge";
@@ -41,9 +47,9 @@ import type {
  *   发送/历史/配置链路调用 ensureStarted() 幂等兜底。
  * - 桥协议：dshHostBridge.ts（fetch-request/response/chunk/end/error）。
  *
- * DSH_HOME：优先直接使用用户真实 ~/.dsh（与 dsh CLI 行为一致，配置/凭证/会话
- * 全在同一处）；仅当 ~/.dsh 不存在时（全新用户）才回退应用私有 dsh-home，
- * 不再复制任何文件——用户改 ~/.dsh 即刻生效，不产生两套配置漂移。
+ * DSH_HOME：直接使用用户真实 ~/.dsh（与 dsh CLI 行为一致，配置/凭证/会话
+ * 全在同一处），不存在时 mkdirSync 自动创建——不产生两套数据目录漂移。
+ * 设置里的 dshHomeDir 覆盖目录优先（自定义路径）。
  */
 export class DshHost {
 	private hostProcess: DshHostProcess | null = null;
@@ -64,7 +70,7 @@ export class DshHost {
 		private readonly getAppPath: () => string,
 		private readonly log: (scope: string, message: string, detail?: unknown) => void =
 			(scope, message, detail) => getAppLogger()?.info(scope, message, detail),
-		/** DSH_HOME 覆盖目录 getter（设置里 dshHomeDir）；空串/undefined = 自动（~/.dsh 优先）。 */
+		/** DSH_HOME 覆盖目录 getter（设置里 dshHomeDir）；空串/undefined = 自动用 ~/.dsh。 */
 		private readonly getDshHomeOverride: () => string | undefined = () => undefined,
 		/**
 		 * DSH host 级代理 env patch 解析（由 main/index.ts 聚合所有 DSH 会话的覆盖生成；
@@ -328,15 +334,17 @@ export class DshHost {
 
 	/**
 	 * 归档 DSH 会话（G14，与 pi 归档同语义：目录移动而非销毁）：
-	 * 把 host 会话目录移出 sessions 树到 $DSH_HOME/.pideck-archive/<sessionId>，
-	 * 并写 manifest（记录原 workspace cwd，恢复时移回）。host 重启后 session.list
-	 * 不再包含该会话（目录已不在 sessions 树）。
+	 * 把 host 会话目录移出 sessions 树到 $DSH_HOME/.pideck/archive/<sessionId>，
+	 * 并写 manifest（记录原 workspace cwd 与会话标题，恢复时移回原位置）。
+	 * host 重启后 session.list 不再包含该会话（目录已不在 sessions 树）。
+	 * title 为归档时刻 catalog 里的会话名：不存则恢复/列表只能看到 host id
+	 * 或退化为日志折叠（见 listArchivedSessions / unarchiveSession）。
 	 * 返回归档目录路径；会话不存在时返回 undefined。
 	 */
-	async archiveSession(dshSessionId: string, cwd: string): Promise<string | undefined> {
+	async archiveSession(dshSessionId: string, cwd: string, title?: string): Promise<string | undefined> {
 		const sourceDir = join(this.getHomeDir(), "sessions", workspaceDirFor(cwd), dshSessionId);
 		if (!existsSync(sourceDir)) return undefined;
-		const archiveRoot = join(this.getHomeDir(), ".pideck-archive");
+  const archiveRoot = pideckArchivePath(this.getHomeDir());
 		const targetDir = join(archiveRoot, dshSessionId);
 		mkdirSync(archiveRoot, { recursive: true });
 		if (existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true });
@@ -345,20 +353,25 @@ export class DshHost {
 			dshSessionId,
 			cwd,
 			archivedAt: Date.now(),
+			// G14+：标题随 manifest 持久化，恢复后列表/会话记录直接可用；
+			// 旧归档没有该字段，由读取侧用日志折叠兜底。
+			...(typeof title === "string" && title.trim() ? { title: title.trim() } : {}),
 		}), "utf8");
 		return targetDir;
 	}
 
-	/** 恢复归档的 DSH 会话（G14）：读 manifest 移回原 workspace 目录。返回恢复后的目录与 manifest 中的原 cwd。 */
-	async unarchiveSession(dshSessionId: string): Promise<{ restoredPath: string; cwd: string } | undefined> {
-		const archiveRoot = join(this.getHomeDir(), ".pideck-archive");
+	/** 恢复归档的 DSH 会话（G14）：读 manifest 移回原 workspace 目录。返回恢复后的目录、manifest 中的原 cwd 与标题。 */
+	async unarchiveSession(dshSessionId: string): Promise<{ restoredPath: string; cwd: string; title?: string } | undefined> {
+  const archiveRoot = pideckArchivePath(this.getHomeDir());
 		const archivedDir = join(archiveRoot, dshSessionId);
 		const manifestPath = join(archivedDir, "pideck-manifest.json");
 		if (!existsSync(manifestPath)) return undefined;
 		let cwd = "";
+		let title: string | undefined;
 		try {
-			const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { cwd?: unknown };
+			const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { cwd?: unknown; title?: unknown };
 			if (typeof manifest.cwd === "string" && manifest.cwd) cwd = manifest.cwd;
+			if (typeof manifest.title === "string" && manifest.title.trim()) title = manifest.title.trim();
 		} catch {
 			// manifest 损坏：无法恢复原位置
 			return undefined;
@@ -366,36 +379,50 @@ export class DshHost {
 		const targetDir = join(this.getHomeDir(), "sessions", workspaceDirFor(cwd), dshSessionId);
 		mkdirSync(dirname(targetDir), { recursive: true });
 		renameSync(archivedDir, targetDir);
-		return { restoredPath: targetDir, cwd };
+		// 旧归档 manifest 无标题时，从恢复后的会话日志前缀只读折叠补全
+		// （与 listArchivedSessions 同源；避免恢复后侧栏落「新会话」占位名）。
+		if (!title) title = foldSessionTitleFromDir(targetDir);
+		return { restoredPath: targetDir, cwd, ...(title ? { title } : {}) };
 	}
 
 	/**
-	 * 归档区中的 DSH 会话清单（G14：恢复入口用；返回 manifest 里的原 workspace cwd 与归档时间）。
+	 * 归档区中的 DSH 会话清单（G14：恢复入口用；返回 manifest 里的原 workspace cwd、
+	 * 归档时间与标题）。标题优先 manifest（G14+ 写入）；旧归档缺省时从归档目录的
+	 * 会话日志前缀只读折叠补全（与外部会话导入同源策略）。
 	 * manifest 缺失/损坏的目录跳过（无 manifest 不视为 PiDeck 归档）。
 	 */
-	listArchivedSessions(): Array<{ dshSessionId: string; cwd: string; archivedAt: number }> {
-		const archiveRoot = join(this.getHomeDir(), ".pideck-archive");
+	listArchivedSessions(): Array<import("../../shared/types").ArchivedDshSession> {
+  const archiveRoot = pideckArchivePath(this.getHomeDir());
 		if (!existsSync(archiveRoot)) return [];
 		return readdirSync(archiveRoot, { withFileTypes: true })
 			.filter((item) => item.isDirectory())
-			.map((item): { dshSessionId: string; cwd: string; archivedAt: number } | undefined => {
+			.map((item): import("../../shared/types").ArchivedDshSession | undefined => {
 				const manifestPath = join(archiveRoot, item.name, "pideck-manifest.json");
 				try {
 					const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
 						dshSessionId?: unknown;
 						cwd?: unknown;
 						archivedAt?: unknown;
+						title?: unknown;
 					};
+					const dshSessionId = typeof manifest.dshSessionId === "string" ? manifest.dshSessionId : item.name;
+					// manifest 携带的标题优先（G14+ 归档时刻写入）；旧归档缺省时
+					// 从归档目录的日志前缀折叠，避免归档区只能显示裸 host id。
+					const manifestTitle = typeof manifest.title === "string" && manifest.title.trim()
+						? manifest.title.trim()
+						: undefined;
+					const title = manifestTitle ?? foldSessionTitleFromDir(join(archiveRoot, item.name));
 					return {
-						dshSessionId: typeof manifest.dshSessionId === "string" ? manifest.dshSessionId : item.name,
+						dshSessionId,
 						cwd: typeof manifest.cwd === "string" ? manifest.cwd : "",
 						archivedAt: typeof manifest.archivedAt === "number" ? manifest.archivedAt : 0,
+						...(title ? { title } : {}),
 					};
 				} catch {
 					return undefined;
 				}
 			})
-			.filter((item): item is { dshSessionId: string; cwd: string; archivedAt: number } => Boolean(item));
+			.filter((item): item is import("../../shared/types").ArchivedDshSession => Boolean(item));
 	}
 
 	/**
@@ -624,7 +651,7 @@ export class DshHost {
 	 * 进程不遵守本锁，阻断也无法防外部并发，但至少双 PiDeck 实例有提示）。
 	 */
 	private acquireHostLock(): void {
-		this.hostLockPath = join(this.dshHome, ".pideck-host.lock");
+  this.hostLockPath = pideckHostLockPath(this.dshHome);
 		try {
 			if (existsSync(this.hostLockPath)) {
 				const raw = readFileSync(this.hostLockPath, "utf8");
@@ -667,6 +694,11 @@ export class DshHost {
 		this.configDir = join(userData, "dsh-config");
 		mkdirSync(this.dshHome, { recursive: true });
 		mkdirSync(this.configDir, { recursive: true });
+		// PiDeck 私有文件统一落 $DSH_HOME/.pideck/：先搬旧位置数据（幂等），再创建目录。
+		// 注：migrateLegacyPideckDshFiles 是一次性迁移（旧布局仅开发/试用环境存在），
+		// 确认无残留后随下一版删除该调用（见 pideckDshHome.ts 头部「生命周期」说明）。
+		migrateLegacyPideckDshFiles(this.dshHome);
+		mkdirSync(pideckDshHome(this.dshHome), { recursive: true });
 		this.acquireHostLock();
 
 		// 定位 hostEntry 产物与 node_modules 锚点（bareModuleBaseUrl）。
@@ -789,8 +821,7 @@ export class DshHost {
 /**
  * DSH_HOME 目录解析（纯函数，可单测）：
  * 1. 设置里 dshHomeDir 非空 → 以用户覆盖为准（任意自定义目录）；
- * 2. 否则一律用 ~/.dsh（与 dsh CLI 共用同一目录；不存在时 mkdirSync 会自动创建，
- *    不再回退应用私有 dsh-home——避免出现两套数据目录漂移）。
+ * 2. 否则一律用 ~/.dsh（与 dsh CLI 共用同一目录；不存在时由调用方 mkdirSync 自动创建）。
  */
 export function resolveDshHomeDir(
 	override: string | undefined,

@@ -353,6 +353,9 @@ export function createPreviewApi(): PiDesktopApi {
 			},
 			open: async () => undefined,
 			showInFolder: async () => undefined,
+			// 预览模式无主进程：不检测文件管理器（打开方式下拉不显示该入口）
+			detectFileManager: async () => null,
+			openFileManager: async () => undefined,
 			readContent: async () => "",
 			// 预览模式无法 stat 真实磁盘：返回空数组，校验方按「未知」处理维持链接现状
 			pathsExist: async () => [],
@@ -1092,7 +1095,11 @@ export function createPreviewApi(): PiDesktopApi {
 				success: false,
 				error: "preview",
 			}),
+			getUsageProbes: async () => ({ recognized: null, templates: [], errors: [] }),
+			saveUsageProbes: async () => ({ ok: false, error: "preview" }),
+			testUsageProbe: async () => ({ success: false, error: "preview" }),
 			installUsageSkill: async () => ({ success: false, error: "preview" }),
+			installImageGenSkill: async () => ({ success: false, error: "preview" }),
 		},
 		pet: {
 			onState: noop,

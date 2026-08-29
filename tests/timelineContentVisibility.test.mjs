@@ -71,24 +71,19 @@ test("user messages fold long text beyond 8 lines with an expand toggle", () => 
   assert.match(surface, /t\("app\.messageCollapse"\)/);
 });
 
-test("compaction card matches the thinking-card visual language", () => {
-  // 压缩卡片：lucide 图标标签行 + 虚线内容框 + 左下角展开按钮；
-  // 思考卡已改成工具式单行 trigger，压缩卡仍保留虚线框（摘要更长）。
-  // 不再用 emoji 充当功能图标（AGENTS.md 图标规范）。
+test("compaction card stays retired: no dashed summary card, no compaction copy", () => {
+  // 压缩摘要卡片按产品决策下线（与 dsh 后端行为对齐）：压缩进行态由 RespondingIndicator
+  // 「正在压缩」承担，compaction system 消息在 SessionMessageTimeline 里不渲染。
+  // 旧卡专用的 Minimize 图标行、虚线摘要框、app.compactionExpand 文案已一并移除；
+  // 此断言固化下线事实，防止卡片未走评审悄悄回来。
   const cards = readFileSync(
     "src/renderer/src/components/session/TimelineEventCards.tsx",
     "utf8",
   );
   assert.doesNotMatch(cards, /📁|📂/);
-  assert.match(cards, /Minimize size=\{15\}/);
-  assert.match(cards, /border-dashed border-border-subtle/);
-  assert.match(
-    cards,
-    /max-h-\[calc\(var\(--font-size-chat\)\*var\(--line-height-chat\)\*4\.5\)\]/,
-  );
-  assert.match(cards, /t\("app\.compactionExpand"\)/);
-  // 展开/收起走左下角按钮，不再整卡可点（与思考卡一致）
-  assert.doesNotMatch(cards, /className="flex w-full cursor-pointer/);
+  assert.doesNotMatch(cards, /Minimize size=\{15\}/);
+  assert.doesNotMatch(cards, /border-dashed border-border-subtle/);
+  assert.doesNotMatch(cards, /app\.compactionExpand/);
 });
 
 test("content enter animation mounts before paint (no flash-then-fade)", () => {

@@ -1,8 +1,8 @@
-import { memo, useCallback, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useRef } from "react";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
-import { Download, Eye, FilePlus, PanelRightOpen, Pencil, Trash2, X } from "lucide-react";
+import { Download, Eye, FilePlus, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
 import { MarkdownStream } from "../session/MarkdownStream";
 import { continueListOnNewline, normalizeOrderedLists, prepareTaskListPreview } from "./scratchPadLists";
@@ -13,23 +13,15 @@ import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
 import { Textarea } from "../ui-shadcn/textarea";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "../ui-shadcn/dropdown-menu";
 
 type Mode = "edit" | "preview";
-
-function ToolButton({ icon, label, text, active, onClick }: {
-	icon?: ReactNode;
-	label: string;
-	text?: string;
-	active?: boolean;
-	onClick: () => void;
-}) {
-	return (
-		<Button variant="ghost" size="icon" aria-label={label} title={label} onClick={onClick} className={active ? "scratch-pad-tool-btn active" : "scratch-pad-tool-btn"}>
-			{icon}
-			{text && <span className="scratch-pad-tool-text">{text}</span>}
-		</Button>
-	);
-}
 
 type ScratchPadPanelProps = {
 	drafts: DraftMeta[];
@@ -96,35 +88,43 @@ const rehypeHighlightMark: Plugin<[], Root> = () => {
 	};
 };
 
-/* 草稿列表项组件 */
+/* 草稿列表项：hover 行时显示删除；仅一份草稿时不提供删除入口 */
 const DraftItem = memo(function DraftItem({
 	draft,
 	isActive,
+	canDelete,
 	onSelect,
 	onDelete,
 }: {
 	draft: DraftMeta;
 	isActive: boolean;
+	canDelete: boolean;
 	onSelect: () => void;
 	onDelete: () => void;
 }) {
 	return (
 		<div
-			className={`scratch-pad-draft-item${isActive ? " active" : ""}`}
+			className={`group mx-1 flex h-7 cursor-pointer select-none items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+				isActive
+					? "bg-accent text-accent-foreground"
+					: "text-foreground/80 hover:bg-muted hover:text-foreground"
+			}`}
 			onClick={onSelect}
 			role="button"
 			tabIndex={0}
 			onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(); } }}
 		>
-			<span className="scratch-pad-draft-name" title={draft.name}>{draft.name}</span>
-			<button
-				className="scratch-pad-draft-del-btn"
-				title={t("scratchPad.deleteDraft")}
-				onClick={(e) => { e.stopPropagation(); onDelete(); }}
-				aria-label={t("scratchPad.deleteDraft")}
-			>
-				<Trash2 size={12} />
-			</button>
+			<span className="min-w-0 flex-1 truncate" title={draft.name}>{draft.name}</span>
+			{canDelete && (
+				<button
+					className="hidden h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-destructive group-hover:flex"
+					title={t("scratchPad.deleteDraft")}
+					onClick={(e) => { e.stopPropagation(); onDelete(); }}
+					aria-label={t("scratchPad.deleteDraft")}
+				>
+					<Trash2 size={11} />
+				</button>
+			)}
 		</div>
 	);
 });
@@ -150,9 +150,6 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 	const lines = content.split("\n");
 	const editorRef = useRef<HTMLTextAreaElement>(null);
 
-	// 文件列表默认折叠，用户需要时手动展开
-	const [showFileList, setShowFileList] = useState(false);
-
 	const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
 		const ta = e.currentTarget;
@@ -176,83 +173,140 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 		});
 	}, [onChangeContent]);
 
-	/* 点击草稿列表中的删除按钮 */
+	/* 点击删除按钮（仅剩一份草稿时不删除，保留最后一份） */
 	const handleDeleteDraft = useCallback((draftPath: string) => {
 		if (drafts.length <= 1) {
-			// 只剩一个时不删除，保留最后一份草稿
 			return;
 		}
 		onDeleteDraft(draftPath);
 	}, [drafts.length, onDeleteDraft]);
+
+	const canDeleteCurrent = Boolean(currentDraftPath) && drafts.length > 1;
 
 	return (
 		<div
 			className={"scratch-pad-panel" + (isClosing ? " closing" : "")}
 			onClick={(event) => event.stopPropagation()}
 		>
-			<header className="scratch-pad-header">
-				<div className="scratch-pad-title">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-						<path d="M12 20h9" />
-						<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-					</svg>
+			<header className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-muted/60 pl-4 pr-2">
+				<div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+					<Pencil size={13} className="text-muted-foreground" aria-hidden="true" />
 					<span>{t("scratchPad.title")}</span>
-					<kbd className="scratch-pad-kbd">⌘⇧S</kbd>
+					<kbd className="ml-1 font-mono text-[11px] font-normal text-muted-foreground">⌘⇧S</kbd>
 				</div>
-				<div className="scratch-pad-toolbar">
-					<ToolButton
-						icon={<FilePlus size={15} />}
-						label={t("scratchPad.newDraft")}
-						onClick={onCreateDraft}
-					/>
-					{currentDraftPath && drafts.length > 1 && (
-						<ToolButton
-							icon={<Trash2 size={15} />}
-							label={t("scratchPad.deleteDraft")}
-							onClick={() => handleDeleteDraft(currentDraftPath)}
-						/>
-					)}
-					<ToolButton
-						icon={<Pencil size={15} />}
-						label={t("scratchPad.edit")}
-						active={mode === "edit"}
+				{/* 编辑/预览分段切换：高频操作独立展示 */}
+				<div
+					className="ml-auto flex items-center gap-0.5 rounded-md bg-muted p-0.5"
+					role="tablist"
+					aria-label={t("scratchPad.title")}
+				>
+					<button
+						type="button"
+						role="tab"
+						aria-selected={mode === "edit"}
 						onClick={() => onSetMode("edit")}
-					/>
-					<ToolButton
-						icon={<Eye size={15} />}
-						label={t("scratchPad.preview")}
-						active={mode === "preview"}
+						className={`flex items-center gap-1 rounded-[5px] px-2 py-1 text-xs transition-colors ${
+							mode === "edit"
+								? "bg-background text-foreground shadow-sm"
+								: "text-muted-foreground hover:text-foreground"
+						}`}
+					>
+						<Pencil size={12} aria-hidden="true" />{t("scratchPad.edit")}
+					</button>
+					<button
+						type="button"
+						role="tab"
+						aria-selected={mode === "preview"}
 						onClick={() => onSetMode("preview")}
-					/>
-					<ToolButton
-						icon={<Download size={15} />}
-						label={t("scratchPad.export")}
-						onClick={onExport}
-					/>
-					{drafts.length > 0 && (
-						<ToolButton
-							icon={<PanelRightOpen size={15} />}
-							label={showFileList ? t("scratchPad.hideFileList") : t("scratchPad.showFileList")}
-							active={showFileList}
-							onClick={() => setShowFileList(v => !v)}
-						/>
-					)}
-					{/* 关闭按钮：悬浮便签无全屏遮罩，X 是唯一可见的关闭入口（Escape/⌘⇧S 仍有效） */}
-					<ToolButton
-						icon={<X size={15} />}
-						label={t("common.close")}
-						onClick={onClose}
-					/>
+						className={`flex items-center gap-1 rounded-[5px] px-2 py-1 text-xs transition-colors ${
+							mode === "preview"
+								? "bg-background text-foreground shadow-sm"
+								: "text-muted-foreground hover:text-foreground"
+						}`}
+					>
+						<Eye size={12} aria-hidden="true" />{t("scratchPad.preview")}
+					</button>
 				</div>
+				{/* 低频操作（新建/导出/删除）收进 ⋯ 菜单；关闭保持独立入口 */}
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							className="size-7"
+							title={t("tabs.moreActions")}
+							aria-label={t("tabs.moreActions")}
+						>
+							<MoreHorizontal className="size-4" aria-hidden="true" />
+						</Button>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end" className="min-w-36">
+						<DropdownMenuItem onClick={onCreateDraft}>
+							<FilePlus size={14} aria-hidden="true" />{t("scratchPad.newDraft")}
+						</DropdownMenuItem>
+						<DropdownMenuItem onClick={onExport}>
+							<Download size={14} aria-hidden="true" />{t("scratchPad.export")}
+						</DropdownMenuItem>
+						{canDeleteCurrent && (
+							<>
+								<DropdownMenuSeparator />
+								<DropdownMenuItem
+									className="text-destructive focus:text-destructive"
+									onClick={() => { if (currentDraftPath) handleDeleteDraft(currentDraftPath); }}
+								>
+									<Trash2 size={14} aria-hidden="true" />{t("scratchPad.deleteDraft")}
+								</DropdownMenuItem>
+							</>
+						)}
+					</DropdownMenuContent>
+				</DropdownMenu>
+				{/* X 是唯一可见的关闭入口（Escape/⌘⇧S 仍有效） */}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					className="size-7"
+					title={t("common.close")}
+					aria-label={t("common.close")}
+					onClick={onClose}
+				>
+					<X className="size-4" aria-hidden="true" />
+				</Button>
 			</header>
 
-			<div className="scratch-pad-body">
-				{/* 编辑/预览区域 — 左 */}
-				<div className="scratch-pad-content">
+			<div className="flex min-h-0 flex-1">
+				{/* 草稿列表常驻左侧：省去「显示文件列表」开关 */}
+				{drafts.length > 0 && (
+					<aside className="flex w-40 shrink-0 flex-col border-r border-border bg-muted/30">
+						<div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-1.5">
+							{drafts.map((d) => (
+								<DraftItem
+									key={d.path}
+									draft={d}
+									isActive={d.path === currentDraftPath}
+									canDelete={drafts.length > 1}
+									onSelect={() => onSelectDraft(d.path)}
+									onDelete={() => handleDeleteDraft(d.path)}
+								/>
+							))}
+						</div>
+						<div className="border-t border-border p-1.5">
+							<Button
+								variant="ghost"
+								size="sm"
+								className="w-full justify-start gap-1.5 text-xs text-muted-foreground"
+								onClick={onCreateDraft}
+							>
+								<FilePlus size={13} aria-hidden="true" />{t("scratchPad.newDraft")}
+							</Button>
+						</div>
+					</aside>
+				)}
+
+				<div className="flex min-w-0 flex-1 flex-col">
 					{mode === "edit" ? (
 						<Textarea
 							ref={editorRef}
-							className="scratch-pad-editor rounded-none border-0 shadow-none dark:bg-transparent focus-visible:border-transparent focus-visible:ring-0"
+							className="flex-1 rounded-none border-0 bg-transparent p-4 font-mono text-sm leading-relaxed shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
 							value={content}
 							placeholder={t("scratchPad.placeholder")}
 							onChange={handleContentChange}
@@ -261,9 +315,9 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 							spellCheck={false}
 						/>
 					) : (
-						<div className="scratch-pad-preview">
+						<div className="min-h-0 flex-1 overflow-y-auto p-4 text-foreground">
 							{empty ? (
-								<div className="scratch-pad-empty-hint">
+								<div className="grid h-full place-items-center text-sm text-muted-foreground">
 									<em>{t("scratchPad.empty")}</em>
 								</div>
 							) : (
@@ -321,22 +375,6 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 						</div>
 					)}
 				</div>
-
-				{showFileList && drafts.length > 0 && (
-					<div className="scratch-pad-draft-list">
-						<div className="scratch-pad-draft-list-scroll">
-							{drafts.map((d) => (
-								<DraftItem
-									key={d.path}
-									draft={d}
-									isActive={d.path === currentDraftPath}
-									onSelect={() => onSelectDraft(d.path)}
-									onDelete={() => handleDeleteDraft(d.path)}
-								/>
-							))}
-						</div>
-					</div>
-				)}
 			</div>
 
 		</div>

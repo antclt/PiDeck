@@ -56,6 +56,7 @@ import {
 import type { PiDesktopApi } from "../../preload";
 import { AuthTab } from "./config/AuthTab";
 import { ModelsTab } from "./config/ModelsTab";
+import { UsageProbeConfigDialog } from "./config/UsageProbeConfigDialog";
 import { removeSelectedModelIndexes } from "./config/modelBatchSelection";
 import { openDocsInSystemBrowser } from "./config/ConfigShared";
 import { RawTab } from "./config/RawTab";
@@ -235,6 +236,10 @@ type ConfigModalProps = {
 	onSaved: () => void;
 	/** 当前项目路径：有值时合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
 	projectPath?: string;
+	/** 深链：打开时落在的配置分页（如圆球「去配置用量」直达 models）。 */
+	focusConfigTab?: ConfigTab;
+	/** 深链：models 页要定位展开的供应商名。 */
+	focusProvider?: string;
 };
 
 /**
@@ -265,6 +270,10 @@ export type ConfigPaneProps = {
 	onSaved?: () => void;
 	/** 当前项目路径：有值时合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
 	projectPath?: string;
+	/** 深链：打开时落在的配置分页（设置窗口内嵌分区消费 openSettingsAtom 的 configTab）。 */
+	focusConfigTab?: ConfigTab;
+	/** 深链：models 页要定位展开的供应商名。 */
+	focusProvider?: string;
 	/**
 	 * 头部按钮状态上报（saving 禁用保存 / hasDirty 黄点 / unsaved 关闭确认清单）。
 	 * 外壳把这些 UI 细节呈现在自己的标题栏，因此 ConfigPane 需要把内部状态同步给外壳。
@@ -277,13 +286,15 @@ export type ConfigPaneProps = {
  * 不包错误边界——宿主 SettingsModal 的 ErrorBoundary 已兜底整个窗口。
  */
 export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
-	function ConfigPane({ onClose, onSaved, projectPath, onStateChange }, ref) {
+	function ConfigPane({ onClose, onSaved, projectPath, focusConfigTab, focusProvider, onStateChange }, ref) {
 		return (
 			<ConfigModalContent
 				open
 				onClose={onClose}
 				onSaved={onSaved ?? (() => {})}
 				projectPath={projectPath}
+				focusConfigTab={focusConfigTab}
+				focusProvider={focusProvider}
 				embedded
 				paneRef={ref}
 				onPaneStateChange={onStateChange}
@@ -374,12 +385,37 @@ type ConfigModalContentProps = ConfigModalProps & {
 };
 
 function ConfigModalContent(props: ConfigModalContentProps) {
-	const { open, onClose, onSaved, projectPath, embedded } = props;
+	const { open, onClose, onSaved, projectPath, embedded, focusConfigTab, focusProvider } = props;
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
 	const [section, setSection] = useState<ConfigSection>(lastTab?.section ?? "config");
-	const [tab, setTab] = useState<ConfigTab>(lastTab?.tab ?? "models");
+	// 深链（如圆球面板「去配置用量」）优先于上次记住的配置分页。
+	const [tab, setTab] = useState<ConfigTab>(focusConfigTab ?? lastTab?.tab ?? "models");
+	// 深链 provider：models 页展开该供应商卡片并滚动高亮（ModelsTab 消费）。
+	const [focusedProvider, setFocusedProvider] = useState<string | undefined>(focusProvider);
+	// 用量探针配置弹窗：由模型/认证/DSH 卡片触发（provider + backend 决定配置落盘位置）。
+	const [usageProbeDialog, setUsageProbeDialog] = useState<{
+		provider: string;
+		backend: "pi" | "dsh";
+	} | null>(null);
+	// 打开弹窗的公共入口：pi 侧（模型/认证）provider 与 DSH route 分开（DSH 走 $DSH_HOME 链路）。
+	const openUsageProbeDialogFor = useCallback(
+		(provider: string, backend: "pi" | "dsh") => {
+			setUsageProbeDialog({ provider, backend });
+		},
+		[],
+	);
+	useEffect(() => {
+		if (!open) return;
+		if (focusConfigTab) setTab(focusConfigTab);
+		if (focusProvider) {
+			setFocusedProvider(focusProvider);
+			setTab("models");
+			setExpandedProvider(focusProvider);
+		}
+		// focusProvider/focusConfigTab 变化即应用：设置窗口已开时点圆球跳转也要生效。
+	}, [open, focusConfigTab, focusProvider]);
 	/** 配置管理顶层后端分页：以 Pi 为主（默认 Pi，且 Pi 标签在左），dsh 页在右。
 	 *  新建会话仍默认 dsh 是运行态偏好，与此处配置管理入口默认值相互独立。
 	 *  弹窗每次打开都会重建 state，这里从 localStorage 恢复上次选定的后端分页。 */
@@ -388,6 +424,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const selectBackendPane = useCallback((value: string) => {
 		const next = value === "pi" ? "pi" : "dsh";
 		setBackendPane(next);
+		// 用量查询弹窗是 per-provider 的：切换 Pi/DSH 页时关闭，
+		// 避免「从认证页点开、切到模型页后弹窗还挂着」的越界出现（用户反馈的闪现 bug）。
+		setUsageProbeDialog(null);
 		try {
 			localStorage.setItem(CONFIG_BACKEND_PANE_KEY, next);
 		} catch {
@@ -2155,6 +2194,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						ref={dshConfigRef}
 						onDirtyChange={handleDshDirtyChange}
 						dirtyNavIds={dshDirtyNavIds}
+						onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "dsh")}
 					/>
 				</TabsContent>
 				<TabsContent value="pi" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
@@ -2168,6 +2208,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					const parsed = parseSectionTabValue(value);
 					setSection(parsed.section);
 					if (parsed.tab) setTab(parsed.tab);
+					// 用量查询弹窗随配置 tab 联动：切走（如 认证 → 模型）即关闭，
+					// 防止弹窗跨 tab 悬挂被误认为「自动弹出」。
+					setUsageProbeDialog(null);
 					// 记住位置：下次打开 Pi 管理页时回到同一 tab
 					try {
 						localStorage.setItem(CONFIG_LAST_TAB_KEY, value);
@@ -2225,6 +2268,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<ModelsTab
 							data={modelsData}
 							expandedProvider={expandedProvider}
+							focusProvider={focusedProvider}
+							onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "pi")}
 							addingProvider={addingProvider}
 							newProviderName={newProviderName}
 							renamingProvider={renamingProvider}
@@ -2314,6 +2359,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						onDeleteAuth={handleDeleteAuth}
 							onUpdate={handleUpdateAuth}
 							onSave={handleSaveAuth}
+							onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "pi")}
 						/>
 					)}
 						</div>
@@ -2499,6 +2545,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				</Tabs>
 				</TabsContent>
 			</Tabs>
+
+			{/* 用量查询配置弹窗：模型/认证/DSH 共用入口；provider + backend 决定配置落盘位置。
+			    必须放在所有 Tabs 之外：Radix Tabs 默认卸载非激活内容，若放回 config:models
+			    TabsContent 内，切到认证 tab / DSH 页时弹窗组件会随卸载消失（点击无反应的 bug）。 */}
+			<UsageProbeConfigDialog
+				open={usageProbeDialog != null}
+				onClose={() => setUsageProbeDialog(null)}
+				provider={usageProbeDialog?.provider ?? ""}
+				backend={usageProbeDialog?.backend}
+			/>
 
 				{deleteSkillConfirm && (
 					<ConfirmDialog

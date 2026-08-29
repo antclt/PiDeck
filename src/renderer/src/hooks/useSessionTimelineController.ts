@@ -37,6 +37,7 @@ import {
   TIMELINE_SCROLLED_TURN_LIMIT,
   TIMELINE_WINDOW_EXPAND_STEP,
 } from "../components/session/timeline/turnRenderWindow";
+import { resolveJumpPendingAction } from "../components/session/timeline/jumpWindowPolicy";
 
 /** 滚动接近顶部自动加载历史的阈值（px，2026-11 轮次模型）：
  *  贴顶（≤8px）才触发翻页——「滑到底才翻」，避免在顶部附近任何滚动都连翻历史页。
@@ -259,6 +260,8 @@ export type SessionTimelineController = {
   showScrollToBottom: boolean;
   /** 由 MessageScroller 汇报用户是否仍在实时尾部，避免两套滚动监听互相抢占。 */
   setAutoScrollFromScroller: (following: boolean) => void;
+  /** 跳转导航进行中：时间线据此解除上滚窗口的条目预算（jumpNavigationActive）。 */
+  jumpNavigationActive: boolean;
   /**
    * 挂到 MessageScroller 的 stick-to-bottom 引擎 API（回底弹簧）。
    * 未挂上时 scrollToBottom 退化为原生 scrollTo。
@@ -572,7 +575,16 @@ export function useSessionTimelineController(options: {
   const settleScrollCancelRef = useRef<(() => void) | undefined>(undefined);
   const scrollerScrollApiRef = useRef<MessageScrollerScrollApi | null>(null);
   const loadMoreAnchorRef = useRef<Tagged<TimelineAnchor> | undefined>(undefined);
-  const pendingJumpRef = useRef<Tagged<string> | undefined>(undefined);
+  /** 挂起的跳转：attempts 驱动指数扩窗与补页防呆（策略见 timeline/jumpWindowPolicy）。 */
+  const pendingJumpRef = useRef<Tagged<{ messageId: string; attempts: number }> | undefined>(undefined);
+  /**
+   * 跳转导航进行中：解除上滚窗口的条目预算（TIMELINE_SCROLLED_MAX_ITEMS）。
+   * 预算按条目数封顶渲染，轮数扩得再大也挂不出预算外的旧消息——跳转会因此
+   * 永远找不到目标行（表现即「点前面的刻度没反应」）。解除后扩窗才能真正
+   * 挂载目标；跳转完成后保持解除（避免预算恢复瞬间把刚定位到的内容裁掉），
+   * 回底（窗口重置 3 轮）或切换会话时恢复。
+   */
+  const [jumpNavigationActive, setJumpNavigationActive] = useState(false);
   const highlightTimersRef = useRef(new Map<number, number>());
   // ── 上滚渲染窗口（2026-08 黑屏治理）──
   // 贴底和上滚初始都只挂 3 轮；每次接近顶部最多扩一个 3 轮 cohort，
@@ -644,7 +656,7 @@ export function useSessionTimelineController(options: {
       expandBatchFrameRef.current = undefined;
     }
   }, [ownerKey]);
-  const expandWindow = useCallback(() => {
+  const expandWindow = useCallback((turns = TIMELINE_WINDOW_EXPAND_STEP) => {
     // 跟底状态（内容短于视口、按钮可见）下点击「显示更早」：先解锁跟随，
     // 否则 turnWindowTurns 恒取贴底窗口 3 轮，扩大 scrolledWindowTurns 不生效，
     // 按钮点击表现为无反应（2026-02 修复）。
@@ -653,7 +665,7 @@ export function useSessionTimelineController(options: {
       setAutoScroll(false);
       setShowScrollToBottom(true);
     }
-    setScrolledWindowTurns((prev) => prev + TIMELINE_WINDOW_EXPAND_STEP);
+    setScrolledWindowTurns((prev) => prev + Math.max(1, turns));
   }, []);
   // 回底/卸载时取消未消费的分批扩展（窗口重置回基础大小，pending 作废）
   useEffect(() => {
@@ -665,6 +677,8 @@ export function useSessionTimelineController(options: {
       }
       // 回底 = 新的浏览周期：冷却清零，避免「刚到底又立刻上滚」被上一次扩窗冷却吞掉。
       lastWindowExpandAtRef.current = 0;
+      // 跳转导航结束：条目预算随窗口重置一并恢复（见 jumpNavigationActive 注释）
+      setJumpNavigationActive(false);
       setScrolledWindowTurns(TIMELINE_SCROLLED_TURN_LIMIT);
     }
   }, [autoScroll]);
@@ -986,18 +1000,22 @@ export function useSessionTimelineController(options: {
       return;
     }
     const index = combinedMessages.findIndex((message) => message.id === messageId);
-    if (index < 0) return;
-    // 目标可能在贴底 turn 窗口外：先取消跟随以展开挂载，再等布局后滚动。
-    // （2026-11 轮次模型：数据全量在 atom，无需再扩展渲染窗口。）
+    const hasMorePages = diskPage ? diskPage.nextBefore !== null : historyHasMore;
+    if (index < 0 && !hasMorePages) return;
+    // 目标可能在贴底 turn 窗口外（先取消跟随以展开挂载），也可能在尚未加载的
+    // 历史页里：挂起跳转，由 pendingJump effect 按策略补页/扩窗直到完成。
     autoScrollRef.current = false;
     setAutoScroll(false);
     setShowScrollToBottom(true);
-    pendingJumpRef.current = { ownerKey: requestOwnerKey, value: messageId };
-  }, [highlightMessage, combinedMessages, ownerKey]);
+    setJumpNavigationActive(true);
+    pendingJumpRef.current = { ownerKey: requestOwnerKey, value: { messageId, attempts: 0 } };
+  }, [highlightMessage, combinedMessages, diskPage, historyHasMore, ownerKey]);
 
   useEffect(() => {
     loadMoreAnchorRef.current = undefined;
     pendingJumpRef.current = undefined;
+    // 切会话：跳转导航结束，条目预算恢复
+    setJumpNavigationActive(false);
     programmaticScrollRef.current = false;
     programmaticScrollUntilRef.current = 0;
     settleScrollCancelRef.current?.();
@@ -1246,25 +1264,41 @@ lastHistoryLoadAtRef.current = now;
     const timeline = timelineRef.current;
     if (!pendingJump || !timeline || !matchesTimelineOwner(pendingJump.ownerKey, ownerKey)) return;
     const element = timeline.querySelector(
-      `[data-message-id="${CSS.escape(pendingJump.value)}"]`,
+      `[data-message-id="${CSS.escape(pendingJump.value.messageId)}"]`,
     ) as HTMLElement | null;
-    if (!element) {
-      // 目标在渲染窗口之外（上滚窗口化）：逐步扩大窗口，本 effect 随窗口变化重跑
-      // 直到目标挂载；目标已不在数据中（期间被压缩清理/删除）则放弃跳转，
-      // 避免窗口无限放大（防呆，2026-08 黑屏治理）。
-      const stillInData = combinedMessages.some((message) => message.id === pendingJump.value);
-      if (!stillInData) {
-        pendingJumpRef.current = undefined;
-        return;
-      }
-      expandWindow();
+    if (element) {
+      pendingJumpRef.current = undefined;
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+      highlightMessage(element, ownerKey);
+      // autoScroll：贴底 turn 窗口展开后 DOM 才出现目标行，需再跑一轮。
       return;
     }
-    pendingJumpRef.current = undefined;
-    element.scrollIntoView({ behavior: "smooth", block: "start" });
-    highlightMessage(element, ownerKey);
-    // autoScroll：贴底 turn 窗口展开后 DOM 才出现目标行，需再跑一轮。
-  }, [autoScroll, combinedMessages, controllerEnabled, expandWindow, highlightMessage, ownerKey, scrolledWindowTurns, visibleMessages.length]);
+    // 目标未挂载：按策略扩窗（指数步长）/ 跳转驱动补页 / 放弃（防呆上限）。
+    // give-up 保留旧行为兜底：目标已不在数据（压缩清理/删除）时不无限扩窗（2026-08 黑屏治理）。
+    const stillInData = combinedMessages.some((message) => message.id === pendingJump.value.messageId);
+    const hasMorePages = diskPage ? diskPage.nextBefore !== null : historyHasMore;
+    const action = resolveJumpPendingAction({
+      targetInLoadedData: stillInData,
+      hasMorePages,
+      isLoadingPage: isLoadingMessagePage,
+      attempts: pendingJump.value.attempts,
+    });
+    if (action.kind === "give-up") {
+      pendingJumpRef.current = undefined;
+      setJumpNavigationActive(false);
+      return;
+    }
+    if (action.kind === "wait") return;
+    pendingJumpRef.current = {
+      ownerKey: pendingJump.ownerKey,
+      value: { messageId: pendingJump.value.messageId, attempts: pendingJump.value.attempts + 1 },
+    };
+    if (action.kind === "load-page") {
+      loadMoreMessages("button");
+      return;
+    }
+    expandWindow(action.turns);
+  }, [autoScroll, combinedMessages, controllerEnabled, diskPage, expandWindow, highlightMessage, historyHasMore, isLoadingMessagePage, loadMoreMessages, ownerKey, scrolledWindowTurns, visibleMessages.length]);
 
   return {
     timelineRef,
@@ -1294,5 +1328,7 @@ lastHistoryLoadAtRef.current = now;
     isSurfaceLoading,
     knownEmpty,
     reloadFromDisk,
+    /** 跳转导航进行中：时间线据此解除条目预算（见 jumpNavigationActive 注释） */
+    jumpNavigationActive,
   };
 }

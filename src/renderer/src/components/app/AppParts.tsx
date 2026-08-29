@@ -434,7 +434,6 @@ export {
   EmptyState,
   ToolCard,
   ToolGroupCard,
-  CompactionCard,
   DiagnosticMessageCard,
   AskQuestionCard,
   ThinkingBlock,

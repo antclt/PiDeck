@@ -51,6 +51,7 @@ import type {
 	ExternalEditor,
 	ExternalEditorId,
 	ExternalEditorSetting,
+	FileManagerInfo,
 	FeedbackEnvironment,
 	FeishuBotConfig,
 	FeishuBridgeStatus,
@@ -110,7 +111,13 @@ import type {
 	TerminalTarget,
 	WebNetworkAddress,
 } from "../shared/types";
-import type { ProviderUsageResult } from "../shared/types/providerUsage";
+import type {
+	ProviderUsageResult,
+	UsageProbeSaveInput,
+	UsageProbeSaveResult,
+	UsageProbeSettingsResult,
+	UsageProbeTestInput,
+} from "../shared/types/providerUsage";
 
 function clipboardSync<T>(channel: string, fallback: T): T {
 	try {
@@ -235,6 +242,12 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.filesOpen, path) as Promise<void>,
 		showInFolder: (path: string) =>
 			ipcRenderer.invoke(ipcChannels.filesShowInFolder, path) as Promise<void>,
+		/** 检测系统可用的文件管理器（打开方式下拉补充入口） */
+		detectFileManager: () =>
+			ipcRenderer.invoke(ipcChannels.filesDetectFileManager) as Promise<FileManagerInfo | null>,
+		/** 在系统文件管理器中打开目录 */
+		openFileManager: (path: string) =>
+			ipcRenderer.invoke(ipcChannels.filesOpenFileManager, path) as Promise<void>,
 		readContent: (path: string, maxBytes?: number) =>
 			ipcRenderer.invoke(ipcChannels.filesReadContent, path, maxBytes) as Promise<string>,
 		/** 批量校验路径是否存在（返回与入参等长的 boolean[]；单路径失败按 false 计） */
@@ -423,9 +436,9 @@ const api = {
 		/** 恢复归档会话（移回原路径并重新入目录） */
 		unarchiveRecord: (archivedPath: string) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogUnarchive, archivedPath) as Promise<boolean>,
-		/** 列出已归档会话摘要（恢复 UI 用） */
+		/** 列出已归档会话（恢复 UI 用；带归档前原始路径供按项目归属过滤） */
 		listArchived: () =>
-			ipcRenderer.invoke(ipcChannels.sessionsCatalogListArchived) as Promise<SessionSummary[]>,
+			ipcRenderer.invoke(ipcChannels.sessionsCatalogListArchived) as Promise<import("../shared/types").ArchivedPiSession[]>,
 		readRecordMessages: (sessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogReadMessages, sessionId) as Promise<
 				import("../shared/types").ChatMessage[]
@@ -561,13 +574,9 @@ const api = {
 		/** DSH 外部会话全量同步（自动发现：catalog 未映射的 host 根会话全部导入）。 */
 		syncDshForeignSessions: () =>
 			ipcRenderer.invoke(ipcChannels.dshSyncForeignSessions) as Promise<{ imported: number; skipped: number }>,
-		/** DSH 归档区会话清单（G14：恢复入口用；目录已移入 .pideck-archive 的 host 会话）。 */
+		/** DSH 归档区会话清单（G14：恢复入口用；目录已移入 .pideck-archive 的 host 会话，含标题）。 */
 		listArchivedDshSessions: () =>
-			ipcRenderer.invoke(ipcChannels.dshListArchived) as Promise<Array<{
-				dshSessionId: string;
-				cwd: string;
-				archivedAt: number;
-			}>>,
+			ipcRenderer.invoke(ipcChannels.dshListArchived) as Promise<import("../shared/types").ArchivedDshSession[]>,
 		/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
 		unarchiveDshSession: (dshSessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshUnarchive, dshSessionId) as Promise<boolean>,
@@ -1428,16 +1437,39 @@ const api = {
 				ipcChannels.configTestProvider,
 				{ providerName, modelId, models },
 			) as Promise<import("../shared/types/fetchedModel").PiModelProbeResult>,
-		/** 查询 provider 用量/余额（如 opencode-go /v1/usage），主进程按 provider 名解析端点并查询 */
-		fetchUsage: (provider: string) =>
+		/** 查询 provider 用量/余额（主进程按 provider 名 + backend 路由；backend=dsh 走 $DSH_HOME 链路） */
+		fetchUsage: (provider: string, backend?: "pi" | "dsh") =>
 			ipcRenderer.invoke(
 				ipcChannels.configFetchUsage,
-				{ provider },
+				{ provider, backend },
 			) as Promise<ProviderUsageResult>,
 		/** 安装内置「用量查询自定义」技能模板到 ~/.pi/agent/skills/usage-probe */
 		installUsageSkill: () =>
 			ipcRenderer.invoke(
 				ipcChannels.configInstallUsageSkill,
+			) as Promise<{ success: boolean; path?: string; error?: string }>,
+		/** 读取该 provider 的用量查询配置 + 内置模板自动识别（探针配置弹窗数据源；backend=dsh 走 DSH 链路） */
+		getUsageProbes: (provider: string, backend?: "pi" | "dsh") =>
+			ipcRenderer.invoke(
+				ipcChannels.configGetUsageProbes,
+				{ provider, backend },
+			) as Promise<UsageProbeSettingsResult>,
+		/** 按 provider 合并保存用量查询配置（主进程校验后落盘，保留其它 providers 与旧 probes） */
+		saveUsageProbes: (payload: UsageProbeSaveInput) =>
+			ipcRenderer.invoke(
+				ipcChannels.configSaveUsageProbes,
+				payload,
+			) as Promise<UsageProbeSaveResult>,
+		/** 单条模板测试（模板 id + 覆盖字段；provider 端点与密钥由主进程解析，不回传渲染层） */
+		testUsageProbe: (payload: UsageProbeTestInput) =>
+			ipcRenderer.invoke(
+				ipcChannels.configTestUsageProbe,
+				payload,
+			) as Promise<ProviderUsageResult>,
+		/** 安装内置「图片生成」技能模板到 ~/.pi/agent/skills/image-gen */
+		installImageGenSkill: () =>
+			ipcRenderer.invoke(
+				ipcChannels.configInstallImageGenSkill,
 			) as Promise<{ success: boolean; path?: string; error?: string }>,
 	},
 	pet: {

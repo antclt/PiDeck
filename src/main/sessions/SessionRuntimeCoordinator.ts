@@ -361,6 +361,35 @@ export class SessionRuntimeCoordinator {
 	}
 
 	/**
+	 * Register a runtime that is being started by a caller outside the normal
+	 * activateRuntime path (currently anonymous --no-session sessions).
+	 *
+	 * The promise is placed in the same per-Session activation gate before the
+	 * Session is returned to the renderer. Therefore a fast first send waits for
+	 * the already-created process instead of creating a second one.
+	 */
+	registerPendingRuntime(sessionId: string, activation: Promise<AgentTab>): void {
+		const normalizedSessionId = sessionId.trim();
+		if (!normalizedSessionId) throw new Error("Session ID is required");
+		if (this.activationBySession.has(normalizedSessionId)) return;
+
+		this.activationBySession.set(normalizedSessionId, activation);
+		// Do not use Promise.finally here: its derived rejection would become an
+		// unhandled promise when nobody races the background activation. The
+		// original promise remains the gate consumed by any concurrent caller.
+		void activation.then(
+			() => this.clearPendingRuntime(normalizedSessionId, activation),
+			() => this.clearPendingRuntime(normalizedSessionId, activation),
+		);
+	}
+
+	private clearPendingRuntime(sessionId: string, activation: Promise<AgentTab>): void {
+		if (this.activationBySession.get(sessionId) === activation) {
+			this.activationBySession.delete(sessionId);
+		}
+	}
+
+	/**
 	 * 删除前强制释放运行时：先解绑让侧栏立刻可删，agent 停在后台。
 	 * 运行中会话也允许删——用户不必先点停止。stop 失败也不挡 catalog 删除。
 	 */

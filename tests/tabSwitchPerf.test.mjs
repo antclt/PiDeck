@@ -47,10 +47,11 @@ test("file tree list is shallow by default in the drawer and accepts a scoped di
   assert.match(filesIpcSource, /maxDepth/);
   assert.match(filesIpcSource, /directory/);
   assert.match(appSource, /maxDepth:\s*0/);
-  // composer @ 引用跟文件抽屉同一套懒加载，只跟 projectId，不跟 sessionId
+  // composer @ 引用跟文件抽屉同一套懒加载，只跟项目（effectiveProjectId），不跟 sessionId
+  // （@ 引用取数已从 ComposerArea 迁入 useSessionComposerController）
   assert.match(composerSource, /maxDepth:\s*0/);
-  assert.match(composerSource, /desktopApi\.files\.list\(record\.projectId, \{ maxDepth: 0 \}\)/);
-  assert.match(composerSource, /\}, \[record\?\.projectId\]\);/);
+  assert.match(composerSource, /desktopApi\.files\.list\(effectiveProjectId, \{ maxDepth: 0 \}\)/);
+  assert.match(composerSource, /\}, \[effectiveProjectId\]\);/);
 });
 
 test("session display index yields during a full rebuild", () => {

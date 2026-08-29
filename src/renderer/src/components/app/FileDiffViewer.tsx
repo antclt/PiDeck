@@ -17,7 +17,6 @@ const CodeDiffView = lazy(() =>
 import { formatFilePathRef } from "../session/composer/chips";
 
 import { isBinaryExtension, isImageFile, isPdfFile } from "../../utils/isTextFile";
-import { getFileIconColor, getFileIconSeti } from "../../fileIcons";
 
 type ViewMode = "view" | "diff";
 
@@ -76,6 +75,9 @@ export function FileDiffViewer(props: {
 	// 二进制预览（图片/PDF）的 Blob URL：切换文件/卸载时 revoke，防止内存泄漏
 	const [mediaUrl, setMediaUrl] = useState<string | null>(null);
 	const mediaUrlRef = useRef<string | null>(null);
+	// 编辑器的 input 事件先于 React render；debounce timer 不能捕获旧 render 的 content。
+	// 这个 ref 是编辑内容的实时镜像，保存时始终从它读取最新文本。
+	const contentRef = useRef(content);
 
 	const isDiffMode = props.mode === "diff";
 	const fileName = props.filePath.split(/[/\\]/).pop() ?? props.filePath;
@@ -148,6 +150,7 @@ export function FileDiffViewer(props: {
 						setLoading(false);
 						return;
 					}
+					contentRef.current = result;
 					setContent(result);
 					// 自动保存基准快照：加载完成即视为「已落盘」状态，避免打开后无改动就触发写盘
 					lastSavedRef.current = result;
@@ -222,13 +225,29 @@ export function FileDiffViewer(props: {
 		}
 	}
 
-	// 从当前内容 state 取最新值（编辑器 onChange 已实时同步；CM6 无 Monaco 的实例取值路径）
-	const getLatestContent = useCallback(() => content, [content]);
+	// 从实时内容镜像取值，而不是从 state 闭包取值：debounce timer/快捷键回调
+	// 可能仍属于上一次 render，但 input 事件已经把最新文本写入 ref。
+	const getLatestContent = useCallback(() => contentRef.current, []);
 
 	// 自动保存：编辑停止 500ms 后静默落盘（仅 allowSave 的文件），Ctrl+S 立即保存并取消挂起的自动保存。
 	const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// 最近一次落盘内容快照：内容未变时跳过保存，避免重复写盘
 	const lastSavedRef = useRef("");
+	// FileDiffViewer 在切换 Tab 时复用实例；用代数阻止旧文件的异步保存结果污染新 Tab。
+	const saveGenerationRef = useRef(0);
+
+	// 切换文件/Tab 或外部缓存内容时，取消旧文件的 debounce 保存并令进行中的保存失效。
+	// 否则旧 timer 可能在新文件已挂载后调用旧 render 的 saveNow，覆盖新文件状态。
+	useEffect(() => {
+		saveGenerationRef.current += 1;
+		if (saveTimerRef.current) {
+			clearTimeout(saveTimerRef.current);
+			saveTimerRef.current = null;
+		}
+		contentRef.current = "";
+		lastSavedRef.current = "";
+		setSaving(false);
+	}, [props.activeTabId, props.filePath, props.originalContent, props.modifiedContent, isDiffMode]);
 
 	const saveNow = useCallback(async () => {
 		if (saveTimerRef.current) {
@@ -238,17 +257,26 @@ export function FileDiffViewer(props: {
 		if (!props.saveContent) return;
 		const latest = getLatestContent();
 		if (latest === lastSavedRef.current) return;
+		const saveGeneration = saveGenerationRef.current;
+		const savePath = props.filePath;
 		setSaving(true);
 		try {
-			await props.saveContent(props.filePath, latest);
+			await props.saveContent(savePath, latest);
+			// Tab 已切换时，旧请求即使完成也不能改动新 Tab 的 dirty/content 状态。
+			if (saveGeneration !== saveGenerationRef.current) return;
 			lastSavedRef.current = latest;
-			setContent(latest);
-			setDirty(false);
+			// 保存期间用户可能继续输入；只有没有更新过才可以清除 dirty，
+			// 绝不能把保存开始时的快照重新 set 回编辑器。
+			if (contentRef.current === latest) {
+				setDirty(false);
+			}
 		} catch (e) {
-			// 保存失败保留 dirty，用户可继续编辑后由下一次自动保存/Ctrl+S 重试
-			setError(e instanceof Error ? e.message : String(e));
+			if (saveGeneration === saveGenerationRef.current) {
+				// 保存失败保留 dirty，用户可继续编辑后由下一次自动保存/Ctrl+S 重试
+				setError(e instanceof Error ? e.message : String(e));
+			}
 		} finally {
-			setSaving(false);
+			if (saveGeneration === saveGenerationRef.current) setSaving(false);
 		}
 	}, [getLatestContent, props.saveContent, props.filePath]);
 
@@ -289,6 +317,8 @@ export function FileDiffViewer(props: {
 	}, []);
 
 	const handleEditorChange = useCallback((value: string) => {
+		// 先写 ref 再触发 React 更新，保证 debounce timer 不会保存上一个 render 的值。
+		contentRef.current = value;
 		setContent(value);
 		setDirty(true);
 		scheduleAutoSave();
@@ -372,19 +402,11 @@ export function FileDiffViewer(props: {
 						<ArrowLeft size={18} />
 					</Button>
 				)}
-				{/* 外置 chrome / 内嵌 Tab：文件名已在 Tab 上，标题槽只留脏标提示 */}
-				{props.chromeTabsExternal || showInlineTabs ? (
-					<span className="file-diff-title min-w-0 flex-1 truncate">
-						{dirty && !props.chromeTabsExternal && t("editor.unsavedMarker")}
-					</span>
-				) : (
-					<span className="file-diff-title" title={props.filePath}>
-						{/* 文件类型图标：与 Git 资源树同一 Seti 图标源（内联 svg + fill-current 着色） */}
-						<FileTypeIcon filePath={props.filePath} />
-						{fileName}
-						{dirty && t("editor.unsavedMarker")}
-					</span>
-				)}
+				{/* Tab 栏负责切换；操作区同时显示当前文件名，避免用户只看到一排无语义的动作钮。 */}
+				<span className="file-diff-title min-w-0 flex-1 truncate" title={props.filePath}>
+					{fileName}
+					{dirty && t("editor.unsavedMarker")}
+				</span>
 				<div className="file-diff-header-actions">
 					{(isMarkdown || isHtml || isSvg) && !isDiffMode && !loading && !error && (
 						<Button
@@ -573,27 +595,6 @@ function mimeFromImageExt(ext: string): string {
 		webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon",
 	};
 	return map[ext] ?? "application/octet-stream";
-}
-
-/**
- * 文件类型图标（Seti，与 Git 资源树同一来源）：svg 内联 + fill-current 按扩展名着色。
- * 图标映射失败时静默降级为空（标题只剩文件名，不影响阅读）。
- */
-function FileTypeIcon({ filePath }: { filePath: string }) {
-	try {
-		const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
-		const { svg, colorName } = getFileIconSeti(fileName);
-		return (
-			<span
-				aria-hidden="true"
-				className="inline-flex size-4 shrink-0 items-center justify-center [&_svg]:size-full [&_svg]:fill-current"
-				style={{ color: getFileIconColor(colorName) }}
-				dangerouslySetInnerHTML={{ __html: svg }}
-			/>
-		);
-	} catch {
-		return null;
-	}
 }
 
 function HtmlPreview({ content }: { content: string }) {
