@@ -622,7 +622,11 @@ async function createAnonymousSession(
 	});
 	// Agent 启动可能包含 spawn/get_state/历史准备；匿名会话先返回可选中的 Session，
 	// 再后台绑定 runtime。这样欢迎页点击后能立即进入输入框，启动失败仍通过 detach/日志收敛。
-	void activateAnonymousRuntime(session, project, input).catch(() => undefined);
+	// 先把后台启动 Promise 放进 Coordinator 的 Session 锁，再把 Session 返回给
+	// renderer；用户若立即输入，activateRuntime 会等待这次启动而不会再 spawn 一个 pi。
+	const activation = activateAnonymousRuntime(session, project, input);
+	sessionRuntimeCoordinator.registerPendingRuntime(session.id, activation);
+	void activation.catch(() => undefined);
 	return { session };
 }
 
@@ -630,7 +634,7 @@ async function activateAnonymousRuntime(
 	session: SessionRecord,
 	project: Project,
 	input: CreateAnonymousSessionInput,
-): Promise<void> {
+): Promise<AgentTab> {
 	let agentId: string | undefined;
 	try {
 		const tab = await agentManager.create({
@@ -655,6 +659,7 @@ async function activateAnonymousRuntime(
 			if (!result.ok) throw new Error(result.error.code);
 		}
 		emitReplacementState(runtime, true);
+		return tab;
 	} catch (error) {
 		if (agentId) await agentManager.stop(agentId).catch(() => undefined);
 		sessionCatalog.removeTransient(session.id);
@@ -668,6 +673,7 @@ async function activateAnonymousRuntime(
 			platform: process.platform,
 			arch: process.arch,
 		});
+		throw error;
 	}
 }
 
