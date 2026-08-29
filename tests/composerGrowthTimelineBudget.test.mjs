@@ -179,6 +179,19 @@ test("composer panel hugs measured content and does not reserve a stats slot", (
   );
 });
 
+test("composer panel resize correction only accepts content-aligned or active programmatic sizes", () => {
+  const { shouldRestoreComposerPanelHeight } = loadModule();
+
+  // 正常测量值和 2px 以内的浮点取整误差不应触发二次布局。
+  assert.equal(shouldRestoreComposerPanelHeight(142, 142, false), false);
+  assert.equal(shouldRestoreComposerPanelHeight(144, 142, false), false);
+  // Group 重建回放的旧百分比高度必须恢复到当前内容目标，不能记成用户高度。
+  assert.equal(shouldRestoreComposerPanelHeight(145, 142, false), true);
+  assert.equal(shouldRestoreComposerPanelHeight(280, 142, false), true);
+  // 本次代码主动 resize 的异步通知允许提交，即使目标因约束被库钳制。
+  assert.equal(shouldRestoreComposerPanelHeight(112, 142, true), false);
+});
+
 test("session view uses the budget function in programResize (not raw delta)", () => {
   const sessionView = readFileSync(
     "src/renderer/src/components/session/SessionView.tsx",
@@ -199,9 +212,14 @@ test("session view uses the budget function in programResize (not raw delta)", (
   assert.match(sessionView, /shouldMountBottomComposer/);
   assert.match(sessionView, /sessionGroupDefaultLayout/);
   assert.match(sessionView, /groupResizeBehavior="preserve-pixel-size"/);
-  assert.match(sessionView, /userComposerHeightRef\.current <= 0 &&/);
-  assert.match(sessionView, /px > composerHeightStateRef\.current \+ 40/);
-  assert.match(sessionView, /void programResize\(contentDrivenHeightRef\.current\)/);
+  // composer Panel 已禁用直接拖拽，非程序化偏差只能来自 Group 重建/缓存回放；
+  // 必须恢复内容高度，并在 Group 尚未注册时进入已有 retry 链。
+  assert.match(sessionView, /shouldRestoreComposerPanelHeight/);
+  assert.match(sessionView, /const appliedHeight = programResize\(contentDrivenHeightRef\.current\);/);
+  assert.match(sessionView, /pendingComposerHeightRef\.current = contentDrivenHeightRef\.current;\s*scheduleComposerHeightRetry\(\);/);
+  assert.doesNotMatch(sessionView, /applyComposerHeight\(px, true\)/);
+  assert.match(sessionView, /useLayoutEffect\(\(\) => \{[\s\S]*?lastAttemptedComposerHeightRef\.current = null;[\s\S]*?\}, \[sessionId\]\);/);
+  assert.match(sessionView, /lastThreePanelLayoutRef\.current = null;/);
   assert.match(sessionView, /visualPx - target/);
 
   assert.match(sessionView, /resolveComposerPanelHeight/);

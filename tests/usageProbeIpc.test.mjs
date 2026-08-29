@@ -111,10 +111,20 @@ test("backend 维度贯通：DSH 链路 = $DSH_HOME/.pideck 配置 + DSH 凭据�
   // 曾把 `dsh:deepseek` 整体当 provider 寄回主进程，DSH 卡片永远解析不出、用量为空。
   const usageHook = readFileSync("src/renderer/src/hooks/useProviderUsage.ts", "utf8");
   assert.match(usageHook, /export function usageCacheKey/);
-  assert.match(usageHook, /dsh:\$\{provider\}/);
+  assert.match(usageHook, /dsh:\$\{normalizeDshDeepseekProvider\(provider\)\}/);
   assert.match(usageHook, /fetchUsage\(provider, backend\)/);
   assert.doesNotMatch(usageHook, /fetchUsage\(cacheKey/);
   assert.doesNotMatch(usageHook, /fetchUsage\(key/);
+  // DSH 官方 DeepSeek 名归一：llm.models 组 id（deepseek-official）与配置面规范名
+  // （deepseek）不一致——主进程入口与端点解析先归一，模型选择器/圆球（provider=
+  // deepseek-official）才能命中 llm-deepseek 命名空间并读回 DSH 卡片保存的探针配置。
+  assert.match(configManager, /normalizeDshDeepseekProvider/);
+  const dshEndpoint = readFileSync("src/main/config/dshUsageEndpoint.ts", "utf8");
+  assert.match(dshEndpoint, /normalizeDshDeepseekProvider/);
+  const usageCacheKeySource = usageHook.match(
+    /export function usageCacheKey\([\s\S]*?\n\}/,
+  )?.[0] ?? "";
+  assert.match(usageCacheKeySource, /normalizeDshDeepseekProvider\(provider\)/);
   // shared 契约带 backend 类型。
   assert.match(sharedTypes, /UsageProbeBackend/);
 });

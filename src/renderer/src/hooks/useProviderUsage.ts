@@ -13,6 +13,7 @@
 import { useCallback, useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { ProviderUsageResult, UsageProbeBackend } from "../../../shared/types/providerUsage";
+import { normalizeDshDeepseekProvider } from "../../../shared/dshProviderNames";
 import { desktopApi } from "../desktopApi";
 import {
 	beginProviderUsageAtom,
@@ -27,11 +28,16 @@ export const USAGE_PROBE_DEFAULT_INTERVAL_MINUTES = 5;
 
 /**
  * 用量展示/缓存 key：DSH 链路的 provider 名前缀 `dsh:`，避免与 pi 侧同名 provider
- * （如 deepseek）串缓存。注意与「发送给主进程的 provider 名」是两个概念——
- * key 只用于渲染层 atom 缓存；主进程按**原始 provider 名**解析端点/配置。
+ * （如 deepseek）串缓存。DSH 官方 DeepSeek 的 provider 名先归一（llm.models 组 id
+ * deepseek-official → 配置面规范名 deepseek），使卡片行（deepseek）、模型选择器分组行
+ * 与圆球面板（deepseek-official）共享同一缓存 key——一处刷新三处联动。
+ * 注意与「发送给主进程的 provider 名」是两个概念——
+ * key 只用于渲染层 atom 缓存；主进程按**原始 provider 名**解析端点/配置（主进程侧
+ * 再做同一归一化，两条链路各自幂等）。
  */
 export function usageCacheKey(provider: string, backend: UsageProbeBackend): string {
-	return backend === "dsh" ? `dsh:${provider}` : provider;
+	if (backend === "dsh") return `dsh:${normalizeDshDeepseekProvider(provider)}`;
+	return provider;
 }
 
 /** provider → 正在进行的请求；模块级一处，避免多组件同时挂载重复弹请求。 */
@@ -135,22 +141,23 @@ export function useProviderUsageRefresh(): (provider: string, backend?: UsagePro
 }
 
 /** 批量刷新（模型选择器打开时）：只查「从未查过或已超过各自间隔」的 provider，跳过新鲜条目。
- * 调用方为 pi 侧模型选择器（provider 即缓存 key），如需 DSH 链路请单独订阅 useProviderUsageEntry。 */
-export function useProviderUsageBatchRefresh(): (providers: string[]) => void {
+ * 调用方为模型选择器（provider 即缓存 key）；DSH 会话的选择器传 backend="dsh"，
+ * 与 pi 侧同名 provider（如 deepseek）互不串缓存、也不误读对方链路的配置。 */
+export function useProviderUsageBatchRefresh(): (providers: string[], backend?: UsageProbeBackend) => void {
 	const records = useAtomValue(providerUsageRecordsReadAtom);
 	const begin = useSetAtom(beginProviderUsageAtom);
 	const resolve = useSetAtom(resolveProviderUsageAtom);
 	return useCallback(
-		(providers: string[]) => {
+		(providers: string[], backend: UsageProbeBackend = "pi") => {
 			for (const provider of providers) {
 				if (!provider) continue;
-				const cacheKey = usageCacheKey(provider, "pi");
+				const cacheKey = usageCacheKey(provider, backend);
 				const record = records[cacheKey] ?? null;
 				const interval = record?.result?.intervalMinutes ?? USAGE_PROBE_DEFAULT_INTERVAL_MINUTES;
 				// 新鲜期去重：未查过（无记录）才触发；interval=0 的已查条目不再自动重查。
 				if (!providerUsageEntryStale(record, interval)) continue;
 				begin(cacheKey);
-				startFetch(provider, cacheKey, resolve);
+				startFetch(provider, cacheKey, resolve, backend);
 			}
 		},
 		[records, begin, resolve],

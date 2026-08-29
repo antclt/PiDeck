@@ -27,6 +27,7 @@ import {
   SessionCommandFailure,
   isLiveRuntimeStatus,
   requireSessionCommand,
+  sessionCommandFailureToast,
   toSessionRuntimeTarget,
 } from "../../utils/sessionCommands";
 import { resolveComposerLiveModel } from "../../utils/modelPendingDisplay";
@@ -37,7 +38,7 @@ import { usePendingModelApply } from "../../hooks/usePendingModelApply";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import type { ComposerPickerKind } from "../../hooks/useSessionComposerController";
 import { WELCOME_MODEL_KEY, WELCOME_THINKING_KEY, readWelcomeModelPreference, readWelcomeThinkingPreference } from "../../utils/chatSessionBootstrap";
-import { THINKING_LEVELS, toThinkingPickerLevels } from "./sessionPickerOptions";
+import { toThinkingPickerLevels } from "./sessionPickerOptions";
 
 export type ComposerPickerHostProps = {
   sessionId: string;
@@ -359,7 +360,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         offerModelRestart(handle, model);
         return;
       }
-      showNotice(error instanceof Error ? error.message : String(error), 4000);
+      // 附带 debugDetails：DSH selectModel 拒绝（如 reasoningEffort 不被模型支持）时
+      // 把真实原因展示给用户，而不是只看到泛化的「会话操作失败，请重试。」
+      showNotice(sessionCommandFailureToast(error), 4000);
     }
   }
 
@@ -443,7 +446,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       }
       props.onClose();
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : String(error), 4000);
+      // 附带 debugDetails：DSH setThinking 的 selectModel 被 host 拒绝（如当前模型
+      // 不支持该档位）时，把真实原因展示给用户，而不是只看到「会话操作失败，请重试。」
+      showNotice(sessionCommandFailureToast(error), 4000);
     }
   }
 
@@ -498,15 +503,19 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         onPick={(model) => void pickModel(model)}
         favoriteModels={favoriteModels}
         onToggleFavorite={(provider, modelId) => void toggleFavorite(provider, modelId)}
+        // 用量查询链路随会话后端：DSH 目录的 provider 是 route 名，配置/凭据走 dsh 链路
+        backend={isDshSession ? "dsh" : "pi"}
       />
     );
   }
   if (props.picker === "thinking") {
     // DSH：当前模型在 host catalog 中且声明了 reasoningEfforts 时，只展示该模型声明的档位
     // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——档位列表按模型裁剪。
-    // 当前模型未知、或目录未声明 reasoningEfforts 时回退全量 THINKING_LEVELS。
-    // host 仍负责最终能力校验——选到不支持的档位不在选择器层预判失败，而在
-    // setRuntimeThinking / 下一次 LLM 请求由 host 抛 UNSUPPORTED_REASONING_EFFORT（回合失败）。
+    // 当前模型未声明 reasoningEfforts（含目录里查不到）时**不回退 pi 全量档位**：
+    // DSH host 对无推理元数据的模型会拒绝任何档位（UNSUPPORTED_REASONING_EFFORT，
+    // 连 off 也一样），回退全量列表只会让用户选到 host 必然拒绝的档位，然后看到
+    // 泛化的「会话操作失败」。此时展示空列表 + 提示，等用户去 DSH 模型配置声明档位。
+    // host 仍负责最终能力校验——声明了档位但 host 仍拒绝的边界由错误透传兜底。
     // 草稿期当前模型 = 部署默认模型（settings.yaml agent-default-model）。
     const currentProvider = resolvedLiveModel.provider;
     const currentModelId = resolvedLiveModel.modelId;
@@ -516,7 +525,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     // currentModel 用于 DSH 档位裁剪与 defaultEffort 兜底。
     const dshLevels = currentModel?.reasoningEfforts && currentModel.reasoningEfforts.length > 0
       ? toThinkingPickerLevels(currentModel.reasoningEfforts.map((effort) => effort.id))
-      : THINKING_LEVELS;
+      : [];
     const runtimeThinkingTarget = !isDshSession && runtimeLive && runtime?.agentId &&
       typeof runtime.runtimeGeneration === "number" && currentProvider && currentModelId
       ? {
@@ -548,6 +557,9 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         ? !runtimeFellBack && runtimeLevels === undefined
         : report === null
     );
+    // DSH 目录尚未加载（选择器打开瞬间）：保持 loading，不把「目录暂空」误报成
+    // 「模型未声明思考档位」（否则 100ms 加载窗口会闪一下不可切换提示）。
+    const dshCatalogLoading = isDshSession && models.length === 0 && report === null;
     // DSH 的思考档位属于 host 的模型选择，草稿期优先部署默认档位；settings.yaml
     // 没配 reasoningEffort 时回退到当前模型自己的 defaultEffort（DSH 官方语义），
     // 不回退到 pi 的欢迎页偏好——否则底栏无值、选择器却勾选 pi 的 max。
@@ -563,7 +575,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
           isLive: runtimeLive,
         })}
         levels={isDshSession ? dshLevels : piLevels}
-        loading={piLevelsLoading}
+        loading={piLevelsLoading || dshCatalogLoading}
         onClose={props.onClose}
         onPick={(level) => void pickThinking(level)}
       />

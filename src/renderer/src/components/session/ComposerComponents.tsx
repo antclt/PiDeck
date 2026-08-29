@@ -78,6 +78,7 @@ import type {
 	ModelListFailReason,
 	ModelListReport,
 	SessionRecord,
+	UsageProbeBackend,
 } from "../../../../shared/types";
 
 
@@ -378,6 +379,9 @@ export function ComposerBottomBar(props: {
 	};
 	const isDsh = props.backend === "dsh";
 	const runtimeLive = Boolean(props.runtimeLive);
+	// 用量查询链路随会话后端：DSH 会话走 dsh（$DSH_HOME 配置 + 凭据库），其余走 pi。
+	// 圆球面板必须与 DSH 卡片/选择器同一 backend，否则查的是另一条 usage-probes.json。
+	const usageBackend: UsageProbeBackend = isDsh ? "dsh" : "pi";
 	// DSH 草稿：记录未填默认时用部署默认（settings.yaml agent-default-model）兜底展示。
 	// 非 live runtime 的残留 state 不能盖住 catalog：Agent 未启动时改模型/思考档位要立刻反映在底栏。
 	const currentThinkingLevel = resolveComposerThinkingLevel({
@@ -585,6 +589,7 @@ export function ComposerBottomBar(props: {
 					<SessionContextMeter
 						state={props.state}
 						onCompact={props.onCompact}
+						backend={usageBackend}
 						// 未激活会话用会话记录/默认 model 推导的 provider 查用量（用量不依赖 agent 运行）
 						fallbackProvider={modelProvider}
 					/>
@@ -849,6 +854,8 @@ export function ModelPicker(props: {
 	refreshing?: boolean;
 	/** 手动刷新：绕过缓存重新拉取模型列表 */
 	onRefresh?: () => void;
+	/** 用量查询链路：DSH 会话（目录 provider 是 DSH route 名）传 "dsh"，缺省 pi。 */
+	backend?: UsageProbeBackend;
 }) {
 	const currentModelKey = props.current?.provider && props.current?.modelId
 		? `${props.current.provider}/${props.current.modelId}`
@@ -890,11 +897,12 @@ export function ModelPicker(props: {
 
 	// 供应商用量行（cc-switch inline）：打开选择器时批量触发 TTL 去重查询，行尾显示
 	// 彩色剩余/百分比；查不到（不支持/失败/查询中）的分组保持干净不渲染。
+	// backend 按会话后端透传（DSH 目录的 provider 是 route 名，配置/凭据在 dsh 链路）。
 	const batchRefreshUsage = useProviderUsageBatchRefresh();
 	const providerKey = sortedProviders.join("\n");
 	useEffect(() => {
-		if (providerKey) batchRefreshUsage(providerKey.split("\n"));
-	}, [providerKey, batchRefreshUsage]);
+		if (providerKey) batchRefreshUsage(providerKey.split("\n"), props.backend);
+	}, [providerKey, batchRefreshUsage, props.backend]);
 
 	const renderModelRow = (model: AvailableModel, valueOverride?: string) => {
 		const modelKey = `${model.provider}/${model.id}`;
@@ -983,7 +991,7 @@ export function ModelPicker(props: {
 							label={provider}
 							count={groupedModels[provider].length}
 							countText={t("config.count.models", { count: groupedModels[provider].length })}
-							trailing={<ProviderUsageInline provider={provider} variant="row" />}
+							trailing={<ProviderUsageInline provider={provider} variant="row" backend={props.backend} />}
 						>
 							{groupedModels[provider].map((model) => renderModelRow(model))}
 						</CommandPickerGroup>
@@ -1022,6 +1030,12 @@ export function ThinkingPicker(props: {
 				<div className="flex min-h-24 items-center justify-center gap-2 text-caption text-muted-foreground" role="status">
 					<RefreshCw size={14} className="animate-spin" aria-hidden="true" />
 					{t("common.loading")}
+				</div>
+			) : levels.length === 0 ? (
+				// DSH 当前模型未声明思考档位：host 会拒绝任何档位（UNSUPPORTED_REASONING_EFFORT），
+				// 只展示提示，不提供可选项（回退 pi 全量列表只会让用户选到 host 必然拒绝的档位）。
+				<div className="flex min-h-24 items-center justify-center px-4 text-center text-caption text-muted-foreground">
+					{t("app.thinkingPickerUnsupported")}
 				</div>
 			) : levels.map((level) => {
 				const selected = level.value === props.current;

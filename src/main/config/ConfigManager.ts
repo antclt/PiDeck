@@ -31,6 +31,7 @@ import type {
 	UsageProbeTestInput,
 } from "../../shared/types/providerUsage";
 import { credentialRefFor } from "../../shared/dshCredentialRef";
+import { normalizeDshDeepseekProvider } from "../../shared/dshProviderNames";
 import { parseProviderModelsResponse } from "./parseProviderModels";
 import { isSafeProviderName, piBuiltinSnapshotFromCatalog, resolvePiApiKey } from "./providerMigration";
 import {
@@ -882,6 +883,9 @@ export class ConfigManager {
 	 * 全部失败时返回结构化错误，并对响应做密钥脱敏，避免把 token 回传给渲染层。
 	 */
 	async fetchProviderUsage(provider: string, backend: UsageProbeBackend = "pi"): Promise<ProviderUsageResult> {
+		// DSH 官方 DeepSeek 的 provider 名归一化：llm.models 组 id（deepseek-official）与
+		// 配置面规范名（deepseek）不一致，不归一就读不到 DSH 卡片保存的探针配置/端点。
+		if (backend === "dsh") provider = normalizeDshDeepseekProvider(provider);
 		const settingsDir = this.usageProbeSettingsDir(backend);
 		// 1) 门控：用户显式关闭（enabled=false）→ 快速返回，不发请求。
 		const settings = await loadUsageProbeSettings(settingsDir, provider);
@@ -957,6 +961,8 @@ export class ConfigManager {
 		provider: string,
 		backend: UsageProbeBackend = "pi",
 	): Promise<UsageProbeSettingsResult> {
+		// 同 fetchProviderUsage：DSH 组 id 别名先归一，才能读回以规范名保存的配置。
+		if (backend === "dsh") provider = normalizeDshDeepseekProvider(provider);
 		const loaded = await loadUsageProbeSettings(this.usageProbeSettingsDir(backend), provider);
 		return {
 			...(loaded.config ? { config: loaded.config } : {}),
@@ -1076,6 +1082,9 @@ export class ConfigManager {
 	 * 无 DSH profile（文件缺失/无该 route）时回落 models.json → pi-ai catalog 兜底。
 	 */
 	private async resolveUsageEndpoint(provider: string, backend: UsageProbeBackend = "pi") {
+		// DSH 官方 DeepSeek 统一用规范名 deepseek：llm.models 组 id（deepseek-official）
+		// 只能命中 pi/catalog 兜底，loadDshUsageProviderProfile 的特判会漏掉它。
+		if (backend === "dsh") provider = normalizeDshDeepseekProvider(provider);
 		const catalog = getPiAiCatalogIndex();
 		if (backend === "dsh") {
 			const home = this.dshUsage?.getHomeDir();

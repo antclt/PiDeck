@@ -39,6 +39,19 @@ export function resolveComposerPanelHeight(input: {
 	);
 }
 
+/**
+ * Composer Panel 本身是 disabled，用户不能直接拖它；因此未命中本次程序 resize
+ * 目标的尺寸回调，只可能来自 Group 重注册、父级分屏重排或尺寸缓存回放。
+ * 这些外部尺寸不得被记录成用户偏好，否则输入栏会在错误高度停留到下次挂载。
+ */
+export function shouldRestoreComposerPanelHeight(
+	actualHeight: number,
+	contentDrivenHeight: number,
+	isProgrammatic: boolean,
+): boolean {
+	return !isProgrammatic && Math.abs(actualHeight - contentDrivenHeight) > 2;
+}
+
 /** 输入正文区封顶高度（px），对齐 dsh-web `--dsh-composer-text-max-height`。
  *  超过后 ProseMirror 内部滚动，不再把输入卡/面板无限撑高。 */
 export const COMPOSER_TEXT_MAX_HEIGHT = 336;

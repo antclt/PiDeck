@@ -73,6 +73,20 @@ test("官方 DeepSeek 走 llm-deepseek 命名空间，ref 为 DEEPSEEK_API_KEY",
   });
 });
 
+test("官方 DeepSeek 的 llm.models 组 id 别名归一：deepseek-official / llm-deepseek", async () => {
+  // 回归：模型选择器分组行与 runtime state 的 provider 是组 id "deepseek-official"
+  // （e2e 实测 deepseek-official/deepseek-v4-pro），用量配置面却是 "deepseek"。
+  // 不归一化会掉进 pi/catalog 兜底 → 「DSH 卡片能显示、选择器/圆球查不到」。
+  await withSettings(SETTINGS, async (dir) => {
+    const fromGroupId = await loadDshUsageProviderProfile(dir, "deepseek-official");
+    assert.equal(fromGroupId.namespace, "llm-deepseek");
+    assert.equal(fromGroupId.credentialRef, "DEEPSEEK_API_KEY");
+    const fromNamespace = await loadDshUsageProviderProfile(dir, "llm-deepseek");
+    assert.equal(fromNamespace.namespace, "llm-deepseek");
+    assert.equal(fromNamespace.credentialRef, "DEEPSEEK_API_KEY");
+  });
+});
+
 test("无 apiKeyEnv 的非 ASCII route（如「组」）：ref 用 PiDeck 稳定摘要", async () => {
   await withSettings(SETTINGS, async (dir) => {
     const group = await loadDshUsageProviderProfile(dir, "组");
