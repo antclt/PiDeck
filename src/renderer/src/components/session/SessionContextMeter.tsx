@@ -4,6 +4,7 @@ import { FoldVertical } from "lucide-react";
 import { useSetAtom } from "jotai";
 import { t } from "../../i18n";
 import type { AgentRuntimeState } from "../../../../shared/types";
+import type { UsageProbeBackend } from "../../../../shared/types/providerUsage";
 import { compactUiState, resolveCompactUsagePercent } from "../../../../shared/compactFeedback";
 import { openSettingsAtom } from "../../atoms/app-ui-atoms";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
@@ -159,6 +160,12 @@ export function SessionContextMeter(props: {
 	 * provider 配置解析端点、不依赖 agent 运行，未激活/未启动会话也可查用量。
 	 */
 	fallbackProvider?: string;
+	/**
+	 * 用量查询链路：DSH 会话传 "dsh"（$DSH_HOME 配置 + DSH 凭据库），缺省 pi。
+	 * 圆球面板与 pi/DSH 各自的 usage-probes.json 同链查询——DSH 侧配的探针
+	 * 不会因误走 pi 链路而查不到（pi/DSH 配置目录与凭据互不相通）。
+	 */
+	backend?: UsageProbeBackend;
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLSpanElement | null>(null);
@@ -500,9 +507,10 @@ export function SessionContextMeter(props: {
 					)}
 					{provider && showUsage && (
 						// 用量区块：与模型卡片/选择器徽标共享 ProviderUsageDetails（同数据源同视觉）；
+						// backend 按会话后端透传（DSH 会话走 dsh 链路，pi 会话走 pi 链路）；
 						// 失败态「配置用量查询」按钮跳设置模型页并定位供应商。
 						<div className="mt-2.5" data-testid="session-context-usage">
-							<ProviderUsageDetails provider={provider} onConfigureUsage={onConfigureUsage} />
+							<ProviderUsageDetails provider={provider} backend={props.backend} onConfigureUsage={onConfigureUsage} />
 						</div>
 					)}
 					{showCompact && (

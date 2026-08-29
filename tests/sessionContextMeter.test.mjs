@@ -255,7 +255,7 @@ test("bottom bar wires the meter next to send controls and merges model + thinki
   const source = bottomBarSource();
   // ContextMeter 挂在右侧组（git 分支之前、发送控件同组）
   assert.match(source, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-  assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*\/\/ [^\n]+\n\s*fallbackProvider=\{modelProvider\}/);
+  assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*backend=\{usageBackend\}\s*\/\/ [^\n]+\n\s*fallbackProvider=\{modelProvider\}/);
   assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
   // 模型/思考合并 chip：模型名 · 思考档位 + chevron（dsh ModelSelect trigger 形态）
   assert.match(source, /composer-bar-btn model-thinking/);
@@ -306,7 +306,7 @@ test("usage block is delegated to the shared ProviderUsageDetails with settings 
   // 圆球面板用量区块 = 共享 ProviderUsageDetails（与模型卡片/选择器徽标同一份数据源与视觉，
   // 本组件只决定「是否渲染」与「失败跳转」，不再自持 fetch/缓存/展示逻辑）
   assert.match(source, /import \{ ProviderUsageDetails \} from "\.\.\/app\/ProviderUsageDetails"/);
-  assert.match(source, /<ProviderUsageDetails provider=\{provider\} onConfigureUsage=\{onConfigureUsage\} \/>/);
+  assert.match(source, /<ProviderUsageDetails provider=\{provider\} backend=\{props\.backend\} onConfigureUsage=\{onConfigureUsage\} \/>/);
   // 失败态入口 = 跳「设置 → 配置管理 → 模型」并定位该供应商（openSettingsAtom 深链）
   assert.match(source, /openSettingsAtom/);
   assert.match(source, /configTab: "models", provider \}/);
@@ -318,8 +318,9 @@ test("usage block is delegated to the shared ProviderUsageDetails with settings 
 
 test("picker rows and provider cards use the cc-switch style inline usage", () => {
   const picker = bottomBarSource();
-  // 选择器分组行：trailing 插槽挂 inline（不往 label 里塞元素），打开时批量 TTL 去重查询
-  assert.match(picker, /trailing=\{<ProviderUsageInline provider=\{provider\} variant="row" \/>\}/);
+  // 选择器分组行：trailing 插槽挂 inline（不往 label 里塞元素），打开时批量 TTL 去重查询；
+  // backend 随会话后端透传（DSH 会话的分组行走 dsh 链路，不误查 pi 的 usage-probes.json）。
+  assert.match(picker, /trailing=\{<ProviderUsageInline provider=\{provider\} variant="row" backend=\{props\.backend\} \/>\}/);
   assert.match(picker, /useProviderUsageBatchRefresh/);
   // command-picker 提供 trailing 插槽（渲染在 label 与 count 之间）
   const commandPicker = readFileSync("src/renderer/src/components/ui-shadcn/command-picker.tsx", "utf8");

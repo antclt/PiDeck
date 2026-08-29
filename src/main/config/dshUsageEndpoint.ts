@@ -13,6 +13,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { credentialRefFor } from "../../shared/dshCredentialRef";
+import { normalizeDshDeepseekProvider } from "../../shared/dshProviderNames";
 import { loadYamlObject, parseDshSettingsDocument } from "./providerMigration";
 
 export type DshUsageProviderProfile = {
@@ -36,7 +37,9 @@ export async function loadDshUsageProviderProfile(
 	homeDir: string,
 	provider: string,
 ): Promise<DshUsageProviderProfile | undefined> {
-	const name = provider?.trim() ?? "";
+	// 官方 DeepSeek 在 llm.models / session.models 里的组 id 是 deepseek-official，
+	// 与配置面规范名 deepseek 不一致：先归一化再特判，否则选择器/圆球查不到官方路由。
+	const name = normalizeDshDeepseekProvider(provider?.trim() ?? "");
 	if (!name) return undefined;
 
 	let raw: string;

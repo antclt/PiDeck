@@ -24,6 +24,7 @@ import type {
 import { desktopApi } from "../desktopApi";
 import { showNotice } from "../utils/notice";
 import { invalidateAllProviderUsageAtom, resolveProviderUsageAtom } from "../atoms/provider-usage-atoms";
+import { usageCacheKey } from "../hooks/useProviderUsage";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui-shadcn/dialog";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
@@ -127,8 +128,9 @@ export function UsageProbeConfigDialog(props: {
 }) {
 	const invalidateAll = useSetAtom(invalidateAllProviderUsageAtom);
 	const resolveUsage = useSetAtom(resolveProviderUsageAtom);
-	/** 缓存 key：DSH 链路用 dsh: 前缀，与 pi 同名 provider 互不串缓存。 */
-	const cacheKey = props.backend === "dsh" ? `dsh:${props.provider}` : props.provider;
+	// 缓存 key：与 useProviderUsage.usageCacheKey 同规则（DSH 链路 dsh: 前缀 + 官方
+	// DeepSeek 名归一），保证弹窗「测试成功」写进的缓存与卡片/选择器/圆球的查询共用一份。
+	const cacheKey = usageCacheKey(props.provider, props.backend ?? "pi");
 
 	// ── 打开时加载：已保存配置 + 内置模板自动识别 ──
 	const [loaded, setLoaded] = useState(false);
