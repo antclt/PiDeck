@@ -179,6 +179,33 @@ export type AppUpdateDownloadResult = {
 	assetName: string;
 };
 
+/**
+ * 主进程后台更新检查推送给渲染层的状态快照（齿轮角标 / 首次弹窗判定用）。
+ * 由主进程 UpdateService 定时检查后通过 app:update-status-changed 推送。
+ */
+export type AppUpdateStatusSnapshot = {
+	/** 最后一次后台检查完成时间（毫秒时间戳）；缺省 = 尚未检查。 */
+	lastCheckAt?: number;
+	/** PiDeck 应用更新状态；null = 尚未成功检查过。 */
+	app: {
+		latestVersion: string;
+		hasUpdate: boolean;
+		/** 用户跳过的版本（该版本不再主动提示，手动检测仍可查看）。 */
+		skippedVersion?: string;
+		/** 最近一次已弹窗提示过的版本（“每版本只弹一次”判定）。 */
+		notifiedVersion?: string;
+	} | null;
+	/** Pi CLI 更新状态；null = 尚未成功检查过。 */
+	piCli: {
+		currentVersion?: string;
+		latestVersion?: string;
+		hasUpdate: boolean;
+		/** 最近一次已提示过的版本。 */
+		notifiedVersion?: string;
+		error?: string;
+	} | null;
+};
+
 export type AppLogLevel = "debug" | "info" | "warn" | "error";
 
 export type AppLogEntry = {

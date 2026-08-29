@@ -263,6 +263,14 @@ export type AppSettings = {
 	/** 是否禁用版本更新检测（PiDeck + Pi CLI），默认 false 表示正常检测；
 	 *  开启后自动跳过启动和定时检测，设置页中检测按钮也禁用。 */
 	disableUpdateCheck: boolean;
+	/** 上次后台检查完成时间（毫秒时间戳）；缺省 = 从未检查。 */
+	updateLastCheckAt?: number;
+	/** 最近一次“已提示过”的 PiDeck 版本（弹窗关闭后写入，用于“每版本只弹一次”）；缺省 = 未提示过任何版本。 */
+	updateNotifiedVersion?: string;
+	/** 用户跳过的 PiDeck 版本（该版本不再主动提示，手动检测仍可查看）；缺省 = 未跳过。 */
+	updateSkippedVersion?: string;
+	/** 最近一次“已提示过”的 Pi CLI 版本；缺省 = 未提示过。 */
+	updatePiNotifiedVersion?: string;
 
 	// ── Agent 后端 ──
 	/**

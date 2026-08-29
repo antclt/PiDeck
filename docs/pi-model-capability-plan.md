@@ -29,8 +29,8 @@
 | 数据 | 权威来源 | PiDeck 用途 |
 |---|---|---|
 | 全局可用模型、容量、输入模态、reasoning/map | 用户安装的 `pi --mode rpc --no-session` 的 `get_available_models` | 欢迎页模型列表和只读能力展示 |
-| 每个模型实际可选 levels | 同一临时 Pi 进程的 `set_model → get_available_thinking_levels` | 欢迎页/草稿 thinking picker 精确过滤 |
-| 运行中 session 的 levels | 该 session 自己的 Pi runtime `get_available_thinking_levels` | 运行态最终权威值 |
+| 每个模型实际可选 levels | 同一临时 Pi 进程的 `set_model → get_available_thinking_levels` | 欢迎页/草稿 thinking picker 精确过滤（运行态也统一读此 snapshot） |
+| 运行中 session 的 levels（仅兜底） | 该 session 自己的 Pi runtime `get_available_thinking_levels` | idle + cache-miss 时后台补充，不是展示主源 |
 | DSH thinking efforts | DSH host catalog | DSH picker；不得接入 Pi probe |
 | `pi --list-models` / 本地 `models.json` | 兼容数据源 | 旧 Pi、probe 失败或 hydration 尚未成功时的 fallback |
 
@@ -390,9 +390,9 @@ Pi 上游从 **0.81.0** 开始提供 `get_available_thinking_levels`，但它只
 
 这仍然只有 PiDeck ↔ Pi 的 stdio JSON-RPC 一条通信边界，不在 PiDeck 复制 Pi 的能力算法。现有 `pi --list-models` 可在旧 Pi 或 capability hydration 失败时继续担任兼容 fallback；长期可推动 Pi 提供一次返回所有模型已计算 levels 的 RPC，去掉批量 `set_model → get_available_thinking_levels` 循环。
 
-### Phase C：运行态继续使用已有 RPC
+### Phase C：运行态与全局统一为 capability cache，runtime RPC 仅兑底
 
-运行中 Pi Agent 使用 `get_available_thinking_levels`。Composer host 在 Agent 就绪并获得 `provider/modelId` 时查询一次，结果按 `sessionId + agentId + runtimeGeneration + provider + modelId` 缓存；模型切换或 runtime 替换后重新查询，打开思考菜单只读取该 cache。晚到的旧 runtime 响应无法覆盖新 identity。
+运行中 Pi Agent 的思考强度**统一读同一份 `PiModelCapabilityCache` snapshot**，不再把 runtime RPC 当作展示主源；`get_available_thinking_levels` 只在「菜单打开 + idle + cache 未就绪/无该模型档位」时后台查一次，结果按 `sessionId + agentId + runtimeGeneration + provider + modelId` 缓存；模型切换或 runtime 替换后重新查询，晚到的旧 runtime 响应无法覆盖新 identity。**运行中（非 idle）不为展示发该 RPC，打开菜单只读 cache / 兼容档位，绝不被后台往返卡成 loading。**
 
 | 场景 | 容量/图片/是否推理 | 可选 thinking levels |
 |---|---|---|
@@ -442,7 +442,7 @@ Pi 上游从 **0.81.0** 开始提供 `get_available_thinking_levels`，但它只
 | 消费面 | 数据源 | 说明 |
 |---|---|---|
 | 欢迎页/草稿态模型与思考强度选择 | `PiModelCapabilityCache`（启动/配置变更时 hydration） | `listModelsReport` 优先返回 cache snapshot；无 runtime 时 `ThinkingPicker` 直接读 cache 的 `thinkingLevels` |
-| 运行态 Agent 思考强度 | 该 session 自己的 Pi runtime `get_available_thinking_levels` | session-scoped，旧 runtime 迟到结果丢弃 |
+| 运行态 Agent 思考强度 | 同一份 `PiModelCapabilityCache` snapshot（统一展示源）；runtime RPC `get_available_thinking_levels` 仅作 idle + cache-miss 的后台兜底 | session-scoped，旧 runtime 迟到结果丢弃；运行中不为此发 RPC，绝不阻塞菜单 |
 | 配置页自适应模板（新增/失焦/保存补空） | bundled `pi-ai` catalog（`getPiAiCatalogIndex`） | `projects:get-model-spec` 只从 bundled catalog 匹配；不读 cache、不读外部 Pi 目录 |
 | 配置页自适应模板（重置/拉取） | endpoint `/models` 实报字段 > bundled catalog 模板 | `mergeAdaptiveModelTemplate`：endpoint 实报优先，catalog 补空 |
 | DSH | DSH host catalog `reasoningEfforts` | 独立，不接 Pi probe |
@@ -466,3 +466,21 @@ Pi 上游从 **0.81.0** 开始提供 `get_available_thinking_levels`，但它只
 - **provider compat 联动（2026-08 决策）**：保存时 `deriveProviderCompat`（`utils/modelSpecAutoFill.ts`）检测该 provider 任一模型存在非空档位映射且 `reasoning !== false` → 自动写 `compat.supportsReasoningEffort: true`，否则 false。否则 pi 用 provider 级 compat 覆盖模型定义，用户选了思考强度也不发 `reasoning_effort`；旧版本无条件写 false，因此自动判定优先于已存在的 false（陈旧值非用户意图），显式 true 保留。UI 上的 supportsReasoningEffort 开关为显示/手动覆盖，下次保存仍按联动归一。
 - capability cache 继续保留 Pi RPC 返回的完整模型字段（不只 provider/id/thinkingLevels），供视觉桥等既有消费方读取；配置模板计算不再消费它。
 - 移除了 `enrichFetchedModelFromCatalog` / `lookupPiAiModelSpec` 等不再有调用方的 bundled catalog 导出。
+
+### 统一标准（2026-08-29 收敛）
+
+模型选择与思考强度统一为一个数据源：**`PiModelCapabilityCache` snapshot**。
+
+1. **模型列表唯一来源 = cache**：欢迎页、草稿、运行态打开模型 picker 都只读 `projects:listModelsReport`（snapshot → 兼容 fallback）。运行中 Agent 不参与列表拉取，它只负责两件事：`set_model` 应用、busy 分支（`pickModelWhileBusy`）里的运行快照校验。
+2. **思考强度唯一来源 = 同一 cache 的 per-model `thinkingLevels`**：打开任意 picker 直接读；runtime RPC 仅在 idle + cache-miss 时后台兑底；DSH 独立走 `reasoningEfforts`。
+3. **设置保存即失效重建**：`configSaveModels` / `configSaveAuth` / custom Pi path 变更均触发 `refreshPiModelCatalogs()`（invalidate + 新 generation hydration），目录 watcher 兑底外部文件变更，选择器打开时 `ensure()` 等同一 generation 的在途结果 → 新增模型保存后即可在选择器看到。
+4. **cache 不 gate 使用**：Pi Agent 每次 spawn 自行读 `models.json`（`--offline` 仅跳过启动期网络刷新）。cache 未刷新只影响展示；新模型只要在 `models.json`，新启动 Agent 的 `set_model` 直接成功，已运行 Agent 走既有 `needsRestart` 引导重启后生效。
+
+运行态场景汇总：
+
+| 场景 | 容量/图片/是否推理 | 可选 thinking levels |
+|---|---|---|
+| 欢迎页/草稿，cache 就绪 | Pi 的完整 model snapshot | cache 的 per-model `thinkingLevels`（hydration 已算好） |
+| 欢迎页/草稿，旧 Pi 或 hydration 失败 | `/list-models` 字段或“未知” | 兼容 fallback，不标成精确能力 |
+| 运行中的 Pi Agent | runtime state / record | 同一 cache snapshot；idle + cache-miss 时后台 runtime RPC 兑底，不阻塞 |
+| DSH | DSH host catalog | `reasoningEfforts`，独立处理 |

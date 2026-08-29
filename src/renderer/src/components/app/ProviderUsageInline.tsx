@@ -13,7 +13,7 @@
  * 其余绿；余额不足 10% 橙、≤0 红。无数据一律返回 null——保持「查不到就不显示」。
  */
 import { Clock, RefreshCw } from "lucide-react";
-import type { UsageProbeBackend } from "../../../../shared/types/providerUsage";
+import type { ProviderUsageResult, UsageProbeBackend } from "../../../../shared/types/providerUsage";
 import {
 	useProviderUsageEntry,
 	useProviderUsageRefresh,
@@ -25,6 +25,11 @@ import {
 	relativeTimeParts,
 } from "../../utils/providerUsageDisplay";
 import { t } from "../../i18n";
+
+/** 只有成功且能格式化出数值的结果才属于卡片可见的用量状态。 */
+function hasUsableUsage(result: ProviderUsageResult | null): boolean {
+	return result != null && result.success && formatUsageBadgeText(result) != null;
+}
 
 /** 数值段：灰标签（剩/已用）+ 彩色粗体数字，或纯彩色百分比。 */
 function UsageValue(props: { provider: string; backend?: UsageProbeBackend; className?: string }) {
@@ -54,8 +59,7 @@ export function ProviderUsageInline(props: {
 	const entry = useProviderUsageEntry(props.provider, props.backend);
 	const refresh = useProviderUsageRefresh();
 	if (!props.provider) return null;
-	const hasUsable =
-		entry.result != null && entry.result.success && formatUsageBadgeText(entry.result) != null;
+	const hasUsable = hasUsableUsage(entry.result);
 	if (!hasUsable) return null;
 	const fetchedAt = entry.fetchedAt;
 
@@ -98,10 +102,8 @@ export function ProviderUsageInline(props: {
 /**
  * 供应商卡片底部统一用量行（学 cc-switch：所有卡片同一位置、右对齐、行高一致）。
  *
- * 二态（保证对齐，行容器恒占位）：
- * - 有数据：时间 + 彩色数值 + 刷新（与 ProviderUsageInline 同源）；
- * - 其余（未开启/加载/失败/不支持）：空占位，不渲染任何文案——「查不到就不显示」。
- *   未开启不给「用量查询未开启 → 去配置」广告位（用户反馈：没开启的功能不该有引导条）；
+ * - 其余（未开启/加载/失败/不支持）：不渲染用量行——「查不到就不显示」。
+ *   未开启不给「用量查询未开启 → 去配置」广告位（未开启的功能不应占位）；
  *   配置入口统一在卡片头部柱状图按钮，生效意图由用户主动发起。
  */
 export function ProviderUsageFooter(props: {
@@ -109,20 +111,15 @@ export function ProviderUsageFooter(props: {
 	backend?: UsageProbeBackend;
 }) {
 	const entry = useProviderUsageEntry(props.provider, props.backend);
-	if (!props.provider) return null;
-	const hasUsable =
-		entry.result != null && entry.result.success && formatUsageBadgeText(entry.result) != null;
-	if (!hasUsable) {
-		// 空占位：保持行高，让所有卡片底部用量行水平对齐（cc-switch 卡片列表同款）。
-		return <span className="inline-flex h-5 items-center" aria-hidden="true" />;
-	}
+	if (!props.provider || !hasUsableUsage(entry.result)) return null;
 	return <ProviderUsageInline provider={props.provider} variant="card" backend={props.backend} />;
 }
 
 /**
  * 供应商卡片底部统一用量行（cc-switch 版式：卡片右下角只放金额/百分比）。
  *
- * 模型页 / 认证页 / DSH 页共用：右对齐一行 = 用量显示（时间+数值+刷新）或空占位。
+ * 模型页 / 认证页 / DSH 页共用：成功且有可展示数值时才渲染右对齐一行 = 用量显示（时间+数值+刷新）。
+ * 没有成功配对结果时整个行容器也不渲染，避免卡片底部留下空白占位。
  * 未开启不显示引导（配置入口在卡片头部柱状图按钮）。
  * 「用量查询」柱状图按钮在各自卡片**头部图标组**（不占用量行，见各卡片实现）。
  * 行高固定（h-9）+ border-t 分隔，所有卡片水平对齐。
@@ -133,6 +130,8 @@ export function ProviderUsageRow(props: {
 	backend?: UsageProbeBackend;
 	className?: string;
 }) {
+	const entry = useProviderUsageEntry(props.provider, props.backend);
+	if (!props.provider || !hasUsableUsage(entry.result)) return null;
 	return (
 		<div
 			className={`flex h-9 items-center justify-end gap-1.5 border-t border-border/60 px-3.5 ${props.className ?? ""}`}

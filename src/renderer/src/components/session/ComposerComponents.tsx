@@ -439,7 +439,7 @@ export function ComposerBottomBar(props: {
 	return (
 		<div className="composer-bottom-bar min-h-10 shrink-0 border-t border-transparent px-2.5 py-2">
 			<div className="composer-bottom-layout flex min-w-0 items-center gap-2">
-				<div className="composer-bottom-left flex min-w-0 flex-wrap items-center gap-0.5">
+				<div className="composer-bottom-left flex min-w-0 flex-nowrap items-center gap-0.5 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 					{props.onChangeBackend ? (
 						<ComposerBackendPicker
 							backend={props.backend ?? "pi"}
@@ -545,6 +545,16 @@ export function ComposerBottomBar(props: {
 							))}
 						</DropdownMenuContent>
 					</DropdownMenu>
+					{props.feishuIndicator}
+					{props.securityControl}
+				</div>
+				<div
+					className={`composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4${
+						isImageGenMode
+							? " overflow-x-auto overflow-y-hidden [scrollbar-width:none]"
+							: " overflow-hidden"
+					}`}
+				>
 					{isImageGenMode && props.imageGenOptions ? (
 						<ComposerImageGenOptions
 							config={props.imageGenOptions.config}
@@ -560,10 +570,6 @@ export function ComposerBottomBar(props: {
 							onWatermarkChange={props.imageGenOptions.onWatermarkChange}
 						/>
 					) : null}
-					{props.feishuIndicator}
-					{props.securityControl}
-				</div>
-				<div className="composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4 overflow-hidden">
 					{/* 生图模式用独立供应商/模型下拉，不展示会话 LLM chip，避免两套配置混用。 */}
 					{isImageGenMode ? null : (
 						<ModelThinkingChip
@@ -1014,8 +1020,6 @@ export function ThinkingPicker(props: {
 		label?: string;
 		description?: string;
 	}>;
-	/** Pi capability snapshot/runtime RPC 尚未返回时，不用静态档位冒充已确认能力。 */
-	loading?: boolean;
 }) {
 	const levels = props.levels ?? THINKING_LEVELS;
 	return (
@@ -1026,14 +1030,9 @@ export function ThinkingPicker(props: {
 			className="thinking-picker"
 			value={props.current}
 		>
-			{props.loading ? (
-				<div className="flex min-h-24 items-center justify-center gap-2 text-caption text-muted-foreground" role="status">
-					<RefreshCw size={14} className="animate-spin" aria-hidden="true" />
-					{t("common.loading")}
-				</div>
-			) : levels.length === 0 ? (
-				// DSH 当前模型未声明思考档位：host 会拒绝任何档位（UNSUPPORTED_REASONING_EFFORT），
-				// 只展示提示，不提供可选项（回退 pi 全量列表只会让用户选到 host 必然拒绝的档位）。
+			{levels.length === 0 ? (
+				// 空数组只代表后端明确返回「当前模型没有可用档位」。目录未加载或模型
+				// 未声明元数据时宿主会传 undefined，继续展示全量兼容档位而不是阻断用户。
 				<div className="flex min-h-24 items-center justify-center px-4 text-center text-caption text-muted-foreground">
 					{t("app.thinkingPickerUnsupported")}
 				</div>

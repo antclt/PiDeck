@@ -4,6 +4,14 @@
 - **用量查询重构（对齐 cc-switch）** — 模型 / 认证 / DSH 三处统一的用量显示（卡片右下角金额或百分比 + 头部柱状图入口）；per-provider 启用开关 + 内置模板自动识别 + 通用 / New API 声明式模板 + 超时 / 自动查询间隔（默认 5 分钟，0 = 仅手动）；未启用或不受支持时不再自动查询。
 - **DSH 用量查询链路** — DSH 模型配置页同款用量显示与探针配置：配置落 `$DSH_HOME/.pideck/usage-probes.json`，凭据读取 DSH 官方凭据库（`.credentials.yaml`），与 pi 侧同构、互不干扰。
 - **PiDeck 特有文件统一收拢** — DSH_HOME 下的会话归档 / 宿主互斥锁 / 用量配置统一迁入 `~/.dsh/.pideck/`（一次性迁移，迁移逻辑确认旧布局无残留后随下版删除）。
+- **主动更新提示（无配额方案）** — PiDeck 与 Pi CLI 后台每 2h 自动检查更新：启动延迟 30s 首次检查，发现新版本时设置齿轮出现圆点角标并自动弹出更新弹窗（每版本只提示一次，支持「跳过此版本」）；检查源从 GitHub REST API 改为 `releases/latest` 重定向 + `latest.yml`（对齐 electron-updater 策略，不再受 60 次/小时/IP 配额限制，无需任何认证）。
+- **发布流程配套 latest.yml** — electron-builder 增加 `publish`（provider: github）配置，`dist:win` 打包后打印需随 Release 上传的资产清单；channel 元数据按平台区分（Windows: `latest.yml` / macOS: `latest-mac.yml` / Linux: `latest-linux.yml`），客户端按平台读取对应文件；缺失时自动降级 atom/API 兜底路径。
+- **检查超时防护** — 每次 GitHub 检查请求带 10s 超时：用户本地网络异常时手动「检测更新」最多转圈 10s 即显示失败并可重试，后台检查失败后照常调度下一轮（杜绝历史「一直转圈、手动更新被卡死」）。
+- **Pi CLI 后台检查** — Pi CLI 版本随主进程每 2h 自动检查，发现新版本时 toast 提示并在设置页「版本与更新」分区显示当前 → 最新版本。
+- **修复手动检测被吞** — 自动检查在途时手动「检测更新」不再被 checking 门控吞掉（历史「有更新也不弹」根因），改为共享同一在途请求。
+
+### 🐛 修复
+- **更新检查降级路径** — 线上 Release 缺少 latest.yml 时自动降级 atom feed + REST 兜底，不再直接失败。
 
 ## v0.7.2 - 2026-08-29
 

@@ -73,6 +73,7 @@ import { msUntilNextThemeBoundary } from "../../shared/themeSchedule";
 
 import { usePiUpdate } from "./hooks/usePiUpdate";
 import { useAppUpdateController } from "./hooks/useAppUpdateController";
+import { useBackgroundUpdateWatch } from "./hooks/useBackgroundUpdateWatch";
 import { useProjectSync } from "./hooks/useProjectSync";
 import {
   agentInventoryAtom,
@@ -571,6 +572,14 @@ export function App() {
     openExternal: (url) => api.app.openExternal(url),
   }, false);
 
+  // 后台更新状态订阅：主进程每 2h 自动检查（无配额方案），有更新且未跳过/未提示
+  // 时自动弹窗；Pi CLI 有更新时 toast 一次并引导去设置页。
+  useBackgroundUpdateWatch({
+    api,
+    appUpdateCheck: (source) => appUpdate.check(source),
+    showToast,
+  });
+
   // upToDateVersion: hook does not expose this; used by AppUpdateOverlay for "up to date" toast.
   const [upToDateVersion, setUpToDateVersion] = useState<string | null>(null);
 
@@ -703,9 +712,15 @@ export function App() {
     setBusySendDelivery(settings.busySendDelivery);
   }, [settings.busySendDelivery, setBusySendDelivery]);
 
-  // 应用更新检查只允许设置页「版本与更新」手动触发，这里不做任何自动检查：
-  // 启动自动检查曾导致一进应用就检测、且自动检查在途时手动按钮被 checking 门控
-  // 吞掉（有更新也不弹）。新版本提示完全依赖手动按钮（AppUpdateOverlay）。
+  // 应用更新：主进程后台每 2h 自动检查（无配额方案），有更新且未跳过/未提示时
+  // 经 useBackgroundUpdateWatch 自动弹窗；设置页手动「检测更新」仍可用（checking 门控
+  // 已改为共享在途 promise，不再吞结果）。弹窗关闭/跳过时向主进程标记已提示/跳过，
+  // 保证「每版本只提示一次」。
+  const dismissAppUpdate = useCallback(() => {
+    const version = appUpdate.info?.latestVersion;
+    appUpdate.clear();
+    if (version) void api.app.notifyUpdateSeen("app", version);
+  }, [appUpdate.info?.latestVersion, appUpdate.clear]);
 
   // Guard: hide git drawer when git management is disabled.
   // Equivalent to: if (panel === "git" && !settings.enableGitManagement) return
@@ -3882,11 +3897,16 @@ export function App() {
     />
     <SessionActionOverlays {...overlays.overlayProps} />
     <AppUpdateOverlay
-      controller={appUpdate}
+      controller={{ ...appUpdate, clear: dismissAppUpdate }}
       releasesUrl={appInfo.releasesUrl}
       openExternal={(url, forceSystem) => api.app.openExternal(url, forceSystem)}
       upToDateVersion={upToDateVersion}
       onDismissUpToDate={() => setUpToDateVersion(null)}
+      onSkipVersion={(version) => {
+        void api.app.skipUpdateVersion(version);
+        void api.app.notifyUpdateSeen("app", version);
+        appUpdate.clear();
+      }}
     />
     {previewImage && (
       <ImagePreviewModal

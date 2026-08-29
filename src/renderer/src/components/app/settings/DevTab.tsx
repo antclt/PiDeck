@@ -8,6 +8,8 @@ import type {
 } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
+import { useAtomValue } from "jotai";
+import { pendingAppUpdateAtom, updateStatusAtom } from "../../../atoms/update-atoms";
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
 import {
@@ -61,6 +63,9 @@ type SelectOption = { value: string; label: string; disabled?: boolean };
 export const DevTab = memo(function DevTab(props: DevTabProps) {
   const { draft, updateDraft, isDirty } = props;
   const piPath = props.customPiPath || props.piStatus?.command || "";
+  // 后台检查发现可提示的 PiDeck 新版本（未跳过）时高亮设置页更新分区。
+  const pendingAppUpdate = useAtomValue(pendingAppUpdateAtom);
+  const piCliStatus = useAtomValue(updateStatusAtom)?.piCli ?? null;
 
   // ── WSL 相关状态（仅 Windows + WSL 开启时拉取）──
   const [wslUserInput, setWslUserInput] = useState(draft.wslUser);
@@ -355,6 +360,21 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 
       {/* 版本与更新 */}
       <SettingsSection title={t("settings.sectionUpdates")}>
+        {/* 后台检查发现新版本时的高亮提示（未跳过版本）；点检测更新可立即拉详情。 */}
+        {pendingAppUpdate && (
+          <div className="mb-2 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-2 text-caption text-text-primary">
+            {t("update.availableInSettings")}
+          </div>
+        )}
+        {/* Pi CLI 后台检查结果（每 2h）：有更新时提示，入口在下方开发环境分区。 */}
+        {piCliStatus?.hasUpdate && piCliStatus.latestVersion && (
+          <div className="mb-2 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-2 text-caption text-text-primary">
+            {t("settings.piUpdateAvailableDetail", {
+              current: piCliStatus.currentVersion ?? t("common.unknown"),
+              latest: piCliStatus.latestVersion,
+            })}
+          </div>
+        )}
         <SettingRow
           title={
             <>

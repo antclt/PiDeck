@@ -14,6 +14,8 @@ import {
 import { RpcLogViewer } from "./RpcLogViewer";
 import { SessionProxyDialog } from "../session/SessionProxyDialog";
 import { sessionRecordToSummary } from "../../atoms";
+import { pendingAppUpdateAtom, pendingPiUpdateAtom } from "../../atoms/update-atoms";
+import { useAtomValue } from "jotai";
 import { isManagerSessionSummary, worktreeFamilyProjects } from "../../sessionManagerModel";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
@@ -123,6 +125,8 @@ export type SidebarContentProps = {
 export function SidebarContent(props: SidebarContentProps) {
   const { controller, actions } = props;
   const menu = controller.menu;
+  // 更新角标：PiDeck 或 Pi CLI 有可提示更新时点亮设置按钮圆点（跨重启由主进程持久化状态恢复）。
+  const hasPendingUpdate = useAtomValue(pendingAppUpdateAtom) || useAtomValue(pendingPiUpdateAtom);
   const menuProject = menu?.kind === "project"
     ? controller.catalog.projects.find((project) => project.id === menu.projectId)
     : undefined;
@@ -362,7 +366,11 @@ export function SidebarContent(props: SidebarContentProps) {
         <div className="flex shrink-0 items-center px-2 pb-2 pt-1">
           <Dock size={32} className="w-full justify-between">
             <DockItem>
-              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("settings.title")} aria-label={t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
+              <div className="relative size-full">
+                <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("settings.title")} aria-label={t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
+                {/* 更新角标：PiDeck 或 Pi CLI 有可提示更新时在设置按钮右上角显示圆点 */}
+                {hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />}
+              </div>
             </DockItem>
             <DockItem>
               <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>

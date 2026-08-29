@@ -84,6 +84,9 @@ export function useAppUpdateController(
 	const sequence = useRef(0);
 	const mounted = useRef(true);
 	const downloadGate = useRef(createAppUpdateDownloadGate());
+	// 在途检查共享：自动检查进行中时手动触发复用同一 promise，而不是被 checking
+	// 门控吞掉（历史上正是「自动检查在途 → 手动按钮无响应 → 有更新也不弹」的根因）。
+	const inFlightCheck = useRef<Promise<AppUpdateInfo | null> | null>(null);
 
 	useEffect(() => {
 		mounted.current = true;
@@ -94,27 +97,37 @@ export function useAppUpdateController(
 			mounted.current = false;
 			sequence.current += 1;
 			downloadGate.current.invalidate();
+			inFlightCheck.current = null;
 			unsubscribe?.();
 		};
 	}, [api]);
 
 	const check = useCallback(async (source: "auto" | "manual" = "manual") => {
-		if (checking) return null;
+		// 在途时共享同一 promise：手动/自动检查合并为一次真实请求，结果双方都拿得到。
+		if (inFlightCheck.current) return inFlightCheck.current;
 		const requestSequence = ++sequence.current;
 		setChecking(true);
 		setError(null);
+		const run = (async () => {
+			try {
+				const next = await api.checkUpdate();
+				if (!mounted.current || requestSequence !== sequence.current) return null;
+				setInfo(next.hasUpdate ? next : null);
+				return next;
+			} catch (reason) {
+				if (mounted.current && requestSequence === sequence.current && source === "manual") setError(errorMessage(reason));
+				return null;
+			} finally {
+				if (mounted.current && requestSequence === sequence.current) setChecking(false);
+			}
+		})();
+		inFlightCheck.current = run;
 		try {
-			const next = await api.checkUpdate();
-			if (!mounted.current || requestSequence !== sequence.current) return null;
-			setInfo(next.hasUpdate ? next : null);
-			return next;
-		} catch (reason) {
-			if (mounted.current && requestSequence === sequence.current && source === "manual") setError(errorMessage(reason));
-			return null;
+			return await run;
 		} finally {
-			if (mounted.current && requestSequence === sequence.current) setChecking(false);
+			if (inFlightCheck.current === run) inFlightCheck.current = null;
 		}
-	}, [api, checking]);
+	}, [api]);
 
 	useEffect(() => {
 		if (autoCheck) void check("auto");

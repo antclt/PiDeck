@@ -42,6 +42,34 @@ export function toThinkingPickerLevels(levels: readonly string[]): ThinkingPicke
   return options;
 }
 
+/**
+ * Resolve selectable thinking levels without making menu availability depend on an
+ * asynchronous capability probe. 统一标准：capability cache 是唯一展示源，runtime
+ * RPC 仅在 cache 未覆盖该模型时兑底（其值只会来自 idle + cache-miss 的后台探测）；
+ * 两者同时存在时（cache 后来才刷新）以 cache 为准。缺失 DSH 元数据与 Pi probe
+ * 不可用都属兼容 fallback：后端始终是最终能力裁决者。
+ */
+export function resolveThinkingPickerLevels(input: {
+  backend: "pi" | "dsh";
+  runtimePiLevels?: readonly string[];
+  cachedPiLevels?: readonly string[];
+  dshReasoningEfforts?: ReadonlyArray<{ id: string }>;
+}): ThinkingPickerLevel[] {
+  if (input.backend === "dsh") {
+    const declaredLevels = toThinkingPickerLevels(
+      input.dshReasoningEfforts?.map((effort) => effort.id) ?? [],
+    );
+    return declaredLevels.length > 0 ? declaredLevels : [...THINKING_LEVELS];
+  }
+  if (input.cachedPiLevels !== undefined) {
+    return toThinkingPickerLevels(input.cachedPiLevels);
+  }
+  if (input.runtimePiLevels !== undefined) {
+    return toThinkingPickerLevels(input.runtimePiLevels);
+  }
+  return [...THINKING_LEVELS];
+}
+
 /** Keep provider grouping deterministic so the same model order appears in both pickers. */
 export function groupModelsByProvider(models: AvailableModel[]) {
   const groups = models.reduce<Record<string, AvailableModel[]>>((result, model) => {

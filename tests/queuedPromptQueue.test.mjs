@@ -138,18 +138,22 @@ test("compact queue panel exposes retract, discard, and delivery actions", () =>
   assert.match(queueStateSource, /export const QUEUED_PROMPT_VISIBLE = 3/);
 });
 
-test("busy composer uses one send circle that becomes stop", () => {
+test("busy composer keeps send circle; stop only when input is empty", () => {
   const composerAreaSource = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
   const sendControls = componentInvocation(composerAreaSource, "ComposerSendControls");
 
   assert.match(sendControls, /onSend=\{composer\.delivery\.send\}/);
   assert.match(sendControls, /onStop=\{composer\.delivery\.abort\}/);
+  // 忙碌时有无内容决定停止/发送：hasContent 由控制器传入，不再只看 isAgentBusy
+  assert.match(sendControls, /hasContent=\{composer\.hasContent\}/);
   assert.doesNotMatch(sendControls, /onSendSteer/);
   assert.doesNotMatch(sendControls, /onSendFollowUp/);
   assert.doesNotMatch(sendControls, /onSendAsk/);
   assert.match(composerPanelsSource, /composer-send-primary/);
   assert.match(composerPanelsSource, /primaryStops \? t\("app\.stop"\) : t\("app\.send"\)/);
   assert.match(composerPanelsSource, /onClick=\{primaryStops \? props\.onStop : props\.onSend\}/);
+  assert.match(composerPanelsSource, /resolveComposerSendButtonState\(/);
+  assert.match(composerPanelsSource, /hasContent: props\.hasContent/);
   assert.doesNotMatch(composerPanelsSource, /send-behavior-toggle/);
   assert.doesNotMatch(composerPanelsSource, /send-behavior-chevron/);
   assert.doesNotMatch(composerPanelsSource, /<DropdownMenu>/);

@@ -350,18 +350,39 @@ test("picker rows and provider cards use the cc-switch style inline usage", () =
   assert.equal(existsSync("src/renderer/src/components/app/ProviderUsageBadge.tsx"), false);
 });
 
+test("provider card footer omits the entire usage row when no usable result exists", () => {
+  const source = readFileSync("src/renderer/src/components/app/ProviderUsageInline.tsx", "utf8");
+  // 没有成功且可展示的结果时，卡片不应留下 border/h-9 空行；成功后才挂载整行。
+  const rowSource = source.slice(source.indexOf("export function ProviderUsageRow"));
+  assert.match(rowSource, /const entry = useProviderUsageEntry\(props\.provider, props\.backend\)/);
+  assert.match(rowSource, /if \(!props\.provider \|\| !hasUsableUsage\(entry\.result\)\) return null;/);
+  assert.doesNotMatch(source, /空占位/);
+  assert.doesNotMatch(source, /inline-flex h-5 items-center/);
+});
+
+test("recognized usage badge keeps its label separated from the hint", () => {
+  const source = readFileSync("src/renderer/src/config/UsageProbeConfigDialog.tsx", "utf8");
+  const badgeSection = source.match(/\{hintKey && \([\s\S]*?\n\s*\)\}/)?.[0] ?? "";
+  // 徽标文字按单行盒渲染，并与下一行说明保持明确间距，避免高字号/主题切换时叠字。
+  assert.match(badgeSection, /flex flex-col gap-2/);
+  assert.match(badgeSection, /text-micro leading-none tracking-wide/);
+});
+
 test("provider card footer keeps alignment and stays silent when usage not enabled", () => {
   const source = readFileSync("src/renderer/src/components/app/ProviderUsageInline.tsx", "utf8");
-  // 未开启/失败/不支持 → 空占位保持行高，不渲染任何文案（查不到就不显示）。
-  assert.match(source, /空占位/);
-  // 未开启不再给「用量查询未开启 → 去配置」广告位（用户反馈：没开启的功能不该有引导条）；
-  // 配置入口统一在卡片头部柱状图按钮，由用户主动发起。
+  // 未开启/失败/不支持 → 不渲染整行，不渲染任何文案（查不到就不显示）。
   assert.doesNotMatch(source, /provider-usage-not-enabled/);
   assert.doesNotMatch(source, /provider-usage-footer-configure/);
   assert.doesNotMatch(source, /config\.usage\.notEnabled/);
-  // 三处共用行组件（ProviderUsageRow）：右对齐、行高固定、柱状图按钮（对齐 cc-switch 卡片列表）
+  // 三处共用行组件（ProviderUsageRow）：成功结果才渲染右对齐用量行，柱状图按钮在卡头。
   assert.match(source, /justify-end/);
   assert.match(source, /h-9/);
+});
+
+test("usage probe dialog separates title from enable row", () => {
+  const source = readFileSync("src/renderer/src/config/UsageProbeConfigDialog.tsx", "utf8");
+  // 标题与启用开关是两个视觉层级，标题下必须保留稳定的呼吸间距。
+  assert.match(source, /<DialogHeader className="px-5 pt-4 pb-2">/);
 });
 
 test("usage probe dialog lives outside all TabsContent (tab switch must not unmount it)", () => {

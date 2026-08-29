@@ -340,7 +340,7 @@ export function UsageProbeConfigDialog(props: {
 	return (
 		<Dialog open onOpenChange={(next) => !next && handleClose()}>
 			<DialogContent className="max-h-[85vh] flex flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
-				<DialogHeader className="px-5 pt-4">
+				<DialogHeader className="px-5 pt-4 pb-2">
 					<DialogTitle>
 						{t("config.usageProbe.titleWithProvider", { provider: props.provider })}
 						{props.backend === "dsh" ? t("config.usageProbe.dshSuffix") : null}
@@ -395,12 +395,12 @@ export function UsageProbeConfigDialog(props: {
 									</button>
 								</div>
 								{hintKey && (
-									<div className="space-y-1">
+									<div className="flex flex-col gap-2">
 										{recognized && template === recognized.templateId && (
 											/* 已识别供应商徽标（学 cc-switch DeepSeek 蓝标）：明确「预制的是你」，
 											   让「内置模板」与「需要填字段的模板」一眼区分开 */
 											<span
-												className="inline-flex flex-none items-center rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-micro text-[var(--color-accent)]"
+												className="inline-flex flex-none items-center rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-micro leading-none tracking-wide text-[var(--color-accent)]"
 												data-testid="usage-probe-recognized-badge"
 											>
 												{props.provider}

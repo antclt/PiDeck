@@ -10,6 +10,7 @@
  */
 const { execSync } = require("node:child_process");
 const path = require("node:path");
+const fs = require("node:fs");
 
 const root = path.resolve(__dirname, "..");
 
@@ -29,4 +30,24 @@ execSync(`npx electron-builder --win ${formats}`, {
   shell: true,
 });
 
-console.log(`\n✅ 完成！产物在 release/ 目录下`);
+// 发布提示：electron-builder 已配置 publish(provider: github)，打包会在 release/ 生成
+// 平台 channel 元数据（Windows: latest.yml / macOS: latest-mac.yml / Linux: latest-linux.yml），
+// 客户端无配额更新检查按平台读取对应文件。发布 GitHub Release 时，除安装包外必须
+// 一并上传 channel 文件（每个平台自己的那个），否则该平台客户端自动更新会降级为
+// atom/API 兑底路径。
+console.log(`\n✅ 打包完成！产物在 release/ 目录下`);
+const releaseDir = path.join(root, "release");
+if (fs.existsSync(releaseDir)) {
+  const files = fs.readdirSync(releaseDir)
+    .filter((name) => /latest(-\w+)?\.yml$/.test(name) || !/\.(blockmap|yml)$/.test(name))
+    .filter((name) => !name.startsWith("."));
+  console.log(`\n发布 GitHub Release 时需上传以下文件（assets）：`);
+  for (const name of files) console.log(`  - ${name}`);
+  const ymlFiles = fs.readdirSync(releaseDir).filter((name) => /latest(-\w+)?\.yml$/.test(name));
+  if (ymlFiles.length === 0) {
+    console.warn(`\n⚠ 未找到 latest*.yml：请确认 build.publish 配置存在（provider: github）`);
+  } else {
+    console.log(`\n⚠ 不要漏掉 latest.yml：它是客户端无配额自动更新检查的版本元数据。`);
+  }
+}
+

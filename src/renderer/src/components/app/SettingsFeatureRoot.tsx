@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { AppInfo, AppSettings } from "../../../../shared/types";
 import { settingsFocusAtom, settingsOpenAtom } from "../../atoms";
+import { updateStatusAtom } from "../../atoms/update-atoms";
 import { desktopApi as api } from "../../desktopApi";
 import type { AppUpdateControllerState } from "../../hooks/useAppUpdateController";
 import type { PiUpdateController } from "../../hooks/usePiUpdate";
@@ -30,6 +31,7 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
   const open = useAtomValue(settingsOpenAtom);
   const setOpen = useSetAtom(settingsOpenAtom);
   const setFocus = useSetAtom(settingsFocusAtom);
+  const setUpdateStatus = useSetAtom(updateStatusAtom);
 
   // 按字段级 useMemo 稳定弹窗 props：App 根组件重渲染（低频）不会连带
   // 重渲染 SettingsModal（memo）。piUpdate 内部函数均为 useCallback，
@@ -68,6 +70,10 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
           } else if (!info && props.appUpdate.error) {
             showNotice(t("app.updateFailedNotice", { error: props.appUpdate.error }));
           }
+          // 手动检测后刷新后台快照（角标/设置页高亮与最新结果一致）。
+          void api.app.getUpdateStatus().then((snapshot) => {
+            if (snapshot) setUpdateStatus(snapshot);
+          });
         });
       },
       onCheckPiUpdate: props.piUpdate.checkPiCliUpdate,

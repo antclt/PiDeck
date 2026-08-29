@@ -17,6 +17,7 @@ import type {
 	AppUpdateDownloadProgress,
 	AppUpdateDownloadResult,
 	AppUpdateInfo,
+	AppUpdateStatusSnapshot,
 	AvailableModel,
 	DshModelDiscoveryInput,
 	ModelListFailReason,
@@ -1103,6 +1104,18 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.appInstallUpdate, filePath) as Promise<void>,
 		onUpdateProgress: (callback: (progress: AppUpdateDownloadProgress) => void) =>
 			subscribe(ipcChannels.appUpdateProgress, callback),
+		/** 订阅后台更新检查快照（角标 + 每版本一次提示判定）。 */
+		onUpdateStatus: (callback: (snapshot: AppUpdateStatusSnapshot) => void) =>
+			subscribe(ipcChannels.appUpdateStatusChanged, callback),
+		/** 获取当前更新状态快照（手动检测完成后刷新角标用）。 */
+		getUpdateStatus: () =>
+			ipcRenderer.invoke(ipcChannels.appUpdateStatusChanged) as Promise<AppUpdateStatusSnapshot | null>,
+		/** 记录已提示过的版本（每版本只提示一次）。 */
+		notifyUpdateSeen: (kind: "app" | "pi", version: string) =>
+			ipcRenderer.invoke(ipcChannels.appUpdateNotifySeen, kind, version) as Promise<void>,
+		/** 跳过某版本（该版本不再主动提示）。 */
+		skipUpdateVersion: (version: string) =>
+			ipcRenderer.invoke(ipcChannels.appUpdateSkipVersion, version) as Promise<void>,
 		feedbackEnvironment: () =>
 			ipcRenderer.invoke(
 				ipcChannels.appFeedbackEnvironment,
