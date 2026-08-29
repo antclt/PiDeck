@@ -19,6 +19,7 @@ import type { ImageContent } from "../../../../shared/types";
 import { formatBytes } from "../../../../shared/formatBytes";
 import type { PastedTextFile } from "../../atoms";
 import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
+import { resolveComposerSendButtonState } from "../../utils/composerSendButton";
 import { buildAskContextBlock } from "../../utils/askPanelContext";
 import {
   canChangeQueuedPromptBehavior,
@@ -432,6 +433,8 @@ export function SessionDeliveryNotice(props: {
 export function ComposerSendControls(props: {
   isAgentBusy: boolean;
   isAgentStarting: boolean;
+  /** 输入框是否有内容（文本/附件/粘贴文件）：忙碌但有内容时圆钮仍是发送。 */
+  hasContent: boolean;
   canSend: boolean;
   /** 生图进行中：发送按钮显示转圈并禁用（与 busy 区分，不显示停止按钮） */
   isGeneratingImage?: boolean;
@@ -439,8 +442,15 @@ export function ComposerSendControls(props: {
   onStop: () => void;
 }) {
   // 主题色圆钮（随外观主题主色：经典=近黑、森系绿=鼠尾草绿）。
-  // 空闲发送；忙碌同一颗变停止。插入/排队/并行在排队行上选。
-  const primaryStops = props.isAgentBusy && !props.isGeneratingImage;
+  // 空闲发送；忙碌且输入框为空时才变停止（清空输入即回到停止）；
+  // 忙碌但有内容时保持发送（走 steer/followUp 投递，见 busySendDelivery）。
+  // 插入/排队/并行在排队行上选。
+  const primaryStops =
+    resolveComposerSendButtonState({
+      isAgentBusy: props.isAgentBusy,
+      hasContent: props.hasContent,
+      isGeneratingImage: props.isGeneratingImage,
+    }) === "stop";
   const label = primaryStops ? t("app.stop") : t("app.send");
   const disabled = primaryStops
     ? false
