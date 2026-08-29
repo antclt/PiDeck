@@ -223,6 +223,11 @@
       ],
       "category": "Development",
       "maintainer": "ayuayue <ayuayue@users.noreply.github.com>"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ayuayue",
+      "repo": "PiDeck"
     }
   },
   "devDependencies": {

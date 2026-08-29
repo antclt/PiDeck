@@ -776,6 +776,10 @@ export function createPreviewApi(): PiDesktopApi {
 				releaseUrl: "https://github.com/ayuayue/pi-desktop/releases",
 				assets: [],
 			}),
+			onUpdateStatus: () => () => undefined,
+			getUpdateStatus: async () => null,
+			notifyUpdateSeen: async () => undefined,
+			skipUpdateVersion: async () => undefined,
 			downloadUpdate: async (asset) => ({
 				filePath: asset.name,
 				assetName: asset.name,

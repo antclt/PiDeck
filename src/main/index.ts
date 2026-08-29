@@ -343,6 +343,8 @@ import { startMemoryProfile, isMemoryProfileEnabled, type MemoryProfileHandle } 
 import { DiagnosticsMonitor } from "./diagnostics/DiagnosticsMonitor";
 import { QuitCleanupRegistry } from "./lifecycle/QuitCleanupRegistry";
 import type { FeishuChatBinding } from "../shared/types";
+import { checkAppUpdate as checkForAppUpdate } from "./update/appUpdateCheck";
+import { UpdateService } from "./update/UpdateService";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -377,6 +379,8 @@ let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
 let skillManager: SkillManager;
 let extensionManager: ExtensionManager;
+/** 后台更新检查服务（启动延迟 + 2h 周期，无配额方案）；null = 未初始化。 */
+let updateService: UpdateService | null = null;
 let projectResourceManager: ProjectResourceManager;
 let webServiceManager: WebServiceManager;
 let terminalManager: TerminalSessionManager;
@@ -1058,222 +1062,11 @@ function applyNativeThemeSource(settings: AppSettings) {
 }
 
 const RELEASES_URL = "https://github.com/ayuayue/pi-desktop/releases";
-const LATEST_RELEASE_API =
-	"https://api.github.com/repos/ayuayue/pi-desktop/releases/latest";
 const POSTHOG_PROJECT_KEY =
 	process.env.POSTHOG_PROJECT_KEY ??
 	"phc_xgJ8gFUMgExZEEPzZ7VRa7698ENcaDRquWZVGYb2dCFK";
 const POSTHOG_HOST = process.env.POSTHOG_HOST ?? "https://us.i.posthog.com";
 
-type GitHubReleaseAsset = {
-	name: string;
-	browser_download_url: string;
-	size: number;
-};
-
-type GitHubRelease = {
-	tag_name?: string;
-	name?: string;
-	body?: string;
-	html_url?: string;
-	published_at?: string;
-	assets?: GitHubReleaseAsset[];
-};
-
-function normalizeVersion(version: string) {
-	return version.trim().replace(/^v/i, "");
-}
-
-function compareVersions(left: string, right: string) {
-	const leftParts = normalizeVersion(left)
-		.split(/[.-]/)
-		.map((part) => Number(part) || 0);
-	const rightParts = normalizeVersion(right)
-		.split(/[.-]/)
-		.map((part) => Number(part) || 0);
-	const length = Math.max(leftParts.length, rightParts.length);
-	for (let index = 0; index < length; index += 1) {
-		const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
-		if (diff !== 0) return diff;
-	}
-	return 0;
-}
-
-function selectRecommendedAsset(
-	assets: AppUpdateAsset[],
-	installationType?: "portable" | "installed",
-) {
-	const platform = process.platform;
-	const arch = process.arch;
-	// Windows 便携版以 electron-builder 注入的运行时环境变量为准；旧 settings 可能残留 installed。
-	const isPortable =
-		platform === "win32"
-			? process.env.PORTABLE_EXECUTABLE_DIR !== undefined || installationType === "portable"
-			: installationType === "portable";
-
-	// 映射资产以便匹配
-	const candidates = assets.map((asset) => ({
-		...asset,
-		lowerName: asset.name.toLowerCase(),
-	}));
-
-	// 根据架构确定关键词，严格匹配
-	const archKeywords =
-		arch === "arm64" ? ["arm64", "aarch64"] : ["x64", "amd64", "x86_64"];
-	const matchesArch = (name: string) =>
-		archKeywords.some((keyword) => name.includes(keyword));
-
-	// 检查是否为非目标架构（用于排除不匹配的资产）
-	const isWrongArch = (name: string) => {
-		if (arch === "arm64") {
-			// 当前是 ARM64，排除 x64 相关的
-			return /\b(x64|amd64|x86_64)\b/i.test(name);
-		} else {
-			// 当前是 x64，排除 arm64 相关的
-			return /\b(arm64|aarch64)\b/i.test(name);
-		}
-	};
-
-	const isWindowsAsset = (name: string) =>
-		/\.(exe|msi)$/i.test(name) || (name.endsWith(".zip") && !/(mac|darwin|osx|linux|appimage|deb|tar\.gz)/i.test(name));
-	const isMacAsset = (name: string) => /\.(dmg)$/i.test(name) || /(mac|darwin|osx)/i.test(name);
-	const isLinuxAsset = (name: string) => /(appimage|\.deb$|\.tar\.gz$|linux)/i.test(name);
-
-	if (platform === "win32") {
-		// Windows 只能在 Windows 资产里挑选；Release 同时包含 macOS zip，不能用全局 zip 回退。
-		const platformCandidates = candidates.filter((asset) => isWindowsAsset(asset.lowerName));
-		// Windows: 优先匹配当前安装形态（便携版 vs 安装版）和架构
-		if (isPortable) {
-			// 便携版 exe 是单文件绿色版，无需安装；优先推荐非 Setup 的便携 exe，其次 .zip
-			return (
-				platformCandidates.find(
-					(asset) => !asset.lowerName.includes("setup") && asset.lowerName.endsWith(".exe") && matchesArch(asset.lowerName),
-				) ??
-				platformCandidates.find(
-					(asset) => !asset.lowerName.includes("setup") && asset.lowerName.endsWith(".exe") && !isWrongArch(asset.lowerName),
-				) ??
-				platformCandidates.find(
-					(asset) => asset.lowerName.endsWith(".zip") && matchesArch(asset.lowerName),
-				) ??
-				platformCandidates.find(
-					(asset) => asset.lowerName.endsWith(".zip") && !isWrongArch(asset.lowerName),
-				)
-			);
-		} else {
-			// 安装版：优先推荐带 Setup 的安装 exe，其次普通 exe，最后 zip
-			return (
-				platformCandidates.find(
-					(asset) => asset.lowerName.includes("setup") && asset.lowerName.endsWith(".exe") && matchesArch(asset.lowerName),
-				) ??
-				platformCandidates.find(
-					(asset) => asset.lowerName.includes("setup") && asset.lowerName.endsWith(".exe") && !isWrongArch(asset.lowerName),
-				) ??
-				platformCandidates.find(
-					(asset) => asset.lowerName.endsWith(".exe") && matchesArch(asset.lowerName),
-				) ??
-				platformCandidates.find(
-					(asset) => asset.lowerName.endsWith(".exe") && !isWrongArch(asset.lowerName),
-				) ??
-				platformCandidates.find(
-					(asset) => asset.lowerName.endsWith(".zip") && matchesArch(asset.lowerName),
-				) ??
-				platformCandidates.find(
-					(asset) => asset.lowerName.endsWith(".zip") && !isWrongArch(asset.lowerName),
-				)
-			);
-		}
-	}
-
-	if (platform === "darwin") {
-		// macOS 只在 macOS 资产中选择，避免 x64 zip 回退到 Windows/Linux 包。
-		const platformCandidates = candidates.filter((asset) => isMacAsset(asset.lowerName));
-		return (
-			platformCandidates.find(
-				(asset) => asset.lowerName.endsWith(".dmg") && matchesArch(asset.lowerName),
-			) ??
-			platformCandidates.find(
-				(asset) => asset.lowerName.endsWith(".dmg") && !isWrongArch(asset.lowerName),
-			) ??
-			platformCandidates.find(
-				(asset) => asset.lowerName.endsWith(".zip") && matchesArch(asset.lowerName),
-			) ??
-			platformCandidates.find(
-				(asset) => asset.lowerName.endsWith(".zip") && !isWrongArch(asset.lowerName),
-			)
-		);
-	}
-
-	if (platform === "linux") {
-		// Linux 只在 Linux 资产中选择，避免跨平台 zip/exe 被误推荐。
-		const platformCandidates = candidates.filter((asset) => isLinuxAsset(asset.lowerName));
-		return (
-			platformCandidates.find(
-				(asset) => asset.lowerName.includes("appimage") && matchesArch(asset.lowerName),
-			) ??
-			platformCandidates.find(
-				(asset) =>
-					asset.lowerName.includes("appimage") && !isWrongArch(asset.lowerName),
-			) ??
-			platformCandidates.find(
-				(asset) => asset.lowerName.endsWith(".deb") && matchesArch(asset.lowerName),
-			) ??
-			platformCandidates.find(
-				(asset) => asset.lowerName.endsWith(".deb") && !isWrongArch(asset.lowerName),
-			) ??
-			platformCandidates.find(
-				(asset) => asset.lowerName.endsWith(".tar.gz") && matchesArch(asset.lowerName),
-			) ??
-			platformCandidates.find(
-				(asset) => asset.lowerName.endsWith(".tar.gz") && !isWrongArch(asset.lowerName),
-			)
-		);
-	}
-
-	// 回退：返回第一个匹配架构的资产
-	return candidates.find((asset) => matchesArch(asset.lowerName)) ?? candidates[0];
-}
-
-async function checkForAppUpdate(
-	installationType?: "portable" | "installed",
-): Promise<AppUpdateInfo> {
-	const currentVersion = app.getVersion();
-	void appLogger.info("update", "Check for app update", { currentVersion, installationType });
-	const response = await fetch(LATEST_RELEASE_API, {
-		headers: {
-			Accept: "application/vnd.github+json",
-			"User-Agent": `pi-desktop/${currentVersion}`,
-		},
-	});
-	if (!response.ok) {
-		void appLogger.warn("update", "GitHub release check failed", { status: response.status });
-		throw new Error(mainCopy("update.checkFailed"));
-	}
-	const release = (await response.json()) as GitHubRelease;
-	const latestVersion = normalizeVersion(release.tag_name || currentVersion);
-	const assets = (release.assets ?? []).map((asset) => ({
-		name: asset.name,
-		url: asset.browser_download_url,
-		size: asset.size,
-	}));
-	const recommendedAsset = selectRecommendedAsset(assets, installationType);
-	void appLogger.info("update", "App update check completed", {
-		currentVersion,
-		latestVersion,
-		hasUpdate: compareVersions(latestVersion, currentVersion) > 0,
-		recommendedAsset: recommendedAsset?.name,
-	});
-	return {
-		currentVersion,
-		latestVersion,
-		hasUpdate: compareVersions(latestVersion, currentVersion) > 0,
-		releaseName: release.name || `v${latestVersion}`,
-		releaseNotes: release.body || "",
-		releaseUrl: release.html_url || RELEASES_URL,
-		publishedAt: release.published_at,
-		assets,
-		recommendedAsset,
-	};
-}
 
 function emitUpdateProgress(progress: AppUpdateDownloadProgress) {
 	if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -2841,6 +2634,24 @@ function registerIpc() {
 	// Phase 3.7 拆出 systemIpc 后这些可选依赖必须显式注入；
 	// 漏传 extensionManager 会导致 pi:update-check / pi:update 根本不注册。
 	if (!piModelCapabilityCache) throw new Error("Pi model capability cache is unavailable after settings load");
+	// 后台更新检查：启动延迟 + 每 2h 自动检测 PiDeck 与 Pi CLI（无配额方案，无需认证）。
+	// 快照经 app:update-status-changed 推送渲染层（齿轮角标 + 每版本一次提示判定）。
+	updateService = new UpdateService({
+		settingsStore,
+		checkPiUpdate: () => extensionManager.checkPiUpdate(),
+		sendToRenderer: (snapshot) => {
+			if (mainWindow && !mainWindow.isDestroyed()) {
+				mainWindow.webContents.send(ipcChannels.appUpdateStatusChanged, snapshot);
+			}
+		},
+		log: (level, message, details) => {
+			if (level === "warn") void appLogger.warn("update", message, details ?? {});
+			else void appLogger.info("update", message, details ?? {});
+		},
+		getCurrentVersion: () => app.getVersion(),
+		getInstallationType: () => settingsStore.get().installationType ?? "installed",
+	});
+	updateService.start();
 	registerSystemIpc({
 		piLocator,
 		settingsStore,
@@ -2868,7 +2679,15 @@ function registerIpc() {
 		stopDshHostFromMonitor,
 		getMainWindow: () => mainWindow,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
-		checkForAppUpdate: checkForAppUpdate as (installationType?: string) => Promise<AppUpdateInfo | null>,
+		// 适配层：registerSystemIpc 的旧签名 (installationType?) → 新无配额检查 (options)。
+		checkForAppUpdate: (installationType?: string) =>
+			checkForAppUpdate({
+				owner: "ayuayue",
+				repo: "pi-desktop",
+				currentVersion: app.getVersion(),
+				installationType:
+					installationType === "portable" ? "portable" : installationType === "installed" ? "installed" : undefined,
+			}),
 		downloadUpdateAsset,
 		installDownloadedUpdate,
 		openExternalUrl,
@@ -2940,6 +2759,7 @@ function registerIpc() {
 		},
 		RELEASES_URL,
 		devBranch: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch) ? devGitBranch : undefined,
+		updateService: updateService ?? undefined,
 	});
 
 	registerStoreIpc({
@@ -3483,6 +3303,7 @@ app.whenReady().then(async () => {
 	});
 	// C12：退出清理登记（before-quit 统一 runAll）
 	quitCleanup.register("theme-schedule", () => clearThemeScheduleTimer());
+	quitCleanup.register("update-check", () => updateService?.stop());
 	quitCleanup.register("web-service", () => webServiceManager?.stop());
 	terminalManager = new TerminalSessionManager(
 		(agentId) => {

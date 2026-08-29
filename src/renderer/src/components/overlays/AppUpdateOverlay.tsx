@@ -21,6 +21,8 @@ export type AppUpdateOverlayProps = {
 	openExternal: (url: string, forceSystem?: boolean) => Promise<void> | void;
 	upToDateVersion?: string | null;
 	onDismissUpToDate?: () => void;
+	/** 跳过某版本（不再主动提示；调用方负责持久化 skipUpdateVersion）。 */
+	onSkipVersion?: (version: string) => void;
 };
 
 function formatBytes(bytes?: number) {
@@ -47,6 +49,7 @@ function UpdateDialog(props: {
 	onBrowserDownload: () => void;
 	error?: string | null;
 	onOpenRelease: () => void;
+	onSkipVersion?: () => void;
 }) {
 	const percent = props.progress?.percent ?? 0;
 	return (
@@ -87,6 +90,9 @@ function UpdateDialog(props: {
 				<div className="update-actions">
 					<Button variant="outline" size="sm" className="h-auto px-3 py-2 text-[13px] shadow-none" onClick={props.onOpenRelease}>{t("update.openRelease")}</Button>
 					<Button variant="outline" size="sm" className="h-auto px-3 py-2 text-[13px] shadow-none" onClick={props.onBrowserDownload}>{t("update.browserDownload")}</Button>
+					{props.onSkipVersion && (
+						<Button variant="ghost" size="sm" className="h-auto px-3 py-2 text-[13px] shadow-none text-muted-foreground" title={t("update.skipVersionHint")} onClick={props.onSkipVersion}>{t("update.skipVersion")}</Button>
+					)}
 					{props.downloadedPath ? <Button variant="default" size="sm" className="h-auto px-3 py-2 text-[13px] shadow-none" onClick={props.onInstall}>{t("update.installDownloaded")}</Button> : <Button variant="default" size="sm" className="h-auto px-3 py-2 text-[13px] shadow-none" disabled={props.checking || props.downloading || !props.info.recommendedAsset} onClick={props.onDownload}>{props.downloading ? t("update.downloading") : t("update.downloadInApp")}</Button>}
 				</div>
 			</section>
@@ -95,10 +101,10 @@ function UpdateDialog(props: {
 	);
 }
 
-export function AppUpdateOverlay({ controller, releasesUrl, openExternal, upToDateVersion, onDismissUpToDate }: AppUpdateOverlayProps) {
+export function AppUpdateOverlay({ controller, releasesUrl, openExternal, upToDateVersion, onDismissUpToDate, onSkipVersion }: AppUpdateOverlayProps) {
 	const info = controller.info;
 	if (info) {
-		return <UpdateDialog info={info} progress={controller.progress} checking={controller.checking} downloading={controller.downloading} downloadedPath={controller.downloadedPath} onClose={controller.clear} onDownload={() => void controller.download()} onInstall={() => void controller.install()} error={controller.error} onBrowserDownload={() => void openExternal(info.recommendedAsset?.url ?? info.releaseUrl, true)} onOpenRelease={() => void openExternal(info.releaseUrl, true)} />;
+		return <UpdateDialog info={info} progress={controller.progress} checking={controller.checking} downloading={controller.downloading} downloadedPath={controller.downloadedPath} onClose={controller.clear} onDownload={() => void controller.download()} onInstall={() => void controller.install()} error={controller.error} onBrowserDownload={() => void openExternal(info.recommendedAsset?.url ?? info.releaseUrl, true)} onOpenRelease={() => void openExternal(info.releaseUrl, true)} onSkipVersion={onSkipVersion ? () => onSkipVersion(info.latestVersion) : undefined} />;
 	}
 	if (controller.error) {
 		return (

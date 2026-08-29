@@ -169,6 +169,13 @@ export type SystemIpcDeps = {
 	RELEASES_URL?: string;
 	/** 开发态 git 分支名（多 worktree 并行区分窗口）；正式包/共享分支为空。 */
 	devBranch?: string;
+	/** 后台更新检查服务（定时检查快照推送 / 已提示 / 跳过版本）。 */
+	updateService?: {
+		getSnapshot: () => import("../../shared/types").AppUpdateStatusSnapshot;
+		notifySeen: (kind: "app" | "pi", version: string) => Promise<void>;
+		skipVersion: (version: string) => Promise<void>;
+		recordAppUpdateResult: (info: { latestVersion: string; hasUpdate: boolean }) => void;
+	};
 };
 
 export function registerSystemIpc(deps: SystemIpcDeps): void {
@@ -197,6 +204,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		setFeishuLocale,
 		setFeishuConfigDefaultBotName,
 		refreshTrayContextMenu,
+		updateService,
 		notifyTitleBarChange,
 		applyNativeThemeSource,
 		applyDesktopProxy,
@@ -608,15 +616,35 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── 应用更新 ─────────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.appCheckUpdate, () =>
-		checkForAppUpdate(settingsStore.get().installationType),
-	);
+	ipcMain.handle(ipcChannels.appCheckUpdate, async () => {
+		const info = await checkForAppUpdate(settingsStore.get().installationType);
+		// 手动结果同步进后台快照：角标/设置页高亮与手动检查保持一致。
+		if (info) updateService?.recordAppUpdateResult({ latestVersion: info.latestVersion, hasUpdate: info.hasUpdate });
+		return info;
+	});
 	ipcMain.handle(ipcChannels.appDownloadUpdate, async (_event, asset: AppUpdateAsset) =>
 		downloadUpdateAsset(asset),
 	);
 	ipcMain.handle(ipcChannels.appInstallUpdate, async (_event, filePath: string) =>
 		installDownloadedUpdate(filePath),
 	);
+	// 后台更新检查快照：主进程定时检查后主动推送（渲染层角标/每版本一次提示）；
+	// 渲染层也可主动拉取当前快照（如手动检测完成后刷新角标）。
+	ipcMain.handle(ipcChannels.appUpdateStatusChanged, () =>
+		updateService?.getSnapshot() ?? null,
+	);
+	ipcMain.handle(ipcChannels.appUpdateNotifySeen, async (_event, kind: unknown, version: unknown) => {
+		if (!updateService) return;
+		// 输入校验：kind 只允许 app/pi，version 必须是字符串，否则拒绝（渲染层数据不可信）。
+		if (kind !== "app" && kind !== "pi") return;
+		if (typeof version !== "string" || !version) return;
+		await updateService.notifySeen(kind, version);
+	});
+	ipcMain.handle(ipcChannels.appUpdateSkipVersion, async (_event, version: unknown) => {
+		if (!updateService) return;
+		if (typeof version !== "string" || !version) return;
+		await updateService.skipVersion(version);
+	});
 
 	// ── 应用日志 ─────────────────────────────────────────────────────
 

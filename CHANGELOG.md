@@ -4,6 +4,14 @@
 - **Usage query rebuild (aligned with cc-switch)** — Unified usage display across Models / Auth / DSH (amount or percentage at the bottom-right of the card + bar-chart icon entry in the header); per-provider enable switch + built-in template auto-detection + generic / New API declarative templates + timeout / auto-query interval (default 5 min, 0 = manual only); no automatic probing when disabled or unsupported.
 - **DSH usage query pipeline** — Same usage display and probe configuration on the DSH model config page: config stored at `$DSH_HOME/.pideck/usage-probes.json`, credentials read from the DSH credential store (`.credentials.yaml`); identical to the pi side and fully isolated.
 - **PiDeck-specific files consolidated** — Session archives / host mutex lock / usage config under DSH_HOME now live in `~/.dsh/.pideck/` (one-time migration; the migration logic will be removed in the next release once the legacy layout is confirmed gone).
+- **Proactive update notifications (quota-free)** — PiDeck and Pi CLI now auto-check for updates every 2h in the background (first check 30s after launch). When a new version is found, a dot badge appears on the Settings gear and the update dialog opens automatically (once per version, with "Skip this version" support). The check source switched from the GitHub REST API to the `releases/latest` redirect + `latest.yml` (aligned with electron-updater's strategy): no more 60/hour/IP quota limit and no authentication required.
+- **Release pipeline now ships latest.yml** — electron-builder gains `publish` (provider: github); `dist:win` prints the asset list to upload with the Release. Channel metadata is platform-specific (Windows: `latest.yml` / macOS: `latest-mac.yml` / Linux: `latest-linux.yml`) and each client reads its own platform file; when missing, the client falls back to the atom/API path automatically.
+- **Check timeout protection** — Every GitHub check request has a 10s timeout: with a broken local network, manual "Check for Updates" spins at most 10s then shows an error and can be retried; background checks keep scheduling the next round after failure (eliminating the historical "infinite spinner, manual update blocked" issue).
+- **Pi CLI background check** — Pi CLI version is checked every 2h alongside the app; a toast notifies about new versions and the "Version & Updates" settings section shows current → latest.
+- **Manual check no longer swallowed** — Clicking "Check for Updates" while an auto-check is in flight now shares the same in-flight request instead of being gated away (the historical root cause of "new version but no prompt").
+
+### 🐛 Fixes
+- **Update check fallback path** — When a Release lacks latest.yml, the check now degrades to the atom feed + REST fallback instead of failing outright.
 
 ## v0.7.2 - 2026-08-29
 

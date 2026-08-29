@@ -287,6 +287,12 @@ export const ipcChannels = {
 	appDownloadUpdate: "app:download-update",
 	appInstallUpdate: "app:install-update",
 	appUpdateProgress: "app:update-progress",
+	/** 主进程后台更新检查快照推送（角标 + 每版本一次提示判定）。 */
+	appUpdateStatusChanged: "app:update-status-changed",
+	/** 记录已提示过的版本（每版本只提示一次）。 */
+	appUpdateNotifySeen: "app:update-notify-seen",
+	/** 跳过某版本（该版本不再主动提示）。 */
+	appUpdateSkipVersion: "app:update-skip-version",
 	appFeedbackEnvironment: "app:feedback-environment",
 	appOpenExternal: "app:open-external",
 	appOpenInBrowser: "app:open-in-browser",
