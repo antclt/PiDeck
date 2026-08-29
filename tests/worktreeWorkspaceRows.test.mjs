@@ -68,9 +68,9 @@ test("child worktree labels keep a stable weight without a selected-state swap",
   assert.doesNotMatch(childRow, /isActive \? "font-normal"/);
 });
 
-test("project row shows the merged new-session menu only outside worktree mode", () => {
-  // worktree 模式下入口挪到主工作区行；普通/匿名合并为单个 NewSessionMenu 下拉
-  assert.match(projectTree, /!project\.worktreeEnabled && \(/);
-  assert.match(projectTree, /<NewSessionMenu/);
-  assert.match(projectTree, /projectId=\{project\.id\}/);
+test("project row routes new-session into the more-actions menu", () => {
+  // 新建会话/匿名从项目行的 + 下拉收敛进右侧「⋯」更多操作菜单（ProjectContextMenu），
+  // 项目行不再单独渲染 NewSessionMenu，避免入口零散且视觉上与搜索/分段重复。
+  assert.doesNotMatch(projectTree, /<NewSessionMenu/);
+  assert.match(projectTree, /<Ellipsis/);
 });

@@ -132,10 +132,3 @@ export const turnFlowSettingsAtom = atom<TurnFlowSettings>({
 	collapsePrevRunsOnNewTurn: true,
 });
 
-/**
- * 是否使用 beUI 官方原版组件（false=PiDeck 定制变体）。
- * 与 turnFlowSettingsAtom 同模式：App 从 settings 同步写入，组件直接订阅。
- * 默认 false 与 SettingsStore.defaultSettings 保持一致。
- */
-export const beuiOfficialComponentsAtom = atom(false);
-

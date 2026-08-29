@@ -4,8 +4,12 @@ import { usePersistedPanelWidth } from "./usePersistedPanelWidth";
 // Keep the default workbench geometry aligned with the main dev branch. The
 // Session-first change only affects when a runtime begins, not sidebar width.
 export const DEFAULT_LIST_WIDTH = 221;
-/** 侧栏可调宽度下限/上限（AppShell 布局约束同源，禁止两处漂移）。 */
-export const LIST_WIDTH_MIN = 100;
+/** 侧栏可调宽度下限/上限（AppShell 布局约束同源，禁止两处漂移）。
+ * 下限 208 而非 100：侧栏顶部分段是 活动/聊天/项目 三个等宽 pill tab，
+ * 每个含图标(14px)+gap+中文两字(约 24px)+padding，三个约 180px，
+ * 再加 TabsList padding 与 sidebar-body 左右 padding(16px)，
+ * 低于 200px 时第三个 tab 会被挤出/遮挡，用户无法切换分段。 */
+export const LIST_WIDTH_MIN = 208;
 export const LIST_WIDTH_MAX = 440;
 /** 侧栏宽度是全局布局偏好（与项目无关），不按项目拆分存储键。 */
 export const LIST_WIDTH_STORAGE_KEY = "pid:list-width";

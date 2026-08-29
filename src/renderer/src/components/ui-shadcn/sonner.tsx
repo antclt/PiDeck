@@ -4,8 +4,9 @@ import { Toaster as SonnerToaster } from "sonner";
 import { setToasterReady } from "../../utils/notice";
 
 /**
- * 全局 Toaster（#115）：sonner 官方组件，主题跟随应用 dataset.theme
- * （应用主题独立于系统主题，不能用 sonner 的 "system" 模式）。
+ * 全局 Toaster（#115）：sonner 官方组件，只承担堆叠/定位/时长/主题跟随，
+ * 单条 toast 的具体外观由 notice.ts 经 toast.custom 渲染的自定义卡片（NoticeToastCard）承担。
+ * 主题跟随应用 dataset.theme（应用主题独立于系统主题，不能用 sonner 的 "system" 模式）。
  *
  * portal 到 body：sonner 自身不 portal，而 #root 带 position:relative + z-index:1
  * （层叠上下文），Radix Dialog/Sheet 却 portal 到 body——toast 留在 #root 内会被
@@ -44,7 +45,7 @@ export function Toaster() {
 		const blockToastSwipe = (event: PointerEvent) => {
 			const target = event.target;
 			if (!(target instanceof Element)) return;
-			// 按钮（data-button / data-close-button 等）放行，保持 sonner 原交互
+			// 按钮（复制/关闭/操作等）放行，保持点击可用；仅拦非按钮区的拖选手势
 			if (target.closest("button")) return;
 			if (target.closest("[data-sonner-toast]")) {
 				event.stopImmediatePropagation();
@@ -58,7 +59,6 @@ export function Toaster() {
 			theme={theme}
 			position="top-right"
 			gap={10}
-			closeButton
 			visibleToasts={4}
 			offset={{
 				// 让开自定义标题栏拖拽区（--window-drag-height：frameless 下 32px，否则 0px）。
@@ -66,22 +66,6 @@ export function Toaster() {
 				// 点击被拖拽命中测试吞掉，表现为“点叉没反应”。
 				top: "calc(var(--window-drag-height, 0px) + 12px)",
 				right: "16px",
-			}}
-			toastOptions={{
-				// select-text：显式允许选中 toast 文本（sonner 自身只在 swiped 后关选中，
-				// 这里与上方 pointerdown 拦截配合，保证“拖选复制”始终可用）
-				className: "app-sonner-toast select-text",
-				style: {
-					// 中性面板卡片：与弹窗/抽屉同一套 token，类型语义只体现在图标色（见 surfaces.css）
-					background: "var(--color-bg-panel)",
-					border: "1px solid var(--color-border-subtle)",
-					borderRadius: "var(--radius-lg)",
-					boxShadow: "var(--shadow-popover)",
-					color: "var(--color-text-primary)",
-					fontSize: "13px",
-					fontFamily: "var(--font-family-base)",
-					padding: "12px 36px 12px 14px",
-				},
 			}}
 		/>,
 		document.body,

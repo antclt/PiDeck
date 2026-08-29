@@ -8,15 +8,16 @@
 
 export const SIDEBAR_NAV_TAB_KEY = "pid:sidebar-nav-tab";
 
-export type SidebarNavTab = "chats" | "projects";
+/** 侧栏分段：active（活动 Agent）/ chats（历史会话）/ projects（项目）。 */
+export type SidebarNavTab = "active" | "chats" | "projects";
 
 export const DEFAULT_SIDEBAR_NAV_TAB: SidebarNavTab = "chats";
 
 export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-/** 只接受 chats/projects；其它字符串或 JSON 垃圾一律视为未设置。 */
+/** 只接受 active/chats/projects；其它字符串或 JSON 垃圾一律视为未设置。 */
 export function parseSidebarNavTab(raw: string | null | undefined): SidebarNavTab | null {
-  if (raw === "chats" || raw === "projects") return raw;
+  if (raw === "active" || raw === "chats" || raw === "projects") return raw;
   return null;
 }
 

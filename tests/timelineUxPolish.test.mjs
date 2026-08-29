@@ -27,11 +27,14 @@ const timeline = readFileSync(
   "utf8",
 );
 
-test("tool card name uses medium weight like process summary, not bold 650", () => {
+test("tool card name is a faint process-layer label, weight kept normal", () => {
+  // 过程层视觉：工具名用 tertiary 浅色退到正文之后；字重保持 normal（不降档，
+  // 过轻在 CJK 下会有锯齿感，用户反馈优先保字重、靠颜色区分）
   assert.match(
     toolCard,
-    /className="shrink-0 text-control font-medium lowercase text-text-secondary"/,
+    /className="shrink-0 text-control lowercase text-text-faint"/,
   );
+  assert.doesNotMatch(toolCard, /font-light/);
   assert.doesNotMatch(toolCard, /font-\[650\]/);
   // ToolActivityCard 也不再用 <strong> 加粗
   assert.doesNotMatch(toolCard, /tool-activity-copy>\s*<strong>/);

@@ -54,6 +54,10 @@ export interface MorphingSearchProps {
 	shortcut?: string;
 	/** Render the closed trigger as a compact search icon. */
 	iconOnly?: boolean;
+	/** 面板最大宽度（px，默认 448）：锚点宽于此值时不额外放大，窄屏仍按视口收窄。 */
+	maxWidth?: number;
+	/** 面板结果区最大高度（px，默认 288）。 */
+	maxHeight?: number;
 	emptyMessage?: string;
 	open?: boolean;
 	defaultOpen?: boolean;
@@ -84,6 +88,8 @@ export function MorphingSearch({
 	placeholder = "Search",
 	shortcut = "f",
 	iconOnly = false,
+	maxWidth = 448,
+	maxHeight = 288,
 	emptyMessage = "No results found.",
 	open: controlledOpen,
 	defaultOpen = false,
@@ -349,12 +355,12 @@ export function MorphingSearch({
 	const panelWidth = mounted
 		? Math.max(
 				anchorRect.width,
-				Math.min(448, window.innerWidth - anchorRect.left - 16),
+				Math.min(maxWidth, window.innerWidth - anchorRect.left - 16),
 			)
 		: anchorRect.width;
 	const resultsHeight = mounted
-		? Math.max(96, Math.min(288, window.innerHeight - anchorRect.top - 80))
-		: 288;
+		? Math.max(96, Math.min(maxHeight, window.innerHeight - anchorRect.top - 80))
+		: maxHeight;
 	const collapsedContentClip = `inset(0px ${Math.max(
 		0,
 		panelWidth - anchorRect.width,

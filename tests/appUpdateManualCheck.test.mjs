@@ -2,32 +2,36 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-// 更新检查策略（2026-12 兼容期调整）：启动后自动检查一次，有新版本直接弹窗；
-// 用户打开禁用开关后不再自动检测（设置页手动按钮仍可用），且不存在周期定时器。
-test("app update auto-checks once at startup and never runs periodically while disabled", () => {
+// 更新检查策略：只允许设置页「版本与更新」手动触发，应用启动/进入设置页均不得自动检查。
+// 历史：f7a58852 曾改为纯手动，d348cc5a 又加回「启动自动检查一次」导致一进应用就检测、
+// 且自动检查在途时手动按钮被 checking 门控吞掉（有更新也不弹）；此处回归断言纯手动策略。
+test("app update check is manual-only and never runs automatically", () => {
   const appSource = readFileSync("src/renderer/src/App.tsx", "utf8");
-  const devTabSource = readFileSync(
-    "src/renderer/src/components/app/settings/DevTab.tsx",
-    "utf8",
-  );
 
-  // 旧实现：启动 5s + 每 6h 自动检测；setTimeout 未存引用，切禁用时旧定时器照跑。
-  // 2026-12 改为「启动单次检查 + 禁用开关门控」：弹窗依赖检查结果，但绝无周期定时器。
+  // 旧实现：启动 5s + 每 6h 自动检测；中间态：启动后单次自动检查。
+  // 现策略：无任何自动检查入口（含 startup 单次），弹窗/提示只来自设置页手动按钮。
   assert.doesNotMatch(
     appSource,
     /1000 \* 60 \* 60 \* 6/,
     "periodic auto check timer must not exist",
   );
-  // 启动单次自动检查必须存在（更新弹窗数据源），且受 disableUpdateCheck 门控。
-  assert.match(
+  assert.doesNotMatch(
     appSource,
-    /appUpdate\.check\("auto"\)/,
-    "startup auto check must be scheduled once",
+    /appUpdate\.check\("auto"\)|check\("auto"\)/,
+    "app update must never auto-check (startup or periodic)",
   );
-  assert.match(
+  // 启动自动检查伴随的一次性 ref 也不得残留（否则说明自动路径仍可能被重新接上）
+  assert.doesNotMatch(
     appSource,
-    /settings\.disableUpdateCheck/,
-    "auto check must respect the disable update check setting",
+    /autoCheckedUpdateRef/,
+    "startup auto-check ref must not remain",
+  );
+});
+
+test("dev settings update button stays manual and disabled while update check is disabled", () => {
+  const devTabSource = readFileSync(
+    "src/renderer/src/components/app/settings/DevTab.tsx",
+    "utf8",
   );
 
   // 手动按钮：禁用时 onClick 为空且 loading 不显示（检查可能仍在途，但 UI 不得转圈）。

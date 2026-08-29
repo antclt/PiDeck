@@ -43,14 +43,16 @@ test("defaults to chats so the sidebar opens on the current project session list
   assert.equal(DEFAULT_SIDEBAR_NAV_TAB, "chats");
 });
 
-test("round-trips chats and projects", () => {
+test("round-trips active/chats/projects", () => {
   const { readSidebarNavTab, writeSidebarNavTab } = loadModule();
   const storage = createStorage();
   writeSidebarNavTab(storage, "projects");
   assert.equal(readSidebarNavTab(storage), "projects");
   writeSidebarNavTab(storage, "chats");
   assert.equal(readSidebarNavTab(storage), "chats");
-  assert.equal(storage.getItem(TAB_KEY), "chats");
+  writeSidebarNavTab(storage, "active");
+  assert.equal(readSidebarNavTab(storage), "active");
+  assert.equal(storage.getItem(TAB_KEY), "active");
 });
 
 test("reads null when no cache exists, and ignores malformed payloads", () => {
@@ -62,6 +64,8 @@ test("reads null when no cache exists, and ignores malformed payloads", () => {
   assert.equal(parseSidebarNavTab(null), null);
   assert.equal(parseSidebarNavTab("chats"), "chats");
   assert.equal(parseSidebarNavTab("projects"), "projects");
+  assert.equal(parseSidebarNavTab("active"), "active");
+  assert.equal(parseSidebarNavTab("files"), null);
 });
 
 test("write is a no-op when storage is missing", () => {

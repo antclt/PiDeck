@@ -311,7 +311,7 @@ export const ThinkingBlock = memo(
 				)}
 				<Brain size={16} className="thinking-row-icon shrink-0" aria-hidden="true" />
 				{(hasEnded || props.isStreaming) && props.startedAt && (
-					<small className="shrink-0 text-caption tabular-nums text-text-secondary">
+					<small className="shrink-0 text-caption tabular-nums text-text-faint">
 						{hasEnded ? (
 							t("thinking.duration", { duration: durationText })
 						) : (
@@ -326,9 +326,9 @@ export const ThinkingBlock = memo(
 				)}
 				{/* chevron 语言对齐工具行：折叠 ChevronRight，展开 ChevronDown */}
 				{expanded ? (
-					<ChevronDown size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+					<ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
 				) : (
-					<ChevronRight size={14} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+					<ChevronRight size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
 				)}
 				{/* 折叠才挂预览：与工具 displayLabel 一样 truncate 在同一行；
 				    展开后正文在下方，行内预览会抢宽度、和打字机重复。 */}
@@ -337,7 +337,7 @@ export const ThinkingBlock = memo(
 						text={displayedContent}
 						running={props.isStreaming}
 						showSweep={false}
-						className="min-w-0 flex-[1_1_auto] font-mono text-caption text-text-secondary"
+						className="min-w-0 flex-[1_1_auto] font-mono text-caption text-text-faint"
 					/>
 				)}
 			</button>

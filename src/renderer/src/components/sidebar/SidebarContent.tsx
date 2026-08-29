@@ -1,6 +1,6 @@
-import { Bolt, Folder, MessageSquare, Globe } from "lucide-react";
-import { useState, type ReactNode } from "react";
-import type { AgentTab, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
+import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import type { AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import {
   AgentContextMenu,
   DraftSessionContextMenu,
@@ -24,6 +24,7 @@ import { DshSearchResults } from "./DshSearchResults";
 import { ProjectTree } from "./ProjectTree";
 import { Button } from "../ui-shadcn/button";
 import { Tabs, TabsList, TabsTrigger } from "../motion/tabs";
+import { Dock, DockItem } from "../motion/dock";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
@@ -109,9 +110,14 @@ export type SidebarContentProps = {
   creatingWorktree?: boolean;
   isLanWeb?: boolean;
   chrome?: ReactNode;
+  /** 「新建任务」：打开初始引导页（居中输入框 + 项目下拉切切换），由 App 提供。 */
+  onOpenNewTask?: () => void;
   onOpenSettings?: () => void;
   onOpenFeedback?: () => void;
   onOpenHomepage?: () => void;
+  /** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
+  themeMode?: AppThemeMode;
+  onToggleTheme?: () => void;
 };
 
 export function SidebarContent(props: SidebarContentProps) {
@@ -123,6 +129,21 @@ export function SidebarContent(props: SidebarContentProps) {
   const menuAgent = menu?.kind === "agent"
     ? controller.catalog.agents.find((agent) => agent.id === menu.agentId)
     : undefined;
+
+  // 底栏主题按钮：图标与文案反映当前主题模式；点击翻转浅/暗（规则见 themeAppearance.toggleThemeMode）
+  const ThemeModeIcon =
+    props.themeMode === "dark" ? Moon
+    : props.themeMode === "system" ? Monitor
+    : props.themeMode === "schedule" ? Clock
+    : Sun;
+  const themeToggleTitle = t("app.themeDockTooltip", {
+    mode: t(
+      props.themeMode === "dark" ? "settings.themeDark"
+      : props.themeMode === "system" ? "settings.themeSystem"
+      : props.themeMode === "schedule" ? "settings.themeSchedule"
+      : "settings.themeLight",
+    ),
+  });
   // agent 是否有 live runtime：没有运行中的 pi 子进程时，RPC 日志记录无法开启
   // （记录靠主进程旁路拦截子进程通信，进程不存在则无日志可记）。
   // 注意不能拿 menuAgent.sessionId 直接查 runtimeBySessionId：AgentTab.sessionId
@@ -133,6 +154,34 @@ export function SidebarContent(props: SidebarContentProps) {
   const menuAgentLive = menuAgent !== undefined && isLiveRuntimeStatus(menuAgent.status);
   // “RPC 日志已打开”提醒弹框的打开目标 agent id（null = 关闭）
   const [rpcLogOpenedAgentId, setRpcLogOpenedAgentId] = useState<string | null>(null);
+  // 顶部「搜索」菜单项控制 MorphingSearch 命令面板的展开状态。
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // 全局快捷键：Ctrl+N 新建任务（打开引导页）、Ctrl+F 搜索（打开命令面板）。
+  // 与界面上的 kbd 提示保持一致；输入框/内容可编辑区域聚焦时跳过，避免干扰打字。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const target = event.target;
+      if (target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement)) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "n") {
+        event.preventDefault();
+        props.onOpenNewTask?.();
+      } else if (key === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [props.onOpenNewTask]);
   // 会话代理设置弹框的打开目标会话 id（null = 关闭）
   const [proxyDialogSessionId, setProxyDialogSessionId] = useState<string | null>(null);
   const menuSessionRecord = menu?.kind === "session"
@@ -190,19 +239,59 @@ export function SidebarContent(props: SidebarContentProps) {
     >
       {/* 品牌区提到 body 外：贴侧栏顶边，不被 sidebar-body 的 px/py 顶开（logo 怼左上）。 */}
       {props.chrome}
-      <div className="sidebar-body flex min-h-0 flex-1 flex-col gap-2 px-2 pt-1 pb-1">
-        {/* 搜索：全局会话搜索（跨项目），MorphingSearch 命令面板；onQueryChange 同步 controller.search，
-            保持原有「过滤树 + DSH 全文搜索」行为，onSelect 打开选中会话/项目 */}
-        <MorphingSearch
-          items={searchItems}
-          placeholder={t("app.searchSessions")}
-          shortcut=""
-          emptyMessage={t("app.searchNoResults")}
-          className="h-8 w-full shrink-0"
-          onQueryChange={(query) => controller.setSearch(query)}
-        />
+      <div className="sidebar-body flex min-h-0 flex-1 flex-col gap-2 px-2 pt-2 pb-1">
+        {/* 顶部两个平铺操作：「新建任务」+「搜索」（无下拉、无外边框）。
+            新建任务 → 打开初始引导页（居中输入框 + 项目下拉切换后可直接对话）；
+            搜索 → 打开 MorphingSearch 命令面板。把搜索从整行输入框收敛成单个动作项，
+            消除与下方胶囊分段的样式重复。底部细分割线与下方分组区分，避免与分段栏粘连。 */}
+        <div className="flex shrink-0 flex-col gap-0.5 border-b border-border/40 pt-1 pb-2">
+          <button
+            type="button"
+            className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60"
+            aria-label={t("app.newTask")}
+            title={t("app.newTask")}
+            onClick={() => props.onOpenNewTask?.()}
+          >
+            <CirclePlus className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate font-medium">{t("app.newTask")}</span>
+            {/* 快捷键默认隐藏，行 hover 时才淡入（无边框，弱化到只剩文字），避免常驻视觉噪音 */}
+            <kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">Ctrl+N</kbd>
+          </button>
+          <button
+            type="button"
+            className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60"
+            aria-label={t("app.searchSessions")}
+            title={t("app.searchSessions")}
+            onClick={() => setSearchOpen(true)}
+          >
+            <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate font-medium">{t("app.searchSessions")}</span>
+            {/* 快捷键默认隐藏，行 hover 时才淡入；搜索快捷键为 Ctrl+F（见下方全局监听） */}
+            <kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">Ctrl+F</kbd>
+          </button>
+        </div>
 
-        {/* 聊天 / 项目分段：beUI pill 分段（凹槽轨道 + 凸起高亮胶囊）。
+        {/* MorphingSearch 命令面板：锚点固定定位到视口水平居中、垂直约 1/5 处，
+            （VSCode/Raycast 式 command 弹窗），而不是贴在搜索按钮旁。锚点不可见但保留
+            真实尺寸供 getBoundingClientRect 测量，面板从锚点位置展开即居中。 */}
+        <div className="pointer-events-none fixed left-1/2 top-[16vh] z-50 w-[min(640px,calc(100vw-2rem))] -translate-x-1/2">
+          <MorphingSearch
+            items={searchItems}
+            placeholder={t("app.searchSessions")}
+            shortcut=""
+            iconOnly
+            maxWidth={640}
+            maxHeight={360}
+            open={searchOpen}
+            onOpenChange={setSearchOpen}
+            emptyMessage={t("app.searchNoResults")}
+            className="pointer-events-none h-12 w-full opacity-0"
+            onQueryChange={(query) => controller.setSearch(query)}
+          />
+        </div>
+
+        {/* 活动 / 聊天 / 项目分段：beUI pill 分段（凹槽轨道 + 凸起高亮胶囊）。
+            活动页收集所有已激活的 Agent 会话（跨项目），聊天页显示历史会话，项目页显示工作区目录。
             轨道：muted 弱化底 + hairline 边框；高亮块盖掉 beUI 默认的 bg-primary 色块，
             换成 background 浮起面（细描边 + 投影；暗色用 bg-active 提亮一档做「抬起」感）。
             激活文字显式给 text-foreground 压掉 beUI 的 text-primary-foreground
@@ -215,11 +304,19 @@ export function SidebarContent(props: SidebarContentProps) {
           }}
           variant="pill"
         >
-          <TabsList className="w-full rounded-full border border-border-subtle bg-muted/60 p-0.5">
+          <TabsList className="w-full rounded-full bg-muted/70 p-0.5">
+            <TabsTrigger
+              value="active"
+              className={cn("w-full gap-1.5 px-2 py-1.5 text-xs", controller.navTab === "active" && "text-foreground")}
+              indicatorClassName="bg-background shadow-sm dark:bg-bg-active"
+            >
+              <Activity className="size-3.5 shrink-0" aria-hidden="true" />
+              {t("app.sidebarActive")}
+            </TabsTrigger>
             <TabsTrigger
               value="chats"
               className={cn("w-full gap-1.5 px-2 py-1.5 text-xs", controller.navTab === "chats" && "text-foreground")}
-              indicatorClassName="bg-background shadow-sm ring-1 ring-border-subtle dark:bg-bg-active dark:ring-border-default"
+              indicatorClassName="bg-background shadow-sm dark:bg-bg-active"
             >
               <MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />
               {t("app.sidebarChats")}
@@ -227,7 +324,7 @@ export function SidebarContent(props: SidebarContentProps) {
             <TabsTrigger
               value="projects"
               className={cn("w-full gap-1.5 px-2 py-1.5 text-xs", controller.navTab === "projects" && "text-foreground")}
-              indicatorClassName="bg-background shadow-sm ring-1 ring-border-subtle dark:bg-bg-active dark:ring-border-default"
+              indicatorClassName="bg-background shadow-sm dark:bg-bg-active"
             >
               <Folder className="size-3.5 shrink-0" aria-hidden="true" />
               {t("app.sidebarProjects")}
@@ -258,14 +355,25 @@ export function SidebarContent(props: SidebarContentProps) {
           />
         </section>
       </div>
-      {/* 底栏贴侧栏左下角：无垂直内边距，水平仅留 2px 防贴边裁切。 */}
+      {/* 底栏 dock（beUI Dock）：设置/反馈/官网/主题切换收进浮动卡片，铺满底栏宽度
+          （w-full + justify-between 让四个动作均匀分布，侧栏最小宽 208px 时也不溢出）。
+          DockItem 只提供尺寸与居中容器，按钮本体仍是 shadcn ghost（title/aria 不丢）。 */}
       {!props.isLanWeb && (
-        <div className="toolbar-actions sidebar-bottom-actions flex shrink-0 items-center gap-0 border-t border-border/40 px-0.5 py-0">
-          <div className="sidebar-bottom-primary-actions flex min-w-0 flex-1 items-center gap-0">
-            <Button type="button" variant="ghost" size="icon-sm" className="icon-button settings-icon size-8 rounded-none text-muted-foreground hover:bg-muted hover:text-foreground" title={t("settings.title")} aria-label={t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
-            <Button type="button" variant="ghost" size="icon-sm" className="icon-button feedback-icon size-8 rounded-none text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>
-            <Button type="button" variant="ghost" size="icon-sm" className="icon-button homepage-icon size-8 rounded-none text-muted-foreground hover:bg-muted hover:text-foreground" title={t("app.homepage")} aria-label={t("app.homepage")} onClick={props.onOpenHomepage}><Globe className="size-4" /></Button>
-          </div>
+        <div className="flex shrink-0 items-center px-2 pb-2 pt-1">
+          <Dock size={32} className="w-full justify-between">
+            <DockItem>
+              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("settings.title")} aria-label={t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
+            </DockItem>
+            <DockItem>
+              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>
+            </DockItem>
+            <DockItem>
+              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("app.homepage")} aria-label={t("app.homepage")} onClick={props.onOpenHomepage}><Globe className="size-4" /></Button>
+            </DockItem>
+            <DockItem>
+              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={themeToggleTitle} aria-label={themeToggleTitle} onClick={props.onToggleTheme}><ThemeModeIcon className="size-4" /></Button>
+            </DockItem>
+          </Dock>
         </div>
       )}
 
@@ -284,6 +392,8 @@ export function SidebarContent(props: SidebarContentProps) {
         <ProjectContextMenu
           menu={{ x: menu.x, y: menu.y, project: menuProject }}
           onClose={controller.closeMenu}
+          onNewSession={() => { void actions.sessions.createDraft(menuProject.id); controller.closeMenu(); }}
+          onNewAnonymousSession={() => { void actions.sessions.createAnonymous(menuProject.id); controller.closeMenu(); }}
           onRevealProject={() => { void actions.projects.reveal(menuProject); controller.closeMenu(); }}
           onOpenWithEditor={() => { actions.projects.openWithEditor(menuProject); controller.closeMenu(); }}
           onImportCodexSessions={() => { actions.projects.importSessions(menuProject, "codex"); controller.closeMenu(); }}

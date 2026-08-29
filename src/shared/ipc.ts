@@ -26,6 +26,10 @@ export const ipcChannels = {
 	filesList: "files:list",
 	filesOpen: "files:open",
 	filesShowInFolder: "files:show-in-folder",
+	/** 检测系统可用的文件管理器（打开方式下拉补充入口） */
+	filesDetectFileManager: "files:detect-file-manager",
+	/** 在系统文件管理器中打开目录 */
+	filesOpenFileManager: "files:open-file-manager",
 	filesReadContent: "files:read-content",
 	/** 批量校验路径是否存在（fs.stat）：AI 回复内文件链接的存在性判定用 */
 	filesPathsExist: "files:paths-exist",

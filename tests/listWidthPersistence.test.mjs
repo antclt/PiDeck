@@ -54,7 +54,8 @@ test("list width roundtrips through storage", () => {
 });
 
 test("stored list width is clamped into the draggable min/max bounds", () => {
-  assert.equal(widthState.LIST_WIDTH_MIN, 100);
+  // 下限 208：保证三个分段 tab（活动/聊天/项目）在最小宽度下仍完整显示
+  assert.equal(widthState.LIST_WIDTH_MIN, 208);
   assert.equal(widthState.LIST_WIDTH_MAX, 440);
   const high = memoryStorage({ [widthState.LIST_WIDTH_STORAGE_KEY]: "9999" });
   assert.equal(widthState.readListWidth(high), widthState.LIST_WIDTH_MAX);

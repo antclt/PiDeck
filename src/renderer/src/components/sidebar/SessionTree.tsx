@@ -4,6 +4,7 @@ import type { AgentTab, Project, SessionRecord, SessionSummary } from "../../../
 import { collectDisplayedSessionIds, filterAgentsForSidebarDisplay, getProjectAgentSessionDisplay, sessionStatusDotClass, type ProjectChildItem } from "../../agentListDisplay";
 import { sessionRecordToSummary } from "../../atoms";
 import { t } from "../../i18n";
+import { formatRelativeTime } from "../../utils/relativeTime";
 import { filterSidebarSessions, getBoundSidebarRuntimeAgent, type SidebarController } from "../../hooks/useSidebarController";
 import { Button } from "../ui-shadcn/button";
 import type { SidebarActions } from "./SidebarContent";
@@ -332,6 +333,14 @@ export function SessionTree(props: {
             )}
             {child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
             {renderToggle(groupKey, childCount)}
+            {/* 相对时间常显：会话更新于多久前一目了然；hover 行时让位给右侧「⋯」按钮。
+                窄侧栏时间可能被截断，title 提示完整相对时间。 */}
+            <span
+              className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden group-focus-within/row:hidden"
+              title={formatRelativeTime(child.session.updatedAt)}
+            >
+              {formatRelativeTime(child.session.updatedAt)}
+            </span>
           </div></div>
         </button>
         <Button

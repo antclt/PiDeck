@@ -142,10 +142,14 @@ function writeDrawerState(
   }
 }
 
-/** 抽屉宽度默认值与可调范围（AppShell 布局约束同源，禁止两处漂移）。 */
+/** 抽屉宽度默认值与可调范围（AppShell 布局约束同源，禁止两处漂移）。
+ * 下限 240：抽屉承载 Git 面板（repo 切换 + 文件状态列 + 提交区）、文件树、
+ * 浏览器等密集内容，180px 时文件名被状态徽标/操作按钮挤压，面板标题也放不下；
+ * 240 保证内容面板在最小宽度下仍可完整操作，与左侧分段下限（208）同思路。
+ * pin 状态额外要求更宽（MIN_PINNED 220→260）：钉住时是常驻工作区，不能太窄。 */
 export const DEFAULT_DRAWER_WIDTH = 320;
-export const DRAWER_WIDTH_MIN = 180;
-export const DRAWER_WIDTH_MIN_PINNED = 220;
+export const DRAWER_WIDTH_MIN = 240;
+export const DRAWER_WIDTH_MIN_PINNED = 260;
 export const DRAWER_WIDTH_MAX = 560;
 /** 抽屉宽度是全局布局偏好（与项目无关），不按项目拆分存储键。 */
 export const DRAWER_WIDTH_STORAGE_KEY = "pid:drawer-width";

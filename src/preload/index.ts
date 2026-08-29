@@ -51,6 +51,7 @@ import type {
 	ExternalEditor,
 	ExternalEditorId,
 	ExternalEditorSetting,
+	FileManagerInfo,
 	FeedbackEnvironment,
 	FeishuBotConfig,
 	FeishuBridgeStatus,
@@ -241,6 +242,12 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.filesOpen, path) as Promise<void>,
 		showInFolder: (path: string) =>
 			ipcRenderer.invoke(ipcChannels.filesShowInFolder, path) as Promise<void>,
+		/** 检测系统可用的文件管理器（打开方式下拉补充入口） */
+		detectFileManager: () =>
+			ipcRenderer.invoke(ipcChannels.filesDetectFileManager) as Promise<FileManagerInfo | null>,
+		/** 在系统文件管理器中打开目录 */
+		openFileManager: (path: string) =>
+			ipcRenderer.invoke(ipcChannels.filesOpenFileManager, path) as Promise<void>,
 		readContent: (path: string, maxBytes?: number) =>
 			ipcRenderer.invoke(ipcChannels.filesReadContent, path, maxBytes) as Promise<string>,
 		/** 批量校验路径是否存在（返回与入参等长的 boolean[]；单路径失败按 false 计） */

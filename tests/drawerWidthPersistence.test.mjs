@@ -59,7 +59,9 @@ test("stored drawer width is clamped into the min/max drag bounds", () => {
   assert.equal(widthState.readDrawerWidth(storage), widthState.DRAWER_WIDTH_MAX);
   const low = memoryStorage({ [widthState.DRAWER_WIDTH_STORAGE_KEY]: "-50" });
   assert.equal(widthState.readDrawerWidth(low), widthState.DRAWER_WIDTH_MIN);
-  assert.equal(widthState.DRAWER_WIDTH_MIN, 180);
+  // 下限 240：保证抽屉内容（Git 面板/文件树）在最小宽度下不被遮挡；pin 状态更宽
+  assert.equal(widthState.DRAWER_WIDTH_MIN, 240);
+  assert.equal(widthState.DRAWER_WIDTH_MIN_PINNED, 260);
   assert.equal(widthState.DRAWER_WIDTH_MAX, 560);
 });
 
