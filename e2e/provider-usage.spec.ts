@@ -140,6 +140,7 @@ test("usage: provider card shows cc-switch inline usage and details rows", async
 	const dsInline = window.locator('[data-testid="provider-usage-inline"][data-provider="ds"]');
 	await expect(dsInline).toContainText("剩", { timeout: 10_000 });
 	await expect(dsInline).toContainText("¥5.34");
+	await expect(window.locator('[data-testid="provider-usage-row"][data-provider="ds"]')).toBeVisible();
 	const orInline = window.locator('[data-testid="provider-usage-inline"][data-provider="or"]');
 	await expect(orInline).toContainText("92%");
 	// inline 带相对更新时间 + 刷新按钮（cc-switch 卡头同款）
@@ -211,8 +212,9 @@ test("usage: failed probe keeps header clean and offers configure entry", async 
 
 	await openModelsTab(window);
 
-	// 失败 → 卡头 inline 不渲染（「查不到就不显示」）
+	// 失败 → 卡头 inline 与整个底部用量行都不渲染（「查不到就不显示」）
 	await expect(window.locator('[data-testid="provider-usage-inline"][data-provider="ds"]')).toHaveCount(0, { timeout: 10_000 });
+	await expect(window.locator('[data-testid="provider-usage-row"][data-provider="ds"]')).toHaveCount(0, { timeout: 10_000 });
 
 	// 展开卡片 → 失败详情 + 「去配置」小入口 → 打开配置弹窗
 	const card = await expandProviderCard(window, "ds");
@@ -276,5 +278,6 @@ test("usage: auth tab shows provider balance inline", async ({ app, window }) =>
 	const inline = window.locator('[data-testid="provider-usage-inline"][data-provider="ds"]');
 	await expect(inline).toBeVisible({ timeout: 15_000 });
 	await expect(inline).toContainText("¥5.34");
+	await expect(window.locator('[data-testid="provider-usage-row"][data-provider="ds"]')).toBeVisible();
 	await expect(inline).toContainText("剩");
 });

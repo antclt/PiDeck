@@ -1281,8 +1281,7 @@ export function ModelsTab(props: {
 									</div>
 								</div>
 							)}
-							{/* 用量行（cc-switch 卡片右下角）：用量显示 + 柱状图「用量查询」按钮同一行，
-								所有卡片同一位置、右对齐、行高一致；查不到 = 空占位（不显示文案） */}
+							{/* 用量行（cc-switch 卡片右下角）：有成功结果时显示用量 + 刷新按钮；没有成功配对结果时不渲染整行 */}
 							<ProviderUsageRow provider={name} />
 						</div>
 					);
