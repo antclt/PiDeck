@@ -694,6 +694,7 @@ export const zhCN = {
   "app.highAgentCountSnooze": "本次不再提醒",
   "app.thinkingPickerTitle": "选择思考级别",
   "app.thinkingPickerHint": "某些模型可能不支持所有级别，系统会自动调整为支持的最接近级别",
+  "app.thinkingPickerUnsupported": "当前模型未提供可用的思考档位，无法切换。",
   "app.thinkingSwitchFailed": "切换思考级别失败：{error}",
   "app.thinkingUnsupported": "当前模型不支持 {level}，已回退为 {fallback}",
   "app.titleBarSaved": "标题栏样式已保存，重启应用后生效。",

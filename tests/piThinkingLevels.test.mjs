@@ -6,16 +6,17 @@ const {
   isUnsupportedThinkingLevelsRpcError,
   parseAvailableThinkingLevelsResponse,
 } = loadTsCommonJs("src/main/pi/thinkingLevels.ts");
-const { toThinkingPickerLevels } = loadTsCommonJs(
+const { toThinkingPickerLevels, resolveThinkingPickerLevels } = loadTsCommonJs(
   "src/renderer/src/components/session/sessionPickerOptions.ts",
 );
 
 const { readFile } = await import("node:fs/promises");
-const [pickerSource, ipcSource, sessionIpcSource, preloadSource] = await Promise.all([
+const [pickerSource, ipcSource, sessionIpcSource, preloadSource, componentsSource] = await Promise.all([
   readFile("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8"),
   readFile("src/shared/ipc.ts", "utf8"),
   readFile("src/main/ipc/sessionIpc.ts", "utf8"),
   readFile("src/preload/index.ts", "utf8"),
+  readFile("src/renderer/src/components/session/ComposerComponents.tsx", "utf8"),
 ]);
 
 test("Pi thinking RPC parses and de-duplicates authoritative levels", () => {
@@ -75,12 +76,46 @@ test("non-compatibility RPC errors are not swallowed", () => {
   );
 });
 
-test("Pi picker preloads and caches runtime-specific levels by runtime identity", () => {
+test("Pi picker probes runtime levels only for an idle cache miss", () => {
   assert.match(pickerSource, /beginPiRuntimeThinkingLevels\(\{ sessionId, target \}\)/);
   assert.match(pickerSource, /desktopApi\.sessions\.listRuntimeThinkingLevels\(\{/);
   assert.match(pickerSource, /resolvePiRuntimeThinkingLevels\(\{/);
-  assert.match(pickerSource, /toThinkingPickerLevels\(runtimeLevels\)/);
-  assert.doesNotMatch(pickerSource, /props\.picker !== "thinking"/);
+  assert.match(pickerSource, /runtimePiLevels: runtimeLevels/);
+  assert.match(pickerSource, /props\.picker !== "thinking"/);
+  assert.match(pickerSource, /runtime\?\.status !== "idle"/);
+  assert.match(pickerSource, /report === null/);
+  assert.match(pickerSource, /cachedModel\?\.thinkingLevels !== undefined/);
+});
+
+test("thinking picker immediately uses cache or compatibility levels while Pi runtime probing is pending", () => {
+  const values = (input) => Array.from(resolveThinkingPickerLevels(input), (level) => level.value);
+  // 运行中的 Pi runtime RPC 尚未返回时，已经水合的 capability cache 必须立刻可用。
+  assert.deepEqual(values({ backend: "pi", cachedPiLevels: ["off", "high", "max"] }), ["off", "high", "max"]);
+  // 缓存也没有时不能让菜单转圈；继续给用户兼容全量档位，后端做最终校验。
+  assert.deepEqual(values({ backend: "pi" }), ["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  // 只有后端明确返回空数组时才表示没有可选档位。
+  assert.deepEqual(values({ backend: "pi", runtimePiLevels: [] }), []);
+});
+
+test("DSH missing reasoning metadata falls back to selectable full levels", () => {
+  const values = (input) => Array.from(resolveThinkingPickerLevels(input), (level) => level.value);
+  assert.deepEqual(values({ backend: "dsh" }), ["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  assert.deepEqual(
+    values({ backend: "dsh", dshReasoningEfforts: [{ id: "off" }, { id: "high" }] }),
+    ["off", "high"],
+  );
+  // 运行中只在 idle 时做没有缓存的后台探测；探测不再是弹窗 loading 的前置条件。
+  assert.match(pickerSource, /runtime\?\.status !== "idle"/);
+  assert.match(pickerSource, /cachedModel\?\.thinkingLevels !== undefined/);
+  assert.match(pickerSource, /resolveThinkingPickerLevels\(/);
+  assert.doesNotMatch(pickerSource, /loading=\{/);
+  assert.doesNotMatch(componentsSource, /props\.loading/);
+});
+
+test("DSH thinking/model failures surface the real host reason", () => {
+  // DSH selectModel 拒绝（如 reasoningEffort 不被模型支持）时 toast 必须带 debugDetails，
+  // 否则用户只看到泛化的「会话操作失败，请重试。」且主进程无日志可查。
+  assert.match(pickerSource, /sessionCommandFailureToast\(error\)/);
 });
 
 test("thinking-level RPC is wired through shared IPC, main handler, and preload", () => {

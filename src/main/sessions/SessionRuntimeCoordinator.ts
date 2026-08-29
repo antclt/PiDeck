@@ -678,6 +678,9 @@ export class SessionRuntimeCoordinator {
 			const appliedModel = runtimeState.provider && runtimeState.modelId
 				? { provider: runtimeState.provider, modelId: runtimeState.modelId }
 				: { provider, modelId };
+			// 模型与思考档位是两项独立的用户选择。DSH/PI 的后端可自行规范化或拒绝
+			// reasoning effort，但中间层不能因目录元数据缺失而改写已保存的思考偏好；
+			// 否则用户切回支持该档位的模型时会丢失原选择。
 			await this.catalog.update(target.sessionId, {
 				model: appliedModel,
 				updatedAt: Date.now(),
@@ -1463,11 +1466,15 @@ export class SessionRuntimeCoordinator {
 				await this.agents.setThinking(agentId, entry.thinkingLevel);
 			} catch (error) {
 				if (!isDsh) throw error;
+				const message = errorMessage(error);
 				void this.logger?.warn("session-runtime", "DSH thinking preference ignored", {
 					sessionId: entry.id,
 					thinkingLevel: entry.thinkingLevel,
-					error: errorMessage(error),
+					error: message,
 				});
+				// 后端是档位能力的最终裁决者。即使本次 host 拒绝，也保留用户偏好：
+				// 目录配置、provider 或模型在之后变化时仍可重新应用，不能由 PiDeck
+				// 根据一条当前错误擅自清空用户选择。
 			}
 		}
 		// DSH 权限预设（草稿期预选 / 会话内切换回写）：激活时经 /permission 命令应用

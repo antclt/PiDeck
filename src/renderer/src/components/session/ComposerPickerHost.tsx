@@ -38,7 +38,7 @@ import { usePendingModelApply } from "../../hooks/usePendingModelApply";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import type { ComposerPickerKind } from "../../hooks/useSessionComposerController";
 import { WELCOME_MODEL_KEY, WELCOME_THINKING_KEY, readWelcomeModelPreference, readWelcomeThinkingPreference } from "../../utils/chatSessionBootstrap";
-import { toThinkingPickerLevels } from "./sessionPickerOptions";
+import { resolveThinkingPickerLevels } from "./sessionPickerOptions";
 
 export type ComposerPickerHostProps = {
   sessionId: string;
@@ -120,6 +120,16 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     },
     isLive: runtimeLive,
   });
+  const pickerNeedsModels = props.picker === "model" || props.picker === "thinking";
+  // 模型目录数据源统一走 capability cache。思考选择器同样加载它，运行中也能直接
+  // 复用已水合的模型档位，不必等待 Agent RPC。
+  const { models, report, refreshing, reload } = useBackendModelCatalog({
+    sessionId,
+    backend: isDshSession ? "dsh" : "pi",
+    projectId: record?.projectId,
+    enabled: pickerNeedsModels,
+  });
+
   const runtimeThinkingEntryRef = useRef(piRuntimeThinkingEntry);
   runtimeThinkingEntryRef.current = piRuntimeThinkingEntry;
 
@@ -132,19 +142,26 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   }, [sessionId, clearPiRuntimeThinkingLevels]);
 
   /**
-   * Pi 0.81+ resolves thinkingLevelMap inside the running Agent. Query once when
-   * a runtime first reports its model and again only after that model/agent/generation
-   * changes; menu opening is deliberately not part of this dependency set.
+   * Pi 运行态的 RPC 仅在用户打开思考档位、capability cache 已尝试加载但没有结果、
+   * 且 Agent 空闲时做后台校验。生成中的 Agent 可能延后处理请求；选择器始终优先
+   * 使用 cache / 静态兼容档位，不能被这条非关键校验卡成 loading。
    */
   useEffect(() => {
     const agentId = runtime?.agentId;
     const runtimeGeneration = runtime?.runtimeGeneration;
-    // 只向仍 live 的 Agent 查 thinkingLevelMap；已关闭/解绑的残留绑定不能拿 catalog 新模型去打 RPC。
+    // 只向空闲、且 capability cache 已加载却没有该模型精确档位的 Agent 查
+    // thinkingLevelMap。生成中的 Agent 与未打开的菜单都不能触发这条非关键 RPC。
     const provider = resolvedLiveModel.provider;
     const modelId = resolvedLiveModel.modelId;
+    const cachedModel = models.find(
+      (model) => model.provider === provider && model.id === modelId,
+    );
     if (
+      props.picker !== "thinking" ||
       isDshSession ||
-      !runtimeLive ||
+      runtime?.status !== "idle" ||
+      report === null ||
+      cachedModel?.thinkingLevels !== undefined ||
       !agentId ||
       typeof runtimeGeneration !== "number" ||
       !provider ||
@@ -172,25 +189,18 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     });
   }, [
     sessionId,
+    props.picker,
     isDshSession,
-    runtimeLive,
     runtime?.agentId,
     runtime?.runtimeGeneration,
+    runtime?.status,
     resolvedLiveModel.provider,
     resolvedLiveModel.modelId,
+    models,
+    report,
     beginPiRuntimeThinkingLevels,
     resolvePiRuntimeThinkingLevels,
   ]);
-
-  const pickerNeedsModels = props.picker === "model" || props.picker === "thinking";
-  // 模型目录 + 加载诊断报告：report 为空列表时给出失败原因引导（版本过低/配置损坏/pi 未安装），
-  // reload(true) 为手动刷新（绕过缓存重新 fork pi --list-models），选择器右上角提供刷新按钮。
-  const { models, report, refreshing, reload } = useBackendModelCatalog({
-    sessionId,
-    backend: isDshSession ? "dsh" : "pi",
-    projectId: record?.projectId,
-    enabled: pickerNeedsModels,
-  });
 
   function currentHandle() {
     const current = store.get(sessionRuntimeByIdAtom)[sessionId];
@@ -509,23 +519,15 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     );
   }
   if (props.picker === "thinking") {
-    // DSH：当前模型在 host catalog 中且声明了 reasoningEfforts 时，只展示该模型声明的档位
-    // （llm-deepseek 只接受 off/high/max，llm-pi-ai 按模型声明）——档位列表按模型裁剪。
-    // 当前模型未声明 reasoningEfforts（含目录里查不到）时**不回退 pi 全量档位**：
-    // DSH host 对无推理元数据的模型会拒绝任何档位（UNSUPPORTED_REASONING_EFFORT，
-    // 连 off 也一样），回退全量列表只会让用户选到 host 必然拒绝的档位，然后看到
-    // 泛化的「会话操作失败」。此时展示空列表 + 提示，等用户去 DSH 模型配置声明档位。
-    // host 仍负责最终能力校验——声明了档位但 host 仍拒绝的边界由错误透传兜底。
+    // DSH：只有当前模型明确声明可用 reasoningEfforts 时才按声明裁剪；目录暂未加载、
+    // 未识别当前模型、或没有声明档位时必须回退全量档位。能力判断由 DSH / pi-ai 后端
+    // 最终处理，前端不能因为本地元数据缺失而剥夺用户的切换入口。
     // 草稿期当前模型 = 部署默认模型（settings.yaml agent-default-model）。
     const currentProvider = resolvedLiveModel.provider;
     const currentModelId = resolvedLiveModel.modelId;
     const currentModel = models.find(
       (model) => model.provider === currentProvider && model.id === currentModelId,
     );
-    // currentModel 用于 DSH 档位裁剪与 defaultEffort 兜底。
-    const dshLevels = currentModel?.reasoningEfforts && currentModel.reasoningEfforts.length > 0
-      ? toThinkingPickerLevels(currentModel.reasoningEfforts.map((effort) => effort.id))
-      : [];
     const runtimeThinkingTarget = !isDshSession && runtimeLive && runtime?.agentId &&
       typeof runtime.runtimeGeneration === "number" && currentProvider && currentModelId
       ? {
@@ -540,26 +542,15 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       piRuntimeThinkingEntry?.status === "resolved"
       ? piRuntimeThinkingEntry.levels
       : undefined;
-    const runtimeFellBack = runtimeThinkingTarget &&
-      matchesPiRuntimeThinkingLevelsTarget(piRuntimeThinkingEntry, runtimeThinkingTarget) &&
-      piRuntimeThinkingEntry?.status === "fallback";
-    // 活跃 runtime 一律先等其自身 RPC 结果，不能拿全局 snapshot 冒充当前 Agent。
-    // 欢迎页/草稿没有 runtime 时才用启动 capability cache 的精确模型级结果。
-    const piLevels = !isDshSession
-      ? runtimeThinkingTarget
-        ? runtimeLevels !== undefined ? toThinkingPickerLevels(runtimeLevels) : undefined
-        : currentModel?.thinkingLevels !== undefined
-          ? toThinkingPickerLevels(currentModel.thinkingLevels)
-          : undefined
-      : undefined;
-    const piLevelsLoading = !isDshSession && (
-      runtimeThinkingTarget
-        ? !runtimeFellBack && runtimeLevels === undefined
-        : report === null
-    );
-    // DSH 目录尚未加载（选择器打开瞬间）：保持 loading，不把「目录暂空」误报成
-    // 「模型未声明思考档位」（否则 100ms 加载窗口会闪一下不可切换提示）。
-    const dshCatalogLoading = isDshSession && models.length === 0 && report === null;
+    // 正在运行的 Agent 不能把后台 RPC 当成弹窗的前置条件：优先复用全局 capability
+    // cache，runtime RPC 返回后再以其结果覆盖。缓存/元数据尚不可用时也要保留全量
+    // 兼容档位；后端才是最终能力裁决者。
+    const pickerLevels = resolveThinkingPickerLevels({
+      backend: isDshSession ? "dsh" : "pi",
+      runtimePiLevels: runtimeLevels,
+      cachedPiLevels: currentModel?.thinkingLevels,
+      dshReasoningEfforts: currentModel?.reasoningEfforts,
+    });
     // DSH 的思考档位属于 host 的模型选择，草稿期优先部署默认档位；settings.yaml
     // 没配 reasoningEffort 时回退到当前模型自己的 defaultEffort（DSH 官方语义），
     // 不回退到 pi 的欢迎页偏好——否则底栏无值、选择器却勾选 pi 的 max。
@@ -574,8 +565,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
           fallback: welcomeThinking ?? props.defaultThinkingLevel ?? currentModel?.defaultEffort,
           isLive: runtimeLive,
         })}
-        levels={isDshSession ? dshLevels : piLevels}
-        loading={piLevelsLoading || dshCatalogLoading}
+        levels={pickerLevels}
         onClose={props.onClose}
         onPick={(level) => void pickThinking(level)}
       />

@@ -42,6 +42,33 @@ export function toThinkingPickerLevels(levels: readonly string[]): ThinkingPicke
   return options;
 }
 
+/**
+ * Resolve selectable thinking levels without making menu availability depend on an
+ * asynchronous capability probe. Runtime data wins when available; otherwise the
+ * hydrated model cache wins. Missing DSH metadata and an unavailable Pi probe are
+ * deliberately compatibility fallbacks: the backend remains the final validator.
+ */
+export function resolveThinkingPickerLevels(input: {
+  backend: "pi" | "dsh";
+  runtimePiLevels?: readonly string[];
+  cachedPiLevels?: readonly string[];
+  dshReasoningEfforts?: ReadonlyArray<{ id: string }>;
+}): ThinkingPickerLevel[] {
+  if (input.backend === "dsh") {
+    const declaredLevels = toThinkingPickerLevels(
+      input.dshReasoningEfforts?.map((effort) => effort.id) ?? [],
+    );
+    return declaredLevels.length > 0 ? declaredLevels : [...THINKING_LEVELS];
+  }
+  if (input.runtimePiLevels !== undefined) {
+    return toThinkingPickerLevels(input.runtimePiLevels);
+  }
+  if (input.cachedPiLevels !== undefined) {
+    return toThinkingPickerLevels(input.cachedPiLevels);
+  }
+  return [...THINKING_LEVELS];
+}
+
 /** Keep provider grouping deterministic so the same model order appears in both pickers. */
 export function groupModelsByProvider(models: AvailableModel[]) {
   const groups = models.reduce<Record<string, AvailableModel[]>>((result, model) => {
