@@ -135,6 +135,7 @@ export class DshHost {
 			applies: string;
 			revision: number;
 			value: unknown;
+			base?: unknown;
 			user?: unknown;
 			secrets: Array<{ path: string[]; set: boolean }>;
 			schema: unknown;
@@ -157,6 +158,7 @@ export class DshHost {
 				applies: ns.applies,
 				revision: ns.revision,
 				value: ns.value,
+				base: ns.base,
 				user: ns.user,
 				secrets: (ns.secrets ?? []).map((secret) => ({ path: secret.path, set: secret.set })),
 				schema: ns.schema,

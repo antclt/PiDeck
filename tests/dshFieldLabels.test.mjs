@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { dshFieldCopy, isDshCustomSettingsHiddenField } = loadTsCommonJs(
+const { dshFieldCopy, isDshCustomSettingsHiddenField, isDshDeepseekProfileVisibleField, isDshPiAiCustomRoute } = loadTsCommonJs(
 	"src/renderer/src/config/dshFieldLabels.ts",
 	{
 		stubs: {
@@ -38,6 +38,14 @@ test("custom settings hide secret and credential-ref slots so users do not paste
 	assert.equal(isDshCustomSettingsHiddenField("baseURL"), false);
 	assert.equal(isDshCustomSettingsHiddenField("api"), false);
 	assert.equal(isDshCustomSettingsHiddenField("maxRetries"), false);
+	assert.equal(isDshDeepseekProfileVisibleField("baseURL"), true);
+	assert.equal(isDshDeepseekProfileVisibleField("baseUrl"), true);
+	assert.equal(isDshDeepseekProfileVisibleField("api"), false);
+	assert.equal(isDshDeepseekProfileVisibleField("retryPolicy"), false);
+	assert.equal(isDshPiAiCustomRoute(undefined), true);
+	assert.equal(isDshPiAiCustomRoute({ declared: true }), true);
+	assert.equal(isDshPiAiCustomRoute({ declared: false }), false);
+	assert.equal(isDshPiAiCustomRoute({}), false);
 });
 
 test("schema form and provider cards use field names plus human labels", () => {
@@ -46,7 +54,8 @@ test("schema form and provider cards use field names plus human labels", () => {
 	assert.match(form, /dshFieldCopy/);
 	assert.doesNotMatch(form, /"\(root\)"/);
 	assert.match(cards, /path=\{\[field\.name\]\}/);
-	assert.match(cards, /isDshCustomSettingsHiddenField/);
-	assert.match(cards, /RetryMaxRetriesField/);
+	assert.match(cards, /isDshDeepseekProfileVisibleField/);
+	assert.match(cards, /isDshPiAiCustomRoute/);
+	assert.doesNotMatch(cards, /RetryMaxRetriesField/);
 	assert.doesNotMatch(cards, /path=\{\[\]\}/);
 });

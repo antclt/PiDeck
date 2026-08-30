@@ -84,11 +84,13 @@ test("repack unpack glob keeps native binaries and hostEntry, not every .js", ()
 		"node_modules/node-pty/prebuilds/win32-x64/pty.node",
 		"node_modules/sql.js/dist/sql-wasm.wasm",
 		"node_modules/@img/sharp-win32-x64/lib/libvips-42.dll",
+		"node_modules/@deepseek-ai/dsh-attachment-local/node_modules/@img/sharp-libvips-linux-x64/lib/libvips-cpp.so.8.18.3",
 	]);
 	assert.match(String(glob), /hostEntry\.js/);
 	assert.match(String(glob), /\*\.node/);
 	assert.match(String(glob), /\*\.wasm/);
 	assert.match(String(glob), /\*\.dll/);
+	assert.match(String(glob), /\*\.so\*/);
 	assert.doesNotMatch(String(glob), /\*\.js/);
 });
 
@@ -103,6 +105,60 @@ test("package.json unpacks node-pty so packaged terminal can load pty.node", () 
 		unpack.includes("node_modules/@deepseek-ai/dsh-subprocess-local/node_modules/node-pty/**"),
 		"asarUnpack must list the nested DSH node-pty 1.2 prebuild used by dsh-subprocess-local",
 	);
+});
+
+test("package.json unpacks sharp native packages for every dependency depth", () => {
+	const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+	const unpack = pkg.build?.asarUnpack ?? [];
+	assert.ok(
+		unpack.includes("node_modules/**/@img/sharp-*/**"),
+		"asarUnpack must cover nested sharp libvips packages; versioned .so files need a real disk path on Linux",
+	);
+});
+
+test("afterPack cleanup keeps versioned libvips shared objects unpacked", async () => {
+	const appOutDir = await mkdtemp(join(tmpdir(), "pideck-after-pack-libvips-"));
+	try {
+		const sourceDir = join(appOutDir, "fixture");
+		const archive = join(appOutDir, "resources", "app.asar");
+		const libvipsPath = join(
+			sourceDir,
+			"node_modules",
+			"@deepseek-ai",
+			"dsh-attachment-local",
+			"node_modules",
+			"@img",
+			"sharp-libvips-linux-x64",
+			"lib",
+			"libvips-cpp.so.8.18.3",
+		);
+		await put(libvipsPath, "ELF_SHARED_LIBRARY");
+		await put(join(dirname(libvipsPath), "README.md"), "fixture documentation that forces a repack\n");
+		await mkdir(dirname(archive), { recursive: true });
+		await createAsarPackageWithOptions(sourceDir, archive, { unpack: "*.so*" });
+
+		const relativeLibvipsPath = "node_modules/@deepseek-ai/dsh-attachment-local/node_modules/@img/sharp-libvips-linux-x64/lib/libvips-cpp.so.8.18.3";
+		assert.equal(
+			isUnpackedInHeader(archive, relativeLibvipsPath),
+			true,
+			"fixture must start with libvips outside app.asar",
+		);
+
+		await afterPackCleanup({ appOutDir });
+
+		assert.equal(
+			isUnpackedInHeader(archive, relativeLibvipsPath),
+			true,
+			"repacking asar must preserve versioned ELF libraries outside app.asar",
+		);
+		assert.equal(
+			normalizedEntries(archive).includes("node_modules/@deepseek-ai/dsh-attachment-local/node_modules/@img/sharp-libvips-linux-x64/lib/README.md"),
+			false,
+			"the fixture must exercise a real afterPack cleanup and repack",
+		);
+	} finally {
+		await rm(appOutDir, { recursive: true, force: true });
+	}
 });
 
 test("afterPack cleanup keeps node-pty unpacked after asar repack", async () => {
