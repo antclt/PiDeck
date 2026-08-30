@@ -132,16 +132,17 @@ function listDshRows(
 	hasKey: (namespace: "llm-pi-ai" | "llm-deepseek", name: string, profile: DshProviderProfile) => boolean,
 ): MigratableProviderRow[] {
 	const rows: MigratableProviderRow[] = [];
-	if (parsed.deepseek) {
-		rows.push({
-			name: "deepseek",
-			modelCount: parsed.deepseek.models?.length ?? 0,
-			hasKey: hasKey("llm-deepseek", "deepseek", parsed.deepseek),
-			baseUrl: parsed.deepseek.baseURL,
-			namespace: "llm-deepseek",
-			targetExists: piNames.has("deepseek"),
-		});
-	}
+	const deepseek = parsed.deepseek ?? {};
+	// deepseek-official is supplied by DSH composition even when the user has no
+	// llm-deepseek stanza. It must remain migratable as a credential-only source.
+	rows.push({
+		name: "deepseek",
+		modelCount: deepseek.models?.length ?? 0,
+		hasKey: hasKey("llm-deepseek", "deepseek", deepseek),
+		baseUrl: deepseek.baseURL,
+		namespace: "llm-deepseek",
+		targetExists: piNames.has("deepseek"),
+	});
 	for (const [name, profile] of Object.entries(parsed.piAi)) {
 		rows.push({
 			name,
@@ -228,8 +229,10 @@ async function readPiSnapshot(deps: ProviderMigrationDeps, name: string): Promis
 async function readDshSnapshot(deps: ProviderMigrationDeps, name: string): Promise<DshProviderSnapshot> {
 	const { parsed } = await readDshSettings(deps.dshHost.getHomeDir());
 	const doc = parseDshSettingsDocument(parsed);
-	const official = name === "deepseek" && doc.deepseek;
-	const profile = official ? doc.deepseek : doc.piAi[name];
+	const official = name === "deepseek";
+	// deepseek-official is a composition route: no user settings section is still
+	// a valid source, with the adapter's default DEEPSEEK_API_KEY reference.
+	const profile = official ? (doc.deepseek ?? {}) : doc.piAi[name];
 	if (!profile) throw new Error(`dsh provider not found: ${name}`);
 	const namespace = official ? "llm-deepseek" as const : "llm-pi-ai" as const;
 	const ref = credentialRefFor(profile, official ? "deepseek" : name);
@@ -274,19 +277,22 @@ async function writePiProviderAuthOnly(deps: ProviderMigrationDeps, snapshot: Pi
 }
 
 async function writeDshSnapshot(deps: ProviderMigrationDeps, snapshot: DshProviderSnapshot): Promise<boolean> {
+	const needsSettingsWrite = Object.keys(snapshot.profile).length > 0;
 	const hostReady = deps.dshHost.isHostReady();
 	if (hostReady) {
-		const described = await deps.dshHost.describeSettings();
-		const view = described.namespaces.find((item) => item.ns === snapshot.namespace);
-		if (snapshot.namespace === "llm-deepseek") {
-			await deps.dshHost.updateSettings(snapshot.namespace, snapshot.profile as Record<string, unknown>, view?.revision);
-		} else {
-			const current = view?.value && typeof view.value === "object" && !Array.isArray(view.value)
-				? (view.value as { providers?: Record<string, unknown> })
-				: {};
-			const providers = { ...(current.providers ?? {}) };
-			providers[snapshot.name] = snapshot.profile;
-			await deps.dshHost.updateSettings(snapshot.namespace, { providers }, view?.revision);
+		if (needsSettingsWrite) {
+			const described = await deps.dshHost.describeSettings();
+			const view = described.namespaces.find((item) => item.ns === snapshot.namespace);
+			if (snapshot.namespace === "llm-deepseek") {
+				await deps.dshHost.updateSettings(snapshot.namespace, snapshot.profile as Record<string, unknown>, view?.revision);
+			} else {
+				const current = view?.value && typeof view.value === "object" && !Array.isArray(view.value)
+					? (view.value as { providers?: Record<string, unknown> })
+					: {};
+				const providers = { ...(current.providers ?? {}) };
+				providers[snapshot.name] = snapshot.profile;
+				await deps.dshHost.updateSettings(snapshot.namespace, { providers }, view?.revision);
+			}
 		}
 		if (snapshot.apiKey) {
 			const ref = credentialRefFor(snapshot.profile, snapshot.namespace === "llm-deepseek" ? "deepseek" : snapshot.name);
@@ -297,10 +303,12 @@ async function writeDshSnapshot(deps: ProviderMigrationDeps, snapshot: DshProvid
 	}
 
 	const home = deps.dshHost.getHomeDir();
-	const settingsPath = join(home, "settings.yaml");
-	const { parsed } = await readDshSettings(home);
-	const next = mergeDshProviderIntoSettings(parsed, snapshot);
-	await writeFile(settingsPath, dumpYamlObject(next), "utf8");
+	if (needsSettingsWrite) {
+		const settingsPath = join(home, "settings.yaml");
+		const { parsed } = await readDshSettings(home);
+		const next = mergeDshProviderIntoSettings(parsed, snapshot);
+		await writeFile(settingsPath, dumpYamlObject(next), "utf8");
+	}
 	if (snapshot.apiKey) {
 		const ref = credentialRefFor(snapshot.profile, snapshot.namespace === "llm-deepseek" ? "deepseek" : snapshot.name);
 		if (!isValidCredentialRef(ref)) throw new Error(`invalid credential ref: ${ref}`);

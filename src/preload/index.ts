@@ -389,6 +389,7 @@ const api = {
 					applies: string;
 					revision: number;
 					value: unknown;
+					base?: unknown;
 					user?: unknown;
 					secrets: Array<{ path: string[]; set: boolean }>;
 					schema: unknown;

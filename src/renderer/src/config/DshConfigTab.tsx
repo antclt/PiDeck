@@ -407,6 +407,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 														ops={{ credentials, setKey: setDshKey, unsetKey: unsetDshKey }}
 														catalog={modelCatalog["deepseek-official"]}
 														onSave={(patch) => saveNamespace(ns.ns, patch)}
+														onRefresh={load}
 														sectionApi={sectionApi}
 															instanceKey={`dsh:models:${ns.ns}`}
 														onMigrated={() => { void load(); }}

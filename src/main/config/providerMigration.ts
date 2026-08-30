@@ -39,8 +39,10 @@ export type DshProviderProfile = {
 		name?: string;
 		contextWindow?: number;
 		maxTokens?: number;
-		/** DSH/pi-ai 模型输入模态，例如 ["text", "image"]。 */
+		/** dsh-llm-pi-ai model input modalities. */
 		input?: string[];
+		/** dsh-llm-deepseek model input modalities (the direct adapter's schema spelling). */
+		inputModalities?: string[];
 		/** DSH 的思考档位 → provider wire 值映射；false 表示明确不支持。 */
 		reasoningEfforts?: false | Record<string, string | null>;
 	}>;
@@ -53,6 +55,12 @@ export type PiProviderSnapshot = {
 	apiKey?: string;
 	headers?: Record<string, string>;
 	models: PiModelItem[];
+	/**
+	 * Snapshot was synthesized from pi-ai's built-in catalog because Pi only had
+	 * an auth.json credential. Its endpoint/model rows are defaults, not user
+	 * overrides, so an official DSH adapter must keep its composition defaults.
+	 */
+	catalogOnly?: boolean;
 };
 
 export type DshProviderSnapshot = {
@@ -63,7 +71,7 @@ export type DshProviderSnapshot = {
 };
 
 const DEEPSEEK_OFFICIAL_HOST = "api.deepseek.com";
-const DEEPSEEK_DEFAULT_BASE = "https://api.deepseek.com/v1";
+const DEEPSEEK_DEFAULT_BASE = "https://api.deepseek.com";
 
 export function isSafeProviderName(name: unknown): name is string {
 	return typeof name === "string"
@@ -136,7 +144,7 @@ export function piModelsFromDsh(models: DshProviderProfile["models"]): PiModelIt
 		if (contextWindow !== undefined) row.contextWindow = contextWindow;
 		const maxTokens = asFiniteNumber(model.maxTokens);
 		if (maxTokens !== undefined) row.maxTokens = maxTokens;
-		const input = asStringList(model.input);
+		const input = asStringList(model.inputModalities ?? model.input);
 		if (input) row.input = input;
 		if (model.reasoningEfforts === false) row.reasoning = false;
 		else {
@@ -200,6 +208,7 @@ export function piBuiltinSnapshotFromCatalog(
 		api: typeof first.api === "string" ? first.api.trim() : "openai-completions",
 		apiKey: apiKey?.trim() || undefined,
 		models,
+		catalogOnly: true,
 	};
 }
 
@@ -212,25 +221,86 @@ export function looksLikeOfficialDeepseek(baseUrl: string | undefined): boolean 
 	}
 }
 
-/** pi 供应商 → DSH 档案。官方 DeepSeek 走独立 namespace，其余进 llm-pi-ai。 */
+/** True when a Pi endpoint merely spells DSH's shipped public DeepSeek endpoint. */
+function isDeepseekCompositionBaseUrl(baseUrl: string | undefined): boolean {
+	if (!baseUrl?.trim()) return true;
+	try {
+		const parsed = new URL(baseUrl);
+		if (parsed.hostname.replace(/^www\./, "") !== DEEPSEEK_OFFICIAL_HOST) return false;
+		const path = parsed.pathname.replace(/\/+$/, "") || "/";
+		return path === "/" || path === "/v1";
+	} catch {
+		return false;
+	}
+}
+
+/** The direct DSH adapter owns the official Chat Completions transport itself. */
+function shouldUseDirectDeepseekAdapter(source: PiProviderSnapshot): boolean {
+	const api = source.api?.trim();
+	const hasCustomHeaders = Boolean(source.headers && Object.keys(source.headers).length > 0);
+	return source.name.trim() === "deepseek"
+		&& looksLikeOfficialDeepseek(source.baseUrl)
+		&& (api === undefined || api === "" || api === "openai-completions")
+		&& !hasCustomHeaders;
+}
+
+/**
+ * Pi's generic model metadata does not match dsh-llm-deepseek exactly:
+ * `input` is named `inputModalities`, while its reasoning capabilities are
+ * adapter-owned. Copy only fields the direct adapter's settings schema accepts.
+ */
+function dshDeepseekModelsFromPi(models: PiModelItem[] | undefined): DshProviderProfile["models"] {
+	if (!Array.isArray(models) || models.length === 0) return undefined;
+	const rows: NonNullable<DshProviderProfile["models"]> = [];
+	for (const model of models) {
+		if (typeof model?.id !== "string" || !model.id.trim()) continue;
+		const row: NonNullable<DshProviderProfile["models"]>[number] = { id: model.id.trim() };
+		if (typeof model.name === "string" && model.name.trim()) row.name = model.name.trim();
+		const contextWindow = asFiniteNumber(model.contextWindow);
+		if (contextWindow !== undefined) row.contextWindow = contextWindow;
+		const maxTokens = asFiniteNumber(model.maxTokens);
+		if (maxTokens !== undefined) row.maxTokens = maxTokens;
+		const inputModalities = asStringList(model.input);
+		if (inputModalities) row.inputModalities = inputModalities;
+		rows.push(row);
+	}
+	return rows.length > 0 ? rows : undefined;
+}
+
+/** pi provider → DSH profile. Official DeepSeek keeps composition defaults unless Pi has real overrides. */
 export function piToDshSnapshot(source: PiProviderSnapshot): DshProviderSnapshot {
 	const name = source.name.trim();
-	const officialDeepseek = name === "deepseek" && looksLikeOfficialDeepseek(source.baseUrl);
+	if (shouldUseDirectDeepseekAdapter(source)) {
+		const profile: DshProviderProfile = {};
+		// auth.json-only builtins get their route, key ref and catalog from the
+		// direct adapter composition. Writing those defaults would freeze them in
+		// settings.yaml and prevent future DSH catalog upgrades from applying.
+		if (!source.catalogOnly) {
+			if (source.baseUrl?.trim() && !isDeepseekCompositionBaseUrl(source.baseUrl)) {
+				profile.baseURL = source.baseUrl.trim();
+			}
+			const models = dshDeepseekModelsFromPi(source.models);
+			if (models) profile.models = models;
+		}
+		return {
+			name: "deepseek",
+			namespace: "llm-deepseek",
+			profile,
+			apiKey: source.apiKey?.trim() || undefined,
+		};
+	}
+
 	const profile: DshProviderProfile = {};
-	if (source.baseUrl?.trim() && !officialDeepseek) profile.baseURL = source.baseUrl.trim();
+	if (source.baseUrl?.trim()) profile.baseURL = source.baseUrl.trim();
 	if (source.api?.trim()) profile.api = source.api.trim();
 	if (source.headers) profile.headers = source.headers;
 	const models = dshModelsFromPi(source.models);
 	if (models) profile.models = models;
-	if (officialDeepseek) {
-		profile.apiKeyEnv = "DEEPSEEK_API_KEY";
-	} else {
-		profile.displayName = name;
-		profile.apiKeyEnv = credentialRefFor(undefined, name);
-	}
+	profile.displayName = name;
+	profile.apiKeyEnv = credentialRefFor(undefined, name);
 	return {
-		name: officialDeepseek ? "deepseek" : name,
-		namespace: officialDeepseek ? "llm-deepseek" : "llm-pi-ai",
+		name,
+		namespace: "llm-pi-ai",
 		profile,
 		apiKey: source.apiKey?.trim() || undefined,
 	};
@@ -295,6 +365,8 @@ function normalizeDshModels(value: unknown): DshProviderProfile["models"] {
 		if (maxTokens !== undefined) model.maxTokens = maxTokens;
 		const input = asStringList(rec.input);
 		if (input) model.input = input;
+		const inputModalities = asStringList(rec.inputModalities);
+		if (inputModalities) model.inputModalities = inputModalities;
 		if (rec.reasoningEfforts === false) model.reasoningEfforts = false;
 		else {
 			const reasoningEfforts = asReasoningEfforts(rec.reasoningEfforts);
@@ -332,6 +404,10 @@ export function mergeDshProviderIntoSettings(
 		? { ...(raw as Record<string, unknown>) }
 		: {};
 	if (snapshot.namespace === "llm-deepseek") {
+		// The direct adapter already has a composition profile. An empty snapshot
+		// means Pi supplied only its built-in catalog/key, so do not create a user
+		// settings section merely to repeat DSH defaults.
+		if (Object.keys(snapshot.profile).length === 0) return root;
 		const current = root["llm-deepseek"] && typeof root["llm-deepseek"] === "object" && !Array.isArray(root["llm-deepseek"])
 			? { ...(root["llm-deepseek"] as Record<string, unknown>) }
 			: {};

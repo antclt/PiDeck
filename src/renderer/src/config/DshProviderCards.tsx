@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { BarChart3, ChevronDown, ChevronRight, Copy, Eye, EyeOff, LoaderCircle, Plus, Trash2, X } from "lucide-react";
+import { BarChart3, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import { showNotice } from "../utils/notice";
@@ -16,23 +16,22 @@ import { writeClipboard } from "../utils/clipboard";
 import { ProviderUsageRow } from "../components/app/ProviderUsageInline";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
-import { isDshCustomSettingsHiddenField, isDshPiAiProfileVisibleField } from "./dshFieldLabels";
+import { isDshDeepseekProfileVisibleField, isDshPiAiCustomRoute, isDshPiAiProfileVisibleField } from "./dshFieldLabels";
 import { DshSchemaField, type DshNamespaceView } from "./DshSchemaForm";
 import {
-	DSH_DEFAULT_RETRY_MAX,
+	deletePath,
 	dictEntries,
 	normalizeDshSchema,
 	objectFields,
-	patchDshRetryMaxRetries,
 	pruneEmptyObjects,
 	readDshEntryValue,
-	readDshRetryPolicy,
 	readPath,
 	setPath,
 	type DshSectionApi,
 } from "./dshSchema";
 import { credentialRefFor } from "./dshCredentialRef";
 import { DshModelsEditor } from "./DshModelsEditor";
+import { validateDshDeepseekModels, type DshDeepseekModelValidationFailure } from "./dshModels";
 import type { DshModelRow } from "./DshModelsTable";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
 import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
@@ -253,64 +252,33 @@ function ApiKeyField(props: {
 	);
 }
 
-/**
- * 供应商级最大重试次数。DSH 没有全局 retry：策略在每个 provider 的 retryPolicy。
- * 省略显示默认 5；清空输入 = 恢复默认；always 模式填次数会改成有限 normal。
- */
-function RetryMaxRetriesField(props: {
-	policy: unknown;
-	onChange: (next: unknown) => void;
-	writable: boolean;
-}) {
-	const view = readDshRetryPolicy(props.policy);
-	const unboundedAlways = view.mode === "always" && view.maxRetries === undefined;
-	const committed = unboundedAlways ? "" : String(view.maxRetries ?? DSH_DEFAULT_RETRY_MAX);
-	// 数字框用本地草稿：清空瞬间若立刻写回默认 5，用户没法从空框再输入。
-	const [draft, setDraft] = useState(committed);
-	useEffect(() => {
-		setDraft(committed);
-	}, [committed]);
-	const commit = (raw: string) => {
-		const trimmed = raw.trim();
-		if (trimmed === "") {
-			props.onChange(patchDshRetryMaxRetries(props.policy, undefined));
-			return;
-		}
-		const next = Number(trimmed);
-		if (!Number.isFinite(next)) return;
-		props.onChange(patchDshRetryMaxRetries(props.policy, Math.max(0, Math.min(50, Math.trunc(next)))));
-	};
-	return (
-		<label className="grid gap-1">
-			<span className="grid min-w-0 gap-0.5">
-				<span className="text-caption font-medium text-foreground">{t("config.dsh.field.maxRetries")}</span>
-				<span className="text-micro text-muted-foreground">{t("config.dsh.field.maxRetriesHint")}</span>
-				{unboundedAlways ? (
-					<span className="text-micro text-amber-600 dark:text-amber-400">{t("config.dsh.field.maxRetriesAlways")}</span>
-				) : null}
-			</span>
-			<Input
-				className="h-8"
-				type="number"
-				min={0}
-				max={50}
-				value={draft}
-				placeholder={String(DSH_DEFAULT_RETRY_MAX)}
-				disabled={!props.writable}
-				onChange={(event) => {
-					const raw = event.target.value;
-					setDraft(raw);
-					if (raw.trim() === "") return;
-					commit(raw);
-				}}
-				onBlur={() => commit(draft)}
-			/>
-		</label>
-	);
+function deepseekModelValidationMessage(failure: DshDeepseekModelValidationFailure): string {
+	const index = failure.index + 1;
+	switch (failure.issue) {
+		case "idRequired": return t("config.dsh.modelError.idRequired", { index });
+		case "idDuplicate": return t("config.dsh.modelError.idDuplicate", { index });
+		case "nameInvalid": return t("config.dsh.modelError.nameInvalid", { index });
+		case "contextInvalid": return t("config.dsh.modelError.contextInvalid", { index });
+		case "maxTokensInvalid": return t("config.dsh.modelError.maxTokensInvalid", { index });
+	}
 }
 
-/** 「自定义设置」折叠区：收容模型列表之外的其余 schema 字段。
- *  默认收起，与 dsh-web 对齐；点开后字段立即平铺显示具体值。 */
+/** Only model records are safe to hand to the editable catalog UI. */
+function isDshModelRow(value: unknown): value is DshModelRow {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function dshModelRows(value: unknown): DshModelRow[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const rows: DshModelRow[] = [];
+	for (const item of value) {
+		if (!isDshModelRow(item)) return undefined;
+		rows.push(item);
+	}
+	return rows;
+}
+
+/** 「自定义设置」折叠区：仅收容 dsh-web 也公开的精选字段。 */
 function CustomSettings(props: {
 	label: ReactNode;
 	children: ReactNode;
@@ -334,7 +302,7 @@ function CustomSettings(props: {
 /**
  * llm-pi-ai providers 卡片：每个 provider 一行（可展开），支持添加/删除 provider。
  * 保存语义与 Pi 管理页一致：不自带保存按钮，草稿变化上报脏状态，
- * 由顶部统一保存；API 密钥在「自定义设置」折叠区内填写。
+ * 由顶部统一保存；API 密钥在展开区首段独立填写。
  */
 export function PiAiProvidersCard(props: {
 	namespace: DshNamespaceView;
@@ -677,11 +645,18 @@ export function PiAiProvidersCard(props: {
 					const savedModels = Array.isArray(persisted) ? persisted as DshModelRow[] : [];
 					const models = Array.isArray(draftModels) ? draftModels as DshModelRow[] : savedModels;
 					const providerMeta = (entry.value ?? {}) as Record<string, unknown>;
+					const directoryEntry = props.directory?.find((candidate) => candidate.provider === entry.key);
+					// `declared` means pi-ai knows this key only because settings named it.
+					// Catalog routes own their display name/protocol; an absent directory entry
+					// is treated as custom so a new route remains completable before refresh.
+					const isCustomRoute = isDshPiAiCustomRoute(directoryEntry);
+					const visibleProfileFields = isCustomRoute
+						? orderedProfileFields
+						: orderedProfileFields.filter((field) => field.name === "baseURL" || field.name === "baseUrl");
 					const baseURLValue = entryValue(entry.key, ["baseURL"]);
 					const apiValue = entryValue(entry.key, ["api"]);
 					const baseURL = typeof baseURLValue === "string" ? baseURLValue : "";
 					const api = typeof apiValue === "string" ? apiValue : "";
-					const displayName = typeof providerMeta.displayName === "string" ? providerMeta.displayName : "";
 					const keyRef = credentialRefFor(providerMeta, entry.key);
 					const providerCatalog = props.catalog?.[entry.key];
 					// 生效模型数：自定义 models 非空取自定义数，否则取内置目录数（dsh-web 同语义）
@@ -723,16 +698,16 @@ export function PiAiProvidersCard(props: {
 
 							{isOpen && (
 								<div className="grid gap-3 border-t border-border/40 px-3 py-3">
+									<ApiKeyField
+										ref={keyRef}
+										value={keyDrafts[entry.key] ?? ""}
+										onChange={(next) => setKeyDrafts((prev) => ({ ...prev, [entry.key]: next }))}
+										ops={ops}
+									/>
 									<CustomSettings label={t("config.dsh.customSettings")}>
 										<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
-										<ApiKeyField
-											ref={keyRef}
-											value={keyDrafts[entry.key] ?? ""}
-											onChange={(next) => setKeyDrafts((prev) => ({ ...prev, [entry.key]: next }))}
-											ops={ops}
-										/>
-										{/* 固定顺序平铺（显示名称 / Base URL / 结果协议），值同步读取，点开即显示 */}
-										{orderedProfileFields.map((field) => (
+										{/* A catalog route owns its display name/protocol; hand-declared routes own both. */}
+										{visibleProfileFields.map((field) => (
 											<DshSchemaField
 												key={field.name}
 												schema={schema}
@@ -744,11 +719,6 @@ export function PiAiProvidersCard(props: {
 												writable={writable}
 											/>
 										))}
-										<RetryMaxRetriesField
-											policy={entryValue(entry.key, ["retryPolicy"])}
-											onChange={(next) => updateEntry(entry.key, ["retryPolicy"], next)}
-											writable={writable}
-										/>
 									</CustomSettings>
 									<DshModelsEditor
 										models={models}
@@ -760,8 +730,6 @@ export function PiAiProvidersCard(props: {
 										baseURL={baseURL}
 										api={api}
 										apiKeyDraft={keyDrafts[entry.key]}
-										defaultInput={entryValue(entry.key, ["defaultInput"])}
-										onDefaultInputChange={(input) => updateEntry(entry.key, ["defaultInput"], input)}
 										onChange={(nextModels) => setProviderModels(entry.key, nextModels)}
 									/>
 								</div>
@@ -798,6 +766,8 @@ export function DeepseekRouteCard(props: {
 	/** 适配器内置模型目录（llm.models 中 provider=deepseek-official 的分组）。 */
 	catalog?: Array<{ id: string; name?: string }>;
 	onSave: (patch: Record<string, unknown>) => Promise<void>;
+	/** Reload parent namespace state after a mutate-only operation (such as model reset). */
+	onRefresh?: () => Promise<unknown>;
 	/** 统一保存/脏状态接口（ConfigModal 顶部保存 + 关闭确认）。 */
 	sectionApi?: DshSectionApi;
 	/** 稳定脏标记 key（dsh:<nav>:<sub>）。 */
@@ -815,42 +785,78 @@ export function DeepseekRouteCard(props: {
 
 	const [draft, setDraft] = useState<Record<string, unknown>>({});
 	const [open, setOpen] = useState(false);
-	/** 密钥草稿：保存时先 credentials.set 再 settings.update（与 pi-ai 卡同一收敛语义）。 */
+	/** 密钥草稿：保存时单独写入 credentials，不落 settings.yaml。 */
 	const [keyDraft, setKeyDraft] = useState("");
+	/** `models: []` has a different direct-DeepSeek meaning, so reset must mutate-unset it. */
+	const [pendingModelReset, setPendingModelReset] = useState(false);
+	/** Curated profile fields reset to adapter defaults through explicit path unsets. */
+	const [pendingFieldUnsets, setPendingFieldUnsets] = useState<string[][]>([]);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	/** draft 覆盖读取：draft 优先，否则用现值。 */
+	/** Effective value is needed for adapter-owned defaults such as apiKeyEnv. */
 	const value = (path: string[]) => {
 		const overridden = readPath(draft, path);
 		return overridden !== undefined ? overridden : readPath(namespace.value, path);
+	};
+	/** Curated editable fields should show only a user override, not composition defaults. */
+	const editableValue = (path: string[]) => {
+		if (pendingFieldUnsets.some((candidate) => candidate.join("\u0000") === path.join("\u0000"))) return undefined;
+		const overridden = readPath(draft, path);
+		return overridden !== undefined ? overridden : readPath(namespace.user, path);
 	};
 
 	// 密钥 ref 需在保存回调之前计算（save useCallback 依赖它）
 	const apiKeyEnv = typeof value(["apiKeyEnv"]) === "string" ? value(["apiKeyEnv"]) as string : "";
 	const keyRef = credentialRefFor({ apiKeyEnv }, "deepseek");
 
-	/** 脏状态：settings 草稿或密钥草稿非空。 */
-	const dirty = Object.keys(draft).length > 0 || keyDraft.trim().length > 0;
+	/** 脏状态：settings 草稿、密钥草稿或待提交的模型/字段 reset。 */
+	const dirty = Object.keys(draft).length > 0 || keyDraft.trim().length > 0 || pendingModelReset || pendingFieldUnsets.length > 0;
 	useEffect(() => {
 		sectionApi?.onDirtyChange(instanceId, dirty);
 		// 卸载时清掉本实例的脏来源，避免收起/切换后残留黄点
 		return () => sectionApi?.onDirtyChange(instanceId, false);
 	}, [sectionApi, instanceId, dirty]);
 
-	/** 统一保存：先写密钥草稿（credentials.set），再提交 settings patch；成功返回 true。 */
+	/**
+	 * Persist the visible profile fields and the credential through their separate
+	 * DSH APIs. Reset is a mutate/unset because settings.update only merges and
+	 * `models: []` would mean an intentionally empty official catalog.
+	 */
 	const save = useCallback(async (): Promise<boolean> => {
 		if (!dirty) return true;
 		setSaving(true);
 		setError(null);
 		try {
-			const trimmed = keyDraft.trim();
-			if (trimmed) {
-				await ops.setKey(keyRef, trimmed);
+			const modelFailure = validateDshDeepseekModels(readPath(draft, ["models"]));
+			if (modelFailure) {
+				setError(deepseekModelValidationMessage(modelFailure));
+				return false;
 			}
-			await props.onSave(pruneEmptyObjects(draft) as Record<string, unknown>);
+			const patch = pruneEmptyObjects(draft) as Record<string, unknown>;
+			const unsetOps = [
+				...(pendingModelReset ? [{ op: "unset" as const, path: ["models"] }] : []),
+				...pendingFieldUnsets.map((path) => ({ op: "unset" as const, path })),
+			];
+			if (unsetOps.length > 0) {
+				await desktopApi.sessions.mutateDshSettings(
+					namespace.ns,
+					unsetOps,
+					namespace.revision,
+				);
+			}
+			if (Object.keys(patch).length > 0) {
+				await props.onSave(patch);
+			} else if (unsetOps.length > 0) {
+				if (props.onRefresh) await props.onRefresh();
+				else await props.onSave({});
+			}
+			const trimmed = keyDraft.trim();
+			if (trimmed) await ops.setKey(keyRef, trimmed);
 			setDraft({});
 			setKeyDraft("");
+			setPendingModelReset(false);
+			setPendingFieldUnsets([]);
 			return true;
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -858,7 +864,7 @@ export function DeepseekRouteCard(props: {
 		} finally {
 			setSaving(false);
 		}
-	}, [dirty, keyDraft, keyRef, ops, props]);
+	}, [dirty, draft, keyDraft, keyRef, namespace.ns, namespace.revision, ops, pendingFieldUnsets, pendingModelReset, props]);
 	useEffect(() => {
 		if (!sectionApi) return;
 		sectionApi.registerSave(instanceId, save);
@@ -871,33 +877,70 @@ export function DeepseekRouteCard(props: {
 
 	const update = (path: string[], next: unknown) => {
 		const nextDraft = structuredClone(draft) as Record<string, unknown>;
-		// 空值 = 未覆盖（沿用默认/现有值），避免 patch 提交空串
 		if (next === undefined || next === "") {
-			setPath(nextDraft, path, undefined as never);
+			deletePath(nextDraft, path);
+			const hasUserValue = readPath(namespace.user, path) !== undefined;
+			setPendingFieldUnsets((previous) => {
+				const alreadyPending = previous.some((candidate) => candidate.join("\u0000") === path.join("\u0000"));
+				if (hasUserValue) return alreadyPending ? previous : [...previous, path];
+				return alreadyPending
+					? previous.filter((candidate) => candidate.join("\u0000") !== path.join("\u0000"))
+					: previous;
+			});
 		} else {
 			setPath(nextDraft, path, next);
+			setPendingFieldUnsets((previous) => previous.filter(
+				(candidate) => candidate.join("\u0000") !== path.join("\u0000"),
+			));
 		}
 		setDraft(nextDraft);
 	};
 
-	// models：draft 覆盖优先；保存列表单独传给编辑器做铺底，避免首次自定义清空目录
-	const savedModels = Array.isArray((namespace.value as { models?: unknown } | undefined)?.models)
-		? (namespace.value as { models: DshModelRow[] }).models
-		: [];
-	const draftModels = readPath(draft, ["models"]);
-	const models = Array.isArray(draftModels) ? draftModels as DshModelRow[] : savedModels;
+	// DSH Web builds inherited rows from composition `base` first and then the
+	// schema default. `value` is only a legacy fallback because it may still
+	// carry the user override that reset is about to remove.
+	const draftModels = dshModelRows(readPath(draft, ["models"]));
+	const userModels = dshModelRows(readPath(namespace.user, ["models"]));
+	const baseModels = dshModelRows(readPath(namespace.base, ["models"]));
+	const schemaDefaultModels = dshModelRows(
+		objectFields(schema, root).find((field) => field.name === "models")?.ref.meta?.default,
+	);
+	const effectiveModels = dshModelRows(readPath(namespace.value, ["models"]));
+	const inheritedModels = baseModels
+		?? schemaDefaultModels
+		?? (userModels === undefined ? effectiveModels : undefined)
+		?? dshModelRows(props.catalog)
+		?? [];
+	const modelOverride = !pendingModelReset && (draftModels !== undefined || userModels !== undefined);
+	const models = draftModels ?? (modelOverride ? (effectiveModels ?? userModels ?? []) : inheritedModels);
+	const savedModels = models;
+	const directCatalog = inheritedModels;
 	const baseURLValue = value(["baseURL"]);
 	const apiValue = value(["api"]);
 	const baseURL = typeof baseURLValue === "string" ? baseURLValue : "";
 	const api = typeof apiValue === "string" ? apiValue : "";
+	const defaultContextWindowValue = value(["defaultContextWindow"]);
+	const defaultMaxTokensValue = value(["maxTokens"]);
+	const defaultContextWindow = typeof defaultContextWindowValue === "number" ? defaultContextWindowValue : undefined;
+	const defaultMaxTokens = typeof defaultMaxTokensValue === "number" ? defaultMaxTokensValue : undefined;
 	const baseFields = objectFields(schema, root).filter(
-		(field) => !isDshCustomSettingsHiddenField(field.name, field.ref.meta),
+		(field) => isDshDeepseekProfileVisibleField(field.name),
 	);
 
 	const setModels = (nextModels: DshModelRow[]) => {
+		setPendingModelReset(false);
 		setDraft((prev) => {
 			const next = structuredClone(prev) as Record<string, unknown>;
 			next.models = nextModels;
+			return next;
+		});
+	};
+
+	const resetModels = () => {
+		setPendingModelReset(true);
+		setDraft((prev) => {
+			const next = structuredClone(prev) as Record<string, unknown>;
+			delete next.models;
 			return next;
 		});
 	};
@@ -917,7 +960,7 @@ export function DeepseekRouteCard(props: {
 				<div className="rounded-md border border-border-subtle bg-bg-panel">
 					<ProviderRowHead
 						title={namespace.ns === "llm-deepseek" ? t("config.dsh.deepseekOfficial") : namespace.ns}
-						badges={[t("config.dsh.modelsCount", { count: models.length > 0 ? models.length : (props.catalog?.length ?? 0) })]}
+						badges={[t("config.dsh.modelsCount", { count: modelOverride ? models.length : directCatalog.length })]}
 						keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
 						extraActions={
 							<>
@@ -948,21 +991,17 @@ export function DeepseekRouteCard(props: {
 
 					{open && (
 						<div className="grid gap-3 border-t border-border/40 px-3 py-3">
+							<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
 							<CustomSettings label={t("config.dsh.customSettings")}>
 								<p className="text-micro text-muted-foreground">{t("config.dsh.customSettingsHint")}</p>
-								<ApiKeyField ref={keyRef} value={keyDraft} onChange={setKeyDraft} ops={ops} />
-								<RetryMaxRetriesField
-									policy={value(["retryPolicy"])}
-									onChange={(next) => update(["retryPolicy"], next)}
-									writable={writable}
-								/>
 								{baseFields.map((field) => (
 									<DshSchemaField
 										key={field.name}
 										schema={schema}
 										ref={field.ref}
 										path={[field.name]}
-										value={value([field.name])}
+										value={editableValue([field.name])}
+										placeholder={t("config.dsh.deepseekBaseUrlPlaceholder")}
 										secrets={namespace.secrets}
 										onChange={update}
 										writable={writable}
@@ -972,13 +1011,18 @@ export function DeepseekRouteCard(props: {
 							<DshModelsEditor
 								models={models}
 								savedModels={savedModels}
-								catalog={props.catalog}
+								catalog={directCatalog}
 								writable={writable}
 								providerKey="deepseek-official"
 								settingsNs={namespace.ns}
 								baseURL={baseURL}
 								api={api}
 								apiKeyDraft={keyDraft}
+								modelsOverridden={modelOverride}
+								onResetModels={modelOverride ? resetModels : undefined}
+								editableInherited
+								defaultContextWindow={defaultContextWindow}
+								defaultMaxTokens={defaultMaxTokens}
 								onChange={setModels}
 							/>
 						</div>
