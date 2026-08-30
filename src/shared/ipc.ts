@@ -186,6 +186,18 @@ export const ipcChannels = {
 	dshAgentPresets: "dsh:agent-presets",
 	/** DSH 部署默认模型选择（settings.yaml agent-default-model：provider/model/reasoningEffort）。 */
 	dshDefaultModel: "dsh:default-model",
+	/** DSH runtime 安装态查询（AgentRuntimeProvider 阶段 1：installed/notInstalled/broken 门控 UI）。 */
+	dshRuntimeGetStatus: "dsh-runtime:get-status",
+	/** DSH runtime 安装态变更推送（阶段 2 安装/卸载/版本切换时广播，订阅式）。 */
+	dshRuntimeStatusChanged: "dsh-runtime:status-changed",
+	/** 按需安装 DSH runtime（从下载源索引挑兼容版本；进度走 dsh-runtime:install-progress）。 */
+	dshRuntimeInstall: "dsh-runtime:install",
+	/** 从本地 tgz 导入 runtime（离线 / 镜像不可达时的兜底）。 */
+	dshRuntimeInstallLocal: "dsh-runtime:install-local",
+	/** 卸载已安装的 DSH runtime。 */
+	dshRuntimeUninstall: "dsh-runtime:uninstall",
+	/** 安装进度推送（订阅式）。 */
+	dshRuntimeInstallProgress: "dsh-runtime:install-progress",
 	codexSessionsScan: "codex-sessions:scan",
 	codexSessionsImport: "codex-sessions:import",
 	claudeSessionsScan: "claude-sessions:scan",

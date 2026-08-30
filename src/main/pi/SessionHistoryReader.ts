@@ -1,6 +1,7 @@
 import { open, readFile, stat } from "node:fs/promises";
 import type { ChatMessage, ImageContent, PiSubagentEntry, SessionMessagePage, SessionTodoSnapshot } from "../../shared/types";
 import { parseTodoSnapshotData } from "../../shared/sessionTodo";
+import { deriveAcpDelegateEntries } from "./acpDelegateSubagents";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import type { RpcResponse } from "./PiRpcClient";
 import type { AppLogger } from "../logging/AppLogger";
@@ -1085,6 +1086,8 @@ export class SessionHistoryReader {
 					error: typeof data.error === "string" ? data.error : undefined,
 					startedAt: typeof data.startedAt === "number" ? data.startedAt : undefined,
 					completedAt: typeof data.completedAt === "number" ? data.completedAt : undefined,
+					// via：acp_delegate 委托桥接落盘的 record 携带，渲染层据此展示来源提示
+					via: data.via === "acp-delegate" ? "acp-delegate" : undefined,
 					source: "record",
 				});
 			} catch {
@@ -1095,6 +1098,49 @@ export class SessionHistoryReader {
 			}
 		}
 		return [...byAgentId.values()].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+	}
+
+	/**
+	 * 流式扫描会话文件全量条目，推导 acp_delegate（billion-context-pi）委托的子代理条目。
+	 *
+	 * 该插件不落 subagents:record / start 锚点，读取侧无法像 record 那样按 customType
+	 * 走索引定向读，只能全量扫描。行级预检：所有相关条目（toolCall/派发确认/终态通知）
+	 * 都包含 "acp_delegate" 字样，不含该字样的行直接跳过 JSON.parse，非 acp 会话的
+	 * 扫描成本接近纯文本搜索。损坏行忽略。
+	 */
+	async readAcpDelegateEntries(sessionPath: string): Promise<PiSubagentEntry[]> {
+		const hostPath = this.deps.toHostPath(sessionPath);
+		let content: string;
+		try {
+			content = await readFile(hostPath, "utf8");
+		} catch (error) {
+			void this.deps.logger?.warn("agent", "Failed to read session for acp_delegate derivation", {
+				sessionPath,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return [];
+		}
+		const rawEntries: unknown[] = [];
+		const lines = content.split("\n");
+		for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+			const sourceLine = lines[lineIndex];
+			const jsonLine = sourceLine.endsWith("\r") ? sourceLine.slice(0, -1) : sourceLine;
+			if (jsonLine.includes("acp_delegate")) {
+				try {
+					const parsed: unknown = JSON.parse(jsonLine);
+					if (isRecord(parsed)) rawEntries.push(parsed);
+				} catch {
+					// 损坏行忽略
+				}
+			}
+			// 与索引重建同一节拍让出主线程，大会话扫描不阻塞 IPC/窗口消息
+			if ((lineIndex + 1) % SessionHistoryReader.INDEX_PARSE_YIELD_EVERY === 0) {
+				await new Promise<void>((resolve) => {
+					setImmediate(resolve);
+				});
+			}
+		}
+		return deriveAcpDelegateEntries(rawEntries);
 	}
 
 	/**

@@ -262,14 +262,17 @@ test("reduceSnapshot: failed carries error text to snapshot", () => {
 /** mock pi API：捕获事件订阅与 appendEntry 调用，驱动扩展默认导出的完整链路。 */
 function createMockPi() {
 	const handlers = new Map();
+	// pi.on 生命周期事件（session_start / tool_execution_* / message_end 等）
+	const lifecycle = new Map();
 	const appendedEntries = [];
 	return {
 		pi: {
 			events: { on: (name, cb) => { handlers.set(name, cb); } },
-			on: () => {},
+			on: (name, cb) => { lifecycle.set(name, cb); },
 			appendEntry: (type, data) => { appendedEntries.push({ type, data }); },
 		},
 		handlers,
+		lifecycle,
 		appendedEntries,
 	};
 }
@@ -322,3 +325,153 @@ test("bridge extension: appendEntry throw does not break snapshot flow", () => {
 	}
 	assert.equal(threw, false);
 });
+
+/* ------------------------------------------------------------------ */
+/* acp_delegate（billion-context-pi）桥接                               */
+/* ------------------------------------------------------------------ */
+
+const ACP_DISPATCH = "acp_delegate_111";
+const ACP_RUN_ID = "del_abc123";
+
+function acpDispatchEndEvent() {
+	return {
+		type: "tool_execution_end",
+		toolCallId: ACP_DISPATCH,
+		toolName: "acp_delegate",
+		result: { content: [{ type: "text", text: `Delegated to **worker** (runId \`${ACP_RUN_ID}\`).\nRunning in the background.` }] },
+		isError: false,
+	};
+}
+
+test("reduceAcpToolEvent: start(acp_delegate) → running 条目（via 标记、幂等）", () => {
+	const { reduceAcpToolEvent } = loadBridgeModule();
+	const start = { type: "tool_execution_start", toolCallId: ACP_DISPATCH, toolName: "acp_delegate", args: { agent: "worker", task: "Generate md" } };
+	const first = reduceAcpToolEvent(new Map(), new Map(), "tool_execution_start", start, 1000);
+	assert.equal(first.changed, true);
+	assert.equal(first.state.get(ACP_DISPATCH).status, "running");
+	assert.equal(first.state.get(ACP_DISPATCH).via, "acp-delegate");
+	assert.equal(first.state.get(ACP_DISPATCH).description, "Generate md");
+
+	// 同 toolCallId 幂等
+	const again = reduceAcpToolEvent(first.state, first.runIds, "tool_execution_start", start, 2000);
+	assert.equal(again.changed, false);
+	assert.equal(again.state.get(ACP_DISPATCH).startedAt, 1000);
+});
+
+test("reduceAcpToolEvent: end 从结果文本提取 runId（派发 ≠ 终态）", () => {
+	const { reduceAcpToolEvent } = loadBridgeModule();
+	const started = reduceAcpToolEvent(new Map(), new Map(), "tool_execution_start",
+		{ type: "tool_execution_start", toolCallId: ACP_DISPATCH, toolName: "acp_delegate", args: { agent: "worker" } }, 1000);
+	const ended = reduceAcpToolEvent(started.state, started.runIds, "tool_execution_end", acpDispatchEndEvent(), 1100);
+	assert.equal(ended.changed, false); // 状态不变，widget 不重推
+	assert.equal(ended.runIds.get(ACP_RUN_ID), ACP_DISPATCH);
+	assert.equal(ended.state.get(ACP_DISPATCH).status, "running");
+});
+
+test("reduceAcpToolEvent: 取消按 runId 反查 → stopped", () => {
+	const { reduceAcpToolEvent } = loadBridgeModule();
+	const started = reduceAcpToolEvent(new Map(), new Map(), "tool_execution_start",
+		{ type: "tool_execution_start", toolCallId: ACP_DISPATCH, toolName: "acp_delegate", args: { agent: "worker" } }, 1000);
+	const dispatched = reduceAcpToolEvent(started.state, started.runIds, "tool_execution_end", acpDispatchEndEvent(), 1100);
+	const cancelled = reduceAcpToolEvent(dispatched.state, dispatched.runIds, "tool_execution_start",
+		{ type: "tool_execution_start", toolCallId: "acp_delegate_cancel_x", toolName: "acp_delegate_cancel", args: { runId: ACP_RUN_ID } }, 1200);
+	assert.equal(cancelled.changed, true);
+	assert.equal(cancelled.state.get(ACP_DISPATCH).status, "stopped");
+	assert.equal(cancelled.state.get(ACP_DISPATCH).completedAt, 1200);
+});
+
+test("reduceAcpToolEvent: 非 acp 工具事件被忽略", () => {
+	const { reduceAcpToolEvent } = loadBridgeModule();
+	const result = reduceAcpToolEvent(new Map(), new Map(), "tool_execution_start",
+		{ type: "tool_execution_start", toolCallId: "bash_1", toolName: "bash", args: { command: "ls" } }, 1000);
+	assert.equal(result.changed, false);
+	assert.equal(result.state.size, 0);
+});
+
+test("reduceAcpNotification: completed/FAILED 通知迁到终态并携带错误摘录", () => {
+	const { reduceAcpToolEvent, reduceAcpNotification } = loadBridgeModule();
+	const started = reduceAcpToolEvent(new Map(), new Map(), "tool_execution_start",
+		{ type: "tool_execution_start", toolCallId: ACP_DISPATCH, toolName: "acp_delegate", args: { agent: "worker" } }, 1000);
+	const dispatched = reduceAcpToolEvent(started.state, started.runIds, "tool_execution_end", acpDispatchEndEvent(), 1100);
+
+	const completed = reduceAcpNotification(
+		dispatched.state, dispatched.runIds,
+		`[acp_delegate completed] **worker** (runId \`${ACP_RUN_ID}\`, exit 0) No delegates are currently running.`,
+		2000,
+	);
+	assert.equal(completed.changed, true);
+	assert.equal(completed.state.get(ACP_DISPATCH).status, "completed");
+	assert.equal(completed.state.get(ACP_DISPATCH).completedAt, 2000);
+
+	// FAILED 通知：错误摘录从 Output ~~~ 块提取
+	const failed = reduceAcpNotification(
+		dispatched.state, dispatched.runIds,
+		`[acp_delegate FAILED ⚠️] **worker** (runId \`${ACP_RUN_ID}\`, exit ?) failed.\n\nOutput:\n~~~\nspawn error: ENOENT\n~~~`,
+		3000,
+	);
+	assert.equal(failed.changed, true);
+	assert.equal(failed.state.get(ACP_DISPATCH).status, "error");
+	assert.ok(failed.state.get(ACP_DISPATCH).error.includes("ENOENT"));
+	// 终态后再收通知不再迁移（幂等）
+	const repeated = reduceAcpNotification(failed.state, dispatched.runIds,
+		`[acp_delegate completed] **worker** (runId \`${ACP_RUN_ID}\`, exit 0)`, 4000);
+	assert.equal(repeated.changed, false);
+
+	// 未知 runId 的通知被忽略
+	const orphan = reduceAcpNotification(
+		dispatched.state, dispatched.runIds,
+		`[acp_delegate completed] **worker** (runId \`del_unknown\`, exit 0)`, 5000,
+	);
+	assert.equal(orphan.changed, false);
+});
+
+test("bridge extension: acp 委托派发落 start 锚点、终态通知落 subagents:record", () => {
+	const { default: bridge } = loadBridgeModule();
+	const { lifecycle, appendedEntries } = createMockPi();
+	bridge(pi4acp(lifecycle, appendedEntries));
+
+	// 派发 start → 快照 + start 锚点
+	lifecycle.get("tool_execution_start")({
+		type: "tool_execution_start", toolCallId: ACP_DISPATCH, toolName: "acp_delegate",
+		args: { agent: "worker", task: "Generate md", cwd: "/tmp" },
+	});
+	const anchor = appendedEntries.find((e) => e.type === "pi-deck-subagent-start");
+	assert.ok(anchor, "start 锚点应落盘");
+	assert.equal(anchor.data.id, ACP_DISPATCH);
+	assert.equal(anchor.data.type, "worker");
+
+	// 派发确认（end）→ 只登记 runId，不落盘
+	lifecycle.get("tool_execution_end")(acpDispatchEndEvent());
+	assert.equal(appendedEntries.filter((e) => e.type === "pi-deck-subagent-start").length, 1);
+
+	// 终态通知 → subagents:record 落盘（历史重建权威数据，via 标记）
+	lifecycle.get("message_end")({
+		type: "message_end",
+		message: { role: "user", content: [{ type: "text", text: `[acp_delegate completed] **worker** (runId \`${ACP_RUN_ID}\`, exit 0) No delegates are currently running.` }] },
+	});
+	const record = appendedEntries.find((e) => e.type === "subagents:record");
+	assert.ok(record, "终态 record 应落盘");
+	assert.equal(record.data.id, ACP_DISPATCH);
+	assert.equal(record.data.status, "completed");
+	assert.equal(record.data.via, "acp-delegate");
+	assert.equal(typeof record.data.completedAt, "number");
+});
+
+test("bridge extension: 非 user 消息/非 acp 通知不触发落盘", () => {
+	const { default: bridge } = loadBridgeModule();
+	const { lifecycle, appendedEntries } = createMockPi();
+	bridge(pi4acp(lifecycle, appendedEntries));
+
+	lifecycle.get("message_end")({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "[acp_delegate completed] fake" }] } });
+	lifecycle.get("message_end")({ type: "message_end", message: { role: "user", content: [{ type: "text", text: "普通用户消息 [acp_delegate completed] 字样但非通知" }] } });
+	assert.equal(appendedEntries.length, 0);
+});
+
+/** acp 测试用 mock pi：lifecycle/appendedEntries 与 createMockPi 产物共享同一实例。 */
+function pi4acp(lifecycle, appendedEntries) {
+	return {
+		events: { on: () => {} },
+		on: (name, cb) => { lifecycle.set(name, cb); },
+		appendEntry: (type, data) => { appendedEntries.push({ type, data }); },
+	};
+}

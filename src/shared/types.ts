@@ -27,6 +27,8 @@ export * from "./types/trajectory";
 export * from "./types/todo";
 export * from "./types/dshPlugin";
 export * from "./types/dshLlm";
+export * from "./types/dshRuntime";
+export * from "./types/dshRuntimeManifest";
 export * from "./types/providerMigration";
 export * from "./types/providerUsage";
 export * from "./types/pasteFile";

@@ -86,6 +86,9 @@ function loadAgentManager() {
 		require: (id) => id === "node:fs/promises" ? fsPromises : id === "../../shared/sessionTodo"
 			// todo 快照解析纯函数：本测试不覆盖，空实现满足依赖契约
 			? { parseTodoSnapshotData: () => undefined }
+			// acp_delegate 推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+			: id === "./acpDelegateSubagents"
+			? { deriveAcpDelegateEntries: () => [] }
 			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
 			: id === "../../shared/fileChanges"
 			? { collectSessionFileChanges: () => [] }
@@ -165,6 +168,10 @@ function loadAgentManager() {
 			}
 			if (id === "./extensionError") {
 				return { formatExtensionErrorReason: (error) => String(error) };
+			}
+			// acp_delegate 推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+			if (id === "./acpDelegateSubagents") {
+				return { mergeSubagentSources: (records) => records };
 			}
 			if (id === "./thinkingLevels") {
 				return { parseAvailableThinkingLevelsResponse: (response) => response?.data?.levels };

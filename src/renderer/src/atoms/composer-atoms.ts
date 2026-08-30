@@ -1,5 +1,4 @@
 import { atom } from "jotai";
-import { atomFamily } from "jotai/utils";
 import type { ComposerAgentMode, ImageContent } from "../../../shared/types";
 import type { ModelPending } from "../utils/modelPendingDisplay";
 import type { QuoteSnippet } from "../components/session/composer/quoteChip";
@@ -40,22 +39,6 @@ export const sessionAttachmentsByIdAtom = atom<Record<string, ImageContent[]>>({
 export const sessionPasteFilesByIdAtom = atom<Record<string, PastedTextFile[]>>({});
 export const sessionQuotesByIdAtom = atom<Record<string, SessionQuoteMap>>({});
 
-/** 分段长条弹层打开的分段（null = 收起）。按 session 隔离，分屏多栏互不影响。
- * 分段条（SessionWidgetsCard）只写这个 atom；弹层本体（SessionWidgetsPopover）
- * 渲染在 timeline 面板底部悬浮层，不参与任何布局。 */
-export type WidgetsPopoverSegment = "tasks" | "subagents" | "files";
-export const widgetsPopoverSegmentFamily = atomFamily((_sessionId: string) =>
-  atom<WidgetsPopoverSegment | null>(null),
-);
-
-/** 弹层内行级折叠状态（文件 diff 行 / 子代理详情行），key 带默认折叠值。
- * 弹层渲染在 ComposerWidgetLayoutProvider 之外，不能复用 collapsed 通道，改用
- * 独立 family；param 按 key 去重（默认值可能随数据变化，去重只看 key，
- * 避免同 key 多实例导致展开态丢失）。 */
-export const widgetsDisclosureCollapsedFamily = atomFamily(
-  ({ defaultCollapsed }: { key: string; defaultCollapsed: boolean }) => atom(defaultCollapsed),
-  (a: { key: string }, b: { key: string }) => a.key === b.key,
-);
 export const sessionComposerModeByIdAtom = atom<Record<string, SessionComposerMode>>({});
 export const sessionSendStateByIdAtom = atom<Record<string, SessionSendState>>({});
 

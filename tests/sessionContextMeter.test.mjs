@@ -209,8 +209,11 @@ test("panel reuses the SessionStatus detail builder and keeps compact action", (
   assert.match(source, /import \{ buildSessionStatusDetail \} from "\.\/SurfaceComponents"/);
   assert.match(source, /const detail = buildSessionStatusDetail\(\s*props\.state,/);
   assert.match(source, /props\.state\?\.cacheHitAveragePercent \?\? undefined,/);
-  // 明细行与「最近一次回复」性能组分开渲染（不混读为会话均值）
-  assert.match(source, /detail\.detailRows\.map\(/);
+  // 明细行与「最近一次回复」性能组分开渲染（不混读为会话均值）；
+  // 输入/输出 token 与最新缓存命中率已常驻输入框下方（ComposerStatsLine），
+  // 圆环面板消费前过滤这两行，避免重复展示
+  assert.match(source, /panelDetailRows\.map\(/);
+  assert.match(source, /row\.label !== t\("ctx\.detail\.tokens"\) && row\.label !== t\("ctx\.detail\.hitLatest"\)/);
   assert.match(source, /detail\.replyPerfRows\.map\(/);
   assert.match(source, /t\("ctx\.detail\.lastReply"\)/);
   // DSH 会话统计组（host sessionStats 投影；回合/墙钟/平均首字/生成速度）

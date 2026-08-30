@@ -3,7 +3,8 @@
  * Phase 3.7: extracted from src/main/index.ts registerIpc().
  */
 
-import { ipcMain, type BrowserWindow } from "electron";
+import { existsSync, statSync } from "node:fs";
+import { dialog, ipcMain, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
@@ -32,6 +33,7 @@ import type {
 	ArchivedDshSession,
 } from "../../shared/types";
 import { parseSessionProcessEvents } from "../sessions/sessionProcessEvents";
+import { downgradeStaleRunning } from "../pi/acpDelegateSubagents";
 import { resolveLaunchDefaultOptions } from "../sessions/launchDefaults";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 
@@ -115,6 +117,19 @@ export type DshBackendIpcDeps = {
 		started: boolean;
 		homeDir: string;
 	}>;
+	/**
+	 * DSH runtime 安装态（AgentRuntimeProvider 阶段 1）：installed/notInstalled/broken。
+	 * 未装配 = 无 DSH 后端，按 notInstalled 处理（UI 走安装引导，新建 dsh 会话被拒）。
+	 */
+	getDshRuntimeStatus?: () => import("../../shared/types/dshRuntime").DshRuntimeStatus;
+	/** DSH runtime 是否允许新建 dsh 会话（门控判定收敛在这里，避免各 handler 比对枚举）。 */
+	canCreateDshSession?: () => boolean;
+	/** 按需安装 DSH runtime（按下载源索引挑兼容版本）；进度经 dsh-runtime:install-progress 推送。 */
+	installDshRuntime?: () => Promise<{ ok: boolean; error?: string }>;
+	/** 从本地 tgz 导入 runtime（离线兜底）；文件路径由主进程对话框给出。 */
+	importDshRuntime?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+	/** 卸载当前启用的 runtime。 */
+	uninstallDshRuntime?: () => { ok: boolean; error?: string };
 	/** DSH settings.describe（脱敏 namespace 视图 + schema）。 */
 	describeDshSettings?: () => Promise<{
 		writable: boolean;
@@ -375,6 +390,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		listDshAgentPresets,
 		getDshDefaultModel,
 		getDshStatus,
+		getDshRuntimeStatus,
+		canCreateDshSession,
+		installDshRuntime,
+		importDshRuntime,
+		uninstallDshRuntime,
 		describeDshSettings,
 		updateDshSettings,
 		mutateDshSettings,
@@ -537,6 +557,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (_event, input: CreateSessionDraftInput) => {
 			const project = projectStore.get(input.projectId);
 			if (!project) throw new Error(mainCopy("project.notFound"));
+			// DSH runtime 门控（AgentRuntimeProvider 阶段 1）：runtime 不可用时拒绝新建
+			// dsh 会话——渲染层已按安装态隐藏入口，这里是边界防御（设置残留 dsh /
+			// 渲染层旧版本）。既有 dsh 会话不受影响（打开/发送走运行时链路，不在此处）。
+			if (input.backend === "dsh" && canCreateDshSession?.() !== true) {
+				throw new Error(mainCopy("session.dshRuntimeNotInstalled"));
+			}
 			// Auto-fill model / thinkingLevel from pi config when the caller hasn't
 			// provided them, so the composer bar shows the effective default.
 			// DSH 后端不适用 pi 的模型配置（模型路由由 DSH host 自己的 settings 决定），
@@ -610,6 +636,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(
 		ipcChannels.sessionsCreateAnonymous,
 		async (_event, input: CreateAnonymousSessionInput) => {
+			// 与 createDraft 同一 DSH runtime 门控：匿名会话同样不能落在不可用后端上。
+			if (input.backend === "dsh" && canCreateDshSession?.() !== true) {
+				throw new Error(mainCopy("session.dshRuntimeNotInstalled"));
+			}
 			const result = await createAnonymousSession(input);
 			void appLogger.info("session", "Anonymous session created", {
 				sessionId: result.session.id,
@@ -796,14 +826,22 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return messages;
 		},
 	);
-	/** 子代理列表：从会话文件 subagents:record + catalog 子会话回填合成。 */
-	ipcMain.handle(
-		ipcChannels.sessionsListSubagents,
-		async (_event, sessionId: string) => {
-			if (typeof sessionId !== "string" || !sessionId) return [];
-			const entry = sessionCatalog.get(sessionId);
-			if (!entry?.filePath) return [];
-			const records = await agentManager.readSessionSubagentRecords(entry.filePath);
+		/** 子代理列表：从会话文件 subagents:record + catalog 子会话回填合成。 */
+		ipcMain.handle(
+			ipcChannels.sessionsListSubagents,
+			async (_event, sessionId: string) => {
+				if (typeof sessionId !== "string" || !sessionId) return [];
+				const entry = sessionCatalog.get(sessionId);
+				if (!entry?.filePath) return [];
+				let records = await agentManager.readSessionSubagentRecords(entry.filePath);
+				// acp_delegate 推导条目在会话无活 runtime 时残留的 running 视为已终止：
+				// 终态通知没写进文件（进程被杀/崩溃）的委托在历史会话里永远是 running，
+				// 会误导为仍在运行；活会话保持 running，由后续通知/桥接覆盖。
+				// 与 start 锚点残留合成 stopped 同一语义（见 downgradeStaleRunning）。
+				if (!sessionRuntimeCoordinator.getTarget(sessionId)
+					&& !sessionRuntimeCoordinator.isActivating(sessionId)) {
+					records = downgradeStaleRunning(records);
+				}
 			// 回填 childSessionPath：按 parentSessionPath === 本会话 filePath 收集所有子会话，
 			// 再按子会话名 `${type}#${id前8位}` 精确匹配。
 			const children = sessionCatalog.listEntries()
@@ -1479,6 +1517,40 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			? getDshStatus()
 			: { started: false, homeDir: "" }),
 	);
+	// DSH runtime 安装态查询：未装配 dshBackend = 无 DSH 后端，按 notInstalled 返回
+	//（渲染层据此隐藏 DSH UI、显示安装引导，不会出现裸报错）。
+	ipcMain.handle(
+		ipcChannels.dshRuntimeGetStatus,
+		async () =>
+			getDshRuntimeStatus
+				? getDshRuntimeStatus()
+				: { state: "notInstalled" as const },
+	);
+	// DSH runtime 安装（阶段 2）：进度不走返回值，经 dsh-runtime:install-progress 推送，
+	// 因为下载可能持续数十秒——返回 promise 会让渲染层一直空转等待。
+	ipcMain.handle(ipcChannels.dshRuntimeInstall, async () => {
+		if (!installDshRuntime) throw new Error("DSH runtime installation is not available");
+		return installDshRuntime();
+	});
+	ipcMain.handle(ipcChannels.dshRuntimeInstallLocal, async () => {
+		if (!importDshRuntime) throw new Error("DSH runtime installation is not available");
+		// 对话框在主进程弹：渲染层不参与路径选择，也就没有「传任意路径读文件」的入口。
+		const picked = await dialog.showOpenDialog({
+			title: mainCopy("dsh.runtime.pickArchiveTitle"),
+			filters: [{ name: "DSH runtime", extensions: ["tgz", "tar.gz"] }],
+			properties: ["openFile"],
+		});
+		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
+		const filePath = picked.filePaths[0];
+		if (!filePath || !existsSync(filePath) || !statSync(filePath).isFile()) {
+			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
+		}
+		return importDshRuntime(filePath);
+	});
+	ipcMain.handle(ipcChannels.dshRuntimeUninstall, async () => {
+		if (!uninstallDshRuntime) throw new Error("DSH runtime installation is not available");
+		return uninstallDshRuntime();
+	});
 	ipcMain.handle(
 		ipcChannels.dshConfigDescribe,
 		async () => (describeDshSettings

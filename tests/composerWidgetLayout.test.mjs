@@ -135,7 +135,7 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
     "utf8",
   );
   const widgets = readFileSync(
-    "src/renderer/src/components/session/SessionWidgetsCard.tsx",
+    "src/renderer/src/components/session/SessionTodoStrip.tsx",
     "utf8",
   );
   const goal = readFileSync(
@@ -144,6 +144,10 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
   );
   const queue = readFileSync(
     "src/renderer/src/components/session/ComposerPanels.tsx",
+    "utf8",
+  );
+  const composerAtoms = readFileSync(
+    "src/renderer/src/atoms/composer-atoms.ts",
     "utf8",
   );
 
@@ -160,8 +164,10 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
   for (const source of [widgets, goal, queue]) {
     assert.match(source, /ComposerWidgetFrame/, "all composer cards must share the frame");
   }
-  assert.match(widgets, /widgetsPopoverSegmentFamily/);
-  assert.match(widgets, /SessionWidgetsCard/);
+  assert.match(widgets, /useComposerWidgetCollapsed\(/);
+  assert.match(widgets, /export function progressLabel/);
+  // 弹层时代的独立折叠 family 已随弹层移除：行级折叠统一走 composer 通道
+  assert.doesNotMatch(composerAtoms, /widgetsPopoverSegmentFamily|widgetsDisclosureCollapsedFamily/);
   assert.match(queue, /useComposerWidgetCollapsed\([\s\S]*?queue:/);
   assert.match(queue, /trackRef: RefObject<HTMLElement \| null>/);
 });

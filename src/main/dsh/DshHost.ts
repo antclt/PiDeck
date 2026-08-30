@@ -78,6 +78,12 @@ export class DshHost {
 		 * 只在 host fork 时生效：运行中变更需 host 重启/下次启动才应用（DSH 无 per-session 通道）。
 		 */
 		private readonly resolveHostProxyEnvPatch: () => HostProxyEnvPatch | undefined = () => undefined,
+		/**
+		 * 外部 DSH runtime 根目录（阶段 2：userData/runtimes/dsh/<version>，其下有 node_modules）。
+		 * 返回 undefined 时回退 app 内置 node_modules（依赖分区前的存量包走这条）。
+		 * 只影响 @deepseek-ai/* 的解析；hostEntry 与桥代码始终在 app 内。
+		 */
+		private readonly resolveRuntimeAppRoot: () => string | undefined = () => undefined,
 	) {}
 
 	/** 订阅 host-ready（首次启动与崩溃自动重启；E4：崩溃后恢复运行时状态）。 */
@@ -704,7 +710,11 @@ export class DshHost {
 		this.acquireHostLock();
 
 		// 定位 hostEntry 产物与 node_modules 锚点（bareModuleBaseUrl）。
-		const require = createRequire(join(this.getAppPath(), "package.json"));
+		// @deepseek-ai/* 现在可能来自外部 runtime（阶段 2：userData/runtimes/dsh/<v>），
+		// 因此 require 基准改用 runtime 目录而不是 appPath；未装 runtime 时回退内置。
+		// hostEntry 仍是 PiDeck 自己的产物，继续从 appPath 解析。
+		const runtimeRoot = this.resolveRuntimeAppRoot?.() ?? this.getAppPath();
+		const require = createRequire(join(runtimeRoot, "package.json"));
 		const appRoot = dirname(dirname(dirname(require.resolve("@deepseek-ai/dsh-base/package.json"))));
 		const hostEntryPath = resolveHostEntryPath(this.getAppPath());
 

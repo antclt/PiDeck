@@ -38,7 +38,7 @@ import type { ImageGenMeta } from "../../../shared/types/imagegen";
 import {
   busySendDeliveryAtom,
   cacheSessionMessagesAtom,
-  defaultAgentBackendAtom,
+  effectiveAgentBackendAtom,
   imageGenConfigAtom,
   sessionAttachmentsByIdAtom,
   sessionComposerModeByIdAtom,
@@ -391,7 +391,8 @@ export function useSessionComposerController(
   // 同一解析器 launchDefaults），让底栏/选择器在用户从未设置欢迎页偏好时也能
   // 显示当前默认模型/思考档位。真实会话的默认值写在 record 里走原链路，
   // 不需要这里重复解析。
-  const defaultAgentBackend = useAtomValue(defaultAgentBackendAtom);
+  // 读「有效」后端（经 DSH runtime 安装态钳制）：引导页预取的启动默认不会指向不可用后端。
+  const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
   const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
   useEffect(() => {
     if (record) return;

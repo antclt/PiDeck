@@ -1,8 +1,9 @@
 /**
  * useSessionSubagents — pi-subagents 子代理列表数据 hook。
  *
- * 三源合并（主进程 IPC 的 record 记录 + 桥接扩展实时 widget 快照 + 工具调用推导兜底），
- * 输出统一数组供 SessionWidgetsCard 渲染。
+ * 三源合并（主进程 IPC 的 record 记录 + 桥接扩展实时 widget 快照 + 工具调用推导兜底；
+ * 推导兜底覆盖 billion-context-pi 的 acp_delegate 委托链，见主进程 acpDelegateSubagents），
+ * 输出统一数组供 SessionSubagentsStrip 渲染。
  *
  * @module useSessionSubagents
  */
@@ -35,6 +36,7 @@ interface BridgeSnapshot {
 		completedAt?: number;
 		result?: string;
 		error?: string;
+		via?: string;
 	}>;
 }
 
@@ -53,7 +55,7 @@ function parseBridgeSnapshot(lines: readonly string[] | undefined): {
 		const snap: BridgeSnapshot = JSON.parse(lines[0]);
 		const pluginActive = snap.pluginActive === true;
 		const entries: PiSubagentEntry[] = (snap.agents ?? [])
-			.map((a) => {
+			.map((a): PiSubagentEntry => {
 				const status = VALID_STATUSES.has(a.status ?? "") ? a.status : "queued";
 				return {
 					id: a.id ?? "",
@@ -66,6 +68,7 @@ function parseBridgeSnapshot(lines: readonly string[] | undefined): {
 					completedAt: typeof a.completedAt === "number" ? a.completedAt : undefined,
 					result: typeof a.result === "string" ? a.result : undefined,
 					error: typeof a.error === "string" ? a.error : undefined,
+					via: a.via === "acp-delegate" ? "acp-delegate" : undefined,
 					source: "bridge" as const,
 				};
 			})

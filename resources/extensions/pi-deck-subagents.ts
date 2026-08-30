@@ -4,6 +4,11 @@
  * 订阅 @tintinweb/pi-subagents 插件的生命周期事件，累积快照，经 setWidget 推
  * 送给 PiDeck 渲染层。桥接失效不影响主功能（面板回落为 record + 工具调用推导）。
  *
+ * 另桥接 billion-context-pi 的 acp_delegate 委托链（独立 spawn 子进程，不发插件
+ * 事件、不落 record、运行状态 widget 仅 TUI 模式激活）：监听工具执行事件与终态
+ * 系统通知，并入同一快照；派发即落 start 锚点、终态落 subagents:record，读取侧
+ * （SessionHistoryReader）与 pi-subagents 数据同通道复用。
+ *
  * @packageDocumentation
  */
 
@@ -24,6 +29,8 @@ type AgentSnapshot = {
 	/** 终态结果预览：事件 payload 携带的 result/error 文本，截断控制 widget 体积；完整文本走 record（会话文件）。 */
 	result?: string;
 	error?: string;
+	/** 产出来源通道：acp-delegate = billion-context-pi 的 acp_delegate 委托链。 */
+	via?: "acp-delegate";
 };
 
 type SnapshotState = Map<string, AgentSnapshot>;
@@ -174,6 +181,145 @@ export function reduceSnapshot(
 }
 
 /* ------------------------------------------------------------------ */
+/* acp_delegate（billion-context-pi）桥接                               */
+/* ------------------------------------------------------------------ */
+
+const ACP_DELEGATE_TOOL = "acp_delegate";
+const ACP_CANCEL_TOOL = "acp_delegate_cancel";
+const ACP_VIA = "acp-delegate" as const;
+
+/** 派发确认 / 终态通知文本中的 runId（形如 runId `del_xxx`）。 */
+export function extractAcpRunId(text: string): string | undefined {
+	const match = /runId `([^`]+)`/.exec(text);
+	return match?.[1];
+}
+
+/** FAILED 通知中的错误摘录（Output: ~~~ 围栏块）；截断 2000 字符与 record 预览对齐。 */
+export function extractAcpErrorExcerpt(text: string): string | undefined {
+	const match = /Output:\s*\n?~~~\n?([\s\S]*?)~~~/.exec(text);
+	const excerpt = match?.[1]?.trim();
+	return excerpt ? excerpt.slice(0, 2000) : undefined;
+}
+
+function extractTextItems(items: unknown[]): string {
+	let out = "";
+	for (const item of items) {
+		if (item && typeof item === "object" && (item as Record<string, unknown>).type === "text") {
+			const text = (item as Record<string, unknown>).text;
+			if (typeof text === "string") out += text;
+		}
+	}
+	return out;
+}
+
+/** tool_execution_end 的 result（AgentToolResult | string | 文本数组）归一化为文本。 */
+export function extractToolResultText(result: unknown): string {
+	if (typeof result === "string") return result;
+	if (Array.isArray(result)) return extractTextItems(result);
+	if (result && typeof result === "object") {
+		const content = (result as Record<string, unknown>).content;
+		if (Array.isArray(content)) return extractTextItems(content);
+	}
+	return "";
+}
+
+function isAcpTerminalStatus(status: AgentSnapshot["status"]): boolean {
+	return status !== "queued" && status !== "running";
+}
+
+/**
+ * 工具执行事件 → acp 委托快照条目（与插件快照共用同一 AgentSnapshot 状态集合，
+ * 条目 id 固定为派发 toolCallId，与主进程推导/record 落盘对齐）。
+ *
+ * - start(acp_delegate)：running；幂等。
+ * - start(acp_delegate_cancel)：runId 反查条目 → stopped（end 事件不带 args，
+ *   取消意图在 start 已明确，容忍取消失败误报终态的边缘场景）。
+ * - end(acp_delegate)：从结果文本提取 runId 记入反查表（派发 ≠ 终态，状态不变）。
+ */
+export function reduceAcpToolEvent(
+	state: SnapshotState,
+	runIds: ReadonlyMap<string, string>,
+	eventName: string,
+	data: unknown,
+	now: number,
+): { state: SnapshotState; runIds: Map<string, string>; changed: boolean } {
+	if (!data || typeof data !== "object") return { state, runIds, changed: false };
+	const event = data as Record<string, unknown>;
+	const toolName = typeof event.toolName === "string" ? event.toolName : "";
+	const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : "";
+	if (!toolCallId) return { state, runIds, changed: false };
+	const args = event.args && typeof event.args === "object"
+		? event.args as Record<string, unknown>
+		: {};
+
+	if (eventName === "tool_execution_start" && toolName === ACP_DELEGATE_TOOL) {
+		if (state.has(toolCallId)) return { state, runIds, changed: false };
+		const next = cloneState(state);
+		next.set(toolCallId, {
+			id: toolCallId,
+			type: typeof args.agent === "string" && args.agent ? args.agent : ACP_DELEGATE_TOOL,
+			description: typeof args.task === "string" ? args.task : "",
+			status: "running",
+			toolUses: 0,
+			tokens: 0,
+			startedAt: now,
+			via: ACP_VIA,
+		});
+		return { state: next, runIds, changed: true };
+	}
+
+	if (eventName === "tool_execution_start" && toolName === ACP_CANCEL_TOOL) {
+		const runId = typeof args.runId === "string" ? args.runId : "";
+		const entryId = runId ? runIds.get(runId) : undefined;
+		if (!entryId) return { state, runIds, changed: false };
+		const existing = state.get(entryId);
+		if (!existing || isAcpTerminalStatus(existing.status)) return { state, runIds, changed: false };
+		const next = cloneState(state);
+		next.set(entryId, { ...existing, status: "stopped", completedAt: now });
+		return { state: next, runIds, changed: true };
+	}
+
+	if (eventName === "tool_execution_end" && toolName === ACP_DELEGATE_TOOL) {
+		const runId = extractAcpRunId(extractToolResultText(event.result));
+		if (!runId) return { state, runIds, changed: false };
+		const nextRunIds = new Map(runIds);
+		nextRunIds.set(runId, toolCallId);
+		return { state, runIds: nextRunIds, changed: false };
+	}
+
+	return { state, runIds, changed: false };
+}
+
+/**
+ * 终态系统通知（role=user，"[acp_delegate completed]" / "[acp_delegate FAILED ⚠️]"
+ * 开头）→ 终态迁移。这是 acp 委托唯一可靠的完成信号（插件保证失败必达）。
+ * terminalEntryId 供调用方落 subagents:record。
+ */
+export function reduceAcpNotification(
+	state: SnapshotState,
+	runIds: ReadonlyMap<string, string>,
+	text: string,
+	now: number,
+): { state: SnapshotState; changed: boolean; terminalEntryId?: string } {
+	const isCompleted = text.startsWith("[acp_delegate completed]");
+	const isFailed = text.startsWith("[acp_delegate FAILED");
+	if (!isCompleted && !isFailed) return { state, changed: false };
+	const runId = extractAcpRunId(text);
+	const entryId = runId ? runIds.get(runId) : undefined;
+	if (!entryId) return { state, changed: false };
+	const existing = state.get(entryId);
+	if (!existing || isAcpTerminalStatus(existing.status)) return { state, changed: false };
+	const next = cloneState(state);
+	next.set(entryId, {
+		...existing,
+		status: isFailed ? "error" : "completed",
+		completedAt: now,
+		...(isFailed ? { error: extractAcpErrorExcerpt(text) ?? existing.error } : {}),
+	});
+	return { state: next, changed: true, terminalEntryId: entryId };
+}
+
+/* ------------------------------------------------------------------ */
 /* 扩展主体                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -187,6 +333,13 @@ const WIDGET_KEY = "pi-deck-subagents";
  * 残留锚点（无 record 覆盖）合成 stopped 条目，改动需两侧同步。
  */
 const START_ENTRY_TYPE = "pi-deck-subagent-start";
+
+/**
+ * pi-subagents 插件完成时落盘的 record 条目类型；acp_delegate 委托在终态通知
+ * 到达时按同一形状落盘，读取侧（SessionHistoryReader.readSubagentRecords）
+ * 同字符串过滤，两侧改动需同步。
+ */
+const RECORD_ENTRY_TYPE = "subagents:record";
 
 export default function piDeckSubagentsBridge(pi: any): void {
 	let snapshot: SnapshotState = new Map();
@@ -205,6 +358,7 @@ export default function piDeckSubagentsBridge(pi: any): void {
 			completedAt: a.completedAt,
 			result: a.result,
 				error: a.error,
+			via: a.via,
 		}));
 
 		// line-based，首行机器可读 JSON（与 pi-deck-todo 同约定）
@@ -272,12 +426,84 @@ export default function piDeckSubagentsBridge(pi: any): void {
 	pi.events.on("subagents:failed", onSubagentEvent("subagents:failed"));
 	pi.events.on("subagents:steered", onSubagentEvent("subagents:steered"));
 
+	/* acp_delegate（billion-context-pi）桥接：
+	 * 工具执行事件与终态系统通知走 pi.on 生命周期事件表（非 pi.events）。 */
+
+	// runId → 快照条目 id（派发 toolCallId）：终态通知/取消只带 runId。
+	let acpRunIds: Map<string, string> = new Map();
+
+	function handleAcpToolEvent(eventName: string, data: unknown, ctx?: any) {
+		if (ctx) savedCtx = ctx;
+		const result = reduceAcpToolEvent(snapshot, acpRunIds, eventName, data, Date.now());
+		acpRunIds = result.runIds;
+		if (result.state !== snapshot) snapshot = result.state;
+		if (!result.changed) return;
+		// 派发即落 start 锚点：与 pi-subagents created 同语义（运行中被重启终止
+		// → 残留锚点由读取侧合成 stopped）。落盘失败不影响实时桥接。
+		if (eventName === "tool_execution_start") {
+			const toolCallId = (data as any)?.toolCallId;
+			const entry = typeof toolCallId === "string" ? snapshot.get(toolCallId) : undefined;
+			if (entry) {
+				try {
+					pi.appendEntry(START_ENTRY_TYPE, {
+						id: entry.id,
+						type: entry.type,
+						description: entry.description,
+						startedAt: entry.startedAt,
+					});
+				} catch {
+					// appendEntry 失败不阻断桥接：面板实时数据不依赖锚点
+				}
+			}
+		}
+		if (savedCtx) schedulePush(savedCtx);
+	}
+
+	pi.on("tool_execution_start", (event: unknown, ctx?: any) => handleAcpToolEvent("tool_execution_start", event, ctx));
+	pi.on("tool_execution_end", (event: unknown, ctx?: any) => handleAcpToolEvent("tool_execution_end", event, ctx));
+
+	// 终态系统通知以 user 消息注入会话（message_end 可捕获）：据此迁到终态并落
+	// subagents:record（历史重建的权威数据，读取侧与 pi-subagents record 同通道）。
+	pi.on("message_end", (event: unknown, ctx?: any) => {
+		if (ctx) savedCtx = ctx;
+		const message = event && typeof event === "object" ? (event as Record<string, unknown>).message : undefined;
+		if (!message || typeof message !== "object") return;
+		const record = message as Record<string, unknown>;
+		if (record.role !== "user") return;
+		const text = typeof record.content === "string"
+			? record.content
+			: Array.isArray(record.content) ? extractTextItems(record.content) : "";
+		if (!text.startsWith("[acp_delegate ")) return;
+		const result = reduceAcpNotification(snapshot, acpRunIds, text, Date.now());
+		if (result.state !== snapshot) snapshot = result.state;
+		if (!result.changed) return;
+		const entry = result.terminalEntryId ? snapshot.get(result.terminalEntryId) : undefined;
+		if (entry) {
+			try {
+				pi.appendEntry(RECORD_ENTRY_TYPE, {
+					id: entry.id,
+					type: entry.type,
+					description: entry.description,
+					status: entry.status,
+					startedAt: entry.startedAt,
+					completedAt: entry.completedAt,
+					error: entry.error,
+					via: ACP_VIA,
+				});
+			} catch {
+				// 落盘失败仅损失历史重建（主进程推导兜底仍可从通知文本恢复），不影响实时桥接
+			}
+		}
+		if (savedCtx) schedulePush(savedCtx);
+	});
+
 	pi.on("session_start", (_event: unknown, ctx: any) => {
 		// 重置快照（新会话开始，无存活后台代理）。
 		// pluginActive 不重置：一个 pi 进程对应一个会话，插件加载状态进程级不变；
 		// 且插件在首个 session_start 时广播 ready（其处理器先于本扩展执行），
 		// 若在此重置会把 ready 置的 true 覆盖掉，导致插件在位却误报未安装。
 		snapshot = new Map();
+		acpRunIds = new Map();
 		savedCtx = ctx;
 		if (debounceTimer !== null) {
 			clearTimeout(debounceTimer);

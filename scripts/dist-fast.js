@@ -25,13 +25,19 @@ const root = path.resolve(__dirname, "..");
 const args = process.argv.slice(2);
 const formats = args.length > 0 ? args.join(" ") : "nsis";
 
-console.log(`[1/3] 构建本地 packages（file: 依赖需要 lib/ 产物）…`);
+console.log(`[1/4] 构建本地 packages（file: 依赖需要 lib/ 产物）…`);
 execSync("npm run build:packages", { cwd: root, stdio: "inherit", shell: true });
 
-console.log(`\n[2/3] electron-vite build（跳过 tsc 全量类型检查）…`);
+// DSH runtime 随包资源：electron-builder 的 extraResources 会去 dist-runtime/dsh-runtime
+// 取，目录为空（只有 .gitkeep）时打出来的包 DSH 不可用。--if-missing 让后续快速打包
+// 跳过重打（依赖没变的话产物是一样的），只有首次或手动删除后才花那 20 秒。
+console.log(`\n[2/4] 准备 DSH runtime 随包资源（--if-missing）…`);
+execSync("node scripts/pack-dsh-runtime.mjs --if-missing", { cwd: root, stdio: "inherit", shell: true });
+
+console.log(`\n[3/4] electron-vite build（跳过 tsc 全量类型检查）…`);
 execSync("npx electron-vite build", { cwd: root, stdio: "inherit", shell: true });
 
-console.log(`\n[3/3] electron-builder --win ${formats}（compression=store + 跳过 asar 重打包）…`);
+console.log(`\n[4/4] electron-builder --win ${formats}（compression=store + 跳过 asar 重打包）…`);
 execSync(`npx electron-builder --win ${formats} --config.compression=store`, {
 	cwd: root,
 	stdio: "inherit",

@@ -125,16 +125,16 @@ test("fileChangeToDiffLines: write yields all-added lines, edit yields removed+a
 	]);
 });
 
-test("file changes render through the unified widgets card, not a per-strip owner", () => {
+test("file changes render through the files strip, not a per-strip owner", () => {
 	const timeline = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
 	assert.ok(!timeline.includes("TurnFileChanges"), "timeline should not own the file strip");
 	const turnRow = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
 	assert.doesNotMatch(turnRow, /TurnFileChanges/);
 	const sessionView = readFileSync("src/renderer/src/components/session/SessionView.tsx", "utf8");
-	assert.match(sessionView, /SessionWidgetsCard/);
+	assert.match(sessionView, /SessionFilesStrip/);
 	assert.match(sessionView, /latestAgentRun/);
-	const card = readFileSync("src/renderer/src/components/session/SessionWidgetsCard.tsx", "utf8");
-	assert.match(card, /useSessionFileChanges\(/, "files pane should use the session-level file changes hook");
-	assert.match(card, /data-testid="session-widgets-card"/);
-	assert.doesNotMatch(card, /MAX_VISIBLE_FILES|moreFiles/, "no truncation/more-files UI in the merged card");
+	const strip = readFileSync("src/renderer/src/components/session/SessionFilesStrip.tsx", "utf8");
+	assert.match(strip, /useSessionFileChanges\(/, "files strip should use the session-level file changes hook");
+	assert.match(strip, /data-testid="session-files-strip"/);
+	assert.doesNotMatch(strip, /MAX_VISIBLE_FILES|moreFiles/, "no truncation/more-files UI in the files strip");
 });

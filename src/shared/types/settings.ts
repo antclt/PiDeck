@@ -368,6 +368,13 @@ export type AppSettings = {
 	dshHomeDir?: string;
 
 	/**
+	 * DSH runtime 下载源索引地址（覆盖默认 GitHub Release 资产）。
+	 * 用于镜像/内网分发：索引是 dsh-runtime-releases.json，条目里给出 tarball 直链与 sha256。
+	 * 缺省/空串 = 用内置默认地址。sha256 校验始终生效，镜像也不能绕过。
+	 */
+	dshRuntimeIndexUrl?: string;
+
+	/**
 	 * DSH 审批自动放行：开启后 DSH 会话的工具/命令审批（approval/requested）
 	 * 自动应答 allowed-once，不再弹出确认。
 	 * 缺省 undefined/false：保持人工审批（会话内 Ask 弹窗）。

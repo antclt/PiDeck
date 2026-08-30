@@ -5,8 +5,8 @@ import { useCallback } from "react";
  * 文件列表“保存全部”清空快照：sessionId -> (path -> 清空时刻的 count)。
  * 只有新出现的改动（新路径或同路径 count 增长）才重新展示，已清空条目不再出现。
  *
- * 弹层（SessionWidgetsPopover，保存全部按钮）与分段条徽标（SessionWidgetsCard，
- * 未清空文件数）跨组件共享同一份状态，所以用 atom 而非各自 localStorage state。
+ * 文件横栏（SessionFilesStrip，保存全部按钮）与待办/子代理横栏共用同一份清空
+ * 快照，所以用 atom 而非各自 localStorage state。
  */
 
 const DISMISSED_FILES_KEY = "pid:session-dismissed-files-v1";

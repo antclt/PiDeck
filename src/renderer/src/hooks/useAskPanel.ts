@@ -6,7 +6,7 @@ import {
 	askPanelOriginSessionIdAtom,
 	askPanelSessionIdAtom,
 } from "../atoms/ask-panel-atoms";
-import { defaultAgentBackendAtom } from "../atoms/app-ui-atoms";
+import { effectiveAgentBackendAtom } from "../atoms/app-ui-atoms";
 import { sessionRecordsAtom } from "../atoms/session-atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../atoms/session-selectors";
 import { desktopApi } from "../desktopApi";
@@ -29,7 +29,8 @@ export function useAskPanel() {
 	const [sessionId, setSessionId] = useAtom(askPanelSessionIdAtom);
 	const [originSessionId, setOriginSessionId] = useAtom(askPanelOriginSessionIdAtom);
 	const [creating, setCreating] = useAtom(askPanelCreatingAtom);
-	const defaultAgentBackend = useAtomValue(defaultAgentBackendAtom);
+	// 读「有效」后端（经 DSH runtime 安装态钳制）：runtime 不可用时新建不会落在 dsh 上。
+	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 	const store = useStore();
 
 	// 创建或复用匿名会话；失败返回 null 并 toast

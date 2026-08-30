@@ -29,7 +29,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -133,6 +133,8 @@ import {
   useSessionActions,
 } from "./hooks/useSessionActions";
 import { useScratchPad } from "./hooks/useScratchPad";
+import { useDshRuntimeStatusSync } from "./hooks/useDshRuntimeStatusSync";
+import { useDshRuntimeMigrationNotice } from "./hooks/useDshRuntimeMigrationNotice";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
@@ -711,6 +713,9 @@ export function App() {
   useEffect(() => {
     setDefaultAgentBackend(settings.defaultAgentBackend);
   }, [settings.defaultAgentBackend, setDefaultAgentBackend]);
+  // 派生出「有效」后端：设置值经 DSH runtime 安装态钳制（runtime 不可用时 dsh → pi）。
+  // 所有新建会话入口统一读这个值，避免设置里残留 dsh 而 runtime 已不可用导致裸报错。
+  const effectiveAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 
   // 忙碌时发送的默认投递行为同步给发送链路（composer/App 决策时刻从 atom 读取，
   // 设置保存后无需重挂载会话即可生效，与 defaultAgentBackend 同一模式）。
@@ -842,6 +847,11 @@ export function App() {
   const pendingAgentsRef = useRef<PendingAgentTab[]>([]);
 
   const scratchPad = useScratchPad();
+  // DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
+  // 必须早于任何按安装态门控的 UI 计算，否则首帧会用 checking 初值渲染。
+  useDshRuntimeStatusSync();
+  // 存量 dsh 用户升级后 runtime 不在时给一次直达提示（有 dsh 会话才提示，只提示一次）。
+  useDshRuntimeMigrationNotice();
 
   // Drawer loading handled by useWorkspacePanels; only expandedDirs logic remains.
   useEffect(() => {
@@ -1427,8 +1437,8 @@ export function App() {
     refreshProjectSessions,
     api,
     showToast,
-    // 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh）
-    defaultBackend: settings.defaultAgentBackend,
+    // 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh），经 DSH runtime 安装态钳制
+    defaultBackend: effectiveAgentBackend,
   });
 
   // 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
@@ -1519,11 +1529,12 @@ export function App() {
         // 统一创建 draft 会话（Chat 项目也走普通会话、可保存）：创建不拉 pi，
         // selectSessionCommand 同步切页、立即进入会话页；匿名会话仅保留给侧栏
         // 「新建临时对话」入口（createAnonymousSessionWithTab）。
-        // 默认后端跟随设置项（settings.defaultAgentBackend，默认 pi）。
+        // 默认后端跟随设置项（settings.defaultAgentBackend，默认 pi），
+        // 且经 DSH runtime 安装态钳制——runtime 不可用时不会尝试建 dsh 会话。
         const session = await api.sessions.createDraft({
           projectId: project.id,
-          title: settings.defaultAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
-          backend: settings.defaultAgentBackend,
+          title: effectiveAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
+          backend: effectiveAgentBackend,
           ...launchPreferences,
         });
         upsertSession(session);
@@ -1561,7 +1572,7 @@ export function App() {
       selectSessionCommand,
       upsertSession,
       workspaceChrome,
-      settings.defaultAgentBackend,
+      effectiveAgentBackend,
     ],
   );
 

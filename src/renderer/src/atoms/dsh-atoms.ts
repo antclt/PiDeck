@@ -10,6 +10,7 @@
  * 目录加载逻辑（loadDshAgentPresets）放在消费组件 DshAgentPresetControl 内。
  */
 import { atom } from "jotai";
+import type { DshRuntimeStatus } from "../../../shared/types/dshRuntime";
 
 /** agentPreset.list 名单行的身份字段（与 DshHost.listAgentPresets 返回子集一致）。 */
 export type DshAgentPresetIdentity = {
@@ -20,6 +21,15 @@ export type DshAgentPresetIdentity = {
 	description?: string;
 	broken?: string;
 };
+
+/**
+ * DSH runtime 安装态快照（AgentRuntimeProvider 阶段 1，IPC dsh-runtime:get-status）。
+ * 初值 checking；useDshRuntimeStatusSync（App 挂载一份）拉取并订阅变更写入。
+ * 消费方：ConfigModal（DSH Tab 门控）、CommonTab（默认后端选项）、
+ * App（defaultAgentBackend 钳制）。atoms/index.ts 会被 Node 测试整体加载，
+ * 加载逻辑必须留在 hook，本文件保持纯状态。
+ */
+export const dshRuntimeStatusAtom = atom<DshRuntimeStatus>({ state: "checking" });
 
 /** 目录缓存：null = 未加载或加载失败（可重试）；[] = 已确认部署未装配预设。 */
 export const dshAgentPresetsAtom = atom<DshAgentPresetIdentity[] | null>(null);

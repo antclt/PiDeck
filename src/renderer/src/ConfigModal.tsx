@@ -85,6 +85,10 @@ import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnRe
 import { formatConfigUnsavedMessage, summarizeConfigUnsavedChanges, type ConfigUnsavedItem } from "./config/configUnsavedChangesSummary";
 import { DirtyMarker } from "./components/app/settings/SettingRows";
 import { isValidProviderName } from "../../shared/providerName";
+import { useAtomValue } from "jotai";
+import { dshRuntimeStatusAtom } from "./atoms";
+import { dshUiVisibilityFor } from "../../shared/types/dshRuntime";
+import { DshRuntimeInstallGuide } from "./config/DshRuntimeInstallGuide";
 
 const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi })
 	.piDesktop;
@@ -1991,6 +1995,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** DSH 配置页句柄（顶部统一保存按钮经 saveByKey 调用其 save）。 */
 	const dshConfigRef = useRef<DshConfigTabHandle>(null);
 
+	// DSH runtime 安装态门控：runtime 不可用时整 Tab 换成安装引导（含下载与手动导入），
+	// 不渲染任何 dsh 配置表单（表单此时项项都会失败）。
+	const dshRuntimeStatus = useAtomValue(dshRuntimeStatusAtom);
+	const dshUi = dshUiVisibilityFor(dshRuntimeStatus.state);
+
 	/** 安全管理草稿脏状态上报：有修改 markDirty("security")，保存成功/卸载清标记。 */
 	const handleSecurityDirtyChange = useCallback(
 		(dirty: boolean) => {
@@ -2012,6 +2021,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const saveByKey = async (tabKey: string): Promise<boolean> => {
 		switch (tabKey) {
 			case "dsh": {
+				// runtime 不可用时整页是安装引导，没有任何可保存草稿：直接视为保存通过，
+				// 否则统一保存按钮会因为拿不到 DshConfigTab 句柄而一直报「保存失败」。
+				if (!dshUi.showDshConfigForms) return true;
 				// DSH 页保存成功后显式清未保存标记：子分区草稿已清空并上报 false，
 				// 但卸载/收起的分区可能残留脏来源，这里兜底保证黄点消失。
 				const ok = (await dshConfigRef.current?.save()) ?? false;
@@ -2201,12 +2213,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				{/* forceMount + inactive hidden：Pi/DSH 两个后端页都保持挂载，切换后端不会丢草稿；
 				    与 config:mcp 同款做法，inactive 必须 hidden 避免叠在另一页上。 */}
 				<TabsContent value="dsh" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
-					<DshConfigTab
-						ref={dshConfigRef}
-						onDirtyChange={handleDshDirtyChange}
-						dirtyNavIds={dshDirtyNavIds}
-						onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "dsh")}
-					/>
+					{dshUi.showDshConfigForms ? (
+						<DshConfigTab
+							ref={dshConfigRef}
+							onDirtyChange={handleDshDirtyChange}
+							dirtyNavIds={dshDirtyNavIds}
+							onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "dsh")}
+						/>
+					) : dshUi.showInstallGuide ? (
+						<DshRuntimeInstallGuide status={dshRuntimeStatus} />
+					) : null}
 				</TabsContent>
 				<TabsContent value="pi" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
 			{/* 默认浅色主题整页同底（bg-background），避免顶栏白 / 下方多层灰的割裂感。

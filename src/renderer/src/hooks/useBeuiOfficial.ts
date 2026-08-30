@@ -10,7 +10,7 @@
  * 这套双轨（beui-official/ + *.custom.tsx + wrapper）收敛后，
  * 本文件与开关一起删除。
  */
-export const USE_OFFICIAL_BEUI = false;
+export const USE_OFFICIAL_BEUI = true;
 
 /**
  * 读取「是否使用 beUI 官方原版组件」开关。

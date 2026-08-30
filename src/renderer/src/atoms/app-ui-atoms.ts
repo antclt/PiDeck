@@ -2,6 +2,8 @@ import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import type { BusySendDelivery } from "../../../shared/busySendDelivery";
 import type { AgentBackend } from "../../../shared/types";
+import { resolveEffectiveAgentBackend } from "../../../shared/types/dshRuntime";
+import { dshRuntimeStatusAtom } from "./dsh-atoms";
 import {
   defaultExpandedSidebarProjects,
   readExpandedSidebarProjects,
@@ -73,6 +75,18 @@ export const openSettingsAtom = atom(null, (_get, set, target?: SettingsFocusTar
  * 默认 "pi"（与 SettingsStore.defaultSettings 保持一致，2026-12 兼容期调整）。
  */
 export const defaultAgentBackendAtom = atom<AgentBackend>("pi");
+
+/**
+ * 「有效」默认后端（AgentRuntimeProvider 阶段 1）：设置值经 DSH runtime 安装态钳制。
+ *
+ * 为什么是派生 atom 而不是在 App 的 settings effect 里一次性修正：安装态由 IPC 异步
+ * 送达（初值 checking），晚于 settings 落 atom；派生能保证状态到位后所有消费方
+ * （新建会话 / 并行问询 / 启动默认值）同帧收敛，不会留下「设置=dsh 但已不可用」的窗口。
+ * 钳制规则是纯函数 resolveEffectiveAgentBackend（shared/types/dshRuntime，有单测）。
+ */
+export const effectiveAgentBackendAtom = atom<AgentBackend>((get) =>
+	resolveEffectiveAgentBackend(get(defaultAgentBackendAtom), get(dshRuntimeStatusAtom).state),
+);
 
 /**
  * 忙碌时发送消息的默认投递行为（设置项 busySendDelivery 的渲染层快照）。

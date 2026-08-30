@@ -4,6 +4,9 @@ node_modules/
 # Build outputs
 out/
 dist/
+# DSH runtime 产物（.gitkeep 是占位，必须保留：extraResources 的源目录不能缺失）
+dist-runtime/**/*.tgz
+dist-runtime/*.json
 release/
 release-test/
 release-fix/

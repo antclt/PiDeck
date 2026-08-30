@@ -68,6 +68,10 @@ function loadAgentMessageProjectorModule() {
         // AgentManager 依赖的扩展错误原因格式化；本测试不涉及错误文案，透传字符串即可
         return { formatExtensionErrorReason: (reason) => String(reason ?? "") };
       }
+      // acp_delegate 推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+      if (specifier === "./acpDelegateSubagents") {
+        return { mergeSubagentSources: (records) => records };
+      }
       return nodeRequire(specifier);
     },
     Date,
@@ -117,6 +121,8 @@ function loadAgentManagerModule() {
 		require: (specifier) => {
 			// todo 快照解析纯函数：本测试不覆盖，空实现满足依赖契约
 			if (specifier === "../../shared/sessionTodo") return { parseTodoSnapshotData: () => undefined };
+			// acp_delegate 推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+			if (specifier === "./acpDelegateSubagents") return { deriveAcpDelegateEntries: () => [] };
 			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
 			if (specifier === "../../shared/fileChanges") return { collectSessionFileChanges: () => [] };
 			return nodeRequire(specifier);
@@ -228,6 +234,10 @@ function loadAgentManagerModule() {
       if (specifier === "./extensionError") {
         // AgentManager 依赖的扩展错误原因格式化；本测试不涉及错误文案，透传字符串即可
         return { formatExtensionErrorReason: (reason) => String(reason ?? "") };
+      }
+      // acp_delegate 推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+      if (specifier === "./acpDelegateSubagents") {
+        return { mergeSubagentSources: (records) => records };
       }
       return nodeRequire(specifier);
     },

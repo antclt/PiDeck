@@ -569,6 +569,13 @@ export function createPreviewApi(): PiDesktopApi {
 				started: false,
 				homeDir: "",
 			}),
+			// 预览环境无 DSH 后端：按未安装处理（UI 走安装引导，不裸报错）。
+			getDshRuntimeStatus: async () => ({ state: "notInstalled" as const }),
+			onDshRuntimeStatusChanged: () => () => {},
+			installDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
+			importDshRuntimeFile: async () => ({ ok: false, error: "unavailable in preview" }),
+			uninstallDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
+			onDshRuntimeInstallProgress: () => () => {},
 			describeDshSettings: async () => ({ writable: false, hasDocument: false, namespaces: [] }),
 			updateDshSettings: async () => undefined,
 			mutateDshSettings: async () => undefined,

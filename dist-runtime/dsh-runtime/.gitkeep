@@ -1,0 +1,3 @@
+# 随包 DSH runtime 资源目录（electron-builder extraResources 的源）。
+# 目录必须存在，否则打包时 extraResources 找不到源会失败。
+# 内容由 `npm run runtime:pack` 产出；本文件只是占位，保证空目录也能进版本库。

@@ -29,6 +29,7 @@ import { ipcChannels } from "../../shared/ipc";
 import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { PiProcess } from "./PiProcess";
 import { createCompactRpcRequest } from "./compactRpc";
+import { mergeSubagentSources } from "./acpDelegateSubagents";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { resolveEnabledExtensionPaths } from "../extensions/enabledExtensionResolver";
@@ -877,10 +878,15 @@ export class AgentManager {
 		);
 	}
 	/**
-	 * 读取会话文件中的子代理记录（subagents:record custom 条目）。
+	 * 读取会话文件中的子代理记录（subagents:record custom 条目），并合并
+	 * acp_delegate（billion-context-pi）的工具调用推导条目；同 id 时 record 优先
+	 * （见 mergeSubagentSources 的例外规则）。
 	 */
 	async readSessionSubagentRecords(sessionPath: string) {
-		return this.sessionHistoryReader.readSubagentRecords(sessionPath);
+		const records = await this.sessionHistoryReader.readSubagentRecords(sessionPath);
+		const derived = await this.sessionHistoryReader.readAcpDelegateEntries(sessionPath);
+		if (derived.length === 0) return records;
+		return mergeSubagentSources(records, derived);
 	}
 
 

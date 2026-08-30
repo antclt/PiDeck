@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
+import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
 import type {
 	YaoPromptListResult,
@@ -379,6 +380,39 @@ const api = {
 				started: boolean;
 				homeDir: string;
 			}>,
+		/**
+		 * DSH runtime 安装态（AgentRuntimeProvider 阶段 1）：notInstalled/broken 时
+		 * DSH UI 整体降级为安装引导，新建 dsh 会话被拒。
+		 */
+		getDshRuntimeStatus: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeGetStatus) as Promise<DshRuntimeStatus>,
+		/** DSH runtime 安装态变更推送（阶段 2 安装/卸载时广播）；返回退订函数。 */
+		onDshRuntimeStatusChanged: (callback: (status: DshRuntimeStatus) => void) =>
+			subscribe(ipcChannels.dshRuntimeStatusChanged, callback),
+		/**
+		 * 按需安装 DSH runtime（阶段 2）。进度不在这里返回——下载可能持续数十秒，
+		 * 走 onDshRuntimeInstallProgress 推送。
+		 */
+		installDshRuntime: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeInstall) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 从本地 tgz 导入 runtime（主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
+		importDshRuntimeFile: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocal) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 卸载已安装的 runtime。 */
+		uninstallDshRuntime: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeUninstall) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 安装进度推送（阶段 2）；返回退订函数。 */
+		onDshRuntimeInstallProgress: (callback: (progress: DshRuntimeInstallProgress) => void) =>
+			subscribe(ipcChannels.dshRuntimeInstallProgress, callback),
 		/** DSH settings.describe（脱敏 namespace 视图 + schema）。 */
 		describeDshSettings: () =>
 			ipcRenderer.invoke(ipcChannels.dshConfigDescribe) as Promise<{

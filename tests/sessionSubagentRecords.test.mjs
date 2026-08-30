@@ -443,3 +443,103 @@ test("readSubagentRecords synthesizes stopped from residual start anchors and pr
     rmSync(dir, { recursive: true, force: true });
   }
 });
+/* ------------------------------------------------------------------ */
+/* readAcpDelegateEntries：acp_delegate（billion-context）推导           */
+/* ------------------------------------------------------------------ */
+
+const acpSession = JSON.stringify({
+  type: "session",
+  id: "session-acp",
+  cwd: "/tmp",
+  timestamp: new Date().toISOString(),
+}) + "\n" +
+  // 派发 toolCall
+  JSON.stringify({
+    type: "message",
+    id: "m1",
+    parentId: null,
+    timestamp: "2026-08-30T13:39:40.253Z",
+    message: {
+      role: "assistant",
+      content: [{
+        type: "toolCall",
+        id: "acp_delegate_111",
+        name: "acp_delegate",
+        arguments: { agent: "worker", task: "Generate a markdown file", cwd: "/tmp" },
+      }],
+    },
+  }) + "\n" +
+  // 派发确认（含 runId 关联）
+  JSON.stringify({
+    type: "message",
+    id: "m2",
+    parentId: null,
+    timestamp: "2026-08-30T13:39:40.265Z",
+    message: {
+      role: "toolResult",
+      toolCallId: "acp_delegate_111",
+      toolName: "acp_delegate",
+      content: [{ type: "text", text: "Delegated to **worker** (runId `del_abc123`).\nRunning in the background." }],
+    },
+  }) + "\n" +
+  // 终态系统通知（role=user）
+  JSON.stringify({
+    type: "message",
+    id: "m3",
+    parentId: null,
+    timestamp: "2026-08-30T13:40:11.728Z",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: "[acp_delegate completed] **worker** (runId `del_abc123`, exit 0) No delegates are currently running." }],
+    },
+  }) + "\n" +
+  // 无关行（不含 acp_delegate 字样，走预检跳过路径）
+  JSON.stringify({
+    type: "message",
+    id: "m4",
+    parentId: null,
+    timestamp: "2026-08-30T13:40:12.000Z",
+    message: { role: "user", content: [{ type: "text", text: "继续吧" }] },
+  }) + "\n";
+
+test("readAcpDelegateEntries derives acp_delegate entries from session file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pid-acp-derive-"));
+  const sessionPath = join(dir, "session.jsonl");
+  try {
+    writeSession(sessionPath, acpSession);
+    const reader = createReader();
+    const entries = await reader.readAcpDelegateEntries(sessionPath);
+
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.id, "acp_delegate_111");
+    assert.equal(entry.type, "worker");
+    assert.equal(entry.description, "Generate a markdown file");
+    assert.equal(entry.status, "completed");
+    assert.equal(entry.startedAt, Date.parse("2026-08-30T13:39:40.253Z"));
+    assert.equal(entry.completedAt, Date.parse("2026-08-30T13:40:11.728Z"));
+    assert.equal(entry.source, "toolcall");
+    assert.equal(entry.via, "acp-delegate");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readAcpDelegateEntries returns empty for session without acp activity", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pid-acp-empty-"));
+  const sessionPath = join(dir, "session.jsonl");
+  try {
+    writeSession(sessionPath, JSON.stringify({
+      type: "session", id: "s", cwd: "/tmp", timestamp: new Date().toISOString(),
+    }) + "\n" + JSON.stringify({
+      type: "message", id: "m1", parentId: null, timestamp: new Date().toISOString(),
+      message: { role: "user", content: [{ type: "text", text: "普通会话内容" }] },
+    }) + "\n");
+    const reader = createReader();
+    // VM realm 数组原型不同，deepEqual 不可用
+    const entries = await reader.readAcpDelegateEntries(sessionPath);
+    assert.equal(entries.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
