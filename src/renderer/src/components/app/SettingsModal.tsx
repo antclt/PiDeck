@@ -560,7 +560,18 @@ function SettingsModalContent(props: SettingsModalProps) {
 							/* 应用设置分区：保存常驻且不因「无修改」禁用（无修改也允许再次保存）；
 							   视觉桥保存中禁用防重复提交；有未保存变更时显示「放弃更改」 */
 							<>
-								<Button variant="default" size="sm" onClick={saveAll} disabled={visionDraft.saving}>
+								<Button
+									variant="default"
+									size="sm"
+									onClick={saveAll}
+									disabled={visionDraft.saving || (visionDraft.dirty && visionDraft.modelMissing)}
+									// 视觉桥开启但未选模型时禁用保存：悬停说明原因（对应 visionDraft 的 modelRequired 提示）
+									title={
+										visionDraft.dirty && visionDraft.modelMissing
+											? t("settings.vision.modelRequired")
+											: undefined
+									}
+								>
 									{t("common.save")}
 								</Button>
 								{hasAnyDirtyChanges ? (

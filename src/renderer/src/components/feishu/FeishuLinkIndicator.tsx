@@ -6,6 +6,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import type { FeishuBridgeStatus, FeishuBotConfig } from "../../../../shared/types";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
@@ -50,6 +51,10 @@ export function FeishuLinkIndicator({
 }: Props) {
 	const [open, setOpen] = useState(false);
 	const [selectingBotId, setSelectingBotId] = useState<string | null>(null);
+	/** popover 经 createPortal 渲染到 body 后的视口锚点（trigger 左上角）。
+	 * 原因：composer 底栏是 overflow-y:hidden 的单行滚动容器（da415c99 引入），
+	 * 绝对定位的 popover 向上弹出会被裁剪，表现为「点击后内容不可见」。 */
+	const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
 	const popoverRef = useRef<HTMLDivElement | null>(null);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -76,6 +81,26 @@ export function FeishuLinkIndicator({
 		};
 		document.addEventListener("keydown", handleKeyDown);
 		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, [open]);
+
+	// 打开时按 trigger 位置计算视口锚点；窗口缩放/任意容器滚动时跟随重算（capture 捕获所有滚动容器）
+	useEffect(() => {
+		if (!open) return;
+		const updateAnchor = () => {
+			const el = triggerRef.current;
+			if (!el) return;
+			const rect = el.getBoundingClientRect();
+			// left 钳制：popover 最大宽 420px，右缘留 8px 视口边距
+			const left = Math.max(8, Math.min(rect.left, window.innerWidth - 420 - 8));
+			setAnchor({ top: rect.top, left });
+		};
+		updateAnchor();
+		window.addEventListener("resize", updateAnchor);
+		document.addEventListener("scroll", updateAnchor, true);
+		return () => {
+			window.removeEventListener("resize", updateAnchor);
+			document.removeEventListener("scroll", updateAnchor, true);
+		};
 	}, [open]);
 
 	const sessionBot = sessionBotId
@@ -149,81 +174,94 @@ export function FeishuLinkIndicator({
 				<span className={`feishu-link-logo ${statusClass}`} aria-hidden="true"><FeishuLogo /></span>
 			</button>
 
-			{open && (
-				<div ref={popoverRef} className="feishu-link-popover" role="menu">
-					<div className="feishu-link-popover-header">
-						<div className="feishu-link-popover-heading">
-							<span className={`feishu-link-logo ${statusClass}`} aria-hidden="true"><FeishuLogo /></span>
-							<div className="feishu-link-popover-heading-text">
-								<strong>{t("feishu.link.popoverTitle")}</strong>
-								<span>
-									{statusText}
-									{sessionBot ? ` · ${sessionBot.name}` : ""}
-								</span>
+			{open &&
+				anchor &&
+				createPortal(
+					<div
+						ref={popoverRef}
+						className="feishu-link-popover"
+						role="menu"
+						style={{
+							position: "fixed",
+							left: anchor.left,
+							// 底边固定在 trigger 顶部上方 8px：用 bottom 定位无需测量 popover 自身高度
+							bottom: window.innerHeight - anchor.top + 8,
+						}}
+					>
+						<div className="feishu-link-popover-header">
+							<div className="feishu-link-popover-heading">
+								<span className={`feishu-link-logo ${statusClass}`} aria-hidden="true"><FeishuLogo /></span>
+								<div className="feishu-link-popover-heading-text">
+									<strong>{t("feishu.link.popoverTitle")}</strong>
+									<span>
+										{statusText}
+										{sessionBot ? ` · ${sessionBot.name}` : ""}
+									</span>
+								</div>
 							</div>
-						</div>
-						{sessionBotId && (
-							<button
-								type="button"
-								className="feishu-link-popover-action"
-								onClick={handleClearSessionBot}
-								disabled={connecting}
-							>
-								{t("feishu.link.disconnectSession")}
-							</button>
-						)}
-					</div>
-
-					{status.errorMessage && (
-						<div className="feishu-link-popover-error">{status.errorMessage}</div>
-					)}
-
-					<div className="feishu-link-popover-list">
-						{bots.map((bot) => {
-							const isActive = bot.id === activeBotId;
-							const isSessionPinned = bot.id === sessionBotId;
-							const isSessionConnectedBot = isActive && isSessionPinned;
-							const isSelecting = selectingBotId === bot.id;
-							return (
+							{sessionBotId && (
 								<button
-									key={bot.id}
 									type="button"
-									className={`feishu-link-bot-item${isSessionConnectedBot ? " active" : ""}${isSessionPinned && !isActive ? " pinned" : ""}`}
-									onClick={() => handleSelectBot(bot.id)}
-									disabled={connecting || Boolean(selectingBotId)}
-									role="menuitem"
+									className="feishu-link-popover-action"
+									onClick={handleClearSessionBot}
+									disabled={connecting}
 								>
-									<div className="feishu-link-bot-info">
-										<span className="feishu-link-bot-name">{bot.name}</span>
-										<span className="feishu-link-bot-meta">
-											{isSelecting
-												? t("feishu.link.connectingShort")
-												: isSessionConnectedBot
-													? t("feishu.link.sessionConnected")
-													: isActive
-														? t("feishu.link.globalOnline")
-														: isSessionPinned
-															? t("feishu.link.sessionNotConnected")
-															: bot.appId}
-										</span>
-									</div>
-									{(isSelecting || isSessionConnectedBot || isSessionPinned) && (
-										<span className="feishu-link-bot-check" aria-hidden="true">
-											{isSelecting ? <span className="feishu-link-spinner animate-pideck-spin" /> : "✓"}
-										</span>
-									)}
+									{t("feishu.link.disconnectSession")}
 								</button>
-							);
-						})}
-					</div>
-
-					{!sessionConnected && (
-						<div className="feishu-link-popover-hint">
-							{t("feishu.link.selectHint")}
+							)}
 						</div>
-					)}
-				</div>
-			)}
+
+						{status.errorMessage && (
+							<div className="feishu-link-popover-error">{status.errorMessage}</div>
+						)}
+
+						<div className="feishu-link-popover-list">
+							{bots.map((bot) => {
+								const isActive = bot.id === activeBotId;
+								const isSessionPinned = bot.id === sessionBotId;
+								const isSessionConnectedBot = isActive && isSessionPinned;
+								const isSelecting = selectingBotId === bot.id;
+								return (
+									<button
+										key={bot.id}
+										type="button"
+										className={`feishu-link-bot-item${isSessionConnectedBot ? " active" : ""}${isSessionPinned && !isActive ? " pinned" : ""}`}
+										onClick={() => handleSelectBot(bot.id)}
+										disabled={connecting || Boolean(selectingBotId)}
+										role="menuitem"
+									>
+										<div className="feishu-link-bot-info">
+											<span className="feishu-link-bot-name">{bot.name}</span>
+											<span className="feishu-link-bot-meta">
+												{isSelecting
+													? t("feishu.link.connectingShort")
+													: isSessionConnectedBot
+														? t("feishu.link.sessionConnected")
+														: isActive
+															? t("feishu.link.globalOnline")
+															: isSessionPinned
+																? t("feishu.link.sessionNotConnected")
+																: bot.appId}
+											</span>
+										</div>
+										{(isSelecting || isSessionConnectedBot || isSessionPinned) && (
+											<span className="feishu-link-bot-check" aria-hidden="true">
+												{isSelecting ? <span className="feishu-link-spinner animate-pideck-spin" /> : "✓"}
+											</span>
+										)}
+									</button>
+								);
+							})}
+						</div>
+
+						{!sessionConnected && (
+							<div className="feishu-link-popover-hint">
+								{t("feishu.link.selectHint")}
+							</div>
+						)}
+					</div>,
+					document.body
+				)}
 		</div>
 	);
 }

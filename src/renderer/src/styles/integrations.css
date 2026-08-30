@@ -168,11 +168,10 @@
 }
 
 /* ── Popover ── */
+/* Popover 经 createPortal 渲染到 body（组件内联 style 提供 fixed 定位，锚定 trigger 上方），
+   不再依赖局部 absolute 定位；z-index 需达全局浮层级（--z-popover 与 Radix portal 同层）。 */
 .feishu-link-popover {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  z-index: 130;
+  z-index: var(--z-popover);
   width: min(420px, calc(100vw - 24px));
   min-width: 0;
   max-width: min(520px, calc(100vw - 24px));
@@ -218,7 +217,7 @@
   white-space: nowrap;
 }
 
-.composer-bottom-left .feishu-link-popover-action {
+.feishu-link-popover .feishu-link-popover-action {
   height: auto;
   min-width: 0;
   border: 0;
@@ -229,15 +228,15 @@
   padding: 2px 8px;
   border-radius: var(--radius-sm);
 }
-.composer-bottom-left .feishu-link-popover-action:hover {
+.feishu-link-popover .feishu-link-popover-action:hover {
   background: var(--color-bg-active);
   color: var(--color-text-primary);
 }
-.composer-bottom-left .feishu-link-popover-action:focus-visible {
+.feishu-link-popover .feishu-link-popover-action:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 1px;
 }
-.composer-bottom-left .feishu-link-popover-action:disabled {
+.feishu-link-popover .feishu-link-popover-action:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -260,7 +259,7 @@
   padding-right: 2px;
 }
 
-.composer-bottom-left .feishu-link-bot-item {
+.feishu-link-popover .feishu-link-bot-item {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -280,23 +279,23 @@
     border-color 0.12s ease,
     transform 0.12s ease;
 }
-.composer-bottom-left .feishu-link-bot-item:hover {
+.feishu-link-popover .feishu-link-bot-item:hover {
   background: var(--color-bg-active);
   border-color: var(--color-border-subtle);
   color: var(--color-text-primary);
 }
-.composer-bottom-left .feishu-link-bot-item:active {
+.feishu-link-popover .feishu-link-bot-item:active {
   transform: translateY(1px);
 }
-.composer-bottom-left .feishu-link-bot-item:focus-visible {
+.feishu-link-popover .feishu-link-bot-item:focus-visible {
   outline: var(--focus-ring);
   outline-offset: -1px;
 }
-.composer-bottom-left .feishu-link-bot-item:disabled {
+.feishu-link-popover .feishu-link-bot-item:disabled {
   opacity: 0.6;
   cursor: default;
 }
-.composer-bottom-left .feishu-link-bot-item.active {
+.feishu-link-popover .feishu-link-bot-item.active {
   border-color: color-mix(
     in srgb,
     var(--color-accent) 28%,
@@ -304,7 +303,7 @@
   );
   background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-panel));
 }
-.composer-bottom-left .feishu-link-bot-item.pinned {
+.feishu-link-popover .feishu-link-bot-item.pinned {
   box-shadow: inset 2px 0 0 var(--color-accent);
 }
 .feishu-link-bot-info {

@@ -26,10 +26,12 @@ test("composer shows Feishu logo entry in project session; menu lists bot", asyn
 	test.setTimeout(120_000);
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
+	// 侧栏分段(56469f95)后默认停在「聊天」分段，项目行渲染在「项目」分段下，先切换
+	await window.getByRole("tab", { name: "项目" }).click();
 	// 项目行 → 项目内「新建 Agent」→ 会话视图（composer 可用）
 	const projectRow = window.locator(".conversation", { hasText: "pideck-seed-feishu-proj" }).first();
 	await projectRow.click();
-	await projectRow.getByTitle("新建 Agent").first().click();
+	await projectRow.getByTitle("普通会话").first().click();
 	await expect(window.locator(".composer .rich-input")).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
 
 	// 飞书入口：logo（SVG）而非圆点/文字（main 对齐项）
@@ -44,4 +46,18 @@ test("composer shows Feishu logo entry in project session; menu lists bot", asyn
 	const popover = window.locator(".feishu-link-popover");
 	await expect(popover).toBeVisible();
 	await expect(popover.getByText("E2E 测试机器人")).toBeVisible();
+
+	// 强可见性断言：popover 中心点必须真正命中 popover 自身。
+	// toBeVisible 只检查非空 bbox，被 overflow-y:hidden 裁剪的元素仍会被判定可见，
+	// 此处防裁剪回归（da415c99 把 composer 底栏改为单行滚动容器后曾导致 popover 被裁掉）。
+	const popoverBox = await popover.boundingBox();
+	expect(popoverBox).not.toBeNull();
+	const hitPopup = await window.evaluate(
+		([x, y]) => {
+			const el = document.elementFromPoint(x, y);
+			return el !== null && el.closest(".feishu-link-popover") !== null;
+		},
+		[popoverBox!.x + popoverBox!.width / 2, popoverBox!.y + popoverBox!.height / 2]
+	);
+	expect(hitPopup).toBe(true);
 });

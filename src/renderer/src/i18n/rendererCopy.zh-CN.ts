@@ -2475,6 +2475,7 @@ export const zhCN = {
   "settings.vision.save": "保存视觉桥配置",
   "settings.vision.saved": "已保存：新会话或下一次发送消息时生效",
   "settings.vision.saveFailed": "保存失败",
+  "settings.vision.modelRequired": "启用视觉桥需要先选择视觉模型",
   "settings.vision.configFile": "配置文件位置",
   "settings.vision.configFileDesc": "扩展与 PiDeck 共享这份文件：脱离 PiDeck 单独使用 pi 时也可手动编辑生效。",
   "settings.vision.logSection": "运行记录（诊断）",

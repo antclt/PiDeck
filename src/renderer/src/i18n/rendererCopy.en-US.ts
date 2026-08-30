@@ -2500,6 +2500,7 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.vision.save": "Save Vision Bridge config",
   "settings.vision.saved": "Saved: takes effect on new sessions or the next message",
   "settings.vision.saveFailed": "Save failed",
+  "settings.vision.modelRequired": "Enabling the Vision Bridge requires selecting a vision model first",
   "settings.vision.configFile": "Config file location",
   "settings.vision.configFileDesc": "The extension and PiDeck share this file: it also works when editing manually with pi outside PiDeck.",
   "settings.vision.logSection": "Run log (diagnostics)",

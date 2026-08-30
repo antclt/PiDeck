@@ -84,12 +84,14 @@ test.use({
 // ── A. live 会话：相对路径链接 ──
 test("A: live session relative-path links open non-empty content", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
+	// 侧栏分段(56469f95)后默认停在「聊天」分段，工作区项目行在「项目」分段下，先切换
+	await window.getByRole("tab", { name: "项目" }).click();
 	const projectItem = window.locator(".conversation", { hasText: "pideck-linkrepro-" }).first();
 	await expect(projectItem).toBeVisible({ timeout: 20_000 });
 	await projectItem.click();
 	const projectRow = window.locator(".conversation", { hasText: "pideck-linkrepro-" }).first();
 	await projectRow.hover();
-	await projectRow.getByRole("button", { name: "新建 Agent" }).first().click();
+	await projectRow.getByRole("button", { name: "普通会话" }).first().click();
 
 	const composer = window.locator(".composer .rich-input");
 	await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
@@ -118,6 +120,9 @@ test("A: live session relative-path links open non-empty content", async ({ wind
 // ── B/C. 历史会话（无 agent）：绝对路径链接显示内容；死链不产生空白可点项 ──
 test("B/C: history session absolute-path links show content; dead link downgraded", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
+
+	// 侧栏分段(56469f95)后默认停在「聊天」分段，工作区项目行在「项目」分段下，先切换
+	await window.getByRole("tab", { name: "项目" }).click();
 
 	const projectRow = window.locator(".conversation", { hasText: "pideck-linkrepro-" }).first();
 	await expect(projectRow).toBeVisible({ timeout: 20_000 });
