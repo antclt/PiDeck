@@ -800,9 +800,11 @@ select:focus-visible {
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  /* Spinner 是进行中操作的功能反馈，不是装饰性动效；保留其线性旋转，
+     其余动画仍按系统偏好压缩为单帧。 */
+  *:not(.animate-pideck-spin),
+  *:not(.animate-pideck-spin)::before,
+  *:not(.animate-pideck-spin)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
@@ -3050,7 +3052,9 @@ select:focus-visible {
   scroll-margin-top: 28px;
 }
 .message-timeline:has(.session-runtime-ui:not(:empty)) {
-  padding-bottom: 8px;
+  /* 运行中/时长 meta 紧贴底部 composer widgets 长条时视觉重叠；
+     与基础留白 (24px) 拉开差距，留出呼吸间距 */
+  padding-bottom: 20px;
 }
 /* RespondingIndicator（消息流末尾的 Agent 运行动画）与 ask 卡片（runtimeUi）相邻：
    消息占满滚动区时两者只剩 8px 底部留白，视觉上贴死；给动画块单独留出呼吸间距 */
@@ -3350,12 +3354,6 @@ select:focus-visible {
   border: 3px solid var(--color-border-subtle);
   border-top-color: var(--color-accent);
   border-radius: var(--radius-pill);
-  animation: spin 0.85s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 @keyframes fadeIn {
   from {

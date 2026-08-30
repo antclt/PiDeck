@@ -795,6 +795,54 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return messages;
 		},
 	);
+	/** 子代理列表：从会话文件 subagents:record + catalog 子会话回填合成。 */
+	ipcMain.handle(
+		ipcChannels.sessionsListSubagents,
+		async (_event, sessionId: string) => {
+			if (typeof sessionId !== "string" || !sessionId) return [];
+			const entry = sessionCatalog.get(sessionId);
+			if (!entry?.filePath) return [];
+			const records = await agentManager.readSessionSubagentRecords(entry.filePath);
+			// 回填 childSessionPath：按 parentSessionPath === 本会话 filePath 收集所有子会话，
+			// 再按子会话名 `${type}#${id前8位}` 精确匹配。
+			const children = sessionCatalog.listEntries()
+				.filter(
+					(e) => e.parentSessionPath === entry.filePath,
+				)
+				.map((e) => sessionCatalog.getRecord(e.id))
+				.filter((r): r is NonNullable<typeof r> => r != null);
+			for (const record of records) {
+				const namePrefix = `${record.type}#${record.id.slice(0, 8)}`;
+				const child = children.find((s) => (s.title ?? "").startsWith(namePrefix));
+				if (child?.filePath) record.childSessionPath = child.filePath;
+				if (child) record.childSessionId = child.id;
+			}
+			return records;
+		},
+	);
+	/** 会话级文件修改汇总：从会话文件全量显示消息聚合（历史/活会话通用）。 */
+	ipcMain.handle(
+		ipcChannels.sessionsListFileChanges,
+		async (_event, sessionId: string) => {
+			if (typeof sessionId !== "string" || !sessionId) return [];
+			const entry = sessionCatalog.get(sessionId);
+			// DSH/生图会话无 pi 会话文件，文件汇总无意义
+			if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return [];
+			return agentManager.readSessionFileChanges(entry.filePath);
+		},
+	);
+	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划（历史会话任务 tab）。 */
+	ipcMain.handle(
+		ipcChannels.sessionsListSessionTodo,
+		async (_event, sessionId: string) => {
+			if (typeof sessionId !== "string" || !sessionId) return undefined;
+			const entry = sessionCatalog.get(sessionId);
+			// DSH/生图会话无 pi 会话文件，无 todo 快照
+			if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return undefined;
+			return agentManager.readSessionTodo(entry.filePath);
+		},
+	);
+
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogReadMessagePage,
 		async (_event, sessionId: string, before?: number, pageSize?: number, options?: { beforeEntryId?: string }) => {

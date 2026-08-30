@@ -93,7 +93,7 @@ export function WebDshToolsPanel(props: {
 function LoadingRow() {
 	return (
 		<div className="flex items-center gap-2 p-3 text-caption text-text-secondary">
-			<Loader2 size={14} className="animate-spin" aria-hidden="true" />
+			<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 			{t("dshTools.loading")}
 		</div>
 	);
@@ -209,7 +209,7 @@ function SubagentsTab(props: { sessionId: string }) {
 						</span>
 						{entry.activity === "running" ? (
 							<span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 text-micro font-medium text-primary">
-								<Loader2 size={11} className="animate-spin" aria-hidden="true" />
+								<Loader2 size={11} className="animate-pideck-spin" aria-hidden="true" />
 								{t("dshTools.subagentRunning")}
 							</span>
 						) : (
@@ -228,7 +228,7 @@ function SubagentsTab(props: { sessionId: string }) {
 						<div className="flex max-h-56 flex-col gap-1 overflow-y-auto border-t border-border-subtle p-2">
 							{transcriptLoading && (
 								<p className="flex items-center gap-1.5 px-1 text-caption text-text-tertiary">
-									<Loader2 size={13} className="animate-spin" aria-hidden="true" />
+									<Loader2 size={13} className="animate-pideck-spin" aria-hidden="true" />
 									{t("dshTools.loading")}
 								</p>
 							)}

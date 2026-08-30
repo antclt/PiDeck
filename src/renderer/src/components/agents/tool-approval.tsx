@@ -160,7 +160,7 @@ export function ToolApproval({
           )}
         >
           {busy ? (
-            <LoaderCircle className={cn("size-4", !reduce && "animate-spin")} />
+            <LoaderCircle className={cn("size-4", !reduce && "animate-pideck-spin")} />
           ) : error ? (
             <CircleAlert className="size-4" />
           ) : status === "denied" ? (

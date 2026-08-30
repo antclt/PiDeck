@@ -185,14 +185,12 @@ export function AnimatedBadge({
               exit={reduce ? undefined : "exit"}
               className="inline-flex will-change-transform"
             >
-              {status === "loading" && !reduce && !icon ? (
-                <motion.span
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  className="inline-flex"
-                >
+              {status === "loading" && !icon ? (
+                /* 加载圈是进行中操作的状态反馈，需在 reduced-motion 下继续旋转；
+                   进出场与 pulse 等装饰性 Motion 动效仍由上层 reduce 分支控制。 */
+                <span className="inline-flex animate-pideck-spin">
                   <Icon className={ICON_CLASS[size]} />
-                </motion.span>
+                </span>
               ) : (
                 (icon ?? <Icon className={ICON_CLASS[size]} />)
               )}

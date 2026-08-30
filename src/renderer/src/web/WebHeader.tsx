@@ -181,7 +181,7 @@ function ModelPicker(props: {
 								disabled={props.refreshing}
 								onClick={() => props.onRefresh?.()}
 							>
-								<RefreshCw size={14} className={props.refreshing ? "animate-spin" : ""} aria-hidden="true" />
+								<RefreshCw size={14} className={props.refreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
 							</Button>
 						)}
 					</div>

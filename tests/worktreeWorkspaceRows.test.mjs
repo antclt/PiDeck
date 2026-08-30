@@ -55,7 +55,9 @@ test("worktree auxiliary labels stay at the compact micro size", () => {
   // 这些是层级提示而非主要导航项；使用 caption 会随 medium 档位放大到 13px，
   // 导致“其他工作区”和“还有 N 个会话/查看更多子项”抢过会话行的视觉层级。
   assert.match(worktreeTree, /workspace-tree-section-header[^\n]*text-micro/);
-  assert.match(sessionTree, /className=\{`h-auto [^\`]*justify-start px-2 text-micro /);
+  // 「查看更多 / 收起子项」按钮：紧凑 micro 行（布局类历史上有 min-w-0 w-auto flex-1 等前缀，
+  // 断言只锁 text-micro 与紧凑起始段，不锁布局类顺序）
+  assert.match(sessionTree, /className=\{`h-auto[^`]*?justify-start px-2 text-micro /);
   assert.match(sessionTree, /worktree-sessions-more/);
   assert.match(workspaceStyles, /\.session-more-row,[\s\S]*?font-size: var\(--font-size-micro\)/);
   assert.match(workspaceStyles, /\.worktree-sessions-more[\s\S]*?font-size: var\(--font-size-micro\)/);

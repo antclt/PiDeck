@@ -38,7 +38,6 @@ import { deriveTimelineRunActivity } from "./timeline/timelineRunActivity";
 import {
   canLoadSessionTimelineMore,
   deriveSessionSurfaceRuntime,
-  isLatestTimelineRunBusy,
   restoreTimelineAnchor,
   type SessionTimelineController,
 } from "../../hooks/useSessionTimelineController";
@@ -233,6 +232,10 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   // 只对「时间线尾部新增」的消息播放一次入场动画：历史加载/分页前插不算，
   // 避免整屏消息同时闪烁。乐观上屏的用户消息与流式替换后的权威消息都会触发。
   const [multiSelectOpen, setMultiSelectOpen] = useState(false);
+	// 2026-08 perf：TurnRow 的 memo 浅比较依赖 props 引用稳定。内联箭头会在每次
+	// 时间线渲染创建新函数 → 所有 TurnRow 的 memo 失效 → 滚动/流式时全量重渲染
+	// （longtask 归因：index.js::check/anon 在每个长任务里占 50ms+）。
+	const handleEnterMultiSelect = useCallback(() => setMultiSelectOpen(true), []);
   const [freshMessageIds, setFreshMessageIds] = useState<ReadonlySet<string>>(() => new Set());
   const seenTailMessageIdRef = useRef<string | undefined>(undefined);
   const freshTimersRef = useRef<Map<string, number>>(new Map());
@@ -433,6 +436,24 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     ),
     [followingForTurnWindow, isRestoringScrollAnchor, controller.jumpNavigationActive, reconciledRuns, turnWindowTurns],
   );
+  // 身份判定（2026-08 perf）：位置判定（index / displayRuns.length）随滚动窗口切片
+  // 变化会让窗口内所有 TurnRow 的位置相关 props 一起翻转 → memo 全部失效 →
+  // 滚动 + 流式推送叠加时全量重渲染，单帧超 50ms 形成 longtask（实测归因）。
+  // 改为按 run id 判定：窗口扩展/收缩只影响切片边界，尾部 run 的身份不变 → memo 生效。
+  // MessageItem 的 id 在 message.id，其余类型在顶层 id（与 useLayoutEffect 的 id 提取一致）。
+  // 空窗口（displayRuns 为空数组）时返回 undefined，避免越界崩溃。
+  const renderMessageId = (item: RenderMessage | undefined): string | undefined => {
+    if (!item) return undefined;
+    return item.kind === "message" ? item.message.id : item.id;
+  };
+  const lastDisplayedItemId = renderMessageId(displayRuns[displayRuns.length - 1]);
+  const latestAgentRunId = useMemo(() => {
+    for (let index = displayRuns.length - 1; index >= 0; index -= 1) {
+      const item = displayRuns[index];
+      if (item?.kind === "agent-run") return item.id;
+    }
+    return undefined;
+  }, [displayRuns]);
   // 上滚窗口扩展：对比前后 displayRuns 的 id 序列，找出顶部新增段
   // （窗口扩展 / 数据翻页都在顶部插入内容）。只标记「前缀新增」——
   // 尾部追加（流式新轮）走 freshMessageIds，不在此处处理。
@@ -846,7 +867,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
             {isLoadingMoreMessages ? (
               // 加载动画：点击后立即出现，真正加载完成（finally 复位 isLoadingMessagePage）才消失
               <>
-                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                <Loader2 className="size-3.5 animate-pideck-spin" aria-hidden="true" />
                 {t("timeline.loadingMore")}
               </>
             ) : (
@@ -935,11 +956,10 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
               if (item.kind === "agent-run") {
                 // Only an active model turn keeps its latest run live. Context
                 // compaction happens after agent_end, so it must not fold the answer.
-                const isRunStreaming = isLatestTimelineRunBusy(
-                  isTurnRunning,
-                  index,
-                  displayRuns.length,
-                );
+                // 2026-08 perf：身份判定（run id），不用 index/length——滚动窗口切片变化
+                // 不翻转位置 props，memo 保持生效。busy 仍按「最后一条显示条目」判定
+                // （用户发送后激活等待期不把已完成回答当 live，见组件内注释）。
+                const isRunStreaming = isTurnRunning && item.id === lastDisplayedItemId;
                 return (
                   <TurnRow
                     key={item.id}
@@ -957,16 +977,16 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     liveThinkingId={liveThinkingId}
                     isRuntimeBusy={isRuntimeBusy}
                     agentRunning={isRunStreaming}
-                    isLatestRun={index === displayRuns.length - 1}
-                    isLastAgentRun={index === lastAgentRunIndex}
-                    autoCollapseTick={index === lastAgentRunIndex ? latestTurnAutoCollapseTick : 0}
-                    onAutoCollapsed={index === lastAgentRunIndex ? handleLatestTurnAutoCollapsed : undefined}
+                    isLatestRun={item.id === lastDisplayedItemId}
+                    isLastAgentRun={item.id === latestAgentRunId}
+                    autoCollapseTick={item.id === latestAgentRunId ? latestTurnAutoCollapseTick : 0}
+                    onAutoCollapsed={item.id === latestAgentRunId ? handleLatestTurnAutoCollapsed : undefined}
                     onOpenExternal={props.onOpenExternal}
                     onOpenFile={props.onOpenFile}
                     onDiffFile={props.onDiffFile}
                     onEditMessage={props.onEditMessage}
                     onDeleteMessage={props.onDeleteMessage}
-                    onEnterMultiSelect={() => setMultiSelectOpen(true)}
+                    onEnterMultiSelect={handleEnterMultiSelect}
                   />
                 );
               }
@@ -991,7 +1011,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
                     showResendButton={resendableMessageIds.has(message.id)}
                     validCommandNames={props.validCommandNames}
                     validFilePaths={props.validFilePaths}
-                    onEnterMultiSelect={() => setMultiSelectOpen(true)}
+                    onEnterMultiSelect={handleEnterMultiSelect}
                     // 生图参考图永远不触发视觉桥（参考图直接进供应商 API）
                     visionBridgeExpected={imageGenUserMessageIds.has(message.id) ? false : visionBridgeExpected}
                   />

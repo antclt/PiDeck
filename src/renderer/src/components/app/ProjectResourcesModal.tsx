@@ -400,7 +400,7 @@ export function ProjectResourcesModal(props: {
 							</TabsTrigger>
 						</TabsList>
 						<Button variant="outline" size="sm" onClick={() => void refresh(true)} disabled={loading}>
-							<RefreshCw data-icon="inline-start" aria-hidden="true" className={loading ? "animate-spin" : undefined} />
+							<RefreshCw data-icon="inline-start" aria-hidden="true" className={loading ? "animate-pideck-spin" : undefined} />
 							{t("common.refresh")}
 						</Button>
 					</div>

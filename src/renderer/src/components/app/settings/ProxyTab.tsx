@@ -208,7 +208,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
                   disabled={proxyListRefreshing || proxyListLoading}
                   onClick={() => void refreshModelCandidates(true)}
                 >
-                  <RefreshCw size={14} className={proxyListRefreshing ? "animate-spin" : ""} aria-hidden="true" />
+                  <RefreshCw size={14} className={proxyListRefreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
                 </Button>
                 <div className="flex flex-wrap items-center gap-2 text-micro text-muted-foreground/80">
                   {hasModelFilter ? (

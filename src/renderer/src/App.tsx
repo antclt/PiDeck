@@ -3065,9 +3065,9 @@ export function App() {
       branchByProject={branchByProject}
       creatingWorktree={worktreeCreating}
       isLanWeb={isLanWeb}
-      // 「新建任务」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
+      // 「新建会话」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
       // 用户选择项目后可直接输入对话（首次发送才创建真实会话）。无项目时保持引导页「添加项目」空态。
-      onOpenNewTask={() => { if (activeProjectId) selectProjectCommand(activeProjectId); }}
+      onOpenNewSession={() => { if (activeProjectId) selectProjectCommand(activeProjectId); }}
       onOpenFeedback={() => overlays.setFeedbackOpen(true)}
       settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
       settingsNavTab={settings.sidebarNavTab}

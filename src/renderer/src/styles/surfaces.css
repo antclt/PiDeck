@@ -1020,15 +1020,6 @@
   }
 }
 
-@keyframes spin-indicator {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
 /* ---- 输入框命令模式指示 ---- */
 .composer-box textarea.bang,
 .composer-box .rich-input.bang {
@@ -1754,10 +1745,6 @@
   border: 2px solid var(--color-accent);
   border-top-color: transparent;
   border-radius: 50%;
-  animation: skillhub-spin 0.6s linear infinite;
-}
-@keyframes skillhub-spin {
-  to { transform: rotate(360deg); }
 }
 /* 详情视图 */
 .skillhub-detail-toolbar {

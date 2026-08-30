@@ -186,6 +186,20 @@ test("serializeBatchAnswers: 混合题型序列化并保留 label/wasCustom", ()
 	assert.equal(batchAnswerLabel(undefined), "");
 });
 
+test("serializeBatchAnswers: multi_select 数组 value 序列化与 label 拼接", () => {
+	const { serializeBatchAnswers, batchAnswerLabel } = loadAskUi();
+	const questions = [
+		{ id: "m1", type: "multi_select" },
+	];
+	const answers = { m1: ["A", "C"] };
+	const parsed = JSON.parse(serializeBatchAnswers(questions, answers));
+	assert.deepEqual(parsed.answers[0], { id: "m1", type: "multi_select", value: ["A", "C"], label: "A、C", wasCustom: false });
+	// 空数组视为未作答（label 回退为空）
+	assert.equal(batchAnswerLabel([]), "");
+	assert.equal(batchAnswerLabel(["A"]), "A");
+	assert.equal(batchAnswerLabel(["A", "B", "C"]), "A、B、C");
+});
+
 function mockSelection(text) {
 	return {
 		window: {
@@ -229,15 +243,23 @@ test("SessionRuntimeUiOverlay 使用提取的纯逻辑与语义字号 token", ()
 	assert.ok(guards && guards.length >= 4);
 });
 
-test("Timeline 与安全卡在选项点击前调 hasTextSelection", () => {
+test("Timeline 已清理死代码，安全卡在选项点击前调 hasTextSelection", () => {
 	const timeline = readFileSync("src/renderer/src/components/session/TimelineEventCards.tsx", "utf8");
 	const security = readFileSync("src/renderer/src/components/overlays/SecurityConfirmCard.tsx", "utf8");
-	assert.match(timeline, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
+	// AskQuestionCard 死代码已删除：Timeline 不再有可交互 ask 卡片，守卫职责由 SessionRuntimeUiOverlay 承担
+	assert.doesNotMatch(timeline, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
 	assert.match(security, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
-	const timelineGuards = timeline.match(/if \(hasTextSelection\(\)\) return;/g);
 	const securityGuards = security.match(/if \(hasTextSelection\(\)\) return;/g);
-	assert.ok(timelineGuards && timelineGuards.length >= 2);
 	assert.ok(securityGuards && securityGuards.length >= 2);
+});
+
+test("AgentManager/飞书 envelope 白名单接受 multi_select 批量问题", () => {
+	// multi_select 走批量 envelope，主进程与飞书两处同构解析都必须放行该类型
+	const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+	const askCard = readFileSync("src/main/feishu/AskCard.ts", "utf8");
+	const whiteList = /\["select", "multi_select", "confirm", "input", "editor"\]\.includes\(String\(typed\.type\)\)/;
+	assert.match(agentManager, whiteList);
+	assert.match(askCard, whiteList);
 });
 
 test("AgentManager select 无选项降级为 input（不静默取消）", () => {
@@ -245,6 +267,17 @@ test("AgentManager select 无选项降级为 input（不静默取消）", () => 
 	assert.match(source, /select 无有效选项时降级为 input/);
 	assert.match(source, /effectiveMethod/);
 	assert.doesNotMatch(source, /select 无选项时自动取消，不等用户响应/);
+});
+
+test("ask_question 扩展 schema 支持 multi_select 且强制走批量 envelope", () => {
+	const ext = readFileSync("resources/extensions/pi-deck-ask-question.ts", "utf8");
+	// 批量与单问题两处类型枚举都含 multi_select
+	const enumOccurrences = ext.match(/StringEnum\(\["select", "multi_select", "confirm", "input", "editor"\]/g);
+	assert.ok(enumOccurrences && enumOccurrences.length >= 2);
+	// 单问题 multi_select 也强制走批量 envelope（RPC 单选无法表达多选）
+	assert.match(ext, /needsBatchEnvelope = isBatch \|\| questions\.some\(\(q\) => q\.type === "multi_select"\)/);
+	// multi_select 空数组视为未作答
+	assert.match(ext, /!Array\.isArray\(value\) \|\| value\.length > 0/);
 });
 
 test("渲染层不再用 find 取第一个 pending 请求", () => {

@@ -17,7 +17,9 @@ test("animated-badge component copied with official markers", () => {
 	assert.match(source, /from "@\/lib\/ease"/);
 	assert.match(source, /from "@\/lib\/utils"/);
 	// 关键行为：loading 旋转、状态图标滚动、脉冲层
-	assert.match(source, /animate=\{\{ rotate: 360 \}\}/);
+	// loading 旋转收敛到共享 spinner token（animate-pideck-spin，reduced-motion 下继续转），
+	// 替代官方 rotate:360 写法——与 spinnerUtility.test.mjs 的 title-tab badge 断言一致（PR #171 统一 spinner）
+	assert.match(source, /status === "loading" && !icon[\s\S]*?className="inline-flex animate-pideck-spin"/);
 	assert.match(source, /ICON_ROLL_VARIANTS/);
 	assert.match(source, /pulse = status === "loading"/);
 	// 与官方 API 对齐：showIcon / contentKey / size + PiDeck bare 扩展

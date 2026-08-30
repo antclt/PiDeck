@@ -19,8 +19,8 @@ interface AppSidebarProps {
   branchByProject: Record<string, string | null>;
   creatingWorktree: boolean;
   isLanWeb: boolean;
-  /** 「新建任务」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
-  onOpenNewTask: () => void;
+  /** 「新建会话」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
+  onOpenNewSession: () => void;
   onOpenFeedback: () => void;
   onOpenHomepage: () => void;
   /** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
@@ -75,7 +75,7 @@ export function AppSidebar(props: AppSidebarProps) {
       branchByProject={props.branchByProject}
       creatingWorktree={props.creatingWorktree}
       isLanWeb={props.isLanWeb}
-      onOpenNewTask={props.onOpenNewTask}
+      onOpenNewSession={props.onOpenNewSession}
       chrome={<>
         <div className="list-toolbar flex h-10 shrink-0 items-center gap-1 border-b border-border/40 pr-2.5 pl-[max(0.625rem,var(--traffic-lights-width,0px))]">
           <div className="app-badge flex min-w-0 flex-1 items-center">

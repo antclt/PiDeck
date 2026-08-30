@@ -22,8 +22,11 @@ import type {
 	SessionEnvironment,
 	SessionMessagePage,
 	ThinkingUpdate,
+	SessionFileChange,
+	SessionTodoSnapshot,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
+import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { PiProcess } from "./PiProcess";
 import { createCompactRpcRequest } from "./compactRpc";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
@@ -873,6 +876,29 @@ export class AgentManager {
 			await this.sessionHistoryReader.readSessionDisplayMessages(sessionPath, agentId, sessionContent),
 		);
 	}
+	/**
+	 * 读取会话文件中的子代理记录（subagents:record custom 条目）。
+	 */
+	async readSessionSubagentRecords(sessionPath: string) {
+		return this.sessionHistoryReader.readSubagentRecords(sessionPath);
+	}
+
+
+	/**
+	 * 会话级文件修改汇总：从会话显示消息全量聚合 write/edit/create/patch。
+	 * 与渲染层 TimelineFormat 共用 shared/fileChanges 解析，历史/活会话通用。
+	 */
+	async readSessionFileChanges(sessionPath: string): Promise<SessionFileChange[]> {
+		return collectSessionFileChanges(await this.readSessionDisplayMessages(sessionPath, "_viewer"));
+	}
+
+	/**
+	 * 会话级 todo 快照：读会话分支上最新 pi-deck-todo custom 条目（历史会话重建任务 tab）。
+	 */
+	async readSessionTodo(sessionPath: string): Promise<SessionTodoSnapshot | undefined> {
+		return this.sessionHistoryReader.readTodoSnapshot(sessionPath);
+	}
+
 
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
 	async readSessionDisplayTurnPage(
@@ -5321,7 +5347,7 @@ export class AgentManager {
 					return (
 						typeof typed.id === "string" &&
 						typeof typed.question === "string" &&
-						["select", "confirm", "input", "editor"].includes(String(typed.type))
+						["select", "multi_select", "confirm", "input", "editor"].includes(String(typed.type))
 					);
 				},
 			);

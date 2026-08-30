@@ -134,16 +134,12 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
     "src/renderer/src/components/session/ComposerArea.tsx",
     "utf8",
   );
-  const todo = readFileSync(
-    "src/renderer/src/components/session/SessionTodoStrip.tsx",
+  const widgets = readFileSync(
+    "src/renderer/src/components/session/SessionWidgetsCard.tsx",
     "utf8",
   );
   const goal = readFileSync(
     "src/renderer/src/components/session/SessionGoalStrip.tsx",
-    "utf8",
-  );
-  const files = readFileSync(
-    "src/renderer/src/components/session/SessionModifiedFilesStrip.tsx",
     "utf8",
   );
   const queue = readFileSync(
@@ -161,18 +157,11 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
   );
   assert.match(composer, /Math\.max\(widgetsEl\.offsetHeight, widgetsEl\.scrollHeight\)/);
 
-  for (const source of [todo, goal, files, queue]) {
+  for (const source of [widgets, goal, queue]) {
     assert.match(source, /ComposerWidgetFrame/, "all composer cards must share the frame");
   }
-  assert.match(todo, /useComposerWidgetCollapsed\([\s\S]*?`todo:\$\{props\.sessionId\}`/);
-  assert.match(files, /useComposerWidgetCollapsed\([\s\S]*?modified-files:/);
-  assert.match(files, /previousRunIdentityRef/);
-  assert.match(files, /if \(!runIdentity\) return;/);
-  assert.match(files, /previousRunIdentity && previousRunIdentity !== runIdentity/);
-  assert.match(files, /clearCollapsed\(`modified-files:\$\{previousRunIdentity\}`\)/);
-  assert.match(files, /clearCollapsedByPrefix\(`modified-file-diff:\$\{previousRunIdentity\}:/);
-  assert.match(files, /open=\{!collapsed\}/);
-  assert.match(files, /onOpenChange=\{\(open\) => \{ setCollapsed\(!open\); \}\}/);
+  assert.match(widgets, /widgetsPopoverSegmentFamily/);
+  assert.match(widgets, /SessionWidgetsCard/);
   assert.match(queue, /useComposerWidgetCollapsed\([\s\S]*?queue:/);
   assert.match(queue, /trackRef: RefObject<HTMLElement \| null>/);
 });

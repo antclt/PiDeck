@@ -358,7 +358,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
 				{loading && (
 					<div className="flex min-h-32 items-center justify-center gap-2 text-control text-muted-foreground">
-						<LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+						<LoaderCircle className="size-4 animate-pideck-spin" aria-hidden="true" />
 						{t("common.loading")}
 					</div>
 				)}
@@ -665,7 +665,7 @@ function Overview(props: {
 						disabled={switching}
 						onClick={() => void restartHost()}
 					>
-						{switching ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
+						{switching ? <LoaderCircle className="size-3.5 animate-pideck-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
 						{t("config.dsh.restartHost")}
 					</Button>
 				</div>
@@ -693,7 +693,7 @@ function Overview(props: {
 						disabled={picking || switching}
 						onClick={() => void pickHomeDir()}
 					>
-						{picking ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <FolderOpen className="size-3.5" aria-hidden="true" />}
+						{picking ? <LoaderCircle className="size-3.5 animate-pideck-spin" aria-hidden="true" /> : <FolderOpen className="size-3.5" aria-hidden="true" />}
 						{t("config.dsh.changeHome")}
 					</Button>
 					<Button
@@ -735,7 +735,7 @@ function Overview(props: {
 									onClick={() => void restoreArchived(item.dshSessionId)}
 								>
 									{restoring === item.dshSessionId
-										? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+										? <LoaderCircle className="size-3.5 animate-pideck-spin" aria-hidden="true" />
 										: <ArchiveRestore className="size-3.5" aria-hidden="true" />}
 									{t("config.dsh.restore")}
 								</Button>
@@ -900,7 +900,7 @@ function PresetsTab(props: {
 	if (loading) {
 		return (
 			<div className="flex min-h-32 items-center justify-center gap-2 text-control text-muted-foreground">
-				<LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+				<LoaderCircle className="size-4 animate-pideck-spin" aria-hidden="true" />
 				{t("common.loading")}
 			</div>
 		);

@@ -606,13 +606,13 @@ export function AgentContextMenu(props: {
 			{/* DSH 运行中会话的复制走 clone 分流（fork 无锚点完整副本），保留入口；
 			    导出 HTML 无 DSH 实现（G10 待决策），对 dsh agent 隐藏 */}
 			<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
-				{props.actionLoading === "copy" && <span className="mini-loader" />}
+				{props.actionLoading === "copy" && <span className="mini-loader animate-pideck-spin" />}
 				<Copy className="size-3.5" aria-hidden="true" />
 				{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
 			</DropdownMenuItem>
 			{props.menu.agent.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
-					{props.actionLoading === "export" && <span className="mini-loader" />}
+					{props.actionLoading === "export" && <span className="mini-loader animate-pideck-spin" />}
 					<FileDown className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</DropdownMenuItem>
@@ -757,14 +757,14 @@ export function SessionContextMenu(props: {
 			</DropdownMenuItem>
 			{props.menu.session.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
-					{props.actionLoading === "copy" && <span className="mini-loader" />}
+					{props.actionLoading === "copy" && <span className="mini-loader animate-pideck-spin" />}
 					<Copy className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
 				</DropdownMenuItem>
 			)}
 			{props.menu.session.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
-					{props.actionLoading === "export" && <span className="mini-loader" />}
+					{props.actionLoading === "export" && <span className="mini-loader animate-pideck-spin" />}
 					<FileDown className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</DropdownMenuItem>
@@ -845,7 +845,7 @@ export function ProjectAvatar(props: {
 			)}
 			{StatusIcon && (
 				<span className="avatar-status-indicator" aria-label={props.status}>
-					<StatusIcon size={8} strokeWidth={2.5} className={props.status === "running" ? "animate-spin" : undefined} />
+					<StatusIcon size={8} strokeWidth={2.5} className={props.status === "running" ? "animate-pideck-spin" : undefined} />
 				</span>
 			)}
 		</div>

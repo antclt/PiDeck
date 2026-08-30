@@ -54,6 +54,10 @@ downloads/
 .workbuddy/
 .zcode/
 
+# Trellis 本地工作流资产（初始化于本机，不随仓库分发）
+.trellis/
+.agents/
+
 # Local collaboration notes are machine/user-specific and must never be committed or proposed for a PR.
 docs/PiDeck-协作说明.md
 
@@ -72,5 +76,8 @@ beui-todo-list.tmp.json
 # DSH 排查临时目录（测试日志/会话 jsonl/脚本）
 .dsh-tmp/
 
+# 临时编辑/测试脚本
+scratch-edit-samples/
+scripts/tmp-*
 # beUI 官方源码提取的临时对比目录（不应提交）
 .beui-official/

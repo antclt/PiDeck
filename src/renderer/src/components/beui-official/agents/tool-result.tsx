@@ -102,7 +102,7 @@ function StatusIcon({
   reduce: boolean;
 }) {
   if (status === "running") {
-    return <LoaderCircle className={cn("size-3", !reduce && "animate-spin")} />;
+    return <LoaderCircle className={cn("size-3", !reduce && "animate-pideck-spin")} />;
   }
   if (status === "success") return <CircleCheck className="size-3" />;
   if (status === "error") return <CircleX className="size-3" />;

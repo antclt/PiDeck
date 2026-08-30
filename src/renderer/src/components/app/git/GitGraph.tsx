@@ -382,7 +382,7 @@ function CommitFileRow(props: {
       </span>
       <span className="ml-[5px] flex w-4 shrink-0 justify-end text-xs font-semibold text-right text-[var(--git-desc-fg)]" aria-hidden="true">
         {opening ? (
-          <Loader2 size={13} className="animate-spin" />
+          <Loader2 size={13} className="animate-pideck-spin" />
         ) : (
           compareStatusLetter(file.status)
         )}
@@ -493,7 +493,7 @@ function CommitHoverCard(props: {
       </div>
       {props.state?.loading && (
         <div className="mt-[9px] flex items-center gap-[7px] border-t border-[var(--git-panel-border)] pt-2 text-[var(--git-desc-fg)]">
-          <Loader2 size={13} className="animate-spin" />{" "}
+          <Loader2 size={13} className="animate-pideck-spin" />{" "}
           {t("git.loadingCommitDetails")}
         </div>
       )}
@@ -897,7 +897,7 @@ export function SourceControlGraph(props: GitGraphProps) {
         <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
           {loading && !commits.length && (
             <div className="git-status-msg">
-              <Loader2 size={14} className="animate-spin" />{" "}
+              <Loader2 size={14} className="animate-pideck-spin" />{" "}
               {t("git.loadingCommits")}
             </div>
           )}
@@ -975,7 +975,7 @@ export function SourceControlGraph(props: GitGraphProps) {
                           <div className="grid min-h-[26px] grid-cols-[auto_minmax(0,1fr)_16px] items-center gap-2 px-2.5 pl-0.5 text-[13px] leading-[26px] text-[var(--git-desc-fg)]">
                             <GraphContinuation row={row} />
                             <span className="flex min-w-0 items-center gap-[5px] truncate">
-                              <Loader2 size={13} className="animate-spin" />{" "}
+                              <Loader2 size={13} className="animate-pideck-spin" />{" "}
                               {t("git.loadingCommitFiles")}
                             </span>
                           </div>
@@ -1049,7 +1049,7 @@ export function SourceControlGraph(props: GitGraphProps) {
                   }
                 >
                   {contextMenuLoading === "cherryPick" ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : (
                     <GitBranch size={14} />
                   )}
@@ -1070,7 +1070,7 @@ export function SourceControlGraph(props: GitGraphProps) {
                   }
                 >
                   {contextMenuLoading === "revert" ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : (
                     <RotateCcw size={14} />
                   )}
@@ -1093,7 +1093,7 @@ export function SourceControlGraph(props: GitGraphProps) {
                   }
                 >
                   {contextMenuLoading === "resetSoft" ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : null}
                   {t("git.resetSoft")}
                 </DropdownMenuItem>
@@ -1113,7 +1113,7 @@ export function SourceControlGraph(props: GitGraphProps) {
                   }
                 >
                   {contextMenuLoading === "resetMixed" ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : null}
                   {t("git.resetMixed")}
                 </DropdownMenuItem>
@@ -1167,7 +1167,7 @@ export function SourceControlGraph(props: GitGraphProps) {
                   }}
                 >
                   {contextMenuLoading === "drop" ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : null}
                   {t("git.dropCommit")}
                 </DropdownMenuItem>

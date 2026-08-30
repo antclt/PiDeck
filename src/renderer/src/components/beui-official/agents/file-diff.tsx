@@ -186,7 +186,7 @@ export function FileDiff({
           {streaming ? (
             <LoaderCircle
               aria-label="Applying changes"
-              className={cn("size-3.5", !reduce && "animate-spin")}
+              className={cn("size-3.5", !reduce && "animate-pideck-spin")}
             />
           ) : (
             <Check aria-label="Changes applied" className="size-3.5" />

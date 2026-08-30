@@ -32,16 +32,16 @@ test("goal strip is a 36px independent card in the same family as todo", () => {
   assert.doesNotMatch(source, /createDshGoal/);
 });
 
-test("session view and start surface mount goal after todo in the widgets stack", () => {
+test("session view and start surface mount goal after the unified widgets card", () => {
   const view = viewSource();
   const start = startSource();
-  assert.match(view, /<SessionTodoStrip sessionId=\{sessionId\} \/>/);
+  assert.match(view, /<SessionWidgetsCard\s+sessionId=\{sessionId\}\s+run=\{latestAgentRun\}\s+\/>/);
   assert.match(view, /<SessionGoalStrip sessionId=\{sessionId\} \/>/);
   assert.ok(
-    view.indexOf("<SessionTodoStrip") < view.indexOf("<SessionGoalStrip"),
-    "todo must precede goal in SessionView widgets",
+    view.indexOf("<SessionWidgetsCard") < view.indexOf("<SessionGoalStrip"),
+    "widgets card must precede goal in SessionView widgets",
   );
-  assert.match(start, /<SessionTodoStrip sessionId=\{props\.sessionId\} \/>/);
+  assert.match(start, /<SessionWidgetsCard sessionId=\{props\.sessionId\} \/>/);
   assert.match(start, /<SessionGoalStrip sessionId=\{props\.sessionId\} \/>/);
 });
 

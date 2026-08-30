@@ -131,7 +131,7 @@ export function CodeBlock({
           )}
         >
           {streaming ? (
-            <LoaderCircle className={cn("size-3", !reduce && "animate-spin")} />
+            <LoaderCircle className={cn("size-3", !reduce && "animate-pideck-spin")} />
           ) : (
             <Check className="size-3" />
           )}

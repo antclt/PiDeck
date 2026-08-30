@@ -66,7 +66,7 @@ export function ProviderMigrationButton(props: {
 				void run();
 			}}
 		>
-			{busy ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <ArrowLeftRight className="size-3.5" aria-hidden="true" />}
+			{busy ? <LoaderCircle className="size-3.5 animate-pideck-spin" aria-hidden="true" /> : <ArrowLeftRight className="size-3.5" aria-hidden="true" />}
 		</Button>
 	);
 }

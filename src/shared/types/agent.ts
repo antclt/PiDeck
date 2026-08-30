@@ -231,14 +231,15 @@ export type CreateAgentInput = {
 };
 
 export type AgentUiResponse = {
-	value?: string | boolean;
+	/** 普通回答为 string/boolean；multi_select 多选为 string[] */
+	value?: string | boolean | string[];
 	cancelled?: boolean;
 	confirmed?: boolean;
 };
 
 export type AgentUiBatchQuestion = {
 	id: string;
-	type: "select" | "confirm" | "input" | "editor";
+	type: "select" | "multi_select" | "confirm" | "input" | "editor";
 	question: string;
 	options?: Array<string | { label: string; value?: string; description?: string }>;
 	allowOther?: boolean;
