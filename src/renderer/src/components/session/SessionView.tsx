@@ -79,6 +79,7 @@ export type SessionViewProps = {
   onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
   onDeleteMessage?: (messageId: string, entryId?: string) => void;
   onForkMessage?: (message: any) => void;
+  onRewindToMessage?: (message: any) => void;
   forkingMessageId?: string | null;
   onToast: (message: string) => void;
   onQuickPrompt?: (prompt: string) => void;
@@ -147,6 +148,7 @@ export function SessionView({
   onEditMessage,
   onDeleteMessage,
   onForkMessage,
+  onRewindToMessage,
   forkingMessageId,
   onToast,
   onQuickPrompt,
@@ -646,6 +648,7 @@ export function SessionView({
               onEditMessage,
               onDeleteMessage,
               onForkMessage,
+              onRewindToMessage,
               forkingMessageId,
               onToast,
               onQuickPrompt,

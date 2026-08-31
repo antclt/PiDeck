@@ -8,6 +8,7 @@ import type {
 	CreateAgentInput,
 	ImageContent,
 	RewindCheckpointSummary,
+	RewindRestoreResult,
 	RewindRestoreScope,
 	SendPromptInput,
 	SendPromptResult,
@@ -184,7 +185,7 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		agentId: string,
 		checkpointId: string,
 		scope: RewindRestoreScope,
-	): Promise<void> {
+	): Promise<RewindRestoreResult> {
 		const gateway = this.owner(agentId);
 		this.requireCapability(gateway, "restoreCheckpoint");
 		return gateway.restoreCheckpoint!(agentId, checkpointId, scope);

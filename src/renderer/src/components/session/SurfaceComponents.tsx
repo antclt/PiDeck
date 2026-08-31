@@ -124,6 +124,7 @@ import {
 	Copy,
 	Trash,
 	Share,
+	Undo2,
 	SquarePen,
 	Send,
 	UserPen,
@@ -795,6 +796,8 @@ export const UserBubble = memo(function UserBubble(props: {
 	onDeleteMessage?: (messageId: string, entryId?: string) => void;
 	/** 从该用户消息 fork 新会话；忙碌时不展示入口 */
 	onForkMessage?: (message: ChatMessage) => void;
+	/** 回退工作区文件到该消息时刻前最近的检查点；仅 pi 后端注入（rewind 能力） */
+	onRewindToMessage?: (message: ChatMessage) => void;
 	/** 是否为最后一条用户消息，用于控制重发按钮的显隐 */
 	isLastUserMessage?: boolean;
 	/** 仅当该消息后出现 error/abort 时显示重发（取代无条件 isLastUserMessage） */
@@ -1234,6 +1237,21 @@ export const UserBubble = memo(function UserBubble(props: {
 						aria-label={t("app.forkFromMessage")}
 					>
 						<GitFork size={14} strokeWidth={1.8} aria-hidden="true" />
+					</Button>
+				)}
+				{/* 回退到此消息：把工作区文件恢复到该消息时刻前最近的检查点（见 injector 的最近点解析） */}
+				{!editing && props.onRewindToMessage && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						className="user-turn-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+						disabled={props.agentRunning}
+						onClick={() => props.onRewindToMessage?.(message)}
+						title={props.agentRunning ? t("app.forkBusyTitle") : t("rewind.restoreTitle")}
+						aria-label={t("rewind.restore")}
+					>
+						<Undo2 size={14} strokeWidth={1.8} aria-hidden="true" />
 					</Button>
 				)}
 				{!editing && !props.agentRunning && (
