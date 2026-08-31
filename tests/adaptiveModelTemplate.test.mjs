@@ -3,7 +3,8 @@
  *
  * 规则：
  * - mergeAdaptiveModelTemplate：endpoint /models 实报字段优先，bundled catalog 模板补空；
- * - applyAdaptiveTemplateReset：先清空五个能力字段，再只写模板有值的字段（落盘即空）。
+ * - applyAdaptiveTemplateReset：只覆盖模板有值的字段；模板未提供的容量字段保留用户手填值
+ *   （避免未匹配时把容量清空 → Pi 回退 128k 静默降级），推理/思考档位始终按模板重置。
  */
 
 import { readFileSync } from "node:fs";
@@ -154,15 +155,19 @@ test("reset: 清空五个能力字段后写模板有值字段", () => {
 	assert.equal(next.contextWindow, 200000);
 });
 
-test("reset: 模板缺失的字段不写入（落盘即空，推理默认除外）", () => {
+test("reset: 模板缺失的容量字段保留手填值，推理/档位仍按模板重置", () => {
 	const template = mergeAdaptiveModelTemplate(undefined, null);
 	const next = applyAdaptiveTemplateReset(
 		{ id: "unknown-model", contextWindow: 100, maxTokens: 200, reasoning: true, input: ["text"] },
 		template,
 	);
-	// 模板为空时：容量/模态清空交还 Pi 默认，但推理默认开放（自适应未匹配的兜底策略）
+	// 未匹配到目录时：手填容量/模态必须保留（清空后 Pi 回退 128k，等于静默降级）；
+	// 推理默认开放（自适应未匹配的兜底策略）照常写入。
 	assert.deepEqual(plainModel(next), {
 		id: "unknown-model",
+		contextWindow: 100,
+		maxTokens: 200,
+		input: ["text"],
 		reasoning: true,
 		thinkingLevelMap: { xhigh: "xhigh", max: "max" },
 	});

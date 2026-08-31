@@ -1239,9 +1239,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/**
 	 * 重置为自适应：
 	 * 1. 显式拉取当前 provider 的 /models，取当前 modelId 的实报字段（失败也继续，listing 视为空）；
-	 * 2. 查询 bundled pi-ai catalog 模板（PiDeck 自带，不读 capability cache / 外部 Pi 目录）；
-	 * 3. endpoint 实报优先合并，然后清空五个能力字段，只写模板有值的字段。
-	 * 模板也没有的字段落盘即为空，交还 Pi 默认行为。
+	 * 2. 查询模型规格（运行中 pi 模型列表优先 + bundled pi-ai catalog 兜底，见 resolveModelSpecFromCatalogs）；
+	 * 3. endpoint 实报优先合并，然后只覆盖模板有值的字段。模板未提供的容量字段保留手填值，
+	 *    不落空——否则 Pi 按 128k 回退，用户手填的 1000000 被静默丢掉。
 	 */
 	const handleResetModelToAdaptive = async (providerName: string, index: number) => {
 		const provider = modelsData.providers[providerName];
@@ -1279,7 +1279,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			showNotice(
 				template.matchedId
 					? t("config.modelResetAdaptiveDone", { model: template.matchedId })
-					: t("config.modelResetAdaptiveCleared"),
+					: t("config.modelResetAdaptiveKept"),
 				3000,
 			);
 		} finally {

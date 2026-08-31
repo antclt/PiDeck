@@ -25,12 +25,12 @@ import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import type { SkillManager } from "../skills/SkillManager";
-import { fetchModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import { fetchModelList, getCachedModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/appUpdateCheck";
 import { probePiModel } from "../pi/PiModelProber";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
 import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
-import { resolveModelSpecFromPiCatalogs } from "../pi/modelCapabilityResolver";
+import { resolveModelSpecFromCatalogs } from "../pi/modelCapabilityResolver";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
 import type { AgentProcessMetric, DiagnosticsSnapshot, ProcessMetricsSnapshot } from "../../shared/types";
@@ -376,14 +376,19 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				return null;
 			}
 			try {
-				// 配置阶段模板只读 PiDeck bundled pi-ai catalog；capability cache 不参与（见 modelCapabilityResolver）。
-				return resolveModelSpecFromPiCatalogs(
+				// 配置阶段模板优先读运行中 pi 的模型列表（pi --list-models 已含内置目录 +
+				// auth.json/models.json 覆盖后的解析容量），bundled pi-ai catalog 兜底。
+				// 只读缓存不触发新 fork：启动预取（index.ts refreshModelList）已填充，
+				// 保存 models.json/auth.json 后也由 invalidateModelListCache 置空并重取。
+				const runtimeModels = getCachedModelList() ?? undefined;
+				return resolveModelSpecFromCatalogs(
 					{
 						providerName,
 						modelId,
 						...(typeof modelName === "string" && modelName.trim() ? { modelName } : {}),
 					},
 					getPiAiCatalogIndex(),
+					runtimeModels,
 				);
 			} catch (error) {
 				void appLogger.warn("models", "Model spec lookup failed", {

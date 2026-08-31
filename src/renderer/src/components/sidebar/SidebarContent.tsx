@@ -367,7 +367,8 @@ export function SidebarContent(props: SidebarContentProps) {
           <Dock size={32} className="w-full justify-between">
             <DockItem>
               <div className="relative size-full">
-                <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("settings.title")} aria-label={t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
+                {/* 有可用更新时 title 换成带说明的文案，避免用户把角标误认成别的状态（如 dsh 未安装） */}
+                <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
                 {/* 更新角标：PiDeck 或 Pi CLI 有可提示更新时在设置按钮右上角显示圆点 */}
                 {hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />}
               </div>

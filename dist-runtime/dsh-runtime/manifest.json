@@ -4,12 +4,12 @@
   "builtByAppVersion": "0.7.3-beta",
   "minAppVersion": "0.7.3-beta",
   "maxAppVersion": "",
-  "archiveSha256": "cde1aa269d8c94d9a252d470c4b4a43f314473a33b8c91d94fcdae91f604c085",
+  "archiveSha256": "dca0c4b392a7c773254b69e48f53956bff6b50b5bd4f1238f51ad9add7022bea",
   "requiredPackages": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-app-boot",
     "@deepseek-ai/dsh-host-apiproxy",
     "@deepseek-ai/dsh-cmdline"
   ],
-  "packageCount": 482
+  "packageCount": 485
 }

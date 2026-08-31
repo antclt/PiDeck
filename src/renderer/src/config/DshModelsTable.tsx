@@ -37,7 +37,9 @@ export function ModelsTable(props: {
 	onReset?: () => void;
 	/** DSH Web lets direct-adapter default rows materialize an override on edit. */
 	editableInherited?: boolean;
-	/** Adapter-level fallback capacities shown as placeholders. */
+	/** Adapter-level fallback capacities shown as placeholders — only when actually configured,
+	 *  no hardcoded numeric hint: an unmatched row must read as empty, not as a fake 1M/128k
+	 *  that the user mistakes for a matched capacity (Pi falls back to 128k anyway). */
 	defaultContextWindow?: number;
 	defaultMaxTokens?: number;
 	/** Direct DeepSeek accepts the same 256K / 1M shorthand as DSH Web. */
@@ -207,7 +209,7 @@ export function ModelsTable(props: {
 												type={props.allowCapacitySuffixes ? "text" : "number"}
 												inputMode="numeric"
 												className="h-7"
-												placeholder={formatDshModelCapacity(props.defaultContextWindow, "1000000")}
+												placeholder={formatDshModelCapacity(props.defaultContextWindow)}
 												value={capacityText(index, "contextWindow", model.contextWindow)}
 												disabled={!writable}
 												onChange={(event) => updateCapacity(index, "contextWindow", event.target.value)}
@@ -220,7 +222,7 @@ export function ModelsTable(props: {
 												type={props.allowCapacitySuffixes ? "text" : "number"}
 												inputMode="numeric"
 												className="h-7"
-												placeholder={formatDshModelCapacity(props.defaultMaxTokens, "128000")}
+												placeholder={formatDshModelCapacity(props.defaultMaxTokens)}
 												value={capacityText(index, "maxTokens", model.maxTokens)}
 												disabled={!writable}
 												onChange={(event) => updateCapacity(index, "maxTokens", event.target.value)}

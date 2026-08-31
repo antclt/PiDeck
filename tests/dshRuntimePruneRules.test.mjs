@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasBuildOutput, isExcluded } from "../scripts/runtime-prune-rules.mjs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { hasBuildOutput, isExcluded, isSrcPrunable } from "../scripts/runtime-prune-rules.mjs";
 
 /**
  * DSH runtime 打包裁剪规则的回归测试。
@@ -9,6 +12,10 @@ import { hasBuildOutput, isExcluded } from "../scripts/runtime-prune-rules.mjs";
  * 编译产物 `dist/doc/` 也裁掉了（composer.js 会 require('../doc/directives.js')），
  * host 启动即崩：Cannot find module '../doc/directives.js' → exit(1)。
  * 本文件把「doc/ 编译产物必须保留」钉死，防止回归。
+ *
+ * 后续事故（同一月）：入口感知 src 裁剪引入前，koffi 的 src/（运行时代码所在地）
+ * 因 lib/ 存在被误裁，node-fetch 的 main 指向 src/ 也同理；isSrcPrunable 相关
+ * 用例钉死「入口在 src/ 的包 / KEEP_SRC 白名单包必须保留 src/」。
  */
 
 const noBuild = false;
@@ -63,9 +70,6 @@ test("裁剪规则：LICENSE 与编译产物主体保留", () => {
 });
 
 test("hasBuildOutput：按目录实测判定 src 是否可裁", async () => {
-	const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
-	const { tmpdir } = await import("node:os");
-	const { join } = await import("node:path");
 	const root = mkdtempSync(join(tmpdir(), "dsh-prune-"));
 	try {
 		const withDist = join(root, "a");
@@ -74,6 +78,67 @@ test("hasBuildOutput：按目录实测判定 src 是否可裁", async () => {
 		const srcOnly = join(root, "b");
 		mkdirSync(join(srcOnly, "src"), { recursive: true });
 		assert.equal(hasBuildOutput(srcOnly), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// ── isSrcPrunable：入口感知 src 裁剪（koffi/node-fetch 事故回归）──
+
+function makePkg(root, name, { main, exports, dirs }) {
+	const dir = join(root, name);
+	for (const d of dirs) mkdirSync(join(dir, d), { recursive: true });
+	writeFileSync(join(dir, "package.json"), JSON.stringify({ name, main, exports }));
+	return dir;
+}
+
+function makePruneFixture() {
+	return mkdtempSync(join(tmpdir(), "dsh-prune-src-"));
+}
+
+test("isSrcPrunable：入口在 src/ 的包必须保留 src（node-fetch 事故）", () => {
+	const root = makePruneFixture();
+	try {
+		// main 直接指向 src/index.js，即使有 lib/ 也不能裁
+		const pkg = makePkg(root, "node-fetch", { main: "./src/index.js", dirs: ["src", "lib"] });
+		assert.equal(hasBuildOutput(pkg), true);
+		assert.equal(isSrcPrunable(pkg), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("isSrcPrunable：exports 的 . 运行时条件指向 src/ 时保留 src", () => {
+	const root = makePruneFixture();
+	try {
+		const pkg = makePkg(root, "x-export-src", {
+			exports: { ".": { types: "./src/index.d.ts", default: "./src/index.js" } },
+			dirs: ["src", "dist"],
+		});
+		assert.equal(isSrcPrunable(pkg), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("isSrcPrunable：KEEP_SRC 白名单包（koffi）保留 src，即使入口在根目录", () => {
+	const root = makePruneFixture();
+	try {
+		// koffi：main 在根 index.cjs（内部 require ./src/koffi/…），lib/ 只是原生二进制
+		const pkg = makePkg(root, "koffi", { main: "./index.cjs", dirs: ["src", "lib"] });
+		assert.equal(isSrcPrunable(pkg), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("isSrcPrunable：常规包（入口在 lib/dist）src 仍可裁；无编译产物不可裁", () => {
+	const root = makePruneFixture();
+	try {
+		const normal = makePkg(root, "normal", { main: "./lib/index.js", dirs: ["src", "lib"] });
+		assert.equal(isSrcPrunable(normal), true);
+		const srcOnly = makePkg(root, "src-only", { main: "./src/index.js", dirs: ["src"] });
+		assert.equal(isSrcPrunable(srcOnly), false);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

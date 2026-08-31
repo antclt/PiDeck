@@ -36,9 +36,16 @@
  *   - test/ spec/ examples/ docs/ 运行时不会去读（注意：只裁 **docs/** 复数目录，
  *                            `doc/` 可能是编译产物，见 runtime-prune-rules.mjs 的雷区记录）
  *   - *.md                  数百个包的 README/CHANGELOG 累加约 5MB
- *   - src/（仅当包内已有 lib/ 或 dist/）
+ *   - src/（仅当包内已有 lib/ 或 dist/，且入口不在 src/、不在 KEEP_SRC 白名单）
  *                           源码副本，约 60MB。**条件很关键**：个别包（如嵌套的 zod）
- *                           只有 src/ 没有编译产物，无脑裁会让模块直接消失。
+ *                           只有 src/ 没有编译产物，无脑裁会让模块直接消失；另有
+ *                           koffi/node-fetch 这类运行时代码就活在 src/ 里的包，
+ *                           判定细节见 runtime-prune-rules.mjs 的 isSrcPrunable。
+ *
+ * 另注意：runtime 必须**自包含**——host 的模块解析锚点（--dsh-node-modules）只指向
+ * runtime 目录，不读 app.asar 里的 node_modules（ESM 无 NODE_PATH 双源回退）。
+ * 所以闭包收集**不能**因「包同时是 app 依赖」就跳过（曾因此把 @earendil-works/pi-ai、
+ * node-pty 挡在归档外，host 加载 dsh-llm-pi-ai / pwsh 工具时崩）。
  *
  * 实测（win32-x64）：225.4MB → 150.5MB 未压缩，tarball 47.2MB → 33.6MB。
  * 裁剪后必须跑一遍入口解析校验（见 docs 的验证记录），确认没有裁掉运行文件。
@@ -50,7 +57,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as tar from "tar";
 // 裁剪规则独立成模块：CLI 主流程不便 import（会触发打包），测试直接引用规则单测。
-import { hasBuildOutput, isExcluded } from "./runtime-prune-rules.mjs";
+import { isExcluded, isSrcPrunable } from "./runtime-prune-rules.mjs";
 
 const require = createRequire(import.meta.url);
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -181,14 +188,13 @@ const seedDirs = [
 
 // 随 app 分发的包不在 runtime 里重复带（electron-builder 已打进 asar，装完也用得上）。
 // @deepseek-ai 作用域例外：依赖分区后它们会从 app 依赖里移走，必须自带。
-const appOwnDeps = new Set(Object.keys(appPackage.dependencies ?? {}));
-const extraSeeds = new Set(EXTRA_SEED_NAMES);
-const closure = collectClosure(seedDirs).filter((dir) => {
-	const name = packageNameOf(dir);
-	if (!name) return false;
-	if (name.startsWith("@deepseek-ai/") || extraSeeds.has(name)) return true;
-	return !appOwnDeps.has(name);
-});
+//
+// ⚠️ 2026-08 生产事故：这里曾用 appOwnDeps 过滤掉「同时是 app 依赖」的闭包包
+// （@earendil-works/pi-ai、node-pty），但 host 的模块解析锚点只有 runtime
+// node_modules（见文件头说明），app.asar 里的副本 host 根本看不见——
+// 结果 runtime 里留下一个没有 package.json/index.js 的空壳 pi-ai，
+// dsh-llm-pi-ai 加载即崩（host exit 1）。runtime 必须自包含，不再做此裁剪。
+const closure = collectClosure(seedDirs).filter((dir) => Boolean(packageNameOf(dir)));
 const closureSet = new Set(closure);
 
 // 遍历文件时跳过「属于另一个闭包目录」的子目录：嵌套 node_modules 既会被父目录
@@ -196,7 +202,7 @@ const closureSet = new Set(closure);
 const files = [];
 let prunedBytes = 0;
 for (const dir of closure) {
-	const srcPrunable = hasBuildOutput(dir);
+	const srcPrunable = isSrcPrunable(dir);
 	const walk = (current, base) => {
 		for (const entry of readdirSync(current, { withFileTypes: true })) {
 			const full = join(current, entry.name);
