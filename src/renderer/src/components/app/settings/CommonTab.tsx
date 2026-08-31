@@ -1,5 +1,8 @@
 import { memo } from "react";
+import { useAtomValue } from "jotai";
 import type { AppSettings } from "../../../../../shared/types";
+import { dshUiVisibilityFor } from "../../../../../shared/types/dshRuntime";
+import { dshRuntimeStatusAtom } from "../../../atoms";
 import { t } from "../../../i18n";
 import {
   Select,
@@ -8,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../ui-shadcn/select";
+import { Input } from "../../ui-shadcn/input";
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
 
@@ -26,6 +30,10 @@ type SelectOption = { value: string; label: string; disabled?: boolean };
  */
 export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
   const { draft, updateDraft, isDirty } = props;
+  // DSH runtime 安装态：runtime 不可用时 dsh 选项禁选，
+  // 否则用户能选到一个「保存成功但新建会话必失败」的后端。
+  const dshRuntimeStatus = useAtomValue(dshRuntimeStatusAtom);
+  const dshAvailable = dshUiVisibilityFor(dshRuntimeStatus.state).canCreateDshSession;
   const languageOptions: SelectOption[] = [
     { value: "system", label: t("settings.languageSystem") },
     { value: "zh-CN", label: t("settings.languageZh") },
@@ -149,10 +157,16 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="pi">{t("settings.defaultAgentBackendPi")}</SelectItem>
-              <SelectItem value="dsh">{t("settings.defaultAgentBackendDsh")}</SelectItem>
+              <SelectItem value="dsh" disabled={!dshAvailable}>
+                {dshAvailable
+                  ? t("settings.defaultAgentBackendDsh")
+                  : t("settings.defaultAgentBackendDshUnavailable")}
+              </SelectItem>
             </SelectContent>
           </Select>
         </SettingRow>
+        {/* DSH runtime 管理已迁至 DSH 配置 → 概览页（DshRuntimeSection 区块：
+            未装→安装引导，已装→版本/目录/卸载/导入），这里不再重复放状态行。 */}
         {/* 忙碌时投递行为：Agent 回复期间发送消息的默认语义（pi/dsh 统一）。 */}
         <SettingRow
           title={
@@ -243,6 +257,76 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
           checked={draft.collapsePrevRunsOnNewTurn}
           onChange={(checked) => updateDraft({ collapsePrevRunsOnNewTurn: checked })}
         />
+      </SettingsSection>
+
+      {/* 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 */}
+      <SettingsSection
+        title={t("settings.idleAgentSection")}
+        description={t("settings.idleAgentSectionDesc")}
+      >
+        <SettingSwitchRow
+          title={t("settings.idleAgentAutoRelease")}
+          description={t("settings.idleAgentAutoReleaseDesc")}
+          checked={draft.idleAgentAutoRelease ?? true}
+          dirty={isDirty("idleAgentAutoRelease")}
+          onChange={(checked) => updateDraft({ idleAgentAutoRelease: checked })}
+        />
+        <SettingRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <DirtyMarker dirty={isDirty("idleAgentKeepCount")} label={t("settings.idleAgentKeepCount")} />
+              {t("settings.idleAgentKeepCount")}
+            </span>
+          }
+          description={t("settings.idleAgentKeepCountDesc")}
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              step={1}
+              className="w-24"
+              value={String(draft.idleAgentKeepCount ?? 5)}
+              onChange={(event) => {
+                const n = parseInt(event.target.value, 10);
+                updateDraft({ idleAgentKeepCount: Number.isFinite(n) ? n : 5 });
+              }}
+              aria-label={t("settings.idleAgentKeepCount")}
+            />
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+              {t("settings.idleAgentCountUnit")}
+            </span>
+          </div>
+        </SettingRow>
+        <SettingRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <DirtyMarker dirty={isDirty("idleAgentTimeoutMin")} label={t("settings.idleAgentTimeoutMin")} />
+              {t("settings.idleAgentTimeoutMin")}
+            </span>
+          }
+          description={t("settings.idleAgentTimeoutMinDesc")}
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={1}
+              max={1440}
+              step={5}
+              className="w-24"
+              value={String(draft.idleAgentTimeoutMin ?? 60)}
+              onChange={(event) => {
+                const n = parseInt(event.target.value, 10);
+                updateDraft({ idleAgentTimeoutMin: Number.isFinite(n) ? n : 60 });
+              }}
+              aria-label={t("settings.idleAgentTimeoutMin")}
+            />
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+              {t("settings.idleAgentTimeoutUnit")}
+            </span>
+          </div>
+        </SettingRow>
       </SettingsSection>
 
       {/* 通知 */}

@@ -22,6 +22,8 @@ test.use({
 test("file viewer opens in workbench split and closes back to the drawer", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
+	// 侧栏分段(56469f95)后默认停在「聊天」分段，工作区项目行在「项目」分段下，先切换
+	await window.getByRole("tab", { name: "项目" }).click();
 	// 进入预置项目：侧栏项目显示目录名（pideck-seed-fv-*）
 	const projectItem = window.locator(".conversation", { hasText: "pideck-seed-fv-" }).first();
 	await expect(projectItem).toBeVisible({ timeout: 20_000 });
@@ -30,7 +32,7 @@ test("file viewer opens in workbench split and closes back to the drawer", async
 	// 注：项目行按钮已迁移为 aria-label 定位（旧 .project-action 类已随侧栏重构移除）
 	const projectRow = window.locator(".conversation", { hasText: "pideck-seed-fv-" }).first();
 	await projectRow.hover();
-	await projectRow.getByRole("button", { name: "新建 Agent" }).first().click();
+	await projectRow.getByRole("button", { name: "普通会话" }).first().click();
 
 	// 打开右侧抽屉（files 面板）
 	const toggle = window.locator(".header-drawer-toggle").first();

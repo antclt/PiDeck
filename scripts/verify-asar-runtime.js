@@ -1,0 +1,109 @@
+/**
+ * verify-asar-runtime —— 验证打包产物 asar 的运行时依赖完整性。
+ *
+ * 用途：package.json 的 build.files 里维护了一大批 `!node_modules/xxx` 排除模式，
+ * 目的是剔除已被 electron-vite 打进 out/renderer 的渲染层包。风险是：一旦某个
+ * 运行时真正需要的包被误排除，只有到用户机器上才会以 MODULE_NOT_FOUND 崩溃。
+ * 本脚本在打包后断言「必须保留的包都在、已知冗余包已移除」，作为回归防线。
+ *
+ * 用法：node scripts/verify-asar-runtime.js [win-unpacked 目录]
+ *   默认 release/win-unpacked
+ *
+ * 维护提示：新增主进程运行时依赖时，同步加入 MUST_KEEP；否则排除配置可能误伤。
+ */
+const fs = require("node:fs");
+const path = require("node:path");
+const asar = require("@electron/asar");
+
+const unpackedDir = process.argv[2] || "release/win-unpacked";
+const asarPath = path.join(unpackedDir, "resources", "app.asar");
+
+if (!fs.existsSync(asarPath)) {
+	console.error(`找不到 asar: ${asarPath}`);
+	process.exit(2);
+}
+
+// 运行时必须保留：主进程 external 包 + 动态 import 目标 + hostEntry 动态加载树根 + 原生/asarUnpack 包
+const MUST_KEEP = [
+	"node-pty",
+	"sql.js",
+	"@deepseek-ai/dsh-subprocess-local",
+	"@larksuiteoapi/node-sdk",
+	"dsh-bill",
+	"@earendil-works/pi-ai",
+	"@img/sharp-win32-x64",
+	"@vscode/ripgrep-win32-x64",
+	"openai",
+	"@anthropic-ai/sdk",
+	"@mistralai/mistralai",
+	"@google/genai",
+	"zod",
+	"undici",
+	"@electron-toolkit/utils",
+	"dsh-tool-pwsh-persistent",
+	"koffi",
+];
+
+// 已知冗余（已打进 out/renderer）：抽样式验证排除规则确实生效
+const SHOULD_BE_GONE = [
+	"date-fns",
+	"recharts",
+	"shiki",
+	"framer-motion",
+	"@reduxjs/toolkit",
+	"@tiptap/core",
+	"prosemirror-view",
+	"pngjs",
+	"linkifyjs",
+];
+
+const header = asar.getRawHeader(asarPath).header;
+const nmNode = header.files["node_modules"];
+
+/** 按 `scope/name` 逐级下钻判断包是否存在于 asar */
+function has(pkgName) {
+	let node = nmNode;
+	for (const part of pkgName.split("/")) {
+		node = node && node.files && node.files[part];
+		if (!node) return false;
+	}
+	return true;
+}
+
+const missing = MUST_KEEP.filter((n) => !has(n));
+const remain = SHOULD_BE_GONE.filter((n) => has(n));
+
+let failed = false;
+
+if (missing.length === 0) {
+	console.log(`OK 运行时依赖完整：${MUST_KEEP.length} 个关键包全部保留`);
+} else {
+	failed = true;
+	console.error(`FAIL 运行时包丢失：${missing.join(", ")}`);
+}
+
+if (remain.length === 0) {
+	console.log(`OK 冗余已剔除：${SHOULD_BE_GONE.length} 个抽查冗余包均不在 asar 内`);
+} else {
+	failed = true;
+	console.error(`FAIL 冗余包仍在：${remain.join(", ")}`);
+}
+
+// sql.js 只需 wasm 引擎，asm/debug/browser/worker 变体应被排除
+const sqlDist = nmNode && nmNode.files["sql.js"] && nmNode.files["sql.js"].files["dist"];
+if (sqlDist) {
+	console.log(`OK sql.js dist 保留：${Object.keys(sqlDist.files).join(", ")}`);
+} else {
+	failed = true;
+	console.error("FAIL sql.js dist 缺失");
+}
+
+// app-builder-bin 是 electron-builder 的构建期二进制（207MB），绝不能进产物
+if (has("app-builder-bin")) {
+	failed = true;
+	console.error("FAIL app-builder-bin 混入产物（应为 devDependencies）");
+} else {
+	console.log("OK app-builder-bin 未混入产物");
+}
+
+process.exit(failed ? 1 : 0);

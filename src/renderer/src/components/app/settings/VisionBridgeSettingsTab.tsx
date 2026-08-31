@@ -186,6 +186,9 @@ export function VisionBridgeSettingsTab(props: {
 									)}
 								</span>
 							</>
+						) : draft?.enabled ? (
+							/* 开启状态未选模型：即时提示（保存按钮同步禁用，见 SettingsModal） */
+							<span className="font-semibold text-destructive">{t("settings.vision.modelRequired")}</span>
 						) : undefined
 					}
 				>

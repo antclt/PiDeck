@@ -34,8 +34,12 @@ test("model row uses TableRow/TableCell with edit controls", () => {
   // ID 和名称是受控输入框，必须把键盘输入写回 modelsData；否则 React 会把它们渲染成只读。
   assert.match(source, /value=\{m\.id\}[\s\S]*?onChange=\{\(e\) => props\.onUpdateModel\(name, i, "id", e\.target\.value\)\}/);
   assert.match(source, /value=\{m\.name \?\? ""\}[\s\S]*?onChange=\{\(e\) => props\.onUpdateModel\(name, i, "name", e\.target\.value\)\}/);
-  assert.match(source, /placeholder="1000000"[\s\S]*?className="h-8 min-w-0"/);
-  assert.match(source, /placeholder="128000"[\s\S]*?className="h-8 min-w-0"/);
+  // 容量输入框不允许硬编码数值 hint（1000000/128000）：未匹配到目录时应显示为空，
+  // 否则用户误以为已匹配（实际 Pi 按 128k 回退）。留空 = 交给 Pi 默认。
+  assert.doesNotMatch(source, /placeholder="1000000"/);
+  assert.doesNotMatch(source, /placeholder="128000"/);
+  assert.match(source, /value=\{m\.contextWindow \?\? ""\}/);
+  assert.match(source, /value=\{m\.maxTokens \?\? ""\}/);
   // 删除按钮在操作列
   assert.match(source, /onDeleteModel\(name, i\)/);
 });

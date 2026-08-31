@@ -115,7 +115,7 @@ export function ProviderUsageInline(props: {
 				}}
 				className="flex h-4 w-4 flex-none items-center justify-center rounded text-text-tertiary transition-colors hover:bg-muted/60 hover:text-foreground"
 			>
-				<RefreshCw size={10} className={loading ? "animate-spin" : undefined} />
+				<RefreshCw size={10} className={loading ? "animate-pideck-spin" : undefined} />
 			</button>
 		</span>
 	);

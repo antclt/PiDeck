@@ -235,6 +235,14 @@ export type AppSettings = {
 	/** 巡游碰边后 idle 停顿时长（分钟），默认 5，范围 1–30 */
 	petPatrolPauseMin: number;
 
+	// ── 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 ──
+	/** 是否自动释放闲置 agent，默认 true：开关关闭后闲置 agent 常驻内存不释放 */
+	idleAgentAutoRelease: boolean;
+	/** 保留的闲置 agent 数量，默认 5：超出该数量的闲置 agent（且满足闲置时长）按闲置最久优先释放 */
+	idleAgentKeepCount: number;
+	/** 闲置判定时长（分钟），默认 60：agent 连续闲置超过该时长才可被释放 */
+	idleAgentTimeoutMin: number;
+
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
 	favoriteModels: string[];
@@ -366,6 +374,13 @@ export type AppSettings = {
 	 * 已运行时切换需重启 host。
 	 */
 	dshHomeDir?: string;
+
+	/**
+	 * DSH runtime 下载源索引地址（覆盖默认 GitHub Release 资产）。
+	 * 用于镜像/内网分发：索引是 dsh-runtime-releases.json，条目里给出 tarball 直链与 sha256。
+	 * 缺省/空串 = 用内置默认地址。sha256 校验始终生效，镜像也不能绕过。
+	 */
+	dshRuntimeIndexUrl?: string;
 
 	/**
 	 * DSH 审批自动放行：开启后 DSH 会话的工具/命令审批（approval/requested）

@@ -50,7 +50,10 @@ test("renderer uses Controls isStreaming for live run marking", () => {
 		"src/renderer/src/components/session/SessionMessageTimeline.tsx",
 		"utf8",
 	);
-  assert.match(timeline, /isLatestTimelineRunBusy/);
+  // 2026-08 perf：接线从位置判定（isLatestTimelineRunBusy(index)）改为身份判定
+  // （run id 对比 lastDisplayedItemId），流式信号 isRunStreaming 语义保持不变。
+  assert.match(timeline, /const isRunStreaming = isTurnRunning && item\.id === lastDisplayedItemId;/);
+  assert.match(timeline, /lastDisplayedItemId/);
   assert.match(timeline, /liveThinkingId=\{liveThinkingId\}/);
   assert.match(timeline, /liveThinkingIdBySessionIdAtomFamily/);
   assert.doesNotMatch(timeline, /streamingThinking=\{isRunStreaming \? activeThinking : undefined\}/);

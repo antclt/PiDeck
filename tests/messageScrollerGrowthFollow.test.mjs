@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const scrollerSource = readFileSync(
-  "src/renderer/src/components/agents/message-scroller.custom.tsx",
+  "src/renderer/src/components/agents/message-scroller.tsx",
   "utf8",
 );
 const engineSource = readFileSync(
@@ -187,9 +187,11 @@ test("timeline releases the temporary unbudgeted window after anchor restoration
   // finishes, otherwise the large window stays permanently exempt from its item budget.
   assert.match(timelineSource, /const isRestoringScrollAnchor = controller\.isRestoringScrollAnchor;/);
   assert.match(timelineSource, /followingForTurnWindow \|\| isRestoringScrollAnchor/);
+  // 依赖数组含 controller.jumpNavigationActive（2026-08 定位轴跳转加入 memo 后补齐），
+  // 恢复完成时该 flag 翻转必须使 memo 失效。
   assert.match(
     timelineSource,
-    /\[followingForTurnWindow, isRestoringScrollAnchor, reconciledRuns, turnWindowTurns\]/,
+    /\[followingForTurnWindow, isRestoringScrollAnchor, controller\.jumpNavigationActive, reconciledRuns, turnWindowTurns\]/,
   );
 });
 

@@ -3,10 +3,12 @@ import { useAtomValue } from "jotai";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import type { SessionMessageTimelineProps } from "./SessionMessageTimeline";
 import { SessionMessageTimeline } from "./SessionMessageTimeline";
-import { sessionHistoryMutationOverlayBySessionIdAtomFamily } from "../../atoms";
+import { outlineItemsBySessionIdAtomFamily, sessionHistoryMutationOverlayBySessionIdAtomFamily } from "../../atoms";
 import { Button } from "../ui-shadcn/button";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { t, type TranslationKey } from "../../i18n";
+import type { AgentRunItem } from "./timeline/types";
+import { ConversationOutline } from "./SurfaceComponents";
 
 const HISTORY_OVERLAY_COPY: Record<string, TranslationKey> = {
 	stopping: "message.historyOverlay.stopping",
@@ -26,6 +28,7 @@ export function SessionSurfaceStage(props: {
 	isRestarting: boolean;
 }) {
 	const { sessionId, sessionTimeline, timelineProps, isRestarting } = props;
+	const outlineItems = useAtomValue(outlineItemsBySessionIdAtomFamily(sessionId));
 	const mutationKind = useAtomValue(
 		sessionHistoryMutationOverlayBySessionIdAtomFamily(sessionId),
 	);
@@ -37,6 +40,11 @@ export function SessionSurfaceStage(props: {
 			: t("app.restarting");
 	return (
 		<div className="relative h-full min-h-0">
+            <ConversationOutline
+              className="session-outline-pane"
+              items={outlineItems}
+              onJump={sessionTimeline.jumpToMessage}
+            />
 			<SessionMessageTimeline
 				sessionId={sessionId}
 				controller={sessionTimeline}
@@ -68,7 +76,7 @@ export function SessionSurfaceStage(props: {
 				role={overlayVisible ? "status" : undefined}
 				aria-hidden={!overlayVisible}
 			>
-				<div className="loader" />
+				<div className="loader animate-pideck-spin" />
 				<span className="text-body text-text-secondary">{overlayLabel}</span>
 			</div>
 		</div>

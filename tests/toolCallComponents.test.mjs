@@ -14,6 +14,10 @@ const timelineFormat = readFileSync(
   "src/renderer/src/components/session/TimelineFormat.ts",
   "utf8",
 );
+const toolResult = readFileSync(
+  "src/renderer/src/components/agents/tool-result.tsx",
+  "utf8",
+);
 
 test("tool-call rendering stays isolated behind the SurfaceComponents facade", () => {
   assert.match(toolCalls, /export const ToolCard = memo/);
@@ -27,13 +31,48 @@ test("tool-call rendering stays isolated behind the SurfaceComponents facade", (
 test("timeline tool rendering and message rows share formatting helpers", () => {
   assert.match(toolCalls, /from "\.\/TimelineFormat"/);
   assert.match(surface, /from "\.\/TimelineFormat"/);
-  assert.match(timelineFormat, /export function stripAnsi/);
+  // 文件修改/工具名解析已迁往 shared/fileChanges（main/renderer 共用），TimelineFormat re-export 保持兼容
+  assert.match(timelineFormat, /export \{ collectSessionFileChanges, getToolDiffTarget, getToolName, stripAnsi \};/);
   assert.match(timelineFormat, /export function formatDuration/);
   assert.match(timelineFormat, /export function getToolStatus/);
 });
 
 test("tool and thinking disclosure icons use right-for-collapsed down-for-expanded semantics", () => {
   assert.match(toolCalls, /\{expanded \? \([\s\S]*<ChevronDown[\s\S]*\) : \([\s\S]*<ChevronRight/);
+});
+
+test("embedded tool result keeps formatted beUI output while the trigger remains manual", () => {
+  assert.match(
+    toolCalls,
+    /import \{ ToolResult, ToolResultOutput \} from "\.\.\/agents\/tool-result";/,
+  );
+  assert.match(
+    toolCalls,
+    /<ToolResult[\s\S]*?showHeader=\{false\}[\s\S]*?<ToolResultOutput>\{displayText\}<\/ToolResultOutput>/,
+  );
+  // ToolCard's own disclosure stays opt-in even while a tool is streaming.
+  assert.match(toolCalls, /useState\(props\.defaultOpen \?\? false\)/);
+  // The official header's icon gutter is only used when that header is rendered.
+  assert.match(toolResult, /className=\{cn\("pt-1\.5", showHeader && "pl-6"\)\}/);
+  // Embedded ToolCard results stay in the timeline instead of gaining a second rounded surface.
+  assert.match(
+    toolResult,
+    /className=\{cn\("min-w-0", showHeader && "overflow-hidden rounded-xl bg-muted\/80"\)\}/,
+  );
+  assert.match(toolResult, /showHeader \? "p-3" : "py-1"/);
+  assert.match(toolResult, /showHeader \? "px-2 pb-1\.5" : "pt-1"/);
+  // Tool output follows PiDeck's semantic palette and historical UI-size scale, not Shiki's fixed GitHub colors.
+  assert.match(toolResult, /text-\[length:var\(--font-size-caption\)\]/);
+  assert.match(toolResult, /leading-\[1\.625\]/);
+  assert.match(toolResult, /text-\[color:var\(--color-text-secondary\)\]/);
+  assert.match(toolResult, /\[&_span\]:text-\[color:var\(--color-text-secondary\)\]/);
+  // Standalone beUI ToolResult states use PiDeck semantics rather than fixed Tailwind hues.
+  assert.match(toolResult, /if \(status === "running"\) return "text-info";/);
+  assert.match(toolResult, /if \(status === "success"\) return "text-success";/);
+  assert.match(toolResult, /if \(status === "error"\) return "text-danger";/);
+  assert.match(toolResult, /return "text-text-tertiary";/);
+  assert.doesNotMatch(toolResult, /text-blue-600|text-emerald-600|text-rose-600/);
+  assert.match(toolResult, /if \(!showHeader\) return;/);
 });
 
 test("tool rows share thinking's borderless process-row chrome", () => {

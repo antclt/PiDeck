@@ -446,7 +446,7 @@ export function ExtensionsTab(props: {
 									aria-busy={installing}
 								>
 									{installing ? (
-										<span className="skillhub-installing-dot" aria-hidden="true" />
+										<span className="skillhub-installing-dot animate-pideck-spin" aria-hidden="true" />
 									) : (
 										<Download size={15} strokeWidth={1.8} aria-hidden="true" />
 									)}

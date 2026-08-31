@@ -2,7 +2,9 @@ import { useRef, type ReactNode } from "react";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { ComposerArea } from "./ComposerArea";
 import { QueuedPromptPanel } from "./ComposerPanels";
+import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
+import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
 import { LogoMark } from "./SurfaceParts";
 
@@ -48,6 +50,8 @@ export function SessionStartSurface(props: {
           widgets={
             <>
               <SessionTodoStrip sessionId={props.sessionId} />
+              <SessionFilesStrip sessionId={props.sessionId} />
+              <SessionSubagentsStrip sessionId={props.sessionId} />
               <SessionGoalStrip sessionId={props.sessionId} />
             </>
           }

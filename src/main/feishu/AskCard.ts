@@ -85,7 +85,7 @@ export function tryParseBatchAskEnvelope(title: string): {
 				return (
 					typeof typed.id === "string" &&
 					typeof typed.question === "string" &&
-					["select", "confirm", "input", "editor"].includes(String(typed.type))
+					["select", "multi_select", "confirm", "input", "editor"].includes(String(typed.type))
 				);
 			},
 		);

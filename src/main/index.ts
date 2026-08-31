@@ -234,6 +234,14 @@ import { PiModelCapabilityCache, watchPiConfigDirectory } from "./pi/PiModelCapa
 import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
+import { DshRuntimeStatusService } from "./dsh/runtime/DshRuntimeStatus";
+import {
+	DshRuntimeManager,
+	DSH_BUNDLED_RUNTIME_DIRNAME,
+	readBundledRuntime,
+} from "./dsh/runtime/DshRuntimeManager";
+import { DshRuntimeInstaller } from "./dsh/runtime/DshRuntimeInstaller";
+import { createNetDownloader, createTarExtractor, fetchDshRuntimeIndex } from "./dsh/runtime/dshRuntimeIo";
 import { credentialValueFromDocument } from "./dsh/dshCredentials";
 import { DshAgentManager } from "./dsh/DshAgentManager";
 import { startDshHostInBackground } from "./dsh/startDshHostInBackground";
@@ -255,6 +263,7 @@ import {
 	SessionRuntimeCoordinator,
 	type SessionRuntimeBinding,
 } from "./sessions/SessionRuntimeCoordinator";
+import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
 import { ClaudeSessionImporter } from "./sessions/ClaudeSessionImporter";
@@ -341,6 +350,8 @@ import {
 } from "./feishu/FeishuConfig";
 import { startMemoryProfile, isMemoryProfileEnabled, type MemoryProfileHandle } from "./memory/MemoryMonitor";
 import { DiagnosticsMonitor } from "./diagnostics/DiagnosticsMonitor";
+import { EnvironmentDoctor } from "./health/EnvironmentDoctor";
+import { LogBundleExporter } from "./health/LogBundleExporter";
 import { QuitCleanupRegistry } from "./lifecycle/QuitCleanupRegistry";
 import type { FeishuChatBinding } from "../shared/types";
 import { checkAppUpdate as checkForAppUpdate, UPDATE_REPO, UPDATE_REPO_OWNER } from "./update/appUpdateCheck";
@@ -358,6 +369,8 @@ let fileSystemService: FileSystemService;
 let sessionScanner: SessionScanner;
 let sessionCatalog: SessionCatalog;
 let sessionRuntimeCoordinator: SessionRuntimeCoordinator;
+/** 闲置 agent 自动释放器（内存优化）：whenReady 阶段装配，quit 时 stop */
+let idleAgentReleaser: IdleAgentReleaser | null = null;
 let codexSessionImporter: CodexSessionImporter;
 let claudeSessionImporter: ClaudeSessionImporter;
 let openCodeSessionImporter: OpenCodeSessionImporter;
@@ -371,6 +384,12 @@ let agentManager: AgentManager;
 let piModelCapabilityCache: PiModelCapabilityCache | undefined;
 /** DSH 深融合宿主与后端网关；窗口创建后后台预热，发送链路仍可按需兜底。 */
 let dshHost: DshHost;
+/** DSH runtime 安装态服务（AgentRuntimeProvider 阶段 1）：installed 门控 UI/新建会话。 */
+let dshRuntimeStatus: DshRuntimeStatusService;
+/** DSH runtime 生命周期管理（阶段 2）：外部 runtime 的扫描/下载/安装/回收。 */
+let dshRuntimeManager: DshRuntimeManager;
+/** DSH runtime 安装编排（阶段 2）：索引选版本 + 进度广播。 */
+let dshRuntimeInstaller: DshRuntimeInstaller;
 let dshAgentManager: DshAgentManager;
 /** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
 let compositeAgentGateway: CompositeAgentGateway | undefined;
@@ -391,6 +410,10 @@ let rpcLogger: RpcLogger;
 let memoryProfileHandle: MemoryProfileHandle | null = null;
 /** 设置开关控制的开发诊断（内存 CSV + 事件循环延迟 + 关键耗时） */
 let diagnosticsMonitor: DiagnosticsMonitor | null = null;
+/** 环境体检编排器（问题反馈页一键排障） */
+let environmentDoctor: EnvironmentDoctor | null = null;
+/** 诊断产物导出器（Markdown / zip 日志包） */
+let logBundleExporter: LogBundleExporter | null = null;
 let feishuBridge: FeishuBridge | null = null;
 let usageStatsService: UsageStatsService | null = null;
 /** 粘贴文件启动清理（registerIpc 阶段赋值；whenReady 后 fire-and-forget 执行） */
@@ -1824,6 +1847,33 @@ function currentMainProcessLocale(): MainProcessLocale {
 	return normalizeMainProcessLocale(language === "system" ? app.getLocale() : language);
 }
 
+/**
+ * runtime 变更（安装 / 导入）后重启已运行的 DSH host。
+ *
+ * 为什么必须重启：host 进程是在 fork 时通过 `--dsh-node-modules` 拿到 runtime 路径的，
+ * 之后路径就固化在那个进程里。装了新 runtime 而 host 还在跑，它用的仍是旧路径
+ * （通常是 app 内置那份），用户会看到「装完了但行为没变」。
+ *
+ * 两个收敛点：
+ * - host 没启动过就直接返回——此时用户没在用 DSH，不该为一次安装动作白起一个
+ *   utilityProcess（约 200MB）。下次要用 DSH 时 ensureStarted 会自动用新 runtime fork。
+ * - host 本来在跑说明用户在用 DSH，重启后要重新拉起，否则活跃会话静默失效。
+ */
+async function restartDshHostAfterRuntimeChange(): Promise<void> {
+	if (!dshHost.isStarted()) return;
+	try {
+		// 与 restartDshHost IPC 同一顺序：先停活跃会话（host 侧会话仍持久化，
+		// 重开时 attach 恢复），避免旧 mux 悬挂在已 dispose 的 transport 上。
+		await dshAgentManager.stopAll();
+		await dshHost.restart();
+		await dshHost.ensureStarted();
+	} catch (error) {
+		void appLogger?.warn("dsh-runtime", "restart host after runtime change failed", {
+			error: error instanceof Error ? error.message : String(error),
+		});
+	}
+}
+
 function mainCopy(
 	key: MainProcessTranslationKey,
 	params?: Record<string, string | number>,
@@ -2466,6 +2516,29 @@ function registerIpc() {
 			listDshAgentPresets: () => dshHost.listAgentPresets(),
 			getDshDefaultModel: () => Promise.resolve(dshHost.getDefaultModelSelection()),
 			getDshStatus: () => dshHost.getStatus(),
+			// AgentRuntimeProvider 阶段 1：runtime 安装态门控（未安装时 UI 走安装引导、
+			// 新建 dsh 会话在 sessionIpc 边界被拒）。
+			getDshRuntimeStatus: () => dshRuntimeStatus.getStatus(),
+			canCreateDshSession: () => dshRuntimeStatus.canCreateDshSession(),
+			// 安装/导入/卸载后必须重探测并广播：否则 UI 还停在旧状态，
+			// 用户会看到「刚装完但仍提示未安装」。
+			installDshRuntime: async () => {
+				const result = await dshRuntimeInstaller.installFromIndex();
+				dshRuntimeStatus.refresh();
+				if (result.ok) await restartDshHostAfterRuntimeChange();
+				return result;
+			},
+			importDshRuntime: async (filePath: string) => {
+				const result = await dshRuntimeInstaller.installFromLocalFile(filePath);
+				dshRuntimeStatus.refresh();
+				if (result.ok) await restartDshHostAfterRuntimeChange();
+				return result;
+			},
+			uninstallDshRuntime: () => {
+				const result = dshRuntimeInstaller.uninstall();
+				dshRuntimeStatus.refresh();
+				return result;
+			},
 			describeDshSettings: () => dshHost.describeSettings(),
 			updateDshSettings: (ns, patch, expectedRevision) => dshHost.updateSettings(ns, patch, expectedRevision),
 			mutateDshSettings: (ns, ops, expectedRevision) => dshHost.mutateSettings(ns, ops, expectedRevision),
@@ -2667,6 +2740,8 @@ function registerIpc() {
 		setDshRpcLogging: (agentId, enabled) => dshAgentManager.setRpcLogging(agentId, enabled),
 		isDshRpcLogging: (agentId) => dshAgentManager.isRpcLogging(agentId),
 		diagnosticsMonitor: diagnosticsMonitor ?? undefined,
+		environmentDoctor: environmentDoctor ?? undefined,
+		logBundleExporter: logBundleExporter ?? undefined,
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
 		getDshHostPid: () => dshHost.getHostPid(),
@@ -2914,6 +2989,15 @@ app.whenReady().then(async () => {
 			void appLogger?.warn("skill", "Image-gen skill template auto-install failed", { error: result.error });
 		}
 	});
+	// 环境诊断技能启动时自动落到用户全局技能目录，用户可 /skill:pideck-doctor 让 pi 读诊断报告排障。
+	// fire-and-forget，失败不阻塞启动。
+	void skillManager.installPideckDoctorTemplate().then((result) => {
+		if (result.success) {
+			void appLogger?.info("skill", "Pideck-doctor skill template auto-installed", { path: result.path });
+		} else {
+			void appLogger?.warn("skill", "Pideck-doctor skill template auto-install failed", { error: result.error });
+		}
+	});
 	extensionManager = new ExtensionManager(
 		piLocator,
 		() => settingsStore.get(),
@@ -3009,6 +3093,71 @@ app.whenReady().then(async () => {
 		diagnosticsMonitor?.recordTiming(name, startedAt, detail);
 	});
 	quitCleanup.register("diagnostics-monitor", () => diagnosticsMonitor?.stop());
+	// 环境体检（问题反馈页一键排障）与诊断产物导出器：依赖齐全后构造，注入 systemIpc。
+	// 两者都只读 appLogger/piLocator/settingsStore/configManager，无独立生命周期。
+	environmentDoctor = new EnvironmentDoctor({
+		appLogger,
+		piLocator,
+		settingsStore,
+		configManager,
+	});
+	logBundleExporter = new LogBundleExporter({ appLogger });
+	// DSH runtime 管理器（阶段 2）：外部 runtime 落在 userData/runtimes/dsh/<version>。
+	// 暂存目录与版本目录同级，便于整体清理；两者都在 userData 内，卸载应用时一并带走。
+	dshRuntimeManager = new DshRuntimeManager({
+		layout: {
+			runtimesRoot: join(app.getPath("userData"), "runtimes", "dsh"),
+			tempRoot: join(app.getPath("userData"), "runtimes", ".tmp"),
+		},
+		appVersion: () => app.getVersion(),
+		download: createNetDownloader((scope, message, detail) => void appLogger.warn(scope, message, detail)),
+		extract: createTarExtractor((scope, message, detail) => void appLogger.warn(scope, message, detail)),
+		log: (scope, message, detail) => void appLogger.info(scope, message, detail),
+	});
+	// DSH runtime 安装态服务先于 DshHost 装配（探测只依赖 appPath，不 fork host）。
+	// 探测顺序：外部已装 runtime 优先 → 回退 app 内置（依赖分区前的存量包仍内置），
+	// 两边都没有才是 notInstalled。状态变更经 dsh-runtime:status-changed 广播给渲染层。
+	dshRuntimeStatus = new DshRuntimeStatusService(
+		() => app.getAppPath(),
+		(scope, message, detail) => void appLogger.info(scope, message, detail),
+		() => {
+			const active = dshRuntimeManager.resolveActive();
+			return active
+				? { nodeModules: active.nodeModules, runtimeVersion: active.manifest.runtimeVersion }
+				: undefined;
+		},
+	);
+	dshRuntimeStatus.subscribe((status) => {
+		if (mainWindow && !mainWindow.isDestroyed()) {
+			mainWindow.webContents.send(ipcChannels.dshRuntimeStatusChanged, status);
+		}
+	});
+	// runtime 安装编排：索引拉取 + 选版本 + 落位，进度统一广播给渲染层。
+	// 索引地址默认指向与 app update 同一仓库的 release 资产，settings 可覆盖为镜像。
+	dshRuntimeInstaller = new DshRuntimeInstaller({
+		manager: dshRuntimeManager,
+		// 优先级：环境变量（本地/内网验证用，免改设置）> 设置项（镜像）> 默认 Release 资产。
+		indexUrl: () =>
+			process.env.DSH_RUNTIME_INDEX_URL ||
+			settingsStore.get().dshRuntimeIndexUrl ||
+			`https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases/download/dsh-runtime/dsh-runtime-releases.json`,
+		appVersion: () => app.getVersion(),
+		fetchIndex: fetchDshRuntimeIndex,
+		// 随包 runtime（resources/dsh-runtime/）：有就本地解压，不必联网。
+		// dev 模式下 process.resourcesPath 指向 Electron 自己的 resources，
+		// 没有该子目录 → 读不到 → 自然回退到在线/手动导入。
+		bundledRuntime: () =>
+			readBundledRuntime(
+				process.resourcesPath ? join(process.resourcesPath, DSH_BUNDLED_RUNTIME_DIRNAME) : undefined,
+				app.getVersion(),
+			),
+		onProgress: (progress) => {
+			if (mainWindow && !mainWindow.isDestroyed()) {
+				mainWindow.webContents.send(ipcChannels.dshRuntimeInstallProgress, progress);
+			}
+		},
+		log: (scope, message, detail) => void appLogger.info(scope, message, detail),
+	});
 	// DSH host 实例先装配；是否后台预热看 defaultAgentBackend（见 createWindow 后）。
 	// 发送/历史/配置链路仍走 ensureStarted 幂等兜底，不用 DSH 的用户不常驻 host。
 	// DSH_HOME 可用设置 dshHomeDir 覆盖（用户自己的 ~/.dsh 等），空串 = 应用私有目录。
@@ -3043,6 +3192,8 @@ app.whenReady().then(async () => {
 				bypass: settings.piProxyBypass,
 			});
 		},
+		// 外部 runtime 根目录（未安装时返回 undefined，回退 app 内置 node_modules）。
+		() => dshRuntimeStatus.resolveAppRoot(),
 	);
 	dshAgentManager = new DshAgentManager(
 		dshHost,
@@ -3271,6 +3422,12 @@ app.whenReady().then(async () => {
 			sessionRuntimeCoordinator.editRuntimeMessage(target, messageId, newText),
 		deleteSessionRuntimeMessage: (target, messageId) =>
 			sessionRuntimeCoordinator.deleteRuntimeMessage(target, messageId),
+		listRewindCheckpoints: (target) =>
+			sessionRuntimeCoordinator.listRewindCheckpoints(target),
+		getRewindCheckpointDiff: (target, checkpointId) =>
+			sessionRuntimeCoordinator.getRewindCheckpointDiff(target, checkpointId),
+		restoreRewindCheckpoint: (target, checkpointId, scope) =>
+			sessionRuntimeCoordinator.restoreRewindCheckpoint(target, checkpointId, scope),
 		prepareSessionRuntimeResend: (target, messageId) =>
 			sessionRuntimeCoordinator.prepareRuntimeResend(target, messageId),
 		setSessionRuntimeModel: (target, provider, modelId) =>
@@ -3372,6 +3529,24 @@ app.whenReady().then(async () => {
 		sendAgentPromptWithIntegrations,
 		appLogger,
 	);
+	// 闲置 agent 自动释放（内存优化）：轮询 agents.list() 自记 idle 时长，释放走
+	// coordinator.stopAgentById（解绑 + agents.stop + agents:state 推送，会话状态自动同步）。
+	// 设置项（开关/保留数/闲置时长）每次扫描时读取，改设置后下一轮自动生效。
+	idleAgentReleaser = new IdleAgentReleaser(
+		sessionRuntimeCoordinator,
+		compositeAgentGateway,
+		() => settingsStore.get(),
+		appLogger,
+		undefined, // sweepIntervalMs 用默认 60s
+		// 释放收尾与进程监控停止路径一致：关终端 + sessions:runtime-detach 推送
+		// （缺 detach 时渲染层会话运行标记会停在 running）。
+		(agentId, target) => {
+			terminalManager.closeAgent(agentId);
+			if (target) emitSessionRuntimeDetach(target);
+		},
+	);
+	idleAgentReleaser.start();
+	quitCleanup.register("idle-agent-releaser", () => idleAgentReleaser?.stop());
 	// pi 运行时标题（首轮自动改名 / session_info_changed / rename）写回 catalog：
 	// 侧栏 SessionTree 与 Tab 栏读的是 SessionRecord.title，不是 AgentTab.title。
 	// DSH 已有同语义的 onTitleChanged；pi 以前只 emitState，回话后 UI 仍停在「新会话」。
@@ -3456,10 +3631,12 @@ app.whenReady().then(async () => {
 	void cleanupPasteFiles?.().catch((error: unknown) => {
 		void appLogger.warn("app", "Paste file cleanup failed during startup", error);
 	});
-	// 窗口已可用后再按需预热 DSH：默认后端是 dsh 才后台 boot，避免纯 pi 用户
-	// 空转 utilityProcess（约 200MB）。发送/历史/配置路径仍由 ensureStarted 兜底。
+	// 窗口已可用后再按需预热 DSH：默认后端是 dsh 且 runtime 可用才后台 boot，
+	// 避免纯 pi 用户空转 utilityProcess（约 200MB），也避免 runtime 不在时 boot 必然失败。
+	// 发送/历史/配置路径仍由 ensureStarted 兜底。
 	startDshHostInBackground(dshHost, appLogger, {
-		enabled: settingsStore.get().defaultAgentBackend === "dsh",
+		enabled:
+			settingsStore.get().defaultAgentBackend === "dsh" && dshRuntimeStatus.canCreateDshSession(),
 	});
 
 	// 模型 capability cache 的 hydration 在 syncWslConfig 后启动，确保它与 PiProcess

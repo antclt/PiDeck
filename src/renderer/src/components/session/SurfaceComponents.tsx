@@ -124,6 +124,7 @@ import {
 	Copy,
 	Trash,
 	Share,
+	Undo2,
 	SquarePen,
 	Send,
 	UserPen,
@@ -177,7 +178,6 @@ import { extractVisionBridgeBlocks, matchVisionBridgeEvent } from "../../utils/v
 import { visionImageHashes } from "../../utils/visionImageHash";
 import { ToolCard, ToolGroupCard, type DiffFileHandler } from "./ToolCallComponents";
 import {
-	AskQuestionCard,
 	DiagnosticMessageCard,
 	RespondingIndicator,
 	ThinkingBlock,
@@ -475,7 +475,7 @@ export function AgentAvatar(props: { status: string }) {
 			</svg>
 			</span>
 			<span className="avatar-status-indicator" aria-label={normalizedStatus}>
-				{normalizedStatus === "error" ? <CircleAlert size={8} strokeWidth={2.5} /> : normalizedStatus === "starting" ? <CircleDot size={8} strokeWidth={2.5} /> : normalizedStatus === "running" ? <LoaderCircle size={8} strokeWidth={2.5} className="animate-spin" /> : <Check size={8} strokeWidth={2.5} />}
+				{normalizedStatus === "error" ? <CircleAlert size={8} strokeWidth={2.5} /> : normalizedStatus === "starting" ? <CircleDot size={8} strokeWidth={2.5} /> : normalizedStatus === "running" ? <LoaderCircle size={8} strokeWidth={2.5} className="animate-pideck-spin" /> : <Check size={8} strokeWidth={2.5} />}
 			</span>
 		</div>
 	);
@@ -796,6 +796,8 @@ export const UserBubble = memo(function UserBubble(props: {
 	onDeleteMessage?: (messageId: string, entryId?: string) => void;
 	/** 从该用户消息 fork 新会话；忙碌时不展示入口 */
 	onForkMessage?: (message: ChatMessage) => void;
+	/** 回退工作区文件到该消息时刻前最近的检查点；仅 pi 后端注入（rewind 能力） */
+	onRewindToMessage?: (message: ChatMessage) => void;
 	/** 是否为最后一条用户消息，用于控制重发按钮的显隐 */
 	isLastUserMessage?: boolean;
 	/** 仅当该消息后出现 error/abort 时显示重发（取代无条件 isLastUserMessage） */
@@ -1074,7 +1076,7 @@ export const UserBubble = memo(function UserBubble(props: {
 			{visionBlocks.length === 0 && visionPolling && !visionMatch && (
 				<div className="mb-2 flex w-full max-w-[min(82%,64ch)] flex-col items-end">
 					<div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-						<Loader2 size={11} className="animate-spin" />
+						<Loader2 size={11} className="animate-pideck-spin" />
 						<span>{t("app.visionConverting")}</span>
 					</div>
 				</div>
@@ -1237,6 +1239,21 @@ export const UserBubble = memo(function UserBubble(props: {
 						<GitFork size={14} strokeWidth={1.8} aria-hidden="true" />
 					</Button>
 				)}
+				{/* 回退到此消息：把工作区文件恢复到该消息时刻前最近的检查点（见 injector 的最近点解析） */}
+				{!editing && props.onRewindToMessage && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						className="user-turn-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+						disabled={props.agentRunning}
+						onClick={() => props.onRewindToMessage?.(message)}
+						title={props.agentRunning ? t("app.forkBusyTitle") : t("rewind.restoreTitle")}
+						aria-label={t("rewind.restore")}
+					>
+						<Undo2 size={14} strokeWidth={1.8} aria-hidden="true" />
+					</Button>
+				)}
 				{!editing && !props.agentRunning && (
 					<>
 						{props.onEditMessage && (
@@ -1373,7 +1390,6 @@ function renderChipText(text: string, onOpenFile?: (path: string) => void, valid
 
 export { ToolCard, ToolGroupCard };
 export {
-	AskQuestionCard,
 	DiagnosticMessageCard,
 	RespondingIndicator,
 	ThinkingBlock,
@@ -1390,6 +1406,7 @@ export { MultiSelectModal };
  * 按条数收缩；间距压到下限仍放不下时均匀抽稀，但首尾刻度强制保留（planRailTicks）。
  */
 export function ConversationOutline(props: {
+	className?: string;
 	items: Array<{ id: string; role: string; title: string; time: string }>;
 	onJump: (id: string) => void;
 }) {
@@ -1426,7 +1443,7 @@ export function ConversationOutline(props: {
 		railActiveId !== undefined && railItems.some((item) => item.id === railActiveId);
 
 	return (
-		<div ref={containerRef} className="outline-hover">
+		<div ref={containerRef} className={cn("outline-hover", props.className)}>
 			{railItems.length > 0 && (
 				<PreviewRail
 					orientation="vertical"

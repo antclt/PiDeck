@@ -71,6 +71,12 @@ export const ipcChannels = {
 	sessionsCatalogReadMessagePage: "sessions:catalog-read-message-page",
 	/** 会话 JSONL 过程事件（session/model/thinking/custom/compaction），供轨迹复盘，不进聊天时间线。 */
 	sessionsCatalogReadProcessEvents: "sessions:catalog-read-process-events",
+	/** pi-subagents 扩展子代理列表：合成 record、桥接快照、工具调用推导。 */
+	sessionsListSubagents: "sessions:list-subagents",
+	/** 会话级文件修改汇总：从会话文件全量显示消息聚合 write/edit/create/patch。 */
+	sessionsListFileChanges: "sessions:list-file-changes",
+	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划。 */
+	sessionsListSessionTodo: "sessions:list-session-todo",
 	/** DSH 会话轨迹系统提示（request/header 事件的 EpochHeader.system；非 DSH/无数据返回 undefined）。 */
 	sessionsCatalogReadDshSystemPrompt: "sessions:catalog-read-dsh-system-prompt",
 	sessionsCatalogReadReferenceMessages: "sessions:catalog-read-reference-messages",
@@ -95,6 +101,10 @@ export const ipcChannels = {
 	sessionsRuntimeCompact: "sessions:runtime-compact",
 	sessionsRuntimeState: "sessions:runtime-state",
 	sessionsRuntimeCommands: "sessions:runtime-commands",
+	/** rewind checkpoint（refs/pi-checkpoints，纯 git，跨后端）。 */
+	sessionsRewindList: "sessions:rewind-list",
+	sessionsRewindDiff: "sessions:rewind-diff",
+	sessionsRewindRestore: "sessions:rewind-restore",
 	/** 运行中 Agent 启动快照里的模型（get_available_models），用于判断新加模型要不要重启。 */
 	sessionsRuntimeListModels: "sessions:runtime-list-models",
 	/** Pi 当前模型支持的 thinking levels（get_available_thinking_levels）；旧 Pi 返回 undefined 由 UI 回退。 */
@@ -180,6 +190,18 @@ export const ipcChannels = {
 	dshAgentPresets: "dsh:agent-presets",
 	/** DSH 部署默认模型选择（settings.yaml agent-default-model：provider/model/reasoningEffort）。 */
 	dshDefaultModel: "dsh:default-model",
+	/** DSH runtime 安装态查询（AgentRuntimeProvider 阶段 1：installed/notInstalled/broken 门控 UI）。 */
+	dshRuntimeGetStatus: "dsh-runtime:get-status",
+	/** DSH runtime 安装态变更推送（阶段 2 安装/卸载/版本切换时广播，订阅式）。 */
+	dshRuntimeStatusChanged: "dsh-runtime:status-changed",
+	/** 按需安装 DSH runtime（从下载源索引挑兼容版本；进度走 dsh-runtime:install-progress）。 */
+	dshRuntimeInstall: "dsh-runtime:install",
+	/** 从本地 tgz 导入 runtime（离线 / 镜像不可达时的兜底）。 */
+	dshRuntimeInstallLocal: "dsh-runtime:install-local",
+	/** 卸载已安装的 DSH runtime。 */
+	dshRuntimeUninstall: "dsh-runtime:uninstall",
+	/** 安装进度推送（订阅式）。 */
+	dshRuntimeInstallProgress: "dsh-runtime:install-progress",
 	codexSessionsScan: "codex-sessions:scan",
 	codexSessionsImport: "codex-sessions:import",
 	claudeSessionsScan: "claude-sessions:scan",
@@ -309,6 +331,15 @@ export const ipcChannels = {
 	diagnosticsOpenFolder: "system:diagnostics-open-folder",
 	/** 进程监控里手动停止某个 pi agent（按 agentId 走 AgentManager 正常停止流程） */
 	stopAgent: "system:stop-agent",
+	/**
+	 * 环境体检：采集版本/平台/内存磁盘/pi 安装状态/最近报错，产出脱敏的诊断报告。
+	 * 与 system:diagnostics-snapshot（性能剖析）不是一回事，供「问题反馈」页一键排障。
+	 */
+	healthCheck: "system:health-check",
+	/** 把体检报告（Markdown 形态）保存到用户选择的路径 */
+	healthExportReport: "system:health-export-report",
+	/** 把完整日志（脱敏）+ 报告 + 环境 JSON 打包成 zip 存到用户选择的路径 */
+	healthExportBundle: "system:health-export-bundle",
 	preloadReady: "preload:ready",
 	preloadError: "preload:error",
 	rendererLog: "renderer:log",
@@ -557,5 +588,10 @@ export const ipcChannels = {
 	clipboardReadImage: "clipboard:read-image",
 	clipboardReadFilePaths: "clipboard:read-file-paths",
 	clipboardWriteImage: "clipboard:write-image",
+	/**
+	 * 写纯文本到系统剪贴板。诊断报告/AI 提示词可能上百 KB，
+	 * 必须走主进程（渲染进程直连 clipboard 在 Electron 38 已废弃，大文本会静默失败）。
+	 */
+	clipboardWriteText: "clipboard:write-text",
 
 } as const;

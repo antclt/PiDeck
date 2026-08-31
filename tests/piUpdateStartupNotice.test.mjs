@@ -28,3 +28,25 @@ test("opening dev settings does not auto-detect pi; cached result is shown direc
   // 未检测到时清除旧缓存，避免残留旧路径
   assert.match(hook, /清除旧缓存，避免残留/);
 });
+
+test("Pi CLI update notice is anchored to its controls", () => {
+  const devTab = readFileSync("src/renderer/src/components/app/settings/DevTab.tsx", "utf8");
+  const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
+  const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
+
+  const environmentStart = devTab.indexOf('<SettingsSection title={t("settings.environment")}>');
+  const piNoticeStart = devTab.indexOf("{piUpdateNotice &&");
+  const updatesStart = devTab.indexOf('<SettingsSection title={t("settings.sectionUpdates")}>');
+
+  assert.ok(environmentStart >= 0, "environment section must exist");
+  assert.ok(
+    piNoticeStart > environmentStart && piNoticeStart < updatesStart,
+    "Pi CLI update notice must appear in the environment section beside its action buttons",
+  );
+  // 手动检查结果比定时后台快照新，且后台已发现更新时“更新 Pi”应可直接操作。
+  assert.match(devTab, /const piUpdateStatus = props\.piUpdateCheck \?\? piCliStatus;/);
+  assert.match(devTab, /const piUpdateAvailable = Boolean\(piUpdateStatus\?\.hasUpdate\);/);
+  assert.match(devTab, /disabled=\{\s*disableUpdateCheck \|\| !piUpdateAvailable\s*\}/);
+  assert.match(zh, /可使用上方的「更新 Pi」操作更新/);
+  assert.match(en, /Use Update Pi above to install it/);
+});

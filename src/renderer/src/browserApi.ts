@@ -328,6 +328,12 @@ export function createBrowserApi(): PiDesktopApi {
 				sessionRuntimeCommand(target, "edit-message", { messageId, newText }),
 			deleteRuntimeMessage: (target, messageId) =>
 				sessionRuntimeCommand(target, "delete-message", { messageId }),
+			listRewindCheckpoints: (target) =>
+				sessionRuntimeCommand(target, "rewind-list"),
+			getRewindCheckpointDiff: (target, checkpointId) =>
+				sessionRuntimeCommand(target, "rewind-diff", { checkpointId }),
+			restoreRewindCheckpoint: (target, checkpointId, scope) =>
+				sessionRuntimeCommand(target, "rewind-restore", { checkpointId, scope }),
 			prepareRuntimeResend: (target, messageId) =>
 				sessionRuntimeCommand(target, "prepare-resend", { messageId }),
 			setRuntimeModel: (target, provider, modelId) =>
@@ -348,6 +354,13 @@ export function createBrowserApi(): PiDesktopApi {
 				started: false,
 				homeDir: "",
 			}),
+			// 浏览器/预览环境无 DSH 后端：按未安装处理（UI 走安装引导，不裸报错）。
+			getDshRuntimeStatus: async () => ({ state: "notInstalled" as const }),
+			onDshRuntimeStatusChanged: () => () => {},
+			installDshRuntime: async () => ({ ok: false, error: "unavailable in browser" }),
+			importDshRuntimeFile: async () => ({ ok: false, error: "unavailable in browser" }),
+			uninstallDshRuntime: async () => ({ ok: false, error: "unavailable in browser" }),
+			onDshRuntimeInstallProgress: () => () => {},
 			describeDshSettings: async () => ({ writable: false, hasDocument: false, namespaces: [] }),
 			updateDshSettings: async () => undefined,
 			mutateDshSettings: async () => undefined,

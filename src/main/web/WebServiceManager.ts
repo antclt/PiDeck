@@ -15,6 +15,9 @@ import type {
 	ImageContent,
 	PiCommand,
 	Project,
+	RewindCheckpointSummary,
+	RewindRestoreResult,
+	RewindRestoreScope,
 	SendSessionPromptInput,
 	SendSessionPromptResult,
 	SessionCommandResult,
@@ -105,6 +108,18 @@ type WebServiceDependencies = {
 		target: SessionRuntimeTarget,
 		messageId: string,
 	) => Promise<SessionCommandResult<SessionTargetedValue<void>>>;
+	listRewindCheckpoints: (target: SessionRuntimeTarget) => Promise<
+		SessionCommandResult<SessionTargetedValue<RewindCheckpointSummary[]>>
+	>;
+	getRewindCheckpointDiff: (
+		target: SessionRuntimeTarget,
+		checkpointId: string,
+	) => Promise<SessionCommandResult<SessionTargetedValue<string>>>;
+	restoreRewindCheckpoint: (
+		target: SessionRuntimeTarget,
+		checkpointId: string,
+		scope: RewindRestoreScope,
+	) => Promise<SessionCommandResult<SessionTargetedValue<RewindRestoreResult>>>;
 	prepareSessionRuntimeResend: (
 		target: SessionRuntimeTarget,
 		messageId: string,
@@ -656,7 +671,7 @@ export class WebServiceManager {
 				return;
 			}
 			const sessionRuntimeMatch = url.pathname.match(
-				/^\/api\/sessions\/([^/]+)\/runtime\/(stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone)$/,
+				/^\/api\/sessions\/([^/]+)\/runtime\/(stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone|rewind-list|rewind-diff|rewind-restore)$/,
 			);
 			if (sessionRuntimeMatch && request.method === "POST") {
 				const sessionId = decodeURIComponent(sessionRuntimeMatch[1]);
@@ -670,6 +685,8 @@ export class WebServiceManager {
 					modelId?: string;
 					level?: string;
 					preset?: string;
+					checkpointId?: string;
+					scope?: string;
 				}>(request);
 				const target = body.target;
 				if (!target || target.sessionId !== sessionId) {
@@ -736,6 +753,22 @@ export class WebServiceManager {
 					case "clone":
 						result = await this.deps.cloneSessionRuntime(target);
 						break;
+					case "rewind-list":
+						result = await this.deps.listRewindCheckpoints(target);
+						break;
+					case "rewind-diff":
+						result = await this.deps.getRewindCheckpointDiff(
+							target,
+							body.checkpointId ?? "",
+						);
+						break;
+					case "rewind-restore":
+						result = await this.deps.restoreRewindCheckpoint(
+							target,
+						body.checkpointId ?? "",
+						body.scope === "files" ? "files" : body.scope === "conversation" ? "conversation" : "all",
+					);
+					break;
 				}
 				this.sendJson(response, { result });
 				return;

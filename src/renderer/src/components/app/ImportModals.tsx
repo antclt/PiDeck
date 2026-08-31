@@ -183,7 +183,7 @@ export function CodexImportModal(props: {
 				<div className="codex-import-body">
 					{props.loading ? (
 						<div className="history-loading">
-							<div className="loader" />
+							<div className="loader animate-pideck-spin" />
 							<span>{t("codex.scanning")}</span>
 						</div>
 					) : props.sessions.length === 0 ? (
@@ -328,7 +328,7 @@ export function ClaudeImportModal(props: {
 				<div className="codex-import-body">
 					{props.loading ? (
 						<div className="history-loading">
-							<div className="loader" />
+							<div className="loader animate-pideck-spin" />
 							<span>{t("claude.scanning")}</span>
 						</div>
 					) : props.sessions.length === 0 ? (
@@ -458,7 +458,7 @@ export function OpenCodeImportModal(props: {
 				<div className="codex-import-body">
 					{props.loading ? (
 						<div className="history-loading">
-							<div className="loader" />
+							<div className="loader animate-pideck-spin" />
 							<span>{t("opencode.scanning")}</span>
 						</div>
 					) : props.sessions.length === 0 ? (

@@ -19,6 +19,7 @@ import {
   Activity,
   FolderOpen,
   Globe,
+  History,
   Pencil,
   Terminal,
   GitBranch,
@@ -29,7 +30,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, sessionRecordsAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -105,7 +106,6 @@ import {
   setSessionDraftAtom,
   cacheSessionMessagesAtom,
   upsertSessionAtom,
-  outlineItemsAtom,
 } from "./atoms";
 import {
   applyDshGoalSendTransform,
@@ -133,6 +133,11 @@ import {
   useSessionActions,
 } from "./hooks/useSessionActions";
 import { useScratchPad } from "./hooks/useScratchPad";
+import { useDshRuntimeStatusSync } from "./hooks/useDshRuntimeStatusSync";
+import { useDshRuntimeMigrationNotice } from "./hooks/useDshRuntimeMigrationNotice";
+import { useDshRuntimeInstallProgressSync } from "./hooks/useDshRuntimeInstallProgressSync";
+import { DSH_INSTALL_SETTINGS_TARGET, showDshRuntimeBlockHint } from "./utils/dshRuntimeHint";
+import { dshSendBlockReason } from "../../shared/types/dshRuntime";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
@@ -158,7 +163,6 @@ import { AppUpdateOverlay } from "./components/overlays/AppUpdateOverlay";
 import { ImportOverlayHost } from "./components/overlays/ImportOverlayHost";
 import { EnvironmentOverlay } from "./components/overlays/EnvironmentOverlay";
 import {
-  ConversationOutline,
   EnvironmentDialog,
   FileContextMenu,
   ImagePreviewModal,
@@ -669,6 +673,10 @@ export function App() {
     petScale: DEFAULT_PET_SCALE,
     petPatrolEnabled: true,
     petPatrolPauseMin: 5,
+    // 闲置 agent 自动释放：与 main SettingsStore 默认值保持一致，避免启动时闪烁
+    idleAgentAutoRelease: true,
+    idleAgentKeepCount: 5,
+    idleAgentTimeoutMin: 60,
     favoriteModels: [],
 
     // 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
@@ -711,6 +719,9 @@ export function App() {
   useEffect(() => {
     setDefaultAgentBackend(settings.defaultAgentBackend);
   }, [settings.defaultAgentBackend, setDefaultAgentBackend]);
+  // 派生出「有效」后端：设置值经 DSH runtime 安装态钳制（runtime 不可用时 dsh → pi）。
+  // 所有新建会话入口统一读这个值，避免设置里残留 dsh 而 runtime 已不可用导致裸报错。
+  const effectiveAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 
   // 忙碌时发送的默认投递行为同步给发送链路（composer/App 决策时刻从 atom 读取，
   // 设置保存后无需重挂载会话即可生效，与 defaultAgentBackend 同一模式）。
@@ -842,6 +853,14 @@ export function App() {
   const pendingAgentsRef = useRef<PendingAgentTab[]>([]);
 
   const scratchPad = useScratchPad();
+  // DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
+  // 必须早于任何按安装态门控的 UI 计算，否则首帧会用 checking 初值渲染。
+  useDshRuntimeStatusSync();
+  // DSH runtime 安装进度同步：App 级订阅（常驻，不随 DshRuntimeSection 卸载），
+  // 保证切配置分页/关弹窗后进度仍保留；完成/失败时弹全局 toast。
+  useDshRuntimeInstallProgressSync();
+  // 存量 dsh 用户升级后 runtime 不在时给一次直达提示（有 dsh 会话才提示，只提示一次）。
+  useDshRuntimeMigrationNotice();
 
   // Drawer loading handled by useWorkspacePanels; only expandedDirs logic remains.
   useEffect(() => {
@@ -899,6 +918,10 @@ export function App() {
   const activeAgent = activeAgentId
     ? [...displayAgents, ...pendingAgents].find((agent) => agent.id === activeAgentId)
     : undefined;
+  // rewind（检查点）是 pi 后端能力：抽屉 rail 与底栏按钮同口径门控
+  // （dsh/imagegen 会话不展示入口）。与 Injector 的 isDshBackend 同源判定。
+  const rewindBackend = activeAgent?.backend ?? currentSessionRecord?.backend;
+  const rewindSupported = rewindBackend === undefined || rewindBackend === "pi";
 
   // Timeline scroll, pagination and jump ownership lives in sessionTimeline.
   // Modern Session drafts and attachments are subscribed by ComposerArea; the root only
@@ -1291,10 +1314,6 @@ export function App() {
     }
     return Array.from(byPath.values());
   }, [activeMessages.length, activeAgentId]);
-  // 大纲刻度数据源：必须用「落盘历史前缀 + 运行时窗口段」全量消息（outlineItemsAtom）。
-  // 旧实现只看 runtime 窗口段（currentSessionMessagesAtom），上翻加载过的历史
-  // 没有刻度，长会话刻度轴顶部缺最早的用户消息。
-  const outlineItems = useAtomValue(outlineItemsAtom);
   const flatFiles = useMemo(() => flattenFiles(files), [files]);
   // === file editor hook ===
   const {
@@ -1427,8 +1446,8 @@ export function App() {
     refreshProjectSessions,
     api,
     showToast,
-    // 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh）
-    defaultBackend: settings.defaultAgentBackend,
+    // 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh），经 DSH runtime 安装态钳制
+    defaultBackend: effectiveAgentBackend,
   });
 
   // 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
@@ -1519,11 +1538,12 @@ export function App() {
         // 统一创建 draft 会话（Chat 项目也走普通会话、可保存）：创建不拉 pi，
         // selectSessionCommand 同步切页、立即进入会话页；匿名会话仅保留给侧栏
         // 「新建临时对话」入口（createAnonymousSessionWithTab）。
-        // 默认后端跟随设置项（settings.defaultAgentBackend，默认 pi）。
+        // 默认后端跟随设置项（settings.defaultAgentBackend，默认 pi），
+        // 且经 DSH runtime 安装态钳制——runtime 不可用时不会尝试建 dsh 会话。
         const session = await api.sessions.createDraft({
           projectId: project.id,
-          title: settings.defaultAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
-          backend: settings.defaultAgentBackend,
+          title: effectiveAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
+          backend: effectiveAgentBackend,
           ...launchPreferences,
         });
         upsertSession(session);
@@ -1561,7 +1581,7 @@ export function App() {
       selectSessionCommand,
       upsertSession,
       workspaceChrome,
-      settings.defaultAgentBackend,
+      effectiveAgentBackend,
     ],
   );
 
@@ -2353,6 +2373,20 @@ export function App() {
       }
     }
     // 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）。
+    // DSH 会话 runtime 不可用（未安装/损坏）时 host 无法 fork，activateRuntime 只会抛
+    // 模块解析裸报错——给「去安装」提示（含直达入口）而不是把底层错误甩给用户。
+    const restartRecord = store.get(sessionRecordsAtom)[sessionId];
+    if (restartRecord?.backend === "dsh") {
+      const dshStatus = store.get(dshRuntimeStatusAtom);
+      if (dshSendBlockReason(dshStatus.state)) {
+        showDshRuntimeBlockHint(
+          () => store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET),
+          dshStatus.state,
+          dshStatus.reason,
+        );
+        return;
+      }
+    }
     // 重启活会话走 restartRuntimeTarget→restartingAgentId→SessionSurfaceStage 的 isRestarting 遮罩；
     // 这里（无绑定）没有 restartingAgentId，需显式设置 activating 遮罩，让会话消息区域也有加载动画。
     setActivatingSessionId(sessionId);
@@ -3065,9 +3099,9 @@ export function App() {
       branchByProject={branchByProject}
       creatingWorktree={worktreeCreating}
       isLanWeb={isLanWeb}
-      // 「新建任务」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
+      // 「新建会话」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
       // 用户选择项目后可直接输入对话（首次发送才创建真实会话）。无项目时保持引导页「添加项目」空态。
-      onOpenNewTask={() => { if (activeProjectId) selectProjectCommand(activeProjectId); }}
+      onOpenNewSession={() => { if (activeProjectId) selectProjectCommand(activeProjectId); }}
       onOpenFeedback={() => overlays.setFeedbackOpen(true)}
       settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
       settingsNavTab={settings.sidebarNavTab}
@@ -3099,6 +3133,15 @@ export function App() {
     const record = store.get(sessionRecordByIdAtomFamily(sessionId));
     if (record) selectSessionCommand(record.projectId, sessionId, true);
   }, [selectSessionCommand, store]);
+
+  // 后台 Ask 通知「前往会话」：跳转的同时登记常驻 Tab——agent 开多时被询问的会话
+  // 可能根本没开 Tab（后台并行 ask 等），只切焦点的话回答完切换出去就找不到了。
+  const jumpToAskSession = useCallback((sessionId: string) => {
+    const record = store.get(sessionRecordByIdAtomFamily(sessionId));
+    if (!record) return;
+    workspaceChrome.registerOpenSession(sessionId, "permanent");
+    selectSessionCommand(record.projectId, sessionId, true);
+  }, [selectSessionCommand, store, workspaceChrome]);
 
   // 切会话过渡：会话区整体做一次 160ms 淡入+微位移（Web Animations API，
   // 不卸载树/不动布局，避免整树重建的卡顿与瞬间替换的生硬）；
@@ -3243,6 +3286,7 @@ export function App() {
       forkingMessageId,
       openSidebarSessionById: (projectId: string, sessionId: string) =>
         openSidebarSessionByIdWithTab(projectId, sessionId, "permanent"),
+      focusAskSessionById: jumpToAskSession,
       agents: displayAgents,
       queuedPromptsBySession: queue.queuedPrompts,
       queueRetract: queue.retractQueuedPromptForEdit,
@@ -3292,6 +3336,7 @@ export function App() {
       handleOpenLinkedFile,
       insertQuickPrompt,
       isLanWeb,
+      jumpToAskSession,
       jumpToMessageRef,
       openSidebarSessionByIdWithTab,
       paneLayoutRefs,
@@ -3673,6 +3718,16 @@ export function App() {
               active: drawer === "trajectory",
               onClick: () => handleToolDrawerAction("trajectory"),
             },
+            // 检查点面板：仅当前会话为 pi 后端时展示（rewind 能力；dsh 暂不声明）。
+            ...(rewindSupported
+              ? [{
+                  id: "rewind" as const,
+                  label: t("rewind.title"),
+                  icon: <History size={16} />,
+                  active: drawer === "rewind",
+                  onClick: () => handleToolDrawerAction("rewind"),
+                }]
+              : []),
             {
               id: "browser",
               label: t("app.browser"),
@@ -3693,15 +3748,6 @@ export function App() {
           files={drawerPorts.files}
         />
       )}
-      outlineContent={
-        /* 右缘刻度定位轴（beUI PreviewRail）：点击刻度跳转消息，hover 出预览卡；
-           无消息时轴自动隐藏。工具开关已上收会话 Tab 栏（sessionToolActions）。 */
-        <ConversationOutline
-          items={outlineItems}
-          // 分屏下由聚焦 pane 的 timeline 注入 jump 回调（ChatSessionPane 写入 services）
-          onJump={(messageId) => jumpToMessageRef.current?.(messageId)}
-        />
-      }
       setListCollapsed={setListCollapsed}
       setListWidth={setListWidth}
       setDrawerCollapsed={setDrawerCollapsed}

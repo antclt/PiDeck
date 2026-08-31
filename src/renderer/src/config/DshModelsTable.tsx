@@ -8,11 +8,11 @@
  * 行 key 用 index（id 是行内可编辑字段，用它做 key 会导致每次输入重建行、失焦）。
  */
 import { useState } from "react";
-import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { t } from "../i18n";
+import { formatDshModelCapacity, parseDshModelCapacity } from "./dshModels";
 
 export type DshModelRow = {
 	id?: unknown;
@@ -21,26 +21,29 @@ export type DshModelRow = {
 	maxTokens?: unknown;
 	input?: unknown;
 	reasoningEfforts?: unknown;
+	/** Direct adapter models can carry advanced fields that this curated editor must preserve. */
+	[key: string]: unknown;
 };
-
-function imageInputEnabled(input: unknown): boolean {
-	return Array.isArray(input) && input.includes("image");
-}
-
-function setImageInput(input: unknown, enabled: boolean): string[] {
-	const current = Array.isArray(input)
-		? input.filter((item): item is string => typeof item === "string" && item.length > 0)
-		: ["text"];
-	const withoutImage = current.filter((item) => item !== "image");
-	if (!enabled) return withoutImage.includes("text") ? withoutImage : ["text", ...withoutImage];
-	return withoutImage.includes("text") ? [...withoutImage, "image"] : ["text", ...withoutImage, "image"];
-}
 
 export function ModelsTable(props: {
 	/** 当前模型数组（现值，行内编辑由父级 draft 覆盖）。 */
 	models: DshModelRow[];
-	/** 适配器内置目录（只读展示；仅当 models 为空且未自定义时显示，对齐 dsh-web 的继承模型行）。 */
+	/** Adapter catalog shown while no user-layer model override exists. */
 	catalog?: DshModelRow[];
+	/** Whether `models` is an explicit user-layer override. Needed by direct DeepSeek,
+	 * where an empty array means "advertise no models", not "inherit defaults". */
+	modelsOverridden?: boolean;
+	/** Drop the user-layer models override and return to the adapter catalog. */
+	onReset?: () => void;
+	/** DSH Web lets direct-adapter default rows materialize an override on edit. */
+	editableInherited?: boolean;
+	/** Adapter-level fallback capacities shown as placeholders — only when actually configured,
+	 *  no hardcoded numeric hint: an unmatched row must read as empty, not as a fake 1M/128k
+	 *  that the user mistakes for a matched capacity (Pi falls back to 128k anyway). */
+	defaultContextWindow?: number;
+	defaultMaxTokens?: number;
+	/** Direct DeepSeek accepts the same 256K / 1M shorthand as DSH Web. */
+	allowCapacitySuffixes?: boolean;
 	writable: boolean;
 	/** 行内字段更新（field 为模型条目键名，如 id/name/contextWindow/maxTokens）。 */
 	onUpdate: (index: number, field: string, value: unknown) => void;
@@ -50,21 +53,67 @@ export function ModelsTable(props: {
 	onIdBlur?: (index: number, modelId: string) => void;
 }) {
 	const { models, writable, onUpdate, onAdd, onRemove } = props;
+	/** Current text while a direct-adapter capacity is being edited. */
+	const [capacityDrafts, setCapacityDrafts] = useState<Record<string, string>>({});
 	/** 当前展开容量编辑的行（同时只展开一行）。 */
 	const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
-	const inherited = models.length === 0 && (props.catalog?.length ?? 0) > 0;
-	const shownModels = models.length > 0 ? models : (props.catalog ?? []);
+	const capacityDraftKey = (index: number, field: "contextWindow" | "maxTokens") => `${index}:${field}`;
+	const capacityText = (index: number, field: "contextWindow" | "maxTokens", value: unknown) => {
+		const typed = capacityDrafts[capacityDraftKey(index, field)];
+		if (typed !== undefined) return typed;
+		const numeric = typeof value === "number" ? value : undefined;
+		return props.allowCapacitySuffixes
+			? formatDshModelCapacity(numeric)
+			: (numeric === undefined ? "" : String(numeric));
+	};
+	const updateCapacity = (index: number, field: "contextWindow" | "maxTokens", raw: string) => {
+		if (!props.allowCapacitySuffixes) {
+			const next = raw ? Number(raw) : undefined;
+			onUpdate(index, field, Number.isFinite(next) ? next : undefined);
+			return;
+		}
+		setCapacityDrafts((current) => ({ ...current, [capacityDraftKey(index, field)]: raw }));
+		onUpdate(index, field, parseDshModelCapacity(raw));
+	};
+	const settleCapacity = (index: number, field: "contextWindow" | "maxTokens") => {
+		if (!props.allowCapacitySuffixes) return;
+		const key = capacityDraftKey(index, field);
+		const raw = capacityDrafts[key];
+		if (raw === undefined || Number.isNaN(parseDshModelCapacity(raw))) return;
+		setCapacityDrafts((current) => {
+			const next = { ...current };
+			delete next[key];
+			return next;
+		});
+	};
+
+	const overridden = props.modelsOverridden ?? models.length > 0;
+	const inherited = !overridden && (props.catalog?.length ?? 0) > 0;
+	const canEditRows = !inherited || props.editableInherited === true;
+	const shownModels = inherited ? (props.catalog ?? []) : models;
 
 	return (
 		<div className="grid gap-1.5">
 			<div className="flex items-center gap-2">
 				<span className="text-caption font-semibold text-muted-foreground">{t("config.dsh.models")}</span>
 				<span className="text-micro text-muted-foreground/70">
-					{models.length === 0
+					{inherited
 						? t("config.dsh.modelsInherited")
 						: t("config.dsh.modelsCustomized", { count: models.length })}
 				</span>
+				{overridden && props.onReset && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						className="h-6 px-1.5 text-micro text-muted-foreground"
+						disabled={!writable}
+						onClick={props.onReset}
+					>
+						{t("config.dsh.resetModels")}
+					</Button>
+				)}
 				<Button
 					type="button"
 					variant="ghost"
@@ -79,20 +128,18 @@ export function ModelsTable(props: {
 			</div>
 			{shownModels.length === 0 ? (
 				<div className="rounded-sm border border-dashed border-border-subtle px-3 py-2.5 text-micro text-muted-foreground">
-					{t("config.dsh.modelsEmptyHint")}
+					{inherited ? t("config.dsh.modelsEmptyHint") : t("config.dsh.modelsEmpty")}
 				</div>
 			) : (
 				<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
 					{shownModels.map((model, index) => {
-						const isOpen = !inherited && expandedIndex === index;
+						const isOpen = canEditRows && expandedIndex === index;
 						const id = typeof model.id === "string" ? model.id : "";
 						const name = typeof model.name === "string" ? model.name : "";
 						return (
 							<div key={`${inherited ? "cat" : "row"}-${index}`} className="border-b border-border/40 last:border-b-0">
 								<div className="flex items-center gap-2 px-2.5 py-1.5">
-									{inherited ? (
-										<span className="size-6 shrink-0" aria-hidden="true" />
-									) : (
+									{canEditRows ? (
 										<Button
 											type="button"
 											variant="ghost"
@@ -105,31 +152,37 @@ export function ModelsTable(props: {
 										>
 											{isOpen ? <ChevronDown className="size-3.5" aria-hidden="true" /> : <ChevronRight className="size-3.5" aria-hidden="true" />}
 										</Button>
-									)}
-									{inherited ? (
-										<span className="min-w-0 flex-1 truncate font-mono text-control text-foreground">{id}</span>
 									) : (
+										<span className="size-6 shrink-0" aria-hidden="true" />
+									)}
+									{canEditRows ? (
 										<Input
 											className="h-7 min-w-0 flex-1 font-mono"
-											placeholder="model-id"
+											placeholder={t("config.dsh.modelIdPlaceholder")}
 											value={id}
 											disabled={!writable}
 											onChange={(event) => onUpdate(index, "id", event.target.value)}
-											onBlur={(event) => props.onIdBlur?.(index, event.target.value)}
+											onBlur={(event) => {
+												const trimmed = event.target.value.trim();
+												if (trimmed !== event.target.value) onUpdate(index, "id", trimmed);
+												props.onIdBlur?.(index, trimmed);
+											}}
 										/>
-									)}
-									{inherited ? (
-										name ? <span className="min-w-0 flex-1 truncate text-control text-muted-foreground">{name}</span> : <span className="min-w-0 flex-1" aria-hidden="true" />
 									) : (
+										<span className="min-w-0 flex-1 truncate font-mono text-control text-foreground">{id}</span>
+									)}
+									{canEditRows ? (
 										<Input
 											className="h-7 min-w-0 flex-1"
-											placeholder={t("config.modelDisplayName")}
+											placeholder={t("config.dsh.modelNamePlaceholder")}
 											value={name}
 											disabled={!writable}
 											onChange={(event) => onUpdate(index, "name", event.target.value)}
 										/>
+									) : (
+										name ? <span className="min-w-0 flex-1 truncate text-control text-muted-foreground">{name}</span> : <span className="min-w-0 flex-1" aria-hidden="true" />
 									)}
-									{!inherited && (
+									{canEditRows && (
 										<Button
 											type="button"
 											variant="ghost"
@@ -153,38 +206,28 @@ export function ModelsTable(props: {
 										<label className="grid gap-1">
 											<span className="text-micro text-muted-foreground">{t("config.contextWindow")}</span>
 											<Input
-												type="number"
+												type={props.allowCapacitySuffixes ? "text" : "number"}
+												inputMode="numeric"
 												className="h-7"
-												placeholder="1000000"
-												value={typeof model.contextWindow === "number" ? String(model.contextWindow) : ""}
+												placeholder={formatDshModelCapacity(props.defaultContextWindow)}
+												value={capacityText(index, "contextWindow", model.contextWindow)}
 												disabled={!writable}
-												onChange={(event) => {
-													const next = event.target.value ? Number(event.target.value) : undefined;
-													onUpdate(index, "contextWindow", Number.isFinite(next) ? next : undefined);
-												}}
+												onChange={(event) => updateCapacity(index, "contextWindow", event.target.value)}
+												onBlur={() => settleCapacity(index, "contextWindow")}
 											/>
 										</label>
 										<label className="grid gap-1">
-											<span className="text-micro text-muted-foreground">{t("config.maxTokens")}</span>
+											<span className="text-micro text-muted-foreground">{t("config.dsh.modelMaxTokens")}</span>
 											<Input
-												type="number"
+												type={props.allowCapacitySuffixes ? "text" : "number"}
+												inputMode="numeric"
 												className="h-7"
-												placeholder="128000"
-												value={typeof model.maxTokens === "number" ? String(model.maxTokens) : ""}
+												placeholder={formatDshModelCapacity(props.defaultMaxTokens)}
+												value={capacityText(index, "maxTokens", model.maxTokens)}
 												disabled={!writable}
-												onChange={(event) => {
-													const next = event.target.value ? Number(event.target.value) : undefined;
-													onUpdate(index, "maxTokens", Number.isFinite(next) ? next : undefined);
-												}}
+												onChange={(event) => updateCapacity(index, "maxTokens", event.target.value)}
+												onBlur={() => settleCapacity(index, "maxTokens")}
 											/>
-										</label>
-										<label className="col-span-full flex items-center gap-2 text-micro text-muted-foreground">
-											<Checkbox
-												checked={imageInputEnabled(model.input)}
-												disabled={!writable}
-												onCheckedChange={(checked) => onUpdate(index, "input", setImageInput(model.input, checked === true))}
-											/>
-											{t("settings.vision.supportsImages")}
 										</label>
 									</div>
 								)}

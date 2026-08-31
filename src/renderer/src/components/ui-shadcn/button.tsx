@@ -79,7 +79,7 @@ function Button({
         <>
           {loading && (
             <span
-              className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+              className="size-3.5 shrink-0 animate-pideck-spin rounded-full border-2 border-current border-t-transparent"
               aria-hidden="true"
             />
           )}

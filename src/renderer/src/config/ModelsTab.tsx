@@ -1079,8 +1079,8 @@ export function ModelsTab(props: {
 																	: undefined,
 																)
 														}
-														// 数字输入框不能填写 200k 这类缩写，placeholder 使用真实可保存的 token 数值。
-														placeholder="1000000"
+														// 未匹配到目录时保持空（不展示 1000000 这类暗示值，避免用户误以为已匹配，
+														// 实际 Pi 只会按自身 128k 回退）。留空 = 交给 Pi 默认，语义与保存结果一致。
 														className="h-8 min-w-0"
 													/>
 												</TableCell>
@@ -1098,8 +1098,7 @@ export function ModelsTab(props: {
 																	: undefined,
 																)
 														}
-														// 与 contextWindow 一样保持纯数字，避免提示值看起来能输入但实际被 number 控件拒绝。
-														placeholder="128000"
+														// 与 contextWindow 一样保持纯数字，未匹配时不展示 128000 暗示值。
 														className="h-8 min-w-0"
 													/>
 												</TableCell>

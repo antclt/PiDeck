@@ -16,9 +16,10 @@ import { isLanWeb, desktopApi as api } from "../../desktopApi";
 import { useNotifyLayoutResized } from "../../hooks/useNotifyLayoutResized";
 import { SessionHeader } from "./SessionHeader";
 import { SessionBranchBar } from "./SessionBranchBar";
-import { SessionTodoStrip } from "./SessionTodoStrip";
+import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
-import { SessionModifiedFilesStrip } from "./SessionModifiedFilesStrip";
+import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
+import { SessionTodoStrip } from "./SessionTodoStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SIZE } from "../terminal/TerminalDockPanel";
@@ -78,6 +79,7 @@ export type SessionViewProps = {
   onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
   onDeleteMessage?: (messageId: string, entryId?: string) => void;
   onForkMessage?: (message: any) => void;
+  onRewindToMessage?: (message: any) => void;
   forkingMessageId?: string | null;
   onToast: (message: string) => void;
   onQuickPrompt?: (prompt: string) => void;
@@ -146,6 +148,7 @@ export function SessionView({
   onEditMessage,
   onDeleteMessage,
   onForkMessage,
+  onRewindToMessage,
   forkingMessageId,
   onToast,
   onQuickPrompt,
@@ -645,6 +648,7 @@ export function SessionView({
               onEditMessage,
               onDeleteMessage,
               onForkMessage,
+              onRewindToMessage,
               forkingMessageId,
               onToast,
               onQuickPrompt,
@@ -685,17 +689,21 @@ export function SessionView({
                 enqueue={enqueueSessionPrompt}
                 ensureSessionId={ensureSessionId}
                 queuePanel={queuePanel}
-                // 输入框上方独立卡栈（dsh input dock 移植）：todo → goal，与 queue 同列同宽；
-                // 高度由 ComposerMeasuredExtras 测量内容总高，面板 hug 该值
+                // 输入框上方独立卡栈（dsh input dock 移植）：todo → files → subagents → goal，
+                // 与 queue 同列同宽；高度由 ComposerMeasuredExtras 测量内容总高，面板 hug 该值
                 widgets={
                   <>
                     <SessionTodoStrip sessionId={sessionId} />
-                    <SessionGoalStrip sessionId={sessionId} />
-                    <SessionModifiedFilesStrip
+                    <SessionFilesStrip
                       sessionId={sessionId}
                       run={latestAgentRun}
-                      onDiffFile={onDiffFile ? (path) => onDiffFile(path) : undefined}
+                      onDiffFile={onDiffFile}
                     />
+                    <SessionSubagentsStrip
+                      sessionId={sessionId}
+                      onOpenChildSession={onOpenBranchSession}
+                    />
+                    <SessionGoalStrip sessionId={sessionId} />
                   </>
                 }
               />

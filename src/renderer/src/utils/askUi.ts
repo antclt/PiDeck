@@ -59,7 +59,7 @@ export function classifyAskCardStatus(
  */
 export function buildAskResponse(
 	method: string,
-	value: string | boolean | undefined,
+	value: string | boolean | string[] | undefined,
 	options?: { confirmed?: boolean; cancelled?: boolean },
 ): AgentUiResponse {
 	if (options?.cancelled) return { cancelled: true };
@@ -70,11 +70,12 @@ export function buildAskResponse(
 	return { value: value ?? "" };
 }
 
-export type BatchAnswerValue = string | boolean | null | undefined;
+export type BatchAnswerValue = string | boolean | string[] | null | undefined;
 
-/** 与原有 batchAnswerLabel 一致：布尔转 true/false 文案，其余原样 */
+/** 与原有 batchAnswerLabel 一致：布尔转 true/false 文案，数组 join「、」，其余原样 */
 export function batchAnswerLabel(value: BatchAnswerValue): string {
 	if (typeof value === "boolean") return value ? "true" : "false";
+	if (Array.isArray(value)) return value.join("、");
 	return value ?? "";
 }
 

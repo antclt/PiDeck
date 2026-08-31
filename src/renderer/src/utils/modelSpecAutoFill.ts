@@ -203,25 +203,23 @@ export function mergeAdaptiveModelTemplate(
 }
 
 /**
- * 重置为自适应：先清空五个能力字段，再只写模板有值的字段。
- * 模板未知的字段不写入（落盘就是空），交还 Pi 默认行为。
- * 与 computeModelSpecPatches（只填空字段）不同：重置是用户显式动作，
- * 明确允许模板覆盖用户此前手填的值。
+ * 重置为自适应：只覆盖模板有值的字段。
+ * - 容量字段（contextWindow / maxTokens / input）：模板未提供（未匹配到目录、
+ *   endpoint 未实报）时保留用户当前值——旧实现先清空再写，未匹配时会把用户手填的
+ *   1000000 一并删掉，落盘为空后 Pi 按 128k 回退，等于静默降级；
+ * - reasoning / thinkingLevelMap：模板总是有立场（未声明也默认开放思考档位），
+ *   始终按模板重置，模板没有映射时清空（如 reasoning:false 的纯文本模型）。
  */
 export function applyAdaptiveTemplateReset(
 	model: ModelItem,
 	template: AdaptiveModelTemplate,
 ): ModelItem {
 	const next: ModelItem = { ...model };
-	delete next.contextWindow;
-	delete next.maxTokens;
-	delete next.input;
-	delete next.reasoning;
-	delete next.thinkingLevelMap;
 	if (template.contextWindow != null) next.contextWindow = template.contextWindow;
 	if (template.maxTokens != null) next.maxTokens = template.maxTokens;
-	if (template.reasoning !== undefined) next.reasoning = template.reasoning;
 	if (template.input && template.input.length > 0) next.input = [...template.input];
+	if (template.reasoning !== undefined) next.reasoning = template.reasoning;
 	if (template.thinkingLevelMap) next.thinkingLevelMap = { ...template.thinkingLevelMap };
+	else delete next.thinkingLevelMap;
 	return next;
 }

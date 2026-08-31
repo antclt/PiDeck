@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
+import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
 import type {
 	YaoPromptListResult,
@@ -76,6 +77,9 @@ import type {
 	WorktreeEntry,
 	PiCliUpdateResult,
 	PiCommand,
+	RewindCheckpointSummary,
+	RewindRestoreResult,
+	RewindRestoreScope,
 	PiExtensionListResult,
 	PiInstallStatus,
 	PiInstallExecResult,
@@ -111,6 +115,10 @@ import type {
 	TerminalTab,
 	TerminalTarget,
 	WebNetworkAddress,
+	HealthExportResult,
+	HealthReport,
+	HealthReportContext,
+	HealthReportFormat,
 } from "../shared/types";
 import type {
 	ProviderUsageResult,
@@ -137,6 +145,9 @@ const api = {
 		/** 异步写入图片：data URL 可能较大，不能走 sendSync。 */
 		writeImage: (dataUrl: string) =>
 			ipcRenderer.invoke(ipcChannels.clipboardWriteImage, dataUrl) as Promise<boolean>,
+		/** 异步写入纯文本：诊断报告/AI 提示词可达数十 KB，直连 clipboard 在 Electron 38 已废弃。 */
+		writeText: (value: string) =>
+			ipcRenderer.invoke(ipcChannels.clipboardWriteText, value) as Promise<boolean>,
 	},
 	editors: {
 		list: () => ipcRenderer.invoke(ipcChannels.editorsList) as Promise<ExternalEditor[]>,
@@ -379,6 +390,39 @@ const api = {
 				started: boolean;
 				homeDir: string;
 			}>,
+		/**
+		 * DSH runtime 安装态（AgentRuntimeProvider 阶段 1）：notInstalled/broken 时
+		 * DSH UI 整体降级为安装引导，新建 dsh 会话被拒。
+		 */
+		getDshRuntimeStatus: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeGetStatus) as Promise<DshRuntimeStatus>,
+		/** DSH runtime 安装态变更推送（阶段 2 安装/卸载时广播）；返回退订函数。 */
+		onDshRuntimeStatusChanged: (callback: (status: DshRuntimeStatus) => void) =>
+			subscribe(ipcChannels.dshRuntimeStatusChanged, callback),
+		/**
+		 * 按需安装 DSH runtime（阶段 2）。进度不在这里返回——下载可能持续数十秒，
+		 * 走 onDshRuntimeInstallProgress 推送。
+		 */
+		installDshRuntime: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeInstall) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 从本地 tgz 导入 runtime（主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
+		importDshRuntimeFile: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocal) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 卸载已安装的 runtime。 */
+		uninstallDshRuntime: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeUninstall) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 安装进度推送（阶段 2）；返回退订函数。 */
+		onDshRuntimeInstallProgress: (callback: (progress: DshRuntimeInstallProgress) => void) =>
+			subscribe(ipcChannels.dshRuntimeInstallProgress, callback),
 		/** DSH settings.describe（脱敏 namespace 视图 + schema）。 */
 		describeDshSettings: () =>
 			ipcRenderer.invoke(ipcChannels.dshConfigDescribe) as Promise<{
@@ -389,6 +433,7 @@ const api = {
 					applies: string;
 					revision: number;
 					value: unknown;
+					base?: unknown;
 					user?: unknown;
 					secrets: Array<{ path: string[]; set: boolean }>;
 					schema: unknown;
@@ -555,6 +600,21 @@ const api = {
 				messages: import("../shared/types").ChatMessage[];
 				hasMore: boolean;
 			}>,
+		/** pi-subagents 扩展子代理列表（record + 子会话回填）。 */
+		listSessionSubagents: (sessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsListSubagents, sessionId) as Promise<
+				import("../shared/types").PiSubagentEntry[]
+			>,
+		/** 会话级文件修改汇总（write/edit/create/patch 聚合，历史/活会话通用）。 */
+		listSessionFileChanges: (sessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsListFileChanges, sessionId) as Promise<
+				import("../shared/types").SessionFileChange[]
+			>,
+		/** 会话级 todo 快照（pi-deck-todo custom 条目重建，历史会话任务 tab）。 */
+		listSessionTodo: (sessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsListSessionTodo, sessionId) as Promise<
+				import("../shared/types").SessionTodoSnapshot | undefined
+			>,
 		/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */
 		listDshSkills: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshListSkills, agentId) as Promise<import("../shared/types").DshSkillView[]>,
@@ -664,6 +724,27 @@ const api = {
 				target,
 				messageId,
 			) as Promise<SessionCommandResult<SessionTargetedValue<void>>>,
+		listRewindCheckpoints: (target: SessionRuntimeTarget) =>
+			ipcRenderer.invoke(ipcChannels.sessionsRewindList, target) as Promise<
+				SessionCommandResult<SessionTargetedValue<RewindCheckpointSummary[]>>
+			>,
+		getRewindCheckpointDiff: (target: SessionRuntimeTarget, checkpointId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.sessionsRewindDiff,
+				target,
+				checkpointId,
+			) as Promise<SessionCommandResult<SessionTargetedValue<string>>>,
+		restoreRewindCheckpoint: (
+			target: SessionRuntimeTarget,
+			checkpointId: string,
+			scope: RewindRestoreScope,
+		) =>
+			ipcRenderer.invoke(
+				ipcChannels.sessionsRewindRestore,
+				target,
+				checkpointId,
+				scope,
+			) as Promise<SessionCommandResult<SessionTargetedValue<RewindRestoreResult>>>,
 		prepareRuntimeResend: (target: SessionRuntimeTarget, messageId: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.sessionsRuntimePrepareResend,
@@ -1055,6 +1136,22 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.diagnosticsSnapshot) as Promise<DiagnosticsSnapshot>,
 		openDiagnosticsFolder: () =>
 			ipcRenderer.invoke(ipcChannels.diagnosticsOpenFolder) as Promise<void>,
+		/** 环境体检：跑一次完整检查并返回脱敏报告。 */
+		healthCheck: () => ipcRenderer.invoke(ipcChannels.healthCheck) as Promise<HealthReport>,
+		/** 把 Markdown 报告保存到用户选择的路径。 */
+		healthExportReport: (markdown: string, reportJson?: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.healthExportReport,
+				markdown,
+				reportJson,
+			) as Promise<HealthExportResult>,
+		/** 把脱敏日志 + 报告 + 环境 JSON 打成 zip 保存到用户选择的路径。 */
+		healthExportBundle: (markdown: string, reportJson: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.healthExportBundle,
+				markdown,
+				reportJson,
+			) as Promise<HealthExportResult>,
 	},
 	logs: {
 		list: (query?: AppLogQuery) =>

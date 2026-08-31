@@ -83,7 +83,7 @@ export function ProcessMetricsTab() {
           onClick={() => void refresh()}
           disabled={loading}
         >
-          <RefreshCw className={`size-3.5${loading ? " animate-spin" : ""}`} aria-hidden="true" />
+          <RefreshCw className={`size-3.5${loading ? " animate-pideck-spin" : ""}`} aria-hidden="true" />
           {t("config.process.refresh")}
         </Button>
       </div>

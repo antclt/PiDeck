@@ -124,7 +124,7 @@ test("UI: AnswerOutput live path; TurnRow does not subscribe streaming atom", ()
     "utf8",
   );
   assert.match(timeline, /sessionId=\{sessionId\}/);
-  assert.match(timeline, /isLatestTimelineRunBusy/);
+  assert.match(timeline, /isRunStreaming = isTurnRunning && item.id === lastDisplayedItemId/);
   assert.doesNotMatch(timeline, /streamingTextByIdAtom/);
   assert.doesNotMatch(timeline, /streamingMessageId/);
 });

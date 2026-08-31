@@ -73,17 +73,53 @@ test("dsh custom model round-trips input and reasoningEfforts into Pi metadata",
   assert.equal(dsh.profile.models?.[0]?.cost, undefined);
 });
 
-test("official deepseek stays in llm-deepseek instead of a custom dict row", () => {
+test("official DeepSeek keeps the composition defaults when Pi only supplies its built-in catalog", () => {
+  const dsh = mapping.piToDshSnapshot({
+    name: "deepseek",
+    baseUrl: "https://api.deepseek.com",
+    api: "openai-completions",
+    apiKey: "sk-ds",
+    models: [{ id: "deepseek-v4-flash", input: ["text"] }],
+    catalogOnly: true,
+  });
+  assert.equal(dsh.namespace, "llm-deepseek");
+  // DSH's direct adapter already owns its endpoint, credential reference and catalog.
+  // Migrating an auth.json-only Pi builtin must not materialize a user settings override.
+  assert.deepEqual(JSON.parse(JSON.stringify(dsh.profile)), {});
+  const merged = mapping.mergeDshProviderIntoSettings(
+    { "ui-onboarding": { welcomeNoticeVersion: "keep-me" } },
+    dsh,
+  );
+  assert.equal(merged["llm-deepseek"], undefined);
+  assert.equal(merged["ui-onboarding"].welcomeNoticeVersion, "keep-me");
+});
+
+test("explicit official DeepSeek model overrides use the direct-adapter schema", () => {
   const dsh = mapping.piToDshSnapshot({
     name: "deepseek",
     baseUrl: "https://api.deepseek.com/v1",
     api: "openai-completions",
-    apiKey: "sk-ds",
-    models: [{ id: "deepseek-chat" }],
+    models: [{
+      id: "private-vision",
+      name: "Private Vision",
+      contextWindow: 512000,
+      maxTokens: 64000,
+      input: ["text", "image"],
+      reasoning: true,
+      thinkingLevelMap: { high: "high" },
+    }],
   });
   assert.equal(dsh.namespace, "llm-deepseek");
+  assert.equal(dsh.profile.api, undefined);
+  assert.equal(dsh.profile.apiKeyEnv, undefined);
   assert.equal(dsh.profile.baseURL, undefined);
-  assert.equal(dsh.profile.apiKeyEnv, "DEEPSEEK_API_KEY");
+  assert.deepEqual(JSON.parse(JSON.stringify(dsh.profile.models)), [{
+    id: "private-vision",
+    name: "Private Vision",
+    contextWindow: 512000,
+    maxTokens: 64000,
+    inputModalities: ["text", "image"],
+  }]);
 });
 
 test("dsh settings yaml parse + merge keeps sibling namespaces", () => {
@@ -408,18 +444,86 @@ test("apply pi-to-dsh migrates an auth.json-only builtin provider even when DSH 
       readCredentialValue: async () => undefined,
     },
   };
-  // 无条件迁移：DSH settings.yaml 没有 llm-deepseek 段也照迁，official deepseek
-  // 由 piToDshSnapshot 路由到 llm-deepseek 内置 namespace，key 写 .credentials.yaml。
+  // DSH settings.yaml has no llm-deepseek user override: the direct adapter's
+  // composition already provides the route, model catalog and DEEPSEEK_API_KEY ref.
   const result = await service.applyProviderMigration(deps, "pi-to-dsh", "deepseek");
   assert.equal(result.ok, true);
   assert.equal(result.copiedKey, true);
   assert.equal(result.wroteViaHost, false);
   const settings = await readFile(join(home, "settings.yaml"), "utf8");
   const creds = await readFile(join(home, ".credentials.yaml"), "utf8");
-  assert.match(settings, /llm-deepseek:/);
-  assert.match(settings, /DEEPSEEK_API_KEY/);
+  assert.doesNotMatch(settings, /llm-deepseek:/);
+  assert.doesNotMatch(settings, /DEEPSEEK_API_KEY/);
   assert.match(creds, /DEEPSEEK_API_KEY:/);
   assert.match(creds, /sk-ds/);
+});
+
+test("auth-only official DeepSeek migration to a ready host writes only the credential", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
+  const calls = { describe: 0, update: 0, credential: null };
+  const deps = {
+    configManager: {
+      getModelsConfig: async () => ({ parsed: { providers: {} } }),
+      getAuthConfig: async () => ({ parsed: { deepseek: { type: "api_key", key: "sk-ds-host" } } }),
+      saveModelsConfig: async () => ({ valid: true }),
+      saveAuthConfig: async () => ({ valid: true }),
+    },
+    dshHost: {
+      getHomeDir: () => home,
+      isHostReady: () => true,
+      describeSettings: async () => {
+        calls.describe += 1;
+        return { namespaces: [] };
+      },
+      updateSettings: async () => {
+        calls.update += 1;
+      },
+      setCredential: async (ref, value) => {
+        calls.credential = { ref, value };
+      },
+      readCredentialValue: async () => undefined,
+    },
+  };
+  const result = await service.applyProviderMigration(deps, "pi-to-dsh", "deepseek");
+  assert.equal(result.ok, true);
+  assert.equal(result.wroteViaHost, true);
+  assert.equal(calls.describe, 0);
+  assert.equal(calls.update, 0);
+  assert.deepEqual(calls.credential, { ref: "DEEPSEEK_API_KEY", value: "sk-ds-host" });
+});
+
+test("apply dsh-to-pi migrates the built-in DeepSeek credential without a settings override", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pideck-migrate-"));
+  await writeFile(join(home, "settings.yaml"), "ui-onboarding:\n  welcomeNoticeVersion: keep-me\n", "utf8");
+  const calls = { modelsSaved: false, authSaved: null };
+  const deps = {
+    configManager: {
+      getModelsConfig: async () => ({ parsed: { providers: {} } }),
+      getAuthConfig: async () => ({ parsed: {} }),
+      saveModelsConfig: async () => {
+        calls.modelsSaved = true;
+        return { valid: true };
+      },
+      saveAuthConfig: async (data) => {
+        calls.authSaved = data;
+        return { valid: true };
+      },
+    },
+    dshHost: {
+      getHomeDir: () => home,
+      isHostReady: () => false,
+      updateSettings: async () => undefined,
+      setCredential: async () => undefined,
+      describeSettings: async () => ({ namespaces: [] }),
+      readCredentialValue: async (ref) => (ref === "DEEPSEEK_API_KEY" ? "sk-from-dsh" : undefined),
+    },
+  };
+  const result = await service.applyProviderMigration(deps, "dsh-to-pi", "deepseek");
+  assert.equal(result.ok, true);
+  assert.equal(result.copiedKey, true);
+  assert.equal(calls.modelsSaved, false);
+  assert.equal(calls.authSaved.deepseek.type, "api_key");
+  assert.equal(calls.authSaved.deepseek.key, "sk-from-dsh");
 });
 
 test("source contracts keep IPC / preload / UI wired", async () => {

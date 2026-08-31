@@ -7,6 +7,7 @@ import {
 	readClipboardImageDataUrl,
 	readClipboardText,
 	writeClipboardImageDataUrl,
+	writeClipboardText,
 } from "../clipboard/nativeClipboard";
 
 export type ClipboardIpcDeps = {
@@ -37,6 +38,18 @@ export function registerClipboardIpc({ appLogger }: ClipboardIpcDeps): void {
 			void appLogger.warn("clipboard", "native writeImage failed", {
 				reason: result.reason,
 				payloadChars: typeof dataUrl === "string" ? dataUrl.length : 0,
+			});
+		}
+		return result.ok;
+	});
+	// 写文本：诊断报告/AI 提示词可达数十 KB，渲染进程直连 clipboard 在 Electron 38 已废弃，
+	// 大文本会静默失败（用户以为复制成功，实际剪贴板还是旧内容）。
+	ipcMain.handle(ipcChannels.clipboardWriteText, async (_event, value: unknown) => {
+		const result = writeClipboardText(value);
+		if (!result.ok) {
+			void appLogger.warn("clipboard", "native writeText failed", {
+				reason: result.reason,
+				payloadChars: typeof value === "string" ? value.length : 0,
 			});
 		}
 		return result.ok;

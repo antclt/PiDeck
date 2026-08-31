@@ -1,8 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
-import { t } from "../i18n";
 import { desktopApi as api } from "../desktopApi";
 import type { Project, AppInfo } from "../../../shared/types";
-
 interface ConfirmDialogConfig {
   title: string;
   message: string;
@@ -34,12 +32,13 @@ export function useOverlayActions({ activeProject, appInfo, showToast }: UseOver
   const overlayProps = useMemo(() => ({
     feedback: feedbackOpen ? {
       open: true as const,
-      project: activeProject,
-      appInfo,
-      onClose: () => setFeedbackOpen(false),
-      onCopy: () => showToast(t("app.feedbackCopied")),
-      onOpenExternal: (url: string) => api.app.openExternal(url),
-      loadEnvironment: api.app.feedbackEnvironment,
+      props: {
+        open: true as const,
+        project: activeProject,
+        appInfo,
+        onClose: () => setFeedbackOpen(false),
+        onToast: (message: string) => showToast(message),
+      },
     } : undefined,
     confirm: confirmDialog ? {
       open: true as const,

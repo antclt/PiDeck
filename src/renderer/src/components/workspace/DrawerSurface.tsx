@@ -1,5 +1,6 @@
 import { BrowserSurface } from "./BrowserSurface";
 import { GitDrawerHost } from "./GitDrawerHost";
+import { RewindPanel } from "./RewindPanel";
 import { DrawerContent } from "../app/AppParts";
 import { SessionTrajectoryPanel } from "../session/trajectory/SessionTrajectoryPanel";
 import { LazyWrapper } from "../../hooks/useLazyComponent";
@@ -91,6 +92,10 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
       {drawer === "trajectory" && !drawerCollapsed ? (
         <div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
           <SessionTrajectoryPanel />
+        </div>
+      ) : drawer === "rewind" && !drawerCollapsed ? (
+        <div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
+          <RewindPanel />
         </div>
       ) : drawer === "browser" && !drawerCollapsed ? (
         <div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">

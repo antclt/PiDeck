@@ -184,6 +184,11 @@ export function SessionContextMeter(props: {
 		props.state?.cacheHitAveragePercent ?? undefined,
 		props.state?.cacheHitSampleCount ?? 0,
 	);
+	// 输入/输出 token 与最新缓存命中率已常驻输入框下方（ComposerStatsLine），
+	// 圆环面板不再重复这两行；会话头部（SessionStatus）共用同一构建器不受影响。
+	const panelDetailRows = detail.detailRows.filter(
+		(row) => row.label !== t("ctx.detail.tokens") && row.label !== t("ctx.detail.hitLatest"),
+	);
 
 	// ── 面板内 provider 用量/余额区块 ─────────────────────────────
 	// 数据源与展示统一收敛到 ProviderUsageDetails（模型卡片/选择器徽标同一份
@@ -460,9 +465,9 @@ export function SessionContextMeter(props: {
 							)}
 						</div>
 					)}
-					{(detail.detailRows.length > 0 || detail.replyPerfRows.length > 0 || detail.sessionStatRows.length > 0) && (
+					{(panelDetailRows.length > 0 || detail.replyPerfRows.length > 0 || detail.sessionStatRows.length > 0) && (
 						<div className="mt-2 space-y-0.5 border-t border-border pt-2">
-							{detail.detailRows.map((row) => (
+							{panelDetailRows.map((row) => (
 								<div
 									key={row.label}
 									className={`flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}
@@ -530,7 +535,7 @@ export function SessionContextMeter(props: {
 						>
 							<FoldVertical
 								size={13}
-								className={compactUi.compacting ? "animate-spin" : undefined}
+								className={compactUi.compacting ? "animate-pideck-spin" : undefined}
 							/>
 							{compactUi.compacting
 								? t("sessionContext.compacting")

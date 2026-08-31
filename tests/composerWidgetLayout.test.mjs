@@ -134,7 +134,7 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
     "src/renderer/src/components/session/ComposerArea.tsx",
     "utf8",
   );
-  const todo = readFileSync(
+  const widgets = readFileSync(
     "src/renderer/src/components/session/SessionTodoStrip.tsx",
     "utf8",
   );
@@ -142,12 +142,12 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
     "src/renderer/src/components/session/SessionGoalStrip.tsx",
     "utf8",
   );
-  const files = readFileSync(
-    "src/renderer/src/components/session/SessionModifiedFilesStrip.tsx",
-    "utf8",
-  );
   const queue = readFileSync(
     "src/renderer/src/components/session/ComposerPanels.tsx",
+    "utf8",
+  );
+  const composerAtoms = readFileSync(
+    "src/renderer/src/atoms/composer-atoms.ts",
     "utf8",
   );
 
@@ -161,18 +161,13 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
   );
   assert.match(composer, /Math\.max\(widgetsEl\.offsetHeight, widgetsEl\.scrollHeight\)/);
 
-  for (const source of [todo, goal, files, queue]) {
+  for (const source of [widgets, goal, queue]) {
     assert.match(source, /ComposerWidgetFrame/, "all composer cards must share the frame");
   }
-  assert.match(todo, /useComposerWidgetCollapsed\([\s\S]*?`todo:\$\{props\.sessionId\}`/);
-  assert.match(files, /useComposerWidgetCollapsed\([\s\S]*?modified-files:/);
-  assert.match(files, /previousRunIdentityRef/);
-  assert.match(files, /if \(!runIdentity\) return;/);
-  assert.match(files, /previousRunIdentity && previousRunIdentity !== runIdentity/);
-  assert.match(files, /clearCollapsed\(`modified-files:\$\{previousRunIdentity\}`\)/);
-  assert.match(files, /clearCollapsedByPrefix\(`modified-file-diff:\$\{previousRunIdentity\}:/);
-  assert.match(files, /open=\{!collapsed\}/);
-  assert.match(files, /onOpenChange=\{\(open\) => \{ setCollapsed\(!open\); \}\}/);
+  assert.match(widgets, /useComposerWidgetCollapsed\(/);
+  assert.match(widgets, /export function progressLabel/);
+  // 弹层时代的独立折叠 family 已随弹层移除：行级折叠统一走 composer 通道
+  assert.doesNotMatch(composerAtoms, /widgetsPopoverSegmentFamily|widgetsDisclosureCollapsedFamily/);
   assert.match(queue, /useComposerWidgetCollapsed\([\s\S]*?queue:/);
   assert.match(queue, /trackRef: RefObject<HTMLElement \| null>/);
 });

@@ -7,6 +7,7 @@ import type { SidebarActions } from "./SidebarContent";
 import { ActiveSessionsTree } from "./ActiveSessionsTree";
 import { SessionTree } from "./SessionTree";
 import { WorktreeTree } from "./WorktreeTree";
+import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { Button } from "../ui-shadcn/button";
 import {
 	DropdownMenu,
@@ -90,6 +91,11 @@ export function ProjectTree(props: {
       const dragging = props.controller.drag.sourceProjectId === project.id;
       const dragOver = props.controller.drag.overProjectId === project.id;
       const rootProjectSessions = props.controller.catalog.sessionsByProject[project.id] ?? [];
+      // 项目级「运行中」判定：任一 Agent 进程存活（starting/idle/running）即视为运行中。
+      // 与 ActiveSessionsTree 活动页同源，保证折叠时的项目 tag 与展开后的子行状态一致。
+      const hasLiveAgent = props.controller.catalog.agents.some(
+        (agent) => agent.projectId === project.id && isLiveRuntimeStatus(agent.status),
+      );
       // 运行态属于具体会话，而不是项目容器；项目行只负责导航，避免多个 Agent 同时运行时
       // 项目头像出现无法指向目标会话的聚合动画。
       return <div key={project.id} className={cn("project-group mb-1.5", project.worktreeEnabled && "worktree-enabled")}>
@@ -132,6 +138,16 @@ export function ProjectTree(props: {
             <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-29 @max-[255px]:group-focus-within:pr-29">
               <div className="conversation-title flex min-w-0 items-center">
                 <strong className={`min-w-0 flex-1 truncate font-medium${project.missing ? " text-muted-foreground" : ""}`}>{projectDirectoryName}</strong>
+                {/* 折叠时项目行只剩名称，用 [运行中] tag 提示该工作区仍有 Agent 进程在跑；
+                    展开后子行自带状态点，不再重复提示。绿色与「目录不存在」红色 tag 形成对照。 */}
+                {collapsed && hasLiveAgent && (
+                  <span
+                    className="shrink-0 rounded bg-success/10 px-1 text-[10px] font-medium leading-4 text-success"
+                    title={t("app.projectRunningHint")}
+                  >
+                    {t("app.projectRunning")}
+                  </span>
+                )}
                 {/* 目录已被删除/移动/未挂载：保留记录并标记，用户可右键移除或恢复目录 */}
                 {project.missing && (
                   <span

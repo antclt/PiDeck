@@ -131,6 +131,30 @@ export class AppLogger {
 		return total;
 	}
 
+	/** 日志目录绝对路径。环境诊断导出日志包时要按此目录遍历文件，不能让调用方自己拼。 */
+	getLogDir(): string {
+		return this.dir;
+	}
+
+	/** 列出日志文件（名称/字节数/修改时间），按名称倒序（最新在前）。 */
+	async listFiles(): Promise<Array<{ name: string; path: string; sizeBytes: number; modifiedAt: number }>> {
+		await mkdir(this.dir, { recursive: true });
+		const names = (await readdir(this.dir)).filter((file) => LOG_FILE_PATTERN.test(file)).sort().reverse();
+		const files: Array<{ name: string; path: string; sizeBytes: number; modifiedAt: number }> = [];
+		for (const name of names) {
+			try {
+				const info = await stat(join(this.dir, name));
+				files.push({
+					name,
+					path: join(this.dir, name),
+					sizeBytes: info.size,
+					modifiedAt: info.mtimeMs,
+				});
+			} catch { /* 单个文件统计失败不影响整体 */ }
+		}
+		return files;
+	}
+
 	async openFolder() {
 		await mkdir(this.dir, { recursive: true });
 		await shell.openPath(this.dir);

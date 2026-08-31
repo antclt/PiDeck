@@ -317,7 +317,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
                         : "",
               ].filter(Boolean).join(" ")}
             >
-              {/* 扩展 widget（Todo/Plan）由常驻 todo 条（SessionTodoStrip）展示。 */}
+              {/* 扩展 widget（Todo/Plan）由统一会话组件卡展示。 */}
               <TipTapComposer
                 ref={composer.editor.ref}
                 value={composer.draft}
@@ -371,6 +371,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
               ) : null}
               {/* 运行中允许后端尝试切换思考强度；是否能作用于当前回合由具体 Agent 后端决定。 */}
               <ComposerBottomBar
+                sessionId={props.sessionId}
                 state={composer.runtime?.state}
                 runtimeLive={isLiveRuntimeStatus(composer.runtime?.status)}
                 disabled={composer.isBusy || composer.isStarting}

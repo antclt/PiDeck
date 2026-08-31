@@ -10,12 +10,72 @@ export type DshModelLike = {
 	[key: string]: unknown;
 };
 
+export type DshDeepseekModelValidationFailure = {
+	index: number;
+	issue: "idRequired" | "idDuplicate" | "nameInvalid" | "contextInvalid" | "maxTokensInvalid";
+};
+
+const CAPACITY_PATTERN = /^(\d+(?:\.\d+)?)([km])?$/i;
+
+/** Parse the same `256K` / `1M` capacity shorthand accepted by DSH Web. */
+export function parseDshModelCapacity(raw: string): number | undefined {
+	const trimmed = raw.trim();
+	if (!trimmed) return undefined;
+	const match = CAPACITY_PATTERN.exec(trimmed);
+	if (!match) return Number.NaN;
+	const suffix = match[2]?.toLowerCase();
+	const scale = suffix === "k" ? 1_000 : suffix === "m" ? 1_000_000 : 1;
+	const scaled = Number(match[1]) * scale;
+	const rounded = Math.round(scaled);
+	return Math.abs(scaled - rounded) < 1e-6 ? rounded : scaled;
+}
+
+/** Keep adapter-default capacities compact in placeholders, as DSH Web does. */
+export function formatDshModelCapacity(value: unknown, fallback = ""): string {
+	if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) return fallback;
+	if (value % 1_000_000 === 0) return `${value / 1_000_000}M`;
+	if (value % 1_000 === 0) return `${value / 1_000}K`;
+	return String(value);
+}
+
+function isDshModelRecord(value: unknown): value is DshModelLike {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Validate the direct adapter's user-owned array before persisting it. */
+export function validateDshDeepseekModels(value: unknown): DshDeepseekModelValidationFailure | undefined {
+	if (value === undefined) return undefined;
+	const models = Array.isArray(value) ? value : [];
+	const ids = new Set<string>();
+	for (const [index, candidate] of models.entries()) {
+		const model = isDshModelRecord(candidate) ? candidate : {};
+		const id = typeof model.id === "string" ? model.id.trim() : "";
+		if (!id) return { index, issue: "idRequired" };
+		if (ids.has(id)) return { index, issue: "idDuplicate" };
+		ids.add(id);
+		if (model.name !== undefined && (typeof model.name !== "string" || model.name.length === 0)) {
+			return { index, issue: "nameInvalid" };
+		}
+		if (model.contextWindow !== undefined && (
+			typeof model.contextWindow !== "number" || !Number.isInteger(model.contextWindow) || model.contextWindow <= 0
+		)) {
+			return { index, issue: "contextInvalid" };
+		}
+		if (model.maxTokens !== undefined && (
+			typeof model.maxTokens !== "number" || !Number.isInteger(model.maxTokens) || model.maxTokens <= 0
+		)) {
+			return { index, issue: "maxTokensInvalid" };
+		}
+	}
+	return undefined;
+}
+
 function cloneModelRows(rows: unknown): DshModelLike[] {
 	if (!Array.isArray(rows)) return [];
 	return rows.map((row) =>
 		row && typeof row === "object" && !Array.isArray(row)
 			? { ...(row as DshModelLike) }
-			: { id: "", name: "" },
+			: { id: "" },
 	);
 }
 
@@ -34,35 +94,34 @@ function isNonEmptyModelList(rows: unknown): rows is unknown[] {
  * 2. 已保存的自定义列表
  * 3. 适配器目录（继承态下第一次自定义，必须先拷贝再改）
  *
- * draft=[] 与「尚未写入」同等对待：DSH 空 models 就是继承目录，
- * 若当成权威空数组，下一次添加又会只剩一行空记录。
+ * draft=[] 在 pi-ai 中与「尚未写入」同等对待；Direct DeepSeek 则通过
+ * `emptyDraftIsOverride` 保留它的“显式零模型”语义。
  */
-export function seedDshModelsForCustomEdit(input: {
+type DshModelSeedInput = {
 	draftModels?: unknown;
 	savedModels?: unknown;
 	catalog?: unknown;
-}): DshModelLike[] {
-	if (isNonEmptyModelList(input.draftModels)) return cloneModelRows(input.draftModels);
+	/** Direct DeepSeek uses `models: []` as an explicit zero-model override. */
+	emptyDraftIsOverride?: boolean;
+};
+
+export function seedDshModelsForCustomEdit(input: DshModelSeedInput): DshModelLike[] {
+	if (Array.isArray(input.draftModels) && (input.emptyDraftIsOverride || input.draftModels.length > 0)) {
+		return cloneModelRows(input.draftModels);
+	}
 	if (isNonEmptyModelList(input.savedModels)) return cloneModelRows(input.savedModels);
 	return cloneModelRows(input.catalog);
 }
 
 /** 在已有模型末尾追加一行空自定义（不丢目录 / 已保存列表）。 */
-export function appendBlankDshModel(input: {
-	draftModels?: unknown;
-	savedModels?: unknown;
-	catalog?: unknown;
-}): DshModelLike[] {
+export function appendBlankDshModel(input: DshModelSeedInput): DshModelLike[] {
 	const models = seedDshModelsForCustomEdit(input);
-	models.push({ id: "", name: "" });
+	models.push({ id: "" });
 	return models;
 }
 
 /** 改某一行字段前先按同样优先级铺底，避免只写 draft 时把其它行冲掉。 */
-export function updateDshModelAt(input: {
-	draftModels?: unknown;
-	savedModels?: unknown;
-	catalog?: unknown;
+export function updateDshModelAt(input: DshModelSeedInput & {
 	index: number;
 	field: string;
 	value: unknown;
@@ -79,20 +138,14 @@ export function updateDshModelAt(input: {
 }
 
 /** 删除一行前同样先铺底，避免 inherited / 已保存列表被当成空数组。 */
-export function removeDshModelAt(input: {
-	draftModels?: unknown;
-	savedModels?: unknown;
-	catalog?: unknown;
+export function removeDshModelAt(input: DshModelSeedInput & {
 	index: number;
 }): DshModelLike[] {
 	return seedDshModelsForCustomEdit(input).filter((_, index) => index !== input.index);
 }
 
 /** 把勾选的拉取结果追加到已有模型，跳过 id 重复。 */
-export function appendFetchedDshModels(input: {
-	draftModels?: unknown;
-	savedModels?: unknown;
-	catalog?: unknown;
+export function appendFetchedDshModels(input: DshModelSeedInput & {
 	fetched: FetchedModel[];
 	selectedIds: string[];
 }): DshModelLike[] {

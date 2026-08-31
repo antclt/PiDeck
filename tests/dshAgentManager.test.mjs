@@ -315,7 +315,10 @@ test("create 新建 DSH 会话并注册 runtime（无 dshSessionId 时）", asyn
 	assert.equal(tab.backend, "dsh");
 	assert.equal(manager.list().length, 1);
 	assert.equal(manager.getMessages(tab.id).length, 0, "新建会话无历史");
+});
 
+// 修复：上一个 test 此前缺少收尾 `});`，导致下面两个用例被吞成它的嵌套子测试
+// 并在父测试结束时被 cancel（node:test 报 cancelledByParent）。
 test("create 携带草稿期预选的 agentPreset 随 sessions.create 提交并回读解析值", async () => {
 	const { host, calls, createPayloads } = makeFakeHost();
 	const manager = new DshAgentManager(host, () => PROJECT);
@@ -352,7 +355,6 @@ test("attach 已有会话时从 host list 行读回实际 agentPreset（以 host
 	assert.equal(calls.create, 0, "attach 路径不新建 host 会话");
 	assert.equal(tab.sessionId, "session-preset-1");
 	assert.equal(tab.agentPreset, "minimal");
-});
 });
 
 test("create 在 workspace 解析失败时不得降级为 cwd-only（会进 dsh-web 未分组）", async () => {

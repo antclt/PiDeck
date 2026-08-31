@@ -39,6 +39,11 @@ test("drawer keeps its content mounted through the layout transition", () => {
   // CSS 变量仍承担「受约束渲染宽度」同步（--drawer-col-w 由面板 onLayoutChanged 提交值驱动）
   assert.match(appShell, /"--drawer-col-w": /);
   assert.match(appShell, /renderedWidth/);
+  // #115 U5 常驻挂载：drawer=null 时折叠 0 宽而不是条件卸载；宽度变量由
+  // writeDrawerLayoutVariables 统一写入（visible ? width : 0）
+  assert.match(appShell, /writeDrawerLayoutVariables/);
+  assert.match(appShell, /const renderedWidth = visible \? width : 0/);
+  assert.match(appShell, /"--drawer-col-w", `\$\{renderedWidth\}px`/);
 });
 
 test("closed drawer does not reserve horizontal gutter", () => {

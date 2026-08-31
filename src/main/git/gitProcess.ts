@@ -39,6 +39,17 @@ export interface RunGitOptions {
 	cwd: string;
 	timeoutMs?: number;
 	maxBuffer?: number;
+	/**
+	 * 传给 git 子进程的额外环境变量（与 process.env 合并，同名覆盖）。
+	 * checkpoint 快照需要 GIT_INDEX_FILE 指向临时 index、commit-tree 需要
+	 * GIT_AUTHOR_* 等，都通过这里注入；不传则继承 process.env。
+	 */
+	env?: NodeJS.ProcessEnv;
+	/**
+	 * 写入子进程 stdin 后立即关闭（如 `commit-tree` 的 -F - 消息）。
+	 * 缺省时 stdin 直接 ignore，避免误留管道句柄。
+	 */
+	input?: string;
 }
 
 /**
@@ -60,15 +71,24 @@ export function runGit(
 		cwd,
 		timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
 		maxBuffer = 16 * 1024 * 1024,
+		env,
+		input,
 	} = options;
 	return new Promise((resolve, reject) => {
 		const child = spawn(command, args, {
 			cwd,
 			// Unix：detached 让子进程成为新进程组组长，超时时可用负 pid kill 整个进程树。
 			detached: process.platform !== "win32",
-			stdio: ["ignore", "pipe", "pipe"],
+			// 需要写 stdin 时才开 pipe（commit-tree 消息走这里），否则保持 ignore。
+			stdio: input !== undefined ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
 			windowsHide: true,
+			env: env ? { ...process.env, ...env } : undefined,
 		});
+
+		if (input !== undefined && child.stdin) {
+			child.stdin.write(input);
+			child.stdin.end();
+		}
 
 		let stdout = "";
 		let stderr = "";

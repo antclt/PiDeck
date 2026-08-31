@@ -60,7 +60,9 @@ test("timeline uses turn activity for folding while retaining the compression st
 	);
 
 	assert.match(timeline, /deriveTimelineRunActivity/);
-	assert.match(timeline, /isLatestTimelineRunBusy\(\s*isTurnRunning,/);
+	// 2026-08 perf：接线改身份判定，语义保留——isTurnRunning 参与 isRunStreaming
+	// 判定，compaction 阶段（isTurnRunning=false）不把已完成的回答当 live。
+	assert.match(timeline, /isRunStreaming = isTurnRunning && item\.id === lastDisplayedItemId/);
 	assert.match(timeline, /isRuntimeBusy=\{isRuntimeBusy\}/);
 	assert.match(timeline, /isCompacting=\{isCompacting\}/);
 	assert.match(cards, /agent\.loading\.compacting/);

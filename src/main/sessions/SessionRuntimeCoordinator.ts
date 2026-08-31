@@ -9,6 +9,9 @@ import type {
 	I18nDescriptor,
 	ImageContent,
 	PiCommand,
+	RewindCheckpointSummary,
+	RewindRestoreResult,
+	RewindRestoreScope,
 	SendPromptInput,
 	SendPromptResult,
 	SendSessionPromptInput,
@@ -24,6 +27,7 @@ import type {
 	SessionUiResponseInput,
 } from "../../shared/types";
 import { buildSessionOriginKey } from "../../shared/sessionIdentity";
+import { isRewindCheckpointId, isRewindRestoreScope } from "../../shared/types";
 import type { SessionCatalogEntry } from "./SessionCatalog";
 
 export interface SessionCatalogGateway {
@@ -72,6 +76,12 @@ export interface SessionAgentGateway {
 	getAvailableThinkingLevels?(agentId: string): Promise<string[] | undefined>;
 	/** 可选能力：导出 HTML（pi 经 export_html RPC；dsh 投影式导出 G10）。 */
 	exportHtml?(agentId: string): Promise<unknown>;
+	/** 可选能力：checkpoint 列表（refs/pi-checkpoints；纯 git，pi 提供，dsh 暂缺）。 */
+	listCheckpoints?(agentId: string): Promise<RewindCheckpointSummary[]>;
+	/** 可选能力：checkpoint 与当前 index 树的 diff 摘要（回退预览）。 */
+	getCheckpointDiff?(agentId: string, checkpointId: string): Promise<string>;
+	/** 可选能力：回退到 checkpoint（scope 决定回退范围；当前仅 files 实现）。 */
+	restoreCheckpoint?(agentId: string, checkpointId: string, scope: RewindRestoreScope): Promise<RewindRestoreResult>;
 	/** 可选能力：编辑历史消息（pi 提供；dsh 缺失，capabilities 不含 editMessage）。 */
 	editMessage?(agentId: string, messageId: string, newText: string): Promise<void>;
 	/** 可选能力：删除历史消息（pi 提供；dsh 缺失，capabilities 不含 deleteMessage）。 */
@@ -552,6 +562,72 @@ export class SessionRuntimeCoordinator {
 				);
 			}
 			return this.agents.exportHtml(agentId);
+		});
+	}
+
+	listRewindCheckpoints(
+		target: SessionRuntimeTarget,
+	): Promise<SessionCommandResult<SessionTargetedValue<RewindCheckpointSummary[]>>> {
+		return this.runTargetCommand(target, async (agentId) => {
+			// rewind 是可选能力：后端未实现 listCheckpoints 时按能力缺失拒绝（UI 应已按能力隐藏入口）。
+			if (typeof this.agents.listCheckpoints !== "function") {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support rewind checkpoints`,
+				);
+			}
+			return this.agents.listCheckpoints(agentId);
+		});
+	}
+
+	getRewindCheckpointDiff(
+		target: SessionRuntimeTarget,
+		checkpointId: unknown,
+	): Promise<SessionCommandResult<SessionTargetedValue<string>>> {
+		return this.runTargetCommand(target, async (agentId) => {
+			// 渲染层入参不可信：checkpointId 会拼进 ref 名，必须过安全字符校验。
+			if (!isRewindCheckpointId(checkpointId)) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`Invalid rewind checkpoint id: ${String(checkpointId)}`,
+				);
+			}
+			if (typeof this.agents.getCheckpointDiff !== "function") {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support rewind diffs`,
+				);
+			}
+			return this.agents.getCheckpointDiff(agentId, checkpointId);
+		});
+	}
+
+	restoreRewindCheckpoint(
+		target: SessionRuntimeTarget,
+		checkpointId: unknown,
+		scope: unknown,
+	): Promise<SessionCommandResult<SessionTargetedValue<RewindRestoreResult>>> {
+		return this.runTargetCommand(target, async (agentId) => {
+			// 渲染层入参不可信：scope 必须落在契约枚举内，checkpointId 必须过安全字符校验。
+			if (!isRewindCheckpointId(checkpointId)) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`Invalid rewind checkpoint id: ${String(checkpointId)}`,
+				);
+			}
+			if (!isRewindRestoreScope(scope)) {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`Invalid rewind restore scope: ${String(scope)}`,
+				);
+			}
+			if (typeof this.agents.restoreCheckpoint !== "function") {
+				throw new SessionRuntimeCommandError(
+					"SESSION_COMMAND_FAILED",
+					`backend "${this.agents.backend}" does not support rewind restore`,
+				);
+			}
+			return this.agents.restoreCheckpoint(agentId, checkpointId, scope);
 		});
 	}
 

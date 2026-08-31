@@ -299,7 +299,7 @@ export function ApprovalCard({
           )}
         >
           {busy ? (
-            <LoaderCircle className={cn("size-4", !reduce && "animate-spin")} />
+            <LoaderCircle className={cn("size-4", !reduce && "animate-pideck-spin")} />
           ) : interactive ? (
             questionMode ? (
               <CircleHelp className="size-4" />
@@ -409,7 +409,7 @@ export function ApprovalCard({
                   className="ml-auto rounded-full"
                 >
                   {busy ? (
-                    <LoaderCircle className={cn("size-4", !reduce && "animate-spin")} />
+                    <LoaderCircle className={cn("size-4", !reduce && "animate-pideck-spin")} />
                   ) : currentStep === questions.length - 1 ? (
                     <>
                       {submitLabel}

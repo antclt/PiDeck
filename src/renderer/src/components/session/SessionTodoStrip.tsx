@@ -17,27 +17,25 @@ import {
 } from "./ComposerWidgetLayout";
 import {
 	parseAgentTodoItems,
+	runtimeTodosToItems,
+	sessionTodoSnapshotToItems,
 	stripPiDeckTodoWidgetMetadata,
 	type AgentTodoItem,
 } from "./agentTodoParser";
+import { useSessionTodoSnapshot } from "../../hooks/useSessionTodoSnapshot";
 
 /**
  * composer 上方的 todo 常驻条（移植自 dsh-web 的 TodoPanel）。
  *
  * 形态：与输入框同宽同列的折叠卡（36px 高：图标 + 标题 + 进度文案 + chevron），
- * 点击展开列表（180px 内滚动）。数据两源：
- * - pi 扩展 widget（pi-deck-todo / pi-deck-plan-todos）的行快照经 parseAgentTodoItems 解析；
- * - DSH 官方 todo（AgentRuntimeState.todos 的 TodoItem[]）归一化成同构行式（dsh-todos
- *   合成源），与 Pi 源共用整套 dismiss/解析/字形逻辑，主进程不伪装 widget、渲染层不区分后端。
- * `pi-deck-todo` 的计划身份元数据仅在此处按来源过滤，第三方 widget 不会受该私有协议影响。
+ * 点击展开列表（180px 内滚动）。数据三源归一化成同构行式：
+ * - pi 扩展 widget（pi-deck-todo / pi-deck-plan-todos）的行快照；
+ * - DSH 官方 todo（AgentRuntimeState.todos 的 TodoItem[]）；
+ * - 历史会话的 todo 快照（session 文件 record 解析，无活 runtime 时兜底）。
+ * 无任何 todo 行时整体不渲染（「有那个显示那个」，与 dsh 一致）。
  *
- * 取舍：
- * - 挂在 ComposerArea 的 widgets 槽位（ComposerMeasuredExtras 测量高度并驱动
- *   面板自适应），折叠态常驻 36px，不再重演「widget 挤占输入区」的历史问题。
- * - 尊重历史 dismiss 记录（同一 localStorage 指纹）：2026-08 移除 chat-header
- *   的 SessionWidgetChips 入口后，待办统一由本条常驻展示；用户此前在 chips
- *   关闭过的 widget 仍按指纹保持隐藏（重挂载后生效）。
- * - 无任何 todo 行时整体不渲染（与 dsh 一致）。
+ * 尊重历史 dismiss 记录（同一 localStorage 指纹 v2）：手动关闭后内容指纹
+ * 不变则保持隐藏，工具更新列表（指纹变化）后重新出现。
  */
 
 // dismiss 语义从 v2 保留：key 按「内容指纹」记录（旧数据形状（数组）不兼容，
@@ -79,7 +77,7 @@ export function isWidgetDismissed(
 	);
 }
 
-/** Record every raw widget merged into the strip so a manual close is reversible on content changes. */
+/** Record every visible source so a manual close is reversible on content changes. */
 export function dismissWidgetEntries(
 	dismissed: DismissedWidgets,
 	sessionId: string,
@@ -171,6 +169,15 @@ export function progressLabel(items: AgentTodoItem[]): string {
 	].filter(Boolean).join("\u2002·\u2002");
 }
 
+/** TodoItem → 行式（☑/◐/☐ 前缀）：DSH 与历史快照都归一化成与 Pi widget 同构的文本行，
+ *  复用同一套 dismiss/解析/字形链路。 */
+function todoItemsToLines(items: readonly AgentTodoItem[]): string[] {
+	return items.map((item) => {
+		const mark = item.status === "completed" ? "☑" : item.status === "in-progress" ? "◐" : "☐";
+		return `${mark} ${item.title}`;
+	});
+}
+
 export function SessionTodoStrip(props: { sessionId: string }) {
 	const runtime = useAtomValue(
 		sessionRuntimeBySessionIdAtomFamily(props.sessionId),
@@ -196,38 +203,40 @@ export function SessionTodoStrip(props: { sessionId: string }) {
 		: undefined;
 	const widgets = coherent?.widgets ?? {};
 
-	// DSH 官方 todo 不是 widget：主进程把 todos projection / todo/write 折叠成
-	// AgentRuntimeState.todos（TodoItem[] | null | undefined）。这里归一化成与 Pi
-	// widget 相同的行式（☑/◐/☐ 前缀），复用同一套 dismiss/解析/字形链路；空/清空
-	// 都不产生行 → 不渲染（与 dsh-web 一致）。
-	const dshWidget = useMemo<WidgetLines | undefined>(() => {
-		const todos = runtime?.state?.todos;
-		if (!Array.isArray(todos) || todos.length === 0) return undefined;
-		return {
-			key: "dsh-todos",
-			lines: todos.map((item) => (
-				`${item.status === "completed" ? "☑" : item.status === "in_progress" ? "◐" : "☐"} ${item.content}`
-			)),
-		};
-	}, [runtime?.state?.todos]);
+	// 会话级 todo 快照：仅历史会话（无 coherent runtime）拉取，避免活会话多余 IPC
+	const todoSnapshot = useSessionTodoSnapshot(props.sessionId, !coherent);
 
-	// A widget stays dismissed only while its raw lines stay identical. Keep raw metadata here
-	// until after the decision so a new plan with matching tasks becomes visible again.
-	const visibleWidgets = useMemo(() => {
-		const visible: WidgetLines[] = [];
+	// 数据源归一化成统一行式，再整体走 dismiss 指纹与解析链路
+	const linesByKey = useMemo<WidgetLines[]>(() => {
+		// DSH 不产出 Pi widget，优先消费其运行时的结构化 todos；
+		// Pi 活会话仍以 widget 为实时真源；历史会话用快照兜底。
+		if (runtime?.backend === "dsh") {
+			const todos = runtime.state?.todos;
+			if (!Array.isArray(todos) || todos.length === 0) return [];
+			return [{ key: "dsh-todos", lines: todoItemsToLines(runtimeTodosToItems(todos)) }];
+		}
+		if (!coherent) {
+			const snapshot = sessionTodoSnapshotToItems(todoSnapshot);
+			return snapshot.length > 0
+				? [{ key: "snapshot", lines: todoItemsToLines(snapshot) }]
+				: [];
+		}
+		const result: WidgetLines[] = [];
 		for (const key of ["pi-deck-todo", "pi-deck-plan-todos"]) {
-			const widgetLines = widgets[key];
-			if (!widgetLines?.length) continue;
-			if (isWidgetDismissed(dismissed, props.sessionId, key, widgetLines)) continue;
-			visible.push({ key, lines: widgetLines });
+			const raw = widgets[key];
+			if (raw?.length) result.push({ key, lines: raw });
 		}
-		if (dshWidget) {
-			if (!isWidgetDismissed(dismissed, props.sessionId, dshWidget.key, dshWidget.lines)) {
-				visible.push(dshWidget);
-			}
-		}
-		return visible;
-	}, [widgets, dshWidget, dismissed, props.sessionId]);
+		return result;
+	}, [coherent, runtime?.backend, runtime?.state?.todos, todoSnapshot, widgets]);
+
+	// A source stays dismissed only while its raw lines stay identical. Keep raw metadata here
+	// until after the decision so a new plan with matching tasks becomes visible again.
+	const visibleWidgets = useMemo(
+		() => linesByKey.filter(
+			(w) => !isWidgetDismissed(dismissed, props.sessionId, w.key, w.lines),
+		),
+		[linesByKey, dismissed, props.sessionId],
+	);
 
 	const items = useMemo(() => {
 		const lines: string[] = [];

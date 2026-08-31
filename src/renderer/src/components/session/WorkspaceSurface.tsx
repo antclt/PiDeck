@@ -811,7 +811,7 @@ function SessionsPanel(props: {
 									}
 								>
 									{sessionActionLoading?.filePath === session.filePath &&
-										sessionActionLoading.action === "copy" && <span className="mini-loader" />}
+										sessionActionLoading.action === "copy" && <span className="mini-loader animate-pideck-spin" />}
 									<span>
 										{sessionActionLoading?.filePath === session.filePath &&
 										sessionActionLoading.action === "copy"
@@ -834,7 +834,7 @@ function SessionsPanel(props: {
 									}
 								>
 									{sessionActionLoading?.filePath === session.filePath &&
-										sessionActionLoading.action === "export" && <span className="mini-loader" />}
+										sessionActionLoading.action === "export" && <span className="mini-loader animate-pideck-spin" />}
 									<span>
 										{sessionActionLoading?.filePath === session.filePath &&
 										sessionActionLoading.action === "export"
@@ -858,7 +858,7 @@ function SessionsPanel(props: {
 									onClick={() => setDeleteConfirmSession(session)}
 								>
 									{sessionActionLoading?.filePath === session.filePath &&
-										sessionActionLoading.action === "delete" && <span className="mini-loader" />}
+										sessionActionLoading.action === "delete" && <span className="mini-loader animate-pideck-spin" />}
 									<span>
 										{sessionActionLoading?.filePath === session.filePath &&
 										sessionActionLoading.action === "delete"
@@ -972,7 +972,7 @@ export function SessionHistoryModal(props: {
 				<div className="relative flex min-h-[320px] flex-1 flex-col overflow-hidden">
 					{props.loading ? (
 						<div className="grid min-h-[320px] place-items-center content-center gap-3 text-body text-text-tertiary">
-							<div className="loader" />
+							<div className="loader animate-pideck-spin" />
 							<span>{t("drawer.historyLoading")}</span>
 						</div>
 					) : (

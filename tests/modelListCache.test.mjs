@@ -63,8 +63,8 @@ test("parsePiListModels keeps provider names containing spaces (regression: grok
   assert.equal(models[0].id, "grok-4.5");
   assert.equal(models[1].provider, "grok.weishiair.de copy");
   assert.equal(models[1].id, "grok-4.6");
-  assert.equal(models[1].contextWindow, 500 * 1024);
-  assert.equal(models[1].maxTokens, 128 * 1024);
+  assert.equal(models[1].contextWindow, 500 * 1000);
+  assert.equal(models[1].maxTokens, 128 * 1000);
   assert.equal(models[1].reasoning, true);
   assert.equal(models[1].images, true);
 });
@@ -81,21 +81,21 @@ test("parsePiListModels captures context/maxTokens/images columns", () => {
   // 中文 provider 与 1M context
   assert.equal(models[0].provider, "商汤");
   assert.equal(models[0].id, "deepseek-v4-flash");
-  assert.equal(models[0].contextWindow, 1024 * 1024);
-  assert.equal(models[0].maxTokens, Math.round(65.5 * 1024));
+  assert.equal(models[0].contextWindow, 1000 * 1000);
+  assert.equal(models[0].maxTokens, Math.round(65.5 * 1000));
   assert.equal(models[0].reasoning, true);
   assert.equal(models[0].images, false);
   // 4.1K max-out 与 images=yes
   assert.equal(models[1].provider, "智谱");
   assert.equal(models[1].id, "glm-4v-flash");
-  assert.equal(models[1].contextWindow, 128 * 1024);
-  assert.equal(models[1].maxTokens, Math.round(4.1 * 1024));
+  assert.equal(models[1].contextWindow, 128 * 1000);
+  assert.equal(models[1].maxTokens, Math.round(4.1 * 1000));
   assert.equal(models[1].images, true);
   assert.equal(models[1].reasoning, false);
   // URL provider（自定义网关）不受影响
   assert.equal(models[2].provider, "https://open.mwy.asia");
   assert.equal(models[2].id, "gpt-5.6-luna");
-  assert.equal(models[2].contextWindow, 272 * 1024);
+  assert.equal(models[2].contextWindow, 272 * 1000);
   assert.equal(models[2].images, true);
 });
 
@@ -120,9 +120,10 @@ test("parsePiListModels ignores unknown-option banners mixed into stdout", () =>
 });
 
 test("parseTokenSize handles M/K/plain and rejects garbage", () => {
-  assert.equal(parseTokenSize("1M"), 1024 * 1024);
-  assert.equal(parseTokenSize("65.5K"), Math.round(65.5 * 1024));
-  assert.equal(parseTokenSize("200K"), 200 * 1024);
+  // pi 的 formatTokenCount 用 1000 进制（"1M"→1000000，"65.5K"→65500），解析必须对齐。
+  assert.equal(parseTokenSize("1M"), 1000 * 1000);
+  assert.equal(parseTokenSize("65.5K"), Math.round(65.5 * 1000));
+  assert.equal(parseTokenSize("200K"), 200 * 1000);
   assert.equal(parseTokenSize("4096"), 4096);
   assert.equal(parseTokenSize(""), undefined);
   assert.equal(parseTokenSize("abc"), undefined);

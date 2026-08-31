@@ -565,7 +565,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
                       onSelect={props.onRestartCurrent}
                     >
                       <span className="inline-flex items-center gap-2">
-                        <RotateCw className={cn("size-3.5", props.isRestartingCurrent && "animate-spin")} aria-hidden="true" />
+                        <RotateCw className={cn("size-3.5", props.isRestartingCurrent && "animate-pideck-spin")} aria-hidden="true" />
                         {props.isRestartingCurrent ? t("app.restarting") : t("app.restart")}
                       </span>
                     </DropdownMenuItem>
@@ -577,7 +577,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
                       onSelect={props.onReloadCurrent}
                     >
                       <span className="inline-flex items-center gap-2">
-                        <RefreshCw className={cn("size-3.5", props.isReloadingCurrent && "animate-spin")} aria-hidden="true" />
+                        <RefreshCw className={cn("size-3.5", props.isReloadingCurrent && "animate-pideck-spin")} aria-hidden="true" />
                         {props.isReloadingCurrent ? t("app.reloading") : t("menu.reloadSession")}
                       </span>
                     </DropdownMenuItem>
