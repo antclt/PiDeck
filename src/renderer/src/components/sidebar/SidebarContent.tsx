@@ -130,6 +130,10 @@ export function SidebarContent(props: SidebarContentProps) {
   const menuProject = menu?.kind === "project"
     ? controller.catalog.projects.find((project) => project.id === menu.projectId)
     : undefined;
+  // 子工作区的「⋯」需要复用项目菜单，但删除必须回到根项目的 Git worktree 流程。
+  const menuProjectWorktreeParent = menuProject?.worktreeParentId
+    ? controller.catalog.projects.find((project) => project.id === menuProject.worktreeParentId)
+    : undefined;
   const menuAgent = menu?.kind === "agent"
     ? controller.catalog.agents.find((agent) => agent.id === menu.agentId)
     : undefined;
@@ -414,6 +418,13 @@ export function SidebarContent(props: SidebarContentProps) {
           onToggleWorktree={() => { void actions.projects.toggleWorktree(menuProject); controller.closeMenu(); }}
           onRefreshProject={() => { void actions.projects.refresh(menuProject.id); controller.closeMenu(); }}
           onCopyProjectPath={() => { void actions.projects.copyPath(menuProject); controller.closeMenu(); }}
+          onRemoveWorktree={menuProjectWorktreeParent ? () => {
+            void actions.worktrees.remove(menuProjectWorktreeParent.id, {
+              path: menuProject.path,
+              branch: menuProject.name,
+            }, menuProject);
+            controller.closeMenu();
+          } : undefined}
           onRemoveProject={() => { void actions.projects.remove(menuProject); controller.closeMenu(); }}
         />
       )}

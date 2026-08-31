@@ -11,6 +11,8 @@ const worktreeTree = readFileSync("src/renderer/src/components/sidebar/WorktreeT
 const sessionTree = readFileSync("src/renderer/src/components/sidebar/SessionTree.tsx", "utf8");
 const workspaceStyles = readFileSync("src/renderer/src/styles/workspace.css", "utf8");
 const projectTree = readFileSync("src/renderer/src/components/sidebar/ProjectTree.tsx", "utf8");
+const sidebarContent = readFileSync("src/renderer/src/components/sidebar/SidebarContent.tsx", "utf8");
+const sidebarComponents = readFileSync("src/renderer/src/components/sidebar/SidebarComponents.tsx", "utf8");
 
 test("main workspace is collapsible via the shared worktree expand set", () => {
   assert.match(worktreeTree, /mainCollapsed/);
@@ -19,23 +21,39 @@ test("main workspace is collapsible via the shared worktree expand set", () => {
   assert.match(worktreeTree, /\{!mainCollapsed && \(/);
 });
 
-test("main workspace row carries the merged new-session menu", () => {
+test("workspace title actions match the normal project toolbar", () => {
   const mainSection = worktreeTree.slice(
     worktreeTree.indexOf("workspace-tree-main"),
     worktreeTree.indexOf("workspace-tree-list"),
   );
-  assert.match(mainSection, /<NewSessionMenu/);
-  assert.match(mainSection, /projectId=\{props\.project\.id\}/);
+  assert.doesNotMatch(mainSection, /<NewSessionMenu/);
+  assert.match(mainSection, /<Ellipsis/);
+  assert.match(mainSection, /createDraft\(props\.project\.id\)/);
+  assert.match(mainSection, /projectId: props\.project\.id/);
+
+  const rowView = worktreeTree.slice(worktreeTree.lastIndexOf("WorkspaceTreeRowView"));
+  assert.doesNotMatch(rowView, /<NewSessionMenu/);
+  assert.match(rowView, /<Ellipsis/);
+  assert.match(rowView, /createDraft\(childProject\.id\)/);
+  assert.match(rowView, /projectId: childProject\.id/);
+  assert.match(rowView, /<WorkspaceRowActions/);
+  // 根项目操作保持原样；工作区展开后也不能因为内部工作区行而消失。
+  assert.match(projectTree, /<div className=\{cn\(dimmedActionsClass/);
+  assert.doesNotMatch(projectTree, /\{\(!project\.worktreeEnabled \|\| collapsed\) && \(/);
+  // 工作区标题按会话栏的方式通过右侧留白动画为 + / ⋯ 让位，而不是隐藏文字。
+  assert.match(worktreeTree, /transition-\[padding-right\]/);
+  assert.match(worktreeTree, /group-hover\/workspace-row:pr-\[52px\]/);
+  assert.match(worktreeTree, /group-focus-within\/workspace-row:pr-\[52px\]/);
+  assert.doesNotMatch(mainSection, /@max-\[255px\]/);
+  assert.doesNotMatch(rowView, /@max-\[255px\]/);
 });
 
-test("worktree rows carry the merged new-session menu next to remove", () => {
-  // 行视图必须同时提供「新建（普通/匿名合并下拉）」入口。操作浮层已抽成共享组件
-  // WorkspaceRowActions，故按行视图定义切片断言行为。
-  const rowView = worktreeTree.slice(worktreeTree.lastIndexOf("WorkspaceTreeRowView"));
-  assert.match(rowView, /<NewSessionMenu/);
-  assert.match(rowView, /projectId=\{childProject\.id\}/);
-  assert.match(rowView, /<WorkspaceRowActions>/);
-  assert.match(rowView, /worktrees\.remove\(props\.rootProject\.id/);
+test("workspace title more-actions keeps safe worktree removal in the menu", () => {
+  assert.match(sidebarContent, /const menuProjectWorktreeParent = menuProject\?\.worktreeParentId/);
+  assert.match(sidebarContent, /onRemoveWorktree=\{menuProjectWorktreeParent/);
+  assert.match(sidebarComponents, /onRemoveWorktree\?: \(\) => void/);
+  assert.match(sidebarComponents, /onRemoveWorktree \?\? props\.onRemoveProject/);
+  assert.match(sidebarComponents, /t\("app\.worktreeRemoveConfirmTitle"\)/);
 });
 
 test("worktree rows never take a selected surface; only session leaves do", () => {

@@ -489,6 +489,8 @@ export function ProjectContextMenu(props: {
 	onRefreshProject: () => void;
 	onCopyProjectPath: () => void;
 	onRemoveProject: () => void;
+	/** worktree 子项目删除必须走 Git worktree 清理流程，不能只移除目录记录。 */
+	onRemoveWorktree?: () => void;
 }) {
 	const isWorktreeEnabled = props.menu.project.worktreeEnabled ?? false;
 	return (
@@ -561,10 +563,11 @@ export function ProjectContextMenu(props: {
 				{t("menu.importOpenCode")}
 			</DropdownMenuItem>
 			<DropdownMenuSeparator />
-			{/* 危险区：删除固定在最底部，与普通操作隔开防误触 */}
-			<DropdownMenuItem variant="destructive" onSelect={props.onRemoveProject}>
+			{/* 危险区：worktree 子项目复用此菜单时，删除必须经 Git worktree 清理流程，
+			    以保留分支/目录删除确认与运行中 Agent 保护。 */}
+			<DropdownMenuItem variant="destructive" onSelect={props.onRemoveWorktree ?? props.onRemoveProject}>
 				<Trash2 className="size-3.5" aria-hidden="true" />
-				{t("menu.removeProject")}
+				{props.onRemoveWorktree ? t("app.worktreeRemoveConfirmTitle") : t("menu.removeProject")}
 			</DropdownMenuItem>
 		</MenuShell>
 	);
