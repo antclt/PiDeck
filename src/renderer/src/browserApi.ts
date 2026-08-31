@@ -328,6 +328,12 @@ export function createBrowserApi(): PiDesktopApi {
 				sessionRuntimeCommand(target, "edit-message", { messageId, newText }),
 			deleteRuntimeMessage: (target, messageId) =>
 				sessionRuntimeCommand(target, "delete-message", { messageId }),
+			listRewindCheckpoints: (target) =>
+				sessionRuntimeCommand(target, "rewind-list"),
+			getRewindCheckpointDiff: (target, checkpointId) =>
+				sessionRuntimeCommand(target, "rewind-diff", { checkpointId }),
+			restoreRewindCheckpoint: (target, checkpointId, scope) =>
+				sessionRuntimeCommand(target, "rewind-restore", { checkpointId, scope }),
 			prepareRuntimeResend: (target, messageId) =>
 				sessionRuntimeCommand(target, "prepare-resend", { messageId }),
 			setRuntimeModel: (target, provider, modelId) =>

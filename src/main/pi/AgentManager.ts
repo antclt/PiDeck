@@ -18,6 +18,7 @@ import type {
 	ImageContent,
 	Project,
 	RewindCheckpointSummary,
+	RewindRestoreResult,
 	RewindRestoreScope,
 	SendPromptInput,
 	SendPromptResult,
@@ -57,9 +58,11 @@ import {
 import { SessionHistoryReader, findTurnPageStart } from "./SessionHistoryReader";
 import {
 	currentIndexTree,
+	createCheckpoint,
 	diffCheckpoints,
 	loadAllCheckpoints,
 	loadCheckpointFromRef,
+	MUTATING_TOOLS,
 	restoreCheckpoint as applyCheckpointRestore,
 	toCheckpointSummary,
 } from "../rewind/index.ts";
@@ -312,6 +315,11 @@ export class AgentManager {
 	 * 与 tab.status 分离：压缩/重试收尾时 runtime 仍 busy，但上一轮回答已经完成。
 	 */
 	private readonly agentTurnActiveById = new Map<string, boolean>();
+	/**
+	 * rewind 自动打点的回合计数（agent_start 递增一次 = 一轮 run）。
+	 * pi 事件流没有 turnIndex 概念，用本地计数近似 pi-rewind 的 turn 语义。
+	 */
+	private readonly rewindTurnCounters = new Map<string, number>();
 	/** 正在执行模型配置刷新的 agent，用于退出处理器中忽略进程退出事件 */
 	private readonly modelRefreshingAgents = new Set<string>();
 	/** 用户主动停止的 agent，用于退出处理器中跳过自动重连 */
@@ -3241,23 +3249,97 @@ export class AgentManager {
 	}
 
 	/**
-	 * 回退工作区到 checkpoint。P2 只实现文件回退（scope="files"）：
-	 * conversation/all 需要后端会话级回溯（pi 走会话树导航，P3），先明确拒绝。
+	 * 回退工作区/会话到 checkpoint。
+	 * - files：仅回退文件（reset + safeClean + index 恢复），跨后端可用；
+	 * - conversation：fork 出新会话（在检查点时刻前最近的带 entryId 消息处裁剪），
+	 *   原会话保留、工作区文件不动；
+	 * - all：文件回退 + 会话 fork。
+	 * fork 走 pi fork RPC（AgentManager.forkSession 内部完成 runtime 换绑）。
 	 */
 	async restoreCheckpoint(
 		agentId: string,
 		checkpointId: string,
 		scope: RewindRestoreScope,
-	): Promise<void> {
-		if (scope !== "files") {
-			throw new Error(
-				`Checkpoint restore scope "${scope}" is not supported yet; only "files" is available`,
-			);
-		}
+	): Promise<RewindRestoreResult> {
 		const runtime = this.requireRuntime(agentId);
 		const cp = await loadCheckpointFromRef(runtime.tab.cwd, checkpointId);
 		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
-		await applyCheckpointRestore(runtime.tab.cwd, cp);
+
+		const wantFiles = scope === "files" || scope === "all";
+		const wantConversation = scope === "conversation" || scope === "all";
+		// 会话回退先解析 fork 锚点（失败则整体拒绝，避免「文件已回退但会话没 fork」的半成功态）。
+		const forkEntryId = wantConversation
+			? await this.resolveForkEntryBeforeCheckpoint(agentId, cp.timestamp)
+			: undefined;
+		if (wantFiles) await applyCheckpointRestore(runtime.tab.cwd, cp);
+		let forkedSessionId: string | undefined;
+		if (wantConversation && forkEntryId) {
+			const data = (await this.forkSession(agentId, forkEntryId)) as
+				| { targetSessionId?: string; [key: string]: unknown }
+				| undefined;
+			forkedSessionId = data?.targetSessionId;
+		}
+		return { filesRestored: wantFiles, forkedSessionId };
+	}
+
+	/**
+	 * 找检查点时刻前最近的、带 entryId 的消息作为会话回退的 fork 锚点。
+	 * live 消息（本轮未 settle）没有 entryId，回退到最近一条已落盘消息是合理近似：
+	 * 即「该检查点之后的对话内容从 fork 会话里去掉」。
+	 */
+	private async resolveForkEntryBeforeCheckpoint(
+		agentId: string,
+		beforeTimestamp: number,
+	): Promise<string | undefined> {
+		const pick = (messages: ChatMessage[]): string | undefined =>
+			messages
+				.map((m) => ({
+					ts: m.timestamp,
+					// entryId 在 meta 里（live 消息未落盘投影时缺失），见 loadMessages 的定位逻辑。
+					entryId: typeof m.meta?.entryId === "string" ? m.meta.entryId : undefined,
+				}))
+				.filter((m): m is { ts: number; entryId: string } => m.ts <= beforeTimestamp && Boolean(m.entryId))
+				.sort((a, b) => b.ts - a.ts)[0]?.entryId;
+		const direct = pick(this.messages.get(agentId) ?? []);
+		if (direct) return direct;
+		// 内存投影缺失（如 agent 重启后未读历史）：文件级重投影后再找。
+		await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: 0 });
+		return pick(this.messages.get(agentId) ?? []);
+	}
+
+	/** agent_start 时推进回合计数，返回本轮 turnIndex（供自动打点用）。 */
+	private bumpRewindTurn(agentId: string): number {
+		const next = (this.rewindTurnCounters.get(agentId) ?? 0) + 1;
+		this.rewindTurnCounters.set(agentId, next);
+		return next;
+	}
+
+	/**
+	 * 文件类工具（write/edit/bash）执行结束后异步创建文件检查点（fire-and-forget）。
+	 * 打点放在 tool_execution_end：此时文件系统已静默，快照内容稳定，不会与进行中的
+	 * 写入竞争；恢复语义为「回到该工具执行完成后的状态」。失败不影响 agent 主链路
+	 * （纯旁路快照），只记日志。
+	 */
+	private scheduleRewindCheckpoint(agentId: string, toolName: string, turnIndex: number): void {
+		const runtime = this.agents.get(agentId);
+		const root = runtime?.tab.cwd;
+		const sessionId = runtime?.tab.sessionId;
+		if (!root || !sessionId) return;
+		void createCheckpoint({
+			root,
+			// id 拼进 git ref 名，必须是 isRewindCheckpointId 允许的安全字符。
+			id: `tool-${sessionId}-${turnIndex}-${Date.now()}`,
+			sessionId,
+			trigger: "tool",
+			turnIndex,
+			toolName,
+		}).catch((error: unknown) => {
+			this.appLogger?.warn("rewind", "checkpoint creation failed", {
+				agentId,
+				toolName,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
 	}
 
 	private async promptMatchesRegisteredExtensionCommand(runtime: AgentRuntime, message: string): Promise<boolean> {
@@ -3865,6 +3947,8 @@ export class AgentManager {
 			this.notifiedAskAgents.delete(agentId);
 			this.openAgentStream(agentId);
 			this.setAgentTurnActive(agentId, true);
+			// rewind 回合计数：每轮 run 递增一次，供文件自动打点标记 turnIndex。
+			this.bumpRewindTurn(agentId);
 			runtime.tab.status = "running";
 			this.activeAssistantMessageIds.delete(agentId);
 			this.toolMessageIds.delete(agentId);
@@ -4213,6 +4297,16 @@ export class AgentManager {
 				typed,
 				typed.isError ? "error" : "done",
 			);
+			// 文件类工具执行完成 → 异步自动打点（快照包含该工具改动后的状态）。
+			// 检查点创建不阻塞工具结果推送（fire-and-forget，失败只记日志）。
+			const endedToolName = typed.toolName ?? "";
+			if (MUTATING_TOOLS.has(endedToolName)) {
+				this.scheduleRewindCheckpoint(
+					agentId,
+					endedToolName,
+					this.rewindTurnCounters.get(agentId) ?? 0,
+				);
+			}
 			// 工具执行结束是终态，立即 flush 把最终结果推给渲染进程，避免节流窗口内用户看不到完成状态。
 			this.flushMessageEmit(agentId);
 			// 清除本次 toolCall；并行批次仅在最后一个工具结束时发布 false，

@@ -10,6 +10,7 @@ import type {
 	ImageContent,
 	PiCommand,
 	RewindCheckpointSummary,
+	RewindRestoreResult,
 	RewindRestoreScope,
 	SendPromptInput,
 	SendPromptResult,
@@ -80,7 +81,7 @@ export interface SessionAgentGateway {
 	/** 可选能力：checkpoint 与当前 index 树的 diff 摘要（回退预览）。 */
 	getCheckpointDiff?(agentId: string, checkpointId: string): Promise<string>;
 	/** 可选能力：回退到 checkpoint（scope 决定回退范围；当前仅 files 实现）。 */
-	restoreCheckpoint?(agentId: string, checkpointId: string, scope: RewindRestoreScope): Promise<void>;
+	restoreCheckpoint?(agentId: string, checkpointId: string, scope: RewindRestoreScope): Promise<RewindRestoreResult>;
 	/** 可选能力：编辑历史消息（pi 提供；dsh 缺失，capabilities 不含 editMessage）。 */
 	editMessage?(agentId: string, messageId: string, newText: string): Promise<void>;
 	/** 可选能力：删除历史消息（pi 提供；dsh 缺失，capabilities 不含 deleteMessage）。 */
@@ -605,7 +606,7 @@ export class SessionRuntimeCoordinator {
 		target: SessionRuntimeTarget,
 		checkpointId: unknown,
 		scope: unknown,
-	): Promise<SessionCommandResult<SessionTargetedValue<void>>> {
+	): Promise<SessionCommandResult<SessionTargetedValue<RewindRestoreResult>>> {
 		return this.runTargetCommand(target, async (agentId) => {
 			// 渲染层入参不可信：scope 必须落在契约枚举内，checkpointId 必须过安全字符校验。
 			if (!isRewindCheckpointId(checkpointId)) {

@@ -78,6 +78,7 @@ import type {
 	PiCliUpdateResult,
 	PiCommand,
 	RewindCheckpointSummary,
+	RewindRestoreResult,
 	RewindRestoreScope,
 	PiExtensionListResult,
 	PiInstallStatus,
@@ -736,7 +737,7 @@ const api = {
 				target,
 				checkpointId,
 				scope,
-			) as Promise<SessionCommandResult<SessionTargetedValue<void>>>,
+			) as Promise<SessionCommandResult<SessionTargetedValue<RewindRestoreResult>>>,
 		prepareRuntimeResend: (target: SessionRuntimeTarget, messageId: string) =>
 			ipcRenderer.invoke(
 				ipcChannels.sessionsRuntimePrepareResend,

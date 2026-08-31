@@ -624,7 +624,7 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			restoreRewindCheckpoint: async (target) => ({
 				ok: true,
-				value: { target, value: undefined },
+				value: { target, value: { filesRestored: true } },
 			}),
 			prepareRuntimeResend: async (target) => ({
 				ok: true,

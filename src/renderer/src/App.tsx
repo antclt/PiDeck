@@ -19,6 +19,7 @@ import {
   Activity,
   FolderOpen,
   Globe,
+  History,
   Pencil,
   Terminal,
   GitBranch,
@@ -907,6 +908,10 @@ export function App() {
   const activeAgent = activeAgentId
     ? [...displayAgents, ...pendingAgents].find((agent) => agent.id === activeAgentId)
     : undefined;
+  // rewind（检查点）是 pi 后端能力：抽屉 rail 与底栏按钮同口径门控
+  // （dsh/imagegen 会话不展示入口）。与 Injector 的 isDshBackend 同源判定。
+  const rewindBackend = activeAgent?.backend ?? currentSessionRecord?.backend;
+  const rewindSupported = rewindBackend === undefined || rewindBackend === "pi";
 
   // Timeline scroll, pagination and jump ownership lives in sessionTimeline.
   // Modern Session drafts and attachments are subscribed by ComposerArea; the root only
@@ -3678,6 +3683,16 @@ export function App() {
               active: drawer === "trajectory",
               onClick: () => handleToolDrawerAction("trajectory"),
             },
+            // 检查点面板：仅当前会话为 pi 后端时展示（rewind 能力；dsh 暂不声明）。
+            ...(rewindSupported
+              ? [{
+                  id: "rewind" as const,
+                  label: t("rewind.title"),
+                  icon: <History size={16} />,
+                  active: drawer === "rewind",
+                  onClick: () => handleToolDrawerAction("rewind"),
+                }]
+              : []),
             {
               id: "browser",
               label: t("app.browser"),

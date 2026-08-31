@@ -14,8 +14,19 @@
 /** checkpoint 触发来源（与 pi-rewind 对齐，保证两端创建的 ref 互相可读）。 */
 export type RewindCheckpointTrigger = "turn" | "tool" | "resume" | "before-restore";
 
-/** 回退范围：仅文件 / 仅会话 / 两者。会话回退（P2）走后端 runtime，本类型先定契约。 */
+/** 回退范围：仅文件 / 仅会话 / 两者。会话回退走后端 fork（pi fork RPC），本类型先定契约。 */
 export type RewindRestoreScope = "files" | "conversation" | "all";
+
+/**
+ * 回退执行结果：filesRestored 表示是否做了文件回退；
+ * conversation/all 回退会 fork 出新会话，forkedSessionId 指向新会话 id（原会话保留）。
+ */
+export type RewindRestoreResult = {
+	/** scope 含 "files"/"all" 时 true */
+	filesRestored: boolean;
+	/** conversation/all 时 fork 出的新会话 id；仅文件回退时为 undefined */
+	forkedSessionId?: string;
+};
 
 /**
  * 面向 IPC/UI 的 checkpoint 摘要（不含 git 内部 SHA，避免把实现细节泄露给渲染层）。
