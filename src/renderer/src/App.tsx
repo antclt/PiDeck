@@ -105,7 +105,6 @@ import {
   setSessionDraftAtom,
   cacheSessionMessagesAtom,
   upsertSessionAtom,
-  outlineItemsAtom,
 } from "./atoms";
 import {
   applyDshGoalSendTransform,
@@ -160,7 +159,6 @@ import { AppUpdateOverlay } from "./components/overlays/AppUpdateOverlay";
 import { ImportOverlayHost } from "./components/overlays/ImportOverlayHost";
 import { EnvironmentOverlay } from "./components/overlays/EnvironmentOverlay";
 import {
-  ConversationOutline,
   EnvironmentDialog,
   FileContextMenu,
   ImagePreviewModal,
@@ -1301,10 +1299,6 @@ export function App() {
     }
     return Array.from(byPath.values());
   }, [activeMessages.length, activeAgentId]);
-  // 大纲刻度数据源：必须用「落盘历史前缀 + 运行时窗口段」全量消息（outlineItemsAtom）。
-  // 旧实现只看 runtime 窗口段（currentSessionMessagesAtom），上翻加载过的历史
-  // 没有刻度，长会话刻度轴顶部缺最早的用户消息。
-  const outlineItems = useAtomValue(outlineItemsAtom);
   const flatFiles = useMemo(() => flattenFiles(files), [files]);
   // === file editor hook ===
   const {
@@ -3704,15 +3698,6 @@ export function App() {
           files={drawerPorts.files}
         />
       )}
-      outlineContent={
-        /* 右缘刻度定位轴（beUI PreviewRail）：点击刻度跳转消息，hover 出预览卡；
-           无消息时轴自动隐藏。工具开关已上收会话 Tab 栏（sessionToolActions）。 */
-        <ConversationOutline
-          items={outlineItems}
-          // 分屏下由聚焦 pane 的 timeline 注入 jump 回调（ChatSessionPane 写入 services）
-          onJump={(messageId) => jumpToMessageRef.current?.(messageId)}
-        />
-      }
       setListCollapsed={setListCollapsed}
       setListWidth={setListWidth}
       setDrawerCollapsed={setDrawerCollapsed}

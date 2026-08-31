@@ -378,6 +378,11 @@
   background: var(--color-danger-soft);
   color: var(--color-danger);
 }
+.outline-hover.session-outline-pane {
+  right: 0;
+  top: 40px;
+  bottom: 24px;
+}
 .outline-hover {
   position: absolute;
   right: calc(11px + var(--drawer-splitter-w) + max(var(--drawer-col-w), min(var(--drawer-width), 38vw)) + var(--outline-content-w, 0px));

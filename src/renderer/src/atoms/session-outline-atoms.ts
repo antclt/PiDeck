@@ -12,6 +12,7 @@
  * （重启重生成、编辑消息）会多算一次，可接受。
  */
 import { atom, type Getter } from "jotai";
+import { atomFamily } from "jotai/utils";
 import type { ChatMessage } from "../../../shared/types";
 import type { SessionModifiedFile } from "../components/app/AppParts";
 import {
@@ -78,3 +79,13 @@ export const modifiedFilesAtom = atom((get) => {
 export const outlineItemsAtom = atom((get) => {
   return buildOutline(currentLoadedSessionMessages(get));
 });
+
+/** 每个分屏会话自己的大纲条目，避免依赖当前聚焦会话。 */
+export const outlineItemsBySessionIdAtomFamily = atomFamily((sessionId: string) =>
+  atom((get) => {
+    const entry = get(sessionMessagesCacheAtom)[sessionId];
+    if (!entry) return [];
+    const messages = entry.history ? [...entry.history.messages, ...entry.messages] : entry.messages;
+    return buildOutline(messages);
+  }),
+);

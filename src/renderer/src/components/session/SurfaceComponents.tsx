@@ -1388,6 +1388,7 @@ export { MultiSelectModal };
  * 按条数收缩；间距压到下限仍放不下时均匀抽稀，但首尾刻度强制保留（planRailTicks）。
  */
 export function ConversationOutline(props: {
+	className?: string;
 	items: Array<{ id: string; role: string; title: string; time: string }>;
 	onJump: (id: string) => void;
 }) {
@@ -1424,7 +1425,7 @@ export function ConversationOutline(props: {
 		railActiveId !== undefined && railItems.some((item) => item.id === railActiveId);
 
 	return (
-		<div ref={containerRef} className="outline-hover">
+		<div ref={containerRef} className={cn("outline-hover", props.className)}>
 			{railItems.length > 0 && (
 				<PreviewRail
 					orientation="vertical"
