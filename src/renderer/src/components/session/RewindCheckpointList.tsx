@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FileDiff, Undo2 } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { t, type TranslationKey } from "../../i18n";
@@ -9,7 +9,8 @@ import {
 	sessionCommandFailureToast,
 	toSessionRuntimeTarget,
 } from "../../utils/sessionCommands";
-import { formatRelativeTime } from "../../utils/relativeTime";
+import { formatRelativeTime, formatAbsoluteTime } from "../../utils/relativeTime";
+import { parseDiffStatSummary, type DiffStatSummary } from "../../utils/rewindDiffStat";
 import { showNotice } from "../../utils/notice";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Badge } from "../ui-shadcn/badge";
@@ -34,22 +35,40 @@ const TRIGGER_LABEL_KEY: Record<RewindCheckpointTrigger, TranslationKey> = {
 	"before-restore": "rewind.trigger.beforeRestore",
 };
 
+/** 列表默认渲染上限：超出时折叠为「显示全部」按钮，避免一次铺开全部快照。 */
+const VISIBLE_CHECKPOINT_LIMIT = 5;
+
 /**
  * 检查点列表（弹层与右侧抽屉面板共用）：拉取当前会话在 refs/pi-checkpoints 下的
  * 快照列表，支持查看相对当前工作区的 diff、按范围（files/conversation/all）回退。
  *
  * 挂载即拉取（弹层打开/面板打开都是挂载时机），回退成功后自动刷新。
  * 滚动容器由父级控制：弹层套 ScrollArea，抽屉面板走 drawer-content-frame。
+ *
+ * ⚠️ target 必须稳定引用：toSessionRuntimeTarget 每次调用新建对象，直接依赖它会让
+ * reload 每次渲染都是新引用 → useEffect 每渲染触发一次 → 无限发 IPC 拉列表
+ * （主进程被 git spawn 洪泛 = 卡死 + 弹层持续抖动）。这里按原始字段 useMemo。
  */
 export function RewindCheckpointList(props: { sessionId: string }) {
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(props.sessionId));
-	const target = toSessionRuntimeTarget(props.sessionId, runtime);
+	const agentId = runtime?.agentId;
+	const runtimeGeneration = runtime?.runtimeGeneration;
+	const target = useMemo(
+		() =>
+			agentId
+				? { sessionId: props.sessionId, agentId, runtimeGeneration }
+				: undefined,
+		[props.sessionId, agentId, runtimeGeneration],
+	);
 	const [checkpoints, setCheckpoints] = useState<RewindCheckpointSummary[]>([]);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
+	const [showAll, setShowAll] = useState(false);
 	/** checkpointId → diff 文本缓存（存在即视为已加载/已收起开关）。 */
 	const [diffs, setDiffs] = useState<Record<string, string>>({});
 	const [diffLoadingId, setDiffLoadingId] = useState<string | null>(null);
+	/** checkpointId → 变更统计（auto 摘要行）；null = 与当前工作区无差异；缺 key = 未拉取。 */
+	const [diffStats, setDiffStats] = useState<Record<string, DiffStatSummary | null>>({});
 	/** 待确认回退：检查点 + 回退范围（files/conversation/all，由恢复按钮的下拉菜单选择）。 */
 	const [confirmRestore, setConfirmRestore] = useState<
 		{ cp: RewindCheckpointSummary; scope: RewindRestoreScope } | null
@@ -83,6 +102,49 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 	useEffect(() => {
 		void reload();
 	}, [reload]);
+
+	// 可见行（默认最多 5 条）自动拉取变更统计，用于每行摘要。
+	// 依赖用 checkpoints 引用 + showAll 的 id 串，diffStats 变化后 idsToFetch
+	// 变空直接短路，不会造成二次拉取/死循环。
+	// 默认只渲染最近 VISIBLE_CHECKPOINT_LIMIT 个；超出的折叠到「显示全部」，
+	// 避免一次铺开全部快照（自动打点每小时可能积累几十个）。
+	const visibleCheckpoints = showAll ? checkpoints : checkpoints.slice(0, VISIBLE_CHECKPOINT_LIMIT);
+	const visibleCheckpointIds = visibleCheckpoints.map((cp) => cp.id).join(",");
+	useEffect(() => {
+		if (!target || loading || !visibleCheckpointIds) return;
+		const idsToFetch = visibleCheckpointIds
+			.split(",")
+			.filter((id) => !(id in diffStats));
+		if (idsToFetch.length === 0) return;
+		let cancelled = false;
+		void (async () => {
+			const results = await Promise.all(
+				idsToFetch.map(async (id) => {
+					try {
+						const text = requireSessionCommand(
+							await desktopApi.sessions.getRewindCheckpointDiff(target, id),
+						).value;
+						return { id, stat: parseDiffStatSummary(text) };
+					} catch {
+						// 单条 diff 失败不阻塞其余行：标记为 null（按无差异显示）
+						// 的同时允许下次重试——null 是合法值，这里干脆不写缓存。
+						return { id, stat: undefined as DiffStatSummary | null | undefined };
+					}
+				}),
+			);
+			if (cancelled) return;
+			setDiffStats((prev) => {
+				const next = { ...prev };
+				for (const r of results) {
+					if (r.stat !== undefined) next[r.id] = r.stat;
+				}
+				return next;
+			});
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [target, loading, visibleCheckpointIds, diffStats]);
 
 	const toggleDiff = useCallback(
 		async (cp: RewindCheckpointSummary) => {
@@ -150,6 +212,8 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 		}
 	}, [confirmRestore, target, reload, restoring]);
 
+	const hiddenCount = checkpoints.length - visibleCheckpoints.length;
+
 	return (
 		<>
 			{loading && checkpoints.length === 0 ? (
@@ -162,17 +226,29 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 					<p className="mt-0.5 text-text-tertiary">{t("rewind.emptyHint")}</p>
 				</div>
 			) : (
-				checkpoints.map((cp) => (
-					<CheckpointRow
-						key={cp.id}
-						cp={cp}
-						diff={diffs[cp.id]}
-						diffLoading={diffLoadingId === cp.id}
-						restoring={restoring && confirmRestore?.cp.id === cp.id}
-						onToggleDiff={() => void toggleDiff(cp)}
-						onRestore={(scope) => setConfirmRestore({ cp, scope })}
-					/>
-				))
+				<>
+					{visibleCheckpoints.map((cp) => (
+						<CheckpointRow
+							key={cp.id}
+							cp={cp}
+							diff={diffs[cp.id]}
+							diffStat={diffStats[cp.id]}
+							diffLoading={diffLoadingId === cp.id}
+							restoring={restoring && confirmRestore?.cp.id === cp.id}
+							onToggleDiff={() => void toggleDiff(cp)}
+							onRestore={(scope) => setConfirmRestore({ cp, scope })}
+						/>
+					))}
+					{hiddenCount > 0 && (
+						<button
+							type="button"
+							className="w-full rounded-md px-2 py-1.5 text-center text-xs text-text-tertiary transition-colors hover:bg-muted/60 hover:text-foreground"
+							onClick={() => setShowAll(true)}
+						>
+							{t("rewind.showMore", { count: hiddenCount })}
+						</button>
+					)}
+				</>
 			)}
 			{confirmRestore && (
 				<ConfirmDialog
@@ -213,6 +289,8 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 function CheckpointRow(props: {
 	cp: RewindCheckpointSummary;
 	diff?: string;
+	/** 变更统计（auto 拉取）；null = 无差异；undefined = 未拉取（不展示摘要行）。 */
+	diffStat?: DiffStatSummary | null;
 	diffLoading: boolean;
 	restoring: boolean;
 	onToggleDiff: () => void;
@@ -229,6 +307,20 @@ function CheckpointRow(props: {
 					? t("rewind.triggerBeforeRestoreHint")
 					: t(TRIGGER_LABEL_KEY[cp.trigger]);
 	const diffVisible = props.diff !== undefined || props.diffLoading;
+	// 变更摘要文案：有增删计数 → 带 +N/−M；纯模式变更 → 只列文件数；无差异 → 用 diffEmpty。
+	const stat = props.diffStat;
+	const statLabel =
+		stat === null
+			? t("rewind.diffEmpty")
+			: stat && stat.insertions !== undefined && stat.deletions !== undefined
+				? t("rewind.changedSummary", {
+						files: stat.files,
+						insertions: stat.insertions,
+						deletions: stat.deletions,
+					})
+				: stat
+					? t("rewind.changedFiles", { files: stat.files })
+					: null;
 	return (
 		<div className="rounded-lg border border-border bg-card/60 p-2">
 			<div className="flex items-start gap-2">
@@ -236,7 +328,7 @@ function CheckpointRow(props: {
 					<p className="truncate text-xs font-medium text-foreground" title={cp.description}>
 						{cp.description ?? fallbackLabel}
 					</p>
-					<div className="mt-1 flex items-center gap-1.5 text-[11px] text-text-tertiary">
+					<div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-text-tertiary">
 						<Badge variant="outline" className="h-4 px-1 text-[10px] font-normal">
 							{t(TRIGGER_LABEL_KEY[cp.trigger])}
 						</Badge>
@@ -245,7 +337,20 @@ function CheckpointRow(props: {
 						) : cp.trigger === "turn" ? (
 							<span>{t("rewind.turnLabel", { turn: cp.turnIndex })}</span>
 						) : null}
-						<span className="ml-auto shrink-0 tabular-nums">{formatRelativeTime(cp.timestamp)}</span>
+						{statLabel && (
+							<span
+								className={stat === null ? "text-text-tertiary" : "text-text-secondary"}
+								title={t("rewind.diffVsCurrentHint")}
+							>
+								{statLabel}
+							</span>
+						)}
+						<span
+							className="ml-auto shrink-0 tabular-nums"
+							title={formatAbsoluteTime(cp.timestamp)}
+						>
+							{formatRelativeTime(cp.timestamp)}
+						</span>
 					</div>
 				</div>
 				<div className="flex shrink-0 items-center gap-1">

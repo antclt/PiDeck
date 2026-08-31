@@ -181,6 +181,13 @@ Gitmoji 对应关系：
   petPatrolEnabled: true,
   // 巡游碰边后 idle 停顿默认 5 分钟
   petPatrolPauseMin: 5,
+
+  // ── 闲置 agent 内存优化：自动释放长时间闲置的 agent 进程 ──
+  // 默认开启；保留最近闲置的 5 个；连续闲置 1 小时（60 分钟）才可释放
+  idleAgentAutoRelease: true,
+  idleAgentKeepCount: 5,
+  idleAgentTimeoutMin: 60,
+
   favoriteModels: [],
 
   // ── 扩展管理 ──
@@ -329,6 +336,15 @@ export class SettingsStore {
     // 忙碌时投递行为来自渲染层，非法值丢掉，避免发送链路带着坏语义。
     if ("busySendDelivery" in safePatch) {
       safePatch.busySendDelivery = parseBusySendDelivery(safePatch.busySendDelivery);
+    }
+    // 闲置 agent 释放参数来自渲染层，钳制到合理范围避免非法值（0/负数/超大）写入磁盘
+    if ("idleAgentKeepCount" in safePatch) {
+      const n = Math.floor(Number(safePatch.idleAgentKeepCount));
+      safePatch.idleAgentKeepCount = Number.isFinite(n) ? Math.min(20, Math.max(1, n)) : 5;
+    }
+    if ("idleAgentTimeoutMin" in safePatch) {
+      const n = Math.floor(Number(safePatch.idleAgentTimeoutMin));
+      safePatch.idleAgentTimeoutMin = Number.isFinite(n) ? Math.min(24 * 60, Math.max(1, n)) : 60;
     }
     this.settings = { ...this.settings, ...safePatch };
     // 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。

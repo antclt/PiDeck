@@ -165,6 +165,10 @@ let previewSettings: AppSettings = {
 	petScale: DEFAULT_PET_SCALE,
 	petPatrolEnabled: true,
 	petPatrolPauseMin: 5,
+	// 闲置 agent 自动释放（预览模式不真实释放，仅保持设置项可用）
+	idleAgentAutoRelease: true,
+	idleAgentKeepCount: 5,
+	idleAgentTimeoutMin: 60,
 	favoriteModels: [],
 
 	fontSize: "default",

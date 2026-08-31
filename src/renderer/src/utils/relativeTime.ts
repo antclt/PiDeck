@@ -14,3 +14,11 @@ export function formatRelativeTime(ms: number): string {
 	if (seconds < 31536000) return t("session.relativeMonths", { count: Math.floor(seconds / 2592000) });
 	return t("session.relativeYears", { count: Math.floor(seconds / 31536000) });
 }
+
+/**
+ * 绝对时间（用于 hover 详情，避免相对时间歧义）。
+ * 走系统 locale（toLocaleString），供 title 等次要提示使用。
+ */
+export function formatAbsoluteTime(ms: number): string {
+	return new Date(ms).toLocaleString();
+}

@@ -263,6 +263,7 @@ import {
 	SessionRuntimeCoordinator,
 	type SessionRuntimeBinding,
 } from "./sessions/SessionRuntimeCoordinator";
+import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
 import { ClaudeSessionImporter } from "./sessions/ClaudeSessionImporter";
@@ -366,6 +367,8 @@ let fileSystemService: FileSystemService;
 let sessionScanner: SessionScanner;
 let sessionCatalog: SessionCatalog;
 let sessionRuntimeCoordinator: SessionRuntimeCoordinator;
+/** 闲置 agent 自动释放器（内存优化）：whenReady 阶段装配，quit 时 stop */
+let idleAgentReleaser: IdleAgentReleaser | null = null;
 let codexSessionImporter: CodexSessionImporter;
 let claudeSessionImporter: ClaudeSessionImporter;
 let openCodeSessionImporter: OpenCodeSessionImporter;
@@ -3500,6 +3503,24 @@ app.whenReady().then(async () => {
 		sendAgentPromptWithIntegrations,
 		appLogger,
 	);
+	// 闲置 agent 自动释放（内存优化）：轮询 agents.list() 自记 idle 时长，释放走
+	// coordinator.stopAgentById（解绑 + agents.stop + agents:state 推送，会话状态自动同步）。
+	// 设置项（开关/保留数/闲置时长）每次扫描时读取，改设置后下一轮自动生效。
+	idleAgentReleaser = new IdleAgentReleaser(
+		sessionRuntimeCoordinator,
+		compositeAgentGateway,
+		() => settingsStore.get(),
+		appLogger,
+		undefined, // sweepIntervalMs 用默认 60s
+		// 释放收尾与进程监控停止路径一致：关终端 + sessions:runtime-detach 推送
+		// （缺 detach 时渲染层会话运行标记会停在 running）。
+		(agentId, target) => {
+			terminalManager.closeAgent(agentId);
+			if (target) emitSessionRuntimeDetach(target);
+		},
+	);
+	idleAgentReleaser.start();
+	quitCleanup.register("idle-agent-releaser", () => idleAgentReleaser?.stop());
 	// pi 运行时标题（首轮自动改名 / session_info_changed / rename）写回 catalog：
 	// 侧栏 SessionTree 与 Tab 栏读的是 SessionRecord.title，不是 AgentTab.title。
 	// DSH 已有同语义的 onTitleChanged；pi 以前只 emitState，回话后 UI 仍停在「新会话」。

@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../ui-shadcn/select";
+import { Input } from "../../ui-shadcn/input";
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
 
@@ -256,6 +257,76 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
           checked={draft.collapsePrevRunsOnNewTurn}
           onChange={(checked) => updateDraft({ collapsePrevRunsOnNewTurn: checked })}
         />
+      </SettingsSection>
+
+      {/* 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 */}
+      <SettingsSection
+        title={t("settings.idleAgentSection")}
+        description={t("settings.idleAgentSectionDesc")}
+      >
+        <SettingSwitchRow
+          title={t("settings.idleAgentAutoRelease")}
+          description={t("settings.idleAgentAutoReleaseDesc")}
+          checked={draft.idleAgentAutoRelease ?? true}
+          dirty={isDirty("idleAgentAutoRelease")}
+          onChange={(checked) => updateDraft({ idleAgentAutoRelease: checked })}
+        />
+        <SettingRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <DirtyMarker dirty={isDirty("idleAgentKeepCount")} label={t("settings.idleAgentKeepCount")} />
+              {t("settings.idleAgentKeepCount")}
+            </span>
+          }
+          description={t("settings.idleAgentKeepCountDesc")}
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              step={1}
+              className="w-24"
+              value={String(draft.idleAgentKeepCount ?? 5)}
+              onChange={(event) => {
+                const n = parseInt(event.target.value, 10);
+                updateDraft({ idleAgentKeepCount: Number.isFinite(n) ? n : 5 });
+              }}
+              aria-label={t("settings.idleAgentKeepCount")}
+            />
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+              {t("settings.idleAgentCountUnit")}
+            </span>
+          </div>
+        </SettingRow>
+        <SettingRow
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              <DirtyMarker dirty={isDirty("idleAgentTimeoutMin")} label={t("settings.idleAgentTimeoutMin")} />
+              {t("settings.idleAgentTimeoutMin")}
+            </span>
+          }
+          description={t("settings.idleAgentTimeoutMinDesc")}
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={1}
+              max={1440}
+              step={5}
+              className="w-24"
+              value={String(draft.idleAgentTimeoutMin ?? 60)}
+              onChange={(event) => {
+                const n = parseInt(event.target.value, 10);
+                updateDraft({ idleAgentTimeoutMin: Number.isFinite(n) ? n : 60 });
+              }}
+              aria-label={t("settings.idleAgentTimeoutMin")}
+            />
+            <span className="shrink-0 text-sm text-muted-foreground tabular-nums">
+              {t("settings.idleAgentTimeoutUnit")}
+            </span>
+          </div>
+        </SettingRow>
       </SettingsSection>
 
       {/* 通知 */}

@@ -447,6 +447,51 @@ async function safeClean(
 // 读取 / 列表 / 裁剪
 // ============================================================================
 
+/**
+ * 从 commit message 解析 checkpoint 元数据（不含 id；id 由 ref 名提供）。
+ * 供 loadCheckpointFromRef（单条）与 loadAllCheckpoints（批量）复用。
+ */
+function parseCheckpointCommit(
+	msg: string,
+): Omit<CheckpointData, "id"> | null {
+	const get = (key: string) =>
+		msg.match(new RegExp(`^${key} (.+)$`, "m"))?.[1]?.trim();
+
+	const sid = get("sessionId");
+	const turn = get("turn");
+	const head = get("head");
+	const idx = get("index-tree");
+	const wt = get("worktree-tree");
+	if (!sid || !turn || !head || !idx || !wt) return null;
+
+	const parseJson = (key: string): string[] | undefined => {
+		const raw = get(key);
+		if (!raw) return undefined;
+		try {
+			const arr = JSON.parse(raw) as string[];
+			return arr.length > 0 ? arr : undefined;
+		} catch {
+			return undefined;
+		}
+	};
+
+	return {
+		sessionId: sid,
+		trigger: parseTrigger(get("trigger")),
+		turnIndex: parseInt(turn, 10),
+		toolName: get("toolName") || undefined,
+		description: get("description") || undefined,
+		branch: get("branch") || "unknown",
+		headSha: head,
+		indexTreeSha: idx,
+		worktreeTreeSha: wt,
+		timestamp: get("created") ? new Date(get("created")!).getTime() : 0,
+		preexistingUntrackedFiles: parseJson("untracked"),
+		skippedLargeFiles: parseJson("largeFiles"),
+		skippedLargeDirs: parseJson("largeDirs"),
+	};
+}
+
 /** 从 git ref 加载 checkpoint 元数据；ref 不存在或元数据不完整返回 null。 */
 export async function loadCheckpointFromRef(
 	root: string,
@@ -459,46 +504,8 @@ export async function loadCheckpointFromRef(
 			`${REF_BASE}/${refName}`,
 		]);
 		const msg = await gitOp(root, ["cat-file", "commit", commitSha]);
-
-		const get = (key: string) =>
-			msg.match(new RegExp(`^${key} (.+)$`, "m"))?.[1]?.trim();
-
-		const sid = get("sessionId");
-		const turn = get("turn");
-		const head = get("head");
-		const idx = get("index-tree");
-		const wt = get("worktree-tree");
-		if (!sid || !turn || !head || !idx || !wt) return null;
-
-		const parseJson = (key: string): string[] | undefined => {
-			const raw = get(key);
-			if (!raw) return undefined;
-			try {
-				const arr = JSON.parse(raw) as string[];
-				return arr.length > 0 ? arr : undefined;
-			} catch {
-				return undefined;
-			}
-		};
-
-		return {
-			id: refName,
-			sessionId: sid,
-			trigger: parseTrigger(get("trigger")),
-			turnIndex: parseInt(turn, 10),
-			toolName: get("toolName") || undefined,
-			description: get("description") || undefined,
-			branch: get("branch") || "unknown",
-			headSha: head,
-			indexTreeSha: idx,
-			worktreeTreeSha: wt,
-			timestamp: get("created")
-				? new Date(get("created")!).getTime()
-				: 0,
-			preexistingUntrackedFiles: parseJson("untracked"),
-			skippedLargeFiles: parseJson("largeFiles"),
-			skippedLargeDirs: parseJson("largeDirs"),
-		};
+		const parsed = parseCheckpointCommit(msg);
+		return parsed ? { ...parsed, id: refName } : null;
 	} catch {
 		return null;
 	}
@@ -541,14 +548,56 @@ export async function loadAllCheckpoints(
 	root: string,
 	sessionId?: string,
 ): Promise<CheckpointData[]> {
-	const refs = await listCheckpointRefs(root);
-	const results = await Promise.all(
-		refs.map((r) => loadCheckpointFromRef(root, r)),
-	);
-	return results.filter(
-		(cp): cp is CheckpointData =>
-			cp !== null && (!sessionId || cp.sessionId === sessionId),
-	);
+	try {
+		// 批量读取：一次 for-each-ref 拿 ref→sha，一次 git log --no-walk 解析全部
+		// commit message。弹层打开可能面对几十个 checkpoint，逐 ref spawn 2 次 git
+		// 会明显拖慢主进程（Windows spawn 开销大），批量后固定 2 次进程调用。
+		const prefix = `${REF_BASE}/`;
+		const refOut = await gitOp(root, [
+			"for-each-ref",
+			"--format=%(refname)%00%(objectname)",
+			prefix,
+		]);
+		const pairs = refOut
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => {
+				const sep = line.indexOf("\0");
+				return {
+					ref: line.slice(0, sep).replace(prefix, ""),
+					sha: line.slice(sep + 1),
+				};
+			});
+		if (pairs.length === 0) return [];
+		// %H%x00%B%x00 每条输出 <sha>\0<body>\0。不带 -z 时 git 会在每条记录后
+		// 追加 \n（body 尾部也是 \n），导致 \0 切分后出现 "\n<sha>" 粘连项；
+		// 加 -z 后记录之间改用 \0 分隔，切分产物为 [sha, body, "", sha, body,
+		// "", ...]。配合下面的扫描式配对（40 位 hex + 紧邻可解析 body）即可稳定
+		// 还原全部记录。commit message 不可能含 \0 与纯 40 位 hex 行，不会误配。
+		const batch = await gitOp(root, [
+			"log",
+			"-z",
+			"--no-walk",
+			"--format=%H%x00%B%x00",
+			...pairs.map((p) => p.sha),
+		]);
+		const bySha = new Map<string, Omit<CheckpointData, "id">>();
+		const parts = batch.split("\0");
+		for (let i = 0; i + 1 < parts.length; i++) {
+			if (!/^[0-9a-f]{40}$/.test(parts[i])) continue;
+			const parsed = parseCheckpointCommit(parts[i + 1] ?? "");
+			if (parsed) bySha.set(parts[i], parsed);
+		}
+		const all = pairs
+			.map(({ ref, sha }) => {
+				const parsed = bySha.get(sha);
+				return parsed ? { ...parsed, id: ref } : null;
+			})
+			.filter((cp): cp is CheckpointData => cp !== null);
+		return sessionId ? all.filter((cp) => cp.sessionId === sessionId) : all;
+	} catch {
+		return [];
+	}
 }
 
 /** 删除一个 checkpoint ref（不存在时静默成功）。 */

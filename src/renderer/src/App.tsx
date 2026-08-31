@@ -670,6 +670,10 @@ export function App() {
     petScale: DEFAULT_PET_SCALE,
     petPatrolEnabled: true,
     petPatrolPauseMin: 5,
+    // 闲置 agent 自动释放：与 main SettingsStore 默认值保持一致，避免启动时闪烁
+    idleAgentAutoRelease: true,
+    idleAgentKeepCount: 5,
+    idleAgentTimeoutMin: 60,
     favoriteModels: [],
 
     // 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
