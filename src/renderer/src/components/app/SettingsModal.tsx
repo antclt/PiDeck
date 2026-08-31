@@ -682,7 +682,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 					{/* ── 代理设置 tab ── */}
 					{activeTab === "proxy" && (
-						<TabsContent value="proxy" className="settings-panel min-w-0">
+						<TabsContent value="proxy" className="settings-panel min-w-0 [overflow-anchor:none]">
 							<Suspense fallback={<SettingsTabLoading />}>
 							<ProxyTab
 								draft={draftSettings}
