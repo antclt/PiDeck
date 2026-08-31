@@ -2876,6 +2876,7 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.proxyProvider": "Provider",
   "settings.piProxyModelsSearch": "Search models (provider/ID or name)",
   "settings.piProxyModelsSearchHint": "Search only filters the display; saved selection is unaffected. Checked models not matching still remain.",
+  "settings.piProxyModelsGroupSelected": "Selected {count}",
   "settings.piProxyModelsExtras": "Selected but not in the current list (model may have been removed/renamed)",
   "settings.enableWebService": "Enable Web service",
   "settings.environment": "Environment",

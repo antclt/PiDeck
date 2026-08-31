@@ -2848,6 +2848,7 @@ export const zhCN = {
   "settings.proxyProvider": "供应商",
   "settings.piProxyModelsSearch": "搜索模型（provider/ID 或名称）",
   "settings.piProxyModelsSearchHint": "搜索只过滤显示，已保存的名单不受影响；已勾选但未匹配的模型仍保留",
+  "settings.piProxyModelsGroupSelected": "已选 {count}",
   "settings.piProxyModelsExtras": "已选但不在当前列表（模型可能已被删除/改名）",
   "settings.enableWebService": "启用 Web 服务",
   "settings.environment": "环境",
