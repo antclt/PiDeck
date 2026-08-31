@@ -614,6 +614,18 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				value: { target, value: undefined },
 			}),
+			listRewindCheckpoints: async (target) => ({
+				ok: true,
+				value: { target, value: [] },
+			}),
+			getRewindCheckpointDiff: async (target) => ({
+				ok: true,
+				value: { target, value: "" },
+			}),
+			restoreRewindCheckpoint: async (target) => ({
+				ok: true,
+				value: { target, value: undefined },
+			}),
 			prepareRuntimeResend: async (target) => ({
 				ok: true,
 				value: { target, value: { text: "" } },

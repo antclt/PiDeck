@@ -28,7 +28,7 @@ export type DshRuntimeProbeResult =
  * `--dsh-node-modules`，hostEntry 再从它建 createRequire）。
  */
 export type DshRuntimeProbe =
-	| { ok: true; appRoot: string; source: DshRuntimeSource; runtimeVersion?: string }
+	| { ok: true; appRoot: string; source: DshRuntimeSource; runtimeVersion?: string; installDir?: string }
 	| { ok: false; error: string };
 
 /**
@@ -50,6 +50,8 @@ export function probeDshRuntime(input: {
 			ok: true,
 			// node_modules 的上一级才是 appRoot（与 bundled 分支的 dirname×3 对齐）。
 			appRoot: dirname(input.managed.nodeModules),
+			// 版本目录（runtimesRoot/<version>）即安装落盘位置，UI 概览页展示/打开用。
+			installDir: dirname(input.managed.nodeModules),
 			source: "managed",
 			runtimeVersion: input.managed.runtimeVersion,
 		};
@@ -175,6 +177,9 @@ export class DshRuntimeStatusService {
 				state: "installed",
 				source: probe.source,
 				...(probe.runtimeVersion ? { runtimeVersion: probe.runtimeVersion } : {}),
+				// 外部 managed runtime 时给出落盘目录（runtimesRoot/<version>），UI 概览页展示/打开用；
+				// builtin 内置分发没有独立安装目录（在 app.asar 内），不填。
+				...(probe.source === "managed" && probe.installDir ? { installDir: probe.installDir } : {}),
 			};
 		}
 		// 两者都没有 = 未安装 runtime（阶段 2 依赖分区后的常态）。

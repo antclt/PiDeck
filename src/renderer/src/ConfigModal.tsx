@@ -88,7 +88,6 @@ import { isValidProviderName } from "../../shared/providerName";
 import { useAtomValue } from "jotai";
 import { dshRuntimeStatusAtom } from "./atoms";
 import { dshUiVisibilityFor } from "../../shared/types/dshRuntime";
-import { DshRuntimeInstallGuide } from "./config/DshRuntimeInstallGuide";
 
 const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi })
 	.piDesktop;
@@ -2213,15 +2212,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				{/* forceMount + inactive hidden：Pi/DSH 两个后端页都保持挂载，切换后端不会丢草稿；
 				    与 config:mcp 同款做法，inactive 必须 hidden 避免叠在另一页上。 */}
 				<TabsContent value="dsh" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
-					{dshUi.showDshConfigForms ? (
+					{/* runtime 安装态不再整页替换：概览页内嵌 DshRuntimeSection 状态自适应区块，
+					    未装→安装引导，已装→版本/目录/卸载/导入，一个页面操作完。 */}
+					{dshRuntimeStatus.state !== "checking" ? (
 						<DshConfigTab
 							ref={dshConfigRef}
 							onDirtyChange={handleDshDirtyChange}
 							dirtyNavIds={dshDirtyNavIds}
 							onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "dsh")}
 						/>
-					) : dshUi.showInstallGuide ? (
-						<DshRuntimeInstallGuide status={dshRuntimeStatus} />
 					) : null}
 				</TabsContent>
 				<TabsContent value="pi" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">

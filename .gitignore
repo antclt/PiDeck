@@ -5,11 +5,15 @@ node_modules/
 out/
 dist/
 # DSH runtime 产物（.gitkeep 是占位，必须保留：extraResources 的源目录不能缺失）
+# 注意用 ** 匹配二级目录（dsh-runtime/manifest.json），单层 * 会漏。
 dist-runtime/**/*.tgz
-dist-runtime/*.json
+dist-runtime/**/*.json
 release/
 release-test/
 release-fix/
+# 打包验证/开发产物目录（release-verify 曾误提交 win-unpacked 二进制，见 d8d5711b）
+release-verify/
+release-dev/
 docs-site/.vitepress/cache/
 docs-site/.vitepress/dist/
 *.asar

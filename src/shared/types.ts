@@ -33,3 +33,4 @@ export * from "./types/providerMigration";
 export * from "./types/providerUsage";
 export * from "./types/pasteFile";
 export * from "./types/mcp";
+export * from "./types/rewind";

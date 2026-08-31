@@ -1,13 +1,9 @@
-import { memo, useState } from "react";
+import { memo } from "react";
 import { useAtomValue } from "jotai";
 import type { AppSettings } from "../../../../../shared/types";
 import { dshUiVisibilityFor } from "../../../../../shared/types/dshRuntime";
 import { dshRuntimeStatusAtom } from "../../../atoms";
-import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
-import { showNotice } from "../../../utils/notice";
-import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
-import { Button } from "../../ui-shadcn/button";
 import {
   Select,
   SelectContent,
@@ -37,25 +33,6 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
   // 否则用户能选到一个「保存成功但新建会话必失败」的后端。
   const dshRuntimeStatus = useAtomValue(dshRuntimeStatusAtom);
   const dshAvailable = dshUiVisibilityFor(dshRuntimeStatus.state).canCreateDshSession;
-  const [uninstallOpen, setUninstallOpen] = useState(false);
-
-  // 版本文案按来源分：外部安装的可卸，内置的不行（删了无法补回）。
-  const dshRuntimeLabel = dshRuntimeStatus.runtimeVersion
-    ? dshRuntimeStatus.source === "managed"
-      ? t("settings.dshRuntimeManaged", { version: dshRuntimeStatus.runtimeVersion })
-      : t("settings.dshRuntimeBuiltin", { version: dshRuntimeStatus.runtimeVersion })
-    : t("settings.dshRuntimeUnknown");
-  const dshRuntimeDescription =
-    dshRuntimeStatus.source === "managed"
-      ? t("dsh.runtime.managedHint")
-      : t("dsh.runtime.builtinHint");
-
-  const handleUninstallRuntime = async () => {
-    setUninstallOpen(false);
-    const result = await desktopApi.sessions.uninstallDshRuntime();
-    if (result.ok) showNotice(t("settings.dshRuntimeUninstalled"), 3000);
-    else showNotice(result.error ?? t("settings.dshRuntimeUninstall"), 4000, "error");
-  };
   const languageOptions: SelectOption[] = [
     { value: "system", label: t("settings.languageSystem") },
     { value: "zh-CN", label: t("settings.languageZh") },
@@ -187,36 +164,8 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
             </SelectContent>
           </Select>
         </SettingRow>
-        {/* DSH runtime 状态行：装了要能看到版本，也要能卸（否则用户只能手工去
-            userData 里翻目录）。内置 runtime 不可卸载——它随应用分发，删了也没法
-            用「安装」补回来（内置那份不会再有）。 */}
-        {dshAvailable ? (
-          <SettingRow
-            title={<span>{t("settings.dshRuntime")}</span>}
-            description={dshRuntimeDescription}
-            alignEnd={false}
-          >
-            <div className="flex items-center justify-end gap-2">
-              <span className="text-[13px] text-muted-foreground">{dshRuntimeLabel}</span>
-              {dshRuntimeStatus?.source === "managed" ? (
-                <Button size="sm" variant="outline" onClick={() => setUninstallOpen(true)}>
-                  {t("settings.dshRuntimeUninstall")}
-                </Button>
-              ) : null}
-            </div>
-          </SettingRow>
-        ) : null}
-        {/* ConfirmDialog 自身恒 open（靠 AlertDialog 内部控制），必须条件渲染。 */}
-        {uninstallOpen ? (
-          <ConfirmDialog
-            title={t("settings.dshRuntimeUninstall")}
-            message={t("settings.dshRuntimeUninstallConfirm")}
-            confirmLabel={t("settings.dshRuntimeUninstall")}
-            danger
-            onConfirm={() => void handleUninstallRuntime()}
-            onCancel={() => setUninstallOpen(false)}
-          />
-        ) : null}
+        {/* DSH runtime 管理已迁至 DSH 配置 → 概览页（DshRuntimeSection 区块：
+            未装→安装引导，已装→版本/目录/卸载/导入），这里不再重复放状态行。 */}
         {/* 忙碌时投递行为：Agent 回复期间发送消息的默认语义（pi/dsh 统一）。 */}
         <SettingRow
           title={

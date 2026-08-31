@@ -34,7 +34,8 @@ export type AgentGatewayCapability =
 	| "editMessage" // 编辑历史消息
 	| "deleteMessage" // 删除历史消息
 	| "getCommands" // 会话内命令列表
-	| "exportHtml"; // 导出 HTML
+	| "exportHtml" // 导出 HTML
+	| "rewind"; // checkpoint 文件快照/回退（refs/pi-checkpoints，纯 git）
 
 export type AgentTab = {
 	id: string;
