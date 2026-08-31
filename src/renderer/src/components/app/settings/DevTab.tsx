@@ -66,6 +66,13 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
   // 后台检查发现可提示的 PiDeck 新版本（未跳过）时高亮设置页更新分区。
   const pendingAppUpdate = useAtomValue(pendingAppUpdateAtom);
   const piCliStatus = useAtomValue(updateStatusAtom)?.piCli ?? null;
+  // 手动检查的结果比定时后台快照更新，统一决定提示内容和更新按钮是否可用。
+  const piUpdateStatus = props.piUpdateCheck ?? piCliStatus;
+  const piUpdateAvailable = Boolean(piUpdateStatus?.hasUpdate);
+  const piUpdateNotice =
+    piUpdateAvailable && piUpdateStatus?.latestVersion
+      ? piUpdateStatus
+      : null;
 
   // ── WSL 相关状态（仅 Windows + WSL 开启时拉取）──
   const [wslUserInput, setWslUserInput] = useState(draft.wslUser);
@@ -189,15 +196,21 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
             <Button variant="secondary"
               onClick={props.onUpdatePi}
               loading={props.piUpdating}
-              disabled={
-                disableUpdateCheck ||
-                !props.piUpdateCheck?.hasUpdate
-              }
+              disabled={disableUpdateCheck || !piUpdateAvailable}
             >
               {t("settings.updatePi")}
             </Button>
           </div>
         </div>
+        {/* 后台检查发现的 Pi CLI 更新必须靠近操作按钮，避免提示与入口分属不同分区。 */}
+        {piUpdateNotice && (
+          <div className="mb-2 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-2 text-caption text-text-primary">
+            {t("settings.piUpdateAvailableDetail", {
+              current: piUpdateNotice.currentVersion ?? t("common.unknown"),
+              latest: piUpdateNotice.latestVersion,
+            })}
+          </div>
+        )}
         {props.piUpdateResult && (
           <pre className="setting-update-output">
             {props.piUpdateResult.command}
@@ -364,15 +377,6 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
         {pendingAppUpdate && (
           <div className="mb-2 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-2 text-caption text-text-primary">
             {t("update.availableInSettings")}
-          </div>
-        )}
-        {/* Pi CLI 后台检查结果（每 2h）：有更新时提示，入口在下方开发环境分区。 */}
-        {piCliStatus?.hasUpdate && piCliStatus.latestVersion && (
-          <div className="mb-2 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-3 py-2 text-caption text-text-primary">
-            {t("settings.piUpdateAvailableDetail", {
-              current: piCliStatus.currentVersion ?? t("common.unknown"),
-              latest: piCliStatus.latestVersion,
-            })}
           </div>
         )}
         <SettingRow

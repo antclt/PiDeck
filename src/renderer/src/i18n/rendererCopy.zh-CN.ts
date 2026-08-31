@@ -2737,7 +2737,7 @@ export const zhCN = {
   "settings.piUpdateDone": "Pi 更新命令已完成",
   "settings.piUpdateChecked": "Pi 已是最新版本",
   "settings.piUpdateAvailable": "发现 Pi 新版本",
-  "settings.piUpdateAvailableDetail": "Pi CLI 有新版本：当前 {current} → 最新 {latest}，可在下方更新。",
+  "settings.piUpdateAvailableDetail": "Pi CLI 有新版本：当前 {current} → 最新 {latest}。可使用上方的「更新 Pi」操作更新。",
   "settings.piUpdateFailed": "Pi 更新失败：{error}",
   "settings.disableUpdateCheck": "禁用版本检测",
   "settings.disableUpdateCheckDesc": "开启后不再自动检测 PiDeck 和 Pi CLI 的版本更新，设置页中检测按钮也将禁用。",

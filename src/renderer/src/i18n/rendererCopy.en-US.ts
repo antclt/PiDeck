@@ -2762,7 +2762,7 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.piUpdateDone": "Pi update command completed",
   "settings.piUpdateChecked": "Pi is already up to date",
   "settings.piUpdateAvailable": "New Pi version available",
-  "settings.piUpdateAvailableDetail": "Pi CLI has a new version: {current} → {latest}. Update it below.",
+  "settings.piUpdateAvailableDetail": "Pi CLI has a new version: {current} → {latest}. Use Update Pi above to install it.",
   "settings.piUpdateFailed": "Pi update failed: {error}",
   "settings.disableUpdateCheck": "Disable Update Check",
   "settings.disableUpdateCheckDesc": "When enabled, stops auto-checking updates for PiDeck and Pi CLI. Update buttons in settings will also be disabled.",
