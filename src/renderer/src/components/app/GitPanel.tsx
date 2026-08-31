@@ -663,6 +663,11 @@ export function GitPanel(props: GitPanelProps) {
     setGroups(EMPTY_GROUPS);
     setError(null);
     setCommitting(false);
+    // push/pull 与 commit 同属 mutation：旧请求被序号作废后，其 finally 的守卫
+    // （mutationRequest === mutationRequestRef.current）不再成立，不会执行
+    // setPushing(false)——这里必须显式复位，否则按钮永远转圈。
+    setPushing(false);
+    setPulling(false);
     mutationRunningRef.current = false;
     setMutating(false);
     setResourceOpen({ merge: true, staged: true, changes: true });

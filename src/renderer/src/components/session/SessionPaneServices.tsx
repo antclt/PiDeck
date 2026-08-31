@@ -44,6 +44,8 @@ export type SessionPaneServices = {
   forkFromUserMessage?: (message: ChatMessage) => void;
   forkingMessageId?: string | null;
   openSidebarSessionById?: (projectId: string, sessionId: string) => Promise<void>;
+  /** 后台 Ask toast「前往会话」：按 sessionId 聚焦目标会话并登记常驻 Tab（App 级实现） */
+  focusAskSessionById?: (sessionId: string) => void;
   agents: AgentTab[];
   queuedPromptsBySession: Record<string, QueuedPrompt[]>;
   queueRetract: (sessionId: string, prompt: QueuedPrompt) => void;

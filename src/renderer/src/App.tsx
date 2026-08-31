@@ -3110,6 +3110,15 @@ export function App() {
     if (record) selectSessionCommand(record.projectId, sessionId, true);
   }, [selectSessionCommand, store]);
 
+  // 后台 Ask 通知「前往会话」：跳转的同时登记常驻 Tab——agent 开多时被询问的会话
+  // 可能根本没开 Tab（后台并行 ask 等），只切焦点的话回答完切换出去就找不到了。
+  const jumpToAskSession = useCallback((sessionId: string) => {
+    const record = store.get(sessionRecordByIdAtomFamily(sessionId));
+    if (!record) return;
+    workspaceChrome.registerOpenSession(sessionId, "permanent");
+    selectSessionCommand(record.projectId, sessionId, true);
+  }, [selectSessionCommand, store, workspaceChrome]);
+
   // 切会话过渡：会话区整体做一次 160ms 淡入+微位移（Web Animations API，
   // 不卸载树/不动布局，避免整树重建的卡顿与瞬间替换的生硬）；
   // 首次挂载不播，prefers-reduced-motion 下跳过。
@@ -3253,6 +3262,7 @@ export function App() {
       forkingMessageId,
       openSidebarSessionById: (projectId: string, sessionId: string) =>
         openSidebarSessionByIdWithTab(projectId, sessionId, "permanent"),
+      focusAskSessionById: jumpToAskSession,
       agents: displayAgents,
       queuedPromptsBySession: queue.queuedPrompts,
       queueRetract: queue.retractQueuedPromptForEdit,
@@ -3302,6 +3312,7 @@ export function App() {
       handleOpenLinkedFile,
       insertQuickPrompt,
       isLanWeb,
+      jumpToAskSession,
       jumpToMessageRef,
       openSidebarSessionByIdWithTab,
       paneLayoutRefs,
