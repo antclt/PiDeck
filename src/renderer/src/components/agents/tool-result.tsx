@@ -88,17 +88,15 @@ function getSwapKey(value: ReactNode, fallback: string) {
     : fallback;
 }
 
+/**
+ * Execution states use PiDeck semantic tokens. The user's accent identifies
+ * interactive selection, while success/error meaning must remain stable.
+ */
 function getStatusClass(status: ToolResultStatus) {
-  if (status === "running") {
-    return "text-blue-600 dark:text-blue-400";
-  }
-  if (status === "success") {
-    return "text-emerald-600 dark:text-emerald-400";
-  }
-  if (status === "error") {
-    return "text-rose-600 dark:text-rose-400";
-  }
-  return "text-muted-foreground";
+  if (status === "running") return "text-info";
+  if (status === "success") return "text-success";
+  if (status === "error") return "text-danger";
+  return "text-text-tertiary";
 }
 
 function KindIcon({ kind }: { kind: ToolResultKind }) {
@@ -163,7 +161,12 @@ export function ToolResultOutput({
       code={children}
       language={language}
       className={cn(
-        "whitespace-pre-wrap break-words text-foreground/80",
+        // Tool output is a process log rather than source code: keep it in the
+        // app's neutral color scale instead of beUI's fixed GitHub Shiki palette.
+        // Match PiDeck's prior custom result density: caption text with relaxed leading.
+        "whitespace-pre-wrap break-words text-[length:var(--font-size-caption)]",
+        "leading-[1.625] text-[color:var(--color-text-secondary)]",
+        "[&_span]:text-[color:var(--color-text-secondary)]",
         className,
       )}
     />
@@ -332,8 +335,10 @@ export function ToolResult({
         aria-labelledby={showHeader ? triggerId : undefined}
         open={showHeader ? currentOpen : true}
       >
-        <div className="pl-6 pt-1.5">
-          <div className="overflow-hidden rounded-xl bg-muted/80">
+        {/* Embedded ToolCard already aligns beneath its own icon; applying the
+            standalone beUI header gutter here would produce a double indent. */}
+        <div className={cn("pt-1.5", showHeader && "pl-6")}>
+          <div className={cn("min-w-0", showHeader && "overflow-hidden rounded-xl bg-muted/80")}>
           <div
             ref={viewportRef}
             role="log"
@@ -341,11 +346,14 @@ export function ToolResult({
             className="scrollbar-hide overflow-y-auto"
             style={{ maxHeight }}
           >
-            <div className={cn("p-3", contentClassName)}>{children}</div>
+            <div className={cn(showHeader ? "p-3" : "py-1", contentClassName)}>{children}</div>
           </div>
 
             {canCopy || onRetry ? (
-              <div className="flex items-center gap-0.5 px-2 pb-1.5">
+              <div className={cn(
+                "flex items-center gap-0.5",
+                showHeader ? "px-2 pb-1.5" : "pt-1",
+              )}>
               {canCopy ? (
                 <ToolResultAction
                   label={copied ? t("app.toolResultCopied") : t("app.toolResultCopy")}
