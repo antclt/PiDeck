@@ -21,7 +21,7 @@ const syncRequire = createRequire(import.meta.url);
 
 const MODULE_PATH = "src/main/pi/PiModelProber.ts";
 
-function compile() {
+function compile(execFileImpl = () => {}) {
 	const source = readFileSync(MODULE_PATH, "utf8");
 	const output = ts.transpileModule(source, {
 		compilerOptions: {
@@ -33,9 +33,9 @@ function compile() {
 	}).outputText;
 	const module = { exports: {} };
 	const localRequire = (specifier) => {
-		// 仅 probePiModel 依赖 execFile；parsePiProbeOutput 是纯函数不触发。
+		// execFile 可注入：parsePiProbeOutput 用不到，probePiModel 靠它捕获实参/模拟成败。
 		// type-only import（PiLocator/SettingsStore/shared）经 transpile 擦除。
-		if (specifier === "node:child_process") return { execFile: () => {} };
+		if (specifier === "node:child_process") return { execFile: execFileImpl };
 		return {};
 	};
 	vm.runInNewContext(
@@ -120,4 +120,94 @@ test("content 分段数组正确拼接为文本片段（跳过 reasoning 等非 
 	const result = parsePiProbeOutput(stdout);
 	assert.equal(result.success, true);
 	assert.equal(result.snippet, "第一段第二段");
+});
+
+// ── probePiModel：超时与错误判定 ─────────────────────────────────
+// 背景 issue #173：deepseek-v4-flash 等 reasoning 模型 thinking 阶段首包慢，
+// 原 45s 探针超时会在模型实际可用时误报（用户会话内调用同一模型正常）。
+
+/** 构造 probePiModel 的依赖替身；execFile 由调用方注入以捕获实参或模拟成败。 */
+function setupProbe(execFileImpl) {
+	const loaded = compile(execFileImpl);
+	const settings = {
+		wslEnabled: false,
+		wslDistro: "",
+		wslUser: "",
+		customPiPath: undefined,
+	};
+	const piLocator = {
+		resolveCommand: () => "/usr/bin/pi",
+		createInvocation: (command, args) => ({
+			command,
+			args,
+			pathPrefix: "",
+			wsl: false,
+			shell: false,
+			windowsVerbatimArguments: false,
+		}),
+		createProcessEnv: () => ({}),
+		warmWslCommand: async () => undefined,
+	};
+	return { ...loaded, piLocator, settingsStore: { get: () => settings } };
+}
+
+test("probePiModel 以放宽后的 120s 作为 execFile 超时", async () => {
+	let captured;
+	const { probePiModel, piLocator, settingsStore } = setupProbe((_cmd, _args, opts, cb) => {
+		captured = opts;
+		cb(
+			null,
+			agentEndLine({
+				role: "assistant",
+				content: [{ type: "text", text: "Hi" }],
+				model: "deepseek-v4-flash",
+				stopReason: "stop",
+			}),
+			"",
+		);
+	});
+
+	await probePiModel(piLocator, settingsStore, "deepseek", "deepseek-v4-flash");
+
+	assert.equal(captured.timeout, 120_000);
+	// 回归护栏：防止超时被改回 issue #173 里误报的 45s
+	assert.ok(captured.timeout > 45_000, "探针超时不得回退到 45s");
+});
+
+test("pi 进程被 kill 时判定为超时失败，错误信息带上超时秒数", async () => {
+	const { probePiModel, piLocator, settingsStore } = setupProbe((_cmd, _args, _opts, cb) => {
+		const err = new Error("killed");
+		err.killed = true;
+		cb(err, "", "");
+	});
+
+	const result = await probePiModel(piLocator, settingsStore, "deepseek", "deepseek-v4-flash");
+
+	assert.equal(result.success, false);
+	assert.equal(result.error, "pi model probe timed out after 120s");
+	assert.equal(typeof result.latencyMs, "number");
+});
+
+test("ETIMEDOUT 错误码同样判定为超时", async () => {
+	const { probePiModel, piLocator, settingsStore } = setupProbe((_cmd, _args, _opts, cb) => {
+		const err = new Error("spawn timeout");
+		err.code = "ETIMEDOUT";
+		cb(err, "", "");
+	});
+
+	const result = await probePiModel(piLocator, settingsStore, "p", "m");
+
+	assert.equal(result.success, false);
+	assert.match(result.error, /timed out/);
+});
+
+test("非超时失败优先透传 pi 的 stderr", async () => {
+	const { probePiModel, piLocator, settingsStore } = setupProbe((_cmd, _args, _opts, cb) => {
+		cb(new Error("unknown option"), "", "error: unknown option --foo");
+	});
+
+	const result = await probePiModel(piLocator, settingsStore, "p", "m");
+
+	assert.equal(result.success, false);
+	assert.equal(result.error, "error: unknown option --foo");
 });

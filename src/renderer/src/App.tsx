@@ -30,7 +30,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, sessionRecordsAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -135,6 +135,9 @@ import {
 import { useScratchPad } from "./hooks/useScratchPad";
 import { useDshRuntimeStatusSync } from "./hooks/useDshRuntimeStatusSync";
 import { useDshRuntimeMigrationNotice } from "./hooks/useDshRuntimeMigrationNotice";
+import { useDshRuntimeInstallProgressSync } from "./hooks/useDshRuntimeInstallProgressSync";
+import { DSH_INSTALL_SETTINGS_TARGET, showDshRuntimeBlockHint } from "./utils/dshRuntimeHint";
+import { dshSendBlockReason } from "../../shared/types/dshRuntime";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
@@ -853,6 +856,9 @@ export function App() {
   // DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
   // 必须早于任何按安装态门控的 UI 计算，否则首帧会用 checking 初值渲染。
   useDshRuntimeStatusSync();
+  // DSH runtime 安装进度同步：App 级订阅（常驻，不随 DshRuntimeSection 卸载），
+  // 保证切配置分页/关弹窗后进度仍保留；完成/失败时弹全局 toast。
+  useDshRuntimeInstallProgressSync();
   // 存量 dsh 用户升级后 runtime 不在时给一次直达提示（有 dsh 会话才提示，只提示一次）。
   useDshRuntimeMigrationNotice();
 
@@ -2367,6 +2373,20 @@ export function App() {
       }
     }
     // 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）。
+    // DSH 会话 runtime 不可用（未安装/损坏）时 host 无法 fork，activateRuntime 只会抛
+    // 模块解析裸报错——给「去安装」提示（含直达入口）而不是把底层错误甩给用户。
+    const restartRecord = store.get(sessionRecordsAtom)[sessionId];
+    if (restartRecord?.backend === "dsh") {
+      const dshStatus = store.get(dshRuntimeStatusAtom);
+      if (dshSendBlockReason(dshStatus.state)) {
+        showDshRuntimeBlockHint(
+          () => store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET),
+          dshStatus.state,
+          dshStatus.reason,
+        );
+        return;
+      }
+    }
     // 重启活会话走 restartRuntimeTarget→restartingAgentId→SessionSurfaceStage 的 isRestarting 遮罩；
     // 这里（无绑定）没有 restartingAgentId，需显式设置 activating 遮罩，让会话消息区域也有加载动画。
     setActivatingSessionId(sessionId);

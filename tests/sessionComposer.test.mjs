@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+
+const { dshSendBlockReason } = loadTsCommonJs("src/shared/types/dshRuntime.ts");
 
 function compile(filePath, stubs = {}) {
   const source = readFileSync(filePath, "utf8");
@@ -82,6 +85,9 @@ function createSendHarness(initial = {}) {
     setSessionSendStateAtom: {},
     bindSessionRuntimeAtom: {},
     upsertSessionAtom: {},
+    // DSH 发送拦截门读取的只读 atom（初值 installed，测试按需改写）。
+    dshRuntimeStatusAtom: {},
+    openSettingsAtom: {},
   };
   const state = new Map([
     [atoms.sessionDraftByIdAtom, { ...(initial.drafts ?? {}) }],
@@ -90,7 +96,10 @@ function createSendHarness(initial = {}) {
     [atoms.sessionComposerModeByIdAtom, { ...(initial.modes ?? {}) }],
     [atoms.sessionRuntimeByIdAtom, { ...(initial.runtimes ?? {}) }],
     [atoms.sessionRecordsAtom, { ...(initial.records ?? {}) }],
+    [atoms.dshRuntimeStatusAtom, { state: "installed" }],
   ]);
+  // DSH runtime 拦截时弹的「去安装」提示（showDshRuntimeBlockHint 的替身）。
+  const hints = [];
   const setAtom = (atom, input) => {
     if (atom === atoms.setSessionDraftAtom) {
       const next = { ...state.get(atoms.sessionDraftByIdAtom) };
@@ -146,11 +155,22 @@ function createSendHarness(initial = {}) {
       expandQuoteTokens: () => null,
       stripQuoteTokens: (text) => text.trim(),
     },
-    "../i18n": { translateI18nDescriptor: (_descriptor, fallback) => fallback },
+    "../i18n": {
+      translateI18nDescriptor: (_descriptor, fallback) => fallback,
+      t: (key) => key,
+    },
+    // DSH 发送拦截：真实纯函数 + 提示替身（记录调用，不真弹 sonner toast）。
+    "../../../shared/types/dshRuntime": { dshSendBlockReason },
+    "../utils/dshRuntimeHint": {
+      showDshRuntimeBlockHint: (_openSettings, state, reason) => {
+        hints.push({ state, reason });
+      },
+    },
   });
   return {
     state,
     atoms,
+    hints,
     send: (options) => module.useSessionSend(options),
   };
 }
@@ -507,6 +527,82 @@ test("/new is intercepted as a desktop session create, not sent to pi", async ()
   assert.equal(createCalls, 1);
   assert.equal(sendPromptCalls, 0);
   assert.equal(harness.state.get(harness.atoms.sessionDraftByIdAtom)["session-a"], undefined);
+});
+
+test("DSH session send is blocked with a friendly hint when runtime is missing", async () => {
+  const harness = createSendHarness({
+    drafts: { "session-a": "hello dsh" },
+    records: { "session-a": { id: "session-a", backend: "dsh" } },
+  });
+  harness.state.set(harness.atoms.dshRuntimeStatusAtom, { state: "notInstalled" });
+  let sendPromptCalls = 0;
+  const send = harness.send({
+    sessionId: "session-a",
+    templates: [],
+    compact: async () => undefined,
+    sendPrompt: async () => {
+      sendPromptCalls += 1;
+      return { accepted: true };
+    },
+  });
+  await send();
+  // 拦截发生在发送前：不发 RPC、不发布乐观气泡、不占发送锁，草稿保留供装好重试。
+  assert.equal(sendPromptCalls, 0, "runtime-missing dsh send must not reach sendPrompt");
+  assert.equal(harness.state.get("sendStates")["session-a"].status, "error");
+  assert.equal(harness.hints.length, 1, "must show the install hint");
+  assert.equal(harness.hints[0].state, "notInstalled");
+  assert.equal(
+    harness.state.get(harness.atoms.sessionDraftByIdAtom)["session-a"],
+    "hello dsh",
+    "draft must survive the block for retry after install",
+  );
+});
+
+test("DSH session send blocks with broken reason when runtime is broken", async () => {
+  const harness = createSendHarness({
+    drafts: { "session-a": "ping" },
+    records: { "session-a": { id: "session-a", backend: "dsh" } },
+  });
+  harness.state.set(harness.atoms.dshRuntimeStatusAtom, {
+    state: "broken",
+    reason: "version mismatch",
+  });
+  let sendPromptCalls = 0;
+  const send = harness.send({
+    sessionId: "session-a",
+    templates: [],
+    compact: async () => undefined,
+    sendPrompt: async () => {
+      sendPromptCalls += 1;
+      return { accepted: true };
+    },
+  });
+  await send();
+  assert.equal(sendPromptCalls, 0);
+  assert.deepEqual(harness.hints[0], { state: "broken", reason: "version mismatch" });
+});
+
+test("DSH session send passes through when runtime is installed or checking", async () => {
+  for (const state of ["installed", "checking"]) {
+    const harness = createSendHarness({
+      drafts: { "session-a": "hello dsh" },
+      records: { "session-a": { id: "session-a", backend: "dsh" } },
+    });
+    harness.state.set(harness.atoms.dshRuntimeStatusAtom, { state });
+    let sendPromptCalls = 0;
+    const send = harness.send({
+      sessionId: "session-a",
+      templates: [],
+      compact: async () => undefined,
+      sendPrompt: async () => {
+        sendPromptCalls += 1;
+        return { accepted: true };
+      },
+    });
+    await send();
+    assert.equal(sendPromptCalls, 1, `${state} must not block the send`);
+    assert.equal(harness.hints.length, 0, `${state} must not show the install hint`);
+  }
 });
 
 test("/compact releases the send lock so a follow-up prompt can send", async () => {

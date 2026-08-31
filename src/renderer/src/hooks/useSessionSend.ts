@@ -23,6 +23,8 @@ import {
   setSessionQuotesAtom,
   setSessionSendStateAtom,
   upsertSessionAtom,
+  dshRuntimeStatusAtom,
+  openSettingsAtom,
 } from "../atoms";
 import {
   applyDshGoalSendTransform,
@@ -35,6 +37,8 @@ import {
   stripQuoteTokens,
 } from "../components/session/composer/quoteChip";
 import { t, translateI18nDescriptor } from "../i18n";
+import { DSH_INSTALL_SETTINGS_TARGET, showDshRuntimeBlockHint } from "../utils/dshRuntimeHint";
+import { dshSendBlockReason } from "../../../shared/types/dshRuntime";
 
 export type EnqueuePromptSnapshot = {
   displayText: string;
@@ -199,6 +203,32 @@ export function useSessionSend(options: UseSessionSendOptions) {
     if (!stripQuoteTokens(rawDraft).trim() && !imageSnapshot) {
       options.showError?.(t("app.quoteNeedsQuestion"), 4000);
       return;
+    }
+
+    // DSH 会话在 runtime 不可用（未安装/损坏）时拦截发送：DSH host fork 依赖
+    // @deepseek-ai/dsh-base 产物，runtime 缺失时主进程只会抛模块解析的裸报错。
+    // 发送前给「去安装」提示（含直达入口），避免乐观气泡 + 失败回滚的体验；
+    // checking 不算拦截——状态未定时不误拦正常发送。
+    const recordAtEntry = store.get(sessionRecordsAtom)[sourceSessionId];
+    const runtimeAtEntry = store.get(sessionRuntimeByIdAtom)[sourceSessionId];
+    if (recordAtEntry?.backend === "dsh" || runtimeAtEntry?.backend === "dsh") {
+      const dshStatusAtEntry = store.get(dshRuntimeStatusAtom);
+      if (dshSendBlockReason(dshStatusAtEntry.state)) {
+        const blockMessage =
+          dshStatusAtEntry.state === "broken"
+            ? t("dsh.runtime.sendBroken", { reason: dshStatusAtEntry.reason ?? "" })
+            : t("dsh.runtime.sendNotInstalled");
+        setSendState({
+          sessionId: sourceSessionId,
+          state: { status: "error", error: blockMessage },
+        });
+        showDshRuntimeBlockHint(
+          () => store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET),
+          dshStatusAtEntry.state,
+          dshStatusAtEntry.reason,
+        );
+        return;
+      }
     }
 
     const resolveSendMode = (targetSessionId: string): ComposerAgentMode => {

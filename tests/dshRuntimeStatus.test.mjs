@@ -5,6 +5,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 const {
 	dshUiVisibilityFor,
 	resolveEffectiveAgentBackend,
+	dshSendBlockReason,
 } = loadTsCommonJs("src/shared/types/dshRuntime.ts");
 
 const {
@@ -52,6 +53,14 @@ test("默认后端钳制：runtime 非 installed 时 dsh 回落 pi，pi 不受�
 	// pi 与第三方后端（imagegen）与 DSH runtime 无关，原样透传。
 	assert.equal(resolveEffectiveAgentBackend("pi", "notInstalled"), "pi");
 	assert.equal(resolveEffectiveAgentBackend("pi", "installed"), "pi");
+});
+
+test("dsh 会话发送/重启拦截：非 installed 状态才拦，checking 不误拦", () => {
+	assert.equal(dshSendBlockReason("notInstalled"), "notInstalled");
+	assert.equal(dshSendBlockReason("broken"), "broken");
+	// installed 正常放行；checking 状态未定，不允许把启动首帧的正常发送误拦。
+	assert.equal(dshSendBlockReason("installed"), null);
+	assert.equal(dshSendBlockReason("checking"), null);
 });
 
 test("探测失败映射为 notInstalled，成功映射为 installed", () => {
