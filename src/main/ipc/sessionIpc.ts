@@ -33,7 +33,7 @@ import type {
 	ArchivedDshSession,
 } from "../../shared/types";
 import { parseSessionProcessEvents } from "../sessions/sessionProcessEvents";
-import { downgradeStaleRunning } from "../pi/acpDelegateSubagents";
+import { downgradeStaleRunning } from "../pi/derivedSubagents";
 import { resolveLaunchDefaultOptions } from "../sessions/launchDefaults";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 

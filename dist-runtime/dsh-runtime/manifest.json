@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "runtimeVersion": "0.1.1-rc.1",
-  "builtByAppVersion": "0.7.2-beta",
-  "minAppVersion": "0.7.2-beta",
+  "builtByAppVersion": "0.7.3-beta",
+  "minAppVersion": "0.7.3-beta",
   "maxAppVersion": "",
-  "archiveSha256": "fcd913928e2bef887bab983e1d63c461f94ca1c8e00cf1e9d7cc448f34b59bfb",
+  "archiveSha256": "cde1aa269d8c94d9a252d470c4b4a43f314473a33b8c91d94fcdae91f604c085",
   "requiredPackages": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-app-boot",

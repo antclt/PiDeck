@@ -1,7 +1,7 @@
 import { open, readFile, stat } from "node:fs/promises";
 import type { ChatMessage, ImageContent, PiSubagentEntry, SessionMessagePage, SessionTodoSnapshot } from "../../shared/types";
 import { parseTodoSnapshotData } from "../../shared/sessionTodo";
-import { deriveAcpDelegateEntries } from "./acpDelegateSubagents";
+import { deriveToolSubagentEntries } from "./derivedSubagents";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import type { RpcResponse } from "./PiRpcClient";
 import type { AppLogger } from "../logging/AppLogger";
@@ -1101,20 +1101,21 @@ export class SessionHistoryReader {
 	}
 
 	/**
-	 * 流式扫描会话文件全量条目，推导 acp_delegate（billion-context-pi）委托的子代理条目。
+	 * 流式扫描会话文件全量条目，推导不走 record/事件链的子代理运行
+	 * （acp_delegate：billion-context-pi；subagent 工具：nicobailon pi-subagents）。
 	 *
-	 * 该插件不落 subagents:record / start 锚点，读取侧无法像 record 那样按 customType
-	 * 走索引定向读，只能全量扫描。行级预检：所有相关条目（toolCall/派发确认/终态通知）
-	 * 都包含 "acp_delegate" 字样，不含该字样的行直接跳过 JSON.parse，非 acp 会话的
-	 * 扫描成本接近纯文本搜索。损坏行忽略。
+	 * 这些插件不落 subagents:record / start 锚点，读取侧无法像 record 那样按
+	 * customType 走索引定向读，只能全量扫描。行级预检：相关条目必然包含
+	 * "acp_delegate" 或带引号的 "subagent" 字样，不含两者的行直接跳过
+	 * JSON.parse，纯 record 会话的扫描成本接近纯文本搜索。损坏行忽略。
 	 */
-	async readAcpDelegateEntries(sessionPath: string): Promise<PiSubagentEntry[]> {
+	async readDerivedSubagentEntries(sessionPath: string): Promise<PiSubagentEntry[]> {
 		const hostPath = this.deps.toHostPath(sessionPath);
 		let content: string;
 		try {
 			content = await readFile(hostPath, "utf8");
 		} catch (error) {
-			void this.deps.logger?.warn("agent", "Failed to read session for acp_delegate derivation", {
+			void this.deps.logger?.warn("agent", "Failed to read session for subagent derivation", {
 				sessionPath,
 				error: error instanceof Error ? error.message : String(error),
 			});
@@ -1125,7 +1126,7 @@ export class SessionHistoryReader {
 		for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
 			const sourceLine = lines[lineIndex];
 			const jsonLine = sourceLine.endsWith("\r") ? sourceLine.slice(0, -1) : sourceLine;
-			if (jsonLine.includes("acp_delegate")) {
+			if (jsonLine.includes("acp_delegate") || jsonLine.includes("\"subagent\"")) {
 				try {
 					const parsed: unknown = JSON.parse(jsonLine);
 					if (isRecord(parsed)) rawEntries.push(parsed);
@@ -1140,7 +1141,7 @@ export class SessionHistoryReader {
 				});
 			}
 		}
-		return deriveAcpDelegateEntries(rawEntries);
+		return deriveToolSubagentEntries(rawEntries);
 	}
 
 	/**

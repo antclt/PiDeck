@@ -13,7 +13,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { deriveAcpDelegateEntries, mergeSubagentSources, downgradeStaleRunning } =
-  loadTsCommonJs("src/main/pi/acpDelegateSubagents.ts");
+  loadTsCommonJs("src/main/pi/derivedSubagents.ts");
 
 let seq = 0;
 function entryId() {

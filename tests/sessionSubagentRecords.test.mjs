@@ -444,7 +444,7 @@ test("readSubagentRecords synthesizes stopped from residual start anchors and pr
   }
 });
 /* ------------------------------------------------------------------ */
-/* readAcpDelegateEntries：acp_delegate（billion-context）推导           */
+/* readDerivedSubagentEntries：acp_delegate / subagent 工具推导          */
 /* ------------------------------------------------------------------ */
 
 const acpSession = JSON.stringify({
@@ -502,13 +502,13 @@ const acpSession = JSON.stringify({
     message: { role: "user", content: [{ type: "text", text: "继续吧" }] },
   }) + "\n";
 
-test("readAcpDelegateEntries derives acp_delegate entries from session file", async () => {
+test("readDerivedSubagentEntries derives acp_delegate entries from session file", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pid-acp-derive-"));
   const sessionPath = join(dir, "session.jsonl");
   try {
     writeSession(sessionPath, acpSession);
     const reader = createReader();
-    const entries = await reader.readAcpDelegateEntries(sessionPath);
+    const entries = await reader.readDerivedSubagentEntries(sessionPath);
 
     assert.equal(entries.length, 1);
     const entry = entries[0];
@@ -525,7 +525,7 @@ test("readAcpDelegateEntries derives acp_delegate entries from session file", as
   }
 });
 
-test("readAcpDelegateEntries returns empty for session without acp activity", async () => {
+test("readDerivedSubagentEntries returns empty for session without acp activity", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pid-acp-empty-"));
   const sessionPath = join(dir, "session.jsonl");
   try {
@@ -537,7 +537,7 @@ test("readAcpDelegateEntries returns empty for session without acp activity", as
     }) + "\n");
     const reader = createReader();
     // VM realm 数组原型不同，deepEqual 不可用
-    const entries = await reader.readAcpDelegateEntries(sessionPath);
+    const entries = await reader.readDerivedSubagentEntries(sessionPath);
     assert.equal(entries.length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });

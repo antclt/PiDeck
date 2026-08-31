@@ -33,7 +33,8 @@
  *   - 其他平台的 prebuilds  Electron 只跑当前平台，别把 linux/darwin 的 .node 带给 Windows 用户
  *   - third_party/**        官方包内的历史版本副本（运行时只取 prebuilds/ 里的当前版本）
  *   - *.d.ts                类型声明，Node 不加载
- *   - test/ spec/ examples/ docs/ 运行时不会去读
+ *   - test/ spec/ examples/ docs/ 运行时不会去读（注意：只裁 **docs/** 复数目录，
+ *                            `doc/` 可能是编译产物，见 runtime-prune-rules.mjs 的雷区记录）
  *   - *.md                  数百个包的 README/CHANGELOG 累加约 5MB
  *   - src/（仅当包内已有 lib/ 或 dist/）
  *                           源码副本，约 60MB。**条件很关键**：个别包（如嵌套的 zod）
@@ -48,6 +49,8 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as tar from "tar";
+// 裁剪规则独立成模块：CLI 主流程不便 import（会触发打包），测试直接引用规则单测。
+import { hasBuildOutput, isExcluded } from "./runtime-prune-rules.mjs";
 
 const require = createRequire(import.meta.url);
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -122,49 +125,7 @@ function packageNameOf(dir) {
 	return readPackageJson(dir)?.name;
 }
 
-// ── 文件级裁剪 ──
-
-function isOtherPlatformPrebuild(relPath) {
-	const match = relPath.match(/prebuilds[/\\]([a-z0-9]+)-[\w-]+[/\\]/);
-	if (!match) return false;
-	return match[1] !== PLATFORM;
-}
-
-/**
- * 包内是否有编译产物目录。有 lib/ 或 dist/ 时，src/ 只是源码副本，
- * 运行时加载的是产物，src 可以整块丢掉（这是归档里最大的一块冗余）。
- */
-function hasBuildOutput(pkgDir) {
-	return (
-		existsSync(join(pkgDir, "lib")) ||
-		existsSync(join(pkgDir, "dist")) ||
-		existsSync(join(pkgDir, "build"))
-	);
-}
-
-/**
- * 文件级裁剪判定。
- * relPath 是相对包目录的路径（统一用 `/` 分隔）；pkgDir 用于判断 src/ 是否可丢。
- *
- * 排除的都是「运行时不会被 require 的东西」：调试符号、source map、测试、示例、
- * 文档、类型声明、其他平台的原生二进制、官方包内的历史版本副本，以及有编译产物
- * 时的 src/ 源码。**LICENSE 一律保留**（分发合规）。
- */
-function isExcluded(relPath, pkgDir, srcPrunable) {
-	if (relPath.endsWith(".pdb")) return true;
-	if (relPath.endsWith(".map")) return true;
-	if (relPath.endsWith(".d.ts")) return true;
-	if (relPath.includes("/third_party/") || relPath.includes(`${sep}third_party${sep}`)) return true;
-	if (isOtherPlatformPrebuild(relPath)) return true;
-	// 测试 / 示例 / 文档：npm 包常带，运行时不加载
-	if (/(^|\/)(tests?|__tests__|spec|examples?|demo|docs?)\//.test(relPath)) return true;
-	if (/\.(test|spec)\.[cm]?js$/.test(relPath)) return true;
-	// README/CHANGELOG 之类：运行时不读，且量不小（数百个包累加约 5MB）
-	if (/\.(md|markdown)$/.test(relPath)) return true;
-	// 有 lib/ 或 dist/ 时，src/ 是源码副本
-	if (srcPrunable && relPath.startsWith("src/")) return true;
-	return false;
-}
+// ── 文件级裁剪（规则实现见 runtime-prune-rules.mjs） ──
 
 function listFiles(dir) {
 	const out = [];

@@ -1,16 +1,17 @@
 /**
  * useSessionSubagents — pi-subagents 子代理列表数据 hook。
  *
- * 三源合并（主进程 IPC 的 record 记录 + 桥接扩展实时 widget 快照 + 工具调用推导兜底；
- * 推导兜底覆盖 billion-context-pi 的 acp_delegate 委托链，见主进程 acpDelegateSubagents），
- * 输出统一数组供 SessionSubagentsStrip 渲染。
+ * 三源合并（主进程 IPC 的 record 记录 + 桥接扩展实时 widget 快照 + 工具调用推导兜底），
+ * 另叠加 nicobailon pi-subagents 的 subagent-async widget 运行态快照（后台/工作流
+ * 运行不经 record/桥接链，由插件经 setWidget 直接推送）。输出统一数组供
+ * SessionSubagentsStrip 渲染。
  *
  * @module useSessionSubagents
  */
 
 import { useAtomValue } from "jotai";
 import { useEffect, useMemo, useState } from "react";
-import type { PiSubagentEntry } from "../../../shared/types";
+import type { PiSubagentEntry, PiSubagentStatus } from "../../../shared/types";
 import { desktopApi } from "../desktopApi";
 import {
 	sessionRuntimeUiBySessionIdAtomFamily,
@@ -125,6 +126,69 @@ export function mergeSubagentEntries(
 }
 
 /* ------------------------------------------------------------------ */
+/* nicobailon pi-subagents：subagent-async widget 快照                  */
+/* ------------------------------------------------------------------ */
+
+const SUBAGENT_ASYNC_WIDGET_KEY = "subagent-async";
+const SUBAGENT_ASYNC_LINE_PREFIX = "PI_SUBAGENT_ASYNC_JSON:";
+const SUBAGENT_ASYNC_SNAPSHOT_KIND = "pi-subagents.async-status-snapshot";
+
+/** async 快照 state → PiSubagentStatus；partial（部分失败）按失败类呈现引导关注。 */
+const SNAPSHOT_STATE_TO_STATUS: Record<string, PiSubagentStatus> = {
+	queued: "queued",
+	running: "running",
+	paused: "running",
+	complete: "completed",
+	failed: "error",
+	partial: "error",
+	stopped: "stopped",
+	rejected: "stopped",
+};
+
+/**
+ * 解析 subagent-async widget 行（首行 PI_SUBAGENT_ASYNC_JSON:{...}，rpc 模式由
+ * nicobailon pi-subagents 插件推送）为子代理条目。快照无 task 文本（label 为
+ * agent 名），description 留空；id 为插件 asyncId，与 record/推导条目 id 空间
+ * 不相交。损坏载荷返回 []（fail-soft，不影响其他源）。
+ */
+export function parseSubagentAsyncSnapshot(
+	lines: readonly string[] | undefined,
+): PiSubagentEntry[] {
+	const line = lines?.find((candidate) =>
+		typeof candidate === "string" && candidate.startsWith(SUBAGENT_ASYNC_LINE_PREFIX),
+	);
+	if (!line) return [];
+	try {
+		const snapshot = JSON.parse(line.slice(SUBAGENT_ASYNC_LINE_PREFIX.length)) as {
+			kind?: string;
+			runs?: Array<Record<string, unknown>>;
+		};
+		if (snapshot?.kind !== SUBAGENT_ASYNC_SNAPSHOT_KIND || !Array.isArray(snapshot.runs)) {
+			return [];
+		}
+		const entries: PiSubagentEntry[] = [];
+		for (const run of snapshot.runs) {
+			const id = typeof run?.id === "string" ? run.id : "";
+			if (!id) continue;
+			const state = typeof run?.state === "string" ? run.state : "running";
+			entries.push({
+				id,
+				type: typeof run?.label === "string" && run.label ? run.label : "subagent",
+				description: "",
+				status: SNAPSHOT_STATE_TO_STATUS[state] ?? "running",
+				startedAt: typeof run?.startedAt === "number" ? run.startedAt : undefined,
+				completedAt: typeof run?.endedAt === "number" ? run.endedAt : undefined,
+				source: "bridge",
+				via: "pi-subagents-tool",
+			});
+		}
+		return entries;
+	} catch {
+		return [];
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /* Hook                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -138,13 +202,17 @@ export function useSessionSubagents(
 	const [loading, setLoading] = useState(false);
 	const [records, setRecords] = useState<PiSubagentEntry[]>([]);
 
-	// 桥接实时数据：widgets["pi-deck-subagents"] 的首行 JSON。
+	// 桥接实时数据：widgets["pi-deck-subagents"]（tintinweb 桥接快照）与
+	// widgets["subagent-async"]（nicobailon pi-subagents 的 async 运行快照）。
 	// atom family 按 Record 索引取值，无 runtime UI 记录的会话（如起始页未启动会话）
 	// 运行时为 undefined，必须可选链防护，否则整卡渲染崩溃。
 	const widgets = useAtomValue(
 		sessionRuntimeUiBySessionIdAtomFamily(sessionId),
 	)?.widgets;
 	const bridgeLines = widgets?.["pi-deck-subagents"] as
+		| readonly string[]
+		| undefined;
+	const subagentAsyncLines = widgets?.["subagent-async"] as
 		| readonly string[]
 		| undefined;
 
@@ -168,11 +236,21 @@ export function useSessionSubagents(
 		};
 	}, [sessionId]);
 
-	// 合并
+	// 合并：record（主进程侧已含工具推导）+ tintinweb 桥接 → 叠加 nicobailon async 条目
 	const { merged, pluginActive } = useMemo(
 		() => mergeSubagentEntries(records, bridgeLines),
 		[records, bridgeLines],
 	);
+	const entries = useMemo(() => {
+		const asyncEntries = parseSubagentAsyncSnapshot(subagentAsyncLines);
+		if (asyncEntries.length === 0) return merged;
+		const byId = new Map(merged.map((entry) => [entry.id, entry]));
+		for (const entry of asyncEntries) {
+			// async 快照是运行态唯一实时真源；已存在同 id 时以快照为准（状态更新）
+			byId.set(entry.id, entry);
+		}
+		return [...byId.values()];
+	}, [merged, subagentAsyncLines]);
 
-	return { entries: merged, pluginActive, loading };
+	return { entries, pluginActive, loading };
 }
