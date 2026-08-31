@@ -101,6 +101,10 @@ export const ipcChannels = {
 	sessionsRuntimeCompact: "sessions:runtime-compact",
 	sessionsRuntimeState: "sessions:runtime-state",
 	sessionsRuntimeCommands: "sessions:runtime-commands",
+	/** rewind checkpoint（refs/pi-checkpoints，纯 git，跨后端）。 */
+	sessionsRewindList: "sessions:rewind-list",
+	sessionsRewindDiff: "sessions:rewind-diff",
+	sessionsRewindRestore: "sessions:rewind-restore",
 	/** 运行中 Agent 启动快照里的模型（get_available_models），用于判断新加模型要不要重启。 */
 	sessionsRuntimeListModels: "sessions:runtime-list-models",
 	/** Pi 当前模型支持的 thinking levels（get_available_thinking_levels）；旧 Pi 返回 undefined 由 UI 回退。 */

@@ -7,6 +7,7 @@ import { existsSync, statSync } from "node:fs";
 import { dialog, ipcMain, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import { isDshPermissionPreset } from "../../shared/types/agent";
+import { isRewindRestoreScope } from "../../shared/types/rewind";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import type {
 	CreateSessionDraftInput,
@@ -1703,6 +1704,52 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				{ messageId },
 				() => sessionRuntimeCoordinator.deleteRuntimeMessage(target, messageId),
 			),
+	);
+	// rewind checkpoint：list/diff 是只读命令（同 sessionsRuntimeCommands 风格），
+	// restore 是变更操作，走 handleSessionCommandResult 留日志。
+	ipcMain.handle(
+		ipcChannels.sessionsRewindList,
+		(_event, target: SessionRuntimeTarget) =>
+			sessionRuntimeCoordinator.listRewindCheckpoints(target),
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsRewindDiff,
+		(_event, target: SessionRuntimeTarget, checkpointId: string) =>
+			sessionRuntimeCoordinator.getRewindCheckpointDiff(target, checkpointId),
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsRewindRestore,
+		(_event, target: SessionRuntimeTarget, checkpointId: string, scope: unknown) => {
+			// 渲染层入参不可信：scope 必须在契约枚举内（校验前置到 coordinator 之外再挡一层）。
+			if (!isRewindRestoreScope(scope)) {
+				return handleSessionCommandResult(
+					appLogger,
+					"restoreRewindCheckpoint",
+					target,
+					{ checkpointId, scope: String(scope) },
+					() =>
+						Promise.resolve({
+							ok: false,
+							error: {
+								code: "SESSION_COMMAND_FAILED",
+								debugDetails: `Invalid rewind restore scope: ${String(scope)}`,
+							},
+						}),
+				);
+			}
+			return handleSessionCommandResult(
+				appLogger,
+				"restoreRewindCheckpoint",
+				target,
+				{ checkpointId, scope },
+				() =>
+					sessionRuntimeCoordinator.restoreRewindCheckpoint(
+						target,
+						checkpointId,
+						scope,
+					),
+			);
+		},
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsRuntimePrepareResend,

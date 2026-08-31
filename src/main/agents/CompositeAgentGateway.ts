@@ -7,6 +7,8 @@ import type {
 	ChatMessage,
 	CreateAgentInput,
 	ImageContent,
+	RewindCheckpointSummary,
+	RewindRestoreScope,
 	SendPromptInput,
 	SendPromptResult,
 	SessionUiResponseInput,
@@ -78,7 +80,8 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 	/** 可选能力存在性检查（不抽方法，避免丢 this）；缺失时抛与旧行为一致的错误，由 Coordinator 转 SESSION_COMMAND_FAILED。 */
 	private requireCapability(
 		gateway: SessionAgentGateway,
-		method: "getCommands" | "exportHtml" | "editMessage" | "deleteMessage" | "setPermission",
+		method: "getCommands" | "exportHtml" | "editMessage" | "deleteMessage" | "setPermission"
+			| "listCheckpoints" | "getCheckpointDiff" | "restoreCheckpoint",
 	): void {
 		if (typeof gateway[method] !== "function") {
 			throw new Error(`CompositeAgentGateway: backend "${gateway.backend}" does not support ${method}`);
@@ -163,6 +166,28 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		const gateway = this.owner(agentId);
 		this.requireCapability(gateway, "deleteMessage");
 		await gateway.deleteMessage?.(agentId, messageId);
+	}
+
+	async listCheckpoints(agentId: string): Promise<RewindCheckpointSummary[]> {
+		const gateway = this.owner(agentId);
+		this.requireCapability(gateway, "listCheckpoints");
+		return gateway.listCheckpoints!(agentId);
+	}
+
+	async getCheckpointDiff(agentId: string, checkpointId: string): Promise<string> {
+		const gateway = this.owner(agentId);
+		this.requireCapability(gateway, "getCheckpointDiff");
+		return gateway.getCheckpointDiff!(agentId, checkpointId);
+	}
+
+	async restoreCheckpoint(
+		agentId: string,
+		checkpointId: string,
+		scope: RewindRestoreScope,
+	): Promise<void> {
+		const gateway = this.owner(agentId);
+		this.requireCapability(gateway, "restoreCheckpoint");
+		return gateway.restoreCheckpoint!(agentId, checkpointId, scope);
 	}
 
 	/**

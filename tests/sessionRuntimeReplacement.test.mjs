@@ -29,6 +29,9 @@ function loadCoordinator() {
   const identity = compileModule("src/shared/sessionIdentity.ts");
   return compileModule("src/main/sessions/SessionRuntimeCoordinator.ts", {
     "../../shared/sessionIdentity": identity,
+    // rewind 校验纯函数在 Coordinator 里运行时 import（isRewindCheckpointId/isRewindRestoreScope）；
+    // 本测试不触发 rewind 方法，空桩满足加载契约。
+    "../../shared/types": {},
   });
 }
 

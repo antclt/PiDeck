@@ -17,6 +17,8 @@ import type {
 	I18nParams,
 	ImageContent,
 	Project,
+	RewindCheckpointSummary,
+	RewindRestoreScope,
 	SendPromptInput,
 	SendPromptResult,
 	SessionEnvironment,
@@ -53,6 +55,14 @@ import {
 	type SessionFileRef,
 } from "./SessionFileEditor";
 import { SessionHistoryReader, findTurnPageStart } from "./SessionHistoryReader";
+import {
+	currentIndexTree,
+	diffCheckpoints,
+	loadAllCheckpoints,
+	loadCheckpointFromRef,
+	restoreCheckpoint as applyCheckpointRestore,
+	toCheckpointSummary,
+} from "../rewind/index.ts";
 import {
 	AgentMessageProjector,
 	buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay,
@@ -3201,6 +3211,53 @@ export class AgentManager {
 		return (
 			(response.data as { commands?: unknown[] } | undefined)?.commands ?? []
 		);
+	}
+
+	/**
+	 * rewind checkpoint 列表（refs/pi-checkpoints）。
+	 * root 取 agent 工作目录：纯 git 实现不依赖 pi 进程，即使 pi 没装 pi-rewind
+	 * 扩展，也能读到/回退同仓库里已存在的 checkpoint。过滤用 pi 的 sessionId
+	 * （与 pi-rewind 的 ref 命名一致）；无 session 时列出仓库全部。
+	 */
+	async listCheckpoints(agentId: string): Promise<RewindCheckpointSummary[]> {
+		const runtime = this.requireRuntime(agentId);
+		const checkpoints = await loadAllCheckpoints(
+			runtime.tab.cwd,
+			runtime.tab.sessionId,
+		);
+		return checkpoints
+			.map(toCheckpointSummary)
+			.sort((a, b) => b.timestamp - a.timestamp);
+	}
+
+	/** checkpoint 与当前 index 树的 diff 摘要（回退预览：「回到这里会改哪些文件」）。 */
+	async getCheckpointDiff(agentId: string, checkpointId: string): Promise<string> {
+		const runtime = this.requireRuntime(agentId);
+		const root = runtime.tab.cwd;
+		const cp = await loadCheckpointFromRef(root, checkpointId);
+		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
+		const indexTree = await currentIndexTree(root);
+		return diffCheckpoints(root, cp.worktreeTreeSha, indexTree);
+	}
+
+	/**
+	 * 回退工作区到 checkpoint。P2 只实现文件回退（scope="files"）：
+	 * conversation/all 需要后端会话级回溯（pi 走会话树导航，P3），先明确拒绝。
+	 */
+	async restoreCheckpoint(
+		agentId: string,
+		checkpointId: string,
+		scope: RewindRestoreScope,
+	): Promise<void> {
+		if (scope !== "files") {
+			throw new Error(
+				`Checkpoint restore scope "${scope}" is not supported yet; only "files" is available`,
+			);
+		}
+		const runtime = this.requireRuntime(agentId);
+		const cp = await loadCheckpointFromRef(runtime.tab.cwd, checkpointId);
+		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
+		await applyCheckpointRestore(runtime.tab.cwd, cp);
 	}
 
 	private async promptMatchesRegisteredExtensionCommand(runtime: AgentRuntime, message: string): Promise<boolean> {

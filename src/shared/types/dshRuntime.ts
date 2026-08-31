@@ -32,6 +32,8 @@ export type DshRuntimeStatus = {
 	source?: DshRuntimeSource;
 	/** broken 的原因，供 UI 展示（版本不兼容 / 校验失败 / 清单不可读）。 */
 	reason?: string;
+	/** 已安装 runtime 的落盘目录（外部 managed 时 = runtimesRoot/<version>；内置/builtin 或未安装时缺省）。 */
+	installDir?: string;
 };
 
 /** 状态 → DSH UI 可见性矩阵（纯函数，单测覆盖见 tests/dshRuntimeStatus.test.mjs）。 */

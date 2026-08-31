@@ -88,6 +88,29 @@ test("canCreateDshSession 只在 installed 为真", () => {
 	assert.equal(makeService("missing-dir").canCreateDshSession(), false);
 });
 
+test("managed runtime 状态携带 installDir（runtimesRoot/<version> 落盘目录）", () => {
+	// 构造 resolveManaged 返回外部 runtime 锚点：installDir = dirname(nodeModules) = 版本目录。
+	const service = new DshRuntimeStatusService(
+		() => "missing-dir",
+		() => {},
+		() => ({ nodeModules: "/data/runtimes/dsh/0.1.1-rc.1/node_modules", runtimeVersion: "0.1.1-rc.1" }),
+	);
+	const status = service.getStatus();
+	assert.equal(status.state, "installed");
+	assert.equal(status.source, "managed");
+	assert.equal(status.runtimeVersion, "0.1.1-rc.1");
+	assert.equal(status.installDir, "/data/runtimes/dsh/0.1.1-rc.1");
+});
+
+test("builtin 内置分发不带 installDir（在 app.asar 内无独立落盘目录）", () => {
+	const service = makeService(process.cwd());
+	const status = service.getStatus();
+	if (status.state === "installed") {
+		assert.equal(status.source, "builtin");
+		assert.equal(status.installDir, undefined);
+	}
+});
+
 test("subscribe 返回退订函数，退订后不再收到广播", () => {
 	const service = makeService("missing-dir");
 	const seen = [];

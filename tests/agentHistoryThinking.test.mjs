@@ -72,6 +72,8 @@ function loadAgentMessageProjectorModule() {
       if (specifier === "./derivedSubagents") {
         return { mergeSubagentSources: (records) => records };
       }
+      // rewind checkpoint 纯 git 模块：本测试不涉及，空桩满足依赖契约
+      if (specifier === "../rewind/index.ts") return {};
       return nodeRequire(specifier);
     },
     Date,
@@ -239,6 +241,8 @@ function loadAgentManagerModule() {
       if (specifier === "./derivedSubagents") {
         return { mergeSubagentSources: (records) => records };
       }
+      // rewind checkpoint 纯 git 模块：本测试不涉及，空桩满足依赖契约
+      if (specifier === "../rewind/index.ts") return {};
       return nodeRequire(specifier);
     },
     Date,

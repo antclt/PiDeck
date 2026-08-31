@@ -77,6 +77,8 @@ import type {
 	WorktreeEntry,
 	PiCliUpdateResult,
 	PiCommand,
+	RewindCheckpointSummary,
+	RewindRestoreScope,
 	PiExtensionListResult,
 	PiInstallStatus,
 	PiInstallExecResult,
@@ -713,6 +715,27 @@ const api = {
 				ipcChannels.sessionsRuntimeDeleteMessage,
 				target,
 				messageId,
+			) as Promise<SessionCommandResult<SessionTargetedValue<void>>>,
+		listRewindCheckpoints: (target: SessionRuntimeTarget) =>
+			ipcRenderer.invoke(ipcChannels.sessionsRewindList, target) as Promise<
+				SessionCommandResult<SessionTargetedValue<RewindCheckpointSummary[]>>
+			>,
+		getRewindCheckpointDiff: (target: SessionRuntimeTarget, checkpointId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.sessionsRewindDiff,
+				target,
+				checkpointId,
+			) as Promise<SessionCommandResult<SessionTargetedValue<string>>>,
+		restoreRewindCheckpoint: (
+			target: SessionRuntimeTarget,
+			checkpointId: string,
+			scope: RewindRestoreScope,
+		) =>
+			ipcRenderer.invoke(
+				ipcChannels.sessionsRewindRestore,
+				target,
+				checkpointId,
+				scope,
 			) as Promise<SessionCommandResult<SessionTargetedValue<void>>>,
 		prepareRuntimeResend: (target: SessionRuntimeTarget, messageId: string) =>
 			ipcRenderer.invoke(
