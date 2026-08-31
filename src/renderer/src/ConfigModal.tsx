@@ -243,6 +243,8 @@ type ConfigModalProps = {
 	focusConfigTab?: ConfigTab;
 	/** 深链：models 页要定位展开的供应商名。 */
 	focusProvider?: string;
+	/** 深链：打开时落在的后端分页（DSH 配置 / Pi 管理）；缺省保持上次位置。 */
+	focusBackendPane?: "dsh" | "pi";
 };
 
 /**
@@ -277,6 +279,8 @@ export type ConfigPaneProps = {
 	focusConfigTab?: ConfigTab;
 	/** 深链：models 页要定位展开的供应商名。 */
 	focusProvider?: string;
+	/** 深链：打开时落在的后端分页（DSH 配置 / Pi 管理）；缺省保持上次位置。 */
+	focusBackendPane?: "dsh" | "pi";
 	/**
 	 * 头部按钮状态上报（saving 禁用保存 / hasDirty 黄点 / unsaved 关闭确认清单）。
 	 * 外壳把这些 UI 细节呈现在自己的标题栏，因此 ConfigPane 需要把内部状态同步给外壳。
@@ -294,7 +298,7 @@ export type ConfigPaneProps = {
  * 不包错误边界——宿主 SettingsModal 的 ErrorBoundary 已兜底整个窗口。
  */
 export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
-	function ConfigPane({ onClose, onSaved, projectPath, focusConfigTab, focusProvider, onStateChange, onRequestClose }, ref) {
+	function ConfigPane({ onClose, onSaved, projectPath, focusConfigTab, focusProvider, focusBackendPane, onStateChange, onRequestClose }, ref) {
 		return (
 			<ConfigModalContent
 				open
@@ -303,6 +307,7 @@ export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
 				projectPath={projectPath}
 				focusConfigTab={focusConfigTab}
 				focusProvider={focusProvider}
+				focusBackendPane={focusBackendPane}
 				embedded
 				paneRef={ref}
 				onPaneStateChange={onStateChange}
@@ -399,7 +404,7 @@ type ConfigModalContentProps = ConfigModalProps & {
 };
 
 function ConfigModalContent(props: ConfigModalContentProps) {
-	const { open, onClose, onSaved, projectPath, embedded, focusConfigTab, focusProvider } = props;
+	const { open, onClose, onSaved, projectPath, embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
@@ -433,7 +438,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** 配置管理顶层后端分页：以 Pi 为主（默认 Pi，且 Pi 标签在左），dsh 页在右。
 	 *  新建会话仍默认 dsh 是运行态偏好，与此处配置管理入口默认值相互独立。
 	 *  弹窗每次打开都会重建 state，这里从 localStorage 恢复上次选定的后端分页。 */
-	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(loadLastConfigBackendPane);
+	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(focusBackendPane ?? loadLastConfigBackendPane);
 	/** 切换后端分页并持久化：退出配置管理再进入时停留在上次选定的后端。 */
 	const selectBackendPane = useCallback((value: string) => {
 		const next = value === "pi" ? "pi" : "dsh";

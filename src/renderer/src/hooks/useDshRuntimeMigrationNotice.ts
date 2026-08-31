@@ -16,10 +16,10 @@ import { openSettingsAtom } from "../atoms/app-ui-atoms";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 
-/** 打开「配置管理」页（用户再点 DSH 分页即可安装 runtime）。 */
+/** 打开「配置管理」页并落在 DSH 后端分页（runtime 未装时概览页即安装引导）。 */
 function useOpenConfigPane() {
 	const openSettings = useSetAtom(openSettingsAtom);
-	return () => openSettings({ tab: "common", pane: "config" });
+	return () => openSettings({ tab: "common", pane: "config", backendPane: "dsh" });
 }
 
 export function useDshRuntimeMigrationNotice(): void {

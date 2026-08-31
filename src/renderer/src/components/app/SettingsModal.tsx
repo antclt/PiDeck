@@ -277,14 +277,14 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const [focusPaneTarget] = useAtom(settingsFocusAtom);
 	// 深链的配置分页/供应商定位：快照进本地 state（focus atom 随后会被 useSettingsFocus 清空，
 	// 配置分区深链「圆球 → 去配置用量」需要在整个设置会话期间保持可投递给 ConfigPane）。
-	const [configFocus, setConfigFocus] = useState<{ configTab?: "models" | "auth" | "settings" | "trust" | "mcp" | "raw"; provider?: string } | null>(() => {
+	const [configFocus, setConfigFocus] = useState<{ configTab?: "models" | "auth" | "settings" | "trust" | "mcp" | "raw"; provider?: string; backendPane?: "dsh" | "pi" } | null>(() => {
 		const target = getDefaultStore().get(settingsFocusAtom);
-		return target?.pane === "config" ? { configTab: target.configTab, provider: target.provider } : null;
+		return target?.pane === "config" ? { configTab: target.configTab, provider: target.provider, backendPane: target.backendPane } : null;
 	});
 	useEffect(() => {
 		if (focusPaneTarget?.pane === "config") {
 			setPane("config");
-			setConfigFocus({ configTab: focusPaneTarget.configTab, provider: focusPaneTarget.provider });
+			setConfigFocus({ configTab: focusPaneTarget.configTab, provider: focusPaneTarget.provider, backendPane: focusPaneTarget.backendPane });
 		}
 	}, [focusPaneTarget]);
 	useSettingsFocus(activeTab, setActiveTab, persistTab);
@@ -622,6 +622,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							projectPath={props.projectPath}
 							focusConfigTab={configFocus?.configTab}
 							focusProvider={configFocus?.provider}
+							focusBackendPane={configFocus?.backendPane}
 							onStateChange={handleConfigPaneStateChange}
 							// 嵌套弹层（用量查询「让 AI 帮我查」）整窗关闭走统一关闭确认，
 							// 不直连 onClose 裸关闭——系统设置/配置管理草稿都不能被静默丢弃。

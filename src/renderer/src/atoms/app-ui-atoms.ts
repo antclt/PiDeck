@@ -52,6 +52,12 @@ export type SettingsFocusTarget = {
 	configTab?: "models" | "auth" | "settings" | "trust" | "mcp" | "raw";
 	/** configTab="models" 时要定位的供应商名：ModelsTab 展开该卡片并滚动高亮。 */
 	provider?: string;
+	/**
+	 * pane="config" 时要落在的配置管理后端分页（Pi 管理 / DSH 配置）；
+	 * 缺省保持上次位置（loadLastConfigBackendPane，默认 pi）。
+	 * 深链（如 DSH runtime 未装时的「去安装」）直达 DSH 配置页。
+	 */
+	backendPane?: "dsh" | "pi";
 };
 
 /**
