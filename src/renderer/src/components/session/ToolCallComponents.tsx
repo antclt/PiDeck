@@ -35,7 +35,7 @@ import { TimelineMarker } from "./TimelineMarker";
 import { LiveDuration } from "./LiveDuration";
 import { getToolKind, getToolKindLabel } from "./toolKind";
 import { getToolPhraseFromArgs } from "./timeline/toolPhrase";
-import { ToolResult } from "../agents/tool-result";
+import { ToolResult, ToolResultOutput } from "../agents/tool-result";
 import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
 import {
@@ -426,7 +426,7 @@ export const ToolCard = memo(function ToolCard(props: {
 								copyClassName="tool-card-copy"
 								contentClassName="text-text-tertiary"
 							>
-								{displayText}
+								<ToolResultOutput>{displayText}</ToolResultOutput>
 							</ToolResult>
 						</>
 					)}
