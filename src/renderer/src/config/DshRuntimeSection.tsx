@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
 import { AlertCircle, Download, FolderOpen, LoaderCircle, Trash2 } from "lucide-react";
 import { t } from "../i18n";
 import { Button } from "../components/ui-shadcn/button";
 import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
 import { desktopApi } from "../desktopApi";
 import { showNotice } from "../utils/notice";
+import { dshInstallProgressAtom } from "../atoms/dsh-atoms";
 import type {
 	DshRuntimeInstallPhase,
 	DshRuntimeStatus,
@@ -29,6 +31,8 @@ const PHASE_LABEL: Partial<Record<DshRuntimeInstallPhase, string>> = {
  *
  * 进度走 dsh-runtime:install-progress 推送而不是 install() 的返回值：
  * 下载可能持续数十秒，等 promise 会让按钮一直转圈、用户不知道进展。
+ * 进度状态存 dshInstallProgressAtom（useDshRuntimeInstallProgressSync 在 App
+ * 挂载一份订阅写入）：切配置分页/关弹窗再回来，进度不丢；本区块只读。
  */
 export function DshRuntimeSection({
 	status,
@@ -37,41 +41,26 @@ export function DshRuntimeSection({
 	status: DshRuntimeStatus;
 	onOpenFolder: (path: string) => void;
 }) {
-	const [phase, setPhase] = useState<DshRuntimeInstallPhase | null>(null);
-	const [percent, setPercent] = useState(0);
-	const [error, setError] = useState<string | null>(null);
+	const { phase, percent, error } = useAtomValue(dshInstallProgressAtom);
+	const setProgress = useSetAtom(dshInstallProgressAtom);
 	const [uninstallOpen, setUninstallOpen] = useState(false);
 
-	useEffect(
-		() =>
-			desktopApi.sessions.onDshRuntimeInstallProgress((progress) => {
-				setPhase(progress.phase);
-				setPercent(progress.percent);
-				if (progress.phase === "error") setError(progress.error ?? null);
-				if (progress.phase === "done") {
-					setPhase(null);
-					setPercent(0);
-				}
-			}),
-		[],
-	);
-
 	const run = useCallback(async (kind: "online" | "local") => {
-		setError(null);
-		setPhase(kind === "online" ? "downloading" : "verifying");
-		setPercent(0);
+		// 先落乐观进度：主进程首个 install-progress 推送到达前不让按钮无反馈。
+		setProgress({ phase: kind === "online" ? "downloading" : "verifying", percent: 0, error: undefined });
 		const result =
 			kind === "online"
 				? await desktopApi.sessions.installDshRuntime()
 				: await desktopApi.sessions.importDshRuntimeFile();
+		// 失败时错误文案通常已由 install-progress 推送（phase=error）；这里兜底
+		// 未推送的场景（如文件对话框取消后无事件），并保证 atom 与主进程结果一致。
 		// 用户取消不是错误，静默回到初始态即可。
 		if (!result.ok && result.error !== "cancelled") {
-			setError(result.error ?? "unknown error");
-			setPhase(null);
+			setProgress({ phase: "error", percent: 100, error: result.error ?? "unknown error" });
 		} else if (!result.ok) {
-			setPhase(null);
+			setProgress({ phase: null, percent: 0, error: undefined });
 		}
-	}, []);
+	}, [setProgress]);
 
 	const handleUninstall = useCallback(async () => {
 		setUninstallOpen(false);

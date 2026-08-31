@@ -18,8 +18,19 @@ import type { PiLocator } from "./PiLocator";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { PiModelProbeResult } from "../../shared/types/fetchedModel";
 
-/** 探测超时：reasoning 模型首包可能较慢，放宽到与旧 net.fetch 测试一致。 */
-const PROBE_TIMEOUT_MS = 45_000;
+/**
+ * 探测超时：放宽到 120s。
+ *
+ * 放宽容度的原因（issue #173）：reasoning 模型（如 deepseek-v4-flash）在输出前有
+ * thinking 阶段，首包延迟显著高于普通模型；叠加 pi 冷启动与网络抖动后，原 45s 会
+ * 在模型实际可用时误报 `pi model probe timed out`（用户会话内调用同一模型正常）。
+ *
+ * 不复用 settings.rpcTimeout（会话 RPC 超时）的原因：rpcTimeout 语义是「等一整轮
+ * agent 交互」（含工具调用、多轮命令，见 AgentManager prompt 分支注释），且
+ * SettingsStore.ensureRpcTimeoutMinimum 强制下限 600s。测试连接让用户干等 10 分钟
+ * 才看到失败不可接受，故探针保留独立常量，取值兼顾 reasoning 模型上界与等待体感。
+ */
+export const PROBE_TIMEOUT_MS = 120_000;
 
 const PROBE_BASE_ARGS = [
 	"--mode", "json",
@@ -157,8 +168,10 @@ export async function probePiModel(
 					if (error) {
 						const errObj = error as NodeJS.ErrnoException & { killed?: boolean };
 						const timedOut = errObj.killed || errObj.code === "ETIMEDOUT";
+						// 超时信息带上秒数：便于一眼区分「探针超时」与「模型报错」，
+						// 也方便后续回收用户反馈时判断是否真到了 thinking 阶段的上界。
 						const message = timedOut
-							? "pi model probe timed out"
+							? `pi model probe timed out after ${Math.round(PROBE_TIMEOUT_MS / 1000)}s`
 							: (stderr?.trim() || error.message).slice(0, 500);
 						reject(new Error(message));
 						return;

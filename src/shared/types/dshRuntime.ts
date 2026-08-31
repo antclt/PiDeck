@@ -76,6 +76,24 @@ export type DshRuntimeInstallProgress = {
 };
 
 /**
+ * dsh 会话发送/重启的拦截原因（纯函数，单测覆盖见 tests/dshRuntimeStatus.test.mjs）。
+ *
+ * 为什么需要：DSH host fork 依赖 @deepseek-ai/dsh-base 产物，runtime 缺失/损坏时
+ * 主进程只会抛模块解析的裸报错（Cannot find module …）。渲染层在发送/激活前据此
+ * 拦截并给出「去安装」友好提示，而不是把底层错误直接甩给用户。
+ * checking（状态未定）不算拦截：避免启动首帧把正常发送误拦。
+ */
+export type DshSendBlockReason = "notInstalled" | "broken";
+
+export function dshSendBlockReason(
+	state: DshRuntimeState,
+): DshSendBlockReason | null {
+	if (state === "notInstalled") return "notInstalled";
+	if (state === "broken") return "broken";
+	return null;
+}
+
+/**
  * 设置项 defaultAgentBackend 的有效值（纯函数）：
  * runtime 非 installed 时 dsh 强制回落 pi——防御「设置残留 dsh 但 runtime 已不可用」
  * （阶段 2 升级/卸载场景），新建会话链路不会因后端不可用而裸报错。
