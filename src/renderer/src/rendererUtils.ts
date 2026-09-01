@@ -11,46 +11,12 @@ import {
   type SessionFilterPill,
 } from "./sessionFilterPills";
 
-// 默认高度只作测量前的首帧占位，测到内容后 hug 回去。
-// 最小高度对齐 composer-box CSS min-height(112)：输入区 + 模式/模型底栏。
-// 指标条不再预留独立高度；footer 保留的 8px 底部呼吸空间会被内容测量一并计入，
-// 面板按实测内容回缩，避免输入卡下出现未计入的空白。
+// 输入卡本身的最小高度：输入区 + 模式/模型底栏。footer 的 8px 底 padding 由内容撑开。
 export const COMPOSER_DEFAULT_HEIGHT = 160;
 const COMPOSER_MIN_HEIGHT = 112;
 export { COMPOSER_MIN_HEIGHT };
-
-/**
- * 底部输入栏面板目标高度。
- *
- * 业务规则：无指标/无独立卡时 hug 实测内容，不把 DEFAULT(160) 当用户偏好垫高。
- * 用户拖过才抬楼（userPreferredHeight>0）；contentHeight≤0 视为尚未测到，退回 minHeight。
- */
-export function resolveComposerPanelHeight(input: {
-	contentHeight: number;
-	userPreferredHeight: number;
-	minHeight: number;
-	maxHeight: number;
-}): number {
-	const measured = input.contentHeight > 0 ? input.contentHeight : input.minHeight;
-	const userFloor = input.userPreferredHeight > 0 ? input.userPreferredHeight : 0;
-	return Math.min(
-		Math.max(measured, userFloor, input.minHeight),
-		Math.max(input.minHeight, input.maxHeight),
-	);
-}
-
-/**
- * Composer Panel 本身是 disabled，用户不能直接拖它；因此未命中本次程序 resize
- * 目标的尺寸回调，只可能来自 Group 重注册、父级分屏重排或尺寸缓存回放。
- * 这些外部尺寸不得被记录成用户偏好，否则输入栏会在错误高度停留到下次挂载。
- */
-export function shouldRestoreComposerPanelHeight(
-	actualHeight: number,
-	contentDrivenHeight: number,
-	isProgrammatic: boolean,
-): boolean {
-	return !isProgrammatic && Math.abs(actualHeight - contentDrivenHeight) > 2;
-}
+// 输入栏在时间线列内的高度上限：再高就让独立卡内部滚动，不吃掉对话区。
+export const COMPOSER_MAX_HEIGHT = 480;
 
 /** 输入正文区封顶高度（px），对齐 dsh-web `--dsh-composer-text-max-height`。
  *  超过后 ProseMirror 内部滚动，不再把输入卡/面板无限撑高。 */
@@ -64,22 +30,19 @@ export const COMPOSER_TEXT_MAX_HEIGHT = 336;
  */
 export const PASTE_TO_FILE_MIN_CHARS = 5000;
 
-// timeline 面板 minSize（px）：composer 自动增高时只能占用 timeline 可让出的空间，
-// 不能突破该保底线，否则库的 clamp 会把差额压给 terminal 导致终端被收起。
+// timeline 列（对话区 + 固有高度输入栏）保底：窗口再矮也不把对话区压没。
 export const TIMELINE_MIN_HEIGHT = 160;
 
-/** 当前垂直 Group 实际挂了哪些面板（timeline 始终在）。 */
+/** 当前垂直 Group 实际挂了哪些面板（timeline 始终在；composer 是列内固有高度，不是面板）。 */
 export type SessionPanelSet = {
-	composer: boolean;
 	terminal: boolean;
 };
 
 /**
- * 底部输入栏是否挂到 ResizablePanel。
+ * 是否在时间线列底部挂输入栏。
  *
  * 起始页（空会话且磁盘已就绪）在 timeline 内居中挂同一 ComposerArea，底部栏不重复。
- * 加载中即使 messages 仍为空也要挂底部栏：历史会话首帧 messages=0，卸栏会让
- * 2 值布局打到 1 面板上，react-resizable-panels 抛 `Invalid 1 panel layout`。
+ * 加载中即使 messages 仍为空也要挂底部栏，避免历史会话首帧闪一下居中起始页。
  */
 export function shouldMountBottomComposer(input: {
 	hasActiveConversation: boolean;
@@ -91,126 +54,71 @@ export function shouldMountBottomComposer(input: {
 	return input.isConversationLoading;
 }
 
-/** 面板数变化时强制重建 Group，避免 layouts["timeline,composer"] 被套到 1 面板上。 */
+/** 终端面板挂载变化时强制重建 Group，避免 2 值缓存套到 1 面板上。 */
 export function sessionResizableGroupKey(panels: SessionPanelSet): string {
-	const count = 1 + (panels.composer ? 1 : 0) + (panels.terminal ? 1 : 0);
-	return `session-group-${count}p`;
+	return panels.terminal ? "session-group-2p" : "session-group-1p";
 }
 
 /**
  * setLayout 的键必须与当前已注册面板一致，否则 K() 抛
- * `Invalid N panel layout: a%, b%`。关终端 / 卸 composer 后 getLayout 仍可能带旧键。
- * 差额全部还给 timeline，不把卸载面板的百分比留给仍挂着的面板。
+ * `Invalid N panel layout: a%, b%`。关终端后 getLayout 仍可能带旧键。
+ * 差额全部还给 timeline。
  */
 export function sanitizeSessionPanelLayout(
 	layout: Record<string, number>,
 	panels: SessionPanelSet,
 ): Record<string, number> {
-	const composer = panels.composer ? layout.composer : undefined;
 	const terminal = panels.terminal ? layout.terminal : undefined;
-	const timeline = Math.max(0, 100 - (composer ?? 0) - (terminal ?? 0));
+	const timeline = Math.max(0, 100 - (terminal ?? 0));
 	const next: Record<string, number> = {};
-	// 必须沿用 getLayout() 的键序：K() 用 Object.values 下标对齐 panelConstraints，
-	// constraints 顺序 = 当前 layout 键序（He() 会把带 defaultSize 的 composer 排在前面）。
-	// 强行写成 timeline,composer 会把 [84,16] 打到 composer-first 的面板数组上，
-	// 输入栏吃 84%、拖分隔条方向反了。
+	// 必须沿用 getLayout() 的键序：K() 用 Object.values 下标对齐 panelConstraints。
 	for (const key of Object.keys(layout)) {
 		if (key === "timeline") next.timeline = timeline;
-		else if (key === "composer" && composer !== undefined) next.composer = composer;
 		else if (key === "terminal" && terminal !== undefined) next.terminal = terminal;
 	}
-	// 新挂上的面板按 DOM 顺序追加（timeline → composer → terminal）
 	if (next.timeline === undefined) next.timeline = timeline;
-	if (composer !== undefined && next.composer === undefined) next.composer = composer;
 	if (terminal !== undefined && next.terminal === undefined) next.terminal = terminal;
 	return next;
 }
 
 /**
- * Group 首帧 defaultLayout（百分比，键序 = DOM：timeline → composer → terminal）。
- * 不传时库 He() 在 groupSize=0 会均分 → 输入栏占半屏；再被 onResize 当成用户拖高锁死。
+ * Group 首帧 defaultLayout（百分比，键序 = DOM：timeline → terminal）。
+ * 不传时库 He() 在 groupSize=0 会均分。
  */
 export function sessionGroupDefaultLayout(
 	panels: SessionPanelSet,
-	composerPx: number,
 	terminalPx: number,
 	groupPx: number,
 ): Record<string, number> {
 	const safeGroup = Math.max(groupPx, 1);
-	const composerPct = panels.composer
-		? Math.min(40, Math.max(8, (Math.max(composerPx, 0) / safeGroup) * 100))
-		: 0;
 	const terminalPct = panels.terminal
 		? Math.min(50, Math.max(0, (Math.max(terminalPx, 0) / safeGroup) * 100))
 		: 0;
 	const next: Record<string, number> = {
-		timeline: Math.max(0, 100 - composerPct - terminalPct),
+		timeline: Math.max(0, 100 - terminalPct),
 	};
-	if (panels.composer) next.composer = composerPct;
 	if (panels.terminal) next.terminal = terminalPct;
 	return next;
 }
 
 /**
- * composer 程序化增高时，从 timeline 可让出空间里取预算（百分比）。
- *
- * 背景：AI 输出/发送消息时 composer 上方出现投递通知/widgets，programResize 增高
- * composer 需要从 timeline 扣空间；若 timeline 已到 minSize 保底，库会把 clamp 差额
- * 按面板顺序分摊，最后压到 collapsible 的 terminal 面板，terminal 低于折叠阈值即被
- * 收起。这里把 delta 限制在 timeline 可让出的范围内，保证 setLayout 后各面板不触底。
- *
- * @param layout 当前 group 布局（百分比，键含 timeline）
- * @param composerCurrentPct composer 当前百分比
- * @param targetPct composer 目标百分比
- * @param groupPx group 总高（px），用于把 minSize px 转成百分比
- * @param timelineMinPx timeline minSize（px）
- * @returns 新的 { composer, timeline } 百分比（terminal 不动，由调用方保持）
- */
-export function growComposerWithinTimelineBudget(
-	layout: Record<string, number>,
-	composerCurrentPct: number,
-	targetPct: number,
-	groupPx: number,
-	timelineMinPx: number,
-): { composer: number; timeline: number } {
-	const timelineCurrent = layout.timeline ?? 0;
-	const timelineMinPct = groupPx > 0 ? (timelineMinPx / groupPx) * 100 : 0;
-	const maxGive = Math.max(0, timelineCurrent - timelineMinPct);
-	const delta = Math.min(targetPct - composerCurrentPct, maxGive);
-	return {
-		composer: composerCurrentPct + delta,
-		timeline: timelineCurrent - delta,
-	};
-}
-
-/**
- * 折叠/展开终端后重排三面板：composer 百分比锁定，差额全部由 timeline 承担。
- *
- * 业务规则：react-resizable-panels 的 collapse() 会把腾出的高度补给相邻的
- * composer，输入框被撑到半空；切会话会重新 mount 再 collapse 一次，污染高度
- * 还会回来。关闭终端走卸载路径，不走这里。
- *
- * preserveComposerPct 必须传折叠前的输入框占比——collapse() 之后 layout.composer
- * 往往已经被撑高，不能当源。
+ * 折叠/展开终端后重排：差额全部由 timeline 承担。
+ * 输入栏在列内固有高度，不占 Group 百分比，因此这里不再锁 composer。
  */
 export function redistributeTerminalAgainstTimeline(
 	layout: Record<string, number>,
 	terminalPct: number,
-	preserveComposerPct: number,
 	timelineMinPct = 0,
 ): Record<string, number> | null {
 	if (layout.timeline === undefined || layout.terminal === undefined) return null;
-	const composer = Math.max(0, preserveComposerPct);
 	let terminal = Math.max(0, terminalPct);
-	let timeline = 100 - composer - terminal;
-	// timeline 触底时只能少展开终端，绝不能再去扣 composer。
+	let timeline = 100 - terminal;
 	if (timeline < timelineMinPct) {
 		terminal = Math.max(0, terminal - (timelineMinPct - timeline));
-		timeline = 100 - composer - terminal;
+		timeline = 100 - terminal;
 	}
 	return {
 		...layout,
-		composer,
 		terminal,
 		timeline: Math.max(0, timeline),
 	};

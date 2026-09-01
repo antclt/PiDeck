@@ -159,7 +159,6 @@ test("composer owns disclosure changes and gives the shared scrollport a trailin
     /overflow-y-auto overscroll-contain pb-px empty:hidden/,
     "the shared scrollport must reserve a physical row after its last card",
   );
-  assert.match(composer, /Math\.max\(widgetsEl\.offsetHeight, widgetsEl\.scrollHeight\)/);
 
   for (const source of [widgets, goal, queue]) {
     assert.match(source, /ComposerWidgetFrame/, "all composer cards must share the frame");

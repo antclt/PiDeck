@@ -181,15 +181,11 @@ test("ask stays out of composer sizing and uses the session timeline as its scro
 });
 
 /**
- * 没有 Ask 时，composer 仍从输入卡的最小高度起步；footer 的底部留白会进入
- * ComposerMeasuredExtras 的实测总高，再由 SessionView 在首次绘制前 hug 到正确高度。
- * 这样 Ask 不参与 composer 分配，也不会把 8px 留白漏算成裁切。
+ * 没有 Ask 时，composer 仍从输入卡的最小高度起步；footer 的底部留白是内容的一部分，
+ * 列按固有高度撑开，Ask 不参与 composer 分配。
  */
 test("composer measurement includes the bottom breathing room after ask moves to timeline", () => {
   assert.match(composerArea, /className="composer[^\"]*px-0 pb-2"/);
-  assert.match(composerArea, /style\.paddingBottom/);
-  assert.match(composerArea, /return Math\.ceil\([\s\S]*\+ paddingBottom\)/);
-  assert.match(sessionView, /resolveComposerPanelHeight\(/);
 });
 
 /**
@@ -199,7 +195,7 @@ test("composer measurement includes the bottom breathing room after ask moves to
  * 不依赖写死的像素补偿。
  */
 test("composer panel reserves the same scrollbar gutter as the timeline", () => {
-  assert.match(sessionView, /session-v-composer overflow-hidden \[scrollbar-gutter:stable\]/);
+  assert.match(sessionView, /session-v-composer[\s\S]*\[scrollbar-gutter:stable\]/);
   assert.doesNotMatch(sessionView, /paddingRight/);
   // 时间线侧：宽度约束挂在滚动内容上（视口自带 scrollbar-gutter:stable 预留槽位）；
   // 空态例外：showSurfaceEmptyState 时去掉约束（起始页自控宽度，与引导页一致）。
