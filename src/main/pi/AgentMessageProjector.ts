@@ -1,5 +1,12 @@
 import type { ChatMessage, ImageContent } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
+import {
+	extractToolResultText as extractSharedToolResultText,
+	formatToolDetail as formatSharedToolDetail,
+	safeJson as sharedSafeJson,
+	truncateDetailWithMeta as truncateSharedDetailWithMeta,
+	truncateForDetail as truncateSharedForDetail,
+} from "../../shared/formatToolDetail";
 import { extractMessageText } from "./messageContent";
 import { takeActiveEntryId } from "./sessionEntryIds";
 
@@ -42,8 +49,6 @@ export function buildActiveBranchEntryIds(
  * query needed to preserve cancelled ask_question cards.
  */
 export class AgentMessageProjector {
-	private static readonly MAX_TOOL_RESULT_CHARS = 8000;
-
 	constructor(private readonly deps: AgentMessageProjectorDeps) {}
 
 	convert(
@@ -358,52 +363,12 @@ export class AgentMessageProjector {
 		result: unknown,
 		isError: boolean,
 	) {
-		const details = this.extractToolDetails(result);
-		// args/结果/details 都先序列化再截断，避免单条工具详情撑大 ChatMessage.meta。
-		// 注意：args 在 end/update 事件里可能已是序列化字符串（从 existing.meta.args 回退），
-		// 此时 safeJson(string) 会二次编码导致显示异常，先反解回对象再序列化。
-		let argsObj = args;
-		if (typeof args === "string" && args.trim()) {
-			try {
-				argsObj = JSON.parse(args) as unknown;
-			} catch {
-				// truncated/不可解析时保持原样
-			}
-		}
-		const argsText = argsObj ? this.truncateForDetail(this.safeJson(argsObj)) : "";
-		const resultText = result
-			? this.truncateForDetail(this.extractToolResultText(result) || this.safeJson(result))
-			: "";
-		const detailsText = details ? this.truncateForDetail(this.safeJson(details)) : "";
-		const status = this.deps.translate(isError ? "mainTool.failed" : "mainTool.done");
-		const sections = [
-			this.deps.translate("mainTool.name", { name: toolName ?? "tool" }),
-			this.deps.translate("mainTool.status", { status }),
-			args ? this.deps.translate("mainTool.arguments", { value: argsText }) : "",
-			result ? this.deps.translate("mainTool.result", { value: resultText }) : "",
-			details ? this.deps.translate("mainTool.details", { value: detailsText }) : "",
-		].filter(Boolean);
-		return sections.join("\n\n");
-	}
-
-	private extractToolDetails(result: unknown) {
-		if (!result || typeof result !== "object") return undefined;
-		return (result as any).details;
+		return formatSharedToolDetail(toolName, args, result, isError, this.deps.translate);
 	}
 
 	/** 对超长工具文本做首尾截断，保留头部和尾部以兼顾开头信息和错误堆栈。 */
 	truncateForDetail(text: unknown): string {
-		// safeJson/extractToolResultText 在某些输入下可能返回 undefined（如 JSON.stringify(undefined)），
-		// 必须在此归一化为字符串，否则后续 .length 访问会抛 TypeError 导致主进程未捕获异常弹窗。
-		const str = typeof text === "string" ? text : text == null ? "" : String(text);
-		if (str.length <= AgentMessageProjector.MAX_TOOL_RESULT_CHARS) return str;
-		const keep = Math.floor(AgentMessageProjector.MAX_TOOL_RESULT_CHARS / 2);
-		const omitted = str.length - keep * 2;
-		return (
-			`${str.slice(0, keep)}\n` +
-			`${this.deps.translate("mainTool.truncated", { omitted, total: str.length })}\n` +
-			str.slice(-keep)
-		);
+		return truncateSharedForDetail(text, this.deps.translate);
 	}
 
 	/**
@@ -412,38 +377,15 @@ export class AgentMessageProjector {
 	 * 用于 detailText 的整体上限：formatToolDetail 拼接 args/result/details 三段后可能超过单段上限。
 	 */
 	truncateDetailWithMeta(text: string): { text: string; truncated: boolean; fullLength: number } {
-		if (text.length <= AgentMessageProjector.MAX_TOOL_RESULT_CHARS) {
-			return { text, truncated: false, fullLength: text.length };
-		}
-		const keep = Math.floor(AgentMessageProjector.MAX_TOOL_RESULT_CHARS / 2);
-		const omitted = text.length - keep * 2;
-		return {
-			text:
-				`${text.slice(0, keep)}\n` +
-				`${this.deps.translate("mainTool.truncated", { omitted, total: text.length })}\n` +
-				text.slice(-keep),
-			truncated: true,
-			fullLength: text.length,
-		};
+		return truncateSharedDetailWithMeta(text, this.deps.translate);
 	}
 
-
 	extractToolResultText(result: unknown) {
-		if (!result || typeof result !== "object") return "";
-		const content = (result as any).content;
-		if (!Array.isArray(content)) return "";
-		return content
-			.map((item) => (typeof item?.text === "string" ? item.text : ""))
-			.filter(Boolean)
-			.join("\n");
+		return extractSharedToolResultText(result);
 	}
 
 	safeJson(value: unknown) {
-		try {
-			return JSON.stringify(value, null, 2);
-		} catch {
-			return String(value);
-		}
+		return sharedSafeJson(value);
 	}
 
 	extractText(content: unknown): string {
