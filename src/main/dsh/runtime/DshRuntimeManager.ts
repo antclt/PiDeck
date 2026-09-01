@@ -15,7 +15,7 @@
  * 下载与解压是可注入的（测试用替身，不依赖真实网络/文件系统布局）。
  */
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { cpSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import {
 	DSH_RUNTIME_ARCHIVE_ROOT,
@@ -197,6 +197,60 @@ export class DshRuntimeManager {
 			manifest: selected.manifest,
 			nodeModules: join(this.deps.layout.runtimesRoot, selected.dirName, "node_modules"),
 		};
+	}
+
+	/**
+	 * 从本地已解压的 runtime 目录安装（手动导入已解压目录的场景）。
+	 * 与 installFromArchive 的区别：来源不是 tarball 而是现成目录，跳过解压、直接校验后复制落位。
+	 * 流程：目录校验（manifest + 关键包）→ 复制到临时目录 → 原子 rename 落位 → 清理。
+	 *
+	 * 为什么复制而不是移动：用户选中的是磁盘上自己的解压目录（可能在任意盘符），
+	 * 直接 rename 会跨卷失败（EXDEV）且破坏用户来源；复制到 tempRoot（与 runtimesRoot
+	 * 同卷）再 rename，落位仍是原子的，来源目录保持不动。
+	 */
+	async installFromDirectory(
+		dirPath: string,
+		options: DshRuntimeInstallOptions = {},
+	): Promise<DshRuntimeInstallResult> {
+		const log = this.deps.log ?? (() => {});
+		if (!existsSync(dirPath) || !statSync(dirPath).isDirectory()) {
+			return { ok: false, error: "directory not found" };
+		}
+
+		// 与 tarball 约定一致：目录内可能直接是 dsh-runtime/（解压产物）或套一层包装，
+		// 剥掉顶层后才是 node_modules + manifest。
+		const sourceRoot = existsSync(join(dirPath, DSH_RUNTIME_ARCHIVE_ROOT))
+			? join(dirPath, DSH_RUNTIME_ARCHIVE_ROOT)
+			: dirPath;
+
+		// 先在校验源目录上快速失败（manifest 不对就不复制，避免白拷几十 MB），
+		// 校验通过后再复制到暂存目录落位——落位的始终是校验过的那份内容。
+		const sourceManifest = this.verifyStagedRuntime(sourceRoot);
+		if (typeof sourceManifest === "string") return { ok: false, error: sourceManifest };
+
+		mkdirSync(this.deps.layout.tempRoot, { recursive: true });
+		const staging = join(this.deps.layout.tempRoot, `install-${Date.now()}`);
+		try {
+			options.onPhase?.("extracting");
+			cpSync(sourceRoot, staging, { recursive: true });
+
+			options.onPhase?.("finalizing");
+			const target = this.versionDir(sourceManifest.runtimeVersion);
+			// 同版本已存在：先清掉再 rename（rename 到非空目录在 Windows 会失败）。
+			rmSync(target, { recursive: true, force: true });
+			mkdirSync(this.deps.layout.runtimesRoot, { recursive: true });
+			renameSync(staging, target);
+			log("dsh-runtime", "runtime installed from directory", {
+				version: sourceManifest.runtimeVersion,
+			});
+			return { ok: true, dirName: sourceManifest.runtimeVersion, manifest: sourceManifest };
+		} catch (error) {
+			const message = errorMessage(error);
+			log("dsh-runtime", "runtime install from directory failed", { error: message });
+			return { ok: false, error: message };
+		} finally {
+			rmSync(staging, { recursive: true, force: true });
+		}
 	}
 
 	/**

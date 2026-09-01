@@ -17,7 +17,8 @@ import type {
 	I18nParams,
 	ImageContent,
 	Project,
-	RewindCheckpointSummary,
+	RewindCheckpointPage,
+	RewindCheckpointPageParams,
 	RewindRestoreResult,
 	RewindRestoreScope,
 	SendPromptInput,
@@ -373,10 +374,17 @@ export class AgentManager {
 	private static readonly ABORT_ESCALATION_VERIFY_MS = 4000;
 
 	/**
-	 * 待处理的 Extension UI 请求。key 为 agentId，value 为 Map<requestId, { method, title, options }>。
-	 * 用于在 abort 时及时发送 cancellation 防止 pi 等待超时。
+	 * 待处理的 Extension UI 请求。key 为 agentId，value 为 Map<requestId, { method, title, raisedAt }>。
+	 * 用于在 abort 时及时发送 cancellation 防止 pi 等待超时；raisedAt 记录提问弹起时刻，
+	 * 供 ask_question 工具耗时扣除用户等待时间（exclude_wait）使用。
 	 */
-	private readonly pendingUIRequests = new Map<string, Map<string, { method: string; title: string }>>();
+	private readonly pendingUIRequests = new Map<string, Map<string, { method: string; title: string; raisedAt: number }>>();
+	/**
+	 * 各 agent 已累计的 ask 用户等待毫秒数（raisedAt→回答时刻）。
+	 * 工具耗时（durationMs）应只算 agent 实际处理时长，不含用户盯着问卷思考的时间；
+	 * ask_question 工具结束时从中扣除并清零，工具开始新一轮时也清零防泄漏到后续工具。
+	 */
+	private readonly askWaitMsByAgent = new Map<string, number>();
 	/** abort 时正在等待 ask_question 响应的 agent，用于在工具结果中覆写 answer 为 null。 */
 	private readonly abortedDuringAsk = new Set<string>();
 	/** 成功空闲（settled）回调：供 PetStateBridge 等主进程内部模块订阅，携带完成 Agent 身份。 */
@@ -1896,6 +1904,8 @@ export class AgentManager {
 		if (pending && pending.size > 0) {
 			this.abortedDuringAsk.add(agentId);
 			for (const [requestId] of pending) {
+				// abort 视作用户在此刻结束等待：结算等待时长，供该 ask 工具耗时扣除
+				this.settleAskWait(agentId, requestId);
 				runtime.process.client.sendRaw({
 					type: "extension_ui_response",
 					id: requestId,
@@ -3226,16 +3236,40 @@ export class AgentManager {
 	 * root 取 agent 工作目录：纯 git 实现不依赖 pi 进程，即使 pi 没装 pi-rewind
 	 * 扩展，也能读到/回退同仓库里已存在的 checkpoint。过滤用 pi 的 sessionId
 	 * （与 pi-rewind 的 ref 命名一致）；无 session 时列出仓库全部。
+	 *
+	 * 分页：按 timestamp 倒序（新→旧），beforeTimestamp 为游标。
+	 * limit 默认 10、上限 100；不传 beforeTimestamp 时返回最早一页。
 	 */
-	async listCheckpoints(agentId: string): Promise<RewindCheckpointSummary[]> {
+	async listCheckpoints(
+		agentId: string,
+		params?: RewindCheckpointPageParams,
+	): Promise<RewindCheckpointPage> {
 		const runtime = this.requireRuntime(agentId);
 		const checkpoints = await loadAllCheckpoints(
 			runtime.tab.cwd,
 			runtime.tab.sessionId,
 		);
-		return checkpoints
+		const all = checkpoints
 			.map(toCheckpointSummary)
 			.sort((a, b) => b.timestamp - a.timestamp);
+		// 渲染层入参不可信：limit 钳制在 [1, 100]，beforeTimestamp 非有限数按未传处理。
+		const limit = Math.min(
+			Math.max(1, Math.floor(params?.limit ?? 10)),
+			100,
+		);
+		const before = Number.isFinite(params?.beforeTimestamp)
+			? (params!.beforeTimestamp as number)
+			: Number.POSITIVE_INFINITY;
+		const filtered = all.filter((cp) => cp.timestamp < before);
+		// 未传 limit（如 rewind-to-message 需要全量最近检查点）时返回全部；
+		// 否则按 limit 截取一页，并据此判断是否还有更早的检查点。
+		if (params?.limit === undefined) {
+			return { items: filtered, hasMore: false };
+		}
+		return {
+			items: filtered.slice(0, limit),
+			hasMore: filtered.length > limit,
+		};
 	}
 
 	/** checkpoint 与当前 index 树的 diff 摘要（回退预览：「回到这里会改哪些文件」）。 */
@@ -4269,6 +4303,9 @@ export class AgentManager {
 			if (this.isAgentStreamSealed(agentId)) {
 				return;
 			}
+			// 新工具轮次开始：上一个 ask 的等待累计若未被其 end 事件消耗（如 abort 封印），
+			// 在此清空，防止把旧等待算进后续工具耗时。
+			this.askWaitMsByAgent.delete(agentId);
 			this.upsertToolMessage(agentId, typed, "running");
 			// 并行工具会先连续发多个 start；按 toolCallId 追踪，只有最后一个 end 才能表示工具阶段完成。
 			const toolName = typed.toolName ?? "tool";
@@ -4457,11 +4494,15 @@ export class AgentManager {
 					allowOther: typed.allowOther === true || hasCustomOption,
 				};
 
-		// 记录 pending UI 请求，用于 abort 时自动 cancel
+		// 记录 pending UI 请求，用于 abort 时自动 cancel；raisedAt 同时作为用户等待计时起点
 		if (!this.pendingUIRequests.has(agentId)) {
 			this.pendingUIRequests.set(agentId, new Map());
 		}
-		this.pendingUIRequests.get(agentId)!.set(requestId, { method: effectiveMethod, title: request.title });
+		this.pendingUIRequests.get(agentId)!.set(requestId, {
+			method: effectiveMethod,
+			title: request.title,
+			raisedAt: Date.now(),
+		});
 
 		// The session runtime owns pending UI. Do not write an additional system
 		// message, because that creates a second interactive card in the timeline.
@@ -4469,6 +4510,19 @@ export class AgentManager {
 		this.scheduleUIRequestTimeout(agentId, requestId, typed.timeout);
 		// 桌面通知由 SessionRuntimeCoordinator 统一触发（非聚焦会话才提醒，避免打扰正在看当前会话的用户）；
 		// 此处不重复发，防止一条提问出现两条通知。
+	}
+
+	/**
+	 * 结算一次 ask 的用户等待时长（answer 时刻 - 提问弹起时刻），累加到该 agent 的
+	 * 等待累计值（askWaitMsByAgent）。调用时机 = 用户回答 / 超时 / abort 取消，
+	 * 与 pendingUIRequests 中该请求的删除成对，避免重复结算。
+	 * 用途：ask_question 工具耗时（durationMs）要排除用户思考时间，只展示 agent 处理时长。
+	 */
+	private settleAskWait(agentId: string, requestId: string) {
+		const entry = this.pendingUIRequests.get(agentId)?.get(requestId);
+		if (!entry || typeof entry.raisedAt !== "number") return;
+		const waitMs = Math.max(0, Date.now() - entry.raisedAt);
+		this.askWaitMsByAgent.set(agentId, (this.askWaitMsByAgent.get(agentId) ?? 0) + waitMs);
 	}
 
 	/**
@@ -4491,6 +4545,9 @@ export class AgentManager {
 		// 取消时发 cancelled: true
 		if (response.cancelled) extPayload.cancelled = true;
 		runtime.process.client.sendRaw(extPayload);
+
+		// 结算用户等待时长（回答时刻），供该 ask 所属工具耗时扣除
+		this.settleAskWait(agentId, requestId);
 
 		// 清理 pending 记录
 		const pending = this.pendingUIRequests.get(agentId);
@@ -5171,8 +5228,17 @@ export class AgentManager {
 				: Date.now();
 		// 工具耗时只能由 start/end 两个事件推导；start 时先保存 startedAt，end 时再写入 durationMs，
 		// 避免使用消息 timestamp（会在 update/end 时刷新）导致历史恢复后耗时不可还原。
-		const durationMs =
+		// ask_question 工具耗时需扣除用户等待时长（exclude_wait）：等待期由 settleAskWait 累计在
+		// askWaitMsByAgent，工具结束时减掉并清零，让 durationMs 只反映 agent 实际处理时间。
+		let durationMs =
 			status === "running" ? undefined : Math.max(0, Date.now() - startedAt);
+		if (durationMs !== undefined && toolName === "ask_question") {
+			const askWaitMs = this.askWaitMsByAgent.get(agentId) ?? 0;
+			if (askWaitMs > 0) {
+				durationMs = Math.max(0, durationMs - askWaitMs);
+				this.askWaitMsByAgent.delete(agentId);
+			}
+		}
 		const result =
 			event.result ??
 			event.partialResult ??

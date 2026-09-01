@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -19,7 +22,7 @@ const release = (over = {}) => ({
 /** 组装一个 installer，manager 用替身（不碰磁盘与网络）。 */
 function makeInstaller({ index = { schemaVersion: 1, releases: [release()] }, url = "https://idx.test/i.json", manager = {} } = {}) {
 	const progress = [];
-	const calls = { installFromUrl: [], installFromArchive: [], uninstall: [] };
+	const calls = { installFromUrl: [], installFromArchive: [], installFromDirectory: [], uninstall: [] };
 	const fakeManager = {
 		installFromUrl: async (archiveUrl, sha256, options) => {
 			calls.installFromUrl.push({ archiveUrl, sha256, options });
@@ -33,6 +36,12 @@ function makeInstaller({ index = { schemaVersion: 1, releases: [release()] }, ur
 			calls.installFromArchive.push(filePath);
 			return manager.installFromArchive
 				? manager.installFromArchive()
+				: { ok: true, dirName: "0.1.1-rc.2", manifest: { runtimeVersion: "0.1.1-rc.2" } };
+		},
+		installFromDirectory: async (dirPath) => {
+			calls.installFromDirectory.push(dirPath);
+			return manager.installFromDirectory
+				? manager.installFromDirectory()
 				: { ok: true, dirName: "0.1.1-rc.2", manifest: { runtimeVersion: "0.1.1-rc.2" } };
 		},
 		uninstall: (dirName) => {
@@ -123,6 +132,32 @@ test("installFromLocalFile：本地导入失败时同样给出 error 进度", as
 	const result = await installer.installFromLocalFile("C:/tmp/bad.tgz");
 	assert.equal(result.ok, false);
 	assert.equal(progress.at(-1).error, "manifest missing");
+});
+
+test("installFromLocalFile：目录路径走 installFromDirectory，不查索引也不联网", async () => {
+	const { installer, calls, progress } = makeInstaller();
+	// installer 用 existsSync+statSync 判目录，必须给一个真实存在的目录才能走对分支
+	const dir = mkdtempSync(join(tmpdir(), "dsh-import-dir-"));
+	writeFileSync(join(dir, "manifest.json"), "{}");
+	const result = await installer.installFromLocalFile(dir);
+	assert.equal(result.ok, true);
+	assert.equal(calls.installFromDirectory.length, 1);
+	assert.equal(calls.installFromDirectory[0], dir);
+	assert.equal(calls.installFromArchive.length, 0, "目录不应走归档解压链路");
+	assert.equal(calls.installFromUrl.length, 0);
+	assert.equal(progress.at(-1).phase, "done");
+	rmSync(dir, { recursive: true, force: true });
+});
+
+test("installFromLocalFile：目录导入失败时同样给出 error 进度", async () => {
+	const { installer, progress } = makeInstaller({
+		manager: { installFromDirectory: () => ({ ok: false, error: "manifest missing" }) },
+	});
+	const dir = mkdtempSync(join(tmpdir(), "dsh-import-dir-"));
+	const result = await installer.installFromLocalFile(dir);
+	assert.equal(result.ok, false);
+	assert.equal(progress.at(-1).error, "manifest missing");
+	rmSync(dir, { recursive: true, force: true });
 });
 
 test("uninstall：卸载当前启用版本；没装时返回明确错误", () => {

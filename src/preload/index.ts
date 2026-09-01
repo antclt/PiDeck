@@ -78,7 +78,8 @@ import type {
 	WorktreeEntry,
 	PiCliUpdateResult,
 	PiCommand,
-	RewindCheckpointSummary,
+	RewindCheckpointPage,
+	RewindCheckpointPageParams,
 	RewindRestoreResult,
 	RewindRestoreScope,
 	PiExtensionListResult,
@@ -409,7 +410,7 @@ const api = {
 				ok: boolean;
 				error?: string;
 			}>,
-		/** 从本地 tgz 导入 runtime（主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
+		/** 从本地导入 runtime（.tgz 归档或已解压目录；主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
 		importDshRuntimeFile: () =>
 			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocal) as Promise<{
 				ok: boolean;
@@ -725,9 +726,9 @@ const api = {
 				target,
 				messageId,
 			) as Promise<SessionCommandResult<SessionTargetedValue<void>>>,
-		listRewindCheckpoints: (target: SessionRuntimeTarget) =>
-			ipcRenderer.invoke(ipcChannels.sessionsRewindList, target) as Promise<
-				SessionCommandResult<SessionTargetedValue<RewindCheckpointSummary[]>>
+		listRewindCheckpoints: (target: SessionRuntimeTarget, params?: RewindCheckpointPageParams) =>
+			ipcRenderer.invoke(ipcChannels.sessionsRewindList, target, params) as Promise<
+				SessionCommandResult<SessionTargetedValue<RewindCheckpointPage>>
 			>,
 		getRewindCheckpointDiff: (target: SessionRuntimeTarget, checkpointId: string) =>
 			ipcRenderer.invoke(

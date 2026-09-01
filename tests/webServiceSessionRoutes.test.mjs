@@ -83,7 +83,7 @@ function fixture(overrides = {}) {
 		status: "idle",
 		createdAt: 2,
 	};
-	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], messageSessions: [], rewindTargets: [], rewindRestores: [] };
+	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], messageSessions: [], rewindTargets: [], rewindParams: [], rewindRestores: [] };
 	const targeted = (target, value) => ({ ok: true, value: { target, value } });
 	const deps = {
 		// SSE 流式依赖：测试环境不订阅真实 pi 事件，但必须提供可调用实现满足契约。
@@ -166,16 +166,20 @@ function fixture(overrides = {}) {
 		exportSessionRuntimeHtml: async (target) => targeted(target, { path: "export.html" }),
 		editSessionRuntimeMessage: async (target) => targeted(target, undefined),
 		deleteSessionRuntimeMessage: async (target) => targeted(target, undefined),
-		listRewindCheckpoints: async (target) => {
+		listRewindCheckpoints: async (target, params) => {
 			calls.rewindTargets.push(target);
-			return targeted(target, [{
-				id: "turn-1-1-1234",
-				sessionId: session.id,
-				trigger: "turn",
-				turnIndex: 1,
-				branch: "main",
-				timestamp: 1234,
-			}]);
+			calls.rewindParams.push(params ?? null);
+			return targeted(target, {
+				items: [{
+					id: "turn-1-1-1234",
+					sessionId: session.id,
+					trigger: "turn",
+					turnIndex: 1,
+					branch: "main",
+					timestamp: 1234,
+				}],
+				hasMore: false,
+			});
 		},
 		getRewindCheckpointDiff: async (target) => targeted(target, "a.txt | 1 +"),
 		restoreRewindCheckpoint: async (target, checkpointId, scope) => {
@@ -402,12 +406,14 @@ test("runtime rewind routes forward checkpointId/scope and keep the validated ta
 			await fetch(`${baseUrl}/api/sessions/session-1/runtime/rewind-list`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ target }),
+				body: JSON.stringify({ target, limit: 20, beforeTimestamp: 500 }),
 			})
 		).json();
 		assert.equal(listed.result.ok, true);
 		assert.equal(JSON.stringify(calls.rewindTargets), JSON.stringify([target]));
-		assert.equal(listed.result.value.value[0].trigger, "turn");
+		// 分页参数（limit/beforeTimestamp）应原样透传给后端。
+		assert.equal(JSON.stringify(calls.rewindParams), JSON.stringify([{ limit: 20, beforeTimestamp: 500 }]));
+		assert.equal(listed.result.value.value.items[0].trigger, "turn");
 
 		const diffed = await (
 			await fetch(`${baseUrl}/api/sessions/session-1/runtime/rewind-diff`, {

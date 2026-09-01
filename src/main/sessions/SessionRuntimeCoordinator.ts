@@ -9,7 +9,8 @@ import type {
 	I18nDescriptor,
 	ImageContent,
 	PiCommand,
-	RewindCheckpointSummary,
+	RewindCheckpointPage,
+	RewindCheckpointPageParams,
 	RewindRestoreResult,
 	RewindRestoreScope,
 	SendPromptInput,
@@ -76,8 +77,8 @@ export interface SessionAgentGateway {
 	getAvailableThinkingLevels?(agentId: string): Promise<string[] | undefined>;
 	/** 可选能力：导出 HTML（pi 经 export_html RPC；dsh 投影式导出 G10）。 */
 	exportHtml?(agentId: string): Promise<unknown>;
-	/** 可选能力：checkpoint 列表（refs/pi-checkpoints；纯 git，pi 提供，dsh 暂缺）。 */
-	listCheckpoints?(agentId: string): Promise<RewindCheckpointSummary[]>;
+	/** 可选能力：checkpoint 列表（refs/pi-checkpoints；纯 git，pi 提供，dsh 暂缺）。支持分页。 */
+	listCheckpoints?(agentId: string, params?: RewindCheckpointPageParams): Promise<RewindCheckpointPage>;
 	/** 可选能力：checkpoint 与当前 index 树的 diff 摘要（回退预览）。 */
 	getCheckpointDiff?(agentId: string, checkpointId: string): Promise<string>;
 	/** 可选能力：回退到 checkpoint（scope 决定回退范围；当前仅 files 实现）。 */
@@ -567,7 +568,8 @@ export class SessionRuntimeCoordinator {
 
 	listRewindCheckpoints(
 		target: SessionRuntimeTarget,
-	): Promise<SessionCommandResult<SessionTargetedValue<RewindCheckpointSummary[]>>> {
+		params?: RewindCheckpointPageParams,
+	): Promise<SessionCommandResult<SessionTargetedValue<RewindCheckpointPage>>> {
 		return this.runTargetCommand(target, async (agentId) => {
 			// rewind 是可选能力：后端未实现 listCheckpoints 时按能力缺失拒绝（UI 应已按能力隐藏入口）。
 			if (typeof this.agents.listCheckpoints !== "function") {
@@ -576,7 +578,7 @@ export class SessionRuntimeCoordinator {
 					`backend "${this.agents.backend}" does not support rewind checkpoints`,
 				);
 			}
-			return this.agents.listCheckpoints(agentId);
+			return this.agents.listCheckpoints(agentId, params);
 		});
 	}
 

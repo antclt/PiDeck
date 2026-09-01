@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useAtomValue } from "jotai";
 import { Activity, Check, Clock, Copy, Hash, Wrench } from "lucide-react";
 import type { AgentRuntimeState, ChatMessage } from "../../../../../shared/types";
@@ -19,6 +19,13 @@ import {
 const LANE_ORDER: TrajectoryLane[] = ["input", "model", "tools", "process"];
 const MIN_DRAG_PX = 4;
 const MIN_ZOOM_SPAN_MS = 40;
+
+/**
+ * 轨迹账本滚动位置的按会话记忆：抽屉 tab 切换会卸载本面板，卸载前把
+ * scrollTop 写入模块级 store（组件外），重挂载且内容就绪后再恢复，
+ * 避免每次切回 tab 都回到第一行。key 用 sessionId，切会话互不串扰。
+ */
+const trajectoryLedgerScrollStore = new Map<string, number>();
 
 function laneLabel(lane: TrajectoryLane): string {
 	if (lane === "input") return t("session.trajectory.lane.input");
@@ -103,6 +110,9 @@ export function SessionTrajectoryView(props: {
 	const [now, setNow] = useState(() => Date.now());
 	const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
 	const [range, setRange] = useState<TrajectoryTimeRange | undefined>(undefined);
+	// 轨迹账本滚动容器的 ref + 记忆位：本次挂载是否已为当前会话恢复过滚动位置。
+	const ledgerScrollRef = useRef<HTMLDivElement | null>(null);
+	const scrollRestoredForRef = useRef<string | undefined>(undefined);
 	const model = useMemo(
 		() => buildTrajectory(props.messages, now, {
 			processEvents: props.processEvents,
@@ -116,6 +126,29 @@ export function SessionTrajectoryView(props: {
 	const refreshNow = useCallback(() => {
 		if (model.turns.some((turn) => turn.inFlight)) setNow(Date.now());
 	}, [model.turns]);
+
+	// 卸载前把当前滚动位置写回 store（切 tab 后组件卸载，位置靠 store 兜底）。
+	useEffect(() => {
+		return () => {
+			const el = ledgerScrollRef.current;
+			if (el) trajectoryLedgerScrollStore.set(props.sessionId, el.scrollTop);
+		};
+	}, [props.sessionId]);
+
+	// 内容就绪（有可见记录）后一次性恢复该会话上次的滚动位置；内容还没撑出高度时
+	// 先不恢复，等 records 变化再试，避免恢复落在空列表上。scrollRestoredForRef
+	// 保证同一挂载只恢复一次，内容后续刷新不会反复覆盖用户的新滚动位置。
+	useLayoutEffect(() => {
+		const el = ledgerScrollRef.current;
+		if (!el) return;
+		if (scrollRestoredForRef.current === props.sessionId) return;
+		if (visible.length === 0) return;
+		const saved = trajectoryLedgerScrollStore.get(props.sessionId);
+		if (saved !== undefined && saved > 0) {
+			el.scrollTop = Math.min(saved, el.scrollHeight);
+		}
+		scrollRestoredForRef.current = props.sessionId;
+	}, [props.sessionId, visible]);
 
 	const drawer = props.variant === "drawer";
 
@@ -174,6 +207,7 @@ export function SessionTrajectoryView(props: {
 					selectedId={selected?.id}
 					onSelect={setSelectedId}
 					borderBottom={drawer}
+					scrollRef={ledgerScrollRef}
 				/>
 				<TrajectoryInspector record={selected} runtimeState={runtime?.state} isDsh={props.isDsh} />
 			</div>
@@ -343,10 +377,12 @@ function TrajectoryLedger(props: {
 	selectedId?: string;
 	onSelect: (id: string) => void;
 	borderBottom?: boolean;
+	/** 滚动容器 ref：切 tab 卸载前保存、重挂载后恢复滚动位置。 */
+	scrollRef?: RefObject<HTMLDivElement | null>;
 }) {
 	let lastTurn = -1;
 	return (
-		<div className={`min-h-0 overflow-auto ${props.borderBottom ? "border-b border-border/60" : "border-r border-border/60"}`}>
+		<div ref={props.scrollRef} className={`min-h-0 overflow-auto ${props.borderBottom ? "border-b border-border/60" : "border-r border-border/60"}`}>
 			{props.records.length === 0 ? (
 				<div className="px-3 py-6 text-center text-caption text-muted-foreground">
 					{t("session.trajectory.empty")}

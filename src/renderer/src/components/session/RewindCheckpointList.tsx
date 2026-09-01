@@ -35,8 +35,8 @@ const TRIGGER_LABEL_KEY: Record<RewindCheckpointTrigger, TranslationKey> = {
 	"before-restore": "rewind.trigger.beforeRestore",
 };
 
-/** 列表默认渲染上限：超出时折叠为「显示全部」按钮，避免一次铺开全部快照。 */
-const VISIBLE_CHECKPOINT_LIMIT = 5;
+/** 每页条数：列表按时间倒序一页一页加载，避免一次铺开全部快照。 */
+const PAGE_SIZE = 10;
 
 /**
  * 检查点列表（弹层与右侧抽屉面板共用）：拉取当前会话在 refs/pi-checkpoints 下的
@@ -61,9 +61,11 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 		[props.sessionId, agentId, runtimeGeneration],
 	);
 	const [checkpoints, setCheckpoints] = useState<RewindCheckpointSummary[]>([]);
+	const [hasMore, setHasMore] = useState(false);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
-	const [showAll, setShowAll] = useState(false);
+	/** 加载更多进行中：锁定「加载更多」按钮，避免重复点击拉出重复页。 */
+	const [loadingMore, setLoadingMore] = useState(false);
 	/** checkpointId → diff 文本缓存（存在即视为已加载/已收起开关）。 */
 	const [diffs, setDiffs] = useState<Record<string, string>>({});
 	const [diffLoadingId, setDiffLoadingId] = useState<string | null>(null);
@@ -75,27 +77,56 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 	>(null);
 	const [restoring, setRestoring] = useState(false);
 
-	/** 拉取当前会话检查点列表；无运行时（未激活/已停止）时给出可读提示。 */
+	/** 拉取当前会话检查点列表（首页）；无运行时（未激活/已停止）时给出可读提示。 */
 	const reload = useCallback(async () => {
 		if (!target) {
 			setCheckpoints([]);
+			setHasMore(false);
 			setLoadError(t("rewind.unavailable"));
 			return;
 		}
 		setLoading(true);
 		setLoadError(null);
 		try {
-			const list = requireSessionCommand(
-				await desktopApi.sessions.listRewindCheckpoints(target),
+			const page = requireSessionCommand(
+				await desktopApi.sessions.listRewindCheckpoints(target, { limit: PAGE_SIZE }),
 			).value;
-			setCheckpoints(list);
+			setCheckpoints(page.items);
+			setHasMore(page.hasMore);
 		} catch (error) {
 			setCheckpoints([]);
+			setHasMore(false);
 			setLoadError(sessionCommandFailureToast(error, (raw) => t("rewind.loadFailed", { error: raw })));
 		} finally {
 			setLoading(false);
 		}
 	}, [target]);
+
+	/** 加载更早一页：以当前最后一条的 timestamp 为游标，时间倒序追加。 */
+	const loadMore = useCallback(async () => {
+		if (!target || loadingMore || checkpoints.length === 0) return;
+		const beforeTimestamp = checkpoints[checkpoints.length - 1]?.timestamp;
+		if (beforeTimestamp === undefined) return;
+		setLoadingMore(true);
+		try {
+			const page = requireSessionCommand(
+				await desktopApi.sessions.listRewindCheckpoints(target, {
+					limit: PAGE_SIZE,
+					beforeTimestamp,
+				}),
+			).value;
+			setCheckpoints((prev) => [...prev, ...page.items]);
+			setHasMore(page.hasMore);
+		} catch (error) {
+			showNotice(
+				sessionCommandFailureToast(error, (raw) => t("rewind.loadFailed", { error: raw })),
+				undefined,
+				"error",
+			);
+		} finally {
+			setLoadingMore(false);
+		}
+	}, [target, loadingMore, checkpoints]);
 
 	// 每次挂载（弹层打开/抽屉面板打开）都重新拉取：回退后列表会变化，
 	// 且 ref 可能被外部 pi 进程新增。
@@ -103,13 +134,10 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 		void reload();
 	}, [reload]);
 
-	// 可见行（默认最多 5 条）自动拉取变更统计，用于每行摘要。
-	// 依赖用 checkpoints 引用 + showAll 的 id 串，diffStats 变化后 idsToFetch
-	// 变空直接短路，不会造成二次拉取/死循环。
-	// 默认只渲染最近 VISIBLE_CHECKPOINT_LIMIT 个；超出的折叠到「显示全部」，
-	// 避免一次铺开全部快照（自动打点每小时可能积累几十个）。
-	const visibleCheckpoints = showAll ? checkpoints : checkpoints.slice(0, VISIBLE_CHECKPOINT_LIMIT);
-	const visibleCheckpointIds = visibleCheckpoints.map((cp) => cp.id).join(",");
+	// 可见行（当前已加载的页）自动拉取变更统计，用于每行摘要。
+	// 依赖用 checkpoints 引用 + 长度串，diffStats 变化后 idsToFetch 变空直接短路，
+	// 不会造成二次拉取/死循环。
+	const visibleCheckpointIds = checkpoints.map((cp) => cp.id).join(",");
 	useEffect(() => {
 		if (!target || loading || !visibleCheckpointIds) return;
 		const idsToFetch = visibleCheckpointIds
@@ -212,8 +240,6 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 		}
 	}, [confirmRestore, target, reload, restoring]);
 
-	const hiddenCount = checkpoints.length - visibleCheckpoints.length;
-
 	return (
 		<>
 			{loading && checkpoints.length === 0 ? (
@@ -227,7 +253,7 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 				</div>
 			) : (
 				<>
-					{visibleCheckpoints.map((cp) => (
+					{checkpoints.map((cp) => (
 						<CheckpointRow
 							key={cp.id}
 							cp={cp}
@@ -239,13 +265,18 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 							onRestore={(scope) => setConfirmRestore({ cp, scope })}
 						/>
 					))}
-					{hiddenCount > 0 && (
+					{/* 加载更多：按时间倒序逐页追加（hasMore 由后端游标判断）。 */}
+					{hasMore && (
 						<button
 							type="button"
-							className="w-full rounded-md px-2 py-1.5 text-center text-xs text-text-tertiary transition-colors hover:bg-muted/60 hover:text-foreground"
-							onClick={() => setShowAll(true)}
+							disabled={loadingMore}
+							className="flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-center text-xs text-text-tertiary transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-default disabled:opacity-50"
+							onClick={() => void loadMore()}
 						>
-							{t("rewind.showMore", { count: hiddenCount })}
+							{loadingMore && (
+								<span className="size-3 animate-spin rounded-full border border-text-tertiary border-t-transparent" aria-hidden="true" />
+							)}
+							{t("rewind.loadMore")}
 						</button>
 					)}
 				</>

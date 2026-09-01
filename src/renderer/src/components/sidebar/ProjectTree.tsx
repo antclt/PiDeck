@@ -137,16 +137,20 @@ export function ProjectTree(props: {
             </span>
             <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-29 @max-[255px]:group-focus-within:pr-29">
               <div className="conversation-title flex min-w-0 items-center">
-                <strong className={`min-w-0 flex-1 truncate font-medium${project.missing ? " text-muted-foreground" : ""}`}>{projectDirectoryName}</strong>
-                {/* 折叠时项目行只剩名称，用黄色状态点提示该工作区仍有 Agent 进程在跑；
-                    展开后子行自带状态点，不再重复提示。颜色与语义对齐 agent 行的 running 状态点（bg-warning）。 */}
-                {collapsed && hasLiveAgent && (
-                  <span
-                    className="size-1.5 shrink-0 rounded-full bg-warning"
-                    title={t("app.projectRunningHint")}
-                    aria-hidden="true"
-                  />
-                )}
+                {/* 项目名 + 运行态点合成一个截断单元：点紧跟文本而不是被 space-between
+                    推到最右——旧布局下点在行尾，鼠标移入时会被右侧浮层按钮盖住。 */}
+                <div className="flex min-w-0 flex-1 items-center gap-1">
+                  <strong className={`min-w-0 truncate font-medium${project.missing ? " text-muted-foreground" : ""}`}>{projectDirectoryName}</strong>
+                  {/* 折叠时项目行只剩名称，用黄色状态点提示该工作区仍有 Agent 进程在跑；
+                      展开后子行自带状态点，不再重复提示。颜色与语义对齐 agent 行的 running 状态点（bg-warning）。 */}
+                  {collapsed && hasLiveAgent && (
+                    <span
+                      className="size-1.5 shrink-0 rounded-full bg-warning"
+                      title={t("app.projectRunningHint")}
+                      aria-hidden="true"
+                    />
+                  )}
+                </div>
                 {/* 目录已被删除/移动/未挂载：保留记录并标记，用户可右键移除或恢复目录 */}
                 {project.missing && (
                   <span

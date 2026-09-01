@@ -15,7 +15,8 @@ import type {
 	ImageContent,
 	PiCommand,
 	Project,
-	RewindCheckpointSummary,
+	RewindCheckpointPage,
+	RewindCheckpointPageParams,
 	RewindRestoreResult,
 	RewindRestoreScope,
 	SendSessionPromptInput,
@@ -108,9 +109,10 @@ type WebServiceDependencies = {
 		target: SessionRuntimeTarget,
 		messageId: string,
 	) => Promise<SessionCommandResult<SessionTargetedValue<void>>>;
-	listRewindCheckpoints: (target: SessionRuntimeTarget) => Promise<
-		SessionCommandResult<SessionTargetedValue<RewindCheckpointSummary[]>>
-	>;
+	listRewindCheckpoints: (
+		target: SessionRuntimeTarget,
+		params?: RewindCheckpointPageParams,
+	) => Promise<SessionCommandResult<SessionTargetedValue<RewindCheckpointPage>>>;
 	getRewindCheckpointDiff: (
 		target: SessionRuntimeTarget,
 		checkpointId: string,
@@ -687,6 +689,9 @@ export class WebServiceManager {
 					preset?: string;
 					checkpointId?: string;
 					scope?: string;
+					/** 检查点列表分页：每页条数 / 游标（rewind-list 用）。 */
+					limit?: number;
+					beforeTimestamp?: number;
 				}>(request);
 				const target = body.target;
 				if (!target || target.sessionId !== sessionId) {
@@ -754,7 +759,19 @@ export class WebServiceManager {
 						result = await this.deps.cloneSessionRuntime(target);
 						break;
 					case "rewind-list":
-						result = await this.deps.listRewindCheckpoints(target);
+						result = await this.deps.listRewindCheckpoints(
+							target,
+							{
+								limit:
+									typeof body.limit === "number" && Number.isFinite(body.limit)
+										? body.limit
+										: undefined,
+								beforeTimestamp:
+									typeof body.beforeTimestamp === "number" && Number.isFinite(body.beforeTimestamp)
+										? body.beforeTimestamp
+										: undefined,
+							},
+						);
 						break;
 					case "rewind-diff":
 						result = await this.deps.getRewindCheckpointDiff(
