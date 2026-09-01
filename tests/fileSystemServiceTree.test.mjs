@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, utimesSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -23,6 +23,17 @@ test("WSL project containment preserves Linux path case", () => {
     isPathInsideProject(root, "//wsl$/Debian/root/Repo/src/a.ts"),
     false,
   );
+});
+
+test("native filesystem roots contain their descendants without doubling separators", () => {
+  const nativeRoot = parse(tmpdir()).root;
+  assert.equal(isPathInsideProject(nativeRoot, join(nativeRoot, "pideck-root-child")), true);
+  if (process.platform === "win32") {
+    assert.equal(
+      isPathInsideProject("\\\\server\\share\\", "\\\\server\\share\\dir\\file.txt"),
+      true,
+    );
+  }
 });
 
 test("file tree nodes carry stat metadata for sorting", async () => {

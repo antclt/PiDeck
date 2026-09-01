@@ -219,10 +219,20 @@ export function registerFilesIpc({
 		},
 	);
 
-	ipcMain.handle(ipcChannels.filesWriteContent, async (_event, path: string, content: string) => {
-		await writeFile(toWindowsPath(path), content, "utf8");
-		void appLogger.info("file", "File written", { path, bytes: Buffer.byteLength(content, "utf8") });
-	});
+	ipcMain.handle(
+		ipcChannels.filesWriteContent,
+		async (_event, path: unknown, content: unknown, scope?: unknown) => {
+			if (typeof content !== "string") throw new Error("Invalid file content");
+			const boundary = await resolveProjectReadBoundary(scope);
+			// 已存在的项目文件沿用读取边界的 realpath 校验，阻止 tab 打开后替换 symlink 再保存越界。
+			const writablePath = await resolveReadablePath(path, boundary);
+			await writeFile(writablePath, content, "utf8");
+			void appLogger.info("file", "File written", {
+				path: writablePath,
+				bytes: Buffer.byteLength(content, "utf8"),
+			});
+		},
+	);
 
 	ipcMain.handle(
 		ipcChannels.filesReadBase64,

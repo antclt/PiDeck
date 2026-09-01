@@ -32,7 +32,9 @@ export function isPathInsideProject(root: string, target: string): boolean {
   };
   const rootResolved = normalizeForCompare(root);
   const targetResolved = normalizeForCompare(target);
-  return targetResolved === rootResolved || targetResolved.startsWith(rootResolved + sep);
+  if (targetResolved === rootResolved) return true;
+  const rootPrefix = rootResolved.endsWith(sep) ? rootResolved : rootResolved + sep;
+  return targetResolved.startsWith(rootPrefix);
 }
 
 export class FileSystemService {

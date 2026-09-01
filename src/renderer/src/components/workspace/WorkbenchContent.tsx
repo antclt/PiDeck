@@ -41,7 +41,11 @@ export type WorkbenchContentProps = {
 		scope?: ProjectFileAccessScope,
 	) => Promise<string>;
 	readOriginalContent: (path: string) => Promise<string>;
-	saveContent: (path: string, content: string) => Promise<void>;
+	saveContent: (
+		path: string,
+		content: string,
+		scope?: ProjectFileAccessScope,
+	) => Promise<void>;
 };
 
 /**
