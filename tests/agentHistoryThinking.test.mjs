@@ -36,6 +36,15 @@ function loadAgentMessageProjectorModule() {
     module,
     exports: module.exports,
     require: (specifier) => {
+      if (specifier === "../../shared/formatToolDetail") {
+        return {
+          extractToolResultText: (result) => typeof result === "string" ? result : "",
+          formatToolDetail: () => "",
+          safeJson: (value) => JSON.stringify(value),
+          truncateDetailWithMeta: (text) => ({ text, truncated: false, fullLength: text.length }),
+          truncateForDetail: (text) => typeof text === "string" ? text : String(text ?? ""),
+        };
+      }
       if (specifier === "./messageContent") return { extractMessageText };
       if (specifier === "./sessionEntryIds") {
         return {
