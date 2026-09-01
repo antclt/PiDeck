@@ -38,6 +38,8 @@ export function useOverlayActions({ activeProject, appInfo, showToast }: UseOver
         appInfo,
         onClose: () => setFeedbackOpen(false),
         onToast: (message: string) => showToast(message),
+        // GitHub Issue 提交页需要登录/富文本，强制系统浏览器打开（不受「链接打开方式」设置影响）
+        onOpenExternal: (url: string) => void api.app.openExternal(url, true),
       },
     } : undefined,
     confirm: confirmDialog ? {

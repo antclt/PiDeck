@@ -55,6 +55,7 @@ import type {
 	ExternalEditorSetting,
 	FileManagerInfo,
 	FeedbackEnvironment,
+	FeedbackProjectContext,
 	FeishuBotConfig,
 	FeishuBridgeStatus,
 	FeishuChatBinding,
@@ -1217,6 +1218,12 @@ const api = {
 			ipcRenderer.invoke(
 				ipcChannels.appFeedbackEnvironment,
 			) as Promise<FeedbackEnvironment>,
+		/** 问题反馈「新建会话分析」：读取项目根 AGENTS.md（截断）与项目级技能列表。 */
+		getFeedbackProjectContext: (projectId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.appFeedbackProjectContext,
+				projectId,
+			) as Promise<FeedbackProjectContext>,
 		openExternal: (url: string, forceSystem?: boolean) =>
 			ipcRenderer.invoke(ipcChannels.appOpenExternal, url, forceSystem) as Promise<void>,
 		onOpenInBrowser: (callback: (url: string) => void) =>

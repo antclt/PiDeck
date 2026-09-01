@@ -1,4 +1,5 @@
 import type {
+	FeedbackProjectContext,
 	HealthCheckItem,
 	HealthReport,
 	HealthReportContext,
@@ -81,12 +82,26 @@ function checkLines(checks: HealthCheckItem[]): string[] {
 	});
 }
 
-/** 最近报错 → Markdown 清单（条数上限避免失控）。 */
-function recentErrorLines(summary: HealthReport["logSummary"], limit = 20): string[] {
-	return summary.recent.slice(0, limit).map((line) => {
+/** 最近报错 → Markdown 清单（条数上限避免失控；默认 150 条，保证「今天」的报错都在）。 */
+function recentErrorLines(summary: HealthReport["logSummary"], limit = 150): string[] {
+	const lines = summary.recent.slice(0, limit).map((line) => {
 		const scope = line.scope ? ` [${line.scope}]` : "";
 		return `- ${formatTime(line.time)} ${line.level.toUpperCase()}${scope}: ${line.message}`;
 	});
+	// 采集量超过展示上限时补一行说明，避免用户误以为日志只有这么多
+	if (summary.recent.length > limit) {
+		lines.push(`… 共 ${summary.recent.length} 条（完整列表见「导出日志包」）`);
+	}
+	return lines;
+}
+
+/** 日志统计行：总量 + 今日，让「今天的报错」一眼可见。 */
+function logSummaryLine(summary: HealthReport["logSummary"]): string {
+	const today =
+		summary.todayError > 0 || summary.todayWarn > 0
+			? ` · today ${summary.todayError} errors / ${summary.todayWarn} warns`
+			: "";
+	return `Total ${summary.total} · errors ${summary.error} · warns ${summary.warn} (last 7 days)${today}`;
 }
 
 /**
@@ -117,10 +132,8 @@ export function formatMarkdown(report: HealthReport, context: HealthReportContex
 	lines.push(`## Environment`);
 	lines.push(...environmentLines(report.environment));
 	lines.push("");
-	lines.push(`## Recent logs (${report.logSummary.recent.length} shown)`);
-	lines.push(
-		`Total ${report.logSummary.total} · errors ${report.logSummary.error} · warns ${report.logSummary.warn} (last 7 days)`,
-	);
+	lines.push(`## Recent logs (${Math.min(150, report.logSummary.recent.length)} shown of ${report.logSummary.recent.length} collected)`);
+	lines.push(logSummaryLine(report.logSummary));
 	if (report.logSummary.recent.length === 0) {
 		lines.push("_no recent errors/warnings_");
 	} else {
@@ -150,9 +163,10 @@ export function formatCard(report: HealthReport, context: HealthReportContext): 
 	const free = formatBytes(report.environment.dataDirFreeBytes);
 	lines.push(`**磁盘余量**：${free} · **内存**：${formatBytes(report.environment.appRssBytes)} RSS`);
 	if (report.logSummary.error > 0 || report.logSummary.warn > 0) {
-		lines.push(
-			`**近7天日志**：${report.logSummary.error} errors / ${report.logSummary.warn} warns`,
-		);
+		lines.push(`**近7天日志**：${report.logSummary.error} errors / ${report.logSummary.warn} warns`);
+	}
+	if (report.logSummary.todayError > 0 || report.logSummary.todayWarn > 0) {
+		lines.push(`**今日**：${report.logSummary.todayError} errors / ${report.logSummary.todayWarn} warns`);
 	}
 	lines.push("");
 	lines.push(`_由 PiDeck 生成 · ${formatTime(report.generatedAt)}_`);
@@ -160,10 +174,15 @@ export function formatCard(report: HealthReport, context: HealthReportContext): 
 }
 
 /**
- * 生成可复制给任意 AI 的分析提示词：角色设定 + 体检结果 + 报错摘要，
- * 用户粘贴给 ChatGPT/DeepSeek/群友即可让 AI 帮忙定位。
+ * 生成可复制给任意 AI 的分析提示词：角色设定 + 体检结果 + 报错摘要 + 项目上下文，
+ * 用户粘贴给 ChatGPT/DeepSeek/群友即可让 AI 帮忙定位；也用于「新建会话分析」
+ * 直接填进 PiDeck 新会话的输入框（此时 pi 会自动加载项目 AGENTS.md 与技能）。
  */
-export function formatAiPrompt(report: HealthReport, context: HealthReportContext): string {
+export function formatAiPrompt(
+	report: HealthReport,
+	context: HealthReportContext,
+	projectContext?: FeedbackProjectContext,
+): string {
 	const lines: string[] = [];
 	lines.push(
 		`你是一名专业的桌面软件技术支持工程师。请根据下面的 PiDeck 诊断报告，判断可能的问题根因，并给出**分步骤、可执行**的排查和修复建议。`,
@@ -186,25 +205,51 @@ export function formatAiPrompt(report: HealthReport, context: HealthReportContex
 	lines.push(`## 环境`);
 	lines.push(environmentLines(report.environment).join("\n"));
 	lines.push("");
+	lines.push(`## 日志统计`);
+	lines.push(logSummaryLine(report.logSummary));
+	lines.push("");
 	lines.push(`## 最近报错日志`);
 	if (report.logSummary.recent.length === 0) {
 		lines.push("（近 7 天无 error/warn）");
 	} else {
-		lines.push(...recentErrorLines(report.logSummary, 30));
+		lines.push(...recentErrorLines(report.logSummary, 200));
+	}
+	if (projectContext) {
+		lines.push("");
+		lines.push(`## 项目上下文（${projectContext.projectName || projectContext.projectId}）`);
+		lines.push(
+			`本次分析基于 PiDeck 工程。项目根目录的 AGENTS.md 记录了编码规范、架构约束与测试门禁，` +
+				`以下为内容${projectContext.agentsMdTruncated ? "（超出上限已截断，可让 pi 读取项目根目录完整版）" : ""}：`,
+		);
+		lines.push("");
+		// 用 4 个反引号作围栏：AGENTS.md 正文可能自带 ```，3 反引号围栏会被提前闭合
+		lines.push("````");
+		lines.push(projectContext.agentsMd.trim() || "（项目无 AGENTS.md）");
+		lines.push("````");
+		if (projectContext.skills.length > 0) {
+			lines.push("");
+			lines.push(
+				`项目级可用技能：${projectContext.skills.join(", ")}（如需可让 pi 执行 /skill:<名称> 获取使用说明）`,
+			);
+		}
+		lines.push(
+			`提示：排查 PiDeck 自身问题时，可让 pi 使用全局技能 /skill:pideck-doctor 读取诊断报告与故障模式库。`,
+		);
 	}
 	lines.push("");
 	lines.push("请输出：1) 最可能的根因（按可能性排序）；2) 每条的验证方法；3) 修复步骤；4) 修复后如何验证。");
 	return lines.join("\n");
 }
 
-/** 按格式生成对应文本。 */
+/** 按格式生成对应文本。projectContext 只参与 prompt 形态（新建会话分析用）。 */
 export function formatReport(
 	report: HealthReport,
 	context: HealthReportContext,
 	format: HealthReportFormat,
+	projectContext?: FeedbackProjectContext,
 ): string {
 	if (format === "card") return formatCard(report, context);
-	if (format === "prompt") return formatAiPrompt(report, context);
+	if (format === "prompt") return formatAiPrompt(report, context, projectContext);
 	return formatMarkdown(report, context);
 }
 

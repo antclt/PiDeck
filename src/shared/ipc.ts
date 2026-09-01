@@ -316,6 +316,8 @@ export const ipcChannels = {
 	/** 跳过某版本（该版本不再主动提示）。 */
 	appUpdateSkipVersion: "app:update-skip-version",
 	appFeedbackEnvironment: "app:feedback-environment",
+	/** 问题反馈「新建会话分析」：读取项目根 AGENTS.md（截断）与项目级技能列表。 */
+	appFeedbackProjectContext: "app:feedback-project-context",
 	appOpenExternal: "app:open-external",
 	appOpenInBrowser: "app:open-in-browser",
 	appRestart: "app:restart",

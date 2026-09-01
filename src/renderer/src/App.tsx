@@ -1481,6 +1481,21 @@ export function App() {
     [runCreateAnonymousSession, workspaceChrome],
   );
 
+  /**
+   * 问题反馈「新建会话分析」：在活动项目新建草稿会话并选中，把 AI 提示词预填进
+   * 该会话输入框（composer 草稿）。pi 启动后会自动加载项目 AGENTS.md 与技能，
+   * 提示词里的诊断报告 + 项目上下文可让 pi 在正确约束下排查。
+   */
+  const handleFeedbackCreateSession = useCallback(
+    async (prompt: string): Promise<boolean> => {
+      const session = await createSessionDraftWithTab();
+      if (!session) return false;
+      setSessionDraft({ sessionId: session.id, value: prompt });
+      return true;
+    },
+    [createSessionDraftWithTab, setSessionDraft],
+  );
+
   /** 侧栏/分支打开：选中成功后按 preview|permanent 登记 Tab */
   const openSidebarSessionByIdWithTab = useCallback(
     async (
@@ -3959,7 +3974,24 @@ export function App() {
       onCurrentVersion={setUpToDateVersion}
       projectPath={activeProject?.path}
     />
-    <SessionActionOverlays {...overlays.overlayProps} />
+    {/*
+     * 问题反馈弹窗的「新建会话分析」依赖 App 级会话创建能力（createSessionDraftWithTab），
+     * 在装配层组合：useOverlayActions 只持开关状态，会话创建与预填在此处注入。
+     */}
+    <SessionActionOverlays
+      {...overlays.overlayProps}
+      feedback={
+        overlays.overlayProps.feedback
+          ? {
+              ...overlays.overlayProps.feedback,
+              props: {
+                ...overlays.overlayProps.feedback.props,
+                onCreateSessionWithPrompt: handleFeedbackCreateSession,
+              },
+            }
+          : undefined
+      }
+    />
     <AppUpdateOverlay
       controller={{ ...appUpdate, clear: dismissAppUpdate }}
       releasesUrl={appInfo.releasesUrl}

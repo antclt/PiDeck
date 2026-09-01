@@ -39,6 +39,10 @@ export type HealthLogSummary = {
 	total: number;
 	error: number;
 	warn: number;
+	/** 今天（本地时区 0 点起）的 error/warn 条数。报告头部单独展示，
+	 *  让「今天的报错」不需要翻完整 7 天列表就能看到。 */
+	todayError: number;
+	todayWarn: number;
 	/** 最近若干条 warn/error，按时间倒序，已脱敏并截断条数 */
 	recent: HealthLogLine[];
 };
@@ -121,6 +125,23 @@ export type HealthReportContext = {
 	steps: string;
 	/** 当前项目名；不附带项目路径，避免泄露目录结构 */
 	projectName: string;
+};
+
+/**
+ * 问题反馈「新建会话分析」附带的项目上下文（主进程读取，已脱敏/截断）。
+ *
+ * 用途：AI 分析提示词除了环境体检报告，还应带上 PiDeck 工程自身的规范与技能，
+ * 让新会话里的 pi 在正确约束下排查。AGENTS.md 内容做大小上限截断，避免提示词失控。
+ */
+export type FeedbackProjectContext = {
+	projectId: string;
+	projectName: string;
+	/** 项目根 AGENTS.md 内容（截断后）；文件不存在时为空串 */
+	agentsMd: string;
+	/** AGENTS.md 是否因超出大小上限被截断（提示词里注明，避免误导） */
+	agentsMdTruncated: boolean;
+	/** 项目级技能目录名（.pi/agent/skills 与 .agents/skills 下的子目录名） */
+	skills: string[];
 };
 
 /** 导出结果。canceled=true 表示用户在保存对话框里取消了，不是失败。 */

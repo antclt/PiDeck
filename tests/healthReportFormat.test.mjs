@@ -54,6 +54,8 @@ function makeReport(overrides = {}) {
       total: 100,
       error: 5,
       warn: 3,
+      todayError: 2,
+      todayWarn: 1,
       recent: [
         { time: 1710000000000, level: "error", scope: "agent", message: "spawn failed" },
         { time: 1709990000000, level: "warn", scope: "git", message: "slow" },
@@ -80,6 +82,25 @@ test("formatMarkdown includes description, checks, environment and logs", () => 
   assert.ok(out.startsWith("# PiDeck Diagnostic Report"), "should start with title");
 });
 
+test("formatMarkdown surfaces today's error/warn counts and collection totals", () => {
+  const out = formatMarkdown(makeReport(), CONTEXT);
+  assert.match(out, /today 2 errors \/ 1 warns/, "should show today's counts");
+  assert.match(out, /errors 5 · warns 3/, "should show 7-day totals");
+  assert.match(out, /2 shown of 2 collected/, "should report shown/collected");
+});
+
+test("formatMarkdown notes truncation when collected logs exceed the display limit", () => {
+  const many = Array.from({ length: 200 }, (_, index) => ({
+    time: 1710000000000 - index,
+    level: index % 2 ? "warn" : "error",
+    scope: "agent",
+    message: `line ${index}`,
+  }));
+  const out = formatMarkdown(makeReport({ logSummary: { total: 300, error: 100, warn: 100, todayError: 5, todayWarn: 5, recent: many } }), CONTEXT);
+  assert.match(out, /150 shown of 200 collected/, "should cap shown count at 150");
+  assert.match(out, /共 200 条/, "should append truncation note");
+});
+
 test("formatCard is compact and contains problem + environment", () => {
   const out = formatCard(makeReport(), CONTEXT);
   assert.ok(out.includes("会话起不来"), "should include problem");
@@ -93,6 +114,38 @@ test("formatAiPrompt sets up a support-engineer role", () => {
   assert.ok(out.includes("复现步骤"), "should include repro steps");
   assert.ok(out.includes("最可能的根因"), "should request root-cause analysis");
   assert.ok(out.includes("验证"), "should request verification steps");
+  assert.ok(out.includes("日志统计"), "should include a log stats section");
+  assert.ok(out.includes("today 2 errors / 1 warns"), "should include today counts");
+});
+
+test("formatAiPrompt embeds project context when provided", () => {
+  const projectContext = {
+    projectId: "proj-1",
+    projectName: "PiDeck",
+    agentsMd: "## 架构规则\n- 禁止 any\n- 用 Jotai\n",
+    agentsMdTruncated: false,
+    skills: ["pideck-doctor", "git-helper"],
+  };
+  const out = formatAiPrompt(makeReport(), CONTEXT, projectContext);
+  assert.ok(out.includes("## 项目上下文（PiDeck）"), "should include project context section");
+  assert.ok(out.includes("- 禁止 any"), "should embed AGENTS.md content");
+  assert.ok(out.includes("pideck-doctor"), "should list project skills");
+  assert.ok(out.includes("/skill:pideck-doctor"), "should hint at the diagnostic skill");
+});
+
+test("formatAiPrompt marks truncated AGENTS.md and omits empty project context", () => {
+  const truncated = {
+    projectId: "proj-1",
+    projectName: "PiDeck",
+    agentsMd: "# rules",
+    agentsMdTruncated: true,
+    skills: [],
+  };
+  const out = formatAiPrompt(makeReport(), CONTEXT, truncated);
+  assert.ok(out.includes("已截断"), "should mark truncation");
+  assert.ok(!out.includes("项目级可用技能"), "should skip empty skills list");
+  const withoutContext = formatAiPrompt(makeReport(), CONTEXT);
+  assert.ok(!withoutContext.includes("## 项目上下文"), "no context → no section");
 });
 
 test("summarizeChecks counts statuses and computes score", () => {

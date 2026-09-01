@@ -26,8 +26,10 @@ import { createPathMasker, redactSecrets, truncateText } from "./redact";
 
 /** 日志统计窗口：只看最近 7 天，更早的日志对「现在出问题」几乎没有诊断价值。 */
 const LOG_WINDOW_DAYS = 7;
-/** 报告内附的报错条数上限（warn + error 各取一半），防止报告体积失控。 */
-const MAX_RECENT_PER_LEVEL = 100;
+/** 报告内附的报错条数上限（warn + error 各取一半），防止报告体积失控。
+ *  反馈里常抱怨日志太少，提升到 500/级（合并后最多 1000 条），足够覆盖「今天」的全部报错；
+ *  展示层（markdown/prompt）另有自己的条数上限，这里是采集上限。 */
+const MAX_RECENT_PER_LEVEL = 500;
 /** 单条日志消息进入报告前的截断长度。 */
 const MAX_LINE_CHARS = 400;
 
@@ -163,20 +165,36 @@ export class EnvironmentDoctor {
 		}
 	}
 
-	/** 统计最近 7 天的日志，并取出最新的 warn/error 明细（已脱敏）。 */
+	/** 统计最近 7 天的日志，并取出最新的 warn/error 明细（已脱敏）。
+	 *  同时统计「今天」的 error/warn 条数：报告头部单独展示，
+	 *  用户问「今天的错误」时不用翻完整 7 天列表。 */
 	private async collectLogSummary(): Promise<HealthReport["logSummary"]> {
 		const { appLogger } = this.deps;
 		const from = Date.now() - LOG_WINDOW_DAYS * 86_400_000;
+		// 今天 0 点（本地时区）：today 计数窗口，不随报告生成时间漂移
+		const todayStart = new Date();
+		todayStart.setHours(0, 0, 0, 0);
+		const todayFrom = todayStart.getTime();
 		const maskPath = createPathMasker(app.getPath("home"));
-		const empty = { total: 0, error: 0, warn: 0, recent: [] as HealthLogLine[] };
+		const empty = {
+			total: 0,
+			error: 0,
+			warn: 0,
+			todayError: 0,
+			todayWarn: 0,
+			recent: [] as HealthLogLine[],
+		};
 		try {
-			const [all, errors, warns, recentErrors, recentWarns] = await Promise.all([
-				appLogger.listPage({ level: "all", from, page: 0, pageSize: 1 }),
-				appLogger.listPage({ level: "error", from, page: 0, pageSize: 1 }),
-				appLogger.listPage({ level: "warn", from, page: 0, pageSize: 1 }),
-				appLogger.listPage({ level: "error", from, page: 0, pageSize: MAX_RECENT_PER_LEVEL }),
-				appLogger.listPage({ level: "warn", from, page: 0, pageSize: MAX_RECENT_PER_LEVEL }),
-			]);
+			const [all, errors, warns, todayErrors, todayWarns, recentErrors, recentWarns] =
+				await Promise.all([
+					appLogger.listPage({ level: "all", from, page: 0, pageSize: 1 }),
+					appLogger.listPage({ level: "error", from, page: 0, pageSize: 1 }),
+					appLogger.listPage({ level: "warn", from, page: 0, pageSize: 1 }),
+					appLogger.listPage({ level: "error", from: todayFrom, page: 0, pageSize: 1 }),
+					appLogger.listPage({ level: "warn", from: todayFrom, page: 0, pageSize: 1 }),
+					appLogger.listPage({ level: "error", from, page: 0, pageSize: MAX_RECENT_PER_LEVEL }),
+					appLogger.listPage({ level: "warn", from, page: 0, pageSize: MAX_RECENT_PER_LEVEL }),
+				]);
 			// 只保留 time/level/scope/message：detail 里可能含完整路径或用户内容，一律不带出。
 			const recent = [...recentErrors.entries, ...recentWarns.entries]
 				.map((entry) => ({
@@ -187,7 +205,14 @@ export class EnvironmentDoctor {
 				}))
 				.sort((a, b) => b.time - a.time)
 				.slice(0, MAX_RECENT_PER_LEVEL * 2);
-			return { total: all.total, error: errors.total, warn: warns.total, recent };
+			return {
+				total: all.total,
+				error: errors.total,
+				warn: warns.total,
+				todayError: todayErrors.total,
+				todayWarn: todayWarns.total,
+				recent,
+			};
 		} catch {
 			return empty;
 		}

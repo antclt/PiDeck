@@ -20,7 +20,7 @@ import {
 	DialogTitle,
 } from "../../components/ui-shadcn/dialog";
 import { SectionHeading } from "../../components/ui-shadcn/section-heading";
-import { X, Copy, RefreshCw, FileDown, PackageOpen, Sparkles, MonitorCheck } from "lucide-react";
+import { X, Copy, RefreshCw, FileDown, PackageOpen, Sparkles, MonitorCheck, Bug, MessageSquarePlus } from "lucide-react";
 import type { HealthStatus } from "../../../../shared/types";
 import { summarizeChecks } from "./reportFormat";
 import { useFeedbackReport, type HealthCheckState } from "./useFeedbackReport";
@@ -32,6 +32,10 @@ export type FeedbackDialogProps = {
 	appInfo: AppInfo;
 	onClose: () => void;
 	onToast: (message: string) => void;
+	/** 打开外部 URL（GitHub Issue 提交页）；不传时相关按钮禁用。 */
+	onOpenExternal?: (url: string) => void;
+	/** 新建会话并预填提示词到输入框；返回是否成功。 */
+	onCreateSessionWithPrompt?: (prompt: string) => Promise<boolean>;
 };
 
 const STATUS_TONE: Record<HealthStatus, string> = {
@@ -59,8 +63,8 @@ const STATE_LABEL: Record<HealthCheckState, TranslationKey> = {
  * 使用成熟的 ui-shadcn 组件（Tabs/ScrollArea/Badge/Progress），不引入新依赖。
  * 所有复制走主进程剪贴板（大文本可靠），所有导出走主进程保存对话框。
  */
-export function FeedbackDialog({ open, project, appInfo, onClose, onToast }: FeedbackDialogProps) {
-	const feedback = useFeedbackReport({ projectName: project?.name ?? "" });
+export function FeedbackDialog({ open, project, appInfo, onClose, onToast, onOpenExternal, onCreateSessionWithPrompt }: FeedbackDialogProps) {
+	const feedback = useFeedbackReport({ projectName: project?.name ?? "", projectId: project?.id });
 	const [activeTab, setActiveTab] = useState("describe");
 
 	const summary = useMemo(
@@ -76,6 +80,34 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast }: Fee
 	const handleCopy = async () => {
 		const ok = await feedback.copyText();
 		onToast(ok ? t("feedback.copiedOk") : t("feedback.copyFailed"));
+	};
+
+	/** AI 分析页复制：固定复制提示词形态（带项目上下文），与展示内容一致。 */
+	const handleCopyPrompt = async () => {
+		const ok = await feedback.copyPrompt();
+		onToast(ok ? t("feedback.copiedOk") : t("feedback.copyFailed"));
+	};
+
+	/** 新建会话并预填提示词：创建成功后关掉反馈弹窗，让用户直接在新会话里回车发送。 */
+	const handleCreateSession = async () => {
+		if (!feedback.report) {
+			onToast(t("feedback.ai.notReady"));
+			return;
+		}
+		if (!project) {
+			onToast(t("feedback.ai.noProject"));
+			return;
+		}
+		if (!onCreateSessionWithPrompt || !feedback.promptText) return;
+		const ok = await onCreateSessionWithPrompt(feedback.promptText);
+		onToast(ok ? t("feedback.ai.sessionCreated") : t("feedback.ai.sessionCreateFailed"));
+		if (ok) onClose();
+	};
+
+	/** 直接用系统浏览器打开 GitHub Issue 预填页（issue 页需要登录/富文本，不适合内置浏览器）。 */
+	const handleOpenIssue = () => {
+		if (!onOpenExternal) return;
+		onOpenExternal(githubUrl);
 	};
 
 	const handleExport = async (kind: "md" | "zip") => {
@@ -244,14 +276,25 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast }: Fee
 							</div>
 							<div className="flex min-h-0 flex-1 flex-col p-4">
 								<div className="mb-2 flex justify-end">
-									<Button variant="secondary" size="sm" onClick={() => void handleCopy()}>
+									<Button variant="secondary" size="sm" onClick={() => void handleCopyPrompt()}>
 										<Copy size={14} aria-hidden="true" />
 										<span className="ml-1.5">{t("feedback.copyReport")}</span>
+									</Button>
+									<Button
+										variant="default"
+										size="sm"
+										className="ml-2"
+										disabled={!feedback.report || !onCreateSessionWithPrompt}
+										onClick={() => void handleCreateSession()}
+										title={t("feedback.ai.createSessionHint")}
+									>
+										<MessageSquarePlus size={14} aria-hidden="true" />
+										<span className="ml-1.5">{t("feedback.ai.createSession")}</span>
 									</Button>
 								</div>
 								<ScrollArea className="min-h-0 flex-1 rounded-lg border bg-muted/30 p-3">
 									<pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
-										{feedback.state === "done" ? feedback.text : t("feedback.ai.notReady")}
+										{feedback.state === "done" ? feedback.promptText : t("feedback.ai.notReady")}
 									</pre>
 								</ScrollArea>
 							</div>
@@ -283,7 +326,7 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast }: Fee
 										title={t("feedback.share.copyPrompt")}
 										desc={t("feedback.share.copyPromptDesc")}
 										action={
-											<Button variant="secondary" size="sm" onClick={() => { feedback.setFormat("prompt"); void handleCopy(); }}>
+											<Button variant="secondary" size="sm" onClick={() => void handleCopyPrompt()}>
 												{t("feedback.share.copyPromptAction")}
 											</Button>
 										}
@@ -310,7 +353,22 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast }: Fee
 									/>
 								</div>
 								<div className="mt-auto flex flex-wrap items-center gap-2 border-t pt-3">
-									<Button variant="secondary" size="sm" onClick={() => void onClose()} disabled={false}>
+									<Button
+										variant="default"
+										size="sm"
+										onClick={() => void handleOpenIssue()}
+										disabled={!onOpenExternal}
+										title={t("feedback.openIssueHint")}
+									>
+										<Bug size={14} aria-hidden="true" />
+										<span className="ml-1.5">{t("feedback.openIssue")}</span>
+									</Button>
+									<Button
+										variant="secondary"
+										size="sm"
+										onClick={() => onOpenExternal?.("https://github.com/ayuayue/PiDeck")}
+										disabled={!onOpenExternal}
+									>
 										{t("feedback.authorGithub")}
 									</Button>
 								</div>
