@@ -32,11 +32,14 @@ test("project-scoped reads are validated in main before touching disk", () => {
   assert.match(filesIpc, /const readablePath = await resolveReadablePath\(path, boundary\)/);
   assert.match(filesIpc, /const fileStat = await stat\(readablePath\)/);
   assert.match(filesIpc, /const buffer = await readFile\(readablePath\)/);
+  assert.match(filesIpc, /const writablePath = await resolveReadablePath\(path, boundary\)/);
+  assert.match(filesIpc, /await writeFile\(writablePath, content, "utf8"\)/);
   // preload 只能传 projectId scope，不能传一个由 renderer 自报的可信根目录。
   assert.match(preload, /scope\?: ProjectFileAccessScope/);
   assert.match(preload, /filesReadContent, path, maxBytes, scope/);
   assert.match(preload, /filesPathsExist, paths, scope/);
   assert.match(preload, /filesReadBase64, path, maxBytes, scope/);
+  assert.match(preload, /filesWriteContent, path, content, scope/);
 });
 
 test("files:show-in-folder handler calls shell.showItemInFolder with Windows path conversion", () => {

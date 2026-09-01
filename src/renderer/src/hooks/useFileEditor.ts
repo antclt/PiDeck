@@ -68,8 +68,12 @@ export interface UseFileEditorInput {
   ) => Promise<string>;
   /** 读取 Git 原始内容的 API */
   readGitOriginalContent: (path: string) => Promise<string>;
-  /** 保存文件内容的 API */
-  writeFileContent: (path: string, content: string) => Promise<void>;
+  /** 保存文件内容的 API；项目来源的 tab 必须把同一授权 scope 带到写入边界 */
+  writeFileContent: (
+    path: string,
+    content: string,
+    scope?: ProjectFileAccessScope,
+  ) => Promise<void>;
   /** 系统打开文件 */
   openFile: (path: string) => Promise<void>;
   /** 获取 Git 工作区差异 */
@@ -113,7 +117,11 @@ export interface UseFileEditorOutput {
     scope?: ProjectFileAccessScope,
   ) => Promise<string>;
   readEditorOriginalContent: (path: string) => Promise<string>;
-  saveEditorFileContent: (path: string, content: string) => Promise<void>;
+  saveEditorFileContent: (
+    path: string,
+    content: string,
+    scope?: ProjectFileAccessScope,
+  ) => Promise<void>;
   openEditorTab: (
     path: string,
     mode: "view" | "diff",
@@ -262,7 +270,8 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
     [readGitOriginalContent],
   );
   const saveEditorFileContent = useCallback(
-    (path: string, content: string) => writeFileContent(path, content),
+    (path: string, content: string, scope?: ProjectFileAccessScope) =>
+      writeFileContent(path, content, scope),
     [writeFileContent],
   );
 

@@ -140,6 +140,7 @@ test("edit/write diff cards expose an accessible open-file action", () => {
   // 授权随 editor tab 固化，异步加载不能改用后来聚焦的项目。
   assert.match(fileEditor, /fileAccessScope\?: ProjectFileAccessScope/);
   assert.match(fileEditor, /readFileContent\(path, maxBytes, scope\)/);
+  assert.match(fileEditor, /writeFileContent\(path, content, scope\)/);
 });
 
 test("thinking and tool logos keep a distinct color even on the default zinc theme", () => {
