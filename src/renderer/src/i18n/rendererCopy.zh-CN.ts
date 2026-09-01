@@ -574,7 +574,6 @@ export const zhCN = {
   "app.projectNewAgent": "新建 Agent",
   "app.projectMissing": "目录不存在",
   "app.projectMissingHint": "项目目录已被删除、移动或暂时不可达（如未挂载的磁盘/未启动的 WSL）。可恢复目录，或在项目右键菜单中移除该项目。",
-  "app.projectRunning": "运行中",
   "app.projectRunningHint": "该工作区有会话正在运行（Agent 进程未退出）。",
   "app.chatProjectSettings": "修改聊天记录保存目录",
   "app.modelRestartTitle": "重启 Agent 生效",

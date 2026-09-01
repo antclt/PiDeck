@@ -37,6 +37,20 @@ export type DshRuntimeInstallerDeps = {
 
 export type DshRuntimeCommandResult = { ok: true } | { ok: false; error: string };
 
+/**
+ * 提取错误文案。
+ * 不用 `instanceof Error`：跨 realm（如 Node 测试用 vm 沙箱加载本模块）时该判定
+ * 恒为 false，会退化成 "Error: xxx" 这种带类名前缀的脏文案。取 message 字段
+ * 在两种环境下都得到干净的一手原因（与 DshRuntimeManager 同款实现）。
+ */
+function errorMessage(error: unknown): string {
+	if (error !== null && typeof error === "object" && "message" in error) {
+		const message = (error as { message?: unknown }).message;
+		if (typeof message === "string" && message.length > 0) return message;
+	}
+	return String(error);
+}
+
 export class DshRuntimeInstaller {
 	constructor(private readonly deps: DshRuntimeInstallerDeps) {}
 
@@ -109,8 +123,20 @@ export class DshRuntimeInstaller {
 	uninstall(): DshRuntimeCommandResult {
 		const active = this.deps.manager.resolveActive();
 		if (!active) return { ok: false, error: "no runtime installed" };
-		this.deps.manager.uninstall(active.dirName);
-		return { ok: true };
+		try {
+			this.deps.manager.uninstall(active.dirName);
+			return { ok: true };
+		} catch (error) {
+			// manager.uninstall 在重试耗尽（文件被持续占用，如 DSH host 未停、杀软锁句柄）
+			// 后抛错；这里收口成结构化结果，IPC 边界不再裸抛异常，渲染层弹窗会显示
+			// 友好错误而不是「未处理异常」。
+			const message = errorMessage(error);
+			this.deps.log?.("dsh-runtime", "runtime uninstall failed", {
+				dirName: active.dirName,
+				error: message,
+			});
+			return { ok: false, error: message };
+		}
 	}
 
 	/** 失败出口：推送 error 进度（让 UI 收起进度条）再返回结果。 */

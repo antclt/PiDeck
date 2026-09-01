@@ -277,9 +277,20 @@ export class DshRuntimeManager {
 	uninstall(dirName: string): boolean {
 		const target = join(this.deps.layout.runtimesRoot, dirName);
 		if (!existsSync(target)) return false;
-		rmSync(target, { recursive: true, force: true });
-		this.deps.log?.("dsh-runtime", "runtime uninstalled", { dirName });
-		return true;
+		try {
+			// Windows 上运行中进程（DSH host 持 .node 原生模块 DLL 句柄）、杀软扫描、
+			// 资源管理器打开目录都会让 rm 抛 EPERM/EBUSY。这类占用大多是瞬时锁，
+			// 用 rmSync 内置的线性退避重试（EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM）
+			// 吸收；占用持续到重试耗尽才抛错，由调用方转成结构化结果。
+			rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+			this.deps.log?.("dsh-runtime", "runtime uninstalled", { dirName });
+			return true;
+		} catch (error) {
+			const message = errorMessage(error);
+			this.deps.log?.("dsh-runtime", "runtime uninstall failed", { dirName, error: message });
+			// 抛带上下文的可读错误（含失败版本），不让裸 EPERM 跨 IPC 变成「未处理异常」。
+			throw new Error(`failed to remove runtime directory "${dirName}": ${message}`);
+		}
 	}
 
 	/**
