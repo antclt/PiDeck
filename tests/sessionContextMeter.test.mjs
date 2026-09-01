@@ -341,24 +341,30 @@ test("picker rows and provider cards use the cc-switch style inline usage", () =
   assert.match(inlineSource, /justify-end/);
   assert.match(inlineSource, /h-9/);
   assert.doesNotMatch(inlineSource, /provider-usage-configure-icon/);
+  // 「用量查询」按钮收敛到共享组件 UsageQueryEntryButton（内置支持的供应商零配置自动生效，不渲染）
+  const entryButton = readFileSync("src/renderer/src/components/app/UsageQueryEntryButton.tsx", "utf8");
+  assert.match(entryButton, /useProviderUsageRecognized/);
+  assert.match(entryButton, /provider-usage-configure-icon/);
   const authTab = readFileSync("src/renderer/src/config/AuthTab.tsx", "utf8");
   assert.match(authTab, /ProviderUsageRow\s+provider=\{name\}/);
-  assert.match(authTab, /provider-usage-configure-icon/);
+  assert.match(authTab, /UsageQueryEntryButton/);
   const dshCards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
   assert.match(dshCards, /ProviderUsageRow\s+provider=\{entry\.key\}/);
-  assert.match(dshCards, /provider-usage-configure-icon/);
+  assert.match(dshCards, /UsageQueryEntryButton/);
   const modelsTab2 = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
-  assert.match(modelsTab2, /provider-usage-configure-icon/);
+  assert.match(modelsTab2, /UsageQueryEntryButton/);
   // 旧胶囊徽标组件已删除（cc-switch 风格无胶囊）
   assert.equal(existsSync("src/renderer/src/components/app/ProviderUsageBadge.tsx"), false);
 });
 
-test("provider card footer omits the entire usage row when no usable result exists", () => {
+test("provider card footer omits the entire usage row when no usable result and no leading", () => {
   const source = readFileSync("src/renderer/src/components/app/ProviderUsageInline.tsx", "utf8");
-  // 没有成功且可展示的结果时，卡片不应留下 border/h-9 空行；成功后才挂载整行。
+  // 没有成功且可展示的结果、也没有 leading（模型数量）时，卡片不应留下 border/h-9 空行；
+  // 提供 leading 时行常驻渲染（模型数量要一直可见），右侧用量有则显示、无则留空。
   const rowSource = source.slice(source.indexOf("export function ProviderUsageRow"));
   assert.match(rowSource, /const entry = useProviderUsageEntry\(props\.provider, props\.backend\)/);
-  assert.match(rowSource, /if \(!props\.provider \|\| !hasUsableUsage\(entry\.result\)\) return null;/);
+  assert.match(rowSource, /if \(!props\.leading && !hasUsable\) return null;/);
+  assert.match(rowSource, /hasUsable \? <ProviderUsageFooter/);
   assert.doesNotMatch(source, /空占位/);
   assert.doesNotMatch(source, /inline-flex h-5 items-center/);
 });

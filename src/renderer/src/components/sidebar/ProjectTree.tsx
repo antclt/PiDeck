@@ -1,4 +1,4 @@
-import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, List, Plus, Settings2, UserPlus } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, List, Plus, RefreshCw, Settings2, UserPlus } from "lucide-react";
 import type { DragEvent } from "react";
 import type { Project, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
@@ -335,8 +335,8 @@ export function ProjectTree(props: {
     <>
       {workspaceProjects.length > 0 && (
         <section aria-label={t("app.sidebarProjects")} role="tree">
-        {/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）。
-            不设空 ⋯ 菜单（无低频入口时纯装饰，易被误认成搜索残留）。 */}
+        {/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
+            + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。 */}
           <div className="flex items-center justify-between px-1 pb-1">
             <span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
             <div className="flex items-center gap-0.5">
@@ -364,6 +364,26 @@ export function ProjectTree(props: {
               >
                 <ChevronsDownUp size={14} aria-hidden="true" />
               </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label={t("sidebar.moreActions")}
+                    title={t("sidebar.moreActions")}
+                  >
+                    <Ellipsis size={14} aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" sideOffset={4} className="min-w-36">
+                  <DropdownMenuItem onSelect={() => void props.actions.projects.refreshAll()}>
+                    <RefreshCw className="size-3.5" aria-hidden="true" />
+                    {t("app.projectRefreshAll")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
           {workspaceProjects.map(renderProject)}
@@ -373,8 +393,28 @@ export function ProjectTree(props: {
           此前该分组整体不渲染，用户不知道可以添加项目目录，误以为只能聊天（issue #149）。 */}
       {workspaceProjects.length === 0 && (
         <section aria-label={t("app.sidebarProjects")} className="mt-1">
-          <div className="px-1 pb-1 text-caption font-medium text-muted-foreground">
-            {t("app.sidebarProjects")}
+          <div className="flex items-center justify-between px-1 pb-1">
+            <span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label={t("sidebar.moreActions")}
+                  title={t("sidebar.moreActions")}
+                >
+                  <Ellipsis size={14} aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4} className="min-w-36">
+                <DropdownMenuItem onSelect={() => void props.actions.projects.refreshAll()}>
+                  <RefreshCw className="size-3.5" aria-hidden="true" />
+                  {t("app.projectRefreshAll")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div className="mx-1 rounded-lg border border-dashed border-border-subtle bg-muted/20 px-3 py-4 text-center">
             <FolderPlus className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden="true" />

@@ -29,3 +29,13 @@ test("files:show-in-folder handler calls shell.showItemInFolder with Windows pat
   );
   assert.ok(block, "filesShowInFolder handler must call shell.showItemInFolder(toWindowsPath(path))");
 });
+
+test("files:list maps a deleted project root to a stable missing-directory error", () => {
+  const block = filesIpc.match(
+    /ipcMain\.handle\(\s*ipcChannels\.filesList,[\s\S]*?\n\t\);/,
+  );
+  assert.ok(block, "filesList handler should be discoverable");
+  // 只转换根 listing 的 ENOENT；展开子目录的竞态错误保留原始上下文，便于定位具体路径。
+  assert.match(block[0], /if \(!directory && \(error as NodeJS\.ErrnoException\)\.code === "ENOENT"\)/);
+  assert.match(block[0], /throw new Error\("PROJECT_DIRECTORY_MISSING"\)/);
+});

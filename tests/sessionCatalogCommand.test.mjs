@@ -109,6 +109,47 @@ async function settleAfterMicrotasks() {
   await Promise.resolve();
 }
 
+test("refresh-all rescans project presence and skips missing worktree Git probes", async () => {
+  const useProjectSync = createHookForRuntimeTest();
+  const nextProjects = [
+    { id: "project-1", kind: "workspace", path: "/missing", worktreeEnabled: true, missing: true },
+    { id: "project-2", kind: "workspace", path: "/present", worktreeEnabled: true },
+  ];
+  const worktreeRequests = [];
+  const toastMessages = [];
+  const input = makeHookInput(async () => []);
+  input.api.projects.list = async () => nextProjects;
+  input.api.git.worktreeList = async (projectId) => {
+    worktreeRequests.push(projectId);
+    return [];
+  };
+  input.showToast = (message) => toastMessages.push(message);
+  input.t = (key, params) => `${key}:${params?.count ?? ""}`;
+  const sync = useProjectSync(input);
+
+  await sync.refreshAllProjects();
+  await settleAfterMicrotasks();
+
+  assert.deepEqual([...worktreeRequests], ["project-2"]);
+  assert.deepEqual([...toastMessages], ["app.projectsRefreshed:2"]);
+});
+
+test("refresh-all reports list failures without rejecting the UI action", async () => {
+  const useProjectSync = createHookForRuntimeTest();
+  const input = makeHookInput(async () => []);
+  const toastMessages = [];
+  input.api.projects.list = async () => {
+    throw new Error("list unavailable");
+  };
+  input.showToast = (message) => toastMessages.push(message);
+  input.t = (key, params) => `${key}:${params?.error ?? ""}`;
+  const sync = useProjectSync(input);
+
+  await sync.refreshAllProjects();
+
+  assert.deepEqual([...toastMessages], ["app.projectsRefreshFailed:list unavailable"]);
+});
+
 test("initial and collision callers share the final pending completion", async () => {
   const firstScan = createDeferred();
   const pendingScan = createDeferred();
