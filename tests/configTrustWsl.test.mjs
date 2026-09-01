@@ -93,6 +93,25 @@ function loadConfigManager() {
 			if (id === "../dsh/pideckDshHome") {
 				return { pideckUsageProbesDir: (value) => value };
 			}
+			// ConfigManager 依赖 ../../shared/dshProviderNames 的 normalizeDshDeepseekProvider；.ts 经 node 类型剥离可 require。
+			if (id === "../../shared/dshProviderNames") {
+				return require("../src/shared/dshProviderNames.ts");
+			}
+			// ConfigManager 依赖 ./dshUsageEndpoint；其依赖（dshCredentialRef/dshProviderNames/providerMigration）均已被上面 stub。
+			if (id === "./dshUsageEndpoint") {
+				const src = readFileSync("src/main/config/dshUsageEndpoint.ts", "utf8");
+				const out = ts.transpileModule(src, {
+					compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+				}).outputText;
+				const m = { exports: {} };
+				vm.runInNewContext(out, {
+					...sandbox,
+					module: m,
+					exports: m.exports,
+					require: sandbox.require,
+				}, { filename: "dshUsageEndpoint.ts" });
+				return m.exports;
+			}
 			return require(id);
 		},
 	};

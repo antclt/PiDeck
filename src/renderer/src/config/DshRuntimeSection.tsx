@@ -141,7 +141,7 @@ export function DshRuntimeSection({
 					{busy ? (
 						<div className="mt-1 flex w-full flex-col items-center gap-2">
 							<div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-								<LoaderCircle className="size-3.5 animate-spin" />
+								<LoaderCircle className="size-3.5 animate-pideck-spin" />
 								{uninstalling ? t("dsh.runtime.phase.uninstalling") : phaseLabel}
 							</div>
 							{/* 卸载没有可换算的百分比，只显示不确定进度条。 */}
@@ -188,7 +188,7 @@ export function DshRuntimeSection({
 				{busy ? (
 					<div className="flex w-full flex-col items-center gap-2">
 						<div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-							<LoaderCircle className="size-3.5 animate-spin" />
+							<LoaderCircle className="size-3.5 animate-pideck-spin" />
 							{uninstalling ? t("dsh.runtime.phase.uninstalling") : phaseLabel}
 						</div>
 						<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={uninstalling ? undefined : percent} aria-valuemin={0} aria-valuemax={100}>
