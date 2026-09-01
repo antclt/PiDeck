@@ -168,12 +168,31 @@ test("bottom-settle history clear invalidates in-flight runtime history pages", 
   assert.match(source, /isTimelineAtBottom\(timeline\.scrollTop/);
 });
 
-test("prepend scroll compensation is skipped while following bottom and marks programmatic scroll", () => {
+test("prepend scroll compensation is skipped while following bottom and pins via restoreAt", () => {
   // 跟底中（autoScrollRef=true）不恢复旧锚点：贴底引擎负责生长补偿，避免把用户拽回顶部；
-  // 非跟底时标记程序化滚动，防止补偿的 scrollTop 赋值触发 ≤240px 自动加载。
+  // 非跟底时走 pinViewportAfterPrepend（restoreAt），禁止原生 scrollTop 补偿。
   assert.match(source, /if \(autoScrollRef\.current\) \{\n\s*loadMoreAnchorRef\.current = undefined;\n\s*return;\n\s*\}/);
-  assert.match(source, /programmaticScrollRef\.current = true;\n\s*timeline\.scrollTop = nextScrollTop;/);
+  assert.match(source, /pinViewportAfterPrepend\(nextScrollTop\)/);
+  assert.doesNotMatch(source, /timeline\.scrollTop = nextScrollTop/);
   assert.match(source, /requestAnimationFrame\(\(\) => \{\n\s*programmaticScrollRef\.current = false;/);
+});
+
+test("escaping follow mode and expanding the window unlock the stick-to-bottom engine", () => {
+  // 只改 React autoScroll、不 stopScroll 时，扩窗增高会被 RO 在 isAtBottom 下钉回底部。
+  assert.match(
+    source,
+    /const escapeAutoScroll = useCallback\(\(\) => \{[\s\S]*?scrollerScrollApiRef\.current\?\.stopScroll\(\);/,
+  );
+  assert.match(
+    source,
+    /const expandWindow = useCallback\([\s\S]*?escapeAutoScroll\(\);[\s\S]*?setScrolledWindowTurns/,
+  );
+});
+
+test("prepend pin uses restoreAt so ResizeObserver cannot re-lock to the bottom", () => {
+  assert.match(source, /const pinViewportAfterPrepend = useCallback\(\(nextTop: number\) => \{/);
+  assert.match(source, /api\?\.restoreAt/);
+  assert.match(source, /api\.restoreAt\(nextTop\)/);
 });
 
 test("load-more compensation is skipped at the very top so prepended content stays visible", () => {

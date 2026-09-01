@@ -253,6 +253,11 @@ export type SessionTimelineController = {
   /** 标记一次程序化滚动（turn 窗口展开补偿等组件内补偿用），抑制自动加载监听。
    *  durationMs > 0 时按时间窗口抑制（连续 smooth scroll 会派发多个 scroll 事件）。 */
   markProgrammaticScroll: (durationMs?: number) => void;
+  /**
+   * 顶部插入（扩窗/翻页）后钉住当前视口：走引擎 restoreAt（定位 + 解锁 + ignoreScrollToTop）。
+   * 引擎未挂上时回退原生 scrollTop。
+   */
+  pinViewportAfterPrepend: (nextTop: number) => void;
   jumpToMessage: (messageId: string) => void;
   scrollToBottom: () => void;
   /** Receives wheel input from the sibling outline rail without bypassing timeline scroll ownership. */
@@ -646,6 +651,9 @@ export function useSessionTimelineController(options: {
     }
   }, []);
   const escapeAutoScroll = useCallback(() => {
+    // 先解引擎：只改 React autoScroll 会留下 isAtBottom=true，扩窗增高时 RO 钉底。
+    // autoScroll 已是 false 也要 stopScroll——两套状态可能已经分叉。
+    scrollerScrollApiRef.current?.stopScroll();
     if (!autoScrollRef.current) return;
     autoScrollRef.current = false;
     setAutoScroll(false);
@@ -673,14 +681,10 @@ export function useSessionTimelineController(options: {
   const expandWindow = useCallback((turns = TIMELINE_WINDOW_EXPAND_STEP) => {
     // 跟底状态（内容短于视口、按钮可见）下点击「显示更早」：先解锁跟随，
     // 否则 turnWindowTurns 恒取贴底窗口 3 轮，扩大 scrolledWindowTurns 不生效，
-    // 按钮点击表现为无反应（2026-02 修复）。
-    if (autoScrollRef.current) {
-      autoScrollRef.current = false;
-      setAutoScroll(false);
-      setShowScrollToBottom(true);
-    }
+    // 按钮点击表现为无反应（2026-02 修复）。escapeAutoScroll 同时 stopScroll。
+    escapeAutoScroll();
     setScrolledWindowTurns((prev) => prev + Math.max(1, turns));
-  }, []);
+  }, [escapeAutoScroll]);
   // 回底/卸载时取消未消费的分批扩展（窗口重置回基础大小，pending 作废）
   useEffect(() => {
     if (autoScroll) {
@@ -789,6 +793,21 @@ export function useSessionTimelineController(options: {
       });
     }
   }, []);
+
+  /**
+   * 顶部插入内容后钉住当前视口。必须走 restoreAt：原生 scrollTop 赋值不会解锁引擎，
+   * ResizeObserver 在 isAtBottom 时会把视口钉回底部（上滑扩窗跳到最新一轮的根因）。
+   */
+  const pinViewportAfterPrepend = useCallback((nextTop: number) => {
+    markProgrammaticScroll();
+    const api = scrollerScrollApiRef.current;
+    if (api?.restoreAt) {
+      api.restoreAt(nextTop);
+      return;
+    }
+    const timeline = timelineRef.current;
+    if (timeline) timeline.scrollTop = nextTop;
+  }, [markProgrammaticScroll]);
 
   /**
    * 最新轮结束 1.5s 且用户无操作、执行过程自动收起后，把该轮最终回答开头放到视口中上方。
@@ -1310,18 +1329,11 @@ lastHistoryLoadAtRef.current = now;
       });
       return () => cancelAnimationFrame(topFrame);
     }
-    // 标记程序化滚动：prepend 补偿的 scrollTop 赋值会触发 scroll 事件，
-    // 不能让 ≤8px 自动加载监听把它当成用户上滚（否则连锁翻页）。
-    // rAF 兜底：若补偿实际无位移（delta=0）不产生 scroll 事件，需清掉抑制标记，
-    // 避免吞掉下一次用户滚动（scroll 事件任务先于 rAF 派发，顺序安全）。
-    programmaticScrollRef.current = true;
-    timeline.scrollTop = nextScrollTop;
+    // restoreAt：定位 + 解锁锁底 + ignoreScrollToTop，补偿造成的 scrollTop 增大
+    // 不会被引擎当成用户下滚重锁。markProgrammaticScroll 抑制 controller 自己的扩窗监听。
+    pinViewportAfterPrepend(nextScrollTop);
     loadMoreAnchorRef.current = undefined;
-    const frame = requestAnimationFrame(() => {
-      programmaticScrollRef.current = false;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [controllerEnabled, ownerKey, visibleMessages.length]);
+  }, [controllerEnabled, ownerKey, pinViewportAfterPrepend, visibleMessages.length]);
 
   useEffect(() => {
     if (!controllerEnabled || !pendingJump) return;
@@ -1387,6 +1399,7 @@ lastHistoryLoadAtRef.current = now;
     isLoadingMoreMessages: diskPage || historyHasMore ? isLoadingMessagePage : false,
     loadMoreMessages,
     markProgrammaticScroll,
+    pinViewportAfterPrepend,
     jumpToMessage,
     scrollToBottom,
     scrollTimelineBy,

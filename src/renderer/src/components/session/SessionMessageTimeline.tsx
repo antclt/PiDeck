@@ -622,6 +622,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     height: 0,
     turns: 0,
   });
+  const pinViewportAfterPrepend = controller.pinViewportAfterPrepend;
   useLayoutEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) return;
@@ -635,19 +636,17 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     ) {
       // 所有窗口扩张都锚定当前视口：新内容只出现在上方，正在读的行不被推走。
       // 顶部场景同样补偿，避免「加载后整屏往上跳」；按钮与滚动加载体验统一。
-      const nextTop = restoreTimelineAnchor(
-        timeline.scrollTop,
-        nextHeight - prev.height,
+      // 必须走 restoreAt：原生 scrollTop 不会解锁引擎，RO 会在 isAtBottom 时钉回底部。
+      pinViewportAfterPrepend(
+        restoreTimelineAnchor(timeline.scrollTop, nextHeight - prev.height),
       );
-      controller.markProgrammaticScroll?.();
-      timeline.scrollTop = nextTop;
     }
     turnWindowStateRef.current = {
       windowed: turnWindowActive,
       height: nextHeight,
       turns: turnWindowTurns,
     };
-  }, [controller, displayRuns, followingForTurnWindow, timelineRef, turnWindowActive, turnWindowTurns]);
+  }, [displayRuns, followingForTurnWindow, pinViewportAfterPrepend, timelineRef, turnWindowActive, turnWindowTurns]);
   // 文件修改由 SessionView 提取最近一轮并放在 composer 上方；时间线只负责渲染消息。
   // 时间线里已有用户图片才解析模型目录：原生看图时气泡不能显示视觉桥「转换中」。
   const hasUserImages = useMemo(
