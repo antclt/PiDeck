@@ -16,6 +16,14 @@ const runtimeBridge = readFileSync(
   "utf8",
 );
 
+test("project change events re-read presence-aware inventory before replacing atoms", () => {
+  const changedBlock = source.match(/const offProjects = desktopApi\.projects\.onChanged\(\(\) => \{[\s\S]*?\n    \}\);/);
+  assert.ok(changedBlock, "projects.onChanged handler should be discoverable");
+  assert.match(changedBlock[0], /desktopApi\.projects\.list\(\)/);
+  assert.match(changedBlock[0], /store\.set\(replaceProjectInventoryAtom, projects\)/);
+  assert.doesNotMatch(changedBlock[0], /onChanged\(\(projects\)/);
+});
+
 test("global listener owner handles non-runtime application events only", () => {
   for (const listener of [
     "projects.onChanged",

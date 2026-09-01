@@ -67,7 +67,17 @@ export function registerFilesIpc({
 			? options.directory.trim()
 			: undefined;
 		// directory 必须落在项目内；越界由 FileSystemService.listTree 拒绝。
-		return fileSystemService.listTree(toWindowsPath(project.path), maxDepth, directory);
+		const projectPath = toWindowsPath(project.path);
+		try {
+			return await fileSystemService.listTree(projectPath, maxDepth, directory);
+		} catch (error) {
+			// 项目根被外部删除时用稳定错误码替代 Node/Electron 的整段 ENOENT scandir，
+			// 渲染层据此清空陈旧文件树、刷新项目 presence，并显示可操作的本地化提示。
+			if (!directory && (error as NodeJS.ErrnoException).code === "ENOENT") {
+				throw new Error("PROJECT_DIRECTORY_MISSING");
+			}
+			throw error;
+		}
 	});
 
 	ipcMain.handle(ipcChannels.filesOpen, async (_event, path: string) => {

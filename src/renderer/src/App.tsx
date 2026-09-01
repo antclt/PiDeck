@@ -464,6 +464,7 @@ export function App() {
     setSessionLoadingByProject,
     setVisibleProjectChildCountByProject,
     refreshProjects,
+    refreshAllProjects,
     refreshWorktrees,
     refreshProjectSessions,
     refreshFiles,
@@ -1991,10 +1992,17 @@ export function App() {
         console.error("[Files] refresh failed", error);
         const message = error instanceof Error ? error.message : String(error);
         const tooLarge = message.match(/FILE_TREE_DIRECTORY_TOO_LARGE:(\d+):(\d+)/);
+        const projectDirectoryMissing = message.includes("PROJECT_DIRECTORY_MISSING");
+        if (projectDirectoryMissing) {
+          // 项目在启动/切换期间被外部删除：清空树后重扫项目 presence，侧栏马上标出失效目录。
+          void refreshProjects().catch(() => undefined);
+        }
         showToast(
           tooLarge
             ? t("app.filesDirectoryTooLarge", { count: tooLarge[1], max: tooLarge[2] })
-            : t("app.filesRefreshFailed", { error: message }),
+            : projectDirectoryMissing
+              ? t("app.projectDirectoryMissing")
+              : t("app.filesRefreshFailed", { error: message }),
           4000,
         );
       }
@@ -2010,6 +2018,8 @@ export function App() {
     return () => {
       cancelled = true;
     };
+  // 该 effect 只应由项目身份切换触发；refreshProjects 是 hook 每次渲染返回的命令，
+  // 放入依赖会让 setFiles 后再次触发扫描，形成文件树刷新循环。
   }, [activeProjectId, beginFileTreeRequest, isFileTreeRequestCurrent, loadExpandedDirs]);
 
   useEffect(() => {
@@ -2995,6 +3005,7 @@ export function App() {
         const project = projects.find((candidate) => candidate.id === projectId);
         if (project) await refreshProjectTree(project);
       },
+      refreshAll: refreshAllProjects,
       reorder: reorderProjects,
       reveal: (project) => api.files.showInFolder(project.path),
       openWithEditor: (project) => {
@@ -3873,8 +3884,12 @@ export function App() {
                 await api.files.delete(node.path, true);
                 void refreshVisibleFiles();
                 showToast(t("app.fileDeleted"), 2000);
-              } catch (e) {
-                console.error("[File] 删除失败:", e);
+              } catch (error) {
+                // 回收站不可用、权限不足或文件已被外部移走时，必须把主进程错误呈现给用户；
+                // 仅写控制台会让确认框关闭后看起来像“点击无效”。
+                showToast(t("app.fileDeleteFailed", {
+                  error: String(error instanceof Error ? error.message : error).replace(/^Error:\s*/, ""),
+                }), 5000, "error");
               }
             },
           });

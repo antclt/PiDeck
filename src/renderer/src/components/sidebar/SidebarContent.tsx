@@ -36,6 +36,8 @@ export type SidebarActions = {
     add: () => Promise<void>;
     select: (projectId: string) => void;
     refresh: (projectId: string) => Promise<void>;
+    /** 重扫所有项目目录的存在性并刷新侧栏清单。 */
+    refreshAll: () => Promise<void>;
     reorder: (sourceProjectId: string, targetProjectId: string) => Promise<void>;
     reveal: (project: Project) => Promise<void>;
     openWithEditor: (project: Project) => void;

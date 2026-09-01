@@ -478,6 +478,8 @@ function broadcastVisibleProjects(): void {
 	const visible = s.wslEnabled
 		? projectStore.list().filter((p) => p.kind === "chat" || p.environment === "wsl")
 		: projectStore.list().filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
+	// 这里只广播 store 清单；渲染层接到事件后会再调用 projects:list 附加实时 presence。
+	// 直接把未检测版本写进 atom 会短暂抹掉 missing 标记，使失效目录看起来又恢复正常。
 	window.webContents.send(ipcChannels.projectsChanged, visible);
 }
 
