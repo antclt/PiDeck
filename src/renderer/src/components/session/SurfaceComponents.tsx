@@ -9,6 +9,8 @@ import {
 	useRef,
 	useState,
 	type CSSProperties,
+	type RefObject,
+	type WheelEvent as ReactWheelEvent,
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
@@ -18,6 +20,8 @@ import { writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
 import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
 import { planRailTicks } from "./timeline/outlineRailTicks";
+import { resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
+import { useTimelineOutlineActiveId } from "./timeline/useTimelineOutlineActiveId";
 import { useAtomValue } from "jotai";
 import "katex/dist/katex.min.css";
 
@@ -1407,11 +1411,13 @@ export { MultiSelectModal };
  */
 export function ConversationOutline(props: {
 	className?: string;
+	timelineRef?: RefObject<HTMLElement | null>;
+	onTimelineWheel?: (deltaY: number) => void;
 	items: Array<{ id: string; role: string; title: string; time: string }>;
 	onJump: (id: string) => void;
 }) {
-	// 跳转目标只作高亮反馈；会话切换后旧 id 不在新条目里时不高亮，避免错误落在第一条
-	const [railActiveId, setRailActiveId] = useState<string | undefined>(undefined);
+	// The visible timeline checkpoint owns rail feedback; clicking a tick updates it immediately.
+	const [railActiveId, setRailActiveId] = useTimelineOutlineActiveId(props.timelineRef, props.items);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [availableHeight, setAvailableHeight] = useState(0);
 	// 容器高度由 top/bottom 夹持（不随内容变化），ResizeObserver 重测不会形成反馈环；
@@ -1439,11 +1445,26 @@ export function ConversationOutline(props: {
 			})),
 		[plan.items],
 	);
-	const railActiveVisible =
-		railActiveId !== undefined && railItems.some((item) => item.id === railActiveId);
+	const visibleRailActiveId = useMemo(
+		() => resolveVisibleRailActiveId(railActiveId, props.items, plan.items),
+		[railActiveId, props.items, plan.items],
+	);
+
+	const handleTimelineWheel = useCallback(
+		(event: ReactWheelEvent<HTMLDivElement>) => {
+			if (!props.onTimelineWheel || event.deltaY === 0) return;
+			event.preventDefault();
+			props.onTimelineWheel(event.deltaY);
+		},
+		[props.onTimelineWheel],
+	);
 
 	return (
-		<div ref={containerRef} className={cn("outline-hover", props.className)}>
+		<div
+			ref={containerRef}
+			onWheel={handleTimelineWheel}
+			className={cn("outline-hover pointer-events-none", props.className)}
+		>
 			{railItems.length > 0 && (
 				<PreviewRail
 					orientation="vertical"
@@ -1451,14 +1472,14 @@ export function ConversationOutline(props: {
 					label={t("outline.title")}
 					itemSize={plan.itemSize}
 					previewSide="before"
-					activeId={railActiveId}
-					highlightActive={railActiveVisible}
+					activeId={visibleRailActiveId}
+					highlightActive={visibleRailActiveId !== undefined}
 					onItemSelect={(item) => {
 						setRailActiveId(item.id);
 						props.onJump(item.id);
 					}}
 					/* 宽度对齐原触发按钮（30px），min-h-0 抵消组件自带的演示高度 */
-					className="min-h-0 w-[30px]"
+					className="pointer-events-auto min-h-0 w-[30px]"
 					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
 					previewContainerClassName="inset-y-0 right-7 left-auto w-64"
 					previewClassName="[&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-1 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"

@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import {
   useStickToBottom,
   type ScrollToBottom,
+  type ScrollByWheel,
   type StopScroll,
 } from "@/lib/stick-to-bottom";
 
@@ -31,6 +32,8 @@ export type MessageScrollerScrollApi = {
   restoreAt: (scrollTop: number) => void;
   /** 解锁锁底并取消在途弹簧，发送置顶动画插入垫片前必须先调，否则 RO 会瞬间贴底。 */
   stopScroll: StopScroll;
+  /** Routes wheel input from sibling controls through the stick-to-bottom engine. */
+  scrollByWheel: ScrollByWheel;
 };
 
 export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
@@ -115,6 +118,7 @@ export function MessageScroller({
   const engineIsAtBottom = stick.isAtBottom;
   const engineRestoreAt = stick.restoreAt;
   const engineStopScroll = stick.stopScroll;
+  const engineScrollByWheel = stick.scrollByWheel;
 
   // 把引擎能力挂到外部 ref，供 SessionTimelineController 的回底按钮/历史位置恢复使用。
   useEffect(() => {
@@ -123,6 +127,7 @@ export function MessageScroller({
       scrollToBottom: engineScrollToBottom,
       restoreAt: engineRestoreAt,
       stopScroll: engineStopScroll,
+      scrollByWheel: engineScrollByWheel,
     };
     if (typeof scrollApiRef === "function") {
       scrollApiRef(api);
@@ -134,7 +139,7 @@ export function MessageScroller({
     return () => {
       scrollApiRef.current = null;
     };
-  }, [scrollApiRef, engineScrollToBottom, engineRestoreAt, engineStopScroll]);
+  }, [scrollApiRef, engineScrollToBottom, engineRestoreAt, engineStopScroll, engineScrollByWheel]);
 
   const setViewportRef = useCallback(
     (node: HTMLElement | null) => {

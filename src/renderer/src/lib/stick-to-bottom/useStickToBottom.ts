@@ -135,6 +135,7 @@ export type ScrollToBottom = (
 ) => Promise<boolean> | boolean;
 
 export type StopScroll = () => void;
+export type ScrollByWheel = (deltaY: number) => void;
 
 /** 原子恢复任意滚动位置（会话切换回历史查看位置用）。
  *  与原生 scrollTop 赋值的区别：定位 + 解锁锁底 + 取消在途动画一次完成，
@@ -173,6 +174,7 @@ export interface StickToBottomInstance {
   scrollRef: React.MutableRefObject<HTMLElement | null> & React.RefCallback<HTMLElement>;
   scrollToBottom: ScrollToBottom;
   stopScroll: StopScroll;
+  scrollByWheel: ScrollByWheel;
   /** 原子恢复位置：写 scrollTop 的同时解除锁底并取消在途弹簧动画。 */
   restoreAt: RestoreAt;
   isAtBottom: boolean;
@@ -492,9 +494,10 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
     [setEscapedFromLock, setIsAtBottom, isSelecting, state],
   );
 
-  const handleWheel = useCallback(
-    ({ target, deltaY }: WheelEvent) => {
-      let element = target as HTMLElement;
+  const applyWheelEscape = useCallback(
+    (target: EventTarget | null, deltaY: number) => {
+      if (!(target instanceof HTMLElement)) return;
+      let element = target;
       while (!["scroll", "auto"].includes(getComputedStyle(element).overflow)) {
         if (!element.parentElement) {
           return;
@@ -533,6 +536,11 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
     [setEscapedFromLock, setIsAtBottom, state],
   );
 
+  const handleWheel = useCallback(
+    ({ target, deltaY }: WheelEvent) => applyWheelEscape(target, deltaY),
+    [applyWheelEscape],
+  );
+
   const scrollRef = useRefCallback((scroll) => {
     scrollRef.current?.removeEventListener("scroll", handleScroll);
     scrollRef.current?.removeEventListener("wheel", handleWheel);
@@ -540,6 +548,13 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
     scroll?.addEventListener("wheel", handleWheel, { passive: true });
   }, []);
 
+  /** Uses the same wheel-escape rules when input originates outside the viewport. */
+  const scrollByWheel = useCallback<ScrollByWheel>((deltaY) => {
+    const scroll = scrollRef.current;
+    if (!scroll || !Number.isFinite(deltaY) || deltaY === 0) return;
+    applyWheelEscape(scroll, deltaY);
+    scroll.scrollBy({ top: deltaY });
+  }, [applyWheelEscape]);
   const contentRef = useRefCallback((content) => {
     state.resizeObserver?.disconnect();
     if (!content) {
@@ -642,6 +657,7 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
     scrollRef,
     scrollToBottom,
     stopScroll,
+    scrollByWheel,
     restoreAt,
     /**
      * 对外「是否锁底跟随」只用严格 isAtBottom。

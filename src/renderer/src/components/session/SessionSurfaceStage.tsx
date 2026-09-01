@@ -42,6 +42,8 @@ export function SessionSurfaceStage(props: {
 		<div className="relative h-full min-h-0">
             <ConversationOutline
               className="session-outline-pane"
+              timelineRef={sessionTimeline.timelineRef}
+              onTimelineWheel={sessionTimeline.scrollTimelineBy}
               items={outlineItems}
               onJump={sessionTimeline.jumpToMessage}
             />
