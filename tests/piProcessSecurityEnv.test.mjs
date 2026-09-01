@@ -158,6 +158,26 @@ test("默认（未开启总开关）且存在禁用项时注入 --no-extensions 
 	assert.equal(captured.args[idx + 4], "/mnt/c/ext/b.ts");
 });
 
+test("自动标题设置以显式环境标志注入 pi 进程", async () => {
+	const disabled = loadPiProcess();
+	const disabledProc = new disabled.PiProcess(
+		"C:\\proj",
+		{ autoSessionTitle: false, wslEnabled: true, wslDistro: "Ubuntu", wslUser: "root" },
+		disabled.mockLocator,
+	);
+	await disabledProc.start(undefined, undefined, true);
+	assert.equal(disabled.getCaptured()?.env?.PIDECK_AUTO_SESSION_TITLE, "0");
+
+	const enabled = loadPiProcess();
+	const enabledProc = new enabled.PiProcess(
+		"C:\\proj",
+		{ wslEnabled: true, wslDistro: "Ubuntu", wslUser: "root" },
+		enabled.mockLocator,
+	);
+	await enabledProc.start(undefined, undefined, true);
+	assert.equal(enabled.getCaptured()?.env?.PIDECK_AUTO_SESSION_TITLE, "1");
+});
+
 test("白名单总开关 disableExtensionWhitelist=true 时不再注入 --no-extensions/-e", async () => {
 	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
 	// resolver 返回白名单路径（模拟存在禁用项），但总开关开启时应整体忽略白名单

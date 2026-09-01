@@ -91,6 +91,11 @@ export type AppSettings = {
 	/** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 	sessionTabOpenMode: SessionTabOpenMode;
 	/**
+	 * 是否在首轮 agent 成功结束后，用当前 pi 模型异步生成会话标题。
+	 * 默认开启；设置只在新建或重启 Agent 进程时注入，关闭不影响已有会话的主 agent。
+	 */
+	autoSessionTitle: boolean;
+	/**
 	 * Agent 忙碌时发送消息的默认投递行为。
 	 * "steer"=插入当前回合（模型在本次回合内尽快看到）；"followUp"=排队，当前回合结束后自动发送。
 	 * 仅决定渲染层入队后的默认投递语义；pi/dsh 主进程各自映射到 wire 协议

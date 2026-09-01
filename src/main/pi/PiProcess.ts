@@ -32,6 +32,7 @@ type PiProcessSettings = Pick<
   | "removedBuiltInExtensions"
   | "disabledExtensions"
   | "disableExtensionWhitelist"
+  | "autoSessionTitle"
 >;
 
 type PiProcessLocator = Pick<
@@ -459,6 +460,9 @@ export class PiProcess extends EventEmitter {
     if (this.options.feishuLinked) {
       env.PIDECK_FEISHU_LINKED = "1";
     }
+    // 会话自动标题由 PiDeck 内置扩展在 agent_settled 后独立调用模型；
+    // 显式注入 0/1，避免继承宿主环境中的同名变量。设置变更对新建/重启 Agent 生效。
+    env.PIDECK_AUTO_SESSION_TITLE = this.settings?.autoSessionTitle === false ? "0" : "1";
 
     // 每个 agent 绑定独立 cwd，确保 pi 自己发现项目级 AGENTS.md、settings 和 session 分组。
     // 打包后的 Electron 不一定继承用户终端 PATH；这里补齐跨平台 Node 工具链常见 bin 目录，尽量让已安装 pi 的用户开箱即用。

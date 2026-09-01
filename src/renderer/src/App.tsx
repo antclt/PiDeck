@@ -620,6 +620,8 @@ export function App() {
     disabledExtensions: [],
     disableExtensionWhitelist: false,
     sessionTabOpenMode: "preview",
+    // 与 main SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
+    autoSessionTitle: true,
     // 与 main SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
     busySendDelivery: "steer",
     enableGitManagement: true,

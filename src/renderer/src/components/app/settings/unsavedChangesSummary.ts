@@ -64,6 +64,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "language", tab: "common", itemKey: "settings.language" },
 	{ field: "sessionTabOpenMode", tab: "common", itemKey: "settings.sessionTabOpenMode" },
+	{ field: "autoSessionTitle", tab: "common", itemKey: "settings.autoSessionTitle" },
 	{ field: "sendShortcut", tab: "common", itemKey: "settings.inputShortcut" },
 	{ field: "defaultAgentBackend", tab: "common", itemKey: "settings.defaultAgentBackend" },
 	{ field: "busySendDelivery", tab: "common", itemKey: "settings.busySendDelivery" },

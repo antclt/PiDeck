@@ -12,6 +12,7 @@ export const BUILT_IN_EXTENSIONS = [
 	"pi-deck-plan-mode.ts",
 	"pi-deck-retry-no-body.ts",
 	"pi-deck-security-gate.ts",
+	"pi-deck-session-title.ts",
 	"pi-deck-subagents.ts",
 	"pi-deck-todo.ts",
 	"pi-deck-vision.ts",

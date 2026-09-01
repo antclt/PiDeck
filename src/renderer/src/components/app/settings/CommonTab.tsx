@@ -116,6 +116,13 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
             </SelectContent>
           </Select>
         </SettingRow>
+        <SettingSwitchRow
+          title={t("settings.autoSessionTitle")}
+          description={t("settings.autoSessionTitleDesc")}
+          checked={draft.autoSessionTitle ?? true}
+          dirty={isDirty("autoSessionTitle")}
+          onChange={(checked) => updateDraft({ autoSessionTitle: checked })}
+        />
         <SettingRow
           title={
             <>

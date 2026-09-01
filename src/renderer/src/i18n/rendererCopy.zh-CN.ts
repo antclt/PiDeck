@@ -2796,6 +2796,8 @@ export const zhCN = {
   "settings.languageZh": "简体中文",
   "settings.languageEn": "English",
   "settings.sessionTabOpenMode": "会话 Tab 打开方式",
+  "settings.autoSessionTitle": "自动生成会话标题",
+  "settings.autoSessionTitleDesc": "首轮 Agent 成功结束后，用当前 pi 模型异步生成标题；不修改主提示词或会话消息。关闭后需新建或重启 Agent 才生效。",
   "settings.sessionTabOpenModePreview": "预览（发消息后自动固定）",
   "settings.sessionTabOpenModePermanent": "常驻（打开即固定）",
   "settings.languagePseudo": "伪翻译",
