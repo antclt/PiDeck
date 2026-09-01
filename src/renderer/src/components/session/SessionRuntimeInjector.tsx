@@ -24,8 +24,19 @@ import {
 import type { QueuedPrompt } from "../../hooks/useQueuedPrompt";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { QueuedPromptPanel } from "./ComposerPanels";
+import { FileLinkBaseProvider } from "./FileLinkBase";
 import { SessionView } from "./SessionView";
 import { useSessionPaneServices } from "./SessionPaneServices";
+import { desktopApi } from "../../desktopApi";
+import { t } from "../../i18n";
+import {
+	requireSessionCommand,
+	sessionCommandFailureToast,
+	toSessionRuntimeTarget,
+} from "../../utils/sessionCommands";
+import { formatRelativeTime } from "../../utils/relativeTime";
+import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
+import type { ChatMessage, RewindCheckpointSummary } from "../../../../shared/types";
 
 export type SessionRuntimeInjectorProps = {
   currentSessionId: string;
@@ -77,18 +88,32 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
 
   // 本栏终端归属：从本会话自身的 runtime/record 解析（分屏各栏独立，不再跟随 App 聚焦态）；
   // owner 解析失败或目标不可落地时该栏不挂 dock。
+  const paneProjectId = currentSessionRuntime?.projectId ?? sessionRecord?.projectId ?? "";
   const paneProject = useAtomValue(
-    projectByIdAtomFamily(sessionRecord?.projectId ?? ""),
+    projectByIdAtomFamily(paneProjectId),
+  );
+  const paneFileContext = React.useMemo(
+    () => ({
+      // runtime cwd 是该会话真正执行工具的目录；未启动时回退 catalog 项目根。
+      baseDir: currentSessionRuntime?.cwd ?? paneProject?.path,
+      projectId: paneProjectId || undefined,
+      projectRoot: paneProject?.path,
+    }),
+    [currentSessionRuntime?.cwd, paneProject?.path, paneProjectId],
+  );
+  const openPaneFile = React.useCallback(
+    (path: string, line?: number) => services.onOpenFile(path, line, paneFileContext),
+    [paneFileContext, services.onOpenFile],
   );
   const paneTerminal = React.useMemo(
     () =>
       resolvePaneTerminal({
         sessionId: currentSessionId,
         runtime: currentSessionRuntime,
-        projectId: sessionRecord?.projectId,
+        projectId: paneProjectId || undefined,
         project: paneProject,
       }),
-    [currentSessionId, currentSessionRuntime, sessionRecord?.projectId, paneProject],
+    [currentSessionId, currentSessionRuntime, paneProjectId, paneProject],
   );
   const paneOwnerKey = paneTerminal ? terminalOwnerKey(paneTerminal.owner) : undefined;
   const paneTerminalState = paneOwnerKey
@@ -162,6 +187,8 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
     sessionDurationByAgent: services.sessionDurationByAgent,
     activeProjectId: services.activeProjectId,
     showNotice: services.showNotice,
+    // 后台 Ask toast 的「前往会话」：由 App 级 focusAskSessionById 解析 record 并登记 Tab
+    onFocusSession: services.focusAskSessionById,
   });
 
   const activeAgent = runtime.activeAgentId
@@ -177,7 +204,70 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
   const canEditOrDeleteMessages = !isDshBackend;
   const canResend = !isDshBackend;
 
+  // ── 回退到此消息：解析最近检查点 + 确认回退（仅 pi 后端注入入口）──
+  const [rewindConfirm, setRewindConfirm] = React.useState<RewindCheckpointSummary | null>(null);
+  const [rewinding, setRewinding] = React.useState(false);
+  const handleRewindToMessage = React.useCallback(
+    async (message: ChatMessage) => {
+      const target = toSessionRuntimeTarget(currentSessionId, currentSessionRuntime);
+      if (!target) {
+        services.showToast(t("rewind.unavailable"));
+        return;
+      }
+      let list: RewindCheckpointSummary[];
+      try {
+        // rewind-to-message 需要全量最近检查点（无 limit → 后端返回全部）。
+        list = requireSessionCommand(
+          await desktopApi.sessions.listRewindCheckpoints(target),
+        ).value.items;
+      } catch (error) {
+        services.showToast(
+          sessionCommandFailureToast(error, (raw) => t("rewind.loadFailed", { error: raw })),
+          4000,
+        );
+        return;
+      }
+      // 最近的、时刻不晚于该消息的检查点 ≈ 该消息开始动文件之前的状态；
+      // 该轮没有文件类工具时自然落到上一轮的检查点，语义仍成立（撤销本消息起的改动）。
+      const nearest = [...list]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .find((cp) => cp.timestamp <= message.timestamp);
+      if (!nearest) {
+        services.showToast(t("rewind.empty"), 3000);
+        return;
+      }
+      setRewindConfirm(nearest);
+    },
+    [currentSessionId, currentSessionRuntime, services],
+  );
+  const performRewindRestore = React.useCallback(async () => {
+    if (!rewindConfirm) return;
+    const target = toSessionRuntimeTarget(currentSessionId, currentSessionRuntime);
+    if (!target) return;
+    setRewinding(true);
+    try {
+      await requireSessionCommand(
+        await desktopApi.sessions.restoreRewindCheckpoint(target, rewindConfirm.id, "files"),
+      );
+      services.showToast(t("rewind.restoreDone", { id: rewindConfirm.id }));
+    } catch (error) {
+      services.showToast(
+        sessionCommandFailureToast(error, (raw) => t("rewind.restoreFailed", { error: raw })),
+        4000,
+      );
+    } finally {
+      setRewinding(false);
+      setRewindConfirm(null);
+    }
+  }, [currentSessionId, currentSessionRuntime, rewindConfirm, services]);
+
   return (
+    <FileLinkBaseProvider
+      baseDir={paneFileContext.baseDir}
+      projectId={paneFileContext.projectId}
+      projectRoot={paneFileContext.projectRoot}
+    >
+    <>
     <SessionView
       sessionId={currentSessionId}
       sessionTitle={sessionTitle}
@@ -200,12 +290,13 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       validCommandNames={services.validCommandNames}
       validFilePaths={services.validFilePaths}
       onPreviewImage={services.onPreviewImage}
-      onOpenFile={services.onOpenFile}
+      onOpenFile={openPaneFile}
       onDiffFile={services.onDiffFile}
       onResendUserMessage={canResend ? services.resendUserMessage : undefined}
       onEditMessage={canEditOrDeleteMessages ? services.editMessage : undefined}
       onDeleteMessage={canEditOrDeleteMessages ? services.deleteMessage : undefined}
       onForkMessage={services.forkFromUserMessage}
+      onRewindToMessage={isDshBackend ? undefined : handleRewindToMessage}
       forkingMessageId={services.forkingMessageId}
       onToast={(message: string) => services.showToast(message)}
       onQuickPrompt={(message) => services.insertQuickPrompt(currentSessionId, message)}
@@ -262,5 +353,20 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       runCreateSessionDraft={services.runCreateSessionDraft}
       abortAgent={services.abortAgent}
     />
+    {rewindConfirm && (
+      <ConfirmDialog
+        title={t("rewind.restoreConfirmTitle")}
+        message={t("rewind.restoreConfirmMessage", {
+          id: rewindConfirm.id,
+          time: formatRelativeTime(rewindConfirm.timestamp),
+        })}
+        confirmLabel={t("rewind.restoreConfirmRestore")}
+        danger
+        onConfirm={() => void performRewindRestore()}
+        onCancel={() => setRewindConfirm(null)}
+      />
+    )}
+  </>
+    </FileLinkBaseProvider>
   );
 });

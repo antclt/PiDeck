@@ -48,6 +48,8 @@ function loadAgentManager() {
     module,
     exports: module.exports,
     require: (specifier) => {
+      // 本测试不覆盖会话文件汇总；提供空实现满足 AgentManager 依赖契约
+      if (specifier === "../../shared/fileChanges") return { collectSessionFileChanges: () => [] };
       if (specifier === "electron") {
         return {
           app: { getName: () => "PiDeck", getPath: () => "C:/tmp" },
@@ -131,6 +133,23 @@ function loadAgentManager() {
       }
       if (specifier === "../wsl/WslPaths") {
         return { toWindowsHostPath: (path) => path, toWslLinuxPath: (path) => path };
+      }
+      // AgentManager 依赖 ./derivedSubagents（纯函数，仅类型 import）；.ts 经 node 类型剥离可 require。
+      if (specifier === "./derivedSubagents") {
+        return nodeRequire("../src/main/pi/derivedSubagents.ts");
+      }
+      // sessionFileEditor 测试不覆盖 rewind 业务；保留模块形状以便加载 AgentManager。
+      if (specifier === "../rewind/index.ts") {
+        return {
+          currentIndexTree: async () => "",
+          createCheckpoint: async () => undefined,
+          diffCheckpoints: async () => "",
+          loadAllCheckpoints: async () => [],
+          loadCheckpointFromRef: async () => undefined,
+          MUTATING_TOOLS: new Set(),
+          restoreCheckpoint: async () => undefined,
+          toCheckpointSummary: (checkpoint) => checkpoint,
+        };
       }
       return nodeRequire(specifier);
     },

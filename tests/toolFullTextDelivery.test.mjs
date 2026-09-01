@@ -4,6 +4,7 @@ import test from "node:test";
 
 // 文本驻留契约：工具结果截断下发 + 「查看完整输出」按需读取链路
 const projector = readFileSync("src/main/pi/AgentMessageProjector.ts", "utf8");
+const formatToolDetail = readFileSync("src/shared/formatToolDetail.ts", "utf8");
 const agentUtils = readFileSync("src/main/pi/agentUtils.ts", "utf8");
 const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 const reader = readFileSync("src/main/pi/SessionHistoryReader.ts", "utf8");
@@ -16,9 +17,10 @@ const toolCard = readFileSync(
 
 test("tool detail is delivered with truncated/fullLength markers", () => {
   // detailText 整体截断（拼接后可能超单段上限），并带截断标记供渲染层展示按需加载入口
+  assert.match(formatToolDetail, /export function truncateDetailWithMeta\(/);
+  assert.match(formatToolDetail, /return \{ text, truncated: false, fullLength: text\.length \};/);
+  assert.match(formatToolDetail, /truncated: true,\n\t\tfullLength: text\.length,/);
   assert.match(projector, /truncateDetailWithMeta\(text: string\)/);
-  assert.match(projector, /return \{ text, truncated: false, fullLength: text\.length \};/);
-  assert.match(projector, /truncated: true,\n\t\t\tfullLength: text\.length,/);
   // history 分支写入标记
   assert.match(projector, /detailText: detailDelivery\.text,/);
   assert.match(

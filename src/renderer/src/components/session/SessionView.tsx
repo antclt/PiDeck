@@ -1,43 +1,44 @@
 import { useAtomValue } from "jotai";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type CSSProperties, type RefObject, type ReactNode } from "react";
 import {
   type GroupImperativeHandle,
   type PanelImperativeHandle,
-  type PanelSize,
 } from "react-resizable-panels";
 import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "../ui-shadcn/resizable";
-import type { AgentRuntimeState, GitBranchInfo, ImageContent, TerminalTarget } from "../../../../shared/types";
+import type { GitBranchInfo, ImageContent, TerminalTarget } from "../../../../shared/types";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
-import type { PiDesktopApi } from "../../../../preload";
 import { isLanWeb, desktopApi as api } from "../../desktopApi";
-import { useNotifyLayoutResized } from "../../hooks/useNotifyLayoutResized";
 import { SessionHeader } from "./SessionHeader";
 import { SessionBranchBar } from "./SessionBranchBar";
-import { SessionTodoStrip } from "./SessionTodoStrip";
+import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
-import { SessionModifiedFilesStrip } from "./SessionModifiedFilesStrip";
+import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
+import { SessionTodoStrip } from "./SessionTodoStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SIZE } from "../terminal/TerminalDockPanel";
 import { useSessionPaneServices } from "./SessionPaneServices";
-import { COMPOSER_MIN_HEIGHT, TIMELINE_MIN_HEIGHT, growComposerWithinTimelineBudget, displayProjectDirectoryName, shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout, sessionGroupDefaultLayout, resolveComposerPanelHeight, shouldRestoreComposerPanelHeight } from "../../rendererUtils";
-import { readPanelPixels } from "./sessionPanelSize";
+import {
+  COMPOSER_MAX_HEIGHT,
+  COMPOSER_MIN_HEIGHT,
+  TIMELINE_MIN_HEIGHT,
+  displayProjectDirectoryName,
+  redistributeTerminalAgainstTimeline,
+  shouldMountBottomComposer,
+  sessionResizableGroupKey,
+  sessionGroupDefaultLayout,
+} from "../../rendererUtils";
 import { projectByIdAtomFamily, sessionRecordByIdAtomFamily } from "../../atoms";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 import { groupToolMessages } from "../app/AppUtils";
 import type { AgentRunItem } from "./timeline/types";
 
-// terminal 程序化布局保护窗口（ms）：programResize 后该窗口内的 terminal
-// onResize 一律视为程序化结果，不写 collapsed 状态。独立于 composer 的共享
-// 标记，避免 composer onResize 先触发清掉保护后，terminal 回调被误判为折叠。
+// terminal 程序化布局保护窗口（ms）：setLayout 后该窗口内的 terminal
+// onResize 一律视为程序化结果，不写 collapsed 状态。
 const TERMINAL_PROGRAMMATIC_PROTECT_MS = 250;
-
-// composer 高度重试上限：Group 注册竞态通常在 1-2 帧内自愈；超过该帧数仍失败说明
-// 面板已卸载/组不可用，停止重试避免空转（全新的内容测量会重置预算重新尝试）。
-const COMPOSER_HEIGHT_RETRY_LIMIT = 30;
 
 export type SessionViewProps = {
   // ── Session identity ──
@@ -78,6 +79,7 @@ export type SessionViewProps = {
   onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
   onDeleteMessage?: (messageId: string, entryId?: string) => void;
   onForkMessage?: (message: any) => void;
+  onRewindToMessage?: (message: any) => void;
   forkingMessageId?: string | null;
   onToast: (message: string) => void;
   onQuickPrompt?: (prompt: string) => void;
@@ -131,7 +133,7 @@ export function SessionView({
   hasProject,
   chatHeaderRef,
   composerRef,
-  composerOffsetHeight,
+  composerOffsetHeight: _composerOffsetHeight,
   terminalRowHeight,
   isAgentStarting,
   isRestarting,
@@ -146,6 +148,7 @@ export function SessionView({
   onEditMessage,
   onDeleteMessage,
   onForkMessage,
+  onRewindToMessage,
   forkingMessageId,
   onToast,
   onQuickPrompt,
@@ -170,7 +173,7 @@ export function SessionView({
   settingsOpen,
   environmentDialog,
   runCreateSessionDraft,
-  abortAgent,
+  abortAgent: _abortAgent,
 }: SessionViewProps) {
   const paneServices = useSessionPaneServices();
   // 会话身份面包屑的项目名：多 Tab/分屏时提醒当前会话属于哪个项目。
@@ -178,47 +181,16 @@ export function SessionView({
   const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
   const project = useAtomValue(projectByIdAtomFamily(sessionRecord?.projectId ?? ""));
   const projectName = project ? displayProjectDirectoryName(project) : undefined;
-  // #115 U5 垂直轴：timeline | composer | terminal 三段由 react-resizable-panels 接管。
-  // composer 高度本地持有（px），终端高度/折叠仍由 useTerminalDock 的 per-agent
-  // 状态持有，拖拽结果经 onResize 回写，外部状态经 imperative API 同步。
-  // 起步高度走 COMPOSER_MIN_HEIGHT（输入卡本身），测到内容后再 hug；
-  // 不再用 DEFAULT(160) 预留指标空位。Ask 固定在时间线底部，不占输入栏高度。
-  const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
-  const notifyLayoutResized = useNotifyLayoutResized();
+  // 垂直轴只分两段：时间线列（对话 + 固有高度输入栏）| 终端。
+  // 输入栏不再占 Group 百分比——窗口缩放时时间线吸收全部余量，待办/改文件
+  // 条随内容撑开，放大后由 CSS max-height 自动恢复，不依赖 hug/setLayout。
   const terminalPanelRef = useRef<PanelImperativeHandle | null>(null);
   const sessionGroupRef = useRef<GroupImperativeHandle | null>(null);
-  // 三面板快照只属于当前会话的 Group；solo 会话切换会复用 SessionView，不能跨会话沿用。
-  const lastThreePanelLayoutRef = useRef<Record<string, number> | null>(null);
-
-  // ── composer 面板自适应高度（#115 U5 布局换装） ──────────────
-  // 面板高度由 react-resizable-panels 持有；输入区上方出现可变内容（Todo/记忆
-  // widget、图片附件等）时，footer 固定高度会把 composer-box 挤到 min-height 并
-  // 被 overflow-hidden 裁切，输入区显示不清晰。这里通过 panelRef 命令式 resize：
-  // 内容需要更高 → 自动增高；内容减少（含完全消失）且当前高度由内容驱动 → 回缩，
-  // 但用户手动拖高的高度不被内容变化回缩。
-  const composerPanelRef = useRef<PanelImperativeHandle | null>(null);
-  const composerHeightStateRef = useRef(COMPOSER_MIN_HEIGHT);
-  // 用户手动拖高后的面板高度。0 = 从未拖过，此时 hug 实测内容，不把 DEFAULT 当楼板。
-  const userComposerHeightRef = useRef(0);
-  // 内容驱动高度：最近一次内容所需的面板高度。回缩只发生在 current <= 该值
-  // （面板高度未超过内容所需，即没有被用户手动拖高）。
-  const contentDrivenHeightRef = useRef(COMPOSER_MIN_HEIGHT);
-  // resize() 经 ResizeObserver 异步触发 onResize；用「时间窗口 + 内容驱动高度
-  // 匹配」双重判断区分程序 resize 与用户拖拽，避免程序增高后的回调被误判为
-  // 用户操作（误判会把用户手动高度抬到内容高度，导致内容减少时不再回缩）。
-  const programmaticResizeTargetRef = useRef<number | null>(null);
-  const programResizeExpireRef = useRef(0);
-  // terminal 专用的程序化保护窗口：programResize 设置、仅由超时清空。
-  // 不能复用 programmaticResizeTargetRef——composer 的 onResize 会把它清掉，
-  // 若 terminal 的 onResize 后触发（连续 setLayout 竞态下 K() 把 terminal
-  // 压到折叠阈值），就落在保护窗口外被误判为用户折叠，导致发送消息时终端被收起。
   const terminalProgrammaticExpireRef = useRef(0);
 
-  const composerMaxHeight = Math.max(COMPOSER_MIN_HEIGHT, Math.min(480, window.innerHeight - 260));
   const terminalPanelVisible =
     !isLanWeb && !settingsOpen && !environmentDialog &&
     terminalDockVisible && terminalOpen;
-  // 历史会话加载期 messages 仍为空：仍挂底部栏，避免 1 面板 Group 套用 2 值缓存。
   // 空会话磁盘就绪后卸底部栏，改由 timeline 内 SessionStartSurface 居中输入。
   const bottomComposerVisible = shouldMountBottomComposer({
     hasActiveConversation,
@@ -243,227 +215,26 @@ export function SessionView({
       ? latestRun
       : undefined;
   }, [sessionTimeline.messages]);
-  const sessionPanels = {
-    composer: bottomComposerVisible,
-    terminal: terminalPanelVisible,
-  };
+  const sessionPanels = { terminal: terminalPanelVisible };
+  const timelineColumnMinSize = bottomComposerVisible
+    ? TIMELINE_MIN_HEIGHT + COMPOSER_MIN_HEIGHT
+    : TIMELINE_MIN_HEIGHT;
+  const timelineColumnStyle = {
+    "--session-timeline-min": `${TIMELINE_MIN_HEIGHT}px`,
+  } as CSSProperties;
 
-  function applyComposerHeight(px: number, fromUser: boolean) {
-    composerHeightStateRef.current = px;
-    setComposerHeight(px);
-    if (fromUser) {
-      userComposerHeightRef.current = px;
-    }
-  }
-
-  // ── Group 注册竞态兜底（文档全屏 / 工作台布局切换） ──────────────
-  // react-resizable-panels v4 在布局树切换时，Panel ref 可能短暂指向已注销的 Group，
-  // getSize() 抛 `Group ... not found`。ComposerMeasuredExtras 对相同高度会去重，
-  // 若只吞异常，失败的那次测量可能永远不再触发。这里保留待处理高度并在下一帧重试，
-  // 直到 Group 注册完成；面板卸载 / 组件卸载时清理。
-  const pendingComposerHeightRef = useRef<number | null>(null);
-  const composerRetryFrameRef = useRef(0);
-  const composerHeightRetryCountRef = useRef(0);
-  const lastAttemptedComposerHeightRef = useRef<number | null>(null);
-  // 最新回调快照：rAF 重试走最新闭包，避免引用陈旧 state/ref
-  const handleComposerContentHeightRef = useRef<(contentHeight: number) => void>(() => undefined);
-  const scheduleComposerHeightRetry = () => {
-    if (composerRetryFrameRef.current !== 0) return;
-    if (composerHeightRetryCountRef.current >= COMPOSER_HEIGHT_RETRY_LIMIT) return;
-    composerHeightRetryCountRef.current += 1;
-    composerRetryFrameRef.current = requestAnimationFrame(() => {
-      composerRetryFrameRef.current = 0;
-      const pending = pendingComposerHeightRef.current;
-      if (pending === null) return;
-      pendingComposerHeightRef.current = null;
-      handleComposerContentHeightRef.current(pending);
-    });
-  };
-
-  function programResize(target: number): number | undefined {
-    programmaticResizeTargetRef.current = target;
-    programResizeExpireRef.current = Date.now() + 200;
-    terminalProgrammaticExpireRef.current =
-      Date.now() + TERMINAL_PROGRAMMATIC_PROTECT_MS;
-    try {
-      // 优先走 Group.setLayout：composer 增高时保持 terminal 高度不变，从 timeline
-      // 拿空间。库的 panel.resize() 默认从相邻面板（terminal）拿空间，粘贴图片会
-      // 把终端面板压扁（#115 U5 反馈）。timeline 低于 minSize 时由 K() 自动 clamp。
-      const group = sessionGroupRef.current;
-      const composerSize = composerPanelRef.current?.getSize();
-      if (
-        group &&
-        composerSize &&
-        composerSize.inPixels > 0 &&
-        composerSize.asPercentage > 0
-      ) {
-        const layout = group.getLayout();
-        if (Object.keys(layout).length > 0) {
-          // getSize() 返回 px 与百分比，反推 group 总高，把目标 px 转成百分比。
-          const groupPx = (composerSize.inPixels / composerSize.asPercentage) * 100;
-          const targetPct = Math.min(100, (target / groupPx) * 100);
-          // 增高预算受 timeline 保底线限制：timeline 让不出空间时不再硬扣，
-          // 否则库 K() 会把 clamp 差额压给 collapsible 的 terminal，导致发送消息/输出时终端被收起。
-          const budget = growComposerWithinTimelineBudget(
-            layout,
-            composerSize.asPercentage,
-            targetPct,
-            groupPx,
-            TIMELINE_MIN_HEIGHT,
-          );
-          // setLayout 键必须等于当前已注册面板，否则 K() 抛 Invalid N panel layout。
-          // 关终端 / 历史会话加载期卸 composer 后 getLayout 仍可能带旧键。
-          const next = sanitizeSessionPanelLayout(
-            { ...layout, composer: budget.composer, timeline: budget.timeline },
-            { composer: bottomComposerVisible, terminal: terminalPanelVisible },
-          );
-          // timeline 已触底时预算会把目标压低。状态必须保存最终可达值，而不是
-          // 原始内容目标，否则下一次相同内容测量会被去重，留下错误的受控高度。
-          const budgetTarget = Math.round((budget.composer / 100) * groupPx);
-          programmaticResizeTargetRef.current = budgetTarget;
-          const appliedLayout = group.setLayout(next);
-          const appliedTarget = Math.round(
-            ((appliedLayout.composer ?? budget.composer) / 100) * groupPx,
-          );
-          programmaticResizeTargetRef.current = appliedTarget;
-          window.setTimeout(() => {
-            if (Date.now() >= programResizeExpireRef.current) {
-              programmaticResizeTargetRef.current = null;
-            }
-          }, 250);
-          return appliedTarget;
-        }
-      }
-      // group 未就绪（挂载早期）回退旧路径：相邻面板（terminal）让出空间。
-      const panel = composerPanelRef.current;
-      if (!panel) {
-        programmaticResizeTargetRef.current = null;
-        return undefined;
-      }
-      panel.resize(target);
-    } catch {
-      // 面板尚未注册到 ResizablePanelGroup（挂载早期时序）时 resize 会抛
-      // Group not found；静默跳过并清除目标值，下一轮内容测量会再次尝试。
-      programmaticResizeTargetRef.current = null;
-      return undefined;
-    }
-    // 兜底：resize 未触发 onResize（面板未挂载/已卸载）时也清除目标值，
-    // 避免残留目标吞掉下一次真实拖拽（与目标恰好一致的极小概率）。
-    window.setTimeout(() => {
-      if (Date.now() >= programResizeExpireRef.current) {
-        programmaticResizeTargetRef.current = null;
-      }
-    }, 250);
-    return target;
-  }
-
-  /**
-   * ComposerArea 上报独立卡 + 输入卡 +（有数字才出现的）指标条总高度。
-   * 未拖过时 hug 实测值，不把 DEFAULT 当用户偏好；指标消失后底空隙一并收回。
-   * 输入卡本身 shrink-0：面板被终端拖高时剩余空白不撑开输入框。
-   */
-  function handleComposerContentHeight(contentHeight: number) {
-    // 全新测量（与最近一次尝试的高度不同）时重置重试预算：
-    // 若上一次重试链因上限停止，新的内容变化应能重新发起同步。
-    if (contentHeight !== lastAttemptedComposerHeightRef.current) {
-      composerHeightRetryCountRef.current = 0;
-    }
-    lastAttemptedComposerHeightRef.current = contentHeight;
-
-    const target = resolveComposerPanelHeight({
-      contentHeight,
-      userPreferredHeight: userComposerHeightRef.current,
-      minHeight: COMPOSER_MIN_HEIGHT,
-      maxHeight: composerMaxHeight,
-    });
-    const current = composerHeightStateRef.current;
-    // 百分比缓存可能把面板撑高，而 state 仍是 min：state 已贴合时仍要对齐视觉高度。
-    // react-resizable-panels v4 在布局树切换（如文档打开→全屏）时，Panel ref 可能短暂
-    // 指向已注销的 Group，getSize() 抛 `Group ... not found`。这里做安全读取：未就绪时
-    // 保留本次内容高度并在下一帧重试——ComposerMeasuredExtras 对相同高度会去重，
-    // 只吞异常会把唯一一次测量永久丢掉。
-    const read = readPanelPixels(composerPanelRef.current, current);
-    if (!read.ready) {
-      pendingComposerHeightRef.current = contentHeight;
-      scheduleComposerHeightRetry();
-      return;
-    }
-    const visualPx = read.pixels;
-    if (target === current && Math.abs(visualPx - target) <= 2) return;
-    if (target > current) {
-      contentDrivenHeightRef.current = target;
-      const appliedHeight = programResize(target);
-      if (appliedHeight !== undefined) applyComposerHeight(appliedHeight, false);
-      else {
-        pendingComposerHeightRef.current = contentHeight;
-        scheduleComposerHeightRetry();
-      }
-      return;
-    }
-    // 未拖过必须收回空隙（指标消失、独立卡收起）；拖过才用内容驱动闸门，避免拖高被回吞。
-    if (userComposerHeightRef.current <= 0 || current <= contentDrivenHeightRef.current) {
-      contentDrivenHeightRef.current = Math.min(
-        contentDrivenHeightRef.current,
-        target,
-      );
-      const appliedHeight = programResize(target);
-      if (appliedHeight !== undefined) applyComposerHeight(appliedHeight, false);
-      else {
-        pendingComposerHeightRef.current = contentHeight;
-        scheduleComposerHeightRetry();
-      }
-    }
-  }
-  handleComposerContentHeightRef.current = handleComposerContentHeight;
-
-  // 卸载 / 切会话时取消挂起的 composer 高度重试。solo 栏会复用 SessionView：
-  // 必须用 layout-effect cleanup 在新 Group 提交前撤销旧 rAF，否则旧会话的测量会
-  // 通过最新 callback 写进新会话，导致输入栏突然上浮。
-  useLayoutEffect(() => {
-    return () => {
-      if (composerRetryFrameRef.current !== 0) cancelAnimationFrame(composerRetryFrameRef.current);
-      composerRetryFrameRef.current = 0;
-      pendingComposerHeightRef.current = null;
-      composerHeightRetryCountRef.current = 0;
-      lastAttemptedComposerHeightRef.current = null;
-      programmaticResizeTargetRef.current = null;
-      programResizeExpireRef.current = 0;
-      terminalProgrammaticExpireRef.current = 0;
-    };
-  }, [sessionId]);
-
-  // 终端 Panel 随 terminalOpen 动态挂载，约束注册有一帧延迟（与抽屉同款问题），
-  // imperative 同步统一推迟一帧并容错。折叠/展开后立刻用像素 resize 把 composer
-  // 钳回锚点（collapse() 会把高度补给相邻 composer，输入框停在半空）；切会话会
-  // 再跑一遍 collapse，锚点用 composerHeightStateRef（用户拖拽/内容高度），
-  // 不能读已经被撑高的 layout.composer。
+  // 终端 Panel 随 terminalOpen 动态挂载，约束注册有一帧延迟。
+  // 折叠/展开用稳态读数 + setLayout：差额全部给 timeline，输入栏不在 Group 里。
   useEffect(() => {
     const panel = terminalPanelRef.current;
     if (!panel) return;
     const frame = requestAnimationFrame(() => {
       try {
-        // 先打程序化窗口：collapse() 触发的 composer onResize 既不能记成用户拖高，
-        // 也不能写进 composerHeight——否则切会话再 collapse 会用被污染的锚点。
-        programmaticResizeTargetRef.current = composerHeightStateRef.current;
-        programResizeExpireRef.current = Date.now() + 200;
         terminalProgrammaticExpireRef.current =
           Date.now() + TERMINAL_PROGRAMMATIC_PROTECT_MS;
-        // 先稳态读数，再一次性 setLayout——顺序是硬性约束：
-        // - 不能先调库的 collapse/resize 命令再读 getSize()/getLayout()：库的命令是
-        //   异步提交，刚动过面板时 inPixels/asPercentage 落在过渡态（实测换算 groupPx
-        //   虚高 ~1.7 倍），垃圾百分比会被 K() 按约束重新钳制，composer 反被撑出大段
-        //   空白（视觉上「折叠后高度没释放」）。
-        // - 不能用面板 resize 命令折叠：终端是末位面板，库对末位收缩走 le() 增量重排，
-        //   在 composer disabled + 终端 collapsible 组合下校验失败会静默返回原布局。
-        //   setLayout 是 K() 直接按约束赋值，不经 pivot 重排，行为确定。
-        // composer 锁内容锚点，终端到折叠/记忆高度，差额全部给 timeline。
-        const composerSize = composerPanelRef.current?.getSize();
-        if (!composerSize || composerSize.inPixels <= 0 || composerSize.asPercentage <= 0) return;
-        const groupPx = (composerSize.inPixels / composerSize.asPercentage) * 100;
-        const composerPct = Math.min(
-          100,
-          (composerHeightStateRef.current / groupPx) * 100,
-        );
+        const terminalSize = terminalPanelRef.current?.getSize();
+        if (!terminalSize || terminalSize.inPixels <= 0 || terminalSize.asPercentage <= 0) return;
+        const groupPx = (terminalSize.inPixels / terminalSize.asPercentage) * 100;
         const terminalTargetPx = terminalCollapsed
           ? TERMINAL_PANEL_COLLAPSED_SIZE
           : Math.max(
@@ -472,112 +243,24 @@ export function SessionView({
             );
         const terminalPct = Math.min(100, (terminalTargetPx / groupPx) * 100);
         const layout = sessionGroupRef.current?.getLayout();
-        if (!layout || layout.timeline === undefined || layout.terminal === undefined || layout.composer === undefined) return;
-        // 键序必须沿用 getLayout()（K() 按下标对齐约束，见 sanitizeSessionPanelLayout），
-        // 只覆写值不增删键。
-        sessionGroupRef.current?.setLayout({
-          ...layout,
-          composer: composerPct,
-          terminal: terminalPct,
-          timeline: Math.max(0, 100 - composerPct - terminalPct),
-        });
+        if (!layout || layout.timeline === undefined || layout.terminal === undefined) return;
+        const next = redistributeTerminalAgainstTimeline(
+          layout,
+          terminalPct,
+          (timelineColumnMinSize / groupPx) * 100,
+        );
+        if (next) sessionGroupRef.current?.setLayout(next);
       } catch { /* 约束未就绪，下轮状态再同步 */ }
     });
     return () => cancelAnimationFrame(frame);
-  }, [terminalCollapsed, terminalOpen, terminalDockVisible]);
-
-  function handleComposerResize(size: PanelSize) {
-    const px = Math.round(size.inPixels);
-    const now = Date.now();
-    // 折叠/展开终端期间的 onResize 一律丢弃：库会短暂把腾出的高度写进 composer，
-    // 若此时写 state / 用户锚点，切会话再 collapse 会把输入框重新撑到半空。
-    if (now < terminalProgrammaticExpireRef.current) return;
-    const isProgrammatic =
-      (programmaticResizeTargetRef.current != null &&
-        now < programResizeExpireRef.current) ||
-      Math.abs(px - contentDrivenHeightRef.current) <= 2;
-    if (!shouldRestoreComposerPanelHeight(
-      px,
-      contentDrivenHeightRef.current,
-      isProgrammatic,
-    )) {
-      programmaticResizeTargetRef.current = null;
-      composerHeightStateRef.current = px;
-      setComposerHeight(px);
-      return;
-    }
-
-    // composer Panel 是 disabled，未匹配的尺寸不是用户拖拽，而是 Group 在分屏/历史
-    // 切换时回放了旧百分比或刚经历重注册。恢复到内容锚点；若 Group 尚未就绪，沿用
-    // 内容测量链的重试机制，不能像旧逻辑那样静默留下错误高度。
-    const appliedHeight = programResize(contentDrivenHeightRef.current);
-    if (appliedHeight !== undefined) {
-      applyComposerHeight(appliedHeight, false);
-      return;
-    }
-    pendingComposerHeightRef.current = contentDrivenHeightRef.current;
-    scheduleComposerHeightRetry();
-  }
-
-  // solo 栏无 sessionId key，切会话复用本组件。必须在 render 阶段重置高度：
-  // useLayoutEffect 太晚，Group 已按旧 defaultSize 注册，输入框会悬在半空。
-  // setState-during-render 是 React 官方「prop 变化重置 state」写法，本轮会被丢弃重渲。
-  const composerHeightSessionRef = useRef(sessionId);
-  if (composerHeightSessionRef.current !== sessionId) {
-    composerHeightSessionRef.current = sessionId;
-    composerHeightStateRef.current = COMPOSER_MIN_HEIGHT;
-    userComposerHeightRef.current = 0;
-    contentDrivenHeightRef.current = COMPOSER_MIN_HEIGHT;
-    // 新 Group 不能拿旧会话终端存在时的三面板布局反推 composer 高度。
-    lastThreePanelLayoutRef.current = null;
-    if (composerHeight !== COMPOSER_MIN_HEIGHT) {
-      setComposerHeight(COMPOSER_MIN_HEIGHT);
-    }
-  }
-
-  // 最近一次三面板布局快照（terminal 可见时持续记录），关闭终端时恢复用。
-  useEffect(() => {
-    if (!terminalPanelVisible) return;
-    try {
-      lastThreePanelLayoutRef.current =
-        sessionGroupRef.current?.getLayout() ?? null;
-    } catch { /* Group 未挂载 */ }
-  });
-
-  // terminal 面板卸载时 Group 重注册：2 面板布局缓存缺失会按 defaultSize
-  // 回退（输入框高度跳变 + 内容被压缩出滚动条）。这里在 paint 前用「关闭前
-  // 的三面板布局」主动恢复：composer 保持关闭前高度，timeline 吸收 terminal
-  // 释放的空间；setLayout 同时填充 "timeline,composer" 缓存，重开终端时
-  // 三面板缓存恢复原布局。程序化标记避免恢复触发的 onResize 污染用户手动高度。
-  //
-  // 条件只按 terminalPanelVisible（面板渲染条件）判断，不叠加 terminalOpen：
-  // 打开设置/配置弹窗时 settingsOpen=true → terminal 面板卸载（组变 2 面板），
-  // 但 terminalOpen 仍为 true；若此时 return 不转换布局，缓存仍是 3 值，
-  // react-resizable-panels 的 ResizeObserver 用 3 值校验 2 面板会抛
-  // 「Invalid 2 panel layout」导致 SessionView 崩溃（0.7.0-beta 线上反馈）。
-  useLayoutEffect(() => {
-    if (terminalPanelVisible) return;
-    const prev = lastThreePanelLayoutRef.current;
-    const group = sessionGroupRef.current;
-    const panel = composerPanelRef.current;
-    if (!prev || !group || !panel || prev.composer === undefined) return;
-    try {
-      // 卸 terminal 时若 composer 也未挂（空会话起始页），只保留 timeline，
-      // 不能把 2 值 layout 打到 1 面板上（Invalid 1 panel layout）。
-      const next = sanitizeSessionPanelLayout(prev, {
-        composer: bottomComposerVisible,
-        terminal: false,
-      });
-      const size = panel.getSize();
-      if (size.inPixels <= 0 || size.asPercentage <= 0) return;
-      const groupPx = size.inPixels / (size.asPercentage / 100);
-      const expectedPx = Math.round(groupPx * (prev.composer / 100));
-      programmaticResizeTargetRef.current = expectedPx;
-      programResizeExpireRef.current = Date.now() + 200;
-      group.setLayout(next);
-      applyComposerHeight(expectedPx, false);
-    } catch { /* Group 未就绪 */ }
-  }, [bottomComposerVisible, terminalPanelVisible, terminalOpen]);
+  }, [
+    availableTerminalHeight,
+    terminalCollapsed,
+    terminalDockVisible,
+    terminalOpen,
+    terminalRowHeight,
+    timelineColumnMinSize,
+  ]);
 
   return (
     <div
@@ -606,73 +289,59 @@ export function SessionView({
       {/* 分支导航条：仅当当前会话存在 fork 分支关系（父/兄弟/子分支）时显示 */}
       <SessionBranchBar sessionId={sessionId} onOpenSession={onOpenBranchSession} />
       <ResizablePanelGroup
-        // 面板数变化（terminal / composer 卸载）时强制重建：旧 Group 的
-        // layouts["timeline,composer"] 2 值缓存不能套到 1 面板（历史会话加载期
-        // 曾卸底部栏 → Invalid 1 panel layout: 83.506%, 16.494%）。
+        // 面板数只随终端挂载变化：输入栏在时间线列内，不再改变 Group 面板数。
         key={`${sessionId}:${sessionResizableGroupKey(sessionPanels)}`}
         orientation="vertical"
         className="session-v-group"
         groupRef={sessionGroupRef}
-        // groupSize=0 的首帧若不传 defaultLayout，库 He() 会把未设 defaultSize 的面板均分，
-        // 输入栏占半屏；键序必须 timeline → composer → terminal，与 DOM 一致。
         defaultLayout={sessionGroupDefaultLayout(
           sessionPanels,
-          composerHeightStateRef.current,
-          terminalCollapsed ? 34 : terminalRowHeight,
+          terminalCollapsed ? TERMINAL_PANEL_COLLAPSED_SIZE : terminalRowHeight,
           Math.max(1, window.innerHeight - 120),
         )}
-        // 拖拽命中区放大：输入框（composer-box）顶部边框在 v-splitter 下方约
-        // 8px（footer gap-2），默认 fine 10px 覆盖不到——需在输入框框线上就能拖。
-        // fine 20 → 命中区上下各 ~9.5px，覆盖输入框上沿。
         resizeTargetMinimumSize={{ fine: 20, coarse: 24 }}
       >
-        <ResizablePanel id="timeline" minSize={TIMELINE_MIN_HEIGHT} className="session-v-timeline">
-          <SessionSurfaceStage
-            sessionId={sessionId}
-            sessionTimeline={sessionTimeline}
-            isRestarting={isRestarting}
-            timelineProps={{
-              hasProject,
-              onCreateSession: runCreateSessionDraft,
-              showThinking,
-              validCommandNames,
-              validFilePaths,
-              onPreviewImage,
-              onOpenExternal: (url: string, forceSystem?: boolean) => api.app.openExternal(url, forceSystem),
-              onOpenFile,
-              onDiffFile,
-              onResendUserMessage,
-              onEditMessage,
-              onDeleteMessage,
-              onForkMessage,
-              forkingMessageId,
-              onToast,
-              onQuickPrompt,
-              runtimeUi,
-            }}
-          />
-        </ResizablePanel>
-
-        {/* 有消息或仍在加载：底部 composer。空会话就绪后卸掉，改由起始页居中输入。 */}
-        {bottomComposerVisible && (
-          <>
-            {/* 输入栏与会话区是一个固定整体；只有终端分隔条允许用户改变垂直空间。 */}
-            <ResizablePanel
-              id="composer"
-              disabled
-              panelRef={composerPanelRef}
-              minSize={COMPOSER_MIN_HEIGHT}
-              maxSize={composerMaxHeight}
-              defaultSize={composerHeightStateRef.current}
-              // 窗口缩放时保持输入栏像素高度，避免百分比缓存把栏撑出大块底空隙。
-              // disabled 只禁止用户拖拽该面板；代码仍可通过 panelRef 按内容 hug 高度。
-              groupResizeBehavior="preserve-pixel-size"
-              onResize={handleComposerResize}
-              // 与时间线共享同一条滚动条槽位：面板 overflow-hidden + scrollbar-gutter:stable
-              // 预留与真实滚动条等宽的右侧槽位（时间线视口由自身 gutter 预留），
-              // 使输入框与消息列的百分比宽度/居中基准一致，任何宽度设置与平台下都对齐
-              // （macOS 覆盖式滚动条时两侧槽位同为 0，依然对齐；不写死像素值）。
-              className="session-v-composer overflow-hidden [scrollbar-gutter:stable]"
+        <ResizablePanel
+          id="timeline"
+          minSize={timelineColumnMinSize}
+          className="session-v-timeline flex min-h-0 flex-col"
+          style={timelineColumnStyle}
+        >
+          <div className="session-v-timeline-stage min-h-[var(--session-timeline-min,160px)] flex-1 overflow-hidden">
+            <SessionSurfaceStage
+              sessionId={sessionId}
+              sessionTimeline={sessionTimeline}
+              isRestarting={isRestarting}
+              timelineProps={{
+                hasProject,
+                onCreateSession: runCreateSessionDraft,
+                showThinking,
+                validCommandNames,
+                validFilePaths,
+                onPreviewImage,
+                onOpenExternal: (url: string, forceSystem?: boolean) => api.app.openExternal(url, forceSystem),
+                onOpenFile,
+                onDiffFile,
+                onResendUserMessage,
+                onEditMessage,
+                onDeleteMessage,
+                onForkMessage,
+                onRewindToMessage,
+                forkingMessageId,
+                onToast,
+                onQuickPrompt,
+                runtimeUi,
+              }}
+            />
+          </div>
+          {/* 有消息或仍在加载：列底固有高度输入栏。空会话就绪后卸掉，改由起始页居中输入。
+              max-height 相对本列：窗口放大后上限抬起，待办/改文件条随内容恢复，不锁死像素。 */}
+          {bottomComposerVisible && (
+            <div
+              className="session-v-composer flex min-h-0 shrink-0 flex-col overflow-hidden [scrollbar-gutter:stable]"
+              style={{
+                maxHeight: `min(${COMPOSER_MAX_HEIGHT}px, calc(100% - var(--session-timeline-min, ${TIMELINE_MIN_HEIGHT}px)))`,
+              }}
             >
               <ComposerArea
                 ref={composerRef}
@@ -680,28 +349,28 @@ export function SessionView({
                 turnCount={sessionTimeline.messages.filter((message) => message.role === "user").length}
                 gitInfo={gitInfo}
                 onSwitchBranch={onSwitchBranch}
-                height={composerHeight}
-                onContentHeightChange={handleComposerContentHeight}
                 enqueue={enqueueSessionPrompt}
                 ensureSessionId={ensureSessionId}
                 queuePanel={queuePanel}
-                // 输入框上方独立卡栈（dsh input dock 移植）：todo → goal，与 queue 同列同宽；
-                // 高度由 ComposerMeasuredExtras 测量内容总高，面板 hug 该值
                 widgets={
                   <>
                     <SessionTodoStrip sessionId={sessionId} />
-                    <SessionGoalStrip sessionId={sessionId} />
-                    <SessionModifiedFilesStrip
+                    <SessionFilesStrip
                       sessionId={sessionId}
                       run={latestAgentRun}
-                      onDiffFile={onDiffFile ? (path) => onDiffFile(path) : undefined}
+                      onDiffFile={onDiffFile}
                     />
+                    <SessionSubagentsStrip
+                      sessionId={sessionId}
+                      onOpenChildSession={onOpenBranchSession}
+                    />
+                    <SessionGoalStrip sessionId={sessionId} />
                   </>
                 }
               />
-            </ResizablePanel>
-          </>
-        )}
+            </div>
+          )}
+        </ResizablePanel>
 
         {terminalPanelVisible && (
           <TerminalDockPanel

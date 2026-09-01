@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const scrollerSource = readFileSync(
-  "src/renderer/src/components/agents/message-scroller.custom.tsx",
+  "src/renderer/src/components/agents/message-scroller.tsx",
   "utf8",
 );
 const engineSource = readFileSync(
@@ -177,6 +177,28 @@ test("timeline controller restores via engine restoreAt and keeps negative offse
   assert.match(source, /if \(viewStateOwnerKey !== ownerKey\) \{/);
 });
 
+test("turn-window expansion pins the viewport through restoreAt instead of native scrollTop", () => {
+  const timelineSource = readFileSync(
+    "src/renderer/src/components/session/SessionMessageTimeline.tsx",
+    "utf8",
+  );
+  const controllerSource = readFileSync(
+    "src/renderer/src/hooks/useSessionTimelineController.ts",
+    "utf8",
+  );
+  // 扩窗补偿走 controller.pinViewportAfterPrepend（内部 restoreAt），不再写原生 scrollTop。
+  assert.match(timelineSource, /pinViewportAfterPrepend\(/);
+  assert.match(timelineSource, /restoreTimelineAnchor\(timeline\.scrollTop, nextHeight - prev\.height\)/);
+  assert.doesNotMatch(timelineSource, /timeline\.scrollTop = nextTop/);
+  // effect 不得依赖整个 controller 对象（每次 render 新引用会提前把 prev.height 写成新高度）。
+  assert.match(
+    timelineSource,
+    /\[displayRuns, followingForTurnWindow, pinViewportAfterPrepend, timelineRef, turnWindowActive, turnWindowTurns\]/,
+  );
+  assert.match(controllerSource, /api\.restoreAt\(nextTop\)/);
+  assert.match(controllerSource, /scrollerScrollApiRef\.current\?\.stopScroll\(\)/);
+});
+
 test("timeline releases the temporary unbudgeted window after anchor restoration", () => {
   const timelineSource = readFileSync(
     "src/renderer/src/components/session/SessionMessageTimeline.tsx",
@@ -187,9 +209,11 @@ test("timeline releases the temporary unbudgeted window after anchor restoration
   // finishes, otherwise the large window stays permanently exempt from its item budget.
   assert.match(timelineSource, /const isRestoringScrollAnchor = controller\.isRestoringScrollAnchor;/);
   assert.match(timelineSource, /followingForTurnWindow \|\| isRestoringScrollAnchor/);
+  // 依赖数组含 controller.jumpNavigationActive（2026-08 定位轴跳转加入 memo 后补齐），
+  // 恢复完成时该 flag 翻转必须使 memo 失效。
   assert.match(
     timelineSource,
-    /\[followingForTurnWindow, isRestoringScrollAnchor, reconciledRuns, turnWindowTurns\]/,
+    /\[followingForTurnWindow, isRestoringScrollAnchor, controller\.jumpNavigationActive, reconciledRuns, turnWindowTurns\]/,
   );
 });
 

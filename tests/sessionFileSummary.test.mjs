@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { collectSessionFileChanges, collectRunFileChanges, fileChangeToDiffLines } from "../src/renderer/src/components/session/TimelineFormat.ts";
-import { MAX_VISIBLE_FILES, visibleFileCount } from "../src/renderer/src/components/session/turn/fileChangesUiState.ts";
 
 /**
  * 会话文件修改汇总收集逻辑测试：
  * write/edit 工具消息 → 文件列表（去重 + 次数累计 + 最后一次 diff 内容）。
+ * 纯函数已迁往 shared/fileChanges，TimelineFormat re-export 保持本测试 import 路径不变。
  */
 function toolMessage(overrides = {}) {
 	return {
@@ -125,24 +125,16 @@ test("fileChangeToDiffLines: write yields all-added lines, edit yields removed+a
 	]);
 });
 
-test("visibleFileCount：默认截断到 MAX_VISIBLE_FILES，展开全部后全量", () => {
-	assert.equal(visibleFileCount(12, false), MAX_VISIBLE_FILES);
-	assert.equal(visibleFileCount(12, true), 12);
-	// 不超过上限时原样返回，不出现无意义的截断按钮
-	assert.equal(visibleFileCount(3, false), 3);
-	assert.equal(visibleFileCount(0, false), 0);
-});
-
-test("file changes render above the composer as a collapsed latest-run strip", () => {
+test("file changes render through the files strip, not a per-strip owner", () => {
 	const timeline = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
 	assert.ok(!timeline.includes("TurnFileChanges"), "timeline should not own the file strip");
 	const turnRow = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
 	assert.doesNotMatch(turnRow, /TurnFileChanges/);
 	const sessionView = readFileSync("src/renderer/src/components/session/SessionView.tsx", "utf8");
-	assert.match(sessionView, /SessionModifiedFilesStrip/);
+	assert.match(sessionView, /SessionFilesStrip/);
 	assert.match(sessionView, /latestAgentRun/);
-	const strip = readFileSync("src/renderer/src/components/session/SessionModifiedFilesStrip.tsx", "utf8");
-	assert.match(strip, /useComposerWidgetCollapsed\([\s\S]*?modified-files:/, "the strip should start collapsed through the composer layout owner");
-	assert.match(strip, /sessionId: string;/);
-	assert.match(strip, /data-testid="session-modified-files-strip"/);
+	const strip = readFileSync("src/renderer/src/components/session/SessionFilesStrip.tsx", "utf8");
+	assert.match(strip, /useSessionFileChanges\(/, "files strip should use the session-level file changes hook");
+	assert.match(strip, /data-testid="session-files-strip"/);
+	assert.doesNotMatch(strip, /MAX_VISIBLE_FILES|moreFiles/, "no truncation/more-files UI in the files strip");
 });

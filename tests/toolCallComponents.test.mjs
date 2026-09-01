@@ -14,6 +14,19 @@ const timelineFormat = readFileSync(
   "src/renderer/src/components/session/TimelineFormat.ts",
   "utf8",
 );
+const toolResult = readFileSync(
+  "src/renderer/src/components/agents/tool-result.tsx",
+  "utf8",
+);
+const runtimeInjector = readFileSync(
+  "src/renderer/src/components/session/SessionRuntimeInjector.tsx",
+  "utf8",
+);
+const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+const fileEditor = readFileSync(
+  "src/renderer/src/hooks/useFileEditor.ts",
+  "utf8",
+);
 
 test("tool-call rendering stays isolated behind the SurfaceComponents facade", () => {
   assert.match(toolCalls, /export const ToolCard = memo/);
@@ -27,13 +40,48 @@ test("tool-call rendering stays isolated behind the SurfaceComponents facade", (
 test("timeline tool rendering and message rows share formatting helpers", () => {
   assert.match(toolCalls, /from "\.\/TimelineFormat"/);
   assert.match(surface, /from "\.\/TimelineFormat"/);
-  assert.match(timelineFormat, /export function stripAnsi/);
+  // 文件修改/工具名解析已迁往 shared/fileChanges（main/renderer 共用），TimelineFormat re-export 保持兼容
+  assert.match(timelineFormat, /export \{ collectSessionFileChanges, getToolDiffTarget, getToolName, stripAnsi \};/);
   assert.match(timelineFormat, /export function formatDuration/);
   assert.match(timelineFormat, /export function getToolStatus/);
 });
 
 test("tool and thinking disclosure icons use right-for-collapsed down-for-expanded semantics", () => {
   assert.match(toolCalls, /\{expanded \? \([\s\S]*<ChevronDown[\s\S]*\) : \([\s\S]*<ChevronRight/);
+});
+
+test("embedded tool result keeps formatted beUI output while the trigger remains manual", () => {
+  assert.match(
+    toolCalls,
+    /import \{ ToolResult, ToolResultOutput \} from "\.\.\/agents\/tool-result";/,
+  );
+  assert.match(
+    toolCalls,
+    /<ToolResult[\s\S]*?showHeader=\{false\}[\s\S]*?<ToolResultOutput>\{displayText\}<\/ToolResultOutput>/,
+  );
+  // ToolCard's own disclosure stays opt-in even while a tool is streaming.
+  assert.match(toolCalls, /useState\(props\.defaultOpen \?\? false\)/);
+  // The official header's icon gutter is only used when that header is rendered.
+  assert.match(toolResult, /className=\{cn\("pt-1\.5", showHeader && "pl-6"\)\}/);
+  // Embedded ToolCard results stay in the timeline instead of gaining a second rounded surface.
+  assert.match(
+    toolResult,
+    /className=\{cn\("min-w-0", showHeader && "overflow-hidden rounded-xl bg-muted\/80"\)\}/,
+  );
+  assert.match(toolResult, /showHeader \? "p-3" : "py-1"/);
+  assert.match(toolResult, /showHeader \? "px-2 pb-1\.5" : "pt-1"/);
+  // Tool output follows PiDeck's semantic palette and historical UI-size scale, not Shiki's fixed GitHub colors.
+  assert.match(toolResult, /text-\[length:var\(--font-size-caption\)\]/);
+  assert.match(toolResult, /leading-\[1\.625\]/);
+  assert.match(toolResult, /text-\[color:var\(--color-text-secondary\)\]/);
+  assert.match(toolResult, /\[&_span\]:text-\[color:var\(--color-text-secondary\)\]/);
+  // Standalone beUI ToolResult states use PiDeck semantics rather than fixed Tailwind hues.
+  assert.match(toolResult, /if \(status === "running"\) return "text-info";/);
+  assert.match(toolResult, /if \(status === "success"\) return "text-success";/);
+  assert.match(toolResult, /if \(status === "error"\) return "text-danger";/);
+  assert.match(toolResult, /return "text-text-tertiary";/);
+  assert.doesNotMatch(toolResult, /text-blue-600|text-emerald-600|text-rose-600/);
+  assert.match(toolResult, /if \(!showHeader\) return;/);
 });
 
 test("tool rows share thinking's borderless process-row chrome", () => {
@@ -52,6 +100,46 @@ test("tool rows share thinking's borderless process-row chrome", () => {
   const skillRule = css.match(/\.tool-card--skill \{[\s\S]*?\n\}/)?.[0] ?? "";
   assert.match(skillRule, /background:\s*transparent/);
   assert.doesNotMatch(skillRule, /border-color/);
+});
+
+test("edit/write diff cards expose an accessible open-file action", () => {
+  // The action lives beside FileDiff rather than inside its disclosure trigger, avoiding nested buttons.
+  assert.match(toolCalls, /onOpenFile\?: \(path: string\) => void/);
+  assert.match(toolCalls, /className="mb-1\.5 flex min-w-0 items-start gap-1"/);
+  assert.match(toolCalls, /aria-label=\{t\("tool\.openFile"\)\}/);
+  assert.match(toolCalls, /title=\{t\("tool\.openFile"\)\}/);
+  assert.match(toolCalls, /onClick=\{\(\) => props\.onOpenFile\?\.\(diffTarget\.path\)\}/);
+  assert.match(toolCalls, /onOpenFile=\{props\.onOpenFile\}/);
+  assert.match(
+    readFileSync("src/renderer/src/components/session/turn/ToolStep.tsx", "utf8"),
+    /onOpenFile=\{props\.onOpenFile\}/,
+  );
+  assert.match(
+    readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8"),
+    /<ToolStep[\s\S]*?onOpenFile=\{props\.onOpenFile\}/,
+  );
+  assert.match(
+    readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8"),
+    /"tool\.openFile": "打开文件"/,
+  );
+  assert.match(
+    readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8"),
+    /"tool\.openFile": "Open file"/,
+  );
+  // 每个分屏栏在 injector 绑定自己的 runtime cwd/project；App 只消费这份上下文。
+  assert.match(runtimeInjector, /paneProjectId = currentSessionRuntime\?\.projectId \?\? sessionRecord\?\.projectId/);
+  assert.match(runtimeInjector, /baseDir: currentSessionRuntime\?\.cwd \?\? paneProject\?\.path/);
+  assert.match(runtimeInjector, /projectId: paneProjectId \|\| undefined/);
+  assert.match(runtimeInjector, /services\.onOpenFile\(path, line, paneFileContext\)/);
+  assert.match(app, /if \(context && !projectId\)/);
+  assert.match(app, /resolveFileLinkPath\(path, baseDir, projectRoot\)/);
+  assert.match(app, /viewFilePath\(resolved, undefined, line, fileAccessScope\)/);
+  assert.match(app, /readBase64\(resolved, undefined, fileAccessScope\)/);
+  assert.match(app, /mimeType: imageMimeTypeFromPath\(resolved\)/);
+  assert.doesNotMatch(app, /dataUrl\.match\(\/\^data:/);
+  // 授权随 editor tab 固化，异步加载不能改用后来聚焦的项目。
+  assert.match(fileEditor, /fileAccessScope\?: ProjectFileAccessScope/);
+  assert.match(fileEditor, /readFileContent\(path, maxBytes, scope\)/);
 });
 
 test("thinking and tool logos keep a distinct color even on the default zinc theme", () => {

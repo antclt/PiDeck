@@ -18,9 +18,13 @@ test("start surface reuses the session bottom composer, not a second input imple
   assert.match(surface, /<ComposerArea/);
   assert.match(surface, /import \{ ComposerArea \} from "\.\/ComposerArea"/);
   assert.match(surface, /import \{ QueuedPromptPanel \} from "\.\/ComposerPanels"/);
+  assert.match(surface, /import \{ SessionFilesStrip \} from "\.\/SessionFilesStrip"/);
   assert.match(surface, /import \{ SessionGoalStrip \} from "\.\/SessionGoalStrip"/);
+  assert.match(surface, /import \{ SessionSubagentsStrip \} from "\.\/SessionSubagentsStrip"/);
   assert.match(surface, /import \{ SessionTodoStrip \} from "\.\/SessionTodoStrip"/);
   assert.match(surface, /<SessionTodoStrip sessionId=\{props\.sessionId\} \/>/);
+  assert.match(surface, /<SessionFilesStrip sessionId=\{props\.sessionId\} \/>/);
+  assert.match(surface, /<SessionSubagentsStrip sessionId=\{props\.sessionId\} \/>/);
   assert.match(surface, /<SessionGoalStrip sessionId=\{props\.sessionId\} \/>/);
   assert.match(surface, /useSessionPaneServices\(\)/);
   assert.match(surface, /queuedPromptsBySession\[props\.sessionId\]/);
@@ -34,7 +38,7 @@ test("start surface centers the composer", () => {
   // 2026-11 整体放大：Logo 72 / 980px / 高 300；快捷项按钮已按用户要求移除
   assert.match(surface, /pt-\[18vh\]/);
   assert.match(surface, /max-w-\[980px\]/);
-  assert.match(surface, /defaultHeight=\{150\}/);
+  assert.doesNotMatch(surface, /defaultHeight=/);
   assert.match(surface, /session-start-surface/);
   // 移除快捷项后不再存在相关常量/交互代码
   assert.doesNotMatch(surface, /QUICK_ACTIONS/);
@@ -42,12 +46,11 @@ test("start surface centers the composer", () => {
 });
 
 test("bottom composer is hidden while the start surface is showing", () => {
-  // 空会话磁盘就绪后卸底部栏，避免同屏两个输入框；加载中 / 有消息仍挂底部栏，
-  // 避免 1 面板 Group 套用 2 值缓存抛 Invalid 1 panel layout。
+  // 空会话磁盘就绪后卸底部栏，避免同屏两个输入框。
   assert.match(view, /shouldMountBottomComposer/);
   assert.match(view, /sessionTimeline\.isSurfaceLoading/);
   assert.match(view, /bottomComposerVisible &&/);
-  assert.match(view, /ResizablePanel\s*\n\s*id="composer"/);
+  assert.doesNotMatch(view, /id="composer"/);
   assert.doesNotMatch(view, /sessionTimeline\.messages\.length > 0 && \(/);
 });
 

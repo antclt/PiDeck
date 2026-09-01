@@ -23,176 +23,40 @@ function approx(a, b) {
 }
 
 function assertLayout(got, expected) {
-	assert.ok(approx(got.composer, expected.composer), `composer ${got.composer} ≈ ${expected.composer}`);
 	assert.ok(approx(got.timeline, expected.timeline), `timeline ${got.timeline} ≈ ${expected.timeline}`);
+	assert.ok(approx(got.terminal, expected.terminal), `terminal ${got.terminal} ≈ ${expected.terminal}`);
 }
 
-/**
- * 回归：AI 输出内容时 composer 上方出现可变内容（投递通知/widgets），
- * programResize 增高 composer 会从 timeline 扣空间；若 timeline 已到
- * minSize(160px) 下限，库会把 clamp 差额压给 terminal，terminal 被压到
- * 折叠阈值以下即触发 handleTerminalResize 的 px<=35 判定 → 终端被收起。
- * 修复：composer 增高只能占用 timeline 可让出的空间（预算制）。
- */
-test("composer growth is capped by the timeline min-size budget", () => {
-  const { growComposerWithinTimelineBudget } = loadModule();
-  // group 高 800px，timeline minSize=160px → 20% 是保底
-  const groupPx = 800;
-  const timelineMinPx = 160;
-  const layout = { timeline: 40, composer: 20, terminal: 40 };
-
-  // 预算充足：timeline 40% 可让 20% → composer 可长到 30%
-  const grown = growComposerWithinTimelineBudget(
-    layout,
-    20, // composer 当前
-    30, // 目标
-    groupPx,
-    timelineMinPx,
-  );
-  assertLayout(grown, { composer: 30, timeline: 30 });
-
-  // 预算不足：timeline 只剩 22%（可让 2%），composer 不能长到 30%
-  const capped = growComposerWithinTimelineBudget(
-    { timeline: 22, composer: 20, terminal: 58 },
-    20,
-    30,
-    groupPx,
-    timelineMinPx,
-  );
-  assertLayout(capped, { composer: 22, timeline: 20 });
-
-  // timeline 已在保底线：composer 完全不能长（预算为 0）
-  const atFloor = growComposerWithinTimelineBudget(
-    { timeline: 20, composer: 20, terminal: 60 },
-    20,
-    40,
-    groupPx,
-    timelineMinPx,
-  );
-  assertLayout(atFloor, { composer: 20, timeline: 20 });
-});
-
-test("timeline budget respects the configured min-size constant", () => {
-  const { growComposerWithinTimelineBudget, TIMELINE_MIN_HEIGHT } = loadModule();
-  assert.equal(TIMELINE_MIN_HEIGHT, 160);
-  // timeline 12% + minSize 12%（=96px/800px 组内），无法让出 → 预算 0
-  const capped = growComposerWithinTimelineBudget(
-    { timeline: 12, composer: 30, terminal: 58 },
-    30,
-    40,
-    800,
-    TIMELINE_MIN_HEIGHT,
-  );
-  assertLayout(capped, { composer: 30, timeline: 12 });
-});
-
-test("collapsing the terminal gives leftover height to the timeline, not the composer", () => {
-  const { redistributeTerminalAgainstTimeline } = loadModule();
-  // 用户把终端拉到 40%，再折叠到 34px / 800px = 4.25%。
-  // 腾出的 35.75% 必须还给 timeline，composer 20% 不得被相邻面板吃掉。
-  const next = redistributeTerminalAgainstTimeline(
-    { timeline: 40, composer: 20, terminal: 40 },
-    4.25,
-    20,
-  );
-  assertLayout(
-    { composer: next.composer, timeline: next.timeline },
-    { composer: 20, timeline: 75.75 },
-  );
-  assert.ok(approx(next.terminal, 4.25), `terminal ${next.terminal} ≈ 4.25`);
-
-  // collapse() 之后库已经把高度写进 composer：仍以折叠前的 20% 为准重排。
-  const polluted = redistributeTerminalAgainstTimeline(
-    { timeline: 40, composer: 55.75, terminal: 4.25 },
-    4.25,
-    20,
-  );
-  assertLayout(
-    { composer: polluted.composer, timeline: polluted.timeline },
-    { composer: 20, timeline: 75.75 },
-  );
-});
-
-test("expanding the terminal takes height from the timeline, not the composer", () => {
+test("collapsing the terminal gives leftover height to the timeline", () => {
   const { redistributeTerminalAgainstTimeline } = loadModule();
   const next = redistributeTerminalAgainstTimeline(
-    { timeline: 75.75, composer: 20, terminal: 4.25 },
+    { timeline: 60, terminal: 40 },
+    4.25,
+  );
+  assertLayout(next, { timeline: 95.75, terminal: 4.25 });
+});
+
+test("expanding the terminal takes height from the timeline", () => {
+  const { redistributeTerminalAgainstTimeline } = loadModule();
+  const next = redistributeTerminalAgainstTimeline(
+    { timeline: 95.75, terminal: 4.25 },
     40,
     20,
-    20,
   );
-  assertLayout(
-    { composer: next.composer, timeline: next.timeline },
-    { composer: 20, timeline: 40 },
-  );
-  assert.ok(approx(next.terminal, 40), `terminal ${next.terminal} ≈ 40`);
+  assertLayout(next, { timeline: 60, terminal: 40 });
 });
 
-test("composer panel hugs measured content and does not reserve a stats slot", () => {
-  const {
-    resolveComposerPanelHeight,
-    COMPOSER_MIN_HEIGHT,
-    COMPOSER_DEFAULT_HEIGHT,
-  } = loadModule();
-  assert.equal(COMPOSER_MIN_HEIGHT, 112);
-  assert.equal(COMPOSER_DEFAULT_HEIGHT, 160);
-
-  // 未拖过：112 的输入卡不应被 DEFAULT 垫到 160（那就是卡下空白）。
-  assert.equal(
-    resolveComposerPanelHeight({
-      contentHeight: 112,
-      userPreferredHeight: 0,
-      minHeight: COMPOSER_MIN_HEIGHT,
-      maxHeight: 480,
-    }),
-    112,
+test("timeline min-size budget stops the terminal from eating the chat column", () => {
+  const { redistributeTerminalAgainstTimeline } = loadModule();
+  const next = redistributeTerminalAgainstTimeline(
+    { timeline: 30, terminal: 70 },
+    90,
+    40,
   );
-  // 指标出现：实测变高，面板跟着长。
-  assert.equal(
-    resolveComposerPanelHeight({
-      contentHeight: 136,
-      userPreferredHeight: 0,
-      minHeight: COMPOSER_MIN_HEIGHT,
-      maxHeight: 480,
-    }),
-    136,
-  );
-  // 用户拖高后，内容变矮也不回缩到拖高以下。
-  assert.equal(
-    resolveComposerPanelHeight({
-      contentHeight: 112,
-      userPreferredHeight: 200,
-      minHeight: COMPOSER_MIN_HEIGHT,
-      maxHeight: 480,
-    }),
-    200,
-  );
-  // 尚未测到内容：保持 min，避免 hug 到 0。
-  assert.equal(
-    resolveComposerPanelHeight({
-      contentHeight: 0,
-      userPreferredHeight: 0,
-      minHeight: COMPOSER_MIN_HEIGHT,
-      maxHeight: 480,
-    }),
-    COMPOSER_MIN_HEIGHT,
-  );
+  assertLayout(next, { timeline: 40, terminal: 60 });
 });
 
-test("composer panel resize correction only accepts content-aligned or active programmatic sizes", () => {
-  const { shouldRestoreComposerPanelHeight } = loadModule();
-
-  // 正常测量值和 2px 以内的浮点取整误差不应触发二次布局。
-  assert.equal(shouldRestoreComposerPanelHeight(142, 142, false), false);
-  assert.equal(shouldRestoreComposerPanelHeight(144, 142, false), false);
-  // Group 重建回放的旧百分比高度必须恢复到当前内容目标，不能记成用户高度。
-  assert.equal(shouldRestoreComposerPanelHeight(145, 142, false), true);
-  assert.equal(shouldRestoreComposerPanelHeight(280, 142, false), true);
-  // 本次代码主动 resize 的异步通知允许提交，即使目标因约束被库钳制。
-  assert.equal(shouldRestoreComposerPanelHeight(112, 142, true), false);
-});
-
-test("session view uses the budget function in programResize (not raw delta)", () => {
+test("session view no longer grows a composer panel against the timeline budget", () => {
   const sessionView = readFileSync(
     "src/renderer/src/components/session/SessionView.tsx",
     "utf8",
@@ -205,63 +69,27 @@ test("session view uses the budget function in programResize (not raw delta)", (
     "src/renderer/src/terminalDockState.ts",
     "utf8",
   );
-  // programResize 必须走预算函数：raw delta 在 timeline 触底时会压扁 terminal
-  assert.match(sessionView, /growComposerWithinTimelineBudget/);
-  assert.match(sessionView, /sanitizeSessionPanelLayout/);
+  assert.doesNotMatch(sessionView, /growComposerWithinTimelineBudget/);
+  assert.doesNotMatch(sessionView, /id="composer"/);
+  assert.match(sessionView, /redistributeTerminalAgainstTimeline/);
   assert.match(sessionView, /sessionResizableGroupKey\(sessionPanels\)/);
-  assert.match(sessionView, /shouldMountBottomComposer/);
   assert.match(sessionView, /sessionGroupDefaultLayout/);
-  assert.match(sessionView, /groupResizeBehavior="preserve-pixel-size"/);
-  // composer Panel 已禁用直接拖拽，非程序化偏差只能来自 Group 重建/缓存回放；
-  // 必须恢复内容高度，并在 Group 尚未注册时进入已有 retry 链。
-  assert.match(sessionView, /shouldRestoreComposerPanelHeight/);
-  assert.match(sessionView, /const appliedHeight = programResize\(contentDrivenHeightRef\.current\);/);
-  assert.match(sessionView, /pendingComposerHeightRef\.current = contentDrivenHeightRef\.current;\s*scheduleComposerHeightRetry\(\);/);
+  assert.match(terminalDockPanel, /groupResizeBehavior="preserve-pixel-size"/);
   assert.doesNotMatch(sessionView, /applyComposerHeight\(px, true\)/);
-  assert.match(sessionView, /useLayoutEffect\(\(\) => \{[\s\S]*?lastAttemptedComposerHeightRef\.current = null;[\s\S]*?\}, \[sessionId\]\);/);
-  assert.match(sessionView, /lastThreePanelLayoutRef\.current = null;/);
-  assert.match(sessionView, /visualPx - target/);
-
-  assert.match(sessionView, /resolveComposerPanelHeight/);
-  assert.match(sessionView, /userComposerHeightRef\.current = 0/);
-  assert.match(sessionView, /useState\(COMPOSER_MIN_HEIGHT\)/);
-
-  assert.match(sessionView, /composerHeightSessionRef/);
   assert.match(sessionView, /sessionTimeline\.isSurfaceLoading/);
-
-  // timeline 面板的 minSize 用同一常量，预算函数与 JSX 约束不漂移
-  assert.match(sessionView, /minSize=\{TIMELINE_MIN_HEIGHT\}/);
-  // 折叠阈值已收敛在 TerminalDockPanel 的纯状态规则；SessionView 仍要把
-  // composer 的程序化 resize 保护窗口传进去，避免自动增长误写成用户折叠。
+  assert.match(sessionView, /minSize=\{timelineColumnMinSize\}/);
   assert.match(
     sessionView,
     /isProgrammaticResize=\{\(\) => Date\.now\(\) < terminalProgrammaticExpireRef\.current\}/,
   );
   assert.match(terminalDockPanel, /applyTerminalPanelResize/);
   assert.match(terminalDockState, /TERMINAL_COLLAPSE_THRESHOLD_PX = 35/);
-  // 折叠/展开终端必须走「稳态读数 + 一次性 setLayout」：
-  // - 库的 collapse() 在本约束组合下会静默失效（调用后 size 不变）；
-  // - panel.resize() 对末位面板收缩走 le() 增量重排，composer disabled + collapsible
-  //   组合下校验失败直接返回原布局；
-  // - 任何先 mutate 面板再读 getSize()/getLayout() 的写法都会拿到过渡态百分比
-  //   （实测 groupPx 虚高 ~1.7 倍），setLayout 被 K() 钳成 composer 撑高的坏布局。
   assert.doesNotMatch(sessionView, /panel\.collapse\(\)/);
   assert.doesNotMatch(sessionView, /panel\.expand\(\)/);
-  assert.match(sessionView, /composerPanelRef\.current\?\.getSize\(\)/);
-  assert.match(sessionView, /setLayout\(\{\s*\.\.\.layout,/);
-  assert.match(sessionView, /composerHeightStateRef\.current \/ groupPx/);
-  assert.match(
-    sessionView,
-    /if \(now < terminalProgrammaticExpireRef\.current\) return/,
-  );
+  assert.match(sessionView, /redistributeTerminalAgainstTimeline\(/);
 });
 
-/**
- * 回归：打开历史会话首帧 messages=[]，旧逻辑卸底部 composer，Group 只剩 timeline，
- * 但仍用 session-group-2p 复用 layouts["timeline,composer"]（例如 83.506%, 16.494%），
- * react-resizable-panels K() 抛 `Invalid 1 panel layout`。
- */
-test("history session loading keeps the bottom composer so the group is never 1-panel", () => {
+test("bottom composer mount does not change the group panel count", () => {
   const { shouldMountBottomComposer, sessionResizableGroupKey, sanitizeSessionPanelLayout } = loadModule();
 
   assert.equal(
@@ -299,80 +127,58 @@ test("history session loading keeps the bottom composer so the group is never 1-
     false,
   );
 
-  assert.equal(sessionResizableGroupKey({ composer: false, terminal: false }), "session-group-1p");
-  assert.equal(sessionResizableGroupKey({ composer: true, terminal: false }), "session-group-2p");
-  assert.equal(sessionResizableGroupKey({ composer: true, terminal: true }), "session-group-3p");
+  assert.equal(sessionResizableGroupKey({ terminal: false }), "session-group-1p");
+  assert.equal(sessionResizableGroupKey({ terminal: true }), "session-group-2p");
   assert.notEqual(
-    sessionResizableGroupKey({ composer: false, terminal: false }),
-    sessionResizableGroupKey({ composer: true, terminal: false }),
+    sessionResizableGroupKey({ terminal: false }),
+    sessionResizableGroupKey({ terminal: true }),
     "1-panel and 2-panel groups must not share a cache key",
   );
 
-  // 2 值缓存打到 1 面板：只留 timeline=100，丢掉 composer 百分比
   const onePanel = sanitizeSessionPanelLayout(
-    { timeline: 83.506, composer: 16.494 },
-    { composer: false, terminal: false },
+    { timeline: 83.506, terminal: 16.494 },
+    { terminal: false },
   );
-  // vm 沙箱对象与测试字面量原型不同，不能 deepEqual；按键/值断言即可。
   assert.equal(onePanel.timeline, 100);
-  assert.equal(onePanel.composer, undefined);
+  assert.equal(onePanel.terminal, undefined);
   assert.equal(Object.keys(onePanel).join(","), "timeline");
 
-  // 3 值缓存打到 2 面板：丢掉 terminal，composer 保持，timeline 吸收差额
   const twoPanel = sanitizeSessionPanelLayout(
-    { timeline: 50, composer: 16.494, terminal: 33.506 },
-    { composer: true, terminal: false },
+    { timeline: 50, terminal: 50 },
+    { terminal: true },
   );
-  assert.equal(twoPanel.composer, 16.494);
-  assert.equal(twoPanel.terminal, undefined);
-  assert.ok(Math.abs(twoPanel.timeline - (100 - 16.494)) < 1e-9);
+  assert.equal(twoPanel.terminal, 50);
+  assert.ok(Math.abs(twoPanel.timeline - 50) < 1e-9);
 });
 
-/**
- * K() 用 Object.values(layout) 对齐 panelConstraints 下标，而 constraints 顺序
- * 等于 Group 当前 getLayout() 的键序。强行重排成 timeline,composer 会把
- * {composer:16, timeline:84} 写成 {timeline:84, composer:16}，值按新键序
- * [84,16] 打到仍是 composer-first 的面板数组上 → 输入栏吃 84%、拖拽反向。
- */
 test("sanitize preserves getLayout key order so percentages are not swapped", () => {
   const { sanitizeSessionPanelLayout } = loadModule();
 
-  const composerFirst = sanitizeSessionPanelLayout(
-    { composer: 16.494, timeline: 83.506 },
-    { composer: true, terminal: false },
+  const terminalFirst = sanitizeSessionPanelLayout(
+    { terminal: 20, timeline: 80 },
+    { terminal: true },
   );
-  assert.equal(Object.keys(composerFirst).join(","), "composer,timeline");
-  assert.equal(composerFirst.composer, 16.494);
-  assert.ok(Math.abs(composerFirst.timeline - 83.506) < 1e-9);
+  assert.equal(Object.keys(terminalFirst).join(","), "terminal,timeline");
+  assert.equal(terminalFirst.terminal, 20);
+  assert.ok(Math.abs(terminalFirst.timeline - 80) < 1e-9);
 
   const timelineFirst = sanitizeSessionPanelLayout(
-    { timeline: 83.506, composer: 16.494 },
-    { composer: true, terminal: false },
+    { timeline: 80, terminal: 20 },
+    { terminal: true },
   );
-  assert.equal(Object.keys(timelineFirst).join(","), "timeline,composer");
-  assert.equal(timelineFirst.composer, 16.494);
-  assert.ok(Math.abs(timelineFirst.timeline - 83.506) < 1e-9);
-
-  const dropTerminal = sanitizeSessionPanelLayout(
-    { composer: 20, timeline: 50, terminal: 30 },
-    { composer: true, terminal: false },
-  );
-  assert.equal(Object.keys(dropTerminal).join(","), "composer,timeline");
-  assert.equal(dropTerminal.composer, 20);
-  assert.equal(dropTerminal.terminal, undefined);
-  assert.ok(Math.abs(dropTerminal.timeline - 80) < 1e-9);
+  assert.equal(Object.keys(timelineFirst).join(","), "timeline,terminal");
+  assert.equal(timelineFirst.terminal, 20);
+  assert.ok(Math.abs(timelineFirst.timeline - 80) < 1e-9);
 });
 
-test("session group default layout keeps composer short and keys in DOM order", () => {
+test("session group default layout keys stay in DOM order", () => {
   const { sessionGroupDefaultLayout } = loadModule();
-  const two = sessionGroupDefaultLayout(
-    { composer: true, terminal: false },
-    160,
-    0,
-    800,
-  );
-  assert.equal(Object.keys(two).join(","), "timeline,composer");
-  assert.equal(two.composer, 20);
+  const one = sessionGroupDefaultLayout({ terminal: false }, 0, 800);
+  assert.equal(Object.keys(one).join(","), "timeline");
+  assert.equal(one.timeline, 100);
+
+  const two = sessionGroupDefaultLayout({ terminal: true }, 160, 800);
+  assert.equal(Object.keys(two).join(","), "timeline,terminal");
+  assert.equal(two.terminal, 20);
   assert.equal(two.timeline, 80);
-  assert.ok(two.composer < 40, "composer must not start at half the group");
 });

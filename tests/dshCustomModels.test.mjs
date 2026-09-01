@@ -62,7 +62,7 @@ test("first custom add while inheriting catalog keeps catalog then appends blank
 	assert.deepEqual(asJson(next), [
 		{ id: "deepseek-chat", name: "DeepSeek Chat" },
 		{ id: "deepseek-reasoner", name: "DeepSeek Reasoner" },
-		{ id: "", name: "" },
+		{ id: "" },
 	]);
 });
 
@@ -74,7 +74,7 @@ test("adding onto saved custom models does not wipe them", () => {
 	});
 	assert.equal(next.length, 2);
 	assert.deepEqual(asJson(next[0]), { id: "grok-4", name: "Grok 4", contextWindow: 200000 });
-	assert.deepEqual(asJson(next[1]), { id: "", name: "" });
+	assert.deepEqual(asJson(next[1]), { id: "" });
 });
 
 test("empty draft falls back to saved or catalog instead of wiping them", () => {
@@ -94,9 +94,35 @@ test("empty draft falls back to saved or catalog instead of wiping them", () => 
 		})),
 		[
 			{ id: "catalog", name: "Catalog" },
-			{ id: "", name: "" },
+			{ id: "" },
 		],
 	);
+});
+
+test("an explicit empty official DeepSeek override stays empty before adding a model", () => {
+	const { appendBlankDshModel } = loadDshModelsModule();
+	const next = appendBlankDshModel({
+		draftModels: [],
+		catalog: [{ id: "deepseek-v4-flash", name: "DeepSeek-V4-Flash" }],
+		emptyDraftIsOverride: true,
+	});
+	assert.deepEqual(asJson(next), [{ id: "" }]);
+});
+
+test("official DeepSeek capacity shorthand and model validation match DSH Web", () => {
+	const { formatDshModelCapacity, parseDshModelCapacity, validateDshDeepseekModels } = loadDshModelsModule();
+	assert.equal(formatDshModelCapacity(1_000_000), "1M");
+	assert.equal(formatDshModelCapacity(256_000), "256K");
+	assert.equal(parseDshModelCapacity("1M"), 1_000_000);
+	assert.equal(parseDshModelCapacity("256K"), 256_000);
+	assert.ok(Number.isNaN(parseDshModelCapacity("not-a-capacity")));
+	assert.equal(validateDshDeepseekModels(undefined), undefined);
+	assert.equal(validateDshDeepseekModels([]), undefined);
+	assert.deepEqual(asJson(validateDshDeepseekModels([{ id: "same" }, { id: "same" }])), {
+		index: 1,
+		issue: "idDuplicate",
+	});
+	assert.equal(validateDshDeepseekModels([{ id: "valid", inputModalities: ["text", "image"] }]), undefined);
 });
 
 test("editing a saved custom row does not drop sibling models", () => {
@@ -165,4 +191,26 @@ test("DSH cards seed custom models instead of starting from an empty draft array
 		cards,
 		/const models = Array.isArray\((?:provider|next)\.models\) \? \[\.\.\.(?:provider|next)\.models\] : \[\];\s*models\.push\(\{ id: ""/,
 	);
+});
+
+test("official DeepSeek lets inherited catalog rows materialize a model override", () => {
+	const cards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
+	const editor = readFileSync("src/renderer/src/config/DshModelsEditor.tsx", "utf8");
+	const table = readFileSync("src/renderer/src/config/DshModelsTable.tsx", "utf8");
+	assert.match(cards, /editableInherited/);
+	assert.match(editor, /emptyDraftIsOverride: props\.modelsOverridden === true/);
+	assert.match(table, /const canEditRows = !inherited \|\| props\.editableInherited === true/);
+	assert.match(table, /defaultContextWindow/);
+});
+
+test("official DeepSeek inherits catalog rows from DSH composition base through IPC", () => {
+	const host = readFileSync("src/main/dsh/DshHost.ts", "utf8");
+	const ipc = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
+	const preload = readFileSync("src/preload/index.ts", "utf8");
+	const cards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
+	assert.match(host, /base: ns\.base/);
+	assert.match(ipc, /base\?: unknown/);
+	assert.match(preload, /base\?: unknown/);
+	assert.match(cards, /readPath\(namespace\.base, \["models"\]\)/);
+	assert.match(cards, /schemaDefaultModels/);
 });

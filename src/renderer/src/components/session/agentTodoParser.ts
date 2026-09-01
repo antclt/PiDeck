@@ -68,3 +68,40 @@ export function parseAgentTodoItems(lines: readonly string[]): AgentTodoItem[] {
 	}
 	return items;
 }
+
+/**
+ * 会话 todo 快照（pi-deck-todo custom 条目）→ TodoItem 列表。
+ *
+ * 历史会话无 runtime widgets，任务 tab 从主进程快照重建。转换为 widget 行格式后
+ * 复用 parseAgentTodoItems，保证与活会话路径同解析口径（状态映射、同标题消歧）。
+ */
+export function sessionTodoSnapshotToItems(
+	snapshot: import("../../../../shared/types").SessionTodoSnapshot | undefined,
+): AgentTodoItem[] {
+	if (!snapshot) return [];
+	const lines = snapshot.todos.map((todo) => `${todo.done ? "☑" : "☐"} #${todo.id} ${todo.text}`);
+	return parseAgentTodoItems(lines);
+}
+
+/**
+ * 将 DSH runtime 的结构化 todo 投影适配为与 Pi widget 相同的展示模型。
+ *
+ * DSH 已提供稳定的状态字段，不能绕回行文本 parser；按正文生成稳定 key，
+ * 并为重复正文追加序号，避免状态更新时 React 列表错误复用行节点。
+ */
+export function runtimeTodosToItems(
+	todos: readonly import("../../../../shared/types").TodoItem[] | null | undefined,
+): AgentTodoItem[] {
+	if (!todos) return [];
+	const occurrences = new Map<string, number>();
+	return todos.map((todo) => {
+		const title = todo.content.trim();
+		const occurrence = (occurrences.get(title) ?? 0) + 1;
+		occurrences.set(title, occurrence);
+		return {
+			id: occurrence === 1 ? title : `${title}#${occurrence}`,
+			title,
+			status: todo.status === "in_progress" ? "in-progress" : todo.status,
+		};
+	});
+}

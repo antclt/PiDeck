@@ -83,7 +83,16 @@ function loadAgentManager() {
 		exports: historyReaderModule.exports,
 		module: historyReaderModule,
 		Promise,
-		require: (id) => id === "node:fs/promises" ? fsPromises : require(id),
+		require: (id) => id === "node:fs/promises" ? fsPromises : id === "../../shared/sessionTodo"
+			// todo 快照解析纯函数：本测试不覆盖，空实现满足依赖契约
+			? { parseTodoSnapshotData: () => undefined }
+			// 工具推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+			: id === "./derivedSubagents"
+			? { deriveToolSubagentEntries: () => [] }
+			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
+			: id === "../../shared/fileChanges"
+			? { collectSessionFileChanges: () => [] }
+			: require(id),
 	}, { filename: "SessionHistoryReader.ts" });
 	class SessionFileEditor {
 		async truncateForResend({ file }) {
@@ -160,6 +169,10 @@ function loadAgentManager() {
 			if (id === "./extensionError") {
 				return { formatExtensionErrorReason: (error) => String(error) };
 			}
+			// 工具推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+			if (id === "./derivedSubagents") {
+				return { mergeSubagentSources: (records) => records };
+			}
 			if (id === "./thinkingLevels") {
 				return { parseAvailableThinkingLevelsResponse: (response) => response?.data?.levels };
 			}
@@ -182,6 +195,11 @@ function loadAgentManager() {
 			if (id === "../extensions/enabledExtensionResolver") {
 				return { resolveEnabledExtensionPaths: () => null };
 			}
+			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
+			if (id === "../../shared/fileChanges") return { collectSessionFileChanges: () => [] };
+			// rewind checkpoint 纯 git 模块：WSL 路径测试不涉及回退，空桩满足依赖契约
+			// （桩返回空对象即可——命名导入在调用时才取属性，本测试不触发 rewind 方法）。
+			if (id === "../rewind/index.ts") return {};
 			return require(id);
 		},
 	};

@@ -122,6 +122,8 @@ let previewSettings: AppSettings = {
 	closeToTray: true,
 	singleInstance: true,
 	enableNotifications: true,
+	// 与主进程 SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
+	autoSessionTitle: true,
 	// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致
 	askNotificationEnabled: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
@@ -165,6 +167,10 @@ let previewSettings: AppSettings = {
 	petScale: DEFAULT_PET_SCALE,
 	petPatrolEnabled: true,
 	petPatrolPauseMin: 5,
+	// 闲置 agent 自动释放（预览模式不真实释放，仅保持设置项可用）
+	idleAgentAutoRelease: true,
+	idleAgentKeepCount: 5,
+	idleAgentTimeoutMin: 60,
 	favoriteModels: [],
 
 	fontSize: "default",
@@ -196,6 +202,7 @@ export function createPreviewApi(): PiDesktopApi {
 		readHtml: () => "",
 		readImage: () => "",
 		writeImage: async () => false,
+		writeText: async () => false,
 	};
 	const createTerminalTab = async (agentId: string, shell?: string, cwd?: string) => {
 		const shellName = shell ?? "powershell";
@@ -247,6 +254,46 @@ export function createPreviewApi(): PiDesktopApi {
 				recentTimings: [],
 			}),
 			openDiagnosticsFolder: async () => undefined,
+			// 环境体检预览桩：返回空报告，仅供预览模式不崩溃
+			healthCheck: async () => ({
+				generatedAt: Date.now(),
+				environment: {
+					appVersion: "preview",
+					platform: "win32",
+					arch: "",
+					osVersion: "",
+					locale: "",
+					timezone: "",
+					electronVersion: "",
+					chromeVersion: "",
+					nodeVersion: "",
+					installMode: "dev",
+					userDataDir: "",
+					logsDir: "",
+					appRssBytes: 0,
+					appHeapUsedBytes: 0,
+					systemTotalMemoryBytes: 0,
+					systemFreeMemoryBytes: 0,
+					dataDirFreeBytes: 0,
+					flags: {
+						wslEnabled: false,
+						wslDistro: "",
+						piProxyEnabled: false,
+						desktopProxyEnabled: false,
+						piProxyConfigured: false,
+						chromiumSandbox: false,
+						developerDiagnostics: false,
+						webServiceEnabled: false,
+						customPiPathConfigured: false,
+					},
+					pi: { installed: false, searchedDirs: [] },
+				},
+				checks: [],
+				logSummary: { total: 0, error: 0, warn: 0, todayError: 0, todayWarn: 0, recent: [] },
+				logFiles: [],
+			}),
+			healthExportReport: async () => ({ ok: true, canceled: false, path: "preview" }),
+			healthExportBundle: async () => ({ ok: true, canceled: false, path: "preview" }),
 		},
 		editors: {
 			list: async () => [],
@@ -395,6 +442,9 @@ export function createPreviewApi(): PiDesktopApi {
 			runDshGoalAction: async () => undefined,
 			listDshSubagents: async () => [],
 			readDshSubagentHistory: async () => ({ messages: [], hasMore: false }),
+			listSessionSubagents: async () => [],
+			listSessionFileChanges: async () => [],
+			listSessionTodo: async () => undefined,
 			listDshSkills: async () => [],
 			listDshOrphans: async () => [],
 			listDshForeignSessions: async () => [],
@@ -404,6 +454,7 @@ export function createPreviewApi(): PiDesktopApi {
 			syncDshForeignSessions: async () => ({ imported: 0, skipped: 0 }),
 			listArchivedDshSessions: async () => [],
 			unarchiveDshSession: async () => true,
+			deleteArchivedDshSession: async () => true,
 			listDshDynamicPlugins: async () => [],
 			listDshStaticPlugins: async () => [],
 			installDshPlugin: async () => undefined,
@@ -485,6 +536,7 @@ export function createPreviewApi(): PiDesktopApi {
 			archiveRecord: async () => true,
 			unarchiveRecord: async () => true,
 			listArchived: async () => [],
+			deleteArchivedRecord: async () => true,
 			copyRecord: async (sessionId) => ({
 				cancelled: false,
 				targetSessionId: `${sessionId}:copy`,
@@ -566,6 +618,13 @@ export function createPreviewApi(): PiDesktopApi {
 				started: false,
 				homeDir: "",
 			}),
+			// 预览环境无 DSH 后端：按未安装处理（UI 走安装引导，不裸报错）。
+			getDshRuntimeStatus: async () => ({ state: "notInstalled" as const }),
+			onDshRuntimeStatusChanged: () => () => {},
+			installDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
+			importDshRuntimeFile: async () => ({ ok: false, error: "unavailable in preview" }),
+			uninstallDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
+			onDshRuntimeInstallProgress: () => () => {},
 			describeDshSettings: async () => ({ writable: false, hasDocument: false, namespaces: [] }),
 			updateDshSettings: async () => undefined,
 			mutateDshSettings: async () => undefined,
@@ -603,6 +662,18 @@ export function createPreviewApi(): PiDesktopApi {
 			deleteRuntimeMessage: async (target) => ({
 				ok: true,
 				value: { target, value: undefined },
+			}),
+			listRewindCheckpoints: async (target) => ({
+				ok: true,
+				value: { target, value: { items: [], hasMore: false } },
+			}),
+			getRewindCheckpointDiff: async (target) => ({
+				ok: true,
+				value: { target, value: "" },
+			}),
+			restoreRewindCheckpoint: async (target) => ({
+				ok: true,
+				value: { target, value: { filesRestored: true } },
 			}),
 			prepareRuntimeResend: async (target) => ({
 				ok: true,
@@ -800,6 +871,13 @@ export function createPreviewApi(): PiDesktopApi {
 					version: "preview",
 					searchedDirs: [],
 				},
+			}),
+			getFeedbackProjectContext: async (_projectId: string) => ({
+				projectId: _projectId,
+				projectName: "preview",
+				agentsMd: "",
+				agentsMdTruncated: false,
+				skills: [],
 			}),
 			openExternal: async () => undefined,
 			restart: async () => undefined,
@@ -1100,6 +1178,7 @@ export function createPreviewApi(): PiDesktopApi {
 				error: "preview",
 			}),
 			getUsageProbes: async () => ({ recognized: null, templates: [], errors: [] }),
+			usageRecognized: async () => ({ recognized: false }),
 			saveUsageProbes: async () => ({ ok: false, error: "preview" }),
 			testUsageProbe: async () => ({ success: false, error: "preview" }),
 			installUsageSkill: async () => ({ success: false, error: "preview" }),

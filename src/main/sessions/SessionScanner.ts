@@ -924,6 +924,30 @@ export class SessionScanner {
     return results.sort((a, b) => b.summary.updatedAt - a.summary.updatedAt);
   }
 
+  /**
+   * 永久删除已归档会话（区别于恢复）：把归档区 JSONL（连同同级子会话目录）移入系统回收站，
+   * 并从归档索引移除条目。只允许删除 .pideck-archive 目录内的文件，防路径穿越。
+   * 幂等：归档文件已被外部清理时视为成功。
+   */
+  async deleteArchived(archivedPath: string): Promise<void> {
+    const wsl = this.isWslPath(archivedPath);
+    const archiveDir = this.archiveDirFor(archivedPath);
+    if (!archiveDir) throw new Error("归档文件不在可扫描目录内，无法删除");
+    // 安全防护：归档路径必须直接位于某扫描根的 .pideck-archive 目录下，拒绝跨目录删除。
+    if (this.normalize(dirname(archivedPath)) !== this.normalize(archiveDir)) {
+      throw new Error("归档文件不在归档目录内，拒绝删除");
+    }
+    // 先删同级子会话目录，再删文件本体（与 delete() 同语义，均走系统回收站）。
+    if (wsl) {
+      await this.deleteWslSiblingDir(archivedPath);
+      await this.deleteWslFile(archivedPath);
+    } else {
+      await this.deleteSiblingDir(archivedPath);
+      if (existsSync(archivedPath)) await shell.trashItem(archivedPath);
+    }
+    await this.removeArchiveEntry(archivedPath, wsl);
+  }
+
   /** 通过 wsl.exe 移动文件/目录 */
   private moveWsl(srcPath: string, dstPath: string): Promise<void> {
     return new Promise((resolve, reject) => {

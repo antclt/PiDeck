@@ -28,13 +28,14 @@ import {
 import { t } from "../../i18n";
 import { formatAskTitle } from "../../utils/askUi";
 import { Badge } from "../ui-shadcn/badge";
+import { detectSubagentFailure } from "./subagentStatus";
 import { Button } from "../ui-shadcn/button";
 import type { ChatMessage } from "../../../../shared/types";
 import { TimelineMarker } from "./TimelineMarker";
 import { LiveDuration } from "./LiveDuration";
 import { getToolKind, getToolKindLabel } from "./toolKind";
 import { getToolPhraseFromArgs } from "./timeline/toolPhrase";
-import { ToolResult } from "../agents/tool-result";
+import { ToolResult, ToolResultOutput } from "../agents/tool-result";
 import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
 import {
@@ -67,6 +68,8 @@ function askAnswerText(answer: unknown, label?: string): string {
   if (label?.trim()) return label;
   if (typeof answer === "string") return answer;
   if (typeof answer === "boolean") return answer ? t("common.true") : t("common.false");
+  // multi_select 的 answer 是选中项数组；label 缺失时拼接展示而非误标未回答
+  if (Array.isArray(answer)) return answer.join("、");
   return t("ask.unanswered");
 }
 
@@ -184,12 +187,22 @@ export const ToolCard = memo(function ToolCard(props: {
 	stopped?: boolean;
 	/** 所属会话 id：运行期绑定不可用时（历史会话 _viewer 投影）回退会话文件定位 */
 	sessionId?: string;
+	/** 通过会话工作区路由打开工具目标文件（相对路径由 App 层补齐工作目录） */
+	onOpenFile?: (path: string) => void;
 }) {
 	const [expanded, setExpanded] = useState(props.defaultOpen ?? false);
 	const messageStatus = getToolStatus(props.message);
 	const status = props.stopped && messageStatus === "running" ? "stopped" : messageStatus;
 	const toolName = getToolName(props.message);
 	const detailText = getToolDetailText(props.message);
+	// pi-subagents 的 Agent/get_subagent_result 失败时返回普通文本结果（无 isError 标记），
+	// 失败只能从结果头部的 "Status: error|stopped|aborted" 探测；探测到则整卡按失败渲染。
+	const subagentFailure =
+		toolName === "Agent" || toolName === "get_subagent_result"
+			? detectSubagentFailure(
+				`${typeof props.message.meta?.result === "string" ? props.message.meta.result : ""}\n${detailText}`,
+			)
+			: undefined;
 	// 工具结果截断标记（主进程 truncateDetailWithMeta 写入）：展开区可「查看完整输出」
 	// 按需读取（运行期走主进程内存缓存，历史会话定位读会话文件）。
 	const isTruncated = props.message.meta?.truncated === true;
@@ -215,7 +228,7 @@ export const ToolCard = memo(function ToolCard(props: {
 			setFullLoading(false);
 		}
 	};
-	const tone = status === "stopped" ? "ok" : getToolTone(props.message);
+	const tone = subagentFailure ? "error" : status === "stopped" ? "ok" : getToolTone(props.message);
 	const subtitle = getToolSubtitle(props.message);
 	const kindLabel = getToolKindLabel(toolName);
 	// write/edit/create/patch 工具：从参数直接取 diff 目标（写整文件新内容 /
@@ -255,6 +268,19 @@ export const ToolCard = memo(function ToolCard(props: {
 				<Badge variant="outline" className="gap-1 border-border-subtle px-1 py-0 text-micro text-text-tertiary">
 					<Square size={8} aria-hidden="true" />
 					{t("tool.statusStopped")}
+				</Badge>
+			);
+		}
+		if (subagentFailure) {
+			// 子代理失败：插件返回普通文本结果（无 isError），此处按探测出的终态渲染失败徽标
+			const label =
+				subagentFailure === "stopped" ? t("tool.statusStopped")
+				: subagentFailure === "aborted" ? t("tool.statusAborted")
+				: t("tool.statusError");
+			return (
+				<Badge variant="outline" className="gap-1 border-danger/40 bg-danger-soft px-1 py-0 text-micro text-danger">
+					<CircleX size={9} aria-hidden="true" />
+					{label}
 				</Badge>
 			);
 		}
@@ -326,8 +352,15 @@ export const ToolCard = memo(function ToolCard(props: {
 					{statusBadge}
 					{/* 耗时数字用界面字体（与行头时间/输入框统计条一致），工具名/路径仍走等宽 */}
 					{showDuration && (
-						<span className="shrink-0 text-caption tabular-nums text-text-tertiary" title={t("tool.durationTitle")}>
-							{status === "running" ? (
+						<span
+							className="shrink-0 text-caption tabular-nums text-text-tertiary"
+							title={isAskCard && status === "running" ? t("ask.waitingHint") : t("tool.durationTitle")}
+						>
+							{isAskCard && status === "running" ? (
+								// ask 等待用户回答阶段不计入工具耗时：不展示累加秒表，改用「等待回答…」
+								// 提示。用户回答后 tool_execution_end 落地的 durationMs 已由主进程扣除等待时长。
+								t("ask.waitingForAnswer")
+							) : status === "running" ? (
 								// 工具执行中：从消息时间戳起实时计时（LiveDuration 每秒刷新）
 								<LiveDuration startedAt={props.message.timestamp} isStreaming />
 							) : (
@@ -379,9 +412,9 @@ export const ToolCard = memo(function ToolCard(props: {
 							{showDiff && diffTarget && (
 								// 文件工具内联 diff（issue-兼容期：edit/write 的工具卡直接看改动，
 								// 不必再点开右侧差异查看器）。折叠态渲染行；maxHeight 上限防长文件撑爆卡片。
-								<div className="mb-1.5">
+								<div className="mb-1.5 flex min-w-0 items-start gap-1">
 									<FileDiff
-										className="min-w-0"
+										className="min-w-0 flex-1"
 										file={diffTarget.path}
 										lines={fileChangeToDiffLines(diffTarget)}
 										status="complete"
@@ -389,6 +422,23 @@ export const ToolCard = memo(function ToolCard(props: {
 										maxHeight={200}
 										language="diff"
 									/>
+									{props.onOpenFile && (
+										// 打开按钮与 diff 标题同行但不嵌套在 FileDiff 的折叠按钮内，
+										// 避免无效的 button 嵌套；路径解析交给会话工作区统一处理。
+										<div className="flex h-9 shrink-0 items-center">
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon-xs"
+												className="size-6 rounded text-text-tertiary hover:bg-muted hover:text-foreground"
+												aria-label={t("tool.openFile")}
+												title={t("tool.openFile")}
+												onClick={() => props.onOpenFile?.(diffTarget.path)}
+											>
+												<FileText size={12} aria-hidden="true" />
+											</Button>
+										</div>
+									)}
 								</div>
 							)}
 							<ToolResult
@@ -402,7 +452,7 @@ export const ToolCard = memo(function ToolCard(props: {
 								copyClassName="tool-card-copy"
 								contentClassName="text-text-tertiary"
 							>
-								{displayText}
+								<ToolResultOutput>{displayText}</ToolResultOutput>
 							</ToolResult>
 						</>
 					)}
@@ -433,7 +483,7 @@ export const ToolCard = memo(function ToolCard(props: {
 									onClick={() => void loadFullText()}
 								>
 									{fullLoading ? (
-										<Loader2 size={12} className="animate-spin" aria-hidden="true" />
+										<Loader2 size={12} className="animate-pideck-spin" aria-hidden="true" />
 									) : null}
 									{fullLoading ? t("tool.loadingFullOutput") : t("tool.viewFullOutput")}
 								</Button>
@@ -452,12 +502,20 @@ export const ToolGroupCard = memo(function ToolGroupCard(props: {
 	stopped?: boolean;
 	/** 所属会话 id（转交 ToolCard「查看完整输出」的历史会话文件回退） */
 	sessionId?: string;
+	/** 转交给每张工具卡的文件打开路由 */
+	onOpenFile?: (path: string) => void;
 }) {
 	return (
 		<section className="tool-group-card w-full min-w-0 overflow-hidden rounded-none border-0 bg-transparent" data-message-id={props.group.id}>
 			<div className="flex flex-col gap-0 p-0">
 				{props.group.messages.map((message) => (
-					<ToolCard key={message.id} message={message} stopped={props.stopped} sessionId={props.sessionId} />
+					<ToolCard
+						key={message.id}
+						message={message}
+						stopped={props.stopped}
+						sessionId={props.sessionId}
+						onOpenFile={props.onOpenFile}
+					/>
 				))}
 			</div>
 		</section>

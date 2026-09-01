@@ -78,6 +78,17 @@ export class DshHost {
 		 * 只在 host fork 时生效：运行中变更需 host 重启/下次启动才应用（DSH 无 per-session 通道）。
 		 */
 		private readonly resolveHostProxyEnvPatch: () => HostProxyEnvPatch | undefined = () => undefined,
+		/**
+		 * 外部 DSH runtime 根目录（阶段 2：userData/runtimes/dsh/<version>，其下有 node_modules）。
+		 * 返回 undefined 时回退 app 内置 node_modules（依赖分区前的存量包走这条）。
+		 * 只影响 @deepseek-ai/* 的解析；hostEntry 与桥代码始终在 app 内。
+		 */
+		private readonly resolveRuntimeAppRoot: () => string | undefined = () => undefined,
+		/**
+		 * 永久删除归档目录的回收站回调（与 pi 会话删除同语义：可恢复，拒绝静默硬删）。
+		 * 主进程装配时注入 electron shell.trashItem；测试注入假实现，保持 DshHost 与 electron 解耦。
+		 */
+		private readonly trashPath: (path: string) => Promise<void> = () => Promise.reject(new Error("trashPath not injected")),
 	) {}
 
 	/** 订阅 host-ready（首次启动与崩溃自动重启；E4：崩溃后恢复运行时状态）。 */
@@ -135,6 +146,7 @@ export class DshHost {
 			applies: string;
 			revision: number;
 			value: unknown;
+			base?: unknown;
 			user?: unknown;
 			secrets: Array<{ path: string[]; set: boolean }>;
 			schema: unknown;
@@ -157,6 +169,7 @@ export class DshHost {
 				applies: ns.applies,
 				revision: ns.revision,
 				value: ns.value,
+				base: ns.base,
 				user: ns.user,
 				secrets: (ns.secrets ?? []).map((secret) => ({ path: secret.path, set: secret.set })),
 				schema: ns.schema,
@@ -383,6 +396,20 @@ export class DshHost {
 		// （与 listArchivedSessions 同源；避免恢复后侧栏落「新会话」占位名）。
 		if (!title) title = foldSessionTitleFromDir(targetDir);
 		return { restoredPath: targetDir, cwd, ...(title ? { title } : {}) };
+	}
+
+	/**
+	 * 永久删除已归档的 DSH 会话（区别于恢复）：把归档目录移入系统回收站（经注入的 trashPath）。
+	 * 幂等：归档目录不存在/非 PiDeck 归档（无 manifest）返回 false；否则删除后返回 true。
+	 */
+	async deleteArchivedSession(dshSessionId: string): Promise<boolean> {
+		const archiveRoot = pideckArchivePath(this.getHomeDir());
+		const archivedDir = join(archiveRoot, dshSessionId);
+		// 只有带 manifest 的目录才算 PiDeck 归档（与 listArchivedSessions 同判定），避免误删非归档目录。
+		const manifestPath = join(archivedDir, "pideck-manifest.json");
+		if (!existsSync(manifestPath)) return false;
+		await this.trashPath(archivedDir);
+		return true;
 	}
 
 	/**
@@ -702,7 +729,11 @@ export class DshHost {
 		this.acquireHostLock();
 
 		// 定位 hostEntry 产物与 node_modules 锚点（bareModuleBaseUrl）。
-		const require = createRequire(join(this.getAppPath(), "package.json"));
+		// @deepseek-ai/* 现在可能来自外部 runtime（阶段 2：userData/runtimes/dsh/<v>），
+		// 因此 require 基准改用 runtime 目录而不是 appPath；未装 runtime 时回退内置。
+		// hostEntry 仍是 PiDeck 自己的产物，继续从 appPath 解析。
+		const runtimeRoot = this.resolveRuntimeAppRoot?.() ?? this.getAppPath();
+		const require = createRequire(join(runtimeRoot, "package.json"));
 		const appRoot = dirname(dirname(dirname(require.resolve("@deepseek-ai/dsh-base/package.json"))));
 		const hostEntryPath = resolveHostEntryPath(this.getAppPath());
 

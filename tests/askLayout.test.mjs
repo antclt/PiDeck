@@ -23,7 +23,7 @@ const sessionTimeline = readFileSync(
  * 这些是布局回归契约：runtime UI 属于会话时间线的可见交互，不再占用 composer 的
  * flex 高度；输入框仍由 composer 自己完整承载，Ask 也不再创建第二个纵向滚动 owner。
  */
-test("composer keeps the editor inside the resizable panel", () => {
+test("composer keeps the editor inside the session column", () => {
   assert.match(composerArea, /className="composer[^\"]*min-h-0[^\"]*overflow-hidden/);
   // 输入卡 shrink-0：面板剩余高度不撑开输入框（todo/终端拖拽与输入高度解耦）
   assert.match(composerArea, /composer-box relative flex[^"]*shrink-0/);
@@ -37,15 +37,13 @@ test("ask inline bar uses the reusable BEUI-style ApprovalCard shell", () => {
   assert.match(overlay, /BatchAskInlineBar/);
 });
 
-test("composer default height stays compact while remaining vertically resizable", () => {
+test("composer default height stays compact inside the timeline column", () => {
   const rendererUtils = readFileSync("src/renderer/src/rendererUtils.ts", "utf8");
   assert.match(rendererUtils, /COMPOSER_DEFAULT_HEIGHT = 160/);
   assert.match(rendererUtils, /COMPOSER_MIN_HEIGHT = 112/);
-  assert.match(sessionView, /useState\(COMPOSER_MIN_HEIGHT\)/);
-  assert.match(sessionView, /minSize=\{COMPOSER_MIN_HEIGHT\}/);
-  // 标签与 prop 允许跨行（终端布局修复后 Group 多了 groupRef，JSX 折行）
+  assert.match(sessionView, /TIMELINE_MIN_HEIGHT \+ COMPOSER_MIN_HEIGHT/);
   assert.match(sessionView, /<ResizablePanelGroup[\s\S]*?orientation="vertical"/);
-  assert.match(sessionView, /id="composer"/);
+  assert.doesNotMatch(sessionView, /id="composer"/);
 });
 
 test("ask overlay keeps fold, cancel, batch and resume interactions", () => {

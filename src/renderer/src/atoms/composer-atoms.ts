@@ -38,6 +38,7 @@ export const sessionDraftByIdAtom = atom<Record<string, string>>({});
 export const sessionAttachmentsByIdAtom = atom<Record<string, ImageContent[]>>({});
 export const sessionPasteFilesByIdAtom = atom<Record<string, PastedTextFile[]>>({});
 export const sessionQuotesByIdAtom = atom<Record<string, SessionQuoteMap>>({});
+
 export const sessionComposerModeByIdAtom = atom<Record<string, SessionComposerMode>>({});
 export const sessionSendStateByIdAtom = atom<Record<string, SessionSendState>>({});
 

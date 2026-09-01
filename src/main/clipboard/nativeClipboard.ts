@@ -62,6 +62,21 @@ export function writeClipboardImageDataUrl(dataUrl: unknown): ClipboardImageWrit
 	}
 }
 
+/** 写纯文本到系统剪贴板。大文本（诊断报告/AI 提示词）必须走主进程，渲染进程直连已在 Electron 38 废弃。 */
+export function writeClipboardText(value: unknown): ClipboardImageWriteResult {
+	if (typeof value !== "string" || !value) {
+		return { ok: false, reason: "empty-payload" };
+	}
+	try {
+		clipboard.writeText(value);
+		// 写完回读确认：Windows 上剪贴板会被第三方工具抢占，静默失败时用户拿到的是旧内容。
+		return clipboard.readText() === value ? { ok: true } : { ok: false, reason: "verify-mismatch" };
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return { ok: false, reason: `native-exception:${message}` };
+	}
+}
+
 /**
  * 读取资源管理器「复制文件」的本地路径。
  * 浏览器 ClipboardEvent 通常拿不到 kind=file，粘贴文件引用依赖此 API。

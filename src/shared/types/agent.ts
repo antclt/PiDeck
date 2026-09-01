@@ -34,7 +34,8 @@ export type AgentGatewayCapability =
 	| "editMessage" // 编辑历史消息
 	| "deleteMessage" // 删除历史消息
 	| "getCommands" // 会话内命令列表
-	| "exportHtml"; // 导出 HTML
+	| "exportHtml" // 导出 HTML
+	| "rewind"; // checkpoint 文件快照/回退（refs/pi-checkpoints，纯 git）
 
 export type AgentTab = {
 	id: string;
@@ -231,14 +232,15 @@ export type CreateAgentInput = {
 };
 
 export type AgentUiResponse = {
-	value?: string | boolean;
+	/** 普通回答为 string/boolean；multi_select 多选为 string[] */
+	value?: string | boolean | string[];
 	cancelled?: boolean;
 	confirmed?: boolean;
 };
 
 export type AgentUiBatchQuestion = {
 	id: string;
-	type: "select" | "confirm" | "input" | "editor";
+	type: "select" | "multi_select" | "confirm" | "input" | "editor";
 	question: string;
 	options?: Array<string | { label: string; value?: string; description?: string }>;
 	allowOther?: boolean;

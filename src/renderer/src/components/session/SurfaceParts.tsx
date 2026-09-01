@@ -4,7 +4,7 @@ export { TurnRow } from "./turn";
 export { ConversationOutline, EmptyState } from "./SurfaceComponents";
 export { LogoMark } from "../app/LogoMark";
 export { AgentAvatar } from "./SurfaceComponents";
-export { AskQuestionCard, DiagnosticMessageCard } from "./SurfaceComponents";
+export { DiagnosticMessageCard } from "./SurfaceComponents";
 export { MultiSelectModal, RespondingIndicator, ThinkingBlock } from "./SurfaceComponents";
 export { AssistantText, ToolCard, ToolGroupCard } from "./SurfaceComponents";
 export { ImagePreviewModal, PromptSuggestions } from "./SurfaceComponents";

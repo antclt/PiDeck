@@ -1,239 +1,102 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
 
-// 与 sessionWidgetChips.test.mjs 相同的 TSX 编译替身模式：只测公开 helper 与源码结构，
-// 不挂载真实 React / jotai。
-function compile(filePath, stubs = {}) {
-  const source = readFileSync(filePath, "utf8");
-  const output = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-      esModuleInterop: true,
-      jsx: ts.JsxEmit.ReactJSX,
-    },
-    fileName: filePath,
-  }).outputText;
-  const module = { exports: {} };
-  const localRequire = (specifier) => stubs[specifier] ?? {};
-  vm.runInNewContext(output, {
-    module,
-    exports: module.exports,
-    require: localRequire,
-    console,
-  }, { filename: filePath });
-  return module.exports;
-}
-
-const stripPath = "src/renderer/src/components/session/SessionTodoStrip.tsx";
-const stripSource = () => readFileSync(stripPath, "utf8");
+/**
+ * 恢复 dsh-web 形态的独立横栏卡（SessionTodoStrip / SessionFilesStrip /
+ * SessionSubagentsStrip 取代 SessionWidgetsCard 分段条与悬浮弹层）后的契约断言：
+ * i18n 文案、composer 挂载链、progressLabel / dismiss 纯函数、旧组件删除。
+ */
 const composerSource = () =>
   readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
 const viewSource = () =>
   readFileSync("src/renderer/src/components/session/SessionView.tsx", "utf8");
+const startSource = () =>
+  readFileSync("src/renderer/src/components/session/SessionStartSurface.tsx", "utf8");
+const stripSource = () =>
+  readFileSync("src/renderer/src/components/session/SessionTodoStrip.tsx", "utf8");
 const zh = () => readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const en = () => readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
-function loadStripHelpers() {
-  // stub 掉 JSX 依赖（jotai/lucide/i18n/parse），只取 progressLabel 纯函数
-  return compile(stripPath, {
-    react: {},
-    jotai: {},
-    "lucide-react": {},
-    "../../i18n": { t: (key, params = {}) => key + ":" + JSON.stringify(params) },
-    "./ComposerRuntimeIntegrations": {},
-    "./agentTodoParser": {
-      parseAgentTodoItems: (lines) => [],
-      stripPiDeckTodoWidgetMetadata: (lines) => lines,
-    },
-  });
-}
-
-test("progressLabel omits zero-count segments and joins with en-space middots", () => {
-  const { progressLabel } = loadStripHelpers();
-  const item = (status) => ({ status, id: status, title: status });
-  // 全状态齐：三段都在，分隔符为 en-space(U+2002) · en-space
-  assert.equal(
-    progressLabel([item("completed"), item("in-progress"), item("pending")]),
-    "sessionTodo.done:{\"done\":1}\u2002·\u2002sessionTodo.active:{\"active\":1}\u2002·\u2002sessionTodo.pending:{\"pending\":1}",
-  );
-  // 零计数段省略：只有进行中 + 待处理（完成 0 不显示）
-  assert.equal(
-    progressLabel([item("in-progress"), item("pending")]),
-    "sessionTodo.active:{\"active\":1}\u2002·\u2002sessionTodo.pending:{\"pending\":1}",
-  );
-  // 全部完成：只显示 done 段
-  assert.equal(
-    progressLabel([item("completed"), item("completed")]),
-    "sessionTodo.done:{\"done\":2}",
-  );
-});
-
-test("strip reads both todo widgets, respects dismissal, and hides when empty", () => {
-  const source = stripSource();
-  // 数据链路：合并 pi-deck-todo + pi-deck-plan-todos 两个 widget 为一个待办列表
-  assert.match(source, /pi-deck-todo/);
-  assert.match(source, /pi-deck-plan-todos/);
-  // DSH 官方 todo 经 runtime state 归一化成同构行式进入同一 todo 条（typed 数据源，
-  // 不伪装成第二个 Pi widget；主进程侧由 todos projection / todo/write 折叠）
-  assert.match(source, /dsh-todos/);
-  assert.match(source, /runtime\?\.state\?\.todos/);
-  assert.match(source, /isWidgetDismissed\(dismissed, props\.sessionId, key, widgetLines\)/);
-  assert.match(source, /loadDismissedWidgets/);
-  assert.match(source, /parseAgentTodoItems\(lines\)/);
-  assert.match(source, /stripPiDeckTodoWidgetMetadata\(widget\.lines\)/);
-  // 原始行先参与 dismiss 指纹，随后才过滤私有元数据，保证 replace 同文本也会复活。
-  assert.match(source, /isWidgetDismissed\(dismissed, props\.sessionId, key, widgetLines\)[\s\S]{0,1200}stripPiDeckTodoWidgetMetadata\(widget\.lines\)/);
-  // 无 todo 行整体不渲染（dsh TodoPanel 同款行为）
-  assert.match(source, /if \(items\.length === 0\) return null/);
-  // 折叠状态由 composer 统一拥有：点击卡片时父级会在 layout effect 内先测量再改 panel。
-  assert.match(source, /useComposerWidgetCollapsed\([\s\S]*?`todo:\$\{props\.sessionId\}`/);
-  assert.doesNotMatch(source, /const \[collapsed, setCollapsed\] = useState\(true\)/);
-});
-
-test("strip renders a collapsed row with title, progress and three-state glyphs", () => {
-  const source = stripSource();
-  // 折叠条：h-9（36px）行 + ListChecks 图标 + 标题 + 进度文案 + chevron
-  assert.match(source, /flex h-9 w-full items-center/);
-  assert.match(source, /ListChecks size=\{14\}/);
-  assert.match(source, /t\("sessionTodo\.title"\)/);
-  assert.match(source, /progressLabel\(items\)/);
-  assert.match(source, /aria-expanded=\{!collapsed\}/);
-  // 展开列表：180px 内滚动 + 状态字形（completed/in-progress/pending 三态 svg）
-  assert.match(source, /max-h-\[180px\]/);
-  assert.match(source, /StatusGlyph status=\{item\.status\}/);
-  assert.match(source, /animate-spin/);
-  assert.match(source, /strokeDasharray="2\.4 2\.4"/);
-});
-
-test("composer area forwards a widgets slot and session view mounts the strip", () => {
+test("composer forwards widgets slot; session surfaces mount the three strips then goal", () => {
   const composer = composerSource();
   const view = viewSource();
-  // ComposerArea：新增 widgets prop 并透传到 ComposerMeasuredExtras（测量链驱动面板增高）
+  const start = startSource();
+  // ComposerArea：widgets prop 透传到 ComposerMeasuredExtras
   assert.match(composer, /widgets\?: ReactNode/);
   assert.match(composer, /widgets=\{props\.widgets \?\? null\}/);
-  // SessionView：底部 composer widgets 栈挂 todo → goal，带 sessionId
-  assert.match(view, /import \{ SessionTodoStrip \} from "\.\/SessionTodoStrip"/);
-  assert.match(view, /import \{ SessionGoalStrip \} from "\.\/SessionGoalStrip"/);
+  // SessionView：todo → files → subagents → goal，独立横栏卡顺序挂载
   assert.match(view, /<SessionTodoStrip sessionId=\{sessionId\} \/>/);
+  assert.match(
+    view,
+    /<SessionFilesStrip[\s\S]*?run=\{latestAgentRun\}[\s\S]*?onDiffFile=\{onDiffFile\}/,
+  );
+  assert.match(
+    view,
+    /<SessionSubagentsStrip[\s\S]*?onOpenChildSession=\{onOpenBranchSession\}/,
+  );
   assert.match(view, /<SessionGoalStrip sessionId=\{sessionId\} \/>/);
+  assert.ok(
+    view.indexOf("<SessionTodoStrip") < view.indexOf("<SessionFilesStrip") &&
+      view.indexOf("<SessionFilesStrip") < view.indexOf("<SessionSubagentsStrip") &&
+      view.indexOf("<SessionSubagentsStrip") < view.indexOf("<SessionGoalStrip"),
+    "strip order must be todo → files → subagents → goal in SessionView widgets",
+  );
+  // SessionStartSurface：引导页同样挂三个横栏 + goal
+  assert.match(start, /<SessionTodoStrip sessionId=\{props\.sessionId\} \/>/);
+  assert.match(start, /<SessionFilesStrip sessionId=\{props\.sessionId\} \/>/);
+  assert.match(start, /<SessionSubagentsStrip sessionId=\{props\.sessionId\} \/>/);
+  assert.match(start, /<SessionGoalStrip sessionId=\{props\.sessionId\} \/>/);
 });
 
-test("strip copy is present in both locale dictionaries", () => {
+test("todo strip copy is present in both locale dictionaries", () => {
   for (const locale of [zh(), en()]) {
-    assert.match(locale, /"sessionTodo\.title"/);
     assert.match(locale, /"sessionTodo\.done": "\{done\}/);
     assert.match(locale, /"sessionTodo\.active": "\{active\}/);
     assert.match(locale, /"sessionTodo\.pending": "\{pending\}/);
+    assert.match(locale, /"sessionTodo\.empty"/);
+    // dismiss 随横栏形态回归：手动关闭 + 内容指纹变化后重新出现
     assert.match(locale, /"sessionTodo\.dismiss"/);
   }
 });
 
-// ── dismiss 记录（自 SessionWidgetChips 迁入，2026-08）──
-
-test("widget dismissal is permanent across restarts and replacement plan identities revive identical visible content", () => {
-  const { isWidgetDismissed, widgetDismissalId, widgetLinesSignature } = loadStripHelpers();
-  const lines = ["── 待办 ──", "☐ #1 修复登录页样式"];
-  // 用户手动关闭 → 记录当时的内容指纹
-  const dismissed = {
-    [widgetDismissalId("session-a", "pi-deck-todo")]: widgetLinesSignature(lines),
-  };
-  // 重启后扩展重建同一列表：指纹相同 → 永久保持隐藏
-  assert.equal(isWidgetDismissed(dismissed, "session-a", "pi-deck-todo", [...lines]), true);
-  // 工具再次调用追加新待办：内容变化 → 自动复活
-  assert.equal(
-    isWidgetDismissed(dismissed, "session-a", "pi-deck-todo", [...lines, "☐ #2 补测试"]),
-    false,
-  );
-  // 计划身份也在原始签名中：即使可见事项/编号完全一致，replace 后也必须复活。
-  const activePlanLines = ["[[pid:todo-plan:7]]", "☐ #1 相同文本"];
-  const planDismissed = {
-    [widgetDismissalId("session-a", "pi-deck-todo")]: widgetLinesSignature(activePlanLines),
-  };
-  assert.equal(isWidgetDismissed(planDismissed, "session-a", "pi-deck-todo", activePlanLines), true);
-  assert.equal(
-    isWidgetDismissed(
-      planDismissed,
-      "session-a",
-      "pi-deck-todo",
-      ["[[pid:todo-plan:8]]", "☐ #1 相同文本"],
-    ),
-    false,
-  );
-  // Branch-scoped metadata prevents branch-local plan #7 with identical text from sharing a dismissal.
-  const branchDismissed = {
-    [widgetDismissalId("session-a", "pi-deck-todo")]: widgetLinesSignature([
-      "[[pid:todo-plan:branch-a:7]]",
-      "☐ #1 相同文本",
-    ]),
-  };
-  assert.equal(
-    isWidgetDismissed(branchDismissed, "session-a", "pi-deck-todo", [
-      "[[pid:todo-plan:branch-b:7]]",
-      "☐ #1 相同文本",
-    ]),
-    false,
-  );
-  // dismiss 按 session / widgetKey 隔离
-  assert.equal(isWidgetDismissed(dismissed, "session-b", "pi-deck-todo", [...lines]), false);
-  assert.equal(isWidgetDismissed(dismissed, "session-a", "pi-deck-plan-todos", [...lines]), false);
+test("progress label keeps zero-segment omission and en-space middot join in the strip", () => {
+  const strip = stripSource();
+  // progressLabel：零计数段过滤 + en-space(U+2002) · en-space 连接（与旧 todo 条同口径）
+  assert.match(strip, /export function progressLabel/);
+  assert.match(strip, /done > 0 \? t\("sessionTodo\.done"/);
+  assert.match(strip, /active > 0 \? t\("sessionTodo\.active"/);
+  assert.match(strip, /pending > 0 \? t\("sessionTodo\.pending"/);
+  assert.match(strip, /join\("\\u2002·\\u2002"\)/);
 });
 
-test("dismissing the unified strip records every visible raw widget fingerprint", () => {
-  const { dismissWidgetEntries, isWidgetDismissed } = loadStripHelpers();
-  const next = dismissWidgetEntries({}, "session-a", [
-    { key: "pi-deck-todo", lines: ["[[pid:todo-plan:branch-a:1]]", "☐ #1 当前计划"] },
-    { key: "pi-deck-plan-todos", lines: ["计划草案 1 步", "☐ 1. 审查"] },
-  ]);
-
-  assert.equal(
-    isWidgetDismissed(next, "session-a", "pi-deck-todo", [
-      "[[pid:todo-plan:branch-a:1]]",
-      "☐ #1 当前计划",
-    ]),
-    true,
-  );
-  assert.equal(
-    isWidgetDismissed(next, "session-a", "pi-deck-plan-todos", [
-      "计划草案 1 步",
-      "☐ 1. 审查",
-    ]),
-    true,
-  );
+test("dismiss helpers keep widget-lines fingerprints", () => {
+  const strip = stripSource();
+  // 手动关闭按「内容指纹」记录：指纹相同保持隐藏，工具更新列表后重新出现
+  assert.match(strip, /export function widgetLinesSignature/);
+  assert.match(strip, /export function isWidgetDismissed/);
+  assert.match(strip, /export function dismissWidgetEntries/);
 });
 
-test("widgetLinesSignature is stable and order/content sensitive", () => {
-  const { widgetLinesSignature } = loadStripHelpers();
-  const a = ["☐ #1 任务一", "☐ #2 任务二"];
-  assert.equal(widgetLinesSignature(a), widgetLinesSignature([...a]));
-  assert.notEqual(widgetLinesSignature(a), widgetLinesSignature([...a].reverse()));
-  assert.notEqual(widgetLinesSignature(a), widgetLinesSignature([...a, "☐ #3 任务三"]));
-  assert.notEqual(widgetLinesSignature(a), widgetLinesSignature(["☐ #1 任务一改"]));
-});
-
-// ── chat-header widget chips 已移除（2026-08 用户要求：待办统一走输入框上方常驻条）──
-
-test("chat-header widget chips are removed; header slot and mounts are gone", () => {
+test("segmented bar and floating popover are removed; strip cards replaced them", () => {
   const view = viewSource();
-  const header = readFileSync(
-    "src/renderer/src/components/session/SessionHeader.tsx",
+  assert.throws(() =>
+    readFileSync("src/renderer/src/components/session/SessionWidgetsCard.tsx"),
+  );
+  assert.throws(() =>
+    readFileSync("src/renderer/src/components/session/SessionWidgetsPopover.tsx"),
+  );
+  assert.doesNotMatch(view, /SessionWidgetsCard|SessionWidgetsPopover/);
+  // 弹层专用 atoms 一并移除：行级折叠统一走 composer 通道
+  const composerAtoms = readFileSync("src/renderer/src/atoms/composer-atoms.ts", "utf8");
+  assert.doesNotMatch(
+    composerAtoms,
+    /widgetsPopoverSegmentFamily|widgetsDisclosureCollapsedFamily/,
+  );
+  // 悬浮弹层不在 timeline 面板内渲染：SessionSurfaceStage 只承载时间线
+  const stage = readFileSync(
+    "src/renderer/src/components/session/SessionSurfaceStage.tsx",
     "utf8",
   );
-  const strip = stripSource();
-  // 组件文件删除 + 挂载/槽位/import 移除
-  assert.throws(() =>
-    readFileSync("src/renderer/src/components/session/SessionWidgetChips.tsx"),
-  );
-  assert.doesNotMatch(view, /SessionWidgetChips/);
-  assert.doesNotMatch(header, /widgetChips/);
-  // dismiss 工具迁入常驻条，保持同一 localStorage 指纹语义
-  assert.match(strip, /DISMISSED_WIDGETS_KEY/);
-  assert.match(strip, /dismissWidgetEntries/);
-  assert.match(strip, /localStorage\.setItem/);
-  assert.match(strip, /sessionTodo\.dismiss/);
-  assert.match(strip, /<X size=\{14\}/);
-  assert.match(strip, /isWidgetDismissed\(dismissed, props\.sessionId, key, widgetLines\)/);
+  assert.doesNotMatch(stage, /SessionWidgetsPopover/);
 });

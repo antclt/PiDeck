@@ -1,5 +1,8 @@
 import { dialog, ipcMain, type BrowserWindow } from "electron";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
+import type { FeedbackProjectContext } from "../../shared/types";
 import type { ProjectStore } from "../projects/ProjectStore";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { GitService } from "../git/GitService";
@@ -207,4 +210,54 @@ export function registerProjectsIpc({
 		appLogger,
 		projectResourceManager,
 	});
+
+	// ── 问题反馈「新建会话分析」的项目上下文 ──
+	// 读取项目根 AGENTS.md（大小截断）与项目级技能目录名，供 AI 提示词携带工程规范。
+	// 只读文件内容，不写任何数据；路径来自 projectStore（用户已信任的项目），无需再次弹信任。
+
+	const FEEDBACK_AGENTS_MD_MAX_CHARS = 14_000;
+	ipcMain.handle(
+		ipcChannels.appFeedbackProjectContext,
+		async (_event, projectId: unknown): Promise<FeedbackProjectContext> => {
+			if (typeof projectId !== "string" || !projectId) {
+				throw new Error("invalid projectId");
+			}
+			const project = projectStore.get(projectId);
+			if (!project) throw new Error(`Project not found: ${projectId}`);
+			const hostPath = resolveProjectHostPath(project);
+			// AGENTS.md 缺失时返回空串而非报错：不是所有项目都写了规范文件
+			let agentsMd = "";
+			try {
+				agentsMd = await readFile(join(hostPath, "AGENTS.md"), "utf8");
+			} catch {
+				agentsMd = "";
+			}
+			const agentsMdTruncated = agentsMd.length > FEEDBACK_AGENTS_MD_MAX_CHARS;
+			if (agentsMdTruncated) {
+				// 在字符上限处往前截到行尾，避免提示词里出现半截代码行
+				const capped = agentsMd.slice(0, FEEDBACK_AGENTS_MD_MAX_CHARS);
+				const lastBreak = capped.lastIndexOf("\n");
+				agentsMd = lastBreak > 0 ? capped.slice(0, lastBreak) : capped;
+			}
+			// 项目级技能：.pi/agent/skills 与 .agents/skills 下的子目录名（读取失败视为无技能）
+			const skillNames = new Set<string>();
+			for (const skillsDir of [".pi/agent/skills", ".agents/skills"]) {
+				try {
+					const entries = await readdir(join(hostPath, skillsDir), { withFileTypes: true });
+					for (const entry of entries) {
+						if (entry.isDirectory()) skillNames.add(entry.name);
+					}
+				} catch {
+					// 目录不存在/不可读都视为无技能，不把项目上下文拉垮
+				}
+			}
+			return {
+				projectId,
+				projectName: project.name,
+				agentsMd,
+				agentsMdTruncated,
+				skills: [...skillNames].sort(),
+			};
+		},
+	);
 }

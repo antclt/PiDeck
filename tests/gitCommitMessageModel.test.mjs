@@ -65,6 +65,10 @@ test("Shared model picker keeps one model line and supports collapse and selecte
   // 用户 toggle 的 selection 合成），批量展开/收起走 applyPickerGroupAction。
   assert.match(commandPicker, /resolveGroupExpanded\(\{/);
   assert.match(commandPicker, /action: \{ kind: "expandAll" \}/);
+  // 折叠状态 = 派生状态 + 用户覆盖：resolveGroupExpanded 统一收口，用户切换走 toggleGroup
+  assert.match(commandPicker, /resolveGroupExpanded\(\{\s*selection,/);
+  assert.match(commandPicker, /toggleGroup\(props\.id\)/);
+  assert.match(commandPicker, /aria-expanded=\{expanded\}/);
   assert.match(composerComponents, /value=\{currentModelKey\}/);
   assert.match(composerComponents, /value: props\.composerAgentMode/);
   assert.match(composerComponents, /value=\{props\.current\}/);

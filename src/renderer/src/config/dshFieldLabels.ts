@@ -80,9 +80,30 @@ export function dshFieldCopy(name: string): DshFieldCopy {
  * pi-ai 目录元数据自动决定，用户一般不改；要改走「源文件」tab 手写 settings.yaml。
  */
 export function isDshCustomSettingsHiddenField(name: string, meta?: Record<string, unknown>): boolean {
-	// retryPolicy 是 object/union，通用表单只会渲成只读 JSON；次数在卡片上单独编辑。
+	// retryPolicy is intentionally kept in settings.yaml: dsh-web's curated
+	// provider cards only expose a key, Base URL and the model catalog.
 	if (name === "models" || name === "apiKeyEnv" || name === "retryPolicy" || name === "compat") return true;
 	return meta?.role === "secret" || meta?.role === "credential-ref";
+}
+
+/**
+ * Direct DeepSeek is a composition-owned adapter, not a generic pi-ai route.
+ * Keep its card aligned with dsh-web: only endpoint override belongs in the
+ * curated fold; thinking/retry/transport defaults stay in the raw settings file.
+ */
+const DSH_DEEPSEEK_PROFILE_VISIBLE_FIELDS = new Set(["baseURL", "baseUrl"]);
+
+export function isDshDeepseekProfileVisibleField(name: string): boolean {
+	return DSH_DEEPSEEK_PROFILE_VISIBLE_FIELDS.has(name);
+}
+
+/**
+ * `declared` is an adapter answer, not an "active" flag: true means pi-ai has
+ * no shipped catalog route for this id. Directory failures are handled like a
+ * custom route so a user can still finish editing a newly-added provider.
+ */
+export function isDshPiAiCustomRoute(entry: { declared?: boolean } | undefined): boolean {
+	return !entry || entry.declared === true;
 }
 
 /**

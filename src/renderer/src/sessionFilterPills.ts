@@ -49,6 +49,18 @@ export function filterSessionsByPills<T extends { source?: SessionSource; backen
 }
 
 /**
+ * 当前会话集合实际存在的类别（按 SESSION_FILTER_PILLS 顺序去重）。
+ * 会话管理弹窗用它动态渲染 pill：只显示「≥1 条会话」的类别，
+ * 避免对没用过导入来源的用户摆出空的 codex/claude/opencode pill（Chat 区尤其明显）。
+ */
+export function pillsPresentIn<T extends { source?: SessionSource; backend?: AgentBackend }>(
+  sessions: readonly T[],
+): SessionFilterPill[] {
+  const present = new Set(sessions.map(sessionPillOf));
+  return SESSION_FILTER_PILLS.filter((pill) => present.has(pill));
+}
+
+/**
  * 过滤配置持久化格式（localStorage key：pideck-session-source-filter）。
  *
  * v2：{ v: 2, filters: { [projectId]: string[] | null } }，数组为 5 个类别。

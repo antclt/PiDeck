@@ -209,7 +209,7 @@ export const StatefulButton = forwardRef<HTMLButtonElement, StatefulButtonProps>
         <AnimatePresence initial={false}>
           {state === "loading" ? (
             <IconSlot keyId="loading-icon">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-pideck-spin" />
             </IconSlot>
           ) : null}
           {state === "success" ? (

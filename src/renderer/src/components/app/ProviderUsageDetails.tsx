@@ -162,7 +162,7 @@ export function ProviderUsageDetails(props: {
 					onClick={() => refresh(props.provider, props.backend)}
 					className="ml-auto flex h-5 w-5 flex-none items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-muted/60 hover:text-foreground"
 				>
-					<RefreshCw size={12} className={loading ? "animate-spin" : undefined} />
+					<RefreshCw size={12} className={loading ? "animate-pideck-spin" : undefined} />
 				</button>
 			</div>
 			{loading && result == null ? (

@@ -35,12 +35,14 @@ test("git panel: status -> diff -> stage -> commit", async ({ window }) => {
 	test.setTimeout(120_000);
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
+	// 侧栏分段(56469f95)后默认停在「聊天」分段，工作区项目行在「项目」分段下，先切换
+	await window.getByRole("tab", { name: "项目" }).click();
 	// 选中种子项目（项目行显示目录 basename），并在该项目下新建会话草案
 	// （头部抽屉开关只在有会话视图时渲染；注意「新建 Agent」图标每个项目行都有，
 	//  必须限定在目标项目行内点击，否则会落到聊天项目上）
 	const projectRow = window.locator(".conversation", { hasText: "pideck-seed-git-repo" }).first();
 	await projectRow.click();
-	await projectRow.getByTitle("新建 Agent").first().click();
+	await projectRow.getByTitle("普通会话").first().click();
 	await expect(window.locator(".composer .rich-input")).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
 
 	// 先展开抽屉（rail 只在抽屉打开期间渲染），再切到 Git tab

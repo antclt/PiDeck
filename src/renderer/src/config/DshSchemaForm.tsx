@@ -32,6 +32,7 @@ export type DshNamespaceView = {
 	applies: string;
 	revision: number;
 	value: unknown;
+	base?: unknown;
 	user?: unknown;
 	secrets: Array<{ path: string[]; set: boolean }>;
 	schema: unknown;
@@ -165,6 +166,8 @@ export function DshSchemaField(props: {
 	ref: DshSchemaRef;
 	path: string[];
 	value: unknown;
+	/** Optional family-specific placeholder for a curated scalar field. */
+	placeholder?: string;
 	secrets: Array<{ path: string[]; set: boolean }>;
 	onChange: (path: string[], next: unknown) => void;
 	writable: boolean;
@@ -177,11 +180,12 @@ function Field(props: {
 	ref: DshSchemaRef;
 	path: string[];
 	value: unknown;
+	placeholder?: string;
 	secrets: Array<{ path: string[]; set: boolean }>;
 	onChange: (path: string[], next: unknown) => void;
 	writable: boolean;
 }) {
-	const { schema, ref, path, value, secrets, onChange, writable } = props;
+	const { schema, ref, path, value, placeholder, secrets, onChange, writable } = props;
 	const meta = ref.meta ?? {};
 
 	if (ref.type === "object") {
@@ -285,7 +289,7 @@ function Field(props: {
 					className="h-8"
 					type={isSecret ? "password" : "text"}
 					value={current}
-					placeholder={isSecret ? (secretSet ? t("config.dsh.secretConfigured") : t("config.dsh.secretEmpty")) : copy.placeholder}
+					placeholder={isSecret ? (secretSet ? t("config.dsh.secretConfigured") : t("config.dsh.secretEmpty")) : (placeholder ?? copy.placeholder)}
 					disabled={!writable || (isSecret && secretSet)}
 					onChange={(event) => onChange(path, event.target.value)}
 				/>

@@ -38,7 +38,7 @@ import type { ImageGenMeta } from "../../../shared/types/imagegen";
 import {
   busySendDeliveryAtom,
   cacheSessionMessagesAtom,
-  defaultAgentBackendAtom,
+  effectiveAgentBackendAtom,
   imageGenConfigAtom,
   sessionAttachmentsByIdAtom,
   sessionComposerModeByIdAtom,
@@ -117,6 +117,7 @@ import {
   processComposerImageFile,
 } from "../utils/composerImages";
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
+import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
 import { showNotice } from "../utils/notice";
 import {
   requireSessionCommand,
@@ -357,7 +358,13 @@ export function useSessionComposerController(
     defaultEffort?: string;
   } | undefined>(undefined);
   useEffect(() => {
-    if (!isDshBackend) return;
+    if (!isDshBackend) {
+      // 离开 dsh 后端（切回 pi/生图）时清掉残留的 DSH 部署默认模型：
+      // 底栏 defaultModel = dshDefaultModel ?? bootstrapDefaultModel，
+      // 残留会让 pi 会话误显示 DSH 的默认模型（用户反馈「切回 pi 默认模型变了」）。
+      setDshDefault(undefined);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -391,7 +398,8 @@ export function useSessionComposerController(
   // 同一解析器 launchDefaults），让底栏/选择器在用户从未设置欢迎页偏好时也能
   // 显示当前默认模型/思考档位。真实会话的默认值写在 record 里走原链路，
   // 不需要这里重复解析。
-  const defaultAgentBackend = useAtomValue(defaultAgentBackendAtom);
+  // 读「有效」后端（经 DSH runtime 安装态钳制）：引导页预取的启动默认不会指向不可用后端。
+  const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
   const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
   useEffect(() => {
     if (record) return;
@@ -1705,10 +1713,18 @@ export function useSessionComposerController(
   const changeBackend = useCallback(async (next: AgentBackend) => {
     if (backendLocked) return;
     try {
+      // 切回 pi 时按 pi 配置重新解析默认模型/思考档位（与 createDraft 缺省填充
+      // 同一解析器 launchDefaults），而不是直接清空——否则用户 pi 配置里的
+      // defaultProvider/defaultModel 不会出现在切回后的会话（底栏回退残留 DSH 默认）。
+      // dsh/imagegen 后端模型由各自部署默认决定，record 保持清空。
+      const resolved = next === "pi"
+        ? await desktopApi.sessions.resolveLaunchDefaults({ backend: "pi" }).catch(() => undefined)
+        : undefined;
+      const defaults = resolveBackendSwitchDefaults(next, resolved);
       const updated = await desktopApi.sessions.updateRecord(sessionId, {
         backend: next,
-        model: null,
-        thinkingLevel: null,
+        model: defaults.model,
+        thinkingLevel: defaults.thinkingLevel,
       });
       upsertSession(updated);
     } catch (error) {
@@ -1784,12 +1800,15 @@ export function useSessionComposerController(
     backend: record?.backend ?? "pi",
     /** 草稿期可切换后端；激活后锁定（undefined → UI 隐藏切换器）。 */
     changeBackend: backendLocked ? undefined : changeBackend,
-    /** DSH 部署默认模型（settings.yaml agent-default-model）；底栏/选择器展示用。 */
-    dshDefaultModel: dshDefault
+    /** DSH 部署默认模型（settings.yaml agent-default-model）；仅 dsh 后端时展示，
+     *  离开 dsh 时清空（否则残留值会随 defaultModel 泄漏到 pi 会话底栏）。 */
+    dshDefaultModel: isDshBackend && dshDefault
       ? { provider: dshDefault.provider, modelId: dshDefault.model, modelName: dshDefault.model }
       : undefined,
     /** DSH 部署默认思考档位：settings.yaml 的 reasoningEffort 优先，缺省用模型自身 defaultEffort。 */
-    dshDefaultThinkingLevel: dshDefault?.reasoningEffort ?? dshDefault?.defaultEffort,
+    dshDefaultThinkingLevel: isDshBackend
+      ? (dshDefault?.reasoningEffort ?? dshDefault?.defaultEffort)
+      : undefined,
     /** 引导页（无 record）启动默认：pi 配置/模型目录解析出的第一个可用项，展示用。 */
     bootstrapDefaultModel: bootstrapDefaults?.model,
     bootstrapDefaultThinkingLevel: bootstrapDefaults?.thinkingLevel,

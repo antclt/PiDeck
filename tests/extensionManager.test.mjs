@@ -43,6 +43,10 @@ function loadExtensionManagerModule() {
       if (specifier === "./extensionVersionGate") {
         return nodeRequire("../src/main/extensions/extensionVersionGate.ts");
       }
+      // ExtensionManager 依赖 ../update/githubFeed 的 compareVersions；.ts 经 node 类型剥离可 require。
+      if (specifier === "../update/githubFeed") {
+        return nodeRequire("../src/main/update/githubFeed.ts");
+      }
       return nodeRequire(specifier);
     },
     Promise,

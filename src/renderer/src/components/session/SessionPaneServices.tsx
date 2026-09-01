@@ -11,6 +11,13 @@ import type { QueuedPrompt } from "../../hooks/useQueuedPrompt";
 import type { NoticeId } from "../../utils/notice";
 import type { TerminalDockStateByOwner } from "../../terminalDockState";
 
+/** 打开会话文件时由栏级 injector 绑定的解析与授权上下文。 */
+export type SessionFileOpenContext = {
+  baseDir?: string;
+  projectId?: string;
+  projectRoot?: string;
+};
+
 /**
  * 会话栏共享服务：跨分屏双栏稳定不变的回调与资源。
  * 身份（sessionId / focused）不进这里，避免大 props 袋透传。
@@ -20,7 +27,7 @@ export type SessionPaneServices = {
   promoteSessionToPermanent: (sessionId: string) => void;
   isLanWeb: boolean;
   showToast: (msg: string, dur?: number) => void;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, line?: number, context?: SessionFileOpenContext) => void;
   onDiffFile: (path: string) => void;
   onPreviewImage: (img: ImageContent | null) => void;
   abortAgent: (agentId?: string) => Promise<void>;
@@ -44,6 +51,8 @@ export type SessionPaneServices = {
   forkFromUserMessage?: (message: ChatMessage) => void;
   forkingMessageId?: string | null;
   openSidebarSessionById?: (projectId: string, sessionId: string) => Promise<void>;
+  /** 后台 Ask toast「前往会话」：按 sessionId 聚焦目标会话并登记常驻 Tab（App 级实现） */
+  focusAskSessionById?: (sessionId: string) => void;
   agents: AgentTab[];
   queuedPromptsBySession: Record<string, QueuedPrompt[]>;
   queueRetract: (sessionId: string, prompt: QueuedPrompt) => void;

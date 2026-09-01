@@ -3,7 +3,6 @@ import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { Button } from "../components/ui-shadcn/button";
-import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { ModelsTable, type DshModelRow } from "./DshModelsTable";
 import { FetchedModelCombobox } from "./FetchedModelCombobox";
 import {
@@ -22,29 +21,32 @@ import { computeModelSpecPatches } from "../utils/modelSpecAutoFill";
  * DSH 的 reasoningEfforts 需要“规范档位 → 上游 wire 值”映射；pi-ai catalog 的
  * ModelSpec 只知道模型是否推理，不能安全构造这份映射。因此自动补全只写容量和图片输入。
  */
-function dshModelSpecPatches(model: ModelItem, spec: ModelSpec | null) {
-  return computeModelSpecPatches(model, spec).filter(([field]) => field !== "reasoning");
-}
-
-function dshDefaultInputSupportsImages(input: unknown): boolean {
-  return Array.isArray(input) && input.includes("image");
-}
-
-function setDshDefaultImageInput(input: unknown, enabled: boolean): string[] {
-  const current = Array.isArray(input)
-    ? input.filter((item): item is string => typeof item === "string" && item.length > 0)
-    : ["text"];
-  const withoutImage = current.filter((item) => item !== "image");
-  if (!enabled) return withoutImage.includes("text") ? withoutImage : ["text", ...withoutImage];
-  return withoutImage.includes("text") ? [...withoutImage, "image"] : ["text", ...withoutImage, "image"];
+function dshModelSpecPatches(
+  model: ModelItem,
+  spec: ModelSpec | null,
+  supportsGenericInput: boolean,
+) {
+  return computeModelSpecPatches(model, spec).filter(([field]) =>
+    field !== "reasoning" && (supportsGenericInput || field !== "input"),
+  );
 }
 
 /**
- * DSH 自定义模型编辑器：在适配器目录上追加/拉取，而不是从空 draft 起步。
- * 获取列表走 DSH host 的 llm.discoverModels；结果只作为待采纳候选。
+ * DSH custom model editor: extend or interrogate the adapter catalog without
+ * starting from an empty draft. The visible fields follow dsh-web's curated
+ * model editor; advanced modality settings remain in settings.yaml.
  */
 export function DshModelsEditor(props: {
 	models: DshModelRow[];
+	/** Whether the direct adapter's user layer owns the array (empty is meaningful there). */
+	modelsOverridden?: boolean;
+	/** Restore the adapter catalog by unsetting the user-layer models array. */
+	onResetModels?: () => void;
+	/** Whether inherited rows should immediately materialize a user override on edit. */
+	editableInherited?: boolean;
+	/** Adapter fallback capacities shown for a model that leaves them unset. */
+	defaultContextWindow?: number;
+	defaultMaxTokens?: number;
 	savedModels?: DshModelRow[];
 	catalog?: DshModelRow[];
 	writable: boolean;
@@ -55,9 +57,6 @@ export function DshModelsEditor(props: {
 	api?: string;
 	/** 只作为本次 discovery 的一次性密钥；为空时由 DSH 读取已存凭证。 */
 	apiKeyDraft?: string;
-	/** 未单独声明 input 的自定义模型使用的 provider 级模态兜底。 */
-	defaultInput?: unknown;
-	onDefaultInputChange?: (input: string[]) => void;
 	onChange: (models: DshModelRow[]) => void;
 }) {
 	const { models, savedModels, catalog, writable } = props;
@@ -68,11 +67,13 @@ export function DshModelsEditor(props: {
 	// 当前 DSH 包只有 llm-pi-ai 注册了 llm.discoverModels；llm-deepseek 的官方配置面
 	// 只编辑适配器 catalog，不能伪造一个必然返回 NO_DISCOVERY 的 endpoint 按钮。
 	const canDiscoverModels = props.settingsNs === "llm-pi-ai";
-
 	const seedInput = {
 		draftModels: models,
 		savedModels,
 		catalog,
+		// DeepSeek treats [] as an intentional catalog override; pi-ai keeps its
+		// historic empty-means-inherit behavior.
+		emptyDraftIsOverride: props.modelsOverridden === true,
 	};
 
 	// 继承目录时 models 为空，勾选器仍要把目录 id 标成已配置，避免重复拉回
@@ -136,7 +137,11 @@ export function DshModelsEditor(props: {
 					? row.input.filter((item): item is string => typeof item === "string")
 					: undefined,
 			};
-			for (const [field, value] of dshModelSpecPatches(model, specs[offset])) {
+			for (const [field, value] of dshModelSpecPatches(
+				model,
+				specs[offset],
+				props.settingsNs === "llm-pi-ai",
+			)) {
 				nextRows = updateDshModelAt({
 					draftModels: nextRows,
 					savedModels,
@@ -165,7 +170,7 @@ export function DshModelsEditor(props: {
 			contextWindow: typeof row.contextWindow === "number" ? row.contextWindow : undefined,
 			maxTokens: typeof row.maxTokens === "number" ? row.maxTokens : undefined,
 		};
-		const updates = dshModelSpecPatches(model, spec);
+		const updates = dshModelSpecPatches(model, spec, props.settingsNs === "llm-pi-ai");
 		if (updates.length === 0) return;
 		let nextRows = current;
 		for (const [field, value] of updates) {
@@ -187,16 +192,6 @@ export function DshModelsEditor(props: {
 
 	return (
 		<div className="grid gap-2">
-			{props.onDefaultInputChange && (
-				<label className="flex items-center gap-2 text-micro text-muted-foreground">
-					<Checkbox
-						checked={dshDefaultInputSupportsImages(props.defaultInput)}
-						disabled={!writable}
-						onCheckedChange={(checked) => props.onDefaultInputChange?.(setDshDefaultImageInput(props.defaultInput, checked === true))}
-					/>
-					{t("config.dsh.defaultImageInput")}
-				</label>
-			)}
 			{canDiscoverModels && (
 				<div className="flex flex-wrap items-center justify-end gap-1.5">
 					<Button
@@ -240,11 +235,17 @@ export function DshModelsEditor(props: {
 			<ModelsTable
 				models={models}
 				catalog={catalog}
+				modelsOverridden={props.modelsOverridden}
+				onReset={props.onResetModels}
+				editableInherited={props.editableInherited}
+				defaultContextWindow={props.defaultContextWindow}
+				defaultMaxTokens={props.defaultMaxTokens}
+				allowCapacitySuffixes={props.settingsNs === "llm-deepseek"}
 				writable={writable}
 				onAdd={() => props.onChange(appendBlankDshModel(seedInput))}
 				onUpdate={(index, field, value) => props.onChange(updateDshModelAt({ ...seedInput, index, field, value }))}
 				onRemove={(index) => props.onChange(removeDshModelAt({ ...seedInput, index }))}
-				onIdBlur={(index, modelId) => void fillFromCatalogOnIdBlur(index, modelId)}
+				onIdBlur={canDiscoverModels ? (index, modelId) => void fillFromCatalogOnIdBlur(index, modelId) : undefined}
 			/>
 		</div>
 	);

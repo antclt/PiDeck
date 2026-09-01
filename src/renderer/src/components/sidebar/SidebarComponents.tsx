@@ -41,6 +41,7 @@ import { Label } from "../../components/ui-shadcn/label";
 import {
 	SESSION_FILTER_PILLS,
 	filterSessionsByPills,
+	pillsPresentIn,
 	type SessionFilterPill,
 } from "../../sessionFilterPills";
 import {
@@ -49,6 +50,7 @@ import {
 	filterArchivedDshByFamily,
 	filterArchivedPiByFamily,
 	managerArchivedDshLabel,
+	managerArchivedRowKey,
 	mergeManagerArchived,
 	sessionManagerRowKey,
 	sessionWorkspaceLabel,
@@ -88,10 +90,14 @@ export function SessionManagerModal(props: {
 	onUnarchive: (session: SessionSummary) => Promise<void>;
 	/** 列出已归档会话（含归档前原始路径，供按家族归属过滤） */
 	listArchived: () => Promise<ArchivedPiSession[]>;
+	/** 永久删除已归档会话（pi 文件归档：移入回收站并移出索引） */
+	deleteArchived: (archivedPath: string) => Promise<void>;
 	/** 列出 DSH 归档会话（归档视图用；host 目录已移入 .pideck-archive，含标题） */
 	listArchivedDsh: () => Promise<ArchivedDshSession[]>;
 	/** 恢复 DSH 归档会话（主进程移回 sessions 树并重建 catalog 记录） */
 	onUnarchiveDsh: (dshSessionId: string) => Promise<void>;
+	/** 永久删除已归档 DSH 会话（host 目录移入回收站） */
+	deleteArchivedDsh: (dshSessionId: string) => Promise<void>;
 }) {
 	// 弹窗项目上下文 = 整个 worktree 家族（根 + 全部子工作区），与侧栏工作区树语义一致。
 	const family = useMemo(
@@ -106,6 +112,11 @@ export function SessionManagerModal(props: {
 	// 已归档视图：true 时展示归档会话并提供恢复；数据打开弹窗时按需拉取。
 	const [showArchived, setShowArchived] = useState(false);
 	const [archivedRows, setArchivedRows] = useState<ManagerArchivedRow[] | null>(null);
+	// 已归档视图选中集合（行身份 = managerArchivedRowKey，与主列表 selected 独立）。
+	const [archivedSelected, setArchivedSelected] = useState<Set<string>>(new Set());
+	const [archivedSelectAll, setArchivedSelectAll] = useState(false);
+	// 已归档行待删除确认：单行/批量均收敛到这里（数组）；确认后调主进程删除并刷新归档列表。
+	const [pendingDeleteArchived, setPendingDeleteArchived] = useState<ManagerArchivedRow[] | null>(null);
 
 	// 按 pill 过滤（一个会话只归属一个 pill，DSH 不与 Pi 重复计数）
 	const filteredSessions = useMemo(
@@ -160,11 +171,42 @@ export function SessionManagerModal(props: {
 	// 弹窗按项目上下文（整个 worktree 家族）展示归档，不再全量跨项目。
 	const loadArchivedRows = () => {
 		void Promise.all([props.listArchived(), props.listArchivedDsh()])
-			.then(([piSessions, dshItems]) => setArchivedRows(mergeManagerArchived(
-				filterArchivedPiByFamily(piSessions, family),
-				filterArchivedDshByFamily(dshItems, family),
-			)))
+			.then(([piSessions, dshItems]) => {
+				setArchivedRows(mergeManagerArchived(
+					filterArchivedPiByFamily(piSessions, family),
+					filterArchivedDshByFamily(dshItems, family),
+				));
+				// 数据刷新后清空选中，避免删除/恢复后残留全选或计数。
+				setArchivedSelected(new Set());
+				setArchivedSelectAll(false);
+			})
 			.catch(() => setArchivedRows([]));
+	};
+
+	// 归档视图全选/取消全选（行身份 = managerArchivedRowKey；数据刷新后置空）。
+	const handleToggleAllArchived = () => {
+		if (archivedSelectAll) {
+			setArchivedSelected(new Set());
+		} else {
+			setArchivedSelected(new Set((archivedRows ?? []).map(managerArchivedRowKey)));
+		}
+		setArchivedSelectAll(!archivedSelectAll);
+	};
+
+	const handleToggleArchived = (key: string) => {
+		setArchivedSelected((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key); else next.add(key);
+			setArchivedSelectAll(next.size === (archivedRows?.length ?? 0));
+			return next;
+		});
+	};
+
+	// 批量删除已归档行：把选中的行收敛到确认弹窗（单行删除也走这里，数组长度 1）。
+	const handleDeleteArchivedSelected = () => {
+		const rows = (archivedRows ?? []).filter((row) => archivedSelected.has(managerArchivedRowKey(row)));
+		if (rows.length === 0) return;
+		setPendingDeleteArchived(rows);
 	};
 
 	return (
@@ -196,7 +238,8 @@ export function SessionManagerModal(props: {
 									{t("common.selectAll")}
 								</Label>
 								<div className="flex items-center gap-1">
-									{SESSION_FILTER_PILLS.map((pill) => (
+									{/* 只渲染当前会话实际存在的类别（Chat 区通常只有 pi/生图，不摆空导入 pill） */}
+									{pillsPresentIn(props.sessions).map((pill) => (
 										<Button
 											key={pill}
 											variant="outline"
@@ -209,6 +252,15 @@ export function SessionManagerModal(props: {
 									))}
 								</div>
 							</>
+						)}
+						{showArchived && (
+							<Label className="flex cursor-pointer items-center gap-2 text-control text-text-secondary select-none">
+								<Checkbox
+									checked={archivedSelectAll}
+									onCheckedChange={handleToggleAllArchived}
+									className="m-0 size-[15px] cursor-pointer accent-[var(--color-accent)]" />
+								{t("common.selectAll")}
+							</Label>
 						)}
 					</div>
 					<div className="flex items-center gap-2">
@@ -232,6 +284,14 @@ export function SessionManagerModal(props: {
 								{t("common.deleteSelected", { count: selected.size })}
 							</Button>
 						)}
+						{showArchived && archivedSelected.size > 0 && (
+							<Button
+								variant="outline" size="sm" className="h-auto gap-1 border border-[color-mix(in_srgb,var(--color-danger)_28%,transparent)] px-3 py-1 text-caption font-medium text-[var(--color-danger)] shadow-none transition-all duration-150 hover:border-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
+								onClick={handleDeleteArchivedSelected}
+							>
+								{t("common.deleteSelected", { count: archivedSelected.size })}
+							</Button>
+						)}
 						<Button
 							variant="outline"
 							size="sm"
@@ -239,6 +299,9 @@ export function SessionManagerModal(props: {
 							onClick={() => {
 								if (showArchived) {
 									setShowArchived(false);
+									// 离开归档视图清空选中，避免下次进来残留高亮/批量计数。
+									setArchivedSelected(new Set());
+									setArchivedSelectAll(false);
 								} else {
 									// 打开归档视图时懒加载归档列表（pi 文件归档 + DSH host 目录归档）
 									if (archivedRows === null) loadArchivedRows();
@@ -257,22 +320,34 @@ export function SessionManagerModal(props: {
 						<Table>
 							<TableHeader>
 								<TableRow className="bg-bg-muted hover:bg-bg-muted">
+									<TableHead className="w-10" />
 									<TableHead className="w-full">{t("sessionManager.session")}</TableHead>
 									<TableHead className="w-40 text-right">{t("sessionManager.actions")}</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
 								{archivedRows === null ? (
-									<TableRow><TableCell colSpan={2} className="py-6 text-center text-caption text-muted-foreground">…</TableCell></TableRow>
+									<TableRow><TableCell colSpan={3} className="py-6 text-center text-caption text-muted-foreground">…</TableCell></TableRow>
 								) : archivedRows.length === 0 ? (
-									<TableRow><TableCell colSpan={2} className="py-6 text-center text-caption text-muted-foreground">{t("sessionManager.archivedEmpty")}</TableCell></TableRow>
+									<TableRow><TableCell colSpan={3} className="py-6 text-center text-caption text-muted-foreground">{t("sessionManager.archivedEmpty")}</TableCell></TableRow>
 								) : archivedRows.map((row) => {
 						// 归档行工作区标签：worktree 子项目会话打「目录名」标（与主列表同策略），主工作区不打。
 						const workspaceLabel = row.kind === "pi"
 							? archivedPiWorkspaceLabel(row.item, family)
 							: archivedDshWorkspaceLabel(row.item, family);
+						const rowKey = managerArchivedRowKey(row);
+						const isChecked = archivedSelected.has(rowKey);
 						return (
-						<TableRow key={row.kind === "pi" ? sessionManagerRowKey(row.item.summary) : row.item.dshSessionId} className="bg-bg-panel">
+						<TableRow key={rowKey} className="group bg-bg-panel" data-state={isChecked ? "selected" : undefined}>
+							<TableCell className="w-10">
+								<Label className="flex shrink-0 cursor-pointer items-center">
+									<Checkbox
+										checked={isChecked}
+										onCheckedChange={() => handleToggleArchived(rowKey)}
+										className="m-0 size-[15px] cursor-pointer accent-[var(--color-accent)]"
+									/>
+								</Label>
+							</TableCell>
 							<TableCell className="w-full max-w-0">
 								{row.kind === "pi" ? (
 									<div className="flex min-w-0 items-center gap-2">
@@ -308,6 +383,14 @@ export function SessionManagerModal(props: {
 											title={t("sessionManager.restore")}
 										>
 											{t("sessionManager.restore")}
+										</Button>
+										<Button
+											variant="ghost" size="sm" className="h-auto gap-[3px] rounded-[4px] px-2 text-caption text-text-tertiary transition-all duration-150 hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+											onClick={() => setPendingDeleteArchived([row])}
+											title={t("common.delete")}
+										>
+											<Trash2 size={12} aria-hidden="true" />
+											{t("common.delete")}
 										</Button>
 								</div>
 							</TableCell>
@@ -405,6 +488,47 @@ export function SessionManagerModal(props: {
 				</div>
 			</div>
 			</DialogContent>
+			{/* 已归档行「删除」确认：删除不可恢复，danger 强调；确认后删除并刷新归档列表。
+			    单行/批量统一收敛到数组：length===1 显示会话名，多条显示计数。 */}
+			<AlertDialog
+				open={pendingDeleteArchived !== null}
+				onOpenChange={(next) => { if (!next) setPendingDeleteArchived(null); }}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>{t("sessionManager.deleteArchivedTitle")}</AlertDialogTitle>
+						<AlertDialogDescription>
+							{pendingDeleteArchived !== null && pendingDeleteArchived.length > 1
+								? t("sessionManager.deleteArchivedBodyMany", { count: pendingDeleteArchived.length })
+								: t("sessionManager.deleteArchivedBody", {
+									name: pendingDeleteArchived === null || pendingDeleteArchived.length === 0 ? ""
+										: pendingDeleteArchived[0].kind === "pi"
+											? (pendingDeleteArchived[0].item.summary.name
+													|| pendingDeleteArchived[0].item.summary.preview?.slice(0, 60)
+													|| t("common.untitled"))
+											: managerArchivedDshLabel(pendingDeleteArchived[0]),
+								})}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-[var(--color-danger)] text-white hover:bg-[var(--color-danger)]"
+							onClick={() => {
+								const pending = pendingDeleteArchived;
+								setPendingDeleteArchived(null);
+								if (!pending || pending.length === 0) return;
+								const deleting = Promise.all(pending.map((row) => row.kind === "pi"
+									? props.deleteArchived(row.item.summary.filePath)
+									: props.deleteArchivedDsh(row.item.dshSessionId)));
+								void deleting.then(loadArchivedRows).catch(() => loadArchivedRows());
+							}}
+						>
+							{t("common.delete")}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</Dialog>
 	);
 }
@@ -489,6 +613,8 @@ export function ProjectContextMenu(props: {
 	onRefreshProject: () => void;
 	onCopyProjectPath: () => void;
 	onRemoveProject: () => void;
+	/** worktree 子项目删除必须走 Git worktree 清理流程，不能只移除目录记录。 */
+	onRemoveWorktree?: () => void;
 }) {
 	const isWorktreeEnabled = props.menu.project.worktreeEnabled ?? false;
 	return (
@@ -561,10 +687,11 @@ export function ProjectContextMenu(props: {
 				{t("menu.importOpenCode")}
 			</DropdownMenuItem>
 			<DropdownMenuSeparator />
-			{/* 危险区：删除固定在最底部，与普通操作隔开防误触 */}
-			<DropdownMenuItem variant="destructive" onSelect={props.onRemoveProject}>
+			{/* 危险区：worktree 子项目复用此菜单时，删除必须经 Git worktree 清理流程，
+			    以保留分支/目录删除确认与运行中 Agent 保护。 */}
+			<DropdownMenuItem variant="destructive" onSelect={props.onRemoveWorktree ?? props.onRemoveProject}>
 				<Trash2 className="size-3.5" aria-hidden="true" />
-				{t("menu.removeProject")}
+				{props.onRemoveWorktree ? t("app.worktreeRemoveConfirmTitle") : t("menu.removeProject")}
 			</DropdownMenuItem>
 		</MenuShell>
 	);
@@ -606,13 +733,13 @@ export function AgentContextMenu(props: {
 			{/* DSH 运行中会话的复制走 clone 分流（fork 无锚点完整副本），保留入口；
 			    导出 HTML 无 DSH 实现（G10 待决策），对 dsh agent 隐藏 */}
 			<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
-				{props.actionLoading === "copy" && <span className="mini-loader" />}
+				{props.actionLoading === "copy" && <span className="mini-loader animate-pideck-spin" />}
 				<Copy className="size-3.5" aria-hidden="true" />
 				{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
 			</DropdownMenuItem>
 			{props.menu.agent.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
-					{props.actionLoading === "export" && <span className="mini-loader" />}
+					{props.actionLoading === "export" && <span className="mini-loader animate-pideck-spin" />}
 					<FileDown className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</DropdownMenuItem>
@@ -757,14 +884,14 @@ export function SessionContextMenu(props: {
 			</DropdownMenuItem>
 			{props.menu.session.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
-					{props.actionLoading === "copy" && <span className="mini-loader" />}
+					{props.actionLoading === "copy" && <span className="mini-loader animate-pideck-spin" />}
 					<Copy className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
 				</DropdownMenuItem>
 			)}
 			{props.menu.session.backend !== "dsh" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
-					{props.actionLoading === "export" && <span className="mini-loader" />}
+					{props.actionLoading === "export" && <span className="mini-loader animate-pideck-spin" />}
 					<FileDown className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</DropdownMenuItem>
@@ -845,7 +972,7 @@ export function ProjectAvatar(props: {
 			)}
 			{StatusIcon && (
 				<span className="avatar-status-indicator" aria-label={props.status}>
-					<StatusIcon size={8} strokeWidth={2.5} className={props.status === "running" ? "animate-spin" : undefined} />
+					<StatusIcon size={8} strokeWidth={2.5} className={props.status === "running" ? "animate-pideck-spin" : undefined} />
 				</span>
 			)}
 		</div>

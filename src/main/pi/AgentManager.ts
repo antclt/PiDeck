@@ -17,15 +17,23 @@ import type {
 	I18nParams,
 	ImageContent,
 	Project,
+	RewindCheckpointPage,
+	RewindCheckpointPageParams,
+	RewindRestoreResult,
+	RewindRestoreScope,
 	SendPromptInput,
 	SendPromptResult,
 	SessionEnvironment,
 	SessionMessagePage,
 	ThinkingUpdate,
+	SessionFileChange,
+	SessionTodoSnapshot,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
+import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { PiProcess } from "./PiProcess";
 import { createCompactRpcRequest } from "./compactRpc";
+import { mergeSubagentSources } from "./derivedSubagents";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { resolveEnabledExtensionPaths } from "../extensions/enabledExtensionResolver";
@@ -49,6 +57,16 @@ import {
 	type SessionFileRef,
 } from "./SessionFileEditor";
 import { SessionHistoryReader, findTurnPageStart } from "./SessionHistoryReader";
+import {
+	currentIndexTree,
+	createCheckpoint,
+	diffCheckpoints,
+	loadAllCheckpoints,
+	loadCheckpointFromRef,
+	MUTATING_TOOLS,
+	restoreCheckpoint as applyCheckpointRestore,
+	toCheckpointSummary,
+} from "../rewind/index.ts";
 import {
 	AgentMessageProjector,
 	buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay,
@@ -298,6 +316,11 @@ export class AgentManager {
 	 * 与 tab.status 分离：压缩/重试收尾时 runtime 仍 busy，但上一轮回答已经完成。
 	 */
 	private readonly agentTurnActiveById = new Map<string, boolean>();
+	/**
+	 * rewind 自动打点的回合计数（agent_start 递增一次 = 一轮 run）。
+	 * pi 事件流没有 turnIndex 概念，用本地计数近似 pi-rewind 的 turn 语义。
+	 */
+	private readonly rewindTurnCounters = new Map<string, number>();
 	/** 正在执行模型配置刷新的 agent，用于退出处理器中忽略进程退出事件 */
 	private readonly modelRefreshingAgents = new Set<string>();
 	/** 用户主动停止的 agent，用于退出处理器中跳过自动重连 */
@@ -351,10 +374,17 @@ export class AgentManager {
 	private static readonly ABORT_ESCALATION_VERIFY_MS = 4000;
 
 	/**
-	 * 待处理的 Extension UI 请求。key 为 agentId，value 为 Map<requestId, { method, title, options }>。
-	 * 用于在 abort 时及时发送 cancellation 防止 pi 等待超时。
+	 * 待处理的 Extension UI 请求。key 为 agentId，value 为 Map<requestId, { method, title, raisedAt }>。
+	 * 用于在 abort 时及时发送 cancellation 防止 pi 等待超时；raisedAt 记录提问弹起时刻，
+	 * 供 ask_question 工具耗时扣除用户等待时间（exclude_wait）使用。
 	 */
-	private readonly pendingUIRequests = new Map<string, Map<string, { method: string; title: string }>>();
+	private readonly pendingUIRequests = new Map<string, Map<string, { method: string; title: string; raisedAt: number }>>();
+	/**
+	 * 各 agent 已累计的 ask 用户等待毫秒数（raisedAt→回答时刻）。
+	 * 工具耗时（durationMs）应只算 agent 实际处理时长，不含用户盯着问卷思考的时间；
+	 * ask_question 工具结束时从中扣除并清零，工具开始新一轮时也清零防泄漏到后续工具。
+	 */
+	private readonly askWaitMsByAgent = new Map<string, number>();
 	/** abort 时正在等待 ask_question 响应的 agent，用于在工具结果中覆写 answer 为 null。 */
 	private readonly abortedDuringAsk = new Set<string>();
 	/** 成功空闲（settled）回调：供 PetStateBridge 等主进程内部模块订阅，携带完成 Agent 身份。 */
@@ -873,6 +903,34 @@ export class AgentManager {
 			await this.sessionHistoryReader.readSessionDisplayMessages(sessionPath, agentId, sessionContent),
 		);
 	}
+	/**
+	 * 读取会话文件中的子代理记录（subagents:record custom 条目），并合并
+	 * 工具调用推导条目（acp_delegate：billion-context；subagent 工具：nicobailon
+	 * pi-subagents）；同 id 时 record 优先（见 mergeSubagentSources 的例外规则）。
+	 */
+	async readSessionSubagentRecords(sessionPath: string) {
+		const records = await this.sessionHistoryReader.readSubagentRecords(sessionPath);
+		const derived = await this.sessionHistoryReader.readDerivedSubagentEntries(sessionPath);
+		if (derived.length === 0) return records;
+		return mergeSubagentSources(records, derived);
+	}
+
+
+	/**
+	 * 会话级文件修改汇总：从会话显示消息全量聚合 write/edit/create/patch。
+	 * 与渲染层 TimelineFormat 共用 shared/fileChanges 解析，历史/活会话通用。
+	 */
+	async readSessionFileChanges(sessionPath: string): Promise<SessionFileChange[]> {
+		return collectSessionFileChanges(await this.readSessionDisplayMessages(sessionPath, "_viewer"));
+	}
+
+	/**
+	 * 会话级 todo 快照：读会话分支上最新 pi-deck-todo custom 条目（历史会话重建任务 tab）。
+	 */
+	async readSessionTodo(sessionPath: string): Promise<SessionTodoSnapshot | undefined> {
+		return this.sessionHistoryReader.readTodoSnapshot(sessionPath);
+	}
+
 
 	/** 轮次维度显示分页：pageSize 复用为轮次数（readSessionDisplayTurnPage 内部夹紧上限） */
 	async readSessionDisplayTurnPage(
@@ -1846,6 +1904,8 @@ export class AgentManager {
 		if (pending && pending.size > 0) {
 			this.abortedDuringAsk.add(agentId);
 			for (const [requestId] of pending) {
+				// abort 视作用户在此刻结束等待：结算等待时长，供该 ask 工具耗时扣除
+				this.settleAskWait(agentId, requestId);
 				runtime.process.client.sendRaw({
 					type: "extension_ui_response",
 					id: requestId,
@@ -3171,6 +3231,151 @@ export class AgentManager {
 		);
 	}
 
+	/**
+	 * rewind checkpoint 列表（refs/pi-checkpoints）。
+	 * root 取 agent 工作目录：纯 git 实现不依赖 pi 进程，即使 pi 没装 pi-rewind
+	 * 扩展，也能读到/回退同仓库里已存在的 checkpoint。过滤用 pi 的 sessionId
+	 * （与 pi-rewind 的 ref 命名一致）；无 session 时列出仓库全部。
+	 *
+	 * 分页：按 timestamp 倒序（新→旧），beforeTimestamp 为游标。
+	 * limit 默认 10、上限 100；不传 beforeTimestamp 时返回最早一页。
+	 */
+	async listCheckpoints(
+		agentId: string,
+		params?: RewindCheckpointPageParams,
+	): Promise<RewindCheckpointPage> {
+		const runtime = this.requireRuntime(agentId);
+		const checkpoints = await loadAllCheckpoints(
+			runtime.tab.cwd,
+			runtime.tab.sessionId,
+		);
+		const all = checkpoints
+			.map(toCheckpointSummary)
+			.sort((a, b) => b.timestamp - a.timestamp);
+		// 渲染层入参不可信：limit 钳制在 [1, 100]，beforeTimestamp 非有限数按未传处理。
+		const limit = Math.min(
+			Math.max(1, Math.floor(params?.limit ?? 10)),
+			100,
+		);
+		const before = Number.isFinite(params?.beforeTimestamp)
+			? (params!.beforeTimestamp as number)
+			: Number.POSITIVE_INFINITY;
+		const filtered = all.filter((cp) => cp.timestamp < before);
+		// 未传 limit（如 rewind-to-message 需要全量最近检查点）时返回全部；
+		// 否则按 limit 截取一页，并据此判断是否还有更早的检查点。
+		if (params?.limit === undefined) {
+			return { items: filtered, hasMore: false };
+		}
+		return {
+			items: filtered.slice(0, limit),
+			hasMore: filtered.length > limit,
+		};
+	}
+
+	/** checkpoint 与当前 index 树的 diff 摘要（回退预览：「回到这里会改哪些文件」）。 */
+	async getCheckpointDiff(agentId: string, checkpointId: string): Promise<string> {
+		const runtime = this.requireRuntime(agentId);
+		const root = runtime.tab.cwd;
+		const cp = await loadCheckpointFromRef(root, checkpointId);
+		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
+		const indexTree = await currentIndexTree(root);
+		return diffCheckpoints(root, cp.worktreeTreeSha, indexTree);
+	}
+
+	/**
+	 * 回退工作区/会话到 checkpoint。
+	 * - files：仅回退文件（reset + safeClean + index 恢复），跨后端可用；
+	 * - conversation：fork 出新会话（在检查点时刻前最近的带 entryId 消息处裁剪），
+	 *   原会话保留、工作区文件不动；
+	 * - all：文件回退 + 会话 fork。
+	 * fork 走 pi fork RPC（AgentManager.forkSession 内部完成 runtime 换绑）。
+	 */
+	async restoreCheckpoint(
+		agentId: string,
+		checkpointId: string,
+		scope: RewindRestoreScope,
+	): Promise<RewindRestoreResult> {
+		const runtime = this.requireRuntime(agentId);
+		const cp = await loadCheckpointFromRef(runtime.tab.cwd, checkpointId);
+		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
+
+		const wantFiles = scope === "files" || scope === "all";
+		const wantConversation = scope === "conversation" || scope === "all";
+		// 会话回退先解析 fork 锚点（失败则整体拒绝，避免「文件已回退但会话没 fork」的半成功态）。
+		const forkEntryId = wantConversation
+			? await this.resolveForkEntryBeforeCheckpoint(agentId, cp.timestamp)
+			: undefined;
+		if (wantFiles) await applyCheckpointRestore(runtime.tab.cwd, cp);
+		let forkedSessionId: string | undefined;
+		if (wantConversation && forkEntryId) {
+			const data = (await this.forkSession(agentId, forkEntryId)) as
+				| { targetSessionId?: string; [key: string]: unknown }
+				| undefined;
+			forkedSessionId = data?.targetSessionId;
+		}
+		return { filesRestored: wantFiles, forkedSessionId };
+	}
+
+	/**
+	 * 找检查点时刻前最近的、带 entryId 的消息作为会话回退的 fork 锚点。
+	 * live 消息（本轮未 settle）没有 entryId，回退到最近一条已落盘消息是合理近似：
+	 * 即「该检查点之后的对话内容从 fork 会话里去掉」。
+	 */
+	private async resolveForkEntryBeforeCheckpoint(
+		agentId: string,
+		beforeTimestamp: number,
+	): Promise<string | undefined> {
+		const pick = (messages: ChatMessage[]): string | undefined =>
+			messages
+				.map((m) => ({
+					ts: m.timestamp,
+					// entryId 在 meta 里（live 消息未落盘投影时缺失），见 loadMessages 的定位逻辑。
+					entryId: typeof m.meta?.entryId === "string" ? m.meta.entryId : undefined,
+				}))
+				.filter((m): m is { ts: number; entryId: string } => m.ts <= beforeTimestamp && Boolean(m.entryId))
+				.sort((a, b) => b.ts - a.ts)[0]?.entryId;
+		const direct = pick(this.messages.get(agentId) ?? []);
+		if (direct) return direct;
+		// 内存投影缺失（如 agent 重启后未读历史）：文件级重投影后再找。
+		await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: 0 });
+		return pick(this.messages.get(agentId) ?? []);
+	}
+
+	/** agent_start 时推进回合计数，返回本轮 turnIndex（供自动打点用）。 */
+	private bumpRewindTurn(agentId: string): number {
+		const next = (this.rewindTurnCounters.get(agentId) ?? 0) + 1;
+		this.rewindTurnCounters.set(agentId, next);
+		return next;
+	}
+
+	/**
+	 * 文件类工具（write/edit/bash）执行结束后异步创建文件检查点（fire-and-forget）。
+	 * 打点放在 tool_execution_end：此时文件系统已静默，快照内容稳定，不会与进行中的
+	 * 写入竞争；恢复语义为「回到该工具执行完成后的状态」。失败不影响 agent 主链路
+	 * （纯旁路快照），只记日志。
+	 */
+	private scheduleRewindCheckpoint(agentId: string, toolName: string, turnIndex: number): void {
+		const runtime = this.agents.get(agentId);
+		const root = runtime?.tab.cwd;
+		const sessionId = runtime?.tab.sessionId;
+		if (!root || !sessionId) return;
+		void createCheckpoint({
+			root,
+			// id 拼进 git ref 名，必须是 isRewindCheckpointId 允许的安全字符。
+			id: `tool-${sessionId}-${turnIndex}-${Date.now()}`,
+			sessionId,
+			trigger: "tool",
+			turnIndex,
+			toolName,
+		}).catch((error: unknown) => {
+			this.appLogger?.warn("rewind", "checkpoint creation failed", {
+				agentId,
+				toolName,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
+	}
+
 	private async promptMatchesRegisteredExtensionCommand(runtime: AgentRuntime, message: string): Promise<boolean> {
 		const trimmed = message.trim();
 		if (!trimmed.startsWith("/")) return false;
@@ -3776,6 +3981,8 @@ export class AgentManager {
 			this.notifiedAskAgents.delete(agentId);
 			this.openAgentStream(agentId);
 			this.setAgentTurnActive(agentId, true);
+			// rewind 回合计数：每轮 run 递增一次，供文件自动打点标记 turnIndex。
+			this.bumpRewindTurn(agentId);
 			runtime.tab.status = "running";
 			this.activeAssistantMessageIds.delete(agentId);
 			this.toolMessageIds.delete(agentId);
@@ -4096,6 +4303,9 @@ export class AgentManager {
 			if (this.isAgentStreamSealed(agentId)) {
 				return;
 			}
+			// 新工具轮次开始：上一个 ask 的等待累计若未被其 end 事件消耗（如 abort 封印），
+			// 在此清空，防止把旧等待算进后续工具耗时。
+			this.askWaitMsByAgent.delete(agentId);
 			this.upsertToolMessage(agentId, typed, "running");
 			// 并行工具会先连续发多个 start；按 toolCallId 追踪，只有最后一个 end 才能表示工具阶段完成。
 			const toolName = typed.toolName ?? "tool";
@@ -4124,6 +4334,16 @@ export class AgentManager {
 				typed,
 				typed.isError ? "error" : "done",
 			);
+			// 文件类工具执行完成 → 异步自动打点（快照包含该工具改动后的状态）。
+			// 检查点创建不阻塞工具结果推送（fire-and-forget，失败只记日志）。
+			const endedToolName = typed.toolName ?? "";
+			if (MUTATING_TOOLS.has(endedToolName)) {
+				this.scheduleRewindCheckpoint(
+					agentId,
+					endedToolName,
+					this.rewindTurnCounters.get(agentId) ?? 0,
+				);
+			}
 			// 工具执行结束是终态，立即 flush 把最终结果推给渲染进程，避免节流窗口内用户看不到完成状态。
 			this.flushMessageEmit(agentId);
 			// 清除本次 toolCall；并行批次仅在最后一个工具结束时发布 false，
@@ -4274,11 +4494,15 @@ export class AgentManager {
 					allowOther: typed.allowOther === true || hasCustomOption,
 				};
 
-		// 记录 pending UI 请求，用于 abort 时自动 cancel
+		// 记录 pending UI 请求，用于 abort 时自动 cancel；raisedAt 同时作为用户等待计时起点
 		if (!this.pendingUIRequests.has(agentId)) {
 			this.pendingUIRequests.set(agentId, new Map());
 		}
-		this.pendingUIRequests.get(agentId)!.set(requestId, { method: effectiveMethod, title: request.title });
+		this.pendingUIRequests.get(agentId)!.set(requestId, {
+			method: effectiveMethod,
+			title: request.title,
+			raisedAt: Date.now(),
+		});
 
 		// The session runtime owns pending UI. Do not write an additional system
 		// message, because that creates a second interactive card in the timeline.
@@ -4286,6 +4510,19 @@ export class AgentManager {
 		this.scheduleUIRequestTimeout(agentId, requestId, typed.timeout);
 		// 桌面通知由 SessionRuntimeCoordinator 统一触发（非聚焦会话才提醒，避免打扰正在看当前会话的用户）；
 		// 此处不重复发，防止一条提问出现两条通知。
+	}
+
+	/**
+	 * 结算一次 ask 的用户等待时长（answer 时刻 - 提问弹起时刻），累加到该 agent 的
+	 * 等待累计值（askWaitMsByAgent）。调用时机 = 用户回答 / 超时 / abort 取消，
+	 * 与 pendingUIRequests 中该请求的删除成对，避免重复结算。
+	 * 用途：ask_question 工具耗时（durationMs）要排除用户思考时间，只展示 agent 处理时长。
+	 */
+	private settleAskWait(agentId: string, requestId: string) {
+		const entry = this.pendingUIRequests.get(agentId)?.get(requestId);
+		if (!entry || typeof entry.raisedAt !== "number") return;
+		const waitMs = Math.max(0, Date.now() - entry.raisedAt);
+		this.askWaitMsByAgent.set(agentId, (this.askWaitMsByAgent.get(agentId) ?? 0) + waitMs);
 	}
 
 	/**
@@ -4308,6 +4545,9 @@ export class AgentManager {
 		// 取消时发 cancelled: true
 		if (response.cancelled) extPayload.cancelled = true;
 		runtime.process.client.sendRaw(extPayload);
+
+		// 结算用户等待时长（回答时刻），供该 ask 所属工具耗时扣除
+		this.settleAskWait(agentId, requestId);
 
 		// 清理 pending 记录
 		const pending = this.pendingUIRequests.get(agentId);
@@ -4988,8 +5228,17 @@ export class AgentManager {
 				: Date.now();
 		// 工具耗时只能由 start/end 两个事件推导；start 时先保存 startedAt，end 时再写入 durationMs，
 		// 避免使用消息 timestamp（会在 update/end 时刷新）导致历史恢复后耗时不可还原。
-		const durationMs =
+		// ask_question 工具耗时需扣除用户等待时长（exclude_wait）：等待期由 settleAskWait 累计在
+		// askWaitMsByAgent，工具结束时减掉并清零，让 durationMs 只反映 agent 实际处理时间。
+		let durationMs =
 			status === "running" ? undefined : Math.max(0, Date.now() - startedAt);
+		if (durationMs !== undefined && toolName === "ask_question") {
+			const askWaitMs = this.askWaitMsByAgent.get(agentId) ?? 0;
+			if (askWaitMs > 0) {
+				durationMs = Math.max(0, durationMs - askWaitMs);
+				this.askWaitMsByAgent.delete(agentId);
+			}
+		}
 		const result =
 			event.result ??
 			event.partialResult ??
@@ -5321,7 +5570,7 @@ export class AgentManager {
 					return (
 						typeof typed.id === "string" &&
 						typeof typed.question === "string" &&
-						["select", "confirm", "input", "editor"].includes(String(typed.type))
+						["select", "multi_select", "confirm", "input", "editor"].includes(String(typed.type))
 					);
 				},
 			);

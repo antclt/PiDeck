@@ -56,7 +56,10 @@ function readUnpackedPatterns(asarPath) {
  *
  * 只保留原生后缀 + utilityProcess 入口文件名。
  */
-const NATIVE_UNPACK_SUFFIXES = new Set([".node", ".dll", ".exe", ".wasm", ".so", ".dylib"]);
+// ELF 共享库经常使用带 ABI 版本的文件名，例如 libvips-cpp.so.8.18.3。
+// 仅匹配 `.so` 会让 afterPack 重打包时把它们重新塞回 app.asar。
+const NATIVE_UNPACK_SUFFIXES = new Set([".node", ".dll", ".exe", ".wasm", ".dylib"]);
+const ELF_SHARED_LIBRARY_PATTERN = /\.so(?:\.\d+)*$/i;
 const ALWAYS_UNPACK_BASENAMES = new Set(["hostentry.js"]);
 
 function unpackGlobFromFiles(files) {
@@ -65,6 +68,11 @@ function unpackGlobFromFiles(files) {
     const base = String(file).split("/").pop() ?? "";
     if (ALWAYS_UNPACK_BASENAMES.has(base.toLowerCase())) {
       patterns.add(base);
+      continue;
+    }
+    if (ELF_SHARED_LIBRARY_PATTERN.test(base)) {
+      // `.so*` 同时覆盖未版本化和带 ABI 版本号的 ELF 动态库。
+      patterns.add("*.so*");
       continue;
     }
     const match = /\.([A-Za-z0-9]+)$/.exec(base);
@@ -278,10 +286,10 @@ exports.default = async function (context) {
               }
             }
           } else if (
-            entry.name === "node_modules" ||
             ["test", "tests", "spec", "__tests__", "__snapshots__", "__mocks__"].includes(entry.name)
           ) {
-            // 删除测试目录（不进入递归，直接删整个目录）
+            // 只删除明确的测试目录。嵌套 node_modules 仍可能承载版本无法提升的生产依赖
+            // （例如 DSH attachment-local 的 sharp），删除它会让重打包后的 asar 缺模块。
             try {
               const testDirSize = await dirSize(full);
               await rmDir(full);

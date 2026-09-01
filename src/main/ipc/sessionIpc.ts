@@ -3,9 +3,11 @@
  * Phase 3.7: extracted from src/main/index.ts registerIpc().
  */
 
-import { ipcMain, type BrowserWindow } from "electron";
+import { existsSync } from "node:fs";
+import { dialog, ipcMain, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import { isDshPermissionPreset } from "../../shared/types/agent";
+import { isRewindRestoreScope } from "../../shared/types/rewind";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import type {
 	CreateSessionDraftInput,
@@ -27,11 +29,13 @@ import type {
 	DshModelDiscoveryInput,
 	FetchedModel,
 	SessionMessagePage,
+	RewindCheckpointPageParams,
 	ResolveLaunchDefaultsInput,
 	ResolvedLaunchDefaults,
 	ArchivedDshSession,
 } from "../../shared/types";
 import { parseSessionProcessEvents } from "../sessions/sessionProcessEvents";
+import { downgradeStaleRunning } from "../pi/derivedSubagents";
 import { resolveLaunchDefaultOptions } from "../sessions/launchDefaults";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 
@@ -115,6 +119,19 @@ export type DshBackendIpcDeps = {
 		started: boolean;
 		homeDir: string;
 	}>;
+	/**
+	 * DSH runtime 安装态（AgentRuntimeProvider 阶段 1）：installed/notInstalled/broken。
+	 * 未装配 = 无 DSH 后端，按 notInstalled 处理（UI 走安装引导，新建 dsh 会话被拒）。
+	 */
+	getDshRuntimeStatus?: () => import("../../shared/types/dshRuntime").DshRuntimeStatus;
+	/** DSH runtime 是否允许新建 dsh 会话（门控判定收敛在这里，避免各 handler 比对枚举）。 */
+	canCreateDshSession?: () => boolean;
+	/** 按需安装 DSH runtime（按下载源索引挑兼容版本）；进度经 dsh-runtime:install-progress 推送。 */
+	installDshRuntime?: () => Promise<{ ok: boolean; error?: string }>;
+	/** 从本地导入 runtime（.tgz 归档或已解压目录；离线兜底）；文件路径由主进程对话框给出。 */
+	importDshRuntime?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+	/** 卸载当前启用的 runtime（先停 host 释放文件锁，故为异步）。 */
+	uninstallDshRuntime?: () => Promise<{ ok: boolean; error?: string }>;
 	/** DSH settings.describe（脱敏 namespace 视图 + schema）。 */
 	describeDshSettings?: () => Promise<{
 		writable: boolean;
@@ -124,6 +141,7 @@ export type DshBackendIpcDeps = {
 			applies: string;
 			revision: number;
 			value: unknown;
+			base?: unknown;
 			user?: unknown;
 			secrets: Array<{ path: string[]; set: boolean }>;
 			schema: unknown;
@@ -229,6 +247,8 @@ export type DshBackendIpcDeps = {
 	unarchiveDshSession?: (dshSessionId: string) => Promise<{ restoredPath: string; cwd: string; title?: string } | undefined>;
 	/** DSH 归档区会话清单（G14：恢复入口用；含标题，旧归档由日志折叠补全）；未装配时返回空列表。 */
 	listArchivedDshSessions?: () => Array<ArchivedDshSession>;
+	/** DSH 永久删除已归档会话（G14：归档目录移入系统回收站）；未装配时抛错。 */
+	deleteArchivedDshSession?: (dshSessionId: string) => Promise<boolean>;
 	/** DSH 动态插件清单（G13 深化）；未装配时返回空列表。 */
 	listDshDynamicPlugins?: () => Promise<import("../../shared/types").DshPluginView[]>;
 	/** DSH 静态 Loader 条目清单（只读）；未装配时返回空列表。 */
@@ -374,6 +394,11 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		listDshAgentPresets,
 		getDshDefaultModel,
 		getDshStatus,
+		getDshRuntimeStatus,
+		canCreateDshSession,
+		installDshRuntime,
+		importDshRuntime,
+		uninstallDshRuntime,
 		describeDshSettings,
 		updateDshSettings,
 		mutateDshSettings,
@@ -401,6 +426,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		archiveDshSession,
 		unarchiveDshSession,
 		listArchivedDshSessions,
+		deleteArchivedDshSession,
 		listDshDynamicPlugins,
 		listDshStaticPlugins,
 		installDshPlugin,
@@ -536,6 +562,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async (_event, input: CreateSessionDraftInput) => {
 			const project = projectStore.get(input.projectId);
 			if (!project) throw new Error(mainCopy("project.notFound"));
+			// DSH runtime 门控（AgentRuntimeProvider 阶段 1）：runtime 不可用时拒绝新建
+			// dsh 会话——渲染层已按安装态隐藏入口，这里是边界防御（设置残留 dsh /
+			// 渲染层旧版本）。既有 dsh 会话不受影响（打开/发送走运行时链路，不在此处）。
+			if (input.backend === "dsh" && canCreateDshSession?.() !== true) {
+				throw new Error(mainCopy("session.dshRuntimeNotInstalled"));
+			}
 			// Auto-fill model / thinkingLevel from pi config when the caller hasn't
 			// provided them, so the composer bar shows the effective default.
 			// DSH 后端不适用 pi 的模型配置（模型路由由 DSH host 自己的 settings 决定），
@@ -609,6 +641,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(
 		ipcChannels.sessionsCreateAnonymous,
 		async (_event, input: CreateAnonymousSessionInput) => {
+			// 与 createDraft 同一 DSH runtime 门控：匿名会话同样不能落在不可用后端上。
+			if (input.backend === "dsh" && canCreateDshSession?.() !== true) {
+				throw new Error(mainCopy("session.dshRuntimeNotInstalled"));
+			}
 			const result = await createAnonymousSession(input);
 			void appLogger.info("session", "Anonymous session created", {
 				sessionId: result.session.id,
@@ -775,6 +811,19 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		async () => sessionScanner.listArchived(),
 	);
 	ipcMain.handle(
+		ipcChannels.sessionsCatalogDeleteArchived,
+		async (_event, archivedPath: unknown): Promise<boolean> => {
+			// 校验入参：归档路径必须是 .pideck-archive 目录内的 JSONL，防路径穿越。
+			// 是否真的位于归档目录内由 sessionScanner.deleteArchived 兜底校验。
+			if (typeof archivedPath !== "string" || !archivedPath.endsWith(".jsonl")) {
+				throw new Error(mainCopy("session.invalidArchivePath"));
+			}
+			await sessionScanner.deleteArchived(archivedPath);
+			void appLogger.info("session", "Archived session deleted", { archivedPath });
+			return true;
+		},
+	);
+	ipcMain.handle(
 		ipcChannels.sessionsCatalogReadMessages,
 		async (_event, sessionId: string) => {
 			const entry = sessionCatalog.get(sessionId);
@@ -795,6 +844,62 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return messages;
 		},
 	);
+		/** 子代理列表：从会话文件 subagents:record + catalog 子会话回填合成。 */
+		ipcMain.handle(
+			ipcChannels.sessionsListSubagents,
+			async (_event, sessionId: string) => {
+				if (typeof sessionId !== "string" || !sessionId) return [];
+				const entry = sessionCatalog.get(sessionId);
+				if (!entry?.filePath) return [];
+				let records = await agentManager.readSessionSubagentRecords(entry.filePath);
+				// acp_delegate 推导条目在会话无活 runtime 时残留的 running 视为已终止：
+				// 终态通知没写进文件（进程被杀/崩溃）的委托在历史会话里永远是 running，
+				// 会误导为仍在运行；活会话保持 running，由后续通知/桥接覆盖。
+				// 与 start 锚点残留合成 stopped 同一语义（见 downgradeStaleRunning）。
+				if (!sessionRuntimeCoordinator.getTarget(sessionId)
+					&& !sessionRuntimeCoordinator.isActivating(sessionId)) {
+					records = downgradeStaleRunning(records);
+				}
+			// 回填 childSessionPath：按 parentSessionPath === 本会话 filePath 收集所有子会话，
+			// 再按子会话名 `${type}#${id前8位}` 精确匹配。
+			const children = sessionCatalog.listEntries()
+				.filter(
+					(e) => e.parentSessionPath === entry.filePath,
+				)
+				.map((e) => sessionCatalog.getRecord(e.id))
+				.filter((r): r is NonNullable<typeof r> => r != null);
+			for (const record of records) {
+				const namePrefix = `${record.type}#${record.id.slice(0, 8)}`;
+				const child = children.find((s) => (s.title ?? "").startsWith(namePrefix));
+				if (child?.filePath) record.childSessionPath = child.filePath;
+				if (child) record.childSessionId = child.id;
+			}
+			return records;
+		},
+	);
+	/** 会话级文件修改汇总：从会话文件全量显示消息聚合（历史/活会话通用）。 */
+	ipcMain.handle(
+		ipcChannels.sessionsListFileChanges,
+		async (_event, sessionId: string) => {
+			if (typeof sessionId !== "string" || !sessionId) return [];
+			const entry = sessionCatalog.get(sessionId);
+			// DSH/生图会话无 pi 会话文件，文件汇总无意义
+			if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return [];
+			return agentManager.readSessionFileChanges(entry.filePath);
+		},
+	);
+	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划（历史会话任务 tab）。 */
+	ipcMain.handle(
+		ipcChannels.sessionsListSessionTodo,
+		async (_event, sessionId: string) => {
+			if (typeof sessionId !== "string" || !sessionId) return undefined;
+			const entry = sessionCatalog.get(sessionId);
+			// DSH/生图会话无 pi 会话文件，无 todo 快照
+			if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return undefined;
+			return agentManager.readSessionTodo(entry.filePath);
+		},
+	);
+
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogReadMessagePage,
 		async (_event, sessionId: string, before?: number, pageSize?: number, options?: { beforeEntryId?: string }) => {
@@ -1147,6 +1252,22 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			return true;
 		},
 	);
+	// DSH 永久删除已归档会话（G14：归档目录移入系统回收站，区别于恢复）
+	ipcMain.handle(
+		ipcChannels.dshDeleteArchived,
+		async (_event, dshSessionId: unknown): Promise<boolean> => {
+			// 入参校验：host 生成的会话 id 固定 "session-" 前缀（host 侧目录名 = sessionId），
+			// 白名单正则挡掉路径穿越类输入（渲染层数据不可信，校验在边界）。
+			if (typeof dshSessionId !== "string" || !/^session-[A-Za-z0-9-]+$/.test(dshSessionId)) {
+				throw new Error(mainCopy("session.invalidArchivePath"));
+			}
+			if (!deleteArchivedDshSession) throw new Error("DSH archive delete is not available");
+			const deleted = await deleteArchivedDshSession(dshSessionId);
+			if (!deleted) throw new Error(mainCopy("session.invalidArchivePath"));
+			void appLogger.info("session", "DSH archived session deleted", { dshSessionId });
+			return true;
+		},
+	);
 	// DSH 动态插件管理（G13 深化：进程内临时扩展，define/run/stop/undefine）。
 	// 语义校验（idPrefix 规则、源码单侧上限、会话归属）在 host 侧桥插件统一执行；
 	// IPC 边界只做第一行类型检查（渲染层数据不可信）。
@@ -1430,6 +1551,42 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			? getDshStatus()
 			: { started: false, homeDir: "" }),
 	);
+	// DSH runtime 安装态查询：未装配 dshBackend = 无 DSH 后端，按 notInstalled 返回
+	//（渲染层据此隐藏 DSH UI、显示安装引导，不会出现裸报错）。
+	ipcMain.handle(
+		ipcChannels.dshRuntimeGetStatus,
+		async () =>
+			getDshRuntimeStatus
+				? getDshRuntimeStatus()
+				: { state: "notInstalled" as const },
+	);
+	// DSH runtime 安装（阶段 2）：进度不走返回值，经 dsh-runtime:install-progress 推送，
+	// 因为下载可能持续数十秒——返回 promise 会让渲染层一直空转等待。
+	ipcMain.handle(ipcChannels.dshRuntimeInstall, async () => {
+		if (!installDshRuntime) throw new Error("DSH runtime installation is not available");
+		return installDshRuntime();
+	});
+	ipcMain.handle(ipcChannels.dshRuntimeInstallLocal, async () => {
+		if (!importDshRuntime) throw new Error("DSH runtime installation is not available");
+		// 对话框在主进程弹：渲染层不参与路径选择，也就没有「传任意路径读文件」的入口。
+		const picked = await dialog.showOpenDialog({
+			title: mainCopy("dsh.runtime.pickArchiveTitle"),
+			// 过滤器只影响文件选择；openDirectory 让已解压目录也能被选中。
+			filters: [{ name: "DSH runtime", extensions: ["tgz", "tar.gz"] }],
+			properties: ["openFile", "openDirectory"],
+		});
+		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
+		const filePath = picked.filePaths[0];
+		// 归档文件或已解压目录都允许（目录由 installer 按类型分流处理）。
+		if (!filePath || !existsSync(filePath)) {
+			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
+		}
+		return importDshRuntime(filePath);
+	});
+	ipcMain.handle(ipcChannels.dshRuntimeUninstall, async () => {
+		if (!uninstallDshRuntime) throw new Error("DSH runtime installation is not available");
+		return uninstallDshRuntime();
+	});
 	ipcMain.handle(
 		ipcChannels.dshConfigDescribe,
 		async () => (describeDshSettings
@@ -1582,6 +1739,52 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				{ messageId },
 				() => sessionRuntimeCoordinator.deleteRuntimeMessage(target, messageId),
 			),
+	);
+	// rewind checkpoint：list/diff 是只读命令（同 sessionsRuntimeCommands 风格），
+	// restore 是变更操作，走 handleSessionCommandResult 留日志。
+	ipcMain.handle(
+		ipcChannels.sessionsRewindList,
+		(_event, target: SessionRuntimeTarget, params?: RewindCheckpointPageParams) =>
+			sessionRuntimeCoordinator.listRewindCheckpoints(target, params),
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsRewindDiff,
+		(_event, target: SessionRuntimeTarget, checkpointId: string) =>
+			sessionRuntimeCoordinator.getRewindCheckpointDiff(target, checkpointId),
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsRewindRestore,
+		(_event, target: SessionRuntimeTarget, checkpointId: string, scope: unknown) => {
+			// 渲染层入参不可信：scope 必须在契约枚举内（校验前置到 coordinator 之外再挡一层）。
+			if (!isRewindRestoreScope(scope)) {
+				return handleSessionCommandResult(
+					appLogger,
+					"restoreRewindCheckpoint",
+					target,
+					{ checkpointId, scope: String(scope) },
+					() =>
+						Promise.resolve({
+							ok: false,
+							error: {
+								code: "SESSION_COMMAND_FAILED",
+								debugDetails: `Invalid rewind restore scope: ${String(scope)}`,
+							},
+						}),
+				);
+			}
+			return handleSessionCommandResult(
+				appLogger,
+				"restoreRewindCheckpoint",
+				target,
+				{ checkpointId, scope },
+				() =>
+					sessionRuntimeCoordinator.restoreRewindCheckpoint(
+						target,
+						checkpointId,
+						scope,
+					),
+			);
+		},
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsRuntimePrepareResend,

@@ -4,9 +4,18 @@ node_modules/
 # Build outputs
 out/
 dist/
+# electron-vite 构建时生成的临时配置（时间戳后缀，非源码）
+electron.vite.config.*.mjs
+# DSH runtime 产物（.gitkeep 是占位，必须保留：extraResources 的源目录不能缺失）
+# 注意用 ** 匹配二级目录（dsh-runtime/manifest.json），单层 * 会漏。
+dist-runtime/**/*.tgz
+dist-runtime/**/*.json
 release/
 release-test/
 release-fix/
+# 打包验证/开发产物目录（release-verify 曾误提交 win-unpacked 二进制，见 d8d5711b）
+release-verify/
+release-dev/
 docs-site/.vitepress/cache/
 docs-site/.vitepress/dist/
 *.asar
@@ -54,6 +63,10 @@ downloads/
 .workbuddy/
 .zcode/
 
+# Trellis 本地工作流资产（初始化于本机，不随仓库分发）
+.trellis/
+.agents/
+
 # Local collaboration notes are machine/user-specific and must never be committed or proposed for a PR.
 docs/PiDeck-协作说明.md
 
@@ -72,5 +85,8 @@ beui-todo-list.tmp.json
 # DSH 排查临时目录（测试日志/会话 jsonl/脚本）
 .dsh-tmp/
 
+# 临时编辑/测试脚本
+scratch-edit-samples/
+scripts/tmp-*
 # beUI 官方源码提取的临时对比目录（不应提交）
 .beui-official/

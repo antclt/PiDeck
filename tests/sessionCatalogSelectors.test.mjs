@@ -40,6 +40,12 @@ function loadAtoms() {
     "../utils/liveTextHandoff": compileModule(
       "src/renderer/src/utils/liveTextHandoff.ts",
     ),
+    "./outlineRevision": compileModule(
+      "src/renderer/src/atoms/outlineRevision.ts",
+    ),
+    "./outlineProjectionCache": compileModule(
+      "src/renderer/src/atoms/outlineProjectionCache.ts",
+    ),
   });
   const selectors = compileModule("src/renderer/src/atoms/session-selectors.ts", {
     "./session-atoms": sessions,

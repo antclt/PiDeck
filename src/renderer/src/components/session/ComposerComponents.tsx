@@ -197,7 +197,7 @@ export function ExtensionWidgetCard(props: {
 	);
 }
 
-/** 输入框底栏的后端选择下拉（pi / dsh）：默认 dsh，官方 logo 区分。
+/** 输入框底栏的后端选择下拉（pi / dsh）：跟随会话后端（新建会话默认 pi，由设置项 defaultAgentBackend 决定）。
  * 触发区只显示当前后端 logo（不再带文字）；下拉选项保留文字便于选择时区分。 */
 export function ComposerBackendPicker(props: {
 	backend: AgentBackend;
@@ -315,6 +315,7 @@ function ComposerBranchSwitcher(props: {
 }
 
 export function ComposerBottomBar(props: {
+	sessionId: string;
 	state?: AgentRuntimeState;
 	disabled?: boolean;
 	/** thinking 按钮专用禁用：仅在 Agent 启动中禁用，运行中由后端决定是否接受修改。 */
@@ -589,7 +590,7 @@ export function ComposerBottomBar(props: {
 					    原独立 compact 按钮移除，避免双入口。 */}
 				</div>
 				<div className="composer-bottom-right ml-auto flex shrink-0 items-center gap-2">
-					{/* 上下文占用圆环（dsh ContextMeter 移植）：发送按钮旁常驻指示，
+					{/* 上下文占用圆环（dsh ContextMeter 移植）：发送按钮旁常驻指示,
 					    点击展开占用面板（两段占比/缓存命中/输入输出/压缩入口）；
 					    压缩动作从右上角紧凑徽章迁入面板；无 capacity 数据时自身不渲染 */}
 					<SessionContextMeter
@@ -837,7 +838,7 @@ function ModelListStatusGuide(props: {
 					onClick={props.onRefresh}
 					disabled={props.refreshing}
 				>
-					<RefreshCw size={13} className={props.refreshing ? "animate-spin" : ""} aria-hidden="true" />
+					<RefreshCw size={13} className={props.refreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
 					{props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRetry")}
 				</Button>
 			)}
@@ -972,7 +973,7 @@ export function ModelPicker(props: {
 						onClick={props.onRefresh}
 						disabled={props.refreshing}
 					>
-						<RefreshCw size={14} className={props.refreshing ? "animate-spin" : ""} aria-hidden="true" />
+						<RefreshCw size={14} className={props.refreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
 					</Button>
 				) : undefined
 			}

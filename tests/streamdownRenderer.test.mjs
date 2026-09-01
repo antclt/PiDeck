@@ -61,7 +61,8 @@ test("streamdown chat prose density overrides official space-y-4 / heading scale
     streamdownChrome,
     /\.markdown-body :is\(\.space-y-4\) > :not\(:last-child\):not\(\[data-streamdown\^="heading-"\]\)/,
   );
-  assert.match(streamdownChrome, /margin-block-end:\s*0\.55em/);
+  // 2026 排版优化（beui 流式观感）：段距 0.55em→0.7em、行高 1.5→1.6、列表/标题留白微增。
+  assert.match(streamdownChrome, /margin-block-end:\s*0\.7em/);
   assert.match(
     streamdownChrome,
     /\.markdown-body :is\(\.space-y-4\) > \[data-streamdown\^="heading-"\]/,
@@ -69,7 +70,7 @@ test("streamdown chat prose density overrides official space-y-4 / heading scale
   assert.match(streamdownChrome, /\[data-streamdown="heading-1"\][\s\S]*?font-size:\s*1\.5em/);
   assert.match(streamdownChrome, /list-style-position:\s*outside/);
   const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
-  assert.match(foundation, /--line-height-chat:\s*1\.5/);
+  assert.match(foundation, /--line-height-chat:\s*1\.6/);
   const timeline = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
   assert.match(timeline, /line-height:\s*var\(--line-height-chat\)/);
   assert.doesNotMatch(timeline, /line-height:\s*1\.68/);

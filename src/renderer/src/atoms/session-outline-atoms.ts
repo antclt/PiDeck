@@ -7,11 +7,11 @@
  * 只有真正消费它们的组件（OutlinePanel / useFileEditor 事件路径）才订阅，
  * App 根组件不再随消息流更新。
  *
- * 注意：派生 atom 每次消息链变化都会重算（流式输出时长度每次都在变，
- * 与原 useMemo 依赖 [messages.length] 的开销相当）；非流式的低频内容替换
- * （重启重生成、编辑消息）会多算一次，可接受。
+ * 大纲投影按用户消息边界缓存：流式 assistant/tool 更新复用既有数组，只有新用户消息、
+ * 历史前缀变化或低频重载才重建摘要，避免把 token 频率传导到右侧刻度。
  */
 import { atom, type Getter } from "jotai";
+import { atomFamily } from "jotai/utils";
 import type { ChatMessage } from "../../../shared/types";
 import type { SessionModifiedFile } from "../components/app/AppParts";
 import {
@@ -20,26 +20,23 @@ import {
   getToolFilePath,
   getToolNewContent,
 } from "../components/app/AppUtils";
-import { currentSessionIdAtom, sessionMessagesCacheAtom } from "./session-atoms";
+import {
+  getSessionOutlineProjection,
+  releaseSessionOutlineProjection,
+  setSessionOutlineProjection,
+  type SessionOutlineItems,
+} from "./outlineProjectionCache";
+
+import {
+  currentSessionIdAtom,
+  sessionMessagesCacheAtom,
+  type SessionMessageCacheEntry,
+} from "./session-atoms";
 
 /** 当前聚焦会话的消息数组（只读派生，供大纲/文件清单计算）。 */
 function currentSessionMessages(get: Getter): ChatMessage[] {
   const sessionId = get(currentSessionIdAtom);
   return sessionId ? get(sessionMessagesCacheAtom)[sessionId]?.messages ?? [] : [];
-}
-
-/**
- * 当前聚焦会话「全部已加载」的消息：落盘历史前缀 + 运行时窗口段，
- * 与时间线 combinedMessages 同构。大纲刻度必须用这一份——
- * 只读 .messages 的话，上翻加载的历史没有刻度，runtime 窗口会话
- * （主进程 12 轮缓存）的长会话只剩尾部几轮可定位。
- */
-function currentLoadedSessionMessages(get: Getter): ChatMessage[] {
-  const sessionId = get(currentSessionIdAtom);
-  if (!sessionId) return [];
-  const entry = get(sessionMessagesCacheAtom)[sessionId];
-  if (!entry) return [];
-  return entry.history ? [...entry.history.messages, ...entry.messages] : entry.messages;
 }
 
 /**
@@ -74,7 +71,55 @@ export const modifiedFilesAtom = atom((get) => {
   return Array.from(byPath.values());
 });
 
+/**
+ * Projection values live in a cache keyed by the message-cache lifecycle rather
+ * than in atom-family closures, so LRU eviction can release large histories.
+ */
+type OutlineItems = SessionOutlineItems;
+type OutlineEntrySource = {
+  sessionId: string;
+  entry: SessionMessageCacheEntry | undefined;
+};
+const EMPTY_OUTLINE_ITEMS: OutlineItems = [];
+
+function createOutlineItemsAtom(
+  readEntry: (get: Getter) => OutlineEntrySource | undefined,
+) {
+  return atom((get) => {
+    const source = readEntry(get);
+    if (!source?.entry) {
+      if (source) releaseSessionOutlineProjection(source.sessionId);
+      return EMPTY_OUTLINE_ITEMS;
+    }
+
+    const { sessionId, entry } = source;
+    if (entry.outlineRevision !== undefined) {
+      const cached = getSessionOutlineProjection(sessionId, entry.outlineRevision);
+      if (cached) return cached;
+    }
+
+    const messages = entry.history
+      ? [...entry.history.messages, ...entry.messages]
+      : entry.messages;
+    const items = buildOutline(messages);
+    if (entry.outlineRevision !== undefined) {
+      setSessionOutlineProjection(sessionId, entry.outlineRevision, items);
+    }
+    return items;
+  });
+}
 /** 当前聚焦会话的大纲条目（用户消息摘要），供右侧刻度定位轴展示。 */
-export const outlineItemsAtom = atom((get) => {
-  return buildOutline(currentLoadedSessionMessages(get));
+export const outlineItemsAtom = createOutlineItemsAtom((get) => {
+  const sessionId = get(currentSessionIdAtom);
+  return sessionId
+    ? { sessionId, entry: get(sessionMessagesCacheAtom)[sessionId] }
+    : undefined;
 });
+
+/** 每个分屏会话自己的大纲条目，避免依赖当前聚焦会话。 */
+export const outlineItemsBySessionIdAtomFamily = atomFamily((sessionId: string) =>
+  createOutlineItemsAtom((get) => ({
+    sessionId,
+    entry: get(sessionMessagesCacheAtom)[sessionId],
+  })),
+);

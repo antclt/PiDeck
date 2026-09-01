@@ -154,7 +154,7 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 					<span className={cn("tool-card-status shrink-0", running && "text-warning", error && "text-danger")}>
 						{running ? (
 							<span className="inline-flex items-center gap-1.5">
-								<span className="tool-card-spinner" aria-hidden="true" />
+								<span className="tool-card-spinner animate-pideck-spin" aria-hidden="true" />
 								{t("tool.statusRunning")}
 							</span>
 						) : error ? (

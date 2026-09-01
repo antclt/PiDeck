@@ -19,6 +19,7 @@ import {
   Activity,
   FolderOpen,
   Globe,
+  History,
   Pencil,
   Terminal,
   GitBranch,
@@ -29,7 +30,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, sessionRecordsAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -45,6 +46,7 @@ import { useAgentLoadNotice } from "./hooks/useAgentLoadNotice";
 import { useSessionLayout } from "./hooks/useSessionLayout";
 import { useFileEditor } from "./hooks/useFileEditor";
 import { resolveFileLinkPath } from "./utils/filePathLinks";
+import { imageMimeTypeFromPath } from "./utils/composerImages";
 import { useOverlayActions } from "./hooks/useOverlayActions";
 import { useWorkspacePanels, type WorkspaceDrawerPanel, type WorkspaceExternalEditorAdapter } from "./hooks/useWorkspacePanels";
 import { useDrawerPorts } from "./hooks/useDrawerPorts";
@@ -105,7 +107,6 @@ import {
   setSessionDraftAtom,
   cacheSessionMessagesAtom,
   upsertSessionAtom,
-  outlineItemsAtom,
 } from "./atoms";
 import {
   applyDshGoalSendTransform,
@@ -133,13 +134,21 @@ import {
   useSessionActions,
 } from "./hooks/useSessionActions";
 import { useScratchPad } from "./hooks/useScratchPad";
+import { useDshRuntimeStatusSync } from "./hooks/useDshRuntimeStatusSync";
+import { useDshRuntimeMigrationNotice } from "./hooks/useDshRuntimeMigrationNotice";
+import { useDshRuntimeInstallProgressSync } from "./hooks/useDshRuntimeInstallProgressSync";
+import { DSH_INSTALL_SETTINGS_TARGET, showDshRuntimeBlockHint } from "./utils/dshRuntimeHint";
+import { dshSendBlockReason } from "../../shared/types/dshRuntime";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { ChatSessionPane } from "./components/session/ChatSessionPane";
 import { SessionSplitStage } from "./components/session/SessionSplitStage";
 import { splitLayoutSessionIds } from "./utils/sessionSplitEdge";
 import { findLoadedDirectory, loadProjectFileTree, mergeFileTreeChildren } from "./utils/fileTreeLazy";
 import { SessionTabsBar, type SessionToolAction } from "./components/session/SessionTabsBar";
-import { SessionPaneServicesProvider } from "./components/session/SessionPaneServices";
+import {
+  SessionPaneServicesProvider,
+  type SessionFileOpenContext,
+} from "./components/session/SessionPaneServices";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
 import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
@@ -158,7 +167,6 @@ import { AppUpdateOverlay } from "./components/overlays/AppUpdateOverlay";
 import { ImportOverlayHost } from "./components/overlays/ImportOverlayHost";
 import { EnvironmentOverlay } from "./components/overlays/EnvironmentOverlay";
 import {
-  ConversationOutline,
   EnvironmentDialog,
   FileContextMenu,
   ImagePreviewModal,
@@ -460,6 +468,7 @@ export function App() {
     setSessionLoadingByProject,
     setVisibleProjectChildCountByProject,
     refreshProjects,
+    refreshAllProjects,
     refreshWorktrees,
     refreshProjectSessions,
     refreshFiles,
@@ -616,6 +625,8 @@ export function App() {
     disabledExtensions: [],
     disableExtensionWhitelist: false,
     sessionTabOpenMode: "preview",
+    // 与 main SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
+    autoSessionTitle: true,
     // 与 main SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
     busySendDelivery: "steer",
     enableGitManagement: true,
@@ -669,6 +680,10 @@ export function App() {
     petScale: DEFAULT_PET_SCALE,
     petPatrolEnabled: true,
     petPatrolPauseMin: 5,
+    // 闲置 agent 自动释放：与 main SettingsStore 默认值保持一致，避免启动时闪烁
+    idleAgentAutoRelease: true,
+    idleAgentKeepCount: 5,
+    idleAgentTimeoutMin: 60,
     favoriteModels: [],
 
     // 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
@@ -711,6 +726,9 @@ export function App() {
   useEffect(() => {
     setDefaultAgentBackend(settings.defaultAgentBackend);
   }, [settings.defaultAgentBackend, setDefaultAgentBackend]);
+  // 派生出「有效」后端：设置值经 DSH runtime 安装态钳制（runtime 不可用时 dsh → pi）。
+  // 所有新建会话入口统一读这个值，避免设置里残留 dsh 而 runtime 已不可用导致裸报错。
+  const effectiveAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 
   // 忙碌时发送的默认投递行为同步给发送链路（composer/App 决策时刻从 atom 读取，
   // 设置保存后无需重挂载会话即可生效，与 defaultAgentBackend 同一模式）。
@@ -842,6 +860,14 @@ export function App() {
   const pendingAgentsRef = useRef<PendingAgentTab[]>([]);
 
   const scratchPad = useScratchPad();
+  // DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
+  // 必须早于任何按安装态门控的 UI 计算，否则首帧会用 checking 初值渲染。
+  useDshRuntimeStatusSync();
+  // DSH runtime 安装进度同步：App 级订阅（常驻，不随 DshRuntimeSection 卸载），
+  // 保证切配置分页/关弹窗后进度仍保留；完成/失败时弹全局 toast。
+  useDshRuntimeInstallProgressSync();
+  // 存量 dsh 用户升级后 runtime 不在时给一次直达提示（有 dsh 会话才提示，只提示一次）。
+  useDshRuntimeMigrationNotice();
 
   // Drawer loading handled by useWorkspacePanels; only expandedDirs logic remains.
   useEffect(() => {
@@ -899,6 +925,10 @@ export function App() {
   const activeAgent = activeAgentId
     ? [...displayAgents, ...pendingAgents].find((agent) => agent.id === activeAgentId)
     : undefined;
+  // rewind（检查点）是 pi 后端能力：抽屉 rail 与底栏按钮同口径门控
+  // （dsh/imagegen 会话不展示入口）。与 Injector 的 isDshBackend 同源判定。
+  const rewindBackend = activeAgent?.backend ?? currentSessionRecord?.backend;
+  const rewindSupported = rewindBackend === undefined || rewindBackend === "pi";
 
   // Timeline scroll, pagination and jump ownership lives in sessionTimeline.
   // Modern Session drafts and attachments are subscribed by ComposerArea; the root only
@@ -1291,10 +1321,6 @@ export function App() {
     }
     return Array.from(byPath.values());
   }, [activeMessages.length, activeAgentId]);
-  // 大纲刻度数据源：必须用「落盘历史前缀 + 运行时窗口段」全量消息（outlineItemsAtom）。
-  // 旧实现只看 runtime 窗口段（currentSessionMessagesAtom），上翻加载过的历史
-  // 没有刻度，长会话刻度轴顶部缺最早的用户消息。
-  const outlineItems = useAtomValue(outlineItemsAtom);
   const flatFiles = useMemo(() => flattenFiles(files), [files]);
   // === file editor hook ===
   const {
@@ -1347,33 +1373,50 @@ export function App() {
   // 替代原先的"系统默认应用打开"（.md 会被浏览器接管、体验割裂）
   // line 为可选 `path:line` 位置标记：编辑器打开后滚动定位到该行。
   const handleOpenLinkedFile = useCallback(
-    (path: string, line?: number) => {
-      const resolved = resolveFileLinkPath(
-        path,
-        activeAgent?.cwd ?? activeProject?.path,
-      );
-      // 相对路径且无基准目录（无 agent cwd / 无项目）时解析器返回 null：
-      // 直接提示，而不是把原样相对路径丢给主进程按进程 cwd 乱猜 → 静默空白文件。
+    (path: string, line?: number, context?: SessionFileOpenContext) => {
+      // 有栏级上下文时绝不回退 App 当前焦点：分屏左栏的点击不能借用右栏 cwd/project。
+      const baseDir = context
+        ? context.baseDir
+        : activeAgent?.cwd ?? activeProject?.path;
+      const projectRoot = context ? context.projectRoot : activeProject?.path;
+      const projectId = context ? context.projectId : activeProject?.id;
+      // 会话内入口必须携带稳定 projectId；缺失时不能降级成通用读取绕开主进程项目边界。
+      if (context && !projectId) {
+        showToast(t("app.fileLinkCannotResolve", { path }));
+        return;
+      }
+      const resolved = resolveFileLinkPath(path, baseDir, projectRoot);
+      // 相对路径无基准目录、`..` 逃逸或绝对路径落在项目外都会返回 null。
+      // 主进程读取时还会按 projectId 对真实路径做第二次边界校验。
       if (!resolved) {
         showToast(t("app.fileLinkCannotResolve", { path }));
         return;
       }
+      const fileAccessScope = projectId ? { projectId } : undefined;
       const ext = resolved.split(".").pop()?.toLowerCase() ?? "";
       if (IMAGE_EXTENSIONS.has(ext)) {
-        // 图片：读取二进制 → 弹窗预览
+        // readBase64 返回原始 base64，不是 data URL；直接构造 ImageContent 供预览弹层使用。
         void api.files
-          .readBase64(resolved)
-          .then((dataUrl) => {
-            const m = dataUrl.match(/^data:(.*?);base64,(.*)$/s);
-            if (m) setPreviewImage({ type: "image", mimeType: m[1], data: m[2] });
+          .readBase64(resolved, undefined, fileAccessScope)
+          .then((data) => {
+            if (!data) throw new Error("FILE_NOT_FOUND");
+            setPreviewImage({
+              type: "image",
+              mimeType: imageMimeTypeFromPath(resolved),
+              data,
+            });
           })
-          .catch(() => showToast(t("app.openFileFailed", { error: ext })));
+          .catch((error) =>
+            showToast(t("app.openFileFailed", {
+              error: error instanceof Error ? error.message : String(error),
+            })),
+          );
         return;
       }
-      // markdown / html / 其他文本文件：统一抽屉查看；带行号链接打开后滚动定位
-      viewFilePath(resolved, undefined, line);
+      // markdown / html / 其他文本文件：统一抽屉查看；scope 固化进 tab，切焦点后仍按原项目读取。
+      viewFilePath(resolved, undefined, line, fileAccessScope);
     },
-    [activeAgent?.cwd, activeProject?.path, viewFilePath, showToast],
+    [activeAgent?.cwd, activeProject?.id, activeProject?.path, viewFilePath, showToast],
   );
 
   // 工具抽屉（files/git/browser）的统一切换语义：当前面板已展开 → 关闭；
@@ -1427,8 +1470,8 @@ export function App() {
     refreshProjectSessions,
     api,
     showToast,
-    // 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh）
-    defaultBackend: settings.defaultAgentBackend,
+    // 新建会话默认后端：跟随设置项（默认 pi，可切换 dsh），经 DSH runtime 安装态钳制
+    defaultBackend: effectiveAgentBackend,
   });
 
   // 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
@@ -1460,6 +1503,21 @@ export function App() {
       return session;
     },
     [runCreateAnonymousSession, workspaceChrome],
+  );
+
+  /**
+   * 问题反馈「新建会话分析」：在活动项目新建草稿会话并选中，把 AI 提示词预填进
+   * 该会话输入框（composer 草稿）。pi 启动后会自动加载项目 AGENTS.md 与技能，
+   * 提示词里的诊断报告 + 项目上下文可让 pi 在正确约束下排查。
+   */
+  const handleFeedbackCreateSession = useCallback(
+    async (prompt: string): Promise<boolean> => {
+      const session = await createSessionDraftWithTab();
+      if (!session) return false;
+      setSessionDraft({ sessionId: session.id, value: prompt });
+      return true;
+    },
+    [createSessionDraftWithTab, setSessionDraft],
   );
 
   /** 侧栏/分支打开：选中成功后按 preview|permanent 登记 Tab */
@@ -1519,11 +1577,12 @@ export function App() {
         // 统一创建 draft 会话（Chat 项目也走普通会话、可保存）：创建不拉 pi，
         // selectSessionCommand 同步切页、立即进入会话页；匿名会话仅保留给侧栏
         // 「新建临时对话」入口（createAnonymousSessionWithTab）。
-        // 默认后端跟随设置项（settings.defaultAgentBackend，默认 pi）。
+        // 默认后端跟随设置项（settings.defaultAgentBackend，默认 pi），
+        // 且经 DSH runtime 安装态钳制——runtime 不可用时不会尝试建 dsh 会话。
         const session = await api.sessions.createDraft({
           projectId: project.id,
-          title: settings.defaultAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
-          backend: settings.defaultAgentBackend,
+          title: effectiveAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
+          backend: effectiveAgentBackend,
           ...launchPreferences,
         });
         upsertSession(session);
@@ -1561,7 +1620,7 @@ export function App() {
       selectSessionCommand,
       upsertSession,
       workspaceChrome,
-      settings.defaultAgentBackend,
+      effectiveAgentBackend,
     ],
   );
 
@@ -1954,10 +2013,17 @@ export function App() {
         console.error("[Files] refresh failed", error);
         const message = error instanceof Error ? error.message : String(error);
         const tooLarge = message.match(/FILE_TREE_DIRECTORY_TOO_LARGE:(\d+):(\d+)/);
+        const projectDirectoryMissing = message.includes("PROJECT_DIRECTORY_MISSING");
+        if (projectDirectoryMissing) {
+          // 项目在启动/切换期间被外部删除：清空树后重扫项目 presence，侧栏马上标出失效目录。
+          void refreshProjects().catch(() => undefined);
+        }
         showToast(
           tooLarge
             ? t("app.filesDirectoryTooLarge", { count: tooLarge[1], max: tooLarge[2] })
-            : t("app.filesRefreshFailed", { error: message }),
+            : projectDirectoryMissing
+              ? t("app.projectDirectoryMissing")
+              : t("app.filesRefreshFailed", { error: message }),
           4000,
         );
       }
@@ -1973,6 +2039,8 @@ export function App() {
     return () => {
       cancelled = true;
     };
+  // 该 effect 只应由项目身份切换触发；refreshProjects 是 hook 每次渲染返回的命令，
+  // 放入依赖会让 setFiles 后再次触发扫描，形成文件树刷新循环。
   }, [activeProjectId, beginFileTreeRequest, isFileTreeRequestCurrent, loadExpandedDirs]);
 
   useEffect(() => {
@@ -2353,6 +2421,20 @@ export function App() {
       }
     }
     // 未启动/已解绑：激活会话（ensureRuntime 对无绑定会话 create 新 Agent，幂等去重防重复点击）。
+    // DSH 会话 runtime 不可用（未安装/损坏）时 host 无法 fork，activateRuntime 只会抛
+    // 模块解析裸报错——给「去安装」提示（含直达入口）而不是把底层错误甩给用户。
+    const restartRecord = store.get(sessionRecordsAtom)[sessionId];
+    if (restartRecord?.backend === "dsh") {
+      const dshStatus = store.get(dshRuntimeStatusAtom);
+      if (dshSendBlockReason(dshStatus.state)) {
+        showDshRuntimeBlockHint(
+          () => store.set(openSettingsAtom, DSH_INSTALL_SETTINGS_TARGET),
+          dshStatus.state,
+          dshStatus.reason,
+        );
+        return;
+      }
+    }
     // 重启活会话走 restartRuntimeTarget→restartingAgentId→SessionSurfaceStage 的 isRestarting 遮罩；
     // 这里（无绑定）没有 restartingAgentId，需显式设置 activating 遮罩，让会话消息区域也有加载动画。
     setActivatingSessionId(sessionId);
@@ -2834,9 +2916,26 @@ export function App() {
     return api.sessions.listArchived();
   }
 
+  /** 永久删除已归档会话（pi 文件归档：文件移入回收站并移出索引） */
+  async function deleteArchivedSidebarSession(archivedPath: string) {
+    await api.sessions.deleteArchivedRecord(archivedPath);
+    showToast(t("app.sessionDeletedFromArchive"), 2200);
+    // 归档删除不影响常规目录；刷新当前项目只是让 catalog 快照与磁盘一致。
+    const projectId = activeProjectId;
+    if (projectId) await refreshProjectSessions(projectId);
+  }
+
   /** 列出 DSH 归档会话（会话管理弹窗归档视图用；与 pi 归档合并展示） */
   function listArchivedDshSidebarSessions() {
     return api.sessions.listArchivedDshSessions();
+  }
+
+  /** 永久删除已归档 DSH 会话（host 目录移入回收站） */
+  async function deleteArchivedDshSidebarSession(dshSessionId: string) {
+    await api.sessions.deleteArchivedDshSession(dshSessionId);
+    showToast(t("app.sessionDeletedFromArchive"), 2200);
+    const projectId = activeProjectId;
+    if (projectId) await refreshProjectSessions(projectId);
   }
 
   function requestDeleteSidebarSession(projectId: string, session: SessionSummary) {
@@ -2927,6 +3026,7 @@ export function App() {
         const project = projects.find((candidate) => candidate.id === projectId);
         if (project) await refreshProjectTree(project);
       },
+      refreshAll: refreshAllProjects,
       reorder: reorderProjects,
       reveal: (project) => api.files.showInFolder(project.path),
       openWithEditor: (project) => {
@@ -2996,10 +3096,16 @@ export function App() {
         await unarchiveSidebarSession(archived.filePath, projectId);
       },
       listArchived: () => listArchivedSidebarSessions(),
+      deleteArchived: async (archivedPath) => {
+        await deleteArchivedSidebarSession(archivedPath);
+      },
       unarchiveDsh: async (dshSessionId, projectId) => {
         await unarchiveDshSidebarSession(dshSessionId, projectId);
       },
       listArchivedDsh: () => listArchivedDshSidebarSessions(),
+      deleteArchivedDsh: async (dshSessionId) => {
+        await deleteArchivedDshSidebarSession(dshSessionId);
+      },
     },
     agents: {
       rename: rename.openAgentRename,
@@ -3065,9 +3171,9 @@ export function App() {
       branchByProject={branchByProject}
       creatingWorktree={worktreeCreating}
       isLanWeb={isLanWeb}
-      // 「新建任务」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
+      // 「新建会话」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
       // 用户选择项目后可直接输入对话（首次发送才创建真实会话）。无项目时保持引导页「添加项目」空态。
-      onOpenNewTask={() => { if (activeProjectId) selectProjectCommand(activeProjectId); }}
+      onOpenNewSession={() => { if (activeProjectId) selectProjectCommand(activeProjectId); }}
       onOpenFeedback={() => overlays.setFeedbackOpen(true)}
       settingsExpandedProjectIds={settings.sidebarExpandedProjectIds}
       settingsNavTab={settings.sidebarNavTab}
@@ -3099,6 +3205,15 @@ export function App() {
     const record = store.get(sessionRecordByIdAtomFamily(sessionId));
     if (record) selectSessionCommand(record.projectId, sessionId, true);
   }, [selectSessionCommand, store]);
+
+  // 后台 Ask 通知「前往会话」：跳转的同时登记常驻 Tab——agent 开多时被询问的会话
+  // 可能根本没开 Tab（后台并行 ask 等），只切焦点的话回答完切换出去就找不到了。
+  const jumpToAskSession = useCallback((sessionId: string) => {
+    const record = store.get(sessionRecordByIdAtomFamily(sessionId));
+    if (!record) return;
+    workspaceChrome.registerOpenSession(sessionId, "permanent");
+    selectSessionCommand(record.projectId, sessionId, true);
+  }, [selectSessionCommand, store, workspaceChrome]);
 
   // 切会话过渡：会话区整体做一次 160ms 淡入+微位移（Web Animations API，
   // 不卸载树/不动布局，避免整树重建的卡顿与瞬间替换的生硬）；
@@ -3243,6 +3358,7 @@ export function App() {
       forkingMessageId,
       openSidebarSessionById: (projectId: string, sessionId: string) =>
         openSidebarSessionByIdWithTab(projectId, sessionId, "permanent"),
+      focusAskSessionById: jumpToAskSession,
       agents: displayAgents,
       queuedPromptsBySession: queue.queuedPrompts,
       queueRetract: queue.retractQueuedPromptForEdit,
@@ -3292,6 +3408,7 @@ export function App() {
       handleOpenLinkedFile,
       insertQuickPrompt,
       isLanWeb,
+      jumpToAskSession,
       jumpToMessageRef,
       openSidebarSessionByIdWithTab,
       paneLayoutRefs,
@@ -3627,9 +3744,12 @@ export function App() {
 
 
   return (
-    // 文件链接存在性校验的 baseDir 与 handleOpenLinkedFile 同口径
-    // （activeAgent cwd 优先，回退项目路径），让 markdown 内链接按同一基准解析。
-    <FileLinkBaseProvider baseDir={activeAgent?.cwd ?? activeProject?.path}>
+    // 非会话静态区域使用当前焦点作为兜底；每个 SessionRuntimeInjector 会用本栏 cwd/project 覆盖。
+    <FileLinkBaseProvider
+      baseDir={activeAgent?.cwd ?? activeProject?.path}
+      projectId={activeProject?.id}
+      projectRoot={activeProject?.path}
+    >
     <>
       <AppBootstrap {...bootstrapProps} />
     <AppShell
@@ -3673,6 +3793,16 @@ export function App() {
               active: drawer === "trajectory",
               onClick: () => handleToolDrawerAction("trajectory"),
             },
+            // 检查点面板：仅当前会话为 pi 后端时展示（rewind 能力；dsh 暂不声明）。
+            ...(rewindSupported
+              ? [{
+                  id: "rewind" as const,
+                  label: t("rewind.title"),
+                  icon: <History size={16} />,
+                  active: drawer === "rewind",
+                  onClick: () => handleToolDrawerAction("rewind"),
+                }]
+              : []),
             {
               id: "browser",
               label: t("app.browser"),
@@ -3693,15 +3823,6 @@ export function App() {
           files={drawerPorts.files}
         />
       )}
-      outlineContent={
-        /* 右缘刻度定位轴（beUI PreviewRail）：点击刻度跳转消息，hover 出预览卡；
-           无消息时轴自动隐藏。工具开关已上收会话 Tab 栏（sessionToolActions）。 */
-        <ConversationOutline
-          items={outlineItems}
-          // 分屏下由聚焦 pane 的 timeline 注入 jump 回调（ChatSessionPane 写入 services）
-          onJump={(messageId) => jumpToMessageRef.current?.(messageId)}
-        />
-      }
       setListCollapsed={setListCollapsed}
       setListWidth={setListWidth}
       setDrawerCollapsed={setDrawerCollapsed}
@@ -3787,8 +3908,12 @@ export function App() {
                 await api.files.delete(node.path, true);
                 void refreshVisibleFiles();
                 showToast(t("app.fileDeleted"), 2000);
-              } catch (e) {
-                console.error("[File] 删除失败:", e);
+              } catch (error) {
+                // 回收站不可用、权限不足或文件已被外部移走时，必须把主进程错误呈现给用户；
+                // 仅写控制台会让确认框关闭后看起来像“点击无效”。
+                showToast(t("app.fileDeleteFailed", {
+                  error: String(error instanceof Error ? error.message : error).replace(/^Error:\s*/, ""),
+                }), 5000, "error");
               }
             },
           });
@@ -3913,7 +4038,24 @@ export function App() {
       onCurrentVersion={setUpToDateVersion}
       projectPath={activeProject?.path}
     />
-    <SessionActionOverlays {...overlays.overlayProps} />
+    {/*
+     * 问题反馈弹窗的「新建会话分析」依赖 App 级会话创建能力（createSessionDraftWithTab），
+     * 在装配层组合：useOverlayActions 只持开关状态，会话创建与预填在此处注入。
+     */}
+    <SessionActionOverlays
+      {...overlays.overlayProps}
+      feedback={
+        overlays.overlayProps.feedback
+          ? {
+              ...overlays.overlayProps.feedback,
+              props: {
+                ...overlays.overlayProps.feedback.props,
+                onCreateSessionWithPrompt: handleFeedbackCreateSession,
+              },
+            }
+          : undefined
+      }
+    />
     <AppUpdateOverlay
       controller={{ ...appUpdate, clear: dismissAppUpdate }}
       releasesUrl={appInfo.releasesUrl}

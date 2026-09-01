@@ -83,7 +83,7 @@ function fixture(overrides = {}) {
 		status: "idle",
 		createdAt: 2,
 	};
-	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], messageSessions: [] };
+	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], messageSessions: [], rewindTargets: [], rewindParams: [], rewindRestores: [] };
 	const targeted = (target, value) => ({ ok: true, value: { target, value } });
 	const deps = {
 		// SSE 流式依赖：测试环境不订阅真实 pi 事件，但必须提供可调用实现满足契约。
@@ -166,6 +166,26 @@ function fixture(overrides = {}) {
 		exportSessionRuntimeHtml: async (target) => targeted(target, { path: "export.html" }),
 		editSessionRuntimeMessage: async (target) => targeted(target, undefined),
 		deleteSessionRuntimeMessage: async (target) => targeted(target, undefined),
+		listRewindCheckpoints: async (target, params) => {
+			calls.rewindTargets.push(target);
+			calls.rewindParams.push(params ?? null);
+			return targeted(target, {
+				items: [{
+					id: "turn-1-1-1234",
+					sessionId: session.id,
+					trigger: "turn",
+					turnIndex: 1,
+					branch: "main",
+					timestamp: 1234,
+				}],
+				hasMore: false,
+			});
+		},
+		getRewindCheckpointDiff: async (target) => targeted(target, "a.txt | 1 +"),
+		restoreRewindCheckpoint: async (target, checkpointId, scope) => {
+			calls.rewindRestores.push({ target, checkpointId, scope });
+			return targeted(target, undefined);
+		},
 		prepareSessionRuntimeResend: async (target) => targeted(target, { text: "hello" }),
 		setSessionRuntimeModel: async (target) => targeted(target, { isStreaming: false }),
 		setSessionRuntimeThinking: async (target) => targeted(target, { isStreaming: false }),
@@ -367,6 +387,56 @@ test("runtime HTTP commands preserve the full generation-validated target", asyn
 		assert.equal(JSON.stringify(calls.stateTargets), JSON.stringify([target]));
 
 		const mismatch = await fetch(`${baseUrl}/api/sessions/other/runtime/state`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ target }),
+		});
+		assert.equal(mismatch.status, 400);
+	});
+});
+
+test("runtime rewind routes forward checkpointId/scope and keep the validated target", async () => {
+	await withServer(async ({ baseUrl, runtime, calls }) => {
+		const target = {
+			sessionId: runtime.sessionId,
+			agentId: runtime.agentId,
+			runtimeGeneration: runtime.runtimeGeneration,
+		};
+		const listed = await (
+			await fetch(`${baseUrl}/api/sessions/session-1/runtime/rewind-list`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ target, limit: 20, beforeTimestamp: 500 }),
+			})
+		).json();
+		assert.equal(listed.result.ok, true);
+		assert.equal(JSON.stringify(calls.rewindTargets), JSON.stringify([target]));
+		// 分页参数（limit/beforeTimestamp）应原样透传给后端。
+		assert.equal(JSON.stringify(calls.rewindParams), JSON.stringify([{ limit: 20, beforeTimestamp: 500 }]));
+		assert.equal(listed.result.value.value.items[0].trigger, "turn");
+
+		const diffed = await (
+			await fetch(`${baseUrl}/api/sessions/session-1/runtime/rewind-diff`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ target, checkpointId: "turn-1-1-1234" }),
+			})
+		).json();
+		assert.equal(diffed.result.value.value, "a.txt | 1 +");
+
+		const restored = await (
+			await fetch(`${baseUrl}/api/sessions/session-1/runtime/rewind-restore`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ target, checkpointId: "turn-1-1-1234", scope: "files" }),
+			})
+		).json();
+		assert.equal(restored.result.ok, true);
+		assert.equal(JSON.stringify(calls.rewindRestores), JSON.stringify([
+			{ target, checkpointId: "turn-1-1-1234", scope: "files" },
+		]));
+
+		const mismatch = await fetch(`${baseUrl}/api/sessions/other/runtime/rewind-list`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ target }),

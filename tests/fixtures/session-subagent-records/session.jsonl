@@ -1,0 +1,8 @@
+{"type":"session","id":"mock-session-001","cwd":"C:/mock/project","timestamp":"2026-08-27T00:00:00.000Z"}
+{"type":"message","id":"msg-1","role":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}
+{"type":"message","id":"msg-2","role":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi there"}]}}
+{"type":"custom","customType":"subagents:record","id":"rec-1","parentId":"msg-2","data":{"id":"agent-abc12345","type":"Explore","description":"Find auth files","status":"completed","result":"Found 3 auth files in src/auth/","startedAt":1700000000000,"completedAt":1700000005000}}
+{"type":"custom","customType":"subagents:record","id":"rec-2","parentId":"rec-1","data":{"id":"agent-def67890","type":"code","description":"Implement login","status":"running","startedAt":1700000010000}}
+{"type":"custom","customType":"subagents:record","id":"rec-3","parentId":"rec-2","data":{"id":"agent-ghi11111","type":"Explore","description":"explore-done-error","status":"error","error":"timeout","startedAt":1700000020000,"completedAt":1700000030000}}
+{"type":"custom","customType":"subagents:record","id":"rec-4","parentId":"rec-3","data":{"id":"agent-jkl22222","type":"code","description":"bad status","status":"INVALID_STATUS","startedAt":1700000040000}}
+{"type":"custom","customType":"pi-subagents.child-session","id":"rec-5","parentId":"rec-4","data":{"schemaVersion":1}}

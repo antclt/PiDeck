@@ -191,3 +191,81 @@ test("DshHost 归档往返：编码含不安全字符的 cwd 也能恢复", asyn
 		rmSync(home, { recursive: true, force: true });
 	}
 });
+
+test("DshHost.deleteArchivedSession：删除归档目录并返回 true（走注入的回收站回调）", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-dsh-delarchive-"));
+	const trashed = [];
+	const host = new DshHost(
+		() => join(home, "userData"),
+		() => home,
+		() => undefined,
+		() => home,
+		undefined,
+		undefined,
+		async (path) => { trashed.push(path); rmSync(path, { recursive: true, force: true }); },
+	);
+	try {
+		const cwd = "C:/work/project";
+		const sessionId = "session-del-1";
+		makeSessionDir(home, cwd, sessionId);
+		await host.archiveSession(sessionId, cwd, "要删除的归档");
+
+		const deleted = await host.deleteArchivedSession(sessionId);
+		assert.equal(deleted, true, "归档存在时应返回 true");
+		assert.equal(trashed.length, 1, "回收站回调应被调用一次");
+		assert.ok(trashed[0].endsWith(join(".pideck", "archive", sessionId)), `回收站应收到归档目录: ${trashed[0]}`);
+		assert.ok(!existsSync(join(home, ".pideck", "archive", sessionId)), "归档目录应已移入回收站");
+		// 删除后归档清单不再包含它
+		assert.equal(host.listArchivedSessions().length, 0, "删除后归档清单应为空");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("DshHost.deleteArchivedSession：无 manifest 目录（非 PiDeck 归档）不删除并返回 false", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-dsh-delarchive-guard-"));
+	const trashed = [];
+	const host = new DshHost(
+		() => join(home, "userData"),
+		() => home,
+		() => undefined,
+		() => home,
+		undefined,
+		undefined,
+		async (path) => { trashed.push(path); rmSync(path, { recursive: true, force: true }); },
+	);
+	try {
+		// 无 manifest 的目录不属于 PiDeck 归档，delete 必须拒绝（避免误删非归档数据）
+		const archiveDir = join(home, ".pideck", "archive", "session-orphan-dir");
+		mkdirSync(archiveDir, { recursive: true });
+		writeFileSync(join(archiveDir, "other.data"), "not pideck archive");
+
+		const deleted = await host.deleteArchivedSession("session-orphan-dir");
+		assert.equal(deleted, false, "无 manifest 时应返回 false");
+		assert.equal(trashed.length, 0, "回收站回调不应被调用");
+		assert.ok(existsSync(archiveDir), "非归档目录不应被删除");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("DshHost.deleteArchivedSession：归档目录不存在时返回 false（幂等）", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pideck-dsh-delarchive-missing-"));
+	const trashed = [];
+	const host = new DshHost(
+		() => join(home, "userData"),
+		() => home,
+		() => undefined,
+		() => home,
+		undefined,
+		undefined,
+		async (path) => { trashed.push(path); rmSync(path, { recursive: true, force: true }); },
+	);
+	try {
+		const deleted = await host.deleteArchivedSession("session-never-existed");
+		assert.equal(deleted, false, "不存在时应返回 false");
+		assert.equal(trashed.length, 0, "回收站回调不应被调用");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});

@@ -36,6 +36,15 @@ function loadAgentMessageProjectorModule() {
     module,
     exports: module.exports,
     require: (specifier) => {
+      if (specifier === "../../shared/formatToolDetail") {
+        return {
+          extractToolResultText: (result) => typeof result === "string" ? result : "",
+          formatToolDetail: () => "",
+          safeJson: (value) => JSON.stringify(value),
+          truncateDetailWithMeta: (text) => ({ text, truncated: false, fullLength: text.length }),
+          truncateForDetail: (text) => typeof text === "string" ? text : String(text ?? ""),
+        };
+      }
       if (specifier === "./messageContent") return { extractMessageText };
       if (specifier === "./sessionEntryIds") {
         return {
@@ -68,6 +77,12 @@ function loadAgentMessageProjectorModule() {
         // AgentManager 依赖的扩展错误原因格式化；本测试不涉及错误文案，透传字符串即可
         return { formatExtensionErrorReason: (reason) => String(reason ?? "") };
       }
+      // 工具推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+      if (specifier === "./derivedSubagents") {
+        return { mergeSubagentSources: (records) => records };
+      }
+      // rewind checkpoint 纯 git 模块：本测试不涉及，空桩满足依赖契约
+      if (specifier === "../rewind/index.ts") return {};
       return nodeRequire(specifier);
     },
     Date,
@@ -114,7 +129,15 @@ function loadAgentManagerModule() {
 	vm.runInNewContext(historyReaderOutput, {
 		module: historyReaderModule,
 		exports: historyReaderModule.exports,
-		require: nodeRequire,
+		require: (specifier) => {
+			// todo 快照解析纯函数：本测试不覆盖，空实现满足依赖契约
+			if (specifier === "../../shared/sessionTodo") return { parseTodoSnapshotData: () => undefined };
+			// acp_delegate 推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+			if (specifier === "./derivedSubagents") return { deriveToolSubagentEntries: () => [] };
+			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
+			if (specifier === "../../shared/fileChanges") return { collectSessionFileChanges: () => [] };
+			return nodeRequire(specifier);
+		},
 		Buffer,
 		Date,
 		Map,
@@ -157,6 +180,8 @@ function loadAgentManagerModule() {
 		if (specifier === "./SessionFileEditor") {
 			return { SessionFileEditor: class {} };
 		}
+		// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
+		if (specifier === "../../shared/fileChanges") return { collectSessionFileChanges: () => [] };
 		if (specifier === "./SessionHistoryReader") return historyReaderModule.exports;
       if (specifier === "./sessionEntryIds") {
         return {
@@ -221,6 +246,12 @@ function loadAgentManagerModule() {
         // AgentManager 依赖的扩展错误原因格式化；本测试不涉及错误文案，透传字符串即可
         return { formatExtensionErrorReason: (reason) => String(reason ?? "") };
       }
+      // 工具推导纯函数：本测试不覆盖（另有 sessionAcpDelegateDerive.test.mjs），空实现满足依赖契约
+      if (specifier === "./derivedSubagents") {
+        return { mergeSubagentSources: (records) => records };
+      }
+      // rewind checkpoint 纯 git 模块：本测试不涉及，空桩满足依赖契约
+      if (specifier === "../rewind/index.ts") return {};
       return nodeRequire(specifier);
     },
     Date,

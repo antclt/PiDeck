@@ -293,6 +293,11 @@ test("tool/call 与 tool/result 投影工具消息（结果拼到工具行）", 
 	// 工具耗时 = result 时间 - call 时间（渲染层工具卡片 formatDuration）
 	assert.equal(p.messages[0].meta?.durationMs, 1);
 	assert.equal(p.executingTool, undefined);
+	// 与 PI 同一套 detailText，时间线展开区不再 JSON.stringify 整份 meta
+	assert.match(p.messages[0].meta?.detailText ?? "", /工具：pwsh/);
+	assert.match(p.messages[0].meta?.detailText ?? "", /状态：完成/);
+	assert.match(p.messages[0].meta?.detailText ?? "", /结果：/);
+	assert.match(p.messages[0].meta?.detailText ?? "", /C:\\work/);
 });
 
 test("并行工具结果按 callId 精确收口（乱序到达不串卡）", () => {
@@ -382,6 +387,27 @@ test("turn/end 兜底清掉未收到 result 的 running 工具卡", () => {
 	assert.equal(p.executingTool, undefined);
 });
 
+
+test("tool/result 带参数时 detailText 含参数段（PI 同款分节）", () => {
+	let p = projectDshEvent(undefined, event("tool/call", 6, {
+		toolName: "read",
+		callId: "call-1",
+		arguments: JSON.stringify({ file_path: "F:/PiDeck/src/a.ts", offset: 1, limit: 50 }),
+	}), AGENT);
+	p = projectDshEvent(p, event("tool/result", 7, {
+		message: {
+			source: { kind: "tool", callId: "call-1" },
+			content: [{ type: "text", text: "export function foo() {}" }],
+		},
+	}), AGENT);
+	const detail = p.messages[0].meta?.detailText ?? "";
+	assert.match(detail, /工具：read/);
+	assert.match(detail, /参数：/);
+	assert.match(detail, /"file_path": "F:\/PiDeck\/src\/a\.ts"/);
+	assert.match(detail, /结果：/);
+	assert.match(detail, /export function foo\(\) \{\}/);
+	assert.equal(p.messages[0].meta?.truncated, undefined);
+});
 
 test("tool/call 的 arguments（JSON 字符串）解析进 meta.args，host view 透传进 meta.view", () => {
 	// DSH 的 tool/call.arguments 是 JSON 字符串（host 侧 presentCall 也 JSON.parse 后消费）；

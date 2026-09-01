@@ -48,10 +48,12 @@
   /*
    * 会话正文行高：无单位倍率，随 --font-size-chat 各档缩放。
    * 旧值散落写成 1.68（15px → 25.2px），段落偏疏、扫描密度低于 Codex/Cursor
-   *（对话区常见 1.45–1.55）和 Claude Desktop（约 1.6）。取 1.5（15px → 22.5px）
-   * 作为中英混排可读与精致密度的折中；不要对 CJK 正文设负 letter-spacing。
+   *（对话区常见 1.45–1.55）和 Claude Desktop（约 1.6）。2026 曾取 1.5（15px → 22.5px）
+   * 作中英混排可读与精致密度的折中；后按 beui 流式消息观感（leading-6≈1.71）放宽到
+   * 1.6（15px → 24px），段落更舒展、列表/标题层次更清晰，同时避免超大行高稀释扫描密度。
+   * 不要对 CJK 正文设负 letter-spacing。
    */
-  --line-height-chat: 1.5;
+  --line-height-chat: 1.6;
   --font-size-input: 14px;
   --font-size-title: 16px;
   --font-size-brand: 18px;
@@ -800,9 +802,11 @@ select:focus-visible {
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  /* Spinner 是进行中操作的功能反馈，不是装饰性动效；保留其线性旋转，
+     其余动画仍按系统偏好压缩为单帧。 */
+  *:not(.animate-pideck-spin),
+  *:not(.animate-pideck-spin)::before,
+  *:not(.animate-pideck-spin)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
@@ -2571,7 +2575,6 @@ select:focus-visible {
 :root[data-bg-image="on"] [data-slot="dialog-content"].config-modal,
 :root[data-bg-image="on"] [data-slot="dialog-content"].settings-modal,
 :root[data-bg-image="on"] [data-slot="dialog-content"].project-resources-dialog,
-:root[data-bg-image="on"] [data-slot="dialog-content"].feedback-modal-shell,
 :root[data-bg-image="on"] [data-slot="dialog-content"].environment-dialog {
   /* 这些都是完整工作台弹框，header 与内容必须共享页面面板档透明度。 */
   --wallpaper-dialog-alpha: var(--wallpaper-panel-alpha, 30%);
@@ -2670,24 +2673,28 @@ select:focus-visible {
   min-height: 0;
 }
 .session-v-timeline,
-.session-v-composer,
 .session-v-terminal {
   height: 100%;
   min-height: 0;
 }
-.session-v-timeline > *,
+/* 时间线列是 flex 列：stage 吃剩余高度，输入栏按内容 shrink-0。不要再给 stage 写 height:100%，
+   否则会和底部输入栏叠出溢出。 */
+.session-v-timeline-stage {
+  min-height: 0;
+}
 .session-v-terminal > *,
 .session-v-timeline .message-timeline {
   height: 100%;
   min-height: 0;
 }
-/* composer 在面板内撑满；旧布局的底部外边距在面板模式下会造成溢出 */
+/* 输入栏在时间线列内按内容撑开；max-height 由 SessionView 按列高设置。 */
 .session-v-composer .composer {
-  height: 100%;
+  height: auto;
+  max-height: 100%;
   margin-bottom: 0;
   box-sizing: border-box;
 }
-/* 纵向 Group 的横线分隔条（SessionView：timeline|composer|terminal）。
+/* 纵向 Group 的横线分隔条（SessionView：timeline 列 | terminal）。
    v4：Group vertical → Separator aria-orientation=horizontal（与 Group 相反）。
    必须 w-full，否则命中区只剩左缘 1px 竖条，中间拖不动。 */
 .v-splitter {
@@ -3050,7 +3057,9 @@ select:focus-visible {
   scroll-margin-top: 28px;
 }
 .message-timeline:has(.session-runtime-ui:not(:empty)) {
-  padding-bottom: 8px;
+  /* 运行中/时长 meta 紧贴底部 composer widgets 长条时视觉重叠；
+     与基础留白 (24px) 拉开差距，留出呼吸间距 */
+  padding-bottom: 20px;
 }
 /* RespondingIndicator（消息流末尾的 Agent 运行动画）与 ask 卡片（runtimeUi）相邻：
    消息占满滚动区时两者只剩 8px 底部留白，视觉上贴死；给动画块单独留出呼吸间距 */
@@ -3350,12 +3359,6 @@ select:focus-visible {
   border: 3px solid var(--color-border-subtle);
   border-top-color: var(--color-accent);
   border-radius: var(--radius-pill);
-  animation: spin 0.85s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 @keyframes fadeIn {
   from {

@@ -5,6 +5,7 @@ import type {
   GitChangedFile,
   GitResourceGroupType,
   Project,
+  ProjectFileAccessScope,
 } from "../../../shared/types";
 import type {
   WorkspaceContentOpenMode,
@@ -16,10 +17,7 @@ import {
   promotePreviewEditorTab as nextPreviewAfterPromote,
   type EditorTabOpenMode,
 } from "../utils/editorTabs";
-
-function isAbsoluteFilePath(path: string) {
-  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/");
-}
+import { resolveFileLinkPath } from "../utils/filePathLinks";
 
 const EDITOR_TAB_LIMIT = 5;
 const EDITOR_TAB_TEXT_BUDGET = 24 * 1024 * 1024;
@@ -37,6 +35,8 @@ interface EditorTab {
   /** 打开后滚动定位的目标行（1 起，来自 `path:line` 链接位置标记）；
    * 仅显式携带时写入，普通重复点击不覆盖已有定位。 */
   initialLine?: number;
+  /** 项目文件入口的读取授权；随 tab 固化，不能在加载时改读当前焦点项目。 */
+  fileAccessScope?: ProjectFileAccessScope;
   lastAccess: number;
 }
 
@@ -46,12 +46,6 @@ interface GitDrawerDiff {
   originalContent: string;
   modifiedContent: string;
   label: string;
-}
-
-export function resolveFileLinkPath(path: string, basePath?: string) {
-  if (!path || isAbsoluteFilePath(path) || !basePath) return path;
-  const separator = basePath.includes("\\") ? "\\" : "/";
-  return `${basePath.replace(/[\\/]+$/, "")}${separator}${path.replace(/^[\\/]+/, "")}`;
 }
 
 export interface UseFileEditorInput {
@@ -67,7 +61,11 @@ export interface UseFileEditorInput {
   contentOpenMode: WorkspaceContentOpenMode;
   showToast: (message: string, duration?: number) => void;
   /** 读取文件内容的 API；maxBytes 用于编辑器大文件前置拦截（主进程 stat 检查，不传输超限内容） */
-  readFileContent: (path: string, maxBytes?: number) => Promise<string>;
+  readFileContent: (
+    path: string,
+    maxBytes?: number,
+    scope?: ProjectFileAccessScope,
+  ) => Promise<string>;
   /** 读取 Git 原始内容的 API */
   readGitOriginalContent: (path: string) => Promise<string>;
   /** 保存文件内容的 API */
@@ -109,7 +107,11 @@ export interface UseFileEditorOutput {
   activeTabId: string | null;
   activeTab: EditorTab | null;
   editorTabAccessSequenceRef: React.MutableRefObject<number>;
-  readEditorFileContent: (path: string, maxBytes?: number) => Promise<string>;
+  readEditorFileContent: (
+    path: string,
+    maxBytes?: number,
+    scope?: ProjectFileAccessScope,
+  ) => Promise<string>;
   readEditorOriginalContent: (path: string) => Promise<string>;
   saveEditorFileContent: (path: string, content: string) => Promise<void>;
   openEditorTab: (
@@ -122,6 +124,8 @@ export interface UseFileEditorOutput {
     label?: string,
     preserveDrawer?: boolean,
     openMode?: EditorTabOpenMode,
+    initialLine?: number,
+    fileAccessScope?: ProjectFileAccessScope,
   ) => void;
   closeEditorTab: (tabId: string) => void;
   selectEditorTab: (tabId: string) => void;
@@ -131,7 +135,12 @@ export interface UseFileEditorOutput {
   previewEditorTabId: string | null;
   openFilePath: (path: string) => void;
   /** 单击默认 preview；双击传 permanent */
-  viewFilePath: (path: string, openMode?: EditorTabOpenMode, initialLine?: number) => void;
+  viewFilePath: (
+    path: string,
+    openMode?: EditorTabOpenMode,
+    initialLine?: number,
+    fileAccessScope?: ProjectFileAccessScope,
+  ) => void;
   diffFilePath: (path: string, originalContent?: string, content?: string) => void;
   openWorkspaceFileDiff: (
     group: GitResourceGroupType,
@@ -244,7 +253,8 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 
   // ---- IO callbacks ----
   const readEditorFileContent = useCallback(
-    (path: string, maxBytes?: number) => readFileContent(path, maxBytes),
+    (path: string, maxBytes?: number, scope?: ProjectFileAccessScope) =>
+      readFileContent(path, maxBytes, scope),
     [readFileContent],
   );
   const readEditorOriginalContent = useCallback(
@@ -294,6 +304,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
       preserveDrawer = false,
       openMode: EditorTabOpenMode = "permanent",
       initialLine?: number,
+      fileAccessScope?: ProjectFileAccessScope,
     ) => {
       // updater 纯化：StrictMode 双调用下，updater 内 crypto.randomUUID/嵌套
       // setState 会产生两个不同 id → activeTabId 与 editorTabs 不一致 → 首次空白。
@@ -312,6 +323,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
         label,
         preserveDrawer,
         ...(initialLine !== undefined ? { initialLine } : {}),
+        fileAccessScope,
         lastAccess: ++editorTabAccessSequenceRef.current,
       };
       const strategy =
@@ -331,6 +343,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
               label,
               preserveDrawer,
               ...(initialLine !== undefined ? { initialLine } : {}),
+              fileAccessScope,
               lastAccess: candidate.lastAccess,
             }
           : tab,
@@ -421,6 +434,10 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
         path,
         activeAgent?.cwd ?? activeProject?.path,
       );
+      if (!resolvedPath) {
+        showToast(t("app.fileLinkCannotResolve", { path }));
+        return;
+      }
       void openFile(resolvedPath).catch((error) => {
         showToast(
           t("app.openFileFailed", {
@@ -433,7 +450,12 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
   );
 
   const viewFilePath = useCallback(
-    (path: string, openMode: EditorTabOpenMode = "preview", initialLine?: number) => {
+    (
+      path: string,
+      openMode: EditorTabOpenMode = "preview",
+      initialLine?: number,
+      fileAccessScope?: ProjectFileAccessScope,
+    ) => {
       // 只清 Git Diff，保留已有文件 tab——否则预览/多 tab 无法成立
       dismissGitDiffOnly();
       openEditorTab(
@@ -447,6 +469,7 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
         false,
         openMode,
         initialLine,
+        fileAccessScope,
       );
       const mode = contentOpenModeRef.current;
       editorModeRef.current = mode;

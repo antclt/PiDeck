@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import type { VisionBridgeConfig, VisionBridgeState } from "../../../../../shared/types";
+import { visionModelMissing } from "../../../utils/visionModelMissing";
 import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { showNotice } from "../../../utils/notice";
@@ -68,9 +69,15 @@ export function useVisionBridgeDraft() {
 		setNotice(null);
 	}, []);
 
-	/** 保存草稿到 pi-deck-vision.json；成功清脏标记并弹 toast，失败保留脏标记（头部按钮可重试）。 */
+	/** 保存草稿到 pi-deck-vision.json；成功清脏标记并弹 toast，失败保留脏标记（头部按钮可重试）。
+	 *  开启状态未选模型属无效配置：不发起 IPC，就近提示后拒绝（与主进程白名单校验语义一致，
+	 *  但把错误从「保存失败」升级为明确的「需要先选模型」，并避免无意义的写盘尝试）。 */
 	const save = useCallback(async (): Promise<boolean> => {
 		if (!draft) return false;
+		if (visionModelMissing(draft)) {
+			setNotice(t("settings.vision.modelRequired"));
+			return false;
+		}
 		setSaving(true);
 		setNotice(null);
 		try {
@@ -97,5 +104,7 @@ export function useVisionBridgeDraft() {
 		setNotice(null);
 	}, [state]);
 
-	return { draft, loading, saving, dirty, notice, configDir: state?.configDir ?? "", updateDraft, save, reset };
+	// 开启状态未选模型：保存按钮禁用（引导先选模型），save() 亦前置拦截
+	const modelMissing = visionModelMissing(draft);
+	return { draft, loading, saving, dirty, modelMissing, notice, configDir: state?.configDir ?? "", updateDraft, save, reset };
 }

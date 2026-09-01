@@ -2,7 +2,9 @@ import { useRef, type ReactNode } from "react";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { ComposerArea } from "./ComposerArea";
 import { QueuedPromptPanel } from "./ComposerPanels";
+import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
+import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
 import { LogoMark } from "./SurfaceParts";
 
@@ -35,12 +37,10 @@ export function SessionStartSurface(props: {
     <div className="session-start-surface flex min-h-full w-full flex-col items-center gap-8 bg-transparent px-6 pb-10 pt-[18vh] [--font-size-input:15.5px] [--line-height-input:25px]">
       <LogoMark size={72} />
       {props.projectSwitcher}
-      {/* 复用会话页底部输入框组件：defaultHeight 起步高度 150px（先 300 太大改 100 又太小，
-          取中间值），底部栏（模型/思考/模式/安全级别/git）与发送按钮全保留 */}
+      {/* 复用会话页底部输入框组件：高度随内容撑开，底部栏（模型/思考/模式/安全级别/git）与发送按钮全保留 */}
       <div className="w-full max-w-[980px]">
         <ComposerArea
           sessionId={props.sessionId}
-          defaultHeight={150}
           gitInfo={services.gitInfo}
           enqueue={services.enqueueSessionPrompt}
           ensureSessionId={services.ensureSessionId}
@@ -48,6 +48,8 @@ export function SessionStartSurface(props: {
           widgets={
             <>
               <SessionTodoStrip sessionId={props.sessionId} />
+              <SessionFilesStrip sessionId={props.sessionId} />
+              <SessionSubagentsStrip sessionId={props.sessionId} />
               <SessionGoalStrip sessionId={props.sessionId} />
             </>
           }

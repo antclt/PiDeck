@@ -1,6 +1,6 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BarChart3, Brain, Check, ChevronDown, ChevronRight, Coins, Copy, ExternalLink, Plus, RotateCcw, SquarePen, Trash2, X } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronRight, Coins, Copy, ExternalLink, Plus, RotateCcw, SquarePen, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import type { ModelItem, ModelsFile } from "./configTypes";
@@ -31,6 +31,7 @@ import { applyModelPatches, computeModelSpecPatches } from "../utils/modelSpecAu
 import type { FetchedModel } from "../../../shared/types/fetchedModel";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
 import { ProviderUsageRow } from "../components/app/ProviderUsageInline";
+import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { ProviderUsageDetails } from "../components/app/ProviderUsageDetails";
 import { isValidProviderName } from "../../../shared/providerName";
 
@@ -486,10 +487,6 @@ export function ModelsTab(props: {
 									) : (
 										<span className="text-control font-semibold text-text-primary">{name}</span>
 									)}
-									{/* 模型数量：低调文本跟在名称右侧（替代旧胶囊），用量在最右侧 */}
-									<span className="flex-none text-caption text-text-tertiary">
-										{t("config.count.models", { count: provider.models.length })}
-									</span>
 								</div>
 
 								<div className="flex items-center gap-1">
@@ -529,18 +526,11 @@ export function ModelsTab(props: {
 										direction="pi-to-dsh"
 										provider={name}
 									/>
-									{/* 用量查询配置（cc-switch 同款：柱状图图标放在卡片头部图标组，不在用量行里单列） */}
-									<Button variant="ghost" size="icon-sm" className="size-7"
-										onClick={(e) => {
-											e.stopPropagation();
-											props.onOpenUsageProbeDialog(name);
-										}}
-										title={t("config.usageProbe.entry")}
-										aria-label={t("config.usageProbe.entry")}
-										data-testid="provider-usage-configure-icon"
-									>
-										<BarChart3 size={14} />
-									</Button>
+									{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；其余可配通用/New API 模板） */}
+									<UsageQueryEntryButton
+										provider={name}
+										onOpen={() => props.onOpenUsageProbeDialog(name)}
+									/>
 									<Button variant="ghost" size="icon-sm" className="size-7"
 										onClick={(e) => {
 											e.stopPropagation();
@@ -1079,8 +1069,8 @@ export function ModelsTab(props: {
 																	: undefined,
 																)
 														}
-														// 数字输入框不能填写 200k 这类缩写，placeholder 使用真实可保存的 token 数值。
-														placeholder="1000000"
+														// 未匹配到目录时保持空（不展示 1000000 这类暗示值，避免用户误以为已匹配，
+														// 实际 Pi 只会按自身 128k 回退）。留空 = 交给 Pi 默认，语义与保存结果一致。
 														className="h-8 min-w-0"
 													/>
 												</TableCell>
@@ -1098,8 +1088,7 @@ export function ModelsTab(props: {
 																	: undefined,
 																)
 														}
-														// 与 contextWindow 一样保持纯数字，避免提示值看起来能输入但实际被 number 控件拒绝。
-														placeholder="128000"
+														// 与 contextWindow 一样保持纯数字，未匹配时不展示 128000 暗示值。
 														className="h-8 min-w-0"
 													/>
 												</TableCell>
@@ -1281,8 +1270,11 @@ export function ModelsTab(props: {
 									</div>
 								</div>
 							)}
-							{/* 用量行（cc-switch 卡片右下角）：有成功结果时显示用量 + 刷新按钮；没有成功配对结果时不渲染整行 */}
-							<ProviderUsageRow provider={name} />
+							{/* 用量行（cc-switch 卡片右下角）：左侧模型数量常驻，右侧有用量时显示用量 + 刷新按钮 */}
+							<ProviderUsageRow
+								provider={name}
+								leading={t("config.count.models", { count: provider.models.length })}
+							/>
 						</div>
 					);
 				})}

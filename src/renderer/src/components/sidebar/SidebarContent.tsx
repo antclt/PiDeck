@@ -36,6 +36,8 @@ export type SidebarActions = {
     add: () => Promise<void>;
     select: (projectId: string) => void;
     refresh: (projectId: string) => Promise<void>;
+    /** 重扫所有项目目录的存在性并刷新侧栏清单。 */
+    refreshAll: () => Promise<void>;
     reorder: (sourceProjectId: string, targetProjectId: string) => Promise<void>;
     reveal: (project: Project) => Promise<void>;
     openWithEditor: (project: Project) => void;
@@ -75,10 +77,15 @@ export type SidebarActions = {
     unarchive: (session: SessionSummary, projectId?: string) => Promise<void>;
     /** 列出已归档会话（恢复 UI 用；带原始路径，弹窗按项目归属过滤） */
     listArchived: () => Promise<ArchivedPiSession[]>;
+    /** 永久删除已归档会话（pi 文件归档；移入回收站并移出索引） */
+    deleteArchived: (archivedPath: string) => Promise<void>;
     /** 恢复 DSH 归档会话（host 目录移回 sessions 树并重建 catalog 记录） */
     unarchiveDsh: (dshSessionId: string, projectId?: string) => Promise<void>;
     /** 列出 DSH 归档会话（会话管理弹窗归档视图用；含标题） */
-    listArchivedDsh: () => Promise<ArchivedDshSession[]>;  };
+    listArchivedDsh: () => Promise<ArchivedDshSession[]>;
+    /** 永久删除已归档 DSH 会话（host 目录移入回收站） */
+    deleteArchivedDsh: (dshSessionId: string) => Promise<void>;
+  };
   agents: {
     rename: (agent: AgentTab) => void;
     export: (agent: AgentTab) => Promise<void>;
@@ -112,8 +119,8 @@ export type SidebarContentProps = {
   creatingWorktree?: boolean;
   isLanWeb?: boolean;
   chrome?: ReactNode;
-  /** 「新建任务」：打开初始引导页（居中输入框 + 项目下拉切切换），由 App 提供。 */
-  onOpenNewTask?: () => void;
+  /** 「新建会话」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
+  onOpenNewSession?: () => void;
   onOpenSettings?: () => void;
   onOpenFeedback?: () => void;
   onOpenHomepage?: () => void;
@@ -129,6 +136,10 @@ export function SidebarContent(props: SidebarContentProps) {
   const hasPendingUpdate = useAtomValue(pendingAppUpdateAtom) || useAtomValue(pendingPiUpdateAtom);
   const menuProject = menu?.kind === "project"
     ? controller.catalog.projects.find((project) => project.id === menu.projectId)
+    : undefined;
+  // 子工作区的「⋯」需要复用项目菜单，但删除必须回到根项目的 Git worktree 流程。
+  const menuProjectWorktreeParent = menuProject?.worktreeParentId
+    ? controller.catalog.projects.find((project) => project.id === menuProject.worktreeParentId)
     : undefined;
   const menuAgent = menu?.kind === "agent"
     ? controller.catalog.agents.find((agent) => agent.id === menu.agentId)
@@ -161,7 +172,7 @@ export function SidebarContent(props: SidebarContentProps) {
   // 顶部「搜索」菜单项控制 MorphingSearch 命令面板的展开状态。
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // 全局快捷键：Ctrl+N 新建任务（打开引导页）、Ctrl+F 搜索（打开命令面板）。
+  // 全局快捷键：Ctrl+N 新建会话（打开引导页）、Ctrl+F 搜索（打开命令面板）。
   // 与界面上的 kbd 提示保持一致；输入框/内容可编辑区域聚焦时跳过，避免干扰打字。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -177,7 +188,7 @@ export function SidebarContent(props: SidebarContentProps) {
       const key = event.key.toLowerCase();
       if (key === "n") {
         event.preventDefault();
-        props.onOpenNewTask?.();
+        props.onOpenNewSession?.();
       } else if (key === "f") {
         event.preventDefault();
         setSearchOpen(true);
@@ -185,7 +196,7 @@ export function SidebarContent(props: SidebarContentProps) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [props.onOpenNewTask]);
+  }, [props.onOpenNewSession]);
   // 会话代理设置弹框的打开目标会话 id（null = 关闭）
   const [proxyDialogSessionId, setProxyDialogSessionId] = useState<string | null>(null);
   const menuSessionRecord = menu?.kind === "session"
@@ -244,20 +255,20 @@ export function SidebarContent(props: SidebarContentProps) {
       {/* 品牌区提到 body 外：贴侧栏顶边，不被 sidebar-body 的 px/py 顶开（logo 怼左上）。 */}
       {props.chrome}
       <div className="sidebar-body flex min-h-0 flex-1 flex-col gap-2 px-2 pt-2 pb-1">
-        {/* 顶部两个平铺操作：「新建任务」+「搜索」（无下拉、无外边框）。
-            新建任务 → 打开初始引导页（居中输入框 + 项目下拉切换后可直接对话）；
+        {/* 顶部两个平铺操作：「新建会话」+「搜索」（无下拉、无外边框）。
+            新建会话 → 打开初始引导页（居中输入框 + 项目下拉切换后可直接对话）；
             搜索 → 打开 MorphingSearch 命令面板。把搜索从整行输入框收敛成单个动作项，
             消除与下方胶囊分段的样式重复。底部细分割线与下方分组区分，避免与分段栏粘连。 */}
         <div className="flex shrink-0 flex-col gap-0.5 border-b border-border/40 pt-1 pb-2">
           <button
             type="button"
             className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60"
-            aria-label={t("app.newTask")}
-            title={t("app.newTask")}
-            onClick={() => props.onOpenNewTask?.()}
+            aria-label={t("app.newSession")}
+            title={t("app.newSession")}
+            onClick={() => props.onOpenNewSession?.()}
           >
             <CirclePlus className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate font-medium">{t("app.newTask")}</span>
+            <span className="min-w-0 flex-1 truncate font-medium">{t("app.newSession")}</span>
             {/* 快捷键默认隐藏，行 hover 时才淡入（无边框，弱化到只剩文字），避免常驻视觉噪音 */}
             <kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">Ctrl+N</kbd>
           </button>
@@ -367,7 +378,8 @@ export function SidebarContent(props: SidebarContentProps) {
           <Dock size={32} className="w-full justify-between">
             <DockItem>
               <div className="relative size-full">
-                <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("settings.title")} aria-label={t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
+                {/* 有可用更新时 title 换成带说明的文案，避免用户把角标误认成别的状态（如 dsh 未安装） */}
+                <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
                 {/* 更新角标：PiDeck 或 Pi CLI 有可提示更新时在设置按钮右上角显示圆点 */}
                 {hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />}
               </div>
@@ -413,6 +425,13 @@ export function SidebarContent(props: SidebarContentProps) {
           onToggleWorktree={() => { void actions.projects.toggleWorktree(menuProject); controller.closeMenu(); }}
           onRefreshProject={() => { void actions.projects.refresh(menuProject.id); controller.closeMenu(); }}
           onCopyProjectPath={() => { void actions.projects.copyPath(menuProject); controller.closeMenu(); }}
+          onRemoveWorktree={menuProjectWorktreeParent ? () => {
+            void actions.worktrees.remove(menuProjectWorktreeParent.id, {
+              path: menuProject.path,
+              branch: menuProject.name,
+            }, menuProject);
+            controller.closeMenu();
+          } : undefined}
           onRemoveProject={() => { void actions.projects.remove(menuProject); controller.closeMenu(); }}
         />
       )}
@@ -561,8 +580,10 @@ export function SidebarContent(props: SidebarContentProps) {
           onArchive={(sessions) => Promise.all(sessions.map((session) => actions.sessions.archive(managerProject.id, session))).then(controller.closeSessionManager)}
           onUnarchive={(archived) => actions.sessions.unarchive(archived, managerProject.id)}
           listArchived={actions.sessions.listArchived}
+          deleteArchived={(archivedPath) => actions.sessions.deleteArchived(archivedPath)}
           onUnarchiveDsh={(dshSessionId) => actions.sessions.unarchiveDsh(dshSessionId, managerProject.id)}
           listArchivedDsh={actions.sessions.listArchivedDsh}
+          deleteArchivedDsh={(dshSessionId) => actions.sessions.deleteArchivedDsh(dshSessionId)}
         />
       )}
       {controller.worktreeCreateProjectId && (

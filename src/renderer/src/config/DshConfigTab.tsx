@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAtomValue } from "jotai";
 import {
 ArchiveRestore,
 ChevronDown,
@@ -30,6 +31,8 @@ import { DSH_PERMISSION_PRESETS } from "../components/session/DshPermissionMenu"
 import { CodeMirrorEditor } from "../components/app/CodeMirrorEditor";
 import { useSaveRegistry } from "../hooks/useSaveRegistry";
 import { DshSchemaForm, type DshNamespaceView } from "./DshSchemaForm";
+import { DshRuntimeSection } from "./DshRuntimeSection";
+import { dshRuntimeStatusAtom } from "../atoms/dsh-atoms";
 import { isDshPluginNamespace, dshPluginNamespaceTitleKey, dshPluginNamespaceDescriptionKey } from "./dshPluginNamespaces";
 import { DshPluginSection, PluginInventoryView } from "./DshPluginSection";
 import { DeepseekRouteCard, PiAiProvidersCard } from "./DshProviderCards";
@@ -127,6 +130,9 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 	}>>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
+	/** runtime 安装态（全局同步）：未安装时跳过配置加载，概览页由 DshRuntimeSection 承担安装引导。 */
+	const dshRuntimeStatus = useAtomValue(dshRuntimeStatusAtom);
+	const runtimeInstalled = dshRuntimeStatus.state === "installed";
 	const [activeTab, setActiveTab] = useState(loadDshLastTab);
 	/** 插件 tab 内部子页（对齐 dsh-web：插件配置 / 插件列表）。 */
 	const [pluginPane, setPluginPane] = useState<"config" | "list">(loadDshLastPluginPane);
@@ -202,6 +208,17 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 	const load = useCallback(async () => {
 		setLoading(true);
 		try {
+			// runtime 未安装时 host 起不来，describe 必然失败：跳过配置加载，
+			// 概览页由 DshRuntimeSection 展示安装引导；装好后 status-changed 触发重载。
+			if (!runtimeInstalled) {
+				setNamespaces([]);
+				setWritable(false);
+				setHasDocument(false);
+				setModelCatalog({});
+				setProviderDirectory([]);
+				setError(null);
+				return [];
+			}
 			const settingsResult = await desktopApi.sessions.describeDshSettings();
 			setNamespaces(settingsResult.namespaces);
 			setWritable(settingsResult.writable);
@@ -251,7 +268,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 		} finally {
 			setLoading(false);
 		}
-	}, []);
+	}, [runtimeInstalled]);
 
 	/** 状态（host 是否启动/目录）独立加载：不依赖 settings.describe，
 	 * host boot 失败时概览页仍能显示当前目录与重启入口，而不是整页空白。 */
@@ -280,6 +297,12 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 		void load();
 		void loadStatus();
 	}, [load, loadStatus]);
+
+	// runtime 未安装时配置分区（models/presets/plugins 等）没有内容，
+	// 把导航钳制到概览页，保证用户一进来看到的就是安装引导。
+	useEffect(() => {
+		if (!runtimeInstalled && activeTab !== "overview") selectTab("overview");
+	}, [runtimeInstalled, activeTab, selectTab]);
 
 	useEffect(() => {
 		const onMigrated = () => {
@@ -358,7 +381,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
 				{loading && (
 					<div className="flex min-h-32 items-center justify-center gap-2 text-control text-muted-foreground">
-						<LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+						<LoaderCircle className="size-4 animate-pideck-spin" aria-hidden="true" />
 						{t("common.loading")}
 					</div>
 				)}
@@ -407,6 +430,7 @@ export const DshConfigTab = forwardRef<DshConfigTabHandle, {
 														ops={{ credentials, setKey: setDshKey, unsetKey: unsetDshKey }}
 														catalog={modelCatalog["deepseek-official"]}
 														onSave={(patch) => saveNamespace(ns.ns, patch)}
+														onRefresh={load}
 														sectionApi={sectionApi}
 															instanceKey={`dsh:models:${ns.ns}`}
 														onMigrated={() => { void load(); }}
@@ -510,6 +534,8 @@ function Overview(props: {
 	const { status } = props;
 	const [picking, setPicking] = useState(false);
 	const [switching, setSwitching] = useState(false);
+	/** runtime 安装态（全局同步）：概览页顶部 runtime 管理区块（未装→安装引导，已装→版本/目录/卸载）。 */
+	const runtimeStatus = useAtomValue(dshRuntimeStatusAtom);
 	/** G14：归档区 DSH 会话清单（目录已移入 .pideck-archive 的 host 会话；恢复入口用，含标题）。 */
 	const [archived, setArchived] = useState<ArchivedDshSession[]>([]);
 	/** G14：正在恢复的 dshSessionId（按钮转圈防重复点击）。 */
@@ -642,6 +668,8 @@ function Overview(props: {
 
 	return (
 		<div className="grid gap-4 p-4">
+			{/* DSH 后端运行时管理区块：未装→安装引导，已装→版本/目录/卸载/导入。 */}
+			<DshRuntimeSection status={runtimeStatus} onOpenFolder={props.onOpenFolder} />
 			<section className="grid gap-2">
 				<h3 className="flex items-center gap-2 text-caption font-semibold text-muted-foreground">
 					<DshLogo className="size-4" />
@@ -665,7 +693,7 @@ function Overview(props: {
 						disabled={switching}
 						onClick={() => void restartHost()}
 					>
-						{switching ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
+						{switching ? <LoaderCircle className="size-3.5 animate-pideck-spin" aria-hidden="true" /> : <RefreshCw className="size-3.5" aria-hidden="true" />}
 						{t("config.dsh.restartHost")}
 					</Button>
 				</div>
@@ -693,7 +721,7 @@ function Overview(props: {
 						disabled={picking || switching}
 						onClick={() => void pickHomeDir()}
 					>
-						{picking ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <FolderOpen className="size-3.5" aria-hidden="true" />}
+						{picking ? <LoaderCircle className="size-3.5 animate-pideck-spin" aria-hidden="true" /> : <FolderOpen className="size-3.5" aria-hidden="true" />}
 						{t("config.dsh.changeHome")}
 					</Button>
 					<Button
@@ -735,7 +763,7 @@ function Overview(props: {
 									onClick={() => void restoreArchived(item.dshSessionId)}
 								>
 									{restoring === item.dshSessionId
-										? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+										? <LoaderCircle className="size-3.5 animate-pideck-spin" aria-hidden="true" />
 										: <ArchiveRestore className="size-3.5" aria-hidden="true" />}
 									{t("config.dsh.restore")}
 								</Button>
@@ -900,7 +928,7 @@ function PresetsTab(props: {
 	if (loading) {
 		return (
 			<div className="flex min-h-32 items-center justify-center gap-2 text-control text-muted-foreground">
-				<LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+				<LoaderCircle className="size-4 animate-pideck-spin" aria-hidden="true" />
 				{t("common.loading")}
 			</div>
 		);

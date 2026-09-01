@@ -1,3 +1,4 @@
+import type { ProjectFileAccessScope } from "../../../../shared/types";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { ArrowLeft, Maximize, Minimize2, Rows2, SquareSplitHorizontal, X, Eye, FileCode } from "lucide-react";
@@ -40,7 +41,13 @@ export function FileDiffViewer(props: {
 	onCloseTab?: (id: string) => void;
 	/** 双击预览 Tab → 常驻 */
 	onPromotePreviewTab?: (id: string) => void;
-	readContent: (path: string) => Promise<string>;
+	readContent: (
+		path: string,
+		maxBytes?: number,
+		scope?: ProjectFileAccessScope,
+	) => Promise<string>;
+	/** 项目文件读取授权；存在时 read/stat/base64 都由主进程限制到该项目根。 */
+	fileAccessScope?: ProjectFileAccessScope;
 	/** 从会话消息 meta 中提取的工具执行前原始内容，优先于 Git HEAD。 */
 	originalContent?: string;
 	/** Session-recorded modified content, preferred over disk read for historical sessions. */
@@ -126,7 +133,7 @@ export function FileDiffViewer(props: {
 				// 修改后内容优先使用会话记录（modifiedContent），历史会话恢复时磁盘可能已变化。
 				const contentPromise = props.modifiedContent !== undefined
 					? Promise.resolve(props.modifiedContent)
-					: props.readContent(props.filePath);
+					: props.readContent(props.filePath, undefined, props.fileAccessScope);
 				const originalPromise =
 					isDiffMode && props.originalContent !== undefined
 						? Promise.resolve(props.originalContent)
@@ -165,7 +172,10 @@ export function FileDiffViewer(props: {
 						/^([A-Za-z]:[\\/]|\/)/.test(props.filePath)
 					) {
 						try {
-							const [exists] = await window.piDesktop.files.pathsExist([props.filePath]);
+							const [exists] = await window.piDesktop.files.pathsExist(
+								[props.filePath],
+								props.fileAccessScope,
+							);
 							if (!exists && !cancelled) {
 								setError(t("editor.fileNotFound", { path: props.filePath }));
 							}
@@ -191,7 +201,11 @@ export function FileDiffViewer(props: {
 				return;
 			}
 			try {
-				const base64 = await readBinary(props.filePath);
+				const base64 = await readBinary(
+					props.filePath,
+					undefined,
+					props.fileAccessScope,
+				);
 				if (isCancelled || !base64) {
 					if (!isCancelled) setError(t("editor.binaryFileNotSupported", { ext }));
 					return;
@@ -211,7 +225,7 @@ export function FileDiffViewer(props: {
 	// readContent/readOriginalContent 是稳定的 API 回调（上层已 useCallback），
 	// 不参与 effect deps，避免父组件因其他状态变化重渲染时反复加载文件导致编辑器重置到顶部。
 	// 两侧缓存内容都需要监听：同一路径可在多个历史提交 Diff tab 之间切换。
-	}, [props.filePath, props.originalContent, props.modifiedContent, isDiffMode]);
+	}, [props.filePath, props.activeTabId, props.originalContent, props.modifiedContent, props.fileAccessScope?.projectId, isDiffMode]);
 
 	const handleClose = useCallback(() => {
 		props.onClose();

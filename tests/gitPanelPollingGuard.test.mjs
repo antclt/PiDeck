@@ -90,3 +90,29 @@ test("手动刷新按钮保留（用户 git init 后可立即手动恢复）", (
   // 手动刷新入口仍在（非 silent 刷新）
   assert.match(source, /void refresh\(\);/);
 });
+
+test("git init 后经 ref 读取最新作用域的 refresh（旧闭包会被作用域守卫丢弃）", () => {
+  // refresh 每轮渲染写入 ref：props.gitInit 内部 refreshRepos 会让宿主重渲染，
+  // repoScopeKey 可能从 projectRoot 切到 main 侧 resolve 出的 repo.path；
+  // 若 init 按钮闭包直接调 refresh，其 repoScopeKey === repoScopeKeyRef.current
+  // 守卫会判失败，结果被丢弃且 loading 卡死。
+  assert.match(source, /const refreshRef = useRef\(refresh\);\s*refreshRef\.current = refresh;/);
+  assert.ok((source.match(/void refreshRef\.current\(\);/g) ?? []).length >= 1, "init 完成路径应经 refreshRef 拉最新状态");
+});
+
+test("两个 git init 入口统一走 doInitRepo，不再从旧闭包直接调 refresh", () => {
+  // 分支栏 / 空状态两个 init 按钮共用同一实现，避免两处修复不同步
+  const initClicks = source.match(/onClick=\{\(\) => void doInitRepo\(\)\}/g) ?? [];
+  assert.equal(initClicks.length, 2, "分支栏 + 空状态两个 init 按钮都应走 doInitRepo");
+  // init 的 IPC 调用收敛到 doInitRepo 一处
+  assert.equal(
+    (source.match(/await props\.gitInit\(props\.projectId\);/g) ?? []).length,
+    1,
+    "gitInit IPC 调用应只在 doInitRepo 内出现一次",
+  );
+  // 旧写法（init 完成后直接调闭包 refresh）已不存在
+  assert.doesNotMatch(
+    source,
+    /await props\.gitInit\(props\.projectId\);\s*setNotAGitRepo\(false\);\s*void refresh\(\);/,
+  );
+});

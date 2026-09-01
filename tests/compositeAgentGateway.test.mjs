@@ -19,7 +19,7 @@ function makeFakeGateway(backend, { supportsOptional = true } = {}) {
 			"compact",
 			"fork",
 			"getForkMessages",
-			...(supportsOptional ? ["editMessage", "deleteMessage", "getCommands", "exportHtml"] : []),
+			...(supportsOptional ? ["editMessage", "deleteMessage", "getCommands", "exportHtml", "rewind"] : []),
 		]),
 		list() {
 			return [...tabs];
@@ -118,6 +118,17 @@ function makeFakeGateway(backend, { supportsOptional = true } = {}) {
 				async deleteMessage(agentId, messageId) {
 					calls.push(["deleteMessage", backend, agentId, messageId]);
 				},
+				async listCheckpoints(agentId) {
+					calls.push(["listCheckpoints", backend, agentId]);
+					return [];
+				},
+				async getCheckpointDiff(agentId, checkpointId) {
+					calls.push(["getCheckpointDiff", backend, agentId, checkpointId]);
+					return "diff";
+				},
+				async restoreCheckpoint(agentId, checkpointId, scope) {
+					calls.push(["restoreCheckpoint", backend, agentId, checkpointId, scope]);
+				},
 				async mutatePersistedSessionMessage(sessionPath, messageId, operation, extra) {
 					calls.push(["mutatePersistedSessionMessage", backend, sessionPath, messageId, operation, extra]);
 					return operation === "resend" ? { text: "hello" } : undefined;
@@ -181,18 +192,26 @@ test("capabilities 取所有子网关并集（含可选能力项）", async () =
 	const { composite } = makeComposite();
 	assert.deepEqual(
 		[...composite.capabilities].sort(),
-		["compact", "deleteMessage", "editMessage", "exportHtml", "fork", "getCommands", "getForkMessages"].sort(),
+		["compact", "deleteMessage", "editMessage", "exportHtml", "fork", "getCommands", "getForkMessages", "rewind"].sort(),
 	);
 });
 
-test("可选能力缺失：getCommands/exportHtml/editMessage/deleteMessage 抛错且不落到子网关", async () => {
+test("可选能力缺失：getCommands/exportHtml/editMessage/deleteMessage/rewind 抛错且不落到子网关", async () => {
 	const { dsh, composite } = makeComposite();
 	const tab = await composite.create({ projectId: "p1", backend: "dsh" });
 	await assert.rejects(composite.getCommands(tab.id), /does not support getCommands/);
 	await assert.rejects(composite.exportHtml(tab.id), /does not support exportHtml/);
 	await assert.rejects(composite.editMessage(tab.id, "m1", "x"), /does not support editMessage/);
 	await assert.rejects(composite.deleteMessage(tab.id, "m1"), /does not support deleteMessage/);
-	assert.equal(dsh.calls.some(([name]) => ["getCommands", "exportHtml", "editMessage", "deleteMessage"].includes(name)), false);
+	await assert.rejects(composite.listCheckpoints(tab.id), /does not support listCheckpoints/);
+	await assert.rejects(composite.getCheckpointDiff(tab.id, "cp1"), /does not support getCheckpointDiff/);
+	await assert.rejects(composite.restoreCheckpoint(tab.id, "cp1", "files"), /does not support restoreCheckpoint/);
+	assert.equal(
+		dsh.calls.some(([name]) =>
+			["getCommands", "exportHtml", "editMessage", "deleteMessage", "listCheckpoints", "getCheckpointDiff", "restoreCheckpoint"].includes(name),
+		),
+		false,
+	);
 });
 
 test("可选能力存在：转发到所属网关并透传参数", async () => {
@@ -202,10 +221,16 @@ test("可选能力存在：转发到所属网关并透传参数", async () => {
 	await composite.editMessage(tab.id, "m1", "新文本");
 	await composite.deleteMessage(tab.id, "m1");
 	await composite.exportHtml(tab.id);
+	await composite.listCheckpoints(tab.id);
+	await composite.getCheckpointDiff(tab.id, "cp-1");
+	await composite.restoreCheckpoint(tab.id, "cp-1", "files");
 	assert.deepEqual(pi.calls.filter(([name]) => name === "getCommands").at(-1), ["getCommands", "pi", tab.id]);
 	assert.deepEqual(pi.calls.filter(([name]) => name === "editMessage").at(-1), ["editMessage", "pi", tab.id, "m1", "新文本"]);
 	assert.deepEqual(pi.calls.filter(([name]) => name === "deleteMessage").at(-1), ["deleteMessage", "pi", tab.id, "m1"]);
 	assert.deepEqual(pi.calls.filter(([name]) => name === "exportHtml").at(-1), ["exportHtml", "pi", tab.id]);
+	assert.deepEqual(pi.calls.filter(([name]) => name === "listCheckpoints").at(-1), ["listCheckpoints", "pi", tab.id]);
+	assert.deepEqual(pi.calls.filter(([name]) => name === "getCheckpointDiff").at(-1), ["getCheckpointDiff", "pi", tab.id, "cp-1"]);
+	assert.deepEqual(pi.calls.filter(([name]) => name === "restoreCheckpoint").at(-1), ["restoreCheckpoint", "pi", tab.id, "cp-1", "files"]);
 });
 
 test("无 runtime 的 JSONL 改写按 pi 网关转发，不落到 DSH", async () => {

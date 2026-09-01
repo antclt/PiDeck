@@ -121,7 +121,7 @@ export function EnvironmentDialog(props: {
 
 					{props.checking && (
 						<div className="env-card env-loading-card">
-							<div className="loader" />
+							<div className="loader animate-pideck-spin" />
 							<span>{t("environment.checking")}</span>
 						</div>
 					)}
@@ -192,7 +192,7 @@ export function EnvironmentDialog(props: {
 
 								{props.npmChecking && (
 									<div className="env-install-loading">
-										<div className="loader" />
+										<div className="loader animate-pideck-spin" />
 										<span>{t("environment.checking")}</span>
 									</div>
 								)}
@@ -249,7 +249,7 @@ export function EnvironmentDialog(props: {
 										{/* 安装进行中：显示进度 */}
 										{props.installExecuting && (
 											<div className="env-install-progress">
-												<div className="loader" />
+												<div className="loader animate-pideck-spin" />
 												<span>{t("environment.installExecuting")}</span>
 											</div>
 										)}
@@ -435,7 +435,6 @@ export {
   ToolCard,
   ToolGroupCard,
   DiagnosticMessageCard,
-  AskQuestionCard,
   ThinkingBlock,
   RespondingIndicator,
   AssistantText,

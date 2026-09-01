@@ -1,10 +1,9 @@
-import { ChevronDown, ChevronRight, GitBranch, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Ellipsis, GitBranch, Plus } from "lucide-react";
 import type { AgentTab, Project, SessionRecord, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import { t } from "../../i18n";
 import type { SidebarActions } from "./SidebarContent";
 import { SessionTree } from "./SessionTree";
-import { NewSessionMenu } from "./NewSessionMenu";
 import { Button } from "../ui-shadcn/button";
 import { cn } from "../../lib/utils";
 import { mergeWorkspaceTreeRows, type WorkspaceTreeRow } from "./workspaceTreeModel";
@@ -12,25 +11,29 @@ import { mergeWorkspaceTreeRows, type WorkspaceTreeRow } from "./workspaceTreeMo
 // 主工作区是根项目展开后的首个导航项，字号需要与父项目保持一致；
 // 其他 worktree 只是该项目的分支入口，渲染时会覆写为较小的 text-control，避免子项抢占层级。
 const workspaceRowClass =
-  "workspace-tree-row group relative flex min-h-8 min-w-0 items-center gap-0.5 rounded-md p-0.5 text-body text-foreground transition-[background-color,border-color,box-shadow] duration-fast hover:bg-muted/60";
+  "workspace-tree-row relative flex min-h-8 min-w-0 items-center gap-0.5 rounded-md p-0.5 text-body text-foreground transition-[background-color,border-color,box-shadow] duration-fast hover:bg-muted/60";
 const workspaceSelectClass =
-  "flex min-h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-0 text-left text-body text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground";
+  "flex min-h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-0 text-left text-body text-muted-foreground transition-[color,background-color,padding-right] hover:bg-accent hover:text-accent-foreground disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground";
 const workspaceActionClass = "text-muted-foreground hover:bg-muted hover:text-foreground";
+const workspaceActionPaddingClass =
+  "group-hover/workspace-row:pr-[52px] group-focus-within/workspace-row:pr-[52px]";
 const workspaceSessionsClass = "min-w-0 basis-[calc(100%-24px)] ml-6 pl-2";
 
 /**
- * 操作按钮（+/匿名/删除）以 absolute 浮层呈现，必须锚定在「标题行」这一层：
- * 外层行容器还包着展开的会话列表（flex-wrap 换行），若直接对行容器 top-1/2 定位，
- * 按钮会跑到「标题 + 全部历史会话」整块的中心，压住历史会话行、挡住点击。
- * 窄侧栏（<256px）时按钮会盖住标题：行文本上 @max-[255px]:group-hover:pr-* 压出
- * 按钮宽度的右侧留白，文本截断让位但保持可见（淡出到透明会不可读，已弃用），
- * 与项目行/会话行同一套策略。主工作区行 2 按钮 52px，子工作区行 3 按钮 78px。
+ * 工作区标题操作与普通项目行保持同一呈现：两个等尺寸的 + / ⋯ 浮层按钮。
+ * 子工作区的标题行独立命名为 group，展开后的会话列表不会意外点亮标题操作。
  */
 function WorkspaceRowActions(props: {
   children: React.ReactNode;
+  menuOpen?: boolean;
 }) {
   return (
-    <div className="workspace-tree-actions pointer-events-none absolute top-1/2 right-0.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+    <div
+      className={cn(
+        "workspace-tree-actions pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover/workspace-row:pointer-events-auto group-hover/workspace-row:opacity-100 group-focus-within/workspace-row:pointer-events-auto group-focus-within/workspace-row:opacity-100",
+        props.menuOpen && "pointer-events-auto opacity-100",
+      )}
+    >
       {props.children}
     </div>
   );
@@ -55,11 +58,13 @@ export function WorktreeTree(props: {
   const mainSessionsKey = props.project.path;
   const mainCollapsed = props.controller.expandedWorktreePaths.has(mainSessionsKey);
   const mainRowId = `worktree-main-sessions-${props.project.id}`;
+  const mainActionsOpen = props.controller.menu?.kind === "project"
+    && props.controller.menu.projectId === props.project.id;
 
   return (
     <div className="workspace-tree min-w-0 py-1 pl-1">
       <section className="workspace-tree-main" aria-label={t("app.worktreeMainWorkspace")}>
-        <div className={workspaceRowClass}>
+        <div className={cn(workspaceRowClass, "group/workspace-row")}>
           <Button
             type="button"
             variant="ghost"
@@ -86,24 +91,53 @@ export function WorktreeTree(props: {
             title={t("app.worktreeMainWorkspace")}
           >
             <span className="worktree-main-branch-icon grid size-5 shrink-0 place-items-center text-muted-foreground"><GitBranch size={14} /></span>
-            <span className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-[52px] @max-[255px]:group-focus-within:pr-[52px]">
+            <span
+              className={cn(
+                "conversation-body min-w-0 flex-1 transition-[padding-right]",
+                workspaceActionPaddingClass,
+                mainActionsOpen && "pr-[52px]",
+              )}
+            >
               <span className="conversation-title flex min-w-0 items-center gap-1.5">
                 <strong className="min-w-0 truncate font-medium">{t("app.worktreeMainWorkspace")}</strong>
                 <span className="worktree-main-branch min-w-0 truncate text-control text-muted-foreground">{props.branch ?? t("app.worktreeBranchLoading")}</span>
               </span>
             </span>
           </Button>
-          {/* 新建入口放在工作区行上（hover 显现，与其他工作区行一致）：
-              根项目行在 worktree 模式下不再承担 +/匿名，避免入口藏得深。
-              主工作区的会话列表在行外（section 内），行容器高度只有标题行，锚定安全。 */}
-          <WorkspaceRowActions>
-            <NewSessionMenu
-              projectId={props.project.id}
-              actions={props.actions}
-              size={13}
-              buttonClassName={cn(workspaceActionClass, "grid size-6 place-items-center rounded-md")}
-              chevronClassName={cn(workspaceActionClass, "grid size-3.5 place-items-center rounded-md")}
-            />
+          {/* 工作区标题也复用项目栏的 + / ⋯ 操作；根项目行保留自己的原有入口。 */}
+          <WorkspaceRowActions
+            menuOpen={mainActionsOpen}
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={workspaceActionClass}
+              aria-label={t("app.newNormalSession")}
+              title={t("app.newNormalSession")}
+              onClick={() => void props.actions.sessions.createDraft(props.project.id)}
+            >
+              <Plus size={13} aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={workspaceActionClass}
+              aria-label={t("sidebar.moreActions")}
+              title={t("sidebar.moreActions")}
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                void props.controller.openMenu({
+                  kind: "project",
+                  projectId: props.project.id,
+                  x: rect.right,
+                  y: rect.bottom,
+                });
+              }}
+            >
+              <Ellipsis size={14} aria-hidden="true" />
+            </Button>
           </WorkspaceRowActions>
         </div>
         {/* Worktree 模式下主工作区是默认展开的第一项；根项目历史必须挂在这里，
@@ -142,7 +176,6 @@ export function WorktreeTree(props: {
           <WorkspaceTreeRowView
             key={row.key}
             row={row}
-            rootProject={props.project}
             controller={props.controller}
             actions={props.actions}
             currentSessionId={props.currentSessionId}
@@ -154,12 +187,11 @@ export function WorktreeTree(props: {
 }
 
 /**
- * 单个工作区行：选择、展开和破坏性操作拆成并列控件，避免嵌套 button/role=button
- * 造成 click 冒泡串线。只有真实 child project 才显示会话和删除/新建操作。
+ * 单个工作区行：选择和展开拆成并列控件，避免嵌套 button/role=button
+ * 造成 click 冒泡串线。只有真实 child project 才显示新建和更多操作。
  */
 function WorkspaceTreeRowView(props: {
   row: WorkspaceTreeRow;
-  rootProject: Project;
   controller: SidebarController;
   actions: SidebarActions;
   currentSessionId?: string;
@@ -168,13 +200,16 @@ function WorkspaceTreeRowView(props: {
   const childProject = row.project;
   const expanded = Boolean(childProject && props.controller.expandedWorktreePaths.has(row.path));
   const rowId = `worktree-sessions-${row.key.replace(/[^a-z0-9]+/gi, "-")}`;
+  const childActionsOpen = childProject !== undefined
+    && props.controller.menu?.kind === "project"
+    && props.controller.menu.projectId === childProject.id;
 
   return (
     // 工作区行是容器：选中态只落在叶子会话上，分支名不加底、不加字重区分。
     <div className={cn(workspaceRowClass, "flex-wrap text-muted-foreground")}>
       {/* 标题行单独成相对容器：会话列表（flex-wrap 换到下一行）留在外层，
           操作按钮 absolute 锚定本行，不会压到展开的历史会话上。 */}
-      <div className="workspace-tree-header relative flex min-w-0 flex-1 items-center gap-0.5">
+      <div className="workspace-tree-header group/workspace-row relative flex min-w-0 flex-1 items-center gap-0.5">
         <Button
           type="button"
           variant="ghost"
@@ -197,8 +232,9 @@ function WorkspaceTreeRowView(props: {
             workspaceSelectClass,
             // 子 worktree 是父项目下的分支入口，不应与父项目/主工作区争夺视觉层级。
             "text-control",
-            // 窄侧栏 hover 压出 3 按钮（78px）留白；transition-all 让压缩动画与配色过渡共存
-            "transition-all @max-[255px]:group-hover:pr-[78px] @max-[255px]:group-focus-within:pr-[78px]",
+            // 与会话行一样，右侧操作显现时通过 padding-right 动画压缩标题，不让文字落在按钮下。
+            workspaceActionPaddingClass,
+            childActionsOpen && "pr-[52px]",
           )}
           disabled={!childProject}
           onClick={() => childProject && props.actions.projects.select(childProject.id)}
@@ -221,27 +257,38 @@ function WorkspaceTreeRowView(props: {
         </button>
 
         {childProject && (
-          <WorkspaceRowActions>
-            <NewSessionMenu
-              projectId={childProject.id}
-              actions={props.actions}
-              size={13}
-              buttonClassName={cn(workspaceActionClass, "grid size-6 place-items-center rounded-md")}
-              chevronClassName={cn(workspaceActionClass, "grid size-3.5 place-items-center rounded-md")}
-            />
+          <WorkspaceRowActions
+            menuOpen={childActionsOpen}
+          >
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
-              className="text-muted-foreground hover:bg-danger-soft hover:text-danger"
-              title={t("menu.removeProject")}
-              aria-label={t("menu.removeProject")}
-              onClick={() => void props.actions.worktrees.remove(props.rootProject.id, {
-                path: row.path,
-                branch: row.branch,
-              }, childProject)}
+              className={workspaceActionClass}
+              aria-label={t("app.newNormalSession")}
+              title={t("app.newNormalSession")}
+              onClick={() => void props.actions.sessions.createDraft(childProject.id)}
             >
-              <Trash2 size={13} />
+              <Plus size={13} aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={workspaceActionClass}
+              aria-label={t("sidebar.moreActions")}
+              title={t("sidebar.moreActions")}
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                void props.controller.openMenu({
+                  kind: "project",
+                  projectId: childProject.id,
+                  x: rect.right,
+                  y: rect.bottom,
+                });
+              }}
+            >
+              <Ellipsis size={14} aria-hidden="true" />
             </Button>
           </WorkspaceRowActions>
         )}

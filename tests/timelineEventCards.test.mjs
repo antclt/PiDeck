@@ -14,7 +14,6 @@ const events = readFileSync(
 test("timeline event cards retain the SurfaceComponents public facade", () => {
   for (const name of [
     "DiagnosticMessageCard",
-    "AskQuestionCard",
     "ThinkingBlock",
     "RespondingIndicator",
   ]) {

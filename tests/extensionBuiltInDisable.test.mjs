@@ -71,6 +71,10 @@ function loadExtensionManager({ homeDir, runPiOutput = "", fsOverrides = {} } = 
 					],
 				};
 			}
+			// ExtensionManager 依赖 ../update/githubFeed 的 compareVersions；.ts 经 node 类型剥离可 require。
+			if (id === "../update/githubFeed") {
+				return require("../src/main/update/githubFeed.ts");
+			}
 			return require(id);
 		},
 	};

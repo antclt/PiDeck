@@ -176,7 +176,12 @@ export function parsePiListModels(stdout: string): AvailableModel[] {
 	return models;
 }
 
-/** 解析 pi 表格里的 token 数："1M"→1048576，"65.5K"→67109，"200K"→204800；解析失败返回 undefined。 */
+/** 解析 pi 表格里的 token 数："1M"→1000000，"65.5K"→65500，"200K"→200000；解析失败返回 undefined。
+ *
+ * 进制必须与 pi 的 formatTokenCount 对齐（1000 进制，见 pi dist/cli/list-models.js）：
+ * 十进制 round 数（1e6→"1M"、272000→"272K"、204800→"204.8K"）用 1000 进制可精确还原；
+ * 旧实现按 1024 解析会把 1e6 猜成 1048576（+4.9%，配置回写时把模型容量写超），
+ * 而真实值是二进制 1M（1048576）的模型按 1000 解析只低 4.6%，方向安全（提前压缩而非超限）。 */
 export function parseTokenSize(value: string): number | undefined {
 	const trimmed = value.trim();
 	if (!trimmed) return undefined;
@@ -185,8 +190,8 @@ export function parseTokenSize(value: string): number | undefined {
 	const num = Number(match[1]);
 	if (!Number.isFinite(num) || num <= 0) return undefined;
 	const unit = match[2]?.toLowerCase();
-	if (unit === "k") return Math.round(num * 1024);
-	if (unit === "m") return Math.round(num * 1024 * 1024);
+	if (unit === "k") return Math.round(num * 1000);
+	if (unit === "m") return Math.round(num * 1000 * 1000);
 	return Math.round(num);
 }
 

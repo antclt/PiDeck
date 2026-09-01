@@ -64,6 +64,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "language", tab: "common", itemKey: "settings.language" },
 	{ field: "sessionTabOpenMode", tab: "common", itemKey: "settings.sessionTabOpenMode" },
+	{ field: "autoSessionTitle", tab: "common", itemKey: "settings.autoSessionTitle" },
 	{ field: "sendShortcut", tab: "common", itemKey: "settings.inputShortcut" },
 	{ field: "defaultAgentBackend", tab: "common", itemKey: "settings.defaultAgentBackend" },
 	{ field: "busySendDelivery", tab: "common", itemKey: "settings.busySendDelivery" },
@@ -71,6 +72,9 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "workspaceContentOpenMode", tab: "common", itemKey: "settings.workspaceContentOpenMode" },
 	{ field: "expandInterimDuringStream", tab: "common", itemKey: "settings.expandInterimDuringStream" },
 	{ field: "collapsePrevRunsOnNewTurn", tab: "common", itemKey: "settings.collapsePrevRunsOnNewTurn" },
+	{ field: "idleAgentAutoRelease", tab: "common", itemKey: "settings.idleAgentAutoRelease" },
+	{ field: "idleAgentKeepCount", tab: "common", itemKey: "settings.idleAgentKeepCount" },
+	{ field: "idleAgentTimeoutMin", tab: "common", itemKey: "settings.idleAgentTimeoutMin" },
 	{ field: "enableNotifications", tab: "common", itemKey: "settings.enableNotifications" },
 	{ field: "askNotificationEnabled", tab: "common", itemKey: "settings.askNotification" },
 	{ field: "agentCountReminderEnabled", tab: "common", itemKey: "settings.agentCountReminder" },

@@ -85,6 +85,9 @@ import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnRe
 import { formatConfigUnsavedMessage, summarizeConfigUnsavedChanges, type ConfigUnsavedItem } from "./config/configUnsavedChangesSummary";
 import { DirtyMarker } from "./components/app/settings/SettingRows";
 import { isValidProviderName } from "../../shared/providerName";
+import { useAtomValue } from "jotai";
+import { dshRuntimeStatusAtom } from "./atoms";
+import { dshUiVisibilityFor } from "../../shared/types/dshRuntime";
 
 const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi })
 	.piDesktop;
@@ -240,6 +243,8 @@ type ConfigModalProps = {
 	focusConfigTab?: ConfigTab;
 	/** 深链：models 页要定位展开的供应商名。 */
 	focusProvider?: string;
+	/** 深链：打开时落在的后端分页（DSH 配置 / Pi 管理）；缺省保持上次位置。 */
+	focusBackendPane?: "dsh" | "pi";
 };
 
 /**
@@ -274,6 +279,8 @@ export type ConfigPaneProps = {
 	focusConfigTab?: ConfigTab;
 	/** 深链：models 页要定位展开的供应商名。 */
 	focusProvider?: string;
+	/** 深链：打开时落在的后端分页（DSH 配置 / Pi 管理）；缺省保持上次位置。 */
+	focusBackendPane?: "dsh" | "pi";
 	/**
 	 * 头部按钮状态上报（saving 禁用保存 / hasDirty 黄点 / unsaved 关闭确认清单）。
 	 * 外壳把这些 UI 细节呈现在自己的标题栏，因此 ConfigPane 需要把内部状态同步给外壳。
@@ -291,7 +298,7 @@ export type ConfigPaneProps = {
  * 不包错误边界——宿主 SettingsModal 的 ErrorBoundary 已兜底整个窗口。
  */
 export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
-	function ConfigPane({ onClose, onSaved, projectPath, focusConfigTab, focusProvider, onStateChange, onRequestClose }, ref) {
+	function ConfigPane({ onClose, onSaved, projectPath, focusConfigTab, focusProvider, focusBackendPane, onStateChange, onRequestClose }, ref) {
 		return (
 			<ConfigModalContent
 				open
@@ -300,6 +307,7 @@ export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
 				projectPath={projectPath}
 				focusConfigTab={focusConfigTab}
 				focusProvider={focusProvider}
+				focusBackendPane={focusBackendPane}
 				embedded
 				paneRef={ref}
 				onPaneStateChange={onStateChange}
@@ -396,7 +404,7 @@ type ConfigModalContentProps = ConfigModalProps & {
 };
 
 function ConfigModalContent(props: ConfigModalContentProps) {
-	const { open, onClose, onSaved, projectPath, embedded, focusConfigTab, focusProvider } = props;
+	const { open, onClose, onSaved, projectPath, embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
@@ -428,9 +436,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		// focusProvider/focusConfigTab 变化即应用：设置窗口已开时点圆球跳转也要生效。
 	}, [open, focusConfigTab, focusProvider]);
 	/** 配置管理顶层后端分页：以 Pi 为主（默认 Pi，且 Pi 标签在左），dsh 页在右。
-	 *  新建会话仍默认 dsh 是运行态偏好，与此处配置管理入口默认值相互独立。
+	 *  新建会话默认后端跟随设置项 defaultAgentBackend（默认 pi），与此处配置管理入口相互独立。
 	 *  弹窗每次打开都会重建 state，这里从 localStorage 恢复上次选定的后端分页。 */
-	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(loadLastConfigBackendPane);
+	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(focusBackendPane ?? loadLastConfigBackendPane);
 	/** 切换后端分页并持久化：退出配置管理再进入时停留在上次选定的后端。 */
 	const selectBackendPane = useCallback((value: string) => {
 		const next = value === "pi" ? "pi" : "dsh";
@@ -1235,9 +1243,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/**
 	 * 重置为自适应：
 	 * 1. 显式拉取当前 provider 的 /models，取当前 modelId 的实报字段（失败也继续，listing 视为空）；
-	 * 2. 查询 bundled pi-ai catalog 模板（PiDeck 自带，不读 capability cache / 外部 Pi 目录）；
-	 * 3. endpoint 实报优先合并，然后清空五个能力字段，只写模板有值的字段。
-	 * 模板也没有的字段落盘即为空，交还 Pi 默认行为。
+	 * 2. 查询模型规格（运行中 pi 模型列表优先 + bundled pi-ai catalog 兜底，见 resolveModelSpecFromCatalogs）；
+	 * 3. endpoint 实报优先合并，然后只覆盖模板有值的字段。模板未提供的容量字段保留手填值，
+	 *    不落空——否则 Pi 按 128k 回退，用户手填的 1000000 被静默丢掉。
 	 */
 	const handleResetModelToAdaptive = async (providerName: string, index: number) => {
 		const provider = modelsData.providers[providerName];
@@ -1275,7 +1283,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			showNotice(
 				template.matchedId
 					? t("config.modelResetAdaptiveDone", { model: template.matchedId })
-					: t("config.modelResetAdaptiveCleared"),
+					: t("config.modelResetAdaptiveKept"),
 				3000,
 			);
 		} finally {
@@ -1991,6 +1999,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** DSH 配置页句柄（顶部统一保存按钮经 saveByKey 调用其 save）。 */
 	const dshConfigRef = useRef<DshConfigTabHandle>(null);
 
+	// DSH runtime 安装态门控：runtime 不可用时整 Tab 换成安装引导（含下载与手动导入），
+	// 不渲染任何 dsh 配置表单（表单此时项项都会失败）。
+	const dshRuntimeStatus = useAtomValue(dshRuntimeStatusAtom);
+	const dshUi = dshUiVisibilityFor(dshRuntimeStatus.state);
+
 	/** 安全管理草稿脏状态上报：有修改 markDirty("security")，保存成功/卸载清标记。 */
 	const handleSecurityDirtyChange = useCallback(
 		(dirty: boolean) => {
@@ -2012,6 +2025,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const saveByKey = async (tabKey: string): Promise<boolean> => {
 		switch (tabKey) {
 			case "dsh": {
+				// runtime 不可用时整页是安装引导，没有任何可保存草稿：直接视为保存通过，
+				// 否则统一保存按钮会因为拿不到 DshConfigTab 句柄而一直报「保存失败」。
+				if (!dshUi.showDshConfigForms) return true;
 				// DSH 页保存成功后显式清未保存标记：子分区草稿已清空并上报 false，
 				// 但卸载/收起的分区可能残留脏来源，这里兜底保证黄点消失。
 				const ok = (await dshConfigRef.current?.save()) ?? false;
@@ -2201,12 +2217,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				{/* forceMount + inactive hidden：Pi/DSH 两个后端页都保持挂载，切换后端不会丢草稿；
 				    与 config:mcp 同款做法，inactive 必须 hidden 避免叠在另一页上。 */}
 				<TabsContent value="dsh" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
-					<DshConfigTab
-						ref={dshConfigRef}
-						onDirtyChange={handleDshDirtyChange}
-						dirtyNavIds={dshDirtyNavIds}
-						onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "dsh")}
-					/>
+					{/* runtime 安装态不再整页替换：概览页内嵌 DshRuntimeSection 状态自适应区块，
+					    未装→安装引导，已装→版本/目录/卸载/导入，一个页面操作完。 */}
+					{dshRuntimeStatus.state !== "checking" ? (
+						<DshConfigTab
+							ref={dshConfigRef}
+							onDirtyChange={handleDshDirtyChange}
+							dirtyNavIds={dshDirtyNavIds}
+							onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "dsh")}
+						/>
+					) : null}
 				</TabsContent>
 				<TabsContent value="pi" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
 			{/* 默认浅色主题整页同底（bg-background），避免顶栏白 / 下方多层灰的割裂感。

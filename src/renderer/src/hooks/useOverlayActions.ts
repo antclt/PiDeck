@@ -1,8 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
-import { t } from "../i18n";
 import { desktopApi as api } from "../desktopApi";
 import type { Project, AppInfo } from "../../../shared/types";
-
 interface ConfirmDialogConfig {
   title: string;
   message: string;
@@ -34,12 +32,15 @@ export function useOverlayActions({ activeProject, appInfo, showToast }: UseOver
   const overlayProps = useMemo(() => ({
     feedback: feedbackOpen ? {
       open: true as const,
-      project: activeProject,
-      appInfo,
-      onClose: () => setFeedbackOpen(false),
-      onCopy: () => showToast(t("app.feedbackCopied")),
-      onOpenExternal: (url: string) => api.app.openExternal(url),
-      loadEnvironment: api.app.feedbackEnvironment,
+      props: {
+        open: true as const,
+        project: activeProject,
+        appInfo,
+        onClose: () => setFeedbackOpen(false),
+        onToast: (message: string) => showToast(message),
+        // GitHub Issue 提交页需要登录/富文本，强制系统浏览器打开（不受「链接打开方式」设置影响）
+        onOpenExternal: (url: string) => void api.app.openExternal(url, true),
+      },
     } : undefined,
     confirm: confirmDialog ? {
       open: true as const,

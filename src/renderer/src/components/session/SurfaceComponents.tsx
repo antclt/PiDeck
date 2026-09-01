@@ -9,6 +9,8 @@ import {
 	useRef,
 	useState,
 	type CSSProperties,
+	type RefObject,
+	type WheelEvent as ReactWheelEvent,
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
@@ -18,6 +20,8 @@ import { writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
 import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
 import { planRailTicks } from "./timeline/outlineRailTicks";
+import { areOutlineRailItemsEqual, createOutlineItemIndex, resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
+import { useTimelineOutlineActiveId } from "./timeline/useTimelineOutlineActiveId";
 import { useAtomValue } from "jotai";
 import "katex/dist/katex.min.css";
 
@@ -124,6 +128,7 @@ import {
 	Copy,
 	Trash,
 	Share,
+	Undo2,
 	SquarePen,
 	Send,
 	UserPen,
@@ -177,7 +182,6 @@ import { extractVisionBridgeBlocks, matchVisionBridgeEvent } from "../../utils/v
 import { visionImageHashes } from "../../utils/visionImageHash";
 import { ToolCard, ToolGroupCard, type DiffFileHandler } from "./ToolCallComponents";
 import {
-	AskQuestionCard,
 	DiagnosticMessageCard,
 	RespondingIndicator,
 	ThinkingBlock,
@@ -475,7 +479,7 @@ export function AgentAvatar(props: { status: string }) {
 			</svg>
 			</span>
 			<span className="avatar-status-indicator" aria-label={normalizedStatus}>
-				{normalizedStatus === "error" ? <CircleAlert size={8} strokeWidth={2.5} /> : normalizedStatus === "starting" ? <CircleDot size={8} strokeWidth={2.5} /> : normalizedStatus === "running" ? <LoaderCircle size={8} strokeWidth={2.5} className="animate-spin" /> : <Check size={8} strokeWidth={2.5} />}
+				{normalizedStatus === "error" ? <CircleAlert size={8} strokeWidth={2.5} /> : normalizedStatus === "starting" ? <CircleDot size={8} strokeWidth={2.5} /> : normalizedStatus === "running" ? <LoaderCircle size={8} strokeWidth={2.5} className="animate-pideck-spin" /> : <Check size={8} strokeWidth={2.5} />}
 			</span>
 		</div>
 	);
@@ -671,7 +675,7 @@ export const AssistantText = memo(
 		images?: ImageContent[];
 		onPreviewImage: (image: ImageContent) => void;
 		onOpenExternal: (url: string) => void;
-		onOpenFile?: (path: string) => void;
+		onOpenFile?: (path: string, line?: number) => void;
 		/** 当前消息是否正在流式追加。为 true 时走轻量渲染路径，跳过 KaTeX 数学解析与
 		 *  mermaid 图渲染，避免每个 token 都对不断增长的全量正文调用重型插件导致主线程卡死。 */
 		isStreaming?: boolean;
@@ -710,14 +714,14 @@ export const AssistantText = memo(
 			</div>
 		);
 	},
-	// 自定义比较：文本、流式标记、图片一致时跳过重渲染。回调函数（onPreviewImage/onOpenExternal/
-	// onOpenFile）行为稳定（读 ref 或 setState），不参与比较，避免 App 每次渲染新建内联箭头
-	// 函数导致 memo 失效——历史消息在流式期间因此不再重复解析 Markdown，从根上消除卡顿。
+	// 自定义比较：正文文件回调绑定栏级 cwd/project，作用域变化时必须刷新；其余稳定回调仍忽略，
+	// 避免 App 常规渲染让历史消息反复解析 Markdown。
 	(prev, next) =>
 		prev.text === next.text &&
 		prev.isStreaming === next.isStreaming &&
 		prev.settle === next.settle &&
-		prev.images === next.images,
+		prev.images === next.images &&
+		prev.onOpenFile === next.onOpenFile,
 );
 
 /** 视觉桥「请求详情」展开面板：展示最近一次 input 转换的模型/耗时/token/提示词与每张图结果。
@@ -796,6 +800,8 @@ export const UserBubble = memo(function UserBubble(props: {
 	onDeleteMessage?: (messageId: string, entryId?: string) => void;
 	/** 从该用户消息 fork 新会话；忙碌时不展示入口 */
 	onForkMessage?: (message: ChatMessage) => void;
+	/** 回退工作区文件到该消息时刻前最近的检查点；仅 pi 后端注入（rewind 能力） */
+	onRewindToMessage?: (message: ChatMessage) => void;
 	/** 是否为最后一条用户消息，用于控制重发按钮的显隐 */
 	isLastUserMessage?: boolean;
 	/** 仅当该消息后出现 error/abort 时显示重发（取代无条件 isLastUserMessage） */
@@ -1074,7 +1080,7 @@ export const UserBubble = memo(function UserBubble(props: {
 			{visionBlocks.length === 0 && visionPolling && !visionMatch && (
 				<div className="mb-2 flex w-full max-w-[min(82%,64ch)] flex-col items-end">
 					<div className="flex items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-						<Loader2 size={11} className="animate-spin" />
+						<Loader2 size={11} className="animate-pideck-spin" />
 						<span>{t("app.visionConverting")}</span>
 					</div>
 				</div>
@@ -1237,6 +1243,21 @@ export const UserBubble = memo(function UserBubble(props: {
 						<GitFork size={14} strokeWidth={1.8} aria-hidden="true" />
 					</Button>
 				)}
+				{/* 回退到此消息：把工作区文件恢复到该消息时刻前最近的检查点（见 injector 的最近点解析） */}
+				{!editing && props.onRewindToMessage && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						className="user-turn-action-btn size-7 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+						disabled={props.agentRunning}
+						onClick={() => props.onRewindToMessage?.(message)}
+						title={props.agentRunning ? t("app.forkBusyTitle") : t("rewind.restoreTitle")}
+						aria-label={t("rewind.restore")}
+					>
+						<Undo2 size={14} strokeWidth={1.8} aria-hidden="true" />
+					</Button>
+				)}
 				{!editing && !props.agentRunning && (
 					<>
 						{props.onEditMessage && (
@@ -1373,7 +1394,6 @@ function renderChipText(text: string, onOpenFile?: (path: string) => void, valid
 
 export { ToolCard, ToolGroupCard };
 export {
-	AskQuestionCard,
 	DiagnosticMessageCard,
 	RespondingIndicator,
 	ThinkingBlock,
@@ -1389,12 +1409,28 @@ export { MultiSelectModal };
  * 高度自适应：容器被 .outline-hover 的 top/bottom 双向夹持出可用高度，刻度间距
  * 按条数收缩；间距压到下限仍放不下时均匀抽稀，但首尾刻度强制保留（planRailTicks）。
  */
-export function ConversationOutline(props: {
+type ConversationOutlineProps = {
+	className?: string;
+	timelineRef?: RefObject<HTMLElement | null>;
+	onTimelineWheel?: (deltaY: number) => void;
 	items: Array<{ id: string; role: string; title: string; time: string }>;
 	onJump: (id: string) => void;
-}) {
-	// 跳转目标只作高亮反馈；会话切换后旧 id 不在新条目里时不高亮，避免错误落在第一条
-	const [railActiveId, setRailActiveId] = useState<string | undefined>(undefined);
+};
+
+function areConversationOutlinePropsEqual(
+	previous: ConversationOutlineProps,
+	next: ConversationOutlineProps,
+): boolean {
+	return previous.className === next.className &&
+		previous.timelineRef === next.timelineRef &&
+		previous.onTimelineWheel === next.onTimelineWheel &&
+		previous.onJump === next.onJump &&
+		areOutlineRailItemsEqual(previous.items, next.items);
+}
+
+function ConversationOutlineView(props: ConversationOutlineProps) {
+	// The visible timeline checkpoint owns rail feedback; clicking a tick updates it immediately.
+	const [railActiveId, setRailActiveId] = useTimelineOutlineActiveId(props.timelineRef, props.items);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [availableHeight, setAvailableHeight] = useState(0);
 	// 容器高度由 top/bottom 夹持（不随内容变化），ResizeObserver 重测不会形成反馈环；
@@ -1422,11 +1458,27 @@ export function ConversationOutline(props: {
 			})),
 		[plan.items],
 	);
-	const railActiveVisible =
-		railActiveId !== undefined && railItems.some((item) => item.id === railActiveId);
+	const outlineItemIndex = useMemo(() => createOutlineItemIndex(props.items), [props.items]);
+	const visibleRailActiveId = useMemo(
+		() => resolveVisibleRailActiveId(railActiveId, outlineItemIndex, plan.items),
+		[railActiveId, outlineItemIndex, plan.items],
+	);
+
+	const handleTimelineWheel = useCallback(
+		(event: ReactWheelEvent<HTMLDivElement>) => {
+			if (!props.onTimelineWheel || event.deltaY === 0) return;
+			event.preventDefault();
+			props.onTimelineWheel(event.deltaY);
+		},
+		[props.onTimelineWheel],
+	);
 
 	return (
-		<div ref={containerRef} className="outline-hover">
+		<div
+			ref={containerRef}
+			onWheel={handleTimelineWheel}
+			className={cn("outline-hover pointer-events-none", props.className)}
+		>
 			{railItems.length > 0 && (
 				<PreviewRail
 					orientation="vertical"
@@ -1434,14 +1486,14 @@ export function ConversationOutline(props: {
 					label={t("outline.title")}
 					itemSize={plan.itemSize}
 					previewSide="before"
-					activeId={railActiveId}
-					highlightActive={railActiveVisible}
+					activeId={visibleRailActiveId}
+					highlightActive={visibleRailActiveId !== undefined}
 					onItemSelect={(item) => {
 						setRailActiveId(item.id);
 						props.onJump(item.id);
 					}}
 					/* 宽度对齐原触发按钮（30px），min-h-0 抵消组件自带的演示高度 */
-					className="min-h-0 w-[30px]"
+					className="pointer-events-auto min-h-0 w-[30px]"
 					railClassName="w-full content-center [&_[data-slot=preview-rail-item]]:w-full [&_[data-slot=preview-rail-item]]:justify-center [&_[data-slot=preview-rail-tick]]:h-px [&_[data-slot=preview-rail-tick]]:w-4 [&_[data-slot=preview-rail-tick]]:origin-center"
 					previewContainerClassName="inset-y-0 right-7 left-auto w-64"
 					previewClassName="[&_[data-slot=preview-rail-card]]:h-20 [&_[data-slot=preview-rail-card]]:overflow-hidden [&_[data-slot=preview-rail-card]]:p-3 [&_[data-slot=preview-rail-title]]:line-clamp-1 [&_[data-slot=preview-rail-title]]:text-xs [&_[data-slot=preview-rail-title]]:leading-4 [&_[data-slot=preview-rail-description]]:line-clamp-1 [&_[data-slot=preview-rail-description]]:text-xs [&_[data-slot=preview-rail-description]]:leading-4"
@@ -1450,6 +1502,11 @@ export function ConversationOutline(props: {
 		</div>
 	);
 }
+
+export const ConversationOutline = memo(
+	ConversationOutlineView,
+	areConversationOutlinePropsEqual,
+);
 
 export { DrawerContent, SessionFileSummary, SessionHistoryModal } from "./WorkspaceSurface";
 

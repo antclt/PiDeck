@@ -91,6 +91,11 @@ export type AppSettings = {
 	/** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 	sessionTabOpenMode: SessionTabOpenMode;
 	/**
+	 * 是否在首轮 agent 成功结束后，用当前 pi 模型异步生成会话标题。
+	 * 默认开启；设置只在新建或重启 Agent 进程时注入，关闭不影响已有会话的主 agent。
+	 */
+	autoSessionTitle: boolean;
+	/**
 	 * Agent 忙碌时发送消息的默认投递行为。
 	 * "steer"=插入当前回合（模型在本次回合内尽快看到）；"followUp"=排队，当前回合结束后自动发送。
 	 * 仅决定渲染层入队后的默认投递语义；pi/dsh 主进程各自映射到 wire 协议
@@ -235,6 +240,14 @@ export type AppSettings = {
 	/** 巡游碰边后 idle 停顿时长（分钟），默认 5，范围 1–30 */
 	petPatrolPauseMin: number;
 
+	// ── 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 ──
+	/** 是否自动释放闲置 agent，默认 true：开关关闭后闲置 agent 常驻内存不释放 */
+	idleAgentAutoRelease: boolean;
+	/** 保留的闲置 agent 数量，默认 5：超出该数量的闲置 agent（且满足闲置时长）按闲置最久优先释放 */
+	idleAgentKeepCount: number;
+	/** 闲置判定时长（分钟），默认 60：agent 连续闲置超过该时长才可被释放 */
+	idleAgentTimeoutMin: number;
+
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
 	favoriteModels: string[];
@@ -366,6 +379,13 @@ export type AppSettings = {
 	 * 已运行时切换需重启 host。
 	 */
 	dshHomeDir?: string;
+
+	/**
+	 * DSH runtime 下载源索引地址（覆盖默认 GitHub Release 资产）。
+	 * 用于镜像/内网分发：索引是 dsh-runtime-releases.json，条目里给出 tarball 直链与 sha256。
+	 * 缺省/空串 = 用内置默认地址。sha256 校验始终生效，镜像也不能绕过。
+	 */
+	dshRuntimeIndexUrl?: string;
 
 	/**
 	 * DSH 审批自动放行：开启后 DSH 会话的工具/命令审批（approval/requested）

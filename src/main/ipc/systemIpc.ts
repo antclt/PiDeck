@@ -25,12 +25,12 @@ import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import type { SkillManager } from "../skills/SkillManager";
-import { fetchModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import { fetchModelList, getCachedModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/appUpdateCheck";
 import { probePiModel } from "../pi/PiModelProber";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
 import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
-import { resolveModelSpecFromPiCatalogs } from "../pi/modelCapabilityResolver";
+import { resolveModelSpecFromCatalogs } from "../pi/modelCapabilityResolver";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
 import type { AgentProcessMetric, DiagnosticsSnapshot, ProcessMetricsSnapshot } from "../../shared/types";
@@ -51,6 +51,14 @@ import type {
 } from "../../shared/types/providerUsage";
 import type { ProviderMigrationDirection } from "../../shared/types/providerMigration";
 import type { McpConfigFile, McpServerDefinition } from "../../shared/types/mcp";
+import type {
+	HealthExportResult,
+	HealthReport,
+	HealthReportContext,
+	HealthReportFormat,
+} from "../../shared/types";
+import type { EnvironmentDoctor } from "../health/EnvironmentDoctor";
+import type { LogBundleExporter } from "../health/LogBundleExporter";
 
 /**
  * IPC 边界校验：RPC 日志条目必须字段齐全，防止渲染层传伪造对象写盘。
@@ -98,6 +106,10 @@ export type SystemIpcDeps = {
 	providerMigration?: ProviderMigrationDeps;
 	/** 全局 Pi 模型 capability snapshot（启动/配置变更时 hydration，picker 只读）。 */
 	modelCapabilityCache: PiModelCapabilityCache;
+	/** 环境体检编排器（问题反馈页一键排障）。 */
+	environmentDoctor?: EnvironmentDoctor;
+	/** 诊断产物导出器（Markdown / zip 日志包）。 */
+	logBundleExporter?: LogBundleExporter;
 	getMainWindow: () => Electron.BrowserWindow | null;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	/** Check for app update; defined in index.ts */
@@ -230,6 +242,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		providerMigration,
 		modelCapabilityCache,
 		diagnosticsMonitor,
+		environmentDoctor,
+		logBundleExporter,
 	} = deps;
 
 	/**
@@ -376,14 +390,19 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				return null;
 			}
 			try {
-				// 配置阶段模板只读 PiDeck bundled pi-ai catalog；capability cache 不参与（见 modelCapabilityResolver）。
-				return resolveModelSpecFromPiCatalogs(
+				// 配置阶段模板优先读运行中 pi 的模型列表（pi --list-models 已含内置目录 +
+				// auth.json/models.json 覆盖后的解析容量），bundled pi-ai catalog 兜底。
+				// 只读缓存不触发新 fork：启动预取（index.ts refreshModelList）已填充，
+				// 保存 models.json/auth.json 后也由 invalidateModelListCache 置空并重取。
+				const runtimeModels = getCachedModelList() ?? undefined;
+				return resolveModelSpecFromCatalogs(
 					{
 						providerName,
 						modelId,
 						...(typeof modelName === "string" && modelName.trim() ? { modelName } : {}),
 					},
 					getPiAiCatalogIndex(),
+					runtimeModels,
 				);
 			} catch (error) {
 				void appLogger.warn("models", "Model spec lookup failed", {
@@ -739,6 +758,36 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.logsClear, async () => appLogger.clear());
 	ipcMain.handle(ipcChannels.logsOpenFolder, async () => appLogger.openFolder());
 	ipcMain.handle(ipcChannels.logsSize, async () => appLogger.getSize());
+
+	// ── 环境体检（问题反馈页一键排障）──────────────────────────────
+	// 依赖在装配层注入；未装配时（如 headless 测试）返回明确的降级错误，不静默失败。
+
+	ipcMain.handle(ipcChannels.healthCheck, async (): Promise<HealthReport> => {
+		if (!environmentDoctor) throw new Error("EnvironmentDoctor not injected");
+		return environmentDoctor.run();
+	});
+
+	ipcMain.handle(
+		ipcChannels.healthExportReport,
+		async (_event, markdown: unknown, reportJson?: unknown): Promise<HealthExportResult> => {
+			if (!logBundleExporter) throw new Error("LogBundleExporter not injected");
+			return logBundleExporter.exportReport({
+				markdown: typeof markdown === "string" ? markdown : "",
+				reportJson: typeof reportJson === "string" ? reportJson : undefined,
+			});
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.healthExportBundle,
+		async (_event, markdown: unknown, reportJson: unknown): Promise<HealthExportResult> => {
+			if (!logBundleExporter) throw new Error("LogBundleExporter not injected");
+			return logBundleExporter.exportBundle({
+				markdown: typeof markdown === "string" ? markdown : "",
+				reportJson: typeof reportJson === "string" ? reportJson : "{}",
+			});
+		},
+	);
 
 	// ── RPC 日志 ─────────────────────────────────────────────────────
 
@@ -1295,6 +1344,18 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 		const backend = raw.backend === "dsh" ? "dsh" : "pi";
 		return configManager.getUsageProbeSettings(provider, backend);
+	});
+	// 轻量内置识别（渲染层隐藏「用量查询」配置按钮用）：命中内置候选（零配置自动生效）返回 true。
+	// 与 getUsageProbes 的区别：不读 usage-probes.json，只按端点解析 + 内置候选表判断，开销更小。
+	ipcMain.handle(ipcChannels.configUsageRecognized, async (_event, payload: unknown) => {
+		const raw = payload && typeof payload === "object" ? (payload as { provider?: unknown; backend?: unknown }) : {};
+		const provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
+		if (!provider || provider.length > 128) {
+			return { recognized: false };
+		}
+		const backend = raw.backend === "dsh" ? "dsh" : "pi";
+		const recognized = await configManager.recognizeUsageTemplate(provider, backend);
+		return { recognized: recognized != null };
 	});
 	// 按 provider 合并保存：入口校验与落盘同一套规则，零错误才写（保留文件里其它 providers 与旧 probes）。
 	ipcMain.handle(ipcChannels.configSaveUsageProbes, async (_event, payload: unknown) => {

@@ -72,7 +72,7 @@ export interface AppShellProps {
   drawerContent: (panel: WorkspaceDrawerPanel) => ReactNode;
   /** 抽屉活动栏（files/git/browser 切换），由 App 注入；抽屉打开时常驻。 */
   drawerRail?: ReactNode;
-  outlineContent: ReactNode;
+  outlineContent?: ReactNode;
 
   setListCollapsed: (v: boolean) => void;
   setListWidth: (v: number) => void;

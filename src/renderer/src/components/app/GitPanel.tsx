@@ -663,6 +663,11 @@ export function GitPanel(props: GitPanelProps) {
     setGroups(EMPTY_GROUPS);
     setError(null);
     setCommitting(false);
+    // push/pull 与 commit 同属 mutation：旧请求被序号作废后，其 finally 的守卫
+    // （mutationRequest === mutationRequestRef.current）不再成立，不会执行
+    // setPushing(false)——这里必须显式复位，否则按钮永远转圈。
+    setPushing(false);
+    setPulling(false);
     mutationRunningRef.current = false;
     setMutating(false);
     setResourceOpen({ merge: true, staged: true, changes: true });
@@ -805,6 +810,38 @@ export function GitPanel(props: GitPanelProps) {
     },
     [props.projectId, repoScopeKey, refreshAheadBehind],
   );
+
+  // refresh 必须经 ref 读取：props.gitInit 内部会 refreshRepos，触发 GitDrawerHost
+  // 重渲染后 repoScopeKey 可能变化（无仓库时用 projectRoot，初始化后换成 main 侧
+  // resolve 出来的 repo.path，字符串形式不一定一致）。init 按钮闭包里捕获的 refresh
+  // 是旧作用域，其成功/收尾守卫（repoScopeKey === repoScopeKeyRef.current）会判失败，
+  // 结果被丢弃、loading 卡死——变更区要手动点好几次才恢复。
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
+  /**
+   * 初始化 git 仓库（分支栏 / 空状态两个入口共用）。
+   * gitInit 内部已 refreshRepos（仓库列表变化会触发宿主重渲染并更新作用域），
+   * 完成后用最新作用域的 refresh 拉一次状态，确保刚 init 的仓库立刻出现在变更区。
+   */
+  const doInitRepo = useCallback(async () => {
+    if (!props.gitInit) return;
+    setInitializing(true);
+    try {
+      await props.gitInit(props.projectId);
+      setNotAGitRepo(false);
+      void refreshRef.current();
+    } catch (caught) {
+      // 初始化失败不常驻面板错误区（此时面板本就无变更列表），toast 提示即可。
+      showNotice(
+        gitOperationErrorText(caught) || t("git.operationFailed"),
+        8000,
+        "error",
+        t("git.operationFailed"),
+      );
+    }
+    setInitializing(false);
+  }, [props.gitInit, props.projectId]);
 
   // 打开 Git drawer 时首次加载；historyOnly 只看 Graph/Compare，不必轮询工作区。
   useEffect(() => {
@@ -1344,7 +1381,7 @@ export function GitPanel(props: GitPanelProps) {
       {loading && (
         <Loader2
           size={14}
-          className="animate-spin"
+          className="animate-pideck-spin"
           aria-label={t("common.loading")}
         />
       )}
@@ -1395,7 +1432,7 @@ export function GitPanel(props: GitPanelProps) {
             onClick={() => void doPush()}
           >
             {pushing ? (
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={14} className="animate-pideck-spin" />
             ) : (
               <ArrowUpFromLine size={14} />
             )}
@@ -1428,7 +1465,7 @@ export function GitPanel(props: GitPanelProps) {
             onClick={() => void doPull()}
           >
             {pulling ? (
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={14} className="animate-pideck-spin" />
             ) : (
               <ArrowDownToLine size={14} />
             )}
@@ -1500,27 +1537,10 @@ export function GitPanel(props: GitPanelProps) {
             variant="ghost" size="icon-sm" className="size-7 inline-grid size-7 place-items-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             title={t("git.initInBranchBar")}
             disabled={initializing}
-            onClick={async () => {
-              if (!props.gitInit) return;
-              setInitializing(true);
-              try {
-                await props.gitInit(props.projectId);
-                setNotAGitRepo(false);
-                void refresh();
-              } catch (caught) {
-                // 初始化失败不常驻面板错误区（此时面板本就无变更列表），toast 提示即可。
-                showNotice(
-                  gitOperationErrorText(caught) || t("git.operationFailed"),
-                  8000,
-                  "error",
-                  t("git.operationFailed"),
-                );
-              }
-              setInitializing(false);
-            }}
+            onClick={() => void doInitRepo()}
           >
             {initializing ? (
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={14} className="animate-pideck-spin" />
             ) : (
               <Plus size={14} />
             )}
@@ -1643,27 +1663,10 @@ export function GitPanel(props: GitPanelProps) {
                   type="button"
                   variant="ghost" size="sm" className=" h-auto px-2.5 text-[13px]"
                   disabled={initializing}
-                  onClick={async () => {
-                    if (!props.gitInit) return;
-                    setInitializing(true);
-                    try {
-                      await props.gitInit(props.projectId);
-                      setNotAGitRepo(false);
-                      // 初始化完成后刷新状态
-                      void refresh();
-                    } catch (caught) {
-                      showNotice(
-                        gitOperationErrorText(caught) || t("git.operationFailed"),
-                        8000,
-                        "error",
-                        t("git.operationFailed"),
-                      );
-                    }
-                    setInitializing(false);
-                  }}
+                  onClick={() => void doInitRepo()}
                 >
                   {initializing ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : (
                     t("git.initRepo")
                   )}
@@ -1716,7 +1719,7 @@ export function GitPanel(props: GitPanelProps) {
                   onClick={() => void runGenerateCommitMessage()}
                 >
                   {commitGenLoading ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-pideck-spin" />
                   ) : (
                     <Sparkles size={14} />
                   )}
@@ -2128,7 +2131,7 @@ function CompareChanges(props: {
               onClick={() => void run()}
             >
               {loading ? (
-                <Loader2 size={14} className="animate-spin" />
+                <Loader2 size={14} className="animate-pideck-spin" />
               ) : (
                 t("git.compare")
               )}

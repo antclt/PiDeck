@@ -14,6 +14,8 @@ import type {
   SessionRuntimeInfo,
 } from "../../../shared/types";
 import { mergeAgentRuntimeState } from "../utils/agentRuntimeState";
+import { findLastUserMessageIndex, shouldRefreshOutlineForRuntimeUpsert } from "./outlineRevision";
+import { releaseSessionOutlineProjection } from "./outlineProjectionCache";
 import { sameProjectSessionList } from "../utils/sessionRecordIdentity";
 import {
   resolveStreamingTextUpdate,
@@ -92,6 +94,10 @@ export type SessionMessageCacheEntry = {
 	revision: number;
 	source: "disk" | "runtime";
 	updatedAt: number;
+	/** Changes only when the user-message outline can change. */
+	outlineRevision?: number;
+	/** Last user-message index in messages (not the separate history prefix). */
+	outlineLastUserIndex?: number;
 	/** Present only for paged historical reads; runtime owns an authoritative full snapshot. */
 	page?: Pick<SessionMessagePage, "total" | "nextBefore">;
 	/** 激活显示窗口起点（runtime 数组下标空间，2026-08 激活分页）；>0 表示窗口前还有历史。 */
@@ -167,6 +173,13 @@ export const sessionRuntimeUiByIdAtom = atom<Record<string, SessionRuntimeUiStat
 export const sessionCacheStatsAtom = atom<Record<string, { cacheHitHistory: number[] }>>({});
 export const SESSION_CACHE_STATS_LIMIT = 50;
 export const sessionMessagesCacheAtom = atom<Record<string, SessionMessageCacheEntry>>({});
+
+// Cache entries can be evicted and recreated, so outline revisions must not restart per session.
+let nextSessionMessageOutlineRevision = 0;
+function allocateSessionMessageOutlineRevision(): number {
+  nextSessionMessageOutlineRevision += 1;
+  return nextSessionMessageOutlineRevision;
+}
 
 /** 时间线改写过程遮罩：停 Agent / 写 JSONL / 重载 / 激活 / fork，按 sessionId 隔离。 */
 export type SessionHistoryMutationOverlayKind =
@@ -559,6 +572,8 @@ export const cacheSessionMessagesAtom = atom(
 		/** 窗口首条消息的文件消息下标（2026-11）：窗口缺 entryId 时作为首次补历史的数值游标 */
 		windowStartFilePos?: number;
 		history?: SessionMessageCacheEntry["history"];
+		/** Runtime tail updates can opt out only after verifying no user checkpoint changed. */
+		outlineChanged?: boolean;
 		/**
 		 * 强制用 disk 快照覆盖当前缓存（含 runtime 源）。
 		 * 编辑/删除/重发改 JSONL 并停掉 Agent 后必须走这条：否则「disk 条数不多于 runtime」守卫会丢掉刚改过的文件。
@@ -603,6 +618,16 @@ export const cacheSessionMessagesAtom = atom(
     ) {
       return false;
     }
+    const outlineChanged = input.outlineChanged !== false;
+    const shouldReplaceOutlineProjection =
+      outlineChanged || current?.outlineRevision === undefined;
+    const outlineRevision = shouldReplaceOutlineProjection
+      ? allocateSessionMessageOutlineRevision()
+      : current.outlineRevision;
+    const outlineLastUserIndex = outlineChanged
+      ? findLastUserMessageIndex(input.messages)
+      : current?.outlineLastUserIndex ?? findLastUserMessageIndex(input.messages);
+    if (shouldReplaceOutlineProjection) releaseSessionOutlineProjection(input.sessionId);
     const revision = input.source === "runtime"
       ? (current?.revision ?? 0) + 1
       : (current?.revision ?? 0);
@@ -613,6 +638,8 @@ export const cacheSessionMessagesAtom = atom(
 			revision,
 			source: input.source,
 			updatedAt: Date.now(),
+			outlineRevision,
+			outlineLastUserIndex,
 			...(input.source === "disk" && input.page ? { page: input.page } : {}),
 			// runtime 窗口语义（2026-08 激活分页）：entry 每次整体重建，
 			// 调用方必须显式给出 windowStart/history（undefined = 清除，如版本失效丢前缀）；
@@ -642,7 +669,10 @@ export const cacheSessionMessagesAtom = atom(
       SESSION_MESSAGE_CACHE_LIMIT,
     );
     for (const cachedSessionId of Object.keys(nextCache)) {
-      if (!retainedIds.includes(cachedSessionId)) delete nextCache[cachedSessionId];
+      if (!retainedIds.includes(cachedSessionId)) {
+        delete nextCache[cachedSessionId];
+        releaseSessionOutlineProjection(cachedSessionId);
+      }
     }
     set(sessionMessagesCacheAtom, nextCache);
     set(sessionMessageLruAtom, retainedIds);
@@ -651,35 +681,38 @@ export const cacheSessionMessagesAtom = atom(
 );
 
 export const prependSessionMessagePageAtom = atom(
-	null,
-	(get, set, input: {
-		sessionId: string;
-		before: number;
-		expectedRevision: number;
-		page: SessionMessagePage;
-	}) => {
-		const current = get(sessionMessagesCacheAtom)[input.sessionId];
-		if (
-			!current ||
-			current.source !== "disk" ||
-			current.revision !== input.expectedRevision ||
-			current.page?.nextBefore !== input.before
-		) {
-			return false;
-		}
-		set(sessionMessagesCacheAtom, {
-			...get(sessionMessagesCacheAtom),
-			[input.sessionId]: {
-				...current,
-				messages: [...input.page.messages, ...current.messages],
-				page: { total: input.page.total, nextBefore: input.page.nextBefore },
-				updatedAt: Date.now(),
-			},
-		});
-		return true;
-	},
+  null,
+  (get, set, input: {
+    sessionId: string;
+    before: number;
+    expectedRevision: number;
+    page: SessionMessagePage;
+  }) => {
+    const current = get(sessionMessagesCacheAtom)[input.sessionId];
+    if (
+      !current ||
+      current.source !== "disk" ||
+      current.revision !== input.expectedRevision ||
+      current.page?.nextBefore !== input.before
+    ) {
+      return false;
+    }
+    const messages = [...input.page.messages, ...current.messages];
+    releaseSessionOutlineProjection(input.sessionId);
+    set(sessionMessagesCacheAtom, {
+      ...get(sessionMessagesCacheAtom),
+      [input.sessionId]: {
+        ...current,
+        messages,
+        page: { total: input.page.total, nextBefore: input.page.nextBefore },
+        updatedAt: Date.now(),
+        outlineRevision: allocateSessionMessageOutlineRevision(),
+        outlineLastUserIndex: findLastUserMessageIndex(messages),
+      },
+    });
+    return true;
+  },
 );
-
 export const touchSessionMessagesAtom = atom(null, (get, set, sessionId: string) => {
   if (!get(sessionMessagesCacheAtom)[sessionId]) return;
   set(sessionMessageLruAtom, [
@@ -761,7 +794,7 @@ export const prependSessionHistoryPageAtom = atom(
   (get, set, input: {
     sessionId: string;
     expectedRevision: number;
-    /** 续页游标（首次加载为 undefined，调用方以 beforeEntryId 锚定） */
+    /** Continuation cursor; undefined denotes the first history page. */
     before?: number | null;
     page: SessionMessagePage;
   }) => {
@@ -773,26 +806,22 @@ export const prependSessionHistoryPageAtom = atom(
     ) {
       return false;
     }
-    // 续页必须游标连续；首次加载（无 history）不要求
     if (current.history && current.history.nextBefore !== input.before) return false;
-    // 回底清理后迟到的续页直接拒绝：history 已清空时只接受新的首次页（before === undefined），
-    // 否则慢响应会把已释放的历史前缀复活并携带旧滚动锚点。
     if (!current.history && input.before !== undefined) return false;
 
     const segmentKeys = new Set(current.messages.map(messageEntryKey));
     const pageMessages = input.page.messages.filter((message) => !segmentKeys.has(messageEntryKey(message)));
-
     const stalePrefix = Boolean(
       current.history?.version &&
       input.page.indexVersion &&
       current.history.version !== input.page.indexVersion,
     );
-    // 版本漂移：旧前缀下标空间失效，直接以新页重建前缀（仍然与窗口段去重）
     const baseMessages = stalePrefix ? [] : (current.history?.messages ?? []);
     const baseKeys = new Set(baseMessages.map(messageEntryKey));
     const freshMessages = pageMessages.filter((message) => !baseKeys.has(messageEntryKey(message)));
-
     const merged = [...freshMessages, ...baseMessages];
+    releaseSessionOutlineProjection(input.sessionId);
+
     set(sessionMessagesCacheAtom, {
       ...get(sessionMessagesCacheAtom),
       [input.sessionId]: {
@@ -801,18 +830,19 @@ export const prependSessionHistoryPageAtom = atom(
           ? {
               messages: merged,
               nextBefore: input.page.nextBefore,
-              // 续页锚点：本次页最旧条目的 entryId（渲染层续页请求携带，缓存优先路径依赖）
               ...(input.page.nextBeforeEntryId ? { nextBeforeEntryId: input.page.nextBeforeEntryId } : {}),
               version: input.page.indexVersion ?? current.history?.version,
             }
           : undefined,
         updatedAt: Date.now(),
+        outlineRevision: allocateSessionMessageOutlineRevision(),
+        outlineLastUserIndex: current.outlineLastUserIndex ??
+          findLastUserMessageIndex(current.messages),
       },
     });
     return true;
   },
 );
-
 /**
  * 回底清理临时历史（2026-11 轮次模型）：贴底稳定后把 runtime 会话翻过的历史前缀清掉，
  * 只保留运行时窗口段 —— atom 数据回到「最近 9 轮窗口」（DOM 3 / atom 9 / main 12 模型）；
@@ -820,18 +850,25 @@ export const prependSessionHistoryPageAtom = atom(
  * 仅 runtime 来源缓存生效；disk 来源（历史会话浏览）不清，避免打断按条分页游标。
  */
 export const clearSessionHistoryAtom = atom(
-	null,
-	(get, set, sessionId: string) => {
-		const current = get(sessionMessagesCacheAtom)[sessionId];
-		if (!current || current.source !== "runtime" || !current.history) return false;
-		set(sessionMessagesCacheAtom, {
-			...get(sessionMessagesCacheAtom),
-			[sessionId]: { ...current, history: undefined, updatedAt: Date.now() },
-		});
-		return true;
-	},
+  null,
+  (get, set, sessionId: string) => {
+    const current = get(sessionMessagesCacheAtom)[sessionId];
+    if (!current || current.source !== "runtime" || !current.history) return false;
+    releaseSessionOutlineProjection(sessionId);
+    set(sessionMessagesCacheAtom, {
+      ...get(sessionMessagesCacheAtom),
+      [sessionId]: {
+        ...current,
+        history: undefined,
+        updatedAt: Date.now(),
+        outlineRevision: allocateSessionMessageOutlineRevision(),
+        outlineLastUserIndex: current.outlineLastUserIndex ??
+          findLastUserMessageIndex(current.messages),
+      },
+    });
+    return true;
+  },
 );
-
 function toAgentUiRequest(
   payload: Record<string, unknown>,
   agentId: string,
@@ -845,7 +882,9 @@ function toAgentUiRequest(
         if (
           typeof typed.id !== "string" ||
           typeof typed.question !== "string" ||
-          !["select", "confirm", "input", "editor"].includes(String(typed.type))
+          // 与主进程/飞书 envelope 白名单同构：multi_select 也走批量信封，
+          // 这里漏放行会导致选项组件整体不渲染（2026-09 回归）。
+          !["select", "multi_select", "confirm", "input", "editor"].includes(String(typed.type))
         ) {
           return questions;
         }
@@ -1405,6 +1444,12 @@ export const applySessionRuntimeEventAtom = atom(
               ...current.messages.slice(0, offset),
               ...(messages as ChatMessage[]),
             ];
+            const outlineChanged = shouldRefreshOutlineForRuntimeUpsert(
+              current.messages,
+              current.outlineLastUserIndex,
+              offset,
+              messages,
+            );
             // 长度校验：合并后本地长度 = 卡片 + (totalLength − W)；不满足说明增量已失序
             // （漏事件/trim 未校准），丢弃等待全量
             if (merged.length === totalLength - W + cardCount) {
@@ -1413,6 +1458,7 @@ export const applySessionRuntimeEventAtom = atom(
                 messages: merged,
                 source: "runtime",
                 windowStart: W,
+                outlineChanged,
                 history: current.history,
                 cardCount,
               });
@@ -1620,6 +1666,7 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
   delete cacheStats[sessionId];
   set(sessionCacheStatsAtom, cacheStats);
   const cache = { ...get(sessionMessagesCacheAtom) };
+  releaseSessionOutlineProjection(sessionId);
   delete cache[sessionId];
   set(sessionMessagesCacheAtom, cache);
   clearSessionLiveThinking(get, set, sessionId);

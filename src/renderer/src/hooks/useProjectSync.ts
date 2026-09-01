@@ -104,11 +104,33 @@ export function useProjectSync(input: UseProjectSyncInput) {
     return fileTreeGenerationRef.current === generation && activeProjectIdRef.current === projectId;
   }, []);
 
-  async function refreshProjects() {
+  /**
+   * 重新读取项目目录存在性并替换侧栏清单。
+   * 缺失目录只标记 missing、不自动移除，避免网络盘/WSL 暂时不可达时丢失项目记录。
+   */
+  async function refreshProjects(): Promise<Project[]> {
     const next = await api.projects.list();
     setProjects(next);
     if (!activeProjectId && next.length > 0) setActiveProjectId(next[0].id);
-    for (const p of next) { if (p.worktreeEnabled) void refreshWorktrees(p.id); }
+    // 失效目录不能继续触发 Git 扫描，否则手动刷新项目后仍会产生 ENOENT 噪音。
+    for (const p of next) { if (p.worktreeEnabled && !p.missing) void refreshWorktrees(p.id); }
+    return next;
+  }
+
+  /** 用户从项目分组菜单发起的全量刷新：重扫清单并给出统一反馈。 */
+  async function refreshAllProjects() {
+    try {
+      const next = await refreshProjects();
+      showToast(t("app.projectsRefreshed", { count: next.filter((project) => project.kind !== "chat").length }), 1800);
+    } catch (error) {
+      showToast(
+        t("app.projectsRefreshFailed", {
+          // Electron invoke 在部分环境会把 Error 跨 realm 包装，统一去掉可选的 `Error:` 前缀。
+          error: String(error instanceof Error ? error.message : error).replace(/^Error:\s*/, ""),
+        }),
+        4000,
+      );
+    }
   }
 
   async function refreshWorktrees(projectId: string) {
@@ -278,13 +300,20 @@ export function useProjectSync(input: UseProjectSyncInput) {
 
   async function refreshProjectTree(project: Project) {
     await syncDshForeignSessionsIfEnabled();
-    await refreshProjects();
-    await refreshProjectSessions(project.id);
-    if (project.worktreeEnabled) {
-      await refreshWorktrees(project.id);
-      const latestProjects = await api.projects.list();
-      setProjects(latestProjects);
-      const childProjects = latestProjects.filter((p) => p.worktreeParentId === project.id);
+    const latestProjects = await refreshProjects();
+    const latestProject = latestProjects.find((candidate) => candidate.id === project.id);
+    // 项目可能在菜单打开后被外部删除。刷新存在性后立即停止后续会话/Git 扫描，
+    // 避免继续对旧路径执行 scandir 并把原始 ENOENT 暴露给用户。
+    if (!latestProject || latestProject.missing) {
+      showToast(t("app.projectDirectoryMissing"), 4000);
+      return;
+    }
+    await refreshProjectSessions(latestProject.id);
+    if (latestProject.worktreeEnabled) {
+      await refreshWorktrees(latestProject.id);
+      const projectsAfterWorktreeRefresh = await api.projects.list();
+      setProjects(projectsAfterWorktreeRefresh);
+      const childProjects = projectsAfterWorktreeRefresh.filter((p) => p.worktreeParentId === latestProject.id && !p.missing);
       await Promise.all(childProjects.map((child) => refreshProjectSessions(child.id).catch(() => undefined)));
     }
     showToast(t("app.projectRefreshed", {}), 1800);
@@ -312,14 +341,22 @@ export function useProjectSync(input: UseProjectSyncInput) {
       if (!isFileTreeRequestCurrent(generation, projectId)) return;
       const message = error instanceof Error ? error.message : String(error);
       const tooLarge = message.match(/FILE_TREE_DIRECTORY_TOO_LARGE:(\d+):(\d+)/);
+      const projectDirectoryMissing = message.includes("PROJECT_DIRECTORY_MISSING");
+      if (projectDirectoryMissing) {
+        // 目录被外部删除后先清掉陈旧文件树，再刷新项目 presence，让侧栏立即出现“目录不存在”。
+        setFiles([]);
+        void refreshProjects().catch(() => undefined);
+      }
       showToast(
         tooLarge
           ? t("app.filesDirectoryTooLarge", { count: tooLarge[1], max: tooLarge[2] })
-          : t("app.filesRefreshFailed", { error: message }),
+          : projectDirectoryMissing
+            ? t("app.projectDirectoryMissing")
+            : t("app.filesRefreshFailed", { error: message }),
         4000,
       );
     }
   }
 
-  return { worktreesByProject, branchByProject, files, setFiles, gitInfo, setGitInfo, sessionLoadingByProject, setSessionLoadingByProject, visibleProjectChildCountByProject, setVisibleProjectChildCountByProject, refreshProjects, refreshWorktrees, refreshSessions, refreshProjectSessions, refreshFiles, refreshProjectTree, syncDshForeignSessionsIfEnabled, beginFileTreeRequest, isFileTreeRequestCurrent };
+  return { worktreesByProject, branchByProject, files, setFiles, gitInfo, setGitInfo, sessionLoadingByProject, setSessionLoadingByProject, visibleProjectChildCountByProject, setVisibleProjectChildCountByProject, refreshProjects, refreshAllProjects, refreshWorktrees, refreshSessions, refreshProjectSessions, refreshFiles, refreshProjectTree, syncDshForeignSessionsIfEnabled, beginFileTreeRequest, isFileTreeRequestCurrent };
 }

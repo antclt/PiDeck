@@ -14,7 +14,7 @@
  * 颜色规则与三处详情面板共用 providerUsageDisplay 的 tone：≥90% 红 / ≥70% 橙 /
  * 其余绿；余额不足 10% 橙、≤0 红。无数据一律返回 null——保持「查不到就不显示」。
  */
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Clock, RefreshCw } from "lucide-react";
 import type { ProviderUsageResult, UsageProbeBackend } from "../../../../shared/types/providerUsage";
 import {
@@ -115,7 +115,7 @@ export function ProviderUsageInline(props: {
 				}}
 				className="flex h-4 w-4 flex-none items-center justify-center rounded text-text-tertiary transition-colors hover:bg-muted/60 hover:text-foreground"
 			>
-				<RefreshCw size={10} className={loading ? "animate-spin" : undefined} />
+				<RefreshCw size={10} className={loading ? "animate-pideck-spin" : undefined} />
 			</button>
 		</span>
 	);
@@ -145,22 +145,34 @@ export function ProviderUsageFooter(props: {
  * 未开启不显示引导（配置入口在卡片头部柱状图按钮）。
  * 「用量查询」柱状图按钮在各自卡片**头部图标组**（不占用量行，见各卡片实现）。
  * 行高固定（h-9）+ border-t 分隔，所有卡片水平对齐。
+ *
+ * leading：可选的左侧内容（如模型页的「N 个模型」数量）。提供后行始终渲染
+ * （左 leading、右用量有则显示），让底部用量行不再只有右侧文本、视觉上空；
+ * 不提供时维持「查不到就不渲染」的旧行为（认证页/DSH 页不受影响）。
  */
 export function ProviderUsageRow(props: {
 	provider: string;
 	/** 查询/缓存链路：pi（缺省）或 dsh（$DSH_HOME 配置 + DSH 凭据库）。 */
 	backend?: UsageProbeBackend;
 	className?: string;
+	/** 左侧固定内容（如模型数量）；提供后行始终渲染。 */
+	leading?: ReactNode;
 }) {
 	const entry = useProviderUsageEntry(props.provider, props.backend);
-	if (!props.provider || !hasUsableUsage(entry.result)) return null;
+	if (!props.provider) return null;
+	const hasUsable = hasUsableUsage(entry.result);
+	// leading 提供时行必然渲染（模型数量常驻）；否则仅在有可用用量时渲染（旧行为）。
+	if (!props.leading && !hasUsable) return null;
 	return (
 		<div
 			className={`flex h-9 items-center justify-end gap-1.5 border-t border-border/60 px-3.5 ${props.className ?? ""}`}
 			data-testid="provider-usage-row"
 			data-provider={props.provider}
 		>
-			<ProviderUsageFooter provider={props.provider} backend={props.backend} />
+			{props.leading ? (
+				<span className="mr-auto min-w-0 truncate text-caption text-text-tertiary">{props.leading}</span>
+			) : null}
+			{hasUsable ? <ProviderUsageFooter provider={props.provider} backend={props.backend} /> : null}
 		</div>
 	);
 }

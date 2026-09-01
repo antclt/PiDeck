@@ -27,6 +27,7 @@ function compileModule(filePath, imports = {}) {
     console,
     Date,
     Set,
+    Map,
   }, { filename: filePath });
   return module.exports;
 }
@@ -35,15 +36,19 @@ function loadAtoms() {
   const runtimeState = compileModule("src/renderer/src/utils/agentRuntimeState.ts");
   const sessionRecordIdentity = compileModule("src/renderer/src/utils/sessionRecordIdentity.ts");
   const liveTextHandoff = compileModule("src/renderer/src/utils/liveTextHandoff.ts");
+  const outlineRevision = compileModule("src/renderer/src/atoms/outlineRevision.ts");
+  const outlineProjectionCache = compileModule("src/renderer/src/atoms/outlineProjectionCache.ts");
   const sessions = compileModule("src/renderer/src/atoms/session-atoms.ts", {
     "../utils/agentRuntimeState": runtimeState,
     "../utils/sessionRecordIdentity": sessionRecordIdentity,
     "../utils/liveTextHandoff": liveTextHandoff,
+    "./outlineRevision": outlineRevision,
+    "./outlineProjectionCache": outlineProjectionCache,
   });
   const composer = compileModule("src/renderer/src/atoms/composer-atoms.ts", {
     "./session-atoms": sessions,
   });
-  return { ...sessions, ...composer };
+  return { ...sessions, ...composer, outlineProjectionCache };
 }
 
 function session(id, projectId = "project-1", overrides = {}) {
@@ -60,6 +65,10 @@ function session(id, projectId = "project-1", overrides = {}) {
     updatedAt: 1,
     ...overrides,
   };
+}
+
+function chatMessage(id, role, text, timestamp = 1) {
+  return { id, agentId: "agent", role, text, timestamp };
 }
 
 test("stores catalog records and selection by stable session ID", () => {
@@ -165,6 +174,34 @@ test("keeps only the 8 most recently written session message caches", () => {
   assert.equal(cache["session-8"].messages[0].text, "8");
 });
 
+test("message cache eviction releases the matching outline projection", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  store.set(atoms.cacheSessionMessagesAtom, {
+    sessionId: "session-a",
+    messages: [chatMessage("a", "user", "A")],
+    source: "runtime",
+  });
+  const first = store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+  atoms.outlineProjectionCache.setSessionOutlineProjection(
+    "session-a",
+    first.outlineRevision,
+    [{ id: "a", role: "user", title: "A", time: "1" }],
+  );
+
+  for (let index = 0; index < 8; index += 1) {
+    store.set(atoms.cacheSessionMessagesAtom, {
+      sessionId: `session-${index}`,
+      messages: [chatMessage(`message-${index}`, "assistant", String(index))],
+      source: "runtime",
+    });
+  }
+
+  assert.equal(
+    atoms.outlineProjectionCache.getSessionOutlineProjection("session-a", first.outlineRevision),
+    undefined,
+  );
+});
 test("does not let a stale disk write clobber a live runtime cache", () => {
   // A runtime→disk overwrite with fewer messages than currently cached is
   // treated as stale (e.g. anonymous sessions where disk always returns []).
@@ -463,6 +500,96 @@ test("incremental message flush merges tail upserts and discards non-contiguous 
   assert.deepEqual([...readMessages().map((m) => m.text)], ["q", "final"]);
 });
 
+test("runtime assistant tail upserts preserve the outline revision", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  const emit = (payload) => store.set(atoms.applySessionRuntimeEventAtom, {
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:message",
+    payload,
+  });
+  const entry = () => store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+
+  emit({ agentId: "agent-a", messages: [
+    chatMessage("first", "user", "First"),
+    chatMessage("first-answer", "assistant", "Answer"),
+    chatMessage("last", "user", "Last"),
+    chatMessage("last-answer", "assistant", "Partial"),
+  ] });
+  const outlineRevision = entry().outlineRevision;
+
+  emit({ agentId: "agent-a", upsertFrom: 3, totalLength: 4, messages: [
+    chatMessage("last-answer", "assistant", "Completed"),
+  ] });
+
+  assert.equal(entry().outlineRevision, outlineRevision);
+});
+
+test("runtime upserts touching an earlier user checkpoint advance the outline revision", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  const emit = (payload) => store.set(atoms.applySessionRuntimeEventAtom, {
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:message",
+    payload,
+  });
+  const entry = () => store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+
+  emit({ agentId: "agent-a", messages: [
+    chatMessage("first", "user", "First"),
+    chatMessage("first-answer", "assistant", "Answer"),
+    chatMessage("last", "user", "Last"),
+    chatMessage("last-answer", "assistant", "Partial"),
+  ] });
+  const outlineRevision = entry().outlineRevision;
+
+  emit({ agentId: "agent-a", upsertFrom: 0, totalLength: 4, messages: [
+    chatMessage("first", "user", "Edited first"),
+    chatMessage("first-answer", "assistant", "Answer"),
+    chatMessage("last", "user", "Last"),
+    chatMessage("last-answer", "assistant", "Completed"),
+  ] });
+
+  assert.ok(entry().outlineRevision > outlineRevision);
+});
+test("history prefix loading and clearing advance the outline revision", () => {
+  const atoms = loadAtoms();
+  const store = createStore();
+  const emit = (payload) => store.set(atoms.applySessionRuntimeEventAtom, {
+    sessionId: "session-a",
+    agentId: "agent-a",
+    runtimeGeneration: 1,
+    sourceChannel: "agents:message",
+    payload,
+  });
+  const entry = () => store.get(atoms.sessionMessagesCacheAtom)["session-a"];
+
+  emit({ agentId: "agent-a", messages: [
+    chatMessage("latest-question", "user", "Latest"),
+    chatMessage("latest-answer", "assistant", "Answer"),
+  ] });
+  const initialOutlineRevision = entry().outlineRevision;
+
+  assert.equal(store.set(atoms.prependSessionHistoryPageAtom, {
+    sessionId: "session-a",
+    expectedRevision: entry().revision,
+    before: undefined,
+    page: {
+      messages: [chatMessage("older-question", "user", "Older")],
+      total: 3,
+      nextBefore: null,
+    },
+  }), true);
+  const afterPrependOutlineRevision = entry().outlineRevision;
+  assert.ok(afterPrependOutlineRevision > initialOutlineRevision);
+
+  assert.equal(store.set(atoms.clearSessionHistoryAtom, "session-a"), true);
+  assert.ok(entry().outlineRevision > afterPrependOutlineRevision);
+});
 test("incremental upsert is ignored while cache holds disk-sourced messages", () => {
   const atoms = loadAtoms();
   const store = createStore();
