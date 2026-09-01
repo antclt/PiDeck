@@ -60,7 +60,14 @@ function messageEntry(message, index) {
 	};
 }
 
-function createHarness({ enabled = true, entries = [], titleName, authBaseUrl } = {}) {
+function createHarness({
+	enabled = true,
+	entries = [],
+	titleName,
+	authBaseUrl,
+	hasModel = true,
+	authResolver,
+} = {}) {
 	let branch = entries;
 	let sessionId = "session-1";
 	let currentName = titleName;
@@ -79,15 +86,15 @@ function createHarness({ enabled = true, entries = [], titleName, authBaseUrl } 
 		hasUI: false,
 		cwd: "C:/project",
 		sessionManager,
-		model: { provider: "test-provider", id: "test-model" },
+		model: hasModel ? { provider: "test-provider", id: "test-model" } : undefined,
 		modelRegistry: {
-			getApiKeyAndHeaders: async () => ({
-			ok: true,
-			apiKey: "test-key",
-			headers: {},
-			env: {},
-			...(authBaseUrl ? { baseUrl: authBaseUrl } : {}),
-		}),
+			getApiKeyAndHeaders: authResolver ?? (async () => ({
+				ok: true,
+				apiKey: "test-key",
+				headers: {},
+				env: {},
+				...(authBaseUrl ? { baseUrl: authBaseUrl } : {}),
+			})),
 		},
 	};
 	const completeSimple = (model, titleContext, options) => {
@@ -202,6 +209,26 @@ test("disabled setting prevents the built-in extension from making a request", a
 	assert.deepEqual(harness.setNames, []);
 });
 
+test("missing model or credentials leaves the existing fallback untouched", async () => {
+	const entries = freshBranch();
+	const noModel = createHarness({ entries, hasModel: false });
+	await startFresh(noModel, entries);
+	await noModel.emit("agent_settled");
+	await flushAsyncWork();
+	assert.equal(noModel.completeCalls.length, 0);
+	assert.deepEqual(noModel.setNames, []);
+
+	const noCredentials = createHarness({
+		entries,
+		authResolver: async () => ({ ok: false, error: "No API key" }),
+	});
+	await startFresh(noCredentials, entries);
+	await noCredentials.emit("agent_settled");
+	await flushAsyncWork();
+	assert.equal(noCredentials.completeCalls.length, 0);
+	assert.deepEqual(noCredentials.setNames, []);
+});
+
 test("cleans model formatting, removes emoji, and enforces the short title contract", async () => {
 	const { cleanTitle, redactSensitiveText } = compileExtension({ completeSimple: () => Promise.reject(new Error("unused")) });
 	assert.equal(cleanTitle("**Title: Fix login API! 🚀**\nextra explanation"), "Fix login API");
@@ -214,18 +241,83 @@ test("cleans model formatting, removes emoji, and enforces the short title contr
 	assert.ok(Array.from(cleanTitle("一个非常非常非常非常非常非常长的标题") ?? "").length <= 32);
 });
 
-test("does not name a failed first run, but can name after a later successful retry", async () => {
-	const entries = [messageEntry(userMessage("修复构建失败"), 0), messageEntry(assistantMessage([], "error"), 1)];
+test("names an interrupted first run from the user request", async () => {
+	const entries = [
+		messageEntry(userMessage("修复构建失败"), 0),
+		messageEntry(assistantMessage([{ type: "text", text: "检索尚未完成" }], "aborted"), 1),
+	];
 	const harness = createHarness({ entries });
 	await startFresh(harness, entries);
 	await harness.emit("agent_settled");
 	await flushAsyncWork();
+
+	assert.equal(harness.completeCalls.length, 1);
+	assert.match(harness.completeCalls[0].titleContext.messages[0].content, /修复构建失败/);
+	assert.doesNotMatch(harness.completeCalls[0].titleContext.messages[0].content, /检索尚未完成/);
+});
+
+test("names an errored first run from the user request", async () => {
+	const entries = [
+		messageEntry(userMessage("修复启动报错"), 0),
+		messageEntry(assistantMessage([], "error"), 1),
+	];
+	const harness = createHarness({ entries });
+	await startFresh(harness, entries);
+	await harness.emit("agent_settled");
+	await flushAsyncWork();
+
+	assert.equal(harness.completeCalls.length, 1);
+	assert.match(harness.completeCalls[0].titleContext.messages[0].content, /修复启动报错/);
+});
+
+test("prewarms credentials before an interrupted run settles", async () => {
+	let resolveAuth;
+	const authReady = new Promise((resolve) => { resolveAuth = resolve; });
+	let authCalls = 0;
+	const entries = [
+		messageEntry(userMessage("中断后仍应生成标题"), 0),
+		messageEntry(assistantMessage([], "aborted"), 1),
+	];
+	const harness = createHarness({ entries });
+	harness.context.modelRegistry.getApiKeyAndHeaders = async () => {
+		authCalls += 1;
+		return authReady;
+	};
+
+	await startFresh(harness, entries);
+	await flushAsyncWork();
+	assert.equal(authCalls, 1);
+
+	await harness.emit("agent_start");
+	await flushAsyncWork();
+	assert.equal(authCalls, 1);
+
+	await harness.emit("agent_settled");
+	await flushAsyncWork();
 	assert.equal(harness.completeCalls.length, 0);
 
-	harness.setBranch(freshBranch({ user: "修复构建失败", assistant: "构建已经恢复" }));
+	resolveAuth({ ok: true, apiKey: "test-key", headers: {}, env: {} });
+	await flushAsyncWork();
+	assert.equal(harness.completeCalls.length, 1);
+	assert.deepEqual(harness.setNames, ["修复登录流程"]);
+});
+
+test("retries a failed title request only on a later agent run", async () => {
+	const entries = freshBranch({ user: "修复构建失败" });
+	const harness = createHarness({ entries });
+	harness.setCompletion(() => Promise.reject(new Error("temporary title failure")));
+	await startFresh(harness, entries);
 	await harness.emit("agent_settled");
 	await flushAsyncWork();
 	assert.equal(harness.completeCalls.length, 1);
+
+	harness.setCompletion(() => Promise.resolve(assistantMessage([{ type: "text", text: "构建恢复" }])));
+	harness.setBranch(freshBranch({ user: "修复构建失败", assistant: "构建已经恢复" }));
+	await harness.emit("agent_start");
+	await harness.emit("agent_settled");
+	await flushAsyncWork();
+	assert.equal(harness.completeCalls.length, 2);
+	assert.deepEqual(harness.setNames, ["构建恢复"]);
 });
 
 test("manual rename wins and aborts the pending title request", async () => {

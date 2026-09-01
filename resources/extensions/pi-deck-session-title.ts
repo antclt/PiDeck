@@ -2,7 +2,7 @@
  * PiDeck 的轻量会话标题扩展。
  *
  * 标题请求只在首轮 agent_settled 后异步发起，使用独立的最小 Context；
- * 不修改主 agent 的 prompt、消息、工具或 session transcript。
+ * 即使主轮被中断，也根据首条 user 意图生成标题，不修改主 agent 的 prompt、消息、工具或 session transcript。
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -18,6 +18,7 @@ const MAX_USER_INPUT_CHARS = 1600;
 const MAX_ASSISTANT_INPUT_CHARS = 600;
 const MAX_TITLE_CHARS = 32;
 const TITLE_TIMEOUT_MS = 30_000;
+const MAX_TITLE_ATTEMPTS = 2;
 
 const TITLE_SYSTEM_PROMPT = `You generate a concise title for a coding assistant conversation.
 Return only one plain-text title on one line, with no explanation, quotes, Markdown, emoji, or "Title:" prefix.
@@ -55,6 +56,8 @@ type PendingTitle = {
 	runtimeGeneration: number;
 	nameRevision: number;
 };
+
+type TitleAuth = Awaited<ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>>;
 
 /** 从消息 content 中提取纯文本；图片、思考、工具调用等非文本块会被忽略。 */
 export function extractText(content: unknown): string {
@@ -140,21 +143,33 @@ function lastAssistant(branch: readonly SessionEntry[]): AssistantMessage | unde
 	return undefined;
 }
 
+function isIncompleteAssistant(message: AssistantMessage | undefined): boolean {
+	return !message || message.stopReason === "error" || message.stopReason === "aborted";
+}
+
+function firstCompletedAssistantText(branch: readonly SessionEntry[]): string | undefined {
+	for (const entry of branch) {
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		if (isIncompleteAssistant(entry.message)) continue;
+		const text = messageText(entry.message);
+		if (text.trim()) return text;
+	}
+	return undefined;
+}
+
 /**
  * 从首轮分支构造最小标题输入。
- * 只取首条 user 文本和首条 assistant 文本，不读取 system/tools/thinking/文件内容。
+ * 只取首条 user 文本和少量已完成 assistant 文本，不读取 system/tools/thinking/文件内容。
+ * 主轮被中断或报错时仍保留 user 意图，确保标题旁路不会因主 Agent 失败而失效。
  */
 export function buildTitleInput(branch: readonly SessionEntry[]): TitleInput | undefined {
 	const firstUser = firstMessageText(branch, "user");
 	if (!firstUser || isCommandInput(firstUser)) return undefined;
 
-	// agent_settled 也可能由失败的 agent run 触发；失败时等待用户重试，而不是命名失败轮次。
 	const finalAssistant = lastAssistant(branch);
-	if (!finalAssistant || finalAssistant.stopReason === "error" || finalAssistant.stopReason === "aborted") {
-		return undefined;
-	}
-
-	const firstAssistant = firstMessageText(branch, "assistant");
+	const firstAssistant = isIncompleteAssistant(finalAssistant)
+		? undefined
+		: firstCompletedAssistantText(branch);
 	return {
 		userText: prepareInputText(firstUser, MAX_USER_INPUT_CHARS),
 		...(firstAssistant
@@ -286,19 +301,17 @@ async function withTimeout<T>(
 }
 
 async function requestTitle(
-	ctx: ExtensionContext,
 	model: NonNullable<ExtensionContext["model"]>,
 	input: TitleInput,
 	controller: AbortController,
+	authPromise: Promise<TitleAuth | undefined>,
 ): Promise<string | undefined> {
 	const startedAt = Date.now();
 	try {
-		const auth = await withTimeout(
-			ctx.modelRegistry.getApiKeyAndHeaders(model),
-			controller,
-			TITLE_TIMEOUT_MS,
-		);
-		if (!auth.ok) return undefined;
+		// 认证在 session_start/agent_start 预热；中断发生在主模型请求尚未完成时，
+		// 直接在 agent_settled 再取认证可能与主请求争用同一凭据解析链，导致旁路超时。
+		const auth = await withTimeout(authPromise, controller, TITLE_TIMEOUT_MS);
+		if (!auth?.ok) return undefined;
 
 		const remaining = Math.max(1, TITLE_TIMEOUT_MS - (Date.now() - startedAt));
 		// OAuth/凭据可能为当前请求提供临时 baseUrl（例如 Copilot）；不能只传 apiKey，
@@ -332,11 +345,34 @@ export default function piDeckSessionTitle(pi: ExtensionAPI): void {
 	let sessionId: string | undefined;
 	let runtimeGeneration = 0;
 	let eligible = false;
-	let attempted = false;
+	let titleAttempts = 0;
+	let agentRunGeneration = 0;
+	let titleAttemptRunGeneration: number | undefined;
 	let manualNameTouched = false;
 	let nameRevision = 0;
 	let pending: PendingTitle | undefined;
 	let applyingAutoTitle = false;
+	let authCache: {
+		modelKey: string;
+		promise: Promise<TitleAuth | undefined>;
+	} | undefined;
+
+	const modelKey = (model: NonNullable<ExtensionContext["model"]>): string =>
+		`${model.provider}\u0000${model.id}\u0000${model.api}`;
+
+	const primeAuth = (
+		ctx: ExtensionContext,
+		model: NonNullable<ExtensionContext["model"]>,
+		refresh: boolean,
+	): Promise<TitleAuth | undefined> => {
+		const key = modelKey(model);
+		if (!refresh && authCache?.modelKey === key) return authCache.promise;
+		const promise = Promise.resolve()
+			.then(() => ctx.modelRegistry.getApiKeyAndHeaders(model))
+			.catch(() => undefined);
+		authCache = { modelKey: key, promise };
+		return promise;
+	};
 
 	const cancelPending = () => {
 		const current = pending;
@@ -348,7 +384,10 @@ export default function piDeckSessionTitle(pi: ExtensionAPI): void {
 		cancelPending();
 		runtimeGeneration += 1;
 		sessionId = readSessionId(ctx);
-		attempted = false;
+		titleAttempts = 0;
+		authCache = undefined;
+		agentRunGeneration = 0;
+		titleAttemptRunGeneration = undefined;
 		manualNameTouched = false;
 		nameRevision = 0;
 
@@ -360,6 +399,11 @@ export default function piDeckSessionTitle(pi: ExtensionAPI): void {
 		}
 		const freshReason = event.reason === "new" || event.reason === "startup";
 		eligible = enabled && freshReason && !hasConversation(branch) && !hasSessionName(pi);
+		if (eligible && ctx.model) primeAuth(ctx, ctx.model, false);
+	});
+
+	pi.on("model_select", (_event, ctx) => {
+		if (enabled && eligible && ctx.model) primeAuth(ctx, ctx.model, true);
 	});
 
 	pi.on("session_info_changed", (_event, _ctx) => {
@@ -376,12 +420,28 @@ export default function piDeckSessionTitle(pi: ExtensionAPI): void {
 		runtimeGeneration += 1;
 		sessionId = undefined;
 		eligible = false;
-		attempted = true;
+		authCache = undefined;
+		titleAttempts = MAX_TITLE_ATTEMPTS;
 		manualNameTouched = true;
 	});
 
+	pi.on("agent_start", (_event, ctx) => {
+		// 用真实 agent run 作为重试边界，避免重复 settled 事件消耗标题请求次数。
+		agentRunGeneration += 1;
+		if (enabled && eligible && ctx.model) {
+			// 首轮复用启动阶段的预热结果；标题失败后的下一轮强制重新解析凭据。
+			primeAuth(ctx, ctx.model, titleAttempts > 0);
+		}
+	});
+
 	pi.on("agent_settled", (_event, ctx) => {
-		if (!enabled || !eligible || attempted || pending) return;
+		if (
+			!enabled
+			|| !eligible
+			|| titleAttempts >= MAX_TITLE_ATTEMPTS
+			|| pending
+			|| titleAttemptRunGeneration === agentRunGeneration
+		) return;
 		if (manualNameTouched || hasSessionName(pi)) return;
 
 		// Anonymous sessions can receive their durable id only after the first prompt;
@@ -390,6 +450,7 @@ export default function piDeckSessionTitle(pi: ExtensionAPI): void {
 		if (currentSessionId) sessionId = currentSessionId;
 		const model = ctx.model;
 		if (!currentSessionId || !model) return;
+		const authPromise = primeAuth(ctx, model, false);
 
 		let branch: readonly SessionEntry[];
 		try {
@@ -400,7 +461,8 @@ export default function piDeckSessionTitle(pi: ExtensionAPI): void {
 		const input = buildTitleInput(branch);
 		if (!input) return;
 
-		attempted = true;
+		titleAttempts += 1;
+		titleAttemptRunGeneration = agentRunGeneration;
 		const request: PendingTitle = {
 			controller: new AbortController(),
 			sessionId: currentSessionId,
@@ -416,7 +478,7 @@ export default function piDeckSessionTitle(pi: ExtensionAPI): void {
 			return readSessionId(ctx) === request.sessionId;
 		};
 
-		void requestTitle(ctx, model, input, request.controller)
+		void requestTitle(model, input, request.controller, authPromise)
 			.then((title) => {
 				if (!title || !isCurrent()) return;
 				applyingAutoTitle = true;
