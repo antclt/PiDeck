@@ -103,6 +103,8 @@ const defaultSettings: AppSettings = {
   startupWindowMode: "last",
   piEnvironmentChecked: false,
   sessionTabOpenMode: "preview",
+  // 默认开启：标题请求由内置扩展在首轮结束后独立异步执行，不进入主 agent 上下文。
+  autoSessionTitle: true,
   // 忙碌时发送默认「插入当前回合」（对齐 pi 历史行为）；dsh 会话此前默认排队，
   // 统一后由本设置项决定，用户可在常用设置→会话中改回。
   busySendDelivery: "steer",
@@ -248,6 +250,10 @@ export class SettingsStore {
           ...(parsed.externalEditors ?? {}),
         },
       };
+      // 新增布尔开关按旧 settings.json 的缺省/脏数据回落，避免字符串值让 UI 或 pi env 误判。
+      if (typeof this.settings.autoSessionTitle !== "boolean") {
+        this.settings.autoSessionTitle = defaultSettings.autoSessionTitle;
+      }
       // 兼容迁移：内置 CommitMono 字体已移除（打包瘦身），旧设置里的 "commit-mono"
       // 不再存在于 AppFontMonoMode 枚举，统一回退到系统等宽字体，避免类型漂移。
       // 注意：磁盘 JSON 是无类型的，旧值可能是已删除的枚举项，先拓宽为 string 再比较。
@@ -332,6 +338,10 @@ export class SettingsStore {
     }
     if ("piProxyModels" in safePatch) {
       safePatch.piProxyModels = normalizeProxyList(safePatch.piProxyModels);
+    }
+    // IPC 入参不可信：自动标题开关只接受布尔值，非法值保持原有设置。
+    if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
+      delete safePatch.autoSessionTitle;
     }
     // 忙碌时投递行为来自渲染层，非法值丢掉，避免发送链路带着坏语义。
     if ("busySendDelivery" in safePatch) {

@@ -22,7 +22,7 @@ test("composer forwards widgets slot; session surfaces mount the three strips th
   const composer = composerSource();
   const view = viewSource();
   const start = startSource();
-  // ComposerArea：widgets prop 透传到 ComposerMeasuredExtras（测量链驱动面板增高）
+  // ComposerArea：widgets prop 透传到 ComposerMeasuredExtras
   assert.match(composer, /widgets\?: ReactNode/);
   assert.match(composer, /widgets=\{props\.widgets \?\? null\}/);
   // SessionView：todo → files → subagents → goal，独立横栏卡顺序挂载

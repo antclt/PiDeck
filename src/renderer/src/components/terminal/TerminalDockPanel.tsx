@@ -99,6 +99,8 @@ export function TerminalDockPanel(props: TerminalDockPanelProps) {
         minSize={TERMINAL_PANEL_MIN_SIZE}
         maxSize={Math.max(TERMINAL_PANEL_MIN_SIZE, props.maxHeight)}
         defaultSize={props.collapsed ? TERMINAL_PANEL_COLLAPSED_SIZE : props.height}
+        // 窗口缩放保住终端像素高度，余量全部给时间线列（列内输入栏是固有高度）。
+        groupResizeBehavior="preserve-pixel-size"
         onResize={handleResize}
         className="session-v-terminal"
       >

@@ -14,10 +14,9 @@ import { cn } from "@/lib/utils";
 /**
  * Local layout contract for cards that live above the session composer.
  *
- * A disclosure change must re-render ComposerMeasuredExtras itself so its
- * layout effect can resize the controlled panel before Chromium paints. Keeping
- * this state in individual cards would leave ResizeObserver as the first
- * responder and makes the panel trail the content change.
+ * Collapse state lives here so a disclosure change re-renders the extras
+ * wrapper and the footer can size to content in the same frame. Cards do not
+ * own this state: the composer column is intrinsic, not a hug-measured panel.
  */
 export type ComposerWidgetCollapsedByKey = Readonly<Record<string, boolean>>;
 

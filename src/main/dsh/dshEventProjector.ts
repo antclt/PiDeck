@@ -1,4 +1,10 @@
 import type { ChatMessage, ImageContent, TodoItem } from "../../shared/types";
+import {
+	defaultToolDetailTranslate,
+	formatToolDetail,
+	truncateDetailWithMeta,
+	type ToolDetailTranslate,
+} from "../../shared/formatToolDetail";
 
 /**
  * DSH SessionEvent → PiDeck ChatMessage 投影（纯函数，无副作用，可单测）。
@@ -181,7 +187,7 @@ export function projectDshEvent(
 	 *  dsh-web 渲染工具卡片用的就是它；对 tool/call 投影进 meta.view）。 */
 	view?: unknown,
 	/** 投影选项（D8：用户主动停止后的迟到 turn/end 不追加 error 气泡——停止被显示为回合失败）。 */
-	opts?: { skipErrorTurnEnd?: boolean },
+	opts?: { skipErrorTurnEnd?: boolean; translate?: ToolDetailTranslate },
 ): DshProjection {
 	const base: DshProjection = prev ?? {
 		messages: [],
@@ -207,6 +213,7 @@ export function projectDshEvent(
 	const type = event.type ?? "?";
 	const data = (event.data ?? {}) as Record<string, unknown>;
 	const seq = typeof event.seq === "number" ? event.seq : 0;
+	const translate = opts?.translate ?? defaultToolDetailTranslate;
 	// 打包行（text-chunks / reasoning-chunks）的序号基准在 seq0（首个成员的 seq）。
 	const seq0 = typeof event.seq0 === "number" ? event.seq0 : seq;
 
@@ -509,6 +516,18 @@ export function projectDshEvent(
 
 				const resultTime = eventTime(event.time);
 				const callTime = typeof target.timestamp === "number" ? target.timestamp : resultTime;
+				const toolName = typeof target.meta?.toolName === "string" ? target.meta.toolName : "tool";
+				// 与 PI 同一套 detailText（工具/状态/参数/结果）；结果正文用已截断的 text，
+				// 超长仍走 meta.fullText + truncated，展开区「查看完整输出」契约不变。
+				const detailText = formatToolDetail(
+					toolName,
+					target.meta?.args,
+					text || undefined,
+					false,
+					translate,
+				);
+				const detailDelivery = truncateDetailWithMeta(detailText, translate);
+				const keepFullText = truncated || detailDelivery.truncated;
 				messages[targetIndex] = {
 					...target,
 					text: text ? `${target.text}: ${text}` : target.text,
@@ -517,12 +536,13 @@ export function projectDshEvent(
 							...target.meta,
 							status: "done",
 							durationMs: Math.max(0, resultTime - callTime),
+							detailText: detailDelivery.text,
 							// host 为结果事件计算的下发 view（dsh-web 历史页同数据）：
-							// 与 call 侧 meta.view 区分存放（resultView），供轨迹/工具卡
+							// 与 call 侧 meta.view 区分存放（resultView），供轨迹面板
 							// 展示输出/退出码/实际 diff 等结果态信息。
 							...(view !== undefined ? { resultView: view } : {}),
 							// 截断标记与完整文本：渲染层 ToolCard 据此显示「查看完整输出」
-							...(truncated ? { truncated: true as const, fullText } : {}),
+							...(keepFullText ? { truncated: true as const, fullText } : {}),
 						}
 						: target.meta,
 				};

@@ -255,6 +255,8 @@ export type SessionTimelineController = {
   markProgrammaticScroll: (durationMs?: number) => void;
   jumpToMessage: (messageId: string) => void;
   scrollToBottom: () => void;
+  /** Receives wheel input from the sibling outline rail without bypassing timeline scroll ownership. */
+  scrollTimelineBy: (deltaY: number) => void;
   /** 最新轮自动收起后，把该轮最终回答开头平滑放到视口中上方；仅仍在跟随时生效。 */
   scrollFinalAnswerToUpperMiddle: (runId: string) => void;
   /** 滚动回调（MessageScroller viewport 接线）：维护会话切换的滚动锚点。 */
@@ -750,6 +752,26 @@ export function useSessionTimelineController(options: {
     });
   }, [ownerKey]);
 
+  /**
+   * The outline rail is a sibling of the scroll viewport, so its wheel event
+   * needs to be forwarded here for the existing scroll lifecycle to observe it.
+   */
+  const scrollTimelineBy = useCallback((deltaY: number) => {
+    const requestOwnerKey = ownerKey;
+    if (
+      !Number.isFinite(deltaY) ||
+      deltaY === 0 ||
+      ownerKeyRef.current !== requestOwnerKey
+    ) return;
+    const api = scrollerScrollApiRef.current;
+    if (api) {
+      api.scrollByWheel(deltaY);
+      return;
+    }
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    timeline.scrollBy({ top: deltaY });
+  }, [ownerKey]);
   /** 标记一次程序化滚动（turn 窗口展开补偿等组件内补偿用），抑制自动加载监听。
    *  durationMs > 0 时按时间窗口抑制：连续 smooth scroll 会派发多个 scroll 事件，
    *  单次 boolean 会在第一个事件就被消费掉，后续事件可能误触发历史加载。 */
@@ -1367,6 +1389,7 @@ lastHistoryLoadAtRef.current = now;
     markProgrammaticScroll,
     jumpToMessage,
     scrollToBottom,
+    scrollTimelineBy,
     scrollFinalAnswerToUpperMiddle,
     /** 滚动回调：维护会话切换用的滚动锚点（rAF 合并，不触发渲染） */
     handleTimelineScroll,
