@@ -665,7 +665,7 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			listRewindCheckpoints: async (target) => ({
 				ok: true,
-				value: { target, value: [] },
+				value: { target, value: { items: [], hasMore: false } },
 			}),
 			getRewindCheckpointDiff: async (target) => ({
 				ok: true,

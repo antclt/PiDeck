@@ -200,7 +200,7 @@ export const ipcChannels = {
 	dshRuntimeStatusChanged: "dsh-runtime:status-changed",
 	/** 按需安装 DSH runtime（从下载源索引挑兼容版本；进度走 dsh-runtime:install-progress）。 */
 	dshRuntimeInstall: "dsh-runtime:install",
-	/** 从本地 tgz 导入 runtime（离线 / 镜像不可达时的兜底）。 */
+	/** 从本地导入 runtime（.tgz 归档或已解压目录；离线 / 镜像不可达时的兜底）。 */
 	dshRuntimeInstallLocal: "dsh-runtime:install-local",
 	/** 卸载已安装的 DSH runtime。 */
 	dshRuntimeUninstall: "dsh-runtime:uninstall",

@@ -201,9 +201,10 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
       }
       let list: RewindCheckpointSummary[];
       try {
+        // rewind-to-message 需要全量最近检查点（无 limit → 后端返回全部）。
         list = requireSessionCommand(
           await desktopApi.sessions.listRewindCheckpoints(target),
-        ).value;
+        ).value.items;
       } catch (error) {
         services.showToast(
           sessionCommandFailureToast(error, (raw) => t("rewind.loadFailed", { error: raw })),

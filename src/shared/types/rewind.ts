@@ -59,6 +59,27 @@ export function isRewindRestoreScope(value: unknown): value is RewindRestoreScop
 }
 
 /**
+ * 检查点列表分页参数（时间倒序翻页，新的在前）。
+ *
+ * limit 默认 10、上限 100；beforeTimestamp 为游标：只返回 timestamp 严格早于
+ * 该值的检查点（用上一页最后一条的 timestamp 翻页），避免 offset 分页在
+ * 列表被新 checkpoint 插入时错位。
+ */
+export type RewindCheckpointPageParams = {
+	/** 每页条数（默认 10，上限 100） */
+	limit?: number;
+	/** 游标：只返回 timestamp 早于该值的检查点 */
+	beforeTimestamp?: number;
+};
+
+/** 检查点列表分页结果。 */
+export type RewindCheckpointPage = {
+	items: RewindCheckpointSummary[];
+	/** 是否还有更早的检查点（决定「加载更多」按钮是否展示） */
+	hasMore: boolean;
+};
+
+/**
  * IPC 边界校验：checkpoint id 必须是指向 ref 名的安全字符。
  * 该值会拼进 `update-ref refs/pi-checkpoints/<id>` 与 rev-parse，必须拒绝
  * 空格/路径分隔符/控制字符，防注入与越界访问其他 ref 命名空间。

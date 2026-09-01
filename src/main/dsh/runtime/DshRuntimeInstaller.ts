@@ -13,6 +13,7 @@ import {
 	type DshRuntimeReleaseIndex,
 } from "../../../shared/types/dshRuntimeManifest";
 import type { DshRuntimeInstallProgress } from "../../../shared/types/dshRuntime";
+import { existsSync, statSync } from "node:fs";
 import type { BundledDshRuntime, DshRuntimeManager } from "./DshRuntimeManager";
 
 /** 拉取下载源索引（返回 null 表示拉不到/解析不了）。 */
@@ -110,12 +111,18 @@ export class DshRuntimeInstaller {
 		return this.finish(result, release.runtimeVersion);
 	}
 
-	/** 手动导入本地 tgz（离线/镜像不可达的兜底；路径由文件对话框给出）。 */
+	/**
+	 * 手动导入本地 runtime（离线/镜像不可达的兜底；路径由文件对话框给出）。
+	 * 支持两种来源：.tgz 归档（走解压落位）与已解压的 runtime 目录（直接校验复制）。
+	 */
 	async installFromLocalFile(filePath: string): Promise<DshRuntimeCommandResult> {
 		this.deps.onProgress({ phase: "verifying", percent: 0 });
-		// 本地导入没有下载源索引，因此拿不到期望 sha256 —— 校验职责落在归档内的
+		// 本地导入没有下载源索引，因此拿不到期望 sha256 —— 校验职责落在归档/目录内的
 		// manifest（schema + 兼容区间 + 关键包齐全），足以挡住「拿错文件」。
-		const result = await this.deps.manager.installFromArchive(filePath);
+		const isDirectory = existsSync(filePath) && statSync(filePath).isDirectory();
+		const result = isDirectory
+			? await this.deps.manager.installFromDirectory(filePath)
+			: await this.deps.manager.installFromArchive(filePath);
 		return this.finish(result, result.ok ? result.manifest.runtimeVersion : undefined);
 	}
 

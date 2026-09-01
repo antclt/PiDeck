@@ -7,7 +7,8 @@ import type {
 	ChatMessage,
 	CreateAgentInput,
 	ImageContent,
-	RewindCheckpointSummary,
+	RewindCheckpointPage,
+	RewindCheckpointPageParams,
 	RewindRestoreResult,
 	RewindRestoreScope,
 	SendPromptInput,
@@ -169,10 +170,13 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		await gateway.deleteMessage?.(agentId, messageId);
 	}
 
-	async listCheckpoints(agentId: string): Promise<RewindCheckpointSummary[]> {
+	async listCheckpoints(
+		agentId: string,
+		params?: RewindCheckpointPageParams,
+	): Promise<RewindCheckpointPage> {
 		const gateway = this.owner(agentId);
 		this.requireCapability(gateway, "listCheckpoints");
-		return gateway.listCheckpoints!(agentId);
+		return gateway.listCheckpoints!(agentId, params);
 	}
 
 	async getCheckpointDiff(agentId: string, checkpointId: string): Promise<string> {

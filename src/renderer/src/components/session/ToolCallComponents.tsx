@@ -350,8 +350,15 @@ export const ToolCard = memo(function ToolCard(props: {
 					{statusBadge}
 					{/* 耗时数字用界面字体（与行头时间/输入框统计条一致），工具名/路径仍走等宽 */}
 					{showDuration && (
-						<span className="shrink-0 text-caption tabular-nums text-text-tertiary" title={t("tool.durationTitle")}>
-							{status === "running" ? (
+						<span
+							className="shrink-0 text-caption tabular-nums text-text-tertiary"
+							title={isAskCard && status === "running" ? t("ask.waitingHint") : t("tool.durationTitle")}
+						>
+							{isAskCard && status === "running" ? (
+								// ask 等待用户回答阶段不计入工具耗时：不展示累加秒表，改用「等待回答…」
+								// 提示。用户回答后 tool_execution_end 落地的 durationMs 已由主进程扣除等待时长。
+								t("ask.waitingForAnswer")
+							) : status === "running" ? (
 								// 工具执行中：从消息时间戳起实时计时（LiveDuration 每秒刷新）
 								<LiveDuration startedAt={props.message.timestamp} isStreaming />
 							) : (

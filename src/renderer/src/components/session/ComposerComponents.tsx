@@ -52,7 +52,6 @@ import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { useComposerModeAvailability } from "../../hooks/useComposerModeAvailability";
 import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
 import { SessionContextMeter } from "./SessionContextMeter";
-import { RewindCheckpointsButton } from "./RewindCheckpointsButton";
 import { ProviderUsageInline } from "../app/ProviderUsageInline";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
@@ -591,13 +590,7 @@ export function ComposerBottomBar(props: {
 					    原独立 compact 按钮移除，避免双入口。 */}
 				</div>
 				<div className="composer-bottom-right ml-auto flex shrink-0 items-center gap-2">
-					{/* 检查点入口：仅 pi 后端渲染（rewind 能力），列表/回退弹层自包含。 */}
-					<RewindCheckpointsButton
-						sessionId={props.sessionId}
-						backend={props.backend}
-						disabled={props.disabled}
-					/>
-					{/* 上下文占用圆环（dsh ContextMeter 移植）：发送按钮旁常驻指示，
+					{/* 上下文占用圆环（dsh ContextMeter 移植）：发送按钮旁常驻指示,
 					    点击展开占用面板（两段占比/缓存命中/输入输出/压缩入口）；
 					    压缩动作从右上角紧凑徽章迁入面板；无 capacity 数据时自身不渲染 */}
 					<SessionContextMeter

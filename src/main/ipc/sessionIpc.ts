@@ -3,7 +3,7 @@
  * Phase 3.7: extracted from src/main/index.ts registerIpc().
  */
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dialog, ipcMain, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import { isDshPermissionPreset } from "../../shared/types/agent";
@@ -29,6 +29,7 @@ import type {
 	DshModelDiscoveryInput,
 	FetchedModel,
 	SessionMessagePage,
+	RewindCheckpointPageParams,
 	ResolveLaunchDefaultsInput,
 	ResolvedLaunchDefaults,
 	ArchivedDshSession,
@@ -127,7 +128,7 @@ export type DshBackendIpcDeps = {
 	canCreateDshSession?: () => boolean;
 	/** 按需安装 DSH runtime（按下载源索引挑兼容版本）；进度经 dsh-runtime:install-progress 推送。 */
 	installDshRuntime?: () => Promise<{ ok: boolean; error?: string }>;
-	/** 从本地 tgz 导入 runtime（离线兜底）；文件路径由主进程对话框给出。 */
+	/** 从本地导入 runtime（.tgz 归档或已解压目录；离线兜底）；文件路径由主进程对话框给出。 */
 	importDshRuntime?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
 	/** 卸载当前启用的 runtime（先停 host 释放文件锁，故为异步）。 */
 	uninstallDshRuntime?: () => Promise<{ ok: boolean; error?: string }>;
@@ -1570,12 +1571,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		// 对话框在主进程弹：渲染层不参与路径选择，也就没有「传任意路径读文件」的入口。
 		const picked = await dialog.showOpenDialog({
 			title: mainCopy("dsh.runtime.pickArchiveTitle"),
+			// 过滤器只影响文件选择；openDirectory 让已解压目录也能被选中。
 			filters: [{ name: "DSH runtime", extensions: ["tgz", "tar.gz"] }],
-			properties: ["openFile"],
+			properties: ["openFile", "openDirectory"],
 		});
 		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
 		const filePath = picked.filePaths[0];
-		if (!filePath || !existsSync(filePath) || !statSync(filePath).isFile()) {
+		// 归档文件或已解压目录都允许（目录由 installer 按类型分流处理）。
+		if (!filePath || !existsSync(filePath)) {
 			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
 		}
 		return importDshRuntime(filePath);
@@ -1741,8 +1744,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	// restore 是变更操作，走 handleSessionCommandResult 留日志。
 	ipcMain.handle(
 		ipcChannels.sessionsRewindList,
-		(_event, target: SessionRuntimeTarget) =>
-			sessionRuntimeCoordinator.listRewindCheckpoints(target),
+		(_event, target: SessionRuntimeTarget, params?: RewindCheckpointPageParams) =>
+			sessionRuntimeCoordinator.listRewindCheckpoints(target, params),
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsRewindDiff,

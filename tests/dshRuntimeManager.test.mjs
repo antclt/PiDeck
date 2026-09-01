@@ -221,6 +221,66 @@ test("installFromArchive：requiredPackages 缺失时拒绝（归档与清单不
 	rmSync(root, { recursive: true, force: true });
 });
 
+test("installFromDirectory：已解压目录直接校验落位，不经过解压", async () => {
+	const { manager, layout, root } = makeManager();
+	const source = join(root, "extracted");
+	stageRuntime(source);
+	const result = await manager.installFromDirectory(source);
+	assert.equal(result.ok, true);
+	assert.equal(result.dirName, "0.1.1-rc.2");
+	assert.equal(existsSync(join(layout.runtimesRoot, "0.1.1-rc.2", "manifest.json")), true);
+	assert.equal(existsSync(join(layout.runtimesRoot, "0.1.1-rc.2", "node_modules")), true);
+	// 来源目录保持不动（复制而非移动）：用户自己的解压目录不能被消费掉
+	assert.equal(existsSync(source), true);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("installFromDirectory：目录内带 dsh-runtime/ 顶层包装时剥掉这一层", async () => {
+	const { manager, layout, root } = makeManager();
+	const parent = join(root, "parent");
+	stageRuntime(join(parent, "dsh-runtime"));
+	const result = await manager.installFromDirectory(parent);
+	assert.equal(result.ok, true);
+	assert.equal(existsSync(join(layout.runtimesRoot, "0.1.1-rc.2", "manifest.json")), true);
+	assert.equal(existsSync(join(layout.runtimesRoot, "0.1.1-rc.2", "dsh-runtime")), false);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("installFromDirectory：manifest 缺失时拒绝，且不落位不残留", async () => {
+	const { manager, layout, root } = makeManager();
+	const source = join(root, "junk");
+	mkdirSync(source, { recursive: true });
+	writeFileSync(join(source, "readme.txt"), "not a runtime");
+	const result = await manager.installFromDirectory(source);
+	assert.equal(result.ok, false);
+	assert.equal(result.error, "manifest missing");
+	assert.equal(existsSync(layout.runtimesRoot), false, "校验失败绝不能落位");
+	const leftovers = existsSync(layout.tempRoot)
+		? readdirSync(layout.tempRoot).filter((name) => name.startsWith("install-"))
+		: [];
+	assert.deepEqual(leftovers, []);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("installFromDirectory：app 版本不兼容时拒绝（防止装了用不了的 runtime）", async () => {
+	const { manager, root } = makeManager();
+	const source = join(root, "extracted");
+	stageRuntime(source, { over: { minAppVersion: "9.0.0", maxAppVersion: "" } });
+	const result = await manager.installFromDirectory(source);
+	assert.equal(result.ok, false);
+	assert.equal(result.error, "app version incompatible");
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("installFromDirectory：路径不存在或不是目录时返回明确错误", async () => {
+	const { manager, root } = makeManager();
+	assert.equal((await manager.installFromDirectory(join(root, "nope"))).error, "directory not found");
+	const file = join(root, "a-file");
+	writeFileSync(file, "x");
+	assert.equal((await manager.installFromDirectory(file)).error, "directory not found");
+	rmSync(root, { recursive: true, force: true });
+});
+
 test("installFromArchive：解压抛错时失败，且暂存目录被清理（不留残骸）", async () => {
 	const { manager, layout, root } = makeManager({
 		extract: async (_archive, destDir) => {

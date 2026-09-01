@@ -3451,8 +3451,8 @@ app.whenReady().then(async () => {
 			sessionRuntimeCoordinator.editRuntimeMessage(target, messageId, newText),
 		deleteSessionRuntimeMessage: (target, messageId) =>
 			sessionRuntimeCoordinator.deleteRuntimeMessage(target, messageId),
-		listRewindCheckpoints: (target) =>
-			sessionRuntimeCoordinator.listRewindCheckpoints(target),
+		listRewindCheckpoints: (target, params) =>
+			sessionRuntimeCoordinator.listRewindCheckpoints(target, params),
 		getRewindCheckpointDiff: (target, checkpointId) =>
 			sessionRuntimeCoordinator.getRewindCheckpointDiff(target, checkpointId),
 		restoreRewindCheckpoint: (target, checkpointId, scope) =>
