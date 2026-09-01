@@ -2534,9 +2534,35 @@ function registerIpc() {
 				if (result.ok) await restartDshHostAfterRuntimeChange();
 				return result;
 			},
-			uninstallDshRuntime: () => {
+			uninstallDshRuntime: async () => {
+				// 卸载会删掉 host 正在用的 runtime 目录：Windows 上 host 的 .node 原生模块
+				// 已映射成 DLL 句柄，进程存活时删目录必报 EPERM（文件被占用）。所以先停
+				// 活跃会话、杀掉 host 释放文件锁，再删；删完若原本在用 DSH 就把 host 拉回
+				// 来（删失败时旧目录还在，重启 fork 仍走旧 runtime，用户可稍后重试卸载）。
+				const wasRunning = dshHost.isStarted() || dshHost.isHostProcessRunning();
+				if (wasRunning) {
+					try {
+						// 会话只在 boot 完成后才存在（isStarted 为真时停）；进程存活就杀。
+						if (dshHost.isStarted()) await dshAgentManager.stopAll();
+						await dshHost.restart();
+					} catch (error) {
+						// 停 host 失败不阻塞卸载：rmSync 自带重试，锁仍在则返回结构化错误。
+						void appLogger?.warn("dsh-runtime", "stop host before uninstall failed", {
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
 				const result = dshRuntimeInstaller.uninstall();
 				dshRuntimeStatus.refresh();
+				if (wasRunning) {
+					try {
+						await dshHost.ensureStarted();
+					} catch (error) {
+						void appLogger?.warn("dsh-runtime", "restart host after runtime uninstall failed", {
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
 				return result;
 			},
 			describeDshSettings: () => dshHost.describeSettings(),

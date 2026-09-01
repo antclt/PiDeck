@@ -436,7 +436,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		// focusProvider/focusConfigTab 变化即应用：设置窗口已开时点圆球跳转也要生效。
 	}, [open, focusConfigTab, focusProvider]);
 	/** 配置管理顶层后端分页：以 Pi 为主（默认 Pi，且 Pi 标签在左），dsh 页在右。
-	 *  新建会话仍默认 dsh 是运行态偏好，与此处配置管理入口默认值相互独立。
+	 *  新建会话默认后端跟随设置项 defaultAgentBackend（默认 pi），与此处配置管理入口相互独立。
 	 *  弹窗每次打开都会重建 state，这里从 localStorage 恢复上次选定的后端分页。 */
 	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(focusBackendPane ?? loadLastConfigBackendPane);
 	/** 切换后端分页并持久化：退出配置管理再进入时停留在上次选定的后端。 */

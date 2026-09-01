@@ -198,7 +198,7 @@ export function ExtensionWidgetCard(props: {
 	);
 }
 
-/** 输入框底栏的后端选择下拉（pi / dsh）：默认 dsh，官方 logo 区分。
+/** 输入框底栏的后端选择下拉（pi / dsh）：跟随会话后端（新建会话默认 pi，由设置项 defaultAgentBackend 决定）。
  * 触发区只显示当前后端 logo（不再带文字）；下拉选项保留文字便于选择时区分。 */
 export function ComposerBackendPicker(props: {
 	backend: AgentBackend;

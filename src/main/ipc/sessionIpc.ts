@@ -129,8 +129,8 @@ export type DshBackendIpcDeps = {
 	installDshRuntime?: () => Promise<{ ok: boolean; error?: string }>;
 	/** 从本地 tgz 导入 runtime（离线兜底）；文件路径由主进程对话框给出。 */
 	importDshRuntime?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
-	/** 卸载当前启用的 runtime。 */
-	uninstallDshRuntime?: () => { ok: boolean; error?: string };
+	/** 卸载当前启用的 runtime（先停 host 释放文件锁，故为异步）。 */
+	uninstallDshRuntime?: () => Promise<{ ok: boolean; error?: string }>;
 	/** DSH settings.describe（脱敏 namespace 视图 + schema）。 */
 	describeDshSettings?: () => Promise<{
 		writable: boolean;
