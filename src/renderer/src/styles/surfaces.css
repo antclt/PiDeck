@@ -1954,38 +1954,6 @@
   padding-right: 38px;
 }
 
-
-
-
-
-
-.config-copy-btn {
-  height: var(--control-height-md);
-  padding: 0 10px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-panel);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-  cursor: pointer;
-  transition:
-    background-color 0.15s,
-    border-color 0.15s,
-    color 0.15s;
-  white-space: nowrap;
-}
-
-.config-copy-btn:hover {
-  background: var(--color-bg-hover);
-  border-color: var(--color-border-strong);
-}
-
-.config-copy-btn.copied {
-  background: var(--color-bg-active);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
 .config-models-section {
   /* 模型列表是展开区的第二个业务分组，独立成面板以避免裸表格观感。 */
   margin: 0 16px 16px;

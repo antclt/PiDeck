@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MouseEvent } from "react";
-import { Check, Eye, EyeOff, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Copy, Eye, EyeOff } from "lucide-react";
 import { t } from "../i18n";
 import { writeClipboard } from "../utils/clipboard";
 import { PROVIDER_API_OPTIONS, API_TYPE_LABELS, getApiTypeDescription } from "./providerHeaders";
@@ -25,26 +25,32 @@ export function openDocsInSystemBrowser(url: string) {
 
 export function CopyButton(props: { text: string }) {
 	const [copied, setCopied] = useState(false);
+	const resetTimer = useRef<number | null>(null);
+	useEffect(() => () => {
+		if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+	}, []);
 	const handleCopy = async (e: MouseEvent) => {
 		e.stopPropagation();
 		await writeClipboard(props.text);
+		if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
 		setCopied(true);
-		setTimeout(() => setCopied(false), 1500);
+		resetTimer.current = window.setTimeout(() => {
+			resetTimer.current = null;
+			setCopied(false);
+		}, 1500);
 	};
 	return (
-		<button
-			className={`config-copy-btn ${copied ? "copied" : ""}`}
+		<Button
+			type="button"
+			variant="ghost"
+			size="icon-sm"
+			className="size-7"
 			onClick={handleCopy}
-			title={t("common.copy")}
+			title={copied ? t("common.copied") : t("common.copy")}
+			aria-label={copied ? t("common.copied") : t("common.copy")}
 		>
-			{copied ? (
-				<>
-					<Check size={14} /> {t("terminal.copied")}
-				</>
-			) : (
-				t("common.copy")
-			)}
-		</button>
+			{copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+		</Button>
 	);
 }
 
@@ -65,13 +71,15 @@ export function SecretInput(props: {
 				className="h-8 min-w-0 flex-1 rounded-sm border border-border-subtle bg-bg-panel px-3 font-mono text-control text-text-primary outline-none transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
 			/>
 			<Button
-				variant="outline"
+				type="button"
+				variant="ghost"
 				size="icon-sm"
-				className="size-9 rounded-sm"
+				className="size-7"
 				onClick={() => setVisible(!visible)}
 				title={visible ? t("common.hide") : t("common.show")}
+				aria-label={visible ? t("common.hide") : t("common.show")}
 			>
-				{visible ? <EyeOff size={15} /> : <Eye size={15} />}
+				{visible ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
 			</Button>
 			<CopyButton text={props.value} />
 		</div>
