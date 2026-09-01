@@ -331,6 +331,11 @@ export type AppSettings = {
 	 * settings.json 作跨 renderer origin / dev 强杀的可靠恢复来源。缺省为 chats。
 	 */
 	sidebarNavTab?: "active" | "chats" | "projects";
+	/**
+	 * 侧栏中置顶的会话记录 id。SessionRecord.id 跨重启稳定；缺失或已删除的 id
+	 * 在展示时安全忽略，避免修改 pi 会话文件或把短生命周期 agentId 持久化。
+	 */
+	pinnedSessionIds?: string[];
 
 	// ── 扩展管理 ──
 	/**

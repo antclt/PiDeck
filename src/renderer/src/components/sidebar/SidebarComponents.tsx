@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { Archive, Boxes, Check, CircleAlert, CircleDot, Code2, Copy, Download, FileDown, FileText, Filter, Folder, FolderSearch, GitBranch, Link2, List, LoaderCircle, MessageCircle, Pencil, Plus, Power, Radio, RefreshCw, RotateCw, ScrollText, Settings2, SquarePen, Trash2, UserPlus, XCircle } from "lucide-react";
+import { Archive, Boxes, Check, CircleAlert, CircleDot, Code2, Copy, Download, FileDown, FileText, Filter, Folder, FolderSearch, GitBranch, Link2, List, LoaderCircle, MessageCircle, Pencil, Pin, PinOff, Plus, Power, Radio, RefreshCw, RotateCw, ScrollText, Settings2, SquarePen, Trash2, UserPlus, XCircle } from "lucide-react";
 import { t } from "../../i18n";
 import {
 	AlertDialog,
@@ -702,6 +702,8 @@ export function AgentContextMenu(props: {
 	actionLoading?: "copy" | "export" | null;
 	onClose: () => void;
 	onRename: () => void;
+	isPinned?: boolean;
+	onTogglePinned?: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
@@ -730,6 +732,14 @@ export function AgentContextMenu(props: {
 				<Pencil className="size-3.5" aria-hidden="true" />
 				{t("common.rename")}
 			</DropdownMenuItem>
+			{props.onTogglePinned && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onTogglePinned}>
+					{props.isPinned
+						? <PinOff className="size-3.5" aria-hidden="true" />
+						: <Pin className="size-3.5" aria-hidden="true" />}
+					{t(props.isPinned ? "menu.unpinSession" : "menu.pinSession")}
+				</DropdownMenuItem>
+			)}
 			{/* DSH 运行中会话的复制走 clone 分流（fork 无锚点完整副本），保留入口；
 			    导出 HTML 无 DSH 实现（G10 待决策），对 dsh agent 隐藏 */}
 			<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
@@ -828,6 +838,8 @@ export function SessionContextMenu(props: {
 	actionLoading?: "copy" | "export" | null;
 	onClose: () => void;
 	onRename: () => void;
+	isPinned?: boolean;
+	onTogglePinned?: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
 	onCopySessionFilePath: () => void;
@@ -861,6 +873,14 @@ export function SessionContextMenu(props: {
 				<Pencil className="size-3.5" aria-hidden="true" />
 				{t("common.rename")}
 			</DropdownMenuItem>
+			{props.onTogglePinned && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onTogglePinned}>
+					{props.isPinned
+						? <PinOff className="size-3.5" aria-hidden="true" />
+						: <Pin className="size-3.5" aria-hidden="true" />}
+					{t(props.isPinned ? "menu.unpinSession" : "menu.pinSession")}
+				</DropdownMenuItem>
+			)}
 			{props.onRestartSession && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onRestartSession}>
 					<span className="inline-flex items-center gap-2">

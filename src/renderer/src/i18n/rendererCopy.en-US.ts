@@ -2428,6 +2428,8 @@ export const enUS: Record<TranslationKey, string> = {
   "menu.closeAgent": "Close Agent",
   "menu.restartSession": "Restart Session",
   "menu.reloadSession": "Reload Session",
+  "menu.pinSession": "Pin Session",
+  "menu.unpinSession": "Unpin Session",
   "menu.copySession": "Copy Session",
   "menu.sessionProxy": "Session proxy",
   "menu.archiveSession": "Archive Session",
