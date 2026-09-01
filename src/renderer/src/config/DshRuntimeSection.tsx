@@ -44,6 +44,9 @@ export function DshRuntimeSection({
 	const { phase, percent, error } = useAtomValue(dshInstallProgressAtom);
 	const setProgress = useSetAtom(dshInstallProgressAtom);
 	const [uninstallOpen, setUninstallOpen] = useState(false);
+	// 卸载无阶段进度可推（主进程只返回布尔结果），用本地 state 表达 busy：
+	// 停 host → 删目录 → 拉起 host 可能耗时数秒，期间必须给用户转圈反馈。
+	const [uninstalling, setUninstalling] = useState(false);
 
 	const run = useCallback(async (kind: "online" | "local") => {
 		// 先落乐观进度：主进程首个 install-progress 推送到达前不让按钮无反馈。
@@ -64,14 +67,22 @@ export function DshRuntimeSection({
 
 	const handleUninstall = useCallback(async () => {
 		setUninstallOpen(false);
-		const result = await desktopApi.sessions.uninstallDshRuntime();
-		if (result.ok) showNotice(t("settings.dshRuntimeUninstalled"), 3000);
-		else showNotice(result.error ?? t("settings.dshRuntimeUninstall"), 4000, "error");
+		setUninstalling(true);
+		try {
+			const result = await desktopApi.sessions.uninstallDshRuntime();
+			if (result.ok) showNotice(t("settings.dshRuntimeUninstalled"), 3000);
+			else showNotice(result.error ?? t("settings.dshRuntimeUninstall"), 4000, "error");
+		} finally {
+			setUninstalling(false);
+		}
 	}, []);
 
 	const broken = status.state === "broken";
 	const notInstalled = status.state === "notInstalled";
-	const busy = phase !== null && phase !== "done" && phase !== "error";
+	// busy = 安装进度进行中（下载/校验/解压/落位）或卸载进行中（本地 state）。
+	const busy = (phase !== null && phase !== "done" && phase !== "error") || uninstalling;
+	// busy 里多了 uninstalling 分支后，TS 无法再从 busy 反推 phase 非空，这里直接收窄 phase。
+	const phaseLabel = phase ? (PHASE_LABEL[phase] ?? "") : "";
 	const installed = status.state === "installed";
 
 	// 已安装形态：版本 + 目录 + 管理操作（内置只读展示）。
@@ -111,17 +122,17 @@ export function DshRuntimeSection({
 						</div>
 					) : null}
 					<div className="flex flex-wrap items-center gap-2">
-						<Button size="sm" className="gap-1.5" onClick={() => void run("online")}>
+						<Button size="sm" className="gap-1.5" disabled={busy} onClick={() => void run("online")}>
 							<Download className="size-3.5" />
 							{t("dsh.runtime.reinstall")}
 						</Button>
 						{/* 手动导入：镜像不可达 / 离线场景的兜底，对话框由主进程弹出。 */}
-						<Button size="sm" variant="outline" className="gap-1.5" onClick={() => void run("local")}>
+						<Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={() => void run("local")}>
 							<FolderOpen className="size-3.5" />
 							{t("dsh.runtime.importLocal")}
 						</Button>
 						{status.source === "managed" ? (
-							<Button size="sm" variant="outline" className="gap-1.5 text-destructive" onClick={() => setUninstallOpen(true)}>
+							<Button size="sm" variant="outline" className="gap-1.5 text-destructive" disabled={busy} onClick={() => setUninstallOpen(true)}>
 								<Trash2 className="size-3.5" />
 								{t("settings.dshRuntimeUninstall")}
 							</Button>
@@ -131,10 +142,11 @@ export function DshRuntimeSection({
 						<div className="mt-1 flex w-full flex-col items-center gap-2">
 							<div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
 								<LoaderCircle className="size-3.5 animate-spin" />
-								{PHASE_LABEL[phase] ? t(PHASE_LABEL[phase] as never) : ""}
+								{uninstalling ? t("dsh.runtime.phase.uninstalling") : phaseLabel}
 							</div>
-							<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-								<div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+							{/* 卸载没有可换算的百分比，只显示不确定进度条。 */}
+							<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={uninstalling ? undefined : percent} aria-valuemin={0} aria-valuemax={100}>
+								<div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${uninstalling ? 40 : Math.max(0, Math.min(100, percent))}%` }} />
 							</div>
 						</div>
 					) : null}
@@ -177,10 +189,10 @@ export function DshRuntimeSection({
 					<div className="flex w-full flex-col items-center gap-2">
 						<div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
 							<LoaderCircle className="size-3.5 animate-spin" />
-							{PHASE_LABEL[phase] ? t(PHASE_LABEL[phase] as never) : ""}
+							{uninstalling ? t("dsh.runtime.phase.uninstalling") : phaseLabel}
 						</div>
-						<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-							<div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+						<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={uninstalling ? undefined : percent} aria-valuemin={0} aria-valuemax={100}>
+							<div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${uninstalling ? 40 : Math.max(0, Math.min(100, percent))}%` }} />
 						</div>
 					</div>
 				) : (

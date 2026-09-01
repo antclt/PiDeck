@@ -160,19 +160,19 @@ test("installFromLocalFile：目录导入失败时同样给出 error 进度", as
 	rmSync(dir, { recursive: true, force: true });
 });
 
-test("uninstall：卸载当前启用版本；没装时返回明确错误", () => {
+test("uninstall：卸载当前启用版本；没装时返回明确错误", async () => {
 	const { installer, calls } = makeInstaller({
 		manager: { resolveActive: { dirName: "0.1.1-rc.2", nodeModules: "x" } },
 	});
-	assert.equal(installer.uninstall().ok, true);
+	assert.equal((await installer.uninstall()).ok, true);
 	assert.deepEqual(calls.uninstall, ["0.1.1-rc.2"]);
 
 	const empty = makeInstaller();
-	assert.equal(empty.installer.uninstall().error, "no runtime installed");
+	assert.equal((await empty.installer.uninstall()).error, "no runtime installed");
 	assert.equal(empty.calls.uninstall.length, 0);
 });
 
-test("uninstall：manager 抛错（文件被占用）时收口成结构化错误，不再裸抛", () => {
+test("uninstall：manager 抛错（文件被占用）时收口成结构化错误，不再裸抛", async () => {
 	const { installer, calls } = makeInstaller({
 		manager: {
 			resolveActive: { dirName: "0.1.1-rc.2", nodeModules: "x" },
@@ -183,7 +183,7 @@ test("uninstall：manager 抛错（文件被占用）时收口成结构化错误
 	});
 	// 复现回归：manager.uninstall 重试耗尽后抛 EPERM，installer 必须转成
 	// { ok:false, error }，不能让裸异常跨 IPC 变成「未处理异常」。
-	const result = installer.uninstall();
+	const result = await installer.uninstall();
 	assert.equal(result.ok, false);
 	assert.match(result.error, /EPERM/);
 	assert.deepEqual(calls.uninstall, ["0.1.1-rc.2"]);

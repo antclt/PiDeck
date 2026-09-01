@@ -15,7 +15,10 @@
  * 下载与解压是可注入的（测试用替身，不依赖真实网络/文件系统布局）。
  */
 import { createHash } from "node:crypto";
-import { cpSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+// 大目录的复制/删除/改名必须走异步版：runtime 目录有数万个小文件（约 150MB），
+// 用 cpSync/rmSync 会同步阻塞主进程事件循环，安装/卸载期间整个 UI 卡死。
+import { cp, rename, rm } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import {
 	DSH_RUNTIME_ARCHIVE_ROOT,
@@ -232,14 +235,15 @@ export class DshRuntimeManager {
 		const staging = join(this.deps.layout.tempRoot, `install-${Date.now()}`);
 		try {
 			options.onPhase?.("extracting");
-			cpSync(sourceRoot, staging, { recursive: true });
+			// 异步复制来源目录（数万文件），避免 cpSync 阻塞主进程事件循环。
+			await cp(sourceRoot, staging, { recursive: true });
 
 			options.onPhase?.("finalizing");
 			const target = this.versionDir(sourceManifest.runtimeVersion);
 			// 同版本已存在：先清掉再 rename（rename 到非空目录在 Windows 会失败）。
-			rmSync(target, { recursive: true, force: true });
+			await rm(target, { recursive: true, force: true });
 			mkdirSync(this.deps.layout.runtimesRoot, { recursive: true });
-			renameSync(staging, target);
+			await rename(staging, target);
 			log("dsh-runtime", "runtime installed from directory", {
 				version: sourceManifest.runtimeVersion,
 			});
@@ -249,7 +253,7 @@ export class DshRuntimeManager {
 			log("dsh-runtime", "runtime install from directory failed", { error: message });
 			return { ok: false, error: message };
 		} finally {
-			rmSync(staging, { recursive: true, force: true });
+			await rm(staging, { recursive: true, force: true });
 		}
 	}
 
@@ -291,9 +295,9 @@ export class DshRuntimeManager {
 			options.onPhase?.("finalizing");
 			const target = this.versionDir(manifest.runtimeVersion);
 			// 同版本已存在：先清掉再 rename（rename 到非空目录在 Windows 会失败）。
-			rmSync(target, { recursive: true, force: true });
+			await rm(target, { recursive: true, force: true });
 			mkdirSync(this.deps.layout.runtimesRoot, { recursive: true });
-			renameSync(root, target);
+			await rename(root, target);
 			log("dsh-runtime", "runtime installed", { version: manifest.runtimeVersion });
 			return { ok: true, dirName: manifest.runtimeVersion, manifest };
 		} catch (error) {
@@ -301,7 +305,7 @@ export class DshRuntimeManager {
 			log("dsh-runtime", "runtime install failed", { error: message });
 			return { ok: false, error: message };
 		} finally {
-			rmSync(staging, { recursive: true, force: true });
+			await rm(staging, { recursive: true, force: true });
 		}
 	}
 
@@ -323,20 +327,21 @@ export class DshRuntimeManager {
 			this.deps.log?.("dsh-runtime", "runtime download failed", { error: message });
 			return { ok: false, error: message };
 		} finally {
-			rmSync(archivePath, { recursive: true, force: true });
+			await rm(archivePath, { recursive: true, force: true });
 		}
 	}
 
 	/** 卸载指定版本目录（当前启用的也可卸，卸载后状态服务会退回 notInstalled）。 */
-	uninstall(dirName: string): boolean {
+	async uninstall(dirName: string): Promise<boolean> {
 		const target = join(this.deps.layout.runtimesRoot, dirName);
 		if (!existsSync(target)) return false;
 		try {
 			// Windows 上运行中进程（DSH host 持 .node 原生模块 DLL 句柄）、杀软扫描、
 			// 资源管理器打开目录都会让 rm 抛 EPERM/EBUSY。这类占用大多是瞬时锁，
-			// 用 rmSync 内置的线性退避重试（EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM）
+			// 用 fs/promises.rm 的线性退避重试（EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM）
 			// 吸收；占用持续到重试耗尽才抛错，由调用方转成结构化结果。
-			rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+			// 异步删除：整个 runtime 目录数万小文件，rmSync 会阻塞主进程事件循环。
+			await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 			this.deps.log?.("dsh-runtime", "runtime uninstalled", { dirName });
 			return true;
 		} catch (error) {

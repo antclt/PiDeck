@@ -48,10 +48,12 @@
   /*
    * 会话正文行高：无单位倍率，随 --font-size-chat 各档缩放。
    * 旧值散落写成 1.68（15px → 25.2px），段落偏疏、扫描密度低于 Codex/Cursor
-   *（对话区常见 1.45–1.55）和 Claude Desktop（约 1.6）。取 1.5（15px → 22.5px）
-   * 作为中英混排可读与精致密度的折中；不要对 CJK 正文设负 letter-spacing。
+   *（对话区常见 1.45–1.55）和 Claude Desktop（约 1.6）。2026 曾取 1.5（15px → 22.5px）
+   * 作中英混排可读与精致密度的折中；后按 beui 流式消息观感（leading-6≈1.71）放宽到
+   * 1.6（15px → 24px），段落更舒展、列表/标题层次更清晰，同时避免超大行高稀释扫描密度。
+   * 不要对 CJK 正文设负 letter-spacing。
    */
-  --line-height-chat: 1.5;
+  --line-height-chat: 1.6;
   --font-size-input: 14px;
   --font-size-title: 16px;
   --font-size-brand: 18px;

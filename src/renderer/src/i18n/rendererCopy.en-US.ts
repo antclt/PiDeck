@@ -1380,6 +1380,7 @@ export const enUS: Record<TranslationKey, string> = {
   "dsh.runtime.phase.verifying": "Verifying archive…",
   "dsh.runtime.phase.extracting": "Extracting…",
   "dsh.runtime.phase.finalizing": "Finalizing…",
+  "dsh.runtime.phase.uninstalling": "Uninstalling runtime…",
   "dsh.runtime.installHint": "The runtime is downloaded once, the first time you use DSH. Skipping it leaves the pi backend fully working.",
   "dsh.runtime.installDir": "Install directory",
   "dsh.runtime.notInstalledCreate": "DSH backend is not installed; the session was created with the pi backend instead.",

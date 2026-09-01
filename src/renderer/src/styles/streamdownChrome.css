@@ -19,11 +19,13 @@
    选择器必须比 .space-y-4 > :not(:last-child) 更具体，否则标题上边距会被冲成 0。 */
 .markdown-body :is(.space-y-4) > :not(:last-child):not([data-streamdown^="heading-"]):not([data-streamdown$="-list"]):not([data-streamdown="horizontal-rule"]):not([data-streamdown="blockquote"]):not([data-streamdown="code-block"]):not([data-streamdown="table-wrapper"]) {
   margin-block-start: 0;
-  margin-block-end: 0.55em;
+  /* 段间呼吸（beui 流式消息 p+p 上方 12px 同档）：0.55em（≈8px @15px）偏密，放宽到 0.7em（≈10.5px）。 */
+  margin-block-end: 0.7em;
 }
 .markdown-body :is(.space-y-4) > [data-streamdown^="heading-"] {
-  margin-top: 1.1em;
-  margin-bottom: 0.35em;
+  /* 标题上下留白微增（1.1/0.35→1.3/0.45），分级更醒目；行高 1.3 保持不变。 */
+  margin-top: 1.3em;
+  margin-bottom: 0.45em;
   font-weight: 600;
   line-height: 1.3;
   letter-spacing: -0.012em;
@@ -52,18 +54,20 @@
 .markdown-body [data-streamdown="ordered-list"],
 .markdown-body [data-streamdown="unordered-list"] {
   list-style-position: outside;
-  margin: 0.4em 0 0.65em;
-  padding-left: 1.35em;
+  /* 列表上下边距加大、缩进放宽（1.35→1.5em），多条列表更易逐条扫读（beui pl-5 + my-3）。 */
+  margin: 0.55em 0 0.75em;
+  padding-left: 1.5em;
 }
 .markdown-body [data-streamdown="list-item"] {
-  margin: 0.12em 0;
+  /* 列表项行间留白略增（0.12em→0.2em）。 */
+  margin: 0.2em 0;
   padding-block: 0;
 }
 .markdown-body [data-streamdown="horizontal-rule"] {
   margin-block: 1.1em;
 }
 .markdown-body [data-streamdown="blockquote"] {
-  margin-block: 0.55em;
+  margin-block: 0.7em;
   padding: 0.45em 0.85em;
 }
 

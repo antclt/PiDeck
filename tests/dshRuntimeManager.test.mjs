@@ -339,9 +339,9 @@ test("resolveActive 按兼容区间选版本；uninstall 后回到未安装", as
 	const active = manager.resolveActive();
 	assert.equal(active.dirName, "0.1.1-rc.2");
 	assert.equal(active.nodeModules, join(layout.runtimesRoot, "0.1.1-rc.2", "node_modules"));
-	assert.equal(manager.uninstall("0.1.1-rc.2"), true);
+	assert.equal(await manager.uninstall("0.1.1-rc.2"), true);
 	assert.equal(manager.resolveActive(), undefined);
-	assert.equal(manager.uninstall("0.1.1-rc.2"), false, "重复卸载返回 false");
+	assert.equal(await manager.uninstall("0.1.1-rc.2"), false, "重复卸载返回 false");
 	rmSync(root, { recursive: true, force: true });
 });
 

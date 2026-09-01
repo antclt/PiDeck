@@ -127,11 +127,11 @@ export class DshRuntimeInstaller {
 	}
 
 	/** 卸载当前启用的 runtime（卸载后状态服务会退回 notInstalled）。 */
-	uninstall(): DshRuntimeCommandResult {
+	async uninstall(): Promise<DshRuntimeCommandResult> {
 		const active = this.deps.manager.resolveActive();
 		if (!active) return { ok: false, error: "no runtime installed" };
 		try {
-			this.deps.manager.uninstall(active.dirName);
+			await this.deps.manager.uninstall(active.dirName);
 			return { ok: true };
 		} catch (error) {
 			// manager.uninstall 在重试耗尽（文件被持续占用，如 DSH host 未停、杀软锁句柄）

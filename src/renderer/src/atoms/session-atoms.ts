@@ -882,7 +882,9 @@ function toAgentUiRequest(
         if (
           typeof typed.id !== "string" ||
           typeof typed.question !== "string" ||
-          !["select", "confirm", "input", "editor"].includes(String(typed.type))
+          // 与主进程/飞书 envelope 白名单同构：multi_select 也走批量信封，
+          // 这里漏放行会导致选项组件整体不渲染（2026-09 回归）。
+          !["select", "multi_select", "confirm", "input", "editor"].includes(String(typed.type))
         ) {
           return questions;
         }

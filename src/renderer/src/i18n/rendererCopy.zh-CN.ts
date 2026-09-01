@@ -1374,6 +1374,7 @@ export const zhCN = {
   "dsh.runtime.phase.verifying": "正在校验归档…",
   "dsh.runtime.phase.extracting": "正在解压…",
   "dsh.runtime.phase.finalizing": "正在落位…",
+  "dsh.runtime.phase.uninstalling": "正在卸载 runtime…",
   "dsh.runtime.installHint": "runtime 只在你首次使用 DSH 时下载一次；不安装不影响 pi 后端。",
   "dsh.runtime.installDir": "安装目录",
   "dsh.runtime.notInstalledCreate": "DSH 后端未安装，已改用 pi 后端创建会话。",

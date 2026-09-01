@@ -257,9 +257,13 @@ test("AgentManager/飞书 envelope 白名单接受 multi_select 批量问题", (
 	// multi_select 走批量 envelope，主进程与飞书两处同构解析都必须放行该类型
 	const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 	const askCard = readFileSync("src/main/feishu/AskCard.ts", "utf8");
+	// 渲染端 toAgentUiRequest 白名单也必须同构放行，否则 multi_select 选项不渲染
+	// （2026-09 回归：主进程放行、渲染端过滤导致选项组件整体消失）。
+	const sessionAtoms = readFileSync("src/renderer/src/atoms/session-atoms.ts", "utf8");
 	const whiteList = /\["select", "multi_select", "confirm", "input", "editor"\]\.includes\(String\(typed\.type\)\)/;
 	assert.match(agentManager, whiteList);
 	assert.match(askCard, whiteList);
+	assert.match(sessionAtoms, whiteList);
 });
 
 test("AgentManager select 无选项降级为 input（不静默取消）", () => {

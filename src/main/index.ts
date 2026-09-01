@@ -2552,7 +2552,7 @@ function registerIpc() {
 						});
 					}
 				}
-				const result = dshRuntimeInstaller.uninstall();
+				const result = await dshRuntimeInstaller.uninstall();
 				dshRuntimeStatus.refresh();
 				if (wasRunning) {
 					try {
