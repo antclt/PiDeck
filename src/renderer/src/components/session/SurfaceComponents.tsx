@@ -20,7 +20,7 @@ import { writeClipboardImage } from "../../utils/clipboard";
 import { MarkdownStream } from "./MarkdownStream";
 import { PreviewRail, type PreviewRailItem } from "../motion/preview-rail";
 import { planRailTicks } from "./timeline/outlineRailTicks";
-import { resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
+import { areOutlineRailItemsEqual, createOutlineItemIndex, resolveVisibleRailActiveId } from "./timeline/outlineRailActive";
 import { useTimelineOutlineActiveId } from "./timeline/useTimelineOutlineActiveId";
 import { useAtomValue } from "jotai";
 import "katex/dist/katex.min.css";
@@ -1409,13 +1409,26 @@ export { MultiSelectModal };
  * 高度自适应：容器被 .outline-hover 的 top/bottom 双向夹持出可用高度，刻度间距
  * 按条数收缩；间距压到下限仍放不下时均匀抽稀，但首尾刻度强制保留（planRailTicks）。
  */
-export function ConversationOutline(props: {
+type ConversationOutlineProps = {
 	className?: string;
 	timelineRef?: RefObject<HTMLElement | null>;
 	onTimelineWheel?: (deltaY: number) => void;
 	items: Array<{ id: string; role: string; title: string; time: string }>;
 	onJump: (id: string) => void;
-}) {
+};
+
+function areConversationOutlinePropsEqual(
+	previous: ConversationOutlineProps,
+	next: ConversationOutlineProps,
+): boolean {
+	return previous.className === next.className &&
+		previous.timelineRef === next.timelineRef &&
+		previous.onTimelineWheel === next.onTimelineWheel &&
+		previous.onJump === next.onJump &&
+		areOutlineRailItemsEqual(previous.items, next.items);
+}
+
+function ConversationOutlineView(props: ConversationOutlineProps) {
 	// The visible timeline checkpoint owns rail feedback; clicking a tick updates it immediately.
 	const [railActiveId, setRailActiveId] = useTimelineOutlineActiveId(props.timelineRef, props.items);
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -1445,9 +1458,10 @@ export function ConversationOutline(props: {
 			})),
 		[plan.items],
 	);
+	const outlineItemIndex = useMemo(() => createOutlineItemIndex(props.items), [props.items]);
 	const visibleRailActiveId = useMemo(
-		() => resolveVisibleRailActiveId(railActiveId, props.items, plan.items),
-		[railActiveId, props.items, plan.items],
+		() => resolveVisibleRailActiveId(railActiveId, outlineItemIndex, plan.items),
+		[railActiveId, outlineItemIndex, plan.items],
 	);
 
 	const handleTimelineWheel = useCallback(
@@ -1488,6 +1502,11 @@ export function ConversationOutline(props: {
 		</div>
 	);
 }
+
+export const ConversationOutline = memo(
+	ConversationOutlineView,
+	areConversationOutlinePropsEqual,
+);
 
 export { DrawerContent, SessionFileSummary, SessionHistoryModal } from "./WorkspaceSurface";
 

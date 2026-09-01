@@ -1,9 +1,8 @@
 /**
  * Pure selection rules for the session outline rail.
  *
- * The rail only renders user-message checkpoints. The active checkpoint follows
- * the last one at or above the viewport anchor, falling back to the first one
- * below the anchor when the viewport starts before the first checkpoint.
+ * Positions are measured in timeline content coordinates, so scroll handling can
+ * locate the active checkpoint without reading message DOM geometry every frame.
  */
 export type OutlineItemWithId = {
   id: string;
@@ -14,19 +13,69 @@ export type OutlineItemPosition = {
   top: number;
 };
 
+export type OutlineItemIndex = ReadonlyMap<string, number>;
+export type OutlineRailItem = OutlineItemWithId & {
+  role: string;
+  title: string;
+  time: string;
+};
+
+export function areOutlineRailItemsEqual(
+  previous: readonly OutlineRailItem[],
+  next: readonly OutlineRailItem[],
+): boolean {
+  if (previous === next) return true;
+  if (previous.length !== next.length) return false;
+  for (let index = 0; index < previous.length; index += 1) {
+    const left = previous[index]!;
+    const right = next[index]!;
+    if (
+      left.id !== right.id ||
+      left.role !== right.role ||
+      left.title !== right.title ||
+      left.time !== right.time
+    ) return false;
+  }
+  return true;
+}
+
+export function createOutlineItemIndex<T extends OutlineItemWithId>(
+  items: readonly T[],
+): OutlineItemIndex {
+  const indexById = new Map<string, number>();
+  for (let index = 0; index < items.length; index += 1) {
+    indexById.set(items[index]!.id, index);
+  }
+  return indexById;
+}
+
+/**
+ * Returns the last checkpoint at or above the viewport anchor. Positions must
+ * be finite and sorted from top to bottom, which makes the scroll hot path a
+ * binary search instead of a full message-DOM scan.
+ */
 export function resolveActiveOutlineItemId(
   positions: readonly OutlineItemPosition[],
   anchorOffset: number,
 ): string | undefined {
-  let activeId: string | undefined;
+  let low = 0;
+  let high = positions.length - 1;
+  let activeIndex = -1;
 
-  for (const position of positions) {
-    if (!Number.isFinite(position.top)) continue;
-    if (position.top > anchorOffset) return activeId ?? position.id;
-    activeId = position.id;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const position = positions[middle]!;
+    if (position.top <= anchorOffset) {
+      activeIndex = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
   }
 
-  return activeId;
+  return activeIndex >= 0
+    ? positions[activeIndex]!.id
+    : positions[0]?.id;
 }
 
 /**
@@ -35,23 +84,19 @@ export function resolveActiveOutlineItemId(
  */
 export function resolveVisibleRailActiveId<T extends OutlineItemWithId>(
   activeId: string | undefined,
-  sourceItems: readonly T[],
+  sourceIndexById: OutlineItemIndex,
   railItems: readonly T[],
 ): string | undefined {
   if (!activeId) return undefined;
 
-  const sourceIndex = sourceItems.findIndex((item) => item.id === activeId);
-  if (sourceIndex < 0) return undefined;
-  if (railItems.some((item) => item.id === activeId)) return activeId;
+  const sourceIndex = sourceIndexById.get(activeId);
+  if (sourceIndex === undefined) return undefined;
 
-  const firstRailItem = railItems[0];
-  if (!firstRailItem) return undefined;
-
-  let nearestId = firstRailItem.id;
+  let nearestId: string | undefined;
   let nearestDistance = Number.POSITIVE_INFINITY;
   for (const railItem of railItems) {
-    const railIndex = sourceItems.findIndex((item) => item.id === railItem.id);
-    if (railIndex < 0) continue;
+    const railIndex = sourceIndexById.get(railItem.id);
+    if (railIndex === undefined) continue;
     const distance = Math.abs(railIndex - sourceIndex);
     if (distance < nearestDistance) {
       nearestDistance = distance;

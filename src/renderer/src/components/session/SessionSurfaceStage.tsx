@@ -1,5 +1,7 @@
 import { CircleArrowDown } from "lucide-react";
+import { useMemo } from "react";
 import { useAtomValue } from "jotai";
+import { selectAtom } from "jotai/utils";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import type { SessionMessageTimelineProps } from "./SessionMessageTimeline";
 import { SessionMessageTimeline } from "./SessionMessageTimeline";
@@ -9,6 +11,7 @@ import { chatContentWidthStyle } from "./chatContentWidth";
 import { t, type TranslationKey } from "../../i18n";
 import type { AgentRunItem } from "./timeline/types";
 import { ConversationOutline } from "./SurfaceComponents";
+import { areOutlineRailItemsEqual } from "./timeline/outlineRailActive";
 
 const HISTORY_OVERLAY_COPY: Record<string, TranslationKey> = {
 	stopping: "message.historyOverlay.stopping",
@@ -28,7 +31,16 @@ export function SessionSurfaceStage(props: {
 	isRestarting: boolean;
 }) {
 	const { sessionId, sessionTimeline, timelineProps, isRestarting } = props;
-	const outlineItems = useAtomValue(outlineItemsBySessionIdAtomFamily(sessionId));
+	// Assistant streaming rebuilds the derived array; equal user checkpoints should not rerender the rail.
+	const outlineItemsAtom = useMemo(
+		() => selectAtom(
+			outlineItemsBySessionIdAtomFamily(sessionId),
+			(items) => items,
+			areOutlineRailItemsEqual,
+		),
+		[sessionId],
+	);
+	const outlineItems = useAtomValue(outlineItemsAtom);
 	const mutationKind = useAtomValue(
 		sessionHistoryMutationOverlayBySessionIdAtomFamily(sessionId),
 	);
