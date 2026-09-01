@@ -192,3 +192,10 @@ test("真实 pi-ai catalog：gpt-4o 有 contextWindow", () => {
 		undefined,
 	);
 });
+
+test("真实 pi-ai catalog：0.84.4 的 qwen3.8-max 来自 PiDeck 根依赖", () => {
+	const entry = lookupPiAiCatalogEntry(getPiAiCatalogIndex(), "opencode-go", "qwen3.8-max");
+	assert.ok(entry, "qwen3.8-max 应命中 PiDeck 0.84.4 catalog");
+	assert.equal(entry.contextWindow, 1000000);
+	assert.equal(entry.maxTokens, 131072);
+});

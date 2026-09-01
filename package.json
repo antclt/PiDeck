@@ -85,7 +85,7 @@
     "probe:dsh": "node scripts/dsh-embed-probe.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.82.1",
+    "@earendil-works/pi-ai": "^0.84.4",
     "@electron-toolkit/utils": "^4.0.0",
     "@larksuiteoapi/node-sdk": "^1.67.0",
     "node-pty": "^1.1.0",
