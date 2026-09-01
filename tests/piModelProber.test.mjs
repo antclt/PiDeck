@@ -201,13 +201,73 @@ test("ETIMEDOUT 错误码同样判定为超时", async () => {
 	assert.match(result.error, /timed out/);
 });
 
-test("非超时失败优先透传 pi 的 stderr", async () => {
+test("非超时失败优先透传 pi 的 stderr（非 Unknown option 不触发降级）", async () => {
+	let calls = 0;
 	const { probePiModel, piLocator, settingsStore } = setupProbe((_cmd, _args, _opts, cb) => {
-		cb(new Error("unknown option"), "", "error: unknown option --foo");
+		calls += 1;
+		cb(new Error("command failed"), "", "401 status code (no body)");
 	});
 
 	const result = await probePiModel(piLocator, settingsStore, "p", "m");
 
 	assert.equal(result.success, false);
-	assert.equal(result.error, "error: unknown option --foo");
+	assert.equal(result.error, "401 status code (no body)");
+	// 模型真实报错不是 Unknown option，不应触发降级重试（只有一次调用）。
+	assert.equal(calls, 1, "模型报错不应触发降级重试");
+});
+
+test("老版本 pi 报 Unknown option 时自动降级为最小核心参数集重试", async () => {
+	const argSets = [];
+	let calls = 0;
+	const { probePiModel, piLocator, settingsStore } = setupProbe((_cmd, args, _opts, cb) => {
+		calls += 1;
+		argSets.push(args);
+		if (calls === 1) {
+			// 首次：老 pi 不认识较新的 flag（--no-context-files/--no-themes 等）。
+			cb(new Error("command failed"), "", "Error: Unknown option: --no-context-files");
+			return;
+		}
+		cb(null, agentEndLine({ role: "assistant", content: [{ type: "text", text: "Hi" }], model: "p", stopReason: "stop" }), "");
+	});
+
+	const result = await probePiModel(piLocator, settingsStore, "p", "m");
+
+	assert.equal(result.success, true);
+	assert.equal(calls, 2, "Unknown option 应触发一次降级重试");
+	// 首次用全集（含较新 flag）；降级集只保留长期通用的核心 flag。
+	assert.ok(argSets[0].includes("--no-skills"), "首次探测应含全集优化 flag");
+	assert.ok(argSets[0].includes("--no-context-files"));
+	assert.ok(argSets[1].includes("--no-extensions"), "降级集应保留长期通用 flag");
+	assert.ok(argSets[1].includes("--offline"));
+	assert.ok(!argSets[1].includes("--no-skills"), "降级集不应含较新 flag --no-skills");
+	assert.ok(!argSets[1].includes("--no-context-files"), "降级集不应含 --no-context-files");
+	assert.ok(!argSets[1].includes("--no-themes"), "降级集不应含 --no-themes");
+});
+
+test("probePiModel 主动给子进程 stdin 发送 EOF，避免 pi 阻塞等待输入导致超时", async () => {
+	// 回归护栏 issue：Windows cmd /s /c 包装调用下 stdin 保持打开且未 EOF 时，
+	// pi --mode json --print 会阻塞等待键盘输入直到探针超时（实测 120s out=0）。
+	// 只有显式 stdin.end() 发送 EOF 后 pi 才正常返回，故必须断言 execFile 返回的
+	// child.stdin.end() 被调用。
+	let endsCalled = 0;
+	const child = { stdin: { end: () => (endsCalled += 1) } };
+	const { probePiModel, piLocator, settingsStore } = setupProbe((_cmd, _args, _opts, cb) => {
+		// execFile 返回 child：真实实现会用 stdio 管道接通 stdin，探针随后 end() 它。
+		cb(
+			null,
+			agentEndLine({
+				role: "assistant",
+				content: [{ type: "text", text: "Hi" }],
+				model: "p",
+				stopReason: "stop",
+			}),
+			"",
+		);
+		return child;
+	});
+
+	const result = await probePiModel(piLocator, settingsStore, "p", "m");
+
+	assert.equal(result.success, true);
+	assert.equal(endsCalled, 1, "探针必须对子进程 stdin 显式发送 EOF");
 });

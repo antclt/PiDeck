@@ -32,6 +32,8 @@ import type { PiModelProbeResult } from "../../shared/types/fetchedModel";
  */
 export const PROBE_TIMEOUT_MS = 120_000;
 
+// 全集优化参数：关掉一切非必要资源发现/加载，纯对话且冷启动最快（当前 pi 版本）。
+// 实测每个 flag 都真实生效，减少首包延迟。
 const PROBE_BASE_ARGS = [
 	"--mode", "json",
 	"--print",
@@ -42,6 +44,20 @@ const PROBE_BASE_ARGS = [
 	"--no-context-files",
 	"--no-prompt-templates",
 	"--no-themes",
+	"--offline",
+];
+
+// 降级核心集：只保留长期存在的核心 flag，用于老版本 pi。
+// --no-context-files（issue #3253）、--no-themes、--no-prompt-templates 等较新，老 pi
+// 解析到未知长 flag 会直接 `Error: Unknown option: --xxx` 硬退（实测：任意未知长 flag
+// 快速退出 out=0），导致探针误报「测试失败」。删掉这些纯优化的 --no-* 只影响冷启动
+// 速度，结果仍与会话一致；--mode json/--print/--no-session/--no-extensions/--offline
+// 为长期通用 flag，任意可用版本都支持。
+const PROBE_BASE_ARGS_MINIMAL = [
+	"--mode", "json",
+	"--print",
+	"--no-session",
+	"--no-extensions",
 	"--offline",
 ];
 
@@ -123,6 +139,65 @@ export function parsePiProbeOutput(stdout: string): Omit<PiModelProbeResult, "la
 }
 
 /**
+ * 单次探针运行（不走降级）。成功返回 stdout；失败返回 errorMessage（超时/模型报错/进程
+ * 错误）与 unknownOption 标记（stderr/stdout/error.message 含 "Unknown option"）。
+ *
+ * unknownOption 仅用于触发降级重试：pi 对未注册的长 flag 是硬报错（实测 `--bogus-flag`
+ * → 407ms 退出 out=0），而老版本 pi 又缺少 --no-context-files/--no-themes 等新 flag，
+ * 此时必须降级为最小核心集重试；真正的模型报错（401/超时/权限）不含该字样，不会误触发降级。
+ */
+function runProbeOnce(
+	piLocator: PiLocator,
+	settings: ReturnType<SettingsStore["get"]>,
+	invocation: ReturnType<PiLocator["createInvocation"]>,
+): Promise<
+	| { ok: true; stdout: string }
+	| { ok: false; errorMessage: string; unknownOption: boolean }
+> {
+	return new Promise((resolve) => {
+		const child = execFile(
+			invocation.command,
+			invocation.args,
+			{
+				env: piLocator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl),
+				shell: invocation.shell,
+				windowsHide: true,
+				timeout: PROBE_TIMEOUT_MS,
+				encoding: "utf8",
+				windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+			},
+			(error, stdout, stderr) => {
+				if (error) {
+					const errObj = error as NodeJS.ErrnoException & { killed?: boolean };
+					const timedOut = errObj.killed || errObj.code === "ETIMEDOUT";
+					// 超时信息带上秒数：便于一眼区分「探针超时」与「模型报错」，
+					// 也方便后续回收用户反馈时判断是否真到了 thinking 阶段的上界。
+					const message = timedOut
+						? `pi model probe timed out after ${Math.round(PROBE_TIMEOUT_MS / 1000)}s`
+						: (stderr?.trim() || error.message).slice(0, 500);
+					resolve({
+						ok: false,
+						errorMessage: message,
+						unknownOption: /unknown option/i.test(
+							`${stderr ?? ""}\n${stdout ?? ""}\n${error.message}`,
+						),
+					});
+					return;
+				}
+				resolve({ ok: true, stdout });
+			},
+		);
+		// 关键：主动给子进程 stdin 发送 EOF。
+		// pi 在 `--mode json --print` 下若 stdin 保持打开且未收到 EOF，会阻塞等待
+		// 键盘输入，导致探针永远超时（实测：cmd.exe /s /c 包装调用下 stdin 未结束
+		// ➜ 120s 超时 out=0；stdin 显式 end() 后才正常返回）。直接运行 pi.cmd 能成功
+		// 是因为外层 shell 已把 stdin 连到 EOF；桌面端 execFile 默认保持管道打开，必须
+		// 手动关闭，避免进程一直被判定为超时。
+		child?.stdin?.end();
+	});
+}
+
+/**
  * fork pi 做一次性模型调用。成功后由 parsePiProbeOutput 解析结果；
  * pi 进程级失败（未安装/unknown option/超时/崩溃）时返回失败而非抛出。
  */
@@ -144,49 +219,23 @@ export async function probePiModel(
 		settings.wslDistro,
 		settings.wslUser,
 	);
-	const invocation = piLocator.createInvocation(command, [
-		...PROBE_BASE_ARGS,
-		"--provider", providerName,
-		"--model", modelId,
-		"Hi",
-	]);
 
-	try {
-		const stdout = await new Promise<string>((resolve, reject) => {
-			execFile(
-				invocation.command,
-				invocation.args,
-				{
-					env: piLocator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl),
-					shell: invocation.shell,
-					windowsHide: true,
-					timeout: PROBE_TIMEOUT_MS,
-					encoding: "utf8",
-					windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-				},
-				(error, stdout, stderr) => {
-					if (error) {
-						const errObj = error as NodeJS.ErrnoException & { killed?: boolean };
-						const timedOut = errObj.killed || errObj.code === "ETIMEDOUT";
-						// 超时信息带上秒数：便于一眼区分「探针超时」与「模型报错」，
-						// 也方便后续回收用户反馈时判断是否真到了 thinking 阶段的上界。
-						const message = timedOut
-							? `pi model probe timed out after ${Math.round(PROBE_TIMEOUT_MS / 1000)}s`
-							: (stderr?.trim() || error.message).slice(0, 500);
-						reject(new Error(message));
-						return;
-					}
-					resolve(stdout);
-				},
-			);
-		});
-		return { ...parsePiProbeOutput(stdout), latencyMs: Date.now() - startedAt };
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return {
-			success: false,
-			error: message.slice(0, 500),
-			latencyMs: Date.now() - startedAt,
-		};
+	// 老 pi 优雅降级：先用全集优化参数跑，命中 "Unknown option" 再退到最小核心集重试一次。
+	// 全集参数跑通即返回；模型真正的报错/超时不命中 unknown-option，直接返回不降级。
+	let lastErrorMessage = "pi model probe failed";
+	for (const baseArgs of [PROBE_BASE_ARGS, PROBE_BASE_ARGS_MINIMAL]) {
+		const invocation = piLocator.createInvocation(command, [
+			...baseArgs,
+			"--provider", providerName,
+			"--model", modelId,
+			"Hi",
+		]);
+		const outcome = await runProbeOnce(piLocator, settings, invocation);
+		if (outcome.ok) {
+			return { ...parsePiProbeOutput(outcome.stdout), latencyMs: Date.now() - startedAt };
+		}
+		lastErrorMessage = outcome.errorMessage;
+		if (!outcome.unknownOption) break;
 	}
+	return { success: false, error: lastErrorMessage, latencyMs: Date.now() - startedAt };
 }
