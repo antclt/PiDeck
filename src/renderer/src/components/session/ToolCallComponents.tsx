@@ -187,6 +187,8 @@ export const ToolCard = memo(function ToolCard(props: {
 	stopped?: boolean;
 	/** 所属会话 id：运行期绑定不可用时（历史会话 _viewer 投影）回退会话文件定位 */
 	sessionId?: string;
+	/** 通过会话工作区路由打开工具目标文件（相对路径由 App 层补齐工作目录） */
+	onOpenFile?: (path: string) => void;
 }) {
 	const [expanded, setExpanded] = useState(props.defaultOpen ?? false);
 	const messageStatus = getToolStatus(props.message);
@@ -410,9 +412,9 @@ export const ToolCard = memo(function ToolCard(props: {
 							{showDiff && diffTarget && (
 								// 文件工具内联 diff（issue-兼容期：edit/write 的工具卡直接看改动，
 								// 不必再点开右侧差异查看器）。折叠态渲染行；maxHeight 上限防长文件撑爆卡片。
-								<div className="mb-1.5">
+								<div className="mb-1.5 flex min-w-0 items-start gap-1">
 									<FileDiff
-										className="min-w-0"
+										className="min-w-0 flex-1"
 										file={diffTarget.path}
 										lines={fileChangeToDiffLines(diffTarget)}
 										status="complete"
@@ -420,6 +422,23 @@ export const ToolCard = memo(function ToolCard(props: {
 										maxHeight={200}
 										language="diff"
 									/>
+									{props.onOpenFile && (
+										// 打开按钮与 diff 标题同行但不嵌套在 FileDiff 的折叠按钮内，
+										// 避免无效的 button 嵌套；路径解析交给会话工作区统一处理。
+										<div className="flex h-9 shrink-0 items-center">
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon-xs"
+												className="size-6 rounded text-text-tertiary hover:bg-muted hover:text-foreground"
+												aria-label={t("tool.openFile")}
+												title={t("tool.openFile")}
+												onClick={() => props.onOpenFile?.(diffTarget.path)}
+											>
+												<FileText size={12} aria-hidden="true" />
+											</Button>
+										</div>
+									)}
 								</div>
 							)}
 							<ToolResult
@@ -483,12 +502,20 @@ export const ToolGroupCard = memo(function ToolGroupCard(props: {
 	stopped?: boolean;
 	/** 所属会话 id（转交 ToolCard「查看完整输出」的历史会话文件回退） */
 	sessionId?: string;
+	/** 转交给每张工具卡的文件打开路由 */
+	onOpenFile?: (path: string) => void;
 }) {
 	return (
 		<section className="tool-group-card w-full min-w-0 overflow-hidden rounded-none border-0 bg-transparent" data-message-id={props.group.id}>
 			<div className="flex flex-col gap-0 p-0">
 				{props.group.messages.map((message) => (
-					<ToolCard key={message.id} message={message} stopped={props.stopped} sessionId={props.sessionId} />
+					<ToolCard
+						key={message.id}
+						message={message}
+						stopped={props.stopped}
+						sessionId={props.sessionId}
+						onOpenFile={props.onOpenFile}
+					/>
 				))}
 			</div>
 		</section>

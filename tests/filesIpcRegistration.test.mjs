@@ -4,6 +4,7 @@ import test from "node:test";
 
 const ipc = readFileSync("src/shared/ipc.ts", "utf8");
 const filesIpc = readFileSync("src/main/ipc/filesIpc.ts", "utf8");
+const preload = readFileSync("src/preload/index.ts", "utf8");
 
 /**
  * 回归（30b6954b）：新增 files:copy/files:move 时误删了 filesShowInFolder
@@ -20,6 +21,22 @@ test("every files:* channel in shared/ipc.ts has a handler registered in filesIp
     (key) => !filesIpc.includes(`ipcChannels.${key}`),
   );
   assert.deepEqual(missing, [], "filesIpc.ts must register a handler for every files:* channel");
+});
+
+test("project-scoped reads are validated in main before touching disk", () => {
+  assert.match(filesIpc, /const resolveProjectReadBoundary = async/);
+  assert.match(filesIpc, /projectStore\.get\(rawScope\.projectId\)/);
+  assert.match(filesIpc, /createProjectFileReadBoundary\(toWindowsPath\(project\.path\)\)/);
+  assert.match(filesIpc, /resolveProjectFileReadPath\(boundary, hostPath\)/);
+  assert.match(filesIpc, /const boundary = await resolveProjectReadBoundary\(scope\)/);
+  assert.match(filesIpc, /const readablePath = await resolveReadablePath\(path, boundary\)/);
+  assert.match(filesIpc, /const fileStat = await stat\(readablePath\)/);
+  assert.match(filesIpc, /const buffer = await readFile\(readablePath\)/);
+  // preload 只能传 projectId scope，不能传一个由 renderer 自报的可信根目录。
+  assert.match(preload, /scope\?: ProjectFileAccessScope/);
+  assert.match(preload, /filesReadContent, path, maxBytes, scope/);
+  assert.match(preload, /filesPathsExist, paths, scope/);
+  assert.match(preload, /filesReadBase64, path, maxBytes, scope/);
 });
 
 test("files:show-in-folder handler calls shell.showItemInFolder with Windows path conversion", () => {

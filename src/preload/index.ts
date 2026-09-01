@@ -97,6 +97,7 @@ import type {
 	PiSkillSummary,
 	SkillContentResult,
 	Project,
+	ProjectFileAccessScope,
 	PromptStoreSearchResult,
 	PromptStoreItem,
 	ScratchPadData,
@@ -262,14 +263,14 @@ const api = {
 		/** 在系统文件管理器中打开目录 */
 		openFileManager: (path: string) =>
 			ipcRenderer.invoke(ipcChannels.filesOpenFileManager, path) as Promise<void>,
-		readContent: (path: string, maxBytes?: number) =>
-			ipcRenderer.invoke(ipcChannels.filesReadContent, path, maxBytes) as Promise<string>,
+		readContent: (path: string, maxBytes?: number, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesReadContent, path, maxBytes, scope) as Promise<string>,
 		/** 批量校验路径是否存在（返回与入参等长的 boolean[]；单路径失败按 false 计） */
-		pathsExist: (paths: string[]) =>
-			ipcRenderer.invoke(ipcChannels.filesPathsExist, paths) as Promise<boolean[]>,
-		/** 读取二进制文件为 data URL（粘贴资源管理器图片文件时用；maxBytes 可预检拦截超大文件） */
-		readBase64: (path: string, maxBytes?: number) =>
-			ipcRenderer.invoke(ipcChannels.filesReadBase64, path, maxBytes) as Promise<string>,
+		pathsExist: (paths: string[], scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesPathsExist, paths, scope) as Promise<boolean[]>,
+		/** 读取二进制文件为 base64；scope 存在时主进程限制到对应 ProjectStore 根目录。 */
+		readBase64: (path: string, maxBytes?: number, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesReadBase64, path, maxBytes, scope) as Promise<string>,
 		writeContent: (path: string, content: string) =>
 			ipcRenderer.invoke(ipcChannels.filesWriteContent, path, content) as Promise<void>,
 		delete: (path: string, recursive?: boolean) =>
