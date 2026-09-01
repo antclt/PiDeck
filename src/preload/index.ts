@@ -1578,6 +1578,12 @@ const api = {
 				ipcChannels.configGetUsageProbes,
 				{ provider, backend },
 			) as Promise<UsageProbeSettingsResult>,
+		/** 轻量内置识别（渲染层隐藏「用量查询」按钮用）：命中内置候选返回 true，不读配置文件 */
+		usageRecognized: (provider: string, backend?: "pi" | "dsh") =>
+			ipcRenderer.invoke(
+				ipcChannels.configUsageRecognized,
+				{ provider, backend },
+			) as Promise<{ recognized: boolean }>,
 		/** 按 provider 合并保存用量查询配置（主进程校验后落盘，保留其它 providers 与旧 probes） */
 		saveUsageProbes: (payload: UsageProbeSaveInput) =>
 			ipcRenderer.invoke(

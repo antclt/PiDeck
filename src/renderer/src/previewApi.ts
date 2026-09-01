@@ -1178,6 +1178,7 @@ export function createPreviewApi(): PiDesktopApi {
 				error: "preview",
 			}),
 			getUsageProbes: async () => ({ recognized: null, templates: [], errors: [] }),
+			usageRecognized: async () => ({ recognized: false }),
 			saveUsageProbes: async () => ({ ok: false, error: "preview" }),
 			testUsageProbe: async () => ({ success: false, error: "preview" }),
 			installUsageSkill: async () => ({ success: false, error: "preview" }),
