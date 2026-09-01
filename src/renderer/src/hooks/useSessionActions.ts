@@ -66,6 +66,8 @@ export interface UseSessionActionsOptions {
       archiveRecord: (sessionId: string) => Promise<boolean>;
       unarchiveRecord: (archivedPath: string) => Promise<boolean>;
       listArchived: () => Promise<ArchivedPiSession[]>;
+      deleteArchivedRecord: (archivedPath: string) => Promise<boolean>;
+      deleteArchivedDshSession: (dshSessionId: string) => Promise<boolean>;
       createDraft: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<SessionRecord>;
       createAnonymous: (input: { projectId: string; title: string; backend?: AgentBackend } & SessionLaunchPreferences) => Promise<CreateAnonymousSessionResult>;
     };
@@ -211,6 +213,22 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     return api.sessions.listArchived();
   }
 
+  /** 永久删除已归档会话（pi 文件归档；文件移入回收站并移出归档索引） */
+  async function deleteArchivedSession(archivedPath: string) {
+    await api.sessions.deleteArchivedRecord(archivedPath);
+    showToast(t("app.sessionDeletedFromArchive"), 2200);
+    const projectId = sessionsProjectId ?? activeProjectId;
+    if (projectId) await refreshProjectSessions(projectId);
+  }
+
+  /** 永久删除已归档 DSH 会话（host 目录移入回收站） */
+  async function deleteArchivedDshSession(dshSessionId: string) {
+    await api.sessions.deleteArchivedDshSession(dshSessionId);
+    showToast(t("app.sessionDeletedFromArchive"), 2200);
+    const projectId = sessionsProjectId ?? activeProjectId;
+    if (projectId) await refreshProjectSessions(projectId);
+  }
+
   // ── Sidebar session actions ──
   async function openSidebarSession(
     projectId: string,
@@ -351,6 +369,8 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     archiveHistorySession,
     unarchiveHistorySession,
     listArchivedSessions,
+    deleteArchivedSession,
+    deleteArchivedDshSession,
     openSidebarSession,
     openSidebarSessionById,
     copySidebarSession,

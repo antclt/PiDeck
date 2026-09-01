@@ -486,6 +486,9 @@ const api = {
 		/** 列出已归档会话（恢复 UI 用；带归档前原始路径供按项目归属过滤） */
 		listArchived: () =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogListArchived) as Promise<import("../shared/types").ArchivedPiSession[]>,
+		/** 永久删除已归档会话（归档文件移入系统回收站并移出索引；不可恢复） */
+		deleteArchivedRecord: (archivedPath: string) =>
+			ipcRenderer.invoke(ipcChannels.sessionsCatalogDeleteArchived, archivedPath) as Promise<boolean>,
 		readRecordMessages: (sessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.sessionsCatalogReadMessages, sessionId) as Promise<
 				import("../shared/types").ChatMessage[]
@@ -642,6 +645,9 @@ const api = {
 		/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
 		unarchiveDshSession: (dshSessionId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshUnarchive, dshSessionId) as Promise<boolean>,
+		/** 永久删除已归档 DSH 会话（归档目录移入系统回收站；不可恢复） */
+		deleteArchivedDshSession: (dshSessionId: string) =>
+			ipcRenderer.invoke(ipcChannels.dshDeleteArchived, dshSessionId) as Promise<boolean>,
 		/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
 		listDshDynamicPlugins: () =>
 			ipcRenderer.invoke(ipcChannels.dshPluginList) as Promise<import("../shared/types").DshPluginView[]>,

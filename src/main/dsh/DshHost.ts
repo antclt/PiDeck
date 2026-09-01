@@ -84,6 +84,11 @@ export class DshHost {
 		 * 只影响 @deepseek-ai/* 的解析；hostEntry 与桥代码始终在 app 内。
 		 */
 		private readonly resolveRuntimeAppRoot: () => string | undefined = () => undefined,
+		/**
+		 * 永久删除归档目录的回收站回调（与 pi 会话删除同语义：可恢复，拒绝静默硬删）。
+		 * 主进程装配时注入 electron shell.trashItem；测试注入假实现，保持 DshHost 与 electron 解耦。
+		 */
+		private readonly trashPath: (path: string) => Promise<void> = () => Promise.reject(new Error("trashPath not injected")),
 	) {}
 
 	/** 订阅 host-ready（首次启动与崩溃自动重启；E4：崩溃后恢复运行时状态）。 */
@@ -391,6 +396,20 @@ export class DshHost {
 		// （与 listArchivedSessions 同源；避免恢复后侧栏落「新会话」占位名）。
 		if (!title) title = foldSessionTitleFromDir(targetDir);
 		return { restoredPath: targetDir, cwd, ...(title ? { title } : {}) };
+	}
+
+	/**
+	 * 永久删除已归档的 DSH 会话（区别于恢复）：把归档目录移入系统回收站（经注入的 trashPath）。
+	 * 幂等：归档目录不存在/非 PiDeck 归档（无 manifest）返回 false；否则删除后返回 true。
+	 */
+	async deleteArchivedSession(dshSessionId: string): Promise<boolean> {
+		const archiveRoot = pideckArchivePath(this.getHomeDir());
+		const archivedDir = join(archiveRoot, dshSessionId);
+		// 只有带 manifest 的目录才算 PiDeck 归档（与 listArchivedSessions 同判定），避免误删非归档目录。
+		const manifestPath = join(archivedDir, "pideck-manifest.json");
+		if (!existsSync(manifestPath)) return false;
+		await this.trashPath(archivedDir);
+		return true;
 	}
 
 	/**

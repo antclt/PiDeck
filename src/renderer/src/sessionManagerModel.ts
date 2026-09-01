@@ -198,6 +198,14 @@ export type ManagerArchivedRow =
   | { kind: "pi"; item: ArchivedPiSession }
   | { kind: "dsh"; item: ArchivedDshSession };
 
+/**
+ * 归档行身份（弹窗选中集合用）：pi 行用会话记录 id，DSH 行用 host 会话 id。
+ * 与主列表 sessionManagerRowKey 同语义，两类 id 命名空间不冲突。
+ */
+export function managerArchivedRowKey(row: ManagerArchivedRow): string {
+  return row.kind === "pi" ? sessionManagerRowKey(row.item.summary) : row.item.dshSessionId;
+}
+
 /** 归档行时间戳（排序用）：pi 用 updatedAt，DSH 用 archivedAt。 */
 function managerArchivedTimestamp(row: ManagerArchivedRow): number {
   return row.kind === "pi" ? row.item.summary.updatedAt : row.item.archivedAt;

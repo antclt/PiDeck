@@ -2645,6 +2645,7 @@ function registerIpc() {
 			archiveDshSession: (dshSessionId, cwd, title) => dshHost.archiveSession(dshSessionId, cwd, title),
 			unarchiveDshSession: (dshSessionId) => dshHost.unarchiveSession(dshSessionId),
 			listArchivedDshSessions: () => dshHost.listArchivedSessions(),
+			deleteArchivedDshSession: (dshSessionId) => dshHost.deleteArchivedSession(dshSessionId),
 			// G13 深化：动态 Cordis 插件管理（进程内临时扩展，define/run/stop/undefine）
 			listDshDynamicPlugins: () => dshHost.listDynamicPlugins(),
 			listDshStaticPlugins: () => dshHost.listStaticPlugins(),
@@ -3220,6 +3221,8 @@ app.whenReady().then(async () => {
 		},
 		// 外部 runtime 根目录（未安装时返回 undefined，回退 app 内置 node_modules）。
 		() => dshRuntimeStatus.resolveAppRoot(),
+		// 永久删除归档目录：统一走系统回收站（与 pi 会话删除同语义，可恢复；拒绝静默硬删）。
+		async (path) => { await shell.trashItem(path); },
 	);
 	dshAgentManager = new DshAgentManager(
 		dshHost,

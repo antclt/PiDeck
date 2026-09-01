@@ -75,10 +75,15 @@ export type SidebarActions = {
     unarchive: (session: SessionSummary, projectId?: string) => Promise<void>;
     /** 列出已归档会话（恢复 UI 用；带原始路径，弹窗按项目归属过滤） */
     listArchived: () => Promise<ArchivedPiSession[]>;
+    /** 永久删除已归档会话（pi 文件归档；移入回收站并移出索引） */
+    deleteArchived: (archivedPath: string) => Promise<void>;
     /** 恢复 DSH 归档会话（host 目录移回 sessions 树并重建 catalog 记录） */
     unarchiveDsh: (dshSessionId: string, projectId?: string) => Promise<void>;
     /** 列出 DSH 归档会话（会话管理弹窗归档视图用；含标题） */
-    listArchivedDsh: () => Promise<ArchivedDshSession[]>;  };
+    listArchivedDsh: () => Promise<ArchivedDshSession[]>;
+    /** 永久删除已归档 DSH 会话（host 目录移入回收站） */
+    deleteArchivedDsh: (dshSessionId: string) => Promise<void>;
+  };
   agents: {
     rename: (agent: AgentTab) => void;
     export: (agent: AgentTab) => Promise<void>;
@@ -573,8 +578,10 @@ export function SidebarContent(props: SidebarContentProps) {
           onArchive={(sessions) => Promise.all(sessions.map((session) => actions.sessions.archive(managerProject.id, session))).then(controller.closeSessionManager)}
           onUnarchive={(archived) => actions.sessions.unarchive(archived, managerProject.id)}
           listArchived={actions.sessions.listArchived}
+          deleteArchived={(archivedPath) => actions.sessions.deleteArchived(archivedPath)}
           onUnarchiveDsh={(dshSessionId) => actions.sessions.unarchiveDsh(dshSessionId, managerProject.id)}
           listArchivedDsh={actions.sessions.listArchivedDsh}
+          deleteArchivedDsh={(dshSessionId) => actions.sessions.deleteArchivedDsh(dshSessionId)}
         />
       )}
       {controller.worktreeCreateProjectId && (

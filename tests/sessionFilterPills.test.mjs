@@ -30,6 +30,7 @@ function loadModule() {
 const {
 	sessionPillOf,
 	filterSessionsByPills,
+	pillsPresentIn,
 	isSessionFilterPill,
 	parseSessionFilterState,
 	serializeSessionFilterState,
@@ -103,4 +104,25 @@ test("损坏输入返回空配置（全部显示）", () => {
 	assert.deepEqual(Object.keys(parseSessionFilterState("{bad json")), []);
 	assert.deepEqual(Object.keys(parseSessionFilterState("")), []);
 	assert.deepEqual(Object.keys(parseSessionFilterState(null)), []);
+});
+
+test("pillsPresentIn: 只返回当前会话实际存在的类别，按固定顺序", () => {
+	const sessions = [
+		{ id: "pi-1", source: "pi", backend: "pi" },
+		{ id: "dsh-1", source: "pi", backend: "dsh" },
+	];
+	assert.equal(pillsPresentIn(sessions).join(","), "pi,dsh");
+});
+
+test("pillsPresentIn: 空会话列表返回空数组（不摆任何 pill）", () => {
+	assert.equal(pillsPresentIn([]).length, 0);
+});
+
+test("pillsPresentIn: 导入来源按 sessionPillOf 去重，无重复 pill", () => {
+	const sessions = [
+		{ id: "c1", source: "codex", backend: "pi" },
+		{ id: "c2", source: "codex", backend: "pi" },
+		{ id: "ig1", source: "pi", backend: "imagegen" },
+	];
+	assert.equal(pillsPresentIn(sessions).join(","), "codex,imagegen");
 });

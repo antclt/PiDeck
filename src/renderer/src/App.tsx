@@ -2885,9 +2885,26 @@ export function App() {
     return api.sessions.listArchived();
   }
 
+  /** 永久删除已归档会话（pi 文件归档：文件移入回收站并移出索引） */
+  async function deleteArchivedSidebarSession(archivedPath: string) {
+    await api.sessions.deleteArchivedRecord(archivedPath);
+    showToast(t("app.sessionDeletedFromArchive"), 2200);
+    // 归档删除不影响常规目录；刷新当前项目只是让 catalog 快照与磁盘一致。
+    const projectId = activeProjectId;
+    if (projectId) await refreshProjectSessions(projectId);
+  }
+
   /** 列出 DSH 归档会话（会话管理弹窗归档视图用；与 pi 归档合并展示） */
   function listArchivedDshSidebarSessions() {
     return api.sessions.listArchivedDshSessions();
+  }
+
+  /** 永久删除已归档 DSH 会话（host 目录移入回收站） */
+  async function deleteArchivedDshSidebarSession(dshSessionId: string) {
+    await api.sessions.deleteArchivedDshSession(dshSessionId);
+    showToast(t("app.sessionDeletedFromArchive"), 2200);
+    const projectId = activeProjectId;
+    if (projectId) await refreshProjectSessions(projectId);
   }
 
   function requestDeleteSidebarSession(projectId: string, session: SessionSummary) {
@@ -3047,10 +3064,16 @@ export function App() {
         await unarchiveSidebarSession(archived.filePath, projectId);
       },
       listArchived: () => listArchivedSidebarSessions(),
+      deleteArchived: async (archivedPath) => {
+        await deleteArchivedSidebarSession(archivedPath);
+      },
       unarchiveDsh: async (dshSessionId, projectId) => {
         await unarchiveDshSidebarSession(dshSessionId, projectId);
       },
       listArchivedDsh: () => listArchivedDshSidebarSessions(),
+      deleteArchivedDsh: async (dshSessionId) => {
+        await deleteArchivedDshSidebarSession(dshSessionId);
+      },
     },
     agents: {
       rename: rename.openAgentRename,

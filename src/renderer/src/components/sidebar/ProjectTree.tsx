@@ -1,4 +1,4 @@
-import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, Plus, Settings2, UserPlus } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, List, Plus, Settings2, UserPlus } from "lucide-react";
 import type { DragEvent } from "react";
 import type { Project, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
@@ -294,6 +294,12 @@ export function ProjectTree(props: {
                 <DropdownMenuItem onSelect={() => void props.actions.sessions.createAnonymous(project.id)}>
                   <UserPlus className="size-3.5" aria-hidden="true" />
                   {t("app.newAnonymousSession")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {/* 会话管理：与项目会话管理同款弹窗（含归档/恢复/删除）；Chat 是内置项目同样适用 */}
+                <DropdownMenuItem onSelect={() => { props.controller.openSessionManager(project.id); }}>
+                  <List className="size-3.5" aria-hidden="true" />
+                  {t("menu.manageSessions")}
                 </DropdownMenuItem>
                 {props.actions.projects.changeChatPath && (
                   <DropdownMenuItem onSelect={() => { void props.actions.projects.changeChatPath?.(project); }}>

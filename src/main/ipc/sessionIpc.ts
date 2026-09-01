@@ -246,6 +246,8 @@ export type DshBackendIpcDeps = {
 	unarchiveDshSession?: (dshSessionId: string) => Promise<{ restoredPath: string; cwd: string; title?: string } | undefined>;
 	/** DSH 归档区会话清单（G14：恢复入口用；含标题，旧归档由日志折叠补全）；未装配时返回空列表。 */
 	listArchivedDshSessions?: () => Array<ArchivedDshSession>;
+	/** DSH 永久删除已归档会话（G14：归档目录移入系统回收站）；未装配时抛错。 */
+	deleteArchivedDshSession?: (dshSessionId: string) => Promise<boolean>;
 	/** DSH 动态插件清单（G13 深化）；未装配时返回空列表。 */
 	listDshDynamicPlugins?: () => Promise<import("../../shared/types").DshPluginView[]>;
 	/** DSH 静态 Loader 条目清单（只读）；未装配时返回空列表。 */
@@ -423,6 +425,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		archiveDshSession,
 		unarchiveDshSession,
 		listArchivedDshSessions,
+		deleteArchivedDshSession,
 		listDshDynamicPlugins,
 		listDshStaticPlugins,
 		installDshPlugin,
@@ -805,6 +808,19 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogListArchived,
 		async () => sessionScanner.listArchived(),
+	);
+	ipcMain.handle(
+		ipcChannels.sessionsCatalogDeleteArchived,
+		async (_event, archivedPath: unknown): Promise<boolean> => {
+			// 校验入参：归档路径必须是 .pideck-archive 目录内的 JSONL，防路径穿越。
+			// 是否真的位于归档目录内由 sessionScanner.deleteArchived 兜底校验。
+			if (typeof archivedPath !== "string" || !archivedPath.endsWith(".jsonl")) {
+				throw new Error(mainCopy("session.invalidArchivePath"));
+			}
+			await sessionScanner.deleteArchived(archivedPath);
+			void appLogger.info("session", "Archived session deleted", { archivedPath });
+			return true;
+		},
 	);
 	ipcMain.handle(
 		ipcChannels.sessionsCatalogReadMessages,
@@ -1232,6 +1248,22 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				restoredPath: restored.restoredPath,
 				projectId: project.id,
 			});
+			return true;
+		},
+	);
+	// DSH 永久删除已归档会话（G14：归档目录移入系统回收站，区别于恢复）
+	ipcMain.handle(
+		ipcChannels.dshDeleteArchived,
+		async (_event, dshSessionId: unknown): Promise<boolean> => {
+			// 入参校验：host 生成的会话 id 固定 "session-" 前缀（host 侧目录名 = sessionId），
+			// 白名单正则挡掉路径穿越类输入（渲染层数据不可信，校验在边界）。
+			if (typeof dshSessionId !== "string" || !/^session-[A-Za-z0-9-]+$/.test(dshSessionId)) {
+				throw new Error(mainCopy("session.invalidArchivePath"));
+			}
+			if (!deleteArchivedDshSession) throw new Error("DSH archive delete is not available");
+			const deleted = await deleteArchivedDshSession(dshSessionId);
+			if (!deleted) throw new Error(mainCopy("session.invalidArchivePath"));
+			void appLogger.info("session", "DSH archived session deleted", { dshSessionId });
 			return true;
 		},
 	);

@@ -67,6 +67,8 @@ export const ipcChannels = {
 	sessionsCatalogUnarchive: "sessions:catalog-unarchive",
 	/** 列出已归档会话摘要（恢复 UI 用） */
 	sessionsCatalogListArchived: "sessions:catalog-list-archived",
+	/** 永久删除已归档会话：归档区文件移入系统回收站并从索引移除（区别于恢复）。 */
+	sessionsCatalogDeleteArchived: "sessions:catalog-delete-archived",
 	sessionsCatalogReadMessages: "sessions:catalog-read-messages",
 	sessionsCatalogReadMessagePage: "sessions:catalog-read-message-page",
 	/** 会话 JSONL 过程事件（session/model/thinking/custom/compaction），供轨迹复盘，不进聊天时间线。 */
@@ -148,6 +150,8 @@ export const ipcChannels = {
 	dshListArchived: "dsh:list-archived",
 	/** DSH 会话恢复（G14：目录按 manifest 移回 sessions 树并重建 catalog 记录）。 */
 	dshUnarchive: "dsh:unarchive",
+	/** DSH 永久删除已归档会话：归档目录移入系统回收站（区别于恢复）。 */
+	dshDeleteArchived: "dsh:delete-archived",
 	/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
 	dshPluginList: "dsh:plugin-list",
 	/** DSH 静态 Loader 条目清单（只读：moduleName/enabled/fiberPhase）。 */

@@ -49,6 +49,7 @@ const {
 	sessionManagerRowKey,
 	mergeManagerArchived,
 	managerArchivedDshLabel,
+	managerArchivedRowKey,
 	worktreeFamilyProjects,
 	familyRootProject,
 	sessionWorkspaceLabel,
@@ -237,4 +238,11 @@ test("archivedDshWorkspaceLabel: 同上（cwd 归属）", () => {
 	];
 	assert.equal(archivedDshWorkspaceLabel({ dshSessionId: "s1", cwd: "C:/work/repo", archivedAt: 1 }, family), undefined);
 	assert.equal(archivedDshWorkspaceLabel({ dshSessionId: "s2", cwd: "C:/work/repo-wt-a", archivedAt: 1 }, family), "repo-wt-a");
+});
+test("managerArchivedRowKey: pi 行用会话记录 id，DSH 行用 host 会话 id（两类不冲突）", () => {
+	const piRow = { kind: "pi", item: { summary: summary({ id: "rec-uuid", filePath: "a.jsonl" }) } };
+	const dshRow = { kind: "dsh", item: { dshSessionId: "session-dsh-1", cwd: "C:/work", archivedAt: 1 } };
+	assert.equal(managerArchivedRowKey(piRow), "rec-uuid");
+	assert.equal(managerArchivedRowKey(dshRow), "session-dsh-1");
+	assert.notEqual(managerArchivedRowKey(piRow), managerArchivedRowKey(dshRow), "两类行身份命名空间不应冲突");
 });

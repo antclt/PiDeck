@@ -454,6 +454,7 @@ export function createPreviewApi(): PiDesktopApi {
 			syncDshForeignSessions: async () => ({ imported: 0, skipped: 0 }),
 			listArchivedDshSessions: async () => [],
 			unarchiveDshSession: async () => true,
+			deleteArchivedDshSession: async () => true,
 			listDshDynamicPlugins: async () => [],
 			listDshStaticPlugins: async () => [],
 			installDshPlugin: async () => undefined,
@@ -535,6 +536,7 @@ export function createPreviewApi(): PiDesktopApi {
 			archiveRecord: async () => true,
 			unarchiveRecord: async () => true,
 			listArchived: async () => [],
+			deleteArchivedRecord: async () => true,
 			copyRecord: async (sessionId) => ({
 				cancelled: false,
 				targetSessionId: `${sessionId}:copy`,
