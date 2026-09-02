@@ -120,6 +120,18 @@ test("builtin 内置分发不带 installDir（在 app.asar 内无独立落盘目
 	}
 });
 
+test("builtin 内置分发携带版本号（UI 文案模板带 v 前缀，缺版本会渲染成悬空 v）", () => {
+	const service = makeService(process.cwd());
+	const status = service.getStatus();
+	if (status.state === "installed") {
+		// 版本号必须是形如 x.y.z 的语义版本，不能是空串——空串会导致配置页显示「随应用内置 v」。
+		assert.ok(
+			typeof status.runtimeVersion === "string" && status.runtimeVersion.length > 0,
+			"builtin runtimeVersion 应存在且非空",
+		);
+	}
+});
+
 test("subscribe 返回退订函数，退订后不再收到广播", () => {
 	const service = makeService("missing-dir");
 	const seen = [];

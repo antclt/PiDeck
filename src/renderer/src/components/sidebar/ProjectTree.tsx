@@ -67,6 +67,8 @@ export function ProjectTree(props: {
   currentSessionId?: string;
   worktreesByProject: Readonly<Record<string, readonly WorktreeEntry[]>>;
   branchByProject?: Readonly<Record<string, string | null | undefined>>;
+  /** 正在删除的 worktree 路径集合（透传给 WorktreeTree 驱动淡出动画）。 */
+  removingWorktreePaths?: ReadonlySet<string>;
 }) {
   const rootProjects = props.controller.catalog.projects.filter((project) =>
     !project.worktreeParentId && matchesProject(project, props.controller.search.trim(), props.controller),
@@ -220,6 +222,7 @@ export function ProjectTree(props: {
                 agents={props.controller.catalog.agents}
                 entries={props.worktreesByProject[project.id] ?? []}
                 branch={props.branchByProject?.[project.id]}
+                removingWorktreePaths={props.removingWorktreePaths}
               />
             ) : (
               <SessionTree
