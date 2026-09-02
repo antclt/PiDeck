@@ -827,6 +827,7 @@ type AgentSessionReplacementResult = {
 async function replaceAgentSession(
 	agentId: string,
 	replace: () => Promise<unknown>,
+	options?: { markForked?: boolean },
 ): Promise<AgentSessionReplacementResult & { targetSessionId?: string }> {
 	const originBinding = sessionRuntimeCoordinator.getRuntimeBinding(agentId);
 	const originEntry = originBinding
@@ -866,6 +867,9 @@ async function replaceAgentSession(
 				wslUser: tab.wslUser ?? (environment === "wsl" ? originEntry?.wslUser : undefined),
 				importedSourceId: tab.importedSourceId ?? originEntry?.importedSourceId,
 				piSessionId: tab.sessionId,
+				// fork/clone 产物同步落 fork 标记（列表标题 (fork) 后缀）；开关由调用方按语义传入，
+				// switch_session / 历史会话换绑等不标记。
+				forked: options?.markForked,
 			});
 			return target.id;
 		},
@@ -3484,6 +3488,7 @@ app.whenReady().then(async () => {
 					value: await replaceAgentSession(
 						target.agentId,
 						() => agentManager.cloneSession(target.agentId),
+						{ markForked: true },
 					),
 				};
 			} catch (error) {

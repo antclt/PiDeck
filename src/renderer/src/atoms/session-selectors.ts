@@ -26,6 +26,7 @@ export function sessionRecordToSummary(
     projectPath: session.projectPath,
     name: session.title,
     parentSessionPath: session.parentSessionPath,
+    forked: session.forked,
     preview: session.preview,
     updatedAt: session.updatedAt,
     messageCount: session.messageCount,

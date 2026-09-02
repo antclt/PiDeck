@@ -308,7 +308,11 @@ export type SessionIpcDeps = {
 		sessionId: string,
 	) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
 	exportCatalogSessionHtml: (sessionId: string) => Promise<Record<string, unknown> & { path: string }>;
-	replaceAgentSession: (agentId: string, fn: () => Promise<any>) => Promise<any>;
+	replaceAgentSession: (
+		agentId: string,
+		fn: () => Promise<any>,
+		options?: { markForked?: boolean },
+	) => Promise<any>;
 	/** DSH 后端专用 IPC 依赖（C1 分组；未装配 = 无 DSH 后端）。 */
 	dshBackend?: DshBackendIpcDeps;
 };
@@ -1779,12 +1783,27 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				"restoreRewindCheckpoint",
 				target,
 				{ checkpointId, scope },
-				() =>
-					sessionRuntimeCoordinator.restoreRewindCheckpoint(
+				async () => {
+					const result = await sessionRuntimeCoordinator.restoreRewindCheckpoint(
 						target,
 						checkpointId,
 						scope,
-					),
+					);
+					// conversation/all 会在检查点 fork 出新会话（runtime 已换绑新文件）：
+					// 趁运行态拿到新 sessionPath，同步给 catalog 打 fork 标记（列表 (fork) 后缀），
+					// 不依赖后续扫描才识别。fork 锚点解析失败时不会走到这一步。
+					if (result.ok && scope !== "files") {
+						const tab = agentManager.list().find((candidate) => candidate.id === target.agentId);
+						if (tab?.sessionPath) {
+							const environment = tab.sessionEnvironment ?? "native";
+							const entry = sessionCatalog.findByFilePath(tab.sessionPath, environment);
+							if (entry) {
+								await sessionCatalog.update(entry.id, { forked: true });
+							}
+						}
+					}
+					return result;
+				},
 			);
 		},
 	);
@@ -1856,6 +1875,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				const value = await replaceAgentSession(
 					target.agentId,
 					() => agentManager.cloneSession(target.agentId),
+					{ markForked: true },
 				);
 				void appLogger.info("session", "Session cloned", { sessionId: target.sessionId });
 				return {
@@ -1908,6 +1928,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				const value = await replaceAgentSession(
 					target.agentId,
 					() => agentManager.forkSession(target.agentId, entryId),
+					{ markForked: true },
 				);
 				void appLogger.info("session", "Session forked", { sessionId: target.sessionId, entryId });
 				return {

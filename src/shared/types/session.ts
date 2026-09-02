@@ -94,6 +94,11 @@ export type SessionSummary = {
 	name?: string;
 	/** 子会话：关联的父会话文件路径。有该字段时不在会话列表顶层显示，而是嵌套在父会话下。 */
 	parentSessionPath?: string;
+	/**
+	 * fork 会话标记（pi fork/clone 的文件头带 parentSession）：有父关系但形态为
+	 * 「用户 fork/分支」而非子代理/嵌套子会话，列表顶层展示并加 (fork) 后缀。
+	 */
+	forked?: boolean;
 	preview: string;
 	updatedAt: number;
 	messageCount: number;
@@ -159,6 +164,11 @@ export type SessionRecord = {
 	importedSourceId?: string;
 	parentSessionId?: string;
 	parentSessionPath?: string;
+	/**
+	 * fork 会话标记（pi fork/clone 产物）：标题右侧显示 (fork) 区分；与「子代理/嵌套子会话」
+	 * （parentSessionPath 会被侧栏折叠到父行下）语义不同，两者独立存储。
+	 */
+	forked?: boolean;
 	projectPath?: string;
 	preview: string;
 	messageCount: number;

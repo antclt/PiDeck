@@ -1819,6 +1819,38 @@ export class SessionScanner {
   }
 
   /**
+   * 从有界头部 JSONL 文本探测 pi fork/branch 会话。
+   * pi 的 fork/clone（createBranchedSession / newSession({parentSession})）都会在
+   * session header 写 parentSession；子代理形态（tintinweb 平铺子代理）同样带该字段，
+   * 但其会话名固定 <agent>#<8hex>，据此排除——只有真正的用户 fork/分支才返回 true。
+   * 该探测只产生「fork 标记」，与 parentSessionPath（子代理父关系、列表折叠）语义分离。
+   */
+  private detectForkedFromHead(raw: string): boolean {
+    let hasParentSession = false;
+    let latestSessionInfoName: string | undefined;
+    for (const line of raw.split(/\r?\n/).filter(Boolean)) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!isSessionScanLine(parsed)) continue;
+      const entry = parsed;
+      if (entry.type === "session") {
+        hasParentSession = Boolean(this.optionalString(entry.parentSession ?? entry.header?.parentSession));
+      } else if (entry.type === "session_info") {
+        latestSessionInfoName = this.optionalString(entry.name ?? entry.data?.name);
+      }
+    }
+    if (!hasParentSession) return false;
+    // tintinweb 子代理（名字 <agent>#<8hex>）不是用户 fork；名字缺省（落在窗口盲区）时
+    // 视为普通 fork——子代理形态会被 parentSessionPath/路径推断识别，不受影响。
+    if (latestSessionInfoName && /^[^#]+#[0-9a-f]{8}$/i.test(latestSessionInfoName)) return false;
+    return true;
+  }
+
+  /**
    * 读有界头部并同时校验会话头有效性：transcript 等无 type 头的产物会被标记
    * valid:false，供 catalog 在 mergeScanned 时拒绝索引（#168）。读不到文件时
    * 返回空对象（valid 缺省 = 不拒绝），兼容权限/锁定文件不被误删。
@@ -1828,11 +1860,12 @@ export class SessionScanner {
    */
   async inferSessionNameAndValidity(
     filePath: string,
-  ): Promise<{ name?: string; nameFromSessionInfo?: boolean; valid?: boolean; parentSessionPath?: string }> {
+  ): Promise<{ name?: string; nameFromSessionInfo?: boolean; valid?: boolean; parentSessionPath?: string; forked?: boolean }> {
     const head = await this.readHeadAndInfer(filePath);
     if (!head) return {};
     const parentSessionPath = await this.detectFlatSubagentParentFromHead(filePath, head.raw);
-    return { name: head.name, nameFromSessionInfo: head.nameFromSessionInfo, valid: isValidPiSessionFileHead(head.raw), parentSessionPath };
+    const forked = this.detectForkedFromHead(head.raw);
+    return { name: head.name, nameFromSessionInfo: head.nameFromSessionInfo, valid: isValidPiSessionFileHead(head.raw), parentSessionPath, forked: forked || undefined };
   }
 
   /**
