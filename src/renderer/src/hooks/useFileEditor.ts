@@ -161,6 +161,8 @@ export interface UseFileEditorOutput {
     repoPath?: string,
   ) => Promise<void>;
   closeGitDiff: () => void;
+  /** 仅关掉 Git Diff、保留文件 tab（与 closeGitDiff 不同：后者连 tab 一起清）。 */
+  dismissGitDiff: () => void;
   gitDiffDisplayMode: WorkspaceContentOpenMode;
   gitDrawerDiff: GitDrawerDiff | null;
   toggleGitDiffDisplayMode: () => void;
@@ -651,6 +653,8 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
     openCommitFileDiff: openCommitFileDiffFn,
     // 阅读面关闭钮：清 Diff + 文件 tab，避免「关不完」
     closeGitDiff: dismissWorkbenchContent,
+    // 与新打开文件 tab 同时使用时只清 Diff：Diff 在阅读面独占优先级，不清的话新 tab 被压住看起来“打不开”。
+    dismissGitDiff: dismissGitDiffOnly,
     gitDiffDisplayMode,
     gitDrawerDiff,
     toggleGitDiffDisplayMode,
