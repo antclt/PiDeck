@@ -46,6 +46,7 @@ import { useAgentLoadNotice } from "./hooks/useAgentLoadNotice";
 import { useSessionLayout } from "./hooks/useSessionLayout";
 import { useFileEditor } from "./hooks/useFileEditor";
 import { resolveFileLinkPath } from "./utils/filePathLinks";
+import { imageMimeTypeFromPath } from "./utils/composerImages";
 import { useOverlayActions } from "./hooks/useOverlayActions";
 import { useWorkspacePanels, type WorkspaceDrawerPanel, type WorkspaceExternalEditorAdapter } from "./hooks/useWorkspacePanels";
 import { useDrawerPorts } from "./hooks/useDrawerPorts";
@@ -144,7 +145,10 @@ import { SessionSplitStage } from "./components/session/SessionSplitStage";
 import { splitLayoutSessionIds } from "./utils/sessionSplitEdge";
 import { findLoadedDirectory, loadProjectFileTree, mergeFileTreeChildren } from "./utils/fileTreeLazy";
 import { SessionTabsBar, type SessionToolAction } from "./components/session/SessionTabsBar";
-import { SessionPaneServicesProvider } from "./components/session/SessionPaneServices";
+import {
+  SessionPaneServicesProvider,
+  type SessionFileOpenContext,
+} from "./components/session/SessionPaneServices";
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
 import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
@@ -464,6 +468,7 @@ export function App() {
     setSessionLoadingByProject,
     setVisibleProjectChildCountByProject,
     refreshProjects,
+    refreshAllProjects,
     refreshWorktrees,
     refreshProjectSessions,
     refreshFiles,
@@ -1338,6 +1343,7 @@ export function App() {
     openWorkspaceFileDiff,
     openCommitFileDiff,
     closeGitDiff,
+    dismissGitDiff,
     gitDiffDisplayMode,
     gitDrawerDiff,
     toggleGitDiffDisplayMode,
@@ -1368,33 +1374,50 @@ export function App() {
   // 替代原先的"系统默认应用打开"（.md 会被浏览器接管、体验割裂）
   // line 为可选 `path:line` 位置标记：编辑器打开后滚动定位到该行。
   const handleOpenLinkedFile = useCallback(
-    (path: string, line?: number) => {
-      const resolved = resolveFileLinkPath(
-        path,
-        activeAgent?.cwd ?? activeProject?.path,
-      );
-      // 相对路径且无基准目录（无 agent cwd / 无项目）时解析器返回 null：
-      // 直接提示，而不是把原样相对路径丢给主进程按进程 cwd 乱猜 → 静默空白文件。
+    (path: string, line?: number, context?: SessionFileOpenContext) => {
+      // 有栏级上下文时绝不回退 App 当前焦点：分屏左栏的点击不能借用右栏 cwd/project。
+      const baseDir = context
+        ? context.baseDir
+        : activeAgent?.cwd ?? activeProject?.path;
+      const projectRoot = context ? context.projectRoot : activeProject?.path;
+      const projectId = context ? context.projectId : activeProject?.id;
+      // 会话内入口必须携带稳定 projectId；缺失时不能降级成通用读取绕开主进程项目边界。
+      if (context && !projectId) {
+        showToast(t("app.fileLinkCannotResolve", { path }));
+        return;
+      }
+      const resolved = resolveFileLinkPath(path, baseDir, projectRoot);
+      // 相对路径无基准目录、`..` 逃逸或绝对路径落在项目外都会返回 null。
+      // 主进程读取时还会按 projectId 对真实路径做第二次边界校验。
       if (!resolved) {
         showToast(t("app.fileLinkCannotResolve", { path }));
         return;
       }
+      const fileAccessScope = projectId ? { projectId } : undefined;
       const ext = resolved.split(".").pop()?.toLowerCase() ?? "";
       if (IMAGE_EXTENSIONS.has(ext)) {
-        // 图片：读取二进制 → 弹窗预览
+        // readBase64 返回原始 base64，不是 data URL；直接构造 ImageContent 供预览弹层使用。
         void api.files
-          .readBase64(resolved)
-          .then((dataUrl) => {
-            const m = dataUrl.match(/^data:(.*?);base64,(.*)$/s);
-            if (m) setPreviewImage({ type: "image", mimeType: m[1], data: m[2] });
+          .readBase64(resolved, undefined, fileAccessScope)
+          .then((data) => {
+            if (!data) throw new Error("FILE_NOT_FOUND");
+            setPreviewImage({
+              type: "image",
+              mimeType: imageMimeTypeFromPath(resolved),
+              data,
+            });
           })
-          .catch(() => showToast(t("app.openFileFailed", { error: ext })));
+          .catch((error) =>
+            showToast(t("app.openFileFailed", {
+              error: error instanceof Error ? error.message : String(error),
+            })),
+          );
         return;
       }
-      // markdown / html / 其他文本文件：统一抽屉查看；带行号链接打开后滚动定位
-      viewFilePath(resolved, undefined, line);
+      // markdown / html / 其他文本文件：统一抽屉查看；scope 固化进 tab，切焦点后仍按原项目读取。
+      viewFilePath(resolved, undefined, line, fileAccessScope);
     },
-    [activeAgent?.cwd, activeProject?.path, viewFilePath, showToast],
+    [activeAgent?.cwd, activeProject?.id, activeProject?.path, viewFilePath, showToast],
   );
 
   // 工具抽屉（files/git/browser）的统一切换语义：当前面板已展开 → 关闭；
@@ -1991,10 +2014,17 @@ export function App() {
         console.error("[Files] refresh failed", error);
         const message = error instanceof Error ? error.message : String(error);
         const tooLarge = message.match(/FILE_TREE_DIRECTORY_TOO_LARGE:(\d+):(\d+)/);
+        const projectDirectoryMissing = message.includes("PROJECT_DIRECTORY_MISSING");
+        if (projectDirectoryMissing) {
+          // 项目在启动/切换期间被外部删除：清空树后重扫项目 presence，侧栏马上标出失效目录。
+          void refreshProjects().catch(() => undefined);
+        }
         showToast(
           tooLarge
             ? t("app.filesDirectoryTooLarge", { count: tooLarge[1], max: tooLarge[2] })
-            : t("app.filesRefreshFailed", { error: message }),
+            : projectDirectoryMissing
+              ? t("app.projectDirectoryMissing")
+              : t("app.filesRefreshFailed", { error: message }),
           4000,
         );
       }
@@ -2010,6 +2040,8 @@ export function App() {
     return () => {
       cancelled = true;
     };
+  // 该 effect 只应由项目身份切换触发；refreshProjects 是 hook 每次渲染返回的命令，
+  // 放入依赖会让 setFiles 后再次触发扫描，形成文件树刷新循环。
   }, [activeProjectId, beginFileTreeRequest, isFileTreeRequestCurrent, loadExpandedDirs]);
 
   useEffect(() => {
@@ -2995,6 +3027,7 @@ export function App() {
         const project = projects.find((candidate) => candidate.id === projectId);
         if (project) await refreshProjectTree(project);
       },
+      refreshAll: refreshAllProjects,
       reorder: reorderProjects,
       reveal: (project) => api.files.showInFolder(project.path),
       openWithEditor: (project) => {
@@ -3138,6 +3171,7 @@ export function App() {
       worktreesByProject={worktreesByProject}
       branchByProject={branchByProject}
       creatingWorktree={worktreeCreating}
+      removingWorktreePaths={removingWorktreePaths}
       isLanWeb={isLanWeb}
       // 「新建会话」：清空当前会话并选中活动项目 → 落到初始引导页（居中输入框 + 项目下拉切换），
       // 用户选择项目后可直接输入对话（首次发送才创建真实会话）。无项目时保持引导页「添加项目」空态。
@@ -3629,7 +3663,7 @@ export function App() {
     enableGitManagement: settings.enableGitManagement, activeProjectId,
     gitDrawerDiff, gitDiffDisplayMode,
     openCommitFileDiff, openWorkspaceFileDiff,
-    toggleGitDiffDisplayMode, closeGitDiff,
+    toggleGitDiffDisplayMode, closeGitDiff, dismissGitDiff,
     gitApi: api.git, gitInfo,
     switchBranch, createBranch,
     openDrawer: workspace.openDrawer,
@@ -3713,9 +3747,12 @@ export function App() {
 
 
   return (
-    // 文件链接存在性校验的 baseDir 与 handleOpenLinkedFile 同口径
-    // （activeAgent cwd 优先，回退项目路径），让 markdown 内链接按同一基准解析。
-    <FileLinkBaseProvider baseDir={activeAgent?.cwd ?? activeProject?.path}>
+    // 非会话静态区域使用当前焦点作为兜底；每个 SessionRuntimeInjector 会用本栏 cwd/project 覆盖。
+    <FileLinkBaseProvider
+      baseDir={activeAgent?.cwd ?? activeProject?.path}
+      projectId={activeProject?.id}
+      projectRoot={activeProject?.path}
+    >
     <>
       <AppBootstrap {...bootstrapProps} />
     <AppShell
@@ -3874,8 +3911,12 @@ export function App() {
                 await api.files.delete(node.path, true);
                 void refreshVisibleFiles();
                 showToast(t("app.fileDeleted"), 2000);
-              } catch (e) {
-                console.error("[File] 删除失败:", e);
+              } catch (error) {
+                // 回收站不可用、权限不足或文件已被外部移走时，必须把主进程错误呈现给用户；
+                // 仅写控制台会让确认框关闭后看起来像“点击无效”。
+                showToast(t("app.fileDeleteFailed", {
+                  error: String(error instanceof Error ? error.message : error).replace(/^Error:\s*/, ""),
+                }), 5000, "error");
               }
             },
           });

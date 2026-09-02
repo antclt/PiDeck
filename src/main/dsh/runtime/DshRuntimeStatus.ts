@@ -10,6 +10,7 @@
  * ——同一接缝（--dsh-node-modules 的 appRoot 推导），保证「探测可用 = host 可 fork」。
  */
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
 	DshRuntimeSource,
@@ -19,7 +20,7 @@ import type {
 
 /** 探测结果：ok 时给出 runtime node_modules 锚点（appRoot，与 DshHost 的 appRoot 同源）。 */
 export type DshRuntimeProbeResult =
-	| { ok: true; appRoot: string }
+	| { ok: true; appRoot: string; runtimeVersion?: string }
 	| { ok: false; error: string };
 
 /**
@@ -57,7 +58,14 @@ export function probeDshRuntime(input: {
 		};
 	}
 	if (input.bundled.ok) {
-		return { ok: true, appRoot: input.bundled.appRoot, source: "builtin" };
+		return {
+			ok: true,
+			appRoot: input.bundled.appRoot,
+			source: "builtin",
+			// 内置分发也有版本号（dsh-base 包版本）：UI 概览页文案模板带 v 前缀，
+			// 不填就会渲染成孤零零的「随应用内置 v」。
+			runtimeVersion: input.bundled.runtimeVersion,
+		};
 	}
 	return { ok: false, error: input.bundled.error };
 }
@@ -73,7 +81,20 @@ export function probeBundledDshRuntime(appPath: string): DshRuntimeProbeResult {
 		// 避免主进程产物（CJS）自身解析路径与 host fork 时产生分叉。
 		const require = createRequire(join(appPath, "package.json"));
 		const basePkgPath = require.resolve("@deepseek-ai/dsh-base/package.json");
-		return { ok: true, appRoot: dirname(dirname(dirname(basePkgPath))) };
+		// 顺带读出版本号：resolve 出的就是 package.json 路径，读它比再探测目录更稳。
+		// 读失败不致命——版本缺失只是 UI 少显示一个数字，不能因此把整个探测判失败。
+		let runtimeVersion: string | undefined;
+		try {
+			const pkg = JSON.parse(readFileSync(basePkgPath, "utf8")) as { version?: string };
+			if (typeof pkg.version === "string" && pkg.version) runtimeVersion = pkg.version;
+		} catch {
+			runtimeVersion = undefined;
+		}
+		return {
+			ok: true,
+			appRoot: dirname(dirname(dirname(basePkgPath))),
+			runtimeVersion,
+		};
 	} catch (error) {
 		return {
 			ok: false,

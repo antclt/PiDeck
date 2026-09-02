@@ -97,6 +97,7 @@ import type {
 	PiSkillSummary,
 	SkillContentResult,
 	Project,
+	ProjectFileAccessScope,
 	PromptStoreSearchResult,
 	PromptStoreItem,
 	ScratchPadData,
@@ -262,16 +263,17 @@ const api = {
 		/** 在系统文件管理器中打开目录 */
 		openFileManager: (path: string) =>
 			ipcRenderer.invoke(ipcChannels.filesOpenFileManager, path) as Promise<void>,
-		readContent: (path: string, maxBytes?: number) =>
-			ipcRenderer.invoke(ipcChannels.filesReadContent, path, maxBytes) as Promise<string>,
+		readContent: (path: string, maxBytes?: number, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesReadContent, path, maxBytes, scope) as Promise<string>,
 		/** 批量校验路径是否存在（返回与入参等长的 boolean[]；单路径失败按 false 计） */
-		pathsExist: (paths: string[]) =>
-			ipcRenderer.invoke(ipcChannels.filesPathsExist, paths) as Promise<boolean[]>,
-		/** 读取二进制文件为 data URL（粘贴资源管理器图片文件时用；maxBytes 可预检拦截超大文件） */
-		readBase64: (path: string, maxBytes?: number) =>
-			ipcRenderer.invoke(ipcChannels.filesReadBase64, path, maxBytes) as Promise<string>,
-		writeContent: (path: string, content: string) =>
-			ipcRenderer.invoke(ipcChannels.filesWriteContent, path, content) as Promise<void>,
+		pathsExist: (paths: string[], scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesPathsExist, paths, scope) as Promise<boolean[]>,
+		/** 读取二进制文件为 base64；scope 存在时主进程限制到对应 ProjectStore 根目录。 */
+		readBase64: (path: string, maxBytes?: number, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesReadBase64, path, maxBytes, scope) as Promise<string>,
+		/** 保存项目来源文件时复用读取 scope，主进程据此校验真实写入路径。 */
+		writeContent: (path: string, content: string, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesWriteContent, path, content, scope) as Promise<void>,
 		delete: (path: string, recursive?: boolean) =>
 			ipcRenderer.invoke(ipcChannels.filesDelete, path, recursive) as Promise<void>,
 		/** 复制来源路径到目标目录（支持文件和目录递归），返回目标路径列表 */
@@ -386,11 +388,12 @@ const api = {
 				model: string;
 				reasoningEffort?: string;
 			} | undefined>,
-		/** DSH 配置管理页状态（host 启动状态 + DSH_HOME 目录）。 */
+		/** DSH 配置管理页状态（host 启动状态 + DSH_HOME 目录 + 最近 boot 失败原因）。 */
 		getDshStatus: () =>
 			ipcRenderer.invoke(ipcChannels.dshGetStatus) as Promise<{
 				started: boolean;
 				homeDir: string;
+				bootError?: string | null;
 			}>,
 		/**
 		 * DSH runtime 安装态（AgentRuntimeProvider 阶段 1）：notInstalled/broken 时
@@ -1578,6 +1581,12 @@ const api = {
 				ipcChannels.configGetUsageProbes,
 				{ provider, backend },
 			) as Promise<UsageProbeSettingsResult>,
+		/** 轻量内置识别（渲染层隐藏「用量查询」按钮用）：命中内置候选返回 true，不读配置文件 */
+		usageRecognized: (provider: string, backend?: "pi" | "dsh") =>
+			ipcRenderer.invoke(
+				ipcChannels.configUsageRecognized,
+				{ provider, backend },
+			) as Promise<{ recognized: boolean }>,
 		/** 按 provider 合并保存用量查询配置（主进程校验后落盘，保留其它 providers 与旧 probes） */
 		saveUsageProbes: (payload: UsageProbeSaveInput) =>
 			ipcRenderer.invoke(

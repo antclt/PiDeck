@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.2--beta-yellow)
+![Version](https://img.shields.io/badge/version-0.7.3--beta-yellow)
 
 <!-- star-history:start -->
 <picture>
@@ -33,6 +33,17 @@
 
 ---
 
+<details open>
+<summary>❤️ 赞助商</summary>
+
+| Logo | 简介 |
+| --- | --- |
+| <a href="https://88api.ai/sign-up?aff=DAEe"><img src="docs/images/88vip.png" alt="88API" width="120"></a> | [**88API Token聚合站**](https://88api.ai/sign-up?aff=DAEe)<br>88API 是一站式多模型 API 聚合平台，平台由海外企业运营，稳定高效支持开票。平台提供 DeepSeek 官转和开源渠道，价格低至 5 折，完美适配PiDeck项目。一个 API Key 即可统一接入海内外多种模型，覆盖文本对话、图片、音频、音乐和视频生成接口，适用于 AI 编程、Agent 自动化、内容创作及应用开发。<br><br>[**立即注册 →**](https://88api.ai/sign-up?aff=DAEe) |
+
+</details>
+
+---
+
 ## 📑 目录
 
 - [PiDeck](#pideck)
@@ -40,7 +51,7 @@
   - [📑 目录](#-目录)
   - [✨ 核心亮点](#-核心亮点)
   - [📋 更新日志](#-更新日志)
-    - [v0.7.2 更新亮点](#v072-更新亮点)
+    - [v0.7.3 更新亮点](#v073-更新亮点)
   - [🧩 功能总览](#-功能总览)
     - [工作区与项目](#工作区与项目)
     - [会话与对话](#会话与对话)
@@ -79,25 +90,25 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.7.2**（2026-08-30）
+> **最新版本 v0.7.3**（2026-09-02）
 
-### v0.7.2 更新亮点
-- 🚀 **用量查询重构（对齐 cc-switch）**
-- 🚀 **多段用量徽标**
-- 🚀 **DSH 用量查询链路**
-- 🚀 **用量查询 AI 辅助**
-- 🚀 **PiDeck 特有文件统一收拢**
-- 🚀 **主动更新提示（无配额方案）**
-- 🚀 **发布流程配套 latest.yml**
-- 🚀 **检查超时防护**
-- 🚀 **Pi CLI 后台检查**
-- 🚀 **修复手动检测被吞**
-- 🚀 **会话定位轴刻度完善**
-- 🚀 **定位轴分屏让位**
-- ✨ **更新检查降级路径**
-- ✨ **更新检查链路加固**
-- ✨ **DSH 用量查询 provider 名归一化**
-- ✨ **文件管理器打开与终端归属修复**
+### v0.7.3 更新亮点
+- 🚀 **聊天系统归档**
+- 🚀 **Rewind 检查点**
+- 🚀 **DSH runtime 本地导入**
+- 🚀 **自动会话标题**
+- 🚀 **闲置 Agent 自动释放**
+- 🚀 **用量行常驻与模型卡片收紧**
+- 🚀 **问题反馈带项目上下文**
+- 🚀 **Ask 通知直达会话**
+- 🚀 **配置管理深链**
+- 🚀 **beUI 全面启用**
+- 🚀 **子代理与会话分段卡**
+- 🚀 **pi-tui 重命名同步**
+- ✨ **刷新过期项目**
+- ✨ **DSH runtime 安装不再卡主进程**
+- ✨ **模型测试连接超时**
+- ✨ **上滑读历史不再跳到最新一轮**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

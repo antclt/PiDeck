@@ -269,6 +269,11 @@ export type ProviderUsageResult = {
 	intervalMinutes?: number;
 	/** 失败原因（主进程本地文案或 HTTP 错误摘要）。 */
 	error?: string;
+	/**
+	 * 失败时的排查明细（尝试过的 URL + HTTP 状态/网络错误 + 响应摘要 + 归纳提示），
+	 * 多行文本、已脱敏；渲染层可折叠展示，帮用户定位「地址/鉴权/接口是否变更」。
+	 */
+	detail?: string;
 	/** 查询时刻（Date.now()），渲染层据此判断数据新旧。 */
 	at?: number;
 };

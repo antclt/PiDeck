@@ -274,7 +274,7 @@ export function RewindCheckpointList(props: { sessionId: string }) {
 							onClick={() => void loadMore()}
 						>
 							{loadingMore && (
-								<span className="size-3 animate-spin rounded-full border border-text-tertiary border-t-transparent" aria-hidden="true" />
+								<span className="size-3 animate-pideck-spin rounded-full border border-text-tertiary border-t-transparent" aria-hidden="true" />
 							)}
 							{t("rewind.loadMore")}
 						</button>
@@ -410,7 +410,7 @@ function CheckpointRow(props: {
 								aria-label={t("rewind.restoreTitle")}
 							>
 								{props.restoring ? (
-									<span className="size-3 animate-spin rounded-full border border-text-tertiary border-t-transparent" aria-hidden="true" />
+									<span className="size-3 animate-pideck-spin rounded-full border border-text-tertiary border-t-transparent" aria-hidden="true" />
 								) : (
 									<Undo2 size={13} strokeWidth={1.8} aria-hidden="true" />
 								)}

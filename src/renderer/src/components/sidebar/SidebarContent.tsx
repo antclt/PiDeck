@@ -36,6 +36,8 @@ export type SidebarActions = {
     add: () => Promise<void>;
     select: (projectId: string) => void;
     refresh: (projectId: string) => Promise<void>;
+    /** 重扫所有项目目录的存在性并刷新侧栏清单。 */
+    refreshAll: () => Promise<void>;
     reorder: (sourceProjectId: string, targetProjectId: string) => Promise<void>;
     reveal: (project: Project) => Promise<void>;
     openWithEditor: (project: Project) => void;
@@ -115,6 +117,8 @@ export type SidebarContentProps = {
   worktreesByProject: Readonly<Record<string, readonly WorktreeEntry[]>>;
   branchByProject?: Readonly<Record<string, string | null | undefined>>;
   creatingWorktree?: boolean;
+  /** 正在删除的 worktree 路径集合（透传给 WorktreeTree 驱动淡出动画）。 */
+  removingWorktreePaths?: ReadonlySet<string>;
   isLanWeb?: boolean;
   chrome?: ReactNode;
   /** 「新建会话」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
@@ -375,6 +379,7 @@ export function SidebarContent(props: SidebarContentProps) {
             currentSessionId={props.currentSessionId}
             worktreesByProject={props.worktreesByProject}
             branchByProject={props.branchByProject}
+            removingWorktreePaths={props.removingWorktreePaths}
           />
         </section>
       </div>

@@ -11,6 +11,8 @@ import { twMerge } from "tailwind-merge";
 // 注意：v1 曾用 opacity-0 整行淡出，用户反馈「文字变白不可读、须点击激活才能看到」，
 // 已弃用（见本文件 doesNotMatch 断言防回退）。
 // 本测试锁定：容器基准、统一断点、三棵树的让位宽度与按钮浮层模式不被破坏。
+// 注：WorktreeTree 改版后用命名组 /workspace-row（主/子行共用 workspaceActionPaddingClass
+// 裁剪出入 52px 让位），不再用 @max-[255px] 容器查询门控；测试按当前源码对齐。
 
 const read = (p) => readFileSync(p, "utf8");
 
@@ -55,21 +57,24 @@ test("session rows yield to hover actions on narrow sidebar", () => {
 
 test("worktree rows yield to hover actions on narrow sidebar", () => {
 	const src = read("src/renderer/src/components/sidebar/WorktreeTree.tsx");
-	// 主工作区行：2 按钮（pi/匿名）→ 52px 留白
+	// 主工作区行与子行共用同一让位变量：2 按钮（pi/匿名）→ 52px 留白。
+	// 改版后用命名组 /workspace-row，不再用 @max-[255px] 容器查询门控（与子行保持一致）。
 	assert.match(
 		src,
-		/conversation-body min-w-0 flex-1 transition-\[padding-right\] @max-\[255px\]:group-hover:pr-\[52px\] @max-\[255px\]:group-focus-within:pr-\[52px\]/,
+		/workspaceActionPaddingClass =\s*\n\s*"group-hover\/workspace-row:pr-\[52px\] group-focus-within\/workspace-row:pr-\[52px\]"/,
 	);
-	// 子工作区行：3 按钮（pi/匿名/删除）→ 78px 留白，挂在行按钮上（transition-all 与配色过渡共存）
-	assert.match(src, /transition-all @max-\[255px\]:group-hover:pr-\[78px\] @max-\[255px\]:group-focus-within:pr-\[78px\]/);
+	assert.match(src, /conversation-body min-w-0 flex-1 transition-\[padding-right\]/);
+	// 子行按钮同样接入让位变量（workspaceSelectClass 带 transition-[…,padding-right]）
+	assert.match(src, /workspaceActionPaddingClass,[\s\S]*?childActionsOpen && "pr-\[52px\]"/);
 	// 新建 DSH 会话入口已收敛到会话内的后端选择器，工作区行不再提供独立机器人按钮
 	assert.doesNotMatch(src, /createDraftDsh\(props\.project\.id\)/);
 	assert.doesNotMatch(src, /createDraftDsh\(childProject\.id\)/);
-	// 子行文本 span 回归原始形态（不再淡出/不再带过渡）
+	// 子行文本 span 原始形态（不再淡出/不再带过渡）
 	assert.match(src, /<span className="min-w-0 flex-1 truncate font-medium">\{row\.branch\}<\/span>/);
-	assert.match(src, /workspace-tree-directory max-w-20 shrink-0 truncate text-micro text-muted-foreground\">\{row\.directory\}<\/span>/);
-	// 浮层模式不变
-	assert.match(src, /workspace-tree-actions pointer-events-none absolute top-1\/2 right-0\.5/);
+	assert.match(src, /workspace-tree-directory max-w-20 shrink-0 truncate text-micro text-muted-foreground">\{row\.directory\}<\/span>/);
+	// 浮层模式不变（absolute 不占位 + 命名组 hover 显现）
+	assert.match(src, /workspace-tree-actions pointer-events-none absolute top-1\/2 right-1 flex/);
+	assert.match(src, /group-hover\/workspace-row:pointer-events-auto group-hover\/workspace-row:opacity-100/);
 	// 行文本不得再淡出
 	assert.doesNotMatch(src, /group-hover(?:\/row)?:opacity-0/);
 });

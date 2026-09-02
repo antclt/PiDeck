@@ -118,6 +118,8 @@ export type DshBackendIpcDeps = {
 	getDshStatus?: () => Promise<{
 		started: boolean;
 		homeDir: string;
+		/** 最近一次 host boot 失败的真实原因；无失败/未启动为 null。 */
+		bootError?: string | null;
 	}>;
 	/**
 	 * DSH runtime 安装态（AgentRuntimeProvider 阶段 1）：installed/notInstalled/broken。
@@ -1549,7 +1551,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		ipcChannels.dshGetStatus,
 		async () => (getDshStatus
 			? getDshStatus()
-			: { started: false, homeDir: "" }),
+			: { started: false, homeDir: "", bootError: null }),
 	);
 	// DSH runtime 安装态查询：未装配 dshBackend = 无 DSH 后端，按 notInstalled 返回
 	//（渲染层据此隐藏 DSH UI、显示安装引导，不会出现裸报错）。

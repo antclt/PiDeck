@@ -438,6 +438,8 @@ export const ipcChannels = {
 	configFetchUsage: "config:fetch-usage",
 	/** 读取单个 provider 的用量查询配置（usage-probes.json）+ 内置模板自动识别 */
 	configGetUsageProbes: "config:get-usage-probes",
+	/** 轻量判断 provider 是否命中内置用量模板（零配置自动生效；渲染层据此隐藏「用量查询」配置按钮） */
+	configUsageRecognized: "config:usage-recognized",
 	/** 按 provider 合并保存用量查询配置（校验后落盘，保留其它 providers 与旧 probes） */
 	configSaveUsageProbes: "config:save-usage-probes",
 	/** 单条模板测试（模板 id + 覆盖字段；配置弹窗「测试」按钮，key 不出主进程） */

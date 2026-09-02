@@ -8,12 +8,13 @@
  */
 
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { BarChart3, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { ProviderUsageRow } from "../components/app/ProviderUsageInline";
+import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { isDshDeepseekProfileVisibleField, isDshPiAiCustomRoute, isDshPiAiProfileVisibleField } from "./dshFieldLabels";
@@ -665,23 +666,16 @@ export function PiAiProvidersCard(props: {
 						<div key={entry.key} className="rounded-md border border-border-subtle bg-bg-panel">
 							<ProviderRowHead
 								title={entry.key}
-								badges={[t("config.dsh.modelsCount", { count: modelCount })]}
 								keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
 								extraActions={
 									<>
-										{/* 用量查询配置（柱状图图标在行头图标组，与模型页/认证页同款） */}
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon-sm"
+										{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；DSH 链路 backend=dsh） */}
+										<UsageQueryEntryButton
+											provider={entry.key}
+											backend="dsh"
 											className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-											title={t("config.usageProbe.entry")}
-											aria-label={t("config.usageProbe.entry")}
-											data-testid="provider-usage-configure-icon"
-											onClick={() => props.onOpenUsageProbeDialog(entry.key)}
-										>
-											<BarChart3 className="size-3.5" aria-hidden="true" />
-										</Button>
+											onOpen={() => props.onOpenUsageProbeDialog(entry.key)}
+										/>
 										<ProviderMigrationButton
 											direction="dsh-to-pi"
 											provider={entry.key}
@@ -734,8 +728,12 @@ export function PiAiProvidersCard(props: {
 									/>
 								</div>
 							)}
-							{/* 用量行（与 Pi 模型页同一版式：卡片右下角）= 金额/百分比；DSH 链路（$DSH_HOME 配置 + DSH 凭据库） */}
-							<ProviderUsageRow provider={entry.key} backend="dsh" />
+							{/* 用量行（与 Pi 模型页同一版式：卡片右下角）= 模型数量（左） + 金额/百分比（右）；DSH 链路（$DSH_HOME 配置 + DSH 凭据库） */}
+							<ProviderUsageRow
+								provider={entry.key}
+								backend="dsh"
+								leading={t("config.dsh.modelsCount", { count: modelCount })}
+							/>
 						</div>
 					);
 				})}
@@ -960,23 +958,16 @@ export function DeepseekRouteCard(props: {
 				<div className="rounded-md border border-border-subtle bg-bg-panel">
 					<ProviderRowHead
 						title={namespace.ns === "llm-deepseek" ? t("config.dsh.deepseekOfficial") : namespace.ns}
-						badges={[t("config.dsh.modelsCount", { count: modelOverride ? models.length : directCatalog.length })]}
 						keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
 						extraActions={
 							<>
-								{/* 用量查询配置（柱状图图标在行头图标组，与模型页/认证页同款） */}
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-sm"
+								{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；DSH 官方 DeepSeek） */}
+								<UsageQueryEntryButton
+									provider="deepseek"
+									backend="dsh"
 									className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-									title={t("config.usageProbe.entry")}
-									aria-label={t("config.usageProbe.entry")}
-									data-testid="provider-usage-configure-icon"
-									onClick={() => props.onOpenUsageProbeDialog("deepseek")}
-								>
-									<BarChart3 className="size-3.5" aria-hidden="true" />
-								</Button>
+									onOpen={() => props.onOpenUsageProbeDialog("deepseek")}
+								/>
 								<ProviderMigrationButton
 									direction="dsh-to-pi"
 									provider="deepseek"
@@ -1027,8 +1018,12 @@ export function DeepseekRouteCard(props: {
 							/>
 						</div>
 					)}
-					{/* 用量行（与 Pi 模型页同一版式：卡片右下角）= 金额/百分比；DSH 链路（$DSH_HOME 配置 + DSH 凭据库） */}
-					<ProviderUsageRow provider="deepseek" backend="dsh" />
+					{/* 用量行（与 Pi 模型页同一版式：卡片右下角）= 模型数量（左） + 金额/百分比（右）；DSH 链路（$DSH_HOME 配置 + DSH 凭据库） */}
+					<ProviderUsageRow
+						provider="deepseek"
+						backend="dsh"
+						leading={t("config.dsh.modelsCount", { count: modelOverride ? models.length : directCatalog.length })}
+					/>
 				</div>
 			</div>
 		</div>

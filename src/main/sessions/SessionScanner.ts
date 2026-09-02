@@ -169,8 +169,8 @@ export class SessionScanner {
   private static readonly SUMMARY_READ_CONCURRENCY = 4;
   /** 摘要只读文件前缀：catalog 不需要整份历史，1MB 足够取 cwd/预览/模型。 */
   private static readonly SUMMARY_PARSE_MAX_BYTES = 1024 * 1024;
-  /** 轻量补名只读文件头部：首条 user/assistant 消息几乎总在头部几 KB 内（标题又被截断到 32 字符），64KB 足够。 */
-  private static readonly SUMMARY_NAME_HEAD_BYTES = 64 * 1024;
+  /** 轻量补名读取窗口：头部用于校验会话/首条消息，尾部用于捕获 pi `/name` 追加的最新 session_info。 */
+  private static readonly SUMMARY_NAME_WINDOW_BYTES = 64 * 1024;
   /** 多项目同时 list() 时串行化，避免展开多个项目时并行扫盘把 IPC 打爆。 */
   private listQueue: Promise<void> = Promise.resolve();
   private readonly summaryCache = new SessionSummaryCache<SessionSummary | null>();
@@ -277,6 +277,25 @@ export class SessionScanner {
       execFile(this.wslExePath, [
         "-d", this.wslConfig!.distro, "-u", this.wslConfig!.user,
         "head", "-c", String(maxBytes), "--", wslPath,
+      ], {
+        shell: this.wslShell,
+        encoding: "utf8",
+        timeout: 5_000,
+        signal,
+        windowsHide: true,
+      }, (err, stdout) => {
+        if (err) reject(err);
+        else resolve(stdout);
+      });
+    });
+  }
+
+  /** 通过 wsl.exe 读取文件尾部；pi `/name` 会把权威 session_info 追加在日志末尾。 */
+  private readWslFileTail(wslPath: string, maxBytes: number, signal?: AbortSignal): Promise<string> {
+    return new Promise((resolve, reject) => {
+      execFile(this.wslExePath, [
+        "-d", this.wslConfig!.distro, "-u", this.wslConfig!.user,
+        "tail", "-c", String(maxBytes), "--", wslPath,
       ], {
         shell: this.wslShell,
         encoding: "utf8",
@@ -1749,20 +1768,30 @@ export class SessionScanner {
   }
 
   /**
-   * 有界读文件头部，返回原文与推断标题（不读完整正文、不写摘要缓存）。
-   * 供占位标题回填与会话头有效性校验共用，避免对同一文件重复读盘。
+   * 有界读取文件头 + 文件尾，返回会话头原文与推断标题（不读完整正文、不写摘要缓存）。
+   * pi `/name` 会在 JSONL 末尾追加 session_info，只读头部会永久看不到大会话的外部改名；
+   * 因此头部负责有效性/首条消息，尾部负责最新 session_info；文件超过单窗大小才补读尾部。
    */
   private async readHeadAndInfer(
     filePath: string,
   ): Promise<{ raw: string; name: string | undefined } | null> {
     const isWsl = this.isWslPath(filePath);
     try {
-      const raw = isWsl
-        ? await this.readWslFileHead(filePath, SessionScanner.SUMMARY_NAME_HEAD_BYTES)
-        : await this.readLocalFilePrefix(filePath, SessionScanner.SUMMARY_NAME_HEAD_BYTES);
-      // 头部截断产生的半行解析失败会被 inferScanNameFromLines 跳过，无需额外处理。
-      const name = inferScanNameFromLines(raw.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content));
-      return { raw, name };
+      const version = isWsl ? await this.readWslFileVersion(filePath) : await stat(filePath);
+      const windowBytes = SessionScanner.SUMMARY_NAME_WINDOW_BYTES;
+      const head = isWsl
+        ? await this.readWslFileHead(filePath, windowBytes)
+        : await this.readLocalFilePrefix(filePath, windowBytes);
+      let titleText = head;
+      if (version.size > windowBytes) {
+        const tail = isWsl
+          ? await this.readWslFileTail(filePath, windowBytes)
+          : await this.readLocalFileSuffix(filePath, windowBytes, version.size);
+        titleText = `${head}\n${tail}`;
+      }
+      // 头/尾窗口边界可能截断半行；inferScanNameFromLines 会跳过不可解析行。
+      const name = inferScanNameFromLines(titleText.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content));
+      return { raw: head, name };
     } catch {
       // 读不到（权限/锁定/不存在）：返回 null，调用方按 best-effort 处理，不拒绝文件。
       return null;
@@ -1862,7 +1891,7 @@ export class SessionScanner {
    * 的文件形态完全一致（都带 parentSession header），唯一区分是 tintinweb 会
    * setSessionName("<agent>#<id前8位>")，会话名以 #8 位十六进制结尾。
    * 返回解析后的父会话路径；非 tintinweb 形态（fork/普通会话）返回 undefined。
-   * 仅读头部（SUMMARY_NAME_HEAD_BYTES），不触碰完整正文。
+   * 仅读头部（SUMMARY_NAME_WINDOW_BYTES），不触碰完整正文。
    */
   async probeTintinwebSubagentParent(filePath: string): Promise<string | undefined> {
     const head = await this.readHeadAndInfer(filePath);
@@ -1967,6 +1996,19 @@ export class SessionScanner {
     try {
       const buffer = Buffer.allocUnsafe(maxBytes);
       const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+      return buffer.toString("utf8", 0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /** 读取本地文件尾部窗口；起点按字节计算，避免大会话全量加载进主进程。 */
+  private async readLocalFileSuffix(filePath: string, maxBytes: number, fileSize: number): Promise<string> {
+    const handle = await openFile(filePath, "r");
+    try {
+      const bytesToRead = Math.min(maxBytes, fileSize);
+      const buffer = Buffer.allocUnsafe(bytesToRead);
+      const { bytesRead } = await handle.read(buffer, 0, bytesToRead, Math.max(0, fileSize - bytesToRead));
       return buffer.toString("utf8", 0, bytesRead);
     } finally {
       await handle.close();

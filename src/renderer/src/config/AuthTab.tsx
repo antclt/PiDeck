@@ -1,6 +1,6 @@
 import { Button } from "../components/ui-shadcn/button";
 import { useEffect, useState } from "react";
-import { BarChart3, ChevronDown, ChevronRight, Copy, ExternalLink, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, ExternalLink, Trash2 } from "lucide-react";
 import { t } from "../i18n";
 import type { AuthFile, ModelsFile } from "./configTypes";
 import { ConfigComboboxInput, openDocsInSystemBrowser, SecretInput } from "./ConfigShared";
@@ -8,6 +8,7 @@ import { Input } from "../components/ui-shadcn/input";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Label } from "../components/ui-shadcn/label";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
+import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { ProviderUsageRow } from "../components/app/ProviderUsageInline";
 
 // 根据 pi 官方文档支持的供应商列表 (https://pi.dev/docs/latest/providers#auth-file)
@@ -321,18 +322,11 @@ export function AuthTab(props: {
 										direction="pi-to-dsh"
 										provider={name}
 									/>
-									{/* 用量查询配置（柱状图图标在行头图标组，与模型页/DSH 同款） */}
-									<Button variant="ghost" size="icon-sm" className="size-7"
-										onClick={(e) => {
-											e.stopPropagation();
-											props.onOpenUsageProbeDialog(name);
-										}}
-										title={t("config.usageProbe.entry")}
-										aria-label={t("config.usageProbe.entry")}
-										data-testid="provider-usage-configure-icon"
-									>
-										<BarChart3 size={14} />
-									</Button>
+									{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染） */}
+									<UsageQueryEntryButton
+										provider={name}
+										onOpen={() => props.onOpenUsageProbeDialog(name)}
+									/>
 									<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
 										onClick={(e) => {
 											e.stopPropagation();

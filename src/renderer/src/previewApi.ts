@@ -617,6 +617,7 @@ export function createPreviewApi(): PiDesktopApi {
 			getDshStatus: async () => ({
 				started: false,
 				homeDir: "",
+				bootError: null,
 			}),
 			// 预览环境无 DSH 后端：按未安装处理（UI 走安装引导，不裸报错）。
 			getDshRuntimeStatus: async () => ({ state: "notInstalled" as const }),
@@ -1178,6 +1179,7 @@ export function createPreviewApi(): PiDesktopApi {
 				error: "preview",
 			}),
 			getUsageProbes: async () => ({ recognized: null, templates: [], errors: [] }),
+			usageRecognized: async () => ({ recognized: false }),
 			saveUsageProbes: async () => ({ ok: false, error: "preview" }),
 			testUsageProbe: async () => ({ success: false, error: "preview" }),
 			installUsageSkill: async () => ({ success: false, error: "preview" }),

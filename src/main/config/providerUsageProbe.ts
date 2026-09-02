@@ -23,6 +23,7 @@ import type {
 	ProviderUsageKind,
 	ProviderUsagePeriod,
 } from "../../shared/types/providerUsage";
+import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import { resolveCustomUsage } from "./providerUsageCustom";
 import { getByPath, toNumber } from "./providerUsagePath";
 export { getByPath, toNumber } from "./providerUsagePath";
@@ -135,6 +136,11 @@ export type UsageProbeCandidate = {
 	 * 拼接 path，跳过版本化补齐与路径段拼接。
 	 */
 	rootPath?: boolean;
+	/**
+	 * 基础地址本身就是管理根（如 New API 模板已在构建时剥离 /v1）：true 时跳过版本化
+	 * 补齐，只尝试「原样 baseUrl + path」——补 /v1 只会多一次必 404 的尝试。
+	 */
+	noVersionPath?: boolean;
 	/** 链式预检：先请求预检端点再请求主端点（如 xAI identity → billing）。 */
 	preflight?: UsageProbePreflight;
 	/** 响应解析规格；缺省走 periods（opencode-go 兼容）。 */
@@ -338,7 +344,7 @@ export function candidateApplies(
 
 /** 候选适用 provider 的探测 URL 列表（含版本化 baseUrl 与原样 baseUrl 两条尝试路径）。 */
 export function usageProbeUrls(
-	candidate: Pick<UsageProbeCandidate, "path" | "absoluteUrl" | "rootPath">,
+	candidate: Pick<UsageProbeCandidate, "path" | "absoluteUrl" | "rootPath" | "noVersionPath">,
 	baseUrl: string,
 	ensureVersionPath: (url: string) => string,
 ): string[] {
@@ -357,6 +363,10 @@ export function usageProbeUrls(
 		}
 	}
 	const u = baseUrl.replace(/\/+$/, "");
+	// noVersionPath：baseUrl 已是管理根（如 New API 剥离 /v1 后），补 /v1 只会多一次必 404 的尝试。
+	if (candidate.noVersionPath) {
+		return [candidate.path.startsWith("/") ? `${u}${candidate.path}` : `${u}/${candidate.path}`];
+	}
 	const versioned = ensureVersionPath(baseUrl);
 	const primary = `${versioned.replace(/\/+$/, "")}${candidate.path}`;
 	const bare = `${u}${candidate.path}`;
@@ -569,3 +579,70 @@ function parseBooster(body: unknown, spec: UsageProbeBooster): ProviderUsageBoos
 
 /** 专用解析器表：kind:"custom" 的 resolver 名称 → 解析函数。 */
 
+
+/**
+ * 单次探测失败明细（用于全部候选失败时生成可排查的错误提示）。
+ * 失败分类三种：HTTP 状态码已知（status）、响应 200 但结构不符（shape）、
+ * 网络层失败（超时/不可达，error 字段）。url/body 均已脱敏或截断后再写入。
+ */
+export type UsageProbeAttempt =
+	| { url: string; method: string; status: number; body?: string }
+	| { url: string; method: string; kind: "shape" }
+	| { url: string; method: string; error: "timeout" | "network" };
+
+/**
+ * 失败原因归纳 hint：按「最具解释力」的状态归类，返回 i18n key；无尝试记录返回空串。
+ * 优先级：结构不符（多数网关 404 才是常态，200+结构不符是最可疑的接口变更信号）
+ *       → 鉴权（401/403 全量）→ 404（全量，多是地址问题）→ 5xx → 超时/网络 → 混合。
+ */
+export function classifyUsageProbeFailureHint(
+	attempts: readonly UsageProbeAttempt[],
+): MainProcessTranslationKey | "" {
+	if (attempts.length === 0) return "";
+	// 全部为 200 但结构不匹配：端点存在，只是字段/格式对不上（接口变更或非预期响应）。
+	if (attempts.some((a) => "kind" in a && a.kind === "shape") && attempts.every((a) => "kind" in a && a.kind === "shape")) {
+		return "mainConfig.providerUsageHintShape";
+	}
+	const statuses = attempts.filter((a) => "status" in a).map((a) => a.status);
+	if (attempts.length > 0 && statuses.length === attempts.length) {
+		if (statuses.every((s) => s === 401 || s === 403)) return "mainConfig.providerUsageHintAuth";
+		if (statuses.every((s) => s === 404)) return "mainConfig.providerUsageHintNotFound";
+		if (statuses.some((s) => s >= 500)) return "mainConfig.providerUsageHintServer";
+	}
+	// 全部尝试都没拿到 HTTP 状态（超时 / 网络错误）。
+	if (statuses.length === 0 && attempts.every((a) => "error" in a)) {
+		return "mainConfig.providerUsageHintTimeout";
+	}
+	return "mainConfig.providerUsageHintMixed";
+}
+
+/** 拼接失败明细文本：尝试行（方法 + URL + 状态/错误 + 响应摘要）+ 归纳提示。 */
+export function buildProbeFailureDetail(
+	attempts: readonly UsageProbeAttempt[],
+	translate: (key: MainProcessTranslationKey) => string,
+): string {
+	if (attempts.length === 0) return "";
+	const lines: string[] = [translate("mainConfig.providerUsageAttemptsTitle")];
+	for (const a of attempts) {
+		if ("status" in a) {
+			lines.push(`${a.method} ${a.url} → HTTP ${a.status}`);
+			// 服务端错误摘要（已脱敏截断），保留前 240 字符足够定位是「路径不对」还是「非法请求」。
+			if (a.body) lines.push(`  ${a.body.slice(0, 240)}`);
+		} else if ("kind" in a && a.kind === "shape") {
+			lines.push(`${a.method} ${a.url} → HTTP 200（响应结构与预期不符）`);
+		} else {
+			lines.push(
+				`${a.method} ${a.url} → ${translate(
+					"error" in a && a.error === "timeout"
+						? "mainConfig.providerUsageAttemptTimeout"
+						: "mainConfig.providerUsageAttemptNetwork",
+				)}`,
+			);
+		}
+	}
+	const hintKey = classifyUsageProbeFailureHint(attempts);
+	if (hintKey) {
+		lines.push("", `${translate("mainConfig.providerUsageHintTitle")}${translate(hintKey)}`);
+	}
+	return lines.join("\n");
+}

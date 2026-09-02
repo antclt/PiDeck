@@ -60,6 +60,12 @@ function loadSessionAtoms() {
     "../utils/liveTextHandoff": compileModule(
       "src/renderer/src/utils/liveTextHandoff.ts",
     ),
+    "./outlineRevision": compileModule(
+      "src/renderer/src/atoms/outlineRevision.ts",
+    ),
+    "./outlineProjectionCache": compileModule(
+      "src/renderer/src/atoms/outlineProjectionCache.ts",
+    ),
   });
 }
 

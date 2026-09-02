@@ -158,6 +158,26 @@ test("inferSessionNameFromFile prefers session_info name over the first user tex
 	}
 });
 
+test("inferSessionNameFromFile reads the latest session_info appended beyond the head window", async () => {
+	const home = mkdtempSync(join(tmpdir(), "pi-scan-title-tail-"));
+	const { SessionScanner: Scanner } = loadSessionScanner(home);
+	try {
+		const file = join(home, ".pi", "agent", "sessions", "--C--Users-14012-pi-desktop-dev--", "2026-08-22T04-22-29-162Z_abc.jsonl");
+		const padding = "x".repeat(70 * 1024);
+		writeSession(file, [
+			makeHeader("abc"),
+			makeUser("u1", "文件头里的旧回退标题"),
+			makeAssistant("a1", padding),
+			{ type: "session_info", id: "i1", parentId: "a1", timestamp: "2026-08-22T04:23:00.000Z", name: "pi-tui 在文件末尾追加的新标题" },
+		]);
+		const scanner = new Scanner();
+		const name = await scanner.inferSessionNameFromFile(file);
+		assert.equal(name, "pi-tui 在文件末尾追加的新标题");
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
 test("inferSessionNameFromFile skips pi timestamp stems and untitled text", async () => {
 	const home = mkdtempSync(join(tmpdir(), "pi-scan-title-skip-"));
 	const { SessionScanner: Scanner } = loadSessionScanner(home);

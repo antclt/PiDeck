@@ -63,7 +63,7 @@ export type TurnRowProps = {
 	/** 当前 live 思考段稳定 id（msg-thinking-*），交给 buildTurnDisplay 同身份挂载 */
 	liveThinkingId?: string;
 	onOpenExternal: (url: string) => void;
-	onOpenFile?: (path: string) => void;
+	onOpenFile?: (path: string, line?: number) => void;
 	onDiffFile?: DiffFileHandler;
 	onResendUserMessage?: (message: never) => void;
 	onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
@@ -310,6 +310,7 @@ export const TurnRow = memo(
 												hidden={!stepsVisible}
 												stopped={props.agentRunning !== true}
 												sessionId={props.sessionId}
+												onOpenFile={props.onOpenFile}
 											/>
 										);
 									}
@@ -468,7 +469,8 @@ turnRowPropsEqual,
  * 比较项：
  * - run：深度比较内容（sameAgentRunForRender），未变化的 run 不重渲染；
  * - 标量 props（backend/fresh/showThinking/isStreaming/liveThinkingId/agentRunning/isRuntimeBusy）：=== 比较；
- * - 回调函数（onPreviewImage/onOpenExternal/onOpenFile/onDiffFile/onEditMessage/onDeleteMessage/
+ * - onOpenFile：栏级 cwd/project 变化时引用会更新，必须参与比较，否则历史工具按钮会继续调用旧栏上下文；
+ * - 其余回调函数（onPreviewImage/onOpenExternal/onDiffFile/onEditMessage/onDeleteMessage/
  *   onEnterMultiSelect）：行为稳定（读 ref/setState），引用变化不影响渲染结果，忽略（同 FinalAnswer 惯例）。
  */
 function turnRowPropsEqual(prev: TurnRowProps, next: TurnRowProps): boolean {
@@ -486,6 +488,7 @@ function turnRowPropsEqual(prev: TurnRowProps, next: TurnRowProps): boolean {
 		prev.isRuntimeBusy === next.isRuntimeBusy &&
 		prev.isLatestRun === next.isLatestRun &&
 		prev.isLastAgentRun === next.isLastAgentRun &&
-		prev.autoCollapseTick === next.autoCollapseTick
+		prev.autoCollapseTick === next.autoCollapseTick &&
+		prev.onOpenFile === next.onOpenFile
 	);
 }

@@ -654,3 +654,69 @@ test("credits parse 无 scale 或非法 scale 不缩放（行为不变）", () =
   assert.equal(res.credits.used, 30);
   assert.equal(res.credits.remaining, 70);
 });
+
+test("usageProbeUrls noVersionPath 只尝试管理根单 URL（不补 /v1）", () => {
+  const cand = { path: "/api/user/self", noVersionPath: true };
+  const urls = probe.usageProbeUrls(cand, "https://88api.ai", ensureVersion);
+  // vm realm 数组不能 deepStrictEqual，逐项断言
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0], "https://88api.ai/api/user/self");
+});
+
+test("usageProbeUrls noVersionPath 保留子路径前缀", () => {
+  const cand = { path: "/api/user/self", noVersionPath: true };
+  const urls = probe.usageProbeUrls(cand, "https://host.example/newapi", ensureVersion);
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0], "https://host.example/newapi/api/user/self");
+});
+
+const TR = (k) => `[${k}]`;
+
+test("buildProbeFailureDetail 全量 404 归纳「地址不对」提示并带响应摘要", () => {
+  const attempts = [
+    { url: "https://88api.ai/v1/api/user/self", method: "GET", status: 404 },
+    { url: "https://88api.ai/api/user/self", method: "GET", status: 404, body: '{"error":{"message":"Invalid URL"}}' },
+  ];
+  const detail = probe.buildProbeFailureDetail(attempts, TR);
+  assert.match(detail, /GET https:\/\/88api\.ai\/api\/user\/self → HTTP 404/);
+  assert.match(detail, /Invalid URL/);
+  assert.match(detail, /\[mainConfig\.providerUsageHintNotFound\]/);
+});
+
+test("buildProbeFailureDetail 全量 401/403 归纳「鉴权」提示", () => {
+  const attempts = [
+    { url: "https://88api.ai/api/user/self", method: "GET", status: 401, body: '{"code":"AUTH_UNAUTHORIZED"}' },
+  ];
+  const detail = probe.buildProbeFailureDetail(attempts, TR);
+  assert.match(detail, /\[mainConfig\.providerUsageHintAuth\]/);
+});
+
+test("buildProbeFailureDetail 全部超时/网络错误归纳「超时/网络」提示", () => {
+  const attempts = [
+    { url: "https://88api.ai/api/user/self", method: "GET", error: "timeout" },
+    { url: "https://88api.ai/api/user/self", method: "GET", error: "network" },
+  ];
+  const detail = probe.buildProbeFailureDetail(attempts, TR);
+  assert.match(detail, /\[mainConfig\.providerUsageAttemptTimeout\]/);
+  assert.match(detail, /\[mainConfig\.providerUsageAttemptNetwork\]/);
+  assert.match(detail, /\[mainConfig\.providerUsageHintTimeout\]/);
+});
+
+test("buildProbeFailureDetail 200 结构不符归纳「接口变更」提示", () => {
+  const attempts = [{ url: "https://host/api/user/self", method: "GET", kind: "shape" }];
+  const detail = probe.buildProbeFailureDetail(attempts, TR);
+  assert.match(detail, /响应结构与预期不符/);
+  assert.match(detail, /\[mainConfig\.providerUsageHintShape\]/);
+});
+
+test("buildProbeFailureDetail 混合失败归纳「混合」提示，无尝试记录返回空串", () => {
+  const detail = probe.buildProbeFailureDetail(
+    [
+      { url: "https://a.example/x", method: "GET", status: 404 },
+      { url: "https://a.example/y", method: "GET", status: 401 },
+    ],
+    TR,
+  );
+  assert.match(detail, /\[mainConfig\.providerUsageHintMixed\]/);
+  assert.equal(probe.buildProbeFailureDetail([], TR), "");
+});

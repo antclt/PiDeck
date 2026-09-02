@@ -259,7 +259,8 @@ test("main-process user surfaces use stable copy and keep caught details in logs
     "tray.quit",
     "dialog.chooseChatHistoryFolder",
     "dialog.chooseProjectFolder",
-    "update.checkFailed",
+    // 注：update.checkFailed 由 renderer 用 checkFailedTitle/checkFailedDescription 呈现，
+    // main IPC 不再引用（与 store.skillsShInstallFailed 同理），从扫描列表移除。
     "update.invalidDownloadUrl",
     "update.downloadFailed",
     "wsl.windowsOnly",
