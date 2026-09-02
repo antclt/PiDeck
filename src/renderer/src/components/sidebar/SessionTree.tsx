@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, Ellipsis, HatGlasses, Image as ImageIcon, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Ellipsis, HatGlasses, Image as ImageIcon, Pin, Trash2 } from "lucide-react";
 import type { AgentTab, Project, SessionRecord, SessionSummary } from "../../../../shared/types";
 import { collectDisplayedSessionIds, filterAgentsForSidebarDisplay, getProjectAgentSessionDisplay, sessionStatusDotClass, type ProjectChildItem } from "../../agentListDisplay";
 import { sessionRecordToSummary } from "../../atoms";
@@ -113,6 +113,7 @@ export function SessionTree(props: {
     agents: displayAgents,
     sessions: summaries,
     visibleChildCount: props.visibleChildCount ?? (props.nested ? Number.MAX_SAFE_INTEGER : props.controller.visibleChildCountFor(props.project.id)),
+    pinnedSessionIds: props.controller.pinnedSessionIds,
   });
   const displayedSessionIds = collectDisplayedSessionIds(
     display.visibleChildren,
@@ -158,12 +159,12 @@ export function SessionTree(props: {
     },
   });
 
-  const openContext = (event: React.MouseEvent, session: SessionSummary) => {
+  const openContext = (event: React.MouseEvent, session: SessionSummary, pinnable = true) => {
     event.preventDefault();
     const runtime = getBoundSidebarRuntimeAgent(props.controller.catalog, session.id);
     void props.controller.openMenu(runtime
-      ? { kind: "agent", agentId: runtime.id, x: event.clientX, y: event.clientY }
-      : { kind: "session", projectId: props.project.id, sessionId: session.id, x: event.clientX, y: event.clientY });
+      ? { kind: "agent", agentId: runtime.id, pinnable, x: event.clientX, y: event.clientY }
+      : { kind: "session", projectId: props.project.id, sessionId: session.id, pinnable, x: event.clientX, y: event.clientY });
   };
   const openDraftContext = (event: React.MouseEvent, session: SessionRecord) => {
     event.preventDefault();
@@ -173,6 +174,7 @@ export function SessionTree(props: {
       void props.controller.openMenu({
         kind: "agent",
         agentId: runtimeAgent.id,
+        pinnable: false,
         x: event.clientX,
         y: event.clientY,
       });
@@ -191,7 +193,7 @@ export function SessionTree(props: {
       <div
         key={session.id}
         className={rowContainerClass}
-        onContextMenu={(event) => openContext(event, session)}
+        onContextMenu={(event) => openContext(event, session, false)}
       >
         <button
           type="button"
@@ -217,7 +219,7 @@ export function SessionTree(props: {
           title={t("sidebar.moreActions")}
           onClick={(event) => {
             event.stopPropagation();
-            openContext(event, session);
+            openContext(event, session, false);
           }}
         >
           <Ellipsis size={14} aria-hidden="true" />
@@ -304,6 +306,7 @@ export function SessionTree(props: {
     }
     const runtime = getBoundSidebarRuntimeAgent(props.controller.catalog, child.session.id);
     const runtimeSnapshot = props.controller.catalog.runtimeBySessionId[child.session.id];
+    const pinned = props.controller.isSessionPinned(child.session.id);
     return <Fragment key={child.session.id}>
       <div
         className={rowContainerClass}
@@ -323,6 +326,12 @@ export function SessionTree(props: {
           {...sessionDragProps(child.session.id)}
         >
           {renderRuntimeStatusDot(runtimeSnapshot?.status)}
+          {pinned && (
+            <Pin
+              className="size-3 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+          )}
           <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
             {/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差 */}
             <strong className={cn("min-w-0 flex-1 truncate", runtime ? "font-medium" : "font-normal text-muted-foreground/90")}>{child.session.name || t("common.untitled")}</strong>

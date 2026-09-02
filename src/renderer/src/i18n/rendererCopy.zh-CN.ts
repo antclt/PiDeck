@@ -2419,6 +2419,8 @@ export const zhCN = {
   "menu.closeAgent": "关闭 Agent",
   "menu.restartSession": "重启会话",
   "menu.reloadSession": "重新加载会话",
+  "menu.pinSession": "置顶会话",
+  "menu.unpinSession": "取消置顶",
   "menu.copySession": "复制会话",
   "menu.sessionProxy": "会话代理",
   "menu.archiveSession": "归档会话",
