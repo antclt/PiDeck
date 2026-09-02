@@ -162,6 +162,7 @@ export function UsageProbeConfigDialog(props: {
 	const [intervalMinutes, setIntervalMinutes] = useState(5);
 	const [testState, setTestState] = useState<ButtonState>("idle");
 	const [testError, setTestError] = useState("");
+	const [testDetail, setTestDetail] = useState("");
 	const [testResult, setTestResult] = useState<ProviderUsageResult | null>(null);
 	const [saveState, setSaveState] = useState<ButtonState>("idle");
 	const [saveError, setSaveError] = useState("");
@@ -203,6 +204,7 @@ export function UsageProbeConfigDialog(props: {
 	const resetInstant = useCallback(() => {
 		setTestState("idle");
 		setTestError("");
+		setTestDetail("");
 		setTestResult(null);
 		setSaveState("idle");
 		setSaveError("");
@@ -230,6 +232,7 @@ export function UsageProbeConfigDialog(props: {
 	/** 测试：按当前选中模板 + 覆盖字段发请求（主进程解析端点与密钥）。无模板时不可测试。 */
 	const runTest = async () => {
 		setTestError("");
+		setTestDetail("");
 		setTestResult(null);
 		const current = currentTemplate;
 		if (!current) {
@@ -266,6 +269,8 @@ export function UsageProbeConfigDialog(props: {
 				);
 			} else {
 				setTestError(result.error ?? t("config.usageProbe.testFailed"));
+				// 主进程带上的排查明细（尝试过的 URL + 状态 + 提示），多行展示方便定位问题。
+				setTestDetail(result.detail ?? "");
 			}
 		} catch (error) {
 			setTestState("error");
@@ -564,6 +569,14 @@ export function UsageProbeConfigDialog(props: {
 										</span>
 									)}
 								</div>
+								{testState === "error" && testDetail && (
+									// 失败明细：URL/状态/提示多行列表（已脱敏），平铺展示便于排查地址与鉴权问题。
+									<div className="w-full overflow-hidden rounded-md border border-border/60 bg-background/60 px-2 py-1.5" data-testid="usage-probe-test-detail">
+										<pre className="max-h-44 overflow-auto whitespace-pre-wrap break-all font-mono text-micro leading-relaxed text-text-secondary">
+											{testDetail}
+										</pre>
+									</div>
+								)}
 							</section>
 						</>
 					)}

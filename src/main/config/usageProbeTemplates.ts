@@ -11,6 +11,7 @@
  * 内置候选表（providerUsageProbe.ts）自动识别命中的模板不允许用户改写结构，
  * 只提供「识别结果」让弹窗显示说明（模型：内置默认开、零配置）。
  */
+import { stripOpenAiVersionPath } from "./baseUrlPath";
 import type {
 	UsageProbeProviderConfig,
 	UsageProbeTemplateCategory,
@@ -71,6 +72,10 @@ export function buildDeclarativeUsageProbeTemplate(
 		if (!accessToken || !userId) {
 			return { error: "New API 模板需要访问令牌和用户 ID" };
 		}
+		// New API 管理端点（/api/user/self）挂在站点根，不在 OpenAI 兼容端点（baseUrl 常带 /v1）
+		// 之下：显式覆盖的 baseUrl 优先，未覆盖时从供应商端点解析结果剥离版本段，得到「管理根」。
+		// 这样用户只配一次 baseUrl（推理端点），用量查询自动指向管理面，无需猜测或重复填。
+		const baseUrl = stripOpenAiVersionPath(config.baseUrl?.trim() || endpoint.baseUrl);
 		return {
 			candidate: {
 				path: "/api/user/self",
@@ -86,8 +91,10 @@ export function buildDeclarativeUsageProbeTemplate(
 					usedPath: "data.used_quota",
 					scale: 500000,
 				},
+				// baseUrl 已是管理根：跳过 /v1 版本化补齐，避免先打一个必 404 的 /v1/... 请求。
+				noVersionPath: true,
 			},
-			baseUrl: config.baseUrl?.trim() || endpoint.baseUrl,
+			baseUrl,
 			apiKey: endpoint.apiKey,
 		};
 	}
