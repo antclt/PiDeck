@@ -8,6 +8,7 @@ import { ActiveSessionsTree } from "./ActiveSessionsTree";
 import { SessionTree } from "./SessionTree";
 import { WorktreeTree } from "./WorktreeTree";
 import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
+import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { Button } from "../ui-shadcn/button";
 import {
 	DropdownMenu,
@@ -56,7 +57,7 @@ function matchesProject(project: Project, search: string, controller: SidebarCon
     if (controller.catalog.agents.some((agent) => agent.projectId === related.id &&
       `${agent.title}${agent.cwd}${agent.sessionId ?? ""}`.toLowerCase().includes(query))) return true;
     return (controller.catalog.sessionsByProject[related.id] ?? []).some((session) =>
-      `${session.title}${session.preview}${session.filePath ?? ""}`.toLowerCase().includes(query));
+      `${sessionDisplayName(session.title, session.forked) ?? session.title}${session.preview}${session.filePath ?? ""}`.toLowerCase().includes(query));
   });
 }
 

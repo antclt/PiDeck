@@ -22,6 +22,7 @@ import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController, type SidebarRpcLog } from "../../hooks/useSidebarController";
+import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { DshSearchResults } from "./DshSearchResults";
 import { ProjectTree } from "./ProjectTree";
 import { Button } from "../ui-shadcn/button";
@@ -248,7 +249,7 @@ export function SidebarContent(props: SidebarContentProps) {
     for (const session of controller.catalog.sessionsByProject[project.id] ?? []) {
       searchItems.push({
         id: `session:${session.id}`,
-        title: session.title,
+        title: sessionDisplayName(session.title, session.forked) ?? session.title,
         description: session.preview,
         icon: MessageSquare,
         onSelect: () => { void actions.sessions.open(project.id, session.id); },

@@ -33,6 +33,7 @@ import {
 import { t } from "../../i18n";
 import { AnimatedBadge } from "../motion/animated-badge";
 import { sessionStatusBadge } from "../../utils/sessionStatusBadge";
+import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { Button } from "../ui-shadcn/button";
 import {
   ContextMenu,
@@ -730,7 +731,7 @@ function SessionTab(props: {
     isStopping: props.isStopping,
     isReloading: props.isReloading,
   });
-  const title = record?.title || t("common.untitled");
+  const title = sessionDisplayName(record?.title, record?.forked) || t("common.untitled");
   // Tab 级操作（固定/关闭等）改为右键菜单（ContextMenu，光标处弹出）；Tab 本体点击仍是切换，
   // 拖拽排序与中键关闭与菜单互不干扰（drag/auxclick 不触发 click）。
   // 运行控制（停止/重启/重新加载）只作用于当前会话，已上收右上角 ⋯ 更多操作菜单。
