@@ -30,7 +30,7 @@ import {
   isLanWeb,
   missingElectronPreload,
 } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, sessionRecordsAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, sessionRecordsAtom, bumpNewTurnCollapseTickAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -2537,6 +2537,11 @@ export function App() {
       }
       throw new Error(localizedError);
     }
+    // 排队投递（steer「插入当前回合」/ followUp 排队）同样构成「新一轮」：
+    // bump 会话 tick，timeline 侧非最新轮据此收起（设置② collapsePrevRunsOnNewTurn）。
+    // 普通发送由 useSessionSend 的 sendPrompt 返回值自己 bump；这里是队列 drain 的
+    // 唯一出口，漏掉会导致中断轮（无最终回答）在新一轮开始后仍保持展开。
+    store.set(bumpNewTurnCollapseTickAtom, sessionId);
   }
 
   async function submitPromptSnapshot(

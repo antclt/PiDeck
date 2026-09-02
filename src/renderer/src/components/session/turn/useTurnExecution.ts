@@ -12,6 +12,9 @@ export type TurnExecutionState = {
  * run 级执行过程折叠状态（一个开关控制全部思考/工具/中间回答步骤）。
  *
  * 行为：
+ * - 非 live（只看历史/会话空闲）挂载时一律折叠：已完成轮只留最终回答；
+ *   无最终回答的中断轮（stop/steer 打断）同样收起（旧实现把设置①误用于
+ *   静止历史，导致只看历史时中断轮整段展开）；
  * - 手动开合永远最高优先：流式上升沿不会覆盖用户已折叠的状态；
  * - 流式上升沿：设置①（expandInterimDuringStream）开启且无手动 override 时展开；
  * - 新一轮信号：非最新轮强制收起（含手动展开的），节省渲染资源；
@@ -23,7 +26,8 @@ export function useTurnExecution(opts: {
 	runId?: string;
 	agentRunning?: boolean;
 	isComplete: boolean;
-	/** 本轮是否存在最终回答：无最终回答的 run 不自动展开/收起（中间回答是唯一输出）。 */
+	/** 本轮是否存在最终回答：决定自动收起行为——无最终回答的 run 不自动收起
+	 * （中间回答是唯一输出，避免折叠后整轮只剩空壳），但新一轮信号仍会强制收起。 */
 	hasFinalAnswer?: boolean;
 	/** 是否时间线上最新一轮。非最新轮不自动展开/收起。 */
 	isLatestRun?: boolean;
@@ -39,9 +43,13 @@ export function useTurnExecution(opts: {
 	onAutoCollapsed?: () => void;
 }): TurnExecutionState {
 	const [stepsVisible, setStepsVisible] = useState(() => {
-		// 历史已完成且有最终回答的轮：始终折叠（时间线只留最终回答）。
-		if (opts.isComplete && !opts.agentRunning && opts.hasFinalAnswer) return false;
-		// 进行中/无最终回答（中断）的轮：默认折叠；设置①开启时才默认展开。
+		// 非 live（agentRunning=false：只看历史/会话空闲）一律折叠。
+		// 历史已完成、有最终回答的轮自然折叠；无最终回答的中断轮（stop/steer
+		// 打断，中间回答是其唯一输出）也不例外——只读历史时默认收起，
+		// 而不是把设置①（流式展开）误用于静止的历史轮次。
+		if (!opts.agentRunning) return false;
+		// 仅 live 流式轮遵循设置①：流式中展开中间过程，结束后由
+		// 自动收起信号 / 新一轮信号收掉。
 		return Boolean(opts.expandInterimDuringStream);
 	});
 	const userOverrideRef = useRef(false);
