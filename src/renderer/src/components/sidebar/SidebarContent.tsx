@@ -146,6 +146,16 @@ export function SidebarContent(props: SidebarContentProps) {
   const menuAgent = menu?.kind === "agent"
     ? controller.catalog.agents.find((agent) => agent.id === menu.agentId)
     : undefined;
+  const menuAgentSessionId = menuAgent
+    ? Object.entries(controller.catalog.runtimeBySessionId).find(
+      ([, runtime]) => runtime?.agentId === menuAgent.id,
+    )?.[0]
+    : undefined;
+  const menuAgentSessionRecord = menuAgentSessionId && menuAgent
+    ? controller.catalog.sessionsByProject[menuAgent.projectId]?.find(
+      (session) => session.id === menuAgentSessionId,
+    )
+    : undefined;
 
   // 底栏主题按钮：图标与文案反映当前主题模式；点击翻转浅/暗（规则见 themeAppearance.toggleThemeMode）
   const ThemeModeIcon =
@@ -443,6 +453,11 @@ export function SidebarContent(props: SidebarContentProps) {
           menu={{ x: menu.x, y: menu.y, agent: menuAgent }}
           onClose={controller.closeMenu}
           onRename={() => { actions.agents.rename(menuAgent); controller.closeMenu(); }}
+          isPinned={menuAgentSessionRecord ? controller.isSessionPinned(menuAgentSessionRecord.id) : false}
+          onTogglePinned={menuAgentSessionRecord && menu.pinnable !== false ? () => {
+            controller.toggleSessionPin(menuAgentSessionRecord.id);
+            controller.closeMenu();
+          } : undefined}
           onExport={() => { void actions.agents.export(menuAgent); controller.closeMenu(); }}
           onCopySession={() => { void actions.agents.copySession(menuAgent); controller.closeMenu(); }}
           onCopySessionFilePath={() => { void actions.agents.copyPath(menuAgent); controller.closeMenu(); }}
@@ -511,6 +526,11 @@ export function SidebarContent(props: SidebarContentProps) {
           menu={{ x: menu.x, y: menu.y, session: menuSession }}
           onClose={controller.closeMenu}
           onRename={() => { actions.sessions.rename(menu.projectId, menuSession); controller.closeMenu(); }}
+          isPinned={controller.isSessionPinned(menuSession.id)}
+          onTogglePinned={menu.pinnable ? () => {
+            controller.toggleSessionPin(menuSession.id);
+            controller.closeMenu();
+          } : undefined}
           onOpenProxySetting={() => { controller.closeMenu(); setProxyDialogSessionId(menuSession.id); }}
           // 重启会话（未启动的历史会话走 activateRuntime 启动；有绑定则走 restartRuntime）
           onRestartSession={() => { controller.closeMenu(); void actions.sessions.restart(menu.projectId, menuSession); }}

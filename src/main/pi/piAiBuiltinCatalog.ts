@@ -225,10 +225,11 @@ function artifactPathsIn(resourceDir: string): PiAiCatalogArtifactPaths | undefi
 }
 
 /**
+ * 解析内置（打包 resources / 项目 resources）artifact 路径；不含覆盖层。
  * 打包态直接读 process.resourcesPath；开发态从 out/main 或 cwd 向上定位项目 resources。
  * 不再扫描 node_modules，保证主进程 catalog 与 DSH 的 pi-ai runtime 依赖完全隔离。
  */
-export function resolvePiAiCatalogArtifactPaths(): PiAiCatalogArtifactPaths | undefined {
+export function resolveBuiltinPiAiCatalogArtifactPaths(): PiAiCatalogArtifactPaths | undefined {
 	const packagedResources = typeof process.resourcesPath === "string" ? process.resourcesPath : "";
 	if (packagedResources) {
 		const direct = artifactPathsIn(packagedResources);
@@ -248,25 +249,73 @@ export function resolvePiAiCatalogArtifactPaths(): PiAiCatalogArtifactPaths | un
 	return undefined;
 }
 
-export function loadPiAiCatalogEntries(paths = resolvePiAiCatalogArtifactPaths()): PiAiCatalogEntry[] {
-	try {
-		if (!paths) {
-			console.error("[pi-ai-catalog] generated artifact not found");
-			return [];
-		}
-		const entries = parsePiAiCatalogArtifact(
-			readFileSync(paths.catalogPath, "utf8"),
-			readFileSync(paths.manifestPath, "utf8"),
-		);
-		if (entries.length === 0) console.error("[pi-ai-catalog] generated artifact is invalid or empty");
-		return entries;
-	} catch (error) {
-		console.error("[pi-ai-catalog] failed to load generated artifact", error);
+/**
+ * 解析全部候选路径（优先级从高到低）：userData 覆盖层 → 打包/项目内置。
+ * 覆盖层文件存在性决定是否入列；有效性由 loadPiAiCatalogEntries 逐一校验，
+ * 损坏的覆盖层会自动落回内置（覆盖层坏数据不会遮蔽内置目录）。
+ */
+export function resolvePiAiCatalogArtifactCandidates(): PiAiCatalogArtifactPaths[] {
+	const candidates: PiAiCatalogArtifactPaths[] = [];
+	const overlay = overlayArtifactPaths();
+	if (overlay) candidates.push(overlay);
+	const builtin = resolveBuiltinPiAiCatalogArtifactPaths();
+	if (builtin) candidates.push(builtin);
+	return candidates;
+}
+
+/** 兼容旧调用：返回优先级最高的候选（无则 undefined）。 */
+export function resolvePiAiCatalogArtifactPaths(): PiAiCatalogArtifactPaths | undefined {
+	return resolvePiAiCatalogArtifactCandidates()[0];
+}
+
+export function loadPiAiCatalogEntries(
+	paths: PiAiCatalogArtifactPaths | undefined | readonly PiAiCatalogArtifactPaths[] = resolvePiAiCatalogArtifactCandidates(),
+): PiAiCatalogEntry[] {
+	const list = paths ? (Array.isArray(paths) ? paths : [paths]) : [];
+	if (list.length === 0) {
+		console.error("[pi-ai-catalog] generated artifact not found");
 		return [];
 	}
+	for (let index = 0; index < list.length; index += 1) {
+		const artifact = list[index];
+		try {
+			const entries = parsePiAiCatalogArtifact(
+				readFileSync(artifact.catalogPath, "utf8"),
+				readFileSync(artifact.manifestPath, "utf8"),
+			);
+			if (entries.length > 0) return entries;
+			if (index === 0) console.warn("[pi-ai-catalog] artifact candidate invalid, trying next", artifact.catalogPath);
+		} catch (error) {
+			// 候选文件损坏/读取失败：继续下一层，全部失败才降级为空
+			if (index === 0) console.warn("[pi-ai-catalog] artifact candidate failed to load, trying next", artifact.catalogPath, error);
+		}
+	}
+	console.error("[pi-ai-catalog] generated artifact is invalid or empty");
+	return [];
 }
 
 let cachedIndex: PiAiCatalogIndex | undefined;
+/** 设置页更新功能写入的 userData 覆盖层目录；主进程装配后注入（app ready 后 userData 可用）。 */
+let userDataOverrideDir: string | undefined;
+
+/**
+ * 注入 userData 目录，使覆盖层目录参与 artifact 解析（覆盖层优先、内置兑底）。
+ * 目录切换意味着覆盖层内容可能变化，因此同时使索引缓存失效，下次读取重新加载。
+ */
+export function setPiAiCatalogUserDataDir(dir: string | undefined): void {
+	userDataOverrideDir = dir;
+	cachedIndex = undefined;
+}
+
+/** 使进程内索引缓存失效（目录更新/还原后调用），下次 getPiAiCatalogIndex() 重新读取。 */
+export function invalidatePiAiCatalogIndex(): void {
+	cachedIndex = undefined;
+}
+
+function overlayArtifactPaths(): PiAiCatalogArtifactPaths | undefined {
+	if (!userDataOverrideDir) return undefined;
+	return artifactPathsIn(userDataOverrideDir);
+}
 
 /** 进程内单例索引；测试可 resetPiAiCatalogIndexForTests() */
 export function getPiAiCatalogIndex(): PiAiCatalogIndex {

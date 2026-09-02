@@ -86,22 +86,63 @@ async function ensureGenProcess(
 	// 清理已死的旧进程
 	if (genProcess) stopGenProcess();
 
-	const settings = settingsStore.get();
-	// WSL pi 需要 Linux cwd（--cd）；Windows spawn 本身仍必须落在主机路径上。
-	const wslCwd = settings.wslEnabled && settings.wslDistro && command.startsWith("wsl://")
-		? toWslLinuxPath(projectPath, { distro: settings.wslDistro })
-		: undefined;
-	const invocation = piLocator.createInvocation(command, [
+	try {
+		// 首次默认带扩展启动：提交信息模型选择器允许扩展 provider（如 antigravity 插件）
+		// 贡献的模型（issue #181），进程必须能解析它们，与运行时会话保持一致。
+		// 用户开启「禁用扩展启动」诊断开关（piRpcNoExtensions）时首次也直接不带扩展。
+		const firstWithExtensions = !settingsStore.get().piRpcNoExtensions;
+		return await trySpawnGenProcess(
+			firstWithExtensions,
+			projectPath, command, piLocator, settingsStore, model, appLogger,
+		);
+	} catch {
+		// 带扩展启动失败（坏扩展导致崩溃/启动挂起/RPC 未就绪）：
+		// 降级为无扩展重试一次；仍失败则抛出第二轮错误（无扩展基线，更能反映真实状态）。
+		return await trySpawnGenProcess(
+			false,
+			projectPath, command, piLocator, settingsStore, model, appLogger,
+		);
+	}
+}
+
+/** 生成进程基础参数：默认【加载扩展】（issue #181）；withExtensions=false 时追加
+ * --no-extensions 作为坏扩展场景的降级集。 */
+function buildGenArgs(withExtensions: boolean): string[] {
+	return [
 		"--mode", "rpc",
 		"--no-session",
 		"--no-tools",
-		"--no-extensions",
+		...(withExtensions ? [] : ["--no-extensions"]),
 		"--no-skills",
 		"--no-prompt-templates",
 		"--no-context-files",
 		"--no-themes",
 		"--thinking", "off",
-	], wslCwd ? { wslCwd } : {});
+	];
+}
+
+/** 启动轻量 pi RPC 生成进程并完成 set_model；withExtensions 决定是否加载扩展。
+ * 失败时清理进程与全局状态并抛错，由 ensureGenProcess 决定是否降级重试。 */
+async function trySpawnGenProcess(
+	withExtensions: boolean,
+	projectPath: string,
+	command: string,
+	piLocator: PiLocator,
+	settingsStore: SettingsStore,
+	model: { provider: string; modelId: string },
+	appLogger: Pick<AppLogger, "warn">,
+): Promise<PiRpcClient> {
+	const modelKey = `${model.provider}\0${model.modelId}`;
+	const settings = settingsStore.get();
+	// WSL pi 需要 Linux cwd（--cd）；Windows spawn 本身仍必须落在主机路径上。
+	const wslCwd = settings.wslEnabled && settings.wslDistro && command.startsWith("wsl://")
+		? toWslLinuxPath(projectPath, { distro: settings.wslDistro })
+		: undefined;
+	const invocation = piLocator.createInvocation(
+		command,
+		buildGenArgs(withExtensions),
+		wslCwd ? { wslCwd } : {},
+	);
 	const spawnCwd = wslCwd && settings.wslDistro
 		? toWindowsHostPath(projectPath, { distro: settings.wslDistro })
 		: projectPath;

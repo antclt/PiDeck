@@ -36,7 +36,7 @@ import { createCompactRpcRequest } from "./compactRpc";
 import { mergeSubagentSources } from "./derivedSubagents";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
-import { resolveEnabledExtensionPaths } from "../extensions/enabledExtensionResolver";
+import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
 import {
 	formatExtensionFallbackDebug,
 	shouldRetryWithoutExtensions,
@@ -531,29 +531,9 @@ export class AgentManager {
 			void this.securityStore.ensureSnapshotWritten();
 		}
 		return new PiProcess(cwd, settings, undefined, {
-			resolveBuiltInExtensionPaths: (processSettings) =>
-				listActiveBuiltInExtensionPaths(
-					{
-						appPath: app.getAppPath(),
-						resourcesPath: process.resourcesPath,
-						isDev: !app.isPackaged,
-					},
-					processSettings?.removedBuiltInExtensions ?? settings.removedBuiltInExtensions ?? [],
-				),
-			// 扩展白名单模式：存在禁用扩展（settings.disabledExtensions 非空）时，
-			// 枚举 user/project packages + 本地扩展 + 内置扩展，剔除禁用项后作为 -e 白名单注入。
-			resolveEnabledExtensionPaths: (processSettings) =>
-				resolveEnabledExtensionPaths({
-					cwd,
-					disabled: processSettings?.disabledExtensions ?? settings.disabledExtensions ?? [],
-					removedBuiltInExtensions:
-						processSettings?.removedBuiltInExtensions ?? settings.removedBuiltInExtensions ?? [],
-					builtInRoots: {
-						appPath: app.getAppPath(),
-						resourcesPath: process.resourcesPath,
-						isDev: !app.isPackaged,
-					},
-				}),
+			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
+			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
+			...createPiProcessExtensionResolvers(cwd, settings),
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,

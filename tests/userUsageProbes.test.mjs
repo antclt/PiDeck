@@ -174,6 +174,25 @@ test("rootPath 标记透传到候选（host 根端点场景）", () => {
   assert.equal(result.candidates[0].rootPath, true);
 });
 
+test("skipBearer 透传到候选 noBearer（Cookie 登录态接口场景）", () => {
+  const result = normalizeUserUsageProbes([
+    {
+      match: { baseUrlContains: ["tokenrhythm.studio"] },
+      request: {
+        path: "/api/wallet/summary",
+        rootPath: true,
+        skipBearer: true,
+        headers: { Cookie: "tr_session=sess_x" },
+      },
+      parse: { kind: "balance", valuePath: "data.availableBalanceCny" },
+    },
+  ]);
+  assert.equal(result.errors.length, 0);
+  assert.equal(result.candidates[0].noBearer, true);
+  // 规范化后的 probe 不再需要 skipBearer 字段（只影响候选请求头组装）
+  assert.equal(result.probes[0].request.skipBearer, undefined);
+});
+
 test("windows 的 listPath/where 形态被校验保留，eq 非基本类型的条件被丢弃", () => {
   const result = normalizeUserUsageProbes([
     {

@@ -281,6 +281,7 @@ import { XuePromptManager } from "./prompts/XuePromptManager";
 import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
 import { ExtensionManager } from "./extensions/ExtensionManager";
+import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensionResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
 import { toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
@@ -306,6 +307,9 @@ import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
 import { registerSystemIpc } from "./ipc/systemIpc";
+import { registerCatalogIpc } from "./ipc/catalogIpc";
+import { setPiAiCatalogUserDataDir } from "./pi/piAiBuiltinCatalog";
+import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
 import { fetchModelList, refreshModelCatalogIfStale, refreshModelList } from "./pi/modelListCache";
 import { registerFilesIpc } from "./ipc/filesIpc";
 import { registerClipboardIpc } from "./ipc/clipboardIpc";
@@ -2754,6 +2758,10 @@ function registerIpc() {
 		getInstallationType: () => settingsStore.get().installationType ?? "installed",
 	});
 	updateService.start();
+	// 模型目录更新：覆盖层目录须在 catalog 初次读取前登记（getPiAiCatalogIndex 首次
+	// 调用即锁定索引）；updater 在 ready 后构造，此时 app.getPath("userData") 才可靠。
+	setPiAiCatalogUserDataDir(app.getPath("userData"));
+	registerCatalogIpc(new PiAiCatalogUpdater({ userDataDir: app.getPath("userData") }));
 	registerSystemIpc({
 		piLocator,
 		settingsStore,
@@ -3518,12 +3526,20 @@ app.whenReady().then(async () => {
 			process.cwd(),
 			{
 				...settingsStore.get(),
-				// 全局 picker 与旧 --list-models 使用同一个纯目录范围：不跑扩展、技能或网络刷新。
+				// 全局 picker 用离线目录范围：不跑技能或网络刷新；但不能一刀切禁用扩展——
+				// 扩展通过 pi.registerProvider 贡献的模型（如 antigravity 插件）必须显示在
+				// 选择器中（issue #181），与 CLI 默认行为一致。用户禁用的扩展仍经
+				// createPiProcessExtensionResolvers 白名单过滤，泄漏不进来。
 				piRpcOffline: true,
-				piRpcNoExtensions: true,
 				piRpcNoSkills: true,
 			},
 			piLocator,
+			// 与 AgentManager 同一套扩展解析（内置注入 + 禁用白名单），
+			// 保证「选择器看到的模型」与「运行时实际加载的扩展」同源。
+			createPiProcessExtensionResolvers(
+				process.cwd(),
+				settingsStore.get(),
+			),
 		),
 		getConfigDirectory: () => configManager.getConfigDir(),
 		watchDirectory: watchPiConfigDirectory,

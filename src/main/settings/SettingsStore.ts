@@ -11,6 +11,7 @@ import {
   parseImageGenWatermark,
 } from "../../shared/imageGenParams";
 import { createDefaultExternalEditorSettings, DEFAULT_PET_SCALE, type AppSettings } from "../../shared/types";
+import { normalizePinnedSessionIds } from "../../shared/pinnedSessions";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -286,6 +287,8 @@ export class SettingsStore {
       });
       this.settings.themeScheduleLightStart = schedule.lightStart;
       this.settings.themeScheduleDarkStart = schedule.darkStart;
+      // 置顶状态只接受稳定、非空的 SessionRecord id；旧设置缺省时自然回落为空。
+      this.settings.pinnedSessionIds = normalizePinnedSessionIds(parsed.pinnedSessionIds);
     } catch {
       this.settings = { ...defaultSettings };
     }
@@ -346,6 +349,9 @@ export class SettingsStore {
     // 忙碌时投递行为来自渲染层，非法值丢掉，避免发送链路带着坏语义。
     if ("busySendDelivery" in safePatch) {
       safePatch.busySendDelivery = parseBusySendDelivery(safePatch.busySendDelivery);
+    }
+    if ("pinnedSessionIds" in safePatch) {
+      safePatch.pinnedSessionIds = normalizePinnedSessionIds(safePatch.pinnedSessionIds);
     }
     // 闲置 agent 释放参数来自渲染层，钳制到合理范围避免非法值（0/负数/超大）写入磁盘
     if ("idleAgentKeepCount" in safePatch) {

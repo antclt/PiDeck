@@ -49,6 +49,18 @@ export const ipcChannels = {
 	pasteFilesDelete: "paste-files:delete",
 	/** 启动清理：删除超过保留期的粘贴文件（默认 7 天） */
 	pasteFilesCleanup: "paste-files:cleanup",
+	/** 模型目录（pi-ai-catalog）更新：查询内置/覆盖层状态 */
+	catalogUpdateStatus: "catalog:update-status",
+	/** 模型目录更新：检查远端（GitHub main 分支 manifest）是否有新版本 */
+	catalogUpdateCheck: "catalog:update-check",
+	/** 模型目录更新：从 GitHub（默认 main 分支）拉取并写入 userData 覆盖层 */
+	catalogUpdateFromGithub: "catalog:update-from-github",
+	/** 模型目录还原：删除覆盖层文件，回退到内置目录 */
+	catalogUpdateRestore: "catalog:update-restore",
+	/** 模型目录恢复：从 .bak 备份恢复上一个覆盖版 */
+	catalogUpdateRestorePrevious: "catalog:update-restore-previous",
+	/** 模型目录打开文件：用系统默认程序打开当前生效目录文件（覆盖层优先，否则内置） */
+	catalogOpenFile: "catalog:open-file",
 	sessionsList: "sessions:list",
 	/** Session-first catalog APIs. */
 	sessionsCatalogList: "sessions:catalog-list",

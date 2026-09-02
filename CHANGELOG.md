@@ -38,6 +38,13 @@
 - **Subagent records survive restart and fork** — Start anchors persist (killed-by-restart agents are marked stopped); a full entry-table scan keeps fork side-branch records.
 - **Tool results can open files** — Tool output is tighter, and results can open the matching file in the workspace.
 
+### 🙏 Thanks
+
+Special thanks to **微时佬友** for providing the Grok model service used in our
+community testing environment 🎉
+
+Thanks to all group members who submitted suggestions and bug reports! 🙏
+
 ## v0.7.2 - 2026-08-30
 
 ### 🚀 New Features

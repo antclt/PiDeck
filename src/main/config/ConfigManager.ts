@@ -35,6 +35,7 @@ import { normalizeDshDeepseekProvider } from "../../shared/dshProviderNames";
 import { parseProviderModelsResponse } from "./parseProviderModels";
 import { isSafeProviderName, piBuiltinSnapshotFromCatalog, resolvePiApiKey } from "./providerMigration";
 import {
+	buildProbeFailureDetail,
 	buildProbeHeaders,
 	candidateApplies,
 	getByPath,
@@ -42,7 +43,7 @@ import {
 	USAGE_PROBE_CANDIDATES,
 	usageProbeUrls,
 } from "./providerUsageProbe";
-import type { UsageProbeCandidate } from "./providerUsageProbe";
+import type { UsageProbeAttempt, UsageProbeCandidate } from "./providerUsageProbe";
 import { resolveProviderUsageEndpoint } from "./providerUsageResolver";
 import {
 	buildDeclarativeUsageProbeTemplate,
@@ -1170,6 +1171,9 @@ export class ConfigManager {
 		timeoutMs: number,
 	): Promise<ProviderUsageResult | undefined> {
 		const startedAt = Date.now();
+		// 收集每次失败尝试，全部未命中时拼进 detail（URL + 状态码 + 摘要 + 归纳提示），
+		// 让用户在弹窗里能直接排查（地址对不对 / 鉴权失效 / 接口变更）。
+		const attempts: UsageProbeAttempt[] = [];
 		// 逐候选、逐 URL 尝试；命中的首个成功即返回。
 		for (const candidate of candidates) {
 			// 链式预检（如 xAI 需先查 identity 拿 userId）：先请求预检端点，把响应里
@@ -1230,7 +1234,11 @@ export class ConfigManager {
 					const res = await net.fetch(requestUrl, {
 						method: candidate.method ?? "GET",
 						headers: this.withOpenAiSdkUserAgent({
-							...buildProbeHeaders(candidate.headers, apiKey),
+							...buildProbeHeaders(candidate.headers, apiKey, {
+								// 候选自带 Cookie 等独立鉴权时不能自动补 Bearer（双凭证可能被服务端拒绝，
+								// 如 Token Rhythm 的 AMBIGUOUS_CREDENTIALS 400），由候选/用户探针显式声明。
+								noBearer: candidate.noBearer === true,
+							}),
 							...preflightHeaders,
 							...extraHeaders,
 						}),
@@ -1245,7 +1253,14 @@ export class ConfigManager {
 					const raw = await readBoundedResponseBody(res, MAX_USAGE_RESPONSE_BYTES);
 					const safeRaw = this.redactSecret(raw, apiKey);
 					if (!res.ok) {
-						// 非 2xx：可能是端点不存在，换下一个 URL/候选继续。
+						// 非 2xx：可能是端点不存在，换下一个 URL/候选继续；记一笔尝试明细供失败时归因。
+						attempts.push({
+							url: requestUrl,
+							method: candidate.method ?? "GET",
+							status: res.status,
+							// 只留前 240 字符的脱敏响应摘要，足够定位「路径不对/非法请求」类问题。
+							...(safeRaw ? { body: safeRaw.slice(0, 240) } : {}),
+						});
 						continue;
 					}
 					let body: unknown;
@@ -1266,17 +1281,34 @@ export class ConfigManager {
 							at: startedAt,
 						};
 					}
-					// 2xx 但结构不匹配：不是预期的 usage 端点，继续探测。
-				} catch {
+					// 2xx 但结构不匹配：不是预期的 usage 端点，继续探测；记一笔供失败归因（接口变更信号）。
+					attempts.push({ url: requestUrl, method: candidate.method ?? "GET", kind: "shape" });
+				} catch (error) {
 					// 网络错误/超时/重定向拒绝：单个候选失败不阻断其它候选，记录后继续。
 					// （此前此循环无 catch，net.fetch 拒绝会直接冒泡到 IPC 层炸掉整次查询。）
+					const isTimeout =
+						error instanceof Error &&
+						(error.name === "AbortError" || error.name === "TimeoutError");
+					attempts.push({
+						url: requestUrl,
+						method: candidate.method ?? "GET",
+						error: isTimeout ? "timeout" : "network",
+					});
 				} finally {
 					clearTimeout(timeout);
 				}
 			}
 		}
 
-		// 全部候选未命中：undefined 交由调用方决定最终文案（整体查询 vs 单条测试）。
-		return undefined;
+		// 全部候选未命中：拼上尝试明细返回失败结果（比通用文案多给「试了哪些 URL、为什么失败」），
+		// 无任何尝试（如 preflight 全部失败）时仍返回 undefined 交由调用方决定最终文案。
+		if (attempts.length === 0) {
+			return undefined;
+		}
+		return {
+			success: false,
+			error: this.translate("mainConfig.providerUsageFailed"),
+			detail: buildProbeFailureDetail(attempts, (key) => this.translate(key)),
+		};
 	}
 }

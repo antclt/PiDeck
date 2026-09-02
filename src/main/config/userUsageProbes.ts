@@ -216,6 +216,9 @@ function normalizeProbe(
 	}
 	// host 根端点（如智谱监控 API /api/monitor/…，与 OpenAI 兼容端点不同 base）：显式声明。
 	const rootPath = request.rootPath === true;
+	// 接口自带 Bearer 之外的鉴权（Cookie 登录态）且与 apiKey 双凭证冲突时，禁止自动补
+	// Authorization（服务端可能以「凭证不一致」拒绝，见 Token Rhythm AMBIGUOUS_CREDENTIALS）。
+	const skipBearer = request.skipBearer === true;
 
 	const parse = normalizeParse(probe.parse);
 	if (parse === undefined) {
@@ -248,6 +251,7 @@ function normalizeProbe(
 			baseUrlContains,
 			...(match.apiTypes ? { apiTypes: asStringArray(match.apiTypes) } : {}),
 			...(rootPath ? { rootPath: true } : {}),
+			...(skipBearer ? { noBearer: true } : {}),
 			parse,
 		},
 	};
