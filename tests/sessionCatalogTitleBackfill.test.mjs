@@ -113,7 +113,7 @@ test("an existing Untitled entry is upgraded once the fetcher can infer a title"
   }
 });
 
-test("files with real titles never trigger the fetcher (no pointless reads)", async () => {
+test("unchanged files with real titles do not trigger pointless title reads", async () => {
   const { SessionCatalog } = loadCatalog();
   const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-title-no-call-"));
   try {
@@ -124,9 +124,47 @@ test("files with real titles never trigger the fetcher (no pointless reads)", as
     // summary 自带真实名称（readSummary 全量路径的场景）：不触发补名。
     await catalog.mergeScanned("project-1", [lightSummary({ name: "已有真实标题" })]);
     assert.equal(fetcherCalls, 0);
-    // 条目已有真实标题时，后续轻量扫描也不会触发补名。
+    // 文件版本未变化时保留 catalog 标题，不为周期扫描重复读盘。
     await catalog.mergeScanned("project-1", [lightSummary()]);
     assert.equal(fetcherCalls, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an externally appended pi session_info refreshes an existing real catalog title", async () => {
+  const { SessionCatalog } = loadCatalog();
+  const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-title-external-rename-"));
+  try {
+    let currentTitle = "pi-tui 重命名后的标题";
+    let fetcherCalls = 0;
+    const fetcher = async () => {
+      fetcherCalls += 1;
+      return { name: currentTitle, valid: true };
+    };
+    const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
+    await catalog.load();
+
+    const [initial] = await catalog.mergeScanned("project-1", [
+      lightSummary({ name: "PiDeck 旧标题", updatedAt: 1000 }),
+    ]);
+    assert.equal(initial.title, "PiDeck 旧标题");
+    assert.equal(fetcherCalls, 0);
+
+    // pi-tui /name 会在 JSONL 末尾追加 session_info，同时改变 mtime/size；轻量扫描
+    // 虽不带 name，也必须回读标题并覆盖 catalog 中已有的真实标题。
+    const [renamed] = await catalog.mergeScanned("project-1", [
+      lightSummary({ updatedAt: 2000 }),
+    ]);
+    assert.equal(renamed.title, "pi-tui 重命名后的标题");
+    assert.equal(fetcherCalls, 1);
+
+    currentTitle = "不应在未变化时重复读取";
+    const [unchanged] = await catalog.mergeScanned("project-1", [
+      lightSummary({ updatedAt: 2000 }),
+    ]);
+    assert.equal(unchanged.title, "pi-tui 重命名后的标题");
+    assert.equal(fetcherCalls, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

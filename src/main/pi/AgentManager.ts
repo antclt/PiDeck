@@ -2143,7 +2143,9 @@ export class AgentManager {
 				project.path,
 				runtime.tab.sessionEnvironment ?? "native",
 			);
-			this.applyRuntimeTitle(agentId, data?.sessionName ?? runtime.tab.title, false);
+			// 重启后 get_state 的 sessionName 来自磁盘最新 session_info；tab 可能先沿用 catalog 旧标题，
+			// 因此需要强制通知 catalog，确保 pi-tui 外部改名在“重启 Session”路径也能同步。
+			this.applyRuntimeTitle(agentId, data?.sessionName ?? runtime.tab.title, false, true);
 			runtime.tab.status = "idle";
 			// 进程退出型压缩可能来不及发 compaction_end；重连成功即表示 Pi 已可继续接收消息。
 			this.rpcCompactingAgents.delete(agentId);
@@ -3215,7 +3217,7 @@ export class AgentManager {
 				runtime.tab.sessionEnvironment ?? "native",
 			) ?? runtime.tab.sessionPath;
 		}
-		if (state?.sessionName) this.applyRuntimeTitle(agentId, state.sessionName, false);
+		if (state?.sessionName) this.applyRuntimeTitle(agentId, state.sessionName, false, true);
 		// 重新附加后恢复：保留附加期间用户发送/流式中的消息，避免投影替换吞掉乐观消息
 		await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() }).catch(() => undefined);
 		this.emitState();
@@ -3515,18 +3517,26 @@ export class AgentManager {
 		this.onTitleChanged = handler;
 	}
 
-	/** 更新 tab.title；有变化才 emit 并通知 catalog，避免无意义刷新。 */
-	private applyRuntimeTitle(agentId: string, title: string, emit = true): boolean {
+	/**
+	 * 更新 tab.title；常规路径只在变化时 emit/通知，重启或会话替换可强制把 get_state 的
+	 * 磁盘权威标题写回 catalog，修复 tab 已沿用旧 catalog 标题时被相等判断吞掉的问题。
+	 */
+	private applyRuntimeTitle(agentId: string, title: string, emit = true, forceCatalogSync = false): boolean {
 		const runtime = this.agents.get(agentId);
 		const next = title.replace(/\s+/g, " ").trim();
-		if (!runtime || !next || next === runtime.tab.title) return false;
+		if (!runtime || !next) return false;
 		// pi 未改名时 sessionName = JSONL 文件名（时间戳）。写进 tab/catalog 会：
 		// 1) 侧栏标题变成时间；2) 不再是占位名，refreshAutoTitle 再也不会用首条消息改名。
 		if (looksLikePiSessionFileStem(next)) return false;
-		runtime.tab.title = next;
-		if (emit) this.emitState();
-		this.onTitleChanged?.(agentId, next);
-		return true;
+		const changed = next !== runtime.tab.title;
+		if (changed) {
+			runtime.tab.title = next;
+			if (emit) this.emitState();
+		}
+		// restart/session replacement 的 tab 可能已经是该标题，但 catalog 仍旧；
+		// forceCatalogSync 允许 get_state 的权威值穿过相等判断写回 catalog。
+		if (changed || forceCatalogSync) this.onTitleChanged?.(agentId, next);
+		return changed;
 	}
 
 	private notifyAgentSettled(agentId: string, title: string) {

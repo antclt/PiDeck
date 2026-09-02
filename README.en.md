@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.2--beta-yellow)
+![Version](https://img.shields.io/badge/version-0.7.3--beta-yellow)
 
 <!-- star-history:start -->
 <picture>
@@ -40,7 +40,7 @@
   - [📑 Table of Contents](#-table-of-contents)
   - [✨ Highlights](#-highlights)
   - [📋 Changelog](#-changelog)
-    - [v0.7.2 Release Highlights](#v072-release-highlights)
+    - [v0.7.3 Release Highlights](#v073-release-highlights)
   - [🧩 Features](#-features)
     - [Workspace & Projects](#workspace--projects)
     - [Sessions & Conversation](#sessions--conversation)
@@ -79,25 +79,25 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.2** (2026-08-30)
+> **Latest: v0.7.3** (2026-09-02)
 
-### v0.7.2 Release Highlights
-- 🚀 **Usage query rebuild (aligned with cc-switch)**
-- 🚀 **Multi-segment usage badges**
-- 🚀 **DSH usage query pipeline**
-- 🚀 **Usage query AI assist**
-- 🚀 **PiDeck-specific files consolidated**
-- 🚀 **Proactive update notifications (quota-free)**
-- 🚀 **Release pipeline now ships latest.yml**
-- 🚀 **Check timeout protection**
-- 🚀 **Pi CLI background check**
-- 🚀 **Manual check no longer swallowed**
-- 🚀 **Session ruler rail completions**
-- 🚀 **Ruler rail offsets for split view**
-- ✨ **Update check fallback path**
-- ✨ **Update check pipeline hardening**
-- ✨ **DSH usage query provider normalization**
-- ✨ **File manager open & terminal ownership fixes**
+### v0.7.3 Release Highlights
+- 🚀 **Chat session archives**
+- 🚀 **Rewind checkpoints**
+- 🚀 **Import DSH runtime from a folder**
+- 🚀 **Automatic session titles**
+- 🚀 **Idle agent auto-release**
+- 🚀 **Usage rows stay put, model cards get denser**
+- 🚀 **Feedback reports include project context**
+- 🚀 **Ask notifications jump to the session**
+- 🚀 **Deep links into config backends**
+- 🚀 **beUI rolled out across the app**
+- 🚀 **Subagents and session widget cards**
+- 🚀 **pi-tui rename sync**
+- ✨ **Refresh stale projects**
+- ✨ **DSH runtime install no longer blocks the main process**
+- ✨ **Model connection-test timeouts**
+- ✨ **Reading history no longer jumps to the latest turn**
 
 [View Full Changelog →](CHANGELOG.md)
 

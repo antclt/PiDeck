@@ -86,15 +86,15 @@ export type SessionFilePathResolver = (
 	environment: SessionEnvironment,
 ) => string;
 
-/** 占位标题回填与有效性校验的合并结果：name 缺省时保留占位标题；valid:false 表示
+/** 会话标题读取与有效性校验的合并结果：name 缺省时保留 catalog 标题；valid:false 表示
  *  文件非有效 Pi 会话（如 pi-subagents transcript 转储，首条记录用 recordType 而无 type 头），
  *  mergeScanned 应拒绝索引该文件（#168）；parentSessionPath 仅供平铺子代理形态
  * （@tintinweb/pi-subagents：parentSession header + 会话名 <agent>#<8hex>）回填父关系，
  *  用户 fork / 普通会话 / nicobailon 嵌套形态不返回该值。 */
 export type SessionTitleFetchResult = { name?: string; valid?: boolean; parentSessionPath?: string };
 
-/** 占位标题回填 + 会话头有效性校验：装配层注入（实现为 SessionScanner.inferSessionNameAndValidity，
- *  见 main/index.ts）。合并到一次有界读头部，避免补名与校验分别读盘。 */
+/** 标题刷新 + 会话头有效性校验：装配层注入（实现为 SessionScanner.inferSessionNameAndValidity，
+ *  见 main/index.ts）。文件版本变化时有界读取头尾，既补占位标题，也同步 pi-tui 外部改名。 */
 export type SessionTitleFetcher = (filePath: string) => Promise<SessionTitleFetchResult>;
 
 /** 扫描未读正文时没有 session_info。pi JSONL 文件名是时间戳，不能当标题，否则侧栏全是日期。 */
@@ -831,8 +831,8 @@ export class SessionCatalog {
 	): Promise<SessionRecord[]> {
 		this.assertLoaded();
 		// 轻量列表扫描的 summary 不带 name（listPathSummary 只 stat，见 SessionScanner）；
-		// 对标题将落成占位符的文件做有界读头部补名，让未打开过的 pi 会话也能在侧栏
-		// 显示首条消息标题，而不是永远 Untitled（不再依赖打开/重命名时才补名）。
+		// 新文件/占位标题需要补名，已有标题的文件若 mtime 变化也需有界回读——pi-tui `/name`
+		// 会在 JSONL 末尾追加 session_info，否则项目刷新和重启 Session 都只会继续使用旧 catalog 标题。
 		// 同一次读头部顺带校验会话头有效性：invalidOrigins 收集被判定为非有效会话
 		// 的 originKey（transcript 等无 type 头的产物，#168），下面据此清洗与拒绝。
 		const { names: fetchedNames, invalid: invalidOrigins, parents: fetchedParents } =
@@ -1001,8 +1001,9 @@ export class SessionCatalog {
 		].sort((left, right) => right.updatedAt - left.updatedAt));
 	}
 
-	/** 只对「该会话当前标题是占位符」的文件读头部补名：已有真实标题的条目不读盘。
-	 *  同一次读头部顺带校验会话头有效性（#168）：transcript 等无 type 头的产物
+	/** 对新文件/占位标题，或文件版本相对 catalog 发生变化的条目读取标题。
+	 *  unchanged 的真实标题不读盘，避免周期扫描重复 I/O；mtime 变化则回读头尾以同步
+	 *  pi-tui `/name` 追加的 session_info。同一次读取顺带校验会话头有效性（#168）：transcript 等无 type 头的产物
 	 *  被标记 invalid，mergeScanned 据此拒绝索引并清洗存量条目。
 	 *  tintinweb 平铺子代理（@tintinweb/pi-subagents）会话名固定 <agent>#<8hex>：
 	 *  一旦标题回填该形态而条目仍无父关系，说明它是历史扫描遗留的孤儿（旧版 catalog
@@ -1022,18 +1023,17 @@ export class SessionCatalog {
 		const wanted: Array<{ originKey: string; filePath: string }> = [];
 		for (const summary of summaries) {
 			const originKey = buildSummaryOriginKey(summary, context);
-			// summary 自带真实名称（readSummary 全量路径）或条目已有真实标题时无需补名。
+			// readSummary 全量路径已携带权威标题，无需再次读盘。
 			if (catalogDisplayTitle(summary.name)) continue;
 			const existing = byOrigin.get(originKey);
 			if (existing) {
-				// 已有真实标题的条目默认不读盘；但 tintinweb 嫌疑名 + 无父关系的孤儿例外：
-				// 需回读头部补 parentSessionPath（见上方 JSDoc），否则永远在历史列表顶层平铺。
-				if (!isPlaceholderCatalogTitle(existing.title)) {
-					const tintinwebOrphan = existing.source === "pi"
-						&& !existing.parentSessionPath
-						&& /^[^#]+#[0-9a-f]{8}$/i.test(existing.title);
-					if (!tintinwebOrphan) continue;
-				}
+				const tintinwebOrphan = existing.source === "pi"
+					&& !existing.parentSessionPath
+					&& /^[^#]+#[0-9a-f]{8}$/i.test(existing.title);
+				const fileVersionChanged = existing.updatedAt !== summary.updatedAt;
+				// 已有真实标题且文件版本未变时跳过；变化通常意味着 pi 追加消息/改名，
+				// 头尾窗口读取会用最后一条 session_info 更新标题，成本仍受 128KB 上限约束。
+				if (!isPlaceholderCatalogTitle(existing.title) && !tintinwebOrphan && !fileVersionChanged) continue;
 			}
 			wanted.push({ originKey, filePath: summary.filePath });
 		}

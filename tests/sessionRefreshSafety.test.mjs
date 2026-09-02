@@ -215,7 +215,7 @@ test("add project and right-click refresh sync DSH foreign sessions", () => {
     [
       "async function refreshProjectTree(project: Project) {",
       "await syncDshForeignSessionsIfEnabled()",
-      "await refreshProjectSessions(project.id)",
+      "await refreshProjectSessions(latestProject.id)",
     ],
     "right-click refresh must import DSH before catalog scan",
   );

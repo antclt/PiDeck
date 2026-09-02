@@ -5,6 +5,27 @@
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
+## v0.7.3
+
+发布时间：2026-09-02
+
+- 🚀 **聊天系统归档**
+- 🚀 **Rewind 检查点**
+- 🚀 **DSH runtime 本地导入**
+- 🚀 **自动会话标题**
+- 🚀 **闲置 Agent 自动释放**
+- 🚀 **用量行常驻与模型卡片收紧**
+- 🚀 **问题反馈带项目上下文**
+- 🚀 **Ask 通知直达会话**
+- 🚀 **配置管理深链**
+- 🚀 **beUI 全面启用**
+- 🚀 **子代理与会话分段卡**
+- 🚀 **pi-tui 重命名同步**
+- ✨ **刷新过期项目**
+- ✨ **DSH runtime 安装不再卡主进程**
+- ✨ **模型测试连接超时**
+- ✨ **上滑读历史不再跳到最新一轮**
+
 ## v0.7.2
 
 发布时间：2026-08-30

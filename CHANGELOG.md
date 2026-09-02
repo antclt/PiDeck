@@ -1,3 +1,43 @@
+## v0.7.3 - 2026-09-02
+
+### 🚀 New Features
+- **Chat session archives** — Sessions can be archived out of the workspace, with bulk delete on the archive screen so old chats stop crowding the sidebar.
+- **Rewind checkpoints** — Full checkpoint flow: dialog, drawer, timeline restore, auto snapshots, and session-fork restore; the checkpoint list is paginated so long sessions stay usable.
+- **Import DSH runtime from a folder** — Install a DSH runtime from an already-extracted directory instead of downloading it every time.
+- **Automatic session titles** — New sessions get an auto-generated title, including after an agent interrupt, so the sidebar is no longer a wall of “New session”.
+- **Idle agent auto-release** — Background sweep reclaims idle runtimes to cut memory use when many sessions stay open; checkpoint loading is faster too.
+- **Usage rows stay put, model cards get denser** — Built-in usage templates hide the config entry once recognized and keep the usage row visible; the Pi Models tab now puts model count and usage on the card header instead of an extra footer strip.
+- **Feedback reports include project context** — The feedback page attaches project environment and log stats, so diagnosis no longer needs a hand-assembled dump.
+- **Ask notifications jump to the session** — Background Ask completion toasts can “Go to session” in one click.
+- **Deep links into config backends** — Deep links open the Pi or DSH page inside Config Management directly.
+- **beUI rolled out across the app** — UI switches over to beUI components; the sidebar marks sessions that are currently running.
+- **Subagents and session widget cards** — Built-in pi-subagents extension reads child-agent records and detects failures; todos, subagents, and file changes share one segmented card, and historical sessions can still show todo snapshots.
+- **pi-tui rename sync** — Renaming a session in pi-tui now shows up in the PiDeck sidebar after a project refresh or session restart, instead of sticking to the old title.
+- **ask_question multi-select** — Question cards support multi-select with a single submit.
+- **On-demand fast packing** — `dist:fast` can target portable / zip / nsis so local installers are quicker to verify.
+
+### 🐛 Fixes
+- **Refresh stale projects** — Refresh handles vanished projects, and file-delete failures surface instead of failing silently.
+- **DSH runtime install no longer blocks the main process** — Install / uninstall use async fs, uninstall shows progress; multi_select allowlists and markdown layout are tightened along the way.
+- **Model connection-test timeouts** — Tests send stdin EOF and degrade on older pi, so the spinner no longer runs forever.
+- **Reading history no longer jumps to the latest turn** — Window-growth compensation uses restoreAt, keeping the viewport on the turn you were reading.
+- **Shared DSH tool-card details** — Expanded DSH tool cards reuse the same cleaned-up detail copy as PI.
+- **Composer no longer squashes the todo bar** — The input column uses intrinsic height so the todo bar stays readable after window resize.
+- **API key action buttons aligned** — Auth-page key actions line up instead of sitting askew.
+- **Generic transient-error retries** — The built-in extension covers empty-body / transient errors that pi’s retry list missed, so fewer sessions die on a blip.
+- **Session outline rail keeps up** — Cheaper updates, scroll following, and per-pane isolation, without hitching during streaming.
+- **Stable proxy model selection** — Picking a model through a proxy no longer snaps to the wrong item.
+- **Model probes and DSH runtime errors** — Probe timeouts are looser; DSH runtime install progress and failures are spelled out.
+- **Git push / pull no longer freeze** — Push and pull buttons recover instead of sticking in a busy state.
+- **History-session indicator height** — The sidebar history indicator no longer crowds the title.
+- **Sidebar worktree title overlap** — Worktree titles and action buttons no longer stack on top of each other.
+- **Pi CLI update notice anchored** — The update notice sits on the controls instead of floating elsewhere.
+- **DSH default model catalog restored** — `settings.describe` `base` is forwarded across layers so default models list again via base → schema default.
+- **Linux packages keep DSH sharp** — Linux builds no longer strip sharp / libvips, so DSH-related features can start.
+- **Spinner animation unified** — Loading states share one animation utility so spinners don’t freeze.
+- **Subagent records survive restart and fork** — Start anchors persist (killed-by-restart agents are marked stopped); a full entry-table scan keeps fork side-branch records.
+- **Tool results can open files** — Tool output is tighter, and results can open the matching file in the workspace.
+
 ## v0.7.2 - 2026-08-30
 
 ### 🚀 New Features

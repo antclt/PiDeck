@@ -146,7 +146,8 @@ test("pi runtime title changes notify catalog the same way DSH does", () => {
   assert.match(utils, /session\.newTitle/);
   assert.match(utils, /session\.dshUntitled/);
   assert.match(agentManager, /setTitleChangedHandler\(/);
-  assert.match(agentManager, /this\.onTitleChanged\?\.\(agentId, next\)/);
+  assert.match(agentManager, /if \(changed \|\| forceCatalogSync\) this\.onTitleChanged\?\.\(agentId, next\)/);
+  assert.match(agentManager, /applyRuntimeTitle\(agentId, data\?\.sessionName \?\? runtime\.tab\.title, false, true\)/);
   assert.match(agentManager, /looksLikePiSessionFileStem\(next\)/);
   assert.match(agentManager, /piSessionName/);
   assert.match(agentManager, /return this\.applyRuntimeTitle\(agentId, nextTitle\)/);

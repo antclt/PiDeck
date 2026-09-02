@@ -30,7 +30,7 @@ import { showNotice } from "../utils/notice";
 import { applyModelPatches, computeModelSpecPatches } from "../utils/modelSpecAutoFill";
 import type { FetchedModel } from "../../../shared/types/fetchedModel";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
-import { ProviderUsageRow } from "../components/app/ProviderUsageInline";
+import { ProviderUsageInline } from "../components/app/ProviderUsageInline";
 import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { ProviderUsageDetails } from "../components/app/ProviderUsageDetails";
 import { isValidProviderName } from "../../../shared/providerName";
@@ -485,11 +485,18 @@ export function ModelsTab(props: {
 											autoFocus
 										/>
 									) : (
-										<span className="text-control font-semibold text-text-primary">{name}</span>
+										<span className="min-w-0 truncate text-control font-semibold text-text-primary">{name}</span>
 									)}
+									{/* 折叠态把「N 模型」和用量收进标题行，避免底部再占一条 h-9 空行。用量拦截点击，避免点刷新时误折叠卡片。 */}
+									<span className="shrink-0 rounded-full border border-border-subtle px-1.5 py-px font-mono text-micro tabular-nums text-muted-foreground">
+										{t("config.count.models", { count: provider.models.length })}
+									</span>
+									<span onClick={(event) => event.stopPropagation()}>
+										<ProviderUsageInline provider={name} variant="card" />
+									</span>
 								</div>
 
-								<div className="flex items-center gap-1">
+								<div className="flex shrink-0 items-center gap-1">
 									{props.renamingProvider === name ? (
 										<>
 											<Button variant="ghost" size="icon-sm" className="size-7"
@@ -1270,11 +1277,6 @@ export function ModelsTab(props: {
 									</div>
 								</div>
 							)}
-							{/* 用量行（cc-switch 卡片右下角）：左侧模型数量常驻，右侧有用量时显示用量 + 刷新按钮 */}
-							<ProviderUsageRow
-								provider={name}
-								leading={t("config.count.models", { count: provider.models.length })}
-							/>
 						</div>
 					);
 				})}
