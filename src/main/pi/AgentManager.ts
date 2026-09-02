@@ -1471,6 +1471,7 @@ export class AgentManager {
 				(input.sessionPath
 					? this.translate("session.historyTitle", { project: project.name })
 					: `${project.name} agent`);
+			tab.status = "idle";
 			// 打开即同步权威标题（2026-09 现场）：catalog 可能被扫描器弱回退（首条消息文本）
 			// 覆盖过（session_info 落在头/尾窗口盲区），而 input.title 优先会造成打开后
 			// 侧栏一直停在污染值；pi get_state 的 sessionName 是 JSONL 末尾 session_info 的
