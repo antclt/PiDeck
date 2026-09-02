@@ -70,8 +70,8 @@ test("contextOccupancy keeps raw percent and recomputes zero percent from tokens
   };
   // 常规：percent 保留原始精度（不再四舍五入成整数）
   assert.equal(fieldsOf({ contextPercent: 45.3, contextTokens: 57600, contextWindow: 128000 }), "45.3:57600:128000");
-  // 超过 100 封顶（主进程可能上报未封顶的估算值）
-  assert.equal(fieldsOf({ contextPercent: 112, contextTokens: 100, contextWindow: 200 }), "100:100:200");
+  // 超过 100 不封顶：pi 可能上报未封顶的原始值（缓存超窗），与 CLI footer 同口径
+  assert.equal(fieldsOf({ contextPercent: 112, contextTokens: 100, contextWindow: 200 }), "112:100:200");
   // percent 上报为 0 但 tokens 非 0（pi/dsh 取整成 0 或未随 tokens 刷新）：
   // 按 tokens/window 重算，避免「占用 0% 但 ~408 / 1M」的自相矛盾展示
   const recomputed = occ({ contextPercent: 0, contextTokens: 408, contextWindow: 1_000_000 });
