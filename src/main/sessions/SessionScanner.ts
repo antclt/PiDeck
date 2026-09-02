@@ -104,11 +104,16 @@ function cleanScanTitle(value?: string): string | undefined {
  * 从已解析的 JSONL 行序列推断会话标题（与 readSummary 的 inferredName 同一优先级：
  * session_info 名 > 旧版私有 sessionName > 首条 user 文本 > 首条 assistant 文本）。
  * 推断不出返回 undefined（空文件/只有 tool 消息），由调用方兜底 Untitled。
+ *
+ * @returns { name, fromSessionInfo }：fromSessionInfo 标记标题是否直接取自 session_info
+ *（或旧版私有 sessionName 行）——只有这类权威来源才允许覆盖 catalog 已有真实标题；
+ * 首条消息回退是弱信号，会话文件变大后 session_info 可能落在头/尾窗口盲区，
+ * 弱回退不能把用户/自动命名的标题冲掉（2026-09 用户现场）。
  */
 function inferScanNameFromLines(
   lines: string[],
   extractText: (content: unknown) => string,
-): string | undefined {
+): { name?: string; fromSessionInfo: boolean } {
   let latestSessionInfoName: string | undefined;
   let name: string | undefined;
   let firstUserText = "";
@@ -136,10 +141,13 @@ function inferScanNameFromLines(
       if (text && message.role === "assistant" && !firstAssistantText) firstAssistantText = text;
     }
   }
-  return cleanScanTitle(latestSessionInfoName)
-    || cleanScanTitle(name)
-    || cleanScanTitle(firstUserText)
-    || cleanScanTitle(firstAssistantText);
+  // 取出 clean 前先保留「是否来自 session_info」判定：clean 后也可能是 timestamp/stem，
+  // 此时权威性随其一并失效（时间戳名同样不能覆盖真实标题）。
+  const infoName = cleanScanTitle(latestSessionInfoName) || cleanScanTitle(name);
+  if (infoName) return { name: infoName, fromSessionInfo: true };
+  const fallback = cleanScanTitle(firstUserText) || cleanScanTitle(firstAssistantText);
+  if (fallback) return { name: fallback, fromSessionInfo: false };
+  return { name: undefined, fromSessionInfo: false };
 }
 
 /**
@@ -1701,8 +1709,8 @@ export class SessionScanner {
     // 旧版 PiDeck 的 sessionName 私有行及其他字段仅作降级回退。
     // pi 默认 sessionName / 未改名的 session_info 是 JSONL 文件名时间戳，不能当标题。
     // 与轻量补名共用 inferScanNameFromLines，保证两处推断结果一致。
-    const inferredName = inferScanNameFromLines(lines, (content) => this.extractText(content))
-      || this.translate("session.untitled");
+    const inferred = inferScanNameFromLines(lines, (content) => this.extractText(content));
+    const inferredName = inferred.name || this.translate("session.untitled");
 
     const summary: SessionSummary = {
       id: filePath,
@@ -1768,13 +1776,16 @@ export class SessionScanner {
   }
 
   /**
-   * 有界读取文件头 + 文件尾，返回会话头原文与推断标题（不读完整正文、不写摘要缓存）。
+   * 有界读取文件头 + 文件尾，返回会话头原文、推断标题与权威性标记（不读完整正文、不写摘要缓存）。
    * pi `/name` 会在 JSONL 末尾追加 session_info，只读头部会永久看不到大会话的外部改名；
    * 因此头部负责有效性/首条消息，尾部负责最新 session_info；文件超过单窗大小才补读尾部。
+   *
+   * nameFromSessionInfo=false 表示标题只是首条消息回退（session_info 落在头/尾窗口盲区），
+   * 弱信号不得覆盖 catalog 已有真实标题（2026-09 自动命名被第二轮消息挤掉盲区后回退覆盖的现场）。
    */
   private async readHeadAndInfer(
     filePath: string,
-  ): Promise<{ raw: string; name: string | undefined } | null> {
+  ): Promise<{ raw: string; name: string | undefined; nameFromSessionInfo: boolean } | null> {
     const isWsl = this.isWslPath(filePath);
     try {
       const version = isWsl ? await this.readWslFileVersion(filePath) : await stat(filePath);
@@ -1790,8 +1801,8 @@ export class SessionScanner {
         titleText = `${head}\n${tail}`;
       }
       // 头/尾窗口边界可能截断半行；inferScanNameFromLines 会跳过不可解析行。
-      const name = inferScanNameFromLines(titleText.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content));
-      return { raw: head, name };
+      const inferred = inferScanNameFromLines(titleText.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content));
+      return { raw: head, name: inferred.name, nameFromSessionInfo: inferred.fromSessionInfo };
     } catch {
       // 读不到（权限/锁定/不存在）：返回 null，调用方按 best-effort 处理，不拒绝文件。
       return null;
@@ -1811,15 +1822,17 @@ export class SessionScanner {
    * 读有界头部并同时校验会话头有效性：transcript 等无 type 头的产物会被标记
    * valid:false，供 catalog 在 mergeScanned 时拒绝索引（#168）。读不到文件时
    * 返回空对象（valid 缺省 = 不拒绝），兼容权限/锁定文件不被误删。
+   * nameFromSessionInfo 标记标题是否来自 session_info（权威）：只有权威来源才允许
+   * 覆盖 catalog 已有真实标题，首条消息回退仅用于占位标题补名（2026-09 修复）。
    * 与 inferSessionNameFromFile 共用同一次有界读头部，补名与校验不重复读盘。
    */
   async inferSessionNameAndValidity(
     filePath: string,
-  ): Promise<{ name?: string; valid?: boolean; parentSessionPath?: string }> {
+  ): Promise<{ name?: string; nameFromSessionInfo?: boolean; valid?: boolean; parentSessionPath?: string }> {
     const head = await this.readHeadAndInfer(filePath);
     if (!head) return {};
     const parentSessionPath = await this.detectFlatSubagentParentFromHead(filePath, head.raw);
-    return { name: head.name, valid: isValidPiSessionFileHead(head.raw), parentSessionPath };
+    return { name: head.name, nameFromSessionInfo: head.nameFromSessionInfo, valid: isValidPiSessionFileHead(head.raw), parentSessionPath };
   }
 
   /**

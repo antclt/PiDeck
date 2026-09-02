@@ -90,8 +90,12 @@ export type SessionFilePathResolver = (
  *  文件非有效 Pi 会话（如 pi-subagents transcript 转储，首条记录用 recordType 而无 type 头），
  *  mergeScanned 应拒绝索引该文件（#168）；parentSessionPath 仅供平铺子代理形态
  * （@tintinweb/pi-subagents：parentSession header + 会话名 <agent>#<8hex>）回填父关系，
- *  用户 fork / 普通会话 / nicobailon 嵌套形态不返回该值。 */
-export type SessionTitleFetchResult = { name?: string; valid?: boolean; parentSessionPath?: string };
+ *  用户 fork / 普通会话 / nicobailon 嵌套形态不返回该值。
+ *  nameFromSessionInfo 标记 name 是否直接取自 session_info（权威）：
+ *  - true/缺省 = 权威来源，允许覆盖 catalog 已有真实标题（pi-tui /name 外部改名同步）；
+ *  - false = 首条消息回退的弱信号（session_info 落在头/尾窗口盲区），只用于占位标题补名，
+ *    不得覆盖已有真实标题（2026-09 自动命名被第二轮消息挤出窗口后被回退覆盖的现场）。 */
+export type SessionTitleFetchResult = { name?: string; nameFromSessionInfo?: boolean; valid?: boolean; parentSessionPath?: string };
 
 /** 标题刷新 + 会话头有效性校验：装配层注入（实现为 SessionScanner.inferSessionNameAndValidity，
  *  见 main/index.ts）。文件版本变化时有界读取头尾，既补占位标题，也同步 pi-tui 外部改名。 */
@@ -835,7 +839,7 @@ export class SessionCatalog {
 		// 会在 JSONL 末尾追加 session_info，否则项目刷新和重启 Session 都只会继续使用旧 catalog 标题。
 		// 同一次读头部顺带校验会话头有效性：invalidOrigins 收集被判定为非有效会话
 		// 的 originKey（transcript 等无 type 头的产物，#168），下面据此清洗与拒绝。
-		const { names: fetchedNames, invalid: invalidOrigins, parents: fetchedParents } =
+		const { names: fetchedNames, authoritative: fetchedAuthoritativeByOrigin, invalid: invalidOrigins, parents: fetchedParents } =
 			await this.collectScannedTitles(summaries, context);
 		return this.enqueueMutation((entries) => {
 			let changed = false;
@@ -895,6 +899,10 @@ export class SessionCatalog {
 			for (const summary of acceptedSummaries) {
 				const originKey = buildSummaryOriginKey(summary, context);
 				const fetchedTitle = fetchedNames.get(originKey);
+				// 权威性：命中 session_info（或显式 name 行）才允许覆盖 catalog 已有真实标题。
+				// 首条消息回退（nameFromSessionInfo === false）是弱信号——会话文件变大后
+				// session_info 可能落在扫描器头/尾窗口的盲区，弱回退不得把用户/自动命名冲掉。
+				const fetchedAuthoritative = fetchedAuthoritativeByOrigin.get(originKey) ?? true;
 				// 平铺子代理（tintinweb 形态）父关系回补：轻量扫描不带 parentSessionPath，
 				// 标题回读时若探测到父（<agent>#<8hex> + parentSession header）则用拾取值；
 				// 普通会话/用户 fork 不探测到该值，保持 summary/旧值原样。
@@ -929,8 +937,13 @@ export class SessionCatalog {
 				} else {
 					// 旧 catalog 可能已经保存了时间戳文件名；不能在清洗失败时用 entry.title 回退，
 					// 否则每次扫描都会把这个错误标题原样保留下来，重启后仍显示时间戳。
+					// 已存在真实标题时，弱回退（首条消息文本）不得覆盖（2026-09 现场：
+					// 自动命名 session_info 被第二轮消息挤出窗口盲区后被消息文本冲掉）；
+					// 权威回读（session_info 命中）与占位标题升级不受此限。
 					const nextTitle = catalogDisplayTitle(summary.name)
-						|| catalogDisplayTitle(fetchedTitle)
+						|| (fetchedAuthoritative || isPlaceholderCatalogTitle(entry.title)
+							? catalogDisplayTitle(fetchedTitle)
+							: undefined)
 						|| catalogDisplayTitle(entry.title)
 						|| scannedFileStemTitle(summary.filePath);
 					// 父关系最终值：新探测值优先，缺失时保留旧值（轻量扫描恒缺省，不能清掉已持久化的父）。
@@ -1012,11 +1025,12 @@ export class SessionCatalog {
 	private async collectScannedTitles(
 		summaries: SessionSummary[],
 		context: SessionCatalogContext,
-	): Promise<{ names: Map<string, string>; invalid: Set<string>; parents: Map<string, string> }> {
+	): Promise<{ names: Map<string, string>; authoritative: Map<string, boolean>; invalid: Set<string>; parents: Map<string, string> }> {
 		const names = new Map<string, string>();
+		const authoritative = new Map<string, boolean>();
 		const invalid = new Set<string>();
 		const parents = new Map<string, string>();
-		if (!this.fetchTitle) return { names, invalid, parents };
+		if (!this.fetchTitle) return { names, authoritative, invalid, parents };
 		const byOrigin = new Map(
 			this.entries.filter((entry) => entry.originKey).map((entry) => [entry.originKey!, entry]),
 		);
@@ -1037,7 +1051,7 @@ export class SessionCatalog {
 			}
 			wanted.push({ originKey, filePath: summary.filePath });
 		}
-		if (wanted.length === 0) return { names, invalid, parents };
+		if (wanted.length === 0) return { names, authoritative, invalid, parents };
 		// 有界并行读头部；限制并发避免 WSL 环境一次拉起过多 wsl.exe。
 		// 单个失败降级为无标题/不拒绝，不影响扫描结果。
 		const CONCURRENCY = 8;
@@ -1047,7 +1061,10 @@ export class SessionCatalog {
 				const item = wanted[cursor++];
 				const result = await this.fetchTitle!(item.filePath).catch(() => undefined);
 				if (!result) continue;
-				if (result.name) names.set(item.originKey, result.name);
+				if (result.name) {
+					names.set(item.originKey, result.name);
+					authoritative.set(item.originKey, result.nameFromSessionInfo !== false);
+				}
 				// valid 显式为 false 才拒绝；缺省（读不到/未校验）保留原行为
 				if (result.valid === false) invalid.add(item.originKey);
 				// 平铺子代理（tintinweb 形态）回补父关系：来源只推断自 filename，
@@ -1056,7 +1073,7 @@ export class SessionCatalog {
 			}
 		});
 		await Promise.all(workers);
-		return { names, invalid, parents };
+		return { names, authoritative, invalid, parents };
 	}
 
 	private recordFromEntry(
