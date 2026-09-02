@@ -1234,7 +1234,11 @@ export class ConfigManager {
 					const res = await net.fetch(requestUrl, {
 						method: candidate.method ?? "GET",
 						headers: this.withOpenAiSdkUserAgent({
-							...buildProbeHeaders(candidate.headers, apiKey),
+							...buildProbeHeaders(candidate.headers, apiKey, {
+								// 候选自带 Cookie 等独立鉴权时不能自动补 Bearer（双凭证可能被服务端拒绝，
+								// 如 Token Rhythm 的 AMBIGUOUS_CREDENTIALS 400），由候选/用户探针显式声明。
+								noBearer: candidate.noBearer === true,
+							}),
 							...preflightHeaders,
 							...extraHeaders,
 						}),

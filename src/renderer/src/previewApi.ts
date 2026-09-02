@@ -1289,5 +1289,14 @@ export function createPreviewApi(): PiDesktopApi {
 			getConfig: async () => ({ providers: [], activeProviderId: "", activeModel: "" }),
 			saveConfig: async (config) => ({ ok: true, config }),
 		},
+		// 模型目录预览桩：无内置目录可读，返回「不可用」空态，仅供预览不崩溃
+		catalog: {
+			status: async () => ({ builtin: null, overlay: null, hasOverlayFiles: false, hasBackup: false }),
+			check: async () => ({ ok: false, code: "network", message: "preview stub" }),
+			updateFromGithub: async () => ({ ok: false, code: "network", message: "preview stub" }),
+			restore: async () => ({ ok: true }),
+			restorePrevious: async () => ({ ok: false, code: "no-backup", message: "preview stub" }),
+			openFile: async () => undefined,
+		},
 	};
 }

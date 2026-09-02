@@ -3,6 +3,7 @@ import { ipcChannels } from "../shared/ipc";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
+import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
 import type {
 	YaoPromptListResult,
 	YaoPromptDetailResult,
@@ -1789,6 +1790,22 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.imagegenGetConfig) as Promise<ImageGenConfigFile>,
 		saveConfig: (config: ImageGenConfigFile) =>
 			ipcRenderer.invoke(ipcChannels.imagegenSaveConfig, config) as Promise<ImageGenSaveResult>,
+	},
+
+	// ── 模型目录（pi-ai-catalog）：查询状态 / 检查更新 / 从 GitHub 更新 / 还原 / 恢复备份 ──
+	catalog: {
+		status: () =>
+			ipcRenderer.invoke(ipcChannels.catalogUpdateStatus) as Promise<CatalogUpdateStatus>,
+		check: (branch: "main" | "dev") =>
+			ipcRenderer.invoke(ipcChannels.catalogUpdateCheck, branch) as Promise<CatalogCheckResult>,
+		updateFromGithub: (branch: "main" | "dev") =>
+			ipcRenderer.invoke(ipcChannels.catalogUpdateFromGithub, branch) as Promise<CatalogUpdateResult>,
+		restore: () =>
+			ipcRenderer.invoke(ipcChannels.catalogUpdateRestore) as Promise<CatalogUpdateResult>,
+		restorePrevious: () =>
+			ipcRenderer.invoke(ipcChannels.catalogUpdateRestorePrevious) as Promise<CatalogUpdateResult>,
+		/** 用系统默认程序打开当前生效的目录文件（覆盖层优先，否则内置） */
+		openFile: () => ipcRenderer.invoke(ipcChannels.catalogOpenFile) as Promise<void>,
 	},
 };
 

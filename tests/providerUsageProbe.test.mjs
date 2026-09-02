@@ -118,6 +118,20 @@ test("buildProbeHeaders 缺省补 Bearer，自定义 Authorization 覆盖，{{ap
   assert.equal(j(probe.buildProbeHeaders(undefined, "")), j({}));
 });
 
+test("buildProbeHeaders noBearer 时不自动补 Bearer，显式 Authorization 仍保留", () => {
+  const j = (v) => JSON.stringify(v);
+  // 用户探针 skipBearer（如 Cookie 登录态接口，自动补 Bearer 会触发双凭证冲突）
+  assert.equal(j(probe.buildProbeHeaders({ Cookie: "sid=1; tok=2" }, "sk-1", { noBearer: true })),
+    j({ Cookie: "sid=1; tok=2" }));
+  // noBearer 不影响显式 Authorization（调用方显式声明时以显式为准）
+  assert.equal(j(probe.buildProbeHeaders({ Authorization: "Bearer custom" }, "sk-1", { noBearer: true })),
+    j({ Authorization: "Bearer custom" }));
+  // 不带 noBearer 保持历史行为（无 Authorization 时仍补）
+  const withBearer = probe.buildProbeHeaders({ Cookie: "sid=1" }, "sk-1");
+  assert.equal(withBearer.Cookie, "sid=1");
+  assert.equal(withBearer.Authorization, "Bearer sk-1");
+});
+
 test("parseUsageResponseBody 解析 balance 形态", () => {
   const res = probe.parseUsageResponseBody(
     { balance_infos: [{ currency: "CNY", total_balance: "110.00" }] },

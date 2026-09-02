@@ -22,6 +22,7 @@ import {
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
+import { CatalogSection } from "./CatalogSection";
 
 type DevTabProps = {
   draft: AppSettings;
@@ -407,6 +408,9 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
           }
         />
       </SettingsSection>
+
+      {/* 模型目录：内置随版本发布，可从 GitHub 拉取最新覆盖 */}
+      <CatalogSection />
 
       {/* 运行 */}
       <SettingsSection title={t("settings.sectionRuntime")}>

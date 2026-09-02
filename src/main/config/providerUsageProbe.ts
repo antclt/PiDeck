@@ -141,6 +141,12 @@ export type UsageProbeCandidate = {
 	 * 补齐，只尝试「原样 baseUrl + path」——补 /v1 只会多一次必 404 的尝试。
 	 */
 	noVersionPath?: boolean;
+	/**
+	 * 候选自带自定义鉴权（如 Cookie 登录态 / 非标准头）且与 apiKey 冲突（双凭证），
+	 * 或接口根本不接受 Bearer：true 时禁止 buildProbeHeaders 自动补 Authorization，
+	 * 避免「Cookie 与 Bearer 凭证不一致」类 400/401（Token Rhythm 实测 AMBIGUOUS_CREDENTIALS）。
+	 */
+	noBearer?: boolean;
 	/** 链式预检：先请求预检端点再请求主端点（如 xAI identity → billing）。 */
 	preflight?: UsageProbePreflight;
 	/** 响应解析规格；缺省走 periods（opencode-go 兼容）。 */
@@ -374,16 +380,21 @@ export function usageProbeUrls(
 	return [...new Set(urls)];
 }
 
-/** 组装请求头：无自定义 Authorization 时自动补 Bearer；headers 里的 {{apiKey}} 替换成真实 key。 */
+/**
+ * 组装请求头：无自定义 Authorization 时自动补 Bearer；headers 里的 {{apiKey}} 替换成真实 key。
+ * opts.noBearer（候选 noBearer / 用户探针 skipBearer）＝接口自带独立鉴权（Cookie 等）且
+ * 与 apiKey 双凭证冲突时必须关闭自动补，否则服务端可能以「凭证不一致」拒绝请求。
+ */
 export function buildProbeHeaders(
 	candidateHeaders: Record<string, string> | undefined,
 	apiKey: string,
+	opts?: { noBearer?: boolean },
 ): Record<string, string> {
 	const out: Record<string, string> = {};
 	const entries = Object.entries(candidateHeaders ?? {});
 	const hasAuth = entries.some(([key]) => key.toLowerCase() === "authorization");
 	// 未显式提供鉴权头时按惯例补 Bearer；apiKey 为空则省略（无 key 会在上层快速失败）。
-	if (!hasAuth && apiKey) out.Authorization = `Bearer ${apiKey}`;
+	if (!hasAuth && apiKey && !opts?.noBearer) out.Authorization = `Bearer ${apiKey}`;
 	for (const [key, value] of entries) {
 		if (typeof value !== "string") continue;
 		out[key] = value.replace(/\{\{\s*apiKey\s*\}\}/gi, apiKey);

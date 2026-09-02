@@ -307,6 +307,9 @@ import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
 import { registerSystemIpc } from "./ipc/systemIpc";
+import { registerCatalogIpc } from "./ipc/catalogIpc";
+import { setPiAiCatalogUserDataDir } from "./pi/piAiBuiltinCatalog";
+import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
 import { fetchModelList, refreshModelCatalogIfStale, refreshModelList } from "./pi/modelListCache";
 import { registerFilesIpc } from "./ipc/filesIpc";
 import { registerClipboardIpc } from "./ipc/clipboardIpc";
@@ -2755,6 +2758,10 @@ function registerIpc() {
 		getInstallationType: () => settingsStore.get().installationType ?? "installed",
 	});
 	updateService.start();
+	// 模型目录更新：覆盖层目录须在 catalog 初次读取前登记（getPiAiCatalogIndex 首次
+	// 调用即锁定索引）；updater 在 ready 后构造，此时 app.getPath("userData") 才可靠。
+	setPiAiCatalogUserDataDir(app.getPath("userData"));
+	registerCatalogIpc(new PiAiCatalogUpdater({ userDataDir: app.getPath("userData") }));
 	registerSystemIpc({
 		piLocator,
 		settingsStore,
