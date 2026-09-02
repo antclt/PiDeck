@@ -1372,6 +1372,8 @@ export const enUS: Record<TranslationKey, string> = {
   "config.dsh.homeChangeFailed": "Failed to restart the DSH host; retry or restart the app.",
   "config.dsh.homeReset": "Restored the default DSH config directory (~/.dsh).",
   "config.dsh.homeResetApplied": "Restored the default DSH config directory (~/.dsh) and restarted the DSH host.",
+  "config.dsh.bootFailedTitle": "DSH host failed to start",
+  "config.dsh.bootFailedHint": "The DSH host could not start. Try \"Retry\" or \"Restart host\" first; if it keeps failing, reinstall the DSH backend, or check the DSH config directory and restart the app. Details below.",
   "config.dsh.retry": "Retry",
   "dsh.runtime.notInstalledTitle": "DSH backend is not installed",
   "dsh.runtime.notInstalledDesc": "The DSH backend runtime is not installed. Install it to use DSH sessions and their configuration; skipping it leaves the pi backend fully working.",

@@ -388,11 +388,12 @@ const api = {
 				model: string;
 				reasoningEffort?: string;
 			} | undefined>,
-		/** DSH 配置管理页状态（host 启动状态 + DSH_HOME 目录）。 */
+		/** DSH 配置管理页状态（host 启动状态 + DSH_HOME 目录 + 最近 boot 失败原因）。 */
 		getDshStatus: () =>
 			ipcRenderer.invoke(ipcChannels.dshGetStatus) as Promise<{
 				started: boolean;
 				homeDir: string;
+				bootError?: string | null;
 			}>,
 		/**
 		 * DSH runtime 安装态（AgentRuntimeProvider 阶段 1）：notInstalled/broken 时

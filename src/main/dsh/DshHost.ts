@@ -293,15 +293,22 @@ export class DshHost {
 		return this.dshHome || resolveDshHomeDir(override, this.getUserDataDir());
 	}
 
-	/** DSH 配置管理页数据：host 启动状态 + DSH_HOME 目录（配置/会话/凭证同目录）。 */
+	/** DSH 配置管理页数据：host 启动状态 + DSH_HOME 目录 + 最近一次 boot 失败原因。 */
 	async getStatus(): Promise<{
 		started: boolean;
 		homeDir: string;
+		/** 最近一次 host boot 失败的真实原因（host-error 详情/stderr 尾部）；成功或从未失败为 null。 */
+		bootError?: string | null;
 	}> {
 		// E14：started 语义 = host 进程存活且 boot 完成（client 非 null 可能在崩溃重启
 		// 超限放弃后仍是陈旧引用，UI 会误显示「已启动」）。
 		const started = this.client !== null && this.isHostProcessRunning() && this.isHostReady();
-		return { started, homeDir: this.getHomeDir() };
+		return {
+			started,
+			homeDir: this.getHomeDir(),
+			// boot 失败详情透给渲染层：即使 describe 抛错，概览页也能拿到真实原因。
+			bootError: this.hostProcess?.getLastBootError() ?? null,
+		};
 	}
 
 	/**

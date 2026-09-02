@@ -1366,6 +1366,8 @@ export const zhCN = {
   "config.dsh.homeChangeFailed": "DSH host 重启失败，请重试或重启应用。",
   "config.dsh.homeReset": "已恢复默认 DSH 配置目录（~/.dsh）。",
   "config.dsh.homeResetApplied": "已恢复默认 DSH 配置目录（~/.dsh），DSH host 已重启并生效。",
+  "config.dsh.bootFailedTitle": "DSH host 启动失败",
+  "config.dsh.bootFailedHint": "DSH host 未能启动。请先点「重试」或「重启 host」；若持续失败，可尝试重新安装 DSH 后端，或检查 DSH 配置目录后重启应用。详细原因见下。",
   "config.dsh.retry": "重试",
   "dsh.runtime.notInstalledTitle": "尚未安装 DSH 后端",
   "dsh.runtime.notInstalledDesc": "DSH 后端运行时未安装。安装后即可使用 DSH 会话与其配置管理；不安装不影响 pi 后端。",
