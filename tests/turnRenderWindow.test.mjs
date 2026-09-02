@@ -88,6 +88,7 @@ test("selectTimelineTurnWindow slices past the window turns regardless of follow
   assert.equal(windowing.shouldWindowTimelineTurns(11, 10), true);
   assert.equal(windowing.shouldWindowTimelineTurns(11, 15), false);
   // 2026-08 治理：非贴底（上滚看历史）同样裁剪，只是窗口更大
+
   const scrolled = windowing.selectTimelineTurnWindow(items, 10);
   assert.equal(scrolled.length, 10);
   assert.equal(scrolled[0].id, "b");
@@ -159,4 +160,28 @@ test("auto-expand wiring: controller exposes windowExpandableRef and listens nea
     "utf8",
   );
   assert.match(timelineSource, /windowExpandableRef\.current = turnWindowActive/);
+});
+
+test("countUserTurns merges consecutive user messages into one turn (speaker-hold semantics)", () => {
+  // 连发 3 条 user 无回复 = 1 轮；assistant 回复后下一条 user 才开新轮。
+  assert.equal(
+    windowing.countUserTurns([
+      { role: "user" }, { role: "user" }, { role: "user" },
+      { role: "assistant" },
+      { role: "user" }, { role: "assistant" },
+    ]),
+    2,
+  );
+  // system 诊断卡夹在连发 user 之间不拆轮。
+  assert.equal(
+    windowing.countUserTurns([
+      { role: "user" }, { role: "system" }, { role: "user" }, { role: "assistant" },
+    ]),
+    1,
+  );
+  // 纯连发无任何回复：整段 1 轮（发言权未交还）。
+  assert.equal(
+    windowing.countUserTurns([{ role: "user" }, { role: "user" }, { role: "user" }]),
+    1,
+  );
 });

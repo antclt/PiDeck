@@ -95,8 +95,13 @@ export type SessionHistoryReaderDeps = {
 
 /**
  * 轮次分页起点计算（纯函数，2026-08 激活分页）。
- * 轮次起点 = user 消息——与 trimHistoryMessages、渲染层 agent-run 分组同一约定，
- * 保证页边界永远对齐完整轮次（折叠不会被切成半个回答）。
+ *
+ * 业界 turn 定义（发言权周期）：一轮 = 用户连续发言（可连发多条 user）→
+ * AI 回应周期（assistant/tool/thinking 任意组合，直到下一条用户发言）。
+ * 因此 turn 起点 = role==="user" 且「跳过中间的杂项消息（system/error/卡片）后，
+ * 前一条真实消息不是 user」——连发 user 只有第一条是起点，其余并入同一轮；
+ * 纯 user 无回复的会话整体算一轮（用户还没拿到回应，发言权未交还）。
+ * 页边界永远对齐完整轮（折叠不会被切成半个回答）。
  *
  * 字节预算是安全阀而非分页维度：超预算时从最旧侧整轮丢弃，
  * 最新一轮无论多大都整轮保留（宁超预算不拆轮）。
@@ -108,16 +113,32 @@ export function findTurnPageStart(
 	byteBudget: number,
 ): number {
 	if (before <= 0 || turnCount < 1) return 0;
-	// 从 before-1 向前数第 turnCount 个轮次起点（user 消息）
+	// 预扫描 turn 起点（一次遍历，规则见上方注释）：
+	// 起点 = user 且其前最近的 user/assistant 边界不是 user。
+	// 用 turnStartFlags 标记而非重复扫描，保证 O(n) 且字节循环复用同一界定。
+	const turnStartFlags = new Array<boolean>(before).fill(false);
+	let prevUserOrAssistantRole: "user" | "assistant" | undefined;
+	for (let i = 0; i < before; i += 1) {
+		const role = entries[i].role;
+		if (role === "user") {
+			// 连发 user：只有前一条是 assistant（或无实质消息）时才算新轮起点。
+			if (prevUserOrAssistantRole !== "user") turnStartFlags[i] = true;
+			prevUserOrAssistantRole = "user";
+		} else if (role === "assistant") {
+			prevUserOrAssistantRole = "assistant";
+		}
+		// system/error/toolResult 等其他 role：不改变边界（发言权仍归上一方）。
+	}
+
+	// 从 before-1 向前数第 turnCount 个 turn 起点
 	let turnsSeen = 0;
 	let start = 0;
 	for (let i = before - 1; i >= 0; i -= 1) {
-		if (entries[i].role === "user") {
-			turnsSeen += 1;
-			if (turnsSeen === turnCount) {
-				start = i;
-				break;
-			}
+		if (!turnStartFlags[i]) continue;
+		turnsSeen += 1;
+		if (turnsSeen === turnCount) {
+			start = i;
+			break;
 		}
 	}
 	// 不足 turnCount 轮：从会话头起（开头的 system/碎片消息归入首轮）
@@ -133,8 +154,9 @@ export function findTurnPageStart(
 	let bytes = 0;
 	for (let i = start; i < before; i += 1) bytes += entries[i].byteLength;
 	while (bytes > byteBudget) {
+		// 从 start 向后找下一个 turn 起点（连发 user 整体为一个轮，不拆开丢）
 		let next = start + 1;
-		while (next < before && entries[next].role !== "user") next += 1;
+		while (next < before && !turnStartFlags[next]) next += 1;
 		if (next >= before) break; // 只剩最新一轮：整轮保留，预算让位
 		for (let i = start; i < next; i += 1) bytes -= entries[i].byteLength;
 		start = next;

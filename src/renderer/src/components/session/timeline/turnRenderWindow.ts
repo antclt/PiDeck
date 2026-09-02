@@ -26,11 +26,21 @@ export function countAgentRunItems(items: ReadonlyArray<{ kind: string }>): numb
 	return count;
 }
 
-/** 统计历史页新增的完整 user 轮次；分页协议与主进程都以 user 消息作为轮次起点。 */
+/** 统计消息序列中的 turn 数；分页协议与主进程都以 turn 起点（发言权周期）计数。
+ * 与主进程 findTurnPageStart/turnTrimStartIndex 同一约定：
+ * turn 起点 = role==="user" 且跳过中间杂项后前一条真实消息不是 user——
+ * 连发 user（无 assistant 回复）只算第一条为起点，其余并入同一轮。 */
 export function countUserTurns(messages: ReadonlyArray<{ role?: string }>): number {
 	let count = 0;
+	let prevUserOrAssistantRole: "user" | "assistant" | undefined;
 	for (const message of messages) {
-		if (message.role === "user") count += 1;
+		const role = message.role;
+		if (role === "user") {
+			if (prevUserOrAssistantRole !== "user") count += 1;
+			prevUserOrAssistantRole = "user";
+		} else if (role === "assistant") {
+			prevUserOrAssistantRole = "assistant";
+		}
 	}
 	return count;
 }

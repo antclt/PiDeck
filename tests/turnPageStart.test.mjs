@@ -72,3 +72,38 @@ test("degenerate inputs return session head", () => {
   assert.equal(findTurnPageStart(e, 0, 3, 1000), 0);
   assert.equal(findTurnPageStart(e, 2, 0, 1000), 0);
 });
+
+test("consecutive user messages count as a single turn (speaker-hold semantics)", () => {
+  // 连发 3 条 user 无回复 → 1 轮；随后 assistant 回复。
+  // user@0 u1, user@1 u2, user@2 u3, assistant@3, user@4 (第二轮)
+  const e = entries([
+    "user", "user", "user", "assistant",
+    "user", "assistant",
+  ]);
+  // 整段只有 2 轮（u1+u2+u3 合并，u4 单独）：取 2 轮 = 全段头
+  assert.equal(findTurnPageStart(e, 6, 2, 1_000_000), 0, "two speaker turns cover the whole session");
+  // 取 1 轮：只有第二轮（u4）——起点在下标 4
+  assert.equal(findTurnPageStart(e, 6, 1, 1_000_000), 4, "last speaker turn starts at u4");
+  // 取 1 轮只看第一段（before=4，即 u1..assistant）：起点 0（连发三条作为一个轮）
+  assert.equal(findTurnPageStart(e, 4, 1, 1_000_000), 0, "consecutive users merge into one turn");
+});
+
+test("misc entries between consecutive users do not split the turn", () => {
+  // error/system 卡片夹在连发 user 之间：仍属同一发言权周期，不拆轮。
+  const e = entries(["user", "system", "user", "assistant", "user", "assistant"]);
+  // 起点 0 与 4：u2（下标 2）被 system 卡分隔后仍并入 u1 的轮
+  assert.equal(findTurnPageStart(e, 4, 1, 1_000_000), 0);
+  assert.equal(findTurnPageStart(e, 6, 2, 1_000_000), 0);
+  assert.equal(findTurnPageStart(e, 6, 1, 1_000_000), 4);
+});
+
+test("byte budget drops whole speaker turns including consecutive user runs", () => {
+  // 第一段轮：3 条 user + 1 assistant（400B）；第二段：user + assistant（200B）
+  const e = entries(["user", "user", "user", "assistant", "user", "assistant"], 100);
+  // 预算 600B = 刚好装下两段轮：整段保留，连发段不拆。
+  assert.equal(findTurnPageStart(e, 6, 2, 600), 0, "whole session fits within budget");
+  // 预算 400B（正好第一段大小）：两段都超总预算？不——600>400，丢第一段后剩 200B ≤ 400 → 起点 u4。
+  assert.equal(findTurnPageStart(e, 6, 2, 400), 4, "oldest speaker turn dropped wholesale, consecutive run never split");
+  // 预算 100B：丢第一段（400B）后 200B 仍超 → 只剩最新一轮：宁超预算不拆轮。
+  assert.equal(findTurnPageStart(e, 6, 2, 100), 4, "newest speaker turn kept whole even above budget");
+});
