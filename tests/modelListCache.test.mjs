@@ -20,6 +20,7 @@ const {
   isUnknownCliOption,
   classifyModelListFailure,
   MODEL_LIST_FAST_ARGS,
+  MODEL_LIST_EXT_ARGS,
   MODEL_LIST_COMPAT_ARGS,
 } = loadTsCommonJs("src/main/pi/modelListCache.ts");
 const preload = readFileSync("src/preload/index.ts", "utf8");
@@ -130,9 +131,15 @@ test("parseTokenSize handles M/K/plain and rejects garbage", () => {
   assert.equal(parseTokenSize("-"), undefined);
 });
 
-test("MODEL_LIST_FAST_ARGS includes speed flags", () => {
-  assert.ok(MODEL_LIST_FAST_ARGS.includes("--list-models"));
-  assert.ok(MODEL_LIST_FAST_ARGS.includes("--offline"));
+test("MODEL_LIST_EXT_ARGS 走带扩展优先（#181），FAST_ARGS 仅作降级", () => {
+  // 第一档（带扩展）必须不带 --no-extensions：扩展 registerProvider 贡献的模型
+  // 要能进入选择器（与 CLI 一致）；--no-extensions 只保留在降级档 FAST_ARGS。
+  assert.ok(MODEL_LIST_EXT_ARGS.includes("--list-models"));
+  assert.ok(MODEL_LIST_EXT_ARGS.includes("--offline"));
+  assert.ok(!MODEL_LIST_EXT_ARGS.includes("--no-extensions"));
+  assert.ok(MODEL_LIST_EXT_ARGS.includes("--no-skills"));
+  assert.ok(MODEL_LIST_EXT_ARGS.includes("--no-themes"));
+  // 降级档：第一档因坏扩展失败时的无扩展重试集。
   assert.ok(MODEL_LIST_FAST_ARGS.includes("--no-extensions"));
   assert.ok(MODEL_LIST_FAST_ARGS.includes("--no-skills"));
   assert.ok(MODEL_LIST_FAST_ARGS.includes("--no-themes"));
