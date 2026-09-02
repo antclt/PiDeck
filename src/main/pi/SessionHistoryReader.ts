@@ -103,19 +103,17 @@ export type SessionHistoryReaderDeps = {
  * 纯 user 无回复的会话整体算一轮（用户还没拿到回应，发言权未交还）。
  * 页边界永远对齐完整轮（折叠不会被切成半个回答）。
  *
- * 字节预算是安全阀而非分页维度：超预算时从最旧侧整轮丢弃，
- * 最新一轮无论多大都整轮保留（宁超预算不拆轮）。
+ * 2026-09 统一轮次协议：字节预算已删除——单轮再大也整轮保留，
+ * 页大小只以轮数计（用户看历史就是要看完整一轮，不静默丢内容）。
  */
 export function findTurnPageStart(
 	entries: ReadonlyArray<{ role?: string; byteLength: number }>,
 	before: number,
 	turnCount: number,
-	byteBudget: number,
 ): number {
 	if (before <= 0 || turnCount < 1) return 0;
 	// 预扫描 turn 起点（一次遍历，规则见上方注释）：
 	// 起点 = user 且其前最近的 user/assistant 边界不是 user。
-	// 用 turnStartFlags 标记而非重复扫描，保证 O(n) 且字节循环复用同一界定。
 	const turnStartFlags = new Array<boolean>(before).fill(false);
 	let prevUserOrAssistantRole: "user" | "assistant" | undefined;
 	for (let i = 0; i < before; i += 1) {
@@ -150,16 +148,6 @@ export function findTurnPageStart(
 			if (entries[i].role === "user") { hasEarlierUser = true; break; }
 		}
 		if (!hasEarlierUser) start = 0;
-	}
-	let bytes = 0;
-	for (let i = start; i < before; i += 1) bytes += entries[i].byteLength;
-	while (bytes > byteBudget) {
-		// 从 start 向后找下一个 turn 起点（连发 user 整体为一个轮，不拆开丢）
-		let next = start + 1;
-		while (next < before && !turnStartFlags[next]) next += 1;
-		if (next >= before) break; // 只剩最新一轮：整轮保留，预算让位
-		for (let i = start; i < next; i += 1) bytes -= entries[i].byteLength;
-		start = next;
 	}
 	return start;
 }
@@ -250,10 +238,16 @@ export class SessionHistoryReader {
 	private static readonly SESSION_DISPLAY_INDEX_LIMIT = 32;
 	/** 全量重建时每隔这么多行让出事件循环，避免几十 MB JSONL 同步 parse 卡死主进程。 */
 	private static readonly INDEX_PARSE_YIELD_EVERY = 400;
-	private static readonly MAX_SESSION_DISPLAY_PAGE_BYTES = 256 * 1024;
 	/** 完整消息文本 LRU 缓存（「查看完整输出」按需读取结果）：键 `${sessionPath}#${messageId}`。 */
 	private readonly fullTextCache = new Map<string, string>();
 	private static readonly FULL_TEXT_CACHE_LIMIT = 200;
+	/**
+	 * 轮次分页预取缓存（2026-09 上滚丝滑）：disk 路径翻页时在后台读取下一页
+	 * 并暂存（键含文件版本/游标/页大小，pi 追加消息后自动失效），用户继续上滚时
+	 * 命中缓存免磁盘 IO。只在「上一页已返回且还有下一页」时预取一页，不连锁递归。
+	 */
+	private readonly prefetchCache = new Map<string, SessionMessagePage>();
+	private static readonly PREFETCH_CACHE_LIMIT = 2;
 	/** 轮次分页默认/上限：默认最近一次激活带 3 轮，单页最多 10 轮（防恶意参数撑爆 IPC） */
 	static readonly DEFAULT_TURN_PAGE_SIZE = 3;
 	private static readonly MAX_TURN_PAGE_SIZE = 10;
@@ -420,6 +414,9 @@ export class SessionHistoryReader {
 	/**
 	 * 轮次维度的显示分页：游标仍使用活动分支消息下标，页边界对齐完整轮次。
 	 * 这样无论历史会话是否已经启动 Agent，时间线都不会切开一个 user/assistant 回合。
+	 *
+	 * 2026-09 上滚丝滑：读页后后台预取下一页存入 prefetchCache（LRU 2 页），
+	 * 连续上滚时命中缓存零磁盘 IO；pi 持续追加消息时键版本失效自动重建。
 	 */
 	async readSessionDisplayTurnPage(
 		sessionPath: string,
@@ -444,11 +441,40 @@ export class SessionHistoryReader {
 		const boundedTurnCount = Number.isFinite(turnCount)
 			? Math.min(Math.max(1, Math.floor(turnCount)), SessionHistoryReader.MAX_TURN_PAGE_SIZE)
 			: SessionHistoryReader.DEFAULT_TURN_PAGE_SIZE;
+
+		// 预取命中：直接返回缓存页（键 = 文件版本 + 游标 + 页大小，版本变化即失效）。
+		const prefetchKey = this.buildPrefetchKey(sessionPath, index, boundedBefore, boundedTurnCount);
+		if (prefetchKey) {
+			const cached = this.prefetchCache.get(prefetchKey);
+			if (cached) {
+				// LRU 刷新：先删后插保持 Map 迭代序 = 最近使用序。
+				this.prefetchCache.delete(prefetchKey);
+				this.prefetchCache.set(prefetchKey, cached);
+				return cached;
+			}
+		}
+
+		const page = await this.readTurnPageCore(index, agentId, boundedBefore, boundedTurnCount);
+		// 预取下一页（仅当还有更早历史）——不阻塞当前请求、失败静默。
+		this.enqueuePrefetch(page, sessionPath, index, boundedTurnCount);
+		return page;
+	}
+
+	/**
+	 * 读单页核心实现（无缓存、不触发预取）：预取调用本方法而非公共分页方法，
+	 * 保证「预取不再触发预取」，避免连锁递归读盘。
+	 */
+	private async readTurnPageCore(
+		index: SessionDisplayIndex,
+		agentId: string,
+		boundedBefore: number,
+		boundedTurnCount: number,
+	): Promise<SessionMessagePage> {
+		const total = index.activeMessageEntries.length;
 		const start = findTurnPageStart(
 			index.activeMessageEntries,
 			boundedBefore,
 			boundedTurnCount,
-			SessionHistoryReader.MAX_SESSION_DISPLAY_PAGE_BYTES,
 		);
 
 		// 与普通轮次页一致：压缩会话的归档语义未游标化前走索引切片
@@ -479,6 +505,55 @@ export class SessionHistoryReader {
 			indexVersion: `${index.mtimeMs}:${index.size}`,
 			...index.metadata,
 		};
+	}
+
+	/**
+	 * 预取页缓存键：文件版本 + 页码游标 + 页大小。版本变化（pi 追加/外部重写）自动失效；
+	 * 无文件（匿名会话）返回 undefined（不缓存也不预取）。
+	 */
+	private buildPrefetchKey(
+		sessionPath: string,
+		index: SessionDisplayIndex,
+		before: number,
+		turnCount: number,
+	): string | undefined {
+		if (!index.hostPath) return undefined;
+		return `${sessionPath}|${index.mtimeMs}:${index.size}|${before}|${turnCount}`;
+	}
+
+	/**
+	 * 后台预取下一页：当前页还有更早历史（nextBefore 非 null）时读取下一页
+	 * 并存入 LRU（上限 PREFETCH_CACHE_LIMIT 页）。失败静默——预取是优化不是功能。
+	 * 只预取一页不连锁（下一页到达时不再次触发预取），避免无限递归读盘。
+	 */
+	private enqueuePrefetch(
+		page: SessionMessagePage,
+		sessionPath: string,
+		index: SessionDisplayIndex,
+		turnCount: number,
+	): void {
+		if (page.nextBefore === null || page.nextBefore <= 0) return;
+		const nextKey = this.buildPrefetchKey(sessionPath, index, page.nextBefore, turnCount);
+		if (!nextKey || this.prefetchCache.has(nextKey)) return;
+		// 后台读，不阻塞当前请求；单错不传播（预取失败下次点击仍可正常读盘）。
+		// 走 readTurnPageCore 而不是公共分页方法：预取不再触发预取（无连锁递归）。
+		void this.readTurnPageCore(
+			index,
+			"_prefetch",
+			page.nextBefore,
+			turnCount,
+		).then((nextPage) => {
+			this.prefetchCache.delete(nextKey);
+			this.prefetchCache.set(nextKey, nextPage);
+			this.trimPrefetchCache();
+		}).catch(() => undefined);
+	}
+
+	/** 预取缓存 LRU 裁剪：超出上限丢最旧（Map 迭代序 = 插入序）。 */
+	private trimPrefetchCache(): void {
+		while (this.prefetchCache.size > SessionHistoryReader.PREFETCH_CACHE_LIMIT) {
+			this.prefetchCache.delete(this.prefetchCache.keys().next().value!);
+		}
 	}
 
 	/** entryId → 活动分支消息条目的绝对下标（文件下标空间）；不存在返回 undefined。 */
@@ -976,12 +1051,11 @@ export class SessionHistoryReader {
 		const boundedTurns = Number.isFinite(maxTurns) && maxTurns > 0
 			? Math.max(1, Math.floor(maxTurns))
 			: SessionHistoryReader.DEFAULT_TURN_PAGE_SIZE;
-		// 启动窗口要完整保留最近 N 轮，不能被分页字节预算裁掉工具大输出。
+		// 启动窗口要完整保留最近 N 轮（分页页边界统一按轮计，无字节裁剪）。
 		const start = findTurnPageStart(
 			index.activeMessageEntries,
 			total,
 			boundedTurns,
-			Number.MAX_SAFE_INTEGER,
 		);
 		const entries = index.activeMessageEntries.slice(start);
 		const rawMessages = await this.readIndexedSessionMessages(index.hostPath, entries);

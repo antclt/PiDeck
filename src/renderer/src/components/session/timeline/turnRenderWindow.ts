@@ -14,9 +14,6 @@ export const TIMELINE_MOUNTED_TURN_LIMIT = 3;
 export const TIMELINE_SCROLLED_TURN_LIMIT = 3;
 /** 本地 DOM 扩窗 / 数据翻页的统一 cohort 大小；主进程 12 轮 = atom 9 轮 + 一页 3 轮。 */
 export const TIMELINE_WINDOW_EXPAND_STEP = 3;
-/** 上滚窗口的展示条目预算：单轮超大（一轮内上百条工具调用）时按轮截断仍会挂载海量 DOM，
- *  按条目数兜底截断（截断点取整轮边界，不切碎 run）。贴底窗口不设此限（折叠态 DOM 可控）。 */
-export const TIMELINE_SCROLLED_MAX_ITEMS = 200;
 
 export function countAgentRunItems(items: ReadonlyArray<{ kind: string }>): number {
 	let count = 0;
@@ -48,50 +45,28 @@ export function countUserTurns(messages: ReadonlyArray<{ role?: string }>): numb
 /**
  * 从尾部保留最多 maxTurns 个 agent-run，并带上从首个保留 run 起的全部条目
  * （run 之间的 system/compaction 等附属消息一并保留）。
- * maxItems（可选）：展示条目总预算（run 按内部 items 数计，普通条目按 1 计），
- * 超预算时同样从该处截断 —— 两者都保证不切碎 run（当前 run 完整保留）。
+ * 只按轮数窗口截断（2026-09 统一轮次协议：删除条目预算——单轮再大也整轮保留，
+ * 用户看历史就是要看完整一轮；折叠 unmount 从源头控制 DOM 量，不需要条目兜底）。
  * 不足上限时原样返回（引用不变，便于 memo）。
  */
 export function sliceLastAgentRuns<T extends { kind: string } & { items?: readonly unknown[] }>(
 	items: readonly T[],
 	maxTurns: number,
-	maxItems?: number,
 ): T[] {
 	if (maxTurns <= 0 || items.length === 0) return items as T[];
 	let runs = 0;
-	let weight = 0;
 	for (let index = items.length - 1; index >= 0; index -= 1) {
 		const item = items[index];
 		if (item?.kind !== "agent-run") {
-			// 非 run 条目（消息/诊断卡片）：只占 1 个条目预算，不计轮数
-			weight += 1;
-			if (maxItems !== undefined && weight > maxItems) {
-				return cutFrom(items, index);
-			}
+			// 非 run 条目（消息/诊断卡片）：不占轮数，随所属轮保留
 			continue;
 		}
 		runs += 1;
-		// run 的 DOM 规模由其内部展示条目（思考/工具组/消息）决定，按 items.length 计重；
-		// 空 items 的 run（理论边界）至少计 1，避免权重为 0 导致预算失效。
-		// 预算检查先于轮数检查：超预算时当前 run 也排除（cutFrom），轮数上限才完整保留。
-		weight += Array.isArray(item.items) ? Math.max(1, item.items.length) : 1;
-		if (maxItems !== undefined && weight > maxItems) {
-			return cutFrom(items, index);
-		}
 		if (runs >= maxTurns) {
 			return index === 0 ? (items as T[]) : items.slice(index);
 		}
 	}
 	return items as T[];
-}
-
-/**
- * 从 index 之后开始保留（排除使预算超限的当前条目）。
- * 尾部仅剩当前条目时退化为保留它——空窗口比超一点预算更糟（用户看不到任何内容）。
- */
-function cutFrom<T>(items: readonly T[], index: number): T[] {
-	const cutStart = index + 1;
-	return cutStart >= items.length ? (items.slice(index) as T[]) : items.slice(cutStart);
 }
 
 /**
@@ -106,14 +81,13 @@ export function shouldWindowTimelineTurns(
 	return windowTurns > 0 && agentRunCount > windowTurns;
 }
 
-/** 按窗口轮数决定展示列表；未裁剪时返回原数组引用。maxItems 为上滚窗口的条目预算。 */
+/** 按窗口轮数决定展示列表；未裁剪时返回原数组引用。 */
 export function selectTimelineTurnWindow<T extends { kind: string } & { items?: readonly unknown[] }>(
 	items: readonly T[],
 	windowTurns: number,
-	maxItems?: number,
 ): T[] {
 	if (!shouldWindowTimelineTurns(countAgentRunItems(items), windowTurns)) {
 		return items as T[];
 	}
-	return sliceLastAgentRuns(items, windowTurns, maxItems);
+	return sliceLastAgentRuns(items, windowTurns);
 }

@@ -979,7 +979,7 @@ export class AgentManager {
 			SessionHistoryReader.maxTurnPageSize(),
 		);
 		const roles = list.map((m) => ({ role: m.role, byteLength: 0 }));
-		const start = findTurnPageStart(roles, pos, turnCount, Number.MAX_SAFE_INTEGER);
+		const start = findTurnPageStart(roles, pos, turnCount);
 		if (start >= pos) return null;
 		const page = list.slice(start, pos);
 		const oldest = page[0] ?? list[0];
@@ -1217,14 +1217,13 @@ export class AgentManager {
 		this.rebindInFlightMessages(agentId, nextMessages, messages);
 		this.messages.set(agentId, nextMessages);
 		// 显示窗口 = 尾部 9 轮（DOM 3 / atom 9 / main 12 模型；轮次起点对齐 user 消息，
-		// 与 disk 轮次分页同一约定；字节预算不参与窗口计算——单轮再大也整轮显示，折叠完整性优先）
+		// 与 disk 轮次分页同一约定；单轮再大也整轮显示，折叠完整性优先）
 		this.displayWindowStartByAgent.set(
 			agentId,
 			findTurnPageStart(
 				nextMessages.map((m) => ({ role: m.role, byteLength: 0 })),
 				nextMessages.length,
 				AgentManager.DISPLAY_WINDOW_TURNS,
-				Number.MAX_SAFE_INTEGER,
 			),
 		);
 		// 文件版本随本次加载快照：压缩/外部改写会改变 mtime:size，渲染层据此丢弃 disk 前缀
@@ -5940,7 +5939,6 @@ export class AgentManager {
 				all.map((message) => ({ role: message.role, byteLength: 0 })),
 				all.length,
 				AgentManager.DISPLAY_WINDOW_TURNS,
-				Number.MAX_SAFE_INTEGER,
 			);
 			this.displayWindowComputedLengthByAgent.set(agentId, all.length);
 		}
@@ -6032,7 +6030,6 @@ export class AgentManager {
 			list.map((m) => ({ role: m.role, byteLength: 0 })),
 			list.length,
 			AgentManager.DISPLAY_WINDOW_TURNS,
-			Number.MAX_SAFE_INTEGER,
 		);
 		// 不超过 12 轮时也要校准尾部 9 轮窗口。通常 settled 前的 flush 已经做过这步，
 		// 这里保留独立调用时的兜底，避免新会话在 12 轮以内把全部消息留在 atom。
@@ -6070,7 +6067,6 @@ export class AgentManager {
 				next.map((m) => ({ role: m.role, byteLength: 0 })),
 				next.length,
 				AgentManager.DISPLAY_WINDOW_TURNS,
-				Number.MAX_SAFE_INTEGER,
 			),
 		);
 		this.markMessagesDirtyFrom(agentId, 0);

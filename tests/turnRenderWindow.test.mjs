@@ -19,15 +19,6 @@ function runs(...ids) {
   return ids.map((id) => ({ kind: "agent-run", id, items: [] }));
 }
 
-/** 构造带内部条目的 run（items.length 决定 DOM 权重，用于条目预算测试）。 */
-function heavyRun(id, itemCount) {
-  return {
-    kind: "agent-run",
-    id,
-    items: Array.from({ length: itemCount }, (_, i) => ({ kind: "message", id: `${id}-${i}` })),
-  };
-}
-
 test("sliceLastAgentRuns keeps only the trailing maxTurns agent-runs", () => {
   const items = [
     { kind: "message", id: "sys" },
@@ -57,31 +48,6 @@ test("sliceLastAgentRuns returns same reference when under the limit", () => {
   assert.equal(windowing.sliceLastAgentRuns(items, 10), items);
 });
 
-test("sliceLastAgentRuns cuts by item budget without splitting a run", () => {
-  // 尾部两个大 run（各 150 条）+ 一个小 run：轮数上限 3 不够裁，
-  // 条目预算 200 把最老的大 run 完整排除（不切碎 run 边界）。
-  const items = [
-    heavyRun("r1", 150),
-    heavyRun("r2", 150),
-    runs("r3")[0],
-  ];
-  const sliced = windowing.sliceLastAgentRuns(items, 3, 200);
-  assert.deepEqual(
-    sliced.map((item) => item.id),
-    ["r2", "r3"],
-  );
-});
-
-test("sliceLastAgentRuns item budget keeps only trailing lightweight runs", () => {
-  // 10 个轻量 run（各 1 条）：预算 5 时只保留尾部 5 个 run
-  const items = runs("r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10");
-  const sliced = windowing.sliceLastAgentRuns(items, 100, 5);
-  assert.deepEqual(
-    sliced.map((item) => item.id),
-    ["r6", "r7", "r8", "r9", "r10"],
-  );
-});
-
 test("selectTimelineTurnWindow slices past the window turns regardless of following", () => {
   const items = runs("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k");
   assert.equal(windowing.countAgentRunItems(items), 11);
@@ -104,7 +70,7 @@ test("timeline wires the turn mount window helper", () => {
   const source = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
   assert.match(source, /selectTimelineTurnWindow/);
   assert.match(source, /TIMELINE_MOUNTED_TURN_LIMIT/);
-  assert.match(source, /TIMELINE_SCROLLED_MAX_ITEMS/);
+  assert.doesNotMatch(source, /TIMELINE_SCROLLED_MAX_ITEMS/, "item budget removed in turn-centric protocol");
   assert.match(source, /displayRuns\.map/);
 });
 
