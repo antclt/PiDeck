@@ -169,6 +169,15 @@ function loadAgentManagerModule() {
       if (specifier === "electron") {
         return { app: { getName: () => "PiDeck" }, Notification: { isSupported: () => false } };
       }
+      // 共享扩展 resolver（issue #181）：本测试不涉及扩展加载，透传空实现即可
+      if (specifier === "../extensions/piProcessExtensionResolvers") {
+        return {
+          createPiProcessExtensionResolvers: () => ({
+            resolveBuiltInExtensionPaths: () => [],
+            resolveEnabledExtensionPaths: () => null,
+          }),
+        };
+      }
       if (specifier === "../../shared/ipc") return { ipcChannels: {} };
       if (specifier === "./PiProcess") return { PiProcess: class {} };
       if (specifier === "./bashResult") return { formatBashToolMessage: () => "" };

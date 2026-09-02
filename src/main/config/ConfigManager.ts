@@ -49,7 +49,8 @@ import {
 	buildDeclarativeUsageProbeTemplate,
 	USAGE_PROBE_CATEGORY_BY_TEMPLATE_ID,
 } from "./usageProbeTemplates";
-import { loadUsageProbeSettings, loadUserUsageProbes } from "./userUsageProbes";
+import { loadUsageProbeSettings, loadUserUsageProbes, loadUserUsageProbesDetailed } from "./userUsageProbes";
+import type { UserUsageProbe } from "./userUsageProbes";
 import { pideckUsageProbesDir } from "../dsh/pideckDshHome";
 import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
 import { loadDshUsageProviderProfile } from "./dshUsageEndpoint";
@@ -915,7 +916,7 @@ export class ConfigManager {
 
 		// 3) 模板路由：声明式模板优先（用户显式选择），否则内置 + 旧探针自动匹配。
 		const template = settings.config?.template;
-		if (template === "general" || template === "newapi") {
+		if (template === "general" || template === "newapi" || template === "cookie") {
 			const built = buildDeclarativeUsageProbeTemplate(template, settings.config ?? {}, {
 				baseUrl: resolvedBaseUrl,
 				apiKey: resolvedApiKey,
@@ -965,12 +966,39 @@ export class ConfigManager {
 		// 同 fetchProviderUsage：DSH 组 id 别名先归一，才能读回以规范名保存的配置。
 		if (backend === "dsh") provider = normalizeDshDeepseekProvider(provider);
 		const loaded = await loadUsageProbeSettings(this.usageProbeSettingsDir(backend), provider);
+		// 旧版 probes 数组命中回显：手写/历史探针没有声明式配置，弹窗据此预填 Cookie 模板字段迁移。
+		const legacyProbes = await this.matchLegacyProbesForProvider(provider, backend);
 		return {
 			...(loaded.config ? { config: loaded.config } : {}),
 			recognized: await this.recognizeUsageTemplate(provider, backend),
 			templates: [],
 			errors: loaded.errors,
+			...(legacyProbes.length > 0 ? { legacyProbes } : {}),
 		};
+	}
+
+	/**
+	 * 按 provider 查找命中的旧版探针（usage-probes.json 的 probes 数组）。
+	 * 匹配规则与运行时合并探测一致（candidateApplies：baseUrlContains / apiTypes），
+	 * 保证「弹窗看到的迁移源」与「实际查询时生效的探针」是同一批。
+	 */
+	private async matchLegacyProbesForProvider(
+		provider: string,
+		backend: UsageProbeBackend = "pi",
+	): Promise<UserUsageProbe[]> {
+		const resolved = await this.resolveUsageEndpoint(provider, backend);
+		if (!resolved.matched || !resolved.baseUrl) return [];
+		const api = this.normalizeApiType(resolved.apiType);
+		const loaded = await loadUserUsageProbesDetailed(this.usageProbeSettingsDir(backend));
+		const hits: UserUsageProbe[] = [];
+		for (let index = 0; index < loaded.candidates.length; index += 1) {
+			const probe = loaded.probes[index];
+			const candidate = loaded.candidates[index];
+			if (probe && candidate && candidateApplies(candidate, resolved.baseUrl, api)) {
+				hits.push(probe);
+			}
+		}
+		return hits;
 	}
 
 	/** 内置模板自动识别（零配置生效路径）：命中返回 templateId + 面向用户的类别。 */
@@ -1016,8 +1044,8 @@ export class ConfigManager {
 			return { success: false, error: this.translate("mainConfig.providerUsageUnsupported") };
 		}
 
-		// 声明式模板（general/newapi）：构建候选时可携带覆盖字段。
-		if (template === "general" || template === "newapi") {
+		// 声明式模板（general/newapi/cookie）：构建候选时可携带覆盖字段。
+		if (template === "general" || template === "newapi" || template === "cookie") {
 			const built = buildDeclarativeUsageProbeTemplate(
 				template,
 				{
@@ -1025,6 +1053,10 @@ export class ConfigManager {
 					baseUrl: input.baseUrl,
 					accessToken: input.accessToken,
 					userId: input.userId,
+					cookie: input.cookie,
+					cookiePath: input.cookiePath,
+					valuePath: input.valuePath,
+					currencyPath: input.currencyPath,
 				},
 				{ baseUrl: resolvedBaseUrl, apiKey: resolvedApiKey },
 			);

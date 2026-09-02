@@ -346,6 +346,28 @@ export class SettingsStore {
     if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
       delete safePatch.autoSessionTitle;
     }
+    // lastUsedModel 只接受 { provider, modelId } 双字符串（渲染层发送时才写，入参不可信）。
+    // 值相同（含非法被丢弃后无变更）直接早退：发送每条消息都会调用，避免高频无效写盘与审计刷屏。
+    if ("lastUsedModel" in safePatch) {
+      const candidate = safePatch.lastUsedModel;
+      if (
+        candidate &&
+        typeof candidate === "object" &&
+        typeof candidate.provider === "string" &&
+        candidate.provider.length > 0 &&
+        typeof candidate.modelId === "string" &&
+        candidate.modelId.length > 0
+      ) {
+        safePatch.lastUsedModel = { provider: candidate.provider, modelId: candidate.modelId };
+      } else {
+        delete safePatch.lastUsedModel;
+      }
+      const prev = this.settings.lastUsedModel;
+      const next = safePatch.lastUsedModel;
+      if (!next || (prev && prev.provider === next.provider && prev.modelId === next.modelId)) {
+        return this.get();
+      }
+    }
     // 忙碌时投递行为来自渲染层，非法值丢掉，避免发送链路带着坏语义。
     if ("busySendDelivery" in safePatch) {
       safePatch.busySendDelivery = parseBusySendDelivery(safePatch.busySendDelivery);

@@ -105,21 +105,6 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   // 当前模型信息（思考档位按当前模型 reasoningEfforts 裁剪，模型未知/未声明时回退全量，
   // host 负责最终能力校验）。
   const isDshSession = record?.backend === "dsh" || runtime?.backend === "dsh";
-  const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
-  // 非 live 残留 state 不能盖住 catalog：Agent 未启动时改模型，选择器高亮必须跟记录走。
-  const runtimeLive = isLiveRuntimeStatus(runtime?.status);
-  const resolvedLiveModel = resolveComposerLiveModel({
-    state: runtime?.state,
-    record: record?.model,
-    fallback: {
-      // 无 record（引导页）时优先用户上次欢迎页选择（welcomeModel），
-      // 其次主进程解析的启动默认（pi 时由 props.defaultModel 透传）。
-      provider: welcomeModel?.provider ?? props.defaultModel?.provider,
-      modelId: welcomeModel?.modelId ?? props.defaultModel?.modelId,
-      modelName: props.defaultModel?.modelName,
-    },
-    isLive: runtimeLive,
-  });
   const pickerNeedsModels = props.picker === "model" || props.picker === "thinking";
   // 模型目录数据源统一走 capability cache。思考选择器同样加载它，运行中也能直接
   // 复用已水合的模型档位，不必等待 Agent RPC。
@@ -128,6 +113,40 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
     backend: isDshSession ? "dsh" : "pi",
     projectId: record?.projectId,
     enabled: pickerNeedsModels,
+  });
+  const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
+  // welcome 偏好可能指向已删除的供应商/模型（models.json 已更新而 localStorage 残留）：
+  // 目录加载后校验存在性，失效则忽略该偏好，避免选择器/默认高亮落在幽灵模型上。
+  // 目录未加载（models 为空）时不判定，避免误清用户仍有效的偏好。
+  const welcomeModelLost = Boolean(
+    welcomeModel &&
+      models.length > 0 &&
+      !models.some((m) => m.provider === welcomeModel.provider && m.id === welcomeModel.modelId),
+  );
+  useEffect(() => {
+    // 失效偏好只清一次：下次引导页不再默认已删除的模型（创建时主进程也会兜底丢弃）。
+    if (welcomeModelLost) {
+      try {
+        localStorage.removeItem(WELCOME_MODEL_KEY);
+      } catch {
+        // localStorage 不可用时静默；展示层已忽略该偏好。
+      }
+    }
+  }, [welcomeModelLost]);
+  const effectiveWelcomeModel = welcomeModelLost ? undefined : welcomeModel;
+  // 非 live 残留 state 不能盖住 catalog：Agent 未启动时改模型，选择器高亮必须跟记录走。
+  const runtimeLive = isLiveRuntimeStatus(runtime?.status);
+  const resolvedLiveModel = resolveComposerLiveModel({
+    state: runtime?.state,
+    record: record?.model,
+    fallback: {
+      // 无 record（引导页）时优先用户上次欢迎页选择（effectiveWelcomeModel），
+      // 其次主进程解析的启动默认（pi 时由 props.defaultModel 透传）。
+      provider: effectiveWelcomeModel?.provider ?? props.defaultModel?.provider,
+      modelId: effectiveWelcomeModel?.modelId ?? props.defaultModel?.modelId,
+      modelName: props.defaultModel?.modelName,
+    },
+    isLive: runtimeLive,
   });
 
   const runtimeThinkingEntryRef = useRef(piRuntimeThinkingEntry);

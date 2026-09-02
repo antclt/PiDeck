@@ -164,3 +164,16 @@ test("订阅者抛错不影响服务：refresh 仍能返回状态", () => {
 	});
 	assert.equal(service.refresh().state, "notInstalled");
 });
+
+test("allowBundledFallback=false 时内置探测被禁用（dev 模式强制外部安装）", () => {
+	// dev 模式：项目根 node_modules 里装着 @deepseek-ai 开发依赖，但状态服务
+	// 不应把「node_modules 有包」当作已安装 runtime——否则 UI 显示随应用内置且不可卸载。
+	const service = new DshRuntimeStatusService(
+		() => process.cwd(),
+		() => {},
+		() => undefined,
+		() => false,
+	);
+	const status = service.getStatus();
+	assert.equal(status.state, "notInstalled");
+});

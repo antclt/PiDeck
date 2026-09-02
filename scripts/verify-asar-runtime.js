@@ -24,12 +24,13 @@ if (!fs.existsSync(asarPath)) {
 }
 
 // 运行时必须保留：主进程 external 包 + 动态 import 目标 + hostEntry 动态加载树根 + 原生/asarUnpack 包
+// 注意：@deepseek-ai/* 与 dsh-bill/dsh-tool-pwsh-persistent 已依赖分区（仅 devDependencies），
+// 不进 app.asar——它们的加载锚点在外部 runtime（resources/dsh-runtime 归档 / userData 已装目录），
+// 归档完整性由 scripts/check-dsh-asar.mjs + check-dsh-boot.mjs 守护，这里不再断言。
 const MUST_KEEP = [
 	"node-pty",
 	"sql.js",
-	"@deepseek-ai/dsh-subprocess-local",
 	"@larksuiteoapi/node-sdk",
-	"dsh-bill",
 	"@img/sharp-win32-x64",
 	"@vscode/ripgrep-win32-x64",
 	"openai",
@@ -39,7 +40,6 @@ const MUST_KEEP = [
 	"zod",
 	"undici",
 	"@electron-toolkit/utils",
-	"dsh-tool-pwsh-persistent",
 	"koffi",
 ];
 

@@ -38,11 +38,86 @@ test("pi backend prefers strict provider+model pair from settings", () => {
 		models: {
 			providers: {
 				openai: { models: [{ id: "gpt-5.2" }] },
+				anthropic: { models: [{ id: "claude-opus-4-6" }] },
 			},
 		},
 	});
 	assert.deepEqual(plain(result.model), { provider: "anthropic", modelId: "claude-opus-4-6" });
 	assert.equal(result.thinkingLevel, undefined);
+});
+
+test("settings 显式默认指向已删除供应商/模型时回退第一个可用（删除后不再默认幽灵）", () => {
+	const result = resolve({
+		settings: { defaultProvider: "deleted-provider", defaultModel: "deleted-model" },
+		models: {
+			providers: {
+				openai: { models: [{ id: "gpt-5.2" }] },
+			},
+		},
+	});
+	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
+});
+
+test("lastUsed（最后一次使用）优先于 settings 显式默认", () => {
+	const result = resolve({
+		settings: { defaultProvider: "openai", defaultModel: "gpt-5.2" },
+		models: {
+			providers: {
+				openai: { models: [{ id: "gpt-5.2" }] },
+				zhipu: { models: [{ id: "glm-5" }] },
+			},
+		},
+		lastUsedModel: { provider: "zhipu", modelId: "glm-5" },
+	});
+	assert.deepEqual(plain(result.model), { provider: "zhipu", modelId: "glm-5" });
+});
+
+test("lastUsed 指向已删除模型时回退 settings 显式默认", () => {
+	const result = resolve({
+		settings: { defaultProvider: "openai", defaultModel: "gpt-5.2" },
+		models: {
+			providers: {
+				openai: { models: [{ id: "gpt-5.2" }] },
+			},
+		},
+		// 用户删除了 zhipu：lastUsed 校验存在性失败，应回退仍有效的显式默认
+		lastUsedModel: { provider: "zhipu", modelId: "glm-5" },
+	});
+	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
+});
+
+test("lastUsed 与 settings 默认都被删除时回退第一个可用", () => {
+	const result = resolve({
+		settings: { defaultProvider: "openai", defaultModel: "gpt-5.2" },
+		models: {
+			providers: {
+				deepseek: { models: [{ id: "deepseek-chat" }] },
+			},
+		},
+		lastUsedModel: { provider: "openai", modelId: "gpt-5.2" },
+	});
+	assert.deepEqual(plain(result.model), { provider: "deepseek", modelId: "deepseek-chat" });
+});
+
+test("lastUsed 非法形状（非对象/半结构）被忽略并回退", () => {
+	const models = {
+		providers: { openai: { models: [{ id: "gpt-5.2" }] } },
+	};
+	for (const bad of [null, "zhipu/glm-5", { provider: "zhipu" }, { modelId: "glm-5" }, { provider: 42, modelId: "x" }]) {
+		const result = resolve({ settings: {}, models, lastUsedModel: bad });
+		assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
+	}
+});
+
+test("dsh 后端忽略 lastUsed（模型归属 host settings）", () => {
+	const result = resolve({
+		backend: "dsh",
+		settings: { defaultThinkingLevel: "high" },
+		models: { providers: { openai: { models: [{ id: "gpt-5.2" }] } } },
+		lastUsedModel: { provider: "openai", modelId: "gpt-5.2" },
+	});
+	assert.equal(result.model, undefined);
+	assert.equal(result.thinkingLevel, "high");
 });
 
 test("half-configured settings fall back to first provider/model of models.json", () => {

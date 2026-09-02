@@ -254,6 +254,7 @@ import {
 import { PiLocator } from "./pi/PiLocator";
 import { testPiProxy } from "./pi/PiProxyTester";
 import { SessionScanner } from "./sessions/SessionScanner";
+import { resolveLaunchDefaultOptions, isModelInModelsConfig } from "./sessions/launchDefaults";
 import {
 	SessionCatalog,
 	canAttachRuntimeMetadata,
@@ -614,35 +615,29 @@ async function createAnonymousSession(
 	let model = input.model;
 	let thinkingLevel = input.thinkingLevel;
 	try {
-		// 引导页显式选择优先于 pi 配置；下面只为缺失字段补默认值。
 		const [settingsResult, modelsResult] = await Promise.all([
 			configManager.getSettingsConfig(),
 			configManager.getModelsConfig(),
 		]);
-		const settings = settingsResult.parsed;
-		const defaultProvider = typeof settings.defaultProvider === "string"
-			? settings.defaultProvider
-			: undefined;
-		const defaultModelId = typeof settings.defaultModel === "string"
-			? settings.defaultModel
-			: undefined;
-		if (!model && defaultProvider && defaultModelId) {
-			model = { provider: defaultProvider, modelId: defaultModelId };
-		} else if (!model) {
-			const providers = modelsResult.parsed?.providers;
-			if (providers) {
-				const firstProviderName = Object.keys(providers)[0];
-				const firstProvider = firstProviderName ? providers[firstProviderName] : undefined;
-				const firstModel = firstProvider?.models?.[0];
-				if (firstProviderName && firstModel?.id) {
-					model = { provider: firstProviderName, modelId: firstModel.id };
-				}
-			}
+		// 渲染层/引导页显式传入的模型（欢迎页偏好等）也可能指向已删除条目：
+		// 校验仍存在于 models.json，不存在则丢弃交给解析器兜底（lastUsed → 显式默认 → 第一个可用）。
+		if (model && !isModelInModelsConfig(modelsResult.parsed, model)) {
+			model = undefined;
 		}
-		const level = typeof settings.defaultThinkingLevel === "string"
-			? settings.defaultThinkingLevel
-			: undefined;
-		if (!thinkingLevel) thinkingLevel = level;
+		// 缺省填充与引导页展示共用同一解析器（launchDefaults，含「最后一次使用」优先）：
+		// 保证「预选的默认」与「创建时真正套用的默认」永远同源。
+		const defaults = resolveLaunchDefaultOptions({
+			backend: "pi",
+			settings: settingsResult.parsed,
+			models: modelsResult.parsed,
+			lastUsedModel: settingsStore.get().lastUsedModel,
+		});
+		if (!model) {
+			model = defaults.model;
+		}
+		if (!thinkingLevel) {
+			thinkingLevel = defaults.thinkingLevel;
+		}
 	} catch {
 		// Config read is best-effort.
 	}
@@ -1887,6 +1882,25 @@ function mainCopy(
 	return mainProcessT(currentMainProcessLocale(), key, params);
 }
 
+/**
+ * 把 DSH runtime 导入/安装的内部错误码翻译为用户可读文案。
+ * 错误码是 DshRuntimeManager.verifyStagedRuntime 的返回值契约（tests 亦断言裸码），
+ * 因此这里只做「码 → 文案」映射，不修改下层返回值。
+ */
+function dshRuntimeErrorCopy(error: string): string {
+	if (error === "manifest missing") return mainCopy("dsh.runtime.errors.manifestMissing");
+	if (error === "manifest unreadable") return mainCopy("dsh.runtime.errors.manifestUnreadable");
+	if (error === "manifest schema unsupported") return mainCopy("dsh.runtime.errors.schemaUnsupported");
+	if (error === "app version incompatible") return mainCopy("dsh.runtime.errors.appIncompatible");
+	if (error === "node_modules missing") return mainCopy("dsh.runtime.errors.nodeModulesMissing");
+	if (error.startsWith("required package missing: "))
+		return mainCopy("dsh.runtime.errors.requiredPackageMissing", {
+			pkg: error.slice("required package missing: ".length),
+		});
+	if (error === "directory not found" || error === "cancelled") return error;
+	return error;
+}
+
 function sessionCommandIpcError(error: SessionCommandError): SessionCommandIpcError {
 	if (error.debugDetails) {
 		void appLogger?.warn("session-command", "Session command failed", {
@@ -2538,6 +2552,9 @@ function registerIpc() {
 				const result = await dshRuntimeInstaller.installFromLocalFile(filePath);
 				dshRuntimeStatus.refresh();
 				if (result.ok) await restartDshHostAfterRuntimeChange();
+				// 失败时把内部错误码映射为用户可读文案（配置页直接展示 error 字段）。
+				// 只映射已知校验码；未知错误（如磁盘满、权限）保留原始信息以便排查。
+				if (!result.ok) return { ok: false, error: dshRuntimeErrorCopy(result.error) };
 				return result;
 			},
 			uninstallDshRuntime: async () => {
@@ -3152,8 +3169,10 @@ app.whenReady().then(async () => {
 		log: (scope, message, detail) => void appLogger.info(scope, message, detail),
 	});
 	// DSH runtime 安装态服务先于 DshHost 装配（探测只依赖 appPath，不 fork host）。
-	// 探测顺序：外部已装 runtime 优先 → 回退 app 内置（依赖分区前的存量包仍内置），
+	// 探测顺序：外部已装 runtime 优先 → 回退 app 内置（仅打包态：依赖分区前的存量包仍内置），
 	// 两边都没有才是 notInstalled。状态变更经 dsh-runtime:status-changed 广播给渲染层。
+	// allowBundledFallback 只在打包态开启：dev 模式下项目 node_modules 里的 @deepseek-ai
+	// 是开发依赖，若当作内置会污染状态（显示「随应用内置」且不可卸载）；dev 走外部安装流程。
 	dshRuntimeStatus = new DshRuntimeStatusService(
 		() => app.getAppPath(),
 		(scope, message, detail) => void appLogger.info(scope, message, detail),
@@ -3163,6 +3182,7 @@ app.whenReady().then(async () => {
 				? { nodeModules: active.nodeModules, runtimeVersion: active.manifest.runtimeVersion }
 				: undefined;
 		},
+		() => app.isPackaged,
 	);
 	dshRuntimeStatus.subscribe((status) => {
 		if (mainWindow && !mainWindow.isDestroyed()) {
