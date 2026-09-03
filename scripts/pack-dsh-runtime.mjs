@@ -360,7 +360,11 @@ if (lite) {
 	for (const name of readdirSync(bundleDir)) {
 		if (name !== ".gitkeep") rmSync(join(bundleDir, name), { recursive: true, force: true });
 	}
-	writeFileSync(join(bundleDir, ".gitkeep"), "");
+	// 只在文件不存在时创建占位（首次检出/目录被删场景）；已在版本库里的 .gitkeep
+	// 带说明注释，绝不能被每次打包清空——否则 git 工作区永远显示它被修改（diff 噪声）。
+	if (!existsSync(join(bundleDir, ".gitkeep"))) {
+		writeFileSync(join(bundleDir, ".gitkeep"), "");
+	}
 	console.log("[pack-dsh-runtime] --lite：随包目录留空（已清理旧产物），安装走在线/手动导入");
 } else {
 	copyFileSync(archivePath, join(bundleDir, archiveName));
