@@ -12,6 +12,7 @@ const {
   resolveListedProxyMode,
   resolveEffectiveSessionProxyMode,
   applyPiProxyModeWithProvider,
+  computeGenProxyKey,
 } = loadTsCommonJs("src/main/sessions/sessionProxyPolicy.ts");
 
 // 注：loadTsCommonJs 跨 vm realm 加载，对象原型与本地不同，deepEqual 会因 prototype
@@ -143,6 +144,18 @@ test("applyPiProxyModeWithProvider: 模型名单内即使全局关闭也强制�
   // 名单都空 → 原样返回（跟随全局，不创建新对象）
   const noList = { ...base, piProxyProviders: [], piProxyModels: [] };
   assert.equal(applyPiProxyModeWithProvider(noList, "follow", "openai", "gpt-4o"), noList);
+});
+
+test("computeGenProxyKey: 序列化实际生效的代理状态（含名单命中/绕过列表）", () => {
+	const base = { piProxyEnabled: false, piProxyUrl: "http://127.0.0.1:7890", piProxyBypass: "", piProxyModels: ["openai/gpt-4o"] };
+	// 全局关但名单命中 → 强制 on（指纹 on + URL）
+	assert.equal(computeGenProxyKey(base, "openai", "gpt-4o"), "on|http://127.0.0.1:7890|");
+	// 名单启用但未命中 → off（黑白名单语义）
+	assert.equal(computeGenProxyKey(base, "openai", "gpt-4o-mini"), "off");
+	// 名单未启用 + 全局关 → off
+	assert.equal(computeGenProxyKey({ piProxyEnabled: false, piProxyUrl: "x", piProxyBypass: "b", piProxyModels: [] }, "openai", "gpt-4o"), "off");
+	// 全局开 → on（即使名单为空）；绕过列表参与指纹（改 bypass 需重建进程）
+	assert.equal(computeGenProxyKey({ piProxyEnabled: true, piProxyUrl: "http://127.0.0.1:7890", piProxyBypass: "localhost", piProxyModels: [] }, "openai", "gpt-4o"), "on|http://127.0.0.1:7890|localhost");
 });
 
 test("applyProxyEnvPatch: 先剥离后注入，顺序固定", () => {

@@ -17,6 +17,10 @@ import {
 	toWindowsHostPath,
 	toWslLinuxPath,
 } from "../wsl/WslPaths";
+import {
+	applyPiProxyModeWithProvider,
+	computeGenProxyKey,
+} from "../sessions/sessionProxyPolicy";
 
 export type GitIpcDeps = {
 	appLogger: Pick<AppLogger, "warn" | "info" | "error">;
@@ -35,6 +39,8 @@ let genProcess: ChildProcess | null = null;
 let genRpcClient: PiRpcClient | null = null;
 let genProcessCwd = "";
 let genModelKey = "";
+/** 当前生成进程的代理指纹：代理设置/名单命中变化且模型未变时也要重建（env 在 spawn 时定格）。 */
+let genProxyKey = "";
 let genIdleTimer: NodeJS.Timeout | null = null;
 /** 生成互斥锁：同一时刻只允许一个摘要请求，避免并发打到复用进程触发 pi 的 busy 拒绝 */
 let genBusy = false;
@@ -53,6 +59,7 @@ function stopGenProcess() {
 	genProcess = null;
 	genProcessCwd = "";
 	genModelKey = "";
+	genProxyKey = "";
 }
 
 /** 重置空闲定时器：30 分钟无请求自动杀掉进程释放内存 */
@@ -73,9 +80,12 @@ async function ensureGenProcess(
 	appLogger: Pick<AppLogger, "warn">,
 ): Promise<PiRpcClient> {
 	// provider/model 变化时必须重启轻量进程，避免旧进程继续持有上一组选中的模型。
+	// 代理指纹同理：HTTP_PROXY 等环境变量在 spawn 时定格，设置页改代理/名单后不重建
+	// 旧进程会一直直连（或沿用旧代理），表现为「配置了代理但生成摘要没走代理」。
 	const modelKey = `${model.provider}\0${model.modelId}`;
+	const proxyKey = computeGenProxyKey(settingsStore.get(), model.provider, model.modelId);
 	if (genProcess && genRpcClient && genProcess.exitCode === null) {
-		if (genModelKey === modelKey) {
+		if (genModelKey === modelKey && genProxyKey === proxyKey) {
 			genProcessCwd = projectPath;
 			resetGenIdleTimer();
 			return genRpcClient;
@@ -149,7 +159,13 @@ async function trySpawnGenProcess(
 
 	const childProcess = spawn(invocation.command, invocation.args, {
 		cwd: spawnCwd,
-		env: piLocator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl),
+		// 与运行时会话同策略：会话 on/off 覆盖 > 模型名单命中强制走代理 > 跟随全局。
+		// 之前只按 piProxyEnabled 全局开关注入，名单内模型（全局关）生成摘要会直连失败。
+		env: piLocator.createProcessEnv(
+			applyPiProxyModeWithProvider(settings, undefined, model.provider, model.modelId),
+			invocation.pathPrefix,
+			invocation.wsl,
+		),
 		stdio: ["pipe", "pipe", "pipe"],
 		shell: invocation.shell,
 		windowsHide: true,
@@ -157,6 +173,7 @@ async function trySpawnGenProcess(
 	});
 	genProcess = childProcess;
 	genProcessCwd = spawnCwd;
+	genProxyKey = computeGenProxyKey(settings, model.provider, model.modelId);
 
 	genRpcClient = new PiRpcClient(childProcess.stdin!, childProcess.stdout!);
 

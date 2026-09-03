@@ -35,7 +35,7 @@ export type PiProxyModeSettings = Pick<AppSettings, "piProxyEnabled" | "piProxyU
 /** 按模型/供应商过滤所需的全局设置子集（代理 URL + 两级白名单；供应商名单为旧版兼容字段）。 */
 export type PiProxyProviderSettings = Pick<
 	AppSettings,
-	"piProxyEnabled" | "piProxyUrl" | "piProxyProviders" | "piProxyModels"
+	"piProxyEnabled" | "piProxyUrl" | "piProxyBypass" | "piProxyProviders" | "piProxyModels"
 >;
 
 /**
@@ -274,6 +274,23 @@ export function resolveConfigProxyTarget(
 		default:
 			return { mode: "follow" };
 	}
+}
+
+/**
+ * 轻量生成进程（git 摘要等）的代理指纹：序列化「本次调用实际生效的 pi 代理状态」。
+ * 持久化进程的 HTTP_PROXY 等环境变量在 spawn 时定格，代理设置或名单命中变化后
+ * 必须依据指纹判断是否需要重建进程（否则旧进程永远沿用旧代理状态）。
+ */
+export function computeGenProxyKey(
+	settings: PiProxyProviderSettings,
+	provider: string | undefined,
+	modelId: string | undefined,
+): string {
+	const effective = applyPiProxyModeWithProvider(settings, undefined, provider, modelId);
+	if (effective?.piProxyEnabled !== true) return "off";
+	// 开启时 URL/绕过列表参与指纹：改地址或 bypass 需要重建持久化进程
+	// （HTTP_PROXY 等环境变量在 spawn 时定格，不重建会沿用旧代理）。
+	return ["on", effective.piProxyUrl.trim(), effective.piProxyBypass.trim()].join("|");
 }
 
 /**
