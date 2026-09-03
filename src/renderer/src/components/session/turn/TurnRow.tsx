@@ -1,11 +1,12 @@
 import {
   messageEntryId,
 } from "../../../utils/sessionCommands";
-import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronUp, Clock, Share, SquarePen, Trash } from "lucide-react";
-import { atom, useAtomValue } from "jotai";
+import { atom, useAtomValue, useSetAtom } from "jotai";
+import { selectAtom } from "jotai/utils";
 import type { AgentBackend, ImageContent } from "../../../../../shared/types";
-import { liveTextActiveBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily } from "../../../atoms/session-atoms";
+import { liveTextActiveBySessionAtom, newTurnCollapseTickBySessionIdAtomFamily, runStepsVisibleMemoryBySessionIdAtomFamily, type RunStepsVisibleMemoryEntry } from "../../../atoms/session-atoms";
 import { turnFlowSettingsAtom } from "../../../atoms/app-ui-atoms";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
@@ -34,6 +35,8 @@ import type { DiffFileHandler } from "../ToolCallComponents";
 const NO_LIVE_TEXT_ATOM = atom(false);
 /** sessionId 为空时的占位 atom：恒 0（无会话不订阅新一轮信号）。 */
 const NO_TURN_TICK_ATOM = atom(0);
+/** sessionId 为空时的占位 atom：恒 undefined（无会话不订阅展开记忆）。 */
+const NO_STEPS_MEMORY_ATOM = atom<RunStepsVisibleMemoryEntry | undefined>(undefined);
 
 /**
  * 一轮 AI 回答的扁平容器：左侧竖线聚合，内含思考/工具/回答。
@@ -193,6 +196,35 @@ export const TurnRow = memo(
 			? newTurnCollapseTickBySessionIdAtomFamily(props.sessionId)
 			: NO_TURN_TICK_ATOM,
 	);
+	// 执行过程展开状态跨挂载记忆（run 级）：切会话再切回时恢复手动/流式展开的
+	// 轮次；selectAtom 按 run.id 取值，同会话其它 run 变化不重渲染本行。
+	const stepsVisibleMemoryAtom = useMemo(
+		() => props.sessionId
+			? selectAtom(
+					runStepsVisibleMemoryBySessionIdAtomFamily(props.sessionId),
+					(map) => map[run.id] ?? undefined,
+					Object.is,
+				)
+			: NO_STEPS_MEMORY_ATOM,
+		[props.sessionId, run.id],
+	);
+	const stepsVisibleMemory = useAtomValue(stepsVisibleMemoryAtom);
+	const setRunStepsMemoryAtom = useSetAtom(
+		runStepsVisibleMemoryBySessionIdAtomFamily(props.sessionId ?? ""),
+	);
+	const onStepsVisibleMemoryChange = useCallback(
+		(visible: boolean | undefined, atTick: number) => {
+			const runId = run.id;
+			if (!props.sessionId || !runId) return;
+			setRunStepsMemoryAtom((prev) => {
+				const next = { ...prev };
+				if (visible === undefined) delete next[runId];
+				else next[runId] = { visible, atTick };
+				return next;
+			});
+		},
+		[props.sessionId, run.id, setRunStepsMemoryAtom],
+	);
 	const { stepsVisible, setStepsVisibleFromUser, toggleSteps } =
 		useTurnExecution({
 			runId: run.id,
@@ -205,6 +237,8 @@ export const TurnRow = memo(
 			newTurnCollapseTick,
 			autoCollapseTick: props.autoCollapseTick,
 			onAutoCollapsed: props.onAutoCollapsed,
+			stepsVisibleMemory,
+			onStepsVisibleMemoryChange,
 		});
 
 	// 中间内容（思考/工具/中间回答）与最终回答分组：
