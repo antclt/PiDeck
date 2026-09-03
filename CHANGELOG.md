@@ -15,6 +15,8 @@
 - **pi-tui rename sync** — Renaming a session in pi-tui now shows up in the PiDeck sidebar after a project refresh or session restart, instead of sticking to the old title.
 - **ask_question multi-select** — Question cards support multi-select with a single submit.
 - **On-demand fast packing** — `dist:fast` can target portable / zip / nsis so local installers are quicker to verify.
+- **DSH runtime version detection & worktree fade-out** — Built-in DSH runtimes show the detected version; deleting a worktree fades out instead of vanishing abruptly.
+- **Model catalog updater** — The settings page can pull the latest model catalog from GitHub to override the bundled copy, with one-click restore and graceful fallback; probes skip auto-attaching a Bearer when a custom auth header is configured.
 
 ### 🐛 Fixes
 - **Refresh stale projects** — Refresh handles vanished projects, and file-delete failures surface instead of failing silently.
@@ -40,6 +42,8 @@
 - **Extension-provided models selectable in pickers** — The model selector, connection test, and Git commit-message generation load extensions by default (falling back to no-extension mode on failure), so models registered by extensions in the CLI are also selectable in PiDeck.
 - **Checkpoint lists no longer show "No checkpoints yet" forever** — Reading switched to a single `git cat-file --batch` (SHAs via stdin, no command-line length limit), fixing the list coming back empty once a repository accumulated hundreds of refs; the checkpoints panel also gained a manual refresh button.
 - **No more flashing CMD windows** — Pi child processes are spawned hidden on Windows, so launching a session no longer pops a console window.
+- **Usage probe failures are diagnosable** — Every failed attempt (URL/method/status/redacted response summary) is recorded and shown when all probes miss; New API-style management endpoints no longer get a redundant `/v1` attempt, and failures are grouped into actionable hints.
+- **Open-file inside Git diff fixed** — Clicking the inline “open file” button on a diff line no longer does nothing after the diff updates; it opens the snapshot path in the scoped preview.
 
 ### 🙏 Thanks
 
