@@ -49,9 +49,8 @@ export function resolveJumpPendingAction(input: {
  * 轮次窗口从尾部保留 W 个 run：目标在第 k 轮（1-based，共 T 轮）时需要
  * W ≥ T-k+1，即目标（含）之后还有多少条 turn。轮次以 turn 起点为计数
  * （与主进程 findTurnPageStart 的发言权周期口径一致：连发 user 只算一轮）；
- * +1 轮冗余吸收 system/compaction 等非 run 条目。估算偏大会整段挂载
- * （jumpNavigationActive 已解除条目预算），无害；
- * 估算不足由 effect 的指数兜底补齐。
+ * +1 轮冗余吸收 system/compaction 等非 run 条目。估算偏大会多挂少量尾部轮次，
+ * 不会改变窗口模型；估算不足由 effect 的指数兜底补齐。
  */
 export function estimateJumpExpandTurns(
   messages: ReadonlyArray<{ role?: string }>,
