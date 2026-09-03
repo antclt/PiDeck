@@ -354,8 +354,14 @@ writeFileSync(indexPath, JSON.stringify(localIndex, null, 2));
 const bundleDir = join(outDir, DSH_BUNDLED_DIRNAME);
 mkdirSync(bundleDir, { recursive: true });
 if (lite) {
+	// --lite：随包目录留空，但必须清掉此前非 lite 打包残留的 tgz/manifest——
+	// 否则 electron-builder 的 extraResources 会把旧 runtime 打进安装包，
+	// “减小体积”的目标被过期产物悄悄破坏。
+	for (const name of readdirSync(bundleDir)) {
+		if (name !== ".gitkeep") rmSync(join(bundleDir, name), { recursive: true, force: true });
+	}
 	writeFileSync(join(bundleDir, ".gitkeep"), "");
-	console.log("[pack-dsh-runtime] --lite：随包目录留空，安装走在线/手动导入");
+	console.log("[pack-dsh-runtime] --lite：随包目录留空（已清理旧产物），安装走在线/手动导入");
 } else {
 	copyFileSync(archivePath, join(bundleDir, archiveName));
 	// 随包这份 manifest 必须带真实 sha256：应用端用它校验归档完整性。

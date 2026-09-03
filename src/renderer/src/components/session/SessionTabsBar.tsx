@@ -63,6 +63,7 @@ import {
 } from "../ui-shadcn/popover";
 import { cn } from "../../lib/utils";
 import { SessionBackendBadge } from "./SessionSourceBadge";
+import { TitleScrollText } from "../sidebar/TitleScrollText";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 import { buildProjectTabGroups, type ProjectTabGroup } from "../../utils/sessionTabGroups";
@@ -1036,7 +1037,24 @@ function SessionTab(props: {
             {t("app.composerModeGoal")}
           </span>
         )}
-        <span className={cn("min-w-0 flex-1 truncate", preview && "italic")}>{title}</span>
+        {/* 标题复用侧栏 TitleScrollText：溢出时 hover 滚动到尾、离开回开头（与左侧会话列表一致）。
+            strong 是块级元素（flex-1 占满剩余空间），需显式覆盖字重：非激活 400、激活 500，
+            否则 strong 的 UA 默认 bold(700) 会让所有 tab 标题变粗。truncate 补省略号
+            （组件自带 overflow-hidden 只截断不省略，侧栏靠 legacy .conversation-title strong 补）。
+            收敛触发（tab 是高频交互区，侧栏默认行为不适合）：
+            - disabled={active}：激活 tab 不滚动——内容已在右侧看全，且切换 tab 时鼠标恰好落在
+              新激活 tab 上，立即滚动体验很吵（原生 title 提示兜底）；
+            - hoverDelayMs=500：快速扫过 tab 栏不触发，停留半秒才滚。 */}
+        <TitleScrollText
+          text={title}
+          disabled={active}
+          hoverDelayMs={500}
+          className={cn(
+            "truncate",
+            active ? "font-medium" : "font-normal",
+            preview && "italic",
+          )}
+        />
         {!pinned && (
           <button
             type="button"

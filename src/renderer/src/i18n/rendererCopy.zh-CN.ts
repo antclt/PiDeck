@@ -1380,6 +1380,7 @@ export const zhCN = {
   "config.dsh.retry": "重试",
   "dsh.runtime.notInstalledTitle": "尚未安装 DSH 后端",
   "dsh.runtime.notInstalledDesc": "DSH 后端运行时未安装。安装后即可使用 DSH 会话与其配置管理；不安装不影响 pi 后端。",
+  "dsh.runtime.devNoDownload": "当前为开发模式：DSH runtime 随正式打包分发，此处不提供在线下载；如需本地调试可从仓库安装 @deepseek-ai 依赖或使用打包版。",
   "dsh.runtime.brokenTitle": "DSH 后端不可用",
   "dsh.runtime.brokenDesc": "已安装的 DSH 运行时（{version}）与当前应用版本不兼容，请重新安装匹配的运行时。",
   "dsh.runtime.install": "安装 DSH 后端",

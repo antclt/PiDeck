@@ -3216,10 +3216,12 @@ app.whenReady().then(async () => {
 		log: (scope, message, detail) => void appLogger.info(scope, message, detail),
 	});
 	// DSH runtime 安装态服务先于 DshHost 装配（探测只依赖 appPath，不 fork host）。
-	// 探测顺序：外部已装 runtime 优先 → 回退 app 内置（仅打包态：依赖分区前的存量包仍内置），
+	// 探测顺序：外部已装 runtime 优先 → 回退 app 内置（dev 模式 = 项目 node_modules 的
+	// @deepseek-ai 开发依赖，已随 npm install 存在，直接可用无需安装/下载），
 	// 两边都没有才是 notInstalled。状态变更经 dsh-runtime:status-changed 广播给渲染层。
-	// allowBundledFallback 只在打包态开启：dev 模式下项目 node_modules 里的 @deepseek-ai
-	// 是开发依赖，若当作内置会污染状态（显示「随应用内置」且不可卸载）；dev 走外部安装流程。
+	// allowBundledFallback 只在开发态开启：**打包版不内置 runtime**（build 用 runtime:pack:lite，
+	// 随包目录留空）——减小安装体积，需要 DSH 的用户在打包版里按引导下载安装；
+	// 开发态则直接复用项目 node_modules（零下载、零安装，符合「dev 不需要装 runtime」的诉求）。
 	dshRuntimeStatus = new DshRuntimeStatusService(
 		() => app.getAppPath(),
 		(scope, message, detail) => void appLogger.info(scope, message, detail),
@@ -3229,6 +3231,7 @@ app.whenReady().then(async () => {
 				? { nodeModules: active.nodeModules, runtimeVersion: active.manifest.runtimeVersion }
 				: undefined;
 		},
+		() => !app.isPackaged,
 		() => app.isPackaged,
 	);
 	dshRuntimeStatus.subscribe((status) => {

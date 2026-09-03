@@ -1386,6 +1386,7 @@ export const enUS: Record<TranslationKey, string> = {
   "config.dsh.retry": "Retry",
   "dsh.runtime.notInstalledTitle": "DSH backend is not installed",
   "dsh.runtime.notInstalledDesc": "The DSH backend runtime is not installed. Install it to use DSH sessions and their configuration; skipping it leaves the pi backend fully working.",
+  "dsh.runtime.devNoDownload": "Development mode: the DSH runtime ships with packaged builds only; online download is unavailable here. Install the @deepseek-ai dependencies from the repo or use a packaged build for local debugging.",
   "dsh.runtime.brokenTitle": "DSH backend is unavailable",
   "dsh.runtime.brokenDesc": "The installed DSH runtime ({version}) is incompatible with this app version. Reinstall a matching runtime.",
   "dsh.runtime.install": "Install DSH backend",
