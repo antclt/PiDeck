@@ -547,7 +547,9 @@ export function ComposerBottomBar(props: {
 						</DropdownMenuContent>
 					</DropdownMenu>
 					{props.feishuIndicator}
-					{props.securityControl}
+					{/* 生图模式无 pi/DSH runtime：安全等级（pi 安全门）与 DSH 权限预设都对图片生成无意义，
+					   且 SecurityControl 按 backend 分发时没有 imagegen 分支会误显示成 pi 安全等级菜单，故直接屏蔽。 */}
+					{isImageGenMode ? null : props.securityControl}
 				</div>
 				<div
 					className={`composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4${
@@ -592,14 +594,18 @@ export function ComposerBottomBar(props: {
 				<div className="composer-bottom-right ml-auto flex shrink-0 items-center gap-2">
 					{/* 上下文占用圆环（dsh ContextMeter 移植）：发送按钮旁常驻指示,
 					    点击展开占用面板（两段占比/缓存命中/输入输出/压缩入口）；
-					    压缩动作从右上角紧凑徽章迁入面板；无 capacity 数据时自身不渲染 */}
-					<SessionContextMeter
-						state={props.state}
-						onCompact={props.onCompact}
-						backend={usageBackend}
-						// 未激活会话用会话记录/默认 model 推导的 provider 查用量（用量不依赖 agent 运行）
-						fallbackProvider={modelProvider}
-					/>
+					    压缩动作从右上角紧凑徽章迁入面板；无 capacity 数据时自身不渲染。
+					    生图模式没有 LLM 上下文（消息不进 pi/DSH 会话，历史独立存 ImageSessionStore），
+					    圆环与压缩入口一并屏蔽。 */}
+					{isImageGenMode ? null : (
+						<SessionContextMeter
+							state={props.state}
+							onCompact={props.onCompact}
+							backend={usageBackend}
+							// 未激活会话用会话记录/默认 model 推导的 provider 查用量（用量不依赖 agent 运行）
+							fallbackProvider={modelProvider}
+						/>
+					)}
 					{/* 分支只读 chip 升级为可切换下拉：当前分支即触发器，展开列表选目标分支后
 					    先弹确认（切换会携带未提交更改），确认后才调 App 级 switchBranch。 */}
 					{props.gitInfo?.current && props.onSwitchBranch ? (
