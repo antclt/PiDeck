@@ -252,6 +252,14 @@ export type AppSettings = {
 	/** 收藏的模型 ID 列表 */
 	favoriteModels: string[];
 
+	// ── 新会话默认模型：记录用户最后一次实际使用的供应商/模型 ──
+	/**
+	 * 用户最后一次发送消息时使用的模型（主进程在 sendPrompt 接受时自动记录）。
+	 * 为「新会话默认」提供 lastUsed 语义——新会话默认 = 上次真正用过的供应商/模型，
+	 * 而非固定配置。可选以兼容旧 settings.json；模型被删除后由解析器校验存在性自动回退。
+	 */
+	lastUsedModel?: { provider: string; modelId: string };
+
 	// ── 字体配置：沿用主题机制实时生效，写入 documentElement token ──
 	/** 全局字号基准档位；未单独设置各区域时，所有字号 token 均由此推导 */
 	fontSize: AppFontSizeMode;

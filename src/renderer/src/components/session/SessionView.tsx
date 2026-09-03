@@ -358,6 +358,7 @@ export function SessionView({
                     <SessionFilesStrip
                       sessionId={sessionId}
                       run={latestAgentRun}
+                      onOpenFile={onOpenFile}
                       onDiffFile={onDiffFile}
                     />
                     <SessionSubagentsStrip

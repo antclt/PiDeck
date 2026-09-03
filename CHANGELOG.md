@@ -37,6 +37,9 @@
 - **Spinner animation unified** — Loading states share one animation utility so spinners don’t freeze.
 - **Subagent records survive restart and fork** — Start anchors persist (killed-by-restart agents are marked stopped); a full entry-table scan keeps fork side-branch records.
 - **Tool results can open files** — Tool output is tighter, and results can open the matching file in the workspace.
+- **Extension-provided models selectable in pickers** — The model selector, connection test, and Git commit-message generation load extensions by default (falling back to no-extension mode on failure), so models registered by extensions in the CLI are also selectable in PiDeck.
+- **Checkpoint lists no longer show "No checkpoints yet" forever** — Reading switched to a single `git cat-file --batch` (SHAs via stdin, no command-line length limit), fixing the list coming back empty once a repository accumulated hundreds of refs; the checkpoints panel also gained a manual refresh button.
+- **No more flashing CMD windows** — Pi child processes are spawned hidden on Windows, so launching a session no longer pops a console window.
 
 ### 🙏 Thanks
 

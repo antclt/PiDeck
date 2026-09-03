@@ -299,6 +299,19 @@ export async function loadUserUsageProbes(configDir: string): Promise<UserUsageP
 	return { candidates, errors };
 }
 
+/**
+ * 读盘 + 规范化的共用实现（旧 probes 数组；文件缺失静默空，JSON 损坏返回可读错误）。
+ * 导出供弹窗回显：candidates 与 probes 按下标一一对应，按 provider 命中后取回
+ * 原始探测形态（含 Cookie 等用户自有字段），映射到声明式 Cookie 模板字段迁移。
+ */
+export async function loadUserUsageProbesDetailed(configDir: string): Promise<{
+	probes: UserUsageProbe[];
+	candidates: UsageProbeCandidate[];
+	errors: string[];
+}> {
+	return readUserUsageProbesNormalized(configDir);
+}
+
 /** 读盘 + 规范化的共用实现（旧 probes 数组；文件缺失静默空，JSON 损坏返回可读错误）。 */
 async function readUserUsageProbesNormalized(configDir: string): Promise<{
 	probes: UserUsageProbe[];
@@ -366,7 +379,7 @@ export function normalizeProviderConfig(input: unknown): { config: UsageProbePro
 		if (typeof input.template !== "string") return { error: "template 必须是字符串" };
 		const id = input.template.trim();
 		const isBuiltin = Object.prototype.hasOwnProperty.call(USAGE_PROBE_CATEGORY_BY_TEMPLATE_ID, id);
-		if (!isBuiltin && id !== "general" && id !== "newapi") {
+		if (!isBuiltin && id !== "general" && id !== "newapi" && id !== "cookie") {
 			return { error: `未知模板：${id}` };
 		}
 		config.template = id;
@@ -387,6 +400,21 @@ export function normalizeProviderConfig(input: unknown): { config: UsageProbePro
 	if (accessToken) config.accessToken = accessToken;
 	const userId = optionalString(input.userId);
 	if (userId) config.userId = userId;
+
+	// Cookie 模板字段：cookie 值任意字符串；cookiePath 必须以 / 开头（与旧探针同规则）。
+	const cookie = optionalString(input.cookie);
+	if (cookie) config.cookie = cookie;
+	if (input.cookiePath !== undefined) {
+		const cookiePath = optionalString(input.cookiePath);
+		if (!cookiePath || !cookiePath.startsWith("/")) {
+			return { error: "cookiePath 必须以 / 开头的路径" };
+		}
+		config.cookiePath = cookiePath;
+	}
+	const valuePath = optionalString(input.valuePath);
+	if (valuePath) config.valuePath = valuePath;
+	const currencyPath = optionalString(input.currencyPath);
+	if (currencyPath) config.currencyPath = currencyPath;
 
 	if (input.timeoutSecs !== undefined) {
 		if (typeof input.timeoutSecs !== "number" || !Number.isInteger(input.timeoutSecs) || input.timeoutSecs < 1 || input.timeoutSecs > 300) {

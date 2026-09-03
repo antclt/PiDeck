@@ -1392,7 +1392,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { success: false, error: "Invalid provider name" };
 		}
 		const template = typeof input.template === "string" ? input.template.trim() : undefined;
-		if (template && template !== "general" && template !== "newapi") {
+		if (template && template !== "general" && template !== "newapi" && template !== "cookie") {
 			// 内置模板 id 也接受（识别命中后的「测试」按钮走这条路径）。
 			const knownBuiltin = USAGE_PROBE_CANDIDATES.some((c) => c.templateId === template);
 			if (!knownBuiltin) {
@@ -1407,6 +1407,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			...(typeof input.baseUrl === "string" ? { baseUrl: input.baseUrl } : {}),
 			...(typeof input.accessToken === "string" ? { accessToken: input.accessToken } : {}),
 			...(typeof input.userId === "string" ? { userId: input.userId } : {}),
+			// Cookie 模板字段：弹窗测试必须透传，否则构建候选时校验失败（必填三件套）。
+			...(typeof input.cookie === "string" ? { cookie: input.cookie } : {}),
+			...(typeof input.cookiePath === "string" ? { cookiePath: input.cookiePath } : {}),
+			...(typeof input.valuePath === "string" ? { valuePath: input.valuePath } : {}),
+			...(typeof input.currencyPath === "string" ? { currencyPath: input.currencyPath } : {}),
 			...(typeof input.timeoutSecs === "number" ? { timeoutSecs: input.timeoutSecs } : {}),
 		});
 		void appLogger.info("config", "Usage probe tested", {

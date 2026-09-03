@@ -44,6 +44,7 @@ const CATEGORY_LABEL_KEY: Record<UsageProbeTemplateCategory, TranslationKey> = {
 	subscription: "config.usageProbe.category.subscription",
 	general: "config.usageProbe.category.general",
 	newapi: "config.usageProbe.category.newapi",
+	cookie: "config.usageProbe.category.cookie",
 };
 
 /** 类别 → 说明文案 i18n key（内置/套餐/订阅无字段，说明即全部）。 */
@@ -53,12 +54,14 @@ const CATEGORY_HINT_KEY: Record<UsageProbeTemplateCategory, TranslationKey> = {
 	subscription: "config.usageProbe.subscriptionHint",
 	general: "config.usageProbe.generalHint",
 	newapi: "config.usageProbe.newapiHint",
+	cookie: "config.usageProbe.cookieHint",
 };
 
-/** 模板 id → 类别（内置 templateId 由主进程识别结果给出；声明式两个固定）。 */
+/** 模板 id → 类别（内置 templateId 由主进程识别结果给出；声明式三个固定）。 */
 const DECLARATIVE_TEMPLATE_CATEGORY: Record<string, UsageProbeTemplateCategory> = {
 	general: "general",
 	newapi: "newapi",
+	cookie: "cookie",
 };
 
 /** 「无模板」哨兵：供应商既不适用通用也不适用 New API 时，明确不选任何预设模板。 */
@@ -157,6 +160,10 @@ export function UsageProbeConfigDialog(props: {
 	const [baseUrl, setBaseUrl] = useState("");
 	const [accessToken, setAccessToken] = useState("");
 	const [userId, setUserId] = useState("");
+	const [cookie, setCookie] = useState("");
+	const [cookiePath, setCookiePath] = useState("");
+	const [valuePath, setValuePath] = useState("");
+	const [currencyPath, setCurrencyPath] = useState("");
 	const [showToken, setShowToken] = useState(false);
 	const [timeoutSecs, setTimeoutSecs] = useState(10);
 	const [intervalMinutes, setIntervalMinutes] = useState(5);
@@ -166,12 +173,15 @@ export function UsageProbeConfigDialog(props: {
 	const [testResult, setTestResult] = useState<ProviderUsageResult | null>(null);
 	const [saveState, setSaveState] = useState<ButtonState>("idle");
 	const [saveError, setSaveError] = useState("");
+	// 旧版 probes 数组命中提示（打开时检测；保存迁移后置空）
+	const [legacyNotice, setLegacyNotice] = useState("");
 
 	useEffect(() => {
 		if (!props.open || !props.provider) return;
 		let cancelled = false;
 		setLoaded(false);
 		setLoadErrors([]);
+		setLegacyNotice("");
 		// 主进程侧默认值：内置命中 → enabled 默认 true；未命中 → false（用户显式开启才保存）。
 		desktopApi.config
 			.getUsageProbes(props.provider, props.backend)
@@ -185,9 +195,36 @@ export function UsageProbeConfigDialog(props: {
 				setBaseUrl(config?.baseUrl ?? "");
 				setAccessToken(config?.accessToken ?? "");
 				setUserId(config?.userId ?? "");
+				setCookie(config?.cookie ?? "");
+				setCookiePath(config?.cookiePath ?? "");
+				setValuePath(config?.valuePath ?? "");
+				setCurrencyPath(config?.currencyPath ?? "");
 				setTimeoutSecs(config?.timeoutSecs ?? 10);
 				setIntervalMinutes(config?.intervalMinutes ?? 5);
 				setLoadErrors(result.errors);
+				// 旧版 probes 数组命中回显：无声明式模板时预选 Cookie 模板并回填字段，
+				// 让手写/历史配置可见可迁（保存即转为声明式配置）。
+				const legacy = result.legacyProbes ?? [];
+				if (legacy.length > 0 && !config?.template) {
+					const first = legacy[0];
+					const cookieHeader = first.request?.headers?.["Cookie"] ?? first.request?.headers?.cookie ?? "";
+					if (cookieHeader) setCookie(cookieHeader);
+					if (first.request?.path) setCookiePath(first.request.path);
+					// parse 是判别联合：currencyPath 只在 kind "balance" 分支可取。
+					const parse = first.parse;
+					if (parse?.kind === "balance") {
+						if (parse.valuePath) setValuePath(parse.valuePath);
+						if (parse.currencyPath) setCurrencyPath(parse.currencyPath);
+					}
+					const firstNamed = legacy.find((item) => item.name)?.name;
+					setLegacyNotice(
+						t("config.usageProbe.legacyDetected", {
+							count: String(legacy.length),
+							name: firstNamed ?? t("config.usageProbe.legacyUnnamed"),
+						}),
+					);
+					setTemplate("cookie");
+				}
 				setLoaded(true);
 			})
 			.catch((error) => {
@@ -220,7 +257,7 @@ export function UsageProbeConfigDialog(props: {
 	 * 保存时只写开关/超时/间隔，查询走内置候选 + 旧探针自动匹配。 */
 	const currentTemplate = useMemo((): { id: string; category: UsageProbeTemplateCategory } | null => {
 		if (template === NONE_TEMPLATE) return null;
-		if (template === "general" || template === "newapi") {
+		if (template === "general" || template === "newapi" || template === "cookie") {
 			return { id: template, category: DECLARATIVE_TEMPLATE_CATEGORY[template] };
 		}
 		if (recognized && recognized.templateId === template) {
@@ -251,6 +288,10 @@ export function UsageProbeConfigDialog(props: {
 				...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
 				...(accessToken.trim() ? { accessToken: accessToken.trim() } : {}),
 				...(userId.trim() ? { userId: userId.trim() } : {}),
+				...(cookie.trim() ? { cookie: cookie.trim() } : {}),
+				...(cookiePath.trim() ? { cookiePath: cookiePath.trim() } : {}),
+				...(valuePath.trim() ? { valuePath: valuePath.trim() } : {}),
+				...(currencyPath.trim() ? { currencyPath: currencyPath.trim() } : {}),
 				...(timeoutSecs !== 10 ? { timeoutSecs } : {}),
 			});
 			setTestResult(result);
@@ -295,12 +336,12 @@ export function UsageProbeConfigDialog(props: {
 			intervalMinutes,
 		};
 		// 内置识别命中 / 无模板：不写 template（自动路由）；声明式：写模板 id + 模板字段。
-		if (!isNone && current && (current.id === "general" || current.id === "newapi")) {
+		if (!isNone && current && (current.id === "general" || current.id === "newapi" || current.id === "cookie")) {
 			config.template = current.id;
 			if (current.id === "general") {
 				if (apiKey.trim()) config.apiKey = apiKey.trim();
 				if (baseUrl.trim()) config.baseUrl = baseUrl.trim();
-			} else {
+			} else if (current.id === "newapi") {
 				if (baseUrl.trim()) config.baseUrl = baseUrl.trim();
 				if (!accessToken.trim() || !userId.trim()) {
 					setSaveState("error");
@@ -313,6 +354,23 @@ export function UsageProbeConfigDialog(props: {
 				}
 				config.accessToken = accessToken.trim();
 				config.userId = userId.trim();
+			} else {
+				if (baseUrl.trim()) config.baseUrl = baseUrl.trim();
+				if (!cookie.trim() || !cookiePath.trim() || !valuePath.trim()) {
+					setSaveState("error");
+					setSaveError(
+						!cookie.trim()
+							? t("config.usageProbe.cookieRequired")
+							: !cookiePath.trim()
+								? t("config.usageProbe.cookiePathRequired")
+								: t("config.usageProbe.cookieValuePathRequired"),
+					);
+					return;
+				}
+				config.cookie = cookie.trim();
+				config.cookiePath = cookiePath.trim();
+				config.valuePath = valuePath.trim();
+				if (currencyPath.trim()) config.currencyPath = currencyPath.trim();
 			}
 		}
 		setSaveState("loading");
@@ -395,6 +453,14 @@ export function UsageProbeConfigDialog(props: {
 									{loadErrors.join("\n")}
 								</div>
 							)}
+							{legacyNotice && (
+								<div
+									className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-caption leading-relaxed text-sky-600 dark:text-sky-400"
+									data-testid="usage-probe-legacy-notice"
+								>
+									{legacyNotice}
+								</div>
+							)}
 
 							{/* 启用开关（cc-switch 同款：整行右侧 Switch） */}
 							<div className="flex items-center justify-between rounded-lg border border-border px-3.5 py-2.5">
@@ -439,6 +505,14 @@ export function UsageProbeConfigDialog(props: {
 										data-testid="usage-probe-template-newapi"
 									>
 										{t("config.usageProbe.category.newapi")}
+									</button>
+									<button
+										type="button"
+										className={pillClass(template === "cookie")}
+										onClick={() => setTemplate("cookie")}
+										data-testid="usage-probe-template-cookie"
+									>
+										{t("config.usageProbe.category.cookie")}
 									</button>
 								</div>
 								{template === NONE_TEMPLATE && (
@@ -525,6 +599,59 @@ export function UsageProbeConfigDialog(props: {
 								</section>
 							)}
 
+
+							{currentTemplate?.id === "cookie" && (
+								<section className="space-y-3">
+									<div className="grid grid-cols-2 gap-3">
+										<div className="space-y-1.5">
+											<div className="flex items-center justify-between">
+												<Label className="text-xs font-medium text-foreground">{t("config.usageProbe.cookieLabel")}</Label>
+												<button
+													type="button"
+													className="inline-flex items-center gap-1 text-micro text-text-tertiary transition-colors hover:text-foreground"
+													onClick={() => setShowToken((value) => !value)}
+												>
+													{showToken ? <EyeOff size={12} /> : <Eye size={12} />}
+													{showToken ? t("config.usageProbe.hideKey") : t("config.usageProbe.showKey")}
+												</button>
+											</div>
+											<Input
+												type={showToken ? "text" : "password"}
+												value={cookie}
+												onChange={(event) => setCookie(event.target.value)}
+												placeholder={t("config.usageProbe.cookiePlaceholder")}
+												className="h-9"
+											/>
+										</div>
+										<OptionalField
+											label={t("config.usageProbe.credentialBaseUrl")}
+											placeholder={t("config.usageProbe.credentialBaseUrlPlaceholder")}
+											value={baseUrl}
+											onChange={setBaseUrl}
+										/>
+									</div>
+									<OptionalField
+										label={t("config.usageProbe.cookiePathLabel")}
+										placeholder={t("config.usageProbe.cookiePathPlaceholder")}
+										value={cookiePath}
+										onChange={setCookiePath}
+									/>
+									<div className="grid grid-cols-2 gap-3">
+										<OptionalField
+											label={t("config.usageProbe.cookieValuePathLabel")}
+											placeholder={t("config.usageProbe.cookieValuePathPlaceholder")}
+											value={valuePath}
+											onChange={setValuePath}
+										/>
+										<OptionalField
+											label={t("config.usageProbe.cookieCurrencyPathLabel")}
+											placeholder={t("config.usageProbe.cookieCurrencyPathPlaceholder")}
+											value={currencyPath}
+											onChange={setCurrencyPath}
+										/>
+									</div>
+								</section>
+							)}
 							{/* 超时 / 自动查询间隔（cc-switch 同款两列） */}
 							<div className="grid grid-cols-2 gap-3">
 								<NumberField

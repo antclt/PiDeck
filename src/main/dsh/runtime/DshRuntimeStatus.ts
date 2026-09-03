@@ -35,10 +35,11 @@ export type DshRuntimeProbe =
 /**
  * 组合探测：外部已安装 runtime 优先，未安装时回退 app 内置 node_modules。
  *
- * 为什么保留内置回退：阶段 2 的依赖分区（把 @deepseek-ai 移入 devDependencies）
- * 是最后一步，在那之前存量安装包里仍然内置 runtime；有回退才能保证「装了新版
- * PiDeck 但还没下载 runtime」的用户 DSH 功能不消失。依赖分区完成后内置探测
- * 恒失败，行为自动退化为纯外部模式，无需再改这里。
+ * 为什么保留内置回退：存量安装包（依赖分区前发布）的 asar 内仍带 @deepseek-ai；
+ * 有回退才能保证「装了新版 PiDeck 但还没下载 runtime」的用户 DSH 功能不消失。
+ * 回退开关（allowBundledFallback）由装配层注入：打包态 true（存量包兼容）、
+ * dev 模式 false（项目 node_modules 是开发依赖，不视为随应用分发，强制外部安装）。
+ * 依赖分区后的新包内置探测恒失败，行为自动退化为纯外部模式。
  */
 export function probeDshRuntime(input: {
 	/** 外部 runtime（DshRuntimeManager.resolveActive）；undefined = 未安装。 */
@@ -110,8 +111,7 @@ export function dshRuntimeStateFromProbe(probe: DshRuntimeProbeResult): DshRunti
 
 /**
  * DSH runtime 状态服务：进程内缓存探测结果 + 变更订阅。
- * 阶段 1 状态在进程生命周期内不变（内置分发）；阶段 2 安装/卸载/更新后调 refresh()
- * 重探测并广播，渲染层经 dsh-runtime:status-changed 收到推送。
+ * 安装/卸载/更新后调 refresh() 重探测并广播，渲染层经 dsh-runtime:status-changed 收到推送。
  */
 export class DshRuntimeStatusService {
 	private current: DshRuntimeStatus | null = null;
@@ -122,6 +122,11 @@ export class DshRuntimeStatusService {
 	 * @param log 日志出口。
 	 * @param resolveManaged 外部 runtime 解析（阶段 2：DshRuntimeManager.resolveActive）。
 	 *   缺省 = 纯内置模式（阶段 1 形态，也是不装 runtime 时的自然退路）。
+	 * @param allowBundledFallback 是否允许回退 app 内置 node_modules 探测：
+	 *   打包态 true（依赖分区前的存量安装包内置可用）；dev 模式 false——项目
+	 *   node_modules 里的 @deepseek-ai 是开发依赖，不能当作「随应用分发」的已安装
+	 *   runtime，否则 UI 会显示内置且不可卸载（用户诉求：默认不安装、可安装可卸、
+	 *   安装后显示版本号）。
 	 */
 	constructor(
 		private readonly getAppPath: () => string,
@@ -129,6 +134,7 @@ export class DshRuntimeStatusService {
 		private readonly resolveManaged: () =>
 			| { nodeModules: string; runtimeVersion: string }
 			| undefined = () => undefined,
+		private readonly allowBundledFallback: () => boolean = () => true,
 	) {}
 
 	/** 当前状态（首次调用探测并缓存；IPC 查询走这里）。 */
@@ -187,7 +193,10 @@ export class DshRuntimeStatusService {
 	private probeOnceFresh(): DshRuntimeProbe {
 		return probeDshRuntime({
 			managed: this.resolveManaged(),
-			bundled: probeBundledDshRuntime(this.getAppPath()),
+			// dev 模式禁止内置回退：项目 node_modules 的包是开发依赖，不视为应用内置。
+			bundled: this.allowBundledFallback()
+				? probeBundledDshRuntime(this.getAppPath())
+				: { ok: false, error: "bundled fallback disabled" },
 		});
 	}
 

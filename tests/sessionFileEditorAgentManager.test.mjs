@@ -131,6 +131,15 @@ function loadAgentManager() {
       if (specifier === "../extensions/enabledExtensionResolver") {
         return { resolveEnabledExtensionPaths: () => null };
       }
+      // 共享扩展 resolver（issue #181）：本测试不涉及扩展加载，透传空实现即可
+      if (specifier === "../extensions/piProcessExtensionResolvers") {
+        return {
+          createPiProcessExtensionResolvers: () => ({
+            resolveBuiltInExtensionPaths: () => [],
+            resolveEnabledExtensionPaths: () => null,
+          }),
+        };
+      }
       if (specifier === "../wsl/WslPaths") {
         return { toWindowsHostPath: (path) => path, toWslLinuxPath: (path) => path };
       }

@@ -36,7 +36,7 @@ import type {
 } from "../../shared/types";
 import { parseSessionProcessEvents } from "../sessions/sessionProcessEvents";
 import { downgradeStaleRunning } from "../pi/derivedSubagents";
-import { resolveLaunchDefaultOptions } from "../sessions/launchDefaults";
+import { resolveLaunchDefaultOptions, isModelInModelsConfig } from "../sessions/launchDefaults";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
 
 function isDshModelDiscoveryInput(input: unknown): input is DshModelDiscoveryInput {
@@ -587,12 +587,29 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 						configManager.getSettingsConfig(),
 						configManager.getModelsConfig(),
 					]);
+					// 引导页/渲染层显式传入的模型（如欢迎页偏好）也可能指向已删除的供应商/模型：
+					// 校验其仍存在于 models.json，不存在则丢弃交给解析器兜底（lastUsed → 显式默认 → 第一个可用），
+					// 避免新会话带着幽灵模型启动（用户反馈「删了供应商/模型新建会话还是它」）。
+					if (input.backend !== "dsh" && model) {
+						if (
+							typeof model.provider !== "string" ||
+							typeof model.modelId !== "string" ||
+							!isModelInModelsConfig(modelsResult.parsed, {
+								provider: model.provider,
+								modelId: model.modelId,
+							})
+						) {
+							model = undefined;
+						}
+					}
 					// 缺省填充与引导页展示共用同一解析器（launchDefaults），
 					// 保证「预选的默认」与「创建时真正套用的默认」永远同源。
 					const defaults = resolveLaunchDefaultOptions({
 						backend: input.backend,
 						settings: settingsResult.parsed,
 						models: modelsResult.parsed,
+						// lastUsed 语义：用户最近一次实际发送所用模型优先于静态默认。
+						lastUsedModel: settingsStore.get().lastUsedModel,
 					});
 					if (input.backend !== "dsh" && !model) {
 						model = defaults.model;
@@ -636,6 +653,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					backend,
 					settings: settingsResult.parsed,
 					models: modelsResult.parsed,
+					// lastUsed 语义：引导页预选默认 = 用户最后一次实际使用的模型。
+					lastUsedModel: settingsStore.get().lastUsedModel,
 				});
 			} catch {
 				// 配置读取失败返回空默认：引导页退回「无预选」形态，不阻塞 UI；
@@ -1468,6 +1487,26 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				if (result.agentId) {
 					const tab = agentManager.list().find((candidate) => candidate.id === result.agentId);
 					if (tab) emitSessionRuntimeEvent(tab.id, ipcChannels.agentsState, tab);
+				}
+				// 消息被接受才记「最后一次使用」（选而未发不算）：写入 desktop settings.lastUsedModel，
+				// 新会话默认解析（launchDefaults）以它优先。fire-and-forget，不阻塞发送响应。
+				// DSH 会话跳过：其模型归属 host 设置，不在 models.json 中，记录会污染 pi 侧解析。
+				if (result.accepted) {
+					const record = sessionCatalog.get(input.sessionId);
+					if (record?.backend !== "dsh" && record?.model?.provider && record?.model?.modelId) {
+						void settingsStore
+							.update({
+								lastUsedModel: {
+									provider: record.model.provider,
+									modelId: record.model.modelId,
+								},
+							})
+							.catch((error) => {
+								void appLogger.warn("settings", "Failed to record lastUsedModel", {
+									error: error instanceof Error ? error.message : String(error),
+								});
+							});
+					}
 				}
 				void appLogger.info("session", "Session prompt IPC completed", {
 					sessionId: input.sessionId,
