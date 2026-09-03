@@ -756,6 +756,7 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionFiles.loading": "Loading files…",
   // Composer-side files section content
   "sessionFiles.openInDiffViewer": "Open in external diff viewer",
+  "sessionFiles.openFile": "Open file",
   "sessionFiles.count": "{count} files",
   "sessionFiles.saveAll": "Save all",
   // Composer-side goal strip (ported from dsh-web GoalBar): hidden when absent/complete

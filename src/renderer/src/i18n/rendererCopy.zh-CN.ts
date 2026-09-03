@@ -752,6 +752,7 @@ export const zhCN = {
   "sessionFiles.empty": "会话暂无文件修改",
   "sessionFiles.loading": "正在加载文件…",
   "sessionFiles.openInDiffViewer": "在外部 diff 查看器中打开",
+  "sessionFiles.openFile": "打开文件",
   "sessionFiles.count": "{count} 个文件",
   "sessionFiles.saveAll": "保存全部",
   // composer 上方 goal 条（dsh GoalBar）：无目标/已完成不渲染
