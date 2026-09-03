@@ -91,6 +91,36 @@ test("trim keeps a leading system summary card + last turns (compaction retentio
   assert.equal(input[start].text, "q2");
 });
 
+test("consecutive user messages merge into a single turn for trim", () => {
+  // 连发 3 条 user 无回复（同一发言权）→ 与后续 assistant 算 1 轮。
+  const input = [
+    { role: "user", text: "q1" },
+    { role: "user", text: "q2" },
+    { role: "user", text: "q3" },
+    { role: "assistant", text: "a1" },
+    { role: "user", text: "q4" },
+    { role: "assistant", text: "a2" },
+  ];
+  // 整段 2 轮：trim 到 1 轮只保留 q4 起；q1-q3+a1 是同一轮，整段丢弃。
+  const start = turnTrimStartIndex(input, 1);
+  assert.equal(start, 4);
+  assert.equal(input[start].text, "q4");
+  // 4 轮上限：全段保留（起点 0）
+  assert.equal(turnTrimStartIndex(input, 4), 0);
+});
+
+test("consecutive users with misc entries still merge (no split by system card)", () => {
+  const input = [
+    { role: "user", text: "q1" },
+    { role: "system", text: "diag card" },
+    { role: "user", text: "q2" },
+    { role: "assistant", text: "a1" },
+  ];
+  // 一张轮：system 卡不打断发言权，q1+q2 合并为一个 turn。
+  assert.equal(turnTrimStartIndex(input, 1), 0);
+  assert.equal(turnTrimStartIndex(input, 2), 0);
+});
+
 const translateTitle = (key, params = {}) => {
   if (key === "session.newTitle") return params.locale === "en" ? "New session" : "新会话";
   if (key === "session.historyTitle") return `${params.project} 历史会话`;

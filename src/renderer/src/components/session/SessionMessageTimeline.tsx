@@ -60,7 +60,6 @@ import {
   selectTimelineTurnWindow,
   shouldWindowTimelineTurns,
   TIMELINE_MOUNTED_TURN_LIMIT,
-  TIMELINE_SCROLLED_MAX_ITEMS,
   countAgentRunItems,
 } from "./timeline/turnRenderWindow";
 
@@ -419,9 +418,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   // 渲染窗口（2026-08 黑屏治理）：贴底只挂尾部 3 轮；上滚查看历史也裁剪
   // （controller.scrolledWindowTurns，初始 3 轮，接近顶部按 3 轮 cohort 自动扩大）——
   // 历史全量放开挂载是大会话渲染进程内存峰值/黑屏的来源。数据仍在 atoms；
-  // 但切换恢复期间必须暂时取消条目预算，先物化已保存锚点再恢复正常窗口治理。
-  // 跳转导航（刻度/消息定位）同理：条目预算按条目数封顶，轮数扩得再大也挂不出
-  // 预算外的旧消息，跳转会永远找不到目标行——挂起期间解除预算，回底/切会话恢复。
+  // 但切换恢复期间必须暂时全量物化已保存锚点（恢复只看已存内容，量可控）。
+  // 跳转导航（刻度/消息定位）同理：轮数窗口扩得再大也要能挂到目标行，
+  // 挂起期间解除轮数窗口，回底/切会话恢复。
   const followingForTurnWindow = controller.autoScroll;
   const isRestoringScrollAnchor = controller.isRestoringScrollAnchor;
   const turnWindowTurns = followingForTurnWindow
@@ -430,10 +429,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
   const displayRuns = useMemo(
     () => selectTimelineTurnWindow(
       reconciledRuns,
-      turnWindowTurns,
       followingForTurnWindow || isRestoringScrollAnchor || controller.jumpNavigationActive
-        ? undefined
-        : TIMELINE_SCROLLED_MAX_ITEMS,
+        ? Number.MAX_SAFE_INTEGER
+        : turnWindowTurns,
     ),
     [followingForTurnWindow, isRestoringScrollAnchor, controller.jumpNavigationActive, reconciledRuns, turnWindowTurns],
   );

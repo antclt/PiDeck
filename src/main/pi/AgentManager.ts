@@ -979,7 +979,7 @@ export class AgentManager {
 			SessionHistoryReader.maxTurnPageSize(),
 		);
 		const roles = list.map((m) => ({ role: m.role, byteLength: 0 }));
-		const start = findTurnPageStart(roles, pos, turnCount, Number.MAX_SAFE_INTEGER);
+		const start = findTurnPageStart(roles, pos, turnCount);
 		if (start >= pos) return null;
 		const page = list.slice(start, pos);
 		const oldest = page[0] ?? list[0];
@@ -1217,14 +1217,13 @@ export class AgentManager {
 		this.rebindInFlightMessages(agentId, nextMessages, messages);
 		this.messages.set(agentId, nextMessages);
 		// 显示窗口 = 尾部 9 轮（DOM 3 / atom 9 / main 12 模型；轮次起点对齐 user 消息，
-		// 与 disk 轮次分页同一约定；字节预算不参与窗口计算——单轮再大也整轮显示，折叠完整性优先）
+		// 与 disk 轮次分页同一约定；单轮再大也整轮显示，折叠完整性优先）
 		this.displayWindowStartByAgent.set(
 			agentId,
 			findTurnPageStart(
 				nextMessages.map((m) => ({ role: m.role, byteLength: 0 })),
 				nextMessages.length,
 				AgentManager.DISPLAY_WINDOW_TURNS,
-				Number.MAX_SAFE_INTEGER,
 			),
 		);
 		// 文件版本随本次加载快照：压缩/外部改写会改变 mtime:size，渲染层据此丢弃 disk 前缀
@@ -1452,6 +1451,13 @@ export class AgentManager {
 					? this.translate("session.historyTitle", { project: project.name })
 					: `${project.name} agent`);
 			tab.status = "idle";
+			// 打开即同步权威标题（2026-09 现场）：catalog 可能被扫描器弱回退（首条消息文本）
+			// 覆盖过（session_info 落在头/尾窗口盲区），而 input.title 优先会造成打开后
+			// 侧栏一直停在污染值；pi get_state 的 sessionName 是 JSONL 末尾 session_info 的
+			// 权威值，两者不一致时以 pi 为准回写 catalog，顺带覆盖 pi-tui 外部改名漏同步的场景。
+			if (piSessionName && piSessionName !== input.title && piSessionName !== tab.title) {
+				this.onTitleChanged?.(id, piSessionName);
+			}
 			// 历史一律从 JSONL 尾部读最近 N 轮，禁止 get_messages：
 			// pi 会把整段历史打成单行 JSON，主进程 JSON.parse 会冻住窗口按钮。
 			// Agent 可用只依赖 get_state；历史后台加载，加载期间新消息由 preserveMessagesAfter 保护。
@@ -5933,7 +5939,6 @@ export class AgentManager {
 				all.map((message) => ({ role: message.role, byteLength: 0 })),
 				all.length,
 				AgentManager.DISPLAY_WINDOW_TURNS,
-				Number.MAX_SAFE_INTEGER,
 			);
 			this.displayWindowComputedLengthByAgent.set(agentId, all.length);
 		}
@@ -6025,7 +6030,6 @@ export class AgentManager {
 			list.map((m) => ({ role: m.role, byteLength: 0 })),
 			list.length,
 			AgentManager.DISPLAY_WINDOW_TURNS,
-			Number.MAX_SAFE_INTEGER,
 		);
 		// 不超过 12 轮时也要校准尾部 9 轮窗口。通常 settled 前的 flush 已经做过这步，
 		// 这里保留独立调用时的兜底，避免新会话在 12 轮以内把全部消息留在 atom。
@@ -6063,7 +6067,6 @@ export class AgentManager {
 				next.map((m) => ({ role: m.role, byteLength: 0 })),
 				next.length,
 				AgentManager.DISPLAY_WINDOW_TURNS,
-				Number.MAX_SAFE_INTEGER,
 			),
 		);
 		this.markMessagesDirtyFrom(agentId, 0);

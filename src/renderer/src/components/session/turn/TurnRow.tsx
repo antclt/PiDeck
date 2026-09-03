@@ -288,7 +288,14 @@ export const TurnRow = memo(
 							onToggle={toggleSteps}
 						/>
 						<CollapsibleContent className="execution-summary-details">
-							{foldableItems.map((item) => {
+							{/* 折叠挂载策略（2026-09 主流实践，按轮状态分场景）：
+							    1. 非流式轮（agentRunning=false，含历史已结束轮）折叠时**完全卸载**内容——
+							       历史默认折叠，滚动经过几十轮只携带折叠头 + 最终回答，
+							       单轮 500 条工具调用时省下海量 DOM；展开时全量挂载。
+							    2. live 流式轮（agentRunning=true）折叠时仍保持挂载（display:none）——
+							       卸载会重置打字机动画状态，恢复展开时思考/工具重播。
+							    代价：Radix 高度渐变动画在历史轮退化为瞬时展开/收起。 */}
+							{(stepsVisible || props.agentRunning === true) && foldableItems.map((item) => {
 								let content: ReactNode;
 								let itemKey: string;
 								if (item.kind === "process-entry") {

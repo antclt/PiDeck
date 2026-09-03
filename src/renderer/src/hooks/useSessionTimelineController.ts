@@ -79,6 +79,10 @@ const BOTTOM_THRESHOLD = 16;
 const LEGACY_OWNER_KEY = "legacy";
 /** runtime 窗口会话「加载更多对话」的单页轮数（与主进程 DEFAULT_TURN_PAGE_SIZE 对齐） */
 const RUNTIME_HISTORY_TURN_PAGE_SIZE = 3;
+/** 历史会话（disk 路径）首开加载的轮数：与运行时窗口 DISPLAY_WINDOW_TURNS(9) 对齐，
+ *  首次上滚 9 轮内零延迟；翻页与 runtime 同用 3 轮 cohort。
+ *  2026-09 统一轮次协议：废除旧的「按消息条数(100)」页大小，页大小只以轮次计。 */
+const DISK_INITIAL_TURN_PAGE_SIZE = 9;
 /** 最新轮自动收起后，把本轮起始消息放在视口约 30% 高度处（中上方，不贴顶不贴底）。 */
 const SETTLED_TURN_VIEWPORT_ANCHOR_RATIO = 0.3;
 /** 收起目标距底 ≤ 该值（与引擎 STICK_TO_BOTTOM_OFFSET_PX=70 同语义）时放弃「安静收起”：
@@ -306,8 +310,6 @@ export type SessionTimelineController = {
 export function useSessionTimelineController(options: {
   sessionId?: string;
   messages?: ChatMessage[];
-  initialPageSize?: number;
-  pageSize?: number;
 }): SessionTimelineController {
   const ownerKey = options.sessionId ?? LEGACY_OWNER_KEY;
   const timelineRef = useRef<HTMLElement | null>(null);
@@ -478,7 +480,7 @@ export function useSessionTimelineController(options: {
     setLoadState({ sessionId, state: { status: "loading" } });
 
 		void desktopApi.sessions
-			.readRecordMessagePage(sessionId, undefined, options.initialPageSize ?? 100)
+			.readRecordMessagePage(sessionId, undefined, DISK_INITIAL_TURN_PAGE_SIZE)
 			.then((page: { messages: ChatMessage[]; total: number; nextBefore: number | null }) => {
 				if (latestLoadBySession.get(sessionId) !== sequence) return;
 				cacheMessages({
@@ -512,7 +514,7 @@ export function useSessionTimelineController(options: {
       const page = await desktopApi.sessions.readRecordMessagePage(
         sessionId,
         undefined,
-        options.initialPageSize ?? 100,
+        DISK_INITIAL_TURN_PAGE_SIZE,
       );
       if (latestLoadBySession.get(sessionId) !== sequence) return;
       cacheMessages({
@@ -535,7 +537,7 @@ export function useSessionTimelineController(options: {
       });
       throw error;
     }
-  }, [cacheMessages, options.initialPageSize, options.sessionId, setLoadState]);
+  }, [cacheMessages, options.sessionId, setLoadState]);
 
 	const diskPage = controllerEnabled && cachedEntry?.source === "disk"
 		? cachedEntry.page
@@ -596,10 +598,9 @@ export function useSessionTimelineController(options: {
   >(undefined);
   const jumpNonceRef = useRef(0);
   /**
-   * 跳转导航进行中：解除上滚窗口的条目预算（TIMELINE_SCROLLED_MAX_ITEMS）。
-   * 预算按条目数封顶渲染，轮数扩得再大也挂不出预算外的旧消息——跳转会因此
-   * 永远找不到目标行（表现即「点前面的刻度没反应」）。解除后扩窗才能真正
-   * 挂载目标；跳转完成后保持解除（避免预算恢复瞬间把刚定位到的内容裁掉），
+   * 跳转导航进行中：解除上滚窗口的轮数窗口（TIMELINE_MOUNTED_TURN_LIMIT 等）。
+   * 轮数窗口按 cohort 渐进扩大，跳转目标可能远在窗口之外（表现即「点前面的刻度没反应」）。
+   * 解除后扩窗才能真正挂载目标；跳转完成后保持解除（避免窗口恢复瞬间把刚定位到的内容裁掉），
    * 回底（窗口重置 3 轮）或切换会话时恢复。
    */
   const [jumpNavigationActive, setJumpNavigationActive] = useState(false);
@@ -931,7 +932,7 @@ export function useSessionTimelineController(options: {
 			const expectedRevision = cachedEntry?.revision ?? 0;
 			setIsLoadingMessagePage(true);
 			void desktopApi.sessions
-				.readRecordMessagePage(sessionId, before, options.pageSize ?? 100)
+				.readRecordMessagePage(sessionId, before, RUNTIME_HISTORY_TURN_PAGE_SIZE)
 				.then((page: { messages: ChatMessage[]; total: number; nextBefore: number | null }) => {
 					if (latestLoadBySession.get(sessionId) !== sequence) return;
 					if (prependMessagePage({ sessionId, before, expectedRevision, page })) {
@@ -991,7 +992,7 @@ export function useSessionTimelineController(options: {
 				});
 			return;
 		}
-	}, [cachedEntry?.revision, diskPage, expandWindowBatched, historyHasMore, isLoadingMessagePage, messages, options.pageSize, options.sessionId, ownerKey, prependHistoryPage, prependMessagePage, runtimeHistory]);
+	}, [cachedEntry?.revision, diskPage, expandWindowBatched, historyHasMore, isLoadingMessagePage, messages, options.sessionId, ownerKey, prependHistoryPage, prependMessagePage, runtimeHistory]);
 
 	// ── 回底清理临时历史（2026-11 轮次模型）──
 	// 贴底稳定 1.5s 后清掉翻过的历史前缀（atom 只留运行时窗口段），渲染层内存回到最小；
