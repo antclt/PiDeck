@@ -1884,6 +1884,8 @@ export const enUS: Record<TranslationKey, string> = {
   "config.rawHostReads": "Saved changes are picked up by pi (scope follows the official docs).",
   "config.emptyConfig": "No config yet",
   "config.noMatchingOptions": "No matching options",
+  "config.comboboxSearchPlaceholder": "Search…",
+  "config.comboboxNoMatchCommitHint": "No match — press Enter to use the typed value",
   "config.settings.selectProvider": "Select or enter provider",
   "config.settings.selectModel": "Select or enter model",
   "config.settings.selectModelFor": "Select or enter model for {provider}",

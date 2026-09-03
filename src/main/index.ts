@@ -259,7 +259,7 @@ import {
 	SessionCatalog,
 	canAttachRuntimeMetadata,
 } from "./sessions/SessionCatalog";
-import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
+import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import {
 	SessionRuntimeCoordinator,
 	type SessionRuntimeBinding,
@@ -3273,8 +3273,9 @@ app.whenReady().then(async () => {
 		// 会话级代理覆盖（DSH 降级方案，用户确认的取舍）：DSH 是单一共享 host、无 per-session
 		// 通道，只能聚合所有 DSH 会话（backend=dsh）的开关应用到共享 host 的 fork env。
 		// 冲突规则 off 优先于 on（直连是安全默认）；全 follow → 不动（保持 host 现有行为）。
-		// 注意：dsh host 内部是否读取这些标准代理 env 属 dsh 实现（@deepseek-ai/* 包内部），
-		// 此处仅 best-effort 注入，不保证生效。
+		// 生效机制：buildHostProxyEnvPatch 在 on 时会额外注入 NODE_USE_ENV_PROXY=1，让 host
+		// 内部 globalThis.fetch（undici）真正按注入的 HTTP_PROXY/NO_PROXY 走代理（Node 22.21+
+		// 行为，Electron 43 内置 Node 24.18.1 已实测）；off 时剥离该开关。
 		() => {
 			const settings = settingsStore.get();
 			// DSH 共享 host 的代理需按供应商过滤逐会话计算有效模式，再聚合（与 pi 会话链路一致的 provider 感知）。
@@ -3291,9 +3292,20 @@ app.whenReady().then(async () => {
 					return effectiveMode === "follow" ? undefined : { mode: effectiveMode } as import("../shared/types/session").SessionProxyOverride;
 				});
 			const mode = aggregateDshProxyMode(dshOverrides);
-			return buildHostProxyEnvPatch(mode, {
-				url: settings.piProxyUrl,
-				bypass: settings.piProxyBypass,
+			// 全局开关兜底：所有 DSH 会话都 follow（无显式覆盖、无名单命中）时，仍应让 host
+			// 跟随全局 pi 代理开关——否则用户在设置页只开全局开关，DSH 永远直连（与 pi 会话
+			// 「名单空时跟随全局」语义不一致）。名单非空时不做兜底（见 resolveDshHostProxyMode）。
+			const settingsSnapshot = settingsStore.get();
+			const hasProxyList =
+				(settingsSnapshot.piProxyModels?.length ?? 0) > 0 ||
+				(settingsSnapshot.piProxyProviders?.length ?? 0) > 0;
+			const finalMode = resolveDshHostProxyMode(mode, {
+				piProxyEnabled: settingsSnapshot.piProxyEnabled,
+				hasList: hasProxyList,
+			});
+			return buildHostProxyEnvPatch(finalMode, {
+				url: settingsSnapshot.piProxyUrl,
+				bypass: settingsSnapshot.piProxyBypass,
 			});
 		},
 		// 外部 runtime 根目录（未安装时返回 undefined，回退 app 内置 node_modules）。

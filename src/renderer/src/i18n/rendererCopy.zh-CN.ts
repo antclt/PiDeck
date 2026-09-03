@@ -1870,6 +1870,8 @@ export const zhCN = {
   "config.rawHostReads": "保存后由 pi 读取（改动范围以官方文档为准）。",
   "config.emptyConfig": "暂无配置",
   "config.noMatchingOptions": "无匹配选项",
+  "config.comboboxSearchPlaceholder": "搜索…",
+  "config.comboboxNoMatchCommitHint": "无匹配选项，按 Enter 使用输入值",
   "config.settings.selectProvider": "选择或输入服务商",
   "config.settings.selectModel": "选择或输入模型",
   "config.settings.selectModelFor": "为 {provider} 选择或输入模型",
