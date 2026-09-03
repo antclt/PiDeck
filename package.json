@@ -54,7 +54,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
-    "build": "npm run build:packages && npm run generate:pi-ai-catalog && npm run runtime:pack:lite && npm run runtime:check && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
+    "build": "npm run build:packages && npm run generate:pi-ai-catalog && npm run runtime:pack && npm run runtime:check && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
     "build:packages": "node scripts/build-local-packages.js",
     "build:fast": "npm run generate:pi-ai-catalog && electron-vite build",
     "runtime:pack": "node scripts/pack-dsh-runtime.mjs",
