@@ -85,8 +85,10 @@ test("sidebar child titles use the shared width clamp and hover-scroll component
   assert.match(dshSearchResults, /import \{ TitleScrollText \} from "\.\/TitleScrollText"/);
   assert.match(dshSearchResults, /text=\{record\.title\}/);
   assert.doesNotMatch(titleScrollText, /title=\{overflowing \? text : undefined\}/);
-  assert.match(titleScrollText, /TITLE_SCROLL_PIXELS_PER_SECOND = 20/);
-  assert.match(titleScrollText, /TITLE_SCROLL_MIN_DURATION_MS = 1_800/);
+  // 速率规则：用户反馈 20px/s 过快后调慢为 12px/s（短标题下限放宽到 2.8s 避免“瞬移”，长标题上限放到 30s 保持匀速）
+  assert.match(titleScrollText, /TITLE_SCROLL_PIXELS_PER_SECOND = 12/);
+  assert.match(titleScrollText, /TITLE_SCROLL_MIN_DURATION_MS = 2_800/);
+  assert.match(titleScrollText, /TITLE_SCROLL_MAX_DURATION_MS = 30_000/);
   assert.match(projectTree, /truncate font-medium/);
 });
 
