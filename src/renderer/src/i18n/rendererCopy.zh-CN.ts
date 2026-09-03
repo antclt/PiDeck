@@ -911,6 +911,8 @@ export const zhCN = {
   "session.splitGroup.label": "分屏组",
   "session.splitGroup.expand": "展开分屏组",
   "session.splitGroup.collapse": "收起分屏组",
+  "session.projectGroup.expand": "展开项目分组",
+  "session.projectGroup.collapse": "收起项目分组",
   "session.splitGroup.rename": "重命名分屏组",
   "session.splitGroup.renamePlaceholder": "输入分屏组名称",
   "session.splitGroup.color": "选择分屏组颜色",

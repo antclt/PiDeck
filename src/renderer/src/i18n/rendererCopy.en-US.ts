@@ -918,6 +918,8 @@ export const enUS: Record<TranslationKey, string> = {
   "session.splitGroup.label": "Split group",
   "session.splitGroup.expand": "Expand split group",
   "session.splitGroup.collapse": "Collapse split group",
+  "session.projectGroup.expand": "Expand project group",
+  "session.projectGroup.collapse": "Collapse project group",
   "session.splitGroup.rename": "Rename split group",
   "session.splitGroup.renamePlaceholder": "Enter group name",
   "session.splitGroup.color": "Choose group color",
