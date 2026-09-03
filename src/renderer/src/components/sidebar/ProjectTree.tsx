@@ -9,6 +9,7 @@ import { SessionTree } from "./SessionTree";
 import { WorktreeTree } from "./WorktreeTree";
 import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
+import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
 import { Button } from "../ui-shadcn/button";
 import {
 	DropdownMenu,
@@ -33,16 +34,6 @@ const treeRowClass =
  * 必须点击激活才能看到文字；压缩+截断只损失尾部文字，不影响辨认。 */
 const dimmedActionsClass =
 	"pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100";
-
-function isChatProject(project: Project) {
-  return project.kind === "chat";
-}
-
-function displayProjectDirectoryName(project: Project) {
-  if (isChatProject(project)) return "Chat";
-  const normalizedPath = project.path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalizedPath.split("/").pop() || project.name || project.path;
-}
 
 function matchesProject(project: Project, search: string, controller: SidebarController) {
   if (!search) return true;

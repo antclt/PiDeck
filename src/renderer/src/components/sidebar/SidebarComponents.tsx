@@ -613,6 +613,8 @@ export function ProjectContextMenu(props: {
 	onRefreshProject: () => void;
 	onCopyProjectPath: () => void;
 	onRemoveProject: () => void;
+	/** 重命名项目显示名（仅改 label，不动磁盘目录）；Chat / worktree 子项目不展示。 */
+	onRenameProject: () => void;
 	/** worktree 子项目删除必须走 Git worktree 清理流程，不能只移除目录记录。 */
 	onRemoveWorktree?: () => void;
 }) {
@@ -647,6 +649,13 @@ export function ProjectContextMenu(props: {
 			<DropdownMenuSeparator />
 			{/* 项目管理：会话/资源/过滤/工作区/刷新集中一组，删除式操作不混入 */}
 			<DropdownMenuLabel>{t("menu.group.manage")}</DropdownMenuLabel>
+			{/* 重命名仅对普通顶级项目开放：聊天项目名固定、worktree 子项目 name 承载 git 分支名 */}
+			{!props.menu.project.kind && !props.menu.project.worktreeParentId && (
+				<DropdownMenuItem onSelect={props.onRenameProject}>
+					<Pencil className="size-3.5" aria-hidden="true" />
+					{t("menu.renameProject")}
+				</DropdownMenuItem>
+			)}
 			<DropdownMenuItem onSelect={props.onManageSessions}>
 				<List className="size-3.5" aria-hidden="true" />
 				{t("menu.manageSessions")}

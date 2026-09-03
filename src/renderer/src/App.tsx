@@ -550,6 +550,8 @@ export function App() {
       return { ...agent, title: updated.title };
     },
     renameSession: (id, name) => api.sessions.updateRecord(id, { title: name }),
+    renameProject: (id, name) => api.projects.rename(id, name),
+    applyRenamedProjects: setProjects,
     showToast,
     refreshProjectSessions,
     closeAgentMenu: () => undefined,
@@ -3050,6 +3052,7 @@ export function App() {
         showToast(t("common.copied"));
       },
       remove: removeSidebarProject,
+      rename: rename.openProjectRename,
       changeChatPath,
     },
     sessions: {
@@ -3938,7 +3941,7 @@ export function App() {
       </Suspense>
     )}
     <RenameModals
-      agentRename={rename.renameModalsProps.agentRename}
+      rename={rename.renameModalsProps.rename}
       fileRename={renamingFile ? {
         path: renamingFile.path,
         name: renamingFile.name,

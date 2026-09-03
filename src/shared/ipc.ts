@@ -3,6 +3,8 @@ export const ipcChannels = {
 	projectsAdd: "projects:add",
 	projectsRemove: "projects:remove",
 	projectsReorder: "projects:reorder",
+	// 重命名项目显示名（仅改侧栏/标题 label，不改磁盘目录；聊天项目与 worktree 子项目拒绝）
+	projectsRename: "projects:rename",
 	projectsChanged: "projects:changed",
 	projectResourcesList: "project-resources:list",
 	projectResourcesCreateSkill: "project-resources:create-skill",

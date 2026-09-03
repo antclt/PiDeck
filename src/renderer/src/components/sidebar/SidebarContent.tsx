@@ -46,6 +46,8 @@ export type SidebarActions = {
     manageResources: (project: Project) => void;
     toggleWorktree: (project: Project) => Promise<void>;
     copyPath: (project: Project) => Promise<void>;
+    /** 重命名项目显示名（仅改 label，不动磁盘目录）；打开重命名对话框。 */
+    rename: (project: Project) => void;
     remove: (project: Project) => Promise<void>;
     changeChatPath?: (project: Project) => Promise<void>;
   };
@@ -439,6 +441,7 @@ export function SidebarContent(props: SidebarContentProps) {
           onToggleWorktree={() => { void actions.projects.toggleWorktree(menuProject); controller.closeMenu(); }}
           onRefreshProject={() => { void actions.projects.refresh(menuProject.id); controller.closeMenu(); }}
           onCopyProjectPath={() => { void actions.projects.copyPath(menuProject); controller.closeMenu(); }}
+          onRenameProject={() => { actions.projects.rename(menuProject); controller.closeMenu(); }}
           onRemoveWorktree={menuProjectWorktreeParent ? () => {
             void actions.worktrees.remove(menuProjectWorktreeParent.id, {
               path: menuProject.path,

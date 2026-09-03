@@ -361,9 +361,13 @@ test("narrow project tree keeps root names from losing avoidable width", () => {
 
 test("ProjectTree shows the project directory name like the dev reference", () => {
   const projectTree = readFileSync("src/renderer/src/components/sidebar/ProjectTree.tsx", "utf8");
-  assert.match(projectTree, /function displayProjectDirectoryName\(project: Project\)/);
-  assert.match(projectTree, /project\.path\.replace\(/);
+  const rendererUtils = readFileSync("src/renderer/src/rendererUtils.ts", "utf8");
+  // 显示名解析已收敛到 rendererUtils 单一来源（含重命名别名逻辑，见 projectDisplayName.test.mjs）；
+  // ProjectTree 直接复用，保证侧栏/面包屑/搜索处处一致。
+  assert.match(projectTree, /import \{ displayProjectDirectoryName, isChatProject \} from "\.\.\/\.\.\/rendererUtils"/);
   assert.match(projectTree, /const projectDirectoryName = displayProjectDirectoryName\(project\)/);
+  assert.match(rendererUtils, /export function displayProjectDirectoryName\(project: Project\)/);
+  assert.match(rendererUtils, /project\.path\.replace\(/);
   // 悬浮路径气泡已移除（仅能展示不能复制，且 bug 多）；项目行直接渲染目录名。
   assert.doesNotMatch(projectTree, /<PathTooltip/);
   assert.doesNotMatch(projectTree, /PathTooltip/);

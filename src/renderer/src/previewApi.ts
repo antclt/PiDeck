@@ -323,6 +323,7 @@ export function createPreviewApi(): PiDesktopApi {
 				projects.sort((a, b) => projectIds.indexOf(a.id) - projectIds.indexOf(b.id));
 				return projects;
 			},
+			rename: async () => projects,
 			onChanged: noop,
 			listRoot: async () => projects,
 			listWorktreeChildren: async () => [],

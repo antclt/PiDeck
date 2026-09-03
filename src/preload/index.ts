@@ -184,6 +184,9 @@ const api = {
 				ipcChannels.projectsReorder,
 				projectIds,
 			) as Promise<Project[]>,
+		// 重命名项目显示名（仅改 label，不动磁盘目录）；返回更新后的项目列表
+		rename: (id: string, name: string) =>
+			ipcRenderer.invoke(ipcChannels.projectsRename, id, name) as Promise<Project[]>,
 		onChanged: (callback: (projects: Project[]) => void) =>
 			subscribe(ipcChannels.projectsChanged, callback),
 		// 仅返回顶级项目（不含 worktree 子项目）
