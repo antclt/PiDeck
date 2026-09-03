@@ -697,8 +697,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	} | null>(null);
 
 	const loadConfig = useCallback(
-		async (target: ConfigTab, options?: { force?: boolean }) => {
-			setLoading(true);
+		async (target: ConfigTab, options?: { force?: boolean; silent?: boolean }) => {
+			// silent：测试连接成功后回读磁盘用——不置 loading，避免 ModelsTab 在
+			// `!loading && ...` 条件下被卸载重建、滚动容器内容塔缩后 scrollTop 归零。
+			if (!options?.silent) setLoading(true);
 			setError(null);
 			setConfigDiagnostic(null);
 			try {
@@ -1209,8 +1211,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			setTestResult({ providerName, ...result });
 			if (result.success) {
 				// 测试即保存：清除脏标记并回读磁盘，保持表单与磁盘、baseline 一致。
+				// silent 回读：不卸载 ModelsTab（loading 会塔缩滚动容器、滚动位置丢失），
+				// 用户停留在测试结果卡片处。
 				clearDirty("config:models");
-				await loadConfig("models", { force: true });
+				await loadConfig("models", { force: true, silent: true });
 				onSaved();
 			}
 		} catch (e) {
@@ -1292,7 +1296,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			const spec = await api.projects
 				.getModelSpec(providerName, model.id, model.name)
 				.catch(() => null);
-			const template = mergeAdaptiveModelTemplate(listing, spec);
+			const template = mergeAdaptiveModelTemplate(listing, spec, model.id);
 			const nextModel = applyAdaptiveTemplateReset(model, template);
 			const models = [...provider.models];
 			models[index] = nextModel;
