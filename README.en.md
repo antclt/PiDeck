@@ -79,7 +79,7 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.3** (2026-09-02)
+> **Latest: v0.7.3** (2026-09-03)
 
 ### v0.7.3 Release Highlights
 - 🚀 **Chat session archives**

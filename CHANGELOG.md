@@ -1,4 +1,4 @@
-## v0.7.3 - 2026-09-02
+## v0.7.3 - 2026-09-03
 
 ### 🚀 New Features
 - **Chat session archives** — Sessions can be archived out of the workspace, with bulk delete on the archive screen so old chats stop crowding the sidebar.
@@ -17,6 +17,12 @@
 - **On-demand fast packing** — `dist:fast` can target portable / zip / nsis so local installers are quicker to verify.
 - **DSH runtime version detection & worktree fade-out** — Built-in DSH runtimes show the detected version; deleting a worktree fades out instead of vanishing abruptly.
 - **Model catalog updater** — The settings page can pull the latest model catalog from GitHub to override the bundled copy, with one-click restore and graceful fallback; probes skip auto-attaching a Bearer when a custom auth header is configured.
+- **Turn-based memory management for long sessions** — History browsing now uses a unified turn protocol: turns are counted per speaking turn (consecutive user messages merge into one), with disk pagination prefetch, execution details unloaded when a historical turn folds, and the timeline compact-summary card retired; context usage is no longer capped at 100%, matching the pi CLI semantics. Long sessions browse more smoothly.
+- **Session tabs regrouped by project** — New sessions land at the tail of their project's group (instead of the global end), with separators between project groups.
+- **Project display-name rename** — Projects can have a display name (label only, disk directory untouched) for a more readable sidebar.
+- **Fork session marker** — Forked sessions carry a `(fork)` marker physically written into the session name, so it no longer reappears after rename/delete; the old session is confirmed to have no leftover runtime state after a fork.
+- **Open-file action in the session files list** — The session's modified-files list gains an “open file” action entry.
+- **Explicit proxy-policy override for model fetching & connection tests** — Model listing and connection tests can explicitly pick a proxy policy instead of being bound to the global config.
 
 ### 🐛 Fixes
 - **Refresh stale projects** — Refresh handles vanished projects, and file-delete failures surface instead of failing silently.
@@ -44,6 +50,13 @@
 - **No more flashing CMD windows** — Pi child processes are spawned hidden on Windows, so launching a session no longer pops a console window.
 - **Usage probe failures are diagnosable** — Every failed attempt (URL/method/status/redacted response summary) is recorded and shown when all probes miss; New API-style management endpoints no longer get a redundant `/v1` attempt, and failures are grouped into actionable hints.
 - **Open-file inside Git diff fixed** — Clicking the inline “open file” button on a diff line no longer does nothing after the diff updates; it opens the snapshot path in the scoped preview.
+- **Auto session titles no longer hard-truncated** — Title generation avoids cutting words in the middle; weak fallback no longer overwrites a real existing title.
+- **Vision models mis-flagged as text-only fixed** — Some vision models are no longer treated as text-only; the page scroll position no longer jumps after a connection test.
+- **Git summary generation honors the model proxy list** — The commit-summary subprocess follows the model proxy list and rebuilds when proxy config changes.
+- **Git history graph excludes rewind checkpoints** — Checkpoints no longer show up as commits; image-generation mode hides security-level and context controls.
+- **DSH session delete moves to recycle bin** — Deleting a DSH session also moves its `~/.dsh/sessions` directory into the system recycle bin.
+- **Project-row action overlap fixed** — Hover action buttons no longer cover the project name at medium sidebar widths.
+- **Timeline state kept across session switches** — Execution expand/collapse state survives switching sessions; interrupted turns fold automatically when reading history, and a new turn unfolds on start.
 
 ### 🙏 Thanks
 
