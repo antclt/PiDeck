@@ -23,9 +23,9 @@ const selectedRowClass = "active bg-bg-active text-foreground";
 /** 行右侧「更多操作（三个点）」按钮：absolute 浮层，不参与布局（不挤压标题文字），
  * 默认隐藏（pointer-events 一并关闭防误触），行 hover / 行内聚焦时显现——
  * 与 WorktreeTree 的 workspace-tree-actions 同一套虚化模式。
- * 窄侧栏（<256px）时按钮会盖住标题：conversation-body 上
- * @max-[255px]:group-hover/row:pr-7 在 hover 时压出 28px 留白（一个按钮宽），
- * 标题截断让位但保持可见（淡出到透明会让标题不可读，须点击激活才能看到，已弃用）。 */
+ * 按钮浮层会盖住标题：conversation-body 上 group-hover/row:pr-7 在 hover 时压出
+ * 28px 留白（一个按钮宽），标题截断让位但保持可见——所有宽度统一让位
+ * （淡出到透明会让标题不可读，须点击激活才能看到，已弃用）。 */
 const rowMoreActionsClass =
 	"row-more-actions pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100";
 

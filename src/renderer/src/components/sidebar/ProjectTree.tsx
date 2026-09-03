@@ -28,10 +28,13 @@ const treeRowClass =
 
 /** 项目行右侧操作按钮的虚化模式：absolute 浮层，不参与布局（不挤压项目名文字），
  * 默认隐藏（pointer-events 一并关闭防误触），行 hover / 行内聚焦时显现。
- * 窄侧栏（<256px）时按钮会盖住项目名：conversation-body 上
- * @max-[255px]:group-hover:pr-29 在 hover 时压出 116px 右侧留白（4 个按钮宽），
- * 文本截断让位但保持可见——2027-01 用户反馈：整行淡出到透明会导致标题不可读，
- * 必须点击激活才能看到文字；压缩+截断只损失尾部文字，不影响辨认。 */
+ * 按钮浮层会盖住项目名：conversation-body 上 group-hover:pr-16 在 hover 时压出
+ * 右侧留白——容器 right-1(4px) + pr-1(4px) + 两个 size-6 按钮(52px) + 4px 余量 = 64px，
+ * 文本截断让位但保持可见；启用来源筛选（sourceFilter）时共 3 个按钮，让位加宽到 88px。
+ * 与 SessionTree/WorktreeTree 同一策略：所有宽度统一让位，不能只依赖窄侧栏断点
+ * （中等宽度下长项目名同样会延伸到按钮下方，表现为 + / ⋯ 叠在项目名文字上）。
+ * 2027-01 用户反馈：整行淡出到透明会导致标题不可读，必须点击激活才能看到文字；
+ * 压缩+截断只损失尾部文字，不影响辨认。 */
 const dimmedActionsClass =
 	"pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100";
 
@@ -129,7 +132,12 @@ export function ProjectTree(props: {
             <span className="grid size-5 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
               {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
             </span>
-            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] @max-[255px]:group-hover:pr-29 @max-[255px]:group-focus-within:pr-29">
+            <div className={cn(
+              "conversation-body min-w-0 flex-1 transition-[padding-right] group-hover:pr-16 group-focus-within:pr-16",
+              // 筛选按钮与 + / ⋯ 共 3 个按钮时让位 88px（24×3 + 8px 间隙 + 外层定位），
+              // 否则文本会短到筛按钮下方。twMerge 保证后者胜出（见 sidebarNarrowRowActions 契约测试）。
+              sourceFilter !== null && "group-hover:pr-[88px] group-focus-within:pr-[88px]",
+            )}>
               <div className="conversation-title flex min-w-0 items-center">
                 {/* 项目名 + 运行态点合成一个截断单元：点紧跟文本而不是被 space-between
                     推到最右——旧布局下点在行尾，鼠标移入时会被右侧浮层按钮盖住。 */}
