@@ -379,10 +379,10 @@ test("offline Session Viewer reads complete historical turns only", async () => 
 	}
 });
 
-test("offline Session Viewer caps a large-text turn page by bytes without splitting the newest turn", async () => {
+test("offline Session Viewer keeps whole turns under the unified turn protocol", async () => {
 	const { AgentManager } = loadAgentManagerModule();
 	const manager = new AgentManager(() => undefined, () => null, { get: () => ({}) }, {});
-	const directory = await mkdtemp(join(tmpdir(), "pideck-history-page-bytes-"));
+	const directory = await mkdtemp(join(tmpdir(), "pideck-history-page-turns-"));
 	const sessionPath = join(directory, "large-text.jsonl");
 	const lines = [JSON.stringify({ id: "session", type: "session" })];
 	let parentId = "session";
@@ -407,9 +407,11 @@ test("offline Session Viewer caps a large-text turn page by bytes without splitt
 	try {
 		await writeFile(sessionPath, `${lines.join("\n")}\n`, "utf8");
 		const page = await manager.readSessionDisplayTurnPage(sessionPath, "viewer", undefined, 100);
+		// 2026-09 统一轮次协议：字节预算已删除——单轮再大也整轮保留，
+		// 页大小只以轮数计（夹紧到 MAX_TURN_PAGE_SIZE）；大文本轮不能被切成半页。
 		assert.equal(page.messages.at(-1).text.length, 100_000);
-		assert.equal(page.messages.length, 4, "a byte budget should drop older complete turns without splitting the newest turns");
-		assert.equal(page.nextBefore, 16);
+		assert.equal(page.messages.length, 20, "a large turn must be kept whole, never byte-split");
+		assert.equal(page.nextBefore, null, "10 turns fit the page; no older history remains");
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}

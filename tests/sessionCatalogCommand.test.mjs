@@ -56,6 +56,16 @@ function createHookForRuntimeTest() {
           } : undefined,
         };
       }
+      if (request === "../utils/catalogLoadWatchdog") {
+        // 看门狗兜底：测试不驱动定时器，只提供空实现（schedule 静默、cancel 幂等）。
+        return {
+          createKeyedWatchdog: () => ({
+            schedule: () => 0,
+            cancel: () => undefined,
+            cancelAll: () => undefined,
+          }),
+        };
+      }
       throw new Error(`Unexpected runtime import: ${request}`);
     },
     setTimeout,
