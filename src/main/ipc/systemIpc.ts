@@ -24,6 +24,8 @@ import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
+import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
+import type { ConfigProxyMode } from "../../shared/types/fetchedModel";
 import type { SkillManager } from "../skills/SkillManager";
 import { fetchModelList, getCachedModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/appUpdateCheck";
@@ -190,6 +192,11 @@ export type SystemIpcDeps = {
 		recordAppUpdateResult: (info: { latestVersion: string; hasUpdate: boolean }) => void;
 	};
 };
+
+// 渲染层传入的代理模式收窄：非白名单一律回退 follow（跟随全局），保证 IPC 边界不信任任意字符串。
+function asConfigProxyMode(raw: unknown): ConfigProxyMode {
+	return raw === "pi" || raw === "desktop" || raw === "off" ? raw : "follow";
+}
 
 export function registerSystemIpc(deps: SystemIpcDeps): void {
 	const {
@@ -1271,9 +1278,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configFetchModels, async (
 		_event,
-		payload: { baseUrl: string; apiKey: string; apiType?: string; headers?: Record<string, string> },
+		payload: { baseUrl: string; apiKey: string; apiType?: string; headers?: Record<string, string>; proxyMode?: string },
 	) => {
-		const result = await configManager.fetchProviderModels(payload.baseUrl, payload.apiKey, payload.apiType, payload.headers);
+		// proxyMode 白名单收窄（渲染层不可信），再解析成主进程代理策略。
+		const proxyTarget = resolveConfigProxyTarget(settingsStore.get(), asConfigProxyMode(payload?.proxyMode));
+		const result = await configManager.fetchProviderModels(payload.baseUrl, payload.apiKey, payload.apiType, payload.headers, proxyTarget);
 		void appLogger.info("config", "Provider models fetched", {
 			baseUrl: payload.baseUrl,
 			apiType: payload.apiType,
@@ -1283,7 +1292,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configTestProvider, async (
 		_event,
-		payload: { providerName: string; modelId: string; models: PiModelsFile },
+		payload: { providerName: string; modelId: string; models: PiModelsFile; proxyMode?: string },
 	) => {
 		// 1) 边界校验：provider/model 名必须是有限的非空字符串；models 交由 saveModelsConfig 做结构校验。
 		const providerName = typeof payload?.providerName === "string" ? payload.providerName.trim() : "";
@@ -1304,7 +1313,14 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
 
 		// 3) 用真实 pi 做一次最小调用（走 pi 的 provider 解析 + SDK，与真实会话同路径）。
-		const result = await probePiModel(piLocator, settingsStore, providerName, modelId);
+		//    测试连接显式选了代理时，把它覆盖到探针进程的代理环境（pi 侧只认 piProxy* 配置）。
+		const result = await probePiModel(
+			piLocator,
+			settingsStore,
+			providerName,
+			modelId,
+			resolveConfigProxyTarget(settingsStore.get(), asConfigProxyMode(payload?.proxyMode)),
+		);
 		void appLogger.info("config", "Provider connection tested via pi", {
 			providerName,
 			modelId,

@@ -36,6 +36,14 @@ function compile(execFileImpl = () => {}) {
 		// execFile 可注入：parsePiProbeOutput 用不到，probePiModel 靠它捕获实参/模拟成败。
 		// type-only import（PiLocator/SettingsStore/shared）经 transpile 擦除。
 		if (specifier === "node:child_process") return { execFile: execFileImpl };
+		// PiModelProber 现在有运行时依赖 applyConfigProxyTarget（proxyTarget 未传时原样返回，
+		// 与真实实现的 follow 语义一致），提供等价 mock 即可。
+		if (specifier === "../sessions/sessionProxyPolicy") {
+			return {
+				applyConfigProxyTarget: (settings, target) =>
+					target === undefined ? settings : settings,
+			};
+		}
 		return {};
 	};
 	vm.runInNewContext(

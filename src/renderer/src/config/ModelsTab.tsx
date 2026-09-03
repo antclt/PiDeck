@@ -28,12 +28,32 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui-shadcn/popover";
 import { showNotice } from "../utils/notice";
 import { applyModelPatches, computeModelSpecPatches } from "../utils/modelSpecAutoFill";
-import type { FetchedModel } from "../../../shared/types/fetchedModel";
+import type { FetchedModel, ConfigProxyMode } from "../../../shared/types/fetchedModel";
 import { ProviderMigrationButton } from "./ProviderMigrationButton";
 import { ProviderUsageInline } from "../components/app/ProviderUsageInline";
 import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { ProviderUsageDetails } from "../components/app/ProviderUsageDetails";
 import { isValidProviderName } from "../../../shared/providerName";
+
+/**
+ * 代理下拉右侧的提示文案：直接显示将流向的代理 URL（未配置则提示），
+ * 让用户对「测试/拉取走了哪个代理」有确定感，而不是黑盒。
+ */
+function proxyModeHint(
+	mode: ConfigProxyMode,
+	settings: { piProxyUrl: string; desktopProxyUrl: string } | null,
+): string {
+	if (mode === "pi") {
+		return settings?.piProxyUrl ? settings.piProxyUrl : t("config.proxyUrlUnset");
+	}
+	if (mode === "desktop") {
+		return settings?.desktopProxyUrl ? settings.desktopProxyUrl : t("config.proxyUrlUnset");
+	}
+	if (mode === "off") {
+		return t("config.proxyOffHint");
+	}
+	return t("config.proxyFollowHint");
+}
 
 const KNOWN_PROVIDER_FIELDS = new Set([
 	"baseUrl",
@@ -88,6 +108,10 @@ export function ModelsTab(props: {
 		requestBody?: string;
 	} | null;
 	testModelIdByProvider: Record<string, string>;
+	/** 每个 provider 的测试/拉取代理选择：follow=跟随全局，pi/desktop=强制走对应代理，off=强制直连。 */
+	testProxyModeByProvider: Record<string, ConfigProxyMode>;
+	/** 代理配置快照（下拉里显示实际代理 URL，让用户知道会把流量送到哪）。 */
+	proxySettings: { piProxyUrl: string; desktopProxyUrl: string } | null;
 	saving: boolean;
 	onToggleProvider: (name: string) => void;
 	onStartAddProvider: () => void;
@@ -123,6 +147,7 @@ export function ModelsTab(props: {
 	onFetchModels: (providerName: string) => void;
 	onTestProvider: (providerName: string) => void;
 	onChangeTestModelId: (providerName: string, modelId: string) => void;
+	onChangeTestProxyMode: (providerName: string, mode: ConfigProxyMode) => void;
 	onClearTestResult: () => void;
 	onSave: () => void;
 	onChangeProvider: (name: string, field: string, value: unknown) => void;
@@ -674,6 +699,29 @@ export function ModelsTab(props: {
 														? t("config.testingConnection")
 														: t("config.testConnection")}
 												</Button>
+											</div>
+										</div>
+
+										{/* 测试/拉取模型的代理选择：需要代理才能访问的供应商（海外网关等）不用改全局代理开关。 */}
+										<div className="grid grid-cols-[90px_1fr] items-center gap-2.5">
+											<Label className="pl-0.5 text-left text-xs font-medium text-text-secondary">{t("config.testProxy")}</Label>
+											<div className="flex min-w-0 items-center gap-2.5">
+												<ConfigSelect
+													value={props.testProxyModeByProvider[name] ?? "follow"}
+													onChange={(value) => props.onChangeTestProxyMode(name, (value || "follow") as ConfigProxyMode)}
+													options={[
+														{ value: "follow", label: t("config.proxyFollow") },
+														{ value: "pi", label: t("config.proxyPi") },
+														{ value: "desktop", label: t("config.proxyDesktop") },
+														{ value: "off", label: t("config.proxyOff") },
+													]}
+												/>
+												<span className="min-w-0 truncate font-mono text-[11px] text-text-tertiary">
+													{proxyModeHint(
+														props.testProxyModeByProvider[name] ?? "follow",
+														props.proxySettings,
+													)}
+												</span>
 											</div>
 										</div>
 

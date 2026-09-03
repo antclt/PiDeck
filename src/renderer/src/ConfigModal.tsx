@@ -40,7 +40,7 @@ import { cn } from "./lib/utils";
 import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
 import { applyAdaptiveTemplateReset, collectModelSpecPatches, deriveProviderCompat, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
-import type { FetchedModel } from "../../shared/types/fetchedModel";
+import type { FetchedModel, ConfigProxyMode } from "../../shared/types/fetchedModel";
 import {
 	Component,
 	forwardRef,
@@ -667,6 +667,27 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const [testModelIdByProvider, setTestModelIdByProvider] = useState<
 		Record<string, string>
 	>({});
+	// 每个 provider 的测试/拉取模型代理模式：follow 跟随全局，pi/desktop 强制走对应代理，off 强制直连。
+	// 独立于全局代理开关：有些供应商（如海外网关）只在代理下才通，而全局开关会影响所有会话。
+	const [testProxyModeByProvider, setTestProxyModeByProvider] = useState<
+		Record<string, ConfigProxyMode>
+	>({});
+	// 代理配置快照（用于下拉里展示实际 URL，给用户明确反馈走的是哪个代理）。
+	const [proxySettings, setProxySettings] = useState<{
+		piProxyUrl: string;
+		desktopProxyUrl: string;
+	} | null>(null);
+	useEffect(() => {
+		api.settings
+			.get()
+			.then((s) =>
+				setProxySettings({
+					piProxyUrl: s.piProxyUrl ?? "",
+					desktopProxyUrl: s.desktopProxyUrl ?? "",
+				}),
+			)
+			.catch(() => setProxySettings(null));
+	}, []);
 	// 删除确认对话框
 	const [deleteConfirm, setDeleteConfirm] = useState<{
 		type: "provider" | "model" | "auth" | "batch";
@@ -1114,6 +1135,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				provider.apiKey,
 				provider.api as string | undefined,
 				getProviderHeaders(provider.headers),
+				// 拉取列表与测试同用 per-provider 代理选择（海外网关需代理时不用改全局开关）。
+				testProxyModeByProvider[providerName] ?? "follow",
 			);
 			if (result.success && result.models) {
 				setFetchedModels((prev) => ({
@@ -1181,6 +1204,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				providerName,
 				modelId,
 				modelsData,
+				testProxyModeByProvider[providerName] ?? "follow",
 			);
 			setTestResult({ providerName, ...result });
 			if (result.success) {
@@ -2311,6 +2335,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							testingProvider={testingProvider}
 							testResult={testResult}
 							testModelIdByProvider={testModelIdByProvider}
+							testProxyModeByProvider={testProxyModeByProvider}
+							proxySettings={proxySettings}
 							saving={saving}
 							onToggleProvider={(name) =>
 								setExpandedProvider(expandedProvider === name ? null : name)
@@ -2342,6 +2368,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 								setTestModelIdByProvider((current) => ({
 									...current,
 									[providerName]: modelId,
+								}))
+							}
+							onChangeTestProxyMode={(providerName, mode) =>
+								setTestProxyModeByProvider((current) => ({
+									...current,
+									[providerName]: mode,
 								}))
 							}
 							onClearTestResult={() => setTestResult(null)}

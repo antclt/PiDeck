@@ -23,6 +23,10 @@ import { execFile } from "node:child_process";
 import type { PiLocator } from "./PiLocator";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { PiModelProbeResult } from "../../shared/types/fetchedModel";
+import {
+	applyConfigProxyTarget,
+	type ConfigProxyTarget,
+} from "../sessions/sessionProxyPolicy";
 
 /**
  * 探测超时：放宽到 120s。
@@ -225,6 +229,10 @@ function runProbeOnce(
  * fork pi 做一次性模型调用。成功后由 parsePiProbeOutput 解析结果；
  * pi 进程级失败（未安装/unknown option/超时/崩溃）时返回失败而非抛出。
  *
+ * proxyTarget：配置页显式选择的代理目标（follow/on/off），覆盖探针子进程的代理环境——
+ * 部分供应商（海外网关）需要代理才能访问，而全局 pi 代理开关通常只服务于会话白名单，
+ * 探针按用户选择强制注入或剥离代理环境变量，与会话侧 applyPiProxyEnv 共用同一套键。
+ *
  * 降级链：带扩展全集 → 带扩展最小集（仅 unknown option）→ 无扩展最小集（进程超时/
  * pi 层无 agent_end 结果时）。模型级结果（agent_end 成功或 stopReason=error）
  * 一律直接返回，不降级——降级只针对“pi 没跑起来”的情形（#181 坏扩展场景）。
@@ -234,9 +242,12 @@ export async function probePiModel(
 	settingsStore: SettingsStore,
 	providerName: string,
 	modelId: string,
+	proxyTarget?: ConfigProxyTarget,
 ): Promise<PiModelProbeResult> {
 	const startedAt = Date.now();
 	const settings = settingsStore.get();
+	// 测试代理显式选择时覆盖探针设置（follow 原样返回，不产生新对象）。
+	const probeSettings = applyConfigProxyTarget(settings, proxyTarget);
 	// 拉测试可以等 WSL which；不能在 resolveCommand 里同步卡住主进程。
 	if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
 		await piLocator.warmWslCommand(settings.wslDistro, settings.wslUser);
@@ -259,7 +270,7 @@ export async function probePiModel(
 			"--model", modelId,
 			"Hi",
 		]);
-		const outcome = await runProbeOnce(piLocator, settings, invocation);
+		const outcome = await runProbeOnce(piLocator, probeSettings, invocation);
 		if (outcome.ok) {
 			const parsed = parsePiProbeOutput(outcome.stdout);
 			// 有 agent_end（无论成功/模型报错）都是模型级结果，直接返回；
@@ -287,7 +298,7 @@ export async function probePiModel(
 			"--model", modelId,
 			"Hi",
 		]);
-		const outcome = await runProbeOnce(piLocator, settings, invocation);
+		const outcome = await runProbeOnce(piLocator, probeSettings, invocation);
 		if (outcome.ok) {
 			const parsed = parsePiProbeOutput(outcome.stdout);
 			return { ...parsed, latencyMs: Date.now() - startedAt };

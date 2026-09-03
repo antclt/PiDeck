@@ -2,7 +2,8 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { normalize, join, dirname } from "node:path";
 import { dirname as posixDirname, normalize as posixNormalize } from "node:path/posix";
 import { homedir } from "node:os";
-import { net } from "electron";
+import { net, session } from "electron";
+import type { Session } from "electron";
 import type { ConfigFileDiagnostic, ConfigFileReadResult } from "../../shared/types";
 import type { McpConfigFile, McpConfigSnapshot, McpProbeResult, McpServerDefinition } from "../../shared/types/mcp";
 import {
@@ -54,6 +55,7 @@ import type { UserUsageProbe } from "./userUsageProbes";
 import { pideckUsageProbesDir } from "../dsh/pideckDshHome";
 import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
 import { loadDshUsageProviderProfile } from "./dshUsageEndpoint";
+import type { ConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 
 /** pi 全局配置目录：~/.pi/agent/ */
 const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
@@ -72,6 +74,42 @@ export type DshUsageLookup = {
 // Provider 用量/连接探测面对的是第三方网关，首包可能慢于普通模型；放宽超时避免误判。
 const PROVIDER_TEST_TIMEOUT_MS = 45_000;
 
+// 模型列表拉取的"显式代理"专用 session。
+// 为什么不用 defaultSession + session.setProxy 全局改：桌面代理全局开关是用户
+// 手动控制的（D:\桌面代理），这里按单个拉取请求临时开启/关闭代理，改全局会
+// 影响用户在跑的会话流量；所以用独立内存 partition（非 persist 前缀=不落盘），
+// 代理规则只影响本模块的请求。
+let modelListProxySession: Session | null = null;
+async function getModelListProxySession(): Promise<Session> {
+	if (!modelListProxySession) {
+		modelListProxySession = session.fromPartition("pideck-config-proxy", { cache: false });
+	}
+	return modelListProxySession;
+}
+
+// 根据代理目标挑出用于拉取模型列表的 fetch 实现：
+// - follow/undefined → net.fetch（走默认 session，受桌面代理全局开关影响，现状行为）；
+// - on/off → 独立 session，临时 setProxy 为 fixed_servers / direct 后 fetch。
+// 返回 null 表示跟随全局（调用方继续用 net.fetch）。
+async function modelListFetch(
+	url: string,
+	init: { method?: string; headers?: Record<string, string>; signal: AbortSignal },
+	proxyTarget?: ConfigProxyTarget,
+): Promise<Response | null> {
+	if (proxyTarget?.mode !== "on" && proxyTarget?.mode !== "off") {
+		return null;
+	}
+	const proxySession = await getModelListProxySession();
+	const proxyMode = proxyTarget.mode === "on"
+		? ({
+			mode: "fixed_servers" as const,
+			proxyRules: proxyTarget.url,
+			proxyBypassRules: proxyTarget.bypass,
+		})
+		: ({ mode: "direct" as const });
+	await proxySession.setProxy(proxyMode);
+	return proxySession.fetch(url, init);
+}
 // 用量查询默认超时（学 cc-switch：10 秒；可被 per-provider 配置覆盖）。
 const USAGE_PROBE_DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -518,12 +556,14 @@ export class ConfigManager {
 	/**
 	 * 向 provider 拉取可用模型列表。
 	 * 对优先路径尝试失败后自动回退到备选路径，提升对各厂商端点格式差异的容错。
+	 * proxyTarget 显式指定代理策略（on/off），可覆盖桌面代理全局开关；不传则跟随全局。
 	 */
 	async fetchProviderModels(
 		baseUrl: string,
 		apiKey: string,
 		apiType?: string,
 		headers?: Record<string, string>,
+		proxyTarget?: ConfigProxyTarget,
 	): Promise<{
 		success: boolean;
 		models?: FetchedModel[];
@@ -549,12 +589,22 @@ export class ConfigManager {
 				const timeout = setTimeout(() => controller.abort(), 10_000);
 
 				try {
-					// 桌面端配置检测属于 Electron 主进程自身请求；使用 net.fetch 才能走 defaultSession 的代理配置。
-					const res = await net.fetch(request.url, {
+					// 桌面端配置检测属于 Electron 主进程自身请求；net.fetch 才走 defaultSession 的代理配置。
+					// 显式选择了代理时改用独立 session（见 modelListFetch），避免动全局代理开关。
+					const response = await modelListFetch(
+						request.url,
+						{
+							method: request.method ?? "GET",
+							headers: request.headers,
+							signal: controller.signal,
+						},
+						proxyTarget,
+					);
+					const res = response ?? (await net.fetch(request.url, {
 						method: request.method ?? "GET",
 						headers: request.headers,
 						signal: controller.signal,
-					});
+					}));
 
 					if (!res.ok) {
 						lastDebugDetails = `HTTP ${res.status}: ${res.statusText}`;

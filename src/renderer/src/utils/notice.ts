@@ -172,7 +172,8 @@ function showFallbackNotice(message: string, duration: number, kind: NoticeData[
 			if (!action) continue;
 			const button = document.createElement("button");
 			button.type = "button";
-			button.textContent = action.label;
+			// 与 NoticeToastCard 的主按钮保持一致：action 带「→」强化前往语义
+			button.textContent = key === "action" ? `${action.label} →` : action.label;
 			button.style.cssText = key === "action"
 				? "border:0;border-radius:6px;padding:4px 12px;font:600 12px/1.4 system-ui,sans-serif;background:var(--color-accent,#3b82f6);color:#fff;cursor:pointer"
 				: "border:1px solid var(--color-border-subtle,rgba(0,0,0,0.12));border-radius:6px;padding:4px 12px;font:500 12px/1.4 system-ui,sans-serif;background:transparent;color:var(--color-text-secondary,#57606a);cursor:pointer";

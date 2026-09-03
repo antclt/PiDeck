@@ -221,7 +221,8 @@ export function buildHostProxyEnvPatch(
 	return undefined;
 }
 
-/** 把 patch 应用到已构建的 fork env（原地修改）：先剥离后注入，顺序固定。 */
+/**
+ * 把 patch 应用到已构建的 fork env（原地修改）：先剥离后注入，顺序固定。 */
 export function applyProxyEnvPatch(
 	env: Record<string, string>,
 	patch: HostProxyEnvPatch,
@@ -230,4 +231,61 @@ export function applyProxyEnvPatch(
 	for (const [key, value] of Object.entries(patch.set)) {
 		if (value !== undefined) env[key] = value;
 	}
+}
+
+// ── 配置页「拉取模型 / 测试连接」的代理选择 ───────────────
+
+import type { ConfigProxyMode } from "../../shared/types/fetchedModel";
+
+/**
+ * 配置检测代理目标（纯数据，供 ConfigManager 临时 session 与 PiModelProber 环境注入共用）：
+ * - follow：不覆盖（主进程 net.fetch 默认走桌面代理全局；pi 进程跟随 pi 代理全局开关）；
+ * - on：强制走 url（bypass 为同源代理配置的绕过列表）；
+ * - off：强制直连。
+ */
+export type ConfigProxyTarget =
+	| { mode: "follow" }
+	| { mode: "on"; url: string; bypass: string }
+	| { mode: "off" };
+
+/**
+ * 把渲染层代理选择解析成主进程可执行的代理目标（纯函数，可单测）。
+ * 复用设置中的代理地址：pi / desktop 两个模式各自取对应 URL 字段；
+ * 所选代理 URL 为空时降级为 off（与全局开关注释一致：没配地址就无法代理）。
+ */
+export function resolveConfigProxyTarget(
+	settings: { piProxyUrl: string; piProxyBypass: string; desktopProxyUrl: string; desktopProxyBypass: string },
+	proxyMode: ConfigProxyMode | undefined,
+): ConfigProxyTarget {
+	switch (proxyMode) {
+		case "pi": {
+			const url = settings.piProxyUrl.trim();
+			if (!url) return { mode: "off" };
+			return { mode: "on", url, bypass: settings.piProxyBypass.trim() };
+		}
+		case "desktop": {
+			const url = settings.desktopProxyUrl.trim();
+			if (!url) return { mode: "off" };
+			return { mode: "on", url, bypass: settings.desktopProxyBypass.trim() };
+		}
+		case "off":
+			return { mode: "off" };
+		case "follow":
+		default:
+			return { mode: "follow" };
+	}
+}
+
+/**
+ * 把配置检测的代理目标落到 pi 子进程设置（探针走 applyPiProxyEnv 的环境变量注入）：
+ * on → 强制开启并覆盖 URL（即使全局 piProxyEnabled 为关）；off → 强制关闭（含名单外剥离）。
+ * follow 返回原对象（调用方沿用引用，不产生新对象开销）。
+ */
+export function applyConfigProxyTarget<T extends { piProxyEnabled: boolean; piProxyUrl: string; piProxyBypass: string }>(
+	settings: T,
+	target: ConfigProxyTarget | undefined,
+): T {
+	if (!target || target.mode === "follow") return settings;
+	if (target.mode === "off") return { ...settings, piProxyEnabled: false };
+	return { ...settings, piProxyEnabled: true, piProxyUrl: target.url, piProxyBypass: target.bypass };
 }

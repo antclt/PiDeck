@@ -1491,16 +1491,17 @@ const api = {
 				ipcChannels.configImport,
 				packageJson,
 			) as Promise<{ valid: boolean; error?: string }>,
-		/** 从 provider 的 baseUrl + apiKey 拉取可用模型列表；headers 允许 provider 自定义（含 User-Agent） */
+		/** 从 provider 的 baseUrl + apiKey 拉取可用模型列表；headers 允许 provider 自定义（含 User-Agent）；proxyMode=follow 跟随全局 / pi 走 PI 代理 / desktop 走桌面代理 / off 强制直连 */
 		fetchModels: (
 			baseUrl: string,
 			apiKey: string,
 			apiType?: string,
 			headers?: Record<string, string>,
+			proxyMode?: "follow" | "pi" | "desktop" | "off",
 		) =>
 			ipcRenderer.invoke(
 				ipcChannels.configFetchModels,
-				{ baseUrl, apiKey, apiType, headers },
+				{ baseUrl, apiKey, apiType, headers, proxyMode },
 			) as Promise<{
 				success: boolean;
 				models?: FetchedModel[];
@@ -1558,15 +1559,16 @@ const api = {
 		/** 视觉桥：清空事件文件 */
 		visionClearEvents: () =>
 			ipcRenderer.invoke(ipcChannels.visionClearEvents) as Promise<{ ok: boolean }>,
-		/** 测试 provider 连接：先保存配置，再用真实 pi 做一次最小调用验证是否可用 */
+		/** 测试 provider 连接：先保存配置，再用真实 pi 做一次最小调用验证是否可用；proxyMode 控制探针进程代理（同 fetchModels 语义，pi 侧走 PI 代理配置） */
 		testProvider: (
 			providerName: string,
 			modelId: string,
 			models: unknown,
+			proxyMode?: "follow" | "pi" | "desktop" | "off",
 		) =>
 			ipcRenderer.invoke(
 				ipcChannels.configTestProvider,
-				{ providerName, modelId, models },
+				{ providerName, modelId, models, proxyMode },
 			) as Promise<import("../shared/types/fetchedModel").PiModelProbeResult>,
 		/** 查询 provider 用量/余额（主进程按 provider 名 + backend 路由；backend=dsh 走 $DSH_HOME 链路） */
 		fetchUsage: (provider: string, backend?: "pi" | "dsh") =>
