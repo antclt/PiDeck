@@ -3405,8 +3405,13 @@ app.whenReady().then(async () => {
 			// Web 删除与桌面 IPC 同一策略：先解绑再删 catalog，agent 后台停。
 			await sessionRuntimeCoordinator.releaseRuntimeForDelete(sessionId);
 			if (entry.filePath) await sessionScanner.delete(entry.filePath);
-			// DSH 没有 session.delete：记下墓碑，避免刷新把 host 目录再导回侧栏。
+			// DSH 没有 session.delete：与 pi 端同语义删除——把 host 会话目录移入系统回收站
+			// （可恢复；trashPath 失败时抛错由 IPC 呈现，拒绝静默硬删；目录已不在=幂等成功）。
+			// cwd 取项目目录（DSH workspace 编码同源）；项目被移除过则扫 sessions 树兑底。
 			if (entry.backend === "dsh" && entry.dshSessionId) {
+				const project = projectStore.get(entry.projectId);
+				await dshHost.deleteSession(entry.dshSessionId, project?.path ?? "");
+				// 记下墓碑：host 目录已移出 sessions 树，避免刷新把残留索引/回收站路径再导回侧栏。
 				await sessionCatalog.rememberDismissedDshSession(entry.dshSessionId);
 			}
 			await sessionCatalog.removeWithDescendants(sessionId);

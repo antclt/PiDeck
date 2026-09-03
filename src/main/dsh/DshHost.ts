@@ -10,7 +10,7 @@ import { DshApiClient, type DshFetchTransport } from "./DshApiClient";
 import { toDshAvailableModels, toDshFetchedModels } from "./dshModels";
 import { parseAgentDefaultModel } from "./dshDefaultModel";
 import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
-import { workspaceDirFor } from "./dshSessionPath";
+import { workspaceDirFor, findDshSessionDir } from "./dshSessionPath";
 import {
 	migrateLegacyPideckDshFiles,
 	pideckArchivePath,
@@ -416,6 +416,22 @@ export class DshHost {
 		const manifestPath = join(archivedDir, "pideck-manifest.json");
 		if (!existsSync(manifestPath)) return false;
 		await this.trashPath(archivedDir);
+		return true;
+	}
+
+	/**
+	 * 删除活跃 DSH 会话（与 pi 会话删除同语义）：把 host 会话目录移入系统回收站
+	 * （经注入的 trashPath，可恢复；回收站不可用时抛错，拒绝静默硬删）。
+	 * DSH 官方没有 session.delete 协议，定位/搬移与 archiveSession 同构（移出 sessions 树），
+	 * host 重启后 session.list 不再包含该会话。
+	 * 幂等：目录不存在（已删/已回收）返回 false。
+	 * @param cwd 会话所属 workspace（catalog 记录的 project.path），用于精确推导；
+	 *            失配时按 sessionId 兜底扫描（项目目录移动后仍可删除）。
+	 */
+	async deleteSession(dshSessionId: string, cwd: string): Promise<boolean> {
+		const target = findDshSessionDir(this.getHomeDir(), cwd, dshSessionId);
+		if (!target) return false;
+		await this.trashPath(target);
 		return true;
 	}
 
