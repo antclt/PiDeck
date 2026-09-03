@@ -96,7 +96,9 @@ export type SessionSummary = {
 	parentSessionPath?: string;
 	/**
 	 * fork 会话标记（pi fork/clone 的文件头带 parentSession）：有父关系但形态为
-	 * 「用户 fork/分支」而非子代理/嵌套子会话，列表顶层展示并加 (fork) 后缀。
+	 * 「用户 fork/分支」而非子代理/嵌套子会话。仅作 fork 身份元数据——
+	 * (fork) 标题后缀已由主进程物理写入会话名（见 main/sessions/sessionForkTitle.ts），
+	 * 展示层不再按该标记拼装，重命名删除后缀即为删除。
 	 */
 	forked?: boolean;
 	preview: string;
@@ -165,8 +167,9 @@ export type SessionRecord = {
 	parentSessionId?: string;
 	parentSessionPath?: string;
 	/**
-	 * fork 会话标记（pi fork/clone 产物）：标题右侧显示 (fork) 区分；与「子代理/嵌套子会话」
-	 * （parentSessionPath 会被侧栏折叠到父行下）语义不同，两者独立存储。
+	 * fork 会话标记（pi fork/clone 产物）：fork 身份元数据；(fork) 标题后缀已由主进程
+	 * 物理写入会话名（见 main/sessions/sessionForkTitle.ts），展示层不再按标记拼装。
+	 * 与「子代理/嵌套子会话」（parentSessionPath 会被侧栏折叠到父行下）语义不同，两者独立存储。
 	 */
 	forked?: boolean;
 	projectPath?: string;

@@ -49,7 +49,8 @@ export type SessionCatalogEntry = {
 	parentSessionPath?: string;
 	/**
 	 * fork 会话标记（pi fork/clone 产物，文件头带 parentSession）：
-	 * 与 parentSessionPath 独立（后者=子代理折叠关系），仅用于列表标题 (fork) 后缀。
+	 * 与 parentSessionPath 独立（后者=子代理折叠关系），仅作 fork 身份元数据——
+	 * (fork) 标题后缀由 fork 完成时物理写入会话名（sessionForkTitle.ts），不靠该标记拼装。
 	 */
 	forked?: boolean;
 	model?: { provider: string; modelId: string };
@@ -618,7 +619,7 @@ export class SessionCatalog {
 			/** 切到生图后端时甩开 pi 会话文件引用（null = 清空）。 */
 			filePath?: string | null;
 			piSessionId?: string | null;
-			/** fork 标记：仅显式 true 时置位（列表 (fork) 后缀）。 */
+			/** fork 标记：仅显式 true 时置位（fork 身份元数据；(fork) 后缀已物理写入标题）。 */
 			forked?: boolean | null;
 		},
 	): Promise<SessionRecord> {

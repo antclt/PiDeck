@@ -446,7 +446,6 @@ export const zhCN = {
   "session.relativeDays": "{count} 天前",
   "session.relativeMonths": "{count} 个月前",
   "session.relativeYears": "{count} 年前",
-  "session.forkedSuffix": "(fork)",
   "git.cherryPick": "挑选此提交",
   "git.cherryPickSuccess": "已挑选提交 {hash}",
   "git.revert": "撤销此提交",

@@ -71,7 +71,8 @@ test("mergeScanned marks a newly discovered fork file without folding it under i
     await catalog.load();
     // 轻量扫描（listPathSummary）不带 name：新文件因此进入头部探测（wanted）路径
     const [record] = await catalog.mergeScanned("project-1", [summary({ name: undefined })]);
-    // fork 标记独立于 parentSessionPath：显示在顶层列表并带 (fork) 后缀
+    // fork 标记独立于 parentSessionPath：顶层展示的 fork 身份元数据（(fork) 标题后缀
+    // 已物理写入会话名，见 sessionForkTitle.ts）
     assert.equal(record.forked, true);
     assert.equal(record.parentSessionPath, undefined);
     // 跨重启持久化：重载后标记仍在（不依赖每次扫描重新探测）

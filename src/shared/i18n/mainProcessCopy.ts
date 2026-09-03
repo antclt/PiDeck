@@ -81,6 +81,8 @@ export const mainProcessZhCN = {
 	"session.untitled": "未命名会话",
 	"session.emptyPreview": "空会话",
 	"session.copyTitle": "{title} 副本",
+	// fork/clone 产物物理命名后缀：属于会话名的一部分（重命名可删除），展示层不再拼装。
+	"session.forkedSuffix": "(fork)",
 	"session.historyTitle": "{project} 历史会话",
 	"session.historyFallbackTitle": "历史会话",
 	"session.summaryPlaceholder": "[摘要]",
@@ -298,6 +300,8 @@ export const mainProcessEnUS: Record<MainProcessTranslationKey, string> = {
 	"session.untitled": "Untitled session",
 	"session.emptyPreview": "Empty session",
 	"session.copyTitle": "{title} copy",
+	// Physical suffix appended to fork/clone session titles: part of the real name (removable by rename).
+	"session.forkedSuffix": "(fork)",
 	"session.historyTitle": "{project} history",
 	"session.historyFallbackTitle": "History",
 	"session.summaryPlaceholder": "[Summary]",

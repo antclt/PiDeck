@@ -445,7 +445,6 @@ export const enUS: Record<TranslationKey, string> = {
   "session.relativeDays": "{count}d ago",
   "session.relativeMonths": "{count}mo ago",
   "session.relativeYears": "{count}y ago",
-  "session.forkedSuffix": "(fork)",
   "git.cherryPick": "Cherry-pick",
   "git.cherryPickSuccess": "Cherry-picked {hash}",
   "git.revert": "Revert",

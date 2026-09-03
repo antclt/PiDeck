@@ -266,6 +266,7 @@ import {
 } from "./sessions/SessionRuntimeCoordinator";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
+import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
 import { ClaudeSessionImporter } from "./sessions/ClaudeSessionImporter";
 import { OpenCodeSessionImporter } from "./sessions/OpenCodeSessionImporter";
@@ -852,9 +853,29 @@ async function replaceAgentSession(
 				throw new Error(`Replacement runtime has no session path: ${agentId}`);
 			}
 			const environment = tab.sessionEnvironment ?? originEntry?.environment ?? "native";
+			// fork/clone 产物把 (fork) 物理写进会话名（走 pi set_session_name RPC，持久化到
+			// 会话文件），不再由展示层按 forked 标记拼装——用户重命名删掉后缀就是真的删掉，
+			// 扫描回读（session_info 命中）也与文件一致。rename RPC 失败不阻断 fork：
+			// 回退原名，避免文件/目录标题分叉（下次扫描以文件为权威）。
+			let title = tab.title;
+			if (options?.markForked) {
+				const forkedTitle = appendSessionForkSuffix(title, mainCopy("session.forkedSuffix"));
+				if (forkedTitle !== title) {
+					try {
+						await agentManager.rename(agentId, forkedTitle);
+						title = forkedTitle;
+					} catch (error) {
+						void appLogger.warn("session", "Fork session suffix rename failed", {
+							agentId,
+							title,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
+			}
 			const target = await sessionCatalog.ensureRuntimeTarget({
 				projectId: tab.projectId,
-				title: tab.title,
+				title,
 				source: tab.sessionSource ?? originEntry?.source ?? "pi",
 				environment,
 				filePath: tab.sessionPath,
@@ -862,7 +883,8 @@ async function replaceAgentSession(
 				wslUser: tab.wslUser ?? (environment === "wsl" ? originEntry?.wslUser : undefined),
 				importedSourceId: tab.importedSourceId ?? originEntry?.importedSourceId,
 				piSessionId: tab.sessionId,
-				// fork/clone 产物同步落 fork 标记（列表标题 (fork) 后缀）；开关由调用方按语义传入，
+				// fork/clone 产物同步落 fork 标记（fork 身份元数据；(fork) 标题后缀已物理写入
+				// 会话名，见上方 appendSessionForkSuffix）；开关由调用方按语义传入，
 				// switch_session / 历史会话换绑等不标记。
 				forked: options?.markForked,
 			});

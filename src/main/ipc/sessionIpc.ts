@@ -73,6 +73,7 @@ import type { SessionScanner } from "../sessions/SessionScanner";
 import type { SessionCatalog } from "../sessions/SessionCatalog";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { SessionCommandIpcError } from "../sessions/SessionCommandIpcError";
+import { appendSessionForkSuffix } from "../sessions/sessionForkTitle";
 import type { AgentManager } from "../pi/AgentManager";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { TerminalSessionManager } from "../terminal/TerminalSessionManager";
@@ -1838,6 +1839,32 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 							const entry = sessionCatalog.findByFilePath(tab.sessionPath, environment);
 							if (entry) {
 								await sessionCatalog.update(entry.id, { forked: true });
+								// (fork) 物理写进会话名（与 fork/clone 一致，见 appendSessionForkSuffix）：
+								// 走 pi set_session_name RPC。注意 rewind 恢复不重建 runtime 绑定
+								// （绑定仍指向原会话），rename 触发的标题回写会落到原条目标题上，
+								// 因此记录原条目标题并在完成后恢复，避免「原会话被改名成 xxx (fork)」。
+								const forkedTitle = appendSessionForkSuffix(entry.title, mainCopy("session.forkedSuffix"));
+								if (forkedTitle !== entry.title) {
+									const originBinding = sessionRuntimeCoordinator.getRuntimeBinding(target.agentId);
+									const originSessionId = originBinding?.sessionId;
+									const originTitle = originSessionId && originSessionId !== entry.id
+										? sessionCatalog.get(originSessionId)?.title
+										: undefined;
+									try {
+										await agentManager.rename(target.agentId, forkedTitle);
+										await sessionCatalog.update(entry.id, { title: forkedTitle });
+										if (originSessionId && originTitle !== undefined) {
+											await sessionCatalog.update(originSessionId, { title: originTitle });
+										}
+									} catch (error) {
+										void appLogger.warn("session", "Rewind fork suffix rename failed", {
+											sessionId: entry.id,
+											agentId: target.agentId,
+											title: entry.title,
+											error: error instanceof Error ? error.message : String(error),
+										});
+									}
+								}
 							}
 						}
 					}
