@@ -209,3 +209,64 @@ test("白名单总开关 disableExtensionWhitelist=true 时不再注入 --no-ext
 	assert.ok(!captured.args.includes("--no-extensions"), "总开关开启时不应注入 --no-extensions");
 	assert.ok(!captured.args.includes("--extension"), "总开关开启时不应注入 --extension");
 });
+
+test("存在禁用技能时注入 --no-skills + 逐条 --skill 白名单", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
+	const proc = new PiProcess(
+		"C:\\proj",
+		{ wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" },
+		mockLocator,
+		{
+			// 模拟技能白名单解析器：存在禁用项 → 返回启用技能路径
+			resolveEnabledSkillPaths: () => ["C:\\Users\\tester\\skills\\a\\SKILL.md", "C:\\Users\\tester\\skills\\b\\SKILL.md"],
+			securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+		},
+	);
+	await proc.start(undefined, undefined, true);
+	const captured = getCaptured();
+	assert.ok(captured?.args, "spawn 应被调用");
+	const idx = captured.args.indexOf("--no-skills");
+	assert.ok(idx >= 0, "技能白名单模式应注入 --no-skills");
+	assert.equal(captured.args[idx + 1], "--skill");
+	// WSL 模式：--skill 后的路径同样被转换为 distro 内 Linux 路径
+	assert.equal(captured.args[idx + 2], "/mnt/c/Users/tester/skills/a/SKILL.md");
+	assert.equal(captured.args[idx + 3], "--skill");
+	assert.equal(captured.args[idx + 4], "/mnt/c/Users/tester/skills/b/SKILL.md");
+});
+
+test("无禁用技能（resolver 返回 null）时不注入 --no-skills/--skill", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
+	const proc = new PiProcess(
+		"C:\\proj",
+		{ wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" },
+		mockLocator,
+		{
+			resolveEnabledSkillPaths: () => null,
+			securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+		},
+	);
+	await proc.start(undefined, undefined, true);
+	const captured = getCaptured();
+	assert.ok(captured?.args, "spawn 应被调用");
+	assert.ok(!captured.args.includes("--no-skills"), "无禁用项时不应注入 --no-skills");
+	assert.ok(!captured.args.includes("--skill"), "无禁用项时不应注入 --skill");
+});
+
+test("piRpcNoSkills 总开关开启时不注入技能白名单", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
+	const proc = new PiProcess(
+		"C:\\proj",
+		{ wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root", piRpcNoSkills: true },
+		mockLocator,
+		{
+			resolveEnabledSkillPaths: () => ["C:\\Users\\tester\\skills\\a\\SKILL.md"],
+			securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+		},
+	);
+	await proc.start(undefined, undefined, true);
+	const captured = getCaptured();
+	assert.ok(captured?.args, "spawn 应被调用");
+	// piRpcNoSkills 分支已注入 --no-skills（总开关）；技能白名单不应再注入 --skill
+	assert.ok(captured.args.includes("--no-skills"), "总开关应注入 --no-skills");
+	assert.ok(!captured.args.includes("--skill"), "总开关开启时不应注入 --skill");
+});

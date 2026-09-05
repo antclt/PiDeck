@@ -201,6 +201,10 @@ Gitmoji 对应关系：
   /** 白名单总开关：true 时不走 -e 注入，默认加载全部扩展（防御启动失败） */
   disableExtensionWhitelist: false,
 
+  // ── 技能管理 ──
+  /** 用户禁用的全局技能名（小写 name）；非空时 RPC 启动走 --no-skills + --skill 白名单 */
+  disabledSkills: [],
+
   // 生图参数：记在 composer 底栏，跨会话复用；缺省不指定分辨率、不带水印
   imageGenSize: DEFAULT_IMAGE_GEN_SIZE,
   imageGenWatermark: DEFAULT_IMAGE_GEN_WATERMARK,

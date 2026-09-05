@@ -112,6 +112,8 @@ let previewSettings: AppSettings = {
 	/** 扩展禁用白名单：与 SettingsStore 默认一致，预览壳不启用白名单 */
 	disabledExtensions: [],
 	disableExtensionWhitelist: false,
+	/** 技能禁用列表：与 SettingsStore 默认一致，预览壳不启用技能白名单 */
+	disabledSkills: [],
 	sessionTabOpenMode: "preview",
 	// 与 SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
 	busySendDelivery: "steer",

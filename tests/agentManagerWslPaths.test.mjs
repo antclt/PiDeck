@@ -204,6 +204,14 @@ function loadAgentManager() {
 					}),
 				};
 			}
+			// 技能白名单 resolver：本测试不涉及技能加载，透传空实现即可
+			if (id === "../skills/piProcessSkillResolvers") {
+				return {
+					createPiProcessSkillResolvers: () => ({
+						resolveEnabledSkillPaths: () => null,
+					}),
+				};
+			}
 			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
 			if (id === "../../shared/fileChanges") return { collectSessionFileChanges: () => [] };
 			// rewind checkpoint 纯 git 模块：WSL 路径测试不涉及回退，空桩满足依赖契约

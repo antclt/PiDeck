@@ -407,6 +407,16 @@ export type AppSettings = {
 	 */
 	disableExtensionWhitelist: boolean;
 
+	/**
+	 * 用户禁用的全局技能名列表（与 SkillManager.list 的 name 去重键一致，比较时小写），
+	 * 存储于 PiDeck 自身设置（不写 pi settings）。
+	 * pi 的 frontmatter `disable-model-invocation` 只阻止模型自动调用、技能仍被加载；
+	 * 完全禁用只能靠 PiDeck 启动 RPC 时切「白名单模式」：--no-skills + 逐条 --skill
+	 * 注入未禁用技能（见 skillWhitelistResolver）。
+	 * 列表为空 = 白名单关闭，pi 自动发现全部技能（兼容用户在 PiDeck 外手动安装的技能）。
+	 */
+	disabledSkills: string[];
+
 	// ── 生图模式（composer 底栏记忆，不是独立设置页） ──
 	/** 生图尺寸：unset=不发送 size；或 OpenAI WxH / 火山 1K/2K/4K */
 	imageGenSize: string;

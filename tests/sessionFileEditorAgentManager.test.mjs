@@ -140,6 +140,14 @@ function loadAgentManager() {
           }),
         };
       }
+      // 技能白名单 resolver：本测试不涉及技能加载，透传空实现即可
+      if (specifier === "../skills/piProcessSkillResolvers") {
+        return {
+          createPiProcessSkillResolvers: () => ({
+            resolveEnabledSkillPaths: () => null,
+          }),
+        };
+      }
       if (specifier === "../wsl/WslPaths") {
         return { toWindowsHostPath: (path) => path, toWslLinuxPath: (path) => path };
       }

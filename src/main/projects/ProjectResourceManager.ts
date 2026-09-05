@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { trashPath } from "../fs/trash";
@@ -105,8 +105,25 @@ export class ProjectResourceManager {
 		const raw = await readFile(skill.path, "utf8");
 		const next = this.setFrontmatterBoolean(raw, "disable-model-invocation", !enabled);
 		await writeFile(skill.path, next, "utf8");
-		// 重新读取文件，获取最新 frontmatter 状态
-		return this.readSkill(skill.path, this.skillLocations(project).find((l) => l.id === skill.sourceId) ?? this.skillLocations(project)[0], skill.type);
+		// 项目级禁用列表写入 .pi/settings.json（技能白名单模式依据），与 toggleExtension 同位置。
+		// frontmatter 标记保留用于老版本兼容显示与手动编辑场景；「不加载」以 settings 列表为准。
+		const settingsFile = join(this.projectRoot(project), ".pi", "settings.json");
+		let settingsRaw = "{}";
+		try { settingsRaw = await readFile(settingsFile, "utf8"); } catch {}
+		const settings = JSON.parse(settingsRaw) as { disabledSkills?: string[] };
+		const disabled = settings.disabledSkills ?? [];
+		const nameKey = skill.name.toLowerCase();
+		const nextDisabled = disabled.filter((name) => name.toLowerCase() !== nameKey);
+		if (!enabled) nextDisabled.push(skill.name);
+		settings.disabledSkills = nextDisabled;
+		await writeFile(settingsFile, JSON.stringify(settings, null, 2), "utf8");
+		// 重新读取文件，获取最新 frontmatter + 禁用列表状态
+		return this.readSkill(
+			skill.path,
+			this.skillLocations(project).find((l) => l.id === skill.sourceId) ?? this.skillLocations(project)[0],
+			skill.type,
+			this.readProjectDisabledSkillKeys(project),
+		);
 	}
 
 	async toggleExtension(projectId: string, extensionPath: string, enabled: boolean): Promise<void> {
@@ -140,35 +157,54 @@ export class ProjectResourceManager {
 	}
 
 	private async listSkills(project: Project): Promise<PiSkillSummary[]> {
+		const disabledKeys = this.readProjectDisabledSkillKeys(project);
 		const groups = await Promise.all(
-			this.skillLocations(project).map((location) => this.scanSkillLocation(location)),
+			this.skillLocations(project).map((location) => this.scanSkillLocation(location, disabledKeys)),
 		);
 		return groups.flat().sort((a, b) => a.name.localeCompare(b.name));
 	}
 
-	private async scanSkillLocation(location: PiSkillLocation): Promise<PiSkillSummary[]> {
+	/** 读取项目 .pi/settings.json 的 disabledSkills（小写 name 集合），供列表/开关显示与白名单枚举。 */
+	private readProjectDisabledSkillKeys(project: Project): Set<string> {
+		try {
+			const raw = readFileSync(join(this.projectRoot(project), ".pi", "settings.json"), "utf8");
+			const settings = JSON.parse(raw) as { disabledSkills?: string[] };
+			return new Set((settings.disabledSkills ?? []).map((name) => name.toLowerCase()));
+		} catch {
+			return new Set();
+		}
+	}
+
+	private async scanSkillLocation(location: PiSkillLocation, disabledKeys: Set<string>): Promise<PiSkillSummary[]> {
 		const entries = await readdir(location.path, { withFileTypes: true }).catch(() => []);
 		const skills: PiSkillSummary[] = [];
 		for (const entry of entries) {
 			const fullPath = join(location.path, entry.name);
 			if (entry.isDirectory()) {
-				await this.collectDirectorySkills(fullPath, location, skills);
+				await this.collectDirectorySkills(fullPath, location, skills, disabledKeys);
 			} else if (location.rootMarkdownEnabled && entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-				skills.push(await this.readSkill(fullPath, location, "markdown"));
+				skills.push(await this.readSkill(fullPath, location, "markdown", disabledKeys));
 			}
 		}
 		return skills;
 	}
 
-	private async collectDirectorySkills(dir: string, location: PiSkillLocation, out: PiSkillSummary[]) {
+	private async collectDirectorySkills(
+		dir: string,
+		location: PiSkillLocation,
+		out: PiSkillSummary[],
+		disabledKeys: Set<string>,
+	) {
 		const skillPath = join(dir, SKILL_FILE);
 		if (existsSync(skillPath)) {
-			out.push(await this.readSkill(skillPath, location, "directory"));
+			out.push(await this.readSkill(skillPath, location, "directory", disabledKeys));
 			return;
 		}
 		const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
 		for (const entry of entries) {
-			if (entry.isDirectory()) await this.collectDirectorySkills(join(dir, entry.name), location, out);
+			if (entry.isDirectory()) {
+				await this.collectDirectorySkills(join(dir, entry.name), location, out, disabledKeys);
+			}
 		}
 	}
 
@@ -176,6 +212,7 @@ export class ProjectResourceManager {
 		skillPath: string,
 		location: PiSkillLocation,
 		type: PiSkillSummary["type"],
+		disabledKeys: Set<string> = new Set(),
 	): Promise<PiSkillSummary> {
 		const raw = await readFile(skillPath, "utf8").catch(() => "");
 		const frontmatter = this.parseFrontmatter(raw);
@@ -191,7 +228,11 @@ export class ProjectResourceManager {
 			sourceId: location.id,
 			sourceLabel: location.label,
 			type,
-			enabled: frontmatter["disable-model-invocation"] !== "true",
+			// 禁用 = 项目禁用列表 ∪ frontmatter 标记（老版语义，仅阻止自动调用，升级后由
+			// 白名单解析器一并排除，显示与加载保持一致）
+			enabled:
+				frontmatter["disable-model-invocation"] !== "true" &&
+				!disabledKeys.has(name.toLowerCase()),
 			valid: warnings.length === 0,
 			warnings,
 		};

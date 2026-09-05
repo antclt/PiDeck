@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -69,6 +69,36 @@ test("list on a regular project scans .pi/skills SKILL.md files", async () => {
 		assert.equal(result.skills[0].name, "mykit");
 		assert.equal(result.skills[0].sourceId, "project-pi");
 		assert.equal(result.extensions.length, 0);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("toggleSkill 写入项目 .pi/settings.json 的 disabledSkills 并反映到列表", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pideck-prm-toggle-"));
+	try {
+		const skillDir = join(root, ".pi", "skills");
+		mkdirSync(join(skillDir, "mykit"), { recursive: true });
+		writeFileSync(join(skillDir, "mykit", "SKILL.md"), "---\nname: MyKit\ndescription: Test kit\n---\n\n# MyKit\n");
+		const project = { id: "p1", name: "P1", path: root, lastOpenedAt: 1 };
+		const manager = managerFor(project);
+		const skillPath = join(skillDir, "mykit", "SKILL.md");
+
+		// 禁用：项目 settings 写入（名称保留原始大小写，比较不敏感）
+		const disabled = await manager.toggleSkill("p1", skillPath, false);
+		assert.equal(disabled.enabled, false);
+		const settings = JSON.parse(readFileSync(join(root, ".pi", "settings.json"), "utf8"));
+		assert.deepEqual(settings.disabledSkills, ["MyKit"]);
+
+		// 列表显示禁用
+		const listed = await manager.list("p1");
+		assert.equal(listed.skills[0].enabled, false);
+
+		// 启用：从 settings 移除
+		const enabled = await manager.toggleSkill("p1", skillPath, true);
+		assert.equal(enabled.enabled, true);
+		const after = JSON.parse(readFileSync(join(root, ".pi", "settings.json"), "utf8"));
+		assert.deepEqual(after.disabledSkills, []);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

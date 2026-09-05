@@ -37,6 +37,7 @@ import { mergeSubagentSources } from "./derivedSubagents";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
+import { createPiProcessSkillResolvers } from "../skills/piProcessSkillResolvers";
 import {
 	formatExtensionFallbackDebug,
 	shouldRetryWithoutExtensions,
@@ -533,7 +534,9 @@ export class AgentManager {
 		return new PiProcess(cwd, settings, undefined, {
 			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
 			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
+			// 技能解析器同源：禁用的技能在 RPC 启动时以 --no-skills + --skill 白名单剔除。
 			...createPiProcessExtensionResolvers(cwd, settings),
+			...createPiProcessSkillResolvers(cwd, settings),
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,

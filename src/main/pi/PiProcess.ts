@@ -13,7 +13,7 @@ import type { AppSettings } from "../../shared/types";
 import type { SessionProxyMode } from "../../shared/types/session";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { appendBuiltInExtensionArgs } from "../extensions/builtInExtensions";
-import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST } from "../extensions/extensionVersionGate";
+import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST } from "../extensions/extensionVersionGate";
 import { getAppLogger } from "../logging/sharedLogger";
 import { applyPiProxyMode } from "../sessions/sessionProxyPolicy";
 
@@ -31,6 +31,7 @@ type PiProcessSettings = Pick<
   | "piRpcNoSkills"
   | "removedBuiltInExtensions"
   | "disabledExtensions"
+  | "disabledSkills"
   | "disableExtensionWhitelist"
   | "autoSessionTitle"
 >;
@@ -55,6 +56,15 @@ type PiProcessOptions = {
    * 返回数组（可能为空）= 启用白名单，start() 附加 --no-extensions 并逐条注入。
    */
   resolveEnabledExtensionPaths?: (
+    settings?: PiProcessSettings,
+    cwd?: string,
+  ) => string[] | null;
+  /**
+   * 技能白名单模式解析器：全局/项目技能目录 + settings.skills + 包技能的全部启用路径。
+   * 返回 null = 无禁用项，不启用白名单（pi 自动发现全部技能）；
+   * 返回数组（可能为空）= 启用白名单，start() 附加 --no-skills 并逐条 --skill 注入。
+   */
+  resolveEnabledSkillPaths?: (
     settings?: PiProcessSettings,
     cwd?: string,
   ) => string[] | null;
@@ -373,6 +383,51 @@ export class PiProcess extends EventEmitter {
       }
     }
 
+    // 技能白名单模式：存在禁用技能时 --no-skills 关自动发现 + 逐条 --skill 注入未禁用的技能。
+    // pi 的 frontmatter disable-model-invocation 只阻止模型自动调用、不阻止加载（用户仍可
+    // /skill:name 手动触发）；「不加载」唯一可靠手段就是白名单（与扩展白名单同构）。
+    // 解析器返回 null = 无禁用项，不启用（pi 默认发现全部技能，兼容 PiDeck 未跟踪的安装）。
+    // piRpcNoSkills（诊断总开关）优先：已传 --no-skills 时不再注入，保证诊断路径干净。
+    const skillWhitelistPaths = this.options.resolveEnabledSkillPaths?.(this.settings, this.cwd) ?? null;
+    const useSkillWhitelist =
+      skillWhitelistPaths !== null &&
+      skillWhitelistPaths !== undefined &&
+      !this.settings?.piRpcNoSkills;
+    if (useSkillWhitelist) {
+      if (!trustOverride) await this.ensureVersionCheck(command);
+      const cachedSkillGate = PiProcess.versionCache.get(command);
+      const minorForSkillGate =
+        cachedSkillGate?.status === "done" ? cachedSkillGate.minorVersion : this.piMinorVersion;
+      if (
+        minorForSkillGate !== null &&
+        minorForSkillGate !== undefined &&
+        minorForSkillGate < MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST
+      ) {
+        // 版本过低：白名单不可用，恢复 pi 默认技能发现（禁用不生效，行为与未启用一致）。
+        void getAppLogger()?.warn("pi-process", "pi version too old for skill whitelist; falling back to default discovery", {
+          minorVersion: minorForSkillGate,
+          required: MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST,
+        });
+        console.warn(
+          `[PiProcess] pi ${minorForSkillGate}.x too old for skill disable whitelist (need >= ${MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST}); disabled skills will still load`,
+        );
+      } else {
+        // 白名单模式即使列表为空也要加 --no-skills：空列表表示「全部禁用」，不是「不启用」。
+        // useSkillWhitelist 已排除 piRpcNoSkills，此处不会与诊断开关重复加参数。
+        finalPiArgs.push("--no-skills");
+        for (const skillPath of skillWhitelistPaths) {
+          const trimmed = skillPath.trim();
+          if (!trimmed) continue;
+          finalPiArgs.push("--skill", trimmed);
+        }
+        void getAppLogger()?.info("pi-process", "Skill whitelist mode enabled", {
+          skills: skillWhitelistPaths.length,
+          cwd: this.cwd,
+        });
+        console.log(`[PiProcess] Skill whitelist mode: ${skillWhitelistPaths.length} skills via --skill`);
+      }
+    }
+
     let spawnCwd = this.cwd;
     let diagnosticCwd = this.cwd;
     let wslCwd: string | undefined;
@@ -387,7 +442,7 @@ export class PiProcess extends EventEmitter {
       // WSL 下 session 路径与 -e 扩展路径都需转成 Linux 路径，否则 pi 在 distro 内打不开 Windows 路径。
       finalPiArgs = finalPiArgs.map((arg, index) => {
         const prev = finalPiArgs[index - 1];
-        if (prev === "--session" || prev === "--extension" || prev === "-e") {
+        if (prev === "--session" || prev === "--extension" || prev === "-e" || prev === "--skill") {
           // 仅转换看起来像 Windows 绝对路径的参数，避免误伤相对路径/选项值
           if (/^[A-Za-z]:[\\/]/.test(arg) || arg.startsWith("\\\\")) {
             return toWslLinuxPath(arg, environment);

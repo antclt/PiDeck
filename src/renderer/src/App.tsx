@@ -606,9 +606,10 @@ export function App() {
     startupWindowMode: "last",
     piEnvironmentChecked: false,
     /** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
-    /** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
     disabledExtensions: [],
     disableExtensionWhitelist: false,
+    /** 技能禁用列表：与 SettingsStore 默认一致，空数组 = 不启用技能白名单 */
+    disabledSkills: [],
     sessionTabOpenMode: "preview",
     // 与 main SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
     autoSessionTitle: true,

@@ -291,6 +291,7 @@ import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensionResolvers";
+import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
 import { toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
@@ -3019,6 +3020,12 @@ app.whenReady().then(async () => {
 	promptManager = new PromptManager(undefined, mainCopy);
 	xuePromptManager = new XuePromptManager();
 	skillManager = new SkillManager(undefined, mainCopy);
+	// 注入设置读写：技能开关同步持久化禁用列表（--no-skills/--skill 白名单模式的依据），
+	// 跨重启保留，不再只依赖 SKILL.md frontmatter（该标记仅阻止模型自动调用）。
+	skillManager.configureSettings(
+		() => settingsStore.get(),
+		(patch) => settingsStore.update(patch),
+	);
 	// 启动时自动安装内置 usage-probe 技能模板到用户全局技能目录：
 	// pi 只扫 ~/.pi/agent/skills、~/.agents/skills，不读 pideck 打包资源目录（resources/skills），
 	// 必须落到用户目录，用户才能在聊天里 /skill:usage-probe 让 AI 引导写用量探针配置。
@@ -3571,12 +3578,20 @@ app.whenReady().then(async () => {
 				piRpcNoSkills: true,
 			},
 			piLocator,
-			// 与 AgentManager 同一套扩展解析（内置注入 + 禁用白名单），
+			// 与 AgentManager 同一套扩展/技能解析（内置注入 + 禁用白名单），
 			// 保证「选择器看到的模型」与「运行时实际加载的扩展」同源。
-			createPiProcessExtensionResolvers(
-				process.cwd(),
-				settingsStore.get(),
-			),
+			{
+				...createPiProcessExtensionResolvers(
+					process.cwd(),
+					settingsStore.get(),
+				),
+				// 技能白名单解析器同源注入；该进程固定 piRpcNoSkills（模型查询不需要技能），
+				// PiProcess 侧会因 noSkills 关闭白名单，此处仅为装配一致性。
+				...createPiProcessSkillResolvers(
+					process.cwd(),
+					settingsStore.get(),
+				),
+			},
 		),
 		getConfigDirectory: () => configManager.getConfigDir(),
 		watchDirectory: watchPiConfigDirectory,
