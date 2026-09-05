@@ -686,8 +686,8 @@ export const zhCN = {
   "sessionContext.tools": "工具",
   "sessionContext.compact": "压缩上下文",
   "sessionContext.compacting": "压缩中…",
-  "sessionContext.compactNotReady": "暂无需压缩",
-  "sessionContext.compactNotReadyHint": "上下文占用未到 30%，暂无需压缩",
+  "sessionContext.compactNotReady": "暂不可用",
+  "sessionContext.compactNotReadyHint": "暂无上下文数据，暂不可压缩",
   // 上下文面板里的 provider 用量/余额区块
   "sessionContext.usageHeader": "用量",
   "sessionContext.usageRolling": "滚动窗口",

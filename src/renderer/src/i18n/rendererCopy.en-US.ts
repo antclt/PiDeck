@@ -689,8 +689,8 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionContext.tools": "Tools",
   "sessionContext.compact": "Compact context",
   "sessionContext.compacting": "Compacting…",
-  "sessionContext.compactNotReady": "Not needed yet",
-  "sessionContext.compactNotReadyHint": "Context usage is below 30% — nothing to compact yet",
+  "sessionContext.compactNotReady": "Unavailable",
+  "sessionContext.compactNotReadyHint": "No context data yet — compaction unavailable",
   // Provider usage / balance section in the context panel
   "sessionContext.usageHeader": "Usage",
   "sessionContext.usageRolling": "Rolling",
