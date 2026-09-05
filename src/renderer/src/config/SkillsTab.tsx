@@ -427,13 +427,17 @@ function SkillTableRow(props: {
 			</TableCell>
 			<TableCell className="text-right">
 				<div className="flex justify-end gap-1">
-					<Button variant="ghost" size="icon-sm" className="size-7"
-						onClick={() => props.onToggle(skill, !effectiveEnabled)}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						className={`size-7${effectiveEnabled ? " text-accent" : ""}`}
 						disabled={inherited && !skill.enabled}
+						onClick={() => props.onToggle(skill, !effectiveEnabled)}
 						title={effectiveEnabled ? t("common.disable") : t("common.enabled")}
-						style={effectiveEnabled ? { color: "var(--color-accent)" } : undefined}
 					>
-						{effectiveEnabled ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
+						{effectiveEnabled
+							? <ToggleRight size={18} strokeWidth={1.8} />
+							: <ToggleLeft size={18} strokeWidth={1.8} />}
 					</Button>
 					{!inherited ? (
 						<>

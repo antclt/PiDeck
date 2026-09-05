@@ -215,13 +215,17 @@ export function PromptsTab(props: {
 					<TableCell className="text-right"><div className="flex justify-end gap-1">
 						{/* 内置推荐模板（builtin://）无磁盘文件，pi 不会加载，不提供开关 */}
 						{!template.path.startsWith("builtin://") && (
-							<Button variant="ghost" size="icon-sm" className="size-7"
-								onClick={() => props.onToggle(template, !effectiveEnabled)}
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className={`size-7${effectiveEnabled ? " text-accent" : ""}`}
 								disabled={inherited && template.enabled === false}
+								onClick={() => props.onToggle(template, !effectiveEnabled)}
 								title={effectiveEnabled ? t("common.disable") : t("common.enabled")}
-								style={effectiveEnabled ? { color: "var(--color-accent)" } : undefined}
 							>
-								{effectiveEnabled ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
+								{effectiveEnabled
+									? <ToggleRight size={18} strokeWidth={1.8} />
+									: <ToggleLeft size={18} strokeWidth={1.8} />}
 							</Button>
 						)}
 						{!inherited ? (

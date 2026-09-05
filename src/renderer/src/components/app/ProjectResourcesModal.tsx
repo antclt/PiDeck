@@ -551,9 +551,9 @@ export function ProjectResourcesModal(props: {
 									<Button
 										variant="ghost"
 										size="icon-sm"
+										className={`size-7${skill.enabled ? " text-accent" : ""}`}
 										onClick={() => void toggleSkill(skill)}
 										title={skill.enabled ? t("common.disable") : t("common.enabled")}
-										style={skill.enabled ? { color: "var(--color-accent)" } : undefined}
 									>
 										{skill.enabled ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
 									</Button>
@@ -595,9 +595,9 @@ export function ProjectResourcesModal(props: {
 									<Button
 										variant="ghost"
 										size="icon-sm"
+										className={`size-7${extension.enabled !== false ? " text-accent" : ""}`}
 										onClick={() => void toggleExtension(extension)}
 										title={extension.enabled !== false ? t("common.disable") : t("common.enabled")}
-										style={extension.enabled !== false ? { color: "var(--color-accent)" } : undefined}
 									>
 										{extension.enabled !== false ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
 									</Button>
