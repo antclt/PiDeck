@@ -292,6 +292,7 @@ import { readSkillContent } from "./skills/readSkillContent";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensionResolvers";
 import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
+import { createPiProcessPromptResolvers } from "./prompts/piProcessPromptResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
 import { toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
@@ -3018,6 +3019,12 @@ app.whenReady().then(async () => {
 		},
 	});
 	promptManager = new PromptManager(undefined, mainCopy);
+	// 注入设置读写：模板开关同步持久化禁用列表（--no-prompt-templates/--prompt-template
+	// 白名单模式的依据），跨重启保留。
+	promptManager.configureSettings(
+		() => settingsStore.get(),
+		(patch) => settingsStore.update(patch),
+	);
 	xuePromptManager = new XuePromptManager();
 	skillManager = new SkillManager(undefined, mainCopy);
 	// 注入设置读写：技能开关同步持久化禁用列表（--no-skills/--skill 白名单模式的依据），
@@ -3588,6 +3595,11 @@ app.whenReady().then(async () => {
 				// 技能白名单解析器同源注入；该进程固定 piRpcNoSkills（模型查询不需要技能），
 				// PiProcess 侧会因 noSkills 关闭白名单，此处仅为装配一致性。
 				...createPiProcessSkillResolvers(
+					process.cwd(),
+					settingsStore.get(),
+				),
+				// 提示词模板白名单解析器同源注入（与技能一致）。
+				...createPiProcessPromptResolvers(
 					process.cwd(),
 					settingsStore.get(),
 				),

@@ -148,6 +148,14 @@ function loadAgentManager() {
           }),
         };
       }
+      // 提示词模板白名单 resolver：本测试不涉及模板加载，透传空实现即可
+      if (specifier === "../prompts/piProcessPromptResolvers") {
+        return {
+          createPiProcessPromptResolvers: () => ({
+            resolveEnabledPromptPaths: () => null,
+          }),
+        };
+      }
       if (specifier === "../wsl/WslPaths") {
         return { toWindowsHostPath: (path) => path, toWslLinuxPath: (path) => path };
       }

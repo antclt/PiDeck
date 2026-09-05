@@ -1774,6 +1774,8 @@ export const zhCN = {
   "config.skillDeletedToast": "Skill 已删除，重启 agent 后生效",
   "config.skillRenamedToast": "Skill 已重命名，重启 agent 后生效",
   "config.promptRenamedToast": "提示词已重命名，重启 agent 后生效",
+  "config.promptDisabledToast": "提示词已禁用，重启 agent 后生效",
+  "config.promptEnabledToast": "提示词已启用，重启 agent 后生效",
   "config.skillDisabledToast": "Skill 已禁用，重启 agent 后生效",
   "config.skillEnabledToast": "Skill 已启用，重启 agent 后生效",
   "config.extensionUninstalledToast": "扩展已卸载，重启 agent 后生效",

@@ -249,6 +249,7 @@ export const ipcChannels = {
 	promptsDeleteInProject: "prompts:delete-in-project",
 	promptsRename: "prompts:rename",
 	promptsRenameInProject: "prompts:rename-in-project",
+	promptsToggle: "prompts:toggle",
 	promptStoreSearch: "prompt-store:search",
 	promptStoreGet: "prompt-store:get",
 	promptStoreImport: "prompt-store:import",

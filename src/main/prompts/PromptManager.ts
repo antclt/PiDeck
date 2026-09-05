@@ -5,6 +5,7 @@ import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { trashPath } from "../fs/trash";
 import type {
+	AppSettings,
 	CreatePiPromptTemplateInput,
 	PiPromptTemplateListResult,
 	PiPromptTemplateSummary,
@@ -201,12 +202,54 @@ when appropriate. If unsure whether a skill is needed, follow the rule:
 export class PromptManager {
 	private promptsDir: string;
 	private wslEnvironment: WslEnvironment | null = null;
+	/** PiDeck 设置的读取/写入（禁用列表持久化）；未配置时开关不生效（旧行为）。 */
+	private settingsProvider: (() => AppSettings) | null = null;
+	private settingsPatcher: ((patch: Partial<AppSettings>) => Promise<AppSettings>) | null = null;
 
 	constructor(
 		home?: string,
 		private readonly translate: PromptCopy = () => "Prompt operation failed.",
 	) {
 		this.promptsDir = join(home ?? homedir(), ".pi", "agent", "prompts");
+	}
+
+	/** 注入 PiDeck 设置读写：启用后 toggle 同步持久化禁用列表（模板白名单模式的依据）。 */
+	configureSettings(
+		getSettings: () => AppSettings,
+		patchSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>,
+	) {
+		this.settingsProvider = getSettings;
+		this.settingsPatcher = patchSettings;
+	}
+
+	/** 模板名是否在 PiDeck settings 禁用列表（小写比较；未配置 settings 时视为未禁用）。 */
+	private isDisabledInSettings(name: string): boolean {
+		if (!this.settingsProvider) return false;
+		const key = name.toLowerCase();
+		return (this.settingsProvider().disabledPrompts ?? []).some(
+			(disabledName) => disabledName.toLowerCase() === key,
+		);
+	}
+
+	/**
+	 * 开关模板：写 PiDeck settings 禁用列表（模板白名单模式 --no-prompt-templates/
+	 * --prompt-template 的依据）。内置推荐模板（builtin://，无磁盘文件）不可禁用。
+	 */
+	async toggle(filePath: string, enabled: boolean): Promise<PiPromptTemplateSummary> {
+		const { templates } = await this.list();
+		const template = templates.find((t) => t.path === filePath);
+		if (!template) throw new Error(this.translate("mainPrompt.fileNotFound"));
+		if (template.path.startsWith("builtin://")) {
+			throw new Error(this.translate("mainPrompt.builtinCannotDisable"));
+		}
+		if (this.settingsProvider && this.settingsPatcher) {
+			const current = this.settingsProvider().disabledPrompts ?? [];
+			const nameKey = template.name.toLowerCase();
+			const nextList = current.filter((name) => name.toLowerCase() !== nameKey);
+			if (!enabled) nextList.push(template.name);
+			await this.settingsPatcher({ disabledPrompts: nextList });
+		}
+		return { ...template, enabled };
 	}
 
 	/** 将 prompt 目录切换到统一解析出的 WSL HOME；null 恢复 Windows home。 */
@@ -258,6 +301,8 @@ export class PromptManager {
 				content: raw,
 				userCreated: true,
 				scope: "global",
+				// 禁用状态 = PiDeck settings 禁用列表（模板白名单模式的依据）
+				enabled: !this.isDisabledInSettings(name),
 			});
 		}
 
@@ -265,7 +310,7 @@ export class PromptManager {
 		const userNames = new Set(templates.map((t) => t.name));
 		for (const builtin of BUILTIN_TEMPLATES) {
 			if (!userNames.has(builtin.name)) {
-				templates.push(builtin);
+				templates.push({ ...builtin, enabled: true });
 			}
 		}
 
@@ -331,6 +376,7 @@ export class PromptManager {
 				content: raw,
 				userCreated: true,
 				scope: "project",
+				enabled: !this.isDisabledInSettings(name),
 			});
 		}
 		templates.sort((a, b) => a.name.localeCompare(b.name));

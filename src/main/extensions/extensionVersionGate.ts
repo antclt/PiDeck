@@ -22,6 +22,13 @@ export const MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST = 60;
 export const MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST = 60;
 
 /**
+ * 提示词模板白名单模式（--no-prompt-templates + 逐条 --prompt-template 注入）的版本门槛。
+ * `--prompt-template` 与 `--no-prompt-templates` 与 --skill/--no-skills 同批引入
+ * （pi 0.50.0 的 CLI flags，CHANGELOG #645），保守沿用 60 与扩展/技能同一门槛。
+ */
+export const MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST = 60;
+
+/**
  * 从 pi 版本串（如 "0.82.1" / "v0.60.0"）解析次版本号；解析失败返回 null（视为版本未知）。
  */
 export function parsePiMinorVersion(version: string | null | undefined): number | null {

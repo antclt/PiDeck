@@ -205,6 +205,10 @@ Gitmoji 对应关系：
   /** 用户禁用的全局技能名（小写 name）；非空时 RPC 启动走 --no-skills + --skill 白名单 */
   disabledSkills: [],
 
+  // ── 提示词模板管理 ──
+  /** 用户禁用的全局提示词模板名（小写 name）；非空时 RPC 启动走 --no-prompt-templates + --prompt-template 白名单 */
+  disabledPrompts: [],
+
   // 生图参数：记在 composer 底栏，跨会话复用；缺省不指定分辨率、不带水印
   imageGenSize: DEFAULT_IMAGE_GEN_SIZE,
   imageGenWatermark: DEFAULT_IMAGE_GEN_WATERMARK,

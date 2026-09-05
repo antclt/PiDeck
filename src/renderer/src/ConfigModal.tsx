@@ -1804,6 +1804,17 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		}
 	};
 
+	const handleTogglePrompt = async (template: PiPromptTemplateSummary, enabled: boolean) => {
+		setError(null);
+		try {
+			await api.prompts.toggle(template.path, enabled);
+			await refreshPrompts();
+			showToast(enabled ? t("config.promptEnabledToast") : t("config.promptDisabledToast"));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+	};
+
 	const handleQuickSavePrompt = async (): Promise<boolean> => {
 		if (!editingPrompt || editPromptSaving) return false;
 		setEditPromptSaving(true);
@@ -2549,6 +2560,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							onDelete={setDeletePromptConfirm}
 							onEdit={handleEditPrompt}
 							onRename={handleRenamePrompt}
+							onToggle={handleTogglePrompt}
 							onQuickSave={handleQuickSavePrompt}
 							onCancelEdit={handleCancelEditPrompt}
 							onChangeEditContent={(value) => {

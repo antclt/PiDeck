@@ -80,6 +80,11 @@ export function registerStoreIpc({
 		void appLogger.info("prompt", "Project prompt template renamed", { projectPath, oldName, newName });
 		return result;
 	});
+	ipcMain.handle(ipcChannels.promptsToggle, async (_event, filePath: string, enabled: boolean) => {
+		const result = await promptManager.toggle(filePath, enabled);
+		void appLogger.info("prompt", "Prompt template toggled", { filePath, enabled });
+		return result;
+	});
 
 	// ── Prompt Store (prompts.chat) ──────────────────────────────────────
 	const PROMPT_STORE_BASE = "https://prompts.chat/api";

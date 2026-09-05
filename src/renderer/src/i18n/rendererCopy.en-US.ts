@@ -1785,6 +1785,10 @@ export const enUS: Record<TranslationKey, string> = {
     "Skill renamed. Restart agents for it to take effect.",
   "config.promptRenamedToast":
     "Prompt renamed. Restart agents for it to take effect.",
+  "config.promptDisabledToast":
+    "Prompt disabled. Restart agents for it to take effect.",
+  "config.promptEnabledToast":
+    "Prompt enabled. Restart agents for it to take effect.",
   "config.skillDisabledToast":
     "Skill disabled. Restart agents for it to take effect.",
   "config.skillEnabledToast":

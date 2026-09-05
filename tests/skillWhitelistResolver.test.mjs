@@ -9,10 +9,33 @@ import vm from "node:vm";
 
 const nodeRequire = createRequire(import.meta.url);
 
+/** 加载 resourceWhitelist.ts（公共过滤规则，ts → CJS → vm 沙箱）。 */
+function loadResourceWhitelist() {
+	const source = readFileSync("src/main/resourceWhitelist.ts", "utf8");
+	const { outputText } = ts.transpileModule(source, {
+		compilerOptions: {
+			module: ts.ModuleKind.CommonJS,
+			target: ts.ScriptTarget.ES2022,
+		},
+	});
+	const module = { exports: {} };
+	vm.runInNewContext(outputText, {
+		module,
+		exports: module.exports,
+		require: (specifier) => {
+			if (specifier === "minimatch") return nodeRequire("minimatch");
+			if (specifier === "ignore") return nodeRequire("ignore");
+			return nodeRequire(specifier);
+		},
+	}, { filename: "resourceWhitelist.ts" });
+	return module.exports;
+}
+
 /**
  * 加载 skillWhitelistResolver.ts（技能白名单路径解析，纯 fs 逻辑，无外部依赖）。
  */
 function loadResolverModule() {
+	const resourceWhitelist = loadResourceWhitelist();
 	const source = readFileSync("src/main/skills/skillWhitelistResolver.ts", "utf8");
 	const { outputText } = ts.transpileModule(source, {
 		compilerOptions: {
@@ -24,7 +47,10 @@ function loadResolverModule() {
 	vm.runInNewContext(outputText, {
 		module,
 		exports: module.exports,
-		require: (specifier) => nodeRequire(specifier),
+		require: (specifier) => {
+			if (specifier === "../resourceWhitelist") return resourceWhitelist;
+			return nodeRequire(specifier);
+		},
 	}, { filename: "skillWhitelistResolver.ts" });
 	return module.exports;
 }

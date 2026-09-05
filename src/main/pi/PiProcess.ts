@@ -13,7 +13,7 @@ import type { AppSettings } from "../../shared/types";
 import type { SessionProxyMode } from "../../shared/types/session";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { appendBuiltInExtensionArgs } from "../extensions/builtInExtensions";
-import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST } from "../extensions/extensionVersionGate";
+import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST, MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST } from "../extensions/extensionVersionGate";
 import { getAppLogger } from "../logging/sharedLogger";
 import { applyPiProxyMode } from "../sessions/sessionProxyPolicy";
 
@@ -32,6 +32,7 @@ type PiProcessSettings = Pick<
   | "removedBuiltInExtensions"
   | "disabledExtensions"
   | "disabledSkills"
+  | "disabledPrompts"
   | "disableExtensionWhitelist"
   | "autoSessionTitle"
 >;
@@ -65,6 +66,15 @@ type PiProcessOptions = {
    * 返回数组（可能为空）= 启用白名单，start() 附加 --no-skills 并逐条 --skill 注入。
    */
   resolveEnabledSkillPaths?: (
+    settings?: PiProcessSettings,
+    cwd?: string,
+  ) => string[] | null;
+  /**
+   * 提示词模板白名单模式解析器：全局/项目 prompts 目录 + settings.prompts + 包模板的全部启用路径。
+   * 返回 null = 无禁用项，不启用白名单（pi 自动发现全部模板）；
+   * 返回数组（可能为空）= 启用白名单，start() 附加 --no-prompt-templates 并逐条 --prompt-template 注入。
+   */
+  resolveEnabledPromptPaths?: (
     settings?: PiProcessSettings,
     cwd?: string,
   ) => string[] | null;
@@ -428,6 +438,47 @@ export class PiProcess extends EventEmitter {
       }
     }
 
+    // 提示词模板白名单模式：与技能白名单同构。存在禁用模板时 --no-prompt-templates 关自动
+    // 发现 + 逐条 --prompt-template 注入未禁用的模板（/name 命令只展开白名单内的模板）。
+    // 解析器返回 null = 无禁用项，不启用（pi 默认发现全部模板）。
+    const promptWhitelistPaths = this.options.resolveEnabledPromptPaths?.(this.settings, this.cwd) ?? null;
+    const usePromptWhitelist =
+      promptWhitelistPaths !== null &&
+      promptWhitelistPaths !== undefined;
+    if (usePromptWhitelist) {
+      if (!trustOverride) await this.ensureVersionCheck(command);
+      const cachedPromptGate = PiProcess.versionCache.get(command);
+      const minorForPromptGate =
+        cachedPromptGate?.status === "done" ? cachedPromptGate.minorVersion : this.piMinorVersion;
+      if (
+        minorForPromptGate !== null &&
+        minorForPromptGate !== undefined &&
+        minorForPromptGate < MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST
+      ) {
+        // 版本过低：白名单不可用，恢复 pi 默认模板发现（禁用不生效，行为与未启用一致）。
+        void getAppLogger()?.warn("pi-process", "pi version too old for prompt whitelist; falling back to default discovery", {
+          minorVersion: minorForPromptGate,
+          required: MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST,
+        });
+        console.warn(
+          `[PiProcess] pi ${minorForPromptGate}.x too old for prompt disable whitelist (need >= ${MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST}); disabled prompts will still load`,
+        );
+      } else {
+        // 白名单模式即使列表为空也要加 --no-prompt-templates：空列表表示「全部禁用」。
+        finalPiArgs.push("--no-prompt-templates");
+        for (const promptPath of promptWhitelistPaths) {
+          const trimmed = promptPath.trim();
+          if (!trimmed) continue;
+          finalPiArgs.push("--prompt-template", trimmed);
+        }
+        void getAppLogger()?.info("pi-process", "Prompt whitelist mode enabled", {
+          prompts: promptWhitelistPaths.length,
+          cwd: this.cwd,
+        });
+        console.log(`[PiProcess] Prompt whitelist mode: ${promptWhitelistPaths.length} prompts via --prompt-template`);
+      }
+    }
+
     let spawnCwd = this.cwd;
     let diagnosticCwd = this.cwd;
     let wslCwd: string | undefined;
@@ -442,7 +493,7 @@ export class PiProcess extends EventEmitter {
       // WSL 下 session 路径与 -e 扩展路径都需转成 Linux 路径，否则 pi 在 distro 内打不开 Windows 路径。
       finalPiArgs = finalPiArgs.map((arg, index) => {
         const prev = finalPiArgs[index - 1];
-        if (prev === "--session" || prev === "--extension" || prev === "-e" || prev === "--skill") {
+        if (prev === "--session" || prev === "--extension" || prev === "-e" || prev === "--skill" || prev === "--prompt-template") {
           // 仅转换看起来像 Windows 绝对路径的参数，避免误伤相对路径/选项值
           if (/^[A-Za-z]:[\\/]/.test(arg) || arg.startsWith("\\\\")) {
             return toWslLinuxPath(arg, environment);

@@ -114,6 +114,8 @@ let previewSettings: AppSettings = {
 	disableExtensionWhitelist: false,
 	/** 技能禁用列表：与 SettingsStore 默认一致，预览壳不启用技能白名单 */
 	disabledSkills: [],
+	/** 提示词模板禁用列表：与 SettingsStore 默认一致，预览壳不启用模板白名单 */
+	disabledPrompts: [],
 	sessionTabOpenMode: "preview",
 	// 与 SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
 	busySendDelivery: "steer",
@@ -1040,6 +1042,14 @@ export function createPreviewApi(): PiDesktopApi {
 				content: `---\ndescription: Renamed project prompt\n---\n`,
 				userCreated: true,
 				scope: "project",
+			}),
+			toggle: async (filePath, enabled) => ({
+				name: filePath.split("/").pop()?.replace(/\.md$/, "") ?? "prompt",
+				path: filePath,
+				description: "Preview prompt",
+				content: "",
+				userCreated: true,
+				enabled,
 			}),
 		},
 		promptStore: {

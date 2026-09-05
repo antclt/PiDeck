@@ -252,6 +252,48 @@ test("无禁用技能（resolver 返回 null）时不注入 --no-skills/--skill"
 	assert.ok(!captured.args.includes("--skill"), "无禁用项时不应注入 --skill");
 });
 
+test("存在禁用模板时注入 --no-prompt-templates + 逐条 --prompt-template 白名单", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
+	const proc = new PiProcess(
+		"C:\\proj",
+		{ wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" },
+		mockLocator,
+		{
+			// 模拟模板白名单解析器：存在禁用项 → 返回启用模板路径
+			resolveEnabledPromptPaths: () => ["C:\\Users\\tester\\prompts\\a.md", "C:\\Users\\tester\\prompts\\b.md"],
+			securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+		},
+	);
+	await proc.start(undefined, undefined, true);
+	const captured = getCaptured();
+	assert.ok(captured?.args, "spawn 应被调用");
+	const idx = captured.args.indexOf("--no-prompt-templates");
+	assert.ok(idx >= 0, "模板白名单模式应注入 --no-prompt-templates");
+	assert.equal(captured.args[idx + 1], "--prompt-template");
+	// WSL 模式：--prompt-template 后的路径同样被转换为 distro 内 Linux 路径
+	assert.equal(captured.args[idx + 2], "/mnt/c/Users/tester/prompts/a.md");
+	assert.equal(captured.args[idx + 3], "--prompt-template");
+	assert.equal(captured.args[idx + 4], "/mnt/c/Users/tester/prompts/b.md");
+});
+
+test("无禁用模板（resolver 返回 null）时不注入 --no-prompt-templates/--prompt-template", async () => {
+	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
+	const proc = new PiProcess(
+		"C:\\proj",
+		{ wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" },
+		mockLocator,
+		{
+			resolveEnabledPromptPaths: () => null,
+			securitySnapshotPath: "C:\\Users\\tester\\AppData\\Roaming\\PiDeck-dev\\security-policy.json",
+		},
+	);
+	await proc.start(undefined, undefined, true);
+	const captured = getCaptured();
+	assert.ok(captured?.args, "spawn 应被调用");
+	assert.ok(!captured.args.includes("--no-prompt-templates"), "无禁用项时不应注入 --no-prompt-templates");
+	assert.ok(!captured.args.includes("--prompt-template"), "无禁用项时不应注入 --prompt-template");
+});
+
 test("piRpcNoSkills 总开关开启时不注入技能白名单", async () => {
 	const { PiProcess, mockLocator, getCaptured } = loadPiProcess();
 	const proc = new PiProcess(

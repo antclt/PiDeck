@@ -186,6 +186,14 @@ function loadAgentManagerModule() {
           }),
         };
       }
+      // 提示词模板白名单 resolver：本测试不涉及模板加载，透传空实现即可
+      if (specifier === "../prompts/piProcessPromptResolvers") {
+        return {
+          createPiProcessPromptResolvers: () => ({
+            resolveEnabledPromptPaths: () => null,
+          }),
+        };
+      }
       if (specifier === "../../shared/ipc") return { ipcChannels: {} };
       if (specifier === "./PiProcess") return { PiProcess: class {} };
       if (specifier === "./bashResult") return { formatBashToolMessage: () => "" };

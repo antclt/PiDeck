@@ -1322,6 +1322,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.promptsRename, oldName, newName) as Promise<PiPromptTemplateSummary>,
 		renameInProject: (projectPath: string, oldName: string, newName: string) =>
 			ipcRenderer.invoke(ipcChannels.promptsRenameInProject, projectPath, oldName, newName) as Promise<PiPromptTemplateSummary>,
+		toggle: (filePath: string, enabled: boolean) =>
+			ipcRenderer.invoke(ipcChannels.promptsToggle, filePath, enabled) as Promise<PiPromptTemplateSummary>,
 	},
 	promptStore: {
 		search: (query: string, options?: { limit?: number; type?: string; category?: string; tag?: string }) =>

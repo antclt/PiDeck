@@ -417,6 +417,15 @@ export type AppSettings = {
 	 */
 	disabledSkills: string[];
 
+	/**
+	 * 用户禁用的全局提示词模板名列表（与 PromptManager.list 的 name 一致，比较时小写），
+	 * 存储于 PiDeck 自身设置（不写 pi settings）。
+	 * 完全禁用只能靠 PiDeck 启动 RPC 时切「白名单模式」：--no-prompt-templates +
+	 * 逐条 --prompt-template 注入未禁用模板（见 promptWhitelistResolver）。
+	 * 列表为空 = 白名单关闭，pi 自动发现全部模板。
+	 */
+	disabledPrompts: string[];
+
 	// ── 生图模式（composer 底栏记忆，不是独立设置页） ──
 	/** 生图尺寸：unset=不发送 size；或 OpenAI WxH / 火山 1K/2K/4K */
 	imageGenSize: string;

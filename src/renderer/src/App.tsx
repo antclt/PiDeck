@@ -610,6 +610,8 @@ export function App() {
     disableExtensionWhitelist: false,
     /** 技能禁用列表：与 SettingsStore 默认一致，空数组 = 不启用技能白名单 */
     disabledSkills: [],
+    /** 提示词模板禁用列表：与 SettingsStore 默认一致，空数组 = 不启用模板白名单 */
+    disabledPrompts: [],
     sessionTabOpenMode: "preview",
     // 与 main SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
     autoSessionTitle: true,

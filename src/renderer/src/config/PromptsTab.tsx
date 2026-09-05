@@ -3,7 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Tabs, TabsList, TabsTrigger } from "../components/ui-shadcn/tabs";
 import { showNotice } from "../utils/notice";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, FileEdit, FileText, Pencil, ShoppingBag, Trash2, X } from "lucide-react";
+import { Check, FileEdit, FileText, Pencil, ShoppingBag, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import type {
 	CreatePiPromptTemplateInput,
 	PiPromptTemplateListResult,
@@ -38,6 +38,7 @@ export function PromptsTab(props: {
 	onDelete: (template: PiPromptTemplateSummary) => void;
 	onEdit: (template: PiPromptTemplateSummary) => void;
 	onRename: (template: PiPromptTemplateSummary, newName: string) => Promise<void>;
+	onToggle: (template: PiPromptTemplateSummary, enabled: boolean) => void;
 	onCancelEdit: () => void;
 	onQuickSave: () => void;
 	onChangeEditContent: (value: string) => void;
@@ -197,11 +198,21 @@ export function PromptsTab(props: {
 											<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setRenamingTemplate(null)} disabled={renameBusy} title={t("common.cancel")}><X size={14} strokeWidth={2} /></Button>
 										</div>
 									) : (
-										<button type="button" className="prompts-list-item-info" onClick={() => props.onEdit(template)} title={t("common.edit")}><span className="flex min-w-0 items-center gap-2"><FileText size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" /><strong className="truncate">/{template.name}</strong></span></button>
+										<button type="button" className="prompts-list-item-info" onClick={() => props.onEdit(template)} title={t("common.edit")}><span className="flex min-w-0 items-center gap-2"><FileText size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" /><strong className="truncate">/{template.name}</strong>{template.enabled !== false ? <span className="skill-state enabled">{t("common.enabled")}</span> : <span className="skill-state disabled">{t("common.disabled")}</span>}</span></button>
 									)}
 								</TableCell>
 								<TableCell className="whitespace-normal break-words text-caption leading-relaxed text-text-secondary" title={template.description}>{template.description}</TableCell>
 								<TableCell className="text-right"><div className="flex justify-end gap-1">
+									{/* 内置推荐模板（builtin://）无磁盘文件，pi 不会加载，不提供开关 */}
+									{!template.path.startsWith("builtin://") && (
+										<Button variant="ghost" size="icon-sm" className="size-7"
+											onClick={() => props.onToggle(template, template.enabled === false)}
+											title={template.enabled === false ? t("common.enabled") : t("common.disable")}
+											style={template.enabled !== false ? { color: "var(--color-accent)" } : undefined}
+										>
+											{template.enabled === false ? <ToggleLeft size={18} strokeWidth={1.8} /> : <ToggleRight size={18} strokeWidth={1.8} />}
+										</Button>
+									)}
 									<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => props.onEdit(template)} title={t("common.edit")}><Pencil size={14} strokeWidth={1.8} /></Button>
 									<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => { setRenamingTemplate(template.path); setRenameValue(template.name); }} title={t("common.rename")}><FileEdit size={14} strokeWidth={1.8} /></Button>
 									<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => props.onDelete(template)} title={t("common.delete")}><Trash2 size={14} strokeWidth={1.8} /></Button>
