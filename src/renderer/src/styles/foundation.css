@@ -802,11 +802,12 @@ select:focus-visible {
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  /* Spinner 是进行中操作的功能反馈，不是装饰性动效；保留其线性旋转，
-     其余动画仍按系统偏好压缩为单帧。 */
-  *:not(.animate-pideck-spin),
-  *:not(.animate-pideck-spin)::before,
-  *:not(.animate-pideck-spin)::after {
+  /* Spinner 是进行中操作的功能反馈，不是装饰性动效；标题滚动是用户主动
+     hover 触发的「查看完整标题」功能行为（压成单帧会直接跳尾，无法阅读）。
+     两者保留其线性运动，其余动画仍按系统偏好压缩为单帧。 */
+  *:not(.animate-pideck-spin):not(.animate-title-scroll),
+  *:not(.animate-pideck-spin):not(.animate-title-scroll)::before,
+  *:not(.animate-pideck-spin):not(.animate-title-scroll)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
