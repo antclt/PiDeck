@@ -4023,7 +4023,9 @@ export function App() {
       onRestartWebService={restartWebService}
       appInfo={appInfo}
       onChange={updateSettings}
-      projectPath={activeProject?.path}
+      projectId={activeProject?.id}
+      projectKind={activeProject?.kind}
+      projectName={activeProject?.name}
     />
     {/*
      * 问题反馈弹窗的「新建会话分析」依赖 App 级会话创建能力（createSessionDraftWithTab），

@@ -605,9 +605,9 @@ export function useSessionComposerController(
     } catch {
       // Project templates remain usable when the global store is unavailable.
     }
-    if (record?.projectPath) {
+    if (record?.projectId) {
       try {
-        const projectResult = await desktopApi.prompts.listByProject(record.projectPath);
+        const projectResult = await desktopApi.prompts.listByProject(record.projectId);
         next.push(...projectResult.templates.map((template) => ({
           ...template,
           argumentHint: parseArgumentHint(template.content),
@@ -620,7 +620,7 @@ export function useSessionComposerController(
       setTemplateState({ key: templateKey, items: next });
     }
     return next;
-  }, [record?.projectPath, sessionId, templateKey]);
+  }, [record?.projectId, sessionId, templateKey]);
 
   useEffect(() => {
     liveDomDraftRef.current = { sessionId, value: draft };

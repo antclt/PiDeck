@@ -3,48 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { createRequire } from "node:module";
-import ts from "typescript";
-import vm from "node:vm";
-
-const nodeRequire = createRequire(import.meta.url);
-
-/** 加载 resourceWhitelist.ts（公共过滤规则，与 skillWhitelistResolver 测试同构）。 */
-function loadResourceWhitelist() {
-	const source = readFileSync("src/main/resourceWhitelist.ts", "utf8");
-	const { outputText } = ts.transpileModule(source, {
-		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-	});
-	const module = { exports: {} };
-	vm.runInNewContext(outputText, {
-		module,
-		exports: module.exports,
-		require: (specifier) => {
-			if (specifier === "minimatch") return nodeRequire("minimatch");
-			if (specifier === "ignore") return nodeRequire("ignore");
-			return nodeRequire(specifier);
-		},
-	}, { filename: "resourceWhitelist.ts" });
-	return module.exports;
-}
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /** 加载 promptWhitelistResolver.ts（提示词模板白名单路径解析）。 */
 function loadResolverModule() {
-	const resourceWhitelist = loadResourceWhitelist();
-	const source = readFileSync("src/main/prompts/promptWhitelistResolver.ts", "utf8");
-	const { outputText } = ts.transpileModule(source, {
-		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-	});
-	const module = { exports: {} };
-	vm.runInNewContext(outputText, {
-		module,
-		exports: module.exports,
-		require: (specifier) => {
-			if (specifier === "../resourceWhitelist") return resourceWhitelist;
-			return nodeRequire(specifier);
-		},
-	}, { filename: "promptWhitelistResolver.ts" });
-	return module.exports;
+	return loadTsCommonJs("src/main/prompts/promptWhitelistResolver.ts");
 }
 
 /** 在临时根下构造 ~/.pi/agent + <cwd>/.pi 项目目录骨架（建 .git 截断祖先链）。 */
@@ -94,12 +57,13 @@ test("无禁用项时关闭白名单（返回 null）", () => {
 	}
 });
 
-test("有禁用项时枚举全局/项目模板并剔除禁用项（递归收集 .md，无 agents 目录）", () => {
+test("有禁用项时仅枚举全局/项目 prompts 目录的顶层 .md（无 agents 目录）", () => {
 	const { resolveEnabledPromptPaths } = loadResolverModule();
 	const { root, home, agentDir, cwd } = setupFixtures();
 	try {
 		promptMd(join(agentDir, "prompts"), "review.md");
 		promptMd(join(agentDir, "prompts"), "disabled.md");
+		// Nested prompts are not auto-discovered in pi 0.85; they require an explicit settings path.
 		promptMd(join(agentDir, "prompts", "nested", "sub"), "deep.md");
 		// .d.md 也被 pi 加载（collectFiles /\.md$/），白名单枚举必须包含
 		promptMd(join(agentDir, "prompts"), "hidden.d.md");
@@ -114,7 +78,6 @@ test("有禁用项时枚举全局/项目模板并剔除禁用项（递归收集 
 		assert.ok(result, "有禁用项时必须启用白名单");
 		same(result, [
 			join(agentDir, "prompts", "review.md"),
-			join(agentDir, "prompts", "nested", "sub", "deep.md"),
 			join(agentDir, "prompts", "hidden.d.md"),
 			join(cwd, ".pi", "prompts", "project-prompt.md"),
 		]);
@@ -224,6 +187,71 @@ test("manifest pi.prompts 声明的 patterns 过滤生效（! 排除）", () => 
 		const result = resolveEnabledPromptPaths({ agentHomeDir: home, cwd, disabledNames: ["nonexistent"] });
 		assert.ok(result);
 		same(result, [join(pkgDir, "custom", "alpha.md")]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("全局禁用与项目同名模板相互隔离", () => {
+	const { resolveEnabledPromptPaths } = loadResolverModule();
+	const { root, home, agentDir, cwd } = setupFixtures();
+	try {
+		promptMd(join(agentDir, "prompts"), "shared.md");
+		promptMd(join(cwd, ".pi", "prompts"), "shared.md");
+		const result = resolveEnabledPromptPaths({ agentHomeDir: home, cwd, disabledNames: ["shared"] });
+		assert.ok(result);
+		same(result, [join(cwd, ".pi", "prompts", "shared.md")]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("项目继承覆盖只禁用全局模板，保留项目同名模板", () => {
+	const { resolveEnabledPromptPaths } = loadResolverModule();
+	const { root, home, agentDir, cwd, put } = setupFixtures();
+	try {
+		promptMd(join(agentDir, "prompts"), "shared.md");
+		const projectPrompt = join(cwd, ".pi", "prompts", "shared.md");
+		promptMd(join(cwd, ".pi", "prompts"), "shared.md");
+		put("project/.pi/settings.json", JSON.stringify({
+			pideckDisabledGlobalPrompts: ["shared"],
+		}));
+		const result = resolveEnabledPromptPaths({ agentHomeDir: home, cwd, disabledNames: [] });
+		assert.ok(result);
+		same(result, [projectPrompt]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("项目 settings 的相对 prompt 路径以 <cwd>/.pi 为基准", () => {
+	const { resolveEnabledPromptPaths } = loadResolverModule();
+	const { root, home, cwd, put } = setupFixtures();
+	try {
+		promptMd(join(cwd, ".pi", "extra", "nested"), "project-explicit.md");
+		put("project/.pi/settings.json", JSON.stringify({ prompts: ["extra"] }));
+		const result = resolveEnabledPromptPaths({ agentHomeDir: home, cwd, disabledNames: ["missing"] });
+		assert.ok(result);
+		same(result, [join(cwd, ".pi", "extra", "nested", "project-explicit.md")]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("拒绝项目 trust 时强制全局白名单且忽略项目模板", () => {
+	const { resolveEnabledPromptPaths } = loadResolverModule();
+	const { root, home, agentDir, cwd } = setupFixtures();
+	try {
+		promptMd(join(agentDir, "prompts"), "global.md");
+		promptMd(join(cwd, ".pi", "prompts"), "project.md");
+		const result = resolveEnabledPromptPaths({
+			agentHomeDir: home,
+			cwd,
+			disabledNames: [],
+			includeProjectResources: false,
+		});
+		assert.ok(result);
+		same(result, [join(agentDir, "prompts", "global.md")]);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

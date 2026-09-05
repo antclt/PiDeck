@@ -1,4 +1,4 @@
-import type { PiSkillSummary } from "./skills";
+import type { PiSkillLocation, PiSkillSummary } from "./skills";
 
 // ── Pi / NPM / Config ──────────────────────────────────────────────────
 
@@ -48,15 +48,69 @@ export type ConfigFileReadResult<T> = {
 
 // ── Project Resources / Extensions ─────────────────────────────────────
 
+export type ProjectResourceOverrides = {
+	/** 当前项目禁用的全局扩展 source；不修改全局启用状态。 */
+	disabledGlobalExtensions: string[];
+	/** 当前项目禁用的全局技能稳定键（sourceId:name）。 */
+	disabledGlobalSkills: string[];
+	/** 当前项目禁用的全局提示词稳定键（规范化 name）。 */
+	disabledGlobalPrompts: string[];
+};
+
+export type ProjectInheritedResourceToggleInput = {
+	projectId: string;
+	kind: "extension" | "skill" | "prompt";
+	key: string;
+	enabled: boolean;
+};
+
 export type ProjectResourceListResult = {
 	skills: PiSkillSummary[];
 	extensions: PiExtensionSummary[];
+	skillLocations: PiSkillLocation[];
+	overrides: ProjectResourceOverrides;
 };
+
+/** 运行时发现的资源（packages / settings 显式路径 / 祖先 .agents/skills）的只读描述。 */
+export type ProjectResourceDiscoveryResult = {
+	skills: Array<{
+		id: string;
+		name: string;
+		path: string;
+		dir: string;
+		sourceId: string;
+		sourceLabel: string;
+		description: string;
+		enabled: boolean;
+		managed: boolean;
+	}>;
+	prompts: Array<{
+		name: string;
+		path: string;
+		sourceId: string;
+		sourceLabel: string;
+		description: string;
+		enabled: boolean;
+		managed: boolean;
+	}>;
+	extensions: Array<{
+		source: string;
+		path: string;
+		sourceId: string;
+		sourceLabel: string;
+		physicalScope: "user" | "project";
+		enabled: boolean;
+		managed: boolean;
+	}>;
+};
+
+export type ProjectResourceDirectoryKind = "project-pi" | "project-agents" | "prompts";
 
 export type CreateProjectSkillInput = {
 	projectId: string;
 	name: string;
 	description: string;
+	locationId: Extract<PiSkillLocation["id"], "project-pi" | "project-agents">;
 };
 
 export type PiExtensionSummary = {

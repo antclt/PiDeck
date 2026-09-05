@@ -150,10 +150,37 @@ export function matchesAnyPattern(filePath: string, patterns: string[], baseDir:
 	});
 }
 
+function normalizeExactPattern(pattern: string): string {
+	const normalized = pattern.startsWith("./") || pattern.startsWith(".\\")
+		? pattern.slice(2)
+		: pattern;
+	return toPosixPath(normalized);
+}
+
+/** `+`/`-` overrides in pi 0.85 match exact paths, never glob expressions or bare filenames. */
+export function matchesAnyExactPattern(filePath: string, patterns: string[], baseDir: string): boolean {
+	if (patterns.length === 0) return false;
+	const rel = toPosixPath(relative(baseDir, filePath));
+	const filePathPosix = toPosixPath(filePath);
+	const isSkillFile = basename(filePath) === SKILL_FILE;
+	const parentDir = isSkillFile ? dirname(filePath) : undefined;
+	const parentRel = parentDir ? toPosixPath(relative(baseDir, parentDir)) : undefined;
+	const parentDirPosix = parentDir ? toPosixPath(parentDir) : undefined;
+	return patterns.some((pattern) => {
+		const normalized = normalizeExactPattern(pattern);
+		if (normalized === rel || normalized === filePathPosix) return true;
+		return Boolean(
+			isSkillFile &&
+			parentRel !== undefined &&
+			parentDirPosix !== undefined &&
+			(normalized === parentRel || normalized === parentDirPosix),
+		);
+	});
+}
+
 /**
  * settings 数组的 override 过滤（对齐 pi 的 isEnabledByOverrides）：
- * `!` 排除、`+` 强制启用（覆盖排除）、`-` 强制排除（最后判定，覆盖强制启用）。
- * 仅用于自动发现目录的资源；显式路径集合用 applyPatterns（含 include 语义）。
+ * `!` 使用 glob 排除；`+`/`-` 只按精确路径判定，且 `-` 最后生效。
  */
 export function passesOverrides(filePath: string, baseDir: string, patterns: string[]): boolean {
 	const excludes = patterns.filter((p) => p.startsWith("!")).map((p) => p.slice(1));
@@ -161,8 +188,8 @@ export function passesOverrides(filePath: string, baseDir: string, patterns: str
 	const forceExcludes = patterns.filter((p) => p.startsWith("-")).map((p) => p.slice(1));
 	let enabled = true;
 	if (excludes.length > 0 && matchesAnyPattern(filePath, excludes, baseDir)) enabled = false;
-	if (forceIncludes.length > 0 && matchesAnyPattern(filePath, forceIncludes, baseDir)) enabled = true;
-	if (forceExcludes.length > 0 && matchesAnyPattern(filePath, forceExcludes, baseDir)) enabled = false;
+	if (forceIncludes.length > 0 && matchesAnyExactPattern(filePath, forceIncludes, baseDir)) enabled = true;
+	if (forceExcludes.length > 0 && matchesAnyExactPattern(filePath, forceExcludes, baseDir)) enabled = false;
 	return enabled;
 }
 
@@ -184,29 +211,39 @@ export function applyPatterns(allPaths: string[], patterns: string[], baseDir: s
 	}
 	if (forceIncludes.length > 0) {
 		for (const filePath of allPaths) {
-			if (!result.includes(filePath) && matchesAnyPattern(filePath, forceIncludes, baseDir)) {
+			if (!result.includes(filePath) && matchesAnyExactPattern(filePath, forceIncludes, baseDir)) {
 				result.push(filePath);
 			}
 		}
 	}
 	if (forceExcludes.length > 0) {
-		result = result.filter((filePath) => !matchesAnyPattern(filePath, forceExcludes, baseDir));
+		result = result.filter((filePath) => !matchesAnyExactPattern(filePath, forceExcludes, baseDir));
 	}
 	return new Set(result);
 }
 
-/** autoload:false 的 delta 开关语义（对齐 pi 的 applyAutoloadDisabledPatterns）。 */
-export function deltaEnabled(filePath: string, patterns: string[], baseDir: string): boolean {
-	let enabled = true;
+/** autoload:false 的 delta 开关语义；只返回 pattern 明确命中的资源。 */
+export function applyAutoloadDisabledPatterns(
+	allPaths: string[],
+	patterns: string[],
+	baseDir: string,
+): Map<string, boolean> {
+	const result = new Map<string, boolean>();
 	for (const pattern of patterns) {
-		const target = pattern.slice(
-			pattern.startsWith("+") || pattern.startsWith("-") || pattern.startsWith("!") ? 1 : 0,
-		);
-		const matches = matchesAnyPattern(filePath, [target], baseDir);
-		if (!matches) continue;
-		enabled = !pattern.startsWith("-") && !pattern.startsWith("!");
+		const prefix = pattern[0];
+		const target = prefix === "+" || prefix === "-" || prefix === "!"
+			? pattern.slice(1)
+			: pattern;
+		const exact = prefix === "+" || prefix === "-";
+		const enabled = prefix !== "-" && prefix !== "!";
+		for (const filePath of allPaths) {
+			const matches = exact
+				? matchesAnyExactPattern(filePath, [target], baseDir)
+				: matchesAnyPattern(filePath, [target], baseDir);
+			if (matches) result.set(filePath, enabled);
+		}
 	}
-	return enabled;
+	return result;
 }
 
 /**

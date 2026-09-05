@@ -1,12 +1,14 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
-import { useEffect, useState } from "react";
-import { Copy, Download, Power, RotateCcw, Trash2 } from "lucide-react";
-import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, PiPackageInfo } from "../../../shared/types";
+import { useEffect, useState, type ReactNode } from "react";
+import { Copy, Download, FolderOpen, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
+import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, PiPackageInfo, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n/rendererCopy.zh-CN";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
+import type { ResourceScope } from "./ResourceScopeSelector";
+import { isProjectDiscoverySource } from "./resourceScopeModel";
 
 type ExtensionsApi = {
 	list: () => Promise<PiExtensionListResult>;
@@ -145,15 +147,28 @@ function shortName(source: string): string {
 }
 
 export function ExtensionsTab(props: {
+	scope: ResourceScope;
+	scopeSelector?: ReactNode;
+	projectId?: string;
+	projectOverrides: ProjectResourceOverrides;
+	discoveryExtensions: Array<{
+		source: string;
+		path: string;
+		sourceId: string;
+		sourceLabel: string;
+		physicalScope: "user" | "project";
+		enabled: boolean;
+		managed: boolean;
+	}>;
 	data: PiExtensionListResult;
 	loading: boolean;
 	uninstallingSource: string | null;
 	onRefresh: () => void;
+	onToggle?: (extension: PiExtensionSummary, enabled: boolean) => void | Promise<void>;
 	onUninstall: (extension: PiExtensionSummary) => void;
+	onShowInFolder: (extension: PiExtensionSummary) => void;
 }) {
 	const [installingSources, setInstallingSources] = useState<Set<string>>(() => new Set());
-	const [restoringBuiltIn, setRestoringBuiltIn] = useState<string | null>(null);
-	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
 	const [togglingSource, setTogglingSource] = useState<string | null>(null);
 	// 白名单总开关（「禁用 -e 参数」）：true = 不注入 --no-extensions/-e，pi 默认加载全部扩展。
 	// 从 PiDeck settings 读取默认状态；切换写入后本地同步，供 RPC 下次启动生效。
@@ -191,50 +206,21 @@ export function ExtensionsTab(props: {
 		}
 	}, [props.data.conflicts]);
 
-	const handleRemoveBuiltIn = async (extension: PiExtensionSummary) => {
-		if (removingBuiltIn) return;
-		setRemovingBuiltIn(extension.source);
-		try {
-			await getExtensionsApi().removeBuiltIn(extension.source);
-			props.onRefresh();
-		} catch (e) {
-			showNotice(
-				t("config.extensionOperationFailed", { error: formatExtensionError(e) }),
-				4500,
-				"error",
-			);
-		} finally {
-			setRemovingBuiltIn(null);
-		}
-	};
-
-	const handleRestoreBuiltIn = async (extension: PiExtensionSummary) => {
-		if (restoringBuiltIn) return;
-		setRestoringBuiltIn(extension.source);
-		try {
-			await getExtensionsApi().restoreBuiltIn(extension.source);
-			props.onRefresh();
-		} catch (e) {
-			showNotice(
-				t("config.extensionOperationFailed", { error: formatExtensionError(e) }),
-				4500,
-				"error",
-			);
-		} finally {
-			setRestoringBuiltIn(null);
-		}
-	};
-
 	/** 禁用/启用非内置扩展：写入 PiDeck settings 的 scoped 禁用列表，重启 RPC 时以白名单模式生效。 */
-	const handleToggle = async (extension: PiExtensionSummary) => {
+	const handleToggle = async (extension: PiExtensionSummary, nextEnabled?: boolean) => {
 		if (togglingSource) return;
+		const enabled = nextEnabled ?? extension.enabled === false;
 		setTogglingSource(extension.source);
 		try {
-			await getExtensionsApi().toggle(extension.source, extension.enabled === false, extension.scope);
+			if (props.onToggle) {
+				await props.onToggle(extension, enabled);
+			} else {
+				await getExtensionsApi().toggle(extension.source, enabled, extension.scope);
+			}
 			props.onRefresh();
 			showNotice(
 				t(
-					extension.enabled === false
+					enabled
 						? "config.extensionEnabledToast"
 						: "config.extensionDisabledToast",
 					{ name: shortName(extension.source) },
@@ -350,6 +336,34 @@ export function ExtensionsTab(props: {
 		void writeClipboard(command);
 		showNotice(t("config.extensionUpdateCommandCopied", { command }), 2500);
 	};
+
+	const projectExtensions = props.data.extensions.filter((extension) => extension.scope === "project");
+	const globalExtensions = props.data.extensions.filter((extension) => extension.scope !== "project");
+	const visibleExtensions = props.scope === "project"
+		? [...projectExtensions, ...globalExtensions]
+		: globalExtensions;
+	const disabledGlobalSources = new Set(props.projectOverrides.disabledGlobalExtensions);
+	const renderExtensionRows = (extensions: PiExtensionSummary[], inherited: boolean) =>
+		extensions.map((extension) => {
+			const disabledHere = inherited && disabledGlobalSources.has(extension.source);
+			return (
+				<ExtensionTableRow
+					key={`${extension.scope}:${extension.id}`}
+					projectId={props.projectId}
+					extension={extension}
+					effectiveEnabled={extension.enabled !== false && !disabledHere}
+					inherited={inherited}
+					uninstalling={props.uninstallingSource === extension.source}
+					onDelete={props.onUninstall}
+					onShowInFolder={props.onShowInFolder}
+					toggling={togglingSource === extension.source}
+					onToggle={handleToggle}
+					updatingOne={updatingOne === extension.source}
+					onUpdateOne={handleUpdateOne}
+					onCopyUpdateCommand={handleCopyUpdateCommand}
+				/>
+			);
+		});
 
 	return (
 		<div className="extensions-tab">
@@ -478,28 +492,34 @@ export function ExtensionsTab(props: {
 				<div className="mb-3 mt-2 flex items-center justify-between gap-3">
 					<div className="min-w-0">
 						<span className="font-mono text-xs tabular-nums text-muted-foreground">
-							{t("config.count.extensions", { count: props.data.extensions.length })}
+							{t("config.count.extensions", { count: visibleExtensions.length })}
 						</span>
 						<small className="skills-restart-hint block text-caption text-muted-foreground">
 							{t("config.extensionRestartHint")}
 						</small>
 					</div>
 					<div className="skills-toolbar-actions flex shrink-0 items-center gap-1.5">
-						{/* 白名单总开关：开启后 -e 白名单失效，pi 默认加载全部扩展（防御个别扩展导致启动失败） */}
-						<Button
-							variant={whitelistDisabled ? "default" : "outline"}
-							size="sm"
-							onClick={() => void handleToggleWhitelist()}
-							disabled={props.loading || togglingWhitelist}
-							title={t("config.extensionWhitelistHint")}
-						>
-							<Power size={14} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />
-							{t(whitelistDisabled ? "config.extensionWhitelistOn" : "config.extensionWhitelistOff")}
-						</Button>
-						{/* 工具栏统一 size=sm，与设置页/会话顶栏控件高度对齐 */}
-						<Button variant="outline" size="sm" onClick={handleUpdateExtensions} disabled={props.loading || Boolean(updating)}>
-							{updating ? t("settings.updating") : t("settings.updateExtensionsAll")}
-						</Button>
+						{props.scopeSelector}
+						{props.scope === "global" ? (
+							<>
+								{/* 白名单总开关只属于全局设置。 */}
+								<Button
+									variant={whitelistDisabled ? "default" : "outline"}
+									size="sm"
+									onClick={() => void handleToggleWhitelist()}
+									disabled={props.loading || togglingWhitelist}
+									title={t("config.extensionWhitelistHint")}
+								>
+									{whitelistDisabled
+										? <ToggleRight size={18} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />
+										: <ToggleLeft size={18} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />}
+									{t(whitelistDisabled ? "config.extensionWhitelistOn" : "config.extensionWhitelistOff")}
+								</Button>
+								<Button variant="outline" size="sm" onClick={handleUpdateExtensions} disabled={props.loading || Boolean(updating)}>
+									{updating ? t("settings.updating") : t("settings.updateExtensionsAll")}
+								</Button>
+							</>
+						) : null}
 						<Button variant="outline" size="sm" onClick={props.onRefresh} disabled={props.loading}>
 							{t("common.refresh")}
 						</Button>
@@ -508,7 +528,7 @@ export function ExtensionsTab(props: {
 				<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
 					{props.loading ? (
 						<div className="py-12 text-center text-control text-muted-foreground">{t("config.loadingExtensions")}</div>
-					) : props.data.extensions.length === 0 ? (
+					) : visibleExtensions.length === 0 ? (
 						<div className="py-12 text-center text-control text-muted-foreground">{t("config.emptyExtensions")}</div>
 					) : (
 						<Table>
@@ -516,28 +536,34 @@ export function ExtensionsTab(props: {
 								<TableRow>
 									<TableHead>{t("config.extension")}</TableHead>
 									<TableHead>{t("config.extensionVersion")}</TableHead>
-									<TableHead>{t("config.extensionPath")}</TableHead>
-									<TableHead className="w-20 text-right">{t("config.actions")}</TableHead>
+									<TableHead className="w-28 text-right">{t("config.actions")}</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{props.data.extensions.map((extension) => (
-									<ExtensionTableRow
-										key={extension.id}
-										extension={extension}
-										uninstalling={props.uninstallingSource === extension.source}
-										onUninstall={props.onUninstall}
-										onRemoveBuiltIn={handleRemoveBuiltIn}
-										onRestoreBuiltIn={handleRestoreBuiltIn}
-										removingBuiltIn={removingBuiltIn === extension.source}
-										restoringBuiltIn={restoringBuiltIn === extension.source}
-										toggling={togglingSource === extension.source}
-										onToggle={handleToggle}
-										updatingOne={updatingOne === extension.source}
-										onUpdateOne={handleUpdateOne}
-										onCopyUpdateCommand={handleCopyUpdateCommand}
-									/>
-								))}
+								{props.scope === "project" && projectExtensions.length > 0 ? (
+									<TableRow>
+										<TableCell colSpan={3} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
+											{t("config.resourceGroup.project")}
+										</TableCell>
+									</TableRow>
+								) : null}
+								{props.scope === "project" ? renderExtensionRows(projectExtensions, false) : null}
+								{props.scope === "project" &&
+									props.discoveryExtensions
+										.filter((item) => isProjectDiscoverySource(item.sourceId))
+										.map((item) => <DiscoveredExtensionRow key={`discovered:${item.path}`} item={item} />)}
+								{props.scope === "project" && globalExtensions.length > 0 ? (
+									<TableRow>
+										<TableCell colSpan={3} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
+											{t("config.resourceGroup.global")}
+										</TableCell>
+									</TableRow>
+								) : null}
+								{renderExtensionRows(globalExtensions, props.scope === "project")}
+								{props.scope === "project" &&
+									props.discoveryExtensions
+										.filter((item) => !isProjectDiscoverySource(item.sourceId))
+										.map((item) => <DiscoveredExtensionRow key={`discovered:${item.path}`} item={item} />)}
 							</TableBody>
 						</Table>
 					)}
@@ -547,35 +573,67 @@ export function ExtensionsTab(props: {
 	);
 }
 
+function DiscoveredExtensionRow(props: {
+	item: {
+		source: string;
+		path: string;
+		sourceId: string;
+		sourceLabel: string;
+		physicalScope: "user" | "project";
+		enabled: boolean;
+		managed: boolean;
+	};
+}) {
+	const { item } = props;
+	const name = item.source
+		.replace(/^(?:npm|file|github|git):/i, "")
+		.replace(/\.ts$/i, "");
+	return (
+		<TableRow>
+			<TableCell className="min-w-0">
+				<div className="flex min-w-0 flex-col gap-0.5">
+					<div className="flex min-w-0 items-center gap-2">
+						<strong className="truncate text-control font-medium text-foreground">{name}</strong>
+						<span className="text-micro" title={t("config.resourceManagedHint")}>
+							{t("config.resourceManaged")}
+						</span>
+					</div>
+					<span className="truncate font-mono text-caption text-muted-foreground">{item.sourceLabel}</span>
+				</div>
+			</TableCell>
+			<TableCell className="whitespace-nowrap text-caption text-muted-foreground">-</TableCell>
+			<TableCell className="text-right" />
+		</TableRow>
+	);
+}
+
 function ExtensionTableRow(props: {
+	projectId?: string;
 	extension: PiExtensionSummary;
+	effectiveEnabled: boolean;
+	inherited: boolean;
 	uninstalling: boolean;
-	onUninstall: (extension: PiExtensionSummary) => void;
-	onRemoveBuiltIn: (extension: PiExtensionSummary) => void;
-	onRestoreBuiltIn: (extension: PiExtensionSummary) => void;
-	removingBuiltIn?: boolean;
-	restoringBuiltIn?: boolean;
+	onDelete: (extension: PiExtensionSummary) => void;
+	onShowInFolder: (extension: PiExtensionSummary) => void;
 	toggling?: boolean;
-	onToggle: (extension: PiExtensionSummary) => void;
+	onToggle: (extension: PiExtensionSummary, nextEnabled?: boolean) => void;
 	updatingOne: boolean;
 	onUpdateOne: (extension: PiExtensionSummary) => void;
 	onCopyUpdateCommand: (extension: PiExtensionSummary) => void;
 }) {
-	const { extension } = props;
-	const name = extension.source.replace(/^(?:npm|file|github|git):/i, "");
-	const disabled = extension.enabled === false;
+	const { extension, effectiveEnabled, inherited } = props;
+	const name = extension.source
+		.replace(/^(?:npm|file|github|git):/i, "")
+		.replace(/\.ts$/i, "");
 	return (
 		<TableRow aria-busy={props.uninstalling}>
 			<TableCell className="min-w-0">
 				<div className="flex min-w-0 flex-col gap-0.5">
 					<div className="flex min-w-0 items-center gap-2">
-						{/* 禁用态弱化名称，避免与启用扩展抢视觉层级 */}
-						<strong className={`truncate text-control font-medium text-foreground${disabled ? " opacity-50" : ""}`}>{name}</strong>
+						<strong className={`truncate text-control font-medium text-foreground${effectiveEnabled ? "" : " opacity-50"}`}>{name}</strong>
 						{extension.builtIn && <span className="text-micro text-muted-foreground">{t("common.builtIn")}</span>}
-						{/* 过滤式安装徽标：source 已在主进程剥离 "(filtered)" 后缀，
-						    版本查询/更新/卸载均用干净 source；此处仅展示标记 */}
 						{extension.filtered && <span className="text-micro text-muted-foreground">{t("config.extensionFiltered")}</span>}
-						{disabled && !extension.builtIn && (
+						{!effectiveEnabled && (
 							<span className="text-micro text-muted-foreground">{t("config.extensionDisabledBadge")}</span>
 						)}
 					</div>
@@ -588,8 +646,7 @@ function ExtensionTableRow(props: {
 					latest: extension.latestVersion ?? "-",
 				})}
 				{extension.hasUpdate && <span className="ml-1 text-text-primary">{t("config.extensionUpdateAvailable")}</span>}
-				{/* 有更新时提供单扩展更新与复制更新指令（npm 包专属；内置扩展无版本概念） */}
-				{extension.hasUpdate && !extension.builtIn && (
+				{extension.hasUpdate && !extension.builtIn && !inherited && (
 					<div className="mt-1.5 flex items-center gap-1.5">
 						<Button
 							size="xs"
@@ -608,46 +665,42 @@ function ExtensionTableRow(props: {
 				)}
 				{extension.updateError && <div className="text-destructive">{extension.updateError}</div>}
 			</TableCell>
-			<TableCell className="max-w-64 truncate font-mono text-caption text-muted-foreground" title={extension.path ?? undefined}>
-				{extension.path || "-"}
-			</TableCell>
 			<TableCell className="text-right">
 				<div className="flex justify-end gap-1">
-					{extension.builtIn && extension.enabled !== false && (
-						<Button variant="ghost" size="icon-sm" className="size-7" disabled={props.removingBuiltIn} onClick={() => props.onRemoveBuiltIn(extension)} title={props.removingBuiltIn ? t("config.uninstalling") : t("config.uninstall")}>
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											className="size-7"
+											disabled={!extension.path}
+											onClick={() => props.onShowInFolder(extension)}
+											title={t("config.openExtensionLocation")}
+										>
+											<FolderOpen size={14} strokeWidth={1.8} />
+										</Button>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						className={`size-7${effectiveEnabled ? " text-accent" : ""}`}
+						disabled={props.toggling || props.uninstalling || (inherited && extension.enabled === false)}
+						onClick={() => props.onToggle(extension, !effectiveEnabled)}
+						title={effectiveEnabled ? t("config.extensionDisable") : t("config.extensionEnable")}
+						aria-busy={props.toggling}
+					>
+						{effectiveEnabled
+							? <ToggleRight size={18} strokeWidth={1.8} />
+							: <ToggleLeft size={18} strokeWidth={1.8} />}
+					</Button>
+					{!inherited && (!extension.builtIn || extension.enabled !== false) && (
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+							disabled={props.uninstalling}
+							onClick={() => props.onDelete(extension)}
+							title={props.uninstalling ? t("config.uninstalling") : t("config.uninstall")}
+						>
 							<Trash2 size={14} strokeWidth={1.8} />
 						</Button>
-					)}
-					{extension.builtIn && extension.enabled === false && (
-						<Button variant="ghost" size="icon-sm" className="size-7" disabled={props.restoringBuiltIn} onClick={() => props.onRestoreBuiltIn(extension)} title={t("config.restoreBuiltIn")}>
-							<RotateCcw size={14} strokeWidth={1.8} />
-						</Button>
-					)}
-					{!extension.builtIn && (
-						<>
-							{/* 禁用/启用：非内置扩展写 PiDeck settings 禁用列表，重启 RPC 白名单生效；
-							    内置扩展走下方 remove/restore（removedBuiltInExtensions），不复用此按钮 */}
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								className={`size-7${disabled ? " text-text-primary" : ""}`}
-								disabled={props.toggling || props.uninstalling}
-								onClick={() => props.onToggle(extension)}
-								title={
-									props.toggling
-										? t("config.extensionToggling")
-										: disabled
-											? t("config.extensionEnable")
-											: t("config.extensionDisable")
-								}
-								aria-busy={props.toggling}
-							>
-								<Power size={14} strokeWidth={1.8} />
-							</Button>
-							<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={props.uninstalling} onClick={() => props.onUninstall(extension)} title={props.uninstalling ? t("config.uninstalling") : t("config.uninstall")}>
-								<Trash2 size={14} strokeWidth={1.8} />
-							</Button>
-						</>
 					)}
 				</div>
 			</TableCell>

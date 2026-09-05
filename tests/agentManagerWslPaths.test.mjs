@@ -23,7 +23,7 @@ function loadWslPaths() {
 	return sandbox.exports;
 }
 
-function loadAgentManager() {
+function loadAgentManager(existsPredicate = () => false) {
 	const wslPaths = loadWslPaths();
 	// AgentManager 新增 streamGate 依赖（abort 流式封印）；与 WslPaths 一样显式沙箱加载。
 	const streamGate = (() => {
@@ -119,7 +119,7 @@ function loadAgentManager() {
 				return {
 					existsSync: (filePath) => {
 						calls.existsSync.push(filePath);
-						return false;
+						return existsPredicate(filePath);
 					},
 					readdirSync: (dir) => {
 						calls.readdirSync.push(dir);
@@ -301,6 +301,14 @@ test("keeps switch_session RPC paths in Linux form", async () => {
 	);
 
 	assert.equal(requests[0].sessionPath, "/root/.pi/agent/sessions/session.jsonl");
+});
+
+test("project MCP files require an explicit trust decision", () => {
+	for (const suffix of [".mcp.json", ".pi\\mcp.json"]) {
+		const { AgentManager } = loadAgentManager((filePath) => filePath.endsWith(suffix));
+		const manager = createManager(AgentManager);
+		assert.equal(manager.hasTrustRequiringResources("C:\\project"), true, suffix);
+	}
 });
 
 test("uses host paths for trust resource checks and Linux paths for trust keys", async () => {

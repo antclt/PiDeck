@@ -57,7 +57,7 @@ import { SETTINGS_TAB_IDS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLay
 import { useGitModels } from "./settings/gitModels.ts";
 import { formatSettingsUnsavedMessage, summarizeSettingsUnsavedChanges } from "./settings/unsavedChangesSummary.ts";
 import { UpdateInstallUnsavedDialog } from "./settings/UpdateInstallUnsavedDialog.tsx";
-import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult } from "../../../../shared/types";
+import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult, Project } from "../../../../shared/types";
 
 // ── 各 tab 内容 lazy 加载：首开只下载壳 + 当前 tab 的 chunk（qrcode/表格/日志查看器等
 //    重依赖随各自 tab 拆包），切换到某 tab 时才加载其 chunk（本地文件，秒级以内）。──
@@ -153,8 +153,12 @@ type SettingsModalProps = {
 	onOpenWebService: (port: string) => void;
 	onClose: () => void;
 	onChange: (patch: Partial<AppSettings>) => Promise<boolean>;
-	/** 当前项目路径：有值时配置管理分区合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
-	projectPath?: string;
+	/** 当前项目身份：项目资源操作只使用主进程登记的 id。 */
+	projectId?: string;
+	/** Chat workspace has no project resource scope. */
+	projectKind?: Project["kind"];
+	/** 当前项目名称：作用域选择器显示用。 */
+	projectName?: string;
 };
 
 /**
@@ -658,7 +662,9 @@ function SettingsModalContent(props: SettingsModalProps) {
 						<ConfigPane
 							ref={configPaneRef}
 							onClose={props.onClose}
-							projectPath={props.projectPath}
+							projectId={props.projectId}
+							projectKind={props.projectKind}
+							projectName={props.projectName}
 							focusConfigTab={configFocus?.configTab}
 							focusProvider={configFocus?.provider}
 							focusBackendPane={configFocus?.backendPane}

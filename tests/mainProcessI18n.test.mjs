@@ -116,7 +116,7 @@ test("main-process managers use the injected locale for user-visible validation"
     new ProjectResourceManager(
       () => ({ id: "project", name: "Project", path: tmpdir(), lastOpenedAt: 1 }),
       en,
-    ).createSkill({ projectId: "project", name: "", description: "description" }),
+    ).createSkill({ projectId: "project", name: "", description: "description", locationId: "project-pi" }),
     /lowercase letters, numbers, and hyphens/i,
   );
   assert.equal(

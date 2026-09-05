@@ -12,12 +12,17 @@ export function createPiProcessPromptResolvers(
 	cwd: string,
 	settings: AppSettings,
 ): {
-	resolveEnabledPromptPaths: (processSettings?: Partial<AppSettings>) => string[] | null;
+	resolveEnabledPromptPaths: (
+		processSettings?: Partial<AppSettings>,
+		cwd?: string,
+		includeProjectResources?: boolean,
+	) => string[] | null;
 } {
 	return {
-		resolveEnabledPromptPaths: (processSettings) =>
+		resolveEnabledPromptPaths: (processSettings, _processCwd, includeProjectResources = true) =>
 			resolveEnabledPromptPaths({
 				cwd,
+				includeProjectResources,
 				disabledNames:
 					processSettings?.disabledPrompts ?? settings.disabledPrompts ?? [],
 			}),

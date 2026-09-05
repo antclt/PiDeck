@@ -2767,6 +2767,7 @@ function registerIpc() {
 		piLocator,
 		settingsStore,
 		configManager,
+		projectResourceManager,
 		agentManager,
 		skillManager,
 		appLogger,
@@ -2894,6 +2895,7 @@ function registerIpc() {
 		skillManager,
 		xuePromptManager,
 		extensionManager,
+		projectResourceManager,
 		appLogger,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 	});

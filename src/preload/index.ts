@@ -44,7 +44,11 @@ import type {
 	VisionBridgeConfig,
 	CreatePiSkillInput,
 	CreateProjectSkillInput,
+	ProjectInheritedResourceToggleInput,
+	ProjectResourceDirectoryKind,
 	ProjectResourceListResult,
+	ProjectResourceDiscoveryResult,
+	ProjectResourceOverrides,
 	PetAggregateState,
 	PetManifest,
 	PetNotification,
@@ -237,6 +241,8 @@ const api = {
 	projectResources: {
 		list: (projectId: string) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesList, projectId) as Promise<ProjectResourceListResult>,
+		openDirectory: (projectId: string, kind: ProjectResourceDirectoryKind) =>
+			ipcRenderer.invoke(ipcChannels.projectResourcesOpenDirectory, projectId, kind) as Promise<void>,
 		createSkill: (input: CreateProjectSkillInput) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesCreateSkill, input) as Promise<PiSkillSummary>,
 		deleteSkill: (projectId: string, skillPath: string) =>
@@ -245,20 +251,24 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.projectResourcesDeleteExtension, projectId, extensionPath) as Promise<void>,
 		toggleExtension: (projectId: string, extensionPath: string, enabled: boolean) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesToggleExtension, projectId, extensionPath, enabled) as Promise<void>,
+		toggleInherited: (input: ProjectInheritedResourceToggleInput) =>
+			ipcRenderer.invoke(ipcChannels.projectResourcesToggleInherited, input) as Promise<ProjectResourceOverrides>,
 		toggleSkill: (projectId: string, skillPath: string, enabled: boolean) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesToggleSkill, projectId, skillPath, enabled) as Promise<PiSkillSummary>,
 		renameSkill: (projectId: string, skillPath: string, newName: string) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesRenameSkill, projectId, skillPath, newName) as Promise<PiSkillSummary>,
+		discovery: (projectId: string) =>
+			ipcRenderer.invoke(ipcChannels.projectResourcesDiscovery, projectId) as Promise<ProjectResourceDiscoveryResult>,
 	},
 	files: {
 		list: (projectId: string, options?: { maxDepth?: number; directory?: string }) =>
 			ipcRenderer.invoke(ipcChannels.filesList, projectId, options) as Promise<
 				FileTreeNode[]
 			>,
-		open: (path: string) =>
-			ipcRenderer.invoke(ipcChannels.filesOpen, path) as Promise<void>,
-		showInFolder: (path: string) =>
-			ipcRenderer.invoke(ipcChannels.filesShowInFolder, path) as Promise<void>,
+		open: (path: string, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesOpen, path, scope) as Promise<void>,
+		showInFolder: (path: string, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesShowInFolder, path, scope) as Promise<void>,
 		/** 检测系统可用的文件管理器（打开方式下拉补充入口） */
 		detectFileManager: () =>
 			ipcRenderer.invoke(ipcChannels.filesDetectFileManager) as Promise<FileManagerInfo | null>,
@@ -1312,18 +1322,25 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.promptsOpenFolder) as Promise<void>,
 		edit: (filePath: string, content?: string) =>
 			ipcRenderer.invoke(ipcChannels.promptsEdit, filePath, content) as Promise<string | void>,
-		listByProject: (projectPath: string) =>
-			ipcRenderer.invoke(ipcChannels.promptsListByProject, projectPath) as Promise<PiPromptTemplateListResult>,
-		createInProject: (projectPath: string, input: CreatePiPromptTemplateInput) =>
-			ipcRenderer.invoke(ipcChannels.promptsCreateInProject, projectPath, input) as Promise<PiPromptTemplateSummary>,
-		deleteFromProject: (projectPath: string, fileName: string) =>
-			ipcRenderer.invoke(ipcChannels.promptsDeleteInProject, projectPath, fileName) as Promise<void>,
+		listByProject: (projectId: string) =>
+			ipcRenderer.invoke(ipcChannels.promptsListByProject, projectId) as Promise<PiPromptTemplateListResult>,
+		createInProject: (projectId: string, input: CreatePiPromptTemplateInput) =>
+			ipcRenderer.invoke(ipcChannels.promptsCreateInProject, projectId, input) as Promise<PiPromptTemplateSummary>,
+		deleteFromProject: (projectId: string, name: string) =>
+			ipcRenderer.invoke(ipcChannels.promptsDeleteInProject, projectId, name) as Promise<void>,
 		rename: (oldName: string, newName: string) =>
 			ipcRenderer.invoke(ipcChannels.promptsRename, oldName, newName) as Promise<PiPromptTemplateSummary>,
-		renameInProject: (projectPath: string, oldName: string, newName: string) =>
-			ipcRenderer.invoke(ipcChannels.promptsRenameInProject, projectPath, oldName, newName) as Promise<PiPromptTemplateSummary>,
+		renameInProject: (projectId: string, oldName: string, newName: string) =>
+			ipcRenderer.invoke(ipcChannels.promptsRenameInProject, projectId, oldName, newName) as Promise<PiPromptTemplateSummary>,
 		toggle: (filePath: string, enabled: boolean) =>
 			ipcRenderer.invoke(ipcChannels.promptsToggle, filePath, enabled) as Promise<PiPromptTemplateSummary>,
+		toggleInProject: (projectId: string, name: string, enabled: boolean) =>
+			ipcRenderer.invoke(
+				ipcChannels.promptsToggleInProject,
+				projectId,
+				name,
+				enabled,
+			) as Promise<PiPromptTemplateSummary>,
 	},
 	promptStore: {
 		search: (query: string, options?: { limit?: number; type?: string; category?: string; tag?: string }) =>
@@ -1443,8 +1460,8 @@ const api = {
 				parsed: Record<string, unknown>;
 				diagnostic?: ConfigFileDiagnostic;
 			}>,
-		getMcp: (projectPath?: string) =>
-			ipcRenderer.invoke(ipcChannels.configGetMcp, projectPath) as Promise<
+		getMcp: (projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.configGetMcp, projectId) as Promise<
 				import("../shared/types/mcp").McpConfigSnapshot
 			>,
 		saveMcp: (data: import("../shared/types/mcp").McpConfigFile) =>

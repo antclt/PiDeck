@@ -14,12 +14,17 @@ export function createPiProcessSkillResolvers(
 	cwd: string,
 	settings: AppSettings,
 ): {
-	resolveEnabledSkillPaths: (processSettings?: Partial<AppSettings>) => string[] | null;
+	resolveEnabledSkillPaths: (
+		processSettings?: Partial<AppSettings>,
+		cwd?: string,
+		includeProjectResources?: boolean,
+	) => string[] | null;
 } {
 	return {
-		resolveEnabledSkillPaths: (processSettings) =>
+		resolveEnabledSkillPaths: (processSettings, _processCwd, includeProjectResources = true) =>
 			resolveEnabledSkillPaths({
 				cwd,
+				includeProjectResources,
 				disabledNames:
 					processSettings?.disabledSkills ?? settings.disabledSkills ?? [],
 			}),

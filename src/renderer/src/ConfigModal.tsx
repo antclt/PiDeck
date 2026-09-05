@@ -67,6 +67,7 @@ import { SettingsTab } from "./config/SettingsTab";
 import { PromptsTab } from "./config/PromptsTab";
 import { SkillsTab } from "./config/SkillsTab";
 import { ExtensionsTab } from "./config/ExtensionsTab";
+import { ResourceScopeSelector, type ResourceScope } from "./config/ResourceScopeSelector";
 import { SecuritySection, type SecuritySectionHandle } from "./components/config/SecuritySection";
 import { DshLogo, PiLogo } from "./components/session/SessionSourceBadge";
 import { DshConfigTab, type DshConfigTabHandle } from "./config/DshConfigTab";
@@ -80,7 +81,22 @@ import type {
 	ModelsFile,
 	SettingsFile,
 } from "./config/configTypes";
-import type { ConfigFileDiagnostic, CreatePiPromptTemplateInput, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary } from "../../shared/types";
+import type { ConfigFileDiagnostic, CreatePiPromptTemplateInput, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary, Project, ProjectResourceDiscoveryResult, ProjectResourceListResult } from "../../shared/types";
+import {
+	globalPromptOverrideKey,
+	globalSkillOverrideKey,
+	isGlobalSkillSourceId,
+} from "../../shared/resourceIdentity";
+import {
+	emptyDiscoveryData,
+	emptyProjectResourceData,
+	GLOBAL_SKILL_SOURCES,
+	isGlobalSkill,
+	isProjectExtension,
+	isProjectPrompt,
+	isProjectSkill,
+	PROJECT_SKILL_SOURCES,
+} from "./config/resourceScopeModel";
 import { getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS } from "./config/providerHeaders";
 import { TOKENDANCE_PROVIDER } from "../../shared/tokendance";
 import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnReload, reconcileConfigDirty } from "./config/configDirtyMarks";
@@ -130,7 +146,6 @@ function loadLastConfigBackendPane(): "dsh" | "pi" {
 /** 全部合法 section / config 组子 tab，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
 const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "skills", "prompts", "extensions"];
 const CONFIG_TABS: readonly ConfigTab[] = ["models", "auth", "settings", "trust", "mcp", "raw"];
-
 /**
  * 读取上次打开的 tab；localStorage 不可用、无记录或值已失效时返回 null（由调用方回退默认值）。
  * Radix Dialog 关闭会卸载内容，state 在每次打开时重建，因此需要从外部存储恢复。
@@ -239,8 +254,12 @@ type ConfigModalProps = {
 	open: boolean;
 	onClose: () => void;
 	onSaved: () => void;
-	/** 当前项目路径：有值时合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
-	projectPath?: string;
+	/** 当前项目身份：项目资源 IPC 只接受由主进程登记的 projectId。 */
+	projectId?: string;
+	/** Chat workspace has no project resource scope. */
+	projectKind?: Project["kind"];
+	/** 当前项目名称：仅用于作用域选择器显示。 */
+	projectName?: string;
 	/** 深链：打开时落在的配置分页（如圆球「去配置用量」直达 models）。 */
 	focusConfigTab?: ConfigTab;
 	/** 深链：models 页要定位展开的供应商名。 */
@@ -275,8 +294,12 @@ export type ConfigPaneState = {
 export type ConfigPaneProps = {
 	onClose: () => void;
 	onSaved?: () => void;
-	/** 当前项目路径：有值时合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
-	projectPath?: string;
+	/** 当前项目身份：项目资源 IPC 只接受由主进程登记的 projectId。 */
+	projectId?: string;
+	/** Chat workspace has no project resource scope. */
+	projectKind?: Project["kind"];
+	/** 当前项目名称：仅用于作用域选择器显示。 */
+	projectName?: string;
 	/** 深链：打开时落在的配置分页（设置窗口内嵌分区消费 openSettingsAtom 的 configTab）。 */
 	focusConfigTab?: ConfigTab;
 	/** 深链：models 页要定位展开的供应商名。 */
@@ -300,13 +323,15 @@ export type ConfigPaneProps = {
  * 不包错误边界——宿主 SettingsModal 的 ErrorBoundary 已兜底整个窗口。
  */
 export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
-	function ConfigPane({ onClose, onSaved, projectPath, focusConfigTab, focusProvider, focusBackendPane, onStateChange, onRequestClose }, ref) {
+	function ConfigPane({ onClose, onSaved, projectId, projectKind, projectName, focusConfigTab, focusProvider, focusBackendPane, onStateChange, onRequestClose }, ref) {
 		return (
 			<ConfigModalContent
 				open
 				onClose={onClose}
 				onSaved={onSaved ?? (() => {})}
-				projectPath={projectPath}
+				projectId={projectId}
+				projectKind={projectKind}
+				projectName={projectName}
 				focusConfigTab={focusConfigTab}
 				focusProvider={focusProvider}
 				focusBackendPane={focusBackendPane}
@@ -406,7 +431,13 @@ type ConfigModalContentProps = ConfigModalProps & {
 };
 
 function ConfigModalContent(props: ConfigModalContentProps) {
-	const { open, onClose, onSaved, projectPath, embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
+	const { open, onClose, onSaved, projectId, projectKind, projectName, embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
+	const hasProject = Boolean(projectId && projectKind !== "chat");
+	/** Shared resource scope; keeping it here makes it survive resource-tab switches. */
+	const [resourceScope, setResourceScope] = useState<ResourceScope>("global");
+	useEffect(() => {
+		if (!hasProject && resourceScope !== "global") setResourceScope("global");
+	}, [hasProject, resourceScope]);
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
@@ -459,6 +490,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const [error, setError] = useState<string | null>(null);
 	/** 各 tab 未保存修改集合：key 用 sectionTabValue 编码（如 "config:models"/"skills"），顶部保存按钮与关闭确认依赖它 */
 	const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
+	const resourceScopeSelector = (
+		<ResourceScopeSelector
+			value={resourceScope}
+			hasProject={hasProject}
+			projectName={projectName}
+			disabled={dirtyTabs.has("config:mcp")}
+			onChange={setResourceScope}
+		/>
+	);
 	/** loadConfig 不能依赖 dirtyTabs（否则切 tab 会重建回调并误触发重载）；用 ref 读最新脏集合。 */
 	const dirtyTabsRef = useRef(dirtyTabs);
 	dirtyTabsRef.current = dirtyTabs;
@@ -535,16 +575,36 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		locations: [],
 		skills: [],
 	});
+	const [projectResourcesData, setProjectResourcesData] =
+		useState<ProjectResourceListResult>(emptyProjectResourceData);
+	/** 运行时发现的资源（packages/settings 显式路径/祖先 .agents/skills）只读描述。 */
+	const [discoveryData, setDiscoveryData] = useState<ProjectResourceDiscoveryResult>(emptyDiscoveryData);
 	const [extensionsData, setExtensionsData] = useState<PiExtensionListResult>({
 		extensions: [],
 		raw: "",
 	});
 	const [extensionsLoading, setExtensionsLoading] = useState(false);
+	/** 资源刷新代数：scope/project 变化或 mutation 后递增，旧响应不得覆盖新结果。 */
+	const resourceGenerationRef = useRef(0);
+	const bumpResourceGeneration = useCallback(() => {
+		resourceGenerationRef.current += 1;
+	}, []);
 	const [creatingSkill, setCreatingSkill] = useState(false);
 	const [uninstallingExtensionSource, setUninstallingExtensionSource] = useState<string | null>(null);
 	const [newSkillName, setNewSkillName] = useState("");
 	const [newSkillDescription, setNewSkillDescription] = useState("");
 	const [newSkillLocationId, setNewSkillLocationId] = useState<PiSkillLocation["id"]>("pi-global");
+	/** Keep the create target inside the selected resource scope. */
+	useEffect(() => {
+		const allowed = skillsData.locations.filter((location) =>
+			resourceScope === "project"
+				? PROJECT_SKILL_SOURCES.has(location.id)
+				: GLOBAL_SKILL_SOURCES.has(location.id),
+		);
+		if (allowed.length > 0 && !allowed.some((location) => location.id === newSkillLocationId)) {
+			setNewSkillLocationId(allowed[0].id);
+		}
+	}, [newSkillLocationId, resourceScope, skillsData.locations]);
 	const [deleteSkillConfirm, setDeleteSkillConfirm] = useState<PiSkillSummary | null>(null);
 	const [editingGlobalSkill, setEditingGlobalSkill] = useState<PiSkillSummary | null>(null);
 	const [editGlobalContent, setEditGlobalContent] = useState("");
@@ -840,7 +900,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				} else if (target === "mcp") {
 					// MCP 页自己拉盘；这里只同步源文件编辑器和 force 重载。
 					if (!skipRaw) {
-						const res = await api.config.getMcp(projectPath);
+						const res = await api.config.getMcp();
 						setRawContent(res.writableRaw);
 						setRawFileName("mcp.json");
 						baselineRawRef.current = { fileName: "mcp.json", content: res.writableRaw };
@@ -868,7 +928,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 								: fileName === "trust.json"
 									? await api.config.getTrust()
 									: fileName === "mcp.json"
-										? await api.config.getMcp(projectPath).then((snapshot) => ({ raw: snapshot.writableRaw, diagnostic: undefined }))
+										? await api.config.getMcp().then((snapshot) => ({ raw: snapshot.writableRaw, diagnostic: undefined }))
 										: await api.config.getSettings();
 					if (!skipRaw) {
 						setRawContent(res.raw);
@@ -886,7 +946,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				setLoading(false);
 			}
 		},
-		[tab, clearDirty, projectPath],
+		[tab, clearDirty],
 	);
 
 	useEffect(() => {
@@ -909,8 +969,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		return () => { cancelled = true; };
 	}, [open]);
 
+	// 资源页在进入/scope/project 变化时刷新；generation 变化让在途旧响应失效。
 	useEffect(() => {
 		if (!open) return;
+		bumpResourceGeneration();
 		if (section === "skills") {
 			void refreshSkills();
 			return;
@@ -926,7 +988,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			return;
 		}
 		void loadConfig(tab);
-	}, [open, section, tab, loadConfig]);
+	}, [open, section, tab, loadConfig, resourceScope, projectId, bumpResourceGeneration]);
 
 	const showToast = (msg: string) => {
 		showNotice(msg, 2500);
@@ -1648,7 +1710,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						: fileName === "trust.json"
 							? await api.config.getTrust()
 							: fileName === "mcp.json"
-								? await api.config.getMcp(projectPath).then((snapshot) => ({ raw: snapshot.writableRaw }))
+								? await api.config.getMcp().then((snapshot) => ({ raw: snapshot.writableRaw }))
 								: await api.config.getSettings();
 			setRawFileName(fileName);
 			setRawContent(res.raw);
@@ -1680,17 +1742,35 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		}
 	};
 
-	/** 刷新 prompt templates 列表 */
+	/** 刷新 prompt templates 列表：project 数据仅在 project scope 拉取，旧响应不得覆盖新 scope 结果。 */
 	const refreshPrompts = async () => {
-		const res = await api.prompts.list();
-		// 过滤掉用户已删除的内置模板，同时翻译内置模板的 description
-		res.templates = res.templates
-			.filter((t) => t.userCreated || !deletedBuiltinNames.has(t.name))
-			.map((tpl) => ({
-				...tpl,
-				description: translateBuiltinPromptDescription(tpl),
+		const generation = resourceGenerationRef.current;
+		const projectIdHere = resourceScope === "project" ? projectId : undefined;
+		const [globalResult, projectResult, projectResourceResult, discoveryResult] = await Promise.all([
+			api.prompts.list(),
+			projectIdHere && hasProject
+				? api.prompts.listByProject(projectIdHere)
+				: Promise.resolve(null),
+			projectIdHere && hasProject
+				? api.projectResources.list(projectIdHere)
+				: Promise.resolve(emptyProjectResourceData()),
+			projectIdHere && hasProject
+				? api.projectResources.discovery(projectIdHere)
+				: Promise.resolve(emptyDiscoveryData()),
+		]);
+		if (generation !== resourceGenerationRef.current) return;
+		const globalTemplates = globalResult.templates
+			.filter((template) => template.userCreated || !deletedBuiltinNames.has(template.name))
+			.map((template) => ({
+				...template,
+				description: translateBuiltinPromptDescription(template),
 			}));
-		setPromptsData(res);
+		setDiscoveryData(discoveryResult);
+		setProjectResourcesData(projectResourceResult);
+		setPromptsData({
+			...globalResult,
+			templates: [...(projectResult?.templates ?? []), ...globalTemplates],
+		});
 	};
 
 	/** 创建新 prompt template */
@@ -1698,12 +1778,20 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setCreatingPrompt(true);
 		setError(null);
 		try {
-			await api.prompts.create({
-				name: newPromptName,
-				description: newPromptDescription,
-			});
+			if (resourceScope === "project" && projectId) {
+				await api.prompts.createInProject(projectId, {
+					name: newPromptName,
+					description: newPromptDescription,
+				});
+			} else {
+				await api.prompts.create({
+					name: newPromptName,
+					description: newPromptDescription,
+				});
+			}
 			setNewPromptName("");
 			setNewPromptDescription("");
+			bumpResourceGeneration();
 			await refreshPrompts();
 			showToast(t("config.promptCreatedToast"));
 		} catch (e) {
@@ -1716,9 +1804,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** 确认删除 prompt template */
 	const confirmDeletePrompt = async (target: PiPromptTemplateSummary) => {
 		setError(null);
+		if (resourceScope === "project" && !isProjectPrompt(target)) return;
 		if (target.userCreated) {
 			try {
-				await api.prompts.delete(target.path);
+				if (isProjectPrompt(target) && projectId) {
+					await api.prompts.deleteFromProject(projectId, target.name);
+				} else {
+					await api.prompts.delete(target.path);
+				}
+				bumpResourceGeneration();
 				await refreshPrompts();
 				showToast(t("config.promptDeletedToast"));
 			} catch (e) {
@@ -1733,6 +1827,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** 打开 prompt template 编辑器 */
 	const handleEditPrompt = async (template: PiPromptTemplateSummary) => {
+		// Inherited global rows are read-only in project scope.
+		if (resourceScope === "project" && !isProjectPrompt(template)) {
+			showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
+			return;
+		}
 		// 内置模板直接使用预加载的 content，无需从文件读取
 		if (!template.userCreated) {
 			setEditingPrompt(template);
@@ -1746,7 +1845,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setEditPromptLoading(true);
 		setError(null);
 		try {
-			const content = await api.prompts.edit(template.path);
+			const content = isProjectPrompt(template) && projectId
+				? await window.piDesktop.files.readContent(template.path, undefined, { projectId })
+				: await api.prompts.edit(template.path);
 			setEditPromptContent(content as string);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -1776,12 +1877,19 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					description: editingPrompt.description,
 				});
 				await api.prompts.edit(created.path, editPromptContent);
+			} else if (isProjectPrompt(editingPrompt) && projectId) {
+				await window.piDesktop.files.writeContent(
+					editingPrompt.path,
+					editPromptContent,
+					{ projectId },
+				);
 			} else {
 				await api.prompts.edit(editingPrompt.path, editPromptContent);
 			}
 			clearDirty("prompts");
 			showToast(t("config.promptSavedToast"));
 			setEditingPrompt(null);
+			bumpResourceGeneration();
 			await refreshPrompts();
 			return true;
 		} catch (err) {
@@ -1793,10 +1901,20 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	/** Ctrl+S 快速保存：保存但不关闭弹框、不弹提示 */
-	const handleRenamePrompt = async (template: { name: string; path: string }, newName: string) => {
+	const handleRenamePrompt = async (template: PiPromptTemplateSummary, newName: string) => {
 		setError(null);
 		try {
-			await api.prompts.rename(template.name, newName);
+			if (resourceScope === "project" && !isProjectPrompt(template)) {
+				// Inherited global rows are read-only in project scope; never mutate the global file.
+				showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
+				return;
+			}
+			if (isProjectPrompt(template) && projectId) {
+				await api.prompts.renameInProject(projectId, template.name, newName);
+			} else {
+				await api.prompts.rename(template.name, newName);
+			}
+			bumpResourceGeneration();
 			await refreshPrompts();
 			showToast(t("config.promptRenamedToast"));
 		} catch (e) {
@@ -1807,7 +1925,25 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const handleTogglePrompt = async (template: PiPromptTemplateSummary, enabled: boolean) => {
 		setError(null);
 		try {
-			await api.prompts.toggle(template.path, enabled);
+			if (resourceScope === "project" && projectId) {
+				if (isProjectPrompt(template)) {
+					await api.prompts.toggleInProject(projectId, template.name, enabled);
+				} else if (template.enabled === false) {
+					// A globally disabled template cannot be re-enabled from project scope.
+					showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
+					return;
+				} else {
+					await api.projectResources.toggleInherited({
+						projectId,
+						kind: "prompt",
+						key: globalPromptOverrideKey(template.name),
+						enabled,
+					});
+				}
+			} else {
+				await api.prompts.toggle(template.path, enabled);
+			}
+			bumpResourceGeneration();
 			await refreshPrompts();
 			showToast(enabled ? t("config.promptEnabledToast") : t("config.promptDisabledToast"));
 		} catch (e) {
@@ -1826,6 +1962,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					description: editingPrompt.description,
 				});
 				await api.prompts.edit(created.path, editPromptContent);
+			} else if (isProjectPrompt(editingPrompt) && projectId) {
+				await window.piDesktop.files.writeContent(
+					editingPrompt.path,
+					editPromptContent,
+					{ projectId },
+				);
 			} else {
 				await api.prompts.edit(editingPrompt.path, editPromptContent);
 			}
@@ -1840,26 +1982,53 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		}
 	};
 
-	/** 从用户选择的 JSON 文件导入配置，成功后刷新当前 tab。 */
+	/** Refresh global resources and, when in project scope, project-owned resources plus overrides. */
 	const refreshSkills = async () => {
-		const res = await api.skills.list();
-		setSkillsData(res);
-		if (res.locations[0] && !res.locations.some((item) => item.id === newSkillLocationId)) {
-			setNewSkillLocationId(res.locations[0].id);
-		}
+		const generation = resourceGenerationRef.current;
+		const projectIdHere = resourceScope === "project" ? projectId : undefined;
+		const [globalResult, projectResult, discoveryResult] = await Promise.all([
+			api.skills.list(),
+			projectIdHere && hasProject
+				? api.projectResources.list(projectIdHere)
+				: Promise.resolve(emptyProjectResourceData()),
+			projectIdHere && hasProject
+				? api.projectResources.discovery(projectIdHere)
+				: Promise.resolve(emptyDiscoveryData()),
+		]);
+		if (generation !== resourceGenerationRef.current) return;
+		setDiscoveryData(discoveryResult);
+		setProjectResourcesData(projectResult);
+		const locations = [...globalResult.locations, ...projectResult.skillLocations];
+		setSkillsData({
+			locations,
+			skills: [...projectResult.skills, ...globalResult.skills.filter(isGlobalSkill)],
+		});
 	};
 
 	const handleCreateSkill = async () => {
 		setCreatingSkill(true);
 		setError(null);
 		try {
-			await api.skills.create({
-				name: newSkillName,
-				description: newSkillDescription,
-				locationId: newSkillLocationId,
-			});
+			if (resourceScope === "project" && projectId) {
+				const locationId = newSkillLocationId === "project-agents"
+					? "project-agents"
+					: "project-pi";
+				await api.projectResources.createSkill({
+					projectId,
+					name: newSkillName,
+					description: newSkillDescription,
+					locationId,
+				});
+			} else {
+				await api.skills.create({
+					name: newSkillName,
+					description: newSkillDescription,
+					locationId: newSkillLocationId,
+				});
+			}
 			setNewSkillName("");
 			setNewSkillDescription("");
+			bumpResourceGeneration();
 			await refreshSkills();
 			showToast(t("config.skillCreatedToast"));
 		} catch (e) {
@@ -1869,10 +2038,29 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		}
 	};
 
-	const handleToggleSkill = async (path: string, enabled: boolean) => {
+	const handleToggleSkill = async (skill: PiSkillSummary, enabled: boolean) => {
 		setError(null);
 		try {
-			await api.skills.toggle(path, enabled);
+			if (resourceScope === "project" && projectId) {
+				if (isProjectSkill(skill)) {
+					await api.projectResources.toggleSkill(projectId, skill.path, enabled);
+				} else if (isGlobalSkill(skill) && isGlobalSkillSourceId(skill.sourceId)) {
+					if (skill.enabled === false) {
+						// A globally disabled skill cannot be re-enabled from project scope.
+						showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
+						return;
+					}
+					await api.projectResources.toggleInherited({
+						projectId,
+						kind: "skill",
+						key: globalSkillOverrideKey(skill.sourceId, skill.name),
+						enabled,
+					});
+				}
+			} else {
+				await api.skills.toggle(skill.path, enabled);
+			}
+			bumpResourceGeneration();
 			await refreshSkills();
 			showToast(enabled ? t("config.skillEnabledToast") : t("config.skillDisabledToast"));
 		} catch (e) {
@@ -1886,7 +2074,13 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setDeleteSkillConfirm(null);
 		setError(null);
 		try {
-			await api.skills.delete(target.path);
+			if (resourceScope === "project" && !isProjectSkill(target)) return;
+			if (resourceScope === "project" && projectId) {
+				await api.projectResources.deleteSkill(projectId, target.path);
+			} else {
+				await api.skills.delete(target.path);
+			}
+			bumpResourceGeneration();
 			await refreshSkills();
 			showToast(t("config.skillDeletedToast"));
 		} catch (e) {
@@ -1897,7 +2091,17 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const handleRenameGlobalSkill = async (skill: PiSkillSummary, newName: string) => {
 		setError(null);
 		try {
-			await api.skills.rename(skill.path, newName);
+			if (resourceScope === "project" && !isProjectSkill(skill)) {
+				// Inherited global rows are read-only in project scope; never mutate the global skill.
+				showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
+				return;
+			}
+			if (resourceScope === "project" && isProjectSkill(skill) && projectId) {
+				await api.projectResources.renameSkill(projectId, skill.path, newName);
+			} else {
+				await api.skills.rename(skill.path, newName);
+			}
+			bumpResourceGeneration();
 			await refreshSkills();
 			showToast(t("config.skillRenamedToast"));
 		} catch (e) {
@@ -1906,12 +2110,18 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleEditGlobalSkill = async (skill: PiSkillSummary) => {
+		// Inherited global rows are read-only in project scope.
+		if (resourceScope === "project" && !isProjectSkill(skill)) {
+			showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
+			return;
+		}
 		setEditingGlobalSkill(skill);
 		setEditGlobalContent("");
 		setEditGlobalLoading(true);
 		setError(null);
 		try {
-			const content = await window.piDesktop.files.readContent(skill.path);
+			const accessScope = isProjectSkill(skill) && projectId ? { projectId } : undefined;
+			const content = await window.piDesktop.files.readContent(skill.path, undefined, accessScope);
 			setEditGlobalContent(content);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -1940,10 +2150,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setEditGlobalSaving(true);
 		setError(null);
 		try {
-			await window.piDesktop.files.writeContent(editingGlobalSkill.path, editGlobalContent);
+			const accessScope = isProjectSkill(editingGlobalSkill) && projectId ? { projectId } : undefined;
+			await window.piDesktop.files.writeContent(
+				editingGlobalSkill.path,
+				editGlobalContent,
+				accessScope,
+			);
 			clearDirty("skills");
 			setEditGlobalSaved(true);
 			window.setTimeout(() => setEditGlobalSaved(false), 2000);
+			bumpResourceGeneration();
 			await refreshSkills();
 			return true;
 		} catch (err) {
@@ -1954,32 +2170,86 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		}
 	};
 
-	/**
-	 * 加载扩展列表。
-	 * - forceRefresh=false：优先用主进程缓存（启动预热后通常秒开）
-	 * - forceRefresh=true：手动刷新时强制重扫，并查询 npm 更新信息
-	 */
+	/** Load the complete list, while project-owned rows are fetched only in project scope. */
 	const refreshExtensions = async (forceRefresh = false) => {
 		setExtensionsLoading(true);
 		setError(null);
+		const generation = resourceGenerationRef.current;
+		const projectIdHere = resourceScope === "project" ? projectId : undefined;
 		try {
-			const res = await api.extensions.list(forceRefresh);
-			setExtensionsData(res);
+			const [globalResult, projectResult, discoveryResult] = await Promise.all([
+				api.extensions.list(forceRefresh),
+				projectIdHere && hasProject
+					? api.projectResources.list(projectIdHere)
+					: Promise.resolve(emptyProjectResourceData()),
+				projectIdHere && hasProject
+					? api.projectResources.discovery(projectIdHere)
+					: Promise.resolve(emptyDiscoveryData()),
+			]);
+			if (generation !== resourceGenerationRef.current) return;
+			setDiscoveryData(discoveryResult);
+			const globalExtensions = globalResult.extensions.filter((extension) => !isProjectExtension(extension));
+			const projectExtensions = projectResult.extensions;
+			setProjectResourcesData(projectResult);
+			const seenSources = new Set<string>();
+			const mergedExtensions = [...projectExtensions, ...globalExtensions].filter((extension) => {
+				const key = `${extension.scope ?? "unknown"}\u0000${extension.source}`;
+				if (seenSources.has(key)) return false;
+				seenSources.add(key);
+				return true;
+			});
+			setExtensionsData({ ...globalResult, extensions: mergedExtensions });
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
 		} finally {
-			setExtensionsLoading(false);
+			if (generation === resourceGenerationRef.current) setExtensionsLoading(false);
+		}
+	};
+
+	/** Extension toggles in project view are project overrides, never global mutations. */
+	const handleToggleExtension = async (extension: PiExtensionSummary, enabled: boolean) => {
+		if (resourceScope === "project" && projectId) {
+			if (isProjectExtension(extension) && extension.path) {
+				await api.projectResources.toggleExtension(projectId, extension.path, enabled);
+			} else if (!isProjectExtension(extension)) {
+				if (extension.enabled === false) {
+					// A globally disabled extension cannot be re-enabled from project scope.
+					showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
+					return;
+				}
+				await api.projectResources.toggleInherited({
+					projectId,
+					kind: "extension",
+					key: extension.source,
+					enabled,
+				});
+			}
+			return;
+		}
+		await api.extensions.toggle(extension.source, enabled, extension.scope);
+	};
+
+	const handleRequestExtensionUninstall = (extension: PiExtensionSummary) => {
+		// A global row shown as inherited by a project is read-only in that project.
+		if (resourceScope === "project" && !isProjectExtension(extension)) return;
+		setUninstallExtensionConfirm(extension);
+	};
+
+	const handleOpenExtensionLocation = async (extension: PiExtensionSummary) => {
+		if (!extension.path) return;
+		try {
+			await window.piDesktop.files.showInFolder(
+				extension.path,
+				extension.scope === "project" && projectId ? { projectId } : undefined,
+			);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
 		}
 	};
 
 	const confirmUninstallExtension = async () => {
 		if (!uninstallExtensionConfirm) return;
 		const target = uninstallExtensionConfirm;
-		// 防御性检查：内置扩展不应出现在确认弹窗中
-		if (target.builtIn) {
-			setUninstallExtensionConfirm(null);
-			return;
-		}
 		setUninstallExtensionConfirm(null);
 		// 立刻进入卸载态以触发卡片退场动画，同时发起真实卸载；两者并行，避免"删完才闪一下"。
 		setUninstallingExtensionSource(target.source);
@@ -1988,16 +2258,30 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		});
 		try {
 			await Promise.all([
-				api.extensions.uninstall(target.source, target.scope),
+				(async () => {
+					if (isProjectExtension(target) && projectId && target.path) {
+						await api.projectResources.deleteExtension(projectId, target.path);
+					} else if (target.builtIn) {
+						await api.extensions.removeBuiltIn(target.source);
+					} else {
+						await api.extensions.uninstall(target.source, target.scope);
+					}
+				})(),
 				exitAnimation,
 			]);
 			// 与禁用/手动刷新一致：强制重扫并跳过可能残留的 in-flight 缓存结果。
 			await refreshExtensions(true);
 			showToast(t("config.extensionUninstalledToast"));
 		} catch (e) {
-			// 配置页顶部红字容易被滚出视口；卸载失败用 error toast，用户能立刻看到。
-			// 附带一条终端可手动执行的卸载命令（pi uninstall 与主进程内部执行的
-			// pi remove 是同一命令的别名），并提供一键复制按钮；命令本身也在正文里。
+			if (isProjectExtension(target) || target.builtIn) {
+				showNotice(
+					t("config.extensionOperationFailed", { error: formatIpcError(e) }),
+					4500,
+					"error",
+				);
+				return;
+			}
+			// Package uninstall failures include the equivalent CLI command as a manual fallback.
 			const uninstallCmd = `pi uninstall ${target.source}${target.scope === "project" ? " -l" : ""}`;
 			showNotice(
 				t("config.extensionUninstallFailed", { error: formatIpcError(e) }) +
@@ -2516,6 +2800,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						</div>
 					) : (
 							<SkillsTab
+								scope={resourceScope}
+								scopeSelector={resourceScopeSelector}
+								projectOverrides={projectResourcesData.overrides}
+								discoverySkills={discoveryData.skills}
 							data={skillsData}
 							loading={loading}
 							creating={creatingSkill}
@@ -2523,12 +2811,22 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							newDescription={newSkillDescription}
 							newLocationId={newSkillLocationId}
 							onRefresh={refreshSkills}
-							onOpenRoot={() => api.skills.openFolder()}
+							onOpenRoot={() => {
+								if (resourceScope === "project" && projectId) {
+									const kind = newSkillLocationId === "project-agents"
+										? "project-agents"
+										: "project-pi";
+									void api.projectResources.openDirectory(projectId, kind)
+										.catch((err) => setError(err instanceof Error ? err.message : String(err)));
+									return;
+								}
+								void api.skills.openFolder().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+							}}
 							onChangeNewName={setNewSkillName}
 							onChangeNewDescription={setNewSkillDescription}
 							onChangeNewLocation={setNewSkillLocationId}
 							onCreate={handleCreateSkill}
-							onToggle={(skill, enabled) => handleToggleSkill(skill.path, enabled)}
+							onToggle={handleToggleSkill}
 							onDelete={setDeleteSkillConfirm}
 							onEdit={handleEditGlobalSkill}
 							onRename={handleRenameGlobalSkill}
@@ -2543,6 +2841,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{statusBlock}
 					{!loading && (
 						<PromptsTab
+							scope={resourceScope}
+							scopeSelector={resourceScopeSelector}
+							projectOverrides={projectResourcesData.overrides}
+							discoveryPrompts={discoveryData.prompts}
 							data={promptsData}
 							loading={loading}
 							creating={creatingPrompt}
@@ -2553,7 +2855,14 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							editLoading={editPromptLoading}
 							editSaving={editPromptSaving}
 							onRefresh={refreshPrompts}
-							onOpenRoot={() => api.prompts.openFolder()}
+							onOpenRoot={() => {
+								if (resourceScope === "project" && projectId) {
+									void api.projectResources.openDirectory(projectId, "prompts")
+										.catch((err) => setError(err instanceof Error ? err.message : String(err)));
+									return;
+								}
+								void api.prompts.openFolder().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+							}}
 							onChangeNewName={setNewPromptName}
 							onChangeNewDescription={setNewPromptDescription}
 							onCreate={handleCreatePrompt}
@@ -2577,11 +2886,18 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<div className="config-content">
 					{statusBlock}
 					<ExtensionsTab
+							scope={resourceScope}
+							projectId={projectId}
+							projectOverrides={projectResourcesData.overrides}
+							discoveryExtensions={discoveryData.extensions}
+							scopeSelector={resourceScopeSelector}
 							data={extensionsData}
 							loading={extensionsLoading}
 							uninstallingSource={uninstallingExtensionSource}
 							onRefresh={() => void refreshExtensions(true)}
-							onUninstall={setUninstallExtensionConfirm}
+							onToggle={handleToggleExtension}
+							onUninstall={handleRequestExtensionUninstall}
+							onShowInFolder={(extension) => void handleOpenExtensionLocation(extension)}
 						/>
 						</div>
 					</TabsContent>
@@ -2598,7 +2914,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{/* forceMount：MCP 页自管草稿，切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
 					<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
 						<div className="config-content flex min-h-0 flex-col">
-						<McpTab ref={mcpTabRef} projectPath={projectPath} onDirtyChange={handleMcpDirtyChange} />
+						<McpTab ref={mcpTabRef} projectId={hasProject ? projectId : undefined} scope={resourceScope} scopeSelector={resourceScopeSelector} onDirtyChange={handleMcpDirtyChange} />
 						</div>
 					</TabsContent>
 
@@ -2670,9 +2986,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 				{uninstallExtensionConfirm && (
 					<ConfirmDialog
-						title={t("config.uninstallExtensionTitle")}
-						message={t("config.uninstallExtensionBody", { source: uninstallExtensionConfirm.source }) + (uninstallExtensionConfirm.path ? "\n" + uninstallExtensionConfirm.path : "")}
-						confirmLabel={t("config.uninstall")}
+						title={t("config.deleteExtensionTitle")}
+						message={t("config.deleteExtensionBody", { source: uninstallExtensionConfirm.source }) + (uninstallExtensionConfirm.path ? "\n" + uninstallExtensionConfirm.path : "")}
+						confirmLabel={t("common.delete")}
 						danger
 						onConfirm={confirmUninstallExtension}
 						onCancel={() => setUninstallExtensionConfirm(null)}

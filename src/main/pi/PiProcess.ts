@@ -50,7 +50,10 @@ type PiProcessOptions = {
    * 解析当前应通过 -e 注入的 PiDeck 内置扩展绝对路径。
    * 未提供时 RPC 不注入内置扩展（兼容测试/探针）。
    */
-  resolveBuiltInExtensionPaths?: (settings?: PiProcessSettings) => string[];
+  resolveBuiltInExtensionPaths?: (
+    settings?: PiProcessSettings,
+    includeProjectResources?: boolean,
+  ) => string[];
   /**
    * 白名单模式解析器：user/project packages + 本地扩展 + 内置扩展的启用路径列表。
    * 返回 null = 无禁用项，不启用白名单（pi 自动发现全部扩展）；
@@ -59,6 +62,7 @@ type PiProcessOptions = {
   resolveEnabledExtensionPaths?: (
     settings?: PiProcessSettings,
     cwd?: string,
+    includeProjectResources?: boolean,
   ) => string[] | null;
   /**
    * 技能白名单模式解析器：全局/项目技能目录 + settings.skills + 包技能的全部启用路径。
@@ -68,6 +72,7 @@ type PiProcessOptions = {
   resolveEnabledSkillPaths?: (
     settings?: PiProcessSettings,
     cwd?: string,
+    includeProjectResources?: boolean,
   ) => string[] | null;
   /**
    * 提示词模板白名单模式解析器：全局/项目 prompts 目录 + settings.prompts + 包模板的全部启用路径。
@@ -77,6 +82,7 @@ type PiProcessOptions = {
   resolveEnabledPromptPaths?: (
     settings?: PiProcessSettings,
     cwd?: string,
+    includeProjectResources?: boolean,
   ) => string[] | null;
   /**
    * 安全策略快照路径（userData/security-policy.json）。
@@ -210,15 +216,14 @@ export class PiProcess extends EventEmitter {
 
   /**
    * 仅停放 codeisland 等黑名单文件，不碰 npm packages / 其它本地扩展。
+   * 拒绝项目 trust 时只允许访问全局目录，不能扫描或移动项目资源。
    * 用户已开 piRpcNoExtensions 时无需停放（扩展本就不会加载）。
    */
-  private parkIncompatibleExtensions(): string[] {
+  private parkIncompatibleExtensions(includeProjectResources: boolean): string[] {
     if (this.settings?.piRpcNoExtensions) return [];
     const home = this.options.agentHomeDir?.trim() || homedir();
-    const dirs = [
-      join(home, ".pi", "agent", "extensions"),
-      join(this.cwd, ".pi", "extensions"),
-    ];
+    const dirs = [join(home, ".pi", "agent", "extensions")];
+    if (includeProjectResources) dirs.push(join(this.cwd, ".pi", "extensions"));
     const parked: ParkedExtension[] = [];
     for (const dir of dirs) {
       parked.push(...parkBlockedExtensionsInDir(dir));
@@ -269,8 +274,12 @@ export class PiProcess extends EventEmitter {
     if (this.settings?.piRpcNoExtensions) args.push("--no-extensions");
     if (this.settings?.piRpcNoSkills) args.push("--no-skills");
 
-    // 仅临时停放 codeisland 等黑名单扩展文件；npm packages 与其它本地扩展照常加载。
-    const blockedNames = this.parkIncompatibleExtensions();
+    const includeProjectResources = trustOverride !== "no-approve";
+    let blockedNames: string[] = [];
+    let startupComplete = false;
+    try {
+      // 仅临时停放 codeisland 等黑名单扩展文件；拒绝 trust 时不得扫描或移动项目扩展。
+      blockedNames = this.parkIncompatibleExtensions(includeProjectResources);
     if (blockedNames.length > 0) {
       // 黑名单扩展被停放属于启动诊断事件，同步写入日志文件便于排查 RPC 初始化失败
       void getAppLogger()?.warn("pi-process", "Desktop-incompatible extensions parked for RPC", {
@@ -285,20 +294,27 @@ export class PiProcess extends EventEmitter {
     // 白名单模式：存在禁用扩展时，--no-extensions 关自动发现 + 逐条 -e 注入未禁用的扩展。
     // 必须在 parkIncompatibleExtensions 之后调用：黑名单文件已被移走，resolver 的 existsSync
     // 会自然跳过它们，避免 -e 指向已停放路径导致 pi 报 path does not exist。
-    // disableExtensionWhitelist（UI「禁用 -e 参数」总开关）为 true 时无条件关闭白名单：
-    // 恢复 pi 默认发现加载全部扩展，防御个别扩展的白名单注入导致 RPC 启动失败。
+    // disableExtensionWhitelist only affects trusted sessions. Denied trust is a security mode and
+    // always keeps the global-only whitelist so the diagnostic switch cannot restore project discovery.
     // 此处只计算列表，实际注入推迟到版本门槛检查之后（见下方 version gate），
     // 确保在拿到 command + versionCache 后统一决定。
-    const whitelistPaths = this.options.resolveEnabledExtensionPaths?.(this.settings, this.cwd) ?? null;
+    const whitelistPaths = this.options.resolveEnabledExtensionPaths?.(
+      this.settings,
+      this.cwd,
+      includeProjectResources,
+    ) ?? null;
     const useWhitelist =
       whitelistPaths !== null &&
       whitelistPaths !== undefined &&
       !this.settings?.piRpcNoExtensions &&
-      !this.settings?.disableExtensionWhitelist;
+      (!this.settings?.disableExtensionWhitelist || !includeProjectResources);
 
     // PiDeck 内置扩展：从 app resources 以 -e 注入，不再复制到 ~/.pi/agent/extensions。
     // piRpcNoExtensions 或白名单模式时不再单独注入（白名单列表已包含内置扩展）。
-    const builtInPaths = this.options.resolveBuiltInExtensionPaths?.(this.settings) ?? [];
+    const builtInPaths = this.options.resolveBuiltInExtensionPaths?.(
+      this.settings,
+      includeProjectResources,
+    ) ?? [];
     const argsWithBuiltIns = useWhitelist
       ? args
       : appendBuiltInExtensionArgs(args, builtInPaths, {
@@ -332,18 +348,28 @@ export class PiProcess extends EventEmitter {
     }
     const command = this.locator.resolveCommand(this.settings?.customPiPath, this.settings?.wslEnabled, this.settings?.wslDistro, this.settings?.wslUser);
 
-    // 信任覆盖：用 --approve/--no-approve 覆盖 pi 的 trustStore 决策（本次生效，不落盘）。
-    // trust-session 用 --approve 让 pi 本次加载项目资源；deny 用 --no-approve 以不信任模式启动。
-    // --approve/--no-approve 从 pi 0.79.0 开始支持。对老版本 pi 不传递这些参数，
-    // 避免 "unknown option" 错误导致 RPC 进程启动失败。
+    // A denied trust decision must fail closed. Without a verified --no-approve flag, starting pi
+    // would allow its normal project discovery to load code the user explicitly rejected.
     if (trustOverride) {
       await this.ensureVersionCheck(command);
       const cached = PiProcess.versionCache.get(command);
-      if (cached?.status === "done" && PiProcess.versionSupportsTrustFlags(cached.minorVersion)) {
-        if (trustOverride === "approve") finalPiArgs.push("--approve");
-        else if (trustOverride === "no-approve") finalPiArgs.push("--no-approve");
+      const supportsTrustFlags =
+        cached?.status === "done" &&
+        cached.ok &&
+        PiProcess.versionSupportsTrustFlags(cached.minorVersion);
+      if (trustOverride === "no-approve" && !supportsTrustFlags) {
+        this.restoreParkedExtensions();
+        void getAppLogger()?.error("pi-process", "Cannot enforce denied project trust", {
+          command,
+          minorVersion: cached?.status === "done" ? cached.minorVersion : null,
+          versionCheck: cached?.status === "done" ? cached.ok : false,
+        });
+        throw new Error(
+          "Cannot start an untrusted project safely: pi 0.79.0 or newer is required and its version must be verifiable.",
+        );
       }
-      // 版本不支持信任标志时静默跳过：老版本 pi 无 trust 系统，自动加载所有资源。
+      if (supportsTrustFlags) finalPiArgs.push(trustOverride === "approve" ? "--approve" : "--no-approve");
+      // Approving an old pi retains historical behavior; only denial requires a hard security guarantee.
     }
 
     // 扩展白名单的版本门槛：-e 的目录/包源语义从 pi 0.60 起才文档化，过低版本传目录
@@ -398,7 +424,11 @@ export class PiProcess extends EventEmitter {
     // /skill:name 手动触发）；「不加载」唯一可靠手段就是白名单（与扩展白名单同构）。
     // 解析器返回 null = 无禁用项，不启用（pi 默认发现全部技能，兼容 PiDeck 未跟踪的安装）。
     // piRpcNoSkills（诊断总开关）优先：已传 --no-skills 时不再注入，保证诊断路径干净。
-    const skillWhitelistPaths = this.options.resolveEnabledSkillPaths?.(this.settings, this.cwd) ?? null;
+    const skillWhitelistPaths = this.options.resolveEnabledSkillPaths?.(
+      this.settings,
+      this.cwd,
+      includeProjectResources,
+    ) ?? null;
     const useSkillWhitelist =
       skillWhitelistPaths !== null &&
       skillWhitelistPaths !== undefined &&
@@ -441,7 +471,11 @@ export class PiProcess extends EventEmitter {
     // 提示词模板白名单模式：与技能白名单同构。存在禁用模板时 --no-prompt-templates 关自动
     // 发现 + 逐条 --prompt-template 注入未禁用的模板（/name 命令只展开白名单内的模板）。
     // 解析器返回 null = 无禁用项，不启用（pi 默认发现全部模板）。
-    const promptWhitelistPaths = this.options.resolveEnabledPromptPaths?.(this.settings, this.cwd) ?? null;
+    const promptWhitelistPaths = this.options.resolveEnabledPromptPaths?.(
+      this.settings,
+      this.cwd,
+      includeProjectResources,
+    ) ?? null;
     const usePromptWhitelist =
       promptWhitelistPaths !== null &&
       promptWhitelistPaths !== undefined;
@@ -641,7 +675,24 @@ export class PiProcess extends EventEmitter {
       this.rpc = undefined;
     });
 
+    startupComplete = true;
     return this.rpc;
+    } catch (error) {
+      // Resolver/version/WSL preparation can fail after extensions were parked but before a
+      // child exit handler owns restoration. Roll back this start attempt synchronously.
+      if (!startupComplete) {
+        const failedProcess = this.proc;
+        this.proc = undefined;
+        this.rpc = undefined;
+        try {
+          failedProcess?.kill();
+        } catch {
+          // The process may already have exited; restoration remains required either way.
+        }
+        this.restoreParkedExtensions();
+      }
+      throw error;
+    }
   }
 
   get client() {

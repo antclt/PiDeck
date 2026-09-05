@@ -44,7 +44,16 @@ export function ProjectResourcesModal(props: {
 	project: Project;
 	onClose: () => void;
 }) {
-	const [data, setData] = useState<ProjectResourceListResult>({ skills: [], extensions: [] });
+	const [data, setData] = useState<ProjectResourceListResult>({
+		skills: [],
+		extensions: [],
+		skillLocations: [],
+		overrides: {
+			disabledGlobalExtensions: [],
+			disabledGlobalSkills: [],
+			disabledGlobalPrompts: [],
+		},
+	});
 	const [prompts, setPrompts] = useState<PiPromptTemplateSummary[]>([]);
 	const [promptsLoading, setPromptsLoading] = useState(false);
 	const [loading, setLoading] = useState(true);
@@ -101,13 +110,13 @@ export function ProjectResourcesModal(props: {
 		setPromptsLoading(true);
 		setError(null);
 		try {
-			const result = await window.piDesktop.prompts.listByProject(props.project.path);
+			const result = await window.piDesktop.prompts.listByProject(props.project.id);
 			setPrompts(result.templates);
 		} catch (err) {
 			setPrompts([]);
 		}
 		setPromptsLoading(false);
-	}, [props.project.path]);
+	}, [props.project.id]);
 
 	/** 进入提示词 tab 时自动加载 */
 	useEffect(() => {
@@ -137,6 +146,7 @@ export function ProjectResourcesModal(props: {
 				projectId: props.project.id,
 				name: newName.trim(),
 				description: newDescription.trim(),
+				locationId: "project-pi",
 			});
 			setNewName("");
 			setNewDescription("");
@@ -158,11 +168,10 @@ export function ProjectResourcesModal(props: {
 			} else if (deleteTarget.kind === "extension" && deleteTarget.item.path) {
 				await api.deleteExtension(props.project.id, deleteTarget.item.path);
 			} else if (deleteTarget.kind === "prompt") {
-				// 用文件名删除项目级 prompt
-				const fileName = deleteTarget.item.path.split(/[/\\]/).pop();
-				if (fileName) {
-					await window.piDesktop.prompts.deleteFromProject(props.project.path, fileName);
-				}
+				await window.piDesktop.prompts.deleteFromProject(
+					props.project.id,
+					deleteTarget.item.name,
+				);
 			}
 			setDeleteTarget(null);
 			await Promise.all([refresh(), loadPrompts()]);
@@ -199,7 +208,11 @@ export function ProjectResourcesModal(props: {
 		setEditLoading(true);
 		setError(null);
 		try {
-			const content = await window.piDesktop.files.readContent(skill.path);
+			const content = await window.piDesktop.files.readContent(
+				skill.path,
+				undefined,
+				{ projectId: props.project.id },
+			);
 			setEditContent(content);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -215,7 +228,11 @@ export function ProjectResourcesModal(props: {
 		setEditSaving(true);
 		setError(null);
 		try {
-			await window.piDesktop.files.writeContent(editingSkill.path, editContent);
+			await window.piDesktop.files.writeContent(
+				editingSkill.path,
+				editContent,
+				{ projectId: props.project.id },
+			);
 			setEditSaved(true);
 			window.setTimeout(() => setEditSaved(false), 2000);
 			// 保存后刷新列表，让 readSkill 读到最新 frontmatter
@@ -262,9 +279,10 @@ export function ProjectResourcesModal(props: {
 	};
 
 	const toggleExtension = async (extension: PiExtensionSummary) => {
+		if (!extension.path) return;
 		const nextEnabled = extension.enabled !== false ? false : true;
 		try {
-			await api.toggleExtension(props.project.id, extension.path!, nextEnabled);
+			await api.toggleExtension(props.project.id, extension.path, nextEnabled);
 			setData((prev) => ({
 				...prev,
 				extensions: prev.extensions.map((e) =>
@@ -285,7 +303,7 @@ export function ProjectResourcesModal(props: {
 		setCreatingPrompt(true);
 		setError(null);
 		try {
-			await window.piDesktop.prompts.createInProject(props.project.path, {
+			await window.piDesktop.prompts.createInProject(props.project.id, {
 				name: newPromptName.trim(),
 				description: newPromptDescription.trim(),
 			});
@@ -306,7 +324,11 @@ export function ProjectResourcesModal(props: {
 		setEditProjectPromptSaved(false);
 		setError(null);
 		try {
-			const content = await window.piDesktop.files.readContent(prompt.path);
+			const content = await window.piDesktop.files.readContent(
+				prompt.path,
+				undefined,
+				{ projectId: props.project.id },
+			);
 			setEditProjectPromptContent(content);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -321,7 +343,11 @@ export function ProjectResourcesModal(props: {
 		setEditProjectPromptSaving(true);
 		setError(null);
 		try {
-			await window.piDesktop.files.writeContent(editingProjectPrompt.path, editProjectPromptContent);
+			await window.piDesktop.files.writeContent(
+				editingProjectPrompt.path,
+				editProjectPromptContent,
+				{ projectId: props.project.id },
+			);
 			setEditProjectPromptSaved(true);
 			window.setTimeout(() => setEditProjectPromptSaved(false), 2000);
 			await loadPrompts();

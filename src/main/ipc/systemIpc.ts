@@ -32,6 +32,7 @@ import { fetchModelList, getCachedModelList, invalidateModelListCache, refreshMo
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthStore } from "../config/tokendanceAuth";
+import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
@@ -81,10 +82,45 @@ function isRpcLogEntry(value: unknown): value is RpcLogEntry {
 	);
 }
 
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return isUnknownRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
+	if (!isUnknownRecord(value)) return false;
+	const optionalString = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "string";
+	const optionalNumber = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "number";
+	return (
+		["command", "cwd", "url", "socket", "bearerToken", "bearerTokenEnv"].every(optionalString) &&
+		optionalNumber("idleTimeout") &&
+		optionalNumber("requestTimeoutMs") &&
+		(!("args" in value) || value.args === undefined || (Array.isArray(value.args) && value.args.every((entry) => typeof entry === "string"))) &&
+		(!("env" in value) || value.env === undefined || isStringRecord(value.env)) &&
+		(!("headers" in value) || value.headers === undefined || isStringRecord(value.headers)) &&
+		(!("auth" in value) || value.auth === undefined || value.auth === "bearer" || value.auth === "oauth") &&
+		(!("lifecycle" in value) || value.lifecycle === undefined || ["lazy", "eager", "keep-alive", "lazy-keep-alive"].includes(String(value.lifecycle))) &&
+		(!("disabled" in value) || value.disabled === undefined || typeof value.disabled === "boolean") &&
+		(!("directTools" in value) || value.directTools === undefined || typeof value.directTools === "boolean" || (Array.isArray(value.directTools) && value.directTools.every((entry) => typeof entry === "string")))
+	);
+}
+
+function isMcpConfigFile(value: unknown): value is McpConfigFile {
+	if (!isUnknownRecord(value)) return false;
+	if ("settings" in value && value.settings !== undefined && !isUnknownRecord(value.settings)) return false;
+	if (!("mcpServers" in value) || value.mcpServers === undefined) return true;
+	if (!isUnknownRecord(value.mcpServers)) return false;
+	return Object.values(value.mcpServers).every(isMcpServerDefinition);
+}
+
 export type SystemIpcDeps = {
 	piLocator: PiLocator;
 	settingsStore: SettingsStore;
 	configManager: ConfigManager;
+	projectResourceManager: ProjectResourceManager;
 	agentManager: AgentManager;
 	skillManager: SkillManager;
 	appLogger: AppLogger;
@@ -218,6 +254,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		piLocator,
 		settingsStore,
 		configManager,
+		projectResourceManager,
 		agentManager,
 		skillManager,
 		appLogger,
@@ -1212,30 +1249,30 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configGetTrust, () =>
 		configManager.getTrustConfig(),
 	);
-	// MCP 配置只读合并：projectPath 可选，非法输入当全局层处理。
-	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectPath?: unknown) => {
-		const path =
-			typeof projectPath === "string" && projectPath.trim().length > 0
-				? projectPath.trim()
-				: undefined;
-		return configManager.getMcpConfig(path);
+	// MCP project layers are selected by a stable registered project id; renderer paths are never trusted.
+	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectId?: unknown) => {
+		if (projectId === undefined) return configManager.getMcpConfig();
+		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) {
+			throw new Error("Invalid project id.");
+		}
+		return configManager.getMcpConfig(projectResourceManager.getProjectRoot(projectId.trim()));
 	});
 	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown) => {
-		if (!data || typeof data !== "object" || Array.isArray(data)) {
-			return { valid: false, error: "mcp.json must be an object" };
+		if (!isMcpConfigFile(data)) {
+			return { valid: false, error: "mcp.json must contain an object of server definitions" };
 		}
-		const result = await configManager.saveMcpConfig(data as McpConfigFile);
+		const result = await configManager.saveMcpConfig(data);
 		void appLogger.info("config", "MCP config saved", {
-			serverCount: Object.keys((data as McpConfigFile).mcpServers ?? {}).length,
+			serverCount: Object.keys(data.mcpServers ?? {}).length,
 		});
 		return result;
 	});
 	// 轻量探测：不 spawn 用户 command、不连 MCP SDK。
 	ipcMain.handle(ipcChannels.configProbeMcp, async (_event, definition: unknown) => {
-		if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
+		if (!isMcpServerDefinition(definition)) {
 			return { ok: false, error: "invalid MCP server definition" };
 		}
-		return configManager.probeMcpServer(definition as McpServerDefinition);
+		return configManager.probeMcpServer(definition);
 	});
 	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
 	ipcMain.handle(ipcChannels.configGetDir, () =>

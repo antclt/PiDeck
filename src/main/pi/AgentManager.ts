@@ -3149,8 +3149,9 @@ export class AgentManager {
 	): Promise<T> {
 		const project = this.getProject(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const trustOverride = await this.ensureProjectTrust(project);
 		const process = this.createPiProcess(project.path, sessionPath);
-		await process.start(sessionPath);
+		await process.start(sessionPath, trustOverride);
 		try {
 			return await run(process);
 		} finally {
@@ -4571,7 +4572,7 @@ export class AgentManager {
 		"settings.json",
 		"extensions",
 		"skills",
-		"prompts",
+		"mcp.json",
 		"themes",
 		"SYSTEM.md",
 		"APPEND_SYSTEM.md",
@@ -4585,7 +4586,10 @@ export class AgentManager {
 	private hasTrustRequiringResources(hostCwd: string): boolean {
 		const configDir = join(hostCwd, ".pi");
 		if (
-			AgentManager.TRUST_REQUIRING_RESOURCE_FILES.some((file) => existsSync(join(configDir, file)))
+			AgentManager.TRUST_REQUIRING_RESOURCE_FILES.some((file) => existsSync(join(configDir, file))) ||
+			// pi-mcp-adapter also loads a project-root layer. It can define stdio commands,
+			// so a project with only .mcp.json still requires an explicit trust decision.
+			existsSync(join(hostCwd, ".mcp.json"))
 		) {
 			return true;
 		}

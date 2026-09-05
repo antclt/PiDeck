@@ -117,16 +117,19 @@ export function registerFilesIpc({
 		}
 	});
 
-	ipcMain.handle(ipcChannels.filesOpen, async (_event, path: string) => {
-		const error = await shell.openPath(toWindowsPath(path));
+	ipcMain.handle(ipcChannels.filesOpen, async (_event, path: unknown, scope?: unknown) => {
+		const boundary = await resolveProjectReadBoundary(scope);
+		const readablePath = await resolveReadablePath(path, boundary);
+		const error = await shell.openPath(readablePath);
 		// Electron 通过返回字符串报告打开失败；显式抛出后前端才能提示路径不存在或系统无法打开。
 		if (error) throw new Error(error);
 	});
 
-	ipcMain.handle(ipcChannels.filesShowInFolder, async (_event, path: string) => {
-		// 回归修复（30b6954b 误删）：渲染层「在文件夹中显示」依赖此通道，
-		// 缺失时 invoke 会抛 No handler registered。WSL 路径先转 Windows 再定位。
-		shell.showItemInFolder(toWindowsPath(path));
+	ipcMain.handle(ipcChannels.filesShowInFolder, async (_event, path: unknown, scope?: unknown) => {
+		// 项目来源必须按 ProjectStore 中的注册根目录重新授权，不能信任 renderer 自报路径。
+		const boundary = await resolveProjectReadBoundary(scope);
+		const readablePath = await resolveReadablePath(path, boundary);
+		shell.showItemInFolder(readablePath);
 	});
 
 	ipcMain.handle(ipcChannels.filesDetectFileManager, async (): Promise<FileManagerInfo | null> => {

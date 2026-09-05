@@ -354,7 +354,17 @@ export function createPreviewApi(): PiDesktopApi {
 			respondTrustRequest: async () => undefined,
 		},
 		projectResources: {
-			list: async () => ({ skills: [], extensions: [] }),
+			list: async () => ({
+				skills: [],
+				extensions: [],
+				skillLocations: [],
+				overrides: {
+					disabledGlobalExtensions: [],
+					disabledGlobalSkills: [],
+					disabledGlobalPrompts: [],
+				},
+			}),
+			openDirectory: async () => undefined,
 			createSkill: async (input) => ({
 				id: `project-pi:${input.name}`,
 				name: input.name,
@@ -371,6 +381,14 @@ export function createPreviewApi(): PiDesktopApi {
 			deleteSkill: async () => undefined,
 			deleteExtension: async () => undefined,
 			toggleExtension: async () => undefined,
+			toggleInherited: async (input) => ({
+				disabledGlobalExtensions:
+					input.kind === "extension" && !input.enabled ? [input.key] : [],
+				disabledGlobalSkills:
+					input.kind === "skill" && !input.enabled ? [input.key] : [],
+				disabledGlobalPrompts:
+					input.kind === "prompt" && !input.enabled ? [input.key] : [],
+			}),
 			renameSkill: async (_projectId, _skillPath, newName) => ({
 				id: `project-pi:${newName}`,
 				name: newName,
@@ -397,6 +415,7 @@ export function createPreviewApi(): PiDesktopApi {
 				valid: true,
 				warnings: [],
 			}),
+		discovery: async () => ({ skills: [], prompts: [], extensions: [] }),
 		},
 		files: {
 			list: async (_projectId, options) => {
@@ -1019,9 +1038,9 @@ export function createPreviewApi(): PiDesktopApi {
 			openFolder: async () => undefined,
 			edit: async (_filePath, _content?) => "---\ndescription: Preview\n---\n\nPreview content",
 			listByProject: async () => ({ templates: [], globalDir: "" }),
-			createInProject: async (_projectPath, input) => ({
+			createInProject: async (_projectId, input) => ({
 				name: input.name,
-				path: `project://${_projectPath}/.pi/prompts/${input.name}.md`,
+				path: `project://${_projectId}/.pi/prompts/${input.name}.md`,
 				description: input.description,
 				content: `---\ndescription: ${input.description}\n---\n`,
 				userCreated: true,
@@ -1035,9 +1054,9 @@ export function createPreviewApi(): PiDesktopApi {
 				content: `---\ndescription: Renamed prompt\n---\n`,
 				userCreated: true,
 			}),
-			renameInProject: async (_projectPath, _oldName, newName) => ({
+			renameInProject: async (_projectId, _oldName, newName) => ({
 				name: newName,
-				path: `project://${_projectPath}/.pi/prompts/${newName}.md`,
+				path: `project://${_projectId}/.pi/prompts/${newName}.md`,
 				description: "Renamed project prompt",
 				content: `---\ndescription: Renamed project prompt\n---\n`,
 				userCreated: true,
@@ -1049,6 +1068,15 @@ export function createPreviewApi(): PiDesktopApi {
 				description: "Preview prompt",
 				content: "",
 				userCreated: true,
+				enabled,
+			}),
+			toggleInProject: async (_projectId, name, enabled) => ({
+				name,
+				path: `project://${_projectId}/.pi/prompts/${name}.md`,
+				description: "Preview project prompt",
+				content: "",
+				userCreated: true,
+				scope: "project",
 				enabled,
 			}),
 		},

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useMemo, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import type { AppInfo, AppSettings } from "../../../../shared/types";
+import type { AppInfo, AppSettings, Project } from "../../../../shared/types";
 import { settingsFocusAtom, settingsOpenAtom } from "../../atoms";
 import { updateStatusAtom } from "../../atoms/update-atoms";
 import {
@@ -23,8 +23,12 @@ type SettingsFeatureRootProps = {
   onRestartWebService: () => void;
   appInfo: AppInfo;
   onChange: (patch: Partial<AppSettings>) => Promise<boolean>;
-  /** 当前项目路径：有值时配置管理分区合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
-  projectPath?: string;
+  /** 当前项目身份：项目资源 IPC 只接受主进程登记的 id。 */
+  projectId?: string;
+  /** Chat workspace has no project resource scope. */
+  projectKind?: Project["kind"];
+  /** 当前项目名称：作用域选择器显示用。 */
+  projectName?: string;
 };
 
 /** Owns Settings overlay visibility and modal-only commands without mirroring AppSettings. */
@@ -129,7 +133,9 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
         setOpen(false);
       },
       onChange: props.onChange,
-      projectPath: props.projectPath,
+      projectId: props.projectId,
+      projectKind: props.projectKind,
+      projectName: props.projectName,
     }),
     [
       props.settings,
@@ -157,7 +163,9 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
       props.piUpdate.piUpdating,
       props.onRestartWebService,
       props.onChange,
-      props.projectPath,
+      props.projectId,
+      props.projectKind,
+      props.projectName,
       installAppUpdate,
       setFocus,
       setOpen,

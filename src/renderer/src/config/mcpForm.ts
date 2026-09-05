@@ -3,6 +3,13 @@
  * 放独立模块是为了可单测，并避免 McpTab 继续变长。
  */
 
+import type {
+	McpConfigFile,
+	McpConfigSnapshot,
+	McpServerListItem,
+} from "../../../shared/types/mcp";
+import type { ResourceScope } from "./ResourceScopeSelector";
+
 const SERVER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 /** 与主进程 mcpConfig.isMcpServerName 同一规则，避免渲染层 import 主进程模块。 */
@@ -35,6 +42,40 @@ export function omitUndefined<T extends Record<string, unknown>>(value: T): Part
 		if (item !== undefined) (out as Record<string, unknown>)[key] = item;
 	}
 	return out;
+}
+
+export function buildMcpDisplayServers(
+	snapshot: McpConfigSnapshot,
+	writable: McpConfigFile,
+	scope: ResourceScope,
+): McpServerListItem[] {
+	// Main already merged all six layers in precedence order. Project scope is read-only and must
+	// never reapply the lower-precedence global writable file over a project definition.
+	if (scope === "project") return [...snapshot.servers];
+	const writableServers = writable.mcpServers ?? {};
+	const seen = new Set<string>();
+	const items = snapshot.servers.map((item) => {
+		seen.add(item.name);
+		const overlay = writableServers[item.name];
+		if (!overlay) return item;
+		return {
+			...item,
+			definition: { ...item.definition, ...omitUndefined(overlay) },
+			ownedByWritable: item.originPath === snapshot.writablePath,
+			overridePath: snapshot.writablePath,
+		};
+	});
+	for (const [name, definition] of Object.entries(writableServers)) {
+		if (seen.has(name)) continue;
+		items.push({
+			name,
+			definition,
+			originPath: snapshot.writablePath,
+			overridePath: snapshot.writablePath,
+			ownedByWritable: true,
+		});
+	}
+	return items.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 /**

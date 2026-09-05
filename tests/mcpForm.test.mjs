@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { argsToText, isMcpServerName, omitUndefined, recordToText, textToArgs, textToRecord } = loadTsCommonJs(
+const {
+	argsToText,
+	buildMcpDisplayServers,
+	isMcpServerName,
+	omitUndefined,
+	recordToText,
+	textToArgs,
+	textToRecord,
+} = loadTsCommonJs(
 	"src/renderer/src/config/mcpForm.ts",
 );
 
@@ -26,6 +34,26 @@ test("omitUndefined keeps defined overlay fields without wiping command", () => 
 	const merged = { command: "npx", ...omitUndefined({ disabled: true, command: undefined }) };
 	assert.equal(merged.command, "npx");
 	assert.equal(merged.disabled, true);
+});
+
+test("project MCP display preserves the main-process merged precedence", () => {
+	const snapshot = {
+		writablePath: "/home/me/.pi/agent/mcp.json",
+		writableFile: { mcpServers: { docs: { command: "global" } } },
+		writableRaw: "",
+		layers: [],
+		servers: [{
+			name: "docs",
+			definition: { command: "project" },
+			originPath: "/repo/.mcp.json",
+			overridePath: "/repo/.mcp.json",
+			ownedByWritable: false,
+		}],
+	};
+	const projectItems = buildMcpDisplayServers(snapshot, snapshot.writableFile, "project");
+	assert.equal(projectItems[0].definition.command, "project");
+	const globalItems = buildMcpDisplayServers(snapshot, snapshot.writableFile, "global");
+	assert.equal(globalItems[0].definition.command, "global");
 });
 
 test("MCP form server names match the main-process rule", () => {

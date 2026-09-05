@@ -113,8 +113,9 @@ test("skills and prompts use full-width tab rails with compact selected tabs", (
   assert.match(tabs, /!text-\[color:var\(--color-text-secondary\)\]/);
 });
 
-test("skill list is not accidentally filtered by the new-skill destination", () => {
-  assert.match(skills, /const visibleSkills = data\.skills;/);
+test("skill list filtering depends on resource scope, not the new-skill destination", () => {
+  assert.match(skills, /const visibleSkills = data\.skills\.filter\(\(skill\) => props\.scope/);
+  assert.doesNotMatch(skills, /data\.skills\.filter\([^;]*newLocationId/);
   assert.doesNotMatch(skills, /const filteredSkills = data\.skills\.filter/);
 });
 
