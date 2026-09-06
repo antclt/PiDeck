@@ -156,9 +156,9 @@ export function ExtensionStoreTab(props: {
 
 	return (
 		<div className="prompt-store-tab">
-			{/* 搜索 + 类型 + 排序工具栏 */}
-			<div className="prompt-store-search-bar">
-				<div className="prompt-store-search-input-wrap">
+			{/* 搜索 + 类型 + 排序工具栏（一行 flex：搜索框占满剩余宽度，两个下拉固定宽度并排右侧） */}
+			<div className="prompt-store-search-bar flex items-center gap-2.5">
+				<div className="prompt-store-search-input-wrap min-w-0 flex-1">
 					<Search size={15} strokeWidth={1.8} className="prompt-store-search-icon" />
 					<Input
 						ref={searchInputRef}
