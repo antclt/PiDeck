@@ -15,6 +15,7 @@ import type {
 	AppUpdateStatusSnapshot,
 } from "../../shared/types/app";
 import type { PiUpdateCheckResult } from "../../shared/types";
+import type { CatalogCheckResult } from "../../shared/types/catalog";
 import type { SettingsStore } from "../settings/SettingsStore";
 import { normalizeUpdateSource, normalizeCustomMirrorHost, updateSourceFeedUrl, updateSourceLatestReleaseUrl } from "./updateSources";
 import type { AutoUpdaterLike } from "./autoUpdaterTypes";
@@ -32,6 +33,8 @@ export type UpdateServiceDeps = {
 	settingsStore: Pick<SettingsStore, "get" | "update">;
 	/** Pi CLI 版本检查（extensionManager.checkPiUpdate 注入）。 */
 	checkPiUpdate?: () => Promise<PiUpdateCheckResult>;
+	/** 内置模型目录（pi-ai-catalog）远端检查（PiAiCatalogUpdater.checkRemote 注入）。 */
+	checkCatalogUpdate?: () => Promise<CatalogCheckResult>;
 	/** 推送给渲染层（mainWindow.webContents.send 注入）。 */
 	sendToRenderer?: (snapshot: AppUpdateStatusSnapshot) => void;
 	log?: (level: "info" | "warn", message: string, details?: Record<string, unknown>) => void;
@@ -85,6 +88,7 @@ export class UpdateService {
 	private unsubscribeUpdater: (() => void) | null = null;
 	private lastApp: AppCheckResult | null = null;
 	private lastPi: PiCheckResult | null = null;
+	private lastCatalog: CatalogCheckResult | null = null;
 	private download: AppUpdateDownloadState = emptyDownloadState();
 
 	constructor(deps: UpdateServiceDeps) {
@@ -116,9 +120,10 @@ export class UpdateService {
 			this.pushSnapshot();
 		}
 		try {
-			const [appResult, piResult] = await Promise.allSettled([
+			const [appResult, piResult, catalogResult] = await Promise.allSettled([
 				this.checkApp(),
 				this.checkPi(),
+				this.checkCatalog(),
 			]);
 			if (appResult.status === "fulfilled") this.lastApp = appResult.value;
 			if (appResult.status === "rejected") {
@@ -128,6 +133,15 @@ export class UpdateService {
 				void this.deps.log?.("warn", "App update check failed", { error });
 			}
 			if (piResult.status === "fulfilled") this.lastPi = piResult.value;
+			if (piResult.status === "rejected") {
+				const error = toErrorMessage(piResult.reason);
+				void this.deps.log?.("warn", "Pi CLI update check failed", { error });
+			}
+			if (catalogResult.status === "fulfilled") this.lastCatalog = catalogResult.value;
+			if (catalogResult.status === "rejected") {
+				const error = toErrorMessage(catalogResult.reason);
+				void this.deps.log?.("warn", "Catalog update check failed", { error });
+			}
 			// 检查时间持久化（低频写，2h 一次），供 UI 显示上次检查时间。
 			await this.deps.settingsStore
 				.update({ updateLastCheckAt: Date.now() })
@@ -266,6 +280,14 @@ export class UpdateService {
 						hasUpdate: this.lastPi.hasUpdate,
 						notifiedVersion: settings.updatePiNotifiedVersion,
 						error: this.lastPi.error,
+					}
+				: null,
+			catalog: this.lastCatalog
+				? {
+						localVersion: this.lastCatalog.ok ? this.lastCatalog.localVersion : null,
+						latestVersion: this.lastCatalog.ok ? this.lastCatalog.remoteVersion : undefined,
+						hasUpdate: this.lastCatalog.ok ? this.lastCatalog.hasUpdate : false,
+						error: this.lastCatalog.ok ? undefined : this.lastCatalog.message,
 					}
 				: null,
 		};
@@ -422,6 +444,12 @@ export class UpdateService {
 			hasUpdate: result.hasUpdate,
 			error: result.error,
 		};
+	}
+
+	/** 内置模型目录远端检查：未注入时跳过（不产生快照节点，不视为错误）。 */
+	private async checkCatalog(): Promise<CatalogCheckResult | null> {
+		if (!this.deps.checkCatalogUpdate) return null;
+		return this.deps.checkCatalogUpdate();
 	}
 
 	private getAutoUpdater(): AutoUpdaterLike {

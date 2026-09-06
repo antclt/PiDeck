@@ -1,6 +1,7 @@
 import { Component, Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getDefaultStore, useAtom } from "jotai";
+import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
+import { hasPendingUpdateAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
 import {
 	Settings2,
@@ -262,6 +263,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 function SettingsModalContent(props: SettingsModalProps) {
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容）。
 	// 深链（如 Git「去设置」）优先于上次记住的 tab，否则会停在外观/开发等其它页。
+	const hasPendingUpdate = useAtomValue(hasPendingUpdateAtom);
 	const [activeTab, setActiveTab] = useState<SettingsTabId>(
 		() => getDefaultStore().get(settingsFocusAtom)?.tab ?? loadLastSettingsTab(),
 	);
@@ -691,11 +693,15 @@ function SettingsModalContent(props: SettingsModalProps) {
 										className="my-1.5 h-px w-auto shrink-0 bg-border-subtle max-[820px]:mx-1 max-[820px]:my-0 max-[820px]:h-auto max-[820px]:w-px"
 									/>
 								) : null}
-								<TabsTrigger value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
+						<TabsTrigger value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 									<span className="settings-tab-icon">{tab.icon}</span>
 									<strong>{tab.label}</strong>
-								{/* 未保存黄点：按字段目录归并到所属 tab，视觉桥草稿算 vision */}
-								{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+									{/* 右侧状态点：更新亮点（仅 dev tab，app/pi/模型目录任一有更新）+ 未保存黄点。
+										两者可并存；均为装饰（aria-hidden），语义由 tab 内卡片文案承担。 */}
+									<div className="ml-auto flex items-center gap-1">
+										{tab.id === "dev" && hasPendingUpdate ? <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden="true" /> : null}
+										{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+									</div>
 								</TabsTrigger>
 							</Fragment>
 						))}

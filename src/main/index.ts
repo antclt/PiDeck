@@ -2733,12 +2733,19 @@ function registerIpc() {
 	// Phase 3.7 拆出 systemIpc 后这些可选依赖必须显式注入；
 	// 漏传 extensionManager 会导致 pi:update-check / pi:update 根本不注册。
 	if (!piModelCapabilityCache) throw new Error("Pi model capability cache is unavailable after settings load");
+	// 模型目录更新器：设置页手动更新与 UpdateService 第三路定时检查共用同一实例。
+	// 覆盖层目录须在 catalog 初次读取前登记（getPiAiCatalogIndex 首次调用即锁定索引）；
+	// app 已 ready 后 app.getPath("userData") 才可靠，故在此提前构造。
+	setPiAiCatalogUserDataDir(app.getPath("userData"));
+	const catalogUpdater = new PiAiCatalogUpdater({ userDataDir: app.getPath("userData") });
 	// 后台更新检查：Windows / 支持自动升级的发行物走 electron-updater；
 	// macOS 当前未签 Developer ID，不能承诺稳定的替换/重启，因此只检测 Release 并交给用户手动安装。
 	// 两条路径都由同一个 UpdateService 快照推送渲染层，设置页能明确表达能力边界。
 	const updateServiceBase = {
 		settingsStore,
 		checkPiUpdate: () => extensionManager.checkPiUpdate(),
+		// 模型目录：复用设置页同一检查链路（GitHub main 分支 manifest 比对），结果并入更新快照。
+		checkCatalogUpdate: () => catalogUpdater.checkRemote(),
 		sendToRenderer: (snapshot: import("../shared/types").AppUpdateStatusSnapshot) => {
 			if (mainWindow && !mainWindow.isDestroyed()) {
 				mainWindow.webContents.send(ipcChannels.appUpdateStatusChanged, snapshot);
@@ -2779,10 +2786,7 @@ function registerIpc() {
 		});
 	}
 	updateService.start();
-	// 模型目录更新：覆盖层目录须在 catalog 初次读取前登记（getPiAiCatalogIndex 首次
-	// 调用即锁定索引）；updater 在 ready 后构造，此时 app.getPath("userData") 才可靠。
-	setPiAiCatalogUserDataDir(app.getPath("userData"));
-	registerCatalogIpc(new PiAiCatalogUpdater({ userDataDir: app.getPath("userData") }));
+	registerCatalogIpc(catalogUpdater);
 	// TokenDance 目录 store 是共享实例：渲染层目录展示与一键安装（写入配置）读同一份缓存。
 	const tokendanceCatalogStore = new TokendanceCatalogStore({
 		getCachePath: () => join(app.getPath("userData"), "tokendance-models.json"),

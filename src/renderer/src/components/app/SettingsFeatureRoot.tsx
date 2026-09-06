@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useMemo, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { AppInfo, AppSettings, Project } from "../../../../shared/types";
 import { settingsFocusAtom, settingsOpenAtom } from "../../atoms";
@@ -39,6 +39,14 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
   const setUpdateStatus = useSetAtom(updateStatusAtom);
   const updateInstallPreflightTasks = useAtomValue(updateInstallPreflightTasksAtom);
   const updateInstallInFlightRef = useRef(false);
+
+  // 打开设置页即视为「已看过」更新圆点解释（无论从侧栏/toast/深链进入）：
+  // 用户已找到入口，coachmark 无需再弹（持久化标记，settings.update 幂等）。
+  useEffect(() => {
+    if (open) {
+      void api.settings.update({ updateDotHintSeen: true }).catch(() => undefined);
+    }
+  }, [open]);
 
   /**
    * File editors debounce writes during normal typing. Before an updater-triggered process

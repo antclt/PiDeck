@@ -256,6 +256,15 @@ export type AppUpdateStatusSnapshot = {
 		notifiedVersion?: string;
 		error?: string;
 	} | null;
+	/** 内置模型目录（pi-ai-catalog）更新状态；null = 尚未成功检查过。 */
+	catalog: {
+		/** 当前生效版本（覆盖层优先，否则内置）；无有效目录为 null。 */
+		localVersion?: string | null;
+		/** 远端（GitHub main 分支）最新版本；检查成功时存在。 */
+		latestVersion?: string;
+		hasUpdate: boolean;
+		error?: string;
+	} | null;
 };
 
 export type AppLogLevel = "debug" | "info" | "warn" | "error";

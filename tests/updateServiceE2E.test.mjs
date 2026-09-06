@@ -180,6 +180,7 @@ function createAutomaticService(options = {}) {
 	const service = new UpdateService({
 		settingsStore: settings,
 		checkPiUpdate: options.checkPiUpdate,
+		checkCatalogUpdate: options.checkCatalogUpdate,
 		sendToRenderer: (snapshot) => snapshots.push(structuredClone(snapshot)),
 		log: (level, message, details) => logs.push({ level, message, details }),
 		getCurrentVersion: () => "0.7.3-beta",
@@ -378,6 +379,86 @@ test("notifySeen and skipVersion persist the app-version markers", async (t) => 
 	assert.equal(settings.get().updateSkippedVersion, "0.7.4");
 	assert.equal(snapshot.app.notifiedVersion, "0.7.4");
 	assert.equal(snapshot.app.skippedVersion, "0.7.4");
+});
+
+// --- catalog (model directory) check ------------------------------------
+
+test("checkNow folds a catalog update into the snapshot", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const { service, snapshots } = createAutomaticService({
+		updater,
+		checkPiUpdate: async () => ({ hasUpdate: false }),
+		checkCatalogUpdate: async () => ({
+			ok: true,
+			remoteVersion: "0.90.0",
+			localVersion: "0.84.4",
+			hasUpdate: true,
+		}),
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	const snapshot = snapshots.at(-1);
+	assert.equal(snapshot.catalog.hasUpdate, true);
+	assert.equal(snapshot.catalog.latestVersion, "0.90.0");
+	assert.equal(snapshot.catalog.localVersion, "0.84.4");
+	assert.equal(snapshot.catalog.error, undefined);
+});
+
+test("catalog check without an injected checker keeps the snapshot node absent", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const { service, snapshots } = createAutomaticService({ updater });
+	stopAfter(t, service);
+
+	await service.checkNow();
+	assert.equal(snapshots.at(-1).catalog, null);
+});
+
+test("catalog check failure surfaces as error without marking an update", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const { service, snapshots, logs } = createAutomaticService({
+		updater,
+		checkCatalogUpdate: async () => ({ ok: false, code: "network", message: "manifest fetch failed" }),
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	const snapshot = snapshots.at(-1);
+	assert.equal(snapshot.catalog.hasUpdate, false);
+	assert.equal(snapshot.catalog.latestVersion, undefined);
+	assert.match(snapshot.catalog.error, /manifest fetch failed/);
+});
+
+test("a rejected catalog checker logs a warning and keeps the previous snapshot", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const { service, snapshots, logs } = createAutomaticService({
+		updater,
+		checkCatalogUpdate: async () => {
+			throw new Error("boom");
+		},
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	assert.equal(snapshots.at(-1).catalog, null);
+	// rejected 才会打 warn（与 app/pi 两路一致）；ok:false 只进快照 error 字段。
+	assert.ok(logs.some(({ level, message }) => level === "warn" && message.includes("Catalog")));
 });
 
 // --- manual delivery (unsigned macOS) ----------------------------------

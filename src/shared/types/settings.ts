@@ -347,6 +347,8 @@ export type AppSettings = {
 	updateSkippedVersion?: string;
 	/** 最近一次“已提示过”的 Pi CLI 版本；缺省 = 未提示过。 */
 	updatePiNotifiedVersion?: string;
+	/** 是否已看过「更新圆点」的首次解释气泡（coachmark 一次性教育标记）；缺省 = 未看过。 */
+	updateDotHintSeen?: boolean;
 
 	// ── Agent 后端 ──
 	/**

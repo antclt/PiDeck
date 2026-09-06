@@ -14,7 +14,7 @@ import {
 import { RpcLogViewer } from "./RpcLogViewer";
 import { SessionProxyDialog } from "../session/SessionProxyDialog";
 import { sessionRecordToSummary } from "../../atoms";
-import { pendingAppUpdateAtom, pendingPiUpdateAtom } from "../../atoms/update-atoms";
+import { hasPendingUpdateAtom, pendingAppUpdateAtom, pendingCatalogUpdateAtom, pendingPiUpdateAtom, updateStatusAtom } from "../../atoms/update-atoms";
 import { useAtomValue } from "jotai";
 import { isManagerSessionSummary, worktreeFamilyProjects } from "../../sessionManagerModel";
 import { t } from "../../i18n";
@@ -26,8 +26,10 @@ import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { DshSearchResults } from "./DshSearchResults";
 import { ProjectTree } from "./ProjectTree";
 import { Button } from "../ui-shadcn/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { Tabs, TabsList, TabsTrigger } from "../motion/tabs";
 import { Dock, DockItem } from "../motion/dock";
+import { UpdateDotHint } from "./UpdateDotHint";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
@@ -137,11 +139,25 @@ export type SidebarContentProps = {
 export function SidebarContent(props: SidebarContentProps) {
   const { controller, actions } = props;
   const menu = controller.menu;
-  // 两个 atom 必须无条件读取：不能用 `useAtomValue(app) || useAtomValue(pi)`，
-  // 否则应用更新从 false 变 true 时会短路跳过第二个 Hook，破坏 Hook 调用顺序。
+  // 三个更新源 atom 必须无条件读取：不能用短路合并，否则任一更新源从 false 变 true
+  // 时会跳过后续 Hook，破坏 Hook 调用顺序。快照本体供角标 tooltip 清单取版本号。
   const hasPendingAppUpdate = useAtomValue(pendingAppUpdateAtom);
   const hasPendingPiUpdate = useAtomValue(pendingPiUpdateAtom);
-  const hasPendingUpdate = hasPendingAppUpdate || hasPendingPiUpdate;
+  const hasPendingCatalogUpdate = useAtomValue(pendingCatalogUpdateAtom);
+  const hasPendingUpdate = useAtomValue(hasPendingUpdateAtom);
+  const updateStatus = useAtomValue(updateStatusAtom);
+  // tooltip 清单条目：按「哪一类有更新」组装，让用户不用猜圆点指的是什么。
+  const updateItems = [
+    hasPendingAppUpdate && updateStatus?.app?.latestVersion
+      ? t("update.dotMenuApp", { version: updateStatus.app.latestVersion })
+      : null,
+    hasPendingPiUpdate && updateStatus?.piCli?.latestVersion
+      ? t("update.dotMenuPi", { version: updateStatus.piCli.latestVersion })
+      : null,
+    hasPendingCatalogUpdate && updateStatus?.catalog?.latestVersion
+      ? t("update.dotMenuCatalog", { version: updateStatus.catalog.latestVersion })
+      : null,
+  ].filter((item): item is string => item !== null);
   const menuProject = menu?.kind === "project"
     ? controller.catalog.projects.find((project) => project.id === menu.projectId)
     : undefined;
@@ -397,9 +413,31 @@ export function SidebarContent(props: SidebarContentProps) {
           <Dock size={32} className="w-full justify-between">
             <DockItem>
               <div className="relative size-full">
-                {/* 有可用更新时 title 换成带说明的文案，避免用户把角标误认成别的状态（如 dsh 未安装） */}
-                <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
-                {/* 更新角标：PiDeck 或 Pi CLI 有可提示更新时在设置按钮右上角显示圆点 */}
+                {/* 首次解释气泡：圆点第一次出现时指向设置按钮（Material feature discovery） */}
+                <UpdateDotHint hasPendingUpdate={hasPendingUpdate} onOpenSettings={() => props.onOpenSettings?.()} />
+                {/* 有可用更新时：圆点 + 富 tooltip 清单（谁有更新、版本号），点击进入设置页查看。
+                  aria-label 保留更新文案，读屏与纯键盘用户不依赖视觉圆点。 */}
+                <Tooltip delayDuration={300}>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={hasPendingUpdate ? t("settings.titleWithUpdate") : t("settings.title")} onClick={props.onOpenSettings}><Bolt className="size-4" /></Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={6} className="max-w-56">
+                    {hasPendingUpdate ? (
+                      <div className="flex flex-col gap-1">
+                        <span className="font-medium">{t("update.dotMenuTitle")}</span>
+                        <ul className="flex flex-col gap-0.5">
+                          {updateItems.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                        <span className="opacity-75">{t("update.dotMenuHint")}</span>
+                      </div>
+                    ) : (
+                      t("settings.title")
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+                {/* 更新角标：PiDeck / Pi CLI / 模型目录任一有可提示更新时显示圆点 */}
                 {hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />}
               </div>
             </DockItem>
