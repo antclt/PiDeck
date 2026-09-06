@@ -194,6 +194,8 @@ Gitmoji 对应关系：
   idleAgentTimeoutMin: 60,
 
   favoriteModels: [],
+  // 提供商显示开关默认全显示：隐藏列表为空 = 不隐藏任何提供商
+  hiddenProviders: [],
 
   // ── 扩展管理 ──
   /** 用户手动移除的内置扩展，启动时跳过自动部署 */

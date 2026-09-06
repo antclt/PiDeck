@@ -906,14 +906,24 @@ export function ModelPicker(props: {
 	backend?: UsageProbeBackend;
 	/** 最近使用的供应商 ID 列表（最新在前）：已用过的分组排最前，未用过的按内置置顶+字母序。 */
 	recentProviders?: string[];
+	/** 用户隐藏的供应商 key 列表（Pi 模型页眼睛开关）；Pi 后端按 provider 过滤，DSH 不生效。 */
+	hiddenProviders?: string[];
 }) {
 	const currentModelKey = props.current?.provider && props.current?.modelId
 		? `${props.current.provider}/${props.current.modelId}`
 		: undefined;
 	const favoritesSet = new Set(props.favoriteModels ?? []);
+	// 隐藏开关：Pi 后端按 provider 过滤（DSH 的 route 名不参与隐藏列表）；
+	// 过滤后收藏/分组/搜索都基于可见模型，隐藏供应商的模型完全不出现在选择器里。
+	const hiddenSet = new Set(
+		props.backend === "dsh" ? [] : (props.hiddenProviders ?? []),
+	);
+	const visibleModels = props.models.filter(
+		(model) => !hiddenSet.has(model.provider),
+	);
 
 	// 收藏列表（从全部模型中提取，不移除原供应商分组下的显示）
-	const favorites: AvailableModel[] = props.models.filter((model) =>
+	const favorites: AvailableModel[] = visibleModels.filter((model) =>
 		favoritesSet.has(`${model.provider}/${model.id}`),
 	);
 	favorites.sort((a, b) => {
@@ -925,7 +935,7 @@ export function ModelPicker(props: {
 
 	// 全量模型按供应商分组（收藏模型也保留在原分组）；
 	// 搜索交给 cmdk（item 的 value/keywords 同时覆盖 name/id/provider）
-	const groupedModels = groupModelsByProvider(props.models);
+	const groupedModels = groupModelsByProvider(visibleModels);
 	// 最近使用过的供应商排最前（高频免搜索直达），未使用过的按内置置顶 + 字母序；
 	// 'other' 是白名单外供应商的兜底组，顺序保持最后。
 	const sortedProviders = orderProviderGroups(Object.keys(groupedModels), props.recentProviders);

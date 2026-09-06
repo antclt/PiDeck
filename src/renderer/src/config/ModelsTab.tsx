@@ -1,6 +1,6 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Brain, Check, ChevronDown, ChevronRight, Coins, Copy, ExternalLink, Plus, RotateCcw, SquarePen, Trash2, X } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronRight, Coins, Copy, Eye, EyeOff, ExternalLink, Plus, RotateCcw, SquarePen, Trash2, X } from "lucide-react";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import type { ModelItem, ModelsFile } from "./configTypes";
@@ -33,7 +33,9 @@ import { ProviderMigrationButton } from "./ProviderMigrationButton";
 import { ProviderUsageInline } from "../components/app/ProviderUsageInline";
 import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
 import { ProviderUsageDetails } from "../components/app/ProviderUsageDetails";
-import { isValidProviderName } from "../../../shared/providerName";
+import { AddProviderDialog } from "./AddProviderDialog";
+import type { AddProviderDraft } from "./addProviderDraft";
+import { splitVisibleAndHiddenProviders } from "./providerVisibility";
 
 /**
  * 代理下拉右侧的提示文案：直接显示将流向的代理 URL（未配置则提示），
@@ -88,8 +90,12 @@ export function ModelsTab(props: {
 	focusProvider?: string;
 	/** 打开用量探针配置弹窗（配置唯一入口在模型页）。 */
 	onOpenUsageProbeDialog: (providerName: string) => void;
+	/** 新增供应商弹窗开关（由父级持有，确认/取消回调走 props）。 */
 	addingProvider: boolean;
-	newProviderName: string;
+	/** 用户隐藏的供应商 key 列表（模型页主列表过滤 + 底部已隐藏区展示）。 */
+	hiddenProviders: string[];
+	/** 切换供应商隐藏状态（父级持久化到 AppSettings.hiddenProviders）。 */
+	onToggleHiddenProvider: (name: string) => void;
 	renamingProvider: string | null;
 	renameValue: string;
 	fetchingProvider: string | null;
@@ -116,8 +122,8 @@ export function ModelsTab(props: {
 	onToggleProvider: (name: string) => void;
 	onStartAddProvider: () => void;
 	onCancelAddProvider: () => void;
-	onChangeNewProviderName: (name: string) => void;
-	onConfirmAddProvider: () => void;
+	/** 弹窗确认：携带完整草稿（名字 + 服务商字段），父级一步写入 modelsData。 */
+	onConfirmAddProvider: (draft: AddProviderDraft) => void;
 	onStartRename: (name: string) => void;
 	onChangeRenameValue: (name: string) => void;
 	onConfirmRename: (oldName: string) => void;
@@ -154,6 +160,11 @@ export function ModelsTab(props: {
 }) {
 	const { data, expandedProvider, saving } = props;
 	const providerNames = Object.keys(data.providers);
+	// 隐藏开关：主列表只显示未隐藏项，隐藏项进页面底部「已隐藏」折叠区（设置页隐藏开关）
+	const { visible: visibleProviderNames, hidden: hiddenProviderNames } =
+		splitVisibleAndHiddenProviders(providerNames, props.hiddenProviders ?? []);
+	// 底部已隐藏折叠区展开状态（默认收起，避免一屏多折叠区）
+	const [hiddenSectionOpen, setHiddenSectionOpen] = useState(false);
 	// 自动获取后的待保存选择：与 provider 分开存储，避免多个 provider 同时展开时选中状态互相污染。
 	const [selectedFetchedModelIds, setSelectedFetchedModelIds] = useState<Record<string, string[]>>({});
 	// 当前正在弹计费对话框的模型键（`${providerName}-${index}`），null 表示关闭
@@ -286,7 +297,7 @@ export function ModelsTab(props: {
 		<div>
 			<div className="mb-3 flex items-center justify-between gap-3">
 				<span className="font-mono text-xs tabular-nums text-text-tertiary">
-					{t("config.count.providers", { count: providerNames.length })}
+					{t("config.count.providers", { count: visibleProviderNames.length })}
 				</span>
 				<div className="flex min-w-0 items-center gap-1.5">
 					<Button size="sm" variant="outline"
@@ -310,7 +321,7 @@ export function ModelsTab(props: {
 								setBatchMode(true);
 							}
 						}}
-						disabled={saving || providerNames.length === 0}
+						disabled={saving || visibleProviderNames.length === 0}
 					>
 						{batchMode ? t("common.cancel") : t("common.deleteBatch")}
 					</Button>
@@ -413,33 +424,16 @@ export function ModelsTab(props: {
 				</div>
 			)}
 
-			{props.addingProvider && (
-				<div className="config-add-provider-row">
-					<Input
-						value={props.newProviderName}
-						onChange={(e) => props.onChangeNewProviderName(e.target.value)}
-						placeholder={t("config.providerNamePlaceholder")}
-						onKeyDown={(e) => e.key === "Enter" && props.onConfirmAddProvider()}
-						autoFocus
-					/>
-					<Button size="sm" variant="default"
-						onClick={props.onConfirmAddProvider}
-						disabled={!isValidProviderName(props.newProviderName)}
-					>
-						{t("common.confirm")}
-					</Button>
-					<Button size="sm" variant="outline" onClick={props.onCancelAddProvider}>
-						{t("common.cancel")}
-					</Button>
-					{/* 输入了内容但非法时给出规则提示，避免按钮禁用却不知原因 */}
-					{props.newProviderName.trim() && !isValidProviderName(props.newProviderName) ? (
-						<p className="text-micro text-destructive">{t("config.providerNameRule")}</p>
-					) : null}
-				</div>
-			)}
+			{/* 新增供应商：一步弹窗（字段与展开卡片一致），不再先输名字再展开卡片 */}
+			<AddProviderDialog
+				open={props.addingProvider}
+				existingNames={providerNames}
+				onClose={props.onCancelAddProvider}
+				onConfirm={props.onConfirmAddProvider}
+			/>
 
 			<div className="flex flex-col gap-2.5">
-				{providerNames.map((name) => {
+				{visibleProviderNames.map((name) => {
 					const provider = data.providers[name];
 					const isExpanded = expandedProvider === name;
 					const isModelBatchMode = modelBatchProvider === name;
@@ -554,6 +548,16 @@ export function ModelsTab(props: {
 											<SquarePen size={14} />
 										</Button>
 									)}
+									{/* 隐藏开关：眼睛按钮切换隐藏，隐藏后卡片移入底部「已隐藏」折叠区（模型选择器同步不显示） */}
+									<Button variant="ghost" size="icon-sm" className="size-7"
+										onClick={(e) => {
+											e.stopPropagation();
+											props.onToggleHiddenProvider(name);
+										}}
+										title={t("config.hideProvider")}
+									>
+										<Eye size={14} />
+									</Button>
 									<ProviderMigrationButton
 										direction="pi-to-dsh"
 										provider={name}
@@ -1328,6 +1332,47 @@ export function ModelsTab(props: {
 						</div>
 					);
 				})}
+				{/* 已隐藏的供应商折叠区：眼睛按钮隐藏后移到这里，可展开恢复显示 */}
+				{hiddenProviderNames.length > 0 && (
+					<div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
+						<button
+							type="button"
+							className="flex w-full cursor-pointer items-center gap-2 px-3.5 py-2 text-left transition-colors duration-150 hover:bg-bg-hover"
+							onClick={() => setHiddenSectionOpen((prev) => !prev)}
+						>
+							{hiddenSectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+							<EyeOff size={14} className="text-muted-foreground" aria-hidden="true" />
+							<span className="text-control font-semibold text-text-primary">
+								{t("config.hiddenProviders", { count: hiddenProviderNames.length })}
+							</span>
+						</button>
+						{hiddenSectionOpen && (
+							<div className="border-t border-border-subtle px-3.5 py-2">
+								<p className="mb-2 text-[11px] leading-relaxed text-text-tertiary">
+									{t("config.hiddenProvidersHint")}
+								</p>
+								<div className="flex flex-col gap-1">
+									{hiddenProviderNames.map((hiddenName) => (
+										<div
+											key={hiddenName}
+											className="flex items-center justify-between gap-2 rounded-sm bg-bg-muted px-2.5 py-1.5"
+										>
+											<span className="min-w-0 truncate font-mono text-control text-text-primary">
+												{hiddenName}
+											</span>
+											<Button variant="ghost" size="icon-sm" className="size-7 shrink-0"
+												onClick={() => props.onToggleHiddenProvider(hiddenName)}
+												title={t("config.showProvider")}
+											>
+												<Eye size={14} />
+											</Button>
+										</div>
+									))}
+								</div>
+							</div>
+						)}
+					</div>
+				)}
 				{providerNames.length === 0 && (
 					<div className="py-12 text-center text-control text-text-tertiary">{t("config.emptyProviders")}</div>
 				)}

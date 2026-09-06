@@ -101,6 +101,7 @@ import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnRe
 import { formatConfigUnsavedMessage, summarizeConfigUnsavedChanges, type ConfigUnsavedItem } from "./config/configUnsavedChangesSummary";
 import { DirtyMarker } from "./components/app/settings/SettingRows";
 import { isValidProviderName } from "../../shared/providerName";
+import { buildProviderConfigFromDraft, type AddProviderDraft } from "./config/addProviderDraft";
 import { useAtomValue } from "jotai";
 import { dshRuntimeStatusAtom } from "./atoms";
 import { dshUiVisibilityFor } from "../../shared/types/dshRuntime";
@@ -652,9 +653,31 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	// 展开的 provider / auth 项
 	const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 	const [expandedAuth, setExpandedAuth] = useState<string | null>(null);
-	// 新增 provider
+	// 新增 provider（弹窗开关）
 	const [addingProvider, setAddingProvider] = useState(false);
-	const [newProviderName, setNewProviderName] = useState("");
+	/** 用户隐藏的供应商 key 列表（模型页眼睛开关持久化到 AppSettings.hiddenProviders）。 */
+	const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
+	/** 切换供应商隐藏状态：本地立即生效 + 持久化到 AppSettings（不影响 models.json 配置本身）。 */
+	const handleToggleHiddenProvider = useCallback((name: string) => {
+		setHiddenProviders((prev) => {
+			const next = prev.includes(name) ? prev.filter((item) => item !== name) : [...prev, name];
+			void api.settings.update({ hiddenProviders: next }).catch(() => undefined);
+			return next;
+		});
+	}, []);
+	// 打开配置页时读取 AppSettings.hiddenProviders（模型页眼睛开关的持久化来源）
+	useEffect(() => {
+		let cancelled = false;
+		void api.settings
+			.get()
+			.then((settings) => {
+				if (!cancelled) setHiddenProviders(settings.hiddenProviders ?? []);
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 	// 重命名 provider
 	const [renamingProvider, setRenamingProvider] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState("");
@@ -1021,28 +1044,30 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		}
 	}, [loadConfig]);
 
-	const handleAddProvider = () => {
-		const providerName = newProviderName.trim();
-		// 空：静默返回（用户尚未输入）；非法字符：提示规则，避免 DSH credentialRefFor
-		// 把含特殊字符的名字转成非法环境变量名 → 密钥读不到。
-		if (!providerName) return;
+	/**
+	 * 新增供应商（一步弹窗）：携带完整草稿（名字 + 服务商字段），
+	 * 直接写入 modelsData 并展开卡片；不再先输名字再展开。
+	 */
+	const handleAddProvider = (draft: AddProviderDraft) => {
+		const providerName = draft.name.trim();
+		// 非法字符：提示规则，避免 DSH credentialRefFor 把含特殊字符的名字转成
+		// 非法环境变量名 → 密钥读不到（弹窗内已禁用确定，这里仅兜底）。
 		if (!isValidProviderName(providerName)) {
 			showNotice(t("config.providerNameRule"));
 			return;
 		}
+		const provider = buildProviderConfigFromDraft(draft);
 		const updated = {
 			...modelsData,
 			providers: {
 				...modelsData.providers,
-				// 默认不写入 headers，保持和手写 models.json 一致；需要兼容特定代理时再由用户显式选择 User-Agent。
-				[providerName]: { models: [] },
+				[providerName]: provider,
 			},
 		};
 		setModelsData(updated);
 		markDirty("config:models");
 		setExpandedProvider(providerName);
 		setAddingProvider(false);
-		setNewProviderName("");
 	};
 
 	// 重命名 provider：保留所有配置和模型，仅修改 key 名称
@@ -2562,7 +2587,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							focusProvider={focusedProvider}
 							onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "pi")}
 							addingProvider={addingProvider}
-							newProviderName={newProviderName}
+							hiddenProviders={hiddenProviders}
+							onToggleHiddenProvider={handleToggleHiddenProvider}
 							renamingProvider={renamingProvider}
 							renameValue={renameValue}
 							fetchingProvider={fetchingProvider}
@@ -2579,10 +2605,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							}
 							onStartAddProvider={() => {
 								setAddingProvider(true);
-								setNewProviderName("");
 							}}
 							onCancelAddProvider={() => setAddingProvider(false)}
-							onChangeNewProviderName={setNewProviderName}
 							onConfirmAddProvider={handleAddProvider}
 							onStartRename={handleStartRename}
 							onChangeRenameValue={setRenameValue}
