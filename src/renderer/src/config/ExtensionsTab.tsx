@@ -290,7 +290,7 @@ export function ExtensionsTab(props: {
 				onValueChange={(v) => { if (v === "local" || v === "store") setExtTab(v); }}
 				className="gap-0"
 			>
-				<TabsList className="w-full">
+				<TabsList className="w-fit self-start">
 					<TabsTrigger value="local" onClick={() => props.onRefresh()}>
 						{t("config.nav.extensions")}
 					</TabsTrigger>
