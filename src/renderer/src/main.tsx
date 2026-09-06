@@ -88,9 +88,27 @@ if (!rootElement) {
   throw new Error("Renderer root element missing");
 }
 
+/**
+ * 临时调试入口（仅 dev，测完删除本组件）：URL 带 ?crashTest 时在渲染期抛错，
+ * 进入 AppErrorBoundary，用于验证崩溃自动刷新（5s 倒计时 → 刷新 → 3 次后停止）。
+ * 触发：DevTools Console 执行 location.search = "?crashTest=1"（reload 后参数仍在，
+ * 会持续崩溃，可观察 3 次上限）。恢复：location.search = ""。
+ */
+function CrashTestTrigger() {
+  if (
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).has("crashTest")
+  ) {
+    throw new Error("crash test: remove ?crashTest from URL to recover");
+  }
+  return null;
+}
+
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <AppErrorBoundary>
+      {/* 临时调试：崩溃自动刷新验证入口（仅 dev，见 CrashTestTrigger 注释） */}
+      <CrashTestTrigger />
       {/* shadcn Tooltip 必须在 Provider 树内使用（#115 U1） */}
       <TooltipProvider>
         <App />

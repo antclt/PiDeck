@@ -5,6 +5,10 @@ import { t } from "../../i18n";
 import { isLanWeb } from "../../desktopApi";
 import { showNotice } from "../../utils/notice";
 import { StackTrace } from "../ui-shadcn/stack-trace";
+import {
+	CRASH_AUTO_RELOAD_KEY,
+	computeCrashReloadPlan,
+} from "../../utils/autoReloadPolicy";
 
 type AppErrorBoundaryProps = {
 	children: ReactNode;
@@ -16,7 +20,14 @@ type AppErrorBoundaryProps = {
 
 type AppErrorBoundaryState = {
 	error: Error | null;
+	/** 自动刷新倒计时（秒）；null = 未在自动刷新 */
+	autoReloadSeconds: number | null;
+	/** 自动刷新已连续失败达到上限，停止自动刷新（仅提示，需用户手动操作） */
+	autoReloadExhausted: boolean;
 };
+
+/** 自动刷新倒计时秒数：给用户留出看错误信息/手动操作的缓冲，太短来不及反应。 */
+const AUTO_RELOAD_SECONDS = 5;
 
 /**
  * 全局/局部 React 错误边界。
@@ -26,10 +37,19 @@ export class AppErrorBoundary extends Component<
 	AppErrorBoundaryProps,
 	AppErrorBoundaryState
 > {
-	override state: AppErrorBoundaryState = { error: null };
+	override state: AppErrorBoundaryState = {
+		error: null,
+		autoReloadSeconds: null,
+		autoReloadExhausted: false,
+	};
+
+	/** 自动刷新定时器句柄；组件卸载/取消时清理（生命周期配对）。 */
+	private autoReloadTimer: number | null = null;
 
 	static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
-		return { error };
+		// 返回完整 state：倒计时/已耗尽标志由 componentDidCatch 里的 scheduleAutoReload
+		// 在提交后设置（getDerivedStateFromError 阶段不读 sessionStorage）。
+		return { error, autoReloadSeconds: null, autoReloadExhausted: false };
 	}
 
 	override componentDidCatch(error: Error, info: ErrorInfo) {
@@ -46,10 +66,88 @@ export class AppErrorBoundary extends Component<
 				componentStack: info.componentStack,
 			})
 			.catch(() => undefined);
+		// 崩溃后自动尝试刷新页面；连续失败（短时间窗口内累计）则停止，避免死循环。
+		this.scheduleAutoReload();
 	}
 
+	override componentWillUnmount() {
+		this.clearAutoReloadTimer();
+	}
+
+	/**
+	 * 崩溃自动刷新：读 sessionStorage 计数（刷新后仍保留，同一窗口内共享），
+	 * 时间窗口内累计崩溃次数，≤3 次时倒计时后自动刷新；超过上限停止自动刷新
+	 * （已证明刷新不可行，改由用户手动操作）。局部边界（有 onReset）不自动
+	 * 整页刷新——宿主负责局部恢复，整页重载会打断用户正在进行的编辑。
+	 */
+	private scheduleAutoReload = () => {
+		if (this.props.onReset) return;
+
+		let stored: { count: number; at: number } | null = null;
+		try {
+			const raw = window.sessionStorage.getItem(CRASH_AUTO_RELOAD_KEY);
+			if (raw) {
+				const parsed = JSON.parse(raw) as { count?: unknown; at?: unknown };
+				if (
+					typeof parsed.count === "number" &&
+					typeof parsed.at === "number"
+				) {
+					stored = { count: parsed.count, at: parsed.at };
+				}
+			}
+		} catch {
+			// sessionStorage 不可用（隐私模式等）：按首次崩溃处理，仍允许自动刷新。
+			stored = null;
+		}
+
+		const plan = computeCrashReloadPlan({ stored, now: Date.now() });
+		try {
+			window.sessionStorage.setItem(
+				CRASH_AUTO_RELOAD_KEY,
+				JSON.stringify({ count: plan.count, at: Date.now() }),
+			);
+		} catch {
+			// 写入失败不影响本次展示；下次崩溃重新计数（最多再多自动刷新一轮）。
+		}
+
+		if (!plan.shouldAutoReload) {
+			// 已连续自动刷新 3 次仍崩溃：停止倒计时，提示用户手动刷新/退出。
+			this.setState({ autoReloadExhausted: true });
+			return;
+		}
+
+		this.clearAutoReloadTimer();
+		this.setState({ autoReloadSeconds: AUTO_RELOAD_SECONDS });
+		this.autoReloadTimer = window.setInterval(() => {
+			const next = (this.state.autoReloadSeconds ?? AUTO_RELOAD_SECONDS) - 1;
+			if (next <= 0) {
+				this.clearAutoReloadTimer();
+				this.setState({ autoReloadSeconds: null });
+				// 刷新后若仍崩溃会再次进入边界并累计计数，达到上限即停止。
+				window.location.reload();
+				return;
+			}
+			this.setState({ autoReloadSeconds: next });
+		}, 1000);
+	};
+
+	private clearAutoReloadTimer = () => {
+		if (this.autoReloadTimer != null) {
+			window.clearInterval(this.autoReloadTimer);
+			this.autoReloadTimer = null;
+		}
+	};
+
+	/** 用户取消自动刷新：停止倒计时，保留崩溃页供手动操作。 */
+	private handleCancelAutoReload = () => {
+		this.clearAutoReloadTimer();
+		this.setState({ autoReloadSeconds: null });
+	};
+
 	private handleReset = () => {
-		this.setState({ error: null });
+		// 重置边界时同步停止自动刷新：若重试即恢复，不能再被旧定时器整页刷新。
+		this.clearAutoReloadTimer();
+		this.setState({ error: null, autoReloadSeconds: null, autoReloadExhausted: false });
 		this.props.onReset?.();
 	};
 
@@ -113,6 +211,30 @@ export class AppErrorBoundary extends Component<
 							</Button>
 						) : null}
 					</div>
+					{/* 自动刷新状态提示：倒计时中 / 已多次失败停止（用户可见文案走 i18n） */}
+					{this.state.autoReloadSeconds != null && (
+						<div className="app-error-boundary-autoreload">
+							<span>
+								{t("app.renderErrorAutoReload", {
+									seconds: this.state.autoReloadSeconds,
+								})}
+							</span>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="app-error-boundary-autoreload-cancel"
+								onClick={this.handleCancelAutoReload}
+							>
+								{t("app.renderErrorAutoReloadCancel")}
+							</Button>
+						</div>
+					)}
+					{this.state.autoReloadExhausted && (
+						<div className="app-error-boundary-autoreload">
+							<span>{t("app.renderErrorAutoReloadExhausted")}</span>
+						</div>
+					)}
 					<small className="app-error-boundary-help">
 						{t("app.renderErrorHelp")}
 					</small>
