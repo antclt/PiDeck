@@ -479,6 +479,19 @@ export const ipcChannels = {
 	configInstallUsageSkill: "config:install-usage-skill",
 	/** 安装内置「图片生成」技能模板到 ~/.pi/agent/skills/image-gen */
 	configInstallImageGenSkill: "config:install-image-gen-skill",
+	// ===== 配置备份（config-backup） =====
+	/** 列出全部配置备份（仅元数据，不读文件内容）。 */
+	configBackupList: "config-backup:list",
+	/** 立即创建一份配置备份（manual / first-run / upgrade / on-save / pre-restore）。 */
+	configBackupCreate: "config-backup:create",
+	/** 读取备份详情（文件内容已脱敏）。 */
+	configBackupRead: "config-backup:read",
+	/** 恢复备份：恢复前自动为当前配置建一份 pre-restore 保护备份。 */
+	configBackupRestore: "config-backup:restore",
+	/** 删除单个备份。 */
+	configBackupDelete: "config-backup:delete",
+	/** 清空全部备份。 */
+	configBackupDeleteAll: "config-backup:delete-all",
 
 	// ===== 安全管理（SecurityStore + pi-deck-security-gate 扩展） =====
 	/** 拉取完整安全配置（等级/默认等级/会话覆盖） */

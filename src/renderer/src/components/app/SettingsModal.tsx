@@ -16,6 +16,7 @@ import {
 	Activity,
 	MessageSquare,
 	ImageIcon,
+	DatabaseBackup,
 	Globe,
 	FileCode2,
 	GitBranch,
@@ -74,6 +75,7 @@ const PetTab = lazy(() => import("./settings/PetTab").then((m) => ({ default: m.
 const SoundTab = lazy(() => import("./settings/SoundTab").then((m) => ({ default: m.SoundTab })));
 const ImTab = lazy(() => import("./settings/ImTab").then((m) => ({ default: m.ImTab })));
 const StorageTab = lazy(() => import("./settings/SettingsStorageTab").then((m) => ({ default: m.StorageTab })));
+const BackupTab = lazy(() => import("./settings/SettingsBackupTab").then((m) => ({ default: m.BackupTab })));
 const ProcessMetricsTab = lazy(() => import("./settings/ProcessMetricsTab").then((m) => ({ default: m.ProcessMetricsTab })));
 const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => ({ default: m.UsageStatsTab })));
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
@@ -252,6 +254,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	pet: { labelKey: "settings.tabs.pet", icon: <PawPrint size={16} /> },
 	sound: { labelKey: "settings.tabs.sound", icon: <Volume2 size={16} /> },
 	storage: { labelKey: "settings.tabs.storage", icon: <Trash2 size={16} /> },
+	backup: { labelKey: "settings.tabs.backup", icon: <DatabaseBackup size={16} /> },
 	usage: { labelKey: "settings.tabs.usage", icon: <ChartColumnBig size={16} /> },
 	process: { labelKey: "settings.tabs.process", icon: <Activity size={16} /> },
 	vision: { labelKey: "settings.tabs.vision", icon: <Eye size={16} /> },
@@ -894,6 +897,14 @@ function SettingsModalContent(props: SettingsModalProps) {
 								settings={draftSettings}
 								onChange={updateDraft}
 							/>
+							</Suspense>
+						</TabsContent>
+					)}
+					{/* ── 配置备份 tab ── */}
+					{activeTab === "backup" && (
+						<TabsContent value="backup" className="settings-panel min-w-0">
+							<Suspense fallback={<SettingsTabLoading />}>
+							<BackupTab />
 							</Suspense>
 						</TabsContent>
 					)}

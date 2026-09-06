@@ -1224,6 +1224,14 @@ export function createPreviewApi(): PiDesktopApi {
 			installUsageSkill: async () => ({ success: false, error: "preview" }),
 			installImageGenSkill: async () => ({ success: false, error: "preview" }),
 		},
+		configBackups: {
+			list: async () => ({ ok: true, backups: [] }),
+			create: async () => ({ ok: true, id: "backup-preview.json" }),
+			read: async () => null,
+			restore: async () => ({ ok: false, error: "preview" }),
+			delete: async () => ({ ok: true }),
+			deleteAll: async () => ({ ok: true }),
+		},
 		pet: {
 			onState: noop,
 			list: async () => [

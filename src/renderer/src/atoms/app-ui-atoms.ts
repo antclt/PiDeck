@@ -30,6 +30,7 @@ export type SettingsTabId =
 	| "pet"
 	| "sound"
 	| "storage"
+	| "backup"
 	| "usage"
 	| "process"
 	| "vision"
