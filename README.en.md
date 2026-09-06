@@ -85,6 +85,13 @@
 - 🚀 **Command Code usage query support**
 - 🚀 **Application update lifecycle hardening**
 - 🚀 **Update source mirrors with auto health checks**
+- 🚀 **Composer voice transcription**
+- 🚀 **Recovery from request body size limits**
+- 🚀 **Built-in TokenDance provider**
+- 🚀 **pi v0.85.0 tracking**
+- 🚀 **ZCode session import**
+- 🚀 **pi.dev extension store**
+- 🚀 **Provider groups sorted by recent use**
 - ✨ **Tool stopwatch no longer resets mid-stream**
 - ✨ **Vision-bridge model picker fits extra-long model names**
 - ✨ **Unified session turn counting**
