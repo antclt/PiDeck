@@ -177,7 +177,12 @@ export function CatalogSection() {
 						run(
 							"update",
 							() => desktopApi.catalog.updateFromGithub("main"),
-							() => t("settings.catalogUpdated"),
+							(result) => {
+								const r = result as CatalogUpdateResult;
+								return r.ok && r.updated
+									? t("settings.catalogUpdated")
+									: t("settings.catalogAlreadyLatest");
+							},
 						)
 					}
 				>

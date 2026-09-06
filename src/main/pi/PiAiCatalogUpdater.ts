@@ -30,6 +30,11 @@ import {
 	parsePiAiCatalogArtifact,
 	resolveBuiltinPiAiCatalogArtifactPaths,
 } from "./piAiBuiltinCatalog";
+import {
+	compareSemver,
+	generatePiAiCatalogFromFiles,
+	type CatalogSourceFile,
+} from "./piAiCatalogGenerate";
 import type {
 	CatalogArtifactSourceStatus,
 	CatalogCheckResult,
@@ -37,10 +42,32 @@ import type {
 	CatalogUpdateStatus,
 } from "../../shared/types/catalog";
 
-/** 默认拉取分支：main（发行分支，模型目录与正式发行版对齐） */
+/** 默认回退分支：main（发行分支，模型目录与正式发行版对齐） */
 export const CATALOG_UPDATE_DEFAULT_BRANCH = "main";
 /** 允许的分支白名单（IPC 边界校验也使用同一常量，防路径/URL 注入） */
 export const CATALOG_UPDATE_ALLOWED_BRANCHES = ["main", "dev"] as const;
+
+/** 上游 npm 包名（与生成器/内置校验一致，来源即 @earendil-works/pi-ai）。 */
+export const CATALOG_SOURCE_PACKAGE = "@earendil-works/pi-ai";
+/** npm 版本解析源（中国镜像优先，官方兜底）：只取 latest 版本号。 */
+export const CATALOG_NPM_LATEST_URLS = [
+	"https://registry.npmmirror.com/@earendil-works/pi-ai/latest",
+	"https://registry.npmjs.org/@earendil-works/pi-ai/latest",
+] as const;
+/** jsDelivr 文件列表 API（枚举 dist/providers/data/*.json），取 flat 列表。 */
+export const CATALOG_JSDELIVR_FLAT_PREFIX =
+	"https://data.jsdelivr.com/v1/package/npm/@earendil-works/pi-ai@";
+/** jsDelivr 单文件 CDN 前缀（按版本取 dist/providers/data/<file>）。 */
+export const CATALOG_JSDELIVR_FILE_PREFIX =
+	"https://cdn.jsdelivr.net/npm/@earendil-works/pi-ai@";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
 
 /** 下载源（按顺序尝试）：jsDelivr CDN → GitHub raw。raw 位于 CDN 失效/被墙时兜底。 */
 function sourceBaseUrls(branch: string): { catalog: string; manifest: string }[] {
@@ -164,15 +191,50 @@ export class PiAiCatalogUpdater {
 	}
 
 	/**
-	 * 从 GitHub 分支拉取最新目录并写入覆盖层。
-	 * 流程：双源下载 → manifest 校验 → 备份当前覆盖 → 原子替换 → 失效索引缓存。
-	 * 成功返回 { ok: true }（UI 随后拉 getStatus 刷新状态卡片）。
+	 * 更新到最新：主源跟随 @earendil-works/pi-ai 的 npm latest（运行时从来源文件生成
+	 * catalog，不依赖 PiDeck 仓库分支是否提交了对等资源——main 可能停在 0.85.0 而
+	 * npm latest 已是 0.85.1）。npm 不可达/生成失败时回退到仓库分支预生成件。
+	 * 流程：npm latest 解析 → 生成校验 → 备份当前覆盖 → 原子替换 → 失效索引缓存。
+	 * 返回 { ok: true, updated }：updated=false 表示已是最新（未覆盖写）。
 	 */
 	async update(branch?: string): Promise<CatalogUpdateResult> {
-		const targetBranch = branch ?? this.branch;
+		const npmResult = await this.tryUpdateFromNpmLatest();
+		if (npmResult) return npmResult;
+		return this.updateFromBranch(branch ?? this.branch);
+	}
+
+	/**
+	 * 主源：从 npm latest 生成并写入覆盖层。
+	 * 返回 null 表示 npm 路径失败（网络/生成校验不过），由 update() 回退到分支源。
+	 */
+	private async tryUpdateFromNpmLatest(): Promise<CatalogUpdateResult | null> {
+		try {
+			const version = await this.resolveNpmLatestVersion();
+			if (!version) return null;
+			const current = this.getEffectiveVersion();
+			// 防降级：npm latest 不高于当前生效版本时，不覆盖（远端分支可能更旧）。
+			if (current && compareSemver(version, current) <= 0) {
+				return { ok: true, updated: false };
+			}
+			const files = await this.fetchNpmCatalogDataFiles(version);
+			if (files.length === 0) return null;
+			const generated = generatePiAiCatalogFromFiles(files, version);
+			const entries = parsePiAiCatalogArtifact(generated.catalogText, generated.manifestText);
+			// 生成结果本身需通过内置校验（哈希/结构），防止上游数据异常上盘。
+			if (entries.length === 0) return null;
+			this.writeOverlayAtomically(generated.catalogText, generated.manifestText);
+			invalidatePiAiCatalogIndex();
+			return { ok: true, updated: true };
+		} catch {
+			return null;
+		}
+	}
+
+	/** 回退源：从仓库分支拉取预生成件（双源下载 → 校验 → 版本防降级 → 写入）。 */
+	private async updateFromBranch(branch: string): Promise<CatalogUpdateResult> {
 		let pair: { catalogRaw: string; manifestRaw: string };
 		try {
-			pair = await this.downloadFromAnySource(targetBranch);
+			pair = await this.downloadFromAnySource(branch);
 		} catch (error) {
 			return {
 				ok: false,
@@ -185,8 +247,29 @@ export class PiAiCatalogUpdater {
 			// 下载内容与 manifest 不匹配（或被篡改）：拒绝写入，防止坏数据上盘
 			return { ok: false, code: "validation", message: "downloaded artifact failed manifest validation" };
 		}
+		return this.writeWithVersionGuard(
+			pair.catalogRaw,
+			pair.manifestRaw,
+			manifestPackageVersion(pair.manifestRaw),
+		);
+	}
+
+	/**
+	 * 版本防降级写入：新版本不高于当前生效版本（覆盖层优先，否则内置）时跳过写入，
+	 * 返回 { ok: true, updated: false }（已是最新，不覆盖）。
+	 * 写入失败返回 write 码，成功返回 { ok: true, updated: true }。
+	 */
+	private writeWithVersionGuard(
+		catalogRaw: string,
+		manifestRaw: string,
+		newVersion: string | null,
+	): CatalogUpdateResult {
+		const current = this.getEffectiveVersion();
+		if (current && newVersion && compareSemver(newVersion, current) <= 0) {
+			return { ok: true, updated: false };
+		}
 		try {
-			this.writeOverlayAtomically(pair.catalogRaw, pair.manifestRaw);
+			this.writeOverlayAtomically(catalogRaw, manifestRaw);
 		} catch (error) {
 			return {
 				ok: false,
@@ -195,19 +278,71 @@ export class PiAiCatalogUpdater {
 			};
 		}
 		invalidatePiAiCatalogIndex();
-		return { ok: true };
+		return { ok: true, updated: true };
+	}
+
+	/** 当前生效目录版本（覆盖层优先，否则内置）；无有效目录为 null。 */
+	private getEffectiveVersion(): string | null {
+		const status = this.getStatus();
+		return status.overlay?.packageVersion ?? status.builtin?.packageVersion ?? null;
+	}
+
+	/** 解析 npm 包 latest 版本号；所有源失败返回 null（不抛，交由调用方回退）。 */
+	private async resolveNpmLatestVersion(): Promise<string | null> {
+		for (const url of CATALOG_NPM_LATEST_URLS) {
+			try {
+				const text = await this.downloadText(url, this.maxManifestBytes);
+				const parsed: unknown = JSON.parse(text);
+				if (isRecord(parsed)) {
+					const version = nonEmptyString(parsed.version);
+					if (version) return version;
+				}
+			} catch {
+				// 换下一个镜像源
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * 从 npm 包枚举并拉取 dist/providers/data/*.json（只取需要的模型规格数据，
+	 * 不下载整个 4MB 包）。用 jsDelivr flat 列表枚举文件名，再并行拉各文件。
+	 */
+	private async fetchNpmCatalogDataFiles(version: string): Promise<CatalogSourceFile[]> {
+		const flatUrl = `${CATALOG_JSDELIVR_FLAT_PREFIX}${version}/flat`;
+		const flatText = await this.downloadText(flatUrl, this.maxCatalogBytes);
+		const flat: unknown = JSON.parse(flatText);
+		const files = isRecord(flat) && Array.isArray(flat.files) ? flat.files : [];
+		const names = files
+			.map((entry) => (isRecord(entry) && typeof entry.name === "string" ? entry.name.replace(/^\//, "") : ""))
+			.filter(
+				(name) =>
+					name.startsWith("dist/providers/data/") &&
+					name.endsWith(".json") &&
+					!name.endsWith(".manifest.json"),
+			);
+		if (names.length === 0) return [];
+		return Promise.all(
+			names.map(async (name) => {
+				const content = await this.downloadText(
+					`${CATALOG_JSDELIVR_FILE_PREFIX}${version}/${name}`,
+					this.maxCatalogBytes,
+				);
+				return { name: name.slice("dist/providers/data/".length), content };
+			}),
+		);
 	}
 
 	/** 一键还原：当前覆盖版转存为 .bak 并删除覆盖文件，回退到内置目录。 */
 	restoreBuiltin(): CatalogUpdateResult {
 		if (!existsSync(this.catalogPath()) && !existsSync(this.manifestPath())) {
 			// 没有覆盖层：无需操作，视为成功（UI 状态卡片会显示内置生效）
-			return { ok: true };
+			return { ok: true, updated: false };
 		}
 		try {
 			this.moveOverlayToBackup();
 			invalidatePiAiCatalogIndex();
-			return { ok: true };
+			return { ok: true, updated: true };
 		} catch (error) {
 			return {
 				ok: false,
@@ -232,7 +367,7 @@ export class PiAiCatalogUpdater {
 			}
 			this.writeOverlayAtomically(catalogRaw, manifestRaw);
 			invalidatePiAiCatalogIndex();
-			return { ok: true };
+			return { ok: true, updated: true };
 		} catch (error) {
 			return {
 				ok: false,
@@ -243,13 +378,26 @@ export class PiAiCatalogUpdater {
 	}
 
 	/**
-	 * 检查远端是否有新版本：下载远端 manifest（双源）、解析 packageVersion，
-	 * 与当前生效版本（覆盖层优先，否则内置）比对。
+	 * 检查是否有新版本：主源解析 @earendil-works/pi-ai 的 npm latest 版本号，
+	 * 与当前生效版本（覆盖层优先，否则内置）做语义版本比较（防止把更旧的远端分支
+	 * 0.85.0 误报为“新版本”，也不把本地已更新的目录降级）。
+	 * npm 不可达时回退到仓库分支 manifest 比对。
 	 */
 	async checkRemote(branch?: string): Promise<CatalogCheckResult> {
+		const npmVersion = await this.resolveNpmLatestVersion();
+		if (npmVersion) {
+			const localVersion = this.getEffectiveVersion();
+			const hasUpdate = localVersion ? compareSemver(npmVersion, localVersion) > 0 : true;
+			return { ok: true, remoteVersion: npmVersion, localVersion, hasUpdate };
+		}
+		return this.checkRemoteFromBranch(branch ?? this.branch);
+	}
+
+	/** 回退：从仓库分支 manifest 解析版本并做语义比较。 */
+	private async checkRemoteFromBranch(branch: string): Promise<CatalogCheckResult> {
 		let manifestRaw: string;
 		try {
-			manifestRaw = await this.downloadManifestFromAnySource(branch ?? this.branch);
+			manifestRaw = await this.downloadManifestFromAnySource(branch);
 		} catch (error) {
 			return {
 				ok: false,
@@ -263,7 +411,8 @@ export class PiAiCatalogUpdater {
 		}
 		const status = this.getStatus();
 		const localVersion = status.overlay?.packageVersion ?? status.builtin?.packageVersion ?? null;
-		return { ok: true, remoteVersion, localVersion, hasUpdate: remoteVersion !== localVersion };
+		const hasUpdate = localVersion ? compareSemver(remoteVersion, localVersion) > 0 : true;
+		return { ok: true, remoteVersion, localVersion, hasUpdate };
 	}
 
 	/**

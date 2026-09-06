@@ -1359,7 +1359,7 @@ export function createPreviewApi(): PiDesktopApi {
 			status: async () => ({ builtin: null, overlay: null, hasOverlayFiles: false, hasBackup: false }),
 			check: async () => ({ ok: false, code: "network", message: "preview stub" }),
 			updateFromGithub: async () => ({ ok: false, code: "network", message: "preview stub" }),
-			restore: async () => ({ ok: true }),
+			restore: async () => ({ ok: true, updated: false }),
 			restorePrevious: async () => ({ ok: false, code: "no-backup", message: "preview stub" }),
 			openFile: async () => undefined,
 		},

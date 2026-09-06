@@ -28,13 +28,14 @@ export type CatalogUpdateStatus = {
 
 /** 更新/还原失败原因码：渲染层按码映射 i18n 文案，message 仅入日志。 */
 export type CatalogUpdateFailCode =
-	| "network" // 两个下载源都失败/超时
+	| "network" // 两个下载源（npm + 分支回退）都失败/超时
 	| "validation" // 下载内容与 manifest 校验不过（防坏数据上盘）
 	| "write" // 磁盘写入失败
 	| "no-backup"; // 没有可用备份（恢复上一个覆盖版时）
 
 export type CatalogUpdateResult =
-	| { ok: true }
+	// updated=false 表示已是最新（或远端不高于当前生效版本），未发生覆盖写
+	| { ok: true; updated: boolean }
 	| { ok: false; code: CatalogUpdateFailCode; message: string };
 
 /** 「检查更新」结果：远端 manifest 比对当前生效版本。 */
