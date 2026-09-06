@@ -81,7 +81,7 @@ import type {
 	ModelsFile,
 	SettingsFile,
 } from "./config/configTypes";
-import type { ConfigFileDiagnostic, CreatePiPromptTemplateInput, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary, Project, ProjectResourceDiscoveryResult, ProjectResourceListResult } from "../../shared/types";
+import type { ConfigFileDiagnostic, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillSummary, Project, ProjectResourceDiscoveryResult, ProjectResourceListResult } from "../../shared/types";
 import {
 	globalPromptOverrideKey,
 	globalSkillOverrideKey,
@@ -90,12 +90,10 @@ import {
 import {
 	emptyDiscoveryData,
 	emptyProjectResourceData,
-	GLOBAL_SKILL_SOURCES,
 	isGlobalSkill,
 	isProjectExtension,
 	isProjectPrompt,
 	isProjectSkill,
-	PROJECT_SKILL_SOURCES,
 } from "./config/resourceScopeModel";
 import { getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS } from "./config/providerHeaders";
 import { TOKENDANCE_PROVIDER } from "../../shared/tokendance";
@@ -589,22 +587,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const bumpResourceGeneration = useCallback(() => {
 		resourceGenerationRef.current += 1;
 	}, []);
-	const [creatingSkill, setCreatingSkill] = useState(false);
 	const [uninstallingExtensionSource, setUninstallingExtensionSource] = useState<string | null>(null);
-	const [newSkillName, setNewSkillName] = useState("");
-	const [newSkillDescription, setNewSkillDescription] = useState("");
-	const [newSkillLocationId, setNewSkillLocationId] = useState<PiSkillLocation["id"]>("pi-global");
-	/** Keep the create target inside the selected resource scope. */
-	useEffect(() => {
-		const allowed = skillsData.locations.filter((location) =>
-			resourceScope === "project"
-				? PROJECT_SKILL_SOURCES.has(location.id)
-				: GLOBAL_SKILL_SOURCES.has(location.id),
-		);
-		if (allowed.length > 0 && !allowed.some((location) => location.id === newSkillLocationId)) {
-			setNewSkillLocationId(allowed[0].id);
-		}
-	}, [newSkillLocationId, resourceScope, skillsData.locations]);
 	const [deleteSkillConfirm, setDeleteSkillConfirm] = useState<PiSkillSummary | null>(null);
 	const [editingGlobalSkill, setEditingGlobalSkill] = useState<PiSkillSummary | null>(null);
 	const [editGlobalContent, setEditGlobalContent] = useState("");
@@ -615,9 +598,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		templates: [],
 		globalDir: "",
 	});
-	const [creatingPrompt, setCreatingPrompt] = useState(false);
-	const [newPromptName, setNewPromptName] = useState("");
-	const [newPromptDescription, setNewPromptDescription] = useState("");
 	const [editingPrompt, setEditingPrompt] = useState<PiPromptTemplateSummary | null>(null);
 	const [editPromptContent, setEditPromptContent] = useState("");
 	const [editPromptLoading, setEditPromptLoading] = useState(false);
@@ -1773,34 +1753,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		});
 	};
 
-	/** 创建新 prompt template */
-	const handleCreatePrompt = async () => {
-		setCreatingPrompt(true);
-		setError(null);
-		try {
-			if (resourceScope === "project" && projectId) {
-				await api.prompts.createInProject(projectId, {
-					name: newPromptName,
-					description: newPromptDescription,
-				});
-			} else {
-				await api.prompts.create({
-					name: newPromptName,
-					description: newPromptDescription,
-				});
-			}
-			setNewPromptName("");
-			setNewPromptDescription("");
-			bumpResourceGeneration();
-			await refreshPrompts();
-			showToast(t("config.promptCreatedToast"));
-		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
-		} finally {
-			setCreatingPrompt(false);
-		}
-	};
-
 	/** 确认删除 prompt template */
 	const confirmDeletePrompt = async (target: PiPromptTemplateSummary) => {
 		setError(null);
@@ -2003,39 +1955,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			locations,
 			skills: [...projectResult.skills, ...globalResult.skills.filter(isGlobalSkill)],
 		});
-	};
-
-	const handleCreateSkill = async () => {
-		setCreatingSkill(true);
-		setError(null);
-		try {
-			if (resourceScope === "project" && projectId) {
-				const locationId = newSkillLocationId === "project-agents"
-					? "project-agents"
-					: "project-pi";
-				await api.projectResources.createSkill({
-					projectId,
-					name: newSkillName,
-					description: newSkillDescription,
-					locationId,
-				});
-			} else {
-				await api.skills.create({
-					name: newSkillName,
-					description: newSkillDescription,
-					locationId: newSkillLocationId,
-				});
-			}
-			setNewSkillName("");
-			setNewSkillDescription("");
-			bumpResourceGeneration();
-			await refreshSkills();
-			showToast(t("config.skillCreatedToast"));
-		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
-		} finally {
-			setCreatingSkill(false);
-		}
 	};
 
 	const handleToggleSkill = async (skill: PiSkillSummary, enabled: boolean) => {
@@ -2806,26 +2725,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 								discoverySkills={discoveryData.skills}
 							data={skillsData}
 							loading={loading}
-							creating={creatingSkill}
-							newName={newSkillName}
-							newDescription={newSkillDescription}
-							newLocationId={newSkillLocationId}
 							onRefresh={refreshSkills}
 							onOpenRoot={() => {
 								if (resourceScope === "project" && projectId) {
-									const kind = newSkillLocationId === "project-agents"
-										? "project-agents"
-										: "project-pi";
-									void api.projectResources.openDirectory(projectId, kind)
+									void api.projectResources.openDirectory(projectId, "project-pi")
 										.catch((err) => setError(err instanceof Error ? err.message : String(err)));
 									return;
 								}
 								void api.skills.openFolder().catch((err) => setError(err instanceof Error ? err.message : String(err)));
 							}}
-							onChangeNewName={setNewSkillName}
-							onChangeNewDescription={setNewSkillDescription}
-							onChangeNewLocation={setNewSkillLocationId}
-							onCreate={handleCreateSkill}
 							onToggle={handleToggleSkill}
 							onDelete={setDeleteSkillConfirm}
 							onEdit={handleEditGlobalSkill}
@@ -2847,9 +2755,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							discoveryPrompts={discoveryData.prompts}
 							data={promptsData}
 							loading={loading}
-							creating={creatingPrompt}
-							newName={newPromptName}
-							newDescription={newPromptDescription}
 							editingTemplate={editingPrompt}
 							editContent={editPromptContent}
 							editLoading={editPromptLoading}
@@ -2863,9 +2768,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 								}
 								void api.prompts.openFolder().catch((err) => setError(err instanceof Error ? err.message : String(err)));
 							}}
-							onChangeNewName={setNewPromptName}
-							onChangeNewDescription={setNewPromptDescription}
-							onCreate={handleCreatePrompt}
 							onDelete={setDeletePromptConfirm}
 							onEdit={handleEditPrompt}
 							onRename={handleRenamePrompt}

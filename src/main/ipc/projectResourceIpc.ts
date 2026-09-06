@@ -1,7 +1,6 @@
 import { ipcMain, shell } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import type {
-	CreateProjectSkillInput,
 	ProjectInheritedResourceToggleInput,
 	ProjectResourceDirectoryKind,
 } from "../../shared/types";
@@ -15,16 +14,6 @@ export type ProjectResourceIpcDeps = {
 
 function nonEmptyString(value: unknown, maxLength = 4096): value is string {
 	return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
-}
-
-function isCreateSkillInput(value: unknown): value is CreateProjectSkillInput {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-	return (
-		"projectId" in value && nonEmptyString(value.projectId, 256) &&
-		"name" in value && nonEmptyString(value.name, 256) &&
-		"description" in value && typeof value.description === "string" && value.description.length <= 4096 &&
-		"locationId" in value && (value.locationId === "project-pi" || value.locationId === "project-agents")
-	);
 }
 
 function isInheritedToggleInput(value: unknown): value is ProjectInheritedResourceToggleInput {
@@ -63,12 +52,6 @@ export function registerProjectResourceIpc({
 			if (error) throw new Error(error);
 		},
 	);
-	ipcMain.handle(ipcChannels.projectResourcesCreateSkill, async (_event, input: unknown) => {
-		if (!isCreateSkillInput(input)) throw new Error("Invalid project skill input.");
-		const result = await projectResourceManager.createSkill({ ...input, projectId: input.projectId.trim() });
-		void appLogger.info("project-resource", "Project skill created", { projectId: input.projectId, name: result.name });
-		return result;
-	});
 	ipcMain.handle(ipcChannels.projectResourcesDeleteSkill, async (_event, projectId: unknown, skillPath: unknown) => {
 		if (!nonEmptyString(projectId, 256) || !nonEmptyString(skillPath)) throw new Error("Invalid project skill deletion input.");
 		// The manager resolves and rechecks project ownership before deleting renderer-supplied paths.

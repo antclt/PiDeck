@@ -44,7 +44,6 @@ test("prompt IPC rejects malformed global and project payloads before manager ca
 			readContent: failIfCalled,
 			rename: failIfCalled,
 			toggle: failIfCalled,
-			createInProject: failIfCalled,
 		},
 		{ getProjectRoot: failIfCalled },
 	);
@@ -63,14 +62,6 @@ test("prompt IPC rejects malformed global and project payloads before manager ca
 	await assert.rejects(
 		handlers.get(ipcChannels.promptsToggle)({}, "C:/prompt.md", "yes"),
 		/Invalid prompt toggle input/,
-	);
-	await assert.rejects(
-		handlers.get(ipcChannels.promptsCreateInProject)(
-			{},
-			"p".repeat(257),
-			{ name: "valid", description: "description" },
-		),
-		/Invalid project id/,
 	);
 	assert.equal(managerCalls, 0);
 });

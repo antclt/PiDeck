@@ -71,6 +71,7 @@ export function registerStoreIpc({
 
 	// ── Prompt Templates ──
 	ipcMain.handle(ipcChannels.promptsList, () => promptManager.list());
+	// 编辑内置模板时先创建用户副本（fork）再写入内容，渲染层编辑流程依赖此通道。
 	ipcMain.handle(ipcChannels.promptsCreate, async (_event, input: unknown) => {
 		const validInput = promptInput(input);
 		const result = await promptManager.create(validInput);
@@ -94,16 +95,6 @@ export function registerStoreIpc({
 	});
 	ipcMain.handle(ipcChannels.promptsListByProject, async (_event, projectId: unknown) => {
 		return promptManager.listByProject(projectRoot(projectId));
-	});
-	ipcMain.handle(ipcChannels.promptsCreateInProject, async (_event, projectId: unknown, input: unknown) => {
-		const validInput = promptInput(input);
-		const root = projectRoot(projectId);
-		const result = await promptManager.createInProject(root, validInput);
-		void appLogger.info("prompt", "Project prompt template created", {
-			projectId,
-			name: validInput.name,
-		});
-		return result;
 	});
 	ipcMain.handle(ipcChannels.promptsDeleteInProject, async (_event, projectId: unknown, name: unknown) => {
 		const validName = requireText(name, "project prompt name", 256);

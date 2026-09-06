@@ -51,8 +51,6 @@ import type {
 	SessionRecord,
 	SessionProcessEvent,
 	VisionBridgeConfig,
-	CreatePiSkillInput,
-	CreateProjectSkillInput,
 	ProjectInheritedResourceToggleInput,
 	ProjectResourceDirectoryKind,
 	ProjectResourceListResult,
@@ -255,8 +253,6 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.projectResourcesList, projectId) as Promise<ProjectResourceListResult>,
 		openDirectory: (projectId: string, kind: ProjectResourceDirectoryKind) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesOpenDirectory, projectId, kind) as Promise<void>,
-		createSkill: (input: CreateProjectSkillInput) =>
-			ipcRenderer.invoke(ipcChannels.projectResourcesCreateSkill, input) as Promise<PiSkillSummary>,
 		deleteSkill: (projectId: string, skillPath: string) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesDeleteSkill, projectId, skillPath) as Promise<void>,
 		deleteExtension: (projectId: string, extensionPath: string) =>
@@ -1328,8 +1324,6 @@ const api = {
 		// 读技能 SKILL.md 正文（白名单校验在主进程完成），技能选择器详情/全文插入用。
 		readContent: (path: string) =>
 			ipcRenderer.invoke(ipcChannels.skillsReadContent, path) as Promise<SkillContentResult>,
-		create: (input: CreatePiSkillInput) =>
-			ipcRenderer.invoke(ipcChannels.skillsCreate, input) as Promise<PiSkillSummary>,
 		toggle: (path: string, enabled: boolean) =>
 			ipcRenderer.invoke(
 				ipcChannels.skillsToggle,
@@ -1356,8 +1350,6 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.promptsEdit, filePath, content) as Promise<string | void>,
 		listByProject: (projectId: string) =>
 			ipcRenderer.invoke(ipcChannels.promptsListByProject, projectId) as Promise<PiPromptTemplateListResult>,
-		createInProject: (projectId: string, input: CreatePiPromptTemplateInput) =>
-			ipcRenderer.invoke(ipcChannels.promptsCreateInProject, projectId, input) as Promise<PiPromptTemplateSummary>,
 		deleteFromProject: (projectId: string, name: string) =>
 			ipcRenderer.invoke(ipcChannels.promptsDeleteInProject, projectId, name) as Promise<void>,
 		rename: (oldName: string, newName: string) =>

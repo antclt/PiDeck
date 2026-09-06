@@ -1,13 +1,10 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/ui-shadcn/select";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui-shadcn/tabs";
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, FileEdit, Pencil, ShoppingBag, Sparkles, ToggleLeft, ToggleRight, Trash2, X, Store, Globe } from "lucide-react";
 import type {
-	CreatePiSkillInput,
 	PiSkillListResult,
-	PiSkillLocation,
 	PiSkillSummary,
 	ProjectResourceOverrides,
 } from "../../../shared/types";
@@ -15,8 +12,6 @@ import { t } from "../i18n";
 import { SkillStoreTab } from "./SkillStoreTab";
 import { SkillHubStorePanel } from "./SkillHubStorePanel";
 import { Input } from "../components/ui-shadcn/input";
-import { Textarea } from "../components/ui-shadcn/textarea";
-import { Label } from "../components/ui-shadcn/label";
 import type { ResourceScope } from "./ResourceScopeSelector";
 import { globalSkillOverrideKey, isGlobalSkillSourceId } from "../../../shared/resourceIdentity";
 
@@ -37,16 +32,8 @@ export function SkillsTab(props: {
 	}>;
 	data: PiSkillListResult;
 	loading: boolean;
-	creating: boolean;
-	newName: string;
-	newDescription: string;
-	newLocationId: PiSkillLocation["id"];
 	onRefresh: () => void;
 	onOpenRoot: () => void;
-	onChangeNewName: (value: string) => void;
-	onChangeNewDescription: (value: string) => void;
-	onChangeNewLocation: (value: PiSkillLocation["id"]) => void;
-	onCreate: () => void;
 	onToggle: (skill: PiSkillSummary, enabled: boolean) => void;
 	onDelete: (skill: PiSkillSummary) => void;
 	onEdit: (skill: PiSkillSummary) => void;
@@ -58,11 +45,6 @@ export function SkillsTab(props: {
 	const projectSkills = visibleSkills.filter((skill) => skill.sourceId === "project-pi" || skill.sourceId === "project-agents");
 	const globalSkills = visibleSkills.filter((skill) => skill.sourceId === "pi-global" || skill.sourceId === "agents-global");
 	const disabledGlobalKeys = new Set(props.projectOverrides.disabledGlobalSkills);
-	const availableLocations = data.locations.filter((location) =>
-		props.scope === "project"
-			? location.id === "project-pi" || location.id === "project-agents"
-			: location.id === "pi-global" || location.id === "agents-global",
-	);
 	// 一级 tab：本地 / 商店
 	const [skillTab, setSkillTab] = useState<"local" | "store">("local");
 	// 二级 tab（商店内）：选择供应商
@@ -70,11 +52,6 @@ export function SkillsTab(props: {
 	useEffect(() => {
 		if (props.scope === "project" && skillTab === "store") setSkillTab("local");
 	}, [props.scope, skillTab]);
-	const canCreate = props.newName.trim() && props.newDescription.trim();
-	// 新建技能的位置只影响保存目标，不应把其他目录已有的技能从列表中隐藏。
-	const selectedLocation =
-		availableLocations.find((location) => location.id === props.newLocationId) ??
-		availableLocations[0];
 	return (
 		<div className="skills-tab">
 			<div className="mb-3 flex items-center justify-between gap-3">
@@ -119,10 +96,7 @@ export function SkillsTab(props: {
 					{storeSource === "skillhub" ? (
 						<SkillHubStorePanel />
 					) : (
-						<SkillStoreTab
-							onImported={props.onRefresh}
-							locationId={props.newLocationId}
-						/>
+						<SkillStoreTab onImported={props.onRefresh} />
 					)}
 				</div>
 			) : (
@@ -146,63 +120,6 @@ export function SkillsTab(props: {
 					</Button>
 				</div>
 			</div>
-
-			<section className="config-create-card">
-				<strong>{t("config.createSkill")}</strong>
-				<div className="config-create-grid">
-					<Label className="config-create-label">
-						<span>{t("config.name")}</span>
-						<Input
-							value={props.newName}
-							placeholder={t("config.skillNamePlaceholder")}
-							onChange={(event) => props.onChangeNewName(event.target.value)}
-						/>
-					</Label>
-					<Label className="config-create-label">
-						<span>{t("config.location")}</span>
-						<Select
-							value={props.newLocationId}
-							onValueChange={(v) => {
-								// 只接受已知位置 id，避免外部字符串注入；仅改变保存目标，不立即创建文件。
-								if (v === "pi-global" || v === "agents-global" || v === "project-pi" || v === "project-agents") {
-									props.onChangeNewLocation(v);
-								}
-							}}
-						>
-							{/* 只显示相对路径（label 形如 ~/.pi/agent/skills）：绝对路径长且无增益，
-								窄列会溢出框边界；单行 + truncate 超长省略。 */}
-							<SelectTrigger className="w-full">
-								<span className="min-w-0 flex-1 truncate text-left">
-									{selectedLocation?.label ?? t("config.chooseFolder")}
-								</span>
-							</SelectTrigger>
-							<SelectContent>
-								{availableLocations.map((location) => (
-									<SelectItem key={location.id} value={location.id}>
-										<span className="min-w-0 flex-1 truncate text-left">{location.label}</span>
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</Label>
-				</div>
-				<Label className="config-create-label">
-					<span>{t("config.description")}</span>
-					<Textarea
-						value={props.newDescription}
-						placeholder={t("config.skillUseWhenPlaceholder")}
-						onChange={(event) => props.onChangeNewDescription(event.target.value)}
-						className="min-h-[72px] resize-y"
-					/>
-				</Label>
-				<Button size="sm" variant="default"
-					className="justify-self-start"
-					onClick={props.onCreate}
-					disabled={!canCreate || props.creating}
-				>
-					{props.creating ? t("config.creatingSkill") : t("config.addSkill")}
-				</Button>
-			</section>
 
 			<div className="overflow-x-auto rounded-lg border border-border-subtle bg-bg-panel">
 				{visibleSkills.length === 0 ? (
@@ -460,4 +377,3 @@ function SkillTableRow(props: {
 	);
 }
 
-export type { CreatePiSkillInput };

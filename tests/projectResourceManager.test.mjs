@@ -51,10 +51,6 @@ test("write operations on a chat project keep throwing chatUnsupported", async (
 	const manager = managerFor(chatProject);
 	const chatUnsupported = /do not support project-level resources/i;
 	await assert.rejects(manager.ensureResourceDirectory("builtin-chat", "prompts"), chatUnsupported);
-	await assert.rejects(
-		manager.createSkill({ projectId: "builtin-chat", name: "hello", description: "desc", locationId: "project-pi" }),
-		chatUnsupported,
-	);
 	await assert.rejects(manager.deleteSkill("builtin-chat", "C:/x/SKILL.md"), chatUnsupported);
 	await assert.rejects(manager.renameSkill("builtin-chat", "C:/x/SKILL.md", "hello"), chatUnsupported);
 	await assert.rejects(manager.toggleSkill("builtin-chat", "C:/x/SKILL.md", false), chatUnsupported);
@@ -75,29 +71,6 @@ test("list on a regular project scans .pi/skills SKILL.md files", async () => {
 		assert.equal(result.skills[0].name, "mykit");
 		assert.equal(result.skills[0].sourceId, "project-pi");
 		assert.equal(result.extensions.length, 0);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
-test("createSkill writes to the selected project resource location", async () => {
-	const root = mkdtempSync(join(tmpdir(), "pideck-prm-location-"));
-	try {
-		const manager = managerFor({ id: "p1", name: "P1", path: root, lastOpenedAt: 1 });
-		const created = await manager.createSkill({
-			projectId: "p1",
-			name: "agents-skill",
-			description: "created in the agents directory",
-			locationId: "project-agents",
-		});
-		assert.equal(created.sourceId, "project-agents");
-		assert.equal(
-			created.path.toLowerCase().endsWith(join(".agents", "skills", "agents-skill", "SKILL.md").toLowerCase()),
-			true,
-		);
-		const listed = await manager.list("p1");
-		assert.equal(listed.skills.some((skill) => skill.path === created.path), true);
-		assert.equal(listed.skillLocations.length, 2);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -261,10 +234,6 @@ test("项目资源目录 junction 指向项目外时列表与写操作都拒绝�
 		const manager = managerFor({ id: "p1", name: "P1", path: root, lastOpenedAt: 1 });
 		const listed = await manager.list("p1");
 		assert.equal(listed.skills.length, 0);
-		await assert.rejects(
-			manager.createSkill({ projectId: "p1", name: "new", description: "new skill", locationId: "project-pi" }),
-			/outside the project/i,
-		);
 		assert.equal(readFileSync(join(outsideSkills, "secret", "SKILL.md"), "utf8").includes("outside"), true);
 	} finally {
 		rmSync(fixture, { recursive: true, force: true });

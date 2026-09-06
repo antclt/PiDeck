@@ -14,7 +14,6 @@ import type {
 	AppSettings,
 	AvailableModel,
 	ModelListReport,
-	CreatePiSkillInput,
 	SessionCommandResult,
 	SessionRuntimeTarget,
 } from "../../shared/types";
@@ -1185,11 +1184,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (!readSkillContent) throw new Error("readSkillContent not available");
 		// 渲染层传入的路径不可信：白名单校验（全局/项目技能位置）在 readSkillContent 内完成。
 		return readSkillContent(skillPath);
-	});
-	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput) => {
-		const result = await skillManager.create(input);
-		void appLogger.info("skill", "Skill created", { name: input.name, locationId: input.locationId });
-		return result;
 	});
 	ipcMain.handle(ipcChannels.skillsToggle, async (_event, path: string, enabled: boolean) => {
 		const result = await skillManager.toggle(path, enabled);

@@ -9,7 +9,6 @@ import {
 } from "../files/projectFileAccess";
 import { trashPath } from "../fs/trash";
 import type {
-	CreateProjectSkillInput,
 	PiExtensionSummary,
 	PiPromptTemplateSummary,
 	PiSkillLocation,
@@ -117,45 +116,6 @@ export class ProjectResourceManager {
 		const safeDirectory = await this.resolveProjectWritePath(project, location);
 		await mkdir(safeDirectory, { recursive: true });
 		return this.resolveExistingProjectPath(project, safeDirectory);
-	}
-
-	async createSkill(input: CreateProjectSkillInput): Promise<PiSkillSummary> {
-		const project = this.requireProject(input.projectId);
-		const locations = this.skillLocations(project);
-		const location = locations.find((candidate) => candidate.id === input.locationId);
-		if (!location) throw new Error(this.translate("mainProjectResource.pathOutsideProject"));
-		const normalizedName = this.normalizeSkillName(input.name);
-		if (!normalizedName) throw new Error(this.translate("mainProjectResource.skillNameCharacters"));
-		// 保留用户原始输入作为显示名；标准化名仅用于目录/文件路径，SKILL.md 内存原始名
-		// 这样 readSkill/refresh 后 UI 展示的是用户输入的原始名称，不会被 normalizeSkillName 截断。
-		const displayName = input.name.trim();
-		const description = input.description.trim();
-		if (!description) throw new Error(this.translate("mainSkill.descriptionRequired"));
-
-		const skillDir = await this.resolveProjectWritePath(project, join(location.path, normalizedName));
-		if (existsSync(skillDir)) throw new Error(this.translate("mainProjectResource.skillAlreadyExists", { name: normalizedName }));
-		await mkdir(skillDir, { recursive: true });
-		const skillPath = join(skillDir, SKILL_FILE);
-		await writeFile(
-			skillPath,
-			`---\nname: ${displayName}\ndescription: ${description.replace(/\n/g, " ")}\n---\n\n# ${displayName}\n\n## Usage\n\nReplace this section with your skill instructions.\nSee https://agentskills.io/specification for the SKILL.md format.\n`,
-			"utf8",
-		);
-		// 直接构造返回结果，避免 re-read 解析偏差
-		const warnings = this.validateSkill(normalizedName, description);
-		return {
-			id: `${location.id}:${skillPath}`,
-			name: displayName,
-			description,
-			path: skillPath,
-			dir: skillDir,
-			sourceId: location.id,
-			sourceLabel: location.label,
-			type: "directory",
-			enabled: true,
-			valid: warnings.length === 0,
-			warnings,
-		};
 	}
 
 	async deleteSkill(projectId: string, skillPath: string): Promise<void> {

@@ -17,7 +17,6 @@ test("project resource IPC retains all handlers and manager-owned path checks", 
   for (const channel of [
     "projectResourcesList",
     "projectResourcesOpenDirectory",
-    "projectResourcesCreateSkill",
     "projectResourcesDeleteSkill",
     "projectResourcesDeleteExtension",
     "projectResourcesToggleSkill",
@@ -57,7 +56,6 @@ test("project resource IPC rejects malformed renderer input before calling the m
     projectResourceManager: {
       list: failIfCalled,
       ensureResourceDirectory: failIfCalled,
-      createSkill: failIfCalled,
       deleteSkill: failIfCalled,
       deleteExtension: failIfCalled,
       toggleSkill: failIfCalled,
@@ -76,17 +74,6 @@ test("project resource IPC rejects malformed renderer input before calling the m
   await assert.rejects(
     handlers.get(ipcChannels.projectResourcesOpenDirectory)({}, "p", "outside"),
     /Invalid project resource directory input/,
-  );
-  await assert.rejects(
-    handlers.get(ipcChannels.projectResourcesCreateSkill)({}, { projectId: "p", name: "x" }),
-    /Invalid project skill input/,
-  );
-  await assert.rejects(
-    handlers.get(ipcChannels.projectResourcesCreateSkill)(
-      {},
-      { projectId: "p", name: "x", description: "desc", locationId: "pi-global" },
-    ),
-    /Invalid project skill input/,
   );
   await assert.rejects(
     handlers.get(ipcChannels.projectResourcesToggleSkill)({}, "p", "path", "yes"),

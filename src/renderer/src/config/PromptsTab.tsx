@@ -5,7 +5,6 @@ import { showNotice } from "../utils/notice";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, FileEdit, FileText, Pencil, ShoppingBag, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import type {
-	CreatePiPromptTemplateInput,
 	PiPromptTemplateListResult,
 	PiPromptTemplateSummary,
 	ProjectResourceOverrides,
@@ -14,8 +13,6 @@ import { t } from "../i18n";
 import { CodeMirrorEditor } from "../components/app/CodeMirrorEditor";
 import { PromptStoreTab } from "./PromptStoreTab";
 import { Input } from "../components/ui-shadcn/input";
-import { Textarea } from "../components/ui-shadcn/textarea";
-import { Label } from "../components/ui-shadcn/label";
 import type { ResourceScope } from "./ResourceScopeSelector";
 import { globalPromptOverrideKey } from "../../../shared/resourceIdentity";
 import { isProjectDiscoverySource } from "./resourceScopeModel";
@@ -70,9 +67,6 @@ export function PromptsTab(props: {
 	}>;
 	data: PiPromptTemplateListResult;
 	loading: boolean;
-	creating: boolean;
-	newName: string;
-	newDescription: string;
 	/** 当前正在编辑的模板，null 表示未打开编辑器 */
 	editingTemplate: PiPromptTemplateSummary | null;
 	/** 编辑器内容 */
@@ -83,9 +77,6 @@ export function PromptsTab(props: {
 	editSaving: boolean;
 	onRefresh: () => void;
 	onOpenRoot: () => void;
-	onChangeNewName: (value: string) => void;
-	onChangeNewDescription: (value: string) => void;
-	onCreate: () => void;
 	onDelete: (template: PiPromptTemplateSummary) => void;
 	onEdit: (template: PiPromptTemplateSummary) => void;
 	onRename: (template: PiPromptTemplateSummary, newName: string) => Promise<void>;
@@ -104,7 +95,6 @@ export function PromptsTab(props: {
 	const globalTemplates = visibleTemplates.filter((template) => template.scope !== "project");
 	const disabledGlobalKeys = new Set(props.projectOverrides.disabledGlobalPrompts);
 	const visibleTemplateCount = visibleTemplates.length;
-	const canCreate = props.newName.trim().length > 0 && props.newDescription.trim().length > 0;
 
 	// tab 切换："local"（本地模板） 或 "store"（在线商店）
 	const [promptTab, setPromptTab] = useState<"local" | "store">("local");
@@ -296,34 +286,6 @@ export function PromptsTab(props: {
 					</Button>
 				</div>
 			</div>
-
-			<section className="config-create-card">
-				<strong>{t("config.createPrompt")}</strong>
-				<Label className="config-create-label">
-					<span>{t("config.name")}</span>
-					<Input
-						value={props.newName}
-						placeholder={t("config.promptNamePlaceholder")}
-						onChange={(e) => props.onChangeNewName(e.target.value)}
-					/>
-				</Label>
-				<Label className="config-create-label">
-					<span>{t("config.description")}</span>
-					<Textarea
-						className="min-h-[72px] resize-y"
-						value={props.newDescription}
-						placeholder={t("config.promptDescriptionPlaceholder")}
-						onChange={(e) => props.onChangeNewDescription(e.target.value)}
-					/>
-				</Label>
-				<Button size="sm" variant="default"
-					className="justify-self-start"
-					disabled={!canCreate || props.creating}
-					onClick={props.onCreate}
-				>
-					{props.loading || props.creating ? t("common.loading") : t("config.create")}
-				</Button>
-			</section>
 
 			<section className="overflow-hidden rounded-lg border border-border-subtle bg-bg-panel">
 				{visibleTemplateCount === 0 ? (

@@ -220,8 +220,6 @@ import type {
 	SessionRuntimeEvent,
 	SessionRuntimeTarget,
 	SessionUiResponseInput,
-	CreatePiPromptTemplateInput,
-	CreatePiSkillInput,
 	PiPromptTemplateSummary,
 	PromptStoreSearchResult,
 	PromptStoreSearchResponse,
