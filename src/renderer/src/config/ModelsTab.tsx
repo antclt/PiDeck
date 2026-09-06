@@ -984,10 +984,12 @@ export function ModelsTab(props: {
 															filledCount++;
 															return applyModelPatches(m, updates);
 														});
-																				props.onChangeProvider(name, "models", [
-																...currentProvider.models,
-																...newModels,
-															]);
+																				const allModels = [...currentProvider.models, ...newModels];
+										// 按模型名称（无名称时回退 id）字母正序排列，保证保存后模型表顺序稳定。
+										allModels.sort((a, b) =>
+											((a.name ?? a.id).toLowerCase()).localeCompare((b.name ?? b.id).toLowerCase()),
+										);
+										props.onChangeProvider(name, "models", allModels);
 														setSelectedFetchedModels(name, []);
 															if (filledCount > 0) {
 																showNotice(t("config.modelsSavedWithSpecs", { count: filledCount }), 3000);
