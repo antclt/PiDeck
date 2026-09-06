@@ -10,7 +10,7 @@ import {
   parseImageGenSize,
   parseImageGenWatermark,
 } from "../../shared/imageGenParams";
-import { createDefaultExternalEditorSettings, DEFAULT_PET_SCALE, type AppSettings } from "../../shared/types";
+import { createDefaultExternalEditorSettings, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, normalizeSoundAlertSettings, type AppSettings } from "../../shared/types";
 import { normalizePinnedSessionIds } from "../../shared/pinnedSessions";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
@@ -136,6 +136,8 @@ Gitmoji 对应关系：
   // 默认单实例：托盘隐藏后再次点击快捷方式会唤起原窗口，而不是再开一个进程
   singleInstance: true,
   enableNotifications: true,
+  // 声音提醒默认开启（完成/异常），等待输入默认关闭（避免提问刷屏）
+  soundAlert: createDefaultSoundAlertSettings(),
   // Ask 提问系统通知默认关闭：与通用通知解耦，避免非聚焦会话每次提问都打扰
   askNotificationEnabled: false,
   // 人文关怀提醒默认开启：用户可在设置中随时关闭
@@ -301,6 +303,8 @@ export class SettingsStore {
       this.settings.themeScheduleDarkStart = schedule.darkStart;
       // 置顶状态只接受稳定、非空的 SessionRecord id；旧设置缺省时自然回落为空。
       this.settings.pinnedSessionIds = normalizePinnedSessionIds(parsed.pinnedSessionIds);
+      // 声音提醒来自旧 JSON 时可能缺字段/非法；统一归一化（旧数据自动获得默认配置）。
+      this.settings.soundAlert = normalizeSoundAlertSettings(parsed.soundAlert);
     } catch {
       this.settings = { ...defaultSettings };
     }
@@ -393,8 +397,36 @@ export class SettingsStore {
       const prev = this.settings.lastUsedModel;
       const next = safePatch.lastUsedModel;
       if (!next || (prev && prev.provider === next.provider && prev.modelId === next.modelId)) {
-        return this.get();
+        // 值相同（含非法被丢弃）则从本次 patch 中剔除，避免无意义写盘与审计刷屏；
+        // 不能直接 return：同一次 update 可能还携带 recentProviders 等需要落盘的字段。
+        delete safePatch.lastUsedModel;
       }
+    }
+    // recentProviders 只接受字符串数组（最新在前）：去重、去空、截断到 8 个。
+    // 与 lastUsedModel 一样在 sendPrompt 接受时写入，入参不可信；旧数据缺省为 []（不排序）。
+    // 内容无变化（含非法被清空后为空）从 patch 中剔除：发送每条消息都会调用，避免高频写盘。
+    if ("recentProviders" in safePatch) {
+      const candidate = safePatch.recentProviders;
+      const cleaned: string[] = [];
+      const seen = new Set<string>();
+      if (Array.isArray(candidate)) {
+        for (const item of candidate) {
+          if (typeof item === "string" && item.length > 0 && !seen.has(item)) {
+            seen.add(item);
+            cleaned.push(item);
+            if (cleaned.length >= 8) break;
+          }
+        }
+      }
+      const prev = this.settings.recentProviders ?? [];
+      const unchanged =
+        cleaned.length === prev.length && cleaned.every((item, index) => item === prev[index]);
+      if (unchanged) delete safePatch.recentProviders;
+      else safePatch.recentProviders = cleaned;
+    }
+    // 所有字段都被去重剔除后没有可写内容：直接返回，避免空 patch 仍触发一次写盘。
+    if (Object.keys(safePatch).length === 0) {
+      return this.get();
     }
     // 忙碌时投递行为来自渲染层，非法值丢掉，避免发送链路带着坏语义。
     if ("busySendDelivery" in safePatch) {
@@ -402,6 +434,10 @@ export class SettingsStore {
     }
     if ("pinnedSessionIds" in safePatch) {
       safePatch.pinnedSessionIds = normalizePinnedSessionIds(safePatch.pinnedSessionIds);
+    }
+    // 声音提醒来自渲染层，入参不可信：缺字段/非法引用/越界音量一律回落默认。
+    if ("soundAlert" in safePatch) {
+      safePatch.soundAlert = normalizeSoundAlertSettings(safePatch.soundAlert);
     }
     // 闲置 agent 释放参数来自渲染层，钳制到合理范围避免非法值（0/负数/超大）写入磁盘
     if ("idleAgentKeepCount" in safePatch) {

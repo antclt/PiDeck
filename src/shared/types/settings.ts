@@ -2,6 +2,7 @@ import type { AgentBackend } from "./agent";
 import type { BusySendDelivery } from "../busySendDelivery";
 import type { ExternalEditorSettings } from "./project";
 import type { SecurityConfig } from "./security";
+import type { SoundAlertSettings } from "./soundAlert";
 
 export type SendShortcutMode =
 	| "enter-send"
@@ -145,6 +146,12 @@ export type AppSettings = {
 	/** 会话结束时发送系统通知 */
 	enableNotifications: boolean;
 	/**
+	 * 声音提醒（会话完成/异常/等待输入时播放提示音）。
+	 * 独立于系统通知 enableNotifications：通知关闭仍可只听声音，反之亦然。
+	 * 缺省用 DEFAULT_SOUND_ALERT_SETTINGS（见 shared/types/soundAlert.ts）。
+	 */
+	soundAlert: SoundAlertSettings;
+	/**
 	 * 非聚焦会话收到 Ask 提问（select/confirm/input/editor/batch_ask）时发送系统通知。
 	 * 默认关闭：与通用 enableNotifications 解耦，用户可单独控制提问提醒，避免打扰。
 	 */
@@ -276,6 +283,14 @@ export type AppSettings = {
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
 	favoriteModels: string[];
+
+	// ── 模型选择器分组排序：记录最近使用的供应商 ──
+	/**
+	 * 最近使用的供应商 ID 列表（最新在前，最多 8 个），主进程在 sendPrompt 接受时自动记录，
+	 * 与 lastUsedModel 同点写入。模型选择器按此优先排列供应商分组：最近用过的排最前，
+	 * 没记录过的供应商仍按内置置顶 + 字母序。可选以兼容旧 settings.json。
+	 */
+	recentProviders?: string[];
 
 	// ── 新会话默认模型：记录用户最后一次实际使用的供应商/模型 ──
 	/**

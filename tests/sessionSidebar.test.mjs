@@ -464,3 +464,17 @@ test("expanded children can be collapsed back via sidebar controller", () => {
   assert.match(zh, /"app\.projectCollapseChildren": "收起"/);
   assert.match(en, /"app\.projectCollapseChildren": "Collapse"/);
 });
+
+test("activity page keeps failed/stopped agents visible (error/closed)", () => {
+  const activeTree = readFileSync(
+    "src/renderer/src/components/sidebar/ActiveSessionsTree.tsx",
+    "utf8",
+  );
+  // 活动页是 runtime 会话入口：catalog 只含 runtime 绑定的 Agent（detached 已被排除），
+  // 因此不能按 isLiveRuntimeStatus 过滤——否则 error/closed 的失败会话在活动页消失。
+  assert.doesNotMatch(activeTree, /isLiveRuntimeStatus\(agent\.status\)/);
+  // 终态 Agent 仍以状态点区分（error=红点），行主体与 live 行共用同一渲染路径。
+  assert.match(activeTree, /sessionStatusDotClass\(agent\.status\)/);
+  // 右键/重启入口不区分 live：失败会话也能从活动页菜单重启。
+  assert.match(activeTree, /openMenu\(\{ kind: "agent", agentId: agent\.id/);
+});

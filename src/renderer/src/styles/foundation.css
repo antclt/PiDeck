@@ -32,7 +32,7 @@
   /*
    * 等宽字体栈必须带 CJK 回退：栈内西文等宽字体（Consolas/Menlo 等）不含汉字，
    * 若直接落到通用 monospace，Windows 会经 FontLink 用 SimSun(宋体) 渲染中文，
-   * 11px 小字 + 合成 600 字重时笔画挤压缠在一起（如「下次调用前」投递徽章）。
+   * 11px 小字 + 合成 600 字重时笔画挤压缠在一起（如等宽小字徽章/时间戳）。
    * CJK 字体放在通用 monospace 之前，西文仍命中前面的等宽字体，汉字命中 UI 同款字体。
    */
   --font-family-mono:

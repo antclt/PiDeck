@@ -5,6 +5,13 @@ import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/type
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
 import type {
+	VoiceTranscriptionPublicConfig,
+	VoiceTranscriptionRequest,
+	VoiceTranscriptionResult,
+	VoiceTranscriptionSaveInput,
+	VoiceTranscriptionSaveResult,
+} from "../shared/types/voiceTranscription";
+import type {
 	YaoPromptListResult,
 	YaoPromptDetailResult,
 	AgentRuntimeState,
@@ -31,6 +38,8 @@ import type {
 	ClaudeSessionSummary,
 	OpenCodeImportReport,
 	OpenCodeSessionSummary,
+	ZCodeImportReport,
+	ZCodeSessionSummary,
 	ConfigFileDiagnostic,
 	DraftMeta,
 	CreateSessionDraftInput,
@@ -53,6 +62,9 @@ import type {
 	PetManifest,
 	PetNotification,
 	PetWindowCaps,
+	SoundAlertPlayEvent,
+	CustomSoundInfo,
+	SoundImportResult,
 	ExternalEditor,
 	ExternalEditorId,
 	ExternalEditorSetting,
@@ -872,6 +884,18 @@ const api = {
 				sourcePaths,
 			) as Promise<OpenCodeImportReport>,
 	},
+	zcodeSessions: {
+		scan: (projectId: string) =>
+			ipcRenderer.invoke(ipcChannels.zcodeSessionsScan, projectId) as Promise<
+				ZCodeSessionSummary[]
+			>,
+		import: (projectId: string, sourcePaths: string[]) =>
+			ipcRenderer.invoke(
+				ipcChannels.zcodeSessionsImport,
+				projectId,
+				sourcePaths,
+			) as Promise<ZCodeImportReport>,
+	},
 	git: {
 		/** 扫描项目内独立仓库；单仓项目通常只返回根仓库 */
 		listRepos: (projectId: string) =>
@@ -933,6 +957,14 @@ const api = {
 				options,
 				repoPath,
 			) as Promise<CommitEntry[]>,
+		// 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。
+		commitCount: (projectId: string, options?: { ref?: string; path?: string; allBranches?: boolean }, repoPath?: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitCommitCount,
+				projectId,
+				options,
+				repoPath,
+			) as Promise<number>,
 		// Git 引用（分支 / 远程分支 / Tag）
 		refs: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
@@ -1391,6 +1423,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.extensionsUpdate) as Promise<PiCliUpdateResult>,
 		updateOne: (source: string) =>
 			ipcRenderer.invoke(ipcChannels.extensionsUpdateOne, source) as Promise<PiCliUpdateResult>,
+		catalog: (query: import("../shared/types").PiPackageCatalogQuery) =>
+			ipcRenderer.invoke(ipcChannels.extensionsCatalog, query) as Promise<import("../shared/types").PiPackageCatalog>,
 	},
 	settings: {
 		get: () =>
@@ -1712,6 +1746,20 @@ const api = {
 		/** 右键上下文菜单 */
 		contextMenu: () => ipcRenderer.invoke(ipcChannels.petContextMenu) as Promise<void>,
 	},
+	sounds: {
+		/** 订阅主进程推送的声音提醒播放事件（完成/出错/等待输入） */
+		onPlay: (callback: (event: SoundAlertPlayEvent) => void) =>
+			subscribe(ipcChannels.soundsPlay, callback),
+		/** 列出自定义音频（userData/sounds/），设置页下拉选项用 */
+		listCustom: () =>
+			ipcRenderer.invoke(ipcChannels.soundsListCustom) as Promise<CustomSoundInfo[]>,
+		/** 弹选择框导入自定义音频；取消/非法/超限返回结构化错误 */
+		importCustom: () =>
+			ipcRenderer.invoke(ipcChannels.soundsImportCustom) as Promise<SoundImportResult>,
+		/** 删除自定义音频文件 */
+		removeCustom: (name: string) =>
+			ipcRenderer.invoke(ipcChannels.soundsRemoveCustom, name) as Promise<boolean>,
+	},
 	terminal: {
 		list: (target: TerminalTarget) =>
 			ipcRenderer.invoke(ipcChannels.terminalList, target) as Promise<
@@ -1842,6 +1890,16 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.imagegenSaveConfig, config) as Promise<ImageGenSaveResult>,
 	},
 
+	voiceTranscription: {
+		getConfig: () =>
+			ipcRenderer.invoke(ipcChannels.voiceTranscriptionGetConfig) as Promise<VoiceTranscriptionPublicConfig>,
+		saveConfig: (config: VoiceTranscriptionSaveInput) =>
+			ipcRenderer.invoke(ipcChannels.voiceTranscriptionSaveConfig, config) as Promise<VoiceTranscriptionSaveResult>,
+		transcribe: (request: VoiceTranscriptionRequest) =>
+			ipcRenderer.invoke(ipcChannels.voiceTranscriptionTranscribe, request) as Promise<VoiceTranscriptionResult>,
+		cancel: (requestId: string) =>
+			ipcRenderer.invoke(ipcChannels.voiceTranscriptionCancel, requestId) as Promise<void>,
+	},
 	// ── 模型目录（pi-ai-catalog）：查询状态 / 检查更新 / 从 GitHub 更新 / 还原 / 恢复备份 ──
 	catalog: {
 		status: () =>

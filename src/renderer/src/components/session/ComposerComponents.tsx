@@ -70,7 +70,7 @@ import {
 } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel } from "../ui-shadcn/command-picker";
-import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider } from "./sessionPickerOptions";
+import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, orderProviderGroups } from "./sessionPickerOptions";
 import type {
 	AgentBackend,
 	AgentRuntimeState,
@@ -349,6 +349,7 @@ export function ComposerBottomBar(props: {
 	feishuIndicator?: ReactNode;
 	/** 安全等级选择器（自包含组件，注入到左下角工具组） */
 	securityControl?: ReactNode;
+	voiceControls: ReactNode;
 	sendControls: ReactNode;
 	onPickModel: () => void;
 	onPickPromptTemplate: () => void;
@@ -659,6 +660,7 @@ export function ComposerBottomBar(props: {
 							<span className="composer-bar-branch-name truncate">{props.gitInfo.current}</span>
 						</span>
 						) : null}
+					{props.voiceControls}
 					{props.sendControls}
 				</div>
 			</div>
@@ -902,6 +904,8 @@ export function ModelPicker(props: {
 	onRefresh?: () => void;
 	/** 用量查询链路：DSH 会话（目录 provider 是 DSH route 名）传 "dsh"，缺省 pi。 */
 	backend?: UsageProbeBackend;
+	/** 最近使用的供应商 ID 列表（最新在前）：已用过的分组排最前，未用过的按内置置顶+字母序。 */
+	recentProviders?: string[];
 }) {
 	const currentModelKey = props.current?.provider && props.current?.modelId
 		? `${props.current.provider}/${props.current.modelId}`
@@ -922,17 +926,9 @@ export function ModelPicker(props: {
 	// 全量模型按供应商分组（收藏模型也保留在原分组）；
 	// 搜索交给 cmdk（item 的 value/keywords 同时覆盖 name/id/provider）
 	const groupedModels = groupModelsByProvider(props.models);
-	// 内置 TokenDance 置顶：PiDeck 内置供应商优先展示（未配置时列表里没有该组，自然不占位；
-	// 配置/拉取目录后该组恒在第一）。'other' 是白名单外供应商的兜底组，顺序保持最后。
-	const providerOrder = ['tokendance', 'anthropic', 'openai', 'google', 'deepseek', 'other'];
-	const sortedProviders = Object.keys(groupedModels).sort((a, b) => {
-		const aIndex = providerOrder.indexOf(a);
-		const bIndex = providerOrder.indexOf(b);
-		if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-		if (aIndex !== -1) return -1;
-		if (bIndex !== -1) return 1;
-		return a.localeCompare(b);
-	});
+	// 最近使用过的供应商排最前（高频免搜索直达），未使用过的按内置置顶 + 字母序；
+	// 'other' 是白名单外供应商的兜底组，顺序保持最后。
+	const sortedProviders = orderProviderGroups(Object.keys(groupedModels), props.recentProviders);
 
 	// 默认展开集合（「当前选中模型可见」驱动）：只展开收藏栏 + 当前模型所在提供商，
 	// 其余提供商折叠；无收藏且无当前模型时回退第一个提供商。折叠是派生状态，

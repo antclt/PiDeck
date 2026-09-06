@@ -2,6 +2,7 @@ import type { PiDesktopApi } from "../../preload";
 import {
 	createDefaultExternalEditorSettings,
 	createDefaultSecurityConfig,
+	createDefaultSoundAlertSettings,
 	DEFAULT_PET_SCALE,
 } from "../../shared/types";
 import type {
@@ -187,6 +188,8 @@ let previewSettings: AppSettings = {
 	fontFamilyMono: "system-mono",
 	fontFamilyMonoCustom: "",
 	removedBuiltInExtensions: [],
+	// 与主进程 defaultSettings 保持一致（预览壳不真实播放，仅保持设置项形状完整）
+	soundAlert: createDefaultSoundAlertSettings(),
 	imageGenSize: "unset",
 	imageGenWatermark: false,
 	imageGenOutputFormat: "png",
@@ -751,6 +754,10 @@ export function createPreviewApi(): PiDesktopApi {
 			scan: async () => [],
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
+		zcodeSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
 		git: {
 			listRepos: async () => [],
 			branches: async () => ({ current: "main", branches: ["main", "dev"] }),
@@ -771,6 +778,7 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			worktreeRemove: async () => true,
 				commitLog: async () => [],
+				commitCount: async () => 0,
 				refs: async () => [],
 				branchCompare: async () => ({ files: [], ahead: 0, behind: 0 }),
 				commitDetail: async () => null,
@@ -1024,6 +1032,27 @@ export function createPreviewApi(): PiDesktopApi {
 				output: "Preview mode: extension update-one output",
 				updated: false,
 			}),
+			catalog: async () => ({
+				generatedAt: Date.now(),
+				fromCache: false,
+				items: [
+					{
+						name: "preview-extension",
+						description: "Preview mode extension",
+						author: "preview",
+						types: ["extension"],
+						downloadsPerMonth: 1,
+						publishedAt: Date.now(),
+						searchText: "preview-extension",
+						installSource: "npm:preview-extension",
+						pageUrl: "https://pi.dev/packages/preview-extension",
+					},
+				],
+				page: 1,
+				pageSize: 1,
+				total: 1,
+				lastPage: 1,
+			}),
 		},
 		prompts: {
 			list: async () => ({ templates: [], globalDir: "C:/Users/preview/.pi/agent/prompts" }),
@@ -1251,6 +1280,13 @@ export function createPreviewApi(): PiDesktopApi {
 			setDragging: async () => undefined,
 			getCurrent: async () => ({ id: "clawd", displayName: "Clawd", source: "builtin", spritesheetUrl: "" }),
 		},
+		sounds: {
+			// 预览模式：不真实播放，事件订阅空操作（保持 PiDesktopApi 形状完整）
+			onPlay: noop,
+			listCustom: async () => [],
+			importCustom: async () => ({ ok: false, error: "canceled" as const }),
+			removeCustom: async () => false,
+		},
 		terminal: {
 			// 预览模式只按归属键过滤：agent 目标用 agentId，project 目标用项目 id
 			list: async (target) =>
@@ -1330,6 +1366,25 @@ export function createPreviewApi(): PiDesktopApi {
 			generate: async (_request) => ({ ok: false, error: "notConfigured" }),
 			getConfig: async () => ({ providers: [], activeProviderId: "", activeModel: "" }),
 			saveConfig: async (config) => ({ ok: true, config }),
+		},
+		voiceTranscription: {
+			getConfig: async () => ({
+				baseUrl: "https://api.openai.com/v1",
+				model: "whisper-1",
+				language: "",
+				hasApiKey: false,
+			}),
+			saveConfig: async (config) => ({
+				ok: true,
+				config: {
+					baseUrl: config.baseUrl,
+					model: config.model,
+					language: config.language,
+					hasApiKey: false,
+				},
+			}),
+			transcribe: async () => ({ ok: false, error: "notConfigured" }),
+			cancel: async () => {},
 		},
 		// 模型目录预览桩：无内置目录可读，返回「不可用」空态，仅供预览不崩溃
 		catalog: {

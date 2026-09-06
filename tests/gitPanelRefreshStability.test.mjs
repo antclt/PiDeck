@@ -19,7 +19,11 @@ test("open Git graph reads the latest commitLog without reloading on wrapper ide
     graph.indexOf("const graphRows = useMemo"),
   );
   assert.match(graph, /const commitLogRef = useRef\(props\.commitLog\)/);
+  assert.match(graph, /const commitCountRef = useRef\(props\.commitCount\)/);
   assert.match(loadBlock, /commitLogRef\.current\(projectId/);
+  assert.match(loadBlock, /commitCountRef\.current\(projectId/);
   assert.doesNotMatch(loadBlock, /props\.commitLog\(projectId/);
   assert.doesNotMatch(loadBlock, /props\.commitLog,/);
+  // GitDrawerHost 每次 render 都会换包装函数；load 依赖不能挂 props.commitCount，否则 Graph 会反复重拉。
+  assert.doesNotMatch(loadBlock, /props\.commitCount/);
 });

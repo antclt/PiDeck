@@ -229,6 +229,8 @@ export const ipcChannels = {
 	claudeSessionsImport: "claude-sessions:import",
 	openCodeSessionsScan: "opencode-sessions:scan",
 	openCodeSessionsImport: "opencode-sessions:import",
+	zcodeSessionsScan: "zcode-sessions:scan",
+	zcodeSessionsImport: "zcode-sessions:import",
 	settingsGet: "settings:get",
 	settingsUpdate: "settings:update",
 	/** 重启当前已启用的 Web 服务，不修改 Web 设置 */
@@ -276,6 +278,7 @@ export const ipcChannels = {
 	extensionsRestoreBuiltIn: "extensions:restore-built-in",
 	extensionsUpdate: "extensions:update",
 	extensionsUpdateOne: "extensions:update-one",
+	extensionsCatalog: "extensions:catalog",
 	/** 扫描项目目录内的独立 Git 仓库（根 + 嵌套），供侧栏切换 */
 	gitListRepos: "git:list-repos",
 	gitBranches: "git:branches",
@@ -286,6 +289,8 @@ export const ipcChannels = {
 	gitWorktreeCreate: "git:worktree-create",
 	gitWorktreeRemove: "git:worktree-remove",
 	gitCommitLog: "git:commit-log",
+	/** 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。 */
+	gitCommitCount: "git:commit-count",
 	gitRefs: "git:refs",
 	gitBranchCompare: "git:branch-compare",
 	gitCommitDetail: "git:commit-detail",
@@ -584,6 +589,16 @@ export const ipcChannels = {
 	/** 宠物窗 → 主进程：请求显示右键上下文菜单 */
 	petContextMenu: "pet:context-menu",
 
+	// ===== 声音提醒 =====
+	/** 主进程 → 渲染层：推送声音提醒播放事件（完成/出错/等待输入） */
+	soundsPlay: "sounds:play",
+	/** 设置页 → 主进程：列出自定义音频（userData/sounds/） */
+	soundsListCustom: "sounds:list-custom",
+	/** 设置页 → 主进程：弹选择框导入自定义音频，返回 { ok, info | error } */
+	soundsImportCustom: "sounds:import-custom",
+	/** 设置页 → 主进程：删除自定义音频文件 */
+	soundsRemoveCustom: "sounds:remove-custom",
+
 	// ===== Scratch Pad（草稿本/多草稿） =====
 	scratchPadList: "scratch-pad:list",
 	scratchPadCreate: "scratch-pad:create",
@@ -618,6 +633,12 @@ export const ipcChannels = {
 	imagegenGetConfig: "imagegen:get-config",
 	/** 保存独立生图配置（白名单校验后落盘） */
 	imagegenSaveConfig: "imagegen:save-config",
+
+	// ===== Composer voice transcription =====
+	voiceTranscriptionGetConfig: "voice-transcription:get-config",
+	voiceTranscriptionSaveConfig: "voice-transcription:save-config",
+	voiceTranscriptionTranscribe: "voice-transcription:transcribe",
+	voiceTranscriptionCancel: "voice-transcription:cancel",
 
 	// ===== 系统剪贴板（必须走主进程；Electron 38 废弃渲染进程/preload 直连 clipboard） =====
 	clipboardReadText: "clipboard:read-text",

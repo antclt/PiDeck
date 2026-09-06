@@ -2887,7 +2887,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{statusBlock}
 					<ExtensionsTab
 							scope={resourceScope}
-							projectId={projectId}
 							projectOverrides={projectResourcesData.overrides}
 							discoveryExtensions={discoveryData.extensions}
 							scopeSelector={resourceScopeSelector}
