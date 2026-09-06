@@ -755,6 +755,7 @@ export const zhCN = {
   "sessionFiles.openFile": "打开文件",
   "sessionFiles.count": "{count} 个文件",
   "sessionFiles.saveAll": "保存全部",
+  "sessionFiles.saveAllTitle": "标记本轮修改已处理并清空列表（文件已由 Agent 写入磁盘，这里只是汇总；下一轮修改会重新出现）",
   // composer 上方 goal 条（dsh GoalBar）：无目标/已完成不渲染
   "sessionGoal.aria": "当前目标",
   // composer 上方排队卡（dsh QueueDock 独立卡）：多条时折叠头文案

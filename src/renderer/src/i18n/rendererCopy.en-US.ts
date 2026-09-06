@@ -759,6 +759,7 @@ export const enUS: Record<TranslationKey, string> = {
   "sessionFiles.openFile": "Open file",
   "sessionFiles.count": "{count} files",
   "sessionFiles.saveAll": "Save all",
+  "sessionFiles.saveAllTitle": "Mark the current round as handled and clear the list (files were already written to disk by the agent; this is just a summary; new changes reappear)",
   // Composer-side goal strip (ported from dsh-web GoalBar): hidden when absent/complete
   "sessionGoal.aria": "Current goal",
   // Composer-side queue card (dsh QueueDock as a standalone card): collapsed header copy
