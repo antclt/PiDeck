@@ -155,6 +155,11 @@ type GitPanelProps = {
     projectId: string,
     options?: { maxEntries?: number; ref?: string; allBranches?: boolean },
   ) => Promise<CommitEntry[]>;
+  /** 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。 */
+  commitCount: (
+    projectId: string,
+    options?: { ref?: string; allBranches?: boolean },
+  ) => Promise<number>;
   commitDetail: (
     projectId: string,
     ref: string,
@@ -1911,6 +1916,7 @@ export function GitPanel(props: GitPanelProps) {
         paneIdPrefix={paneIdPrefix}
         projectId={props.projectId}
         commitLog={props.commitLog}
+        commitCount={props.commitCount}
         commitDetail={props.commitDetail}
         onOpenCommitFileDiff={props.onOpenCommitFileDiff}
         branches={props.branches}

@@ -483,4 +483,47 @@ describe("GitService committed-file diff integration", () => {
       rmSync(plainDir, { recursive: true, force: true });
     }
   });
+
+  test("counts commits with the same filters as getCommitLog", async () => {
+    const service = new GitService();
+    // 与 live git 对照，不硬编码仓库提交数：本文件前面的用例会往共享仓库里继续 commit。
+    const headCount = Number.parseInt(git("rev-list", "--count", "HEAD"), 10);
+    assert.equal(await service.getCommitCount(repositoryDir, { ref: "HEAD" }), headCount);
+    assert.equal(
+      await service.getCommitCount(repositoryDir, { allBranches: false, ref: "HEAD" }),
+      headCount,
+    );
+
+    const currentBranch = git("branch", "--show-current");
+    const branchCount = Number.parseInt(git("rev-list", "--count", currentBranch), 10);
+    assert.equal(await service.getCommitCount(repositoryDir, { ref: currentBranch }), branchCount);
+
+    const allVisible = Number.parseInt(
+      git("rev-list", "--count", "--exclude=refs/pi-checkpoints/*", "--all"),
+      10,
+    );
+    assert.equal(await service.getCommitCount(repositoryDir, { allBranches: true }), allVisible);
+
+    // rewind checkpoint 是内部快照，全图 count 必须排除，否则徽章会把 pi-rewind 算进去。
+    git("update-ref", "refs/pi-checkpoints/test-count", "HEAD");
+    try {
+      const withCheckpoint = Number.parseInt(git("rev-list", "--count", "--all"), 10);
+      assert.ok(withCheckpoint >= allVisible);
+      assert.equal(await service.getCommitCount(repositoryDir, { allBranches: true }), allVisible);
+    } finally {
+      git("update-ref", "-d", "refs/pi-checkpoints/test-count");
+    }
+
+    const injectedOutput = join(repositoryDir, "should-not-exist-count.patch");
+    assert.equal(await service.getCommitCount(repositoryDir, { ref: `--output=${injectedOutput}` }), 0);
+    assert.equal(await service.getCommitCount(repositoryDir, { ref: "definitely-missing-ref" }), 0);
+    assert.equal(existsSync(injectedOutput), false);
+
+    const plainDir = mkdtempSync(join(tmpdir(), "pideck-not-git-count-"));
+    try {
+      assert.equal(await service.getCommitCount(plainDir), 0);
+    } finally {
+      rmSync(plainDir, { recursive: true, force: true });
+    }
+  });
 });

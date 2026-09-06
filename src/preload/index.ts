@@ -947,6 +947,14 @@ const api = {
 				options,
 				repoPath,
 			) as Promise<CommitEntry[]>,
+		// 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。
+		commitCount: (projectId: string, options?: { ref?: string; path?: string; allBranches?: boolean }, repoPath?: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitCommitCount,
+				projectId,
+				options,
+				repoPath,
+			) as Promise<number>,
 		// Git 引用（分支 / 远程分支 / Tag）
 		refs: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(

@@ -37,6 +37,11 @@ export type GitGraphProps = {
     projectId: string,
     options?: { maxEntries?: number; ref?: string; allBranches?: boolean },
   ) => Promise<CommitEntry[]>;
+  /** 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。 */
+  commitCount: (
+    projectId: string,
+    options?: { ref?: string; allBranches?: boolean },
+  ) => Promise<number>;
   commitDetail: (projectId: string, ref: string) => Promise<CommitDetail | null>;
   onOpenCommitFileDiff: (
     commit: CommitEntry,
@@ -514,6 +519,7 @@ function CommitHoverCard(props: {
 
 export function SourceControlGraph(props: GitGraphProps) {
   const [commits, setCommits] = useState<CommitEntry[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ref, setRef] = useState("");
@@ -524,9 +530,11 @@ export function SourceControlGraph(props: GitGraphProps) {
     Record<string, CommitDetailState>
   >({});
   const [hover, setHover] = useState<CommitHoverState | null>(null);
-  // GitDrawerHost 每次外层 render 都会重新包装 commitLog；读取最新函数但不重跑 Graph。
+  // GitDrawerHost 每次外层 render 都会重新包装 commitLog / commitCount；读取最新函数但不重跑 Graph。
   const commitLogRef = useRef(props.commitLog);
   commitLogRef.current = props.commitLog;
+  const commitCountRef = useRef(props.commitCount);
+  commitCountRef.current = props.commitCount;
   const loadSequence = useRef(0);
   const detailSequence = useRef(0);
   const detailStateRef = useRef<Record<string, CommitDetailState>>({});
@@ -664,6 +672,7 @@ export function SourceControlGraph(props: GitGraphProps) {
     // A project can reuse the same branch name, so all graph-local state must stop at this boundary.
     loadSequence.current += 1;
     setCommits([]);
+    setTotalCount(0);
     setError(null);
     setLoading(false);
     setRef("");
@@ -763,13 +772,19 @@ export function SourceControlGraph(props: GitGraphProps) {
     setError(null);
     resetCommitDetails();
     try {
-      const next = await commitLogRef.current(projectId, {
-        maxEntries: loadCount,
-        ref: ref || undefined,
-        allBranches: !ref,
-      });
-      if (request === loadSequence.current && projectId === props.projectId)
+      // 列表仍分页；总数单独 count，徽章显示仓库/当前分支规模而不是已加载页大小。
+      const filter = { ref: ref || undefined, allBranches: !ref };
+      const [next, count] = await Promise.all([
+        commitLogRef.current(projectId, {
+          maxEntries: loadCount,
+          ...filter,
+        }),
+        commitCountRef.current(projectId, filter),
+      ]);
+      if (request === loadSequence.current && projectId === props.projectId) {
         setCommits(next);
+        setTotalCount(count);
+      }
     } catch (caught) {
       if (request === loadSequence.current && projectId === props.projectId)
         setError(errorMessage(caught));
@@ -858,7 +873,7 @@ export function SourceControlGraph(props: GitGraphProps) {
       <PaneHeader
         id={`${props.paneIdPrefix}-graph`}
         title={t("git.sourceControlGraph")}
-        count={commits.length}
+        count={totalCount}
         open={props.open}
         onToggle={props.onToggle}
       >

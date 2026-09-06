@@ -112,6 +112,14 @@ assert.doesNotMatch(twistie, /ChevronDown|ChevronRight|GitBranch|GitCommit|GitCo
     assert.doesNotMatch(gitSurface, /status === [0-9]/);
   });
 
+  test("does not badge the source-control graph header with the loaded commit page size", () => {
+    // 图默认一次只拉 30 条，徽章显示的是已加载条数而不是仓库提交总数，信息量低且容易误解。
+    assert.doesNotMatch(graph, /count=\{commits\.length\}/);
+    // 标题徽章改显示与当前过滤一致的仓库/分支提交总数。
+    assert.match(graph, /count=\{totalCount\}/);
+    assert.match(graph, /title=\{t\("git\.sourceControlGraph"\)\}/);
+  });
+
   test("renders SVG graph lanes and does not retain the old fixed graph height", () => {
     assert.match(graph, /function GraphLanes/);
     assert.match(graph, /function buildGraphRows/);
