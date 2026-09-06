@@ -144,7 +144,7 @@ export function DiscoveredExtensionRow(props: { item: DiscoveredExtensionItem })
 					<div className="flex min-w-0 items-center gap-2">
 						<strong className="truncate text-control font-medium text-foreground">{name}</strong>
 						<span className="text-micro" title={t("config.resourceManagedHint")}>
-							{t("config.resourceManaged")}
+							{t("config.source.global")}
 						</span>
 					</div>
 					<span className="truncate font-mono text-caption text-muted-foreground">{item.sourceLabel}</span>

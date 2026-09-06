@@ -238,6 +238,9 @@ export function ExtensionsTab(props: {
 		? [...projectExtensions, ...globalExtensions]
 		: globalExtensions;
 	const disabledGlobalSources = new Set(props.projectOverrides.disabledGlobalExtensions);
+	// discovery 行去重：与已安装列表同 source 的条目只保留普通行（带操作），列表只显示一次
+	const installedSources = new Set(props.data.extensions.map((extension) => extension.source));
+	const uniqueDiscoveryExtensions = props.discoveryExtensions.filter((item) => !installedSources.has(item.source));
 	const renderExtensionRows = (extensions: PiExtensionSummary[], inherited: boolean) =>
 		extensions.map((extension) => {
 			const disabledHere = inherited && disabledGlobalSources.has(extension.source);
@@ -264,21 +267,25 @@ export function ExtensionsTab(props: {
 	return (
 		<div className="extensions-tab">
 			{/* 一级 tab：已安装 / 扩展商店（shadcn Tabs，与 SkillsTab 的「本地/商店」结构对齐） */}
-			<Tabs
-				value={extTab}
-				onValueChange={(v) => { if (v === "local" || v === "store") setExtTab(v); }}
-				className="gap-0"
-			>
-				<TabsList className="w-fit self-start">
-					<TabsTrigger value="local" onClick={() => props.onRefresh()}>
-						{t("config.nav.extensions")}
-					</TabsTrigger>
-					<TabsTrigger value="store" disabled={props.scope === "project"}>
-						<ShoppingBag size={14} strokeWidth={1.8} />
-						{t("config.extensionStoreTab")}
-					</TabsTrigger>
-				</TabsList>
-			</Tabs>
+			<div className="mb-3 flex items-center justify-between gap-3">
+				<Tabs
+					value={extTab}
+					onValueChange={(v) => { if (v === "local" || v === "store") setExtTab(v); }}
+					className="gap-0"
+				>
+					<TabsList className="w-fit self-start">
+						<TabsTrigger value="local" onClick={() => props.onRefresh()}>
+							{t("config.nav.extensions")}
+						</TabsTrigger>
+						<TabsTrigger value="store" disabled={props.scope === "project"}>
+							<ShoppingBag size={14} strokeWidth={1.8} />
+							{t("config.extensionStoreTab")}
+						</TabsTrigger>
+					</TabsList>
+				</Tabs>
+				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
+				<div className="shrink-0">{props.scopeSelector}</div>
+			</div>
 			{extTab === "store" ? (
 				<ExtensionStoreTab
 					installedExtensions={props.data.extensions}
@@ -339,7 +346,6 @@ export function ExtensionsTab(props: {
 						</small>
 					</div>
 					<div className="skills-toolbar-actions flex shrink-0 items-center gap-1.5">
-						{props.scopeSelector}
 						{props.scope === "global" ? (
 							<>
 								{/* 白名单总开关：开启后 -e 白名单失效，pi 默认加载全部扩展（防御个别扩展导致启动失败） */}
@@ -390,7 +396,7 @@ export function ExtensionsTab(props: {
 								) : null}
 								{props.scope === "project" ? renderExtensionRows(projectExtensions, false) : null}
 								{props.scope === "project" &&
-									props.discoveryExtensions
+									uniqueDiscoveryExtensions
 										.filter((item) => isProjectDiscoverySource(item.sourceId))
 										.map((item) => <DiscoveredExtensionRow key={`discovered:${item.path}`} item={item} />)}
 								{props.scope === "project" && globalExtensions.length > 0 ? (
@@ -402,7 +408,7 @@ export function ExtensionsTab(props: {
 								) : null}
 								{renderExtensionRows(globalExtensions, props.scope === "project")}
 								{props.scope === "project" &&
-									props.discoveryExtensions
+									uniqueDiscoveryExtensions
 										.filter((item) => !isProjectDiscoverySource(item.sourceId))
 										.map((item) => <DiscoveredExtensionRow key={`discovered:${item.path}`} item={item} />)}
 							</TableBody>

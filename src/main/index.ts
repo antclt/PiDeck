@@ -3101,6 +3101,11 @@ app.whenReady().then(async () => {
 		() => settingsStore.get(),
 		(patch) => settingsStore.update(patch),
 		mainCopy,
+		{
+			appPath: app.getAppPath(),
+			resourcesPath: process.resourcesPath,
+			isDev: !app.isPackaged,
+		},
 	);
 	projectResourceManager = new ProjectResourceManager(
 		(projectId) => projectStore.get(projectId),

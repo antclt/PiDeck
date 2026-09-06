@@ -4032,6 +4032,7 @@ export function App() {
       onRestartWebService={restartWebService}
       appInfo={appInfo}
       onChange={updateSettings}
+      projects={projects}
       projectId={activeProject?.id}
       projectKind={activeProject?.kind}
       projectName={activeProject?.name}

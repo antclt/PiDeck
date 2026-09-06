@@ -37,7 +37,7 @@ function DiscoveredPromptRow(props: {
 						<FileText size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" />
 						<strong className="truncate">/{item.name}</strong>
 						<span className="skill-state" title={t("config.resourceManagedHint")}>
-							{t("config.resourceManaged")}
+							{t("config.source.global")}
 						</span>
 						<span className={`skill-state ${item.enabled ? "enabled" : "disabled"}`}>
 							{item.enabled ? t("common.enabled") : t("common.disabled")}
@@ -94,6 +94,9 @@ export function PromptsTab(props: {
 	const projectTemplates = visibleTemplates.filter((template) => template.scope === "project");
 	const globalTemplates = visibleTemplates.filter((template) => template.scope !== "project");
 	const disabledGlobalKeys = new Set(props.projectOverrides.disabledGlobalPrompts);
+	// discovery 行去重：与本地列表同名的条目只保留本地行（带操作），列表只显示一次
+	const localPromptNames = new Set(visibleTemplates.map((template) => template.name.toLowerCase()));
+	const uniqueDiscoveryPrompts = props.discoveryPrompts.filter((item) => !localPromptNames.has(item.name.toLowerCase()));
 	const visibleTemplateCount = visibleTemplates.length;
 
 	// tab 切换："local"（本地模板） 或 "store"（在线商店）
@@ -203,21 +206,18 @@ export function PromptsTab(props: {
 					</TableCell>
 					<TableCell className="whitespace-normal break-words text-caption leading-relaxed text-text-secondary" title={template.description}>{template.description}</TableCell>
 					<TableCell className="text-right"><div className="flex justify-end gap-1">
-						{/* 内置推荐模板（builtin://）无磁盘文件，pi 不会加载，不提供开关 */}
-						{!template.path.startsWith("builtin://") && (
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								className={`size-7${effectiveEnabled ? " text-primary" : ""}`}
-								disabled={inherited && template.enabled === false}
-								onClick={() => props.onToggle(template, !effectiveEnabled)}
-								title={effectiveEnabled ? t("common.disable") : t("common.enabled")}
-							>
-								{effectiveEnabled
-									? <ToggleRight size={18} strokeWidth={1.8} />
-									: <ToggleLeft size={18} strokeWidth={1.8} />}
-							</Button>
-						)}
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							className={`size-7${effectiveEnabled ? " text-primary" : ""}`}
+							disabled={inherited && template.enabled === false}
+							onClick={() => props.onToggle(template, !effectiveEnabled)}
+							title={effectiveEnabled ? t("common.disable") : t("common.enabled")}
+						>
+							{effectiveEnabled
+								? <ToggleRight size={18} strokeWidth={1.8} />
+								: <ToggleLeft size={18} strokeWidth={1.8} />}
+						</Button>
 						{!inherited ? (
 							<>
 								<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => props.onEdit(template)} title={t("common.edit")}><Pencil size={14} strokeWidth={1.8} /></Button>
@@ -247,7 +247,8 @@ export function PromptsTab(props: {
 					onValueChange={(v) => { if (v === "local" || v === "store") setPromptTab(v); }}
 					className="min-w-0 flex-1 gap-0"
 				>
-					<TabsList className="w-full">
+					{/* 两个 table（本地/商店）外框紧凑，仅包裹 tab 本身，与扩展页对齐 */}
+					<TabsList className="w-fit self-start">
 						<TabsTrigger value="local" onClick={() => props.onRefresh()}>
 							{t("config.nav.prompts")}
 						</TabsTrigger>
@@ -257,6 +258,7 @@ export function PromptsTab(props: {
 						</TabsTrigger>
 					</TabsList>
 				</Tabs>
+				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
 				<div className="shrink-0">{props.scopeSelector}</div>
 			</div>
 
@@ -302,7 +304,7 @@ export function PromptsTab(props: {
 					) : null}
 					{projectTemplates.map((template) => renderTemplateRow(template))}
 					{props.scope === "project" &&
-						props.discoveryPrompts
+						uniqueDiscoveryPrompts
 							.filter((item) => isProjectDiscoverySource(item.sourceId))
 							.map((item) => <DiscoveredPromptRow key={`discovered:${item.path}`} item={item} />)}
 					{/* 全局组：全局模板 + 继承的全局托管资源 */}
@@ -315,7 +317,7 @@ export function PromptsTab(props: {
 					) : null}
 					{globalTemplates.map((template) => renderTemplateRow(template))}
 					{props.scope === "project" &&
-						props.discoveryPrompts
+						uniqueDiscoveryPrompts
 							.filter((item) => !isProjectDiscoverySource(item.sourceId))
 							.map((item) => <DiscoveredPromptRow key={`discovered:${item.path}`} item={item} />)}
 					</TableBody></Table>

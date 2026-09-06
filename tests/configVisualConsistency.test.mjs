@@ -100,9 +100,10 @@ test("resource create forms are removed; lists keep compact density", () => {
   assert.match(projectResources, /project-resources-list-section/);
 });
 
-test("skills and prompts use full-width tab rails with compact selected tabs", () => {
-  assert.match(skills, /<TabsList className="w-full"/);
-  assert.match(prompts, /<TabsList className="w-full"/);
+test("skills and prompts use compact tab rails aligned with the extensions page", () => {
+  // 用户要求技能/提示词页的两个 table（本地/商店）外框与扩展页一致：紧凑、仅包裹 tab 本身
+  assert.match(skills, /<TabsList className="w-fit self-start"/);
+  assert.match(prompts, /<TabsList className="w-fit self-start"/);
   const tabs = readFileSync("src/renderer/src/components/ui-shadcn/tabs.tsx", "utf8");
   assert.match(tabs, /w-full items-center/);
   assert.match(tabs, /data-\[state=active\]:shadow-sm/);

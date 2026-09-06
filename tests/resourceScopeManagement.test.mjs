@@ -9,21 +9,21 @@ test("configuration resources share one global/project scope owner", () => {
 	const selector = read("src/renderer/src/config/ResourceScopeSelector.tsx");
 	assert.match(modal, /useState<ResourceScope>\("global"\)/);
 	assert.equal((modal.match(/scopeSelector=\{resourceScopeSelector\}/g) ?? []).length, 4);
-	assert.match(modal, /projectKind !== "chat"/);
+	assert.match(modal, /item\.kind !== "chat"/);
 	assert.doesNotMatch(modal, /getMcp\(projectPath\)/);
 	assert.match(selector, /type ResourceScope = "global" \| "project"/);
-	assert.match(selector, /\{hasProject \? \(/);
+	assert.match(selector, /availableProjects = projects\.filter\(/);
 	assert.match(selector, /<SelectItem value="global">/);
-	assert.match(selector, /<SelectItem value="project">/);
+	assert.match(selector, /<SelectItem[^>]*value=\{item\.id\}>/);
 });
 
-test("extension scope table keeps version/path columns and horizontal state toggles", () => {
+test("extension scope table keeps three columns and horizontal state toggles", () => {
 	const extensions = read("src/renderer/src/config/ExtensionsTab.tsx");
 	const rows = read("src/renderer/src/config/extensionsTableRows.tsx");
-	// 合并远端后保留真实路径列（扩展/版本/路径/操作）
+	// 路径列已随并行提交移除，表头为 扩展/版本/操作 三列
 	assert.match(extensions, /config\.extensionVersion/);
-	assert.match(extensions, /config\.extensionPath/);
 	assert.match(extensions, /config\.actions/);
+	assert.doesNotMatch(extensions, /config\.extensionPath/);
 	// 启停开关用水平 ToggleLeft/ToggleRight，不使用 Power 图标
 	assert.doesNotMatch(extensions + rows, /\bPower\b/);
 	assert.match(rows, /<ToggleRight/);
@@ -55,10 +55,10 @@ test("project resource views group inherited globals and use project-only overri
 test("project resource file operations retain the registered project scope", () => {
 	const modal = read("src/renderer/src/ConfigModal.tsx");
 	const extensions = read("src/renderer/src/config/ExtensionsTab.tsx");
-	assert.match(modal, /isProjectSkill\(skill\) && projectId \? \{ projectId \} : undefined/);
-	assert.match(modal, /isProjectSkill\(editingGlobalSkill\) && projectId \? \{ projectId \} : undefined/);
-	assert.match(modal, /api\.projectResources\.openDirectory\(projectId, "project-pi"\)/);
-	assert.match(modal, /extension\.scope === "project" && projectId \? \{ projectId \} : undefined/);
+	assert.match(modal, /isProjectSkill\(skill\) && effectiveProjectId \? \{ projectId: effectiveProjectId \} : undefined/);
+	assert.match(modal, /isProjectSkill\(editingGlobalSkill\) && effectiveProjectId \? \{ projectId: effectiveProjectId \} : undefined/);
+	assert.match(modal, /api\.projectResources\.openDirectory\(effectiveProjectId, "project-pi"\)/);
+	assert.match(modal, /extension\.scope === "project" && effectiveProjectId \? \{ projectId: effectiveProjectId \} : undefined/);
 	assert.match(extensions, /onShowInFolder/);
 });
 

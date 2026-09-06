@@ -45,6 +45,9 @@ export function SkillsTab(props: {
 	const projectSkills = visibleSkills.filter((skill) => skill.sourceId === "project-pi" || skill.sourceId === "project-agents");
 	const globalSkills = visibleSkills.filter((skill) => skill.sourceId === "pi-global" || skill.sourceId === "agents-global");
 	const disabledGlobalKeys = new Set(props.projectOverrides.disabledGlobalSkills);
+	// discovery 行去重：与本地列表同名的条目只保留本地行（带操作），列表只显示一次
+	const localSkillNames = new Set(visibleSkills.map((skill) => skill.name.toLowerCase()));
+	const uniqueDiscoverySkills = props.discoverySkills.filter((item) => !localSkillNames.has(item.name.toLowerCase()));
 	// 一级 tab：本地 / 商店
 	const [skillTab, setSkillTab] = useState<"local" | "store">("local");
 	// 二级 tab（商店内）：选择供应商
@@ -57,20 +60,22 @@ export function SkillsTab(props: {
 			<div className="mb-3 flex items-center justify-between gap-3">
 				{/* Scope stays in the page header while Local/Store content changes below. */}
 				<Tabs
-					value={skillTab}
-					onValueChange={(v) => { if (v === "local" || v === "store") setSkillTab(v); }}
-					className="min-w-0 flex-1 gap-0"
-				>
-					<TabsList className="w-full">
+						value={skillTab}
+						onValueChange={(v) => { if (v === "local" || v === "store") setSkillTab(v); }}
+						className="min-w-0 flex-1 gap-0"
+					>
+						{/* 两个 table（本地/商店）外框紧凑，仅包裹 tab 本身，与扩展页对齐 */}
+						<TabsList className="w-fit self-start">
 						<TabsTrigger value="local" onClick={() => props.onRefresh()}>
 							{t("config.nav.skills")}
 						</TabsTrigger>
 						<TabsTrigger value="store" disabled={props.scope === "project"}>
 							<ShoppingBag size={14} strokeWidth={1.8} />
-							{t("config.promptStoreTab")}
+							{t("config.skillStoreTab")}
 						</TabsTrigger>
 					</TabsList>
 				</Tabs>
+				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
 				<div className="shrink-0">{props.scopeSelector}</div>
 			</div>
 
@@ -157,7 +162,7 @@ export function SkillsTab(props: {
 								/>
 							))}
 							{props.scope === "project" &&
-								props.discoverySkills
+								uniqueDiscoverySkills
 									.filter((item) => isProjectDiscoverySource(item.sourceId))
 									.map((item) => (
 										<DiscoveredSkillRow key={item.id} item={item} />
@@ -188,7 +193,7 @@ export function SkillsTab(props: {
 								);
 							})}
 							{props.scope === "project" &&
-								props.discoverySkills
+								uniqueDiscoverySkills
 									.filter((item) => !isProjectDiscoverySource(item.sourceId))
 									.map((item) => (
 										<DiscoveredSkillRow key={item.id} item={item} />
@@ -224,7 +229,7 @@ function DiscoveredSkillRow(props: {
 						<Sparkles size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" />
 						<strong className="truncate text-control font-medium text-foreground">{item.name}</strong>
 						<span className="skill-state" title={t("config.resourceManagedHint")}>
-							{t("config.resourceManaged")}
+							{t("config.source.global")}
 						</span>
 						<span className={`skill-state ${item.enabled ? "enabled" : "disabled"}`}>
 							{item.enabled ? t("common.enabled") : t("common.disabled")}

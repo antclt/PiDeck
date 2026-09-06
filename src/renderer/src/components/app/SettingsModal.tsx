@@ -158,6 +158,8 @@ type SettingsModalProps = {
 	onChange: (patch: Partial<AppSettings>) => Promise<boolean>;
 	/** 当前项目身份：项目资源操作只使用主进程登记的 id。 */
 	projectId?: string;
+	/** PiDeck 当前加载的全部项目（作用域下拉展示；Chat 项目除外）。 */
+	projects?: Array<{ id: string; name: string; kind?: Project["kind"] }>;
 	/** Chat workspace has no project resource scope. */
 	projectKind?: Project["kind"];
 	/** 当前项目名称：作用域选择器显示用。 */
@@ -670,6 +672,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							projectId={props.projectId}
 							projectKind={props.projectKind}
 							projectName={props.projectName}
+							projects={props.projects}
 							focusConfigTab={configFocus?.configTab}
 							focusProvider={configFocus?.provider}
 							focusBackendPane={configFocus?.backendPane}

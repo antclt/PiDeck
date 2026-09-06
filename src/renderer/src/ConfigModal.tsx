@@ -255,6 +255,8 @@ type ConfigModalProps = {
 	onSaved: () => void;
 	/** 当前项目身份：项目资源 IPC 只接受由主进程登记的 projectId。 */
 	projectId?: string;
+	/** PiDeck 当前加载的全部项目（作用域下拉展示；Chat 项目除外）。 */
+	projects?: Array<{ id: string; name: string; kind?: Project["kind"] }>;
 	/** Chat workspace has no project resource scope. */
 	projectKind?: Project["kind"];
 	/** 当前项目名称：仅用于作用域选择器显示。 */
@@ -295,6 +297,8 @@ export type ConfigPaneProps = {
 	onSaved?: () => void;
 	/** 当前项目身份：项目资源 IPC 只接受由主进程登记的 projectId。 */
 	projectId?: string;
+	/** PiDeck 当前加载的全部项目（作用域下拉展示；Chat 项目除外）。 */
+	projects?: Array<{ id: string; name: string; kind?: Project["kind"] }>;
 	/** Chat workspace has no project resource scope. */
 	projectKind?: Project["kind"];
 	/** 当前项目名称：仅用于作用域选择器显示。 */
@@ -322,7 +326,7 @@ export type ConfigPaneProps = {
  * 不包错误边界——宿主 SettingsModal 的 ErrorBoundary 已兜底整个窗口。
  */
 export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
-	function ConfigPane({ onClose, onSaved, projectId, projectKind, projectName, focusConfigTab, focusProvider, focusBackendPane, onStateChange, onRequestClose }, ref) {
+	function ConfigPane({ onClose, onSaved, projectId, projectKind, projectName, projects, focusConfigTab, focusProvider, focusBackendPane, onStateChange, onRequestClose }, ref) {
 		return (
 			<ConfigModalContent
 				open
@@ -331,6 +335,7 @@ export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
 				projectId={projectId}
 				projectKind={projectKind}
 				projectName={projectName}
+				projects={projects}
 				focusConfigTab={focusConfigTab}
 				focusProvider={focusProvider}
 				focusBackendPane={focusBackendPane}
@@ -430,10 +435,20 @@ type ConfigModalContentProps = ConfigModalProps & {
 };
 
 function ConfigModalContent(props: ConfigModalContentProps) {
-	const { open, onClose, onSaved, projectId, projectKind, projectName, embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
-	const hasProject = Boolean(projectId && projectKind !== "chat");
+	const { open, onClose, onSaved, projectId, projectKind, projectName, projects = [], embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
 	/** Shared resource scope; keeping it here makes it survive resource-tab switches. */
 	const [resourceScope, setResourceScope] = useState<ResourceScope>("global");
+	/** scope 选择器中当前选中的项目 id（默认当前激活项目，可通过下拉切换任意已加载项目）。 */
+	const [scopeProjectId, setScopeProjectId] = useState<string | undefined>(projectId);
+	useEffect(() => {
+		// 侧栏切换激活项目时跟随；用户在下拉中手动选择的项目在切回激活项目时由下一次选择覆盖。
+		setScopeProjectId(projectId);
+	}, [projectId]);
+	/** scope=project 时实际使用的项目 id（下拉可选的任意已加载非 Chat 项目）。 */
+	const effectiveProjectId = resourceScope === "project"
+		? (projects.find((item) => item.id === scopeProjectId && item.kind !== "chat")?.id ?? undefined)
+		: undefined;
+	const hasProject = Boolean(effectiveProjectId);
 	useEffect(() => {
 		if (!hasProject && resourceScope !== "global") setResourceScope("global");
 	}, [hasProject, resourceScope]);
@@ -492,10 +507,13 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const resourceScopeSelector = (
 		<ResourceScopeSelector
 			value={resourceScope}
-			hasProject={hasProject}
-			projectName={projectName}
+			projects={projects}
+			selectedProjectId={scopeProjectId}
 			disabled={dirtyTabs.has("config:mcp")}
-			onChange={setResourceScope}
+			onChange={(scope, projectId) => {
+				setResourceScope(scope);
+				if (projectId) setScopeProjectId(projectId);
+			}}
 		/>
 	);
 	/** loadConfig 不能依赖 dirtyTabs（否则切 tab 会重建回调并误触发重载）；用 ref 读最新脏集合。 */
@@ -991,7 +1009,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			return;
 		}
 		void loadConfig(tab);
-	}, [open, section, tab, loadConfig, resourceScope, projectId, bumpResourceGeneration]);
+	}, [open, section, tab, loadConfig, resourceScope, effectiveProjectId, bumpResourceGeneration]);
 
 	const showToast = (msg: string) => {
 		showNotice(msg, 2500);
@@ -1750,7 +1768,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** 刷新 prompt templates 列表：project 数据仅在 project scope 拉取，旧响应不得覆盖新 scope 结果。 */
 	const refreshPrompts = async () => {
 		const generation = resourceGenerationRef.current;
-		const projectIdHere = resourceScope === "project" ? projectId : undefined;
+		const projectIdHere = resourceScope === "project" ? effectiveProjectId : undefined;
 		const [globalResult, projectResult, projectResourceResult, discoveryResult] = await Promise.all([
 			api.prompts.list(),
 			projectIdHere && hasProject
@@ -1784,8 +1802,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		if (resourceScope === "project" && !isProjectPrompt(target)) return;
 		if (target.userCreated) {
 			try {
-				if (isProjectPrompt(target) && projectId) {
-					await api.prompts.deleteFromProject(projectId, target.name);
+				if (isProjectPrompt(target) && effectiveProjectId) {
+					await api.prompts.deleteFromProject(effectiveProjectId, target.name);
 				} else {
 					await api.prompts.delete(target.path);
 				}
@@ -1822,8 +1840,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setEditPromptLoading(true);
 		setError(null);
 		try {
-			const content = isProjectPrompt(template) && projectId
-				? await window.piDesktop.files.readContent(template.path, undefined, { projectId })
+			const content = isProjectPrompt(template) && effectiveProjectId
+				? await window.piDesktop.files.readContent(template.path, undefined, { projectId: effectiveProjectId })
 				: await api.prompts.edit(template.path);
 			setEditPromptContent(content as string);
 		} catch (err) {
@@ -1854,11 +1872,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					description: editingPrompt.description,
 				});
 				await api.prompts.edit(created.path, editPromptContent);
-			} else if (isProjectPrompt(editingPrompt) && projectId) {
+			} else if (isProjectPrompt(editingPrompt) && effectiveProjectId) {
 				await window.piDesktop.files.writeContent(
 					editingPrompt.path,
 					editPromptContent,
-					{ projectId },
+					{ projectId: effectiveProjectId },
 				);
 			} else {
 				await api.prompts.edit(editingPrompt.path, editPromptContent);
@@ -1886,8 +1904,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
 				return;
 			}
-			if (isProjectPrompt(template) && projectId) {
-				await api.prompts.renameInProject(projectId, template.name, newName);
+			if (isProjectPrompt(template) && effectiveProjectId) {
+				await api.prompts.renameInProject(effectiveProjectId, template.name, newName);
 			} else {
 				await api.prompts.rename(template.name, newName);
 			}
@@ -1902,16 +1920,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const handleTogglePrompt = async (template: PiPromptTemplateSummary, enabled: boolean) => {
 		setError(null);
 		try {
-			if (resourceScope === "project" && projectId) {
+			if (resourceScope === "project" && effectiveProjectId) {
 				if (isProjectPrompt(template)) {
-					await api.prompts.toggleInProject(projectId, template.name, enabled);
+					await api.prompts.toggleInProject(effectiveProjectId, template.name, enabled);
 				} else if (template.enabled === false) {
 					// A globally disabled template cannot be re-enabled from project scope.
 					showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
 					return;
 				} else {
 					await api.projectResources.toggleInherited({
-						projectId,
+						projectId: effectiveProjectId,
 						kind: "prompt",
 						key: globalPromptOverrideKey(template.name),
 						enabled,
@@ -1939,11 +1957,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					description: editingPrompt.description,
 				});
 				await api.prompts.edit(created.path, editPromptContent);
-			} else if (isProjectPrompt(editingPrompt) && projectId) {
+			} else if (isProjectPrompt(editingPrompt) && effectiveProjectId) {
 				await window.piDesktop.files.writeContent(
 					editingPrompt.path,
 					editPromptContent,
-					{ projectId },
+					{ projectId: effectiveProjectId },
 				);
 			} else {
 				await api.prompts.edit(editingPrompt.path, editPromptContent);
@@ -1962,7 +1980,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** Refresh global resources and, when in project scope, project-owned resources plus overrides. */
 	const refreshSkills = async () => {
 		const generation = resourceGenerationRef.current;
-		const projectIdHere = resourceScope === "project" ? projectId : undefined;
+		const projectIdHere = resourceScope === "project" ? effectiveProjectId : undefined;
 		const [globalResult, projectResult, discoveryResult] = await Promise.all([
 			api.skills.list(),
 			projectIdHere && hasProject
@@ -1985,9 +2003,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const handleToggleSkill = async (skill: PiSkillSummary, enabled: boolean) => {
 		setError(null);
 		try {
-			if (resourceScope === "project" && projectId) {
+			if (resourceScope === "project" && effectiveProjectId) {
 				if (isProjectSkill(skill)) {
-					await api.projectResources.toggleSkill(projectId, skill.path, enabled);
+					await api.projectResources.toggleSkill(effectiveProjectId, skill.path, enabled);
 				} else if (isGlobalSkill(skill) && isGlobalSkillSourceId(skill.sourceId)) {
 					if (skill.enabled === false) {
 						// A globally disabled skill cannot be re-enabled from project scope.
@@ -1995,7 +2013,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						return;
 					}
 					await api.projectResources.toggleInherited({
-						projectId,
+						projectId: effectiveProjectId,
 						kind: "skill",
 						key: globalSkillOverrideKey(skill.sourceId, skill.name),
 						enabled,
@@ -2019,8 +2037,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setError(null);
 		try {
 			if (resourceScope === "project" && !isProjectSkill(target)) return;
-			if (resourceScope === "project" && projectId) {
-				await api.projectResources.deleteSkill(projectId, target.path);
+			if (resourceScope === "project" && effectiveProjectId) {
+				await api.projectResources.deleteSkill(effectiveProjectId, target.path);
 			} else {
 				await api.skills.delete(target.path);
 			}
@@ -2040,8 +2058,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
 				return;
 			}
-			if (resourceScope === "project" && isProjectSkill(skill) && projectId) {
-				await api.projectResources.renameSkill(projectId, skill.path, newName);
+			if (resourceScope === "project" && isProjectSkill(skill) && effectiveProjectId) {
+				await api.projectResources.renameSkill(effectiveProjectId, skill.path, newName);
 			} else {
 				await api.skills.rename(skill.path, newName);
 			}
@@ -2064,7 +2082,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setEditGlobalLoading(true);
 		setError(null);
 		try {
-			const accessScope = isProjectSkill(skill) && projectId ? { projectId } : undefined;
+			const accessScope = isProjectSkill(skill) && effectiveProjectId ? { projectId: effectiveProjectId } : undefined;
 			const content = await window.piDesktop.files.readContent(skill.path, undefined, accessScope);
 			setEditGlobalContent(content);
 		} catch (err) {
@@ -2094,7 +2112,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setEditGlobalSaving(true);
 		setError(null);
 		try {
-			const accessScope = isProjectSkill(editingGlobalSkill) && projectId ? { projectId } : undefined;
+			const accessScope = isProjectSkill(editingGlobalSkill) && effectiveProjectId ? { projectId: effectiveProjectId } : undefined;
 			await window.piDesktop.files.writeContent(
 				editingGlobalSkill.path,
 				editGlobalContent,
@@ -2119,7 +2137,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setExtensionsLoading(true);
 		setError(null);
 		const generation = resourceGenerationRef.current;
-		const projectIdHere = resourceScope === "project" ? projectId : undefined;
+		const projectIdHere = resourceScope === "project" ? effectiveProjectId : undefined;
 		try {
 			const [globalResult, projectResult, discoveryResult] = await Promise.all([
 				api.extensions.list(forceRefresh),
@@ -2152,9 +2170,9 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** Extension toggles in project view are project overrides, never global mutations. */
 	const handleToggleExtension = async (extension: PiExtensionSummary, enabled: boolean) => {
-		if (resourceScope === "project" && projectId) {
+		if (resourceScope === "project" && effectiveProjectId) {
 			if (isProjectExtension(extension) && extension.path) {
-				await api.projectResources.toggleExtension(projectId, extension.path, enabled);
+				await api.projectResources.toggleExtension(effectiveProjectId, extension.path, enabled);
 			} else if (!isProjectExtension(extension)) {
 				if (extension.enabled === false) {
 					// A globally disabled extension cannot be re-enabled from project scope.
@@ -2162,7 +2180,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					return;
 				}
 				await api.projectResources.toggleInherited({
-					projectId,
+					projectId: effectiveProjectId,
 					kind: "extension",
 					key: extension.source,
 					enabled,
@@ -2184,7 +2202,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		try {
 			await window.piDesktop.files.showInFolder(
 				extension.path,
-				extension.scope === "project" && projectId ? { projectId } : undefined,
+				extension.scope === "project" && effectiveProjectId ? { projectId: effectiveProjectId } : undefined,
 			);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -2203,8 +2221,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		try {
 			await Promise.all([
 				(async () => {
-					if (isProjectExtension(target) && projectId && target.path) {
-						await api.projectResources.deleteExtension(projectId, target.path);
+					if (isProjectExtension(target) && effectiveProjectId && target.path) {
+						await api.projectResources.deleteExtension(effectiveProjectId, target.path);
 					} else if (target.builtIn) {
 						await api.extensions.removeBuiltIn(target.source);
 					} else {
@@ -2751,8 +2769,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							loading={loading}
 							onRefresh={refreshSkills}
 							onOpenRoot={() => {
-								if (resourceScope === "project" && projectId) {
-									void api.projectResources.openDirectory(projectId, "project-pi")
+								if (resourceScope === "project" && effectiveProjectId) {
+									void api.projectResources.openDirectory(effectiveProjectId, "project-pi")
 										.catch((err) => setError(err instanceof Error ? err.message : String(err)));
 									return;
 								}
@@ -2785,8 +2803,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							editSaving={editPromptSaving}
 							onRefresh={refreshPrompts}
 							onOpenRoot={() => {
-								if (resourceScope === "project" && projectId) {
-									void api.projectResources.openDirectory(projectId, "prompts")
+								if (resourceScope === "project" && effectiveProjectId) {
+									void api.projectResources.openDirectory(effectiveProjectId, "prompts")
 										.catch((err) => setError(err instanceof Error ? err.message : String(err)));
 									return;
 								}
@@ -2839,7 +2857,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{/* forceMount：MCP 页自管草稿，切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
 					<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
 						<div className="config-content flex min-h-0 flex-col">
-						<McpTab ref={mcpTabRef} projectId={hasProject ? projectId : undefined} scope={resourceScope} scopeSelector={resourceScopeSelector} onDirtyChange={handleMcpDirtyChange} />
+						<McpTab ref={mcpTabRef} projectId={hasProject ? effectiveProjectId : undefined} scope={resourceScope} scopeSelector={resourceScopeSelector} onDirtyChange={handleMcpDirtyChange} />
 						</div>
 					</TabsContent>
 

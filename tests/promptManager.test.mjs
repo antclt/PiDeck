@@ -63,25 +63,13 @@ test("toggle 同步持久化 PiDeck settings 禁用列表（模板白名单模�
 	});
 });
 
-test("内置推荐模板（builtin://）不可禁用；list 中始终为启用态", async () => {
+test("内置推荐模板（builtin://）已移除：list 只返回真实落盘模板", async () => {
 	await withTemporaryHome(async (home) => {
 		const { PromptManager } = loadPromptManagerModule();
 		const manager = new PromptManager(home);
-		const settings = { disabledPrompts: [] };
-		manager.configureSettings(
-			() => settings,
-			(patch) => {
-				Object.assign(settings, patch);
-				return Promise.resolve(settings);
-			},
-		);
-
 		const { templates } = await manager.list();
-		const builtin = templates.find((t) => t.path.startsWith("builtin://"));
-		assert.ok(builtin, "内置模板应存在");
-		assert.equal(builtin.enabled, true);
-		await assert.rejects(manager.toggle(builtin.path, false));
-		assert.deepEqual(settings.disabledPrompts, [], "内置模板不应写入禁用列表");
+		// 内置推荐模板不再注入列表：不应出现 builtin:// 虚拟条目
+		assert.equal(templates.some((t) => t.path.startsWith("builtin://")), false);
 	});
 });
 
