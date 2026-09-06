@@ -284,6 +284,14 @@ export type AppSettings = {
 	/** 收藏的模型 ID 列表 */
 	favoriteModels: string[];
 
+	// ── 模型选择器分组排序：记录最近使用的供应商 ──
+	/**
+	 * 最近使用的供应商 ID 列表（最新在前，最多 8 个），主进程在 sendPrompt 接受时自动记录，
+	 * 与 lastUsedModel 同点写入。模型选择器按此优先排列供应商分组：最近用过的排最前，
+	 * 没记录过的供应商仍按内置置顶 + 字母序。可选以兼容旧 settings.json。
+	 */
+	recentProviders?: string[];
+
 	// ── 新会话默认模型：记录用户最后一次实际使用的供应商/模型 ──
 	/**
 	 * 用户最后一次发送消息时使用的模型（主进程在 sendPrompt 接受时自动记录）。

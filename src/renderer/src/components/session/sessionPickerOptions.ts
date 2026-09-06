@@ -85,6 +85,47 @@ export function groupModelsByProvider(models: AvailableModel[]) {
 }
 
 /**
+ * 模型选择器供应商分组排序权重：内置置顶供应商的固定顺序。
+ * 未出现在 recentProviders（最近使用）里的分组按此顺序 + 字母序排；
+ * 'other' 是白名单外供应商的兜底组，始终最后。
+ */
+export const PROVIDER_ORDER = ["tokendance", "anthropic", "openai", "google", "deepseek", "other"];
+
+/**
+ * 对供应商分组 key 排序：
+ * 1) 最近使用过的（recentProviders，最新在前）排最前，让高频供应商免搜索直达；
+ * 2) 未使用过的按内置置顶顺序（PROVIDER_ORDER）+ 字母序；
+ * 3) 'other' 兜底组恒最后，避免未知供应商混进常用区。
+ * 纯函数便于单测：排序策略离开 React 也能验证。
+ */
+export function orderProviderGroups(
+  providers: string[],
+  recentProviders?: string[],
+): string[] {
+  const recent = recentProviders ?? [];
+  const recentIndex = new Map<string, number>();
+  recent.forEach((provider, index) => {
+    if (!recentIndex.has(provider)) recentIndex.set(provider, index);
+  });
+  return [...providers].sort((a, b) => {
+    // other 恒最后：不受最近使用影响（它是白名单外兜底，不是用户选的供应商）。
+    if (a === "other") return 1;
+    if (b === "other") return -1;
+    const aRecent = recentIndex.get(a);
+    const bRecent = recentIndex.get(b);
+    if (aRecent !== undefined && bRecent !== undefined) return aRecent - bRecent;
+    if (aRecent !== undefined) return -1;
+    if (bRecent !== undefined) return 1;
+    const aIndex = PROVIDER_ORDER.indexOf(a);
+    const bIndex = PROVIDER_ORDER.indexOf(b);
+    if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+    if (aIndex !== -1) return -1;
+    if (bIndex !== -1) return 1;
+    return a.localeCompare(b);
+  });
+}
+
+/**
  * 模型选择器初始展开规则（「当前选中模型可见」驱动）：打开时只保证当前模型所在分组可见，
  * 其余提供商分组全部折叠。
  *
