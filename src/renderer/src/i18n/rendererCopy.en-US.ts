@@ -531,11 +531,6 @@ export const enUS: Record<TranslationKey, string> = {
   "app.logoLabel": "PiDeck logo",
   "app.homepage": "Website",
   "app.themeDockTooltip": "Theme: {mode} (click to switch)",
-  "app.messageDeliveryFollowUp": "Queued after stop",
-  "app.messageDeliveryFollowUpTitle": "followUp: send after the agent stops",
-  "app.messageDeliverySteer": "Before next call",
-  "app.messageDeliverySteerTitle":
-    "steer: applies after the current tool call and before the next LLM call",
   "app.commandPickerEmpty": "No matching options",
   "app.commandPickerSearch": "Search options",
   "app.modelPickerEmpty": "No matching models",

@@ -532,11 +532,6 @@ export const zhCN = {
   "app.logoLabel": "PiDeck 标志",
   "app.homepage": "官网主页",
   "app.themeDockTooltip": "主题：{mode}（点击切换）",
-  "app.messageDeliveryFollowUp": "结束后排队",
-  "app.messageDeliveryFollowUpTitle": "followUp：等待 agent 停止后发送",
-  "app.messageDeliverySteer": "下次调用前",
-  "app.messageDeliverySteerTitle":
-    "steer：当前工具调用后、下一次 LLM 调用前生效",
   "app.commandPickerEmpty": "没有匹配的选项",
   "app.commandPickerSearch": "搜索选项",
   "app.modelPickerEmpty": "没有匹配的模型",
