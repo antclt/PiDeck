@@ -90,6 +90,8 @@
 Special thanks to **微时佬友** for providing the Grok model service used in our
 community testing environment 🎉
 
+Thanks to **歌者、幕书、王女士** for their generous donations and support! 🎉
+
 Thanks to all group members who submitted suggestions and bug reports! 🙏
 
 ## v0.7.2 - 2026-08-30
