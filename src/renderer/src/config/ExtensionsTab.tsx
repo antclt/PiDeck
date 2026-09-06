@@ -20,7 +20,6 @@ type ExtensionsApi = {
 	toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => Promise<void>;
 	setWhitelistDisabled: (enabled: boolean) => Promise<void>;
 	removeBuiltIn: (source: string) => Promise<void>;
-	restoreBuiltIn: (source: string) => Promise<void>;
 	update: () => Promise<PiCliUpdateResult>;
 	updateOne: (source: string) => Promise<PiCliUpdateResult>;
 };
@@ -73,7 +72,6 @@ export function ExtensionsTab(props: {
 		// 项目作用域下只做本地管理，商店（全局安装入口）切回本地。
 		if (props.scope === "project" && extTab === "store") setExtTab("local");
 	}, [props.scope, extTab]);
-	const [restoringBuiltIn, setRestoringBuiltIn] = useState<string | null>(null);
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
 	const [togglingSource, setTogglingSource] = useState<string | null>(null);
 	// 白名单总开关（「禁用 -e 参数」）：true = 不注入 --no-extensions/-e，pi 默认加载全部扩展。
@@ -126,23 +124,6 @@ export function ExtensionsTab(props: {
 			);
 		} finally {
 			setRemovingBuiltIn(null);
-		}
-	};
-
-	const handleRestoreBuiltIn = async (extension: PiExtensionSummary) => {
-		if (restoringBuiltIn) return;
-		setRestoringBuiltIn(extension.source);
-		try {
-			await getExtensionsApi().restoreBuiltIn(extension.source);
-			props.onRefresh();
-		} catch (e) {
-			showNotice(
-				t("config.extensionOperationFailed", { error: formatExtensionError(e) }),
-				4500,
-				"error",
-			);
-		} finally {
-			setRestoringBuiltIn(null);
 		}
 	};
 
@@ -269,9 +250,7 @@ export function ExtensionsTab(props: {
 					uninstalling={props.uninstallingSource === extension.source}
 					onUninstall={props.onUninstall}
 					onRemoveBuiltIn={handleRemoveBuiltIn}
-					onRestoreBuiltIn={handleRestoreBuiltIn}
 					removingBuiltIn={removingBuiltIn === extension.source}
-					restoringBuiltIn={restoringBuiltIn === extension.source}
 					toggling={togglingSource === extension.source}
 					onToggle={handleToggle}
 					updatingOne={updatingOne === extension.source}

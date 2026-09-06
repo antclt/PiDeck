@@ -28,11 +28,14 @@ test("extension scope table keeps version/path columns and horizontal state togg
 	assert.doesNotMatch(extensions + rows, /\bPower\b/);
 	assert.match(rows, /<ToggleRight/);
 	assert.match(rows, /<ToggleLeft/);
-	// 继承的全局行只读：全局禁用项不可在项目视图重新启用，remove/restore/uninstall 均隐藏
-	assert.match(rows, /\(inherited && extension\.enabled === false\)/);
+	// 内置扩展也使用同一启停开关；仅保留全局范围下的独立移除入口。
+	assert.match(rows, /启停开关：内置扩展也复用 extensions:toggle/);
+	assert.match(rows, /onClick=\{\(\) => props\.onToggle\(extension, !effectiveEnabled\)\}/);
 	assert.match(rows, /extension\.builtIn && extension\.enabled !== false && !inherited/);
-	assert.match(rows, /extension\.builtIn && extension\.enabled === false && !inherited/);
-	assert.match(rows, /!inherited && \(\s*<Button[\s\S]*?onUninstall/);
+	assert.doesNotMatch(rows, /onRestoreBuiltIn|restoringBuiltIn/);
+	// 继承的全局行只读：全局禁用项不可在项目视图重新启用，卸载/移除均隐藏
+	assert.match(rows, /\(inherited && extension\.enabled === false\)/);
+	assert.match(rows, /!extension\.builtIn && !inherited && \(\s*<Button[\s\S]*?onUninstall/);
 });
 
 test("project resource views group inherited globals and use project-only overrides", () => {

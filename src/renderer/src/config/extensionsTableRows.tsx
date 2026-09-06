@@ -1,6 +1,6 @@
 import { Button } from "../components/ui-shadcn/button";
 import { TableCell, TableRow } from "../components/ui-shadcn/table";
-import { Copy, FolderOpen, RotateCcw, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
+import { Copy, FolderOpen, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import type { PiExtensionSummary } from "../../../shared/types";
 import { t } from "../i18n";
 
@@ -16,7 +16,7 @@ export type DiscoveredExtensionItem = {
 };
 
 /**
- * 已安装扩展表格行：内置扩展走 remove/restore，非内置扩展走启停开关 + 卸载；
+ * 已安装扩展表格行：所有扩展共用启停开关；内置扩展另保留移除入口，普通扩展提供卸载；
  * 项目作用域下继承的全局行只读（无卸载/移除，开关只写项目覆盖）。
  */
 export function ExtensionTableRow(props: {
@@ -26,9 +26,7 @@ export function ExtensionTableRow(props: {
 	uninstalling: boolean;
 	onUninstall: (extension: PiExtensionSummary) => void;
 	onRemoveBuiltIn: (extension: PiExtensionSummary) => void;
-	onRestoreBuiltIn: (extension: PiExtensionSummary) => void;
 	removingBuiltIn?: boolean;
-	restoringBuiltIn?: boolean;
 	toggling?: boolean;
 	onToggle: (extension: PiExtensionSummary, enabled: boolean) => void | Promise<void>;
 	updatingOne: boolean;
@@ -50,7 +48,7 @@ export function ExtensionTableRow(props: {
 						{/* 过滤式安装徽标：source 已在主进程剥离 "(filtered)" 后缀，
 						    版本查询/更新/卸载均用干净 source；此处仅展示标记 */}
 						{extension.filtered && <span className="text-micro text-muted-foreground">{t("config.extensionFiltered")}</span>}
-						{disabled && !extension.builtIn && (
+						{disabled && (
 							<span className="text-micro text-muted-foreground">{t("config.extensionDisabledBadge")}</span>
 						)}
 					</div>
@@ -99,45 +97,36 @@ export function ExtensionTableRow(props: {
 					>
 						<FolderOpen size={14} strokeWidth={1.8} />
 					</Button>
+					{/* 启停开关：内置扩展也复用 extensions:toggle；项目作用域下继承的全局行只写项目覆盖，
+					    全局已禁用的项不可在项目视图重新启用 */}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						className={`size-7${effectiveEnabled ? " text-primary" : ""}`}
+						disabled={props.toggling || props.uninstalling || (inherited && extension.enabled === false)}
+						onClick={() => props.onToggle(extension, !effectiveEnabled)}
+						title={
+							props.toggling
+								? t("config.extensionToggling")
+								: effectiveEnabled
+									? t("config.extensionDisable")
+									: t("config.extensionEnable")
+						}
+						aria-busy={props.toggling}
+					>
+						{effectiveEnabled
+							? <ToggleRight size={18} strokeWidth={1.8} />
+							: <ToggleLeft size={18} strokeWidth={1.8} />}
+					</Button>
 					{extension.builtIn && extension.enabled !== false && !inherited && (
 						<Button variant="ghost" size="icon-sm" className="size-7" disabled={props.removingBuiltIn} onClick={() => props.onRemoveBuiltIn(extension)} title={props.removingBuiltIn ? t("config.uninstalling") : t("config.uninstall")}>
 							<Trash2 size={14} strokeWidth={1.8} />
 						</Button>
 					)}
-					{extension.builtIn && extension.enabled === false && !inherited && (
-						<Button variant="ghost" size="icon-sm" className="size-7" disabled={props.restoringBuiltIn} onClick={() => props.onRestoreBuiltIn(extension)} title={t("config.restoreBuiltIn")}>
-							<RotateCcw size={14} strokeWidth={1.8} />
+					{!extension.builtIn && !inherited && (
+						<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={props.uninstalling} onClick={() => props.onUninstall(extension)} title={props.uninstalling ? t("config.uninstalling") : t("config.uninstall")}>
+							<Trash2 size={14} strokeWidth={1.8} />
 						</Button>
-					)}
-					{!extension.builtIn && (
-						<>
-							{/* 启停开关：启用态主题色高亮；项目作用域下继承的全局行只写项目覆盖，
-							    全局已禁用的项不可在项目视图重新启用 */}
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								className={`size-7${effectiveEnabled ? " text-primary" : ""}`}
-								disabled={props.toggling || props.uninstalling || (inherited && extension.enabled === false)}
-								onClick={() => props.onToggle(extension, !effectiveEnabled)}
-								title={
-									props.toggling
-										? t("config.extensionToggling")
-										: effectiveEnabled
-											? t("config.extensionDisable")
-											: t("config.extensionEnable")
-								}
-								aria-busy={props.toggling}
-							>
-								{effectiveEnabled
-									? <ToggleRight size={18} strokeWidth={1.8} />
-									: <ToggleLeft size={18} strokeWidth={1.8} />}
-							</Button>
-							{!inherited && (
-								<Button variant="ghost" size="icon-sm" className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={props.uninstalling} onClick={() => props.onUninstall(extension)} title={props.uninstalling ? t("config.uninstalling") : t("config.uninstall")}>
-									<Trash2 size={14} strokeWidth={1.8} />
-								</Button>
-							)}
-						</>
 					)}
 				</div>
 			</TableCell>
