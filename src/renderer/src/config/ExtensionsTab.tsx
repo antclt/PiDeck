@@ -377,14 +377,13 @@ export function ExtensionsTab(props: {
 								<TableRow>
 									<TableHead>{t("config.extension")}</TableHead>
 									<TableHead>{t("config.extensionVersion")}</TableHead>
-									<TableHead>{t("config.extensionPath")}</TableHead>
 									<TableHead className="w-28 text-right">{t("config.actions")}</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
 								{props.scope === "project" && projectExtensions.length > 0 ? (
 									<TableRow>
-										<TableCell colSpan={4} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
+										<TableCell colSpan={3} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
 											{t("config.resourceGroup.project")}
 										</TableCell>
 									</TableRow>
@@ -396,7 +395,7 @@ export function ExtensionsTab(props: {
 										.map((item) => <DiscoveredExtensionRow key={`discovered:${item.path}`} item={item} />)}
 								{props.scope === "project" && globalExtensions.length > 0 ? (
 									<TableRow>
-										<TableCell colSpan={4} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
+										<TableCell colSpan={3} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
 											{t("config.resourceGroup.global")}
 										</TableCell>
 									</TableRow>

@@ -81,9 +81,6 @@ export function ExtensionTableRow(props: {
 				)}
 				{extension.updateError && <div className="text-destructive">{extension.updateError}</div>}
 			</TableCell>
-			<TableCell className="max-w-64 truncate font-mono text-caption text-muted-foreground" title={extension.path ?? undefined}>
-				{extension.path || "-"}
-			</TableCell>
 			<TableCell className="text-right">
 				<div className="flex justify-end gap-1">
 					{/* 文件位置：真实安装路径（主进程按项目边界授权打开） */}
@@ -154,9 +151,6 @@ export function DiscoveredExtensionRow(props: { item: DiscoveredExtensionItem })
 				</div>
 			</TableCell>
 			<TableCell className="whitespace-nowrap text-caption text-muted-foreground">-</TableCell>
-			<TableCell className="max-w-64 truncate font-mono text-caption text-muted-foreground" title={item.path}>
-				{item.path}
-			</TableCell>
 			<TableCell className="text-right" />
 		</TableRow>
 	);

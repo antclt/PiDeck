@@ -216,14 +216,13 @@ export function SkillsTab(props: {
 								    无 width 的列会被压到接近 0（描述竖条）；给百分比宽度后
 								    各列按比例压缩，描述列任何窗口下都保持可读宽度 */}
 								<TableHead className="w-2/5">{t("config.description")}</TableHead>
-								<TableHead className="w-44">{t("config.extensionPath")}</TableHead>
 								<TableHead className="w-36 text-right">{t("config.actions")}</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
 							{props.scope === "project" && projectSkills.length > 0 ? (
 								<TableRow>
-									<TableCell colSpan={4} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
+									<TableCell colSpan={3} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
 										{t("config.resourceGroup.project")}
 									</TableCell>
 								</TableRow>
@@ -248,7 +247,7 @@ export function SkillsTab(props: {
 									))}
 							{props.scope === "project" && globalSkills.length > 0 ? (
 								<TableRow>
-									<TableCell colSpan={4} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
+									<TableCell colSpan={3} className="bg-bg-hover px-3 py-1.5 text-caption font-semibold text-foreground">
 										{t("config.resourceGroup.global")}
 									</TableCell>
 								</TableRow>
@@ -319,9 +318,6 @@ function DiscoveredSkillRow(props: {
 			</TableCell>
 			<TableCell className="w-2/5 whitespace-normal break-words text-caption leading-relaxed text-muted-foreground" title={item.description}>
 				<span className="block line-clamp-3">{item.description}</span>
-			</TableCell>
-			<TableCell className="truncate font-mono text-caption text-muted-foreground" title={item.path}>
-				{item.path}
 			</TableCell>
 			<TableCell className="text-right" />
 		</TableRow>
@@ -421,9 +417,6 @@ function SkillTableRow(props: {
 			    line-clamp 会改 display 为 -webkit-box，必须包一层 span 而不能直接放 td 上。 */}
 			<TableCell className="w-2/5 whitespace-normal break-words text-caption leading-relaxed text-muted-foreground" title={skill.description}>
 				<span className="block line-clamp-3">{skill.description || t("config.skillDescriptionMissing")}</span>
-			</TableCell>
-			<TableCell className="truncate font-mono text-caption text-muted-foreground" title={skill.path}>
-				{skill.path}
 			</TableCell>
 			<TableCell className="text-right">
 				<div className="flex justify-end gap-1">

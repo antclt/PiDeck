@@ -1990,7 +1990,6 @@ export const zhCN = {
   "config.installedExtensions": "已安装扩展",
   "config.extension": "扩展",
   "config.extensionVersion": "版本",
-  "config.extensionPath": "路径",
   "config.actions": "操作",
   "goal.noGoal": "无目标，使用 /goal <目标> 开始",
   "logs.empty": "没有匹配的日志。",

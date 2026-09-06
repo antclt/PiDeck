@@ -2006,7 +2006,6 @@ export const enUS: Record<TranslationKey, string> = {
   "config.installedExtensions": "Installed Extensions",
   "config.extension": "Extension",
   "config.extensionVersion": "Version",
-  "config.extensionPath": "Path",
   "config.actions": "Actions",
   "goal.noGoal": "No goal set. Use /goal <objective>",
   "logs.empty": "No matching logs.",

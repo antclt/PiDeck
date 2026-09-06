@@ -528,7 +528,7 @@ export function ProjectResourcesModal(props: {
 										</span>
 									</div>
 									<small>{skill.description || t("config.skillDescriptionMissing")}</small>
-								<small>{skill.sourceLabel} · {skill.path}</small>
+								<small>{skill.sourceLabel}</small>
 								</button>
 								<div className="skill-card-actions project-resource-actions">
 									{/* 操作入口保持常驻，删除/编辑不依赖 hover；shadcn ghost 图标按钮统一尺寸 */}
@@ -589,7 +589,6 @@ export function ProjectResourcesModal(props: {
 										</Badge>
 										<Badge variant="outline">{t("projectResources.projectScope")}</Badge>
 									</div>
-									<small>{extension.path}</small>
 								</div>
 								<div className="skill-card-actions project-resource-actions">
 									<Button
@@ -681,7 +680,6 @@ export function ProjectResourcesModal(props: {
 										<strong>/{prompt.name}</strong>
 									</div>
 									<small>{prompt.description}</small>
-									<small>{prompt.path}</small>
 								</button>
 								<div className="skill-card-actions project-resource-actions">
 									<Button
