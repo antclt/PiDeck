@@ -36,3 +36,4 @@ export * from "./types/mcp";
 export * from "./types/rewind";
 export * from "./types/health";
 export * from "./types/soundAlert";
+export * from "./types/packageCatalog";

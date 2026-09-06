@@ -1404,6 +1404,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.extensionsUpdate) as Promise<PiCliUpdateResult>,
 		updateOne: (source: string) =>
 			ipcRenderer.invoke(ipcChannels.extensionsUpdateOne, source) as Promise<PiCliUpdateResult>,
+		catalog: (query: import("../shared/types").PiPackageCatalogQuery) =>
+			ipcRenderer.invoke(ipcChannels.extensionsCatalog, query) as Promise<import("../shared/types").PiPackageCatalog>,
 	},
 	settings: {
 		get: () =>

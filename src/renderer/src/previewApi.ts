@@ -1009,6 +1009,27 @@ export function createPreviewApi(): PiDesktopApi {
 				output: "Preview mode: extension update-one output",
 				updated: false,
 			}),
+			catalog: async () => ({
+				generatedAt: Date.now(),
+				fromCache: false,
+				items: [
+					{
+						name: "preview-extension",
+						description: "Preview mode extension",
+						author: "preview",
+						types: ["extension"],
+						downloadsPerMonth: 1,
+						publishedAt: Date.now(),
+						searchText: "preview-extension",
+						installSource: "npm:preview-extension",
+						pageUrl: "https://pi.dev/packages/preview-extension",
+					},
+				],
+				page: 1,
+				pageSize: 1,
+				total: 1,
+				lastPage: 1,
+			}),
 		},
 		prompts: {
 			list: async () => ({ templates: [], globalDir: "C:/Users/preview/.pi/agent/prompts" }),

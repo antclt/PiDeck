@@ -273,6 +273,7 @@ export const ipcChannels = {
 	extensionsRestoreBuiltIn: "extensions:restore-built-in",
 	extensionsUpdate: "extensions:update",
 	extensionsUpdateOne: "extensions:update-one",
+	extensionsCatalog: "extensions:catalog",
 	/** 扫描项目目录内的独立 Git 仓库（根 + 嵌套），供侧栏切换 */
 	gitListRepos: "git:list-repos",
 	gitBranches: "git:branches",

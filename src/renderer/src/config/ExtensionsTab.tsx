@@ -1,12 +1,14 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui-shadcn/tabs";
 import { useEffect, useState } from "react";
-import { Copy, Download, Power, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, Download, Power, RotateCcw, ShoppingBag, Trash2 } from "lucide-react";
 import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, PiPackageInfo } from "../../../shared/types";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n/rendererCopy.zh-CN";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
+import { ExtensionStoreTab } from "./ExtensionStoreTab";
 
 type ExtensionsApi = {
 	list: () => Promise<PiExtensionListResult>;
@@ -151,6 +153,8 @@ export function ExtensionsTab(props: {
 	onRefresh: () => void;
 	onUninstall: (extension: PiExtensionSummary) => void;
 }) {
+	// 一级 tab：已安装 / 扩展商店（与 SkillsTab 的「本地/商店」结构对齐）
+	const [extTab, setExtTab] = useState<"local" | "store">("local");
 	const [installingSources, setInstallingSources] = useState<Set<string>>(() => new Set());
 	const [restoringBuiltIn, setRestoringBuiltIn] = useState<string | null>(null);
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
@@ -353,6 +357,29 @@ export function ExtensionsTab(props: {
 
 	return (
 		<div className="extensions-tab">
+			{/* 一级 tab：已安装 / 扩展商店（shadcn Tabs，与 SkillsTab 的「本地/商店」结构对齐） */}
+			<Tabs
+				value={extTab}
+				onValueChange={(v) => { if (v === "local" || v === "store") setExtTab(v); }}
+				className="gap-0"
+			>
+				<TabsList className="w-full">
+					<TabsTrigger value="local" onClick={() => props.onRefresh()}>
+						{t("config.nav.extensions")}
+					</TabsTrigger>
+					<TabsTrigger value="store">
+						<ShoppingBag size={14} strokeWidth={1.8} />
+						{t("config.extensionStoreTab")}
+					</TabsTrigger>
+				</TabsList>
+			</Tabs>
+			{extTab === "store" ? (
+				<ExtensionStoreTab
+					installedExtensions={props.data.extensions}
+					onInstalled={() => props.onRefresh()}
+				/>
+			) : (
+			<>
 			{showUpdateDialog && (
 				<div className="config-update-dialog-backdrop" role="dialog" aria-modal="true">
 					<div className="config-update-dialog">
@@ -543,6 +570,8 @@ export function ExtensionsTab(props: {
 					)}
 				</div>
 			</div>
+			</>
+			)}
 		</div>
 	);
 }

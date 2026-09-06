@@ -18,6 +18,7 @@ import type { PromptManager } from "../prompts/PromptManager";
 import type { SkillManager } from "../skills/SkillManager";
 import type { XuePromptManager } from "../prompts/XuePromptManager";
 import type { ExtensionManager } from "../extensions/ExtensionManager";
+import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
@@ -473,4 +474,21 @@ export function registerStoreIpc({
 		void appLogger.info("extension", "Extension update-one command completed", { source, updated: result.updated, bytes: result.output.length });
 		return result;
 	});
+	// 扩展商店：pi.dev 目录页无公开 JSON API，主进程抓 SSR HTML 解析 + 缓存后返回。
+	// 渲染层只消费结构化结果，不感知 HTML 解析细节；失败时保留旧缓存或报用户可读错误。
+	ipcMain.handle(
+		ipcChannels.extensionsCatalog,
+		async (_event, query: import("../../shared/types").PiPackageCatalogQuery) => {
+			try {
+				return await getPiPackageCatalog(query ?? {});
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				void appLogger.warn("extension-store", "Catalog fetch failed", {
+					query: { page: query?.page, query: query?.query, type: query?.type, sort: query?.sort },
+					error: message,
+				});
+				throw new Error(mainCopy("store.packageCatalogFailed"));
+			}
+		},
+	);
 }
