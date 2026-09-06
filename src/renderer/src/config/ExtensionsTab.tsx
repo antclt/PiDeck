@@ -680,7 +680,7 @@ function ExtensionTableRow(props: {
 					<Button
 						variant="ghost"
 						size="icon-sm"
-						className={`size-7${effectiveEnabled ? " text-accent" : ""}`}
+						className={`size-7${effectiveEnabled ? " text-primary" : ""}`}
 						disabled={props.toggling || props.uninstalling || (inherited && extension.enabled === false)}
 						onClick={() => props.onToggle(extension, !effectiveEnabled)}
 						title={effectiveEnabled ? t("config.extensionDisable") : t("config.extensionEnable")}

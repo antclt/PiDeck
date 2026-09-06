@@ -218,7 +218,7 @@ export function PromptsTab(props: {
 							<Button
 								variant="ghost"
 								size="icon-sm"
-								className={`size-7${effectiveEnabled ? " text-accent" : ""}`}
+								className={`size-7${effectiveEnabled ? " text-primary" : ""}`}
 								disabled={inherited && template.enabled === false}
 								onClick={() => props.onToggle(template, !effectiveEnabled)}
 								title={effectiveEnabled ? t("common.disable") : t("common.enabled")}

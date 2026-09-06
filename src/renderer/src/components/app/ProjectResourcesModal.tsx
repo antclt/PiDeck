@@ -551,7 +551,7 @@ export function ProjectResourcesModal(props: {
 									<Button
 										variant="ghost"
 										size="icon-sm"
-										className={`size-7${skill.enabled ? " text-accent" : ""}`}
+										className={`size-7${skill.enabled ? " text-primary" : ""}`}
 										onClick={() => void toggleSkill(skill)}
 										title={skill.enabled ? t("common.disable") : t("common.enabled")}
 									>
@@ -595,7 +595,7 @@ export function ProjectResourcesModal(props: {
 									<Button
 										variant="ghost"
 										size="icon-sm"
-										className={`size-7${extension.enabled !== false ? " text-accent" : ""}`}
+										className={`size-7${extension.enabled !== false ? " text-primary" : ""}`}
 										onClick={() => void toggleExtension(extension)}
 										title={extension.enabled !== false ? t("common.disable") : t("common.enabled")}
 									>

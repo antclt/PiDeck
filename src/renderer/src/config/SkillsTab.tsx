@@ -430,7 +430,7 @@ function SkillTableRow(props: {
 					<Button
 						variant="ghost"
 						size="icon-sm"
-						className={`size-7${effectiveEnabled ? " text-accent" : ""}`}
+						className={`size-7${effectiveEnabled ? " text-primary" : ""}`}
 						disabled={inherited && !skill.enabled}
 						onClick={() => props.onToggle(skill, !effectiveEnabled)}
 						title={effectiveEnabled ? t("common.disable") : t("common.enabled")}
