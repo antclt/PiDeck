@@ -29,10 +29,11 @@ test("引导卡一键安装指向 npm:pi-mcp-adapter，装完自动重新探测"
 
 test("未安装时仅全局页显示引导卡，项目页仍保留只读资源列表", () => {
 	const source = read("src/renderer/src/config/McpTab.tsx");
-	assert.match(source, /const showAdapterGuide = adapterInstalled === false && scope === "global";/);
+	// 作用域已内聚到 McpTab（effectiveScope），引导仅在全局作用域展示
+	assert.match(source, /const showAdapterGuide = adapterInstalled === false && effectiveScope === "global";/);
 	assert.match(source, /showAdapterGuide \? \(\s*<McpAdapterGuide onInstalled=\{load\} \/>/);
 	assert.match(source, /showAdapterGuide \? null : \(/);
-	assert.match(source, /adapterInstalled !== false && scope === "global" \? \(\s*<Button size="sm" onClick=\{startCreate\}/);
+	assert.match(source, /adapterInstalled !== false && effectiveScope === "global" \? \(\s*<Button size="sm" onClick=\{startCreate\}/);
 });
 
 test("i18n 双语文案齐全（desc/install/installing/failed/cmd/copied/restartHint）", () => {

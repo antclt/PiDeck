@@ -4,7 +4,7 @@
  * 不启动 MCP 运行时；探测仅检查 command 是否在 PATH / HTTP 是否可达。
  */
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, PlugZap, RefreshCw } from "lucide-react";
 import { t } from "../i18n";
 import { Button } from "../components/ui-shadcn/button";
@@ -13,7 +13,7 @@ import { Switch } from "../components/ui-shadcn/switch";
 import { Label } from "../components/ui-shadcn/label";
 import { Textarea } from "../components/ui-shadcn/textarea";
 import { ConfigSelect, openDocsInSystemBrowser } from "./ConfigShared";
-import type { ResourceScope } from "./ResourceScopeSelector";
+import { ResourceScopeSelector, type ResourceScope } from "./ResourceScopeSelector";
 import {
 	inferMcpTransport,
 	isMcpServerDisabled,
@@ -75,12 +75,20 @@ function blankDefinition(transport: McpServerTransport): McpServerDefinition {
 }
 
 export const McpTab = forwardRef<McpTabHandle, {
-	projectId?: string;
-	scope: ResourceScope;
-	scopeSelector?: ReactNode;
+	/** PiDeck 已加载项目（项目作用域下拉数据源）；Chat 项目由选择器过滤。 */
+	projects?: Array<{ id: string; name: string; kind?: string }>;
+	/** 当前激活项目 id：项目作用域默认选中并跟随激活项目变化。 */
+	activeProjectId?: string;
 	onDirtyChange: (dirty: boolean) => void;
 }>(function McpTab(props, ref) {
-	const { projectId, scope, scopeSelector, onDirtyChange } = props;
+	const { projects = [], activeProjectId, onDirtyChange } = props;
+	/**
+	 * MCP 页自持作用域：项目级 mcp.json 只有这里能管理（项目右键的资源弹窗不含 MCP），
+	 * 因此保留全局/项目切换；技能/扩展/提示词页的作用域下拉已按产品决策移除。
+	 */
+	const [scope, setScope] = useState<ResourceScope>("global");
+	/** 项目作用域下下拉中选中的项目 id（默认激活项目，可切换任意已加载项目）。 */
+	const [scopeProjectId, setScopeProjectId] = useState<string | undefined>(activeProjectId);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -94,9 +102,46 @@ export const McpTab = forwardRef<McpTabHandle, {
 	const [adapterInstalled, setAdapterInstalled] = useState<boolean | null>(null);
 	const loadGenerationRef = useRef(0);
 
-	const markDirty = useCallback(() => {
-		onDirtyChange(true);
+	/** 有未保存草稿时禁用作用域切换：切作用域会整页重载并丢弃草稿。 */
+	const [dirty, setDirty] = useState(false);
+	/** 脏状态同步：既上报父层（标题栏保存按钮/关闭确认），也留在本地控制下拉禁用。 */
+	const syncDirty = useCallback((next: boolean) => {
+		setDirty(next);
+		onDirtyChange(next);
 	}, [onDirtyChange]);
+
+	useEffect(() => {
+		// 跟随激活项目：侧栏切换项目时下拉选中项同步（仅影响 project 作用域的目标项目）。
+		setScopeProjectId(activeProjectId);
+	}, [activeProjectId]);
+
+	/** 项目作用域实际使用的项目 id：过滤 Chat 项目（无项目级 mcp.json）；全局作用域为 undefined。 */
+	const effectiveProjectId = useMemo(
+		() => scope === "project"
+			? projects.find((item) => item.id === scopeProjectId && item.kind !== "chat")?.id
+			: undefined,
+		[scope, projects, scopeProjectId],
+	);
+	/** 无可用项目时不允许停留在 project 作用域（与旧全局选择器的自动回退行为一致）。 */
+	const effectiveScope: ResourceScope = scope === "project" && effectiveProjectId ? "project" : "global";
+
+	/** 作用域下拉：全局 / 项目级 mcp.json 切换；有草稿时禁用。 */
+	const scopeSelector = (
+		<ResourceScopeSelector
+			value={effectiveScope}
+			projects={projects}
+			selectedProjectId={scopeProjectId}
+			disabled={dirty}
+			onChange={(nextScope, nextProjectId) => {
+				setScope(nextScope);
+				if (nextProjectId) setScopeProjectId(nextProjectId);
+			}}
+		/>
+	);
+
+	const markDirty = useCallback(() => {
+		syncDirty(true);
+	}, [syncDirty]);
 
 	/**
 	 * 探测 pi-mcp-adapter 扩展是否已安装（扩展列表）；失败返回 null 由调用方降级。
@@ -124,12 +169,12 @@ export const McpTab = forwardRef<McpTabHandle, {
 		try {
 			const adapterState = await probeAdapter();
 			if (generation !== loadGenerationRef.current) return;
-			const next = await api.config.getMcp(scope === "project" ? projectId : undefined);
+			const next = await api.config.getMcp(effectiveProjectId);
 			if (generation !== loadGenerationRef.current) return;
 			setAdapterInstalled(adapterState);
 			setSnapshot(next);
 			setWritable(next.writableFile.mcpServers ? next.writableFile : { ...next.writableFile, mcpServers: {} });
-			onDirtyChange(false);
+			syncDirty(false);
 			setCreating(null);
 			const names = next.servers.map((item) => item.name);
 			setSelected((current) => (current && names.includes(current) ? current : names[0] ?? null));
@@ -140,7 +185,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 		} finally {
 			if (generation === loadGenerationRef.current) setLoading(false);
 		}
-	}, [onDirtyChange, probeAdapter, projectId, scope]);
+	}, [syncDirty, probeAdapter, effectiveProjectId, effectiveScope]);
 
 	useEffect(() => {
 		void load();
@@ -151,8 +196,8 @@ export const McpTab = forwardRef<McpTabHandle, {
 	}, [load]);
 
 	const displayServers = useMemo(
-		() => snapshot ? buildMcpDisplayServers(snapshot, writable, scope) : [],
-		[scope, snapshot, writable],
+		() => snapshot ? buildMcpDisplayServers(snapshot, writable, effectiveScope) : [],
+		[effectiveScope, snapshot, writable],
 	);
 
 	const selectedItem = displayServers.find((item) => item.name === selected) ?? null;
@@ -162,10 +207,10 @@ export const McpTab = forwardRef<McpTabHandle, {
 	const transport = inferMcpTransport(editingDef);
 
 	const applyWritable = useCallback((next: McpConfigFile) => {
-		if (scope === "project") return;
+		if (effectiveScope === "project") return;
 		setWritable(next);
 		markDirty();
-	}, [markDirty, scope]);
+	}, [markDirty, effectiveScope]);
 
 	const upsert = useCallback((name: string, definition: McpServerDefinition) => {
 		applyWritable({
@@ -175,7 +220,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 	}, [applyWritable, writable]);
 
 	const startCreate = () => {
-		if (scope === "project") return;
+		if (effectiveScope === "project") return;
 		setCreating({ name: "", definition: blankDefinition("stdio") });
 		setSelected(null);
 		setProbe(null);
@@ -187,7 +232,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 		setProbe(null);
 		// 新建草稿不在 writable 里；取消后若可写层未改，清掉黄点。
 		if (snapshot && JSON.stringify(writable) === JSON.stringify(snapshot.writableFile)) {
-			onDirtyChange(false);
+			syncDirty(false);
 		}
 	};
 
@@ -256,8 +301,8 @@ export const McpTab = forwardRef<McpTabHandle, {
 	};
 
 	const save = useCallback(async (): Promise<boolean> => {
-		if (scope === "project") {
-			onDirtyChange(false);
+		if (effectiveScope === "project") {
+			syncDirty(false);
 			return true;
 		}
 		if (snapshot?.writableError) {
@@ -302,7 +347,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 		} finally {
 			setSaving(false);
 		}
-	}, [creating, displayServers, load, onDirtyChange, scope, snapshot?.writableError, writable]);
+	}, [creating, displayServers, load, syncDirty, effectiveScope, snapshot?.writableError, writable]);
 
 	useImperativeHandle(ref, () => ({ save, reload: load }), [save, load]);
 
@@ -315,7 +360,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 		"project-pi": t("config.mcp.layer.projectPi"),
 	}), []);
 
-	const showAdapterGuide = adapterInstalled === false && scope === "global";
+	const showAdapterGuide = adapterInstalled === false && effectiveScope === "global";
 
 	if (loading && !snapshot) {
 		return <div className="py-12 text-center text-control text-muted-foreground">{t("common.loading")}</div>;
@@ -342,7 +387,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 						<RefreshCw size={14} />
 						{t("common.refresh")}
 					</Button>
-					{adapterInstalled !== false && scope === "global" ? (
+					{adapterInstalled !== false && effectiveScope === "global" ? (
 						<Button size="sm" onClick={startCreate} disabled={saving || Boolean(creating)}>
 							<Plus size={14} />
 							{t("config.mcp.add")}
@@ -372,12 +417,12 @@ export const McpTab = forwardRef<McpTabHandle, {
 								title={layer.path}
 							>
 								{layerLabel[layer.kind]}
-								{scope === "global" && layer.writable ? ` · ${t("config.mcp.writable")}` : ""}
+								{effectiveScope === "global" && layer.writable ? ` · ${t("config.mcp.writable")}` : ""}
 								{layer.exists ? "" : ` · ${t("config.mcp.missing")}`}
 							</span>
 						))}
 					</div>
-					{scope === "global" && snapshot?.writablePath ? (
+					{effectiveScope === "global" && snapshot?.writablePath ? (
 						<p className="truncate font-mono text-micro text-muted-foreground" title={snapshot.writablePath}>
 							{t("config.mcp.writingTo")}: {snapshot.writablePath}
 						</p>
@@ -388,7 +433,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 			{showAdapterGuide ? null : (
 				<div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
 				<McpServerListPane
-					scope={scope}
+					scope={effectiveScope}
 					projectLayerPaths={(snapshot?.layers ?? [])
 						.filter((layer) => layer.kind === "project" || layer.kind === "project-pi")
 						.map((layer) => layer.path)}
@@ -405,7 +450,7 @@ export const McpTab = forwardRef<McpTabHandle, {
 					{!selected && !creating ? (
 						<div className="py-8 text-center text-micro text-muted-foreground">{t("config.mcp.selectHint")}</div>
 					) : (
-						<fieldset disabled={scope === "project"} className="contents">
+						<fieldset disabled={effectiveScope === "project"} className="contents">
 							<div className="grid gap-2">
 								<Label>{t("config.mcp.field.name")}</Label>
 								<Input

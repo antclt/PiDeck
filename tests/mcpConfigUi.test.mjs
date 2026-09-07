@@ -7,7 +7,8 @@ test("ConfigModal wires an MCP tab without bloating loadConfig into MCP CRUD", (
 	const modal = readFileSync("src/renderer/src/ConfigModal.tsx", "utf8");
 	assert.match(modal, /id: "mcp"/);
 	assert.match(modal, /CONFIG_TABS: readonly ConfigTab\[] = \["models", "auth", "settings", "trust", "mcp", "raw"\]/);
-	assert.match(modal, /<McpTab[\s\S]*scope=\{resourceScope\}[\s\S]*scopeSelector=\{resourceScopeSelector\}[\s\S]*onDirtyChange=\{handleMcpDirtyChange\}/);
+	// MCP 页自持作用域：父层只传项目列表 + 激活项目 + 脏回调，不再下发 scope/scopeSelector
+	assert.match(modal, /<McpTab[\s\S]*projects=\{projects\}[\s\S]*activeProjectId=\{projectId\}[\s\S]*onDirtyChange=\{handleMcpDirtyChange\}/);
 	assert.match(modal, /case "config:mcp":/);
 	assert.match(modal, /api\.config\.getMcp/);
 	assert.match(modal, /rawFileName === "mcp\.json"/);
@@ -51,9 +52,11 @@ test("McpTab stays proxy-config only and keeps project sources read-only", () =>
 	assert.match(tab, /probeMcp/);
 	assert.match(tab, /item\?\.ownedByWritable/);
 	assert.match(tab, /writableBroken/);
-	assert.match(tab, /getMcp\(scope === "project" \? projectId : undefined\)/);
+	// 作用域内聚在 McpTab：getMcp 按派生的 effectiveProjectId 拉取（Chat 项目过滤后回退全局）
+	assert.match(tab, /getMcp\(effectiveProjectId\)/);
+	assert.match(tab, /const effectiveScope: ResourceScope = scope === "project" && effectiveProjectId \? "project" : "global"/);
 	assert.match(tab, /generation !== loadGenerationRef\.current/);
-	assert.match(tab, /<fieldset disabled=\{scope === "project"\}/);
+	assert.match(tab, /<fieldset disabled=\{effectiveScope === "project"\}/);
 	assert.match(resourceViews, /config\.resourceGroup\.project/);
 	assert.match(resourceViews, /config\.resourceGroup\.global/);
 	assert.doesNotMatch(tab, /Client|StdioClientTransport|@modelcontextprotocol/);

@@ -7,10 +7,21 @@ const read = (path) => readFileSync(path, "utf8");
 test("configuration resources share one global/project scope owner", () => {
 	const modal = read("src/renderer/src/ConfigModal.tsx");
 	const selector = read("src/renderer/src/config/ResourceScopeSelector.tsx");
-	assert.match(modal, /useState<ResourceScope>\(resourceOnly \? "project" : "global"\)/);
-	assert.equal((modal.match(/scopeSelector=\{resourceScopeSelector\}/g) ?? []).length, 4);
-	assert.match(modal, /item\.kind !== "chat"/);
-	assert.match(modal, /resourceOnly[\s\S]*projectKind === "chat" \? undefined : projectId/);
+	const mcp = read("src/renderer/src/config/McpTab.tsx");
+	// 主配置页资源作用域是派生值：非 resourceOnly 固定 global（全局/用户自装/内置），
+	// 项目级技能/扩展/提示词管理入口在项目右键的资源弹窗，不再提供可切换下拉。
+	assert.match(modal, /const resourceScope: ResourceScope = resourceOnly \? "project" : "global"/);
+	assert.doesNotMatch(modal, /useState<ResourceScope>/);
+	// 资源 tab（技能/扩展/提示词）仍接 resourceScopeSelector：resourceOnly 为固定项目标识，主页面为 undefined
+	assert.equal((modal.match(/scopeSelector=\{resourceScopeSelector\}/g) ?? []).length, 3);
+	// MCP 页自持作用域：项目级 mcp.json 只有这里能管理，下拉与脏保护内聚在 McpTab
+	assert.match(mcp, /useState<ResourceScope>\("global"\)/);
+	assert.match(mcp, /ResourceScopeSelector, type ResourceScope \} from "\.\/ResourceScopeSelector"/);
+	assert.match(mcp, /disabled=\{dirty\}/);
+	assert.match(mcp, /getMcp\(effectiveProjectId\)/);
+	// Chat 项目没有项目资源，作用域解析必须过滤（McpTab 项目解析 + resourceOnly 入口）
+	assert.match(mcp, /item\.kind !== "chat"/);
+	assert.match(modal, /resourceOnly && projectKind !== "chat" \? projectId : undefined/);
 	assert.match(modal, /resourceScopeSelector = resourceOnly \?/);
 	assert.doesNotMatch(modal, /getMcp\(projectPath\)/);
 	assert.match(selector, /type ResourceScope = "global" \| "project"/);

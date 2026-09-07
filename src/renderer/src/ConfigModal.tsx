@@ -68,7 +68,7 @@ import { SettingsTab } from "./config/SettingsTab";
 import { PromptsTab } from "./config/PromptsTab";
 import { SkillsTab } from "./config/SkillsTab";
 import { ExtensionsTab } from "./config/ExtensionsTab";
-import { ResourceScopeSelector, type ResourceScope } from "./config/ResourceScopeSelector";
+import { type ResourceScope } from "./config/ResourceScopeSelector";
 import { SecuritySection, type SecuritySectionHandle } from "./components/config/SecuritySection";
 import { DshLogo, PiLogo } from "./components/session/SessionSourceBadge";
 import { DshConfigTab, type DshConfigTabHandle } from "./config/DshConfigTab";
@@ -442,24 +442,17 @@ type ConfigModalContentProps = ConfigModalProps & {
 
 function ConfigModalContent(props: ConfigModalContentProps) {
 	const { open, onClose, onSaved, projectId, projectKind, projectName, projects = [], resourceOnly = false, embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
-	/** Shared resource scope; keeping it here makes it survive resource-tab switches. */
-	const [resourceScope, setResourceScope] = useState<ResourceScope>(resourceOnly ? "project" : "global");
-	/** scope 选择器中当前选中的项目 id（默认当前激活项目，可通过下拉切换任意已加载项目）。 */
-	const [scopeProjectId, setScopeProjectId] = useState<string | undefined>(projectId);
-	useEffect(() => {
-		// 侧栏切换激活项目时跟随；用户在下拉中手动选择的项目在切回激活项目时由下一次选择覆盖。
-		setScopeProjectId(projectId);
-	}, [projectId]);
-	/** scope=project 时实际使用的项目 id；资源管理器模式不经过下拉，直接使用入口项目。 */
-	const effectiveProjectId = resourceScope === "project"
-		? resourceOnly
-			? (projectKind === "chat" ? undefined : projectId)
-			: (projects.find((item) => item.id === scopeProjectId && item.kind !== "chat")?.id ?? undefined)
-		: undefined;
+	/**
+	 * 资源作用域是派生值而非可切换 state：
+	 * - 主配置页固定 global（全局安装 + 用户 ~/.pi 自装 + PiDeck 内置）；项目级技能/扩展/提示词
+	 *   的管理入口在项目右键的「资源管理」弹窗，这里不再提供全局/项目下拉（双入口反而混乱）。
+	 * - 资源管理器模式（resourceOnly，项目右键进入）固定为入口项目。
+	 * MCP 页例外：项目级 mcp.json 没有其它管理入口，作用域切换内聚在 McpTab 自己的 state 里。
+	 */
+	const resourceScope: ResourceScope = resourceOnly ? "project" : "global";
+	/** scope=project 时实际使用的项目 id；资源管理器模式直接使用入口项目（Chat 项目无项目资源目录）。 */
+	const effectiveProjectId = resourceOnly && projectKind !== "chat" ? projectId : undefined;
 	const hasProject = Boolean(effectiveProjectId);
-	useEffect(() => {
-		if (!resourceOnly && !hasProject && resourceScope !== "global") setResourceScope("global");
-	}, [hasProject, resourceOnly, resourceScope]);
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
@@ -512,6 +505,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const [error, setError] = useState<string | null>(null);
 	/** 各 tab 未保存修改集合：key 用 sectionTabValue 编码（如 "config:models"/"skills"），顶部保存按钮与关闭确认依赖它 */
 	const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
+	/** 资源页工具栏右侧的作用域标识：resourceOnly 展示固定项目名；主配置页无下拉（undefined 不渲染）。 */
 	const resourceScopeSelector = resourceOnly ? (
 		<div
 			className="flex h-8 max-w-[16rem] items-center gap-1.5 rounded-md border border-border-subtle px-2.5 text-control text-muted-foreground"
@@ -521,18 +515,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			<FolderOpen className="size-3.5 shrink-0" aria-hidden="true" />
 			<span className="truncate">{projectName?.trim() || t("config.resourceScope.projectFallback")}</span>
 		</div>
-	) : (
-		<ResourceScopeSelector
-			value={resourceScope}
-			projects={projects}
-			selectedProjectId={scopeProjectId}
-			disabled={dirtyTabs.has("config:mcp")}
-			onChange={(scope, projectId) => {
-				setResourceScope(scope);
-				if (projectId) setScopeProjectId(projectId);
-			}}
-		/>
-	);
+	) : undefined;
 	/** loadConfig 不能依赖 dirtyTabs（否则切 tab 会重建回调并误触发重载）；用 ref 读最新脏集合。 */
 	const dirtyTabsRef = useRef(dirtyTabs);
 	dirtyTabsRef.current = dirtyTabs;
@@ -2923,7 +2906,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{/* forceMount：MCP 页自管草稿，切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
 					<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
 						<div className="config-content flex min-h-0 flex-col">
-						<McpTab ref={mcpTabRef} projectId={hasProject ? effectiveProjectId : undefined} scope={resourceScope} scopeSelector={resourceScopeSelector} onDirtyChange={handleMcpDirtyChange} />
+						{/* MCP 页自持作用域：项目级 mcp.json 仅此入口，项目下拉与脏保护都在 McpTab 内部 */}
+					<McpTab ref={mcpTabRef} projects={projects} activeProjectId={projectId} onDirtyChange={handleMcpDirtyChange} />
 						</div>
 					</TabsContent>
 
