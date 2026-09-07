@@ -430,7 +430,6 @@ export function SidebarContent(props: SidebarContentProps) {
                             <li key={item}>{item}</li>
                           ))}
                         </ul>
-                        <span className="opacity-75">{t("update.dotMenuHint")}</span>
                       </div>
                     ) : (
                       t("settings.title")

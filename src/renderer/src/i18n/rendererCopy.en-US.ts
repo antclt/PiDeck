@@ -3494,7 +3494,6 @@ export const enUS: Record<TranslationKey, string> = {
   "update.dotMenuApp": "PiDeck v{version}",
   "update.dotMenuPi": "pi CLI v{version}",
   "update.dotMenuCatalog": "Model catalog v{version}",
-  "update.dotMenuHint": "Click to open Settings",
   "update.dotHintTitle": "Updates available",
   "update.dotHintBody": "The dot on the Settings button means updates are available (PiDeck app / pi CLI / model catalog).",
   "update.dotHintAction": "View updates",

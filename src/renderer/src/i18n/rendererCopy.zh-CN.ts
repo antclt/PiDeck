@@ -3459,7 +3459,6 @@ export const zhCN = {
   "update.dotMenuApp": "PiDeck v{version}",
   "update.dotMenuPi": "pi CLI v{version}",
   "update.dotMenuCatalog": "模型目录 v{version}",
-  "update.dotMenuHint": "点击打开设置查看",
   "update.dotHintTitle": "有新版本可用",
   "update.dotHintBody": "侧栏设置按钮上的圆点表示有可用更新（PiDeck 应用 / pi CLI / 模型目录）。",
   "update.dotHintAction": "查看更新",
