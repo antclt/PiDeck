@@ -27,7 +27,7 @@ import {
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./SettingRows";
 
-type SoundTabProps = {
+type NotificationTabProps = {
 	draft: AppSettings;
 	updateDraft: (patch: Partial<AppSettings>) => void;
 	/** 字段级脏检查（与其它 tab 同一 isDirty 回调），驱动标题旁黄点。 */
@@ -128,11 +128,11 @@ function SoundEventRow(props: {
 }
 
 /**
- * 设置弹框「声音提醒」tab：总开关 / 音量 / 三事件（完成/出错/等待输入）各自
- * 选音效（预设 + 自定义导入）+ 试听；自定义音频独立管理（导入/删除）。
+ * 设置弹框「通知设置」tab：系统通知开关（会话完成/Ask 提问/Agent 数量提醒，
+ * 由常用设置迁入）+ 声音提醒（总开关 / 音量 / 三事件选音效 + 试听 / 自定义音频管理）。
  * 音效引用格式（预设 id / custom:<file>）与 shared/types/soundAlert.ts 一致。
  */
-export const SoundTab = memo(function SoundTab(props: SoundTabProps) {
+export const NotificationTab = memo(function NotificationTab(props: NotificationTabProps) {
 	const { draft, updateDraft } = props;
 	const isDirty = props.isDirty ?? (() => false);
 	// 防御：旧缓存 settings 可能缺 soundAlert（主进程加载时会归一化，渲染层草稿兜底）
@@ -189,6 +189,33 @@ export const SoundTab = memo(function SoundTab(props: SoundTabProps) {
 
 	return (
 		<>
+			{/* 系统通知（原常用设置「通知」区）：会话完成/Ask 提问/Agent 数量提醒三个独立开关 */}
+			<SettingsSection title={t("settings.notificationSection")}>
+				<SettingSwitchRow
+					title={t("settings.enableNotifications")}
+					checked={draft.enableNotifications}
+					onChange={(checked) =>
+						updateDraft({ enableNotifications: checked })
+					}
+				/>
+				<SettingSwitchRow
+					title={t("settings.askNotification")}
+					description={t("settings.askNotificationDesc")}
+					checked={draft.askNotificationEnabled}
+					onChange={(checked) =>
+						updateDraft({ askNotificationEnabled: checked })
+					}
+				/>
+				<SettingSwitchRow
+					title={t("settings.agentCountReminder")}
+					description={t("settings.agentCountReminderDesc")}
+					checked={draft.agentCountReminderEnabled}
+					onChange={(checked) =>
+						updateDraft({ agentCountReminderEnabled: checked })
+					}
+				/>
+			</SettingsSection>
+
 			<SettingsSection title={t("settings.sound.title")} description={t("settings.sound.sectionDesc")}>
 				<SettingSwitchRow
 					title={t("settings.sound.enabled")}

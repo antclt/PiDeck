@@ -29,23 +29,23 @@ test("AgentManager 的 Ask 通知改由独立开关门控，与通用通知解�
 });
 
 test("设置面板与未保存摘要均提供该开关", () => {
-	const commonTab = readFileSync(
-		"src/renderer/src/components/app/settings/CommonTab.tsx",
+	const notificationTab = readFileSync(
+		"src/renderer/src/components/app/settings/NotificationTab.tsx",
 		"utf8",
 	);
 	const summary = readFileSync(
 		"src/renderer/src/components/app/settings/unsavedChangesSummary.ts",
 		"utf8",
 	);
-	assert.match(commonTab, /updateDraft\(\{ askNotificationEnabled: checked \}\)/);
-	assert.match(summary, /\{ field: "askNotificationEnabled", tab: "common", itemKey: "settings\.askNotification" \}/);
+	assert.match(notificationTab, /updateDraft\(\{ askNotificationEnabled: checked \}\)/);
+	assert.match(summary, /\{ field: "askNotificationEnabled", tab: "notification", itemKey: "settings\.askNotification" \}/);
 });
 
 test("i18n 双语文案齐全且通用通知描述不再混入提问场景", () => {
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 	assert.match(zh, /"settings\.askNotification": "Ask 提问系统通知"/);
-	assert.match(zh, /"settings\.askNotificationDesc": "后台会话的 Agent 向你提问/);
+	assert.match(zh, /"settings\.askNotificationDesc": "Agent 向你提问/);
 	assert.match(en, /"settings\.askNotification": "Ask question notifications"/);
-	assert.match(en, /"settings\.askNotificationDesc": "When an agent in a background session asks/);
+	assert.match(en, /"settings\.askNotificationDesc": "When an agent asks/);
 });

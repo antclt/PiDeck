@@ -8,7 +8,7 @@ import {
 	Network,
 	Wrench,
 	PawPrint,
-	Volume2,
+	Bell,
 	Trash2,
 	Brush,
 	Eye,
@@ -72,7 +72,7 @@ const EditorsTab = lazy(() => import("./settings/EditorsTab").then((m) => ({ def
 const GitTab = lazy(() => import("./settings/GitTab").then((m) => ({ default: m.GitTab })));
 const DevTab = lazy(() => import("./settings/DevTab").then((m) => ({ default: m.DevTab })));
 const PetTab = lazy(() => import("./settings/PetTab").then((m) => ({ default: m.PetTab })));
-const SoundTab = lazy(() => import("./settings/SoundTab").then((m) => ({ default: m.SoundTab })));
+const NotificationTab = lazy(() => import("./settings/NotificationTab").then((m) => ({ default: m.NotificationTab })));
 const ImTab = lazy(() => import("./settings/ImTab").then((m) => ({ default: m.ImTab })));
 const StorageTab = lazy(() => import("./settings/SettingsStorageTab").then((m) => ({ default: m.StorageTab })));
 const BackupTab = lazy(() => import("./settings/SettingsBackupTab").then((m) => ({ default: m.BackupTab })));
@@ -252,7 +252,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	dev: { labelKey: "settings.tabs.dev", icon: <Wrench size={16} /> },
 	im: { labelKey: "settings.tabs.im", icon: <MessageSquare size={16} /> },
 	pet: { labelKey: "settings.tabs.pet", icon: <PawPrint size={16} /> },
-	sound: { labelKey: "settings.tabs.sound", icon: <Volume2 size={16} /> },
+	notification: { labelKey: "settings.tabs.notification", icon: <Bell size={16} /> },
 	storage: { labelKey: "settings.tabs.storage", icon: <Trash2 size={16} /> },
 	backup: { labelKey: "settings.tabs.backup", icon: <DatabaseBackup size={16} /> },
 	usage: { labelKey: "settings.tabs.usage", icon: <ChartColumnBig size={16} /> },
@@ -868,11 +868,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 						</TabsContent>
 					)}
 
-					{/* ── 声音提醒 tab ── */}
-					{activeTab === "sound" && (
-						<TabsContent value="sound" className="settings-panel min-w-0">
+					{/* ── 通知设置 tab（系统通知 + 声音提醒） ── */}
+					{activeTab === "notification" && (
+						<TabsContent value="notification" className="settings-panel min-w-0">
 							<Suspense fallback={<SettingsTabLoading />}>
-							<SoundTab
+							<NotificationTab
 								draft={draftSettings}
 								updateDraft={updateDraft}
 								isDirty={isDirty}

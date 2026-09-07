@@ -16,7 +16,7 @@ export type SettingsUnsavedTabId =
 	| "dev"
 	| "im"
 	| "pet"
-	| "sound"
+	| "notification"
 	| "storage"
 	| "usage"
 	| "process"
@@ -52,7 +52,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	dev: "settings.tabs.dev",
 	im: "settings.tabs.im",
 	pet: "settings.tabs.pet",
-	sound: "settings.tabs.sound",
+	notification: "settings.tabs.notification",
 	storage: "settings.tabs.storage",
 	usage: "settings.tabs.usage",
 	process: "settings.tabs.process",
@@ -77,9 +77,9 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "idleAgentAutoRelease", tab: "common", itemKey: "settings.idleAgentAutoRelease" },
 	{ field: "idleAgentKeepCount", tab: "common", itemKey: "settings.idleAgentKeepCount" },
 	{ field: "idleAgentTimeoutMin", tab: "common", itemKey: "settings.idleAgentTimeoutMin" },
-	{ field: "enableNotifications", tab: "common", itemKey: "settings.enableNotifications" },
-	{ field: "askNotificationEnabled", tab: "common", itemKey: "settings.askNotification" },
-	{ field: "agentCountReminderEnabled", tab: "common", itemKey: "settings.agentCountReminder" },
+	{ field: "enableNotifications", tab: "notification", itemKey: "settings.enableNotifications" },
+	{ field: "askNotificationEnabled", tab: "notification", itemKey: "settings.askNotification" },
+	{ field: "agentCountReminderEnabled", tab: "notification", itemKey: "settings.agentCountReminder" },
 	{ field: "startupWindowMode", tab: "common", itemKey: "settings.startupWindowMode" },
 	{ field: "closeToTray", tab: "common", itemKey: "settings.closeToTray" },
 	{ field: "singleInstance", tab: "common", itemKey: "settings.singleInstance" },
@@ -124,8 +124,8 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "petScale", tab: "pet", itemKey: "settings.pet.scale" },
 	{ field: "petId", tab: "pet", itemKey: "settings.pet.choose" },
 
-	// 声音提醒：整块 soundAlert 归到「声音提醒」tab（目录顺序与 settingsTabLayout 一致）
-	{ field: "soundAlert", tab: "sound", itemKey: "settings.sound.title" },
+	// 通知设置 tab：系统通知三开关 + 声音提醒整块 soundAlert（目录顺序与 settingsTabLayout 一致）
+	{ field: "soundAlert", tab: "notification", itemKey: "settings.sound.title" },
 
 	{ field: "wslEnabled", tab: "dev", itemKey: "settings.piSource.label" },
 	{ field: "wslDistro", tab: "dev", itemKey: "settings.wsl.distro" },
