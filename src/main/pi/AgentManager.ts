@@ -59,6 +59,7 @@ import {
 	type SessionFileRef,
 } from "./SessionFileEditor";
 import { SessionHistoryReader, findTurnPageStart } from "./SessionHistoryReader";
+import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
 import {
 	currentIndexTree,
 	createCheckpoint,
@@ -196,6 +197,8 @@ export class AgentManager {
 	private readonly sessionFileEditor: SessionFileEditor;
 	private readonly sessionHistoryReader: SessionHistoryReader;
 	private readonly messageProjector: AgentMessageProjector;
+	/** catalog 改写发生在 stop 之后：保留受限身份摘要，而不是保留整个已停 runtime。 */
+	private readonly stoppedMessageIdentities = new StoppedMessageIdentityCache();
 	/** 流式消息 emit 节流状态。 */
 	private readonly messageFlushTimers = new Map<string, NodeJS.Timeout>();
 	private readonly pendingMessageAgents = new Set<string>();
@@ -2882,6 +2885,7 @@ export class AgentManager {
 			sessionPath,
 			messageId,
 			options?.entryId,
+			this.stoppedMessageIdentities.get(hostPath, messageId),
 		);
 		if (!located) {
 			// 未落盘删除兜底：发送中/刚结束即中断，再删该轮消息时 JSONL 还没有这条记录——
@@ -3462,6 +3466,14 @@ export class AgentManager {
 		// 标记用户主动停止，退出处理器将跳过自动重连
 		this.userInitiatedStop.add(agentId);
 		const process = runtime.process;
+		if (runtime.tab.sessionPath) {
+			// 编辑确认框可能捕获了投影前的 live ID；清缓存前留存锚点/摘要，
+			// 文件读者仍会校验活动分支与唯一性，不能凭 UI 的过期 ID 盲改正文。
+			this.stoppedMessageIdentities.capture(
+				this.toSessionHostPath(runtime.tab.sessionPath),
+				this.messages.get(agentId) ?? [],
+			);
+		}
 		this.agents.delete(agentId);
 		this.messages.delete(agentId);
 		this.messageDirtyFromByAgent.delete(agentId);
@@ -3556,6 +3568,7 @@ export class AgentManager {
 		}
 		this.agents.clear();
 		this.messages.clear();
+		this.stoppedMessageIdentities.clear();
 		// 退出时统一清理所有 gate / abort 兜底定时器，避免泄漏到下一次生命周期。
 		for (const agentId of [...this.streamGates.keys()]) this.clearStreamGate(agentId);
 		this.recentlyAborted.clear();
