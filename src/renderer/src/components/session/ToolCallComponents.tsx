@@ -247,9 +247,13 @@ export const ToolCard = memo(function ToolCard(props: {
 	// 模型用 read 工具读取 SKILL.md 来加载 skill：识别后以 skill 徽标样式渲染
 	const skillName = getReadSkillName(props.message);
 	const isSkillRead = Boolean(skillName);
-	// 历史会话中从 ask_question 工具结果反推的提问卡片数据
+	// 历史会话中从 ask_question 工具结果反推的提问卡片数据；运行中（等待回答）时
+	// 结果尚未落地、meta 没有 _askCard，只能靠 toolName + running 识别，否则等待期
+	// 会退化为普通工具卡用 LiveDuration 持续计时（2026-09 用户反馈「ask 时时间还在计时」）。
 	const askCard = props.message.meta?._askCard as AskCardSummary | undefined;
-	const isAskCard = Boolean(askCard?.question);
+	const isAskCard =
+		Boolean(askCard?.question) ||
+		(toolName.toLowerCase() === "ask_question" && status === "running");
 	// 状态徽章（借鉴 AI Elements Tool 的 getStatusBadge）：三态图标+文案 pill 一眼可辨。
 	// running 保留琥珀色警示位；error 用 destructive 红；done 用 secondary。
 	// 低强调确认（ask_question 已回答时文案替换为「已回答」）。

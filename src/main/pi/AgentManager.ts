@@ -5252,9 +5252,14 @@ export class AgentManager {
 		// 避免使用消息 timestamp（会在 update/end 时刷新）导致历史恢复后耗时不可还原。
 		// ask_question 工具耗时需扣除用户等待时长（exclude_wait）：等待期由 settleAskWait 累计在
 		// askWaitMsByAgent，工具结束时减掉并清零，让 durationMs 只反映 agent 实际处理时间。
+		// 注意扣除不只适用于 ask_question 自身：tool_execution_start 已清空累计值，因此任何工具
+		// end 时残留的等待量只可能是「本工具运行期间结算的等待」——子代理委托工具（Agent /
+		// acp_delegate 等）运行中，子代理转发的提问被回答时正是这种情况，若只对 ask_question
+		// 扣除，该等待会在下一个工具 start 时被无痕清掉，委托工具卡时长仍虚高（用户反馈
+		// 「代理的时间也有问题」）。
 		let durationMs =
 			status === "running" ? undefined : Math.max(0, Date.now() - startedAt);
-		if (durationMs !== undefined && toolName === "ask_question") {
+		if (durationMs !== undefined) {
 			const askWaitMs = this.askWaitMsByAgent.get(agentId) ?? 0;
 			if (askWaitMs > 0) {
 				durationMs = Math.max(0, durationMs - askWaitMs);
