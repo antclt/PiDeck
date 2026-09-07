@@ -47,12 +47,16 @@ export const ipcChannels = {
 	filesMove: "files:move",
 	/** 读取文件返回 base64 编码的数据 URL，用于图片等二进制文件 */
 	filesReadBase64: "files:read-base64",
-	/** 粘贴大文本转文件：写入受管 paste 目录（项目 .pideck-paste/ 或 userData/paste-files/） */
+	/** 粘贴大文本转文件：新写入一律落 userData/paste-files/（项目路径仅做登记校验） */
 	pasteFilesWrite: "paste-files:write",
 	/** 移除粘贴文件 chip 时同步删除落盘文件（仅限 paste 目录内路径） */
 	pasteFilesDelete: "paste-files:delete",
 	/** 启动清理：删除超过保留期的粘贴文件（默认 7 天） */
 	pasteFilesCleanup: "paste-files:cleanup",
+	/** 设置页占用统计：userData/paste-files + 各项目遗留 .pideck-paste */
+	pasteFilesGetSize: "paste-files:get-size",
+	/** 设置页一键清空两个受管根下的 paste-* 文件 */
+	pasteFilesClearAll: "paste-files:clear-all",
 	/** 模型目录（pi-ai-catalog）更新：查询内置/覆盖层状态 */
 	catalogUpdateStatus: "catalog:update-status",
 	/** 模型目录更新：检查远端（GitHub main 分支 manifest）是否有新版本 */

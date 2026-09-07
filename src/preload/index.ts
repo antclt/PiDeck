@@ -326,7 +326,7 @@ const api = {
 		getClipboardPaths: () => clipboardSync<string[]>(ipcChannels.clipboardReadFilePaths, []),
 	},
 	pasteFiles: {
-		/** 粘贴大文本 → 落盘受管文件，返回路径元数据供 chip 展示与发送引用。 */
+		/** 粘贴大文本 → 落盘 userData/paste-files，返回路径元数据供 chip 展示与发送内联。 */
 		write: (input: PasteFileWriteInput) =>
 			ipcRenderer.invoke(ipcChannels.pasteFilesWrite, input) as Promise<PasteFileWriteResult>,
 		/** 移除 chip 时同步删除落盘文件（仅限受管目录内路径）。 */
@@ -334,6 +334,10 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.pasteFilesDelete, path) as Promise<void>,
 		/** 启动清理过期粘贴文件（渲染层一般不调用）。 */
 		cleanup: () => ipcRenderer.invoke(ipcChannels.pasteFilesCleanup) as Promise<number>,
+		/** 设置页占用统计：userData 新文件 + 各项目遗留 .pideck-paste。 */
+		getSize: () => ipcRenderer.invoke(ipcChannels.pasteFilesGetSize) as Promise<number>,
+		/** 设置页一键清空两个受管根下的 paste-* 文件。 */
+		clearAll: () => ipcRenderer.invoke(ipcChannels.pasteFilesClearAll) as Promise<number>,
 	},
 	dialog: {
 		/**

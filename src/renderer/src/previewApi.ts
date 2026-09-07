@@ -444,6 +444,8 @@ export function createPreviewApi(): PiDesktopApi {
 			},
 			delete: async () => undefined,
 			cleanup: async () => 0,
+			getSize: async () => 0,
+			clearAll: async () => 0,
 		},
 		dialog: {
 			pickFiles: async () => [],

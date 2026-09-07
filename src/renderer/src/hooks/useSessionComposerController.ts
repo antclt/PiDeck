@@ -1202,8 +1202,8 @@ export function useSessionComposerController(
         return;
       }
       // 粘贴文件折叠：把 chip 里的文件引用/内容并进草稿再发送。
-      // 项目内文件（inProject）走 @\"path\" 引用——pi 展开读取，消息体保持轻量；
-      // 匿名会话（文件在 userData，pi 无法读取）折叠原样文本内联，保证内容送达。
+      // 新写入一律在 userData（inProject=false）：折叠原样文本内联，pi 读不到 userData；
+      // 遗留项目内 chip（inProject=true）仍走 @"path" 引用——pi 展开读取。
       if (pasteFiles.length) {
         const refs: string[] = [];
         for (const file of pasteFiles) {
@@ -1477,18 +1477,17 @@ export function useSessionComposerController(
   });
 
   /**
-   * 大段粘贴文本 → 落盘受管文件 + 附件栏 chip。
+   * 大段粘贴文本 → 落盘 userData/paste-files + 附件栏 chip。
    * 触发条件：粘贴纯文本达到 PASTE_TO_FILE_MIN_CHARS（复制长日志/代码/文章是主要场景）。
-   * 有项目：写入 `<project>/.pideck-paste/`，发送时折叠 @"path" 引用（pi 可展开读取）；
-   * 匿名会话：写入 userData/paste-files/，发送时折叠原样文本内联。
+   * 新写入一律落应用数据目录（与日志同属），发送时折叠原样文本内联；
+   * projectPath 仍会传给主进程做已登记项目校验，但不再决定落盘目录。
    * 写盘失败（权限/路径异常）回退原样插入，保证粘贴内容不丢。
    */
   const pasteTextToFile = useCallback(async (text: string) => {
     try {
       const result = await desktopApi.pasteFiles.write({
         // 项目根经 projectId 反查项目清单（不依赖可能缺失的 record.projectPath）；
-        // 有项目（含引导页选中项目）→ 写 <project>/.pideck-paste/ 并在发送时折叠为
-        // @"path" 引用（消息端渲染文件 chip）；无项目 → userData 兜底、折叠原样文本内联。
+        // 非空时主进程只做已登记项目校验，新写入一律落 userData/paste-files/。
         projectPath: composerProject?.path ?? "",
         content: text,
       });
