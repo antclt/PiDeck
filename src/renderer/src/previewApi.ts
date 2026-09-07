@@ -1195,6 +1195,8 @@ export function createPreviewApi(): PiDesktopApi {
 			// 设计预览：内置 TokenDance 目录返回空（不触真实网络）
 			getTokendanceModels: async () => ({ models: [], fromCache: false, at: 0 }),
 			tokendanceAuthStart: async () => ({ ok: false, error: "preview" }),
+			tokendanceAuthAwait: async () => ({ ok: false, error: "preview" }),
+			tokendanceAuthCancel: async () => ({ ok: true }),
 			tokendanceAuthExchange: async () => ({ ok: false, error: "preview" }),
 			installTokendance: async () => ({ ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "preview" }),
 			testProvider: async () => ({

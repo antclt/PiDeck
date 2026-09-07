@@ -459,8 +459,12 @@ export const ipcChannels = {
 	/** 取内置 TokenDance 模型目录（live fetch + userData 缓存；force=true 强制刷新） */
 	configGetTokendanceModels: "config:get-tokendance-models",
 	configInstallTokendance: "config:install-tokendance",
-	/** 启动 TokenDance OAuth 授权流程（PKCE S256 headless；返回授权 URL + flowId） */
+	/** 启动 TokenDance OAuth 授权流程（PKCE S256；mode=callback 走本地回环自动收 code，headless 需用户粘贴） */
 	configTokendanceAuthStart: "config:tokendance-auth-start",
+	/** 等待回环回调自动送达的 code 并交换成 API Key（callback 模式专用，一次点击完成授权） */
+	configTokendanceAuthAwait: "config:tokendance-auth-await",
+	/** 放弃授权流程：释放本地回环端口并丢弃 verifier（弹窗关闭/用户取消时调用） */
+	configTokendanceAuthCancel: "config:tokendance-auth-cancel",
 	/** 提交一次性授权 code 交换 TokenDance API Key（成功返回完整 key） */
 	configTokendanceAuthExchange: "config:tokendance-auth-exchange",
 	/** 快速测试 provider 连接：发送一条最小请求验证 baseUrl/apiKey/模型 是否正常 */

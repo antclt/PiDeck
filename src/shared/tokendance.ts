@@ -30,3 +30,10 @@ export const TOKENDANCE_KEY_NAME = "PiDeck";
 
 /** 兜底解析内置端点时发出的归因请求头（请求维度归因，覆盖 Key 上的 app_url）。 */
 export const TOKENDANCE_APP_URL_HEADER = "X-App-URL";
+
+/**
+ * 授权收码方式（跨层契约：主进程实现、preload 入参、渲染层选单共用一份定义）。
+ * - callback：本地回环监听自动接收 code，用户无需复制粘贴（默认）。
+ * - headless：无 callback_url，授权页展示一次性 code 由用户粘贴（降级/离线兜底）。
+ */
+export type TokendanceAuthMode = "callback" | "headless";
