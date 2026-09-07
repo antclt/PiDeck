@@ -72,10 +72,17 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 /**
- * 下载源（按顺序尝试）：镜像代理 GitHub raw → GitHub raw → jsDelivr gh。
+ * 下载源（按顺序尝试）：镜像代理 GitHub raw → GitHub raw。
  * 镜像前缀形如 `https://ghfast.top/https://raw.githubusercontent.com/...`，
  * 与应用更新的 GitHub 镜像体系同源（shared/updateSources.ts），国内可达性远好于
- * 直连 GitHub raw / jsDelivr CDN。未配置镜像时退化为「raw → jsDelivr」。
+ * 直连 GitHub raw。未配置镜像时只有 GitHub raw 一个源。
+ *
+ * 注意：不再把 jsDelivr gh CDN 列为下载回退源。实测 jsDelivr 对 manifest/catalog
+ * 有陈旧缓存（如 0.85.0），与 GitHub raw 当前的 0.85.1 内容不同（dataSha256
+ * 不一致）。一旦 GitHub raw 短暂失败、回落到 jsDelivr，就会拿到过期数据且无法
+ * 与"当前版本"区分 —— 表现为 checkRemote 永远报"已是最新"而错过真更新。
+ * 下载失败时由调用方走 npm 生成回退（checkRemote）或直接报错（update），
+ * 不拿陈旧 CDN 数据当真值。
  */
 function sourceBaseUrls(
 	branch: string,
@@ -83,14 +90,11 @@ function sourceBaseUrls(
 ): { catalog: string; manifest: string }[] {
 	const rawCatalog = `https://raw.githubusercontent.com/ayuayue/PiDeck/${branch}/resources/${PI_AI_CATALOG_FILE_NAME}`;
 	const rawManifest = `https://raw.githubusercontent.com/ayuayue/PiDeck/${branch}/resources/${PI_AI_CATALOG_MANIFEST_FILE_NAME}`;
-	const jsdelivrCatalog = `https://cdn.jsdelivr.net/gh/ayuayue/PiDeck@${branch}/resources/${PI_AI_CATALOG_FILE_NAME}`;
-	const jsdelivrManifest = `https://cdn.jsdelivr.net/gh/ayuayue/PiDeck@${branch}/resources/${PI_AI_CATALOG_MANIFEST_FILE_NAME}`;
 	const sources: { catalog: string; manifest: string }[] = [];
 	if (mirrorHost) {
 		sources.push({ catalog: `${mirrorHost}/${rawCatalog}`, manifest: `${mirrorHost}/${rawManifest}` });
 	}
 	sources.push({ catalog: rawCatalog, manifest: rawManifest });
-	sources.push({ catalog: jsdelivrCatalog, manifest: jsdelivrManifest });
 	return sources;
 }
 
