@@ -13,14 +13,17 @@
  * - 红点/角标与列表未读标记共用 unreadAnnouncementsAtom（仅统计 flash+notice，见 atoms）；
  * - 打开弹窗即标记全部已读（公告是低频广播，不做逐条已读的复杂交互）；
  * - 列表卡片只展示清洗后的短摘要（announcementExcerpt），完整正文放「查看详情」
- *   弹窗经 MarkdownStream 渲染——公告是外部数据，全量 md 渲染走会话消息同一套
- *   sanitize 管线（streamdown 默认 rehype-sanitize），不新增注入面；
+ *   右侧 Drawer 经 MarkdownStream 渲染——公告是外部数据，全量 md 渲染走会话消息
+ *   同一套 sanitize 管线（streamdown 默认 rehype-sanitize），不新增注入面；
+ * - 详情抽屉里的外链强制走系统默认浏览器（不跟随「内置浏览器」设置），避免阅读时
+ *   弹出浏览器面板打断浏览；
  * - 手动刷新失败静默提示（showNotice），不打断浏览。
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { ChevronDown, ChevronRight, Megaphone, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Megaphone, RefreshCw, X } from "lucide-react";
 import {
 	unreadAnnouncementsAtom,
 	announcementStateAtom,
@@ -44,6 +47,7 @@ import {
 	DialogTrigger,
 } from "../ui-shadcn/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
+import { Drawer } from "../motion/drawer";
 import type { AnnouncementItem } from "../../../../shared/types/announcement";
 
 /** 未读通知 + 使用指南的默认展示上限；超出走「展示更多公告」，不全量展开。 */
@@ -121,49 +125,110 @@ function AnnouncementCard(props: {
 }
 
 /**
- * 公告详情弹窗：完整正文经 MarkdownStream 渲染（light 模式，公告正文是外部数据，
- * 走会话消息同一套 sanitize 管线；light 关闭图表/代码高亮等重渲染，静态场景更省内存）。
+ * 公告详情抽屉：完整正文经 MarkdownStream 渲染（light 模式，公告正文是外部数据，
+ * 走会话消息同一套 sanitize 管线）。
+ *
+ * 用 beui Drawer（右侧滑出）而非嵌套 Dialog 的原因：列表弹窗之上再叠一层弹窗
+ * 会形成嵌套 modal（焦点陷阱/双层遮罩/z-index 管理都得更小心）；侧滑抽屉作为
+ * 独立固定层滑出，遮罩点按/Escape 只关抽屉，列表弹窗保持打开可继续浏览，
+ * 交互身份更清晰（列表=总览，抽屉=详情）。
+ *
+ * 必须 createPortal 到 document.body 的原因：beui Drawer 不像 Radix 弹窗那样
+ * 自带 portal，fixed 元素渲染在组件原位；侧栏祖先若带 transform/opacity/过滤
+ * 等会形成堆叠上下文，把抽屉的 fixed 层关在里面（初始表现=抽屉完全不可见）。
+ * portals 到 body 后与弹窗的 Radix portal 同层参与堆叠。
+ *
+ * 层级不是 z-50：本项目 shadcn Dialog 用 CSS 变量 --z-dialog(950)（见 foundation.css
+ * 浮层层级语义 token），弹窗内 popover 为 --z-popover(960)；抽屉改用同一体系的
+ * --z-drawer(980) 才压得住弹窗。v1 曾用 z-[60] 以为盖过默认 z-50，实际远低于 950，
+ * 导致抽屉永远被弹窗盖住且弹窗关不掉（X 点在抽屉背板上）——改为 token 后修复。
+ *
+ * 链接强制走系统浏览器（forceSystem=true）：公告是外部数据，正文里的 GitHub/
+ * 文档链接点击后应直达外部站点；不跟随用户「内置浏览器」设置，避免在详情阅读
+ * 场景里弹出浏览器面板打断浏览（内置面板是给会话浏览用的）。
  */
-function AnnouncementDetailDialog(props: {
+function AnnouncementDetailDrawer(props: {
 	item: AnnouncementItem | null;
 	onClose: () => void;
 }) {
 	const { item, onClose } = props;
-	return (
-		<Dialog
+	// 正文滚动容器 ref：react-remove-scroll 的滚轮锁会把弹窗内容之外的 wheel 一律
+	// preventDefault（抽屉 portal 在锁外，症状=只能拖滚动条），需要手动滚轮桥
+	const scrollRef = useRef<HTMLDivElement>(null);
+	// 详见组件头注释：摆脱侧栏祖先堆叠上下文，与列表弹窗的 Radix portal 同层
+	return createPortal(
+		<Drawer
 			open={item !== null}
 			onOpenChange={(next) => {
 				if (!next) onClose();
 			}}
+			side="right"
+			ariaLabel={t("announcements.title")}
+			// 用与 Dialog 同一体系的 --z-drawer(980) 覆盖 beui 默认 z-50（twMerge 同组去重）；
+			// 宽度同样覆盖默认 w-80
+			backdropClassName="z-[var(--z-drawer)]"
+			className="z-[var(--z-drawer)] w-[min(560px,85vw)]"
 		>
-			<DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
-				{item && (
-					<>
-						<DialogHeader>
-							<DialogTitle className={levelToneClass(item.level)}>{item.title}</DialogTitle>
-							<DialogDescription>
+			{item && (
+				<>
+					<header className="flex items-start justify-between gap-3 border-b border-border/60 px-5 py-4">
+						<div className="min-w-0">
+							<h2
+								className={cn(
+									"text-base font-semibold leading-snug",
+									levelToneClass(item.level),
+								)}
+							>
+								{item.title}
+							</h2>
+							<p className="mt-1 text-xs text-muted-foreground">
 								{t("announcements.publishedAt", {
 									time: item.publishedAt.slice(0, 10),
 								})}
-							</DialogDescription>
-						</DialogHeader>
-						<div className="min-h-0 flex-1 overflow-y-auto pr-1">
-							<MarkdownStream
-								text={item.body}
-								isStreaming={false}
-								light
-								// 正文里的外链走系统浏览器（与列表弹窗历史行为一致），失败静默
-								onOpenExternal={(url, forceSystem) => {
-									void desktopApi.app
-										.openExternal(url, forceSystem)
-										.catch(() => undefined);
-								}}
-							/>
+							</p>
 						</div>
-					</>
-				)}
-			</DialogContent>
-		</Dialog>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon"
+							className="-mr-1.5 shrink-0 text-muted-foreground hover:text-foreground"
+							onClick={onClose}
+							aria-label={t("announcements.closeDetail")}
+						>
+							<X className="size-4" />
+						</Button>
+					</header>
+					<div
+						ref={scrollRef}
+						onWheel={(event) => {
+							// 滚轮桥（详见 scrollRef 注释）：把 wheel 增量手动写入 scrollTop，
+							// clamp 到边界，行为与原生滚动一致；不 preventDefault，避免被动
+							// 监听器告警（此抽屉仅在弹窗锁激活的上下文出现，无原生叠加问题）
+							const el = scrollRef.current;
+							if (!el) return;
+							const max = el.scrollHeight - el.clientHeight;
+							if (max <= 0) return;
+							let delta = event.deltaY;
+							if (event.deltaMode === 1) delta *= 16;
+							else if (event.deltaMode === 2) delta = el.clientHeight * Math.sign(delta);
+							el.scrollTop = Math.min(max, Math.max(0, el.scrollTop + delta));
+						}}
+						className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+					>
+						<MarkdownStream
+							text={item.body}
+							isStreaming={false}
+							light
+							// 公告外链强制系统默认浏览器：不跟随「内置浏览器」设置（详见组件头注释）
+							onOpenExternal={(url) => {
+								void desktopApi.app.openExternal(url, true).catch(() => undefined);
+							}}
+						/>
+					</div>
+				</>
+			)}
+		</Drawer>,
+		document.body,
 	);
 }
 
@@ -179,6 +244,10 @@ export function AnnouncementCenter() {
 	const [showRead, setShowRead] = useState(false);
 	// 详情弹窗受控状态：null = 关闭；打开时与列表弹窗并存（列表在上层 Dialog）
 	const [detailItem, setDetailItem] = useState<AnnouncementItem | null>(null);
+	// 抽屉生命周期的同步镜像：Radix modal 弹窗把外部点击的关闭延迟到 click 事件才派发
+	//（deferPointerDownOutside，见 dialog 源码），彼时抽屉已被关、state 已更新，靠
+	// state 守卫必输；必须用 ref，且解锁要延后到提交完成后（见下方 useEffect）
+	const detailOpenRef = useRef(false);
 	// 弹窗开关提升为 atom：toast「查看」按钮需要远程打开公告中心（单一 owner，见 announcement-atoms）
 	const open = useAtomValue(announcementCenterOpenAtom);
 	const setOpen = useSetAtom(announcementCenterOpenAtom);
@@ -207,11 +276,19 @@ export function AnnouncementCenter() {
 	// 打开详情视为已浏览（与打开列表弹窗语义一致，markAllRead 幂等可重复调用）
 	const viewDetail = useCallback(
 		(item: AnnouncementItem) => {
+			detailOpenRef.current = true; // 先上锁再开抽屉，避免状态提交前出现空窗
 			setDetailItem(item);
 			markAllRead();
 		},
 		[markAllRead],
 	);
+	// 关闭抽屉只改 state；ref 解锁必须晚于（提交后）——同一 click 事件里事件冒泡到
+	// Radix 的延迟派发点时需仍能拦到（见 DialogContent 的 onPointerDownOutside）
+	const closeDetail = useCallback(() => setDetailItem(null), []);
+	// 提交完成后抽屉已进入退出动画（面板尚未销毁），此时放行弹窗的关闭路径才安全
+	useEffect(() => {
+		if (detailItem === null) detailOpenRef.current = false;
+	}, [detailItem]);
 
 	const items = state?.items ?? [];
 	const readSet = new Set(state?.readIds ?? []);
@@ -233,6 +310,9 @@ export function AnnouncementCenter() {
 		<Dialog
 			open={open}
 			onOpenChange={(next) => {
+				// 抽屉打开/退出期间，弹窗的所有关闭请求先由抽屉消化（Escape 先关抽屉，
+				// 外部点击落在抽屉背板上）；ref 同步可读，不依赖 state 提交时序
+				if (!next && detailOpenRef.current) return;
 				setOpen(next);
 				// 关闭时复位展开状态，下次打开回到默认折叠视图
 				if (!next) {
@@ -276,7 +356,18 @@ export function AnnouncementCenter() {
 						: t("announcements.title")}
 				</TooltipContent>
 			</Tooltip>
-			<DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
+			<DialogContent
+				onPointerDownOutside={(event) => {
+					// 源头拦截：抽屉打开期间的外部点击不应关弹窗。Radix modal 把 POINTER_DOWN_OUTSIDE
+					// 延迟到 click 派发（deferPointerDownOutside），此刻抽屉已先被关、onOpenChange 守卫
+					// 会读到过期状态；直接 preventDefault 从根上取消这次 dismiss
+					if (detailOpenRef.current) {
+						event.preventDefault();
+						return;
+					}
+				}}
+				className="flex max-h-[80vh] flex-col sm:max-w-2xl"
+			>
 				<DialogHeader>
 					<DialogTitle>{t("announcements.title")}</DialogTitle>
 					<DialogDescription>
@@ -413,8 +504,8 @@ export function AnnouncementCenter() {
 					)}
 				</DialogFooter>
 			</DialogContent>
-			{/* 详情弹窗（嵌套 Dialog）：列表弹窗之上展示完整正文，关闭只复位本弹窗 */}
-			<AnnouncementDetailDialog item={detailItem} onClose={() => setDetailItem(null)} />
+			{/* 详情抽屉（beui Drawer 右侧滑出，独立固定层）：列表弹窗之上展示完整正文，关闭只复位本抽屉 */}
+			<AnnouncementDetailDrawer item={detailItem} onClose={closeDetail} />
 		</Dialog>
 	);
 }

@@ -1,11 +1,11 @@
 import { Button } from "../components/ui-shadcn/button";
 import { showNotice } from "../utils/notice";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import type { YaoPromptListResult, YaoPromptItem, YaoPromptDetailResult, PiPromptTemplateSummary, PiPromptTemplateListResult } from "../../../shared/types";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
-import { Input } from "../components/ui-shadcn/input";
+import { StoreSearchBar } from "./StoreSearchBar";
 import { Pagination } from "../components/ui-shadcn/pagination";
 const PAGE_SIZE = 20;
 
@@ -179,18 +179,12 @@ export function YaoPromptTab(props: {
 
 	return (
 		<div className="store-sub-tab">
-			{/* 工具栏：搜索 + 更新按钮 */}
-			<div className="prompt-store-search-bar">
-				<div className="prompt-store-search-input-wrap">
-					<Search size={15} strokeWidth={1.8} className="prompt-store-search-icon" />
-					<Input
-						type="text"
-					value={searchQuery}
-					onChange={(e) => handleSearchChange(e.target.value)}
-					placeholder={t("config.yaoSearchPlaceholder")}
-					/>
-				</div>
-			</div>
+			{/* 工具栏：搜索（输入即搜，无独立搜索按钮，统一 StoreSearchBar 胶囊外观） */}
+			<StoreSearchBar
+				value={searchQuery}
+				onChange={handleSearchChange}
+				placeholder={t("config.yaoSearchPlaceholder")}
+			/>
 
 			{error && <div className="mb-3.5 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">{error}</div>}
 			{/* toast 已改用 sonner */}

@@ -1,6 +1,5 @@
 import { Button } from "../components/ui-shadcn/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
-import { Tabs, TabsList, TabsTrigger } from "../components/ui-shadcn/tabs";
 import { showNotice } from "../utils/notice";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, FileEdit, FileText, Pencil, ShoppingBag, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
@@ -12,6 +11,7 @@ import type {
 import { t } from "../i18n";
 import { CodeMirrorEditor } from "../components/app/CodeMirrorEditor";
 import { PromptStoreTab } from "./PromptStoreTab";
+import { ContentTabs } from "./ContentTabs";
 import { Input } from "../components/ui-shadcn/input";
 import type { ResourceScope } from "./ResourceScopeSelector";
 import { globalPromptOverrideKey } from "../../../shared/resourceIdentity";
@@ -250,22 +250,19 @@ export function PromptsTab(props: {
 		<div className="prompts-tab">
 			<div className="mb-3 flex items-center justify-between gap-3">
 				{/* Scope stays available while Local/Store content changes below. */}
-				<Tabs
+				<ContentTabs
 					value={promptTab}
-					onValueChange={(v) => { if (v === "local" || v === "store") setPromptTab(v); }}
-					className="min-w-0 flex-1 gap-0"
-				>
-					{/* 两个 table（本地/商店）外框紧凑，仅包裹 tab 本身，与扩展页对齐 */}
-					<TabsList className="w-fit self-start">
-						<TabsTrigger value="local" onClick={() => props.onRefresh()}>
-							{t("config.nav.prompts")}
-						</TabsTrigger>
-						<TabsTrigger value="store">
-							<ShoppingBag size={14} strokeWidth={1.8} />
-							{t("config.promptStoreTab")}
-						</TabsTrigger>
-					</TabsList>
-				</Tabs>
+					onValueChange={(v) => {
+						if (v !== "local" && v !== "store") return;
+						setPromptTab(v);
+						// 切回本地时刷新列表（原 TabsTrigger onClick 行为迁到 onValueChange 统一处理）
+						if (v === "local") props.onRefresh();
+					}}
+					items={[
+						{ value: "local", label: t("config.nav.prompts") },
+						{ value: "store", label: t("config.promptStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> },
+					]}
+				/>
 				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
 				<div className="shrink-0">{props.scopeSelector}</div>
 			</div>

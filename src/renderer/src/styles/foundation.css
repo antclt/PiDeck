@@ -161,6 +161,9 @@
    */
   --z-dialog: 950;
   --z-popover: 960;
+  /* 浮层侧滑抽屉（beui Drawer，如公告详情）：高于弹窗(950)及弹窗内 popover(960)，
+   * 但低于 1000 旧式浮层，避免反被旧浮层盖住。 */
+  --z-drawer: 980;
   /* shadcn new-york 默认 radius 约 0.5rem，整体略圆一点更接近官方 */
   --radius-xs: 4px;
   --radius-sm: 6px;

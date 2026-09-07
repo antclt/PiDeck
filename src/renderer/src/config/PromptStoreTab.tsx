@@ -1,13 +1,13 @@
 import { Button } from "../components/ui-shadcn/button";
-import { Tabs, TabsList, TabsTrigger } from "../components/ui-shadcn/tabs";
 import { showNotice } from "../utils/notice";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Check, Download, ExternalLink, Globe, Search } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, Download, ExternalLink, Globe } from "lucide-react";
 import type { PromptStoreItem, PromptStoreSearchResult, PiPromptTemplateSummary, PiPromptTemplateListResult } from "../../../shared/types";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import { YaoPromptTab } from "./YaoPromptTab";
-import { Input } from "../components/ui-shadcn/input";
+import { ContentTabs } from "./ContentTabs";
+import { StoreSearchBar } from "./StoreSearchBar";
 
 /**
  * 根据导入逻辑生成的文件名（与主进程 promptStoreImport 中一致）
@@ -187,64 +187,35 @@ export function PromptStoreTab(props: {
 
 	return (
 		<div className="prompt-store-tab">
-			{/* 子 tab 切换：国际商店 / 中文精选（shadcn Tabs） */}
-			<Tabs
+			{/* 子 tab 切换：国际商店 / 中文精选（内容级下划线，compact 版） */}
+			<ContentTabs
+				compact
+				fill={false}
 				value={storeSubTab}
 				onValueChange={(v) => { if (v === "store" || v === "yao") setStoreSubTab(v); }}
-				className="gap-0"
-			>
-				<TabsList className="w-full">
-					<TabsTrigger value="store">
-						<Globe size={14} strokeWidth={1.8} />
-						prompts.chat
-					</TabsTrigger>
-					<TabsTrigger value="yao">
-						<BookOpen size={14} strokeWidth={1.8} />
-						{t("config.promptStoreChinesePicks")}
-					</TabsTrigger>
-				</TabsList>
-			</Tabs>
+				items={[
+					{ value: "store", label: "prompts.chat", icon: <Globe size={14} strokeWidth={1.8} /> },
+					{ value: "yao", label: t("config.promptStoreChinesePicks"), icon: <BookOpen size={14} strokeWidth={1.8} /> },
+				]}
+			/>
 
 			{storeSubTab === "yao" ? (
 				<YaoPromptTab projectId={props.projectId} onImported={props.onImported} />
 			) : (
 				<>
-					{/* 搜索栏 */}
-					<div className="prompt-store-search-bar">
-				<div className="prompt-store-search-input-wrap">
-					<Search size={15} strokeWidth={1.8} className="prompt-store-search-icon" />
-					<Input
+					{/* 搜索栏 + 热门词建议（StoreSearchBar 统一胶囊外观，替代 prompt-store-search-* 手写 CSS） */}
+					<StoreSearchBar
 						ref={searchInputRef}
-						type="text"
 						value={query}
-						onChange={(e) => setQuery(e.target.value)}
+						onChange={setQuery}
 						onKeyDown={handleKeyDown}
 						placeholder={t("config.promptStoreSearchPlaceholder")}
-						disabled={searching}
+						searching={searching}
+						searchDisabled={!query.trim()}
+						onSearch={() => void handleSearch(query)}
+						suggestions={!result && !searching ? SUGGESTED_SEARCHES : undefined}
+						onSuggestionClick={(s) => { setQuery(s); void handleSearch(s); }}
 					/>
-					<Button
-						 size="sm" variant="default"
-						onClick={() => void handleSearch(query)}
-						disabled={searching || !query.trim()}
-					>
-						{searching ? t("config.promptStoreSearching") : <Search size={14} strokeWidth={1.8} />}
-					</Button>
-				</div>
-				{/* 热门搜索建议 */}
-				{!result && !searching && (
-					<div className="prompt-store-suggestions">
-						{SUGGESTED_SEARCHES.map((s) => (
-							<button
-								key={s}
-								className="prompt-store-suggestion-chip"
-								onClick={() => { setQuery(s); void handleSearch(s); }}
-							>
-								{s}
-							</button>
-						))}
-					</div>
-				)}
-			</div>
 
 			{/* 错误提示 */}
 			{error && <div className="mb-3.5 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">{error}</div>}

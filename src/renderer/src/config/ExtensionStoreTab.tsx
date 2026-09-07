@@ -1,12 +1,12 @@
 import { Button } from "../components/ui-shadcn/button";
-import { Input } from "../components/ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui-shadcn/select";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Copy, Download, ExternalLink, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, Download, ExternalLink } from "lucide-react";
 import type { PiPackageCatalog, PiPackageCatalogItem, PiPackageCatalogQuery, PiExtensionSummary } from "../../../shared/types";
 import { t } from "../i18n";
+import { StoreSearchBar } from "./StoreSearchBar";
 
 /**
  * 扩展商店（pi.dev Package Catalog）视图。
@@ -159,21 +159,16 @@ export function ExtensionStoreTab(props: {
 	return (
 		<div className="prompt-store-tab">
 			{/* 搜索 + 类型 + 排序工具栏（一行 flex：搜索框占满剩余宽度，两个下拉固定宽度并排右侧） */}
-			<div className="prompt-store-search-bar flex items-center gap-2.5">
-				<div className="prompt-store-search-input-wrap min-w-0 flex-1">
-					<Search size={15} strokeWidth={1.8} className="prompt-store-search-icon" />
-					<Input
-						ref={searchInputRef}
-						type="text"
-						value={query}
-						onChange={(e) => setQuery(e.target.value)}
-						placeholder={t("config.extensionStoreSearchPlaceholder")}
-						disabled={loading}
-					/>
-					<Button size="sm" variant="default" onClick={() => void load({ page: 1, refresh: true })} disabled={loading}>
-						{loading ? t("config.promptStoreSearching") : <Search size={14} strokeWidth={1.8} />}
-					</Button>
-				</div>
+			<div className="flex items-center gap-2.5">
+				<StoreSearchBar
+					ref={searchInputRef}
+					value={query}
+					onChange={setQuery}
+					placeholder={t("config.extensionStoreSearchPlaceholder")}
+					searching={loading}
+					onSearch={() => void load({ page: 1, refresh: true })}
+					className="min-w-0 flex-1"
+				/>
 				{/* 类型过滤（目录页 type 参数） */}
 				<Select value={type} onValueChange={(v) => setType(v)}>
 					<SelectTrigger size="sm" className="w-36 shrink-0" aria-label={t("config.extensionStoreType")}>
