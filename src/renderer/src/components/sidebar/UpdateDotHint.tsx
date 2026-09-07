@@ -19,6 +19,11 @@ type UpdateDotHintProps = {
  * 圆点第一次出现时在旁边弹一次「这是更新提醒」的说明，用户看过/点过/超时后
  * 永久标记已解释（updateDotHintSeen），不再打扰；进过设置页也会被标记（见
  * SettingsFeatureRoot）。与 toast 通知互补：toast 说「有更新」，气泡解释「这个点是什么」。
+ *
+ * 锚定契约（回归曾现 bug）：气泡必须左缘锚定并铺满 dock 行（left-0 right-0），
+ * 箭头指向最左侧的设置按钮。此前右对齐（right-0）到 32px 的按钮 + 固定 w-56，
+ * 224px 宽在 208px 侧栏下左溢约 175px，被 aside 的 overflow-hidden 裁剪成
+ * 窗口左缘一条竖条——表现为「更新提示挤在左侧、一半在屏外」。
  */
 export function UpdateDotHint(props: UpdateDotHintProps) {
 	const { hasPendingUpdate, onOpenSettings } = props;
@@ -92,14 +97,14 @@ export function UpdateDotHint(props: UpdateDotHintProps) {
 
 	return (
 		<div
-			className="absolute bottom-full right-0 z-(--z-popover) mb-2 w-56 rounded-lg border bg-popover p-3 shadow-lg"
+			className="absolute bottom-full left-0 right-0 z-(--z-popover) mb-2 rounded-lg border bg-popover p-3 shadow-lg"
 			role="note"
 			aria-label={t("update.dotHintTitle")}
 			onClick={close}
 		>
-			{/* 指向设置按钮的小箭头 */}
+			{/* 指向设置按钮的小箭头：设置按钮是 dock 最左一项（相对行左缘约 24px） */}
 			<span
-				className="absolute -bottom-1 right-4 size-2 rotate-45 border-b border-r bg-popover"
+				className="absolute -bottom-1 left-6 size-2 rotate-45 border-b border-r bg-popover"
 				aria-hidden="true"
 			/>
 			<p className="text-sm font-medium text-foreground">{t("update.dotHintTitle")}</p>

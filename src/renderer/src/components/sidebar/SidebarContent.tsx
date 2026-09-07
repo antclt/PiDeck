@@ -408,14 +408,17 @@ export function SidebarContent(props: SidebarContentProps) {
       </div>
       {/* 底栏 dock（beUI Dock）：设置/反馈/官网/主题切换收进浮动卡片，铺满底栏宽度
           （w-full + justify-between 让四个动作均匀分布，侧栏最小宽 208px 时也不溢出）。
-          DockItem 只提供尺寸与居中容器，按钮本体仍是 shadcn ghost（title/aria 不丢）。 */}
+          DockItem 只提供尺寸与居中容器，按钮本体仍是 shadcn ghost（title/aria 不丢）。
+          行容器带 relative：首次解释气泡挂在整行上（左缘铺满行宽），不能寄生在 32px
+          的 DockItem 内——否则 224px 气泡会溢出侧栏左缘被裁剪（回归见 updateDotHintAnchor）。 */}
       {!props.isLanWeb && (
-        <div className="flex shrink-0 items-center px-2 pb-2 pt-1">
+        <div className="relative flex shrink-0 items-center px-2 pb-2 pt-1">
+          {/* 首次解释气泡：圆点第一次出现时指向设置按钮（Material feature discovery），
+              与 Dock 同级挂载（铺满行宽，箭头指向最左侧的设置按钮） */}
+          <UpdateDotHint hasPendingUpdate={hasPendingUpdate} onOpenSettings={() => props.onOpenSettings?.()} />
           <Dock size={32} className="w-full justify-between">
             <DockItem>
               <div className="relative size-full">
-                {/* 首次解释气泡：圆点第一次出现时指向设置按钮（Material feature discovery） */}
-                <UpdateDotHint hasPendingUpdate={hasPendingUpdate} onOpenSettings={() => props.onOpenSettings?.()} />
                 {/* 有可用更新时：圆点 + 富 tooltip 清单（谁有更新、版本号），点击进入设置页查看。
                   aria-label 保留更新文案，读屏与纯键盘用户不依赖视觉圆点。 */}
                 <Tooltip delayDuration={300}>
