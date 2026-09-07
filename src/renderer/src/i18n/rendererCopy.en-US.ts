@@ -2873,11 +2873,11 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.storage.openFolderDesc": "View log files in file manager",
   // ===== Config backup (config-backup) =====
   "settings.backup.title": "Config Backup",
-  "settings.backup.desc": "Automatically snapshot model config, pi settings and PiDeck settings. A snapshot is created on first use, after an app upgrade, or when config is saved; you can also back up manually.",
+  "settings.backup.desc": "Snapshot model config, pi settings and PiDeck settings. One initial backup is created automatically on first use; after that backups are manual only. Back up or restore anytime to recover from misconfiguration or loss.",
   "settings.backup.createButton": "Back Up Now",
   "settings.backup.createDesc": "Save current model config, pi settings and PiDeck settings as one snapshot",
   "settings.backup.createSuccess": "Backup created",
-  "settings.backup.hint": "Backups are stored locally in the app data directory; secrets are redacted when viewing. The last 20 automatic backups are kept.",
+  "settings.backup.hint": "Backups are stored locally in the app data directory; secrets are redacted when viewing. The initial backup is kept long-term and manual backups are never auto-deleted; a protective backup (last 5 kept) is created before each restore.",
   "settings.backup.listTitle": "Backup List",
   "settings.backup.empty": "No backups yet. Click \"Back Up Now\" to create one",
   "settings.backup.view": "View",
@@ -3699,5 +3699,11 @@ export const enUS: Record<TranslationKey, string> = {
   "announcements.refresh": "Refresh",
   "announcements.refreshFailed": "Failed to refresh announcements, please try again later",
   "announcements.markAllRead": "Mark all read",
+  "announcements.section.flash": "Quick notices",
+  "announcements.section.notice": "Announcements",
+  "announcements.section.guides": "Guides",
+  "announcements.section.read": "Archive",
+  "announcements.showMore": "Show more ({count})",
+  "announcements.collapse": "Collapse",
 };
 

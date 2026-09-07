@@ -73,6 +73,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** 合法公告级别；未知值丢弃条目（坏数据不猜测映射、不进客户端）。 */
 const ANNOUNCEMENT_LEVELS: readonly AnnouncementLevel[] = ["info", "warn", "critical"];
 
+/** 合法公告类别；旧 feed/缓存缺省按 notice（正式广播）兼容处理。
+ * flash=时点信息（读完即焚）/ notice=正式广播（读后归档）/ guide=常驻指南（静默）。 */
+const ANNOUNCEMENT_CATEGORIES = ["flash", "notice", "guide"] as const;
+
 /**
  * 校验单条公告：字段类型/边界校验，非法条目整体丢弃（不修复、不填默认值——
  * 源由维护者 commit，数据出错应该被发现，而不是被静默修正后展示）。
@@ -88,11 +92,18 @@ export function parseAnnouncementItem(value: unknown): AnnouncementItem | null {
 	if (typeof effectiveUntil !== "string" || Number.isNaN(Date.parse(effectiveUntil))) return null;
 	// minVersion 可选；给了就必须是字符串（比较交给 compareSemver 的容错解析）
 	if (value.minVersion !== undefined && typeof value.minVersion !== "string") return null;
+	// category 可选；合法值透传，未知/缺失按 notice 兜底（旧版本 feed 与缓存没有该字段）
+	const category =
+		typeof value.category === "string" &&
+		(ANNOUNCEMENT_CATEGORIES as readonly string[]).includes(value.category)
+			? (value.category as AnnouncementItem["category"])
+			: "notice";
 	return {
 		id,
 		title,
 		body,
 		level: level as AnnouncementLevel,
+		category,
 		publishedAt,
 		effectiveUntil,
 		minVersion: value.minVersion as string | undefined,

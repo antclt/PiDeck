@@ -6,7 +6,11 @@
  * 内部键带命名空间前缀（`pi/`、`pideck/`），避免两个同名 settings.json 冲突。
  */
 
-/** 备份触发原因：自动（首次 / 升级 / 保存）与手动 / 恢复前保护。 */
+/**
+ * 备份触发原因：当前仅产生 first-run（首次使用自动）、manual（用户手动）与
+ * pre-restore（恢复前保护）；upgrade / on-save 为旧版本自动备份模式的遗留原因，
+ * 只可能出现在历史备份元数据中，类型保留以兼容旧备份文件。
+ */
 export type ConfigBackupReason =
 	| "first-run"
 	| "upgrade"

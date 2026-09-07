@@ -15,6 +15,17 @@
 /** 公告级别：info 常规 / warn 需要关注 / critical 强提醒（横幅样式与红点力度区分）。 */
 export type AnnouncementLevel = "info" | "warn" | "critical";
 
+/**
+ * 公告类别（生命周期 × 打扰策略，决定列表呈现、已读去向与提醒力度）：
+ * - flash 临时通知：时点性信息（系统维护/活动截止/一次性提示），时间敏感、强提醒；
+ *   未读时计入角标与 toast，读完即从列表移除（时点信息不值得回查）；
+ * - notice 公告：正式广播（版本发布/行为变更/重要说明），阅读后折叠进「已读归档」可回查；
+ *   未读时计入角标与 toast，toast 尊重「公告通知」总开关；
+ * - guide 指南：常驻参考（新手教程/功能说明），始终显示在「使用指南」区，不追踪已读、不打扰。
+ * 旧数据缺省按 notice 处理（兼容历史 feed 与缓存；上一版 notice/guide 语义保持不变）。
+ */
+export type AnnouncementCategory = "flash" | "notice" | "guide";
+
 /** 单条公告（渲染层可见形态，均为校验后的干净数据）。 */
 export type AnnouncementItem = {
 	/** 稳定唯一 id（发布后不可变更）；渲染层已读去重的 key。 */
@@ -28,6 +39,8 @@ export type AnnouncementItem = {
 	 */
 	body: string;
 	level: AnnouncementLevel;
+	/** 类别：notice 通知（瞬态）/ guide 指南（常驻）；旧数据缺省按 notice。 */
+	category: AnnouncementCategory;
 	/** 发布时间（ISO 8601）。 */
 	publishedAt: string;
 	/** 过期时间（ISO 8601）；主进程按本地时间过滤，过期条目不下发。 */

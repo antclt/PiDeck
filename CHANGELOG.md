@@ -42,7 +42,7 @@
 Special thanks to **微时佬友** for providing the Grok model service used in our
 software development 🎉
 
-Thanks to **歌者、幕书、王女士** for their generous donations and support! 🎉
+Thanks to  **歌者、幕书、王女士、何希尔**  for their generous donations and support! 🎉
 
 Thanks to **sgafxh, r0y1z2, c834292137, bfzha** and all contributors for their
 code contributions 🙏

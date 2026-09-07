@@ -2847,11 +2847,11 @@ export const zhCN = {
   "settings.storage.openFolderDesc": "在文件管理器中查看日志文件",
   // ===== 配置备份（config-backup） =====
   "settings.backup.title": "配置备份",
-  "settings.backup.desc": "自动备份模型配置、pi 设置与 PiDeck 设置。首次使用、版本升级或保存配置时自动创建一份快照，也可手动备份。",
+  "settings.backup.desc": "配置备份：首次使用时自动创建一份初始快照，之后不再自动备份。需要时可手动备份，配置出错或丢失时可用备份一键恢复。",
   "settings.backup.createButton": "立即备份",
   "settings.backup.createDesc": "把当前模型配置、pi 设置与 PiDeck 设置保存为一份快照",
   "settings.backup.createSuccess": "备份已创建",
-  "settings.backup.hint": "备份保存在本机应用数据目录，查看时密钥已脱敏；自动备份保留最近 20 份。",
+  "settings.backup.hint": "备份保存在本机应用数据目录，查看时密钥已脱敏。初始备份长期保留，手动备份不会被自动删除；恢复前会自动为当前配置创建保护备份（保护备份仅保留最近 5 份）。",
   "settings.backup.listTitle": "备份列表",
   "settings.backup.empty": "暂无备份，点击「立即备份」创建一份",
   "settings.backup.view": "查看",
@@ -3664,6 +3664,12 @@ export const zhCN = {
   "announcements.refresh": "刷新",
   "announcements.refreshFailed": "公告刷新失败，请稍后重试",
   "announcements.markAllRead": "全部已读",
+  "announcements.section.flash": "临时通知",
+  "announcements.section.notice": "公告",
+  "announcements.section.guides": "使用指南",
+  "announcements.section.read": "已读归档",
+  "announcements.showMore": "展示更多公告 ({count})",
+  "announcements.collapse": "收起",
 } as const;
 
 export type TranslationKey = keyof typeof zhCN;

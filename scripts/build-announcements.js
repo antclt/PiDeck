@@ -14,11 +14,18 @@
  *   id: 2026-09-07-announcements-live   # 稳定唯一 id（发布后不可变更）
  *   title: 公告功能上线
  *   level: info                         # info | warn | critical
+ *   category: notice                    # 可选通知/指南，缺省 notice（见下）
  *   publishedAt: 2026-09-07T00:00:00+08:00
  *   effectiveUntil: 2026-10-07T00:00:00+08:00
  *   minVersion: 0.7.4-beta              # 可选：仅向低于该版本的客户端展示
  *   ---
  *   正文（markdown，客户端详情视图经 sanitize 渲染；首尾空行会被剔除）
+ *
+ * category 说明（生命周期 × 打扰策略，与 shared/types/announcement.ts 对齐）：
+ * - flash —— 临时通知（时点性）：系统维护/活动截止/一次性提示，读完即移除，TTL 建议短；
+ * - notice —— 公告（正式广播）：版本发布/行为变更等，已读折叠进「已读归档」，TTL 建议数周~数月；
+ * - guide —— 指南（常驻参考）：新手教程/功能说明，长期显示、不打扰；
+ * - 缺省 = notice（兼容历史 md 文件）。
  */
 
 "use strict";
@@ -32,10 +39,12 @@ const OUT_FILE = path.join(ROOT, "announcements.json");
 
 /** 合法级别（与 shared/types/announcement.ts 的 AnnouncementLevel 对齐）。 */
 const LEVELS = ["info", "warn", "critical"];
+/** 合法类别（与 shared/types/announcement.ts 的 AnnouncementCategory 对齐；缺省 notice）。 */
+const CATEGORIES = ["flash", "notice", "guide"];
 /** 必填字段（缺失/为空即报错，不允许生成半成品公告）。 */
 const REQUIRED_FIELDS = ["id", "title", "level", "publishedAt", "effectiveUntil"];
 /** 可选字段（透传；给了必须是非空字符串）。 */
-const OPTIONAL_FIELDS = ["minVersion"];
+const OPTIONAL_FIELDS = ["minVersion", "category"];
 
 /**
  * 拆分 front matter 与正文：首行必须为 `---`，第二个 `---` 行之前的行是元数据。
@@ -117,6 +126,9 @@ function validateItem(fields, body) {
 	if (fields.level !== undefined && !LEVELS.includes(fields.level)) {
 		errors.push(`level 必须是 ${LEVELS.join(" / ")} 之一，当前：${fields.level}`);
 	}
+	if (fields.category !== undefined && !CATEGORIES.includes(fields.category)) {
+		errors.push(`category 必须是 ${CATEGORIES.join(" / ")} 之一，当前：${fields.category}`);
+	}
 	for (const key of OPTIONAL_FIELDS) {
 		if (fields[key] !== undefined && fields[key].trim() === "") {
 			errors.push(`可选字段 ${key} 给了空值（不需要则整行删除）`);
@@ -156,6 +168,8 @@ function parseAnnouncementMarkdown(filePath) {
 		title: fields.title,
 		body: body.trim(),
 		level: fields.level,
+		// 类别缺省 notice：旧 md 文件/历史 feed 无此字段，统一按正式广播处理（兼容历史）
+		category: fields.category ?? "notice",
 		publishedAt: fields.publishedAt,
 		effectiveUntil: fields.effectiveUntil,
 	};

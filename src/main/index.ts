@@ -2823,7 +2823,6 @@ function registerIpc() {
 		diagnosticsMonitor: diagnosticsMonitor ?? undefined,
 		environmentDoctor: environmentDoctor ?? undefined,
 		logBundleExporter: logBundleExporter ?? undefined,
-		configBackupManager: configBackupManager ?? undefined,
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
 		getDshHostPid: () => dshHost.getHostPid(),
@@ -3095,7 +3094,8 @@ app.whenReady().then(async () => {
 			}
 		},
 	});
-	// 配置备份：pi 配置文件 + pideck 设置的快照（首次/升级自动建，保存时防抖建）。
+	// 配置备份：pi 配置文件 + pideck 设置的快照（手动模式：仅首次使用自动建 first-run，
+	// 之后备份/恢复都由用户在设置页手动触发）。
 	// 依赖注入生效目录与 userData，WSL 切换后跟随 configManager.getConfigDir()。
 	configBackupManager = new ConfigBackupManager({
 		getConfigDir: () => configManager.getConfigDir(),
@@ -3826,8 +3826,8 @@ app.whenReady().then(async () => {
 	// 不能挡在 createWindow 前面（打包便携版表现为「启动没反应」，dev 因热路径较短不易复现）。
 	registerIpc();
 	registerFeishuIpc();
-	// 配置备份：首次使用（无备份）或版本升级（最新备份版本 ≠ 当前）时自动建一份。
-	// 同步快，不挡首帧；失败仅记录，不阻断启动。
+	// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
+	// 之后不再自动备份。同步快，不挡首帧；失败仅记录，不阻断启动。
 	configBackupManager?.ensureInitialBackups();
 	await createWindow();
 	setupTray();

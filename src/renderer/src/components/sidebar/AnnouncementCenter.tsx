@@ -1,8 +1,16 @@
 /**
  * 公告中心：侧栏底栏入口按钮（含未读圆点）+ 弹窗列表 + 公告详情弹窗。
  *
+ * 公告分三类（AnnouncementCategory）：
+ * - flash 临时通知（时点性）：系统维护/活动截止等，读完即从列表移除（不值得回查），强提醒；
+ * - notice 公告（正式广播）：版本发布/行为变更等，读后折叠进「已读归档」可回查；
+ * - guide 指南（常驻参考）：新手教程/功能说明，始终显示在「使用指南」区，不参与未读/红点/toast。
+ *
  * 设计要点：
- * - 红点/角标与列表未读标记共用 unreadAnnouncementsAtom 派生（单一 owner，见 atoms）；
+ * - 列表按「临时通知 → 公告 → 使用指南 → 已读归档」分区，各区内部发布时间倒序（新的在前）；
+ * - 未读（flash + notice）+ 指南默认只展开前 VISIBLE_LIMIT 条，超出走「展示更多公告 (N)」/「收起」；
+ * - 已读归档默认折叠成一行计数（看过后不该占主列表），可展开回看；已读 flash 不归档、直接消失；
+ * - 红点/角标与列表未读标记共用 unreadAnnouncementsAtom（仅统计 flash+notice，见 atoms）；
  * - 打开弹窗即标记全部已读（公告是低频广播，不做逐条已读的复杂交互）；
  * - 列表卡片只展示清洗后的短摘要（announcementExcerpt），完整正文放「查看详情」
  *   弹窗经 MarkdownStream 渲染——公告是外部数据，全量 md 渲染走会话消息同一套
@@ -10,8 +18,9 @@
  * - 手动刷新失败静默提示（showNotice），不打断浏览。
  */
 import { useCallback, useState } from "react";
+import type { ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Megaphone, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Megaphone, RefreshCw } from "lucide-react";
 import {
 	unreadAnnouncementsAtom,
 	announcementStateAtom,
@@ -37,6 +46,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import type { AnnouncementItem } from "../../../../shared/types/announcement";
 
+/** 未读通知 + 使用指南的默认展示上限；超出走「展示更多公告」，不全量展开。 */
+const VISIBLE_LIMIT = 5;
+
 /** 公告级别 → 视觉锚点类（tone-* 保留锚点，颜色规则走既有 token 状态规则）。 */
 function levelToneClass(level: AnnouncementItem["level"]): string {
 	switch (level) {
@@ -47,6 +59,19 @@ function levelToneClass(level: AnnouncementItem["level"]): string {
 		default:
 			return "tone-info";
 	}
+}
+
+/** 分区小标题（未读通知/使用指南/已读通知），保持整页结构可扫读。 */
+function SectionLabel(props: { children: ReactNode; count?: number }) {
+	const { children, count } = props;
+	return (
+		<div className="flex items-baseline gap-1.5 px-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70 first:mt-0 mt-1">
+			<span>{children}</span>
+			{count !== undefined && count > 0 && (
+				<span className="text-muted-foreground/50">({count})</span>
+			)}
+		</div>
+	);
 }
 
 /** 单条公告卡片：标题 + 级别锚点 + 清洗后的短摘要 + 「查看详情」入口。 */
@@ -111,7 +136,7 @@ function AnnouncementDetailDialog(props: {
 				if (!next) onClose();
 			}}
 		>
-			<DialogContent className="flex max-h-[75vh] flex-col sm:max-w-xl">
+			<DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
 				{item && (
 					<>
 						<DialogHeader>
@@ -144,10 +169,14 @@ function AnnouncementDetailDialog(props: {
 
 /**
  * 公告中心入口 + 弹窗。挂在侧栏底栏 Dock（与设置/反馈并排）。
- * 未读数 > 0 时按钮显示圆点；打开弹窗即触发全部已读（幂等）。
+ * 未读数（仅 notice）> 0 时按钮显示圆点；打开弹窗即触发全部已读（幂等）。
  */
 export function AnnouncementCenter() {
 	const [refreshing, setRefreshing] = useState(false);
+	// 「展示更多」开关：未读+指南合计超过 VISIBLE_LIMIT 时控制展开全部
+	const [showAllActive, setShowAllActive] = useState(false);
+	// 已读通知区默认折叠成一行计数，只看一眼就用不着撑开长列表
+	const [showRead, setShowRead] = useState(false);
 	// 详情弹窗受控状态：null = 关闭；打开时与列表弹窗并存（列表在上层 Dialog）
 	const [detailItem, setDetailItem] = useState<AnnouncementItem | null>(null);
 	// 弹窗开关提升为 atom：toast「查看」按钮需要远程打开公告中心（单一 owner，见 announcement-atoms）
@@ -185,6 +214,16 @@ export function AnnouncementCenter() {
 	);
 
 	const items = state?.items ?? [];
+	const readSet = new Set(state?.readIds ?? []);
+	// 类别路由：flash=时点信息（读完即焚，不归档）/ notice=正式广播（读后进归档区）/ guide=常驻指南（不参与未读）
+	const unreadFlashes = items.filter((item) => item.category === "flash" && !readSet.has(item.id));
+	const unreadNotices = items.filter((item) => item.category === "notice" && !readSet.has(item.id));
+	const readNotices = items.filter((item) => item.category === "notice" && readSet.has(item.id));
+	const guides = items.filter((item) => item.category === "guide");
+	// 主展示区 = 未读临时通知 + 未读公告 + 使用指南（新的在前，快照已按发布时间倒序）
+	const activeItems = [...unreadFlashes, ...unreadNotices, ...guides];
+	const activeVisible = showAllActive ? activeItems : activeItems.slice(0, VISIBLE_LIMIT);
+	const hiddenCount = Math.max(0, activeItems.length - VISIBLE_LIMIT);
 	const unreadCount = unread.length;
 
 	// 入口隐藏：开关关闭 = 用户不要公告，通知与入口一并下线（挂载点不变，侧栏结构稳定）
@@ -195,6 +234,11 @@ export function AnnouncementCenter() {
 			open={open}
 			onOpenChange={(next) => {
 				setOpen(next);
+				// 关闭时复位展开状态，下次打开回到默认折叠视图
+				if (!next) {
+					setShowAllActive(false);
+					setShowRead(false);
+				}
 				// 关闭/打开都视为「已浏览」：打开瞬间标记，弹窗内未读点即时消隐
 				if (next && unreadCount > 0) markAllRead();
 			}}
@@ -216,7 +260,7 @@ export function AnnouncementCenter() {
 							>
 								<Megaphone className="size-4" />
 							</Button>
-							{/* 未读圆点：与设置按钮更新角标同款式 */}
+							{/* 未读圆点：与设置按钮更新角标同款式；仅 notice 计入（guide 常驻不打扰） */}
 							{unreadCount > 0 && (
 								<span
 									className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]"
@@ -232,7 +276,7 @@ export function AnnouncementCenter() {
 						: t("announcements.title")}
 				</TooltipContent>
 			</Tooltip>
-			<DialogContent className="max-h-[70vh] sm:max-w-lg">
+			<DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
 				<DialogHeader>
 					<DialogTitle>{t("announcements.title")}</DialogTitle>
 					<DialogDescription>
@@ -249,18 +293,106 @@ export function AnnouncementCenter() {
 							{t("announcements.empty")}
 						</p>
 					) : (
-						(() => {
-							// 快照 items 有序（发布时间倒序）；已读集合转 Set 避免 O(n²)
-							const readSet = new Set(state?.readIds ?? []);
-							return items.map((item) => (
-								<AnnouncementCard
-									key={item.id}
-									item={item}
-									unread={!readSet.has(item.id)}
-									onViewDetail={viewDetail}
-								/>
-							));
-						})()
+						<>
+							{/* 临时通知：已读即焚（不归档），时点信息看完就该消失 */}
+							{unreadFlashes.length > 0 && (
+								<section className="flex flex-col gap-2.5">
+									<SectionLabel count={unreadFlashes.length}>
+										{t("announcements.section.flash")}
+									</SectionLabel>
+									{activeVisible
+										.filter((item) => item.category === "flash")
+										.map((item) => (
+											<AnnouncementCard
+												key={item.id}
+												item={item}
+												unread
+												onViewDetail={viewDetail}
+											/>
+										))}
+								</section>
+							)}
+							{/* 公告：未读时展示，读后进归档区 */}
+							{unreadNotices.length > 0 && (
+								<section className="flex flex-col gap-2.5">
+									<SectionLabel count={unreadNotices.length}>
+										{t("announcements.section.notice")}
+									</SectionLabel>
+									{activeVisible
+										.filter((item) => item.category === "notice")
+										.map((item) => (
+											<AnnouncementCard
+												key={item.id}
+												item={item}
+												unread
+												onViewDetail={viewDetail}
+											/>
+										))}
+								</section>
+							)}
+							{/* 使用指南：常驻参考，不参与未读，始终展示 */}
+							{guides.length > 0 && (
+								<section className="flex flex-col gap-2.5">
+									<SectionLabel count={guides.length}>
+										{t("announcements.section.guides")}
+									</SectionLabel>
+									{activeVisible
+										.filter((item) => item.category === "guide")
+										.map((item) => (
+											<AnnouncementCard
+												key={item.id}
+												item={item}
+												unread={false}
+												onViewDetail={viewDetail}
+											/>
+										))}
+								</section>
+							)}
+							{/* 展示更多 / 收起：未读+指南合计超过上限时出现，避免大全量展开 */}
+							{hiddenCount > 0 && (
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="self-center text-xs text-muted-foreground hover:text-foreground"
+									onClick={() => setShowAllActive((v) => !v)}
+								>
+									{showAllActive
+										? t("announcements.collapse")
+										: t("announcements.showMore", { count: String(hiddenCount) })}
+								</Button>
+							)}
+							{/* 已读归档：公告读过折叠成一行（看过后不该占主列表）；flash 已读不归档直接消失 */}
+							{readNotices.length > 0 && (
+								<section className="flex flex-col gap-2.5">
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										className="h-auto justify-start gap-1 self-start px-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70 hover:bg-transparent hover:text-foreground"
+										onClick={() => setShowRead((v) => !v)}
+										aria-expanded={showRead}
+									>
+										{showRead ? (
+											<ChevronDown className="size-3.5" />
+										) : (
+											<ChevronRight className="size-3.5" />
+										)}
+										{t("announcements.section.read")}
+										<span className="text-muted-foreground/50">({readNotices.length})</span>
+									</Button>
+									{showRead &&
+										readNotices.map((item) => (
+											<AnnouncementCard
+												key={item.id}
+												item={item}
+												unread={false}
+												onViewDetail={viewDetail}
+											/>
+										))}
+								</section>
+							)}
+						</>
 					)}
 				</div>
 				<DialogFooter className="items-center gap-2">

@@ -26,6 +26,7 @@ function makeMd(overrides = {}, body = "正文内容") {
 		`effectiveUntil: ${overrides.effectiveUntil ?? "2026-10-07T00:00:00+08:00"}`,
 	];
 	if (overrides.minVersion !== undefined) lines.push(`minVersion: ${overrides.minVersion}`);
+	if (overrides.category !== undefined) lines.push(`category: ${overrides.category}`);
 	if (overrides.extraField !== undefined)
 		lines.push(`${overrides.extraField}: ${overrides.extraValue ?? "x"}`);
 	lines.push("---", "", body);
@@ -100,10 +101,34 @@ test("parseAnnouncementMarkdown：合法文件 → 完整条目（minVersion 透
 	assert.equal(item.id, "2026-09-07-sample");
 	assert.equal(item.title, "示例公告");
 	assert.equal(item.level, "info");
+	// 未写 category 时缺省 notice（兼容历史 md，与 AnnouncementService 兜底一致）
+	assert.equal(item.category, "notice");
 	assert.equal(item.publishedAt, "2026-09-07T00:00:00+08:00");
 	assert.equal(item.effectiveUntil, "2026-10-07T00:00:00+08:00");
 	assert.equal(item.minVersion, "0.7.4-beta");
 	assert.equal(item.body, "正文内容");
+});
+
+test("parseAnnouncementMarkdown：category=flash/guide 透传 / 非法 category 拒绝", () => {
+	// 合法类别透传（flash 临时通知 / guide 指南常驻）
+	for (const category of ["flash", "guide"]) {
+		const file = join(
+			track(tmpDirWith({ "a.md": makeMd({ category }) })),
+			"a.md",
+		);
+		const parsed = build.parseAnnouncementMarkdown(file);
+		assert.deepEqual(parsed.errors, []);
+		assert.equal(parsed.item.category, category);
+	}
+
+	// 类别必须在 flash/notice/guide 内，否则整条拒绝（防笔误类别混进 feed）
+	const badFile = join(
+		track(tmpDirWith({ "a.md": makeMd({ category: "spam" }) })),
+		"a.md",
+	);
+	const bad = build.parseAnnouncementMarkdown(badFile);
+	assert.equal(bad.item, null);
+	assert.match(bad.errors.join("\n"), /category/);
 });
 
 test("parseAnnouncementMarkdown：正文首尾空行被剔除", () => {
@@ -140,6 +165,7 @@ test("parseAnnouncementMarkdown：缺必填字段逐一报错", () => {
 test("parseAnnouncementMarkdown：非法 level / 非法日期 / 空正文 / id 含空白均拒绝", () => {
 	const badSources = [
 		makeMd({ level: "loud" }),
+		makeMd({ category: "spam" }),
 		makeMd({ publishedAt: "不是日期" }),
 		makeMd({ effectiveUntil: "2026-13-45" }),
 		makeMd({ id: "2026-09-07 bad id" }),
@@ -263,6 +289,7 @@ test("生成的 feed 保持 AnnouncementItem 精确字段（服务端 schema 只
 	const item = feed.announcements[0];
 	assert.deepEqual(Object.keys(item).sort(), [
 		"body",
+		"category",
 		"effectiveUntil",
 		"id",
 		"level",

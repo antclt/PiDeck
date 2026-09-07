@@ -144,6 +144,22 @@ test("parseAnnouncementItem：字段边界校验（空 id / 超长 title / 非�
 	assert.equal(ok.minVersion, "0.6.6");
 });
 
+test("parseAnnouncementItem：category 缺省 notice，flash/guide 透传，非法值退回 notice", () => {
+	// 历史 feed/缓存无 category 字段 → notice（正式广播，兼容旧数据）
+	const dflt = svcMod.parseAnnouncementItem(item());
+	assert.equal(dflt.category, "notice");
+	// 合法类别透传（flash 临时通知 / guide 指南常驻）
+	for (const category of ["flash", "guide"]) {
+		const parsed = svcMod.parseAnnouncementItem({ ...item(), category });
+		assert.equal(parsed.category, category);
+	}
+	// 未知/非字符串类别不丢弃整条，按 notice 兜底（类别只影响展示语义，不判定数据合法性）
+	const bad = svcMod.parseAnnouncementItem({ ...item(), category: "spam" });
+	assert.equal(bad.category, "notice");
+	const weird = svcMod.parseAnnouncementItem({ ...item(), category: 7 });
+	assert.equal(weird.category, "notice");
+});
+
 // ── TTL + 版本门控 ──
 
 test("filterEffectiveItems：过期条目丢弃（until <= now），未过期保留", () => {

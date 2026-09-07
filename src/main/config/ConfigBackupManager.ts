@@ -23,8 +23,9 @@ import type {
  * 设计要点：
  * - 依赖全部注入（getConfigDir / getUserDataDir / getAppVersion），模块不 import electron，
  *   单测用临时目录驱动（tests/configBackupManager.test.mjs）。
- * - 备份目录 userData/config-backups/，一份备份 = 一个 JSON 文件，保留最近 MAX_BACKUPS 份。
- * - 自动触发：首次使用（first-run）、版本升级（upgrade）、配置保存（on-save，防抖合并）。
+ * - 备份目录 userData/config-backups/，一份备份 = 一个 JSON 文件。
+ * - 手动模式：仅首次使用自动建 first-run 备份一次，之后不再自动备份（upgrade / on-save
+ *   是旧版本自动备份模式遗留的原因，只可能出现在历史备份中）；备份/恢复都由用户在设置页手动操作。
  * - 恢复前自动为当前配置建 pre-restore 保护备份：恢复不可逆，必须先留退路。
  * - 「查看」内容脱敏：递归把 key / apiKey / token 等字段打码，token 不进渲染层。
  */
@@ -37,8 +38,6 @@ export type ConfigBackupManagerDeps = {
 	getAppVersion: () => string;
 	/** 错误上报（调用方注入 logger，模块自身不输出）。 */
 	onError?: (message: string, detail: unknown) => void;
-	/** 保存触发的防抖窗口（毫秒）；默认 3000，测试可传短值。 */
-	saveDebounceMs?: number;
 };
 
 /** 备份文件命名空间前缀：pi 文件与 pideck 文件分开，避免两个 settings.json 同名冲突。 */
@@ -52,10 +51,11 @@ export const BACKUP_FILE_KEYS = [
 
 const BACKUP_DIR_NAME = "config-backups";
 const BACKUP_FILE_PREFIX = "backup-";
-/** 自动备份保留上限：超出时删除最旧备份（用户可手动删除全部）。 */
-export const MAX_BACKUPS = 20;
-/** 保存触发的防抖窗口：设置页保存一次会连续写多个文件，合并为一次备份。 */
-const SAVE_DEBOUNCE_MS = 3000;
+/**
+ * 自动备份保留上限：pre-restore 保护备份超出时删除最旧（手动模式下“自动产生”的备份只有它）。
+ * first-run 初始备份与 manual 手动备份是用户长期依赖的资产，永不自动删除（用户可手动删）。
+ */
+export const MAX_BACKUPS = 5;
 
 /** 递归脱敏时命中的字段名（值必须为 string 且足够长才替换，避免误伤短标识符）。 */
 const SECRET_KEY_NAMES = new Set([
@@ -82,14 +82,9 @@ type BackupPackage = {
 
 export class ConfigBackupManager {
 	private readonly deps: ConfigBackupManagerDeps;
-	/** 保存触发的防抖 timer；null 表示没有待执行的备份。 */
-	private saveTimer: NodeJS.Timeout | null = null;
-	/** 保存防抖窗口（构造注入，默认 SAVE_DEBOUNCE_MS）。 */
-	private readonly saveDebounceMs: number;
 
 	constructor(deps: ConfigBackupManagerDeps) {
 		this.deps = deps;
-		this.saveDebounceMs = deps.saveDebounceMs ?? SAVE_DEBOUNCE_MS;
 	}
 
 	// ── 目录与元数据 ─────────────────────────────────────
@@ -148,7 +143,7 @@ export class ConfigBackupManager {
 
 	/**
 	 * 创建备份：收集当前生效目录的 pi 配置 + pideck 设置，打包为单文件 JSON。
-	 * 创建后执行保留策略（超出 MAX_BACKUPS 删除最旧）。
+	 * 创建后执行保留策略（只修剪自动产生的保护备份，first-run/manual 不动）。
 	 */
 	create(reason: ConfigBackupReason): ConfigBackupActionResult {
 		try {
@@ -284,10 +279,8 @@ export class ConfigBackupManager {
 	}
 
 	/**
-	 * 启动时自动备份检查：
-	 * - 无任何备份 → 首次使用，建 first-run 备份；
-	 * - 最新备份的版本 ≠ 当前版本 → 已升级，建 upgrade 备份。
-	 * 只做一次（结果由备份目录状态决定），失败不阻断启动。
+	 * 启动时自动备份检查（手动模式）：仅当备份目录里没有任何备份时建一份 first-run 初始备份，
+	 * 之后无论版本如何变化都不再自动创建；失败不阻断启动。
 	 */
 	ensureInitialBackups(): ConfigBackupActionResult {
 		const listed = this.list();
@@ -295,26 +288,7 @@ export class ConfigBackupManager {
 		if (listed.backups.length === 0) {
 			return this.create("first-run");
 		}
-		const latest = listed.backups[0];
-		if (latest.appVersion !== this.deps.getAppVersion()) {
-			return this.create("upgrade");
-		}
 		return { ok: true };
-	}
-
-	/**
-	 * 配置保存后触发：防抖合并（设置页保存一次会连写多个字段/文件），
-	 * 防抖窗口内多次保存只产生一份 on-save 备份。fire-and-forget，错误只上报。
-	 */
-	notifyConfigSaved(): void {
-		if (this.saveTimer) clearTimeout(this.saveTimer);
-		this.saveTimer = setTimeout(() => {
-			this.saveTimer = null;
-			const result = this.create("on-save");
-			if (!result.ok) this.report("notifyConfigSaved", result.error);
-		}, this.saveDebounceMs);
-		// 主进程长跑：timer 不 prevent 进程退出（应用退出前无需清，进程即止）。
-		this.saveTimer.unref?.();
 	}
 
 	// ── 内部实现 ─────────────────────────────────────────
@@ -358,14 +332,19 @@ export class ConfigBackupManager {
 	}
 
 	/**
-	 * 保留策略：按创建时间保留最近 MAX_BACKUPS 份，删除最旧。
+	 * 保留策略：只修剪「自动产生」的备份（pre-restore 保护备份，以及旧版本遗留的
+	 * on-save / upgrade 备份），按创建时间保留最近 MAX_BACKUPS 份、删除最旧。
+	 * first-run 初始备份与 manual 手动备份永不自动删除（用户可手动删除）。
 	 * 删除失败不阻断（保留比删除安全），只上报。
 	 */
 	private prune(): void {
 		const listed = this.list();
 		if (!listed.ok) return;
-		// 只保留最近 MAX_BACKUPS 份，删除更旧的；删除失败不阻断（保留比删除安全）。
-		for (const meta of listed.backups.slice(MAX_BACKUPS)) {
+		const automatic = listed.backups.filter(
+			(meta) =>
+				meta.reason === "pre-restore" || meta.reason === "on-save" || meta.reason === "upgrade",
+		);
+		for (const meta of automatic.slice(MAX_BACKUPS)) {
 			try {
 				unlinkSync(join(this.backupDir(), meta.id));
 			} catch (error) {

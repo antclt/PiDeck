@@ -2,6 +2,7 @@
 id: 2026-09-07-announcements-live
 title: 公告功能上线
 level: info
+category: flash
 publishedAt: 2026-09-07T00:00:00+08:00
 effectiveUntil: 2026-10-07T00:00:00+08:00
 ---

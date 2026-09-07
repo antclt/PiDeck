@@ -1,5 +1,6 @@
 /**
- * ConfigBackupManager 单测：备份创建/列表/保留策略/脱敏/恢复保护/删除/启动检测/防抖。
+ * ConfigBackupManager 单测：备份创建/列表/保留策略/脱敏/恢复保护/删除/启动检测。
+ * 手动模式：仅 first-run 自动；manual 与 first-run 永不自动删除；pre-restore 超量修剪。
  * 用真实临时目录驱动（依赖注入 getConfigDir/getUserDataDir/getAppVersion），不依赖 electron。
  */
 import assert from "node:assert/strict";
@@ -60,7 +61,6 @@ function setup(opts = {}) {
 		getConfigDir: () => configDir,
 		getUserDataDir: () => userData,
 		getAppVersion: () => "1.0.0",
-		saveDebounceMs: 20,
 		...opts,
 	});
 	return { manager, userData, configDir, root };
@@ -94,19 +94,29 @@ test("create 生成备份文件并记录元数据（files 含 pi/* 与 pideck/* 
 	}
 });
 
-test("保留策略：超过 MAX_BACKUPS 时删除最旧，只留最近 N 份", () => {
+test("保留策略：自动备份（pre-restore/on-save/upgrade）超 MAX_BACKUPS 删最旧，first-run/manual 永不自动删除", () => {
 	const ctx = setup();
 	try {
+		const firstRun = ctx.manager.create("first-run").id;
+		const manual = ctx.manager.create("manual").id;
 		const created = [];
 		for (let i = 0; i < MAX_BACKUPS + 5; i++) {
-			created.push(ctx.manager.create("on-save").id);
+			created.push(ctx.manager.create("pre-restore").id);
 		}
 		const listed = ctx.manager.list();
-		assert.equal(listed.backups.length, MAX_BACKUPS);
-		// 最旧的 5 份被删除（created 数组前 5 个）
+		// 自动备份只留最近 MAX_BACKUPS 份
+		const auto = listed.backups.filter((b) => b.reason === "pre-restore");
+		assert.equal(auto.length, MAX_BACKUPS);
+		// 最旧的 5 份自动备份被删除（created 数组前 5 个）
 		for (const id of created.slice(0, 5)) {
 			assert.ok(!readdirSync(join(ctx.userData, "config-backups")).includes(id), `should prune ${id}`);
 		}
+		// first-run 与 manual 始终保留
+		const reasons = listed.backups.map((b) => b.reason);
+		assert.ok(reasons.includes("first-run"), `reasons=${reasons.join(",")}`);
+		assert.ok(reasons.includes("manual"), `reasons=${reasons.join(",")}`);
+		assert.ok(readdirSync(join(ctx.userData, "config-backups")).includes(firstRun));
+		assert.ok(readdirSync(join(ctx.userData, "config-backups")).includes(manual));
 	} finally {
 		cleanup(ctx);
 	}
@@ -275,26 +285,20 @@ test("deleteMany 全部非法：一个都没删 → 返回失败", () => {
 	}
 });
 
-test("ensureInitialBackups：无备份 → first-run；版本变化 → upgrade；同版本 → 不新增", () => {
+test("ensureInitialBackups：无备份 → first-run；已有备份 → 不新增（手动模式）", () => {
 	const ctx = setup();
 	try {
 		// 无备份：首次使用
 		const first = ctx.manager.ensureInitialBackups();
 		assert.equal(first.ok, true);
-		let listed = ctx.manager.list();
+		const listed = ctx.manager.list();
 		assert.equal(listed.backups.length, 1);
 		assert.equal(listed.backups[0].reason, "first-run");
 
-		// 同版本：不新增
+		// 已有备份：不再自动创建（同版本不新增；版本差异场景见下一条测试）
 		const same = ctx.manager.ensureInitialBackups();
 		assert.equal(same.ok, true);
 		assert.equal(ctx.manager.list().backups.length, 1);
-
-		// 版本变化：升级备份
-		const upgraded = ctx.manager.create("upgrade");
-		assert.equal(upgraded.ok, true);
-		assert.equal(ctx.manager.list().backups.length, 2);
-		assert.equal(ctx.manager.list().backups[0].reason, "upgrade");
 	} finally {
 		cleanup(ctx);
 	}
@@ -313,16 +317,21 @@ test("路径安全：非法 id（路径穿越/非备份命名）一律拒绝", (
 	}
 });
 
-test("notifyConfigSaved 防抖：窗口内多次调用只生成一份 on-save 备份", async () => {
+test("ensureInitialBackups 手动模式补充：升级版本后已有备份目录不再补 backup", () => {
+	// 与主测试互补：这里独立验证“版本变化也不新增”的场景（setup 版本固定为 1.0.0）。
+	// 通过伪造第二个 manager 指向同一临时目录 + 不同版本号驱动。
 	const ctx = setup();
 	try {
-		ctx.manager.notifyConfigSaved();
-		ctx.manager.notifyConfigSaved();
-		ctx.manager.notifyConfigSaved();
-		await new Promise((resolve) => setTimeout(resolve, 80));
-		const listed = ctx.manager.list();
-		assert.equal(listed.backups.length, 1);
-		assert.equal(listed.backups[0].reason, "on-save");
+		assert.equal(ctx.manager.ensureInitialBackups().ok, true);
+		assert.equal(ctx.manager.list().backups.length, 1);
+
+		const upgraded = new ConfigBackupManager({
+			getConfigDir: () => ctx.configDir,
+			getUserDataDir: () => ctx.userData,
+			getAppVersion: () => "2.0.0",
+		});
+		assert.equal(upgraded.ensureInitialBackups().ok, true);
+		assert.equal(upgraded.list().backups.length, 1);
 	} finally {
 		cleanup(ctx);
 	}
