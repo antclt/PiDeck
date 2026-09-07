@@ -81,6 +81,22 @@ test("skills and prompts use compact tab rails aligned with the extensions page"
   assert.match(tabs, /!text-\[color:var\(--color-text-secondary\)\]/);
 });
 
+test("prompt names and actions reserve enough table space", () => {
+  // 名称列不能被 scope/status 徽标挤成短省略号；操作列也要容纳启停、编辑、重命名、删除四个按钮。
+  assert.match(prompts, /<TableHead className="w-\[22rem\]">{t\("config\.name"\)}/);
+  assert.match(prompts, /<TableCell className="w-\[22rem\] max-w-\[22rem\]">/);
+  assert.match(prompts, /<strong className="min-w-0 flex-1 break-words whitespace-normal">\/\{template\.name\}<\/strong>/);
+  assert.match(prompts, /<TableHead className="w-44 text-right">\{t\("config\.actions"\)\}<\/TableHead>/);
+  assert.match(prompts, /<TableCell className="w-44 text-right"><div className="flex min-w-max justify-end gap-1">/);
+});
+
+test("discovered prompts are explicitly read-only instead of showing a fake toggle", () => {
+  // package/settings 发现行不是 PromptManager 可写模板，因此没有安全的行内启停 IPC。
+  assert.match(prompts, /Runtime-discovered package\/settings prompts are owned by pi\/package settings/);
+  assert.match(prompts, /title=\{t\("config\.resourceManagedHint"\)\}/);
+  assert.match(prompts, /\{t\("config\.resourceManaged"\)\}/);
+});
+
 test("skill list filtering depends on resource scope, not the new-skill destination", () => {
   assert.match(skills, /const visibleSkills = data\.skills\.filter\(\(skill\) => props\.scope/);
   assert.doesNotMatch(skills, /data\.skills\.filter\([^;]*newLocationId/);
