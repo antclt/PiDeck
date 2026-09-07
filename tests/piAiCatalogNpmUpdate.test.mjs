@@ -1,12 +1,13 @@
 /**
- * pi-ai 目录更新（npm latest 主源 + 防降级）单测。
+ * pi-ai 目录更新单测（分支主源 + 镜像代理 + npm 回退 + 防降级）。
  *
- * 背景：旧更新器从 PiDeck 仓库 main 分支拉预生成件，main 停在 0.85.0 而本地内置
- * 已是 0.85.1，且比较用 `!==` 会把更旧的 0.85.0 误报为「新版本」并降级覆盖。
- * 修复：主源改为 @earendil-works/pi-ai npm latest（运行时生成），比较改语义版本，
- * 远端不高于当前生效版本时 hasUpdate=false / update 不写（防降级）。
+ * 背景：目录下载/检测原以 npm latest 为主源，但 npm 数据文件走 jsDelivr CDN，
+ * 国内不稳定；且 npm registry 与仓库分支 manifest 可能错位（分支已推 0.85.1
+ * 而 npm latest 仍是 0.85.0）。修复：主源改为仓库分支预生成件（直连或经
+ * GitHub 镜像代理，与应用更新同源），分支全挂时回退 npm latest；版本比较
+ * 仍用语义版本，远端不高于当前生效版本时 hasUpdate=false / update 不写（防降级）。
  *
- * 测试用 fetch 替身模拟 npm registry latest + jsDelivr flat + 单文件，不触网。
+ * 测试用 fetch 替身模拟分支 manifest/catalog、镜像代理 URL、npm registry + jsDelivr，不触网。
  */
 
 import assert from "node:assert/strict";
@@ -17,6 +18,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { PiAiCatalogUpdater } = loadTsCommonJs("src/main/pi/PiAiCatalogUpdater.ts");
+const { generatePiAiCatalogFromFiles } = loadTsCommonJs("src/main/pi/piAiCatalogGenerate.ts");
 
 function okResponse(text) {
 	return { ok: true, arrayBuffer: async () => new TextEncoder().encode(text).buffer };
@@ -162,6 +164,141 @@ test("catalog: 已有覆盖层时，npm latest 不高于覆盖层也不覆盖", 
 		assert.equal(result.ok, true);
 		assert.equal(result.updated, false);
 		assert.equal(downgrade.getStatus().overlay?.packageVersion, "9.9.9", "覆盖层仍为更高版本");
+	} finally {
+		cleanup(dir);
+	}
+});
+
+/**
+ * 分支源 fetch 替身：认识 GitHub raw 与镜像代理前缀两种 manifest/catalog URL，
+ * 其它 URL 一律抛错（模拟分支源是主路径、npm 源未接通的场景）。
+ */
+function makeBranchFetch(catalogText, manifestText) {
+	return async (url) => {
+		if (url.endsWith("pi-ai-catalog.manifest.json")) return okResponse(manifestText);
+		if (url.endsWith("pi-ai-catalog.json")) return okResponse(catalogText);
+		throw new Error(`unexpected branch url ${url}`);
+	};
+}
+
+/** 用来源文件生成一份合法的 catalog/manifest 对（版本号可指定）。 */
+function generateArtifact(version, modelId = "model-a") {
+	return generatePiAiCatalogFromFiles(
+		[{ name: "demo.json", content: demoDataFileContent(modelId) }],
+		version,
+	);
+}
+
+test("catalog:update 走仓库分支预生成件（主源，直连 GitHub raw）", async () => {
+	const dir = tempDir();
+	try {
+		const { catalogText, manifestText } = generateArtifact("9.9.9");
+		const updater = new PiAiCatalogUpdater({
+			userDataDir: dir,
+			fetchImpl: makeBranchFetch(catalogText, manifestText),
+			timeoutMs: 200,
+		});
+		const result = await updater.update("main");
+		assert.equal(result.ok, true);
+		assert.equal(result.updated, true, "分支源高于本地内置时应写入覆盖层");
+		assert.equal(updater.getStatus().overlay?.packageVersion, "9.9.9");
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("catalog:checkRemote 走仓库分支 manifest（主源）", async () => {
+	const dir = tempDir();
+	try {
+		const { catalogText, manifestText } = generateArtifact("9.9.9");
+		const updater = new PiAiCatalogUpdater({
+			userDataDir: dir,
+			fetchImpl: makeBranchFetch(catalogText, manifestText),
+			timeoutMs: 200,
+		});
+		const checked = await updater.checkRemote("main");
+		assert.equal(checked.ok, true);
+		assert.equal(checked.remoteVersion, "9.9.9", "检测远端应取分支 manifest 版本");
+		assert.equal(checked.hasUpdate, true);
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("catalog: 镜像源（ghfast）生成代理 URL 并生效", async () => {
+	const dir = tempDir();
+	try {
+		const { catalogText, manifestText } = generateArtifact("9.9.9");
+		const seen = [];
+		const updater = new PiAiCatalogUpdater({
+			userDataDir: dir,
+			source: () => "ghfast",
+			fetchImpl: async (url) => {
+				seen.push(url);
+				if (url.endsWith("pi-ai-catalog.manifest.json")) return okResponse(manifestText);
+				if (url.endsWith("pi-ai-catalog.json")) return okResponse(catalogText);
+				throw new Error(`unexpected url ${url}`);
+			},
+			timeoutMs: 200,
+		});
+		const result = await updater.update("main");
+		assert.equal(result.ok, true);
+		assert.equal(result.updated, true);
+		assert.ok(
+			seen.some((u) => u.startsWith("https://ghfast.top/https://raw.githubusercontent.com/")),
+			`分支请求应经 ghfast 代理前缀，实际: ${JSON.stringify(seen)}`,
+		);
+		assert.equal(updater.getStatus().overlay?.packageVersion, "9.9.9");
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("catalog: 自定义镜像前缀（custom）生效", async () => {
+	const dir = tempDir();
+	try {
+		const { catalogText, manifestText } = generateArtifact("9.9.9");
+		const seen = [];
+		const updater = new PiAiCatalogUpdater({
+			userDataDir: dir,
+			source: () => "custom",
+			customHost: () => "https://ghproxy.example.com",
+			fetchImpl: async (url) => {
+				seen.push(url);
+				if (url.endsWith("pi-ai-catalog.manifest.json")) return okResponse(manifestText);
+				if (url.endsWith("pi-ai-catalog.json")) return okResponse(catalogText);
+				throw new Error(`unexpected url ${url}`);
+			},
+			timeoutMs: 200,
+		});
+		await updater.update("main");
+		assert.ok(
+			seen.some((u) => u.startsWith("https://ghproxy.example.com/https://raw.githubusercontent.com/")),
+			`自定义镜像前缀应生效，实际: ${JSON.stringify(seen)}`,
+		);
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("catalog: 分支源全挂时回退 npm latest", async () => {
+	const dir = tempDir();
+	try {
+		const updater = new PiAiCatalogUpdater({
+			userDataDir: dir,
+			fetchImpl: async (url) => {
+				// 分支源（raw / jsDelivr gh）一律失败，模拟不可达
+				if (url.includes("raw.githubusercontent.com") || url.includes("cdn.jsdelivr.net/gh/")) {
+					throw new Error(`branch down ${url}`);
+				}
+				return makeNpmFetch("9.9.9", ["demo.json"])(url);
+			},
+			timeoutMs: 200,
+		});
+		const result = await updater.update("main");
+		assert.equal(result.ok, true);
+		assert.equal(result.updated, true, "分支失败应回退 npm 并写入");
+		assert.equal(updater.getStatus().overlay?.packageVersion, "9.9.9");
 	} finally {
 		cleanup(dir);
 	}

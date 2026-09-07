@@ -1,40 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
+// modelsUtils 现在依赖 shared/modelOrder（保存顺序与下拉列表对齐）；
+// 旧内联 loader 把非白名单 require 一律抛错，改用真实依赖图加载。
 function loadModelsTabModule() {
-	const source = readFileSync("src/renderer/src/config/modelsUtils.ts", "utf8");
-	const { outputText } = ts.transpileModule(source, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-			jsx: ts.JsxEmit.ReactJSX,
+	return loadTsCommonJs("src/renderer/src/config/modelsUtils.ts", {
+		stubs: {
+			"../i18n": { t: (key) => key },
 		},
 	});
-	const sandbox = {
-		exports: {},
-		require: (id) => {
-			if (id === "react" || id === "react/jsx-runtime") return {};
-			if (id === "lucide-react") return {};
-			if (id === "../i18n") return { t: (key) => key };
-			if (id === "./ConfigShared") return {};
-			if (id === "./providerHeaders") {
-				return {
-					CUSTOM_USER_AGENT_VALUE: "__custom__",
-					getUserAgentOptions: () => [],
-					getHeaderValue: () => "",
-					setHeaderValue: () => ({}),
-				};
-			}
-			throw new Error(`Unexpected require: ${id}`);
-		},
-	};
-	vm.runInNewContext(outputText, sandbox, {
-		filename: "ModelsTab.tsx",
-	});
-	return sandbox.exports;
 }
 
 test("builds multiple fetched models and skips duplicates", () => {

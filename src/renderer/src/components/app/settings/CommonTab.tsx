@@ -26,7 +26,7 @@ type CommonTabProps = {
 type SelectOption = { value: string; label: string; disabled?: boolean };
 
 /**
- * 设置弹框「常用设置」tab：语言/会话/通知/窗口（Git 分区已拆为独立 tab）。
+ * 设置弹框「常用设置」tab：语言/会话/窗口（Git 分区已拆为独立 tab，通知已拆为独立「通知设置」tab）。
  * 独立组件 + memo：切换 tab 或壳层无关状态变化时不重渲染本 tab。
  */
 export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
@@ -337,33 +337,6 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
             </span>
           </div>
         </SettingRow>
-      </SettingsSection>
-
-      {/* 通知 */}
-      <SettingsSection title={t("settings.notificationSection")}>
-        <SettingSwitchRow
-          title={t("settings.enableNotifications")}
-          checked={draft.enableNotifications}
-          onChange={(checked) =>
-            updateDraft({ enableNotifications: checked })
-          }
-        />
-        <SettingSwitchRow
-          title={t("settings.askNotification")}
-          description={t("settings.askNotificationDesc")}
-          checked={draft.askNotificationEnabled}
-          onChange={(checked) =>
-            updateDraft({ askNotificationEnabled: checked })
-          }
-        />
-        <SettingSwitchRow
-          title={t("settings.agentCountReminder")}
-          description={t("settings.agentCountReminderDesc")}
-          checked={draft.agentCountReminderEnabled}
-          onChange={(checked) =>
-            updateDraft({ agentCountReminderEnabled: checked })
-          }
-        />
       </SettingsSection>
 
       {/* 窗口 */}

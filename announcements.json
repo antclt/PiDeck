@@ -1,0 +1,13 @@
+{
+	"version": 1,
+	"announcements": [
+		{
+			"id": "2026-09-07-announcements-live",
+			"title": "公告功能上线",
+			"body": "PiDeck 现已支持公告功能，将定期发布一些使用指南，或常见问题处理方式。如感觉打扰，可在设置-通知设置 中关闭公告通知功能",
+			"level": "info",
+			"publishedAt": "2026-09-07T00:00:00+08:00",
+			"effectiveUntil": "2026-10-07T00:00:00+08:00"
+		}
+	]
+}

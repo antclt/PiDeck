@@ -459,8 +459,12 @@ export const ipcChannels = {
 	/** 取内置 TokenDance 模型目录（live fetch + userData 缓存；force=true 强制刷新） */
 	configGetTokendanceModels: "config:get-tokendance-models",
 	configInstallTokendance: "config:install-tokendance",
-	/** 启动 TokenDance OAuth 授权流程（PKCE S256 headless；返回授权 URL + flowId） */
+	/** 启动 TokenDance OAuth 授权流程（PKCE S256；mode=callback 走本地回环自动收 code，headless 需用户粘贴） */
 	configTokendanceAuthStart: "config:tokendance-auth-start",
+	/** 等待回环回调自动送达的 code 并交换成 API Key（callback 模式专用，一次点击完成授权） */
+	configTokendanceAuthAwait: "config:tokendance-auth-await",
+	/** 放弃授权流程：释放本地回环端口并丢弃 verifier（弹窗关闭/用户取消时调用） */
+	configTokendanceAuthCancel: "config:tokendance-auth-cancel",
 	/** 提交一次性授权 code 交换 TokenDance API Key（成功返回完整 key） */
 	configTokendanceAuthExchange: "config:tokendance-auth-exchange",
 	/** 快速测试 provider 连接：发送一条最小请求验证 baseUrl/apiKey/模型 是否正常 */
@@ -651,6 +655,18 @@ export const ipcChannels = {
 	voiceTranscriptionSaveConfig: "voice-transcription:save-config",
 	voiceTranscriptionTranscribe: "voice-transcription:transcribe",
 	voiceTranscriptionCancel: "voice-transcription:cancel",
+
+	// ===== 应用公告（无服务器拉取） =====
+	/** 渲染层 → 主进程：拉取当前公告快照（主进程返回缓存，不做网络请求） */
+	announcementList: "announcement:list",
+	/** 渲染层 → 主进程：立即刷新公告（设置页/手动刷新入口；带随机抖动防集中打源） */
+	announcementRefresh: "announcement:refresh",
+	/** 渲染层 → 主进程：标记公告已读（存储持久化到 userData） */
+	announcementMarkRead: "announcement:mark-read",
+	/** 渲染层 → 主进程：标记全部公告已读 */
+	announcementMarkAllRead: "announcement:mark-all-read",
+	/** 主进程 → 渲染层：推送公告快照（定时拉取成功/缓存加载完成后广播） */
+	announcementChanged: "announcement:changed",
 
 	// ===== 系统剪贴板（必须走主进程；Electron 38 废弃渲染进程/preload 直连 clipboard） =====
 	clipboardReadText: "clipboard:read-text",

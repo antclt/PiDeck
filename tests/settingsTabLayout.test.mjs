@@ -18,8 +18,8 @@ test("布局覆盖全部 16 个 tab 且不重复", () => {
 
 test("展示顺序按 基础 → 扩展集成 → 开发者工具 → 开发与维护 排列", () => {
 	assert.deepEqual([...SETTINGS_TAB_LAYOUT.map((entry) => entry.id)], [
-		"common", "appearance", "proxy",
-		"im", "pet", "sound", "vision", "imagegen",
+		"common", "notification", "appearance", "proxy",
+		"im", "pet", "vision", "imagegen",
 		"web", "editors", "git",
 		"dev", "usage", "process", "storage", "backup",
 	]);

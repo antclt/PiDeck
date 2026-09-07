@@ -1,4 +1,6 @@
 import type { AvailableModel } from "../../../../shared/types";
+// 下拉列表排序键与配置页 / 落盘顺序共用 shared 比较器（避免两边秩不一致）。
+import { compareModelRows } from "../../../../shared/modelOrder";
 import type { TranslationKey } from "../../i18n";
 
 /** Shared thinking options used by both the composer picker and the first-session setup. */
@@ -79,7 +81,7 @@ export function groupModelsByProvider(models: AvailableModel[]) {
   }, {});
 
   for (const providerModels of Object.values(groups)) {
-    providerModels.sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id));
+    providerModels.sort(compareModelRows);
   }
   return groups;
 }

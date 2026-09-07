@@ -403,7 +403,10 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
       </SettingsSection>
 
       {/* 模型目录：内置随版本发布，可从 GitHub 拉取最新覆盖 */}
-      <CatalogSection />
+      <CatalogSection
+        updateSource={draft.updateSource}
+        customUpdateSourceUrl={draft.customUpdateSourceUrl}
+      />
 
       {/* 运行 */}
       <SettingsSection title={t("settings.sectionRuntime")}>

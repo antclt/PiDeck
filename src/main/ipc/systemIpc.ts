@@ -31,7 +31,7 @@ import type { SkillManager } from "../skills/SkillManager";
 import { fetchModelList, getCachedModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
-import type { TokendanceAuthStore } from "../config/tokendanceAuth";
+import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
@@ -1390,17 +1390,52 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { models: [], fromCache: false, at: 0 };
 		}
 	});
-	ipcMain.handle(ipcChannels.configTokendanceAuthStart, async (_event) => {
+	ipcMain.handle(ipcChannels.configTokendanceAuthStart, async (_event, payload: unknown) => {
 		// 未装配 = 主进程没注册授权能力（预览/测试壳），返回失败不抛异常。
 		if (!tokendanceAuth) return { ok: false, error: "TokenDance auth unavailable" };
+		const mode =
+			typeof payload === "object" && payload
+				? (payload as { mode?: unknown }).mode
+				: undefined;
+		// 枚举白名单：只认 headless，其余（含缺失/非法）一律取默认 callback。
+		const requested: TokendanceAuthMode = mode === "headless" ? "headless" : "callback";
 		try {
-			return { ok: true, ...tokendanceAuth.start() } as const;
+			// callback 模式要绑定本地端口（异步），失败时 store 内部降级为 headless 并带 fallbackReason。
+			return { ok: true, ...(await tokendanceAuth.start({ mode: requested })) } as const;
 		} catch (error) {
 			void appLogger.warn("config", "TokenDance auth start failed", {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return { ok: false, error: "TokenDance auth start failed" };
 		}
+	});
+	ipcMain.handle(ipcChannels.configTokendanceAuthAwait, async (_event, payload: unknown) => {
+		// callback 模式主路径：挂起等待浏览器把 code 送回本地，拿到就当场交换成 Key。
+		const flowId =
+			typeof payload === "object" && payload
+				? (payload as { flowId?: unknown }).flowId
+				: undefined;
+		if (typeof flowId !== "string" || !flowId) {
+			return { ok: false, error: "Invalid auth await input" };
+		}
+		if (!tokendanceAuth) return { ok: false, error: "TokenDance auth unavailable" };
+		const result = await tokendanceAuth.awaitKey(flowId);
+		if (result.ok) {
+			void appLogger.info("config", "TokenDance API key exchanged via callback");
+			return { ok: true, key: result.key } as const;
+		}
+		void appLogger.warn("config", "TokenDance callback auth failed", { error: result.error });
+		return { ok: false, error: result.error } as const;
+	});
+	ipcMain.handle(ipcChannels.configTokendanceAuthCancel, async (_event, payload: unknown) => {
+		// 生命周期配对：弹窗关闭/取消必须释放回环端口，否则端口随流程泄漏到过期清理为止。
+		const flowId =
+			typeof payload === "object" && payload
+				? (payload as { flowId?: unknown }).flowId
+				: undefined;
+		if (typeof flowId !== "string" || !flowId) return { ok: false, error: "Invalid auth cancel input" };
+		tokendanceAuth?.cancel(flowId);
+		return { ok: true } as const;
 	});
 	ipcMain.handle(ipcChannels.configTokendanceAuthExchange, async (_event, payload: unknown) => {
 		// 边界校验：flowId/code 必须是非空字符串（渲染层入参不可信）；code 不写日志。

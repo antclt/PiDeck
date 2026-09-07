@@ -7,7 +7,7 @@ import type { SettingsTabId } from "../../../atoms";
  *
  * 14 个 tab 平铺不易扫读，按「基础 → 扩展集成 → 开发者工具 → 开发与维护」四个簇
  * 重排并在簇边界渲染一条分割线：
- * - 基础：常用 / 外观 / 代理（打开应用必看的全局项）
+ * - 基础：常用 / 通知 / 外观 / 代理（打开应用必看的全局项）
  * - 扩展集成：飞书机器人 / 桌面宠物 / 视觉桥 / 生图（外部能力与增值功能）
  * - 开发者工具：局域网 Web 服务 / 外部编辑器 / Git
  * - 开发与维护：开发设置 / 用量统计 / 进程监控 / 缓存与日志 / 配置备份
@@ -23,11 +23,11 @@ export type SettingsTabLayoutEntry = {
 
 export const SETTINGS_TAB_LAYOUT: readonly SettingsTabLayoutEntry[] = [
 	{ id: "common" },
+	{ id: "notification" },
 	{ id: "appearance" },
 	{ id: "proxy" },
 	{ id: "im", dividerBefore: true },
 	{ id: "pet" },
-	{ id: "sound" },
 	{ id: "vision" },
 	{ id: "imagegen" },
 	{ id: "web", dividerBefore: true },

@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
+import type { TokendanceAuthMode } from "../shared/tokendance";
+import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
@@ -1559,10 +1561,24 @@ const api = {
 				fromCache: boolean;
 				at: number;
 			}>,
-		/** 启动 TokenDance OAuth 授权（PKCE S256 headless）：返回授权 URL + flowId（verifier 仅主进程持有）。 */
-		tokendanceAuthStart: () =>
-			ipcRenderer.invoke(ipcChannels.configTokendanceAuthStart) as Promise<
-				{ ok: true; flowId: string; authUrl: string } | { ok: false; error: string }
+		/**
+		 * 启动 TokenDance OAuth 授权（PKCE S256）：返回授权 URL + flowId（verifier 仅主进程持有）。
+		 * mode 默认 callback（本地回环自动收 code）；主进程绑定失败会降级成 headless 并回 fallbackReason。
+		 */
+		tokendanceAuthStart: (mode?: TokendanceAuthMode) =>
+			ipcRenderer.invoke(ipcChannels.configTokendanceAuthStart, { mode }) as Promise<
+				| { ok: true; flowId: string; authUrl: string; mode: TokendanceAuthMode; fallbackReason?: string }
+				| { ok: false; error: string }
+			>,
+		/** 等回环回调自动送达的 code 并交换成 Key（callback 模式免粘贴主路径；超时/失败返回 error）。 */
+		tokendanceAuthAwait: (flowId: string) =>
+			ipcRenderer.invoke(ipcChannels.configTokendanceAuthAwait, { flowId }) as Promise<
+				{ ok: true; key: string } | { ok: false; error: string }
+			>,
+		/** 放弃授权：释放本地回环端口并丢弃 verifier（弹窗关闭/取消时必调）。 */
+		tokendanceAuthCancel: (flowId: string) =>
+			ipcRenderer.invoke(ipcChannels.configTokendanceAuthCancel, { flowId }) as Promise<
+				{ ok: boolean; error?: string }
 			>,
 		/** 用一次性授权 code 交换 TokenDance API Key；成功后 key 只在本次响应出现，须立即写入配置。 */
 		tokendanceAuthExchange: (flowId: string, code: string) =>
@@ -1789,6 +1805,23 @@ const api = {
 		/** 删除自定义音频文件 */
 		removeCustom: (name: string) =>
 			ipcRenderer.invoke(ipcChannels.soundsRemoveCustom, name) as Promise<boolean>,
+	},
+	announcements: {
+		/** 拉取当前公告快照（主进程返回缓存态，不触发网络请求） */
+		list: () =>
+			ipcRenderer.invoke(ipcChannels.announcementList) as Promise<AnnouncementState>,
+		/** 手动刷新公告（设置页/入口按钮；主进程防重入，并发调用安全） */
+		refresh: () =>
+			ipcRenderer.invoke(ipcChannels.announcementRefresh) as Promise<AnnouncementState>,
+		/** 标记单条公告已读（幂等） */
+		markRead: (id: string) =>
+			ipcRenderer.invoke(ipcChannels.announcementMarkRead, id) as Promise<boolean>,
+		/** 全部已读 */
+		markAllRead: () =>
+			ipcRenderer.invoke(ipcChannels.announcementMarkAllRead) as Promise<boolean>,
+		/** 订阅公告快照推送（定时拉取/已读变更后触发）；返回退订函数，组件卸载必须调用 */
+		onChanged: (callback: (state: AnnouncementState) => void) =>
+			subscribe(ipcChannels.announcementChanged, callback),
 	},
 	terminal: {
 		list: (target: TerminalTarget) =>
