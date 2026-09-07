@@ -24,3 +24,10 @@ export const unreadAnnouncementsAtom = atom<AnnouncementItem[]>((get) => {
  * toast「查看」按钮在任意位置都能打开公告中心，状态必须提升为全局单一 owner。
  */
 export const announcementCenterOpenAtom = atom(false);
+
+/**
+ * 「公告通知」开关的渲染层镜像（App.tsx 在 settings 变化时同步写入）。
+ * 通知调度 hook 与侧栏入口显隐共用同一数据源，设置保存后即时生效。
+ * 默认 true 与主进程 SettingsStore 出厂默认一致（首屏未拉到真实设置前不误隐）。
+ */
+export const announcementNotificationEnabledAtom = atom(true);

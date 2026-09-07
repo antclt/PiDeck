@@ -3162,7 +3162,7 @@ export const zhCN = {
   "settings.agentCountReminder": "激活 Agent 数量提醒",
   "settings.agentCountReminderDesc": "激活 Agent 达到 15 个时，启动时提醒关闭空闲会话释放内存",
   "settings.announcementNotification": "公告通知",
-  "settings.announcementNotificationDesc": "收到新公告时弹出提醒（默认开启；输入或会话运行中会自动延后弹出），关闭后仍可点击侧栏公告图标查看",
+  "settings.announcementNotificationDesc": "收到新公告时弹出提醒（默认开启；输入或会话运行中会自动延后弹出）。关闭后侧栏公告入口与提醒一并隐藏",
   "settings.enablePiProxy": "启用 pi agent 代理",
   "settings.enablePiProxyDesc": "开启后所有 pi 会话默认走下方地址（重启会话后生效）。仅保存地址不开启开关时，可配合右键菜单「会话代理」或下方供应商白名单按需启用",
   "settings.piProxyModels": "按模型走代理",

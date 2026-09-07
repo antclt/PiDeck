@@ -3191,7 +3191,7 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.agentCountReminder": "Active agent count reminder",
   "settings.agentCountReminderDesc": "When 15+ agents are active, remind at launch to close idle sessions and free memory",
   "settings.announcementNotification": "Announcement notifications",
-  "settings.announcementNotificationDesc": "Show a toast when new announcements arrive (default on; auto-deferred while typing or a session is running). Turn off to check via the sidebar megaphone only",
+  "settings.announcementNotificationDesc": "Show a toast when new announcements arrive (default on; auto-deferred while typing or a session is running). Turning off also hides the sidebar megaphone entry",
   "settings.enablePiProxy": "Enable pi agent proxy",
   "settings.enablePiProxyDesc": "When on, all pi sessions use the address below by default (takes effect after restarting the session). Save the address without enabling it to apply it per-session via the \u201CSession proxy\u201D context menu or the provider allowlist below",
   "settings.piProxyModels": "Proxy by model",

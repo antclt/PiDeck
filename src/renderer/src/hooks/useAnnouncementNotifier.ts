@@ -15,6 +15,7 @@ import { useEffect, useRef } from "react";
 import { getDefaultStore, useAtomValue } from "jotai";
 import {
 	announcementCenterOpenAtom,
+	announcementNotificationEnabledAtom,
 	unreadAnnouncementsAtom,
 } from "../atoms/announcement-atoms";
 import { currentSessionRuntimeAtom } from "../atoms/session-atoms";
@@ -65,10 +66,12 @@ function readAnnouncementBusyContext(): AnnouncementBusyContext {
 }
 
 /**
- * 公告通知调度。enabled = 设置「公告通知」开关（默认开启）；
- * 关闭后完全不弹 toast，公告仍经侧栏红点入口被动可见。
+ * 公告通知调度。开关读 announcementNotificationEnabledAtom 镜像（App.tsx 从
+ * settings 同步，参数化 prop 改为 atom 后切开关最多延迟一个轮询周期生效，
+ * 约 3s，对低频公告无感知）；关闭后完全不弹 toast，入口按钮与红点由
+ * AnnouncementCenter 按同一开关隐藏。
  */
-export function useAnnouncementNotifier(enabled: boolean): void {
+export function useAnnouncementNotifier(): void {
 	// 本运行周期已弹过 toast 的公告 id：防止同一条公告反复打扰（应用重启才重置）
 	const shownIdsRef = useRef<Set<string>>(new Set());
 	const lastToastAtRef = useRef(0);
@@ -83,7 +86,8 @@ export function useAnnouncementNotifier(enabled: boolean): void {
 	}, [centerOpen]);
 
 	useEffect(() => {
-		if (!enabled) return;
+		// 开关走镜像 atom 而非 effect 依赖：轮询链路不重建，切开关最迟下个 tick 生效
+		if (!getDefaultStore().get(announcementNotificationEnabledAtom)) return;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const tick = () => {
 			// 先排下一轮再处理本轮：任何提前 return 的分支都不会打断轮询节奏
@@ -118,5 +122,5 @@ export function useAnnouncementNotifier(enabled: boolean): void {
 		return () => {
 			if (timer !== undefined) clearTimeout(timer);
 		};
-	}, [enabled]);
+	}, []);
 }

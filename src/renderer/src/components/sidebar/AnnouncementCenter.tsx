@@ -15,6 +15,7 @@ import {
 	unreadAnnouncementsAtom,
 	announcementStateAtom,
 	announcementCenterOpenAtom,
+	announcementNotificationEnabledAtom,
 } from "../../atoms/announcement-atoms";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
@@ -99,6 +100,9 @@ export function AnnouncementCenter() {
 	const setOpen = useSetAtom(announcementCenterOpenAtom);
 	const state = useAtomValue(announcementStateAtom);
 	const unread = useAtomValue(unreadAnnouncementsAtom);
+	// 「公告通知」开关关闭时整个公告入口隐藏（用户明确不要公告），
+	// 同一开关也控制 toast 弹出（见 useAnnouncementNotifier），数据源单一
+	const notifyEnabled = useAtomValue(announcementNotificationEnabledAtom);
 	// 打开弹窗即已读：主进程幂等合并，重复调用安全
 	const markAllRead = useCallback(() => {
 		void desktopApi.announcements.markAllRead().catch(() => undefined);
@@ -118,6 +122,9 @@ export function AnnouncementCenter() {
 
 	const items = state?.items ?? [];
 	const unreadCount = unread.length;
+
+	// 入口隐藏：开关关闭 = 用户不要公告，通知与入口一并下线（挂载点不变，侧栏结构稳定）
+	if (!notifyEnabled) return null;
 
 	return (
 		<Dialog
