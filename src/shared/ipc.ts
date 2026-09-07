@@ -654,6 +654,18 @@ export const ipcChannels = {
 	voiceTranscriptionTranscribe: "voice-transcription:transcribe",
 	voiceTranscriptionCancel: "voice-transcription:cancel",
 
+	// ===== 应用公告（无服务器拉取） =====
+	/** 渲染层 → 主进程：拉取当前公告快照（主进程返回缓存，不做网络请求） */
+	announcementList: "announcement:list",
+	/** 渲染层 → 主进程：立即刷新公告（设置页/手动刷新入口；带随机抖动防集中打源） */
+	announcementRefresh: "announcement:refresh",
+	/** 渲染层 → 主进程：标记公告已读（存储持久化到 userData） */
+	announcementMarkRead: "announcement:mark-read",
+	/** 渲染层 → 主进程：标记全部公告已读 */
+	announcementMarkAllRead: "announcement:mark-all-read",
+	/** 主进程 → 渲染层：推送公告快照（定时拉取成功/缓存加载完成后广播） */
+	announcementChanged: "announcement:changed",
+
 	// ===== 系统剪贴板（必须走主进程；Electron 38 废弃渲染进程/preload 直连 clipboard） =====
 	clipboardReadText: "clipboard:read-text",
 	clipboardReadHtml: "clipboard:read-html",

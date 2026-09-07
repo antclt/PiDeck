@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
 import type { TokendanceAuthMode } from "../shared/tokendance";
+import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
@@ -1799,6 +1800,23 @@ const api = {
 		/** 删除自定义音频文件 */
 		removeCustom: (name: string) =>
 			ipcRenderer.invoke(ipcChannels.soundsRemoveCustom, name) as Promise<boolean>,
+	},
+	announcements: {
+		/** 拉取当前公告快照（主进程返回缓存态，不触发网络请求） */
+		list: () =>
+			ipcRenderer.invoke(ipcChannels.announcementList) as Promise<AnnouncementState>,
+		/** 手动刷新公告（设置页/入口按钮；主进程防重入，并发调用安全） */
+		refresh: () =>
+			ipcRenderer.invoke(ipcChannels.announcementRefresh) as Promise<AnnouncementState>,
+		/** 标记单条公告已读（幂等） */
+		markRead: (id: string) =>
+			ipcRenderer.invoke(ipcChannels.announcementMarkRead, id) as Promise<boolean>,
+		/** 全部已读 */
+		markAllRead: () =>
+			ipcRenderer.invoke(ipcChannels.announcementMarkAllRead) as Promise<boolean>,
+		/** 订阅公告快照推送（定时拉取/已读变更后触发）；返回退订函数，组件卸载必须调用 */
+		onChanged: (callback: (state: AnnouncementState) => void) =>
+			subscribe(ipcChannels.announcementChanged, callback),
 	},
 	terminal: {
 		list: (target: TerminalTarget) =>

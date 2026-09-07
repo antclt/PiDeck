@@ -1,6 +1,7 @@
 import React from "react";
 import { useGlobalAgentListeners } from "../../hooks/useGlobalAgentListeners";
 import { useSoundAlerts } from "../../hooks/useSoundAlerts";
+import { useAnnouncementsSync } from "../../hooks/useAnnouncementsSync";
 import type { AppSettings, Project } from "../../../../shared/types";
 
 interface AppBootstrapProps {
@@ -22,6 +23,8 @@ export const AppBootstrap = React.memo(function AppBootstrap(props: AppBootstrap
   });
   // 声音提醒：全局唯一挂载点（与其它全局 listener 同层），卸载即退订
   useSoundAlerts();
+  // 公告快照全局同步：初始 list + 订阅推送，同样全局唯一挂载点、卸载即退订
+  useAnnouncementsSync();
 
   return null;
 });

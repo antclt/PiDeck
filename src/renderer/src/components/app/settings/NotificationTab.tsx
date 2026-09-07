@@ -214,6 +214,14 @@ export const NotificationTab = memo(function NotificationTab(props: Notification
 						updateDraft({ agentCountReminderEnabled: checked })
 					}
 				/>
+				<SettingSwitchRow
+					title={t("settings.announcementNotification")}
+					description={t("settings.announcementNotificationDesc")}
+					checked={draft.announcementNotificationEnabled}
+					onChange={(checked) =>
+						updateDraft({ announcementNotificationEnabled: checked })
+					}
+				/>
 			</SettingsSection>
 
 			<SettingsSection title={t("settings.sound.title")} description={t("settings.sound.sectionDesc")}>

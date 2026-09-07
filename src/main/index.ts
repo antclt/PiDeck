@@ -22,6 +22,8 @@ import { PetSystem, type PetSystemDeps } from "./pet";
 import { SoundAlertService } from "./sounds/SoundAlertService";
 import { registerSoundIpc } from "./ipc/soundIpc";
 import { registerSoundProtocol } from "./sounds/soundProtocol";
+import { AnnouncementService } from "./announcements/AnnouncementService";
+import { registerAnnouncementIpc } from "./ipc/announcementIpc";
 import {
 	applyLinuxDisplayBackendWorkaround,
 	isUsingLinuxXWaylandWorkaround,
@@ -433,6 +435,8 @@ let terminalManager: TerminalSessionManager;
 let petSystem: PetSystem | null = null;
 /** 声音提醒服务（完成/出错/等待输入提示音）；null = 未初始化 */
 let soundAlertService: SoundAlertService | null = null;
+/** 应用公告服务（无服务器拉取模式）；null = 未初始化 */
+let announcementService: AnnouncementService | null = null;
 let appLogger: AppLogger;
 let rpcLogger: RpcLogger;
 /** 内存采样句柄（PIDECK_MEMORY_PROFILE=1 时启用），quit 时停止 */
@@ -3943,6 +3947,26 @@ app.whenReady().then(async () => {
 	quitCleanup.register("sound-alert", () => {
 		soundAlertService?.detach();
 		soundAlertService = null;
+	});
+
+	// 应用公告：无服务器拉取（仓库 announcements.json，jsDelivr → 内置镜像 → raw 兜底），
+	// 2h 周期 + 启动抖动；快照变化推给主窗口，已读集合持久化在 userData。
+	announcementService = new AnnouncementService({
+		userDataDir: app.getPath("userData"),
+		appVersion: app.getVersion(),
+		log: (domain, message, details) => void appLogger.info(domain, message, details),
+		onSnapshot: (state) => {
+			// 推送前判空 + isDestroyed：窗口销毁后 send 会抛
+			const win = mainWindow;
+			if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.announcementChanged, state);
+		},
+	});
+	announcementService.start();
+	registerAnnouncementIpc(() => announcementService);
+	// 退出清理登记（before-quit 统一 runAll）：停定时器，避免退出阶段仍触发拉取
+	quitCleanup.register("announcement", () => {
+		announcementService?.stop();
+		announcementService = null;
 	});
 
 	// 项目列表可能位于杀软/同步盘较慢的 userData；窗口先显示，随后异步加载，避免 packaged app 打开时白屏等待。

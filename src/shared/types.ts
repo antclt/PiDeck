@@ -30,6 +30,7 @@ export * from "./types/dshLlm";
 export * from "./types/dshRuntime";
 export * from "./types/dshRuntimeManifest";
 export * from "./types/providerMigration";
+export * from "./types/announcement";
 export * from "./types/providerUsage";
 export * from "./types/pasteFile";
 export * from "./types/mcp";

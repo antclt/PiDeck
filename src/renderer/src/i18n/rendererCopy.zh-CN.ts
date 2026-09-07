@@ -3152,6 +3152,8 @@ export const zhCN = {
   "settings.askNotificationDesc": "Agent 向你提问（select/confirm/input/editor）时，同时发送系统通知（默认关闭，应用内 toast 始终显示）",
   "settings.agentCountReminder": "激活 Agent 数量提醒",
   "settings.agentCountReminderDesc": "激活 Agent 达到 15 个时，启动时提醒关闭空闲会话释放内存",
+  "settings.announcementNotification": "公告通知",
+  "settings.announcementNotificationDesc": "收到新公告时弹出提醒（默认开启；输入或会话运行中会自动延后弹出），关闭后仍可点击侧栏公告图标查看",
   "settings.enablePiProxy": "启用 pi agent 代理",
   "settings.enablePiProxyDesc": "开启后所有 pi 会话默认走下方地址（重启会话后生效）。仅保存地址不开启开关时，可配合右键菜单「会话代理」或下方供应商白名单按需启用",
   "settings.piProxyModels": "按模型走代理",
@@ -3640,6 +3642,17 @@ export const zhCN = {
   "voice.settings.error.invalidConfig": "语音设置无效，请检查地址、模型和语言",
   "voice.settings.error.secureStorageUnavailable": "系统安全存储不可用，无法保存新的 API Key",
   "voice.settings.error.saveFailed": "保存语音设置失败",
+  "announcements.title": "公告",
+  "announcements.empty": "暂无公告",
+  "announcements.notFetched": "公告尚未获取，启动后自动拉取",
+  "announcements.fetchedAt": "最近检查：{time}",
+  "announcements.unreadBadge": "{count} 条未读公告",
+  "announcements.unreadAria": "公告，{count} 条未读",
+  "announcements.viewOnline": "查看全部公告",
+  "announcements.toast.view": "查看",
+  "announcements.refresh": "刷新",
+  "announcements.refreshFailed": "公告刷新失败，请稍后重试",
+  "announcements.markAllRead": "全部已读",
 } as const;
 
 export type TranslationKey = keyof typeof zhCN;
