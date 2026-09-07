@@ -32,7 +32,7 @@ function pruneRuntimeNotificationKeys(): void {
   for (const retainedKey of retained) seenRuntimeNotificationKeys.add(retainedKey);
 }
 
-/** 后台 Ask 在焦点切换期间保持去重，只有请求结束后才显式回收。 */
+/** Ask 提醒在焦点切换期间保持去重，只有请求结束后才显式回收。 */
 export function rememberBackgroundAsk(key: string): boolean {
   if (seenBackgroundAskKeys.has(key)) return false;
   seenBackgroundAskKeys.add(key);
@@ -52,7 +52,7 @@ export function getRememberedBackgroundAskKeys(): string[] {
   return Array.from(seenBackgroundAskKeys);
 }
 
-/** 后台 Ask 通知的展示信息拆分：会话名缺失时回退默认名，问题摘要取请求标题。 */
+/** Ask 提醒通知的展示信息拆分：会话名缺失时回退默认名，问题摘要取请求标题。 */
 export type BackgroundAskDisplay = {
   sessionName: string;
   question: string | undefined;
@@ -64,7 +64,7 @@ export type BackgroundAskDisplay = {
  * - question：请求自身的标题（即提问内容），无则不提供（调用方选择精简文案）。
  * 纯逻辑，不依赖 React / i18n，便于单测。
  * 标题先过 formatAskTitle：剥掉 Plan/安全确认的内部标记（如安全确认的 JSON 负载），
- * 避免后台通知里出现原始标记/JSON 而不是可读的问题。
+ * 避免提醒通知里出现原始标记/JSON 而不是可读的问题。
  */
 export function describeBackgroundAsk(input: {
   sessionName?: string;

@@ -5654,7 +5654,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * 非聚焦会话收到 Ask 类 UI 请求时的桌面通知（SessionRuntimeCoordinator 调用）。
+	 * 会话收到 Ask 类 UI 请求时的桌面通知（SessionRuntimeCoordinator 调用，
+	 * 不再区分该会话是否聚焦：只要 Agent 在提问就提醒）。
 	 * 独立于 notifySessionEnd：由 askNotificationEnabled 单独门控（默认关闭），
 	 * 即使用户关闭通用会话结束通知，仍可单独开启提问提醒，反之亦然。
 	 * 每轮 run 只通知一次（去重标记在 agent_start 时清除），避免同一轮多次提问刷屏。
