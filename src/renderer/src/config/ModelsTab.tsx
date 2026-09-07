@@ -13,6 +13,8 @@ import {
 	setHeaderValue,
 } from "./providerHeaders";
 import { buildModelsFromFetchedSelection } from "./modelsUtils";
+// 排序键收敛到 shared：与模型下拉列表 / 主进程写入保持同一顺序。
+import { compareModelRows } from "../../../shared/modelOrder";
 import {
 	countSelectedModelIndexes,
 	getModelSelectionState,
@@ -986,9 +988,7 @@ export function ModelsTab(props: {
 														});
 																				const allModels = [...currentProvider.models, ...newModels];
 										// 按模型名称（无名称时回退 id）字母正序排列，保证保存后模型表顺序稳定。
-										allModels.sort((a, b) =>
-											((a.name ?? a.id).toLowerCase()).localeCompare((b.name ?? b.id).toLowerCase()),
-										);
+										allModels.sort(compareModelRows);
 										props.onChangeProvider(name, "models", allModels);
 														setSelectedFetchedModels(name, []);
 															if (filledCount > 0) {

@@ -10,6 +10,8 @@
  */
 
 import type { FetchedModel } from "../../shared/types/fetchedModel";
+// 排序键收敛到 shared：/models 结果、配置页保存、模型下拉列表用同一套顺序。
+import { sortModelRows } from "../../shared/modelOrder";
 import { positiveInt } from "../pi/piAiBuiltinCatalog";
 import { parseThinkingLevelMap } from "../pi/modelCapabilityMatch";
 
@@ -105,9 +107,7 @@ export function parseProviderModelsResponse(
 			...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 		});
 	}
-	// 按模型名称（无名称时回退 id）字母正序排列，避免下拉列表与保存后的顺序随 API 返回乱序。
-	models.sort((a, b) =>
-		((a.name ?? a.id).toLowerCase()).localeCompare((b.name ?? b.id).toLowerCase()),
-	);
-	return models;
+	// 按展示名正序排列（排序键收敛到 shared/modelOrder，与下拉列表/配置页一致），
+	// 避免下拉列表与保存后的顺序随 API 返回乱序。
+	return sortModelRows(models);
 }

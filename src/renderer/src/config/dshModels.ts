@@ -1,4 +1,6 @@
 import type { FetchedModel } from "../../../shared/types/fetchedModel";
+// 排序键收敛到 shared：DSH 模型行与 Pi 配置页 / 下拉列表保持同一顺序。
+import { sortModelRows } from "../../../shared/modelOrder";
 import { buildModelsFromFetchedSelection } from "./modelsUtils";
 
 /** DSH 模型行：自定义覆盖适配器目录时写入 settings.yaml 的条目。 */
@@ -166,13 +168,8 @@ export function appendFetchedDshModels(input: DshModelSeedInput & {
 			return row;
 		}),
 	];
-	// 按模型名称（无名称时回退 id）字母正序排列，保证保存后模型表顺序稳定。
-	result.sort((a, b) => {
-		const aKey = typeof a.name === "string" && a.name ? a.name : String(a.id ?? "");
-		const bKey = typeof b.name === "string" && b.name ? b.name : String(b.id ?? "");
-		return aKey.toLowerCase().localeCompare(bKey.toLowerCase());
-	});
-	return result;
+	// 按展示名正序排列（name 缺失回退 id），保证保存后模型表顺序稳定。
+	return sortModelRows(result);
 }
 
 /** DSH 配置页应通过 host 的 llm.discoverModels 取候选，不在 renderer 解析 provider 端点。 */

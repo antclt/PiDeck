@@ -18,6 +18,13 @@ function makeCatalog(models = [{ id: "glm-4.7" }, { id: "deepseek-v4-flash", con
 	};
 }
 
+/** 按 id 取模型行：保存列表已按名称排序，断言不再依赖入参顺序。 */
+function byId(models, id) {
+	const found = models.find((model) => model.id === id);
+	assert.ok(found, `model ${id} missing from ${JSON.stringify(models.map((m) => m.id))}`);
+	return found;
+}
+
 /** ConfigManager 替身：内存版 models.json（save 后可从 _dump 读回断言）。 */
 function makeConfigManager(initialProviders = {}) {
 	let providers = { ...initialProviders };
@@ -70,7 +77,12 @@ test("一键安装：pi models.json 写入 provider（baseUrl/归因头/模型�
 	// 请求维度归因：X-App-URL 覆盖 Key 上的 app_url
 	assert.equal(provider.headers["X-App-URL"], "https://pideck.caoayu.top/");
 	assert.equal(provider.models.length, 2);
-	assert.equal(provider.models[1].contextWindow, 128000);
+	// 保存顺序与模型下拉列表一致（按名称/id 正序）：deepseek-v4-flash 排在 glm-4.7 之前
+	assert.deepEqual(
+		provider.models.map((m) => m.id),
+		["deepseek-v4-flash", "glm-4.7"],
+	);
+	assert.equal(byId(provider.models, "deepseek-v4-flash").contextWindow, 128000);
 
 	// DSH 侧：llm-pi-ai.providers.tokendance（displayName/baseURL/api/apiKeyEnv/models）+ 凭证
 	const dshCall = dshHost._calls.updateSettings[0];
@@ -157,16 +169,14 @@ test("contextWindow 非正整数（0）不写入：pi 报 invalid contextWindow 
 		{},
 	);
 	assert.equal(result.ok, true);
-	const [bad, good] = configManager._dump()["tokendance"].models;
-	assert.equal(bad.contextWindow, undefined);
-	assert.equal(bad.id, "seedream-5.0-lite");
-	assert.equal(good.contextWindow, 200000);
+	// 排序后位置会变（glm 排在 seedream 前），按 id 取行断言字段而非依赖下标
+	const savedModels = configManager._dump()["tokendance"].models;
+	assert.equal(byId(savedModels, "seedream-5.0-lite").contextWindow, undefined);
+	assert.equal(byId(savedModels, "glm-4.7").contextWindow, 200000);
 	// DSH 侧同步过滤：DSH schema contextWindow min(1) 拒绝 0，必须不写入
-	const dshPatch = dshHost._calls.updateSettings[0].patch;
-	const dshModels = dshPatch.providers.tokendance.models;
-	assert.equal(dshModels[0].contextWindow, undefined);
-	assert.equal(dshModels[0].id, "seedream-5.0-lite");
-	assert.equal(dshModels[1].contextWindow, 200000);
+	const dshModels = dshHost._calls.updateSettings[0].patch.providers.tokendance.models;
+	assert.equal(byId(dshModels, "seedream-5.0-lite").contextWindow, undefined);
+	assert.equal(byId(dshModels, "glm-4.7").contextWindow, 200000);
 });
 
 test("安装前强制 refresh 目录（旧缓存可能含坏数据；refresh 失败降级 getModels）", async () => {
@@ -209,7 +219,9 @@ test("catalogLookup：目录命中时补 maxTokens/reasoning/input/thinkingLevel
 		{},
 	);
 	assert.equal(result.ok, true);
-	const [hit, miss] = configManager._dump()["tokendance"].models;
+	const saved = configManager._dump()["tokendance"].models;
+	const hit = byId(saved, "glm-4.7");
+	const miss = byId(saved, "qq-custom-model");
 	// 目录权威：contextWindow 用 TokenDance 实报值，即使 catalog 不同也以平台为准
 	assert.equal(hit.contextWindow, 200000);
 	assert.equal(hit.maxTokens, 131072);
