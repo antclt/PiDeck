@@ -49,6 +49,7 @@ test("large settings dialogs inherit page wallpaper transparency", () => {
   const settingsSource = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
   const projectResourcesSource = readFileSync("src/renderer/src/components/app/ProjectResourcesModal.tsx", "utf8");
   const modelsSource = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
+  const modelsTableSource = readFileSync("src/renderer/src/config/ModelsTable.tsx", "utf8");
   const surfacesSource = readFileSync("src/renderer/src/styles/surfaces.css", "utf8");
 
   // 设置和项目资源管理是工作台式弹框，应跟随页面透明度；普通确认弹框仍保留
@@ -58,7 +59,8 @@ test("large settings dialogs inherit page wallpaper transparency", () => {
   assert.match(surfacesSource, /\.settings-modal \.settings-layout[\s\S]*?\.project-resources-dialog \.project-resources-body[\s\S]*?background: transparent;/);
   assert.match(modelsSource, /config-provider-card/);
   assert.match(modelsSource, /config-provider-body/);
-  assert.match(modelsSource, /config-model-table/);
+  // 模型表格容器已内聚到共享组件 ModelsTable（展开卡片与编辑页共用）
+  assert.match(modelsTableSource, /config-model-table/);
   assert.match(surfacesSource, /\.config-modal \.config-model-table[\s\S]*?\.feedback-modal-shell \.feedback-environment-content[\s\S]*?\.feedback-modal-shell \.feedback-actions/);
 });
 
