@@ -2033,7 +2033,7 @@ export const zhCN = {
   "projectResources.emptyExtensions": "该项目暂无 Extension。文件应放在 .pi/extensions/ 下。",
   "projectResources.deleteSkillConfirm": "确认删除 Skill「{name}」吗？此操作会删除本地 Skill 文件。",
   "projectResources.deleteExtensionConfirm": "确认删除 Extension「{name}」吗？此操作会删除本地 Extension 文件。",
-  "projectResources.extensionsHint": "项目扩展放在 .pi/extensions/ 目录下（.ts 文件或含 index.ts 的子目录）。",
+  "projectResources.extensionsHint": "项目扩展放在 .pi/extensions/ 目录下（.ts/.js 文件、含 index.ts/index.js 的子目录，或 package.json 的 pi.extensions 声明）。",
   "projectResources.editFile": "在默认编辑器中打开 SKILL.md",
   "projectResources.editorSaved": "已保存",
   "projectResources.projectScope": "项目级",

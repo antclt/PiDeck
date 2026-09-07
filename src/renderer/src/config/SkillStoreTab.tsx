@@ -6,13 +6,14 @@ import type { PromptStoreItem, PromptStoreSearchResult, PiSkillSummary } from ".
 import { t } from "../i18n";
 import { Input } from "../components/ui-shadcn/input";
 
-const api = (window as unknown as { piDesktop: { skillStore: { search: (q: string) => Promise<PromptStoreSearchResult>; import: (item: PromptStoreItem, locationId?: string) => Promise<PiSkillSummary> } } }).piDesktop;
+const api = (window as unknown as { piDesktop: { skillStore: { search: (q: string) => Promise<PromptStoreSearchResult>; import: (item: PromptStoreItem, locationId?: string, projectId?: string) => Promise<PiSkillSummary> } } }).piDesktop;
 
 const SUGGESTED_SEARCHES = ["code review", "testing", "react", "python", "git", "docker", "security", "refactoring", "typescript", "node"];
 
 export function SkillStoreTab(props: {
 	onImported?: () => void;
 	locationId?: string;
+	projectId?: string;
 }) {
 	const [query, setQuery] = useState("");
 	const [searching, setSearching] = useState(false);
@@ -54,7 +55,7 @@ export function SkillStoreTab(props: {
 		setImportingId(item.id);
 		setError(null);
 		try {
-			await api.skillStore.import(item, props.locationId);
+			await api.skillStore.import(item, props.locationId, props.projectId);
 			showNotice(t("config.skillStoreImported"), 2500);
 			props.onImported?.();
 		} catch (err) {

@@ -54,6 +54,8 @@ function DiscoveredPromptRow(props: {
 
 export function PromptsTab(props: {
 	scope: ResourceScope;
+	/** Project id used by online prompt imports; global scope passes undefined. */
+	projectId?: string;
 	scopeSelector?: ReactNode;
 	projectOverrides: ProjectResourceOverrides;
 	discoveryPrompts: Array<{
@@ -101,9 +103,6 @@ export function PromptsTab(props: {
 
 	// tab 切换："local"（本地模板） 或 "store"（在线商店）
 	const [promptTab, setPromptTab] = useState<"local" | "store">("local");
-	useEffect(() => {
-		if (props.scope === "project" && promptTab === "store") setPromptTab("local");
-	}, [promptTab, props.scope]);
 
 	// Prompt 重命名状态
 	const [renamingTemplate, setRenamingTemplate] = useState<string | null>(null);
@@ -252,7 +251,7 @@ export function PromptsTab(props: {
 						<TabsTrigger value="local" onClick={() => props.onRefresh()}>
 							{t("config.nav.prompts")}
 						</TabsTrigger>
-						<TabsTrigger value="store" disabled={props.scope === "project"}>
+						<TabsTrigger value="store">
 							<ShoppingBag size={14} strokeWidth={1.8} />
 							{t("config.promptStoreTab")}
 						</TabsTrigger>
@@ -264,6 +263,7 @@ export function PromptsTab(props: {
 
 			{promptTab === "store" ? (
 				<PromptStoreTab
+					projectId={props.scope === "project" ? props.projectId : undefined}
 					onImported={props.onRefresh}
 				/>
 			) : (

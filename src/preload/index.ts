@@ -1371,38 +1371,38 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.promptStoreSearch, query, options) as Promise<PromptStoreSearchResult>,
 		get: (id: string) =>
 			ipcRenderer.invoke(ipcChannels.promptStoreGet, id) as Promise<PromptStoreItem>,
-		import: (data: { title: string; description: string; content: string }) =>
+		import: (data: { title: string; description: string; content: string; projectId?: string }) =>
 			ipcRenderer.invoke(ipcChannels.promptStoreImport, data) as Promise<PiPromptTemplateSummary>,
 	},
 	skillStore: {
 		search: (query: string) =>
 			ipcRenderer.invoke(ipcChannels.skillStoreSearch, query) as Promise<PromptStoreSearchResult>,
-		import: (item: PromptStoreItem, locationId?: string) =>
-			ipcRenderer.invoke(ipcChannels.skillStoreImport, item, locationId) as Promise<PiSkillSummary>,
+		import: (item: PromptStoreItem, locationId?: string, projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.skillStoreImport, item, locationId, projectId) as Promise<PiSkillSummary>,
 	},
 	skillHub: {
 		search: (query: string, page?: number, pageSize?: number, sortBy?: string, order?: string) =>
 			ipcRenderer.invoke(ipcChannels.skillHubSearch, { query, page, pageSize, sortBy, order }) as Promise<import("../shared/types").SkillHubSearchResult>,
 		detail: (slug: string) =>
 			ipcRenderer.invoke(ipcChannels.skillHubDetail, slug) as Promise<import("../shared/types").SkillHubDetail | null>,
-		install: (slug: string, installDir: string) =>
-			ipcRenderer.invoke(ipcChannels.skillHubInstall, slug, installDir) as Promise<import("../shared/types").SkillHubInstallResult>,
+		install: (slug: string, projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.skillHubInstall, slug, projectId) as Promise<import("../shared/types").SkillHubInstallResult>,
 	},
 	yaoPrompts: {
 		list: (opts?: { category?: string; search?: string; page?: number; pageSize?: number }) =>
 			ipcRenderer.invoke(ipcChannels.yaoPromptsList, opts) as Promise<YaoPromptListResult>,
 		detail: (slug: string, category: string) =>
 			ipcRenderer.invoke(ipcChannels.yaoPromptsDetail, slug, category) as Promise<YaoPromptDetailResult>,
-		import: (slug: string, category: string) =>
-			ipcRenderer.invoke(ipcChannels.yaoPromptsImport, slug, category) as Promise<PiPromptTemplateSummary>,
+		import: (slug: string, category: string, projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.yaoPromptsImport, slug, category, projectId) as Promise<PiPromptTemplateSummary>,
 	},
 	extensions: {
 		list: (forceRefresh?: boolean) =>
 			ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh) as Promise<PiExtensionListResult>,
 		uninstall: (source: string, scope?: "user" | "project" | "unknown") =>
 			ipcRenderer.invoke(ipcChannels.extensionsUninstall, source, scope) as Promise<void>,
-		install: (source: string) =>
-			ipcRenderer.invoke(ipcChannels.extensionsInstall, source) as Promise<string>,
+		install: (source: string, projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.extensionsInstall, source, projectId) as Promise<string>,
 		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown") =>
 			ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope) as Promise<void>,
 		setWhitelistDisabled: (enabled: boolean) =>

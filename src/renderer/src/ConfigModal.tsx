@@ -2804,6 +2804,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					) : (
 							<SkillsTab
 								scope={resourceScope}
+								projectId={resourceScope === "project" ? effectiveProjectId : undefined}
 								scopeSelector={resourceScopeSelector}
 								projectOverrides={projectResourcesData.overrides}
 								discoverySkills={discoveryData.skills}
@@ -2834,6 +2835,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{!loading && (
 						<PromptsTab
 							scope={resourceScope}
+							projectId={resourceScope === "project" ? effectiveProjectId : undefined}
 							scopeSelector={resourceScopeSelector}
 							projectOverrides={projectResourcesData.overrides}
 							discoveryPrompts={discoveryData.prompts}
@@ -2873,6 +2875,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{statusBlock}
 					<ExtensionsTab
 							scope={resourceScope}
+							projectId={resourceScope === "project" ? effectiveProjectId : undefined}
 							projectOverrides={projectResourcesData.overrides}
 							discoveryExtensions={discoveryData.extensions}
 							scopeSelector={resourceScopeSelector}

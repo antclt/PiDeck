@@ -298,7 +298,7 @@ import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensi
 import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
 import { createPiProcessPromptResolvers } from "./prompts/piProcessPromptResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
-import { toWindowsHostPath } from "./wsl/WslPaths";
+import { toWslLinuxPath, toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
 import { registerUsageStatsIpc } from "./ipc/usageStatsIpc";
 import { UsageStatsService } from "./usageStats/UsageStatsService";
@@ -2929,6 +2929,24 @@ function registerIpc() {
 		xuePromptManager,
 		extensionManager,
 		projectResourceManager,
+		configManager,
+		projectTrustPath: (projectRoot, projectId) => {
+			const project = projectStore.get(projectId);
+			const settings = settingsStore.get();
+			if (
+				project?.environment === "wsl" &&
+				process.platform === "win32" &&
+				settings.wslEnabled &&
+				settings.wslDistro
+			) {
+				try {
+					return toWslLinuxPath(projectRoot, { distro: settings.wslDistro });
+				} catch {
+					return projectRoot;
+				}
+			}
+			return projectRoot;
+		},
 		appLogger,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 	});

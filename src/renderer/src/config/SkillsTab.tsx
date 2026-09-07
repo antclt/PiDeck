@@ -17,6 +17,8 @@ import { globalSkillOverrideKey, isGlobalSkillSourceId } from "../../../shared/r
 
 export function SkillsTab(props: {
 	scope: ResourceScope;
+	/** Project id used by store imports; global scope deliberately passes undefined. */
+	projectId?: string;
 	scopeSelector?: ReactNode;
 	projectOverrides: ProjectResourceOverrides;
 	discoverySkills: Array<{
@@ -52,9 +54,6 @@ export function SkillsTab(props: {
 	const [skillTab, setSkillTab] = useState<"local" | "store">("local");
 	// 二级 tab（商店内）：选择供应商
 	const [storeSource, setStoreSource] = useState<"promptchat" | "skillhub">("skillhub");
-	useEffect(() => {
-		if (props.scope === "project" && skillTab === "store") setSkillTab("local");
-	}, [props.scope, skillTab]);
 	return (
 		<div className="skills-tab">
 			<div className="mb-3 flex items-center justify-between gap-3">
@@ -69,7 +68,7 @@ export function SkillsTab(props: {
 						<TabsTrigger value="local" onClick={() => props.onRefresh()}>
 							{t("config.nav.skills")}
 						</TabsTrigger>
-						<TabsTrigger value="store" disabled={props.scope === "project"}>
+						<TabsTrigger value="store">
 							<ShoppingBag size={14} strokeWidth={1.8} />
 							{t("config.skillStoreTab")}
 						</TabsTrigger>
@@ -99,9 +98,12 @@ export function SkillsTab(props: {
 						</TabsList>
 					</Tabs>
 					{storeSource === "skillhub" ? (
-						<SkillHubStorePanel />
+						<SkillHubStorePanel projectId={props.scope === "project" ? props.projectId : undefined} />
 					) : (
-						<SkillStoreTab onImported={props.onRefresh} />
+						<SkillStoreTab
+							projectId={props.scope === "project" ? props.projectId : undefined}
+							onImported={props.onRefresh}
+						/>
 					)}
 				</div>
 			) : (

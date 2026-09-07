@@ -2048,7 +2048,7 @@ export const enUS: Record<TranslationKey, string> = {
   "projectResources.emptyExtensions": "No project extensions yet. Place files under .pi/extensions/.",
   "projectResources.deleteSkillConfirm": 'Delete skill "{name}"? This removes the local skill files.',
   "projectResources.deleteExtensionConfirm": 'Delete extension "{name}"? This removes the local extension files.',
-  "projectResources.extensionsHint": "Project extensions live under .pi/extensions/ (.ts files or directories with index.ts).",
+  "projectResources.extensionsHint": "Project extensions live under .pi/extensions/ (.ts/.js files, index.ts/index.js directories, or package.json pi.extensions entries).",
   "projectResources.editFile": "Open SKILL.md in default editor",
   "projectResources.editorSaved": "Saved",
   "projectResources.projectScope": "Project",

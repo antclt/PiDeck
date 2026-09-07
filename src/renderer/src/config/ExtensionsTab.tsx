@@ -16,7 +16,7 @@ import { RecommendedPackagesPanel } from "./extensionsRecommendedPackages";
 type ExtensionsApi = {
 	list: () => Promise<PiExtensionListResult>;
 	uninstall: (source: string, scope?: "user" | "project" | "unknown") => Promise<void>;
-	install: (source: string) => Promise<string>;
+	install: (source: string, projectId?: string) => Promise<string>;
 	toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => Promise<void>;
 	setWhitelistDisabled: (enabled: boolean) => Promise<void>;
 	removeBuiltIn: (source: string) => Promise<void>;
@@ -46,6 +46,8 @@ function shortName(source: string): string {
 
 export function ExtensionsTab(props: {
 	scope: ResourceScope;
+	/** Project id used by the extension store; global scope passes undefined. */
+	projectId?: string;
 	scopeSelector?: ReactNode;
 	projectOverrides: ProjectResourceOverrides;
 	/** 运行时发现（package/settings 声明）的扩展只读描述。 */
@@ -68,10 +70,6 @@ export function ExtensionsTab(props: {
 }) {
 	// 一级 tab：已安装 / 扩展商店（与 SkillsTab 的「本地/商店」结构对齐）
 	const [extTab, setExtTab] = useState<"local" | "store">("local");
-	useEffect(() => {
-		// 项目作用域下只做本地管理，商店（全局安装入口）切回本地。
-		if (props.scope === "project" && extTab === "store") setExtTab("local");
-	}, [props.scope, extTab]);
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
 	const [togglingSource, setTogglingSource] = useState<string | null>(null);
 	// 白名单总开关（「禁用 -e 参数」）：true = 不注入 --no-extensions/-e，pi 默认加载全部扩展。
@@ -277,7 +275,7 @@ export function ExtensionsTab(props: {
 						<TabsTrigger value="local" onClick={() => props.onRefresh()}>
 							{t("config.nav.extensions")}
 						</TabsTrigger>
-						<TabsTrigger value="store" disabled={props.scope === "project"}>
+						<TabsTrigger value="store">
 							<ShoppingBag size={14} strokeWidth={1.8} />
 							{t("config.extensionStoreTab")}
 						</TabsTrigger>
@@ -288,7 +286,10 @@ export function ExtensionsTab(props: {
 			</div>
 			{extTab === "store" ? (
 				<ExtensionStoreTab
-					installedExtensions={props.data.extensions}
+					installedExtensions={props.scope === "project"
+						? props.data.extensions.filter((extension) => extension.scope === "project")
+						: props.data.extensions}
+					projectId={props.scope === "project" ? props.projectId : undefined}
 					onInstalled={() => props.onRefresh()}
 				/>
 			) : (
