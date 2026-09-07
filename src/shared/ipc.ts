@@ -494,6 +494,8 @@ export const ipcChannels = {
 	configBackupRestore: "config-backup:restore",
 	/** 删除单个备份。 */
 	configBackupDelete: "config-backup:delete",
+	/** 批量删除多个备份（按 id 列表，非法 id 由主进程跳过）。 */
+	configBackupDeleteMany: "config-backup:delete-many",
 	/** 清空全部备份。 */
 	configBackupDeleteAll: "config-backup:delete-all",
 

@@ -673,6 +673,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const [expandedAuth, setExpandedAuth] = useState<string | null>(null);
 	// 新增 provider（弹窗开关）
 	const [addingProvider, setAddingProvider] = useState(false);
+	/** 正在编辑的 provider key（编辑弹窗目标）；null = 无编辑弹窗。 */
+	const [editingProvider, setEditingProvider] = useState<string | null>(null);
 	/** 用户隐藏的供应商 key 列表（模型页眼睛开关持久化到 AppSettings.hiddenProviders）。 */
 	const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
 	/** 切换供应商隐藏状态：本地立即生效 + 持久化到 AppSettings（不影响 models.json 配置本身）。 */
@@ -1063,7 +1065,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	}, [loadConfig]);
 
 	/**
-	 * 新增供应商（一步弹窗）：携带完整草稿（名字 + 服务商字段），
+	 * 新增供应商（一步弹窗）：携带完整草稿（名字 + 服务商字段 + 模型列表），
 	 * 直接写入 modelsData 并展开卡片；不再先输名字再展开。
 	 */
 	const handleAddProvider = (draft: AddProviderDraft) => {
@@ -1086,6 +1088,42 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		markDirty("config:models");
 		setExpandedProvider(providerName);
 		setAddingProvider(false);
+	};
+
+	/**
+	 * 编辑供应商（弹窗确认）：名字可改（走 rename 语义：provider key + auth key 同步），
+	 * 字段与模型列表整体写回 modelsData。
+	 */
+	const handleEditProvider = (oldName: string, draft: AddProviderDraft) => {
+		const newName = draft.name.trim();
+		if (!isValidProviderName(newName)) {
+			showNotice(t("config.providerNameRule"));
+			return;
+		}
+		if (newName !== oldName && modelsData.providers[newName]) {
+			showNotice(t("config.providerNameDuplicate"));
+			return;
+		}
+		const provider = buildProviderConfigFromDraft(draft);
+		const providers = { ...modelsData.providers };
+		if (newName !== oldName) {
+			// 改名：新 key 承接旧 provider，删旧 key；auth.json 同步（pi 按新名称查认证）。
+			providers[newName] = provider;
+			delete providers[oldName];
+			if (authData[oldName]) {
+				const updatedAuth = { ...authData };
+				updatedAuth[newName] = updatedAuth[oldName];
+				delete updatedAuth[oldName];
+				setAuthData(updatedAuth);
+				markDirty("config:auth");
+			}
+			if (expandedProvider === oldName) setExpandedProvider(newName);
+		} else {
+			providers[oldName] = provider;
+		}
+		setModelsData({ ...modelsData, providers });
+		markDirty("config:models");
+		setEditingProvider(null);
 	};
 
 	// 重命名 provider：保留所有配置和模型，仅修改 key 名称
@@ -2626,6 +2664,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							}}
 							onCancelAddProvider={() => setAddingProvider(false)}
 							onConfirmAddProvider={handleAddProvider}
+							editingProvider={editingProvider}
+							onStartEditProvider={(name) => setEditingProvider(name)}
+							onCancelEditProvider={() => setEditingProvider(null)}
+							onConfirmEditProvider={handleEditProvider}
 							onStartRename={handleStartRename}
 							onChangeRenameValue={setRenameValue}
 							onConfirmRename={handleConfirmRename}

@@ -18,7 +18,21 @@ function emptyDraft() {
     apiKey: "",
     userAgent: "",
     compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
+    models: [],
   };
+}
+
+function sampleModels() {
+  return [
+    {
+      id: "deepseek-chat",
+      name: "DeepSeek Chat",
+      inputCost: 1,
+      outputCost: 2,
+      thinking: true,
+    },
+    { id: "deepseek-reasoner" },
+  ];
 }
 
 test("空草稿：只写 models: []，不写入任何空字段（与手写 models.json 一致）", () => {
@@ -70,4 +84,23 @@ test("compat 勾选任一项即写入两个布尔字段", () => {
     json(reasoning.compat),
     json({ supportsDeveloperRole: false, supportsReasoningEffort: true }),
   );
+});
+
+test("models 草稿：整体透传（含空列表），与页面模型列表一一对应", () => {
+  const provider = buildProviderConfigFromDraft({
+    ...emptyDraft(),
+    models: sampleModels(),
+  });
+  assert.equal(json(provider.models), json(sampleModels()));
+
+  // 空列表也显式写入 []，保证「清空模型」的编辑操作能落盘
+  const cleared = buildProviderConfigFromDraft(emptyDraft());
+  assert.equal(json(cleared.models), json([]));
+});
+
+test("models 字段未提供时兜底为空数组（兼容旧调用方）", () => {
+  const draft = emptyDraft();
+  delete draft.models;
+  const provider = buildProviderConfigFromDraft(draft);
+  assert.equal(json(provider.models), json([]));
 });

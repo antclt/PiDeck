@@ -62,3 +62,8 @@ export type ConfigBackupListResult =
 export type ConfigBackupActionResult =
 	| { ok: true; id?: string }
 	| { ok: false; error: string };
+
+/** 批量删除结果：ok 时返回实际删除的备份数（部分成功亦 ok）。 */
+export type ConfigBackupDeleteManyResult =
+	| { ok: true; deleted: number }
+	| { ok: false; error: string };
