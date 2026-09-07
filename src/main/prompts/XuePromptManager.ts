@@ -247,7 +247,8 @@ export class XuePromptManager {
 	 */
 	async importToPi(
 		slug: string,
-		category: string
+		category: string,
+		projectPath?: string,
 	): Promise<PiPromptTemplateSummary> {
 		const detail = await this.detail(slug, category);
 		if (!detail) throw new Error(`未找到提示词: ${slug}`);
@@ -262,10 +263,13 @@ export class XuePromptManager {
 			tryName: string
 		): Promise<PiPromptTemplateSummary> => {
 			try {
-				return await this.promptManager.create({
+				const input = {
 					name: tryName,
 					description: detail.description || detail.title,
-				});
+				};
+				return projectPath
+					? await this.promptManager.createInProject(projectPath, input)
+					: await this.promptManager.create(input);
 			} catch {
 				const match = tryName.match(/-(\d+)$/);
 				const nextNum = match ? parseInt(match[1], 10) + 1 : 2;
@@ -276,11 +280,12 @@ export class XuePromptManager {
 		};
 
 		const summary = await tryCreate(name);
-		const frontmatter = `---\ndescription: ${(detail.description || detail.title).replace(/\n/g, " ")}\nsource: xueprompt\n---\n\n`;
-		await this.promptManager.writeContent(
-			summary.path,
-			frontmatter + detail.promptContent
-		);
+		const frontmatter = `---\ndescription: ${(detail.description || detail.title).replace(/[\\r\\n]+/g, " ")}\nsource: xueprompt\n---\n\n`;
+		if (projectPath) {
+			await this.promptManager.writeContentInProject(projectPath, summary.path, frontmatter + detail.promptContent);
+		} else {
+			await this.promptManager.writeContent(summary.path, frontmatter + detail.promptContent);
+		}
 		return summary;
 	}
 }

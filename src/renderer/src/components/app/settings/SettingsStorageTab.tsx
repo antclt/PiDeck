@@ -1,5 +1,5 @@
 import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
 import { SectionHeading } from "../../ui-shadcn/section-heading";
@@ -48,6 +48,7 @@ export function StorageTab(props: {
 }) {
 	const [logsSize, setLogsSize] = useState<string>("");
 	const [rpcLogsSize, setRpcLogsSize] = useState<string>("");
+	const [pasteFilesSize, setPasteFilesSize] = useState<string>("");
 	const [clearing, setClearing] = useState<string | null>(null);
 	const [feedback, setFeedback] = useState("");
 	const [confirmDialog, setConfirmDialog] = useState<{
@@ -56,29 +57,21 @@ export function StorageTab(props: {
 		onConfirm: () => void;
 	} | null>(null);
 
-	useEffect(() => {
-		let mounted = true;
-		const refresh = () => {
-			void window.piDesktop.logs.getSize().then((bytes) => {
-				if (mounted) setLogsSize(formatBytes(bytes));
-			});
-		};
-		refresh();
-		const timer = setInterval(refresh, 5000);
-		return () => { mounted = false; clearInterval(timer); };
+	/**
+	 * 统一刷新三类占用统计（应用日志 / RPC 日志 / 粘贴文件）：
+	 * 被 5s 轮询与清理完成后共用，保证「清理后立刻看到新大小」。
+	 */
+	const refreshSizes = useCallback(() => {
+		void window.piDesktop.logs.getSize().then((bytes) => setLogsSize(formatBytes(bytes)));
+		void window.piDesktop.rpcLogs.getSize().then((bytes) => setRpcLogsSize(formatBytes(bytes)));
+		void window.piDesktop.pasteFiles.getSize().then((bytes) => setPasteFilesSize(formatBytes(bytes)));
 	}, []);
 
 	useEffect(() => {
-		let mounted = true;
-		const refresh = () => {
-			void window.piDesktop.rpcLogs.getSize().then((bytes) => {
-				if (mounted) setRpcLogsSize(formatBytes(bytes));
-			});
-		};
-		refresh();
-		const timer = setInterval(refresh, 5000);
-		return () => { mounted = false; clearInterval(timer); };
-	}, []);
+		refreshSizes();
+		const timer = setInterval(refreshSizes, 5000);
+		return () => clearInterval(timer);
+	}, [refreshSizes]);
 
 	const doClear = async (target: string) => {
 		setClearing(target);
@@ -88,15 +81,20 @@ export function StorageTab(props: {
 				await window.piDesktop.logs.clear();
 			} else if (target === "rpc") {
 				await window.piDesktop.rpcLogs.clear();
+			} else if (target === "paste") {
+				// 粘贴文件：清空 userData/paste-files 与各项目遗留的 .pideck-paste
+				await window.piDesktop.pasteFiles.clearAll();
 			} else {
 				await window.piDesktop.logs.clear();
 				await window.piDesktop.rpcLogs.clear();
+				await window.piDesktop.pasteFiles.clearAll();
 			}
 			setFeedback(t("settings.storage.clearSuccess"));
 		} catch (e) {
 			setFeedback(`${t("common.error")}: ${e instanceof Error ? e.message : String(e)}`);
 		} finally {
 			setClearing(null);
+			refreshSizes();
 		}
 	};
 
@@ -166,7 +164,7 @@ export function StorageTab(props: {
 						variant="destructive"
 						loading={clearing === "all"}
 						disabled={clearing !== null}
-						onClick={() => confirmClear("all", `${t("settings.storage.appLogs")} + ${t("settings.storage.rpcLogs")}`)}
+						onClick={() => confirmClear("all", `${t("settings.storage.appLogs")} + ${t("settings.storage.rpcLogs")} + ${t("settings.storage.pasteFiles")}`)}
 					>
 						{t("settings.storage.clearAllButton")}
 					</Button>
@@ -196,6 +194,21 @@ export function StorageTab(props: {
 						loading={clearing === "rpc" || clearing === "all"}
 						disabled={clearing !== null}
 						onClick={() => confirmClear("rpc", t("settings.storage.rpcLogs"))}
+					>
+						{t("common.delete")}
+					</Button>
+				</div>
+			</SettingsSection>
+			{/* 粘贴文件：输入框长文本自动转文件的落盘位置（userData/paste-files，另含各项目遗留 .pideck-paste） */}
+			<SettingsSection title={t("settings.storage.pasteFiles")} description={t("settings.storage.pasteFilesDesc")}>
+				<div className="flex items-center justify-between gap-3 px-0.5 py-1.5">
+					<span className="text-caption text-muted-foreground">
+						{t("settings.storage.pasteFilesSize")}：{pasteFilesSize || t("common.loading")}
+					</span>
+					<Button variant="secondary"
+						loading={clearing === "paste" || clearing === "all"}
+						disabled={clearing !== null}
+						onClick={() => confirmClear("paste", t("settings.storage.pasteFiles"))}
 					>
 						{t("common.delete")}
 					</Button>

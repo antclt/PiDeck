@@ -17,18 +17,29 @@ const sidebar = readFileSync(
 test("v3 sidebar bottom actions render inside a full-width beUI Dock", () => {
   assert.match(sidebar, /import \{ Dock, DockItem \} from "\.\.\/motion\/dock";/);
   assert.match(sidebar, /<Dock size=\{32\} className="w-full justify-between">/);
-  assert.equal((sidebar.match(/<DockItem>/g) || []).length, 4);
+  // 5 项 = 4 个动作（设置/反馈/官网/主题）+ 1 个公告中心入口（并入 dock 后未同步计数）。
+  assert.equal((sidebar.match(/<DockItem>/g) || []).length, 5);
 });
 
 test("dock keeps the four actions, their labels and callbacks", () => {
   const dockBlock = sidebar.slice(sidebar.indexOf("<Dock size={32}"));
-  assert.match(dockBlock, /title=\{hasPendingUpdate \? t\("settings.titleWithUpdate"\) : t\("settings.title"\)\}[\s\S]*?onClick=\{props\.onOpenSettings\}/);
+  // 设置按钮：更新角标场景的文案进 aria-label（读屏/键盘），可见解释由 Tooltip 清单承担；
+  // 首次解释气泡改挂 dock 行容器（与 Dock 同级），不再寄生在 DockItem 内（锚定契约见
+  // updateDotHintAnchor.test.mjs）——它在 dockBlock 之外、行容器内。
+  assert.match(sidebar, /<UpdateDotHint hasPendingUpdate=\{hasPendingUpdate\}/);
+  assert.match(dockBlock, /aria-label=\{hasPendingUpdate \? t\("settings.titleWithUpdate"\) : t\("settings.title"\)\}["\s\S]*?onClick=\{props\.onOpenSettings\}/);
+  assert.match(dockBlock, /<Tooltip delayDuration=\{300\}>/);
   assert.match(dockBlock, /title=\{t\("feedback.title"\)\}[\s\S]*?onClick=\{props\.onOpenFeedback\}/);
   assert.match(dockBlock, /title=\{t\("app.homepage"\)\}[\s\S]*?onClick=\{props\.onOpenHomepage\}/);
   // 主题按钮：title/aria 用当前模式的完整文案，回调走 onToggleTheme
   assert.match(dockBlock, /title=\{themeToggleTitle\} aria-label=\{themeToggleTitle\} onClick=\{props\.onToggleTheme\}/);
-  // 按钮本体仍是 shadcn ghost Button（hover 观感由 utility 承担）
-  assert.equal((dockBlock.match(/variant="ghost"/g) || []).length, 4);
+  // 按钮本体仍是 shadcn ghost Button（hover 观感由 utility 承担）；
+  // AnnouncementCenter 内部有自己的 ghost 按钮，先把公告入口整段剔除再数四个动作按钮。
+  const dockActions = dockBlock.replace(
+    /<DockItem>\s*<AnnouncementCenter \/>\s*<\/DockItem>/,
+    "",
+  );
+  assert.equal((dockActions.match(/variant="ghost"/g) || []).length, 4);
 });
 
 test("legacy toolbar/icon-button bottom bar classes are gone", () => {

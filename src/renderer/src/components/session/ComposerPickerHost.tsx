@@ -30,14 +30,14 @@ import {
   sessionCommandFailureToast,
   toSessionRuntimeTarget,
 } from "../../utils/sessionCommands";
-import { resolveComposerLiveModel } from "../../utils/modelPendingDisplay";
+import { resolveComposerLiveModel, resolveGuideDisplayModel } from "../../utils/modelPendingDisplay";
 import { resolveComposerThinkingLevel } from "../../utils/thinkingDisplay";
 import { ConfirmDialog } from "../app/AppParts";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { usePendingModelApply } from "../../hooks/usePendingModelApply";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import type { ComposerPickerKind } from "../../hooks/useSessionComposerController";
-import { WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeModelPreference } from "../../utils/chatSessionBootstrap";
+import { WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeModelPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
 import { resolveThinkingPickerLevels } from "./sessionPickerOptions";
 
 export type ComposerPickerHostProps = {
@@ -57,8 +57,6 @@ export type ComposerPickerHostProps = {
   /** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期高亮与过滤用。 */
   defaultModel?: { provider?: string; modelId?: string; modelName?: string };
   defaultThinkingLevel?: string;
-  /** 主进程解析的默认模型是否来自用户显式配置：True 时欢迎页偏好不参与引导页回退。 */
-  defaultModelConfigured?: boolean;
 };
 
 export function ComposerPickerHost(props: ComposerPickerHostProps) {
@@ -76,6 +74,10 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   const clearPiRuntimeThinkingLevels = useSetAtom(clearPiRuntimeThinkingLevelsAtom);
   const resolvePiRuntimeThinkingLevels = useSetAtom(resolvePiRuntimeThinkingLevelsAtom);
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
+  /** 最近使用的供应商（最新在前）：模型选择器按此优先排列供应商分组。 */
+  const [recentProviders, setRecentProviders] = useState<string[]>([]);
+  /** 用户隐藏的供应商（Pi 模型页眼睛开关）：Pi 后端模型选择器按 provider 过滤。 */
+  const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
   /** 模型在本地 models.json 存在但运行中 Agent 未加载：待确认重启的目标。 */
   const [restartTarget, setRestartTarget] = useState<{
     handle: SessionRuntimeTarget;
@@ -98,6 +100,8 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   useEffect(() => {
     void desktopApi.settings.get().then((settings) => {
       setFavoriteModels(settings.favoriteModels ?? []);
+      setRecentProviders(settings.recentProviders ?? []);
+      setHiddenProviders(settings.hiddenProviders ?? []);
     }).catch(() => undefined);
   }, []);
 
@@ -122,34 +126,44 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   // 与 ComposerBottomBar 共用 isWelcomeModelLost 判定；目录未加载（models 为空）时不判定，
   // 避免误清用户仍有效的偏好。
   const welcomeModelLost = isWelcomeModelLost(welcomeModel, models);
+  // 展示可以宽容忽略，但删除不可逆：本组件在有 record 时按 record.projectId 加载
+  // 「项目范围」目录，而偏好是全局 localStorage——项目列表合法地不含该模型时不能
+  // 拿它判死全局偏好，否则会把用户在别的项目里仍然有效的点选静默销毁。
+  const clearWelcomePreference = shouldClearWelcomePreference({
+    welcomeModel,
+    models,
+    catalogLoaded: report?.ok === true,
+    catalogIsGlobal: !record?.projectId,
+  });
   useEffect(() => {
     // 失效偏好只清一次：下次引导页不再默认已删除的模型（创建时主进程也会兜底丢弃）。
-    if (welcomeModelLost) {
+    if (clearWelcomePreference) {
       try {
         localStorage.removeItem(WELCOME_MODEL_KEY);
       } catch {
         // localStorage 不可用时静默；展示层已忽略该偏好。
       }
     }
-  }, [welcomeModelLost]);
+  }, [clearWelcomePreference]);
   const effectiveWelcomeModel = welcomeModelLost ? undefined : welcomeModel;
-  // 引导页（无 record）模型高亮 = 底栏同款决策（与主进程创建规则同源）：
-  // 显式配置默认模型时偏好被覆盖；（用户规则：默认模型 > 偏好 > 上次使用 > 空）。
-  const guideDefaultModel =
-    props.defaultModelConfigured || isDshSession
-      ? props.defaultModel
-      : (effectiveWelcomeModel ?? props.defaultModel);
+  // 引导页（无 record）模型高亮：与主进程创建解析同序（点选 > 显式默认 > 切换列表 > 上次使用）。
+  // 规则收拢到 resolveGuideDisplayModel，不再在本组件与 ComposerComponents 各写一份。
+  const guideDefaultModel = resolveGuideDisplayModel({
+    isDsh: isDshSession,
+    welcomeModel: effectiveWelcomeModel,
+    defaultModel: props.defaultModel,
+  });
   // 非 live 残留 state 不能盖住 catalog：Agent 未启动时改模型，选择器高亮必须跟记录走。
   const runtimeLive = isLiveRuntimeStatus(runtime?.status);
   const resolvedLiveModel = resolveComposerLiveModel({
     state: runtime?.state,
     record: record?.model,
     fallback: {
-      // 无 record（引导页）：按「显式默认 > 偏好 > 上次使用 > 空」取高亮；
-      // 优先展显示式默认（guideDefaultModel 已按规则折叠），避免高亮落在幽灵模型上。
+      // 无 record（引导页）：高亮取 guideDefaultModel（已按「点选 > 显式默认 > 切换列表 > 上次使用」
+      // 折叠）；modelName 必须同源取 guideDefaultModel，否则点选生效时会拿默认模型的展示名配点选的 id。
       provider: guideDefaultModel?.provider,
       modelId: guideDefaultModel?.modelId,
-      modelName: props.defaultModel?.modelName,
+      modelName: guideDefaultModel?.modelName,
     },
     isLive: runtimeLive,
   });
@@ -534,6 +548,8 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         onPick={(model) => void pickModel(model)}
         favoriteModels={favoriteModels}
         onToggleFavorite={(provider, modelId) => void toggleFavorite(provider, modelId)}
+        recentProviders={recentProviders}
+        hiddenProviders={hiddenProviders}
         // 用量查询链路随会话后端：DSH 目录的 provider 是 route 名，配置/凭据走 dsh 链路
         backend={isDshSession ? "dsh" : "pi"}
       />

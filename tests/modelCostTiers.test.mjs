@@ -60,8 +60,11 @@ test("toTierDrafts: undefined tiers yields empty drafts; numbers become strings"
 	]);
 });
 
-test("ModelsTab renders tiered pricing UI in the cost dialog (Table + add button + threshold column)", () => {
-	const source = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
+test("ModelsTable renders tiered pricing UI in the cost dialog (Table + add button + threshold column)", () => {
+	// 计费弹框随模型表格一起内聚到共享组件 ModelsTable（ModelsTab 与编辑页共用）
+	const table = readFileSync("src/renderer/src/config/ModelsTable.tsx", "utf8");
+	const tab = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
+	const source = table + "\n" + tab;
 	// 梯度用 shadcn Table 呈现，阈值列带 > 前缀，添加按钮 + 删除按钮
 	assert.match(source, /config\.costTiersTitle/);
 	assert.match(source, /config\.costTiersHint/);

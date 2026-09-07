@@ -6,8 +6,8 @@ import { currentSessionIdAtom } from "./session-atoms";
 
 /**
  * 粘贴大文本 → 落盘文件 chip 的元数据（内容只在主进程受管目录，此处仅存指针）。
- * inProject=true：发送时折叠为 @"path" 引用（pi 可展开读取）；
- * inProject=false（匿名会话，文件在 userData）：发送时折叠为原样文本内联。
+ * 新写入一律 inProject=false（userData/paste-files）：发送时折叠为原样文本内联；
+ * 遗留项目内 chip（inProject=true）仍走 @"path" 引用。
  */
 export type PastedTextFile = {
 	id: string;

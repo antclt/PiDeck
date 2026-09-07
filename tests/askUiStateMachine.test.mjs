@@ -6,10 +6,10 @@ import vm from "node:vm";
 
 /**
  * Ask 提问 UI 状态机与应答构造（#ask-ui）：
- * - 纯逻辑：pickActiveAskRequest / buildAskResponse / serializeBatchAnswers / hasTextSelection
+ * - 纯逻辑：pickActiveAskRequest / buildAskResponse / serializeBatchAnswers / shouldSuppressAskClick
  * - 静态契约：渲染层使用提取的纯逻辑 + shadcn 组件与语义字号 token；
  *   主进程 select 无选项降级为 input（不再静默取消）；
- *   overlay / timeline / 安全卡在选项点击前调 hasTextSelection，避免划选复制误答。
+ *   overlay / timeline / 安全卡在选项点击前调按压感知守卫 shouldSuppressAskClick，避免划选 mouseup 冒充 click 误答。
  */
 
 function loadAskUi(sandboxExtras = {}) {
@@ -208,19 +208,40 @@ function mockSelection(text) {
 	};
 }
 
-test("hasTextSelection: 无 window 视为没有划选", () => {
-	const { hasTextSelection } = loadAskUi();
-	assert.equal(hasTextSelection(), false);
+// 按压感知划选守卫（askUi.ts）：只吞「本次按压新拖出的选区」。
+// 背景：Chromium 按钮上 mousedown 不塌缩选区，旧守卫直接查全局选区会把
+// 「划选复制/双击选词之后的真实点击」也吞掉（ask 选项点不动，2026-09 修复）。
+test("shouldSuppressAskClickSnapshot: click 时无有效选区 → 放行（任意快照）", () => {
+	const { shouldSuppressAskClickSnapshot } = loadAskUi("");
+	assert.equal(shouldSuppressAskClickSnapshot("", ""), false);
+	assert.equal(shouldSuppressAskClickSnapshot("旧选区", ""), false);
+	assert.equal(shouldSuppressAskClickSnapshot(null, ""), false);
+	// 纯空白选区与旧守卫 trim 语义一致
+	assert.equal(shouldSuppressAskClickSnapshot(null, "  \n\t  "), false);
 });
 
-test("hasTextSelection: 空选区 / 纯空白 / null 视为没有划选", () => {
-	assert.equal(loadAskUi(mockSelection("")).hasTextSelection(), false);
-	assert.equal(loadAskUi(mockSelection("  \n\t  ")).hasTextSelection(), false);
-	assert.equal(loadAskUi(mockSelection(null)).hasTextSelection(), false);
+test("shouldSuppressAskClickSnapshot: 选区与按压快照一致（旧选区残留）→ 放行 —— 修复点", () => {
+	const { shouldSuppressAskClickSnapshot } = loadAskUi("问题标题文本");
+	assert.equal(shouldSuppressAskClickSnapshot("问题标题文本", "问题标题文本"), false);
 });
 
-test("hasTextSelection: 非空划选返回 true", () => {
-	assert.equal(loadAskUi(mockSelection("提问内容")).hasTextSelection(), true);
+test("shouldSuppressAskClickSnapshot: 选区与快照不一致（本次按压新拖出）→ 吞掉", () => {
+	const { shouldSuppressAskClickSnapshot } = loadAskUi("拖出来的新选区");
+	// 按压开始时无选区，click 时出现选区 = 划选恰好结束在按钮上的冒充 click
+	assert.equal(shouldSuppressAskClickSnapshot("", "拖出来的新选区"), true);
+	// 按压期间选区被改变同样视为冒充
+	assert.equal(shouldSuppressAskClickSnapshot("按压前的旧选区", "改变后选区"), true);
+});
+
+test("shouldSuppressAskClickSnapshot: 无按压快照且有选区 → 保守吞掉（兜底旧守卫语义）", () => {
+	const { shouldSuppressAskClickSnapshot } = loadAskUi("划选文本");
+	assert.equal(shouldSuppressAskClickSnapshot(null, "划选文本"), true);
+	assert.equal(shouldSuppressAskClickSnapshot(undefined, "划选文本"), true);
+});
+
+test("shouldSuppressAskClick: 无 window 视为不吞（SSR 兜底）", () => {
+	const { shouldSuppressAskClick } = loadAskUi(undefined);
+	assert.equal(shouldSuppressAskClick(), false);
 });
 
 // ── 静态契约 ──
@@ -230,7 +251,8 @@ test("SessionRuntimeUiOverlay 使用提取的纯逻辑与语义字号 token", ()
 	assert.match(source, /import \{[^}]*pickActiveAskRequest[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
 	assert.match(source, /import \{[^}]*buildAskResponse[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
 	assert.match(source, /import \{[^}]*serializeBatchAnswers[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
-	assert.match(source, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
+	assert.match(source, /import \{[^}]*shouldSuppressAskClick[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
+	assert.doesNotMatch(source, /hasTextSelection/);
 	// 不再直接构造应答 payload（统一走 askUi.buildAskResponse）
 	assert.doesNotMatch(source, /void answer\(\{ value/);
 	assert.doesNotMatch(source, /void answer\(\{ confirmed/);
@@ -238,8 +260,9 @@ test("SessionRuntimeUiOverlay 使用提取的纯逻辑与语义字号 token", ()
 	assert.match(source, /variant="outline"/);
 	assert.doesNotMatch(source, /text-\[13px\]/);
 	assert.doesNotMatch(source, /text-\[11px\]/);
-	// submitValue 与 BatchQuestion 的 true/false/select 都要守卫划选（后者不走 submitValue）
-	const guards = source.match(/if \(hasTextSelection\(\)\) return;/g);
+	// submitValue 与 BatchQuestion 的 true/false/select 都要守卫划选（后者不走 submitValue）；
+	// 统一用按压感知守卫：只吞本次按压新拖出的选区，旧选区残留不得吞真实点击
+	const guards = source.match(/if \(shouldSuppressAskClick\(\)\) return;/g);
 	assert.ok(guards && guards.length >= 4);
 });
 
@@ -249,13 +272,13 @@ test("SessionRuntimeUiOverlay keeps recovery prompts visible after model errors"
 	assert.match(source, /runtime\.status !== "closed"/);
 });
 
-test("Timeline 已清理死代码，安全卡在选项点击前调 hasTextSelection", () => {
+test("Timeline 已清理死代码，安全卡在选项点击前调按压感知守卫", () => {
 	const timeline = readFileSync("src/renderer/src/components/session/TimelineEventCards.tsx", "utf8");
 	const security = readFileSync("src/renderer/src/components/overlays/SecurityConfirmCard.tsx", "utf8");
 	// AskQuestionCard 死代码已删除：Timeline 不再有可交互 ask 卡片，守卫职责由 SessionRuntimeUiOverlay 承担
 	assert.doesNotMatch(timeline, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
-	assert.match(security, /import \{[^}]*hasTextSelection[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
-	const securityGuards = security.match(/if \(hasTextSelection\(\)\) return;/g);
+	assert.match(security, /import \{[^}]*shouldSuppressAskClick[^}]*\} from "\.\.\/\.\.\/utils\/askUi"/);
+	const securityGuards = security.match(/if \(shouldSuppressAskClick\(\)\) return;/g);
 	assert.ok(securityGuards && securityGuards.length >= 2);
 });
 

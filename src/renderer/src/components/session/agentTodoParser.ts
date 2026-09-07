@@ -79,7 +79,11 @@ export function sessionTodoSnapshotToItems(
 	snapshot: import("../../../../shared/types").SessionTodoSnapshot | undefined,
 ): AgentTodoItem[] {
 	if (!snapshot) return [];
-	const lines = snapshot.todos.map((todo) => `${todo.done ? "☑" : "☐"} #${todo.id} ${todo.text}`);
+	// v3 三态：completed→☑、in_progress→◐、其余→☐，与 pi-deck-todo widget 行式同构。
+	const lines = snapshot.todos.map((todo) => {
+		const mark = todo.status === "completed" ? "☑" : todo.status === "in_progress" ? "◐" : "☐";
+		return `${mark} #${todo.id} ${todo.text}`;
+	});
 	return parseAgentTodoItems(lines);
 }
 

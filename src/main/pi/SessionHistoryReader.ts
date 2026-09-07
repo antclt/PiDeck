@@ -5,6 +5,7 @@ import { deriveToolSubagentEntries } from "./derivedSubagents";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import type { RpcResponse } from "./PiRpcClient";
 import type { AppLogger } from "../logging/AppLogger";
+import { stoppedMessageFingerprint, type StoppedMessageIdentity } from "./stoppedMessageIdentity";
 
 type SessionModelSelection = {
 	provider: string;
@@ -45,6 +46,8 @@ type SessionDisplayEntry = {
 	role?: string;
 	/** 消息条目的 message.id：编辑/删除/重发缓存未命中时按 messageId 定位文件条目 */
 	messageId?: string;
+	/** 停止后 live ID 的安全回查窗口；只读时间邻近条目，避免整段历史按正文扫描。 */
+	messageTimestamp?: number;
 	summary?: string;
 	firstKeptEntryId?: string;
 	timestamp?: string;
@@ -704,6 +707,7 @@ export class SessionHistoryReader {
 		 * 文件里没有对应关系；而投影后的消息带 entryId，必须优先按它定位，否则编辑/删除
 		 * 会落空（delete 走 no-op、edit/resend 报 Message not found）。 */
 		entryIdHint?: string,
+		stoppedIdentity?: StoppedMessageIdentity,
 	): Promise<{ entryId: string; role?: string; text: string; images?: ImageContent[] } | undefined> {
 		if (!messageId) return undefined;
 		let index: SessionDisplayIndex;
@@ -726,13 +730,16 @@ export class SessionHistoryReader {
 		// 裸 entryId（旧会话无 message.id 时渲染 ID 即 `${agentId}-history-${entryId}`）。
 		// entryIdHint 优先：live 随机 ID 在文件里必然不存在，直接按文件条目 id 锚定。
 		const syntheticId = syntheticHistoryEntryId(messageId);
+		const resolvedHint = entryIdHint ?? stoppedIdentity?.entryId;
 		const entry = index.activeMessageEntries.find(
 			(candidate) =>
-				(entryIdHint !== undefined && candidate.id === entryIdHint) ||
+				(resolvedHint !== undefined && candidate.id === resolvedHint) ||
 				candidate.messageId === messageId ||
 				candidate.id === messageId ||
 				(syntheticId !== undefined && candidate.id === syntheticId),
-		);
+		) ?? (resolvedHint === undefined && stoppedIdentity
+			? await this.findStoppedMessageEntry(index, stoppedIdentity)
+			: undefined);
 		if (!entry) return undefined;
 		const raw = await this.readIndexedSessionMessages(index.hostPath, [entry]);
 		const content = (raw[0] as { content?: unknown } | undefined)?.content;
@@ -743,6 +750,30 @@ export class SessionHistoryReader {
 			text: extracted.text,
 			...(extracted.images?.length ? { images: extracted.images } : {}),
 		};
+	}
+
+	/**
+	 * 临时 ID 没有落盘：仅在同角色、5 秒邻近窗口内按完整可见内容摘要唯一匹配。
+	 * 不按文本“找最近一条”：重复提示词、分支和未落盘消息必须宁可拒绝也不改错。
+	 */
+	private async findStoppedMessageEntry(
+		index: SessionDisplayIndex,
+		identity: StoppedMessageIdentity,
+	): Promise<SessionDisplayEntry | undefined> {
+		if (!Number.isFinite(identity.timestamp)) return undefined;
+		const candidates = index.activeMessageEntries.filter((entry) =>
+			entry.role === identity.role && entry.messageTimestamp !== undefined &&
+			Math.abs(entry.messageTimestamp - identity.timestamp) <= 5_000,
+		);
+		// 这是异常身份的恢复路径，不允许为一次编辑读取无限正文/图片。
+		if (candidates.length > 256 || candidates.reduce((size, entry) => size + entry.byteLength, 0) > 8 * 1024 * 1024) {
+			return undefined;
+		}
+		const raw = await this.readIndexedSessionMessages(index.hostPath, candidates);
+		const projected = this.deps.convertMessages("_viewer", raw, candidates.map((entry) => entry.id));
+		const matches = projected.filter((message) => stoppedMessageFingerprint(message) === identity.fingerprint);
+		if (matches.length !== 1) return undefined;
+		return candidates.find((entry) => entry.id === matches[0].meta?.entryId);
 	}
 
 	private async getSessionDisplayIndex(sessionPath: string): Promise<SessionDisplayIndex> {
@@ -853,6 +884,9 @@ export class SessionHistoryReader {
 				thinkingLevel,
 				role: typeof message?.role === "string" ? message.role : undefined,
 				messageId: typeof message?.id === "string" ? message.id : undefined,
+				messageTimestamp: typeof message?.timestamp === "number"
+					? message.timestamp
+					: typeof parsed.timestamp === "string" ? Date.parse(parsed.timestamp) : undefined,
 				summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
 				firstKeptEntryId: typeof parsed.firstKeptEntryId === "string"
 					? parsed.firstKeptEntryId

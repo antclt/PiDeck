@@ -1,4 +1,4 @@
-import type { PiSkillSummary } from "./skills";
+import type { PiSkillLocation, PiSkillSummary } from "./skills";
 
 // ── Pi / NPM / Config ──────────────────────────────────────────────────
 
@@ -14,6 +14,23 @@ export type PiInstallStatus = {
 	version?: string;
 	searchedDirs: string[];
 	error?: string;
+	/**
+	 * WSL 模式下解析出的 Linux 绝对路径（如 /home/dev/.nvm/versions/node/v22/bin/pi）。
+	 * `command` 是给人看的 `wsl -d … -u … <path>` 形式，本字段留给设置页做可复制的诊断信息。
+	 */
+	piPath?: string;
+};
+
+/**
+ * 设置页「验证并保存」的 WSL 连接结果。
+ * piVersion / piPath 由与 agent 启动同一条探测链路产出，避免「验证通过但启动失败」。
+ */
+export type WslConnectionValidation = {
+	ok: boolean;
+	whoami: string;
+	piVersion: string;
+	piPath: string;
+	error: string;
 };
 
 /** 安装命令执行结果 */
@@ -48,16 +65,63 @@ export type ConfigFileReadResult<T> = {
 
 // ── Project Resources / Extensions ─────────────────────────────────────
 
+export type ProjectResourceOverrides = {
+	/** 当前项目禁用的全局扩展 source；不修改全局启用状态。 */
+	disabledGlobalExtensions: string[];
+	/** 当前项目禁用的全局技能稳定键（sourceId:name）。 */
+	disabledGlobalSkills: string[];
+	/** 当前项目禁用的全局提示词稳定键（规范化 name）。 */
+	disabledGlobalPrompts: string[];
+};
+
+export type ProjectInheritedResourceToggleInput = {
+	projectId: string;
+	kind: "extension" | "skill" | "prompt";
+	key: string;
+	enabled: boolean;
+};
+
 export type ProjectResourceListResult = {
 	skills: PiSkillSummary[];
 	extensions: PiExtensionSummary[];
+	skillLocations: PiSkillLocation[];
+	overrides: ProjectResourceOverrides;
 };
 
-export type CreateProjectSkillInput = {
-	projectId: string;
-	name: string;
-	description: string;
+/** 运行时发现的资源（packages / settings 显式路径 / 祖先 .agents/skills）的只读描述。 */
+export type ProjectResourceDiscoveryResult = {
+	skills: Array<{
+		id: string;
+		name: string;
+		path: string;
+		dir: string;
+		sourceId: string;
+		sourceLabel: string;
+		description: string;
+		enabled: boolean;
+		managed: boolean;
+	}>;
+	prompts: Array<{
+		name: string;
+		path: string;
+		sourceId: string;
+		sourceLabel: string;
+		description: string;
+		enabled: boolean;
+		managed: boolean;
+	}>;
+	extensions: Array<{
+		source: string;
+		path: string;
+		sourceId: string;
+		sourceLabel: string;
+		physicalScope: "user" | "project";
+		enabled: boolean;
+		managed: boolean;
+	}>;
 };
+
+export type ProjectResourceDirectoryKind = "project-pi" | "project-agents" | "prompts";
 
 export type PiExtensionSummary = {
 	id: string;
@@ -207,6 +271,15 @@ export type AppUpdateStatusSnapshot = {
 		hasUpdate: boolean;
 		/** 最近一次已提示过的版本。 */
 		notifiedVersion?: string;
+		error?: string;
+	} | null;
+	/** 内置模型目录（pi-ai-catalog）更新状态；null = 尚未成功检查过。 */
+	catalog: {
+		/** 当前生效版本（覆盖层优先，否则内置）；无有效目录为 null。 */
+		localVersion?: string | null;
+		/** 远端（GitHub main 分支）最新版本；检查成功时存在。 */
+		latestVersion?: string;
+		hasUpdate: boolean;
 		error?: string;
 	} | null;
 };

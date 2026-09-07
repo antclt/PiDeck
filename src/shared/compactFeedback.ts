@@ -1,25 +1,20 @@
 /**
- * 手动压缩的统一门槛与结果分类。
+ * 手动压缩的统一可用态与结果分类。
  *
- * 历史问题：底栏 compact chip（>30% 才出现）迁入上下文圆环后，压缩按钮几乎
- * 总是可点；占用很低时点下去会打 RPC，pi 回 nothing-to-do / too-small，
- * 用户觉得「没到级别还弹提示」。成功路径又不弹 toast，重复点击在压缩中
- * 被主进程当成功返回，表现为「点了没反应」。
- *
- * 统一规则（按钮 / /compact / 主进程跳过 共用同一套分类）：
- * - 占用 < COMPACT_READY_PERCENT：客户端视为未就绪，不发 RPC；
- * - 占用达标：发 RPC，成功 toast、失败按原文分类；
+ * 可用态（按钮 / /compact 共用）：
+ * - 上下文占用数据可用（percent 已上报）即可压缩，不再设占用门槛——
+ *   占用很低时点击由 pi 自行判定（nothing-to-do / too-small 按原文分类提示）；
+ * - 无占用数据（会话未运行 / 尚未上报）视为未就绪，按钮禁用；
  * - 压缩进行中：拒绝重复请求（不再静默当成功）；
  * - compaction cancelled：静默（自动压缩撞车 / 新消息打断）。
+ *
+ * urgency 色阶保留：≥90 红 / ≥70 黄，仅作视觉提示，不影响可点性。
  */
-
-/** 建议手动压缩的占用门槛（与旧 compact chip >30% 一致）。 */
-export const COMPACT_READY_PERCENT = 30;
 
 export type CompactUrgency = "idle" | "warn" | "danger";
 
 export type CompactUiState = {
-	/** 占用达到建议门槛，按钮可点、会发 RPC。 */
+	/** 上下文占用数据可用（已上报 percent），按钮可点、会发 RPC。 */
 	ready: boolean;
 	compacting: boolean;
 	urgency: CompactUrgency;
@@ -33,7 +28,7 @@ export type CompactNoticeKind =
 	| "failed"
 	| "silent";
 
-/** 门槛判定用的占用字段；与 runtime state / 圆环 occupancy 同源。 */
+/** 圆环/压缩可用性判定用的占用字段；与 runtime state / 圆环 occupancy 同源。 */
 export type CompactUsageInput = {
 	contextPercent?: number | null;
 	contextTokens?: number | null;
@@ -63,27 +58,17 @@ export function resolveCompactUsagePercent(
 	return percent;
 }
 
-/** 圆环压缩按钮的可见交互态：压缩中禁用；未达标也禁用（避免打空 RPC）。 */
+/** 圆环压缩按钮的可见交互态：压缩中禁用；无占用数据（percent 未上报）也禁用。
+ * 占用达标与否不再影响可点性（随时可压缩），urgency 色阶仅作视觉提示。 */
 export function compactUiState(
 	percent: number | null | undefined,
 	compacting: boolean,
 ): CompactUiState {
-	const usage = percent ?? 0;
 	return {
-		ready: usage >= COMPACT_READY_PERCENT,
+		ready: percent != null,
 		compacting,
-		urgency: usage >= 90 ? "danger" : usage >= 70 ? "warn" : "idle",
+		urgency: percent == null ? "idle" : percent >= 90 ? "danger" : percent >= 70 ? "warn" : "idle",
 	};
-}
-
-/** 客户端是否应拦截手动压缩（未达门槛且当前没在压）。percent 用 resolveCompactUsagePercent 的结果。 */
-export function shouldSkipCompactForLowUsage(
-	percent: number | null | undefined,
-	compacting: boolean,
-): boolean {
-	if (compacting) return false;
-	if (percent == null) return false;
-	return percent < COMPACT_READY_PERCENT;
 }
 
 /**

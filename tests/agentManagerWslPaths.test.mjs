@@ -23,7 +23,7 @@ function loadWslPaths() {
 	return sandbox.exports;
 }
 
-function loadAgentManager() {
+function loadAgentManager(existsPredicate = () => false) {
 	const wslPaths = loadWslPaths();
 	// AgentManager 新增 streamGate 依赖（abort 流式封印）；与 WslPaths 一样显式沙箱加载。
 	const streamGate = (() => {
@@ -119,7 +119,7 @@ function loadAgentManager() {
 				return {
 					existsSync: (filePath) => {
 						calls.existsSync.push(filePath);
-						return false;
+						return existsPredicate(filePath);
 					},
 					readdirSync: (dir) => {
 						calls.readdirSync.push(dir);
@@ -204,6 +204,22 @@ function loadAgentManager() {
 					}),
 				};
 			}
+			// 技能白名单 resolver：本测试不涉及技能加载，透传空实现即可
+			if (id === "../skills/piProcessSkillResolvers") {
+				return {
+					createPiProcessSkillResolvers: () => ({
+						resolveEnabledSkillPaths: () => null,
+					}),
+				};
+			}
+			// 提示词模板白名单 resolver：本测试不涉及模板加载，透传空实现即可
+			if (id === "../prompts/piProcessPromptResolvers") {
+				return {
+					createPiProcessPromptResolvers: () => ({
+						resolveEnabledPromptPaths: () => null,
+					}),
+				};
+			}
 			// 会话文件汇总纯函数：本测试不覆盖，空实现满足 AgentManager 依赖契约
 			if (id === "../../shared/fileChanges") return { collectLatestTurnFileChanges: () => [] };
 			// rewind checkpoint 纯 git 模块：WSL 路径测试不涉及回退，空桩满足依赖契约
@@ -285,6 +301,14 @@ test("keeps switch_session RPC paths in Linux form", async () => {
 	);
 
 	assert.equal(requests[0].sessionPath, "/root/.pi/agent/sessions/session.jsonl");
+});
+
+test("project MCP files require an explicit trust decision", () => {
+	for (const suffix of [".mcp.json", ".pi\\mcp.json"]) {
+		const { AgentManager } = loadAgentManager((filePath) => filePath.endsWith(suffix));
+		const manager = createManager(AgentManager);
+		assert.equal(manager.hasTrustRequiringResources("C:\\project"), true, suffix);
+	}
 });
 
 test("uses host paths for trust resource checks and Linux paths for trust keys", async () => {

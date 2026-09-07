@@ -32,7 +32,7 @@
   /*
    * 等宽字体栈必须带 CJK 回退：栈内西文等宽字体（Consolas/Menlo 等）不含汉字，
    * 若直接落到通用 monospace，Windows 会经 FontLink 用 SimSun(宋体) 渲染中文，
-   * 11px 小字 + 合成 600 字重时笔画挤压缠在一起（如「下次调用前」投递徽章）。
+   * 11px 小字 + 合成 600 字重时笔画挤压缠在一起（如等宽小字徽章/时间戳）。
    * CJK 字体放在通用 monospace 之前，西文仍命中前面的等宽字体，汉字命中 UI 同款字体。
    */
   --font-family-mono:
@@ -802,11 +802,12 @@ select:focus-visible {
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  /* Spinner 是进行中操作的功能反馈，不是装饰性动效；保留其线性旋转，
-     其余动画仍按系统偏好压缩为单帧。 */
-  *:not(.animate-pideck-spin),
-  *:not(.animate-pideck-spin)::before,
-  *:not(.animate-pideck-spin)::after {
+  /* Spinner 是进行中操作的功能反馈，不是装饰性动效；标题滚动是用户主动
+     hover 触发的「查看完整标题」功能行为（压成单帧会直接跳尾，无法阅读）。
+     两者保留其线性运动，其余动画仍按系统偏好压缩为单帧。 */
+  *:not(.animate-pideck-spin):not(.animate-title-scroll),
+  *:not(.animate-pideck-spin):not(.animate-title-scroll)::before,
+  *:not(.animate-pideck-spin):not(.animate-title-scroll)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;

@@ -23,105 +23,24 @@
   box-shadow: var(--shadow-xl);
 }
 
-/* 内容区：两列栅格，左表单右列表 */
+/* 内容区：列表单列排布（两列栅格布局随创建表单卡片一起移除） */
 .project-resources-body {
   min-height: 100%;
   padding: 24px;
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px 24px;
   align-content: start;
   background: var(--color-bg-muted);
 }
 
-/* 创建表单卡片 */
-.project-skill-create {
-  display: grid;
-  gap: 14px;
-  padding: 20px;
-  min-height: 0;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-panel);
-  align-content: start;
-  align-self: start;
-  grid-row: 1 / span 2;
-}
-/* 创建表单字段 */
-.project-resources-name-field {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-}
-.project-resources-name-field input {
-  width: 100%;
-  height: var(--control-height-lg);
-  padding: 0 10px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-control);
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
-}
-.project-resources-name-field input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: var(--focus-ring);
-}
-.project-resources-desc-field {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-}
-.project-resources-desc-field textarea {
-  width: 100%;
-  min-height: 60px;
-  max-height: 120px;
-  padding: 8px 10px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-control);
-  resize: vertical;
-  font-family: inherit;
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
-}
-.project-resources-desc-field textarea:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: var(--focus-ring);
-}
-
 /* 资源列表区 */
 .project-resources-list-section {
   display: grid;
-  grid-column: 2;
-  grid-row: 2;
   gap: 8px;
   align-content: start;
 }
 
-/* 窄窗口时创建区和资源列表上下排列，避免第二列被压缩到不可读。 */
-@media (max-width: 820px) {
-  .project-resources-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .project-skill-create {
-    grid-row: auto;
-  }
-  .project-resources-list-header.col-span-2,
-  .project-resources-list-section {
-    grid-column: 1;
-    grid-row: auto;
-  }
-}
+/* 窄窗口时的两列布局已随创建表单卡片移除，无需再调整栅格列。 */
 .project-resources-list-header {
   display: flex;
   align-items: center;

@@ -71,6 +71,9 @@ function buildReferenceTree(messages: SessionMessage[]): {
 				items: subItems,
 				startedAt: subItems[0]?.message.timestamp ?? 0,
 				endedAt: subItems[subItems.length - 1]?.message.timestamp ?? 0,
+				// 会话引用只用于展示所选消息列表，不参与耗时统计
+				askWaitMs: 0,
+				askPending: false,
 			});
 		} else if (msg.role === "user") {
 			const id = `${REF_ID_PREFIX}${i}`;

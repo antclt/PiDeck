@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAtomValue } from "jotai";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
+import { updateStatusAtom } from "../../../atoms/update-atoms";
 import { Button } from "../../ui-shadcn/button";
 import { SettingsSection } from "./SettingsStorageTab";
 import type {
@@ -9,6 +11,8 @@ import type {
 	CatalogUpdateResult,
 	CatalogUpdateStatus,
 } from "../../../../../shared/types/catalog";
+import type { UpdateSourceId } from "../../../../../shared/types/settings";
+import { normalizeCustomMirrorHost, UPDATE_SOURCE_MIRRORS } from "../../../../../shared/updateSources";
 
 type BusyKind = "check" | "update" | "restore" | "restore-prev" | null;
 
@@ -46,10 +50,37 @@ function sourceText(
  * pi-ai 模型目录覆盖到 userData，支持一键还原与恢复上一个覆盖版。
  * 状态与操作结果不落本地配置——目录文件由主进程统一管理，本组件只读展示。
  */
-export function CatalogSection() {
+export function CatalogSection(props: {
+	updateSource?: UpdateSourceId;
+	customUpdateSourceUrl?: string;
+}) {
 	const [status, setStatus] = useState<CatalogUpdateStatus | null>(null);
 	const [busy, setBusy] = useState<BusyKind>(null);
 	const [notice, setNotice] = useState<Notice>(null);
+	// 后台定时检查（UpdateService 第三路）发现的新版本提示：打开设置页立即可见，
+	// 无需先点「检查更新」；本地/远端版本取自同一检查链路（覆盖层优先，否则内置）。
+	const catalogSnapshot = useAtomValue(updateStatusAtom)?.catalog ?? null;
+	const updateNotice = useMemo(
+		() =>
+			catalogSnapshot?.hasUpdate
+				? t("settings.catalogUpdateAvailable", {
+						local: catalogSnapshot.localVersion ?? "—",
+						remote: catalogSnapshot.latestVersion ?? "—",
+					})
+				: null,
+		[catalogSnapshot],
+	);
+	// 当前目录更新源的展示名：与应用更新同源，直接复用同一份镜像清单与 label。
+	const catalogSourceLabel = useMemo(() => {
+		const source = props.updateSource ?? "github";
+		if (source === "github") return t("settings.updateSourceGithub");
+		if (source === "custom") {
+			const host = normalizeCustomMirrorHost(props.customUpdateSourceUrl ?? "");
+			return host ?? t("settings.updateSourceGithub");
+		}
+		const mirror = UPDATE_SOURCE_MIRRORS.find((m) => m.id === source);
+		return mirror ? mirror.host : t("settings.updateSourceGithub");
+	}, [props.updateSource, props.customUpdateSourceUrl]);
 
 	const refresh = useCallback(() => {
 		desktopApi.catalog
@@ -91,6 +122,18 @@ export function CatalogSection() {
 			description={t("settings.catalogSectionDesc")}
 		>
 			<div className="flex flex-col gap-2">
+				{/* 目录更新源：与应用更新同源，方便用户确认走的是哪个 GitHub 镜像 */}
+				<div className="flex items-center gap-1.5 text-caption text-muted-foreground">
+					<span>{t("settings.catalogUpdateSource")}</span>
+					<span className="font-medium text-foreground">{catalogSourceLabel}</span>
+				</div>
+				{/* 后台检查发现新版本：亮点 + 版本对比，提示用户点「更新」拉取最新目录 */}
+				{updateNotice ? (
+					<div className="flex items-center gap-1.5 text-caption font-medium text-[var(--color-accent)]">
+						<span className="size-1.5 shrink-0 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />
+						<span>{updateNotice}</span>
+					</div>
+				) : null}
 				<div className="flex items-center gap-2 text-caption text-muted-foreground">
 					<span>{t("settings.catalogBuiltin")}</span>
 					<span className="font-medium text-foreground">{sourceText(status?.builtin ?? null)}</span>
@@ -155,7 +198,12 @@ export function CatalogSection() {
 						run(
 							"update",
 							() => desktopApi.catalog.updateFromGithub("main"),
-							() => t("settings.catalogUpdated"),
+							(result) => {
+								const r = result as CatalogUpdateResult;
+								return r.ok && r.updated
+									? t("settings.catalogUpdated")
+									: t("settings.catalogAlreadyLatest");
+							},
 						)
 					}
 				>

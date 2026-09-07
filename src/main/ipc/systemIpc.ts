@@ -14,7 +14,6 @@ import type {
 	AppSettings,
 	AvailableModel,
 	ModelListReport,
-	CreatePiSkillInput,
 	SessionCommandResult,
 	SessionRuntimeTarget,
 } from "../../shared/types";
@@ -31,7 +30,8 @@ import type { SkillManager } from "../skills/SkillManager";
 import { fetchModelList, getCachedModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
-import type { TokendanceAuthStore } from "../config/tokendanceAuth";
+import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
+import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
@@ -41,7 +41,7 @@ import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
 import type { AgentProcessMetric, DiagnosticsSnapshot, ProcessMetricsSnapshot } from "../../shared/types";
 import type { DiagnosticsMonitor } from "../diagnostics/DiagnosticsMonitor";
-import { getWslExe } from "../wsl/wslExe";
+import { getWslExe, decodeWslOutput, parseWslDistroList } from "../wsl/wslExe";
 import { listWebNetworkAddresses } from "../web/WebNetwork";
 import { toggleMainWindowDevTools } from "../devTools";
 import {
@@ -81,10 +81,45 @@ function isRpcLogEntry(value: unknown): value is RpcLogEntry {
 	);
 }
 
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return isUnknownRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
+	if (!isUnknownRecord(value)) return false;
+	const optionalString = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "string";
+	const optionalNumber = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "number";
+	return (
+		["command", "cwd", "url", "socket", "bearerToken", "bearerTokenEnv"].every(optionalString) &&
+		optionalNumber("idleTimeout") &&
+		optionalNumber("requestTimeoutMs") &&
+		(!("args" in value) || value.args === undefined || (Array.isArray(value.args) && value.args.every((entry) => typeof entry === "string"))) &&
+		(!("env" in value) || value.env === undefined || isStringRecord(value.env)) &&
+		(!("headers" in value) || value.headers === undefined || isStringRecord(value.headers)) &&
+		(!("auth" in value) || value.auth === undefined || value.auth === "bearer" || value.auth === "oauth") &&
+		(!("lifecycle" in value) || value.lifecycle === undefined || ["lazy", "eager", "keep-alive", "lazy-keep-alive"].includes(String(value.lifecycle))) &&
+		(!("disabled" in value) || value.disabled === undefined || typeof value.disabled === "boolean") &&
+		(!("directTools" in value) || value.directTools === undefined || typeof value.directTools === "boolean" || (Array.isArray(value.directTools) && value.directTools.every((entry) => typeof entry === "string")))
+	);
+}
+
+function isMcpConfigFile(value: unknown): value is McpConfigFile {
+	if (!isUnknownRecord(value)) return false;
+	if ("settings" in value && value.settings !== undefined && !isUnknownRecord(value.settings)) return false;
+	if (!("mcpServers" in value) || value.mcpServers === undefined) return true;
+	if (!isUnknownRecord(value.mcpServers)) return false;
+	return Object.values(value.mcpServers).every(isMcpServerDefinition);
+}
+
 export type SystemIpcDeps = {
 	piLocator: PiLocator;
 	settingsStore: SettingsStore;
 	configManager: ConfigManager;
+	projectResourceManager: ProjectResourceManager;
 	agentManager: AgentManager;
 	skillManager: SkillManager;
 	appLogger: AppLogger;
@@ -213,11 +248,20 @@ function asConfigProxyMode(raw: unknown): ConfigProxyMode {
 	return raw === "pi" || raw === "desktop" || raw === "off" ? raw : "follow";
 }
 
+/**
+ * WSL 发行版名 / 用户名的边界校验：只允许安全字符、限长，且不得以 `-` 开头。
+ * 两者会以数组形式传给 wsl.exe 的 `-d` / `-u`，以 `-` 开头的值会被当成额外选项解析。
+ */
+function isWslName(value: string): boolean {
+	return /^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$/.test(value);
+}
+
 export function registerSystemIpc(deps: SystemIpcDeps): void {
 	const {
 		piLocator,
 		settingsStore,
 		configManager,
+		projectResourceManager,
 		agentManager,
 		skillManager,
 		appLogger,
@@ -285,14 +329,23 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── Pi 检测 ──────────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.piCheck, async () => {
+	ipcMain.handle(ipcChannels.piCheck, async (_event, force?: unknown) => {
 		const settings = settingsStore.get();
-		const status = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		// 渲染层输入不可信：只认布尔 true，其他一律当非强制重检
+		const forceWslProbe = force === true;
+		const status = await piLocator.check(
+			settings.customPiPath,
+			settings.wslEnabled,
+			settings.wslDistro,
+			settings.wslUser,
+			{ forceWslProbe },
+		);
 		void appLogger.info("pi", "Pi check completed", {
 			installed: status.installed,
 			version: status.version,
 			command: status.command,
 			error: status.error,
+			forceWslProbe,
 		});
 		return status;
 	});
@@ -451,49 +504,49 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (process.platform !== "win32") return [] as string[];
 		try {
 			const { execFile } = await import("node:child_process");
-			return new Promise<string[]>((resolve) => {
-				execFile(wslExePath, ["-l", "-q"], { encoding: "utf8", timeout: 10_000, windowsHide: true, shell: wslShell },
+			return await new Promise<string[]>((resolve) => {
+				// wsl.exe 在 Windows 10 1903+ 以 UTF-16LE 输出；按 utf8 解码会得到字符夹 NUL 的乱码，
+				// 旧实现的 `!includes("\x00")` 过滤会把全部行丢掉，表现为发行版下拉框永远为空。
+				execFile(wslExePath, ["-l", "-q"], { encoding: "buffer", timeout: 10_000, windowsHide: true, shell: wslShell },
 					(err, stdout) => {
 						if (err) { resolve([]); return; }
-						const distros = stdout.split(/\r?\n/)
-							.map((s) => s.trim())
-							.filter((s) => s.length > 0 && !s.includes("\\") && !s.includes("\x00"));
-						resolve(distros);
+						resolve(parseWslDistroList(stdout));
 					});
 			});
 		} catch { return [] as string[]; }
 	});
 
-	ipcMain.handle(ipcChannels.wslValidateConnection, async (_event, distro: string, user: string) => {
+	ipcMain.handle(ipcChannels.wslValidateConnection, async (_event, distro: unknown, user: unknown) => {
+		// 边界校验：渲染层输入不可信，distro/user 只允许安全字符且限长（会拼进子进程参数数组）。
+		if (
+			typeof distro !== "string" ||
+			typeof user !== "string" ||
+			!isWslName(distro) ||
+			!isWslName(user)
+		) {
+			return { ok: false, whoami: "", piVersion: "", piPath: "", error: mainCopy("wsl.connectionFailed") };
+		}
 		if (process.platform !== "win32") {
-			return { ok: false, whoami: "", piVersion: "", error: mainCopy("wsl.windowsOnly") };
+			return { ok: false, whoami: "", piVersion: "", piPath: "", error: mainCopy("wsl.windowsOnly") };
 		}
 		try {
 			const { execFile } = await import("node:child_process");
 			const whoami = await new Promise<string>((resolve, reject) => {
 				execFile(wslExePath, ["-d", distro, "-u", user, "whoami"],
-					{ encoding: "utf8", timeout: 10_000, windowsHide: true, shell: wslShell },
+					{ encoding: "buffer", timeout: 10_000, windowsHide: true, shell: wslShell },
 					(err, stdout) => {
 						if (err) { reject(err); return; }
-						resolve(stdout.trim());
+						resolve(decodeWslOutput(stdout).trim());
 					});
 			});
-			let piVersion = "";
-			try {
-				piVersion = await new Promise<string>((resolve, reject) => {
-					execFile(wslExePath, ["-d", distro, "-u", user, "pi", "--version"],
-						{ encoding: "utf8", timeout: 10_000, windowsHide: true, shell: wslShell },
-						(err, stdout) => {
-							if (err) { reject(err); return; }
-							resolve(stdout.trim());
-						});
-				});
-			} catch { /* pi 未安装，piVersion 保持空 */ }
+			// 与 agent 启动共用同一探测结果（强制重探）：用户可能刚在 WSL 里装完 pi 就来点验证。
+			const pi = await piLocator.checkWslInstallation(distro, user, { force: true });
 			return {
 				ok: true,
 				whoami,
-				piVersion,
-				error: piVersion ? "" : mainCopy("wsl.piNotInstalled"),
+				piVersion: pi.installed ? (pi.version ?? "") : "",
+				piPath: pi.installed ? (pi.piPath ?? "") : "",
+				error: pi.installed ? "" : mainCopy("wsl.piNotInstalled"),
 			};
 		} catch (err) {
 			void appLogger.warn("wsl", "WSL connection validation failed", {
@@ -505,6 +558,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				ok: false,
 				whoami: "",
 				piVersion: "",
+				piPath: "",
 				error: mainCopy("wsl.connectionFailed"),
 			};
 		}
@@ -1149,11 +1203,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		// 渲染层传入的路径不可信：白名单校验（全局/项目技能位置）在 readSkillContent 内完成。
 		return readSkillContent(skillPath);
 	});
-	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput) => {
-		const result = await skillManager.create(input);
-		void appLogger.info("skill", "Skill created", { name: input.name, locationId: input.locationId });
-		return result;
-	});
 	ipcMain.handle(ipcChannels.skillsToggle, async (_event, path: string, enabled: boolean) => {
 		const result = await skillManager.toggle(path, enabled);
 		void appLogger.info("skill", "Skill toggled", { path, enabled });
@@ -1212,30 +1261,30 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configGetTrust, () =>
 		configManager.getTrustConfig(),
 	);
-	// MCP 配置只读合并：projectPath 可选，非法输入当全局层处理。
-	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectPath?: unknown) => {
-		const path =
-			typeof projectPath === "string" && projectPath.trim().length > 0
-				? projectPath.trim()
-				: undefined;
-		return configManager.getMcpConfig(path);
+	// MCP project layers are selected by a stable registered project id; renderer paths are never trusted.
+	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectId?: unknown) => {
+		if (projectId === undefined) return configManager.getMcpConfig();
+		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) {
+			throw new Error("Invalid project id.");
+		}
+		return configManager.getMcpConfig(projectResourceManager.getProjectRoot(projectId.trim()));
 	});
 	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown) => {
-		if (!data || typeof data !== "object" || Array.isArray(data)) {
-			return { valid: false, error: "mcp.json must be an object" };
+		if (!isMcpConfigFile(data)) {
+			return { valid: false, error: "mcp.json must contain an object of server definitions" };
 		}
-		const result = await configManager.saveMcpConfig(data as McpConfigFile);
+		const result = await configManager.saveMcpConfig(data);
 		void appLogger.info("config", "MCP config saved", {
-			serverCount: Object.keys((data as McpConfigFile).mcpServers ?? {}).length,
+			serverCount: Object.keys(data.mcpServers ?? {}).length,
 		});
 		return result;
 	});
 	// 轻量探测：不 spawn 用户 command、不连 MCP SDK。
 	ipcMain.handle(ipcChannels.configProbeMcp, async (_event, definition: unknown) => {
-		if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
+		if (!isMcpServerDefinition(definition)) {
 			return { ok: false, error: "invalid MCP server definition" };
 		}
-		return configManager.probeMcpServer(definition as McpServerDefinition);
+		return configManager.probeMcpServer(definition);
 	});
 	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
 	ipcMain.handle(ipcChannels.configGetDir, () =>
@@ -1282,7 +1331,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configSaveAuth, async (_event, data) => {
 		const result = await configManager.saveAuthConfig(data);
-		if (result.valid) void refreshPiModelCatalogs().catch(() => undefined);
+		if (result.valid) {
+			void refreshPiModelCatalogs().catch(() => undefined);
+		}
 		void appLogger.info("config", "Auth config saved", { authCount: Object.keys(data ?? {}).length });
 		return result;
 	});
@@ -1293,8 +1344,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configSaveRaw, async (_event, fileName, rawJson) => {
 		const result = await configManager.saveRawConfig(fileName, rawJson);
-		if (result.valid && (fileName === "models.json" || fileName === "auth.json")) {
-			void refreshPiModelCatalogs().catch(() => undefined);
+		if (result.valid) {
+			if (fileName === "models.json" || fileName === "auth.json") {
+				void refreshPiModelCatalogs().catch(() => undefined);
+			}
 		}
 		void appLogger.info("config", "Raw config saved", { fileName, bytes: Buffer.byteLength(rawJson, "utf8") });
 		return result;
@@ -1304,7 +1357,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	);
 	ipcMain.handle(ipcChannels.configImport, async (_event, packageJson: string) => {
 		const result = await configManager.importConfig(packageJson);
-		if (result.valid) void refreshPiModelCatalogs().catch(() => undefined);
+		if (result.valid) {
+			void refreshPiModelCatalogs().catch(() => undefined);
+		}
 		void appLogger.info("config", "Config imported", { bytes: Buffer.byteLength(packageJson, "utf8"), valid: result.valid });
 		return result;
 	});
@@ -1338,17 +1393,52 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { models: [], fromCache: false, at: 0 };
 		}
 	});
-	ipcMain.handle(ipcChannels.configTokendanceAuthStart, async (_event) => {
+	ipcMain.handle(ipcChannels.configTokendanceAuthStart, async (_event, payload: unknown) => {
 		// 未装配 = 主进程没注册授权能力（预览/测试壳），返回失败不抛异常。
 		if (!tokendanceAuth) return { ok: false, error: "TokenDance auth unavailable" };
+		const mode =
+			typeof payload === "object" && payload
+				? (payload as { mode?: unknown }).mode
+				: undefined;
+		// 枚举白名单：只认 headless，其余（含缺失/非法）一律取默认 callback。
+		const requested: TokendanceAuthMode = mode === "headless" ? "headless" : "callback";
 		try {
-			return { ok: true, ...tokendanceAuth.start() } as const;
+			// callback 模式要绑定本地端口（异步），失败时 store 内部降级为 headless 并带 fallbackReason。
+			return { ok: true, ...(await tokendanceAuth.start({ mode: requested })) } as const;
 		} catch (error) {
 			void appLogger.warn("config", "TokenDance auth start failed", {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return { ok: false, error: "TokenDance auth start failed" };
 		}
+	});
+	ipcMain.handle(ipcChannels.configTokendanceAuthAwait, async (_event, payload: unknown) => {
+		// callback 模式主路径：挂起等待浏览器把 code 送回本地，拿到就当场交换成 Key。
+		const flowId =
+			typeof payload === "object" && payload
+				? (payload as { flowId?: unknown }).flowId
+				: undefined;
+		if (typeof flowId !== "string" || !flowId) {
+			return { ok: false, error: "Invalid auth await input" };
+		}
+		if (!tokendanceAuth) return { ok: false, error: "TokenDance auth unavailable" };
+		const result = await tokendanceAuth.awaitKey(flowId);
+		if (result.ok) {
+			void appLogger.info("config", "TokenDance API key exchanged via callback");
+			return { ok: true, key: result.key } as const;
+		}
+		void appLogger.warn("config", "TokenDance callback auth failed", { error: result.error });
+		return { ok: false, error: result.error } as const;
+	});
+	ipcMain.handle(ipcChannels.configTokendanceAuthCancel, async (_event, payload: unknown) => {
+		// 生命周期配对：弹窗关闭/取消必须释放回环端口，否则端口随流程泄漏到过期清理为止。
+		const flowId =
+			typeof payload === "object" && payload
+				? (payload as { flowId?: unknown }).flowId
+				: undefined;
+		if (typeof flowId !== "string" || !flowId) return { ok: false, error: "Invalid auth cancel input" };
+		tokendanceAuth?.cancel(flowId);
+		return { ok: true } as const;
 	});
 	ipcMain.handle(ipcChannels.configTokendanceAuthExchange, async (_event, payload: unknown) => {
 		// 边界校验：flowId/code 必须是非空字符串（渲染层入参不可信）；code 不写日志。

@@ -104,7 +104,8 @@ const skillStore = read("src/renderer/src/config/SkillStoreTab.tsx");
 const yaoStore = read("src/renderer/src/config/YaoPromptTab.tsx");
 const skillHub = read("src/renderer/src/config/SkillHubStorePanel.tsx");
 const promptStore = read("src/renderer/src/config/PromptStoreTab.tsx");
-const extensions = read("src/renderer/src/config/ExtensionsTab.tsx");
+const extensions = read("src/renderer/src/config/ExtensionsTab.tsx")
+	+ "\n" + read("src/renderer/src/config/extensionsRecommendedPackages.tsx");
 const configShared = read("src/renderer/src/config/ConfigShared.tsx");
 const providerHeaders = read("src/renderer/src/config/providerHeaders.ts");
 const queuedPrompt = read("src/renderer/src/hooks/useQueuedPrompt.ts");

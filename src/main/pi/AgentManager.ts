@@ -37,6 +37,8 @@ import { mergeSubagentSources } from "./derivedSubagents";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
+import { createPiProcessSkillResolvers } from "../skills/piProcessSkillResolvers";
+import { createPiProcessPromptResolvers } from "../prompts/piProcessPromptResolvers";
 import {
 	formatExtensionFallbackDebug,
 	shouldRetryWithoutExtensions,
@@ -57,6 +59,7 @@ import {
 	type SessionFileRef,
 } from "./SessionFileEditor";
 import { SessionHistoryReader, findTurnPageStart } from "./SessionHistoryReader";
+import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
 import {
 	currentIndexTree,
 	createCheckpoint,
@@ -194,6 +197,8 @@ export class AgentManager {
 	private readonly sessionFileEditor: SessionFileEditor;
 	private readonly sessionHistoryReader: SessionHistoryReader;
 	private readonly messageProjector: AgentMessageProjector;
+	/** catalog 改写发生在 stop 之后：保留受限身份摘要，而不是保留整个已停 runtime。 */
+	private readonly stoppedMessageIdentities = new StoppedMessageIdentityCache();
 	/** 流式消息 emit 节流状态。 */
 	private readonly messageFlushTimers = new Map<string, NodeJS.Timeout>();
 	private readonly pendingMessageAgents = new Set<string>();
@@ -533,7 +538,10 @@ export class AgentManager {
 		return new PiProcess(cwd, settings, undefined, {
 			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
 			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
+			// 技能/模板解析器同源：禁用的技能与提示词模板在 RPC 启动时以白名单剔除。
 			...createPiProcessExtensionResolvers(cwd, settings),
+			...createPiProcessSkillResolvers(cwd, settings),
+			...createPiProcessPromptResolvers(cwd, settings),
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,
@@ -2877,6 +2885,7 @@ export class AgentManager {
 			sessionPath,
 			messageId,
 			options?.entryId,
+			this.stoppedMessageIdentities.get(hostPath, messageId),
 		);
 		if (!located) {
 			// 未落盘删除兜底：发送中/刚结束即中断，再删该轮消息时 JSONL 还没有这条记录——
@@ -3148,8 +3157,9 @@ export class AgentManager {
 	): Promise<T> {
 		const project = this.getProject(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const trustOverride = await this.ensureProjectTrust(project);
 		const process = this.createPiProcess(project.path, sessionPath);
-		await process.start(sessionPath);
+		await process.start(sessionPath, trustOverride);
 		try {
 			return await run(process);
 		} finally {
@@ -3456,6 +3466,14 @@ export class AgentManager {
 		// 标记用户主动停止，退出处理器将跳过自动重连
 		this.userInitiatedStop.add(agentId);
 		const process = runtime.process;
+		if (runtime.tab.sessionPath) {
+			// 编辑确认框可能捕获了投影前的 live ID；清缓存前留存锚点/摘要，
+			// 文件读者仍会校验活动分支与唯一性，不能凭 UI 的过期 ID 盲改正文。
+			this.stoppedMessageIdentities.capture(
+				this.toSessionHostPath(runtime.tab.sessionPath),
+				this.messages.get(agentId) ?? [],
+			);
+		}
 		this.agents.delete(agentId);
 		this.messages.delete(agentId);
 		this.messageDirtyFromByAgent.delete(agentId);
@@ -3550,6 +3568,7 @@ export class AgentManager {
 		}
 		this.agents.clear();
 		this.messages.clear();
+		this.stoppedMessageIdentities.clear();
 		// 退出时统一清理所有 gate / abort 兜底定时器，避免泄漏到下一次生命周期。
 		for (const agentId of [...this.streamGates.keys()]) this.clearStreamGate(agentId);
 		this.recentlyAborted.clear();
@@ -4570,7 +4589,7 @@ export class AgentManager {
 		"settings.json",
 		"extensions",
 		"skills",
-		"prompts",
+		"mcp.json",
 		"themes",
 		"SYSTEM.md",
 		"APPEND_SYSTEM.md",
@@ -4584,7 +4603,10 @@ export class AgentManager {
 	private hasTrustRequiringResources(hostCwd: string): boolean {
 		const configDir = join(hostCwd, ".pi");
 		if (
-			AgentManager.TRUST_REQUIRING_RESOURCE_FILES.some((file) => existsSync(join(configDir, file)))
+			AgentManager.TRUST_REQUIRING_RESOURCE_FILES.some((file) => existsSync(join(configDir, file))) ||
+			// pi-mcp-adapter also loads a project-root layer. It can define stdio commands,
+			// so a project with only .mcp.json still requires an explicit trust decision.
+			existsSync(join(hostCwd, ".mcp.json"))
 		) {
 			return true;
 		}
@@ -5230,9 +5252,14 @@ export class AgentManager {
 		// 避免使用消息 timestamp（会在 update/end 时刷新）导致历史恢复后耗时不可还原。
 		// ask_question 工具耗时需扣除用户等待时长（exclude_wait）：等待期由 settleAskWait 累计在
 		// askWaitMsByAgent，工具结束时减掉并清零，让 durationMs 只反映 agent 实际处理时间。
+		// 注意扣除不只适用于 ask_question 自身：tool_execution_start 已清空累计值，因此任何工具
+		// end 时残留的等待量只可能是「本工具运行期间结算的等待」——子代理委托工具（Agent /
+		// acp_delegate 等）运行中，子代理转发的提问被回答时正是这种情况，若只对 ask_question
+		// 扣除，该等待会在下一个工具 start 时被无痕清掉，委托工具卡时长仍虚高（用户反馈
+		// 「代理的时间也有问题」）。
 		let durationMs =
 			status === "running" ? undefined : Math.max(0, Date.now() - startedAt);
-		if (durationMs !== undefined && toolName === "ask_question") {
+		if (durationMs !== undefined) {
 			const askWaitMs = this.askWaitMsByAgent.get(agentId) ?? 0;
 			if (askWaitMs > 0) {
 				durationMs = Math.max(0, durationMs - askWaitMs);
@@ -5645,7 +5672,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * 非聚焦会话收到 Ask 类 UI 请求时的桌面通知（SessionRuntimeCoordinator 调用）。
+	 * 会话收到 Ask 类 UI 请求时的桌面通知（SessionRuntimeCoordinator 调用，
+	 * 不再区分该会话是否聚焦：只要 Agent 在提问就提醒）。
 	 * 独立于 notifySessionEnd：由 askNotificationEnabled 单独门控（默认关闭），
 	 * 即使用户关闭通用会话结束通知，仍可单独开启提问提醒，反之亦然。
 	 * 每轮 run 只通知一次（去重标记在 agent_start 时清除），避免同一轮多次提问刷屏。

@@ -21,10 +21,12 @@ function predictImportName(title: string): string {
 		.replace(/^-|-$/g, "");
 }
 
-/** 获取本地已安装 prompt 名称集合 */
-async function getInstalledPromptNames(): Promise<Set<string>> {
+/** 获取当前作用域已安装 prompt 名称集合 */
+async function getInstalledPromptNames(projectId?: string): Promise<Set<string>> {
 	try {
-		const list: PiPromptTemplateListResult = await desktopApi.prompts.list();
+		const list: PiPromptTemplateListResult = projectId
+			? await desktopApi.prompts.listByProject(projectId)
+			: await desktopApi.prompts.list();
 		return new Set(list.templates.filter((t) => t.userCreated).map((t) => t.name.toLowerCase()));
 	} catch {
 		return new Set();
@@ -40,6 +42,8 @@ const SUGGESTED_SEARCHES = ["code review", "refactoring", "test", "git", "docume
 export function PromptStoreTab(props: {
 	/** 导入成功后的回调，用于刷新本地模板列表 */
 	onImported?: () => void;
+	/** Selected project id; omitted for the global pi prompt directory. */
+	projectId?: string;
 }) {
 	const [storeSubTab, setStoreSubTab] = useState<"store" | "yao">("store");
 	const [query, setQuery] = useState("");
@@ -72,7 +76,7 @@ export function PromptStoreTab(props: {
 		try {
 			const [data, installed] = await Promise.all([
 				desktopApi.promptStore.search(q, { limit: 20 }),
-				getInstalledPromptNames(),
+				getInstalledPromptNames(props.projectId),
 			]);
 			setResult(data);
 			setInstalledNames(installed);
@@ -83,7 +87,7 @@ export function PromptStoreTab(props: {
 		} finally {
 			setSearching(false);
 		}
-	}, []);
+	}, [props.projectId]);
 
 	const handleKeyDown = (e: React.KeyboardEvent) => {
 		if (e.key === "Enter") {
@@ -103,6 +107,7 @@ export function PromptStoreTab(props: {
 				title: item.title,
 				description: item.description,
 				content: item.content,
+				projectId: props.projectId,
 			});
 			showNotice(t("config.promptStoreImported"), 2500);
 			// 刷新本地列表 + 重新搜索以更新已安装标注
@@ -201,7 +206,7 @@ export function PromptStoreTab(props: {
 			</Tabs>
 
 			{storeSubTab === "yao" ? (
-				<YaoPromptTab onImported={props.onImported} />
+				<YaoPromptTab projectId={props.projectId} onImported={props.onImported} />
 			) : (
 				<>
 					{/* 搜索栏 */}

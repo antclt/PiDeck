@@ -1,13 +1,14 @@
 import { Component, Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getDefaultStore, useAtom } from "jotai";
+import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
+import { hasPendingUpdateAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
 import {
 	Settings2,
 	Network,
 	Wrench,
 	PawPrint,
-	Volume2,
+	Bell,
 	Trash2,
 	Brush,
 	Eye,
@@ -15,6 +16,7 @@ import {
 	Activity,
 	MessageSquare,
 	ImageIcon,
+	DatabaseBackup,
 	Globe,
 	FileCode2,
 	GitBranch,
@@ -58,7 +60,7 @@ import { SETTINGS_TAB_IDS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLay
 import { useGitModels } from "./settings/gitModels.ts";
 import { formatSettingsUnsavedMessage, summarizeSettingsUnsavedChanges } from "./settings/unsavedChangesSummary.ts";
 import { UpdateInstallUnsavedDialog } from "./settings/UpdateInstallUnsavedDialog.tsx";
-import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult } from "../../../../shared/types";
+import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult, Project } from "../../../../shared/types";
 
 // ── 各 tab 内容 lazy 加载：首开只下载壳 + 当前 tab 的 chunk（qrcode/表格/日志查看器等
 //    重依赖随各自 tab 拆包），切换到某 tab 时才加载其 chunk（本地文件，秒级以内）。──
@@ -70,9 +72,10 @@ const EditorsTab = lazy(() => import("./settings/EditorsTab").then((m) => ({ def
 const GitTab = lazy(() => import("./settings/GitTab").then((m) => ({ default: m.GitTab })));
 const DevTab = lazy(() => import("./settings/DevTab").then((m) => ({ default: m.DevTab })));
 const PetTab = lazy(() => import("./settings/PetTab").then((m) => ({ default: m.PetTab })));
-const SoundTab = lazy(() => import("./settings/SoundTab").then((m) => ({ default: m.SoundTab })));
+const NotificationTab = lazy(() => import("./settings/NotificationTab").then((m) => ({ default: m.NotificationTab })));
 const ImTab = lazy(() => import("./settings/ImTab").then((m) => ({ default: m.ImTab })));
 const StorageTab = lazy(() => import("./settings/SettingsStorageTab").then((m) => ({ default: m.StorageTab })));
+const BackupTab = lazy(() => import("./settings/SettingsBackupTab").then((m) => ({ default: m.BackupTab })));
 const ProcessMetricsTab = lazy(() => import("./settings/ProcessMetricsTab").then((m) => ({ default: m.ProcessMetricsTab })));
 const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => ({ default: m.UsageStatsTab })));
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
@@ -155,8 +158,14 @@ type SettingsModalProps = {
 	onOpenWebService: (port: string) => void;
 	onClose: () => void;
 	onChange: (patch: Partial<AppSettings>) => Promise<boolean>;
-	/** 当前项目路径：有值时配置管理分区合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
-	projectPath?: string;
+	/** 当前项目身份：项目资源操作只使用主进程登记的 id。 */
+	projectId?: string;
+	/** PiDeck 当前加载的全部项目（作用域下拉展示；Chat 项目除外）。 */
+	projects?: Array<{ id: string; name: string; kind?: Project["kind"] }>;
+	/** Chat workspace has no project resource scope. */
+	projectKind?: Project["kind"];
+	/** 当前项目名称：作用域选择器显示用。 */
+	projectName?: string;
 };
 
 /**
@@ -243,8 +252,9 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	dev: { labelKey: "settings.tabs.dev", icon: <Wrench size={16} /> },
 	im: { labelKey: "settings.tabs.im", icon: <MessageSquare size={16} /> },
 	pet: { labelKey: "settings.tabs.pet", icon: <PawPrint size={16} /> },
-	sound: { labelKey: "settings.tabs.sound", icon: <Volume2 size={16} /> },
+	notification: { labelKey: "settings.tabs.notification", icon: <Bell size={16} /> },
 	storage: { labelKey: "settings.tabs.storage", icon: <Trash2 size={16} /> },
+	backup: { labelKey: "settings.tabs.backup", icon: <DatabaseBackup size={16} /> },
 	usage: { labelKey: "settings.tabs.usage", icon: <ChartColumnBig size={16} /> },
 	process: { labelKey: "settings.tabs.process", icon: <Activity size={16} /> },
 	vision: { labelKey: "settings.tabs.vision", icon: <Eye size={16} /> },
@@ -258,6 +268,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 function SettingsModalContent(props: SettingsModalProps) {
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容）。
 	// 深链（如 Git「去设置」）优先于上次记住的 tab，否则会停在外观/开发等其它页。
+	const hasPendingUpdate = useAtomValue(hasPendingUpdateAtom);
 	const [activeTab, setActiveTab] = useState<SettingsTabId>(
 		() => getDefaultStore().get(settingsFocusAtom)?.tab ?? loadLastSettingsTab(),
 	);
@@ -661,7 +672,10 @@ function SettingsModalContent(props: SettingsModalProps) {
 						<ConfigPane
 							ref={configPaneRef}
 							onClose={props.onClose}
-							projectPath={props.projectPath}
+							projectId={props.projectId}
+							projectKind={props.projectKind}
+							projectName={props.projectName}
+							projects={props.projects}
 							focusConfigTab={configFocus?.configTab}
 							focusProvider={configFocus?.provider}
 							focusBackendPane={configFocus?.backendPane}
@@ -685,11 +699,15 @@ function SettingsModalContent(props: SettingsModalProps) {
 										className="my-1.5 h-px w-auto shrink-0 bg-border-subtle max-[820px]:mx-1 max-[820px]:my-0 max-[820px]:h-auto max-[820px]:w-px"
 									/>
 								) : null}
-								<TabsTrigger value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
+						<TabsTrigger value={tab.id} className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 									<span className="settings-tab-icon">{tab.icon}</span>
 									<strong>{tab.label}</strong>
-								{/* 未保存黄点：按字段目录归并到所属 tab，视觉桥草稿算 vision */}
-								{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+									{/* 右侧状态点：更新亮点（仅 dev tab，app/pi/模型目录任一有更新）+ 未保存黄点。
+										两者可并存；均为装饰（aria-hidden），语义由 tab 内卡片文案承担。 */}
+									<div className="ml-auto flex items-center gap-1">
+										{tab.id === "dev" && hasPendingUpdate ? <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden="true" /> : null}
+										{dirtyTabIds.has(tab.id as SettingsUnsavedTabId) ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+									</div>
 								</TabsTrigger>
 							</Fragment>
 						))}
@@ -850,11 +868,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 						</TabsContent>
 					)}
 
-					{/* ── 声音提醒 tab ── */}
-					{activeTab === "sound" && (
-						<TabsContent value="sound" className="settings-panel min-w-0">
+					{/* ── 通知设置 tab（系统通知 + 声音提醒） ── */}
+					{activeTab === "notification" && (
+						<TabsContent value="notification" className="settings-panel min-w-0">
 							<Suspense fallback={<SettingsTabLoading />}>
-							<SoundTab
+							<NotificationTab
 								draft={draftSettings}
 								updateDraft={updateDraft}
 								isDirty={isDirty}
@@ -879,6 +897,14 @@ function SettingsModalContent(props: SettingsModalProps) {
 								settings={draftSettings}
 								onChange={updateDraft}
 							/>
+							</Suspense>
+						</TabsContent>
+					)}
+					{/* ── 配置备份 tab ── */}
+					{activeTab === "backup" && (
+						<TabsContent value="backup" className="settings-panel min-w-0">
+							<Suspense fallback={<SettingsTabLoading />}>
+							<BackupTab />
 							</Suspense>
 						</TabsContent>
 					)}

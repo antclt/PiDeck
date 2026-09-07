@@ -348,6 +348,60 @@ test("groupToolMessages 空闲态 error 诊断仍排在完成 run 之后（不�
 	assert.equal(renderedDefault[2].message.role, "error");
 });
 
+/* ── ask_question 等待时长推导（2026-09 用户反馈「ask 时时间还在计时」）──
+ * 主进程已在 ask_question 工具结束时把用户等待从 durationMs 扣除（AgentManager
+ * settleAskWait / upsertToolMessage），渲染层在分组时反推每轮等待量：
+ *   等待 = (工具结束消息时间戳 - meta.startedAt) - meta.durationMs
+ * 供 TurnRow 从轮时长减去（effectiveStart = startedAt + askWaitMs）；
+ * 运行中的 ask（meta.status === "running"）标记 askPending，尾部耗时冻结。 */
+
+function askToolMessage({ status, startedAt, durationMs, timestamp }) {
+	const meta = { toolName: "ask_question", status, startedAt, toolCallId: `ask-${seq}` };
+	if (durationMs !== undefined) meta.durationMs = durationMs;
+	return { id: `ask-${seq}`, agentId: "a", role: "tool", text: "✓ ask_question", timestamp, meta };
+}
+
+test("groupToolMessages 反推 ask_question 等待：completed 时按三字段差值累计", () => {
+	const { groupToolMessages } = loadAppUtils();
+	const user = { id: "u1", agentId: "a", role: "user", text: "问题", timestamp: 1 };
+	const ask = askToolMessage({ status: "done", startedAt: 1000, durationMs: 2000, timestamp: 12000 });
+	const a1 = { id: "a1", agentId: "a", role: "assistant", text: "回答", timestamp: 13000 };
+	const rendered = groupToolMessages([user, ask, a1]);
+	const run = rendered.find((item) => item.kind === "agent-run");
+	// 等待 = 12000 - 1000(开始) - 2000(实际处理) = 9000ms
+	assert.equal(run.askWaitMs, 9000);
+	assert.equal(run.askPending, false);
+});
+
+test("groupToolMessages 运行中 ask_question 标记 askPending 并冻结在提问时刻", () => {
+	const { groupToolMessages } = loadAppUtils();
+	const user = { id: "u1", agentId: "a", role: "user", text: "问题", timestamp: 1 };
+	const ask = askToolMessage({ status: "running", startedAt: 5000, timestamp: 5000 });
+	const rendered = groupToolMessages([user, ask]);
+	const run = rendered.find((item) => item.kind === "agent-run");
+	assert.equal(run.askPending, true);
+	assert.equal(run.askPendingAt, 5000);
+	// 运行中无 durationMs：不参与等待累计
+	assert.equal(run.askWaitMs, 0);
+});
+
+test("groupToolMessages 非 ask 工具不计入等待；已结算等待不影响新一轮 run", () => {
+	const { groupToolMessages } = loadAppUtils();
+	const user = { id: "u1", agentId: "a", role: "user", text: "问题", timestamp: 1 };
+	const read = {
+		id: "r1",
+		agentId: "a",
+		role: "tool",
+		text: "✓ read",
+		timestamp: 10,
+		meta: { toolName: "read", status: "done", startedAt: 5, durationMs: 5 },
+	};
+	const a1 = { id: "a1", agentId: "a", role: "assistant", text: "回答", timestamp: 20 };
+	const run = groupToolMessages([user, read, a1]).find((item) => item.kind === "agent-run");
+	assert.equal(run.askWaitMs, 0);
+	assert.equal(run.askPending, false);
+});
+
 /* ── stopReason 协议信号判定（2026-08 升级）──
  * pi RPC message_end 携带 provider 归一化 stopReason：
  * stop=最终回复 / toolUse=中间回复（工具调用回合）/ pending=message_start 占位。

@@ -4,35 +4,37 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /**
- * 手动压缩统一策略：门槛、按钮态、错误分类。
+ * 手动压缩统一策略：可用态、按钮态、错误分类。
  * 圆环按钮 / /compact / 主进程重复压缩共用同一套规则。
  */
 
 const {
-	COMPACT_READY_PERCENT,
 	compactUiState,
 	resolveCompactUsagePercent,
-	shouldSkipCompactForLowUsage,
 	classifyCompactError,
 } = loadTsCommonJs("src/shared/compactFeedback.ts");
 
-test("COMPACT_READY_PERCENT is 30 (legacy compact-chip threshold)", () => {
-	assert.equal(COMPACT_READY_PERCENT, 30);
-});
-
-test("compactUiState disables below threshold and while compacting", () => {
+test("compactUiState is ready whenever usage data exists, regardless of occupancy", () => {
 	// loadTsCommonJs 在 vm 里跑，对象原型跨 realm，不能 deepEqual 整个对象
 	const fields = (percent, compacting) => {
 		const state = compactUiState(percent, compacting);
 		return `${state.ready}:${state.compacting}:${state.urgency}`;
 	};
-	assert.equal(fields(12, false), "false:false:idle");
-	assert.equal(fields(29.9, false), "false:false:idle");
-	assert.equal(fields(30, false), "true:false:idle");
-	assert.equal(fields(45, false), "true:false:idle");
-	assert.equal(fields(70, false), "true:false:warn");
-	assert.equal(fields(90, true), "true:true:danger");
+	// 无占用数据（会话未运行/尚未上报）：未就绪，禁用
 	assert.equal(fields(undefined, false), "false:false:idle");
+	assert.equal(fields(null, false), "false:false:idle");
+	// 数据可用即随时可压缩（不再有 30% 门槛），0% 占用也可点
+	assert.equal(fields(0, false), "true:false:idle");
+	assert.equal(fields(12, false), "true:false:idle");
+	assert.equal(fields(45, false), "true:false:idle");
+	// urgency 色阶保留：≥70 黄 / ≥90 红（仅视觉提示）
+	assert.equal(fields(70, false), "true:false:warn");
+	assert.equal(fields(90, false), "true:false:danger");
+	assert.equal(fields(90, true), "true:true:danger");
+	// 压缩中：有数据时 ready 保持 true，禁用由 compacting 态负责
+	assert.equal(fields(90, true), "true:true:danger");
+	// 压缩中 + 无数据：同样未就绪（ready false，且 compacting 也禁用）
+	assert.equal(fields(undefined, true), "false:true:idle");
 });
 
 test("resolveCompactUsagePercent matches ring occupancy, including zero-percent token fallback", () => {
@@ -58,18 +60,13 @@ test("resolveCompactUsagePercent matches ring occupancy, including zero-percent 
 		contextWindow: 100_000,
 	});
 	assert.equal(drifted, 40);
-	assert.equal(shouldSkipCompactForLowUsage(drifted, false), false);
 });
 
-test("shouldSkipCompactForLowUsage only skips idle low-usage clicks", () => {
-	assert.equal(shouldSkipCompactForLowUsage(12, false), true);
-	assert.equal(shouldSkipCompactForLowUsage(30, false), false);
-	assert.equal(shouldSkipCompactForLowUsage(45, false), false);
-	// 压缩中不走客户端跳过：交给 inProgress 提示
-	assert.equal(shouldSkipCompactForLowUsage(12, true), false);
-	// 无占用数据时不拦截（草稿刚启动 / 尚未上报），让 RPC 决定
-	assert.equal(shouldSkipCompactForLowUsage(undefined, false), false);
-	assert.equal(shouldSkipCompactForLowUsage(null, false), false);
+test("no client-side low-usage skip: any reported occupancy reaches the RPC", () => {
+	// 不再有 shouldSkipCompactForLowUsage：低占用也由 pi 自行判定
+	const feedback = readFileSync("src/shared/compactFeedback.ts", "utf8");
+	assert.doesNotMatch(feedback, /COMPACT_READY_PERCENT/);
+	assert.doesNotMatch(feedback, /shouldSkipCompactForLowUsage/);
 });
 
 test("classifyCompactError maps pi/DSH strings to one notice kind", () => {
@@ -89,22 +86,22 @@ test("meter compact button uses shared ui state and e2e testid", () => {
 	const meter = readFileSync("src/renderer/src/components/session/SessionContextMeter.tsx", "utf8");
 	assert.match(meter, /from "\.\.\/\.\.\/\.\.\/\.\.\/shared\/compactFeedback"/);
 	assert.match(meter, /resolveCompactUsagePercent\(state\)/);
-	assert.match(meter, /compactUiState\(percent, compacting\)/);
+	assert.match(meter, /compactUiState\(context\?\.percent, compacting\)/);
 	assert.match(meter, /data-testid="session-context-compact"/);
 	assert.match(meter, /sessionContext\.compactNotReady/);
 	assert.match(meter, /sessionContext\.compactNotReadyHint/);
 	assert.match(meter, /compactDisabled = compactUi\.compacting \|\| !compactUi\.ready/);
 });
 
-test("composer compact path skips low usage, toasts done, and maps inProgress", () => {
+test("composer compact path toasts done and maps inProgress", () => {
 	const composer = readFileSync(
 		"src/renderer/src/hooks/useSessionComposerController.ts",
 		"utf8",
 	);
 	assert.match(composer, /function compactNotice/);
 	assert.match(composer, /classifyCompactError/);
-	assert.match(composer, /shouldSkipCompactForLowUsage/);
-	assert.match(composer, /resolveCompactUsagePercent\(live\?\.state\)/);
+	// 客户端不再按占用拦截：低占用也发 RPC，由 pi 自行判定
+	assert.doesNotMatch(composer, /shouldSkipCompactForLowUsage/);
 	assert.match(composer, /app\.compactDone/);
 	assert.match(composer, /app\.compactInProgress/);
 	assert.match(composer, /app\.compactSessionTooSmall/);

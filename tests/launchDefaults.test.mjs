@@ -8,7 +8,8 @@ import vm from "node:vm";
 // createDraft 缺省填充与引导页底栏预选共用同一解析，保证「展示的默认」与
 // 「首次发送真实套用的默认」一致——这里锁住降级规则，防止两边再次分叉。
 //
-// 用户规则（2026-10）：默认模型（settings 显式配置）> 欢迎页偏好 > 上次使用 > 空。
+// 用户规则（引导页点选优先）：点选（welcomeModel）> 显式默认 > enabledModels > 上次使用 > 空。
+// 长期配置（显式默认 / 模型切换列表）只在用户本次没有点选时充当预选值。
 // 思考级别一律取 settings.defaultThinkingLevel（偏好级别不参与）。
 
 function loadResolver() {
@@ -44,19 +45,35 @@ const MANY = {
 	},
 };
 
-test("显式默认（settings 配对）优先于一切，且 defaultModelConfigured 标记为 true", () => {
+test("引导页点选优先于显式默认（用户规则第 1 条），但 configured 标记仍为 true", () => {
 	const result = resolve({
 		settings: { defaultProvider: "anthropic", defaultModel: "claude-opus-4-6" },
 		models: MANY,
-		// 即使 lastUsed 与偏好都存在，显式默认仍胜出（用户规则第 1 条）
 		lastUsedModel: { provider: "zhipu", modelId: "glm-5" },
 		welcomeModel: { provider: "openai", modelId: "gpt-5.2" },
+	});
+	// 用户在「新建 agent 页」显式点选的模型必须胜出：它表达的是本次新建的即时意图；
+	// 旧规则把它压在第 3 级，导致配置了有效默认模型时点选 100% 静默失效。
+	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
+	// 标记仍为 true：确实存在有效的显式配置默认（供文案/诊断用，不再作为展示闸门）。
+	assert.equal(result.defaultModelConfigured, true);
+});
+
+test("无点选时：显式默认优先于 enabledModels 与 lastUsed（用户规则第 2 条）", () => {
+	const result = resolve({
+		settings: {
+			defaultProvider: "anthropic",
+			defaultModel: "claude-opus-4-6",
+			enabledModels: ["openai/*"],
+		},
+		models: MANY,
+		lastUsedModel: { provider: "zhipu", modelId: "glm-5" },
 	});
 	assert.deepEqual(plain(result.model), { provider: "anthropic", modelId: "claude-opus-4-6" });
 	assert.equal(result.defaultModelConfigured, true);
 });
 
-test("无显式默认：欢迎页偏好优先于 lastUsed（用户规则第 2 条）", () => {
+test("无显式默认：引导页点选优先于 lastUsed（用户规则第 1 条）", () => {
 	const result = resolve({
 		settings: {},
 		models: MANY,
@@ -222,19 +239,26 @@ test("bare modelId pattern 匹配任意 provider", () => {
 	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 });
 
-test("enabledModels 优先于欢迎偏好与 lastUsed", () => {
-	const result = resolve({
-		settings: { enabledModels: ["ai88/deepseek-v4-flash-vision-exp"] },
-		models: {
-			providers: {
-				ai88: { models: [{ id: "deepseek-v4-flash-vision-exp" }] },
-				openai: { models: [{ id: "gpt-5.2" }] },
-			},
+test("引导页点选优先于 enabledModels；无点选时 enabledModels 优先于 lastUsed（第 3 条）", () => {
+	const settings = { enabledModels: ["ai88/deepseek-v4-flash-vision-exp"] };
+	const models = {
+		providers: {
+			ai88: { models: [{ id: "deepseek-v4-flash-vision-exp" }] },
+			openai: { models: [{ id: "gpt-5.2" }] },
 		},
-		lastUsedModel: { provider: "openai", modelId: "gpt-5.2" },
+	};
+	const lastUsedModel = { provider: "openai", modelId: "gpt-5.2" };
+	// 点选胜出：旧规则下这里会返回 ai88，即「页面看似切了、发送后变回旧模型」的根因。
+	const picked = resolve({
+		settings,
+		models,
+		lastUsedModel,
 		welcomeModel: { provider: "openai", modelId: "gpt-5.2" },
 	});
-	assert.deepEqual(plain(result.model), { provider: "ai88", modelId: "deepseek-v4-flash-vision-exp" });
+	assert.deepEqual(plain(picked.model), { provider: "openai", modelId: "gpt-5.2" });
+	// 无点选时 enabledModels 仍优先于 lastUsed（长期配置次序不变）。
+	const noPick = resolve({ settings, models, lastUsedModel });
+	assert.deepEqual(plain(noPick.model), { provider: "ai88", modelId: "deepseek-v4-flash-vision-exp" });
 });
 
 test("enabledModels 全部失效（已被删除）→ 回退欢迎偏好/lastUsed", () => {

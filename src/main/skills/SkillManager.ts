@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { trashPath } from "../fs/trash";
 import type {
+	AppSettings,
 	CreatePiSkillInput,
 	PiSkillListResult,
 	PiSkillLocation,
@@ -35,12 +36,24 @@ type SkillCopy = (
  */
 export class SkillManager {
 	private locations: PiSkillLocation[];
+	/** PiDeck 设置的读取/写入（禁用列表持久化）；未配置时开关仅写 frontmatter（旧行为）。 */
+	private settingsProvider: (() => AppSettings) | null = null;
+	private settingsPatcher: ((patch: Partial<AppSettings>) => Promise<AppSettings>) | null = null;
 
 	constructor(
 		home?: string,
 		private readonly translate: SkillCopy = () => "Skill operation failed.",
 	) {
 		this.locations = this.buildLocations(home ?? homedir());
+	}
+
+	/** 注入 PiDeck 设置读写：启用后 toggle 同步持久化禁用列表（技能白名单模式的依据）。 */
+	configureSettings(
+		getSettings: () => AppSettings,
+		patchSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>,
+	) {
+		this.settingsProvider = getSettings;
+		this.settingsPatcher = patchSettings;
 	}
 
 	/** 将 skill 目录切换到统一解析出的 WSL HOME；null 恢复 Windows home。 */
@@ -110,6 +123,16 @@ export class SkillManager {
 		const raw = await readFile(skill.path, "utf8");
 		const next = this.setFrontmatterBoolean(raw, "disable-model-invocation", !enabled);
 		await writeFile(skill.path, next, "utf8");
+		// 同步 PiDeck settings 禁用列表（技能白名单模式 --no-skills/--skill 的依据）。
+		// frontmatter 标记保留：老版本 UI 的禁用状态、手动编辑场景仍以此为准，
+		// 白名单解析器对两者都排除，显示与加载保持一致。
+		if (this.settingsProvider && this.settingsPatcher) {
+			const current = this.settingsProvider().disabledSkills ?? [];
+			const nameKey = skill.name.toLowerCase();
+			const nextList = current.filter((name) => name.toLowerCase() !== nameKey);
+			if (!enabled) nextList.push(skill.name);
+			await this.settingsPatcher({ disabledSkills: nextList });
+		}
 		return this.findByPath(skill.path);
 	}
 
@@ -154,7 +177,22 @@ export class SkillManager {
 			const targetDir = join(this.locations[0].path, skillName);
 			await mkdir(targetDir, { recursive: true });
 			const targetPath = join(targetDir, SKILL_FILE);
+			// 模板覆盖前保留用户禁用状态：PiDeck 技能开关把 disable-model-invocation
+			// 写进这份 SKILL.md 的 frontmatter，无条件覆盖会在每次启动时把用户禁用的
+			// 内置技能重置为启用（「重启后技能全部恢复」bug 的根源）。模板正文仍随
+			// 应用更新同步，仅该状态字段需回迁。
+			const previous = await readFile(targetPath, "utf8").catch(() => null);
+			const wasDisabled =
+				previous !== null &&
+				this.parseFrontmatter(previous)["disable-model-invocation"] === "true";
 			await writeFile(targetPath, content, "utf8");
+			if (wasDisabled) {
+				await writeFile(
+					targetPath,
+					this.setFrontmatterBoolean(content, "disable-model-invocation", true),
+					"utf8",
+				);
+			}
 			return { success: true, path: targetPath };
 		} catch (error) {
 			return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -263,10 +301,23 @@ export class SkillManager {
 			sourceId: location.id,
 			sourceLabel: location.label,
 			type,
-			enabled: frontmatter["disable-model-invocation"] !== "true",
+			// 禁用 = PiDeck settings 禁用列表 ∪ frontmatter 标记（老版语义）；两者任一命中
+			// 都视为禁用，与技能白名单解析器的排除规则一致
+			enabled:
+				frontmatter["disable-model-invocation"] !== "true" &&
+				!this.isDisabledInSettings(name),
 			valid: warnings.length === 0,
 			warnings,
 		};
+	}
+
+	/** 技能名是否在 PiDeck settings 禁用列表（小写比较；未配置 settings 时视为未禁用）。 */
+	private isDisabledInSettings(name: string): boolean {
+		if (!this.settingsProvider) return false;
+		const key = name.toLowerCase();
+		return (this.settingsProvider().disabledSkills ?? []).some(
+			(disabledName) => disabledName.toLowerCase() === key,
+		);
 	}
 
 	private parseFrontmatter(raw: string) {

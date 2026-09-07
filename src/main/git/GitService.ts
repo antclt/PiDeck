@@ -451,6 +451,42 @@ export class GitService {
 	}
 
 	/**
+	 * 统计与 getCommitLog 相同过滤条件下的提交总数（不分页）。
+	 * 图谱标题徽章要显示仓库/当前分支的真实规模，不能用已加载的 30 条页大小冒充。
+	 * 过滤必须与 log 对齐：全图排除 rewind checkpoint；显式 ref 先解析再 count，解析失败返回 0。
+	 */
+	async getCommitCount(
+		cwd: string,
+		options?: { ref?: string; path?: string; allBranches?: boolean },
+	): Promise<number> {
+		const args = ["rev-list", "--count"];
+		const useAll = options?.allBranches ?? true;
+
+		if (useAll && !options?.ref) {
+			// --exclude 必须与 --all 配对；漏掉会把 refs/pi-checkpoints 内部快照算进用户可见总数。
+			args.push(`--exclude=${REF_BASE}/*`, "--all");
+		}
+
+		if (options?.ref) {
+			const hash = await this.resolveCommitHash(cwd, options.ref);
+			if (!hash) return 0;
+			args.push(hash);
+		}
+
+		if (options?.path) {
+			args.push("--", options.path);
+		}
+
+		try {
+			const { stdout } = await execFileAsync("git", args, { cwd });
+			const n = Number.parseInt(stdout.trim(), 10);
+			return Number.isFinite(n) && n >= 0 ? n : 0;
+		} catch {
+			return 0;
+		}
+	}
+
+	/**
 	 * 获取 Git 引用（分支 / 远程分支 / Tag），按 committerdate 倒序。
 	 * 复刻 VS Code 的 getRefs() + parseRefs()。
 	 * rewind checkpoint refs（refs/pi-checkpoints/*）是应用内部快照数据，

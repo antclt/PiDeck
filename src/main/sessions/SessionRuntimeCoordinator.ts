@@ -120,7 +120,7 @@ export interface SessionAgentGateway {
 		requestId: string,
 		response: SessionUiResponseInput["response"],
 	): Promise<unknown> | unknown;
-	/** 非聚焦会话收到 Ask 类 UI 请求时触发桌面通知（由 AgentManager 实现）
+	/** 会话收到 Ask 类 UI 请求时触发桌面通知（由 AgentManager 实现，不再区分会话是否聚焦）
 	 * 参数：agentId（去重/日志）、sessionId（点击跳转目标）、sessionTitle、question（提问内容，可空） */
 	notifyAskPending(
 		agentId: string,
@@ -1012,16 +1012,14 @@ export class SessionRuntimeCoordinator {
 			allowOther: event.payload.allowOther === true,
 		});
 
-		// 非聚焦会话收到 Ask 类请求时触发桌面通知：用户切到别的会话时
-		// 也能第一时间知道另一个会话需要确认，不用手动切回去才发现。
-		if (this.focusedSessionId !== event.sessionId) {
-			const title = this.catalog.get(event.sessionId)?.title
-				?? this.catalog.getRecord(event.sessionId)?.title
-				?? "";
-			// 带 agentId（每轮去重）、sessionId（点击跳转）与提问内容（展示在通知气泡里）
-			const question = typeof event.payload.title === "string" ? event.payload.title : "";
-			this.agents.notifyAskPending(event.agentId, event.sessionId, title, question);
-		}
+		// 任何会话收到 Ask 类请求都触发桌面通知：不再按聚焦会话/窗口焦点过滤，
+		// 只要 Agent 在提问就提醒（是否真正弹出由 askNotificationEnabled 设置门控）。
+		const title = this.catalog.get(event.sessionId)?.title
+			?? this.catalog.getRecord(event.sessionId)?.title
+			?? "";
+		// 带 agentId（每轮去重）、sessionId（点击跳转）与提问内容（展示在通知气泡里）
+		const question = typeof event.payload.title === "string" ? event.payload.title : "";
+		this.agents.notifyAskPending(event.agentId, event.sessionId, title, question);
 	}
 
 	/** Web / 飞书以外的只读快照：手机端轮询后渲染确认卡片。 */

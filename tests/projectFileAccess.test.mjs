@@ -16,6 +16,8 @@ const {
 	FILE_OUTSIDE_PROJECT_ERROR,
 	assertProjectFilePathInsideRoot,
 	assertProjectFileReadPath,
+	createProjectFileReadBoundary,
+	resolveProjectFileWritePath,
 } = loadTsCommonJs("src/main/files/projectFileAccess.ts");
 
 test("project file access accepts a real file inside the project", async () => {
@@ -42,6 +44,60 @@ test("project file access rejects lexical traversal and prefix collisions", () =
 		() => assertProjectFilePathInsideRoot(root, join(`${root}-other`, "secret.txt")),
 		new RegExp(FILE_OUTSIDE_PROJECT_ERROR),
 	);
+});
+
+test("project writes reject a dangling file symlink", async (t) => {
+	const fixture = mkdtempSync(join(tmpdir(), "pideck-project-write-file-link-"));
+	const root = join(fixture, "project");
+	const outsideFile = join(fixture, "outside", "future.txt");
+	const link = join(root, "linked.txt");
+	mkdirSync(root, { recursive: true });
+	try {
+		try {
+			symlinkSync(outsideFile, link, "file");
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "EPERM") {
+				t.skip("The current filesystem does not permit file symlink creation");
+				return;
+			}
+			throw error;
+		}
+		const boundary = await createProjectFileReadBoundary(root);
+		await assert.rejects(
+			() => resolveProjectFileWritePath(boundary, link),
+			new RegExp(FILE_OUTSIDE_PROJECT_ERROR),
+		);
+	} finally {
+		rmSync(fixture, { recursive: true, force: true });
+	}
+});
+
+test("project writes reject a dangling intermediate directory symlink or junction", async (t) => {
+	const fixture = mkdtempSync(join(tmpdir(), "pideck-project-write-dir-link-"));
+	const root = join(fixture, "project");
+	const outsideDir = join(fixture, "outside");
+	const link = join(root, "linked");
+	mkdirSync(root, { recursive: true });
+	mkdirSync(outsideDir, { recursive: true });
+	try {
+		try {
+			symlinkSync(outsideDir, link, process.platform === "win32" ? "junction" : "dir");
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "EPERM") {
+				t.skip("The current filesystem does not permit directory link creation");
+				return;
+			}
+			throw error;
+		}
+		rmSync(outsideDir, { recursive: true, force: true });
+		const boundary = await createProjectFileReadBoundary(root);
+		await assert.rejects(
+			() => resolveProjectFileWritePath(boundary, join(link, "future.txt")),
+			new RegExp(FILE_OUTSIDE_PROJECT_ERROR),
+		);
+	} finally {
+		rmSync(fixture, { recursive: true, force: true });
+	}
 });
 
 test("project file access rejects a symlink that resolves outside the project", async (t) => {

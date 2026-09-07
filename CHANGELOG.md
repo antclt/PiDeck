@@ -9,6 +9,15 @@
 - **Built-in TokenDance provider** — TokenDance (tokendance.space) ships as a built-in provider with a live model catalog, one-click OAuth key install, in-line balance display in the auth list and DSH migration support; manually added TokenDance providers automatically receive the `X-App-URL` attribution header so usage is credited to the app.
 - **pi v0.85.0 tracking** — The bundled model catalog is regenerated against pi-ai 0.85.0 (1336 entries) with updated model lists and capability fields.
 - **ZCode session import** — Import ZCode (Z.ai CLI) sessions from `~/.zcode/cli/db/db.sqlite`: the project context menu gains an "Import ZCode Sessions" entry with a picker showing title / preview / message count and new / current / outdated status. Conversations are converted into Pi-readable sessions (text, reasoning, tool calls with matched results, image attachments restored from artifacts), subagent sessions and timeline noise are skipped, and imported sessions carry a ZCode source badge with dedicated filtering.
+- **pi.dev extension store** — Extension management gains a two-pane "Installed / Store" view; the store lists packages from the pi.dev Package Catalog page (name / description / author / type / monthly downloads / publish date / npm & GitHub links) with search, type filtering, sort by downloads or latest, and pagination. One-click install, copy the install command, open the pi.dev page, and already-installed packages are marked "installed" with the install button disabled.
+- **Provider groups sorted by recent use** — The model picker's provider groups now sort "recently used first" (the newest used provider jumps to the top, up to 8 remembered); never-used / non-built-in providers fall back to built-in-pinned alphabetical order, and the `other` fallback group always stays last, so commonly used providers need no repeated scrolling.
+- **Serverless announcement system** — Announcements are managed as a repo-root `announcements.json` (announcing = committing), fetched from multiple sources with a staggered 2h polling timer; the sidebar announcement center shows an unread dot / popup list / manual refresh / mark-all-read; the popup policy is do-not-disturb aware (deferred while typing, an agent is running, a modal is open, or the window is inactive, then auto-complemented when idle).
+- **TokenDance one-click setup now grabs the API key too** — Authorization and key retrieval merge into one click: a loopback callback server (RFC 8252 §7.3, system-assigned port, 128-bit random callback token) captures the code, exchanges it and writes the key; it degrades to the manual paste path when the local bind fails.
+- **Model catalog updates via GitHub branch + app-update mirrors** — Catalog check/download switch from the npm `latest` tag to pre-generated branch artifacts over GitHub raw, reusing the update mirror configuration (auto-generated mirror proxy URLs) for far better reachability in CN networks; falls back to npm latest when every source fails, keeping the anti-downgrade version comparison.
+- **Settings gains a dedicated “Notifications” tab** — The notification toggles (session done / Ask / agent count) and sound alerts merge into one tab under Common settings.
+- **Ask notifications no longer depend on session focus** — Any pending Ask question in the background now notifies.
+- **Resource management aligned with pi 0.85** — Extension / prompt / skill discovery and project-level installs follow pi 0.85 semantics; the project resource management screen reuses the settings-page resource UI.
+- **Announcement center entry hides when reminders are off** — Turning off announcement reminders also hides the sidebar announcement entry.
 
 ### 🐛 Fixes
 - **Tool stopwatch no longer resets mid-stream** — Tool duration now starts from meta.startedAt (same baseline as the final durationMs), so long-running commands no longer flash back to near-zero while streaming output.
@@ -17,6 +26,30 @@
 - **Fork titles persist and long sidebar names scroll** — Forked session titles survive restarts; extra-long sidebar titles scroll on hover.
 - **Git badge state survives tab switches** — Ahead/behind badges are cached per project + repo scope, so switching session tabs no longer blanks them (the cached value shows instantly and a background refresh corrects it shortly after).
 - **Calmer title scrolling** — Sidebar and tab title scrolling is unified to a constant 5px/s with no upper duration cap, so very long titles never turn into a fast flicker.
+- **Ask wait time no longer counts into reply duration** — Elapsed time while waiting for the user's answer is excluded from the reported response time.
+- **Ask select boxes no longer swallow clicks on press-drag** — A press-perception guard keeps press-drag selection from eating the click underneath.
+- **Edit / resend after stopping a session no longer errors** — Stopped messages keep their identity, so editing or resending no longer reports “Message not found”.
+- **Pasted long text is stored in the app-data directory** — Oversized pasted content goes under the app data dir; the settings storage page can count and clean it up.
+- **Crash-page auto-refresh countdown fixed** — The 5-second countdown no longer freezes in dev builds (StrictMode double-mount race).
+- **Welcome-page model pick is no longer silently overridden** — The model chosen on the welcome page wins even when a default model is configured.
+- **Catalog update check not fooled by stale jsDelivr cache** — jsDelivr is removed from catalog sources (stale CDN data previously reported “already up to date”); mirror proxies + GitHub raw remain, with npm-latest fallback on failure.
+- **Prompt name and action-area display fixed** — In Config Management, prompt names and their action area no longer render incorrectly.
+- **Model list write order matches the picker** — Persisted model lists are sorted by the same shared rule (`shared/modelOrder`) the dropdown shows.
+- **macOS layout hides the pi brand logo** — The logo no longer takes space in the compact macOS layout.
+
+### 🙏 Thanks
+
+Special thanks to **微时佬友** for providing the Grok model service used in our
+software development 🎉
+
+Thanks to  **歌者、幕书、王女士、何希尔**  for their generous donations and support! 🎉
+
+Thanks to **sgafxh, r0y1z2, c834292137, bfzha** and all contributors for their
+code contributions 🙏
+
+Thanks to all group members who submitted suggestions and bug reports! 🙏
+
+> 💬 **QQ feedback group: 1026218644**
 
 ## v0.7.3 - 2026-09-03
 

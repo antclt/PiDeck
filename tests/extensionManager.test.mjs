@@ -29,6 +29,9 @@ function loadExtensionManagerModule() {
         return { toWindowsHostPath: (path) => path };
       }
       // 25fd516 起 ExtensionManager 依赖内置扩展清单模块；按真实模块透传（纯数据 + 纯函数）
+      if (specifier === "./extensionDiscovery") {
+        return nodeRequire("../src/main/extensions/extensionDiscovery.ts");
+      }
       if (specifier === "./builtInExtensions") {
         return nodeRequire("../src/main/extensions/builtInExtensions.ts");
       }
@@ -134,6 +137,50 @@ test("parseListOutput leaves plain package sources untouched", () => {
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].source, "npm:pi-web-access");
   assert.equal(parsed[0].filtered, undefined);
+});
+
+test("list discovers local js, index.js, and package-manifest extensions once per root", async () => {
+  const { ExtensionManager } = loadExtensionManagerModule();
+  const home = await mkdtemp(join(tmpdir(), "pideck-extension-discovery-"));
+  try {
+    const extensionsDir = join(home, ".pi", "agent", "extensions");
+    await mkdir(join(extensionsDir, "index-package"), { recursive: true });
+    await mkdir(join(extensionsDir, "manifest-package", "dist"), { recursive: true });
+    await mkdir(join(extensionsDir, "fallback-package"), { recursive: true });
+    await mkdir(join(extensionsDir, "ignored-directory"), { recursive: true });
+    await writeFile(join(extensionsDir, "plain.js"), "module.exports = {};", "utf8");
+    await writeFile(join(extensionsDir, "index-package", "index.js"), "module.exports = {};", "utf8");
+    await writeFile(
+      join(extensionsDir, "manifest-package", "package.json"),
+      JSON.stringify({ pi: { extensions: ["dist/first.js", "dist/second.ts"] } }),
+      "utf8",
+    );
+    await writeFile(join(extensionsDir, "manifest-package", "dist", "first.js"), "module.exports = {};", "utf8");
+    await writeFile(join(extensionsDir, "manifest-package", "dist", "second.ts"), "export default {};", "utf8");
+    await writeFile(
+      join(extensionsDir, "fallback-package", "package.json"),
+      JSON.stringify({ pi: { extensions: ["missing.js"] } }),
+      "utf8",
+    );
+    await writeFile(join(extensionsDir, "fallback-package", "index.js"), "module.exports = {};", "utf8");
+    await writeFile(join(extensionsDir, "ignored-directory", "README.md"), "not an extension", "utf8");
+
+    const manager = new ExtensionManager({}, () => ({}));
+    manager.configureWsl({ windowsHome: home });
+    manager.runPi = async () => "User packages:\n";
+    const result = await manager.list(false);
+    const local = result.extensions.filter((extension) => extension.id.startsWith("local:"));
+    const bySource = new Map(local.map((extension) => [extension.source, extension]));
+
+    assert.equal(bySource.get("plain.js")?.path, join(extensionsDir, "plain.js"));
+    assert.equal(bySource.get("index-package")?.path, join(extensionsDir, "index-package"));
+    assert.equal(bySource.get("manifest-package")?.path, join(extensionsDir, "manifest-package"));
+    assert.equal(bySource.get("fallback-package")?.path, join(extensionsDir, "fallback-package"));
+    assert.equal(local.filter((extension) => extension.source === "manifest-package").length, 1);
+    assert.equal(bySource.has("ignored-directory"), false);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("uninstall removes a local extension and clears its stale disable entry", async () => {

@@ -158,6 +158,12 @@ export type AppSettings = {
 	askNotificationEnabled: boolean;
 	/** 激活 Agent 数量提醒（人文关怀）：激活数达到阈值时，启动时提示关闭空闲会话释放内存。默认开启。 */
 	agentCountReminderEnabled: boolean;
+	/**
+	 * 公告通知：拉取到新未读公告时在右上角弹 toast 提醒（默认开启）。
+	 * 关闭后仅保留侧栏公告入口的红点（公告中心随时可看），不再主动弹窗；
+	 * 弹出时机由渲染层忙碌检测控制（输入中/模态打开/窗口隐藏时延迟），与本开关解耦。
+	 */
+	announcementNotificationEnabled: boolean;
 	/** 是否在会话中显示模型思考过程，默认开启 */
 	showThinking: boolean;
 	/**
@@ -284,6 +290,22 @@ export type AppSettings = {
 	/** 收藏的模型 ID 列表 */
 	favoriteModels: string[];
 
+	// ── 提供商显示开关：隐藏后模型页卡片列表与模型选择器都不再展示该供应商 ──
+	/**
+	 * 用户主动隐藏的提供商 key 列表（与 models.json 的 provider key 一致）。
+	 * 隐藏后：Pi 模型页卡片移入页面底部「已隐藏」折叠区，模型选择器不再显示其模型；
+	 * 配置本身不删除，恢复显示即可继续使用。可选以兼容旧 settings.json。
+	 */
+	hiddenProviders?: string[];
+
+	// ── 模型选择器分组排序：记录最近使用的供应商 ──
+	/**
+	 * 最近使用的供应商 ID 列表（最新在前，最多 8 个），主进程在 sendPrompt 接受时自动记录，
+	 * 与 lastUsedModel 同点写入。模型选择器按此优先排列供应商分组：最近用过的排最前，
+	 * 没记录过的供应商仍按内置置顶 + 字母序。可选以兼容旧 settings.json。
+	 */
+	recentProviders?: string[];
+
 	// ── 新会话默认模型：记录用户最后一次实际使用的供应商/模型 ──
 	/**
 	 * 用户最后一次发送消息时使用的模型（主进程在 sendPrompt 接受时自动记录）。
@@ -339,6 +361,8 @@ export type AppSettings = {
 	updateSkippedVersion?: string;
 	/** 最近一次“已提示过”的 Pi CLI 版本；缺省 = 未提示过。 */
 	updatePiNotifiedVersion?: string;
+	/** 是否已看过「更新圆点」的首次解释气泡（coachmark 一次性教育标记）；缺省 = 未看过。 */
+	updateDotHintSeen?: boolean;
 
 	// ── Agent 后端 ──
 	/**
@@ -413,6 +437,25 @@ export type AppSettings = {
 	 * 用于防御个别扩展的 -e 注入 / 白名单枚举导致 RPC 启动失败的情况。
 	 */
 	disableExtensionWhitelist: boolean;
+
+	/**
+	 * 用户禁用的全局技能名列表（与 SkillManager.list 的 name 去重键一致，比较时小写），
+	 * 存储于 PiDeck 自身设置（不写 pi settings）。
+	 * pi 的 frontmatter `disable-model-invocation` 只阻止模型自动调用、技能仍被加载；
+	 * 完全禁用只能靠 PiDeck 启动 RPC 时切「白名单模式」：--no-skills + 逐条 --skill
+	 * 注入未禁用技能（见 skillWhitelistResolver）。
+	 * 列表为空 = 白名单关闭，pi 自动发现全部技能（兼容用户在 PiDeck 外手动安装的技能）。
+	 */
+	disabledSkills: string[];
+
+	/**
+	 * 用户禁用的全局提示词模板名列表（与 PromptManager.list 的 name 一致，比较时小写），
+	 * 存储于 PiDeck 自身设置（不写 pi settings）。
+	 * 完全禁用只能靠 PiDeck 启动 RPC 时切「白名单模式」：--no-prompt-templates +
+	 * 逐条 --prompt-template 注入未禁用模板（见 promptWhitelistResolver）。
+	 * 列表为空 = 白名单关闭，pi 自动发现全部模板。
+	 */
+	disabledPrompts: string[];
 
 	// ── 生图模式（composer 底栏记忆，不是独立设置页） ──
 	/** 生图尺寸：unset=不发送 size；或 OpenAI WxH / 火山 1K/2K/4K */

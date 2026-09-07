@@ -60,6 +60,9 @@ function loadExtensionManager({ homeDir, runPiOutput = "", fsOverrides = {} } = 
 			if (id === "./extensionVersionGate") {
 				return require("../src/main/extensions/extensionVersionGate.ts");
 			}
+			if (id === "./extensionDiscovery") {
+				return require("../src/main/extensions/extensionDiscovery.ts");
+			}
 			if (id === "./builtInExtensions") {
 				// ExtensionManager 只需要内置名列表；避免 vm 沙箱解析相对 TS 路径失败。
 				return {

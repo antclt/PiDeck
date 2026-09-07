@@ -1504,15 +1504,21 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				// 消息被接受才记「最后一次使用」（选而未发不算）：写入 desktop settings.lastUsedModel，
 				// 新会话默认解析（launchDefaults）以它优先。fire-and-forget，不阻塞发送响应。
 				// DSH 会话跳过：其模型归属 host 设置，不在 models.json 中，记录会污染 pi 侧解析。
+				// 同时维护 recentProviders（最新在前，去重截断 8）：模型选择器按此优先排列供应商分组。
 				if (result.accepted) {
 					const record = sessionCatalog.get(input.sessionId);
 					if (record?.backend !== "dsh" && record?.model?.provider && record?.model?.modelId) {
+						const provider = record.model.provider;
+						const current = settingsStore.get().recentProviders ?? [];
+						// 当前供应商提到首位，其余保持原有相对顺序；SettingsStore 会做去重/截断/无变化早退。
+						const recentProviders = [provider, ...current.filter((item) => item !== provider)];
 						void settingsStore
 							.update({
 								lastUsedModel: {
-									provider: record.model.provider,
+									provider,
 									modelId: record.model.modelId,
 								},
+								recentProviders,
 							})
 							.catch((error) => {
 								void appLogger.warn("settings", "Failed to record lastUsedModel", {

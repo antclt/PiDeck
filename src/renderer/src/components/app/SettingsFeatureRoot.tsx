@@ -1,6 +1,6 @@
-import { lazy, Suspense, useCallback, useMemo, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import type { AppInfo, AppSettings } from "../../../../shared/types";
+import type { AppInfo, AppSettings, Project } from "../../../../shared/types";
 import { settingsFocusAtom, settingsOpenAtom } from "../../atoms";
 import { updateStatusAtom } from "../../atoms/update-atoms";
 import {
@@ -23,8 +23,14 @@ type SettingsFeatureRootProps = {
   onRestartWebService: () => void;
   appInfo: AppInfo;
   onChange: (patch: Partial<AppSettings>) => Promise<boolean>;
-  /** 当前项目路径：有值时配置管理分区合并项目 `.mcp.json` / `.pi/mcp.json`（只读）。 */
-  projectPath?: string;
+  /** 当前项目身份：项目资源 IPC 只接受主进程登记的 id。 */
+  projectId?: string;
+  /** PiDeck 当前加载的全部项目（作用域下拉展示；Chat 项目除外）。 */
+  projects?: Array<{ id: string; name: string; kind?: Project["kind"] }>;
+  /** Chat workspace has no project resource scope. */
+  projectKind?: Project["kind"];
+  /** 当前项目名称：作用域选择器显示用。 */
+  projectName?: string;
 };
 
 /** Owns Settings overlay visibility and modal-only commands without mirroring AppSettings. */
@@ -35,6 +41,14 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
   const setUpdateStatus = useSetAtom(updateStatusAtom);
   const updateInstallPreflightTasks = useAtomValue(updateInstallPreflightTasksAtom);
   const updateInstallInFlightRef = useRef(false);
+
+  // 打开设置页即视为「已看过」更新圆点解释（无论从侧栏/toast/深链进入）：
+  // 用户已找到入口，coachmark 无需再弹（持久化标记，settings.update 幂等）。
+  useEffect(() => {
+    if (open) {
+      void api.settings.update({ updateDotHintSeen: true }).catch(() => undefined);
+    }
+  }, [open]);
 
   /**
    * File editors debounce writes during normal typing. Before an updater-triggered process
@@ -129,7 +143,10 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
         setOpen(false);
       },
       onChange: props.onChange,
-      projectPath: props.projectPath,
+      projectId: props.projectId,
+      projectKind: props.projectKind,
+      projectName: props.projectName,
+      projects: props.projects,
     }),
     [
       props.settings,
@@ -157,7 +174,10 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
       props.piUpdate.piUpdating,
       props.onRestartWebService,
       props.onChange,
-      props.projectPath,
+      props.projectId,
+      props.projectKind,
+      props.projectName,
+      props.projects,
       installAppUpdate,
       setFocus,
       setOpen,

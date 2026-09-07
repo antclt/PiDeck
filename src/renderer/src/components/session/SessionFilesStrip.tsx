@@ -137,6 +137,8 @@ export function SessionFilesStrip(props: {
 							variant="ghost"
 							size="sm"
 							className="h-6 gap-1 px-2 text-xs text-text-tertiary hover:bg-muted hover:text-foreground"
+							// 提示按钮用途：它不清空磁盘上的文件，只是把「本轮修改汇总」标记为已处理
+							title={t("sessionFiles.saveAllTitle")}
 							onClick={() => dismissAll(fileEntries)}
 						>
 							<Save size={13} />

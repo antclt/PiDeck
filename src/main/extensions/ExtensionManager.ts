@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { basename, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
 import { trashPath } from "../fs/trash";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -13,12 +13,13 @@ import type {
 	PiUpdateCheckResult,
 } from "../../shared/types";
 import type { PiLocator } from "../pi/PiLocator";
-import { toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
+import { toWslLinuxPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, parsePiMinorVersion } from "./extensionVersionGate";
 // 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
 import { compareVersions } from "../utils/versionCompare";
+import { discoverExtensionEntries } from "./extensionDiscovery";
 
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
@@ -71,6 +72,8 @@ export class ExtensionManager {
 			patch: Partial<AppSettings>,
 		) => Promise<AppSettings> = async () => getSettings(),
 		private readonly translate: ExtensionCopy = () => "Extension operation failed.",
+		/** 内置扩展磁盘根：提供后可为内置扩展补齐真实路径，使「打开目录」可用。 */
+		private readonly builtInRoots: BuiltInExtensionPathRoots | undefined = undefined,
 	) {}
 
 	/** 将扩展文件边界切换到统一解析出的 WSL HOME；null 恢复 Windows home。 */
@@ -153,8 +156,9 @@ export class ExtensionManager {
 			? await Promise.all(parsed.map((extension) => this.enrichExtensionVersion(extension)))
 			: parsed;
 
-		// 扫描本地自动发现的扩展（~/.pi/agent/extensions/ 下的 .ts 文件和目录），
-		// pi list 只列出通过 pi install 安装的包，不包含本地文件扩展。
+		// 扫描本地自动发现的扩展（~/.pi/agent/extensions/ 下的 .ts/.js 文件、
+		// index.ts/index.js 目录和 pi.extensions manifest），pi list 只列出通过
+		// pi install 安装的包，不包含本地文件扩展。
 		const localExtensions = await this.scanLocalExtensions();
 
 		// 合并，已通过 pi 安装的优先保留原条目
@@ -170,10 +174,14 @@ export class ExtensionManager {
 		const existingSources = new Set(merged.map((ext) => ext.source));
 		for (const builtIn of BUILT_IN_EXTENSIONS) {
 			if (!existingSources.has(builtIn)) {
+				// 内置扩展经 -e 从应用资源目录注入；提供 builtInRoots 时补真实磁盘路径，
+				// 让「打开目录」按钮可用（否则 path 为 undefined，UI 无法定位）。
 				merged.push({
 					id: `local:${builtIn}`,
 					source: builtIn,
-					path: undefined,
+					path: this.builtInRoots
+						? resolveBuiltInExtensionPath(builtIn, this.builtInRoots)
+						: undefined,
 					scope: "user",
 					builtIn: true,
 				});
@@ -243,53 +251,29 @@ export class ExtensionManager {
 
 	/**
 	 * 扫描 ~/.pi/agent/extensions/ 目录，发现未被 pi list 列出的本地扩展。
-	 * 单文件扩展（.ts 文件）和目录扩展（含 index.ts）都会被识别。
+	 * 发现规则与 pi 0.85 runtime resolver 共用：直接 .ts/.js、目录 index.ts/index.js，
+	 * 以及 package.json 的 pi.extensions 声明；同一目录声明多个入口仍只显示一行。
 	 */
 	private async scanLocalExtensions(): Promise<PiExtensionSummary[]> {
 		const extensionsDir = join(this.homeDir, ".pi", "agent", "extensions");
-		const result: PiExtensionSummary[] = [];
-
-		let entries: string[];
-		try {
-			entries = await readdir(extensionsDir);
-		} catch {
-			return result; // 目录不存在时静默跳过
+		const roots = new Map<string, string>();
+		for (const entryPath of discoverExtensionEntries(extensionsDir)) {
+			const relativePath = relative(extensionsDir, entryPath);
+			const firstSegment = relativePath.split(sep)[0];
+			// Manifest entries must resolve back to one direct child. Besides matching the
+			// managed resource model, this prevents a malformed manifest from exposing a
+			// parent path as the row's uninstall/open-location target.
+			if (!firstSegment || firstSegment === "." || firstSegment === "..") continue;
+			roots.set(firstSegment, join(extensionsDir, firstSegment));
 		}
 
-		for (const entry of entries) {
-			if (entry.startsWith(".") || entry === "node_modules" || entry.endsWith(".d.ts")) continue;
-
-			const fullPath = join(extensionsDir, entry);
-			let name = entry;
-			let source = entry;
-
-			// 处理目录扩展（目录/index.ts）
-			if (entry.endsWith(".ts")) {
-				// 单文件扩展，去掉 .ts 后缀作为显示名
-				name = entry.slice(0, -3);
-				source = entry;
-			} else {
-				// 目录扩展，检查是否有 index.ts
-				try {
-					await readFile(join(fullPath, "index.ts"), "utf-8");
-					name = entry;
-					source = entry;
-				} catch {
-					continue; // 没有 index.ts，跳过
-				}
-			}
-
-			const isBuiltIn = name.startsWith("pi-deck-");
-			result.push({
-				id: `local:${source}`,
-				source,
-				path: extensionsDir,
-				scope: "user",
-				builtIn: isBuiltIn,
-			});
-		}
-
-		return result;
+		return [...roots.entries()].map(([source, path]) => ({
+			id: `local:${source}`,
+			source,
+			path,
+			scope: "user",
+			builtIn: source.startsWith("pi-deck-"),
+		}));
 	}
 
 	/**
@@ -436,10 +420,16 @@ export class ExtensionManager {
 		this.invalidateListCache();
 	}
 
-	async install(source: string): Promise<string> {
+	/** Install globally or in the selected pi 0.85 project scope. */
+	async install(source: string, options: { projectRoot?: string } = {}): Promise<string> {
 		const normalized = source.trim();
 		if (!normalized) throw new Error(this.translate("mainExtension.nameRequired"));
-		const result = await this.runPi(["install", normalized], 60_000);
+		const args = ["install", normalized, ...(options.projectRoot ? ["-l"] : [])];
+		const result = await this.runPi(args, 120_000, {
+			offline: false,
+			cwd: options.projectRoot,
+			projectInstall: Boolean(options.projectRoot),
+		});
 		this.invalidateListCache();
 		return result;
 	}
@@ -655,10 +645,14 @@ export class ExtensionManager {
 		return null;
 	}
 
-	private async runPi(args: string[], timeout: number, options: { offline?: boolean } = {}): Promise<string> {
-		// --no-approve 在 pi 0.79+ 才支持，老版本需要跳过以避免 unknown option 错误。
+	private async runPi(
+		args: string[],
+		timeout: number,
+		options: { offline?: boolean; cwd?: string; projectInstall?: boolean } = {},
+	): Promise<string> {
+		// 项目安装必须让 pi 读取已通过 PiDeck trust 校验的项目资源；--no-approve 会绕过该路径。
 		const finalArgs = [...args];
-		if (await this.noApproveSupported()) {
+		if (!options.projectInstall && await this.noApproveSupported()) {
 			finalArgs.push("--no-approve");
 		}
 		const settings = this.getSettings();
@@ -666,11 +660,16 @@ export class ExtensionManager {
 		if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
 			await this.locator.warmWslCommand(settings.wslDistro, settings.wslUser);
 		}
+		const runtimeCwd = options.cwd && this.wslEnvironment
+			? toWslLinuxPath(options.cwd, this.wslEnvironment)
+			: options.cwd;
 		const command = this.locator.resolveCommand(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
-		const invocation = this.locator.createInvocation(command, finalArgs);
+		const invocation = this.locator.createInvocation(command, finalArgs, {
+			wslCwd: this.wslEnvironment && runtimeCwd ? runtimeCwd : undefined,
+		});
 		const env = this.locator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl);
-		// list/remove/install 使用离线模式避免配置页被网络和包管理器输出拖慢；update 必须允许联网，
-		// 否则 pi 只会返回简化的 Updated packages，无法真正走 npm 更新流程。
+		// list/remove 默认走离线模式避免配置页被网络拖慢；store install 与 update 显式允许联网，
+		// 否则 pi 只会返回简化的结果，无法真正完成包安装/更新。
 		if (options.offline !== false) env.PI_OFFLINE = "1";
 		return new Promise<string>((resolve, reject) => {
 			execFile(
@@ -678,6 +677,7 @@ export class ExtensionManager {
 				invocation.args,
 				{
 					env,
+					...(invocation.wsl ? {} : { cwd: runtimeCwd }),
 					shell: invocation.shell,
 					windowsHide: true,
 					timeout,

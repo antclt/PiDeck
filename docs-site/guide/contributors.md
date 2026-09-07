@@ -76,7 +76,7 @@ title: 贡献者
   <div class="contributor-info">
     <strong>bfzha</strong>
     <span class="contributor-handle">@bfzha</span>
-    <p>VS Code 风格 Git 面板与复杂工作流支持 (#68)</p>
+    <p>VS Code 风格 Git 面板与复杂工作流支持、会话内存瘦身与流式渲染优化、时间线查看位置保持、技能/提示词/扩展启停开关、资源作用域与 pi 0.85 解析器对齐 (#68, #145, #144, #143, #142, #141)</p>
     <a href="https://github.com/bfzha" target="_blank" rel="noreferrer">GitHub</a>
   </div>
 </div>
@@ -128,6 +128,46 @@ title: 贡献者
     <span class="contributor-handle">@clancyclaw</span>
     <p>修复 RichInput 换行被吞掉，保证多行草稿完整保留</p>
     <a href="https://github.com/clancyclaw" target="_blank" rel="noreferrer">GitHub</a>
+  </div>
+</div>
+
+<div class="contributor-card">
+  <div class="contributor-avatar">OP</div>
+  <div class="contributor-info">
+    <strong>octo-patch</strong>
+    <span class="contributor-handle">@octo-patch</span>
+    <p>MiniMax 端点认证专属模型发现 (#112)</p>
+    <a href="https://github.com/octo-patch" target="_blank" rel="noreferrer">GitHub</a>
+  </div>
+</div>
+
+<div class="contributor-card">
+  <div class="contributor-avatar">c8</div>
+  <div class="contributor-info">
+    <strong>c834292137</strong>
+    <span class="contributor-handle">@c834292137</span>
+    <p>统一会话组件卡（待办/子代理/文件修改）并聚合共享层 (#171)</p>
+    <a href="https://github.com/c834292137" target="_blank" rel="noreferrer">GitHub</a>
+  </div>
+</div>
+
+<div class="contributor-card">
+  <div class="contributor-avatar">r0</div>
+  <div class="contributor-info">
+    <strong>r0y1z2</strong>
+    <span class="contributor-handle">@r0y1z2</span>
+    <p>项目会话置顶、输入框安全语音转写 (#177, #176)</p>
+    <a href="https://github.com/r0y1z2" target="_blank" rel="noreferrer">GitHub</a>
+  </div>
+</div>
+
+<div class="contributor-card">
+  <div class="contributor-avatar">sg</div>
+  <div class="contributor-info">
+    <strong>sgafxh</strong>
+    <span class="contributor-handle">@sgafxh</span>
+    <p>请求体超限后的会话恢复、修复 Windows 启动 pi 闪 CMD 窗口 (#188, #180)</p>
+    <a href="https://github.com/sgafxh" target="_blank" rel="noreferrer">GitHub</a>
   </div>
 </div>
 

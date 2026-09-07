@@ -113,6 +113,10 @@ let previewSettings: AppSettings = {
 	/** 扩展禁用白名单：与 SettingsStore 默认一致，预览壳不启用白名单 */
 	disabledExtensions: [],
 	disableExtensionWhitelist: false,
+	/** 技能禁用列表：与 SettingsStore 默认一致，预览壳不启用技能白名单 */
+	disabledSkills: [],
+	/** 提示词模板禁用列表：与 SettingsStore 默认一致，预览壳不启用模板白名单 */
+	disabledPrompts: [],
 	sessionTabOpenMode: "preview",
 	// 与 SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
 	busySendDelivery: "steer",
@@ -129,6 +133,8 @@ let previewSettings: AppSettings = {
 	askNotificationEnabled: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
 	agentCountReminderEnabled: true,
+	// 公告通知开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
+	announcementNotificationEnabled: true,
 	// showThinking 由 pi agent 的 hideThinkingBlock 控制，运行时从主进程加载
 	showThinking: true,
 	// 流式对话行为：与主进程 SettingsStore 默认一致（预览窗口保持相同观感）
@@ -173,6 +179,8 @@ let previewSettings: AppSettings = {
 	idleAgentKeepCount: 5,
 	idleAgentTimeoutMin: 60,
 	favoriteModels: [],
+	// 提供商显示开关：与 SettingsStore 默认一致，预览壳默认全显示
+	hiddenProviders: [],
 
 	fontSize: "default",
 	uiFontSize: null,
@@ -353,23 +361,28 @@ export function createPreviewApi(): PiDesktopApi {
 			respondTrustRequest: async () => undefined,
 		},
 		projectResources: {
-			list: async () => ({ skills: [], extensions: [] }),
-			createSkill: async (input) => ({
-				id: `project-pi:${input.name}`,
-				name: input.name,
-				description: input.description,
-				path: `C:/Users/preview/project/.pi/skills/${input.name}/SKILL.md`,
-				dir: `C:/Users/preview/project/.pi/skills/${input.name}`,
-				sourceId: "project-pi" as const,
-				sourceLabel: ".pi/skills",
-				type: "directory" as const,
-				enabled: true,
-				valid: true,
-				warnings: [],
+			list: async () => ({
+				skills: [],
+				extensions: [],
+				skillLocations: [],
+				overrides: {
+					disabledGlobalExtensions: [],
+					disabledGlobalSkills: [],
+					disabledGlobalPrompts: [],
+				},
 			}),
+			openDirectory: async () => undefined,
 			deleteSkill: async () => undefined,
 			deleteExtension: async () => undefined,
 			toggleExtension: async () => undefined,
+			toggleInherited: async (input) => ({
+				disabledGlobalExtensions:
+					input.kind === "extension" && !input.enabled ? [input.key] : [],
+				disabledGlobalSkills:
+					input.kind === "skill" && !input.enabled ? [input.key] : [],
+				disabledGlobalPrompts:
+					input.kind === "prompt" && !input.enabled ? [input.key] : [],
+			}),
 			renameSkill: async (_projectId, _skillPath, newName) => ({
 				id: `project-pi:${newName}`,
 				name: newName,
@@ -396,6 +409,7 @@ export function createPreviewApi(): PiDesktopApi {
 				valid: true,
 				warnings: [],
 			}),
+		discovery: async () => ({ skills: [], prompts: [], extensions: [] }),
 		},
 		files: {
 			list: async (_projectId, options) => {
@@ -430,6 +444,8 @@ export function createPreviewApi(): PiDesktopApi {
 			},
 			delete: async () => undefined,
 			cleanup: async () => 0,
+			getSize: async () => 0,
+			clearAll: async () => 0,
 		},
 		dialog: {
 			pickFiles: async () => [],
@@ -755,6 +771,7 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			worktreeRemove: async () => true,
 				commitLog: async () => [],
+				commitCount: async () => 0,
 				refs: async () => [],
 				branchCompare: async () => ({ files: [], ahead: 0, behind: 0 }),
 				commitDetail: async () => null,
@@ -837,6 +854,7 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				whoami: "preview",
 				piVersion: "preview",
+				piPath: "/usr/local/bin/pi",
 				error: "",
 			}),
 		},
@@ -938,19 +956,6 @@ export function createPreviewApi(): PiDesktopApi {
 			readContent: async (_path) => ({
 				content: "# preview-skill\n\nPreview skill body used by the browser preview layout.",
 			}),
-			create: async (input) => ({
-				id: `pi-global:${input.name}`,
-				name: input.name,
-				description: input.description,
-				path: `C:/Users/preview/.pi/agent/skills/${input.name}/SKILL.md`,
-				dir: `C:/Users/preview/.pi/agent/skills/${input.name}`,
-				sourceId: input.locationId,
-				sourceLabel: "~/.pi/agent/skills",
-				type: "directory" as const,
-				enabled: true,
-				valid: true,
-				warnings: [],
-			}),
 			toggle: async (path, enabled) => ({
 				id: `pi-global:${path}`,
 				name: "preview-skill",
@@ -1008,6 +1013,27 @@ export function createPreviewApi(): PiDesktopApi {
 				output: "Preview mode: extension update-one output",
 				updated: false,
 			}),
+			catalog: async () => ({
+				generatedAt: Date.now(),
+				fromCache: false,
+				items: [
+					{
+						name: "preview-extension",
+						description: "Preview mode extension",
+						author: "preview",
+						types: ["extension"],
+						downloadsPerMonth: 1,
+						publishedAt: Date.now(),
+						searchText: "preview-extension",
+						installSource: "npm:preview-extension",
+						pageUrl: "https://pi.dev/packages/preview-extension",
+					},
+				],
+				page: 1,
+				pageSize: 1,
+				total: 1,
+				lastPage: 1,
+			}),
 		},
 		prompts: {
 			list: async () => ({ templates: [], globalDir: "C:/Users/preview/.pi/agent/prompts" }),
@@ -1022,14 +1048,6 @@ export function createPreviewApi(): PiDesktopApi {
 			openFolder: async () => undefined,
 			edit: async (_filePath, _content?) => "---\ndescription: Preview\n---\n\nPreview content",
 			listByProject: async () => ({ templates: [], globalDir: "" }),
-			createInProject: async (_projectPath, input) => ({
-				name: input.name,
-				path: `project://${_projectPath}/.pi/prompts/${input.name}.md`,
-				description: input.description,
-				content: `---\ndescription: ${input.description}\n---\n`,
-				userCreated: true,
-				scope: "project",
-			}),
 			deleteFromProject: async () => undefined,
 			rename: async (_oldName, newName) => ({
 				name: newName,
@@ -1038,13 +1056,30 @@ export function createPreviewApi(): PiDesktopApi {
 				content: `---\ndescription: Renamed prompt\n---\n`,
 				userCreated: true,
 			}),
-			renameInProject: async (_projectPath, _oldName, newName) => ({
+			renameInProject: async (_projectId, _oldName, newName) => ({
 				name: newName,
-				path: `project://${_projectPath}/.pi/prompts/${newName}.md`,
+				path: `project://${_projectId}/.pi/prompts/${newName}.md`,
 				description: "Renamed project prompt",
 				content: `---\ndescription: Renamed project prompt\n---\n`,
 				userCreated: true,
 				scope: "project",
+			}),
+			toggle: async (filePath, enabled) => ({
+				name: filePath.split("/").pop()?.replace(/\.md$/, "") ?? "prompt",
+				path: filePath,
+				description: "Preview prompt",
+				content: "",
+				userCreated: true,
+				enabled,
+			}),
+			toggleInProject: async (_projectId, name, enabled) => ({
+				name,
+				path: `project://${_projectId}/.pi/prompts/${name}.md`,
+				description: "Preview project prompt",
+				content: "",
+				userCreated: true,
+				scope: "project",
+				enabled,
 			}),
 		},
 		promptStore: {
@@ -1165,6 +1200,8 @@ export function createPreviewApi(): PiDesktopApi {
 			// 设计预览：内置 TokenDance 目录返回空（不触真实网络）
 			getTokendanceModels: async () => ({ models: [], fromCache: false, at: 0 }),
 			tokendanceAuthStart: async () => ({ ok: false, error: "preview" }),
+			tokendanceAuthAwait: async () => ({ ok: false, error: "preview" }),
+			tokendanceAuthCancel: async () => ({ ok: true }),
 			tokendanceAuthExchange: async () => ({ ok: false, error: "preview" }),
 			installTokendance: async () => ({ ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "preview" }),
 			testProvider: async () => ({
@@ -1193,6 +1230,15 @@ export function createPreviewApi(): PiDesktopApi {
 			testUsageProbe: async () => ({ success: false, error: "preview" }),
 			installUsageSkill: async () => ({ success: false, error: "preview" }),
 			installImageGenSkill: async () => ({ success: false, error: "preview" }),
+		},
+		configBackups: {
+			list: async () => ({ ok: true, backups: [] }),
+			create: async () => ({ ok: true, id: "backup-preview.json" }),
+			read: async () => null,
+			restore: async () => ({ ok: false, error: "preview" }),
+			delete: async () => ({ ok: true }),
+			deleteMany: async () => ({ ok: true, deleted: 0 }),
+			deleteAll: async () => ({ ok: true }),
 		},
 		pet: {
 			onState: noop,
@@ -1224,6 +1270,14 @@ export function createPreviewApi(): PiDesktopApi {
 			listCustom: async () => [],
 			importCustom: async () => ({ ok: false, error: "canceled" as const }),
 			removeCustom: async () => false,
+		},
+		announcements: {
+			// 预览模式：无公告数据，返回空快照保持 PiDesktopApi 形状完整（订阅空操作）
+			list: async () => ({ items: [], fetchedAt: null, source: "cache" as const, readIds: [] }),
+			refresh: async () => ({ items: [], fetchedAt: null, source: "cache" as const, readIds: [] }),
+			markRead: async () => true,
+			markAllRead: async () => true,
+			onChanged: () => () => {},
 		},
 		terminal: {
 			// 预览模式只按归属键过滤：agent 目标用 agentId，project 目标用项目 id
@@ -1329,7 +1383,7 @@ export function createPreviewApi(): PiDesktopApi {
 			status: async () => ({ builtin: null, overlay: null, hasOverlayFiles: false, hasBackup: false }),
 			check: async () => ({ ok: false, code: "network", message: "preview stub" }),
 			updateFromGithub: async () => ({ ok: false, code: "network", message: "preview stub" }),
-			restore: async () => ({ ok: true }),
+			restore: async () => ({ ok: true, updated: false }),
 			restorePrevious: async () => ({ ok: false, code: "no-backup", message: "preview stub" }),
 			openFile: async () => undefined,
 		},

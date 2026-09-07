@@ -25,9 +25,10 @@ import { formatPercent } from "./TimelineFormat";
  * - 完整会话详情：复用会话头部 SessionStatus 的明细构建器（buildSessionStatusDetail），
  *   包含上下文/输入输出/缓存读写/命中率/费用，以及「最近一次回复」的性能组
  *   （TTFT 首字、总耗时、tps）——圆环面板与会话头部共用同一份明细，语义一致；
- * - 压缩上下文按钮：从原右上角紧凑徽章移入面板。占用未达
- *   COMPACT_READY_PERCENT（30%）时禁用并说明「未到建议门槛」，避免空 RPC；
- *   达标后可点，urgency 色阶 ≥90 红 / ≥70 黄；压缩中禁用并显示进度态。
+ * - 压缩上下文按钮：从原右上角紧凑徽章移入面板。无上下文数据（会话未运行/
+ *   尚未上报）时禁用并说明「暂不可用」；数据可用随时可压（不再设占用门槛，
+ *   占用很低时由 pi 自行判定 nothing-to-do/too-small）；压缩中禁用并显示进度态。
+ *   urgency 色阶 ≥90 红 / ≥70 黄仅作视觉提示。
  *
  * 边界：
  * - 圆环常驻：percent 或 window 缺失（会话未运行/模型切换瞬间）时渲染 0% 占位环，
@@ -307,8 +308,10 @@ export function SessionContextMeter(props: {
 		})()
 		: undefined;
 	const showCompact = props.onCompact !== undefined;
-	// 压缩按钮态走共享策略：未达 30% 禁用（点了也不会发 RPC）；压缩中禁用。
-	const compactUi = compactUiState(percent, compacting);
+	// 压缩按钮态走共享策略：无占用数据（percent 未上报）禁用；压缩中禁用。
+	// 传 context?.percent 而非 ?? 0 后的 percent：占位环需要 0，但未就绪判定
+	// 必须以「是否有真实数据」为准（percent=0 的真实数据也允许压缩）。
+	const compactUi = compactUiState(context?.percent, compacting);
 	const compactDisabled = compactUi.compacting || !compactUi.ready;
 	const compactUrgency =
 		compactUi.urgency === "danger" ? "text-destructive border-destructive/40 hover:bg-destructive/10" :

@@ -36,8 +36,8 @@ test("spinner utility centralizes an explicit loading-state animation", () => {
   const foundationStyles = readFileSync(`${rendererRoot}/styles/foundation.css`, "utf8");
   assert.match(
     foundationStyles,
-    /\*:not\(\.animate-pideck-spin\),\s*\*:not\(\.animate-pideck-spin\)::before,\s*\*:not\(\.animate-pideck-spin\)::after\s*\{[\s\S]*?animation-duration:\s*0\.01ms\s*!important;[\s\S]*?animation-iteration-count:\s*1\s*!important;/,
-    "the global reduced-motion reset must exclude loading spinners",
+    /\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\),\s*\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\)::before,\s*\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\)::after\s*\{[\s\S]*?animation-duration:\s*0\.01ms\s*!important;[\s\S]*?animation-iteration-count:\s*1\s*!important;/,
+    "the global reduced-motion reset must exclude loading spinners and title hover-scroll",
   );
 });
 
@@ -108,7 +108,7 @@ test("legacy spinner shells delegate rotation to the shared utility", () => {
     ["src/renderer/src/components/app/AppParts.tsx", 'className="loader animate-pideck-spin"'],
     ["src/renderer/src/components/session/WorkspaceSurface.tsx", 'className="mini-loader animate-pideck-spin"'],
     ["src/renderer/src/components/feishu/FeishuLinkIndicator.tsx", 'className="feishu-link-spinner animate-pideck-spin"'],
-    ["src/renderer/src/config/ExtensionsTab.tsx", 'className="skillhub-installing-dot animate-pideck-spin"'],
+    ["src/renderer/src/config/extensionsRecommendedPackages.tsx", 'className="skillhub-installing-dot animate-pideck-spin"'],
     ["src/renderer/src/web/WebTimeline.tsx", 'className="tool-card-spinner animate-pideck-spin"'],
   ]) {
     assert.match(readFileSync(filePath, "utf8"), new RegExp(selector));

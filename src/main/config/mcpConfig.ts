@@ -17,6 +17,11 @@ import type {
 	McpServerListItem,
 	McpServerTransport,
 } from "../../shared/types/mcp";
+import {
+	createProjectFileReadBoundary,
+	resolveProjectFileReadPath,
+	type ProjectFileReadBoundary,
+} from "../files/projectFileAccess";
 
 const MCP_DOCS_URL = "https://nicobailon-pi-mcp-adapter.mintlify.app/configuration/server-setup";
 const HTTP_PROBE_TIMEOUT_MS = 8_000;
@@ -83,7 +88,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 export function parseMcpConfigFile(raw: string): { file: McpConfigFile; error?: string } {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(raw) as unknown;
+		parsed = JSON.parse(raw);
 	} catch (error) {
 		return { file: { mcpServers: {} }, error: error instanceof Error ? error.message : String(error) };
 	}
@@ -94,7 +99,27 @@ export function parseMcpConfigFile(raw: string): { file: McpConfigFile; error?: 
 	if (mcpServers !== undefined && !isPlainObject(mcpServers)) {
 		return { file: { mcpServers: {} }, error: "mcpServers must be an object" };
 	}
-	return { file: parsed as McpConfigFile };
+	const file: McpConfigFile = {};
+	for (const [key, value] of Object.entries(parsed)) {
+		if (key !== "mcpServers") file[key] = value;
+	}
+	if (mcpServers) {
+		const normalizedServers: Record<string, McpServerDefinition> = {};
+		for (const [name, value] of Object.entries(mcpServers)) {
+			const definition = normalizeMcpServerDefinition(value);
+			if (!definition) {
+				// Do not silently omit malformed entries: a later visual save would rewrite the
+				// file without the user's original server. The raw file remains available for repair.
+				return {
+					file: { ...file, mcpServers: normalizedServers },
+					error: `Server "${name}" must be an object`,
+				};
+			}
+			normalizedServers[name] = definition;
+		}
+		file.mcpServers = normalizedServers;
+	}
+	return { file };
 }
 
 function asStringRecord(value: unknown): Record<string, string> | undefined {
@@ -107,10 +132,10 @@ function asStringRecord(value: unknown): Record<string, string> | undefined {
 }
 
 /** 浅合并时丢掉 undefined，避免 `{ disabled: true }` 把下层 command/url 冲成空。 */
-function omitUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
-	const out: Partial<T> = {};
+function omitUndefined(value: Record<string, unknown>): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
 	for (const [key, item] of Object.entries(value)) {
-		if (item !== undefined) (out as Record<string, unknown>)[key] = item;
+		if (item !== undefined) out[key] = item;
 	}
 	return out;
 }
@@ -129,6 +154,11 @@ export function normalizeMcpServerDefinition(value: unknown): McpServerDefinitio
 			? value.lifecycle
 			: undefined;
 	const auth = value.auth === "bearer" || value.auth === "oauth" ? value.auth : undefined;
+	const directTools = typeof value.directTools === "boolean"
+		? value.directTools
+		: Array.isArray(value.directTools)
+			? value.directTools.filter((item): item is string => typeof item === "string")
+			: undefined;
 	const definition: McpServerDefinition = {
 		...value,
 		command: typeof value.command === "string" ? value.command : undefined,
@@ -145,10 +175,7 @@ export function normalizeMcpServerDefinition(value: unknown): McpServerDefinitio
 		idleTimeout: typeof value.idleTimeout === "number" ? value.idleTimeout : undefined,
 		requestTimeoutMs: typeof value.requestTimeoutMs === "number" ? value.requestTimeoutMs : undefined,
 		disabled: value.disabled === true ? true : value.disabled === false ? false : undefined,
-		directTools:
-			typeof value.directTools === "boolean" || Array.isArray(value.directTools)
-				? (value.directTools as boolean | string[])
-				: undefined,
+		directTools,
 	};
 	return definition;
 }
@@ -285,7 +312,7 @@ export async function probeHttpUrl(
 	const request: HttpGet | undefined =
 		fetchImpl ??
 		(typeof globalThis.fetch === "function"
-			? (globalThis.fetch.bind(globalThis) as HttpGet)
+			? (input, init) => globalThis.fetch(input, init)
 			: undefined);
 	if (!request) {
 		return { ok: false, transport: "http", error: "fetch is not available" };
@@ -342,9 +369,15 @@ export async function probeMcpServer(def: McpServerDefinition): Promise<McpProbe
 		: { ok: false, transport: "socket", error: `Socket not found: ${socket}` };
 }
 
-async function readMcpLayerFile(path: string): Promise<{ exists: boolean; file: McpConfigFile; raw: string; error?: string }> {
+async function readMcpLayerFile(
+	path: string,
+	projectBoundary?: ProjectFileReadBoundary,
+): Promise<{ exists: boolean; file: McpConfigFile; raw: string; error?: string }> {
 	try {
-		const raw = await readFile(path, "utf8");
+		const readPath = projectBoundary
+			? await resolveProjectFileReadPath(projectBoundary, path)
+			: path;
+		const raw = await readFile(readPath, "utf8");
 		const parsed = parseMcpConfigFile(raw);
 		return { exists: true, file: parsed.file, raw, error: parsed.error };
 	} catch {
@@ -365,9 +398,20 @@ export async function loadMcpConfigSnapshot(
 `;
 	let writablePath = join(piAgentDir, "mcp.json");
 	let writableError: string | undefined;
+	let projectBoundary: ProjectFileReadBoundary | undefined;
+	if (projectPath) {
+		try {
+			projectBoundary = await createProjectFileReadBoundary(projectPath);
+		} catch {
+			// Missing/unreadable project roots expose no project MCP layers.
+		}
+	}
 
 	for (const layer of declared) {
-		const result = await readMcpLayerFile(layer.path);
+		const projectLayer = layer.kind === "project" || layer.kind === "project-pi";
+		const result = projectLayer && !projectBoundary
+			? { exists: false, file: { mcpServers: {} }, raw: "" }
+			: await readMcpLayerFile(layer.path, projectLayer ? projectBoundary : undefined);
 		layers.push({ ...layer, exists: result.exists });
 		if (layer.writable) {
 			writablePath = layer.path;

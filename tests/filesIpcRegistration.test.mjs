@@ -36,18 +36,29 @@ test("project-scoped reads are validated in main before touching disk", () => {
   assert.match(filesIpc, /await writeFile\(writablePath, content, "utf8"\)/);
   // preload 只能传 projectId scope，不能传一个由 renderer 自报的可信根目录。
   assert.match(preload, /scope\?: ProjectFileAccessScope/);
+  assert.match(preload, /filesOpen, path, scope/);
+  assert.match(preload, /filesShowInFolder, path, scope/);
   assert.match(preload, /filesReadContent, path, maxBytes, scope/);
   assert.match(preload, /filesPathsExist, paths, scope/);
   assert.match(preload, /filesReadBase64, path, maxBytes, scope/);
   assert.match(preload, /filesWriteContent, path, content, scope/);
 });
 
-test("files:show-in-folder handler calls shell.showItemInFolder with Windows path conversion", () => {
-  // 具体断言修复目标：handler 本体存在且保留 toWindowsPath 转换（WSL 路径可用）
-  const block = filesIpc.match(
-    /ipcMain\.handle\(\s*ipcChannels\.filesShowInFolder,[\s\S]*?shell\.showItemInFolder\(toWindowsPath\(path\)\);/,
+test("project-scoped open/show operations resolve the registered project boundary", () => {
+  const openBlock = filesIpc.match(
+    /ipcMain\.handle\(ipcChannels\.filesOpen,[\s\S]*?\n\t\}\);/,
   );
-  assert.ok(block, "filesShowInFolder handler must call shell.showItemInFolder(toWindowsPath(path))");
+  const showBlock = filesIpc.match(
+    /ipcMain\.handle\(ipcChannels\.filesShowInFolder,[\s\S]*?\n\t\}\);/,
+  );
+  assert.ok(openBlock, "filesOpen handler should be discoverable");
+  assert.ok(showBlock, "filesShowInFolder handler should be discoverable");
+  for (const block of [openBlock[0], showBlock[0]]) {
+    assert.match(block, /resolveProjectReadBoundary\(scope\)/);
+    assert.match(block, /resolveReadablePath\(path, boundary\)/);
+  }
+  assert.match(openBlock[0], /shell\.openPath\(readablePath\)/);
+  assert.match(showBlock[0], /shell\.showItemInFolder\(readablePath\)/);
 });
 
 test("files:list maps a deleted project root to a stable missing-directory error", () => {

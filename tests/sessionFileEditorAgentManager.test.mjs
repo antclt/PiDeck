@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import { createRequire } from "node:module";
 import test from "node:test";
 import ts from "typescript";
@@ -72,6 +76,7 @@ function loadAgentManager() {
         return { formatExtensionErrorReason: () => "" };
       }
       if (specifier === "./SessionFileEditor") return { SessionFileEditor: class {} };
+      if (specifier === "./stoppedMessageIdentity") return loadTsCommonJs("src/main/pi/stoppedMessageIdentity.ts");
       if (specifier === "./SessionHistoryReader") {
         return {
           SessionHistoryReader: class {
@@ -140,6 +145,22 @@ function loadAgentManager() {
           }),
         };
       }
+      // 技能白名单 resolver：本测试不涉及技能加载，透传空实现即可
+      if (specifier === "../skills/piProcessSkillResolvers") {
+        return {
+          createPiProcessSkillResolvers: () => ({
+            resolveEnabledSkillPaths: () => null,
+          }),
+        };
+      }
+      // 提示词模板白名单 resolver：本测试不涉及模板加载，透传空实现即可
+      if (specifier === "../prompts/piProcessPromptResolvers") {
+        return {
+          createPiProcessPromptResolvers: () => ({
+            resolveEnabledPromptPaths: () => null,
+          }),
+        };
+      }
       if (specifier === "../wsl/WslPaths") {
         return { toWindowsHostPath: (path) => path, toWslLinuxPath: (path) => path };
       }
@@ -177,6 +198,9 @@ function loadAgentManager() {
 }
 
 const AgentManager = loadAgentManager();
+const { SessionHistoryReader } = loadTsCommonJs("src/main/pi/SessionHistoryReader.ts");
+const { SessionFileEditor } = loadTsCommonJs("src/main/pi/SessionFileEditor.ts");
+const { AgentMessageProjector } = loadTsCommonJs("src/main/pi/AgentMessageProjector.ts");
 
 function chatMessage(overrides = {}) {
   return {
@@ -386,6 +410,68 @@ test("mutatePersistedSessionMessage writes the file without switch_session when 
   assert.equal(received[2][0], "resend");
   assert.equal(draft.text, "answer");
   assert.equal(commands.filter((command) => command.type === "switch_session").length, 0);
+});
+
+/** 重放编辑确认框捕获 live ID → 停止 runtime → catalog 改文件，文件读写均使用真实实现。 */
+async function withStoppedLiveMessage(operation) {
+  const directory = await mkdtemp(join(tmpdir(), "pideck-stop-edit-"));
+  const sessionPath = join(directory, "session.jsonl");
+  const liveMessage = chatMessage({
+    id: "live-user-uuid", role: "user", text: "original question", timestamp: 1234, meta: {},
+  });
+  try {
+    await writeFile(sessionPath, [
+      { type: "session", id: "session", version: 3 },
+      { type: "message", id: "entry-user", parentId: null,
+        message: { role: "user", content: [{ type: "text", text: liveMessage.text }], timestamp: 1234 } },
+    ].map(JSON.stringify).join("\n") + "\n");
+    const { manager, runtime } = createHarness(new SessionFileEditor(), { messages: [liveMessage] });
+    runtime.tab.sessionPath = sessionPath;
+    runtime.process.stop = () => {};
+    const projector = new AgentMessageProjector({ translate: (key) => key, isAskAborted: () => false });
+    manager.sessionHistoryReader = new SessionHistoryReader({
+      toHostPath: (path) => path,
+      convertMessages: (...args) => projector.convert(...args),
+      trimMessages: (messages) => messages,
+      translate: (key) => key,
+    });
+    await manager.stop("agent-1");
+    await operation(manager, sessionPath, liveMessage);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test("editing a live message after stopping resolves its persisted entry without restarting", async () => {
+  await withStoppedLiveMessage(async (manager, sessionPath, message) => {
+    await manager.mutatePersistedSessionMessage(sessionPath, message.id, "edit", { newText: "edited question" });
+    const reader = manager.sessionHistoryReader;
+    const located = await reader.readMessageByMessageId(sessionPath, "entry-user");
+    assert.equal(located.text, "edited question");
+  });
+});
+
+test("a persisted entry hint makes the same stopped live message editable", async () => {
+  await withStoppedLiveMessage(async (manager, sessionPath, message) => {
+    await manager.mutatePersistedSessionMessage(sessionPath, message.id, "edit", {
+      entryId: "entry-user", newText: "edited with entry anchor",
+    });
+    assert.equal((await manager.sessionHistoryReader.readMessageByMessageId(sessionPath, "entry-user")).text,
+      "edited with entry anchor");
+  });
+});
+
+test("resending a live message after stopping returns the persisted prompt without restarting", async () => {
+  await withStoppedLiveMessage(async (manager, sessionPath, message) => {
+    const result = await manager.mutatePersistedSessionMessage(sessionPath, message.id, "resend");
+    assert.equal(result.text, "original question");
+    const content = await readFile(sessionPath, "utf8");
+    // tombstone 必须保留 id（pi SessionManager._buildIndex 以最后一条带 id 的记录为叶）；
+    // resend 把原根转标成 type:deleted + reason:resend-truncate，而不是从文件里擦掉 id。
+    assert.match(content, /"type":"deleted"/);
+    assert.match(content, /"reason":"resend-truncate"/);
+    assert.match(content, /"id":"entry-user"/);
+  });
 });
 
 test("mutatePersistedSessionMessage refuses a live runtime", async () => {

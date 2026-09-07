@@ -3,37 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { createRequire } from "node:module";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const nodeRequire = createRequire(import.meta.url);
-
-/**
- * 加载 enabledExtensionResolver.ts（白名单路径解析，纯 fs 逻辑）。
- * 内置扩展模块走真实实现：listActiveBuiltInExtensionPaths 读真实文件系统，
- * 因此 builtInRoots 必须指向临时资源目录并写入 pi-deck-* 文件。
- */
+/** 加载 enabledExtensionResolver.ts（白名单路径解析，纯 fs 逻辑）。 */
 function loadResolverModule() {
-	const source = readFileSync("src/main/extensions/enabledExtensionResolver.ts", "utf8");
-	const { outputText } = ts.transpileModule(source, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-	});
-	const module = { exports: {} };
-	vm.runInNewContext(outputText, {
-		module,
-		exports: module.exports,
-		require: (specifier) => {
-			if (specifier === "./builtInExtensions") {
-				return nodeRequire("../src/main/extensions/builtInExtensions.ts");
-			}
-			return nodeRequire(specifier);
-		},
-	}, { filename: "enabledExtensionResolver.ts" });
-	return module.exports;
+	return loadTsCommonJs("src/main/extensions/enabledExtensionResolver.ts");
 }
 
 /** 在临时根下构造 ~/.pi/agent + <cwd>/.pi 项目目录骨架。返回各关键路径与写文件助手。 */
@@ -80,15 +54,21 @@ test("disabled 为空时关闭白名单（返回 null）", () => {
 	}
 });
 
-test("有禁用项时：npm 包按安装目录注入，禁用的剔除、未安装的跳过", () => {
+test("有禁用项时：npm 包按 manifest 入口注入，禁用的剔除、未安装的跳过", () => {
 	const { resolveEnabledExtensionPaths } = loadResolverModule();
 	const { root, home, cwd, put, mkdir } = setupFixtures();
 	try {
 		put(".pi/agent/settings.json", JSON.stringify({
 			packages: ["npm:pi-web-access", "npm:pi-mcp-adapter", "npm:pi-missing"],
 		}));
-		mkdir(".pi/agent/npm/node_modules/pi-web-access");
-		mkdir(".pi/agent/npm/node_modules/pi-mcp-adapter");
+		put(".pi/agent/npm/node_modules/pi-web-access/package.json", JSON.stringify({
+			pi: { extensions: ["src/index.ts"] },
+		}));
+		put(".pi/agent/npm/node_modules/pi-web-access/src/index.ts", "// extension");
+		put(".pi/agent/npm/node_modules/pi-mcp-adapter/package.json", JSON.stringify({
+			pi: { extensions: ["index.ts"] },
+		}));
+		put(".pi/agent/npm/node_modules/pi-mcp-adapter/index.ts", "// extension");
 
 		const result = resolveEnabledExtensionPaths({
 			agentHomeDir: home,
@@ -98,7 +78,7 @@ test("有禁用项时：npm 包按安装目录注入，禁用的剔除、未安�
 			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
 		});
 		assert.notEqual(result, null);
-		same(result, [join(home, ".pi", "agent", "npm", "node_modules", "pi-web-access")]);
+		same(result, [join(home, ".pi", "agent", "npm", "node_modules", "pi-web-access", "src", "index.ts")]);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -109,9 +89,15 @@ test("project packages 从项目 .pi/npm 注入，且 user/project 同名禁用�
 	const { root, home, cwd, put, mkdir } = setupFixtures();
 	try {
 		put(".pi/agent/settings.json", JSON.stringify({ packages: ["npm:pi-web-access"] }));
-		mkdir(".pi/agent/npm/node_modules/pi-web-access");
+		put(".pi/agent/npm/node_modules/pi-web-access/package.json", JSON.stringify({
+			pi: { extensions: ["index.ts"] },
+		}));
+		put(".pi/agent/npm/node_modules/pi-web-access/index.ts", "// extension");
 		put("project/.pi/settings.json", JSON.stringify({ packages: ["npm:pi-project-tool"] }));
-		mkdir("project/.pi/npm/node_modules/pi-project-tool");
+		put("project/.pi/npm/node_modules/pi-project-tool/package.json", JSON.stringify({
+			pi: { extensions: ["index.ts"] },
+		}));
+		put("project/.pi/npm/node_modules/pi-project-tool/index.ts", "// extension");
 
 		// 只禁用 user 级 pi-web-access：project 条目不受牵连
 		const result = resolveEnabledExtensionPaths({
@@ -121,7 +107,7 @@ test("project packages 从项目 .pi/npm 注入，且 user/project 同名禁用�
 			removedBuiltInExtensions: [],
 			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
 		});
-		same(result, [join(cwd, ".pi", "npm", "node_modules", "pi-project-tool")]);
+		same(result, [join(cwd, ".pi", "npm", "node_modules", "pi-project-tool", "index.ts")]);
 
 		// 禁用 project 同名 → project 条目剔除，user 条目保留
 		const result2 = resolveEnabledExtensionPaths({
@@ -131,7 +117,7 @@ test("project packages 从项目 .pi/npm 注入，且 user/project 同名禁用�
 			removedBuiltInExtensions: [],
 			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
 		});
-		same(result2, [join(home, ".pi", "agent", "npm", "node_modules", "pi-web-access")]);
+		same(result2, [join(home, ".pi", "agent", "npm", "node_modules", "pi-web-access", "index.ts")]);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -247,6 +233,151 @@ test("特殊字符扩展名（空格/中文/&）按字面匹配：spawn 数组�
 			join(home, ".pi", "agent", "extensions", chinese),
 			join(home, ".pi", "agent", "extensions", "plain.ts"),
 		]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("项目扩展禁用不误伤同 source 的全局扩展", () => {
+	const { resolveEnabledExtensionPaths } = loadResolverModule();
+	const { root, home, cwd, put } = setupFixtures();
+	try {
+		const globalPath = put(".pi/agent/extensions/shared.ts", "export default () => {};");
+		put("project/.pi/extensions/shared.ts", "export default () => {};");
+		put("project/.pi/settings.json", JSON.stringify({ disabledExtensions: ["shared.ts"] }));
+		const result = resolveEnabledExtensionPaths({
+			agentHomeDir: home,
+			cwd,
+			disabled: [],
+			removedBuiltInExtensions: [],
+			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
+		});
+		assert.ok(result);
+		same(result, [globalPath]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("项目继承覆盖只禁用全局 extension，保留同 source 项目资源", () => {
+	const { resolveEnabledExtensionPaths } = loadResolverModule();
+	const { root, home, cwd, put } = setupFixtures();
+	try {
+		put(".pi/agent/extensions/shared.ts", "export default () => {};");
+		const projectPath = put("project/.pi/extensions/shared.ts", "export default () => {};");
+		put("project/.pi/settings.json", JSON.stringify({
+			pideckDisabledGlobalExtensions: ["shared.ts"],
+		}));
+		const result = resolveEnabledExtensionPaths({
+			agentHomeDir: home,
+			cwd,
+			disabled: [],
+			removedBuiltInExtensions: [],
+			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
+		});
+		assert.ok(result);
+		same(result, [projectPath]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("拒绝项目 trust 时强制全局白名单且不显式注入项目扩展", () => {
+	const { resolveEnabledExtensionPaths } = loadResolverModule();
+	const { root, home, cwd, put } = setupFixtures();
+	try {
+		const globalPath = put(".pi/agent/extensions/global.ts", "export default () => {};");
+		put("project/.pi/extensions/project.ts", "export default () => {};");
+		const result = resolveEnabledExtensionPaths({
+			agentHomeDir: home,
+			cwd,
+			includeProjectResources: false,
+			disabled: [],
+			removedBuiltInExtensions: [],
+			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
+		});
+		assert.ok(result);
+		same(result, [globalPath]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("package extensions empty filter disables every manifest entry", () => {
+	const { resolveEnabledExtensionPaths } = loadResolverModule();
+	const { root, home, cwd, put } = setupFixtures();
+	try {
+		put(".pi/agent/npm/node_modules/ext-pack/package.json", JSON.stringify({
+			pi: { extensions: ["src/*.ts"] },
+		}));
+		put(".pi/agent/npm/node_modules/ext-pack/src/a.ts", "// a");
+		put(".pi/agent/settings.json", JSON.stringify({
+			packages: [{ source: "npm:ext-pack", extensions: [] }],
+		}));
+		const result = resolveEnabledExtensionPaths({
+			agentHomeDir: home,
+			cwd,
+			disabled: [{ scope: "user", source: "missing" }],
+			removedBuiltInExtensions: [],
+			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
+		});
+		same(result, []);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("package extension filters apply glob then exact force overrides", () => {
+	const { resolveEnabledExtensionPaths } = loadResolverModule();
+	const { root, home, cwd, put } = setupFixtures();
+	try {
+		const packageRoot = join(home, ".pi", "agent", "npm", "node_modules", "ext-pack");
+		put(".pi/agent/npm/node_modules/ext-pack/package.json", JSON.stringify({
+			pi: { extensions: ["src/*.ts"] },
+		}));
+		put(".pi/agent/npm/node_modules/ext-pack/src/a.ts", "// a");
+		put(".pi/agent/npm/node_modules/ext-pack/src/b.ts", "// b");
+		put(".pi/agent/settings.json", JSON.stringify({
+			packages: [{
+				source: "npm:ext-pack",
+				extensions: ["src/*.ts", "!src/b.ts", "+src/b.ts", "-src/a.ts"],
+			}],
+		}));
+		const result = resolveEnabledExtensionPaths({
+			agentHomeDir: home,
+			cwd,
+			disabled: [{ scope: "user", source: "missing" }],
+			removedBuiltInExtensions: [],
+			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
+		});
+		same(result, [join(packageRoot, "src", "b.ts")]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("project autoload:false extension package applies a delta over the user install", () => {
+	const { resolveEnabledExtensionPaths } = loadResolverModule();
+	const { root, home, cwd, put } = setupFixtures();
+	try {
+		const packageRoot = join(home, ".pi", "agent", "npm", "node_modules", "ext-pack");
+		put(".pi/agent/npm/node_modules/ext-pack/package.json", JSON.stringify({
+			pi: { extensions: ["src/*.ts"] },
+		}));
+		put(".pi/agent/npm/node_modules/ext-pack/src/a.ts", "// a");
+		put(".pi/agent/npm/node_modules/ext-pack/src/b.ts", "// b");
+		put(".pi/agent/settings.json", JSON.stringify({ packages: ["npm:ext-pack"] }));
+		put("project/.pi/settings.json", JSON.stringify({
+			packages: [{ source: "npm:ext-pack", extensions: ["!src/b.ts"], autoload: false }],
+		}));
+		const result = resolveEnabledExtensionPaths({
+			agentHomeDir: home,
+			cwd,
+			disabled: [{ scope: "user", source: "missing" }],
+			removedBuiltInExtensions: [],
+			builtInRoots: { appPath: root, resourcesPath: root, isDev: true },
+		});
+		same(result, [join(packageRoot, "src", "a.ts")]);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
