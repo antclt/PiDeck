@@ -854,6 +854,7 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				whoami: "preview",
 				piVersion: "preview",
+				piPath: "/usr/local/bin/pi",
 				error: "",
 			}),
 		},
