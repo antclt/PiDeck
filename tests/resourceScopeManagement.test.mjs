@@ -7,9 +7,11 @@ const read = (path) => readFileSync(path, "utf8");
 test("configuration resources share one global/project scope owner", () => {
 	const modal = read("src/renderer/src/ConfigModal.tsx");
 	const selector = read("src/renderer/src/config/ResourceScopeSelector.tsx");
-	assert.match(modal, /useState<ResourceScope>\("global"\)/);
+	assert.match(modal, /useState<ResourceScope>\(resourceOnly \? "project" : "global"\)/);
 	assert.equal((modal.match(/scopeSelector=\{resourceScopeSelector\}/g) ?? []).length, 4);
 	assert.match(modal, /item\.kind !== "chat"/);
+	assert.match(modal, /resourceOnly[\s\S]*projectKind === "chat" \? undefined : projectId/);
+	assert.match(modal, /resourceScopeSelector = resourceOnly \?/);
 	assert.doesNotMatch(modal, /getMcp\(projectPath\)/);
 	assert.match(selector, /type ResourceScope = "global" \| "project"/);
 	assert.match(selector, /availableProjects = projects\.filter\(/);

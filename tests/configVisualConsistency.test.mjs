@@ -11,7 +11,6 @@ const rendererStyles = readFileSync("src/renderer/src/styles.css", "utf8");
 const settingsModal = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
 const commonTab = readFileSync("src/renderer/src/components/app/settings/CommonTab.tsx", "utf8");
 const projectResources = readFileSync("src/renderer/src/components/app/ProjectResourcesModal.tsx", "utf8");
-const workspaceStyles = readFileSync("src/renderer/src/styles/workspace.css", "utf8");
 const zhCopy = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const enCopy = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 const tabs = readFileSync("src/renderer/src/components/ui-shadcn/tabs.tsx", "utf8");
@@ -54,50 +53,22 @@ test("config shell defines compact density and crisp system typography", () => {
   assert.match(surfaces, /\.config-modal \{[\s\S]*width: min\(1300px, 80vw\);[\s\S]*height: min\(850px, 80vh\);/);
 });
 
-test("project resources use one consistent shadcn management shell", () => {
-  // 弹窗必须只有一套标题栏和一套 tab rail；重复 header 会造成截图中的空白与关闭按钮错位。
-  assert.match(projectResources, /<DialogHeader className="[^"]*border-b/);
-  assert.doesNotMatch(projectResources, /<header className="project-resources-header"/);
-  assert.match(projectResources, /<Tabs\n\s+value=\{activeTab\}/);
-  assert.match(projectResources, /<TabsList className="[^"]*w-full/);
-  assert.match(projectResources, /from "\.\.\/ui-shadcn\/(?:alert|scroll-area)"/);
-  assert.match(projectResources, /<Alert variant="destructive"/);
-  assert.match(projectResources, /<ScrollArea className=/);
+test("project resource menu reuses the settings resource views with a fixed project scope", () => {
+  // 项目入口只保留壳层；列表、商店、编辑和操作统一由设置页 ConfigPane 提供。
+  assert.match(projectResources, /<ConfigPane/);
+  assert.match(projectResources, /resourceOnly/);
+  assert.match(projectResources, /projectId=\{props\.project\.id\}/);
+  assert.match(projectResources, /projectName=\{props\.project\.name\}/);
+  assert.match(projectResources, /from "\.\.\/\.\.\/ConfigModal"/);
+  assert.doesNotMatch(projectResources, /ResourceScopeSelector/);
+  assert.doesNotMatch(projectResources, /<Tabs/);
 
-  // 视觉重排只能换容器；项目资源的切换、编辑、启停、删除和刷新流程必须仍在页面中。
-  for (const contract of [
-    "toggleSkill",
-    "toggleExtension",
-    "confirmDelete",
-    "openEditor",
-    "openProjectPromptEditor",
-    "refresh",
-    "loadPrompts",
-  ]) {
-    assert.match(projectResources, new RegExp(`\\b${contract}\\b`));
-  }
-});
-
-test("project resource cards stack metadata and keep destructive actions discoverable", () => {
-  // 卡片内容必须垂直排布；横向 flex 会把名称、状态和路径挤成截图中的一条线。
-  assert.match(workspaceStyles, /\.project-resource-card > \.project-resource-info \{[^}]*display: grid/);
-  // 新建表单卡片（两列栅格左栏）已整体移除，列表不再依赖跨行占位。
-  assert.doesNotMatch(workspaceStyles, /\.project-skill-create/);
-  // 删除/编辑不能只依赖 hover，否则鼠标离开卡片或触屏设备上不可发现。
-  assert.match(workspaceStyles, /\.project-resource-actions \{[^}]*opacity: 1/);
-  assert.match(projectResources, /setDeleteTarget\(\{ kind: "skill"/);
-  assert.match(projectResources, /setDeleteTarget\(\{ kind: "extension"/);
-  assert.match(projectResources, /setDeleteTarget\(\{ kind: "prompt"/);
-});
-
-test("resource create forms are removed; lists keep compact density", () => {
-  // 新建 Skill/提示词表单已整体移除（模板由 AI 生成，无需手动填写）：
-  // 固定标签列、创建按钮文案与两列栅格规则都不应再出现。
-  assert.doesNotMatch(projectResources, /grid-cols-\[4rem_minmax\(0,1fr\)\]/);
-  assert.doesNotMatch(projectResources, /projectResources\.createSkillAction/);
-  assert.doesNotMatch(projectResources, /projectResources\.createPromptAction/);
-  assert.doesNotMatch(projectResources, /creatingPrompt \? t\("config\.creatingSkill"\)/);
-  assert.match(projectResources, /project-resources-list-section/);
+  // resourceOnly 模式固定 project scope，且用静态项目标签替代下拉选择器。
+  assert.match(configModal, /resourceOnly \? "project" : "global"/);
+  assert.match(configModal, /resourceOnly\s*\?/);
+  assert.match(configModal, /resourceScopeSelector = resourceOnly \?/);
+  assert.match(configModal, /projectName\?\.trim\(\) \|\| t\("config\.resourceScope\.projectFallback"\)/);
+  assert.match(configModal, /!resourceOnly && \(/);
 });
 
 test("skills and prompts use compact tab rails aligned with the extensions page", () => {

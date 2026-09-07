@@ -55,8 +55,8 @@ test("large settings dialogs inherit page wallpaper transparency", () => {
   // 设置和项目资源管理是工作台式弹框，应跟随页面透明度；普通确认弹框仍保留
   // 更高的可读性基线，避免把两类交互的视觉规则混在一起。
   assert.match(settingsSource, /settings-modal[^\n]*\[--wallpaper-dialog-alpha:var\(--wallpaper-panel-alpha,30%\)\]/);
-  assert.match(projectResourcesSource, /project-resources-dialog[^\n]*\[--wallpaper-dialog-alpha:var\(--wallpaper-panel-alpha,30%\)\]/);
-  assert.match(surfacesSource, /\.settings-modal \.settings-layout[\s\S]*?\.project-resources-dialog \.project-resources-body[\s\S]*?background: transparent;/);
+  assert.match(projectResourcesSource, /config-modal[^\n]*\[--wallpaper-dialog-alpha:var\(--wallpaper-panel-alpha,30%\)\]/);
+  assert.match(surfacesSource, /:root\[data-bg-image="on"\] \.config-modal \.config-layout[\s\S]*?background: transparent;/);
   assert.match(modelsSource, /config-provider-card/);
   assert.match(modelsSource, /config-provider-body/);
   // 模型表格容器已内聚到共享组件 ModelsTable（展开卡片与编辑页共用）
