@@ -2744,7 +2744,13 @@ function registerIpc() {
 	// 覆盖层目录须在 catalog 初次读取前登记（getPiAiCatalogIndex 首次调用即锁定索引）；
 	// app 已 ready 后 app.getPath("userData") 才可靠，故在此提前构造。
 	setPiAiCatalogUserDataDir(app.getPath("userData"));
-	const catalogUpdater = new PiAiCatalogUpdater({ userDataDir: app.getPath("userData") });
+	const catalogUpdater = new PiAiCatalogUpdater({
+		userDataDir: app.getPath("userData"),
+		// 目录更新/检测复用应用更新的 GitHub 镜像配置（settings.updateSource），
+		// 国内用户切镜像后自动走代理前缀，无需为目录单独维护一套源。
+		source: () => settingsStore.get().updateSource,
+		customHost: () => settingsStore.get().customUpdateSourceUrl,
+	});
 	// 后台更新检查：Windows / 支持自动升级的发行物走 electron-updater；
 	// macOS 当前未签 Developer ID，不能承诺稳定的替换/重启，因此只检测 Release 并交给用户手动安装。
 	// 两条路径都由同一个 UpdateService 快照推送渲染层，设置页能明确表达能力边界。
