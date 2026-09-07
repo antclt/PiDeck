@@ -244,6 +244,27 @@ export class ConfigBackupManager {
 		}
 	}
 
+	/** 批量删除：逐项删除，非法 id 跳过不阻断；只要一个都没删成功就视为失败（含全部非法/不存在）。 */
+	deleteMany(ids: string[]): { ok: true; deleted: number } | { ok: false; error: string } {
+		let deleted = 0;
+		const errors: string[] = [];
+		for (const id of ids) {
+			const filePath = this.resolveBackupPath(id);
+			if (!filePath) continue;
+			try {
+				unlinkSync(filePath);
+				deleted += 1;
+			} catch (error) {
+				errors.push(error instanceof Error ? error.message : String(error));
+			}
+		}
+		// 一个都没删成功 → 失败（区分“全部非法”与“部分失败但已删成功”）。
+		if (deleted === 0) {
+			return { ok: false, error: errors[0] ?? "no backups deleted" };
+		}
+		return { ok: true, deleted };
+	}
+
 	/** 清空全部备份。 */
 	deleteAll(): ConfigBackupActionResult {
 		try {

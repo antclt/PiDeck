@@ -1709,6 +1709,11 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.configBackupDelete, id) as Promise<
 				import("../shared/types/backup").ConfigBackupActionResult
 			>,
+		/** 批量删除多个备份，返回实际删除数量。 */
+		deleteMany: (ids: string[]) =>
+			ipcRenderer.invoke(ipcChannels.configBackupDeleteMany, ids) as Promise<
+				import("../shared/types/backup").ConfigBackupDeleteManyResult
+			>,
 		/** 清空全部备份。 */
 		deleteAll: () =>
 			ipcRenderer.invoke(ipcChannels.configBackupDeleteAll) as Promise<

@@ -55,6 +55,21 @@ export function registerBackupIpc({
 		return files;
 	};
 
+	/** 批量删除入参校验：非空字符串数组，逐项必须是本应用命名的备份文件名。 */
+	const requireBackupIds = (value: unknown): string[] => {
+		if (!Array.isArray(value) || value.length === 0) {
+			throw new Error("Invalid backup ids.");
+		}
+		const ids = value.filter(
+			(entry): entry is string =>
+				typeof entry === "string" && /^backup-[0-9]+(?:-[0-9]+)?\.json$/.test(entry),
+		);
+		if (ids.length !== value.length) {
+			throw new Error("Invalid backup id.");
+		}
+		return ids;
+	};
+
 	ipcMain.handle(ipcChannels.configBackupList, (): ConfigBackupListResult =>
 		configBackupManager.list(),
 	);
@@ -93,6 +108,14 @@ export function registerBackupIpc({
 	ipcMain.handle(ipcChannels.configBackupDelete, (_event, id: unknown) => {
 		const result = configBackupManager.delete(requireBackupId(id));
 		if (result.ok) void appLogger.info("backup", "Config backup deleted", { id });
+		return result;
+	});
+
+	ipcMain.handle(ipcChannels.configBackupDeleteMany, (_event, ids: unknown) => {
+		const result = configBackupManager.deleteMany(requireBackupIds(ids));
+		if (result.ok) {
+			void appLogger.info("backup", "Config backups deleted", { count: result.deleted });
+		}
 		return result;
 	});
 

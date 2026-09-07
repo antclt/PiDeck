@@ -1230,6 +1230,7 @@ export function createPreviewApi(): PiDesktopApi {
 			read: async () => null,
 			restore: async () => ({ ok: false, error: "preview" }),
 			delete: async () => ({ ok: true }),
+			deleteMany: async () => ({ ok: true, deleted: 0 }),
 			deleteAll: async () => ({ ok: true }),
 		},
 		pet: {

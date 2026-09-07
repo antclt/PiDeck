@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { t, type TranslationKey } from "../../../i18n";
+import { showNotice } from "../../../utils/notice";
 import { Button } from "../../ui-shadcn/button";
+import { Checkbox } from "../../ui-shadcn/checkbox";
 import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
 import {
 	BackupDetailDialog,
@@ -18,16 +20,15 @@ import { SettingRow } from "./SettingRows";
 
 /**
  * 配置备份 tab：列出所有配置备份（pi 配置文件 + pideck 设置），
- * 支持立即备份、查看（脱敏）、恢复（单个/全部文件）、删除。
+ * 支持立即备份、查看（脱敏）、恢复（单个/全部文件）、单删与批量删除。
  *
  * 自动备份由主进程触发（首次使用 / 版本升级 / 配置保存，防抖合并），
  * 本组件只负责展示与手动操作，不感知触发逻辑。
+ * 操作结果统一走全局 toast（showNotice），避免底部小字被忽略。
  */
 export function BackupTab() {
 	const [backups, setBackups] = useState<ConfigBackupMeta[] | null>(null);
 	const [busy, setBusy] = useState<string | null>(null);
-	const [feedback, setFeedback] = useState("");
-	const [error, setError] = useState("");
 	const [confirm, setConfirm] = useState<{
 		title: string;
 		message: string;
@@ -37,14 +38,21 @@ export function BackupTab() {
 	const [detailOpen, setDetailOpen] = useState(false);
 	/** 恢复选择弹窗目标：非 null 时弹窗打开（默认全选，可勾选单个文件）。 */
 	const [restoreTarget, setRestoreTarget] = useState<ConfigBackupDetail | null>(null);
+	/** 批量删除勾选集合（备份 id）。 */
+	const [selected, setSelected] = useState<Set<string>>(new Set());
 
 	const refresh = useCallback(async () => {
 		const result = await window.piDesktop.configBackups.list();
 		if (result.ok) {
 			setBackups(result.backups);
-			setError("");
+			// 列表刷新后清理已不存在的勾选（被删/被清理的备份 id）。
+			setSelected((prev) => {
+				const alive = new Set(result.backups.map((entry) => entry.id));
+				const next = new Set([...prev].filter((id) => alive.has(id)));
+				return next.size === prev.size ? prev : next;
+			});
 		} else {
-			setError(result.error);
+			showNotice(result.error, 3000, "error");
 		}
 	}, []);
 
@@ -52,24 +60,28 @@ export function BackupTab() {
 		void refresh();
 	}, [refresh]);
 
-	/** 统一动作执行：busyKey 标识列表行 loading（默认 "action" = 顶部按钮）。 */
+	/**
+	 * 统一动作执行：busyKey 标识 loading 源（默认 "action" = 顶部按钮，
+	 * "bulk" = 批量删除，备份 id = 对应列表行/恢复弹窗）。
+	 * 结果一律 toast：成功 info、失败 error（用户可感知，不依赖页面内小字）。
+	 */
 	const runAction = async (
 		action: () => Promise<{ ok: boolean; error?: string }>,
 		successKey: TranslationKey,
+		successParams?: Record<string, string | number | boolean | null | undefined>,
 		busyKey: string = "action",
 	) => {
 		setBusy(busyKey);
-		setFeedback("");
 		try {
 			const result = await action();
 			if (result.ok) {
-				setFeedback(t(successKey));
+				showNotice(t(successKey, successParams), 2500);
 				await refresh();
 			} else {
-				setError(result.error ?? t("common.error"));
+				showNotice(result.error ?? t("common.error"), 3000, "error");
 			}
 		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
+			showNotice(e instanceof Error ? e.message : String(e), 3000, "error");
 		} finally {
 			setBusy(null);
 		}
@@ -84,19 +96,50 @@ export function BackupTab() {
 
 	/** 打开恢复选择弹窗：先读取脱敏详情拿到文件清单，再让用户勾选。 */
 	const openRestoreDialog = async (backup: ConfigBackupMeta) => {
-		setBusy(backup.id);
+		setBusy(`restore-${backup.id}`);
 		try {
 			const result = await window.piDesktop.configBackups.read(backup.id);
 			if (result) {
 				setRestoreTarget(result);
 			} else {
-				setError(t("settings.backup.readFailed"));
+				showNotice(t("settings.backup.readFailed"), 3000, "error");
 			}
 		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
+			showNotice(e instanceof Error ? e.message : String(e), 3000, "error");
 		} finally {
 			setBusy(null);
 		}
+	};
+
+	const toggleSelect = (id: string) => {
+		setSelected((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) {
+				next.delete(id);
+			} else {
+				next.add(id);
+			}
+			return next;
+		});
+	};
+
+	/** 批量删除确认：danger 弹窗，确认后一次 IPC 删除全部勾选项。 */
+	const confirmBulkDelete = () => {
+		const ids = [...selected];
+		if (ids.length === 0) return;
+		setConfirm({
+			title: t("settings.backup.bulkDeleteTitle"),
+			message: t("settings.backup.bulkDeleteConfirm", { count: ids.length }),
+			onConfirm: () => {
+				setConfirm(null);
+				void runAction(
+					() => window.piDesktop.configBackups.deleteMany(ids),
+					"settings.backup.bulkDeleteSuccess",
+					{ count: ids.length },
+					"bulk",
+				);
+			},
+		});
 	};
 
 	const confirmDelete = (backup: ConfigBackupMeta) => {
@@ -110,24 +153,25 @@ export function BackupTab() {
 				void runAction(
 					() => window.piDesktop.configBackups.delete(backup.id),
 					"settings.backup.deleteSuccess",
-					backup.id,
+					undefined,
+					`del-${backup.id}`,
 				);
 			},
 		});
 	};
 
 	const openDetail = async (backup: ConfigBackupMeta) => {
-		setBusy(backup.id);
+		setBusy(`view-${backup.id}`);
 		try {
 			const result = await window.piDesktop.configBackups.read(backup.id);
 			if (result) {
 				setDetail(result);
 				setDetailOpen(true);
 			} else {
-				setError(t("settings.backup.readFailed"));
+				showNotice(t("settings.backup.readFailed"), 3000, "error");
 			}
 		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
+			showNotice(e instanceof Error ? e.message : String(e), 3000, "error");
 		} finally {
 			setBusy(null);
 		}
@@ -150,20 +194,24 @@ export function BackupTab() {
 			<RestoreDialog
 				detail={restoreTarget}
 				open={restoreTarget !== null}
-				restoring={busy !== null && busy !== "action"}
+				restoring={busy === restoreTarget?.id}
 				onOpenChange={(open) => {
-					if (!open) setRestoreTarget(null);
+					// 恢复执行中不允许关闭（防止用户误以为已取消、重复提交）。
+					if (!open && busy !== restoreTarget?.id) setRestoreTarget(null);
 				}}
 				onRestore={(files) => {
 					const target = restoreTarget;
-					setRestoreTarget(null);
 					if (!target) return;
-					// 恢复所选文件（单个或多个）；恢复前主进程自动建保护备份。
-					void runAction(
-						() => window.piDesktop.configBackups.restore(target.id, files),
-						"settings.backup.restoreSuccess",
-						target.id,
-					);
+					void (async () => {
+						// 弹窗保持打开直到恢复完成：按钮转圈（restoring）→ toast 结果 → 关闭。
+						await runAction(
+							() => window.piDesktop.configBackups.restore(target.id, files),
+							"settings.backup.restoreSuccess",
+							undefined,
+							target.id,
+						);
+						setRestoreTarget(null);
+					})();
 				}}
 			/>
 
@@ -188,6 +236,20 @@ export function BackupTab() {
 			</SettingsSection>
 
 			<SettingsSection title={t("settings.backup.listTitle")}>
+				<div className="flex items-center justify-end pb-1">
+					<Button
+						variant="ghost"
+						size="sm"
+						className="text-destructive hover:text-destructive"
+						disabled={selected.size === 0 || busy !== null}
+						loading={busy === "bulk"}
+						onClick={confirmBulkDelete}
+					>
+						{selected.size > 0
+							? t("settings.backup.bulkDeleteSelected", { count: selected.size })
+							: t("settings.backup.bulkDelete")}
+					</Button>
+				</div>
 				{isLoading ? (
 					<p className="px-0.5 py-1 text-caption text-muted-foreground">{t("common.loading")}</p>
 				) : backups.length === 0 ? (
@@ -197,7 +259,15 @@ export function BackupTab() {
 						<SettingRow
 							key={backup.id}
 							level={1}
-							title={<span>{formatTime(backup.createdAt)}</span>}
+							title={
+								<div className="flex items-center gap-2">
+									<Checkbox
+										checked={selected.has(backup.id)}
+										onCheckedChange={() => toggleSelect(backup.id)}
+									/>
+									<span>{formatTime(backup.createdAt)}</span>
+								</div>
+							}
 							description={formatBackupDesc(backup)}
 						>
 							<div className="flex items-center gap-2">
@@ -205,7 +275,7 @@ export function BackupTab() {
 									variant="ghost"
 									size="sm"
 									disabled={busy !== null}
-									loading={busy === backup.id}
+									loading={busy === `view-${backup.id}`}
 									onClick={() => void openDetail(backup)}
 								>
 									{t("settings.backup.view")}
@@ -214,6 +284,7 @@ export function BackupTab() {
 									variant="ghost"
 									size="sm"
 									disabled={busy !== null}
+									loading={busy === `restore-${backup.id}`}
 									onClick={() => void openRestoreDialog(backup)}
 								>
 									{t("settings.backup.restore")}
@@ -223,6 +294,7 @@ export function BackupTab() {
 									size="sm"
 									className="text-destructive hover:text-destructive"
 									disabled={busy !== null}
+									loading={busy === `del-${backup.id}`}
 									onClick={() => confirmDelete(backup)}
 								>
 									{t("common.delete")}
@@ -232,14 +304,6 @@ export function BackupTab() {
 					))
 				)}
 			</SettingsSection>
-
-			{(feedback || error) && (
-				<div className="px-0.5 pb-1 pt-2">
-					<small className={`setting-status ${error ? "error" : "success"}`}>
-						{error || feedback}
-					</small>
-				</div>
-			)}
 		</>
 	);
 }

@@ -243,6 +243,38 @@ test("delete / deleteAll 删除备份文件", () => {
 	}
 });
 
+test("deleteMany 批量删除：逐项删除，非法 id 跳过且不阻断其余", () => {
+	const ctx = setup();
+	try {
+		const a = ctx.manager.create("manual");
+		const b = ctx.manager.create("manual");
+		const c = ctx.manager.create("manual");
+
+		// 混合合法 + 非法 + 不存在的 id：合法的删掉，非法/不存在跳过，仍返回 ok。
+		const result = ctx.manager.deleteMany([a.id, b.id, "../evil.json", "backup-9999999999999.json"]);
+		assert.equal(result.ok, true);
+		assert.equal(result.deleted, 2);
+		const { backups } = ctx.manager.list();
+		assert.equal(backups.length, 1);
+		assert.equal(backups[0].id, c.id);
+	} finally {
+		cleanup(ctx);
+	}
+});
+
+test("deleteMany 全部非法：一个都没删 → 返回失败", () => {
+	const ctx = setup();
+	try {
+		ctx.manager.create("manual");
+		// 全传非法 id → 一个都没删 → 失败。
+		const result = ctx.manager.deleteMany(["../evil.json", "foo.txt"]);
+		assert.equal(result.ok, false);
+		assert.equal(ctx.manager.list().backups.length, 1);
+	} finally {
+		cleanup(ctx);
+	}
+});
+
 test("ensureInitialBackups：无备份 → first-run；版本变化 → upgrade；同版本 → 不新增", () => {
 	const ctx = setup();
 	try {
