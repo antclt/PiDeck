@@ -17,6 +17,11 @@ import type { ResourceScope } from "./ResourceScopeSelector";
 import { globalPromptOverrideKey } from "../../../shared/resourceIdentity";
 import { isProjectDiscoverySource } from "./resourceScopeModel";
 
+/**
+ * Runtime-discovered package/settings prompts are owned by pi/package settings,
+ * not PromptManager's editable prompt directory. Keep them visibly read-only:
+ * their empty toggle action is intentional, not a missing handler.
+ */
 function DiscoveredPromptRow(props: {
 	item: {
 		name: string;
@@ -31,11 +36,11 @@ function DiscoveredPromptRow(props: {
 	const { item } = props;
 	return (
 		<TableRow>
-			<TableCell className="w-48 max-w-48">
+			<TableCell className="w-[22rem] max-w-[22rem]">
 				<div className="flex min-w-0 flex-col gap-0.5">
-					<div className="flex min-w-0 items-center gap-2">
+					<div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
 						<FileText size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" />
-						<strong className="truncate">/{item.name}</strong>
+						<strong className="min-w-0 flex-1 break-words whitespace-normal">/{item.name}</strong>
 						<span className="skill-state" title={t("config.resourceManagedHint")}>
 							{t("config.source.global")}
 						</span>
@@ -47,13 +52,19 @@ function DiscoveredPromptRow(props: {
 				</div>
 			</TableCell>
 			<TableCell className="whitespace-normal break-words text-caption leading-relaxed text-text-secondary" title={item.description}>{item.description}</TableCell>
-			<TableCell className="text-right" />
+			<TableCell className="w-44 text-right">
+				<span className="text-caption text-muted-foreground" title={t("config.resourceManagedHint")}>
+					{t("config.resourceManaged")}
+				</span>
+			</TableCell>
 		</TableRow>
 	);
 }
 
 export function PromptsTab(props: {
 	scope: ResourceScope;
+	/** Project id used by online prompt imports; global scope passes undefined. */
+	projectId?: string;
 	scopeSelector?: ReactNode;
 	projectOverrides: ProjectResourceOverrides;
 	discoveryPrompts: Array<{
@@ -101,9 +112,6 @@ export function PromptsTab(props: {
 
 	// tab 切换："local"（本地模板） 或 "store"（在线商店）
 	const [promptTab, setPromptTab] = useState<"local" | "store">("local");
-	useEffect(() => {
-		if (props.scope === "project" && promptTab === "store") setPromptTab("local");
-	}, [promptTab, props.scope]);
 
 	// Prompt 重命名状态
 	const [renamingTemplate, setRenamingTemplate] = useState<string | null>(null);
@@ -179,7 +187,7 @@ export function PromptsTab(props: {
 		return (
 			<Fragment key={template.path}>
 				<TableRow key={`${template.path}-item`}>
-					<TableCell className="w-48 max-w-48">
+					<TableCell className="w-[22rem] max-w-[22rem]">
 						{isRenaming && !inherited ? (
 							<div className="flex items-center gap-1">
 								<Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void handleRename(); if (e.key === "Escape") setRenamingTemplate(null); }} autoFocus disabled={renameBusy} />
@@ -194,9 +202,9 @@ export function PromptsTab(props: {
 								disabled={inherited}
 								title={inherited ? undefined : t("common.edit")}
 							>
-								<span className="flex min-w-0 items-center gap-2">
+								<span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
 									<FileText size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" />
-									<strong className="truncate">/{template.name}</strong>
+									<strong className="min-w-0 flex-1 break-words whitespace-normal">/{template.name}</strong>
 									<span className={`skill-state ${effectiveEnabled ? "enabled" : "disabled"}`}>
 										{effectiveEnabled ? t("common.enabled") : t("common.disabled")}
 									</span>
@@ -205,7 +213,7 @@ export function PromptsTab(props: {
 						)}
 					</TableCell>
 					<TableCell className="whitespace-normal break-words text-caption leading-relaxed text-text-secondary" title={template.description}>{template.description}</TableCell>
-					<TableCell className="text-right"><div className="flex justify-end gap-1">
+					<TableCell className="w-44 text-right"><div className="flex min-w-max justify-end gap-1">
 						<Button
 							variant="ghost"
 							size="icon-sm"
@@ -252,7 +260,7 @@ export function PromptsTab(props: {
 						<TabsTrigger value="local" onClick={() => props.onRefresh()}>
 							{t("config.nav.prompts")}
 						</TabsTrigger>
-						<TabsTrigger value="store" disabled={props.scope === "project"}>
+						<TabsTrigger value="store">
 							<ShoppingBag size={14} strokeWidth={1.8} />
 							{t("config.promptStoreTab")}
 						</TabsTrigger>
@@ -264,6 +272,7 @@ export function PromptsTab(props: {
 
 			{promptTab === "store" ? (
 				<PromptStoreTab
+					projectId={props.scope === "project" ? props.projectId : undefined}
 					onImported={props.onRefresh}
 				/>
 			) : (
@@ -293,7 +302,7 @@ export function PromptsTab(props: {
 				{visibleTemplateCount === 0 ? (
 					<div className="py-12 text-center text-control text-text-tertiary">{t("config.noPrompts")}</div>
 				) : (
-					<Table className="table-fixed"><TableHeader><TableRow><TableHead className="w-48">{t("config.name")}</TableHead><TableHead>{t("config.description")}</TableHead><TableHead className="w-28 text-right">{t("config.actions")}</TableHead></TableRow></TableHeader><TableBody>
+					<Table className="table-fixed"><TableHeader><TableRow><TableHead className="w-[22rem]">{t("config.name")}</TableHead><TableHead>{t("config.description")}</TableHead><TableHead className="w-44 text-right">{t("config.actions")}</TableHead></TableRow></TableHeader><TableBody>
 					{/* 项目组：项目模板 + 项目侧托管资源 */}
 					{props.scope === "project" && projectTemplates.length > 0 ? (
 						<TableRow>

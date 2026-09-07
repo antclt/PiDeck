@@ -133,6 +133,8 @@ let previewSettings: AppSettings = {
 	askNotificationEnabled: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
 	agentCountReminderEnabled: true,
+	// 公告通知开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
+	announcementNotificationEnabled: true,
 	// showThinking 由 pi agent 的 hideThinkingBlock 控制，运行时从主进程加载
 	showThinking: true,
 	// 流式对话行为：与主进程 SettingsStore 默认一致（预览窗口保持相同观感）
@@ -442,6 +444,8 @@ export function createPreviewApi(): PiDesktopApi {
 			},
 			delete: async () => undefined,
 			cleanup: async () => 0,
+			getSize: async () => 0,
+			clearAll: async () => 0,
 		},
 		dialog: {
 			pickFiles: async () => [],
@@ -1195,6 +1199,8 @@ export function createPreviewApi(): PiDesktopApi {
 			// 设计预览：内置 TokenDance 目录返回空（不触真实网络）
 			getTokendanceModels: async () => ({ models: [], fromCache: false, at: 0 }),
 			tokendanceAuthStart: async () => ({ ok: false, error: "preview" }),
+			tokendanceAuthAwait: async () => ({ ok: false, error: "preview" }),
+			tokendanceAuthCancel: async () => ({ ok: true }),
 			tokendanceAuthExchange: async () => ({ ok: false, error: "preview" }),
 			installTokendance: async () => ({ ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "preview" }),
 			testProvider: async () => ({
@@ -1263,6 +1269,14 @@ export function createPreviewApi(): PiDesktopApi {
 			listCustom: async () => [],
 			importCustom: async () => ({ ok: false, error: "canceled" as const }),
 			removeCustom: async () => false,
+		},
+		announcements: {
+			// 预览模式：无公告数据，返回空快照保持 PiDesktopApi 形状完整（订阅空操作）
+			list: async () => ({ items: [], fetchedAt: null, source: "cache" as const, readIds: [] }),
+			refresh: async () => ({ items: [], fetchedAt: null, source: "cache" as const, readIds: [] }),
+			markRead: async () => true,
+			markAllRead: async () => true,
+			onChanged: () => () => {},
 		},
 		terminal: {
 			// 预览模式只按归属键过滤：agent 目标用 agentId，project 目标用项目 id

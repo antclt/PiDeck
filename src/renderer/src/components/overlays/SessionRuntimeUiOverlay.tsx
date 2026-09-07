@@ -11,10 +11,10 @@ import { t } from "../../i18n";
 import {
 	buildAskResponse,
 	formatAskTitle,
-	hasTextSelection,
 	parseSecurityConfirmTitle,
 	pickActiveAskRequest,
 	serializeBatchAnswers,
+	shouldSuppressAskClick,
 	splitAskOption,
 } from "../../utils/askUi";
 import { SecurityConfirmCard } from "./SecurityConfirmCard";
@@ -325,8 +325,9 @@ function BatchQuestion(props: {
 							variant="outline"
 							disabled={props.responding}
 							onClick={() => {
-								// 划选复制的 mouseup 落在按钮上会冒充 click；有选区时不记答案。
-								if (hasTextSelection()) return;
+								// 划选 mouseup 落在按钮上会冒充 click；按压感知守卫只吞本次按压新拖出的选区，
+								// 旧选区残留不再误吞（划选复制/双击选词后选项仍可正常点击）。
+								if (shouldSuppressAskClick()) return;
 								props.onAnswer(true, t("common.true"));
 							}}
 						>
@@ -339,7 +340,7 @@ function BatchQuestion(props: {
 							variant="outline"
 							disabled={props.responding}
 							onClick={() => {
-								if (hasTextSelection()) return;
+								if (shouldSuppressAskClick()) return;
 								props.onAnswer(false, t("common.false"));
 							}}
 						>
@@ -366,7 +367,7 @@ function BatchQuestion(props: {
 										variant="outline"
 										disabled={props.responding}
 										onClick={() => {
-										if (hasTextSelection()) return;
+										if (shouldSuppressAskClick()) return;
 										props.onAnswer(value, label);
 									}}
 									>
@@ -426,7 +427,7 @@ function BatchQuestion(props: {
 										variant="outline"
 										disabled={props.responding}
 										onClick={() => {
-											if (hasTextSelection()) return;
+											if (shouldSuppressAskClick()) return;
 											// 切换选中项：multi_select 答案始终是数组
 											const next = selected
 												? selectedValues.filter((v) => v !== value)
@@ -542,9 +543,10 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 	};
 	const cancel = () => void answer(request.method, buildAskResponse(request.method, undefined, { cancelled: true }));
 	const submitValue = (value: string | boolean | undefined, confirmed?: boolean) => {
-		// 划选复制的 mouseup 落在选项/提交按钮上会冒充 click，误答提问。
+		// 划选 mouseup 落在选项/提交按钮上会冒充 click，误答提问；按压感知守卫只吞
+		// 本次按压新拖出的选区，旧选区残留不再误吞（根因见 askUi.ts）。
 		// Enter 键也走这里：input/textarea 选区不进 window.getSelection，键盘提交不受影响。
-		if (hasTextSelection()) return;
+		if (shouldSuppressAskClick()) return;
 		void answer(request.method, buildAskResponse(request.method, value, { confirmed }));
 	};
 
@@ -609,7 +611,7 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 									variant="outline"
 									disabled={responding}
 									onClick={() => {
-										if (hasTextSelection()) return;
+										if (shouldSuppressAskClick()) return;
 										setSelectedOption(option);
 									}}
 									title={parsed.description || parsed.label}

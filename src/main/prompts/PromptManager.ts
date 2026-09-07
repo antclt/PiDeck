@@ -427,6 +427,14 @@ export class PromptManager {
 		await writeFile(await this.resolveGlobalWritePath(filePath), content, "utf8");
 	}
 
+	/** Save a project-local template after re-validating the canonical project boundary. */
+	async writeContentInProject(projectPath: string, filePath: string, content: string): Promise<void> {
+		const projectRoot = resolve(this.hostPath(projectPath));
+		const boundary = await this.createProjectBoundary(projectRoot);
+		const safePath = await this.resolveProjectWritePath(boundary, filePath);
+		await writeFile(safePath, content, "utf8");
+	}
+
 	private parseFrontmatter(raw: string): Record<string, string> {
 		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 		const result: Record<string, string> = {};

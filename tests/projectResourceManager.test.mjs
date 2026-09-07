@@ -58,6 +58,26 @@ test("write operations on a chat project keep throwing chatUnsupported", async (
 	await assert.rejects(manager.toggleExtension("builtin-chat", "C:/x/ext.ts", false), chatUnsupported);
 });
 
+test("store skill import writes a project-local .pi/skills resource", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pideck-prm-store-skill-"));
+	try {
+		const project = { id: "p1", name: "P1", path: root, lastOpenedAt: 1 };
+		const manager = managerFor(project);
+		const summary = await manager.importSkillFromStore("p1", {
+			name: "PDF / Tools",
+			description: "Useful PDF tools",
+			content: "# PDF / Tools\n\nUse the tool.",
+		});
+		const skillPath = join(root, ".pi", "skills", "pdf-tools", "SKILL.md");
+		assert.equal(summary.sourceId, "project-pi");
+		assert.equal(summary.path.endsWith(join(".pi", "skills", "pdf-tools", "SKILL.md")), true);
+		assert.match(readFileSync(skillPath, "utf8"), /name: pdf-tools/);
+		assert.match(readFileSync(skillPath, "utf8"), /source: prompts\.chat/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("list on a regular project scans .pi/skills SKILL.md files", async () => {
 	const root = mkdtempSync(join(tmpdir(), "pideck-prm-"));
 	try {
@@ -177,6 +197,37 @@ test("项目扩展开关用含后缀 source，并在 settings 损坏时拒绝写
 		const listed = await manager.list("p1");
 		assert.equal(listed.extensions[0].source, "shared.ts");
 		assert.equal(listed.extensions[0].enabled, false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("项目扩展列表对齐 pi 的 js、index.js 与 package manifest 发现规则", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pideck-prm-extension-discovery-"));
+	try {
+		const extensionDir = join(root, ".pi", "extensions");
+		mkdirSync(join(extensionDir, "index-package"), { recursive: true });
+		mkdirSync(join(extensionDir, "manifest-package", "dist"), { recursive: true });
+		mkdirSync(join(extensionDir, "ignored-directory"), { recursive: true });
+		writeFileSync(join(extensionDir, "plain.js"), "module.exports = {};\n");
+		writeFileSync(join(extensionDir, "index-package", "index.js"), "module.exports = {};\n");
+		writeFileSync(
+			join(extensionDir, "manifest-package", "package.json"),
+			JSON.stringify({ pi: { extensions: ["dist/first.js", "dist/second.ts"] } }),
+		);
+		writeFileSync(join(extensionDir, "manifest-package", "dist", "first.js"), "module.exports = {};\n");
+		writeFileSync(join(extensionDir, "manifest-package", "dist", "second.ts"), "export default {};\n");
+		writeFileSync(join(extensionDir, "ignored-directory", "README.md"), "not an extension\n");
+
+		const manager = managerFor({ id: "p1", name: "P1", path: root, lastOpenedAt: 1 });
+		const result = await manager.listProjectExtensions("p1");
+		const bySource = new Map(result.map((extension) => [extension.source, extension]));
+
+		assert.ok(bySource.get("plain.js")?.path?.endsWith(join(".pi", "extensions", "plain.js")));
+		assert.ok(bySource.get("index-package")?.path?.endsWith(join(".pi", "extensions", "index-package")));
+		assert.ok(bySource.get("manifest-package")?.path?.endsWith(join(".pi", "extensions", "manifest-package")));
+		assert.equal(result.filter((extension) => extension.source === "manifest-package").length, 1);
+		assert.equal(bySource.has("ignored-directory"), false);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

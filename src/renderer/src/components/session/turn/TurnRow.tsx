@@ -106,10 +106,14 @@ export const TurnRow = memo(
 	// 流式 run 也有空骨架消息（message_start/thinking 时创建），因此流式中 isComplete 恒为 true。
 	// 真实语义：agentRunning 期间（仅末轮）由 LiveDuration 实时计时，agent 空闲后才显示固定值。
 	const isRunLive = Boolean(props.agentRunning);
-	const duration = isComplete && run.startedAt > 0 ? run.endedAt - run.startedAt : 0;
-	// 耗时：结束后固定（endedAt - startedAt）；流式中（isRunLive）由 LiveDuration 实时增长
+	// 回复耗时扣除本轮 ask_question 的等待：等待段由主进程从工具 durationMs 中排除，
+	// 这里把等价量从轮时长里减去，含义为「agent 实际处理时长」。
+	const effectiveStart = run.startedAt + (run.askWaitMs ?? 0);
+	const duration = isComplete && effectiveStart > 0 ? Math.max(0, run.endedAt - effectiveStart) : 0;
+	// 耗时：结束后固定（endedAt - startedAt - ask 等待）；流式中（isRunLive）由 LiveDuration 实时增长；
+	// 轮被 ask_question 阻塞时冻结在提问弹起时刻（时间不再计入）。
 	const showDuration =
-		(isComplete && !isRunLive && duration > 0) || (isRunLive && run.startedAt > 0);
+		((isComplete && !isRunLive && duration > 0) || (isRunLive && effectiveStart > 0));
 
 	// 扁平展示序列：Live 与 History 共用 msg-thinking-* 身份（liveThinkingId 命中即挂步）。
 	const displayItems = useMemo(
@@ -482,14 +486,17 @@ export const TurnRow = memo(
 
 				{/* 尾部耗时：回复生成中由 LiveDuration 实时计时（100ms 连续跳动，用户视线在底部），
 				    回复结束后固定为总耗时。全轮只有一个耗时显示点（行头只留时间戳），
-				    避免开头结尾重复；无最终回答的轮（纯工具/思考）同样可见。 */}
+				    避免开头结尾重复；无最终回答的轮（纯工具/思考）同样可见。
+				    ask_question 等待回答期间不增长：冻结在提问弹起时刻，等待不计入处理耗时。 */}
 				{showDuration && (
 					<div className="flex items-center gap-1.5 text-muted-foreground">
 						<Clock size={12} className="shrink-0" aria-hidden="true" />
 						{/* 耗时数字与行头时间一致用界面字体（见 TurnAuthorHeader 注释）；tabular-nums 保持跳动不抖 */}
 						<span className="text-body leading-none tabular-nums">
-							{isRunLive ? (
-								<LiveDuration startedAt={run.startedAt} isStreaming />
+							{isRunLive && run.askPending ? (
+								formatDuration(Math.max(0, (run.askPendingAt ?? effectiveStart) - effectiveStart))
+							) : isRunLive ? (
+								<LiveDuration startedAt={effectiveStart} isStreaming />
 							) : (
 								formatDuration(duration)
 							)}

@@ -8,12 +8,13 @@ import { showNotice } from "../utils/notice";
 import { desktopApi } from "../desktopApi";
 import type { SkillHubItem, SkillHubDetail, SkillHubSearchResult, SkillHubInstallResult, PiSkillListResult } from "../../../shared/types";
 
-const STORAGE_KEY = "skillhub-installed-v1";
+const STORAGE_KEY = "skillhub-installed-v2";
 
 /** localStorage 持久化的安装记录（slug + name，用于验证删除后自动清理） */
 interface PersistedInstall {
 	slug: string;
 	name: string;
+	projectId?: string;
 }
 
 function loadPersisted(): PersistedInstall[] {
@@ -34,20 +35,22 @@ function savePersisted(entries: PersistedInstall[]) {
 }
 
 /** 添加入口到持久化列表（去重） */
-function persistInstall(prev: PersistedInstall[], slug: string, name: string): PersistedInstall[] {
+function persistInstall(prev: PersistedInstall[], slug: string, name: string, projectId?: string): PersistedInstall[] {
 	if (!Array.isArray(prev)) prev = [];
-	const existing = prev.find((e) => e.slug === slug);
+	const existing = prev.find((e) => e.slug === slug && e.projectId === projectId);
 	if (existing) {
 		existing.name = name;
 		return prev;
 	}
-	return [...prev, { slug, name }];
+	return [...prev, { slug, name, projectId }];
 }
 
 /** 获取本地已安装 skill 名称集合 */
-async function getInstalledNames(): Promise<Set<string>> {
+async function getInstalledNames(projectId?: string): Promise<Set<string>> {
 	try {
-		const list: PiSkillListResult = await desktopApi.skills.list();
+		const list: PiSkillListResult = projectId
+			? await desktopApi.projectResources.list(projectId)
+			: await desktopApi.skills.list();
 		return new Set(list.skills.map((s) => s.name.toLowerCase()));
 	} catch {
 		return new Set();
@@ -55,9 +58,9 @@ async function getInstalledNames(): Promise<Set<string>> {
 }
 
 /** 获取本地已安装 skill 名称 → slugs 映射（同名取唯一匹配的 skills.sh slug） */
-async function getInstalledSlugsSet(searchItems: SkillHubItem[]): Promise<Set<string>> {
+async function getInstalledSlugsSet(searchItems: SkillHubItem[], projectId?: string): Promise<Set<string>> {
 	try {
-		const installed = await getInstalledNames();
+		const installed = await getInstalledNames(projectId);
 
 		// 统计搜索结果中各 name 出现的次数
 		const nameCount = new Map<string, number>();
@@ -85,7 +88,7 @@ const api = (window as unknown as {
 		skillHub: {
 			search: (q: string, limit?: number) => Promise<SkillHubSearchResult>;
 			detail: (slug: string) => Promise<SkillHubDetail | null>;
-			install: (slug: string, installDir: string) => Promise<SkillHubInstallResult>;
+			install: (slug: string, projectId?: string) => Promise<SkillHubInstallResult>;
 		};
 	};
 }).piDesktop;
@@ -101,7 +104,7 @@ function fmtNum(n: number): string {
 	return String(n);
 }
 
-export function SkillHubStorePanel() {
+export function SkillHubStorePanel(props: { projectId?: string }) {
 	const [query, setQuery] = useState("");
 	const [searching, setSearching] = useState(false);
 	const [installedSlugs, setInstalledSlugs] = useState<Set<string>>(new Set());
@@ -133,12 +136,12 @@ export function SkillHubStorePanel() {
 		try {
 			const data = await api.skillHub.search(q, 50);
 			// 搜索后判断已安装状态（需要搜索结果列表来消除同名歧义）
-			const installed = await getInstalledSlugsSet(data.items);
+			const installed = await getInstalledSlugsSet(data.items, props.projectId);
 			// 合并持久化记录 → 精确 slug 匹配，无条件信任（安装时已记录完整 slug）
 			const merged = new Set(installed);
 			const persisted = Array.isArray(persistedRef.current) ? persistedRef.current : [];
 			for (const entry of persisted) {
-				merged.add(entry.slug);
+				if (entry.projectId === props.projectId) merged.add(entry.slug);
 			}
 			setResult(data);
 			setInstalledSlugs(merged);
@@ -148,7 +151,7 @@ export function SkillHubStorePanel() {
 		} finally {
 			setSearching(false);
 		}
-	}, []);
+	}, [props.projectId]);
 
 	const handleKeyDown = (e: React.KeyboardEvent) => {
 		if (e.key === "Enter") void handleSearch(query);
@@ -174,11 +177,11 @@ export function SkillHubStorePanel() {
 	const handleInstallFromList = async (slug: string, name: string) => {
 		setInstallingSlugs((prev) => new Set(prev).add(slug));
 		try {
-			const result = await api.skillHub.install(slug, "");
+			const result = await api.skillHub.install(slug, props.projectId);
 			if (result.success) {
 				showNotice(t("app.skillsInstalled", { name }), 3000);
 				// 安装成功 → 持久化安装记录（确保跨组件卸载后仍显示已安装，删除后自动清理）
-				persistedRef.current = persistInstall(persistedRef.current, slug, name);
+				persistedRef.current = persistInstall(persistedRef.current, slug, name, props.projectId);
 				savePersisted(persistedRef.current);
 				// 刷新搜索结果（更新已安装标注）
 				void handleSearch(query);
@@ -204,7 +207,7 @@ export function SkillHubStorePanel() {
 		setInstalling(true);
 		setInstallResult(null);
 		try {
-			const result = await api.skillHub.install(previewSlug, "");
+			const result = await api.skillHub.install(previewSlug, props.projectId);
 			if (result.success) {
 				setInstallResult(result);
 				showNotice(t("app.skillsInstalled", { name: detail?.skill?.displayName || previewSlug }), 3000);

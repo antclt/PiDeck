@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, relative, sep } from "node:path";
 import type { DisabledExtensionEntry } from "../../shared/types";
@@ -15,6 +15,7 @@ import {
 } from "../resourceWhitelist";
 import { readProjectResourceOverrides } from "../projects/projectResourceOverrides";
 import { resolveConfiguredPackageResources } from "../packageResourceResolver";
+import { discoverExtensionEntries } from "./extensionDiscovery";
 
 const CONFIG_DIR_NAME = ".pi";
 
@@ -165,62 +166,7 @@ function discoverAutoExtensionEntries(
 	overridesBase = dir,
 	overrides: string[] = [],
 ): string[] {
-	let entries;
-	try {
-		entries = readdirSync(dir, { withFileTypes: true });
-	} catch {
-		return [];
-	}
-	const candidates: string[] = [];
-	for (const entry of entries) {
-		const name = entry.name;
-		if (name.startsWith(".") || name === "node_modules" || name.endsWith(".d.ts")) continue;
-		const fullPath = join(dir, name);
-		let isDirectory = entry.isDirectory();
-		if (entry.isSymbolicLink()) {
-			try {
-				isDirectory = statSync(fullPath).isDirectory();
-			} catch {
-				continue;
-			}
-		}
-		if (!isDirectory) {
-			if (name.endsWith(".ts") || name.endsWith(".js")) candidates.push(fullPath);
-			continue;
-		}
-		const entryFiles = resolveExtensionEntryPoints(fullPath);
-		if (entryFiles) candidates.push(...entryFiles);
-	}
+	const candidates = discoverExtensionEntries(dir);
 	const enabled = applyPatterns(candidates, overrides, overridesBase);
 	return candidates.filter((path) => enabled.has(path));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Resolve an extension directory's manifest entries, then its conventional index fallback. */
-function resolveExtensionEntryPoints(dir: string): string[] | null {
-	const packageJsonPath = join(dir, "package.json");
-	if (existsSync(packageJsonPath)) {
-		try {
-			const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-			const pi = isRecord(parsed) && isRecord(parsed.pi) ? parsed.pi : null;
-			const declared = pi?.extensions;
-			if (Array.isArray(declared)) {
-				const paths = declared
-					.filter((entry): entry is string => typeof entry === "string")
-					.map((entry) => join(dir, entry))
-					.filter(existsSync);
-				return paths.length > 0 ? paths : null;
-			}
-		} catch {
-			// A damaged package manifest falls back to index.ts/index.js.
-		}
-	}
-	for (const index of ["index.ts", "index.js"]) {
-		const path = join(dir, index);
-		if (existsSync(path)) return [path];
-	}
-	return null;
 }

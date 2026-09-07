@@ -67,6 +67,34 @@ export function isWelcomeModelLost(
 }
 
 /**
+ * 是否该把引导页点选偏好从 localStorage 真的删掉——这是唯一会**销毁**用户点选的路径，
+ * 判定必须比展示判定（isWelcomeModelLost）更保守：忽略是临时的、删除是不可逆的。
+ *
+ * 两道闸门各自的业务理由：
+ * - catalogLoaded：偏好是持久数据，而目录可能还在加载中或 IPC 已失败（此时列表为空或残缺）。
+ *   拿瞬时状态去毁持久偏好，就是用户反馈的「切了模型但发送后又变回去」的静默丢盘路径。
+ * - catalogIsGlobal：偏好存在**全局** localStorage，但 ComposerPickerHost 在有 record 时按
+ *   record.projectId 加载**项目范围**目录；项目列表合法地不含该模型时，不能证明全局偏好已死，
+ *   否则用户在别的项目里的选择会被无声销毁。
+ *
+ * 点选已升为创建解析的最高优先级（引导页点选 > 显式默认 > enabledModels > 上次使用），
+ * 误删的代价比历史上更大，因此这里宁可不删（残留项由展示层忽略 + 主进程创建时兜底丢弃）。
+ */
+export function shouldClearWelcomePreference(input: {
+  welcomeModel: { provider: string; modelId: string } | undefined;
+  models: AvailableModel[];
+  /** 目录是否来自一次成功的完整加载（ModelListReport.ok === true）。 */
+  catalogLoaded: boolean;
+  /** 目录是否按全局范围加载（未传 projectId）。 */
+  catalogIsGlobal: boolean;
+}): boolean {
+  const { welcomeModel, models, catalogLoaded, catalogIsGlobal } = input;
+  if (!welcomeModel) return false;
+  if (!catalogLoaded || !catalogIsGlobal) return false;
+  return isWelcomeModelLost(welcomeModel, models);
+}
+
+/**
  * The built-in Chat view needs an identity before the composer renders, but
  * opening the app must not add an unrequested row to history. This renderer-
  * only ID is promoted to a Catalog record only when the user sends.

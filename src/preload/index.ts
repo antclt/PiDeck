@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcChannels } from "../shared/ipc";
+import type { TokendanceAuthMode } from "../shared/tokendance";
+import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
@@ -324,7 +326,7 @@ const api = {
 		getClipboardPaths: () => clipboardSync<string[]>(ipcChannels.clipboardReadFilePaths, []),
 	},
 	pasteFiles: {
-		/** 粘贴大文本 → 落盘受管文件，返回路径元数据供 chip 展示与发送引用。 */
+		/** 粘贴大文本 → 落盘 userData/paste-files，返回路径元数据供 chip 展示与发送内联。 */
 		write: (input: PasteFileWriteInput) =>
 			ipcRenderer.invoke(ipcChannels.pasteFilesWrite, input) as Promise<PasteFileWriteResult>,
 		/** 移除 chip 时同步删除落盘文件（仅限受管目录内路径）。 */
@@ -332,6 +334,10 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.pasteFilesDelete, path) as Promise<void>,
 		/** 启动清理过期粘贴文件（渲染层一般不调用）。 */
 		cleanup: () => ipcRenderer.invoke(ipcChannels.pasteFilesCleanup) as Promise<number>,
+		/** 设置页占用统计：userData 新文件 + 各项目遗留 .pideck-paste。 */
+		getSize: () => ipcRenderer.invoke(ipcChannels.pasteFilesGetSize) as Promise<number>,
+		/** 设置页一键清空两个受管根下的 paste-* 文件。 */
+		clearAll: () => ipcRenderer.invoke(ipcChannels.pasteFilesClearAll) as Promise<number>,
 	},
 	dialog: {
 		/**
@@ -1371,38 +1377,38 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.promptStoreSearch, query, options) as Promise<PromptStoreSearchResult>,
 		get: (id: string) =>
 			ipcRenderer.invoke(ipcChannels.promptStoreGet, id) as Promise<PromptStoreItem>,
-		import: (data: { title: string; description: string; content: string }) =>
+		import: (data: { title: string; description: string; content: string; projectId?: string }) =>
 			ipcRenderer.invoke(ipcChannels.promptStoreImport, data) as Promise<PiPromptTemplateSummary>,
 	},
 	skillStore: {
 		search: (query: string) =>
 			ipcRenderer.invoke(ipcChannels.skillStoreSearch, query) as Promise<PromptStoreSearchResult>,
-		import: (item: PromptStoreItem, locationId?: string) =>
-			ipcRenderer.invoke(ipcChannels.skillStoreImport, item, locationId) as Promise<PiSkillSummary>,
+		import: (item: PromptStoreItem, locationId?: string, projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.skillStoreImport, item, locationId, projectId) as Promise<PiSkillSummary>,
 	},
 	skillHub: {
 		search: (query: string, page?: number, pageSize?: number, sortBy?: string, order?: string) =>
 			ipcRenderer.invoke(ipcChannels.skillHubSearch, { query, page, pageSize, sortBy, order }) as Promise<import("../shared/types").SkillHubSearchResult>,
 		detail: (slug: string) =>
 			ipcRenderer.invoke(ipcChannels.skillHubDetail, slug) as Promise<import("../shared/types").SkillHubDetail | null>,
-		install: (slug: string, installDir: string) =>
-			ipcRenderer.invoke(ipcChannels.skillHubInstall, slug, installDir) as Promise<import("../shared/types").SkillHubInstallResult>,
+		install: (slug: string, projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.skillHubInstall, slug, projectId) as Promise<import("../shared/types").SkillHubInstallResult>,
 	},
 	yaoPrompts: {
 		list: (opts?: { category?: string; search?: string; page?: number; pageSize?: number }) =>
 			ipcRenderer.invoke(ipcChannels.yaoPromptsList, opts) as Promise<YaoPromptListResult>,
 		detail: (slug: string, category: string) =>
 			ipcRenderer.invoke(ipcChannels.yaoPromptsDetail, slug, category) as Promise<YaoPromptDetailResult>,
-		import: (slug: string, category: string) =>
-			ipcRenderer.invoke(ipcChannels.yaoPromptsImport, slug, category) as Promise<PiPromptTemplateSummary>,
+		import: (slug: string, category: string, projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.yaoPromptsImport, slug, category, projectId) as Promise<PiPromptTemplateSummary>,
 	},
 	extensions: {
 		list: (forceRefresh?: boolean) =>
 			ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh) as Promise<PiExtensionListResult>,
 		uninstall: (source: string, scope?: "user" | "project" | "unknown") =>
 			ipcRenderer.invoke(ipcChannels.extensionsUninstall, source, scope) as Promise<void>,
-		install: (source: string) =>
-			ipcRenderer.invoke(ipcChannels.extensionsInstall, source) as Promise<string>,
+		install: (source: string, projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.extensionsInstall, source, projectId) as Promise<string>,
 		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown") =>
 			ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope) as Promise<void>,
 		setWhitelistDisabled: (enabled: boolean) =>
@@ -1559,10 +1565,24 @@ const api = {
 				fromCache: boolean;
 				at: number;
 			}>,
-		/** 启动 TokenDance OAuth 授权（PKCE S256 headless）：返回授权 URL + flowId（verifier 仅主进程持有）。 */
-		tokendanceAuthStart: () =>
-			ipcRenderer.invoke(ipcChannels.configTokendanceAuthStart) as Promise<
-				{ ok: true; flowId: string; authUrl: string } | { ok: false; error: string }
+		/**
+		 * 启动 TokenDance OAuth 授权（PKCE S256）：返回授权 URL + flowId（verifier 仅主进程持有）。
+		 * mode 默认 callback（本地回环自动收 code）；主进程绑定失败会降级成 headless 并回 fallbackReason。
+		 */
+		tokendanceAuthStart: (mode?: TokendanceAuthMode) =>
+			ipcRenderer.invoke(ipcChannels.configTokendanceAuthStart, { mode }) as Promise<
+				| { ok: true; flowId: string; authUrl: string; mode: TokendanceAuthMode; fallbackReason?: string }
+				| { ok: false; error: string }
+			>,
+		/** 等回环回调自动送达的 code 并交换成 Key（callback 模式免粘贴主路径；超时/失败返回 error）。 */
+		tokendanceAuthAwait: (flowId: string) =>
+			ipcRenderer.invoke(ipcChannels.configTokendanceAuthAwait, { flowId }) as Promise<
+				{ ok: true; key: string } | { ok: false; error: string }
+			>,
+		/** 放弃授权：释放本地回环端口并丢弃 verifier（弹窗关闭/取消时必调）。 */
+		tokendanceAuthCancel: (flowId: string) =>
+			ipcRenderer.invoke(ipcChannels.configTokendanceAuthCancel, { flowId }) as Promise<
+				{ ok: boolean; error?: string }
 			>,
 		/** 用一次性授权 code 交换 TokenDance API Key；成功后 key 只在本次响应出现，须立即写入配置。 */
 		tokendanceAuthExchange: (flowId: string, code: string) =>
@@ -1789,6 +1809,23 @@ const api = {
 		/** 删除自定义音频文件 */
 		removeCustom: (name: string) =>
 			ipcRenderer.invoke(ipcChannels.soundsRemoveCustom, name) as Promise<boolean>,
+	},
+	announcements: {
+		/** 拉取当前公告快照（主进程返回缓存态，不触发网络请求） */
+		list: () =>
+			ipcRenderer.invoke(ipcChannels.announcementList) as Promise<AnnouncementState>,
+		/** 手动刷新公告（设置页/入口按钮；主进程防重入，并发调用安全） */
+		refresh: () =>
+			ipcRenderer.invoke(ipcChannels.announcementRefresh) as Promise<AnnouncementState>,
+		/** 标记单条公告已读（幂等） */
+		markRead: (id: string) =>
+			ipcRenderer.invoke(ipcChannels.announcementMarkRead, id) as Promise<boolean>,
+		/** 全部已读 */
+		markAllRead: () =>
+			ipcRenderer.invoke(ipcChannels.announcementMarkAllRead) as Promise<boolean>,
+		/** 订阅公告快照推送（定时拉取/已读变更后触发）；返回退订函数，组件卸载必须调用 */
+		onChanged: (callback: (state: AnnouncementState) => void) =>
+			subscribe(ipcChannels.announcementChanged, callback),
 	},
 	terminal: {
 		list: (target: TerminalTarget) =>

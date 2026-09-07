@@ -30,6 +30,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { Tabs, TabsList, TabsTrigger } from "../motion/tabs";
 import { Dock, DockItem } from "../motion/dock";
 import { UpdateDotHint } from "./UpdateDotHint";
+import { AnnouncementCenter } from "./AnnouncementCenter";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
@@ -439,6 +440,10 @@ export function SidebarContent(props: SidebarContentProps) {
                 {/* 更新角标：PiDeck / Pi CLI / 模型目录任一有可提示更新时显示圆点 */}
                 {hasPendingUpdate && <span className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />}
               </div>
+            </DockItem>
+            {/* 公告中心入口：未读红点在组件内部按 atom 派生（单一 owner） */}
+            <DockItem>
+              <AnnouncementCenter />
             </DockItem>
             <DockItem>
               <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>

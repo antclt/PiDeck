@@ -61,12 +61,13 @@ import {
 	SelectItem,
 	SelectTrigger,
 } from "../ui-shadcn/select";
-import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, type ModelPending } from "../../utils/modelPendingDisplay";
+import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
 import { resolveComposerThinkingLevel } from "../../utils/thinkingDisplay";
 import {
   WELCOME_MODEL_KEY,
   isWelcomeModelLost,
   readWelcomeModelPreference,
+  shouldClearWelcomePreference,
 } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
@@ -339,9 +340,6 @@ export function ComposerBottomBar(props: {
 	 *  不写入记录（激活后 runtime state 覆盖）。 */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
-	/** 主进程解析的默认模型是否来自用户显式配置（settings.defaultProvider+defaultModel）：
-	 *  为 true 时欢迎页偏好不再参与引导页回退（用户规则：默认模型 > 偏好 > 上次使用 > 空）。 */
-	defaultModelConfigured?: boolean;
 	/** 当前会话后端（pi 缺省）。 */
 	backend?: AgentBackend;
 	/** 切换后端：UI 层面先停 runtime 再写 catalog。 */
@@ -387,31 +385,39 @@ export function ComposerBottomBar(props: {
 	// 目录命中主进程全局缓存（模型选择器同源），通常不会额外 fork pi。
 	const isDsh = props.backend === "dsh";
 	const needsWelcomeCatalog = !props.record && !isDsh;
-	const { models: welcomeCatalogModels } = useBackendModelCatalog({
+	const { models: welcomeCatalogModels, report: welcomeCatalogReport } = useBackendModelCatalog({
 		sessionId: props.sessionId,
 		backend: isDsh ? "dsh" : "pi",
 		enabled: needsWelcomeCatalog,
 	});
 	const welcomeModel = needsWelcomeCatalog ? readWelcomeModelPreference()?.model : undefined;
 	const welcomeModelLost = isWelcomeModelLost(welcomeModel, welcomeCatalogModels);
+	// 删除不可逆，走保守判定：只有「一次成功的完整加载」才具备判死资格。
+	// 本组件不传 projectId → 目录恒为全局范围，与全局偏好的作用域一致。
+	const clearWelcomePreference = shouldClearWelcomePreference({
+		welcomeModel,
+		models: welcomeCatalogModels,
+		catalogLoaded: welcomeCatalogReport?.ok === true,
+		catalogIsGlobal: true,
+	});
 	useEffect(() => {
 		// 失效偏好只清一次：下次引导页不再默认已删除的模型（创建时主进程也会兜底丢弃）。
-		if (welcomeModelLost) {
+		if (clearWelcomePreference) {
 			try {
 				localStorage.removeItem(WELCOME_MODEL_KEY);
 			} catch {
 				// localStorage 不可用时静默；展示层已忽略该偏好。
 			}
 		}
-	}, [welcomeModelLost]);
+	}, [clearWelcomePreference]);
 	const effectiveWelcomeModel = welcomeModelLost ? undefined : welcomeModel;
-	// 引导页（无 record、pi）默认模型决策，与主进程创建规则（launchDefaults）同源，
-	// 避免「底栏显示的默认」与「首次发送套用的默认」分叉：
-	// - 用户显式配置了默认模型（defaultModelConfigured）→ 一律用主进程解析的默认，
-	//   欢迎页偏好被覆盖（用户规则：默认模型 > 偏好 > 上次使用 > 空）；
-	// - 未配置显式默认 → 有效偏好优先，其次解析结果（此时 = 上次使用 / 空）。
-	const guideDefaultModel =
-		props.defaultModelConfigured || isDsh ? props.defaultModel : (effectiveWelcomeModel ?? props.defaultModel);
+	// 引导页（无 record、pi）默认模型展示：与主进程创建解析同序（点选 > 显式默认 > 切换列表 > 上次使用）。
+	// 规则收拢到 resolveGuideDisplayModel，与 ComposerPickerHost 共用一份，避免两侧各自演化。
+	const guideDefaultModel = resolveGuideDisplayModel({
+		isDsh,
+		welcomeModel: effectiveWelcomeModel,
+		defaultModel: props.defaultModel,
+	});
 	const runtimeLive = Boolean(props.runtimeLive);
 	// 用量查询链路随会话后端：DSH 会话走 dsh（$DSH_HOME 配置 + 凭据库），其余走 pi。
 	// 圆球面板必须与 DSH 卡片/选择器同一 backend，否则查的是另一条 usage-probes.json。

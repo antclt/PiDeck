@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import {
 	createProjectFileReadBoundary,
 	resolveProjectFileReadPath,
@@ -25,6 +25,7 @@ import {
 	projectResourceOverridesFromRecord,
 	setProjectInheritedResourceEnabled,
 } from "./projectResourceOverrides";
+import { discoverExtensionEntries } from "../extensions/extensionDiscovery";
 
 const SKILL_FILE = "SKILL.md";
 
@@ -76,6 +77,14 @@ export class ProjectResourceManager {
 		return this.projectRoot(this.requireProject(projectId));
 	}
 
+	/**
+	 * Resolve the registered project root through the canonical boundary used by all project writes.
+	 * Store installs use this instead of trusting a renderer-supplied path or a symlink alias.
+	 */
+	async resolveProjectRoot(projectId: string): Promise<string> {
+		return (await this.projectBoundary(this.requireProject(projectId))).canonicalRoot;
+	}
+
 	async list(projectId: string): Promise<ProjectResourceListResult> {
 		const project = this.getProject(projectId);
 		if (!project) throw new Error(this.translate("project.notFound"));
@@ -104,6 +113,33 @@ export class ProjectResourceManager {
 	}
 
 	/** Ensure a user-selected project resource directory exists inside the registered root. */
+	/** Import a store skill into the pi 0.85 project-local .pi/skills directory. */
+	async importSkillFromStore(
+		projectId: string,
+		input: { name: string; description: string; content: string },
+	): Promise<PiSkillSummary> {
+		const project = this.requireProject(projectId);
+		const normalizedName = this.normalizeSkillName(input.name);
+		if (!normalizedName) throw new Error(this.translate("mainSkill.nameRequired"));
+		const description = input.description.trim();
+		if (!description) throw new Error(this.translate("mainSkill.descriptionRequired"));
+
+		const boundary = await this.projectBoundary(project);
+		const lexicalPath = join(this.projectRoot(project), ".pi", "skills", normalizedName, SKILL_FILE);
+		const filePath = await this.resolveProjectWritePath(project, lexicalPath);
+		if (existsSync(filePath)) {
+			throw new Error(this.translate("mainProjectResource.skillAlreadyExists", { name: normalizedName }));
+		}
+		await mkdir(dirname(filePath), { recursive: true });
+		const safeDescription = description.replace(/[\r\n]+/g, " ");
+		const safeContent = `---\nname: ${normalizedName}\ndescription: ${safeDescription}\nsource: prompts.chat\n---\n\n${input.content}`;
+		await writeFile(filePath, safeContent, "utf8");
+		const safePath = await resolveProjectFileReadPath(boundary, filePath);
+		const location = this.skillLocations(project).find((candidate) => candidate.id === "project-pi");
+		if (!location) throw new Error(this.translate("mainProjectResource.pathOutsideProject"));
+		return this.readSkill(safePath, location, "directory");
+	}
+
 	async ensureResourceDirectory(
 		projectId: string,
 		kind: ProjectResourceDirectoryKind,
@@ -336,20 +372,16 @@ export class ProjectResourceManager {
 		settings?: Record<string, unknown>,
 	): Promise<PiExtensionSummary[]> {
 		const effectiveSettings = settings ?? await this.readProjectSettings(project);
+		const boundary = await this.projectBoundary(project);
 		const lexicalExtensionsDir = join(this.projectRoot(project), ".pi", "extensions");
 		let extensionsDir = lexicalExtensionsDir;
 		if (existsSync(lexicalExtensionsDir)) {
 			try {
-				extensionsDir = await resolveProjectFileReadPath(
-					await this.projectBoundary(project),
-					lexicalExtensionsDir,
-				);
+				extensionsDir = await resolveProjectFileReadPath(boundary, lexicalExtensionsDir);
 			} catch {
 				return [];
 			}
 		}
-		const entries = await readdir(extensionsDir, { withFileTypes: true }).catch(() => []);
-		const result: PiExtensionSummary[] = [];
 		const disabledExts = new Set(
 			Array.isArray(effectiveSettings.disabledExtensions)
 				? effectiveSettings.disabledExtensions.filter(
@@ -357,22 +389,27 @@ export class ProjectResourceManager {
 				)
 				: [],
 		);
-		for (const entry of entries) {
-			if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name.endsWith(".d.ts")) continue;
-			const fullPath = join(extensionsDir, entry.name);
-			if (entry.isFile() && entry.name.endsWith(".ts")) {
-				const ext = this.toExtensionSummary(entry.name, fullPath);
-				ext.enabled = !disabledExts.has(ext.source);
-				result.push(ext);
-				continue;
-			}
-			if (entry.isDirectory() && existsSync(join(fullPath, "index.ts"))) {
-				const ext = this.toExtensionSummary(entry.name, fullPath);
-				ext.enabled = !disabledExts.has(ext.source);
-				result.push(ext);
+		const roots = new Map<string, string>();
+		for (const entryPath of discoverExtensionEntries(extensionsDir)) {
+			const relativePath = relative(extensionsDir, entryPath);
+			const source = relativePath.split(sep)[0];
+			if (!source || source === "." || source === "..") continue;
+			try {
+				// Validate both the discovered entry and its top-level root so a project-local
+				// symlink/junction cannot make the management list expose an external path.
+				await resolveProjectFileReadPath(boundary, entryPath);
+				const safeRoot = await resolveProjectFileReadPath(boundary, join(extensionsDir, source));
+				roots.set(source, safeRoot);
+			} catch {
+				// Runtime discovery may see the entry, but management must not cross the project boundary.
 			}
 		}
-		return result.sort((a, b) => a.source.localeCompare(b.source));
+		return [...roots.entries()]
+			.map(([source, path]) => ({
+				...this.toExtensionSummary(source, path),
+				enabled: !disabledExts.has(source),
+			}))
+			.sort((a, b) => a.source.localeCompare(b.source));
 	}
 
 	private toExtensionSummary(name: string, path: string): PiExtensionSummary {

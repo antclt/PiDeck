@@ -9,9 +9,11 @@ import { Input } from "../components/ui-shadcn/input";
 import { Pagination } from "../components/ui-shadcn/pagination";
 const PAGE_SIZE = 20;
 
-async function getInstalledPromptNames(): Promise<Set<string>> {
+async function getInstalledPromptNames(projectId?: string): Promise<Set<string>> {
 	try {
-		const list: PiPromptTemplateListResult = await desktopApi.prompts.list();
+		const list: PiPromptTemplateListResult = projectId
+			? await desktopApi.prompts.listByProject(projectId)
+			: await desktopApi.prompts.list();
 		return new Set(list.templates.filter((template) => template.userCreated).map((template) => template.name.toLowerCase()));
 	} catch {
 		return new Set();
@@ -20,6 +22,7 @@ async function getInstalledPromptNames(): Promise<Set<string>> {
 
 export function YaoPromptTab(props: {
 	onImported?: () => void;
+	projectId?: string;
 }) {
 	const [initialLoading, setInitialLoading] = useState(true);
 	const [loading, setLoading] = useState(false);
@@ -39,7 +42,7 @@ export function YaoPromptTab(props: {
 	// 首次加载分类（全量，数据量小）
 	useEffect(() => {
 		void loadCategories();
-	}, []);
+	}, [props.projectId]);
 
 	useEffect(() => {
 		if (!initialLoading) void loadPrompts();
@@ -51,7 +54,7 @@ export function YaoPromptTab(props: {
 		try {
 			const [result, installed] = await Promise.all([
 				desktopApi.yaoPrompts.list(),
-				getInstalledPromptNames(),
+				getInstalledPromptNames(props.projectId),
 			]);
 			setData(result);
 			setInstalledNames(installed);
@@ -117,10 +120,10 @@ export function YaoPromptTab(props: {
 		setImportingSlug(item.slug);
 		setError(null);
 		try {
-			await desktopApi.yaoPrompts.import(item.slug, item.category);
+			await desktopApi.yaoPrompts.import(item.slug, item.category, props.projectId);
 			showNotice(t("config.promptStoreImported"), 2500);
 			props.onImported?.();
-			setInstalledNames(await getInstalledPromptNames());
+			setInstalledNames(await getInstalledPromptNames(props.projectId));
 		} catch (err) {
 			console.error("[YaoPrompts] Import failed", err);
 			setError(t("config.yaoImportError"));

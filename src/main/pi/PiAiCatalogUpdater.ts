@@ -41,6 +41,8 @@ import type {
 	CatalogUpdateResult,
 	CatalogUpdateStatus,
 } from "../../shared/types/catalog";
+import type { UpdateSourceId } from "../../shared/types/settings";
+import { normalizeCustomMirrorHost, UPDATE_SOURCE_MIRRORS } from "../../shared/updateSources";
 
 /** 默认回退分支：main（发行分支，模型目录与正式发行版对齐） */
 export const CATALOG_UPDATE_DEFAULT_BRANCH = "main";
@@ -69,18 +71,31 @@ function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** 下载源（按顺序尝试）：jsDelivr CDN → GitHub raw。raw 位于 CDN 失效/被墙时兜底。 */
-function sourceBaseUrls(branch: string): { catalog: string; manifest: string }[] {
-	return [
-		{
-			catalog: `https://cdn.jsdelivr.net/gh/ayuayue/PiDeck@${branch}/resources/${PI_AI_CATALOG_FILE_NAME}`,
-			manifest: `https://cdn.jsdelivr.net/gh/ayuayue/PiDeck@${branch}/resources/${PI_AI_CATALOG_MANIFEST_FILE_NAME}`,
-		},
-		{
-			catalog: `https://raw.githubusercontent.com/ayuayue/PiDeck/${branch}/resources/${PI_AI_CATALOG_FILE_NAME}`,
-			manifest: `https://raw.githubusercontent.com/ayuayue/PiDeck/${branch}/resources/${PI_AI_CATALOG_MANIFEST_FILE_NAME}`,
-		},
-	];
+/**
+ * 下载源（按顺序尝试）：镜像代理 GitHub raw → GitHub raw。
+ * 镜像前缀形如 `https://ghfast.top/https://raw.githubusercontent.com/...`，
+ * 与应用更新的 GitHub 镜像体系同源（shared/updateSources.ts），国内可达性远好于
+ * 直连 GitHub raw。未配置镜像时只有 GitHub raw 一个源。
+ *
+ * 注意：不再把 jsDelivr gh CDN 列为下载回退源。实测 jsDelivr 对 manifest/catalog
+ * 有陈旧缓存（如 0.85.0），与 GitHub raw 当前的 0.85.1 内容不同（dataSha256
+ * 不一致）。一旦 GitHub raw 短暂失败、回落到 jsDelivr，就会拿到过期数据且无法
+ * 与"当前版本"区分 —— 表现为 checkRemote 永远报"已是最新"而错过真更新。
+ * 下载失败时由调用方走 npm 生成回退（checkRemote）或直接报错（update），
+ * 不拿陈旧 CDN 数据当真值。
+ */
+function sourceBaseUrls(
+	branch: string,
+	mirrorHost?: string | null,
+): { catalog: string; manifest: string }[] {
+	const rawCatalog = `https://raw.githubusercontent.com/ayuayue/PiDeck/${branch}/resources/${PI_AI_CATALOG_FILE_NAME}`;
+	const rawManifest = `https://raw.githubusercontent.com/ayuayue/PiDeck/${branch}/resources/${PI_AI_CATALOG_MANIFEST_FILE_NAME}`;
+	const sources: { catalog: string; manifest: string }[] = [];
+	if (mirrorHost) {
+		sources.push({ catalog: `${mirrorHost}/${rawCatalog}`, manifest: `${mirrorHost}/${rawManifest}` });
+	}
+	sources.push({ catalog: rawCatalog, manifest: rawManifest });
+	return sources;
 }
 
 /**
@@ -136,6 +151,14 @@ export type PiAiCatalogUpdaterOptions = {
 	maxManifestBytes?: number;
 	/** 默认分支，默认 main */
 	branch?: string;
+	/**
+	 * 更新源：复用应用更新的 GitHub 镜像配置（shared/updateSources.ts）。
+	 * 目录下载/检测默认直连 GitHub 分支，国内用户切镜像后自动走代理前缀。
+	 * 用函数而非快照：设置可在运行时更改，每次检查/下载读最新值。
+	 */
+	source?: () => UpdateSourceId;
+	/** source="custom" 时的镜像前缀；与 source 同生命周期（运行时读最新）。 */
+	customHost?: () => string;
 };
 
 export class PiAiCatalogUpdater {
@@ -145,6 +168,8 @@ export class PiAiCatalogUpdater {
 	private readonly maxCatalogBytes: number;
 	private readonly maxManifestBytes: number;
 	private readonly branch: string;
+	private readonly source: () => UpdateSourceId;
+	private readonly customHost: () => string;
 
 	constructor(options: PiAiCatalogUpdaterOptions) {
 		this.userDataDir = options.userDataDir;
@@ -153,6 +178,20 @@ export class PiAiCatalogUpdater {
 		this.maxCatalogBytes = options.maxCatalogBytes ?? 16 * 1024 * 1024;
 		this.maxManifestBytes = options.maxManifestBytes ?? 64 * 1024;
 		this.branch = options.branch ?? CATALOG_UPDATE_DEFAULT_BRANCH;
+		this.source = options.source ?? (() => "github");
+		this.customHost = options.customHost ?? (() => "");
+	}
+
+	/**
+	 * 当前源对应的镜像 host：github 官方源返回 null（直连 GitHub raw），
+	 * 镜像/自定义返回代理前缀（如 https://ghfast.top），供 sourceBaseUrls 生成
+	 * `https://<镜像>/https://raw.githubusercontent.com/...` 形式的代理 URL。
+	 */
+	private mirrorHost(): string | null {
+		const source = this.source();
+		if (source === "github") return null;
+		if (source === "custom") return normalizeCustomMirrorHost(this.customHost());
+		return UPDATE_SOURCE_MIRRORS.find((m) => m.id === source)?.host ?? null;
 	}
 
 	private catalogPath(): string {
@@ -191,21 +230,26 @@ export class PiAiCatalogUpdater {
 	}
 
 	/**
-	 * 更新到最新：主源跟随 @earendil-works/pi-ai 的 npm latest（运行时从来源文件生成
-	 * catalog，不依赖 PiDeck 仓库分支是否提交了对等资源——main 可能停在 0.85.0 而
-	 * npm latest 已是 0.85.1）。npm 不可达/生成失败时回退到仓库分支预生成件。
-	 * 流程：npm latest 解析 → 生成校验 → 备份当前覆盖 → 原子替换 → 失效索引缓存。
+	 * 更新到最新：主源走仓库分支预生成件（直连或经 GitHub 镜像代理，单文件下载，
+	 * 国内比 npm 生成路径稳定），分支全挂时回退到 npm latest 生成。
+	 * 流程：分支下载 → 校验 → 版本防降级 → 备份当前覆盖 → 原子替换 → 失效索引缓存。
 	 * 返回 { ok: true, updated }：updated=false 表示已是最新（未覆盖写）。
 	 */
 	async update(branch?: string): Promise<CatalogUpdateResult> {
+		const branchResult = await this.updateFromBranch(branch ?? this.branch);
+		if (branchResult.ok) return branchResult;
 		const npmResult = await this.tryUpdateFromNpmLatest();
 		if (npmResult) return npmResult;
-		return this.updateFromBranch(branch ?? this.branch);
+		return {
+			ok: false,
+			code: "network",
+			message: "catalog update failed from all sources (branch + npm)",
+		};
 	}
 
 	/**
-	 * 主源：从 npm latest 生成并写入覆盖层。
-	 * 返回 null 表示 npm 路径失败（网络/生成校验不过），由 update() 回退到分支源。
+	 * 回退源：从 npm latest 生成并写入覆盖层（分支源全挂时的最后手段）。
+	 * 返回 null 表示 npm 路径失败（网络/生成校验不过）。
 	 */
 	private async tryUpdateFromNpmLatest(): Promise<CatalogUpdateResult | null> {
 		try {
@@ -232,9 +276,10 @@ export class PiAiCatalogUpdater {
 
 	/** 回退源：从仓库分支拉取预生成件（双源下载 → 校验 → 版本防降级 → 写入）。 */
 	private async updateFromBranch(branch: string): Promise<CatalogUpdateResult> {
+		const mirrorHost = this.mirrorHost();
 		let pair: { catalogRaw: string; manifestRaw: string };
 		try {
-			pair = await this.downloadFromAnySource(branch);
+			pair = await this.downloadFromAnySource(branch, mirrorHost);
 		} catch (error) {
 			return {
 				ok: false,
@@ -378,26 +423,28 @@ export class PiAiCatalogUpdater {
 	}
 
 	/**
-	 * 检查是否有新版本：主源解析 @earendil-works/pi-ai 的 npm latest 版本号，
-	 * 与当前生效版本（覆盖层优先，否则内置）做语义版本比较（防止把更旧的远端分支
-	 * 0.85.0 误报为“新版本”，也不把本地已更新的目录降级）。
-	 * npm 不可达时回退到仓库分支 manifest 比对。
+	 * 检查是否有新版本：主源读仓库分支 manifest（直连或经 GitHub 镜像代理），
+	 * 与下载同源，避免「检测说有更新、下载却拿不到」的版本错位；
+	 * 分支全不可达时回退到 npm latest。
 	 */
 	async checkRemote(branch?: string): Promise<CatalogCheckResult> {
+		const branchResult = await this.checkRemoteFromBranch(branch ?? this.branch);
+		if (branchResult.ok) return branchResult;
 		const npmVersion = await this.resolveNpmLatestVersion();
 		if (npmVersion) {
 			const localVersion = this.getEffectiveVersion();
 			const hasUpdate = localVersion ? compareSemver(npmVersion, localVersion) > 0 : true;
 			return { ok: true, remoteVersion: npmVersion, localVersion, hasUpdate };
 		}
-		return this.checkRemoteFromBranch(branch ?? this.branch);
+		return branchResult;
 	}
 
 	/** 回退：从仓库分支 manifest 解析版本并做语义比较。 */
 	private async checkRemoteFromBranch(branch: string): Promise<CatalogCheckResult> {
+		const mirrorHost = this.mirrorHost();
 		let manifestRaw: string;
 		try {
-			manifestRaw = await this.downloadManifestFromAnySource(branch);
+			manifestRaw = await this.downloadManifestFromAnySource(branch, mirrorHost);
 		} catch (error) {
 			return {
 				ok: false,
@@ -422,9 +469,10 @@ export class PiAiCatalogUpdater {
 	 */
 	private async downloadFromAnySource(
 		branch: string,
+		mirrorHost?: string | null,
 	): Promise<{ catalogRaw: string; manifestRaw: string }> {
 		let lastError: unknown;
-		for (const source of sourceBaseUrls(branch)) {
+		for (const source of sourceBaseUrls(branch, mirrorHost)) {
 			try {
 				const manifestRaw = await this.downloadText(source.manifest, this.maxManifestBytes);
 				const catalogRaw = await this.downloadText(source.catalog, this.maxCatalogBytes);
@@ -437,9 +485,12 @@ export class PiAiCatalogUpdater {
 	}
 
 	/** 只下载 manifest（checkRemote 用），源列表同 update，全部失败抛错。 */
-	private async downloadManifestFromAnySource(branch: string): Promise<string> {
+	private async downloadManifestFromAnySource(
+		branch: string,
+		mirrorHost?: string | null,
+	): Promise<string> {
 		let lastError: unknown;
-		for (const source of sourceBaseUrls(branch)) {
+		for (const source of sourceBaseUrls(branch, mirrorHost)) {
 			try {
 				return await this.downloadText(source.manifest, this.maxManifestBytes);
 			} catch (error) {

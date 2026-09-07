@@ -168,6 +168,13 @@ export type AgentRunItem = {
 	items: Array<MessageItem | ToolGroupItem | ThinkingGroupItem>;
 	startedAt: number;
 	endedAt: number;
+	/** 本轮内 ask_question 的用户等待总时长（ms）：由已完成的 ask 工具消息推导，
+	 *  回复耗时（endedAt - startedAt）需扣除这部分，等待段不计入 agent 处理时间。 */
+	askWaitMs: number;
+	/** 本轮是否阻塞在提问上（最后一条 ask 工具仍在等待回答）：尾部耗时应冻结而非持续跳动。 */
+	askPending: boolean;
+	/** 阻塞中的提问弹起时刻（ask 工具 beganAt），用于把尾部耗时冻结在该时刻。 */
+	askPendingAt?: number;
 };
 
 export type RenderMessage = MessageItem | ToolGroupItem | ThinkingGroupItem | AgentRunItem;
@@ -241,6 +248,9 @@ export function sameAgentRunForRender(previous: AgentRunItem, next: AgentRunItem
 		previous.id !== next.id ||
 		previous.startedAt !== next.startedAt ||
 		previous.endedAt !== next.endedAt ||
+		previous.askWaitMs !== next.askWaitMs ||
+		previous.askPending !== next.askPending ||
+		previous.askPendingAt !== next.askPendingAt ||
 		previous.items.length !== next.items.length
 	) {
 		return false;
@@ -364,6 +374,33 @@ export function groupToolMessages(
 		const runStableId = currentRun[0]
 			? (currentRun[0].kind === "message" ? currentRun[0].message.id : currentRun[0].id)
 			: "";
+		// 汇总本轮 ask_question 的用户等待时长：等待段不计入「回复耗时」。
+		// ask_question 工具结束时主进程已把等待从 durationMs 中扣除（见 AgentManager
+		// settleAskWait / upsertToolMessage），因此每笔等待量可反推：
+		//   等待 = (工具结束时间戳 - meta.startedAt) - durationMs
+		// 只有结束时间戳 / startedAt / durationMs 三者齐备才能反推（历史消息缺 durationMs
+		// 时按 0 处理，退化为旧行为）。运行中的 ask（meta.status === "running"，结果未落地
+		// 所以没有 _askCard）意味着整轮阻塞在提问上，尾部耗时需冻结在提问时刻。
+		let askWaitMs = 0;
+		let askPending = false;
+		let askPendingAt: number | undefined;
+		for (const item of currentRun) {
+			if (item.kind !== "tool-group") continue;
+			for (const message of item.messages) {
+				if (message.role !== "tool") continue;
+				const meta = message.meta;
+				if (typeof meta?.toolName !== "string" || meta.toolName.toLowerCase() !== "ask_question") continue;
+				if (meta.status === "running") {
+					askPending = true;
+					if (typeof meta.startedAt === "number") askPendingAt = meta.startedAt;
+					continue;
+				}
+				const { startedAt, durationMs } = meta;
+				if (typeof startedAt === "number" && typeof durationMs === "number") {
+					askWaitMs += Math.max(0, message.timestamp - startedAt - durationMs);
+				}
+			}
+		}
 		result.push({
 			kind: "agent-run",
 			id: runStableId,
@@ -371,6 +408,9 @@ export function groupToolMessages(
 			// 回合起点优先用触发它的用户消息时间戳，无用户消息时回退到 run 内首条消息时间戳
 			startedAt: lastUserTimestamp || runStartedAt,
 			endedAt: runEndedAt || runStartedAt,
+			askWaitMs,
+			askPending,
+			...(askPendingAt !== undefined ? { askPendingAt } : {}),
 		});
 		currentRun = [];
 		runStartedAt = 0;

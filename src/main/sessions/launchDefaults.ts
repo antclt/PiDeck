@@ -7,20 +7,25 @@ import type {
  * 会话「默认启动偏好」解析器：createDraft 缺省填充与引导页展示共用，保证
  * 「底栏/选择器预选的默认值」与「首次发送时真实套用的默认值」永远一致。
  *
- * 规则（2026-10 按用户反馈调整优先级）：
+ * 规则（引导页点选优先——本条规则取代更早的「显式默认 > 偏好」排序，见下）：
  * - 模型仅对非 DSH 后端解析——pi 模型配置不适用于 DSH（模型路由由 DSH host
  *   自己的 settings 决定）。解析优先级：
- *     1. settings.defaultProvider + defaultModel（用户显式配置，有效才算）；
- *     2. settings.enabledModels（pi 的模型切换列表，用户显式维护，glob 匹配；
- *        用户规则：enabledModels 的优先级在默认模型之后）；
- *     3. 欢迎页偏好模型（渲染层 localStorage 残留，主进程校验存在性）；
+ *     1. 引导页点选模型（渲染层传入的 welcomeModel：用户在「新建 agent 页」刚做的
+ *        显式选择。用户规则：本会话就用我选的，点选不得被静态配置静默覆盖）；
+ *     2. settings.defaultProvider + defaultModel（用户显式配置的默认模型，有效才算）；
+ *     3. settings.enabledModels（pi 的模型切换列表，用户显式维护，glob 匹配）；
  *     4. 用户最后一次实际使用的模型（desktop settings.lastUsedModel，发送时自动记录）；
  *     5. 以上皆无／全部失效 → 空（不再回退 models.json 第一个模型：用户规则
  *        「上次也没有就是默认是空的」，避免在用户删光模型后仍预选到残留项）。
+ *   为什么点选排第一：welcomeModel 只有引导页提升为真实会话这一条链路会传（见
+ *   main/ipc/sessionIpc.ts createDraft），它表达的是「这一次新建要用哪个模型」的即时
+ *   意图；而默认模型/切换列表是长期配置，只应在用户本次没有点选时充当预选值。
+ *   旧排序把点选压在第 3 级，导致配置了有效默认模型时引导页选择 100% 静默失效
+ *   （症状：切不动的一直显示默认模型；页面看似切了、发送后仍用旧模型）。
  *   **每个来源都会校验目标模型确实仍存在于 models.json**：供应商/模型被删除后，
  *   失效来源自动跳过，保证新会话（底栏预选与真实套用）不再默认已删除的模型。
- * - defaultModelConfigured 标记来源是否为「显式配置的默认模型」：渲染层在显示
- *   回退时只有该标记为 false 才允许欢迎页偏好参与（与创建规则同源，防再次分叉）。
+ * - defaultModelConfigured 仅标记「是否存在有效的显式配置默认模型」，供调用方做文案
+ *   与诊断用；它**不再**作为渲染层展示回退的闸门（展示与创建必须同序，否则再次分叉）。
  * - 思考档位对两种后端都填充（值域 off/high/max 兼容），一律取 settings.defaultThinkingLevel
  *   （用户规则：思考级别只跟"默认级别"走，欢迎页偏好级别不参与）。
  *
@@ -38,16 +43,16 @@ export function resolveLaunchDefaultOptions(input: {
 }): ResolvedLaunchDefaults {
 	const defaults: ResolvedLaunchDefaults = {};
 	if (input.backend !== "dsh") {
-		// 显式默认只解析一次：defaultModelConfigured 标记给渲染层，供其决定
-		// 欢迎页偏好是否可参与展示回退（显示与创建必须同规则）。
+		// 显式默认只解析一次：defaultModelConfigured 仅作「是否存在有效显式默认」的诊断标记
+		// 返回（供文案/排查用）；渲染层展示不再拿它当闸门——展示与创建统一按点选优先。
 		const explicit = strictModelPair(input.settings, input.models);
 		if (explicit) defaults.defaultModelConfigured = true;
 		// 仅在解析成功时落键：空结果必须是真 {}，调用方才能用 presence 判断是否预选
-		// 优先级：显式默认 > enabledModels（pi 模型切换列表）> 欢迎偏好 > 上次使用 > 空。
+		// 优先级：引导页点选 > 显式默认 > enabledModels（pi 模型切换列表）> 上次使用 > 空。
 		const model =
+			welcomeModelOfModelsConfig(input.welcomeModel, input.models) ??
 			explicit ??
 			enabledModelsOfModelsConfig(input.settings, input.models) ??
-			welcomeModelOfModelsConfig(input.welcomeModel, input.models) ??
 			lastUsedModelOfModelsConfig(input.lastUsedModel, input.models);
 		if (model) defaults.model = model;
 	}

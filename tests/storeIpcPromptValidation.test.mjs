@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-function register(promptManager, projectResourceManager = {}) {
+function register(promptManager, projectResourceManager = {}, options = {}) {
 	const handlers = new Map();
 	const electron = {
 		ipcMain: {
@@ -19,8 +19,10 @@ function register(promptManager, projectResourceManager = {}) {
 		promptManager,
 		skillManager: {},
 		xuePromptManager: {},
-		extensionManager: {},
 		projectResourceManager,
+		configManager: options.configManager,
+		projectTrustPath: options.projectTrustPath,
+		extensionManager: options.extensionManager ?? {},
 		appLogger: {
 			info: async () => {},
 			warn: async () => {},
@@ -64,6 +66,98 @@ test("prompt IPC rejects malformed global and project payloads before manager ca
 		/Invalid prompt toggle input/,
 	);
 	assert.equal(managerCalls, 0);
+});
+
+test("project store imports require trust before writing project-local resources", async () => {
+	let promptCalls = 0;
+	const { handlers, ipcChannels } = register(
+		{
+			createInProject: async (_root, input) => {
+				promptCalls += 1;
+				return { name: input.name, description: input.description, path: "C:/project/.pi/prompts/demo.md", content: "", userCreated: true, scope: "project" };
+			},
+			writeContentInProject: async () => {
+				promptCalls += 1;
+			},
+		},
+		{ resolveProjectRoot: async () => "C:/project" },
+		{ configManager: { getProjectTrustDecision: async () => false } },
+	);
+
+	await assert.rejects(
+		handlers.get(ipcChannels.promptStoreImport)({}, {
+			title: "Demo",
+			description: "A demo prompt",
+			content: "body",
+			projectId: "p1",
+		}),
+		/mainProjectResource\.projectNotTrusted/,
+	);
+	assert.equal(promptCalls, 0);
+});
+
+test("trusted project store imports route prompts, skills, and extensions to the project target", async () => {
+	const calls = [];
+	const { handlers, ipcChannels } = register(
+		{
+			createInProject: async (root, input) => {
+				calls.push(["prompt-create", root, input]);
+				return { name: input.name, description: input.description, path: "C:/project/.pi/prompts/demo.md", content: "", userCreated: true, scope: "project" };
+			},
+			writeContentInProject: async (root, path, content) => calls.push(["prompt-write", root, path, content]),
+		},
+		{
+			resolveProjectRoot: async () => "C:/project",
+			importSkillFromStore: async (projectId, input) => {
+				calls.push(["skill", projectId, input]);
+				return { name: input.name, path: "C:/project/.pi/skills/demo/SKILL.md" };
+			},
+		},
+		{
+			configManager: { getProjectTrustDecision: async () => true },
+			extensionManager: {
+				install: async (source, options) => {
+					calls.push(["extension", source, options]);
+					return "installed";
+				},
+			},
+		},
+	);
+
+	await handlers.get(ipcChannels.promptStoreImport)({}, {
+		title: "Demo",
+		description: "A demo prompt",
+		content: "body",
+		projectId: "p1",
+	});
+	await handlers.get(ipcChannels.skillStoreImport)({}, {
+		id: "skill-1",
+		title: "Demo Skill",
+		description: "A demo skill",
+		content: "body",
+		type: "skill",
+		author: "",
+		category: "",
+		tags: [],
+		votes: 0,
+		createdAt: "",
+	}, "pi-global", "p1");
+	await handlers.get(ipcChannels.extensionsInstall)({}, "npm:demo", "p1");
+
+	assert.equal(calls.filter(([kind]) => kind === "prompt-create").length, 1);
+	assert.equal(calls.filter(([kind]) => kind === "prompt-write").length, 1);
+	const skillCall = calls.find(([kind]) => kind === "skill");
+	assert.ok(skillCall);
+	assert.equal(skillCall[0], "skill");
+	assert.equal(skillCall[1], "p1");
+	assert.equal(skillCall[2].name, "demo-skill");
+	assert.equal(skillCall[2].description, "A demo skill");
+	assert.equal(skillCall[2].content, "# Demo Skill\n\nbody");
+	const extensionCall = calls.find(([kind]) => kind === "extension");
+	assert.ok(extensionCall);
+	assert.equal(extensionCall[0], "extension");
+	assert.equal(extensionCall[1], "npm:demo");
+	assert.equal(extensionCall[2].projectRoot, "C:/project");
 });
 
 test("prompt IPC accepts an empty description string and leaves required-field policy to the manager", async () => {

@@ -20,6 +20,7 @@ import {
 import { Button } from "../ui-shadcn/button";
 import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { detectRendererPlatform } from "../../lib/detectRendererPlatform";
 import { ConfirmDialog as ShadcnConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import type { PiInstallStatus, PiInstallExecResult } from "../../../../shared/types";
 
@@ -482,9 +483,12 @@ export function BrandLockup(props: { replayToken?: number } = {}) {
 		void loadDevBranch().then(setBranch);
 	}, []);
 	const brandTitle = branch ? `PiDeck · ${branch}` : "PiDeck";
+	// macOS 窗口左上角已有原生交通灯，π logo + 字标挤在同一行视觉过重；
+	// darwin 平台只保留字标（品牌语义仍由 aria-label 承载），其余平台维持原样。
+	const showLogo = detectRendererPlatform() !== "darwin";
 	return (
 		<div className="brand-lockup flex h-full min-w-0 items-center gap-2" aria-label={brandTitle} title={branch ? brandTitle : undefined}>
-			<PiLogoCanvas size={18} autoPlay playOnClick replayToken={props.replayToken} />
+			{showLogo && <PiLogoCanvas size={18} autoPlay playOnClick replayToken={props.replayToken} />}
 			{/* 视觉变形只作用于字标本身，品牌语义仍由外层 aria-label 保留。 */}
 			<span className="brand-wordmark translate-x-0.5 truncate text-[18px] font-[PiDeckDepartureMono] font-normal uppercase leading-none text-zinc-950 dark:text-white" aria-hidden="true">PiDeck</span>
 		</div>

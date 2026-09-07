@@ -189,7 +189,51 @@ export function serializeBatchAnswers(
  * 不复用 messageSelection.ts：那是消息树多选，不是 window 划选探测。
  * input/textarea 内的选区走 selectionStart，不会进入 window.getSelection，故键盘 Enter 提交不受影响。
  */
-export function hasTextSelection(): boolean {
+/**
+ * 按压感知划选守卫 —— 「ask 选项点很久才能勾上」的修复（2026-09 用户反馈）。
+ *
+ * 旧守卫 hasTextSelection() 在 click 里直接查全局选区，但 Chromium 中按钮
+ * mousedown 不会塌缩选区：用户划选复制/双击选词后旧选区长期残留，所有 ask
+ * 按钮点击被持续吞掉，直到恰好点到非按钮区域才恢复（真实输入管线夹具
+ * tests/fixtures/ask-click-driver.cjs 实测）。
+ *
+ * 正确判据：比较「click 时刻的选区」与「本次按压 mousedown 时刻的选区快照」——
+ * 一致说明选区在按压前就存在（旧残留），放行；不一致说明是本次按压新拖出来的
+ * （划选 mouseup 落在按钮上的冒充 click），吞掉。
+ */
+
+/** 最近一次 mousedown 时刻的选区快照；null = 尚无样本（保守按旧守卫处理） */
+let pressSelectionSnapshot: string | null = null;
+
+// 模块加载即安装（renderer 环境才有 document；vm 单测沙箱无 document 自动跳过）。
+// 不依赖各按钮接线，新增 ask 按钮默认获得正确语义；应用级单例监听，随进程生命周期存活，
+// 无需配对清理（非组件级 listener）。
+if (typeof document !== "undefined" && typeof window !== "undefined") {
+	document.addEventListener(
+		"mousedown",
+		() => {
+			pressSelectionSnapshot = window.getSelection()?.toString() ?? "";
+		},
+		// capture：先于任何业务 mousedown 处理器记录快照，保证 click 判定时样本新鲜
+		true,
+	);
+}
+
+/**
+ * 纯判定核心（便于单测）：给定按压快照与 click 时刻选区，是否吞掉点击。
+ * - click 时无有效选区 → 放行（大多数点击）
+ * - 无按压快照（null）且有选区 → 保守吞掉（与旧守卫等价的兜底）
+ * - 快照与当前选区一致 → 旧选区残留，放行（修复点）
+ * - 快照与当前选区不同 → 本次按压新拖出的选区，吞掉
+ */
+export function shouldSuppressAskClickSnapshot(pressSnapshot: string | null, currentSelection: string): boolean {
+	if (!currentSelection.trim()) return false;
+	if (pressSnapshot === null) return true;
+	return pressSnapshot !== currentSelection;
+}
+
+/** click 处理器首行调用；返回 true 表示本次点击由划选 mouseup 冒充，应忽略 */
+export function shouldSuppressAskClick(): boolean {
 	if (typeof window === "undefined") return false;
-	return Boolean(window.getSelection()?.toString().trim());
+	return shouldSuppressAskClickSnapshot(pressSelectionSnapshot, window.getSelection()?.toString() ?? "");
 }

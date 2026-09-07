@@ -35,6 +35,7 @@ import {
 	ShieldCheck,
 	Sparkles,
 	PlugZap,
+	FolderOpen,
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { deepClone } from "./utils/deepEqual";
@@ -303,6 +304,8 @@ export type ConfigPaneProps = {
 	projectKind?: Project["kind"];
 	/** 当前项目名称：仅用于作用域选择器显示。 */
 	projectName?: string;
+	/** 资源管理器专用模式：只显示资源页，并将作用域固定为当前项目。 */
+	resourceOnly?: boolean;
 	/** 深链：打开时落在的配置分页（设置窗口内嵌分区消费 openSettingsAtom 的 configTab）。 */
 	focusConfigTab?: ConfigTab;
 	/** 深链：models 页要定位展开的供应商名。 */
@@ -326,7 +329,7 @@ export type ConfigPaneProps = {
  * 不包错误边界——宿主 SettingsModal 的 ErrorBoundary 已兜底整个窗口。
  */
 export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
-	function ConfigPane({ onClose, onSaved, projectId, projectKind, projectName, projects, focusConfigTab, focusProvider, focusBackendPane, onStateChange, onRequestClose }, ref) {
+	function ConfigPane({ onClose, onSaved, projectId, projectKind, projectName, projects, resourceOnly, focusConfigTab, focusProvider, focusBackendPane, onStateChange, onRequestClose }, ref) {
 		return (
 			<ConfigModalContent
 				open
@@ -336,6 +339,7 @@ export const ConfigPane = forwardRef<ConfigPaneHandle, ConfigPaneProps>(
 				projectKind={projectKind}
 				projectName={projectName}
 				projects={projects}
+				resourceOnly={resourceOnly}
 				focusConfigTab={focusConfigTab}
 				focusProvider={focusProvider}
 				focusBackendPane={focusBackendPane}
@@ -421,6 +425,8 @@ export function ConfigModal(props: ConfigModalProps) {
 }
 
 type ConfigModalContentProps = ConfigModalProps & {
+	/** 资源管理器专用模式：只渲染技能/扩展/提示词，并固定到传入项目。 */
+	resourceOnly?: boolean;
 	/** 嵌入模式：不渲染 Dialog 外壳与标题栏按钮（宿主提供窗口），自身仍维护全部状态/保存/关闭确认逻辑 */
 	embedded?: boolean;
 	/** embedded 时暴露给宿主标题栏按钮的句柄 */
@@ -435,27 +441,29 @@ type ConfigModalContentProps = ConfigModalProps & {
 };
 
 function ConfigModalContent(props: ConfigModalContentProps) {
-	const { open, onClose, onSaved, projectId, projectKind, projectName, projects = [], embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
+	const { open, onClose, onSaved, projectId, projectKind, projectName, projects = [], resourceOnly = false, embedded, focusConfigTab, focusProvider, focusBackendPane } = props;
 	/** Shared resource scope; keeping it here makes it survive resource-tab switches. */
-	const [resourceScope, setResourceScope] = useState<ResourceScope>("global");
+	const [resourceScope, setResourceScope] = useState<ResourceScope>(resourceOnly ? "project" : "global");
 	/** scope 选择器中当前选中的项目 id（默认当前激活项目，可通过下拉切换任意已加载项目）。 */
 	const [scopeProjectId, setScopeProjectId] = useState<string | undefined>(projectId);
 	useEffect(() => {
 		// 侧栏切换激活项目时跟随；用户在下拉中手动选择的项目在切回激活项目时由下一次选择覆盖。
 		setScopeProjectId(projectId);
 	}, [projectId]);
-	/** scope=project 时实际使用的项目 id（下拉可选的任意已加载非 Chat 项目）。 */
+	/** scope=project 时实际使用的项目 id；资源管理器模式不经过下拉，直接使用入口项目。 */
 	const effectiveProjectId = resourceScope === "project"
-		? (projects.find((item) => item.id === scopeProjectId && item.kind !== "chat")?.id ?? undefined)
+		? resourceOnly
+			? (projectKind === "chat" ? undefined : projectId)
+			: (projects.find((item) => item.id === scopeProjectId && item.kind !== "chat")?.id ?? undefined)
 		: undefined;
 	const hasProject = Boolean(effectiveProjectId);
 	useEffect(() => {
-		if (!hasProject && resourceScope !== "global") setResourceScope("global");
-	}, [hasProject, resourceScope]);
+		if (!resourceOnly && !hasProject && resourceScope !== "global") setResourceScope("global");
+	}, [hasProject, resourceOnly, resourceScope]);
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容），
 	// 用 lazy initializer 在挂载时读一次 localStorage，恢复到上次所在 tab。
 	const [lastTab] = useState(loadLastConfigTab);
-	const [section, setSection] = useState<ConfigSection>(lastTab?.section ?? "config");
+	const [section, setSection] = useState<ConfigSection>(resourceOnly ? "skills" : lastTab?.section ?? "config");
 	// 深链（如圆球面板「去配置用量」）优先于上次记住的配置分页。
 	const [tab, setTab] = useState<ConfigTab>(focusConfigTab ?? lastTab?.tab ?? "models");
 	// 深链 provider：models 页展开该供应商卡片并滚动高亮（ModelsTab 消费）。
@@ -474,18 +482,18 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	);
 	useEffect(() => {
 		if (!open) return;
-		if (focusConfigTab) setTab(focusConfigTab);
-		if (focusProvider) {
+		if (!resourceOnly && focusConfigTab) setTab(focusConfigTab);
+		if (!resourceOnly && focusProvider) {
 			setFocusedProvider(focusProvider);
 			setTab("models");
 			setExpandedProvider(focusProvider);
 		}
 		// focusProvider/focusConfigTab 变化即应用：设置窗口已开时点圆球跳转也要生效。
-	}, [open, focusConfigTab, focusProvider]);
+	}, [open, focusConfigTab, focusProvider, resourceOnly]);
 	/** 配置管理顶层后端分页：以 Pi 为主（默认 Pi，且 Pi 标签在左），dsh 页在右。
 	 *  新建会话默认后端跟随设置项 defaultAgentBackend（默认 pi），与此处配置管理入口相互独立。
 	 *  弹窗每次打开都会重建 state，这里从 localStorage 恢复上次选定的后端分页。 */
-	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(focusBackendPane ?? loadLastConfigBackendPane);
+	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(resourceOnly ? "pi" : focusBackendPane ?? loadLastConfigBackendPane);
 	/** 切换后端分页并持久化：退出配置管理再进入时停留在上次选定的后端。 */
 	const selectBackendPane = useCallback((value: string) => {
 		const next = value === "pi" ? "pi" : "dsh";
@@ -504,7 +512,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const [error, setError] = useState<string | null>(null);
 	/** 各 tab 未保存修改集合：key 用 sectionTabValue 编码（如 "config:models"/"skills"），顶部保存按钮与关闭确认依赖它 */
 	const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
-	const resourceScopeSelector = (
+	const resourceScopeSelector = resourceOnly ? (
+		<div
+			className="flex h-8 max-w-[16rem] items-center gap-1.5 rounded-md border border-border-subtle px-2.5 text-control text-muted-foreground"
+			title={projectName ?? t("config.resourceScope.projectFallback")}
+			aria-label={t("config.resourceScope.label")}
+		>
+			<FolderOpen className="size-3.5 shrink-0" aria-hidden="true" />
+			<span className="truncate">{projectName?.trim() || t("config.resourceScope.projectFallback")}</span>
+		</div>
+	) : (
 		<ResourceScopeSelector
 			value={resourceScope}
 			projects={projects}
@@ -2513,42 +2530,44 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		<>
 			{/* 顶层后端分页：Pi 配置管理（默认，在左）/ DSH 配置管理（在右） */}
 			<Tabs value={backendPane} onValueChange={selectBackendPane} className="flex min-h-0 min-w-0 flex-1 flex-col">
-				<TabsList
-					// 嵌入设置窗口时 Pi/DSH 用 shadcn line variant（下划线式）：与顶层「系统设置/配置管理」
-					// 的分段条（default variant）区分层级——上层页面级、下层内容级，避免两条同款 tab 冲突。
-					variant={embedded ? "line" : "default"}
-					className={cn(
-						"shrink-0",
-						embedded
-							? "justify-start gap-1 px-3"
-							: "config-backend-switch h-9 justify-start gap-1 border-b border-border/60 px-3",
-					)}>
-					<TabsTrigger
+				{!resourceOnly && (
+					<TabsList
+						// 嵌入设置窗口时 Pi/DSH 用 shadcn line variant（下划线式）：与顶层「系统设置/配置管理」
+						// 的分段条（default variant）区分层级——上层页面级、下层内容级，避免两条同款 tab 冲突。
 						variant={embedded ? "line" : "default"}
-						value="pi"
 						className={cn(
-							"h-8 gap-1.5 px-3 text-[13px] font-medium",
-							!embedded && "config-backend-tab",
-						)}
-					>
-						<PiLogo className="size-3.5 shrink-0" />
-						{t("config.backend.pi")}
-						{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
-					</TabsTrigger>
-					<TabsTrigger
-						variant={embedded ? "line" : "default"}
-						value="dsh"
-						className={cn(
-							"h-8 gap-1.5 px-3 text-[13px] font-medium",
-							!embedded && "config-backend-tab",
-						)}
-					>
-						<DshLogo className="size-3.5 shrink-0" />
-						{t("config.backend.dsh")}
-						{/* 后端分页黄点：该后端任意分区有草稿时提醒 */}
-						{hasDshDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
-					</TabsTrigger>
-				</TabsList>
+							"shrink-0",
+							embedded
+								? "justify-start gap-1 px-3"
+								: "config-backend-switch h-9 justify-start gap-1 border-b border-border/60 px-3",
+						)}>
+						<TabsTrigger
+							variant={embedded ? "line" : "default"}
+							value="pi"
+							className={cn(
+								"h-8 gap-1.5 px-3 text-[13px] font-medium",
+								!embedded && "config-backend-tab",
+							)}
+						>
+							<PiLogo className="size-3.5 shrink-0" />
+							{t("config.backend.pi")}
+							{hasPiDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+						</TabsTrigger>
+						<TabsTrigger
+							variant={embedded ? "line" : "default"}
+							value="dsh"
+							className={cn(
+								"h-8 gap-1.5 px-3 text-[13px] font-medium",
+								!embedded && "config-backend-tab",
+							)}
+						>
+							<DshLogo className="size-3.5 shrink-0" />
+							{t("config.backend.dsh")}
+							{/* 后端分页黄点：该后端任意分区有草稿时提醒 */}
+							{hasDshDirty ? <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+						</TabsTrigger>
+					</TabsList>
+				)}
 				{/* forceMount + inactive hidden：Pi/DSH 两个后端页都保持挂载，切换后端不会丢草稿；
 				    与 config:mcp 同款做法，inactive 必须 hidden 避免叠在另一页上。 */}
 				<TabsContent value="dsh" forceMount className="flex min-h-0 min-w-0 flex-1 data-[state=inactive]:hidden">
@@ -2590,27 +2609,29 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					className="config-sidebar flex min-h-0 shrink-0 flex-col items-stretch gap-2.5 overflow-auto border-0 border-r border-border rounded-none bg-transparent p-2.5 data-[orientation=vertical]:w-[160px] max-[820px]:flex-row max-[820px]:gap-3 max-[820px]:overflow-x-auto max-[820px]:overflow-y-hidden max-[820px]:border-r-0 max-[820px]:border-b"
 					aria-label={t("config.title")}
 				>
-					<div className="config-sidebar-group grid gap-0.5">
-						<span className="px-2 pb-1 text-micro font-semibold text-muted-foreground">{t("config.group.config")}</span>
-						{configNavItems.map((item) => (
-							<TabsTrigger
-								key={item.id}
-								value={`config:${item.id}`}
-								className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium"
-							>
-								<span className="config-nav-icon">{item.icon}</span>
-								{item.label}
-								{/* 未保存黄点：与 DSH 导航同款 */}
-								{dirtyTabs.has(`config:${item.id}`) || dirtyTabs.has(item.id) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
-							</TabsTrigger>
-						))}
-					</div>
+					{!resourceOnly && (
+						<div className="config-sidebar-group grid gap-0.5">
+							<span className="px-2 pb-1 text-micro font-semibold text-muted-foreground">{t("config.group.config")}</span>
+							{configNavItems.map((item) => (
+								<TabsTrigger
+									key={item.id}
+									value={`config:${item.id}`}
+									className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium"
+								>
+									<span className="config-nav-icon">{item.icon}</span>
+									{item.label}
+									{/* 未保存黄点：与 DSH 导航同款 */}
+									{dirtyTabs.has(`config:${item.id}`) || dirtyTabs.has(item.id) ? <span className="ml-auto size-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+								</TabsTrigger>
+							))}
+						</div>
+					)}
 					<div className="config-sidebar-group grid gap-0.5">
 						<span className="px-2 pb-1 text-micro font-semibold text-muted-foreground">{t("config.group.agent")}</span>
-						<TabsTrigger value="security" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
+						{!resourceOnly && <TabsTrigger value="security" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 							<span className="config-nav-icon"><Shield size={14} aria-hidden="true" /></span>
 							{t("config.nav.security")}
-						</TabsTrigger>
+						</TabsTrigger>}
 						<TabsTrigger value="extensions" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 							<span className="config-nav-icon"><Puzzle size={14} aria-hidden="true" /></span>
 							{t("config.nav.extensions")}
@@ -2804,6 +2825,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					) : (
 							<SkillsTab
 								scope={resourceScope}
+								projectId={resourceScope === "project" ? effectiveProjectId : undefined}
 								scopeSelector={resourceScopeSelector}
 								projectOverrides={projectResourcesData.overrides}
 								discoverySkills={discoveryData.skills}
@@ -2834,6 +2856,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{!loading && (
 						<PromptsTab
 							scope={resourceScope}
+							projectId={resourceScope === "project" ? effectiveProjectId : undefined}
 							scopeSelector={resourceScopeSelector}
 							projectOverrides={projectResourcesData.overrides}
 							discoveryPrompts={discoveryData.prompts}
@@ -2873,6 +2896,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					{statusBlock}
 					<ExtensionsTab
 							scope={resourceScope}
+							projectId={resourceScope === "project" ? effectiveProjectId : undefined}
 							projectOverrides={projectResourcesData.overrides}
 							discoveryExtensions={discoveryData.extensions}
 							scopeSelector={resourceScopeSelector}

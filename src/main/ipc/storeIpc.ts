@@ -19,6 +19,7 @@ import type { SkillManager } from "../skills/SkillManager";
 import type { XuePromptManager } from "../prompts/XuePromptManager";
 import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
+import type { ConfigManager } from "../config/ConfigManager";
 import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
 
 export type StoreIpcDeps = {
@@ -27,6 +28,9 @@ export type StoreIpcDeps = {
 	xuePromptManager: XuePromptManager;
 	extensionManager: ExtensionManager;
 	projectResourceManager: ProjectResourceManager;
+	/** Project trust is checked before any store write; optional keeps isolated IPC tests lightweight. */
+	configManager?: ConfigManager;
+	projectTrustPath?: (projectRoot: string, projectId: string) => string;
 	appLogger: AppLogger;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 };
@@ -37,6 +41,8 @@ export function registerStoreIpc({
 	xuePromptManager,
 	extensionManager,
 	projectResourceManager,
+	configManager,
+	projectTrustPath,
 	appLogger,
 	mainCopy,
 }: StoreIpcDeps): void {
@@ -67,6 +73,18 @@ export function registerStoreIpc({
 			throw new Error("Invalid project id.");
 		}
 		return projectResourceManager.getProjectRoot(projectId.trim());
+	};
+	type ProjectInstallTarget = { id: string; root: string };
+	const projectInstallTarget = async (projectId: unknown): Promise<ProjectInstallTarget | undefined> => {
+		if (projectId === undefined || projectId === "") return undefined;
+		const validProjectId = typeof projectId === "string" ? projectId.trim() : "";
+		if (!validProjectId || validProjectId.length > 256) throw new Error("Invalid project id.");
+		const root = await projectResourceManager.resolveProjectRoot(validProjectId);
+		if (!configManager) throw new Error(mainCopy("mainProjectResource.projectNotTrusted"));
+		const trustPath = projectTrustPath?.(root, validProjectId) ?? root;
+		const trusted = await configManager.getProjectTrustDecision(trustPath);
+		if (trusted !== true) throw new Error(mainCopy("mainProjectResource.projectNotTrusted"));
+		return { id: validProjectId, root };
 	};
 
 	// ── Prompt Templates ──
@@ -270,11 +288,14 @@ export function registerStoreIpc({
 		title,
 		description,
 		content,
+		projectId,
 	}: {
 		title: string;
 		description: string;
 		content: string;
+		projectId?: unknown;
 	}) => {
+		const target = await projectInstallTarget(projectId);
 		try {
 			const name = title
 				.trim()
@@ -288,7 +309,9 @@ export function registerStoreIpc({
 
 			const tryCreate = async (tryName: string): Promise<PiPromptTemplateSummary> => {
 				try {
-					return await promptManager.create({ name: tryName, description });
+					return target
+						? await promptManager.createInProject(target.root, { name: tryName, description })
+						: await promptManager.create({ name: tryName, description });
 				} catch {
 					const match = tryName.match(/-(\d+)$/);
 					const nextNum = match ? parseInt(match[1], 10) + 1 : 2;
@@ -300,11 +323,16 @@ export function registerStoreIpc({
 			const hintLine = argumentHint ? `\nargument-hint: ${argumentHint}` : "";
 			const frontmatter = `---\ndescription: ${description.replace(/\n/g, " ")}\nsource: prompts.chat${hintLine}\n---\n\n`;
 			const summary = await tryCreate(name);
-			await promptManager.writeContent(summary.path, frontmatter + converted);
+			if (target) {
+				await promptManager.writeContentInProject(target.root, summary.path, frontmatter + converted);
+			} else {
+				await promptManager.writeContent(summary.path, frontmatter + converted);
+			}
 
 			void appLogger.info("prompt-store", "Imported prompt from store", {
 				title,
 				localName: summary.name,
+				scope: target ? "project" : "global",
 				variables: varCount,
 			});
 			return summary;
@@ -336,35 +364,55 @@ export function registerStoreIpc({
 		}
 	});
 
-	ipcMain.handle(ipcChannels.skillStoreImport, async (_event, item: PromptStoreItem, locationId: "pi-global" | "agents-global" = "pi-global") => {
-		try {
-			const name = item.title
-				.trim()
-				.toLowerCase()
-				.replace(/[^\p{L}\p{N}-]+/gu, "-")
-				.replace(/-+/g, "-")
-				.replace(/^-|-$/g, "");
-			if (!name) throw new Error(mainCopy("store.invalidItemTitle"));
+	ipcMain.handle(
+		ipcChannels.skillStoreImport,
+		async (
+			_event,
+			item: PromptStoreItem,
+			locationId: "pi-global" | "agents-global" = "pi-global",
+			projectId?: unknown,
+		) => {
+			const target = await projectInstallTarget(projectId);
+			try {
+				const name = item.title
+					.trim()
+					.toLowerCase()
+					.replace(/[^\p{L}\p{N}-]+/gu, "-")
+					.replace(/-+/g, "-")
+					.replace(/^-|-$/g, "");
+				if (!name) throw new Error(mainCopy("store.invalidItemTitle"));
 
-			const { writeFile } = await import("node:fs/promises");
+				const summary = target
+					? await projectResourceManager.importSkillFromStore(target.id, {
+						name,
+						description: item.description || item.title,
+						content: `# ${item.title}\n\n${item.content}`,
+					})
+					: await skillManager.create({
+						name,
+						description: item.description || item.title,
+						locationId: locationId ?? "pi-global",
+					});
 
-			const summary = await skillManager.create({
-				name,
-				description: item.description || item.title,
-				locationId: locationId ?? "pi-global",
-			});
+				if (!target) {
+					const { writeFile } = await import("node:fs/promises");
+					const skillContent = `---\nname: ${name}\ndescription: ${(item.description || item.title).replace(/[\\r\\n]+/g, " ")}\nsource: prompts.chat\n---\n\n# ${item.title}\n\n${item.content}`;
+					await writeFile(summary.path, skillContent, "utf8");
+				}
 
-			const skillContent = `---\nname: ${name}\ndescription: ${(item.description || item.title).replace(/\n/g, " ")}\nsource: prompts.chat\n---\n\n# ${item.title}\n\n${item.content}`;
-			await writeFile(summary.path, skillContent, "utf8");
-
-			void appLogger.info("skill-store", "Imported skill from store", { title: item.title, localName: name });
-			return summary;
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("skill-store", "Import failed", { title: item.title, error: message });
-			throw new Error(mainCopy("store.skillImportFailed"));
-		}
-	});
+				void appLogger.info("skill-store", "Imported skill from store", {
+					title: item.title,
+					localName: name,
+					scope: target ? "project" : "global",
+				});
+				return summary;
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				void appLogger.warn("skill-store", "Import failed", { title: item.title, error: message });
+				throw new Error(mainCopy("store.skillImportFailed"));
+			}
+		},
+	);
 
 	// ── Skills.sh ─────────────────────────
 	ipcMain.handle(ipcChannels.skillHubSearch, async (_event, opts: { query: string; limit?: number }) => {
@@ -404,30 +452,63 @@ export function registerStoreIpc({
 
 	ipcMain.handle(ipcChannels.skillHubDetail, async () => null);
 
-	ipcMain.handle(ipcChannels.skillHubInstall, async (_event, slug: string) => {
-		const lastSlash = slug.lastIndexOf("/");
-		const pkg = lastSlash > 0 ? slug.slice(0, lastSlash) : slug;
-		const skillName = lastSlash > 0 ? slug.slice(lastSlash + 1) : "";
-		// P0 security: whitelist shell-safe characters only
+	ipcMain.handle(ipcChannels.skillHubInstall, async (_event, slug: unknown, projectId?: unknown) => {
+		const validSlug = typeof slug === "string" ? slug.trim() : "";
+		const lastSlash = validSlug.lastIndexOf("/");
+		const pkg = lastSlash > 0 ? validSlug.slice(0, lastSlash) : validSlug;
+		const skillName = lastSlash > 0 ? validSlug.slice(lastSlash + 1) : "";
+		// P0 security: validate each argument before passing it to execFile (shell is disabled).
 		const SAFE_SLUG_RE = /^[a-zA-Z0-9@/\-_.]+$/;
-		if (!SAFE_SLUG_RE.test(pkg) || (skillName && !SAFE_SLUG_RE.test(skillName))) {
-			return { success: false, slug, installDir: "", error: mainCopy("store.skillsShInvalidSlug") };
+		if (!validSlug || !SAFE_SLUG_RE.test(pkg) || (skillName && !SAFE_SLUG_RE.test(skillName))) {
+			return { success: false, slug: validSlug, installDir: "", error: mainCopy("store.skillsShInvalidSlug") };
 		}
+		const target = await projectInstallTarget(projectId);
 		try {
-			const { exec } = await import("node:child_process");
-			const { promisify } = await import("node:util");
-			const execAsync = promisify(exec);
-			const cmd = `npx skills add "${pkg}" -g -s "${skillName}" -y`;
-			await execAsync(cmd, { encoding: "utf8", timeout: 120_000, maxBuffer: 10 * 1024 * 1024 });
-			void appLogger.info("skill-hub", "Installed skill", { slug, pkg, skillName });
-			return { success: true, slug, installDir: "" };
+			const { execFile } = await import("node:child_process");
+			const command = process.platform === "win32" ? "npx.cmd" : "npx";
+			const args = ["skills", "add", pkg, "--agent", "pi"];
+			if (skillName) args.push("--skill", skillName);
+			if (!target) args.push("--global");
+			args.push("--yes");
+			await new Promise<void>((resolve, reject) => {
+				execFile(
+					command,
+					args,
+					{
+						cwd: target?.root,
+						encoding: "utf8",
+						timeout: 120_000,
+						maxBuffer: 10 * 1024 * 1024,
+						shell: false,
+						windowsHide: true,
+					},
+					(error, _stdout, stderr) => {
+						if (error) {
+							const detail = typeof stderr === "string" && stderr.trim()
+								? `${error.message}: ${stderr.trim()}`
+								: error.message;
+							reject(new Error(detail));
+							return;
+						}
+						resolve();
+					},
+				);
+			});
+			const installDir = target
+				? await projectResourceManager.ensureResourceDirectory(target.id, "project-pi")
+				: "";
+			void appLogger.info("skill-hub", "Installed skill", {
+				slug: validSlug,
+				pkg,
+				skillName,
+				scope: target ? "project" : "global",
+			});
+			return { success: true, slug: validSlug, installDir };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("skill-hub", "Install failed", { slug, error: message });
-			// 返回真实错误信息（截断防爆，exec 的 stderr 可能很长），渲染层 toast 直接展示；
-			// 此前只返回通用文案，用户无法判断是网络、权限还是包名问题
+			void appLogger.warn("skill-hub", "Install failed", { slug: validSlug, error: message });
 			const brief = message.length > 300 ? `${message.slice(0, 300)}…` : message;
-			return { success: false, slug, installDir: "", error: brief };
+			return { success: false, slug: validSlug, installDir: "", error: brief };
 		}
 	});
 
@@ -460,17 +541,25 @@ export function registerStoreIpc({
 		}
 	});
 
-	ipcMain.handle(ipcChannels.yaoPromptsImport, async (_event, slug: string, category: string) => {
-		try {
-			const result = await xuePromptManager.importToPi(slug, category);
-			void appLogger.info("yao-prompts", "Imported to pi templates", { slug, localName: result.name });
-			return result;
-		} catch (err) {
+	ipcMain.handle(
+		ipcChannels.yaoPromptsImport,
+		async (_event, slug: string, category: string, projectId?: unknown) => {
+			const target = await projectInstallTarget(projectId);
+			try {
+				const result = await xuePromptManager.importToPi(slug, category, target?.root);
+				void appLogger.info("yao-prompts", "Imported to pi templates", {
+					slug,
+					localName: result.name,
+					scope: target ? "project" : "global",
+				});
+				return result;
+			} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			void appLogger.warn("yao-prompts", "Import failed", { slug, category, error: message });
-			throw new Error(mainCopy("store.yaoImportFailed"));
-		}
-	});
+				void appLogger.warn("yao-prompts", "Import failed", { slug, category, error: message });
+				throw new Error(mainCopy("store.yaoImportFailed"));
+			}
+		},
+	);
 
 	// ── Extensions ──────────────────────────────
 	ipcMain.handle(ipcChannels.extensionsList, (_event, forceRefresh?: boolean) =>
@@ -505,9 +594,14 @@ export function registerStoreIpc({
 			throw error;
 		}
 	});
-	ipcMain.handle(ipcChannels.extensionsInstall, async (_event, source: string) => {
-		const result = await extensionManager.install(source);
-		void appLogger.info("extension", "Extension installed", { source });
+	ipcMain.handle(ipcChannels.extensionsInstall, async (_event, source: string, projectId?: unknown) => {
+		const target = await projectInstallTarget(projectId);
+		const result = await extensionManager.install(source, target ? { projectRoot: target.root } : undefined);
+		void appLogger.info("extension", "Extension installed", {
+			source,
+			scope: target ? "project" : "global",
+			projectId: target?.id,
+		});
 		return result;
 	});
 	ipcMain.handle(

@@ -43,6 +43,11 @@ import { useRename } from "./hooks/useRename";
 import { useProjectRuntimeCapabilities } from "./hooks/useRuntimeCapabilities";
 import { useSessionRuntimeBridge } from "./hooks/useSessionRuntimeBridge";
 import { useAgentLoadNotice } from "./hooks/useAgentLoadNotice";
+import { useAnnouncementNotifier } from "./hooks/useAnnouncementNotifier";
+import {
+  announcementCenterOpenAtom,
+  announcementNotificationEnabledAtom,
+} from "./atoms/announcement-atoms";
 import { useSessionLayout } from "./hooks/useSessionLayout";
 import { useFileEditor } from "./hooks/useFileEditor";
 import { resolveFileLinkPath } from "./utils/filePathLinks";
@@ -634,6 +639,8 @@ export function App() {
     askNotificationEnabled: false,
     // 人文关怀提醒默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不关闭提醒
     agentCountReminderEnabled: true,
+    // 公告通知默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不误关提醒
+    announcementNotificationEnabled: true,
     // showThinking 由 pi agent 的 hideThinkingBlock 控制，启动后从主进程加载的真实值会覆盖此处
     showThinking: true,
     // 流式对话行为：默认自动展开中间过程；新一轮默认收起非最新轮（与 SettingsStore 一致）
@@ -985,6 +992,21 @@ export function App() {
   });
   // 激活 Agent 数量告警：受设置 agentCountReminderEnabled 控制（默认开启），每个启动周期提示一次
   useAgentLoadNotice(settings.agentCountReminderEnabled);
+
+  // 公告通知开关 → 渲染层镜像 atom：通知调度与侧栏入口显隐共用同一数据源，
+  // 设置保存后即时生效（settings.get 首拉与 onSettingsApplied 都经此处同步）
+  const setAnnouncementNotifyEnabled = useSetAtom(announcementNotificationEnabledAtom);
+  useEffect(() => {
+    setAnnouncementNotifyEnabled(settings.announcementNotificationEnabled);
+    // 关闭通知时若公告弹窗恰好开着（弹窗与设置弹窗互斥，理论少见），一并收起，
+    // 避免重新开启后残留的 open=true 让弹窗自动弹开
+    if (!settings.announcementNotificationEnabled) {
+      store.set(announcementCenterOpenAtom, false);
+    }
+  }, [settings.announcementNotificationEnabled, setAnnouncementNotifyEnabled, store]);
+
+  // 公告通知调度（读镜像 atom）：输入/Agent 运行中/模态打开/窗口不活跃时自动延后弹出（不打扰操作，见 hook 注释）
+  useAnnouncementNotifier();
   const activeQueuedPrompts = currentSessionId
     ? (queue.queuedPrompts[currentSessionId] ?? [])
     : [];

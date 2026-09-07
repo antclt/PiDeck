@@ -22,6 +22,8 @@ import { PetSystem, type PetSystemDeps } from "./pet";
 import { SoundAlertService } from "./sounds/SoundAlertService";
 import { registerSoundIpc } from "./ipc/soundIpc";
 import { registerSoundProtocol } from "./sounds/soundProtocol";
+import { AnnouncementService } from "./announcements/AnnouncementService";
+import { registerAnnouncementIpc } from "./ipc/announcementIpc";
 import {
 	applyLinuxDisplayBackendWorkaround,
 	isUsingLinuxXWaylandWorkaround,
@@ -298,7 +300,7 @@ import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensi
 import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
 import { createPiProcessPromptResolvers } from "./prompts/piProcessPromptResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
-import { toWindowsHostPath } from "./wsl/WslPaths";
+import { toWslLinuxPath, toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
 import { registerUsageStatsIpc } from "./ipc/usageStatsIpc";
 import { UsageStatsService } from "./usageStats/UsageStatsService";
@@ -433,6 +435,8 @@ let terminalManager: TerminalSessionManager;
 let petSystem: PetSystem | null = null;
 /** 声音提醒服务（完成/出错/等待输入提示音）；null = 未初始化 */
 let soundAlertService: SoundAlertService | null = null;
+/** 应用公告服务（无服务器拉取模式）；null = 未初始化 */
+let announcementService: AnnouncementService | null = null;
 let appLogger: AppLogger;
 let rpcLogger: RpcLogger;
 /** 内存采样句柄（PIDECK_MEMORY_PROFILE=1 时启用），quit 时停止 */
@@ -2740,7 +2744,13 @@ function registerIpc() {
 	// 覆盖层目录须在 catalog 初次读取前登记（getPiAiCatalogIndex 首次调用即锁定索引）；
 	// app 已 ready 后 app.getPath("userData") 才可靠，故在此提前构造。
 	setPiAiCatalogUserDataDir(app.getPath("userData"));
-	const catalogUpdater = new PiAiCatalogUpdater({ userDataDir: app.getPath("userData") });
+	const catalogUpdater = new PiAiCatalogUpdater({
+		userDataDir: app.getPath("userData"),
+		// 目录更新/检测复用应用更新的 GitHub 镜像配置（settings.updateSource），
+		// 国内用户切镜像后自动走代理前缀，无需为目录单独维护一套源。
+		source: () => settingsStore.get().updateSource,
+		customHost: () => settingsStore.get().customUpdateSourceUrl,
+	});
 	// 后台更新检查：Windows / 支持自动升级的发行物走 electron-updater；
 	// macOS 当前未签 Developer ID，不能承诺稳定的替换/重启，因此只检测 Release 并交给用户手动安装。
 	// 两条路径都由同一个 UpdateService 快照推送渲染层，设置页能明确表达能力边界。
@@ -2929,6 +2939,24 @@ function registerIpc() {
 		xuePromptManager,
 		extensionManager,
 		projectResourceManager,
+		configManager,
+		projectTrustPath: (projectRoot, projectId) => {
+			const project = projectStore.get(projectId);
+			const settings = settingsStore.get();
+			if (
+				project?.environment === "wsl" &&
+				process.platform === "win32" &&
+				settings.wslEnabled &&
+				settings.wslDistro
+			) {
+				try {
+					return toWslLinuxPath(projectRoot, { distro: settings.wslDistro });
+				} catch {
+					return projectRoot;
+				}
+			}
+			return projectRoot;
+		},
 		appLogger,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 	});
@@ -3943,6 +3971,26 @@ app.whenReady().then(async () => {
 	quitCleanup.register("sound-alert", () => {
 		soundAlertService?.detach();
 		soundAlertService = null;
+	});
+
+	// 应用公告：无服务器拉取（仓库 announcements.json，jsDelivr → 内置镜像 → raw 兜底），
+	// 2h 周期 + 启动抖动；快照变化推给主窗口，已读集合持久化在 userData。
+	announcementService = new AnnouncementService({
+		userDataDir: app.getPath("userData"),
+		appVersion: app.getVersion(),
+		log: (domain, message, details) => void appLogger.info(domain, message, details),
+		onSnapshot: (state) => {
+			// 推送前判空 + isDestroyed：窗口销毁后 send 会抛
+			const win = mainWindow;
+			if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.announcementChanged, state);
+		},
+	});
+	announcementService.start();
+	registerAnnouncementIpc(() => announcementService);
+	// 退出清理登记（before-quit 统一 runAll）：停定时器，避免退出阶段仍触发拉取
+	quitCleanup.register("announcement", () => {
+		announcementService?.stop();
+		announcementService = null;
 	});
 
 	// 项目列表可能位于杀软/同步盘较慢的 userData；窗口先显示，随后异步加载，避免 packaged app 打开时白屏等待。

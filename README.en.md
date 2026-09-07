@@ -92,6 +92,8 @@
 - 🚀 **ZCode session import**
 - 🚀 **pi.dev extension store**
 - 🚀 **Provider groups sorted by recent use**
+- 🚀 **Serverless announcement system**
+- 🚀 **TokenDance one-click setup now grabs the API key too**
 - ✨ **Tool stopwatch no longer resets mid-stream**
 - ✨ **Vision-bridge model picker fits extra-long model names**
 - ✨ **Unified session turn counting**

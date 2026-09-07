@@ -106,7 +106,7 @@ const askUiMock = {
         : { value: value ?? "" }
   ),
   serializeBatchAnswers: () => "{}",
-  hasTextSelection: () => false,
+  shouldSuppressAskClick: () => false,
   parseSecurityConfirmTitle: () => null,
   formatAskTitle: (title) => title.replace(/^\[PI_DECK_PLAN_NEXT\]\s*/u, "").trim(),
   splitAskOption: (option) => ({ label: option }),

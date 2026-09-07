@@ -20,7 +20,7 @@ const api = (window as unknown as {
 	piDesktop: {
 		extensions: {
 			catalog: (query: PiPackageCatalogQuery) => Promise<PiPackageCatalog>;
-			install: (source: string) => Promise<string>;
+			install: (source: string, projectId?: string) => Promise<string>;
 		};
 	};
 }).piDesktop;
@@ -62,6 +62,8 @@ export function formatPublishedAt(timestamp?: number, locale?: string): string {
 export function ExtensionStoreTab(props: {
 	/** 已安装扩展列表：用于标记商店卡片「已安装」并禁用安装按钮 */
 	installedExtensions: PiExtensionSummary[];
+	/** Selected project id; omitted for global pi install. */
+	projectId?: string;
 	/** 安装成功后触发（父级刷新扩展列表） */
 	onInstalled?: () => void;
 }) {
@@ -129,7 +131,7 @@ export function ExtensionStoreTab(props: {
 		if (installing) return;
 		setInstalling(item.installSource);
 		try {
-			await api.extensions.install(item.installSource);
+			await api.extensions.install(item.installSource, props.projectId);
 			showNotice(t("config.extensionStoreInstalled", { name: item.name }), 2500);
 			props.onInstalled?.();
 		} catch (err) {

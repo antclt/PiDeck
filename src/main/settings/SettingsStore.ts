@@ -142,6 +142,8 @@ Gitmoji 对应关系：
   askNotificationEnabled: false,
   // 人文关怀提醒默认开启：用户可在设置中随时关闭
   agentCountReminderEnabled: true,
+  // 公告通知默认开启：新公告弹 toast 提醒（弹出时机另有忙碌延迟控制）
+  announcementNotificationEnabled: true,
   showThinking: readPiAgentShowThinking() ?? true,
   // 流式对话设置：默认自动展开中间过程（思考/工具详情随最新轮流式展开）；
   // 新一轮开始默认收起非最新轮（含手动展开的），用户可在设置中关闭。
@@ -270,6 +272,11 @@ export class SettingsStore {
       // 新增布尔开关按旧 settings.json 的缺省/脏数据回落，避免字符串值让 UI 或 pi env 误判。
       if (typeof this.settings.autoSessionTitle !== "boolean") {
         this.settings.autoSessionTitle = defaultSettings.autoSessionTitle;
+      }
+      // 公告通知开关同理：旧配置缺字段回落 true（默认开启），脏数据（字符串等）也回落。
+      if (typeof this.settings.announcementNotificationEnabled !== "boolean") {
+        this.settings.announcementNotificationEnabled =
+          defaultSettings.announcementNotificationEnabled;
       }
       // 兼容迁移：内置 CommitMono 字体已移除（打包瘦身），旧设置里的 "commit-mono"
       // 不再存在于 AppFontMonoMode 枚举，统一回退到系统等宽字体，避免类型漂移。

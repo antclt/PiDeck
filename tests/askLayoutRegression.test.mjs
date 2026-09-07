@@ -148,12 +148,17 @@ test("Long ask descriptions collapse to a preview with eye toggle", () => {
 test("Ask option clicks skip submit while text is selected", () => {
   // 选项/允许/拒绝是 button：划选结束后 mouseup 落在按钮上会冒充 click。
   // overlay submitValue + BatchQuestion true/false/select、安全卡 allow/deny
-  // 都必须在提交前探测 window 划选并跳过。TimelineEventCards 的 AskQuestionCard
-  // 死代码已删除（2026-08 清理），交互卡片统一由 SessionRuntimeUiOverlay 承载。
-  assert.match(overlay, /hasTextSelection/);
-  assert.match(securityCard, /hasTextSelection/);
-  const overlayGuards = overlay.match(/if \(hasTextSelection\(\)\) return;/g);
-  const securityGuards = securityCard.match(/if \(hasTextSelection\(\)\) return;/g);
+  // 都必须在提交前用按压感知守卫（shouldSuppressAskClick）判定并跳过——
+  // 只吞本次按压新拖出的选区；旧守卫直接查全局选区会把「划选复制/双击选词
+  // 之后的真实点击」也吞掉（ask 选项点很久才能勾上的根因，2026-09 修复）。
+  // TimelineEventCards 的 AskQuestionCard 死代码已删除（2026-08 清理），
+  // 交互卡片统一由 SessionRuntimeUiOverlay 承载。
+  assert.match(overlay, /shouldSuppressAskClick/);
+  assert.match(securityCard, /shouldSuppressAskClick/);
+  assert.doesNotMatch(overlay, /hasTextSelection/);
+  assert.doesNotMatch(securityCard, /hasTextSelection/);
+  const overlayGuards = overlay.match(/if \(shouldSuppressAskClick\(\)\) return;/g);
+  const securityGuards = securityCard.match(/if \(shouldSuppressAskClick\(\)\) return;/g);
   assert.ok(overlayGuards && overlayGuards.length >= 4);
   assert.ok(securityGuards && securityGuards.length >= 2);
 });

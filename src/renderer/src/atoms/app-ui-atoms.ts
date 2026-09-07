@@ -28,7 +28,7 @@ export type SettingsTabId =
 	| "dev"
 	| "im"
 	| "pet"
-	| "sound"
+	| "notification"
 	| "storage"
 	| "backup"
 	| "usage"

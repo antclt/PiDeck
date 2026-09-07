@@ -34,7 +34,7 @@ export const activeAgentIdAtom = selectAtom(
   (rt) => rt?.agentId,
 );
 
-// 后台 Ask 的 Toast 句柄跨 Tab 生命周期存在，不能放在单个 hook 实例的 ref 中。
+// Ask 提醒的 Toast 句柄跨 Tab 生命周期存在，不能放在单个 hook 实例的 ref 中。
 const backgroundAskNoticeIdMap = new Map<string, NoticeId>();
 
 // ── types ──
@@ -79,7 +79,7 @@ export interface UseSessionRuntimeControllerOptions {
     title?: string,
     actions?: NoticeActions,
   ) => NoticeId | undefined;
-  /** 后台 Ask 通知的「前往会话」动作：跳转到等待回答的会话（渲染层提供，不依赖主进程）。 */
+  /** Ask 提醒的「前往会话」动作：跳转到等待回答的会话（渲染层提供，不依赖主进程）。 */
   onFocusSession?: (sessionId: string) => void;
 }
 
@@ -208,7 +208,7 @@ export function useSessionRuntimeController(
     : undefined;
   const sessionHasProject = Boolean(activeProjectId);
 
-  // 后台 Ask 会跨 Tab 等待；去重 key 与 toast 句柄都由 renderer 进程级模块持有。
+  // Ask 提醒会跨 Tab 等待；去重 key 与 toast 句柄都由 renderer 进程级模块持有。
 
   useEffect(() => {
     const notification = currentSessionRuntimeUi?.notification;
@@ -243,7 +243,7 @@ export function useSessionRuntimeController(
 
       const key = `${sessionId}:${runtimeUi.runtimeGeneration}:${pendingAsk.request.requestId}`;
       pendingAskKeys.add(key);
-      if (sessionId === focusedSessionId) continue;
+      // 不按聚焦会话过滤：任何会话的 Ask（含当前 Tab）都弹 toast 提醒
       activeBackgroundKeys.add(key);
       if (!rememberBackgroundAsk(key)) continue;
       const display = describeBackgroundAsk({
@@ -262,7 +262,7 @@ export function useSessionRuntimeController(
       if (noticeId !== undefined) backgroundAskNoticeIdMap.set(key, noticeId);
     }
 
-    // 焦点切回原会话时只撤掉当前浮层；通知 key 保留到 Ask 真正完成，避免来回切换反复弹出。
+    // 仅当 Ask 不再 pending（已回答/取消）时撤掉对应浮层；通知 key 保留到 Ask 真正完成，避免来回切换反复弹出。
     for (const [key, noticeId] of backgroundAskNoticeIdMap) {
       if (activeBackgroundKeys.has(key)) continue;
       dismissNotice(noticeId);
