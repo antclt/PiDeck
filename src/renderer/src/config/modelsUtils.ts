@@ -18,7 +18,7 @@ export function buildModelsFromFetchedSelection(
 ): ModelItem[] {
 	const existingIds = new Set(existingModels.map((model) => model.id));
 	const selectedIds = new Set(selectedModelIds);
-	return fetchedModels
+	const result = fetchedModels
 		.filter((model) => selectedIds.has(model.id) && !existingIds.has(model.id))
 		.map((model) => {
 			const item: ModelItem = {
@@ -32,4 +32,9 @@ export function buildModelsFromFetchedSelection(
 			if (model.input && model.input.length > 0) item.input = model.input;
 			return item;
 		});
+	// 按模型名称（无名称时回退 id）字母正序排列，保证保存后模型表顺序稳定。
+	result.sort((a, b) =>
+		((a.name ?? a.id).toLowerCase()).localeCompare((b.name ?? b.id).toLowerCase()),
+	);
+	return result;
 }

@@ -1682,6 +1682,44 @@ const api = {
 				ipcChannels.configInstallImageGenSkill,
 			) as Promise<{ success: boolean; path?: string; error?: string }>,
 	},
+	configBackups: {
+		/** 列出全部配置备份（仅元数据）。 */
+		list: () =>
+			ipcRenderer.invoke(ipcChannels.configBackupList) as Promise<
+				import("../shared/types/backup").ConfigBackupListResult
+			>,
+		/** 立即创建一份配置备份（reason 只接受 manual；其余原因由主进程内部触发）。 */
+		create: (reason?: import("../shared/types/backup").ConfigBackupReason) =>
+			ipcRenderer.invoke(ipcChannels.configBackupCreate, reason ?? "manual") as Promise<
+				import("../shared/types/backup").ConfigBackupActionResult
+			>,
+		/** 读取备份详情（文件内容已脱敏）。 */
+		read: (id: string) =>
+			ipcRenderer.invoke(ipcChannels.configBackupRead, id) as Promise<
+				import("../shared/types/backup").ConfigBackupDetail | null
+			>,
+		/** 恢复备份（恢复前主进程自动为当前配置建 pre-restore 保护备份）。
+		 *  @param files 要恢复的文件 key 白名单（如 ["pi/models.json"]）；缺省 = 恢复全部。 */
+		restore: (id: string, files?: string[]) =>
+			ipcRenderer.invoke(ipcChannels.configBackupRestore, id, files) as Promise<
+				import("../shared/types/backup").ConfigBackupActionResult
+			>,
+		/** 删除单个备份。 */
+		delete: (id: string) =>
+			ipcRenderer.invoke(ipcChannels.configBackupDelete, id) as Promise<
+				import("../shared/types/backup").ConfigBackupActionResult
+			>,
+		/** 批量删除多个备份，返回实际删除数量。 */
+		deleteMany: (ids: string[]) =>
+			ipcRenderer.invoke(ipcChannels.configBackupDeleteMany, ids) as Promise<
+				import("../shared/types/backup").ConfigBackupDeleteManyResult
+			>,
+		/** 清空全部备份。 */
+		deleteAll: () =>
+			ipcRenderer.invoke(ipcChannels.configBackupDeleteAll) as Promise<
+				import("../shared/types/backup").ConfigBackupActionResult
+			>,
+	},
 	pet: {
 		/** 宠物窗监听主进程推送的聚合状态 */
 		onState: (callback: (state: PetAggregateState) => void) =>

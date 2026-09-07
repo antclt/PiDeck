@@ -20,6 +20,20 @@
 - **Git badge state survives tab switches** — Ahead/behind badges are cached per project + repo scope, so switching session tabs no longer blanks them (the cached value shows instantly and a background refresh corrects it shortly after).
 - **Calmer title scrolling** — Sidebar and tab title scrolling is unified to a constant 5px/s with no upper duration cap, so very long titles never turn into a fast flicker.
 
+### 🙏 Thanks
+
+Special thanks to **微时佬友** for providing the Grok model service used in our
+software development 🎉
+
+Thanks to **歌者、幕书、王女士** for their generous donations and support! 🎉
+
+Thanks to **sgafxh, r0y1z2, c834292137, bfzha** and all contributors for their
+code contributions 🙏
+
+Thanks to all group members who submitted suggestions and bug reports! 🙏
+
+> 💬 **QQ feedback group: 1026218644**
+
 ## v0.7.3 - 2026-09-03
 
 ### 🚀 New Features
@@ -89,8 +103,6 @@
 
 Special thanks to **微时佬友** for providing the Grok model service used in our
 community testing environment 🎉
-
-Thanks to **歌者、幕书、王女士** for their generous donations and support! 🎉
 
 Thanks to all group members who submitted suggestions and bug reports! 🙏
 

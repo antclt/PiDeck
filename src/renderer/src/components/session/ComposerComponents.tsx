@@ -69,8 +69,8 @@ import {
   readWelcomeModelPreference,
 } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
-import { CommandPickerGroup, CommandPickerPanel } from "../ui-shadcn/command-picker";
-import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, orderProviderGroups } from "./sessionPickerOptions";
+import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
+import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, orderProviderGroups } from "./sessionPickerOptions";
 import type {
 	AgentBackend,
 	AgentRuntimeState,
@@ -802,6 +802,8 @@ function CommandPickerDialog(props: {
 	showGroupActions?: boolean;
 	/** 默认展开的分组 id 集合（null = 默认全展开）；透传给 CommandPickerPanel。 */
 	defaultExpandedIds?: ReadonlySet<string> | null;
+	/** 搜索过滤函数；缺省用 cmdk 内置 fuzzy（仅模型选择器等长列表需要传精确子串过滤）。 */
+	filter?: CommandPickerFilter;
 	/** 标题栏操作（如模型列表手动刷新按钮）；渲染在折叠/展开按钮之后、关闭按钮之前 */
 	headerAction?: ReactNode;
 	children: ReactNode;
@@ -823,6 +825,7 @@ function CommandPickerDialog(props: {
 					value={props.value}
 					showGroupActions={props.showGroupActions}
 					defaultExpandedIds={props.defaultExpandedIds}
+					filter={props.filter}
 					headerAction={props.headerAction}
 					onClose={props.onClose}
 				>
@@ -1008,6 +1011,9 @@ export function ModelPicker(props: {
 			value={currentModelKey}
 			showGroupActions
 			defaultExpandedIds={defaultExpandedIds}
+			// 精确子串搜索：cmdk 默认 fuzzy 会让 1-2 字符词命中全部 tokendance 模型（见
+			// modelPickerSearchFilter 注释）；其他选择器（思考级别/预设）仍用默认 fuzzy。
+			filter={modelPickerSearchFilter}
 			// 手动刷新入口：标题栏右上角，任何情况下（含加载失败）都能重新拉取模型列表。
 			headerAction={
 				props.onRefresh ? (

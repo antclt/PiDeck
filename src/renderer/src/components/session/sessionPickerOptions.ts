@@ -126,6 +126,31 @@ export function orderProviderGroups(
 }
 
 /**
+ * 模型选择器搜索过滤：子串精确匹配（替代 cmdk 内置 fuzzy）。
+ *
+ * 为什么不用默认 fuzzy：cmdk 1.1 的 command-score 对「任意子序列」都返回 >0 即显示，
+ * 而每个模型的 keywords 都含供应商名（如 tokendance），1-2 字符搜索词（de/en/an 等）
+ * 会命中全部模型——表现为「搜索了但 tokendance 没被过滤」。子串匹配下：
+ * - 搜 "deepseek" 只显示 id/name 含 deepseek 的模型（不再误匹配 claude/glm 等子序列）；
+ * - 分隔符归一化保留容错："gpt4o" / "gpt-4o" / "gpt 4o" 互相命中；
+ * - 搜供应商名（如 tokendance）仍命中该供应商全部模型（value=provider/id 参与匹配）。
+ * 返回 cmdk filter 约定分数：1 = 命中，0 = 不显示。
+ */
+export function modelPickerSearchFilter(
+	value: string,
+	search: string,
+	keywords: string[] | undefined,
+): number {
+	const query = search.trim().toLowerCase();
+	if (!query) return 1;
+	// 只保留字母/数字/中文，去掉 - _ . / 空格等分隔符：模型 ID 常见 "gpt-4o"
+	// 形式，用户输入 "gpt4o" 也应命中；中文模型名（如「通义千问」）原样保留。
+	const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "");
+	const haystack = normalize(`${value} ${(keywords ?? []).join(" ")}`);
+	return haystack.includes(normalize(query)) ? 1 : 0;
+}
+
+/**
  * 模型选择器初始展开规则（「当前选中模型可见」驱动）：打开时只保证当前模型所在分组可见，
  * 其余提供商分组全部折叠。
  *

@@ -283,6 +283,7 @@ import { applyDesktopProxy } from "./settings/DesktopProxy";
 import { GitService } from "./git/GitService";
 import { WorktreeService } from "./git/WorktreeService";
 import { ConfigManager } from "./config/ConfigManager";
+import { ConfigBackupManager } from "./config/ConfigBackupManager";
 import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
@@ -324,6 +325,7 @@ import { VoiceTranscriptionService } from "./voice/VoiceTranscriptionService";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
 import { registerSystemIpc } from "./ipc/systemIpc";
+import { registerBackupIpc } from "./ipc/backupIpc";
 import { registerCatalogIpc } from "./ipc/catalogIpc";
 import { getPiAiCatalogIndex, lookupPiAiCatalogEntry, setPiAiCatalogUserDataDir } from "./pi/piAiBuiltinCatalog";
 import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
@@ -418,6 +420,7 @@ let dshAgentManager: DshAgentManager;
 /** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
 let compositeAgentGateway: CompositeAgentGateway | undefined;
 let configManager: ConfigManager;
+let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
 let skillManager: SkillManager;
@@ -2810,6 +2813,7 @@ function registerIpc() {
 		diagnosticsMonitor: diagnosticsMonitor ?? undefined,
 		environmentDoctor: environmentDoctor ?? undefined,
 		logBundleExporter: logBundleExporter ?? undefined,
+		configBackupManager: configBackupManager ?? undefined,
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
 		getDshHostPid: () => dshHost.getHostPid(),
@@ -2927,6 +2931,18 @@ function registerIpc() {
 		projectResourceManager,
 		appLogger,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
+	});
+
+	// 配置备份（config-backup:*）：恢复成功后重载 pideck 设置 + 刷新 pi 模型目录。
+	registerBackupIpc({
+		configBackupManager: configBackupManager!,
+		appLogger,
+		afterRestore: async () => {
+			// 恢复写回的是磁盘文件：pideck 设置需重新 load 进内存（其它 store 仍持旧值，
+			// UI 会提示重启生效）；pi 模型目录缓存刷新，避免恢复后仍用旧模型列表。
+			await settingsStore.load();
+			void piModelCapabilityCache?.refresh().catch(() => undefined);
+		},
 	});
 
 	registerTerminalIpc({
@@ -3050,6 +3066,14 @@ app.whenReady().then(async () => {
 				return undefined;
 			}
 		},
+	});
+	// 配置备份：pi 配置文件 + pideck 设置的快照（首次/升级自动建，保存时防抖建）。
+	// 依赖注入生效目录与 userData，WSL 切换后跟随 configManager.getConfigDir()。
+	configBackupManager = new ConfigBackupManager({
+		getConfigDir: () => configManager.getConfigDir(),
+		getUserDataDir: () => app.getPath("userData"),
+		getAppVersion: () => app.getVersion(),
+		onError: (message, detail) => void appLogger?.warn("backup", message, { detail }),
 	});
 	promptManager = new PromptManager(undefined, mainCopy);
 	// 注入设置读写：模板开关同步持久化禁用列表（--no-prompt-templates/--prompt-template
@@ -3774,6 +3798,9 @@ app.whenReady().then(async () => {
 	// 不能挡在 createWindow 前面（打包便携版表现为「启动没反应」，dev 因热路径较短不易复现）。
 	registerIpc();
 	registerFeishuIpc();
+	// 配置备份：首次使用（无备份）或版本升级（最新备份版本 ≠ 当前）时自动建一份。
+	// 同步快，不挡首帧；失败仅记录，不阻断启动。
+	configBackupManager?.ensureInitialBackups();
 	await createWindow();
 	setupTray();
 	// 粘贴文件启动清理：删除超过保留期的落盘文件（fire-and-forget，不挡首帧）

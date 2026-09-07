@@ -24,6 +24,13 @@ type CommandPickerContextValue = {
 	toggleGroup: (id: string) => void;
 };
 
+/** cmdk 过滤函数签名（value/keywords 参与匹配，返回分数，>0 显示）。 */
+export type CommandPickerFilter = (
+	value: string,
+	search: string,
+	keywords: string[] | undefined,
+) => number;
+
 const CommandPickerContext = createContext<CommandPickerContextValue>({
 	searchActive: false,
 	selection: INITIAL_PICKER_GROUP_SELECTION,
@@ -99,6 +106,12 @@ export function CommandPickerPanel(props: {
 	headerAction?: ReactNode;
 	/** 默认展开的分组 id 集合；null（缺省）= 默认全展开。未覆盖的分组始终跟随该集合（数据异步到达后自动生效）。 */
 	defaultExpandedIds?: ReadonlySet<string> | null;
+	/**
+	 * 过滤函数（缺省用 cmdk 内置 fuzzy 匹配）。模型选择器等长列表需要
+	 * 精确子串过滤：内置 fuzzy 对任意子序列都返回 >0，供应商名（如
+	 * "tokendance"）在 keywords 里会让 1-2 字符搜索词命中全部模型。
+	 */
+	filter?: CommandPickerFilter;
 	children: ReactNode;
 	className?: string;
 }) {
@@ -197,7 +210,7 @@ export function CommandPickerPanel(props: {
 					)}
 				</div>
 			</header>
-			<Command defaultValue={props.value} onValueChange={props.onValueChange} className="min-h-0 rounded-none">
+			<Command defaultValue={props.value} onValueChange={props.onValueChange} filter={props.filter} className="min-h-0 rounded-none">
 				<CommandInput
 					onValueChange={setSearch}
 					placeholder={props.searchPlaceholder}
