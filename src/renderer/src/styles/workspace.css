@@ -313,60 +313,6 @@
   display: grid;
   gap: 14px;
 }
-.prompt-store-search-bar {
-  display: grid;
-  gap: 10px;
-}
-.prompt-store-search-input-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 4px 4px 4px 12px;
-  background: var(--color-bg-panel);
-}
-.prompt-store-search-input-wrap:focus-within {
-  border-color: var(--color-accent);
-  box-shadow: var(--focus-ring);
-}
-.prompt-store-search-icon {
-  flex-shrink: 0;
-  color: var(--color-text-tertiary);
-}
-.prompt-store-search-input-wrap input {
-  flex: 1;
-  border: none;
-  background: none;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-control);
-  outline: none;
-  padding: 6px 0;
-}
-.prompt-store-search-input-wrap input::placeholder {
-  color: var(--color-text-tertiary);
-}
-.prompt-store-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.prompt-store-suggestion-chip {
-  padding: 4px 10px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-full);
-  background: var(--color-bg-muted);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.prompt-store-suggestion-chip:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
-}
-
 .prompt-store-results {
   display: grid;
   gap: 8px;

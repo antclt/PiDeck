@@ -244,7 +244,11 @@ export function ReasoningText({
           className,
         )}
       >
-        <span aria-hidden="true" className="inline-flex size-3 shrink-0 items-center justify-center">
+        {/* 指示器容器不再锁 size-3：beui 默认 ascii 单字符指示器（一个字符约 12px）
+            锁死没问题，但文本型指示器（scramble 的 LOADING）宽度由内容决定，
+            锁死宽度会让文字溢出盖住右侧短语。改成随内容自适应：
+            单字符指示器占位不变，文本指示器正常撑开。 */}
+        <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center">
           {indicator ?? (
             <Loader
               variant="ascii-line"

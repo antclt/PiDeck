@@ -981,6 +981,7 @@ export const zhCN = {
   "common.true": "是",
   "common.install": "安装",
   "common.installing": "安装中…",
+  "common.search": "搜索",
   "common.searching": "搜索中",
   "common.verified": "已认证",
   "common.versions": "个版本",
@@ -3670,6 +3671,7 @@ export const zhCN = {
   "announcements.section.read": "已读归档",
   "announcements.showMore": "展示更多公告 ({count})",
   "announcements.collapse": "收起",
+  "announcements.closeDetail": "关闭详情",
 } as const;
 
 export type TranslationKey = keyof typeof zhCN;

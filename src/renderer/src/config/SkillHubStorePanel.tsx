@@ -1,9 +1,9 @@
 // @ts-nocheck - SkillHub store panel, new feature
 import { Button } from "../components/ui-shadcn/button";
-import { Input } from "../components/ui-shadcn/input";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, Download, ArrowLeft, Check, AlertCircle, X, Trash2, BadgeCheck } from "lucide-react";
+import { Download, ArrowLeft, Check, AlertCircle, X, Trash2, BadgeCheck } from "lucide-react";
 import { t } from "../i18n";
+import { StoreSearchBar } from "./StoreSearchBar";
 import { showNotice } from "../utils/notice";
 import { desktopApi } from "../desktopApi";
 import type { SkillHubItem, SkillHubDetail, SkillHubSearchResult, SkillHubInstallResult, PiSkillListResult } from "../../../shared/types";
@@ -243,40 +243,18 @@ export function SkillHubStorePanel(props: { projectId?: string }) {
 	// Search / List view
 	return (
 		<div className="skillhub-panel">
-			<div className="skillhub-search-bar">
-				<div className="skillhub-search-input-wrap">
-					<Search size={15} strokeWidth={1.8} className="skillhub-search-icon" />
-					<Input
-						ref={searchInputRef}
-						type="text"
-						value={query}
-						onChange={(e) => setQuery(e.target.value)}
-						onKeyDown={handleKeyDown}
-						placeholder={t("config.skillHubSearchPlaceholder")}
-						disabled={searching}
-					/>
-					<Button
-						 size="sm" variant="default"
-						onClick={() => void handleSearch(query)}
-						disabled={searching || !query.trim()}
-					>
-						{searching ? t("common.searching") + "…" : <Search size={14} />}
-					</Button>
-				</div>
-				{!result && !searching && (
-					<div className="skillhub-suggestions">
-						{SUGGESTED_SEARCHES.map((s) => (
-							<button
-								key={s}
-								className="skillhub-suggestion-chip"
-								onClick={() => { setQuery(s); void handleSearch(s); }}
-							>
-								{s}
-							</button>
-						))}
-					</div>
-				)}
-			</div>
+			<StoreSearchBar
+				ref={searchInputRef}
+				value={query}
+				onChange={setQuery}
+				onKeyDown={handleKeyDown}
+				placeholder={t("config.skillHubSearchPlaceholder")}
+				searching={searching}
+				searchDisabled={!query.trim()}
+				onSearch={() => void handleSearch(query)}
+				suggestions={!result && !searching ? SUGGESTED_SEARCHES : undefined}
+				onSuggestionClick={(s) => { setQuery(s); void handleSearch(s); }}
+			/>
 
 			{error && <div className="mb-3.5 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">{error}</div>}
 			{searching && <div className="py-12 text-center text-control text-text-tertiary">{t("common.searching")}…</div>}

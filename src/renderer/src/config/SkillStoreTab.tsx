@@ -1,10 +1,10 @@
 import { Button } from "../components/ui-shadcn/button";
 import { showNotice } from "../utils/notice";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Download, ExternalLink, Search, Sparkles } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Sparkles } from "lucide-react";
 import type { PromptStoreItem, PromptStoreSearchResult, PiSkillSummary } from "../../../shared/types";
 import { t } from "../i18n";
-import { Input } from "../components/ui-shadcn/input";
+import { StoreSearchBar } from "./StoreSearchBar";
 
 const api = (window as unknown as { piDesktop: { skillStore: { search: (q: string) => Promise<PromptStoreSearchResult>; import: (item: PromptStoreItem, locationId?: string, projectId?: string) => Promise<PiSkillSummary> } } }).piDesktop;
 
@@ -117,36 +117,18 @@ export function SkillStoreTab(props: {
 
 	return (
 		<div className="prompt-store-tab">
-			<div className="prompt-store-search-bar">
-				<div className="prompt-store-search-input-wrap">
-					<Search size={15} strokeWidth={1.8} className="prompt-store-search-icon" />
-					<Input
-						ref={searchInputRef}
-						type="text"
-						value={query}
-					onChange={(e) => setQuery(e.target.value)}
-					onKeyDown={handleKeyDown}
-					placeholder={t("config.skillStoreSearchPlaceholder")}
-						disabled={searching}
-					/>
-					<Button
-						 size="sm" variant="default"
-						onClick={() => void handleSearch(query)}
-						disabled={searching || !query.trim()}
-					>
-					{searching ? t("config.promptStoreSearching") : <Search size={14} strokeWidth={1.8} />}
-					</Button>
-				</div>
-				{!result && !searching && (
-					<div className="prompt-store-suggestions">
-						{SUGGESTED_SEARCHES.map((s) => (
-							<Button key={s} variant="ghost" size="sm" className="prompt-store-suggestion-chip" onClick={() => { setQuery(s); void handleSearch(s); }}>
-								{s}
-							</Button>
-						))}
-					</div>
-				)}
-			</div>
+			<StoreSearchBar
+				ref={searchInputRef}
+				value={query}
+				onChange={setQuery}
+				onKeyDown={handleKeyDown}
+				placeholder={t("config.skillStoreSearchPlaceholder")}
+				searching={searching}
+				searchDisabled={!query.trim()}
+				onSearch={() => void handleSearch(query)}
+				suggestions={!result && !searching ? SUGGESTED_SEARCHES : undefined}
+				onSuggestionClick={(s) => { setQuery(s); void handleSearch(s); }}
+			/>
 
 			{error && <div className="mb-3.5 rounded-sm border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-control leading-relaxed text-danger whitespace-pre-line">{error}</div>}
 			{/* toast 已改用 sonner */}

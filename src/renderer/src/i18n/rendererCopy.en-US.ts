@@ -981,6 +981,7 @@ export const enUS: Record<TranslationKey, string> = {
   "common.true": "True",
   "common.install": "Install",
   "common.installing": "Installing…",
+  "common.search": "Search",
   "common.searching": "Searching",
   "common.verified": "Verified",
   "common.versions": "versions",
@@ -3705,5 +3706,6 @@ export const enUS: Record<TranslationKey, string> = {
   "announcements.section.read": "Archive",
   "announcements.showMore": "Show more ({count})",
   "announcements.collapse": "Collapse",
+  "announcements.closeDetail": "Close details",
 };
 
