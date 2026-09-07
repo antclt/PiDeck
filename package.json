@@ -63,6 +63,8 @@
     "runtime:check:boot": "node scripts/check-dsh-boot.mjs",
     "generate:pi-ai-catalog": "node scripts/generate-pi-ai-catalog.mjs",
     "check:pi-ai-catalog": "node scripts/generate-pi-ai-catalog.mjs --check",
+    "build:announcements": "node scripts/build-announcements.js",
+    "check:announcements": "node scripts/build-announcements.js --check",
     "pack:dev": "node scripts/pack-dev.js",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

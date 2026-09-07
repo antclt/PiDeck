@@ -21,7 +21,11 @@ export type AnnouncementItem = {
 	id: string;
 	/** 标题（单行短文案）。 */
 	title: string;
-	/** 正文（纯文本，支持 \n 换行；不做 markdown 渲染，控制攻击面）。 */
+	/**
+	 * 正文（markdown 文本）：列表卡片展示清洗后的短摘要，完整正文在详情弹窗经
+	 * MarkdownStream 的 sanitize 管线渲染（与会话消息同一渲染链，不新增注入面）；
+	 * markdown 结构可用（加粗/列表/链接等），大小上限 5000 字符（服务端校验）。
+	 */
 	body: string;
 	level: AnnouncementLevel;
 	/** 发布时间（ISO 8601）。 */

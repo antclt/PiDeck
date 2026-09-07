@@ -1,11 +1,12 @@
 /**
- * 公告中心：侧栏底栏入口按钮（含未读圆点）+ 弹窗列表。
+ * 公告中心：侧栏底栏入口按钮（含未读圆点）+ 弹窗列表 + 公告详情弹窗。
  *
  * 设计要点：
  * - 红点/角标与列表未读标记共用 unreadAnnouncementsAtom 派生（单一 owner，见 atoms）；
  * - 打开弹窗即标记全部已读（公告是低频广播，不做逐条已读的复杂交互）；
- * - 链接统一走 desktopApi.app.openExternal（forceSystem=true），公告正文是外部数据，
- *   不渲染 HTML/markdown，控制攻击面；
+ * - 列表卡片只展示清洗后的短摘要（announcementExcerpt），完整正文放「查看详情」
+ *   弹窗经 MarkdownStream 渲染——公告是外部数据，全量 md 渲染走会话消息同一套
+ *   sanitize 管线（streamdown 默认 rehype-sanitize），不新增注入面；
  * - 手动刷新失败静默提示（showNotice），不打断浏览。
  */
 import { useCallback, useState } from "react";
@@ -20,7 +21,9 @@ import {
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
+import { announcementExcerpt } from "../../utils/announcementExcerpt";
 import { showNotice } from "../../utils/notice";
+import { MarkdownStream } from "../session/MarkdownStream";
 import { Button } from "../ui-shadcn/button";
 import {
 	Dialog,
@@ -46,9 +49,13 @@ function levelToneClass(level: AnnouncementItem["level"]): string {
 	}
 }
 
-/** 单条公告卡片：标题 + 级别锚点 + 正文（保留换行）+ 可选链接。 */
-function AnnouncementCard(props: { item: AnnouncementItem; unread: boolean }) {
-	const { item, unread } = props;
+/** 单条公告卡片：标题 + 级别锚点 + 清洗后的短摘要 + 「查看详情」入口。 */
+function AnnouncementCard(props: {
+	item: AnnouncementItem;
+	unread: boolean;
+	onViewDetail: (item: AnnouncementItem) => void;
+}) {
+	const { item, unread, onViewDetail } = props;
 	return (
 		<article
 			className={cn(
@@ -67,25 +74,71 @@ function AnnouncementCard(props: { item: AnnouncementItem; unread: boolean }) {
 					{item.title}
 				</h4>
 			</header>
-			{/* 公告正文是外部数据：white-space 保留换行展示纯文本，绝不注入 HTML */}
-			<p className="mt-1.5 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
-				{item.body}
+			{/* 列表卡片不渲染 md（公告是外部数据）：摘要清洗标记 + 折叠空白 + 截断，
+			   完整正文放详情弹窗经 MarkdownStream 的 sanitize 管线渲染 */}
+			<p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+				{announcementExcerpt(item.body)}
 			</p>
 			<footer className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground/80">
 				<time dateTime={item.publishedAt}>{item.publishedAt.slice(0, 10)}</time>
-				<button
+				<Button
 					type="button"
-					className="text-[11px] underline-offset-2 hover:underline"
-					onClick={() =>
-						void desktopApi.app
-							.openExternal("https://github.com/ayuayue/PiDeck/discussions", true)
-							.catch(() => undefined)
-					}
+					variant="ghost"
+					size="sm"
+					className="h-auto p-0 text-[11px] text-muted-foreground/80 hover:text-foreground"
+					onClick={() => onViewDetail(item)}
 				>
-					{t("announcements.viewOnline")}
-				</button>
+					{t("announcements.viewDetail")}
+				</Button>
 			</footer>
 		</article>
+	);
+}
+
+/**
+ * 公告详情弹窗：完整正文经 MarkdownStream 渲染（light 模式，公告正文是外部数据，
+ * 走会话消息同一套 sanitize 管线；light 关闭图表/代码高亮等重渲染，静态场景更省内存）。
+ */
+function AnnouncementDetailDialog(props: {
+	item: AnnouncementItem | null;
+	onClose: () => void;
+}) {
+	const { item, onClose } = props;
+	return (
+		<Dialog
+			open={item !== null}
+			onOpenChange={(next) => {
+				if (!next) onClose();
+			}}
+		>
+			<DialogContent className="flex max-h-[75vh] flex-col sm:max-w-xl">
+				{item && (
+					<>
+						<DialogHeader>
+							<DialogTitle className={levelToneClass(item.level)}>{item.title}</DialogTitle>
+							<DialogDescription>
+								{t("announcements.publishedAt", {
+									time: item.publishedAt.slice(0, 10),
+								})}
+							</DialogDescription>
+						</DialogHeader>
+						<div className="min-h-0 flex-1 overflow-y-auto pr-1">
+							<MarkdownStream
+								text={item.body}
+								isStreaming={false}
+								light
+								// 正文里的外链走系统浏览器（与列表弹窗历史行为一致），失败静默
+								onOpenExternal={(url, forceSystem) => {
+									void desktopApi.app
+										.openExternal(url, forceSystem)
+										.catch(() => undefined);
+								}}
+							/>
+						</div>
+					</>
+				)}
+			</DialogContent>
+		</Dialog>
 	);
 }
 
@@ -95,6 +148,8 @@ function AnnouncementCard(props: { item: AnnouncementItem; unread: boolean }) {
  */
 export function AnnouncementCenter() {
 	const [refreshing, setRefreshing] = useState(false);
+	// 详情弹窗受控状态：null = 关闭；打开时与列表弹窗并存（列表在上层 Dialog）
+	const [detailItem, setDetailItem] = useState<AnnouncementItem | null>(null);
 	// 弹窗开关提升为 atom：toast「查看」按钮需要远程打开公告中心（单一 owner，见 announcement-atoms）
 	const open = useAtomValue(announcementCenterOpenAtom);
 	const setOpen = useSetAtom(announcementCenterOpenAtom);
@@ -119,6 +174,15 @@ export function AnnouncementCenter() {
 			})
 			.finally(() => setRefreshing(false));
 	}, []);
+
+	// 打开详情视为已浏览（与打开列表弹窗语义一致，markAllRead 幂等可重复调用）
+	const viewDetail = useCallback(
+		(item: AnnouncementItem) => {
+			setDetailItem(item);
+			markAllRead();
+		},
+		[markAllRead],
+	);
 
 	const items = state?.items ?? [];
 	const unreadCount = unread.length;
@@ -189,7 +253,12 @@ export function AnnouncementCenter() {
 							// 快照 items 有序（发布时间倒序）；已读集合转 Set 避免 O(n²)
 							const readSet = new Set(state?.readIds ?? []);
 							return items.map((item) => (
-								<AnnouncementCard key={item.id} item={item} unread={!readSet.has(item.id)} />
+								<AnnouncementCard
+									key={item.id}
+									item={item}
+									unread={!readSet.has(item.id)}
+									onViewDetail={viewDetail}
+								/>
 							));
 						})()
 					)}
@@ -212,6 +281,8 @@ export function AnnouncementCenter() {
 					)}
 				</DialogFooter>
 			</DialogContent>
+			{/* 详情弹窗（嵌套 Dialog）：列表弹窗之上展示完整正文，关闭只复位本弹窗 */}
+			<AnnouncementDetailDialog item={detailItem} onClose={() => setDetailItem(null)} />
 		</Dialog>
 	);
 }

@@ -56,6 +56,13 @@ src/
 └── shared/            # 主/渲染共享类型（按域拆分）与 IPC 通道定义
 ```
 
+### 公告维护与发布（announcements-md → announcements.json）
+
+- 公告的**唯一编辑入口**是 `announcements-md/*.md`（front matter + markdown 正文；目录内 `README.md` 是维护说明，脚本显式跳过）。**禁止手写仓库根 `announcements.json`**，客户端实际拉取的文件必须由脚本生成。
+- 发布流程：改 md → `npm run build:announcements`（`node scripts/build-announcements.js`）生成 json → md 与 json 一起 commit 到 `main` 分支。`npm run check:announcements`（`--check`）断言 json 与 md 逐字节一致，用于 CI 防手工改动漂移。
+- md 格式：front matter 必填 `id` / `title` / `level`(info|warn|critical) / `publishedAt` / `effectiveUntil`（ISO 8601），可选 `minVersion`（仅向更低版本客户端展示）；`id` 必须稳定唯一（渲染层已读去重 key）且不含空白；下线公告 = 删除对应 md 文件重新生成，或等 `effectiveUntil` 自然过期。
+- 渲染安全边界：公告是外部数据。**列表卡片只展示 `announcementExcerpt()` 清洗后的短摘要（不渲染 md）**；「查看详情」弹窗复用 `MarkdownStream`（light 模式）渲染完整正文——与会话消息同一套 streamdown sanitize 管线。禁止在列表卡片直接渲染 md 或引入第二条公告渲染链。
+
 ## 架构规则（硬性）
 
 1. **session-first**：会话是一等公民。新功能优先挂在 session/runtime 链路上，不要退回“围绕 agent tab 堆全局 state”。
