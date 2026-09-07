@@ -1854,11 +1854,11 @@ export function useSessionComposerController(
     dshDefaultThinkingLevel: isDshBackend
       ? (dshDefault?.reasoningEffort ?? dshDefault?.defaultEffort)
       : undefined,
-    /** 引导页（无 record）启动默认：主进程按 pi 配置/模型目录解析（显式默认 > 偏好 > 上次使用 > 空），展示用。 */
+    /** 引导页（无 record）预选默认：主进程按 pi 配置/模型目录解析（显式默认 > 切换列表 > 上次使用），展示用。
+     *  注：该 IPC 不传 welcomeModel（偏好只存在于渲染层 localStorage），引导页点选由
+     *  resolveGuideDisplayModel 在本值之上叠加，次序与主进程 resolveLaunchDefaultOptions 一致。 */
     bootstrapDefaultModel: bootstrapDefaults?.model,
     bootstrapDefaultThinkingLevel: bootstrapDefaults?.thinkingLevel,
-    /** 解析结果是否来自用户显式配置的默认模型：True 时欢迎页偏好不参与展示回退（与创建同规则）。 */
-    bootstrapDefaultModelConfigured: bootstrapDefaults?.defaultModelConfigured === true,
     draft,
     attachments,
     mode,

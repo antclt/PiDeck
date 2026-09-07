@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { computeModelDisplay, formatModelRef, resolveComposerLiveModel } = loadTsCommonJs(
+const { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel } = loadTsCommonJs(
   "src/renderer/src/utils/modelPendingDisplay.ts",
 );
 
@@ -103,6 +103,13 @@ test("契约: 运行中优先直接切换模型，后端 busy 时才排到下一
   assert.match(components, /app\.modelPendingTitle/);
   assert.match(components, /resolveComposerLiveModel/);
   assert.match(picker, /resolveComposerLiveModel/);
+  // 引导页展示决策必须走同一个纯函数：历史上 ComposerComponents 与 ComposerPickerHost
+  // 各写了一份「defaultModelConfigured 闸门」，与主进程四级来源不同序，导致
+  // 「配了默认模型就切不动」。这里锁住单一入口，防止再次分叉。
+  assert.match(components, /resolveGuideDisplayModel/);
+  assert.match(picker, /resolveGuideDisplayModel/);
+  assert.doesNotMatch(components, /defaultModelConfigured/);
+  assert.doesNotMatch(picker, /defaultModelConfigured/);
   assert.match(picker, /isLiveRuntimeStatus\(runtime\?\.status\)/);
 
   assert.match(picker, /setRuntimeModel/);
@@ -127,4 +134,43 @@ test("契约: 运行中优先直接切换模型，后端 busy 时才排到下一
   assert.match(sessionIpc, /ipcChannels\.sessionsRuntimeListModels/);
   assert.match(sessionIpc, /listRuntimeModels\(target\)/);
   assert.match(preload, /listRuntimeModels: \(target: SessionRuntimeTarget\)/);
+});
+
+// ---- 引导页（无 record）展示决策：必须与主进程 resolveLaunchDefaultOptions 同序 ----
+
+test("resolveGuideDisplayModel: 引导页点选优先于主进程预选默认", () => {
+  // 旧规则下这里会返回预选默认（openai/gpt-5），即用户报告的「切不动」。
+  assertDisplay(
+    resolveGuideDisplayModel({
+      isDsh: false,
+      welcomeModel: { provider: "anthropic", modelId: "claude-opus-4-6" },
+      defaultModel: { provider: "openai", modelId: "gpt-5", modelName: "GPT-5" },
+    }),
+    { provider: "anthropic", modelId: "claude-opus-4-6" },
+  );
+});
+
+test("resolveGuideDisplayModel: 无点选时用预选默认（显式默认/切换列表/上次使用的折叠结果）", () => {
+  assertDisplay(
+    resolveGuideDisplayModel({
+      isDsh: false,
+      defaultModel: { provider: "openai", modelId: "gpt-5", modelName: "GPT-5" },
+    }),
+    { provider: "openai", modelId: "gpt-5", modelName: "GPT-5" },
+  );
+});
+
+test("resolveGuideDisplayModel: DSH 忽略 pi 点选偏好（模型路由归 host settings）", () => {
+  assertDisplay(
+    resolveGuideDisplayModel({
+      isDsh: true,
+      welcomeModel: { provider: "anthropic", modelId: "claude-opus-4-6" },
+      defaultModel: { provider: "dsh-host", modelId: "agent-default" },
+    }),
+    { provider: "dsh-host", modelId: "agent-default" },
+  );
+});
+
+test("resolveGuideDisplayModel: 点选与预选都为空时返回 undefined（底栏退回「模型: -」）", () => {
+  assertDisplay(resolveGuideDisplayModel({ isDsh: false }), undefined);
 });
