@@ -220,8 +220,6 @@ import type {
 	SessionRuntimeEvent,
 	SessionRuntimeTarget,
 	SessionUiResponseInput,
-	CreatePiPromptTemplateInput,
-	CreatePiSkillInput,
 	PiPromptTemplateSummary,
 	PromptStoreSearchResult,
 	PromptStoreSearchResponse,
@@ -285,6 +283,7 @@ import { applyDesktopProxy } from "./settings/DesktopProxy";
 import { GitService } from "./git/GitService";
 import { WorktreeService } from "./git/WorktreeService";
 import { ConfigManager } from "./config/ConfigManager";
+import { ConfigBackupManager } from "./config/ConfigBackupManager";
 import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
@@ -296,6 +295,8 @@ import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensionResolvers";
+import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
+import { createPiProcessPromptResolvers } from "./prompts/piProcessPromptResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
 import { toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
@@ -324,6 +325,7 @@ import { VoiceTranscriptionService } from "./voice/VoiceTranscriptionService";
 import { VisionBridgeConfigManager } from "./settings/visionBridgeConfig";
 import { registerSessionIpc, scheduleCatalogBackgroundScan } from "./ipc/sessionIpc";
 import { registerSystemIpc } from "./ipc/systemIpc";
+import { registerBackupIpc } from "./ipc/backupIpc";
 import { registerCatalogIpc } from "./ipc/catalogIpc";
 import { getPiAiCatalogIndex, lookupPiAiCatalogEntry, setPiAiCatalogUserDataDir } from "./pi/piAiBuiltinCatalog";
 import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
@@ -418,6 +420,7 @@ let dshAgentManager: DshAgentManager;
 /** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
 let compositeAgentGateway: CompositeAgentGateway | undefined;
 let configManager: ConfigManager;
+let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
 let skillManager: SkillManager;
@@ -2733,12 +2736,19 @@ function registerIpc() {
 	// Phase 3.7 拆出 systemIpc 后这些可选依赖必须显式注入；
 	// 漏传 extensionManager 会导致 pi:update-check / pi:update 根本不注册。
 	if (!piModelCapabilityCache) throw new Error("Pi model capability cache is unavailable after settings load");
+	// 模型目录更新器：设置页手动更新与 UpdateService 第三路定时检查共用同一实例。
+	// 覆盖层目录须在 catalog 初次读取前登记（getPiAiCatalogIndex 首次调用即锁定索引）；
+	// app 已 ready 后 app.getPath("userData") 才可靠，故在此提前构造。
+	setPiAiCatalogUserDataDir(app.getPath("userData"));
+	const catalogUpdater = new PiAiCatalogUpdater({ userDataDir: app.getPath("userData") });
 	// 后台更新检查：Windows / 支持自动升级的发行物走 electron-updater；
 	// macOS 当前未签 Developer ID，不能承诺稳定的替换/重启，因此只检测 Release 并交给用户手动安装。
 	// 两条路径都由同一个 UpdateService 快照推送渲染层，设置页能明确表达能力边界。
 	const updateServiceBase = {
 		settingsStore,
 		checkPiUpdate: () => extensionManager.checkPiUpdate(),
+		// 模型目录：复用设置页同一检查链路（GitHub main 分支 manifest 比对），结果并入更新快照。
+		checkCatalogUpdate: () => catalogUpdater.checkRemote(),
 		sendToRenderer: (snapshot: import("../shared/types").AppUpdateStatusSnapshot) => {
 			if (mainWindow && !mainWindow.isDestroyed()) {
 				mainWindow.webContents.send(ipcChannels.appUpdateStatusChanged, snapshot);
@@ -2779,10 +2789,7 @@ function registerIpc() {
 		});
 	}
 	updateService.start();
-	// 模型目录更新：覆盖层目录须在 catalog 初次读取前登记（getPiAiCatalogIndex 首次
-	// 调用即锁定索引）；updater 在 ready 后构造，此时 app.getPath("userData") 才可靠。
-	setPiAiCatalogUserDataDir(app.getPath("userData"));
-	registerCatalogIpc(new PiAiCatalogUpdater({ userDataDir: app.getPath("userData") }));
+	registerCatalogIpc(catalogUpdater);
 	// TokenDance 目录 store 是共享实例：渲染层目录展示与一键安装（写入配置）读同一份缓存。
 	const tokendanceCatalogStore = new TokendanceCatalogStore({
 		getCachePath: () => join(app.getPath("userData"), "tokendance-models.json"),
@@ -2792,6 +2799,7 @@ function registerIpc() {
 		piLocator,
 		settingsStore,
 		configManager,
+		projectResourceManager,
 		agentManager,
 		skillManager,
 		appLogger,
@@ -2805,6 +2813,7 @@ function registerIpc() {
 		diagnosticsMonitor: diagnosticsMonitor ?? undefined,
 		environmentDoctor: environmentDoctor ?? undefined,
 		logBundleExporter: logBundleExporter ?? undefined,
+		configBackupManager: configBackupManager ?? undefined,
 		// 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送）
 		stopAgentFromMonitor,
 		getDshHostPid: () => dshHost.getHostPid(),
@@ -2919,8 +2928,21 @@ function registerIpc() {
 		skillManager,
 		xuePromptManager,
 		extensionManager,
+		projectResourceManager,
 		appLogger,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
+	});
+
+	// 配置备份（config-backup:*）：恢复成功后重载 pideck 设置 + 刷新 pi 模型目录。
+	registerBackupIpc({
+		configBackupManager: configBackupManager!,
+		appLogger,
+		afterRestore: async () => {
+			// 恢复写回的是磁盘文件：pideck 设置需重新 load 进内存（其它 store 仍持旧值，
+			// UI 会提示重启生效）；pi 模型目录缓存刷新，避免恢复后仍用旧模型列表。
+			await settingsStore.load();
+			void piModelCapabilityCache?.refresh().catch(() => undefined);
+		},
 	});
 
 	registerTerminalIpc({
@@ -3045,9 +3067,29 @@ app.whenReady().then(async () => {
 			}
 		},
 	});
+	// 配置备份：pi 配置文件 + pideck 设置的快照（首次/升级自动建，保存时防抖建）。
+	// 依赖注入生效目录与 userData，WSL 切换后跟随 configManager.getConfigDir()。
+	configBackupManager = new ConfigBackupManager({
+		getConfigDir: () => configManager.getConfigDir(),
+		getUserDataDir: () => app.getPath("userData"),
+		getAppVersion: () => app.getVersion(),
+		onError: (message, detail) => void appLogger?.warn("backup", message, { detail }),
+	});
 	promptManager = new PromptManager(undefined, mainCopy);
+	// 注入设置读写：模板开关同步持久化禁用列表（--no-prompt-templates/--prompt-template
+	// 白名单模式的依据），跨重启保留。
+	promptManager.configureSettings(
+		() => settingsStore.get(),
+		(patch) => settingsStore.update(patch),
+	);
 	xuePromptManager = new XuePromptManager();
 	skillManager = new SkillManager(undefined, mainCopy);
+	// 注入设置读写：技能开关同步持久化禁用列表（--no-skills/--skill 白名单模式的依据），
+	// 跨重启保留，不再只依赖 SKILL.md frontmatter（该标记仅阻止模型自动调用）。
+	skillManager.configureSettings(
+		() => settingsStore.get(),
+		(patch) => settingsStore.update(patch),
+	);
 	// 启动时自动安装内置 usage-probe 技能模板到用户全局技能目录：
 	// pi 只扫 ~/.pi/agent/skills、~/.agents/skills，不读 pideck 打包资源目录（resources/skills），
 	// 必须落到用户目录，用户才能在聊天里 /skill:usage-probe 让 AI 引导写用量探针配置。
@@ -3083,6 +3125,11 @@ app.whenReady().then(async () => {
 		() => settingsStore.get(),
 		(patch) => settingsStore.update(patch),
 		mainCopy,
+		{
+			appPath: app.getAppPath(),
+			resourcesPath: process.resourcesPath,
+			isDev: !app.isPackaged,
+		},
 	);
 	projectResourceManager = new ProjectResourceManager(
 		(projectId) => projectStore.get(projectId),
@@ -3600,12 +3647,25 @@ app.whenReady().then(async () => {
 				piRpcNoSkills: true,
 			},
 			piLocator,
-			// 与 AgentManager 同一套扩展解析（内置注入 + 禁用白名单），
+			// 与 AgentManager 同一套扩展/技能解析（内置注入 + 禁用白名单），
 			// 保证「选择器看到的模型」与「运行时实际加载的扩展」同源。
-			createPiProcessExtensionResolvers(
-				process.cwd(),
-				settingsStore.get(),
-			),
+			{
+				...createPiProcessExtensionResolvers(
+					process.cwd(),
+					settingsStore.get(),
+				),
+				// 技能白名单解析器同源注入；该进程固定 piRpcNoSkills（模型查询不需要技能），
+				// PiProcess 侧会因 noSkills 关闭白名单，此处仅为装配一致性。
+				...createPiProcessSkillResolvers(
+					process.cwd(),
+					settingsStore.get(),
+				),
+				// 提示词模板白名单解析器同源注入（与技能一致）。
+				...createPiProcessPromptResolvers(
+					process.cwd(),
+					settingsStore.get(),
+				),
+			},
 		),
 		getConfigDirectory: () => configManager.getConfigDir(),
 		watchDirectory: watchPiConfigDirectory,
@@ -3738,6 +3798,9 @@ app.whenReady().then(async () => {
 	// 不能挡在 createWindow 前面（打包便携版表现为「启动没反应」，dev 因热路径较短不易复现）。
 	registerIpc();
 	registerFeishuIpc();
+	// 配置备份：首次使用（无备份）或版本升级（最新备份版本 ≠ 当前）时自动建一份。
+	// 同步快，不挡首帧；失败仅记录，不阻断启动。
+	configBackupManager?.ensureInitialBackups();
 	await createWindow();
 	setupTray();
 	// 粘贴文件启动清理：删除超过保留期的落盘文件（fire-and-forget，不挡首帧）

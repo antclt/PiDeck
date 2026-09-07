@@ -194,6 +194,8 @@ Gitmoji 对应关系：
   idleAgentTimeoutMin: 60,
 
   favoriteModels: [],
+  // 提供商显示开关默认全显示：隐藏列表为空 = 不隐藏任何提供商
+  hiddenProviders: [],
 
   // ── 扩展管理 ──
   /** 用户手动移除的内置扩展，启动时跳过自动部署 */
@@ -202,6 +204,14 @@ Gitmoji 对应关系：
   disabledExtensions: [],
   /** 白名单总开关：true 时不走 -e 注入，默认加载全部扩展（防御启动失败） */
   disableExtensionWhitelist: false,
+
+  // ── 技能管理 ──
+  /** 用户禁用的全局技能名（小写 name）；非空时 RPC 启动走 --no-skills + --skill 白名单 */
+  disabledSkills: [],
+
+  // ── 提示词模板管理 ──
+  /** 用户禁用的全局提示词模板名（小写 name）；非空时 RPC 启动走 --no-prompt-templates + --prompt-template 白名单 */
+  disabledPrompts: [],
 
   // 生图参数：记在 composer 底栏，跨会话复用；缺省不指定分辨率、不带水印
   imageGenSize: DEFAULT_IMAGE_GEN_SIZE,
@@ -389,8 +399,36 @@ export class SettingsStore {
       const prev = this.settings.lastUsedModel;
       const next = safePatch.lastUsedModel;
       if (!next || (prev && prev.provider === next.provider && prev.modelId === next.modelId)) {
-        return this.get();
+        // 值相同（含非法被丢弃）则从本次 patch 中剔除，避免无意义写盘与审计刷屏；
+        // 不能直接 return：同一次 update 可能还携带 recentProviders 等需要落盘的字段。
+        delete safePatch.lastUsedModel;
       }
+    }
+    // recentProviders 只接受字符串数组（最新在前）：去重、去空、截断到 8 个。
+    // 与 lastUsedModel 一样在 sendPrompt 接受时写入，入参不可信；旧数据缺省为 []（不排序）。
+    // 内容无变化（含非法被清空后为空）从 patch 中剔除：发送每条消息都会调用，避免高频写盘。
+    if ("recentProviders" in safePatch) {
+      const candidate = safePatch.recentProviders;
+      const cleaned: string[] = [];
+      const seen = new Set<string>();
+      if (Array.isArray(candidate)) {
+        for (const item of candidate) {
+          if (typeof item === "string" && item.length > 0 && !seen.has(item)) {
+            seen.add(item);
+            cleaned.push(item);
+            if (cleaned.length >= 8) break;
+          }
+        }
+      }
+      const prev = this.settings.recentProviders ?? [];
+      const unchanged =
+        cleaned.length === prev.length && cleaned.every((item, index) => item === prev[index]);
+      if (unchanged) delete safePatch.recentProviders;
+      else safePatch.recentProviders = cleaned;
+    }
+    // 所有字段都被去重剔除后没有可写内容：直接返回，避免空 patch 仍触发一次写盘。
+    if (Object.keys(safePatch).length === 0) {
+      return this.get();
     }
     // 忙碌时投递行为来自渲染层，非法值丢掉，避免发送链路带着坏语义。
     if ("busySendDelivery" in safePatch) {

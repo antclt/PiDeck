@@ -23,11 +23,8 @@ import type {
 } from "../../../../shared/types";
 import { t } from "../../i18n";
 import { Input } from "../ui-shadcn/input";
-import { Textarea } from "../ui-shadcn/textarea";
-import { Label } from "../../components/ui-shadcn/label";
 import { Alert, AlertDescription } from "../ui-shadcn/alert";
 import { Badge } from "../ui-shadcn/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui-shadcn/card";
 import { ScrollArea } from "../ui-shadcn/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
 
@@ -44,20 +41,22 @@ export function ProjectResourcesModal(props: {
 	project: Project;
 	onClose: () => void;
 }) {
-	const [data, setData] = useState<ProjectResourceListResult>({ skills: [], extensions: [] });
+	const [data, setData] = useState<ProjectResourceListResult>({
+		skills: [],
+		extensions: [],
+		skillLocations: [],
+		overrides: {
+			disabledGlobalExtensions: [],
+			disabledGlobalSkills: [],
+			disabledGlobalPrompts: [],
+		},
+	});
 	const [prompts, setPrompts] = useState<PiPromptTemplateSummary[]>([]);
 	const [promptsLoading, setPromptsLoading] = useState(false);
 	const [loading, setLoading] = useState(true);
-	const [createBusy, setCreateBusy] = useState(false);
 	const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 	const [deleteBusy, setDeleteBusy] = useState(false);
 	const [activeTab, setActiveTab] = useState<ProjectResourceTab>("skills");
-	const [newName, setNewName] = useState("");
-	const [newDescription, setNewDescription] = useState("");
-	// 项目 prompt 创建状态
-	const [newPromptName, setNewPromptName] = useState("");
-	const [newPromptDescription, setNewPromptDescription] = useState("");
-	const [creatingPrompt, setCreatingPrompt] = useState(false);
 	// 项目 prompt 编辑器状态
 	const [editingProjectPrompt, setEditingProjectPrompt] = useState<PiPromptTemplateSummary | null>(null);
 	const [editProjectPromptContent, setEditProjectPromptContent] = useState("");
@@ -101,13 +100,13 @@ export function ProjectResourcesModal(props: {
 		setPromptsLoading(true);
 		setError(null);
 		try {
-			const result = await window.piDesktop.prompts.listByProject(props.project.path);
+			const result = await window.piDesktop.prompts.listByProject(props.project.id);
 			setPrompts(result.templates);
 		} catch (err) {
 			setPrompts([]);
 		}
 		setPromptsLoading(false);
-	}, [props.project.path]);
+	}, [props.project.id]);
 
 	/** 进入提示词 tab 时自动加载 */
 	useEffect(() => {
@@ -123,31 +122,6 @@ export function ProjectResourcesModal(props: {
 		}
 	}, [refresh, loadPrompts, chatProject]);
 
-	const canCreateSkill = useMemo(
-		() => newName.trim().length > 0 && newDescription.trim().length > 0,
-		[newName, newDescription],
-	);
-
-	const createSkill = async () => {
-		if (!canCreateSkill || createBusy) return;
-		setCreateBusy(true);
-		setError(null);
-		try {
-			await api.createSkill({
-				projectId: props.project.id,
-				name: newName.trim(),
-				description: newDescription.trim(),
-			});
-			setNewName("");
-			setNewDescription("");
-			await refresh();
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setCreateBusy(false);
-		}
-	};
-
 	const confirmDelete = async () => {
 		if (!deleteTarget || deleteBusy) return;
 		setDeleteBusy(true);
@@ -158,11 +132,10 @@ export function ProjectResourcesModal(props: {
 			} else if (deleteTarget.kind === "extension" && deleteTarget.item.path) {
 				await api.deleteExtension(props.project.id, deleteTarget.item.path);
 			} else if (deleteTarget.kind === "prompt") {
-				// 用文件名删除项目级 prompt
-				const fileName = deleteTarget.item.path.split(/[/\\]/).pop();
-				if (fileName) {
-					await window.piDesktop.prompts.deleteFromProject(props.project.path, fileName);
-				}
+				await window.piDesktop.prompts.deleteFromProject(
+					props.project.id,
+					deleteTarget.item.name,
+				);
 			}
 			setDeleteTarget(null);
 			await Promise.all([refresh(), loadPrompts()]);
@@ -199,7 +172,11 @@ export function ProjectResourcesModal(props: {
 		setEditLoading(true);
 		setError(null);
 		try {
-			const content = await window.piDesktop.files.readContent(skill.path);
+			const content = await window.piDesktop.files.readContent(
+				skill.path,
+				undefined,
+				{ projectId: props.project.id },
+			);
 			setEditContent(content);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -215,7 +192,11 @@ export function ProjectResourcesModal(props: {
 		setEditSaving(true);
 		setError(null);
 		try {
-			await window.piDesktop.files.writeContent(editingSkill.path, editContent);
+			await window.piDesktop.files.writeContent(
+				editingSkill.path,
+				editContent,
+				{ projectId: props.project.id },
+			);
 			setEditSaved(true);
 			window.setTimeout(() => setEditSaved(false), 2000);
 			// 保存后刷新列表，让 readSkill 读到最新 frontmatter
@@ -262,9 +243,10 @@ export function ProjectResourcesModal(props: {
 	};
 
 	const toggleExtension = async (extension: PiExtensionSummary) => {
+		if (!extension.path) return;
 		const nextEnabled = extension.enabled !== false ? false : true;
 		try {
-			await api.toggleExtension(props.project.id, extension.path!, nextEnabled);
+			await api.toggleExtension(props.project.id, extension.path, nextEnabled);
 			setData((prev) => ({
 				...prev,
 				extensions: prev.extensions.map((e) =>
@@ -276,29 +258,6 @@ export function ProjectResourcesModal(props: {
 		}
 	};
 
-	// ── 项目级 prompt 操作 ──
-
-	const canCreatePrompt = newPromptName.trim().length > 0 && newPromptDescription.trim().length > 0;
-
-	const createProjectPrompt = async () => {
-		if (!canCreatePrompt || creatingPrompt) return;
-		setCreatingPrompt(true);
-		setError(null);
-		try {
-			await window.piDesktop.prompts.createInProject(props.project.path, {
-				name: newPromptName.trim(),
-				description: newPromptDescription.trim(),
-			});
-			setNewPromptName("");
-			setNewPromptDescription("");
-			await loadPrompts();
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setCreatingPrompt(false);
-		}
-	};
-
 	const openProjectPromptEditor = async (prompt: PiPromptTemplateSummary) => {
 		setEditingProjectPrompt(prompt);
 		setEditProjectPromptContent("");
@@ -306,7 +265,11 @@ export function ProjectResourcesModal(props: {
 		setEditProjectPromptSaved(false);
 		setError(null);
 		try {
-			const content = await window.piDesktop.files.readContent(prompt.path);
+			const content = await window.piDesktop.files.readContent(
+				prompt.path,
+				undefined,
+				{ projectId: props.project.id },
+			);
 			setEditProjectPromptContent(content);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -321,7 +284,11 @@ export function ProjectResourcesModal(props: {
 		setEditProjectPromptSaving(true);
 		setError(null);
 		try {
-			await window.piDesktop.files.writeContent(editingProjectPrompt.path, editProjectPromptContent);
+			await window.piDesktop.files.writeContent(
+				editingProjectPrompt.path,
+				editProjectPromptContent,
+				{ projectId: props.project.id },
+			);
 			setEditProjectPromptSaved(true);
 			window.setTimeout(() => setEditProjectPromptSaved(false), 2000);
 			await loadPrompts();
@@ -438,27 +405,6 @@ export function ProjectResourcesModal(props: {
 					</div>
 				) : activeTab === "skills" ? (
 					<div className="project-resources-body">
-						<Card className="project-skill-create">
-							<CardHeader className="gap-1 px-0 py-0">
-								<CardTitle className="text-sm">{t("projectResources.createSkill")}</CardTitle>
-								<CardDescription>{t("projectResources.createSkillHint")}</CardDescription>
-							</CardHeader>
-							<CardContent className="grid gap-3 px-0 pb-0">
-								{/* 两列宽度保证中文字段名完整显示，同时把输入控件的剩余空间固定留给内容。 */}
-								<Label className="project-resources-name-field grid w-full grid-cols-[4rem_minmax(0,1fr)] items-center gap-2">
-									<span>{t("config.name")}</span>
-									<Input value={newName} placeholder="my-project-skill" onChange={(event) => setNewName(event.target.value)} />
-								</Label>
-								<Label className="project-resources-desc-field grid w-full grid-cols-[4rem_minmax(0,1fr)] items-start gap-2">
-									<span className="pt-2">{t("config.description")}</span>
-									<Textarea value={newDescription} placeholder="Use when..." onChange={(event) => setNewDescription(event.target.value)} />
-								</Label>
-								<Button variant="default" onClick={createSkill} disabled={!canCreateSkill || createBusy}>
-									<Code2 data-icon="inline-start" aria-hidden="true" />
-									{createBusy ? t("projectResources.creatingSkillAction") : t("projectResources.createSkillAction")}
-								</Button>
-							</CardContent>
-						</Card>
 						<div className="project-resources-list-header">
 							<strong>{t("projectResources.skillsTab", { count: data.skills.length })}</strong>
 							<Badge variant="secondary">{data.skills.length}</Badge>
@@ -502,7 +448,7 @@ export function ProjectResourcesModal(props: {
 										</span>
 									</div>
 									<small>{skill.description || t("config.skillDescriptionMissing")}</small>
-								<small>{skill.sourceLabel} · {skill.path}</small>
+								<small>{skill.sourceLabel}</small>
 								</button>
 								<div className="skill-card-actions project-resource-actions">
 									{/* 操作入口保持常驻，删除/编辑不依赖 hover；shadcn ghost 图标按钮统一尺寸 */}
@@ -525,9 +471,9 @@ export function ProjectResourcesModal(props: {
 									<Button
 										variant="ghost"
 										size="icon-sm"
+										className={`size-7${skill.enabled ? " text-primary" : ""}`}
 										onClick={() => void toggleSkill(skill)}
 										title={skill.enabled ? t("common.disable") : t("common.enabled")}
-										style={skill.enabled ? { color: "var(--color-accent)" } : undefined}
 									>
 										{skill.enabled ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
 									</Button>
@@ -547,7 +493,7 @@ export function ProjectResourcesModal(props: {
 					</div>
 				) : activeTab === "extensions" ? (
 					<div className="project-resources-body">
-						<div className="project-resources-list-header col-span-2">
+						<div className="project-resources-list-header">
 							<strong>{t("projectResources.extensionsTab", { count: data.extensions.length })}</strong>
 							<Badge variant="secondary">{data.extensions.length}</Badge>
 						</div>
@@ -563,15 +509,14 @@ export function ProjectResourcesModal(props: {
 										</Badge>
 										<Badge variant="outline">{t("projectResources.projectScope")}</Badge>
 									</div>
-									<small>{extension.path}</small>
 								</div>
 								<div className="skill-card-actions project-resource-actions">
 									<Button
 										variant="ghost"
 										size="icon-sm"
+										className={`size-7${extension.enabled !== false ? " text-primary" : ""}`}
 										onClick={() => void toggleExtension(extension)}
 										title={extension.enabled !== false ? t("common.disable") : t("common.enabled")}
-										style={extension.enabled !== false ? { color: "var(--color-accent)" } : undefined}
 									>
 										{extension.enabled !== false ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
 									</Button>
@@ -616,26 +561,6 @@ export function ProjectResourcesModal(props: {
 					</div>
 				) : (
 					<div className="project-resources-body">
-						<Card className="project-skill-create">
-							<CardHeader className="gap-1 px-0 py-0">
-								<CardTitle className="text-sm">{t("projectResources.createPrompt")}</CardTitle>
-								<CardDescription>{t("projectResources.projectScope")}</CardDescription>
-							</CardHeader>
-							<CardContent className="grid gap-3 px-0 pb-0">
-								<Label className="project-resources-name-field grid w-full grid-cols-[4rem_minmax(0,1fr)] items-center gap-2">
-									<span>{t("config.name")}</span>
-									<Input value={newPromptName} placeholder="my-project-prompt" onChange={(event) => setNewPromptName(event.target.value)} />
-								</Label>
-								<Label className="project-resources-desc-field grid w-full grid-cols-[4rem_minmax(0,1fr)] items-start gap-2">
-									<span className="pt-2">{t("config.description")}</span>
-									<Textarea value={newPromptDescription} placeholder="Use when..." onChange={(event) => setNewPromptDescription(event.target.value)} />
-								</Label>
-								<Button variant="default" onClick={createProjectPrompt} disabled={!canCreatePrompt || creatingPrompt}>
-									<MessageSquareText data-icon="inline-start" aria-hidden="true" />
-									{creatingPrompt ? t("projectResources.creatingPromptAction") : t("projectResources.createPromptAction")}
-								</Button>
-							</CardContent>
-						</Card>
 						<div className="project-resources-list-header">
 							<strong>{t("projectResources.promptsTab", { count: prompts.length })}</strong>
 							<Badge variant="secondary">{prompts.length}</Badge>
@@ -655,7 +580,6 @@ export function ProjectResourcesModal(props: {
 										<strong>/{prompt.name}</strong>
 									</div>
 									<small>{prompt.description}</small>
-									<small>{prompt.path}</small>
 								</button>
 								<div className="skill-card-actions project-resource-actions">
 									<Button

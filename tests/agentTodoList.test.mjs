@@ -4,6 +4,7 @@ import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
 import { twMerge } from "tailwind-merge";
+import { parseTodoSnapshotData } from "../src/shared/sessionTodo.ts";
 
 // 官方 BeUI Todo List 迁移后：组件源码在 agents/todo-list.tsx（官方结构忠实拷贝），
 // widget 行→TodoItem 的解析器移入 session/agentTodoParser.ts（纯函数）。
@@ -255,6 +256,7 @@ test("parser preserves insertion order for completed items (2027-01 widget contr
 
 test("pi-deck-todo extension emits a stable plan identity and in-order item rows", () => {
 	const ext = readFileSync("resources/extensions/pi-deck-todo.ts", "utf8");
+	const state = readFileSync("resources/extensions/pi-deck-todo-state.ts", "utf8");
 	// 完成项原位保留：不再按状态分组沉底，也不再有「最近完成」区段
 	assert.doesNotMatch(ext, /── 已完成 ──/);
 	assert.doesNotMatch(ext, /── 最近完成 ──/);
@@ -262,11 +264,19 @@ test("pi-deck-todo extension emits a stable plan identity and in-order item rows
 	assert.doesNotMatch(ext, /cleanupCompleted/);
 	// 内置 widget 的计划身份进入原始行数组，renderer 可用它区分相同文本的新计划。
 	assert.match(ext, /PLAN_METADATA_PREFIX/);
-	assert.match(ext, /planMetadataLine\(activePlan\.id\)/);
+	assert.match(ext, /planMetadataLine\(nonEmptyString\(ctx\.sessionManager\.getLeafId\(\)\), activePlan\.id\)/);
 	// 扩展不再输出自有折叠摘要，展开/折叠统一归 renderer 管理。
 	assert.doesNotMatch(ext, /widgetCollapsed/);
-	// 新契约：按插入顺序输出全部条目，完成态由 ☑ 标记表达
-	assert.match(ext, /activePlan\.todos\.map\(\(todo\) => `\$\{todo\.done \? "☑" : "☐"\} #\$\{todo\.id\} \$\{todo\.text\}`\)/);
+	// 三态 widget 行由独立状态模块格式化：☑/◐/☐ + #id + text，纯模块不依赖 pi API
+	assert.match(state, /formatTodoWidgetLine/);
+	assert.match(state, /☑/);
+	assert.match(state, /◐/);
+	assert.match(state, /formatTodoStatusMarker/);
+	assert.doesNotMatch(state, /from "@earendil-works\/pi/);
+	assert.doesNotMatch(state, /from "typebox"/);
+	// 旧 toggle/done 契约彻底移除：schema/提示词/来源里都不允许出现
+	assert.doesNotMatch(ext, /toggle/);
+	assert.doesNotMatch(ext, /\.done/);
 	// session_start 不再清理已完成项，只有 replace / clear 显式改变计划边界。
 	assert.doesNotMatch(ext, /cleanupCompleted\(ctx\)/);
 	assert.match(ext, /case "replace"/);
@@ -307,6 +317,37 @@ test("parser ids are stable across status toggles and line insertions", () => {
 	// 同标题消歧：出现两次时第二个 id 带序号，不会 key 冲突
 	const dup = parseAgentTodoItems(["☐ 写文档", "☐ 写文档"]);
 	assert.notEqual(dup[0].id, dup[1].id);
+});
+
+test("sessionTodoSnapshotToItems maps v3 three states and reuses the widget parse path", () => {
+	const { sessionTodoSnapshotToItems } = loadParser();
+	// vm 编译模块的 plain object 原型属另一 realm，按字段断言（与同文件既有 parser 测试同口径）。
+	const items = sessionTodoSnapshotToItems({
+		planId: 2,
+		todos: [
+			{ id: 15, text: "主进程读取", status: "pending" },
+			{ id: 22, text: "文件 tab", status: "in_progress" },
+			{ id: 26, text: "发版", status: "completed" },
+		],
+	});
+	assert.equal(items.length, 3);
+	// 展开成宿主 realm 数组再 deepEqual，避免 vm realm 的原型差异（同文件既有 parser 测试同口径）。
+	assert.deepEqual([...items.map((item) => item.title)], ["主进程读取", "文件 tab", "发版"]);
+	assert.deepEqual([...items.map((item) => item.status)], ["pending", "in-progress", "completed"]);
+	assert.equal(items[0].id, "主进程读取");
+	assert.equal(items[1].id, "文件 tab");
+	assert.equal(items[2].id, "发版");
+});
+
+test("sessionTodoSnapshotToItems: legacy done shape is no longer supported", () => {
+	const { sessionTodoSnapshotToItems } = loadParser();
+	// 旧 done 布尔形状在解析链最上游整体丢弃：parseTodoSnapshotData 视为无计划返回
+	// undefined，转换器收到 undefined 得到空数组（「旧格式视为无计划」）。
+	// 不再直接喂原始 done 形状给 sessionTodoSnapshotToItems——那会把旧项渲染成
+	// pending，与旧格式视为无计划矛盾，且真实链路（SessionTodoStrip 只接 parse 结果）不可达。
+	const parsed = parseTodoSnapshotData({ todos: [{ id: 7, text: "旧任务", done: true }] });
+	assert.equal(parsed, undefined);
+	assert.deepEqual([...sessionTodoSnapshotToItems(parsed)], []);
 });
 
 test("parser is a pure module without runtime imports (import type only)", () => {

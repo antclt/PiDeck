@@ -965,17 +965,6 @@ export const UserBubble = memo(function UserBubble(props: {
 	// 提取 pi 展开后的 <skill> 块：渲染为 skill 徽标，并从正文里剥除 XML
 	const { skills, text: bodyText } = extractSkillBlocks(vision.text);
 	const cleanText = bodyText;
-	// 投递策略标签：steer(下次调用前插入) / followUp(停止后排队)
-	const deliveryBehavior = message.meta?.streamingBehavior as
-		| "steer"
-		| "followUp"
-		| undefined;
-	const deliveryLabel =
-		deliveryBehavior === "steer"
-			? t("app.messageDeliverySteer")
-			: deliveryBehavior === "followUp"
-				? t("app.messageDeliveryFollowUp")
-				: null;
 	/** 原地编辑不影响输入框；先提交给确认弹窗。 */
 	const handleSaveEdit = () => {
 		if (props.onEditMessage && editText.trim()) {
@@ -1200,20 +1189,6 @@ export const UserBubble = memo(function UserBubble(props: {
 				</div>
 			)}
 			<div className="mt-1 inline-flex items-center gap-2 text-[11px] tabular-nums text-text-tertiary">
-				{deliveryLabel && (
-					<span
-						className={`inline-flex h-[18px] items-center rounded-full border border-[color-mix(in_srgb,var(--color-accent)_24%,var(--color-border-subtle))] bg-[var(--color-accent-soft)] px-[7px] font-mono text-[11px] font-semibold leading-none text-[var(--color-accent)]${
-							deliveryBehavior === "followUp" ? " border-[color-mix(in_srgb,var(--color-info)_20%,var(--color-border-subtle))] bg-[color:color-mix(in_srgb,var(--color-info)_10%,var(--color-bg-panel))] text-[var(--color-info)]" : ""
-						}`}
-						title={
-							deliveryBehavior === "followUp"
-								? t("app.messageDeliveryFollowUpTitle")
-								: t("app.messageDeliverySteerTitle")
-						}
-					>
-						{deliveryLabel}
-					</span>
-				)}
 				<time>{formatTime(message.timestamp)}</time>
 			</div>
 			<div className="user-turn-actions flex min-h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">

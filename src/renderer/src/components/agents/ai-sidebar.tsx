@@ -288,7 +288,7 @@ function MarqueeLabel({ active, children }: { active: boolean; children: string 
         transition={
           running
             ? {
-                // 与侧栏 TitleScrollText 保持一致：5px/s 匀速滚动，长短标题速度相同
+                // 独立跑马灯实现：保持自身 5px/s 匀速滚动，避免改变该组件行为
                 // （原版 beui 为 distance/34 + 2.4s 下限，速度明显偏快）。
                 duration: distance / 5,
                 ease: "linear",

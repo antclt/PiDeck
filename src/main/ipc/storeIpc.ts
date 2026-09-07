@@ -18,12 +18,15 @@ import type { PromptManager } from "../prompts/PromptManager";
 import type { SkillManager } from "../skills/SkillManager";
 import type { XuePromptManager } from "../prompts/XuePromptManager";
 import type { ExtensionManager } from "../extensions/ExtensionManager";
+import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
+import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
 	skillManager: SkillManager;
 	xuePromptManager: XuePromptManager;
 	extensionManager: ExtensionManager;
+	projectResourceManager: ProjectResourceManager;
 	appLogger: AppLogger;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 };
@@ -33,53 +36,120 @@ export function registerStoreIpc({
 	skillManager,
 	xuePromptManager,
 	extensionManager,
+	projectResourceManager,
 	appLogger,
 	mainCopy,
 }: StoreIpcDeps): void {
+	const requireText = (value: unknown, label: string, maxLength = 4096): string => {
+		if (typeof value !== "string" || !value.trim() || value.length > maxLength) {
+			throw new Error(`Invalid ${label}.`);
+		}
+		return value;
+	};
+	const requireString = (value: unknown, label: string, maxLength: number): string => {
+		if (typeof value !== "string" || value.length > maxLength) {
+			throw new Error(`Invalid ${label}.`);
+		}
+		return value;
+	};
+	const promptInput = (value: unknown): CreatePiPromptTemplateInput => {
+		if (typeof value !== "object" || value === null || Array.isArray(value)) {
+			throw new Error("Invalid prompt input.");
+		}
+		const name = "name" in value ? requireString(value.name, "prompt name", 256) : "";
+		const description = "description" in value
+			? requireString(value.description, "prompt description", 4096)
+			: "";
+		return { name, description };
+	};
+	const projectRoot = (projectId: unknown): string => {
+		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) {
+			throw new Error("Invalid project id.");
+		}
+		return projectResourceManager.getProjectRoot(projectId.trim());
+	};
+
 	// ── Prompt Templates ──
 	ipcMain.handle(ipcChannels.promptsList, () => promptManager.list());
-	ipcMain.handle(ipcChannels.promptsCreate, async (_event, input: CreatePiPromptTemplateInput) => {
-		const result = await promptManager.create(input);
-		void appLogger.info("prompt", "Prompt template created", { name: input.name });
+	// 编辑内置模板时先创建用户副本（fork）再写入内容，渲染层编辑流程依赖此通道。
+	ipcMain.handle(ipcChannels.promptsCreate, async (_event, input: unknown) => {
+		const validInput = promptInput(input);
+		const result = await promptManager.create(validInput);
+		void appLogger.info("prompt", "Prompt template created", { name: validInput.name });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.promptsDelete, async (_event, filePath: string) => {
-		await promptManager.delete(filePath);
-		void appLogger.info("prompt", "Prompt template deleted", { filePath });
+	ipcMain.handle(ipcChannels.promptsDelete, async (_event, filePath: unknown) => {
+		const validPath = requireText(filePath, "prompt path", 32_768);
+		await promptManager.delete(validPath);
+		void appLogger.info("prompt", "Prompt template deleted", { filePath: validPath });
 	});
 	ipcMain.handle(ipcChannels.promptsOpenFolder, () => promptManager.openFolder());
-	ipcMain.handle(ipcChannels.promptsEdit, async (_event, filePath: string, content?: string) => {
+	ipcMain.handle(ipcChannels.promptsEdit, async (_event, filePath: unknown, content?: unknown) => {
+		const validPath = requireText(filePath, "prompt path", 32_768);
 		if (content !== undefined) {
-			await promptManager.writeContent(filePath, content);
+			const validContent = requireString(content, "prompt content", 4 * 1024 * 1024);
+			await promptManager.writeContent(validPath, validContent);
 			return;
 		}
-		return promptManager.readContent(filePath);
+		return promptManager.readContent(validPath);
 	});
-	ipcMain.handle(ipcChannels.promptsListByProject, async (_event, projectPath: string) => {
-		return promptManager.listByProject(projectPath);
+	ipcMain.handle(ipcChannels.promptsListByProject, async (_event, projectId: unknown) => {
+		return promptManager.listByProject(projectRoot(projectId));
 	});
-	ipcMain.handle(ipcChannels.promptsCreateInProject, async (_event, projectPath: string, input: CreatePiPromptTemplateInput) => {
-		const result = await promptManager.createInProject(projectPath, input);
-		void appLogger.info("prompt", "Project prompt template created", {
-			projectPath,
-			name: input.name,
+	ipcMain.handle(ipcChannels.promptsDeleteInProject, async (_event, projectId: unknown, name: unknown) => {
+		const validName = requireText(name, "project prompt name", 256);
+		const root = projectRoot(projectId);
+		await promptManager.deleteFromProject(root, validName);
+		void appLogger.info("prompt", "Project prompt template deleted", { projectId, name: validName });
+	});
+	ipcMain.handle(ipcChannels.promptsRename, async (_event, oldName: unknown, newName: unknown) => {
+		const validOldName = requireText(oldName, "old prompt name", 256);
+		const validNewName = requireText(newName, "new prompt name", 256);
+		const result = await promptManager.rename(validOldName, validNewName);
+		void appLogger.info("prompt", "Prompt template renamed", {
+			oldName: validOldName,
+			newName: validNewName,
 		});
 		return result;
 	});
-	ipcMain.handle(ipcChannels.promptsDeleteInProject, async (_event, projectPath: string, fileName: string) => {
-		await promptManager.deleteFromProject(projectPath, fileName);
-		void appLogger.info("prompt", "Project prompt template deleted", { projectPath, fileName });
-	});
-	ipcMain.handle(ipcChannels.promptsRename, async (_event, oldName: string, newName: string) => {
-		const result = await promptManager.rename(oldName, newName);
-		void appLogger.info("prompt", "Prompt template renamed", { oldName, newName });
+	ipcMain.handle(ipcChannels.promptsRenameInProject, async (_event, projectId: unknown, oldName: unknown, newName: unknown) => {
+		const validOldName = requireText(oldName, "old project prompt name", 256);
+		const validNewName = requireText(newName, "new project prompt name", 256);
+		const result = await promptManager.renameInProject(
+			projectRoot(projectId),
+			validOldName,
+			validNewName,
+		);
+		void appLogger.info("prompt", "Project prompt template renamed", {
+			projectId,
+			oldName: validOldName,
+			newName: validNewName,
+		});
 		return result;
 	});
-	ipcMain.handle(ipcChannels.promptsRenameInProject, async (_event, projectPath: string, oldName: string, newName: string) => {
-		const result = await promptManager.renameInProject(projectPath, oldName, newName);
-		void appLogger.info("prompt", "Project prompt template renamed", { projectPath, oldName, newName });
+	ipcMain.handle(ipcChannels.promptsToggle, async (_event, filePath: unknown, enabled: unknown) => {
+		const validPath = requireText(filePath, "prompt path", 32_768);
+		if (typeof enabled !== "boolean") throw new Error("Invalid prompt toggle input.");
+		const result = await promptManager.toggle(validPath, enabled);
+		void appLogger.info("prompt", "Prompt template toggled", { filePath: validPath, enabled });
 		return result;
 	});
+	ipcMain.handle(
+		ipcChannels.promptsToggleInProject,
+		async (_event, projectId: unknown, name: unknown, enabled: unknown) => {
+			const validName = requireText(name, "project prompt name", 256);
+			if (typeof enabled !== "boolean") {
+				throw new Error("Invalid project prompt toggle input.");
+			}
+			const result = await promptManager.toggleInProject(projectRoot(projectId), validName, enabled);
+			void appLogger.info("prompt", "Project prompt template toggled", {
+				projectId,
+				name: validName,
+				enabled,
+			});
+			return result;
+		},
+	);
 
 	// ── Prompt Store (prompts.chat) ──────────────────────────────────────
 	const PROMPT_STORE_BASE = "https://prompts.chat/api";
@@ -473,4 +543,21 @@ export function registerStoreIpc({
 		void appLogger.info("extension", "Extension update-one command completed", { source, updated: result.updated, bytes: result.output.length });
 		return result;
 	});
+	// 扩展商店：pi.dev 目录页无公开 JSON API，主进程抓 SSR HTML 解析 + 缓存后返回。
+	// 渲染层只消费结构化结果，不感知 HTML 解析细节；失败时保留旧缓存或报用户可读错误。
+	ipcMain.handle(
+		ipcChannels.extensionsCatalog,
+		async (_event, query: import("../../shared/types").PiPackageCatalogQuery) => {
+			try {
+				return await getPiPackageCatalog(query ?? {});
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				void appLogger.warn("extension-store", "Catalog fetch failed", {
+					query: { page: query?.page, query: query?.query, type: query?.type, sort: query?.sort },
+					error: message,
+				});
+				throw new Error(mainCopy("store.packageCatalogFailed"));
+			}
+		},
+	);
 }

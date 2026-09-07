@@ -155,7 +155,7 @@ export function appendFetchedDshModels(input: DshModelSeedInput & {
 		name: typeof row.name === "string" ? row.name : undefined,
 	}));
 	const added = buildModelsFromFetchedSelection(input.fetched, input.selectedIds, existingItems);
-	return [
+	const result = [
 		...existing,
 		...added.map((model) => {
 			const row: DshModelLike = { id: model.id, name: model.name };
@@ -166,6 +166,13 @@ export function appendFetchedDshModels(input: DshModelSeedInput & {
 			return row;
 		}),
 	];
+	// 按模型名称（无名称时回退 id）字母正序排列，保证保存后模型表顺序稳定。
+	result.sort((a, b) => {
+		const aKey = typeof a.name === "string" && a.name ? a.name : String(a.id ?? "");
+		const bKey = typeof b.name === "string" && b.name ? b.name : String(b.id ?? "");
+		return aKey.toLowerCase().localeCompare(bKey.toLowerCase());
+	});
+	return result;
 }
 
 /** DSH 配置页应通过 host 的 llm.discoverModels 取候选，不在 renderer 解析 provider 端点。 */

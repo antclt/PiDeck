@@ -24,6 +24,12 @@ export type GitDrawerApi = {
     options?: { maxEntries?: number; ref?: string; allBranches?: boolean },
     repoPath?: string,
   ) => Promise<CommitEntry[]>;
+  /** 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。 */
+  commitCount: (
+    projectId: string,
+    options?: { ref?: string; allBranches?: boolean },
+    repoPath?: string,
+  ) => Promise<number>;
   commitDetail: (projectId: string, ref: string, repoPath?: string) => Promise<CommitDetail | null>;
   branchCompare: (
     projectId: string,
@@ -105,6 +111,9 @@ function createScopedGitApi(
   return {
     commitLog: (id: string, options?: { maxEntries?: number; ref?: string; allBranches?: boolean }) =>
       gitApi.commitLog(id, options, repoPath),
+    // 与 commitLog 一样固定 cwd：多仓并排时不能从全局当前仓库读路径。
+    commitCount: (id: string, options?: { ref?: string; allBranches?: boolean }) =>
+      gitApi.commitCount(id, options, repoPath),
     commitDetail: (id: string, ref: string) => gitApi.commitDetail(id, ref, repoPath),
     branchCompare: (id: string, base: string, target: string) =>
       gitApi.branchCompare(id, base, target, repoPath),
@@ -272,6 +281,7 @@ export function GitDrawerHost(props: GitDrawerHostProps) {
         }
         onSelectHistoryRepo={layout === "historyOnly" ? selectHistoryRepo : undefined}
         commitLog={scopedApi.commitLog}
+        commitCount={scopedApi.commitCount}
         commitDetail={scopedApi.commitDetail}
         onOpenCommitFileDiff={(commit, file) => onOpenCommitFileDiff(commit, file, repoPath)}
         onOpenWorkspaceFileDiff={(group, path) => onOpenWorkspaceFileDiff(group, path, repoPath)}

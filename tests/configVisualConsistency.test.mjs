@@ -60,15 +60,12 @@ test("project resources use one consistent shadcn management shell", () => {
   assert.doesNotMatch(projectResources, /<header className="project-resources-header"/);
   assert.match(projectResources, /<Tabs\n\s+value=\{activeTab\}/);
   assert.match(projectResources, /<TabsList className="[^"]*w-full/);
-  assert.match(projectResources, /from "\.\.\/ui-shadcn\/(?:card|alert|scroll-area)"/);
-  assert.match(projectResources, /<Card(?:\s|>)/);
+  assert.match(projectResources, /from "\.\.\/ui-shadcn\/(?:alert|scroll-area)"/);
   assert.match(projectResources, /<Alert variant="destructive"/);
   assert.match(projectResources, /<ScrollArea className=/);
 
-  // 视觉重排只能换容器；项目资源的创建、切换、编辑、启停、删除和刷新流程必须仍在页面中。
+  // 视觉重排只能换容器；项目资源的切换、编辑、启停、删除和刷新流程必须仍在页面中。
   for (const contract of [
-    "createSkill",
-    "createProjectPrompt",
     "toggleSkill",
     "toggleExtension",
     "confirmDelete",
@@ -84,7 +81,8 @@ test("project resources use one consistent shadcn management shell", () => {
 test("project resource cards stack metadata and keep destructive actions discoverable", () => {
   // 卡片内容必须垂直排布；横向 flex 会把名称、状态和路径挤成截图中的一条线。
   assert.match(workspaceStyles, /\.project-resource-card > \.project-resource-info \{[^}]*display: grid/);
-  assert.match(workspaceStyles, /\.project-skill-create \{[^}]*grid-row: 1 \/ span 2/);
+  // 新建表单卡片（两列栅格左栏）已整体移除，列表不再依赖跨行占位。
+  assert.doesNotMatch(workspaceStyles, /\.project-skill-create/);
   // 删除/编辑不能只依赖 hover，否则鼠标离开卡片或触屏设备上不可发现。
   assert.match(workspaceStyles, /\.project-resource-actions \{[^}]*opacity: 1/);
   assert.match(projectResources, /setDeleteTarget\(\{ kind: "skill"/);
@@ -92,29 +90,29 @@ test("project resource cards stack metadata and keep destructive actions discove
   assert.match(projectResources, /setDeleteTarget\(\{ kind: "prompt"/);
 });
 
-test("resource forms reserve label width and distinguish skill/prompt actions", () => {
-  // 固定标签列避免中文字段名被压成竖排；按钮文案必须按资源类型区分。
-  assert.match(projectResources, /grid-cols-\[4rem_minmax\(0,1fr\)\]/);
-  assert.match(projectResources, /t\("projectResources\.createSkillAction"\)/);
-  assert.match(projectResources, /t\("projectResources\.createPromptAction"\)/);
-  assert.match(zhCopy, /"projectResources\.createSkillAction": "创建技能"/);
-  assert.match(zhCopy, /"projectResources\.createPromptAction": "创建提示词"/);
-  assert.match(enCopy, /"projectResources\.createSkillAction": "Create Skill"/);
-  assert.match(enCopy, /"projectResources\.createPromptAction": "Create Prompt"/);
+test("resource create forms are removed; lists keep compact density", () => {
+  // 新建 Skill/提示词表单已整体移除（模板由 AI 生成，无需手动填写）：
+  // 固定标签列、创建按钮文案与两列栅格规则都不应再出现。
+  assert.doesNotMatch(projectResources, /grid-cols-\[4rem_minmax\(0,1fr\)\]/);
+  assert.doesNotMatch(projectResources, /projectResources\.createSkillAction/);
+  assert.doesNotMatch(projectResources, /projectResources\.createPromptAction/);
   assert.doesNotMatch(projectResources, /creatingPrompt \? t\("config\.creatingSkill"\)/);
+  assert.match(projectResources, /project-resources-list-section/);
 });
 
-test("skills and prompts use full-width tab rails with compact selected tabs", () => {
-  assert.match(skills, /<TabsList className="w-full"/);
-  assert.match(prompts, /<TabsList className="w-full"/);
+test("skills and prompts use compact tab rails aligned with the extensions page", () => {
+  // 用户要求技能/提示词页的两个 table（本地/商店）外框与扩展页一致：紧凑、仅包裹 tab 本身
+  assert.match(skills, /<TabsList className="w-fit self-start"/);
+  assert.match(prompts, /<TabsList className="w-fit self-start"/);
   const tabs = readFileSync("src/renderer/src/components/ui-shadcn/tabs.tsx", "utf8");
   assert.match(tabs, /w-full items-center/);
   assert.match(tabs, /data-\[state=active\]:shadow-sm/);
   assert.match(tabs, /!text-\[color:var\(--color-text-secondary\)\]/);
 });
 
-test("skill list is not accidentally filtered by the new-skill destination", () => {
-  assert.match(skills, /const visibleSkills = data\.skills;/);
+test("skill list filtering depends on resource scope, not the new-skill destination", () => {
+  assert.match(skills, /const visibleSkills = data\.skills\.filter\(\(skill\) => props\.scope/);
+  assert.doesNotMatch(skills, /data\.skills\.filter\([^;]*newLocationId/);
   assert.doesNotMatch(skills, /const filteredSkills = data\.skills\.filter/);
 });
 
@@ -129,8 +127,8 @@ test("skill table uses real aligned columns, not a colSpan card", () => {
   assert.match(skillTableRow, /<TableCell className="text-right">/);
   // 操作按钮直接放在 TableCell 内，不再包一层可点击的卡片 button。
   assert.doesNotMatch(skillTableRow, /<button[\s\S]*skill-rename-inline[\s\S]*<Button/);
-  // 位置选择改为 shadcn Select，不再使用自定义下拉弹层。
-  // （远端 abb45b39 有意恢复默认高度：选择器仅显示相对路径、单行截断左对齐）
-  assert.match(skills, /<SelectTrigger className="w-full">/);
+  // 新建 Skill 表单已整体移除：位置选择 Select 与旧自定义下拉弹层都不应出现。
+  assert.doesNotMatch(skills, /<SelectTrigger/);
   assert.doesNotMatch(skills, /skill-location-picker/);
+  assert.doesNotMatch(skills, /config\.createSkill/);
 });

@@ -69,8 +69,8 @@ import {
   readWelcomeModelPreference,
 } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
-import { CommandPickerGroup, CommandPickerPanel } from "../ui-shadcn/command-picker";
-import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider } from "./sessionPickerOptions";
+import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
+import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, orderProviderGroups } from "./sessionPickerOptions";
 import type {
 	AgentBackend,
 	AgentRuntimeState,
@@ -802,6 +802,8 @@ function CommandPickerDialog(props: {
 	showGroupActions?: boolean;
 	/** 默认展开的分组 id 集合（null = 默认全展开）；透传给 CommandPickerPanel。 */
 	defaultExpandedIds?: ReadonlySet<string> | null;
+	/** 搜索过滤函数；缺省用 cmdk 内置 fuzzy（仅模型选择器等长列表需要传精确子串过滤）。 */
+	filter?: CommandPickerFilter;
 	/** 标题栏操作（如模型列表手动刷新按钮）；渲染在折叠/展开按钮之后、关闭按钮之前 */
 	headerAction?: ReactNode;
 	children: ReactNode;
@@ -823,6 +825,7 @@ function CommandPickerDialog(props: {
 					value={props.value}
 					showGroupActions={props.showGroupActions}
 					defaultExpandedIds={props.defaultExpandedIds}
+					filter={props.filter}
 					headerAction={props.headerAction}
 					onClose={props.onClose}
 				>
@@ -904,14 +907,26 @@ export function ModelPicker(props: {
 	onRefresh?: () => void;
 	/** 用量查询链路：DSH 会话（目录 provider 是 DSH route 名）传 "dsh"，缺省 pi。 */
 	backend?: UsageProbeBackend;
+	/** 最近使用的供应商 ID 列表（最新在前）：已用过的分组排最前，未用过的按内置置顶+字母序。 */
+	recentProviders?: string[];
+	/** 用户隐藏的供应商 key 列表（Pi 模型页眼睛开关）；Pi 后端按 provider 过滤，DSH 不生效。 */
+	hiddenProviders?: string[];
 }) {
 	const currentModelKey = props.current?.provider && props.current?.modelId
 		? `${props.current.provider}/${props.current.modelId}`
 		: undefined;
 	const favoritesSet = new Set(props.favoriteModels ?? []);
+	// 隐藏开关：Pi 后端按 provider 过滤（DSH 的 route 名不参与隐藏列表）；
+	// 过滤后收藏/分组/搜索都基于可见模型，隐藏供应商的模型完全不出现在选择器里。
+	const hiddenSet = new Set(
+		props.backend === "dsh" ? [] : (props.hiddenProviders ?? []),
+	);
+	const visibleModels = props.models.filter(
+		(model) => !hiddenSet.has(model.provider),
+	);
 
 	// 收藏列表（从全部模型中提取，不移除原供应商分组下的显示）
-	const favorites: AvailableModel[] = props.models.filter((model) =>
+	const favorites: AvailableModel[] = visibleModels.filter((model) =>
 		favoritesSet.has(`${model.provider}/${model.id}`),
 	);
 	favorites.sort((a, b) => {
@@ -923,18 +938,10 @@ export function ModelPicker(props: {
 
 	// 全量模型按供应商分组（收藏模型也保留在原分组）；
 	// 搜索交给 cmdk（item 的 value/keywords 同时覆盖 name/id/provider）
-	const groupedModels = groupModelsByProvider(props.models);
-	// 内置 TokenDance 置顶：PiDeck 内置供应商优先展示（未配置时列表里没有该组，自然不占位；
-	// 配置/拉取目录后该组恒在第一）。'other' 是白名单外供应商的兜底组，顺序保持最后。
-	const providerOrder = ['tokendance', 'anthropic', 'openai', 'google', 'deepseek', 'other'];
-	const sortedProviders = Object.keys(groupedModels).sort((a, b) => {
-		const aIndex = providerOrder.indexOf(a);
-		const bIndex = providerOrder.indexOf(b);
-		if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-		if (aIndex !== -1) return -1;
-		if (bIndex !== -1) return 1;
-		return a.localeCompare(b);
-	});
+	const groupedModels = groupModelsByProvider(visibleModels);
+	// 最近使用过的供应商排最前（高频免搜索直达），未使用过的按内置置顶 + 字母序；
+	// 'other' 是白名单外供应商的兜底组，顺序保持最后。
+	const sortedProviders = orderProviderGroups(Object.keys(groupedModels), props.recentProviders);
 
 	// 默认展开集合（「当前选中模型可见」驱动）：只展开收藏栏 + 当前模型所在提供商，
 	// 其余提供商折叠；无收藏且无当前模型时回退第一个提供商。折叠是派生状态，
@@ -1004,6 +1011,9 @@ export function ModelPicker(props: {
 			value={currentModelKey}
 			showGroupActions
 			defaultExpandedIds={defaultExpandedIds}
+			// 精确子串搜索：cmdk 默认 fuzzy 会让 1-2 字符词命中全部 tokendance 模型（见
+			// modelPickerSearchFilter 注释）；其他选择器（思考级别/预设）仍用默认 fuzzy。
+			filter={modelPickerSearchFilter}
 			// 手动刷新入口：标题栏右上角，任何情况下（含加载失败）都能重新拉取模型列表。
 			headerAction={
 				props.onRefresh ? (

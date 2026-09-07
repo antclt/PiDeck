@@ -360,9 +360,10 @@
  * 标题被截断时，hover 让全文滚到末尾停住再回弹，离开回开头。
  * 时长/距离由组件实测溢出后注入 --title-scroll-duration / --title-scroll-distance；
  * 未溢出的行不加 animate-title-scroll，完全静止。
- * 匀速（linear）：组件按 5px/s 线性折算时长，这里不再叠加缓动曲线，
- * 避免中段瞬时加速导致长标题看不清。 */
-@theme {
+ * 匀速（linear）：组件按 30px/s 线性折算时长，这里不再叠加缓动曲线，
+ * 避免中段瞬时加速导致长标题看不清。
+ * 必须 inline：否则嵌套 var 会在 :root token 定义时提前解析，冻结为 3s fallback。 */
+@theme inline {
   --animate-title-scroll: title-scroll-to-end var(--title-scroll-duration, 3s) linear forwards;
 
   @keyframes title-scroll-to-end {

@@ -3543,6 +3543,23 @@ div.fixed.inset-0.z-50 {
   color: var(--color-text-tertiary, #6b7280);
 }
 
+/* 自动刷新状态行：倒计时文案 + 取消按钮水平排布，与上方按钮组保持节奏 */
+.app-error-boundary-autoreload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-tertiary, #6b7280);
+}
+
+.app-error-boundary-autoreload-cancel {
+  color: var(--color-text-tertiary, #6b7280);
+}
+
 /* ── keyframes ── */
 @keyframes error-boundary-rise {
   from { opacity: 0; transform: translateY(8px); }

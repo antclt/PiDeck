@@ -1,10 +1,12 @@
 import { app } from "electron";
+import { basename } from "node:path";
 import type { AppSettings } from "../../shared/types";
 import {
 	listActiveBuiltInExtensionPaths,
 	type BuiltInExtensionPathRoots,
 } from "./builtInExtensions";
 import { resolveEnabledExtensionPaths } from "./enabledExtensionResolver";
+import { readProjectResourceOverrides } from "../projects/projectResourceOverrides";
 
 /**
  * 为 PiProcess 构造扩展解析器（内置扩展注入 + 白名单枚举）。
@@ -19,9 +21,14 @@ export function createPiProcessExtensionResolvers(
 	cwd: string,
 	settings: AppSettings,
 ): {
-	resolveBuiltInExtensionPaths: (processSettings?: Partial<AppSettings>) => string[];
+	resolveBuiltInExtensionPaths: (
+		processSettings?: Partial<AppSettings>,
+		includeProjectResources?: boolean,
+	) => string[];
 	resolveEnabledExtensionPaths: (
 		processSettings?: Partial<AppSettings>,
+		cwd?: string,
+		includeProjectResources?: boolean,
 	) => string[] | null;
 } {
 	const builtInRoots: BuiltInExtensionPathRoots = {
@@ -30,14 +37,21 @@ export function createPiProcessExtensionResolvers(
 		isDev: !app.isPackaged,
 	};
 	return {
-		resolveBuiltInExtensionPaths: (processSettings) =>
-			listActiveBuiltInExtensionPaths(
+		resolveBuiltInExtensionPaths: (processSettings, includeProjectResources = true) => {
+			const disabledForProject = new Set(
+				includeProjectResources
+					? readProjectResourceOverrides(cwd).disabledGlobalExtensions
+					: [],
+			);
+			return listActiveBuiltInExtensionPaths(
 				builtInRoots,
 				processSettings?.removedBuiltInExtensions ?? settings.removedBuiltInExtensions ?? [],
-			),
-		resolveEnabledExtensionPaths: (processSettings) =>
+			).filter((path) => !disabledForProject.has(basename(path)));
+		},
+		resolveEnabledExtensionPaths: (processSettings, _processCwd, includeProjectResources = true) =>
 			resolveEnabledExtensionPaths({
 				cwd,
+				includeProjectResources,
 				disabled:
 					processSettings?.disabledExtensions ?? settings.disabledExtensions ?? [],
 				removedBuiltInExtensions:

@@ -22,7 +22,11 @@ test("v3 sidebar bottom actions render inside a full-width beUI Dock", () => {
 
 test("dock keeps the four actions, their labels and callbacks", () => {
   const dockBlock = sidebar.slice(sidebar.indexOf("<Dock size={32}"));
-  assert.match(dockBlock, /title=\{hasPendingUpdate \? t\("settings.titleWithUpdate"\) : t\("settings.title"\)\}[\s\S]*?onClick=\{props\.onOpenSettings\}/);
+  // 设置按钮：更新角标场景的文案进 aria-label（读屏/键盘），可见解释由 Tooltip 清单承担；
+  // 首次出现时 UpdateDotHint 气泡指向该按钮。
+  assert.match(dockBlock, /aria-label=\{hasPendingUpdate \? t\("settings.titleWithUpdate"\) : t\("settings.title"\)\}["\s\S]*?onClick=\{props\.onOpenSettings\}/);
+  assert.match(dockBlock, /<UpdateDotHint hasPendingUpdate=\{hasPendingUpdate\}/);
+  assert.match(dockBlock, /<Tooltip delayDuration=\{300\}>/);
   assert.match(dockBlock, /title=\{t\("feedback.title"\)\}[\s\S]*?onClick=\{props\.onOpenFeedback\}/);
   assert.match(dockBlock, /title=\{t\("app.homepage"\)\}[\s\S]*?onClick=\{props\.onOpenHomepage\}/);
   // 主题按钮：title/aria 用当前模式的完整文案，回调走 onToggleTheme

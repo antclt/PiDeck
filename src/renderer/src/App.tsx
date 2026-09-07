@@ -612,9 +612,12 @@ export function App() {
     startupWindowMode: "last",
     piEnvironmentChecked: false,
     /** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
-    /** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
     disabledExtensions: [],
     disableExtensionWhitelist: false,
+    /** 技能禁用列表：与 SettingsStore 默认一致，空数组 = 不启用技能白名单 */
+    disabledSkills: [],
+    /** 提示词模板禁用列表：与 SettingsStore 默认一致，空数组 = 不启用模板白名单 */
+    disabledPrompts: [],
     sessionTabOpenMode: "preview",
     // 与 main SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
     autoSessionTitle: true,
@@ -4029,7 +4032,10 @@ export function App() {
       onRestartWebService={restartWebService}
       appInfo={appInfo}
       onChange={updateSettings}
-      projectPath={activeProject?.path}
+      projects={projects}
+      projectId={activeProject?.id}
+      projectKind={activeProject?.kind}
+      projectName={activeProject?.name}
     />
     {/*
      * 问题反馈弹窗的「新建会话分析」依赖 App 级会话创建能力（createSessionDraftWithTab），

@@ -13,7 +13,7 @@ import type { AppSettings } from "../../shared/types";
 import type { SessionProxyMode } from "../../shared/types/session";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { appendBuiltInExtensionArgs } from "../extensions/builtInExtensions";
-import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST } from "../extensions/extensionVersionGate";
+import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST, MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST } from "../extensions/extensionVersionGate";
 import { getAppLogger } from "../logging/sharedLogger";
 import { applyPiProxyMode } from "../sessions/sessionProxyPolicy";
 
@@ -31,6 +31,8 @@ type PiProcessSettings = Pick<
   | "piRpcNoSkills"
   | "removedBuiltInExtensions"
   | "disabledExtensions"
+  | "disabledSkills"
+  | "disabledPrompts"
   | "disableExtensionWhitelist"
   | "autoSessionTitle"
 >;
@@ -48,7 +50,10 @@ type PiProcessOptions = {
    * 解析当前应通过 -e 注入的 PiDeck 内置扩展绝对路径。
    * 未提供时 RPC 不注入内置扩展（兼容测试/探针）。
    */
-  resolveBuiltInExtensionPaths?: (settings?: PiProcessSettings) => string[];
+  resolveBuiltInExtensionPaths?: (
+    settings?: PiProcessSettings,
+    includeProjectResources?: boolean,
+  ) => string[];
   /**
    * 白名单模式解析器：user/project packages + 本地扩展 + 内置扩展的启用路径列表。
    * 返回 null = 无禁用项，不启用白名单（pi 自动发现全部扩展）；
@@ -57,6 +62,27 @@ type PiProcessOptions = {
   resolveEnabledExtensionPaths?: (
     settings?: PiProcessSettings,
     cwd?: string,
+    includeProjectResources?: boolean,
+  ) => string[] | null;
+  /**
+   * 技能白名单模式解析器：全局/项目技能目录 + settings.skills + 包技能的全部启用路径。
+   * 返回 null = 无禁用项，不启用白名单（pi 自动发现全部技能）；
+   * 返回数组（可能为空）= 启用白名单，start() 附加 --no-skills 并逐条 --skill 注入。
+   */
+  resolveEnabledSkillPaths?: (
+    settings?: PiProcessSettings,
+    cwd?: string,
+    includeProjectResources?: boolean,
+  ) => string[] | null;
+  /**
+   * 提示词模板白名单模式解析器：全局/项目 prompts 目录 + settings.prompts + 包模板的全部启用路径。
+   * 返回 null = 无禁用项，不启用白名单（pi 自动发现全部模板）；
+   * 返回数组（可能为空）= 启用白名单，start() 附加 --no-prompt-templates 并逐条 --prompt-template 注入。
+   */
+  resolveEnabledPromptPaths?: (
+    settings?: PiProcessSettings,
+    cwd?: string,
+    includeProjectResources?: boolean,
   ) => string[] | null;
   /**
    * 安全策略快照路径（userData/security-policy.json）。
@@ -190,15 +216,14 @@ export class PiProcess extends EventEmitter {
 
   /**
    * 仅停放 codeisland 等黑名单文件，不碰 npm packages / 其它本地扩展。
+   * 拒绝项目 trust 时只允许访问全局目录，不能扫描或移动项目资源。
    * 用户已开 piRpcNoExtensions 时无需停放（扩展本就不会加载）。
    */
-  private parkIncompatibleExtensions(): string[] {
+  private parkIncompatibleExtensions(includeProjectResources: boolean): string[] {
     if (this.settings?.piRpcNoExtensions) return [];
     const home = this.options.agentHomeDir?.trim() || homedir();
-    const dirs = [
-      join(home, ".pi", "agent", "extensions"),
-      join(this.cwd, ".pi", "extensions"),
-    ];
+    const dirs = [join(home, ".pi", "agent", "extensions")];
+    if (includeProjectResources) dirs.push(join(this.cwd, ".pi", "extensions"));
     const parked: ParkedExtension[] = [];
     for (const dir of dirs) {
       parked.push(...parkBlockedExtensionsInDir(dir));
@@ -249,8 +274,12 @@ export class PiProcess extends EventEmitter {
     if (this.settings?.piRpcNoExtensions) args.push("--no-extensions");
     if (this.settings?.piRpcNoSkills) args.push("--no-skills");
 
-    // 仅临时停放 codeisland 等黑名单扩展文件；npm packages 与其它本地扩展照常加载。
-    const blockedNames = this.parkIncompatibleExtensions();
+    const includeProjectResources = trustOverride !== "no-approve";
+    let blockedNames: string[] = [];
+    let startupComplete = false;
+    try {
+      // 仅临时停放 codeisland 等黑名单扩展文件；拒绝 trust 时不得扫描或移动项目扩展。
+      blockedNames = this.parkIncompatibleExtensions(includeProjectResources);
     if (blockedNames.length > 0) {
       // 黑名单扩展被停放属于启动诊断事件，同步写入日志文件便于排查 RPC 初始化失败
       void getAppLogger()?.warn("pi-process", "Desktop-incompatible extensions parked for RPC", {
@@ -265,20 +294,27 @@ export class PiProcess extends EventEmitter {
     // 白名单模式：存在禁用扩展时，--no-extensions 关自动发现 + 逐条 -e 注入未禁用的扩展。
     // 必须在 parkIncompatibleExtensions 之后调用：黑名单文件已被移走，resolver 的 existsSync
     // 会自然跳过它们，避免 -e 指向已停放路径导致 pi 报 path does not exist。
-    // disableExtensionWhitelist（UI「禁用 -e 参数」总开关）为 true 时无条件关闭白名单：
-    // 恢复 pi 默认发现加载全部扩展，防御个别扩展的白名单注入导致 RPC 启动失败。
+    // disableExtensionWhitelist only affects trusted sessions. Denied trust is a security mode and
+    // always keeps the global-only whitelist so the diagnostic switch cannot restore project discovery.
     // 此处只计算列表，实际注入推迟到版本门槛检查之后（见下方 version gate），
     // 确保在拿到 command + versionCache 后统一决定。
-    const whitelistPaths = this.options.resolveEnabledExtensionPaths?.(this.settings, this.cwd) ?? null;
+    const whitelistPaths = this.options.resolveEnabledExtensionPaths?.(
+      this.settings,
+      this.cwd,
+      includeProjectResources,
+    ) ?? null;
     const useWhitelist =
       whitelistPaths !== null &&
       whitelistPaths !== undefined &&
       !this.settings?.piRpcNoExtensions &&
-      !this.settings?.disableExtensionWhitelist;
+      (!this.settings?.disableExtensionWhitelist || !includeProjectResources);
 
     // PiDeck 内置扩展：从 app resources 以 -e 注入，不再复制到 ~/.pi/agent/extensions。
     // piRpcNoExtensions 或白名单模式时不再单独注入（白名单列表已包含内置扩展）。
-    const builtInPaths = this.options.resolveBuiltInExtensionPaths?.(this.settings) ?? [];
+    const builtInPaths = this.options.resolveBuiltInExtensionPaths?.(
+      this.settings,
+      includeProjectResources,
+    ) ?? [];
     const argsWithBuiltIns = useWhitelist
       ? args
       : appendBuiltInExtensionArgs(args, builtInPaths, {
@@ -312,18 +348,28 @@ export class PiProcess extends EventEmitter {
     }
     const command = this.locator.resolveCommand(this.settings?.customPiPath, this.settings?.wslEnabled, this.settings?.wslDistro, this.settings?.wslUser);
 
-    // 信任覆盖：用 --approve/--no-approve 覆盖 pi 的 trustStore 决策（本次生效，不落盘）。
-    // trust-session 用 --approve 让 pi 本次加载项目资源；deny 用 --no-approve 以不信任模式启动。
-    // --approve/--no-approve 从 pi 0.79.0 开始支持。对老版本 pi 不传递这些参数，
-    // 避免 "unknown option" 错误导致 RPC 进程启动失败。
+    // A denied trust decision must fail closed. Without a verified --no-approve flag, starting pi
+    // would allow its normal project discovery to load code the user explicitly rejected.
     if (trustOverride) {
       await this.ensureVersionCheck(command);
       const cached = PiProcess.versionCache.get(command);
-      if (cached?.status === "done" && PiProcess.versionSupportsTrustFlags(cached.minorVersion)) {
-        if (trustOverride === "approve") finalPiArgs.push("--approve");
-        else if (trustOverride === "no-approve") finalPiArgs.push("--no-approve");
+      const supportsTrustFlags =
+        cached?.status === "done" &&
+        cached.ok &&
+        PiProcess.versionSupportsTrustFlags(cached.minorVersion);
+      if (trustOverride === "no-approve" && !supportsTrustFlags) {
+        this.restoreParkedExtensions();
+        void getAppLogger()?.error("pi-process", "Cannot enforce denied project trust", {
+          command,
+          minorVersion: cached?.status === "done" ? cached.minorVersion : null,
+          versionCheck: cached?.status === "done" ? cached.ok : false,
+        });
+        throw new Error(
+          "Cannot start an untrusted project safely: pi 0.79.0 or newer is required and its version must be verifiable.",
+        );
       }
-      // 版本不支持信任标志时静默跳过：老版本 pi 无 trust 系统，自动加载所有资源。
+      if (supportsTrustFlags) finalPiArgs.push(trustOverride === "approve" ? "--approve" : "--no-approve");
+      // Approving an old pi retains historical behavior; only denial requires a hard security guarantee.
     }
 
     // 扩展白名单的版本门槛：-e 的目录/包源语义从 pi 0.60 起才文档化，过低版本传目录
@@ -373,6 +419,100 @@ export class PiProcess extends EventEmitter {
       }
     }
 
+    // 技能白名单模式：存在禁用技能时 --no-skills 关自动发现 + 逐条 --skill 注入未禁用的技能。
+    // pi 的 frontmatter disable-model-invocation 只阻止模型自动调用、不阻止加载（用户仍可
+    // /skill:name 手动触发）；「不加载」唯一可靠手段就是白名单（与扩展白名单同构）。
+    // 解析器返回 null = 无禁用项，不启用（pi 默认发现全部技能，兼容 PiDeck 未跟踪的安装）。
+    // piRpcNoSkills（诊断总开关）优先：已传 --no-skills 时不再注入，保证诊断路径干净。
+    const skillWhitelistPaths = this.options.resolveEnabledSkillPaths?.(
+      this.settings,
+      this.cwd,
+      includeProjectResources,
+    ) ?? null;
+    const useSkillWhitelist =
+      skillWhitelistPaths !== null &&
+      skillWhitelistPaths !== undefined &&
+      !this.settings?.piRpcNoSkills;
+    if (useSkillWhitelist) {
+      if (!trustOverride) await this.ensureVersionCheck(command);
+      const cachedSkillGate = PiProcess.versionCache.get(command);
+      const minorForSkillGate =
+        cachedSkillGate?.status === "done" ? cachedSkillGate.minorVersion : this.piMinorVersion;
+      if (
+        minorForSkillGate !== null &&
+        minorForSkillGate !== undefined &&
+        minorForSkillGate < MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST
+      ) {
+        // 版本过低：白名单不可用，恢复 pi 默认技能发现（禁用不生效，行为与未启用一致）。
+        void getAppLogger()?.warn("pi-process", "pi version too old for skill whitelist; falling back to default discovery", {
+          minorVersion: minorForSkillGate,
+          required: MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST,
+        });
+        console.warn(
+          `[PiProcess] pi ${minorForSkillGate}.x too old for skill disable whitelist (need >= ${MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST}); disabled skills will still load`,
+        );
+      } else {
+        // 白名单模式即使列表为空也要加 --no-skills：空列表表示「全部禁用」，不是「不启用」。
+        // useSkillWhitelist 已排除 piRpcNoSkills，此处不会与诊断开关重复加参数。
+        finalPiArgs.push("--no-skills");
+        for (const skillPath of skillWhitelistPaths) {
+          const trimmed = skillPath.trim();
+          if (!trimmed) continue;
+          finalPiArgs.push("--skill", trimmed);
+        }
+        void getAppLogger()?.info("pi-process", "Skill whitelist mode enabled", {
+          skills: skillWhitelistPaths.length,
+          cwd: this.cwd,
+        });
+        console.log(`[PiProcess] Skill whitelist mode: ${skillWhitelistPaths.length} skills via --skill`);
+      }
+    }
+
+    // 提示词模板白名单模式：与技能白名单同构。存在禁用模板时 --no-prompt-templates 关自动
+    // 发现 + 逐条 --prompt-template 注入未禁用的模板（/name 命令只展开白名单内的模板）。
+    // 解析器返回 null = 无禁用项，不启用（pi 默认发现全部模板）。
+    const promptWhitelistPaths = this.options.resolveEnabledPromptPaths?.(
+      this.settings,
+      this.cwd,
+      includeProjectResources,
+    ) ?? null;
+    const usePromptWhitelist =
+      promptWhitelistPaths !== null &&
+      promptWhitelistPaths !== undefined;
+    if (usePromptWhitelist) {
+      if (!trustOverride) await this.ensureVersionCheck(command);
+      const cachedPromptGate = PiProcess.versionCache.get(command);
+      const minorForPromptGate =
+        cachedPromptGate?.status === "done" ? cachedPromptGate.minorVersion : this.piMinorVersion;
+      if (
+        minorForPromptGate !== null &&
+        minorForPromptGate !== undefined &&
+        minorForPromptGate < MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST
+      ) {
+        // 版本过低：白名单不可用，恢复 pi 默认模板发现（禁用不生效，行为与未启用一致）。
+        void getAppLogger()?.warn("pi-process", "pi version too old for prompt whitelist; falling back to default discovery", {
+          minorVersion: minorForPromptGate,
+          required: MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST,
+        });
+        console.warn(
+          `[PiProcess] pi ${minorForPromptGate}.x too old for prompt disable whitelist (need >= ${MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST}); disabled prompts will still load`,
+        );
+      } else {
+        // 白名单模式即使列表为空也要加 --no-prompt-templates：空列表表示「全部禁用」。
+        finalPiArgs.push("--no-prompt-templates");
+        for (const promptPath of promptWhitelistPaths) {
+          const trimmed = promptPath.trim();
+          if (!trimmed) continue;
+          finalPiArgs.push("--prompt-template", trimmed);
+        }
+        void getAppLogger()?.info("pi-process", "Prompt whitelist mode enabled", {
+          prompts: promptWhitelistPaths.length,
+          cwd: this.cwd,
+        });
+        console.log(`[PiProcess] Prompt whitelist mode: ${promptWhitelistPaths.length} prompts via --prompt-template`);
+      }
+    }
+
     let spawnCwd = this.cwd;
     let diagnosticCwd = this.cwd;
     let wslCwd: string | undefined;
@@ -387,7 +527,7 @@ export class PiProcess extends EventEmitter {
       // WSL 下 session 路径与 -e 扩展路径都需转成 Linux 路径，否则 pi 在 distro 内打不开 Windows 路径。
       finalPiArgs = finalPiArgs.map((arg, index) => {
         const prev = finalPiArgs[index - 1];
-        if (prev === "--session" || prev === "--extension" || prev === "-e") {
+        if (prev === "--session" || prev === "--extension" || prev === "-e" || prev === "--skill" || prev === "--prompt-template") {
           // 仅转换看起来像 Windows 绝对路径的参数，避免误伤相对路径/选项值
           if (/^[A-Za-z]:[\\/]/.test(arg) || arg.startsWith("\\\\")) {
             return toWslLinuxPath(arg, environment);
@@ -535,7 +675,24 @@ export class PiProcess extends EventEmitter {
       this.rpc = undefined;
     });
 
+    startupComplete = true;
     return this.rpc;
+    } catch (error) {
+      // Resolver/version/WSL preparation can fail after extensions were parked but before a
+      // child exit handler owns restoration. Roll back this start attempt synchronously.
+      if (!startupComplete) {
+        const failedProcess = this.proc;
+        this.proc = undefined;
+        this.rpc = undefined;
+        try {
+          failedProcess?.kill();
+        } catch {
+          // The process may already have exited; restoration remains required either way.
+        }
+        this.restoreParkedExtensions();
+      }
+      throw error;
+    }
   }
 
   get client() {

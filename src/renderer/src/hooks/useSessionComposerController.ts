@@ -29,8 +29,6 @@ import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
 import {
   classifyCompactError,
-  resolveCompactUsagePercent,
-  shouldSkipCompactForLowUsage,
   type CompactNoticeKind,
 } from "../../../shared/compactFeedback";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
@@ -613,9 +611,9 @@ export function useSessionComposerController(
     } catch {
       // Project templates remain usable when the global store is unavailable.
     }
-    if (record?.projectPath) {
+    if (record?.projectId) {
       try {
-        const projectResult = await desktopApi.prompts.listByProject(record.projectPath);
+        const projectResult = await desktopApi.prompts.listByProject(record.projectId);
         next.push(...projectResult.templates.map((template) => ({
           ...template,
           argumentHint: parseArgumentHint(template.content),
@@ -628,7 +626,7 @@ export function useSessionComposerController(
       setTemplateState({ key: templateKey, items: next });
     }
     return next;
-  }, [record?.projectPath, sessionId, templateKey]);
+  }, [record?.projectId, sessionId, templateKey]);
 
   useEffect(() => {
     liveDomDraftRef.current = { sessionId, value: draft };
@@ -987,22 +985,17 @@ export function useSessionComposerController(
 
   /**
    * 手动压缩唯一入口：圆环按钮与 /compact 共用。
-   * 未达 30% 门槛不打 RPC（友好 toast）；压缩中拒绝重复点击；成功弹完成。
+   * 不再设占用门槛（数据可用即可压，低占用时 pi 自行判定 nothing-to-do/too-small）；
+   * 压缩中拒绝重复点击；成功弹完成。
    */
   const runManualCompact = useCallback(async (
     target: { sessionId: string; agentId: string; runtimeGeneration: number },
     prompt?: string,
   ) => {
     const live = store.get(sessionRuntimeBySessionIdAtomFamily(sessionId));
-    // 与圆环 occupancy 同一套占用数字：percent=0 但 tokens 非 0 时按 tokens/window 重算。
-    const percent = resolveCompactUsagePercent(live?.state);
     const compacting = live?.state?.isCompacting === true;
     if (compacting) {
       showNotice(t("app.compactInProgress"), 4000);
-      return;
-    }
-    if (shouldSkipCompactForLowUsage(percent, compacting)) {
-      showNotice(t("app.compactSessionTooSmall"), 6000);
       return;
     }
     try {

@@ -15,7 +15,7 @@ import type {
 import type { PiLocator } from "../pi/PiLocator";
 import { toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, parsePiMinorVersion } from "./extensionVersionGate";
 // 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
 import { compareVersions } from "../utils/versionCompare";
@@ -71,6 +71,8 @@ export class ExtensionManager {
 			patch: Partial<AppSettings>,
 		) => Promise<AppSettings> = async () => getSettings(),
 		private readonly translate: ExtensionCopy = () => "Extension operation failed.",
+		/** 内置扩展磁盘根：提供后可为内置扩展补齐真实路径，使「打开目录」可用。 */
+		private readonly builtInRoots: BuiltInExtensionPathRoots | undefined = undefined,
 	) {}
 
 	/** 将扩展文件边界切换到统一解析出的 WSL HOME；null 恢复 Windows home。 */
@@ -170,10 +172,14 @@ export class ExtensionManager {
 		const existingSources = new Set(merged.map((ext) => ext.source));
 		for (const builtIn of BUILT_IN_EXTENSIONS) {
 			if (!existingSources.has(builtIn)) {
+				// 内置扩展经 -e 从应用资源目录注入；提供 builtInRoots 时补真实磁盘路径，
+				// 让「打开目录」按钮可用（否则 path 为 undefined，UI 无法定位）。
 				merged.push({
 					id: `local:${builtIn}`,
 					source: builtIn,
-					path: undefined,
+					path: this.builtInRoots
+						? resolveBuiltInExtensionPath(builtIn, this.builtInRoots)
+						: undefined,
 					scope: "user",
 					builtIn: true,
 				});

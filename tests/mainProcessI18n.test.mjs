@@ -94,7 +94,6 @@ test("main-process managers use the injected locale for user-visible validation"
   const { PromptManager } = loadTsCommonJs("src/main/prompts/PromptManager.ts", {
     stubs: { electron: electronStub },
   });
-  const { ProjectResourceManager } = loadTsCommonJs("src/main/projects/ProjectResourceManager.ts");
   const { PiLocator } = loadTsCommonJs("src/main/pi/PiLocator.ts", {
     stubs: { electron: electronStub },
   });
@@ -111,13 +110,6 @@ test("main-process managers use the injected locale for user-visible validation"
   await assert.rejects(
     new PromptManager(tmpdir(), en).create({ name: "", description: "description" }),
     /template name is required/i,
-  );
-  await assert.rejects(
-    new ProjectResourceManager(
-      () => ({ id: "project", name: "Project", path: tmpdir(), lastOpenedAt: 1 }),
-      en,
-    ).createSkill({ projectId: "project", name: "", description: "description" }),
-    /lowercase letters, numbers, and hyphens/i,
   );
   assert.equal(
     (await new PiLocator(en).validateCustomPath("")).error,

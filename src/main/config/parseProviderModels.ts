@@ -105,5 +105,9 @@ export function parseProviderModelsResponse(
 			...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 		});
 	}
+	// 按模型名称（无名称时回退 id）字母正序排列，避免下拉列表与保存后的顺序随 API 返回乱序。
+	models.sort((a, b) =>
+		((a.name ?? a.id).toLowerCase()).localeCompare((b.name ?? b.id).toLowerCase()),
+	);
 	return models;
 }

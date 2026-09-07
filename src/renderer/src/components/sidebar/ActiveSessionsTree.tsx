@@ -4,7 +4,6 @@ import { sessionStatusDotClass } from "../../agentListDisplay";
 import { sessionRecordToSummary } from "../../atoms";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
-import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import type { SidebarActions } from "./SidebarContent";
 import { Button } from "../ui-shadcn/button";
@@ -23,10 +22,12 @@ const rowMoreActionsClass =
 	"row-more-actions pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100";
 
 /**
- * 活动 Agent 会话页：跨项目收集所有已激活（live runtime）的 Agent，按会话更新时间排序。
+ * 活动 Agent 会话页：跨项目收集所有已绑定 runtime 的 Agent（live + 终态），按会话更新时间排序。
  * 活动行身份与 SessionTree 的 agent 行一致（状态点 + 标题 + 后端标记 + 相对时间），
  * 点击打开绑定会话（单击 preview / 双击 permanent），右键打开 Agent 菜单，支持拖拽分屏。
- * 这是「进程还在跑」的实时入口，与 chats 的历史会话列表互补：历史页只读记录，活动页跟进程。
+ * 这是「runtime 会话」的实时入口：live 状态（starting/idle/running）是进程仍在，
+ * error/closed 是运行失败或已停止但 Tab 未关——保留它们才能从活动页直接重启/重载失败会话，
+ * 而不是让失败会话在活动页消失、只能去 chats 历史页翻。
  */
 export function ActiveSessionsTree(props: {
 	controller: SidebarController;
@@ -34,7 +35,9 @@ export function ActiveSessionsTree(props: {
 	currentSessionId?: string;
 }) {
 	const { controller } = props;
-	// 收集所有项目下 live runtime 的 agent，并解析其绑定会话记录（sessionId → record）。
+	// 收集所有项目下已绑定 runtime 的 agent，并解析其绑定会话记录（sessionId → record）。
+	// catalog.agents 只含 runtime 绑定（detached 已被 agentInventoryAtom 排除），
+	// 因此不再按 isLiveRuntimeStatus 过滤——否则 error/closed 的失败会话会从活动页消失。
 	const liveRows: {
 		agent: AgentTab;
 		projectId: string;
@@ -45,7 +48,6 @@ export function ActiveSessionsTree(props: {
 		const sessions = controller.catalog.sessionsByProject[project.id] ?? [];
 		for (const agent of controller.catalog.agents) {
 			if (agent.projectId !== project.id) continue;
-			if (!isLiveRuntimeStatus(agent.status)) continue;
 			// 绑定会话：runtimeBySessionId 反查（最可靠），否则按 sessionPath 匹配历史记录。
 			const bound = sessions.find((session) =>
 				controller.catalog.runtimeBySessionId[session.id]?.agentId === agent.id,
@@ -113,8 +115,8 @@ export function ActiveSessionsTree(props: {
 							/>
 							<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
 								<div className="conversation-title flex min-w-0 items-center gap-1.5">
-									{/* 当前选中会话不滚动（与激活 tab 一致），避免选中行 hover 也在动 */}
-									<TitleScrollText text={displayTitle} className="font-medium" disabled={selected} />
+									{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
+									<TitleScrollText text={displayTitle} className="font-medium" />
 									<SessionBackendMark backend={agent.backend} />
 									{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略） */}
 									<span className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden">

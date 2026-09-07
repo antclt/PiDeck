@@ -463,6 +463,17 @@ export function registerGitIpc({
 	);
 
 	ipcMain.handle(
+		ipcChannels.gitCommitCount,
+		async (_event, projectId: string, options?: { ref?: string; path?: string; allBranches?: boolean }, repoPath?: string) => {
+			const cwd = findGitCwd(projectId, repoPath);
+			// 找不到仓库时返回 0：徽章在 count<=0 时隐藏，避免把「无仓库」渲染成 NaN。
+			if (!cwd) return 0;
+			const hostOptions = options?.path ? { ...options, path: hostPath(options.path) } : options;
+			return gitService.getCommitCount(cwd, hostOptions);
+		},
+	);
+
+	ipcMain.handle(
 		ipcChannels.gitRefs,
 		async (_event, projectId: string, repoPath?: string) => {
 			const cwd = findGitCwd(projectId, repoPath);

@@ -37,6 +37,8 @@ import { mergeSubagentSources } from "./derivedSubagents";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
+import { createPiProcessSkillResolvers } from "../skills/piProcessSkillResolvers";
+import { createPiProcessPromptResolvers } from "../prompts/piProcessPromptResolvers";
 import {
 	formatExtensionFallbackDebug,
 	shouldRetryWithoutExtensions,
@@ -533,7 +535,10 @@ export class AgentManager {
 		return new PiProcess(cwd, settings, undefined, {
 			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
 			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
+			// 技能/模板解析器同源：禁用的技能与提示词模板在 RPC 启动时以白名单剔除。
 			...createPiProcessExtensionResolvers(cwd, settings),
+			...createPiProcessSkillResolvers(cwd, settings),
+			...createPiProcessPromptResolvers(cwd, settings),
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,
@@ -3148,8 +3153,9 @@ export class AgentManager {
 	): Promise<T> {
 		const project = this.getProject(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const trustOverride = await this.ensureProjectTrust(project);
 		const process = this.createPiProcess(project.path, sessionPath);
-		await process.start(sessionPath);
+		await process.start(sessionPath, trustOverride);
 		try {
 			return await run(process);
 		} finally {
@@ -4570,7 +4576,7 @@ export class AgentManager {
 		"settings.json",
 		"extensions",
 		"skills",
-		"prompts",
+		"mcp.json",
 		"themes",
 		"SYSTEM.md",
 		"APPEND_SYSTEM.md",
@@ -4584,7 +4590,10 @@ export class AgentManager {
 	private hasTrustRequiringResources(hostCwd: string): boolean {
 		const configDir = join(hostCwd, ".pi");
 		if (
-			AgentManager.TRUST_REQUIRING_RESOURCE_FILES.some((file) => existsSync(join(configDir, file)))
+			AgentManager.TRUST_REQUIRING_RESOURCE_FILES.some((file) => existsSync(join(configDir, file))) ||
+			// pi-mcp-adapter also loads a project-root layer. It can define stdio commands,
+			// so a project with only .mcp.json still requires an explicit trust decision.
+			existsSync(join(hostCwd, ".mcp.json"))
 		) {
 			return true;
 		}

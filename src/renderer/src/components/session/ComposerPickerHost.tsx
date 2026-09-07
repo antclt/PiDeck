@@ -76,6 +76,10 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   const clearPiRuntimeThinkingLevels = useSetAtom(clearPiRuntimeThinkingLevelsAtom);
   const resolvePiRuntimeThinkingLevels = useSetAtom(resolvePiRuntimeThinkingLevelsAtom);
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
+  /** 最近使用的供应商（最新在前）：模型选择器按此优先排列供应商分组。 */
+  const [recentProviders, setRecentProviders] = useState<string[]>([]);
+  /** 用户隐藏的供应商（Pi 模型页眼睛开关）：Pi 后端模型选择器按 provider 过滤。 */
+  const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
   /** 模型在本地 models.json 存在但运行中 Agent 未加载：待确认重启的目标。 */
   const [restartTarget, setRestartTarget] = useState<{
     handle: SessionRuntimeTarget;
@@ -98,6 +102,8 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   useEffect(() => {
     void desktopApi.settings.get().then((settings) => {
       setFavoriteModels(settings.favoriteModels ?? []);
+      setRecentProviders(settings.recentProviders ?? []);
+      setHiddenProviders(settings.hiddenProviders ?? []);
     }).catch(() => undefined);
   }, []);
 
@@ -534,6 +540,8 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
         onPick={(model) => void pickModel(model)}
         favoriteModels={favoriteModels}
         onToggleFavorite={(provider, modelId) => void toggleFavorite(provider, modelId)}
+        recentProviders={recentProviders}
+        hiddenProviders={hiddenProviders}
         // 用量查询链路随会话后端：DSH 目录的 provider 是 route 名，配置/凭据走 dsh 链路
         backend={isDshSession ? "dsh" : "pi"}
       />

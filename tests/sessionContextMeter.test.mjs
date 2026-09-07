@@ -224,7 +224,7 @@ test("panel reuses the SessionStatus detail builder and keeps compact action", (
   assert.doesNotMatch(source, /sessionContext\.cacheHit/);
   assert.doesNotMatch(source, /sessionContext\.inputOutput/);
   assert.doesNotMatch(source, /sessionContext\.cost/);
-  // 压缩按钮：从右上角紧凑徽章迁入面板底部；门槛/紧急色走 compactUiState
+  // 压缩按钮：从右上角紧凑徽章迁入面板底部；可用态/紧急色走 compactUiState
   assert.match(source, /t\("sessionContext\.compact"\)/);
   assert.match(source, /t\("sessionContext\.compacting"\)/);
   assert.match(source, /t\("sessionContext\.compactNotReady"\)/);
@@ -441,7 +441,7 @@ test("meter stays visible without capacity: placeholder ring + unavailable panel
   assert.doesNotMatch(source, /if \(!available && open\) setOpen\(false\)/);
   // 面板定位/外点/滚动监听不再受可用性限制
   assert.doesNotMatch(source, /if \(!open \|\| !available\) return;/);
-  // 占用条/图例在无可用时隐藏；压缩按钮因 percent=0 自动禁用（compactUiState not ready）
+  // 占用条/图例在无可用时隐藏；压缩按钮无数据时传 undefined → compactUiState not ready（禁用）
   assert.match(source, /\{available && segments !== null && \(/);
   assert.match(source, /t\("sessionContext\.unavailable"\)/);
 });

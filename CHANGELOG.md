@@ -9,6 +9,8 @@
 - **Built-in TokenDance provider** — TokenDance (tokendance.space) ships as a built-in provider with a live model catalog, one-click OAuth key install, in-line balance display in the auth list and DSH migration support; manually added TokenDance providers automatically receive the `X-App-URL` attribution header so usage is credited to the app.
 - **pi v0.85.0 tracking** — The bundled model catalog is regenerated against pi-ai 0.85.0 (1336 entries) with updated model lists and capability fields.
 - **ZCode session import** — Import ZCode (Z.ai CLI) sessions from `~/.zcode/cli/db/db.sqlite`: the project context menu gains an "Import ZCode Sessions" entry with a picker showing title / preview / message count and new / current / outdated status. Conversations are converted into Pi-readable sessions (text, reasoning, tool calls with matched results, image attachments restored from artifacts), subagent sessions and timeline noise are skipped, and imported sessions carry a ZCode source badge with dedicated filtering.
+- **pi.dev extension store** — Extension management gains a two-pane "Installed / Store" view; the store lists packages from the pi.dev Package Catalog page (name / description / author / type / monthly downloads / publish date / npm & GitHub links) with search, type filtering, sort by downloads or latest, and pagination. One-click install, copy the install command, open the pi.dev page, and already-installed packages are marked "installed" with the install button disabled.
+- **Provider groups sorted by recent use** — The model picker's provider groups now sort "recently used first" (the newest used provider jumps to the top, up to 8 remembered); never-used / non-built-in providers fall back to built-in-pinned alphabetical order, and the `other` fallback group always stays last, so commonly used providers need no repeated scrolling.
 
 ### 🐛 Fixes
 - **Tool stopwatch no longer resets mid-stream** — Tool duration now starts from meta.startedAt (same baseline as the final durationMs), so long-running commands no longer flash back to near-zero while streaming output.
@@ -17,6 +19,20 @@
 - **Fork titles persist and long sidebar names scroll** — Forked session titles survive restarts; extra-long sidebar titles scroll on hover.
 - **Git badge state survives tab switches** — Ahead/behind badges are cached per project + repo scope, so switching session tabs no longer blanks them (the cached value shows instantly and a background refresh corrects it shortly after).
 - **Calmer title scrolling** — Sidebar and tab title scrolling is unified to a constant 5px/s with no upper duration cap, so very long titles never turn into a fast flicker.
+
+### 🙏 Thanks
+
+Special thanks to **微时佬友** for providing the Grok model service used in our
+software development 🎉
+
+Thanks to **歌者、幕书、王女士** for their generous donations and support! 🎉
+
+Thanks to **sgafxh, r0y1z2, c834292137, bfzha** and all contributors for their
+code contributions 🙏
+
+Thanks to all group members who submitted suggestions and bug reports! 🙏
+
+> 💬 **QQ feedback group: 1026218644**
 
 ## v0.7.3 - 2026-09-03
 

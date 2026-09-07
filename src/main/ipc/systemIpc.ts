@@ -14,13 +14,13 @@ import type {
 	AppSettings,
 	AvailableModel,
 	ModelListReport,
-	CreatePiSkillInput,
 	SessionCommandResult,
 	SessionRuntimeTarget,
 } from "../../shared/types";
 import type { PiLocator } from "../pi/PiLocator";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { ConfigManager, PiModelsFile } from "../config/ConfigManager";
+import type { ConfigBackupManager } from "../config/ConfigBackupManager";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
@@ -32,6 +32,7 @@ import { fetchModelList, getCachedModelList, invalidateModelListCache, refreshMo
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthStore } from "../config/tokendanceAuth";
+import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
@@ -81,10 +82,45 @@ function isRpcLogEntry(value: unknown): value is RpcLogEntry {
 	);
 }
 
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return isUnknownRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
+	if (!isUnknownRecord(value)) return false;
+	const optionalString = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "string";
+	const optionalNumber = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "number";
+	return (
+		["command", "cwd", "url", "socket", "bearerToken", "bearerTokenEnv"].every(optionalString) &&
+		optionalNumber("idleTimeout") &&
+		optionalNumber("requestTimeoutMs") &&
+		(!("args" in value) || value.args === undefined || (Array.isArray(value.args) && value.args.every((entry) => typeof entry === "string"))) &&
+		(!("env" in value) || value.env === undefined || isStringRecord(value.env)) &&
+		(!("headers" in value) || value.headers === undefined || isStringRecord(value.headers)) &&
+		(!("auth" in value) || value.auth === undefined || value.auth === "bearer" || value.auth === "oauth") &&
+		(!("lifecycle" in value) || value.lifecycle === undefined || ["lazy", "eager", "keep-alive", "lazy-keep-alive"].includes(String(value.lifecycle))) &&
+		(!("disabled" in value) || value.disabled === undefined || typeof value.disabled === "boolean") &&
+		(!("directTools" in value) || value.directTools === undefined || typeof value.directTools === "boolean" || (Array.isArray(value.directTools) && value.directTools.every((entry) => typeof entry === "string")))
+	);
+}
+
+function isMcpConfigFile(value: unknown): value is McpConfigFile {
+	if (!isUnknownRecord(value)) return false;
+	if ("settings" in value && value.settings !== undefined && !isUnknownRecord(value.settings)) return false;
+	if (!("mcpServers" in value) || value.mcpServers === undefined) return true;
+	if (!isUnknownRecord(value.mcpServers)) return false;
+	return Object.values(value.mcpServers).every(isMcpServerDefinition);
+}
+
 export type SystemIpcDeps = {
 	piLocator: PiLocator;
 	settingsStore: SettingsStore;
 	configManager: ConfigManager;
+	projectResourceManager: ProjectResourceManager;
 	agentManager: AgentManager;
 	skillManager: SkillManager;
 	appLogger: AppLogger;
@@ -122,6 +158,8 @@ export type SystemIpcDeps = {
 	environmentDoctor?: EnvironmentDoctor;
 	/** 诊断产物导出器（Markdown / zip 日志包）。 */
 	logBundleExporter?: LogBundleExporter;
+	/** 配置备份管理器：配置保存成功后触发 on-save 备份（可选，未装配则不备份）。 */
+	configBackupManager?: ConfigBackupManager;
 	getMainWindow: () => Electron.BrowserWindow | null;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 	/** Check for app update（index.ts 注入：直接触发 UpdateService.checkNow，结果经快照推送）。 */
@@ -218,6 +256,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		piLocator,
 		settingsStore,
 		configManager,
+		projectResourceManager,
 		agentManager,
 		skillManager,
 		appLogger,
@@ -269,7 +308,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		diagnosticsMonitor,
 		environmentDoctor,
 		logBundleExporter,
+		configBackupManager,
 	} = deps;
+
+	// 配置保存成功后触发备份（防抖合并由 ConfigBackupManager 内部处理）。
+	const notifyBackup = (): void => configBackupManager?.notifyConfigSaved();
 
 	/**
 	 * Models/auth 的任何写入都必须同时失效 CLI fallback 与 Pi-authoritative
@@ -1121,6 +1164,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			modelCapabilityCache.watchConfigDirectory();
 			void refreshPiModelCatalogs().catch(() => undefined);
 		}
+		// 设置保存成功：触发配置备份（pideck settings 是备份对象之一）。
+		notifyBackup();
 		return settings;
 	});
 
@@ -1148,11 +1193,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (!readSkillContent) throw new Error("readSkillContent not available");
 		// 渲染层传入的路径不可信：白名单校验（全局/项目技能位置）在 readSkillContent 内完成。
 		return readSkillContent(skillPath);
-	});
-	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput) => {
-		const result = await skillManager.create(input);
-		void appLogger.info("skill", "Skill created", { name: input.name, locationId: input.locationId });
-		return result;
 	});
 	ipcMain.handle(ipcChannels.skillsToggle, async (_event, path: string, enabled: boolean) => {
 		const result = await skillManager.toggle(path, enabled);
@@ -1212,30 +1252,31 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configGetTrust, () =>
 		configManager.getTrustConfig(),
 	);
-	// MCP 配置只读合并：projectPath 可选，非法输入当全局层处理。
-	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectPath?: unknown) => {
-		const path =
-			typeof projectPath === "string" && projectPath.trim().length > 0
-				? projectPath.trim()
-				: undefined;
-		return configManager.getMcpConfig(path);
+	// MCP project layers are selected by a stable registered project id; renderer paths are never trusted.
+	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectId?: unknown) => {
+		if (projectId === undefined) return configManager.getMcpConfig();
+		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) {
+			throw new Error("Invalid project id.");
+		}
+		return configManager.getMcpConfig(projectResourceManager.getProjectRoot(projectId.trim()));
 	});
 	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown) => {
-		if (!data || typeof data !== "object" || Array.isArray(data)) {
-			return { valid: false, error: "mcp.json must be an object" };
+		if (!isMcpConfigFile(data)) {
+			return { valid: false, error: "mcp.json must contain an object of server definitions" };
 		}
-		const result = await configManager.saveMcpConfig(data as McpConfigFile);
+		const result = await configManager.saveMcpConfig(data);
+		if (result.valid) notifyBackup();
 		void appLogger.info("config", "MCP config saved", {
-			serverCount: Object.keys((data as McpConfigFile).mcpServers ?? {}).length,
+			serverCount: Object.keys(data.mcpServers ?? {}).length,
 		});
 		return result;
 	});
 	// 轻量探测：不 spawn 用户 command、不连 MCP SDK。
 	ipcMain.handle(ipcChannels.configProbeMcp, async (_event, definition: unknown) => {
-		if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
+		if (!isMcpServerDefinition(definition)) {
 			return { ok: false, error: "invalid MCP server definition" };
 		}
-		return configManager.probeMcpServer(definition as McpServerDefinition);
+		return configManager.probeMcpServer(definition);
 	});
 	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
 	ipcMain.handle(ipcChannels.configGetDir, () =>
@@ -1248,6 +1289,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configSaveModels, async (_event, data) => {
 		const result = await configManager.saveModelsConfig(data);
 		if (!result.valid) return result;
+		notifyBackup();
 		invalidateModelListCache();
 		// 保存后同步验证：用真实 pi 重新列出模型，确认配置能被 pi 正常加载。
 		// 只有拿到非空模型列表才算“保存且可用”；空/失败时把原因带回渲染层提示用户检查配置。
@@ -1282,19 +1324,26 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configSaveAuth, async (_event, data) => {
 		const result = await configManager.saveAuthConfig(data);
-		if (result.valid) void refreshPiModelCatalogs().catch(() => undefined);
+		if (result.valid) {
+			notifyBackup();
+			void refreshPiModelCatalogs().catch(() => undefined);
+		}
 		void appLogger.info("config", "Auth config saved", { authCount: Object.keys(data ?? {}).length });
 		return result;
 	});
 	ipcMain.handle(ipcChannels.configSaveSettings, async (_event, settings) => {
 		const result = await configManager.saveSettingsConfig(settings);
+		if (result.valid) notifyBackup();
 		void appLogger.info("config", "Pi settings config saved", { keys: Object.keys(settings ?? {}) });
 		return result;
 	});
 	ipcMain.handle(ipcChannels.configSaveRaw, async (_event, fileName, rawJson) => {
 		const result = await configManager.saveRawConfig(fileName, rawJson);
-		if (result.valid && (fileName === "models.json" || fileName === "auth.json")) {
-			void refreshPiModelCatalogs().catch(() => undefined);
+		if (result.valid) {
+			notifyBackup();
+			if (fileName === "models.json" || fileName === "auth.json") {
+				void refreshPiModelCatalogs().catch(() => undefined);
+			}
 		}
 		void appLogger.info("config", "Raw config saved", { fileName, bytes: Buffer.byteLength(rawJson, "utf8") });
 		return result;
@@ -1304,7 +1353,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	);
 	ipcMain.handle(ipcChannels.configImport, async (_event, packageJson: string) => {
 		const result = await configManager.importConfig(packageJson);
-		if (result.valid) void refreshPiModelCatalogs().catch(() => undefined);
+		if (result.valid) {
+			notifyBackup();
+			void refreshPiModelCatalogs().catch(() => undefined);
+		}
 		void appLogger.info("config", "Config imported", { bytes: Buffer.byteLength(packageJson, "utf8"), valid: result.valid });
 		return result;
 	});

@@ -13,7 +13,7 @@ test("skill hub result cards force system browser", () => {
 });
 
 test("extension recommendation cards force system browser", () => {
-	const src = readFileSync("src/renderer/src/config/ExtensionsTab.tsx", "utf8");
+	const src = readFileSync("src/renderer/src/config/extensionsRecommendedPackages.tsx", "utf8");
 	// 扩展推荐卡片：原来裸 window.open（会走 setWindowOpenHandler 跟随设置，internal 时同样被遮挡）
 	assert.doesNotMatch(src, /window\.open\(/);
 	assert.match(src, /window\.piDesktop\.app\.openExternal\(\s*`https:\/\/pi\.dev\/packages\/\$\{pkg\.name\}\?name=\$\{packageName\}`,\s*true\s*\)/);

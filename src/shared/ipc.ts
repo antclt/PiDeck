@@ -7,12 +7,14 @@ export const ipcChannels = {
 	projectsRename: "projects:rename",
 	projectsChanged: "projects:changed",
 	projectResourcesList: "project-resources:list",
-	projectResourcesCreateSkill: "project-resources:create-skill",
+	projectResourcesOpenDirectory: "project-resources:open-directory",
 	projectResourcesDeleteSkill: "project-resources:delete-skill",
 	projectResourcesToggleSkill: "project-resources:toggle-skill",
 	projectResourcesDeleteExtension: "project-resources:delete-extension",
 	projectResourcesToggleExtension: "project-resources:toggle-extension",
+	projectResourcesToggleInherited: "project-resources:toggle-inherited",
 	projectResourcesRenameSkill: "project-resources:rename-skill",
+	projectResourcesDiscovery: "project-resources:discovery",
 	projectsListRoot: "projects:list-root",
 	projectsListWorktreeChildren: "projects:list-worktree-children",
 	projectsToggleWorktreeEnabled: "projects:toggle-worktree-enabled",
@@ -236,7 +238,6 @@ export const ipcChannels = {
 	settingsApplyWindow: "settings:apply-window",
 	skillsList: "skills:list",
 	skillsReadContent: "skills:read-content",
-	skillsCreate: "skills:create",
 	skillsToggle: "skills:toggle",
 	skillsDelete: "skills:delete",
 	skillsOpenFolder: "skills:open-folder",
@@ -247,10 +248,11 @@ export const ipcChannels = {
 	promptsOpenFolder: "prompts:open-folder",
 	promptsEdit: "prompts:edit",
 	promptsListByProject: "prompts:list-by-project",
-	promptsCreateInProject: "prompts:create-in-project",
 	promptsDeleteInProject: "prompts:delete-in-project",
 	promptsRename: "prompts:rename",
 	promptsRenameInProject: "prompts:rename-in-project",
+	promptsToggle: "prompts:toggle",
+	promptsToggleInProject: "prompts:toggle-in-project",
 	promptStoreSearch: "prompt-store:search",
 	promptStoreGet: "prompt-store:get",
 	promptStoreImport: "prompt-store:import",
@@ -273,6 +275,7 @@ export const ipcChannels = {
 	extensionsRestoreBuiltIn: "extensions:restore-built-in",
 	extensionsUpdate: "extensions:update",
 	extensionsUpdateOne: "extensions:update-one",
+	extensionsCatalog: "extensions:catalog",
 	/** 扫描项目目录内的独立 Git 仓库（根 + 嵌套），供侧栏切换 */
 	gitListRepos: "git:list-repos",
 	gitBranches: "git:branches",
@@ -283,6 +286,8 @@ export const ipcChannels = {
 	gitWorktreeCreate: "git:worktree-create",
 	gitWorktreeRemove: "git:worktree-remove",
 	gitCommitLog: "git:commit-log",
+	/** 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。 */
+	gitCommitCount: "git:commit-count",
 	gitRefs: "git:refs",
 	gitBranchCompare: "git:branch-compare",
 	gitCommitDetail: "git:commit-detail",
@@ -474,6 +479,21 @@ export const ipcChannels = {
 	configInstallUsageSkill: "config:install-usage-skill",
 	/** 安装内置「图片生成」技能模板到 ~/.pi/agent/skills/image-gen */
 	configInstallImageGenSkill: "config:install-image-gen-skill",
+	// ===== 配置备份（config-backup） =====
+	/** 列出全部配置备份（仅元数据，不读文件内容）。 */
+	configBackupList: "config-backup:list",
+	/** 立即创建一份配置备份（manual / first-run / upgrade / on-save / pre-restore）。 */
+	configBackupCreate: "config-backup:create",
+	/** 读取备份详情（文件内容已脱敏）。 */
+	configBackupRead: "config-backup:read",
+	/** 恢复备份：恢复前自动为当前配置建一份 pre-restore 保护备份。 */
+	configBackupRestore: "config-backup:restore",
+	/** 删除单个备份。 */
+	configBackupDelete: "config-backup:delete",
+	/** 批量删除多个备份（按 id 列表，非法 id 由主进程跳过）。 */
+	configBackupDeleteMany: "config-backup:delete-many",
+	/** 清空全部备份。 */
+	configBackupDeleteAll: "config-backup:delete-all",
 
 	// ===== 安全管理（SecurityStore + pi-deck-security-gate 扩展） =====
 	/** 拉取完整安全配置（等级/默认等级/会话覆盖） */

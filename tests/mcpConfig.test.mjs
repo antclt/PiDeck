@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -144,9 +144,66 @@ test("broken writable mcp.json keeps raw, reports error, and does not wipe other
 	assert.deepEqual({ ...snapshot.writableFile, mcpServers: { ...snapshot.writableFile.mcpServers } }, { mcpServers: {} });
 });
 
+test("malformed writable server entries preserve raw JSON and block visual saving", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-mcp-malformed-server-"));
+	const home = join(root, "home");
+	const agentDir = join(home, ".pi", "agent");
+	try {
+		await mkdir(agentDir, { recursive: true });
+		await writeFile(
+			join(agentDir, "mcp.json"),
+			JSON.stringify({ mcpServers: { valid: { command: "npx" }, damaged: 42 } }, null, 2),
+			"utf8",
+		);
+		const snapshot = await loadMcpConfigSnapshot(agentDir, undefined, home);
+		assert.match(snapshot.writableError ?? "", /damaged.*object/i);
+		assert.match(snapshot.writableRaw, /"damaged"\s*:\s*42/);
+		assert.deepEqual(
+			{ ...snapshot.writableFile, mcpServers: { ...snapshot.writableFile.mcpServers } },
+			{ mcpServers: {} },
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("project MCP layer junction cannot escape the registered project root", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-mcp-junction-"));
+	const home = join(root, "home");
+	const agentDir = join(home, ".pi", "agent");
+	const project = join(root, "project");
+	const outsidePi = join(root, "outside-pi");
+	try {
+		await mkdir(agentDir, { recursive: true });
+		await mkdir(project, { recursive: true });
+		await mkdir(outsidePi, { recursive: true });
+		await writeFile(
+			join(outsidePi, "mcp.json"),
+			JSON.stringify({ mcpServers: { secret: { command: "outside" } } }),
+			"utf8",
+		);
+		try {
+			await symlink(outsidePi, join(project, ".pi"), process.platform === "win32" ? "junction" : "dir");
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "EPERM") {
+				t.skip("The current filesystem does not permit junction creation");
+				return;
+			}
+			throw error;
+		}
+		const snapshot = await loadMcpConfigSnapshot(agentDir, project, home);
+		assert.equal(snapshot.servers.some((server) => server.name === "secret"), false);
+		assert.equal(snapshot.layers.find((layer) => layer.kind === "project-pi")?.exists, false);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("parseMcpConfigFile rejects non-object mcpServers", () => {
 	const bad = parseMcpConfigFile(JSON.stringify({ mcpServers: [] }));
 	assert.ok(bad.error);
+	const malformedServer = parseMcpConfigFile(JSON.stringify({ mcpServers: { damaged: 42 } }));
+	assert.match(malformedServer.error ?? "", /damaged.*object/i);
 	const ok = parseMcpConfigFile(JSON.stringify({ mcpServers: { a: { command: "npx" } } }));
 	assert.equal(ok.error, undefined);
 	assert.equal(ok.file.mcpServers.a.command, "npx");

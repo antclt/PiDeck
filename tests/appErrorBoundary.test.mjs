@@ -52,3 +52,41 @@ test("AppErrorBoundary renders a system-consistent error card", () => {
   // 可访问性：reduced-motion 关闭动画
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
+
+test("AppErrorBoundary auto-reloads after crash with a 3-attempt cap", () => {
+  const boundary = readFileSync("src/renderer/src/components/app/AppErrorBoundary.tsx", "utf8");
+
+  // 崩溃后自动刷新：componentDidCatch 里调度，倒计时后 reload
+  assert.match(boundary, /componentDidCatch/);
+  assert.match(boundary, /scheduleAutoReload\(\)/);
+  assert.match(boundary, /window\.location\.reload\(\)/);
+  assert.match(boundary, /window\.setInterval/);
+  assert.match(boundary, /clearInterval/);
+  // 计数持久化到 sessionStorage（刷新后仍保留），并按时间窗口累计
+  assert.match(boundary, /CRASH_AUTO_RELOAD_KEY/);
+  assert.match(boundary, /sessionStorage\.getItem/);
+  assert.match(boundary, /sessionStorage\.setItem/);
+  assert.match(boundary, /computeCrashReloadPlan/);
+  // 达到上限停止自动刷新（不再 reload），提示手动操作
+  assert.match(boundary, /autoReloadExhausted/);
+  assert.match(boundary, /shouldAutoReload/);
+  // 局部边界（有 onReset）不自动整页刷新
+  assert.match(boundary, /if \(this\.props\.onReset\) return/);
+
+  // 倒计时 UI：提示文案 + 取消按钮；卸载时清理定时器（生命周期配对）
+  assert.match(boundary, /componentWillUnmount/);
+  assert.match(boundary, /app\.renderErrorAutoReload"/);
+  assert.match(boundary, /app\.renderErrorAutoReloadCancel"/);
+  assert.match(boundary, /app\.renderErrorAutoReloadExhausted"/);
+  assert.match(boundary, /handleCancelAutoReload/);
+  assert.match(boundary, /app-error-boundary-autoreload/);
+  // 重试重置时同步停止自动刷新，避免旧定时器误刷
+  assert.match(boundary, /handleReset/);
+  assert.match(boundary, /clearAutoReloadTimer\(\)/);
+
+  // 崩溃计数/窗口常量来自独立纯函数模块（可单测）
+  const policy = readFileSync("src/renderer/src/utils/autoReloadPolicy.ts", "utf8");
+  assert.match(policy, /export function computeCrashReloadPlan/);
+  assert.match(policy, /MAX_AUTO_RELOAD_ATTEMPTS = 3/);
+  assert.match(policy, /CRASH_AUTO_RELOAD_WINDOW_MS = 60_000/);
+});

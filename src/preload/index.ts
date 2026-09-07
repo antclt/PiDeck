@@ -51,9 +51,11 @@ import type {
 	SessionRecord,
 	SessionProcessEvent,
 	VisionBridgeConfig,
-	CreatePiSkillInput,
-	CreateProjectSkillInput,
+	ProjectInheritedResourceToggleInput,
+	ProjectResourceDirectoryKind,
 	ProjectResourceListResult,
+	ProjectResourceDiscoveryResult,
+	ProjectResourceOverrides,
 	PetAggregateState,
 	PetManifest,
 	PetNotification,
@@ -249,28 +251,32 @@ const api = {
 	projectResources: {
 		list: (projectId: string) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesList, projectId) as Promise<ProjectResourceListResult>,
-		createSkill: (input: CreateProjectSkillInput) =>
-			ipcRenderer.invoke(ipcChannels.projectResourcesCreateSkill, input) as Promise<PiSkillSummary>,
+		openDirectory: (projectId: string, kind: ProjectResourceDirectoryKind) =>
+			ipcRenderer.invoke(ipcChannels.projectResourcesOpenDirectory, projectId, kind) as Promise<void>,
 		deleteSkill: (projectId: string, skillPath: string) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesDeleteSkill, projectId, skillPath) as Promise<void>,
 		deleteExtension: (projectId: string, extensionPath: string) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesDeleteExtension, projectId, extensionPath) as Promise<void>,
 		toggleExtension: (projectId: string, extensionPath: string, enabled: boolean) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesToggleExtension, projectId, extensionPath, enabled) as Promise<void>,
+		toggleInherited: (input: ProjectInheritedResourceToggleInput) =>
+			ipcRenderer.invoke(ipcChannels.projectResourcesToggleInherited, input) as Promise<ProjectResourceOverrides>,
 		toggleSkill: (projectId: string, skillPath: string, enabled: boolean) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesToggleSkill, projectId, skillPath, enabled) as Promise<PiSkillSummary>,
 		renameSkill: (projectId: string, skillPath: string, newName: string) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesRenameSkill, projectId, skillPath, newName) as Promise<PiSkillSummary>,
+		discovery: (projectId: string) =>
+			ipcRenderer.invoke(ipcChannels.projectResourcesDiscovery, projectId) as Promise<ProjectResourceDiscoveryResult>,
 	},
 	files: {
 		list: (projectId: string, options?: { maxDepth?: number; directory?: string }) =>
 			ipcRenderer.invoke(ipcChannels.filesList, projectId, options) as Promise<
 				FileTreeNode[]
 			>,
-		open: (path: string) =>
-			ipcRenderer.invoke(ipcChannels.filesOpen, path) as Promise<void>,
-		showInFolder: (path: string) =>
-			ipcRenderer.invoke(ipcChannels.filesShowInFolder, path) as Promise<void>,
+		open: (path: string, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesOpen, path, scope) as Promise<void>,
+		showInFolder: (path: string, scope?: ProjectFileAccessScope) =>
+			ipcRenderer.invoke(ipcChannels.filesShowInFolder, path, scope) as Promise<void>,
 		/** 检测系统可用的文件管理器（打开方式下拉补充入口） */
 		detectFileManager: () =>
 			ipcRenderer.invoke(ipcChannels.filesDetectFileManager) as Promise<FileManagerInfo | null>,
@@ -947,6 +953,14 @@ const api = {
 				options,
 				repoPath,
 			) as Promise<CommitEntry[]>,
+		// 与当前图谱过滤一致的提交总数（不分页），供源代码管理图标题徽章使用。
+		commitCount: (projectId: string, options?: { ref?: string; path?: string; allBranches?: boolean }, repoPath?: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitCommitCount,
+				projectId,
+				options,
+				repoPath,
+			) as Promise<number>,
 		// Git 引用（分支 / 远程分支 / Tag）
 		refs: (projectId: string, repoPath?: string) =>
 			ipcRenderer.invoke(
@@ -1310,8 +1324,6 @@ const api = {
 		// 读技能 SKILL.md 正文（白名单校验在主进程完成），技能选择器详情/全文插入用。
 		readContent: (path: string) =>
 			ipcRenderer.invoke(ipcChannels.skillsReadContent, path) as Promise<SkillContentResult>,
-		create: (input: CreatePiSkillInput) =>
-			ipcRenderer.invoke(ipcChannels.skillsCreate, input) as Promise<PiSkillSummary>,
 		toggle: (path: string, enabled: boolean) =>
 			ipcRenderer.invoke(
 				ipcChannels.skillsToggle,
@@ -1336,16 +1348,23 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.promptsOpenFolder) as Promise<void>,
 		edit: (filePath: string, content?: string) =>
 			ipcRenderer.invoke(ipcChannels.promptsEdit, filePath, content) as Promise<string | void>,
-		listByProject: (projectPath: string) =>
-			ipcRenderer.invoke(ipcChannels.promptsListByProject, projectPath) as Promise<PiPromptTemplateListResult>,
-		createInProject: (projectPath: string, input: CreatePiPromptTemplateInput) =>
-			ipcRenderer.invoke(ipcChannels.promptsCreateInProject, projectPath, input) as Promise<PiPromptTemplateSummary>,
-		deleteFromProject: (projectPath: string, fileName: string) =>
-			ipcRenderer.invoke(ipcChannels.promptsDeleteInProject, projectPath, fileName) as Promise<void>,
+		listByProject: (projectId: string) =>
+			ipcRenderer.invoke(ipcChannels.promptsListByProject, projectId) as Promise<PiPromptTemplateListResult>,
+		deleteFromProject: (projectId: string, name: string) =>
+			ipcRenderer.invoke(ipcChannels.promptsDeleteInProject, projectId, name) as Promise<void>,
 		rename: (oldName: string, newName: string) =>
 			ipcRenderer.invoke(ipcChannels.promptsRename, oldName, newName) as Promise<PiPromptTemplateSummary>,
-		renameInProject: (projectPath: string, oldName: string, newName: string) =>
-			ipcRenderer.invoke(ipcChannels.promptsRenameInProject, projectPath, oldName, newName) as Promise<PiPromptTemplateSummary>,
+		renameInProject: (projectId: string, oldName: string, newName: string) =>
+			ipcRenderer.invoke(ipcChannels.promptsRenameInProject, projectId, oldName, newName) as Promise<PiPromptTemplateSummary>,
+		toggle: (filePath: string, enabled: boolean) =>
+			ipcRenderer.invoke(ipcChannels.promptsToggle, filePath, enabled) as Promise<PiPromptTemplateSummary>,
+		toggleInProject: (projectId: string, name: string, enabled: boolean) =>
+			ipcRenderer.invoke(
+				ipcChannels.promptsToggleInProject,
+				projectId,
+				name,
+				enabled,
+			) as Promise<PiPromptTemplateSummary>,
 	},
 	promptStore: {
 		search: (query: string, options?: { limit?: number; type?: string; category?: string; tag?: string }) =>
@@ -1396,6 +1415,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.extensionsUpdate) as Promise<PiCliUpdateResult>,
 		updateOne: (source: string) =>
 			ipcRenderer.invoke(ipcChannels.extensionsUpdateOne, source) as Promise<PiCliUpdateResult>,
+		catalog: (query: import("../shared/types").PiPackageCatalogQuery) =>
+			ipcRenderer.invoke(ipcChannels.extensionsCatalog, query) as Promise<import("../shared/types").PiPackageCatalog>,
 	},
 	settings: {
 		get: () =>
@@ -1465,8 +1486,8 @@ const api = {
 				parsed: Record<string, unknown>;
 				diagnostic?: ConfigFileDiagnostic;
 			}>,
-		getMcp: (projectPath?: string) =>
-			ipcRenderer.invoke(ipcChannels.configGetMcp, projectPath) as Promise<
+		getMcp: (projectId?: string) =>
+			ipcRenderer.invoke(ipcChannels.configGetMcp, projectId) as Promise<
 				import("../shared/types/mcp").McpConfigSnapshot
 			>,
 		saveMcp: (data: import("../shared/types/mcp").McpConfigFile) =>
@@ -1660,6 +1681,44 @@ const api = {
 			ipcRenderer.invoke(
 				ipcChannels.configInstallImageGenSkill,
 			) as Promise<{ success: boolean; path?: string; error?: string }>,
+	},
+	configBackups: {
+		/** 列出全部配置备份（仅元数据）。 */
+		list: () =>
+			ipcRenderer.invoke(ipcChannels.configBackupList) as Promise<
+				import("../shared/types/backup").ConfigBackupListResult
+			>,
+		/** 立即创建一份配置备份（reason 只接受 manual；其余原因由主进程内部触发）。 */
+		create: (reason?: import("../shared/types/backup").ConfigBackupReason) =>
+			ipcRenderer.invoke(ipcChannels.configBackupCreate, reason ?? "manual") as Promise<
+				import("../shared/types/backup").ConfigBackupActionResult
+			>,
+		/** 读取备份详情（文件内容已脱敏）。 */
+		read: (id: string) =>
+			ipcRenderer.invoke(ipcChannels.configBackupRead, id) as Promise<
+				import("../shared/types/backup").ConfigBackupDetail | null
+			>,
+		/** 恢复备份（恢复前主进程自动为当前配置建 pre-restore 保护备份）。
+		 *  @param files 要恢复的文件 key 白名单（如 ["pi/models.json"]）；缺省 = 恢复全部。 */
+		restore: (id: string, files?: string[]) =>
+			ipcRenderer.invoke(ipcChannels.configBackupRestore, id, files) as Promise<
+				import("../shared/types/backup").ConfigBackupActionResult
+			>,
+		/** 删除单个备份。 */
+		delete: (id: string) =>
+			ipcRenderer.invoke(ipcChannels.configBackupDelete, id) as Promise<
+				import("../shared/types/backup").ConfigBackupActionResult
+			>,
+		/** 批量删除多个备份，返回实际删除数量。 */
+		deleteMany: (ids: string[]) =>
+			ipcRenderer.invoke(ipcChannels.configBackupDeleteMany, ids) as Promise<
+				import("../shared/types/backup").ConfigBackupDeleteManyResult
+			>,
+		/** 清空全部备份。 */
+		deleteAll: () =>
+			ipcRenderer.invoke(ipcChannels.configBackupDeleteAll) as Promise<
+				import("../shared/types/backup").ConfigBackupActionResult
+			>,
 	},
 	pet: {
 		/** 宠物窗监听主进程推送的聚合状态 */

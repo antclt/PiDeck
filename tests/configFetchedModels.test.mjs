@@ -76,6 +76,10 @@ test("carries listing capacities onto new models and leaves missing fields empty
 	);
 	assert.deepEqual(JSON.parse(JSON.stringify(models)), [
 		{
+			id: "empty",
+			name: "empty",
+		},
+		{
 			id: "listed",
 			name: "Listed",
 			contextWindow: 64000,
@@ -84,6 +88,5 @@ test("carries listing capacities onto new models and leaves missing fields empty
 			thinkingLevelMap: { off: null, high: "high", max: "max" },
 			input: ["text", "image"],
 		},
-		{ id: "empty", name: "empty" },
 	]);
 });
