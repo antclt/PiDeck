@@ -9,6 +9,7 @@ import {
 	CRASH_AUTO_RELOAD_KEY,
 	computeCrashReloadPlan,
 } from "../../utils/autoReloadPolicy";
+import { AutoReloadTimer } from "../../utils/crashAutoReloadTimer";
 
 type AppErrorBoundaryProps = {
 	children: ReactNode;
@@ -43,8 +44,37 @@ export class AppErrorBoundary extends Component<
 		autoReloadExhausted: false,
 	};
 
-	/** 自动刷新定时器句柄；组件卸载/取消时清理（生命周期配对）。 */
-	private autoReloadTimer: number | null = null;
+	/**
+	 * 自动刷新倒计时 timer。
+	 * 注意：不能在 componentDidCatch 里创建后就不再管——React 19 StrictMode（dev）
+	 * 下 error fallback 会 double-mount（mount→unmount→remount），伪卸载时
+	 * componentWillUnmount 会 stop 掉它，而 componentDidCatch 只在错误提交时调用
+	 * 一次不会重建，表现为文案停在 5 秒不递减。componentDidMount 里的 ensure()
+	 * 负责在 remount 后按 state 兜底重建（正常挂载/用户取消后不会误启动）。
+	 */
+	private readonly autoReloadTimer = new AutoReloadTimer({
+		onTick: (remaining) => this.setState({ autoReloadSeconds: remaining }),
+		onDone: () => {
+			this.setState({ autoReloadSeconds: null });
+			// 刷新后若仍崩溃会再次进入边界并累计计数，达到上限即停止。
+			window.location.reload();
+		},
+	});
+
+	override componentDidMount() {
+		// StrictMode remount 兜底：见 autoReloadTimer 字段注释。
+		// 初次挂载（无 error）或局部边界（scheduleAutoReload 已直接返回、
+		// autoReloadSeconds 仍为 null）时 ensure 不会启动 timer。
+		if (this.state.error) {
+			this.autoReloadTimer.ensure(
+				this.state.autoReloadSeconds ?? AUTO_RELOAD_SECONDS,
+			);
+		}
+	}
+
+	override componentWillUnmount() {
+		this.autoReloadTimer.stop();
+	}
 
 	static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
 		// 返回完整 state：倒计时/已耗尽标志由 componentDidCatch 里的 scheduleAutoReload
@@ -68,10 +98,6 @@ export class AppErrorBoundary extends Component<
 			.catch(() => undefined);
 		// 崩溃后自动尝试刷新页面；连续失败（短时间窗口内累计）则停止，避免死循环。
 		this.scheduleAutoReload();
-	}
-
-	override componentWillUnmount() {
-		this.clearAutoReloadTimer();
 	}
 
 	/**
@@ -116,37 +142,22 @@ export class AppErrorBoundary extends Component<
 			return;
 		}
 
-		this.clearAutoReloadTimer();
 		this.setState({ autoReloadSeconds: AUTO_RELOAD_SECONDS });
-		this.autoReloadTimer = window.setInterval(() => {
-			const next = (this.state.autoReloadSeconds ?? AUTO_RELOAD_SECONDS) - 1;
-			if (next <= 0) {
-				this.clearAutoReloadTimer();
-				this.setState({ autoReloadSeconds: null });
-				// 刷新后若仍崩溃会再次进入边界并累计计数，达到上限即停止。
-				window.location.reload();
-				return;
-			}
-			this.setState({ autoReloadSeconds: next });
-		}, 1000);
-	};
-
-	private clearAutoReloadTimer = () => {
-		if (this.autoReloadTimer != null) {
-			window.clearInterval(this.autoReloadTimer);
-			this.autoReloadTimer = null;
-		}
+		// 崩溃次数登记（上面 sessionStorage 写入）只在此处执行一次；timer 的
+		// 生命周期交给 autoReloadTimer（start 内部先 stop 再重启），StrictMode
+		// remount 后的重建由 componentDidMount 的 ensure 兜底。
+		this.autoReloadTimer.start(AUTO_RELOAD_SECONDS);
 	};
 
 	/** 用户取消自动刷新：停止倒计时，保留崩溃页供手动操作。 */
 	private handleCancelAutoReload = () => {
-		this.clearAutoReloadTimer();
+		this.autoReloadTimer.stop();
 		this.setState({ autoReloadSeconds: null });
 	};
 
 	private handleReset = () => {
 		// 重置边界时同步停止自动刷新：若重试即恢复，不能再被旧定时器整页刷新。
-		this.clearAutoReloadTimer();
+		this.autoReloadTimer.stop();
 		this.setState({ error: null, autoReloadSeconds: null, autoReloadExhausted: false });
 		this.props.onReset?.();
 	};
