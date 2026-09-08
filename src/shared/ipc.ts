@@ -1,6 +1,8 @@
 export const ipcChannels = {
 	projectsList: "projects:list",
 	projectsAdd: "projects:add",
+	// 文件夹右键菜单直达：按路径添加项目（渲染层确认后调用；projectsAdd 走系统目录选择框）
+	projectsAddByPath: "projects:add-by-path",
 	projectsRemove: "projects:remove",
 	projectsReorder: "projects:reorder",
 	// 重命名项目显示名（仅改侧栏/标题 label，不改磁盘目录；聊天项目与 worktree 子项目拒绝）
@@ -683,5 +685,11 @@ export const ipcChannels = {
 	 * 必须走主进程（渲染进程直连 clipboard 在 Electron 38 已废弃，大文本会静默失败）。
 	 */
 	clipboardWriteText: "clipboard:write-text",
+
+	// ===== 资源管理器右键菜单（HKCU 注册/查询，portable 亦可用） =====
+	/** 渲染层 → 主进程：查询「用 PiDeck 打开」右键菜单是否已注册 */
+	shellMenuGetState: "shell-menu:get-state",
+	/** 渲染层 → 主进程：启用/取消资源管理器右键菜单注册 */
+	shellMenuSetEnabled: "shell-menu:set-enabled",
 
 } as const;

@@ -206,6 +206,7 @@ import type {
   ComposerAgentMode,
   TerminalTarget,
   GitBranchInfo,
+  FocusTargetPayload,
 } from "../../shared/types";
 
 export function App() {
@@ -1496,8 +1497,28 @@ export function App() {
       focusProject: (projectId) => {
         selectProjectCommand(projectId);
       },
+      // 文件夹右键打开未收录目录：弹确认框，确认后按路径入库并跳到该项目的引导页。
+      focusOpenProjectPath: (path: string) => {
+        overlays.showConfirm({
+          title: t("app.openFolderConfirmTitle"),
+          message: t("app.openFolderConfirmMessage", { path }),
+          confirmLabel: t("app.openFolderConfirmAdd"),
+          onConfirm: () => {
+            void api.projects
+              .addByPath(path)
+              .then((project) => {
+                selectProjectCommand(project.id);
+                showToast(t("app.openFolderAdded", { name: project.name }));
+              })
+              .catch((error) => {
+                showToast(error instanceof Error ? error.message : String(error), 5000, "error");
+              })
+              .finally(() => overlays.clearConfirm());
+          },
+        });
+      },
     });
-  }, [workspaceChrome, selectSessionCommand, selectProjectCommand]);
+  }, [workspaceChrome, selectSessionCommand, selectProjectCommand, overlays, showToast]);
 
   /** 新建会话：选中 + 登记常驻 Tab（chrome 与 selection 在 App 边界组合） */
   const createSessionDraftWithTab = useCallback(
@@ -1712,7 +1733,10 @@ export function App() {
       navigateTo(url);
     },
     onTrustRequest: overlays.setTrustRequest,
-    onFocusTarget: (target: { sessionId: string }) => {
+    // 主进程焦点目标（通知点击/右键打开项目）：sessionId 走旧链路选中会话；
+    // projectId/projectPath 由 useSessionWorkspaceChrome 的订阅处理（本回调只透传不重复消费）。
+    onFocusTarget: (target: FocusTargetPayload) => {
+      if (!("sessionId" in target)) return;
       const session = store.get(sessionRecordByIdAtomFamily(target.sessionId));
       if (session) selectSessionCommand(session.projectId, session.id, false);
     },

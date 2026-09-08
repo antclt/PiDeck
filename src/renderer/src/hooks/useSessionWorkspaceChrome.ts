@@ -24,6 +24,7 @@ import {
   type SessionSplitDropTarget,
   type SessionSplitLayout,
 } from "../utils/sessionSplitEdge";
+import type { FocusTargetPayload } from "../../../shared/types";
 
 const PINNED_TABS_STORAGE_KEY = "pideck.pinnedSessionTabIds";
 const SPLIT_GROUP_COLLAPSED_KEY = "pideck.splitGroupCollapsed";
@@ -36,6 +37,8 @@ export type SessionWorkspaceFocusHandlers = {
   focusSession: (projectId: string, sessionId: string) => void;
   /** 无剩余 Tab 时回到项目空态 */
   focusProject: (projectId: string) => void;
+  /** 文件夹右键打开未收录目录：弹确认框引导新增项目（App 注入） */
+  focusOpenProjectPath?: (path: string) => void;
 };
 
 /**
@@ -150,9 +153,11 @@ export function useSessionWorkspaceChrome(options: {
     });
   }, [sessionRecords, setSessionTabIds]);
 
-  // 主进程「跳转到某会话」推送（系统通知点击 / 桌面宠物点击）：解析 record 后交给
-  // App 注入的 focus handler 切换焦点。冷启动点击通知时 catalog 可能尚未加载完，
-  // 小间隔重试（最长约 3 秒）直到能解析到会话记录，避免首帧竞态丢目标。
+  // 主进程「跳转目标」推送（系统通知点击 / 桌面宠物点击 / 文件夹右键打开项目）：
+  // - sessionId：解析 record 后交给 App 注入的 focus handler 切换焦点。冷启动点击通知时
+  //   catalog 可能尚未加载完，小间隔重试（最长约 3 秒）直到能解析到会话记录，避免首帧竞态丢目标。
+  // - projectId：右键打开已收录目录，直接选中项目（引导页）。
+  // - projectPath：右键打开未收录目录，交给 App 弹确认框走新增项目流程。
   useEffect(() => {
     let disposed = false;
     const focusBySessionId = (sessionId: string) => {
@@ -167,14 +172,25 @@ export function useSessionWorkspaceChrome(options: {
       };
       tryFocus(0);
     };
-    const unsubscribe = window.piDesktop.pet.onFocusTarget(({ sessionId }) => {
-      focusBySessionId(sessionId);
+    const handleFocusTarget = (target: FocusTargetPayload) => {
+      if ("projectId" in target) {
+        focusHandlersRef.current.focusProject(target.projectId);
+        return;
+      }
+      if ("projectPath" in target) {
+        focusHandlersRef.current.focusOpenProjectPath?.(target.projectPath);
+        return;
+      }
+      focusBySessionId(target.sessionId);
+    };
+    const unsubscribe = window.piDesktop.pet.onFocusTarget((target) => {
+      handleFocusTarget(target);
     });
-    // 冷启动/页面加载期间点击通知：主进程直接 send 会在监听注册前丢失，
+    // 冷启动/页面加载期间点击通知/右键菜单：主进程直接 send 会在监听注册前丢失，
     // 挂载后主动拉取一次 pending 目标（与事件推送共用同一解析/重试逻辑）。
     void window.piDesktop.pet.getPendingFocusTarget?.().then((target) => {
       if (disposed || !target) return;
-      focusBySessionId(target.sessionId);
+      handleFocusTarget(target);
     });
     return () => {
       disposed = true;

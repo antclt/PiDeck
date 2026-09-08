@@ -12,19 +12,33 @@ const FOCUS_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const SESSION_RE = new RegExp(`pideck://session/(${FOCUS_UUID})`, "i");
 const AGENT_RE = new RegExp(`pideck://agent/(${FOCUS_UUID})`, "i");
 
+const OPEN_PROJECT_FLAG = "--open-project";
+
 export type FocusTarget = {
 	sessionId?: string;
 	agentId?: string;
+	/** 文件夹右键菜单唤起：待打开/导入的目录路径（来自 --open-project 参数）。 */
+	projectPath?: string;
 };
 
 export function extractFocusTargetFromArgv(argv?: string[]): FocusTarget | undefined {
 	if (!argv || argv.length === 0) return undefined;
-	for (const arg of argv) {
-		const text = String(arg);
+	for (let i = 0; i < argv.length; i++) {
+		const text = String(argv[i]);
 		const sessionMatch = text.match(SESSION_RE);
 		if (sessionMatch) return { sessionId: sessionMatch[1] };
 		const agentMatch = text.match(AGENT_RE);
 		if (agentMatch) return { agentId: agentMatch[1] };
+		// 右键菜单形式一：--open-project <path>（路径为独立参数，引号已被命令行解析剥离）
+		if (text === OPEN_PROJECT_FLAG) {
+			const path = argv[i + 1] ? String(argv[i + 1]).trim() : "";
+			if (path && !path.startsWith("--")) return { projectPath: path };
+		}
+		// 右键菜单形式二：--open-project=<path>
+		if (text.startsWith(`${OPEN_PROJECT_FLAG}=`)) {
+			const path = text.slice(OPEN_PROJECT_FLAG.length + 1).trim();
+			if (path) return { projectPath: path };
+		}
 	}
 	return undefined;
 }
