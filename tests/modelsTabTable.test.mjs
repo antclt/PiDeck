@@ -53,10 +53,13 @@ test("ModelsTab and AddProviderDialog both reuse the shared ModelsTable", () => 
   assert.match(dialogSource, /<ModelsTable/);
 });
 
-test("collapsed provider card keeps model count and usage in the header", () => {
-  // 折叠态不再另开 h-9 底栏：模型数徽章贴在名称后，用量走卡头 inline（有数据才渲染）。
+test("collapsed provider card keeps model count in the header and expands on whole-row click", () => {
+  // 折叠态不再另开 h-9 底栏：模型数徽章贴在名称后；用量已移出配置页。整行点击展开。
   assert.match(tabSource, /config\.count\.models/);
-  assert.match(tabSource, /ProviderUsageInline\s+provider=\{name\}\s+variant="card"/);
+  assert.match(tabSource, /cursor-pointer/);
+  assert.match(tabSource, /onClick=\{\(\) => props\.onToggleProvider\(name\)\}/);
+  assert.doesNotMatch(tabSource, /ProviderUsageInline/);
+  assert.doesNotMatch(tabSource, /ProviderUsageDetails/);
   assert.doesNotMatch(tabSource, /ProviderUsageRow/);
   assert.doesNotMatch(tabSource, /leading=/);
 });

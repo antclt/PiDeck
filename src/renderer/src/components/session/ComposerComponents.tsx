@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
+import { useSetAtom } from "jotai";
 import {
 	AlertCircle,
 	Brain,
@@ -52,8 +53,9 @@ import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { useComposerModeAvailability } from "../../hooks/useComposerModeAvailability";
 import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
 import { SessionContextMeter } from "./SessionContextMeter";
-import { ProviderUsageInline } from "../app/ProviderUsageInline";
+import { ProviderUsageDetails } from "../app/ProviderUsageDetails";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
+import { openSettingsAtom } from "../../atoms/app-ui-atoms";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
 import {
 	Select,
@@ -921,6 +923,8 @@ export function ModelPicker(props: {
 	const currentModelKey = props.current?.provider && props.current?.modelId
 		? `${props.current.provider}/${props.current.modelId}`
 		: undefined;
+	// 用量失败时跳转设置·模型 tab 对应供应商（与 SessionContextMeter deep-link 同口）。
+	const openModelsSettings = useSetAtom(openSettingsAtom);
 	const favoritesSet = new Set(props.favoriteModels ?? []);
 	// 隐藏开关：Pi 后端按 provider 过滤（DSH 的 route 名不参与隐藏列表）；
 	// 过滤后收藏/分组/搜索都基于可见模型，隐藏供应商的模型完全不出现在选择器里。
@@ -958,9 +962,8 @@ export function ModelPicker(props: {
 		providers: sortedProviders,
 	}));
 
-	// 供应商用量行（cc-switch inline）：打开选择器时批量触发 TTL 去重查询，行尾显示
-	// 彩色剩余/百分比；查不到（不支持/失败/查询中）的分组保持干净不渲染。
-	// backend 按会话后端透传（DSH 目录的 provider 是 route 名，配置/凭据在 dsh 链路）。
+	// 打开选择器时批量 TTL 去重查询（受 providerUsageAutoQueryEnabled 闸门；关闭时为 no-op）。
+	// 用量明细放展开组内，标题行不再挂 inline 刷新；backend 按会话后端透传（DSH 目录的 provider 是 route 名）。
 	const batchRefreshUsage = useProviderUsageBatchRefresh();
 	const providerKey = sortedProviders.join("\n");
 	useEffect(() => {
@@ -1057,8 +1060,27 @@ export function ModelPicker(props: {
 							label={provider}
 							count={groupedModels[provider].length}
 							countText={t("config.count.models", { count: groupedModels[provider].length })}
-							trailing={<ProviderUsageInline provider={provider} variant="row" backend={props.backend} />}
 						>
+							{/* 用量放展开区：刷新按钮不占标题行。非 CommandItem，避免 cmdk 把点击当成选模型。 */}
+							<div
+								className="px-1"
+								onPointerDown={(event) => event.stopPropagation()}
+								onClick={(event) => event.stopPropagation()}
+							>
+								<ProviderUsageDetails
+									provider={provider}
+									backend={props.backend}
+									onConfigureUsage={() =>
+										openModelsSettings({
+											tab: "common",
+											pane: "config",
+											configTab: "models",
+											provider,
+										})
+									}
+									className="border-t-0 pt-1"
+								/>
+							</div>
 							{groupedModels[provider].map((model) => renderModelRow(model))}
 						</CommandPickerGroup>
 					))}
