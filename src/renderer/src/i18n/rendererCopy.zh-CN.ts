@@ -561,6 +561,7 @@ export const zhCN = {
   "app.modelPickerRefresh": "刷新模型列表",
   "app.modelPickerRefreshing": "正在刷新…",
   "app.modelPickerRetry": "刷新重试",
+  "app.modelListLoading": "正在加载模型列表…",
   "app.modelListLoadFailed": "模型列表加载失败",
   "app.modelListEmptyTitle": "模型列表为空",
   "app.modelListEmptyGuide": "没有可用模型。请在「模型」设置页添加 provider 与模型，然后点击刷新。",

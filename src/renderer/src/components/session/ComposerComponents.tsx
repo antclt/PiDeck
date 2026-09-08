@@ -12,6 +12,7 @@ import {
 	GitBranch,
 	ImageIcon,
 	ListChecks,
+	Loader2,
 	Paperclip,
 	Plus,
 	RefreshCw,
@@ -71,7 +72,7 @@ import {
 } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
-import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, orderProviderGroups } from "./sessionPickerOptions";
+import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
 import type {
 	AgentBackend,
 	AgentRuntimeState,
@@ -896,6 +897,20 @@ function ModelListStatusGuide(props: {
 	);
 }
 
+/**
+ * 首次加载态：模型目录还没返回任何报告时的占位。
+ * 旧实现在此状态下面板完全空白（models=[] 且 report=null 两个分支都不命中），
+ * 用户以为「选择器里没有模型」；改为明确的加载提示。
+ */
+function ModelListLoadingState() {
+	return (
+		<div className="flex items-center gap-2.5 px-4 py-5 text-caption text-muted-foreground" role="status" aria-live="polite">
+			<Loader2 size={15} className="animate-pideck-spin" aria-hidden="true" />
+			{t("app.modelListLoading")}
+		</div>
+	);
+}
+
 export function ModelPicker(props: {
 	models: AvailableModel[];
 	current?: { provider?: string; modelId?: string; modelName?: string };
@@ -907,6 +922,8 @@ export function ModelPicker(props: {
 	onToggleFavorite?: (provider: string, modelId: string) => void;
 	/** 模型列表加载报告：为空时（加载失败/无模型）展示原因引导（版本过低/配置损坏/pi 未安装等）。 */
 	report?: ModelListReport | null;
+	/** 首次加载在途：列表为空时展示加载态（与 report=null 配对使用） */
+	loading?: boolean;
 	/** 手动刷新进行中（重新调用 pi --list-models） */
 	refreshing?: boolean;
 	/** 手动刷新：绕过缓存重新拉取模型列表 */
@@ -957,6 +974,12 @@ export function ModelPicker(props: {
 		current: props.current,
 		providers: sortedProviders,
 	}));
+	// 主体状态：加载中 / 失败或空态引导 / 模型列表（纯函数，见 sessionPickerOptions）。
+	const bodyState = resolveModelPickerBody({
+		modelCount: props.models.length,
+		report: props.report,
+		loading: props.loading,
+	});
 
 	// 供应商用量行（cc-switch inline）：打开选择器时批量触发 TTL 去重查询，行尾显示
 	// 彩色剩余/百分比；查不到（不支持/失败/查询中）的分组保持干净不渲染。
@@ -1037,7 +1060,9 @@ export function ModelPicker(props: {
 				) : undefined
 			}
 		>
-			{props.models.length === 0 && props.report ? (
+			{bodyState === "loading" ? (
+				<ModelListLoadingState />
+			) : bodyState === "guide" && props.report ? (
 				<ModelListStatusGuide
 					report={props.report}
 					refreshing={props.refreshing}

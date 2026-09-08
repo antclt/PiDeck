@@ -560,6 +560,7 @@ export const enUS: Record<TranslationKey, string> = {
   "app.modelPickerRefresh": "Refresh model list",
   "app.modelPickerRefreshing": "Refreshing…",
   "app.modelPickerRetry": "Refresh and retry",
+  "app.modelListLoading": "Loading model list…",
   "app.modelListLoadFailed": "Failed to load model list",
   "app.modelListEmptyTitle": "Model list is empty",
   "app.modelListEmptyGuide": "No available models. Add a provider and models in the Models settings page, then refresh.",

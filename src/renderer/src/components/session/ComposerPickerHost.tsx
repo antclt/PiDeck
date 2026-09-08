@@ -114,7 +114,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
   const pickerNeedsModels = props.picker === "model" || props.picker === "thinking";
   // 模型目录数据源统一走 capability cache。思考选择器同样加载它，运行中也能直接
   // 复用已水合的模型档位，不必等待 Agent RPC。
-  const { models, report, refreshing, reload } = useBackendModelCatalog({
+  const { models, report, loading: catalogLoading, refreshing, reload } = useBackendModelCatalog({
     sessionId,
     backend: isDshSession ? "dsh" : "pi",
     projectId: record?.projectId,
@@ -541,6 +541,7 @@ export function ComposerPickerHost(props: ComposerPickerHostProps) {
       <ModelPicker
         models={models}
         report={report}
+        loading={catalogLoading}
         refreshing={refreshing}
         onRefresh={() => reload(true)}
         current={resolvedLiveModel}
