@@ -546,7 +546,7 @@ export const enUS: Record<TranslationKey, string> = {
   "about.devBranch": "Dev branch",
   "about.runtimeInfo": "Runtime",
   "about.dshVersion": "DSH runtime",
-  "about.piAiVersion": "pi-ai catalog",
+  "about.piAiVersion": "pi-ai model catalog",
   "about.runtimeStack": "Electron {electron} · Chromium {chromium} · Node {node}",
   "about.timestamps": "Timestamps",
   "about.buildTime": "Build time",

@@ -547,7 +547,7 @@ export const zhCN = {
   "about.devBranch": "开发分支",
   "about.runtimeInfo": "运行时",
   "about.dshVersion": "DSH 运行时",
-  "about.piAiVersion": "pi-ai 目录",
+  "about.piAiVersion": "pi-ai 模型目录",
   "about.runtimeStack": "Electron {electron} · Chromium {chromium} · Node {node}",
   "about.timestamps": "时间",
   "about.buildTime": "打包时间",
