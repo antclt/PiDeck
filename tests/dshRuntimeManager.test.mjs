@@ -17,6 +17,8 @@ const {
 const {
 	DshRuntimeManager,
 	isSafeArchiveEntry,
+	readBundledRuntime,
+	readDeclaredDshVersion,
 	readRuntimeManifest,
 	sha256OfFile,
 } = loadTsCommonJs("src/main/dsh/runtime/DshRuntimeManager.ts");
@@ -405,4 +407,29 @@ test("readRuntimeManifest：清单损坏或缺失返回 undefined（按未安装
 	assert.equal(read.compatible, true);
 	assert.equal(read.manifest.runtimeVersion, "0.1.1-rc.2");
 	rmSync(root, { recursive: true, force: true });
+});
+
+test("readDeclaredDshVersion：读 package.json 声明的 @deepseek-ai/dsh 版本", () => {
+	const dir = mkdtempSync(join(tmpdir(), "pideck-declared-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({ dependencies: { "@deepseek-ai/dsh": "0.1.1-rc.2", other: "1.0.0" } }),
+			"utf8",
+		);
+		assert.equal(readDeclaredDshVersion(dir), "0.1.1-rc.2");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("readDeclaredDshVersion：无 dsh 依赖 / 目录缺失时返回 undefined", () => {
+	const dir = mkdtempSync(join(tmpdir(), "pideck-declared-"));
+	try {
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "plain" }), "utf8");
+		assert.equal(readDeclaredDshVersion(dir), undefined, "无 dsh 依赖不报错");
+		assert.equal(readDeclaredDshVersion(join(dir, "no-such-dir")), undefined, "目录缺失容错");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

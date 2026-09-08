@@ -1,5 +1,5 @@
 import { dialog, ipcMain, type BrowserWindow } from "electron";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
 import type { FeedbackProjectContext } from "../../shared/types";
@@ -103,6 +103,20 @@ export function registerProjectsIpc({
 			: null;
 		const project = await projectStore.chooseAndAdd(env, wslEnvironment);
 		void appLogger.info("project", "Project added", { projectId: project?.id, path: project?.path, environment: env });
+		return project;
+	});
+	// 文件夹右键菜单（--open-project）直达：给定路径必须是已存在的目录，
+	// 校验通过后直接入库（与选择框添加同一 add 链路：同路径去重/聊天目录特判）。
+	ipcMain.handle(ipcChannels.projectsAddByPath, async (_event, path: unknown) => {
+		if (typeof path !== "string" || path.trim().length === 0) {
+			throw new Error("INVALID_PROJECT_PATH");
+		}
+		const stats = await stat(path).catch(() => null);
+		if (!stats || !stats.isDirectory()) {
+			throw new Error("INVALID_PROJECT_PATH");
+		}
+		const project = await projectStore.add(path.trim());
+		void appLogger.info("project", "Project added via explorer context menu", { projectId: project.id, path: project.path });
 		return project;
 	});
 	ipcMain.handle(ipcChannels.projectsRemove, async (_event, id: string) => {

@@ -197,6 +197,19 @@ export type AppInfo = {
 	userDataDir: string;
 	/** 开发态 git 分支名（多 worktree 并行时区分窗口）；正式包/共享分支为空。 */
 	devBranch?: string;
+	/** pi CLI 版本（探测失败/未安装时缺省，UI 显示 —）；进程生命周期内缓存。 */
+	piVersion?: string;
+	/** 当前启用的 DSH 运行时版本（bundled manifest）；未启用/开发态缺省。 */
+	dshRuntimeVersion?: string;
+	/** 内置 pi-ai 目录清单 source.packageVersion；不含 overlay。 */
+	piAiVersion?: string;
+	electronVersion?: string;
+	chromeVersion?: string;
+	nodeVersion?: string;
+	/** 打包构建时间（ISO）：app.asar 的 mtime；开发态为 package.json mtime。 */
+	buildTime?: string;
+	/** 安装时间（ISO，仅打包态）：安装/升级时写入的 exe mtime。 */
+	installedAt?: string;
 };
 
 export type FeedbackEnvironment = {

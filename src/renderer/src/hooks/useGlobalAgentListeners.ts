@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useStore } from "jotai";
 import type {
   AppSettings,
+  FocusTargetPayload,
   Project,
 } from "../../../shared/types";
 import { replaceProjectInventoryAtom } from "../atoms";
@@ -9,7 +10,8 @@ import { desktopApi } from "../desktopApi";
 
 type GlobalAgentListenerCallbacks = {
   onProjectsChanged?: (projects: Project[]) => void;
-  onFocusTarget?: (target: { sessionId: string }) => void;
+  /** 主进程焦点目标（通知点击/右键打开项目）：sessionId 跳会话，projectId/projectPath 由 workspace chrome 订阅消费，此处仅透传 */
+  onFocusTarget?: (target: FocusTargetPayload) => void;
   onSettingsApplied?: (settings: AppSettings) => void;
   onOpenInBrowser?: (url: string) => void;
   onTrustRequest?: (request: {

@@ -24,6 +24,13 @@ export type ProviderUsageEntry = {
 
 const EMPTY_ENTRY: ProviderUsageEntry = { status: "idle", result: null, fetchedAt: null };
 
+/**
+ * 全局「自动查询供应商用量」开关快照。默认关闭：打开模型选择器/配置页会对每个
+ * provider 扇出 HTTP，多个 provider 共用同一本地 OpenAI 兼容网关时会打熔断。
+ * App.tsx 从 settings 同步；用量 hook 读取本 atom，不直接订 settings 以免跨树重渲染。
+ */
+export const providerUsageAutoQueryEnabledAtom = atom(false);
+
 /** provider → entry 的 record 原子：所有写动作都落在这里。 */
 const providerUsageRecordsAtom = atom<Record<string, ProviderUsageEntry>>({});
 

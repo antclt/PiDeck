@@ -129,6 +129,8 @@ let previewSettings: AppSettings = {
 	enableNotifications: true,
 	// 与主进程 SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
 	autoSessionTitle: true,
+	// 默认关闭自动用量查询：与主进程 SettingsStore 默认一致，避免预览 mock 漏字段
+	providerUsageAutoQueryEnabled: false,
 	// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致
 	askNotificationEnabled: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
@@ -243,6 +245,11 @@ export function createPreviewApi(): PiDesktopApi {
 	};
 	return {
 		clipboard: clipboardStub,
+		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持
+		shellMenu: {
+			getState: async () => ({ supported: false, registered: false }),
+			setEnabled: async () => ({ supported: false, registered: false }),
+		},
 		// 进程监控预览桩：返回空快照，仅供预览模式不崩溃
 		system: {
 			getProcessMetrics: async () => ({
@@ -332,6 +339,7 @@ export function createPreviewApi(): PiDesktopApi {
 		projects: {
 			list: async () => projects,
 			add: async () => projects[0],
+			addByPath: async () => projects[0],
 			remove: async () => projects,
 			reorder: async (projectIds) => {
 				projects.sort((a, b) => projectIds.indexOf(a.id) - projectIds.indexOf(b.id));

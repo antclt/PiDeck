@@ -1,12 +1,12 @@
 /**
  * Provider 用量查询 hook：atoms（provider-usage-atoms）之上的取数副作用层。
  *
- * 自动查询纪律（对齐 cc-switch「按设置的间隔探查、不主动冗余刷新」）：
- * - 新鲜期 = 主进程返回的 intervalMinutes（默认 5 分钟，0 = 关闭自动查询）——
- *   不是固定 60s。打开面板/卡片时只有「从未查过」或「已超过间隔」才发请求；
- * - interval = 0：打开时查一次（用户主动查看 = 手动性质），此后不自动重查、
- *   不轮询，只有手动刷新 / 测试 / 保存后置失效才会再发；
- * - 手动刷新（useProviderUsageRefresh）永远直接发请求，不走新鲜期判定。
+ * 自动查询纪律：
+ * - 全局开关 providerUsageAutoQueryEnabled（默认关）是防熔断主闸：
+ *   关闭时卡片挂载 / 轮询 / 模型选择器批量都不发 HTTP；
+ * - 开关打开后，新鲜期 = 主进程返回的 intervalMinutes（默认 5 分钟）；
+ * - interval = 0：该 provider 不轮询，且已查过的条目不自动重查；
+ * - 手动刷新（useProviderUsageRefresh）永远直接发请求，不看全局开关、不走新鲜期。
  *
  * 查询只写 atoms（组件卸载后写入也无害：缓存本就是跨组件共享的），无 cancelled 需求。
  */
@@ -17,14 +17,21 @@ import { normalizeDshDeepseekProvider } from "../../../shared/dshProviderNames";
 import { desktopApi } from "../desktopApi";
 import {
 	beginProviderUsageAtom,
+	providerUsageAutoQueryEnabledAtom,
 	providerUsageEntryAtomFamily,
 	providerUsageRecordsReadAtom,
 	resolveProviderUsageAtom,
 	type ProviderUsageEntry,
 } from "../atoms/provider-usage-atoms";
+import {
+	USAGE_PROBE_DEFAULT_INTERVAL_MINUTES,
+	shouldAutoFetchProviderUsage,
+} from "./providerUsageAutoQuery";
 
-/** 默认自动查询间隔（分钟）：与主进程默认一致（学 cc-switch），0 = 关闭自动查询。 */
-export const USAGE_PROBE_DEFAULT_INTERVAL_MINUTES = 5;
+export {
+	USAGE_PROBE_DEFAULT_INTERVAL_MINUTES,
+	providerUsageEntryStale,
+} from "./providerUsageAutoQuery";
 
 /**
  * 用量展示/缓存 key：DSH 链路的 provider 名前缀 `dsh:`，避免与 pi 侧同名 provider
@@ -66,22 +73,6 @@ function startFetch(
 			inFlight.delete(cacheKey);
 		});
 	inFlight.set(cacheKey, promise);
-}
-
-/**
- * entry 是否需要（重）查：
- * - 从未完成过（fetchedAt=null）→ 需要（首查）；
- * - interval <= 0（关闭自动查询）→ 不需要（只靠手动刷新）；
- * - 否则按 interval 分钟过期判定（默认 5 分钟），不再有固定 60s 的冗余重查。
- */
-export function providerUsageEntryStale(
-	entry: Pick<ProviderUsageEntry, "fetchedAt"> | null,
-	intervalMinutes: number = USAGE_PROBE_DEFAULT_INTERVAL_MINUTES,
-	now: number = Date.now(),
-): boolean {
-	if (!entry || entry.fetchedAt == null) return true;
-	if (intervalMinutes <= 0) return false;
-	return now - entry.fetchedAt >= intervalMinutes * 60_000;
 }
 
 /** provider → 内置识别结果的模块级缓存（跨组件共享，避免重复 IPC）；识别结果跟随 provider 名/backend。 */
@@ -128,8 +119,8 @@ export function useProviderUsageRecognized(
  * `dsh:<provider>` 隔离；**主进程收到的永远是原始 provider 名**（缓存 key 只在
  * 渲染层 atom 里用，不能当 provider 名发过去——之前把 `dsh:deepseek` 整体当
  * provider 寄回主进程，导致 DSH 卡片用量永远解析不出、显示为空）。
- * 首次挂载查一次；成功后按主进程返回的 intervalMinutes 排下一次自动刷新
- * （0 = 不自动；默认 5 分钟）。 */
+ * 全局开关打开时，首次挂载才查；成功后按 intervalMinutes 排下一次自动刷新
+ * （0 = 该 provider 不轮询；默认 5 分钟）。开关关闭时本 hook 只订阅缓存、不发 HTTP。 */
 export function useProviderUsageEntry(
 	provider: string | undefined,
 	backend: UsageProbeBackend = "pi",
@@ -138,33 +129,54 @@ export function useProviderUsageEntry(
 	const entry = useAtomValue(providerUsageEntryAtomFamily(cacheKey ?? ""));
 	const begin = useSetAtom(beginProviderUsageAtom);
 	const resolve = useSetAtom(resolveProviderUsageAtom);
-	// 生效间隔：已查到结果用配置值（0 = 不自动）；未查到用默认值（首查）。
+	const autoQueryEnabled = useAtomValue(providerUsageAutoQueryEnabledAtom);
+	// 生效间隔：已查到结果用配置值（0 = 该 provider 不轮询）；未查到用默认值。
 	const intervalMinutes =
 		entry.result?.intervalMinutes ?? USAGE_PROBE_DEFAULT_INTERVAL_MINUTES;
 	useEffect(() => {
 		if (!provider || !cacheKey) return;
-		// 依赖只用原始值 cacheKey/fetchedAt / intervalMinutes（entry 对象引用经 selectAtom/Object.is 已稳定）。
-		if (!providerUsageEntryStale(entry, intervalMinutes)) return;
+		// 全局关则跳过首查；开则走新鲜期（从未查过或已过 interval 才发）。
+		if (
+			!shouldAutoFetchProviderUsage({
+				autoQueryEnabled,
+				reason: "mount",
+				entry,
+				intervalMinutes,
+			})
+		) {
+			return;
+		}
 		begin(cacheKey);
 		startFetch(provider, cacheKey, resolve, backend);
-	}, [provider, cacheKey, entry.fetchedAt, intervalMinutes, begin, resolve, backend]);
+		// 依赖只用 fetchedAt 而非整个 entry：begin() 会把 status 改成 loading，
+		// 若订整个对象会在首查发出后立刻重跑 effect（inFlight 能挡住 HTTP，但仍多一次 begin）。
+	}, [provider, cacheKey, entry.fetchedAt, intervalMinutes, autoQueryEnabled, begin, resolve, backend]);
 
-	// 自动轮询：只对「已成功且间隔 > 0」的 provider 排下一次刷新；
-	// interval = 0 时不轮询（关闭自动查询 = 完全手动）。
+	// 自动轮询：全局开 + 间隔 > 0 才排下一次刷新。
 	// 挂载在哪个面板就轮询哪个（模型卡片/选择器可见时才有订阅者），不后台刷全部。
 	useEffect(() => {
-		if (!provider || !cacheKey || intervalMinutes <= 0) return;
+		if (!provider || !cacheKey) return;
+		if (
+			!shouldAutoFetchProviderUsage({
+				autoQueryEnabled,
+				reason: "poll",
+				entry,
+				intervalMinutes,
+			})
+		) {
+			return;
+		}
 		const timer = window.setTimeout(() => {
 			begin(cacheKey);
 			startFetch(provider, cacheKey, resolve, backend);
 		}, intervalMinutes * 60_000);
 		return () => window.clearTimeout(timer);
-	}, [provider, cacheKey, intervalMinutes, begin, resolve, backend]);
+	}, [provider, cacheKey, intervalMinutes, autoQueryEnabled, begin, resolve, backend]);
 
 	return entry;
 }
 
-/** 手动刷新单个 provider（详情面板刷新按钮 / 保存探针后重查）：不走新鲜期判定。 */
+/** 手动刷新单个 provider（详情面板刷新按钮 / 保存探针后重查）：不看全局开关、不走新鲜期。 */
 export function useProviderUsageRefresh(): (provider: string, backend?: UsageProbeBackend) => void {
 	const begin = useSetAtom(beginProviderUsageAtom);
 	const resolve = useSetAtom(resolveProviderUsageAtom);
@@ -179,13 +191,14 @@ export function useProviderUsageRefresh(): (provider: string, backend?: UsagePro
 	);
 }
 
-/** 批量刷新（模型选择器打开时）：只查「从未查过或已超过各自间隔」的 provider，跳过新鲜条目。
+/** 批量刷新（模型选择器打开时）：全局关则整批跳过；开则只查「从未查过或已超过各自间隔」的 provider。
  * 调用方为模型选择器（provider 即缓存 key）；DSH 会话的选择器传 backend="dsh"，
  * 与 pi 侧同名 provider（如 deepseek）互不串缓存、也不误读对方链路的配置。 */
 export function useProviderUsageBatchRefresh(): (providers: string[], backend?: UsageProbeBackend) => void {
 	const records = useAtomValue(providerUsageRecordsReadAtom);
 	const begin = useSetAtom(beginProviderUsageAtom);
 	const resolve = useSetAtom(resolveProviderUsageAtom);
+	const autoQueryEnabled = useAtomValue(providerUsageAutoQueryEnabledAtom);
 	return useCallback(
 		(providers: string[], backend: UsageProbeBackend = "pi") => {
 			for (const provider of providers) {
@@ -193,12 +206,21 @@ export function useProviderUsageBatchRefresh(): (providers: string[], backend?: 
 				const cacheKey = usageCacheKey(provider, backend);
 				const record = records[cacheKey] ?? null;
 				const interval = record?.result?.intervalMinutes ?? USAGE_PROBE_DEFAULT_INTERVAL_MINUTES;
-				// 新鲜期去重：未查过（无记录）才触发；interval=0 的已查条目不再自动重查。
-				if (!providerUsageEntryStale(record, interval)) continue;
+				// 全局关则跳过；开则走新鲜期（未查过才触发；interval=0 的已查条目不再自动重查）。
+				if (
+					!shouldAutoFetchProviderUsage({
+						autoQueryEnabled,
+						reason: "batch",
+						entry: record,
+						intervalMinutes: interval,
+					})
+				) {
+					continue;
+				}
 				begin(cacheKey);
 				startFetch(provider, cacheKey, resolve, backend);
 			}
 		},
-		[records, begin, resolve],
+		[records, begin, resolve, autoQueryEnabled],
 	);
 }

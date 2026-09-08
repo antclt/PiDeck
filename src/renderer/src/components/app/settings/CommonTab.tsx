@@ -1,9 +1,10 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
 import type { AppSettings } from "../../../../../shared/types";
 import { dshUiVisibilityFor } from "../../../../../shared/types/dshRuntime";
 import { dshRuntimeStatusAtom } from "../../../atoms";
 import { t } from "../../../i18n";
+import { desktopApi } from "../../../desktopApi";
 import {
   Select,
   SelectContent,
@@ -67,6 +68,49 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
     { value: "fullscreen", label: t("settings.startupWindow.fullscreen") },
   ];
 
+  const [shellMenuState, setShellMenuState] = useState<{
+    supported: boolean;
+    registered: boolean;
+  } | null>(null);
+  // 右键菜单是系统级即时副作用：不走 draft 保存（注册表 = 真相源），
+  // 挂载时查询一次，切换时直接写 HKCU 并回查真实状态，失败时保留原状态。
+  const [shellMenuBusy, setShellMenuBusy] = useState(false);
+  const [shellMenuError, setShellMenuError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void desktopApi.shellMenu
+      .getState()
+      .then((state) => {
+        if (!cancelled) {
+          setShellMenuState(state);
+          setShellMenuError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setShellMenuState(null);
+          setShellMenuError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const toggleShellMenu = (enabled: boolean) => {
+    if (shellMenuBusy) return;
+    setShellMenuBusy(true);
+    setShellMenuError(null);
+    void desktopApi.shellMenu
+      .setEnabled(enabled)
+      .then((state) => setShellMenuState(state))
+      .catch((error: unknown) => {
+        // 回查一次真实状态，避免开关显示与注册表不一致（如写失败）
+        void desktopApi.shellMenu.getState().then(setShellMenuState).catch(() => undefined);
+        setShellMenuError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => setShellMenuBusy(false));
+  };
+
   return (
     <>
       {/* 语言（单行分区：行标题即一级标题，内容行入淡色框） */}
@@ -125,6 +169,13 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
           checked={draft.autoSessionTitle ?? true}
           dirty={isDirty("autoSessionTitle")}
           onChange={(checked) => updateDraft({ autoSessionTitle: checked })}
+        />
+        <SettingSwitchRow
+          title={t("settings.providerUsageAutoQuery")}
+          description={t("settings.providerUsageAutoQueryDesc")}
+          checked={draft.providerUsageAutoQueryEnabled ?? false}
+          dirty={isDirty("providerUsageAutoQueryEnabled")}
+          onChange={(checked) => updateDraft({ providerUsageAutoQueryEnabled: checked })}
         />
         <SettingRow
           title={
@@ -337,6 +388,29 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
             </span>
           </div>
         </SettingRow>
+      </SettingsSection>
+
+      {/* 文件资源管理器集成：注册「用 PiDeck 打开」右键菜单（目录与空白处），
+          HKCU 写入即时生效；非 Windows 平台开关置灰并提示。 */}
+      <SettingsSection
+        title={t("settings.shellContextMenuSection")}
+        description={t("settings.shellContextMenuSectionDesc")}
+      >
+        <SettingSwitchRow
+          title={t("settings.shellContextMenu")}
+          description={t("settings.shellContextMenuDesc")}
+          checked={shellMenuState?.registered ?? false}
+          disabled={!shellMenuState?.supported || shellMenuBusy}
+          onChange={toggleShellMenu}
+        />
+        {!shellMenuState?.supported && (
+          <p className="px-4 pb-2 text-xs text-destructive">
+            {t("settings.shellContextMenuUnsupported")}
+          </p>
+        )}
+        {shellMenuError && (
+          <p className="px-4 pb-2 text-xs text-destructive">{shellMenuError}</p>
+        )}
       </SettingsSection>
 
       {/* 窗口 */}

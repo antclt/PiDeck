@@ -329,8 +329,8 @@ export function ComposerBottomBar(props: {
 	modelPending?: ModelPending;
 	composerAgentMode: ComposerAgentMode;
 	gitInfo?: GitBranchInfo;
-	/** 切换分支（右侧分支下拉）：经 App 级 switchBranch 执行，
-	 *  成功后统一刷新 gitInfo/branchByProject，右侧 Git 面板与底栏保持同步。 */
+	/** 切换分支（右侧分支下拉）：经栏级 usePaneGitInfo 的 switchBranch 执行，
+	 *  成功后回写本栏 gitInfo 并通知 App（仅当本栏为聚焦项目时采纳），右侧 Git 面板与底栏保持同步。 */
 	onSwitchBranch?: (branch: string) => void;
 	/** Draft sessions do not have a runtime yet, so retain their persisted settings in the bar. */
 	record?: Pick<SessionRecord, "model" | "thinkingLevel">;
@@ -647,7 +647,7 @@ export function ComposerBottomBar(props: {
 						/>
 					)}
 					{/* 分支只读 chip 升级为可切换下拉：当前分支即触发器，展开列表选目标分支后
-					    先弹确认（切换会携带未提交更改），确认后才调 App 级 switchBranch。 */}
+					    先弹确认（切换会携带未提交更改），确认后才调栏级 switchBranch（绑定本栏项目）。 */}
 					{props.gitInfo?.current && props.onSwitchBranch ? (
 						<ComposerBranchSwitcher
 							gitInfo={props.gitInfo}

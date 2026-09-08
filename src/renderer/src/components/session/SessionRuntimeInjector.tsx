@@ -27,6 +27,7 @@ import { QueuedPromptPanel } from "./ComposerPanels";
 import { FileLinkBaseProvider } from "./FileLinkBase";
 import { SessionView } from "./SessionView";
 import { useSessionPaneServices } from "./SessionPaneServices";
+import { usePaneGitInfo } from "../../hooks/usePaneGitInfo";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import {
@@ -141,6 +142,21 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
     },
     [paneOwnerKey, services.setTerminalCollapsedByOwnerKey],
   );
+
+  // 本栏 Git 分支状态：按本会话项目（paneProjectId，即所属 worktree）加载/轮询/切换。
+  // 历史缺陷：分屏双栏共用 App 聚焦项目的 services.gitInfo——点击任一栏，所有栏的
+  // 分支 chip 和切换目标会一起切到该栏项目；改为栏级 usePaneGitInfo 后各栏独立。
+  // onChanged 回写给 App（仅当本栏项目恰为聚焦项目时才被采纳，见 App 的 handleProjectGitChanged），
+  // 保证右侧 Git 抽屉与刚切换的栏尽快同步；切换失败 toast 走 services.showToast。
+  const paneGit = usePaneGitInfo(paneProjectId, {
+    onChanged: services.onProjectGitChanged,
+    onSwitchError: (error) =>
+      services.showToast(
+        t("app.branchSwitchFailed", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+  });
 
   const runtimeUiResponder = React.useMemo(() => {
     if (!currentSessionRuntime?.agentId) return undefined;
@@ -309,8 +325,8 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
           : undefined
       }
       enqueueSessionPrompt={services.enqueueSessionPrompt}
-      gitInfo={services.gitInfo}
-      onSwitchBranch={services.onSwitchBranch}
+      gitInfo={paneGit.gitInfo}
+      onSwitchBranch={paneGit.switchBranch}
       ensureSessionId={services.ensureSessionId}
       runtimeUi={
         runtimeUiResponder ? (

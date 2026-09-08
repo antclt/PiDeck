@@ -334,6 +334,7 @@ import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
 import { fetchModelList, refreshModelCatalogIfStale, refreshModelList } from "./pi/modelListCache";
 import { registerFilesIpc } from "./ipc/filesIpc";
 import { registerClipboardIpc } from "./ipc/clipboardIpc";
+import { registerShellMenuIpc } from "./ipc/shellMenuIpc";
 import {
 	BROWSER_PANEL_PARTITION as BROWSER_PANEL_PARTITION_SHARED,
 	isAllowedBrowserPanelUrl as isAllowedBrowserPanelUrlShared,
@@ -1227,20 +1228,21 @@ function focusMainWindow() {
 }
 
 /**
- * 页面加载期间（冷启动/窗口重建）点击通知的跳转目标：直接 send 会在 preload/React
+ * 页面加载期间（冷启动/窗口重建）的跳转目标（通知点击/右键打开项目）：直接 send 会在 preload/React
  * 监听注册前丢失，先存入 pending，由两条路径兜底送达：
  * 1. did-finish-load 后 flush 一次（窗口重建/旧 renderer 兼容的尽力而为）；
  * 2. renderer 挂载后经 pet:get-focus-target-pending 主动拉取（取走即清空，保证送达）。
+ * 三种目标：sessionId 跳会话；projectId 跳已有项目（右键打开已收录目录）；projectPath 引导新增项目。
  */
-let pendingFocusTarget: { sessionId: string } | null = null;
+let pendingFocusTarget: { sessionId: string } | { projectId: string } | { projectPath: string } | null = null;
 
 /** 窗口就绪（存在且未在加载）直接推送；否则入 pending 队列。 */
-function queueFocusTarget(sessionId: string) {
+function queueFocusTarget(target: { sessionId: string } | { projectId: string } | { projectPath: string }) {
 	if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isLoading()) {
-		mainWindow.webContents.send(ipcChannels.petFocusAgentTarget, { sessionId });
+		mainWindow.webContents.send(ipcChannels.petFocusAgentTarget, target);
 		return;
 	}
-	pendingFocusTarget = { sessionId };
+	pendingFocusTarget = target;
 }
 
 /** did-finish-load 兜底：仍在加载期排队的目标补发一次（不清空，renderer 拉取幂等）。 */
@@ -1260,11 +1262,22 @@ function handleVersionFocusRequest(payload?: FocusPayload) {
 	const target = extractFocusTargetFromArgv(payload?.argv);
 	const activateSession = () => {
 		if (!target) return;
+		// 文件夹右键打开：已收录目录直接跳项目（渲染层 selectProjectCommand）；
+		// 未收录目录推 projectPath，渲染层弹确认框走新增项目流程。
+		if (target.projectPath) {
+			const existing = projectStore?.findByPath(target.projectPath);
+			if (existing) {
+				queueFocusTarget({ projectId: existing.id });
+			} else {
+				queueFocusTarget({ projectPath: target.projectPath });
+			}
+			return;
+		}
 		let sessionId = target.sessionId;
 		if (!sessionId && target.agentId && sessionRuntimeCoordinator) {
 			sessionId = sessionRuntimeCoordinator.getSessionId(target.agentId);
 		}
-		if (sessionId) queueFocusTarget(sessionId);
+		if (sessionId) queueFocusTarget({ sessionId });
 	};
 	if (mainWindow && !mainWindow.isDestroyed()) {
 		focusMainWindow();
@@ -2815,6 +2828,8 @@ function registerIpc() {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		// 「关于」面板读取启用中的 DSH 运行时版本
+		dshRuntimeManager: dshRuntimeManager ?? undefined,
 		// G17：RPC 日志按 backend 分流（DSH 走 DshAgentManager 领域调用记录）
 		isDshAgent: (agentId) =>
 			dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
@@ -2990,6 +3005,11 @@ function registerIpc() {
 		openExternalUrl,
 	});
 	registerClipboardIpc({ appLogger });
+	// 资源管理器右键菜单（HKCU）：菜单显示名跟随主进程 locale（可能随设置语言切换）
+	registerShellMenuIpc({
+		appLogger,
+		menuTitle: mainCopy("shellMenu.openWithPiDeck"),
+	});
 }
 
 function sendTelemetryHeartbeat() {
@@ -3916,14 +3936,23 @@ app.whenReady().then(async () => {
 		});
 	}
 
-	// 冷启动通知唤起：应用未运行时点击系统通知，本进程即为唯一实例（无次实例 .focus 流转），
-	// argv 携带 pideck:// URL，窗口就绪后跳转对应会话。
+	// 冷启动通知/右键唤起：应用未运行时点击系统通知或右键菜单，本进程即为唯一实例（无次实例 .focus
+	// 流转），argv 携带 pideck:// URL 或 --open-project 参数，窗口就绪后跳转对应会话/项目。
 	// 页面仍在加载时直接 send 会丢（preload/React 监听未注册），故走 pending 队列：
 	// did-finish-load 补发一次 + renderer 挂载后主动拉取（见 queueFocusTarget 注释）。
 	// catalog 可能尚未加载完，renderer 侧监听会小间隔重试直到能解析到会话记录。
 	const coldStartTarget = extractFocusTargetFromArgv(process.argv);
-	if (coldStartTarget?.sessionId) {
-		queueFocusTarget(coldStartTarget.sessionId);
+	if (coldStartTarget) {
+		if (coldStartTarget.projectPath) {
+			const existing = projectStore?.findByPath(coldStartTarget.projectPath);
+			if (existing) {
+				queueFocusTarget({ projectId: existing.id });
+			} else {
+				queueFocusTarget({ projectPath: coldStartTarget.projectPath });
+			}
+		} else if (coldStartTarget.sessionId) {
+			queueFocusTarget({ sessionId: coldStartTarget.sessionId });
+		}
 	}
 	// renderer 挂载后拉取 pending 跳转目标（一次性，取走即清空）
 	ipcMain.handle(ipcChannels.petGetFocusTargetPending, () => {

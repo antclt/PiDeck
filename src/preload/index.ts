@@ -69,6 +69,7 @@ import type {
 	ExternalEditorId,
 	ExternalEditorSetting,
 	FileManagerInfo,
+	FocusTargetPayload,
 	FeedbackEnvironment,
 	FeedbackProjectContext,
 	FeishuBotConfig,
@@ -168,6 +169,20 @@ const api = {
 		writeText: (value: string) =>
 			ipcRenderer.invoke(ipcChannels.clipboardWriteText, value) as Promise<boolean>,
 	},
+	shellMenu: {
+		/** 查询资源管理器右键菜单注册状态（非 Windows 返回 supported=false） */
+		getState: () =>
+			ipcRenderer.invoke(ipcChannels.shellMenuGetState) as Promise<{
+				supported: boolean;
+				registered: boolean;
+			}>,
+		/** 启用/取消「用 PiDeck 打开」右键菜单（HKCU 写入，portable 亦可用） */
+		setEnabled: (enabled: boolean) =>
+			ipcRenderer.invoke(ipcChannels.shellMenuSetEnabled, enabled) as Promise<{
+				supported: boolean;
+				registered: boolean;
+			}>,
+	},
 	editors: {
 		list: () => ipcRenderer.invoke(ipcChannels.editorsList) as Promise<ExternalEditor[]>,
 		redetect: () =>
@@ -192,6 +207,9 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.projectsList) as Promise<Project[]>,
 		add: () =>
 			ipcRenderer.invoke(ipcChannels.projectsAdd) as Promise<Project | null>,
+		/** 文件夹右键菜单直达：给定路径必须是已存在的目录，主进程校验后入库 */
+		addByPath: (path: string) =>
+			ipcRenderer.invoke(ipcChannels.projectsAddByPath, path) as Promise<Project>,
 		remove: (id: string) =>
 			ipcRenderer.invoke(ipcChannels.projectsRemove, id) as Promise<Project[]>,
 		reorder: (projectIds: string[]) =>
@@ -1759,11 +1777,11 @@ const api = {
 		/** 点击宠物跳转活跃 Agent */
 		focusAgent: () =>
 			ipcRenderer.invoke(ipcChannels.petFocusAgent) as Promise<void>,
-		onFocusTarget: (callback: (target: { sessionId: string }) => void) =>
+		onFocusTarget: (callback: (target: FocusTargetPayload) => void) =>
 			subscribe(ipcChannels.petFocusAgentTarget, callback),
-		/** 冷启动/页面加载期间点击通知的跳转目标：挂载后主动拉取（一次性） */
+		/** 冷启动/页面加载期间点击通知或右键菜单的跳转目标：挂载后主动拉取（一次性） */
 		getPendingFocusTarget: () =>
-			ipcRenderer.invoke(ipcChannels.petGetFocusTargetPending) as Promise<{ sessionId: string } | null>,
+			ipcRenderer.invoke(ipcChannels.petGetFocusTargetPending) as Promise<FocusTargetPayload | null>,
 		/** 主进程推送当前选中宠物的 manifest，据此加载 spritesheet */
 		onSprite: (callback: (manifest: PetManifest) => void) =>
 			subscribe(ipcChannels.petCurrentSprite, callback),

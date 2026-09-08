@@ -2,14 +2,14 @@ import React from "react";
 import { useGlobalAgentListeners } from "../../hooks/useGlobalAgentListeners";
 import { useSoundAlerts } from "../../hooks/useSoundAlerts";
 import { useAnnouncementsSync } from "../../hooks/useAnnouncementsSync";
-import type { AppSettings, Project } from "../../../../shared/types";
+import type { AppSettings, FocusTargetPayload, Project } from "../../../../shared/types";
 
 interface AppBootstrapProps {
   onProjectsChanged: (projects: Project[]) => void;
   onSettingsApplied: (settings: AppSettings) => void;
   onOpenInBrowser: (url: string) => void;
   onTrustRequest: (req: { requestId: string; cwd: string; projectName: string }) => void;
-  onFocusTarget: (target: { sessionId: string }) => void;
+  onFocusTarget: (target: FocusTargetPayload) => void;
 }
 
 /** Bootstrap — sets up global IPC listeners, renders nothing. */

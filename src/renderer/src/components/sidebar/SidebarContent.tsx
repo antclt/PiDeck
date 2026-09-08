@@ -131,7 +131,6 @@ export type SidebarContentProps = {
   onOpenNewSession?: () => void;
   onOpenSettings?: () => void;
   onOpenFeedback?: () => void;
-  onOpenHomepage?: () => void;
   /** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
   themeMode?: AppThemeMode;
   onToggleTheme?: () => void;
@@ -452,9 +451,6 @@ export function SidebarContent(props: SidebarContentProps) {
               <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>
             </DockItem>
             <DockItem>
-              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("app.homepage")} aria-label={t("app.homepage")} onClick={props.onOpenHomepage}><Globe className="size-4" /></Button>
-            </DockItem>
-            <DockItem>
               <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={themeToggleTitle} aria-label={themeToggleTitle} onClick={props.onToggleTheme}><ThemeModeIcon className="size-4" /></Button>
             </DockItem>
           </Dock>
@@ -499,6 +495,7 @@ export function SidebarContent(props: SidebarContentProps) {
             controller.closeMenu();
           } : undefined}
           onRemoveProject={() => { void actions.projects.remove(menuProject); controller.closeMenu(); }}
+          onChatSettings={() => { if (actions.projects.changeChatPath) void actions.projects.changeChatPath(menuProject); controller.closeMenu(); }}
         />
       )}
       {menuAgent && menu?.kind === "agent" && (

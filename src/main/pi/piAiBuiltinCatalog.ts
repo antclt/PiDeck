@@ -250,6 +250,31 @@ export function resolveBuiltinPiAiCatalogArtifactPaths(): PiAiCatalogArtifactPat
 }
 
 /**
+ * 读取内置 pi-ai 目录清单的打包源版本（source.packageVersion），供「关于」面板展示。
+ * 仅内置 artifact，不含 overlay；manifest 缺失或解析失败返回 undefined（UI 显示 —）。
+ */
+export function readBuiltinPiAiCatalogVersion(): string | undefined {
+	const builtin = resolveBuiltinPiAiCatalogArtifactPaths();
+	if (!builtin) return undefined;
+	try {
+		const manifest: unknown = JSON.parse(readFileSync(builtin.manifestPath, "utf8"));
+		if (
+			typeof manifest === "object" &&
+			manifest !== null &&
+			"source" in manifest &&
+			typeof (manifest as { source?: unknown }).source === "object" &&
+			(manifest as { source?: unknown }).source !== null
+		) {
+			const packageVersion = (manifest as { source?: { packageVersion?: unknown } }).source?.packageVersion;
+			return typeof packageVersion === "string" ? packageVersion : undefined;
+		}
+		return undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * 解析全部候选路径（优先级从高到低）：userData 覆盖层 → 打包/项目内置。
  * 覆盖层文件存在性决定是否入列；有效性由 loadPiAiCatalogEntries 逐一校验，
  * 损坏的覆盖层会自动落回内置（覆盖层坏数据不会遮蔽内置目录）。
