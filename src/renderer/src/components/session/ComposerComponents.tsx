@@ -69,6 +69,7 @@ import {
   WELCOME_MODEL_KEY,
   isWelcomeModelLost,
   readWelcomeModelPreference,
+  readWelcomeThinkingPreference,
   shouldClearWelcomePreference,
 } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
@@ -375,11 +376,9 @@ export function ComposerBottomBar(props: {
 		onWatermarkChange: (watermark: boolean) => void;
 	};
 }) {
-	// 默认模型/思考级别来自主进程按 pi 配置自动填充进会话记录的默认值（props.record），
-	// 不读取渲染层 welcome localStorage 偏好，避免用户偏好覆盖 pi 配置。
-	// 例外：无 record（引导页虚拟会话）时回退显示欢迎页偏好——picker 无 record
-	// 分支把选择写进 localStorage，回退后用户选中模型/思考级别立即在底部栏可见；
-	// 创建会话时这些偏好会作为启动参数带入（App.ensureSessionForSend）。
+	// 真实会话以 runtime / catalog record 为准；只有无 record 的引导页虚拟会话
+	// 才读取 welcome localStorage。这样用户点选模型/思考档位后能立即看到结果，
+	// 首次发送再由 App.ensureSessionForSend 把同一显式选择带入真实会话。
 	// 该偏好可能指向已删除的模型（localStorage 残留，用户删除模型后底栏仍显示旧默认）：
 	// 引导页（无 record、pi 后端）常驻加载模型目录做存在性校验（与 ComposerPickerHost
 	// 同一判定 isWelcomeModelLost），失效则忽略偏好并清理缓存，显示回落到主进程解析的
@@ -393,6 +392,10 @@ export function ComposerBottomBar(props: {
 		enabled: needsWelcomeCatalog,
 	});
 	const welcomeModel = needsWelcomeCatalog ? readWelcomeModelPreference()?.model : undefined;
+	// 思考档位不依赖模型目录；无 record 时直接读取 picker 写入的显式选择。
+	const welcomeThinking = !props.record
+		? readWelcomeThinkingPreference()?.thinkingLevel
+		: undefined;
 	const welcomeModelLost = isWelcomeModelLost(welcomeModel, welcomeCatalogModels);
 	// 删除不可逆，走保守判定：只有「一次成功的完整加载」才具备判死资格。
 	// 本组件不传 projectId → 目录恒为全局范围，与全局偏好的作用域一致。
@@ -429,9 +432,8 @@ export function ComposerBottomBar(props: {
 	const currentThinkingLevel = resolveComposerThinkingLevel({
 		state: props.state?.thinkingLevel,
 		record: props.record?.thinkingLevel,
-		// 思考级别一律走默认档位（用户规则：取 settings.defaultThinkingLevel；
-		// 欢迎页偏好级别不再参与——偏好只管模型，级别跟默认走）。
-		fallback: props.defaultThinkingLevel,
+		// 引导页显式点选优先；未选择时才回退主进程解析的配置默认档位。
+		fallback: welcomeThinking ?? props.defaultThinkingLevel,
 		isLive: runtimeLive,
 	});
 	const thinkingLevelLabel = (level: string) => {
