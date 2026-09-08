@@ -2815,6 +2815,8 @@ function registerIpc() {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		// 「关于」面板读取启用中的 DSH 运行时版本
+		dshRuntimeManager: dshRuntimeManager ?? undefined,
 		// G17：RPC 日志按 backend 分流（DSH 走 DshAgentManager 领域调用记录）
 		isDshAgent: (agentId) =>
 			dshAgentManager?.list().some((tab) => tab.id === agentId) === true,

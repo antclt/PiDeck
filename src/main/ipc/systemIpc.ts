@@ -8,7 +8,11 @@ import { ipcChannels } from "../../shared/ipc";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
 import { probeAllMirrors, type MirrorHealthResult } from "../update/mirrorHealth";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
+import { DSH_BUNDLED_RUNTIME_DIRNAME, readBundledRuntime } from "../dsh/runtime/DshRuntimeManager";
+import { resolveAppTimes } from "../utils/appInfoTimes";
+import { join } from "node:path";
 import type {
+	AppInfo,
 	AppLogLevel,
 	AppLogQuery,
 	AppSettings,
@@ -35,7 +39,7 @@ import type { ProjectResourceManager } from "../projects/ProjectResourceManager"
 
 import { probePiModel } from "../pi/PiModelProber";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
-import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
+import { getPiAiCatalogIndex, readBuiltinPiAiCatalogVersion } from "../pi/piAiBuiltinCatalog";
 import { resolveModelSpecFromCatalogs } from "../pi/modelCapabilityResolver";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
@@ -229,6 +233,8 @@ export type SystemIpcDeps = {
 	RELEASES_URL?: string;
 	/** 开发态 git 分支名（多 worktree 并行区分窗口）；正式包/共享分支为空。 */
 	devBranch?: string;
+	/** DSH 运行时管理器（读取启用中的 runtime 版本，随包 bundled manifest 兜底）。 */
+	dshRuntimeManager?: import("../dsh/runtime/DshRuntimeManager").DshRuntimeManager;
 	/** 后台更新检查服务（定时检查快照推送 / 已提示 / 跳过版本 / 立即检查 / 下载 / 安装）。 */
 	updateService?: {
 		getSnapshot: () => import("../../shared/types").AppUpdateStatusSnapshot;
@@ -254,6 +260,21 @@ function asConfigProxyMode(raw: unknown): ConfigProxyMode {
  */
 function isWslName(value: string): boolean {
 	return /^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$/.test(value);
+}
+
+/**
+ * 解析「关于」面板要展示的 DSH 运行时版本：优先用户已激活/安装的 runtime（resolveActive），
+ * 无则回退到随包 bundled runtime 清单；两者都没有（如 dev 模式未接 dsh-runtime）返回 undefined。
+ */
+function resolveDshRuntimeVersion(
+	manager: SystemIpcDeps["dshRuntimeManager"],
+): string | undefined {
+	const active = manager?.resolveActive();
+	if (active?.manifest.runtimeVersion) return active.manifest.runtimeVersion;
+	return readBundledRuntime(
+		join(typeof process.resourcesPath === "string" ? process.resourcesPath : "", DSH_BUNDLED_RUNTIME_DIRNAME),
+		app.getVersion(),
+	)?.manifest.runtimeVersion;
 }
 
 export function registerSystemIpc(deps: SystemIpcDeps): void {
@@ -701,14 +722,54 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── 应用信息 ─────────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.appInfo, () => ({
-		version: app.getVersion(),
-		releasesUrl: RELEASES_URL ?? `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases`,
-		platform: process.platform,
-		// 数据目录直接取实际生效路径：便携版（exe 同级 data/）、安装版、dev 模式（-dev 后缀）由主进程统一解析
-		userDataDir: app.getPath("userData"),
-		devBranch: devBranch,
-	}));
+	// appInfo 现在包含 pi / DSH runtime / pi-ai 目录版本探测（pi 需要 spawn 一次进程），
+	// 结果按进程生命周期缓存：并发请求共享同一 in-flight promise，失败也缓存，
+	// 避免每次打开/启动反复 spawn `pi --version` 拖慢路径。
+	let appInfoPromise: Promise<AppInfo> | undefined;
+
+	const resolveAppInfo = (): Promise<AppInfo> => {
+		appInfoPromise ??= (async () => {
+			let piVersion: string | undefined;
+			try {
+				// 与设置页/反馈环境一致：用当前设置的 WSL 路径探测 pi CLI 版本
+				const settings = settingsStore.get();
+				const status = await piLocator.check(
+					settings.customPiPath,
+					settings.wslEnabled,
+					settings.wslDistro,
+					settings.wslUser,
+				);
+				piVersion = status.version;
+			} catch (error) {
+				appLogger.warn("appInfo", "pi version probe failed", { error });
+			}
+			const times = resolveAppTimes({
+				isPackaged: app.isPackaged,
+				resourcesPath: typeof process.resourcesPath === "string" ? process.resourcesPath : "",
+				appPath: app.getAppPath(),
+				execPath: process.execPath,
+			});
+			return {
+				version: app.getVersion(),
+				releasesUrl: RELEASES_URL ?? `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases`,
+				platform: process.platform,
+				// 数据目录直接取实际生效路径：便携版（exe 同级 data/）、安装版、dev 模式（-dev 后缀）由主进程统一解析
+				userDataDir: app.getPath("userData"),
+				homeDir: app.getPath("home"),
+				devBranch: devBranch,
+				piVersion,
+				dshRuntimeVersion: resolveDshRuntimeVersion(deps.dshRuntimeManager),
+				piAiVersion: readBuiltinPiAiCatalogVersion(),
+				electronVersion: process.versions.electron ?? "",
+				chromeVersion: process.versions.chrome ?? "",
+				nodeVersion: process.versions.node,
+				...times,
+			};
+		})();
+		return appInfoPromise;
+	};
+
+	ipcMain.handle(ipcChannels.appInfo, resolveAppInfo);
 
 	ipcMain.handle(ipcChannels.appNetworkAddresses, () => listWebNetworkAddresses());
 
