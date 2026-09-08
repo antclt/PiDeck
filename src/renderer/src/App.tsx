@@ -31,6 +31,7 @@ import {
   missingElectronPreload,
 } from "./desktopApi";
 import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, sessionRecordsAtom, bumpNewTurnCollapseTickAtom } from "./atoms";
+import { providerUsageAutoQueryEnabledAtom } from "./atoms/provider-usage-atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 // 文件链接路由：图片类型走弹窗预览
@@ -628,6 +629,8 @@ export function App() {
     sessionTabOpenMode: "preview",
     // 与 main SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
     autoSessionTitle: true,
+    // 默认关闭自动用量查询：与 SettingsStore 一致，避免首屏/模型选择器把本地网关打熔断
+    providerUsageAutoQueryEnabled: false,
     // 与 main SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
     busySendDelivery: "steer",
     enableGitManagement: true,
@@ -744,6 +747,12 @@ export function App() {
   useEffect(() => {
     setBusySendDelivery(settings.busySendDelivery);
   }, [settings.busySendDelivery, setBusySendDelivery]);
+
+  // 用量自动查询开关同步给 hook（模型选择器/配置卡片从 atom 读取，不直接订 settings）。
+  const setProviderUsageAutoQueryEnabled = useSetAtom(providerUsageAutoQueryEnabledAtom);
+  useEffect(() => {
+    setProviderUsageAutoQueryEnabled(settings.providerUsageAutoQueryEnabled);
+  }, [settings.providerUsageAutoQueryEnabled, setProviderUsageAutoQueryEnabled]);
 
   // Guard: hide git drawer when git management is disabled.
   // Equivalent to: if (panel === "git" && !settings.enableGitManagement) return

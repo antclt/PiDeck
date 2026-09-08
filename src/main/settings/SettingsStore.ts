@@ -106,6 +106,9 @@ const defaultSettings: AppSettings = {
   sessionTabOpenMode: "preview",
   // 默认开启：标题请求由内置扩展在首轮结束后独立异步执行，不进入主 agent 上下文。
   autoSessionTitle: true,
+  // 默认关闭：打开模型选择器/配置页会对每个 provider 扇出 HTTP 用量探测，
+  // 多个 provider 共用同一本地 OpenAI 兼容网关时会把网关打熔断。关闭后仍可手动刷新。
+  providerUsageAutoQueryEnabled: false,
   // 忙碌时发送默认「插入当前回合」（对齐 pi 历史行为）；dsh 会话此前默认排队，
   // 统一后由本设置项决定，用户可在常用设置→会话中改回。
   busySendDelivery: "steer",
@@ -273,6 +276,11 @@ export class SettingsStore {
       if (typeof this.settings.autoSessionTitle !== "boolean") {
         this.settings.autoSessionTitle = defaultSettings.autoSessionTitle;
       }
+      // 用量自动查询：旧配置缺字段/脏数据回落 false（保守，避免升级后把本地网关打熔断）。
+      if (typeof this.settings.providerUsageAutoQueryEnabled !== "boolean") {
+        this.settings.providerUsageAutoQueryEnabled =
+          defaultSettings.providerUsageAutoQueryEnabled;
+      }
       // 公告通知开关同理：旧配置缺字段回落 true（默认开启），脏数据（字符串等）也回落。
       if (typeof this.settings.announcementNotificationEnabled !== "boolean") {
         this.settings.announcementNotificationEnabled =
@@ -370,6 +378,13 @@ export class SettingsStore {
     // IPC 入参不可信：自动标题开关只接受布尔值，非法值保持原有设置。
     if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
       delete safePatch.autoSessionTitle;
+    }
+    // IPC 入参不可信：用量自动查询开关只接受布尔值，非法值保持原有设置。
+    if (
+      "providerUsageAutoQueryEnabled" in safePatch &&
+      typeof safePatch.providerUsageAutoQueryEnabled !== "boolean"
+    ) {
+      delete safePatch.providerUsageAutoQueryEnabled;
     }
     // 更新源 id 归一化（只允许已知枚举，防手改/脏值污染 feed URL）；自定义源地址仅接受字符串。
     if ("updateSource" in safePatch) {

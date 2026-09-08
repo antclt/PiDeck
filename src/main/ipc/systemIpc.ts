@@ -8,7 +8,7 @@ import { ipcChannels } from "../../shared/ipc";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
 import { probeAllMirrors, type MirrorHealthResult } from "../update/mirrorHealth";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
-import { DSH_BUNDLED_RUNTIME_DIRNAME, readBundledRuntime } from "../dsh/runtime/DshRuntimeManager";
+import { DSH_BUNDLED_RUNTIME_DIRNAME, readBundledRuntime, readDeclaredDshVersion } from "../dsh/runtime/DshRuntimeManager";
 import { resolveAppTimes } from "../utils/appInfoTimes";
 import { join } from "node:path";
 import type {
@@ -271,10 +271,14 @@ function resolveDshRuntimeVersion(
 ): string | undefined {
 	const active = manager?.resolveActive();
 	if (active?.manifest.runtimeVersion) return active.manifest.runtimeVersion;
-	return readBundledRuntime(
+	const bundled = readBundledRuntime(
 		join(typeof process.resourcesPath === "string" ? process.resourcesPath : "", DSH_BUNDLED_RUNTIME_DIRNAME),
 		app.getVersion(),
-	)?.manifest.runtimeVersion;
+	);
+	if (bundled?.manifest.runtimeVersion) return bundled.manifest.runtimeVersion;
+	// 兜底：版本依赖（package.json 声明的 @deepseek-ai/dsh）。无论用户是否安装 runtime、
+	// dev 还是打包态（asar 内 package.json 可读），都能给出「本版本配套」的 dsh 版本。
+	return readDeclaredDshVersion(app.getAppPath());
 }
 
 export function registerSystemIpc(deps: SystemIpcDeps): void {

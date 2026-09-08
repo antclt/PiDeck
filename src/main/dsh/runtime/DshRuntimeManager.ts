@@ -165,6 +165,24 @@ export function readBundledRuntime(
 	}
 }
 
+/**
+ * 读取应用当前声明的 dsh 依赖版本（package.json → dependencies["@deepseek-ai/dsh"]）。
+ * 这是「版本依赖的 dsh 运行时」：与用户是否安装 runtime 无关；dev（仓库根）与打包态
+ * （asar 内 package.json 可读）均可用，作为「关于」面板没有安装/随包资源时的兜底展示。
+ */
+export function readDeclaredDshVersion(appPath: string | undefined): string | undefined {
+	if (!appPath) return undefined;
+	try {
+		const parsed = JSON.parse(readFileSync(join(appPath, "package.json"), "utf8")) as {
+			dependencies?: Record<string, unknown>;
+		};
+		const version = parsed.dependencies?.["@deepseek-ai/dsh"];
+		return typeof version === "string" ? version : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export class DshRuntimeManager {
 	private readonly download: DshRuntimeDownloader | undefined;
 	private readonly extract: DshRuntimeExtractor | undefined;

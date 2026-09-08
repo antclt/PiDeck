@@ -39,5 +39,8 @@ export function resolveAppTimes(input: {
 			installedAt: mtimeIso(input.execPath),
 		};
 	}
-	return { buildTime: mtimeIso(join(input.appPath, "package.json")) };
+	// 开发态：优先 electron-vite 构建产物（out/main/index.js 的 mtime ≈ 最近一次构建时刻，
+	// 最接近「打包时间」语义）；无产物时退回 package.json 写入时间（源码更新时刻）。
+	const buildOutput = join(input.appPath, "out", "main", "index.js");
+	return { buildTime: mtimeIso(buildOutput) ?? mtimeIso(join(input.appPath, "package.json")) };
 }

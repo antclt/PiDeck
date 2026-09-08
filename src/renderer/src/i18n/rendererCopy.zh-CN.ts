@@ -3043,6 +3043,8 @@ export const zhCN = {
   "settings.sessionTabOpenMode": "会话 Tab 打开方式",
   "settings.autoSessionTitle": "自动生成会话标题",
   "settings.autoSessionTitleDesc": "首轮 Agent 成功结束后，用当前 pi 模型异步生成标题；不修改主提示词或会话消息。关闭后需新建或重启 Agent 才生效。",
+  "settings.providerUsageAutoQuery": "自动查询供应商用量",
+  "settings.providerUsageAutoQueryDesc": "打开模型选择器或配置页时自动探查各供应商余额/用量。多个供应商共用同一本地网关时可能打熔断；关闭后仍可在用量卡片里手动刷新。",
   "settings.sessionTabOpenModePreview": "预览（发消息后自动固定）",
   "settings.sessionTabOpenModePermanent": "常驻（打开即固定）",
   "settings.languagePseudo": "伪翻译",

@@ -3069,6 +3069,8 @@ export const enUS: Record<TranslationKey, string> = {
   "settings.sessionTabOpenMode": "Session tab open mode",
   "settings.autoSessionTitle": "Generate session titles automatically",
   "settings.autoSessionTitleDesc": "After the first Agent run succeeds, use the current pi model to generate a title asynchronously without changing the main prompt or messages. Restart or create an Agent after changing this setting.",
+  "settings.providerUsageAutoQuery": "Automatically query provider usage",
+  "settings.providerUsageAutoQueryDesc": "When you open the model picker or config pages, PiDeck probes each provider's remaining quota. Multiple providers sharing one local gateway can trip its circuit breaker; you can still refresh a card manually when this is off.",
   "settings.sessionTabOpenModePreview": "Preview (auto-pin after sending)",
   "settings.sessionTabOpenModePermanent": "Permanent (pin on open)",
   "settings.languagePseudo": "Pseudo",

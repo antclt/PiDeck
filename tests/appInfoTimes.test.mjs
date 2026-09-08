@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -52,10 +52,14 @@ test("打包态缺 app.asar / exe 时对应字段缺省，不抛异常", () => {
 	assert.equal(result.installedAt, undefined);
 });
 
-test("开发态只报 package.json 时间，不报安装时间（execPath 是 Electron 壳）", () => {
+test("开发态优先构建产物时间，无产物时回退 package.json", () => {
 	const appDir = join(tmp, "dev-app");
-	mkdirSync(appDir, { recursive: true });
-	writeFileSync(join(appDir, "package.json"), "{}", "utf8");
+	mkdirSync(join(appDir, "out", "main"), { recursive: true });
+	const manifest = join(appDir, "package.json");
+	writeFileSync(manifest, "{}", "utf8");
+	// package.json 先写（旧），构建产物后写（新）——断言取的是产物 mtime
+	const buildOut = join(appDir, "out", "main", "index.js");
+	writeFileSync(buildOut, "bundle", "utf8");
 
 	const result = resolveAppTimes({
 		isPackaged: false,
@@ -65,5 +69,31 @@ test("开发态只报 package.json 时间，不报安装时间（execPath 是 El
 	});
 
 	assert.ok(result.buildTime, "开发态应有 buildTime");
+	// mtimeIso 经 Date 转 ISO（毫秒截断），容忍亚毫秒误差
+	assert.ok(
+		Math.abs(new Date(result.buildTime).getTime() - statSync(buildOut).mtimeMs) < 1,
+		"应取构建产物 mtime",
+	);
+	assert.equal(result.installedAt, undefined);
+});
+
+test("开发态无构建产物时回退 package.json 时间", () => {
+	const appDir = join(tmp, "dev-app-no-out");
+	mkdirSync(appDir, { recursive: true });
+	const manifest = join(appDir, "package.json");
+	writeFileSync(manifest, "{}", "utf8");
+
+	const result = resolveAppTimes({
+		isPackaged: false,
+		resourcesPath: join(tmp, "resources"),
+		appPath: appDir,
+		execPath: process.execPath,
+	});
+
+	assert.ok(result.buildTime, "应有 buildTime");
+	assert.ok(
+		Math.abs(new Date(result.buildTime).getTime() - statSync(manifest).mtimeMs) < 1,
+		"应回退 package.json mtime",
+	);
 	assert.equal(result.installedAt, undefined);
 });
