@@ -17,6 +17,11 @@
  * 选项末尾追加「✎ 自行输入...」，选中后再用 ctx.ui.input 收集自定义答案——这样桌面端
  * select 不再硬编码自定义按钮，allowOther 完全由工具调用方控制。
  *
+ * type 推断兜底（2026-09 统计：flash 档模型约 1/6 的批量提问会省略可推导的 type，
+ * 校验层硬失败导致整批重发）：type 保持 schema 可选，执行时按问题形状兜底——
+ * 带 options 推断为 select（confirm 的「是/否」以 select 呈现，语义一致），
+ * 不带 options 推断为 input。显式传 multi_select/confirm/editor 时原样生效。
+ *
  * 覆盖 ctx.hasUI 检查，非交互模式下跳过；UI 调用包 try-catch 处理用户取消场景。
  *
  * @packageDocumentation
@@ -90,9 +95,12 @@ const OptionSchema = Type.Union([
 
 const QuestionSchema = Type.Object({
 	id: Type.String({ description: "Unique identifier for this question" }),
-	type: StringEnum(["select", "multi_select", "confirm", "input", "editor"], {
-		description: "Type of question to ask; multi_select renders checkbox options and returns an array of selected values",
-	}),
+	type: Type.Optional(
+		StringEnum(["select", "multi_select", "confirm", "input", "editor"], {
+			description:
+				"Type of question to ask; multi_select renders checkbox options and returns an array of selected values. Optional: defaults to select when options are provided, otherwise input",
+		}),
+	),
 	question: Type.String({ description: "The question or prompt to display" }),
 	options: Type.Optional(Type.Array(OptionSchema, { description: "Options for select / multi_select type questions" })),
 	allowOther: Type.Optional(
@@ -119,7 +127,8 @@ const AskQuestionParams = Type.Object({
 	// 单问题模式（向后兼容）
 	type: Type.Optional(
 		StringEnum(["select", "multi_select", "confirm", "input", "editor"], {
-			description: "Type of question (single-question mode; ignored when `questions` is provided)",
+			description:
+				"Type of question (single-question mode; ignored when `questions` is provided. Optional: defaults to select when options are provided, otherwise input)",
 		}),
 	),
 	question: Type.Optional(Type.String({ description: "The question to show (single-question mode)" })),
@@ -149,6 +158,16 @@ function optionDisplayText(opt: NormalizedOption): string {
 }
 
 /**
+ * 推断缺省 type：显式给了就用显式的；否则看形状——带 options 是选择题（flash 档模型
+ * 经常省略可推导的 type，直接硬失败会整批重发，这里按意图兜底），没有则是文本输入。
+ */
+function inferType(raw: Record<string, unknown>): NormalizedQuestion["type"] {
+	const explicit = raw.type as NormalizedQuestion["type"] | undefined;
+	if (explicit) return explicit;
+	return Array.isArray(raw.options) && raw.options.length > 0 ? "select" : "input";
+}
+
+/**
  * 把工具参数归一化为统一问题列表。
  * 批量模式用 questions 数组；否则回退到单问题顶层字段，保持向后兼容。
  */
@@ -157,7 +176,7 @@ function toQuestions(params: Record<string, unknown>): NormalizedQuestion[] {
 	if (Array.isArray(rawQuestions) && rawQuestions.length > 0) {
 		return rawQuestions.map((q, i) => {
 			const r = (q ?? {}) as Record<string, unknown>;
-			const type = (r.type as NormalizedQuestion["type"]) ?? "input";
+			const type = inferType(r);
 			const isPickList = type === "select" || type === "multi_select";
 			return {
 				id: String(r.id ?? `q${i + 1}`),
@@ -172,7 +191,7 @@ function toQuestions(params: Record<string, unknown>): NormalizedQuestion[] {
 		});
 	}
 	// 单问题模式：顶层字段
-	const type = (params.type as NormalizedQuestion["type"]) ?? "input";
+	const type = inferType(params);
 	const isPickList = type === "select" || type === "multi_select";
 	return [
 		{
@@ -352,6 +371,7 @@ export default function (pi: ExtensionAPI) {
 				"The tool blocks until the user responds through the desktop UI.",
 				"Single question: use type/question/options/placeholder/prefill.",
 				"Multiple questions: use questions:[{id,type,question,options,allowOther,...}] to ask all at once in a tabbed batch UI.",
+				"The type field is optional; it defaults to select when options are provided, otherwise input. Best practice: still set select/multi_select/confirm explicitly.",
 				"For batch mode, set review:true to require a Submit/review tab before final submit.",
 				"Use type:multi_select when the user should pick MULTIPLE items from a list — it renders checkboxes and returns an array of selected values.",
 			].join(" "),
