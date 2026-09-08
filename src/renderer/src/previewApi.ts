@@ -129,8 +129,6 @@ let previewSettings: AppSettings = {
 	enableNotifications: true,
 	// 与主进程 SettingsStore 默认一致：首轮完成后由内置扩展异步生成标题
 	autoSessionTitle: true,
-	// 默认关闭自动用量查询：与主进程 SettingsStore 默认一致，避免预览 mock 漏字段
-	providerUsageAutoQueryEnabled: false,
 	// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致
 	askNotificationEnabled: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
@@ -1237,8 +1235,8 @@ export function createPreviewApi(): PiDesktopApi {
 				error: "preview",
 			}),
 			getUsageProbes: async () => ({ recognized: null, templates: [], errors: [] }),
-			usageRecognized: async () => ({ recognized: false }),
 			saveUsageProbes: async () => ({ ok: false, error: "preview" }),
+			listUsageProbeStates: async () => ({ providers: {}, errors: [] }),
 			testUsageProbe: async () => ({ success: false, error: "preview" }),
 			installUsageSkill: async () => ({ success: false, error: "preview" }),
 			installImageGenSkill: async () => ({ success: false, error: "preview" }),

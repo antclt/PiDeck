@@ -319,25 +319,24 @@ test("usage block is delegated to the shared ProviderUsageDetails with settings 
   assert.doesNotMatch(source, /usageCache/);
 });
 
-test("picker expanded groups host usage details; provider config pages drop usage display", () => {
+test("picker shows usage inline on the provider group row; provider config pages keep the header badge", () => {
   const picker = bottomBarSource();
-  // 用量刷新在展开分组内（非标题 trailing）；非 CommandItem，避免 cmdk 把点击当成选模型。
-  // backend 随会话后端透传（DSH 会话走 dsh 链路，不误查 pi 的 usage-probes.json）。
-  assert.match(picker, /<ProviderUsageDetails/);
-  assert.match(picker, /provider=\{provider\}/);
-  assert.match(picker, /backend=\{props\.backend\}/);
-  assert.match(picker, /className="border-t-0 pt-1"/);
+  // 用量回到「模型提供商」标题行右侧（trailing inline 单值位）：无数据/未启用时不渲染，
+  // 所以标题行保持干净；backend 随会话后端透传（DSH 会话走 dsh 链路，不误查 pi 的 usage-probes.json）。
+  assert.match(
+    picker,
+    /trailing=\{<ProviderUsageInline provider=\{provider\} variant="row" backend=\{props\.backend\} \/>\}/,
+  );
   assert.match(picker, /useProviderUsageBatchRefresh/);
-  assert.match(picker, /openSettingsAtom/);
-  assert.match(picker, /configTab: "models"/);
-  assert.doesNotMatch(picker, /ProviderUsageInline/);
-  assert.doesNotMatch(picker, /trailing=\{<ProviderUsage/);
-  // command-picker 仍保留 trailing 插槽（其他 picker 可能用），ModelPicker 不再传入用量。
+  // 展开区不再挂用量明细块（明细在圆球面板；标题行只放单值位）。
+  assert.doesNotMatch(picker, /ProviderUsageDetails/);
+  assert.doesNotMatch(picker, /className="border-t-0 pt-1"/);
+  // command-picker 仍保留 trailing 插槽（其他 picker 可能用）。
   const commandPicker = readFileSync("src/renderer/src/components/ui-shadcn/command-picker.tsx", "utf8");
   assert.match(commandPicker, /trailing\?: ReactNode/);
   // Pi 模型页：折叠卡片不再另开 h-9 底栏——模型数徽章 + 卡头用量徽标都收进标题行；
-  // 展开体里的「用量」明细块（ProviderUsageDetails）按要求移除（卡头徽标已覆盖展示）；
-  // 整行点击展开来自上游，卡头徽标保留（本页例外，AuthTab/DSH 跟随上游移除）。
+  // 展开体里的「用量」明细块（ProviderUsageDetails）仍不挂（卡头徽标已覆盖展示）；
+  // 整行点击展开来自上游，卡头徽标常驻；模型/认证/DSH 三页统一。
   const modelsTab = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
   assert.match(modelsTab, /ProviderUsageInline\s+provider=\{name\}\s+variant="card"/);
   assert.match(modelsTab, /UsageQueryEntryButton/);
@@ -354,15 +353,20 @@ test("picker expanded groups host usage details; provider config pages drop usag
   assert.doesNotMatch(inlineSource, /export function ProviderUsageRow/);
   assert.doesNotMatch(inlineSource, /provider-usage-configure-icon/);
   const entryButton = readFileSync("src/renderer/src/components/app/UsageQueryEntryButton.tsx", "utf8");
-  assert.match(entryButton, /useProviderUsageRecognized/);
+  // 「用量查询」按钮常驻：不再因内置识别命中而隐藏（认证页/模型卡片都要能看到这个图标与开关入口）。
+  assert.doesNotMatch(entryButton, /useProviderUsageRecognized/);
   assert.match(entryButton, /provider-usage-configure-icon/);
+  assert.match(entryButton, /BarChart3/);
   const authTab = readFileSync("src/renderer/src/config/AuthTab.tsx", "utf8");
-  assert.doesNotMatch(authTab, /ProviderUsageInline/);
+  // 认证页卡片同样常驻徽章（只读展示，开关在右侧「用量查询」弹窗里），仍不挂详情块（详情在圆球/选择器展开区）。
+  assert.match(authTab, /<ProviderUsageInline provider=\{name\} variant="card" \/>/);
   assert.doesNotMatch(authTab, /ProviderUsageDetails/);
   assert.doesNotMatch(authTab, /ProviderUsageRow/);
   assert.match(authTab, /UsageQueryEntryButton/);
   const dshCards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
-  assert.doesNotMatch(dshCards, /ProviderUsageInline/);
+  // DSH 卡片徽章必须走 dsh 链路（配置/凭据都在 $DSH_HOME，不误读 pi 的 usage-probes.json）。
+  assert.match(dshCards, /<ProviderUsageInline provider=\{entry\.key\} variant="card" backend="dsh" \/>/);
+  assert.match(dshCards, /<ProviderUsageInline provider="deepseek" variant="card" backend="dsh" \/>/);
   assert.doesNotMatch(dshCards, /ProviderUsageDetails/);
   assert.match(dshCards, /config\.dsh\.modelsCount/);
   assert.doesNotMatch(dshCards, /ProviderUsageRow/);

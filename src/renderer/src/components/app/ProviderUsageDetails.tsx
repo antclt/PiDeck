@@ -8,6 +8,7 @@
  *   （绿/橙/红按 70/90 阈值）+ 彩色粗体百分比 + 剩余小字；
  * - 余额/credits：灰标签 + 彩色粗体数字（剩 ≤0 红、<10% 橙、其余绿）；
  * - booster（Kimi Boost 等独立货币）：主额度下方子块，不与主额度混单位；
+ * - 未启用（徽章/弹窗里的开关关着）：灰字「用量查询未开启」+ 「去配置」，不再空着不解释；
  * - 失败：红字 + 重试 + 「配置用量查询」（onConfigureUsage 深链模型设置）。
  * 数据源 provider-usage-atoms 与 inline 行同一份缓存。
  */
@@ -18,7 +19,7 @@ import type {
 	ProviderUsageResult,
 	UsageProbeBackend,
 } from "../../../../shared/types/providerUsage";
-import { useProviderUsageEntry, useProviderUsageRefresh } from "../../hooks/useProviderUsage";
+import { useProviderUsageEntry, useProviderUsageRefresh, useProviderUsageState } from "../../hooks/useProviderUsage";
 import {
 	formatAmount,
 	formatBalance,
@@ -126,10 +127,13 @@ export function ProviderUsageDetails(props: {
 	className?: string;
 }) {
 	const entry = useProviderUsageEntry(props.provider || undefined, props.backend);
+	const state = useProviderUsageState(props.provider || undefined, props.backend);
 	const refresh = useProviderUsageRefresh();
 	if (!props.provider) return null;
 	const loading = entry.status === "loading";
 	const result = entry.result;
+	// 开关关着（默认态）：不查也不空着——直接告诉用户去哪开。
+	const notEnabled = state != null && !state.enabled;
 	const balance = result?.kind === "balance" && result.success ? result.balance : undefined;
 	const credits = result?.kind === "credits" && result.success ? result.credits : undefined;
 	const periods = result?.kind === "periods" && result.success ? result.periods : undefined;
@@ -144,6 +148,7 @@ export function ProviderUsageDetails(props: {
 			data-testid="provider-usage-details"
 			data-provider={props.provider}
 			data-status={entry.status}
+			data-enabled={state ? (state.enabled ? "true" : "false") : undefined}
 		>
 			<div className="flex items-center gap-1.5 px-0.5">
 				<span className="text-micro font-semibold uppercase tracking-wide text-text-tertiary">
@@ -259,7 +264,23 @@ export function ProviderUsageDetails(props: {
 					})}
 				</div>
 			) : null}
-			{failed ? (
+			{notEnabled ? (
+				// 未启用：与失败态同一行布局，但用中性色（不是错误，只是没开）。
+				<div className="flex items-center gap-1.5 px-0.5 text-caption leading-5 text-text-tertiary">
+					<AlertCircle size={12} aria-hidden="true" />
+					<span>{t("config.usage.notEnabled")}</span>
+					{props.onConfigureUsage && (
+						<button
+							type="button"
+							data-testid="provider-usage-configure"
+							onClick={props.onConfigureUsage}
+							className="ml-auto inline-flex flex-none items-center rounded px-1.5 py-0.5 text-caption text-text-secondary transition-colors hover:bg-muted/60 hover:text-foreground"
+						>
+							{t("config.usage.configure")}
+						</button>
+					)}
+				</div>
+			) : failed ? (
 				// 失败态只占一行（cc-switch 同款极简）：红字提示；「去配置」是行内小链接，
 				// 不再渲染全宽大按钮；重试统一走头部的刷新按钮（只保留一个刷新入口）。
 				// 结构性「未开启」给专属引导文案（用量查询未开启 → 去配置），其余失败给通用文案。

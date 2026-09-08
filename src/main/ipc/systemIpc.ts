@@ -1666,18 +1666,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		const backend = raw.backend === "dsh" ? "dsh" : "pi";
 		return configManager.getUsageProbeSettings(provider, backend);
 	});
-	// 轻量内置识别（渲染层隐藏「用量查询」配置按钮用）：命中内置候选（零配置自动生效）返回 true。
-	// 与 getUsageProbes 的区别：不读 usage-probes.json，只按端点解析 + 内置候选表判断，开销更小。
-	ipcMain.handle(ipcChannels.configUsageRecognized, async (_event, payload: unknown) => {
-		const raw = payload && typeof payload === "object" ? (payload as { provider?: unknown; backend?: unknown }) : {};
-		const provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
-		if (!provider || provider.length > 128) {
-			return { recognized: false };
-		}
-		const backend = raw.backend === "dsh" ? "dsh" : "pi";
-		const recognized = await configManager.recognizeUsageTemplate(provider, backend);
-		return { recognized: recognized != null };
-	});
 	// 按 provider 合并保存：入口校验与落盘同一套规则，零错误才写（保留文件里其它 providers 与旧 probes）。
 	ipcMain.handle(ipcChannels.configSaveUsageProbes, async (_event, payload: unknown) => {
 		const input =
@@ -1701,6 +1689,21 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			ok: result.ok,
 		});
 		return result;
+	});
+	// 批量状态表（徽章开关 / 启动预热选源）：只回开关/模板/间隔，不回传任何密钥。
+	ipcMain.handle(ipcChannels.configListUsageProbeStates, async (_event, payload: unknown) => {
+		const raw =
+			payload && typeof payload === "object"
+				? (payload as { backend?: unknown; providers?: unknown })
+				: {};
+		const backend = raw.backend === "dsh" ? "dsh" : "pi";
+		// 渲染层数据不可信：只接受字符串数组，并限制条目数（防超大 payload 触发 N 次解析）。
+		const providers = Array.isArray(raw.providers)
+			? raw.providers
+					.filter((name): name is string => typeof name === "string")
+					.slice(0, 512)
+			: [];
+		return configManager.listUsageProbeStates(backend, providers);
 	});
 	// 单条模板测试（弹窗「测试」按钮）：按模板 id + 覆盖字段构建候选，主进程解析端点与密钥。
 	ipcMain.handle(ipcChannels.configTestUsageProbe, async (_event, payload: unknown) => {

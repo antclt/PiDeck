@@ -122,12 +122,6 @@ export type AppSettings = {
 	 */
 	autoSessionTitle: boolean;
 	/**
-	 * 是否自动探查供应商用量/余额。默认关闭：打开模型选择器/配置页会对每个
-	 * provider 扇出 HTTP，多个 provider 共用同一本地 OpenAI 兼容网关时会把网关打熔断。
-	 * 关闭后仍可在用量卡片里手动刷新/测试。
-	 */
-	providerUsageAutoQueryEnabled: boolean;
-	/**
 	 * Agent 忙碌时发送消息的默认投递行为。
 	 * "steer"=插入当前回合（模型在本次回合内尽快看到）；"followUp"=排队，当前回合结束后自动发送。
 	 * 仅决定渲染层入队后的默认投递语义；pi/dsh 主进程各自映射到 wire 协议

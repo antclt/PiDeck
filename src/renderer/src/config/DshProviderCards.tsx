@@ -14,6 +14,7 @@ import { desktopApi } from "../desktopApi";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { UsageQueryEntryButton } from "../components/app/UsageQueryEntryButton";
+import { ProviderUsageInline } from "../components/app/ProviderUsageInline";
 import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { isDshDeepseekProfileVisibleField, isDshPiAiCustomRoute, isDshPiAiProfileVisibleField } from "./dshFieldLabels";
@@ -669,6 +670,10 @@ export function PiAiProvidersCard(props: {
 								keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
 								extraActions={
 									<>
+										{/* 用量徽章常驻（DSH 链路 backend=dsh）：与模型/认证页同款，开关即「是否启用用量查询」 */}
+										<span className="shrink-0" onClick={(event) => event.stopPropagation()}>
+											<ProviderUsageInline provider={entry.key} variant="card" backend="dsh" />
+										</span>
 										{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；DSH 链路 backend=dsh） */}
 										<UsageQueryEntryButton
 											provider={entry.key}
@@ -956,6 +961,10 @@ export function DeepseekRouteCard(props: {
 						keyDot={<KeyStatusDot state={ops.credentials[keyRef]} />}
 						extraActions={
 							<>
+								{/* 用量徽章常驻（DSH 官方 DeepSeek）：provider 名归一为 deepseek，与卡片/选择器同缓存 key */}
+								<span className="shrink-0" onClick={(event) => event.stopPropagation()}>
+									<ProviderUsageInline provider="deepseek" variant="card" backend="dsh" />
+								</span>
 								{/* 用量查询配置（内置支持的供应商零配置自动生效，不渲染；DSH 官方 DeepSeek） */}
 								<UsageQueryEntryButton
 									provider="deepseek"
