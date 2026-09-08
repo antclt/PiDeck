@@ -223,6 +223,9 @@
       "category": "Development",
       "maintainer": "ayuayue <ayuayue@users.noreply.github.com>"
     },
+    "appImage": {
+      "artifactName": "${productName}.${ext}"
+    },
     "publish": {
       "provider": "github",
       "owner": "ayuayue",
