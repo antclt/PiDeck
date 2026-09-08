@@ -42,6 +42,8 @@ import type {
 	OpenCodeSessionSummary,
 	ZCodeImportReport,
 	ZCodeSessionSummary,
+	WorkBuddyImportReport,
+	WorkBuddySessionSummary,
 	ConfigFileDiagnostic,
 	DraftMeta,
 	CreateSessionDraftInput,
@@ -69,6 +71,7 @@ import type {
 	ExternalEditorId,
 	ExternalEditorSetting,
 	FileManagerInfo,
+	FocusTargetPayload,
 	FeedbackEnvironment,
 	FeedbackProjectContext,
 	FeishuBotConfig,
@@ -144,6 +147,7 @@ import type {
 	UsageProbeSaveInput,
 	UsageProbeSaveResult,
 	UsageProbeSettingsResult,
+	UsageProbeStatesResult,
 	UsageProbeTestInput,
 } from "../shared/types/providerUsage";
 
@@ -167,6 +171,20 @@ const api = {
 		/** 异步写入纯文本：诊断报告/AI 提示词可达数十 KB，直连 clipboard 在 Electron 38 已废弃。 */
 		writeText: (value: string) =>
 			ipcRenderer.invoke(ipcChannels.clipboardWriteText, value) as Promise<boolean>,
+	},
+	shellMenu: {
+		/** 查询资源管理器右键菜单注册状态（非 Windows 返回 supported=false） */
+		getState: () =>
+			ipcRenderer.invoke(ipcChannels.shellMenuGetState) as Promise<{
+				supported: boolean;
+				registered: boolean;
+			}>,
+		/** 启用/取消「用 PiDeck 打开」右键菜单（HKCU 写入，portable 亦可用） */
+		setEnabled: (enabled: boolean) =>
+			ipcRenderer.invoke(ipcChannels.shellMenuSetEnabled, enabled) as Promise<{
+				supported: boolean;
+				registered: boolean;
+			}>,
 	},
 	editors: {
 		list: () => ipcRenderer.invoke(ipcChannels.editorsList) as Promise<ExternalEditor[]>,
@@ -192,6 +210,9 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.projectsList) as Promise<Project[]>,
 		add: () =>
 			ipcRenderer.invoke(ipcChannels.projectsAdd) as Promise<Project | null>,
+		/** 文件夹右键菜单直达：给定路径必须是已存在的目录，主进程校验后入库 */
+		addByPath: (path: string) =>
+			ipcRenderer.invoke(ipcChannels.projectsAddByPath, path) as Promise<Project>,
 		remove: (id: string) =>
 			ipcRenderer.invoke(ipcChannels.projectsRemove, id) as Promise<Project[]>,
 		reorder: (projectIds: string[]) =>
@@ -898,6 +919,18 @@ const api = {
 				projectId,
 				sourcePaths,
 			) as Promise<ZCodeImportReport>,
+	},
+	workbuddySessions: {
+		scan: (projectId: string) =>
+			ipcRenderer.invoke(ipcChannels.workbuddySessionsScan, projectId) as Promise<
+				WorkBuddySessionSummary[]
+			>,
+		import: (projectId: string, sourcePaths: string[]) =>
+			ipcRenderer.invoke(
+				ipcChannels.workbuddySessionsImport,
+				projectId,
+				sourcePaths,
+			) as Promise<WorkBuddyImportReport>,
 	},
 	git: {
 		/** 扫描项目内独立仓库；单仓项目通常只返回根仓库 */
@@ -1650,16 +1683,17 @@ const api = {
 		/** 视觉桥：清空事件文件 */
 		visionClearEvents: () =>
 			ipcRenderer.invoke(ipcChannels.visionClearEvents) as Promise<{ ok: boolean }>,
-		/** 测试 provider 连接：先保存配置，再用真实 pi 做一次最小调用验证是否可用；proxyMode 控制探针进程代理（同 fetchModels 语义，pi 侧走 PI 代理配置） */
+		/** 测试 provider 连接（隔离探针）：临时 agent 目录 + PI_CODING_AGENT_DIR 跑真实 pi，测当前表单值且不落盘；proxyMode 控制探针进程代理（同 fetchModels 语义，pi 侧走 PI 代理配置） */
 		testProvider: (
 			providerName: string,
 			modelId: string,
-			models: unknown,
+			provider: unknown,
+			apiKey: string,
 			proxyMode?: "follow" | "pi" | "desktop" | "off",
 		) =>
 			ipcRenderer.invoke(
 				ipcChannels.configTestProvider,
-				{ providerName, modelId, models, proxyMode },
+				{ providerName, modelId, provider, apiKey, proxyMode },
 			) as Promise<import("../shared/types/fetchedModel").PiModelProbeResult>,
 		/** 查询 provider 用量/余额（主进程按 provider 名 + backend 路由；backend=dsh 走 $DSH_HOME 链路） */
 		fetchUsage: (provider: string, backend?: "pi" | "dsh") =>
@@ -1678,18 +1712,18 @@ const api = {
 				ipcChannels.configGetUsageProbes,
 				{ provider, backend },
 			) as Promise<UsageProbeSettingsResult>,
-		/** 轻量内置识别（渲染层隐藏「用量查询」按钮用）：命中内置候选返回 true，不读配置文件 */
-		usageRecognized: (provider: string, backend?: "pi" | "dsh") =>
-			ipcRenderer.invoke(
-				ipcChannels.configUsageRecognized,
-				{ provider, backend },
-			) as Promise<{ recognized: boolean }>,
 		/** 按 provider 合并保存用量查询配置（主进程校验后落盘，保留其它 providers 与旧 probes） */
 		saveUsageProbes: (payload: UsageProbeSaveInput) =>
 			ipcRenderer.invoke(
 				ipcChannels.configSaveUsageProbes,
 				payload,
 			) as Promise<UsageProbeSaveResult>,
+		/** 批量读取各 provider 用量查询状态（徽章开关 / 启动预热选源；只回开关/模板/间隔，不含密钥） */
+		listUsageProbeStates: (payload: { providers?: string[]; backend?: "pi" | "dsh" } = {}) =>
+			ipcRenderer.invoke(
+				ipcChannels.configListUsageProbeStates,
+				payload,
+			) as Promise<UsageProbeStatesResult>,
 		/** 单条模板测试（模板 id + 覆盖字段；provider 端点与密钥由主进程解析，不回传渲染层） */
 		testUsageProbe: (payload: UsageProbeTestInput) =>
 			ipcRenderer.invoke(
@@ -1759,11 +1793,11 @@ const api = {
 		/** 点击宠物跳转活跃 Agent */
 		focusAgent: () =>
 			ipcRenderer.invoke(ipcChannels.petFocusAgent) as Promise<void>,
-		onFocusTarget: (callback: (target: { sessionId: string }) => void) =>
+		onFocusTarget: (callback: (target: FocusTargetPayload) => void) =>
 			subscribe(ipcChannels.petFocusAgentTarget, callback),
-		/** 冷启动/页面加载期间点击通知的跳转目标：挂载后主动拉取（一次性） */
+		/** 冷启动/页面加载期间点击通知或右键菜单的跳转目标：挂载后主动拉取（一次性） */
 		getPendingFocusTarget: () =>
-			ipcRenderer.invoke(ipcChannels.petGetFocusTargetPending) as Promise<{ sessionId: string } | null>,
+			ipcRenderer.invoke(ipcChannels.petGetFocusTargetPending) as Promise<FocusTargetPayload | null>,
 		/** 主进程推送当前选中宠物的 manifest，据此加载 spritesheet */
 		onSprite: (callback: (manifest: PetManifest) => void) =>
 			subscribe(ipcChannels.petCurrentSprite, callback),

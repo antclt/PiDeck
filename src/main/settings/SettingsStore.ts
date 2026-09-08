@@ -291,6 +291,8 @@ export class SettingsStore {
       // 语义从「最大宽度 px」变为「占面板百分比」，无法精确换算（面板宽度可变），
       // 用线性映射保留旧值感觉：800→60%、1400→84%、1800(不限)→100%。
       this.migrateContentWidth();
+      // 兼容迁移：全局用量自动查询开关已删除（改为每个 provider 徽章/弹窗里的开关）。
+      this.migrateRemovedUsageAutoQuerySwitch();
       // 兼容迁移：按供应商/模型过滤的代理白名单，旧数据缺省为 []（不按名单过滤，保持全局行为）。
       this.normalizePiProxyProviders();
       this.normalizePiProxyModels();
@@ -345,6 +347,20 @@ export class SettingsStore {
       mapped = Math.min(100, Math.max(60, Math.round(((legacyPx - 800) / 1000) * 40 + 60)));
     }
     this.settings.chatContentWidthPct = mapped;
+    void this.save().catch(() => undefined);
+  }
+
+  /**
+   * 兼容迁移：全局「自动查询供应商用量」开关已删除。
+   *
+   * 为什么必须删：设置对象是整体持久化的——旧字段留在内存里，下一次任意保存都会把它
+   * 写回磁盘，用户永远看不到它被清掉；而它已不再被任何代码读取。删除后立即落盘一次。
+   * 磁盘 JSON 无类型，旧值先按 unknown 收窄再删。
+   */
+  private migrateRemovedUsageAutoQuerySwitch() {
+    const legacy = this.settings as unknown as Record<string, unknown>;
+    if (!("providerUsageAutoQueryEnabled" in legacy)) return;
+    delete legacy.providerUsageAutoQueryEnabled;
     void this.save().catch(() => undefined);
   }
 

@@ -8,7 +8,13 @@ import { ipcChannels } from "../../shared/ipc";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
 import { probeAllMirrors, type MirrorHealthResult } from "../update/mirrorHealth";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
+import { DSH_BUNDLED_RUNTIME_DIRNAME, readBundledRuntime, readDeclaredDshVersion } from "../dsh/runtime/DshRuntimeManager";
+import { resolveAppTimes } from "../utils/appInfoTimes";
+import { join } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import type {
+	AppInfo,
 	AppLogLevel,
 	AppLogQuery,
 	AppSettings,
@@ -19,7 +25,7 @@ import type {
 } from "../../shared/types";
 import type { PiLocator } from "../pi/PiLocator";
 import type { SettingsStore } from "../settings/SettingsStore";
-import type { ConfigManager, PiModelsFile } from "../config/ConfigManager";
+import type { ConfigManager } from "../config/ConfigManager";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
@@ -34,8 +40,9 @@ import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendan
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
+import { PROBE_AGENT_DIR_ENV, buildProbeDraftFiles, toWslAccessiblePath } from "../pi/probeDraftConfig";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
-import { getPiAiCatalogIndex } from "../pi/piAiBuiltinCatalog";
+import { getPiAiCatalogIndex, readBuiltinPiAiCatalogVersion } from "../pi/piAiBuiltinCatalog";
 import { resolveModelSpecFromCatalogs } from "../pi/modelCapabilityResolver";
 import { getProcessSnapshot } from "../process/ProcessMonitor";
 import { buildDshHostMonitorRow, isDshHostMonitorId } from "../process/dshHostMonitor";
@@ -229,6 +236,8 @@ export type SystemIpcDeps = {
 	RELEASES_URL?: string;
 	/** 开发态 git 分支名（多 worktree 并行区分窗口）；正式包/共享分支为空。 */
 	devBranch?: string;
+	/** DSH 运行时管理器（读取启用中的 runtime 版本，随包 bundled manifest 兜底）。 */
+	dshRuntimeManager?: import("../dsh/runtime/DshRuntimeManager").DshRuntimeManager;
 	/** 后台更新检查服务（定时检查快照推送 / 已提示 / 跳过版本 / 立即检查 / 下载 / 安装）。 */
 	updateService?: {
 		getSnapshot: () => import("../../shared/types").AppUpdateStatusSnapshot;
@@ -254,6 +263,25 @@ function asConfigProxyMode(raw: unknown): ConfigProxyMode {
  */
 function isWslName(value: string): boolean {
 	return /^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$/.test(value);
+}
+
+/**
+ * 解析「关于」面板要展示的 DSH 运行时版本：优先用户已激活/安装的 runtime（resolveActive），
+ * 无则回退到随包 bundled runtime 清单；两者都没有（如 dev 模式未接 dsh-runtime）返回 undefined。
+ */
+function resolveDshRuntimeVersion(
+	manager: SystemIpcDeps["dshRuntimeManager"],
+): string | undefined {
+	const active = manager?.resolveActive();
+	if (active?.manifest.runtimeVersion) return active.manifest.runtimeVersion;
+	const bundled = readBundledRuntime(
+		join(typeof process.resourcesPath === "string" ? process.resourcesPath : "", DSH_BUNDLED_RUNTIME_DIRNAME),
+		app.getVersion(),
+	);
+	if (bundled?.manifest.runtimeVersion) return bundled.manifest.runtimeVersion;
+	// 兜底：版本依赖（package.json 声明的 @deepseek-ai/dsh）。无论用户是否安装 runtime、
+	// dev 还是打包态（asar 内 package.json 可读），都能给出「本版本配套」的 dsh 版本。
+	return readDeclaredDshVersion(app.getAppPath());
 }
 
 export function registerSystemIpc(deps: SystemIpcDeps): void {
@@ -701,14 +729,54 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── 应用信息 ─────────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.appInfo, () => ({
-		version: app.getVersion(),
-		releasesUrl: RELEASES_URL ?? `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases`,
-		platform: process.platform,
-		// 数据目录直接取实际生效路径：便携版（exe 同级 data/）、安装版、dev 模式（-dev 后缀）由主进程统一解析
-		userDataDir: app.getPath("userData"),
-		devBranch: devBranch,
-	}));
+	// appInfo 现在包含 pi / DSH runtime / pi-ai 目录版本探测（pi 需要 spawn 一次进程），
+	// 结果按进程生命周期缓存：并发请求共享同一 in-flight promise，失败也缓存，
+	// 避免每次打开/启动反复 spawn `pi --version` 拖慢路径。
+	let appInfoPromise: Promise<AppInfo> | undefined;
+
+	const resolveAppInfo = (): Promise<AppInfo> => {
+		appInfoPromise ??= (async () => {
+			let piVersion: string | undefined;
+			try {
+				// 与设置页/反馈环境一致：用当前设置的 WSL 路径探测 pi CLI 版本
+				const settings = settingsStore.get();
+				const status = await piLocator.check(
+					settings.customPiPath,
+					settings.wslEnabled,
+					settings.wslDistro,
+					settings.wslUser,
+				);
+				piVersion = status.version;
+			} catch (error) {
+				appLogger.warn("appInfo", "pi version probe failed", { error });
+			}
+			const times = resolveAppTimes({
+				isPackaged: app.isPackaged,
+				resourcesPath: typeof process.resourcesPath === "string" ? process.resourcesPath : "",
+				appPath: app.getAppPath(),
+				execPath: process.execPath,
+			});
+			return {
+				version: app.getVersion(),
+				releasesUrl: RELEASES_URL ?? `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases`,
+				platform: process.platform,
+				// 数据目录直接取实际生效路径：便携版（exe 同级 data/）、安装版、dev 模式（-dev 后缀）由主进程统一解析
+				userDataDir: app.getPath("userData"),
+				homeDir: app.getPath("home"),
+				devBranch: devBranch,
+				piVersion,
+				dshRuntimeVersion: resolveDshRuntimeVersion(deps.dshRuntimeManager),
+				piAiVersion: readBuiltinPiAiCatalogVersion(),
+				electronVersion: process.versions.electron ?? "",
+				chromeVersion: process.versions.chrome ?? "",
+				nodeVersion: process.versions.node,
+				...times,
+			};
+		})();
+		return appInfoPromise;
+	};
+
+	ipcMain.handle(ipcChannels.appInfo, resolveAppInfo);
 
 	ipcMain.handle(ipcChannels.appNetworkAddresses, () => listWebNetworkAddresses());
 
@@ -1492,44 +1560,79 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { ok: false, modelCount: 0, piSaved: false, dshSaved: false, error: "TokenDance install failed" };
 		}
 	});
-	ipcMain.handle(ipcChannels.configTestProvider, async (
-		_event,
-		payload: { providerName: string; modelId: string; models: PiModelsFile; proxyMode?: string },
-	) => {
-		// 1) 边界校验：provider/model 名必须是有限的非空字符串；models 交由 saveModelsConfig 做结构校验。
-		const providerName = typeof payload?.providerName === "string" ? payload.providerName.trim() : "";
-		const modelId = typeof payload?.modelId === "string" ? payload.modelId.trim() : "";
-		if (!providerName || providerName.length > 128 || !modelId || modelId.length > 256) {
+	ipcMain.handle(ipcChannels.configTestProvider, async (_event, payload: unknown) => {
+		// 1) 边界校验：provider/model 名必须是有限的非空字符串；provider 必须是普通对象；
+		//    key 只写临时目录且不落日志，但仍限制长度防滥用。
+		const raw =
+			payload && typeof payload === "object" && !Array.isArray(payload)
+				? (payload as {
+						providerName?: unknown;
+						modelId?: unknown;
+						provider?: unknown;
+						apiKey?: unknown;
+						proxyMode?: unknown;
+					})
+				: {};
+		const providerName = typeof raw.providerName === "string" ? raw.providerName.trim() : "";
+		const modelId = typeof raw.modelId === "string" ? raw.modelId.trim() : "";
+		const provider = raw.provider;
+		const apiKey = typeof raw.apiKey === "string" ? raw.apiKey : "";
+		if (
+			!providerName ||
+			providerName.length > 128 ||
+			!modelId ||
+			modelId.length > 256 ||
+			!provider ||
+			typeof provider !== "object" ||
+			Array.isArray(provider) ||
+			apiKey.length > 4096
+		) {
 			return { success: false, error: "Invalid provider name or model id" };
 		}
-		if (!payload?.models || typeof payload.models !== "object") {
-			return { success: false, error: "Invalid models config" };
-		}
 
-		// 2) 点击测试即保存：把表单里的配置先落盘，pi 只读磁盘上的 models.json/auth.json。
-		const saved = await configManager.saveModelsConfig(payload.models);
-		if (!saved.valid) {
-			return { success: false, error: saved.error ?? "Invalid models config" };
+		// 2) 隔离探针：把「当前表单值」写进临时 agent 目录（models.json/auth.json + 正式
+		//    settings.json 副本），PI_CODING_AGENT_DIR 指向它，探针结束后整目录删除。
+		//    测的是用户眼前的值（含未保存修改），正式配置零接触——测试 ≠ 保存。
+		const tempDir = await mkdtemp(join(tmpdir(), "pideck-probe-"));
+		try {
+			const settingsConfig = await configManager.getSettingsConfig();
+			const { modelsJson, authJson, settingsJson } = buildProbeDraftFiles(
+				providerName,
+				provider as Record<string, unknown>,
+				apiKey || undefined,
+				settingsConfig.parsed,
+			);
+			await writeFile(join(tempDir, "models.json"), modelsJson, "utf8");
+			await writeFile(join(tempDir, "auth.json"), authJson, "utf8");
+			// 正式 settings.json 副本：扩展注册的 api 协议靠它加载；空配置不写。
+			if (settingsJson) await writeFile(join(tempDir, "settings.json"), settingsJson, "utf8");
+			// WSL：pi 在 Linux 里读不到 Windows 路径，转 /mnt/<drive>；非 WSL 用原路径。
+			const settings = settingsStore.get();
+			const agentDirEnv =
+				settings.wslEnabled && process.platform === "win32"
+					? toWslAccessiblePath(tempDir)
+					: tempDir;
+			// 3) 用真实 pi 做一次最小调用（走 pi 的 provider 解析 + SDK，与真实会话同路径）。
+			//    测试连接显式选了代理时，把它覆盖到探针进程的代理环境（pi 侧只认 piProxy* 配置）。
+			const result = await probePiModel(
+				piLocator,
+				settingsStore,
+				providerName,
+				modelId,
+				resolveConfigProxyTarget(settingsStore.get(), asConfigProxyMode(raw.proxyMode)),
+				{ [PROBE_AGENT_DIR_ENV]: agentDirEnv },
+			);
+			void appLogger.info("config", "Provider connection tested via pi (isolated)", {
+				providerName,
+				modelId,
+				success: result.success,
+				error: result.error,
+			});
+			return result;
+		} finally {
+			// 无论成败都清掉临时目录（含待测密钥），不留给磁盘。
+			await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
 		}
-		invalidateModelListCache();
-		void refreshModelList(piLocator, settingsStore, configManager).catch(() => undefined);
-
-		// 3) 用真实 pi 做一次最小调用（走 pi 的 provider 解析 + SDK，与真实会话同路径）。
-		//    测试连接显式选了代理时，把它覆盖到探针进程的代理环境（pi 侧只认 piProxy* 配置）。
-		const result = await probePiModel(
-			piLocator,
-			settingsStore,
-			providerName,
-			modelId,
-			resolveConfigProxyTarget(settingsStore.get(), asConfigProxyMode(payload?.proxyMode)),
-		);
-		void appLogger.info("config", "Provider connection tested via pi", {
-			providerName,
-			modelId,
-			success: result.success,
-			error: result.error,
-		});
-		return result;
 	});
 	ipcMain.handle(ipcChannels.configFetchUsage, async (
 		_event,
@@ -1563,18 +1666,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		const backend = raw.backend === "dsh" ? "dsh" : "pi";
 		return configManager.getUsageProbeSettings(provider, backend);
 	});
-	// 轻量内置识别（渲染层隐藏「用量查询」配置按钮用）：命中内置候选（零配置自动生效）返回 true。
-	// 与 getUsageProbes 的区别：不读 usage-probes.json，只按端点解析 + 内置候选表判断，开销更小。
-	ipcMain.handle(ipcChannels.configUsageRecognized, async (_event, payload: unknown) => {
-		const raw = payload && typeof payload === "object" ? (payload as { provider?: unknown; backend?: unknown }) : {};
-		const provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
-		if (!provider || provider.length > 128) {
-			return { recognized: false };
-		}
-		const backend = raw.backend === "dsh" ? "dsh" : "pi";
-		const recognized = await configManager.recognizeUsageTemplate(provider, backend);
-		return { recognized: recognized != null };
-	});
 	// 按 provider 合并保存：入口校验与落盘同一套规则，零错误才写（保留文件里其它 providers 与旧 probes）。
 	ipcMain.handle(ipcChannels.configSaveUsageProbes, async (_event, payload: unknown) => {
 		const input =
@@ -1598,6 +1689,21 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			ok: result.ok,
 		});
 		return result;
+	});
+	// 批量状态表（徽章开关 / 启动预热选源）：只回开关/模板/间隔，不回传任何密钥。
+	ipcMain.handle(ipcChannels.configListUsageProbeStates, async (_event, payload: unknown) => {
+		const raw =
+			payload && typeof payload === "object"
+				? (payload as { backend?: unknown; providers?: unknown })
+				: {};
+		const backend = raw.backend === "dsh" ? "dsh" : "pi";
+		// 渲染层数据不可信：只接受字符串数组，并限制条目数（防超大 payload 触发 N 次解析）。
+		const providers = Array.isArray(raw.providers)
+			? raw.providers
+					.filter((name): name is string => typeof name === "string")
+					.slice(0, 512)
+			: [];
+		return configManager.listUsageProbeStates(backend, providers);
 	});
 	// 单条模板测试（弹窗「测试」按钮）：按模板 id + 覆盖字段构建候选，主进程解析端点与密钥。
 	ipcMain.handle(ipcChannels.configTestUsageProbe, async (_event, payload: unknown) => {

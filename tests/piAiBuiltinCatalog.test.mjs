@@ -7,6 +7,9 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -18,6 +21,7 @@ const {
 	getPiAiCatalogIndex,
 	parsePiAiCatalogArtifact,
 	positiveInt,
+	readBuiltinPiAiCatalogVersion,
 } = catalog;
 
 function sampleIndex() {
@@ -104,9 +108,10 @@ test("parseProviderModelsResponse: 读 listing 容量字段，缺则省略", () 
 		],
 	});
 	assert.deepEqual(JSON.parse(JSON.stringify(models)), [
-		{ id: "foo", name: "Foo Display", contextWindow: 64000, maxTokens: 4096 },
+		// 按展示名正序（shared/modelOrder 与下拉列表/配置页同一套排序）：bar < bare < foo display
 		{ id: "bar", contextWindow: 128000, maxTokens: 8192 },
 		{ id: "bare" },
+		{ id: "foo", name: "Foo Display", contextWindow: 64000, maxTokens: 4096 },
 	]);
 });
 
@@ -238,4 +243,9 @@ test("真实生成 catalog：0.85.0 的 qwen3.8-max 可供主进程读取", () =
 	assert.ok(entry, "qwen3.8-max 应命中 PiDeck 0.85.0 artifact");
 	assert.equal(entry.contextWindow, 1000000);
 	assert.equal(entry.maxTokens, 131072);
+});
+
+test("readBuiltinPiAiCatalogVersion：仓库内置 manifest 返回 pi-ai 包版本", () => {
+	const version = readBuiltinPiAiCatalogVersion();
+	assert.match(version ?? "", /^\d+\.\d+\.\d+/, "应从仓库 resources 读到 pi-ai 包版本");
 });

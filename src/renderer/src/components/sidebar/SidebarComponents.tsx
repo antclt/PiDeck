@@ -610,6 +610,7 @@ export function ProjectContextMenu(props: {
 	onImportClaudeSessions: () => void;
 	onImportOpenCodeSessions: () => void;
 	onImportZCodeSessions: () => void;
+	onImportWorkBuddySessions: () => void;
 	onManageProjectResources: () => void;
 	onManageSessions: () => void;
 	onFilterSessions: () => void;
@@ -621,6 +622,8 @@ export function ProjectContextMenu(props: {
 	onRenameProject: () => void;
 	/** worktree 子项目删除必须走 Git worktree 清理流程，不能只移除目录记录。 */
 	onRemoveWorktree?: () => void;
+	/** 聊天项目目录设置（仅内置 Chat 项目展示；调整会话存储目录，主进程校验不与已注册项目重叠）。 */
+	onChatSettings?: () => void;
 }) {
 	const isWorktreeEnabled = props.menu.project.worktreeEnabled ?? false;
 	return (
@@ -660,6 +663,13 @@ export function ProjectContextMenu(props: {
 					{t("menu.renameProject")}
 				</DropdownMenuItem>
 			)}
+			{/* 聊天项目固定名但目录可迁移：目录设置仅对 Chat 展示，其余项目没有此入口 */}
+			{props.menu.project.kind === "chat" && props.onChatSettings && (
+				<DropdownMenuItem onSelect={props.onChatSettings}>
+					<Settings2 className="size-3.5" aria-hidden="true" />
+					{t("app.chatProjectSettings")}
+				</DropdownMenuItem>
+			)}
 			<DropdownMenuItem onSelect={props.onManageSessions}>
 				<List className="size-3.5" aria-hidden="true" />
 				{t("menu.manageSessions")}
@@ -680,39 +690,50 @@ export function ProjectContextMenu(props: {
 				<RefreshCw className="size-3.5" aria-hidden="true" />
 				{t("app.projectRefresh")}
 			</DropdownMenuItem>
-			<DropdownMenuItem onSelect={props.onToggleWorktree}>
-				<GitBranch className="size-3.5" aria-hidden="true" />
-				{isWorktreeEnabled ? t("menu.disableWorktree") : t("menu.enableWorktree")}
-			</DropdownMenuItem>
-			<DropdownMenuSeparator />
-			{/* 导入：外部会话迁移入口（Codex/Claude/OpenCode/ZCode），二级菜单收拢，避免主菜单过长 */}
-			<DropdownMenuSub>
-				<DropdownMenuSubTrigger>
-					<Download className="size-3.5" aria-hidden="true" />
-					{t("menu.importSessions")}
-				</DropdownMenuSubTrigger>
-				<DropdownMenuSubContent>
-					<DropdownMenuItem onSelect={props.onImportCodexSessions}>
-						{t("menu.importCodex")}
+			{/* Chat 内置项目没有 Git 工作区概念（存储目录即会话宿主目录），工作区开关无意义；仅普通项目展示 */}
+			{props.menu.project.kind !== "chat" && (
+				<DropdownMenuItem onSelect={props.onToggleWorktree}>
+					<GitBranch className="size-3.5" aria-hidden="true" />
+					{isWorktreeEnabled ? t("menu.disableWorktree") : t("menu.enableWorktree")}
+				</DropdownMenuItem>
+			)}
+			{/* 导入：外部会话迁移入口（Codex/Claude/OpenCode/ZCode），二级菜单收拢，避免主菜单过长。
+			    Chat 项目没有工作目录可扫描外部会话库，移除与删除对 Chat 一并隐藏（内置项目不可删）。 */}
+			{props.menu.project.kind !== "chat" && (
+				<>
+					<DropdownMenuSeparator />
+					<DropdownMenuSub>
+						<DropdownMenuSubTrigger>
+							<Download className="size-3.5" aria-hidden="true" />
+							{t("menu.importSessions")}
+						</DropdownMenuSubTrigger>
+						<DropdownMenuSubContent>
+							<DropdownMenuItem onSelect={props.onImportCodexSessions}>
+								{t("menu.importCodex")}
+							</DropdownMenuItem>
+							<DropdownMenuItem onSelect={props.onImportClaudeSessions}>
+								{t("menu.importClaude")}
+							</DropdownMenuItem>
+							<DropdownMenuItem onSelect={props.onImportOpenCodeSessions}>
+								{t("menu.importOpenCode")}
+							</DropdownMenuItem>
+							<DropdownMenuItem onSelect={props.onImportZCodeSessions}>
+								{t("menu.importZCode")}
+							</DropdownMenuItem>
+							<DropdownMenuItem onSelect={props.onImportWorkBuddySessions}>
+								{t("menu.importWorkBuddy")}
+							</DropdownMenuItem>
+						</DropdownMenuSubContent>
+					</DropdownMenuSub>
+					<DropdownMenuSeparator />
+					{/* 危险区：worktree 子项目复用此菜单时，删除必须经 Git worktree 清理流程，
+					    以保留分支/目录删除确认与运行中 Agent 保护。 */}
+					<DropdownMenuItem variant="destructive" onSelect={props.onRemoveWorktree ?? props.onRemoveProject}>
+						<Trash2 className="size-3.5" aria-hidden="true" />
+						{props.onRemoveWorktree ? t("app.worktreeRemoveConfirmTitle") : t("menu.removeProject")}
 					</DropdownMenuItem>
-					<DropdownMenuItem onSelect={props.onImportClaudeSessions}>
-						{t("menu.importClaude")}
-					</DropdownMenuItem>
-					<DropdownMenuItem onSelect={props.onImportOpenCodeSessions}>
-						{t("menu.importOpenCode")}
-					</DropdownMenuItem>
-					<DropdownMenuItem onSelect={props.onImportZCodeSessions}>
-						{t("menu.importZCode")}
-					</DropdownMenuItem>
-				</DropdownMenuSubContent>
-			</DropdownMenuSub>
-			<DropdownMenuSeparator />
-			{/* 危险区：worktree 子项目复用此菜单时，删除必须经 Git worktree 清理流程，
-			    以保留分支/目录删除确认与运行中 Agent 保护。 */}
-			<DropdownMenuItem variant="destructive" onSelect={props.onRemoveWorktree ?? props.onRemoveProject}>
-				<Trash2 className="size-3.5" aria-hidden="true" />
-				{props.onRemoveWorktree ? t("app.worktreeRemoveConfirmTitle") : t("menu.removeProject")}
-			</DropdownMenuItem>
+				</>
+			)}
 		</MenuShell>
 	);
 }

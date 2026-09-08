@@ -72,12 +72,14 @@ import {
 import {
   GUIDE_BOOTSTRAP_SESSION_ID,
   readWelcomeModelPreference,
+  readWelcomeThinkingPreference,
   resolveChatSessionBootstrap,
 } from "./utils/chatSessionBootstrap";
 import { detectRendererPlatform } from "./lib/detectRendererPlatform";
 import { msUntilNextThemeBoundary } from "../../shared/themeSchedule";
 
 import { usePiUpdate } from "./hooks/usePiUpdate";
+import { useProviderUsageStartupWarmup } from "./hooks/useProviderUsage";
 
 import { useBackgroundUpdateWatch } from "./hooks/useBackgroundUpdateWatch";
 import { useProjectSync } from "./hooks/useProjectSync";
@@ -205,6 +207,8 @@ import type {
   SessionSummary,
   ComposerAgentMode,
   TerminalTarget,
+  GitBranchInfo,
+  FocusTargetPayload,
 } from "../../shared/types";
 
 export function App() {
@@ -527,14 +531,18 @@ export function App() {
     setOpenCodeImportProject,
     zcodeImportProject,
     setZcodeImportProject,
+    workbuddyImportProject,
+    setWorkbuddyImportProject,
     codexImportController,
     claudeImportController,
     openCodeImportController,
     zcodeImportController,
+    workbuddyImportController,
     openCodexImport,
     openClaudeImport,
     openOpenCodeImport,
     openZCodeImport,
+    openWorkBuddyImport,
   } = useImportFlow({
     setProjectMenu: () => undefined,
     refreshProjectSessions,
@@ -547,6 +555,8 @@ export function App() {
     importOpenCodeSessionsApi: api.openCodeSessions.import,
     scanZCodeSessions: api.zcodeSessions.scan,
     importZCodeSessionsApi: api.zcodeSessions.import,
+    scanWorkBuddySessions: api.workbuddySessions.scan,
+    importWorkBuddySessionsApi: api.workbuddySessions.import,
     t,
   });
 
@@ -742,6 +752,10 @@ export function App() {
   useEffect(() => {
     setBusySendDelivery(settings.busySendDelivery);
   }, [settings.busySendDelivery, setBusySendDelivery]);
+
+  // 启动预热：应用起来后把「已开启用量查询」的供应商各查一次（串行错峰），
+  // 打开模型/认证页即可直接看到徽章数值，不必先手动刷新。
+  useProviderUsageStartupWarmup();
 
   // Guard: hide git drawer when git management is disabled.
   // Equivalent to: if (panel === "git" && !settings.enableGitManagement) return
@@ -1495,8 +1509,28 @@ export function App() {
       focusProject: (projectId) => {
         selectProjectCommand(projectId);
       },
+      // 文件夹右键打开未收录目录：弹确认框，确认后按路径入库并跳到该项目的引导页。
+      focusOpenProjectPath: (path: string) => {
+        overlays.showConfirm({
+          title: t("app.openFolderConfirmTitle"),
+          message: t("app.openFolderConfirmMessage", { path }),
+          confirmLabel: t("app.openFolderConfirmAdd"),
+          onConfirm: () => {
+            void api.projects
+              .addByPath(path)
+              .then((project) => {
+                selectProjectCommand(project.id);
+                showToast(t("app.openFolderAdded", { name: project.name }));
+              })
+              .catch((error) => {
+                showToast(error instanceof Error ? error.message : String(error), 5000, "error");
+              })
+              .finally(() => overlays.clearConfirm());
+          },
+        });
+      },
     });
-  }, [workspaceChrome, selectSessionCommand, selectProjectCommand]);
+  }, [workspaceChrome, selectSessionCommand, selectProjectCommand, overlays, showToast]);
 
   /** 新建会话：选中 + 登记常驻 Tab（chrome 与 selection 在 App 边界组合） */
   const createSessionDraftWithTab = useCallback(
@@ -1578,11 +1612,11 @@ export function App() {
         throw new Error(t("app.guideBootstrapUnavailable"));
       }
       const promotion = (async () => {
-        // 引导页 picker 无 record 分支把模型选择存进 localStorage；创建时作为
-        // 「偏好」交给主进程解析（优先级：显式默认 > 偏好 > 上次使用 > 空），
-        // 与底栏显示同源，避免显示/套用分叉。思考级别不随偏好传入——
-        // 一律走默认档位（settings.defaultThinkingLevel），由解析器决定。
+        // 引导页 picker 无 record 分支把显式选择存进 localStorage；创建时将模型交给
+        // 主进程校验、将思考档位作为启动偏好带入。底栏展示和真实会话创建读取同一份值，
+        // 避免出现「菜单看似切换，首次发送后又回到默认档位」。
         const welcomeModel = readWelcomeModelPreference()?.model;
+        const welcomeThinking = readWelcomeThinkingPreference()?.thinkingLevel;
         // 统一创建 draft 会话（Chat 项目也走普通会话、可保存）：创建不拉 pi，
         // selectSessionCommand 同步切页、立即进入会话页；匿名会话仅保留给侧栏
         // 「新建临时对话」入口（createAnonymousSessionWithTab）。
@@ -1593,6 +1627,7 @@ export function App() {
           title: effectiveAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
           backend: effectiveAgentBackend,
           ...(welcomeModel ? { welcomeModel } : {}),
+          ...(welcomeThinking ? { thinkingLevel: welcomeThinking } : {}),
         });
         upsertSession(session);
         // 引导页发送时 useSessionSend 已把 user 消息乐观写入虚拟会话 cache；
@@ -1711,7 +1746,10 @@ export function App() {
       navigateTo(url);
     },
     onTrustRequest: overlays.setTrustRequest,
-    onFocusTarget: (target: { sessionId: string }) => {
+    // 主进程焦点目标（通知点击/右键打开项目）：sessionId 走旧链路选中会话；
+    // projectId/projectPath 由 useSessionWorkspaceChrome 的订阅处理（本回调只透传不重复消费）。
+    onFocusTarget: (target: FocusTargetPayload) => {
+      if (!("sessionId" in target)) return;
       const session = store.get(sessionRecordByIdAtomFamily(target.sessionId));
       if (session) selectSessionCommand(session.projectId, session.id, false);
     },
@@ -3053,6 +3091,7 @@ export function App() {
         if (source === "codex") return openCodexImport(project);
         if (source === "claude") return openClaudeImport(project);
         if (source === "zcode") return openZCodeImport(project);
+        if (source === "workbuddy") return openWorkBuddyImport(project);
         return openOpenCodeImport(project);
       },
       manageResources: (project) => setProjectResourcesProject(project),
@@ -3200,8 +3239,8 @@ export function App() {
       settingsPinnedSessionIds={settings.pinnedSessionIds}
       settingsLoaded={settingsLoaded}
       onExpandedProjectsReady={() => setExpandedProjectsReady(true)}
-      // 官网主页是品牌入口，强制系统浏览器打开：不受「链接打开方式=内置浏览器」设置影响
-      onOpenHomepage={() => void api.app.openExternal("https://ayuayue.github.io/PiDeck/", true)}
+      // 关于弹框：版本号/官网/GitHub 链接数据来自 AppInfo IPC（上方 useEffect 已拉取）
+      appInfo={appInfo}
       // 底栏主题按钮：点击在浅/暗之间翻转；跟随系统/跟随时间退出自动时按当前实际明暗翻到对面，
       // 保证每次点击都有可见变化。落库后只合并 theme 字段，data-theme 由外观 effect 依赖 settings.theme 重应用。
       themeMode={settings.theme}
@@ -3356,6 +3395,22 @@ export function App() {
     ? terminalOwnerKey(terminalOwner)
     : undefined;
 
+  // 分屏栏分支变化后的全局同步：只采纳“栏项目 == 当前聚焦项目”的变化，
+  // 非聚焦栏（另一个 worktree）切分支不得污染右侧 Git 抽屉/侧栏的聚焦态；
+  // 聚焦项目自己的分支早期离开（checkout 后被 4s 轮询追平）也不至于闪回旧值。
+  const handleProjectGitChanged = useCallback(
+    (projectId: string, info: GitBranchInfo) => {
+      if (projectId !== activeProjectIdRef.current) return;
+      setGitInfo((current) =>
+        current.current === info.current &&
+        current.branches.join("\n") === info.branches.join("\n")
+          ? current
+          : info,
+      );
+    },
+    [],
+  );
+
   const sessionPaneServices = useMemo(
     () => ({
       isLanWeb,
@@ -3389,8 +3444,7 @@ export function App() {
       restartingAgentId,
       sessionDurationByAgent,
       activeProjectId,
-      gitInfo,
-      onSwitchBranch: switchBranch,
+      onProjectGitChanged: handleProjectGitChanged,
       showThinking: settings.showThinking,
       validCommandNames,
       validFilePaths,
@@ -3420,12 +3474,11 @@ export function App() {
       displayAgents,
       editMessage,
       enqueueSessionPrompt,
-      switchBranch,
+      handleProjectGitChanged,
       ensureSessionForSend,
       environmentDialog,
       forkFromUserMessage,
       forkingMessageId,
-      gitInfo,
       handleOpenLinkedFile,
       insertQuickPrompt,
       isLanWeb,
@@ -4088,6 +4141,7 @@ export function App() {
     {claudeImportProject && <ImportOverlayHost kind="claude" project={claudeImportProject} controller={claudeImportController} onClose={() => setClaudeImportProject(null)} />}
     {openCodeImportProject && <ImportOverlayHost kind="opencode" project={openCodeImportProject} controller={openCodeImportController} onClose={() => setOpenCodeImportProject(null)} />}
     {zcodeImportProject && <ImportOverlayHost kind="zcode" project={zcodeImportProject} controller={zcodeImportController} onClose={() => setZcodeImportProject(null)} />}
+    {workbuddyImportProject && <ImportOverlayHost kind="workbuddy" project={workbuddyImportProject} controller={workbuddyImportController} onClose={() => setWorkbuddyImportProject(null)} />}
 
     {/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}
     <ScratchPadOverlay controller={scratchPad} />

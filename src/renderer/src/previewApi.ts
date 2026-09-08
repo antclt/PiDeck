@@ -243,6 +243,11 @@ export function createPreviewApi(): PiDesktopApi {
 	};
 	return {
 		clipboard: clipboardStub,
+		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持
+		shellMenu: {
+			getState: async () => ({ supported: false, registered: false }),
+			setEnabled: async () => ({ supported: false, registered: false }),
+		},
 		// 进程监控预览桩：返回空快照，仅供预览模式不崩溃
 		system: {
 			getProcessMetrics: async () => ({
@@ -332,6 +337,7 @@ export function createPreviewApi(): PiDesktopApi {
 		projects: {
 			list: async () => projects,
 			add: async () => projects[0],
+			addByPath: async () => projects[0],
 			remove: async () => projects,
 			reorder: async (projectIds) => {
 				projects.sort((a, b) => projectIds.indexOf(a.id) - projectIds.indexOf(b.id));
@@ -748,6 +754,10 @@ export function createPreviewApi(): PiDesktopApi {
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
 		zcodeSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
+		workbuddySessions: {
 			scan: async () => [],
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
@@ -1225,8 +1235,8 @@ export function createPreviewApi(): PiDesktopApi {
 				error: "preview",
 			}),
 			getUsageProbes: async () => ({ recognized: null, templates: [], errors: [] }),
-			usageRecognized: async () => ({ recognized: false }),
 			saveUsageProbes: async () => ({ ok: false, error: "preview" }),
+			listUsageProbeStates: async () => ({ providers: {}, errors: [] }),
 			testUsageProbe: async () => ({ success: false, error: "preview" }),
 			installUsageSkill: async () => ({ success: false, error: "preview" }),
 			installImageGenSkill: async () => ({ success: false, error: "preview" }),

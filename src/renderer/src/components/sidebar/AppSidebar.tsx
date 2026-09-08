@@ -2,10 +2,11 @@ import React, { useRef } from "react";
 import { useSetAtom } from "jotai";
 import { PanelLeft } from "lucide-react";
 import { SidebarContent, type SidebarActions } from "./SidebarContent";
-import type { AppThemeMode, WorktreeEntry } from "../../../../shared/types";
+import type { AppInfo, AppThemeMode, WorktreeEntry } from "../../../../shared/types";
 import { useSidebarController } from "../../hooks/useSidebarController";
 import type { SidebarNavTab } from "../../utils/sidebarNavTab";
 import { BrandLockup } from "../app/AppParts";
+import { AboutPopover } from "../app/AboutPopover";
 import { settingsOpenAtom } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
 import { Button } from "../ui-shadcn/button";
@@ -24,7 +25,8 @@ interface AppSidebarProps {
   /** 「新建会话」：打开初始引导页（居中输入框 + 项目下拉切换），由 App 提供。 */
   onOpenNewSession: () => void;
   onOpenFeedback: () => void;
-  onOpenHomepage: () => void;
+  /** 关于弹框（版本/官网/GitHub 链接）数据，由 App 从 AppInfo IPC 拉取后提供。 */
+  appInfo: AppInfo;
   /** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
   themeMode: AppThemeMode;
   onToggleTheme: () => void;
@@ -92,9 +94,24 @@ export function AppSidebar(props: AppSidebarProps) {
       onOpenNewSession={props.onOpenNewSession}
       chrome={<>
         <div className="list-toolbar flex h-10 shrink-0 items-center gap-1 border-b border-border/40 pr-2.5 pl-[max(0.625rem,var(--traffic-lights-width,0px))]">
-          <div className="app-badge flex min-w-0 flex-1 items-center">
-            <BrandLockup />
-          </div>
+          <AboutPopover appInfo={props.appInfo}>
+            <div
+              className="app-badge flex min-w-0 flex-1 cursor-pointer items-center justify-center pl-5"
+              role="button"
+              tabIndex={0}
+              aria-label={t("about.title")}
+              title={t("about.clickHint")}
+              onKeyDown={(e) => {
+                // 键盘可达性：Enter/空格等价点击，触发 MorphPopoverTrigger 注入的 onClick
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.currentTarget.click();
+                }
+              }}
+            >
+              <BrandLockup />
+            </div>
+          </AboutPopover>
           <Button
             type="button"
             variant="ghost"
@@ -110,7 +127,6 @@ export function AppSidebar(props: AppSidebarProps) {
       </>}
       onOpenSettings={() => setSettingsOpen(true)}
       onOpenFeedback={props.onOpenFeedback}
-      onOpenHomepage={props.onOpenHomepage}
       themeMode={props.themeMode}
       onToggleTheme={props.onToggleTheme}
     />

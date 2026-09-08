@@ -1,4 +1,4 @@
-import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, List, Plus, RefreshCw, Settings2, UserPlus } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, Plus, RefreshCw } from "lucide-react";
 import type { DragEvent } from "react";
 import type { Project, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
@@ -15,7 +15,6 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
-	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "../ui-shadcn/dropdown-menu";
 import { cn } from "../../lib/utils";
@@ -254,10 +253,17 @@ export function ProjectTree(props: {
     const sessions = props.controller.catalog.sessionsByProject[project.id] ?? [];
     return (
       <section key={project.id} className="mb-4" aria-label={t("app.chatProject")} role="treeitem" aria-expanded={!collapsed}>
-        {/* 分组标题栏：左侧「聊天」标题，右侧 = 「+ 新建会话」+ 折叠（高频操作外露）
-            + 「⋯ 更多操作」下拉（匿名会话/目录设置收纳其中）。
-            新建与折叠都是最常用入口，直接外露；匿名会话使用率低，收进更多菜单。 */}
-        <div className="flex items-center justify-between px-1 pb-1">
+        {/* 聊天标题栏：左侧「聊天」标题，右侧 = 「+ 新建会话」+ 折叠（高频操作外露）
+            + 「⋯ 更多操作」（完整项目菜单，新建/定位/会话管理/目录设置）。
+            新建与折叠都是最常用入口，直接外露；其余操作收进完整菜单。 */}
+        <div
+          className="flex items-center justify-between px-1 pb-1"
+          // 右键与「⋯」同款完整项目菜单：让 Chat 项目行获得与工作区项目一致的操作入口
+          onContextMenu={(event) => {
+            event.preventDefault();
+            void props.controller.openMenu({ kind: "project", projectId: project.id, x: event.clientX, y: event.clientY });
+          }}
+        >
           <span className="text-caption font-medium text-muted-foreground">{t("app.sidebarChats")}</span>
           <div className="flex items-center gap-0.5">
             <Button
@@ -284,38 +290,24 @@ export function ProjectTree(props: {
             >
               <ChevronsDownUp size={14} aria-hidden="true" />
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                  aria-label={t("sidebar.moreActions")}
-                  title={t("sidebar.moreActions")}
-                >
-                  <Ellipsis size={14} aria-hidden="true" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={4} className="min-w-36">
-                <DropdownMenuItem onSelect={() => void props.actions.sessions.createAnonymous(project.id)}>
-                  <UserPlus className="size-3.5" aria-hidden="true" />
-                  {t("app.newAnonymousSession")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                {/* 会话管理：与项目会话管理同款弹窗（含归档/恢复/删除）；Chat 是内置项目同样适用 */}
-                <DropdownMenuItem onSelect={() => { props.controller.openSessionManager(project.id); }}>
-                  <List className="size-3.5" aria-hidden="true" />
-                  {t("menu.manageSessions")}
-                </DropdownMenuItem>
-                {props.actions.projects.changeChatPath && (
-                  <DropdownMenuItem onSelect={() => { void props.actions.projects.changeChatPath?.(project); }}>
-                    <Settings2 className="size-3.5" aria-hidden="true" />
-                    {t("app.chatProjectSettings")}
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* 三个点：与项目行同款完整菜单，不再单独维护精简版下拉；
+                 Chat 项目无意义的操作（重命名/资源管理/工作区/导入/移除）
+                 由 ProjectContextMenu 内 kind === 'chat' 分支统一过滤 */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label={t("sidebar.moreActions")}
+              title={t("sidebar.moreActions")}
+              onClick={(event) => {
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                void props.controller.openMenu({ kind: "project", projectId: project.id, x: rect.right, y: rect.bottom });
+              }}
+            >
+              <Ellipsis size={14} aria-hidden="true" />
+            </Button>
           </div>
         </div>
         {!collapsed && (

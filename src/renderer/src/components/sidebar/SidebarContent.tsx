@@ -45,7 +45,7 @@ export type SidebarActions = {
     reorder: (sourceProjectId: string, targetProjectId: string) => Promise<void>;
     reveal: (project: Project) => Promise<void>;
     openWithEditor: (project: Project) => void;
-    importSessions: (project: Project, source: "codex" | "claude" | "opencode" | "zcode") => void;
+    importSessions: (project: Project, source: "codex" | "claude" | "opencode" | "zcode" | "workbuddy") => void;
     manageResources: (project: Project) => void;
     toggleWorktree: (project: Project) => Promise<void>;
     copyPath: (project: Project) => Promise<void>;
@@ -131,7 +131,6 @@ export type SidebarContentProps = {
   onOpenNewSession?: () => void;
   onOpenSettings?: () => void;
   onOpenFeedback?: () => void;
-  onOpenHomepage?: () => void;
   /** 底栏主题切换：当前主题模式 + 点击循环（浅色→暗色→跟随系统），由 App 提供。 */
   themeMode?: AppThemeMode;
   onToggleTheme?: () => void;
@@ -452,9 +451,6 @@ export function SidebarContent(props: SidebarContentProps) {
               <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>
             </DockItem>
             <DockItem>
-              <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("app.homepage")} aria-label={t("app.homepage")} onClick={props.onOpenHomepage}><Globe className="size-4" /></Button>
-            </DockItem>
-            <DockItem>
               <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={themeToggleTitle} aria-label={themeToggleTitle} onClick={props.onToggleTheme}><ThemeModeIcon className="size-4" /></Button>
             </DockItem>
           </Dock>
@@ -484,6 +480,7 @@ export function SidebarContent(props: SidebarContentProps) {
           onImportClaudeSessions={() => { actions.projects.importSessions(menuProject, "claude"); controller.closeMenu(); }}
           onImportOpenCodeSessions={() => { actions.projects.importSessions(menuProject, "opencode"); controller.closeMenu(); }}
           onImportZCodeSessions={() => { actions.projects.importSessions(menuProject, "zcode"); controller.closeMenu(); }}
+          onImportWorkBuddySessions={() => { actions.projects.importSessions(menuProject, "workbuddy"); controller.closeMenu(); }}
           onManageProjectResources={() => { actions.projects.manageResources(menuProject); controller.closeMenu(); }}
           onManageSessions={() => { controller.openSessionManager(menuProject.id); controller.closeMenu(); }}
           onFilterSessions={() => { controller.openSourceFilter(menuProject.id, menu.x, menu.y + 20); controller.closeMenu(); }}
@@ -499,6 +496,7 @@ export function SidebarContent(props: SidebarContentProps) {
             controller.closeMenu();
           } : undefined}
           onRemoveProject={() => { void actions.projects.remove(menuProject); controller.closeMenu(); }}
+          onChatSettings={() => { if (actions.projects.changeChatPath) void actions.projects.changeChatPath(menuProject); controller.closeMenu(); }}
         />
       )}
       {menuAgent && menu?.kind === "agent" && (
