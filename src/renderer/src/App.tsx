@@ -531,14 +531,18 @@ export function App() {
     setOpenCodeImportProject,
     zcodeImportProject,
     setZcodeImportProject,
+    workbuddyImportProject,
+    setWorkbuddyImportProject,
     codexImportController,
     claudeImportController,
     openCodeImportController,
     zcodeImportController,
+    workbuddyImportController,
     openCodexImport,
     openClaudeImport,
     openOpenCodeImport,
     openZCodeImport,
+    openWorkBuddyImport,
   } = useImportFlow({
     setProjectMenu: () => undefined,
     refreshProjectSessions,
@@ -551,6 +555,8 @@ export function App() {
     importOpenCodeSessionsApi: api.openCodeSessions.import,
     scanZCodeSessions: api.zcodeSessions.scan,
     importZCodeSessionsApi: api.zcodeSessions.import,
+    scanWorkBuddySessions: api.workbuddySessions.scan,
+    importWorkBuddySessionsApi: api.workbuddySessions.import,
     t,
   });
 
@@ -3089,6 +3095,7 @@ export function App() {
         if (source === "codex") return openCodexImport(project);
         if (source === "claude") return openClaudeImport(project);
         if (source === "zcode") return openZCodeImport(project);
+        if (source === "workbuddy") return openWorkBuddyImport(project);
         return openOpenCodeImport(project);
       },
       manageResources: (project) => setProjectResourcesProject(project),
@@ -4138,6 +4145,7 @@ export function App() {
     {claudeImportProject && <ImportOverlayHost kind="claude" project={claudeImportProject} controller={claudeImportController} onClose={() => setClaudeImportProject(null)} />}
     {openCodeImportProject && <ImportOverlayHost kind="opencode" project={openCodeImportProject} controller={openCodeImportController} onClose={() => setOpenCodeImportProject(null)} />}
     {zcodeImportProject && <ImportOverlayHost kind="zcode" project={zcodeImportProject} controller={zcodeImportController} onClose={() => setZcodeImportProject(null)} />}
+    {workbuddyImportProject && <ImportOverlayHost kind="workbuddy" project={workbuddyImportProject} controller={workbuddyImportController} onClose={() => setWorkbuddyImportProject(null)} />}
 
     {/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}
     <ScratchPadOverlay controller={scratchPad} />

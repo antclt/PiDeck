@@ -279,6 +279,7 @@ import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
 import { ClaudeSessionImporter } from "./sessions/ClaudeSessionImporter";
 import { OpenCodeSessionImporter } from "./sessions/OpenCodeSessionImporter";
 import { ZCodeSessionImporter } from "./sessions/ZCodeSessionImporter";
+import { WorkBuddySessionImporter } from "./sessions/WorkBuddySessionImporter";
 import { SettingsStore } from "./settings/SettingsStore";
 import { SecurityStore } from "./security/SecurityStore";
 import { applyDesktopProxy } from "./settings/DesktopProxy";
@@ -403,6 +404,7 @@ let codexSessionImporter: CodexSessionImporter;
 let claudeSessionImporter: ClaudeSessionImporter;
 let openCodeSessionImporter: OpenCodeSessionImporter;
 let zcodeSessionImporter: ZCodeSessionImporter;
+let workbuddySessionImporter: WorkBuddySessionImporter;
 let settingsStore: SettingsStore;
 let securityStore: SecurityStore;
 let worktreeService: WorktreeService;
@@ -2509,6 +2511,7 @@ function registerIpc() {
 		claudeSessionImporter,
 		openCodeSessionImporter,
 		zcodeSessionImporter,
+		workbuddySessionImporter,
 		appLogger,
 		terminalManager,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
@@ -3069,6 +3072,7 @@ app.whenReady().then(async () => {
 	claudeSessionImporter = new ClaudeSessionImporter(mainCopy);
 	openCodeSessionImporter = new OpenCodeSessionImporter(mainCopy);
 	zcodeSessionImporter = new ZCodeSessionImporter(mainCopy);
+	workbuddySessionImporter = new WorkBuddySessionImporter(mainCopy);
 	settingsStore = new SettingsStore();
 	// 安全管理：配置 owner + 策略快照写入（供 pi-deck-security-gate 扩展消费）
 	securityStore = new SecurityStore({

@@ -42,6 +42,8 @@ import type {
 	OpenCodeSessionSummary,
 	ZCodeImportReport,
 	ZCodeSessionSummary,
+	WorkBuddyImportReport,
+	WorkBuddySessionSummary,
 	ConfigFileDiagnostic,
 	DraftMeta,
 	CreateSessionDraftInput,
@@ -916,6 +918,18 @@ const api = {
 				projectId,
 				sourcePaths,
 			) as Promise<ZCodeImportReport>,
+	},
+	workbuddySessions: {
+		scan: (projectId: string) =>
+			ipcRenderer.invoke(ipcChannels.workbuddySessionsScan, projectId) as Promise<
+				WorkBuddySessionSummary[]
+			>,
+		import: (projectId: string, sourcePaths: string[]) =>
+			ipcRenderer.invoke(
+				ipcChannels.workbuddySessionsImport,
+				projectId,
+				sourcePaths,
+			) as Promise<WorkBuddyImportReport>,
 	},
 	git: {
 		/** 扫描项目内独立仓库；单仓项目通常只返回根仓库 */
