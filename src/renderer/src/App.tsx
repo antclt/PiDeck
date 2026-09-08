@@ -1516,16 +1516,19 @@ export function App() {
           message: t("app.openFolderConfirmMessage", { path }),
           confirmLabel: t("app.openFolderConfirmAdd"),
           onConfirm: () => {
-            void api.projects
-              .addByPath(path)
-              .then((project) => {
+            void (async () => {
+              try {
+                const project = await api.projects.addByPath(path);
+                // 与对话框添加同一刷新链路：侧栏清单立即出现新项目（主进程广播为兜底）。
+                await refreshProjects();
                 selectProjectCommand(project.id);
                 showToast(t("app.openFolderAdded", { name: project.name }));
-              })
-              .catch((error) => {
+              } catch (error) {
                 showToast(error instanceof Error ? error.message : String(error), 5000, "error");
-              })
-              .finally(() => overlays.clearConfirm());
+              } finally {
+                overlays.clearConfirm();
+              }
+            })();
           },
         });
       },
