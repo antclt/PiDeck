@@ -50,7 +50,9 @@ export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
    * 布局 resize/动画/程序化定位不会触发——时间线据此区分「浏览历史」与「布局滚动」，
    * 修复内容收缩 clamp 被误判为用户上滑导致脱离吸底的问题。
    */
-  onUserScrollIntent?: (intent: "up" | "down") => void;
+  /** 引擎上报的真实用户滚动意图（wheel/触摸/滚动条）。source 区分真实输入与
+   *  scroll 派生（程序化滚动抑制），controller 据此决定是否终止在途定位动画。 */
+  onUserScrollIntent?: (intent: "up" | "down", source: "scroll" | "input") => void;
   /** Accessible label for the scrollable transcript. */
   label?: string;
   /** Marks the transcript as waiting for more streamed content. */

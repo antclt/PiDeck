@@ -284,8 +284,15 @@ export type SessionTimelineController = {
   /**
    * 引擎上报的用户滚动意图（wheel/触摸/滚动条真实输入）：
    * 近顶部自动扩窗/预取只消费该意图，布局 resize/clamp 不算用户上滑。
+   * source 区分真实输入与 scroll 派生：只有真实输入才终止在途定位动画。
    */
-  setUserScrollIntent: (intent: "up" | "down") => void;
+  setUserScrollIntent: (intent: "up" | "down", source?: "scroll" | "input") => void;
+  /**
+   * 新 run 开始（busy 边沿）：若在途 settle 定位动画（系统态移动视口），
+   * 取消并恢复跟随贴底，让新 run 流式从底部继续；无在途动画（用户正读历史）
+   * 则不动，保持不抢用户操作。
+   */
+  cancelSettledRepositionForNewRun: () => void;
   /**
    * 挂到 MessageScroller 的 stick-to-bottom 引擎 API（回底弹簧）。
    * 未挂上时 scrollToBottom 退化为原生 scrollTo。
@@ -696,6 +703,10 @@ export function useSessionTimelineController(options: {
    */
   const invalidateHistoryBrowsing = useCallback(() => {
     historyBrowseGenerationRef.current += 1;
+    // 历史浏览事务结束（回底/重锁）同样作废在途的「最终回答安静定位」动画：
+    // 回底后视口应停在底部，不能让动画把刚回底的位置再拉到 30% 高度。
+    settleScrollCancelRef.current?.();
+    settleScrollCancelRef.current = undefined;
     pendingExpandTurnsRef.current = 0;
     if (expandBatchFrameRef.current !== undefined) {
       window.cancelAnimationFrame(expandBatchFrameRef.current);
@@ -714,6 +725,10 @@ export function useSessionTimelineController(options: {
     // 先解引擎：只改 React autoScroll 会留下 isAtBottom=true，扩窗增高时 RO 钉底。
     // autoScroll 已是 false 也要 stopScroll——两套状态可能已经分叉。
     scrollerScrollApiRef.current?.stopScroll();
+    // 进入历史浏览（用户上滚/点「显示更早」）：在途的定位动画立即作废，
+    // 程序化滚动不得继续覆盖用户正在做的滚动。
+    settleScrollCancelRef.current?.();
+    settleScrollCancelRef.current = undefined;
     if (!autoScrollRef.current) return;
     autoScrollRef.current = false;
     setAutoScroll(false);
@@ -896,6 +911,18 @@ export function useSessionTimelineController(options: {
     if (!autoScrollRef.current) return;
     const timeline = timelineRef.current;
     if (!timeline) return;
+    // 几何兜底（最终防线）：即使 autoScroll 状态因竞态尚未刷新（引擎逃逸识别/
+    // onFollowChange 传播延迟，或输入设备未被引擎识别为真实滚动），视口已物理
+    // 离开实时尾部（距底 > 70px 近底带）就视为用户正在读历史——定位只对
+    // 「确实还在底部」的会话生效，不得把用户手动位置拉回 30%。
+    // 这是状态驱动的真正含义：以物理几何为准，不依赖瞬时状态传播。
+    if (
+      timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight >
+      SETTLED_TURN_KEEP_BOTTOM_EPSILON_PX
+    ) {
+      settleScrollCancelRef.current?.();
+      return;
+    }
     // 只认最终回答容器（data-final-answer=runId）：手动停止/异常中断的 run 只有思考与
     // 工具调用、没有回答 → 该属性不存在 → 直接放弃收起（保持现状跟随）。
     // 若回退到 data-message-id=runId 把 run 行当锚，会误把视口拽离底部并弹出回底按钮，
@@ -939,25 +966,29 @@ export function useSessionTimelineController(options: {
 
     let cancelled = false;
     let cancelAnimation: () => void = () => undefined;
+    // 不再监听全局输入事件（鼠标/键盘/滚轮/触摸）——用户输入本身不参与取消。
+    // 定位动画只由状态边界终止：
+    // - 引擎确认的真实 wheel/touch 输入（setUserScrollIntent source="input"）；
+    // - 滚动条拖动（下方 pointerdown 命中滚动条区域）；
+    // - 进入历史浏览（escapeAutoScroll）；
+    // - 回底/下滚重锁/切会话/新一轮（invalidateHistoryBrowsing / cancelSettledRepositionForNewRun）。
+    const onScrollbarPointerDown = (event: PointerEvent) => {
+      // clientWidth 不含滚动条；落在 clientWidth 右侧即命中滚动条 gutter。
+      const rect = timeline.getBoundingClientRect();
+      if (event.clientX >= rect.left + timeline.clientWidth) interrupt();
+    };
     const interrupt = () => {
       if (cancelled) return;
       cancelled = true;
+      timeline.removeEventListener("pointerdown", onScrollbarPointerDown, true);
       programmaticScrollUntilRef.current = 0;
       programmaticScrollRef.current = false;
       cancelAnimation();
-      cleanupListeners();
       settleScrollCancelRef.current = undefined;
     };
-    const cleanupListeners = () => {
-      window.removeEventListener("wheel", interrupt, true);
-      window.removeEventListener("touchstart", interrupt, true);
-      window.removeEventListener("pointerdown", interrupt, true);
-      window.removeEventListener("keydown", interrupt, true);
-    };
-    window.addEventListener("wheel", interrupt, { passive: true, capture: true });
-    window.addEventListener("touchstart", interrupt, { passive: true, capture: true });
-    window.addEventListener("pointerdown", interrupt, { capture: true });
-    window.addEventListener("keydown", interrupt, { capture: true });
+    // 滚动条拖动取消：用命中区域判定而不是几何分叉——内容收缩 clamp 也会改变
+    // scrollTop，几何启发式会把 clamp 误判为用户接管而取消定位动画（2026-09 修正）。
+    timeline.addEventListener("pointerdown", onScrollbarPointerDown, true);
 
     let completed = false;
     markProgrammaticScroll(duration + 120);
@@ -966,7 +997,7 @@ export function useSessionTimelineController(options: {
       isCancelled: () => cancelled,
       onComplete: () => {
         completed = true;
-        cleanupListeners();
+        timeline.removeEventListener("pointerdown", onScrollbarPointerDown, true);
         programmaticScrollUntilRef.current = 0;
         programmaticScrollRef.current = false;
         settleScrollCancelRef.current = undefined;
@@ -983,6 +1014,30 @@ export function useSessionTimelineController(options: {
     setAutoScroll(following);
     setShowScrollToBottom(!following);
   }, [invalidateHistoryBrowsing]);
+
+  /**
+   * 新 run 开始（busy 边沿）时调用：若在途 settle 定位动画（系统态移动视口），
+   * 取消动画并恢复跟随贴底——否则动画飞行中发送新一轮，视口会永久停在旧 run
+   * 的 30% 锚点：新 run 流式在视口外展开且不跟随，结束后自身 settle 也不 arm
+   * （F1，2026-09 对抗审查）。无在途动画（用户正在读历史）则不打扰。
+   */
+  const cancelSettledRepositionForNewRun = useCallback(() => {
+    if (!settleScrollCancelRef.current) return;
+    settleScrollCancelRef.current?.();
+    settleScrollCancelRef.current = undefined;
+    // 恢复跟随贴底（系统态取消，区别于用户态取消——用户读历史不恢复）。
+    scrollerScrollApiRef.current?.stopScroll();
+    autoScrollRef.current = true;
+    setAutoScroll(true);
+    setShowScrollToBottom(false);
+    const api = scrollerScrollApiRef.current;
+    if (api) {
+      void api.scrollToBottom({ animation: "instant" });
+      return;
+    }
+    const timeline = timelineRef.current;
+    if (timeline) timeline.scrollTop = timeline.scrollHeight;
+  }, []);
 
   /** 计算垫片高度：让「用户消息顶 + 视口高 == 内容总高」，滚到底时用户消息正好钉在顶部。 */
 
@@ -1332,10 +1387,17 @@ export function useSessionTimelineController(options: {
   // 历史扩窗只消费 stick 引擎确认的用户意图。普通 scroll 事件仍由
   // handleTimelineScroll 保存锚点，但不再拥有跟随/浏览状态的切换权限：内容收缩、
   // ResizeObserver、动画和程序化定位因此不能借 scrollTop 变化触发历史呈现。
-  const setUserScrollIntent = useCallback((intent: "up" | "down") => {
+  const setUserScrollIntent = useCallback((intent: "up" | "down", source?: "scroll" | "input") => {
     if (userScrollIntentFrameRef.current !== undefined) {
       window.cancelAnimationFrame(userScrollIntentFrameRef.current);
       userScrollIntentFrameRef.current = undefined;
+    }
+    // 引擎确认的真实 wheel/touch 输入（source="input"）：立即终止在途的
+    // 「最终回答安静定位」动画——动画自激发的 scroll 派生意图带 source="scroll"，
+    // 且被 programmaticScroll 窗口抑制，不会把自己取消掉（状态驱动取消）。
+    if (source === "input") {
+      settleScrollCancelRef.current?.();
+      settleScrollCancelRef.current = undefined;
     }
     // down 只取消同帧尚未消费的 up；实际重锁由 stick 引擎决定，并经
     // setAutoScrollFromScroller 进入 invalidateHistoryBrowsing。
@@ -1497,6 +1559,8 @@ export function useSessionTimelineController(options: {
     scrollToBottom,
     scrollTimelineBy,
     scrollFinalAnswerToUpperMiddle,
+    /** 新 run 开始（busy 边沿）：取消在途 settle 定位动画并恢复跟随贴底。 */
+    cancelSettledRepositionForNewRun,
     /** 滚动回调：维护会话切换用的滚动锚点（rAF 合并，不触发渲染） */
     handleTimelineScroll,
     autoScroll,

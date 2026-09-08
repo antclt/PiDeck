@@ -26,7 +26,7 @@ test("escape tolerance band keeps near-bottom scrolls attached", () => {
   // 才上报，容差带内/守卫带内的轻微上滚不算浏览（防与内容收缩 clamp 叠加误扩窗）。
   assert.match(
     engineSource,
-    /if \(\s*distanceFromBottom > AT_BOTTOM_TOLERANCE_PX &&[\s\S]*?!isWithinGrowthGuardBand\(distanceFromBottom, state\)\s*\) \{\s*reportUserIntent\("up"\);\s*setEscapedFromLock\(true\);\s*setIsAtBottom\(false\);/,
+    /if \(\s*distanceFromBottom > AT_BOTTOM_TOLERANCE_PX &&[\s\S]*?!isWithinGrowthGuardBand\(distanceFromBottom, state\)\s*\) \{\s*reportUserIntent\("up", "scroll"\);\s*setEscapedFromLock\(true\);\s*setIsAtBottom\(false\);/,
   );
   // wheel 逃逸同样带距离守卫（贴底时向上滚轮无位移，不算逃逸意图）
   assert.match(

@@ -59,6 +59,14 @@ const RETAIN_ANIMATION_DURATION_MS = 350;
  *  导致运行中脱离吸底、回底按钮连点无效的问题（见 scrollHistoryPolicy）。 */
 export type ScrollUserIntent = "up" | "down";
 
+/**
+ * 用户意图的来源：
+ * - "input"：真实 wheel/touch 输入（浏览器默认滚动尚未发生），unambiguous；
+ * - "scroll"：scroll 事件派生的方向判断（可能是本组件程序化滚动/动画自激发的
+ *   scrollTop 变化，必须由 programmaticScroll 窗口抑制，不能当作真实用户输入）。
+ */
+export type ScrollIntentSource = "scroll" | "input";
+
 /** 下滚输入是否可直接重锁（纯函数，可单测）：物理距底 <= 容差带即重锁。
  *  贴底/近底状态下用户继续下滚不会产生位移，浏览器不派发 scroll 事件，
  *  handleScroll 的重锁路径（isScrollingDown）收不到信号——「已物理到底但逻辑
@@ -115,7 +123,7 @@ export interface StickToBottomOptions extends SpringAnimation {
    * 时间线 controller 据此把「用户浏览历史」与「布局滚动」分开，
    * 修复 clamp scrollTop 被误判为上滑导致运行中脱离吸底的问题。
    */
-  onUserIntent?: (intent: ScrollUserIntent) => void;
+  onUserIntent?: (intent: ScrollUserIntent, source: ScrollIntentSource) => void;
 }
 
 export type ScrollToBottomOptions =
@@ -264,8 +272,8 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
    * 每次已确认的用户滚动都独立上报。方向不是可去重的状态：
    * 「上滚 → 回底 → 再上滚」是两个不同浏览周期，第二次 up 仍必须通知 controller。
    */
-  const reportUserIntent = useCallback((intent: ScrollUserIntent) => {
-    optionsRef.current?.onUserIntent?.(intent);
+  const reportUserIntent = useCallback((intent: ScrollUserIntent, source: ScrollIntentSource) => {
+    optionsRef.current?.onUserIntent?.(intent, source);
   }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: state intentionally created once
@@ -491,7 +499,7 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
         if (isSelecting()) {
           setEscapedFromLock(true);
           setIsAtBottom(false);
-          reportUserIntent("up");
+          reportUserIntent("up", "scroll");
           return;
         }
         const isScrollingDown = scrollTop > lastScrollTop;
@@ -516,13 +524,13 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
             // 不视为逃逸——「推着推着就不动了」的根因（详见常量注释）。
             !isWithinGrowthGuardBand(distanceFromBottom, state)
           ) {
-            reportUserIntent("up");
+            reportUserIntent("up", "scroll");
             setEscapedFromLock(true);
             setIsAtBottom(false);
           }
         }
         if (isScrollingDown) {
-          reportUserIntent("down");
+          reportUserIntent("down", "scroll");
           setEscapedFromLock(false);
         }
         if (!state.escapedFromLock && state.isNearBottom) {
@@ -570,7 +578,7 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
           ) &&
           !state.animation?.ignoreEscapes
         ) {
-          reportUserIntent("up");
+          reportUserIntent("up", "input");
           setEscapedFromLock(true);
           setIsAtBottom(false);
         }
@@ -579,7 +587,7 @@ export const useStickToBottom = (options: StickToBottomOptions = {}): StickToBot
       if (deltaY > 0) {
         // 下滚是真实用户意图；物理近底时直接重锁（无位移的下滚没有 scroll 事件，
         // handleScroll 的重锁路径收不到信号——已到底但逻辑逃逸的卡死根因）。
-        reportUserIntent("down");
+        reportUserIntent("down", "input");
         const distanceFromBottom =
           scrollRef.current.scrollHeight -
           scrollRef.current.scrollTop -

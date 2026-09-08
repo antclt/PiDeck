@@ -36,12 +36,15 @@ test("down-wheel at physical bottom relocks without requiring a scroll event (bu
 test("engine reports every user wheel/scroll intent, including repeated directions", () => {
   // 方向是一次输入事件，不是可去重的长期状态：up → 回底 → up 的第二个浏览周期
   // 必须再次通知 controller；布局滚动仍由 ResizeObserver/ignoreScrollToTop 守卫过滤。
-  assert.match(engineSource, /reportUserIntent\("up"\)/);
-  assert.match(engineSource, /reportUserIntent\("down"\)/);
-  assert.match(engineSource, /onUserIntent\?: \(intent: ScrollUserIntent\) => void/);
+  assert.match(engineSource, /reportUserIntent\("up", "scroll"|reportUserIntent\("up", "input"/);
+  assert.match(engineSource, /reportUserIntent\("down", "scroll"|reportUserIntent\("down", "input"/);
   assert.match(
     engineSource,
-    /const reportUserIntent = useCallback\(\(intent: ScrollUserIntent\) => \{\s*optionsRef\.current\?\.onUserIntent\?\.\(intent\);/,
+    /onUserIntent\?: \(intent: ScrollUserIntent, source: ScrollIntentSource\) => void/,
+  );
+  assert.match(
+    engineSource,
+    /const reportUserIntent = useCallback\(\(intent: ScrollUserIntent, source: ScrollIntentSource\) => \{\s*optionsRef\.current\?\.onUserIntent\?\.\(intent, source\);/,
   );
   assert.doesNotMatch(engineSource, /lastUserIntentRef/);
   // 下滚重锁在真实下滚输入路径（wheel deltaY>0）直接判定
@@ -60,7 +63,7 @@ test("MessageScroller wires user scroll intent from engine to the timeline contr
   );
   assert.match(
     scrollerSource,
-    /onUserScrollIntent\?: \(intent: "up" \| "down"\) => void/,
+    /onUserScrollIntent\?: \(intent: "up" \| "down", source: "scroll" \| "input"\) => void/,
   );
   assert.match(scrollerSource, /onUserIntent: onUserScrollIntent,/);
   assert.match(timelineSource, /onUserScrollIntent=\{controller\.setUserScrollIntent\}/);

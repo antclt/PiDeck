@@ -33,27 +33,52 @@ async function sendPrompt(window: Page, text: string) {
 }
 
 async function fitNearTopBottom(app: ElectronApplication, window: Page) {
+	// 前置：窗口可能被环境干扰最小化（并发 e2e / OS 行为）。Windows 上最小化/隐藏
+	// 窗口的 setBounds 会被忽略（实测 bounds 恒为初始值），几何永远不达标；先恢复可见。
+	await app.evaluate(({ BrowserWindow }) => {
+		const target = BrowserWindow.getAllWindows()[0];
+		if (!target) return;
+		if (target.isMinimized()) target.restore();
+		if (!target.isVisible()) target.showInactive();
+		if (target.isMaximized()) target.unmaximize();
+	});
+	const measure = async () => {
+		await window.locator(".message-timeline").evaluate((timeline) => {
+			timeline.scrollTop = timeline.scrollHeight;
+		});
+		await window.waitForTimeout(80);
+		return geometry(window);
+	};
+	const inBand = (current: Awaited<ReturnType<typeof geometry>>) =>
+		current.maxTop > 40 && current.maxTop < current.expandThreshold - 20;
+	// 1）先只调 zoom：zoom 不依赖窗口可见性/可调整性（窗口被最小化时 setBounds
+	//    无效但 setZoomFactor 始终生效），CSS 视口随 zoom 缩小即可得到「内容可滚动
+	//    且底部落在自动扩窗阈值内」的几何。
+	for (const zoomFactor of [1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5]) {
+		await app.evaluate(({ BrowserWindow }, z) => {
+			const target = BrowserWindow.getAllWindows()[0];
+			if (!target) return;
+			target.webContents.setZoomFactor(z);
+		}, zoomFactor);
+		await window.waitForTimeout(120);
+		const current = await measure();
+		if (inBand(current)) return current;
+	}
+	// 2）兜底：窗口可见时再扫窗口高度（原有策略，保留以兼容不同内容高度）。
 	for (const zoomFactor of [1, 0.95, 0.9, 0.85]) {
 		for (const height of [700, 760, 820, 880, 940, 1020, 1120, 1220]) {
 			await app.evaluate(({ BrowserWindow }, next) => {
 				const target = BrowserWindow.getAllWindows()[0];
 				if (!target) return;
+				if (target.isMinimized()) target.restore();
+				if (!target.isVisible()) target.showInactive();
 				if (target.isMaximized()) target.unmaximize();
 				target.webContents.setZoomFactor(next.zoomFactor);
 				target.setBounds({ width: 900, height: next.height });
 			}, { height, zoomFactor });
 			await window.waitForTimeout(120);
-			await window.locator(".message-timeline").evaluate((timeline) => {
-				timeline.scrollTop = timeline.scrollHeight;
-			});
-			await window.waitForTimeout(80);
-			const current = await geometry(window);
-			if (
-				current.maxTop > 40 &&
-				current.maxTop < current.expandThreshold - 20
-			) {
-				return current;
-			}
+			const current = await measure();
+			if (inBand(current)) return current;
 		}
 	}
 	throw new Error(`Could not fit near-top bottom geometry: ${JSON.stringify(await geometry(window))}`);
@@ -176,6 +201,11 @@ test("go-bottom survives shrink clamp; real browsing still expands and relocks",
 	await expect(bottomButton(window), "live-to-settled handoff must keep following").toHaveCount(0);
 
 	// ── 真实用户上滚读历史：渐进扩窗仍工作 ──
+	// 先等自动收起（1.5s tick + 320ms + 折叠动画）与 settle 定位跑完：折叠会让
+	// 内容回落到 3 轮高度，若此时视口不可滚动（maxTop=0），上滚没有任何位移、
+	// 扩窗断言失去意义。重新适配几何，保证上滚前内容确实溢出视口。
+	await window.waitForTimeout(2600);
+	await fitNearTopBottom(app, window);
 	await wheel(window, -160, 14, 160);
 	expect(await window.locator(".turn-row").count(), "real up-scroll must still expand the window").toBeGreaterThan(3);
 	await expect(bottomButton(window)).toHaveCount(1);
