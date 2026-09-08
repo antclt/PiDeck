@@ -324,7 +324,6 @@ export function SettingsTab(props: {
 							options={THINKING_LEVELS}
 							onChange={(v) => props.onChange({ ...data, defaultThinkingLevel: v })}
 							placeholder={t("config.general.thinkingLevelPlaceholder")}
-							clearSpace
 						/>
 					</ClearableSettingsInput>
 				</SettingRow>
@@ -359,7 +358,6 @@ export function SettingsTab(props: {
 							options={SEND_MODE_OPTIONS}
 							onChange={(v) => props.onChange({ ...data, steeringMode: v })}
 							placeholder={t("config.general.steeringModePlaceholder")}
-							clearSpace
 						/>
 					</ClearableSettingsInput>
 				</SettingRow>
@@ -377,7 +375,6 @@ export function SettingsTab(props: {
 							options={SEND_MODE_OPTIONS}
 							onChange={(v) => props.onChange({ ...data, followUpMode: v })}
 							placeholder={t("config.general.followUpModePlaceholder")}
-							clearSpace
 						/>
 					</ClearableSettingsInput>
 				</SettingRow>
@@ -397,7 +394,6 @@ export function SettingsTab(props: {
 							options={PROJECT_TRUST_OPTIONS}
 							onChange={(v) => props.onChange({ ...data, defaultProjectTrust: v })}
 							placeholder={t("config.general.projectTrustPlaceholder")}
-							clearSpace
 						/>
 					</ClearableSettingsInput>
 				</SettingRow>
@@ -417,7 +413,6 @@ export function SettingsTab(props: {
 							options={TRANSPORT_OPTIONS}
 							onChange={(v) => props.onChange({ ...data, transport: v })}
 							placeholder={t("config.general.transportPlaceholder")}
-							clearSpace
 						/>
 					</ClearableSettingsInput>
 				</SettingRow>
@@ -691,19 +686,20 @@ function EnabledModelsInput(props: {
 	);
 }
 
-/** 带清空按钮的输入包装器：值非空时常显清空按钮，点击即清除选中值。
+/** 带清空按钮的输入包装器：值非空时在控件右侧并排显示 ✕ 清除按钮，点击即清除选中值。
  *  清除只置空值（onChange("")），保留设置项 key，避免设置页整行消失。
- *  按钮定位在右侧下拉触发按钮左侧（right-[38px]），避免与箭头按钮互相遮挡。 */
+ *  ✕ 置于控件外右侧（flex 并排，不悬浮在控件上）——不会遮挡输入文字、下拉箭头，
+ *  也不会与控件内部图标（如 Select 的 chevron）发生重叠。 */
 function ClearableSettingsInput(props: { empty: boolean; onClear: () => void; children: ReactNode }) {
 	return (
-		<div className="relative w-full">
-			{props.children}
+		<div className="flex w-full items-center gap-1.5">
+			<div className="min-w-0 flex-1">{props.children}</div>
 			{!props.empty && (
 				<Button
 					type="button"
 					variant="ghost"
 					size="icon-xs"
-					className="absolute top-1/2 -translate-y-1/2 right-[38px] size-6 rounded-sm hover:bg-bg-hover"
+					className="size-6 shrink-0 rounded-sm text-text-tertiary hover:bg-bg-hover hover:text-text-secondary"
 					onMouseDown={(e) => {
 						// 用 mousedown 而非 click：避免触发 combobox 的 onFocus/onChange 连锁反应
 						e.preventDefault();
@@ -712,7 +708,7 @@ function ClearableSettingsInput(props: { empty: boolean; onClear: () => void; ch
 					}}
 					title={t("common.clear")}
 				>
-					<X size={12} className="text-text-tertiary" />
+					<X size={12} />
 				</Button>
 			)}
 		</div>
@@ -744,7 +740,6 @@ function SettingsValueInput(props: {
 					options={providerOptions}
 					onChange={(v) => props.onChange(v)}
 					placeholder={t("config.settings.selectProvider")}
-					clearSpace
 				/>
 			</ClearableSettingsInput>
 		);
@@ -856,7 +851,6 @@ function SettingsValueInput(props: {
 					placeholder={selectedProviderName
 						? t("config.settings.selectModelFor", { provider: selectedProviderName })
 						: t("config.settings.selectModelFirst")}
-					clearSpace
 				/>
 			</ClearableSettingsInput>
 		);
