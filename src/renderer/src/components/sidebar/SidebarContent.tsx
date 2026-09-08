@@ -499,6 +499,7 @@ export function SidebarContent(props: SidebarContentProps) {
             controller.closeMenu();
           } : undefined}
           onRemoveProject={() => { void actions.projects.remove(menuProject); controller.closeMenu(); }}
+          onChatSettings={() => { if (actions.projects.changeChatPath) void actions.projects.changeChatPath(menuProject); controller.closeMenu(); }}
         />
       )}
       {menuAgent && menu?.kind === "agent" && (
