@@ -526,18 +526,20 @@ export function UsageProbeConfigDialog(props: {
 									</p>
 								)}
 								{hintKey && (
-									<div className="flex flex-col gap-2">
+									/* 徽标与说明同行：父容器若用 flex-col，徽标会被 cross-axis stretch 拉成整行宽（表现为一条大灰杠），
+									   因此用水平 flex + shrink-0，徽标保持内容宽，说明文字在剩余空间内换行 */
+									<div className="flex items-center gap-2 px-0.5">
 										{recognized && template === recognized.templateId && (
 											/* 已识别供应商徽标（学 cc-switch DeepSeek 蓝标）：明确「预制的是你」，
 											   让「内置模板」与「需要填字段的模板」一眼区分开 */
 											<span
-												className="inline-flex flex-none items-center rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-micro leading-none tracking-wide text-[var(--color-accent)]"
+												className="inline-flex shrink-0 items-center rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-micro leading-none tracking-wide text-[var(--color-accent)]"
 												data-testid="usage-probe-recognized-badge"
 											>
 												{props.provider}
 											</span>
 										)}
-										<p className="px-0.5 text-caption text-text-tertiary">
+										<p className="min-w-0 flex-1 text-caption text-text-tertiary">
 											{recognized && template === recognized.templateId
 												? t("config.usageProbe.builtinHint")
 												: t(hintKey)}
