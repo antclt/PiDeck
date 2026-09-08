@@ -384,8 +384,10 @@ export function ModelsTab(props: {
 								}}
 								className={`config-provider-card overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-150${isExpanded ? " border-[color-mix(in_srgb,var(--color-accent)_32%,var(--color-border-subtle))] shadow-[var(--shadow-border)] overflow-visible" : ""}${highlightProvider === name ? " ring-2 ring-[color:var(--color-accent)]" : ""}`}
 							>
+							{/* 整行点击展开/收起；右侧操作区 stopPropagation，避免点复制/删除/用量配置时误折叠。 */}
 							<div
-								className="flex items-center justify-between px-3.5 py-2 transition-colors duration-150"
+								className="flex cursor-pointer items-center justify-between px-3.5 py-2 transition-colors duration-150 hover:bg-bg-hover"
+								onClick={() => props.onToggleProvider(name)}
 							>
 								{batchMode && (
 								<Label className="mr-2.5 inline-flex size-4 shrink-0 items-center justify-center" onClick={(e) => e.stopPropagation()}>
@@ -414,7 +416,7 @@ export function ModelsTab(props: {
 									</span>
 								</div>
 
-								<div className="flex shrink-0 items-center gap-1">
+								<div className="flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
 									<Button variant="ghost" size="icon-sm" className="size-7"
 										onClick={(e) => {
 											e.stopPropagation();
@@ -461,7 +463,7 @@ export function ModelsTab(props: {
 									>
 										<Trash2 size={14} />
 									</Button>
-									{/* 显式展开按钮：卡片不再整卡点击展开，高级配置（模型表格/测试连接等）由 Chevron 打开 */}
+									{/* 显式展开按钮：与整行点击共用 onToggleProvider；按钮自身 stopPropagation 避免冒泡双触发 */}
 									<Button variant="ghost" size="icon-sm" className="size-7"
 										onClick={(e) => {
 											e.stopPropagation();

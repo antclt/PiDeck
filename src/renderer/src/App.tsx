@@ -73,6 +73,7 @@ import {
 import {
   GUIDE_BOOTSTRAP_SESSION_ID,
   readWelcomeModelPreference,
+  readWelcomeThinkingPreference,
   resolveChatSessionBootstrap,
 } from "./utils/chatSessionBootstrap";
 import { detectRendererPlatform } from "./lib/detectRendererPlatform";
@@ -530,14 +531,18 @@ export function App() {
     setOpenCodeImportProject,
     zcodeImportProject,
     setZcodeImportProject,
+    workbuddyImportProject,
+    setWorkbuddyImportProject,
     codexImportController,
     claudeImportController,
     openCodeImportController,
     zcodeImportController,
+    workbuddyImportController,
     openCodexImport,
     openClaudeImport,
     openOpenCodeImport,
     openZCodeImport,
+    openWorkBuddyImport,
   } = useImportFlow({
     setProjectMenu: () => undefined,
     refreshProjectSessions,
@@ -550,6 +555,8 @@ export function App() {
     importOpenCodeSessionsApi: api.openCodeSessions.import,
     scanZCodeSessions: api.zcodeSessions.scan,
     importZCodeSessionsApi: api.zcodeSessions.import,
+    scanWorkBuddySessions: api.workbuddySessions.scan,
+    importWorkBuddySessionsApi: api.workbuddySessions.import,
     t,
   });
 
@@ -1609,11 +1616,11 @@ export function App() {
         throw new Error(t("app.guideBootstrapUnavailable"));
       }
       const promotion = (async () => {
-        // 引导页 picker 无 record 分支把模型选择存进 localStorage；创建时作为
-        // 「偏好」交给主进程解析（优先级：显式默认 > 偏好 > 上次使用 > 空），
-        // 与底栏显示同源，避免显示/套用分叉。思考级别不随偏好传入——
-        // 一律走默认档位（settings.defaultThinkingLevel），由解析器决定。
+        // 引导页 picker 无 record 分支把显式选择存进 localStorage；创建时将模型交给
+        // 主进程校验、将思考档位作为启动偏好带入。底栏展示和真实会话创建读取同一份值，
+        // 避免出现「菜单看似切换，首次发送后又回到默认档位」。
         const welcomeModel = readWelcomeModelPreference()?.model;
+        const welcomeThinking = readWelcomeThinkingPreference()?.thinkingLevel;
         // 统一创建 draft 会话（Chat 项目也走普通会话、可保存）：创建不拉 pi，
         // selectSessionCommand 同步切页、立即进入会话页；匿名会话仅保留给侧栏
         // 「新建临时对话」入口（createAnonymousSessionWithTab）。
@@ -1624,6 +1631,7 @@ export function App() {
           title: effectiveAgentBackend === "dsh" ? `${project.name} DSH` : `${project.name} agent`,
           backend: effectiveAgentBackend,
           ...(welcomeModel ? { welcomeModel } : {}),
+          ...(welcomeThinking ? { thinkingLevel: welcomeThinking } : {}),
         });
         upsertSession(session);
         // 引导页发送时 useSessionSend 已把 user 消息乐观写入虚拟会话 cache；
@@ -3087,6 +3095,7 @@ export function App() {
         if (source === "codex") return openCodexImport(project);
         if (source === "claude") return openClaudeImport(project);
         if (source === "zcode") return openZCodeImport(project);
+        if (source === "workbuddy") return openWorkBuddyImport(project);
         return openOpenCodeImport(project);
       },
       manageResources: (project) => setProjectResourcesProject(project),
@@ -4136,6 +4145,7 @@ export function App() {
     {claudeImportProject && <ImportOverlayHost kind="claude" project={claudeImportProject} controller={claudeImportController} onClose={() => setClaudeImportProject(null)} />}
     {openCodeImportProject && <ImportOverlayHost kind="opencode" project={openCodeImportProject} controller={openCodeImportController} onClose={() => setOpenCodeImportProject(null)} />}
     {zcodeImportProject && <ImportOverlayHost kind="zcode" project={zcodeImportProject} controller={zcodeImportController} onClose={() => setZcodeImportProject(null)} />}
+    {workbuddyImportProject && <ImportOverlayHost kind="workbuddy" project={workbuddyImportProject} controller={workbuddyImportController} onClose={() => setWorkbuddyImportProject(null)} />}
 
     {/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}
     <ScratchPadOverlay controller={scratchPad} />

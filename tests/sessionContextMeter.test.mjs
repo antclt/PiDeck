@@ -306,7 +306,7 @@ test("context meter copy is present in both locale dictionaries", () => {
 
 test("usage block is delegated to the shared ProviderUsageDetails with settings deep-link on failure", () => {
   const source = meterSource();
-  // 圆球面板用量区块 = 共享 ProviderUsageDetails（与模型卡片/选择器徽标同一份数据源与视觉，
+  // 圆球面板用量区块 = 共享 ProviderUsageDetails（与模型选择器展开区同一份数据源与视觉，
   // 本组件只决定「是否渲染」与「失败跳转」，不再自持 fetch/缓存/展示逻辑）
   assert.match(source, /import \{ ProviderUsageDetails \} from "\.\.\/app\/ProviderUsageDetails"/);
   assert.match(source, /<ProviderUsageDetails provider=\{provider\} backend=\{props\.backend\} onConfigureUsage=\{onConfigureUsage\} \/>/);
@@ -319,49 +319,54 @@ test("usage block is delegated to the shared ProviderUsageDetails with settings 
   assert.doesNotMatch(source, /usageCache/);
 });
 
-test("picker rows and provider cards use the cc-switch style inline usage", () => {
+test("picker expanded groups host usage details; provider config pages drop usage display", () => {
   const picker = bottomBarSource();
-  // 选择器分组行：trailing 插槽挂 inline（不往 label 里塞元素），打开时批量 TTL 去重查询；
-  // backend 随会话后端透传（DSH 会话的分组行走 dsh 链路，不误查 pi 的 usage-probes.json）。
-  assert.match(picker, /trailing=\{<ProviderUsageInline provider=\{provider\} variant="row" backend=\{props\.backend\} \/>\}/);
+  // 用量刷新在展开分组内（非标题 trailing）；非 CommandItem，避免 cmdk 把点击当成选模型。
+  // backend 随会话后端透传（DSH 会话走 dsh 链路，不误查 pi 的 usage-probes.json）。
+  assert.match(picker, /<ProviderUsageDetails/);
+  assert.match(picker, /provider=\{provider\}/);
+  assert.match(picker, /backend=\{props\.backend\}/);
+  assert.match(picker, /className="border-t-0 pt-1"/);
   assert.match(picker, /useProviderUsageBatchRefresh/);
-  // command-picker 提供 trailing 插槽（渲染在 label 与 count 之间）
+  assert.match(picker, /openSettingsAtom/);
+  assert.match(picker, /configTab: "models"/);
+  assert.doesNotMatch(picker, /ProviderUsageInline/);
+  assert.doesNotMatch(picker, /trailing=\{<ProviderUsage/);
+  // command-picker 仍保留 trailing 插槽（其他 picker 可能用），ModelPicker 不再传入用量。
   const commandPicker = readFileSync("src/renderer/src/components/ui-shadcn/command-picker.tsx", "utf8");
   assert.match(commandPicker, /trailing\?: ReactNode/);
   // Pi 模型页：折叠卡片不再另开 h-9 底栏——模型数徽章 + 卡头用量徽标都收进标题行；
-  // 展开体里的「用量」明细块（ProviderUsageDetails）按要求移除（卡头徽标已覆盖展示）。
+  // 展开体里的「用量」明细块（ProviderUsageDetails）按要求移除（卡头徽标已覆盖展示）；
+  // 整行点击展开来自上游，卡头徽标保留（本页例外，AuthTab/DSH 跟随上游移除）。
   const modelsTab = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
   assert.match(modelsTab, /ProviderUsageInline\s+provider=\{name\}\s+variant="card"/);
   assert.match(modelsTab, /UsageQueryEntryButton/);
-  assert.doesNotMatch(modelsTab, /ProviderUsageDetails/);
   assert.match(modelsTab, /config\.count\.models/);
+  assert.match(modelsTab, /cursor-pointer/);
+  assert.match(modelsTab, /onClick=\{\(\) => props\.onToggleProvider\(name\)\}/);
+  assert.doesNotMatch(modelsTab, /ProviderUsageDetails/);
   assert.doesNotMatch(modelsTab, /ProviderUsageRow/);
   assert.doesNotMatch(modelsTab, /leading=/);
-  // 模型页/认证页/DSH 三处用量均已收进卡头 inline（variant=card），底部行组件已全部删除。
+  assert.match(modelsTab, /UsageQueryEntryButton/);
   const inlineSource = readFileSync("src/renderer/src/components/app/ProviderUsageInline.tsx", "utf8");
   assert.match(inlineSource, /variant: "row" \| "card"/);
   assert.doesNotMatch(inlineSource, /export function ProviderUsageFooter/);
   assert.doesNotMatch(inlineSource, /export function ProviderUsageRow/);
   assert.doesNotMatch(inlineSource, /provider-usage-configure-icon/);
-  // 「用量查询」按钮收敛到共享组件 UsageQueryEntryButton（内置支持的供应商零配置自动生效，不渲染）
   const entryButton = readFileSync("src/renderer/src/components/app/UsageQueryEntryButton.tsx", "utf8");
   assert.match(entryButton, /useProviderUsageRecognized/);
   assert.match(entryButton, /provider-usage-configure-icon/);
-  // 认证页：用量/余额也收进标题行（与模型页同布局，刷新点击不误触折叠），不再单独占 h-9 底栏。
   const authTab = readFileSync("src/renderer/src/config/AuthTab.tsx", "utf8");
-  assert.match(authTab, /<ProviderUsageInline provider=\{name\} variant="card" \/>/);
+  assert.doesNotMatch(authTab, /ProviderUsageInline/);
+  assert.doesNotMatch(authTab, /ProviderUsageDetails/);
   assert.doesNotMatch(authTab, /ProviderUsageRow/);
   assert.match(authTab, /UsageQueryEntryButton/);
-  // DSH 页：模型数徽章（badges）+ 用量/余额都收进卡片标题行，不再单独 h-9 底栏（动态目录 + 官方 DeepSeek 两处）。
   const dshCards = readFileSync("src/renderer/src/config/DshProviderCards.tsx", "utf8");
-  assert.match(dshCards, /<ProviderUsageInline provider=\{entry\.key\} backend="dsh" variant="card" \/>/);
-  assert.match(dshCards, /<ProviderUsageInline provider="deepseek" backend="dsh" variant="card" \/>/);
+  assert.doesNotMatch(dshCards, /ProviderUsageInline/);
+  assert.doesNotMatch(dshCards, /ProviderUsageDetails/);
   assert.match(dshCards, /config\.dsh\.modelsCount/);
   assert.doesNotMatch(dshCards, /ProviderUsageRow/);
   assert.match(dshCards, /UsageQueryEntryButton/);
-  const modelsTab2 = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
-  // 模型页卡头保留用量查询配置入口（与认证页/DSH 页同一共享组件）。
-  assert.match(modelsTab2, /UsageQueryEntryButton/);
   // 旧胶囊徽标组件已删除（cc-switch 风格无胶囊）
   assert.equal(existsSync("src/renderer/src/components/app/ProviderUsageBadge.tsx"), false);
 });

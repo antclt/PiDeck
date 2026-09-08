@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
+import { useSetAtom } from "jotai";
 import {
 	AlertCircle,
 	Brain,
@@ -53,8 +54,9 @@ import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { useComposerModeAvailability } from "../../hooks/useComposerModeAvailability";
 import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
 import { SessionContextMeter } from "./SessionContextMeter";
-import { ProviderUsageInline } from "../app/ProviderUsageInline";
+import { ProviderUsageDetails } from "../app/ProviderUsageDetails";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
+import { openSettingsAtom } from "../../atoms/app-ui-atoms";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
 import {
 	Select,
@@ -68,6 +70,7 @@ import {
   WELCOME_MODEL_KEY,
   isWelcomeModelLost,
   readWelcomeModelPreference,
+  readWelcomeThinkingPreference,
   shouldClearWelcomePreference,
 } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
@@ -374,11 +377,9 @@ export function ComposerBottomBar(props: {
 		onWatermarkChange: (watermark: boolean) => void;
 	};
 }) {
-	// 默认模型/思考级别来自主进程按 pi 配置自动填充进会话记录的默认值（props.record），
-	// 不读取渲染层 welcome localStorage 偏好，避免用户偏好覆盖 pi 配置。
-	// 例外：无 record（引导页虚拟会话）时回退显示欢迎页偏好——picker 无 record
-	// 分支把选择写进 localStorage，回退后用户选中模型/思考级别立即在底部栏可见；
-	// 创建会话时这些偏好会作为启动参数带入（App.ensureSessionForSend）。
+	// 真实会话以 runtime / catalog record 为准；只有无 record 的引导页虚拟会话
+	// 才读取 welcome localStorage。这样用户点选模型/思考档位后能立即看到结果，
+	// 首次发送再由 App.ensureSessionForSend 把同一显式选择带入真实会话。
 	// 该偏好可能指向已删除的模型（localStorage 残留，用户删除模型后底栏仍显示旧默认）：
 	// 引导页（无 record、pi 后端）常驻加载模型目录做存在性校验（与 ComposerPickerHost
 	// 同一判定 isWelcomeModelLost），失效则忽略偏好并清理缓存，显示回落到主进程解析的
@@ -392,6 +393,10 @@ export function ComposerBottomBar(props: {
 		enabled: needsWelcomeCatalog,
 	});
 	const welcomeModel = needsWelcomeCatalog ? readWelcomeModelPreference()?.model : undefined;
+	// 思考档位不依赖模型目录；无 record 时直接读取 picker 写入的显式选择。
+	const welcomeThinking = !props.record
+		? readWelcomeThinkingPreference()?.thinkingLevel
+		: undefined;
 	const welcomeModelLost = isWelcomeModelLost(welcomeModel, welcomeCatalogModels);
 	// 删除不可逆，走保守判定：只有「一次成功的完整加载」才具备判死资格。
 	// 本组件不传 projectId → 目录恒为全局范围，与全局偏好的作用域一致。
@@ -428,9 +433,8 @@ export function ComposerBottomBar(props: {
 	const currentThinkingLevel = resolveComposerThinkingLevel({
 		state: props.state?.thinkingLevel,
 		record: props.record?.thinkingLevel,
-		// 思考级别一律走默认档位（用户规则：取 settings.defaultThinkingLevel；
-		// 欢迎页偏好级别不再参与——偏好只管模型，级别跟默认走）。
-		fallback: props.defaultThinkingLevel,
+		// 引导页显式点选优先；未选择时才回退主进程解析的配置默认档位。
+		fallback: welcomeThinking ?? props.defaultThinkingLevel,
 		isLive: runtimeLive,
 	});
 	const thinkingLevelLabel = (level: string) => {
@@ -938,6 +942,8 @@ export function ModelPicker(props: {
 	const currentModelKey = props.current?.provider && props.current?.modelId
 		? `${props.current.provider}/${props.current.modelId}`
 		: undefined;
+	// 用量失败时跳转设置·模型 tab 对应供应商（与 SessionContextMeter deep-link 同口）。
+	const openModelsSettings = useSetAtom(openSettingsAtom);
 	const favoritesSet = new Set(props.favoriteModels ?? []);
 	// 隐藏开关：Pi 后端按 provider 过滤（DSH 的 route 名不参与隐藏列表）；
 	// 过滤后收藏/分组/搜索都基于可见模型，隐藏供应商的模型完全不出现在选择器里。
@@ -981,9 +987,8 @@ export function ModelPicker(props: {
 		loading: props.loading,
 	});
 
-	// 供应商用量行（cc-switch inline）：打开选择器时批量触发 TTL 去重查询，行尾显示
-	// 彩色剩余/百分比；查不到（不支持/失败/查询中）的分组保持干净不渲染。
-	// backend 按会话后端透传（DSH 目录的 provider 是 route 名，配置/凭据在 dsh 链路）。
+	// 打开选择器时批量 TTL 去重查询（受 providerUsageAutoQueryEnabled 闸门；关闭时为 no-op）。
+	// 用量明细放展开组内，标题行不再挂 inline 刷新；backend 按会话后端透传（DSH 目录的 provider 是 route 名）。
 	const batchRefreshUsage = useProviderUsageBatchRefresh();
 	const providerKey = sortedProviders.join("\n");
 	useEffect(() => {
@@ -1082,8 +1087,27 @@ export function ModelPicker(props: {
 							label={provider}
 							count={groupedModels[provider].length}
 							countText={t("config.count.models", { count: groupedModels[provider].length })}
-							trailing={<ProviderUsageInline provider={provider} variant="row" backend={props.backend} />}
 						>
+							{/* 用量放展开区：刷新按钮不占标题行。非 CommandItem，避免 cmdk 把点击当成选模型。 */}
+							<div
+								className="px-1"
+								onPointerDown={(event) => event.stopPropagation()}
+								onClick={(event) => event.stopPropagation()}
+							>
+								<ProviderUsageDetails
+									provider={provider}
+									backend={props.backend}
+									onConfigureUsage={() =>
+										openModelsSettings({
+											tab: "common",
+											pane: "config",
+											configTab: "models",
+											provider,
+										})
+									}
+									className="border-t-0 pt-1"
+								/>
+							</div>
 							{groupedModels[provider].map((model) => renderModelRow(model))}
 						</CommandPickerGroup>
 					))}

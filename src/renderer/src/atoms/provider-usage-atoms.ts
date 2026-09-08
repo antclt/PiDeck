@@ -1,8 +1,8 @@
 /**
  * Provider 用量/余额查询结果缓存（Jotai 单一 owner）。
  *
- * 三处消费（composer 圆球面板 / 设置模型卡片 / 模型选择器分组徽标）共享同一份
- * record：任意一处刷新成功，其余两处立即拿到同一 entry，数字滚动动画自然联动。
+ * composer 圆球面板与模型选择器展开区共享同一份 record：任意一处刷新成功，
+ * 其他已挂载消费端立即拿到同一 entry，数字滚动动画自然联动。
  * entry 状态机：null（未查过）→ loading → ready | error；fetchedAt 供 TTL 判断。
  */
 import { atom } from "jotai";

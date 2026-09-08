@@ -153,7 +153,7 @@ export function useProviderUsageEntry(
 	}, [provider, cacheKey, entry.fetchedAt, intervalMinutes, autoQueryEnabled, begin, resolve, backend]);
 
 	// 自动轮询：全局开 + 间隔 > 0 才排下一次刷新。
-	// 挂载在哪个面板就轮询哪个（模型卡片/选择器可见时才有订阅者），不后台刷全部。
+	// 挂载在哪个消费面板就轮询哪个（当前为圆球面板/模型选择器展开区），不后台刷全部供应商。
 	useEffect(() => {
 		if (!provider || !cacheKey) return;
 		if (

@@ -1,6 +1,6 @@
 /**
  * Provider 用量/余额详情块（cc-switch 展开模式 TierBar 语言）：
- * composer 圆球面板与设置模型卡片展开体共用的唯一渲染。
+ * 模型选择器展开分组与 SessionContextMeter 圆球面板共用的唯一渲染；供应商配置页不再挂载。
  *
  * 版式学自 cc-switch SubscriptionQuotaFooter/UsageFooter：
  * - 头部：标题 + Clock 相对更新时间 + 刷新按钮（右对齐）；
@@ -8,11 +8,12 @@
  *   （绿/橙/红按 70/90 阈值）+ 彩色粗体百分比 + 剩余小字；
  * - 余额/credits：灰标签 + 彩色粗体数字（剩 ≤0 红、<10% 橙、其余绿）；
  * - booster（Kimi Boost 等独立货币）：主额度下方子块，不与主额度混单位；
- * - 失败：红字 + 重试 + 「配置用量查询」（onConfigureUsage 深链模型页）。
- * 数据源 provider-usage-atoms 与 inline 行/卡头同一份缓存。
+ * - 失败：红字 + 重试 + 「配置用量查询」（onConfigureUsage 深链模型设置）。
+ * 数据源 provider-usage-atoms 与 inline 行同一份缓存。
  */
 import { AlertCircle, Clock, RefreshCw } from "lucide-react";
 import { t } from "../../i18n";
+import { cn } from "../../lib/utils";
 import type {
 	ProviderUsageResult,
 	UsageProbeBackend,
@@ -120,7 +121,7 @@ export function ProviderUsageDetails(props: {
 	/** 查询/缓存链路：dsh（$DSH_HOME 配置 + DSH 凭据库）或 pi（缺省）。
 	 *  圆球面板按会话后端透传——DSH 会话配在 dsh 链路的探针不会被当成 pi 配置漏查。 */
 	backend?: UsageProbeBackend;
-	/** 失败态「去配置」动作：圆球面板跳模型设置；模型卡片打开探针配置弹窗。缺省不渲染按钮。 */
+	/** 失败态「去配置」动作：圆球面板/选择器深链模型设置。缺省不渲染按钮。 */
 	onConfigureUsage?: () => void;
 	className?: string;
 }) {
@@ -139,7 +140,7 @@ export function ProviderUsageDetails(props: {
 
 	return (
 		<div
-			className={`space-y-1.5 border-t border-border pt-2 ${props.className ?? ""}`}
+			className={cn("space-y-1.5 border-t border-border pt-2", props.className)}
 			data-testid="provider-usage-details"
 			data-provider={props.provider}
 			data-status={entry.status}

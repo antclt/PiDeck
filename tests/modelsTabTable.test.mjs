@@ -53,14 +53,16 @@ test("ModelsTab and AddProviderDialog both reuse the shared ModelsTable", () => 
   assert.match(dialogSource, /<ModelsTable/);
 });
 
-test("provider card header keeps model count + inline usage; expanded body drops the usage details block", () => {
-  // 折叠态不再另开 h-9 底栏：模型数徽章 + 卡头用量徽标（时间+数值+刷新）都收进标题行。
+test("provider card keeps model count + inline usage in the header, drops the usage details block, and expands on whole-row click", () => {
+  // 折叠态不再另开 h-9 底栏：模型数徽章 + 卡头用量徽标（时间+数值+刷新）都收进标题行；
+  // 展开体里的「用量」明细块（ProviderUsageDetails）按要求移除——卡头徽标已覆盖展示。
   assert.match(tabSource, /config\.count\.models/);
   assert.match(tabSource, /ProviderUsageInline\s+provider=\{name\}\s+variant="card"/);
   // 卡头用量查询配置入口保留（内置支持的供应商零配置自动生效，不渲染）。
   assert.match(tabSource, /UsageQueryEntryButton/);
-  // 展开体里的「用量」明细块（ProviderUsageDetails：用量标题 + 刷新按钮 + 进度条/余额）
-  // 按要求移除——卡头徽标已覆盖展示，展开区只留连接配置/测试/兼容性/模型列表。
+  // 上游新增：整行点击展开/收起（右侧操作区 stopPropagation）。
+  assert.match(tabSource, /cursor-pointer/);
+  assert.match(tabSource, /onClick=\{\(\) => props\.onToggleProvider\(name\)\}/);
   assert.doesNotMatch(tabSource, /ProviderUsageDetails/);
   assert.doesNotMatch(tabSource, /ProviderUsageRow/);
   assert.doesNotMatch(tabSource, /leading=/);
