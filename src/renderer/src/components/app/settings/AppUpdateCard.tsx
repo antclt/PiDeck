@@ -67,8 +67,10 @@ export function AppUpdateCard(props: AppUpdateCardProps) {
 	};
 
 	return (
-		<div className="mb-3 rounded-md border border-border-subtle bg-panel px-3 py-2">
-			<div className="flex items-center justify-between">
+		/* 内容直接铺在 SettingsSection 的淡色外框里，不再自套边框（避免内外双框）。 */
+		<div className="mb-3">
+			{/* 首行固定最小行高 + 垂直居中：与「自动下载更新」等 SettingRow 同行高观感，按钮不致偏上。 */}
+			<div className="flex min-h-10 items-center justify-between gap-2">
 				<span className="text-body">
 					{t("app.updateCardVersion", { version: props.appVersion })}
 				</span>
