@@ -815,6 +815,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
       // 由 MessageScroller 的 resize + 28px 阈值决定，不再整段忙碌硬贴底。
       busy={isRuntimeBusy || isAwaitingAssistant}
       onFollowChange={controller.setAutoScrollFromScroller}
+      onUserScrollIntent={controller.setUserScrollIntent}
       viewportProps={{
         // 会话切换滚动位置保持：滚动时维护 per-session 锚点（rAF 合并，不触发渲染）
         onScroll: controller.handleTimelineScroll,
