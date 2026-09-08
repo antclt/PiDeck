@@ -328,9 +328,12 @@ test("picker rows and provider cards use the cc-switch style inline usage", () =
   // command-picker 提供 trailing 插槽（渲染在 label 与 count 之间）
   const commandPicker = readFileSync("src/renderer/src/components/ui-shadcn/command-picker.tsx", "utf8");
   assert.match(commandPicker, /trailing\?: ReactNode/);
-  // Pi 模型页：折叠卡片不再另开 h-9 底栏——模型数徽章 + 用量（时间+数值+刷新）都收进标题行。
+  // Pi 模型页：折叠卡片不再另开 h-9 底栏——模型数徽章 + 卡头用量徽标都收进标题行；
+  // 展开体里的「用量」明细块（ProviderUsageDetails）按要求移除（卡头徽标已覆盖展示）。
   const modelsTab = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
   assert.match(modelsTab, /ProviderUsageInline\s+provider=\{name\}\s+variant="card"/);
+  assert.match(modelsTab, /UsageQueryEntryButton/);
+  assert.doesNotMatch(modelsTab, /ProviderUsageDetails/);
   assert.match(modelsTab, /config\.count\.models/);
   assert.doesNotMatch(modelsTab, /ProviderUsageRow/);
   assert.doesNotMatch(modelsTab, /leading=/);
@@ -357,6 +360,7 @@ test("picker rows and provider cards use the cc-switch style inline usage", () =
   assert.doesNotMatch(dshCards, /ProviderUsageRow/);
   assert.match(dshCards, /UsageQueryEntryButton/);
   const modelsTab2 = readFileSync("src/renderer/src/config/ModelsTab.tsx", "utf8");
+  // 模型页卡头保留用量查询配置入口（与认证页/DSH 页同一共享组件）。
   assert.match(modelsTab2, /UsageQueryEntryButton/);
   // 旧胶囊徽标组件已删除（cc-switch 风格无胶囊）
   assert.equal(existsSync("src/renderer/src/components/app/ProviderUsageBadge.tsx"), false);

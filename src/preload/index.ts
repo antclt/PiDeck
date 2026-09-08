@@ -1668,16 +1668,17 @@ const api = {
 		/** 视觉桥：清空事件文件 */
 		visionClearEvents: () =>
 			ipcRenderer.invoke(ipcChannels.visionClearEvents) as Promise<{ ok: boolean }>,
-		/** 测试 provider 连接：先保存配置，再用真实 pi 做一次最小调用验证是否可用；proxyMode 控制探针进程代理（同 fetchModels 语义，pi 侧走 PI 代理配置） */
+		/** 测试 provider 连接（隔离探针）：临时 agent 目录 + PI_CODING_AGENT_DIR 跑真实 pi，测当前表单值且不落盘；proxyMode 控制探针进程代理（同 fetchModels 语义，pi 侧走 PI 代理配置） */
 		testProvider: (
 			providerName: string,
 			modelId: string,
-			models: unknown,
+			provider: unknown,
+			apiKey: string,
 			proxyMode?: "follow" | "pi" | "desktop" | "off",
 		) =>
 			ipcRenderer.invoke(
 				ipcChannels.configTestProvider,
-				{ providerName, modelId, models, proxyMode },
+				{ providerName, modelId, provider, apiKey, proxyMode },
 			) as Promise<import("../shared/types/fetchedModel").PiModelProbeResult>,
 		/** 查询 provider 用量/余额（主进程按 provider 名 + backend 路由；backend=dsh 走 $DSH_HOME 链路） */
 		fetchUsage: (provider: string, backend?: "pi" | "dsh") =>
