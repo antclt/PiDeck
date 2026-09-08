@@ -62,9 +62,8 @@ export type SessionPaneServices = {
   restartingAgentId: string | null;
   sessionDurationByAgent: Record<string, number>;
   activeProjectId: string | undefined;
-  gitInfo: GitBranchInfo;
-  /** 底栏分支下拉的切换回调（owner 为 App 级 switchBranch，保持 Git 面板同步） */
-  onSwitchBranch: (branch: string) => void;
+  /** 分屏栏分支变化（切换成功/失败回读）后的回写通知：App 只在 projectId 为当前聚焦项目时采纳，避免非聚焦栏污染全局 Git 抽屉 */
+  onProjectGitChanged?: (projectId: string, info: GitBranchInfo) => void;
   showThinking: boolean;
   validCommandNames: Set<string>;
   validFilePaths: Set<string>;

@@ -1,4 +1,5 @@
 import { useRef, type ReactNode } from "react";
+import { useAtomValue } from "jotai";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { ComposerArea } from "./ComposerArea";
 import { QueuedPromptPanel } from "./ComposerPanels";
@@ -7,6 +8,8 @@ import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
 import { LogoMark } from "./SurfaceParts";
+import { sessionRecordByIdAtomFamily } from "../../atoms/session-selectors";
+import { usePaneGitInfo } from "../../hooks/usePaneGitInfo";
 
 /**
  * 新会话起始页（DeepSeek 式居中输入框）：匿名/新会话还没有消息时，
@@ -26,6 +29,12 @@ export function SessionStartSurface(props: {
   bootstrapProjectId?: string;
 }) {
   const services = useSessionPaneServices();
+  // 起始页展示的分支属于“下一个会话将落地”的项目：引导页（虚拟会话）用选中项目，
+  // 真实匿名会话用其 record 自身项目。分屏下两个 worktree 各开空会话时，
+  // 各自起始页显示各自 worktree 的分支，不跟随 App 聚焦项目（栏级 usePaneGitInfo）。
+  const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));
+  const startProjectId = props.bootstrapProjectId ?? sessionRecord?.projectId;
+  const { gitInfo } = usePaneGitInfo(startProjectId);
   const queuedTrackRef = useRef<HTMLElement | null>(null);
   const activeQueuedPrompts = services.queuedPromptsBySession[props.sessionId] ?? [];
 
@@ -41,7 +50,7 @@ export function SessionStartSurface(props: {
       <div className="w-full max-w-[980px]">
         <ComposerArea
           sessionId={props.sessionId}
-          gitInfo={services.gitInfo}
+          gitInfo={gitInfo}
           enqueue={services.enqueueSessionPrompt}
           ensureSessionId={services.ensureSessionId}
           bootstrapProjectId={props.bootstrapProjectId}

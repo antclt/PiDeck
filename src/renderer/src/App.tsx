@@ -205,6 +205,7 @@ import type {
   SessionSummary,
   ComposerAgentMode,
   TerminalTarget,
+  GitBranchInfo,
 } from "../../shared/types";
 
 export function App() {
@@ -3356,6 +3357,22 @@ export function App() {
     ? terminalOwnerKey(terminalOwner)
     : undefined;
 
+  // 分屏栏分支变化后的全局同步：只采纳“栏项目 == 当前聚焦项目”的变化，
+  // 非聚焦栏（另一个 worktree）切分支不得污染右侧 Git 抽屉/侧栏的聚焦态；
+  // 聚焦项目自己的分支早期离开（checkout 后被 4s 轮询追平）也不至于闪回旧值。
+  const handleProjectGitChanged = useCallback(
+    (projectId: string, info: GitBranchInfo) => {
+      if (projectId !== activeProjectIdRef.current) return;
+      setGitInfo((current) =>
+        current.current === info.current &&
+        current.branches.join("\n") === info.branches.join("\n")
+          ? current
+          : info,
+      );
+    },
+    [],
+  );
+
   const sessionPaneServices = useMemo(
     () => ({
       isLanWeb,
@@ -3389,8 +3406,7 @@ export function App() {
       restartingAgentId,
       sessionDurationByAgent,
       activeProjectId,
-      gitInfo,
-      onSwitchBranch: switchBranch,
+      onProjectGitChanged: handleProjectGitChanged,
       showThinking: settings.showThinking,
       validCommandNames,
       validFilePaths,
@@ -3420,12 +3436,11 @@ export function App() {
       displayAgents,
       editMessage,
       enqueueSessionPrompt,
-      switchBranch,
+      handleProjectGitChanged,
       ensureSessionForSend,
       environmentDialog,
       forkFromUserMessage,
       forkingMessageId,
-      gitInfo,
       handleOpenLinkedFile,
       insertQuickPrompt,
       isLanWeb,
