@@ -12,6 +12,7 @@ import {
 	session,
 	shell,
 	Tray,
+	Notification,
 } from "electron";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -24,6 +25,10 @@ import { registerSoundIpc } from "./ipc/soundIpc";
 import { registerSoundProtocol } from "./sounds/soundProtocol";
 import { AnnouncementService } from "./announcements/AnnouncementService";
 import { registerAnnouncementIpc } from "./ipc/announcementIpc";
+import { AutomationStore } from "./automation/AutomationStore";
+import { AutomationScheduler } from "./automation/AutomationScheduler";
+import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
+import { registerAutomationIpc } from "./ipc/automationIpc";
 import {
 	applyLinuxDisplayBackendWorkaround,
 	isUsingLinuxXWaylandWorkaround,
@@ -440,6 +445,10 @@ let petSystem: PetSystem | null = null;
 let soundAlertService: SoundAlertService | null = null;
 /** 应用公告服务（无服务器拉取模式）；null = 未初始化 */
 let announcementService: AnnouncementService | null = null;
+/** 定时任务与自动化服务；null = 未初始化 */
+let automationStore: AutomationStore | null = null;
+let automationScheduler: AutomationScheduler | null = null;
+let automationRunCoordinator: AutomationRunCoordinator | null = null;
 let appLogger: AppLogger;
 let rpcLogger: RpcLogger;
 /** 内存采样句柄（PIDECK_MEMORY_PROFILE=1 时启用），quit 时停止 */
@@ -581,6 +590,7 @@ function emitSessionRuntimeEvent(
 		payload,
 	};
 	sessionRuntimeCoordinator.observeRuntimeEvent(event);
+	automationRunCoordinator?.observeRuntimeEvent(event);
 	if (payload && typeof payload === "object" && !Array.isArray(payload)) {
 		const tab = payload as Partial<AgentTab>;
 		if (typeof tab.sessionPath === "string" && tab.sessionPath) {
@@ -2319,6 +2329,21 @@ function registerIpc() {
 	// 用量统计：业务在 UsageStatsService，handler 薄层只校验/适配
 	registerUsageStatsIpc(ipcMain, usageStatsService);
 
+	if (automationStore && automationScheduler && automationRunCoordinator) {
+		registerAutomationIpc({
+			automationStore,
+			automationScheduler,
+			automationRunCoordinator,
+			appLogger,
+			onNotifyChanged: (event) => {
+				const win = mainWindow;
+				if (win && !win.isDestroyed()) {
+					win.webContents.send(ipcChannels.automationChanged, event);
+				}
+			},
+		});
+	}
+
 	const catalogIdentityContext = () => {
 		const { wslEnabled, wslDistro, wslUser } = settingsStore.get();
 		return wslEnabled ? { wslDistro, wslUser } : {};
@@ -3760,6 +3785,53 @@ app.whenReady().then(async () => {
 		sendAgentPromptWithIntegrations,
 		appLogger,
 	);
+
+	// 定时任务调度器与执行编排器装配
+	automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
+	await automationStore.load();
+	automationRunCoordinator = new AutomationRunCoordinator({
+		store: automationStore,
+		catalog: sessionCatalog,
+		sessionRuntimeCoordinator,
+		projectStore,
+		gitService,
+		logger: appLogger,
+		notifyRunFinished: (run, task) => {
+			const settings = settingsStore.get();
+			if (!settings.enableNotifications || !Notification.isSupported()) return;
+			const isSuccess = run.status === "succeeded";
+			const appName = app.getName();
+			const body = isSuccess
+				? mainCopy("mainNotification.automationDone", { name: task.name })
+				: mainCopy("mainNotification.automationFailed", {
+						name: task.name,
+						error: run.error || run.status,
+					});
+			const notification = new Notification({
+				title: appName,
+				body,
+				silent: false,
+			});
+			notification.on("click", () => {
+				focusMainWindow();
+				if (run.sessionId) {
+					queueFocusTarget({ sessionId: run.sessionId });
+				}
+			});
+			notification.show();
+		},
+	});
+	automationScheduler = new AutomationScheduler(automationStore);
+	automationScheduler.setTriggerHandler(async (task, scheduledFor, trigger) => {
+		await automationRunCoordinator?.enqueueRun(task, scheduledFor, trigger);
+	});
+	automationScheduler.start();
+	quitCleanup.register("automation", () => {
+		automationScheduler?.stop();
+		automationRunCoordinator?.dispose();
+		automationScheduler = null;
+		automationRunCoordinator = null;
+	});
 	// 闲置 agent 自动释放（内存优化）：轮询 agents.list() 自记 idle 时长，释放走
 	// coordinator.stopAgentById（解绑 + agents.stop + agents:state 推送，会话状态自动同步）。
 	// 设置项（开关/保留数/闲置时长）每次扫描时读取，改设置后下一轮自动生效。

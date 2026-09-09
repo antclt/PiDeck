@@ -174,6 +174,16 @@ export const ipcChannels = {
 	dshUnarchive: "dsh:unarchive",
 	/** DSH 永久删除已归档会话：归档目录移入系统回收站（区别于恢复）。 */
 	dshDeleteArchived: "dsh:delete-archived",
+	/** 定时任务与自动化 */
+	automationGetSnapshot: "automation:get-snapshot",
+	automationCreateTask: "automation:create-task",
+	automationUpdateTask: "automation:update-task",
+	automationDeleteTask: "automation:delete-task",
+	automationRunNow: "automation:run-now",
+	automationAbortRun: "automation:abort-run",
+	automationUpdateSettings: "automation:update-settings",
+	automationPreviewCron: "automation:preview-cron",
+	automationChanged: "automation:changed",
 	/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
 	dshPluginList: "dsh:plugin-list",
 	/** DSH 静态 Loader 条目清单（只读：moduleName/enabled/fiberPhase）。 */

@@ -48,6 +48,15 @@ import type {
 	ConfigFileDiagnostic,
 	DraftMeta,
 	CreateSessionDraftInput,
+	AutomationSnapshot,
+	AutomationTask,
+	AutomationRun,
+	AutomationSettings,
+	AutomationCronPreview,
+	AutomationChangedEvent,
+	CreateAutomationTaskInput,
+	UpdateAutomationTaskInput,
+	UpdateAutomationSettingsInput,
 	ResolveLaunchDefaultsInput,
 	ResolvedLaunchDefaults,
 	CreateAnonymousSessionInput,
@@ -2028,6 +2037,28 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.catalogUpdateRestorePrevious) as Promise<CatalogUpdateResult>,
 		/** 用系统默认程序打开当前生效的目录文件（覆盖层优先，否则内置） */
 		openFile: () => ipcRenderer.invoke(ipcChannels.catalogOpenFile) as Promise<void>,
+	},
+
+	// ── 定时任务与自动化 ──
+	automation: {
+		getSnapshot: () =>
+			ipcRenderer.invoke(ipcChannels.automationGetSnapshot) as Promise<AutomationSnapshot>,
+		createTask: (input: CreateAutomationTaskInput) =>
+			ipcRenderer.invoke(ipcChannels.automationCreateTask, input) as Promise<AutomationTask>,
+		updateTask: (taskId: string, patch: UpdateAutomationTaskInput) =>
+			ipcRenderer.invoke(ipcChannels.automationUpdateTask, taskId, patch) as Promise<AutomationTask>,
+		deleteTask: (taskId: string) =>
+			ipcRenderer.invoke(ipcChannels.automationDeleteTask, taskId) as Promise<boolean>,
+		runNow: (taskId: string) =>
+			ipcRenderer.invoke(ipcChannels.automationRunNow, taskId) as Promise<AutomationRun>,
+		abortRun: (runId: string) =>
+			ipcRenderer.invoke(ipcChannels.automationAbortRun, runId) as Promise<boolean>,
+		updateSettings: (patch: UpdateAutomationSettingsInput) =>
+			ipcRenderer.invoke(ipcChannels.automationUpdateSettings, patch) as Promise<AutomationSettings>,
+		previewCron: (expression: string, count?: number) =>
+			ipcRenderer.invoke(ipcChannels.automationPreviewCron, expression, count) as Promise<AutomationCronPreview>,
+		onChanged: (callback: (event: AutomationChangedEvent) => void) =>
+			subscribe<AutomationChangedEvent>(ipcChannels.automationChanged, callback),
 	},
 };
 

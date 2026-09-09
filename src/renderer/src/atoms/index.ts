@@ -10,3 +10,4 @@ export * from "./imagegen-atoms";
 export * from "./git-atoms";
 export * from "./dsh-atoms";
 export * from "./announcement-atoms";
+export * from "./automation-atoms";
