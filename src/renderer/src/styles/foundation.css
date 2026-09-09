@@ -231,6 +231,11 @@
 /* ===== 主题色预设（data-accent） =====
  * 默认主题使用中性灰；绿色作为可选主题保留，不再承担出厂默认色。
  * 自定义主题：新增一个 data-accent 值 + SettingsModal 色板预设条目即可。
+ * 注意：accent 色块只覆盖「主色/链接/logo」等装饰色，刻意不覆盖状态语义色
+ * （--color-danger / --color-warning / --color-info）——状态灯（idle=蓝、
+ * 运行=黄、错误=红）必须跨主题恒定可辨识，否则暖阳米/紫/玫等主题下
+ * idle 灯会被染成主色、与运行/错误灯糊在一起（见 sessionStatusDotClass）。
+ * 状态色与身份色解耦的约定见上方 --color-tool 注释。
  */
 :root[data-accent="green"] {
   /* 森系绿（参考同目录 Proma 的 theme-forest-light 森息晨光）：
@@ -258,7 +263,6 @@
   --color-logo-green-mid: #2f6fe0;
   --color-logo-green-deep: #2456b8;
   --color-brand-green: #1d4ed8;
-  --color-info: #2563eb;
   --color-chat-link: #2563eb;
 }
 :root[data-accent="purple"] {
@@ -269,7 +273,6 @@
   --color-logo-green-mid: #7c3aed;
   --color-logo-green-deep: #6d28d9;
   --color-brand-green: #6d28d9;
-  --color-info: #7c3aed;
   --color-chat-link: #7c3aed;
 }
 :root[data-accent="amber"] {
@@ -280,7 +283,6 @@
   --color-logo-green-mid: #c26a06;
   --color-logo-green-deep: #9a5505;
   --color-brand-green: #92400e;
-  --color-info: #b45309;
   --color-chat-link: #b45309;
 }
 :root[data-accent="rose"] {
@@ -291,7 +293,6 @@
   --color-logo-green-mid: #e11d48;
   --color-logo-green-deep: #be123c;
   --color-brand-green: #be123c;
-  --color-info: #e11d48;
   --color-chat-link: #e11d48;
 }
 
@@ -502,7 +503,8 @@
   --overlay-backdrop-subtle: rgba(0, 0, 0, 0.35);
 }
 
-/* 暗色主题色预设（data-accent），亮色系保证可读性 */
+/* 暗色主题色预设（data-accent），亮色系保证可读性；
+   同样不覆盖状态语义色（--color-info 等），状态灯跨主题恒定。 */
 :root[data-theme="dark"][data-accent="green"] {
   /* 森系绿暗色（参考 Proma theme-forest-dark 森息夜语）：雾绿灰主色 hsl(145,25%,42%)；
      accent-soft 用其 --accent（hsl 150 12% 22% = #313f38）作悬停/选中暖调。 */
@@ -513,7 +515,6 @@
   --color-logo-green: #64b486;
   --color-logo-green-mid: #508667;
   --color-logo-green-deep: #3d6b4d;
-  --color-info: #60a5fa;
   --color-chat-link: #87c5a1;
 }
 :root[data-theme="dark"][data-accent="blue"] {
@@ -524,7 +525,6 @@
   --color-logo-green-mid: #3b82f6;
   --color-logo-green-deep: #2563eb;
   --color-brand-green: #60a5fa;
-  --color-info: #60a5fa;
   --color-chat-link: #60a5fa;
 }
 :root[data-theme="dark"][data-accent="purple"] {
@@ -535,7 +535,6 @@
   --color-logo-green-mid: #8b5cf6;
   --color-logo-green-deep: #7c3aed;
   --color-brand-green: #a78bfa;
-  --color-info: #a78bfa;
   --color-chat-link: #a78bfa;
 }
 :root[data-theme="dark"][data-accent="amber"] {
@@ -546,7 +545,6 @@
   --color-logo-green-mid: #f59e0b;
   --color-logo-green-deep: #d97706;
   --color-brand-green: #fbbf24;
-  --color-info: #fbbf24;
   --color-chat-link: #fbbf24;
 }
 :root[data-theme="dark"][data-accent="rose"] {
@@ -557,7 +555,6 @@
   --color-logo-green-mid: #f43f5e;
   --color-logo-green-deep: #e11d48;
   --color-brand-green: #fb7185;
-  --color-info: #fb7185;
   --color-chat-link: #fb7185;
 }
 
