@@ -166,6 +166,8 @@ function loadSessionScanner(homePath, fsOverrides = {}) {
 	const sessionSummaryCache = loadSessionSummaryCacheModule(homePath);
 	const wslPaths = loadWslPathsModule();
 	const sessionIdentity = loadTranspiledModule("src/shared/sessionIdentity.ts");
+	// SessionScanner 新增的自包含块折叠（无依赖纯函数）
+	const expandedRefBlocks = loadTranspiledModule("src/shared/expandedRefBlocks.ts");
 	const sandbox = {
 		AbortController,
 		AbortSignal,
@@ -182,6 +184,7 @@ function loadSessionScanner(homePath, fsOverrides = {}) {
 			if (id === "./sessionSummaryCache") return sessionSummaryCache;
 			if (id === "./sessionNameLine") return loadSessionNameLineModule();
 			if (id === "../../shared/sessionIdentity") return sessionIdentity;
+			if (id === "../../shared/expandedRefBlocks") return expandedRefBlocks;
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
 			if (id === "node:fs") return { ...require(id), ...fsOverrides };
 			return require(id);

@@ -33,6 +33,7 @@ import type {
 	UpdateSessionRecordInput,
 } from "../../shared/types";
 import type { PendingUiRequestSnapshot } from "../sessions/SessionRuntimeCoordinator";
+import { replaceExpandedRefBlocksWithLabels } from "../../shared/expandedRefBlocks";
 import { serializeWebClientDictionaries, webEnUS } from "./WebI18n";
 import {
 	WebEventStreamRouter,
@@ -954,7 +955,10 @@ export class WebServiceManager {
 			return tr(value.i18nKey, value.i18nParams);
 		}
 		function localizeMessage(message) {
-			const localized = localizeDescriptor(message.meta, message.text || "");
+			// Web 端消息是纯文本出口：折叠自包含引用块，避免把 <quoted_context> 等 XML 原文发给浏览器。
+			const localized = replaceExpandedRefBlocksWithLabels(
+				localizeDescriptor(message.meta, message.text || ""),
+			);
 			const debug = typeof message.meta?.debugDetails === "string" ? message.meta.debugDetails.trim() : "";
 			if (debug) console.error(debug);
 			return localized;

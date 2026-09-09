@@ -751,10 +751,6 @@
   background: transparent;
 }
 
-/* 用户消息中的 skill 徽标：pi 展开后的 /skill:name 会以 <skill> 块注入消息文本，
-   这里把它从正文剥除并单独渲染成轻量徽标，让用户知道这条消息用了哪些 skill。
-   徽标仅作展示：取消内部 gap（斜杠与名字紧贴成一个整体，避免割裂），并禁用文本选中。 */
-
 /* 工具卡片上的来源徽标：MCP 代理/直连会显示 MCP·server，内置工具不显示 */
 .tool-card-kind {
   flex: 0 0 auto;
@@ -1518,122 +1514,117 @@ body.ask-dialog-open .ask-card-preview {
 .composer .tiptap-composer-host .ProseMirror p {
   margin: 0;
 }
-/* 行内 chip:文件=蓝、skill=淡紫。输入框 + 消息气泡通用。
-   使用 display:inline + box-decoration-break:clone,长 chip 自动折行时
-   背景/边框在折行处重复,视觉上像两个独立 chip;空间恢复后自动回到一个 chip。 */
+/* ============ 行内引用 chip（输入框 + 消息气泡通用） ============
+/* ============ 行内引用 chip（输入框 + 消息气泡通用） ============
+   2026-09 视觉对齐 Proma（F:/Proma apps/electron/src/renderer/components/ai-elements/
+   rich-text-input.tsx 内联 <style>）：无边框、4px 圆角、13px/500、gap 2px、
+   baseline 对齐，且底色与文字、图标同源（类型色浅底 + 同色文字），
+   图标用 currentColor 跟随文字色——这是 Proma chip 最核心的观感。
+   颜色仍走 foundation.css 的 --color-chip-* 语义 token（不随 data-accent 洗白），
+   底色由同一 token 用 color-mix 派生，暗色主题自动跟随。
+   长标签不折行：统一最大 280px 省略，完整值留在 raw/title。 */
 .composer .input-chip,
 .user-turn-text .input-chip {
-  display: inline;
-  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: min(100%, 280px);
+  overflow: hidden;
+  padding: 1px 4px 1px 2px;
   margin: 0 1px;
+  border: none;
   border-radius: var(--radius-xs);
-  font-size: inherit;
-  font-family: var(--font-family-business);
-  line-height: 1.7;
-  word-break: break-all;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-  user-select: all;
-  -webkit-user-select: all;
+  font-size: var(--font-size-control);
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: baseline;
+  transition:
+    background-color 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.12s cubic-bezier(0.16, 1, 0.3, 1);
 }
+/* 图标 12px + currentColor（Proma 规格）：不再单独染色，与文字同色 */
 .composer .input-chip__icon,
 .user-turn-text .input-chip__icon {
-  margin-right: 2px;
-  opacity: 0.7;
-  font-weight: 600;
-  display: inline;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
 }
 .composer .input-chip__label,
 .user-turn-text .input-chip__label {
-  max-width: none;
-  overflow: visible;
-  word-break: break-all;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-/* 输入框内文件引用 @path 不加高亮（参考 dsh-web 输入框 textarea 形态：纯文本）。
-   原因：chip 背景会让路径与后续输入视觉粘连成一块，用户需要手动补空格才能
-   区分；纯文本后靠 @ 前缀自然分隔。TipTap atom 属性保留，路径仍是整体 token。 */
-.composer .input-chip--file {
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: inherit;
-  font-family: inherit;
-  line-height: inherit;
-  box-decoration-break: unset;
-  -webkit-box-decoration-break: unset;
-  user-select: text;
-  -webkit-user-select: text;
-}
-.composer .input-chip--file .input-chip__icon {
-  margin-right: 0;
-  opacity: 1;
-  font-weight: inherit;
-}
-/* 消息气泡里文件引用用 dsh-web fileMention 轻链接形态：无背景无边框、
-   品牌蓝文字、hover 下划线；有 onOpenFile 回调时（.clickable）光标 pointer。 */
+/* 类型色：底色与文字同源（Proma `bg-primary/10 text-primary` 的做法） */
+.composer .input-chip--file,
 .user-turn-text .input-chip--file {
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: none;
-  color: var(--color-brand-blue);
-  text-decoration: none;
+  background: color-mix(in srgb, var(--color-chip-file) 12%, transparent);
+  color: var(--color-chip-file);
 }
-.user-turn-text .input-chip--file:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+.composer .input-chip--skill,
+.user-turn-text .input-chip--skill {
+  background: color-mix(in srgb, var(--color-chip-skill) 15%, transparent);
+  color: var(--color-chip-skill);
+}
+.composer .input-chip--session,
+.user-turn-text .input-chip--session {
+  background: color-mix(in srgb, var(--color-chip-session) 14%, transparent);
+  color: var(--color-chip-session);
+}
+/* hover：同色加深一档（Proma 0.16~0.20 的观感） */
+.composer .input-chip--file:hover,
+.user-turn-text .input-chip--file.clickable:hover {
+  background: color-mix(in srgb, var(--color-chip-file) 20%, transparent);
+}
+.composer .input-chip--skill:hover {
+  background: color-mix(in srgb, var(--color-chip-skill) 22%, transparent);
+}
+.composer .input-chip--session:hover {
+  background: color-mix(in srgb, var(--color-chip-session) 22%, transparent);
+}
+/* 输入框内 chip 进入动画（pop-in，借鉴 beui multi-select token：
+   上移 + 缩小 + 淡入，cubic-bezier(0.16,1,0.3,1) 与 lib/ease EASE_OUT 对齐）。
+   气泡内是历史内容，不播放动画，避免整页弹跳。 */
+@keyframes input-chip-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.composer .input-chip {
+  animation: input-chip-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer .input-chip {
+    animation: none;
+  }
+}
+/* 用户消息中的 chip 仅作展示，不再响应点击，避免和发送后的普通文本产生割裂；
+   气泡内 file 引用保留点击打开（.clickable）时 hover 轻微加深。 */
+.user-turn-text .input-chip {
+  cursor: default;
 }
 .user-turn-text .input-chip--file.clickable {
   cursor: pointer;
 }
-.user-turn-text .input-chip--file .input-chip__icon {
-  margin-right: 0;
-  opacity: 1;
-  font-weight: inherit;
-}
-.composer .input-chip--skill,
-.user-turn-text .input-chip--skill {
-  background: color-mix(in srgb, var(--color-brand-purple) 15%, transparent);
-  color: var(--color-brand-purple);
-  border: 1px solid
-    color-mix(in srgb, var(--color-brand-purple) 28%, transparent);
-}
-/* 用户消息中的 chip 仅作高亮展示，不再响应点击，避免和发送后的普通文本产生割裂。 */
-.user-turn-text .input-chip {
-  cursor: default;
-}
 
-.composer .input-chip--session,
-.user-turn-text .input-chip--session {
-  background: color-mix(in srgb, var(--color-brand-green) 14%, transparent);
-  color: var(--color-brand-green);
-  border: 1px solid color-mix(in srgb, var(--color-brand-green) 28%, transparent);
-  cursor: pointer;
-}
-.composer .input-chip--session:hover {
-  background: color-mix(in srgb, var(--color-brand-green) 24%, transparent);
-}
-
-/* 引用 chip（#q<id> 快照指针）：引用的是对话内容，与 markdown 引用块同语义
-   （accent 柔和底 + 中性文字），单行省略号——长划选不能把输入框撑成多行。
-   双类名提高特异性（压过同文件靠后的基类 display:inline/word-break:break-all），
-   ellipsis 需要 inline-block 才生效。 */
+/* 引用 chip（#q<id> 快照指针）：Proma `.agent-history-quote-chip` 用主题色 12% 底 +
+   主题色文字；这里走 accent 语义 token，默认主题下就是中性灰，不抢正文。 */
 .composer .input-chip.input-chip--quote,
 .user-turn-text .input-chip.input-chip--quote {
-  display: inline-block;
-  max-width: 280px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  vertical-align: bottom;
-  line-height: 1.5;
-  word-break: normal;
-  background: color-mix(in srgb, var(--color-accent-soft) 55%, var(--color-bg-panel));
-  color: var(--color-text-secondary);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+}
+.composer .input-chip.input-chip--quote:hover {
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .composer-box:focus-within {

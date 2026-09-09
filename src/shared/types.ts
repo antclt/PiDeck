@@ -40,3 +40,4 @@ export * from "./types/health";
 export * from "./types/backup";
 export * from "./types/soundAlert";
 export * from "./types/packageCatalog";
+export * from "./types/automation";

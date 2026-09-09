@@ -15,6 +15,7 @@ import { normalizePinnedSessionIds } from "../../shared/pinnedSessions";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { getAppLogger } from "../logging/sharedLogger";
+import { setConfiguredGitPath } from "../git/gitExecutable";
 
 /** 桌面端 settings.json（userData），与 pi agent settings 分离 */
 function desktopSettingsPath() {
@@ -132,6 +133,8 @@ Gitmoji 对应关系：
   // 默认不指定模型，避免升级后在用户尚未配置 provider 时隐式调用错误模型。
   gitCommitMessageProvider: "",
   gitCommitMessageModel: "",
+  // 空串 = 自动解析（PATH 中的 git → 各平台已知安装位置）；用户可在 Git 设置页显式指定。
+  gitExecutablePath: "",
   closeToTray: true,
   // 默认单实例：托盘隐藏后再次点击快捷方式会唤起原窗口，而不是再开一个进程
   singleInstance: true,
@@ -222,9 +225,9 @@ Gitmoji 对应关系：
 
   // ── 更新检测：检查永远自动；自动下载默认开启（v0.7.4 起取代 disableUpdateCheck）──
   autoDownloadUpdates: true,
-  // 更新源：默认 GitHub 官方；国内用户可切镜像前缀代理（见 updateSources.ts）
-  updateSource: "github",
-  // 自定义镜像前缀（updateSource=custom 时生效），空串 = 未填
+  // 更新源：默认国内 AtomGit 源（第一首选）；用户可切 GitHub 官方源（见 updateSources.ts）
+  updateSource: "atomgit",
+  // 自定义镜像前缀（保留向下兼容字段），空串 = 未填
   customUpdateSourceUrl: "",
 
   // ── Agent 后端：默认 pi（经典后端），用户可在设置中切换为 dsh ──
@@ -316,6 +319,10 @@ export class SettingsStore {
       this.settings.pinnedSessionIds = normalizePinnedSessionIds(parsed.pinnedSessionIds);
       // 声音提醒来自旧 JSON 时可能缺字段/非法；统一归一化（旧数据自动获得默认配置）。
       this.settings.soundAlert = normalizeSoundAlertSettings(parsed.soundAlert);
+      // git 可执行文件路径来自旧 JSON 时可能是脏值（非字符串）；回落空串（自动解析），
+      // 避免 spawn 拿到非字符串路径把整个 Git 面板打挂。
+      this.settings.gitExecutablePath =
+        typeof parsed.gitExecutablePath === "string" ? parsed.gitExecutablePath.trim() : "";
     } catch {
       this.settings = { ...defaultSettings };
     }
@@ -325,6 +332,9 @@ export class SettingsStore {
     if (computedShowThinking !== undefined) {
       this.settings.showThinking = computedShowThinking;
     }
+    // git 可执行文件：每次 load 都把持久化值灌进子进程解析器，
+    // 覆盖冷启动、备份恢复等所有 reload 路径（保存路径由 settings:update 同步）。
+    setConfiguredGitPath(this.settings.gitExecutablePath);
     // 每次启动都校准安装类型：Windows 便携版由 electron-builder 注入运行时环境变量,
     // 该信号比旧 settings 更可信,可修正用户从安装版/旧版本迁移后残留的 installed 记录。
     await this.detectAndSaveInstallationType();
@@ -387,16 +397,12 @@ export class SettingsStore {
     if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
       delete safePatch.autoSessionTitle;
     }
-    // 更新源 id 归一化（只允许已知枚举，防手改/脏值污染 feed URL）；自定义源地址仅接受字符串。
+    // 更新源 id 归一化（只允许已知枚举：atomgit 第一首选，github 官方；其余历史值回退 atomgit）。
     if ("updateSource" in safePatch) {
       const candidate = safePatch.updateSource;
       const known =
         typeof candidate === "string" &&
-        (candidate === "github" ||
-          candidate === "ghfast" ||
-          candidate === "ghproxy-net" ||
-          candidate === "ghproxy-cxkpro" ||
-          candidate === "custom");
+        (candidate === "atomgit" || candidate === "github");
       if (known) safePatch.updateSource = candidate;
       else delete safePatch.updateSource;
     }

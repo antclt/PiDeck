@@ -14,7 +14,7 @@ import type { UIMessage } from "ai";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { splitAskOption, formatAskTitle } from "../utils/askUi";
+import { splitAskOption, formatAskTitle, serializeBatchAnswers } from "../utils/askUi";
 import { WebAssistantText } from "./WebAssistantText";
 import type { WebPendingUiRequest } from "./webTypes";
 import type { AgentUiResponse } from "../../../shared/types";
@@ -214,14 +214,188 @@ function WebAskCard(props: {
 	busy: boolean;
 	onRespond: (response: AgentUiResponse) => void;
 }) {
+	const batchQuestions = props.request.batchQuestions;
+	const isBatch = Boolean(batchQuestions && batchQuestions.length > 0);
+
+	// 状态：用于批量问答
+	const [batchTab, setBatchTab] = useState(0);
+	const [batchAnswers, setBatchAnswers] = useState<Record<string, string | boolean | string[]>>({});
+	const [batchInput, setBatchInput] = useState("");
+
+	// 单问题/普通输入框
 	const [draft, setDraft] = useState(props.request.prefill ?? "");
 	const method = props.request.method;
 	const options = (props.request.options ?? []).filter((option) => !option.startsWith("✎"));
+
+	// 如果是批量问题或者 multi_select 信封
+	if (isBatch && batchQuestions && batchQuestions.length > 0) {
+		const currentQ = batchQuestions[batchTab] || batchQuestions[0];
+		const total = batchQuestions.length;
+		const isLast = batchTab === total - 1;
+		const currentAns = batchAnswers[currentQ.id];
+
+		const handleAnswerOne = (val: string | boolean | string[]) => {
+			const updated = { ...batchAnswers, [currentQ.id]: val };
+			setBatchAnswers(updated);
+			if (!isLast) {
+				setBatchTab(batchTab + 1);
+				setBatchInput("");
+			} else {
+				// 提交全部答案
+				const serialized = serializeBatchAnswers(batchQuestions, updated);
+				props.onRespond({ value: serialized });
+			}
+		};
+
+		const handleToggleMulti = (val: string) => {
+			const arr = Array.isArray(currentAns) ? [...currentAns] : [];
+			const idx = arr.indexOf(val);
+			if (idx >= 0) arr.splice(idx, 1);
+			else arr.push(val);
+			setBatchAnswers({ ...batchAnswers, [currentQ.id]: arr });
+		};
+
+		return (
+			<section className="mt-3 rounded-lg border border-border bg-card p-3 shadow-sm">
+				<div className="mb-2 flex items-center justify-between text-caption font-medium text-foreground">
+					<span>{t("ask.toolName")} ({batchTab + 1}/{total})</span>
+					{total > 1 ? (
+						<div className="flex gap-1">
+							{batchQuestions.map((q, idx) => (
+								<button
+									key={q.id}
+									type="button"
+									className={cn(
+										"h-5 w-5 rounded text-xs",
+										idx === batchTab
+											? "bg-primary text-primary-foreground font-semibold"
+											: batchAnswers[q.id] !== undefined
+												? "bg-muted text-foreground"
+												: "bg-muted/40 text-muted-foreground"
+									)}
+									onClick={() => {
+										setBatchTab(idx);
+										setBatchInput("");
+									}}
+								>
+									{idx + 1}
+								</button>
+							))}
+						</div>
+					) : null}
+				</div>
+
+				<p className="mb-3 whitespace-pre-wrap break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]">
+					{currentQ.question}
+				</p>
+
+				{/* 选项渲染 */}
+				{currentQ.type === "select" && currentQ.options && currentQ.options.length > 0 ? (
+					<div className="flex flex-col gap-2">
+						{currentQ.options.map((opt) => {
+							const label = typeof opt === "string" ? opt : opt.label;
+							const desc = typeof opt === "string" ? undefined : opt.description;
+							const val = typeof opt === "string" ? opt : (opt.value ?? opt.label);
+							return (
+								<Button
+									key={label}
+									type="button"
+									variant={currentAns === val ? "default" : "secondary"}
+									size="sm"
+									className="h-auto min-h-9 w-full flex-col items-start justify-center whitespace-normal break-words py-2 text-left"
+									disabled={props.busy}
+									onClick={() => handleAnswerOne(val)}
+								>
+									<span className="whitespace-pre-wrap break-words">{label}</span>
+									{desc ? <span className="text-xs font-normal leading-relaxed text-muted-foreground">{desc}</span> : null}
+								</Button>
+							);
+						})}
+					</div>
+				) : currentQ.type === "multi_select" && currentQ.options && currentQ.options.length > 0 ? (
+					<div className="flex flex-col gap-2">
+						{currentQ.options.map((opt) => {
+							const label = typeof opt === "string" ? opt : opt.label;
+							const desc = typeof opt === "string" ? undefined : opt.description;
+							const val = typeof opt === "string" ? opt : (opt.value ?? opt.label);
+							const selected = Array.isArray(currentAns) && currentAns.includes(val);
+							return (
+								<Button
+									key={label}
+									type="button"
+									variant={selected ? "default" : "secondary"}
+									size="sm"
+									className="h-auto min-h-9 w-full flex-col items-start justify-center whitespace-normal break-words py-2 text-left"
+									disabled={props.busy}
+									onClick={() => handleToggleMulti(val)}
+								>
+									<span className="whitespace-pre-wrap break-words">
+										{selected ? "✓ " : "○ "}{label}
+									</span>
+									{desc ? <span className="text-xs font-normal leading-relaxed text-muted-foreground">{desc}</span> : null}
+								</Button>
+							);
+						})}
+						<Button
+							type="button"
+							size="sm"
+							className="mt-2"
+							disabled={props.busy || !Array.isArray(currentAns) || currentAns.length === 0}
+							onClick={() => handleAnswerOne(currentAns ?? [])}
+						>
+							{isLast ? t("ask.submit") : t("ask.batchNext")}
+						</Button>
+					</div>
+				) : currentQ.type === "confirm" ? (
+					<div className="flex gap-2">
+						<Button type="button" size="sm" disabled={props.busy} onClick={() => handleAnswerOne(true)}>
+							{t("common.true")}
+						</Button>
+						<Button type="button" variant="secondary" size="sm" disabled={props.busy} onClick={() => handleAnswerOne(false)}>
+							{t("common.false")}
+						</Button>
+					</div>
+				) : (
+					<div className="flex flex-col gap-2">
+						<textarea
+							className="min-h-16 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+							placeholder={currentQ.placeholder || t("ask.inputPlaceholder")}
+							value={batchInput}
+							disabled={props.busy}
+							onChange={(event) => setBatchInput(event.target.value)}
+						/>
+						<Button
+							type="button"
+							size="sm"
+							disabled={props.busy || !batchInput.trim()}
+							onClick={() => handleAnswerOne(batchInput.trim())}
+						>
+							{isLast ? t("ask.submit") : t("ask.batchNext")}
+						</Button>
+					</div>
+				)}
+
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					className="mt-2"
+					disabled={props.busy}
+					onClick={() => props.onRespond({ cancelled: true })}
+				>
+					{t("common.cancel")}
+				</Button>
+			</section>
+		);
+	}
+
+	const displayTitle = formatAskTitle(props.request.title || t("ask.defaultTitle"));
+
 	return (
 		<section className="mt-3 rounded-lg border border-border bg-card p-3 shadow-sm">
 			<div className="mb-2 text-caption font-medium text-foreground">{t("ask.toolName")}</div>
 			<p className="mb-3 whitespace-pre-wrap break-words text-sm text-foreground [overflow-wrap:anywhere]">
-				{formatAskTitle(props.request.title || t("ask.defaultTitle"))}
+				{displayTitle}
 			</p>
 			{method === "select" && options.length > 0 ? (
 				<div className="flex flex-col gap-2">

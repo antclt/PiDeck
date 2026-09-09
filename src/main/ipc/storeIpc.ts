@@ -465,11 +465,14 @@ export function registerStoreIpc({
 		const target = await projectInstallTarget(projectId);
 		try {
 			const { execFile } = await import("node:child_process");
-			const command = process.platform === "win32" ? "npx.cmd" : "npx";
-			const args = ["skills", "add", pkg, "--agent", "pi"];
-			if (skillName) args.push("--skill", skillName);
-			if (!target) args.push("--global");
-			args.push("--yes");
+			const { buildSkillHubInstallCommand } = await import("../skills/skillHubInstallCommand");
+			// win32 经 cmd.exe /d /s /c 包装（Node 24 Windows 直 spawn .cmd 报 EINVAL），
+			// 非 win 平台数组直调；命令构造见 skillHubInstallCommand.ts 头注释。
+			const { command, args } = buildSkillHubInstallCommand({
+				pkg,
+				skillName,
+				global: !target,
+			});
 			await new Promise<void>((resolve, reject) => {
 				execFile(
 					command,

@@ -1,33 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-function transpile(filePath) {
-	return ts.transpileModule(readFileSync(filePath, "utf8"), {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-	}).outputText;
-}
-
-function loadModule() {
-	const sandbox = {
-		exports: {},
-		// composerBehavior.ts 只有 type-only import（transpile 后擦除），不应产生运行时 require
-		require: (specifier) => {
-			throw new Error(`Unexpected import: ${specifier}`);
-		},
-	};
-	vm.runInNewContext(transpile("src/renderer/src/composerBehavior.ts"), sandbox, {
-		filename: "composerBehavior.ts",
-	});
-	return sandbox.exports;
-}
-
-const { extractUserPrompts, mergePromptHistory } = loadModule();
+const { extractUserPrompts, mergePromptHistory } = loadTsCommonJs(
+	"src/renderer/src/composerBehavior.ts",
+);
 
 // vm 沙箱 realm 的数组原型与宿主不同，deepStrictEqual 会因原型不等而失败，
 // 统一转成宿主数组再比较（元素为字符串原始值，跨 realm 可直接比较）。

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
+import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
@@ -243,7 +244,7 @@ function SubagentsPanel(props: { agentId: string }) {
       .catch(() => null);
     setTranscriptLoading(false);
     if (page) {
-      setTranscript(page.messages.map((message) => ({ role: message.role, text: message.text })));
+      setTranscript(page.messages.map((message) => ({ role: message.role, text: replaceExpandedRefBlocksWithLabels(message.text) })));
     } else {
       setTranscriptError(true);
     }

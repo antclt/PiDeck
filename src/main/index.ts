@@ -12,6 +12,7 @@ import {
 	session,
 	shell,
 	Tray,
+	Notification,
 } from "electron";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -24,6 +25,10 @@ import { registerSoundIpc } from "./ipc/soundIpc";
 import { registerSoundProtocol } from "./sounds/soundProtocol";
 import { AnnouncementService } from "./announcements/AnnouncementService";
 import { registerAnnouncementIpc } from "./ipc/announcementIpc";
+import { AutomationStore } from "./automation/AutomationStore";
+import { AutomationScheduler } from "./automation/AutomationScheduler";
+import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
+import { registerAutomationIpc } from "./ipc/automationIpc";
 import {
 	applyLinuxDisplayBackendWorkaround,
 	isUsingLinuxXWaylandWorkaround,
@@ -440,6 +445,10 @@ let petSystem: PetSystem | null = null;
 let soundAlertService: SoundAlertService | null = null;
 /** 应用公告服务（无服务器拉取模式）；null = 未初始化 */
 let announcementService: AnnouncementService | null = null;
+/** 定时任务与自动化服务；null = 未初始化 */
+let automationStore: AutomationStore | null = null;
+let automationScheduler: AutomationScheduler | null = null;
+let automationRunCoordinator: AutomationRunCoordinator | null = null;
 let appLogger: AppLogger;
 let rpcLogger: RpcLogger;
 /** 内存采样句柄（PIDECK_MEMORY_PROFILE=1 时启用），quit 时停止 */
@@ -581,6 +590,7 @@ function emitSessionRuntimeEvent(
 		payload,
 	};
 	sessionRuntimeCoordinator.observeRuntimeEvent(event);
+	automationRunCoordinator?.observeRuntimeEvent(event);
 	if (payload && typeof payload === "object" && !Array.isArray(payload)) {
 		const tab = payload as Partial<AgentTab>;
 		if (typeof tab.sessionPath === "string" && tab.sessionPath) {
@@ -1236,6 +1246,10 @@ function focusMainWindow() {
  * 2. renderer 挂载后经 pet:get-focus-target-pending 主动拉取（取走即清空，保证送达）。
  * 三种目标：sessionId 跳会话；projectId 跳已有项目（右键打开已收录目录）；projectPath 引导新增项目。
  */
+/** 项目表加载完成的 Promise（whenReady 内赋值）。冷启动跳转目标 / 单实例焦点请求
+ * 解析目录是否已收录前必须先等它，否则 findByPath 命中空项目表，已注册目录也会弹「添加为项目」。 */
+let projectStoreReady: Promise<unknown> | null = null;
+
 let pendingFocusTarget: { sessionId: string } | { projectId: string } | { projectPath: string } | null = null;
 
 /** 窗口就绪（存在且未在加载）直接推送；否则入 pending 队列。 */
@@ -1262,11 +1276,13 @@ function flushPendingFocusTargetOnLoad() {
  */
 function handleVersionFocusRequest(payload?: FocusPayload) {
 	const target = extractFocusTargetFromArgv(payload?.argv);
-	const activateSession = () => {
+	const activateSession = async () => {
 		if (!target) return;
 		// 文件夹右键打开：已收录目录直接跳项目（渲染层 selectProjectCommand）；
 		// 未收录目录推 projectPath，渲染层弹确认框走新增项目流程。
 		if (target.projectPath) {
+			// 主实例可能在启动早期就收到 .focus 信号（项目表尚未 load 完），先等就绪再判定。
+			if (projectStoreReady) await projectStoreReady;
 			const existing = projectStore?.findByPath(target.projectPath);
 			if (existing) {
 				queueFocusTarget({ projectId: existing.id });
@@ -1283,19 +1299,19 @@ function handleVersionFocusRequest(payload?: FocusPayload) {
 	};
 	if (mainWindow && !mainWindow.isDestroyed()) {
 		focusMainWindow();
-		activateSession();
+		void activateSession();
 		return;
 	}
 	void app.whenReady().then(() => {
 		if (mainWindow && !mainWindow.isDestroyed()) {
 			focusMainWindow();
-			activateSession();
+			void activateSession();
 			return;
 		}
 		if (settingsStore) {
 			void createWindow()
 				.then(() => {
-					activateSession();
+					void activateSession();
 				})
 				.catch((error) => {
 					void appLogger?.error("app", "Failed to recreate window on version focus request", error);
@@ -2312,6 +2328,21 @@ async function sendAgentPromptWithIntegrations(
 function registerIpc() {
 	// 用量统计：业务在 UsageStatsService，handler 薄层只校验/适配
 	registerUsageStatsIpc(ipcMain, usageStatsService);
+
+	if (automationStore && automationScheduler && automationRunCoordinator) {
+		registerAutomationIpc({
+			automationStore,
+			automationScheduler,
+			automationRunCoordinator,
+			appLogger,
+			onNotifyChanged: (event) => {
+				const win = mainWindow;
+				if (win && !win.isDestroyed()) {
+					win.webContents.send(ipcChannels.automationChanged, event);
+				}
+			},
+		});
+	}
 
 	const catalogIdentityContext = () => {
 		const { wslEnabled, wslDistro, wslUser } = settingsStore.get();
@@ -3754,6 +3785,53 @@ app.whenReady().then(async () => {
 		sendAgentPromptWithIntegrations,
 		appLogger,
 	);
+
+	// 定时任务调度器与执行编排器装配
+	automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
+	await automationStore.load();
+	automationRunCoordinator = new AutomationRunCoordinator({
+		store: automationStore,
+		catalog: sessionCatalog,
+		sessionRuntimeCoordinator,
+		projectStore,
+		gitService,
+		logger: appLogger,
+		notifyRunFinished: (run, task) => {
+			const settings = settingsStore.get();
+			if (!settings.enableNotifications || !Notification.isSupported()) return;
+			const isSuccess = run.status === "succeeded";
+			const appName = app.getName();
+			const body = isSuccess
+				? mainCopy("mainNotification.automationDone", { name: task.name })
+				: mainCopy("mainNotification.automationFailed", {
+						name: task.name,
+						error: run.error || run.status,
+					});
+			const notification = new Notification({
+				title: appName,
+				body,
+				silent: false,
+			});
+			notification.on("click", () => {
+				focusMainWindow();
+				if (run.sessionId) {
+					queueFocusTarget({ sessionId: run.sessionId });
+				}
+			});
+			notification.show();
+		},
+	});
+	automationScheduler = new AutomationScheduler(automationStore);
+	automationScheduler.setTriggerHandler(async (task, scheduledFor, trigger) => {
+		await automationRunCoordinator?.enqueueRun(task, scheduledFor, trigger);
+	});
+	automationScheduler.start();
+	quitCleanup.register("automation", () => {
+		automationScheduler?.stop();
+		automationRunCoordinator?.dispose();
+		automationScheduler = null;
+		automationRunCoordinator = null;
+	});
 	// 闲置 agent 自动释放（内存优化）：轮询 agents.list() 自记 idle 时长，释放走
 	// coordinator.stopAgentById（解绑 + agents.stop + agents:state 推送，会话状态自动同步）。
 	// 设置项（开关/保留数/闲置时长）每次扫描时读取，改设置后下一轮自动生效。
@@ -3940,6 +4018,29 @@ app.whenReady().then(async () => {
 		});
 	}
 
+	// 项目列表可能位于杀软/同步盘较慢的 userData；窗口先显示，随后异步加载，避免 packaged app 打开时白屏等待。
+	// 必须在冷启动跳转目标解析之前开始（并等它完成）：否则 findByPath 命中空项目表，
+	// 已收录目录也会被当成新目录弹「添加为项目」（实测右键打开两次都走了 add 链路）。
+	const projectStoreLoadPromise = projectStore.load();
+	projectStoreReady = projectStoreLoadPromise.catch(() => undefined);
+	void projectStoreLoadPromise
+		.then(async () => {
+			// load() 已丢掉 e2e 临时项目；对应 catalog 映射一并清掉，侧栏会话不会再挂回来。
+			const knownProjectIds = new Set(projectStore.list().map((project) => project.id));
+			const orphanProjectIds = new Set(
+				sessionCatalog.listEntries()
+					.map((entry) => entry.projectId)
+					.filter((projectId) => !knownProjectIds.has(projectId)),
+			);
+			for (const projectId of orphanProjectIds) {
+				await sessionCatalog.removeByProjectId(projectId).catch(() => 0);
+			}
+			broadcastVisibleProjects();
+			// 项目表就绪后再扫 DSH_HOME：cwd 才能匹配已注册项目；不启动 host。
+			await scheduleDshForeignAutoImport();
+		})
+		.catch(() => undefined);
+
 	// 冷启动通知/右键唤起：应用未运行时点击系统通知或右键菜单，本进程即为唯一实例（无次实例 .focus
 	// 流转），argv 携带 pideck:// URL 或 --open-project 参数，窗口就绪后跳转对应会话/项目。
 	// 页面仍在加载时直接 send 会丢（preload/React 监听未注册），故走 pending 队列：
@@ -3948,6 +4049,8 @@ app.whenReady().then(async () => {
 	const coldStartTarget = extractFocusTargetFromArgv(process.argv);
 	if (coldStartTarget) {
 		if (coldStartTarget.projectPath) {
+			// 项目表就绪后再判定是否已收录：否则已注册目录也会弹「添加为项目」。
+			await projectStoreReady;
 			const existing = projectStore?.findByPath(coldStartTarget.projectPath);
 			if (existing) {
 				queueFocusTarget({ projectId: existing.id });
@@ -4025,26 +4128,6 @@ app.whenReady().then(async () => {
 		announcementService?.stop();
 		announcementService = null;
 	});
-
-	// 项目列表可能位于杀软/同步盘较慢的 userData；窗口先显示，随后异步加载，避免 packaged app 打开时白屏等待。
-	void projectStore
-		.load()
-		.then(async () => {
-			// load() 已丢掉 e2e 临时项目；对应 catalog 映射一并清掉，侧栏会话不会再挂回来。
-			const knownProjectIds = new Set(projectStore.list().map((project) => project.id));
-			const orphanProjectIds = new Set(
-				sessionCatalog.listEntries()
-					.map((entry) => entry.projectId)
-					.filter((projectId) => !knownProjectIds.has(projectId)),
-			);
-			for (const projectId of orphanProjectIds) {
-				await sessionCatalog.removeByProjectId(projectId).catch(() => 0);
-			}
-			broadcastVisibleProjects();
-			// 项目表就绪后再扫 DSH_HOME：cwd 才能匹配已注册项目；不启动 host。
-			await scheduleDshForeignAutoImport();
-		})
-		.catch(() => undefined);
 
 	// 启动后异步检查 RPC 超时时间，如果小于 600 秒则自动修正为 600 秒
 	// 避免用户配置的过小超时（如 30 秒）导致启动或命令执行频繁超时

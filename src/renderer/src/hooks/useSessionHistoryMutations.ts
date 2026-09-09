@@ -13,6 +13,12 @@ import {
   requireSessionCommand,
   sessionCommandFailureToast,
 } from "../utils/sessionCommands";
+import { setSessionQuotesAtom } from "../atoms/composer-atoms";
+import {
+  extractQuoteTokens,
+  pruneUnreferencedQuotes,
+  rehydrateDraftFromMessage,
+} from "../components/session/composer/quoteChip";
 import { resolveHistoryMutationPath } from "../utils/sessionHistoryMutationPolicy";
 import { messageEntryId } from "../utils/sessionCommands";
 
@@ -63,6 +69,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
   const setOverlay = useSetAtom(setSessionHistoryMutationOverlayAtom);
   const cacheMessages = useSetAtom(cacheSessionMessagesAtom);
   const setLoadState = useSetAtom(setSessionMessageLoadStateAtom);
+  const setQuotes = useSetAtom(setSessionQuotesAtom);
   const [forkingMessageId, setForkingMessageId] = useState<string | null>(null);
   const resendingIdsRef = useRef<Set<string>>(new Set());
   const overlaySessionRef = useRef<string | undefined>(undefined);
@@ -371,15 +378,30 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
         latest.showToast(t("app.forkCancelled"), 3500);
         return;
       }
-      const promptText =
+      const rawPromptText =
         typeof result.text === "string" && result.text.length > 0
           ? result.text
           : message.text;
+      // 还原引用块：直接把 <quoted_context> 等 XML 塞回输入框会露出原文，
+      // quote 重建快照 + #q token，session/skill/template 还原为 mention 文本。
+      const { draft: promptText, quotes } = rehydrateDraftFromMessage(rawPromptText);
       const projectId = latest.resolveProjectId(sessionId);
       const targetSessionId = result.targetSessionId;
       await latest.openReplacedRuntimeSession(projectId, targetSessionId);
       const draftTarget = targetSessionId ?? sessionId;
       if (targetSessionId) latest.setCurrentSessionIdRef(targetSessionId);
+      if (quotes.length > 0) {
+        const referencedIds = new Set(
+          extractQuoteTokens(promptText).map((occurrence) => occurrence.id),
+        );
+        setQuotes({
+          sessionId: draftTarget,
+          value: (current) => ({
+            ...pruneUnreferencedQuotes(current, referencedIds),
+            ...Object.fromEntries(quotes.map((snippet) => [snippet.id, snippet])),
+          }),
+        });
+      }
       latest.setPromptForAgent(draftTarget, promptText);
       window.dispatchEvent(
         new CustomEvent("user-message-edit", { detail: { text: promptText } }),

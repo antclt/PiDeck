@@ -40,13 +40,10 @@ export type WorkspaceContentOpenMode = "split" | "maximize";
 export type SessionTabOpenMode = "preview" | "permanent";
 export type AppFontSizeMode = "compact" | "default" | "medium" | "large" | "xlarge";
 
-/** 更新源：github = 官方 GitHub Release；其余为国内镜像前缀代理；custom = 用户自定义镜像前缀。 */
+/** 更新源：atomgit = 国内 AtomGit 源（默认首选）；github = 官方 GitHub Release。 */
 export type UpdateSourceId =
-	| "github"
-	| "ghfast"
-	| "ghproxy-net"
-	| "ghproxy-cxkpro"
-	| "custom";
+	| "atomgit"
+	| "github";
 
 /** 内置镜像体检状态：ok=检测+下载预检全通；slow=通但实测速度低于阈值；broken=失败/超时/响应异常。 */
 export type MirrorHealthStatus = "ok" | "slow" | "broken";
@@ -136,6 +133,12 @@ export type AppSettings = {
 	gitCommitMessageProvider: string;
 	/** Git 提交摘要使用的模型 ID；为空时生成前提示用户配置 */
 	gitCommitMessageModel: string;
+	/**
+	 * Git 可执行文件绝对路径（如 C:\Program Files\Git\cmd\git.exe）。
+	 * 为空表示自动解析：优先 PATH 中的 git，回退到各平台已知安装位置。
+	 * 用户显式配置后，所有 git 子进程（含 worktree）都使用该路径。
+	 */
+	gitExecutablePath: string;
 	/** 关闭窗口时隐藏到系统托盘而不是退出 */
 	closeToTray: boolean;
 	/**

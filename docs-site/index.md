@@ -15,6 +15,9 @@ hero:
     - theme: alt
       text: 查看 GitHub
       link: https://github.com/ayuayue/PiDeck
+    - theme: alt
+      text: AtomGit 镜像
+      link: https://atomgit.com/ayuayue/PiDeck
 
 features:
   - title: 多项目工作区

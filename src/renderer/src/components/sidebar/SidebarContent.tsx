@@ -31,6 +31,7 @@ import { Tabs, TabsList, TabsTrigger } from "../motion/tabs";
 import { Dock, DockItem } from "../motion/dock";
 import { UpdateDotHint } from "./UpdateDotHint";
 import { AnnouncementCenter } from "./AnnouncementCenter";
+import { AutomationDockButton } from "../automation/AutomationDockButton";
 import { MorphingSearch, type MorphingSearchItem } from "../motion/morphing-search";
 import { parseSidebarNavTab } from "../../utils/sidebarNavTab";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
@@ -446,6 +447,10 @@ export function SidebarContent(props: SidebarContentProps) {
             {/* 公告中心入口：未读红点在组件内部按 atom 派生（单一 owner） */}
             <DockItem>
               <AnnouncementCenter />
+            </DockItem>
+            {/* 定时任务与自动化入口 */}
+            <DockItem>
+              <AutomationDockButton />
             </DockItem>
             <DockItem>
               <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>

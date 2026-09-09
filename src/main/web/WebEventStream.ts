@@ -42,6 +42,8 @@ export class PiEventToUiMessageStream {
 	private reasoningBlockId: string | null = null;
 	private currentMessageId: string | null = null;
 	private finished = false;
+	/** 记录当前流已经发送过 tool-input 的 toolCallId，防止遗漏 start 导致 AI SDK 抛错 */
+	private startedToolCallIds = new Set<string>();
 
 	/**
 	 * 翻译单个 pi 事件为 0..n 个 UIMessageStream 帧。
@@ -159,6 +161,7 @@ export class PiEventToUiMessageStream {
 		if (eventType === "toolcall_start") {
 			const toolCall = ev.toolCall as Record<string, unknown> | undefined;
 			if (toolCall && typeof toolCall.id === "string" && typeof toolCall.name === "string") {
+				this.startedToolCallIds.add(toolCall.id);
 				frames.push({
 					type: "tool-input-start",
 					toolCallId: toolCall.id,
@@ -176,6 +179,12 @@ export class PiEventToUiMessageStream {
 		if (eventType === "toolcall_end") {
 			const toolCall = ev.toolCall as Record<string, unknown> | undefined;
 			if (toolCall && typeof toolCall.id === "string") {
+				// 容错：若当前流中途建立或跨端并发输入，未见证过 toolcall_start，
+				// 过滤孤儿 toolcall_end，防止 AI SDK 抛出 "No tool invocation found for tool call ID" 导致告警红条。
+				if (!this.startedToolCallIds.has(toolCall.id)) {
+					return [];
+				}
+				this.startedToolCallIds.delete(toolCall.id);
 				frames.push({
 					type: "tool-output-available",
 					toolCallId: toolCall.id,
@@ -199,6 +208,7 @@ export class PiEventToUiMessageStream {
 		const toolCallId = typeof event.toolCallId === "string"
 			? event.toolCallId
 			: `tool_${toolName}_${Date.now()}`;
+		this.startedToolCallIds.add(toolCallId);
 		return [
 			{ type: "tool-input-start", toolCallId, toolName },
 			{ type: "tool-input-available", toolCallId, toolName, input: event.args ?? {} },
@@ -210,6 +220,12 @@ export class PiEventToUiMessageStream {
 			? event.toolCallId
 			: undefined;
 		if (!toolCallId) return [];
+		// 容错：若当前流中途建立或跨端并发输入，未见证过 tool_execution_start，
+		// 过滤孤儿 tool_execution_end，防止 AI SDK 抛出 "No tool invocation found for tool call ID" 导致告警红条。
+		if (!this.startedToolCallIds.has(toolCallId)) {
+			return [];
+		}
+		this.startedToolCallIds.delete(toolCallId);
 		if (event.isError) {
 			return [{
 				type: "tool-output-error",

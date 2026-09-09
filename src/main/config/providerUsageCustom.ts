@@ -9,15 +9,17 @@
 import type { ProviderUsageCredits } from "../../shared/types/providerUsage";
 import type { UsageProbeResponse } from "./providerUsageProbe";
 import { getByPath, toNumber } from "./providerUsagePath";
+import { parseBooster } from "./providerUsageBooster";
 
 /** 专用解析器表：kind:"custom" 的 resolver 名称 → 解析函数。 */
 const CUSTOM_RESOLVERS: Record<
-	"xai-billing" | "codex-usage" | "commandcode-credits",
+	"xai-billing" | "codex-usage" | "commandcode-credits" | "kimi-credits",
 	(body: unknown, raw: string) => UsageProbeResponse
 > = {
 	"xai-billing": parseXaiBilling,
 	"codex-usage": parseCodexUsage,
 	"commandcode-credits": parseCommandcodeCredits,
+	"kimi-credits": parseKimiCredits,
 };
 
 /** 按 resolver 名解析（未注册的 resolver 返回 undefined，由调用方回退 raw）。 */
@@ -232,3 +234,161 @@ function parseCommandcodeCredits(body: unknown, raw: string): UsageProbeResponse
 		},
 	};
 }
+
+/**
+ * 辅助从 Detail 对象中提取数字（兼容 string 与 number）。
+ */
+function readDetailNumber(detail: Record<string, unknown> | undefined, key: string): number | undefined {
+	if (!detail) return undefined;
+	return toNumber(detail[key]);
+}
+
+/**
+ * Kimi For Coding（api.kimi.com/coding/v1/usages）多窗口用量解析：
+ * 业务背景与规则：
+ * 1. 5小时滚动限制：在 limits[] 数组中，window.duration === 300 且 timeUnit === "MINUTE" (或 "TIME_UNIT_MINUTE")；
+ *    若存在其他自定义 duration/unit，自动提取为对应 label（如 5h、1d 等）；
+ * 2. 周限额（7天）：在 usage 对象中（limit/used/remaining）；
+ * 3. 月度会员总额度（totalQuota）：
+ *    - 正常状态下 totalQuota 常见为 { limit: 100, remaining: 99 }，used 字段经常缺省，且 remaining: 99 是粘性值；
+ *    - 冻结/超额状态下（403 access_terminated）会带有 used > 0（如 used: 1）；
+ *    - 当 totalQuota 包含用于判断的字段时：
+ *      - 若 used 存在且 > 0，说明已达上限/冻结，标记为 total: 1, used: 1, remaining: 0；
+ *      - 若 used 为 0 或缺省（仅有 remaining/limit），说明额度可用，标记为 total: 100 (或 limit), remaining: remaining, used: total - remaining（或 100/100 绿条）；
+ *        为更直观展示用户看到的“99”，当 remaining 有值时我们保留真实的 limit/remaining/used，使用户清晰看到剩余 99。
+ * 4. 独立 Boost 钱包（boosterWallet）：通过 parseBooster 提取，不与普通请求数混淆。
+ */
+function parseKimiCredits(body: unknown, raw: string): UsageProbeResponse {
+	if (!body || typeof body !== "object" || Array.isArray(body)) return { matched: false, raw };
+	const root = body as Record<string, unknown>;
+
+	const windows: NonNullable<ProviderUsageCredits["windows"]> = [];
+
+	// 1. 5小时及子窗口限额（limits 列表）
+	const limits = root.limits;
+	if (Array.isArray(limits)) {
+		for (const item of limits) {
+			if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+			const limitObj = item as Record<string, unknown>;
+			const windowMeta = limitObj.window as Record<string, unknown> | undefined;
+			const detail = limitObj.detail as Record<string, unknown> | undefined;
+			if (!detail) continue;
+
+			const duration = toNumber(windowMeta?.duration) ?? 0;
+			const unitRaw = String(windowMeta?.timeUnit ?? "").toUpperCase().replace(/^TIME_UNIT_/, "");
+
+			// 计算窗口标识 key
+			let windowKey: string;
+			if (duration === 300 && unitRaw === "MINUTE") {
+				windowKey = "fiveHour";
+			} else if (duration > 0 && unitRaw) {
+				const unitChar = unitRaw.startsWith("HOUR") ? "h" : unitRaw.startsWith("DAY") ? "d" : unitRaw.startsWith("MIN") ? "m" : unitRaw.toLowerCase();
+				windowKey = `${duration}${unitChar}`;
+			} else {
+				windowKey = typeof detail.name === "string" && detail.name ? detail.name : "window";
+			}
+
+			const limitNum = readDetailNumber(detail, "limit");
+			const usedNum = readDetailNumber(detail, "used");
+			let remainingNum = readDetailNumber(detail, "remaining");
+
+			// 只有 remaining 缺省且 total/used 都在时反推 remaining
+			if (remainingNum === undefined && limitNum !== undefined && usedNum !== undefined) {
+				remainingNum = Math.max(0, limitNum - usedNum);
+			}
+
+			if (limitNum !== undefined || usedNum !== undefined || remainingNum !== undefined) {
+				windows.push({
+					key: windowKey,
+					total: limitNum,
+					used: usedNum,
+					remaining: remainingNum,
+				});
+			}
+		}
+	}
+
+	// 2. 周限额（usage 对象）
+	const usage = root.usage as Record<string, unknown> | undefined;
+	let weeklyRemaining: number | undefined;
+	let weeklyTotal: number | undefined;
+	let weeklyUsed: number | undefined;
+	if (usage && typeof usage === "object" && !Array.isArray(usage)) {
+		weeklyTotal = readDetailNumber(usage, "limit");
+		weeklyUsed = readDetailNumber(usage, "used");
+		weeklyRemaining = readDetailNumber(usage, "remaining");
+
+		// 只有 remaining 缺省且 total/used 都在时反推 remaining
+		if (weeklyRemaining === undefined && weeklyTotal !== undefined && weeklyUsed !== undefined) {
+			weeklyRemaining = Math.max(0, weeklyTotal - weeklyUsed);
+		}
+
+		if (weeklyTotal !== undefined || weeklyUsed !== undefined || weeklyRemaining !== undefined) {
+			windows.push({
+				key: "weekly",
+				total: weeklyTotal,
+				used: weeklyUsed,
+				remaining: weeklyRemaining,
+			});
+		}
+	}
+
+	// 3. 月度会员限额（totalQuota 对象）
+	const totalQuota = root.totalQuota as Record<string, unknown> | undefined;
+	if (totalQuota && typeof totalQuota === "object" && !Array.isArray(totalQuota)) {
+		const qLimit = readDetailNumber(totalQuota, "limit") ?? 100;
+		const qUsed = readDetailNumber(totalQuota, "used");
+		const qRemaining = readDetailNumber(totalQuota, "remaining");
+
+		// 若 used 明确 > 0 则表示超额/冻结
+		const isExhausted = qUsed !== undefined && qUsed > 0;
+		if (isExhausted) {
+			windows.push({
+				key: "monthly",
+				total: qLimit,
+				used: qLimit,
+				remaining: 0,
+			});
+		} else if (qRemaining !== undefined || qLimit !== undefined) {
+			const used = qUsed ?? (qRemaining !== undefined ? Math.max(0, qLimit - qRemaining) : 0);
+			windows.push({
+				key: "monthly",
+				total: qLimit,
+				used,
+				remaining: qRemaining ?? Math.max(0, qLimit - used),
+			});
+		}
+	}
+
+	// 4. Boost 钱包独立解析（如果有）
+	const booster = parseBooster(body, {
+		balancePath: "boosterWallet.balance.amountLeft",
+		totalPath: "boosterWallet.balance.amount",
+		currencyPath: "boosterWallet.monthlyUsed.currency",
+		monthlyUsedCentsPath: "boosterWallet.monthlyUsed.priceInCents",
+		monthlyChargeLimitCentsPath: "boosterWallet.monthlyChargeLimit.priceInCents",
+		monthlyChargeLimitEnabledPath: "boosterWallet.monthlyChargeLimitEnabled",
+	});
+
+	if (windows.length === 0 && weeklyTotal === undefined && weeklyRemaining === undefined) {
+		return { matched: false, raw };
+	}
+
+	// 主 credits 兜底：以周限额（或首个有效窗口）为主值
+	const mainRemaining = weeklyRemaining ?? windows[0]?.remaining;
+	const mainTotal = weeklyTotal ?? windows[0]?.total;
+	const mainUsed = weeklyUsed ?? windows[0]?.used;
+
+	return {
+		matched: true,
+		kind: "credits",
+		credits: {
+			...(mainTotal !== undefined ? { total: mainTotal } : {}),
+			...(mainUsed !== undefined ? { used: mainUsed } : {}),
+			...(mainRemaining !== undefined ? { remaining: mainRemaining } : {}),
+			...(windows.length > 0 ? { windows } : {}),
+		},
+		...(booster ? { booster } : {}),
+	};
+}
+

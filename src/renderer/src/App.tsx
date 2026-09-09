@@ -39,6 +39,7 @@ import { type SidebarActions } from "./components/sidebar/SidebarContent";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import { AppBootstrap } from "./components/app/AppBootstrap";
 import { SettingsFeatureRoot } from "./components/app/SettingsFeatureRoot";
+import { AutomationModal } from "./components/automation/AutomationModal";
 import { useRename } from "./hooks/useRename";
 import { useProjectRuntimeCapabilities } from "./hooks/useRuntimeCapabilities";
 import { useSessionRuntimeBridge } from "./hooks/useSessionRuntimeBridge";
@@ -61,6 +62,7 @@ import { useImportFlow } from "./hooks/useImportFlow";
 import { useQueuedPrompt } from "./hooks/useQueuedPrompt";
 import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
 import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
+import { useUserMessageEditReplay } from "./hooks/useUserMessageEditReplay";
 import { PromptDeliveryUnknownError } from "./utils/promptErrors";
 import {
   isLiveRuntimeStatus,
@@ -182,6 +184,7 @@ import { ExternalEditorOverlay } from "./components/workspace/ExternalEditorOver
 import { navigateTo } from "./components/app/BrowserPanel";
 import {
   flattenFiles,
+  fileNodeDragPayloadToRef,
   mergeCommands,
   getToolFilePath,
   getToolNewContent,
@@ -642,6 +645,7 @@ export function App() {
     gitCommitMessagePrompt: "请根据以下 git diff 生成一条中文 git commit message。\n\n变更描述：\n{diff}\n\nGitmoji 对应关系：\n✨ feat - 新功能\n🐛 fix - Bug 修复\n📚 docs - 文档更新\n💎 style - 代码格式\n♻️ refactor - 重构\n🧪 test - 测试\n🔧 chore - 构建/工具",
     gitCommitMessageProvider: "",
     gitCommitMessageModel: "",
+    gitExecutablePath: "",
     closeToTray: true,
     singleInstance: true,
     enableNotifications: true,
@@ -1516,16 +1520,19 @@ export function App() {
           message: t("app.openFolderConfirmMessage", { path }),
           confirmLabel: t("app.openFolderConfirmAdd"),
           onConfirm: () => {
-            void api.projects
-              .addByPath(path)
-              .then((project) => {
+            void (async () => {
+              try {
+                const project = await api.projects.addByPath(path);
+                // 与对话框添加同一刷新链路：侧栏清单立即出现新项目（主进程广播为兜底）。
+                await refreshProjects();
                 selectProjectCommand(project.id);
                 showToast(t("app.openFolderAdded", { name: project.name }));
-              })
-              .catch((error) => {
+              } catch (error) {
                 showToast(error instanceof Error ? error.message : String(error), 5000, "error");
-              })
-              .finally(() => overlays.clearConfirm());
+              } finally {
+                overlays.clearConfirm();
+              }
+            })();
           },
         });
       },
@@ -1986,22 +1993,14 @@ export function App() {
 
   // 已删除内置 goal 完成检测。
 
-  // 监听用户发送消息的编辑事件,将消息填入输入框
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ text: string }>).detail;
-      if (detail?.text) {
-        setPrompt(detail.text);
-        // 光标移至文本末尾，利用 RichInput 的 caretRef 机制在渲染后恢复
-        pendingComposerCaretRef.current = detail.text.length;
-        requestAnimationFrame(() => {
-          composerTextareaRef.current?.focus();
-        });
-      }
-    };
-    window.addEventListener("user-message-edit", handler);
-    return () => window.removeEventListener("user-message-edit", handler);
-  }, []);
+  // 监听用户发送消息的编辑事件：回填输入框，并把自包含引用块还原成 chip
+  // （quote 重建快照 + #q token，其余还原为 mention 文本，见 useUserMessageEditReplay）
+  useUserMessageEditReplay({
+    setPrompt,
+    pendingComposerCaretRef,
+    composerRef: composerTextareaRef,
+    currentSessionIdRef,
+  });
 
   // 编辑器右键「引用选中内容」：@path:start-end 引用追加到输入框（与文件树右键 onAttach 同语义）
   useEffect(() => {
@@ -3949,9 +3948,21 @@ export function App() {
           setFileMenu(null);
         }}
         onAttach={() => {
-          setPrompt(
-            (current) =>
-              `${current}${current.endsWith(" ") || current.length === 0 ? "" : " "}@${fileMenu.node.relativePath} `,
+          // 与文件树拖拽共用同一引用格式：目录补尾斜杠（@dir/），含空格路径自动加引号。
+          // 走 composer-attach-refs 事件插入，避免这里再维护一份 @path 拼接逻辑
+          // （裸 @dir 过不了 chip 路径规则，模型也容易当成 mention）。
+          window.dispatchEvent(
+            new CustomEvent("composer-attach-refs", {
+              detail: {
+                refs: [
+                  fileNodeDragPayloadToRef({
+                    path: fileMenu.node.path,
+                    relativePath: fileMenu.node.relativePath,
+                    type: fileMenu.node.type,
+                  }),
+                ],
+              },
+            }),
           );
           setFileMenu(null);
         }}
@@ -4142,6 +4153,13 @@ export function App() {
     {openCodeImportProject && <ImportOverlayHost kind="opencode" project={openCodeImportProject} controller={openCodeImportController} onClose={() => setOpenCodeImportProject(null)} />}
     {zcodeImportProject && <ImportOverlayHost kind="zcode" project={zcodeImportProject} controller={zcodeImportController} onClose={() => setZcodeImportProject(null)} />}
     {workbuddyImportProject && <ImportOverlayHost kind="workbuddy" project={workbuddyImportProject} controller={workbuddyImportController} onClose={() => setWorkbuddyImportProject(null)} />}
+
+    {/* 定时任务与自动化管理中心全功能弹窗 */}
+    <AutomationModal
+      onViewSession={(projectId, sessionId) => {
+        void openSidebarSessionByIdWithTab(projectId, sessionId, "permanent");
+      }}
+    />
 
     {/* Scratch Pad（草稿本）：根级渲染，避免受 chat-pane grid 影响定位 */}
     <ScratchPadOverlay controller={scratchPad} />

@@ -47,7 +47,7 @@ const {
 	PROBE_TIMEOUT_MS,
 } = mirrorHealth;
 
-const MIRROR = { id: "ghfast", host: "https://ghfast.top" };
+const MIRROR = { id: "atomgit", host: "https://atomgit.com" };
 
 /**
  * 构造 fake fetch：按 URL 尾部分发 yml / 分片请求，用可控延时推进模拟时钟。
@@ -85,7 +85,7 @@ test("探测协议：latest.yml 200 + Range 206 且速度达标 → ok，速度�
 	assert.equal(result.status, "ok");
 	assert.equal(result.speedKBps, 524);
 	assert.equal(result.latencyMs, 100);
-	assert.equal(result.id, "ghfast");
+	assert.equal(result.id, "atomgit");
 	assert.equal(result.error, undefined);
 });
 
@@ -143,20 +143,15 @@ test("fetch 网络错误 → broken，原因「连接失败」（不向外抛）
 	assert.equal(result.error, "连接失败");
 });
 
-test("probeAllMirrors：并行探测全部内置镜像，失败互不影响", async () => {
+test("probeAllMirrors：并行探测全部内置更新源，失败互不影响", async () => {
 	// 真实延迟 + 默认 Date.now：同步 fake fetch 会让测速在 0/1ms 间随机
 	// （dlMs=0 → speed=0 → slow），偶发 flaky（2026-09 CI 实测）；
 	// 注入共享 fake clock 也会被 Promise.all 并行交错污染，同样不可靠。
 	const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-	// 按 URL 中的镜像 host 分发：ghproxy-net 返回 500（broken），其余正常
 	const fetchImpl = async (url, _opts) => {
-		if (url.includes("ghproxy.net/")) {
-			await sleep(5);
-			return new Response("boom", { status: 500 });
-		}
 		if (url.endsWith("/latest.yml")) {
 			await sleep(10);
-			return new Response("version: 0.7.3\n", { status: 200 });
+			return new Response("version: 0.7.4\n", { status: 200 });
 		}
 		await sleep(200); // 256KB/200ms = 1310KB/s，稳定高于 300 阈值
 		return new Response(new Uint8Array(PROBE_RANGE_BYTES), { status: 206 });
@@ -164,10 +159,8 @@ test("probeAllMirrors：并行探测全部内置镜像，失败互不影响", as
 	const results = await probeAllMirrors(fetchImpl);
 	const byId = {};
 	for (const r of results) byId[r.id] = r;
-	assert.equal(Object.keys(byId).length, 3, "应涵盖全部内置镜像");
-	assert.equal(byId.ghfast.status, "ok");
-	assert.equal(byId["ghproxy-net"].status, "broken");
-	assert.equal(byId["ghproxy-cxkpro"].status, "ok");
+	assert.equal(Object.keys(byId).length, 1, "应涵盖内置 AtomGit 更新源");
+	assert.equal(byId.atomgit.status, "ok");
 });
 
 test("探测加超时保护：单请求最坏耗时不超过 PROBE_TIMEOUT_MS", () => {

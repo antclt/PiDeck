@@ -17,6 +17,7 @@ import { useId, type RefObject } from "react";
 import { useAtomValue, useStore } from "jotai";
 import type { ImageContent } from "../../../../shared/types";
 import { formatBytes } from "../../../../shared/formatBytes";
+import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import type { PastedTextFile } from "../../atoms";
 import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
 import { resolveComposerSendButtonState } from "../../utils/composerSendButton";
@@ -163,7 +164,11 @@ function QueuedPromptRow(props: {
   onSendAsk: (prompt: QueuedPromptSnapshot) => void;
 }) {
   const status = props.prompt.status ?? "pending";
-  const previewText = props.prompt.displayText.trim() || t("app.queuedImageMessage");
+  // displayText 可能含 quote/session/skill/template 自包含块；纯文本预览只保留其 chip label，
+  // 避免队列面板露出完整模型上下文或 XML 标签。
+  const previewText = replaceExpandedRefBlocksWithLabels(
+    props.prompt.displayText.trim(),
+  ) || t("app.queuedImageMessage");
   const retractHint = retractControlHint(status);
   const discardHint = discardControlHint(status);
   const canChangeBehavior = canChangeQueuedPromptBehavior(status);
@@ -414,7 +419,10 @@ export function SessionDeliveryNotice(props: {
   onAcknowledge: () => void;
 }) {
   if (props.status !== "unknown") return null;
-  const preview = props.message?.trim() || (props.images?.length ? t("app.queuedImageMessage") : "");
+  // unknownSnapshot.message 是发送期展开后的文本；提示条只保留各类引用的 label，
+  // 避免暴露 XML 块及其长上下文。
+  const preview = replaceExpandedRefBlocksWithLabels(props.message?.trim() ?? "")
+    || (props.images?.length ? t("app.queuedImageMessage") : "");
   return (
     <div className="session-delivery-notice" role="status">
       <div className="session-delivery-notice-copy">

@@ -4,6 +4,7 @@ import type { TokendanceAuthMode } from "../shared/tokendance";
 import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
+import type { GitExecutableInfo } from "../shared/types/git";
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
 import type {
@@ -47,6 +48,15 @@ import type {
 	ConfigFileDiagnostic,
 	DraftMeta,
 	CreateSessionDraftInput,
+	AutomationSnapshot,
+	AutomationTask,
+	AutomationRun,
+	AutomationSettings,
+	AutomationCronPreview,
+	AutomationChangedEvent,
+	CreateAutomationTaskInput,
+	UpdateAutomationTaskInput,
+	UpdateAutomationSettingsInput,
 	ResolveLaunchDefaultsInput,
 	ResolvedLaunchDefaults,
 	CreateAnonymousSessionInput,
@@ -1180,6 +1190,18 @@ const api = {
 				paths,
 				repoPath,
 			) as Promise<void>,
+		/**
+		 * 探测 git 可执行文件。传 configuredPath 可在保存前预览「这样配置能不能用」；
+		 * 不传则用设置里已持久化的值，返回当前实际生效的路径与版本。
+		 */
+		detectExecutable: (configuredPath?: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitDetectExecutable,
+				configuredPath,
+			) as Promise<GitExecutableInfo>,
+		/** 打开文件选择框挑一个 git 可执行文件；取消返回 null */
+		chooseExecutable: () =>
+			ipcRenderer.invoke(ipcChannels.gitChooseExecutable) as Promise<string | null>,
 	},
 	pi: {
 		/**
@@ -2015,6 +2037,28 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.catalogUpdateRestorePrevious) as Promise<CatalogUpdateResult>,
 		/** 用系统默认程序打开当前生效的目录文件（覆盖层优先，否则内置） */
 		openFile: () => ipcRenderer.invoke(ipcChannels.catalogOpenFile) as Promise<void>,
+	},
+
+	// ── 定时任务与自动化 ──
+	automation: {
+		getSnapshot: () =>
+			ipcRenderer.invoke(ipcChannels.automationGetSnapshot) as Promise<AutomationSnapshot>,
+		createTask: (input: CreateAutomationTaskInput) =>
+			ipcRenderer.invoke(ipcChannels.automationCreateTask, input) as Promise<AutomationTask>,
+		updateTask: (taskId: string, patch: UpdateAutomationTaskInput) =>
+			ipcRenderer.invoke(ipcChannels.automationUpdateTask, taskId, patch) as Promise<AutomationTask>,
+		deleteTask: (taskId: string) =>
+			ipcRenderer.invoke(ipcChannels.automationDeleteTask, taskId) as Promise<boolean>,
+		runNow: (taskId: string) =>
+			ipcRenderer.invoke(ipcChannels.automationRunNow, taskId) as Promise<AutomationRun>,
+		abortRun: (runId: string) =>
+			ipcRenderer.invoke(ipcChannels.automationAbortRun, runId) as Promise<boolean>,
+		updateSettings: (patch: UpdateAutomationSettingsInput) =>
+			ipcRenderer.invoke(ipcChannels.automationUpdateSettings, patch) as Promise<AutomationSettings>,
+		previewCron: (expression: string, count?: number) =>
+			ipcRenderer.invoke(ipcChannels.automationPreviewCron, expression, count) as Promise<AutomationCronPreview>,
+		onChanged: (callback: (event: AutomationChangedEvent) => void) =>
+			subscribe<AutomationChangedEvent>(ipcChannels.automationChanged, callback),
 	},
 };
 

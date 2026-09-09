@@ -174,6 +174,16 @@ export const ipcChannels = {
 	dshUnarchive: "dsh:unarchive",
 	/** DSH 永久删除已归档会话：归档目录移入系统回收站（区别于恢复）。 */
 	dshDeleteArchived: "dsh:delete-archived",
+	/** 定时任务与自动化 */
+	automationGetSnapshot: "automation:get-snapshot",
+	automationCreateTask: "automation:create-task",
+	automationUpdateTask: "automation:update-task",
+	automationDeleteTask: "automation:delete-task",
+	automationRunNow: "automation:run-now",
+	automationAbortRun: "automation:abort-run",
+	automationUpdateSettings: "automation:update-settings",
+	automationPreviewCron: "automation:preview-cron",
+	automationChanged: "automation:changed",
 	/** DSH 动态插件清单（G13 深化：进程内临时扩展，重启即失；按会话归属）。 */
 	dshPluginList: "dsh:plugin-list",
 	/** DSH 静态 Loader 条目清单（只读：moduleName/enabled/fiberPhase）。 */
@@ -322,6 +332,13 @@ export const ipcChannels = {
 	gitAheadBehind: "git:ahead-behind",
 	/** 从磁盘删除变更文件（移入回收站，可恢复） */
 	gitDeleteFiles: "git:delete-files",
+	/**
+	 * 探测 git 可执行文件：返回当前实际生效的路径/版本/来源，
+	 * 以及系统自动探测结果（供设置页展示「已识别到」与一键填入）。
+	 */
+	gitDetectExecutable: "git:detect-executable",
+	/** 打开文件选择框挑一个 git 可执行文件，返回绝对路径；取消返回 null */
+	gitChooseExecutable: "git:choose-executable",
 	piCheck: "pi:check",
 	piCheckCustom: "pi:check-custom",
 	/** 获取已安装的 WSL 发行版列表（仅 Windows） */

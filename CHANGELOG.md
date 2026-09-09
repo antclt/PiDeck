@@ -1,3 +1,20 @@
+## v0.7.5-beta - 2026-09-09
+
+### 🚀 New Features
+- **Inline reference chips aligned with Proma and self-contained persistence** — Composer and bubble reference chips now share the Proma skeleton (tinted background, same-hue text and icon, no border, baseline aligned); file chips show only the file name, directory references use a folder icon, and only the `@` prefix remains since the icon conveys the type. Bubble reference chips render back at their original position so multiple references are no longer reordered. Reference / session / skill / prompt-template blocks persist self-containedly: switching sessions or restarting still restores chips, and edit-resend or fork replay no longer leaks raw XML. The file-tree context menu “add to conversation reference” now supports directories (`@dir/`, the trailing slash distinguishing a directory from a mention) and reuses the same reference format as drag-and-drop and the editor context menu.
+- **Sidebar session hover preview card** — Hovering a sidebar session row for 1.5s opens a preview card (debounced against races), so you can confirm a session's content without opening it first.
+- **Configurable Git executable path with detection** — A new `gitExecutablePath` setting: empty means auto-resolve (PATH → common install locations), and a configured value applies to every Git operation (GitService / WorktreeService / checkpoint / git init). The Git tab gains a path input with detect / browse / reset buttons showing source, version and path; saving applies immediately without a restart.
+- **Built-in prompt templates restored and AtomGit mirror added** — Built-in prompt templates are back in the prompt store; the README and docs-site link to the AtomGit mirror.
+
+### 🐛 Fixes
+- **Kimi Coding multi-window quotas and booster wallet** — Usage queries support Kimi Coding's 5h / weekly / monthly windows plus the booster wallet.
+- **Web Ask prompt missing and sidebar pending-question badge** — Fixed the missing Ask question text and concurrent-input warning on the Web surface; the sidebar now shows a pending-question badge.
+- **Accent colors no longer bleed into session status lights** — Removed the `--color-info` override from all 9 accent blocks so session and sidebar status semantics (idle blue / running yellow / error red) stay constant across themes.
+- **Dark-mode selected states no longer render white-on-white** — Usage-query preset pills now use `--color-text-inverse`, with the same fix applied to settings model checkboxes and the Git push badge.
+- **Usage dialog built-in badge no longer stretched** — Fixed the flex-col stretch turning the “built-in” badge into a full-width grey bar; it now sits inline with its label.
+- **Context menu failing to open and project-open flow** — Stopped pre-escaping the registry command value (which caused the Windows “cannot access the specified device” error); cold start / second instance now waits for projectStore before resolving the project directory; adding a project from the context menu broadcasts a sidebar refresh.
+- **Problem-feedback copy no longer mentions email** — Removed the leftover half-sentence about sending email (#194).
+
 ## v0.7.4 - 2026-09-08
 
 ### 🚀 New Features

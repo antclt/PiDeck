@@ -387,8 +387,13 @@ test("recognized usage badge keeps its label separated from the hint", () => {
   const source = readFileSync("src/renderer/src/config/UsageProbeConfigDialog.tsx", "utf8");
   const badgeSection = source.match(/\{hintKey && \([\s\S]*?\n\s*\)\}/)?.[0] ?? "";
   // 徽标文字按单行盒渲染，并与下一行说明保持明确间距，避免高字号/主题切换时叠字。
-  assert.match(badgeSection, /flex flex-col gap-2/);
   assert.match(badgeSection, /text-micro leading-none tracking-wide/);
+  // 徽标与说明同行布局：水平 flex + 明确间距，既防叠字又防 flex-col cross-axis stretch
+  // 把徽标拉成整行宽的「大灰杠」（用户截图里的视觉 bug）。
+  assert.match(badgeSection, /flex items-center gap-2/);
+  // 徽标必须显式禁止在 flex 轴上收缩/拉伸，保持内容宽。
+  assert.match(badgeSection, /inline-flex shrink-0/);
+  assert.doesNotMatch(badgeSection, /flex flex-col/);
 });
 
 test("provider usage inline keeps no bottom row footprint", () => {

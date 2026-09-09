@@ -132,6 +132,31 @@ test("appearance theme i18n keys exist in zh-CN and en-US dictionaries", () => {
   }
 });
 
+/**
+ * 回归：暖阳米（accent=amber）下会话状态灯被主色污染，idle 灯变琥珀、
+ * 与运行（warning）/错误（danger）糊成一片。状态语义色（info=蓝、warning=黄、
+ * danger=红）必须跨主题恒定，accent/appearance 色块只允许改装饰色
+ * （主色/链接/logo/工具身份色），禁止覆盖状态色 token。
+ */
+const STATUS_TOKENS = ["--color-info", "--color-warning", "--color-danger"];
+
+test("accent and appearance blocks never override semantic status colors", () => {
+  const blockPattern =
+    /:root(\[data-theme="dark"\])?\[data-(accent|appearance)="[^"]+"\]\s*\{([^}]*)\}/g;
+  let match;
+  let count = 0;
+  while ((match = blockPattern.exec(foundation)) !== null) {
+    count += 1;
+    // 剥掉块内注释：注释里允许提及状态 token（如 fresh-green 的“不动 --color-info 状态色”），
+    // 断言只针对实际会生效的属性声明。
+    const body = match[3].replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const token of STATUS_TOKENS) {
+      assert.ok(!body.includes(token), `block ${match[0].slice(0, 44)}… must not override ${token}`);
+    }
+  }
+  assert.ok(count > 0, "expected to find at least one accent/appearance block");
+});
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

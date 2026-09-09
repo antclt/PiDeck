@@ -1,22 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 function loadComposerBehaviorModule() {
-	const source = readFileSync("src/renderer/src/composerBehavior.ts", "utf8");
-	const { outputText } = ts.transpileModule(source, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-	});
-	const sandbox = { exports: {} };
-	vm.runInNewContext(outputText, sandbox, {
-		filename: "composerBehavior.ts",
-	});
-	return sandbox.exports;
+	// composerBehavior 现在会调用纯消息块 codec；使用共享依赖图加载器，
+	// 避免手写 VM loader 在生产模块新增本地 import 后失去 require 能力。
+	return loadTsCommonJs("src/renderer/src/composerBehavior.ts");
 }
 
 test("ignores Enter while an IME composition is being confirmed", () => {
@@ -321,10 +310,14 @@ test("expandPromptTemplates keeps /name as-is when the template body is empty (f
 	assert.equal(noTrailing.message, "/commit-push");
 	assert.equal(noTrailing.emptyTemplateName, "commit-push");
 
-	// 正常模板照常展开，不产生 emptyTemplateName
+	// 正常模板把名称和正文一起持久化：模型仍读正文，时间线重载后可恢复 /review chip。
 	const normal = expandPromptTemplates("/review", templates);
-	assert.equal(normal.message, "\n请审查暂存的 Git 更改");
+	assert.equal(
+		normal.message,
+		"<prompt_template name=\"review\">\n请审查暂存的 Git 更改\n</prompt_template>",
+	);
 	assert.equal(normal.emptyTemplateName, undefined);
+	assert.equal(normal.description, "审查");
 
 	// 消息同时含空模板与普通文本：展开其余部分，仍标记空模板
 	const mixed = expandPromptTemplates("先看下 /commit-push 再处理", templates);
