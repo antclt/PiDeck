@@ -177,7 +177,7 @@ import type {
 	VisionEventsInfo,
 } from "../../../../shared/types";
 import { parseRichInputChips, unwrapFileChipPath, formatChipDisplayLabel, isDirectoryFileChip } from "./composer/chips";
-import { buildBubbleRefLayout, replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
+import { buildBubbleRefSegments, replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import type { BubbleRefSegment } from "./composer/quoteChip";
 import removeMarkdown from "remove-markdown";
 
@@ -953,8 +953,9 @@ export const UserBubble = memo(function UserBubble(props: {
 	// quoted_context / referenced_session / skill / prompt_template 都在 renderUserBubbleChipText 中
 	// 就地解析为 chip；这里保留完整文本，以便重载后的自包含块不会丢失展示元数据。
 	const cleanText = vision.text;
-	// 气泡布局（对齐 Proma）：quote chip 独立一行放正文上方，其余片段行内跟随。
-	const bubbleLayout = buildBubbleRefLayout(cleanText);
+	// 气泡片段（正文 + 引用/会话/skill chip）严格按原文顺序渲染：
+	// 多个引用各有自己的描述时，顺序就是「引用1 描述1 引用2 描述2」，不能全部提到顶部。
+	const bubbleSegments = buildBubbleRefSegments(cleanText);
 	/** 原地编辑不影响输入框；先提交给确认弹窗。 */
 	const handleSaveEdit = () => {
 		if (props.onEditMessage && editText.trim()) {
@@ -1117,25 +1118,15 @@ export const UserBubble = memo(function UserBubble(props: {
 			)}
 			{cleanText && !editing && (
 				<div className="user-turn-bubble w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
-					{/* 引用 chip 独立一行放正文上方（对齐 Proma ChatMessageItem 的 QuoteChip 行） */}
-					{bubbleLayout.quotes.length > 0 && (
-						<div className="mb-2 flex flex-wrap gap-1.5">
-							{bubbleLayout.quotes.map((block) => (
-								<BubbleQuoteChip key={`quote-${block.start}`} label={block.label} text={block.text} />
-							))}
-						</div>
-					)}
-					{bubbleLayout.segments.length > 0 && (
-						<div
-							ref={userTextRef}
-							// user-turn-text 是气泡 chip 样式的唯一作用域锚点：timeline.css 的
-							// `.user-turn-text .input-chip*` 全靠它生效（漏写时 chip 会退化成裸文本，
-							// 且 lucide 图标会被 preflight 的 svg{display:block} 撑成单独一行）。
-							className={`user-turn-text text-chat text-text-primary whitespace-pre-wrap break-words ${messageExpanded ? "" : "line-clamp-8"}`}
-						>
-							{renderBubbleSegments(bubbleLayout.segments, props)}
-						</div>
-					)}
+					<div
+						ref={userTextRef}
+						// user-turn-text 是气泡 chip 样式的唯一作用域锚点：timeline.css 的
+						// `.user-turn-text .input-chip*` 全靠它生效（漏写时 chip 会退化成裸文本，
+						// 且 lucide 图标会被 preflight 的 svg{display:block} 撑成单独一行）。
+						className={`user-turn-text text-chat text-text-primary whitespace-pre-wrap break-words ${messageExpanded ? "" : "line-clamp-8"}`}
+					>
+						{renderBubbleSegments(bubbleSegments, props)}
+					</div>
 					{messageOverflowing && (
 						<div className="relative mt-1 flex justify-end">
 							{/* 折叠态底部渐变提示还有内容；展开态不需要 */}
@@ -1338,25 +1329,13 @@ const CHIP_ICONS: Record<string, typeof FileText> = {
 	quote: Quote,
 };
 
-/** 气泡引用 chip（对齐 Proma QuoteChip）：正文上方独立一行，rounded-md + 主题色浅底 +
- * 细边框，图标与文字都走 accent 语义 token，暗色主题自动跟随。 */
-function BubbleQuoteChip({ label, text }: { label: string; text: string }) {
-	return (
-		<div
-			className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border border-[color:color-mix(in_srgb,var(--color-accent)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--color-accent)_8%,transparent)] px-2.5 py-1 text-[12px] text-text-secondary"
-			title={text}
-		>
-			<Quote className="size-3.5 shrink-0 text-[color:color-mix(in_srgb,var(--color-accent)_60%,transparent)]" aria-hidden="true" />
-			<span className="min-w-0 max-w-full truncate">{label}</span>
-		</div>
-	);
-}
-
-/** 气泡正文片段：正文 + 非 quote chip（session/skill/template），保持原文顺序行内渲染。
+/** 气泡正文片段：正文 + 引用/会话/skill chip，严格按原文顺序行内渲染。
  *
  * quoted_context / referenced_session / pi 的 skill / PiDeck 的 prompt_template 都自带展示名和
  * 完整模型上下文；因此切会话、重启、模板改名或删除后仍可恢复，不依赖运行时 atom。其余
- * 原始 `@path`、`/command` 正文继续走 renderChipText 重新解析。 */
+ * 原始 `@path`、`/command` 正文继续走 renderChipText 重新解析。
+ * 顺序必须保持：用户可能「引用A + 描述A + 引用B + 描述B」，把引用全部提前会打乱配对
+ * （发送给模型的文本本身顺序正确，问题只在展示层）。 */
 function renderBubbleSegments(
 	segments: BubbleRefSegment[],
 	props: {

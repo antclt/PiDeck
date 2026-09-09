@@ -75,14 +75,15 @@ test("inline chips follow the Proma skeleton (tinted, borderless, compact)", () 
 });
 
 /**
- * 气泡布局契约（对齐 Proma ChatMessageItem）：quote chip 独立成行放在正文上方，
- * 其余 chip 行内跟随正文；正文容器必须挂 user-turn-text 才能吃到 chip 样式。
+ * 气泡顺序契约（回归）：引用 chip 必须按原文顺序与各自描述相邻渲染。
+ * 曾按 Proma 把引用全部提到正文上方，导致「引用A 描述A 引用B 描述B」被打乱成
+ * 「引用A 引用B 描述A 描述B」（发送给模型的文本顺序其实是对的，只有展示层错乱）。
  */
-test("bubble quotes render in their own row above the message text", () => {
-  assert.match(surfaceComponents, /buildBubbleRefLayout\(cleanText\)/);
-  assert.match(surfaceComponents, /bubbleLayout\.quotes\.map/);
-  assert.match(surfaceComponents, /bubbleLayout\.segments/);
-  assert.match(surfaceComponents, /mb-2 flex flex-wrap gap-1\.5/);
+test("bubble renders chips in original order, never lifted above the text", () => {
+  assert.match(surfaceComponents, /buildBubbleRefSegments\(cleanText\)/);
+  assert.match(surfaceComponents, /renderBubbleSegments\(bubbleSegments, props\)/);
+  // 不能再出现「引用单独一行提前」的布局
+  assert.doesNotMatch(surfaceComponents, /buildBubbleRefLayout|bubbleLayout\.quotes/);
 });
 
 /**

@@ -16,7 +16,6 @@ const {
 	parseExpandedPromptTemplateBlocks,
 	parseExpandedRefBlocks,
 	buildBubbleRefSegments,
-	buildBubbleRefLayout,
 	rehydrateDraftFromMessage,
 	replaceExpandedRefBlocksWithLabels,
 	formatPromptTemplateBlock,
@@ -222,21 +221,21 @@ test("buildBubbleRefSegments keeps chips inline by trimming block-adjacent white
 	assertJsonEqual(buildBubbleRefSegments("普通消息"), [{ kind: "text", value: "普通消息" }]);
 });
 
-test("buildBubbleRefLayout lifts quotes above the text and keeps other chips inline", () => {
+test("buildBubbleRefSegments keeps quote/description pairing in original order", () => {
+	// 回归（用户实测）：引用A + 描述A + 引用B + 描述B 不能被重排成「两个引用都在最上面」。
 	const text =
-		'<quoted_context label="引文" message_id="m1">\n引用正文\n</quoted_context>\n\n<referenced_session name="会话A">\n[User]: x\n</referenced_session>\n\n你好';
-	const layout = buildBubbleRefLayout(text);
-	// quote 提到独立行（Proma QuoteChip 行），不再出现在正文片段里
-	assert.equal(layout.quotes.length, 1);
-	assert.equal(layout.quotes[0].label, "引文");
-	assertJsonEqual(layout.segments.map((segment) => segment.kind), ["chip", "text"]);
-	assert.equal(layout.segments[0].block.kind, "session");
-	assert.equal(layout.segments[1].value, "你好");
+		'<quoted_context label="引用A" message_id="m1">\nA 全文\n</quoted_context>\n\ndd\n\n' +
+		'<quoted_context label="引用B" message_id="m2">\nB 全文\n</quoted_context>\n\nde3d';
+	const segments = buildBubbleRefSegments(text);
+	assertJsonEqual(
+		segments.map((segment) => (segment.kind === "text" ? segment.value : segment.block.label)),
+		["引用A", "dd", "引用B", "de3d"],
+	);
 
-	// 无引用块：整段作为一个文本片段，quotes 为空
-	const plain = buildBubbleRefLayout("普通消息");
-	assertJsonEqual(plain.quotes, []);
-	assertJsonEqual(plain.segments, [{ kind: "text", value: "普通消息" }]);
+	// 无块：整段作为一个文本片段
+	assertJsonEqual(buildBubbleRefSegments("普通消息"), [
+		{ kind: "text", value: "普通消息" },
+	]);
 });
 
 test("rehydrateDraftFromMessage restores chips instead of raw XML", () => {

@@ -347,43 +347,17 @@ export function buildBubbleRefSegments(text: string): BubbleRefSegment[] {
 	const segments: BubbleRefSegment[] = [];
 	let cursor = 0;
 	for (const block of blocks) {
-		const before = text.slice(cursor, block.start).replace(/\s+$/, "");
-		if (before.trim()) segments.push({ kind: "text", value: before });
+		// 块两侧的 \n\n 是写给模型看的上下文分隔；气泡里压成片段间的单个空格。
+		// 必须首尾都裁：只裁尾空白会让「块 A → 正文 → 块 B」中间那段带上 \n\n，
+		// 在 whitespace-pre-wrap 里多出一个空行（曾漏裁首空白）。
+		const before = text.slice(cursor, block.start).replace(/^\s+/, "").replace(/\s+$/, "");
+		if (before) segments.push({ kind: "text", value: before });
 		segments.push({ kind: "chip", block });
 		cursor = block.end;
 	}
 	const after = text.slice(cursor).replace(/^\s+/, "");
-	if (after.trim()) segments.push({ kind: "text", value: after });
+	if (after) segments.push({ kind: "text", value: after });
 	return segments;
-}
-
-/** 已折叠的引用块（气泡顶部引用行的元素类型）。 */
-export type ExpandedQuoteRefBlock = Extract<ExpandedRefBlock, { kind: "quote" }>;
-
-/** 气泡布局：quote 块提到正文上方单独一行，其余片段保持原文顺序行内渲染。 */
-export type BubbleRefLayout = {
-	/** 引用块（Proma QuoteChip 的 `flex flex-wrap gap-1.5 mb-2` 独立行）。 */
-	quotes: ExpandedQuoteRefBlock[];
-	/** 正文 + 非 quote chip。 */
-	segments: BubbleRefSegment[];
-};
-
-/**
- * 按 Proma 的消息布局拆分气泡内容：
- * 引用对话内容是「上下文」，独立成行放在正文上方（Proma ChatMessageItem 的 QuoteChip 行）；
- * skill/session/template 等消息内容内的引用则继续行内跟随正文。
- */
-export function buildBubbleRefLayout(text: string): BubbleRefLayout {
-	const quotes: ExpandedQuoteRefBlock[] = [];
-	const segments: BubbleRefSegment[] = [];
-	for (const segment of buildBubbleRefSegments(text)) {
-		if (segment.kind === "chip" && segment.block.kind === "quote") {
-			quotes.push(segment.block);
-			continue;
-		}
-		segments.push(segment);
-	}
-	return { quotes, segments };
 }
 
 /** 编辑重发/重放草稿的还原结果：draft 回填输入框，quotes 需调用方登记到会话快照 atom。 */
