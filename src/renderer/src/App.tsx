@@ -182,6 +182,7 @@ import { ExternalEditorOverlay } from "./components/workspace/ExternalEditorOver
 import { navigateTo } from "./components/app/BrowserPanel";
 import {
   flattenFiles,
+  fileNodeDragPayloadToRef,
   mergeCommands,
   getToolFilePath,
   getToolNewContent,
@@ -3953,9 +3954,21 @@ export function App() {
           setFileMenu(null);
         }}
         onAttach={() => {
-          setPrompt(
-            (current) =>
-              `${current}${current.endsWith(" ") || current.length === 0 ? "" : " "}@${fileMenu.node.relativePath} `,
+          // 与文件树拖拽共用同一引用格式：目录补尾斜杠（@dir/），含空格路径自动加引号。
+          // 走 composer-attach-refs 事件插入，避免这里再维护一份 @path 拼接逻辑
+          // （裸 @dir 过不了 chip 路径规则，模型也容易当成 mention）。
+          window.dispatchEvent(
+            new CustomEvent("composer-attach-refs", {
+              detail: {
+                refs: [
+                  fileNodeDragPayloadToRef({
+                    path: fileMenu.node.path,
+                    relativePath: fileMenu.node.relativePath,
+                    type: fileMenu.node.type,
+                  }),
+                ],
+              },
+            }),
           );
           setFileMenu(null);
         }}

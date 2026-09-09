@@ -97,7 +97,6 @@ export function FileContextMenu(props: {
 	hasClipboardFiles?: boolean;
 	onPaste?: (targetDir: string) => void;
 }) {
-	const isFile = props.menu.node.type === "file";
 	const targetDir = props.menu.node.type === "directory"
 		? props.menu.node.path
 		: props.menu.node.path.split(/[\\/]/).slice(0, -1).join("/") || ".";
@@ -124,10 +123,16 @@ export function FileContextMenu(props: {
 				}}
 			/>
 			<DropdownMenuContent align="start" side="bottom" className="min-w-40">
-				<DropdownMenuItem disabled={!isFile} onSelect={props.onAttach}>
+				{/* 目录同样可引用：拖拽落点与 @ 建议列表都允许目录，右键菜单不应更严。
+				    引用文本由 fileNodeDragPayloadToRef 统一补尾斜杠（@dir/），
+				    裸 @dir 过不了 chip 路径规则，模型也容易当成 mention。 */}
+				<DropdownMenuItem onSelect={props.onAttach}>
 					{t("menu.attachFile")}
 				</DropdownMenuItem>
-				<DropdownMenuItem disabled={!isFile} onSelect={props.onOpen}>
+				{/* 目录也用系统默认程序打开：目录的默认处理器就是文件管理器
+				    （Windows Explorer / macOS Finder / Linux xdg），与「在文件夹中显示」不冲突——
+				    后者定位到父目录并选中该项。 */}
+				<DropdownMenuItem onSelect={props.onOpen}>
 					{t("menu.defaultOpen")}
 				</DropdownMenuItem>
 				<DropdownMenuItem onSelect={props.onReveal}>{t("menu.revealFile")}</DropdownMenuItem>
