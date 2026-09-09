@@ -1,5 +1,6 @@
-import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, Plus, RefreshCw } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, HelpCircle, Plus, RefreshCw } from "lucide-react";
 import type { DragEvent } from "react";
+import { useAtomValue } from "jotai";
 import type { Project, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import { t } from "../../i18n";
@@ -10,6 +11,9 @@ import { WorktreeTree } from "./WorktreeTree";
 import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { displayProjectDirectoryName, isChatProject } from "../../rendererUtils";
+import { sessionRuntimeUiByIdAtom } from "../../atoms/session-atoms";
+import { countPendingAsksForSessions } from "../../utils/askUi";
+import { Badge } from "../ui-shadcn/badge";
 import { Button } from "../ui-shadcn/button";
 import {
 	DropdownMenu,
@@ -64,6 +68,7 @@ export function ProjectTree(props: {
   /** 正在删除的 worktree 路径集合（透传给 WorktreeTree 驱动淡出动画）。 */
   removingWorktreePaths?: ReadonlySet<string>;
 }) {
+  const sessionRuntimeUiById = useAtomValue(sessionRuntimeUiByIdAtom);
   const rootProjects = props.controller.catalog.projects.filter((project) =>
     !project.worktreeParentId && matchesProject(project, props.controller.search.trim(), props.controller),
   );
@@ -92,6 +97,17 @@ export function ProjectTree(props: {
       const hasLiveAgent = props.controller.catalog.agents.some(
         (agent) => agent.projectId === project.id && isLiveRuntimeStatus(agent.status),
       );
+      // 统计该项目（及直属 worktree）所有会话中处于等待用户确认/回答的 Ask 数量
+      const relatedProjectIds = [
+        project.id,
+        ...props.controller.catalog.projects
+          .filter((candidate) => candidate.worktreeParentId === project.id)
+          .map((candidate) => candidate.id),
+      ];
+      const allProjectSessionIds = relatedProjectIds.flatMap(
+        (pid) => (props.controller.catalog.sessionsByProject[pid] ?? []).map((s) => s.id),
+      );
+      const pendingAskCount = countPendingAsksForSessions(allProjectSessionIds, sessionRuntimeUiById);
       // 运行态属于具体会话，而不是项目容器；项目行只负责导航，避免多个 Agent 同时运行时
       // 项目头像出现无法指向目标会话的聚合动画。
       return <div key={project.id} className={cn("project-group mb-1.5", project.worktreeEnabled && "worktree-enabled")}>
@@ -142,6 +158,17 @@ export function ProjectTree(props: {
                     推到最右——旧布局下点在行尾，鼠标移入时会被右侧浮层按钮盖住。 */}
                 <div className="flex min-w-0 flex-1 items-center gap-1">
                   <strong className={`min-w-0 truncate font-medium${project.missing ? " text-muted-foreground" : ""}`}>{projectDirectoryName}</strong>
+                  {/* 待确认徽章：当项目下有会话等待用户输入/确认时醒目展示 */}
+                  {pendingAskCount > 0 && (
+                    <Badge
+                      variant="outline"
+                      className="h-4 shrink-0 gap-0.5 border-amber-500/40 bg-amber-500/15 px-1 py-0 text-[10px] font-medium leading-none text-amber-600 dark:text-amber-400"
+                      title={t("sidebar.pendingConfirmationHint", { count: String(pendingAskCount) })}
+                    >
+                      <HelpCircle className="size-2.5 shrink-0 animate-pulse" aria-hidden="true" />
+                      <span>{pendingAskCount > 1 ? t("sidebar.pendingConfirmationCount", { count: String(pendingAskCount) }) : t("sidebar.pendingConfirmation")}</span>
+                    </Badge>
+                  )}
                   {/* 折叠时项目行只剩名称，用黄色状态点提示该工作区仍有 Agent 进程在跑；
                       展开后子行自带状态点，不再重复提示。颜色与语义对齐 agent 行的 running 状态点（bg-warning）。 */}
                   {collapsed && hasLiveAgent && (

@@ -11,10 +11,39 @@ export type AskRequestEntry = {
 };
 
 /**
- * 从全部请求中选择当前应展示的一个。
- * 规则：只取 pending/responding 的请求，多个并存时展示**最新到达**的——
- * 否则 Plan 模式的 select 若一直挂着，后续真正需要用户回答的 ask 会被遮蔽。
+ * 判断某个 request entry 是否是待用户确认/回答的 Ask 请求。
+ * 与 SessionRuntimeUiOverlay / useSessionRuntimeController 的 Ask 方法判定一致。
  */
+export function isPendingAskRequest(entry: AskRequestEntry | undefined): boolean {
+	if (!entry?.request?.method) return false;
+	return (
+		(entry.status === "pending" || entry.status === "responding") &&
+		["select", "confirm", "input", "editor", "batch_ask"].includes(entry.request.method)
+	);
+}
+
+/**
+ * 统计指定会话集合中待确认的 Ask 请求总数。
+ * 纯逻辑函数，供侧栏项目行等计算待确认徽章展示。
+ */
+export function countPendingAsksForSessions(
+	sessionIds: Iterable<string>,
+	sessionRuntimeUiById: Readonly<Record<string, { requests?: Record<string, AskRequestEntry> }>> | undefined,
+): number {
+	if (!sessionRuntimeUiById) return 0;
+	let count = 0;
+	for (const sessionId of sessionIds) {
+		const runtimeUi = sessionRuntimeUiById[sessionId];
+		if (!runtimeUi?.requests) continue;
+		for (const req of Object.values(runtimeUi.requests)) {
+			if (isPendingAskRequest(req)) {
+				count += 1;
+			}
+		}
+	}
+	return count;
+}
+
 export function pickActiveAskRequest(
 	entries: Readonly<Record<string, AskRequestEntry>> | undefined,
 ): AgentUiRequest | undefined {

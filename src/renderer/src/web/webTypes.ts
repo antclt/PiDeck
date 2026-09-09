@@ -5,6 +5,8 @@
  * 由 webApi.ts 轮询填充。会话/运行态只读展示用，不持有桌面端 atoms。
  */
 
+import type { AgentUiBatchQuestion } from "../../../shared/types";
+
 export type WebProject = {
 	id: string;
 	name: string;
@@ -49,6 +51,8 @@ export type WebPendingUiRequest = {
 	placeholder?: string;
 	prefill?: string;
 	allowOther?: boolean;
+	batchQuestions?: AgentUiBatchQuestion[];
+	batchReview?: boolean;
 };
 
 export type WebState = {

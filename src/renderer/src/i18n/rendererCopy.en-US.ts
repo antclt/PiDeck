@@ -2,6 +2,9 @@ import { mainProcessEnUS } from "../../../shared/i18n/mainProcessCopy";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
 
 export const enUS: Record<TranslationKey, string> = {
+  "sidebar.pendingConfirmation": "Pending",
+  "sidebar.pendingConfirmationCount": "Pending ({count})",
+  "sidebar.pendingConfirmationHint": "{count} pending confirmation(s) in this project",
   "app.chatProject": "Chat",
   "pagination.label": "Pagination",
   "pagination.page": "Page {page}",

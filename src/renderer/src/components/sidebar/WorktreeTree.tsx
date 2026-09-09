@@ -1,10 +1,14 @@
-import { ChevronDown, ChevronRight, Ellipsis, GitBranch, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Ellipsis, GitBranch, HelpCircle, Plus } from "lucide-react";
 import type { AgentTab, Project, SessionRecord, WorktreeEntry } from "../../../../shared/types";
+import { useAtomValue } from "jotai";
 import type { SidebarController } from "../../hooks/useSidebarController";
 import { t } from "../../i18n";
 import type { SidebarActions } from "./SidebarContent";
 import { SessionTree } from "./SessionTree";
 import { Button } from "../ui-shadcn/button";
+import { Badge } from "../ui-shadcn/badge";
+import { sessionRuntimeUiByIdAtom } from "../../atoms/session-atoms";
+import { countPendingAsksForSessions } from "../../utils/askUi";
 import { cn } from "../../lib/utils";
 import { mergeWorkspaceTreeRows, type WorkspaceTreeRow } from "./workspaceTreeModel";
 import { normalizeWorkspacePath } from "./workspaceTreeModel";
@@ -69,6 +73,13 @@ export function WorktreeTree(props: {
   const mainActionsOpen = props.controller.menu?.kind === "project"
     && props.controller.menu.projectId === props.project.id;
 
+  const sessionRuntimeUiById = useAtomValue(sessionRuntimeUiByIdAtom);
+  // 主工作区会话待确认 Ask 数量
+  const mainPendingAskCount = countPendingAsksForSessions(
+    props.sessions.map((s) => s.id),
+    sessionRuntimeUiById,
+  );
+
   return (
     <div className="workspace-tree min-w-0 py-1 pl-1">
       <section className="workspace-tree-main" aria-label={t("app.worktreeMainWorkspace")}>
@@ -108,6 +119,16 @@ export function WorktreeTree(props: {
             >
               <span className="conversation-title flex min-w-0 items-center gap-1.5">
                 <strong className="min-w-0 truncate font-medium">{t("app.worktreeMainWorkspace")}</strong>
+                {mainPendingAskCount > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="h-4 shrink-0 gap-0.5 border-amber-500/40 bg-amber-500/15 px-1 py-0 text-[10px] font-medium leading-none text-amber-600 dark:text-amber-400"
+                    title={t("sidebar.pendingConfirmationHint", { count: String(mainPendingAskCount) })}
+                  >
+                    <HelpCircle className="size-2.5 shrink-0 animate-pulse" aria-hidden="true" />
+                    <span>{mainPendingAskCount > 1 ? t("sidebar.pendingConfirmationCount", { count: String(mainPendingAskCount) }) : t("sidebar.pendingConfirmation")}</span>
+                  </Badge>
+                )}
                 <span className="worktree-main-branch min-w-0 truncate text-control text-muted-foreground">{props.branch ?? t("app.worktreeBranchLoading")}</span>
               </span>
             </span>
@@ -214,6 +235,13 @@ function WorkspaceTreeRowView(props: {
   const childActionsOpen = childProject !== undefined
     && props.controller.menu?.kind === "project"
     && props.controller.menu.projectId === childProject.id;
+  const sessionRuntimeUiById = useAtomValue(sessionRuntimeUiByIdAtom);
+  const childPendingAskCount = childProject
+    ? countPendingAsksForSessions(
+        (props.controller.catalog.sessionsByProject[childProject.id] ?? []).map((s) => s.id),
+        sessionRuntimeUiById,
+      )
+    : 0;
 
   return (
     // 工作区行是容器：选中态只落在叶子会话上，分支名不加底、不加字重区分。
@@ -262,6 +290,16 @@ function WorkspaceTreeRowView(props: {
         >
           <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate font-medium">{row.branch}</span>
+          {childPendingAskCount > 0 && (
+            <Badge
+              variant="outline"
+              className="h-4 shrink-0 gap-0.5 border-amber-500/40 bg-amber-500/15 px-1 py-0 text-[10px] font-medium leading-none text-amber-600 dark:text-amber-400"
+              title={t("sidebar.pendingConfirmationHint", { count: String(childPendingAskCount) })}
+            >
+              <HelpCircle className="size-2.5 shrink-0 animate-pulse" aria-hidden="true" />
+              <span>{childPendingAskCount > 1 ? t("sidebar.pendingConfirmationCount", { count: String(childPendingAskCount) }) : t("sidebar.pendingConfirmation")}</span>
+            </Badge>
+          )}
           {row.directory !== row.branch && (
             <span className="workspace-tree-directory max-w-20 shrink-0 truncate text-micro text-muted-foreground">{row.directory}</span>
           )}

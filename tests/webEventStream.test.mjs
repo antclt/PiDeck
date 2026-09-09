@@ -150,6 +150,33 @@ test("agent_settled also closes the Web stream", () => {
 	assert.equal(frames[0].type, "finish");
 });
 
+test("tool_execution_end without tool_execution_start is ignored to prevent AI SDK error", () => {
+	const adapter = new PiEventToUiMessageStream();
+	// 中途连入或并发时，错过了 tool_execution_start
+	const end = adapter.push({
+		type: "tool_execution_end",
+		toolCallId: "orphan_call_1",
+		isError: false,
+	});
+	assert.equal(end.length, 0);
+
+	const errorEnd = adapter.push({
+		type: "tool_execution_end",
+		toolCallId: "orphan_call_2",
+		isError: true,
+	});
+	assert.equal(errorEnd.length, 0);
+
+	const toolCallEnd = adapter.push({
+		type: "message_update",
+		assistantMessageEvent: {
+			type: "toolcall_end",
+			toolCall: { id: "orphan_call_3", output: {} },
+		},
+	});
+	assert.equal(toolCallEnd.length, 0);
+});
+
 test("agent_end error carries error frame before finish", () => {
 	const adapter = new PiEventToUiMessageStream();
 	const frames = adapter.push({ type: "agent_end", error: "boom" });

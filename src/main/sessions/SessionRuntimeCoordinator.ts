@@ -26,6 +26,7 @@ import type {
 	SessionRuntimeTarget,
 	SessionTargetedValue,
 	SessionUiResponseInput,
+	AgentUiBatchQuestion,
 } from "../../shared/types";
 import { buildSessionOriginKey } from "../../shared/sessionIdentity";
 import { isRewindCheckpointId, isRewindRestoreScope } from "../../shared/types";
@@ -160,6 +161,8 @@ export type PendingUiRequestSnapshot = {
 	placeholder?: string;
 	prefill?: string;
 	allowOther?: boolean;
+	batchQuestions?: AgentUiBatchQuestion[];
+	batchReview?: boolean;
 };
 
 type PendingUiRequest = PendingUiRequestSnapshot;
@@ -999,6 +1002,10 @@ export class SessionRuntimeCoordinator {
 		const options = Array.isArray(event.payload.options)
 			? event.payload.options.filter((option): option is string => typeof option === "string")
 			: undefined;
+		const batchQuestions = Array.isArray(event.payload.batchQuestions)
+			? (event.payload.batchQuestions as AgentUiBatchQuestion[])
+			: undefined;
+		const batchReview = event.payload.batchReview === true;
 		this.pendingUiRequests.set(key, {
 			sessionId: event.sessionId,
 			agentId: event.agentId,
@@ -1010,6 +1017,8 @@ export class SessionRuntimeCoordinator {
 			placeholder: typeof event.payload.placeholder === "string" ? event.payload.placeholder : undefined,
 			prefill: typeof event.payload.prefill === "string" ? event.payload.prefill : undefined,
 			allowOther: event.payload.allowOther === true,
+			batchQuestions,
+			batchReview,
 		});
 
 		// 任何会话收到 Ask 类请求都触发桌面通知：不再按聚焦会话/窗口焦点过滤，
@@ -1018,7 +1027,8 @@ export class SessionRuntimeCoordinator {
 			?? this.catalog.getRecord(event.sessionId)?.title
 			?? "";
 		// 带 agentId（每轮去重）、sessionId（点击跳转）与提问内容（展示在通知气泡里）
-		const question = typeof event.payload.title === "string" ? event.payload.title : "";
+		const rawQuestion = typeof event.payload.title === "string" ? event.payload.title : "";
+		const question = rawQuestion || (batchQuestions && batchQuestions[0]?.question ? batchQuestions[0].question : "");
 		this.agents.notifyAskPending(event.agentId, event.sessionId, title, question);
 	}
 

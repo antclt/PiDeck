@@ -1,6 +1,9 @@
 import { mainProcessZhCN } from "../../../shared/i18n/mainProcessCopy";
 
 export const zhCN = {
+  "sidebar.pendingConfirmation": "待确认",
+  "sidebar.pendingConfirmationCount": "待确认 ({count})",
+  "sidebar.pendingConfirmationHint": "该项目有 {count} 个待确认的提问",
   "app.chatProject": "聊天",
   "pagination.label": "分页",
   "pagination.page": "第 {page} 页",
