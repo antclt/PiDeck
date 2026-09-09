@@ -194,7 +194,8 @@ test("内置候选包含 OpenRouter、Kimi For Coding 与 Moonshot balance", () 
   assert.equal(openrouter.parse.kind, "credits");
   assert.equal(openrouter.path, "/key");
   assert.equal(moonshot.parse.kind, "balance");
-  assert.equal(kimi.parse.kind, "credits");
+  assert.equal(kimi.parse.kind, "custom");
+  assert.equal(kimi.parse.resolver, "kimi-credits");
 });
 
 test("OpenRouter 候选：普通 inference key 走 /api/v1/key 而非 /credits", () => {
@@ -253,6 +254,68 @@ test("Kimi For Coding 候选：命中 api.kimi.com，解析真实 /usages 响应
   assert.equal(res.credits.used, 214);
   // remainingPath 命中 → 直接用 usage.remaining（字符串数字也会被 toNumber 收窄）
   assert.equal(res.credits.remaining, 1834);
+});
+
+test("Kimi For Coding：多窗口 limits(5小时)+usage(周)+totalQuota(月)+booster 解析完整性", () => {
+  const kimi = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.kimi.com"));
+  const rawBody = {
+    limits: [
+      {
+        window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+        detail: { limit: 100, used: 20, remaining: 80, resetTime: "2026-03-31T05:00:00Z" },
+      },
+    ],
+    usage: {
+      limit: 1000,
+      used: 350,
+      remaining: 650,
+      resetTime: "2026-04-05T00:00:00Z",
+    },
+    totalQuota: {
+      limit: 100,
+      remaining: 99,
+    },
+    boosterWallet: {
+      balance: { type: "BOOSTER", amount: "5000000", amountLeft: "2000000" },
+      monthlyUsed: { currency: "CNY", priceInCents: 1500 },
+      monthlyChargeLimit: { currency: "CNY", priceInCents: 5000 },
+      monthlyChargeLimitEnabled: true,
+    },
+  };
+
+  const res = probe.parseUsageResponseBody(rawBody, JSON.stringify(rawBody), kimi.parse);
+  assert.equal(res.matched, true);
+  assert.equal(res.kind, "credits");
+
+  // windows 应包含 fiveHour、weekly、monthly
+  const windows = res.credits.windows;
+  assert.ok(Array.isArray(windows));
+  assert.equal(windows.length, 3);
+
+  const fiveHour = windows.find((w) => w.key === "fiveHour");
+  assert.ok(fiveHour, "应提取 5小时滚动限制");
+  assert.equal(fiveHour.total, 100);
+  assert.equal(fiveHour.used, 20);
+  assert.equal(fiveHour.remaining, 80);
+
+  const weekly = windows.find((w) => w.key === "weekly");
+  assert.ok(weekly, "应提取周额度限制");
+  assert.equal(weekly.total, 1000);
+  assert.equal(weekly.used, 350);
+  assert.equal(weekly.remaining, 650);
+
+  const monthly = windows.find((w) => w.key === "monthly");
+  assert.ok(monthly, "应提取月度会员限制");
+  assert.equal(monthly.total, 100);
+  assert.equal(monthly.used, 1);
+  assert.equal(monthly.remaining, 99);
+
+  // boosterWallet 独立解析
+  assert.ok(res.booster);
+  assert.equal(res.booster.balance, 0.02); // 2000000 / 1000000 / 100 = 0.02 元
+  assert.equal(res.booster.currency, "CNY");
+  assert.equal(res.booster.monthlyUsed, 15); // 1500 cents = 15 元
+  assert.equal(res.booster.monthlyChargeLimit, 50); // 5000 cents = 50 元
 });
 
 test("Kimi For Coding：字段漂移下只给 limit+remaining 或 limit+used 都能解析", () => {

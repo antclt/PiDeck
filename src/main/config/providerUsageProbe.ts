@@ -93,9 +93,9 @@ export type UsageProbeParse =
 	/**
 	 * 专用解析器：响应结构特殊（cent 包装、percent/count 混合、多端点链），
 	 * 声明式路径表达不了，注册专用函数解析。目前支持 xai-billing / codex-usage /
-	 * commandcode-credits。
+	 * commandcode-credits / kimi-credits。
 	 */
-	| { kind: "custom"; resolver: "xai-billing" | "codex-usage" | "commandcode-credits" };
+	| { kind: "custom"; resolver: "xai-billing" | "codex-usage" | "commandcode-credits" | "kimi-credits" };
 
 /** 链式预检（如 xAI 需先查 identity 拿 userId 再查 billing）：
  *  先请求预检端点，把响应里 capture.path 的值注入主请求的 capture.header。 */
@@ -211,28 +211,15 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 		},
 	},
 	// Kimi For Coding（kimi-coding，baseUrl 默认 https://api.kimi.com/coding/v1）：
-	// GET /usages 返回周计划主额度 + 子窗口截，字段在 used/remaining 间有历史漂移，
-	// 故三个 path 都挂上（remainingPath 命中即用 API 给的剩余，否则由 total-used 反推）。
-	// boosterWallet（Boost 点数）是独立货币：定点 1,000,000 单位/分，月限额用分钱
-	// priceInCents，与主额度语义不同，故单独解析进结果 booster 字段（不混进主 credits），
-	// UI 在主额度下方追加展示，避免误导用户当成同一单位。
+	// GET /usages 包含 5小时滚动限制（limits[]）、周额度（usage）、月度会员限额（totalQuota）
+	// 以及独立定点 Boost 点数货币（boosterWallet），由专用解析器 kimi-credits 统一提取展示。
 	{
 		path: "/usages",
 		baseUrlContains: ["api.kimi.com"],
 		templateId: "kimi-credits",
 		parse: {
-			kind: "credits",
-			totalPath: "usage.limit",
-			usedPath: "usage.used",
-			remainingPath: "usage.remaining",
-			booster: {
-				balancePath: "boosterWallet.balance.amountLeft",
-				totalPath: "boosterWallet.balance.amount",
-				currencyPath: "boosterWallet.monthlyUsed.currency",
-				monthlyUsedCentsPath: "boosterWallet.monthlyUsed.priceInCents",
-				monthlyChargeLimitCentsPath: "boosterWallet.monthlyChargeLimit.priceInCents",
-				monthlyChargeLimitEnabledPath: "boosterWallet.monthlyChargeLimitEnabled",
-			},
+			kind: "custom",
+			resolver: "kimi-credits",
 		},
 	},
 	// Moonshot / Kimi（国内 .cn 与国际 .ai 是同一个 balance 端点）：/users/me/balance
