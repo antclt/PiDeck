@@ -11,6 +11,12 @@
 ![React](https://img.shields.io/badge/React-19-61dafb)
 ![Version](https://img.shields.io/badge/version-0.7.4-blue)
 
+国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
+<!-- <p>
+  <a href="您的AtomGit项目链接"><img alt="AtomGit G-Star" src="https://atomgit.com/ayuayue/PiDeck/star/new_badge.svg"></a>
+</p> -->
+
+
 <!-- star-history:start -->
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/star-history/star-history-dark.svg">
