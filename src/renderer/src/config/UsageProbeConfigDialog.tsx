@@ -67,12 +67,15 @@ const DECLARATIVE_TEMPLATE_CATEGORY: Record<string, UsageProbeTemplateCategory> 
 /** 「无模板」哨兵：供应商既不适用通用也不适用 New API 时，明确不选任何预设模板。 */
 const NONE_TEMPLATE = "none";
 
-/** cc-switch pill 同款样式：选中实心、未选描边灰字。 */
+/** cc-switch pill 同款样式：选中实心、未选描边灰字。
+ * 文字色必须用 --color-text-inverse（亮色白/暗色黑），不能写死 text-white：
+ * 暗色模式 accent 反转为浅色（默认 #fafafa、blue/amber 等均为亮色），
+ * 白字会直接盖在浅底上看不见（与 ComposerPanels 发送按钮同一规则）。 */
 function pillClass(selected: boolean): string {
 	return cn(
 		"h-7 rounded-lg border px-2.5 text-caption",
 		selected
-			? "border-transparent bg-[color:var(--color-accent)] font-medium text-white shadow-sm hover:opacity-90"
+			? "border-transparent bg-[color:var(--color-accent)] font-medium text-[var(--color-text-inverse)] shadow-sm hover:opacity-90"
 			: "border-border bg-transparent text-text-secondary hover:bg-bg-hover hover:text-foreground",
 	);
 }

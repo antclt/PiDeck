@@ -2049,7 +2049,8 @@
 .config-enabled-models-option.selected .config-enabled-models-checkbox {
   border-color: var(--color-accent);
   background: var(--color-accent);
-  color: white;
+  /* 文字色跟随 inverse token：暗色模式 accent 反转为浅色，写死 white 会白底白字 */
+  color: var(--color-text-inverse);
 }
 
 

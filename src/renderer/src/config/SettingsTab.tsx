@@ -667,7 +667,7 @@ function EnabledModelsInput(props: {
 										onSelect={() => toggleModel(m.fullKey)}
 										className={`cursor-pointer gap-2 py-[7px] pr-3 pl-7 text-control text-text-primary ${selected.has(m.fullKey) ? "bg-[color:color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-panel))]" : ""}`}
 									>
-										<span className={`flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border-[1.5px] border-border-strong text-[color:var(--color-accent)] transition-[border-color,background-color] duration-100${selected.has(m.fullKey) ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-white" : ""}`}>
+										<span className={`flex size-[18px] shrink-0 items-center justify-center rounded-[4px] border-[1.5px] border-border-strong text-[color:var(--color-accent)] transition-[border-color,background-color] duration-100${selected.has(m.fullKey) ? " border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]" : ""}`}>
 											{selected.has(m.fullKey) && <Check size={12} />}
 										</span>
 										<span className="text-control text-text-primary">{m.name ?? m.id}</span>
