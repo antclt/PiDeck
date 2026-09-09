@@ -225,9 +225,9 @@ Gitmoji 对应关系：
 
   // ── 更新检测：检查永远自动；自动下载默认开启（v0.7.4 起取代 disableUpdateCheck）──
   autoDownloadUpdates: true,
-  // 更新源：默认 GitHub 官方；国内用户可切镜像前缀代理（见 updateSources.ts）
-  updateSource: "github",
-  // 自定义镜像前缀（updateSource=custom 时生效），空串 = 未填
+  // 更新源：默认国内 AtomGit 源（第一首选）；用户可切 GitHub 官方源（见 updateSources.ts）
+  updateSource: "atomgit",
+  // 自定义镜像前缀（保留向下兼容字段），空串 = 未填
   customUpdateSourceUrl: "",
 
   // ── Agent 后端：默认 pi（经典后端），用户可在设置中切换为 dsh ──
@@ -397,16 +397,12 @@ export class SettingsStore {
     if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
       delete safePatch.autoSessionTitle;
     }
-    // 更新源 id 归一化（只允许已知枚举，防手改/脏值污染 feed URL）；自定义源地址仅接受字符串。
+    // 更新源 id 归一化（只允许已知枚举：atomgit 第一首选，github 官方；其余历史值回退 atomgit）。
     if ("updateSource" in safePatch) {
       const candidate = safePatch.updateSource;
       const known =
         typeof candidate === "string" &&
-        (candidate === "github" ||
-          candidate === "ghfast" ||
-          candidate === "ghproxy-net" ||
-          candidate === "ghproxy-cxkpro" ||
-          candidate === "custom");
+        (candidate === "atomgit" || candidate === "github");
       if (known) safePatch.updateSource = candidate;
       else delete safePatch.updateSource;
     }

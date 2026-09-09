@@ -72,17 +72,7 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 /**
- * 下载源（按顺序尝试）：镜像代理 GitHub raw → GitHub raw。
- * 镜像前缀形如 `https://ghfast.top/https://raw.githubusercontent.com/...`，
- * 与应用更新的 GitHub 镜像体系同源（shared/updateSources.ts），国内可达性远好于
- * 直连 GitHub raw。未配置镜像时只有 GitHub raw 一个源。
- *
- * 注意：不再把 jsDelivr gh CDN 列为下载回退源。实测 jsDelivr 对 manifest/catalog
- * 有陈旧缓存（如 0.85.0），与 GitHub raw 当前的 0.85.1 内容不同（dataSha256
- * 不一致）。一旦 GitHub raw 短暂失败、回落到 jsDelivr，就会拿到过期数据且无法
- * 与"当前版本"区分 —— 表现为 checkRemote 永远报"已是最新"而错过真更新。
- * 下载失败时由调用方走 npm 生成回退（checkRemote）或直接报错（update），
- * 不拿陈旧 CDN 数据当真值。
+ * 下载源（按顺序尝试）：若配置了 AtomGit 则优先从 AtomGit raw 下载，随后回退 GitHub raw。
  */
 function sourceBaseUrls(
 	branch: string,
@@ -92,7 +82,11 @@ function sourceBaseUrls(
 	const rawManifest = `https://raw.githubusercontent.com/ayuayue/PiDeck/${branch}/resources/${PI_AI_CATALOG_MANIFEST_FILE_NAME}`;
 	const sources: { catalog: string; manifest: string }[] = [];
 	if (mirrorHost) {
-		sources.push({ catalog: `${mirrorHost}/${rawCatalog}`, manifest: `${mirrorHost}/${rawManifest}` });
+		const atomgitPrefix = `${mirrorHost}/ayuayue/PiDeck/raw/${branch}/resources`;
+		sources.push({
+			catalog: `${atomgitPrefix}/${PI_AI_CATALOG_FILE_NAME}`,
+			manifest: `${atomgitPrefix}/${PI_AI_CATALOG_MANIFEST_FILE_NAME}`,
+		});
 	}
 	sources.push({ catalog: rawCatalog, manifest: rawManifest });
 	return sources;
@@ -183,14 +177,12 @@ export class PiAiCatalogUpdater {
 	}
 
 	/**
-	 * 当前源对应的镜像 host：github 官方源返回 null（直连 GitHub raw），
-	 * 镜像/自定义返回代理前缀（如 https://ghfast.top），供 sourceBaseUrls 生成
-	 * `https://<镜像>/https://raw.githubusercontent.com/...` 形式的代理 URL。
+	 * 当前源对应的镜像/加速 host：github 官方源返回 null（直连 GitHub raw），
+	 * atomgit 返回 AtomGit 域名，供 sourceBaseUrls 优先从 AtomGit raw 加速获取。
 	 */
 	private mirrorHost(): string | null {
 		const source = this.source();
 		if (source === "github") return null;
-		if (source === "custom") return normalizeCustomMirrorHost(this.customHost());
 		return UPDATE_SOURCE_MIRRORS.find((m) => m.id === source)?.host ?? null;
 	}
 

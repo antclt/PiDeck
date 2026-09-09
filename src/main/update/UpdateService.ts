@@ -229,12 +229,7 @@ export class UpdateService {
 		if (this.deliveryMode !== "automatic") return;
 		const settings = this.deps.settingsStore.get();
 		const source = normalizeUpdateSource(settings.updateSource);
-		const feedUrl = updateSourceFeedUrl(
-			source,
-			source === "custom"
-				? normalizeCustomMirrorHost(settings.customUpdateSourceUrl ?? "")
-				: null,
-		);
+		const feedUrl = updateSourceFeedUrl(source);
 		this.getAutoUpdater().setFeedUrl(feedUrl);
 	}
 
@@ -415,12 +410,7 @@ export class UpdateService {
 		if (this.deliveryMode === "manual") {
 			const settings = this.deps.settingsStore.get();
 			const source = normalizeUpdateSource(settings.updateSource);
-			const releaseUrl = updateSourceLatestReleaseUrl(
-				source,
-				source === "custom"
-					? normalizeCustomMirrorHost(settings.customUpdateSourceUrl ?? "")
-					: null,
-			);
+			const releaseUrl = updateSourceLatestReleaseUrl(source);
 			const result = await this.getManualChecker()(releaseUrl ?? undefined);
 			this.lastApp = result;
 			this.download = result.hasUpdate

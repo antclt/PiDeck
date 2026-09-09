@@ -20,11 +20,22 @@ export const UPDATE_REPO = "PiDeck";
 /** generic feed 的固定路径段：GitHub 把 `releases/latest/download/<asset>` 302 到当前最新 release。 */
 export const RELEASES_LATEST_DOWNLOAD_PATH = "/releases/latest/download";
 
-/** 镜像清单：id = 设置枚举值；host = 镜像域名前缀（github 官方源不在此列，走 app-update.yml 原生链路）。 */
+/** AtomGit 托管根域名。 */
+export const ATOMGIT_HOST = "https://atomgit.com";
+
+/** AtomGit Release 仓库根路径，例如 `https://atomgit.com/ayuayue/PiDeck`。 */
+export function atomGitReleasesBase(): string {
+  return `${ATOMGIT_HOST}/${UPDATE_REPO_OWNER}/${UPDATE_REPO}`;
+}
+
+/** AtomGit Release generic feed baseUrl（latest.yml 与安装包都下载自此路径）。 */
+export function atomGitFeedUrl(): string {
+  return `${atomGitReleasesBase()}/releases/download/latest`;
+}
+
+/** 镜像/非官方更新源清单：保留 AtomGit 作为国内加速源（第一首选）；github 走原生链路。 */
 export const UPDATE_SOURCE_MIRRORS: ReadonlyArray<{ id: UpdateSourceId; host: string }> = [
-  { id: "ghfast", host: "https://ghfast.top" },
-  { id: "ghproxy-net", host: "https://ghproxy.net" },
-  { id: "ghproxy-cxkpro", host: "https://ghproxy.cxkpro.top" },
+  { id: "atomgit", host: ATOMGIT_HOST },
 ];
 
 /** GitHub Release 仓库根路径，例如 `https://github.com/ayuayue/PiDeck`。 */
@@ -32,8 +43,11 @@ export function gitHubReleasesBase(): string {
   return `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}`;
 }
 
-/** 镜像前缀 → generic feed baseUrl（latest.yml 与安装包/blockmap 都拼在其后）。 */
+/** 镜像前缀 → generic feed baseUrl。对于 atomgit 直接返回 atomgit feed url。 */
 export function buildCustomSourceFeedUrl(host: string): string {
+  if (host === ATOMGIT_HOST || host.startsWith(ATOMGIT_HOST)) {
+    return atomGitFeedUrl();
+  }
   return `${host}/${gitHubReleasesBase()}${RELEASES_LATEST_DOWNLOAD_PATH}`;
 }
 

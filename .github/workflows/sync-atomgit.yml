@@ -1,0 +1,56 @@
+name: Sync Release to AtomGit
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "指定要同步到 AtomGit 的 Release Tag（如 v0.7.4，留空则默认最新 Release）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  sync-atomgit:
+    name: Sync Release to AtomGit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve target tag
+        id: resolve-tag
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ] && [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          if [ -z "$TAG" ]; then
+            # 留空时查询 GitHub 仓库最新 Release 的 Tag
+            echo "No tag specified, fetching latest release from GitHub..."
+            TAG=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName)
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::未能识别或获取到合法的 Release Tag"
+            exit 1
+          fi
+          echo "Target tag: ${TAG}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run sync script
+        run: |
+          node scripts/sync-release-to-atomgit.mjs --tag "${{ steps.resolve-tag.outputs.tag }}" --gh-repo "${{ github.repository }}"
+        env:
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -531,12 +531,12 @@ test("switching update source rebuilds the generic feed URL immediately", async 
 	service.start({ startDelayMs: 0, intervalMs: 60_000 });
 	assert.equal(updater.feedUrl, null);
 
-	// 设置页切换到 ghfast 镜像：保存即生效（无需重启）
-	await settings.update({ updateSource: "ghfast" });
+	// 设置页切换到 atomgit 更新源：保存即生效（无需重启）
+	await settings.update({ updateSource: "atomgit" });
 	service.applyUpdateSource();
 	assert.equal(
 		updater.feedUrl,
-		"https://ghfast.top/https://github.com/ayuayue/PiDeck/releases/latest/download",
+		"https://atomgit.com/ayuayue/PiDeck/releases/download/latest",
 	);
 
 	// 回到官方源：重置 feed，恢复原生 GitHub provider
@@ -545,28 +545,27 @@ test("switching update source rebuilds the generic feed URL immediately", async 
 	assert.equal(updater.feedUrl, null);
 });
 
-test("custom mirror prefix is normalized and applied as feed URL", async (t) => {
+test("atomgit source is applied as generic feed URL on start", async (t) => {
 	const { service, updater } = createAutomaticService({
-		settings: { updateSource: "custom", customUpdateSourceUrl: "  https://mirror.example.com/  " },
+		settings: { updateSource: "atomgit" },
 	});
 	stopAfter(t, service);
 	service.start({ startDelayMs: 0, intervalMs: 60_000 });
-	// 前缀 trim + 去尾斜杠后拼接到 generic feed
 	assert.equal(
 		updater.feedUrl,
-		"https://mirror.example.com/https://github.com/ayuayue/PiDeck/releases/latest/download",
+		"https://atomgit.com/ayuayue/PiDeck/releases/download/latest",
 	);
 });
 
-test("manual delivery uses latestReleaseUrl from the configured mirror per check", async (t) => {
+test("manual delivery uses latestReleaseUrl from the configured atomgit source per check", async (t) => {
 	let receivedUrl;
 	const { service, settings } = createManualService((latestReleaseUrl) => {
 		receivedUrl = latestReleaseUrl;
 		return Promise.resolve({ hasUpdate: false, latestVersion: null });
 	});
 	stopAfter(t, service);
-	await settings.update({ updateSource: "ghfast" });
+	await settings.update({ updateSource: "atomgit" });
 	await service.checkNow();
-	// macOS manual 检查：镜像源 URL 传进检查器（GitHub 源时为 undefined）
-	assert.equal(receivedUrl, "https://ghfast.top/https://github.com/ayuayue/PiDeck/releases/latest");
+	// macOS manual 检查：AtomGit 源 URL 传进检查器（GitHub 源时为 undefined）
+	assert.equal(receivedUrl, "https://atomgit.com/ayuayue/PiDeck/releases/latest");
 });

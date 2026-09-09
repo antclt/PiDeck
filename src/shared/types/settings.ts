@@ -40,13 +40,10 @@ export type WorkspaceContentOpenMode = "split" | "maximize";
 export type SessionTabOpenMode = "preview" | "permanent";
 export type AppFontSizeMode = "compact" | "default" | "medium" | "large" | "xlarge";
 
-/** 更新源：github = 官方 GitHub Release；其余为国内镜像前缀代理；custom = 用户自定义镜像前缀。 */
+/** 更新源：atomgit = 国内 AtomGit 源（默认首选）；github = 官方 GitHub Release。 */
 export type UpdateSourceId =
-	| "github"
-	| "ghfast"
-	| "ghproxy-net"
-	| "ghproxy-cxkpro"
-	| "custom";
+	| "atomgit"
+	| "github";
 
 /** 内置镜像体检状态：ok=检测+下载预检全通；slow=通但实测速度低于阈值；broken=失败/超时/响应异常。 */
 export type MirrorHealthStatus = "ok" | "slow" | "broken";
