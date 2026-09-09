@@ -4,22 +4,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 function loadComposerBehaviorModule() {
-	const source = readFileSync("src/renderer/src/composerBehavior.ts", "utf8");
-	const { outputText } = ts.transpileModule(source, {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-		},
-	});
-	const sandbox = { exports: {} };
-	vm.runInNewContext(outputText, sandbox, {
-		filename: "composerBehavior.ts",
-	});
-	return sandbox.exports;
+	return loadTsCommonJs("src/renderer/src/composerBehavior.ts");
 }
 
 const {

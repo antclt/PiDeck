@@ -134,6 +134,9 @@ import {
 	UserPen,
 	GitFork,
 	LoaderCircle,
+	Sparkles,
+	MessageSquare,
+	Quote,
 } from "lucide-react";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { normalizeSessionPathForCompare } from "../../agentListDisplay";
@@ -173,7 +176,9 @@ import type {
 	VisionBridgeEvent,
 	VisionEventsInfo,
 } from "../../../../shared/types";
-import { parseRichInputChips, unwrapFileChipPath } from "./composer/chips";
+import { parseRichInputChips, unwrapFileChipPath, formatChipDisplayLabel, isDirectoryFileChip } from "./composer/chips";
+import { buildBubbleRefLayout, replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
+import type { BubbleRefSegment } from "./composer/quoteChip";
 import removeMarkdown from "remove-markdown";
 
 import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
@@ -768,23 +773,6 @@ function VisionBridgeDetail(props: { events: VisionEventsInfo | null; loading: b
 	);
 }
 
-/**
- * 从用户消息文本中提取 pi 展开后的 <skill name="..." location="...">...</skill> 块。
- * pi 在发送 /skill:name 时会把 skill 内容展开成该 XML 块注入用户消息，
- * 这里在展示层把它们识别出来，渲染成 skill 徽标，并把原始 XML 从正文里剥除。
- * 返回 { skills, text }：skills 为 skill 名列表，text 为移除 skill 块后的正文。
- */
-function extractSkillBlocks(text: string): { skills: string[]; text: string } {
-	const skills: string[] = [];
-	// 非贪婪匹配 skill 块；name/location 属性顺序与引号样式兼容 pi 实际输出
-	const re = /<skill\s+name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/gi;
-	const cleaned = text.replace(re, (_m, name: string) => {
-		if (name) skills.push(name);
-		return "";
-	});
-	return { skills, text: cleaned.trim() };
-}
-
 /** 用户消息：右对齐气泡 + 附件 + hover 显隐操作栏（复制/编辑/删除/重发/修改输入框）。
  * 编辑分两种：原地编辑（修改 JSONL + 重载会话）和修改输入框（放回 composer 不自动发送）。 */
 export const UserBubble = memo(function UserBubble(props: {
@@ -962,9 +950,11 @@ export const UserBubble = memo(function UserBubble(props: {
 			if (timer !== undefined) window.clearTimeout(timer);
 		};
 	}, [imageHashes, message.images, message.timestamp, visionBlocks.length, visionBridgeEnabled]);
-	// 提取 pi 展开后的 <skill> 块：渲染为 skill 徽标，并从正文里剥除 XML
-	const { skills, text: bodyText } = extractSkillBlocks(vision.text);
-	const cleanText = bodyText;
+	// quoted_context / referenced_session / skill / prompt_template 都在 renderUserBubbleChipText 中
+	// 就地解析为 chip；这里保留完整文本，以便重载后的自包含块不会丢失展示元数据。
+	const cleanText = vision.text;
+	// 气泡布局（对齐 Proma）：quote chip 独立一行放正文上方，其余片段行内跟随。
+	const bubbleLayout = buildBubbleRefLayout(cleanText);
 	/** 原地编辑不影响输入框；先提交给确认弹窗。 */
 	const handleSaveEdit = () => {
 		if (props.onEditMessage && editText.trim()) {
@@ -981,16 +971,6 @@ export const UserBubble = memo(function UserBubble(props: {
 	};
 	return (
 		<article /* user-turn 为 e2e 选择器锚点 */ ref={rowRef} className={`user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end ${props.fresh ? "user-turn--fresh animate-[message-enter_260ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}${props.topFresh ? " user-turn--top-fresh animate-[top-enter_280ms_cubic-bezier(0.22,1,0.36,1)_both]" : ""}`} data-message-id={message.id}>
-			{skills.length > 0 && (
-				<div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
-					{skills.map((name) => (
-						<span key={name} className="user-turn-skill-badge inline-flex items-center gap-0.5 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground" title={`/${name}`}>
-							<span className="font-mono text-[11px] font-medium text-muted-foreground">/</span>
-							{name}
-						</span>
-					))}
-				</div>
-			)}
 			{message.images && message.images.length > 0 && (
 				<div className="mb-2 flex max-w-[min(82%,64ch)] flex-wrap justify-end gap-2">
 					{message.images.map((img, index) => (
@@ -1137,12 +1117,25 @@ export const UserBubble = memo(function UserBubble(props: {
 			)}
 			{cleanText && !editing && (
 				<div className="user-turn-bubble w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
-					<div
-						ref={userTextRef}
-						className={`text-chat text-text-primary whitespace-pre-wrap break-words ${messageExpanded ? "" : "line-clamp-8"}`}
-					>
-						{renderChipText(cleanText, props.onOpenFile, props.validCommandNames, props.validFilePaths)}
-					</div>
+					{/* 引用 chip 独立一行放正文上方（对齐 Proma ChatMessageItem 的 QuoteChip 行） */}
+					{bubbleLayout.quotes.length > 0 && (
+						<div className="mb-2 flex flex-wrap gap-1.5">
+							{bubbleLayout.quotes.map((block) => (
+								<BubbleQuoteChip key={`quote-${block.start}`} label={block.label} text={block.text} />
+							))}
+						</div>
+					)}
+					{bubbleLayout.segments.length > 0 && (
+						<div
+							ref={userTextRef}
+							// user-turn-text 是气泡 chip 样式的唯一作用域锚点：timeline.css 的
+							// `.user-turn-text .input-chip*` 全靠它生效（漏写时 chip 会退化成裸文本，
+							// 且 lucide 图标会被 preflight 的 svg{display:block} 撑成单独一行）。
+							className={`user-turn-text text-chat text-text-primary whitespace-pre-wrap break-words ${messageExpanded ? "" : "line-clamp-8"}`}
+						>
+							{renderBubbleSegments(bubbleLayout.segments, props)}
+						</div>
+					)}
 					{messageOverflowing && (
 						<div className="relative mt-1 flex justify-end">
 							{/* 折叠态底部渐变提示还有内容；展开态不需要 */}
@@ -1192,7 +1185,11 @@ export const UserBubble = memo(function UserBubble(props: {
 				<time>{formatTime(message.timestamp)}</time>
 			</div>
 			<div className="user-turn-actions flex min-h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
-				<CopyMenu text={stripMarkdown(cleanText)} markdown={message.text} targetRef={rowRef} />
+				<CopyMenu
+					text={stripMarkdown(replaceExpandedRefBlocksWithLabels(cleanText))}
+					markdown={replaceExpandedRefBlocksWithLabels(message.text)}
+					targetRef={rowRef}
+				/>
 				<Button
 					type="button"
 					variant="ghost"
@@ -1332,9 +1329,92 @@ export function stripMarkdown(text: string): string {
 	});
 }
 
-/** 将消息文本中的 @path / /command 渲染为行内 chip（聊天区展示用，与输入框 chip 视觉一致）。
- * 可通过 onOpenFile 回调使 chip 可点击跳转。 */
-function renderChipText(text: string, onOpenFile?: (path: string) => void, validCommandNames?: Set<string>, validFilePaths?: Set<string>): ReactNode[] {
+/** 引用 chip 图标：与输入框（mentionChip 内联 SVG）同 path 同 stroke 参数，视觉逐像素一致。
+ * lucide 组件渲染结果 = 同 viewBox + stroke currentColor + width/height 1em 的 svg。 */
+const CHIP_ICONS: Record<string, typeof FileText> = {
+	file: FileText,
+	skill: Sparkles,
+	session: MessageSquare,
+	quote: Quote,
+};
+
+/** 气泡引用 chip（对齐 Proma QuoteChip）：正文上方独立一行，rounded-md + 主题色浅底 +
+ * 细边框，图标与文字都走 accent 语义 token，暗色主题自动跟随。 */
+function BubbleQuoteChip({ label, text }: { label: string; text: string }) {
+	return (
+		<div
+			className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border border-[color:color-mix(in_srgb,var(--color-accent)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--color-accent)_8%,transparent)] px-2.5 py-1 text-[12px] text-text-secondary"
+			title={text}
+		>
+			<Quote className="size-3.5 shrink-0 text-[color:color-mix(in_srgb,var(--color-accent)_60%,transparent)]" aria-hidden="true" />
+			<span className="min-w-0 max-w-full truncate">{label}</span>
+		</div>
+	);
+}
+
+/** 气泡正文片段：正文 + 非 quote chip（session/skill/template），保持原文顺序行内渲染。
+ *
+ * quoted_context / referenced_session / pi 的 skill / PiDeck 的 prompt_template 都自带展示名和
+ * 完整模型上下文；因此切会话、重启、模板改名或删除后仍可恢复，不依赖运行时 atom。其余
+ * 原始 `@path`、`/command` 正文继续走 renderChipText 重新解析。 */
+function renderBubbleSegments(
+	segments: BubbleRefSegment[],
+	props: {
+		onOpenFile?: (path: string) => void;
+		validCommandNames?: Set<string>;
+		validFilePaths?: Set<string>;
+	},
+): ReactNode[] {
+	const nodes: ReactNode[] = [];
+	segments.forEach((segment, index) => {
+		// 片段之间补一个空格：块自带的 \n\n 只服务模型阅读，气泡里必须保持行内紧凑，
+		// 否则每个 chip 独占一行（用户实测截图：「不像行内 chip」）。
+		if (index > 0) nodes.push(" ");
+		if (segment.kind === "text") {
+			nodes.push(
+				...renderChipText(
+					segment.value,
+					props.onOpenFile,
+					props.validCommandNames,
+					props.validFilePaths,
+					`text-${index}-`,
+				),
+			);
+			return;
+		}
+		const { block } = segment;
+		const chipKind = block.kind;
+		const label = block.kind === "session" ? block.name : block.label;
+		// skill/template 正文可能是一整份 SKILL.md 或提示词；它属于模型上下文，不应在
+		// 原生 title 中撑出巨大浮层。quote/session 仍保留全文悬浮预览。
+		const title = block.kind === "skill" ? `/${label}` : block.text;
+		const Icon = CHIP_ICONS[chipKind] ?? FileText;
+		nodes.push(
+			<span
+				key={`${chipKind}-${block.start}`}
+				className={`input-chip input-chip--${chipKind}`}
+				data-type={chipKind}
+				title={title}
+			>
+				{/* inline-block 是必须的：Tailwind preflight 把 svg 设为 display:block，
+				    仅靠 legacy 作用域在气泡外的渲染点会再次被拆行 */}
+				<Icon className="input-chip__icon inline-block shrink-0" width="12" height="12" aria-hidden="true" />
+				<span className="input-chip__label">{formatChipDisplayLabel(chipKind, label)}</span>
+			</span>,
+		);
+	});
+	return nodes;
+}
+
+/** 将原始 @path / /command 渲染为行内 chip（聊天区展示用，与输入框视觉一致）。
+ * 自包含 XML 块由 renderUserBubbleChipText 先折叠；file chip 保留点击打开能力。 */
+function renderChipText(
+	text: string,
+	onOpenFile?: (path: string) => void,
+	validCommandNames?: Set<string>,
+	validFilePaths?: Set<string>,
+	keyPrefix = "",
+): ReactNode[] {
 	const chips = parseRichInputChips(text, validCommandNames, validFilePaths);
 	if (chips.length === 0) return [text];
 	const nodes: ReactNode[] = [];
@@ -1344,19 +1424,24 @@ function renderChipText(text: string, onOpenFile?: (path: string) => void, valid
 			nodes.push(text.slice(cursor, chip.start));
 		}
 		const clickable = onOpenFile && chip.kind === "file";
+		// 目录引用换成文件夹图标（对齐 Proma 的目录 chip）；title 给完整路径便于悬浮确认。
+		const isDirectory = chip.kind === "file" && isDirectoryFileChip(chip.raw);
+		const Icon = isDirectory ? Folder : CHIP_ICONS[chip.kind] ?? FileText;
+		const title = chip.kind === "file" ? unwrapFileChipPath(chip.raw) : chip.raw;
 		nodes.push(
 			<span
-				key={`chip-${chip.start}`}
+				key={`${keyPrefix}chip-${chip.start}`}
 				className={`input-chip input-chip--${chip.kind}${clickable ? " clickable" : ""}`}
 				data-type={chip.kind}
 				data-raw={chip.raw}
-				title={chip.raw}
+				title={title}
 				onClick={clickable ? () => onOpenFile(unwrapFileChipPath(chip.raw)) : undefined}
 			>
-				<span className="input-chip__icon">
-					{chip.kind === "file" ? "@" : "/"}
+				<Icon className="input-chip__icon inline-block shrink-0" width="12" height="12" aria-hidden="true" />
+				{/* 展示文本与输入框一致（formatChipDisplayLabel），构成区分信号之一 */}
+				<span className="input-chip__label">
+					{formatChipDisplayLabel(chip.kind, chip.label)}
 				</span>
-				<span className="input-chip__label">{chip.label}</span>
 			</span>,
 		);
 		cursor = chip.end;

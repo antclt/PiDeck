@@ -43,7 +43,7 @@ test("App：文件树右键引用复用 fileNodeDragPayloadToRef 并经 composer
   assert.match(openBlock, /api\.files\.open\(fileMenu\.node\.path\)/);
 });
 
-test("目录节点引用带尾斜杠且可解析为 file chip", () => {
+test("目录节点引用带尾斜杠（raw）且可解析为 file chip", () => {
   const ref = appUtils.fileNodeDragPayloadToRef({
     path: "C:\\proj\\.tmp",
     relativePath: ".tmp",
@@ -59,10 +59,11 @@ test("目录节点引用带尾斜杠且可解析为 file chip", () => {
   );
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].kind, "file");
-  assert.equal(parsed[0].label, ".tmp/");
+  // 展示只给目录名（文件夹图标承担「目录」语义，对齐 Proma）
+  assert.equal(parsed[0].label, ".tmp");
 });
 
-test("含空格的目录引用加引号并保留尾斜杠", () => {
+test("含空格的目录引用加引号、raw 保留尾斜杠", () => {
   const ref = appUtils.fileNodeDragPayloadToRef({
     path: "C:\\proj\\my docs",
     relativePath: "my docs",
@@ -73,5 +74,5 @@ test("含空格的目录引用加引号并保留尾斜杠", () => {
   const parsed = chips.parseRichInputChips(ref, undefined, new Set(["my docs"]));
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].kind, "file");
-  assert.equal(parsed[0].label, "my docs/");
+  assert.equal(parsed[0].label, "my docs");
 });

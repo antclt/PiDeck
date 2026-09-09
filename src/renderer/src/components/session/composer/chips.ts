@@ -14,6 +14,63 @@ export type ComposerChip = {
 	label: string;
 };
 
+/** 展示前缀：渲染层拼在 label 前的触发符（与旧字符 icon 一致，构成区分信号之一）。
+ * 发送/解析仍用 raw，此常量只影响展示；parseHTML/readChipFromDom 重建节点时
+ * 需按同一映射剥前缀，避免 attrs.label 污染导致双前缀。 */
+export const CHIP_PREFIX: Record<ComposerChip["kind"], string> = {
+	file: "@",
+	skill: "/",
+	session: "&",
+	quote: "❝",
+};
+
+/**
+ * chip 的展示文本。
+ *
+ * 对齐 Proma：只有文件引用保留 `@`（用户敲进去的引用语法），`/`、`&`、`❝` 一律交给图标
+ * 表达，避免图标与字符双前缀；pi 的 `/skill:名称` 是 wire 细节，展示层只留技能名。
+ */
+export function formatChipDisplayLabel(
+	kind: ComposerChip["kind"],
+	label: string,
+): string {
+	if (kind === "file") return `@${label}`;
+	if (kind === "skill") return label.replace(/^skill:/, "");
+	return label;
+}
+
+/**
+ * 从 DOM 展示文本还原 chip label（parseHTML / readChipFromDom 用）。
+ *
+ * 必须按类型剥：展示层只有 file 带 `@`，skill 的旧版 wire 前缀是 `/skill:`（技能名本身不可能以 `/` 开头）。
+ * session/quote 的 label 可能本身就以 `&`、`/`、`@`、`❝` 开头（例如引用一段 `/src/foo` 路径），
+ * 旧实现统一 `replace(/^[@/&❝]/)` 会把 label 的首字符吃掉。
+ */
+export function stripChipDisplayPrefix(
+	kind: ComposerChip["kind"],
+	text: string,
+): string {
+	if (kind === "file") return text.replace(/^@/, "");
+	if (kind === "skill") return text.replace(/^\/(?:skill:)?/, "");
+	return text;
+}
+
+/**
+ * 文件 chip 的展示文本：只显示文件名（对齐 Proma FilePathChip 的 `truncate max-w-[240px]`
+ * + tooltip 全路径），完整路径仍保留在 raw 里用于打开文件与悬浮查看。
+ */
+export function formatFileChipLabel(path: string): string {
+	const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+	const segments = normalized.split("/").filter(Boolean);
+	return segments.at(-1) ?? normalized;
+}
+
+/** raw 是否为目录引用（`@src/` 或 `@"my docs/"`）：据此换成文件夹图标。 */
+export function isDirectoryFileChip(raw: string): boolean {
+	const body = raw.replace(/^@/, "").replace(/^"|"$/g, "");
+	return /[/\\]$/.test(body);
+}
+
 /** @deprecated 兼容旧名；新代码用 ComposerChip */
 export type RichInputChip = ComposerChip;
 
@@ -141,7 +198,17 @@ export function parseRichInputChips(
 		if (text[end] === "/") continue;
 		if (!overlapsUrl(start, end, urlSpans)) {
 			const label = m[1].slice(1);
-			if (!validCommandNames || validCommandNames.has(label)) {
+			// pi 的技能调用 wire token 是 /skill:名称；运行时命令清单未必把每个已安装
+			// skill 枚举为独立命令，因此除精确白名单外也认这一确定语法。这样 disk 重载后
+			// /skill:foo 仍能还原为 chip，而未知普通 /command 继续保持纯文本。
+			const isPiSkillInvocation = /^skill:[\p{L}\p{N}_-]+$/u.test(label);
+			const baseCommand = label.split(":", 1)[0] ?? label;
+			if (
+				!validCommandNames ||
+				validCommandNames.has(label) ||
+				validCommandNames.has(baseCommand) ||
+				isPiSkillInvocation
+			) {
 				chips.push({ start, end, raw: m[1], kind: "skill", label });
 			}
 		}
@@ -186,9 +253,11 @@ export function parseRichInputChips(
 				/^[a-zA-Z]:[\\/]/.test(pathKey) || /^\/[^/]+\//.test(pathKey);
 			if (!isAbsPath && validFilePaths && !validFilePaths.has(pathKey)) continue;
 			const baseLabel = pathKey || normalized || seg;
-			const label = isDirectoryRef
+			const fullLabel = isDirectoryRef
 				? `${baseLabel.replace(/[/\\]+$/, "")}/`
 				: baseLabel;
+			// 只展示文件名（Proma 同款），全路径仍在 raw 里，不影响偏移、打开或发送内容。
+			const label = formatFileChipLabel(fullLabel);
 			// 保留用户实际输入的 raw，不在解析阶段改写成 @"…"：原始 token 的
 			// 字符区间必须与 ProseMirror 的纯文本偏移一致，否则 atom 节点长度
 			// 与 caret 映射不一致，后续输入可能落到 chip 内部或把文字插入错误位置。

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ComponentProps, ReactNode, RefObject } from "react";
 import type { ChatMessage, ImageContent } from "../../../../shared/types";
 import { MarkdownStream } from "./MarkdownStream";
+import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import { Button } from "../ui-shadcn/button";
 import {
   DiagnosticMessageCard,
@@ -818,7 +819,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
     const content = kind === "text"
       ? selected
           .map((message) => {
-            let text = message.text;
+            // 多选复制也走与气泡/单条复制相同的展示折叠，不能让模型上下文 XML 漏出。
+            let text = replaceExpandedRefBlocksWithLabels(message.text);
             text = text.replace(
               /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
               "",
@@ -831,7 +833,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
             return stripMarkdown(text);
           })
           .join(separator)
-      : selected.map((message) => message.text).join(separator);
+      : selected
+          .map((message) => replaceExpandedRefBlocksWithLabels(message.text))
+          .join(separator);
 
     await navigator.clipboard.writeText(content);
     props.onToast(

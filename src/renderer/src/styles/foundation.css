@@ -138,6 +138,14 @@
   /* 过程行图标色：默认 zinc 主题会把 brand-purple 洗成灰，思考/工具 logo 必须单独保色，
      否则和正文 tertiary 糊成一块。不跟 data-accent 走，身份色不等于主题强调色。 */
   --color-thinking: #6366f1;
+  /* 输入框/消息引用 chip 身份色（file/skill/session）：不随 data-accent 洗白，
+     否则默认 neutral 主题下三类引用糊成灰阶、无法区分。
+     2026-09 对齐 Proma 后底色与文字同源（color-mix 同 token 派生），文字即身份色，
+     因此浅色档必须够深才能过 WCAG AA：实测 #2563eb 仅 4.37:1、#16a34a 仅 2.82:1，
+     已换成 #1d4ed8（5.57:1）与 #166534（5.73:1）；skill 紫 4.53:1 达标保持。 */
+  --color-chip-file: #1d4ed8;
+  --color-chip-skill: #7c3aed;
+  --color-chip-session: #166534;
   --color-code-bg: #111418;
   --color-code-text: #d1d5db;
   --color-chat-card-bg: #fafafa;
@@ -481,6 +489,11 @@
   --color-brand-rose: #9ca3af;
   --color-info: #60a5fa;
   --color-thinking: #818cf8;
+  /* 引用 chip 身份色暗色档：比浅色提亮一档，保证在深灰底上有足够辨识度
+     （实测文字/底色 5.2~7.7:1，均达 AA）。 */
+  --color-chip-file: #60a5fa;
+  --color-chip-skill: #a78bfa;
+  --color-chip-session: #4ade80;
   --color-code-bg: #1a1a1a;
   --color-code-text: #d1d5db;
   --color-chat-card-bg: #171717;

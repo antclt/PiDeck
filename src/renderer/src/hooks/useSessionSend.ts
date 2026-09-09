@@ -194,9 +194,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
       ? [...attachmentSnapshot]
       : undefined;
     if (!hasComposerSubmission(rawDraft, imageSnapshot)) return;
-    // 引用展开唯一咽喉点（审计定稿）：后续乐观缓存/队列快照/历史记录全部消费展开后的文本，
-    // #q token 永不出现在时间线气泡或发给 pi 的内容里。
-    // 注意：引用展开后仍是普通 markdown 文本，因此与斜杠命令混写时按普通消息处理（有意为之）。
+    // 引用展开唯一咽喉点（审计定稿）：后续乐观缓存/队列快照/历史记录全部消费自包含块文本，
+    // #q token 永不出现在时间线气泡或发给 pi 的内容里。气泡只解析块的 label，模型仍读取全文。
+    // 与斜杠命令混写时仍按普通消息继续走后续模板/会话引用展开（有意为之）。
     const quoteMap = store.get(sessionQuotesByIdAtom)[sourceSessionId];
     const message = expandQuoteTokens(rawDraft, (id) => quoteMap?.[id]) ?? rawDraft;
     // 只有引用没有任何正文/图片：引用是上下文不是消息，拦下并提示先写问题

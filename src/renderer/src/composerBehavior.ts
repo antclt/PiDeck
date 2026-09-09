@@ -6,6 +6,7 @@ export type SendShortcut =
 export type ComposerEnterIntent = "ignore" | "newline" | "send";
 
 import type { AgentBackend, ComposerAgentMode } from "@shared/types";
+import { formatPromptTemplateBlock } from "./components/session/composer/referenceBlocks";
 
 export const PI_DECK_PLAN_MODE_MARKER = "__PI_DECK_PLAN_MODE__";
 export const PI_DECK_GOAL_MODE_MARKER = "__PI_DECK_GOAL_MODE__";
@@ -192,6 +193,8 @@ function stripFrontmatter(raw: string): string {
  *   保持 /name 原样并返回 emptyTemplateName，调用方据此给出明确提示，
  *   避免展开成空白导致主进程“消息不能为空”的误导性拒绝
  * - 展开时剥离 content 中的 frontmatter，避免元数据泄漏到对话消息中
+ * - 展开结果写成自包含 `<prompt_template>` 块：模型仍读完整模板正文，气泡可在重启、
+ *   模板改名或删除后稳定还原为 `/模板名` chip（不依赖当前模板列表）
  */
 export function expandPromptTemplates(
 	message: string,
@@ -230,9 +233,10 @@ export function expandPromptTemplates(
 			emptyTemplateName = name;
 			return _match;
 		}
-		// 命令后有用户输入时用两个换行分隔模板内容和用户输入，提升可读性
+		// 命令后有用户输入时用两个换行分隔模板内容和用户输入，提升可读性。
+		// 内容和模板名一起编码：前端展示只折叠为 /name，但模型仍可读取完整正文。
 		const separator = suffix && /\s/.test(suffix) ? "\n\n" : "";
-		return prefix + content + separator;
+		return prefix + formatPromptTemplateBlock(name, content) + separator;
 	});
 
 	return {

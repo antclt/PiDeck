@@ -61,6 +61,7 @@ import { useImportFlow } from "./hooks/useImportFlow";
 import { useQueuedPrompt } from "./hooks/useQueuedPrompt";
 import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
 import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
+import { useUserMessageEditReplay } from "./hooks/useUserMessageEditReplay";
 import { PromptDeliveryUnknownError } from "./utils/promptErrors";
 import {
   isLiveRuntimeStatus,
@@ -1991,22 +1992,14 @@ export function App() {
 
   // 已删除内置 goal 完成检测。
 
-  // 监听用户发送消息的编辑事件,将消息填入输入框
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ text: string }>).detail;
-      if (detail?.text) {
-        setPrompt(detail.text);
-        // 光标移至文本末尾，利用 RichInput 的 caretRef 机制在渲染后恢复
-        pendingComposerCaretRef.current = detail.text.length;
-        requestAnimationFrame(() => {
-          composerTextareaRef.current?.focus();
-        });
-      }
-    };
-    window.addEventListener("user-message-edit", handler);
-    return () => window.removeEventListener("user-message-edit", handler);
-  }, []);
+  // 监听用户发送消息的编辑事件：回填输入框，并把自包含引用块还原成 chip
+  // （quote 重建快照 + #q token，其余还原为 mention 文本，见 useUserMessageEditReplay）
+  useUserMessageEditReplay({
+    setPrompt,
+    pendingComposerCaretRef,
+    composerRef: composerTextareaRef,
+    currentSessionIdRef,
+  });
 
   // 编辑器右键「引用选中内容」：@path:start-end 引用追加到输入框（与文件树右键 onAttach 同语义）
   useEffect(() => {
