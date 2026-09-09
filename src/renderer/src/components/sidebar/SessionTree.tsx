@@ -199,6 +199,7 @@ export function SessionTree(props: {
       >
         <SessionHoverCard
           session={session}
+          title={title}
           projectName={props.project.name}
           disabled={Boolean(props.controller.menu)}
         >
@@ -282,6 +283,7 @@ export function SessionTree(props: {
         >
           <SessionHoverCard
             session={agentSession}
+            title={child.agent.title}
             projectName={props.project.name}
             status={child.agent.status}
             disabled={Boolean(props.controller.menu)}
@@ -341,6 +343,7 @@ export function SessionTree(props: {
       >
         <SessionHoverCard
           session={child.session}
+          title={child.session.name}
           projectName={props.project.name}
           status={runtimeSnapshot?.status}
           disabled={Boolean(props.controller.menu)}
@@ -427,6 +430,7 @@ export function SessionTree(props: {
           >
             <SessionHoverCard
               session={session}
+              title={session.title}
               projectName={props.project.name}
               status={runtime?.status}
               disabled={Boolean(props.controller.menu)}

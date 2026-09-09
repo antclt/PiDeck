@@ -95,6 +95,7 @@ export function ActiveSessionsTree(props: {
 					>
 						<SessionHoverCard
 							session={record ?? summary}
+							title={displayTitle}
 							projectName={project?.name}
 							status={agent.status}
 							disabled={Boolean(controller.menu)}

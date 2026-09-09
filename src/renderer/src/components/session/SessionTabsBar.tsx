@@ -706,6 +706,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
                   <DropdownMenuLabel>{t("tabs.currentSessionGroup")}</DropdownMenuLabel>
                   {props.onStopCurrent && (
                     <DropdownMenuItem
+                      variant="destructive"
                       disabled={!props.canStopCurrent || props.isStoppingCurrent}
                       style={!props.canStopCurrent || props.isStoppingCurrent ? { opacity: 0.4 } : undefined}
                       onSelect={props.onStopCurrent}
@@ -1118,13 +1119,14 @@ function SessionTab(props: {
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => props.onCloseOthers(sessionId)}>
+        {/* 批量关闭属于危险操作，采用 destructive 危险变体以红色警示 */}
+        <ContextMenuItem variant="destructive" onSelect={() => props.onCloseOthers(sessionId)}>
           <span className="inline-flex items-center gap-2">
             <CircleX className="size-3.5" aria-hidden="true" />
             {t("tabs.closeOthers")}
           </span>
         </ContextMenuItem>
-        <ContextMenuItem onSelect={props.onCloseAll}>
+        <ContextMenuItem variant="destructive" onSelect={props.onCloseAll}>
           <span className="inline-flex items-center gap-2">
             <X className="size-3.5" aria-hidden="true" />
             {t("tabs.closeAll")}

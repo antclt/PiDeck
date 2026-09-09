@@ -57,6 +57,7 @@ test("hover-card i18n copy is synchronized between zh-CN and en-US", () => {
 		"sidebar.hoverCard.updatedAt",
 		"sidebar.hoverCard.emptyPreview",
 		"sidebar.hoverCard.localTask",
+		"sidebar.hoverCard.messageCount",
 	];
 
 	for (const key of keys) {

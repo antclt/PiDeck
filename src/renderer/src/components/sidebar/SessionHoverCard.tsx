@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
-import { Calendar, Folder, Laptop } from "lucide-react";
+import { Calendar, Folder, Laptop, MessageSquare } from "lucide-react";
 import type { SessionRecord, SessionSummary } from "../../../../shared/types";
+import { looksLikePiSessionFileStem } from "../../../../shared/sessionIdentity";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { formatFullDateTime } from "../../utils/relativeTime";
@@ -11,6 +12,8 @@ export interface SessionHoverCardProps {
 	children: ReactNode;
 	/** 会话摘要或记录数据（含 preview、updatedAt、source、backend 等） */
 	session?: SessionSummary | SessionRecord;
+	/** 可选显式标题（例如从 AgentTab 或父级格式化后的名称） */
+	title?: string;
 	/** 所属项目/工作区名称（对应截图中的「所属空间」） */
 	projectName?: string;
 	/** 当前运行态状态（idle / running / error 等） */
@@ -30,25 +33,52 @@ export interface SessionHoverCardProps {
  * 1. 延迟触发：默认设置 openDelay=1500ms（1.5 秒）。鼠标快速划过侧栏列表时不会频繁触发浮层挂载
  *    与竞态渲染，只有光标在某一行停留超过 1.5 秒后才弹出卡片。
  * 2. 位置朝向：默认朝右侧弹出（side="right"），利用右侧主视口充裕空间展示，不遮挡侧栏下方的其他会话。
- * 3. 丰富信息：展示会话首轮/摘要预览文本、本地任务/来源后端标记、所属项目空间、精准更新时间。
+ * 3. 丰富信息：展示会话标题与首轮提问/摘要预览文本、本地任务/来源后端标记、所属项目空间、精准更新时间。
+ *    当轻量扫描未载入正文 preview 时，自动回退展示已推断出的会话标题，避免有标题却显示「暂无内容摘要」。
  * 4. 状态互斥：支持 disabled 属性，在右键上下文菜单激活或拖拽时禁止浮层激活。
  */
 export function SessionHoverCard({
 	children,
 	session,
+	title,
 	projectName,
 	status,
 	disabled = false,
 	openDelay = 1500,
 	closeDelay = 200,
 }: SessionHoverCardProps) {
-	// 没有会话数据或显式禁用时，直接渲染子元素，不挂载 HoverCard 行为
-	if (!session || disabled) {
+	// 没有会话数据且未传标题，或显式禁用时，直接渲染子元素，不挂载 HoverCard 行为
+	if ((!session && !title) || disabled) {
 		return <>{children}</>;
 	}
 
-	const previewText = session.preview?.trim() || t("sidebar.hoverCard.emptyPreview");
-	const formattedTime = session.updatedAt ? formatFullDateTime(session.updatedAt) : "";
+	// 提取并清洗标题：排除时间戳文件名、纯 Untitled 等占位符
+	const rawTitle = (
+		title ||
+		(session && "title" in session && typeof session.title === "string" ? session.title : undefined) ||
+		(session && "name" in session && typeof session.name === "string" ? session.name : undefined)
+	)?.trim();
+	const isPlaceholderTitle = !rawTitle || looksLikePiSessionFileStem(rawTitle) || /^untitled(?: session)?$/i.test(rawTitle);
+	const validTitle = isPlaceholderTitle ? undefined : rawTitle;
+
+	// 提取并清洗正文预览：排除空会话等占位标记
+	const rawPreview = session?.preview?.trim();
+	const isPlaceholderPreview = !rawPreview ||
+		rawPreview === "空会话" ||
+		rawPreview === "Empty session" ||
+		rawPreview === t("sidebar.hoverCard.emptyPreview");
+	const validPreview = isPlaceholderPreview ? undefined : rawPreview;
+
+	// 判断标题与预览内容是否实质相同（相同或互相包含前缀，避免卡片内重复展示相同文本）
+	const isSameContent = Boolean(
+		validTitle &&
+		validPreview &&
+		(validTitle === validPreview ||
+			validPreview.startsWith(validTitle) ||
+			validTitle.startsWith(validPreview))
+	);
+
+	const formattedTime = session?.updatedAt ? formatFullDateTime(session.updatedAt) : "";
 
 	return (
 		<HoverCard openDelay={openDelay} closeDelay={closeDelay}>
@@ -63,9 +93,28 @@ export function SessionHoverCard({
 					e.preventDefault();
 				}}
 			>
-				{/* 1. 会话预览正文区 */}
-				<div className="max-h-48 overflow-y-auto text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words font-mono">
-					{previewText}
+				{/* 1. 会话正文预览区：有明确标题和独立摘要时分层展示，否则展示主体内容；两者皆空才显示占位 */}
+				<div className="max-h-48 overflow-y-auto select-text">
+					{validTitle && validPreview && !isSameContent ? (
+						<div className="flex flex-col gap-1.5">
+							<div className="text-xs font-semibold leading-snug text-foreground break-words">
+								{validTitle}
+							</div>
+							<div className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+								{validPreview}
+							</div>
+						</div>
+					) : validTitle || validPreview ? (
+						<div className="text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words font-medium">
+							{isSameContent
+								? (validPreview!.length >= validTitle!.length ? validPreview : validTitle)
+								: (validTitle ?? validPreview)}
+						</div>
+					) : (
+						<div className="text-xs leading-relaxed text-muted-foreground/70 italic">
+							{t("sidebar.hoverCard.emptyPreview")}
+						</div>
+					)}
 				</div>
 
 				{/* 2. 会话属性与标签区 */}
@@ -76,13 +125,21 @@ export function SessionHoverCard({
 						<span>{t("sidebar.hoverCard.localTask")}</span>
 					</span>
 
+					{/* 消息数量（若大于 0） */}
+					{typeof session?.messageCount === "number" && session.messageCount > 0 && (
+						<span className="inline-flex items-center gap-1 rounded bg-muted/80 px-1.5 py-0.5 text-foreground/80">
+							<MessageSquare size={11} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+							<span>{t("sidebar.hoverCard.messageCount", { count: session.messageCount })}</span>
+						</span>
+					)}
+
 					{/* 后端标识（dsh / imagegen） */}
-					{session.backend && session.backend !== "pi" && (
+					{session?.backend && session.backend !== "pi" && (
 						<SessionBackendMark backend={session.backend} />
 					)}
 
 					{/* 外部导入来源（codex / claude / workbuddy 等） */}
-					{session.source && session.source !== "pi" && (
+					{session?.source && session.source !== "pi" && (
 						<SessionSourceBadge source={session.source} />
 					)}
 
