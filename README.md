@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.4-blue)
+![Version](https://img.shields.io/badge/version-0.7.5--beta-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- <p>
@@ -57,7 +57,7 @@
   - [📑 目录](#-目录)
   - [✨ 核心亮点](#-核心亮点)
   - [📋 更新日志](#-更新日志)
-    - [v0.7.4-beta 更新亮点](#v074-beta-更新亮点)
+    - [v0.7.5-beta 更新亮点](#v075-beta-更新亮点)
   - [🧩 功能总览](#-功能总览)
     - [工作区与项目](#工作区与项目)
     - [会话与对话](#会话与对话)
@@ -96,25 +96,17 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.7.4**（2026-09-08）
+> **最新版本 v0.7.5-beta**（2026-09-09）
 
-### v0.7.4 更新亮点
-- 🚀 **应用更新与便携版优化**
-- 🚀 **WorkBuddy 会话导入**
-- 🚀 **项目与文件夹右键菜单增强**
-- 🚀 **关于弹框展示环境组件版本**
-- 🚀 **配置备份与公告系统进阶**
-- 🚀 **DSH 版本兜底与用量自动查询**
-- 🚀 **配置区多级 Tab 与商店搜索栏统一 UI**
-- 🚀 **Command Code 用量查询支持**
-- 🚀 **应用更新生命周期加固**
-- 🚀 **更新源镜像选择与自动体检**
-- 🚀 **Composer 语音转写**
-- 🚀 **请求体超限后的会话恢复**
-- ✨ **WSL 环境 Node/pi 检测支持**
-- ✨ **分屏 Git 分支独立展示**
-- ✨ **会话时间线吸底体验优化**
-- ✨ **ask_question 参数自适应推断**
+### v0.7.5-beta 更新亮点
+- 🚀 **行内引用 chip 对齐 Proma 并自包含持久化**
+- 🚀 **侧栏会话悬浮预览卡片**
+- 🚀 **设置页 Git 可执行文件路径配置与检测**
+- 🚀 **恢复内置 prompt 模板并补充 AtomGit 镜像**
+- ✨ **Kimi Coding 多窗口额度与加速包余额**
+- ✨ **Web 端 Ask 题干缺失与侧栏待确认徽章**
+- ✨ **主题色不再污染会话状态灯**
+- ✨ **暗色模式选中态白底白字修复**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

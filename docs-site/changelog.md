@@ -5,6 +5,19 @@
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
+## v0.7.5-beta
+
+发布时间：2026-09-09
+
+- 🚀 **行内引用 chip 对齐 Proma 并自包含持久化**
+- 🚀 **侧栏会话悬浮预览卡片**
+- 🚀 **设置页 Git 可执行文件路径配置与检测**
+- 🚀 **恢复内置 prompt 模板并补充 AtomGit 镜像**
+- ✨ **Kimi Coding 多窗口额度与加速包余额**
+- ✨ **Web 端 Ask 题干缺失与侧栏待确认徽章**
+- ✨ **主题色不再污染会话状态灯**
+- ✨ **暗色模式选中态白底白字修复**
+
 ## v0.7.4
 
 发布时间：2026-09-08

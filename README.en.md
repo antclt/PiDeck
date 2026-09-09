@@ -9,7 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.4-blue)
+![Version](https://img.shields.io/badge/version-0.7.5--beta-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -40,7 +40,7 @@
   - [📑 Table of Contents](#-table-of-contents)
   - [✨ Highlights](#-highlights)
   - [📋 Changelog](#-changelog)
-    - [v0.7.4-beta Release Highlights](#v074-beta-release-highlights)
+    - [v0.7.5-beta Release Highlights](#v075-beta-release-highlights)
   - [🧩 Features](#-features)
     - [Workspace & Projects](#workspace--projects)
     - [Sessions & Conversation](#sessions--conversation)
@@ -79,25 +79,17 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.4** (2026-09-08)
+> **Latest: v0.7.5-beta** (2026-09-09)
 
-### v0.7.4 Release Highlights
-- 🚀 **App update & portable build optimizations**
-- 🚀 **WorkBuddy session import**
-- 🚀 **Enhanced project and directory context menus**
-- 🚀 **About dialog displays runtime component versions**
-- 🚀 **Config backup & announcement system advancements**
-- 🚀 **DSH version fallback & auto-usage query toggle**
-- 🚀 **Unified settings multi-level tabs & store search UI**
-- 🚀 **Command Code usage query support**
-- 🚀 **Application update lifecycle hardening**
-- 🚀 **Update source mirrors with auto health checks**
-- 🚀 **Composer voice transcription**
-- 🚀 **Recovery from request body size limits**
-- ✨ **WSL environment Node/pi detection**
-- ✨ **Split-pane independent Git branch display**
-- ✨ **Session timeline stick-to-bottom smoothing**
-- ✨ **Adaptive inference for ask_question type**
+### v0.7.5-beta Release Highlights
+- 🚀 **Inline reference chips aligned with Proma and self-contained persistence**
+- 🚀 **Sidebar session hover preview card**
+- 🚀 **Configurable Git executable path with detection**
+- 🚀 **Built-in prompt templates restored and AtomGit mirror added**
+- ✨ **Kimi Coding multi-window quotas and booster wallet**
+- ✨ **Web Ask prompt missing and sidebar pending-question badge**
+- ✨ **Accent colors no longer bleed into session status lights**
+- ✨ **Dark-mode selected states no longer render white-on-white**
 
 [View Full Changelog →](CHANGELOG.md)
 
