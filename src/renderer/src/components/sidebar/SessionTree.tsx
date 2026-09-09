@@ -9,6 +9,7 @@ import { filterSidebarSessions, getBoundSidebarRuntimeAgent, type SidebarControl
 import { Button } from "../ui-shadcn/button";
 import type { SidebarActions } from "./SidebarContent";
 import { SessionBackendMark, SessionSourceBadge } from "../session/SessionSourceBadge";
+import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
 import { cn } from "../../lib/utils";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
@@ -196,22 +197,28 @@ export function SessionTree(props: {
         className={rowContainerClass}
         onContextMenu={(event) => openContext(event, session, false)}
       >
-        <button
-          type="button"
-          className={cn(
-            sessionRowClass,
-            "session-row codex-subagent-sidebar-row pl-2",
-            session.id === props.currentSessionId && selectedRowClass,
-          )}
-          onClick={() => openSession(session.id)}
-          onDoubleClick={() => openSession(session.id, "permanent")}
-          {...sessionDragProps(session.id)}
+        <SessionHoverCard
+          session={session}
+          projectName={props.project.name}
+          disabled={Boolean(props.controller.menu)}
         >
-          <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
-            <TitleScrollText text={title} />
-            {badge}
-          </div></div>
-        </button>
+          <button
+            type="button"
+            className={cn(
+              sessionRowClass,
+              "session-row codex-subagent-sidebar-row pl-2",
+              session.id === props.currentSessionId && selectedRowClass,
+            )}
+            onClick={() => openSession(session.id)}
+            onDoubleClick={() => openSession(session.id, "permanent")}
+            {...sessionDragProps(session.id)}
+          >
+            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+              <TitleScrollText text={title} />
+              {badge}
+            </div></div>
+          </button>
+        </SessionHoverCard>
         <Button
           type="button"
           variant="ghost"
@@ -273,29 +280,36 @@ export function SessionTree(props: {
           className={rowContainerClass}
           onContextMenu={(event) => { event.preventDefault(); void props.controller.openMenu({ kind: "agent", agentId: child.agent.id, x: event.clientX, y: event.clientY }); }}
         >
-          <button
-            type="button"
-            className={cn(
-              sessionRowClass,
-              agentSession?.id === props.currentSessionId && selectedRowClass,
-            )}
-            onClick={() => { if (agentSession) openSession(agentSession.id); }}
-            onDoubleClick={() => { if (agentSession) openSession(agentSession.id, "permanent"); }}
-            {...(agentSession ? sessionDragProps(agentSession.id) : {})}
+          <SessionHoverCard
+            session={agentSession}
+            projectName={props.project.name}
+            status={child.agent.status}
+            disabled={Boolean(props.controller.menu)}
           >
-            {renderRuntimeStatusDot(child.agent.status)}
-            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
-              {/* 运行中 Agent 行：标题常被 truncate（如 "JZSSC40..."），悬浮展示完整标题；
-                  选中背景仍保留，聚焦行也允许 hover 查看完整标题。 */}
-              <TitleScrollText
-                text={child.agent.title}
-                className="font-medium"
-              />
-              <SessionBackendMark backend={child.agent.backend} />
-              {child.agent.noSession && <span className="anonymous-indicator" title={t("app.anonymousChat")}><HatGlasses size={11} aria-hidden="true" /></span>}
-              {renderToggle(groupKey, childCount)}
-            </div></div>
-          </button>
+            <button
+              type="button"
+              className={cn(
+                sessionRowClass,
+                agentSession?.id === props.currentSessionId && selectedRowClass,
+              )}
+              onClick={() => { if (agentSession) openSession(agentSession.id); }}
+              onDoubleClick={() => { if (agentSession) openSession(agentSession.id, "permanent"); }}
+              {...(agentSession ? sessionDragProps(agentSession.id) : {})}
+            >
+              {renderRuntimeStatusDot(child.agent.status)}
+              <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+                {/* 运行中 Agent 行：标题常被 truncate（如 "JZSSC40..."），悬浮展示完整标题；
+                    选中背景仍保留，聚焦行也允许 hover 查看完整标题。 */}
+                <TitleScrollText
+                  text={child.agent.title}
+                  className="font-medium"
+                />
+                <SessionBackendMark backend={child.agent.backend} />
+                {child.agent.noSession && <span className="anonymous-indicator" title={t("app.anonymousChat")}><HatGlasses size={11} aria-hidden="true" /></span>}
+                {renderToggle(groupKey, childCount)}
+              </div></div>
+            </button>
+          </SessionHoverCard>
           <Button
             type="button"
             variant="ghost"
@@ -325,51 +339,58 @@ export function SessionTree(props: {
         className={rowContainerClass}
         onContextMenu={(event) => openContext(event, child.session)}
       >
-        <button
-          type="button"
-          className={cn(
-            sessionRowClass,
-            // 历史会话不是运行中的 Agent：只给这一类内容增加层级缩进，避免项目标题与历史记录贴在同一列。
-            // 历史会话需要比运行中 Agent 更松的点击区域和行间距，避免连续记录挤成一块。
-            "session-row history-session-row mx-0 min-h-8 pl-2 pr-2 py-0",
-            child.session.id === props.currentSessionId && selectedRowClass,
-          )}
-          onClick={() => openSession(child.session.id)}
-          onDoubleClick={() => openSession(child.session.id, "permanent")}
-          {...sessionDragProps(child.session.id)}
+        <SessionHoverCard
+          session={child.session}
+          projectName={props.project.name}
+          status={runtimeSnapshot?.status}
+          disabled={Boolean(props.controller.menu)}
         >
-          {renderRuntimeStatusDot(runtimeSnapshot?.status)}
-          {pinned && (
-            <Pin
-              className="size-3 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-          )}
-          <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
-            {/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差；
-                标题被截断时 hover 滚动展示全文（TitleScrollText，未溢出则静止）；
-                选中背景仍保留，聚焦行也允许 hover 查看完整标题。 */}
-            <TitleScrollText
-              text={child.session.name || t("common.untitled")}
-              className={cn(runtime ? "font-medium" : "font-normal text-muted-foreground/90")}
-            />
-            {(child.session.backend === "dsh" || child.session.backend === "imagegen") && <SessionBackendMark backend={child.session.backend} />}
-            {/* 生图角标：imagegen 后端会话的徽标已含生图标识，此处仅对遗留 pi 后端含生图消息的会话补图标 */}
-            {child.session.backend !== "imagegen" && child.session.hasImageGen && (
-              <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <button
+            type="button"
+            className={cn(
+              sessionRowClass,
+              // 历史会话不是运行中的 Agent：只给这一类内容增加层级缩进，避免项目标题与历史记录贴在同一列。
+              // 历史会话需要比运行中 Agent 更松的点击区域和行间距，避免连续记录挤成一块。
+              "session-row history-session-row mx-0 min-h-8 pl-2 pr-2 py-0",
+              child.session.id === props.currentSessionId && selectedRowClass,
             )}
-            {child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
-            {renderToggle(groupKey, childCount)}
-            {/* 相对时间常显：会话更新于多久前一目了然；hover 行时让位给右侧「⋯」按钮。
-                窄侧栏时间可能被截断，title 提示完整相对时间。 */}
-            <span
-              className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden group-focus-within/row:hidden"
-              title={formatRelativeTime(child.session.updatedAt)}
-            >
-              {formatRelativeTime(child.session.updatedAt)}
-            </span>
-          </div></div>
-        </button>
+            onClick={() => openSession(child.session.id)}
+            onDoubleClick={() => openSession(child.session.id, "permanent")}
+            {...sessionDragProps(child.session.id)}
+          >
+            {renderRuntimeStatusDot(runtimeSnapshot?.status)}
+            {pinned && (
+              <Pin
+                className="size-3 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+            )}
+            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+              {/* 历史会话（无运行态）文字降一级，与活跃 Agent/运行中会话形成层级差；
+                  标题被截断时 hover 滚动展示全文（TitleScrollText，未溢出则静止）；
+                  选中背景仍保留，聚焦行也允许 hover 查看完整标题。 */}
+              <TitleScrollText
+                text={child.session.name || t("common.untitled")}
+                className={cn(runtime ? "font-medium" : "font-normal text-muted-foreground/90")}
+              />
+              {(child.session.backend === "dsh" || child.session.backend === "imagegen") && <SessionBackendMark backend={child.session.backend} />}
+              {/* 生图角标：imagegen 后端会话的徽标已含生图标识，此处仅对遗留 pi 后端含生图消息的会话补图标 */}
+              {child.session.backend !== "imagegen" && child.session.hasImageGen && (
+                <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              )}
+              {child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
+              {renderToggle(groupKey, childCount)}
+              {/* 相对时间常显：会话更新于多久前一目了然；hover 行时让位给右侧「⋯」按钮。
+                  窄侧栏时间可能被截断，title 提示完整相对时间。 */}
+              <span
+                className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden group-focus-within/row:hidden"
+                title={formatRelativeTime(child.session.updatedAt)}
+              >
+                {formatRelativeTime(child.session.updatedAt)}
+              </span>
+            </div></div>
+          </button>
+        </SessionHoverCard>
         <Button
           type="button"
           variant="ghost"
@@ -404,24 +425,31 @@ export function SessionTree(props: {
             className={cn("draft-session-row group/draft grid items-center gap-1", "grid-cols-[minmax(0,1fr)_2rem]")}
             onContextMenu={(event) => openDraftContext(event, session)}
           >
-          <button
-            type="button"
-            className={cn(
-              sessionRowClass,
-              "session-row draft-session-trigger",
-              session.id === props.currentSessionId && selectedRowClass,
-            )}
-            onClick={() => openSession(session.id)}
-            onDoubleClick={() => openSession(session.id, "permanent")}
-            {...sessionDragProps(session.id)}
-          >
-            <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
-              {renderRuntimeStatusDot(runtime?.status)}
-              {/* 草稿会话：选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
-              <TitleScrollText text={session.title} className="font-medium" />
-              <SessionBackendMark backend={session.backend} />
-            </div></div>
-          </button>
+            <SessionHoverCard
+              session={session}
+              projectName={props.project.name}
+              status={runtime?.status}
+              disabled={Boolean(props.controller.menu)}
+            >
+              <button
+                type="button"
+                className={cn(
+                  sessionRowClass,
+                  "session-row draft-session-trigger",
+                  session.id === props.currentSessionId && selectedRowClass,
+                )}
+                onClick={() => openSession(session.id)}
+                onDoubleClick={() => openSession(session.id, "permanent")}
+                {...sessionDragProps(session.id)}
+              >
+                <div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7"><div className="conversation-title flex min-w-0 items-center gap-1.5">
+                  {renderRuntimeStatusDot(runtime?.status)}
+                  {/* 草稿会话：选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
+                  <TitleScrollText text={session.title} className="font-medium" />
+                  <SessionBackendMark backend={session.backend} />
+                </div></div>
+              </button>
+            </SessionHoverCard>
             <Button variant="ghost" size="icon"
               className="draft-session-delete"
               aria-label={t("common.delete")} title={t("common.delete")}

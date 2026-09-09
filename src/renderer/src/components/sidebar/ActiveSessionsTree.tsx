@@ -8,6 +8,7 @@ import type { SidebarController } from "../../hooks/useSidebarController";
 import type { SidebarActions } from "./SidebarContent";
 import { Button } from "../ui-shadcn/button";
 import { SessionBackendMark } from "../session/SessionSourceBadge";
+import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 import { formatRelativeTime } from "../../utils/relativeTime";
@@ -78,6 +79,7 @@ export function ActiveSessionsTree(props: {
 				const selected = sessionId === props.currentSessionId;
 				const summary = record ? sessionRecordToSummary(record) : undefined;
 				const displayTitle = summary?.name || agent.title;
+				const project = controller.catalog.projects.find((p) => p.id === projectId);
 				// 单击默认 preview；双击显式常驻（与 SessionTree 同一入口语义）。
 				const openSession = (tabMode?: "preview" | "permanent") => {
 					if (sessionId) void props.actions.sessions.open(projectId, sessionId, tabMode);
@@ -91,40 +93,47 @@ export function ActiveSessionsTree(props: {
 							void controller.openMenu({ kind: "agent", agentId: agent.id, x: event.clientX, y: event.clientY });
 						}}
 					>
-						<button
-							type="button"
-							className={cn(activeRowClass, selected && "bg-bg-active text-foreground")}
-							onClick={() => openSession()}
-							onDoubleClick={() => openSession("permanent")}
-							draggable={Boolean(sessionId)}
-							onDragStart={(event) => {
-								if (!sessionId) return;
-								event.dataTransfer.effectAllowed = "move";
-								event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
-								event.dataTransfer.setData("text/plain", sessionId);
-								props.actions.sessions.beginDrag?.(sessionId);
-							}}
-							onDragEnd={() => props.actions.sessions.endDrag?.()}
+						<SessionHoverCard
+							session={record ?? summary}
+							projectName={project?.name}
+							status={agent.status}
+							disabled={Boolean(controller.menu)}
 						>
-							<span
-								className={cn(
-									"size-1.5 shrink-0 rounded-full",
-									sessionStatusDotClass(agent.status),
-								)}
-								aria-hidden="true"
-							/>
-							<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
-								<div className="conversation-title flex min-w-0 items-center gap-1.5">
-									{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
-									<TitleScrollText text={displayTitle} className="font-medium" />
-									<SessionBackendMark backend={agent.backend} />
-									{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略） */}
-									<span className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden">
-										{formatRelativeTime(sortAt)}
-									</span>
+							<button
+								type="button"
+								className={cn(activeRowClass, selected && "bg-bg-active text-foreground")}
+								onClick={() => openSession()}
+								onDoubleClick={() => openSession("permanent")}
+								draggable={Boolean(sessionId)}
+								onDragStart={(event) => {
+									if (!sessionId) return;
+									event.dataTransfer.effectAllowed = "move";
+									event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, sessionId);
+									event.dataTransfer.setData("text/plain", sessionId);
+									props.actions.sessions.beginDrag?.(sessionId);
+								}}
+								onDragEnd={() => props.actions.sessions.endDrag?.()}
+							>
+								<span
+									className={cn(
+										"size-1.5 shrink-0 rounded-full",
+										sessionStatusDotClass(agent.status),
+									)}
+									aria-hidden="true"
+								/>
+								<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover/row:pr-7 group-focus-within/row:pr-7">
+									<div className="conversation-title flex min-w-0 items-center gap-1.5">
+										{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
+										<TitleScrollText text={displayTitle} className="font-medium" />
+										<SessionBackendMark backend={agent.backend} />
+										{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略） */}
+										<span className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden">
+											{formatRelativeTime(sortAt)}
+										</span>
+									</div>
 								</div>
-							</div>
-						</button>
+							</button>
+						</SessionHoverCard>
 						<Button
 							type="button"
 							variant="ghost"

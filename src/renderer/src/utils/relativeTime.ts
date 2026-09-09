@@ -22,3 +22,21 @@ export function formatRelativeTime(ms: number): string {
 export function formatAbsoluteTime(ms: number): string {
 	return new Date(ms).toLocaleString();
 }
+
+/**
+ * 完整日期时间（用于会话悬浮卡片等需要精确、紧凑展示的场景）：
+ * 格式为「YYYY-MM-DD HH:mm:ss」，对月日时分秒补零，跨平台输出稳定一致。
+ */
+export function formatFullDateTime(ms: number): string {
+	const d = new Date(ms);
+	if (Number.isNaN(d.getTime())) return "";
+	const pad = (n: number) => String(n).padStart(2, "0");
+	const year = d.getFullYear();
+	const month = pad(d.getMonth() + 1);
+	const date = pad(d.getDate());
+	const hours = pad(d.getHours());
+	const minutes = pad(d.getMinutes());
+	const seconds = pad(d.getSeconds());
+	return `${year}-${month}-${date} ${hours}:${minutes}:${seconds}`;
+}
+
