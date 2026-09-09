@@ -10,6 +10,7 @@ import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCop
 import { getCodexSessionThreadInfo } from "../../shared/codexSessionMeta";
 import { isInSubagentArtifactsDir, isValidPiSessionFileHead, looksLikePiSessionFileStem, SUBAGENT_ARTIFACTS_DIR_NAME } from "../../shared/sessionIdentity";
 import { extractMessageText, extractThinkingRaw } from "../pi/messageContent";
+import { replaceExpandedRefBlocksWithLabels } from "../../shared/expandedRefBlocks";
 import { toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
 import { getAppLogger } from "../logging/sharedLogger";
 import {
@@ -1632,7 +1633,8 @@ export class SessionScanner {
       if (message.role) {
         messageCount += 1;
         const text = this.extractText(message.content).trim();
-        if (text && preview === emptyPreview) preview = text;
+        // 侧栏会话 preview 是纯文本出口：折叠自包含引用块，避免露出 <quoted_context> 等 XML 原文。
+        if (text && preview === emptyPreview) preview = replaceExpandedRefBlocksWithLabels(text);
         // 旧 JSONL 可能没有 model_change；从最后一条 assistant 消息回退模型。
         if (message.role === "assistant" && typeof message.provider === "string" && typeof message.model === "string") {
           lastAssistantModel = { provider: message.provider, modelId: message.model };

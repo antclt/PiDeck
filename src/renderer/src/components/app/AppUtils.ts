@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import type { ChatMessage, FileTreeNode, PiCommand } from "../../../../shared/types";
 import type { TranslationKey } from "../../i18n";
 import { formatFilePathRef } from "../session/composer/chips";
+import { replaceExpandedRefBlocksWithLabels } from "../session/composer/quoteChip";
 
 /* ── 文件树拖拽负载 ── */
 
@@ -564,7 +565,8 @@ export function buildOutline(messages: ChatMessage[]) {
 		.map((message) => ({
 			id: message.id,
 			role: message.role,
-			title: summarizeMessage(message.text),
+			// 定位轴标题是纯文本出口：先折叠自包含引用块，否则标题就是 <quoted_context …>
+			title: summarizeMessage(replaceExpandedRefBlocksWithLabels(message.text)),
 			time: formatTime(message.timestamp),
 		}))
 		.filter((item) => item.title);

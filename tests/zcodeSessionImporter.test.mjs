@@ -506,6 +506,8 @@ function loadZCodeScanner(homePath) {
 	const sessionSummaryCache = loadZCodeSummaryCacheModule(homePath);
 	const wslPaths = loadZCodeWslPathsModule();
 	const sessionIdentity = loadScannedModule("src/shared/sessionIdentity.ts", new Map());
+	// SessionScanner 新增的自包含块折叠（纯函数、无依赖）：自定义 loader 需显式提供
+	const expandedRefBlocks = loadScannedModule("src/shared/expandedRefBlocks.ts", new Map());
 	const sandbox = {
 		AbortController,
 		AbortSignal,
@@ -521,6 +523,7 @@ function loadZCodeScanner(homePath) {
 			if (id === "./sessionSummaryCache") return sessionSummaryCache;
 			if (id === "./sessionNameLine") return loadZCodeSessionNameLineModule();
 			if (id === "../../shared/sessionIdentity") return sessionIdentity;
+			if (id === "../../shared/expandedRefBlocks") return expandedRefBlocks;
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
 			return require(id);
 		},

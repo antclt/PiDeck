@@ -11,19 +11,30 @@
  */
 
 import {
-	decodeXmlAttribute,
 	escapeXmlAttribute,
-	parseExpandedPromptTemplateBlocks,
-	parseExpandedSkillBlocks,
+	parseExpandedRefBlocks,
+	replaceExpandedRefBlocksWithLabels,
+	sanitizeBlockClosingTag,
 } from "./referenceBlocks";
+import type { ExpandedRefBlock } from "./referenceBlocks";
 
-// 保持既有纯函数入口兼容；属性编解码和命名块已抽到 referenceBlocks，供模板块和引用块复用。
+// 自包含块的解析/折叠已下沉到 shared/expandedRefBlocks（主进程 preview、Web 端共用一份实现）；
+// 这里保留既有导出名，调用方与单测无需改 import 路径。
+export type {
+	ExpandedQuoteBlock,
+	ExpandedRefBlock,
+	ExpandedSessionBlock,
+} from "./referenceBlocks";
 export {
 	decodeXmlAttribute,
 	escapeXmlAttribute,
 	formatPromptTemplateBlock,
 	parseExpandedPromptTemplateBlocks,
+	parseExpandedQuoteBlocks,
+	parseExpandedRefBlocks,
+	parseExpandedSessionBlocks,
 	parseExpandedSkillBlocks,
+	replaceExpandedRefBlocksWithLabels,
 } from "./referenceBlocks";
 
 /** 引用快照：创建时捕获的文本 + 来源消息 id（时间线节点的 data-message-id）。 */
@@ -143,11 +154,6 @@ export function expandQuoteTokens(
 	return parts.join("\n\n") || null;
 }
 
-/** 引用块内禁止出现闭合标签，防止提前截断解析。 */
-function sanitizeQuoteBlockText(value: string): string {
-	return value.replace(/<\/quoted_context>/gi, "<\/quoted_context_>");
-}
-
 /**
  * 快照文本 → 自包含引用块（发送/存储形态，对齐 Proma `<quoted_context>` 方案）：
  *
@@ -161,172 +167,11 @@ export function formatQuoteBlock(
 	text: string,
 	meta: { label: string; messageId: string },
 ): string {
-	const safeText = sanitizeQuoteBlockText(text.trim());
+	const safeText = sanitizeBlockClosingTag(text.trim(), "quoted_context");
 	const safeLabel = escapeXmlAttribute(meta.label);
 	const safeMessageId = escapeXmlAttribute(meta.messageId);
 	return `<quoted_context label="${safeLabel}" message_id="${safeMessageId}">\n${safeText}\n</quoted_context>`;
 }
-
-/** 解析结果：块（含在原文中的区间）+ 剩余正文。 */
-export type ExpandedQuoteBlock = {
-	label: string;
-	messageId: string;
-	text: string;
-	start: number;
-	end: number;
-};
-
-const QUOTED_CONTEXT_RE = /<quoted_context\s+label="([^"]*)"\s+message_id="([^"]*)">\r?\n([\s\S]*?)\r?\n<\/quoted_context>/g;
-
-/**
- * 从消息文本中解析已展开的引用块（气泡展示用，formatQuoteBlock 的逆操作）。
- * 块自带 label/messageId/全文，展示时可直接渲染 chip；找不到块时返回空列表。
- * 兼容旧消息：旧格式 markdown 引用块（`> 行`）不匹配，保持展开文本展示（无法追溯）。
- */
-export function parseExpandedQuoteBlocks(text: string): ExpandedQuoteBlock[] {
-	const blocks: ExpandedQuoteBlock[] = [];
-	const re = new RegExp(QUOTED_CONTEXT_RE.source, "g");
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(text)) !== null) {
-		blocks.push({
-			label: decodeXmlAttribute(m[1] ?? ""),
-			messageId: decodeXmlAttribute(m[2] ?? ""),
-			text: m[3] ?? "",
-			start: m.index,
-			end: m.index + m[0].length,
-		});
-	}
-	return blocks;
-}
-
-/** 已展开的会话引用块（&会话名 发送时由 resolveSessionReferences 展开为 XML）。 */
-export type ExpandedSessionBlock = {
-	/** 会话展示名（xml name 属性，解码后）。 */
-	name: string;
-	/** 引用的会话上下文全文（发给模型的原始内容，可能很长）。 */
-	text: string;
-	start: number;
-	end: number;
-};
-
-const REFERENCED_SESSION_RE = /<referenced_session\s+name="([^"]*)">\r?\n([\s\S]*?)\r?\n<\/referenced_session>/g;
-
-/**
- * 从消息文本中解析已展开的会话引用块（&会话名 → `<referenced_session name="…">…</referenced_session>`）。
- * 发送时 resolveSessionReferences 把 `&会话名` 替换为完整上下文块（模型需要看到引用内容）；
- * 气泡展示时折叠回 session chip（label = 会话名），避免大段 XML 原文展开。
- */
-export function parseExpandedSessionBlocks(text: string): ExpandedSessionBlock[] {
-	if (!text.includes("<referenced_session")) return [];
-	const blocks: ExpandedSessionBlock[] = [];
-	const re = new RegExp(REFERENCED_SESSION_RE.source, "g");
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(text)) !== null) {
-		blocks.push({
-			name: decodeXmlAttribute(m[1] ?? ""),
-			text: m[2] ?? "",
-			start: m.index,
-			end: m.index + m[0].length,
-		});
-	}
-	return blocks;
-}
-
-/**
- * 统一解析消息文本中「已展开的所有引用块」：引用块（<quoted_context>）与会话引用块
- * （<referenced_session>），按出现位置排序返回，气泡渲染时统一折叠为 chip。
- */
-export type ExpandedRefBlock =
-	| { kind: "quote"; label: string; messageId: string; text: string; start: number; end: number }
-	| { kind: "session"; name: string; text: string; start: number; end: number }
-	| { kind: "skill"; label: string; text: string; start: number; end: number };
-
-/**
- * 统一解析消息文本中所有需要折叠展示的自包含块。
- *
- * `referenced_session` 的上下文可能包含历史的 quoted_context/skill 块；排序后必须跳过
- * 已被外层块覆盖的内层结果，否则气泡会重复插入 chip 并漏出一截 XML 正文。
- */
-export function parseExpandedRefBlocks(text: string): ExpandedRefBlock[] {
-	const blocks: ExpandedRefBlock[] = [
-		...parseExpandedQuoteBlocks(text).map((b) => ({
-			kind: "quote" as const,
-			label: b.label,
-			messageId: b.messageId,
-			text: b.text,
-			start: b.start,
-			end: b.end,
-		})),
-		...parseExpandedSessionBlocks(text).map((b) => ({
-			kind: "session" as const,
-			name: b.name,
-			text: b.text,
-			start: b.start,
-			end: b.end,
-		})),
-		...parseExpandedSkillBlocks(text).map((b) => ({
-			kind: "skill" as const,
-			// pi 的 XML 只保存 skill 名；还原为输入框一致的 /skill:name 形态。
-			label: `skill:${b.name}`,
-			text: b.text,
-			start: b.start,
-			end: b.end,
-		})),
-		...parseExpandedPromptTemplateBlocks(text).map((b) => ({
-			kind: "skill" as const,
-			// 模板在 composer 中本来就是 /模板名，复用 skill chip 的斜杠视觉语义。
-			label: b.name,
-			text: b.text,
-			start: b.start,
-			end: b.end,
-		})),
-	];
-	blocks.sort((a, b) => a.start - b.start || b.end - a.end);
-
-	const topLevel: ExpandedRefBlock[] = [];
-	let coveredEnd = -1;
-	for (const block of blocks) {
-		if (block.start < coveredEnd) continue;
-		topLevel.push(block);
-		coveredEnd = block.end;
-	}
-	return topLevel;
-}
-
-/**
- * 把消息文本中的自包含引用块替换为 `❝label` / `&会话名` / `/命令` 展示文本。
- * 用于复制、队列和投递提示等纯文本场景，避免这些 UI 暴露模型需要的 XML 上下文。
- */
-export function replaceExpandedRefBlocksWithLabels(text: string): string {
-	if (
-		!text.includes("<quoted_context") &&
-		!text.includes("<referenced_session") &&
-		!text.includes("<skill") &&
-		!text.includes("<prompt_template")
-	) {
-		return text;
-	}
-	const blocks = parseExpandedRefBlocks(text);
-	if (blocks.length === 0) return text;
-	const parts: string[] = [];
-	let cursor = 0;
-	for (const block of blocks) {
-		if (block.start > cursor) parts.push(text.slice(cursor, block.start));
-		parts.push(
-			block.kind === "quote"
-				? `❝${block.label}`
-				: block.kind === "session"
-					? `&${block.name}`
-					: `/${block.label}`,
-		);
-		cursor = block.end;
-	}
-	if (cursor < text.length) parts.push(text.slice(cursor));
-	return parts.join("");
-}
-
-/** @deprecated 兼容旧调用；新代码明确使用 replaceExpandedRefBlocksWithLabels。 */
-export const replaceExpandedQuoteBlocksWithLabels = replaceExpandedRefBlocksWithLabels;
 
 /** 气泡渲染片段：正文或已折叠的 chip（保持原文顺序）。 */
 export type BubbleRefSegment =

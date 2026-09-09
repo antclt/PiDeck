@@ -77,6 +77,8 @@ function loadSessionScanner(homePath, execFileMock) {
 	);
 	const wslPaths = loadTranspiledModule("src/main/wsl/WslPaths.ts");
 	const sessionIdentity = loadTranspiledModule("src/shared/sessionIdentity.ts");
+	// SessionScanner 新增的自包含块折叠（无依赖纯函数）
+	const expandedRefBlocks = loadTranspiledModule("src/shared/expandedRefBlocks.ts");
 	const sandbox = {
 		AbortController,
 		AbortSignal,
@@ -101,6 +103,7 @@ function loadSessionScanner(homePath, execFileMock) {
 			if (id === "../wsl/WslPaths") return wslPaths;
 			if (id === "./sessionNameLine") return loadSessionNameLineModule();
 			if (id === "../../shared/sessionIdentity") return sessionIdentity;
+			if (id === "../../shared/expandedRefBlocks") return expandedRefBlocks;
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
 			return require(id);
 		},

@@ -17,6 +17,7 @@ import {
 } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
+import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import type { PiSubagentEntry } from "../../../../shared/types";
 import { useSessionSubagents } from "../../hooks/useSessionSubagents";
 import { Button } from "../ui-shadcn/button";
@@ -355,7 +356,13 @@ const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagentEntry }
 			.catch(() => null);
 		setTranscriptLoading(false);
 		if (page) {
-			setTranscript(page.messages.map((message) => ({ role: message.role, text: message.text })));
+			setTranscript(
+				page.messages.map((message) => ({
+					role: message.role,
+					// 转录是纯文本出口：折叠自包含引用块，避免露出 <quoted_context> 等 XML 原文。
+					text: replaceExpandedRefBlocksWithLabels(message.text),
+				})),
+			);
 		} else {
 			setTranscriptError(true);
 		}
