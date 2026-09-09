@@ -2440,7 +2440,9 @@ export const zhCN = {
   "feedback.title": "问题反馈",
   "feedback.issueTitle": "问题反馈：",
   "feedback.issueTitleEmpty": "（请描述问题）",
-  "feedback.intro": "填写问题后，可复制内容或打开 GitHub Issue；也可发送邮件到",
+  // 说明：早期版本在句末展示过作者邮箱 chat@caoayu.eu.org，邮箱下线后曾残留「也可发送邮件到」的半截表述；
+  // 现应用不提供邮箱联系方式，文案只保留复制/开 Issue 两种路径，避免误导用户。
+  "feedback.intro": "填写问题后，可复制内容或打开 GitHub Issue。",
   "feedback.descriptionLabel": "遇到的问题",
   "feedback.descriptionHint": "请描述你遇到的问题或想要的功能",
   "feedback.descriptionPlaceholder":

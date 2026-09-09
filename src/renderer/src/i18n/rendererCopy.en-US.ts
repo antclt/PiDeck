@@ -2458,8 +2458,10 @@ export const enUS: Record<TranslationKey, string> = {
   "feedback.title": "Feedback",
   "feedback.issueTitle": "Feedback: ",
   "feedback.issueTitleEmpty": "(Please describe the issue)",
+  // The old intro mentioned the author email (chat@caoayu.eu.org) at the end; the email was retired,
+  // leaving a dangling "You can also email". Keep the intro to copy/Issue only.
   "feedback.intro":
-    "Describe the issue, then copy the report or open a GitHub Issue. You can also email",
+    "Describe the issue, then copy the report or open a GitHub Issue.",
   "feedback.descriptionLabel": "Issue",
   "feedback.descriptionHint": "Describe the issue or feature request",
   "feedback.descriptionPlaceholder":
