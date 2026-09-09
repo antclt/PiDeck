@@ -31,6 +31,7 @@ import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
 import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordinator";
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
+import { setConfiguredGitPath } from "../git/gitExecutable";
 import type { ConfigProxyMode } from "../../shared/types/fetchedModel";
 import type { SkillManager } from "../skills/SkillManager";
 import { fetchModelList, getCachedModelList, invalidateModelListCache, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
@@ -1138,6 +1139,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.settingsUpdate, async (_event, patch: Partial<AppSettings>) => {
 		const prevSettings = settingsStore.get();
 		const settings = await settingsStore.update(patch);
+		// Git 可执行文件路径：立即同步给 git 子进程解析器，保存后无需重启即生效。
+		if ("gitExecutablePath" in patch) {
+			setConfiguredGitPath(settings.gitExecutablePath);
+		}
 		// 自动下载更新开关：立即下发到 electron-updater（含检查期间的 autoDownload 切换）。
 		if ("autoDownloadUpdates" in patch) {
 			updateService?.applyAutoDownloadPreference();

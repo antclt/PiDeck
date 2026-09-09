@@ -4,6 +4,7 @@ import type { TokendanceAuthMode } from "../shared/tokendance";
 import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
+import type { GitExecutableInfo } from "../shared/types/git";
 import type { ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
 import type {
@@ -1180,6 +1181,18 @@ const api = {
 				paths,
 				repoPath,
 			) as Promise<void>,
+		/**
+		 * 探测 git 可执行文件。传 configuredPath 可在保存前预览「这样配置能不能用」；
+		 * 不传则用设置里已持久化的值，返回当前实际生效的路径与版本。
+		 */
+		detectExecutable: (configuredPath?: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitDetectExecutable,
+				configuredPath,
+			) as Promise<GitExecutableInfo>,
+		/** 打开文件选择框挑一个 git 可执行文件；取消返回 null */
+		chooseExecutable: () =>
+			ipcRenderer.invoke(ipcChannels.gitChooseExecutable) as Promise<string | null>,
 	},
 	pi: {
 		/**

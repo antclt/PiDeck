@@ -322,6 +322,13 @@ export const ipcChannels = {
 	gitAheadBehind: "git:ahead-behind",
 	/** 从磁盘删除变更文件（移入回收站，可恢复） */
 	gitDeleteFiles: "git:delete-files",
+	/**
+	 * 探测 git 可执行文件：返回当前实际生效的路径/版本/来源，
+	 * 以及系统自动探测结果（供设置页展示「已识别到」与一键填入）。
+	 */
+	gitDetectExecutable: "git:detect-executable",
+	/** 打开文件选择框挑一个 git 可执行文件，返回绝对路径；取消返回 null */
+	gitChooseExecutable: "git:choose-executable",
 	piCheck: "pi:check",
 	piCheckCustom: "pi:check-custom",
 	/** 获取已安装的 WSL 发行版列表（仅 Windows） */

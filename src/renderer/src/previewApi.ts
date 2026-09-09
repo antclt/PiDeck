@@ -124,6 +124,7 @@ let previewSettings: AppSettings = {
 	gitCommitMessagePrompt: "",
 	gitCommitMessageProvider: "",
 	gitCommitMessageModel: "",
+	gitExecutablePath: "",
 	closeToTray: true,
 	singleInstance: true,
 	enableNotifications: true,
@@ -806,6 +807,17 @@ export function createPreviewApi(): PiDesktopApi {
 			// 预览环境无真实远程：恒返回 null（不显示 push/pull 角标）
 			aheadBehind: async () => null,
 			deleteFiles: async () => {},
+			// 预览环境无真实子进程：恒报告「PATH 中的 git 可用」
+			detectExecutable: async () => ({
+				source: "path",
+				executable: "git",
+				resolvedPath: "/usr/bin/git",
+				version: "2.53.0",
+				error: null,
+				system: { resolvedPath: "/usr/bin/git", version: "2.53.0", source: "path" },
+			}),
+			// 预览环境无文件对话框：恒取消
+			chooseExecutable: async () => null,
 		},
 		logs: {
 			list: async () => [],
