@@ -15,6 +15,9 @@ hero:
     - theme: alt
       text: View on GitHub
       link: https://github.com/ayuayue/PiDeck
+    - theme: alt
+      text: AtomGit Mirror
+      link: https://atomgit.com/ayuayue/PiDeck
 
 features:
   - title: Multi-Project Workspace
