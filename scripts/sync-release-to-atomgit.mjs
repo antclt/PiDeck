@@ -358,6 +358,10 @@ async function uploadOneAsset(targetTag, fileName, localFilePath) {
     { method: 'PUT', headers: putHeaders, body: fileStream, duplex: 'half' },
     UPLOAD_TIMEOUT_MS,
   );
+  if (putRes.status === 409) {
+    // 409 = 附件已存在（AtomGit 对象存储幂等语义）：视为成功，与「按名去重」断点续传逻辑一致
+    return '';
+  }
   if (!putRes.ok) {
     const putErr = await putRes.text().catch(() => '');
     return `PUT 失败: HTTP ${putRes.status} ${putErr.slice(0, 200)}`;
