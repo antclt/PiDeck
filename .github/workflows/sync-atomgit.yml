@@ -5,18 +5,26 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
-      tag:
-        description: "指定要同步到 AtomGit 的 Release Tag（如 v0.7.4，留空则默认最新 Release）"
+      tags:
+        description: "要同步到 AtomGit 的 Release Tag，逗号分隔（如 v0.7.2,v0.7.3,v0.7.4；留空则只同步最新 Release）"
         required: false
         default: ""
 
 permissions:
   contents: read
 
+# 防并发：release 事件与手动触发同时跑会互相抢占上传（同名附件幂等跳过依赖串行）
+concurrency:
+  group: sync-atomgit
+  cancel-in-progress: false
+
 jobs:
   sync-atomgit:
     name: Sync Release to AtomGit
     runs-on: ubuntu-latest
+    # 兜底超时：历史上 PUT 上传挂起导致 job 卡了 52 分钟无进展；
+    # 三个版本全量约 7GB，上传速度不确定，给足 4 小时；超时强制失败后可重跑（已传附件自动跳过）
+    timeout-minutes: 240
 
     steps:
       - name: Checkout repository
@@ -27,30 +35,32 @@ jobs:
         with:
           node-version: 22
 
-      - name: Resolve target tag
-        id: resolve-tag
+      - name: Resolve target tags
+        id: resolve-tags
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          if [ -z "$TAG" ] && [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
+          TAGS="${{ github.event.inputs.tags }}"
+          if [ -z "$TAGS" ] && [ "${{ github.event_name }}" = "release" ]; then
+            TAGS="${{ github.event.release.tag_name }}"
           fi
-          if [ -z "$TAG" ]; then
-            # 留空时查询 GitHub 仓库最新 Release 的 Tag
-            echo "No tag specified, fetching latest release from GitHub..."
-            TAG=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName)
+          if [ -z "$TAGS" ]; then
+            # 留空时只同步 GitHub 仓库最新 Release（与旧行为一致）
+            echo "No tags specified, fetching latest release from GitHub..."
+            TAGS=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName)
           fi
-          if [ -z "$TAG" ]; then
+          if [ -z "$TAGS" ]; then
             echo "::error::未能识别或获取到合法的 Release Tag"
             exit 1
           fi
-          echo "Target tag: ${TAG}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          # 归一化：去空白、去空段
+          TAGS=$(echo "$TAGS" | tr ',' '\n' | sed 's/[[:space:]]//g' | grep -v '^$' | paste -sd, -)
+          echo "Target tags: ${TAGS}"
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run sync script
         run: |
-          node scripts/sync-release-to-atomgit.mjs --tag "${{ steps.resolve-tag.outputs.tag }}" --gh-repo "${{ github.repository }}"
+          node scripts/sync-release-to-atomgit.mjs --tags "${{ steps.resolve-tags.outputs.tags }}" --gh-repo "${{ github.repository }}"
         env:
           ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
