@@ -58,6 +58,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: AtomGit 官方代理解析加速（/etc/hosts）
+        # AtomGit 官方提供的加速方案：runner 直连 AtomGit/GitCode 对象存储跨境上传极慢
+        # （实测 160MB 需 20-35 分钟），固定解析到官方代理 IP 后走优化线路。
+        # 仅 runner 内临时生效，不改仓库。
+        run: |
+          echo "159.138.147.37 api.atomgit.com" | sudo tee -a /etc/hosts
+          echo "159.138.147.37 file.atomgit.com" | sudo tee -a /etc/hosts
+          echo "159.138.147.37 file.gitcode.com" | sudo tee -a /etc/hosts
+          getent hosts api.atomgit.com file.atomgit.com file.gitcode.com
+
       - name: Run sync script
         run: |
           node scripts/sync-release-to-atomgit.mjs --tags "${{ steps.resolve-tags.outputs.tags }}" --gh-repo "${{ github.repository }}"
