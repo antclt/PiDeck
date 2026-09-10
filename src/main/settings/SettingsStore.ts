@@ -256,6 +256,32 @@ Gitmoji 对应关系：
   fontFamilyMonoCustom: "",
 };
 
+/**
+ * updateSource 一次性迁移（v0.7.5 默认源 github → atomgit）：
+ *
+ * 背景：v0.7.5 把更新源默认值从 "github" 改为 "atomgit"（国内加速源第一首选），
+ * 但设置对象是整体持久化的——旧用户 settings.json 里已写死 "github"，
+ * spread 合并后仍会盖掉新默认值，永远享受不到 AtomGit 镜像。
+ *
+ * 规则（一次性，尊重用户后续选择）：
+ * - 已迁移过（标记位 true）→ 不再改动，用户显式保存的 "github" 永远生效；
+ * - 从未持久化过更新源（旧字段缺省，新装用户）→ 直接用新默认 atomgit，无需迁移；
+ * - 持久化过 "github" 且未迁移 → 补迁移为 "atomgit" 并写标记，此后用户改回 github 不再干预。
+ *
+ * 纯函数直接改传入对象并返回是否发生了迁移：SettingsStore 依赖 electron，
+ * node --test 无法直接 import 该模块，抽成纯函数才能做行为级单测。
+ */
+export function migrateUpdateSourceToAtomgit(settings: {
+  updateSource?: unknown;
+  updateSourceAtomgitMigrated?: unknown;
+}): boolean {
+  if (settings.updateSourceAtomgitMigrated === true) return false;
+  if (settings.updateSource !== "github") return false;
+  settings.updateSource = "atomgit";
+  settings.updateSourceAtomgitMigrated = true;
+  return true;
+}
+
 export class SettingsStore {
   private readonly filePath = desktopSettingsPath();
   private settings: AppSettings = { ...defaultSettings };
@@ -287,6 +313,11 @@ export class SettingsStore {
       const persistedMonoFont: string = this.settings.fontFamilyMono;
       if (persistedMonoFont === "commit-mono") {
         this.settings.fontFamilyMono = "system-mono";
+      }
+      // 兼容迁移：更新源默认 github → atomgit（一次性，写标记后尊重用户显式选择）。
+      if (migrateUpdateSourceToAtomgit(this.settings)) {
+        // 迁移后立即落盘：防止后续任一次保存把未迁移状态写回（与宽度迁移同策略）
+        void this.save().catch(() => undefined);
       }
       // 忙碌时投递行为来自旧 JSON 时可能是任意值；回落默认，避免发送链路带着坏语义。
       this.settings.busySendDelivery = parseBusySendDelivery(this.settings.busySendDelivery);

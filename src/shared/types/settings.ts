@@ -351,11 +351,17 @@ export type AppSettings = {
 	 * 更新源："github" 走 GitHub Release 官方源（app-update.yml 原生链路）；
 	 * 其余为国内镜像前缀代理（generic provider 拼 releases/latest/download）；
 	 * "custom" 用 customUpdateSourceUrl 的镜像前缀。
-	 * 默认 "github"；切换后下轮检查/下载全部走镜像。
+	 * 默认 "atomgit"（v0.7.5 起，国内加速源为第一首选）。
 	 */
 	updateSource: UpdateSourceId;
 	/** updateSource="custom" 时的镜像前缀（如 https://mirror.example.com），拼接规则见 updateSources.ts。 */
 	customUpdateSourceUrl: string;
+	/**
+	 * updateSource 一次性迁移标记：v0.7.5 将默认源从 github 切为 atomgit 时，
+	 * 对已持久化过 "github" 的旧用户补一次迁移到 atomgit；置 true 后永不重复迁移，
+	 * 用户后续显式改回 github 会被尊重。缺省 = 未迁移（仅旧 settings.json 会出现）。
+	 */
+	updateSourceAtomgitMigrated?: boolean;
 	/** 上次后台检查完成时间（毫秒时间戳）；缺省 = 从未检查。 */
 	updateLastCheckAt?: number;
 	/** 最近一次“已提示过”的 PiDeck 版本（弹窗关闭后写入，用于“每版本只弹一次”）；缺省 = 未提示过任何版本。 */
