@@ -181,6 +181,8 @@ export const ipcChannels = {
 	automationDeleteTask: "automation:delete-task",
 	automationRunNow: "automation:run-now",
 	automationAbortRun: "automation:abort-run",
+	automationDeleteRuns: "automation:delete-runs",
+	automationClearRuns: "automation:clear-runs",
 	automationUpdateSettings: "automation:update-settings",
 	automationPreviewCron: "automation:preview-cron",
 	automationChanged: "automation:changed",

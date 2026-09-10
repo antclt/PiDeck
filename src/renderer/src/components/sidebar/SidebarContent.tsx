@@ -319,6 +319,8 @@ export function SidebarContent(props: SidebarContentProps) {
             {/* 快捷键默认隐藏，行 hover 时才淡入；搜索快捷键为 Ctrl+F（见下方全局监听） */}
             <kbd className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-micro text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">Ctrl+F</kbd>
           </button>
+          {/* 定时任务入口：放在新建/搜索下面，避免藏在底栏 Dock 里不好找 */}
+          <AutomationDockButton />
         </div>
 
         {/* MorphingSearch 命令面板：锚点固定定位到视口水平居中、垂直约 1/5 处，
@@ -447,10 +449,6 @@ export function SidebarContent(props: SidebarContentProps) {
             {/* 公告中心入口：未读红点在组件内部按 atom 派生（单一 owner） */}
             <DockItem>
               <AnnouncementCenter />
-            </DockItem>
-            {/* 定时任务与自动化入口 */}
-            <DockItem>
-              <AutomationDockButton />
             </DockItem>
             <DockItem>
               <Button type="button" variant="ghost" className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" title={t("feedback.title")} aria-label={t("feedback.title")} onClick={props.onOpenFeedback}><MessageSquare className="size-4" /></Button>

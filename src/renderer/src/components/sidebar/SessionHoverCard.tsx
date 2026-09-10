@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useRef, useState, type ReactNode, type PointerEvent } from "react";
 import { Calendar, Folder, Laptop, MessageSquare } from "lucide-react";
 import type { SessionRecord, SessionSummary } from "../../../../shared/types";
 import { looksLikePiSessionFileStem } from "../../../../shared/sessionIdentity";
@@ -26,6 +26,15 @@ export interface SessionHoverCardProps {
 	closeDelay?: number;
 }
 
+/** 点击后额外压制时长：覆盖列表重排换位/行重挂载后 Radix 的延迟 open 定时器。 */
+const HOVER_SUPPRESS_EXTRA_MS = 250;
+/**
+ * 模块级「最近一次会话行主键按下」时间戳，跨实例/重挂载共享：点击会话后列表按
+ * updatedAt 重排，行可能在静止光标下换位或重挂载，新实例自身的 suppressUntilRef
+ * 已归零；没有这个共享时间戳就会出现「点完 1.5s 后弹出另一行的预览卡」。
+ */
+let lastRowPointerDownAt = 0;
+
 /**
  * 侧栏会话悬浮预览卡片（SessionHoverCard）
  *
@@ -47,6 +56,36 @@ export function SessionHoverCard({
 	openDelay = 1500,
 	closeDelay = 200,
 }: SessionHoverCardProps) {
+	const [open, setOpen] = useState(false);
+	const suppressUntilRef = useRef(0);
+	const suppressWindowMs = openDelay + closeDelay + HOVER_SUPPRESS_EXTRA_MS;
+
+	// 实例自身的时间戳（覆盖本实例刚被点过）与模块级时间戳（覆盖重挂载后的新实例）
+	// 取较大者判断；点击后的窗口期内任何 hover 打开一律吞掉。
+	const isSuppressed = () =>
+		Date.now() < Math.max(suppressUntilRef.current, lastRowPointerDownAt + suppressWindowMs);
+
+	const cancelPendingOpen = () => {
+		// 点击会话是导航，不是悬停预览：立刻关掉已开卡片，并在 openDelay 窗口内吞掉 Radix 延迟 open。
+		// 超时后允许重新悬停打开，避免 suppress 标志一直卡住下一次正常预览。
+		suppressUntilRef.current = Date.now() + suppressWindowMs;
+		lastRowPointerDownAt = suppressUntilRef.current;
+		setOpen(false);
+	};
+
+	const handleOpenChange = (next: boolean) => {
+		if (next && isSuppressed()) {
+			setOpen(false);
+			return;
+		}
+		setOpen(next);
+	};
+
+	const handleTriggerPointerDown = (event: PointerEvent<HTMLElement>) => {
+		// 只拦主键点击选中；右键菜单仍走悬停卡片的 disabled 路径。
+		if (event.button === 0) cancelPendingOpen();
+	};
+
 	// 没有会话数据且未传标题，或显式禁用时，直接渲染子元素，不挂载 HoverCard 行为
 	if ((!session && !title) || disabled) {
 		return <>{children}</>;
@@ -81,8 +120,10 @@ export function SessionHoverCard({
 	const formattedTime = session?.updatedAt ? formatFullDateTime(session.updatedAt) : "";
 
 	return (
-		<HoverCard openDelay={openDelay} closeDelay={closeDelay}>
-			<HoverCardTrigger asChild>{children}</HoverCardTrigger>
+		<HoverCard open={open} onOpenChange={handleOpenChange} openDelay={openDelay} closeDelay={closeDelay}>
+			<HoverCardTrigger asChild onPointerDown={handleTriggerPointerDown}>
+				{children}
+			</HoverCardTrigger>
 			<HoverCardContent
 				side="right"
 				align="start"

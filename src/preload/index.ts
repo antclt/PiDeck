@@ -2053,6 +2053,10 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.automationRunNow, taskId) as Promise<AutomationRun>,
 		abortRun: (runId: string) =>
 			ipcRenderer.invoke(ipcChannels.automationAbortRun, runId) as Promise<boolean>,
+		deleteRuns: (runIds: string[]) =>
+			ipcRenderer.invoke(ipcChannels.automationDeleteRuns, runIds) as Promise<number>,
+		clearRuns: () =>
+			ipcRenderer.invoke(ipcChannels.automationClearRuns) as Promise<number>,
 		updateSettings: (patch: UpdateAutomationSettingsInput) =>
 			ipcRenderer.invoke(ipcChannels.automationUpdateSettings, patch) as Promise<AutomationSettings>,
 		previewCron: (expression: string, count?: number) =>

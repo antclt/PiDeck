@@ -1461,6 +1461,8 @@ export function createPreviewApi(): PiDesktopApi {
 				events: [],
 			}),
 			abortRun: async () => true,
+			deleteRuns: async (runIds) => runIds.length,
+			clearRuns: async () => 0,
 			updateSettings: async (patch) => ({
 				maxConcurrentRuns: patch.maxConcurrentRuns ?? 1,
 				historyLimit: patch.historyLimit ?? 200,

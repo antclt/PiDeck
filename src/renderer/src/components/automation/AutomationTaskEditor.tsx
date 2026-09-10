@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
-import { Clock, Info, Check, Sparkles } from "lucide-react";
+import { ChevronDown, Sparkles, X } from "lucide-react";
 import { projectInventoryAtom } from "../../atoms/project-atoms";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
@@ -17,6 +17,10 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../ui-shadcn/select";
+import { ModelPicker } from "../session/ComposerComponents";
+import { THINKING_LEVELS } from "../session/sessionPickerOptions";
+import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
+import { CronScheduleBuilder } from "./CronScheduleBuilder";
 import type {
 	AutomationTask,
 	CreateAutomationTaskInput,
@@ -29,29 +33,12 @@ interface AutomationTaskEditorProps {
 	onCancel: () => void;
 }
 
-const CRON_PRESETS = [
-	{ label: "automation.cronPreset.daily9am", expr: "0 9 * * 1-5" },
-	{ label: "automation.cronPreset.hourly", expr: "0 * * * *" },
-	{ label: "automation.cronPreset.every30m", expr: "*/30 * * * *" },
-	{ label: "automation.cronPreset.midnight", expr: "0 0 * * *" },
-] as const;
+/** Radix Select 禁止 value=""；空档位表示跟随项目/全局，用哨兵值落盘时再清掉。 */
+const THINKING_INHERIT = "inherit";
 
 /**
- * 格式化时间戳为易读本地时间
- */
-function formatPreviewTime(timestamp: number): string {
-	const d = new Date(timestamp);
-	return d.toLocaleString(undefined, {
-		month: "numeric",
-		day: "numeric",
-		hour: "2-digit",
-		minute: "2-digit",
-		weekday: "short",
-	});
-}
-
-/**
- * 定时任务新建与编辑表单组件。
+ * 定时任务新建与编辑表单。
+ * 模型/思考走会话同款选择器，调度走可视化 Cron，避免用户手输 provider/model-id 和五段表达式。
  */
 export function AutomationTaskEditor({
 	task,
@@ -60,7 +47,6 @@ export function AutomationTaskEditor({
 }: AutomationTaskEditorProps) {
 	const projects = useAtomValue(projectInventoryAtom);
 
-	// 表单状态
 	const [name, setName] = useState(task?.name ?? "");
 	const [projectId, setProjectId] = useState(
 		task?.projectId ?? (projects[0]?.id || ""),
@@ -69,15 +55,16 @@ export function AutomationTaskEditor({
 		task?.schedule.type === "cron" ? task.schedule.expression : "0 9 * * 1-5",
 	);
 	const [prompt, setPrompt] = useState(task?.prompt ?? "");
-	const [modelInput, setModelInput] = useState(
-		task?.model ? `${task.model.provider}/${task.model.modelId}` : "",
-	);
-	const [thinkingLevel, setThinkingLevel] = useState(
-		task?.thinkingLevel ?? "",
-	);
+	const [selectedModel, setSelectedModel] = useState<
+		{ provider: string; modelId: string } | undefined
+	>(task?.model);
+	const [thinkingLevel, setThinkingLevel] = useState(task?.thinkingLevel ?? "");
 	const [enabled, setEnabled] = useState(task?.enabled ?? true);
+	const [modelPickerOpen, setModelPickerOpen] = useState(false);
+	const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
+	const [recentProviders, setRecentProviders] = useState<string[]>([]);
+	const [hiddenProviders, setHiddenProviders] = useState<string[]>([]);
 
-	// 预算设置（UI 以分钟展示超时）
 	const initialTimeoutMinutes =
 		task?.budget?.timeoutMs != null
 			? String(Math.round(task.budget.timeoutMs / 60000))
@@ -95,12 +82,28 @@ export function AutomationTaskEditor({
 		task?.budget?.maxSteps ? String(task.budget.maxSteps) : "",
 	);
 
-	// Cron 预览状态（时间戳数组）
 	const [cronPreviews, setCronPreviews] = useState<number[]>([]);
 	const [cronError, setCronError] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
-	// 实时计算 Cron 预览
+	useEffect(() => {
+		void desktopApi.settings
+			.get()
+			.then((settings) => {
+				setFavoriteModels(settings.favoriteModels ?? []);
+				setRecentProviders(settings.recentProviders ?? []);
+				setHiddenProviders(settings.hiddenProviders ?? []);
+			})
+			.catch(() => undefined);
+	}, []);
+
+	// 选择器打开才拉模型目录，避免弹层常驻轮询；sessionId 仅满足 hook 签名（目录按 projectId 加载）。
+	const { models, report, loading: catalogLoading, refreshing, reload } = useBackendModelCatalog({
+		sessionId: "automation-editor",
+		projectId: projectId || undefined,
+		enabled: modelPickerOpen,
+	});
+
 	useEffect(() => {
 		let isCancelled = false;
 		const trimmed = cronExpression.trim();
@@ -133,6 +136,28 @@ export function AutomationTaskEditor({
 		};
 	}, [cronExpression]);
 
+	const currentModel = models.find(
+		(model) =>
+			model.provider === selectedModel?.provider && model.id === selectedModel?.modelId,
+	);
+	const modelLabel = selectedModel
+		? (currentModel?.name ?? `${selectedModel.provider}/${selectedModel.modelId}`)
+		: t("automation.modelUnset");
+
+	const toggleFavorite = async (provider: string, modelId: string) => {
+		const key = `${provider}/${modelId}`;
+		const next = favoriteModels.includes(key)
+			? favoriteModels.filter((item) => item !== key)
+			: [...favoriteModels, key];
+		setFavoriteModels(next);
+		try {
+			await desktopApi.settings.update({ favoriteModels: next });
+		} catch (error) {
+			setFavoriteModels(favoriteModels);
+			showNotice(error instanceof Error ? error.message : String(error), 4000);
+		}
+	};
+
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!name.trim()) {
@@ -162,22 +187,8 @@ export function AutomationTaskEditor({
 				maxSteps: maxSteps.trim() ? Number(maxSteps) : undefined,
 			};
 
-			let parsedModel: { provider: string; modelId: string } | undefined;
-			if (modelInput.trim()) {
-				const parts = modelInput.trim().split("/");
-				if (parts.length >= 2) {
-					parsedModel = {
-						provider: parts[0],
-						modelId: parts.slice(1).join("/"),
-					};
-				} else {
-					parsedModel = {
-						provider: "openai",
-						modelId: modelInput.trim(),
-					};
-				}
-			}
-
+			// IPC/JSON 会丢掉 undefined 键。更新时用空对象/空串表示「恢复默认」，
+			// 避免主进程把缺省字段当成「保持原值」。
 			if (task) {
 				const patch: UpdateAutomationTaskInput = {
 					name: name.trim(),
@@ -187,8 +198,8 @@ export function AutomationTaskEditor({
 						expression: cronExpression.trim(),
 					},
 					prompt: prompt.trim(),
-					model: parsedModel,
-					thinkingLevel: thinkingLevel.trim() || undefined,
+					model: selectedModel ?? { provider: "", modelId: "" },
+					thinkingLevel: thinkingLevel.trim(),
 					enabled,
 					budget,
 				};
@@ -202,10 +213,10 @@ export function AutomationTaskEditor({
 						expression: cronExpression.trim(),
 					},
 					prompt: prompt.trim(),
-					model: parsedModel,
-					thinkingLevel: thinkingLevel.trim() || undefined,
 					enabled,
 					budget,
+					...(selectedModel ? { model: selectedModel } : {}),
+					...(thinkingLevel.trim() ? { thinkingLevel: thinkingLevel.trim() } : {}),
 				};
 				await desktopApi.automation.createTask(input);
 			}
@@ -224,8 +235,7 @@ export function AutomationTaskEditor({
 
 	return (
 		<form onSubmit={handleSubmit} className="flex flex-col gap-4 py-1">
-			<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-				{/* 任务名称 */}
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor="task-name" className="text-xs font-medium">
 						{t("automation.name")} <span className="text-destructive">*</span>
@@ -240,7 +250,6 @@ export function AutomationTaskEditor({
 					/>
 				</div>
 
-				{/* 关联项目 */}
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor="task-project" className="text-xs font-medium">
 						{t("automation.project")} <span className="text-destructive">*</span>
@@ -260,55 +269,13 @@ export function AutomationTaskEditor({
 				</div>
 			</div>
 
-			{/* Cron 表达式与预设 */}
-			<div className="flex flex-col gap-1.5 rounded-lg border border-border/50 bg-bg-panel/40 p-3">
-				<div className="flex items-center justify-between">
-					<Label htmlFor="cron-expr" className="text-xs font-medium flex items-center gap-1.5">
-						<Clock className="size-3.5 text-sky-500" />
-						{t("automation.cronExpression")} <span className="text-destructive">*</span>
-					</Label>
-					<div className="flex items-center gap-1">
-						{CRON_PRESETS.map((preset) => (
-							<Button
-								key={preset.expr}
-								type="button"
-								variant="ghost"
-								size="sm"
-								className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-								onClick={() => setCronExpression(preset.expr)}
-							>
-								{t(preset.label as any)}
-							</Button>
-						))}
-					</div>
-				</div>
+			<CronScheduleBuilder
+				value={cronExpression}
+				onChange={setCronExpression}
+				previews={cronPreviews}
+				error={cronError}
+			/>
 
-				<Input
-					id="cron-expr"
-					value={cronExpression}
-					onChange={(e) => setCronExpression(e.target.value)}
-					placeholder="0 9 * * 1-5"
-					className="h-8 text-xs font-mono"
-					required
-				/>
-
-				<div className="flex items-center justify-between text-[11px] text-muted-foreground">
-					<span>{t("automation.cronHelp")}</span>
-					{cronError ? (
-						<span className="text-destructive">{cronError}</span>
-					) : (
-						cronPreviews.length > 0 && (
-							<span className="flex items-center gap-1 text-emerald-500">
-								<Check className="size-3" />
-								{t("automation.cronPreview")}:{" "}
-								{cronPreviews.map(formatPreviewTime).join(" ➔ ")}
-							</span>
-						)
-					)}
-				</div>
-			</div>
-
-			{/* Prompt 提示词 */}
 			<div className="flex flex-col gap-1.5">
 				<Label htmlFor="task-prompt" className="text-xs font-medium">
 					{t("automation.prompt")} <span className="text-destructive">*</span>
@@ -324,42 +291,68 @@ export function AutomationTaskEditor({
 				/>
 			</div>
 
-			{/* 模型与思考档位 */}
-			<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="task-model" className="text-xs font-medium">
-						{t("automation.model")}
-					</Label>
-					<Input
-						id="task-model"
-						value={modelInput}
-						onChange={(e) => setModelInput(e.target.value)}
-						placeholder="provider/model-id"
-						className="h-8 text-xs font-mono"
-					/>
+					<Label className="text-xs font-medium">{t("automation.model")}</Label>
+					<div className="flex items-center gap-1">
+						<Button
+							type="button"
+							variant="outline"
+							className="h-8 min-w-0 flex-1 justify-between px-2 font-mono text-xs"
+							title={modelLabel}
+							onClick={() => setModelPickerOpen(true)}
+						>
+							<span className="min-w-0 truncate">{modelLabel}</span>
+							<ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+						</Button>
+						{selectedModel && (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="h-8 w-8 px-0"
+								title={t("automation.modelUnset")}
+								onClick={() => setSelectedModel(undefined)}
+							>
+								<X className="size-3.5" />
+							</Button>
+						)}
+					</div>
 				</div>
 
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor="task-thinking" className="text-xs font-medium">
 						{t("automation.thinkingLevel")}
 					</Label>
-					<Input
-						id="task-thinking"
-						value={thinkingLevel}
-						onChange={(e) => setThinkingLevel(e.target.value)}
-						placeholder="e.g. low / medium / high"
-						className="h-8 text-xs font-mono"
-					/>
+					<Select
+						value={thinkingLevel || THINKING_INHERIT}
+						onValueChange={(value) => {
+							setThinkingLevel(value === THINKING_INHERIT ? "" : value);
+						}}
+					>
+						<SelectTrigger id="task-thinking" className="h-8 text-xs">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value={THINKING_INHERIT} className="text-xs">
+								{t("automation.thinkingInherit")}
+							</SelectItem>
+							{THINKING_LEVELS.map((level) => (
+								<SelectItem key={level.value} value={level.value} className="text-xs">
+									{t(level.labelKey)}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
 				</div>
 			</div>
 
-			{/* 预算与超限保护 */}
 			<div className="flex flex-col gap-2 rounded-lg border border-border/50 bg-bg-panel/40 p-3">
-				<Label className="text-xs font-medium flex items-center gap-1.5">
+				<Label className="flex items-center gap-1.5 text-xs font-medium">
 					<Sparkles className="size-3.5 text-amber-500" />
 					{t("automation.budgets")}
 				</Label>
-				<div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+				<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
 					<div className="flex flex-col gap-1">
 						<span className="text-[11px] text-muted-foreground">{t("automation.timeoutMinutes")}</span>
 						<Input
@@ -368,7 +361,7 @@ export function AutomationTaskEditor({
 							value={timeoutMinutes}
 							onChange={(e) => setTimeoutMinutes(e.target.value)}
 							placeholder="30"
-							className="h-7 text-xs font-mono"
+							className="h-7 font-mono text-xs"
 						/>
 					</div>
 					<div className="flex flex-col gap-1">
@@ -379,7 +372,7 @@ export function AutomationTaskEditor({
 							value={maxTokens}
 							onChange={(e) => setMaxTokens(e.target.value)}
 							placeholder="e.g. 500000"
-							className="h-7 text-xs font-mono"
+							className="h-7 font-mono text-xs"
 						/>
 					</div>
 					<div className="flex flex-col gap-1">
@@ -391,7 +384,7 @@ export function AutomationTaskEditor({
 							value={maxCostUsd}
 							onChange={(e) => setMaxCostUsd(e.target.value)}
 							placeholder="e.g. 1.00"
-							className="h-7 text-xs font-mono"
+							className="h-7 font-mono text-xs"
 						/>
 					</div>
 					<div className="flex flex-col gap-1">
@@ -402,21 +395,20 @@ export function AutomationTaskEditor({
 							value={maxSteps}
 							onChange={(e) => setMaxSteps(e.target.value)}
 							placeholder="e.g. 50"
-							className="h-7 text-xs font-mono"
+							className="h-7 font-mono text-xs"
 						/>
 					</div>
 				</div>
 			</div>
 
-			{/* 启用开关与保存/取消 */}
-			<div className="flex items-center justify-between pt-2 border-t border-border/40">
+			<div className="flex items-center justify-between border-t border-border/40 pt-2">
 				<div className="flex items-center gap-2">
 					<Switch
 						id="task-enabled"
 						checked={enabled}
 						onCheckedChange={setEnabled}
 					/>
-					<Label htmlFor="task-enabled" className="text-xs cursor-pointer">
+					<Label htmlFor="task-enabled" className="cursor-pointer text-xs">
 						{enabled ? t("automation.enabled") : t("automation.disabled")}
 					</Label>
 				</div>
@@ -442,6 +434,26 @@ export function AutomationTaskEditor({
 					</Button>
 				</div>
 			</div>
+
+			{modelPickerOpen && (
+				<ModelPicker
+					models={models}
+					report={report}
+					loading={catalogLoading}
+					refreshing={refreshing}
+					onRefresh={() => reload(true)}
+					current={selectedModel}
+					favoriteModels={favoriteModels}
+					recentProviders={recentProviders}
+					hiddenProviders={hiddenProviders}
+					onClose={() => setModelPickerOpen(false)}
+					onPick={(model) => {
+						setSelectedModel({ provider: model.provider, modelId: model.id });
+						setModelPickerOpen(false);
+					}}
+					onToggleFavorite={(provider, modelId) => void toggleFavorite(provider, modelId)}
+				/>
+			)}
 		</form>
 	);
 }

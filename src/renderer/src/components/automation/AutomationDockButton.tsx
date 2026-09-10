@@ -4,46 +4,43 @@ import {
 	automationModalOpenAtom,
 	automationActiveRunsAtom,
 } from "../../atoms/automation-atoms";
-import { Button } from "../ui-shadcn/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { t } from "../../i18n";
 
 /**
- * 侧栏底栏 Dock 上的定时任务入口按钮。
- * 当有正在执行的任务时，呈现呼吸蓝点角标与计数提示。
+ * 侧栏顶部动作区的定时任务入口（新建会话 / 搜索会话下方）。
+ * 有正在执行的任务时，行尾显示呼吸蓝点，避免用户还要翻底栏 Dock。
  */
 export function AutomationDockButton() {
 	const [, setOpen] = useAtom(automationModalOpenAtom);
 	const activeRuns = useAtomValue(automationActiveRunsAtom);
 	const hasActive = activeRuns.length > 0;
+	const label = hasActive
+		? `${t("automation.title")} (${activeRuns.length})`
+		: t("automation.title");
 
 	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<div className="relative size-full">
-					<Button
-						type="button"
-						variant="ghost"
-						className="size-full rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-						title={t("automation.title")}
-						aria-label={t("automation.title")}
-						onClick={() => setOpen(true)}
-					>
-						<Clock className="size-4" />
-					</Button>
-					{hasActive && (
-						<span
-							className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-sky-500 animate-pulse"
-							aria-hidden="true"
-						/>
-					)}
-				</div>
-			</TooltipTrigger>
-			<TooltipContent side="top">
-				{hasActive
-					? `${t("automation.title")} (${activeRuns.length})`
-					: t("automation.title")}
-			</TooltipContent>
-		</Tooltip>
+		<button
+			type="button"
+			className="group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-body text-foreground transition-colors hover:bg-muted/60"
+			aria-label={label}
+			title={label}
+			onClick={() => setOpen(true)}
+		>
+			<span className="relative shrink-0">
+				<Clock className="size-4 text-muted-foreground" aria-hidden="true" />
+				{hasActive && (
+					<span
+						className="pointer-events-none absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-sky-500 animate-pulse"
+						aria-hidden="true"
+					/>
+				)}
+			</span>
+			<span className="min-w-0 flex-1 truncate font-medium">{t("automation.title")}</span>
+			{hasActive && (
+				<span className="shrink-0 text-micro tabular-nums text-sky-500">
+					{activeRuns.length}
+				</span>
+			)}
+		</button>
 	);
 }

@@ -161,13 +161,20 @@ export class AutomationStore {
 		}, now);
 		const scheduleChanged = JSON.stringify(current.schedule) !== JSON.stringify(merged.schedule);
 		const reEnabled = !current.enabled && merged.enabled;
+		// 不能先铺 current 再铺 merged：model / thinkingLevel 被清空时 merged 会省略该键，
+		// 铺 current 会把旧值留住，编辑器「恢复默认模型」就写不进去。
 		const updated: AutomationTask = {
-			...current,
+			id: current.id,
 			...merged,
+			createdAt: current.createdAt,
 			updatedAt: now,
 			// A schedule edit or resume starts a fresh scheduling window; intentionally
 			// do not catch up occurrences from the old expression or paused interval.
-			lastScheduledAt: scheduleChanged || reEnabled ? now : current.lastScheduledAt,
+			...(scheduleChanged || reEnabled
+				? { lastScheduledAt: now }
+				: current.lastScheduledAt !== undefined
+					? { lastScheduledAt: current.lastScheduledAt }
+					: {}),
 		};
 		await this.mutate(() => {
 			this.state.tasks[index] = updated;
@@ -236,6 +243,36 @@ export class AutomationStore {
 			this.state.runs = trimAutomationRunHistory(this.state.runs, this.state.settings.historyLimit);
 		});
 		return cloneSerializable(run);
+	}
+
+	/**
+	 * 删除已结束的运行历史。进行中的 queued/starting/running 一律跳过，
+	 * 避免把还在跑的任务从看板抹掉后无法中止。
+	 */
+	async deleteRuns(runIds: string[]): Promise<number> {
+		const idSet = new Set(runIds.filter((id) => typeof id === "string" && id.trim()).map((id) => id.trim()));
+		if (idSet.size === 0) return 0;
+		let deleted = 0;
+		await this.mutate(() => {
+			const next = this.state.runs.filter((run) => {
+				if (!idSet.has(run.id) || !isAutomationRunTerminal(run.status)) return true;
+				deleted += 1;
+				return false;
+			});
+			this.state.runs = next;
+		});
+		return deleted;
+	}
+
+	/** 清空全部已结束记录，保留正在跑的任务。 */
+	async clearTerminalRuns(): Promise<number> {
+		let deleted = 0;
+		await this.mutate(() => {
+			const next = this.state.runs.filter((run) => !isAutomationRunTerminal(run.status));
+			deleted = this.state.runs.length - next.length;
+			this.state.runs = next;
+		});
+		return deleted;
 	}
 
 	async updateRun(
