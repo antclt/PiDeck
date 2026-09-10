@@ -23,8 +23,8 @@ jobs:
     name: Sync Release to AtomGit
     runs-on: ubuntu-latest
     # 兜底超时：历史上 PUT 上传挂起导致 job 卡了 52 分钟无进展；
-    # 三个版本全量约 7GB，上传速度不确定，给足 4 小时；超时强制失败后可重跑（已传附件自动跳过）
-    timeout-minutes: 240
+    # 三个版本全量约 7GB，上传速度不确定，给足 6 小时（GitHub hosted runner 上限）；超时强制失败后可重跑（已传附件自动跳过）
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
