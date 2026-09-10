@@ -1582,3 +1582,81 @@ test("SessionCommandIpcError maps MESSAGE_NOT_FOUND to the dedicated copy key", 
   );
   assert.equal(sessionError.message, "sessionCommand.sessionNotFound");
 });
+
+test("stopRuntime canonicalizes a remapped draft target via the live agent binding", async () => {
+  // 定时任务草稿被扫描合并后 sessionId 会换新：渲染层仍持有旧 sessionId/generation，
+  // 停止必须按 agentId 的 live 绑定规范化，而不是报「会话不存在」。
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness({
+    entry: catalogEntry({ id: "session-draft", status: "draft" }),
+    tabs: [{
+      id: "agent-a",
+      projectId: "project-1",
+      cwd: "C:/project",
+      title: "Session",
+      status: "running",
+      sessionPath: "C:/sessions/scanned.jsonl",
+      createdAt: 1,
+    }],
+  });
+  // 模拟扫描合并后的 catalog：草稿行已 splice 掉，只剩 remap 后的行。
+  const scannedEntry = catalogEntry({
+    id: "session-scanned",
+    status: "active",
+    filePath: "C:/sessions/scanned.jsonl",
+  });
+  harness.catalog.get = (sessionId) =>
+    sessionId === "session-scanned" ? { ...scannedEntry } : undefined;
+  harness.catalog.getRecord = (sessionId) =>
+    sessionId === "session-scanned" ? { ...scannedEntry, preview: "", messageCount: 0 } : undefined;
+
+  const coordinator = new SessionRuntimeCoordinator(
+    harness.catalog,
+    harness.agents,
+    harness.sender,
+  );
+  coordinator.bindExistingAgent("session-scanned", "agent-a");
+  const binding = coordinator.getTarget("session-scanned");
+  assert.ok(binding);
+
+  // 渲染层传来的目标：旧草稿 sessionId + 过期 generation，但 agentId 是活的。
+  const staleTarget = {
+    sessionId: "session-draft",
+    agentId: "agent-a",
+    runtimeGeneration: binding.runtimeGeneration + 5,
+  };
+  const stopped = await coordinator.stopRuntime(staleTarget);
+  assert.equal(stopped.ok, true);
+  // 返回的是规范化后的 live 目标，不再是渲染层的陈旧身份。
+  assert.equal(stopped.value.sessionId, "session-scanned");
+  assert.equal(harness.calls.stop, 1);
+  // 停止后解绑，无残留绑定。
+  assert.equal(coordinator.getTarget("session-scanned"), undefined);
+});
+
+test("stopRuntime reports SESSION_NOT_FOUND only when neither binding nor catalog row exists", async () => {
+  const { SessionRuntimeCoordinator } = loadCoordinator();
+  const harness = createHarness();
+  const coordinator = new SessionRuntimeCoordinator(
+    harness.catalog,
+    harness.agents,
+    harness.sender,
+  );
+  // agentId 从未绑定 + catalog 无行：真正的会话不存在。
+  const missing = await coordinator.stopRuntime({
+    sessionId: "session-ghost",
+    agentId: "agent-ghost",
+    runtimeGeneration: 0,
+  });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "SESSION_NOT_FOUND");
+
+  // 有 catalog 行但 agent 未绑定：是「运行实例不可用」，不是会话不存在。
+  const unbound = await coordinator.stopRuntime({
+    sessionId: "session-1",
+    agentId: "agent-ghost",
+    runtimeGeneration: 0,
+  });
+  assert.equal(unbound.ok, false);
+  assert.equal(unbound.error.code, "SESSION_RUNTIME_UNAVAILABLE");
+});

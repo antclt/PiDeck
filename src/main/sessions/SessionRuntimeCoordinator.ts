@@ -846,19 +846,24 @@ export class SessionRuntimeCoordinator {
 	): Promise<SessionCommandResult<SessionRuntimeTarget>> {
 		let reservation: RuntimeReplacement | undefined;
 		try {
-			this.requireTarget(target);
-			reservation = this.reserveBoundRuntime(target.sessionId, target.agentId);
-			await this.agents.stop(target.agentId);
+			// 停止以「活着的进程」为准：定时任务草稿会话被扫描合并 remap 后，渲染层可能
+			// 仍持有旧 sessionId/generation。只要 agentId 仍有 live 绑定，就用 live 绑定
+			// 规范化目标，别让陈旧身份挡住停止（此前用户只能靠重启停掉后台 Agent）。
+			const stopTarget = this.resolveStopTarget(target);
+			reservation = this.reserveBoundRuntime(stopTarget.sessionId, stopTarget.agentId);
+			await this.agents.stop(stopTarget.agentId);
 			this.requireCurrentReservation(reservation);
 			this.releaseRuntimeReplacement(reservation);
 			reservation = undefined;
-			this.unbindAgentUnchecked(target.agentId);
+			this.unbindAgentUnchecked(stopTarget.agentId);
 			void this.logger?.info("session-runtime", "Runtime stopped", {
-				sessionId: target.sessionId,
-				agentId: target.agentId,
-				runtimeGeneration: target.runtimeGeneration,
+				sessionId: stopTarget.sessionId,
+				agentId: stopTarget.agentId,
+				runtimeGeneration: stopTarget.runtimeGeneration,
+				// 渲染层原始目标仅入日志，便于排查「停止报会话不存在」类反馈。
+				requestedSessionId: target.sessionId,
 			});
-			return { ok: true, value: target };
+			return { ok: true, value: stopTarget };
 		} catch (error) {
 			return this.commandFailure(error);
 		} finally {
@@ -1805,6 +1810,38 @@ export class SessionRuntimeCoordinator {
 				`Session not found: ${target.sessionId}`,
 			);
 		}
+		return this.requireBoundTarget(target);
+	}
+
+	/**
+	 * 停止专用目标规范化（与 requireTarget 不同）：停止的语义是「让这个进程停下来」，
+	 * agentId 才是运行实例的稳定身份。草稿会话被扫描合并 remap 后，渲染层持有的
+	 * sessionId/generation 可能同时过期——只要 agentId 仍有 live 绑定就按 live 绑定停。
+	 * 真正两边都没有（无 live 绑定且 catalog 无行）才报 SESSION_NOT_FOUND；
+	 * 有 catalog 行但无绑定则报「运行实例不可用」，避免误导用户去刷新会话列表。
+	 */
+	private resolveStopTarget(target: SessionRuntimeTarget): SessionRuntimeTarget {
+		const live = this.getRuntimeBinding(target.agentId);
+		if (live) {
+			return {
+				sessionId: live.sessionId,
+				agentId: target.agentId,
+				runtimeGeneration: live.runtimeGeneration,
+			};
+		}
+		if (!this.catalog.get(target.sessionId)) {
+			throw new SessionRuntimeCommandError(
+				"SESSION_NOT_FOUND",
+				`Session not found: ${target.sessionId}`,
+			);
+		}
+		throw new SessionRuntimeCommandError(
+			"SESSION_RUNTIME_UNAVAILABLE",
+			"Session runtime is not available",
+		);
+	}
+
+	private requireBoundTarget(target: SessionRuntimeTarget): SessionRuntimeBinding {
 		const binding = this.getRuntimeBinding(target.agentId);
 		if (!binding || this.agentIdBySession.get(target.sessionId) !== target.agentId) {
 			throw new SessionRuntimeCommandError(

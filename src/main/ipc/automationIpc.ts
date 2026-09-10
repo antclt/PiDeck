@@ -158,6 +158,43 @@ export function registerAutomationIpc(deps: AutomationIpcDeps): () => void {
 	);
 
 	ipcMain.handle(
+		ipcChannels.automationDeleteRuns,
+		async (_event, runIds: unknown): Promise<number> => {
+			if (!Array.isArray(runIds)) {
+				throw new Error("Run IDs must be an array");
+			}
+			const ids = runIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+				.map((id) => id.trim());
+			try {
+				const deleted = await automationStore.deleteRuns(ids);
+				void appLogger.info("automation", "Deleted run history", { requested: ids.length, deleted });
+				return deleted;
+			} catch (err) {
+				void appLogger.error("automation", "Failed to delete run history", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+				throw err;
+			}
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.automationClearRuns,
+		async (): Promise<number> => {
+			try {
+				const deleted = await automationStore.clearTerminalRuns();
+				void appLogger.info("automation", "Cleared terminal run history", { deleted });
+				return deleted;
+			} catch (err) {
+				void appLogger.error("automation", "Failed to clear run history", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+				throw err;
+			}
+		},
+	);
+
+	ipcMain.handle(
 		ipcChannels.automationUpdateSettings,
 		async (
 			_event,
@@ -210,6 +247,8 @@ export function registerAutomationIpc(deps: AutomationIpcDeps): () => void {
 		ipcMain.removeHandler(ipcChannels.automationDeleteTask);
 		ipcMain.removeHandler(ipcChannels.automationRunNow);
 		ipcMain.removeHandler(ipcChannels.automationAbortRun);
+		ipcMain.removeHandler(ipcChannels.automationDeleteRuns);
+		ipcMain.removeHandler(ipcChannels.automationClearRuns);
 		ipcMain.removeHandler(ipcChannels.automationUpdateSettings);
 		ipcMain.removeHandler(ipcChannels.automationPreviewCron);
 	};

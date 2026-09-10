@@ -65,3 +65,19 @@ test("hover-card i18n copy is synchronized between zh-CN and en-US", () => {
 		assert.match(en, new RegExp(`"${key.replace(/\./g, "\\.")}":`));
 	}
 });
+
+test("SessionHoverCard cancels hover-open on row click and suppresses post-click remounts", () => {
+	const source = readFileSync("src/renderer/src/components/sidebar/SessionHoverCard.tsx", "utf8");
+	// 点击会话是导航：pointerdown 立即取消已开卡片并压制延迟 open。
+	assert.match(source, /onPointerDown=\{handleTriggerPointerDown\}/);
+	assert.match(source, /cancelPendingOpen/);
+	// 模块级「最近一次行点击」时间戳：点击后列表按 updatedAt 重排、行可能重挂载，
+	// 新实例自身的 suppressUntilRef 已归零，必须共享时间戳才能吞掉 1.5s 后的弹出。
+	assert.match(source, /lastRowPointerDownAt/);
+	assert.match(source, /HOVER_SUPPRESS_EXTRA_MS/);
+	// 受控 open：Radix 的延迟 open 必须经 handleOpenChange 的 isSuppressed 校验。
+	assert.match(source, /open=\{open\} onOpenChange=\{handleOpenChange\}/);
+	assert.match(source, /const isSuppressed = \(\)/);
+	// 压制窗口按 openDelay + closeDelay + 额外余量计算，与默认 1500ms 对齐。
+	assert.match(source, /const suppressWindowMs = openDelay \+ closeDelay \+ HOVER_SUPPRESS_EXTRA_MS/);
+});
