@@ -34,7 +34,7 @@ test("shouldStripNoCache 只命中镜像下载前缀且携带 noCache 的请求"
 	// 不命中：非下载路径（公告 API 等在同一主机的其它用途）
 	assert.equal(shouldStripNoCache("https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases?noCache=abc"), false);
 	// 不命中：GitHub 官方链路（正常支持 query，无需剥除）
-	assert.equal(shouldStripNoCache("https://github.com/ayuayue/PiDeck/releases/latest/download/latest.yml?noCache=abc"), false);
+	assert.equal(shouldStripNoCache("https://github.com/pideck-app/PiDeck/releases/latest/download/latest.yml?noCache=abc"), false);
 });
 
 test("ATOMGIT_DOWNLOAD_URL_PATTERNS 与前缀一一对应且带通配尾部", () => {

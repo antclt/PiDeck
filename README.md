@@ -250,7 +250,7 @@ PiDeck
 
 **Windows**、**macOS**、**Linux** 平台的预构建安装包在 GitHub Release 中发布：
 
-👉 **[GitHub Releases](https://github.com/ayuayue/PiDeck/releases)**
+👉 **[GitHub Releases](https://github.com/pideck-app/PiDeck/releases)**
 
 > PiDeck 需要单独安装 `pi` CLI 并确保其加入系统 `PATH`。
 
@@ -271,7 +271,7 @@ pi --mode rpc
 ## 🧰 快速开始（从源码运行）
 
 ```bash
-git clone https://github.com/ayuayue/PiDeck.git
+git clone https://github.com/pideck-app/PiDeck.git
 cd PiDeck
 npm install
 npm run make-icon
@@ -306,7 +306,7 @@ A：应用默认发送匿名、低频的 `app_heartbeat` 使用统计（可在�
 
 **Q：遇到问题如何反馈？**
 
-A：欢迎加入文末 QQ 群 / 微信群反馈（也可加作者微信 `caoayu97`），或到 [GitHub Issues](https://github.com/ayuayue/PiDeck/issues) 提交问题；排查问题时可在设置页导出日志。
+A：欢迎加入文末 QQ 群 / 微信群反馈（也可加作者微信 `caoayu97`），或到 [GitHub Issues](https://github.com/pideck-app/PiDeck/issues) 提交问题；排查问题时可在设置页导出日志。
 
 ---
 

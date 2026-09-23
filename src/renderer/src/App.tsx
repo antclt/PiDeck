@@ -783,7 +783,7 @@ export function App() {
 	const [webServiceChanging, setWebServiceChanging] = useState(false);
 	const [appInfo, setAppInfo] = useState<AppInfo>({
 		version: "-",
-		releasesUrl: "https://github.com/ayuayue/PiDeck/releases",
+		releasesUrl: "https://github.com/pideck-app/PiDeck/releases",
 		// 同步判定，避免 Mac 首帧在 appInfo IPC 返回前误画 Win 窗口按钮
 		platform: detectRendererPlatform(),
 		homeDir: "",

@@ -12,7 +12,7 @@ hero:
   actions:
     - theme: brand
       text: Download Latest
-      link: https://github.com/ayuayue/PiDeck/releases
+      link: https://github.com/pideck-app/PiDeck/releases
     - theme: alt
       text: Get Started
       link: /en/guide/getting-started
@@ -20,7 +20,7 @@ hero:
       text: Source Code
       items:
         - text: GitHub (Global)
-          link: https://github.com/ayuayue/PiDeck
+          link: https://github.com/pideck-app/PiDeck
         - text: AtomGit (China mirror)
           link: https://atomgit.com/ayuayue/PiDeck
 

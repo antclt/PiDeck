@@ -10,7 +10,8 @@ import { Button } from "../ui-shadcn/button";
 import { ChangelogDialog } from "./settings/ChangelogDialog";
 
 /** 官网主页：品牌常量入口，与 launchRoutes 保持一致，强制系统浏览器打开。 */
-const WEBSITE_URL = "https://ayuayue.github.io/PiDeck/";
+/** 官网地址：走自定义域名而不是 github.io，仓库换 owner 不需要跟着改。 */
+const WEBSITE_URL = "https://pideck.caoayu.top/";
 
 interface AboutPopoverProps {
 	/** 应用/pi/DSH/pi-ai 版本与时间信息，由 App 从主进程 AppInfo IPC 拉取后传入。 */
@@ -35,7 +36,7 @@ export function AboutPopover(props: AboutPopoverProps) {
 	// 面板残留在遮罩下既挡视线又会被误认为还在交互，应随弹窗打开一并收起。
 	const [aboutOpen, setAboutOpen] = useState(false);
 
-	// releasesUrl 形如 https://github.com/ayuayue/PiDeck/releases，去掉 /releases 即仓库主页
+	// releasesUrl 形如 https://github.com/pideck-app/PiDeck/releases，去掉 /releases 即仓库主页
 	const githubUrl = props.appInfo.releasesUrl.replace(/\/releases\/?$/, "") || WEBSITE_URL;
 	const info = props.appInfo;
 

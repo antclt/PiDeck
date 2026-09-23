@@ -16,9 +16,9 @@ import { createHash } from "node:crypto";
 
 const SETUP = "PiDeck-0.7.3-setup.exe";
 const MIRRORS = [
-	{ id: "ghfast", base: "https://ghfast.top/https://github.com/ayuayue/PiDeck/releases/latest/download" },
-	{ id: "ghproxy-net", base: "https://ghproxy.net/https://github.com/ayuayue/PiDeck/releases/latest/download" },
-	{ id: "ghproxy-cxkpro", base: "https://ghproxy.cxkpro.top/https://github.com/ayuayue/PiDeck/releases/latest/download" },
+	{ id: "ghfast", base: "https://ghfast.top/https://github.com/pideck-app/PiDeck/releases/latest/download" },
+	{ id: "ghproxy-net", base: "https://ghproxy.net/https://github.com/pideck-app/PiDeck/releases/latest/download" },
+	{ id: "ghproxy-cxkpro", base: "https://ghproxy.cxkpro.top/https://github.com/pideck-app/PiDeck/releases/latest/download" },
 ];
 
 const onlyIdx = MIRRORS.findIndex((m) => m.id === process.argv.find((a) => a.startsWith("--only="))?.slice(7));

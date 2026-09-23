@@ -11,7 +11,7 @@ This guide covers building PiDeck from source and creating distribution packages
 
 ```bash
 # Clone
-git clone https://github.com/ayuayue/PiDeck.git
+git clone https://github.com/pideck-app/PiDeck.git
 cd PiDeck
 
 # Install
@@ -97,4 +97,4 @@ Run `npm run dist:win` for the Windows release set. Its final output lists only 
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/ayuayue/PiDeck/blob/main/CONTRIBUTING.md) for contribution guidelines. All contributions are welcome!
+See [CONTRIBUTING.md](https://github.com/pideck-app/PiDeck/blob/main/CONTRIBUTING.md) for contribution guidelines. All contributions are welcome!

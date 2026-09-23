@@ -19,13 +19,13 @@
       "url": "https://github.com/1900EasonJin"
     }
   ],
-  "homepage": "https://github.com/ayuayue/PiDeck#readme",
+  "homepage": "https://github.com/pideck-app/PiDeck#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ayuayue/PiDeck.git"
+    "url": "git+https://github.com/pideck-app/PiDeck.git"
   },
   "bugs": {
-    "url": "https://github.com/ayuayue/PiDeck/issues"
+    "url": "https://github.com/pideck-app/PiDeck/issues"
   },
   "keywords": [
     "pi",
@@ -270,7 +270,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "ayuayue",
+      "owner": "pideck-app",
       "repo": "PiDeck"
     }
   },

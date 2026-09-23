@@ -38,7 +38,7 @@ test("atomGitContentsApiUrl：路径按段编码保留斜杠，分支进 query �
 });
 
 test("gitHubRawFileUrl：仍是 raw 直链（GitHub 侧未被前端接管）", () => {
-	assert.equal(gitHubRawFileUrl("resources/pi-ai-catalog.json", "main"), "https://raw.githubusercontent.com/ayuayue/PiDeck/main/resources/pi-ai-catalog.json");
+	assert.equal(gitHubRawFileUrl("resources/pi-ai-catalog.json", "main"), "https://raw.githubusercontent.com/pideck-app/PiDeck/main/resources/pi-ai-catalog.json");
 });
 
 test("repoFileSourceEntries：github 源 raw 优先，其余源 AtomGit 优先，两条都在", () => {

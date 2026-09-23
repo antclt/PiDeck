@@ -107,7 +107,7 @@ pi --version
 ```
 
 #### 步骤二：下载并运行 PiDeck 客户端
-从 [GitHub Releases](https://github.com/ayuayue/PiDeck/releases) 下载适合操作系统的安装包：
+从 [GitHub Releases](https://github.com/pideck-app/PiDeck/releases) 下载适合操作系统的安装包：
 - **Windows**：推荐下载 `PiDeck-Setup-x.x.x.exe`（支持自动静默检查更新）或绿色免安装便携版 `PiDeck-x.x.x.zip`。
 - **macOS**：
   - Apple Silicon 芯片（M1/M2/M3/M4）：下载 `PiDeck-x.x.x-arm64.dmg`。
@@ -464,7 +464,7 @@ src/
 #### 快速启动本地源码
 ```bash
 # 克隆仓库
-git clone https://github.com/ayuayue/PiDeck.git
+git clone https://github.com/pideck-app/PiDeck.git
 cd pi-desktop
 
 # 安装依赖
@@ -584,7 +584,7 @@ PiDeck 实现了优雅的**热更新机制**：
 ### 5.3 从 Issue 到 PR 的完整标准流程
 
 1. **在 GitHub 上 Fork 仓库**：
-   - 将 `https://github.com/ayuayue/PiDeck` Fork 到你的个人账号。
+   - 将 `https://github.com/pideck-app/PiDeck` Fork 到你的个人账号。
 2. **检出开发分支**：
    - 基于主仓库的 `main`（或进行中的开发分支）拉出你的功能分支：
      ```bash

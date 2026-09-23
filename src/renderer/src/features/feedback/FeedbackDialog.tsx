@@ -287,7 +287,7 @@ export function FeedbackDialog({ open, project, appInfo, onClose, onToast, onOpe
 										<Bug size={14} aria-hidden="true" />
 										<span className="ml-1.5">{t("feedback.openIssue")}</span>
 									</Button>
-									<Button variant="secondary" size="sm" onClick={() => onOpenExternal?.("https://github.com/ayuayue/PiDeck")} disabled={!onOpenExternal}>
+									<Button variant="secondary" size="sm" onClick={() => onOpenExternal?.("https://github.com/pideck-app/PiDeck")} disabled={!onOpenExternal}>
 										{t("feedback.authorGithub")}
 									</Button>
 								</div>

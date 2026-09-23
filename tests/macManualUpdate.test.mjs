@@ -15,9 +15,9 @@ const { MAC_MANUAL_LATEST_RELEASE_URL, createMacManualUpdateChecker, parseGitHub
 });
 
 test("parseGitHubReleaseVersion accepts a redirected latest-release tag only", () => {
-	assert.equal(parseGitHubReleaseVersion("https://github.com/ayuayue/PiDeck/releases/tag/v0.7.4"), "0.7.4");
-	assert.equal(parseGitHubReleaseVersion("https://github.com/ayuayue/PiDeck/releases/tag/0.7.4-beta.1"), "0.7.4-beta.1");
-	assert.equal(parseGitHubReleaseVersion("https://github.com/ayuayue/PiDeck/releases/latest"), null);
+	assert.equal(parseGitHubReleaseVersion("https://github.com/pideck-app/PiDeck/releases/tag/v0.7.4"), "0.7.4");
+	assert.equal(parseGitHubReleaseVersion("https://github.com/pideck-app/PiDeck/releases/tag/0.7.4-beta.1"), "0.7.4-beta.1");
+	assert.equal(parseGitHubReleaseVersion("https://github.com/pideck-app/PiDeck/releases/latest"), null);
 	assert.equal(parseGitHubReleaseVersion("https://atomgit.com/ayuayue/PiDeck/releases/latest"), null);
 	assert.equal(parseGitHubReleaseVersion("not a URL"), null);
 });
@@ -32,7 +32,7 @@ test("parseLatestReleaseTagFromJson reads AtomGit / GitHub REST tag_name", () =>
 test("resolveLatestReleaseVersion prefers a GitHub tag URL, then JSON tag_name", () => {
 	assert.equal(
 		resolveLatestReleaseVersion({
-			url: "https://github.com/ayuayue/PiDeck/releases/tag/v0.7.4",
+			url: "https://github.com/pideck-app/PiDeck/releases/tag/v0.7.4",
 			body: JSON.stringify({ tag_name: "v9.9.9" }),
 		}),
 		"0.7.4",
@@ -54,8 +54,8 @@ test("resolveLatestReleaseVersion prefers a GitHub tag URL, then JSON tag_name",
 
 test("shouldReadJsonBody is true for OpenAPI hosts and JSON content types", () => {
 	assert.equal(shouldReadJsonBody("https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases/latest", "text/plain"), true);
-	assert.equal(shouldReadJsonBody("https://api.github.com/repos/ayuayue/PiDeck/releases/latest", ""), true);
-	assert.equal(shouldReadJsonBody("https://github.com/ayuayue/PiDeck/releases/latest", "text/html"), false);
+	assert.equal(shouldReadJsonBody("https://api.github.com/repos/pideck-app/PiDeck/releases/latest", ""), true);
+	assert.equal(shouldReadJsonBody("https://github.com/pideck-app/PiDeck/releases/latest", "text/html"), false);
 	assert.equal(shouldReadJsonBody("https://atomgit.com/ayuayue/PiDeck/releases/latest", "text/html"), false);
 	assert.equal(shouldReadJsonBody("https://example.com/latest", "application/json; charset=utf-8"), true);
 });
@@ -68,7 +68,7 @@ test("manual macOS checker uses the static latest redirect and detects beta -> s
 			return {
 				ok: true,
 				status: 200,
-				url: "https://github.com/ayuayue/PiDeck/releases/tag/v0.7.4",
+				url: "https://github.com/pideck-app/PiDeck/releases/tag/v0.7.4",
 			};
 		},
 	});
@@ -84,7 +84,7 @@ test("manual macOS checker does not flag the same stable version", async () => {
 		fetchLatestRelease: async () => ({
 			ok: true,
 			status: 200,
-			url: "https://github.com/ayuayue/PiDeck/releases/tag/v0.7.4",
+			url: "https://github.com/pideck-app/PiDeck/releases/tag/v0.7.4",
 		}),
 	});
 

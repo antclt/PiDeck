@@ -25,7 +25,7 @@ const { DEFAULT_UPDATER_CACHE_DIR_NAME, FALLBACK_APP_UPDATE_CONFIG_FILENAME, gen
 test("generateFallbackAppUpdateConfigYaml 生成合法的 GitHub provider 配置", () => {
 	const yaml = generateFallbackAppUpdateConfigYaml();
 	assert.match(yaml, /provider:\s*github/);
-	assert.match(yaml, /owner:\s*ayuayue/);
+	assert.match(yaml, /owner:\s*pideck-app/);
 	assert.match(yaml, /repo:\s*PiDeck/);
 	assert.match(yaml, /updaterCacheDirName:\s*pi-desktop-updater/);
 

@@ -50,9 +50,9 @@ test("客户端下载走 latest 应用 Release，不直连 nodejs.org，也不�
 	assert.equal(dshRunnerNodeSidecarArch("arm64"), "arm64");
 	assert.equal(DSH_RUNNER_NODE_RELEASE_TAG, "latest");
 	assert.equal(defaultDshRunnerNodeIndexUrl("atomgit"), "https://atomgit.com/ayuayue/PiDeck/releases/download/latest/dsh-runner-node-releases.json");
-	assert.equal(defaultDshRunnerNodeIndexUrl("github"), "https://github.com/ayuayue/PiDeck/releases/latest/download/dsh-runner-node-releases.json");
+	assert.equal(defaultDshRunnerNodeIndexUrl("github"), "https://github.com/pideck-app/PiDeck/releases/latest/download/dsh-runner-node-releases.json");
 	assert.equal(dshRunnerNodeAssetDownloadUrl("atomgit", "node-v24.13.0-win-x64.zip"), "https://atomgit.com/ayuayue/PiDeck/releases/download/latest/node-v24.13.0-win-x64.zip");
-	assert.equal(dshRunnerNodeReleasePageUrl("github"), "https://github.com/ayuayue/PiDeck/releases/latest");
+	assert.equal(dshRunnerNodeReleasePageUrl("github"), "https://github.com/pideck-app/PiDeck/releases/latest");
 	assert.equal(dshRunnerNodeReleasePageUrl("atomgit"), "https://atomgit.com/ayuayue/PiDeck/releases/latest");
 	assert.equal(resolveDshRunnerNodeIndexUrl({ updateSource: "github" }), defaultDshRunnerNodeIndexUrl("github"));
 	assert.equal(resolveDshRunnerNodeReleaseUrl(sampleIndex().releases[0], "atomgit", "x64", "24.13.0"), dshRunnerNodeAssetDownloadUrl("atomgit", dshRunnerNodeZipName("24.13.0", "x64")));

@@ -231,7 +231,7 @@ Core design principle: **one agent session = one pi RPC process**, keeping sessi
 
 Prebuilt packages for **Windows**, **macOS**, and **Linux** are published on GitHub Releases:
 
-👉 **[GitHub Releases](https://github.com/ayuayue/PiDeck/releases)**
+👉 **[GitHub Releases](https://github.com/pideck-app/PiDeck/releases)**
 
 > PiDeck requires the `pi` CLI to be installed separately and available in your system `PATH`.
 
@@ -252,7 +252,7 @@ pi --mode rpc
 ## 🧰 Quick Start (from Source)
 
 ```bash
-git clone https://github.com/ayuayue/PiDeck.git
+git clone https://github.com/pideck-app/PiDeck.git
 cd PiDeck
 npm install
 npm run make-icon
@@ -287,7 +287,7 @@ A: The app sends an anonymous, low-frequency `app_heartbeat` usage statistic by 
 
 **Q: How do I report issues?**
 
-A: Join the QQ / WeChat group at the bottom of this page (or add the author's WeChat `caoayu97`), or file an issue on [GitHub Issues](https://github.com/ayuayue/PiDeck/issues); you can export logs from Settings when troubleshooting.
+A: Join the QQ / WeChat group at the bottom of this page (or add the author's WeChat `caoayu97`), or file an issue on [GitHub Issues](https://github.com/pideck-app/PiDeck/issues); you can export logs from Settings when troubleshooting.
 
 ---
 

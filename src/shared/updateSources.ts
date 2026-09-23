@@ -13,8 +13,23 @@
 
 import type { UpdateSourceId } from "./types/settings";
 
-/** 更新所指向的 GitHub 仓库坐标（唯一事实来源，与 main/update/releaseRepo.ts 同源）。 */
-export const UPDATE_REPO_OWNER = "ayuayue";
+/**
+ * GitHub 侧仓库坐标。
+ *
+ * 仓库已从个人账号转移到组织 `pideck-app`（显示名 PiDeck）。旧坐标 `ayuayue/PiDeck`
+ * 只能靠 GitHub 重定向工作，一旦重定向失效（旧名被回收/重定向被删）更新检查会直接 404，
+ * 禁止再回填旧 owner。
+ */
+export const GITHUB_REPO_OWNER = "pideck-app";
+/**
+ * AtomGit 侧仓库坐标。
+ *
+ * AtomGit 命名空间与 GitHub 完全独立：仓库转到组织后，镜像仍挂在个人账号下。
+ * 两侧必须分开取常量——把 GitHub 侧 owner 改掉却误用了这一组（或反之），会同时打断
+ * 国内更新源、公告、模型目录与热更新，因为它们的取件 URL 都走 AtomGit。
+ */
+export const ATOMGIT_REPO_OWNER = "ayuayue";
+/** 仓库名：两侧同名，改仓库名时两边同步。 */
 export const UPDATE_REPO = "PiDeck";
 
 /** generic feed 的固定路径段：GitHub 把 `releases/latest/download/<asset>` 302 到当前最新 release。 */
@@ -35,7 +50,7 @@ export const ATOMGIT_API_HOST = "https://api.atomgit.com";
 
 /** AtomGit Release 仓库根路径，例如 `https://atomgit.com/ayuayue/PiDeck`。 */
 export function atomGitReleasesBase(): string {
-	return `${ATOMGIT_HOST}/${UPDATE_REPO_OWNER}/${UPDATE_REPO}`;
+	return `${ATOMGIT_HOST}/${ATOMGIT_REPO_OWNER}/${UPDATE_REPO}`;
 }
 
 /** AtomGit Release generic feed baseUrl（latest.yml 与安装包都下载自此路径）。 */
@@ -50,15 +65,15 @@ export function atomGitFeedUrl(): string {
  * `/releases/tag/vX.Y.Z`，程序化读版本必须走 JSON 的 `tag_name`。
  */
 export function atomGitLatestReleaseApiUrl(): string {
-	return `${ATOMGIT_API_HOST}/api/v5/repos/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases/latest`;
+	return `${ATOMGIT_API_HOST}/api/v5/repos/${ATOMGIT_REPO_OWNER}/${UPDATE_REPO}/releases/latest`;
 }
 
 /** 镜像/非官方更新源清单：保留 AtomGit 作为国内加速源（第一首选）；github 走原生链路。 */
 export const UPDATE_SOURCE_MIRRORS: ReadonlyArray<{ id: UpdateSourceId; host: string }> = [{ id: "atomgit", host: ATOMGIT_HOST }];
 
-/** GitHub Release 仓库根路径，例如 `https://github.com/ayuayue/PiDeck`。 */
+/** GitHub Release 仓库根路径，例如 `https://github.com/pideck-app/PiDeck`。 */
 export function gitHubReleasesBase(): string {
-	return `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}`;
+	return `https://github.com/${GITHUB_REPO_OWNER}/${UPDATE_REPO}`;
 }
 
 /**

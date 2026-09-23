@@ -71,7 +71,7 @@ test("updateSourceFeedUrl: github 源返回 null（走内置 app-update.yml 通�
 test("updateSourceFeedUrl: atomgit 源生成 AtomGit generic feed baseUrl", () => {
 	assert.equal(updateSourceFeedUrl("atomgit"), "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
 	assert.equal(atomGitFeedUrl(), "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
-	assert.equal(gitHubLatestDownloadBase(), "https://github.com/ayuayue/PiDeck/releases/latest/download");
+	assert.equal(gitHubLatestDownloadBase(), "https://github.com/pideck-app/PiDeck/releases/latest/download");
 });
 
 test("updateSourceLatestReleaseUrl: macOS manual 检查走 AtomGit OpenAPI latest", () => {
