@@ -22,11 +22,11 @@ var config_default = defineConfig({
           { text: "\u95EE\u9898\u6392\u67E5", link: "/guide/troubleshooting" },
           { text: "\u4EA7\u54C1\u5BF9\u6BD4", link: "/guide/comparison" },
           { text: "\u66F4\u65B0\u65E5\u5FD7", link: "/changelog" },
-          { text: "\u4E0B\u8F7D", link: "https://github.com/pideck-app/PiDeck/releases" },
+          { text: "\u4E0B\u8F7D", link: "https://github.com/ayuayue/PiDeck/releases" },
           {
             text: "\u6E90\u7801",
             items: [
-              { text: "GitHub \u4ED3\u5E93\uFF08\u6D77\u5916\uFF09", link: "https://github.com/pideck-app/PiDeck" },
+              { text: "GitHub \u4ED3\u5E93\uFF08\u6D77\u5916\uFF09", link: "https://github.com/ayuayue/PiDeck" },
               { text: "AtomGit \u4ED3\u5E93\uFF08\u56FD\u5185\u955C\u50CF\uFF09", link: "https://atomgit.com/ayuayue/PiDeck" }
             ]
           }
@@ -57,7 +57,7 @@ var config_default = defineConfig({
           formatOptions: { dateStyle: "medium", timeStyle: "short" }
         },
         editLink: {
-          pattern: "https://github.com/pideck-app/PiDeck/edit/main/docs-site/:path",
+          pattern: "https://github.com/ayuayue/PiDeck/edit/main/docs-site/:path",
           text: "\u5728 GitHub \u4E0A\u7F16\u8F91\u6B64\u9875"
         },
         footer: {
@@ -81,11 +81,11 @@ var config_default = defineConfig({
           { text: "Troubleshooting", link: "/en/guide/troubleshooting" },
           { text: "Comparison", link: "/en/guide/comparison" },
           { text: "Changelog", link: "/en/changelog" },
-          { text: "Download", link: "https://github.com/pideck-app/PiDeck/releases" },
+          { text: "Download", link: "https://github.com/ayuayue/PiDeck/releases" },
           {
             text: "Source",
             items: [
-              { text: "GitHub (Global)", link: "https://github.com/pideck-app/PiDeck" },
+              { text: "GitHub (Global)", link: "https://github.com/ayuayue/PiDeck" },
               { text: "AtomGit (China mirror)", link: "https://atomgit.com/ayuayue/PiDeck" }
             ]
           }
@@ -116,7 +116,7 @@ var config_default = defineConfig({
           formatOptions: { dateStyle: "medium", timeStyle: "short" }
         },
         editLink: {
-          pattern: "https://github.com/pideck-app/PiDeck/edit/main/docs-site/:path",
+          pattern: "https://github.com/ayuayue/PiDeck/edit/main/docs-site/:path",
           text: "Edit this page on GitHub"
         },
         footer: {
@@ -133,7 +133,7 @@ var config_default = defineConfig({
     // 只保留内置图标（github）；AtomGit 无内置图标，作为「源码」下拉项出现在导航中，
     // 避免 socialLinks 里出现 no-icon 空白图标位。
     socialLinks: [
-      { icon: "github", link: "https://github.com/pideck-app/PiDeck", ariaLabel: "GitHub \u4ED3\u5E93" }
+      { icon: "github", link: "https://github.com/ayuayue/PiDeck", ariaLabel: "GitHub \u4ED3\u5E93" }
     ],
     search: {
       provider: "local",
@@ -192,10 +192,10 @@ var config_default = defineConfig({
         "operatingSystem": "Windows, macOS, Linux",
         "description": "Open-source desktop workbench for managing multiple pi AI coding agents across local project folders.",
         "url": siteOrigin,
-        "downloadUrl": "https://github.com/pideck-app/PiDeck/releases",
-        "sourceCodeRepository": "https://github.com/pideck-app/PiDeck",
+        "downloadUrl": "https://github.com/ayuayue/PiDeck/releases",
+        "sourceCodeRepository": "https://github.com/ayuayue/PiDeck",
         "sameAs": [
-          "https://github.com/pideck-app/PiDeck",
+          "https://github.com/ayuayue/PiDeck",
           "https://atomgit.com/ayuayue/PiDeck"
         ],
         "license": "https://opensource.org/licenses/MIT",

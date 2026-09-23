@@ -15,9 +15,9 @@ const SETTINGS = join("settings.json");
 
 const SOURCES = [
 	{ id: "official-github", feed: undefined }, // 无 env feed：走原生 GitHub provider（app-update.yml 缺失 → 由 PIDECK_E2E 兜底 github 配置）
-	{ id: "ghfast", feed: "https://ghfast.top/https://github.com/pideck-app/PiDeck/releases/latest/download" },
-	{ id: "ghproxy-net", feed: "https://ghproxy.net/https://github.com/pideck-app/PiDeck/releases/latest/download" },
-	{ id: "ghproxy-cxkpro", feed: "https://ghproxy.cxkpro.top/https://github.com/pideck-app/PiDeck/releases/latest/download" },
+	{ id: "ghfast", feed: "https://ghfast.top/https://github.com/ayuayue/PiDeck/releases/latest/download" },
+	{ id: "ghproxy-net", feed: "https://ghproxy.net/https://github.com/ayuayue/PiDeck/releases/latest/download" },
+	{ id: "ghproxy-cxkpro", feed: "https://ghproxy.cxkpro.top/https://github.com/ayuayue/PiDeck/releases/latest/download" },
 ];
 
 if (!existsSync(EXE)) {

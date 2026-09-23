@@ -288,7 +288,7 @@ test("catalog: atomgit 返回非 JSON（SPA HTML）时回落 GitHub raw 并生�
 		assert.equal(result.ok, true, "AtomGit 形态不识别时不应整单失败");
 		assert.equal(result.updated, true);
 		assert.ok(
-			seen.some((u) => u.startsWith("https://raw.githubusercontent.com/pideck-app/PiDeck/main/resources/")),
+			seen.some((u) => u.startsWith("https://raw.githubusercontent.com/ayuayue/PiDeck/main/resources/")),
 			`应回落到 GitHub raw，实际: ${JSON.stringify(seen)}`,
 		);
 		assert.equal(updater.getStatus().overlay?.packageVersion, "9.9.9");

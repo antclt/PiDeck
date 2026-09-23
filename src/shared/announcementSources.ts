@@ -12,7 +12,7 @@
  * 故整体移除，不再作 fallback 候选。
  */
 
-import { ATOMGIT_REPO_OWNER, GITHUB_REPO_OWNER, UPDATE_REPO } from "./updateSources";
+import { UPDATE_REPO, UPDATE_REPO_OWNER } from "./updateSources";
 
 /** 公告源文件名（仓库根目录）。 */
 export const ANNOUNCEMENT_FILE_NAME = "announcements.json";
@@ -21,10 +21,10 @@ export const ANNOUNCEMENT_FILE_NAME = "announcements.json";
 export const ANNOUNCEMENT_BRANCH = "main";
 
 /** AtomGit contents API URL（首选源；v5 返回 base64 包裹，需 unwrapAtomgitContents 解包）。 */
-export const ANNOUNCEMENT_ATOMGIT_URL = `https://api.atomgit.com/api/v5/repos/${ATOMGIT_REPO_OWNER}/${UPDATE_REPO}/contents/${ANNOUNCEMENT_FILE_NAME}?ref=${ANNOUNCEMENT_BRANCH}`;
+export const ANNOUNCEMENT_ATOMGIT_URL = `https://api.atomgit.com/api/v5/repos/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/contents/${ANNOUNCEMENT_FILE_NAME}?ref=${ANNOUNCEMENT_BRANCH}`;
 
 /** raw.githubusercontent 直连 URL（兜底源；源站权威但国内直连基本不可达）。 */
-export const ANNOUNCEMENT_RAW_URL = `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${UPDATE_REPO}/${ANNOUNCEMENT_BRANCH}/${ANNOUNCEMENT_FILE_NAME}`;
+export const ANNOUNCEMENT_RAW_URL = `https://raw.githubusercontent.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/${ANNOUNCEMENT_BRANCH}/${ANNOUNCEMENT_FILE_NAME}`;
 
 /** 源响应格式：atomgit-contents = v5 contents 包裹；plain = 文件原文。 */
 export type AnnouncementSourceKind = "atomgit-contents" | "plain";

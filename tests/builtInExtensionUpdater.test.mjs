@@ -348,7 +348,7 @@ test("source=github 时 raw 直连优先；AtomGit 的 base64 解码必须字节
 		const githubRun = createUpdater(fixture, repoFiles, { source: () => "github" });
 		const githubCheck = await githubRun.updater.checkRemote();
 		assert.equal(githubCheck.ok, true);
-		assert.ok(githubRun.network.calls[0].startsWith("https://raw.githubusercontent.com/pideck-app/PiDeck/"));
+		assert.ok(githubRun.network.calls[0].startsWith("https://raw.githubusercontent.com/ayuayue/PiDeck/"));
 		assert.deepEqual([...githubCheck.changedFiles], ["pi-deck-todo.ts"]);
 
 		const atomGitRun = createUpdater(fixture, repoFiles);

@@ -206,7 +206,7 @@ test("languages are cached independently and corrupt cache entries are ignored",
 				{
 					[ATOMGIT_API_URL]: atomgitContentsResponse(REAL_CHANGELOG),
 					[enUrl]: jsonResponse('{"message":"Not Found"}'), // 英文仓库里不存在 → 形态异常回退
-					"https://raw.githubusercontent.com/pideck-app/PiDeck/main/CHANGELOG.md": jsonResponse(REAL_CHANGELOG),
+					"https://raw.githubusercontent.com/ayuayue/PiDeck/main/CHANGELOG.md": jsonResponse(REAL_CHANGELOG),
 				},
 				calls,
 			),

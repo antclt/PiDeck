@@ -23,7 +23,7 @@
 
 import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { ATOMGIT_HOST, ATOMGIT_REPO_OWNER, UPDATE_REPO } from "../../shared/updateSources";
+import { ATOMGIT_HOST, UPDATE_REPO, UPDATE_REPO_OWNER } from "../../shared/updateSources";
 import { atomGitContentsApiUrl, decodeAtomGitContentsResponse, gitHubRawFileUrl } from "./atomGitContents";
 import type { UpdateSourceId } from "../../shared/types/settings";
 
@@ -235,7 +235,7 @@ export class ChangelogService {
 	/** 供 UI 降级用：CHANGELOG 在 AtomGit 上的网页地址（走系统浏览器）。 */
 	changelogPageUrl(language: ChangelogLanguage = "zh"): string {
 		const file = language === "zh" ? CHANGELOG_FILE_ZH : CHANGELOG_FILE_EN;
-		return `${ATOMGIT_HOST}/${ATOMGIT_REPO_OWNER}/${UPDATE_REPO}/blob/${this.branch}/${file}`;
+		return `${ATOMGIT_HOST}/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/blob/${this.branch}/${file}`;
 	}
 
 	// ── 本地缓存：正文文件 + meta.json（按语言存抓取时间/来源）。全部静默容错——

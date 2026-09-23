@@ -21,11 +21,11 @@ PiDeck 原生支持 **pi** Agent。通过会话导入功能，你也可以将本
 
 ## 支持哪些平台？
 
-PiDeck 提供 **Windows**、**macOS**、**Linux** 的预构建安装包，通过 [GitHub Releases](https://github.com/pideck-app/PiDeck/releases) 发布。源码开发环境要求 Node.js 20+ 和 npm。
+PiDeck 提供 **Windows**、**macOS**、**Linux** 的预构建安装包，通过 [GitHub Releases](https://github.com/ayuayue/PiDeck/releases) 发布。源码开发环境要求 Node.js 20+ 和 npm。
 
 ## 如何下载安装 PiDeck？
 
-前往 [GitHub Releases](https://github.com/pideck-app/PiDeck/releases) 下载对应平台的安装包。安装后首次启动时，PiDeck 会尝试自动检测 `pi` 路径；如果检测失败，可以在设置里手动填写 pi 可执行文件路径。
+前往 [GitHub Releases](https://github.com/ayuayue/PiDeck/releases) 下载对应平台的安装包。安装后首次启动时，PiDeck 会尝试自动检测 `pi` 路径；如果检测失败，可以在设置里手动填写 pi 可执行文件路径。
 
 ## 从源码运行需要什么环境？
 
@@ -59,7 +59,7 @@ pi --mode rpc
 ## 如何从源码开发 PiDeck？
 
 ```bash
-git clone https://github.com/pideck-app/PiDeck.git
+git clone https://github.com/ayuayue/PiDeck.git
 cd pi-desktop
 npm install
 npm run make-icon
@@ -86,5 +86,5 @@ PiDeck 默认发送匿名、低频的 `app_heartbeat` 使用统计，用于了�
 ## 遇到问题怎么办？
 
 - 先看 [问题排查指南](/guide/troubleshooting)，按症状分类的处理路径
-- 查看 [GitHub Issues](https://github.com/pideck-app/PiDeck/issues)
+- 查看 [GitHub Issues](https://github.com/ayuayue/PiDeck/issues)
 - 加入 **QQ 群：1026218644**，或加 **作者微信：caoayu97** 拉你进微信群

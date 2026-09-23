@@ -27,7 +27,7 @@ const RECOMMENDED_PACKAGES: RecommendedPackage[] = [
 		downloads: "",
 		updated: "",
 		npmUrl: "",
-		repoUrl: "https://github.com/pideck-app/PiDeck",
+		repoUrl: "https://github.com/ayuayue/PiDeck",
 	},
 	{
 		name: "pi-deck-plan-mode",
@@ -37,7 +37,7 @@ const RECOMMENDED_PACKAGES: RecommendedPackage[] = [
 		downloads: "",
 		updated: "",
 		npmUrl: "",
-		repoUrl: "https://github.com/pideck-app/PiDeck",
+		repoUrl: "https://github.com/ayuayue/PiDeck",
 	},
 	{
 		name: "pi-deck-goal-mode",
@@ -47,7 +47,7 @@ const RECOMMENDED_PACKAGES: RecommendedPackage[] = [
 		downloads: "",
 		updated: "",
 		npmUrl: "",
-		repoUrl: "https://github.com/pideck-app/PiDeck",
+		repoUrl: "https://github.com/ayuayue/PiDeck",
 	},
 	{
 		name: "pi-deck-ask-question",
@@ -57,7 +57,7 @@ const RECOMMENDED_PACKAGES: RecommendedPackage[] = [
 		downloads: "",
 		updated: "",
 		npmUrl: "",
-		repoUrl: "https://github.com/pideck-app/PiDeck",
+		repoUrl: "https://github.com/ayuayue/PiDeck",
 	},
 	{
 		name: "pi-deck-nul-redirect-fix",
@@ -67,7 +67,7 @@ const RECOMMENDED_PACKAGES: RecommendedPackage[] = [
 		downloads: "",
 		updated: "",
 		npmUrl: "",
-		repoUrl: "https://github.com/pideck-app/PiDeck",
+		repoUrl: "https://github.com/ayuayue/PiDeck",
 	},
 	{
 		name: "context-mode",

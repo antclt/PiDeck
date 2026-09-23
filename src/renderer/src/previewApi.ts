@@ -952,7 +952,7 @@ export function createPreviewApi(): PiDesktopApi {
 		app: {
 			info: async () => ({
 				version: "preview",
-				releasesUrl: "https://github.com/pideck-app/PiDeck/releases",
+				releasesUrl: "https://github.com/ayuayue/PiDeck/releases",
 				platform: "win32" as NodeJS.Platform,
 				homeDir: "C:/Users/preview",
 				userDataDir: "C:/Users/preview/AppData/Roaming/pi-desktop",

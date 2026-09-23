@@ -15,7 +15,7 @@
  *   由调用方的逐源 try/catch 吞掉并换下一个源）。
  */
 
-import { ATOMGIT_API_HOST, ATOMGIT_REPO_OWNER, GITHUB_REPO_OWNER, UPDATE_REPO } from "../../shared/updateSources";
+import { ATOMGIT_API_HOST, UPDATE_REPO, UPDATE_REPO_OWNER } from "../../shared/updateSources";
 import type { UpdateSourceId } from "../../shared/types/settings";
 
 /** 源候选条目：`id` 供日志/兜底判断，`url` 直接交给 fetch。 */
@@ -26,7 +26,7 @@ export type RepoFileSourceEntry = { id: "atomgit" | "github"; url: string };
  * 与 GitHub raw 的路径写法保持一致，避免文件名带 `#`/空格时拼出坏 URL。
  */
 export function atomGitContentsApiUrl(filePath: string, ref: string): string {
-	const repoPath = `${ATOMGIT_REPO_OWNER}/${UPDATE_REPO}`;
+	const repoPath = `${UPDATE_REPO_OWNER}/${UPDATE_REPO}`;
 	const encoded = filePath
 		.split("/")
 		.map((part) => encodeURIComponent(part))
@@ -38,7 +38,7 @@ export function atomGitContentsApiUrl(filePath: string, ref: string): string {
  * GitHub raw 直链（官方源优先时的首选，也是 AtomGit 失败后的兜底）。
  */
 export function gitHubRawFileUrl(filePath: string, ref: string): string {
-	return `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${UPDATE_REPO}/${ref}/${filePath}`;
+	return `https://raw.githubusercontent.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/${ref}/${filePath}`;
 }
 
 /**
