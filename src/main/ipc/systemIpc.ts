@@ -1938,7 +1938,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { success: false, error: "Invalid provider name" };
 		}
 		const template = typeof input.template === "string" ? input.template.trim() : undefined;
-		if (template && template !== "general" && template !== "newapi" && template !== "cookie") {
+		// 白名单：声明式模板 id + 内置候选 templateId。火山方舟是声明式但不在候选表里
+		// （它没有内置默认 provider），必须显式放行，否则弹窗「测试」会被判成未知模板。
+		if (template && template !== "general" && template !== "newapi" && template !== "cookie" && template !== "volcengine") {
 			// 内置模板 id 也接受（识别命中后的「测试」按钮走这条路径）。
 			const knownBuiltin = USAGE_PROBE_CANDIDATES.some((c) => c.templateId === template);
 			if (!knownBuiltin) {
@@ -1958,6 +1960,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			...(typeof input.cookiePath === "string" ? { cookiePath: input.cookiePath } : {}),
 			...(typeof input.valuePath === "string" ? { valuePath: input.valuePath } : {}),
 			...(typeof input.currencyPath === "string" ? { currencyPath: input.currencyPath } : {}),
+			// 火山方舟 AK/SK：必填透传（缺任一项模板构建即报错，测试按钮才能给出人话提示）。
+			...(typeof input.accessKeyId === "string" ? { accessKeyId: input.accessKeyId } : {}),
+			...(typeof input.secretAccessKey === "string" ? { secretAccessKey: input.secretAccessKey } : {}),
 			...(typeof input.timeoutSecs === "number" ? { timeoutSecs: input.timeoutSecs } : {}),
 		});
 		void appLogger.info("config", "Usage probe tested", {

@@ -62,3 +62,44 @@ test("isDeclarativeTemplateId 覆盖 cookie", () => {
 	assert.equal(tpl.isDeclarativeTemplateId("cookie"), true);
 	assert.equal(tpl.isDeclarativeTemplateId("balance"), false);
 });
+
+test("volcengine 模板：AK/SK 双 Action 候选指向控制面网关，签名头不带 Bearer", () => {
+	const built = tpl.buildDeclarativeUsageProbeTemplate("volcengine", { accessKeyId: "AKLTfake", secretAccessKey: "c2VjcmV0" }, { baseUrl: "https://ark.cn-beijing.volcengineapi.com/api/v3", apiKey: "ark-key" });
+	assert.ok(!("error" in built), "应构建成功");
+	// baseUrl 用控制面网关：推理域名上没有用量接口（不能拼在 ark.cn-beijing.volces.com 下）。
+	assert.equal(built.baseUrl, "https://open.volcengineapi.com");
+	// apiKey 传 AK：只为通过上层「无 key 快速失败」门禁，签名头里另有 Authorization。
+	assert.equal(built.apiKey, "AKLTfake");
+	assert.equal(built.candidates.length, 2);
+	const actions = built.candidates.map((c) => new URL(String(c.absoluteUrl)).searchParams.get("Action"));
+	// 跨 realm 深比较会因 Array 原型不同失败（helper 用 vm 沙箱加载 TS），逐项断言更稳。
+	assert.equal(actions.length, 2);
+	assert.equal(actions[0], "GetAFPUsage");
+	assert.equal(actions[1], "GetCodingPlanUsage");
+	for (const candidate of built.candidates) {
+		assert.equal(candidate.method, "POST");
+		assert.equal(candidate.noBearer, true);
+		assert.equal(candidate.parse.kind, "custom");
+		assert.equal(candidate.parse.resolver, "volcengine-plan");
+		assert.match(String(candidate.headers.Authorization), /^HMAC-SHA256 Credential=AKLTfake\//);
+		assert.doesNotMatch(String(candidate.headers.Authorization), /^Bearer /);
+	}
+});
+
+test("volcengine 模板：Region 从数据面 base_url 推断并进签名 scope", () => {
+	const built = tpl.buildDeclarativeUsageProbeTemplate("volcengine", { accessKeyId: "AK", secretAccessKey: "SK" }, { baseUrl: "https://ark.ap-southeast.volces.com/api/v3", apiKey: "k" });
+	assert.ok(!("error" in built));
+	for (const candidate of built.candidates) {
+		assert.equal(new URL(String(candidate.absoluteUrl)).searchParams.get("Region"), "ap-southeast");
+		assert.match(String(candidate.headers.Authorization), /ap-southeast\/ark\/request,/);
+	}
+});
+
+test("volcengine 模板：缺 AK/SK 分别给出对应人话错误", () => {
+	const noAk = tpl.buildDeclarativeUsageProbeTemplate("volcengine", { secretAccessKey: "SK" }, { baseUrl: "https://ark.cn-beijing.volces.com/v3", apiKey: "k" });
+	assert.ok("error" in noAk);
+	assert.match(String(noAk.error), /API Key ID/);
+	const noSk = tpl.buildDeclarativeUsageProbeTemplate("volcengine", { accessKeyId: "AK" }, { baseUrl: "https://ark.cn-beijing.volces.com/v3", apiKey: "k" });
+	assert.ok("error" in noSk);
+	assert.match(String(noSk.error), /Secret Access Key/);
+});
