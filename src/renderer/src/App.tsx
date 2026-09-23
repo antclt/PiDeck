@@ -3286,25 +3286,30 @@ export function App() {
 							.then((result) => showToast(t("app.exportedPath", { path: result.path }), 3500))
 							.catch((error) => showToast(error instanceof Error ? error.message : String(error), 5000));
 					},
-					onRenameSession: () => {
-						if (!currentSessionRecord) return;
-						// live 会话用 agent 重命名（与侧栏 AgentContextMenu 同源，改名同步运行时标题）；
-						// 历史/未启动会话用 record 拼侧栏同构的 SessionSummary 走统一重命名弹框。
-						if (currentSessionIsLive && activeAgent) {
-							rename.openAgentRename(activeAgent);
-							return;
-						}
-						rename.openSessionRename(currentSessionRecord.projectId, {
-							id: currentSessionRecord.id,
-							filePath: currentSessionRecord.filePath ?? "",
-							name: currentSessionRecord.title,
-							preview: currentSessionRecord.preview,
-							updatedAt: currentSessionRecord.updatedAt,
-							messageCount: currentSessionRecord.messageCount,
-							backend: currentSessionRecord.backend,
-							forked: currentSessionRecord.forked,
-						});
-					},
+					// 草稿期不提供重命名入口（与 canCopySession/canExportHtml 同款草稿闸门）：此时
+					// 自动命名还没跑，先钉一个名字会让条目进 manual 终态，扩展规划的会话名再也写不进来。
+					onRenameSession:
+						currentSessionRecord.status === "draft"
+							? undefined
+							: () => {
+									if (!currentSessionRecord) return;
+									// live 会话用 agent 重命名（与侧栏 AgentContextMenu 同源，改名同步运行时标题）；
+									// 历史/未启动会话用 record 拼侧栏同构的 SessionSummary 走统一重命名弹框。
+									if (currentSessionIsLive && activeAgent) {
+										rename.openAgentRename(activeAgent);
+										return;
+									}
+									rename.openSessionRename(currentSessionRecord.projectId, {
+										id: currentSessionRecord.id,
+										filePath: currentSessionRecord.filePath ?? "",
+										name: currentSessionRecord.title,
+										preview: currentSessionRecord.preview,
+										updatedAt: currentSessionRecord.updatedAt,
+										messageCount: currentSessionRecord.messageCount,
+										backend: currentSessionRecord.backend,
+										forked: currentSessionRecord.forked,
+									});
+								},
 				}
 			: undefined;
 
