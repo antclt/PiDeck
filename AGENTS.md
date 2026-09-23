@@ -108,6 +108,15 @@ src/
 - `pideck-img://` 是自定义协议（`main/imagegen/ImageGenImageProtocol.ts`）：`registerSchemesAsPrivileged` 在 ready 前声明、`protocol.handle` 在 ready 后注册，`img-src` 已在 `src/renderer/index.html` 的 CSP 里放行。内容寻址 ⇒ ref 与内容一一对应，可长缓存。**别把 ref 回读成 base64 塞回消息对象**，那等于把 200 MB 字符串搬回渲染进程堆。
 - 孤儿 blob 回收（`pruneOrphanBlobs`）带 1 小时宽限期（`put` 落盘与引用写进 JSONL 之间有窗口），且**扫描失败整体放弃**（fail-closed：宁可留垃圾也不删掉读不到会话所引用的图）。
 
+### 会话 Markdown 渲染管线（MarkdownStream / streamdown 唯一引擎）
+
+- 唯一引擎是 `src/renderer/src/components/session/MarkdownStream.tsx`（streamdown 2.x + gfm/codeMeta/remarkLinkifyPaths）。公告详情、diff 预览、便签等静态 markdown 场景复用同一套管线（公告走 light 模式），**禁止再引一套 marked/react-markdown**，也禁止 `dangerouslySetInnerHTML` 绕过 sanitize。
+- **流式与 settle 是两条渲染路径**：流式期间不跑 remark 插件（`NO_STREAM_REMARK_PLUGINS`），只做 marked 核心解析；`isStreaming` 转 false 后先保持轻量渲染，`requestIdleCallback` 空闲才切全量（高亮/mermaid/表格）。所以在流式输出里看不到的问题，很可能在 settle 后才暴露——**复现问题要看最终态，别只盯流式过程**。
+- **mdast 插件用「临时属性 + 父节点整体替换 children」协议时，必须补回 `last → text.length` 的尾段**。`MarkdownLinkCore.ts` 的 `remarkLinkifyPaths` 把裸路径文本节点拆成 `[text, link, …]` 写进 `node.__segs`，父节点随后整体替换原文本节点；漏掉尾段，路径之后的全部正文（含 mdast 里同一 text 节点携带的换行后续行）会整段消失——用户看到的现象是「/ 后面的文本不显示、后一行整行不见」。
+- **事故教训（2026-09-23，用户报「斜杠后文本不显示」）**：尾段回填在 `fb6b5667`（feat(markdown): 文件链接存在性校验，失效路径降级纯文本）把 `while` 改成 `for-of` 时被丢掉；表格 cell / API 路径场景下一个 text 节点几乎必以路径结尾，而日常只在段中命中路径，样例永远测不出来。用真实会话 jsonl 实测：91 条回复 47 条丢文本。判据是解析产物可见文本与原文一致，而不是「链接能点」。
+- **回归测试必须跑真实层级**：表格行（cell 内 text）、跨换行正文（`\n` 之后仍是同一个 text 节点）、inline code `__fileLink` 分支、路径正好在末尾（不留空 text 节点）。写法见 `tests/markdownPathTailTruncation.test.mjs`（unified + remark-parse 二次解析对比可见文本，不依赖 cwd/真实项目）。
+- **考古别只看最近几笔提交**：渲染丢文本这类回归可能潜伏数周，用 `git log --oneline -- <文件>` / `git log -S <片段>` 回到底，确认是「谁引入、为什么当时测不出」，再把这两件事写进注释与测试。
+
 ## 架构规则（硬性）
 
 1. **session-first**：会话是一等公民。新功能优先挂在 session/runtime 链路上，不要退回“围绕 agent tab 堆全局 state”。
