@@ -2845,7 +2845,8 @@ export function App() {
 		// 先关 Tab 再清状态，并带走 sibling-dir / parentSessionPath 子会话，避免空态 Composer 残留。
 		dismissSessionTree(session, projectId);
 		showToast(t("app.sessionDeleted"), 2200);
-		await refreshProjectSessions(projectId);
+		// 已按删除结果摘除子树；对账不能重新插入项目级 loading 行，挤动其它会话。
+		await refreshProjectSessions(projectId, true);
 	}
 
 	/** 归档会话：从列表移除但不销毁文件；toast 按后端告知恢复入口（pi 走会话管理，DSH 走配置页归档区） */
