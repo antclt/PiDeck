@@ -87,9 +87,9 @@
 Special thanks to **微时佬友** for providing the model service used in our
 software development 🎉
 
-Thanks to **juzijun233, bfzha, xiaYuTian11, Q-xuan, zx3022448, r0y1z2** and other contributors for their code 🙏
+Thanks to **juzijun233, bfzha, xiaYuTian11, cmyk-xing, Q-xuan, zx3022448, r0y1z2** and other contributors for their code 🙏
 
-What each contributed this cycle: juzijun233 (the stability / security hardening series — no more main-process freezes from PATH probing, session and event boundaries, per-session subscription isolation), xiaYuTian11 (timeline scroll fixes #224, session tab width and font size #226, skill rename routed by type #227), bfzha (run-control semantics split, web service loopback binding with token auth, shell text and status glyph fixes — plus this cycle's ask card rework #230, the pi 0.86 system-entry misalignment fix and the retry card cleanup), Q-xuan (clickable inline-code file references #228), zx3022448 (external resource import #221), r0y1z2 (the compact Windows Explorer quick-task window, PR #243).
+What each contributed this cycle: juzijun233 (the stability / security hardening series — no more main-process freezes from PATH probing, session and event boundaries, per-session subscription isolation), xiaYuTian11 (timeline scroll fixes #224, session tab width and font size #226, skill rename routed by type #227), cmyk-xing (appearance-settings module visibility toggles #254, clearing the guide page's virtual session cache on first send #256, restoring window position and maximized state on startup #259), bfzha (run-control semantics split, web service loopback binding with token auth, shell text and status glyph fixes — plus this cycle's ask card rework #230, the pi 0.86 system-entry misalignment fix and the retry card cleanup), Q-xuan (clickable inline-code file references #228), zx3022448 (external resource import #221), r0y1z2 (the compact Windows Explorer quick-task window, PR #243).
 
 Thanks to **miller, 伊森龙** for their generous donations and support! 🎉
 
