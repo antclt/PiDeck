@@ -927,3 +927,33 @@ test("火山方舟：Result 包裹缺失时退回根对象（兼容网关直出�
 	assert.equal(res.matched, true);
 	assert.equal(res.periods.rolling.percent, 50);
 });
+
+test("火山方舟 Agent Plan：只返回日档时不命中（AFPDaily 隐藏，不能当唯一窗口）", () => {
+	// 日档分母小、容易刷出 99% 惊吓值，展示层已隐藏；若解析层把它当窗口，就会出现「有进度条但控制台看不到」。
+	const body = { Result: { AFPDaily: { Quota: 1_000_000, Used: 999_999 } } };
+	const res = probe.parseUsageResponseBody(body, "{}", { kind: "custom", resolver: "volcengine-plan" });
+	assert.equal(res.matched, false);
+	assert.equal(res.raw, "{}");
+});
+
+test("火山方舟 Agent Plan：桶字段走别名兜底，缺档不出桶", () => {
+	// 只用 ResetTimestamp 别名 + 只给 5h 档：验证别名解析与「缺档不补 0」。
+	const body = { Result: { AFPFiveHour: { Quota: 200, Used: 50, ResetTimestamp: 1782057600 } } };
+	const res = probe.parseUsageResponseBody(body, "{}", { kind: "custom", resolver: "volcengine-plan" });
+	assert.equal(res.matched, true);
+	assert.equal(res.periods.rolling.percent, 25);
+	assert.equal(res.periods.rolling.resetsAt, new Date(1782057600 * 1000).toISOString());
+	assert.equal(res.periods.weekly, undefined);
+	assert.equal(res.periods.monthly, undefined);
+});
+
+test("火山方舟 Coding Plan：数组字段别名 Usages/Details 与窗口名别名均可解析", () => {
+	// Usages 是 QuotaUsage 的兼容别名；窗口名用 "5h"/"week" 这类别名时必须仍能落到正确档位。
+	const res = probe.parseUsageResponseBody({ Result: { Usages: [{ Type: "5h", UsedPercent: 22, ResetTimestamp: 1782057600 }, { Label: "week", UsedPercent: 61 }] } }, "{}", { kind: "custom", resolver: "volcengine-plan" });
+	assert.equal(res.matched, true);
+	assert.equal(res.kind, "periods");
+	assert.equal(res.periods.rolling.percent, 22);
+	assert.equal(res.periods.rolling.resetsAt, new Date(1782057600 * 1000).toISOString());
+	assert.equal(res.periods.weekly.percent, 61);
+	assert.equal(res.periods.monthly, undefined);
+});

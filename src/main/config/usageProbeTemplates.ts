@@ -136,15 +136,26 @@ export function buildDeclarativeUsageProbeTemplate(
 				error: !accessKeyId ? "火山方舟模板需要 API Key ID（AK，控制台「访问控制 → 密钥管理」）" : "火山方舟模板需要 Secret Access Key（SK）",
 			};
 		}
-		// Region 从数据面 base_url 推断（如 ark.cn-beijing.volces.com → cn-beijing）：
-		// 控制面 Host 是固定网关 open.volcengineapi.com，Region 只参与签名 scope。
+		// Region 从数据面 base_url 推断（如 ark.cn-beijing.volces.com → cn-beijing）：它既是
+		// 签名 scope 的地域段，也决定 ark 专属控制面 host（ark.<region>.volcengineapi.com）的地域段。
 		const region = resolveVolcengineRegion(config.baseUrl?.trim() || endpoint.baseUrl);
 		const credentials = { accessKeyId, secretAccessKey };
-		// 双 plan 自动探测：Agent Plan（GetAFPUsage）与 Coding Plan（GetCodingPlanUsage）是
-		// 两个独立 Action，同一账号可以只订阅其一。顺序尝试 candidates，未订阅的那个返回
-		// 200 但解析不出窗口（Quota<=0 / 空数组），自动落到下一条；鉴权失败（AK/SK 错）则
-		// 两条同样失败，最终错误里带 HTTP 状态与响应摘要，用户能看出是密钥问题。
-		const candidates = [buildVolcengineUsageCandidate("GetAFPUsage", credentials, { region }), buildVolcengineUsageCandidate("GetCodingPlanUsage", credentials, { region })];
+		// 双 plan × 双入口共 4 个候选，探测在上层按顺序尝试，命中即停：
+		// 1. 双 plan：Agent Plan（GetAFPUsage）与 Coding Plan（GetCodingPlanUsage）是两个独立
+		//    Action，同一账号可以只订阅其一。未订阅的那个返回 200 但解析不出窗口
+		//    （Quota<=0 / QuotaUsage 空数组），自动落到下一条，不需要调用方判断套餐类型。
+		// 2. 双入口：ark.<region>.volcengineapi.com（官方方舟文档为这些 Action 指定的控制面
+		//    host）优先，open.volcengineapi.com（OpenAPI 统一网关）兜底。我们无法用真实
+		//    AK/SK 联调，两种入口都有官方资料/第三方实现背书，某个入口对特定账号不可用时
+		//    由探测自动切换；AK/SK 本身错误则四条同样失败，最终错误里会带每次尝试的
+		//    HTTP 状态与响应摘要，用户能看出是密钥问题而不是套餐问题。
+		const volcengineEntries = [
+			{ action: "GetAFPUsage", host: undefined },
+			{ action: "GetAFPUsage", host: VOLCENGINE_API_HOST },
+			{ action: "GetCodingPlanUsage", host: undefined },
+			{ action: "GetCodingPlanUsage", host: VOLCENGINE_API_HOST },
+		];
+		const candidates = volcengineEntries.map(({ action, host }) => buildVolcengineUsageCandidate(action, credentials, { region, host }));
 		return {
 			candidates,
 			candidate: candidates[0],

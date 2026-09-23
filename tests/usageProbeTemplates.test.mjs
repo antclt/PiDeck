@@ -63,19 +63,28 @@ test("isDeclarativeTemplateId 覆盖 cookie", () => {
 	assert.equal(tpl.isDeclarativeTemplateId("balance"), false);
 });
 
-test("volcengine 模板：AK/SK 双 Action 候选指向控制面网关，签名头不带 Bearer", () => {
-	const built = tpl.buildDeclarativeUsageProbeTemplate("volcengine", { accessKeyId: "AKLTfake", secretAccessKey: "c2VjcmV0" }, { baseUrl: "https://ark.cn-beijing.volcengineapi.com/api/v3", apiKey: "ark-key" });
+test("volcengine 模板：AK/SK 双 Action × 双入口候选，签名头不带 Bearer", () => {
+	const built = tpl.buildDeclarativeUsageProbeTemplate("volcengine", { accessKeyId: "AKLTfake", secretAccessKey: "c2VjcmV0" }, { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "ark-key" });
 	assert.ok(!("error" in built), "应构建成功");
-	// baseUrl 用控制面网关：推理域名上没有用量接口（不能拼在 ark.cn-beijing.volces.com 下）。
+	// baseUrl 仅作尝试明细的展示兜底：真实请求走 absoluteUrl（控制面入口与推理域不同域）。
 	assert.equal(built.baseUrl, "https://open.volcengineapi.com");
 	// apiKey 传 AK：只为通过上层「无 key 快速失败」门禁，签名头里另有 Authorization。
 	assert.equal(built.apiKey, "AKLTfake");
-	assert.equal(built.candidates.length, 2);
-	const actions = built.candidates.map((c) => new URL(String(c.absoluteUrl)).searchParams.get("Action"));
+	// 双 plan（GetAFPUsage / GetCodingPlanUsage）× 双入口（ark 地域专属 / 统一网关）= 4 个候选。
+	assert.equal(built.candidates.length, 4);
+	const urls = built.candidates.map((c) => new URL(String(c.absoluteUrl)));
+	const actions = urls.map((u) => u.searchParams.get("Action"));
 	// 跨 realm 深比较会因 Array 原型不同失败（helper 用 vm 沙箱加载 TS），逐项断言更稳。
-	assert.equal(actions.length, 2);
+	assert.equal(actions.length, 4);
 	assert.equal(actions[0], "GetAFPUsage");
-	assert.equal(actions[1], "GetCodingPlanUsage");
+	assert.equal(actions[1], "GetAFPUsage");
+	assert.equal(actions[2], "GetCodingPlanUsage");
+	assert.equal(actions[3], "GetCodingPlanUsage");
+	// 每个 plan 内部：ark.<region> 地域专属入口优先（官方方舟文档指定），统一网关兜底。
+	assert.equal(urls[0].hostname, "ark.cn-beijing.volcengineapi.com");
+	assert.equal(urls[1].hostname, "open.volcengineapi.com");
+	assert.equal(urls[2].hostname, "ark.cn-beijing.volcengineapi.com");
+	assert.equal(urls[3].hostname, "open.volcengineapi.com");
 	for (const candidate of built.candidates) {
 		assert.equal(candidate.method, "POST");
 		assert.equal(candidate.noBearer, true);
@@ -84,6 +93,8 @@ test("volcengine 模板：AK/SK 双 Action 候选指向控制面网关，签名�
 		assert.match(String(candidate.headers.Authorization), /^HMAC-SHA256 Credential=AKLTfake\//);
 		assert.doesNotMatch(String(candidate.headers.Authorization), /^Bearer /);
 	}
+	// 签名里的 host 必须与各自 URL 的 host 一致，否则服务端按真实 host 校验会失败。
+	assert.notEqual(built.candidates[0].headers.Authorization, built.candidates[1].headers.Authorization);
 });
 
 test("volcengine 模板：Region 从数据面 base_url 推断并进签名 scope", () => {

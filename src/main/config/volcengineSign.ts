@@ -23,8 +23,9 @@
  *   为 forbidden header，electron.net.fetch 会静默丢弃；服务端按真实请求 host 校验，一致即可。
  * - X-Date 精度到秒（YYYYMMDDTHHMMSSZ），签名有效期约 ±15 分钟；签名由调用方在每次查询时
  *   现算，不缓存，避免长驻进程用过期的签名。
- * - 控制面 Host 是固定网关 open.volcengineapi.com，与数据面推理域名（ark.cn-beijing.volces.com）
- *   无关：Region 只影响 credential scope，不决定 Host。
+ * - 控制面 Host 有两种可用入口（ark.<region>.volcengineapi.com / open.volcengineapi.com，
+ *   见 VOLCENGINE_API_HOST 上方注释），都与数据面推理域名（ark.<region>.volces.com）无关：
+ *   Region 一方面进签名 scope，另一方面决定 ark 专属 host 的地域段。
  */
 import { createHash, createHmac } from "node:crypto";
 import type { UsageProbeCandidate, UsageProbeParse } from "./providerUsageProbe";
@@ -34,8 +35,24 @@ export const VOLCENGINE_API_VERSION = "2024-01-01";
 /** ark 服务的地域与服务名（签名 scope 的第二/三段）。 */
 export const VOLCENGINE_SERVICE = "ark";
 export const VOLCENGINE_REGION = "cn-beijing";
-/** 控制面 OpenAPI 统一网关：数据面 ark.cn-beijing.volces.com 只做推理，没有用量接口。 */
+/**
+ * ark 控制面 OpenAPI 的两个可用入口（都只认 AK/SK 签名，均见于官方资料）：
+ *
+ * 1. `ark.<region>.volcengineapi.com`：方舟文档（82379/2479847 等）与「数据面/管控面
+ *    Base URL 及鉴权」文档为 GetAFPUsage 等控制面 Action 指定的入口，按账号地域拼 host；
+ * 2. `open.volcengineapi.com`：OpenAPI 统一网关，Region 走 query（cc-switch 的实现即用
+ *    这个入口，同样实测可通）。
+ *
+ * 为什么要两条：我们手里没有真实 AK/SK 可以联调，而两种入口都有第三方实现背书。
+ * 按「文档优先」把 ark 专属 host 放前面，统一网关作为兜底候选——某个入口对特定账号
+ * 不可用时探测会自动落到下一条（见 usageProbeTemplates 的四候选构造）。
+ */
 export const VOLCENGINE_API_HOST = "open.volcengineapi.com";
+
+/** ark 服务的地域专属控制面 host（官方方舟文档为 GetAFPUsage 等 Action 指定的入口）。 */
+export function volcengineArkHost(region: string): string {
+	return `ark.${region}.volcengineapi.com`;
+}
 
 /** 签名头必须与实际发送的 Content-Type 完全一致（参与 CanonicalHeaders）。 */
 const SIGNED_CONTENT_TYPE = "application/json; charset=utf-8";
@@ -54,7 +71,7 @@ export type VolcengineSignRequest = {
 	action: string;
 	/** 接口 Version，缺省 2024-01-01。 */
 	version?: string;
-	/** 目标 host，默认 open.volcengineapi.com（必须与请求 URL 的 host 一致，否则签名不匹配）。 */
+	/** 目标 host，默认 ark.<region>.volcengineapi.com（必须与请求 URL 的 host 一致，否则签名不匹配）。 */
 	host?: string;
 	/** 请求体（JSON 字符串）；用量查询为无参调用，缺省 "{}"。 */
 	body?: string;
@@ -109,7 +126,7 @@ export function buildVolcengineSignedHeaders(request: VolcengineSignRequest): Re
 	const version = request.version ?? VOLCENGINE_API_VERSION;
 	const region = request.region ?? VOLCENGINE_REGION;
 	const service = request.service ?? VOLCENGINE_SERVICE;
-	const host = request.host ?? VOLCENGINE_API_HOST;
+	const host = request.host ?? volcengineArkHost(region);
 	const payload = request.body ?? EMPTY_JSON_BODY;
 	const xDate = formatXDate(request.now ?? new Date());
 	const shortDate = xDate.slice(0, 8);
@@ -134,7 +151,7 @@ export function buildVolcengineSignedHeaders(request: VolcengineSignRequest): Re
 
 /**
  * 从数据面 base_url 推断控制面 OpenAPI 需要的 Region（如 `ark.cn-beijing.volces.com` → `cn-beijing`）。
- * 控制面 Host 是固定网关，不随 base_url 变化，Region 只参与签名 scope；识别不了回落 cn-beijing。
+ * Region 既是签名 scope 的地域段，也是 ark 专属控制面 host 的地域段；识别不了回落 cn-beijing。
  */
 export function resolveVolcengineRegion(baseUrl: string): string {
 	// 防御：调用方理论上可能拿到 undefined（配置缺 baseUrl），按兜底默认地域处理。
@@ -152,22 +169,29 @@ export function resolveVolcengineRegion(baseUrl: string): string {
  * 为什么每次查询都要重签：签名带 X-Date（有效期 ±15 分钟），SignatoryHeaders 里已含
  * buildVolcengineSignedHeaders 的调用，候选构造即签名，长驻进程反复查询也不会用过期签名。
  *
+ * host 决定请求落在哪个控制面入口：默认 ark.<region>.volcengineapi.com（官方方舟文档为
+ * GetAFPUsage 指定的入口），也可显式传 VOLCENGINE_API_HOST 走统一网关兜底。host 必须与
+ * absoluteUrl 的 host 完全一致，否则 CanonicalHeaders 里的 host 与真实请求不符 → 签名不匹配。
+ *
  * parse 固定 custom 解析器 volcengine-plan：AFP 与 CodingPlan 两种响应形态由
  * providerUsageCustom.parseVolcenginePlan 按结构二分，这里不区分（探测顺序见模板）。
  */
-export function buildVolcengineUsageCandidate(action: string, credentials: { accessKeyId: string; secretAccessKey: string }, options: { region?: string; version?: string } = {}): UsageProbeCandidate {
+export function buildVolcengineUsageCandidate(action: string, credentials: { accessKeyId: string; secretAccessKey: string }, options: { region?: string; version?: string; host?: string } = {}): UsageProbeCandidate {
 	const region = options.region ?? VOLCENGINE_REGION;
 	const version = options.version ?? VOLCENGINE_API_VERSION;
+	// Region 同时进 query 与签名 scope：统一网关入口靠 query 里的 Region 定位地域，
+	// ark 专属入口靠 host 段，两种入口都带 Region 是两者的交集，安全。
 	const query = buildVolcengineCanonicalQuery(action, region, version);
+	const host = options.host ?? volcengineArkHost(region);
 	const parse: UsageProbeParse = { kind: "custom", resolver: "volcengine-plan" };
 	return {
 		// path 仅作尝试明细里的可读标识（绝对 URL 已给全路径，实际不使用它拼接）。
 		path: `/?${query}`,
-		// 绝对 URL：Host 是控制面网关，与 baseUrl 不同域，不能拼在推理端点之下。
-		absoluteUrl: `https://${VOLCENGINE_API_HOST}/?${query}`,
+		// 绝对 URL：Host 是控制面入口，与 baseUrl 不同域，不能拼在推理端点之下。
+		absoluteUrl: `https://${host}/?${query}`,
 		method: "POST",
 		// version 必须同时喂给签名与 URL：CanonicalQueryString 与真实 query 不一致会签名不匹配。
-		headers: buildVolcengineSignedHeaders({ accessKeyId: credentials.accessKeyId, secretAccessKey: credentials.secretAccessKey, action, region, version }),
+		headers: buildVolcengineSignedHeaders({ accessKeyId: credentials.accessKeyId, secretAccessKey: credentials.secretAccessKey, action, region, version, host }),
 		// 签名头里没有 Bearer：必须关掉自动补的 Authorization，否则它会把签名值覆盖掉。
 		noBearer: true,
 		body: {},
