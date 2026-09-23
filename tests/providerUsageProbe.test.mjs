@@ -949,7 +949,18 @@ test("火山方舟 Agent Plan：桶字段走别名兜底，缺档不出桶", () 
 
 test("火山方舟 Coding Plan：数组字段别名 Usages/Details 与窗口名别名均可解析", () => {
 	// Usages 是 QuotaUsage 的兼容别名；窗口名用 "5h"/"week" 这类别名时必须仍能落到正确档位。
-	const res = probe.parseUsageResponseBody({ Result: { Usages: [{ Type: "5h", UsedPercent: 22, ResetTimestamp: 1782057600 }, { Label: "week", UsedPercent: 61 }] } }, "{}", { kind: "custom", resolver: "volcengine-plan" });
+	const res = probe.parseUsageResponseBody(
+		{
+			Result: {
+				Usages: [
+					{ Type: "5h", UsedPercent: 22, ResetTimestamp: 1782057600 },
+					{ Label: "week", UsedPercent: 61 },
+				],
+			},
+		},
+		"{}",
+		{ kind: "custom", resolver: "volcengine-plan" },
+	);
 	assert.equal(res.matched, true);
 	assert.equal(res.kind, "periods");
 	assert.equal(res.periods.rolling.percent, 22);
