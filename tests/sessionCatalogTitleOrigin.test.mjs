@@ -420,3 +420,34 @@ test("a failed legacy probe keeps the entry retryable and healing is one-shot", 
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+// #266 第二指纹基准：系统提示很大时 64KB 头窗口还没进到第一条用户消息，窗口兜底会落到尾部消息上。
+// 目录标题存的是**真首句**时，必须用「文件内真首句」再比一次才能自愈（只比窗口兜底会永久漏修）。
+test("a legacy first-message title is healed when the name window only sees a later message", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-title-origin-heal-deep-"));
+	try {
+		const filePath = join(dir, "2026-08-22T04-22-29-167Z_pqr.jsonl");
+		const firstUser = "这个会话的第一条用户消息";
+		const lines = [
+			{ type: "session", version: 3, id: "deep-fixture", cwd: "C:/project" },
+			// 巨型系统提示（中文 3 字节/字）：把第一条用户消息推到 64KB 头窗口之外。
+			{ type: "message", message: { role: "system", content: "系统提示 ".repeat(12000) } },
+			{ type: "message", message: { role: "user", content: firstUser } },
+			// 尾部填充：把真首句挤出 64KB 尾窗口，让窗口兜底只能看到后面的用户消息。
+			{ type: "message", message: { role: "assistant", content: "填充 ".repeat(30000) } },
+			{ type: "message", message: { role: "user", content: "尾部这条消息才是窗口兜底" } },
+			{ type: "session_info", name: "权威名：会话标题", cwd: "C:/project" },
+		];
+		await writeFile(filePath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
+		await writeFile(join(dir, "sessions.json"), JSON.stringify({ version: 1, sessions: [legacyHealEntry(filePath, firstUser)] }), "utf8");
+
+		const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, scannerFetcher());
+		await catalog.load();
+		const [merged] = await catalog.mergeScanned("project-1", [lightSummary({ id: filePath, filePath })]);
+		assert.equal(merged.title, "权威名：会话标题", "真首句标题必须被 JSONL 权威名自愈");
+		assert.equal((await readEntry(dir, "legacy-heal")).titleOrigin, "manual", "自愈后转终态 manual");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

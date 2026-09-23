@@ -104,19 +104,23 @@ export type SessionFilePathResolver = (projectId: string, filePath: string, envi
  * 用户 fork / 普通会话 / nicobailon 嵌套形态不返回该值。
  * forked 为 pi fork/branch 探测结果（parentSession header + 非 tintinweb 形态）：
  * 只做列表 (fork) 标记，不影响 parentSessionPath 的折叠语义。 */
-export type SessionTitleFetchResult = { name?: string; nameFromSessionInfo?: boolean; valid?: boolean; parentSessionPath?: string; forked?: boolean; fallbackName?: string };
+export type SessionTitleFetchResult = { name?: string; nameFromSessionInfo?: boolean; valid?: boolean; parentSessionPath?: string; forked?: boolean; fallbackName?: string; firstUserText?: string };
 
 /** collectScannedTitles 收集的补名结果：fromSessionInfo=false 表示首条消息弱回退，所有权只算 fallback（#266）。
  *  fallbackName 是本文件的弱兜底候选（首条 user/assistant 文本），与最终 name 取谁无关：
  *  #266 存量自愈要用它比对「catalog 里存的这一行是不是当年被误锁的首句兜底」。 */
 type ScannedTitleFetch = { name: string; fromSessionInfo: boolean; fallbackName?: string };
 
-/** legacy 存量条目的一次性探测结果：authoritative 只在真读到权威 session_info 名时才有值。 */
-type LegacyTitleProbe = { authoritative?: string; fallback?: string };
+/** legacy 存量条目的一次性探测结果：authoritative 只在真读到权威 session_info 名时才有值。
+ *  firstUserText 是「文件内真首句」（可选，按需读取）：头/尾窗口兜底在系统提示很大的会话里会
+ *  退化成尾部消息，指纹比对需要它才能命中当年写进 catalog 的真首句（#266）。 */
+type LegacyTitleProbe = { authoritative?: string; fallback?: string; firstUserText?: string };
 
 export type SessionTitleFetchOptions = {
 	/** false = only inspect the bounded header for structural metadata; do not read name windows. */
 	includeTitle?: boolean;
+	/** true = 额外有界读取「文件内首条 user 文本」（legacy 存量自愈的第二指纹基准，见 #266）。 */
+	includeFirstUserText?: boolean;
 };
 
 /** 标题刷新 + 会话头有效性校验：装配层注入（实现为 SessionScanner.inferSessionNameAndValidity，
@@ -190,19 +194,29 @@ function assignTitleOrigin(entry: SessionCatalogEntry, origin: SessionTitleOrigi
  * 也可能是被缺陷版本 `titleLocked: !isPlaceholderCatalogTitle(initialTitle)` 误锁的首句兜底。
  * 三条指纹同时成立才判定为后者，把误丢的权威名拿回来：
  * 1. 条目来源是 legacy（只有旧 catalog 迁移来的条目走这条路；auto/manual 不参与）；
- * 2. catalog 现存标题逐字等于本次扫描读到的弱兜底候选（首条 user/assistant 文本）——
+ * 2. catalog 现存标题逐字等于本次扫描读到的弱兜底候选（首条 user/assistant 文本，或文件内真首句）——
  *    用户手动改成与首句一字不差的标题几乎不可能；
  * 3. JSONL 里存在不同的权威 session_info 名，即当年被 applyAutomaticTitle 丢弃的那个名字。
  *
+ * 为什么候选有两条：头/尾窗口的兜底在系统提示很大的会话里会落到尾部消息上（真首句落在 64KB
+ * 头窗口之外），只比它会让这类 #266 存量永远修不了；firstUserText 是文件内真首句（有界读取）。
+ *
  * @returns 要写回的权威标题；不命中返回 undefined（保持原标题，并转终态不再探测）。
  */
-function repairedLegacyFallbackTitle(entry: Pick<SessionCatalogEntry, "title">, probe: { authoritative?: string; fallback?: string }): string | undefined {
+function repairedLegacyFallbackTitle(entry: Pick<SessionCatalogEntry, "title">, probe: { authoritative?: string; fallback?: string; firstUserText?: string }): string | undefined {
 	const authoritative = catalogDisplayTitle(probe.authoritative);
-	const fallback = probe.fallback?.replace(/\s+/g, " ").trim();
-	if (!authoritative || !fallback) return undefined;
-	if (fallback !== entry.title.replace(/\s+/g, " ").trim()) return undefined;
+	if (!authoritative) return undefined;
+	const title = normalizeFingerprintTitle(entry.title);
+	if (!title) return undefined;
+	const candidates = [probe.fallback, probe.firstUserText].map(normalizeFingerprintTitle).filter(Boolean);
+	if (!candidates.some((candidate) => candidate === title)) return undefined;
 	if (authoritative === entry.title) return undefined;
 	return authoritative;
+}
+
+/** 指纹比对前的归一化：折叠空白并去首尾空白，避免换行/多空格造成的假阴性。 */
+function normalizeFingerprintTitle(value: string | undefined): string {
+	return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -1181,7 +1195,7 @@ export class SessionCatalog {
 		const forked = new Map<string, boolean>();
 		if (!this.fetchTitle) return { titles, legacyProbes, invalid, parents, forked };
 		const byOrigin = new Map(this.entries.filter((entry) => entry.originKey).map((entry) => [entry.originKey!, entry]));
-		const wanted: Array<{ originKey: string; filePath: string; includeTitle: boolean; legacyProbe?: boolean }> = [];
+		const wanted: Array<{ originKey: string; filePath: string; includeTitle: boolean; legacyProbe?: boolean; lockedTitle?: string }> = [];
 		for (const summary of summaries) {
 			const originKey = buildSummaryOriginKey(summary, context);
 			const existing = byOrigin.get(originKey);
@@ -1193,7 +1207,7 @@ export class SessionCatalog {
 				// 命中即修、不命中转终态，一次读取收口，之后与其他锁定条目一样不再读盘。
 				const legacy = existing.source === "pi" && resolveTitleOrigin(existing) === "legacy";
 				const tintinwebOrphan = existing.source === "pi" && !existing.parentSessionPath && /^[^#]+#[0-9a-f]{8}$/i.test(existing.title);
-				if (legacy) wanted.push({ originKey, filePath: summary.filePath, includeTitle: true, legacyProbe: true });
+				if (legacy) wanted.push({ originKey, filePath: summary.filePath, includeTitle: true, legacyProbe: true, lockedTitle: existing.title });
 				else if (tintinwebOrphan) wanted.push({ originKey, filePath: summary.filePath, includeTitle: false });
 				continue;
 			}
@@ -1220,7 +1234,18 @@ export class SessionCatalog {
 				}
 				if (item.legacyProbe) {
 					// 只有真读到 session_info 才算权威名：另一个弱兜底不能用来「修复」弱兜底。
-					legacyProbes.set(item.originKey, { authoritative: result.nameFromSessionInfo === true ? result.name : undefined, fallback: result.fallbackName });
+					const authoritative = result.nameFromSessionInfo === true ? result.name : undefined;
+					// #266：窗口兜底对不上目录标题时才多读一次有界前缀，取「文件内真首句」当第二指纹基准
+					// （系统提示很大时窗口兜底会退化成尾部消息，只有真首句与当年写进 catalog 的标题一致）。
+					const needsFirstUserText = Boolean(authoritative) && normalizeFingerprintTitle(result.fallbackName) !== normalizeFingerprintTitle(item.lockedTitle);
+					// 深读失败（WSL 超时/文件被占）只降级回「窗口兜底比对」并消费掉这一次机会，不像读盘失败那样保持可重试：
+					// 一条修不了的存量条目不值得每次扫描都再读 8MB。方向是安全的——最多保持原标题，不会写错。
+					const firstUserText = needsFirstUserText
+						? await this.fetchTitle!(item.filePath, { includeTitle: false, includeFirstUserText: true })
+								.then((extra) => extra?.firstUserText)
+								.catch(() => undefined)
+						: undefined;
+					legacyProbes.set(item.originKey, { authoritative, fallback: result.fallbackName, firstUserText });
 				}
 				// valid 显式为 false 才拒绝；缺省（读不到/未校验）保留原行为
 				if (result.valid === false) invalid.add(item.originKey);

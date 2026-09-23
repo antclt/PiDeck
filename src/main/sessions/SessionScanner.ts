@@ -174,6 +174,14 @@ export class SessionScanner {
 	 */
 	private static readonly SUMMARY_NAME_FULL_SCAN_MAX_BYTES = 1024 * 1024;
 	/**
+	 * 「文件内真首句」的有界读取上限（#266 存量自愈的第二指纹基准）。
+	 *
+	 * 系统提示动辄几百 KB，64KB 的头窗口经常还没进到第一条用户消息，于是头/尾窗口兜底会
+	 * 退化成「尾部某条消息」——而当年被缺陷版本锁进 catalog 的首句兜底来自实时视图的真首句。
+	 * 8MB 覆盖「首条用户消息之前的系统提示」这一常见量级，同时给读取量一个硬上界。
+	 */
+	private static readonly FIRST_MESSAGE_TITLE_MAX_BYTES = 8 * 1024 * 1024;
+	/**
 	 * 整文件读入的体量上限：超过即拒绝（抛可读错误）。
 	 *
 	 * 主进程 V8 老生代堆上限只有 384MB（见 src/main/v8HeapLimits.ts），而
@@ -2068,12 +2076,34 @@ export class SessionScanner {
 	 * provisional 标题阶段采用该名称，后续 pi/TUI 改名不会覆盖 PiDeck 显示标题。
 	 * `includeTitle:false` 只返回头部有效性和结构元数据，不读取尾部或小文件全文。
 	 */
-	async inferSessionNameAndValidity(filePath: string, options: { includeTitle?: boolean } = {}): Promise<{ name?: string; nameFromSessionInfo?: boolean; valid?: boolean; parentSessionPath?: string; forked?: boolean; fallbackName?: string }> {
+	async inferSessionNameAndValidity(filePath: string, options: { includeTitle?: boolean; includeFirstUserText?: boolean } = {}): Promise<{ name?: string; nameFromSessionInfo?: boolean; valid?: boolean; parentSessionPath?: string; forked?: boolean; fallbackName?: string; firstUserText?: string }> {
 		const head = await this.readHeadAndInfer(filePath, options.includeTitle !== false);
 		if (!head) return {};
 		const parentSessionPath = await this.detectFlatSubagentParentFromHead(filePath, head.raw);
 		const forked = this.detectForkedFromHead(head.raw);
-		return { name: head.name, nameFromSessionInfo: head.nameFromSessionInfo, valid: isValidPiSessionFileHead(head.raw), parentSessionPath, forked: forked || undefined, fallbackName: head.fallbackName };
+		// #266 存量自愈的第二指纹基准：只有真首句才和当年锁进 catalog 的标题可比。调用方仅在
+		// 「窗口兜底对不上目录标题」时才要（多一次有界读），默认不读。
+		const firstUserText = options.includeFirstUserText ? await this.inferFirstMessageTitle(filePath) : undefined;
+		return { name: head.name, nameFromSessionInfo: head.nameFromSessionInfo, valid: isValidPiSessionFileHead(head.raw), parentSessionPath, forked: forked || undefined, fallbackName: head.fallbackName, firstUserText };
+	}
+
+	/**
+	 * 有界读取文件开头，取「文件内首条 user 文本」（其次首条 assistant 文本）。
+	 *
+	 * 与 readHeadAndInfer 的头/尾窗口不同：这里从头往后单调读，不会因为 64KB 头窗口还没读到第一条
+	 * 用户消息（系统提示很大时很常见）就退化成「尾部某条消息」。用于 #266 存量自愈的指纹比对——
+	 * 当年被锁进 catalog 的首句兜底来自实时视图的真首句，必须用同一基准才比得上。
+	 *
+	 * 读取有界（FIRST_MESSAGE_TITLE_MAX_BYTES）：超限时宁可放弃比对（保持原标题），不做无界扫描。
+	 */
+	async inferFirstMessageTitle(filePath: string, maxBytes = SessionScanner.FIRST_MESSAGE_TITLE_MAX_BYTES): Promise<string | undefined> {
+		try {
+			const prefix = this.isWslPath(filePath) ? await this.readWslFileHead(filePath, maxBytes) : await this.readLocalFilePrefix(filePath, maxBytes);
+			// 末尾可能截断半行：inferScanNameFromLines 会跳过不可解析行。
+			return inferScanNameFromLines(prefix.split(/\r?\n/).filter(Boolean), (content) => this.extractText(content)).fallbackName;
+		} catch {
+			return undefined;
+		}
 	}
 
 	/**
