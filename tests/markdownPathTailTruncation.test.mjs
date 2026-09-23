@@ -115,6 +115,17 @@ test("inline code 文件引用链路不受影响（__fileLink 分支）", () => 
 	assert.deepEqual(links, ["file://src/renderer/src/main.tsx"], `inline code 引用应链接化：${links}`);
 });
 
+test("真实中文长段落：不丢文本，且并列斜杠不产生文件链接", () => {
+	// 2026-09 线上回归原句：`降分辨率/抽帧`、`GDPR/《个保法》` 曾被识别成尾斜杠目录，
+	// 存在性判否后整段被降级成灰字（用户看到「斜杠前的字像阴影」）。
+	const markdown = "学术上早就有定论：MSR/Princeton 的 VideoStorm（NSDI'17）就是专门研究这个问题——视频分析算力永远不够，必须靠近似（降分辨率/抽帧）和延迟容忍来在集群上同时服务成千上万条查询。\n国内视频 AI 平台论文也实测：只解 I 帧能省约 90% 算力（全量解码 CPU 占用 ~20% → 2%）。";
+	const tree = runPipeline(markdown);
+	assert.equal(renderTree(tree), sourceText(markdown));
+	const links = [];
+	collectLinks(tree, links);
+	assert.deepEqual(links, [], `中文散文不应产生文件链接：${links}`);
+});
+
 function collectLinks(node, out) {
 	if (!node || typeof node !== "object") return;
 	if (node.type === "link") out.push(node.url ?? "");
