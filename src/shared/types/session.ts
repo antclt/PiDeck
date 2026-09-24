@@ -127,6 +127,11 @@ export type SessionSummary = {
 	projectId?: string;
 	projectPath?: string;
 	name?: string;
+	/**
+	 * name 是否来自权威 session_info（false = 首条消息弱回退）；缺省按权威处理。
+	 * catalog 只用它区分所有权：#266 弱回退只能算 fallback，可被扩展模型标题升级。
+	 */
+	nameFromSessionInfo?: boolean;
 	/** 子会话：关联的父会话文件路径。有该字段时不在会话列表顶层显示，而是嵌套在父会话下。 */
 	parentSessionPath?: string;
 	/**

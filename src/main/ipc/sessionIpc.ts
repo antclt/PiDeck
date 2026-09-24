@@ -627,7 +627,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			projectId: input.projectId,
 			title: input.title?.trim() || mainCopy("session.newTitle"),
 			environment: settingsStore.get().wslEnabled ? "wsl" : "native",
-			titleLocked: false,
 			// 后端透传：仅接受白名单枚举，其余视为 pi（渲染层不可信输入校验在边界）。
 			backend: input.backend === "dsh" ? "dsh" : undefined,
 			model,

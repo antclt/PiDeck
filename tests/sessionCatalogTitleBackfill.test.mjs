@@ -144,9 +144,9 @@ test("automatic title claims an unowned placeholder once", async () => {
 		const [draft] = await catalog.mergeScanned("project-1", [lightSummary()]);
 		assert.equal(draft.title, "Untitled");
 
-		const automatic = await catalog.applyAutomaticTitle(draft.id, "自动生成标题");
+		const automatic = await catalog.applyAutomaticTitle(draft.id, "自动生成标题", "auto");
 		assert.equal(automatic.title, "自动生成标题");
-		const lateAutomatic = await catalog.applyAutomaticTitle(draft.id, "不得覆盖的第二个自动标题");
+		const lateAutomatic = await catalog.applyAutomaticTitle(draft.id, "不得覆盖的第二个自动标题", "auto");
 		assert.equal(lateAutomatic.title, "自动生成标题");
 	} finally {
 		await rm(dir, { recursive: true, force: true });
@@ -163,7 +163,7 @@ test("manual ownership blocks an in-flight automatic title and later JSONL names
 
 		// sessionIpc calls this before its asynchronous set_session_name request.
 		await catalog.claimTitleOwnership(draft.id);
-		const lateAutomatic = await catalog.applyAutomaticTitle(draft.id, "自动标题迟到结果");
+		const lateAutomatic = await catalog.applyAutomaticTitle(draft.id, "自动标题迟到结果", "auto");
 		assert.equal(lateAutomatic.title, "Untitled");
 
 		const manual = await catalog.update(draft.id, { title: "A-123" });

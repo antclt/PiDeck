@@ -983,7 +983,12 @@ export class PiLocator {
 	}
 
 	private needsCmdQuote(value: string) {
-		return /[\s&()\[\]{}^=;!'+,`~|<>]/.test(value);
+		// 双引号必须入类：cmd-shim 通道用 windowsVerbatimArguments 把拼好的整条命令行直接交给
+		// cmd.exe（没有 Node 的二次转义），裸引号会打乱 /s /c 的引号配对，把后续参数里的 & 甩到
+		// 引号外造成命令行分裂（实测 name=a" + 后续参数含 & → cmd 真去执行了 & 后面的命令）。
+		// % 故意不入类：引号阻止不了 cmd 的 %VAR% 展开（实测 "a%PATH%b" 照旧被展开），
+		// 放进字符类只会让人误以为已处理；含 % 的供应商名改由 isValidProviderName 拒绝。
+		return /[\s&()\[\]{}^=;!'+,`~|<>"]/.test(value);
 	}
 
 	private getCommandBinDir(command: string) {

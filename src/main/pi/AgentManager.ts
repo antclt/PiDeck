@@ -127,6 +127,12 @@ export type QueuedStartupDiagnostic = {
 	};
 };
 
+/**
+ * PiDeck 自动命名的来源（#266）："auto" = 内置扩展经 marker 校验的模型标题（终态），
+ * "fallback" = 首条消息派生的兜底名（可被 auto 升级）。catalog 据此决定是否能领取占位标题。
+ */
+export type AutomaticTitleSource = "auto" | "fallback";
+
 export class AgentManager {
 	/** 本网关的运行时后端身份：pi。 */
 	readonly backend: AgentBackend = "pi";
@@ -453,8 +459,11 @@ export class AgentManager {
 	/**
 	 * PiDeck automatic-title callback. Generic pi runtime names never reach this
 	 * callback: catalog titles are authoritative after initial discovery.
+	 *
+	 * 装配层据此写入 catalog；source 标记来源（#266）："auto" 可升级 "fallback"，
+	 * 反向不可（否则首条消息会压住扩展模型标题）。
 	 */
-	private onAutomaticTitleChanged?: (agentId: string, title: string) => void;
+	private onAutomaticTitleChanged?: (agentId: string, title: string, source: AutomaticTitleSource) => void;
 	/** Extension marker recorded immediately before its own setSessionName call. */
 	private readonly pendingAutomaticTitles = new Map<string, { title: string; sessionId: string; runtimeGeneration: number }>();
 	/** 已发送 ask 系统通知的 agent；新一轮 run（agent_start）时清除，避免同一轮多次提问刷屏。 */
@@ -3722,13 +3731,13 @@ export class AgentManager {
 		};
 	}
 
-	/** 装配层注入：仅 PiDeck 自动命名经已验证 marker 写回 catalog。 */
-	setAutomaticTitleChangedHandler(handler: (agentId: string, title: string) => void): void {
+	/** 装配层注入：仅 PiDeck 自动命名经已验证 marker 写回 catalog；source 标记来源（#266）。 */
+	setAutomaticTitleChangedHandler(handler: (agentId: string, title: string, source: AutomaticTitleSource) => void): void {
 		this.onAutomaticTitleChanged = handler;
 	}
 
 	/** 更新运行时 tab.title；pi JSONL/TUI 名称不能反向覆盖 catalog。 */
-	private applyRuntimeTitle(agentId: string, title: string, emit = true, automaticTitle = false): boolean {
+	private applyRuntimeTitle(agentId: string, title: string, emit = true, source?: AutomaticTitleSource): boolean {
 		const runtime = this.agents.get(agentId);
 		const next = title.replace(/\s+/g, " ").trim();
 		if (!runtime || !next) return false;
@@ -3741,8 +3750,8 @@ export class AgentManager {
 			if (emit) this.emitState();
 		}
 		// 自动命名可能在运行时 tab 已预先更新后才到达；即使 changed=false 也必须尝试
-		// 领取 catalog 的未确认占位标题。其他 pi 名称只停留在 runtime。
-		if (automaticTitle) this.onAutomaticTitleChanged?.(agentId, next);
+		// 领取 catalog 的未确认占位标题（fallback → auto 的来源升级同样如此）。
+		if (source) this.onAutomaticTitleChanged?.(agentId, next, source);
 		return changed;
 	}
 
@@ -4267,7 +4276,7 @@ export class AgentManager {
 			const automaticMarker = this.pendingAutomaticTitles.get(agentId);
 			this.pendingAutomaticTitles.delete(agentId);
 			const automaticTitle = automaticMarker?.title === name && automaticMarker.sessionId === runtime.tab.sessionId && automaticMarker.runtimeGeneration === runtime.tab.runtimeGeneration;
-			if (automaticTitle) this.applyRuntimeTitle(agentId, name, true, true);
+			if (automaticTitle) this.applyRuntimeTitle(agentId, name, true, "auto");
 		}
 
 		if (typed.type === "agent_start" && runtime) {
@@ -5656,7 +5665,8 @@ export class AgentManager {
 		const nextTitle = inferTitleFromMessages(this.messages.get(agentId) ?? []);
 		if (!nextTitle) return false;
 		// 只覆盖默认/占位标题，避免打开/重命名过的历史会话被第一条消息反向改掉。
-		return this.applyRuntimeTitle(agentId, nextTitle, true, true);
+		// 来源标记为 fallback：它只是内容派生兜底，扩展模型标题（auto）到得更晚也能升级（#266）。
+		return this.applyRuntimeTitle(agentId, nextTitle, true, "fallback");
 	}
 
 	private addDetailedErrorMessage(agentId: string, errorMessage?: string) {

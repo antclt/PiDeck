@@ -113,4 +113,8 @@ test("in-progress glyph keeps its spin on the svg box and the row clips the rota
 	assert.doesNotMatch(progressGlyph, /<circle[^>]*className="[^"]*animate-pideck-spin/, "spinning a <circle> swings it out of the viewBox (transform-origin defaults to 0 0)");
 	// 行级裁剪：把旋转 AABB（≈22.6px）关在 20px 行内，否则外层 ul 的 scrollHeight 会反复越界
 	assert.match(strip, /<li[^>]*className="flex min-w-0 items-center gap-2\.5 overflow-hidden[^"]*"/);
+	// shrink-0 语义：ul 是「flex 列 + max-h-[180px]」容器，flex 子项默认可压缩——条目多到溢出时
+	// 每行会被从 20px 压到约 7.7px（文字被 overflow-hidden 切成横条、相邻行重叠），且
+	// scrollHeight 收缩到与 clientHeight 相等 → 不出现滚动条、用户滚不动。见 2027-01 排版事故。
+	assert.match(strip, /<li[^>]*className="flex min-w-0 items-center gap-2\.5 overflow-hidden shrink-0[^"]*"/, "todo rows must not be flex-shrunk when the capped list overflows");
 });

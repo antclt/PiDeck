@@ -934,7 +934,7 @@ const feishuSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 			title: input.title,
 			environment,
 			source: "pi",
-			titleLocked: true,
+			titleOrigin: "manual",
 		});
 		return { sessionId: draft.id };
 	},
@@ -999,7 +999,7 @@ const feishuSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 				title: input.agent.title || "Feishu session",
 				environment,
 				source,
-				titleLocked: true,
+				titleOrigin: "manual",
 			});
 			sessionId = draft.id;
 		}
@@ -2489,7 +2489,8 @@ function registerIpc() {
 				if (firstLine) {
 					// 自动命名只取首行，不在存储层硬截断；标题展示由侧栏窗口负责钳制，
 					// hover 时滚动展示全文。否则 "(fork)" 或英文单词可能被写成残片。
-					await sessionCatalog.applyAutomaticTitle(sessionId, firstLine);
+					// 生图没有扩展模型命名链路，首行提示词只算 fallback 所有权。
+					await sessionCatalog.applyAutomaticTitle(sessionId, firstLine, "fallback");
 					mainWindow?.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
 				}
 			}
@@ -3697,7 +3698,6 @@ app
 					projectId: input.projectId,
 					title: input.title?.trim() || mainCopy("session.newTitle"),
 					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
-					titleLocked: false,
 					model: input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
 					thinkingLevel: input.thinkingLevel,
 				});
@@ -3995,13 +3995,17 @@ app
 		// 只有 PiDeck 自动命名扩展的专用 marker 才能领取 fresh placeholder。
 		// pi /name、JSONL session_info 与重启 get_state 都不会经过这里，catalog 因而
 		// 始终是侧栏和 Tab 的显示标题权威。
-		agentManager.setAutomaticTitleChangedHandler((agentId, title) => {
+		// source 决定所有权（#266）：扩展模型标题 "auto" 可升级首条消息的 "fallback"；
+		// 反向不可（迟到的首条消息不得压住已生成的模型标题）。
+		agentManager.setAutomaticTitleChangedHandler((agentId, title, source) => {
 			const sessionId = sessionRuntimeCoordinator?.getSessionId(agentId);
 			if (!sessionId) return;
 			const entry = sessionCatalog.get(sessionId);
-			if (!entry || entry.title === title) return;
+			// 文本相同仍可能是「fallback → auto」的所有权升级（扩展标题与首条消息恰好一致）：
+			// 只有来源已确认且非 fallback 时才是真正的 no-op。
+			if (!entry || (entry.title === title && entry.titleOrigin !== "fallback")) return;
 			void sessionCatalog
-				.applyAutomaticTitle(sessionId, title)
+				.applyAutomaticTitle(sessionId, title, source)
 				.then(() => {
 					if (mainWindow && !mainWindow.isDestroyed()) {
 						mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, {

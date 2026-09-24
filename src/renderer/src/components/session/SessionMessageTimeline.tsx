@@ -19,6 +19,7 @@ import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Loader2, LoaderCircle, Power } from "lucide-react";
 import { showNotice } from "../../utils/notice";
+import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { composeFailureNotice, isRetryStatusMessage, reduceFailureNoticePass, type FailureNoticePassState } from "./timelineFailureNotice";
 import { SessionStartSurface } from "./SessionStartSurface";
 import { NotifyMessageCard, shouldRenderNotifyCard } from "./NotifyMessageCard";
@@ -106,6 +107,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	const sessionId = props.sessionId;
 	const session = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
+	const hasLiveRuntime = Boolean(runtime?.agentId) && isLiveRuntimeStatus(runtime?.status);
 	const messageLoadStateSelector = useMemo(() => selectAtom(sessionMessageLoadStateAtom, (states) => states[sessionId], Object.is), [sessionId]);
 	const sendStateSelector = useMemo(() => selectAtom(sessionSendStateByIdAtom, (states) => states[sessionId], Object.is), [sessionId]);
 	const messageLoadState = useAtomValue(messageLoadStateSelector);
@@ -454,8 +456,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	}, [displayRuns]);
 
 	// ── 最新轮结束后的 1.5s idle 自动收起 ──
-	// 用户动鼠标/滚轮/键盘会取消；仅仍在跟底时安排。真正收起由 TurnRow 的
-	// useTurnExecution 完成，收完后回调这里，把本轮起始消息拉到视口中上方。
+	// 仅存活 Agent 实例在跟底时安排；纯历史浏览不自动改变阅读位置。
+	// 鼠标移动、输入草稿不取消，真实上滚读历史会退出跟随。
 	const wasRuntimeBusyRef = useRef(isRuntimeBusy);
 
 	useEffect(() => {
@@ -521,10 +523,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			turnSettleIdleLastRunRef.current = undefined;
 		};
 
-		if (isRuntimeBusy) {
-			// 新一轮开始（busy 边沿）：若在途 settle 定位动画（系统态移动视口），
-			// 取消并恢复跟随贴底——否则动画飞行中发送新消息，视口永久停在旧 run 的
-			// 30% 锚点，新 run 不跟随且自身 settle 也不 arm（对抗审查 F1）。
+		if (isRuntimeBusy || !hasLiveRuntime) {
+			// 实例结束或新一轮开始时作废旧定位；只在动画仍在途时恢复跟随。
 			// 用户正在读历史（无在途动画）则不打扰。
 			controller.cancelSettledRepositionForNewRun();
 			clearIdle();
@@ -543,7 +543,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		armSettledReposition(latestRunIdRef.current);
 
 		return clearIdle;
-	}, [controller.autoScroll, controller.cancelSettledRepositionForNewRun, isRuntimeBusy, sessionId, armSettledReposition]);
+	}, [controller.autoScroll, controller.cancelSettledRepositionForNewRun, hasLiveRuntime, isRuntimeBusy, runtime?.agentId, runtime?.runtimeGeneration, sessionId, armSettledReposition]);
 
 	// 跟随状态变化（回底/下滚重锁）会作废在途的 settle 布局定时：不能让刚回底的
 	// 视口在 320ms 后又被定位拉到 30% 高度。定位动画开始后 autoScroll 恒为 false，
@@ -555,19 +555,19 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		}
 	}, [controller.autoScroll]);
 
-	// 最新轮已结束但重新出现在视口（切会话切回 / 历史会话打开）：不经过 busy 边沿，
+	// 最新轮已结束且仍绑定存活 Agent（切会话切回 / 启动历史会话实例）：不经过 busy 边沿，
 	// 若该会话仍停在最新尾部（跟随），按同一流水线补齐定位。effect 依赖不含
 	// controller.autoScroll：回底（autoScroll false→true）不重跑本 effect，避免
 	// 「刚点回底又被拉去 30%」；守卫只在触发瞬间读一次快照，过期由函数内最新
 	// autoScrollRef 再拦截一次。
 	const latestSettledRunId = latestAgentRunId !== undefined && !isRuntimeBusy ? latestAgentRunId : undefined;
 	useEffect(() => {
-		if (!latestSettledRunId || !controller.autoScroll) return;
+		if (!hasLiveRuntime || !latestSettledRunId || !controller.autoScroll) return;
 		// 幂等：该 run 的 tick 已消费过（自动收起/定位已完成）不再重复 arm——
 		// 否则切回时会把用户手动重新展开的最新轮再收起并清 memory（P2-②）。
 		if (settleTickConsumedRunRef.current === latestSettledRunId) return;
 		armSettledReposition(latestSettledRunId);
-	}, [latestSettledRunId, armSettledReposition, sessionId]);
+	}, [hasLiveRuntime, latestSettledRunId, armSettledReposition, runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
 	const turnWindowActive = shouldWindowTimelineTurns(countAgentRunItems(reconciledRuns), turnWindowTurns);
 	// 方案 C（2026-12）渐进扩展：把「窗口是否仍可扩展」同步给 controller 的滚动监听——
 	// 接近窗口顶部且还有未挂载的已加载数据时，先自动扩窗口（本地 DOM，无网络往返），

@@ -1,5 +1,6 @@
 import { ChevronRight, ChevronsDownUp, Ellipsis, Filter, Folder, FolderOpen, FolderPlus, Plus, RefreshCw } from "lucide-react";
 import type { DragEvent } from "react";
+import { SidebarRemovalList, SidebarRemovalRow } from "./SidebarRemovalRow";
 import { useAtomValue } from "jotai";
 import type { Project, WorktreeEntry } from "../../../../shared/types";
 import type { SidebarController } from "../../hooks/useSidebarController";
@@ -86,6 +87,7 @@ export function ProjectTree(props: {
 		if (source && source !== projectId) void props.actions.projects.reorder(source, projectId);
 	};
 	const renderProject = (project: Project) => {
+		const menuOpen = props.controller.menu?.kind === "project" && props.controller.menu.projectId === project.id;
 		const collapsed = props.controller.isProjectCollapsed(project.id);
 		const projectDirectoryName = displayProjectDirectoryName(project);
 		const sourceFilter = props.controller.sourceFilterFor(project.id);
@@ -100,7 +102,7 @@ export function ProjectTree(props: {
 		// 运行态属于具体会话，而不是项目容器；项目行只负责导航，避免多个 Agent 同时运行时
 		// 项目头像出现无法指向目标会话的聚合动画。
 		return (
-			<div key={project.id} className={cn("project-group mb-1.5", project.worktreeEnabled && "worktree-enabled")}>
+			<SidebarRemovalRow key={project.id} itemId={project.id} className={cn("project-group mb-1.5", project.worktreeEnabled && "worktree-enabled")}>
 				<div
 					className={cn(treeRowClass, !props.controller.search.trim() && "project-draggable", dragging && "dragging opacity-60", dragOver && "drag-over ring-1 ring-border")}
 					onContextMenu={(event) => {
@@ -140,7 +142,7 @@ export function ProjectTree(props: {
 						<span className="grid size-5 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
 							{collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
 						</span>
-						<div className="conversation-body min-w-0 flex-1 transition-[padding-right] group-hover:pr-[88px] group-focus-within:pr-[88px]">
+						<div className={cn("conversation-body min-w-0 flex-1 transition-[padding-right] group-hover:pr-[88px] group-focus-within:pr-[88px]", menuOpen && "pr-[88px]")}>
 							{/* 筛选 / + / ⋯ 共 3 个按钮常驻浮层，hover 时统一让位 88px。
                   twMerge 语义见 tests/sidebarNarrowRowActions.test.mjs 契约测试。 */}
 							<div className="conversation-title flex min-w-0 items-center">
@@ -164,7 +166,7 @@ export function ProjectTree(props: {
 							{/* 项目名称只承担导航信息；详细会话状态由下方的 Agent/历史会话行承担。 */}
 						</div>
 					</button>
-					<div className={cn(dimmedActionsClass, "pr-1", props.controller.menu?.kind === "project" && props.controller.menu.projectId === project.id && "pointer-events-auto opacity-100")}>
+					<div className={cn(dimmedActionsClass, "pr-1", menuOpen && "pointer-events-auto opacity-100")}>
 						{/* 过滤历史记录入口：hover 常驻（右键菜单同款功能），筛选生效时高亮提示 */}
 						<button
 							type="button"
@@ -226,7 +228,7 @@ export function ProjectTree(props: {
 						)}
 					</div>
 				)}
-			</div>
+			</SidebarRemovalRow>
 		);
 	};
 
@@ -319,9 +321,9 @@ export function ProjectTree(props: {
 	});
 
 	const projectsSection = (
-		<>
+		<section aria-label={t("app.sidebarProjects")} role="tree">
 			{workspaceProjects.length > 0 && (
-				<section aria-label={t("app.sidebarProjects")} role="tree">
+				<div>
 					{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
             + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。 */}
 					<div className="flex items-center justify-between px-1 pb-1">
@@ -358,13 +360,13 @@ export function ProjectTree(props: {
 							</DropdownMenu>
 						</div>
 					</div>
-					{workspaceProjects.map(renderProject)}
-				</section>
+				</div>
 			)}
+			<SidebarRemovalList remainingIds={props.controller.catalog.projects.map((project) => project.id)}>{workspaceProjects.map(renderProject)}</SidebarRemovalList>
 			{/* 无任何工作区项目（新用户只有内置 Chat）：显式渲染空态引导。
           此前该分组整体不渲染，用户不知道可以添加项目目录，误以为只能聊天（issue #149）。 */}
 			{workspaceProjects.length === 0 && (
-				<section aria-label={t("app.sidebarProjects")} className="mt-1">
+				<div className="mt-1">
 					<div className="flex items-center justify-between px-1 pb-1">
 						<span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
 						<DropdownMenu>
@@ -390,9 +392,9 @@ export function ProjectTree(props: {
 							{t("app.addProject")}
 						</Button>
 					</div>
-				</section>
+				</div>
 			)}
-		</>
+		</section>
 	);
 
 	return <>{props.controller.navTab === "active" ? <ActiveSessionsTree controller={props.controller} actions={props.actions} currentSessionId={props.currentSessionId} /> : props.controller.navTab === "chats" ? chatSection : projectsSection}</>;
