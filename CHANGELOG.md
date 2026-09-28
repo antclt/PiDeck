@@ -50,7 +50,7 @@
 
 Special thanks to **微时佬友** for providing the model service used in our software development 🎉
 
-Thanks to **@buhuikongpan** for the extension points built-in (#293) and the bridge ANSI sanitisation fix (#294), **@TheMapleBin** for the path-linkification text-loss fix (#274 / #276), **@525300887039** for reporting the Chinese-slash misdetection (#277), **@cmyk-xing** for the looser provider names, the DSH add-provider form, the narrow-window layout and the simple navigation mode (#268), and **@juzijun233** for the model configuration export/import panels (#261).
+Thanks to **@bfzha** for the process-group timeline, quote-overlay fixes, voice input fixes, font-size tier redesign and many other improvements throughout the release, **@buhuikongpan** for the extension points built-in (#293) and the bridge ANSI sanitisation fix (#294), **@TheMapleBin** for the path-linkification text-loss fix (#274 / #276), **@525300887039** for reporting the Chinese-slash misdetection (#277), **@cmyk-xing** for the looser provider names, the DSH add-provider form, the narrow-window layout, the simple navigation mode (#268), the delete exit animation, the window-position restore and the guide-page cache fix, and **@juzijun233** for the model configuration export/import panels (#261) and the stable↔dev channel switcher (#283).
 
 ## v0.7.7 - 2026-09-22
 
