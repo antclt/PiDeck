@@ -215,10 +215,6 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	const turnSettleScrollTimerRef = useRef<number | undefined>(undefined);
 	/** 已排定流水线的 run id：同 run 重复 arm 直接复用，避免双调度。 */
 	const turnSettleIdleLastRunRef = useRef<string | undefined>(undefined);
-	/** 已发出过 autoCollapseTick 的 run id（跨切走保留）：切回补挂 arm 的幂等标记——
-	 *  用户手动重新展开的最新轮（memory 恢复）不应被切回后的新一轮 tick 再收起
-	 *  （对抗审查 P2-②「记忆优先」）。 */
-	const settleTickConsumedRunRef = useRef<string | undefined>(undefined);
 	const latestRunIdRef = useRef<string | undefined>(undefined);
 	// 会话内容就绪淡入：isConversationLoading true→false（切会话历史加载完成）时，
 	// 给 MessageScroller 挂一次 160ms 淡入动画类，与骨架屏消失衔接，避免整块瞬间出现。
@@ -521,9 +517,6 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			}
 			turnSettleIdleTimerRef.current = window.setTimeout(() => {
 				turnSettleIdleTimerRef.current = undefined;
-				// tick 已发出：该 run 的自动收起/定位已完成一次；切回时不再重复 arm
-				//（否则用户手动重新展开的轮次会被再次收起并清 memory）。
-				settleTickConsumedRunRef.current = runId;
 				setLatestTurnAutoCollapseTick((tick) => tick + 1);
 				scheduleFinalAnswerSettle(runId);
 			}, TURN_SETTLE_IDLE_COLLAPSE_MS);
@@ -558,7 +551,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			clearIdle();
 			return;
 		}
-		// 只处理「运行中 → 停转」边沿；历史会话挂载/切回由下方补齐 effect 处理。
+		// 唯一入口：只处理「运行中 → 停转」边沿。会话挂载/切回（含切回后台已结束的
+		// 会话、启动历史会话实例、分屏重开）不再补齐定位——视口保持在用户离开时的位置，
+		// 只由真实的本轮结束驱动（对齐 Proma：轮次结束不移动视口）。
 		if (!wasBusy) return;
 
 		// 最新轮结束且仍在跟随：arm 1.5s 阅读停顿流水线。
@@ -579,19 +574,6 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		}
 	}, [controller.autoScroll]);
 
-	// 最新轮已结束且仍绑定存活 Agent（切会话切回 / 启动历史会话实例）：不经过 busy 边沿，
-	// 若该会话仍停在最新尾部（跟随），按同一流水线补齐定位。effect 依赖不含
-	// controller.autoScroll：回底（autoScroll false→true）不重跑本 effect，避免
-	// 「刚点回底又被拉去 30%」；守卫只在触发瞬间读一次快照，过期由函数内最新
-	// autoScrollRef 再拦截一次。
-	const latestSettledRunId = latestAgentRunId !== undefined && !isRuntimeBusy ? latestAgentRunId : undefined;
-	useEffect(() => {
-		if (!hasLiveRuntime || !latestSettledRunId || !controller.autoScroll) return;
-		// 幂等：该 run 的 tick 已消费过（自动收起/定位已完成）不再重复 arm——
-		// 否则切回时会把用户手动重新展开的最新轮再收起并清 memory（P2-②）。
-		if (settleTickConsumedRunRef.current === latestSettledRunId) return;
-		armSettledReposition(latestSettledRunId);
-	}, [hasLiveRuntime, latestSettledRunId, armSettledReposition, runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
 	const turnWindowActive = shouldWindowTimelineTurns(countAgentRunItems(reconciledRuns), turnWindowTurns);
 	// 方案 C（2026-12）渐进扩展：把「窗口是否仍可扩展」同步给 controller 的滚动监听——
 	// 接近窗口顶部且还有未挂载的已加载数据时，先自动扩窗口（本地 DOM，无网络往返），
