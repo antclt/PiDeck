@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { useEffect, useMemo, useRef, type CSSProperties, type RefObject, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from "react";
 import { type GroupImperativeHandle, type PanelImperativeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "../ui-shadcn/resizable";
 import type { GitBranchInfo, ImageContent, TerminalTarget } from "../../../../shared/types";
@@ -169,6 +169,8 @@ export function SessionView({
 	abortAgent: _abortAgent,
 }: SessionViewProps) {
 	const paneServices = useSessionPaneServices();
+	// 落点随本栏时间线挂载/卸载更新；发送控制器仍只有 ComposerArea 内的一份。
+	const [replyActionsTarget, setReplyActionsTarget] = useState<HTMLDivElement | null>(null);
 	// GUI 扩展桥：把扩展的 ctx.ui.setTitle 应用到 document.title（无贡献时不动，§7.4 只追加）
 	useBridgeSessionTitle(sessionId);
 	// 会话身份面包屑的项目名：多 Tab/分屏时提醒当前会话属于哪个项目。
@@ -303,6 +305,7 @@ export function SessionView({
 								forkingMessageId,
 								onToast,
 								onQuickPrompt,
+								replyActionsRef: setReplyActionsTarget,
 							}}
 						/>
 					</div>
@@ -349,7 +352,9 @@ export function SessionView({
 										<SessionGoalStrip sessionId={sessionId} />
 									</>
 								}
-								commitSuggestRun={latestAgentRun}
+								replyActionMessages={sessionTimeline.messages}
+								replyActionsTarget={replyActionsTarget}
+								replyActionsBlocked={askPanelVisible || isRestarting || isAgentStarting || sessionTimeline.isSurfaceLoading}
 							/>
 						</div>
 					)}

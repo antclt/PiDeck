@@ -875,7 +875,12 @@ export const enUS: Record<TranslationKey, string> = {
 	"sessionFiles.count": "{count} files",
 	"sessionFiles.saveAll": "Save all",
 	"sessionFiles.saveAllTitle": "Mark the current round as handled and clear the list (files were already written to disk by the agent; this is just a summary; new changes reappear)",
-	// Commit/push quick suggestion strip: appears above the composer when the final reply mentions committing/pushing; click sends directly
+	// Latest-reply actions: completion/interruption/request failure suggestions send directly without touching the draft
+	"replySuggest.aria": "Quick reply actions",
+	"replySuggest.continue": "Continue",
+	"replySuggest.continueText": "Please continue the current task from where you left off.",
+	"replySuggest.retry": "Retry",
+	"replySuggest.retryText": "The previous attempt failed. Please retry from the point of failure and complete the original task without repeating successful operations.",
 	"commitSuggest.aria": "Quick commit actions",
 	"commitSuggest.commit": "Commit",
 	"commitSuggest.commitText": "Please commit the current changes with a message following repository conventions.",

@@ -2,7 +2,7 @@ import { useAtomValue } from "jotai";
 import { selectAtom } from "jotai/utils";
 import { useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ComponentProps, ReactNode, RefObject } from "react";
+import type { ComponentProps, ReactNode, Ref, RefObject } from "react";
 import type { ChatMessage, ImageContent } from "../../../../shared/types";
 import { MarkdownStream } from "./MarkdownStream";
 import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
@@ -98,6 +98,8 @@ type TimelineInteractionProps = {
 	onQuickPrompt?: (prompt: string) => void;
 	/** 当前会话的阻塞式交互（如 ask_question），由时间线统一承载滚动与底部定位。 */
 	runtimeUi?: ReactNode;
+	/** 最新回复后唯一的动作落点；内容由本栏 composer 投入，不给历史每轮复制按钮。 */
+	replyActionsRef?: Ref<HTMLDivElement>;
 };
 
 export type SessionMessageTimelineProps = TimelineInteractionProps & {
@@ -1012,6 +1014,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 					    **旁插**在原生指示器之后 —— 保留原生形态，不顶替（§8.2 A 组 / §7.4 只追加）。
 					    无桥贡献时该组件返回 null，不占位。 */}
 					<BridgeWorkingLine sessionId={sessionId} />
+					{props.replyActionsRef ? <div key={sessionId} ref={props.replyActionsRef} data-session-id={sessionId} data-testid="session-reply-actions-target" className="min-w-0 empty:hidden" /> : null}
 				</div>
 			)}
 

@@ -871,7 +871,12 @@ export const zhCN = {
 	"sessionFiles.count": "{count} 个文件",
 	"sessionFiles.saveAll": "保存全部",
 	"sessionFiles.saveAllTitle": "标记本轮修改已处理并清空列表（文件已由 Agent 写入磁盘，这里只是汇总；下一轮修改会重新出现）",
-	// 提交/推送快捷建议条：最终回复提到提交/推送时出现在输入框上方，点击直发
+	// 最新回复尾部快捷操作：按完成/中断/请求失败显示建议，点击直发而不改草稿
+	"replySuggest.aria": "回复快捷操作",
+	"replySuggest.continue": "继续",
+	"replySuggest.continueText": "请继续处理当前任务，从上次结束处接着完成。",
+	"replySuggest.retry": "重试",
+	"replySuggest.retryText": "上一次处理失败了，请从失败处重试并继续完成原任务，不要重复已成功的操作。",
 	"commitSuggest.aria": "快捷提交操作",
 	"commitSuggest.commit": "提交",
 	"commitSuggest.commitText": "请提交当前改动：按仓库惯例写好提交信息。",
