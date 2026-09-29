@@ -2,17 +2,7 @@ import { memo } from "react";
 import { useAtomValue } from "jotai";
 import { streamingTextBySessionIdAtomFamily } from "../../atoms/session-atoms";
 import { MarkdownStream } from "./MarkdownStream";
-
-/** 与 TimelineFormat 同逻辑的内联副本（node 单测可直接加载，零外部依赖）。 */
-const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
-
-function stripAnsi(text: string): string {
-	return text.replace(ANSI_RE, "");
-}
-
-function stripThinkingTags(text: string): string {
-	return text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "").trim();
-}
+import { cleanAnswerText } from "./timeline/answerText.ts";
 
 /**
  * 中间回答视觉档位。
@@ -67,8 +57,8 @@ export const AnswerOutput = memo(function AnswerOutput(props: {
 	if (props.mode === "live") {
 		return <LiveAnswerBody sessionId={props.sessionId ?? ""} hidden={props.hidden} isStreaming={props.isStreaming} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />;
 	}
-	const cleanText = stripThinkingTags(stripAnsi(props.text ?? ""));
-	if (!cleanText.trim()) return null;
+	const cleanText = cleanAnswerText(props.text ?? "");
+	if (!cleanText) return null;
 	return (
 		<div className={answerOutputClassName(props.variant ?? "process")} data-message-id={props.messageId} data-is-streaming="0" data-variant={props.variant ?? "process"} data-settle={props.settle ? "1" : undefined} style={{ display: props.hidden ? "none" : undefined }}>
 			<MarkdownStream text={cleanText} isStreaming={false} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
@@ -83,7 +73,7 @@ export const AnswerOutput = memo(function AnswerOutput(props: {
 const LiveAnswerBody = memo(function LiveAnswerBody(props: { sessionId: string; hidden?: boolean; isStreaming?: boolean; onOpenExternal: (url: string, forceSystem?: boolean) => void; onOpenFile?: (path: string) => void }) {
 	const streaming = useAtomValue(streamingTextBySessionIdAtomFamily(props.sessionId));
 	const sourceText = streaming?.content ?? "";
-	const text = stripThinkingTags(stripAnsi(sourceText));
+	const text = cleanAnswerText(sourceText);
 	return (
 		<div className={answerOutputClassName("answer")} data-live-answer="true" data-is-streaming={props.isStreaming ? "1" : "0"} data-variant="answer" style={{ display: props.hidden ? "none" : undefined }}>
 			<MarkdownStream text={text} isStreaming={Boolean(props.isStreaming)} onOpenExternal={props.onOpenExternal} onOpenFile={props.onOpenFile} />
