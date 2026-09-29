@@ -3459,6 +3459,25 @@ export class AgentManager {
 	}
 
 	/**
+	 * rewind/git 快照的根目录必须是宿主路径。
+	 *
+	 * 背景：WSL 项目在 ProjectStore 里存 UNC（\\wsl.localhost\<distro>\...）或 /mnt/...，
+	 * 而 git 执行层按 cwd 分流（UNC → 发行版内 git；盘符 → Windows git，见 gitWsl.planGitSpawn）。
+	 * /mnt/<盘> 与 C:\ 指向同一份 Windows 盘文件，转宿主形态后交给 Windows git，
+	 * 与 Git 面板（gitIpc 的 projectHostPath）口径一致；WSL 内部项目保持 UNC 走发行版内 git。
+	 * 转换失败（跨发行版 UNC 等）退回原值，由执行层自行判断，不能让打点整体抛错。
+	 */
+	private rewindHostRoot(cwd: string, distro?: string): string {
+		const activeDistro = distro ?? this.wslEnvironment?.distro;
+		if (process.platform !== "win32" || !activeDistro) return cwd;
+		try {
+			return toWindowsHostPath(cwd, { distro: activeDistro });
+		} catch {
+			return cwd;
+		}
+	}
+
+	/**
 	 * rewind checkpoint 列表（refs/pi-checkpoints）。
 	 * root 取 agent 工作目录：纯 git 实现不依赖 pi 进程，即使 pi 没装 pi-rewind
 	 * 扩展，也能读到/回退同仓库里已存在的 checkpoint。过滤用 pi 的 sessionId
@@ -3469,7 +3488,8 @@ export class AgentManager {
 	 */
 	async listCheckpoints(agentId: string, params?: RewindCheckpointPageParams): Promise<RewindCheckpointPage> {
 		const runtime = this.requireRuntime(agentId);
-		const checkpoints = await loadAllCheckpoints(runtime.tab.cwd, runtime.tab.sessionId);
+		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
+		const checkpoints = await loadAllCheckpoints(root, runtime.tab.sessionId);
 		const all = checkpoints.map(toCheckpointSummary).sort((a, b) => b.timestamp - a.timestamp);
 		// 渲染层入参不可信：limit 钳制在 [1, 100]，beforeTimestamp 非有限数按未传处理。
 		const limit = Math.min(Math.max(1, Math.floor(params?.limit ?? 10)), 100);
@@ -3477,7 +3497,7 @@ export class AgentManager {
 		const filtered = all.filter((cp) => cp.timestamp < before);
 		// 附带自动打点健康状态：失败态渲染层显示警示条（此前失败完全静默，
 		// 用户以为有快照、真要回滚才发现列表是空的）。
-		const health = this.rewindHealthByRoot.get(runtime.tab.cwd);
+		const health = this.rewindHealthByRoot.get(root);
 		// 未传 limit（如 rewind-to-message 需要全量最近检查点）时返回全部；
 		// 否则按 limit 截取一页，并据此判断是否还有更早的检查点。
 		if (params?.limit === undefined) {
@@ -3493,7 +3513,7 @@ export class AgentManager {
 	/** checkpoint 与当前 index 树的 diff 摘要（回退预览：「回到这里会改哪些文件」）。 */
 	async getCheckpointDiff(agentId: string, checkpointId: string): Promise<string> {
 		const runtime = this.requireRuntime(agentId);
-		const root = runtime.tab.cwd;
+		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
 		const cp = await loadCheckpointFromRef(root, checkpointId);
 		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
 		const indexTree = await currentIndexTree(root);
@@ -3510,14 +3530,15 @@ export class AgentManager {
 	 */
 	async restoreCheckpoint(agentId: string, checkpointId: string, scope: RewindRestoreScope): Promise<RewindRestoreResult> {
 		const runtime = this.requireRuntime(agentId);
-		const cp = await loadCheckpointFromRef(runtime.tab.cwd, checkpointId);
+		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
+		const cp = await loadCheckpointFromRef(root, checkpointId);
 		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
 
 		const wantFiles = scope === "files" || scope === "all";
 		const wantConversation = scope === "conversation" || scope === "all";
 		// 会话回退先解析 fork 锚点（失败则整体拒绝，避免「文件已回退但会话没 fork」的半成功态）。
 		const forkEntryId = wantConversation ? await this.resolveForkEntryBeforeCheckpoint(agentId, cp.timestamp) : undefined;
-		if (wantFiles) await applyCheckpointRestore(runtime.tab.cwd, cp);
+		if (wantFiles) await applyCheckpointRestore(root, cp);
 		let forkedSessionId: string | undefined;
 		if (wantConversation && forkEntryId) {
 			const data = (await this.forkSession(agentId, forkEntryId)) as { targetSessionId?: string; [key: string]: unknown } | undefined;
@@ -3599,7 +3620,7 @@ export class AgentManager {
 	/** 实际执行打点：成功/失败都更新健康状态；完成后处理 pending 合并补拍。 */
 	private async runRewindCheckpoint(agentId: string, state: { lastAt: number; inFlight: boolean; pending: boolean; timer: NodeJS.Timeout | null }, toolName: string, turnIndex: number): Promise<void> {
 		const runtime = this.agents.get(agentId);
-		const root = runtime?.tab.cwd;
+		const root = runtime ? this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro) : undefined;
 		const sessionId = runtime?.tab.sessionId;
 		// agent 已停止/换 runtime：丢弃补拍（节流 map 已随生命周期清理兜底）。
 		if (!root || !sessionId) return;
@@ -3711,7 +3732,9 @@ export class AgentManager {
 	private activeSessionIdsForRoot(root: string): string[] {
 		const ids = new Set<string>();
 		for (const runtime of this.agents.values()) {
-			if (runtime?.tab.cwd === root && runtime.tab.sessionId) {
+			// 与 prune 传入的 root 同为宿主形态：WSL 项目的 tab.cwd 是存储形态（UNC 或 /mnt/...），
+			// 不归一化会与宿主 root 对不上，keep 集合漏掉同仓库活跃会话 → 并发会话被误删。
+			if (this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro) === root && runtime.tab.sessionId) {
 				ids.add(runtime.tab.sessionId);
 			}
 		}
@@ -4468,7 +4491,7 @@ export class AgentManager {
 			// 首轮 run 顺带清理非活跃会话的 checkpoint（fire-and-forget，
 			// keep 集合含当前会话，并发会话不误删；节流见方法内注释）。
 			if (runtime.tab.cwd && runtime.tab.sessionId) {
-				this.maybePruneOldSessionCheckpoints(runtime.tab.cwd, runtime.tab.sessionId);
+				this.maybePruneOldSessionCheckpoints(this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro), runtime.tab.sessionId);
 			}
 			runtime.tab.status = "running";
 			this.activeAssistantMessageIds.delete(agentId);
