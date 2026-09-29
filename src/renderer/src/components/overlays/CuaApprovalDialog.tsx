@@ -12,6 +12,8 @@ const LABELS = {
 	waiting: "等待审批",
 	actionLabel: "操作",
 	sessionLabel: "会话",
+	agentLabel: "Agent",
+	generationLabel: "代次",
 	detailLabel: "详情",
 	allow: "允许",
 	deny: "拒绝",
@@ -33,6 +35,8 @@ export type CuaApprovalPayload = {
 	requestId: string;
 	action: string;
 	sessionId: string;
+	agentId?: string;
+	runtimeGeneration?: number;
 	detail: unknown;
 	timestampMs: number;
 };
@@ -74,6 +78,18 @@ export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; r
 						<span className="shrink-0">{LABELS.sessionLabel}</span>
 						<span className="font-mono text-text-primary">{request.sessionId.slice(0, 8)}</span>
 					</span>
+					{request.agentId && (
+						<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
+							<span className="shrink-0">{LABELS.agentLabel}</span>
+							<span className="font-mono text-text-primary">{request.agentId}</span>
+						</span>
+					)}
+					{typeof request.runtimeGeneration === "number" && (
+						<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
+							<span className="shrink-0">{LABELS.generationLabel}</span>
+							<span className="font-mono text-text-primary">{request.runtimeGeneration}</span>
+						</span>
+					)}
 				</div>
 
 				{/* 详情区 */}

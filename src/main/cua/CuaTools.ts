@@ -113,15 +113,19 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 				double: z.boolean().default(false),
 				activateTarget: z.string().optional().describe("Optional target window title substring to activate before clicking."),
 				sessionId: z.string().describe("PiDeck session ID for approval gate."),
+				agentId: z.string().optional().describe("PiDeck agent id (approval attribution)."),
+				runtimeGeneration: z.number().int().optional().describe("Session runtime generation (approval attribution)."),
 			},
 		},
 		async (args) => {
+			const meta = { agentId: args.agentId, runtimeGeneration: args.runtimeGeneration };
 			const result = await engine.click(args.sessionId, args.x, args.y, args.button, {
 				activateTarget: args.activateTarget,
+				meta,
 			});
 
 			if (args.double && result.sent > 0) {
-				const second = await engine.click(args.sessionId, args.x, args.y, args.button);
+				const second = await engine.click(args.sessionId, args.x, args.y, args.button, { meta });
 				result.sent += second.sent;
 			}
 
@@ -152,6 +156,8 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 					.optional()
 					.describe("Modifiers for key combos."),
 				sessionId: z.string().describe("PiDeck session ID for approval gate."),
+				agentId: z.string().optional().describe("PiDeck agent id (approval attribution)."),
+				runtimeGeneration: z.number().int().optional().describe("Session runtime generation (approval attribution)."),
 			},
 		},
 		async (args) => {
@@ -159,7 +165,7 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 				text: args.text,
 				key: args.key,
 				modifiers: args.modifiers,
-			});
+			}, { meta: { agentId: args.agentId, runtimeGeneration: args.runtimeGeneration } });
 
 			return {
 				content: [
@@ -186,10 +192,14 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 				deltaY: z.number().int().default(-120).describe("Positive=scroll down, negative=scroll up."),
 				deltaX: z.number().int().default(0).describe("Horizontal scroll."),
 				sessionId: z.string().describe("PiDeck session ID for approval gate."),
+				agentId: z.string().optional().describe("PiDeck agent id (approval attribution)."),
+				runtimeGeneration: z.number().int().optional().describe("Session runtime generation (approval attribution)."),
 			},
 		},
 		async (args) => {
-			const result = await engine.scroll(args.sessionId, args.x, args.y, args.deltaY, args.deltaX);
+			const result = await engine.scroll(args.sessionId, args.x, args.y, args.deltaY, args.deltaX, {
+				meta: { agentId: args.agentId, runtimeGeneration: args.runtimeGeneration },
+			});
 
 			return {
 				content: [

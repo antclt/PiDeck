@@ -35,7 +35,7 @@ export {
 	type WindowInfo,
 } from "./CuaWin32";
 export { analyzeWindows, findWindowByTitle, getPrimaryDisplay, getForegroundWindowInfo, type OcclusionInfo, type DisplayInfo } from "./CuaWindowAnalyzer";
-export { CuaGate, type CuaActionType, type CuaGateDecision, type CuaGateConfig, type CuaApprovalRequest, type CuaApprovalResponse } from "./CuaGate";
+export { CuaGate, type CuaActionType, type CuaActionMeta, type CuaGateDecision, type CuaGateConfig, type CuaApprovalRequest, type CuaApprovalResponse } from "./CuaGate";
 export { CuaEngine, type CuaActionOptions, type CuaEngineConfig, type CuaActionResult } from "./CuaEngine";
 export { createCuaMcpServer } from "./CuaMcpServer";
 export { registerCuaTools } from "./CuaTools";

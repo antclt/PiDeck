@@ -28,8 +28,21 @@ export type CuaGateDecision = {
 export type CuaApprovalRequest = {
 	action: CuaActionType;
 	sessionId: string;
+	/** PiDeck agent id that issued the call (optional metadata). */
+	agentId?: string;
+	/** Runtime generation of the session at call time (optional metadata). */
+	runtimeGeneration?: number;
 	detail: unknown;
 	timestampMs: number;
+};
+
+/**
+ * Runtime identity attached to a gated action. Mirrors the AGENTS.md rule that
+ * runtime commands/events carry sessionId + agentId + runtimeGeneration.
+ */
+export type CuaActionMeta = {
+	agentId?: string;
+	runtimeGeneration?: number;
 };
 
 /** Result returned from the approval handler. */
@@ -76,8 +89,11 @@ export class CuaGate {
 
 	/**
 	 * Check whether an action is permitted for a given session.
+	 *
+	 * @param meta Optional runtime identity (agentId + runtimeGeneration) carried
+	 *   into the approval request so the renderer can show which agent asked.
 	 */
-	async check(action: CuaActionType, sessionId: string, detail: unknown): Promise<CuaGateDecision> {
+	async check(action: CuaActionType, sessionId: string, detail: unknown, meta?: CuaActionMeta): Promise<CuaGateDecision> {
 		// Read-only actions always pass.
 		if (READONLY_ACTIONS.has(action)) {
 			return { allowed: true };
@@ -103,6 +119,8 @@ export class CuaGate {
 		const requestBody: CuaApprovalRequest = {
 			action,
 			sessionId,
+			agentId: meta?.agentId,
+			runtimeGeneration: meta?.runtimeGeneration,
 			detail,
 			timestampMs: Date.now(),
 		};

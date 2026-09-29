@@ -1,7 +1,7 @@
 import koffi from "koffi";
 import { clickAt, GetForegroundWindow, HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, moveMouseAbsolute, pressKeyCombo, scrollAt, SetWindowPos, ShowWindow, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW, typeUnicode, VK_MAP, type WindowInfo } from "./CuaWin32";
 import { analyzeWindows, findWindowByTitle, getPrimaryDisplay, type OcclusionInfo } from "./CuaWindowAnalyzer";
-import { CuaGate, type CuaActionType } from "./CuaGate";
+import { CuaGate, type CuaActionMeta, type CuaActionType } from "./CuaGate";
 
 /**
  * High-level CUA engine: window activation, input injection, and state queries.
@@ -21,6 +21,8 @@ export type CuaActionOptions = {
 	activateTarget?: string;
 	/** If true, require that the action coordinate is not fully occluded. */
 	requireVisible?: boolean;
+	/** Runtime identity attached to the approval request. */
+	meta?: CuaActionMeta;
 };
 
 export type CuaEngineConfig = {
@@ -123,7 +125,7 @@ export class CuaEngine {
 	// -------------------------------------------------------------------------
 
 	async click(sessionId: string, x: number, y: number, button: "left" | "right" | "middle" = "left", options: CuaActionOptions = {}): Promise<CuaActionResult> {
-		const decision = await this.gate.check("click" as CuaActionType, sessionId, { x, y, button });
+		const decision = await this.gate.check("click" as CuaActionType, sessionId, { x, y, button }, options.meta);
 		if (!decision.allowed) {
 			return { sent: 0, error: decision.reason ?? "denied", gateDecision: "denied" };
 		}
@@ -147,8 +149,8 @@ export class CuaEngine {
 		return { sent: clickAt(x, y, button, display.width, display.height), gateDecision: "allowed" };
 	}
 
-	async type(sessionId: string, params: { text?: string; key?: string; modifiers?: string[] }): Promise<CuaActionResult> {
-		const decision = await this.gate.check("type" as CuaActionType, sessionId, params);
+	async type(sessionId: string, params: { text?: string; key?: string; modifiers?: string[] }, options: CuaActionOptions = {}): Promise<CuaActionResult> {
+		const decision = await this.gate.check("type" as CuaActionType, sessionId, params, options.meta);
 		if (!decision.allowed) {
 			return { sent: 0, error: decision.reason ?? "denied", gateDecision: "denied" };
 		}
@@ -173,8 +175,8 @@ export class CuaEngine {
 		return { sent: 0, error: "Either text or key must be provided" };
 	}
 
-	async scroll(sessionId: string, x: number, y: number, deltaY: number = -120, deltaX: number = 0): Promise<CuaActionResult> {
-		const decision = await this.gate.check("scroll" as CuaActionType, sessionId, { x, y, deltaY, deltaX });
+	async scroll(sessionId: string, x: number, y: number, deltaY: number = -120, deltaX: number = 0, options: CuaActionOptions = {}): Promise<CuaActionResult> {
+		const decision = await this.gate.check("scroll" as CuaActionType, sessionId, { x, y, deltaY, deltaX }, options.meta);
 		if (!decision.allowed) {
 			return { sent: 0, error: decision.reason ?? "denied", gateDecision: "denied" };
 		}
