@@ -70,11 +70,13 @@ import type { LogBundleExporter } from "../health/LogBundleExporter";
 
 /**
  * IPC 边界校验：RPC 日志条目必须字段齐全，防止渲染层传伪造对象写盘。
+ * direction 允许 model —— 模型请求快照（pi-deck-model-trace 转发）在时间线里就是该方向，
+ * 漏掉会把保存路径上的模型行全部丢弃（面板看着有、落盘后没有）。
  */
 function isRpcLogEntry(value: unknown): value is RpcLogEntry {
 	if (typeof value !== "object" || value === null) return false;
 	const entry = value as Record<string, unknown>;
-	return typeof entry.id === "string" && typeof entry.agentId === "string" && (entry.direction === "send" || entry.direction === "recv") && typeof entry.summary === "string" && typeof entry.time === "number";
+	return typeof entry.id === "string" && typeof entry.agentId === "string" && (entry.direction === "send" || entry.direction === "recv" || entry.direction === "model") && typeof entry.summary === "string" && typeof entry.time === "number";
 }
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
@@ -1157,6 +1159,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.rpcLogsGet, async (_event, options?: { target?: SessionRuntimeTarget; days?: number; limit?: number }) => rpcLogger.getFromFile({ agentId: resolveRpcRuntimeAgent(options?.target), days: options?.days, limit: options?.limit }));
 	// 实时查看弹窗的初始历史：直接读主进程环形缓冲，不读磁盘
 	ipcMain.handle(ipcChannels.rpcLogsGetLive, async (_event, agentId?: string) => rpcLogger.getLive(typeof agentId === "string" ? agentId : undefined));
+	// 模型请求快照：时间线里只存摘要，完整请求体按需回读（展开模型行时才拉，避免大 payload 进环形缓冲）
+	ipcMain.handle(ipcChannels.rpcLogsGetModelTrace, async (_event, options?: { agentId?: unknown; traceId?: unknown }) => {
+		const agentId = typeof options?.agentId === "string" ? options.agentId : "";
+		const traceId = typeof options?.traceId === "string" ? options.traceId : "";
+		if (!agentId || !traceId) return null;
+		return rpcLogger.readModelTrace(agentId, traceId);
+	});
 	// 实时查看弹窗“保存到文件”：直接合并写入该 agent 的自动日志文件（按 id 去重），
 	// 不再弹目录选择——开启记录后日志本就自动落盘，保存只是把弹窗内容对齐到文件。
 	// 返回实际写入的文件路径列表，供渲染层 toast 提示用户保存位置。

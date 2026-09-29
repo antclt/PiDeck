@@ -1,4 +1,6 @@
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
+import type { ModelTraceRecord, ModelTraceRequestInput } from "../../shared/types/bridge";
+import { ModelTraceStore } from "./ModelTrace";
 import { app } from "electron";
 import { appendFile, mkdir, readFile, readdir, rename, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -31,10 +33,16 @@ function formatDate(value: Date) {
  * - 次日自动 gzip 前一天文件，进一步压缩历史日志
  * - 超过 30 天自动清理
  * - 保持环形缓冲区（1000 条）供实时查看弹窗拉取初始历史
+ *
+ * 模型请求快照（`pi-deck-model-trace`）同属本服务的存储域：完整请求体另存
+ * userData/logs/model-traces（每 trace 一文件，见 ModelTraceStore），
+ * RPC 日志时间线里只放紧凑摘要。占用统计与清理因此按「RPC 日志」一个概念收口。
  */
 export class RpcLogger {
 	/** RPC 日志独立子目录，不和 app 日志混在一起 */
 	private readonly dir = join(app.getPath("userData"), "logs", "rpc");
+	/** 模型请求快照目录（完整请求体），与 rpc 目录平级 */
+	private readonly modelTraces = new ModelTraceStore(join(app.getPath("userData"), "logs", "model-traces"));
 	private live: RpcLogEntry[] = [];
 	/** 最近写入的日期，用于触发跨日 gzip */
 	private lastWriteDate = "";
@@ -177,7 +185,20 @@ export class RpcLogger {
 			.filter((e): e is RpcLogEntry => Boolean(e));
 	}
 
-	/** 获取 RPC 日志文件总大小（字节），可选按 agentId 过滤，含 gzip 文件 */
+	/**
+	 * 落盘一条模型请求快照的完整请求体（每 trace 一文件）。
+	 * 失败向上抛，调用方（AgentManager）吞掉 —— 日志功能不影响会话。
+	 */
+	async writeModelTrace(agentId: string, request: ModelTraceRequestInput): Promise<string> {
+		return this.modelTraces.write({ ...request, agentId });
+	}
+
+	/** 回读一条模型请求快照（面板展开模型行时按需拉取）；缺失/非法参数返回 null。 */
+	async readModelTrace(agentId: string, traceId: string): Promise<ModelTraceRecord | null> {
+		return this.modelTraces.read(agentId, traceId);
+	}
+
+	/** 获取 RPC 日志文件总大小（字节），可选按 agentId 过滤，含 gzip 文件与模型快照 */
 	async getSize(agentId?: string): Promise<number> {
 		await mkdir(this.dir, { recursive: true });
 		const files = this.listFiles(agentId);
@@ -190,14 +211,17 @@ export class RpcLogger {
 				/* skip */
 			}
 		}
+		// 模型快照（完整请求体）计入同一「RPC 日志」占用，否则重度会话里它在设置页完全隐形
+		total += await this.modelTraces.getSize(agentId).catch(() => 0);
 		return total;
 	}
 
-	/** 清空 RPC 日志文件，可选按 agentId 过滤，含 gzip 文件 */
+	/** 清空 RPC 日志文件（含模型快照），可选按 agentId 过滤，含 gzip 文件 */
 	async clear(agentId?: string): Promise<void> {
 		await mkdir(this.dir, { recursive: true });
 		const files = this.listFiles(agentId);
 		await Promise.all(files.map((file) => unlink(join(this.dir, file)).catch(() => undefined)));
+		await this.modelTraces.clear(agentId).catch(() => undefined);
 		if (agentId) {
 			this.live = this.live.filter((e) => e.agentId !== agentId);
 		} else {

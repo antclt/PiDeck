@@ -263,7 +263,8 @@ test("Sidebar leaf remains independent from App and keeps RPC logging query loca
 	assert.doesNotMatch(content, /from "\.\.\/\.\.\/App"/);
 	assert.match(controller, /getRpcLogging/);
 	assert.match(controller, /setAgentRpcLoggingById/);
-	assert.match(content, /RpcLogViewer/);
+	// 日志面板迁到右侧抽屉：侧栏只留打开命令，不再挂查看器组件
+	assert.doesNotMatch(content, /RpcLogViewer/);
 	assert.match(content, /SessionManagerModal/);
 	assert.match(content, /WorktreeCreateDialog/);
 });

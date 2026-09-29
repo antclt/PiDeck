@@ -47,7 +47,7 @@ import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtens
 import { createPiProcessSkillResolvers } from "../skills/piProcessSkillResolvers";
 import { createPiProcessPromptResolvers } from "../prompts/piProcessPromptResolvers";
 import { getBridgeServer } from "./bridge/BridgeServer";
-import type { BridgeEvent, BridgeUpdate } from "../../shared/types/bridge";
+import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../shared/types/bridge";
 import { describeExtensionFallbackSkip, formatExtensionFallbackDebug, resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason, shouldRetryWithoutExtensions } from "./extensionStartupFallback";
 import type { DisabledExtensionsReason } from "./extensionStartupFallback";
 import { formatExtensionErrorReason } from "./extensionError";
@@ -103,6 +103,7 @@ import type { SettingsStore } from "../settings/SettingsStore";
 import type { SecurityStore } from "../security/SecurityStore";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { RpcLogger } from "../logging/RpcLogger";
+import { buildModelTraceLogEntry } from "../logging/ModelTrace";
 import type { RpcLogBatch, RpcLogEntry } from "../../shared/types/rpcLog";
 import type { AppLogger } from "../logging/AppLogger";
 import { toWindowsHostPath, toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
@@ -659,12 +660,19 @@ export class AgentManager {
 	 * 桥扩展读 `PIDECK_BRIDGE_URL` / `PIDECK_BRIDGE_TOKEN`，把 pi 侧被 RPC 丢弃的
 	 * 声明式 UI 扩展点推给 PiDeck。端点未就绪（起不来）时返回 undefined，
 	 * 调用方不注入 → 桥静默不工作，pi 与 PiDeck 都照常（fail-safe，§14.5）。
+	 *
+	 * 同一 token 也承载 `pi-deck-model-trace` 的模型请求快照（/model-trace 子路由），
+	 * 与会话一体注册、一体注销。
 	 */
 	private registerBridgeSession(agentId: string): Record<string, string> | undefined {
 		try {
 			const server = getBridgeServer();
 			if (!server.ready) return undefined;
-			const { url, token } = server.registerAgent(agentId, (update) => this.handleBridgeUpdate(agentId, update));
+			const { url, token } = server.registerAgent(
+				agentId,
+				(update) => this.handleBridgeUpdate(agentId, update),
+				(trace) => this.handleModelTrace(agentId, trace),
+			);
 			return { PIDECK_BRIDGE_URL: url, PIDECK_BRIDGE_TOKEN: token };
 		} catch (error) {
 			void this.appLogger?.warn("agent", "GUI bridge session registration failed; bridge stays idle", {
@@ -672,6 +680,38 @@ export class AgentManager {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return undefined;
+		}
+	}
+
+	/**
+	 * 处理 pi 推来的一条模型请求快照（pi-deck-model-trace，走桥端点同链路）。
+	 *
+	 * 与 RPC 日志**同一开关**：未开启记录的 agent 直接丢弃（不落盘、不广播）。
+	 * 完整请求体写 model-traces 目录并在时间线里只留紧凑条目 —— 上百 KB 的
+	 * 请求体进环形缓冲/IPC 批次会把主进程与渲染层都拖垮。
+	 */
+	private handleModelTrace(agentId: string, trace: ModelTraceInput): void {
+		try {
+			if (!this.rpcLoggingAgents.has(agentId)) return;
+			const entry = buildModelTraceLogEntry(agentId, trace);
+			// 请求体只在 request 快照里；response 只有状态码与耗时（紧凑条目已含）
+			if (trace.kind === "request") {
+				void this.rpcLogger?.writeModelTrace(agentId, trace).catch((error) => {
+					void this.appLogger?.warn("agent", "Model trace write failed", {
+						agentId,
+						traceId: trace.traceId,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
+			}
+			this.rpcLogger?.push(entry);
+			this.enqueueLiveRpcLog(entry);
+		} catch (error) {
+			// 日志功能任何故障都不影响会话
+			void this.appLogger?.warn("agent", "model-trace handler failed", {
+				agentId,
+				error: error instanceof Error ? error.message : String(error),
+			});
 		}
 	}
 

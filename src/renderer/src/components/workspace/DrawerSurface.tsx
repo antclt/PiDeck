@@ -1,11 +1,13 @@
 import { BrowserSurface } from "./BrowserSurface";
 import { GitDrawerHost } from "./GitDrawerHost";
 import { RewindPanel } from "./RewindPanel";
+import { RpcLogPanel } from "./RpcLogPanel";
 import { DrawerContent } from "../app/AppParts";
 import { SessionTrajectoryPanel } from "../session/trajectory/SessionTrajectoryPanel";
 import { LazyWrapper } from "../../hooks/useLazyComponent";
 import { LoaderCircle } from "lucide-react";
 import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
+import type { RpcLogEntry } from "../../../../shared/types/rpcLog";
 import { sessionPillOf, type SessionFilterPill } from "../../sessionFilterPills";
 import { t } from "../../i18n";
 
@@ -37,6 +39,16 @@ export interface DrawerBrowserPort {
 	onCloseBrowser: () => void;
 	onMinimizeBrowser: () => void;
 	onEnterBrowserFullscreen: () => void;
+}
+
+export interface DrawerRpcLogPort {
+	/** 当前日志绑定的 agent；面板可见期间必须存在，否则什么都不渲染 */
+	agentId: string | undefined;
+	loadHistory: (agentId: string) => Promise<RpcLogEntry[]>;
+	getLogging: (agentId: string) => Promise<boolean>;
+	setLogging: (agentId: string, enabled: boolean) => Promise<boolean>;
+	/** 关闭日志面板：由 useWorkspacePanels 还原打开前的抽屉面板 */
+	onClose: () => void;
 }
 
 export interface DrawerFilesPort {
@@ -82,10 +94,11 @@ export interface DrawerSurfaceProps {
 	chrome: DrawerChromePort;
 	browser: DrawerBrowserPort;
 	files: DrawerFilesPort;
+	rpcLog: DrawerRpcLogPort;
 }
 
 export function DrawerSurface(props: DrawerSurfaceProps) {
-	const { drawer, drawerCollapsed, git, chrome, browser, files } = props;
+	const { drawer, drawerCollapsed, git, chrome, browser, files, rpcLog } = props;
 
 	return (
 		<>
@@ -102,6 +115,10 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 				<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
 					<BrowserSurface fullscreen={browser.browserFullscreen} onClose={browser.onCloseBrowser} onMinimize={browser.onMinimizeBrowser} onEnterFullscreen={browser.onEnterBrowserFullscreen} />
 				</div>
+			) : drawer === "rpcLog" && !drawerCollapsed ? (
+				// 实时日志面板（临时面板）：与消息区并排，边看日志边发消息；
+				// agentId 缺省（未打开）时不渲染，避免绑定到空 agent 的订阅。
+				<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">{rpcLog.agentId ? <RpcLogPanel agentId={rpcLog.agentId} loadHistory={rpcLog.loadHistory} getLogging={rpcLog.getLogging} setLogging={rpcLog.setLogging} onClose={rpcLog.onClose} /> : null}</div>
 			) : git.enableGitManagement && drawer === "git" && !drawerCollapsed && git.activeProjectId ? (
 				<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
 					<div className="git-drawer-stack">
@@ -120,7 +137,7 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 						</div>
 					</div>
 				</div>
-			) : drawer && drawer !== "browser" && drawer !== "git" && drawer !== "trajectory" ? (
+			) : drawer && drawer !== "browser" && drawer !== "git" && drawer !== "trajectory" && drawer !== "rpcLog" ? (
 				<LazyWrapper
 					// 滚动层上移到这里：files/sessions 面板自身不再滚动（见 timeline.css
 					// .files-panel/.sessions-panel 注释），占位与内容共用同一滚动容器，配合

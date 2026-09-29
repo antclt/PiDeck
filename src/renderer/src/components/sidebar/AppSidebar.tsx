@@ -53,6 +53,7 @@ export function AppSidebar(props: AppSidebarProps) {
 	const pinnedSessionIdsSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 	const controller = useSidebarController({
 		getRpcLogging: props.actions.rpc.getLogging,
+		openRpcLogViewer: props.actions.rpc.openViewer,
 		settingsExpandedProjectIds: props.settingsExpandedProjectIds,
 		settingsNavTab: props.settingsNavTab,
 		settingsPinnedSessionIds: props.settingsPinnedSessionIds,

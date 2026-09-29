@@ -525,6 +525,8 @@ export const ipcChannels = {
 	rpcLogsGet: "rpc-logs:get",
 	/** 读取主进程实时环形缓冲（最近 N 条） */
 	rpcLogsGetLive: "rpc-logs:get-live",
+	/** 回读一条模型请求快照的完整请求体（面板展开模型行时按需拉取） */
+	rpcLogsGetModelTrace: "rpc-logs:get-model-trace",
 	/** 将弹窗条目合并写入自动日志文件（按 id 去重） */
 	rpcLogsSave: "rpc-logs:save",
 	/** 清空 RPC 日志 */

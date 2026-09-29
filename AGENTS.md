@@ -20,11 +20,12 @@ PiDeck 是一个面向本地开发工作的 Electron 桌面应用，用于在多
 - 代码归属：pi SDK 入口/node 解析在 `src/main/pi/auth/piAuthHostLaunch.ts`（WSL 下明确不支持，UI 提示改用终端 `/login`）；进程生命周期与 NDJSON 协议在 `src/main/pi/auth/PiAuthService.ts`；助手本体是 `resources/pi-auth-host.mjs`（协议 v1，stdout 只放协议数据，日志走 stderr）。
 - 打包：`resources/pi-auth-host.mjs` 必须列进 `package.json` 的 `extraResources`，漏了打包版会报「应用缺少认证助手文件」。
 
-**第二条例外：GUI 扩展桥（`pi-deck-gui-bridge`，边界不得扩大）**
+**第二条例外：GUI 扩展桥（`pi-deck-gui-bridge` + `pi-deck-model-trace`，边界不得扩大）**
 
 - 为什么需要例外：pi 的 `ctx.ui` 声明式方法在 **RPC 模式下被降级成空实现**（`setFooter` / `setHeader` / `setWidget(组件)` / `setWorking*` / `setHiddenThinkingLabel` / `setEditorComponent` 等既不生效也不发事件，见 pi 官方 `docs/rpc-extension-ui.md`）。RPC 客户端无法从 stdio 事件里恢复这些 UI，要接回它们只能在 **pi 进程内**拦截共享的 `ctx.ui`。
 - 允许的做法：主进程起一个只绑 `127.0.0.1` 的端点（`src/main/pi/bridge/BridgeServer.ts`，每 agent 一份 token，spawn 时注入 `PIDECK_BRIDGE_URL` / `PIDECK_BRIDGE_TOKEN`）；pi 侧由随包分发、经 `-e` 注入的桥扩展（`resources/extensions/pi-deck-gui-bridge*.ts`）把声明式 UI 帧推给 PiDeck、把交互事件取回去。渲染层只用 `agents:ui-request` 既有通道，不新开 IPC 域。
-- 边界：这条通道**只允许声明式 UI 帧与交互事件**，禁止扩成通用 pi API 桥（不要拿它去调会话 / 工具 / 模型 / 文件系统）；线格式以 `src/shared/types/bridge.ts` 为宿主侧唯一来源，桥侧 `resources/extensions/pi-deck-gui-bridge-types.ts` 必须逐字段对齐，改动由 `tests/guiBridge*.test.mjs` 的字段断言兜底。
+- 允许的做法（第二用途，2026-09 起）：同一 token 的 **`/bridge/<token>/model-trace` 子路由**承载**模型请求快照** —— `resources/extensions/pi-deck-model-trace.ts` 在 `before_provider_request` 钩子里把 pi 即将发给供应商的请求体（system prompt/上下文/工具表）单向推给 PiDeck（RPC 日志「模型」视图；完整请求体落 `userData/logs/model-traces/`，时间线只留摘要 + traceId，展开时才按 `ipcChannels.rpcLogsGetModelTrace` 回读）。
+- 边界：这条通道**只允许声明式 UI 帧、交互事件与模型请求快照（model-trace 子路由）**，禁止扩成通用 pi API 桥（不要拿它去调会话 / 工具 / 文件系统；model-trace 只收 `ModelTraceInput` 一种形状，不含请求头/鉴权）；线格式以 `src/shared/types/bridge.ts` 为宿主侧唯一来源，桥侧 `resources/extensions/pi-deck-gui-bridge-types.ts` 必须逐字段对齐，改动由 `tests/guiBridge*.test.mjs` 与 `tests/modelTraceExtension.test.mjs` 的字段断言兜底。
 - 已知耦合（唯一一处）：`resources/extensions/pi-deck-gui-bridge-tui.ts` 用宿主注入的 `PIDECK_BRIDGE_PI_PATH` + `createRequire` 解析 **pi 内部的 pi-tui**（要的是与 pi 同一份模块实例，不能自己装一份）。pi 升级若挪动 pi-tui 位置，只影响桥的组件适配层，且必须降级为「该组件渲染不出」而不是报错。
 - fail-safe：端点起不来 → 不注入 env → 桥静默不工作；桥扩展抛错 → 最多让某个落点缺席；两种情况都**不得影响 pi 会话与 PiDeck 其余功能**。
 - 生命周期配对：`BridgeServer` 的会话表必须与 agent 同生共死（`registerAgent` ↔ `unregisterAgent`），stop / restart / 会话删除 / 应用退出路径都要注销（统一走 `AgentManager.unregisterBridgeSession`）。

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "cf431ee5b45f03c55c0729553a704f3b68950a65ba5e7f703cb4dc8b534d4862",
-  "fileCount": 25,
+  "bundleSha256": "6c4d84d462217ba9c563209bc32ecab678f8a17cf1dfc8a3ac6674d2972a9b26",
+  "fileCount": 26,
   "files": [
     {
       "name": "pi-deck-ask-question.ts",
@@ -68,6 +68,11 @@
       "name": "pi-deck-gui-bridge.ts",
       "sha256": "3d20778220a602f4349267cf1f5a1f0b9d7aefc9d55f628af922c11d20e54a9f",
       "bytes": 9797
+    },
+    {
+      "name": "pi-deck-model-trace.ts",
+      "sha256": "12735b789e3c36d42c539da83600bcfb9d1a2bfe1a47698947e035664ca50657",
+      "bytes": 9197
     },
     {
       "name": "pi-deck-nul-redirect-fix.ts",

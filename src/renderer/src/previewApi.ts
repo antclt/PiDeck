@@ -915,6 +915,7 @@ export function createPreviewApi(): PiDesktopApi {
 			getSize: async () => 0,
 			get: async () => [],
 			getLive: async () => [],
+			getModelTrace: async () => null,
 			save: async () => [],
 			onLog: (_callback: unknown) => () => {},
 			clear: async () => undefined,

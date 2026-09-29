@@ -3,6 +3,7 @@ import { ipcChannels } from "../shared/ipc";
 import type { TokendanceAuthMode } from "../shared/tokendance";
 import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
+import type { ModelTraceRecord } from "../shared/types/bridge";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { DshHomeSharingState } from "../shared/types/dshHome";
 import type { UserDataNameMigrationNotice } from "../shared/types/userDataMigration";
@@ -880,6 +881,8 @@ const api = {
 		get: (options?: { target?: SessionRuntimeTarget; days?: number; limit?: number }) => ipcRenderer.invoke(ipcChannels.rpcLogsGet, options) as Promise<RpcLogEntry[]>,
 		/** 实时查看弹窗初始历史：主进程环形缓冲（按 agentId 过滤） */
 		getLive: (agentId?: string) => ipcRenderer.invoke(ipcChannels.rpcLogsGetLive, agentId) as Promise<RpcLogEntry[]>,
+		/** 模型请求快照的完整请求体（面板展开模型行时按 traceId 回读；缺失返回 null） */
+		getModelTrace: (options: { agentId: string; traceId: string }) => ipcRenderer.invoke(ipcChannels.rpcLogsGetModelTrace, options) as Promise<ModelTraceRecord | null>,
 		/** 把弹窗中的日志条目合并写入该 agent 的自动日志文件（按 id 去重），返回写入的文件路径列表 */
 		save: (options: { entries: RpcLogEntry[] }) => ipcRenderer.invoke(ipcChannels.rpcLogsSave, options) as Promise<string[]>,
 		/** 订阅主进程批量推送的实时日志（按 agent 聚合，~80ms 一次），返回退订函数 */

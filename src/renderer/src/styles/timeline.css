@@ -833,8 +833,8 @@
 
 /* ── 会话管理弹框 ── */
 /* #115 U5 收尾：迁移到 shadcn Dialog 后的内嵌形态——
-   尺寸/边框/圆角/阴影由 DialogContent 接管，保留 flex 布局与后代样式作用域 */
-.rpc-log-modal--embedded,
+   尺寸/边框/圆角/阴影由 DialogContent 接管，保留 flex 布局与后代样式作用域。
+   （RPC 日志已改为抽屉面板 rpc-log-panel，不再有 rpc-log-modal--embedded） */
 .update-modal--embedded {
   width: auto;
   height: auto;

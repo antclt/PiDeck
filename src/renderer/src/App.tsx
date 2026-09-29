@@ -3138,6 +3138,8 @@ export function App() {
 				const target = getRuntimeTargetForAgent(agentId);
 				return target ? api.rpcLogs.get({ target }) : Promise.resolve([]);
 			},
+			// 日志面板 = 右侧抽屉的临时面板：非模态，可与消息区同时使用（旧弹窗打开时发不了消息）
+			openViewer: (agentId) => workspace.openRpcLogPanel(agentId),
 		},
 	};
 
@@ -3858,6 +3860,11 @@ export function App() {
 		minimizeBrowser: () => workspace.minimizeBrowser(),
 		enterBrowserFullscreen: () => workspace.enterBrowserFullscreen(),
 		browserFullscreen,
+		rpcLogAgentId: workspace.rpcLogAgentId,
+		rpcLogListLogs: sidebarActions.rpc.listLogs,
+		rpcLogGetLogging: sidebarActions.rpc.getLogging,
+		rpcLogSetLogging: sidebarActions.rpc.setLogging,
+		closeRpcLogPanel: workspace.closeRpcLogPanel,
 		sessionsProject,
 		sessionsProjectId,
 		files,
@@ -4043,7 +4050,7 @@ export function App() {
 							]}
 						/>
 					}
-					drawerContent={(visibleDrawerPanel) => <DrawerSurface drawer={visibleDrawerPanel} drawerCollapsed={drawerCollapsed} git={drawerPorts.git} chrome={drawerPorts.chrome} browser={drawerPorts.browser} files={drawerPorts.files} />}
+					drawerContent={(visibleDrawerPanel) => <DrawerSurface drawer={visibleDrawerPanel} drawerCollapsed={drawerCollapsed} git={drawerPorts.git} chrome={drawerPorts.chrome} browser={drawerPorts.browser} files={drawerPorts.files} rpcLog={drawerPorts.rpcLog} />}
 					setListCollapsed={setListCollapsed}
 					setListWidth={setListWidth}
 					setDrawerCollapsed={setDrawerCollapsed}

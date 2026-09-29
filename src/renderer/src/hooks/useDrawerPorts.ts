@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import type { WorkspaceDrawerPanel } from "./useWorkspacePanels";
 import type { SessionFilterPill } from "../sessionFilterPills";
 import { openGitFileInEditor } from "../utils/gitFileOpen";
-import type { DrawerGitPort, DrawerChromePort, DrawerBrowserPort, DrawerFilesPort } from "../components/workspace/DrawerSurface";
+import type { RpcLogEntry } from "../../../shared/types/rpcLog";
+import type { DrawerGitPort, DrawerChromePort, DrawerBrowserPort, DrawerFilesPort, DrawerRpcLogPort } from "../components/workspace/DrawerSurface";
 
 interface UseDrawerPortsInput {
 	// Git
@@ -28,6 +29,16 @@ interface UseDrawerPortsInput {
 	closeBrowser: () => void;
 	minimizeBrowser: () => void;
 	enterBrowserFullscreen: () => void;
+
+	// RPC log（临时面板：agent 绑定 + 关闭还原，由 useWorkspacePanels 管开关）
+	/** 当前日志面板绑定的 agent；undefined = 未打开 */
+	rpcLogAgentId: string | undefined;
+	/** 从磁盘补回缓冲之外的旧日志（会话右键入口） */
+	rpcLogListLogs: (agentId: string) => Promise<RpcLogEntry[]>;
+	rpcLogGetLogging: (agentId: string) => Promise<boolean>;
+	rpcLogSetLogging: (agentId: string, enabled: boolean) => Promise<boolean>;
+	/** 关闭日志面板并还原打开前的抽屉面板 */
+	closeRpcLogPanel: () => void;
 
 	// Browser
 	browserFullscreen: boolean;
@@ -99,6 +110,14 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
 			onEnterBrowserFullscreen: input.enterBrowserFullscreen,
 		};
 
+		const rpcLog: DrawerRpcLogPort = {
+			agentId: input.rpcLogAgentId,
+			loadHistory: input.rpcLogListLogs,
+			getLogging: input.rpcLogGetLogging,
+			setLogging: input.rpcLogSetLogging,
+			onClose: input.closeRpcLogPanel,
+		};
+
 		const files: DrawerFilesPort = {
 			sessionsProject: input.sessionsProject,
 			sessionsProjectId: input.sessionsProjectId,
@@ -132,7 +151,7 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
 			onMoveFiles: input.onMoveFiles,
 		};
 
-		return { git, chrome, browser, files };
+		return { git, chrome, browser, files, rpcLog };
 	}, [
 		input.enableGitManagement,
 		input.activeProjectId,
@@ -154,6 +173,11 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
 		input.minimizeBrowser,
 		input.enterBrowserFullscreen,
 		input.browserFullscreen,
+		input.rpcLogAgentId,
+		input.rpcLogListLogs,
+		input.rpcLogGetLogging,
+		input.rpcLogSetLogging,
+		input.closeRpcLogPanel,
 		input.sessionsProject,
 		input.sessionsProjectId,
 		input.files,

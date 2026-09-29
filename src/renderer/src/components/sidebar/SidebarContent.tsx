@@ -2,7 +2,6 @@ import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monito
 import { useEffect, useState, type ReactNode } from "react";
 import type { AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog, RpcLogOpenedDialog } from "./SidebarParts";
-import { RpcLogViewer } from "./RpcLogViewer";
 import { sessionRecordToSummary } from "../../atoms";
 import { hasPendingUpdateAtom, pendingAppUpdateAtom, pendingCatalogUpdateAtom, pendingPiUpdateAtom, updateStatusAtom } from "../../atoms/update-atoms";
 import { useAtomValue } from "jotai";
@@ -11,7 +10,8 @@ import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { resolveSessionRunState, sessionRunCapabilities, type SessionRunAction } from "../../utils/sessionCommands";
-import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController, type SidebarRpcLog } from "../../hooks/useSidebarController";
+import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController } from "../../hooks/useSidebarController";
+import type { RpcLogEntry } from "../../../../shared/types/rpcLog";
 import type { SidebarRunControl } from "./SidebarComponents";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { DshSearchResults } from "./DshSearchResults";
@@ -114,7 +114,9 @@ export type SidebarActions = {
 	rpc: {
 		getLogging: (agentId: string) => Promise<boolean>;
 		setLogging: (agentId: string, enabled: boolean) => Promise<boolean>;
-		listLogs: (agentId: string) => Promise<SidebarRpcLog[]>;
+		listLogs: (agentId: string) => Promise<RpcLogEntry[]>;
+		/** 打开实时日志面板（右侧抽屉承载）；侧栏只发打开命令，不负责关闭 */
+		openViewer: (agentId: string) => void;
 	};
 };
 
@@ -790,8 +792,8 @@ export function SidebarContent(props: SidebarContentProps) {
 			{controller.worktreeCreateProjectId && (
 				<WorktreeCreateDialog projectId={controller.worktreeCreateProjectId} creating={Boolean(props.creatingWorktree)} onCreate={(branchName) => void actions.worktrees.create(controller.worktreeCreateProjectId!, branchName).then(controller.closeWorktreeCreate)} onClose={controller.closeWorktreeCreate} />
 			)}
-			{controller.rpcLogAgentId && <RpcLogViewer agentId={controller.rpcLogAgentId} loadHistory={actions.rpc.listLogs} getLogging={actions.rpc.getLogging} setLogging={actions.rpc.setLogging} onClose={controller.closeRpcLogs} />}
-			{/* “RPC 日志已打开”提醒：点击菜单后弹框，可直达日志查看弹窗 */}
+			{/* 实时日志面板挂在右侧工作区抽屉（App 层 rpcLog 面板），侧栏不再挂查看器 */}
+			{/* “RPC 日志已打开”提醒：点击菜单后弹框，可直达日志面板 */}
 			{rpcLogOpenedAgentId && (
 				<RpcLogOpenedDialog
 					onView={() => {
