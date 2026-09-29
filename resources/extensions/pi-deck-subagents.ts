@@ -110,9 +110,23 @@ export function reduceSnapshot(
 			const fields = extractFields(data);
 			if (!fields.id) return { state, changed: false };
 			const existing = state.get(fields.id);
-			if (!existing) return { state, changed: false };
-			if (existing.status === "running") return { state, changed: false };
+			if (existing?.status === "running") return { state, changed: false }; // 重复 started 幂等
 			const next = cloneState(state);
+			if (!existing) {
+				// 前台子代理（spawnAndWait，isBackground=false）不经过 created：插件只在后台派发时发 created。
+				// 无此 upsert 时运行期间快照 agents 为空，面板整块不渲染，直到终态事件（自带完整字段的 upsert 分支）才出现条目。
+				// started 载荷只有 {id,type,description}：startedAt 用到达时刻近似，与 created 分支 fields.startedAt || Date.now() 的口径一致。
+				next.set(fields.id, {
+					id: fields.id,
+					type: fields.type ?? "",
+					description: fields.description ?? "",
+					status: "running",
+					toolUses: fields.toolUses ?? 0,
+					tokens: fields.tokens ?? 0,
+					startedAt: fields.startedAt || Date.now(),
+				});
+				return { state: next, changed: true };
+			}
 			next.set(fields.id, { ...existing, status: "running" });
 			return { state: next, changed: true };
 		}
