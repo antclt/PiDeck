@@ -1,0 +1,122 @@
+/**
+ * CuaService — main-process assembly for the CUA capability (Plan A / T7).
+ *
+ * Responsibilities:
+ *   - Own the singleton CuaGate + CuaEngine.
+ *   - Start the in-process MCP Streamable HTTP host (CuaMcpHttpHost) on
+ *     127.0.0.1 with a random bearer token.
+ *   - Wire the gate's approval handler to the renderer dialog via CuaIpcManager.
+ *   - Register/unregister the `pideck-cua` MCP entry in ~/.pi/agent/mcp.json.
+ *
+ * Lifecycle is driven by the `cuaEnabled` setting: the host only listens (and
+ * the pi MCP entry only exists) while CUA is enabled. This keeps the default
+ * posture "off": no listener, no pi config mutation.
+ *
+ * Everything Electron-specific lives in CuaIpcManager, so this module is a thin
+ * orchestrator that the main index can register with quitCleanup.
+ */
+
+import { randomBytes } from "node:crypto";
+import type { BrowserWindow } from "electron";
+import { CuaEngine } from "./CuaEngine";
+import { CuaGate } from "./CuaGate";
+import { CuaMcpHttpHost } from "./CuaMcpHttpHost";
+import { ensureCuaMcpRegistered, unregisterCuaMcp } from "./CuaMcpRegistration";
+import { CuaIpcManager, type CuaIpcDeps } from "../ipc/cuaIpc";
+
+export type CuaServiceDeps = {
+  /** Current main window (may be null before/after window lifecycle). */
+  getMainWindow: () => BrowserWindow | null;
+  /** Structured logger. */
+  log: (domain: string, message: string, details?: Record<string, unknown>) => void;
+};
+
+export class CuaService {
+  private deps: CuaServiceDeps;
+  private gate: CuaGate;
+  private engine: CuaEngine;
+  private ipc: CuaIpcManager;
+  private host: CuaMcpHttpHost | null = null;
+  private running = false;
+
+  constructor(deps: CuaServiceDeps) {
+    this.deps = deps;
+    this.gate = new CuaGate({ enabled: true });
+    this.engine = new CuaEngine({ defaultDelayMs: 80 }, this.gate);
+
+    const ipcDeps: CuaIpcDeps = {
+      gate: this.gate,
+      mainWindow: deps.getMainWindow,
+      log: deps.log,
+    };
+    this.ipc = new CuaIpcManager(ipcDeps);
+    this.ipc.register();
+
+    // Route approvals straight to the renderer dialog (in-process, no HTTP hop).
+    this.gate.setApprovalHandler(this.ipc.createApprovalHandler());
+  }
+
+  isRunning(): boolean {
+    return this.running;
+  }
+
+  /** Start the HTTP host and register with pi. Idempotent. */
+  async start(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+
+    const authToken = randomBytes(32).toString("hex");
+    this.host = new CuaMcpHttpHost(
+      { port: 0, authToken },
+      {
+        engine: this.engine,
+        gate: this.gate,
+        onLog: (level, message) => this.deps.log("cua", message, { level }),
+      },
+    );
+
+    try {
+      await this.host.start();
+      const url = this.host.getUrl();
+      if (url) {
+        const result = ensureCuaMcpRegistered({ url, bearerToken: authToken });
+        this.deps.log("cua", `CUA MCP registered at ${url}`, { written: result.written });
+      }
+    } catch (error) {
+      this.running = false;
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.log("cua", `CUA service start failed: ${message}`);
+      throw error;
+    }
+  }
+
+  /** Stop the host and unregister from pi. Idempotent. */
+  async stop(): Promise<void> {
+    if (!this.running) return;
+    this.running = false;
+
+    try {
+      unregisterCuaMcp();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.log("cua", `CUA MCP unregister failed: ${message}`);
+    }
+
+    const host = this.host;
+    this.host = null;
+    if (host) {
+      try {
+        await host.stop();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.deps.log("cua", `CUA HTTP host stop failed: ${message}`);
+      }
+    }
+  }
+
+  /** Full teardown for app quit. */
+  async dispose(): Promise<void> {
+    await this.stop();
+    this.ipc.dispose();
+  }
+}

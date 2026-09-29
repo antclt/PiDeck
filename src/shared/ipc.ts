@@ -932,4 +932,14 @@ export const ipcChannels = {
 	channelSwitchGetStatus: "channel-switch:get-status",
 	/** 主进程 → 渲染层：通道切换状态机快照推送（querying/available/downloading/ready/error）。 */
 	channelSwitchStateChanged: "channel-switch:state-changed",
+
+	// ===== CUA 审批门（Plan A：MCP 主进程内托管，审批直连 IPC） =====
+	/** 主进程 → 渲染层：推审批请求（action/sessionId/detail/timestampMs）。 */
+	cuaApprovalRequest: "cua:approval-request",
+	/** 渲染层 → 主进程：回传审批结果（allowed/reason）。 */
+	cuaApprovalResponse: "cua:approval-response",
+	/** 渲染层 → 主进程：拉取 CUA 全局/会话开关状态。 */
+	cuaGetState: "cua:get-state",
+	/** 渲染层 → 主进程：设置 CUA 全局/会话开关。 */
+	cuaSetState: "cua:set-state",
 } as const;

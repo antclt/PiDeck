@@ -11,6 +11,7 @@ import { registerSoundIpc } from "./ipc/soundIpc";
 import { registerSoundProtocol } from "./sounds/soundProtocol";
 import { AnnouncementService } from "./announcements/AnnouncementService";
 import { registerAnnouncementIpc } from "./ipc/announcementIpc";
+import { CuaService } from "./cua/CuaService";
 import { AutomationStore } from "./automation/AutomationStore";
 import { AutomationScheduler } from "./automation/AutomationScheduler";
 import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
@@ -429,6 +430,8 @@ let petSystem: PetSystem | null = null;
 let soundAlertService: SoundAlertService | null = null;
 /** 应用公告服务（无服务器拉取模式）；null = 未初始化 */
 let announcementService: AnnouncementService | null = null;
+/** CUA（Computer Use Agent）服务；null = 未初始化 */
+let cuaService: CuaService | null = null;
 /** 定时任务与自动化服务；null = 未初始化 */
 let automationStore: AutomationStore | null = null;
 let automationScheduler: AutomationScheduler | null = null;
@@ -3178,6 +3181,15 @@ function registerIpc() {
 		reactToPetSettings: async (prev, next) => {
 			await petSystem?.reactToSettings(prev, next);
 		},
+		// CUA 开关：开启时启动进程内 MCP 端点并写入 pi 的 mcp.json，关闭时停端点并注销。
+		reactToCuaSettings: async (prev, next) => {
+			if (!cuaService || prev.cuaEnabled === next.cuaEnabled) return;
+			if (next.cuaEnabled) {
+				await cuaService.start();
+			} else {
+				await cuaService.stop();
+			}
+		},
 		applyNativeThemeSource,
 		refreshTrayContextMenu,
 		// 语言变更时按当前主进程 locale 重算，忽略 systemIpc 传入的占位参数
@@ -4541,6 +4553,24 @@ app
 		quitCleanup.register("announcement", () => {
 			announcementService?.stop();
 			announcementService = null;
+		});
+
+		// CUA（Computer Use Agent）：观察屏幕 + 注入鼠标/键盘输入，供 pi Agent 通过
+		// `pideck-cua` MCP（主进程内 StreamableHTTP 端点）调用。默认关闭（cuaEnabled=false）：
+		// 只有开启时才监听本地端点并写入 ~/.pi/agent/mcp.json，关闭时零副作用（不监听、不改 pi 配置）。
+		// 真实输入注入另有「每次操作审批门 + 全局/会话杀开关」双重兜底（见 cua/CuaGate.ts）。
+		cuaService = new CuaService({
+			getMainWindow: () => mainWindow,
+			log: (domain, message, details) => void appLogger.info(domain, message, details),
+		});
+		if (settingsStore.get().cuaEnabled) {
+			void cuaService.start().catch((error) => {
+				void appLogger.warn("cua", "CUA service start failed", error);
+			});
+		}
+		quitCleanup.register("cua", () => {
+			void cuaService?.dispose();
+			cuaService = null;
 		});
 
 		// 启动后异步检查 RPC 超时时间，如果小于 600 秒则自动修正为 600 秒

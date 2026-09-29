@@ -322,6 +322,15 @@ export type AppSettings = {
 	/** 闲置判定时长（分钟），默认 60：agent 连续闲置超过该时长才可被释放 */
 	idleAgentTimeoutMin: number;
 
+	// ── CUA（Computer Use Agent）：让 Agent 观察屏幕并注入鼠标/键盘输入 ──
+	/**
+	 * 是否启用 CUA 能力，默认 false。
+	 * 开启后主进程才会监听本地 MCP HTTP 端点并把 `pideck-cua` 写入
+	 * ~/.pi/agent/mcp.json；关闭时不监听、不改动 pi 配置（默认姿态为「关」）。
+	 * 真实输入注入另有每次操作审批门 + 全局/会话杀开关双重兜底。
+	 */
+	cuaEnabled: boolean;
+
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
 	favoriteModels: string[];

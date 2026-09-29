@@ -175,6 +175,8 @@ let previewSettings: AppSettings = {
 	idleAgentAutoRelease: true,
 	idleAgentKeepCount: 5,
 	idleAgentTimeoutMin: 60,
+	// CUA 默认关闭：预览壳与主进程 SettingsStore 默认保持一致
+	cuaEnabled: false,
 	favoriteModels: [],
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],
@@ -1747,6 +1749,12 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			previewCron: async () => ({ valid: true, nextRuns: [] }),
 			onChanged: () => () => {},
+		},
+		cua: {
+			onApprovalRequest: () => () => {},
+			sendApprovalResponse: async () => {},
+			getState: async () => ({ enabled: false, sessionOverrides: {} }),
+			setState: async () => ({ enabled: false, sessionOverrides: {} }),
 		},
 	};
 }

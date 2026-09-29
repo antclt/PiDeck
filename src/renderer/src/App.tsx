@@ -152,6 +152,7 @@ import { WorkbenchContent } from "./components/workspace/WorkbenchContent";
 import { RenameModals } from "./components/RenameModals";
 import { SessionActionOverlays } from "./components/overlays/SessionActionOverlays";
 import { SessionProxyDialog } from "./components/session/SessionProxyDialog";
+import { CuaApprovalDialog, useCuaApproval } from "./components/overlays/CuaApprovalDialog";
 
 import { ImportOverlayHost } from "./components/overlays/ImportOverlayHost";
 import { EnvironmentOverlay } from "./components/overlays/EnvironmentOverlay";
@@ -740,6 +741,7 @@ export function App() {
 		idleAgentAutoRelease: true,
 		idleAgentKeepCount: 5,
 		idleAgentTimeoutMin: 60,
+		cuaEnabled: false,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
@@ -919,6 +921,8 @@ export function App() {
 	const pendingAgentsRef = useRef<PendingAgentTab[]>([]);
 
 	const scratchPad = useScratchPad();
+	// CUA 操作审批：根级订阅主进程推送的审批请求并渲染确认弹框（事件驱动，全局唯一一份）。
+	const cuaApproval = useCuaApproval();
 	// DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
 	// 必须早于任何按安装态门控的 UI 计算，否则首帧会用 checking 初值渲染。
 	useDshRuntimeStatusSync();
@@ -4333,6 +4337,16 @@ export function App() {
 				{/* 数据环境弹窗族：首启数据模式选择（内含导入向导）与目录标记警告，事件/atom 驱动 */}
 				<DataModeChoiceDialog />
 				<DataEnvMismatchDialog />
+
+				{/* CUA 操作审批弹框：pi Agent 注入鼠标/键盘前的用户确认（事件驱动，根级渲染） */}
+				<CuaApprovalDialog
+					request={cuaApproval.request}
+					responding={cuaApproval.responding}
+					open={cuaApproval.open}
+					onOpenChange={cuaApproval.setOpen}
+					onRespond={(allowed) => void cuaApproval.respond(allowed)}
+					onCancel={cuaApproval.cancel}
+				/>
 			</>
 		</FileLinkBaseProvider>
 	);

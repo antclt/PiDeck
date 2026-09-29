@@ -210,6 +210,9 @@ Gitmoji 对应关系：
 	idleAgentKeepCount: 5,
 	idleAgentTimeoutMin: 60,
 
+	// CUA 默认关闭：关闭时不监听本地端点、不改动 pi 的 mcp.json，与现状完全一致
+	cuaEnabled: false,
+
 	favoriteModels: [],
 	// 提供商与模型显示开关默认全显示：隐藏列表为空 = 不隐藏任何提供商/模型
 	hiddenProviders: [],
@@ -519,6 +522,10 @@ export class SettingsStore {
 		// IPC 入参不可信：自动标题开关只接受布尔值，非法值保持原有设置。
 		if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
 			delete safePatch.autoSessionTitle;
+		}
+		// CUA 开关来自渲染层，入参不可信：只接受布尔值，非法值保持原有设置。
+		if ("cuaEnabled" in safePatch && typeof safePatch.cuaEnabled !== "boolean") {
+			delete safePatch.cuaEnabled;
 		}
 		if ("navigationMode" in safePatch && safePatch.navigationMode !== "tabs" && safePatch.navigationMode !== "simple") {
 			delete safePatch.navigationMode;
