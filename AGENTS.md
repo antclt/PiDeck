@@ -259,6 +259,8 @@ src/
 21. **路径与命令**：禁止硬编码 `/` 或 `\`；shell 检测、外部编辑器、git 路径查找必须覆盖 win/mac/linux（含 WSL 场景，见 `wslExe.ts`）。
 22. **平台 workaround 集中管理**：如 `linuxDisplayBackend.ts`，平台特判写在专属模块并注明触发条件，不散落在业务代码里。
 23. **Windows 特有问题优先怀疑**：路径空格、杀毒软件锁文件、长路径、权限弹窗；Windows 上的"偶发失败"大多不是偶发，日志要带足上下文。
+24. **WSL 项目的 git 一律走发行版内 git**：cwd 是 `\\wsl.localhost\<distro>\...` / `\\wsl$\...` UNC 时，命令经 `wsl.exe -d <distro> … /usr/bin/env … git` 在发行版内执行（规则与 argv 规划见 `src/main/git/gitWsl.ts`，含 UNC↔Linux 双向转换与输出路径回译）；盘符路径仍走宿主 git。理由：宿主 git.exe 经 9P 访问会被判 `safe.directory`（dubious ownership），且两套 git 的索引视角/换行/文件模式不一致会让同一仓库反复出现「整树改动」；用户也期望复用发行版内的 config / SSH / hooks。
+25. **git 子进程只有两个入口**：`execGit`（读类，execFile 语义）与 `runGitCommand`（写类/checkpoint，spawn + 超时 + stdin）都在 `src/main/git/gitRun.ts` 收口，新增 git 调用不得绕过——宿主 git 与 WSL git 的分派、环境变量传递、错误文案契约（`Command failed:` 前缀）都只在这一层维护。
 
 ## 稳定性与可扩展性约束
 
