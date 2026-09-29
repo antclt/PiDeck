@@ -4,7 +4,6 @@
  */
 
 import type { McpConfigFile, McpConfigSnapshot, McpServerListItem } from "../../../shared/types/mcp";
-import type { ResourceScope } from "./ResourceScopeSelector";
 
 const SERVER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -40,10 +39,11 @@ export function omitUndefined<T extends Record<string, unknown>>(value: T): Part
 	return out;
 }
 
-export function buildMcpDisplayServers(snapshot: McpConfigSnapshot, writable: McpConfigFile, scope: ResourceScope): McpServerListItem[] {
-	// Main already merged all six layers in precedence order. Project scope is read-only and must
-	// never reapply the lower-precedence global writable file over a project definition.
-	if (scope === "project") return [...snapshot.servers];
+/**
+ * 主进程已按优先级合并六层；本函数只把本地可写草稿叠回显示列表，
+ * 让未保存编辑立即生效（项目层不再参与：MCP 页固定全局作用域）。
+ */
+export function buildMcpDisplayServers(snapshot: McpConfigSnapshot, writable: McpConfigFile): McpServerListItem[] {
 	const writableServers = writable.mcpServers ?? {};
 	const seen = new Set<string>();
 	const items = snapshot.servers.map((item) => {

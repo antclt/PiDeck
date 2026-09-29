@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "4db698670561e5c326051924367e8fa6f623ae2685ccf0acd7888ff440fbc702",
+  "bundleSha256": "30e1fb08aa93123dba4a85ebd39a93b8376f7b86199eab5ecf5e3d67226260dd",
   "fileCount": 25,
   "files": [
     {
@@ -106,8 +106,8 @@
     },
     {
       "name": "pi-deck-subagents.ts",
-      "sha256": "40c86c08a9047ed3f2e0139d0482486d89468f5d3f184ea06e5d9aa607c9ae82",
-      "bytes": 23381
+      "sha256": "2b45855cdb130f2175341afcc1920b6fbb1fe1a4b9b84021a9dff6c332b65732",
+      "bytes": 24132
     },
     {
       "name": "pi-deck-todo-state.ts",
