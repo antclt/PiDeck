@@ -85,50 +85,35 @@ const OptionSchema = Type.Union([
 ]);
 
 const QuestionSchema = Type.Object({
-	id: Type.String({ description: "Unique identifier for this question" }),
+	// id 可省略：toQuestions() 按序号兑底（q1/q2/…）。flash 档模型常省略可推导字段，
+	// 留在 required 会重蹈 type 省略被整批拒绝→重发的覆辙，且白耗输出 token。
+	id: Type.Optional(Type.String({ description: "Short unique id for this question; auto-assigned (q1, q2, …) when omitted" })),
 	type: Type.Optional(
 		StringEnum(["select", "multi_select", "confirm", "input", "editor"], {
-			description:
-				"Type of question to ask; multi_select renders checkbox options and returns an array of selected values. Optional: defaults to select when options are provided, otherwise input",
+			description: "Defaults to select when options are provided, otherwise input; set it explicitly for confirm/editor/multi_select",
 		}),
 	),
 	question: Type.String({ description: "The question or prompt to display" }),
 	options: Type.Optional(Type.Array(OptionSchema, { description: "Options for select / multi_select type questions" })),
-	allowOther: Type.Optional(
-		Type.Boolean({ description: "Accepted for compatibility but ignored: select questions always show a custom text input" }),
-	),
-	placeholder: Type.Optional(Type.String({ description: "Placeholder for input/editor type questions" })),
-	prefill: Type.Optional(Type.String({ description: "Prefill for input/editor type questions" })),
+	placeholder: Type.Optional(Type.String({ description: "Placeholder for input/editor questions" })),
+	prefill: Type.Optional(Type.String({ description: "Prefill for input/editor questions" })),
 });
 
+// 只暴露 questions 数组一条调用路径（单问题也放进数组，长度为 1）。
+// 2026-09 prompt 瘦身：删掉顶层单问题字段（type/question/options 等）。
+// 运行时 toQuestions() 仍兼容老模型直接传顶层字段——pi 校验层不设置
+// additionalProperties:false，未声明字段不会被拒绝，执行层照常归一化。
 const AskQuestionParams = Type.Object({
-	// 批量模式
 	questions: Type.Optional(
 		Type.Array(QuestionSchema, {
-			description:
-				"Multiple questions to ask in sequence (batch mode). When provided, the single-question fields below are ignored.",
+			description: "One or more questions to ask in a single card. ALWAYS use this array, even for a single question.",
 		}),
 	),
 	review: Type.Optional(
 		Type.Boolean({
-			description:
-				"When true and in batch mode, shows a Submit/review tab of all answers for confirmation. Default false.",
+			description: "When true, shows a Submit/review tab of all answers for confirmation. Default false.",
 		}),
 	),
-	// 单问题模式（向后兼容）
-	type: Type.Optional(
-		StringEnum(["select", "multi_select", "confirm", "input", "editor"], {
-			description:
-				"Type of question (single-question mode; ignored when `questions` is provided. Optional: defaults to select when options are provided, otherwise input)",
-		}),
-	),
-	question: Type.Optional(Type.String({ description: "The question to show (single-question mode)" })),
-	options: Type.Optional(Type.Array(OptionSchema, { description: "Options (single select / multi_select mode)" })),
-	allowOther: Type.Optional(
-		Type.Boolean({ description: "Accepted for compatibility but ignored: select questions always show a custom text input" }),
-	),
-	placeholder: Type.Optional(Type.String({ description: "Placeholder (single input/editor mode)" })),
-	prefill: Type.Optional(Type.String({ description: "Prefill (single input/editor mode)" })),
 });
 
 /** 把任意 options 输入归一化为 {label, value, description} 结构，兼容字符串简写 */
@@ -269,18 +254,13 @@ export default function (pi: ExtensionAPI) {
 				"the user answers with a Feishu message.",
 			].join(" ")
 			: [
-				"Ask the user to provide input, make a selection, or confirm an action.",
-				"The tool blocks until the user responds through the desktop UI.",
-				"Preferred call form: questions:[{id,type,question,options,placeholder,prefill}] — one or more questions in a single card.",
-				"Single-question top-level fields (type/question/options) are also accepted; both forms render the exact same card UI.",
-				"The type field is optional; it defaults to select when options are provided, otherwise input. Best practice: still set select/multi_select/confirm explicitly.",
-				"Set review:true to require a Submit/review tab before final submit.",
-				"Use type:multi_select when the user should pick MULTIPLE items from a list — it renders checkboxes and returns an array of selected values.",
-				"Every select question always shows a free-text input box under the options; there is no way to hide it.",
-			].join(" "),
+				"Ask the user for input, a selection, or a confirmation; blocks until the user responds through the desktop UI.",
+				"Pass questions:[{type,question,options,placeholder,prefill}] — one or more questions in a single card, even for a single one; id is auto-assigned when omitted.",
+				"type is optional (defaults to select with options, else input); set it explicitly for confirm/editor/multi_select.",
+			].join(" "),,
 		promptSnippet: feishuLinked
 			? "Ask the user a question directly in the reply text (Feishu session: ask_question is disabled)"
-			: "Ask the user a question (or a batch of questions) and wait for responses",
+			: "Ask the user a question (or several in one call) and wait for responses",
 		promptGuidelines: feishuLinked
 			? [
 				"IMPORTANT: This session is linked to Feishu; the interactive ask_question tool is disabled.",
@@ -289,13 +269,8 @@ export default function (pi: ExtensionAPI) {
 			]
 			: [
 				"IMPORTANT RULE: Whenever you need ANY input from the user (a choice, confirmation, text, or multi-line content), you MUST use the ask_question tool. Do NOT write questions in plain text — that forces the user to type free-form replies and breaks the desktop UI interaction flow.",
-				"When you have more than one question, ALWAYS pass them together as a questions array in ONE call; never split related questions into repeated single calls.",
-				"Use type:select with options when the user should pick from predefined choices. Options may be strings or {label, value?, description?} objects; use description to explain long options.",
-				"Use type:multi_select with options when the user should pick MULTIPLE choices — checkboxes are rendered and the answer is an array of selected values.",
-				"Use type:confirm when you need a yes/no decision before proceeding (e.g. destructive operations, irreversible changes).",
-				"Use type:input for short free-text responses, and type:editor for multi-line content like code or long explanations.",
-				"select questions always include a custom free-text input for the user; do not pass allowOther.",
-				"Set review:true to force a Submit/review tab so the user confirms all answers before submitting.",
+				"Pass all questions in ONE questions array per call, never split related questions into repeated calls.",
+				"Types: select = pick from options (strings or {label, value?, description?}; a custom free-text input is always shown); multi_select = pick multiple, returns an array; confirm = yes/no (e.g. destructive or irreversible actions); input = short text; editor = multi-line content like code.",
 			],
 				parameters: AskQuestionParams,
 
