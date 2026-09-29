@@ -276,6 +276,7 @@ import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
+import { startTrayRegistrationVerify, type TrayRegistrationVerify } from "./tray/trayRegistrationVerify";
 import { TelemetryService } from "./telemetry/TelemetryService";
 import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
@@ -373,6 +374,8 @@ const quickTaskChrome = new QuickTaskWindowChrome({
 	saveWorkbenchBounds: (bounds) => saveLastWindowBounds(app.getPath("userData"), bounds),
 });
 let tray: Tray | null = null;
+/** Linux 托盘注册验收器（见 tray/trayRegistrationVerify.ts），退出清理里与 tray 一起停 */
+let trayRegistrationVerify: TrayRegistrationVerify | null = null;
 /** 标记是否由用户主动退出（托盘菜单「退出」），区别于窗口关闭隐藏到托盘 */
 let isQuitting = false;
 /** 渲染进程崩溃自动恢复守卫（2026-08 黑屏治理，见 window/rendererCrashRecovery.ts）：
@@ -1312,23 +1315,45 @@ focusExistingWindow = handleVersionFocusRequest;
 function setupTray() {
 	// iconPath 由 electron-vite 的 ?asset 后缀自动解析，打包后也能正确定位
 	const icon = nativeImage.createFromPath(iconPath);
-	tray = new Tray(icon.resize({ width: 16, height: 16 }));
-	tray.setToolTip("PiDeck");
-	// C12：退出清理登记（before-quit 统一 runAll）
+
+	/** 创建托盘实例；首次创建与自愈重建共用同一条路径，避免两处行为漂移。 */
+	const createTrayInstance = (): Tray => {
+		const instance = new Tray(icon.resize({ width: 16, height: 16 }));
+		instance.setToolTip("PiDeck");
+		// 双击托盘图标恢复窗口（Windows 常见交互）
+		instance.on("double-click", () => {
+			if (mainWindow && !mainWindow.isDestroyed()) {
+				mainWindow.show();
+				mainWindow.focus();
+			}
+		});
+		return instance;
+	};
+
+	tray = createTrayInstance();
+	refreshTrayContextMenu();
+
+	// C12：退出清理登记（before-quit 统一 runAll）——验收器必须一起停，
+	// 否则退出阶段还会把已销毁的 tray 再重建一次。
 	quitCleanup.register("tray", () => {
+		trayRegistrationVerify?.stop();
+		trayRegistrationVerify = null;
 		tray?.destroy();
 		tray = null;
 	});
 
-	// 双击托盘图标恢复窗口（Windows 常见交互）
-	tray.on("double-click", () => {
-		if (mainWindow && !mainWindow.isDestroyed()) {
-			mainWindow.show();
-			mainWindow.focus();
-		}
-	});
-
-	refreshTrayContextMenu();
+	// Linux/GNOME 托盘注册诊断（见 tray/trayRegistrationVerify.ts）：旧版 appindicator 扩展
+	// (< v66) 读不到 SNI 属性会永久放弃图标且不再重试（closeToTray 默认开启时，
+	// 用户点 X 隐藏后就再无唤回入口）。根因与修复见 docs/linux-tray-icon.md。
+	// 这里只验收并记日志，不做重建 —— 重建换名并不能改变扩展的读法，实测无效。
+	if (process.platform === "linux") {
+		trayRegistrationVerify = startTrayRegistrationVerify({
+			onUnregistered: (detail) => {
+				void appLogger?.warn("app", "tray verify: unregistered (likely appindicator extension < v66), see docs/linux-tray-icon.md", detail);
+			},
+			onLog: (message, detail) => void appLogger?.info("app", message, detail),
+		});
+	}
 }
 
 async function openExternalUrl(url: string, forceSystem = false) {
