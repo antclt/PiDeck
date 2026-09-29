@@ -13,7 +13,7 @@ import { desktopApi } from "../desktopApi";
 import { Input } from "../components/ui-shadcn/input";
 import { Textarea } from "../components/ui-shadcn/textarea";
 import { CreateResourceCard, CreateResourceField } from "./ConfigShared";
-import type { ResourceScope } from "./ResourceScopeSelector";
+import type { ResourceScope } from "./resourceScopeModel";
 import { globalSkillOverrideKey, isGlobalSkillSourceId } from "../../../shared/resourceIdentity";
 import { ResourceImportDialog } from "./ResourceImportDialog";
 

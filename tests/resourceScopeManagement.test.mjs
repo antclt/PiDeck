@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const read = (path) => readFileSync(path, "utf8");
 
 test("configuration resources share one global/project scope owner", () => {
 	const modal = read("src/renderer/src/ConfigModal.tsx");
-	const selector = read("src/renderer/src/config/ResourceScopeSelector.tsx");
+	const scopeModel = read("src/renderer/src/config/resourceScopeModel.ts");
 	const mcp = read("src/renderer/src/config/McpTab.tsx");
 	// 主配置页资源作用域是派生值：非 resourceOnly 固定 global（全局/用户自装/内置），
 	// 项目级技能/扩展/提示词管理入口在项目右键的资源弹窗，不再提供可切换下拉。
@@ -14,20 +14,22 @@ test("configuration resources share one global/project scope owner", () => {
 	assert.doesNotMatch(modal, /useState<ResourceScope>/);
 	// 资源 tab（技能/扩展/提示词）仍接 resourceScopeSelector：resourceOnly 为固定项目标识，主页面为 undefined
 	assert.equal((modal.match(/scopeSelector=\{resourceScopeSelector\}/g) ?? []).length, 3);
-	// MCP 页自持作用域：项目级 mcp.json 只有这里能管理，下拉与脏保护内聚在 McpTab
-	assert.match(mcp, /useState<ResourceScope>\("global"\)/);
-	assert.match(mcp, /ResourceScopeSelector, type ResourceScope \} from "\.\/ResourceScopeSelector"/);
-	assert.match(mcp, /disabled=\{dirty\}/);
-	assert.match(mcp, /getMcp\(effectiveProjectId\)/);
-	// Chat 项目没有项目资源，作用域解析必须过滤（McpTab 项目解析 + resourceOnly 入口）
-	assert.match(mcp, /item\.kind !== "chat"/);
+	// MCP 页固定全局作用域（产品决策）：不带 projectId 拉取，项目层不参与显示与操作
+	assert.match(mcp, /getMcp\(\)/);
+	assert.doesNotMatch(mcp, /useState<ResourceScope>|effectiveScope|ResourceScopeSelector/);
+	// 作用域类型迁到 resourceScopeModel；只被 MCP 页使用的共享下拉组件已随之下线
+	assert.match(scopeModel, /export type ResourceScope = "global" \| "project"/);
+	assert.equal(existsSync("src/renderer/src/config/ResourceScopeSelector.tsx"), false);
+	// Chat 项目没有项目资源，作用域解析必须过滤（resourceOnly 入口）
 	assert.match(modal, /resourceOnly && projectKind !== "chat" \? projectId : undefined/);
 	assert.match(modal, /resourceScopeSelector = resourceOnly \?/);
 	assert.doesNotMatch(modal, /getMcp\(projectPath\)/);
-	assert.match(selector, /type ResourceScope = "global" \| "project"/);
-	assert.match(selector, /availableProjects = projects\.filter\(/);
-	assert.match(selector, /<SelectItem value="global">/);
-	assert.match(selector, /<SelectItem[^>]*value=\{item\.id\}>/);
+	// McpTab 装配：只下发导入扫描的项目来源与脏回调，不再传项目列表
+	const mcpMount = modal.split("\n").find((line) => /<McpTab\s/.test(line));
+	assert.ok(mcpMount, "ConfigModal 未挂载 McpTab");
+	assert.match(mcpMount, /activeProjectId=\{projectId\}/);
+	assert.match(mcpMount, /onDirtyChange=\{handleMcpDirtyChange\}/);
+	assert.doesNotMatch(mcpMount, /projects=/);
 });
 
 test("extension scope table keeps three columns and horizontal state toggles", () => {
@@ -55,14 +57,17 @@ test("project resource views group inherited globals and use project-only overri
 	const skills = read("src/renderer/src/config/SkillsTab.tsx");
 	const prompts = read("src/renderer/src/config/PromptsTab.tsx");
 	const extensions = read("src/renderer/src/config/ExtensionsTab.tsx");
-	const mcp = read("src/renderer/src/config/McpResourceViews.tsx");
-	for (const source of [skills, prompts, extensions, mcp]) {
+	for (const source of [skills, prompts, extensions]) {
 		assert.match(source, /config\.resourceGroup\.project/);
 		assert.match(source, /config\.resourceGroup\.global/);
 	}
 	assert.match(skills, /disabledGlobalSkills/);
 	assert.match(prompts, /disabledGlobalPrompts/);
 	assert.match(extensions, /disabledGlobalExtensions/);
+	// MCP 页固定全局作用域：列表不再分项目/全局两组，也没有项目层路径参数
+	const mcp = read("src/renderer/src/config/McpResourceViews.tsx");
+	assert.doesNotMatch(mcp, /config\.resourceGroup\./);
+	assert.doesNotMatch(mcp, /projectLayerPaths/);
 });
 
 test("project resource file operations retain the registered project scope", () => {
