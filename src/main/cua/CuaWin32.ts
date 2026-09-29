@@ -13,21 +13,71 @@ import koffi from "koffi";
  * - `_Out_` annotations are required on pointer output parameters, otherwise
  *   koffi does not write results back into the JS object.
  * - Struct declarations must precede function declarations that reference them.
+ *
+ * 平台范围（2026-09-29 与 cua 作者对齐）：CUA 能力现阶段仅支持 Windows，
+ * macOS/Linux 后补。但本模块会被主进程入口链无条件 import，因此**顶层禁止
+ * 任何 koffi 原生调用**（曾因顶层 `koffi.load("user32.dll")` 在 Linux/macOS
+ * 启动即崩，表现为「双击无反应」，journal 报 Failed to load shared library）。
+ * 约定：
+ * - win32：首次访问 `user32`/`kernel32` 时才加载 DLL 并绑定；
+ * - 其它平台：`koffiStub` 提供可赋值的占位（顶层 `const xxx = user32.func(...)`
+ *   能完成初始化），真正调用任何 CUA 操作时抛带平台说明的错误；
+ * - 未来补 mac/linux 时：替换 `koffiStub` 为对应平台实现，保持「模块加载零原生调用」
+ *   的约定不变（参见 `allocHiddenConsole.ts` 的函数内延迟加载范式）。
  */
 
-export const user32 = koffi.load("user32.dll");
-export const kernel32 = koffi.load("kernel32.dll");
+const isWindows = process.platform === "win32";
+
+function unavailable(op: string): never {
+	throw new Error(`CUA Win32 bindings are only available on Windows (got ${op} on ${process.platform}).`);
+}
+
+/** 非 Windows 上的绑定占位：可赋值给顶层 const，真正调用时才抛。 */
+function stubFunc(name: string): (...args: unknown[]) => never {
+	return (...args: unknown[]) => unavailable(`${name}(${args.length} args)`);
+}
+
+/** 非 Windows 上的 koffi 占位：load/struct/proto 只需「返回可赋值的占位」，不触达原生层。 */
+const koffiStub = {
+	load: (_name: string) => ({ func: (signature: string) => stubFunc(signature) }),
+	struct: (name: string) => ({ __koffiStruct: name }),
+	proto: (name: string) => ({ __koffiProto: name }),
+	sizeof: () => 0,
+	address: () => 0,
+} as unknown as typeof koffi;
+
+const koffiLazy: typeof koffi = isWindows ? koffi : koffiStub;
+
+let cachedUser32: ReturnType<typeof koffi.load> | null = null;
+let cachedKernel32: ReturnType<typeof koffi.load> | null = null;
+
+/** 惰性 DLL 句柄：win32 首次访问时加载；其它平台由 koffiStub 提供占位。 */
+function dll(name: "user32" | "kernel32"): ReturnType<typeof koffi.load> {
+	if (name === "user32") {
+		cachedUser32 ??= koffiLazy.load("user32.dll");
+		return cachedUser32;
+	}
+	cachedKernel32 ??= koffiLazy.load("kernel32.dll");
+	return cachedKernel32;
+}
+
+export const user32: ReturnType<typeof koffi.load> = new Proxy({} as ReturnType<typeof koffi.load>, {
+	get: (_t, prop) => Reflect.get(dll("user32"), prop),
+});
+export const kernel32: ReturnType<typeof koffi.load> = new Proxy({} as ReturnType<typeof koffi.load>, {
+	get: (_t, prop) => Reflect.get(dll("kernel32"), prop),
+});
 
 // ---------------------------------------------------------------------------
 // Structs
 // ---------------------------------------------------------------------------
 
-export const POINT = koffi.struct("POINT", {
+export const POINT = koffiLazy.struct("POINT", {
 	x: "long",
 	y: "long",
 });
 
-export const RECT = koffi.struct("RECT", {
+export const RECT = koffiLazy.struct("RECT", {
 	left: "long",
 	top: "long",
 	right: "long",
@@ -40,7 +90,7 @@ export const RECT = koffi.struct("RECT", {
  * virtual-key input and the mouse branch for absolute coordinate injection.
  * Total size must be 40 bytes on 64-bit Windows.
  */
-export const INPUT = koffi.struct("INPUT", {
+export const INPUT = koffiLazy.struct("INPUT", {
 	type: "uint32_t",
 	// Anonymous union represented as padding + overlapping fields.
 	// Layout matches Windows' INPUT (after 4-byte type):
@@ -123,7 +173,7 @@ export const GetWindowThreadProcessId = user32.func("uint32_t GetWindowThreadPro
 export const GetCurrentThreadId = kernel32.func("uint32_t GetCurrentThreadId()");
 
 // EnumWindows callback prototype: return false to stop enumeration.
-const EnumWindowsProc = koffi.proto("bool EnumWindowsProc(void *hWnd, intptr_t lParam)");
+const EnumWindowsProc = koffiLazy.proto("bool EnumWindowsProc(void *hWnd, intptr_t lParam)");
 export const EnumWindows = user32.func("bool EnumWindows(EnumWindowsProc *lpEnumFunc, intptr_t lParam)");
 
 // ---------------------------------------------------------------------------
@@ -150,7 +200,7 @@ export function enumerateWindows(): WindowInfo[] {
 
 	EnumWindows((hwndPtr: unknown, _lParam: number) => {
 		if (!hwndPtr) return true;
-		const hwnd = Number(koffi.address(hwndPtr));
+		const hwnd = Number(koffiLazy.address(hwndPtr));
 
 		if (!IsWindowVisible(hwndPtr)) return true;
 
@@ -183,7 +233,7 @@ export function enumerateWindows(): WindowInfo[] {
 			pid,
 			rect: { x: rect.left, y: rect.top, width, height },
 			isVisible: true,
-			isForeground: hwnd === Number(koffi.address(fg)),
+			isForeground: hwnd === Number(koffiLazy.address(fg)),
 			isTopmost,
 			zIndex: windows.length,
 		});
@@ -271,7 +321,7 @@ export function sendInputs(inputs: Record<string, number>[]): number {
 	if (inputs.length === 0) return 0;
 	// koffi 3.x: pass the JS array directly for call-by-reference arrays.
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	return SendInput(inputs.length, inputs as any, koffi.sizeof(INPUT));
+	return SendInput(inputs.length, inputs as any, koffiLazy.sizeof(INPUT));
 }
 
 /**

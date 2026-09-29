@@ -152,6 +152,7 @@
       "node_modules/dsh-tool-pwsh-persistent/node_modules/node-pty/**",
       "node_modules/**/@img/sharp-*/**",
       "node_modules/@koromix/koffi-win32-x64/**",
+      "node_modules/@koromix/koffi-linux-x64/**",
       "node_modules/node-addon-require-builtin-win32-x64-msvc/**"
     ],
     "directories": {
