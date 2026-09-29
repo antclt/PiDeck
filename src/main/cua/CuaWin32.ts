@@ -13,6 +13,9 @@ import koffi from "koffi";
  * - `_Out_` annotations are required on pointer output parameters, otherwise
  *   koffi does not write results back into the JS object.
  * - Struct declarations must precede function declarations that reference them.
+ * - `LibraryHandle` 的方法是**原生方法**，receiver 必须是句柄对象本身：把句柄
+ *   包进 Proxy 直接转发方法会抛 `TypeError: Illegal invocation`（2026-09-30
+ *   打包版启动即崩，见 `lazyDll`）。
  *
  * 平台范围（2026-09-29 与 cua 作者对齐）：CUA 能力现阶段仅支持 Windows，
  * macOS/Linux 后补。但本模块会被主进程入口链无条件 import，因此**顶层禁止
@@ -61,12 +64,27 @@ function dll(name: "user32" | "kernel32"): ReturnType<typeof koffi.load> {
 	return cachedKernel32;
 }
 
-export const user32: ReturnType<typeof koffi.load> = new Proxy({} as ReturnType<typeof koffi.load>, {
-	get: (_t, prop) => Reflect.get(dll("user32"), prop),
-});
-export const kernel32: ReturnType<typeof koffi.load> = new Proxy({} as ReturnType<typeof koffi.load>, {
-	get: (_t, prop) => Reflect.get(dll("kernel32"), prop),
-});
+/**
+ * 惰性库句柄代理：win32 首次取属性时才加载 DLL，其它平台由 `koffiStub` 提供占位。
+ *
+ * 取到的方法必须 bind 回真实句柄再返回——`LibraryHandle` 的方法是原生方法，
+ * receiver 必须是句柄对象本身；Proxy 会把 `this` 顶替成代理对象，koffi 随即抛
+ * `TypeError: Illegal invocation`。顶层 `user32.func(...)` 全走代理，漏掉这步
+ * 就是「模块一加载就崩」（2026-09-30 打包版启动失败：崩溃点看着在入口
+ * `require("koffi")`，实际是本模块第一条绑定语句）。
+ */
+function lazyDll(name: "user32" | "kernel32"): ReturnType<typeof koffi.load> {
+	return new Proxy({} as ReturnType<typeof koffi.load>, {
+		get: (_target, prop) => {
+			const lib = dll(name);
+			const value = Reflect.get(lib, prop);
+			return typeof value === "function" ? value.bind(lib) : value;
+		},
+	});
+}
+
+export const user32: ReturnType<typeof koffi.load> = lazyDll("user32");
+export const kernel32: ReturnType<typeof koffi.load> = lazyDll("kernel32");
 
 // ---------------------------------------------------------------------------
 // Structs

@@ -42,3 +42,55 @@ test("buildKeyboardInput produces unicode down input", () => {
 	assert.strictEqual(input.ki_dwFlags, 0x0004);
 	assert.strictEqual(input.mi_dx, 0);
 });
+
+/**
+ * 与真实 koffi 同契约的替身：`LibraryHandle` 的方法是原生方法，receiver 必须是
+ * 句柄对象本身（`proxy.func()` 抛 `TypeError: Illegal invocation`）。
+ * 上面那组用例走真实 koffi，只有 Windows 才会命中这条路径；这里固定
+ * `platform=win32` 让任意平台都能复现同一契约。
+ */
+function createReceiverSensitiveKoffi() {
+	const state = { dlls: [], signatures: [], sizeofSpecs: [] };
+	const load = (dllName) => {
+		state.dlls.push(dllName);
+		const lib = {
+			dll: dllName,
+			func(signature) {
+				if (this !== lib) throw new TypeError("Illegal invocation");
+				state.signatures.push(signature);
+				return () => 0;
+			},
+		};
+		return lib;
+	};
+	return {
+		state,
+		load,
+		struct: (name) => ({ kind: "struct", name }),
+		proto: (name) => ({ kind: "proto", name }),
+		sizeof: (spec) => {
+			state.sizeofSpecs.push(spec);
+			return 40;
+		},
+		address: () => 0,
+	};
+}
+
+test("module import binds koffi LibraryHandle methods to the handle", () => {
+	// 2026-09-30 打包版启动即崩：顶层 `user32.func(...)` 经 Proxy 调用，this 被顶替
+	// 成代理对象 → koffi 抛 Illegal invocation → 主进程入口模块加载失败（弹框把行号
+	// 截成 `app.asar:33`，看着像 `require("koffi")` 炸了）。句柄方法必须 bind 回去。
+	const koffi = createReceiverSensitiveKoffi();
+	const mod = loadTsCommonJs("src/main/cua/CuaWin32.ts", {
+		stubs: { koffi },
+		globals: { process: { platform: "win32" } },
+	});
+
+	assert.ok(koffi.state.dlls.includes("user32.dll"));
+	assert.ok(koffi.state.dlls.includes("kernel32.dll"));
+	assert.ok(koffi.state.signatures.some((signature) => signature.includes("GetSystemMetrics")));
+
+	// 运行期经同一代理的调用同样要能以句柄为 receiver
+	assert.strictEqual(mod.sendInputs([mod.buildMouseInput(1, 1, 0)]), 0);
+	assert.strictEqual(koffi.state.sizeofSpecs.length, 1);
+});
