@@ -16,6 +16,11 @@ export const MAX_REPLY_ACTION_RULES = 64;
 
 const TRIGGER_KINDS: readonly ReplyActionTriggerKind[] = ["onFailure", "onStop", "textMatch"];
 
+// v1 出厂规则曾把这些关键词压成一个组合正则；读取旧的 userData 时拆回普通关键词，
+// 这样升级后设置页不会继续显示一整串用户无法理解的正则。其它自定义正则保持原样。
+const LEGACY_COMPLETION_PATTERN = "(?:完成|搞定|已?实现|已?修复|已?支持|改完|写完|测试通过|全部通过|验证通过)";
+const LEGACY_COMPLETION_PATTERNS = ["完成", "搞定", "实现", "已实现", "修复", "已修复", "支持", "已支持", "改完", "写完", "测试通过", "全部通过", "验证通过"];
+
 function isReplyActionTriggerKind(value: unknown): value is ReplyActionTriggerKind {
 	return typeof value === "string" && (TRIGGER_KINDS as readonly string[]).includes(value);
 }
@@ -34,6 +39,7 @@ export function sanitizeReplyActionTrigger(value: unknown): ReplyActionTrigger |
 		if (!Array.isArray(rawPatterns)) return null;
 		const patterns = rawPatterns
 			.filter((pattern): pattern is string => typeof pattern === "string")
+			.flatMap((pattern) => (pattern.trim() === LEGACY_COMPLETION_PATTERN ? LEGACY_COMPLETION_PATTERNS : pattern.split(/[,，]/)))
 			.map((pattern) => pattern.trim())
 			.filter((pattern) => pattern.length > 0);
 		if (patterns.length === 0) return null;

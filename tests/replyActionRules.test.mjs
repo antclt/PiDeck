@@ -88,6 +88,19 @@ test("清洗：去空白、按 text 去重、坏 trigger 与空文案丢弃、�
 test("清洗文件：裸数组与 {items} 都接受，items: [] 是合法清空，结构坏返回 null", () => {
 	assert.deepEqual(plain(sanitizeReplyActionsFile([{ text: "继续", triggers: [{ kind: "onStop" }] }]).items), [{ text: "继续", triggers: [{ kind: "onStop" }] }]);
 	assert.deepEqual(plain(sanitizeReplyActionsFile({ items: [] }).items), []);
+	assert.deepEqual(
+		plain(
+			sanitizeReplyActionsFile({
+				items: [{ text: "提交", triggers: [{ kind: "textMatch", patterns: ["(?:完成|搞定|已?实现|已?修复|已?支持|改完|写完|测试通过|全部通过|验证通过)"] }] }],
+			}).items,
+		),
+		[
+			{
+				text: "提交",
+				triggers: [{ kind: "textMatch", patterns: ["完成", "搞定", "实现", "已实现", "修复", "已修复", "支持", "已支持", "改完", "写完", "测试通过", "全部通过", "验证通过"] }],
+			},
+		],
+	);
 	assert.equal(sanitizeReplyActionsFile({ nope: true }), null);
 	assert.equal(sanitizeReplyActionsFile({ items: "继续" }), null);
 });

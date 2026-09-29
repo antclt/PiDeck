@@ -94,7 +94,7 @@ export function QuickMessagesDialog(props: { open: boolean; onOpenChange: (open:
 				props.onOpenChange(open);
 			}}
 		>
-			<DialogContent className="sm:max-w-[min(960px,calc(100vw-48px))] gap-3">
+			<DialogContent onOpenAutoFocus={(event) => event.preventDefault()} className="w-[min(960px,calc(100vw-48px))] max-w-none gap-3 sm:max-w-none">
 				<DialogHeader>
 					<DialogTitle>{t("settings.quickMessages")}</DialogTitle>
 					<DialogDescription>{t("settings.quickMessagesDesc", { max: MAX_QUICK_MESSAGES })}</DialogDescription>

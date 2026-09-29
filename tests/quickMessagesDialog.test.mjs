@@ -87,7 +87,9 @@ function dragEvent() {
 test("管理弹框：宽度覆盖 sm 默认值，补充按钮与上下移入口保持可用", async () => {
 	const h = dialogHarness();
 	const view = h.render();
-	assert.ok(view.content.props.className.includes("sm:max-w-[min(960px,calc(100vw-48px))]"));
+	assert.ok(view.content.props.className.includes("w-[min(960px,calc(100vw-48px))]"));
+	assert.ok(view.content.props.className.includes("max-w-none"));
+	assert.ok(view.content.props.className.includes("sm:max-w-none"));
 	const merge = view.buttons.find((button) => Array.isArray(button.props.children) && button.props.children.includes("settings.quickMessagesMergeDefaults"));
 	assert.ok(merge, "必须能显式补充内置而不是恢复覆盖");
 	await merge.props.onClick();
