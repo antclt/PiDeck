@@ -257,7 +257,7 @@ export default function (pi: ExtensionAPI) {
 				"Ask the user for input, a selection, or a confirmation; blocks until the user responds through the desktop UI.",
 				"Pass questions:[{type,question,options,placeholder,prefill}] — one or more questions in a single card, even for a single one; id is auto-assigned when omitted.",
 				"type is optional (defaults to select with options, else input); set it explicitly for confirm/editor/multi_select.",
-			].join(" "),,
+			].join(" "),
 		promptSnippet: feishuLinked
 			? "Ask the user a question directly in the reply text (Feishu session: ask_question is disabled)"
 			: "Ask the user a question (or several in one call) and wait for responses",
