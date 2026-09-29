@@ -29,6 +29,7 @@ import type {
 } from "../shared/types/voiceTranscription";
 import type { WhisperInstallProgress, WhisperInstallResult, WhisperRuntimeStatus } from "../shared/types/whisperRuntime";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
+import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
 	YaoPromptListResult,
 	YaoPromptDetailResult,
@@ -1413,6 +1414,15 @@ const api = {
 		save: (items: string[]) => ipcRenderer.invoke(ipcChannels.quickMessagesSave, items) as Promise<QuickMessagesSaveResult>,
 		/** 用系统默认程序打开配置文件（路径由主进程解析，文件不存在时会先生成） */
 		openFile: () => ipcRenderer.invoke(ipcChannels.quickMessagesOpenFile) as Promise<void>,
+	},
+
+	// ── 回复快捷操作（规则文件 userData/reply-actions.json，结构与快捷消息同构） ──
+	replyActions: {
+		get: () => ipcRenderer.invoke(ipcChannels.replyActionsGet) as Promise<ReplyActionsSnapshot>,
+		/** 整体保存规则数组（顺序即展示顺序，空数组 = 清空） */
+		save: (items: ReplyActionRule[]) => ipcRenderer.invoke(ipcChannels.replyActionsSave, items) as Promise<ReplyActionsSaveResult>,
+		/** 用系统默认程序打开规则文件（路径由主进程解析，文件不存在时会先生成） */
+		openFile: () => ipcRenderer.invoke(ipcChannels.replyActionsOpenFile) as Promise<void>,
 	},
 
 	// ── 定时任务与自动化 ──

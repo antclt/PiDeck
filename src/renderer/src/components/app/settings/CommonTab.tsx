@@ -12,6 +12,7 @@ import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./Setting
 import { VoiceTranscriptionSettingsSection } from "./VoiceTranscriptionSettingsSection";
 import { QuickTaskMenuSetting } from "./QuickTaskMenuSetting";
 import { QuickMessagesSetting } from "./QuickMessagesSetting";
+import { ReplyActionsSetting } from "./ReplyActionsSetting";
 
 type CommonTabProps = {
 	draft: AppSettings;
@@ -297,6 +298,11 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 			{/* 快捷消息：数据在 userData/quick-messages.json，本区自持编辑状态并即时落盘（不参与全局草案/取消）。 */}
 			<SettingsSection title={t("settings.quickMessagesSection")} description={t("settings.quickMessagesSectionDesc")}>
 				<QuickMessagesSetting />
+			</SettingsSection>
+
+			{/* 回复快捷操作：规则在 userData/reply-actions.json，同样即时落盘（不参与全局草案/取消）。 */}
+			<SettingsSection title={t("settings.replyActionsSection")} description={t("settings.replyActionsSectionDesc")}>
+				<ReplyActionsSetting />
 			</SettingsSection>
 
 			{/* 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 */}

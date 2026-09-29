@@ -18,6 +18,7 @@ import { normalizeDshDeepseekProvider } from "../../shared/dshProviderNames";
 import { parseProviderModelsResponse } from "./parseProviderModels";
 import { isSafeProviderName, piBuiltinSnapshotFromCatalog, resolvePiApiKey } from "./providerMigration";
 import { ensureTokendanceAttribution } from "./tokendanceAttribution";
+import { getAppLogger } from "../logging/sharedLogger";
 import { buildProbeFailureDetail, buildProbeHeaders, candidateApplies, getByPath, parseUsageResponseBody, USAGE_PROBE_CANDIDATES, usageProbeUrls } from "./providerUsageProbe";
 import type { UsageProbeAttempt, UsageProbeCandidate } from "./providerUsageProbe";
 import { resolveProviderUsageEndpoint } from "./providerUsageResolver";
@@ -259,6 +260,8 @@ export class ConfigManager {
 			...trustConfig.parsed,
 			[normalizedPath]: true,
 		});
+		// 自动信任目录改变 pi 的工具执行边界，属安全相关决策，单独留痕以便审计
+		getAppLogger()?.info("config", "Directory auto-trusted (trust.json)", { path: normalizedPath });
 	}
 
 	/**
@@ -482,6 +485,8 @@ export class ConfigManager {
 		const filePath = join(this.configDir, fileName);
 		const json = typeof content === "string" ? content : JSON.stringify(content, null, 2);
 		await writeFile(filePath, json, "utf8");
+		// 配置写盘统一留痕（只记路径与字节数，绝不落内容——auth.json 含凭据）
+		getAppLogger()?.info("config", "Config file written", { file: filePath, bytes: json.length });
 	}
 
 	/** Write a validated configuration with a sibling temporary file and atomic replacement. */
@@ -493,6 +498,7 @@ export class ConfigManager {
 		try {
 			await writeFile(temporaryPath, json, { encoding: "utf8", flag: "wx" });
 			await rename(temporaryPath, filePath);
+			getAppLogger()?.info("config", "Config file written (atomic)", { file: filePath, bytes: json.length });
 		} finally {
 			await rm(temporaryPath, { force: true }).catch(() => undefined);
 		}

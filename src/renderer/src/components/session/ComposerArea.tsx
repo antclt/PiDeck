@@ -18,10 +18,14 @@ import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
 import { ComposerWidgetLayoutProvider, type ComposerWidgetCollapsedByKey, useComposerWidgetLayoutValue } from "./ComposerWidgetLayout";
 import type { ChatMessage, GitBranchInfo } from "../../../../shared/types";
+import type { ReplyActionRule } from "../../../../shared/types/replyActions";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 import { VoiceTranscriptionControls } from "./VoiceTranscriptionControls";
 import { SessionReplyActions } from "./SessionReplyActions";
 import { BridgeWidgetSlot } from "../bridge/BridgeSlot";
+
+/** 无规则时的稳定空数组（避免每渲染新引用让下游 memo 失效）。 */
+const EMPTY_REPLY_RULES: readonly ReplyActionRule[] = [];
 
 export type ComposerAreaProps = {
 	sessionId: string;
@@ -32,6 +36,8 @@ export type ComposerAreaProps = {
 	widgets?: ReactNode;
 	/** 回复尾部动作仍复用本栏发送 owner；只把 UI 投到时间线内的落点。 */
 	replyActionMessages?: readonly ChatMessage[];
+	/** 声明式规则（userData/reply-actions.json 快照），由 SessionView 注入以保持单点加载。 */
+	replyActionRules?: readonly ReplyActionRule[];
 	replyActionsTarget?: HTMLDivElement | null;
 	replyActionsBlocked?: boolean;
 	/** 排队消息独立卡（与 todo/goal 同列同宽，不贴输入框、不右浮）。 */
@@ -146,6 +152,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 						<SessionReplyActions
 							sessionId={props.sessionId}
 							messages={props.replyActionMessages}
+							rules={props.replyActionRules ?? EMPTY_REPLY_RULES}
 							target={props.replyActionsTarget ?? null}
 							hidden={Boolean(props.replyActionsBlocked || composer.isBusy || composer.isStarting || composer.sendState.status === "sending" || composer.sendState.status === "unknown" || composer.mode === "imagegen" || composer.backend === "imagegen")}
 							sendDisabled={!composer.delivery.canSendQuickMessage}

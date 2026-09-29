@@ -4,12 +4,18 @@ import { DEFAULT_VOICE_TRANSCRIPTION_CONFIG } from "../../shared/voiceTranscript
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import type { AppSettings, FileTreeNode, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalTab } from "../../shared/types";
 import type { ResourceImportKind } from "../../shared/types/resourceImport";
+import type { ReplyActionRule } from "../../shared/types/replyActions";
 import { t } from "./i18n";
 
 const now = Date.now();
 
 /** 快捷消息预览夹具：预览/截图需要一个非空弹框；真实数据在 userData/quick-messages.json。 */
 const PREVIEW_QUICK_MESSAGES: readonly string[] = ["继续", "提交", "推送", "提交推送"];
+const PREVIEW_REPLY_ACTIONS: readonly ReplyActionRule[] = [
+	{ text: "继续", triggers: [{ kind: "onStop" }] },
+	{ text: "提交", triggers: [{ kind: "onStop" }] },
+	{ text: "重试", triggers: [{ kind: "onFailure" }] },
+];
 
 const projects: Project[] = [
 	{
@@ -1681,6 +1687,21 @@ export function createPreviewApi(): PiDesktopApi {
 			save: async (items) => ({
 				ok: true as const,
 				snapshot: { items, defaults: [...PREVIEW_QUICK_MESSAGES], filePath: "(preview)", seeded: false, defaultsAvailable: false },
+			}),
+			openFile: async () => undefined,
+		},
+		// 回复快捷操作预览桩：与快捷消息同策略，固定夹具让设置区在预览/截图里可用。
+		replyActions: {
+			get: async () => ({
+				items: PREVIEW_REPLY_ACTIONS.map((rule) => ({ ...rule, triggers: rule.triggers.map((trigger) => ({ ...trigger })) })),
+				defaults: [],
+				filePath: "(preview)",
+				seeded: false,
+				defaultsAvailable: false,
+			}),
+			save: async (items) => ({
+				ok: true as const,
+				snapshot: { items, defaults: [], filePath: "(preview)", seeded: false, defaultsAvailable: false },
 			}),
 			openFile: async () => undefined,
 		},

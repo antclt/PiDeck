@@ -357,6 +357,8 @@ export class DshRuntimeManager {
 		const archivePath = join(this.deps.layout.tempRoot, `download-${Date.now()}.tgz`);
 		try {
 			options.onPhase?.("downloading");
+			// 记录安装来源 URL：运行时是外部下载的二进制，出问题时需能审计来源
+			this.deps.log?.("dsh-runtime", "runtime download started", { url });
 			await this.download(url, archivePath, options.onDownloadProgress, options.signal);
 			return await this.installFromArchive(archivePath, expectedSha256, options);
 		} catch (error) {

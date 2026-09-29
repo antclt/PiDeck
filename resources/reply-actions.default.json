@@ -1,0 +1,15 @@
+{
+	"version": 1,
+	"items": [
+		{ "text": "继续", "triggers": [{ "kind": "onStop" }] },
+		{ "text": "再确认一下", "triggers": [{ "kind": "onStop" }] },
+		{ "text": "提交", "triggers": [{ "kind": "onStop" }, { "kind": "textMatch", "patterns": ["(?:完成|搞定|已?实现|已?修复|已?支持|改完|写完|测试通过|全部通过|验证通过)"] }] },
+		{ "text": "提交并推送", "triggers": [{ "kind": "onStop" }, { "kind": "textMatch", "patterns": ["(?:完成|搞定|已?实现|已?修复|已?支持|改完|写完|测试通过|全部通过|验证通过)"] }] },
+		{ "text": "运行测试看看结果", "triggers": [{ "kind": "onStop" }] },
+		{ "text": "重新排查", "triggers": [{ "kind": "onFailure" }] },
+		{ "text": "还是不对，请重新排查", "triggers": [{ "kind": "onFailure" }] },
+		{ "text": "继续，从刚才中断的地方接着做", "triggers": [{ "kind": "onFailure" }] },
+		{ "text": "检查报错并修复", "triggers": [{ "kind": "onFailure" }] },
+		{ "text": "重试一次", "triggers": [{ "kind": "onFailure" }] }
+	]
+}

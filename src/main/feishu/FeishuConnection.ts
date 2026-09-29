@@ -7,6 +7,7 @@ import type { FeishuBotConfig, FeishuTestResult } from "../../shared/types";
 import type { LarkSDK, LarkClient, FeishuCardActionEvent } from "./types";
 import { feishuT, type FeishuLocale } from "./FeishuI18n";
 import { getDecryptedBotAppSecret } from "./FeishuConfig";
+import { getAppLogger } from "../logging/sharedLogger";
 
 const log = (...args: unknown[]) => {
 	try {
@@ -98,12 +99,15 @@ export class FeishuConnection {
 			});
 			this.wsClient = ws;
 			ws.start({ eventDispatcher: dispatcher });
+			// 对外建立常驻长连接（带机器人凭据），起停必须落应用日志而不只是 console
+			getAppLogger()?.info("feishu", "Feishu connection started", { appId });
 			log("[飞书 Bridge] WSClient 已启动");
 
 			return { botOpenId };
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
 			const message = feishuT(this.locale, "connection.failed");
+			getAppLogger()?.error("feishu", "Feishu connection start failed", { appId, error: detail });
 			logErr("[飞书 Bridge] 启动失败:", detail);
 			throw new Error(message + " (" + detail + ")", { cause: error });
 		}
@@ -117,6 +121,7 @@ export class FeishuConnection {
 			} catch {}
 		this.wsClient = null;
 		this.client = null;
+		getAppLogger()?.info("feishu", "Feishu connection stopped", { appId: this.botConfig.appId });
 		log("[Feishu Bridge] stopped");
 	}
 

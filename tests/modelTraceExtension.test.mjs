@@ -127,7 +127,10 @@ test("循环引用等无法序列化的 payload：这一条缺席，不抛错", 
 	assert.equal(result, undefined);
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	assert.equal(fetchCalls.length, 0);
-	assert.ok(stderr.some((line) => line.includes("采集失败")), "失败要留一行 stderr 说明");
+	assert.ok(
+		stderr.some((line) => line.includes("采集失败")),
+		"失败要留一行 stderr 说明",
+	);
 });
 
 test("桥不可用时（fetch 拒绝）不产生未处理拒绝，pi 照常", async () => {
@@ -144,7 +147,10 @@ test("并发上限：宿主迟滞时丢弃后续快照而不是无限堆积", as
 	for (let i = 0; i < 10; i += 1) handlers.get("before_provider_request")({ payload: { messages: [] } }, makeContext());
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	assert.equal(fetchCalls.length, 4, "in-flight 上限 4，其余丢弃");
-	assert.ok(stderr.some((line) => line.includes("丢弃")), "首次丢弃要给一行提示");
+	assert.ok(
+		stderr.some((line) => line.includes("丢弃")),
+		"首次丢弃要给一行提示",
+	);
 });
 
 test("扩展帧字段是共享类型 ModelTraceRequestInput/ResponseInput 的子集", async () => {

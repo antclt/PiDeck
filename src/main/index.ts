@@ -327,8 +327,10 @@ import { registerResourceImportIpc } from "./ipc/resourceImportIpc";
 import { registerBackupIpc } from "./ipc/backupIpc";
 import { registerCatalogIpc } from "./ipc/catalogIpc";
 import { registerQuickMessagesIpc } from "./ipc/quickMessagesIpc";
+import { registerReplyActionsIpc } from "./ipc/replyActionsIpc";
 import { QuickMessageStore } from "./quickmessages/QuickMessageStore";
-import { QUICK_MESSAGES_DEFAULT_RESOURCE_NAME, QUICK_MESSAGES_FILE_NAME } from "../shared/quickMessages";
+import { ReplyActionRuleStore } from "./replyactions/ReplyActionRuleStore";
+import { QUICK_MESSAGES_DEFAULT_RESOURCE_NAME, QUICK_MESSAGES_FILE_NAME, REPLY_ACTIONS_DEFAULT_RESOURCE_NAME, REPLY_ACTIONS_FILE_NAME } from "../shared/quickMessages";
 import { getPiAiCatalogIndex, lookupPiAiCatalogEntry, setPiAiCatalogUserDataDir } from "./pi/piAiBuiltinCatalog";
 import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
 import { fetchModelList, refreshModelCatalogIfStale, refreshModelList } from "./pi/modelListCache";
@@ -3087,6 +3089,14 @@ function registerIpc() {
 		log: (scope, message, detail) => void appLogger.info(scope, message, detail),
 	});
 	registerQuickMessagesIpc(quickMessageStore, (scope, message, detail) => void appLogger.info(scope, message, detail));
+	// 回复快捷操作：最新回复尾部的建议条，规则可由用户编辑（userData/reply-actions.json），
+	// 出厂规则来自随包资源 reply-actions.default.json（提交/推送/重试/继续等常用工程操作）。
+	const replyActionRuleStore = new ReplyActionRuleStore({
+		getConfigPath: () => join(app.getPath("userData"), REPLY_ACTIONS_FILE_NAME),
+		getDefaultConfigPath: () => (app.isPackaged ? join(process.resourcesPath, REPLY_ACTIONS_DEFAULT_RESOURCE_NAME) : join(app.getAppPath(), "resources", REPLY_ACTIONS_DEFAULT_RESOURCE_NAME)),
+		log: (scope, message, detail) => void appLogger.info(scope, message, detail),
+	});
+	registerReplyActionsIpc(replyActionRuleStore, (scope, message, detail) => void appLogger.info(scope, message, detail));
 	registerBuiltInExtensionIpc(builtInExtensionsUpdater);
 	// TokenDance 目录 store 是共享实例：渲染层目录展示与一键安装（写入配置）读同一份缓存。
 	const tokendanceCatalogStore = new TokendanceCatalogStore({

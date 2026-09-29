@@ -3,6 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import type { BusySendDelivery } from "../../../shared/busySendDelivery";
 import type { AgentBackend } from "../../../shared/types";
 import type { QuickMessagesSnapshot } from "../../../shared/types/quickMessages";
+import type { ReplyActionsSnapshot } from "../../../shared/types/replyActions";
 import { resolveEffectiveAgentBackend } from "../../../shared/types/dshRuntime";
 import { isModuleHidden } from "../../../shared/hiddenModules";
 import { dshRuntimeStatusAtom } from "./dsh-atoms";
@@ -114,6 +115,13 @@ export const busySendDeliveryAtom = atom<BusySendDelivery>("steer");
  * null = 尚未读到文件（弹框先显示加载态，不把「还没读完」误报成「没有快捷消息」）。
  */
 export const quickMessagesSnapshotAtom = atom<QuickMessagesSnapshot | null>(null);
+
+/**
+ * 回复快捷操作规则快照（配置文件 userData/reply-actions.json，主进程 ReplyActionRuleStore 读写）。
+ * 与 quickMessagesSnapshotAtom 同一套约定：读写入口统一走 useReplyActions，
+ * SessionReplyActions 只读 rules 展示，设置页经 save 落盘后整份替换快照。
+ */
+export const replyActionsSnapshotAtom = atom<ReplyActionsSnapshot | null>(null);
 
 /**
  * 侧栏展开的项目 id 集合（有 id = 展开）。

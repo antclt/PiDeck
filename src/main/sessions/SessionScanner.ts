@@ -786,6 +786,7 @@ export class SessionScanner {
 			// 重试一次：WSL 走 \\wsl.localhost 的 9P 通道，rename 偶发瞬时失败
 			// （SessionFileEditor.renameWithRetry 有同样观察）；失败时原文件不动。
 			await this.renameWithRetry(tempPath, hostPath);
+			getAppLogger()?.info("session", "Session renamed", { filePath, newName });
 		} catch (error) {
 			await rm(tempPath, { force: true }).catch(() => {});
 			throw error;
@@ -928,17 +929,23 @@ export class SessionScanner {
 			// rm -f 语义保证“文件已被外部清理”与成功删除等价，避免重启后删空草稿报错。
 			await this.deleteWslSiblingDir(filePath);
 			await this.deleteWslFile(filePath);
+			// WSL 分支是硬删除（rm -f，不进回收站），不可恢复的操作必须留痕
+			getAppLogger()?.info("session", "Session deleted permanently (WSL)", { filePath });
 			return;
 		}
 
 		// 先删除同级子会话目录（如果存在），再删除文件本身。
 		await this.deleteSiblingDir(filePath);
 		// catalog 可能保留一个已被 pi/系统回收站移走的历史路径；删除接口必须幂等。
-		if (!existsSync(filePath)) return;
+		if (!existsSync(filePath)) {
+			getAppLogger()?.info("session", "Session delete skipped (file already gone)", { filePath });
+			return;
+		}
 
 		// 删除会话是用户主动操作：统一移入系统回收站（可恢复）。
 		// 回收站不可用时直接抛错——拒绝静默硬删，错误由 IPC 层呈现给用户。
 		await shell.trashItem(filePath);
+		getAppLogger()?.info("session", "Session moved to trash", { filePath });
 	}
 
 	// ── 会话归档：移动到 <扫描根>/.pideck-archive/ 并记录原路径 ──
@@ -986,6 +993,8 @@ export class SessionScanner {
 			}
 		}
 		await this.recordArchiveEntry(finalTarget, filePath, wsl);
+		// 归档会移动用户会话文件（含同级子会话目录），是会话可见性变化的原因，需可追溯
+		getAppLogger()?.info("session", "Session archived", { from: filePath, to: finalTarget, wsl });
 		return finalTarget;
 	}
 
@@ -1017,6 +1026,7 @@ export class SessionScanner {
 			}
 		}
 		await this.removeArchiveEntry(archivedPath, wsl);
+		getAppLogger()?.info("session", "Session restored from archive", { archivedPath, originalPath });
 		return originalPath;
 	}
 
@@ -1078,6 +1088,7 @@ export class SessionScanner {
 			if (existsSync(archivedPath)) await shell.trashItem(archivedPath);
 		}
 		await this.removeArchiveEntry(archivedPath, wsl);
+		getAppLogger()?.info("session", "Archived session deleted permanently", { archivedPath, wsl });
 	}
 
 	/** 通过 wsl.exe 移动文件/目录 */

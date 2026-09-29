@@ -16,6 +16,7 @@ import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
+import { useReplyActions } from "../../hooks/useReplyActions";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SIZE } from "../terminal/TerminalDockPanel";
 import { useSessionPaneServices } from "./SessionPaneServices";
@@ -171,6 +172,10 @@ export function SessionView({
 	const paneServices = useSessionPaneServices();
 	// 落点随本栏时间线挂载/卸载更新；发送控制器仍只有 ComposerArea 内的一份。
 	const [replyActionsTarget, setReplyActionsTarget] = useState<HTMLDivElement | null>(null);
+	// 回复快捷操作规则：全局一份快照（主进程读 userData/reply-actions.json），
+	// SessionReplyActions 只读；保存入口在设置页，保存后整份替换 atom。
+	// 只取 items（规则数组），避免整个 hook 返回值每渲染变引用拖累下游 memo。
+	const { items: replyActionRuleItems } = useReplyActions();
 	// GUI 扩展桥：把扩展的 ctx.ui.setTitle 应用到 document.title（无贡献时不动，§7.4 只追加）
 	useBridgeSessionTitle(sessionId);
 	// 会话身份面包屑的项目名：多 Tab/分屏时提醒当前会话属于哪个项目。
@@ -353,6 +358,7 @@ export function SessionView({
 									</>
 								}
 								replyActionMessages={sessionTimeline.messages}
+								replyActionRules={replyActionRuleItems}
 								replyActionsTarget={replyActionsTarget}
 								replyActionsBlocked={askPanelVisible || isRestarting || isAgentStarting || sessionTimeline.isSurfaceLoading}
 							/>

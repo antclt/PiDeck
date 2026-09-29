@@ -319,7 +319,11 @@ describe("BridgeServer: 模型请求快照（model-trace）", () => {
 
 	it("快照被转发给注册时的 onModelTrace 回调，响应 {ok:true}", async () => {
 		const received = [];
-		const { url } = server.registerAgent("trace-a", () => {}, (trace) => received.push(trace));
+		const { url } = server.registerAgent(
+			"trace-a",
+			() => {},
+			(trace) => received.push(trace),
+		);
 		const result = await postModelTrace(url, requestFrame());
 		assert.equal(result.status, 200);
 		assert.deepEqual(result.body, { ok: true });
@@ -330,7 +334,11 @@ describe("BridgeServer: 模型请求快照（model-trace）", () => {
 
 	it("响应帧（status/durationMs）同样被转发", async () => {
 		const received = [];
-		const { url } = server.registerAgent("trace-resp", () => {}, (trace) => received.push(trace));
+		const { url } = server.registerAgent(
+			"trace-resp",
+			() => {},
+			(trace) => received.push(trace),
+		);
 		const result = await postModelTrace(url, { kind: "response", traceId: "t-2", ts: 1_750_000_000_100, status: 200, durationMs: 1234 });
 		assert.equal(result.status, 200);
 		assert.equal(received[0].kind, "response");
@@ -373,7 +381,11 @@ describe("BridgeServer: 模型请求快照（model-trace）", () => {
 	});
 
 	it("快照投递不更新 lastSeenAt：isAgentConnected 仍只认 UI 轮询", async () => {
-		const { url } = server.registerAgent("trace-seen", () => {}, () => {});
+		const { url } = server.registerAgent(
+			"trace-seen",
+			() => {},
+			() => {},
+		);
 		// 注册本身会写 lastSeenAt：用 10ms 窗口 + 等 30ms，把「刚注册」也排除掉
 		await new Promise((resolve) => setTimeout(resolve, 30));
 		assert.equal(server.isAgentConnected("trace-seen", 10), false, "窗口外的注册不算连接");
@@ -384,7 +396,11 @@ describe("BridgeServer: 模型请求快照（model-trace）", () => {
 	});
 
 	it("与 /ui 互不影响：同 token 的轮询照常带回事件", async () => {
-		const { url } = server.registerAgent("trace-coexist", () => {}, () => {});
+		const { url } = server.registerAgent(
+			"trace-coexist",
+			() => {},
+			() => {},
+		);
 		server.pushEvent("trace-coexist", { type: "resync" });
 		await postModelTrace(url, requestFrame());
 		const ui = await post(url, { updates: [] });

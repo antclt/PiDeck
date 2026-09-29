@@ -84,6 +84,12 @@ export const ipcChannels = {
 	quickMessagesSave: "quick-messages:save",
 	/** 快捷消息：用系统默认程序打开配置文件（路径由主进程解析，渲染层不传路径） */
 	quickMessagesOpenFile: "quick-messages:open-file",
+	/** 回复快捷操作：读取 userData/reply-actions.json（文件缺失时用随包出厂规则种子化） */
+	replyActionsGet: "reply-actions:get",
+	/** 回复快捷操作：整体保存规则数组（顺序即展示顺序，空数组代表用户清空） */
+	replyActionsSave: "reply-actions:save",
+	/** 回复快捷操作：用系统默认程序打开规则文件（路径由主进程解析，渲染层不传路径） */
+	replyActionsOpenFile: "reply-actions:open-file",
 	sessionsList: "sessions:list",
 	/** Session-first catalog APIs. */
 	sessionsCatalogList: "sessions:catalog-list",
