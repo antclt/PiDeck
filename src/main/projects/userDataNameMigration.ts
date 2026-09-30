@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSy
 import { dirname, join, resolve } from "node:path";
 import { PACKAGED_USER_DATA_NAME, PACKAGED_USER_DATA_NAME_NEW } from "../portableUserData";
 import type { UserDataNameMigrationNotice } from "../../shared/types/userDataMigration";
+import { repairUserDataSessionHeaders } from "./userDataSessionHeaderMigration";
 
 /**
  * 正式包装版 userData 目录改名迁移（pi-desktop → PiDeck）。
@@ -12,9 +13,9 @@ import type { UserDataNameMigrationNotice } from "../../shared/types/userDataMig
  * 设计约束：
  * - 在 app.ready 之前、`app.setPath("userData")` 之前同步执行（纯 node:fs，不依赖 Electron），
  *   返回值即本次启动应使用的 userData；改名失败时回退旧目录，下次启动自动重试。
- * - 一次迁移完整闭环 = 目录改名 + 持久化绝对路径改写 + pi 会话 encoded 目录改名。
- *   三步都幂等（判据是「旧根 + 分隔符」前缀，改写后必然不再命中），所以无需完成 marker：
- *   中途崩溃后下次启动只会重跑未完成的子集。
+ * - 一次迁移完整闭环 = 目录改名 + 持久化绝对路径改写 + pi 会话 encoded 目录改名 + header.cwd 修复。
+ *   子步骤均幂等；旧根已消失时仍补完剩余步骤，覆盖中途失败以及 #298 的 beta 存量用户。
+ *   header 只换 cwd，历史消息逐字节保留，避免把迁移变成历史内容编辑。
  * - 只碰落在旧根内的路径：用户自定义到别处的聊天目录、同前缀的 pi-desktop-dev 均不受影响。
  */
 
@@ -158,16 +159,24 @@ function migratePiSessionDirs(piSessionsRoot: string, legacyChildren: string[], 
 	} catch {
 		return renamed;
 	}
-	const byLower = new Map<string, string>();
-	for (const entry of entries) byLower.set(entry.toLowerCase(), entry);
 	const caseInsensitive = isCaseInsensitive(platform);
+	const nameKey = (name: string) => (caseInsensitive ? name.toLowerCase() : name);
+	const byName = new Map(entries.map((entry) => [nameKey(entry), entry]));
 	const separator = platform === "win32" ? "\\" : "/";
 	for (const childPath of legacyChildren) {
 		const exact = encodeSessionDirName(childPath);
-		const matched = byLower.get(exact) ?? (caseInsensitive ? byLower.get(exact.toLowerCase()) : undefined);
-		if (!matched) continue;
 		const newName = encodeSessionDirName(`${newRoot}${childPath.slice(oldRoot.length).replace(/^[\\/]/, separator)}`);
-		if (newName.toLowerCase() !== matched.toLowerCase()) {
+		const matched = byName.get(nameKey(exact));
+		const existingNew = byName.get(nameKey(newName));
+		if (!matched) {
+			// #298：encoded 目录已经迁过，但 JSONL 首行仍是旧 cwd；不能直接跳过。
+			if (existingNew) {
+				repairUserDataSessionHeaders(join(piSessionsRoot, existingNew), oldRoot, newRoot, platform);
+				renamed.set(exact, existingNew);
+			}
+			continue;
+		}
+		if (nameKey(newName) !== nameKey(matched)) {
 			const source = join(piSessionsRoot, matched);
 			const target = join(piSessionsRoot, newName);
 			try {
@@ -184,7 +193,9 @@ function migratePiSessionDirs(piSessionsRoot: string, legacyChildren: string[], 
 			}
 		}
 		// 目录本就与新名一致（如仅大小写差异）：不改磁盘名，但 token 替换仍要做（引用大小写混杂）
-		renamed.set(matched, matched === newName ? matched : newName);
+		const targetName = nameKey(newName) === nameKey(matched) ? matched : (existingNew ?? newName);
+		repairUserDataSessionHeaders(join(piSessionsRoot, targetName), oldRoot, newRoot, platform);
+		renamed.set(matched, targetName);
 	}
 	return renamed;
 }
@@ -221,7 +232,9 @@ function readRecordedChatDir(chatPathFile: string, oldRoot: string): string | nu
 		decoded = decoded.split("\\\\").join("\\");
 	}
 	decoded = decoded.split('\\"').join('"');
-	return decoded.toLowerCase().startsWith(oldRoot.toLowerCase()) || decoded.startsWith(oldRoot) ? decoded : null;
+	const normalized = decoded.replace(/\\/g, "/").toLowerCase();
+	const root = oldRoot.replace(/\\/g, "/").toLowerCase();
+	return normalized === root || normalized.startsWith(`${root}/`) ? decoded : null;
 }
 
 function mergeSessionDirs(source: string, target: string): void {
@@ -253,26 +266,32 @@ export function runUserDataNameMigration(input: UserDataNameMigrationInput): Use
 		return { kind: "skipped", reason: "explicit-user-data-dir", userDataPath: newRoot };
 	}
 	const oldExists = safeIsDirectory(oldRoot);
-	if (!oldExists) {
-		return { kind: "skipped", reason: safeIsDirectory(newRoot) ? "already-migrated" : "new-install", userDataPath: newRoot };
+	const newExists = safeIsDirectory(newRoot);
+	if (!oldExists && !newExists) {
+		return { kind: "skipped", reason: "new-install", userDataPath: newRoot };
 	}
-	if (safeIsDirectory(newRoot)) {
+	if (oldExists && newExists) {
 		return { kind: "skipped", reason: "collision", userDataPath: newRoot };
 	}
 
-	try {
-		mkdirSync(dirname(newRoot), { recursive: true });
-		renameSync(oldRoot, newRoot);
-	} catch (error) {
-		// 改名失败回退旧目录：应用照常启动，下次启动重试（此时新旧目录状态未变）
-		return { kind: "failed", reason: error instanceof Error ? error.message : String(error), userDataPath: oldRoot };
+	if (oldExists) {
+		try {
+			mkdirSync(dirname(newRoot), { recursive: true });
+			renameSync(oldRoot, newRoot);
+		} catch (error) {
+			// 改名失败回退旧目录：应用照常启动，下次启动重试（此时新旧目录状态未变）
+			return { kind: "failed", reason: error instanceof Error ? error.message : String(error), userDataPath: oldRoot };
+		}
 	}
 
 	const caseInsensitive = isCaseInsensitive(platform);
 	// 目录已整体迁到新根，子目录名不变：以新根子目录生成「旧根内路径」候选集匹配编码目录。
-	const legacyChildren = listChildDirs(newRoot).map((child) => `${oldRoot}${child.slice(newRoot.length)}`);
-	// 改写前先读登记路径（磁盘目录可能已被用户删除，但会话目录仍在 ~/.pi 下）
-	const recordedChatDir = readRecordedChatDir(join(newRoot, "chat-path.json"), oldRoot);
+	const legacyChildren = [oldRoot, ...listChildDirs(newRoot).map((child) => `${oldRoot}${child.slice(newRoot.length)}`)];
+	// 改写前先读登记路径；beta 已迁移时登记的可能是新根下的嵌套目录，同样要生成旧编码候选。
+	const chatPathFile = join(newRoot, "chat-path.json");
+	const recordedOld = readRecordedChatDir(chatPathFile, oldRoot);
+	const recordedNew = readRecordedChatDir(chatPathFile, newRoot);
+	const recordedChatDir = recordedOld ?? (recordedNew ? `${oldRoot}${recordedNew.slice(newRoot.length)}` : null);
 	if (recordedChatDir && !legacyChildren.includes(recordedChatDir)) legacyChildren.push(recordedChatDir);
 	const migratedSessionDirs = migratePiSessionDirs(resolve(join(input.homeDir, ".pi", "agent", "sessions")), legacyChildren, oldRoot, newRoot, platform);
 	const encodedPairs = [...migratedSessionDirs.entries()];
@@ -296,7 +315,8 @@ export function runUserDataNameMigration(input: UserDataNameMigrationInput): Use
 		// 无 drafts 目录
 	}
 
-	return { kind: "migrated", oldPath: oldRoot, userDataPath: newRoot, migratedSessionDirs: [...migratedSessionDirs.keys()] };
+	// 保留原有返回契约：存量补修不重复展示整目录迁移提示。
+	return oldExists ? { kind: "migrated", oldPath: oldRoot, userDataPath: newRoot, migratedSessionDirs: [...migratedSessionDirs.keys()] } : { kind: "skipped", reason: "already-migrated", userDataPath: newRoot };
 }
 
 function safeIsDirectory(path: string): boolean {
