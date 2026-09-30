@@ -1,5 +1,5 @@
-import { memo, useEffect, useState } from "react";
-import type { AppInfo, AppSettings, DataEnvInfo, PiCliUpdateResult, PiInstallStatus, PiUpdateCheckResult, WslConnectionValidation } from "../../../../../shared/types";
+import { memo, useEffect, useRef, useState } from "react";
+import type { AppInfo, AppSettings, DataEnvInfo, PiCliUpdateResult, PiInstallation, PiInstallStatus, PiUpdateCheckResult, WslConnectionValidation } from "../../../../../shared/types";
 import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { useAtomValue } from "jotai";
@@ -16,6 +16,7 @@ import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { CatalogSection } from "./CatalogSection";
 import { DshRunnerNodeRow } from "./DshRunnerNodeRow";
+import { PiCommandSourcePanel } from "../PiCommandSourcePanel";
 
 type DevTabProps = {
 	draft: AppSettings;
@@ -28,13 +29,26 @@ type DevTabProps = {
 	appInfo: AppInfo;
 	piStatus: PiInstallStatus | null;
 	piChecking: boolean;
-	customPiPath: string;
-	customPathValidating: boolean;
-	customPathResult: PiInstallStatus | null;
-	onCustomPathChange: (path: string) => void;
-	onValidateCustomPath: () => void;
-	onClearCustomPath: () => void;
+	/** 检测到的全部 pi 安装（含官方 managed 安装）；空数组 = 不展示选择区 */
+	piInstallations: PiInstallation[];
+	/** 从安装列表里选定一份（校验通过后写入 settings.customPiPath） */
+	onChoosePiInstallation: (path: string) => void;
+	/** 反查交互式登录 shell 再找一次（zsh/自定义 PATH 场景） */
+	onShellProbePiInstallations: () => void;
+	shellProbingPiInstallations: boolean;
+	/** 正在校验的安装路径（列表行内 loading） */
+	applyingPiInstallationPath: string | null;
+	/** 进入本 tab 时拉一次安装列表（用户可能从不点「检测环境」） */
+	onRequestPiInstallations: () => void;
+	/** 系统文件选择器挑 pi 可执行文件（稀有/自定义安装） */
+	onBrowsePiPath: () => void;
+	browsingPiPath: boolean;
+	/** 检测环境（并入命令来源面板头部；面板自己会保证 WSL 草稿先落盘） */
 	onCheckPi: () => void;
+	/** 添加/编辑/移除用户自加的候选路径 */
+	onAddPiCustomPath: (path: string) => Promise<void> | void;
+	onUpdatePiCustomPath: (previousPath: string, nextPath: string) => Promise<void> | void;
+	onRemovePiCustomPath: (path: string) => Promise<void> | void;
 	onClearCheckFlag?: () => void;
 	piUpdateChecking: boolean;
 	onCheckPiUpdate: () => void;
@@ -64,7 +78,17 @@ type SelectOption = { value: string; label: string; disabled?: boolean };
  */
 export const DevTab = memo(function DevTab(props: DevTabProps) {
 	const { draft, updateDraft, isDirty } = props;
-	const piPath = props.customPiPath || props.piStatus?.command || "";
+	// 当前使用的 pi 命令：以检测结果为准（自定义路径切换后主进程会把 customPiPath 写进 piStatus.command）
+	const piPath = props.piStatus?.command ?? "";
+
+	// 进本 tab 就拉一次安装列表（主进程 10s 内缓存，不会重复 spawn）：
+	// 用户可能从来不会点「检测环境」，但多份 pi 时必须看得到选择入口。
+	// 用 ref 拿最新回调，避免把这个一次性副作用挂到 props 变化上反复触发。
+	const requestInstallationsRef = useRef(props.onRequestPiInstallations);
+	requestInstallationsRef.current = props.onRequestPiInstallations;
+	useEffect(() => {
+		requestInstallationsRef.current();
+	}, []);
 	// 后台检查发现可提示的 PiDeck 新版本（未跳过）时高亮设置页更新分区。
 	const updateStatus = useAtomValue(updateStatusAtom);
 	// 当前更新通道（useChannelSwitchWatch 初拉）：AppUpdateCard 徽章与切换方向依据；
@@ -172,19 +196,14 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 		{ value: "wsl", label: t("settings.piSource.wsl") },
 	];
 
-	/** 检测环境：先把 WSL 草稿（来源/发行版/用户名）落盘，否则主进程拿旧配置检测。 */
+	/**
+	 * 重新检测：先把 WSL 草稿（来源/发行版/用户名）落盘，否则主进程拿旧配置检测；
+	 * 失败（持久化失败）则中止，避免用旧配置给出误导性结果。
+	 */
 	const handleCheckEnvironment = () => {
 		void (async () => {
 			if (!(await props.onEnsureWslSettingsSaved())) return;
 			props.onCheckPi();
-		})();
-	};
-
-	/** 校验并使用：同上——先落盘 WSL 草稿，再让主进程按界面当前所见状态校验路径。 */
-	const handleValidateCustomPath = () => {
-		void (async () => {
-			if (!(await props.onEnsureWslSettingsSaved())) return;
-			props.onValidateCustomPath();
 		})();
 	};
 
@@ -213,15 +232,8 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 							{props.piStatus && !props.piStatus.installed && props.piStatus.error && <span className="setting-status error">{props.piStatus.error}</span>}
 						</div>
 					</div>
+					{/* 检测/重置标记已并入下方「命令来源」面板的头部（同一件事不再有两个入口） */}
 					<div className="setting-inline-actions">
-						<Button variant="secondary" onClick={handleCheckEnvironment} disabled={props.piChecking}>
-							{props.piChecking ? t("settings.detecting") : t("settings.detectEnvironment")}
-						</Button>
-						{props.onClearCheckFlag && (
-							<Button variant="secondary" onClick={props.onClearCheckFlag}>
-								{t("environment.clearCheckFlag")}
-							</Button>
-						)}
 						<Button variant="secondary" onClick={props.onCheckPiUpdate} loading={props.piUpdateChecking}>
 							{t("settings.checkPiUpdate")}
 						</Button>
@@ -247,11 +259,11 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 					</pre>
 				)}
 
-				<div className="my-3 border-0 border-t border-border-subtle" />
-
-				{/* Pi 来源：Windows 原生 / WSL（仅 Windows 可见） */}
+				{/* Pi 来源：Windows 原生 / WSL（仅 Windows 可见）。
+				    分隔线由本块自己带（mt/pt + border-t）：写成独立元素的话，
+				    非 Windows 平台会凭空多出一条什么都没有的画线。 */}
 				{props.appInfo.platform === "win32" && (
-					<div id="settings-section-dev-pi-source" className="setting-pi-source-block">
+					<div id="settings-section-dev-pi-source" className="setting-pi-source-block mt-3 border-0 border-t border-border-subtle pt-3">
 						<div className="setting-pi-source-row">
 							<span>{t("settings.piSource.label")}</span>
 							<div className="grid gap-1.5">
@@ -363,32 +375,28 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 					</div>
 				)}
 
-				<div className="my-3 border-0 border-t border-border-subtle" />
-
-				{/* 自定义 Pi 路径 */}
-				<div id="settings-section-dev-custom-pi-path" className="setting-pi-path-panel">
-					<SettingRow title={<span>{t("settings.customPiPath")}</span>} description={t("settings.customPiPathHint")} stacked>
-						<Input type="text" value={props.customPiPath} placeholder={piPath || "D:\\mise-data\\installs\\node\\24 13 0\\pi.cmd"} disabled={props.customPathValidating} onChange={(event) => props.onCustomPathChange(event.target.value)} />
-					</SettingRow>
-					<div className="setting-pi-path-actions">
-						<Button variant="secondary" onClick={handleValidateCustomPath} disabled={!props.customPiPath.trim() || props.customPathValidating}>
-							{props.customPathValidating ? t("settings.validating") : t("settings.validatePiPath")}
-						</Button>
-						<Button variant="secondary" onClick={props.onClearCustomPath} disabled={!props.customPiPath || props.customPathValidating}>
-							{t("settings.clearCustomPiPath")}
-						</Button>
+				{/* pi 命令来源：自动检测到的安装 + 用户自己添加的路径，合并成一块（来源只是标签） */}
+				<div id="settings-section-dev-pi-installations" className="flex flex-col gap-2 py-2">
+					{/* 标题/说明：两块旧设置的职责（选哪个 pi + 手动配路径）现在全在这一块里 */}
+					<div className="flex flex-col gap-1">
+						<strong className="text-text-primary text-control">{t("settings.piCommandSourceTitle")}</strong>
+						<small className="text-text-secondary text-caption leading-relaxed">{t("settings.piCommandSourceDesc")}</small>
 					</div>
-					{props.customPathResult && (
-						<small className={`setting-status ${props.customPathResult.installed ? "success" : "error"}`}>
-							{props.customPathResult.installed
-								? t("settings.validatePassed", {
-										value: props.customPathResult.command ?? props.customPathResult.version ?? "pi",
-									})
-								: t("settings.validateFailed", {
-										error: props.customPathResult.error ?? t("environment.unableToRun"),
-									})}
-						</small>
-					)}
+					<PiCommandSourcePanel
+						variant="settings"
+						installations={props.piInstallations}
+						applyingPath={props.applyingPiInstallationPath}
+						onChoose={props.onChoosePiInstallation}
+						onAddCustomPath={props.onAddPiCustomPath}
+						onUpdateCustomPath={props.onUpdatePiCustomPath}
+						onRemoveCustomPath={props.onRemovePiCustomPath}
+						onBrowse={props.onBrowsePiPath}
+						browsing={props.browsingPiPath}
+						onRecheck={handleCheckEnvironment}
+						rechecking={props.piChecking}
+						onShellProbe={props.onShellProbePiInstallations}
+						shellProbing={props.shellProbingPiInstallations}
+					/>
 				</div>
 				{props.appInfo.platform === "win32" && <DshRunnerNodeRow draft={draft} updateDraft={updateDraft} isDirty={isDirty} />}
 			</SettingsSection>
@@ -498,6 +506,15 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 						{t("settings.restartAppButton")}
 					</Button>
 				</SettingRow>
+				{/* 「重置检测标记」原在 pi 命令来源面板里，和「重新检测」并排会被当成同一类操作；
+				    它实际只影响“下次启动是否重跑一遍首启检测”（一次性开关），所以归到调试区。 */}
+				{props.onClearCheckFlag && (
+					<SettingRow anchor="dev-clear-pi-check-flag" title={<span>{t("environment.clearCheckFlag")}</span>} description={t("environment.clearCheckFlagHint")}>
+						<Button variant="secondary" onClick={props.onClearCheckFlag}>
+							{t("settings.toggle")}
+						</Button>
+					</SettingRow>
+				)}
 				<SettingRow anchor="dev-devtools" title={<span>{t("settings.devTools")}</span>} description={t("settings.devToolsDesc")}>
 					<Button variant="secondary" onClick={props.onToggleDevTools}>
 						{t("settings.toggle")}

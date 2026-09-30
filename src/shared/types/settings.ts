@@ -242,8 +242,14 @@ export type AppSettings = {
 	desktopProxyUrl: string;
 	/** 桌面端代理绕过列表，对应 Electron proxyBypassRules */
 	desktopProxyBypass: string;
-	/** 用户手动指定的 pi CLI 命令路径，自动检测不到时用于兜底 */
+	/** 用户手动指定的 pi CLI 命令路径，自动检测不到时用于兜底；同时也是「当前使用」的指针 */
 	customPiPath: string;
+	/**
+	 * 用户自己添加的 pi 候选路径（设置页列表里可随时切换）。
+	 * 与 customPiPath 的分工：本字段只是“备选池”，只影响列表展示与切换；
+	 * 真正生效的永远只有 customPiPath 那一条——启动 pi / 更新 / 扩展管理都只读它。
+	 */
+	piCustomPaths: string[];
 
 	/** 是否发送匿名、低频、最小字段的使用统计 */
 	telemetryEnabled: boolean;

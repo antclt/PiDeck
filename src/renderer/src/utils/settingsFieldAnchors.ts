@@ -52,9 +52,11 @@ export const SETTINGS_FIELD_ANCHORS: readonly SettingsFieldAnchor[] = [
 	},
 	{
 		tab: "dev",
-		slug: "dev-custom-pi-path",
-		labelKey: "settings.customPiPath",
-		keywords: ["pi 路径", "自定义路径", "pi path", "nvm", "fnm", "找不到 pi"],
+		slug: "dev-pi-installations",
+		// 原「自定义 pi 路径」输入框已并入这块列表（检测到的安装 + 我添加的路径），
+		// 锚点必须跟着走：留在旧 id 上会让命令面板点进去静默无反应。
+		labelKey: "settings.piInstallationsTitle",
+		keywords: ["pi 路径", "自定义路径", "pi path", "nvm", "fnm", "找不到 pi", "多个 pi", "选择 pi", "浏览"],
 	},
 	{
 		tab: "dev",

@@ -90,17 +90,35 @@ export function EnvironmentGuidePanel(props: { guide: PiEnvironmentGuide }) {
 				</div>
 				{!piStepDone && activeStep === 2 && (
 					<div className="env-guide-step-body">
-						<small>{t("environment.guidePiDesc")}</small>
-						<div className="env-guide-step-actions">
-							<Button variant="outline" size="sm" className={`env-card-btn env-mirror-btn ${guide.piUseMirror ? "active" : ""} h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none`} onClick={() => guide.setPiUseMirror((prev) => !prev)} disabled={guide.piInstalling}>
-								{guide.piUseMirror ? t("environment.guidePiRemoveMirror") : t("environment.guidePiUseMirror")}
-							</Button>
-							<Button variant="default" size="sm" className="env-card-btn primary h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={() => void guide.installPiForGuide()} disabled={guide.piInstalling}>
-								{guide.piInstalling ? t("environment.guidePiInstalling") : t("environment.guidePiInstall")}
-							</Button>
-						</div>
-						{guide.piInstallResult && (
-							<div className={`env-guide-result ${guide.piInstallResult.success ? "success" : "error"}`}>{guide.piInstallResult.success ? `✓ ${t("environment.guidePiDone")}` : `✗ ${t("environment.guidePiFailed")}：${guide.piInstallResult.stderr?.slice(0, 300) || guide.piInstallResult.stdout?.slice(0, 300)}`}</div>
+						{/* 主进程拦住安装时的现场：本机已有 pi。不再展示安装按钮——用户没有东西可装 */}
+						{guide.piAlreadyInstalled.length > 0 ? (
+							<>
+								<div className="env-guide-result success">✓ {t("environment.guidePiAlreadyInstalled")}</div>
+								<ul className="m-0 flex list-none flex-col gap-1 p-0">
+									{guide.piAlreadyInstalled.map((item) => (
+										<li key={item.path} className="text-text-secondary text-caption">
+											{item.version ? `v${item.version} · ` : ""}
+											{item.path}
+										</li>
+									))}
+								</ul>
+								<small>{t("environment.guidePiAlreadyInstalledHint")}</small>
+							</>
+						) : (
+							<>
+								<small>{t("environment.guidePiDesc")}</small>
+								<div className="env-guide-step-actions">
+									<Button variant="outline" size="sm" className={`env-card-btn env-mirror-btn ${guide.piUseMirror ? "active" : ""} h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none`} onClick={() => guide.setPiUseMirror((prev) => !prev)} disabled={guide.piInstalling}>
+										{guide.piUseMirror ? t("environment.guidePiRemoveMirror") : t("environment.guidePiUseMirror")}
+									</Button>
+									<Button variant="default" size="sm" className="env-card-btn primary h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={() => void guide.installPiForGuide()} disabled={guide.piInstalling}>
+										{guide.piInstalling ? t("environment.guidePiInstalling") : t("environment.guidePiInstall")}
+									</Button>
+								</div>
+								{guide.piInstallResult && (
+									<div className={`env-guide-result ${guide.piInstallResult.success ? "success" : "error"}`}>{guide.piInstallResult.success ? `✓ ${t("environment.guidePiDone")}` : `✗ ${t("environment.guidePiFailed")}：${guide.piInstallResult.stderr?.slice(0, 300) || guide.piInstallResult.stdout?.slice(0, 300)}`}</div>
+								)}
+							</>
 						)}
 					</div>
 				)}
