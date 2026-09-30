@@ -24,6 +24,7 @@ export type WebNetworkAddress = {
 	interfaceName: string;
 	cidr: string | null;
 	isPrivate: boolean;
+	family: "IPv4" | "IPv6";
 };
 /** 文件/Git Diff 在中间栏的默认打开方式：分屏与会话并排，或占满中间栏 */
 export type WorkspaceContentOpenMode = "split" | "maximize";
