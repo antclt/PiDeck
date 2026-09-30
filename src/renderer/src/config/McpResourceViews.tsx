@@ -11,8 +11,12 @@ export function inferMcpTransport(definition: McpServerDefinition): McpServerTra
 	return "stdio";
 }
 
+/**
+ * 停用判定：pi 0.99 内置 MCP 只认 `enabled`（默认 true）；`disabled` 是
+ * adapter 时代字段，0.99 已不识别。过渡期两者都写、都读：旧配置（disabled:true）\ * 仍显示为停用，新写入一律带 enabled，保存时不清 legacy 字段以兼容旧版 pi。
+ */
 export function isMcpServerDisabled(definition: McpServerDefinition): boolean {
-	return definition.disabled === true;
+	return definition.enabled === false || definition.disabled === true;
 }
 
 /** Adapter installation guide shown before MCP configuration becomes useful. */

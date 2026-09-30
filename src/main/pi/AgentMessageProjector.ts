@@ -1,6 +1,13 @@
 import type { ChatMessage, ImageContent } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { extractToolResultText as extractSharedToolResultText, formatToolDetail as formatSharedToolDetail, safeJson as sharedSafeJson, truncateDetailWithMeta as truncateSharedDetailWithMeta, truncateForDetail as truncateSharedForDetail } from "../../shared/formatToolDetail";
+import {
+	extractPiToolTruncation as extractSharedPiTruncation,
+	extractToolResultText as extractSharedToolResultText,
+	formatToolDetail as formatSharedToolDetail,
+	safeJson as sharedSafeJson,
+	truncateDetailWithMeta as truncateSharedDetailWithMeta,
+	truncateForDetail as truncateSharedForDetail,
+} from "../../shared/formatToolDetail";
 import { extractMessageText } from "./messageContent";
 import { isRoleMessageRole, takeActiveEntryId } from "./sessionEntryIds";
 
@@ -160,6 +167,8 @@ export class AgentMessageProjector {
 							details: typed.details,
 						};
 						const filePath = this.getToolPathFromArgs(historicalCall?.args);
+						// 历史工具结果同样带 pi 0.99 的截断信息（details.truncation / fullOutputPath）
+						const piTruncation = extractSharedPiTruncation(result);
 						const piDeckOriginalContent = typed.details?._piDeckOriginalContent as string | undefined;
 						const originalContent = piDeckOriginalContent ?? (filePath ? historicalOriginalContentByPath.get(filePath) : undefined);
 						const detailText = this.formatToolDetail(toolName, historicalCall?.args, result, isError);
@@ -217,6 +226,8 @@ export class AgentMessageProjector {
 									args: this.truncateForDetail(this.safeJson(historicalCall?.args)),
 									result: this.truncateForDetail(this.extractToolResultText(result) || this.safeJson(result)),
 									isError,
+									// pi 侧截断（与 truncated 的展示层截断区分）：历史会话回看时也能拿到完整输出路径
+									...(piTruncation ? { resultTruncation: piTruncation } : {}),
 									detailText: detailDelivery.text,
 									...(detailDelivery.truncated ? { truncated: true, fullLength: detailDelivery.fullLength } : {}),
 									// 历史会话不保存 originalContent（full file），diff 使用工具参数

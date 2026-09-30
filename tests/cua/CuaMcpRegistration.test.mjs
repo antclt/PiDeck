@@ -29,9 +29,12 @@ test("ensureCuaMcpRegistered writes a url entry to ~/.pi/agent/mcp.json", async 
 	const entry = config.mcpServers["pideck-cua"];
 	assert.ok(entry);
 	assert.strictEqual(entry.url, URL1);
-	assert.strictEqual(entry.auth, "bearer");
-	assert.strictEqual(entry.bearerToken, TOKEN1);
-	assert.strictEqual(entry.lifecycle, "keep-alive");
+	// pi 0.99 内置 MCP schema：auth / bearerToken / lifecycle 不再被识别（见文件头注释）。
+	assert.strictEqual(entry.auth, undefined);
+	assert.strictEqual(entry.bearerToken, undefined);
+	assert.strictEqual(entry.lifecycle, undefined);
+	assert.deepStrictEqual(entry.headers, { Authorization: `Bearer ${TOKEN1}` });
+	assert.strictEqual(entry.exposure, "direct");
 	assert.strictEqual(entry.command, undefined);
 });
 
@@ -49,7 +52,7 @@ test("ensureCuaMcpRegistered updates a changed definition", async () => {
 	const mcpPath = join(fakeHome, ".pi", "agent", "mcp.json");
 	const config = JSON.parse(readFileSync(mcpPath, "utf8"));
 	assert.strictEqual(config.mcpServers["pideck-cua"].url, "http://127.0.0.1:40999/mcp");
-	assert.strictEqual(config.mcpServers["pideck-cua"].bearerToken, "tok-2");
+	assert.deepStrictEqual(config.mcpServers["pideck-cua"].headers, { Authorization: "Bearer tok-2" });
 });
 
 test("ensureCuaMcpRegistered preserves other servers", async () => {

@@ -87,14 +87,22 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 	return isUnknownRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
 }
 
+const MCP_EXPOSURE_VALUES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"];
+
 function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
 	if (!isUnknownRecord(value)) return false;
 	const optionalString = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "string";
 	const optionalNumber = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "number";
+	const optionalExposure = (key: string) => !(key in value) || value[key] === undefined || (typeof value[key] === "string" && MCP_EXPOSURE_VALUES.includes(value[key]));
 	return (
 		["command", "cwd", "url", "socket", "bearerToken", "bearerTokenEnv"].every(optionalString) &&
 		optionalNumber("idleTimeout") &&
 		optionalNumber("requestTimeoutMs") &&
+		// pi 0.99 内置 MCP 字段：exposure / toolExposure / enabled / timeout
+		optionalExposure("exposure") &&
+		(!("toolExposure" in value) || value.toolExposure === undefined || (isUnknownRecord(value.toolExposure) && Object.values(value.toolExposure).every((entry) => typeof entry === "string" && MCP_EXPOSURE_VALUES.includes(entry)))) &&
+		(!("enabled" in value) || value.enabled === undefined || typeof value.enabled === "boolean") &&
+		(!("timeout" in value) || value.timeout === undefined || (typeof value.timeout === "number" && Number.isFinite(value.timeout) && value.timeout > 0)) &&
 		(!("args" in value) || value.args === undefined || (Array.isArray(value.args) && value.args.every((entry) => typeof entry === "string"))) &&
 		(!("env" in value) || value.env === undefined || isStringRecord(value.env)) &&
 		(!("headers" in value) || value.headers === undefined || isStringRecord(value.headers)) &&

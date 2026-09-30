@@ -2,12 +2,22 @@
  * CUA MCP registration helper.
  *
  * Writes/updates the `pideck-cua` entry in ~/.pi/agent/mcp.json so pi's
- * pi-mcp-adapter connects to the CUA MCP server.
+ * **built-in** MCP extension (pi 0.99+) connects to the CUA MCP server.
  *
  * Plan A (T7 decision): the CUA MCP server runs inside the PiDeck main process
  * and is exposed over Streamable HTTP on 127.0.0.1. We therefore register a
- * `url` entry (not a stdio `command`), with bearer auth so the adapter does not
- * attempt OAuth discovery.
+ * `url` entry (not a stdio `command`).
+ *
+ * ⚠️ 字段必须按 pi 0.99 内置 MCP 的 schema 写（dist/extensions/mcp 的
+ * `validateMcpServerConfig`）：社区 pi-mcp-adapter 时代的 `auth` /
+ * `bearerToken` / `lifecycle` **不再被识别，会被静默忽略**，HTTP 鉴权只有
+ * `headers`（支持 `${ENV}` / `!command` 替换）与 `oauth` 两条路。写错的表现
+ * 不是报错，而是 CuaMcpHttpHost 对无 Authorization 的请求回 401、pi 侧只显示
+ * "disconnected"——所以这里用 `headers.Authorization` 直写 bearer。
+ *
+ * `exposure: "direct"` 同样必需：内置 MCP 的默认 exposure 是 `codemode`
+ * （工具只从 codemode 脚本可达、不声明给模型），CUA 是桌面操作能力，
+ * 必须让模型直接看到并调用。
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -22,9 +32,6 @@ export type CuaMcpRegistration = {
 	/** Static bearer token required by the host. */
 	bearerToken: string;
 };
-
-/** Default keep-alive so pi reuses one session while PiDeck is running. */
-const CUA_LIFECYCLE = "keep-alive";
 
 /**
  * Ensure the CUA MCP server is registered in ~/.pi/agent/mcp.json.
@@ -51,9 +58,11 @@ export function ensureCuaMcpRegistered(registration: CuaMcpRegistration): { writ
 
 	const newDef = {
 		url: registration.url,
-		auth: "bearer" as const,
-		bearerToken: registration.bearerToken,
-		lifecycle: CUA_LIFECYCLE,
+		// pi 0.99 内置 MCP：HTTP 鉴权走 headers（字面值，不经 shell/环境展开，
+		// token 是 randomBytes(32).toString("hex")，不含 ${...} 形态不会被误替换）。
+		headers: { Authorization: `Bearer ${registration.bearerToken}` },
+		// 默认 codemode exposure 下工具不声明给模型，CUA 会「连上但不可见」。
+		exposure: "direct" as const,
 	};
 
 	const existing = config.mcpServers[CUA_SERVER_NAME];

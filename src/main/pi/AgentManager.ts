@@ -34,6 +34,7 @@ import type {
 import { ipcChannels } from "../../shared/ipc";
 import { sanitizeBridgeUpdate, stripBridgeAnsi } from "../../shared/bridgeText";
 import { collectSessionFileChanges } from "../../shared/fileChanges";
+import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS } from "../../shared/compactFeedback";
 import { PiProcess, type WhitelistSkip } from "./PiProcess";
 import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
@@ -116,6 +117,27 @@ export type ProjectTrustChoice = "trust-remember" | "trust-session" | "deny";
 function readAskField(input: unknown, key: string): unknown {
 	if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
 	return Reflect.get(input, key);
+}
+
+/**
+ * prompt / steer / follow_up 响应的 disposition 取值（pi CHANGELOG 0.99.0 #9098）。
+ * - "started"：已启动一次 agent run；
+ * - "queued"：当前有 run 在跑，消息进入队列（prompt 的 streamingBehavior 排队路径）；
+ * - "handled"：被扩展命令或 input handler 消费，**没有**启动 run。
+ */
+export type PromptDisposition = "started" | "queued" | "handled";
+
+/**
+ * 从 prompt RPC 成功响应的 data 里读 disposition；老版本 pi 不带该字段 → undefined。
+ *
+ * 为什么主进程要知道这件事：disposition === "handled" 表示这条 prompt 不会产生
+ * agent_start / agent_end，等待 agent_end 恢复 idle 的常规链路永远等不到——必须在
+ * 此处改走 scheduleIdleCheckAfterExtensionCommand（pi 的 get_state 兜底）。
+ */
+function readPromptDisposition(data: unknown): PromptDisposition | undefined {
+	if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+	const disposition = Reflect.get(data, "disposition");
+	return disposition === "started" || disposition === "queued" || disposition === "handled" ? disposition : undefined;
 }
 
 /**
@@ -1846,7 +1868,10 @@ export class AgentManager {
 		// 后续消息必须带 streamingBehavior 否则 pi 直接返回 error。这里自动兜底。
 		// images 用于传递粘贴/拖拽的图片，pi 会将 base64 图片直接传给支持视觉的模型。
 		try {
-			const promptIsExtensionCommand = await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage);
+			// prompt 前不再发 get_commands 预检：pi 0.99 起 prompt 成功响应自带
+			// data.disposition（CHANGELOG 0.99.0 #9098），"handled" 即「被扩展命令 /
+			// input handler 消费、没有启动运行」的权威信号，且省掉一次 RPC 往返。
+			// 老版本 pi 没有该字段 → 回退到 get_commands 启发式（见下方 undefined 分支）。
 			const requestPayload: Record<string, unknown> = {
 				type: "prompt",
 				message: agentMessage,
@@ -1896,7 +1921,13 @@ export class AgentManager {
 				};
 			}
 
-			if (promptIsExtensionCommand) {
+			// prompt 被扩展命令 / input handler 消费（没有启动 agent run）时，必须另找
+			// 恢复 idle 的时机：永远不会等到 agent_end（见下方注释）。
+			// pi 0.99+ 直接读 disposition；老版本无此字段，退回发一次 get_commands 预检
+			//（历史上 prompt 之前发的就是它，此处只是搬到 prompt 之后、按需执行）。
+			const disposition = readPromptDisposition(response.data);
+			const consumedWithoutRun = disposition === "handled" ? true : disposition === undefined ? await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage) : false;
+			if (consumedWithoutRun) {
 				// 机制：Pi 扩展命令可在 prompt 阶段直接执行并返回，不进入 agent run。
 				// 证据：@earendil-works/pi-coding-agent/dist/core/agent-session.js 中 AgentSession.prompt()
 				//      先调用 _tryExecuteExtensionCommand()；命中后 return，不再调用 _runAgentPrompt()。
@@ -3760,6 +3791,16 @@ export class AgentManager {
 		this.rewindHealthByRoot.set(root, health);
 	}
 
+	/**
+	 * get_commands 启发式：判断这条 prompt 是否是扩展命令（会被 AgentSession
+	 * _tryExecuteExtensionCommand 消费、不进入 agent run）。
+	 *
+	 * **仅作为 pi 0.99 以下版本的回退路径**：0.99 起 prompt 响应自带
+	 * data.disposition === "handled"（见 readPromptDisposition），权威且零额外往返；
+	 * 只有老版本 pi（disposition 缺失）才在这里补一次 get_commands。启发式本身的
+	 * 判据沿袭 pi dist/core/agent-session.js 的行为：命中后 AgentSession.prompt()
+	 * 直接 return，不再调用 _runAgentPrompt()。
+	 */
 	private async promptMatchesRegisteredExtensionCommand(runtime: AgentRuntime, message: string): Promise<boolean> {
 		const trimmed = message.trim();
 		if (!trimmed.startsWith("/")) return false;
@@ -5686,6 +5727,9 @@ export class AgentManager {
 			}
 		}
 		const result = event.result ?? event.partialResult ?? event.output ?? existing?.meta?.result;
+		// pi 侧截断（bash/powershell >1 MiB）：存在时才写 meta.resultTruncation，
+		// 普通结果的 details 无 truncation 字段 → 不下发多余 meta。
+		const piTruncation = extractPiToolTruncation(result);
 		const detailText = this.messageProjector.formatToolDetail(toolName, args, result, isError);
 		// detailText 整体截断（拼接后可能超单段上限）并标记 truncated/fullLength；
 		// 完整结果文本缓存在 toolFullTextByMessageId（LRU），供「查看完整输出」按需读取。
@@ -5802,6 +5846,9 @@ export class AgentManager {
 			args: argsMeta,
 			result: this.messageProjector.truncateForDetail(this.messageProjector.extractToolResultText(result) || this.messageProjector.safeJson(result)),
 			isError,
+			// pi 0.99 起 bash/powershell 结果 >1 MiB 时 truncated/details.fullOutputPath 单独下发，
+			// 渲染层据此给出完整输出路径（不同于本文件上方的 truncated 展示层截断标记）。
+			...(piTruncation ? { resultTruncation: piTruncation } : {}),
 			detailText: detailDelivery.text,
 			...(detailDelivery.truncated ? { truncated: true, fullLength: detailDelivery.fullLength } : {}),
 			// originalContent 不再存储到消息中（full file 会使会话元数据体积过大）。

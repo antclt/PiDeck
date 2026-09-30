@@ -1,7 +1,8 @@
 /**
  * Pi 配置管理 → MCP 页。
- * 固定全局作用域：只编辑 pi-mcp-adapter 读取的 mcp.json（可写层 ~/.pi/agent/mcp.json），
+ * 固定全局作用域：只编辑 pi 内置 MCP（0.99 起）读取的 mcp.json（可写层 ~/.pi/agent/mcp.json），
  * 项目级 mcp.json 不在本页显示/管理；不启动 MCP 运行时，探测仅检查 command 是否在 PATH / HTTP 是否可达。
+ * pi 0.99 之前该文件由 pi-mcp-adapter 扩展读取，因此 adapter 变为可选组件而非硬前置。
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -15,7 +16,7 @@ import { Textarea } from "../components/ui-shadcn/textarea";
 import { ConfigSelect, openDocsInSystemBrowser } from "./ConfigShared";
 import { inferMcpTransport, isMcpServerDisabled, McpAdapterGuide, McpServerListPane } from "./McpResourceViews";
 import { argsToText, buildMcpDisplayServers, isMcpServerName, recordToText, textToArgs, textToRecord } from "./mcpForm";
-import type { McpConfigFile, McpConfigSnapshot, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../../shared/types/mcp";
+import type { McpConfigFile, McpConfigSnapshot, McpExposure, McpProbeResult, McpServerDefinition, McpServerListItem, McpServerTransport } from "../../../shared/types/mcp";
 import { ResourceImportDialog } from "./ResourceImportDialog";
 
 const api = (
@@ -30,14 +31,16 @@ const api = (
 	}
 ).piDesktop;
 
-const MCP_DOCS = "https://nicobailon-pi-mcp-adapter.mintlify.app/configuration/server-setup";
+const MCP_DOCS = "https://earendil-works.github.io/pi/docs/mcp";
 const EMPTY_FILE: McpConfigFile = { mcpServers: {} };
 
-const LIFECYCLE_OPTIONS = [
-	{ value: "lazy", labelKey: "config.mcp.lifecycle.lazy" as const },
-	{ value: "eager", labelKey: "config.mcp.lifecycle.eager" as const },
-	{ value: "keep-alive", labelKey: "config.mcp.lifecycle.keepAlive" as const },
-	{ value: "lazy-keep-alive", labelKey: "config.mcp.lifecycle.lazyKeepAlive" as const },
+/** pi 0.99 内置 MCP 的 exposure 取值（默认 codemode，即不写字段）。 */
+const EXPOSURE_OPTIONS: Array<{ value: McpExposure; labelKey: "config.mcp.exposure.codemode" | "config.mcp.exposure.codemodeDeferred" | "config.mcp.exposure.deferred" | "config.mcp.exposure.direct" | "config.mcp.exposure.hidden" }> = [
+	{ value: "codemode", labelKey: "config.mcp.exposure.codemode" },
+	{ value: "codemode-deferred", labelKey: "config.mcp.exposure.codemodeDeferred" },
+	{ value: "deferred", labelKey: "config.mcp.exposure.deferred" },
+	{ value: "direct", labelKey: "config.mcp.exposure.direct" },
+	{ value: "hidden", labelKey: "config.mcp.exposure.hidden" },
 ];
 
 const TRANSPORT_OPTIONS: Array<{ value: McpServerTransport; labelKey: "config.mcp.transport.stdio" | "config.mcp.transport.http" | "config.mcp.transport.socket" }> = [
@@ -54,9 +57,9 @@ export type McpTabHandle = {
 const ADAPTER_EXTENSION_ID = "pi-mcp-adapter";
 
 function blankDefinition(transport: McpServerTransport): McpServerDefinition {
-	if (transport === "http") return { url: "https://", lifecycle: "lazy" };
-	if (transport === "socket") return { socket: "", lifecycle: "lazy" };
-	return { command: "npx", args: ["-y"], lifecycle: "lazy" };
+	if (transport === "http") return { url: "https://" };
+	if (transport === "socket") return { socket: "" };
+	return { command: "npx", args: ["-y"] };
 }
 
 export const McpTab = forwardRef<
@@ -81,7 +84,8 @@ export const McpTab = forwardRef<
 	const [creating, setCreating] = useState<{ name: string; definition: McpServerDefinition } | null>(null);
 	const [probe, setProbe] = useState<McpProbeResult | null>(null);
 	const [probing, setProbing] = useState(false);
-	/** pi-mcp-adapter 扩展是否已安装；null = 探测失败/不可用（不阻塞编辑，预览环境等场景降级）。 */
+	/** pi-mcp-adapter 扩展是否已安装；null = 探测失败/不可用（不阻塞编辑，预览环境等场景降级）。
+	 * pi 0.99 起 MCP 是内置能力，这里只作为「可选组件」提示，不再作为配置前置。 */
 	const [adapterInstalled, setAdapterInstalled] = useState<boolean | null>(null);
 	const loadGenerationRef = useRef(0);
 
@@ -90,7 +94,7 @@ export const McpTab = forwardRef<
 
 	/**
 	 * 探测 pi-mcp-adapter 扩展是否已安装（扩展列表）；失败返回 null 由调用方降级。
-	 * mcp.json 依赖该扩展被 pi 加载，缺扩展时配置页改为引导安装。
+	 * pi 0.99 起 mcp.json 由内置 MCP 读取，探测结果只影响「可选 adapter」提示，不阻塞配置。
 	 */
 	const probeAdapter = useCallback(async (): Promise<boolean | null> => {
 		try {
@@ -192,7 +196,10 @@ export const McpTab = forwardRef<
 
 	const switchTransport = (next: McpServerTransport) => {
 		const kept = {
-			lifecycle: editingDef.lifecycle,
+			exposure: editingDef.exposure,
+			enabled: editingDef.enabled,
+			timeout: editingDef.timeout,
+			// legacy disabled：与 enabled 成对写，兼容 pi 0.98（adapter）读取
 			disabled: editingDef.disabled,
 			env: editingDef.env,
 			headers: editingDef.headers,
@@ -209,11 +216,12 @@ export const McpTab = forwardRef<
 	const toggleDisabled = (item: McpServerListItem, disabled: boolean) => {
 		const existing = writable.mcpServers?.[item.name];
 		if (existing) {
-			upsert(item.name, { ...existing, disabled: disabled ? true : undefined });
+			// enabled 给 pi 0.99 内置 MCP；disabled 留给 pi 0.98（adapter）；两者成对写避免升级/降级行为漂移。
+			upsert(item.name, { ...existing, enabled: !disabled, disabled: disabled ? true : false });
 			return;
 		}
-		// 下层只读来源：只写 disabled 覆盖，不把 command/url 复制进 Pi 层。
-		upsert(item.name, { disabled: disabled ? true : false });
+		// 下层只读来源：只写停用覆盖，不把 command/url 复制进 Pi 层。
+		upsert(item.name, { enabled: !disabled, disabled });
 	};
 
 	const removeSelected = () => {
@@ -225,7 +233,7 @@ export const McpTab = forwardRef<
 			delete nextServers[selected];
 			applyWritable({ ...writable, mcpServers: nextServers });
 		} else if (item) {
-			upsert(selected, { disabled: true });
+			upsert(selected, { enabled: false, disabled: true });
 		}
 		const remaining = displayServers.filter((entry) => entry.name !== selected);
 		setSelected(remaining[0]?.name ?? null);
@@ -308,7 +316,6 @@ export const McpTab = forwardRef<
 	if (loading && !snapshot) {
 		return <div className="py-12 text-center text-control text-muted-foreground">{t("common.loading")}</div>;
 	}
-
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-3">
 			<div className="flex items-start justify-between gap-3">
@@ -326,12 +333,10 @@ export const McpTab = forwardRef<
 						{t("common.refresh")}
 					</Button>
 					<ResourceImportDialog kind="mcp" sourceProjectId={activeProjectId} triggerLabel={t("config.import.button")} onImported={() => void load()} />
-					{adapterInstalled !== false ? (
-						<Button size="sm" onClick={startCreate} disabled={saving || Boolean(creating)}>
-							<Plus size={14} />
-							{t("config.mcp.add")}
-						</Button>
-					) : null}
+					<Button size="sm" onClick={startCreate} disabled={saving || Boolean(creating)}>
+						<Plus size={14} />
+						{t("config.mcp.add")}
+					</Button>
 				</div>
 			</div>
 
@@ -339,149 +344,176 @@ export const McpTab = forwardRef<
 			{snapshot?.writableError ? <div className="rounded-sm border border-danger/20 bg-danger-soft px-3 py-2 text-control text-danger">{t("config.mcp.writableBroken")}</div> : null}
 
 			{showAdapterGuide ? (
-				<McpAdapterGuide onInstalled={load} />
-			) : (
-				<>
-					<div className="flex flex-wrap gap-1.5">
-						{(snapshot?.layers ?? []).map((layer) => (
-							<span key={layer.kind} className={`rounded-sm border px-1.5 py-0.5 font-mono text-micro ${layer.exists ? "border-border-subtle text-text-secondary" : "border-dashed border-border-subtle text-muted-foreground"}`} title={layer.path}>
-								{layerLabel[layer.kind]}
-								{layer.writable ? ` · ${t("config.mcp.writable")}` : ""}
-								{layer.exists ? "" : ` · ${t("config.mcp.missing")}`}
-							</span>
-						))}
-					</div>
-					{snapshot?.writablePath ? (
-						<p className="truncate font-mono text-micro text-muted-foreground" title={snapshot.writablePath}>
-							{t("config.mcp.writingTo")}: {snapshot.writablePath}
-						</p>
-					) : null}
-				</>
-			)}
-
-			{showAdapterGuide ? null : (
-				<div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
-					<McpServerListPane
-						servers={displayServers}
-						selected={selected}
-						creating={Boolean(creating)}
-						onSelect={(name) => {
-							setSelected(name);
-							setProbe(null);
-						}}
-					/>
-
-					<div className="flex min-h-0 flex-col gap-3 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-3">
-						{!selected && !creating ? (
-							<div className="py-8 text-center text-micro text-muted-foreground">{t("config.mcp.selectHint")}</div>
-						) : (
-							<>
-								<div className="grid gap-2">
-									<Label>{t("config.mcp.field.name")}</Label>
-									<Input
-										value={creating ? creating.name : (selected ?? "")}
-										onChange={(event) => {
-											if (!creating) return;
-											setCreating({ ...creating, name: event.target.value });
-											markDirty();
-										}}
-										disabled={!creating || saving}
-										placeholder="chrome-devtools"
-										className="h-8 font-mono"
-									/>
-								</div>
-								<div className="grid gap-2">
-									<Label>{t("config.mcp.field.transport")}</Label>
-									<ConfigSelect value={transport} options={TRANSPORT_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => switchTransport(value as McpServerTransport)} />
-								</div>
-								{transport === "stdio" ? (
-									<>
-										<div className="grid gap-2">
-											<Label>{t("config.mcp.field.command")}</Label>
-											<Input value={editingDef.command ?? ""} onChange={(event) => patchEditing({ command: event.target.value, url: undefined, socket: undefined })} className="h-8 font-mono" placeholder="npx" />
-										</div>
-										<div className="grid gap-2">
-											<Label>{t("config.mcp.field.args")}</Label>
-											<Input value={argsToText(editingDef.args)} onChange={(event) => patchEditing({ args: textToArgs(event.target.value) })} className="h-8 font-mono" placeholder="-y chrome-devtools-mcp@1.6.0" />
-										</div>
-										<div className="grid gap-2">
-											<Label>{t("config.mcp.field.cwd")}</Label>
-											<Input value={editingDef.cwd ?? ""} onChange={(event) => patchEditing({ cwd: event.target.value || undefined })} className="h-8 font-mono" />
-										</div>
-									</>
-								) : null}
-								{transport === "http" ? (
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.url")}</Label>
-										<Input value={editingDef.url ?? ""} onChange={(event) => patchEditing({ url: event.target.value, command: undefined, args: undefined, socket: undefined })} className="h-8 font-mono" placeholder="https://mcp.example.com/mcp" />
-									</div>
-								) : null}
-								{transport === "socket" ? (
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.socket")}</Label>
-										<Input value={editingDef.socket ?? ""} onChange={(event) => patchEditing({ socket: event.target.value, command: undefined, url: undefined })} className="h-8 font-mono" />
-									</div>
-								) : null}
-								<div className="grid gap-2">
-									<Label>{t("config.mcp.field.lifecycle")}</Label>
-									<ConfigSelect value={editingDef.lifecycle ?? "lazy"} options={LIFECYCLE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => patchEditing({ lifecycle: value as McpServerDefinition["lifecycle"] })} />
-								</div>
-								{transport === "stdio" ? (
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.env")}</Label>
-										<Textarea value={recordToText(editingDef.env)} onChange={(event) => patchEditing({ env: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.envPlaceholder")} className="min-h-20 font-mono text-control" />
-									</div>
-								) : null}
-								{transport === "http" ? (
-									<div className="grid gap-2">
-										<Label>{t("config.mcp.field.headers")}</Label>
-										<Textarea value={recordToText(editingDef.headers)} onChange={(event) => patchEditing({ headers: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.headersPlaceholder")} className="min-h-20 font-mono text-control" />
-									</div>
-								) : null}
-								<div className="flex items-center justify-between gap-3 rounded-sm border border-border-subtle px-2.5 py-2">
-									<div>
-										<div className="text-control font-medium">{t("config.mcp.field.enabled")}</div>
-										<div className="text-micro text-muted-foreground">{t("config.mcp.field.enabledHint")}</div>
-									</div>
-									<Switch
-										checked={!isMcpServerDisabled(editingDef)}
-										onCheckedChange={(checked) => {
-											if (creating) {
-												patchEditing({ disabled: checked ? undefined : true });
-												return;
-											}
-											if (selectedItem) toggleDisabled(selectedItem, !checked);
-										}}
-									/>
-								</div>
-								{selectedItem && !creating ? (
-									<p className="text-micro text-muted-foreground" title={selectedItem.originPath}>
-										{t("config.mcp.origin")}: {selectedItem.originPath}
-										{selectedItem.ownedByWritable ? "" : ` · ${t("config.mcp.overlayHint")}`}
-									</p>
-								) : null}
-								<div className="flex flex-wrap items-center gap-1.5">
-									<Button variant="outline" size="sm" onClick={() => void runProbe()} disabled={probing || saving}>
-										<PlugZap size={14} />
-										{probing ? t("config.mcp.probing") : t("config.mcp.probe")}
-									</Button>
-									{creating ? (
-										<Button variant="ghost" size="sm" onClick={cancelCreate}>
-											{t("common.cancel")}
-										</Button>
-									) : (
-										<Button variant="outline" size="sm" className="text-destructive" onClick={removeSelected} disabled={saving}>
-											<Trash2 size={13} />
-											{selectedItem?.ownedByWritable ? t("common.delete") : t("config.mcp.disableInstead")}
-										</Button>
-									)}
-								</div>
-								{probe ? <div className={`rounded-sm border px-2.5 py-2 text-micro ${probe.ok ? "border-[var(--color-success)]/30 text-[var(--color-success)]" : "border-danger/20 text-danger"}`}>{probe.ok ? `${t("config.mcp.probeOk")} · ${probe.detail}` : `${t("config.mcp.probeFail")} · ${probe.error}`}</div> : null}
-							</>
-						)}
-					</div>
+				// pi 0.99 起 MCP 内置，adapter 只是可选加速项：提示不再占据整页，折叠保留一键安装入口。
+				<div className="rounded-md border border-border-subtle bg-bg-panel px-3 py-2 text-micro text-muted-foreground">
+					{t("config.mcp.builtInNotice")}
+					<details className="mt-1">
+						<summary className="cursor-pointer text-primary">{t("config.mcp.optionalAdapter")}</summary>
+						<div className="mt-2">
+							<McpAdapterGuide onInstalled={load} />
+						</div>
+					</details>
 				</div>
-			)}
+			) : null}
+
+			<div className="flex flex-wrap gap-1.5">
+				{(snapshot?.layers ?? []).map((layer) => (
+					<span key={layer.kind} className={`rounded-sm border px-1.5 py-0.5 font-mono text-micro ${layer.exists ? "border-border-subtle text-text-secondary" : "border-dashed border-border-subtle text-muted-foreground"}`} title={layer.path}>
+						{layerLabel[layer.kind]}
+						{layer.writable ? ` · ${t("config.mcp.writable")}` : ""}
+						{layer.exists ? "" : ` · ${t("config.mcp.missing")}`}
+					</span>
+				))}
+			</div>
+			{snapshot?.writablePath ? (
+				<p className="truncate font-mono text-micro text-muted-foreground" title={snapshot.writablePath}>
+					{t("config.mcp.writingTo")}: {snapshot.writablePath}
+				</p>
+			) : null}
+
+			<div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
+				<McpServerListPane
+					servers={displayServers}
+					selected={selected}
+					creating={Boolean(creating)}
+					onSelect={(name) => {
+						setSelected(name);
+						setProbe(null);
+					}}
+				/>
+
+				<div className="flex min-h-0 flex-col gap-3 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-3">
+					{!selected && !creating ? (
+						<div className="py-8 text-center text-micro text-muted-foreground">{t("config.mcp.selectHint")}</div>
+					) : (
+						<>
+							<div className="grid gap-2">
+								<Label>{t("config.mcp.field.name")}</Label>
+								<Input
+									value={creating ? creating.name : (selected ?? "")}
+									onChange={(event) => {
+										if (!creating) return;
+										setCreating({ ...creating, name: event.target.value });
+										markDirty();
+									}}
+									disabled={!creating || saving}
+									placeholder="chrome-devtools"
+									className="h-8 font-mono"
+								/>
+							</div>
+							<div className="grid gap-2">
+								<Label>{t("config.mcp.field.transport")}</Label>
+								<ConfigSelect value={transport} options={TRANSPORT_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => switchTransport(value as McpServerTransport)} />
+							</div>
+							{transport === "stdio" ? (
+								<>
+									<div className="grid gap-2">
+										<Label>{t("config.mcp.field.command")}</Label>
+										<Input value={editingDef.command ?? ""} onChange={(event) => patchEditing({ command: event.target.value, url: undefined, socket: undefined })} className="h-8 font-mono" placeholder="npx" />
+									</div>
+									<div className="grid gap-2">
+										<Label>{t("config.mcp.field.args")}</Label>
+										<Input value={argsToText(editingDef.args)} onChange={(event) => patchEditing({ args: textToArgs(event.target.value) })} className="h-8 font-mono" placeholder="-y chrome-devtools-mcp@1.6.0" />
+									</div>
+									<div className="grid gap-2">
+										<Label>{t("config.mcp.field.cwd")}</Label>
+										<Input value={editingDef.cwd ?? ""} onChange={(event) => patchEditing({ cwd: event.target.value || undefined })} className="h-8 font-mono" />
+									</div>
+								</>
+							) : null}
+							{transport === "http" ? (
+								<div className="grid gap-2">
+									<Label>{t("config.mcp.field.url")}</Label>
+									<Input value={editingDef.url ?? ""} onChange={(event) => patchEditing({ url: event.target.value, command: undefined, args: undefined, socket: undefined })} className="h-8 font-mono" placeholder="https://mcp.example.com/mcp" />
+								</div>
+							) : null}
+							{transport === "socket" ? (
+								<div className="grid gap-2">
+									<Label>{t("config.mcp.field.socket")}</Label>
+									<Input value={editingDef.socket ?? ""} onChange={(event) => patchEditing({ socket: event.target.value, command: undefined, url: undefined })} className="h-8 font-mono" />
+								</div>
+							) : null}
+							<div className="grid gap-2">
+								<Label>{t("config.mcp.field.exposure")}</Label>
+								<ConfigSelect value={editingDef.exposure ?? "codemode"} options={EXPOSURE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} onChange={(value) => patchEditing({ exposure: value as McpExposure })} />
+								<p className="text-micro text-muted-foreground">{t("config.mcp.exposureHint")}</p>
+							</div>
+							<div className="grid gap-2">
+								<Label>{t("config.mcp.field.timeout")}</Label>
+								<Input
+									value={editingDef.timeout === undefined ? "" : String(editingDef.timeout)}
+									onChange={(event) => {
+										const raw = event.target.value.trim();
+										// 留空 = 用 pi 默认（60s）；只接受 >0 的有限秒数，无效输入不回写。
+										if (raw === "") {
+											patchEditing({ timeout: undefined });
+											return;
+										}
+										const parsed = Number(raw);
+										if (Number.isFinite(parsed) && parsed > 0) patchEditing({ timeout: parsed });
+									}}
+									className="h-8 font-mono"
+									placeholder="60"
+									inputMode="numeric"
+								/>
+								<p className="text-micro text-muted-foreground">{t("config.mcp.timeoutHint")}</p>
+							</div>
+							{transport === "stdio" ? (
+								<div className="grid gap-2">
+									<Label>{t("config.mcp.field.env")}</Label>
+									<Textarea value={recordToText(editingDef.env)} onChange={(event) => patchEditing({ env: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.envPlaceholder")} className="min-h-20 font-mono text-control" />
+								</div>
+							) : null}
+							{transport === "http" ? (
+								<div className="grid gap-2">
+									<Label>{t("config.mcp.field.headers")}</Label>
+									<Textarea value={recordToText(editingDef.headers)} onChange={(event) => patchEditing({ headers: textToRecord(event.target.value) })} placeholder={t("config.mcp.field.headersPlaceholder")} className="min-h-20 font-mono text-control" />
+								</div>
+							) : null}
+							<div className="flex items-center justify-between gap-3 rounded-sm border border-border-subtle px-2.5 py-2">
+								<div>
+									<div className="text-control font-medium">{t("config.mcp.field.enabled")}</div>
+									<div className="text-micro text-muted-foreground">{t("config.mcp.field.enabledHint")}</div>
+								</div>
+								<Switch
+									checked={!isMcpServerDisabled(editingDef)}
+									onCheckedChange={(checked) => {
+										// pi 0.99 内置 MCP 只认 enabled；disabled 与 enabled 成对写以兼容 pi 0.98（adapter）。
+										if (creating) {
+											patchEditing({ enabled: checked, disabled: !checked });
+											return;
+										}
+										if (selectedItem) toggleDisabled(selectedItem, !checked);
+									}}
+								/>
+							</div>
+							{selectedItem && !creating ? (
+								<p className="text-micro text-muted-foreground" title={selectedItem.originPath}>
+									{t("config.mcp.origin")}: {selectedItem.originPath}
+									{selectedItem.ownedByWritable ? "" : ` · ${t("config.mcp.overlayHint")}`}
+								</p>
+							) : null}
+							<div className="flex flex-wrap items-center gap-1.5">
+								<Button variant="outline" size="sm" onClick={() => void runProbe()} disabled={probing || saving}>
+									<PlugZap size={14} />
+									{probing ? t("config.mcp.probing") : t("config.mcp.probe")}
+								</Button>
+								{creating ? (
+									<Button variant="ghost" size="sm" onClick={cancelCreate}>
+										{t("common.cancel")}
+									</Button>
+								) : (
+									<Button variant="outline" size="sm" className="text-destructive" onClick={removeSelected} disabled={saving}>
+										<Trash2 size={13} />
+										{selectedItem?.ownedByWritable ? t("common.delete") : t("config.mcp.disableInstead")}
+									</Button>
+								)}
+							</div>
+							{probe ? <div className={`rounded-sm border px-2.5 py-2 text-micro ${probe.ok ? "border-[var(--color-success)]/30 text-[var(--color-success)]" : "border-danger/20 text-danger"}`}>{probe.ok ? `${t("config.mcp.probeOk")} · ${probe.detail}` : `${t("config.mcp.probeFail")} · ${probe.error}`}</div> : null}
+						</>
+					)}
+				</div>
+			</div>
 		</div>
 	);
 });
