@@ -55,6 +55,25 @@ test("listWebNetworkAddresses includes global unicast IPv6 and excludes reserved
 	);
 });
 
+test("listWebNetworkAddresses sorts multiple IPv6 addresses after IPv4 and in address order", () => {
+	const result = listWebNetworkAddresses({
+		WiFi: [
+			{ address: "192.168.1.23", netmask: "255.255.255.0", family: "IPv4", mac: "", internal: false, cidr: "192.168.1.23/24" },
+			{ address: "2001:db8::10", netmask: "ffff:ffff:ffff:ffff::", family: "IPv6", mac: "", internal: false, cidr: "2001:db8::10/64" },
+			{ address: "2001:db8::2", netmask: "ffff:ffff:ffff:ffff::", family: "IPv6", mac: "", internal: false, cidr: "2001:db8::2/64" },
+		],
+	});
+
+	assert.deepEqual(
+		result.map(({ address }) => address),
+		["192.168.1.23", "2001:db8::2", "2001:db8::10"],
+	);
+	assert.deepEqual(
+		result.map(({ family }) => family),
+		["IPv4", "IPv6", "IPv6"],
+	);
+});
+
 test("listWebNetworkAddresses deduplicates IPv6 addresses across virtual adapters", () => {
 	const result = listWebNetworkAddresses({
 		WiFi: [{ address: "2001:db8::1", netmask: "ffff:ffff:ffff:ffff::", family: "IPv6", mac: "", internal: false, cidr: "2001:db8::1/64" }],
