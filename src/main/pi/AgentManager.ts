@@ -2129,6 +2129,18 @@ export class AgentManager {
 		const hadActiveTool = Boolean(this.toolExecutingByAgent.get(agentId) || (this.activeToolCallsByAgent.get(agentId)?.size ?? 0) > 0);
 		this.pendingAbortEscalations.set(agentId, { hadActiveTool, acked: false, failed: false });
 
+		// pi 的交互 Esc 语义（pi docs/rpc-commands.md「clear_queue」段）：先 clear_queue 再 abort。
+		// abort 只停当前 run，队列里剩余的 steering/followUp 消息会被继续投递并另起
+		// run——只发 abort 的现象是「用户点了停止，排队的消息还在跑」。
+		// clear_queue 自 pi 0.85.1 提供；更低版本回 unknown-command error，静默降级为
+		// abort-only 的旧行为（见 clearQueueBeforeAbort），停止主路径不受影响。
+		const clearedQueue = await this.clearQueueBeforeAbort(runtime, agentId);
+		if (clearedQueue) {
+			// 撤回的排队消息经 runtime 事件桥写回输入框（CLI Esc 同款语义），
+			// 避免「点了停止、排队的消息也丢了」。
+			this.emit("agents:queue-cleared", { ...this.streamRuntimeTriple(agentId), ...clearedQueue });
+		}
+
 		runtime.process.client
 			.request({ type: "abort" }, 10_000)
 			.then(() => {
@@ -2182,6 +2194,37 @@ export class AgentManager {
 			duration: 2500,
 		});
 		this.emitState();
+	}
+
+	/**
+	 * abort 前撤回 pi 的排队消息（steering / followUp）——pi 交互 Esc 语义的 RPC 复刻。
+	 *
+	 * pi docs/rpc-commands.md「clear_queue」：Esc = clear_queue + abort。abort 只停当前
+	 * run，队列里剩余的消息会被继续投递并另起 run，故 busy 时用户点停止必须先把队列撤干净。
+	 * 返回值非 null 时调用方广播 agents:queue-cleared，由渲染层写回输入框。
+	 *
+	 * 容错：clear_queue 自 pi 0.85.1 提供，更低版本回 unknown-command error——此时静默
+	 * 降级为 abort-only 的旧行为（队列残留），不阻断停止主路径。超时取 3s：本地 RPC 正常
+	 * 毫秒级返回；僵死进程下 abort 至多迟 3s，且 abort 本身仍会发出。
+	 */
+	private async clearQueueBeforeAbort(runtime: AgentRuntime, agentId: string): Promise<{ steering: string[]; followUp: string[] } | null> {
+		try {
+			const response = await runtime.process.client.request({ type: "clear_queue" }, 3_000);
+			const data = response.data;
+			if (!isRecord(data)) return null;
+			const readTexts = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : []);
+			const steering = readTexts(data.steering);
+			const followUp = readTexts(data.followUp);
+			if (steering.length === 0 && followUp.length === 0) return null;
+			return { steering, followUp };
+		} catch (error) {
+			// <0.85.1 的 pi 不认识 clear_queue；abort 是停止核心路径，不能因它失败/超时被拖住。
+			void this.appLogger?.warn("agent", "clear_queue before abort failed; falling back to abort-only", {
+				agentId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return null;
+		}
 	}
 
 	/**
