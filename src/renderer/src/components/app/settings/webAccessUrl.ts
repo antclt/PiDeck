@@ -9,12 +9,7 @@ export function bracketIpv6Host(host: string): string {
 	return host;
 }
 
-export function buildWebAccessUrl(
-	host: string,
-	port: number,
-	token: string,
-	requiresAuth: boolean,
-): string {
+export function buildWebAccessUrl(host: string, port: number, token: string, requiresAuth: boolean): string {
 	const displayHost = bracketIpv6Host(host);
 	let url = `http://${displayHost}:${port}`;
 	if (requiresAuth && token) {

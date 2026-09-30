@@ -68,32 +68,40 @@ test("non-loopback binding rejects /api without a valid token", async () => {
 });
 
 test("loopback binding with auth disabled stays tokenless", async () => {
-	await withManager("127.0.0.1", async ({ manager, baseUrl }) => {
-		assert.equal(manager.current.requiresAuth, false);
-		const response = await fetch(`${baseUrl}/api/nope`);
-		assert.equal(response.status, 404);
-	}, false);
+	await withManager(
+		"127.0.0.1",
+		async ({ manager, baseUrl }) => {
+			assert.equal(manager.current.requiresAuth, false);
+			const response = await fetch(`${baseUrl}/api/nope`);
+			assert.equal(response.status, 404);
+		},
+		false,
+	);
 });
 
 test("loopback binding with auth enabled requires a valid token", async () => {
-	await withManager("127.0.0.1", async ({ manager, baseUrl }) => {
-		const token = manager.current.token;
-		assert.equal(manager.current.requiresAuth, true);
+	await withManager(
+		"127.0.0.1",
+		async ({ manager, baseUrl }) => {
+			const token = manager.current.token;
+			assert.equal(manager.current.requiresAuth, true);
 
-		let response = await fetch(`${baseUrl}/api/nope`);
-		assert.equal(response.status, 401);
+			let response = await fetch(`${baseUrl}/api/nope`);
+			assert.equal(response.status, 401);
 
-		response = await fetch(`${baseUrl}/api/nope?token=${encodeURIComponent(token)}`);
-		assert.equal(response.status, 404);
+			response = await fetch(`${baseUrl}/api/nope?token=${encodeURIComponent(token)}`);
+			assert.equal(response.status, 404);
 
-		response = await fetch(`${baseUrl}/api/nope`, {
-			headers: { authorization: `Bearer ${token}` },
-		});
-		assert.equal(response.status, 404);
+			response = await fetch(`${baseUrl}/api/nope`, {
+				headers: { authorization: `Bearer ${token}` },
+			});
+			assert.equal(response.status, 404);
 
-		response = await fetch(`${baseUrl}/api/health`);
-		assert.equal(response.status, 200);
-	}, true);
+			response = await fetch(`${baseUrl}/api/health`);
+			assert.equal(response.status, 200);
+		},
+		true,
+	);
 });
 
 test("token is regenerated on every start", async () => {
@@ -238,14 +246,18 @@ test("toggling requiresAuth alone restarts the service", async () => {
 });
 
 test("getStatus reports running shape and clears after stop", async () => {
-	await withManager("0.0.0.0", async ({ manager }) => {
-		const status = manager.getStatus();
-		assert.equal(status.running, true);
-		assert.equal(status.host, "0.0.0.0");
-		assert.equal(typeof status.port, "number");
-		assert.equal(typeof status.token, "string");
-		assert.equal(status.requiresAuth, true);
-	}, true);
+	await withManager(
+		"0.0.0.0",
+		async ({ manager }) => {
+			const status = manager.getStatus();
+			assert.equal(status.running, true);
+			assert.equal(status.host, "0.0.0.0");
+			assert.equal(typeof status.port, "number");
+			assert.equal(typeof status.token, "string");
+			assert.equal(status.requiresAuth, true);
+		},
+		true,
+	);
 	// withManager 的 finally 已 stop；此处验证 stop 后的形状
 	const { WebServiceManager } = loadWebServiceModule();
 	const manager = new WebServiceManager({ subscribePiEvents: () => () => undefined });

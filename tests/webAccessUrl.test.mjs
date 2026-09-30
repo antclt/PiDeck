@@ -2,9 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { bracketIpv6Host, buildWebAccessUrl, previewHostFromBinding } = loadTsCommonJs(
-	"src/renderer/src/components/app/settings/webAccessUrl.ts",
-);
+const { bracketIpv6Host, buildWebAccessUrl, previewHostFromBinding } = loadTsCommonJs("src/renderer/src/components/app/settings/webAccessUrl.ts");
 
 test("bracketIpv6Host: IPv6 地址加方括号，IPv4 不变", () => {
 	assert.equal(bracketIpv6Host("::1"), "[::1]");
@@ -15,10 +13,7 @@ test("bracketIpv6Host: IPv6 地址加方括号，IPv4 不变", () => {
 });
 
 test("buildWebAccessUrl: IPv4 + token 生成可访问 URL", () => {
-	assert.equal(
-		buildWebAccessUrl("192.168.1.5", 8765, "t k", true),
-		"http://192.168.1.5:8765?token=t%20k",
-	);
+	assert.equal(buildWebAccessUrl("192.168.1.5", 8765, "t k", true), "http://192.168.1.5:8765?token=t%20k");
 });
 
 test("buildWebAccessUrl: requiresAuth=false 不拼 token", () => {
