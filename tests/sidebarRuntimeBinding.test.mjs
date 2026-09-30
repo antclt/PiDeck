@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 /**
- * RPC 日志右键菜单：菜单项统一「打开RPC日志」，点击后弹「已打开」提醒框；
+ * RPC 日志右键菜单：菜单项统一「打开RPC日志」，点击后只给非阻塞 toast；
  * 运行中 agent 的菜单项必须可选中（修复 key 错配：AgentTab.sessionId 是 pi
  * 自身会话 id，不能直接查 runtimeBySessionId（key = 会话记录 id），必须按
  * agentId 反查 live runtime）。
@@ -30,11 +30,10 @@ test("运行中 agent 的 RPC 日志能力判断按 agentId 反查 runtime，不
 	assert.doesNotMatch(sidebarContent, /getBoundSidebarRuntimeAgent\(controller\.catalog, menuAgent\.sessionId\)/);
 });
 
-test("开启后弹「已打开」提醒框而非自动打开日志弹窗", () => {
-	// 提醒框 state + 渲染
-	assert.match(sidebarContent, /rpcLogOpenedAgentId/);
-	assert.match(sidebarContent, /RpcLogOpenedDialog/);
-	// 开启成功不再自动打开日志查看器
+test("开启记录只给非阻塞 toast，不自动打开日志面板", () => {
+	// 两个右键入口（agent 菜单 / 会话菜单）的成功分支统一走同一条 toast 文案
+	assert.equal(sidebarContent.match(/showNotice\(enabled \? t\("rpc\.loggingEnabled"\) : t\("rpc\.loggingEnableFailed"\), 2500\)/g)?.length, 2);
+	// 开启成功不自动打开日志查看器（用户可能只想留痕，不想被改布局）
 	assert.doesNotMatch(sidebarContent, /setLogging\(menuAgent\.id, true\)[\s\S]{0,220}openRpcLogs\(menuAgent\.id\)/);
 });
 
@@ -49,12 +48,18 @@ test("已开启时菜单项点击为关闭记录，日志面板提供「停止�
 	assert.match(viewer, /t\("rpc\.disableLogging"\)/);
 });
 
-test("「已打开」提醒框组件在 SidebarParts 出口暴露，含查看入口按钮", () => {
+test("阻塞式「已打开」确认弹框已移除（AlertDialog 挡操作，菜单已有「查看日志」入口）", () => {
 	const parts = readFileSync("src/renderer/src/components/sidebar/SidebarParts.tsx", "utf8");
-	assert.match(parts, /RpcLogOpenedDialog/);
-	assert.match(sidebarComponents, /t\("rpc\.logOpenedTitle"\)/);
-	assert.match(sidebarComponents, /t\("rpc\.logOpenedDescription"\)/);
-	assert.match(sidebarComponents, /t\("rpc\.logViewNow"\)/);
+	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
+	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
+	// 组件、出口、调用点与状态全部消失
+	assert.doesNotMatch(parts, /RpcLogOpenedDialog/);
+	assert.doesNotMatch(sidebarComponents, /RpcLogOpenedDialog/);
+	assert.doesNotMatch(sidebarContent, /RpcLogOpenedDialog|rpcLogOpenedAgentId/);
+	// 三份文案同步删除，不留孤儿 key（TranslationKey 由 zh-CN 推导，en-US 必须同步）
+	for (const dict of [zh, en]) {
+		assert.doesNotMatch(dict, /rpc\.logOpenedTitle|rpc\.logOpenedDescription|rpc\.logViewNow/);
+	}
 });
 
 test("右键查记录状态失败不阻断菜单弹出（agent 刚退出时主进程会拒绝）", () => {

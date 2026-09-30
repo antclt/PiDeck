@@ -929,6 +929,7 @@ export function createPreviewApi(): PiDesktopApi {
 			clear: async () => undefined,
 			setLogging: async () => false,
 			getLogging: async () => false,
+			setWatching: async () => false,
 		},
 		pi: {
 			check: async () => ({

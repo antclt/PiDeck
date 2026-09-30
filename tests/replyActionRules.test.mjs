@@ -16,6 +16,7 @@ const diagnostic = (i18nKey) => message("error", "", { meta: { i18nKey } });
 const texts = (rules, messages) => plain(replyActionTextsForMessages(rules, messages));
 const stopRule = { text: "继续", triggers: [{ kind: "onStop" }] };
 const failRule = { text: "重试", triggers: [{ kind: "onFailure" }] };
+const alwaysRule = { text: "收尾", triggers: [{ kind: "always" }] };
 const matchRule = { text: "提交", triggers: [{ kind: "textMatch", patterns: ["完成", "搞定"] }] };
 
 test("onStop 规则在正常收场出现，失败与空轮不出现", () => {
@@ -28,6 +29,15 @@ test("onFailure 规则只在失败轮出现（请求失败诊断与 stopReason e
 	assert.deepEqual(texts([failRule], [user, diagnostic("diagnostic.requestFailed")]), ["重试"]);
 	assert.deepEqual(texts([failRule], [user, answer("文本", "error")]), ["重试"]);
 	assert.deepEqual(texts([failRule], [user, answer()]), []);
+});
+
+test("always 规则在收场后就显示：成功、失败、被中止都出现；运行中仍不出", () => {
+	assert.deepEqual(texts([alwaysRule], [user, answer()]), ["收尾"]);
+	assert.deepEqual(texts([alwaysRule], [user, answer("", "error")]), ["收尾"]);
+	assert.deepEqual(texts([alwaysRule], [user, answer("文本", "error")]), ["收尾"]);
+	assert.deepEqual(texts([alwaysRule], [user, answer("被中止", "aborted")]), ["收尾"]);
+	assert.deepEqual(texts([alwaysRule], []), []);
+	assert.deepEqual(texts([alwaysRule], [user]), []);
 });
 
 test("textMatch 规则按回复散文命中，代码块里的词不算意图，大小写不敏感", () => {

@@ -537,6 +537,8 @@ export const ipcChannels = {
 	rpcLogsClear: "rpc-logs:clear",
 	rpcLoggingSet: "rpc-logs:logging-set",
 	rpcLoggingGet: "rpc-logs:logging-get",
+	/** 登记「实时日志面板是否在看」：主进程据此决定是否广播（落盘不受影响） */
+	rpcLogsSetWatching: "rpc-logs:set-watching",
 
 	appWindowMinimize: "app:window-minimize",
 	appWindowToggleMaximize: "app:window-toggle-maximize",

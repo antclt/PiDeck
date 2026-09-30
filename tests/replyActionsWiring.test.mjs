@@ -71,14 +71,17 @@ test("两个管理弹框共用尺寸与打开时不抢第一项焦点", () => {
 	assert.match(reply, /onOpenAutoFocus=\{\(event\) => event\.preventDefault\(\)\}/, "回复快捷操作弹框不应自动聚焦第一项");
 });
 
-test("回复规则编辑器使用有表头的表格，不把触发条件塞进无语义下拉胶囊", () => {
+test("回复规则编辑器：何时显示是一个带文字的下拉（成功 / 失败 / 全部 / 命中关键词），不再是两列勾选框", () => {
 	const source = readFileSync("src/renderer/src/components/app/settings/ReplyActionsDialog.tsx", "utf8");
 	assert.match(source, /from "\.\.\/\.\.\/ui-shadcn\/table"/, "规则编辑器应复用项目 Table 原语");
-	for (const column of ["replyActionsColumnOrder", "replyActionsColumnText", "replyActionsColumnOnStop", "replyActionsColumnOnFailure", "replyActionsColumnPatterns", "replyActionsColumnOperations"]) {
+	for (const column of ["replyActionsColumnOrder", "replyActionsColumnText", "replyActionsColumnTrigger", "replyActionsColumnOperations"]) {
 		assert.match(source, new RegExp(`t\\(\\"settings\\.${column}\\"\\)`), `缺少表头 ${column}`);
 	}
-	assert.doesNotMatch(source, /<Select\\b|<SelectTrigger\\b|<Zap\\b/, "触发场景不应再依赖无文字的下拉/闪电按钮");
-	assert.match(source, /from "\.\.\/\.\.\/ui-shadcn\/checkbox"/, "触发场景应使用可读的勾选项");
+	assert.match(source, /from "\.\.\/\.\.\/ui-shadcn\/select"/, "何时显示应使用带文字的下拉");
+	for (const mode of ["onStop", "onFailure", "always", "textMatch"]) {
+		assert.match(source, new RegExp(`settings\\.replyActionsTrigger\\.${mode}`), `触发下拉缺少「${mode}」选项`);
+	}
+	assert.doesNotMatch(source, /replyActionsColumnOnStop|replyActionsColumnOnFailure|from "\.\.\/\.\.\/ui-shadcn\/checkbox"/, "成功 / 失败不再分成两列勾选框");
 });
 
 test("设置页管理区与入口接线（缺少入口用户就改不了规则）", () => {

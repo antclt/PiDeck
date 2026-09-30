@@ -888,6 +888,8 @@ const api = {
 		clear: (target?: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.rpcLogsClear, target) as Promise<void>,
 		setLogging: (target: SessionRuntimeTarget, enabled: boolean) => ipcRenderer.invoke(ipcChannels.rpcLoggingSet, target, enabled) as Promise<boolean>,
 		getLogging: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.rpcLoggingGet, target) as Promise<boolean>,
+		/** 登记「该 agent 的实时日志面板是否在看」：主进程据此决定是否广播（面板挂载 true / 卸载 false） */
+		setWatching: (agentId: string, watching: boolean) => ipcRenderer.invoke(ipcChannels.rpcLogsSetWatching, agentId, watching) as Promise<boolean>,
 	},
 	app: {
 		info: () => ipcRenderer.invoke(ipcChannels.appInfo) as Promise<AppInfo>,

@@ -8,13 +8,17 @@
  * 与规则里的 trigger 条件求值，命中即展示该条 suggestion。内置的提交/推送意图推断
  * 不再写死在组件里，出厂规则资源 resources/reply-actions.default.json 与用户文件同一套结构。
  */
-export type ReplyActionTriggerKind = "onFailure" | "onStop" | "textMatch";
+export type ReplyActionTriggerKind = "onFailure" | "onStop" | "always" | "textMatch";
 
 /**
  * 单条规则的触发条件（可组合；全部满足才展示）。
  * - onFailure：最新一轮以失败收场（请求级错误 / stopReason 表明中断）。
  * - onStop：最新一轮正常收场（有助手结语文本且未失败）。
+ * - always：新一轮收场后就总是显示（成功、失败、被中止都算；运行中仍不显示）。
  * - textMatch：助手结尾文本命中任意正则（大小写不敏感；正则解析失败按「永不命中」处理）。
+ *
+ * 设置页把前三个 kind 收敛成「何时显示」下拉（三选一 + 命中关键词）；文件里保留可组合结构，
+ * 手写多 trigger 的规则依旧要求全部命中，语义不回退。
  */
 export type ReplyActionTrigger = {
 	kind: ReplyActionTriggerKind;

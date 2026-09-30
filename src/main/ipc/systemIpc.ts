@@ -1211,6 +1211,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 		return agentManager.isRpcLogging(agentId);
 	});
+	// 实时日志面板挂载/卸载登记观看状态：没有观看者时主进程跳过广播（落盘与环形缓冲不受影响），
+	// 避免重度会话里无人认领的批次每 80ms 跨一次进程克隆。
+	ipcMain.handle(ipcChannels.rpcLogsSetWatching, async (_event, agentId?: unknown, watching?: unknown) => {
+		if (typeof agentId !== "string" || !agentId || typeof watching !== "boolean") return false;
+		agentManager.setRpcLogWatching(agentId, watching);
+		return true;
+	});
 
 	// ── 反馈环境 ─────────────────────────────────────────────────────
 

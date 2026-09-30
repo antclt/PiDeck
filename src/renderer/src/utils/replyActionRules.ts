@@ -58,6 +58,8 @@ function stripCode(text: string): string {
 
 /** 单条 trigger 求值；正则解析失败按「永不命中」处理（用户手写坏正则不能弄崩会话页）。 */
 function triggerMatches(trigger: ReplyActionTrigger, signals: ReplySignals, proseText: string): boolean {
+	// always：新一轮收场后就显示，不挑成功/失败/中止。signals 为 null（运行中）时整体仍不出。
+	if (trigger.kind === "always") return true;
 	if (trigger.kind === "onFailure") return signals.failed;
 	if (trigger.kind === "onStop") return signals.stopped;
 	const compiled = compilePatterns(trigger.patterns ?? []);

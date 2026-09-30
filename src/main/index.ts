@@ -3722,6 +3722,9 @@ app
 		);
 		// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 		quitCleanup.register("pi-agents", () => agentManager?.stopAll());
+		// RPC 日志是合并落盘的（250ms / 256 行刷一批），退出前把缓冲刷干净。
+		// 必须排在 pi-agents 之后：runAll 顺序执行，先停进程（最后几条日志在这里产生）再刷盘。
+		quitCleanup.register("rpc-logs-flush", () => rpcLogger?.flushPending());
 		// GUI 扩展桥端点：关掉监听，释放端口（桥随 pi 子进程一起结束）
 		quitCleanup.register("gui-bridge", () => stopBridgeServer());
 		// 开发诊断必须在 registerIpc 之前创建：systemIpc 闭包捕获这个实例。

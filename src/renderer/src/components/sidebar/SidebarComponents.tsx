@@ -1104,29 +1104,3 @@ export function WorktreeCreateDialog(props: { projectId: string; creating: boole
 		</Dialog>
 	);
 }
-
-/**
- * RPC 日志已打开提醒弹框：开启记录后告知用户已可查看，
- * “查看日志”直接打开右侧抽屉的实时日志面板（RpcLogPanel，非模态）。
- */
-export function RpcLogOpenedDialog(props: { onView: () => void; onClose: () => void }) {
-	return (
-		<AlertDialog
-			open
-			onOpenChange={(open) => {
-				if (!open) props.onClose();
-			}}
-		>
-			<AlertDialogContent>
-				<AlertDialogHeader>
-					<AlertDialogTitle>{t("rpc.logOpenedTitle")}</AlertDialogTitle>
-					<AlertDialogDescription>{t("rpc.logOpenedDescription")}</AlertDialogDescription>
-				</AlertDialogHeader>
-				<AlertDialogFooter>
-					<AlertDialogCancel onClick={props.onClose}>{t("common.cancel")}</AlertDialogCancel>
-					<AlertDialogAction onClick={props.onView}>{t("rpc.logViewNow")}</AlertDialogAction>
-				</AlertDialogFooter>
-			</AlertDialogContent>
-		</AlertDialog>
-	);
-}

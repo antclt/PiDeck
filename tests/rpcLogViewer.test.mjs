@@ -33,6 +33,33 @@ test("viewer rows are memoized and entry merge dedupes and caps", () => {
 	assert.match(viewer, /export function mergeLogEntries/);
 	assert.match(viewer, /merged\.sort\(\(a, b\) => a\.time - b\.time\)/);
 	assert.match(viewer, /merged\.length > MAX_ENTRIES/);
+	// 每批都全量 sort 是纯浪费（实时追加天然升序）：先线性扫描确认有序，乱序才排
+	assert.match(viewer, /let ordered = true;[\s\S]{0,160}if \(!ordered\) merged\.sort/);
+});
+
+test("row memo actually works: stable toggle callback, no inline arrow per row", () => {
+	// 回归：`onToggle={() => handleToggleEntry(log)}` 每次都生成新函数 ⇒ memo 的 props 恒不相等，
+	// 每批新日志都要重渲染全部窗口内行（日志量大时直接卡顿）。回调必须是稳定引用。
+	assert.match(viewer, /onToggle=\{handleToggleEntry\}/);
+	assert.doesNotMatch(viewer, /onToggle=\{\(\) => handleToggleEntry\(log\)\}/);
+	assert.match(viewer, /const handleToggleEntry = useCallback\(\(log: RpcLogEntry\) => \{/);
+	// 行内自己绑定 log
+	assert.match(viewer, /onClick=\{\(\) => onToggle\(log\)\}/);
+});
+
+test("search haystack is cached per entry instead of re-stringifying every batch", () => {
+	// 每批新日志都会重跑筛选：无条件 formatRpcLogForCopy(log) 等于对最多 MAX_ENTRIES 条
+	// 重新 JSON.stringify 整个 data，是流式阶段最大的 CPU 开销之一。
+	assert.match(viewer, /const searchHaystackCache = new WeakMap<RpcLogEntry, string>\(\);/);
+	assert.match(viewer, /searchHaystackCache\.set\(log, built\)/);
+	assert.match(viewer, /return searchHaystack\(log\)\.includes\(normalizedKeyword\)/);
+	assert.doesNotMatch(viewer, /formatRpcLogForCopy\(log\)\.toLowerCase\(\)\.includes/);
+});
+
+test("log list follows the bottom with instant scroll, not a spring", () => {
+	// smooth 弹簧逐帧写 scrollTop，每帧强制整个列表（最多 WINDOW_UNFILTERED 行）重排；
+	// 日志这种高频小增量容器用 instant。
+	assert.match(viewer, /<MessageScroller[\s\S]{0,400}smooth=\{false\}/);
 });
 
 test("viewer uses MessageScroller auto-scroll and cleans up the live subscription", () => {
@@ -76,8 +103,8 @@ test("session context menu shares the unified rpc logging group", () => {
 	// 仅会话有 live runtime 时渲染 RPC 组（历史会话无日志可记/可看）
 	assert.match(sidebarContent, /canRpcLog=\{Boolean\(menuSessionRuntimeAgent\)\}/);
 	assert.doesNotMatch(sidebarContent, /onShowLogs/);
-	// 运行中的会话开启记录成功后弹「已打开」提醒框（与 agent 菜单行为一致，不再直接打开日志弹窗）
-	assert.match(sidebarContent, /setRpcLogOpenedAgentId\(menuSessionRuntimeAgent\.id\);/);
+	// 会话菜单开启记录只给非阻塞 toast（与 agent 菜单同款；确认弹框已移除）
+	assert.match(sidebarContent, /setLogging\(menuSessionRuntimeAgent\.id, true\)[\s\S]{0,220}showNotice\(enabled \? t\("rpc\.loggingEnabled"\)/);
 });
 
 test("agent context menu exposes a live log entry point next to the toggle", () => {
@@ -146,8 +173,9 @@ test("panel loads are keyed on agentId only and survive a dead agent", () => {
 
 test("AgentManager batches live log broadcast and cleans up on exit", () => {
 	// 广播只发生在开启记录的 agent 上：落盘与实时推送同一闸门
-	assert.match(agentManager, /if \(this\.rpcLoggingAgents\.has\(agentId\)\) \{\n\t\t\t\t\tthis\.rpcLogger\?\.push\(logEntry\);/);
-	assert.match(agentManager, /enqueueLiveRpcLog\(logEntry\)/);
+	assert.match(agentManager, /if \(this\.rpcLoggingAgents\.has\(agentId\)\) \{[\s\S]{0,120}this\.enqueueLiveRpcLog\(this\.rpcLogger\?\.push\(logEntry\) \?\? logEntry\);/);
+	// 广播用环形缓冲里那份截断副本（与 getLive 初始历史同形），原始大 payload 不跨进程克隆
+	assert.match(agentManager, /enqueueLiveRpcLog\(this\.rpcLogger\?\.push\(/);
 	// 节流常量：~80ms 聚合一批，单批与缓冲都有上限（防止 IPC/内存失控）
 	assert.match(agentManager, /LIVE_RPC_LOG_FLUSH_MS = 80/);
 	assert.match(agentManager, /LIVE_RPC_LOG_MAX_BATCH = 100/);
@@ -159,17 +187,55 @@ test("AgentManager batches live log broadcast and cleans up on exit", () => {
 	assert.match(agentManager, /dropPendingLiveRpcLogs\(agentId\)/);
 });
 
+test("broadcast is gated on a renderer viewer, not just on logging being enabled", () => {
+	// 面板没打开时，每 80ms 一批无人认领的日志照样要在主进程做结构化克隆再发 IPC，
+	// 表现为整个应用（输入、流式）掉帧。观看状态由面板挂载/卸载成对登记。
+	assert.match(agentManager, /private readonly rpcLogWatchingAgents = new Set<string>\(\);/);
+	assert.match(agentManager, /private enqueueLiveRpcLog\(entry: RpcLogEntry\) \{[\s\S]{0,240}?if \(!this\.rpcLogWatchingAgents\.has\(entry\.agentId\)\) return;/);
+	assert.match(agentManager, /setRpcLogWatching\(agentId: string, watching: boolean\) \{/);
+	// 生命周期配对：agent 关闭 + stopAll 都要清观看登记
+	assert.match(agentManager, /this\.rpcLogWatchingAgents\.delete\(agentId\);/);
+	assert.match(agentManager, /this\.rpcLogWatchingAgents\.clear\(\);/);
+	// 面板侧：挂载登记 true，卸载登记 false（与退订同一清理路径）
+	assert.match(viewer, /window\.piDesktop\.rpcLogs\.setWatching\(agentId, true\)\.catch\(\(\) => undefined\)/);
+	assert.match(viewer, /return \(\) => \{[\s\S]{0,160}window\.piDesktop\.rpcLogs\.setWatching\(agentId, false\)/);
+	// IPC 三处同步：通道常量 + main handler + preload
+	assert.match(ipc, /rpcLogsSetWatching: "rpc-logs:set-watching"/);
+	assert.match(systemIpc, /ipcMain\.handle\(ipcChannels\.rpcLogsSetWatching/);
+	assert.match(systemIpc, /agentManager\.setRpcLogWatching\(agentId, watching\)/);
+	assert.match(preload, /setWatching: \(agentId: string, watching: boolean\) => ipcRenderer\.invoke\(ipcChannels\.rpcLogsSetWatching/);
+});
+
 test("RpcLogger keeps a larger live ring buffer with filtered getLive and data truncation", () => {
 	assert.match(rpcLogger, /const MAX_LIVE = 1000;/);
 	assert.match(rpcLogger, /getLive\(agentId\?: string\)/);
 	assert.match(rpcLogger, /this\.live\.filter\(\(entry\) => entry\.agentId === agentId\)/);
 	// 实时缓冲副本截断大 data，文件仍写原始内容
 	assert.match(rpcLogger, /private truncateForLive\(entry: RpcLogEntry\)/);
-	assert.match(rpcLogger, /this\.writeEntry\(entry\)/);
-	// 弹窗保存：按目标文件分组 → 读文件去重 → 队列串行追加，返回写入的文件路径列表
-	assert.match(rpcLogger, /async appendEntries\(entries: RpcLogEntry\[\]\): Promise<string\[\]>/);
+	// 落盘合并写入：行进缓冲，满水位或定时才整批 appendFile（逐条写 = 每秒上百次文件系统调用）
+	assert.match(rpcLogger, /private queueWrite\(entry: RpcLogEntry\) \{/);
+	assert.match(rpcLogger, /async flushPending\(\): Promise<void> \{/);
+	assert.match(rpcLogger, /await appendFile\(filePath, lines\.join\(""\), "utf8"\)/);
+	assert.match(rpcLogger, /this\.queueWrite\(entry\);/);
+	assert.doesNotMatch(rpcLogger, /private async writeEntry\(/);
+	// push 返回缓冲里那份截断副本，供主进程广播使用（原始大 payload 不跨进程克隆）
+	assert.match(rpcLogger, /push\(entry: RpcLogEntry\): RpcLogEntry \{/);
+	assert.match(rpcLogger, /return liveEntry;/);
+	// 保存/清空之前必须先刷缓冲，否则去重读不到未落盘的自动日志（写出重复行 / 清空不生效）
+	assert.match(rpcLogger, /async appendEntries[\s\S]{0,140}await this\.flushPending\(\);/);
+	assert.match(rpcLogger, /async clear\(agentId\?: string\): Promise<void> \{[\s\S]{0,140}await this\.flushPending\(\);/);
 	assert.match(rpcLogger, /private filePathFor\(entry: RpcLogEntry\)/);
 	assert.match(rpcLogger, /private async readEntryIds\(filePath: string\)/);
+});
+
+test("退出清理把日志缓冲刷出排在建会话进程停止之后", () => {
+	const mainIndex = readFileSync("src/main/index.ts", "utf8");
+	assert.match(mainIndex, /quitCleanup\.register\("rpc-logs-flush", \(\) => rpcLogger\?\.flushPending\(\)\);/);
+	// QuitCleanupRegistry.runAll 按登记顺序执行：pi-agents 必须在前（停进程时还会产生最后几条日志）
+	const piAgentsAt = mainIndex.indexOf('quitCleanup.register("pi-agents"');
+	const flushAt = mainIndex.indexOf('quitCleanup.register("rpc-logs-flush"');
+	assert.ok(piAgentsAt >= 0, "pi-agents 清理登记应存在");
+	assert.ok(flushAt > piAgentsAt, "刷日志缓冲必须排在停止 agent 之后，否则最后几条会丢");
 });
 
 test("systemIpc validates save payloads and merges into the auto file", () => {
@@ -237,7 +303,7 @@ test("AgentManager gates model traces behind the same rpc-logging toggle", () =>
 	// 完整请求体落盘（request 才有）+ 紧凑条目走常规链路（落盘/实时广播）
 	assert.match(agentManager, /if \(trace\.kind === "request"\) \{[\s\S]{0,200}this\.rpcLogger\?\.writeModelTrace\(agentId, trace\)/);
 	assert.match(agentManager, /buildModelTraceLogEntry\(agentId, trace\)/);
-	assert.match(agentManager, /this\.rpcLogger\?\.push\(entry\);\s*this\.enqueueLiveRpcLog\(entry\);/);
+	assert.match(agentManager, /this\.enqueueLiveRpcLog\(this\.rpcLogger\?\.push\(entry\) \?\? entry\);/);
 	// 桥注册第三参把快照路由到 handler（token 与 UI 桥同生共死）
 	assert.match(agentManager, /\(trace\) => this\.handleModelTrace\(agentId, trace\)/);
 });

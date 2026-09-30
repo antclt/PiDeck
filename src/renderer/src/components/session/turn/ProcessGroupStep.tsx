@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, ChevronUp, FilePlus, FileText, Globe, Image, ListChecks, MessageCircleQuestion, Network, Search, Sparkles, SquareCode, SquarePen, Terminal, Wrench, type LucideIcon } from "lucide-react";
-import { memo, useId, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getToolName } from "../../../../../shared/fileChanges";
 import { t } from "../../../i18n";
 import { ShimmerText } from "../ShimmerText";
@@ -37,6 +37,8 @@ export type ProcessGroupStepProps = {
 	running: boolean;
 	/** 该组当前是否展开 */
 	open: boolean;
+	/** 本次展开是否来自自动通道（流式最新组）：展开瞬间自动=落底跟底，手动=保持顶部不跟底 */
+	autoOpen: boolean;
 	onToggle: (open: boolean) => void;
 	showThinking?: boolean;
 	sessionId?: string;
@@ -134,13 +136,30 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 	const stickScrollRef = stick.scrollRef;
 	const stickContentRef = stick.contentRef;
 	const stickScrollToBottom = stick.scrollToBottom;
+	const stickRestoreAt = stick.restoreAt;
 	const stickNoteWheel = stick.noteWheel;
-	// 展开（含首次挂载）后先落底：引擎只在「观察到内容变化」时贴底，
-	// 已有历史成员在挂载那一刻不产生变化事件，必须显式定位。layout 阶段执行，绘制前完成，无可见跳动。
+	// 展开（含首次挂载）后的定位按「本次展开来自哪条通道」分流（2026 用户反馈：点开组体
+	// 想从头看执行的命令，展开即拽到底反而要再滚回最前面）：
+	// - 自动通道（流式最新组）：落底并跟随——组体在长、滚珠不能停在上面（既有契约，e2e 钉住）；
+	// - 手动通道（用户点开）：restoreAt(0) 原子完成「定位到顶 + 解锁锁底 + 取消在途动画」，
+	//   后续成员到达不再拽底；用户滚回物理底仍按引擎语义重锁跟随。
+	// 定位只在「关→开」上升沿执行一次：开着期间 autoOpen 变化（如手动重开的组被 syncLatest
+	// 重新并入自动槽）不得重新定位，否则又会把浏览中的用户拽走。
+	// layout 阶段执行，绘制前完成，无可见跳动。
+	const wasOpenRef = useRef(false);
 	useLayoutEffect(() => {
-		if (!props.open) return;
-		stickScrollToBottom({ animation: "instant" });
-	}, [props.open, stickScrollToBottom]);
+		if (!props.open) {
+			wasOpenRef.current = false;
+			return;
+		}
+		if (wasOpenRef.current) return;
+		wasOpenRef.current = true;
+		if (props.autoOpen) {
+			stickScrollToBottom({ animation: "instant" });
+		} else {
+			stickRestoreAt(0);
+		}
+	}, [props.open, props.autoOpen, stickScrollToBottom, stickRestoreAt]);
 
 	const topKind = topActivityKinds(props.group.counts, 1)[0];
 	// 运行中的「正在…」必须用**当前**工具类别，不能用 topKind（整组摘要）：

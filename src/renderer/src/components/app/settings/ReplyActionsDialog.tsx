@@ -1,21 +1,22 @@
-import { ArrowDown, ArrowUp, FileJson, GripVertical, ListPlus, Plus, RefreshCw, RotateCcw, Trash2, X, Type } from "lucide-react";
+import { ArrowDown, ArrowUp, FileJson, GripVertical, ListPlus, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { MAX_REPLY_ACTION_RULES } from "../../../../../shared/replyActions";
 import type { ReplyActionRule, ReplyActionTrigger } from "../../../../../shared/types/replyActions";
 import { useReplyActionEditor } from "../../../hooks/useReplyActionEditor";
 import { t } from "../../../i18n";
 import { Button } from "../../ui-shadcn/button";
-import { Checkbox } from "../../ui-shadcn/checkbox";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../ui-shadcn/dialog";
 import { Input } from "../../ui-shadcn/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../ui-shadcn/table";
 
 /**
  * 回复快捷操作规则管理器。
  *
- * 这是配置表，不是普通的标签列表：列标题明确说明按钮文案、触发场景和关键词。
- * 触发条件使用可读的勾选项；textMatch 的 patterns 单独放在「关键词」列，
- * 不再用无文字的闪电下拉或把正则裸露在胶囊里。
+ * 一行一条规则，只回答两个问题：「按钮写什么」「什么时候显示」。
+ * 触发场景合并成一个有文字说明的下拉（回复成功 / 回复失败 / 全部 / 命中关键词）——
+ * 拆成「成功」「失败」两列勾选框时，用户既看不出每个开关单独管什么，也看不出勾几个是并集，
+ * 合并后条件自解释、一次只能选一个，组合语义不再暴露给用户。
  */
 export function ReplyActionsDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
 	const editor = useReplyActionEditor();
@@ -101,11 +102,9 @@ export function ReplyActionsDialog(props: { open: boolean; onOpenChange: (open: 
 							<Table className="min-w-[760px] table-fixed">
 								<colgroup>
 									<col className="w-10" />
-									<col className="w-[24%]" />
-									<col className="w-28" />
-									<col className="w-28" />
-									<col className="w-[36%]" />
-									<col className="w-28" />
+									<col className="w-[26%]" />
+									<col className="w-[38%]" />
+									<col className="w-24" />
 								</colgroup>
 								<TableHeader>
 									<TableRow className="bg-bg-muted hover:bg-bg-muted">
@@ -113,16 +112,14 @@ export function ReplyActionsDialog(props: { open: boolean; onOpenChange: (open: 
 											{t("settings.replyActionsColumnOrder")}
 										</TableHead>
 										<TableHead>{t("settings.replyActionsColumnText")}</TableHead>
-										<TableHead className="text-center">{t("settings.replyActionsColumnOnStop")}</TableHead>
-										<TableHead className="text-center">{t("settings.replyActionsColumnOnFailure")}</TableHead>
-										<TableHead>{t("settings.replyActionsColumnPatterns")}</TableHead>
+										<TableHead>{t("settings.replyActionsColumnTrigger")}</TableHead>
 										<TableHead className="text-right">{t("settings.replyActionsColumnOperations")}</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
 									{rules.length === 0 ? (
 										<TableRow>
-											<TableCell colSpan={6} className="py-6 text-center text-caption text-muted-foreground">
+											<TableCell colSpan={4} className="py-6 text-center text-caption text-muted-foreground">
 												{t("settings.replyActionsEmpty")}
 											</TableCell>
 										</TableRow>
@@ -175,6 +172,9 @@ export function ReplyActionsDialog(props: { open: boolean; onOpenChange: (open: 
 	);
 }
 
+/** 何时显示：与下拉选项一一对应的三态 + 命中关键词（第四态，需要 patterns）。 */
+type TriggerMode = "onStop" | "onFailure" | "always" | "textMatch";
+
 function RuleRow(props: {
 	rule: ReplyActionRule;
 	index: number;
@@ -188,9 +188,32 @@ function RuleRow(props: {
 	clearDrag: () => void;
 }) {
 	const { rule, index, rowCount } = props;
-	const stopTrigger = rule.triggers.some((trigger) => trigger.kind === "onStop");
-	const failureTrigger = rule.triggers.some((trigger) => trigger.kind === "onFailure");
 	const matchTrigger = rule.triggers.find((trigger) => trigger.kind === "textMatch");
+	// 关键词输入是受控的中间态：还没写出第一个关键词前只留在本地（draft 非 null），
+	// 不下发空的 textMatch——主进程会按「无 patterns」丢掉这个 trigger，整条规则跟着消失。
+	const [patternDraft, setPatternDraft] = useState<string | null>(null);
+	const mode: TriggerMode = patternDraft !== null ? "textMatch" : triggerModeOf(rule.triggers);
+
+	/** 换「何时显示」：状态类条件写成单个 trigger（组合语义只留在文件里，不暴露给用户）。 */
+	const applyMode = (next: TriggerMode) => {
+		if (next === "textMatch") {
+			setPatternDraft((matchTrigger?.patterns ?? []).join(", "));
+			return;
+		}
+		setPatternDraft(null);
+		props.editor.setRuleTriggers(index, [{ kind: next }]);
+	};
+
+	/** 关键词每次输入都下发，但空输入只更新草稿——保留旧 patterns 在文件里，不删规则。 */
+	const applyPatterns = (rawValue: string) => {
+		setPatternDraft(rawValue);
+		const patterns = rawValue
+			.split(/[,，]/)
+			.map((pattern) => pattern.trim())
+			.filter(Boolean);
+		if (patterns.length === 0) return;
+		props.editor.setRuleTriggers(index, [{ kind: "textMatch", patterns }]);
+	};
 
 	return (
 		<TableRow onDragOver={(event) => props.dragOver(event, index)} onDragLeave={props.dragLeave} onDrop={(event) => props.drop(event, index)} data-state={props.dropTargetActive ? "selected" : undefined}>
@@ -213,38 +236,21 @@ function RuleRow(props: {
 			<TableCell className="max-w-0">
 				<Input value={rule.text} placeholder={t("settings.replyActionsPlaceholder")} onChange={(event) => props.editor.setRuleText(index, event.target.value)} />
 			</TableCell>
-			<TableCell className="text-center">
-				<TriggerCheckbox checked={stopTrigger} label={t("settings.replyActionsTrigger.onStop")} onCheckedChange={(checked) => props.editor.setRuleTriggers(index, updateTrigger(rule.triggers, "onStop", checked))} />
-			</TableCell>
-			<TableCell className="text-center">
-				<TriggerCheckbox checked={failureTrigger} label={t("settings.replyActionsTrigger.onFailure")} onCheckedChange={(checked) => props.editor.setRuleTriggers(index, updateTrigger(rule.triggers, "onFailure", checked))} />
-			</TableCell>
 			<TableCell className="max-w-0">
-				{matchTrigger ? (
-					<div className="flex min-w-0 items-center gap-1">
-						<Input value={(matchTrigger.patterns ?? []).join(", ")} placeholder={t("settings.replyActionsTriggerPatterns")} title={t("settings.replyActionsTriggerPatternsHint")} onChange={(event) => props.editor.setRuleTriggers(index, updatePatterns(rule.triggers, event.target.value))} />
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-sm"
-							title={t("settings.replyActionsTriggerRemove")}
-							aria-label={t("settings.replyActionsTriggerRemove")}
-							onClick={() =>
-								props.editor.setRuleTriggers(
-									index,
-									rule.triggers.filter((trigger) => trigger.kind !== "textMatch"),
-								)
-							}
-						>
-							<X data-icon="inline-start" aria-hidden="true" />
-						</Button>
-					</div>
-				) : (
-					<Button type="button" variant="ghost" size="sm" onClick={() => props.editor.setRuleTriggers(index, [...rule.triggers, { kind: "textMatch", patterns: [] }])}>
-						<Type data-icon="inline-start" aria-hidden="true" />
-						{t("settings.replyActionsTriggerAdd")}
-					</Button>
-				)}
+				<div className="flex items-center gap-1">
+					<Select value={mode} onValueChange={(value) => applyMode(value as TriggerMode)}>
+						<SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={t("settings.replyActionsColumnTrigger")}>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="onStop">{t("settings.replyActionsTrigger.onStop")}</SelectItem>
+							<SelectItem value="onFailure">{t("settings.replyActionsTrigger.onFailure")}</SelectItem>
+							<SelectItem value="always">{t("settings.replyActionsTrigger.always")}</SelectItem>
+							<SelectItem value="textMatch">{t("settings.replyActionsTrigger.textMatch")}</SelectItem>
+						</SelectContent>
+					</Select>
+					{mode === "textMatch" ? <Input className="min-w-0 flex-1" value={patternDraft ?? (matchTrigger?.patterns ?? []).join(", ")} placeholder={t("settings.replyActionsTriggerPatterns")} title={t("settings.replyActionsTriggerPatternsHint")} onChange={(event) => applyPatterns(event.target.value)} /> : null}
+				</div>
 			</TableCell>
 			<TableCell className="text-right">
 				<div className="flex justify-end gap-0.5">
@@ -263,23 +269,13 @@ function RuleRow(props: {
 	);
 }
 
-function TriggerCheckbox(props: { checked: boolean; label: string; onCheckedChange: (checked: boolean) => void }) {
-	return (
-		<label className="inline-flex cursor-pointer items-center justify-center text-caption text-muted-foreground" title={props.label}>
-			<Checkbox checked={props.checked} onCheckedChange={(checked) => props.onCheckedChange(checked === true)} aria-label={props.label} />
-		</label>
-	);
-}
-
-function updateTrigger(triggers: ReplyActionTrigger[], kind: "onStop" | "onFailure", checked: boolean): ReplyActionTrigger[] {
-	if (checked) return triggers.some((trigger) => trigger.kind === kind) ? triggers : [...triggers, { kind }];
-	return triggers.filter((trigger) => trigger.kind !== kind);
-}
-
-function updatePatterns(triggers: ReplyActionTrigger[], rawValue: string): ReplyActionTrigger[] {
-	const patterns = rawValue
-		.split(/[,，]/)
-		.map((pattern) => pattern.trim())
-		.filter(Boolean);
-	return triggers.map((trigger) => (trigger.kind === "textMatch" ? { ...trigger, patterns } : trigger));
+/**
+ * 规则里的 triggers → 下拉当前值。文件允许组合多个 trigger（手写文件的用户），
+ * 界面按「最具体的」展示：有关键词看关键词，否则看成功/失败，都没有才算 always。
+ */
+function triggerModeOf(triggers: ReplyActionTrigger[]): TriggerMode {
+	if (triggers.some((trigger) => trigger.kind === "textMatch")) return "textMatch";
+	if (triggers.some((trigger) => trigger.kind === "onStop")) return "onStop";
+	if (triggers.some((trigger) => trigger.kind === "onFailure")) return "onFailure";
+	return "always";
 }

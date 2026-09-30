@@ -346,6 +346,13 @@ export class AgentManager {
 	/** 开启了 RPC 日志记录的 agent id 集合 */
 	private readonly rpcLoggingAgents = new Set<string>();
 	/**
+	 * 当前有渲染层日志面板在看的 agent id 集合（面板挂载/卸载时经 rpcLogsSetWatching 登记）。
+	 * 落盘与环形缓冲不受它影响（记录开着就一直写），只用于**广播闸门**：
+	 * 没有观看者时每条 RPC 日志仍按批结构化克隆发过去，重度会话里等于每秒 ~5MB 的
+	 * 无主 IPC，序列化在主进程做，表现为整个应用（含输入、流式）掉帧。
+	 */
+	private readonly rpcLogWatchingAgents = new Set<string>();
+	/**
 	 * 实时 RPC 日志广播缓冲：按 agent 聚合待发条目，节流刷出。
 	 * 流式阶段 RPC 事件可能非常高频，逐条 IPC 会把渲染进程打爆，必须批量推送。
 	 */
@@ -726,8 +733,7 @@ export class AgentManager {
 					});
 				});
 			}
-			this.rpcLogger?.push(entry);
-			this.enqueueLiveRpcLog(entry);
+			this.enqueueLiveRpcLog(this.rpcLogger?.push(entry) ?? entry);
 		} catch (error) {
 			// 日志功能任何故障都不影响会话
 			void this.appLogger?.warn("agent", "model-trace handler failed", {
@@ -3865,6 +3871,9 @@ export class AgentManager {
 	 * 批量推送既能降低 IPC 次数，也让渲染层一次 state 更新收到多条，减少重渲染频率。
 	 */
 	private enqueueLiveRpcLog(entry: RpcLogEntry) {
+		// 广播闸门：面板没打开就直接丢弃（落盘/环形缓冲已在 RpcLogger.push 里完成）。
+		// 面板打开时会先 setRpcLogWatching(true)，初始历史走 getLive 环形缓冲补齐。
+		if (!this.rpcLogWatchingAgents.has(entry.agentId)) return;
 		let pending = this.pendingLiveRpcLogs.get(entry.agentId);
 		if (!pending) {
 			pending = [];
@@ -3920,6 +3929,18 @@ export class AgentManager {
 	}
 
 	/**
+	 * 登记「某 agent 的实时日志面板是否在看」。
+	 * 由渲染层面板挂载/卸载成对调用；只影响广播，不影响记录与落盘。
+	 */
+	setRpcLogWatching(agentId: string, watching: boolean) {
+		if (watching) {
+			this.rpcLogWatchingAgents.add(agentId);
+		} else {
+			this.rpcLogWatchingAgents.delete(agentId);
+		}
+	}
+
+	/**
 	 * error 终态但 pi 进程仍存活时的原进程复活（Issue #218）。
 	 * 回复级错误（API 400/模型报错/prompt 投递未知）只结束本轮回复，进程本身没死；
 	 * 此前被标成终态 error 后，下次激活要么抛「启动失败」、要么停掉活进程重建——
@@ -3964,6 +3985,7 @@ export class AgentManager {
 		this.clearStreamGate(agentId);
 		// agent 关闭时自动关闭 RPC 日志记录，并丢弃未广播的实时日志缓冲
 		this.rpcLoggingAgents.delete(agentId);
+		this.rpcLogWatchingAgents.delete(agentId);
 		this.dropPendingLiveRpcLogs(agentId);
 		this.displayWindowStartByAgent.delete(agentId);
 		this.displayWindowComputedLengthByAgent.delete(agentId);
@@ -4067,6 +4089,7 @@ export class AgentManager {
 			this.liveRpcLogFlushTimer = null;
 		}
 		this.pendingLiveRpcLogs.clear();
+		this.rpcLogWatchingAgents.clear();
 		this.emitState();
 	}
 
@@ -4153,8 +4176,7 @@ export class AgentManager {
 				// 只有用户手动开启 RPC 日志记录的 agent 才产生日志流量（落盘 + 实时广播）。
 				// 未开启的 agent 不发射任何事件，避免每一条 RPC 通信都白白过一遍 IPC。
 				if (this.rpcLoggingAgents.has(agentId)) {
-					this.rpcLogger?.push(logEntry);
-					this.enqueueLiveRpcLog(logEntry);
+					this.enqueueLiveRpcLog(this.rpcLogger?.push(logEntry) ?? logEntry);
 				}
 			} catch (error) {
 				void this.appLogger?.warn("agent", "rpc-log handler failed", {

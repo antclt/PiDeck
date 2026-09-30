@@ -16,9 +16,12 @@ import { isModelTraceLogData, type RpcLogBatch, type RpcLogEntry } from "../../.
  * 可与消息区同时使用；面板本身不持有开关语义，关闭/恢复由 useWorkspacePanels 负责。
  *
  * 数据链路：主进程 RpcLogger 环形缓冲（初始历史）→ 订阅 agentsRpcLog 批量推送（~80ms 一批）→ 本组件追加渲染。
- * 性能设计：
- * - 内存：条目总量封顶 MAX_ENTRIES，超限丢最旧；主进程侧批量节流，避免高频 IPC；
- * - 渲染：无筛选时只渲染最近 WINDOW_UNFILTERED 条（窗口化），行组件 React.memo，追加重渲染只落在新增行；
+ * 挂载时向主进程登记「正在看该 agent」（rpcLogsSetWatching），卸载时取消：没有观看者就不广播。
+ * 性能设计（日志高频时不能拖垮会话流式）：
+ * - 内存：条目总量封顶 MAX_ENTRIES，超限丢最旧；主进程只广播环形缓冲里 data 已截断的副本；
+ * - 渲染：无筛选时只渲染最近 WINDOW_UNFILTERED 条（窗口化）；行组件 React.memo 且回调引用稳定
+ *   （行内自己绑定 log），追加重渲染只落在新增行；追底用 instant 而非弹簧，避免逐帧强制重排；
+ * - 搜索：命中判定用按条目缓存的全文（WeakMap），不每批重新 stringify；
  * - 自动滚动：复用 MessageScroller 的 stick-to-bottom 引擎（用户上翻即脱离，回底按钮归位）。
  */
 const MAX_ENTRIES = 3000;
@@ -46,17 +49,31 @@ export interface RpcLogPanelProps {
 	onClose: () => void;
 }
 
-/** 合并初始历史与实时追加：按 id 去重、按时间升序、封顶 MAX_ENTRIES */
+/**
+ * 合并初始历史与实时追加：按 id 去重、按时间升序、封顶 MAX_ENTRIES。
+ *
+ * 每批新日志都会跑这里（~80ms 一次），所以避免无条件全量 sort：实时追加天然升序，
+ * 先做一次线性扫描确认有序，只有乱序（初始历史 + 环形缓冲拼接）才排序。
+ */
 export function mergeLogEntries(existing: RpcLogEntry[], incoming: RpcLogEntry[]): RpcLogEntry[] {
 	if (incoming.length === 0) return existing;
-	const seen = new Set(existing.map((entry) => entry.id));
+	const seen = new Set<string>();
+	// 不用 existing.map() 先复制一份 id 数组：这是每批都要做的额外分配
+	for (const entry of existing) seen.add(entry.id);
 	const merged = existing.slice();
 	for (const entry of incoming) {
 		if (seen.has(entry.id)) continue;
 		seen.add(entry.id);
 		merged.push(entry);
 	}
-	merged.sort((a, b) => a.time - b.time);
+	let ordered = true;
+	for (let i = 1; i < merged.length; i++) {
+		if (merged[i].time < merged[i - 1].time) {
+			ordered = false;
+			break;
+		}
+	}
+	if (!ordered) merged.sort((a, b) => a.time - b.time);
 	return merged.length > MAX_ENTRIES ? merged.slice(merged.length - MAX_ENTRIES) : merged;
 }
 
@@ -71,8 +88,23 @@ export function formatRpcLogForCopy(log: RpcLogEntry): string {
 	});
 }
 
+/**
+ * 搜索用的全文（小写）。缓存按条目对象走 WeakMap：同一批历史在后续每批合并里都是
+ * 同一对象引用，所以每条日志最多 JSON.stringify 一次，条目被淘汰后随 GC 释放。
+ * 没有缓存时，每个 ~80ms 批次都会对最多 MAX_ENTRIES 条重新 stringify 整个 data，
+ * 这是日志量大时流式卡顿的主要 CPU 开销之一。
+ */
+const searchHaystackCache = new WeakMap<RpcLogEntry, string>();
+function searchHaystack(log: RpcLogEntry): string {
+	const cached = searchHaystackCache.get(log);
+	if (cached !== undefined) return cached;
+	const built = formatRpcLogForCopy(log).toLowerCase();
+	searchHaystackCache.set(log, built);
+	return built;
+}
+
 /** 行组件：memo 后追加重渲染只更新新增行，历史行直接跳过 */
-const RpcLogRow = memo(function RpcLogRow(props: { log: RpcLogEntry; expanded: boolean; onToggle: () => void; traceView?: ModelTraceView }) {
+const RpcLogRow = memo(function RpcLogRow(props: { log: RpcLogEntry; expanded: boolean; onToggle: (log: RpcLogEntry) => void; traceView?: ModelTraceView }) {
 	const { log, expanded, onToggle, traceView } = props;
 	const trace = isModelTraceLogData(log.data) ? log.data : undefined;
 	/** 模型请求行：展开时展示完整请求体（已回读到才可显示），否则退回条目 data */
@@ -93,7 +125,7 @@ const RpcLogRow = memo(function RpcLogRow(props: { log: RpcLogEntry; expanded: b
 	}
 	return (
 		<div className="rpc-log-entry-wrap">
-			<div className={`rpc-log-entry ${directionClass}`} onClick={onToggle} title={log.summary}>
+			<div className={`rpc-log-entry ${directionClass}`} onClick={() => onToggle(log)} title={log.summary}>
 				<time>
 					{new Date(log.time).toLocaleTimeString(undefined, {
 						hour: "2-digit",
@@ -176,6 +208,9 @@ export function RpcLogPanel(props: RpcLogPanelProps) {
 			if (disposed || batch.agentId !== agentId) return;
 			setEntries((current) => mergeLogEntries(current, batch.entries));
 		});
+		// 观看登记：主进程只向「有面板在看」的 agent 广播实时批次（见 AgentManager.enqueueLiveRpcLog）。
+		// 登记失败（agent 已退出等）不影响面板展示已有历史；卸载必须成对取消，否则广播闸门会一直开着。
+		void window.piDesktop.rpcLogs.setWatching(agentId, true).catch(() => undefined);
 		// 开关状态：未开启时提示用户先开启记录
 		if (getLogging) {
 			void getLogging(agentId)
@@ -190,6 +225,7 @@ export function RpcLogPanel(props: RpcLogPanelProps) {
 		return () => {
 			disposed = true;
 			unsubscribe();
+			void window.piDesktop.rpcLogs.setWatching(agentId, false).catch(() => undefined);
 		};
 	}, [agentId]);
 
@@ -200,7 +236,8 @@ export function RpcLogPanel(props: RpcLogPanelProps) {
 		return entries.filter((log) => {
 			if (directionFilter !== "all" && log.direction !== directionFilter) return false;
 			if (!normalizedKeyword) return true;
-			return formatRpcLogForCopy(log).toLowerCase().includes(normalizedKeyword);
+			// 缓存过的全文（小写）做子串匹配；每条最多 stringify 一次，见 searchHaystack
+			return searchHaystack(log).includes(normalizedKeyword);
 		});
 	}, [entries, keyword, directionFilter]);
 	// 无筛选时只渲染最近一段，避免大块渲染拖垮流式场景；筛选态放开到全部命中（总量已被 MAX_ENTRIES 封顶）
@@ -286,6 +323,14 @@ export function RpcLogPanel(props: RpcLogPanelProps) {
 		setAutoScroll(true);
 	}, []);
 
+	/**
+	 * 引擎在用户手动滚到底时会 relock（重新锁底跟随），这会让「自动滚动=关」形同虚设。
+	 * 面板按开关状态补一次解锁：跟随与否只由用户点开关 / 回底按钮决定，滚动位置不改变它。
+	 */
+	useEffect(() => {
+		if (!autoScroll && following) scrollApiRef.current?.stopScroll();
+	}, [autoScroll, following]);
+
 	const title = t("rpc.title", { visible: renderedEntries.length, total: entries.length });
 
 	return (
@@ -359,10 +404,12 @@ export function RpcLogPanel(props: RpcLogPanelProps) {
 				</div>
 			)}
 
+			{/* smooth={false}：日志追底用 instant。弹簧动画逐帧写 scrollTop，每帧都会强制这个
+			    容器（最多 WINDOW_UNFILTERED 行）重排，高频日志下持续掉帧。 */}
 			<div className="relative min-h-0 flex-1">
-				<MessageScroller className="h-full" followOutput={autoScroll} followThreshold={56} onFollowChange={setFollowing} scrollApiRef={scrollApiRef} label={title} viewportClassName="rpc-log-list" smooth>
+				<MessageScroller className="h-full" followOutput={autoScroll} followThreshold={56} onFollowChange={setFollowing} scrollApiRef={scrollApiRef} label={title} viewportClassName="rpc-log-list" smooth={false}>
 					{renderedEntries.map((log) => (
-						<RpcLogRow key={log.id} log={log} expanded={expandedId === log.id} onToggle={() => handleToggleEntry(log)} traceView={expandedId === log.id ? traceViews[log.id] : undefined} />
+						<RpcLogRow key={log.id} log={log} expanded={expandedId === log.id} onToggle={handleToggleEntry} traceView={expandedId === log.id ? traceViews[log.id] : undefined} />
 					))}
 					{renderedEntries.length === 0 && <div className="rpc-log-empty">{t("rpc.empty")}</div>}
 				</MessageScroller>

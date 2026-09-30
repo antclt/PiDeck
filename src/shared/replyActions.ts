@@ -14,7 +14,7 @@ export const REPLY_ACTIONS_FILE_VERSION = 1;
 /** 单文件规则条数上限：建议条一次最多展示几条，超配只会稀释注意力 */
 export const MAX_REPLY_ACTION_RULES = 64;
 
-const TRIGGER_KINDS: readonly ReplyActionTriggerKind[] = ["onFailure", "onStop", "textMatch"];
+const TRIGGER_KINDS: readonly ReplyActionTriggerKind[] = ["onFailure", "onStop", "always", "textMatch"];
 
 // v1 出厂规则曾把这些关键词压成一个组合正则；读取旧的 userData 时拆回普通关键词，
 // 这样升级后设置页不会继续显示一整串用户无法理解的正则。其它自定义正则保持原样。

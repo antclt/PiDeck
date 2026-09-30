@@ -56,7 +56,19 @@ export const ProcessFold = memo(function ProcessFold(props: ProcessFoldProps) {
 	const renderNode = (node: TurnProcessNode): ReactNode => {
 		switch (node.kind) {
 			case "group":
-				return <ProcessGroupStep group={node} running={node.id === runningGroupId} open={isGroupOpen(props.groupState, node.id)} onToggle={(open) => props.onToggleGroup(node.id, open)} showThinking={props.showThinking} sessionId={props.sessionId} onOpenFile={props.onOpenFile} onOpenExternal={props.onOpenExternal} />;
+				return (
+					<ProcessGroupStep
+						group={node}
+						running={node.id === runningGroupId}
+						open={isGroupOpen(props.groupState, node.id)}
+						autoOpen={props.groupState.autoGroupId === node.id}
+						onToggle={(open) => props.onToggleGroup(node.id, open)}
+						showThinking={props.showThinking}
+						sessionId={props.sessionId}
+						onOpenFile={props.onOpenFile}
+						onOpenExternal={props.onOpenExternal}
+					/>
+				);
 			case "interim":
 				// live 那一条由 TurnRow 挂在大折叠栏外，这里跳过以免同一段正文出现两份
 				if (node.id === props.liveInterimId) return null;
