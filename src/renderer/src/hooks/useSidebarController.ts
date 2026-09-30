@@ -22,15 +22,6 @@ export type SidebarMenuTarget =
 	| { kind: "session"; projectId: string; sessionId: string; pinnable: boolean; x: number; y: number }
 	| { kind: "draft"; projectId: string; sessionId: string; x: number; y: number };
 
-export type SidebarRpcLog = {
-	id: string;
-	agentId: string;
-	direction: string;
-	summary: string;
-	time: number;
-	data?: unknown;
-};
-
 export type SidebarRuntimeSummary = {
 	agentId?: string;
 	status: string;
@@ -106,10 +97,8 @@ export type SidebarController = {
 	worktreeCreateProjectId?: string;
 	openWorktreeCreate: (projectId: string) => void;
 	closeWorktreeCreate: () => void;
-	rpcLogAgentId?: string;
-	/** 打开实时 RPC 日志查看弹窗（数据订阅由弹窗自己管理） */
+	/** 打开实时 RPC 日志面板（承载在右侧抽屉，开关/还原由 App 的 useWorkspacePanels 管理） */
 	openRpcLogs: (agentId: string) => void;
-	closeRpcLogs: () => void;
 };
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -174,6 +163,8 @@ export function useSidebarController(
 	options: {
 		storage?: StorageLike;
 		getRpcLogging?: (agentId: string) => Promise<boolean>;
+		/** 打开实时日志面板的宿主回调：侧栏只发命令，承载形态（右侧抽屉）由 App 决定 */
+		openRpcLogViewer?: (agentId: string) => void;
 		pageSize?: number;
 		/** 展开集合变更时写入 settings.json；dev 强杀丢 localStorage 时靠它恢复 */
 		persistExpandedProjectIds?: (projectIds: string[]) => void;
@@ -223,13 +214,15 @@ export function useSidebarController(
 	}, []);
 	const [sessionManagerProjectId, setSessionManagerProjectId] = useState<string>();
 	const [worktreeCreateProjectId, setWorktreeCreateProjectId] = useState<string>();
-	const [rpcLogAgentId, setRpcLogAgentId] = useState<string>();
 	const requestGateRef = useRef(createSidebarRequestGate());
 	const pinnedSessionIdsRef = useRef(pinnedSessionIds);
 	pinnedSessionIdsRef.current = pinnedSessionIds;
 	const pinnedSessionIdsHydratedRef = useRef(false);
 	const persistPinnedSessionIdsRef = useRef(options.persistPinnedSessionIds);
 	persistPinnedSessionIdsRef.current = options.persistPinnedSessionIds;
+	// 打开日志面板的宿主回调存 ref：openRpcLogs 保持稳定引用，菜单 JSX 不随 App 重渲染失效
+	const openRpcLogViewerRef = useRef(options.openRpcLogViewer);
+	openRpcLogViewerRef.current = options.openRpcLogViewer;
 
 	useEffect(() => {
 		const storage = options.storage ?? (typeof window === "undefined" ? undefined : window.localStorage);
@@ -485,7 +478,9 @@ export function useSidebarController(
 		async (target: SidebarMenuTarget) => {
 			const request = requestGateRef.current.beginMenu();
 			if (target.kind === "agent" && options.getRpcLogging) {
-				const logging = await options.getRpcLogging(target.agentId);
+				// agent 可能在右键瞬间退出：主进程会拒绝该查询（无可用运行实例）。
+				// 查询失败必须放行菜单弹出——await 抛出会跳过 setMenu，用户点右键看不到菜单。
+				const logging = await options.getRpcLogging(target.agentId).catch(() => false);
 				if (!requestGateRef.current.isCurrentMenu(request)) return;
 				patchRpcLogging(target.agentId, logging);
 			}
@@ -494,8 +489,8 @@ export function useSidebarController(
 		[options.getRpcLogging],
 	);
 	const openRpcLogs = useCallback((agentId: string) => {
-		// 弹窗自持数据（初始历史 + 实时订阅），这里只负责开关
-		setRpcLogAgentId(agentId);
+		// 数据订阅由 RpcLogPanel 自持；这里只发打开命令（宿主把它变成右侧抽屉的 rpcLog 临时面板）
+		openRpcLogViewerRef.current?.(agentId);
 	}, []);
 
 	return {
@@ -546,11 +541,6 @@ export function useSidebarController(
 		worktreeCreateProjectId,
 		openWorktreeCreate: setWorktreeCreateProjectId,
 		closeWorktreeCreate: () => setWorktreeCreateProjectId(undefined),
-		rpcLogAgentId,
 		openRpcLogs,
-		closeRpcLogs: () => {
-			// 弹窗卸载即退订实时日志，无需额外请求门
-			setRpcLogAgentId(undefined);
-		},
 	};
 }

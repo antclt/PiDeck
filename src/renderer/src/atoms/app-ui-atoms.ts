@@ -3,7 +3,9 @@ import { atomWithStorage } from "jotai/utils";
 import type { BusySendDelivery } from "../../../shared/busySendDelivery";
 import type { AgentBackend } from "../../../shared/types";
 import type { QuickMessagesSnapshot } from "../../../shared/types/quickMessages";
+import type { ReplyActionsSnapshot } from "../../../shared/types/replyActions";
 import { resolveEffectiveAgentBackend } from "../../../shared/types/dshRuntime";
+import { isModuleHidden } from "../../../shared/hiddenModules";
 import { dshRuntimeStatusAtom } from "./dsh-atoms";
 import type { SettingsFieldAnchorSlug } from "../utils/settingsFieldAnchors";
 import { defaultExpandedSidebarProjects, readExpandedSidebarProjects } from "../utils/sidebarExpandedProjects";
@@ -85,6 +87,19 @@ export const defaultAgentBackendAtom = atom<AgentBackend>("pi");
 export const effectiveAgentBackendAtom = atom<AgentBackend>((get) => resolveEffectiveAgentBackend(get(defaultAgentBackendAtom), get(dshRuntimeStatusAtom).state));
 
 /**
+ * 用户隐藏的功能模块（设置项 hiddenModules 的渲染层快照，清单见 shared/hiddenModules.ts）。
+ * App 在 settings 变化时写入；不持有 settings props 的消费方（ConfigModal 的 Pi/DSH 分页、
+ * composer 后端下拉）从这里读，设置保存后立即生效。默认空 = 全部显示。
+ */
+export const hiddenModulesAtom = atom<readonly string[]>([]);
+
+/** DSH 后端入口是否隐藏：配置管理的 DSH 分页 + 新建会话的 DSH 后端选项。 */
+export const dshModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "dsh"));
+
+/** 生图入口是否隐藏：输入框后端下拉里的生图选项。 */
+export const imageGenModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "imagegen"));
+
+/**
  * 忙碌时发送消息的默认投递行为（设置项 busySendDelivery 的渲染层快照）。
  * App 在 settings 变化时写入；composer/发送链路在决策时刻读取，
  * 避免把 settings props 一路透传进深层 hook。默认与 main SettingsStore 保持一致。
@@ -100,6 +115,13 @@ export const busySendDeliveryAtom = atom<BusySendDelivery>("steer");
  * null = 尚未读到文件（弹框先显示加载态，不把「还没读完」误报成「没有快捷消息」）。
  */
 export const quickMessagesSnapshotAtom = atom<QuickMessagesSnapshot | null>(null);
+
+/**
+ * 回复快捷操作规则快照（配置文件 userData/reply-actions.json，主进程 ReplyActionRuleStore 读写）。
+ * 与 quickMessagesSnapshotAtom 同一套约定：读写入口统一走 useReplyActions，
+ * SessionReplyActions 只读 rules 展示，设置页经 save 落盘后整份替换快照。
+ */
+export const replyActionsSnapshotAtom = atom<ReplyActionsSnapshot | null>(null);
 
 /**
  * 侧栏展开的项目 id 集合（有 id = 展开）。
@@ -134,11 +156,11 @@ export const sidebarNavTabAtom = atom<SidebarNavTab>(readSidebarNavTab(typeof wi
 export type TurnFlowSettings = {
 	/** 流式对话时展开中间过程（默认开：最新轮流式输出时自动展开思考/工具详情）。 */
 	expandInterimDuringStream: boolean;
-	/** 新一轮开始时收起上一轮（默认开：发送新消息后收起所有非最新轮，含手动展开的）。 */
-	collapsePrevRunsOnNewTurn: boolean;
+	/** 是否按过程组合并显示思考/工具调用（默认开：连续思考/工具调用合并成过程组）。 */
+	processGroupDisplay: boolean;
 };
 
 export const turnFlowSettingsAtom = atom<TurnFlowSettings>({
 	expandInterimDuringStream: true,
-	collapsePrevRunsOnNewTurn: true,
+	processGroupDisplay: true,
 });

@@ -290,7 +290,8 @@ export class AutomationRunCoordinator {
 				title,
 				environment,
 				source: "pi",
-				titleLocked: true,
+				// 自动化任务的标题由用户配置直接给出，是终态名而非占位。
+				titleOrigin: "manual",
 				backend: task.backend ?? "pi",
 				model: task.model,
 				thinkingLevel: task.thinkingLevel,
@@ -651,6 +652,9 @@ export class AutomationRunCoordinator {
 					// Non-fatal if runtime stop fails
 				}
 			}
+
+			// 自动运行的终态必须留痕：无人值守触发的 agent 活动只能靠日志回溯
+			void this.logger?.info("automation", "Automation run finished", { runId, taskId: tracker?.taskId ?? run?.taskId, status, durationMs, ...(error ? { error } : {}) });
 
 			const updatedRun = await this.store.updateRun(
 				runId,

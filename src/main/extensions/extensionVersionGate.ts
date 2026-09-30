@@ -29,6 +29,22 @@ export const MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST = 60;
 export const MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST = 60;
 
 /**
+ * pi 0.99 起支持 `-e builtin:<name>` 形式的扩展源（内置扩展按名加载），
+ * 同时 `--no-extensions` 的语义从「关掉文件型扩展发现」扩大为
+ * 「关掉所有扩展，**含内置扩展**」（llama.cpp / codemode / tool-search / mcp）。
+ *
+ * 门槛依据（来自 pi 0.99.1 安装包源码考证）：
+ * - `dist/extensions/index.js` 的 builtInExtensions 仅登记 4 个名字：
+ *   `llama.cpp`、`codemode`、`tool-search`、`mcp`（后三个 replaceable）；
+ * - `dist/core/package-manager.js` 的 resolveExtensionSources 用
+ *   `source.startsWith("builtin:")` 过滤内置源，该分支在 0.99.0 引入
+ *   （`-e, --extension <source>` 在此之前只接受 path / npm / git 源）；
+ * - 低于 0.99 的 pi 传 `builtin:mcp` 会被当成未知源，resolvedPaths 为空或直接
+ *   报错，导致 RPC 启动失败——因此必须版本门控。
+ */
+export const MIN_PI_MINOR_VERSION_FOR_BUILTIN_EXTENSION_SPECIFIER = 99;
+
+/**
  * 从 pi 版本串（如 "0.82.1" / "v0.60.0"）解析次版本号；解析失败返回 null（视为版本未知）。
  */
 export function parsePiMinorVersion(version: string | null | undefined): number | null {

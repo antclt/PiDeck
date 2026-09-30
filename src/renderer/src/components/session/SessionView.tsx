@@ -1,11 +1,14 @@
 import { useAtomValue } from "jotai";
-import { useEffect, useMemo, useRef, type CSSProperties, type RefObject, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from "react";
 import { type GroupImperativeHandle, type PanelImperativeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "../ui-shadcn/resizable";
 import type { GitBranchInfo, ImageContent, TerminalTarget } from "../../../../shared/types";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { isLanWeb, desktopApi as api } from "../../desktopApi";
 import { SessionHeader } from "./SessionHeader";
+import { BridgeOverlayHost, BridgeGuiSlot, BridgeSlot } from "../bridge/BridgeSlot";
+import { BRIDGE_TARGET } from "../../../../shared/types/bridge";
+import { useBridgeSessionTitle } from "../../hooks/useBridgeSessionTitle";
 import { SessionBranchBar } from "./SessionBranchBar";
 import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
@@ -13,6 +16,7 @@ import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
+import { useReplyActions } from "../../hooks/useReplyActions";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { TerminalDockPanel, TERMINAL_PANEL_COLLAPSED_SIZE, TERMINAL_PANEL_MIN_SIZE } from "../terminal/TerminalDockPanel";
 import { useSessionPaneServices } from "./SessionPaneServices";
@@ -166,6 +170,14 @@ export function SessionView({
 	abortAgent: _abortAgent,
 }: SessionViewProps) {
 	const paneServices = useSessionPaneServices();
+	// 落点随本栏时间线挂载/卸载更新；发送控制器仍只有 ComposerArea 内的一份。
+	const [replyActionsTarget, setReplyActionsTarget] = useState<HTMLDivElement | null>(null);
+	// 回复快捷操作规则：全局一份快照（主进程读 userData/reply-actions.json），
+	// SessionReplyActions 只读；保存入口在设置页，保存后整份替换 atom。
+	// 只取 items（规则数组），避免整个 hook 返回值每渲染变引用拖累下游 memo。
+	const { items: replyActionRuleItems } = useReplyActions();
+	// GUI 扩展桥：把扩展的 ctx.ui.setTitle 应用到 document.title（无贡献时不动，§7.4 只追加）
+	useBridgeSessionTitle(sessionId);
 	// 会话身份面包屑的项目名：多 Tab/分屏时提醒当前会话属于哪个项目。
 	// 从会话记录解析 projectId → 项目目录名；无记录（匿名会话等）时省略。
 	const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
@@ -243,17 +255,25 @@ export function SessionView({
 		<div className={splitPane ? `session-split-pane flex h-full min-h-0 flex-col${focused ? " session-split-pane-focused" : ""}` : "contents"} onMouseDown={splitPane ? () => onFocusPane?.() : undefined}>
 			{/* Tab 栏已统一外置；运行控制（停止/重启）在共享 Tab 栏的 Tab 下拉；
           本栏只保留会话状态徽章与分屏身份标题（抽屉开关在共享 Tab 栏）。 */}
-			<SessionHeader
-				headerRef={chatHeaderRef}
-				statusSessionId={sessionId}
-				title={sessionTitle}
-				projectName={projectName}
-				paneTitle={splitPane ? sessionTitle : undefined}
-				onExitSplit={splitPane ? () => paneServices.exitSessionSplit(sessionId) : undefined}
-				isAnonymous={activeAgent?.noSession}
-				duration={sessionDuration}
-				isStarting={isAgentStarting}
-			/>
+			{(!paneServices.simpleNavigation || splitPane) && (
+				<SessionHeader
+					headerRef={chatHeaderRef}
+					statusSessionId={sessionId}
+					title={sessionTitle}
+					projectName={projectName}
+					paneTitle={splitPane ? sessionTitle : undefined}
+					onExitSplit={splitPane ? () => paneServices.exitSessionSplit(sessionId) : undefined}
+					isAnonymous={activeAgent?.noSession}
+					duration={sessionDuration}
+					isStarting={isAgentStarting}
+				/>
+			)}
+			{/* GUI 扩展桥：顶部区落点（ctx.ui.setHeader）。无贡献时返回 null，不占位。 */}
+			<BridgeSlot sessionId={sessionId} targetId={BRIDGE_TARGET.header} className="flex flex-col gap-1 px-1" />
+			{/* GUI 扩展桥：顶部横幅通知区落点（ctx.gui.setBanner）。
+			    紧贴会话标题栏之下、聊天区之上 —— 与 SessionBranchBar 同级「旁插」。
+			    无贡献时返回 null，不占位、不挤动下方布局。 */}
+			<BridgeGuiSlot sessionId={sessionId} slot="banner" className="flex flex-col gap-1 px-1" />
 			{/* 分支导航条：仅当当前会话存在 fork 分支关系（父/兄弟/子分支）时显示 */}
 			<SessionBranchBar sessionId={sessionId} onOpenSession={onOpenBranchSession} />
 			<ResizablePanelGroup
@@ -272,6 +292,7 @@ export function SessionView({
 							sessionTimeline={sessionTimeline}
 							isRestarting={isRestarting}
 							timelineProps={{
+								instantSessionSwitch: paneServices.simpleNavigation,
 								hasProject,
 								onCreateSession: runCreateSessionDraft,
 								showThinking,
@@ -289,6 +310,7 @@ export function SessionView({
 								forkingMessageId,
 								onToast,
 								onQuickPrompt,
+								replyActionsRef: setReplyActionsTarget,
 							}}
 						/>
 					</div>
@@ -335,6 +357,10 @@ export function SessionView({
 										<SessionGoalStrip sessionId={sessionId} />
 									</>
 								}
+								replyActionMessages={sessionTimeline.messages}
+								replyActionRules={replyActionRuleItems}
+								replyActionsTarget={replyActionsTarget}
+								replyActionsBlocked={askPanelVisible || isRestarting || isAgentStarting || sessionTimeline.isSurfaceLoading}
 							/>
 						</div>
 					)}
@@ -358,6 +384,10 @@ export function SessionView({
 					/>
 				)}
 			</ResizablePanelGroup>
+			{/* GUI 扩展桥：底部状态区落点（ctx.ui.setFooter）+ 覆盖层宿主（ctx.gui.custom）。
+			    两者无内容时都返回 null，PiDeck 原有 DOM 零变化。 */}
+			<BridgeSlot sessionId={sessionId} targetId={BRIDGE_TARGET.footer} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1" />
+			<BridgeOverlayHost sessionId={sessionId} />
 		</div>
 	);
 }

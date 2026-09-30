@@ -11,8 +11,9 @@ const timeline = readFileSync("src/renderer/src/components/session/SessionMessag
 
 test("tool card name is a faint process-layer label, weight kept normal", () => {
 	// 过程层视觉：工具名用 tertiary 浅色退到正文之后；字重保持 normal（不降档，
-	// 过轻在 CJK 下会有锯齿感，用户反馈优先保字重、靠颜色区分）
-	assert.match(toolCard, /className="shrink-0 text-control lowercase text-text-faint"/);
+	// 过轻在 CJK 下会有锯齿感，用户反馈优先保字重、靠颜色区分）。
+	// 字号走会话正文轨道（text-chat-row = 正文 −2px）：随「会话正文字号」缩放，不随界面字号。
+	assert.match(toolCard, /className="shrink-0 text-chat-row lowercase text-text-faint"/);
 	assert.doesNotMatch(toolCard, /font-light/);
 	assert.doesNotMatch(toolCard, /font-\[650\]/);
 	// ToolActivityCard 也不再用 <strong> 加粗
@@ -85,8 +86,7 @@ test("settled positioning is state-driven, inputs never cancel it", () => {
 	assert.match(controller, /settleScrollCancelRef\.current\?\.\(\);/);
 	// 对抗审查补修：
 	// - F1：新一轮开始（busy 边沿）取消在途 settle 动画并恢复跟随贴底；
-	// - P2-①：动画期间用户接管（拖动滚动条等）经几何检测中断，不再逐帧覆盖；
-	// - P2-②：切回补挂 arm 幂等，已消费过 tick 的 run 不再重复 arm（记忆优先）。
+	// - P2-①：动画期间用户接管（拖动滚动条等）经几何检测中断，不再逐帧覆盖。
 	assert.match(controller, /cancelSettledRepositionForNewRun/);
 	assert.match(timeline, /controller\.cancelSettledRepositionForNewRun\(\)/);
 	// 滚动条拖动取消用「命中滚动条区域」的事件判定；不用几何分叉启发式——
@@ -95,7 +95,11 @@ test("settled positioning is state-driven, inputs never cancel it", () => {
 	assert.match(controller, /event\.clientX >= rect\.left \+ timeline\.clientWidth/);
 	const pinScrollSource = readFileSync("src/renderer/src/lib/pinTurnScroll.ts", "utf8");
 	assert.doesNotMatch(pinScrollSource, /TAKEOVER_TOLERANCE_PX/);
-	assert.match(timeline, /settleTickConsumedRunRef/);
+	// 唯一边沿契约（2026-09 收口「触发场景太多」）：定位只能由「运行中 → 停转」
+	// 的 busy 边沿 arm。挂载/切回/启动实例/预热 runtime 一律补齐定位的旧实现已删除，
+	// 其幂等标记 settleTickConsumedRunRef 必须同步消失（否则是删漏的死代码）。
+	assert.doesNotMatch(timeline, /settleTickConsumedRunRef/);
+	assert.doesNotMatch(timeline, /latestSettledRunId/);
 	// 触发时序不变：1.5s 阅读停顿 + 320ms 布局稳定窗口。
 	assert.match(timeline, /TURN_SETTLE_IDLE_COLLAPSE_MS = 1500/);
 	assert.match(timeline, /TURN_SETTLE_SCROLL_DELAY_MS/);

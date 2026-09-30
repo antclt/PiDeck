@@ -38,12 +38,12 @@ test("开启后弹「已打开」提醒框而非自动打开日志弹窗", () =>
 	assert.doesNotMatch(sidebarContent, /setLogging\(menuAgent\.id, true\)[\s\S]{0,220}openRpcLogs\(menuAgent\.id\)/);
 });
 
-test("已开启时菜单项点击为关闭记录，弹窗提供「停止记录」按钮", () => {
+test("已开启时菜单项点击为关闭记录，日志面板提供「停止记录」按钮", () => {
 	// 关闭分支：setLogging(id, false) + 结果 toast
 	assert.match(sidebarContent, /setLogging\(menuAgent\.id, false\)/);
 	assert.match(sidebarContent, /setLogging\(menuSessionRuntimeAgent\.id, false\)/);
-	// 查看弹窗在记录开启时提供停止按钮
-	const viewer = readFileSync("src/renderer/src/components/sidebar/RpcLogViewer.tsx", "utf8");
+	// 日志面板（右侧抽屉 rpcLog）在记录开启时提供停止按钮
+	const viewer = readFileSync("src/renderer/src/components/workspace/RpcLogPanel.tsx", "utf8");
 	assert.match(viewer, /handleDisableLogging/);
 	assert.match(viewer, /setLogging\(agentId, false\)/);
 	assert.match(viewer, /t\("rpc\.disableLogging"\)/);
@@ -55,4 +55,11 @@ test("「已打开」提醒框组件在 SidebarParts 出口暴露，含查看入
 	assert.match(sidebarComponents, /t\("rpc\.logOpenedTitle"\)/);
 	assert.match(sidebarComponents, /t\("rpc\.logOpenedDescription"\)/);
 	assert.match(sidebarComponents, /t\("rpc\.logViewNow"\)/);
+});
+
+test("右键查记录状态失败不阻断菜单弹出（agent 刚退出时主进程会拒绝）", () => {
+	// 回归（2026-09 UI 冒烟）：openMenu 里裸 await getRpcLogging，reject 时
+	// ① 冒成未处理异常 toast ② 跳过 setMenu 导致右键菜单弹不出来。
+	assert.match(controller, /await options\.getRpcLogging\(target\.agentId\)\.catch\(\(\) => false\)/);
+	assert.doesNotMatch(controller, /await options\.getRpcLogging\(target\.agentId\);\s*\n\s*if \(!requestGateRef\.current\.isCurrentMenu\(request\)\) return;/);
 });

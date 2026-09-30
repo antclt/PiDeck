@@ -35,6 +35,7 @@ interface GitDrawerDiff {
 }
 
 export interface UseFileEditorInput {
+	preserveTabsForGit?: boolean;
 	activeProjectId: string | undefined;
 	activeProjectIdRef: React.MutableRefObject<string | undefined>;
 	activeAgent: AgentTab | null;
@@ -100,8 +101,8 @@ export interface UseFileEditorOutput {
 	/** VS Code 式预览 Tab id（斜体）；至多一个 */
 	previewEditorTabId: string | null;
 	openFilePath: (path: string) => void;
-	/** 单击默认 preview；双击传 permanent */
-	viewFilePath: (path: string, openMode?: EditorTabOpenMode, initialLine?: number, fileAccessScope?: ProjectFileAccessScope) => void;
+	/** 单击默认 preview；双击传 permanent。readOnly=true 时不提供保存/自动保存（项目外文件） */
+	viewFilePath: (path: string, openMode?: EditorTabOpenMode, initialLine?: number, fileAccessScope?: ProjectFileAccessScope, readOnly?: boolean) => void;
 	diffFilePath: (path: string, originalContent?: string, content?: string) => void;
 	openWorkspaceFileDiff: (group: GitResourceGroupType, path: string, repoPath?: string) => Promise<void>;
 	openCommitFileDiff: (commit: CommitEntry, file: GitChangedFile, repoPath?: string) => Promise<void>;
@@ -121,6 +122,8 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 	const { activeProjectId, activeProjectIdRef, activeAgent, activeProject, drawer, modifiedFiles, setDrawer, setDrawerCollapsed, contentOpenMode, showToast, readFileContent, readGitOriginalContent, writeFileContent, openFile, workspaceFileDiff, commitFileDiff, t } = input;
 
 	const contentOpenModeRef = useRef(contentOpenMode);
+	const preserveTabsForGitRef = useRef(input.preserveTabsForGit);
+	preserveTabsForGitRef.current = input.preserveTabsForGit;
 	contentOpenModeRef.current = contentOpenMode;
 
 	// ---- 中间栏内容布局（split | maximize）----
@@ -328,10 +331,12 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 	);
 
 	const viewFilePath = useCallback(
-		(path: string, openMode: EditorTabOpenMode = "preview", initialLine?: number, fileAccessScope?: ProjectFileAccessScope) => {
+		(path: string, openMode: EditorTabOpenMode = "preview", initialLine?: number, fileAccessScope?: ProjectFileAccessScope, readOnly = false) => {
 			// 只清 Git Diff，保留已有文件 tab——否则预览/多 tab 无法成立
 			dismissGitDiffOnly();
-			openEditorTab(path, "view", undefined, undefined, true, undefined, undefined, false, openMode, initialLine, fileAccessScope);
+			// readOnly 用 allowSave=false 表达：FileDiffViewer 只在该值为真时才挂保存与自动保存，
+			// 因此项目外文件确认后的「只读查看」不会变成「可写任意路径」。
+			openEditorTab(path, "view", undefined, undefined, !readOnly, undefined, undefined, false, openMode, initialLine, fileAccessScope);
 			const mode = contentOpenModeRef.current;
 			editorModeRef.current = mode;
 			setEditorMode(mode);
@@ -371,10 +376,12 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 				}
 				const groupLabel = group === "index" ? t("git.stagedChanges") : group === "merge" ? t("git.mergeChanges") : t("git.changes");
 				const mode = contentOpenModeRef.current;
-				// Diff 独占阅读面：清掉文件 tab，避免关 Diff 后又弹回文件
-				setActiveTabId(null);
-				setEditorTabs([]);
-				setPreviewEditorTabId(null);
+				// Simple mode keeps file drafts beside Git; tabs retain the upstream exclusive surface.
+				if (!preserveTabsForGitRef.current) {
+					setActiveTabId(null);
+					setEditorTabs([]);
+					setPreviewEditorTabId(null);
+				}
 				editorModeRef.current = mode;
 				setEditorMode(mode);
 				setGitDiffDisplayMode(mode);
@@ -407,9 +414,11 @@ export function useFileEditor(input: UseFileEditorInput): UseFileEditorOutput {
 					return;
 				}
 				const mode = contentOpenModeRef.current;
-				setActiveTabId(null);
-				setEditorTabs([]);
-				setPreviewEditorTabId(null);
+				if (!preserveTabsForGitRef.current) {
+					setActiveTabId(null);
+					setEditorTabs([]);
+					setPreviewEditorTabId(null);
+				}
 				editorModeRef.current = mode;
 				setEditorMode(mode);
 				setGitDiffDisplayMode(mode);

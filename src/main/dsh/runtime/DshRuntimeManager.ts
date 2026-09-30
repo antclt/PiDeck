@@ -33,8 +33,12 @@ export type DshRuntimeLayout = {
 	tempRoot: string;
 };
 
-/** 下载器：`onProgress(receivedBytes, totalBytes|undefined)`。 */
-export type DshRuntimeDownloader = (url: string, destPath: string, onProgress?: (received: number, total?: number) => void, signal?: AbortSignal) => Promise<void>;
+/**
+ * 下载器：`onProgress(receivedBytes, totalBytes|undefined)`。
+ * `options.resumeFromBytes`：目标文件已有的字节数，下载器据此带 Range 续传并在其后追加写；
+ * 服务端不支持 Range 时自行退回全量重下，调用方只需保证 destPath 是那个半截文件。
+ */
+export type DshRuntimeDownloader = (url: string, destPath: string, onProgress?: (received: number, total?: number) => void, signal?: AbortSignal, options?: { resumeFromBytes?: number }) => Promise<void>;
 
 /** 解压器：把 tarball 解到 destDir（destDir 由本模块创建并保证为空）。 */
 export type DshRuntimeExtractor = (archivePath: string, destDir: string) => Promise<void>;
@@ -353,6 +357,8 @@ export class DshRuntimeManager {
 		const archivePath = join(this.deps.layout.tempRoot, `download-${Date.now()}.tgz`);
 		try {
 			options.onPhase?.("downloading");
+			// 记录安装来源 URL：运行时是外部下载的二进制，出问题时需能审计来源
+			this.deps.log?.("dsh-runtime", "runtime download started", { url });
 			await this.download(url, archivePath, options.onDownloadProgress, options.signal);
 			return await this.installFromArchive(archivePath, expectedSha256, options);
 		} catch (error) {

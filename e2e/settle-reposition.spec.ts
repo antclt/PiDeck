@@ -4,8 +4,8 @@ import { makeSeedProject } from "./open-session";
 
 /**
  * 「最新轮结束后把最终回答开头放到视口 30%」的行为级回归（2026-09 状态驱动重构）：
- * - 触发只由状态决定：最新轮 busy→idle 且仍跟随 → 1.5s 阅读停顿 → 定位；
- *   打开/切回仍跟随的已结束会话同样补齐定位。
+ * - 触发只由状态决定，且只有一个入口：最新轮 busy→idle 且仍跟随 → 1.5s 阅读停顿 → 定位。
+ *   打开/切回/启动历史实例/预热 runtime 都不再补齐定位（2026-09 收口：只保留真实的本轮结束）。
  * - 输入不参与取消：1.5s 窗口内移动鼠标、在输入框打字都不取消；
  * - 真实上滚读历史是唯一跳过路径：上滚后位置保持，不被拉回 30%。
  *
@@ -17,7 +17,7 @@ import { makeSeedProject } from "./open-session";
 // 拼接 `join("\n")` 的剩余行。
 const LONG_REPLY = "Mock 回复：「LONG」" + Array.from({ length: 120 }, (_, i) => `第 ${i + 1} 行：长回答示例文本，用于撑高时间线高度（滚动/贴底类用例需要内容溢出视口）。`).join("\n");
 
-// 预置项目 + 一个已结束的 LONG 历史会话（场景 3 用；场景 1/2 仍走内置聊天项目）。
+// 预置项目 + 一个已结束的 LONG 历史会话（后三条历史类用例用；场景 1/2 仍走内置聊天项目）。
 const settleSeedProject = makeSeedProject("settle-reposition-seed");
 
 test.use({
@@ -207,14 +207,10 @@ test("real up-scroll before settle keeps the manual history position", async ({ 
 	expect(after.scrollHeight).toBe(before.scrollHeight);
 });
 
-test("opening a settled session while following still repositions without input", async ({ app, window }) => {
-	test.setTimeout(180_000);
+async function openSeedHistory(app: ElectronApplication, window: Page) {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 	await ensureWindowVisible(app);
-
-	// 侧栏分段后默认停在「聊天」分段，项目行在「项目」分段下（见 file-viewer.spec.ts）
-	await window.getByRole("tab", { name: "项目" }).click();
-	// 项目行显示项目 name（makeSeedProject 传入的 name），非目录前缀
+	await window.getByRole("tab", { name: "项目", exact: true }).click();
 	const projectRow = window.locator(".conversation", { hasText: "settle-reposition-seed" }).first();
 	await expect(projectRow).toBeVisible({ timeout: 30_000 });
 	await projectRow.click();
@@ -222,24 +218,35 @@ test("opening a settled session while following still repositions without input"
 	await expect(historyRow).toBeVisible({ timeout: 15_000 });
 	await historyRow.click();
 	await expect(window.locator(".message-timeline")).toContainText(LONG_REPLY.slice(0, 24), { timeout: 20_000 });
-	// 打开瞬间跟随尾部（无保存锚点）：挂载补齐流水线生效，无需任何输入。
-	// seed 会话内容较短时定位目标会被 clamp 到顶部（anchor 未必精确在 30%），
-	// 因此这里只轮询「最终回答进入视口上半部且视口离开底部」的稳定终态，
-	// 而不是死磕 30% 像素——30% 的精确锚定由场景 1（长内容）覆盖。
-	await expect
-		.poll(
-			async () => {
-				await ensureWindowVisible(app);
-				const f = await anchorFingerprint(window);
-				if (!f) return Number.POSITIVE_INFINITY;
-				if (f.dist <= 300) return Number.POSITIVE_INFINITY;
-				// 最终回答顶部应在视口内（上方 10% 到 60% 高度区间）
-				return f.anchorTopInViewport > -f.clientHeight * 0.1 && f.anchorTopInViewport < f.clientHeight * 0.6 ? 0 : Number.POSITIVE_INFINITY;
-			},
-			{ timeout: 8_000 },
-		)
-		.toBeLessThan(90);
-	const fingerprint = await anchorFingerprint(window);
-	expect(fingerprint).not.toBeNull();
-	expect(fingerprint.dist, `settled session reopen should leave the bottom: ${JSON.stringify(fingerprint)}`).toBeGreaterThan(300);
+}
+
+test("opening history without a started Agent stays at the bottom", async ({ app, window }) => {
+	await openSeedHistory(app, window);
+	await expect.poll(async () => (await geometry(window)).dist).toBeLessThan(90);
+	const before = await geometry(window);
+	await window.waitForTimeout(3300);
+	const after = await geometry(window);
+	expect(after.dist, `unstarted history must not reposition: ${JSON.stringify(after)}`).toBeLessThan(90);
+	// Markdown/窗口布局完成后内容高度仍可变化；应保持贴底，而不是锁死绝对 scrollTop。
+	expect(Math.abs(after.dist - before.dist)).toBeLessThan(5);
+});
+
+test("starting an Agent for existing history does not reposition without a new turn", async ({ app, window }) => {
+	await openSeedHistory(app, window);
+	// 旧的「补齐法」会在 runtime 上线时 arm 流水线，把历史轮次拉到 30%；
+	// 收口后只有真实的本轮结束才能触发，所以激活实例必须完全不动视口。
+	await window.evaluate(async (projectId) => {
+		const records = await window.piDesktop.sessions.listCatalog(projectId, { scan: false });
+		const record = records.find((item) => item.title === "已结束的最新轮会话");
+		if (!record) throw new Error("seed session not found");
+		const activated = await window.piDesktop.sessions.activateRuntime(record.id);
+		if (!activated.ok) throw new Error(JSON.stringify(activated));
+		// 让 activation 事件先到 renderer，再跨过完整的 1.5s + 320ms + 动画窗口。
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		const stopped = await window.piDesktop.sessions.stopRuntime(activated.value);
+		if (!stopped.ok) throw new Error(JSON.stringify(stopped));
+	}, settleSeedProject.id);
+	await window.waitForTimeout(3300);
+	const after = await geometry(window);
+	expect(after.dist, `activated history must stay at the bottom: ${JSON.stringify(after)}`).toBeLessThan(90);
 });

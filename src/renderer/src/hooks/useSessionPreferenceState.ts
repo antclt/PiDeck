@@ -1,4 +1,4 @@
-import { useAtomValue, useSetAtom, useStore } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef, useState } from "react";
 import type { AvailableModel } from "../../../shared/types";
 import {
@@ -9,7 +9,6 @@ import {
 	piRuntimeThinkingLevelsBySessionIdAtomFamily,
 	resolvePiRuntimeThinkingLevelsAtom,
 	sessionRecordByIdAtomFamily,
-	sessionRuntimeByIdAtom,
 	sessionRuntimeBySessionIdAtomFamily,
 	upsertSessionAtom,
 } from "../atoms";
@@ -20,16 +19,9 @@ import { showNotice } from "../utils/notice";
 import { isLiveRuntimeStatus } from "../utils/sessionCommands";
 import { resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../utils/modelPendingDisplay";
 import { resolveComposerThinkingLevel } from "../utils/thinkingDisplay";
+import { modelThinkingLevelOfMap } from "../../../shared/modelThinkingLevels";
 import { modelKey } from "../utils/preferenceCycle";
-import { GUIDE_BOOTSTRAP_SESSION_ID, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeBackendPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
-
-/** runtime state 的增量补丁（模型 / 思考档位）：与 AgentRuntimeState 同名字段。 */
-export type RuntimeStatePatch = {
-	provider?: string;
-	modelId?: string;
-	modelName?: string;
-	thinkingLevel?: string;
-};
+import { GUIDE_BOOTSTRAP_SESSION_ID, WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
 
 /**
  * 会话「模型 + 思考强度」的读侧状态：模型目录、收藏、当前模型与可用档位。
@@ -49,9 +41,11 @@ export function useSessionPreferenceState(options: {
 	/** DSH 部署默认模型（草稿期高亮） */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
+	/** pi settings.modelThinkingLevels 快照（sessions.resolve-launch-defaults 回传）：
+	 *  引导页改选模型后按当前模型反查每模型默认档位，与创建时的解析同序。 */
+	modelThinkingLevels?: Record<string, string>;
 }) {
 	const { sessionId } = options;
-	const store = useStore();
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
 	const upsertSession = useSetAtom(upsertSessionAtom);
@@ -111,7 +105,10 @@ export function useSessionPreferenceState(options: {
 		projectId: record?.projectId,
 		enabled: catalogEnabled,
 	});
-	const welcomeModel = isDshSession ? undefined : readWelcomeModelPreference()?.model;
+	// 引导页点选按后端读各自的存储（issue #253）：DSH 的模型是 host route 名，
+	// 存在 WELCOME_DSH_MODEL_KEY；读错会拿到 pi 的 models.json 模型去高亮 DSH 目录。
+	const welcomeModel = isDshSession ? readWelcomeDshModelPreference()?.model : readWelcomeModelPreference()?.model;
+	const welcomeModelStorageKey = isDshSession ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY;
 	// welcome 偏好可能指向已删除的供应商/模型（models.json 已更新而 localStorage 残留）：
 	// 目录加载后校验存在性，失效则忽略该偏好，避免选择器/默认高亮落在幽灵模型上。
 	// 与 ComposerBottomBar 共用 isWelcomeModelLost 判定；目录未加载（models 为空）时不判定，
@@ -130,12 +127,12 @@ export function useSessionPreferenceState(options: {
 		// 失效偏好只清一次：下次引导页不再默认已删除的模型（创建时主进程也会兜底丢弃）。
 		if (clearWelcomePreference) {
 			try {
-				localStorage.removeItem(WELCOME_MODEL_KEY);
+				localStorage.removeItem(welcomeModelStorageKey);
 			} catch {
 				// localStorage 不可用时静默；展示层已忽略该偏好。
 			}
 		}
-	}, [clearWelcomePreference]);
+	}, [clearWelcomePreference, welcomeModelStorageKey]);
 	const effectiveWelcomeModel = welcomeModelLost ? undefined : welcomeModel;
 	// 引导页（无 record）模型高亮：与主进程创建解析同序（点选 > 显式默认 > 切换列表 > 上次使用）。
 	// 规则收拢到 resolveGuideDisplayModel，不再在本 hook 与 ComposerComponents 各写一份。
@@ -144,10 +141,9 @@ export function useSessionPreferenceState(options: {
 		welcomeModel: effectiveWelcomeModel,
 		defaultModel: options.defaultModel,
 	});
-	// 非 live 残留 state 不能盖住 catalog：Agent 未启动时改模型，选择器高亮必须跟记录走。
+	// 模型选择永远取会话记录或引导页偏好；runtime 仅服务执行与能力状态。
 	const runtimeLive = isLiveRuntimeStatus(runtime?.status);
 	const resolvedLiveModel = resolveComposerLiveModel({
-		state: runtime?.state,
 		record: record?.model,
 		fallback: {
 			// 无 record（引导页）：高亮取 guideDefaultModel（已按「点选 > 显式默认 > 切换列表 > 上次使用」
@@ -156,7 +152,6 @@ export function useSessionPreferenceState(options: {
 			modelId: guideDefaultModel?.modelId,
 			modelName: guideDefaultModel?.modelName,
 		},
-		isLive: runtimeLive,
 	});
 
 	const runtimeThinkingEntryRef = useRef(piRuntimeThinkingEntry);
@@ -231,31 +226,16 @@ export function useSessionPreferenceState(options: {
 		dshReasoningEfforts: currentModelEntry?.reasoningEfforts,
 	});
 	// 无 record 的引导页以用户刚点选的档位为最高优先级；只有尚未点选时，
-	// 才依次回退 settings.defaultThinkingLevel 与模型自身 defaultEffort。
+	// 才依次回退「当前模型的每模型默认」→ settings.defaultThinkingLevel → 模型自身 defaultEffort。
+	// 每模型默认必须按当前展示的模型查（用户可在引导页改选模型）：createDraft 也按
+	// 最终生效的模型查同一张表，次序一致才能保证「显示的就是创建时套用的」。
 	const welcomeThinking = !record ? readWelcomeThinkingPreference()?.thinkingLevel : undefined;
+	const perModelThinkingDefault = modelThinkingLevelOfMap(options.modelThinkingLevels, resolvedLiveModel.provider, resolvedLiveModel.modelId);
 	const currentThinkingLevel = resolveComposerThinkingLevel({
-		state: runtime?.state?.thinkingLevel,
 		record: record?.thinkingLevel,
-		// 无 record（引导页）：显式点选 > 配置默认 > 模型默认（与底栏同规则）。
-		fallback: welcomeThinking ?? options.defaultThinkingLevel ?? currentModelEntry?.defaultEffort,
-		isLive: runtimeLive,
+		// 无 record（引导页）：显式点选 > 每模型默认 > 配置默认 > 模型默认（与底栏同规则）。
+		fallback: welcomeThinking ?? perModelThinkingDefault ?? options.defaultThinkingLevel ?? currentModelEntry?.defaultEffort,
 	});
-
-	/**
-	 * 把后端刚返回的 runtime state 片段合并进本会话的 runtime atom：底栏的模型名/档位
-	 * 立即刷新，不必等 emitState 事件。
-	 */
-	function patchRuntimeState(patch: RuntimeStatePatch) {
-		const current = store.get(sessionRuntimeByIdAtom)[sessionId];
-		if (!current) return;
-		store.set(sessionRuntimeByIdAtom, {
-			...store.get(sessionRuntimeByIdAtom),
-			[sessionId]: {
-				...current,
-				state: current.state ? { ...current.state, ...patch } : patch,
-			},
-		});
-	}
 
 	function setModelPending(pending: ModelPending | undefined) {
 		setModelPendingMap((prev) => ({ ...prev, [sessionId]: pending }));
@@ -316,7 +296,6 @@ export function useSessionPreferenceState(options: {
 		modelPending,
 		setModelPending,
 		upsertSession,
-		patchRuntimeState,
 		toggleFavorite,
 		toggleHideModel,
 	};

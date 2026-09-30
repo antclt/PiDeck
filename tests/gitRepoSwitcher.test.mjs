@@ -89,8 +89,9 @@ test("git IPC and preload accept an optional repoPath without changing init/work
 	assert.match(preload, /branches: \(projectId: string, repoPath\?: string\)/);
 	assert.match(gitIpc, /resolveGitCwd/);
 	assert.match(gitIpc, /listGitRepos\(projectHostPath\(project\)\)/);
-	// git init 走 currentGitExecutable()（用户可在设置页指定路径），root 仍是项目宿主路径、不随 repoPath 变；
-	// windowsHide 是 Windows 启动闪窗修复加的（见 allocHiddenConsole），不改变 cwd 语义。
-	assert.match(gitIpc, /currentGitExecutable\(\), \["init"\], \{[\s\S]{0,60}?cwd: projectHostPath\(project\),[\s\S]{0,60}?\}\)/);
+	// git init 收口到 gitRun.execGit（按 cwd 分派宿主 git / WSL 发行版内 git，见 issue #295）；
+	// root 仍是项目宿主路径、不随 repoPath 变；windowsHide/wsl.exe 细节由执行层统一处理。
+	assert.match(gitIpc, /import \{ execGit \} from "\.\.\/git\/gitRun"/);
+	assert.match(gitIpc, /execGit\(\s*\["init"\],\s*\{\s*cwd:\s*projectHostPath\(project\)\s*\}\s*\)/);
 	assert.match(gitIpc, /worktreeService\.list\(projectHostPath\(project\)\)/);
 });

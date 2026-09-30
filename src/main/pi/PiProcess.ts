@@ -11,7 +11,7 @@ import type { AppSettings } from "../../shared/types";
 import type { SessionProxyMode } from "../../shared/types/session";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { appendBuiltInExtensionArgs } from "../extensions/builtInExtensions";
-import { MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST, MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST } from "../extensions/extensionVersionGate";
+import { MIN_PI_MINOR_VERSION_FOR_BUILTIN_EXTENSION_SPECIFIER, MIN_PI_MINOR_VERSION_FOR_EXTENSION_WHITELIST, MIN_PI_MINOR_VERSION_FOR_PROMPT_WHITELIST, MIN_PI_MINOR_VERSION_FOR_SKILL_WHITELIST } from "../extensions/extensionVersionGate";
 import { getAppLogger } from "../logging/sharedLogger";
 import { applyPiProxyMode } from "../sessions/sessionProxyPolicy";
 import { killProcessTree } from "../git/gitProcess";
@@ -73,6 +73,13 @@ type PiProcessOptions = {
 	 */
 	proxyOverride?: SessionProxyMode;
 	/**
+	 * GUI 扩展桥的环境变量（`PIDECK_BRIDGE_URL` / `PIDECK_BRIDGE_TOKEN` / `PIDECK_BRIDGE_PI_PATH`）。
+	 *
+	 * 由 AgentManager 在 spawn 前从 BridgeServer 取（每 agent 一份 token）。
+	 * 缺省表示端点不可用 —— 桥会静默不工作，pi 行为不变（§14.5）。
+	 */
+	bridgeEnv?: Record<string, string>;
+	/**
 	 * spawn pi 前对会话文件的预检/修复回调（如剔除旧版 PiDeck 私有 sessionName 头行，
 	 * 该行会让 pi 报 "Session file is not a valid pi session" 并 exit 1）。
 	 * 返回是否发生修复；抛错或未注入都不阻塞启动（pi 自身的加载错误更接近事实，留日志即可）。
@@ -132,6 +139,36 @@ function estimateWhitelistInjectionChars(kind: WhitelistKind, paths: readonly st
 		total += flags.per.length + 1 + trimmed.length + (trimmed.includes(" ") ? 2 : 0);
 	}
 	return total;
+}
+
+/**
+ * 把 pi 0.99 的内置扩展（built-in extensions）显式带回命令行。
+ *
+ * 背景（pi 0.99.0 CHANGELOG）：`--no-extensions` 的语义从「关掉文件型扩展的自动发现」
+ * 扩大为「关掉所有扩展，其中包含随 pi 分发、默认启用的 4 个内置扩展」——
+ * `llama.cpp`、`codemode`、`tool-search`、`mcp`（dist/extensions/index.js 的
+ * builtInExtensions）。PiDeck 的扩展白名单与 piRpcNoExtensions 诊断开关都会传
+ * `--no-extensions`，若不显式带回来，用户 MCP 面板里配好的服务器（CUA 注册项也在
+ * 其中，见 CuaMcpRegistration）与 llama.cpp provider 会被静默禁用，现象是
+ * 「升级 pi 后 MCP 工具消失、llama.cpp 模型不可选」。
+ *
+ * 版本门槛：`-e builtin:<name>` specifier 自 pi 0.99 才被识别
+ * （dist/core/package-manager.js 的 resolveExtensionSources 过滤
+ * `source.startsWith("builtin:")`），更低版本的 `-e` 只接受 path / npm / git 源，
+ * 传 `builtin:mcp` 会当成未知源——轻则忽略、重则启动失败，故 <0.99 一律不注入。
+ * 版本未知（探测失败，minorVersion 为 null）同样不注入：未知时保守退回
+ * 「不注入」最坏只是 MCP 不加载，而误注入可能直接让会话起不来。
+ *
+ * 只带 mcp 与 llama.cpp：codemode / tool-search 是 0.99 全新能力、用户尚无依赖，
+ * 未配置 exposure 时它们只是「工具未激活」，不影响既有行为。两者都是 replaceable——
+ * 用户若另装了注册 /mcp 的第三方扩展，会优先取代内置 mcp，注入不会与之冲突。
+ */
+function appendBuiltInExtensionSpecifierArgs(args: string[], minorVersion: number | null | undefined): void {
+	if (minorVersion === null || minorVersion === undefined) return;
+	if (minorVersion < MIN_PI_MINOR_VERSION_FOR_BUILTIN_EXTENSION_SPECIFIER) return;
+	// 值不是文件路径：WSL 下 finalPiArgs.map 的路径转换只认盘符 / UNC 前缀，
+	// `builtin:mcp` 两个条件都不匹配，会原样进 distro；不要给它加转换分支。
+	args.push("--extension", "builtin:mcp", "--extension", "builtin:llama.cpp");
 }
 
 /**
@@ -322,6 +359,10 @@ export class PiProcess extends EventEmitter {
 
 		// 诊断开关：坏扩展/技能有时会拖垮 RPC 初始化；用户可在开发设置临时关闭后重试。
 		// piRpcNoExtensions（总开关）优先：关闭后连白名单注入也不做，保证诊断路径干净。
+		// pi 0.99 起这个开关会连带关掉内置扩展（mcp / llama.cpp / codemode / tool-search），
+		// 这恰好就是诊断语义——用户要的是「pi 一个扩展都不加载」；不要在此处用
+		// `-e builtin:mcp` 把内置扩展带回来（那会让诊断不再干净），
+		// 需要 MCP 能力时请关掉该开关（见 appendBuiltInExtensionSpecifierArgs）。
 		if (this.settings?.piRpcNoExtensions) args.push("--no-extensions");
 		if (this.settings?.piRpcNoSkills) args.push("--no-skills");
 
@@ -478,6 +519,11 @@ export class PiProcess extends EventEmitter {
 						if (!trimmed) continue;
 						finalPiArgs.push("--extension", trimmed);
 					}
+					// pi 0.99 起 --no-extensions 会连带关掉内置扩展（mcp / llama.cpp / codemode / tool-search），
+					// 不显式带回来会让用户 MCP 面板里配好的服务器（含 CUA 注册项）与 llama.cpp provider
+					// 被静默禁用——现象是「升级 pi 后 MCP 工具消失」。--extension 走私有 specifier 分支，
+					// 不参与白名单预算（两条共 ~40 字符，可忽略）。
+					appendBuiltInExtensionSpecifierArgs(finalPiArgs, minorForGate);
 					void getAppLogger()?.info("pi-process", "Extension whitelist mode enabled", {
 						extensions: whitelistPaths.length,
 						cwd: this.cwd,
@@ -581,6 +627,8 @@ export class PiProcess extends EventEmitter {
 				diagnosticCwd = wslCwd;
 
 				// WSL 下 session 路径与 -e 扩展路径都需转成 Linux 路径，否则 pi 在 distro 内打不开 Windows 路径。
+				// `builtin:<name>` 值（appendBuiltInExtensionSpecifierArgs 注入的内置扩展）不是路径，
+				// 两个前提条件都不匹配，会原样进 distro，不要为它新增转换分支。
 				finalPiArgs = finalPiArgs.map((arg, index) => {
 					const prev = finalPiArgs[index - 1];
 					if (prev === "--session" || prev === "--extension" || prev === "-e" || prev === "--skill" || prev === "--prompt-template") {
@@ -662,6 +710,21 @@ export class PiProcess extends EventEmitter {
 			// 飞书绑定会话：ask_question 换成禁用提示版（扩展读取此标记，纯标志位无需路径转换）
 			if (this.options.feishuLinked) {
 				env.PIDECK_FEISHU_LINKED = "1";
+			}
+			// GUI 扩展桥：注入本机端点 URL + 每次 spawn 独享的 token，
+			// 以及 pi 自身的安装路径（桥据此定位与 pi 同实例的 pi-tui，见 pi-deck-gui-bridge-tui.ts）。
+			// 端点不可用时 bridgeEnv 为空 → 不注入 → 桥静默不工作，pi 行为不变。
+			if (this.options.bridgeEnv) {
+				for (const [key, value] of Object.entries(this.options.bridgeEnv)) {
+					if (value) env[key] = value;
+				}
+				// pi 安装路径：桥的 pi-tui 加载器用它做**最可靠**的解析锚点
+				// （没有它也能靠 process.argv 兜底，但显式注入更确定）。
+				// WSL 下 command 是 `wsl://...` 而非 Windows 路径，桥在 distro 内用不到
+				// 宿主路径，故跳过 —— 由 argv 兜底。
+				if (!command.startsWith("wsl://")) {
+					env.PIDECK_BRIDGE_PI_PATH = command;
+				}
 			}
 			// 会话自动标题由 PiDeck 内置扩展在 agent_settled 后独立调用模型；
 			// 显式注入 0/1，避免继承宿主环境中的同名变量。设置变更对新建/重启 Agent 生效。

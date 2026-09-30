@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { open as openFile, readFile, realpath, readdir, rename, stat, unlink, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
+import { getAppLogger } from "../logging/sharedLogger";
 
 export type SessionFileEnvironment = "native" | "wsl";
 
@@ -500,6 +501,7 @@ export class SessionFileEditor {
 				throw new SessionFileEditorError("SESSION_RELOAD_FAILED", "Session reload failed; the original file and runtime were restored", { cause: reloadFailure.error, backupPath });
 			}
 
+			getAppLogger()?.info("session-file", "Session messages appended", { file: input.file.hostPath, count: changedEntryIds.length, backupPath });
 			return {
 				targetEntryId: firstEntryId,
 				changedEntryIds,
@@ -610,12 +612,22 @@ export class SessionFileEditor {
 				throw new SessionFileEditorError("SESSION_RELOAD_FAILED", "Session reload failed; the original file and runtime were restored", { cause: reloadFailure.error, backupPath });
 			}
 
+			this.logMutation(kind, input.file.hostPath, changedEntryIds, backupPath);
 			return {
 				targetEntryId: located.entryId,
 				changedEntryIds,
 				backupPath,
 			};
 		});
+	}
+
+	/**
+	 * 会话文件被就地改写属于不可逆用户操作（编辑/删除/重发截断），必须留痕：
+	 * 记录改写类型、文件与备份路径，便于事后从日志定位并手工恢复备份。
+	 * 用 getAppLogger() 而非构造注入的 logger（其接口只有 warn，且测试常不注入）。
+	 */
+	private logMutation(kind: MutationKind, hostPath: string, changedEntryIds: string[], backupPath: string) {
+		getAppLogger()?.info("session-file", `Session message ${kind}`, { file: hostPath, changedEntryIds, backupPath });
 	}
 
 	private applyMutation(document: JsonlDocument, located: LocatedEntry, kind: MutationKind, newText?: string): string[] {

@@ -1,14 +1,15 @@
-// 契约测试：实时 RPC 日志查看弹窗（RpcLogViewer）+ 主进程实时广播链路。
+// 契约测试：实时 RPC 日志面板（RpcLogPanel，右侧抽屉 rpcLog 临时面板）+ 主进程实时广播链路。
 // 覆盖：
 // 1) 渲染层性能红线：内存封顶 + 无筛选窗口化渲染 + 行 memo + 订阅退订 + 滚动高度链；
 // 2) 主进程批量节流广播（~80ms 聚合）与退出清理；
 // 3) 环形缓冲扩容（初始历史）与 data 截断、保存合并去重；
-// 4) IPC 边界：get-live / save（输入校验与条数上限，保存直写自动文件）/ preload 订阅。
+// 4) IPC 边界：get-live / save（输入校验与条数上限，保存直写自动文件）/ preload 订阅；
+// 5) 抽屉承载语义：不参与项目持久化、关闭还原打开前的面板。
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const viewer = readFileSync("src/renderer/src/components/sidebar/RpcLogViewer.tsx", "utf8");
+const viewer = readFileSync("src/renderer/src/components/workspace/RpcLogPanel.tsx", "utf8");
 const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 const rpcLogger = readFileSync("src/main/logging/RpcLogger.ts", "utf8");
 const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
@@ -86,13 +87,36 @@ test("agent context menu exposes a live log entry point next to the toggle", () 
 	// 未启动（无 live runtime）的 agent：开启记录菜单项置灰并带原因 title
 	assert.match(menu, /rpcToggleDisabled\?: boolean;/);
 	assert.match(menu, /title=\{props\.rpcToggleDisabled \? t\("menu\.rpcLoggingRequiresRuntime"\) : undefined\}/);
-	// 右键菜单已移除“打开日志文件夹”（日志自动落盘，弹窗内即可查看/保存）
+	// 右键菜单已移除“打开日志文件夹”（日志自动落盘，面板内即可查看/保存）
 	assert.doesNotMatch(menu, /rpcLogFile/);
 	assert.doesNotMatch(menu, /openLogFile/);
 	// 旧静态弹窗已从 SidebarParts 移除，不再导出
 	assert.doesNotMatch(sidebarParts, /RpcLogModal/);
-	assert.match(sidebarContent, /<RpcLogViewer/);
+	// 日志面板挂在右侧抽屉：侧栏不再挂查看器组件，菜单只发打开命令
+	assert.doesNotMatch(sidebarContent, /RpcLogViewer/);
 	assert.match(sidebarContent, /controller\.openRpcLogs\(menuAgent\.id\)/);
+});
+
+test("rpc log panel lives in the workspace drawer as a transient panel with restore-on-close", () => {
+	const panels = readFileSync("src/renderer/src/hooks/useWorkspacePanels.ts", "utf8");
+	const surface = readFileSync("src/renderer/src/components/workspace/DrawerSurface.tsx", "utf8");
+	const controller = readFileSync("src/renderer/src/hooks/useSidebarController.ts", "utf8");
+	// 面板类型包含 rpcLog；持久化白名单刻意不含它（绑定 agentId，跨重启必然失效）
+	assert.match(panels, /export type WorkspaceDrawerPanel =[\s\S]{0,120}"rpcLog";/);
+	assert.match(panels, /const validPanel = panel === null \|\| \[[^\]]{0,120}\]\.includes\(String\(panel\)\);/);
+	assert.doesNotMatch(panels, /const validPanel = [^\n]*rpcLog/);
+	// 打开：记住打开前的面板且不写项目存档
+	assert.match(panels, /if \(drawerRef\.current !== "rpcLog"\)\s*rpcLogPreviousPanelRef\.current = drawerRef\.current;/);
+	// 关闭：还原打开前的面板；closeDrawer 也必须路由到还原（否则会把 null 落到用户的常驻面板选择上）
+	assert.match(panels, /const closeRpcLogPanel = useCallback\(\(\) => \{[\s\S]{0,200}setDrawer\(previous \?\? null\);/);
+	assert.match(panels, /if \(drawerRef\.current === "rpcLog"\) \{\s*closeRpcLogPanel\(\);\s*return;\s*\}/);
+	// DrawerSurface 有 rpcLog 分支，且不被 files/sessions 的兜底分支吞掉
+	assert.match(surface, /drawer === "rpcLog" && !drawerCollapsed/);
+	assert.match(surface, /<RpcLogPanel agentId=\{rpcLog\.agentId\}/);
+	assert.match(surface, /drawer !== "rpcLog"/);
+	// 侧栏只发打开命令（宿主 App 把它变成抽屉面板），不再自持开关状态
+	assert.match(controller, /openRpcLogViewerRef\.current\?\.\(agentId\);/);
+	assert.doesNotMatch(controller, /closeRpcLogs/);
 });
 
 test("sidebar gates rpc logging toggle on a live runtime", () => {
@@ -104,6 +128,20 @@ test("sidebar gates rpc logging toggle on a live runtime", () => {
 	assert.match(sidebarContent, /menu\.rpcLoggingRequiresRuntime/);
 	// 兜底分支：置灰点击不触发 onSelect，这里防御状态在菜单打开期间变化
 	assert.match(sidebarContent, /if \(!menuAgentCanRpcLog\) \{\n\s+showNotice\(t\("menu\.rpcLoggingRequiresRuntime"\), 2500\);/);
+});
+
+test("panel loads are keyed on agentId only and survive a dead agent", () => {
+	// 载入器 props 每次 App 渲染都换新引用（App 的 sidebarActions 未 memo）：一旦进 effect 依赖，
+	// 流式期间每个渲染都会退订重订 + 重发 getLive/getLogging IPC。改回 props 直接依赖即回归。
+	assert.match(viewer, /const loadersRef = useRef\(\{ loadHistory: props\.loadHistory, getLogging: props\.getLogging \}\);/);
+	assert.match(viewer, /loadersRef\.current = \{ loadHistory: props\.loadHistory, getLogging: props\.getLogging \};/);
+	assert.match(viewer, /\},\s*\[agentId\]\);/);
+	assert.doesNotMatch(viewer, /\}, \[agentId, props\.loadHistory, props\.getLogging\]\);/);
+	// 关闭 Agent 后面板仍留在抽屉里：主进程拒绝 getLive/getLogging，面板按“暂无历史”处理，
+	// 不得把 SessionCommandIpcError 冒成未处理异常 toast（2026-09 UI 冒烟实测）
+	assert.match(viewer, /\.catch\(\(\) => undefined\)/);
+	assert.match(viewer, /catch \{\s*showNotice\(t\("rpc\.loggingEnableFailed"\), 2500\);\s*\}/);
+	assert.match(viewer, /catch \{\s*showNotice\(t\("rpc\.loggingDisableFailed"\), 2500\);\s*\}/);
 });
 
 test("AgentManager batches live log broadcast and cleans up on exit", () => {
@@ -169,4 +207,74 @@ test("preload exposes getLive/save/onLog with unsubscribe", () => {
 	// 保存接口只传条目（agentId 在条目内），返回写入的文件路径列表
 	assert.match(preload, /save: \(options: \{ entries: RpcLogEntry\[\] \}\) =>/);
 	assert.match(preload, /as Promise<string\[\]>/);
+});
+
+// ── 模型请求快照（pi-deck-model-trace → 桥 /model-trace → RPC 日志「模型」视图）──
+// 覆盖：面板的模型筛选与展开回读、主进程同开关闸门与落盘、IPC 边界（含保存路径放行 model 方向）。
+const modelTrace = readFileSync("src/main/logging/ModelTrace.ts", "utf8");
+const bridgeTypes = readFileSync("src/shared/types/bridge.ts", "utf8");
+
+test("viewer exposes a model filter and lazily loads full request bodies", () => {
+	// 第四个筛选项：模型行与 stdio 两个方向分开看
+	assert.match(viewer, /"all" \| "send" \| "recv" \| "model"/);
+	assert.match(viewer, /rpc\.filterModel/);
+	// 行配色与箭头对模型行单独一套（→/← 已被 stdio 两个方向占用）
+	assert.match(viewer, /log-model/);
+	assert.match(viewer, /trace\?\.kind === "response" \? "↓" : "↑"/);
+	// 完整请求体不在条目里：展开时才按 traceId 回读，同一行只拉一次
+	assert.match(viewer, /window\.piDesktop\.rpcLogs\s*\.getModelTrace\(\{ agentId: log\.agentId, traceId: trace\.traceId \}\)/);
+	assert.match(viewer, /traceRequestedRef\.current\.has\(log\.id\)/);
+	// 读不到（尚未落盘/已清理）与加载中各有提示，不留空白
+	assert.match(viewer, /rpc\.modelLoading/);
+	assert.match(viewer, /rpc\.modelTraceMissing/);
+	// 失败允许重试，且不把拒绝冒成未处理异常
+	assert.match(viewer, /traceRequestedRef\.current\.delete\(log\.id\)/);
+});
+
+test("AgentManager gates model traces behind the same rpc-logging toggle", () => {
+	// 与 stdio 日志同一闸门：未开启记录的 agent 直接丢弃（不落盘、不广播）
+	assert.match(agentManager, /private handleModelTrace\(agentId: string, trace: ModelTraceInput\): void \{[\s\S]{0,200}if \(!this\.rpcLoggingAgents\.has\(agentId\)\) return;/);
+	// 完整请求体落盘（request 才有）+ 紧凑条目走常规链路（落盘/实时广播）
+	assert.match(agentManager, /if \(trace\.kind === "request"\) \{[\s\S]{0,200}this\.rpcLogger\?\.writeModelTrace\(agentId, trace\)/);
+	assert.match(agentManager, /buildModelTraceLogEntry\(agentId, trace\)/);
+	assert.match(agentManager, /this\.rpcLogger\?\.push\(entry\);\s*this\.enqueueLiveRpcLog\(entry\);/);
+	// 桥注册第三参把快照路由到 handler（token 与 UI 桥同生共死）
+	assert.match(agentManager, /\(trace\) => this\.handleModelTrace\(agentId, trace\)/);
+});
+
+test("RpcLogger keeps full request bodies outside the ring buffer", () => {
+	// 与 UI 桥同一 userData 根：logs/model-traces
+	assert.match(rpcLogger, /new ModelTraceStore\(join\(app\.getPath\("userData"\), "logs", "model-traces"\)\)/);
+	assert.match(rpcLogger, /async writeModelTrace\(agentId: string, request: ModelTraceRequestInput\): Promise<string>/);
+	assert.match(rpcLogger, /async readModelTrace\(agentId: string, traceId: string\): Promise<ModelTraceRecord \| null>/);
+	// 存储管理（设置页）与清空必须把快照一起算上，否则「清空日志」后磁盘仍占用
+	assert.match(rpcLogger, /this\.modelTraces\.getSize\(agentId\)/);
+	assert.match(rpcLogger, /this\.modelTraces\.clear\(agentId\)/);
+});
+
+test("ModelTraceStore keeps retention and per-file layout for full payloads", () => {
+	// 每条请求体一个文件（tmp + rename 原子落盘），且 30 天保留 + 总量预算
+	assert.match(modelTrace, /model-\$\{sanitizeId\(agentId\)\}-\$\{traceId\}\.json/);
+	assert.match(modelTrace, /RETENTION_DAYS = 30/);
+	assert.match(modelTrace, /MAX_TOTAL_BYTES = 256 \* 1024 \* 1024/);
+	// traceId 进文件名：读写两侧都按白名单正则校验（防路径穿越）
+	assert.match(modelTrace, /const TRACE_ID_PATTERN = \/\^\[A-Za-z0-9_-\]\{1,64\}\$\//);
+	// 时间线条目：direction "model"，请求体只留 traceId 引用
+	assert.match(modelTrace, /direction: "model"/);
+	assert.match(modelTrace, /export function buildModelTraceLogEntry/);
+	// 宿主侧唯一来源仍是 shared/types/bridge.ts
+	assert.match(bridgeTypes, /export type ModelTraceRequestInput/);
+	assert.match(bridgeTypes, /export type ModelTraceResponseInput/);
+});
+
+test("model trace IPC: on-demand read + save path accepts the model direction", () => {
+	assert.match(ipc, /rpcLogsGetModelTrace: "rpc-logs:get-model-trace"/);
+	assert.match(systemIpc, /ipcChannels\.rpcLogsGetModelTrace/);
+	assert.match(systemIpc, /rpcLogger\.readModelTrace\(agentId, traceId\)/);
+	// 渲染层来的参数不可信：类型校验通过才回读
+	assert.match(systemIpc, /typeof options\?\.agentId === "string"/);
+	// 保存路径必须放行 direction: "model"，否则模型行「面板看得见、落盘后没有」
+	assert.match(systemIpc, /entry\.direction === "recv" \|\| entry\.direction === "model"/);
+	assert.match(preload, /getModelTrace: \(options: \{ agentId: string; traceId: string \}\)/);
+	assert.match(preload, /ipcChannels\.rpcLogsGetModelTrace/);
 });

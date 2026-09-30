@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
+import { resolveUpdateChannel } from "../update/channelIdentity";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
 import { probeAllMirrors, type MirrorHealthResult } from "../update/mirrorHealth";
 import { ChangelogService, type ChangelogLanguage } from "../update/ChangelogService";
@@ -20,6 +21,7 @@ import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { installPiRuntimeNode, piRuntimeNodeExePath, probeNodeVersion, detectPiRuntimeNode } from "../pi/runtimeNodeInstall";
+import { runPiGlobalInstall } from "../pi/piGlobalInstall";
 import type { NpmAvailabilityResult, PiInstallExecResult, PiInstallStatus, PiRuntimeNodeInstallResult, PiRuntimeNodeStatus, WebServiceStatusInfo } from "../../shared/types";
 import type { AppInfo, AppLogLevel, AppLogQuery, AppSettings, AvailableModel, ChangelogPayload, CreatePiSkillInput, ModelListReport, ModelsVerifyResult, SessionCommandResult, SessionRuntimeTarget } from "../../shared/types";
 import type { PiLocator } from "../pi/PiLocator";
@@ -68,11 +70,13 @@ import type { LogBundleExporter } from "../health/LogBundleExporter";
 
 /**
  * IPC 边界校验：RPC 日志条目必须字段齐全，防止渲染层传伪造对象写盘。
+ * direction 允许 model —— 模型请求快照（pi-deck-model-trace 转发）在时间线里就是该方向，
+ * 漏掉会把保存路径上的模型行全部丢弃（面板看着有、落盘后没有）。
  */
 function isRpcLogEntry(value: unknown): value is RpcLogEntry {
 	if (typeof value !== "object" || value === null) return false;
 	const entry = value as Record<string, unknown>;
-	return typeof entry.id === "string" && typeof entry.agentId === "string" && (entry.direction === "send" || entry.direction === "recv") && typeof entry.summary === "string" && typeof entry.time === "number";
+	return typeof entry.id === "string" && typeof entry.agentId === "string" && (entry.direction === "send" || entry.direction === "recv" || entry.direction === "model") && typeof entry.summary === "string" && typeof entry.time === "number";
 }
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
@@ -83,14 +87,22 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 	return isUnknownRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
 }
 
+const MCP_EXPOSURE_VALUES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"];
+
 function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
 	if (!isUnknownRecord(value)) return false;
 	const optionalString = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "string";
 	const optionalNumber = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "number";
+	const optionalExposure = (key: string) => !(key in value) || value[key] === undefined || (typeof value[key] === "string" && MCP_EXPOSURE_VALUES.includes(value[key]));
 	return (
 		["command", "cwd", "url", "socket", "bearerToken", "bearerTokenEnv"].every(optionalString) &&
 		optionalNumber("idleTimeout") &&
 		optionalNumber("requestTimeoutMs") &&
+		// pi 0.99 内置 MCP 字段：exposure / toolExposure / enabled / timeout
+		optionalExposure("exposure") &&
+		(!("toolExposure" in value) || value.toolExposure === undefined || (isUnknownRecord(value.toolExposure) && Object.values(value.toolExposure).every((entry) => typeof entry === "string" && MCP_EXPOSURE_VALUES.includes(entry)))) &&
+		(!("enabled" in value) || value.enabled === undefined || typeof value.enabled === "boolean") &&
+		(!("timeout" in value) || value.timeout === undefined || (typeof value.timeout === "number" && Number.isFinite(value.timeout) && value.timeout > 0)) &&
 		(!("args" in value) || value.args === undefined || (Array.isArray(value.args) && value.args.every((entry) => typeof entry === "string"))) &&
 		(!("env" in value) || value.env === undefined || isStringRecord(value.env)) &&
 		(!("headers" in value) || value.headers === undefined || isStringRecord(value.headers)) &&
@@ -168,6 +180,8 @@ export type SystemIpcDeps = {
 	resolveWslEnvironment?: (distro: string, user: string, logger: { warn: (msg: string, detail: unknown) => void }) => Promise<import("../wsl/WslPaths").WslEnvironment>;
 	/** React to settings changes for pet system */
 	reactToPetSettings?: (prev: AppSettings, next: AppSettings) => Promise<void>;
+	/** React to CUA enable/disable changes (start/stop the in-process MCP host). */
+	reactToCuaSettings?: (prev: AppSettings, next: AppSettings) => Promise<void>;
 	/** Session scanner WSL config */
 	configureSessionScannerWsl?: (env: import("../wsl/WslPaths").WslEnvironment) => Promise<void>;
 	clearSessionScannerWsl?: () => void;
@@ -332,6 +346,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		openExternalUrl: doOpenExternalUrl,
 		resolveWslEnvironment,
 		reactToPetSettings,
+		reactToCuaSettings,
 		configureSessionScannerWsl,
 		clearSessionScannerWsl,
 		setFeishuLocale,
@@ -861,44 +876,43 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				// 国内镜像：只追加 --registry 参数，不改全局配置，用户终端环境零污染。
 				npmArgs.push("--registry=https://registry.npmmirror.com");
 			}
-			// --prefix：pi 装进 <userData>/pi-runtime/pi-global，不写系统 npm 全局目录，
+			// 安装前缀：pi 装进 <userData>/pi-runtime/pi-global，不写系统 npm 全局目录，
 			// 无需提权（mac/Linux 免 sudo）；PiLocator 搜索目录已包含该路径，装完即可检测到。
-			const prefixArg = `--prefix=${join(userData, "pi-runtime", "pi-global")}`;
+			const prefixDir = join(userData, "pi-runtime", "pi-global");
 			void appLogger.info("pi", "Runtime pi install started", {
 				npm: npmCommand,
+				usePortable,
 				useMirror: mirrorArg,
-				prefix: prefixArg,
+				prefix: prefixDir,
 			});
-			// 数组形式传参（安全约束）：不经 shell 拼接，用户输入无法注入命令。
-			const result = await new Promise<PiInstallExecResult>((resolve) => {
-				execFile(
-					npmCommand,
-					[...npmArgs, prefixArg],
-					{
-						// PATH 前置搜索目录：便携 bin + PiLocator 扫描目录，保证便携 npm
-						// 能解析到同目录 node；便携 npm 跑脚本时也要能找到 node。
-						env: piLocator.createProcessEnv(),
-						cwd: app.getPath("home"),
-						timeout: 300_000,
-						encoding: "utf8",
-						windowsHide: true,
-					},
-					(error: unknown, stdout: string, stderr: string) => {
-						const execError = error as { code?: number | string } | null;
-						resolve({
-							success: !error,
-							exitCode: typeof execError?.code === "number" ? execError.code : execError ? -1 : 0,
-							stdout: stdout || "",
-							stderr: stderr || "",
-						});
-					},
-				);
+			// 启动规格交给 PiLocator 解析：Windows 的 npm 是 .cmd 垫片，execFile 直启必 ENOENT
+			// （详见 runPiGlobalInstall 注释），只有经它解析（node 直启 / cmd.exe）才真正跑得起来。
+			const outcome = await runPiGlobalInstall({
+				npmCommand,
+				npmArgs,
+				prefixDir,
+				launcher: {
+					createInvocation: (command, args) => piLocator.createInvocation(command, args),
+					// 参数顺序陷阱：createProcessEnv 首个参数是代理设置，pathPrefix 在第二位。
+					createProcessEnv: (pathPrefix) => piLocator.createProcessEnv(undefined, pathPrefix),
+				},
+				cwd: app.getPath("home"),
+				// 包一层而不是直接把 execFile 传进去：Node 的 execFile 是重载签名，
+				// 显式适配后模块契约只需覆盖「数组传参 + utf8 回调」这一种形态。
+				execFileImpl: (command, args, options, callback) => execFile(command, args, options, callback),
 			});
+			const { launchCommand, launchChannel, launchFallbackReason, ...result } = outcome;
 			void appLogger.info("pi", "Runtime pi install completed", {
 				success: result.success,
 				exitCode: result.exitCode,
 				stdoutLength: result.stdout.length,
 				stderrLength: result.stderr.length,
+				launch: launchCommand,
+				launchChannel,
+				launchFallbackReason,
+				// 仅 spawn 层失败时带片段：这时 npm 一行没执行，stderr 只会是 Node 自己的报错，
+				// 没有 npm 输出也没有 registry 凭据面；缺了它日志里只剩 stdout/stderr=0 无从诊断。
+				stderrPreview: result.exitCode === -1 ? result.stderr.slice(0, 200) : undefined,
 			});
 			return result;
 		} catch (error) {
@@ -985,6 +999,12 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.appCheckUpdate, async () => {
 		await updateService?.checkNow();
 	});
+	// 当前更新通道（编译期判定）：version 与 getAppInfo 同源（都是 app.getVersion()），
+	// 不复用 appInfoPromise —— 那份缓存含 pi --version spawn，只为取版本不值得连带。
+	ipcMain.handle(ipcChannels.appGetChannel, () => ({
+		channel: resolveUpdateChannel(),
+		currentVersion: app.getVersion(),
+	}));
 	ipcMain.handle(ipcChannels.appDownloadUpdate, async () => {
 		await updateService?.downloadNow();
 	});
@@ -1150,6 +1170,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.rpcLogsGet, async (_event, options?: { target?: SessionRuntimeTarget; days?: number; limit?: number }) => rpcLogger.getFromFile({ agentId: resolveRpcRuntimeAgent(options?.target), days: options?.days, limit: options?.limit }));
 	// 实时查看弹窗的初始历史：直接读主进程环形缓冲，不读磁盘
 	ipcMain.handle(ipcChannels.rpcLogsGetLive, async (_event, agentId?: string) => rpcLogger.getLive(typeof agentId === "string" ? agentId : undefined));
+	// 模型请求快照：时间线里只存摘要，完整请求体按需回读（展开模型行时才拉，避免大 payload 进环形缓冲）
+	ipcMain.handle(ipcChannels.rpcLogsGetModelTrace, async (_event, options?: { agentId?: unknown; traceId?: unknown }) => {
+		const agentId = typeof options?.agentId === "string" ? options.agentId : "";
+		const traceId = typeof options?.traceId === "string" ? options.traceId : "";
+		if (!agentId || !traceId) return null;
+		return rpcLogger.readModelTrace(agentId, traceId);
+	});
 	// 实时查看弹窗“保存到文件”：直接合并写入该 agent 的自动日志文件（按 id 去重），
 	// 不再弹目录选择——开启记录后日志本就自动落盘，保存只是把弹窗内容对齐到文件。
 	// 返回实际写入的文件路径列表，供渲染层 toast 提示用户保存位置。
@@ -1463,6 +1490,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 		if (typeof reactToPetSettings === "function") {
 			await reactToPetSettings(prevSettings, settings);
+		}
+		// CUA 开关：开启时启动进程内 MCP 端点并写入 pi 的 mcp.json，关闭时停端点并注销。
+		if ("cuaEnabled" in patch && typeof reactToCuaSettings === "function") {
+			await reactToCuaSettings(prevSettings, settings);
 		}
 		if ("desktopProxyEnabled" in patch || "desktopProxyUrl" in patch || "desktopProxyBypass" in patch) {
 			if (applyDesktopProxy) await applyDesktopProxy(settings);
@@ -1938,7 +1969,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { success: false, error: "Invalid provider name" };
 		}
 		const template = typeof input.template === "string" ? input.template.trim() : undefined;
-		if (template && template !== "general" && template !== "newapi" && template !== "cookie") {
+		// 白名单：声明式模板 id + 内置候选 templateId。火山方舟是声明式但不在候选表里
+		// （它没有内置默认 provider），必须显式放行，否则弹窗「测试」会被判成未知模板。
+		if (template && template !== "general" && template !== "newapi" && template !== "cookie" && template !== "volcengine") {
 			// 内置模板 id 也接受（识别命中后的「测试」按钮走这条路径）。
 			const knownBuiltin = USAGE_PROBE_CANDIDATES.some((c) => c.templateId === template);
 			if (!knownBuiltin) {
@@ -1958,6 +1991,9 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			...(typeof input.cookiePath === "string" ? { cookiePath: input.cookiePath } : {}),
 			...(typeof input.valuePath === "string" ? { valuePath: input.valuePath } : {}),
 			...(typeof input.currencyPath === "string" ? { currencyPath: input.currencyPath } : {}),
+			// 火山方舟 AK/SK：必填透传（缺任一项模板构建即报错，测试按钮才能给出人话提示）。
+			...(typeof input.accessKeyId === "string" ? { accessKeyId: input.accessKeyId } : {}),
+			...(typeof input.secretAccessKey === "string" ? { secretAccessKey: input.secretAccessKey } : {}),
 			...(typeof input.timeoutSecs === "number" ? { timeoutSecs: input.timeoutSecs } : {}),
 		});
 		void appLogger.info("config", "Usage probe tested", {

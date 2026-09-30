@@ -14,9 +14,9 @@
  * 全部受保护）。恢复前应先由调用方创建 before-restore 快照（redo 栈），本模块
  * 只保证「恢复本身不破坏工作区」。
  *
- * git 执行复用 src/main/git/gitProcess.ts 的 runGit（spawn + 进程树 kill + 超时
- * 兜底），比 pi-rewind 自带的字符串拼接 spawn 更安全：路径全部走数组参数，
- * 无 shell 注入面。
+ * git 执行复用 src/main/git/gitRun.ts 的 runGitCommand（spawn + 进程树 kill + 超时
+ * 兜底，并按 cwd 分派宿主 git / WSL 发行版内 git），比 pi-rewind 自带的字符串拼接
+ * spawn 更安全：路径全部走数组参数，无 shell 注入面。
  */
 
 import { mkdtemp, rm } from "node:fs/promises";
@@ -25,8 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { RewindCheckpointSummary } from "../../shared/types/rewind.ts";
-import { runGit } from "../git/gitProcess.ts";
-import { currentGitExecutable } from "../git/gitExecutable.ts";
+import { runGitCommand } from "../git/gitRun.ts";
 import { DEFAULT_MAX_CHECKPOINTS, MAX_UNTRACKED_DIR_FILES, MAX_UNTRACKED_FILE_SIZE, MAX_UNTRACKED_TOTAL_BYTES, REF_BASE, ZEROS } from "./checkpointConstants.ts";
 import { detectLargeDirs, isPathWithinAny, normalizeGitPath, shouldIgnoreForSnapshot } from "./checkpointFilter.ts";
 
@@ -66,9 +65,9 @@ export interface CheckpointData {
 	droppedPaths?: string[];
 }
 
-/** git 命令小封装：跑 runGit、只回 trim 后的 stdout（错误原样抛给调用方 catch）。 */
+/** git 命令小封装：跑 runGitCommand、只回 trim 后的 stdout（错误原样抛给调用方 catch）。 */
 async function gitOp(root: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> {
-	const { stdout } = await runGit(args, { cwd: root, env }, currentGitExecutable());
+	const { stdout } = await runGitCommand(args, { cwd: root, env });
 	return stdout.trim();
 }
 
@@ -348,17 +347,14 @@ export async function createCheckpoint(opts: CreateCheckpointOpts): Promise<Chec
 			GIT_COMMITTER_DATE: iso,
 		};
 
-		// commit-tree 的 message 走 stdin（runGit 的 input 通道；不给消息且不开 stdin
-		// 时 commit-tree 会挂起等输入，所以必须带 input）。
-		const { stdout: commitSha } = await runGit(
-			["commit-tree", worktreeTreeSha],
-			{
-				cwd: root,
-				env: { ...tmpEnv, ...commitEnv },
-				input: msg,
-			},
-			currentGitExecutable(),
-		);
+		// commit-tree 的 message 走 stdin（runGitCommand 的 input 通道；不给消息且不开 stdin
+		// 时 commit-tree 会挂起等输入，所以必须带 input）。WSL 分支的 GIT_INDEX_FILE
+		// 会被转成 /mnt/c/... 形态由 Linux git 使用。
+		const { stdout: commitSha } = await runGitCommand(["commit-tree", worktreeTreeSha], {
+			cwd: root,
+			env: { ...tmpEnv, ...commitEnv },
+			input: msg,
+		});
 
 		await gitOp(root, ["update-ref", `${REF_BASE}/${id}`, commitSha.trim()]);
 
@@ -555,7 +551,7 @@ export async function loadAllCheckpoints(root: string, sessionId?: string): Prom
 		// 吞成 []；而 sessionId 过滤是在全量读取之后做的，任何会话都读不到自己的
 		// 检查点，表现为「检查点列表永远暂无」。stdin 无这个限制，仍保持单次进程调用
 		// 与批量解析的效率。
-		const { stdout: catOut } = await runGit(["cat-file", "--batch"], { cwd: root, input: `${pairs.map((p) => p.sha).join("\n")}\n` }, currentGitExecutable());
+		const { stdout: catOut } = await runGitCommand(["cat-file", "--batch"], { cwd: root, input: `${pairs.map((p) => p.sha).join("\n")}\n` });
 		const bySha = new Map<string, Omit<CheckpointData, "id">>();
 		// cat-file --batch 输出记录流：`<sha> commit <size>\n<contents>\n`。
 		// contents 是 commit 对象全文（tree/author/committer 头 + 空行 + message），
@@ -608,7 +604,7 @@ export async function deleteCheckpoints(root: string, ids: string[]): Promise<vo
 		const batch = ids.slice(i, i + BATCH);
 		const input = batch.map((id) => `delete ${REF_BASE}/${id}`).join("\n") + "\n";
 		try {
-			await runGit(["update-ref", "--stdin"], { cwd: root, input }, currentGitExecutable());
+			await runGitCommand(["update-ref", "--stdin"], { cwd: root, input });
 		} catch {
 			for (const id of batch) {
 				await deleteCheckpoint(root, id);

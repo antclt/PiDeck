@@ -11,9 +11,8 @@ import { ContentTabs } from "./ContentTabs";
 import { Input } from "../components/ui-shadcn/input";
 import { Textarea } from "../components/ui-shadcn/textarea";
 import { CreateResourceCard, CreateResourceField } from "./ConfigShared";
-import type { ResourceScope } from "./ResourceScopeSelector";
 import { globalPromptOverrideKey } from "../../../shared/resourceIdentity";
-import { isProjectDiscoverySource } from "./resourceScopeModel";
+import { isProjectDiscoverySource, type ResourceScope } from "./resourceScopeModel";
 
 /**
  * Runtime-discovered package/settings prompts are owned by pi/package settings,

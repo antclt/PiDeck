@@ -18,6 +18,7 @@ import { normalizeDshDeepseekProvider } from "../../shared/dshProviderNames";
 import { parseProviderModelsResponse } from "./parseProviderModels";
 import { isSafeProviderName, piBuiltinSnapshotFromCatalog, resolvePiApiKey } from "./providerMigration";
 import { ensureTokendanceAttribution } from "./tokendanceAttribution";
+import { getAppLogger } from "../logging/sharedLogger";
 import { buildProbeFailureDetail, buildProbeHeaders, candidateApplies, getByPath, parseUsageResponseBody, USAGE_PROBE_CANDIDATES, usageProbeUrls } from "./providerUsageProbe";
 import type { UsageProbeAttempt, UsageProbeCandidate } from "./providerUsageProbe";
 import { resolveProviderUsageEndpoint } from "./providerUsageResolver";
@@ -259,6 +260,8 @@ export class ConfigManager {
 			...trustConfig.parsed,
 			[normalizedPath]: true,
 		});
+		// 自动信任目录改变 pi 的工具执行边界，属安全相关决策，单独留痕以便审计
+		getAppLogger()?.info("config", "Directory auto-trusted (trust.json)", { path: normalizedPath });
 	}
 
 	/**
@@ -482,6 +485,8 @@ export class ConfigManager {
 		const filePath = join(this.configDir, fileName);
 		const json = typeof content === "string" ? content : JSON.stringify(content, null, 2);
 		await writeFile(filePath, json, "utf8");
+		// 配置写盘统一留痕（只记路径与字节数，绝不落内容——auth.json 含凭据）
+		getAppLogger()?.info("config", "Config file written", { file: filePath, bytes: json.length });
 	}
 
 	/** Write a validated configuration with a sibling temporary file and atomic replacement. */
@@ -493,6 +498,7 @@ export class ConfigManager {
 		try {
 			await writeFile(temporaryPath, json, { encoding: "utf8", flag: "wx" });
 			await rename(temporaryPath, filePath);
+			getAppLogger()?.info("config", "Config file written (atomic)", { file: filePath, bytes: json.length });
 		} finally {
 			await rm(temporaryPath, { force: true }).catch(() => undefined);
 		}
@@ -917,7 +923,7 @@ export class ConfigManager {
 
 		// 3) 模板路由：声明式模板优先（用户显式选择），否则内置 + 旧探针自动匹配。
 		const template = settings.config?.template;
-		if (template === "general" || template === "newapi" || template === "cookie") {
+		if (template === "general" || template === "newapi" || template === "cookie" || template === "volcengine") {
 			const built = buildDeclarativeUsageProbeTemplate(template, settings.config ?? {}, {
 				baseUrl: resolvedBaseUrl,
 				apiKey: resolvedApiKey,
@@ -925,7 +931,9 @@ export class ConfigManager {
 			if ("error" in built) {
 				return { success: false, error: built.error };
 			}
-			return this.runProviderUsageProbes(built.baseUrl, built.apiKey, resolved.headers, [built.candidate], timeoutMs, intervalMinutes);
+			// candidates 而不是 candidate：火山方舟是双 Action 候选（Agent Plan / Coding Plan
+			// 自动探测），其余模板 candidates 长度也是 1，走同一条执行路径。
+			return this.runProviderUsageProbes(built.baseUrl, built.apiKey, resolved.headers, built.candidates, timeoutMs, intervalMinutes);
 		}
 
 		const userProbes = await loadUserUsageProbes(effectiveDir);
@@ -1086,8 +1094,8 @@ export class ConfigManager {
 			return { success: false, error: this.translate("mainConfig.providerUsageUnsupported") };
 		}
 
-		// 声明式模板（general/newapi/cookie）：构建候选时可携带覆盖字段。
-		if (template === "general" || template === "newapi" || template === "cookie") {
+		// 声明式模板（general/newapi/cookie/volcengine）：构建候选时可携带覆盖字段。
+		if (template === "general" || template === "newapi" || template === "cookie" || template === "volcengine") {
 			const built = buildDeclarativeUsageProbeTemplate(
 				template,
 				{
@@ -1099,13 +1107,16 @@ export class ConfigManager {
 					cookiePath: input.cookiePath,
 					valuePath: input.valuePath,
 					currencyPath: input.currencyPath,
+					accessKeyId: input.accessKeyId,
+					secretAccessKey: input.secretAccessKey,
 				},
 				{ baseUrl: resolvedBaseUrl, apiKey: resolvedApiKey },
 			);
 			if ("error" in built) {
 				return { success: false, error: built.error };
 			}
-			return this.runProviderUsageProbes(built.baseUrl, built.apiKey, resolved.headers, [built.candidate], timeoutMs, 0);
+			// candidates：火山方舟双 Action 探测（Agent Plan / Coding Plan）依次尝试。
+			return this.runProviderUsageProbes(built.baseUrl, built.apiKey, resolved.headers, built.candidates, timeoutMs, 0);
 		}
 
 		// 内置模板：按 templateId 找候选（不可改写结构，测的是零配置路径本身）。

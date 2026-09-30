@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Check, Copy, RotateCw } from "lucide-react";
 import type { AppSettings, WebNetworkAddress, WebServiceStatusInfo } from "../../../../../shared/types";
@@ -11,7 +11,7 @@ import { Switch } from "../../ui-shadcn/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import { SettingsSection } from "./SettingsStorageTab";
 import { SettingRow, SettingSwitchRow } from "./SettingRows";
-import { buildWebAccessUrl, previewHostFromBinding } from "./webAccessUrl";
+import { buildWebAccessUrl, previewHostFromBinding, webAddressesForBinding } from "./webAccessUrl";
 
 type WebTabProps = {
 	draft: AppSettings;
@@ -67,7 +67,6 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 			.then((addresses) => {
 				if (!active) return;
 				setWebNetworkAddresses(addresses);
-				setSelectedWebAddress((current) => (addresses.some((item) => item.address === current) ? current : (addresses.find((item) => item.isPrivate)?.address ?? addresses[0]?.address ?? "")));
 			})
 			.catch(() => {
 				if (active) setWebNetworkAddresses([]);
@@ -93,9 +92,12 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 		refreshWebStatus();
 	}, [refreshWebStatus, selectedWebAddress, props.webServiceChanging]);
 
+	// 以实际运行的绑定为准，而非尚未保存的草稿；切换监听后同步排除旧选择，避免生成不可达链接。
+	const availableWebAddresses = useMemo(() => webAddressesForBinding(webNetworkAddresses, webStatus?.host ?? ""), [webNetworkAddresses, webStatus?.host]);
+	const activeWebAddress = availableWebAddresses.some((item) => item.address === selectedWebAddress) ? selectedWebAddress : (availableWebAddresses.find((item) => item.isPrivate)?.address ?? availableWebAddresses[0]?.address ?? "");
 	// 运行中的 URL：预览用环回，扫码用选中的局域网地址。
 	const previewUrl = webStatus?.running ? buildWebAccessUrl(previewHostFromBinding(webStatus.host), webStatus.port, webStatus.token, webStatus.requiresAuth) : "";
-	const qrUrl = webStatus?.running && selectedWebAddress ? buildWebAccessUrl(selectedWebAddress, webStatus.port, webStatus.token, webStatus.requiresAuth) : "";
+	const qrUrl = webStatus?.running && activeWebAddress ? buildWebAccessUrl(activeWebAddress, webStatus.port, webStatus.token, webStatus.requiresAuth) : "";
 
 	// URL 变化时重新编码，二维码只保存 data URL，不把主进程能力暴露给页面。
 	useEffect(() => {
@@ -229,15 +231,15 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 						</div>
 						{webNetworkLoading && <span className="text-micro text-text-tertiary">{t("settings.webNetworkLoading")}</span>}
 					</div>
-					{webNetworkAddresses.length > 0 ? (
+					{availableWebAddresses.length > 0 ? (
 						<div className="grid gap-1.5">
 							<Label className="text-xs font-bold text-text-tertiary">{t("settings.webQrAddress")}</Label>
-							<Select value={selectedWebAddress} onValueChange={setSelectedWebAddress}>
+							<Select value={activeWebAddress} onValueChange={setSelectedWebAddress}>
 								<SelectTrigger className="font-mono text-sm tabular-nums">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									{webNetworkAddresses.map((item) => (
+									{availableWebAddresses.map((item) => (
 										<SelectItem key={item.address} value={item.address}>
 											<span className="font-mono">{item.address}</span>
 											<span className="ml-2 text-xs text-muted-foreground">

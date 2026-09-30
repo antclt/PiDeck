@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
+import { getAppLogger } from "../logging/sharedLogger";
 import type { ConfigBackupActionResult, ConfigBackupDetail, ConfigBackupListResult, ConfigBackupMeta, ConfigBackupReason } from "../../shared/types/backup";
 
 /**
@@ -169,6 +170,8 @@ export class ConfigBackupManager {
 				files,
 			};
 			writeFileSync(join(dir, id), JSON.stringify(pkg, null, 2), "utf8");
+			// 备份含凭据原文，只记 id/reason/文件 key，不记内容
+			getAppLogger()?.info("backup", "Config backup created", { id, reason, files: Object.keys(files) });
 			this.prune();
 			return { ok: true, id };
 		} catch (error) {
@@ -216,6 +219,8 @@ export class ConfigBackupManager {
 					writeFileSync(join(userDataDir, "settings.json"), raw, "utf8");
 				}
 			}
+			// 恢复会整体覆盖现役配置，属不可逆操作，必须留痕（含 pre-restore 保护备份 id）
+			getAppLogger()?.info("backup", "Config backup restored", { id, guardBackup: guard.id, files: targetKeys });
 			return { ok: true, id };
 		} catch (error) {
 			this.report(`restore(${id})`, error);
@@ -229,6 +234,7 @@ export class ConfigBackupManager {
 		if (!filePath) return { ok: false, error: "invalid backup id" };
 		try {
 			unlinkSync(filePath);
+			getAppLogger()?.info("backup", "Config backup deleted", { id, file: filePath });
 			return { ok: true };
 		} catch (error) {
 			this.report(`delete(${id})`, error);
@@ -254,6 +260,7 @@ export class ConfigBackupManager {
 		if (deleted === 0) {
 			return { ok: false, error: errors[0] ?? "no backups deleted" };
 		}
+		getAppLogger()?.info("backup", "Config backups deleted (batch)", { requested: ids.length, deleted });
 		return { ok: true, deleted };
 	}
 
@@ -261,13 +268,17 @@ export class ConfigBackupManager {
 	deleteAll(): ConfigBackupActionResult {
 		try {
 			const dir = this.backupDir();
+			let removed = 0;
 			if (existsSync(dir)) {
 				for (const name of readdirSync(dir)) {
 					if (name.startsWith(BACKUP_FILE_PREFIX) && name.endsWith(".json")) {
 						unlinkSync(join(dir, name));
+						removed += 1;
 					}
 				}
 			}
+			// 清空全部备份不可逆，必须留痕
+			getAppLogger()?.info("backup", "All config backups deleted", { dir, removed });
 			return { ok: true };
 		} catch (error) {
 			this.report("deleteAll", error);
@@ -341,6 +352,7 @@ export class ConfigBackupManager {
 		for (const meta of automatic.slice(MAX_BACKUPS)) {
 			try {
 				unlinkSync(join(this.backupDir(), meta.id));
+				getAppLogger()?.info("backup", "Auto backup pruned (retention policy)", { id: meta.id, reason: meta.reason });
 			} catch (error) {
 				this.report(`prune(${meta.id})`, error);
 			}

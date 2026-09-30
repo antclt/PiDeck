@@ -29,7 +29,7 @@ test("omitUndefined keeps defined overlay fields without wiping command", () => 
 	assert.equal(merged.disabled, true);
 });
 
-test("project MCP display preserves the main-process merged precedence", () => {
+test("display servers overlay the local writable draft without losing lower-layer fields", () => {
 	const snapshot = {
 		writablePath: "/home/me/.pi/agent/mcp.json",
 		writableFile: { mcpServers: { docs: { command: "global" } } },
@@ -38,17 +38,27 @@ test("project MCP display preserves the main-process merged precedence", () => {
 		servers: [
 			{
 				name: "docs",
-				definition: { command: "project" },
-				originPath: "/repo/.mcp.json",
-				overridePath: "/repo/.mcp.json",
+				definition: { command: "npx", disabled: true },
+				originPath: "/home/me/.claude.json",
+				overridePath: "/home/me/.claude.json",
 				ownedByWritable: false,
 			},
 		],
 	};
-	const projectItems = buildMcpDisplayServers(snapshot, snapshot.writableFile, "project");
-	assert.equal(projectItems[0].definition.command, "project");
-	const globalItems = buildMcpDisplayServers(snapshot, snapshot.writableFile, "global");
-	assert.equal(globalItems[0].definition.command, "global");
+	const items = buildMcpDisplayServers(snapshot, { mcpServers: { docs: { disabled: false }, extra: { url: "https://example.com/mcp" } } });
+	const docs = items.find((item) => item.name === "docs");
+	assert.equal(docs.definition.disabled, false);
+	// 只读层的 command 不能被可写草稿冲掉
+	assert.equal(docs.definition.command, "npx");
+	assert.equal(docs.ownedByWritable, false);
+	assert.equal(docs.overridePath, snapshot.writablePath);
+	const extra = items.find((item) => item.name === "extra");
+	assert.equal(extra.ownedByWritable, true);
+	assert.equal(extra.originPath, snapshot.writablePath);
+	assert.deepEqual(
+		items.map((item) => item.name),
+		["docs", "extra"],
+	);
 });
 
 test("MCP form server names match the main-process rule", () => {

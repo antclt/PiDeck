@@ -1,5 +1,5 @@
 import { memo, useState, type ReactNode } from "react";
-import { Brain, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, FileText, Folder, Globe2, Loader2, MessageCircle, Network, Search, Square, SquarePen, Terminal, Wrench } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, FileText, Folder, Globe2, Loader2, MessageCircle, Network, Scissors, Search, Square, SquarePen, Terminal, Wrench } from "lucide-react";
 import { countTextLines, getToolEditDiff, getToolFilePath, parseToolArgs, type ToolGroupItem } from "../app/AppUtils";
 import { t } from "../../i18n";
 import { formatAskTitle } from "../../utils/askUi";
@@ -8,13 +8,17 @@ import { detectSubagentFailure } from "./subagentStatus";
 import { Button } from "../ui-shadcn/button";
 import type { ChatMessage } from "../../../../shared/types";
 import { TimelineMarker } from "./TimelineMarker";
+import { RowText } from "./RowText";
 import { LiveDuration } from "./LiveDuration";
 import { getToolKind, getToolKindLabel } from "./toolKind";
 import { getToolPhraseFromArgs } from "./timeline/toolPhrase";
 import { ToolResult, ToolResultOutput } from "../agents/tool-result";
 import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
+import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { formatDuration, getToolDetailText, getToolDiffTarget, getToolExitCode, getToolLiveStartTimestamp, getToolName, getToolStatus, fileChangeToDiffLines } from "./TimelineFormat";
+import { BridgeGuiSlot } from "../bridge/BridgeSlot";
+import { useInsideProcessGroupBody } from "./turn/processGroupScrollContext";
 
 export type DiffFileHandler = (path: string, originalContent?: string, content?: string) => void;
 
@@ -151,6 +155,14 @@ export const ToolActivityCard = memo(function ToolActivityCard(props: { name: st
 	);
 });
 
+/**
+ * 工具结果内层的限高：组体内让位（null），组外保持既有 320。
+ *
+ * 见 `turn/processGroupScrollContext.ts`：组体已经是「限高 + 一条滚轮」，组内再套一层
+ * 限高滚动区就是用户看到的双层滚动条（内层到边即被 contain 切断，外层不动）。
+ */
+const TOOL_RESULT_MAX_HEIGHT_OUTSIDE_GROUP = 320;
+
 /** 单个工具调用卡片：trigger 行（图标+工具名+副标题+状态+耗时）+ 展开后详情。 */
 export const ToolCard = memo(function ToolCard(props: {
 	message: ChatMessage;
@@ -162,6 +174,8 @@ export const ToolCard = memo(function ToolCard(props: {
 	/** 通过会话工作区路由打开工具目标文件（相对路径由 App 层补齐工作目录） */
 	onOpenFile?: (path: string) => void;
 }) {
+	// 组体内：外层组体已经限高并自带滚轮，这里的内层必须让位，否则是双层滚动条。
+	const insideProcessGroupBody = useInsideProcessGroupBody();
 	const [expanded, setExpanded] = useState(props.defaultOpen ?? false);
 	const messageStatus = getToolStatus(props.message);
 	const status = props.stopped && messageStatus === "running" ? "stopped" : messageStatus;
@@ -173,6 +187,10 @@ export const ToolCard = memo(function ToolCard(props: {
 	// 工具结果截断标记（主进程 truncateDetailWithMeta 写入）：展开区可「查看完整输出」
 	// 按需读取（运行期走主进程内存缓存，历史会话定位读会话文件）。
 	const isTruncated = props.message.meta?.truncated === true;
+	// pi 侧截断（pi 0.99 起 bash/powershell 输出 >1 MiB 时 result.details.truncation）：
+	// 丢的是 pi 没进上下文的内容，完整文件在 resultTruncation.fullOutputPath，与上面
+	// 展示层截断是两件事，因此单独给一行可复制路径而不是复用「查看完整输出」。
+	const piTruncation = props.message.meta?.resultTruncation as { fullOutputPath?: string } | undefined;
 	const [fullText, setFullText] = useState<string | null>(null);
 	const [fullLoading, setFullLoading] = useState(false);
 	const [fullError, setFullError] = useState(false);
@@ -219,14 +237,14 @@ export const ToolCard = memo(function ToolCard(props: {
 	const statusBadge = (() => {
 		if (status === "running") {
 			return (
-				<Badge variant="outline" className="gap-1 border-warning/40 px-1 py-0 text-micro text-warning">
+				<Badge variant="outline" className="gap-1 border-warning/40 px-1 py-0 text-chat-detail text-warning">
 					{t("tool.statusRunning")}
 				</Badge>
 			);
 		}
 		if (status === "stopped") {
 			return (
-				<Badge variant="outline" className="gap-1 border-border-subtle px-1 py-0 text-micro text-text-tertiary">
+				<Badge variant="outline" className="gap-1 border-border-subtle px-1 py-0 text-chat-detail text-text-tertiary">
 					<Square size={8} aria-hidden="true" />
 					{t("tool.statusStopped")}
 				</Badge>
@@ -236,7 +254,7 @@ export const ToolCard = memo(function ToolCard(props: {
 			// 子代理失败：插件返回普通文本结果（无 isError），此处按探测出的终态渲染失败徽标
 			const label = subagentFailure === "stopped" ? t("tool.statusStopped") : subagentFailure === "aborted" ? t("tool.statusAborted") : t("tool.statusError");
 			return (
-				<Badge variant="outline" className="gap-1 border-danger/40 bg-danger-soft px-1 py-0 text-micro text-danger">
+				<Badge variant="outline" className="gap-1 border-danger/40 bg-danger-soft px-1 py-0 text-chat-detail text-danger">
 					<CircleX size={9} aria-hidden="true" />
 					{label}
 				</Badge>
@@ -247,14 +265,14 @@ export const ToolCard = memo(function ToolCard(props: {
 			// 不采用实心 destructive 红底白字——单条工具失败不需要最高警告级的视觉冲击，
 			// 与 running 的 outline 琥珀徽章同构，三态保持可扫读但整体克制。
 			return (
-				<Badge variant="outline" className="gap-1 border-danger/40 bg-danger-soft px-1 py-0 text-micro text-danger">
+				<Badge variant="outline" className="gap-1 border-danger/40 bg-danger-soft px-1 py-0 text-chat-detail text-danger">
 					<CircleX size={9} aria-hidden="true" />
 					{t("tool.statusError")}
 				</Badge>
 			);
 		}
 		return (
-			<Badge variant="secondary" className="gap-1 px-1 py-0 text-micro">
+			<Badge variant="secondary" className="gap-1 px-1 py-0 text-chat-detail">
 				<CircleCheck size={9} aria-hidden="true" />
 				{askCard?.answered ? t("ask.answered") : t("tool.statusDone")}
 			</Badge>
@@ -280,49 +298,49 @@ export const ToolCard = memo(function ToolCard(props: {
 				    status === "running" 才挂载：stopped/error/done 立即消失（stopped 由 props.stopped 短路）；
 				    pointer-events-none 不挡 trigger 点击展开 */}
 					{status === "running" && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-tool-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
-					<button
-						type="button"
-						className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-control leading-5 text-text-faint focus-visible:-outline-offset-2 focus-visible:outline-2"
-						onClick={() => setExpanded((v) => !v)}
-						aria-expanded={expanded}
-					>
+					<button type="button" className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-chat-row text-text-faint focus-visible:-outline-offset-2 focus-visible:outline-2" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
 						<span className="tool-card-icon inline-flex shrink-0 items-center justify-center">{isSkillRead ? <Brain size={16} /> : isAskCard ? <MessageCircle size={16} /> : toolIcon(toolName)}</span>
-						{/* 工具名标签：过程层文字，用 faint 浅色（比 tertiary 更贴近背景）退到正文之后；
-					    字重保持 normal（不降档），过轻在 CJK 下会有锯齿/发虚。 */}
-						<span className="shrink-0 text-control lowercase text-text-faint">{isSkillRead ? `skill:${skillName}` : isAskCard ? t("ask.toolName") : toolName}</span>
-						{expanded ? <ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" /> : <ChevronRight size={14} className="shrink-0 text-text-faint" aria-hidden="true" />}
-						{!isSkillRead && kindLabel && <span className="tool-card-kind">{kindLabel}</span>}
-						{statusBadge}
-						{/* 耗时数字用界面字体（与行头时间/输入框统计条一致），工具名/路径仍走等宽 */}
-						{showDuration && (
-							<span className="shrink-0 text-caption tabular-nums text-text-tertiary" title={isAskCard && status === "running" ? t("ask.waitingHint") : t("tool.durationTitle")}>
-								{isAskCard && status === "running" ? (
-									// ask 等待用户回答阶段不计入工具耗时：不展示累加秒表，改用「等待回答…」
-									// 提示。用户回答后 tool_execution_end 落地的 durationMs 已由主进程扣除等待时长。
-									t("ask.waitingForAnswer")
-								) : status === "running" ? (
-									// 工具执行中：以 meta.startedAt 为秒表起点实时计时。消息 timestamp 会被主进程
-									// 在每次 update/end 时刷新（见 getToolLiveStartTimestamp），直接用会让长命令的
-									// 耗时显示反复归零，结束才突然跳到总时长。
-									<LiveDuration startedAt={getToolLiveStartTimestamp(props.message)} isStreaming />
-								) : (
-									formatDuration(durationMs ?? 0)
-								)}
-							</span>
-						)}
-						{isAskCard && askCard?.question ? (
-							<span className="min-w-0 flex-[1_1_auto] whitespace-normal break-words font-mono text-caption leading-5 text-text-faint" title={askCard.question}>
-								| {askCard.question}
-							</span>
-						) : displayLabel ? (
-							<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-faint" title={subtitle || displayLabel}>
-								{displayLabel}
-							</span>
-						) : subtitle ? (
-							<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-caption text-text-faint" title={subtitle}>
-								| {subtitle}
-							</span>
-						) : null}
+						{/* 文本段：工具名（14px）与耗时 / 命令·路径（12px 等宽）必须共基线，否则等宽详情
+						    比正文高约 3px、看起来「没纵向居中」（原理解释见 RowText）。
+						    徽章 / chevron / kind pill 是盒子，self-center 保持原有居中观感。 */}
+						<RowText className="flex-[1_1_auto]">
+							{/* 工具名标签：过程层文字，用 faint 浅色（比 tertiary 更贴近背景）退到正文之后；
+						    字重保持 normal（不降档），过轻在 CJK 下会有锯齿/发虚。 */}
+							<span className="shrink-0 text-chat-row lowercase text-text-faint">{isSkillRead ? `skill:${skillName}` : isAskCard ? t("ask.toolName") : toolName}</span>
+							{expanded ? <ChevronDown size={14} className="shrink-0 self-center text-text-faint" aria-hidden="true" /> : <ChevronRight size={14} className="shrink-0 self-center text-text-faint" aria-hidden="true" />}
+							{!isSkillRead && kindLabel && <span className="tool-card-kind self-center">{kindLabel}</span>}
+							<span className="inline-flex self-center">{statusBadge}</span>
+							{/* 耗时数字用界面字体（与行头时间/输入框统计条一致），工具名/路径仍走等宽 */}
+							{showDuration && (
+								<span className="shrink-0 text-chat-detail tabular-nums text-text-tertiary" title={isAskCard && status === "running" ? t("ask.waitingHint") : t("tool.durationTitle")}>
+									{isAskCard && status === "running" ? (
+										// ask 等待用户回答阶段不计入工具耗时：不展示累加秒表，改用「等待回答…」
+										// 提示。用户回答后 tool_execution_end 落地的 durationMs 已由主进程扣除等待时长。
+										t("ask.waitingForAnswer")
+									) : status === "running" ? (
+										// 工具执行中：以 meta.startedAt 为秒表起点实时计时。消息 timestamp 会被主进程
+										// 在每次 update/end 时刷新（见 getToolLiveStartTimestamp），直接用会让长命令的
+										// 耗时显示反复归零，结束才突然跳到总时长。
+										<LiveDuration startedAt={getToolLiveStartTimestamp(props.message)} isStreaming />
+									) : (
+										formatDuration(durationMs ?? 0)
+									)}
+								</span>
+							)}
+							{isAskCard && askCard?.question ? (
+								<span className="min-w-0 flex-[1_1_auto] whitespace-normal break-words font-mono text-chat-detail text-text-faint" title={askCard.question}>
+									| {askCard.question}
+								</span>
+							) : displayLabel ? (
+								<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-chat-detail text-text-faint" title={subtitle || displayLabel}>
+									{displayLabel}
+								</span>
+							) : subtitle ? (
+								<span className="min-w-0 flex-[1_1_auto] truncate font-mono text-chat-detail text-text-faint" title={subtitle}>
+									| {subtitle}
+								</span>
+							) : null}
+						</RowText>
 					</button>
 				</div>
 				{expanded && (
@@ -355,7 +373,7 @@ export const ToolCard = memo(function ToolCard(props: {
 									// 文件工具内联 diff（issue-兼容期：edit/write 的工具卡直接看改动，
 									// 不必再点开右侧差异查看器）。折叠态渲染行；maxHeight 上限防长文件撑爆卡片。
 									<div className="mb-1.5 flex min-w-0 items-start gap-1">
-										<FileDiff className="min-w-0 flex-1" file={diffTarget.path} lines={fileChangeToDiffLines(diffTarget)} status="complete" defaultOpen={false} maxHeight={200} language="diff" />
+										<FileDiff className="min-w-0 flex-1" file={diffTarget.path} lines={fileChangeToDiffLines(diffTarget)} status="complete" defaultOpen={false} maxHeight={insideProcessGroupBody ? null : 200} language="diff" />
 										{props.onOpenFile && (
 											// 打开按钮与 diff 标题同行但不嵌套在 FileDiff 的折叠按钮内，
 											// 避免无效的 button 嵌套；路径解析交给会话工作区统一处理。
@@ -373,7 +391,7 @@ export const ToolCard = memo(function ToolCard(props: {
 									title={toolName}
 									status={status === "running" ? "running" : status === "error" ? "error" : "success"}
 									kind={toolName.toLowerCase().includes("bash") || toolName.toLowerCase().includes("shell") ? "terminal" : "custom"}
-									maxHeight={320}
+									maxHeight={insideProcessGroupBody ? null : TOOL_RESULT_MAX_HEIGHT_OUTSIDE_GROUP}
 									copyText={displayText}
 									copyClassName="tool-card-copy"
 									contentClassName="text-text-tertiary"
@@ -382,19 +400,32 @@ export const ToolCard = memo(function ToolCard(props: {
 								</ToolResult>
 							</>
 						)}
+						{piTruncation?.fullOutputPath ? (
+							// pi 侧截断提示：完整输出在磁盘文件里，给出路径 + 一键复制（PiDeck 不代读
+							// pi 的截断文件：那是 pi 的内部产物，路径交给用户自行查看/检索）。
+							<div className="flex items-center gap-2 pl-1 pb-1">
+								<Scissors size={12} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+								<span className="min-w-0 flex-1 truncate text-chat-detail text-text-tertiary" title={piTruncation.fullOutputPath}>
+									{t("tool.piOutputTruncated", { path: piTruncation.fullOutputPath })}
+								</span>
+								<Button type="button" variant="ghost" size="sm" className="h-auto px-1 py-0 text-chat-detail text-text-tertiary hover:text-text-secondary" onClick={() => void copyTextWithCopiedNotice(piTruncation.fullOutputPath ?? "")}>
+									{t("tool.copyPath")}
+								</Button>
+							</div>
+						) : null}
 						{isTruncated && !fullText && (
 							// 截断提示后的按需加载入口：内容完整与否由主进程决定（内存缓存/会话文件），
 							// 失败时保留重试，不让用户卡死在加载态。
 							<div className="flex items-center gap-2 pl-1 pb-1">
 								{fullError ? (
 									<>
-										<span className="text-micro text-text-tertiary">{t("tool.fullOutputLoadFailed")}</span>
-										<Button type="button" variant="ghost" size="sm" className="h-auto px-1 py-0 text-micro text-text-tertiary hover:text-text-secondary" onClick={() => void loadFullText()}>
+										<span className="text-chat-detail text-text-tertiary">{t("tool.fullOutputLoadFailed")}</span>
+										<Button type="button" variant="ghost" size="sm" className="h-auto px-1 py-0 text-chat-detail text-text-tertiary hover:text-text-secondary" onClick={() => void loadFullText()}>
 											{t("tool.retry")}
 										</Button>
 									</>
 								) : (
-									<Button type="button" variant="ghost" size="sm" className="h-auto gap-1 px-1 py-0 text-micro text-text-tertiary hover:text-text-secondary" disabled={fullLoading} onClick={() => void loadFullText()}>
+									<Button type="button" variant="ghost" size="sm" className="h-auto gap-1 px-1 py-0 text-chat-detail text-text-tertiary hover:text-text-secondary" disabled={fullLoading} onClick={() => void loadFullText()}>
 										{fullLoading ? <Loader2 size={12} className="animate-pideck-spin" aria-hidden="true" /> : null}
 										{fullLoading ? t("tool.loadingFullOutput") : t("tool.viewFullOutput")}
 									</Button>
@@ -403,6 +434,10 @@ export const ToolCard = memo(function ToolCard(props: {
 						)}
 					</div>
 				)}
+				{/* GUI 扩展桥：工具卡附加落点（ctx.gui.setToolExtra，key = toolName）。
+				    **在默认内容下方追加**，不顶替默认工具卡（§7.1-B / §7.4 只追加）。
+				    无该 toolName 的贡献时返回 null，不占位。 */}
+				<BridgeGuiSlot sessionId={props.sessionId} slot="tool.extra" matchKey={toolName} className="ml-5 mt-1 flex flex-col gap-1 pl-3" />
 			</section>
 		</TimelineMarker>
 	);

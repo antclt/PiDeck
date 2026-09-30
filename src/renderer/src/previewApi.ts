@@ -1,14 +1,21 @@
 import type { PiDesktopApi } from "../../preload";
-import { createDefaultExternalEditorSettings, createDefaultSecurityConfig, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE } from "../../shared/types";
+import { createDefaultExternalEditorSettings, createDefaultSecurityConfig, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, DEFAULT_TOAST_DURATION_MS } from "../../shared/types";
+import { DEFAULT_VOICE_TRANSCRIPTION_CONFIG } from "../../shared/voiceTranscriptionConfig";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import type { AppSettings, FileTreeNode, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalTab } from "../../shared/types";
 import type { ResourceImportKind } from "../../shared/types/resourceImport";
+import type { ReplyActionRule } from "../../shared/types/replyActions";
 import { t } from "./i18n";
 
 const now = Date.now();
 
 /** 快捷消息预览夹具：预览/截图需要一个非空弹框；真实数据在 userData/quick-messages.json。 */
 const PREVIEW_QUICK_MESSAGES: readonly string[] = ["继续", "提交", "推送", "提交推送"];
+const PREVIEW_REPLY_ACTIONS: readonly ReplyActionRule[] = [
+	{ text: "继续", triggers: [{ kind: "onStop" }] },
+	{ text: "提交", triggers: [{ kind: "onStop" }] },
+	{ text: "重试", triggers: [{ kind: "onFailure" }] },
+];
 
 const projects: Project[] = [
 	{
@@ -118,19 +125,22 @@ let previewSettings: AppSettings = {
 	closeToTray: true,
 	singleInstance: true,
 	enableNotifications: true,
-	// 与主进程 SettingsStore 默认一致：标题生成默认关闭，避免预览壳与真实设置产生分歧
-	autoSessionTitle: false,
+	// 与主进程 SettingsStore 默认一致：标题生成默认开启，预览壳与真实设置保持一致
+	autoSessionTitle: true,
 	// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致
 	askNotificationEnabled: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
 	agentCountReminderEnabled: true,
 	// 公告通知开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
 	announcementNotificationEnabled: true,
+	// toast 展示时长：与主进程 defaultSettings 一致
+	toastDurationMs: DEFAULT_TOAST_DURATION_MS,
 	// showThinking 由 pi agent 的 hideThinkingBlock 控制，运行时从主进程加载
 	showThinking: true,
 	// 流式对话行为：与主进程 SettingsStore 默认一致（预览窗口保持相同观感）
 	expandInterimDuringStream: true,
-	collapsePrevRunsOnNewTurn: true,
+	// 过程组显示默认开启：与主进程 SettingsStore 默认一致（预览窗口按过程组渲染）
+	processGroupDisplay: true,
 	showDevTools: false,
 	developerDiagnostics: false,
 	electronChromiumSandbox: false,
@@ -156,6 +166,7 @@ let previewSettings: AppSettings = {
 	workspaceContentOpenMode: "split",
 	contentMaxWidth: 1800,
 	chatContentWidthPct: 80,
+	navigationMode: "tabs",
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
 	maxEditorFileSizeMB: 5,
 	externalEditors: createDefaultExternalEditorSettings(),
@@ -171,12 +182,15 @@ let previewSettings: AppSettings = {
 	idleAgentAutoRelease: true,
 	idleAgentKeepCount: 5,
 	idleAgentTimeoutMin: 60,
+	// CUA 默认关闭：预览壳与主进程 SettingsStore 默认保持一致
+	cuaEnabled: false,
 	favoriteModels: [],
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],
 	hiddenModels: [],
+	hiddenModules: [],
 
-	fontSize: "default",
+	fontSize: "medium",
 	uiFontSize: null,
 	chatFontSize: null,
 	inputFontSize: null,
@@ -249,6 +263,27 @@ export function createPreviewApi(): PiDesktopApi {
 			cancel: async () => false,
 			logout: async (providerId: string) => ({ ok: false, providerId, error: "Pi auth is unavailable in preview mode." }),
 			onFlowUpdate: () => () => undefined,
+		},
+		// 数据环境预览桩：预览模式无真实数据目录，按 stable 通道未决策返回；导入同步不可用
+		dataEnv: {
+			getInfo: async () => ({ channel: "stable" as const, decided: false, dataMode: null, activeDirectory: "shared" as const }),
+			chooseMode: async () => ({ ok: false as const, error: "invalid-mode" as const }),
+			restart: async () => undefined,
+			confirmMismatch: async () => undefined,
+			onDecisionRequired: () => () => undefined,
+			onMismatchDetected: () => () => undefined,
+			getImportPreview: async () => ({ ok: false as const, error: "unavailable" as const }),
+			importStart: async () => ({ ok: false as const, error: "unavailable" as const }),
+			importCancel: async () => undefined,
+			onImportProgress: () => () => undefined,
+		},
+		// 频道切换预览桩：预览模式不接真实更新源，查询/下载均不可用，状态恒 idle。
+		channelSwitch: {
+			query: async () => ({ ok: false as const, error: "preview-unavailable" as const }),
+			download: async () => ({ ok: false as const, error: "preview-unavailable" as const }),
+			launch: async () => ({ ok: false as const, error: "preview-unavailable" as const }),
+			getStatus: async () => ({ phase: "idle" as const }),
+			onStateChanged: () => () => undefined,
 		},
 		shellMenu: {
 			getQuickTaskState: async () => ({ supported: false, registered: false }),
@@ -358,6 +393,7 @@ export function createPreviewApi(): PiDesktopApi {
 			toggleWorktreeEnabled: async () => projects[0],
 			chooseChatPath: async () => null,
 			setChatPath: async () => projects[0],
+			consumeMigrationNotice: async () => null,
 			listModels: async () => [],
 			// 预览 iframe 不需要真实模型目录：构造一个恒空报告（无失败原因），
 			// 与真实通道的 ModelListReport 形状保持一致，避免类型分叉。
@@ -433,7 +469,7 @@ export function createPreviewApi(): PiDesktopApi {
 				valid: true,
 				warnings: [],
 			}),
-			discovery: async () => ({ skills: [], prompts: [], extensions: [] }),
+			discovery: async () => ({ projectResourcesAllowed: false, overrides: { disabledGlobalExtensions: [], disabledGlobalSkills: [], disabledGlobalPrompts: [] }, skills: [], prompts: [], extensions: [] }),
 		},
 		files: {
 			list: async (_projectId, options) => {
@@ -617,6 +653,9 @@ export function createPreviewApi(): PiDesktopApi {
 				runtimeGeneration: 1,
 			}),
 			sendUiResponse: async () => undefined,
+			// GUI 扩展桥：预览模式无桥端点，恒丢弃
+			sendBridgeEvent: async () => false,
+			requestBridgeResync: async () => false,
 			onRuntimeEvent: noop,
 			listRuntimes: async () => [],
 			activateRuntime: async () => ({
@@ -748,13 +787,13 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				value: { target, value: { text: "" } },
 			}),
-			setRuntimeModel: async (target) => ({
+			setRuntimeModel: async (target, provider, modelId, modelName) => ({
 				ok: true,
-				value: { target, value: {} },
+				value: { target, value: { provider, modelId, modelName: modelName?.trim() || modelId } },
 			}),
-			setRuntimeThinking: async (target) => ({
+			setRuntimeThinking: async (target, thinkingLevel) => ({
 				ok: true,
-				value: { target, value: {} },
+				value: { target, value: { thinkingLevel } },
 			}),
 			setRuntimePermission: async (target) => ({
 				ok: true,
@@ -785,6 +824,10 @@ export function createPreviewApi(): PiDesktopApi {
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
 		claudeSessions: {
+			scan: async () => [],
+			import: async () => ({ results: [], imported: 0, failed: 0 }),
+		},
+		qoderSessions: {
 			scan: async () => [],
 			import: async () => ({ results: [], imported: 0, failed: 0 }),
 		},
@@ -881,6 +924,7 @@ export function createPreviewApi(): PiDesktopApi {
 			getSize: async () => 0,
 			get: async () => [],
 			getLive: async () => [],
+			getModelTrace: async () => null,
 			save: async () => [],
 			onLog: (_callback: unknown) => () => {},
 			clear: async () => undefined,
@@ -960,6 +1004,7 @@ export function createPreviewApi(): PiDesktopApi {
 			preferredSystemLanguages: async () => (navigator.languages?.length ? [...navigator.languages] : [navigator.language]),
 			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true, family: "IPv4" }],
 			checkUpdate: async () => undefined,
+			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview" }),
 			onUpdateStatus: () => () => undefined,
 			onOpenSettings: () => () => undefined,
 			// 预览/浏览器模式没有全局快捷键，订阅退化为空操作
@@ -1013,6 +1058,8 @@ export function createPreviewApi(): PiDesktopApi {
 			toggleMaximizeWindow: async () => false,
 			isWindowMaximized: async () => false,
 			onWindowMaximizedChange: () => () => undefined,
+			// 预览环境无主进程快捷键，返回空订阅以保持 API 形状
+			onZoomFactorChange: () => () => undefined,
 			toggleAlwaysOnTopWindow: async () => false,
 			isWindowAlwaysOnTop: async () => false,
 			closeWindow: async () => undefined,
@@ -1582,23 +1629,44 @@ export function createPreviewApi(): PiDesktopApi {
 			readImageBlob: async () => null,
 		},
 		voiceTranscription: {
-			getConfig: async () => ({
-				baseUrl: "https://api.openai.com/v1",
-				model: "whisper-1",
-				language: "",
-				hasApiKey: false,
-			}),
+			getConfig: async () => ({ ...DEFAULT_VOICE_TRANSCRIPTION_CONFIG, hasApiKey: false, hasVolcAppId: false, hasVolcAccessToken: false, apiKeyHint: null, volcAppIdHint: null, volcAccessTokenHint: null, runtimeReady: false }),
 			saveConfig: async (config) => ({
 				ok: true,
 				config: {
+					enabled: config.enabled,
+					engine: config.engine,
+					cloudProvider: config.cloudProvider,
 					baseUrl: config.baseUrl,
 					model: config.model,
 					language: config.language,
+					inputDeviceId: config.inputDeviceId,
+					localModelId: config.localModelId,
+					cliPath: config.cliPath,
+					cloudResourceId: config.cloudResourceId,
 					hasApiKey: false,
+					hasVolcAppId: false,
+					hasVolcAccessToken: false,
+					apiKeyHint: null,
+					volcAppIdHint: null,
+					volcAccessTokenHint: null,
+					runtimeReady: false,
 				},
 			}),
 			transcribe: async () => ({ ok: false, error: "notConfigured" }),
+			test: async () => ({ ok: false, error: "notConfigured" }),
+			revealSecret: async () => null,
 			cancel: async () => {},
+			// 预览环境没有 WebSocket 服务：开流直接回 notConfigured，录音链路会照直落在整段转写的桩上。
+			startStream: async () => ({ ok: false, error: "notConfigured" }),
+			sendStreamFrame: () => {},
+			finishStream: async () => ({ ok: false, error: "notConfigured" }),
+			onStreamPartial: () => () => undefined,
+			runtimeStatus: async () => ({ autoRuntimeSupported: false, cliReady: false, cliSource: "none", cliPath: null, runtimeVersion: null, models: [] }),
+			installRuntime: async () => ({ ok: false, error: "preview stub" }),
+			installModel: async () => ({ ok: false, error: "preview stub" }),
+			deleteModel: async () => ({ ok: false, error: "preview stub" }),
+			onRuntimeProgress: () => () => undefined,
+			abortInstall: async () => false,
 		},
 		// 模型目录预览桩：无内置目录可读，返回「不可用」空态，仅供预览不崩溃
 		catalog: {
@@ -1622,6 +1690,21 @@ export function createPreviewApi(): PiDesktopApi {
 			save: async (items) => ({
 				ok: true as const,
 				snapshot: { items, defaults: [...PREVIEW_QUICK_MESSAGES], filePath: "(preview)", seeded: false, defaultsAvailable: false },
+			}),
+			openFile: async () => undefined,
+		},
+		// 回复快捷操作预览桩：与快捷消息同策略，固定夹具让设置区在预览/截图里可用。
+		replyActions: {
+			get: async () => ({
+				items: PREVIEW_REPLY_ACTIONS.map((rule) => ({ ...rule, triggers: rule.triggers.map((trigger) => ({ ...trigger })) })),
+				defaults: [],
+				filePath: "(preview)",
+				seeded: false,
+				defaultsAvailable: false,
+			}),
+			save: async (items) => ({
+				ok: true as const,
+				snapshot: { items, defaults: [], filePath: "(preview)", seeded: false, defaultsAvailable: false },
 			}),
 			openFile: async () => undefined,
 		},
@@ -1689,6 +1772,12 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			previewCron: async () => ({ valid: true, nextRuns: [] }),
 			onChanged: () => () => {},
+		},
+		cua: {
+			onApprovalRequest: () => () => {},
+			sendApprovalResponse: async () => {},
+			getState: async () => ({ enabled: false, sessionOverrides: {} }),
+			setState: async () => ({ enabled: false, sessionOverrides: {} }),
 		},
 	};
 }

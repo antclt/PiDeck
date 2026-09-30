@@ -12,6 +12,7 @@ import { DirtyMarker, SettingBox, SettingRow, SettingSwitchRow } from "./Setting
 import { VoiceTranscriptionSettingsSection } from "./VoiceTranscriptionSettingsSection";
 import { QuickTaskMenuSetting } from "./QuickTaskMenuSetting";
 import { QuickMessagesSetting } from "./QuickMessagesSetting";
+import { ReplyActionsSetting } from "./ReplyActionsSetting";
 
 type CommonTabProps = {
 	draft: AppSettings;
@@ -290,12 +291,18 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 				</SettingRow>
 				{/* 流式对话设置：中间过程与本轮修改文件的默认展示行为。 */}
 				<SettingSwitchRow anchor="common-expand-interim-during-stream" title={t("settings.expandInterimDuringStream")} description={t("settings.expandInterimDuringStreamDesc")} checked={draft.expandInterimDuringStream} onChange={(checked) => updateDraft({ expandInterimDuringStream: checked })} />
-				<SettingSwitchRow anchor="common-collapse-prev-runs" title={t("settings.collapsePrevRunsOnNewTurn")} description={t("settings.collapsePrevRunsOnNewTurnDesc")} checked={draft.collapsePrevRunsOnNewTurn} onChange={(checked) => updateDraft({ collapsePrevRunsOnNewTurn: checked })} />
+				{/* 过程组显示：开启后连续思考/工具调用合并成过程组，关闭则保持平铺显示 */}
+				<SettingSwitchRow anchor="common-process-group-display" title={t("settings.processGroupDisplay")} description={t("settings.processGroupDisplayDesc")} checked={draft.processGroupDisplay} onChange={(checked) => updateDraft({ processGroupDisplay: checked })} />
 			</SettingsSection>
 
 			{/* 快捷消息：数据在 userData/quick-messages.json，本区自持编辑状态并即时落盘（不参与全局草案/取消）。 */}
 			<SettingsSection title={t("settings.quickMessagesSection")} description={t("settings.quickMessagesSectionDesc")}>
 				<QuickMessagesSetting />
+			</SettingsSection>
+
+			{/* 回复快捷操作：规则在 userData/reply-actions.json，同样即时落盘（不参与全局草案/取消）。 */}
+			<SettingsSection title={t("settings.replyActionsSection")} description={t("settings.replyActionsSectionDesc")}>
+				<ReplyActionsSetting />
 			</SettingsSection>
 
 			{/* 闲置 Agent 内存优化：自动释放长时间闲置的 agent 进程，降低多会话内存占用 */}
@@ -355,6 +362,11 @@ export const CommonTab = memo(function CommonTab(props: CommonTabProps) {
 						<span className="shrink-0 text-sm text-muted-foreground tabular-nums">{t("settings.idleAgentTimeoutUnit")}</span>
 					</div>
 				</SettingRow>
+			</SettingsSection>
+
+			{/* CUA 桌面操作（实验性）：开启后才监听回环 MCP 端点并注册给 pi；真实输入另有杀开关与逐次审批兜底。 */}
+			<SettingsSection title={t("settings.cuaSection")} description={t("settings.cuaSectionDesc")}>
+				<SettingSwitchRow anchor="common-cua-enabled" title={t("settings.cuaEnabled")} description={t("settings.cuaEnabledDesc")} checked={draft.cuaEnabled ?? false} dirty={isDirty("cuaEnabled")} onChange={(checked) => updateDraft({ cuaEnabled: checked })} />
 			</SettingsSection>
 
 			{/* 文件资源管理器集成：注册「用 PiDeck 打开」右键菜单（目录与空白处），

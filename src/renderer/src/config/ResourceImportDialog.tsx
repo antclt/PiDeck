@@ -105,7 +105,8 @@ function resultStatusLabel(status: ResourceImportReport["results"][number]["stat
 export function ResourceImportDialog(props: {
 	kind: ResourceImportKind;
 	sourceProjectId?: string;
-	projects: ResourceImportProject[];
+	/** 技能导入的项目目标数据源；MCP 导入只写全局层。 */
+	projects?: ResourceImportProject[];
 	/** When set, the skill importer is hosted by a project resource page and must stay there. */
 	fixedProjectId?: string;
 	triggerLabel: string;

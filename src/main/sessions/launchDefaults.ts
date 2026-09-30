@@ -1,4 +1,6 @@
 import type { ResolveLaunchDefaultsInput, ResolvedLaunchDefaults } from "../../shared/types";
+import { createSessionModelPreference } from "../../shared/modelDisplayName";
+import { modelThinkingLevelOf, parseModelThinkingLevels } from "../../shared/modelThinkingLevels";
 
 /**
  * 会话「默认启动偏好」解析器：createDraft 缺省填充与引导页展示共用，保证
@@ -23,8 +25,13 @@ import type { ResolveLaunchDefaultsInput, ResolvedLaunchDefaults } from "../../s
  *   失效来源自动跳过，保证新会话（底栏预选与真实套用）不再默认已删除的模型。
  * - defaultModelConfigured 仅标记「是否存在有效的显式配置默认模型」，供调用方做文案
  *   与诊断用；它**不再**作为渲染层展示回退的闸门（展示与创建必须同序，否则再次分叉）。
- * - 思考档位对两种后端都填充（值域 off/high/max 兼容），一律取 settings.defaultThinkingLevel
- *   （用户规则：思考级别只跟"默认级别"走，欢迎页偏好级别不参与）。
+ * - 思考档位对两种后端都填充（值域 off/high/max 兼容），按 pi 的解析次序取：
+ *   「每模型默认档位」（settings.modelThinkingLevels[provider/modelId]）> 全局
+ *   settings.defaultThinkingLevel。pi 在新建会话（core/agent-session.js findInitialModel）
+ *   与切换模型（_getThinkingLevelForModelSwitch）都按 显式选择 > 每模型默认 > 全局默认
+ *   解析后再 clamp 到该模型可用档位；这里必须同序，否则底栏预选与实际套用再次分叉
+ *   （用户规则：思考级别只跟档位默认走，欢迎页偏好级别不参与）。
+ *   DSH 后端的模型身份不在 pi 侧（无 modelThinkingLevels 可查），只取全局默认。
  *
  * 输入是磁盘 JSON（pi settings / models.json / desktop settings），字段类型不可信：
  * 用 unknown 收窄，任何字段缺失/类型异常都不抛错，而是逐级降级为 undefined。
@@ -48,8 +55,13 @@ export function resolveLaunchDefaultOptions(input: {
 		// 优先级：引导页点选 > 显式默认 > enabledModels（pi 模型切换列表）> 上次使用 > 空。
 		const model = welcomeModelOfModelsConfig(input.welcomeModel, input.models) ?? explicit ?? enabledModelsOfModelsConfig(input.settings, input.models) ?? lastUsedModelOfModelsConfig(input.lastUsedModel, input.models);
 		if (model) defaults.model = model;
+		// 每模型默认档位表整表回传：引导页改选模型后仍能按「当前展示的模型」查到同一档位。
+		const modelThinkingLevels = parseModelThinkingLevels(input.settings);
+		if (modelThinkingLevels) defaults.modelThinkingLevels = modelThinkingLevels;
 	}
-	const thinkingLevel = optionalString(input.settings, "defaultThinkingLevel");
+	// 每模型默认优先于全局默认：显式选择（input.thinkingLevel）在调用方，已在此之前判定；
+	// 这里只补「没传显式档位」时的缺省，与 createDraft 的最终模型保持一致。
+	const thinkingLevel = (input.backend !== "dsh" && defaults.model ? modelThinkingLevelOf(input.settings, defaults.model.provider, defaults.model.modelId) : undefined) ?? optionalString(input.settings, "defaultThinkingLevel");
 	if (thinkingLevel) defaults.thinkingLevel = thinkingLevel;
 	return defaults;
 }
@@ -62,7 +74,7 @@ function strictModelPair(settings: unknown, models: unknown): ResolvedLaunchDefa
 	const provider = optionalString(settings, "defaultProvider");
 	const modelId = optionalString(settings, "defaultModel");
 	if (!provider || !modelId) return undefined;
-	return modelExistsInModelsConfig(models, provider, modelId) ? { provider, modelId } : undefined;
+	return modelPreferenceFromModelsConfig(models, provider, modelId);
 }
 
 /** 显式传入的 model（如欢迎页偏好）是否存在：不存在视为无效，调用方应回退解析默认。 */
@@ -77,7 +89,18 @@ function lastUsedModelOfModelsConfig(lastUsed: unknown, models: unknown): Resolv
 	const modelId = lastUsed.modelId;
 	if (typeof provider !== "string" || typeof modelId !== "string") return undefined;
 	if (!provider || !modelId) return undefined;
-	return modelExistsInModelsConfig(models, provider, modelId) ? { provider, modelId } : undefined;
+	return modelPreferenceFromModelsConfig(models, provider, modelId);
+}
+
+function modelPreferenceFromModelsConfig(models: unknown, provider: string, modelId: string): ResolvedLaunchDefaults["model"] {
+	if (!isRecord(models)) return undefined;
+	const providers = models.providers;
+	if (!isRecord(providers)) return undefined;
+	const providerEntry = providers[provider];
+	if (!isRecord(providerEntry) || !Array.isArray(providerEntry.models)) return undefined;
+	const model = providerEntry.models.find((candidate) => isRecord(candidate) && candidate.id === modelId);
+	if (!isRecord(model)) return undefined;
+	return createSessionModelPreference(provider, modelId, model.name);
 }
 
 /** 模型是否存在于 models.json（provider 键 + models 数组 id 精确匹配）。 */
@@ -96,8 +119,10 @@ function welcomeModelOfModelsConfig(welcome: unknown, models: unknown): Resolved
 	const provider = welcome.provider;
 	const modelId = welcome.modelId;
 	if (typeof provider !== "string" || typeof modelId !== "string") return undefined;
-	if (!provider || !modelId) return undefined;
-	return modelExistsInModelsConfig(models, provider, modelId) ? { provider, modelId } : undefined;
+	if (!provider || !modelId || !modelExistsInModelsConfig(models, provider, modelId)) return undefined;
+	// 引导页已在用户点选的瞬间保存名称快照。这里只做存在性校验，不能再次以当前
+	// models.json 的别名覆盖它，否则用户配置在两次操作之间更新会让底栏跳变。
+	return createSessionModelPreference(provider, modelId, welcome.modelName);
 }
 
 /** settings.enabledModels（pi 的 Ctrl+P 模型切换列表，glob 模式，格式同 --models）：
@@ -128,7 +153,7 @@ function matchEnabledModelPattern(pattern: string, models: unknown): ResolvedLau
 		for (const model of provider.models) {
 			if (!isRecord(model) || typeof model.id !== "string") continue;
 			if (globMatch(patternModelId, model.id)) {
-				return { provider: providerName, modelId: model.id };
+				return createSessionModelPreference(providerName, model.id, model.name);
 			}
 		}
 	}
