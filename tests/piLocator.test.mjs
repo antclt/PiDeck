@@ -167,6 +167,28 @@ test("cmd shim quote-wraps arguments containing double quotes", () => {
 	}
 });
 
+// ~ 不是 cmd 元字符（cmd 不展开 ~，那是 bash 的语义），但 Windows 8.3 短路径
+// （C:\Users\RUNNER~1\...；CI 的 tmpdir、部分用户的临时/主目录）天生带 ~。若把 ~ 算进
+// 「需要引号」，整条命令行会多套一层外引号，行尾那个引号直接粘在最后一个参数上。
+// CI 的 tmpdir 恰好就是 8.3 路径而本地不是，所以这里显式造一个带 ~ 的目录来兜住。
+test("cmd shim: tilde-only path (8.3 short name) gets no outer quote wrap", () => {
+	const root = join(tmpdir(), `pi-desktop-locator-tilde-${process.pid}-~866`, "nvm", "v22.22.1");
+	mkdirSync(root, { recursive: true });
+	const piPath = join(root, "pi.cmd");
+	writeFileSync(piPath, "@echo off\r\n", "utf8");
+	writeFileSync(join(root, "node.exe"), "", "utf8");
+	try {
+		const { PiLocator } = loadPiLocatorModule("win32");
+		const invocation = new PiLocator().createInvocation(piPath, ["--provider", "中文供应商"]);
+		const commandLine = invocation.args[3];
+
+		assert.ok(commandLine.startsWith(piPath), `tilde 路径不应多套外引号：${commandLine}`);
+		assert.match(commandLine, /(?:^| )中文供应商$/, `行尾引号不得粘在参数上：${commandLine}`);
+	} finally {
+		rmSync(join(tmpdir(), `pi-desktop-locator-tilde-${process.pid}-~866`), { recursive: true, force: true });
+	}
+});
+
 // 回归 #169：Linux 下部分用户通过 alias "node /path/pi.js" 直接运行 JS 源文件（而非 npm shim）。
 // createInvocation 必须把指向真实 .js 文件的路径改用 node 启动（无 shebang/可执行位不能直接 execve），
 // 同时不能误拦裸命令名 "pi"（existsSync 对相对路径返回 false）。

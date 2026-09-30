@@ -990,7 +990,11 @@ export class PiLocator {
 		// 引号外造成命令行分裂（实测 name=a" + 后续参数含 & → cmd 真去执行了 & 后面的命令）。
 		// % 故意不入类：引号阻止不了 cmd 的 %VAR% 展开（实测 "a%PATH%b" 照旧被展开），
 		// 放进字符类只会让人误以为已处理；含 % 的供应商名改由 isValidProviderName 拒绝。
-		return /[\s&()\[\]{}^=;!'+,`~|<>"]/.test(value);
+		// ~ 故意不入类：cmd 不展开 ~（那是 bash 的语义），而 Windows 8.3 短路径
+		// （C:\Users\RUNNER~1\...；CI 与部分用户机器的临时/主目录）天生带 ~。把它算进
+		// 「需要引号」会让整条命令行多套一层外引号，行尾那个引号直接粘在最后一个参数上
+		// （2026-09-30 CI 实证：中文供应商" → 供应商名匹配失败），而无空格时这层引号毫无必要。
+		return /[\s&()\[\]{}^=;!'+,`|<>"]/.test(value);
 	}
 
 	private getCommandBinDir(command: string) {

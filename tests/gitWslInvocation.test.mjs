@@ -186,7 +186,11 @@ test("execGit：宿主项目仍 spawn 用户配置的 git，并把显式 env 叠
 	assert.equal(fake.calls[0].options.cwd, "C:\\proj");
 	assert.equal(fake.calls[0].options.maxBuffer, 4096);
 	assert.equal(fake.calls[0].options.env.GIT_X, "1");
-	assert.equal(fake.calls[0].options.env.PATH, process.env.PATH);
+	// Windows 上 {...process.env} 展开的是实际变量名 Path：GH runner 只有 Path、没有 PATH（本机
+	// 两者都有，所以本地一直绿、CI 一直红）。契约是「显式 env 叠在完整父环境之上」，故对键名
+	// 大小写不敏感地取——生产代码 PiLocator.ts 的 PATH 读取也是同样写法。
+	const inheritedPath = fake.calls[0].options.env.PATH ?? fake.calls[0].options.env.Path;
+	assert.equal(inheritedPath, process.env.PATH ?? process.env.Path);
 });
 
 test("execGit：WSL 项目经 wsl.exe 在发行版内执行，stdout 的 NUL 原样保留", async () => {
