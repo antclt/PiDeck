@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { formatToolDetail, extractToolResultText, truncateDetailWithMeta, defaultToolDetailTranslate } = loadTsCommonJs("src/shared/formatToolDetail.ts");
+const { formatToolDetail, extractToolResultText, extractPiToolTruncation, truncateDetailWithMeta, defaultToolDetailTranslate } = loadTsCommonJs("src/shared/formatToolDetail.ts");
 
 function enTranslate(key, params = {}) {
 	if (key === "mainTool.name") return `Tool: ${params.name}`;
@@ -52,6 +52,26 @@ test("formatToolDetail bash uses the raw multiline command instead of JSON escap
 	assert.match(text, /Command: python3 -c 'import json,sys\nprint\(json\.load\(sys\.stdin\)\[\"a\"\]\)' <\/dev\/null/);
 	assert.doesNotMatch(text, /Arguments:/);
 	assert.doesNotMatch(text, /\\n/);
+});
+
+test("extractPiToolTruncation 读取 pi 0.99 的 details.truncation/fullOutputPath", () => {
+	// bash/powershell 输出 >1 MiB 时 pi 只保留尾部窗口，原始文件路径在 details.fullOutputPath
+	const info = extractPiToolTruncation({
+		content: [{ type: "text", text: "...tail...\n\n[Showing lines 2001-9000 of 9000. Full output: /tmp/pi-bash-xx.log]" }],
+		details: { truncation: { truncated: true, truncatedBy: "lines", totalLines: 9000, totalBytes: 2_500_000, outputLines: 2000, outputBytes: 51_200 }, fullOutputPath: "/tmp/pi-bash-xx.log" },
+	});
+	assert.equal(info?.truncatedBy, "lines");
+	assert.equal(info?.totalLines, 9000);
+	assert.equal(info?.totalBytes, 2_500_000);
+	assert.equal(info?.fullOutputPath, "/tmp/pi-bash-xx.log");
+});
+
+test("extractPiToolTruncation 无截断信息时返回 undefined（普通结果/DSH 平铺结果）", () => {
+	assert.equal(extractPiToolTruncation({ content: [{ type: "text", text: "ok" }] }), undefined);
+	assert.equal(extractPiToolTruncation("plain string"), undefined);
+	assert.equal(extractPiToolTruncation(undefined), undefined);
+	// details 存在但没有 truncation（未触发 pi 侧截断）
+	assert.equal(extractPiToolTruncation({ details: { exitCode: 0 } }), undefined);
 });
 
 test("extractToolResultText 拼接 content[].text，忽略非 text 块", () => {

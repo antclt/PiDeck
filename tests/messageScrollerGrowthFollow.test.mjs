@@ -84,10 +84,11 @@ test("tool enter animation has no translateY", () => {
 
 // 跟随开关（followOutput）与用户逃逸/回底（onFollowChange）桥接到引擎：
 // - followOutput=true 时重新锁底（近底 instant / 远处弹簧）
+// - followOutput=false 时主动解锁（引擎不读这个 prop，只 return 等于开关无效）
 // - 引擎 isAtBottom 变化时上报给 controller，controller 再回写 followOutput
 test("followOutput and onFollowChange bridge to the stick engine", () => {
 	assert.match(scrollerSource, /const engineScrollToBottom = stick\.scrollToBottom;/);
-	assert.match(scrollerSource, /if \(!followOutput\) return;/);
+	assert.match(scrollerSource, /if \(!followOutput\) \{\s*engineStopScroll\(\);\s*return;/);
 	assert.match(scrollerSource, /engineScrollToBottom\(\{ animation \}\)/);
 	assert.match(scrollerSource, /reduce \|\| distance <= followThreshold \? "instant" : "smooth"/);
 	assert.match(scrollerSource, /onFollowChange\?\.\(isFollowing\)/);

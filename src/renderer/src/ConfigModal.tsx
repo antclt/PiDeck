@@ -29,7 +29,6 @@ import { ExtensionsTab } from "./config/ExtensionsTab";
 // 会话取值 / 落点 id 映射 / 「页消失就回退」都收在 hook 里（PR 评审 §3）。
 import { BridgeGuiSingleSlot } from "./components/bridge/BridgeSlot";
 import { guiPageSectionId, useBridgeConfigPages } from "./hooks/useBridgeConfigPages";
-import { type ResourceScope } from "./config/ResourceScopeSelector";
 import { SecuritySection, type SecuritySectionHandle } from "./components/config/SecuritySection";
 import { DshLogo, PiLogo } from "./components/session/SessionSourceBadge";
 import { DshConfigTab, type DshConfigTabHandle } from "./config/DshConfigTab";
@@ -39,7 +38,7 @@ import { translateBuiltinPromptDescription } from "./composerBehavior";
 import type { AuthFile, ConfigTab, ModelItem, ModelsFile, SettingsFile } from "./config/configTypes";
 import type { ConfigFileDiagnostic, PiExtensionListResult, PiExtensionSummary, PiPromptTemplateListResult, PiPromptTemplateSummary, PiSkillListResult, PiSkillLocation, PiSkillSummary, Project, ProjectResourceDiscoveryResult, ProjectResourceListResult } from "../../shared/types";
 import { globalPromptOverrideKey, globalSkillOverrideKey, isGlobalSkillSourceId } from "../../shared/resourceIdentity";
-import { emptyDiscoveryData, emptyProjectResourceData, GLOBAL_SKILL_SOURCES, isGlobalSkill, isProjectExtension, isProjectPrompt, isProjectSkill, PROJECT_SKILL_SOURCES } from "./config/resourceScopeModel";
+import { emptyDiscoveryData, emptyProjectResourceData, GLOBAL_SKILL_SOURCES, isGlobalSkill, isProjectExtension, isProjectPrompt, isProjectSkill, PROJECT_SKILL_SOURCES, type ResourceScope } from "./config/resourceScopeModel";
 import { getModelUserAgentOverride, getProviderHeaders, KNOWN_PROVIDER_ENDPOINTS, setModelUserAgentOverride } from "./config/providerHeaders";
 import { TOKENDANCE_PROVIDER } from "../../shared/tokendance";
 import { ALL_CONFIG_DIRTY_KEYS, dirtyKeysClearedByReload, dirtyKeysPreservedOnReload, orderDirtyKeysForSave, reconcileConfigDirty } from "./config/configDirtyMarks";
@@ -369,7 +368,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 * - 主配置页固定 global（全局安装 + 用户 ~/.pi 自装 + PiDeck 内置）；项目级技能/扩展/提示词
 	 *   的管理入口在项目右键的「资源管理」弹窗，这里不再提供全局/项目下拉（双入口反而混乱）。
 	 * - 资源管理器模式（resourceOnly，项目右键进入）固定为入口项目。
-	 * MCP 页例外：项目级 mcp.json 没有其它管理入口，作用域切换内聚在 McpTab 自己的 state 里。
+	 * MCP 页同样固定全局：只显示/操作 ~/.pi/agent/mcp.json 与全局只读层，不提供项目作用域。
 	 */
 	const resourceScope: ResourceScope = resourceOnly ? "project" : "global";
 	/** scope=project 时实际使用的项目 id；资源管理器模式直接使用入口项目（Chat 项目无项目资源目录）。 */
@@ -2923,8 +2922,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						{/* forceMount：MCP 页自管草稿，切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
 						<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
 							<div className="config-content flex min-h-0 flex-col">
-								{/* MCP 页自持作用域：项目级 mcp.json 仅此入口，项目下拉与脏保护都在 McpTab 内部 */}
-								<McpTab ref={mcpTabRef} projects={projects} activeProjectId={projectId} onDirtyChange={handleMcpDirtyChange} />
+								{/* MCP 页固定全局作用域（项目下拉已移除）；activeProjectId 只作导入扫描的项目来源。 */}
+								<McpTab ref={mcpTabRef} activeProjectId={projectId} onDirtyChange={handleMcpDirtyChange} />
 							</div>
 						</TabsContent>
 

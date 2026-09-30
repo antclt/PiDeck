@@ -62,12 +62,13 @@ function runBatch(tool, params) {
 	return { promise: result, envelope: () => envelope };
 }
 
-/** 断言 schema 层面已放行：items 的 required 不再包含 type。 */
-test("QuestionSchema：type 不在批量 items 的 required 里（校验层不再硬失败）", () => {
+/** 断言 schema 层面已放行：items 的 required 只保留 question（id/type 均可省略）。 */
+test("QuestionSchema：required 只含 question；id/type 省略不触发校验失败", () => {
 	const tool = registerTool();
 	const itemsRequired = JSON.parse(JSON.stringify(tool.parameters.properties.questions.items.required));
 	assert.ok(!itemsRequired.includes("type"), `required 不应包含 type，实际: ${itemsRequired}`);
-	assert.ok(itemsRequired.includes("id") && itemsRequired.includes("question"));
+	assert.ok(!itemsRequired.includes("id"), `required 不应包含 id（toQuestions 会按序号兑底），实际: ${itemsRequired}`);
+	assert.ok(itemsRequired.includes("question"));
 	// 顶层单问题模式的 type 同样不强制（根级属性全部 Optional，required 键可能被省略）
 	const topRequired = JSON.parse(JSON.stringify(tool.parameters.required ?? []));
 	assert.ok(!topRequired.includes("type"));

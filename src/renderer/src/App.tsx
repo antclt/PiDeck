@@ -72,7 +72,7 @@ import { PromptDeliveryUnknownError } from "./utils/promptErrors";
 import { isLiveRuntimeStatus, requireSessionCommand, resolveSessionRunState, sessionRunCapabilities, SessionCommandFailure, sessionCommandFailureToast, toSessionRuntimeTarget, type SessionRunCapabilities, type SessionRunAction } from "./utils/sessionCommands";
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, resolveChatSessionBootstrap, resolveGuidePageBackend } from "./utils/chatSessionBootstrap";
 import { detectRendererPlatform } from "./lib/detectRendererPlatform";
-import { msUntilNextThemeBoundary } from "../../shared/themeSchedule";
+import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../../shared/themeSchedule";
 
 import { usePiUpdate } from "./hooks/usePiUpdate";
 import { useProviderUsageStartupWarmup } from "./hooks/useProviderUsage";
@@ -152,6 +152,7 @@ import { WorkbenchContent } from "./components/workspace/WorkbenchContent";
 import { RenameModals } from "./components/RenameModals";
 import { SessionActionOverlays } from "./components/overlays/SessionActionOverlays";
 import { SessionProxyDialog } from "./components/session/SessionProxyDialog";
+import { CuaApprovalDialog, useCuaApproval } from "./components/overlays/CuaApprovalDialog";
 
 import { ImportOverlayHost } from "./components/overlays/ImportOverlayHost";
 import { EnvironmentOverlay } from "./components/overlays/EnvironmentOverlay";
@@ -644,6 +645,12 @@ export function App() {
 
 	// localStorage 只负责首屏；展开项目的权威设置必须等首次 settings.get 返回后才参与迁移。
 	const [settingsLoaded, setSettingsLoaded] = useState(false);
+	// 系统明暗（prefers-color-scheme）与跟随时间当前时刻提为 state：驱动 resolvedTheme 重算。
+	// 之前只在外观 effect 里改 data-theme，壁纸注入 effect 感知不到明暗翻转，
+	// 基于旧主题烤进的 inline 壁纸 token 焊死在 root.style 上，「跟随系统」在有背景图时失效（issue #297）。
+	const [systemPrefersDark, setSystemPrefersDark] = useState(() => Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches));
+	// 跟随时间模式到达浅/暗边界的时间戳；null = 尚未到达边界（用当前时刻解析）。
+	const [scheduleNow, setScheduleNow] = useState<Date | null>(null);
 	const [expandedProjectsReady, setExpandedProjectsReady] = useState(false);
 	const [settings, setSettings] = useState<AppSettings>({
 		useNativeTitleBar: true,
@@ -717,8 +724,9 @@ export function App() {
 		wslUser: "root",
 		telemetryEnabled: true,
 		webServiceEnabled: false,
-		webServiceHost: "127.0.0.1",
+		webServiceHost: "0.0.0.0",
 		webServicePort: 8765,
+		webServiceRequiresAuth: true,
 		rpcTimeout: 600_000,
 		linkOpenMode: "external",
 		workspaceContentOpenMode: "split",
@@ -740,6 +748,7 @@ export function App() {
 		idleAgentAutoRelease: true,
 		idleAgentKeepCount: 5,
 		idleAgentTimeoutMin: 60,
+		cuaEnabled: false,
 		favoriteModels: [],
 
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
@@ -766,6 +775,16 @@ export function App() {
 		piRpcOffline: false,
 		piRpcNoExtensions: false,
 		piRpcNoSkills: false,
+	});
+
+	// 已解析明暗（system 跟 OS、schedule 跟本地时钟、其余原样）：进下方外观应用与壁纸注入两个 effect
+	// 的依赖，明暗翻转时壁纸 inline token 才会按新主题重算（issue #297）。
+	const resolvedTheme = resolveAppColorScheme({
+		theme: settings.theme,
+		themeScheduleLightStart: settings.themeScheduleLightStart,
+		themeScheduleDarkStart: settings.themeScheduleDarkStart,
+		systemPrefersDark,
+		now: scheduleNow ?? undefined,
 	});
 
 	// 流式对话行为设置同步给 turn 组件（TurnRow 直接订阅 atom，避免 5 层 props 透传；
@@ -919,6 +938,8 @@ export function App() {
 	const pendingAgentsRef = useRef<PendingAgentTab[]>([]);
 
 	const scratchPad = useScratchPad();
+	// CUA 操作审批：根级订阅主进程推送的审批请求并渲染确认弹框（事件驱动，全局唯一一份）。
+	const cuaApproval = useCuaApproval();
 	// DSH runtime 安装态同步：全进程只挂这一份（IPC 拉取 + 变更订阅 → dshRuntimeStatusAtom）。
 	// 必须早于任何按安装态门控的 UI 计算，否则首帧会用 checking 初值渲染。
 	useDshRuntimeStatusSync();
@@ -1128,38 +1149,37 @@ export function App() {
 	}, [resolvedLocale]);
 
 	useEffect(() => {
+		// 系统明暗翻转 → setState；resolvedTheme 重算驱动下方外观应用与壁纸注入两个 effect 重跑。
 		const media = window.matchMedia?.("(prefers-color-scheme: dark)");
-		const applyTheme = () => {
-			// 明暗 / 外观主题 / 主色统一经 themeAppearance 应用（与设置弹窗实时预览共用实现）：
-			// data-theme(浅暗) + data-appearance(表面色板) + data-accent(主题自带主色)
-			applyAppearanceAttributes(document.documentElement, settings, Boolean(media?.matches));
+		if (!media?.addEventListener) return;
+		const onChange = () => setSystemPrefersDark(Boolean(media.matches));
+		media.addEventListener("change", onChange);
+		return () => media.removeEventListener("change", onChange);
+	}, []);
+
+	useEffect(() => {
+		// 跟随时间：睡到下一次浅色/暗色边界，到点刷新 scheduleNow 驱动重解析，避免每分钟轮询。
+		if (settings.theme !== "schedule") return;
+		let timer: number | undefined;
+		const arm = () => {
+			const delay = msUntilNextThemeBoundary(new Date(), settings.themeScheduleLightStart, settings.themeScheduleDarkStart);
+			timer = window.setTimeout(() => {
+				setScheduleNow(new Date());
+				arm();
+			}, delay);
 		};
-		applyTheme();
-		const cleanups: Array<() => void> = [];
-		if (settings.theme === "system" && media?.addEventListener) {
-			media.addEventListener("change", applyTheme);
-			cleanups.push(() => media.removeEventListener("change", applyTheme));
-		}
-		// 跟随时间：睡到下一次浅色/暗色边界再应用，避免每分钟轮询。
-		if (settings.theme === "schedule") {
-			let timer: number | undefined;
-			const arm = () => {
-				const delay = msUntilNextThemeBoundary(new Date(), settings.themeScheduleLightStart, settings.themeScheduleDarkStart);
-				timer = window.setTimeout(() => {
-					applyTheme();
-					arm();
-				}, delay);
-			};
-			arm();
-			cleanups.push(() => {
-				if (timer !== undefined) window.clearTimeout(timer);
-			});
-		}
+		arm();
 		return () => {
-			for (const cleanup of cleanups) cleanup();
+			if (timer !== undefined) window.clearTimeout(timer);
 		};
+	}, [settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart]);
+
+	useEffect(() => {
+		// 明暗 / 外观主题 / 主色统一经 themeAppearance 应用（与设置弹窗实时预览共用实现）：
+		// data-theme(浅暗) + data-appearance(表面色板) + data-accent(主题自带主色)。
+		applyAppearanceAttributes(document.documentElement, settings, systemPrefersDark);
 		// 依赖 theme 与 accent：只改主题色时也必须重新应用 data-accent（否则界面不变）
-	}, [settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin]);
+	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin, systemPrefersDark]);
 
 	// 外观主题自定义覆盖 + 换肤背景图统一管理（原两个 effect 互相清除：
 	// 皮肤 effect 清 token 时误清壁纸注入、背景 effect 的 else 分支又误清皮肤 bg 键——
@@ -1244,7 +1264,9 @@ export function App() {
 			root.style.removeProperty("--wallpaper-panel-alpha");
 			root.style.removeProperty("--wallpaper-floating-alpha");
 		}
-	}, [settings.themeSkin, settings.theme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity]);
+		// resolvedTheme 必须进依赖：系统明暗翻转/时间边界到达时壁纸 inline token 要按新明暗重算，
+		// 否则上一主题烤进的 color-mix 基色焊死在 root.style 上压过样式表（issue #297）
+	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity]);
 
 	// 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
 	useEffect(() => {
@@ -2634,7 +2656,7 @@ export function App() {
 	}
 
 	async function updateSettings(patch: Partial<AppSettings>) {
-		const changesWebService = "webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch;
+		const changesWebService = "webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch;
 		if (changesWebService) {
 			setWebServiceChanging(true);
 			showToast(patch.webServiceEnabled === false ? t("app.webStopping") : t("app.webApplying"));
@@ -2654,7 +2676,7 @@ export function App() {
 			if ("sendShortcut" in patch) {
 				notice = t("app.sendShortcutSaved");
 			}
-			if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch) {
+			if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch) {
 				notice = next.webServiceEnabled ? t("app.webServiceStarted", { port: next.webServicePort }) : t("app.webServiceStopped");
 			}
 			if ("useNativeTitleBar" in patch) {
@@ -3138,6 +3160,8 @@ export function App() {
 				const target = getRuntimeTargetForAgent(agentId);
 				return target ? api.rpcLogs.get({ target }) : Promise.resolve([]);
 			},
+			// 日志面板 = 右侧抽屉的临时面板：非模态，可与消息区同时使用（旧弹窗打开时发不了消息）
+			openViewer: (agentId) => workspace.openRpcLogPanel(agentId),
 		},
 	};
 
@@ -3858,6 +3882,11 @@ export function App() {
 		minimizeBrowser: () => workspace.minimizeBrowser(),
 		enterBrowserFullscreen: () => workspace.enterBrowserFullscreen(),
 		browserFullscreen,
+		rpcLogAgentId: workspace.rpcLogAgentId,
+		rpcLogListLogs: sidebarActions.rpc.listLogs,
+		rpcLogGetLogging: sidebarActions.rpc.getLogging,
+		rpcLogSetLogging: sidebarActions.rpc.setLogging,
+		closeRpcLogPanel: workspace.closeRpcLogPanel,
 		sessionsProject,
 		sessionsProjectId,
 		files,
@@ -4043,7 +4072,7 @@ export function App() {
 							]}
 						/>
 					}
-					drawerContent={(visibleDrawerPanel) => <DrawerSurface drawer={visibleDrawerPanel} drawerCollapsed={drawerCollapsed} git={drawerPorts.git} chrome={drawerPorts.chrome} browser={drawerPorts.browser} files={drawerPorts.files} />}
+					drawerContent={(visibleDrawerPanel) => <DrawerSurface drawer={visibleDrawerPanel} drawerCollapsed={drawerCollapsed} git={drawerPorts.git} chrome={drawerPorts.chrome} browser={drawerPorts.browser} files={drawerPorts.files} rpcLog={drawerPorts.rpcLog} />}
 					setListCollapsed={setListCollapsed}
 					setListWidth={setListWidth}
 					setDrawerCollapsed={setDrawerCollapsed}
@@ -4333,6 +4362,9 @@ export function App() {
 				{/* 数据环境弹窗族：首启数据模式选择（内含导入向导）与目录标记警告，事件/atom 驱动 */}
 				<DataModeChoiceDialog />
 				<DataEnvMismatchDialog />
+
+				{/* CUA 操作审批弹框：pi Agent 注入鼠标/键盘前的用户确认（事件驱动，根级渲染） */}
+				<CuaApprovalDialog request={cuaApproval.request} responding={cuaApproval.responding} open={cuaApproval.open} onOpenChange={cuaApproval.setOpen} onRespond={(allowed) => void cuaApproval.respond(allowed)} onCancel={cuaApproval.cancel} />
 			</>
 		</FileLinkBaseProvider>
 	);

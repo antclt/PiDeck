@@ -1,5 +1,8 @@
 import type { PiExtensionSummary, PiPromptTemplateSummary, PiSkillLocation, PiSkillSummary, ProjectResourceDiscoveryResult, ProjectResourceListResult } from "../../../shared/types";
 
+/** 资源作用域：全局（Pi 用户层）或单个项目（项目资源目录）。 */
+export type ResourceScope = "global" | "project";
+
 export const PROJECT_SKILL_SOURCES: ReadonlySet<PiSkillLocation["id"]> = new Set(["project-pi", "project-agents"]);
 
 export const GLOBAL_SKILL_SOURCES: ReadonlySet<PiSkillLocation["id"]> = new Set(["pi-global", "agents-global"]);

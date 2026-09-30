@@ -11,6 +11,7 @@ import { registerSoundIpc } from "./ipc/soundIpc";
 import { registerSoundProtocol } from "./sounds/soundProtocol";
 import { AnnouncementService } from "./announcements/AnnouncementService";
 import { registerAnnouncementIpc } from "./ipc/announcementIpc";
+import { CuaService } from "./cua/CuaService";
 import { AutomationStore } from "./automation/AutomationStore";
 import { AutomationScheduler } from "./automation/AutomationScheduler";
 import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
@@ -275,6 +276,7 @@ import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
+import { startTrayRegistrationVerify, type TrayRegistrationVerify } from "./tray/trayRegistrationVerify";
 import { TelemetryService } from "./telemetry/TelemetryService";
 import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
@@ -327,8 +329,10 @@ import { registerResourceImportIpc } from "./ipc/resourceImportIpc";
 import { registerBackupIpc } from "./ipc/backupIpc";
 import { registerCatalogIpc } from "./ipc/catalogIpc";
 import { registerQuickMessagesIpc } from "./ipc/quickMessagesIpc";
+import { registerReplyActionsIpc } from "./ipc/replyActionsIpc";
 import { QuickMessageStore } from "./quickmessages/QuickMessageStore";
-import { QUICK_MESSAGES_DEFAULT_RESOURCE_NAME, QUICK_MESSAGES_FILE_NAME } from "../shared/quickMessages";
+import { ReplyActionRuleStore } from "./replyactions/ReplyActionRuleStore";
+import { QUICK_MESSAGES_DEFAULT_RESOURCE_NAME, QUICK_MESSAGES_FILE_NAME, REPLY_ACTIONS_DEFAULT_RESOURCE_NAME, REPLY_ACTIONS_FILE_NAME } from "../shared/quickMessages";
 import { getPiAiCatalogIndex, lookupPiAiCatalogEntry, setPiAiCatalogUserDataDir } from "./pi/piAiBuiltinCatalog";
 import { PiAiCatalogUpdater } from "./pi/PiAiCatalogUpdater";
 import { fetchModelList, refreshModelCatalogIfStale, refreshModelList } from "./pi/modelListCache";
@@ -370,6 +374,8 @@ const quickTaskChrome = new QuickTaskWindowChrome({
 	saveWorkbenchBounds: (bounds) => saveLastWindowBounds(app.getPath("userData"), bounds),
 });
 let tray: Tray | null = null;
+/** Linux 托盘注册验收器（见 tray/trayRegistrationVerify.ts），退出清理里与 tray 一起停 */
+let trayRegistrationVerify: TrayRegistrationVerify | null = null;
 /** 标记是否由用户主动退出（托盘菜单「退出」），区别于窗口关闭隐藏到托盘 */
 let isQuitting = false;
 /** 渲染进程崩溃自动恢复守卫（2026-08 黑屏治理，见 window/rendererCrashRecovery.ts）：
@@ -429,6 +435,8 @@ let petSystem: PetSystem | null = null;
 let soundAlertService: SoundAlertService | null = null;
 /** 应用公告服务（无服务器拉取模式）；null = 未初始化 */
 let announcementService: AnnouncementService | null = null;
+/** CUA（Computer Use Agent）服务；null = 未初始化 */
+let cuaService: CuaService | null = null;
 /** 定时任务与自动化服务；null = 未初始化 */
 let automationStore: AutomationStore | null = null;
 let automationScheduler: AutomationScheduler | null = null;
@@ -1307,23 +1315,45 @@ focusExistingWindow = handleVersionFocusRequest;
 function setupTray() {
 	// iconPath 由 electron-vite 的 ?asset 后缀自动解析，打包后也能正确定位
 	const icon = nativeImage.createFromPath(iconPath);
-	tray = new Tray(icon.resize({ width: 16, height: 16 }));
-	tray.setToolTip("PiDeck");
-	// C12：退出清理登记（before-quit 统一 runAll）
+
+	/** 创建托盘实例；首次创建与自愈重建共用同一条路径，避免两处行为漂移。 */
+	const createTrayInstance = (): Tray => {
+		const instance = new Tray(icon.resize({ width: 16, height: 16 }));
+		instance.setToolTip("PiDeck");
+		// 双击托盘图标恢复窗口（Windows 常见交互）
+		instance.on("double-click", () => {
+			if (mainWindow && !mainWindow.isDestroyed()) {
+				mainWindow.show();
+				mainWindow.focus();
+			}
+		});
+		return instance;
+	};
+
+	tray = createTrayInstance();
+	refreshTrayContextMenu();
+
+	// C12：退出清理登记（before-quit 统一 runAll）——验收器必须一起停，
+	// 否则退出阶段还会把已销毁的 tray 再重建一次。
 	quitCleanup.register("tray", () => {
+		trayRegistrationVerify?.stop();
+		trayRegistrationVerify = null;
 		tray?.destroy();
 		tray = null;
 	});
 
-	// 双击托盘图标恢复窗口（Windows 常见交互）
-	tray.on("double-click", () => {
-		if (mainWindow && !mainWindow.isDestroyed()) {
-			mainWindow.show();
-			mainWindow.focus();
-		}
-	});
-
-	refreshTrayContextMenu();
+	// Linux/GNOME 托盘注册诊断（见 tray/trayRegistrationVerify.ts）：旧版 appindicator 扩展
+	// (< v66) 读不到 SNI 属性会永久放弃图标且不再重试（closeToTray 默认开启时，
+	// 用户点 X 隐藏后就再无唤回入口）。根因与修复见 docs/linux-tray-icon.md。
+	// 这里只验收并记日志，不做重建 —— 重建换名并不能改变扩展的读法，实测无效。
+	if (process.platform === "linux") {
+		trayRegistrationVerify = startTrayRegistrationVerify({
+			onUnregistered: (detail) => {
+				void appLogger?.warn("app", "tray verify: unregistered (likely appindicator extension < v66), see docs/linux-tray-icon.md", detail);
+			},
+			onLog: (message, detail) => void appLogger?.info("app", message, detail),
+		});
+	}
 }
 
 async function openExternalUrl(url: string, forceSystem = false) {
@@ -2796,7 +2826,6 @@ function registerIpc() {
 			discoverDshModels: (input) => dshHost.discoverModels(input),
 			listDshProviders: () => dshHost.listProviders(),
 			listDshAgentPresets: () => dshHost.listAgentPresets(),
-			removeDshAgentPreset: (id: string) => dshHost.removeAgentPreset(id),
 			getDshDefaultModel: () => Promise.resolve(dshHost.getDefaultModelSelection()),
 			getDshStatus: () => dshHost.getStatus(),
 			// AgentRuntimeProvider 阶段 1：runtime 安装态门控（未安装时 UI 走安装引导、
@@ -3087,6 +3116,14 @@ function registerIpc() {
 		log: (scope, message, detail) => void appLogger.info(scope, message, detail),
 	});
 	registerQuickMessagesIpc(quickMessageStore, (scope, message, detail) => void appLogger.info(scope, message, detail));
+	// 回复快捷操作：最新回复尾部的建议条，规则可由用户编辑（userData/reply-actions.json），
+	// 出厂规则来自随包资源 reply-actions.default.json（提交/推送/重试/继续等常用工程操作）。
+	const replyActionRuleStore = new ReplyActionRuleStore({
+		getConfigPath: () => join(app.getPath("userData"), REPLY_ACTIONS_FILE_NAME),
+		getDefaultConfigPath: () => (app.isPackaged ? join(process.resourcesPath, REPLY_ACTIONS_DEFAULT_RESOURCE_NAME) : join(app.getAppPath(), "resources", REPLY_ACTIONS_DEFAULT_RESOURCE_NAME)),
+		log: (scope, message, detail) => void appLogger.info(scope, message, detail),
+	});
+	registerReplyActionsIpc(replyActionRuleStore, (scope, message, detail) => void appLogger.info(scope, message, detail));
 	registerBuiltInExtensionIpc(builtInExtensionsUpdater);
 	// TokenDance 目录 store 是共享实例：渲染层目录展示与一键安装（写入配置）读同一份缓存。
 	const tokendanceCatalogStore = new TokendanceCatalogStore({
@@ -3177,6 +3214,15 @@ function registerIpc() {
 		restartWebService: (settings) => webServiceManager.restart(settings),
 		reactToPetSettings: async (prev, next) => {
 			await petSystem?.reactToSettings(prev, next);
+		},
+		// CUA 开关：开启时启动进程内 MCP 端点并写入 pi 的 mcp.json，关闭时停端点并注销。
+		reactToCuaSettings: async (prev, next) => {
+			if (!cuaService || prev.cuaEnabled === next.cuaEnabled) return;
+			if (next.cuaEnabled) {
+				await cuaService.start();
+			} else {
+				await cuaService.stop();
+			}
 		},
 		applyNativeThemeSource,
 		refreshTrayContextMenu,
@@ -3676,6 +3722,9 @@ app
 		);
 		// C12：退出清理登记（before-quit 统一 runAll，新增资源不再改 before-quit）
 		quitCleanup.register("pi-agents", () => agentManager?.stopAll());
+		// RPC 日志是合并落盘的（250ms / 256 行刷一批），退出前把缓冲刷干净。
+		// 必须排在 pi-agents 之后：runAll 顺序执行，先停进程（最后几条日志在这里产生）再刷盘。
+		quitCleanup.register("rpc-logs-flush", () => rpcLogger?.flushPending());
 		// GUI 扩展桥端点：关掉监听，释放端口（桥随 pi 子进程一起结束）
 		quitCleanup.register("gui-bridge", () => stopBridgeServer());
 		// 开发诊断必须在 registerIpc 之前创建：systemIpc 闭包捕获这个实例。
@@ -4541,6 +4590,24 @@ app
 		quitCleanup.register("announcement", () => {
 			announcementService?.stop();
 			announcementService = null;
+		});
+
+		// CUA（Computer Use Agent）：观察屏幕 + 注入鼠标/键盘输入，供 pi Agent 通过
+		// `pideck-cua` MCP（主进程内 StreamableHTTP 端点）调用。默认关闭（cuaEnabled=false）：
+		// 只有开启时才监听本地端点并写入 ~/.pi/agent/mcp.json，关闭时零副作用（不监听、不改 pi 配置）。
+		// 真实输入注入另有「每次操作审批门 + 全局/会话杀开关」双重兜底（见 cua/CuaGate.ts）。
+		cuaService = new CuaService({
+			getMainWindow: () => mainWindow,
+			log: (domain, message, details) => void appLogger.info(domain, message, details),
+		});
+		if (settingsStore.get().cuaEnabled) {
+			void cuaService.start().catch((error) => {
+				void appLogger.warn("cua", "CUA service start failed", error);
+			});
+		}
+		quitCleanup.register("cua", () => {
+			void cuaService?.dispose();
+			cuaService = null;
 		});
 
 		// 启动后异步检查 RPC 超时时间，如果小于 600 秒则自动修正为 600 秒

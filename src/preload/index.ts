@@ -3,6 +3,7 @@ import { ipcChannels } from "../shared/ipc";
 import type { TokendanceAuthMode } from "../shared/tokendance";
 import type { AnnouncementState } from "../shared/types/announcement";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
+import type { ModelTraceRecord } from "../shared/types/bridge";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
 import type { DshHomeSharingState } from "../shared/types/dshHome";
 import type { UserDataNameMigrationNotice } from "../shared/types/userDataMigration";
@@ -28,6 +29,7 @@ import type {
 } from "../shared/types/voiceTranscription";
 import type { WhisperInstallProgress, WhisperInstallResult, WhisperRuntimeStatus } from "../shared/types/whisperRuntime";
 import type { QuickMessagesSaveResult, QuickMessagesSnapshot } from "../shared/types/quickMessages";
+import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
 	YaoPromptListResult,
 	YaoPromptDetailResult,
@@ -419,15 +421,12 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.dshAgentPresets) as Promise<
 				Array<{
 					id: string;
-					trust: "system" | "user";
 					isDefault: boolean;
 					name?: string;
 					description?: string;
 					broken?: string;
 				}>
 			>,
-		/** DSH 删除本地（user）预设（agentPreset.remove）；system 预设由 host 拒绝。 */
-		removeDshAgentPreset: (id: string) => ipcRenderer.invoke(ipcChannels.dshAgentPresetRemove, id) as Promise<void>,
 		/** DSH 部署默认模型选择（settings.yaml agent-default-model），未装配/不可读时 undefined。 */
 		getDshDefaultModel: () =>
 			ipcRenderer.invoke(ipcChannels.dshDefaultModel) as Promise<
@@ -880,6 +879,8 @@ const api = {
 		get: (options?: { target?: SessionRuntimeTarget; days?: number; limit?: number }) => ipcRenderer.invoke(ipcChannels.rpcLogsGet, options) as Promise<RpcLogEntry[]>,
 		/** 实时查看弹窗初始历史：主进程环形缓冲（按 agentId 过滤） */
 		getLive: (agentId?: string) => ipcRenderer.invoke(ipcChannels.rpcLogsGetLive, agentId) as Promise<RpcLogEntry[]>,
+		/** 模型请求快照的完整请求体（面板展开模型行时按 traceId 回读；缺失返回 null） */
+		getModelTrace: (options: { agentId: string; traceId: string }) => ipcRenderer.invoke(ipcChannels.rpcLogsGetModelTrace, options) as Promise<ModelTraceRecord | null>,
 		/** 把弹窗中的日志条目合并写入该 agent 的自动日志文件（按 id 去重），返回写入的文件路径列表 */
 		save: (options: { entries: RpcLogEntry[] }) => ipcRenderer.invoke(ipcChannels.rpcLogsSave, options) as Promise<string[]>,
 		/** 订阅主进程批量推送的实时日志（按 agent 聚合，~80ms 一次），返回退订函数 */
@@ -887,6 +888,8 @@ const api = {
 		clear: (target?: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.rpcLogsClear, target) as Promise<void>,
 		setLogging: (target: SessionRuntimeTarget, enabled: boolean) => ipcRenderer.invoke(ipcChannels.rpcLoggingSet, target, enabled) as Promise<boolean>,
 		getLogging: (target: SessionRuntimeTarget) => ipcRenderer.invoke(ipcChannels.rpcLoggingGet, target) as Promise<boolean>,
+		/** 登记「该 agent 的实时日志面板是否在看」：主进程据此决定是否广播（面板挂载 true / 卸载 false） */
+		setWatching: (agentId: string, watching: boolean) => ipcRenderer.invoke(ipcChannels.rpcLogsSetWatching, agentId, watching) as Promise<boolean>,
 	},
 	app: {
 		info: () => ipcRenderer.invoke(ipcChannels.appInfo) as Promise<AppInfo>,
@@ -1412,6 +1415,15 @@ const api = {
 		openFile: () => ipcRenderer.invoke(ipcChannels.quickMessagesOpenFile) as Promise<void>,
 	},
 
+	// ── 回复快捷操作（规则文件 userData/reply-actions.json，结构与快捷消息同构） ──
+	replyActions: {
+		get: () => ipcRenderer.invoke(ipcChannels.replyActionsGet) as Promise<ReplyActionsSnapshot>,
+		/** 整体保存规则数组（顺序即展示顺序，空数组 = 清空） */
+		save: (items: ReplyActionRule[]) => ipcRenderer.invoke(ipcChannels.replyActionsSave, items) as Promise<ReplyActionsSaveResult>,
+		/** 用系统默认程序打开规则文件（路径由主进程解析，文件不存在时会先生成） */
+		openFile: () => ipcRenderer.invoke(ipcChannels.replyActionsOpenFile) as Promise<void>,
+	},
+
 	// ── 定时任务与自动化 ──
 	automation: {
 		getSnapshot: () => ipcRenderer.invoke(ipcChannels.automationGetSnapshot) as Promise<AutomationSnapshot>,
@@ -1425,6 +1437,18 @@ const api = {
 		updateSettings: (patch: UpdateAutomationSettingsInput) => ipcRenderer.invoke(ipcChannels.automationUpdateSettings, patch) as Promise<AutomationSettings>,
 		previewCron: (expression: string, count?: number) => ipcRenderer.invoke(ipcChannels.automationPreviewCron, expression, count) as Promise<AutomationCronPreview>,
 		onChanged: (callback: (event: AutomationChangedEvent) => void) => subscribe<AutomationChangedEvent>(ipcChannels.automationChanged, callback),
+	},
+
+	// ── CUA 审批门 ──
+	cua: {
+		/** 监听审批请求（主进程 → 渲染层）。 */
+		onApprovalRequest: (callback: (request: { requestId: string; action: string; sessionId: string; detail: unknown; timestampMs: number }) => void) => subscribe(ipcChannels.cuaApprovalRequest, callback),
+		/** 回传审批结果（渲染层 → 主进程）。 */
+		sendApprovalResponse: (requestId: string, response: { allowed: boolean; reason?: string }) => ipcRenderer.invoke(ipcChannels.cuaApprovalResponse, requestId, response) as Promise<void>,
+		/** 拉取 CUA 开关状态。 */
+		getState: () => ipcRenderer.invoke(ipcChannels.cuaGetState) as Promise<{ enabled: boolean; sessionOverrides: Record<string, boolean> }>,
+		/** 设置 CUA 开关。 */
+		setState: (patch: { enabled?: boolean; sessionOverride?: { sessionId: string; enabled: boolean | null } }) => ipcRenderer.invoke(ipcChannels.cuaSetState, patch) as Promise<{ enabled: boolean; sessionOverrides: Record<string, boolean> }>,
 	},
 };
 

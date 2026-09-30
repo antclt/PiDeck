@@ -119,10 +119,64 @@ test("reduceSnapshot: missing id returns unchanged", () => {
 	assert.equal(changed, false);
 });
 
-test("reduceSnapshot: started without prior created ignored", () => {
+test("reduceSnapshot: started without prior created upserts running entry", () => {
 	const { reduceSnapshot } = loadBridgeModule();
-	const { state, changed } = reduceSnapshot(new Map(), "subagents:started", { id: "ghost" });
+	// 前台子代理走 spawnAndWait，插件不发 created（仅后台派发时发）；started 是运行期间
+	// 唯一信号，无既有条目时必须直接 upsert，否则快照 agents 为空、面板整块不渲染。
+	const { state, changed } = reduceSnapshot(new Map(), "subagents:started", {
+		id: "ghost",
+		type: "Explore",
+		description: "find files",
+	});
+	assert.equal(changed, true);
+	const agent = state.get("ghost");
+	assert.equal(agent?.id, "ghost");
+	assert.equal(agent?.status, "running");
+	assert.equal(agent?.type, "Explore");
+	assert.equal(agent?.description, "find files");
+	assert.equal(agent?.toolUses, 0);
+	assert.equal(agent?.tokens, 0);
+	assert.equal(typeof agent?.startedAt, "number");
+});
+
+test("reduceSnapshot: repeated started is idempotent and keeps startedAt", () => {
+	const { reduceSnapshot } = loadBridgeModule();
+	const first = reduceSnapshot(new Map(), "subagents:started", { id: "fg-1", type: "Explore", description: "d" });
+	assert.equal(first.changed, true);
+	const startedAt = first.state.get("fg-1")?.startedAt;
+	const second = reduceSnapshot(first.state, "subagents:started", { id: "fg-1", type: "Explore", description: "d" });
+	assert.equal(second.changed, false);
+	assert.equal(second.state.get("fg-1")?.startedAt, startedAt);
+});
+
+test("reduceSnapshot: started without id is ignored", () => {
+	const { reduceSnapshot } = loadBridgeModule();
+	const { state, changed } = reduceSnapshot(new Map(), "subagents:started", { type: "Explore" });
 	assert.equal(changed, false);
+	assert.equal(state.size, 0);
+});
+
+test("reduceSnapshot: started-only entry migrates to completed with terminal payload", () => {
+	const { reduceSnapshot } = loadBridgeModule();
+	const started = reduceSnapshot(new Map(), "subagents:started", { id: "fg-2", type: "Explore", description: "d" });
+	assert.equal(started.changed, true);
+	const startedAt = started.state.get("fg-2")?.startedAt;
+	const done = reduceSnapshot(started.state, "subagents:completed", {
+		id: "fg-2",
+		status: "completed",
+		toolUses: 5,
+		// 上游 21.7.4 终态 tokens 是 {input,output,total} 对象，桥接 extractFields 用 safeNumber(d.tokens)
+		// 折算 → 对象恒为 0（既有缺陷，本次不修）。夹具用真实载荷形状，锁定「对象载荷不报错、不误透传」的现状。
+		tokens: { input: 100, output: 200, total: 300 },
+		durationMs: 42000,
+	});
+	assert.equal(done.changed, true);
+	const agent = done.state.get("fg-2");
+	assert.equal(agent?.status, "completed");
+	assert.equal(agent?.toolUses, 5);
+	// 既有 tokens 形状缺陷：对象载荷被 safeNumber 折算为 0（修复另议，不在本补丁范围）
+	assert.equal(agent?.tokens, 0);
+	assert.equal(agent?.completedAt, startedAt + 42000);
 });
 
 test("reduceSnapshot: steered transitions to steered state", () => {
@@ -537,4 +591,48 @@ test("bridge extension: session_shutdown 无在飞条目时不落盘、落盘失
 		threw = true;
 	}
 	assert.equal(threw, false);
+});
+
+test("bridge extension: 前台 started-only 事件经去抖推送 running 快照到 widget", async () => {
+	const { default: bridge } = loadBridgeModule();
+	const { pi, handlers, lifecycle, appendedEntries } = createMockPi();
+	bridge(pi);
+
+	// 事件回调没有 ctx，setWidget 走 session_start 保存的 ctx.ui 引用
+	const widgetCalls = [];
+	const ctx = { ui: { setWidget: (key, lines) => widgetCalls.push({ key, lines }) } };
+	lifecycle.get("session_start")({ type: "session_start" }, ctx);
+	handlers.get("subagents:started")({ id: "fg-widget", type: "Explore", description: "foreground task" });
+
+	// schedulePush 去抖 200ms
+	await new Promise((resolve) => setTimeout(resolve, 300));
+
+	const last = widgetCalls.at(-1);
+	assert.equal(last.key, "pi-deck-subagents");
+	const snapshot = JSON.parse(last.lines[0]);
+	assert.equal(snapshot.v, 1);
+	const agent = snapshot.agents.find((a) => a.id === "fg-widget");
+	assert.ok(agent, "运行中的前台子代理应出现在快照 agents 中（面板整块按 entries 渲染）");
+	assert.equal(agent.status, "running");
+	assert.equal(agent.type, "Explore");
+	assert.equal(agent.description, "foreground task");
+	// 决策：不给 started 补 start 锚点——读取侧会把残留锚点合成 stopped，运行期间重取 record 会误显示为已停止
+	assert.equal(appendedEntries.length, 0);
+});
+
+test("bridge extension: session_shutdown 给仅 started 建立的 running 条目补 stopped record", () => {
+	const { default: bridge } = loadBridgeModule();
+	const { pi, handlers, lifecycle, appendedEntries } = createMockPi();
+	bridge(pi);
+
+	// 前台子代理只有 started、无 created：关闭时同样要补终态，否则旧会话文件永远停在 running
+	handlers.get("subagents:started")({ id: "fg-live", type: "Explore", description: "d" });
+	assert.equal(appendedEntries.length, 0);
+	lifecycle.get("session_shutdown")({ type: "session_shutdown", reason: "quit" });
+
+	assert.equal(appendedEntries.length, 1);
+	assert.equal(appendedEntries[0].type, "subagents:record");
+	assert.equal(appendedEntries[0].data.id, "fg-live");
+	assert.equal(appendedEntries[0].data.status, "stopped");
+	assert.equal(typeof appendedEntries[0].data.completedAt, "number");
 });

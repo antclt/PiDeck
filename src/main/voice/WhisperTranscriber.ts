@@ -82,6 +82,8 @@ export class WhisperTranscriber {
 		const pid = this.inFlight.get(requestId);
 		if (pid === undefined) return;
 		this.cancelled.add(requestId);
+		// 杀外部进程树要留痕：否则用户只看到转写中断，无从知道应用动了哪个进程
+		this.deps.log("transcription cancelled (kill process tree)", { requestId, pid });
 		killProcessTree(pid);
 	}
 
@@ -113,6 +115,7 @@ export class WhisperTranscriber {
 				windowsHide: true,
 				env: this.deps.getEnv?.(),
 			});
+			this.deps.log("whisper-cli spawned", { pid: child.pid, cliPath });
 			let stdout = "";
 			let stdoutBytes = 0;
 			let overflowed = false;

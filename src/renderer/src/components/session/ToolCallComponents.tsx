@@ -1,5 +1,5 @@
 import { memo, useState, type ReactNode } from "react";
-import { Brain, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, FileText, Folder, Globe2, Loader2, MessageCircle, Network, Search, Square, SquarePen, Terminal, Wrench } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, FileText, Folder, Globe2, Loader2, MessageCircle, Network, Scissors, Search, Square, SquarePen, Terminal, Wrench } from "lucide-react";
 import { countTextLines, getToolEditDiff, getToolFilePath, parseToolArgs, type ToolGroupItem } from "../app/AppUtils";
 import { t } from "../../i18n";
 import { formatAskTitle } from "../../utils/askUi";
@@ -15,6 +15,7 @@ import { getToolPhraseFromArgs } from "./timeline/toolPhrase";
 import { ToolResult, ToolResultOutput } from "../agents/tool-result";
 import { FileDiff } from "../agents/file-diff";
 import { desktopApi } from "../../desktopApi";
+import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { formatDuration, getToolDetailText, getToolDiffTarget, getToolExitCode, getToolLiveStartTimestamp, getToolName, getToolStatus, fileChangeToDiffLines } from "./TimelineFormat";
 import { BridgeGuiSlot } from "../bridge/BridgeSlot";
 import { useInsideProcessGroupBody } from "./turn/processGroupScrollContext";
@@ -186,6 +187,10 @@ export const ToolCard = memo(function ToolCard(props: {
 	// 工具结果截断标记（主进程 truncateDetailWithMeta 写入）：展开区可「查看完整输出」
 	// 按需读取（运行期走主进程内存缓存，历史会话定位读会话文件）。
 	const isTruncated = props.message.meta?.truncated === true;
+	// pi 侧截断（pi 0.99 起 bash/powershell 输出 >1 MiB 时 result.details.truncation）：
+	// 丢的是 pi 没进上下文的内容，完整文件在 resultTruncation.fullOutputPath，与上面
+	// 展示层截断是两件事，因此单独给一行可复制路径而不是复用「查看完整输出」。
+	const piTruncation = props.message.meta?.resultTruncation as { fullOutputPath?: string } | undefined;
 	const [fullText, setFullText] = useState<string | null>(null);
 	const [fullLoading, setFullLoading] = useState(false);
 	const [fullError, setFullError] = useState(false);
@@ -395,6 +400,19 @@ export const ToolCard = memo(function ToolCard(props: {
 								</ToolResult>
 							</>
 						)}
+						{piTruncation?.fullOutputPath ? (
+							// pi 侧截断提示：完整输出在磁盘文件里，给出路径 + 一键复制（PiDeck 不代读
+							// pi 的截断文件：那是 pi 的内部产物，路径交给用户自行查看/检索）。
+							<div className="flex items-center gap-2 pl-1 pb-1">
+								<Scissors size={12} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+								<span className="min-w-0 flex-1 truncate text-chat-detail text-text-tertiary" title={piTruncation.fullOutputPath}>
+									{t("tool.piOutputTruncated", { path: piTruncation.fullOutputPath })}
+								</span>
+								<Button type="button" variant="ghost" size="sm" className="h-auto px-1 py-0 text-chat-detail text-text-tertiary hover:text-text-secondary" onClick={() => void copyTextWithCopiedNotice(piTruncation.fullOutputPath ?? "")}>
+									{t("tool.copyPath")}
+								</Button>
+							</div>
+						) : null}
 						{isTruncated && !fullText && (
 							// 截断提示后的按需加载入口：内容完整与否由主进程决定（内存缓存/会话文件），
 							// 失败时保留重试，不让用户卡死在加载态。

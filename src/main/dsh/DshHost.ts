@@ -13,7 +13,7 @@ import { dshManuallyStoppedError } from "./dshManualStop";
 import { applyDshBillBackfillPatch } from "./dshBillBackfillPatch";
 import { DshRemoteClient } from "./dshRemoteClient";
 import { toDshAvailableModels, toDshFetchedModels, unwrapDshDiscoveryModels } from "./dshModels";
-import { parseAgentDefaultModel } from "./dshDefaultModel";
+import { isRecord, readDshSettingsSnapshot } from "./dshProfileSettings";
 import { credentialValueFromDocument, isValidCredentialRef } from "./dshCredentials";
 import { workspaceDirFor, findDshSessionDir, dshSessionFilePath } from "./dshSessionPath";
 import { toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
@@ -896,13 +896,12 @@ export class DshHost {
 	}
 
 	/**
-	 * DSH agent 预设目录（agentPreset.list）：会话 agent 的组合预设（standard/code/…）。
-	 * 只读展示（id/trust/isDefault/名称/描述），配置页「预设设置」分区用。
+	 * DSH agent 预设目录（agentPresets/list）：会话 agent 的组合预设（standard/ptc/…）。
+	 * 只读展示（id/isDefault/名称/描述），配置页「预设设置」分区用。
 	 */
 	async listAgentPresets(): Promise<
 		Array<{
 			id: string;
-			trust: "system" | "user";
 			isDefault: boolean;
 			name?: string;
 			description?: string;
@@ -927,9 +926,8 @@ export class DshHost {
 				hint: "agent-presets 组合行未装配时 PiDeck 隐藏会话头模式胶囊（与 dsh-web 一致）",
 			});
 		}
-		return presets.map((preset: { id: string; trust: "system" | "user"; isDefault: boolean; name?: string; description?: string; broken?: string }) => ({
+		return presets.map((preset: { id: string; isDefault: boolean; name?: string; description?: string; broken?: string }) => ({
 			id: preset.id,
-			trust: preset.trust,
 			isDefault: preset.isDefault,
 			...(typeof preset.name === "string" && preset.name ? { name: preset.name } : {}),
 			...(typeof preset.description === "string" && preset.description ? { description: preset.description } : {}),
@@ -937,33 +935,12 @@ export class DshHost {
 		}));
 	}
 
-	/**
-	 * 删除本地（user）预设（agentPreset.remove）。host 拒绝删除 system 预设
-	 * （随部署安装的组合行，不是用户的删除对象）；user 预设来自
-	 * $DSH_HOME/.agent-presets 用户根（dsh-web「复制预设」与 PiDeck 同一目录）。
-	 */
-	async removeAgentPreset(id: string): Promise<void> {
-		await this.ensureStarted();
-		const client = this.client;
-		if (!client) throw new Error("DSH host is not started");
-		const removed = await client.agentPresetsRemove({ agentPreset: id });
-		if (!removed.result.ok) {
-			throw new Error(`dsh agentPreset.remove failed: ${JSON.stringify(removed.result.error)}`);
-		}
-	}
-
-	/**
-	 * 部署默认模型选择（settings.yaml 的 agent-default-model 段）。
-	 * 草稿/未激活会话的底栏与选择器展示默认模型/思考档位用；无需启动 host
-	 * （直接读 DSH_HOME/settings.yaml，host 写出的简单 YAML）。文件缺失或解析
-	 * 失败返回 undefined，调用方回退为不展示默认值。
-	 */
+	/** 草稿会话读取已保存的 profile 默认模型；尚未迁移时兼容旧 settings.yaml。 */
 	getDefaultModelSelection(): import("./dshDefaultModel").DshDefaultModel | undefined {
-		const home = this.getHomeDir();
-		const filePath = join(home, "settings.yaml");
-		if (!existsSync(filePath)) return undefined;
 		try {
-			return parseAgentDefaultModel(readFileSync(filePath, "utf8"));
+			const value = readDshSettingsSnapshot(this.getHomeDir())["agent-default-model"];
+			if (!isRecord(value) || typeof value.provider !== "string" || !value.provider || typeof value.model !== "string" || !value.model) return undefined;
+			return { provider: value.provider, model: value.model, ...(typeof value.reasoningEffort === "string" ? { reasoningEffort: value.reasoningEffort } : {}) };
 		} catch {
 			return undefined;
 		}

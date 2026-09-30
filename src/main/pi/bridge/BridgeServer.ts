@@ -8,6 +8,8 @@
  * - `POST /bridge/<token>/ui`：桥推更新（body `{updates:[...]}`），
  *   响应体带回待处理事件 `{events:[...]}`（一次往返完成双向）；
  *   渲染层要求重同步时额外带 `{resync:true}`，桥据此全量重推一次（§9.4）
+ * - `POST /bridge/<token>/model-trace`：pi-deck-model-trace 扩展推模型请求快照
+ *   （`ModelTraceInput`，同一 token 鉴权；会话由 token 反查，不新开端口/通道）
  * - 只绑 `127.0.0.1`，只认带正确 token 的请求
  *
  * **fail-safe**：端点起不来只是「桥不工作」，pi 会话与 PiDeck 都照常（§14.5）。
@@ -15,7 +17,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import type { BridgeEvent, BridgeUpdate } from "../../../shared/types/bridge";
+import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../../shared/types/bridge";
 import { getAppLogger } from "../../logging/sharedLogger";
 
 /** 单个 agent 的桥会话。 */
@@ -36,6 +38,11 @@ type BridgeSession = {
 	resyncRequested: boolean;
 	/** 收到更新时的回调（由 AgentManager 注入，负责转发给渲染进程）。 */
 	onUpdate: (update: BridgeUpdate) => void;
+	/**
+	 * 收到模型请求快照时的回调（由 AgentManager 注入）。
+	 * 缺省表示不采集（旧调用方/测试）：快照被静默丢弃，桥其余功能不受影响。
+	 */
+	onModelTrace?: (trace: ModelTraceInput) => void;
 };
 
 /** 端点启动结果。 */
@@ -123,9 +130,10 @@ export class BridgeServer {
 	/**
 	 * 为一个 agent 注册桥会话，返回要注入给 pi 的环境变量。
 	 *
-	 * `onUpdate` 由 AgentManager 注入：收到桥的更新后转发给渲染进程。
+	 * `onUpdate` 由 AgentManager 注入：收到桥的更新后转发给渲染进程；
+	 * `onModelTrace` 同理，接收 pi-deck-model-trace 推来的模型请求快照。
 	 */
-	registerAgent(agentId: string, onUpdate: (update: BridgeUpdate) => void): { url: string; token: string } {
+	registerAgent(agentId: string, onUpdate: (update: BridgeUpdate) => void, onModelTrace?: (trace: ModelTraceInput) => void): { url: string; token: string } {
 		// 同 agentId 重复注册（重启/重连）→ 复用 token，保留队列
 		const existing = this.findByAgent(agentId);
 		const token = existing?.token ?? randomUUID();
@@ -137,6 +145,7 @@ export class BridgeServer {
 			updateCount: existing?.updateCount ?? 0,
 			resyncRequested: existing?.resyncRequested ?? false,
 			onUpdate,
+			onModelTrace: onModelTrace ?? existing?.onModelTrace,
 		};
 		this.sessions.set(token, session);
 		this.agentByToken.set(token, agentId);
@@ -198,23 +207,26 @@ export class BridgeServer {
 
 	/** 处理一次桥的请求。任何异常都返回 200 空体，避免桥侧重试风暴。 */
 	private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+		// 异常兜底响应按路由区分：/ui 的桥期待 {events}，trace 侧不解析响应体
+		let route: "ui" | "model-trace" = "ui";
 		try {
 			if (req.method !== "POST") {
 				this.respond(res, 405, { error: "method not allowed" });
 				return;
 			}
 			const url = req.url ?? "";
-			// 路径形态：/bridge/<token>/ui
-			const match = url.match(/^\/bridge\/([^/]+)\/ui\/?$/);
+			// 路径形态：/bridge/<token>/ui 或 /bridge/<token>/model-trace
+			const match = url.match(/^\/bridge\/([^/]+)\/(ui|model-trace)\/?$/);
 			if (!match) {
 				this.respond(res, 404, { error: "not found" });
 				return;
 			}
 			const token = match[1];
+			route = match[2] as "ui" | "model-trace";
 			const session = this.sessions.get(token);
 			if (!session) {
 				// 未知 token：可能是上一轮 runtime 的残留请求，静默接受但不做事
-				this.respond(res, 200, { events: [] });
+				this.respond(res, 200, route === "model-trace" ? { ok: false } : { events: [] });
 				return;
 			}
 			// 请求头 token 强校验：路径 token 与请求头都必须是同一个秘密（PR 评审 §3）。
@@ -223,6 +235,11 @@ export class BridgeServer {
 			const headerToken = req.headers["x-pideck-bridge-token"];
 			if (headerToken !== token) {
 				this.respond(res, 403, { error: "token mismatch" });
+				return;
+			}
+
+			if (route === "model-trace") {
+				await this.handleModelTraceRequest(session, req, res);
 				return;
 			}
 
@@ -266,11 +283,45 @@ export class BridgeServer {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			try {
-				this.respond(res, 200, { events: [] });
+				this.respond(res, 200, route === "model-trace" ? { ok: false } : { events: [] });
 			} catch {
 				// 响应已发出
 			}
 		}
+	}
+
+	/**
+	 * 处理一次模型请求快照推入（POST /bridge/<token>/model-trace）。
+	 *
+	 * 与 /ui 的区别：这是**单向**投递（响应体不带事件），且形状非法直接 400 ——
+	 * trace 侧（pi-deck-model-trace 扩展）不重试，不存在重试风暴问题。
+	 * 注意**不更新** lastSeenAt：isAgentConnected 的语义是「UI 桥在轮询」，
+	 * 模型快照可以独立于桥工作（用户可能只关了桥扩展）。
+	 */
+	private async handleModelTraceRequest(session: BridgeSession, req: IncomingMessage, res: ServerResponse): Promise<void> {
+		const body = await readBody(req);
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(body);
+		} catch {
+			this.respond(res, 400, { ok: false, error: "invalid json" });
+			return;
+		}
+		if (!isModelTraceInput(parsed)) {
+			this.respond(res, 400, { ok: false, error: "invalid trace" });
+			return;
+		}
+		try {
+			session.onModelTrace?.(parsed);
+		} catch (error) {
+			// 单个快照处理失败不影响桥，也不影响后续快照
+			void getAppLogger()?.warn("gui-bridge", "Model trace forwarding failed", {
+				agentId: session.agentId,
+				kind: parsed.kind,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+		this.respond(res, 200, { ok: true });
 	}
 
 	private respond(res: ServerResponse, status: number, body: unknown): void {
@@ -282,6 +333,19 @@ export class BridgeServer {
 		});
 		res.end(text);
 	}
+}
+
+/**
+ * 桥侧对模型快照的最小校验：形状不对直接拒绝。
+ * 字段全量对齐由 tests/modelTraceExtension.test.mjs 断言（扩展侧是自包含 .ts，无法共享类型）。
+ */
+function isModelTraceInput(value: unknown): value is ModelTraceInput {
+	if (typeof value !== "object" || value === null) return false;
+	const trace = value as Record<string, unknown>;
+	if (typeof trace.traceId !== "string" || trace.traceId.length === 0 || typeof trace.ts !== "number") return false;
+	if (trace.kind === "request") return typeof trace.payloadJson === "string" && typeof trace.payloadBytes === "number";
+	if (trace.kind === "response") return typeof trace.status === "number";
+	return false;
 }
 
 /** 读取请求体，带大小上限。 */

@@ -6,7 +6,8 @@ export const DRAWER_ANIMATION_MS = 120;
 export const EDITOR_TAB_LIMIT = 5;
 export const EDITOR_TAB_TEXT_BUDGET = 24 * 1024 * 1024;
 
-export type WorkspaceDrawerPanel = "files" | "sessions" | "browser" | "git" | "trajectory" | "rewind";
+/** rpcLog 是临时面板：绑定 agentId 的实时日志，关闭即还原打开前的面板，不参与项目持久化 */
+export type WorkspaceDrawerPanel = "files" | "sessions" | "browser" | "git" | "trajectory" | "rewind" | "rpcLog";
 export type WorkspaceEditorMode = "view" | "diff";
 
 export type WorkspaceEditorTab = {
@@ -86,6 +87,8 @@ function readDrawerState(storage: WorkspacePanelOptions["storage"], key: string)
 		// 编辑器面板已从抽屉移除（阅读面迁到分屏）；旧存档里的 "editor" 降级为文件树，
 		// 避免读到旧值后面板状态无效（validPanel 校验失败会整体返回 null）。
 		const panel = value.panel === "editor" ? "files" : value.panel;
+		// 白名单刻意不含 "rpcLog"：它绑定 agentId，跨重启必然失效；意外读到旧值当作无存档处理，
+		// 宁可丢掉本次恢复也不能让抽屉首屏弹出一个查不到数据的日志面板（写盘侧同样不落它）。
 		const validPanel = panel === null || ["files", "sessions", "browser", "git", "trajectory", "rewind"].includes(String(panel));
 		return validPanel && typeof value.pinned === "boolean" ? { panel: panel as WorkspaceDrawerPanel | null, pinned: value.pinned } : null;
 	} catch {
@@ -170,6 +173,9 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 
 	const [drawer, setDrawer] = useState<WorkspaceDrawerPanel | null>(null);
 	const [drawerCollapsed, setDrawerCollapsed] = useState(false);
+	// RPC 日志临时面板：agentId 绑定 + 打开前的面板（关闭还原，见 openRpcLogPanel / closeRpcLogPanel）
+	const [rpcLogAgentId, setRpcLogAgentId] = useState<string>();
+	const rpcLogPreviousPanelRef = useRef<WorkspaceDrawerPanel | null>(null);
 	// 抽屉宽度：全局布局偏好（与项目无关），先从 localStorage 恢复并 clamp，
 	// 再由应用设置异步校准，解决开发 renderer origin 变化导致的缓存丢失。
 	// 写入方：AppShell 只在用户拖拽/键盘调整完成后经 shouldCommitPanelPixels 回写。
@@ -257,12 +263,50 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 		[invalidateGitDiff, saveDrawerState],
 	);
 
+	/**
+	 * 打开 RPC 日志面板（agent 绑定由调用方给出）。
+	 *
+	 * 与 openDrawer 的区别（两处都在服务「非模态查看日志」这个产品语义）：
+	 * 1. 不写持久化：面板绑定 agentId，跨重启必然失效，不能成为项目的恢复态；
+	 * 2. 记住打开前的面板，关闭时还原——日志是盖在工具箱上的一层临时视图，
+	 *    看完应该回到用户原本在看的东西，而不是把抽屉清空；
+	 * 3. 不参与 pin 守卫：日志入口是显式动作，允许临时盖过钉住的面板（关闭后仍还原）。
+	 */
+	const openRpcLogPanel = useCallback(
+		(agentId: string) => {
+			if (drawerRef.current !== "rpcLog") rpcLogPreviousPanelRef.current = drawerRef.current;
+			// 日志面板不是 git：无条件作废在途 diff 快照，防止旧响应落到日志之后打开的 git 面板上
+			invalidateGitDiff();
+			setRpcLogAgentId(agentId);
+			setDrawer("rpcLog");
+			setDrawerCollapsed(false);
+		},
+		[invalidateGitDiff],
+	);
+
+	/**
+	 * 关闭 RPC 日志面板并还原它打开前的面板（没有则关闭抽屉）。
+	 * rpcLogAgentId 刻意保留：关闭动画期间面板仍会渲染一帧（WorkspaceDrawerHost 的 120ms
+	 * 合成器契约），清掉 agentId 会让内容在抽屉滑出前先空掉；面板不可见后该 id 无副作用，
+	 * 下次打开一定会被新 id 覆盖。
+	 */
+	const closeRpcLogPanel = useCallback(() => {
+		const previous = rpcLogPreviousPanelRef.current;
+		rpcLogPreviousPanelRef.current = null;
+		setDrawer(previous ?? null);
+	}, []);
+
 	const closeDrawer = useCallback(() => {
 		if (drawerPinnedRef.current) return;
+		// 临时面板走还原语义（且不写存档），避免 closeDrawer 把 null 落到用户的常驻面板选择上
+		if (drawerRef.current === "rpcLog") {
+			closeRpcLogPanel();
+			return;
+		}
 		invalidateGitDiff();
 		if (projectIdRef.current) saveDrawerState(projectIdRef.current, null, false);
 		setDrawer(null);
-	}, [invalidateGitDiff, saveDrawerState]);
+	}, [closeRpcLogPanel, invalidateGitDiff, saveDrawerState]);
 
 	const collapseDrawer = useCallback(() => {
 		if (!drawerPinnedRef.current) setDrawerCollapsed(true);
@@ -436,6 +480,9 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 		setDrawerWidth,
 		drawerPinned,
 		drawerPinnedPanel,
+		rpcLogAgentId,
+		openRpcLogPanel,
+		closeRpcLogPanel,
 		openDrawer,
 		openDrawerForce,
 		closeDrawer,

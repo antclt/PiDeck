@@ -34,6 +34,14 @@ Manage authentication credentials:
 - **Font Size** — Adjust the editor and terminal font size.
 - **Auto-save** — Configure session auto-save intervals.
 
+## Web Service and LAN Access
+
+Enable the service from the Web settings page to access PiDeck from another device's browser. The service is off by default. New configurations listen on `0.0.0.0` (all IPv4 interfaces); an explicitly configured address is preserved.
+
+- **Access tokens are enabled by default**: API requests require a token even through localhost. The page provides a read-only link containing the token, link copying, and QR codes.
+- **Disabling authentication**: Any device that can reach the listening address can use the service directly. Disable it only on a trusted network; never expose an unauthenticated service to the public Internet.
+- **Addresses and restarts**: Only interface addresses covered by the running listener are selectable. The default `0.0.0.0` listener supports IPv4; to use IPv6, bind to `::` or a specific IPv6 address. IPv6 URLs are bracketed automatically. Each start or restart creates a new token, so copy the link or scan the QR code again afterward.
+
 ## Skills
 
 Skills extend the agent's capabilities. PiDeck supports two levels:

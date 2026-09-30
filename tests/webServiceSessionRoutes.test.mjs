@@ -226,7 +226,7 @@ async function withServer(run, overrides = {}) {
 	const WebServiceManager = loadWebServiceManager();
 	const harness = fixture(overrides);
 	const manager = new WebServiceManager(harness.deps);
-	await manager.start("127.0.0.1", 0);
+	await manager.start("127.0.0.1", 0, false);
 	const baseUrl = `http://127.0.0.1:${manager.current.port}`;
 	try {
 		await run({ ...harness, baseUrl });
@@ -242,7 +242,7 @@ test("Web service restart rebinds the configured listener", async () => {
 	await manager.start("127.0.0.1", 0);
 	const port = manager.current.port;
 	try {
-		await manager.restart({ webServiceEnabled: true, webServiceHost: "127.0.0.1", webServicePort: port });
+		await manager.restart({ webServiceEnabled: true, webServiceHost: "127.0.0.1", webServicePort: port, webServiceRequiresAuth: false });
 		const response = await fetch(`http://127.0.0.1:${port}/api/health`);
 		assert.equal(response.status, 200);
 		assert.equal((await response.json()).ok, true);

@@ -136,6 +136,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "webServiceEnabled", tab: "web", itemKey: "settings.enableWebService" },
 	{ field: "webServiceHost", tab: "web", itemKey: "settings.webServiceHost" },
 	{ field: "webServicePort", tab: "web", itemKey: "settings.webServicePort" },
+	{ field: "webServiceRequiresAuth", tab: "web", itemKey: "settings.webUseTokenAuth" },
 	{ field: "externalEditors", tab: "editors", itemKey: "settings.sectionEditors" },
 	// Git 区块原在常用设置，随独立 tab 挪到「开发者」簇（web/editors 之后、dev 之前）
 	{ field: "enableGitManagement", tab: "git", itemKey: "settings.gitManagement" },

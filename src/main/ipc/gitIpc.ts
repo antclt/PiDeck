@@ -5,7 +5,8 @@ import { ipcChannels } from "../../shared/ipc";
 import type { GitDiscardResource, GitGenerateCommitMessageResult, GitWorkspaceDiffGroup } from "../../shared/types";
 import type { GitService } from "../git/GitService";
 import type { GitRefsWatcher } from "../git/GitRefsWatcher";
-import { currentGitExecutable, detectGitExecutable } from "../git/gitExecutable";
+import { detectGitExecutable } from "../git/gitExecutable";
+import { execGit } from "../git/gitRun";
 import { listGitRepos, resolveGitCwd } from "../git/gitRepoScope";
 import type { AppLogger } from "../logging/AppLogger";
 import type { PiLocator } from "../pi/PiLocator";
@@ -553,11 +554,7 @@ export function registerGitIpc({ appLogger, mainCopy, gitService, gitRefsWatcher
 	ipcMain.handle(ipcChannels.gitInit, async (_event, projectId: string) => {
 		const project = projectStore.get(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
-		const { execFile } = await import("node:child_process");
-		await execFile(currentGitExecutable(), ["init"], {
-			cwd: projectHostPath(project),
-			windowsHide: true,
-		});
+		await execGit(["init"], { cwd: projectHostPath(project) });
 		void appLogger.info("git", "Repository initialized", { projectId, path: project.path });
 	});
 

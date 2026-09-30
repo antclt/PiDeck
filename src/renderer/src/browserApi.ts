@@ -311,7 +311,6 @@ export function createBrowserApi(): PiDesktopApi {
 			discoverDshModels: async () => [],
 			listDshProviders: async () => [],
 			listDshAgentPresets: async () => [],
-			removeDshAgentPreset: async () => undefined,
 			getDshStatus: async () => ({
 				started: false,
 				homeDir: "",

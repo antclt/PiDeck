@@ -271,3 +271,140 @@ describe("BridgeServer: 重同步（resync）", () => {
 		assert.equal(server.requestResync("resync-unreg"), false);
 	});
 });
+
+/**
+ * 模型请求快照（/model-trace）：同一 token、同一端点的第二条用途（2026-09 扩展）。
+ *
+ * 单向投递：pi-deck-model-trace 扩展把 before_provider_request 拿到的请求体推来，
+ * 宿主按 token 反查会话落盘；响应体只回 `{ok}`，不做事件回灌。
+ */
+describe("BridgeServer: 模型请求快照（model-trace）", () => {
+	let server;
+	let baseUrl;
+
+	before(async () => {
+		server = new serverMod.BridgeServer();
+		const info = await server.start();
+		baseUrl = info.baseUrl;
+	});
+
+	after(() => {
+		server?.stop();
+	});
+
+	/** 发一次 model-trace 投递（与 /ui 同 token 头约定）。 */
+	async function postModelTrace(url, body, headers = {}) {
+		const token = url.split("/").pop();
+		const response = await fetch(`${url}/model-trace`, {
+			method: "POST",
+			headers: { "content-type": "application/json", "x-pideck-bridge-token": token, ...headers },
+			body: typeof body === "string" ? body : JSON.stringify(body),
+		});
+		return { status: response.status, body: await response.json().catch(() => null) };
+	}
+
+	const requestFrame = () => ({
+		kind: "request",
+		traceId: "t-1",
+		ts: 1_750_000_000_000,
+		model: "claude-sonnet-4",
+		provider: "anthropic",
+		sessionId: "s-1",
+		payloadJson: "{}",
+		payloadBytes: 2,
+		truncated: false,
+		messageCount: 1,
+		toolCount: 0,
+	});
+
+	it("快照被转发给注册时的 onModelTrace 回调，响应 {ok:true}", async () => {
+		const received = [];
+		const { url } = server.registerAgent(
+			"trace-a",
+			() => {},
+			(trace) => received.push(trace),
+		);
+		const result = await postModelTrace(url, requestFrame());
+		assert.equal(result.status, 200);
+		assert.deepEqual(result.body, { ok: true });
+		assert.equal(received.length, 1, "应转发 1 条快照");
+		assert.equal(received[0].traceId, "t-1");
+		assert.equal(received[0].kind, "request");
+	});
+
+	it("响应帧（status/durationMs）同样被转发", async () => {
+		const received = [];
+		const { url } = server.registerAgent(
+			"trace-resp",
+			() => {},
+			(trace) => received.push(trace),
+		);
+		const result = await postModelTrace(url, { kind: "response", traceId: "t-2", ts: 1_750_000_000_100, status: 200, durationMs: 1234 });
+		assert.equal(result.status, 200);
+		assert.equal(received[0].kind, "response");
+		assert.equal(received[0].status, 200);
+	});
+
+	it("未提供回调（旧调用方）时静默接受，不影响桥", async () => {
+		const { url } = server.registerAgent("trace-no-callback", () => {});
+		const result = await postModelTrace(url, requestFrame());
+		assert.equal(result.status, 200);
+		assert.deepEqual(result.body, { ok: true });
+	});
+
+	it("非法 JSON → 400 invalid json", async () => {
+		const { url } = server.registerAgent("trace-badjson", () => {});
+		const result = await postModelTrace(url, "{ not json");
+		assert.equal(result.status, 400);
+		assert.equal(result.body.error, "invalid json");
+	});
+
+	it("形状非法（缺 payloadJson / 未知 kind）→ 400 invalid trace", async () => {
+		const { url } = server.registerAgent("trace-badshape", () => {});
+		const missingPayload = await postModelTrace(url, { kind: "request", traceId: "t-3", ts: 1 });
+		assert.equal(missingPayload.status, 400);
+		assert.equal(missingPayload.body.error, "invalid trace");
+		const unknownKind = await postModelTrace(url, { kind: "other", traceId: "t-3", ts: 1 });
+		assert.equal(unknownKind.status, 400);
+	});
+
+	it("token 头不匹配 → 403（与 /ui 同一层强校验）", async () => {
+		const { url } = server.registerAgent("trace-token", () => {});
+		const result = await postModelTrace(url, requestFrame(), { "x-pideck-bridge-token": "wrong" });
+		assert.equal(result.status, 403);
+	});
+
+	it("未知 token → 200 {ok:false}（tracе 侧不重试，也不回 events 形状）", async () => {
+		const result = await postModelTrace(`${baseUrl}/no-such-token`, requestFrame());
+		assert.equal(result.status, 200);
+		assert.deepEqual(result.body, { ok: false });
+	});
+
+	it("快照投递不更新 lastSeenAt：isAgentConnected 仍只认 UI 轮询", async () => {
+		const { url } = server.registerAgent(
+			"trace-seen",
+			() => {},
+			() => {},
+		);
+		// 注册本身会写 lastSeenAt：用 10ms 窗口 + 等 30ms，把「刚注册」也排除掉
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		assert.equal(server.isAgentConnected("trace-seen", 10), false, "窗口外的注册不算连接");
+		await postModelTrace(url, requestFrame());
+		assert.equal(server.isAgentConnected("trace-seen", 10), false, "只推快照不算桥连接（用户可能关了桥扩展）");
+		await post(url, { updates: [] });
+		assert.equal(server.isAgentConnected("trace-seen", 10), true);
+	});
+
+	it("与 /ui 互不影响：同 token 的轮询照常带回事件", async () => {
+		const { url } = server.registerAgent(
+			"trace-coexist",
+			() => {},
+			() => {},
+		);
+		server.pushEvent("trace-coexist", { type: "resync" });
+		await postModelTrace(url, requestFrame());
+		const ui = await post(url, { updates: [] });
+		assert.equal(ui.status, 200);
+		assert.equal(ui.body.events.length, 1, "快照投递不应取走或清空事件队列");
+	});
+});

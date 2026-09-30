@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "4db698670561e5c326051924367e8fa6f623ae2685ccf0acd7888ff440fbc702",
-  "fileCount": 25,
+  "bundleSha256": "ea72debac372fae977018fcb6f3a78527575fce16487b6981ff145b0f3fd4f76",
+  "fileCount": 26,
   "files": [
     {
       "name": "pi-deck-ask-question.ts",
-      "sha256": "98db1a8166efb7d85d15f40888dc47f608c97713ef333f7fd471d447d26c25c7",
-      "bytes": 15462
+      "sha256": "b6b604c09feccece07ac7307882876f2d0071190051cdf3d2d03cef47e2cfb00",
+      "bytes": 13855
     },
     {
       "name": "pi-deck-ext-points.ts",
@@ -70,6 +70,11 @@
       "bytes": 9797
     },
     {
+      "name": "pi-deck-model-trace.ts",
+      "sha256": "12735b789e3c36d42c539da83600bcfb9d1a2bfe1a47698947e035664ca50657",
+      "bytes": 9197
+    },
+    {
       "name": "pi-deck-nul-redirect-fix.ts",
       "sha256": "d450aa00781a5cedccad426e91aa49d494702398974ec31ef4b3e43ffd97a45d",
       "bytes": 5734
@@ -106,8 +111,8 @@
     },
     {
       "name": "pi-deck-subagents.ts",
-      "sha256": "40c86c08a9047ed3f2e0139d0482486d89468f5d3f184ea06e5d9aa607c9ae82",
-      "bytes": 23381
+      "sha256": "2b45855cdb130f2175341afcc1920b6fbb1fe1a4b9b84021a9dff6c332b65732",
+      "bytes": 24132
     },
     {
       "name": "pi-deck-todo-state.ts",

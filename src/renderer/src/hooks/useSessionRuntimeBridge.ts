@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "jotai";
 import type { AgentRuntimeState } from "../../../shared/types";
-import { applySessionRuntimeEventAtom, openSettingsAtom, replaceSessionRuntimesAtom, sessionRuntimeByIdAtom } from "../atoms";
+import { applySessionRuntimeEventAtom, openSettingsAtom, replaceSessionRuntimesAtom, sessionRuntimeByIdAtom, setSessionDraftAtom } from "../atoms";
 import { agentExitedAtom } from "../atoms/runtime-atoms";
 import { desktopApi } from "../desktopApi";
 import { t } from "../i18n";
@@ -36,6 +36,18 @@ export function useSessionRuntimeBridge(callbacks: RuntimeBridgeCallbacks = {}):
 						store.set(agentExitedAtom, tab.id);
 					}
 				}
+			}
+			// 停止按钮撤回的排队消息（main AgentManager.clearQueueBeforeAbort → agents:queue-cleared）：
+			// 用户点停止后排队中的 steer/followUp 不会执行，文本写回输入框（CLI Esc 同款语义）。
+			// append 而非 replace：不清空用户正在写的内容。
+			if (event.sourceChannel === "agents:queue-cleared" && event.payload && typeof event.payload === "object") {
+				const payload = event.payload as { steering?: unknown; followUp?: unknown };
+				const texts = [...(Array.isArray(payload.steering) ? payload.steering : []), ...(Array.isArray(payload.followUp) ? payload.followUp : [])].filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+				if (texts.length > 0) {
+					const joined = texts.join("\n\n");
+					store.set(setSessionDraftAtom, { sessionId: event.sessionId, value: (current: string) => (current.trim() ? `${current}\n\n${joined}` : joined) });
+				}
+				return;
 			}
 			// 主进程瞬时状态反馈（如 abort 已请求停止）走 toast，不进会话时间线：
 			// 系统卡片太抢眼，且插在 assistant 中间会打断 agent-run 分组。

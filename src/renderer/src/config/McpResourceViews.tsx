@@ -1,8 +1,7 @@
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { t } from "../i18n";
 import { Button } from "../components/ui-shadcn/button";
 import type { McpServerDefinition, McpServerListItem, McpServerTransport } from "../../../shared/types/mcp";
-import type { ResourceScope } from "./ResourceScopeSelector";
 
 const ADAPTER_INSTALL_SOURCE = "npm:pi-mcp-adapter";
 
@@ -12,19 +11,12 @@ export function inferMcpTransport(definition: McpServerDefinition): McpServerTra
 	return "stdio";
 }
 
+/**
+ * 停用判定：pi 0.99 内置 MCP 只认 `enabled`（默认 true）；`disabled` 是
+ * adapter 时代字段，0.99 已不识别。过渡期两者都写、都读：旧配置（disabled:true）\ * 仍显示为停用，新写入一律带 enabled，保存时不清 legacy 字段以兼容旧版 pi。
+ */
 export function isMcpServerDisabled(definition: McpServerDefinition): boolean {
-	return definition.disabled === true;
-}
-
-function pathsEqual(left: string, right: string): boolean {
-	let normalizedLeft = left.replace(/\\/g, "/").replace(/\/$/, "");
-	let normalizedRight = right.replace(/\\/g, "/").replace(/\/$/, "");
-	// Ordinary host Windows paths are case-insensitive; Linux/WSL logical paths remain case-sensitive.
-	if (/^(?:[a-z]:\/|\/\/)/i.test(normalizedLeft)) {
-		normalizedLeft = normalizedLeft.toLowerCase();
-		normalizedRight = normalizedRight.toLowerCase();
-	}
-	return normalizedLeft === normalizedRight;
+	return definition.enabled === false || definition.disabled === true;
 }
 
 /** Adapter installation guide shown before MCP configuration becomes useful. */
@@ -75,45 +67,30 @@ export function McpAdapterGuide(props: { onInstalled: () => void }) {
 	);
 }
 
-/** Scope-aware MCP source list. Project scope groups project definitions before inherited globals. */
-export function McpServerListPane(props: { scope: ResourceScope; projectLayerPaths: readonly string[]; servers: McpServerListItem[]; selected: string | null; creating: boolean; onSelect: (name: string) => void }) {
-	const projectServers = props.servers.filter((item) => props.projectLayerPaths.some((path) => pathsEqual(item.originPath, path)));
-	const globalServers = props.servers.filter((item) => !props.projectLayerPaths.some((path) => pathsEqual(item.originPath, path)));
-	const groups =
-		props.scope === "project"
-			? [
-					{ key: "project", label: t("config.resourceGroup.project"), items: projectServers },
-					{ key: "global", label: t("config.resourceGroup.global"), items: globalServers },
-				]
-			: [{ key: "global", label: t("config.resourceGroup.global"), items: globalServers }];
-
+/** 全局 MCP 来源列表：合并结果按名字升序（页面固定全局作用域，不再分项目/全局两组）。 */
+export function McpServerListPane(props: { servers: McpServerListItem[]; selected: string | null; creating: boolean; onSelect: (name: string) => void }) {
 	return (
 		<div className="flex min-h-0 flex-col gap-1 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-1.5">
 			{props.servers.length === 0 && !props.creating ? (
 				<div className="px-2 py-6 text-center text-micro text-muted-foreground">{t("config.mcp.empty")}</div>
 			) : (
-				groups.map((group) => (
-					<Fragment key={group.key}>
-						{props.scope === "project" && group.items.length > 0 ? <div className="px-2 pb-1 pt-2 text-micro font-semibold text-muted-foreground">{group.label}</div> : null}
-						{group.items.map((item) => {
-							const disabled = isMcpServerDisabled(item.definition);
-							return (
-								<button
-									key={item.name}
-									type="button"
-									className={`flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-control ${props.selected === item.name && !props.creating ? "bg-accent/40" : "hover:bg-bg-hover"}`}
-									onClick={() => {
-										if (!props.creating) props.onSelect(item.name);
-									}}
-								>
-									<span className={`size-1.5 shrink-0 rounded-full ${disabled ? "bg-muted-foreground" : "bg-[var(--color-success)]"}`} aria-hidden="true" />
-									<span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
-									<span className="shrink-0 text-micro text-muted-foreground">{inferMcpTransport(item.definition)}</span>
-								</button>
-							);
-						})}
-					</Fragment>
-				))
+				props.servers.map((item) => {
+					const disabled = isMcpServerDisabled(item.definition);
+					return (
+						<button
+							key={item.name}
+							type="button"
+							className={`flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-control ${props.selected === item.name && !props.creating ? "bg-accent/40" : "hover:bg-bg-hover"}`}
+							onClick={() => {
+								if (!props.creating) props.onSelect(item.name);
+							}}
+						>
+							<span className={`size-1.5 shrink-0 rounded-full ${disabled ? "bg-muted-foreground" : "bg-[var(--color-success)]"}`} aria-hidden="true" />
+							<span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
+							<span className="shrink-0 text-micro text-muted-foreground">{inferMcpTransport(item.definition)}</span>
+						</button>
+					);
+				})
 			)}
 			{props.creating ? <div className="rounded-sm bg-accent/40 px-2 py-1.5 text-control font-medium">{t("config.mcp.newServer")}</div> : null}
 		</div>

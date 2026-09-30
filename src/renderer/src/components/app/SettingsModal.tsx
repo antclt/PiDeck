@@ -120,7 +120,7 @@ type SettingsModalProps = {
 	onToggleDevTools: () => void;
 	onRestartApp: () => void;
 	onClearCheckFlag?: () => void;
-	onOpenWebService: (port: string) => void;
+	onOpenWebService: (url: string) => void;
 	onClose: () => void;
 	onChange: (patch: Partial<AppSettings>) => Promise<boolean>;
 	/** 当前项目身份：项目资源操作只使用主进程登记的 id。 */

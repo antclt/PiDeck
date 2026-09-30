@@ -84,6 +84,12 @@ export const ipcChannels = {
 	quickMessagesSave: "quick-messages:save",
 	/** 快捷消息：用系统默认程序打开配置文件（路径由主进程解析，渲染层不传路径） */
 	quickMessagesOpenFile: "quick-messages:open-file",
+	/** 回复快捷操作：读取 userData/reply-actions.json（文件缺失时用随包出厂规则种子化） */
+	replyActionsGet: "reply-actions:get",
+	/** 回复快捷操作：整体保存规则数组（顺序即展示顺序，空数组代表用户清空） */
+	replyActionsSave: "reply-actions:save",
+	/** 回复快捷操作：用系统默认程序打开规则文件（路径由主进程解析，渲染层不传路径） */
+	replyActionsOpenFile: "reply-actions:open-file",
 	sessionsList: "sessions:list",
 	/** Session-first catalog APIs. */
 	sessionsCatalogList: "sessions:catalog-list",
@@ -255,8 +261,6 @@ export const ipcChannels = {
 	dshCredentialRead: "dsh:credential-read",
 	/** DSH agent 预设目录（agentPreset.list：id/trust/isDefault/名称/描述）。 */
 	dshAgentPresets: "dsh:agent-presets",
-	/** DSH 删除本地（user）预设（agentPreset.remove；host 拒绝 system 预设）。 */
-	dshAgentPresetRemove: "dsh:agent-preset-remove",
 	/** DSH 部署默认模型选择（settings.yaml agent-default-model：provider/model/reasoningEffort）。 */
 	dshDefaultModel: "dsh:default-model",
 	/** DSH runtime 安装态查询（AgentRuntimeProvider 阶段 1：installed/notInstalled/broken 门控 UI）。 */
@@ -525,12 +529,16 @@ export const ipcChannels = {
 	rpcLogsGet: "rpc-logs:get",
 	/** 读取主进程实时环形缓冲（最近 N 条） */
 	rpcLogsGetLive: "rpc-logs:get-live",
+	/** 回读一条模型请求快照的完整请求体（面板展开模型行时按需拉取） */
+	rpcLogsGetModelTrace: "rpc-logs:get-model-trace",
 	/** 将弹窗条目合并写入自动日志文件（按 id 去重） */
 	rpcLogsSave: "rpc-logs:save",
 	/** 清空 RPC 日志 */
 	rpcLogsClear: "rpc-logs:clear",
 	rpcLoggingSet: "rpc-logs:logging-set",
 	rpcLoggingGet: "rpc-logs:logging-get",
+	/** 登记「实时日志面板是否在看」：主进程据此决定是否广播（落盘不受影响） */
+	rpcLogsSetWatching: "rpc-logs:set-watching",
 
 	appWindowMinimize: "app:window-minimize",
 	appWindowToggleMaximize: "app:window-toggle-maximize",
@@ -932,4 +940,14 @@ export const ipcChannels = {
 	channelSwitchGetStatus: "channel-switch:get-status",
 	/** 主进程 → 渲染层：通道切换状态机快照推送（querying/available/downloading/ready/error）。 */
 	channelSwitchStateChanged: "channel-switch:state-changed",
+
+	// ===== CUA 审批门（Plan A：MCP 主进程内托管，审批直连 IPC） =====
+	/** 主进程 → 渲染层：推审批请求（action/sessionId/detail/timestampMs）。 */
+	cuaApprovalRequest: "cua:approval-request",
+	/** 渲染层 → 主进程：回传审批结果（allowed/reason）。 */
+	cuaApprovalResponse: "cua:approval-response",
+	/** 渲染层 → 主进程：拉取 CUA 全局/会话开关状态。 */
+	cuaGetState: "cua:get-state",
+	/** 渲染层 → 主进程：设置 CUA 全局/会话开关。 */
+	cuaSetState: "cua:set-state",
 } as const;

@@ -150,7 +150,14 @@ export function MessageScroller({
 	const isFollowing = engineIsAtBottom;
 
 	useLayoutEffect(() => {
-		if (!followOutput) return;
+		// 关闭跟随必须**主动解锁**：是否追底由引擎自己的 state.isAtBottom 决定，它不读这个 prop。
+		// 只 return 的话「脱离锁底」只会发生在用户上滚那一刻，停在底部时关掉跟随毫无效果
+		// （RPC 日志面板「自动滚动」开关实测无效）。时间线 controller 本就自己调 stopScroll，
+		// 对它是幂等重复（resetReaderUp + escapedFromLock + isAtBottom=false）。
+		if (!followOutput) {
+			engineStopScroll();
+			return;
+		}
 		// 回底按钮会先 setAutoScroll(true) 再发起弹簧；若这里无条件 instant，
 		// layout 阶段会抢跑把弹簧掐死，观感变成「唰」一下。
 		// 距底较远用弹簧滞空；已在近底则 instant 即可。
@@ -158,7 +165,7 @@ export function MessageScroller({
 		const distance = scroll ? scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight : 0;
 		const animation = reduce || distance <= followThreshold ? "instant" : "smooth";
 		engineScrollToBottom({ animation });
-	}, [followOutput, followThreshold, reduce, engineScrollToBottom]);
+	}, [followOutput, followThreshold, reduce, engineScrollToBottom, engineStopScroll]);
 
 	useEffect(() => {
 		onFollowChange?.(isFollowing);

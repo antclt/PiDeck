@@ -17,12 +17,15 @@ import { COMPOSER_TEXT_MAX_HEIGHT } from "../../rendererUtils";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
 import { ComposerWidgetLayoutProvider, type ComposerWidgetCollapsedByKey, useComposerWidgetLayoutValue } from "./ComposerWidgetLayout";
-import type { GitBranchInfo } from "../../../../shared/types";
+import type { ChatMessage, GitBranchInfo } from "../../../../shared/types";
+import type { ReplyActionRule } from "../../../../shared/types/replyActions";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 import { VoiceTranscriptionControls } from "./VoiceTranscriptionControls";
-import { SessionCommitSuggestionStrip } from "./SessionCommitSuggestionStrip";
-import type { AgentRunItem } from "./timeline/types";
+import { SessionReplyActions } from "./SessionReplyActions";
 import { BridgeWidgetSlot } from "../bridge/BridgeSlot";
+
+/** 无规则时的稳定空数组（避免每渲染新引用让下游 memo 失效）。 */
+const EMPTY_REPLY_RULES: readonly ReplyActionRule[] = [];
 
 export type ComposerAreaProps = {
 	sessionId: string;
@@ -31,8 +34,12 @@ export type ComposerAreaProps = {
 	onSwitchBranch?: (branch: string) => void;
 	/** 输入框上方独立卡（todo / goal）；放在 widgets 槽位。 */
 	widgets?: ReactNode;
-	/** 最新一轮 run：驱动「提交/推送」快捷建议条（判据见 commitIntentSuggestions）。 */
-	commitSuggestRun?: AgentRunItem;
+	/** 回复尾部动作仍复用本栏发送 owner；只把 UI 投到时间线内的落点。 */
+	replyActionMessages?: readonly ChatMessage[];
+	/** 声明式规则（userData/reply-actions.json 快照），由 SessionView 注入以保持单点加载。 */
+	replyActionRules?: readonly ReplyActionRule[];
+	replyActionsTarget?: HTMLDivElement | null;
+	replyActionsBlocked?: boolean;
 	/** 排队消息独立卡（与 todo/goal 同列同宽，不贴输入框、不右浮）。 */
 	queuePanel?: ReactNode;
 	enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
@@ -125,15 +132,6 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 
 	const modelPendingMap = useAtomValue(modelPendingByIdAtom);
 
-	// 「提交/推送」快捷建议条：跟在其它独立卡之后，用 composer 的直发通道
-	// （正文不经草稿）。run 身份换轮后建议自动重算，无需显式关闭。
-	const composerWidgets = (
-		<>
-			{props.widgets ?? null}
-			{props.commitSuggestRun ? <SessionCommitSuggestionStrip sessionId={props.sessionId} run={props.commitSuggestRun} sendDisabled={!composer.delivery.canSendQuickMessage} onSend={composer.delivery.sendQuickMessage} /> : null}
-		</>
-	);
-
 	const prewarmStartedForSessionRef = useRef<string | undefined>(undefined);
 	useEffect(() => {
 		if (!props.sessionId || !window.piDesktop) return;
@@ -150,11 +148,22 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 		<ComposerRuntimeIntegrations sessionId={props.sessionId}>
 			{({ feishuIndicator }) => (
 				<>
+					{props.replyActionMessages && (
+						<SessionReplyActions
+							sessionId={props.sessionId}
+							messages={props.replyActionMessages}
+							rules={props.replyActionRules ?? EMPTY_REPLY_RULES}
+							target={props.replyActionsTarget ?? null}
+							hidden={Boolean(props.replyActionsBlocked || composer.isBusy || composer.isStarting || composer.sendState.status === "sending" || composer.sendState.status === "unknown" || composer.mode === "imagegen" || composer.backend === "imagegen")}
+							sendDisabled={!composer.delivery.canSendQuickMessage}
+							onSend={composer.delivery.sendQuickMessage}
+						/>
+					)}
 					{/* 固有高度：内容撑开 footer；父列 max-height 卡住时独立卡内部滚动，
               输入卡 shrink-0 始终完整可见。 */}
 					<footer ref={footerRef} className="composer flex max-h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-2" style={composerFooterStyle()} data-session-id={props.sessionId}>
 						<ComposerMeasuredExtras
-							widgets={composerWidgets}
+							widgets={props.widgets ?? null}
 							queuePanel={props.queuePanel}
 							deliveryNotice={<SessionDeliveryNotice status={composer.sendState.status} message={composer.sendState.unknownSnapshot?.message} images={composer.sendState.unknownSnapshot?.images} error={composer.sendState.error} onAcknowledge={composer.delivery.acknowledgeUnknown} />}
 							attachmentBar={

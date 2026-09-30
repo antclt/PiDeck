@@ -4,12 +4,18 @@ import { DEFAULT_VOICE_TRANSCRIPTION_CONFIG } from "../../shared/voiceTranscript
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import type { AppSettings, FileTreeNode, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalTab } from "../../shared/types";
 import type { ResourceImportKind } from "../../shared/types/resourceImport";
+import type { ReplyActionRule } from "../../shared/types/replyActions";
 import { t } from "./i18n";
 
 const now = Date.now();
 
 /** 快捷消息预览夹具：预览/截图需要一个非空弹框；真实数据在 userData/quick-messages.json。 */
 const PREVIEW_QUICK_MESSAGES: readonly string[] = ["继续", "提交", "推送", "提交推送"];
+const PREVIEW_REPLY_ACTIONS: readonly ReplyActionRule[] = [
+	{ text: "继续", triggers: [{ kind: "onStop" }] },
+	{ text: "提交", triggers: [{ kind: "onStop" }] },
+	{ text: "重试", triggers: [{ kind: "onFailure" }] },
+];
 
 const projects: Project[] = [
 	{
@@ -152,8 +158,9 @@ let previewSettings: AppSettings = {
 	wslUser: "root",
 	telemetryEnabled: true,
 	webServiceEnabled: false,
-	webServiceHost: "127.0.0.1",
+	webServiceHost: "0.0.0.0",
 	webServicePort: 8765,
+	webServiceRequiresAuth: true,
 	rpcTimeout: 600_000,
 	linkOpenMode: "external",
 	workspaceContentOpenMode: "split",
@@ -175,6 +182,8 @@ let previewSettings: AppSettings = {
 	idleAgentAutoRelease: true,
 	idleAgentKeepCount: 5,
 	idleAgentTimeoutMin: 60,
+	// CUA 默认关闭：预览壳与主进程 SettingsStore 默认保持一致
+	cuaEnabled: false,
 	favoriteModels: [],
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],
@@ -511,7 +520,6 @@ export function createPreviewApi(): PiDesktopApi {
 			list: async () => getSessions(),
 			// 预览模式无 DSH host：空预设目录满足接口契约
 			listDshAgentPresets: async () => [],
-			removeDshAgentPreset: async () => {},
 			getDshDefaultModel: async () => undefined,
 			// 预览模式无主进程配置可解析：无启动默认（底栏不预选，不影响其它功能）
 			resolveLaunchDefaults: async () => ({}),
@@ -915,11 +923,13 @@ export function createPreviewApi(): PiDesktopApi {
 			getSize: async () => 0,
 			get: async () => [],
 			getLive: async () => [],
+			getModelTrace: async () => null,
 			save: async () => [],
 			onLog: (_callback: unknown) => () => {},
 			clear: async () => undefined,
 			setLogging: async () => false,
 			getLogging: async () => false,
+			setWatching: async () => false,
 		},
 		pi: {
 			check: async () => ({
@@ -992,7 +1002,7 @@ export function createPreviewApi(): PiDesktopApi {
 				userDataDir: "C:/Users/preview/AppData/Roaming/pi-desktop",
 			}),
 			preferredSystemLanguages: async () => (navigator.languages?.length ? [...navigator.languages] : [navigator.language]),
-			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true }],
+			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true, family: "IPv4" }],
 			checkUpdate: async () => undefined,
 			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview" }),
 			onUpdateStatus: () => () => undefined,
@@ -1683,6 +1693,21 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			openFile: async () => undefined,
 		},
+		// 回复快捷操作预览桩：与快捷消息同策略，固定夹具让设置区在预览/截图里可用。
+		replyActions: {
+			get: async () => ({
+				items: PREVIEW_REPLY_ACTIONS.map((rule) => ({ ...rule, triggers: rule.triggers.map((trigger) => ({ ...trigger })) })),
+				defaults: [],
+				filePath: "(preview)",
+				seeded: false,
+				defaultsAvailable: false,
+			}),
+			save: async (items) => ({
+				ok: true as const,
+				snapshot: { items, defaults: [], filePath: "(preview)", seeded: false, defaultsAvailable: false },
+			}),
+			openFile: async () => undefined,
+		},
 		automation: {
 			getSnapshot: async () => ({
 				revision: 0,
@@ -1747,6 +1772,12 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			previewCron: async () => ({ valid: true, nextRuns: [] }),
 			onChanged: () => () => {},
+		},
+		cua: {
+			onApprovalRequest: () => () => {},
+			sendApprovalResponse: async () => {},
+			getState: async () => ({ enabled: false, sessionOverrides: {} }),
+			setState: async () => ({ enabled: false, sessionOverrides: {} }),
 		},
 	};
 }

@@ -19,6 +19,7 @@ import type { ChatMessage } from "../../../../../shared/types";
 import { getToolName } from "../../../../../shared/fileChanges";
 import { activityCountsFromToolNames, toolActivityCategory, type ActivityCount, type ToolActivityCategory } from "./toolCategory";
 import type { TurnDisplayItem, TurnProcessEntry } from "./types";
+import { cleanAnswerText } from "./answerText.ts";
 
 /**
  * 一级过程行只可能是「重试 / 错误诊断」两种（`isStandaloneEntry` 保证）。
@@ -87,9 +88,9 @@ function flushGroup(members: TurnProcessEntry[], nodes: TurnProcessNode[]): void
  *
  * 边界规则：
  * - `final-answer` 不参与分组（由 `FinalAnswer` 在大折叠栏外常驻渲染）；
- * - 有文本的中间回复 → 先 flush 当前组，再产出一条一级 `interim`；
- * - **空文本中间回复不作边界也不产出**（live 骨架挂载点 / 空 error 占位，产出一行会凭空多出空组头，
- *   `segmentSummary.ts:31-36` 已有同类防呆）；
+ * - 清理后有正文的中间回复 → 先 flush 当前组，再产出一条一级 `interim`；
+ * - **没有正文的中间回复不作边界也不产出**（live 骨架 / 空 error 占位 / 仅思考标签等，
+ *   与正文渲染和 `segmentSummary.ts` 的计数同口径，避免凭空拆出空行和多余组头）；
  * - 重试 / 错误 → 先 flush，再产出一条一级 `entry`；
  * - 其余过程条目（思考 / 工具）→ 并入当前组；工具类别变化**不拆组**。
  */
@@ -100,8 +101,8 @@ export function groupTurnProcess(items: readonly TurnDisplayItem[]): TurnProcess
 	for (const item of items) {
 		if (item.kind === "final-answer") continue;
 		if (item.kind === "interim-answer") {
-			// 空文本：live 骨架 / 占位，不作边界也不产出
-			if (!item.message.text.trim()) continue;
+			// 原文非空不代表有正文；不可见消息不能切断相邻过程组。
+			if (!cleanAnswerText(item.message.text)) continue;
 			flushGroup(current, nodes);
 			current = [];
 			nodes.push({ kind: "interim", id: item.id, message: item.message });

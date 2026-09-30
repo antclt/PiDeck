@@ -34,6 +34,7 @@ import type {
 import { ipcChannels } from "../../shared/ipc";
 import { sanitizeBridgeUpdate, stripBridgeAnsi } from "../../shared/bridgeText";
 import { collectSessionFileChanges } from "../../shared/fileChanges";
+import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS } from "../../shared/compactFeedback";
 import { PiProcess, type WhitelistSkip } from "./PiProcess";
 import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
@@ -47,7 +48,7 @@ import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtens
 import { createPiProcessSkillResolvers } from "../skills/piProcessSkillResolvers";
 import { createPiProcessPromptResolvers } from "../prompts/piProcessPromptResolvers";
 import { getBridgeServer } from "./bridge/BridgeServer";
-import type { BridgeEvent, BridgeUpdate } from "../../shared/types/bridge";
+import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../shared/types/bridge";
 import { describeExtensionFallbackSkip, formatExtensionFallbackDebug, resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason, shouldRetryWithoutExtensions } from "./extensionStartupFallback";
 import type { DisabledExtensionsReason } from "./extensionStartupFallback";
 import { formatExtensionErrorReason } from "./extensionError";
@@ -103,6 +104,7 @@ import type { SettingsStore } from "../settings/SettingsStore";
 import type { SecurityStore } from "../security/SecurityStore";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { RpcLogger } from "../logging/RpcLogger";
+import { buildModelTraceLogEntry } from "../logging/ModelTrace";
 import type { RpcLogBatch, RpcLogEntry } from "../../shared/types/rpcLog";
 import type { AppLogger } from "../logging/AppLogger";
 import { toWindowsHostPath, toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
@@ -115,6 +117,27 @@ export type ProjectTrustChoice = "trust-remember" | "trust-session" | "deny";
 function readAskField(input: unknown, key: string): unknown {
 	if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
 	return Reflect.get(input, key);
+}
+
+/**
+ * prompt / steer / follow_up 响应的 disposition 取值（pi CHANGELOG 0.99.0 #9098）。
+ * - "started"：已启动一次 agent run；
+ * - "queued"：当前有 run 在跑，消息进入队列（prompt 的 streamingBehavior 排队路径）；
+ * - "handled"：被扩展命令或 input handler 消费，**没有**启动 run。
+ */
+export type PromptDisposition = "started" | "queued" | "handled";
+
+/**
+ * 从 prompt RPC 成功响应的 data 里读 disposition；老版本 pi 不带该字段 → undefined。
+ *
+ * 为什么主进程要知道这件事：disposition === "handled" 表示这条 prompt 不会产生
+ * agent_start / agent_end，等待 agent_end 恢复 idle 的常规链路永远等不到——必须在
+ * 此处改走 scheduleIdleCheckAfterExtensionCommand（pi 的 get_state 兜底）。
+ */
+function readPromptDisposition(data: unknown): PromptDisposition | undefined {
+	if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+	const disposition = Reflect.get(data, "disposition");
+	return disposition === "started" || disposition === "queued" || disposition === "handled" ? disposition : undefined;
 }
 
 /**
@@ -322,6 +345,13 @@ export class AgentManager {
 	private readonly outputListeners = new Set<(channel: string, payload: unknown) => void>();
 	/** 开启了 RPC 日志记录的 agent id 集合 */
 	private readonly rpcLoggingAgents = new Set<string>();
+	/**
+	 * 当前有渲染层日志面板在看的 agent id 集合（面板挂载/卸载时经 rpcLogsSetWatching 登记）。
+	 * 落盘与环形缓冲不受它影响（记录开着就一直写），只用于**广播闸门**：
+	 * 没有观看者时每条 RPC 日志仍按批结构化克隆发过去，重度会话里等于每秒 ~5MB 的
+	 * 无主 IPC，序列化在主进程做，表现为整个应用（含输入、流式）掉帧。
+	 */
+	private readonly rpcLogWatchingAgents = new Set<string>();
 	/**
 	 * 实时 RPC 日志广播缓冲：按 agent 聚合待发条目，节流刷出。
 	 * 流式阶段 RPC 事件可能非常高频，逐条 IPC 会把渲染进程打爆，必须批量推送。
@@ -659,12 +689,19 @@ export class AgentManager {
 	 * 桥扩展读 `PIDECK_BRIDGE_URL` / `PIDECK_BRIDGE_TOKEN`，把 pi 侧被 RPC 丢弃的
 	 * 声明式 UI 扩展点推给 PiDeck。端点未就绪（起不来）时返回 undefined，
 	 * 调用方不注入 → 桥静默不工作，pi 与 PiDeck 都照常（fail-safe，§14.5）。
+	 *
+	 * 同一 token 也承载 `pi-deck-model-trace` 的模型请求快照（/model-trace 子路由），
+	 * 与会话一体注册、一体注销。
 	 */
 	private registerBridgeSession(agentId: string): Record<string, string> | undefined {
 		try {
 			const server = getBridgeServer();
 			if (!server.ready) return undefined;
-			const { url, token } = server.registerAgent(agentId, (update) => this.handleBridgeUpdate(agentId, update));
+			const { url, token } = server.registerAgent(
+				agentId,
+				(update) => this.handleBridgeUpdate(agentId, update),
+				(trace) => this.handleModelTrace(agentId, trace),
+			);
 			return { PIDECK_BRIDGE_URL: url, PIDECK_BRIDGE_TOKEN: token };
 		} catch (error) {
 			void this.appLogger?.warn("agent", "GUI bridge session registration failed; bridge stays idle", {
@@ -672,6 +709,37 @@ export class AgentManager {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return undefined;
+		}
+	}
+
+	/**
+	 * 处理 pi 推来的一条模型请求快照（pi-deck-model-trace，走桥端点同链路）。
+	 *
+	 * 与 RPC 日志**同一开关**：未开启记录的 agent 直接丢弃（不落盘、不广播）。
+	 * 完整请求体写 model-traces 目录并在时间线里只留紧凑条目 —— 上百 KB 的
+	 * 请求体进环形缓冲/IPC 批次会把主进程与渲染层都拖垮。
+	 */
+	private handleModelTrace(agentId: string, trace: ModelTraceInput): void {
+		try {
+			if (!this.rpcLoggingAgents.has(agentId)) return;
+			const entry = buildModelTraceLogEntry(agentId, trace);
+			// 请求体只在 request 快照里；response 只有状态码与耗时（紧凑条目已含）
+			if (trace.kind === "request") {
+				void this.rpcLogger?.writeModelTrace(agentId, trace).catch((error) => {
+					void this.appLogger?.warn("agent", "Model trace write failed", {
+						agentId,
+						traceId: trace.traceId,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				});
+			}
+			this.enqueueLiveRpcLog(this.rpcLogger?.push(entry) ?? entry);
+		} catch (error) {
+			// 日志功能任何故障都不影响会话
+			void this.appLogger?.warn("agent", "model-trace handler failed", {
+				agentId,
+				error: error instanceof Error ? error.message : String(error),
+			});
 		}
 	}
 
@@ -1806,7 +1874,10 @@ export class AgentManager {
 		// 后续消息必须带 streamingBehavior 否则 pi 直接返回 error。这里自动兜底。
 		// images 用于传递粘贴/拖拽的图片，pi 会将 base64 图片直接传给支持视觉的模型。
 		try {
-			const promptIsExtensionCommand = await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage);
+			// prompt 前不再发 get_commands 预检：pi 0.99 起 prompt 成功响应自带
+			// data.disposition（CHANGELOG 0.99.0 #9098），"handled" 即「被扩展命令 /
+			// input handler 消费、没有启动运行」的权威信号，且省掉一次 RPC 往返。
+			// 老版本 pi 没有该字段 → 回退到 get_commands 启发式（见下方 undefined 分支）。
 			const requestPayload: Record<string, unknown> = {
 				type: "prompt",
 				message: agentMessage,
@@ -1856,7 +1927,13 @@ export class AgentManager {
 				};
 			}
 
-			if (promptIsExtensionCommand) {
+			// prompt 被扩展命令 / input handler 消费（没有启动 agent run）时，必须另找
+			// 恢复 idle 的时机：永远不会等到 agent_end（见下方注释）。
+			// pi 0.99+ 直接读 disposition；老版本无此字段，退回发一次 get_commands 预检
+			//（历史上 prompt 之前发的就是它，此处只是搬到 prompt 之后、按需执行）。
+			const disposition = readPromptDisposition(response.data);
+			const consumedWithoutRun = disposition === "handled" ? true : disposition === undefined ? await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage) : false;
+			if (consumedWithoutRun) {
 				// 机制：Pi 扩展命令可在 prompt 阶段直接执行并返回，不进入 agent run。
 				// 证据：@earendil-works/pi-coding-agent/dist/core/agent-session.js 中 AgentSession.prompt()
 				//      先调用 _tryExecuteExtensionCommand()；命中后 return，不再调用 _runAgentPrompt()。
@@ -2058,6 +2135,18 @@ export class AgentManager {
 		const hadActiveTool = Boolean(this.toolExecutingByAgent.get(agentId) || (this.activeToolCallsByAgent.get(agentId)?.size ?? 0) > 0);
 		this.pendingAbortEscalations.set(agentId, { hadActiveTool, acked: false, failed: false });
 
+		// pi 的交互 Esc 语义（pi docs/rpc-commands.md「clear_queue」段）：先 clear_queue 再 abort。
+		// abort 只停当前 run，队列里剩余的 steering/followUp 消息会被继续投递并另起
+		// run——只发 abort 的现象是「用户点了停止，排队的消息还在跑」。
+		// clear_queue 自 pi 0.85.1 提供；更低版本回 unknown-command error，静默降级为
+		// abort-only 的旧行为（见 clearQueueBeforeAbort），停止主路径不受影响。
+		const clearedQueue = await this.clearQueueBeforeAbort(runtime, agentId);
+		if (clearedQueue) {
+			// 撤回的排队消息经 runtime 事件桥写回输入框（CLI Esc 同款语义），
+			// 避免「点了停止、排队的消息也丢了」。
+			this.emit("agents:queue-cleared", { ...this.streamRuntimeTriple(agentId), ...clearedQueue });
+		}
+
 		runtime.process.client
 			.request({ type: "abort" }, 10_000)
 			.then(() => {
@@ -2111,6 +2200,37 @@ export class AgentManager {
 			duration: 2500,
 		});
 		this.emitState();
+	}
+
+	/**
+	 * abort 前撤回 pi 的排队消息（steering / followUp）——pi 交互 Esc 语义的 RPC 复刻。
+	 *
+	 * pi docs/rpc-commands.md「clear_queue」：Esc = clear_queue + abort。abort 只停当前
+	 * run，队列里剩余的消息会被继续投递并另起 run，故 busy 时用户点停止必须先把队列撤干净。
+	 * 返回值非 null 时调用方广播 agents:queue-cleared，由渲染层写回输入框。
+	 *
+	 * 容错：clear_queue 自 pi 0.85.1 提供，更低版本回 unknown-command error——此时静默
+	 * 降级为 abort-only 的旧行为（队列残留），不阻断停止主路径。超时取 3s：本地 RPC 正常
+	 * 毫秒级返回；僵死进程下 abort 至多迟 3s，且 abort 本身仍会发出。
+	 */
+	private async clearQueueBeforeAbort(runtime: AgentRuntime, agentId: string): Promise<{ steering: string[]; followUp: string[] } | null> {
+		try {
+			const response = await runtime.process.client.request({ type: "clear_queue" }, 3_000);
+			const data = response.data;
+			if (!isRecord(data)) return null;
+			const readTexts = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : []);
+			const steering = readTexts(data.steering);
+			const followUp = readTexts(data.followUp);
+			if (steering.length === 0 && followUp.length === 0) return null;
+			return { steering, followUp };
+		} catch (error) {
+			// <0.85.1 的 pi 不认识 clear_queue；abort 是停止核心路径，不能因它失败/超时被拖住。
+			void this.appLogger?.warn("agent", "clear_queue before abort failed; falling back to abort-only", {
+				agentId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return null;
+		}
 	}
 
 	/**
@@ -3419,6 +3539,25 @@ export class AgentManager {
 	}
 
 	/**
+	 * rewind/git 快照的根目录必须是宿主路径。
+	 *
+	 * 背景：WSL 项目在 ProjectStore 里存 UNC（\\wsl.localhost\<distro>\...）或 /mnt/...，
+	 * 而 git 执行层按 cwd 分流（UNC → 发行版内 git；盘符 → Windows git，见 gitWsl.planGitSpawn）。
+	 * /mnt/<盘> 与 C:\ 指向同一份 Windows 盘文件，转宿主形态后交给 Windows git，
+	 * 与 Git 面板（gitIpc 的 projectHostPath）口径一致；WSL 内部项目保持 UNC 走发行版内 git。
+	 * 转换失败（跨发行版 UNC 等）退回原值，由执行层自行判断，不能让打点整体抛错。
+	 */
+	private rewindHostRoot(cwd: string, distro?: string): string {
+		const activeDistro = distro ?? this.wslEnvironment?.distro;
+		if (process.platform !== "win32" || !activeDistro) return cwd;
+		try {
+			return toWindowsHostPath(cwd, { distro: activeDistro });
+		} catch {
+			return cwd;
+		}
+	}
+
+	/**
 	 * rewind checkpoint 列表（refs/pi-checkpoints）。
 	 * root 取 agent 工作目录：纯 git 实现不依赖 pi 进程，即使 pi 没装 pi-rewind
 	 * 扩展，也能读到/回退同仓库里已存在的 checkpoint。过滤用 pi 的 sessionId
@@ -3429,7 +3568,8 @@ export class AgentManager {
 	 */
 	async listCheckpoints(agentId: string, params?: RewindCheckpointPageParams): Promise<RewindCheckpointPage> {
 		const runtime = this.requireRuntime(agentId);
-		const checkpoints = await loadAllCheckpoints(runtime.tab.cwd, runtime.tab.sessionId);
+		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
+		const checkpoints = await loadAllCheckpoints(root, runtime.tab.sessionId);
 		const all = checkpoints.map(toCheckpointSummary).sort((a, b) => b.timestamp - a.timestamp);
 		// 渲染层入参不可信：limit 钳制在 [1, 100]，beforeTimestamp 非有限数按未传处理。
 		const limit = Math.min(Math.max(1, Math.floor(params?.limit ?? 10)), 100);
@@ -3437,7 +3577,7 @@ export class AgentManager {
 		const filtered = all.filter((cp) => cp.timestamp < before);
 		// 附带自动打点健康状态：失败态渲染层显示警示条（此前失败完全静默，
 		// 用户以为有快照、真要回滚才发现列表是空的）。
-		const health = this.rewindHealthByRoot.get(runtime.tab.cwd);
+		const health = this.rewindHealthByRoot.get(root);
 		// 未传 limit（如 rewind-to-message 需要全量最近检查点）时返回全部；
 		// 否则按 limit 截取一页，并据此判断是否还有更早的检查点。
 		if (params?.limit === undefined) {
@@ -3453,7 +3593,7 @@ export class AgentManager {
 	/** checkpoint 与当前 index 树的 diff 摘要（回退预览：「回到这里会改哪些文件」）。 */
 	async getCheckpointDiff(agentId: string, checkpointId: string): Promise<string> {
 		const runtime = this.requireRuntime(agentId);
-		const root = runtime.tab.cwd;
+		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
 		const cp = await loadCheckpointFromRef(root, checkpointId);
 		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
 		const indexTree = await currentIndexTree(root);
@@ -3470,14 +3610,15 @@ export class AgentManager {
 	 */
 	async restoreCheckpoint(agentId: string, checkpointId: string, scope: RewindRestoreScope): Promise<RewindRestoreResult> {
 		const runtime = this.requireRuntime(agentId);
-		const cp = await loadCheckpointFromRef(runtime.tab.cwd, checkpointId);
+		const root = this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro);
+		const cp = await loadCheckpointFromRef(root, checkpointId);
 		if (!cp) throw new Error(`Checkpoint not found: ${checkpointId}`);
 
 		const wantFiles = scope === "files" || scope === "all";
 		const wantConversation = scope === "conversation" || scope === "all";
 		// 会话回退先解析 fork 锚点（失败则整体拒绝，避免「文件已回退但会话没 fork」的半成功态）。
 		const forkEntryId = wantConversation ? await this.resolveForkEntryBeforeCheckpoint(agentId, cp.timestamp) : undefined;
-		if (wantFiles) await applyCheckpointRestore(runtime.tab.cwd, cp);
+		if (wantFiles) await applyCheckpointRestore(root, cp);
 		let forkedSessionId: string | undefined;
 		if (wantConversation && forkEntryId) {
 			const data = (await this.forkSession(agentId, forkEntryId)) as { targetSessionId?: string; [key: string]: unknown } | undefined;
@@ -3559,7 +3700,7 @@ export class AgentManager {
 	/** 实际执行打点：成功/失败都更新健康状态；完成后处理 pending 合并补拍。 */
 	private async runRewindCheckpoint(agentId: string, state: { lastAt: number; inFlight: boolean; pending: boolean; timer: NodeJS.Timeout | null }, toolName: string, turnIndex: number): Promise<void> {
 		const runtime = this.agents.get(agentId);
-		const root = runtime?.tab.cwd;
+		const root = runtime ? this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro) : undefined;
 		const sessionId = runtime?.tab.sessionId;
 		// agent 已停止/换 runtime：丢弃补拍（节流 map 已随生命周期清理兜底）。
 		if (!root || !sessionId) return;
@@ -3671,7 +3812,9 @@ export class AgentManager {
 	private activeSessionIdsForRoot(root: string): string[] {
 		const ids = new Set<string>();
 		for (const runtime of this.agents.values()) {
-			if (runtime?.tab.cwd === root && runtime.tab.sessionId) {
+			// 与 prune 传入的 root 同为宿主形态：WSL 项目的 tab.cwd 是存储形态（UNC 或 /mnt/...），
+			// 不归一化会与宿主 root 对不上，keep 集合漏掉同仓库活跃会话 → 并发会话被误删。
+			if (this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro) === root && runtime.tab.sessionId) {
 				ids.add(runtime.tab.sessionId);
 			}
 		}
@@ -3697,6 +3840,16 @@ export class AgentManager {
 		this.rewindHealthByRoot.set(root, health);
 	}
 
+	/**
+	 * get_commands 启发式：判断这条 prompt 是否是扩展命令（会被 AgentSession
+	 * _tryExecuteExtensionCommand 消费、不进入 agent run）。
+	 *
+	 * **仅作为 pi 0.99 以下版本的回退路径**：0.99 起 prompt 响应自带
+	 * data.disposition === "handled"（见 readPromptDisposition），权威且零额外往返；
+	 * 只有老版本 pi（disposition 缺失）才在这里补一次 get_commands。启发式本身的
+	 * 判据沿袭 pi dist/core/agent-session.js 的行为：命中后 AgentSession.prompt()
+	 * 直接 return，不再调用 _runAgentPrompt()。
+	 */
 	private async promptMatchesRegisteredExtensionCommand(runtime: AgentRuntime, message: string): Promise<boolean> {
 		const trimmed = message.trim();
 		if (!trimmed.startsWith("/")) return false;
@@ -3718,6 +3871,9 @@ export class AgentManager {
 	 * 批量推送既能降低 IPC 次数，也让渲染层一次 state 更新收到多条，减少重渲染频率。
 	 */
 	private enqueueLiveRpcLog(entry: RpcLogEntry) {
+		// 广播闸门：面板没打开就直接丢弃（落盘/环形缓冲已在 RpcLogger.push 里完成）。
+		// 面板打开时会先 setRpcLogWatching(true)，初始历史走 getLive 环形缓冲补齐。
+		if (!this.rpcLogWatchingAgents.has(entry.agentId)) return;
 		let pending = this.pendingLiveRpcLogs.get(entry.agentId);
 		if (!pending) {
 			pending = [];
@@ -3773,6 +3929,18 @@ export class AgentManager {
 	}
 
 	/**
+	 * 登记「某 agent 的实时日志面板是否在看」。
+	 * 由渲染层面板挂载/卸载成对调用；只影响广播，不影响记录与落盘。
+	 */
+	setRpcLogWatching(agentId: string, watching: boolean) {
+		if (watching) {
+			this.rpcLogWatchingAgents.add(agentId);
+		} else {
+			this.rpcLogWatchingAgents.delete(agentId);
+		}
+	}
+
+	/**
 	 * error 终态但 pi 进程仍存活时的原进程复活（Issue #218）。
 	 * 回复级错误（API 400/模型报错/prompt 投递未知）只结束本轮回复，进程本身没死；
 	 * 此前被标成终态 error 后，下次激活要么抛「启动失败」、要么停掉活进程重建——
@@ -3817,6 +3985,7 @@ export class AgentManager {
 		this.clearStreamGate(agentId);
 		// agent 关闭时自动关闭 RPC 日志记录，并丢弃未广播的实时日志缓冲
 		this.rpcLoggingAgents.delete(agentId);
+		this.rpcLogWatchingAgents.delete(agentId);
 		this.dropPendingLiveRpcLogs(agentId);
 		this.displayWindowStartByAgent.delete(agentId);
 		this.displayWindowComputedLengthByAgent.delete(agentId);
@@ -3920,6 +4089,7 @@ export class AgentManager {
 			this.liveRpcLogFlushTimer = null;
 		}
 		this.pendingLiveRpcLogs.clear();
+		this.rpcLogWatchingAgents.clear();
 		this.emitState();
 	}
 
@@ -4006,8 +4176,7 @@ export class AgentManager {
 				// 只有用户手动开启 RPC 日志记录的 agent 才产生日志流量（落盘 + 实时广播）。
 				// 未开启的 agent 不发射任何事件，避免每一条 RPC 通信都白白过一遍 IPC。
 				if (this.rpcLoggingAgents.has(agentId)) {
-					this.rpcLogger?.push(logEntry);
-					this.enqueueLiveRpcLog(logEntry);
+					this.enqueueLiveRpcLog(this.rpcLogger?.push(logEntry) ?? logEntry);
 				}
 			} catch (error) {
 				void this.appLogger?.warn("agent", "rpc-log handler failed", {
@@ -4428,7 +4597,7 @@ export class AgentManager {
 			// 首轮 run 顺带清理非活跃会话的 checkpoint（fire-and-forget，
 			// keep 集合含当前会话，并发会话不误删；节流见方法内注释）。
 			if (runtime.tab.cwd && runtime.tab.sessionId) {
-				this.maybePruneOldSessionCheckpoints(runtime.tab.cwd, runtime.tab.sessionId);
+				this.maybePruneOldSessionCheckpoints(this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro), runtime.tab.sessionId);
 			}
 			runtime.tab.status = "running";
 			this.activeAssistantMessageIds.delete(agentId);
@@ -5623,6 +5792,9 @@ export class AgentManager {
 			}
 		}
 		const result = event.result ?? event.partialResult ?? event.output ?? existing?.meta?.result;
+		// pi 侧截断（bash/powershell >1 MiB）：存在时才写 meta.resultTruncation，
+		// 普通结果的 details 无 truncation 字段 → 不下发多余 meta。
+		const piTruncation = extractPiToolTruncation(result);
 		const detailText = this.messageProjector.formatToolDetail(toolName, args, result, isError);
 		// detailText 整体截断（拼接后可能超单段上限）并标记 truncated/fullLength；
 		// 完整结果文本缓存在 toolFullTextByMessageId（LRU），供「查看完整输出」按需读取。
@@ -5739,6 +5911,9 @@ export class AgentManager {
 			args: argsMeta,
 			result: this.messageProjector.truncateForDetail(this.messageProjector.extractToolResultText(result) || this.messageProjector.safeJson(result)),
 			isError,
+			// pi 0.99 起 bash/powershell 结果 >1 MiB 时 truncated/details.fullOutputPath 单独下发，
+			// 渲染层据此给出完整输出路径（不同于本文件上方的 truncated 展示层截断标记）。
+			...(piTruncation ? { resultTruncation: piTruncation } : {}),
 			detailText: detailDelivery.text,
 			...(detailDelivery.truncated ? { truncated: true, fullLength: detailDelivery.fullLength } : {}),
 			// originalContent 不再存储到消息中（full file 会使会话元数据体积过大）。

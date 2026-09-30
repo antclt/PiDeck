@@ -75,7 +75,7 @@ const REQUIRED = [
 	"dsh-anonymous-user-id",
 	"dsh-atomic-write",
 	"dsh-bash-local",
-	"dsh-code-runtime",
+	"dsh-ptc-runtime-node",
 	"dsh-compaction",
 	"dsh-fs",
 	"dsh-invariants",
@@ -104,7 +104,6 @@ const ENTRY_PACKAGES = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-app-boot", "@
  * 入口解析校验看不到这一层间接引用，这里显式钉死。
  */
 const MUST_HAVE_FILES = [
-	"node_modules/koffi/src/koffi/index.cjs",
 	// node-pty 是 dsh-tool-pwsh-persistent 的运行时依赖；入口解析校验覆盖不到
 	// 「依赖包整个缺席」的场景（曾因 appOwnDeps 过滤被挡在归档外）。
 	"node_modules/node-pty/package.json",
@@ -248,6 +247,13 @@ for (const [dir, pkg] of pkgJsonByDir) {
 	if (resolvable.length === 0) {
 		failures.push(`no resolvable entry: ${pkgName} (main=${pkg.main ?? ""} exports=${JSON.stringify(pkg.exports ?? {})?.slice(0, 80)})`);
 	}
+}
+
+// koffi 可由 npm 嵌套安装；检查每一份的间接入口，不能要求顶层提升，也不能让一份好包掩盖坏副本。
+const koffiDirs = [...presentRelByDir.keys()].filter((dir) => dir.endsWith("/koffi"));
+if (!koffiDirs.length) failures.push("missing critical package: koffi");
+for (const dir of koffiDirs) {
+	if (!presentRelByDir.get(dir).has("src/koffi/index.cjs")) failures.push(`missing critical file: ${dir}/src/koffi/index.cjs`);
 }
 
 // 已知关键文件（见 MUST_HAVE_FILES 注释）

@@ -28,7 +28,7 @@ import {
 	type DshUsageTotals,
 } from "./dshProcessEvents";
 import { applyDshControlEvent, beginDshCancel, type DshControlState } from "./dshRuntimeControl";
-import { toDshAvailableModels } from "./dshModels";
+import { resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
 import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshApprovalFrame, parseDshQuestionFrame, questionUiRequest, type DshApprovalFrame, type DshQuestionFrame } from "./dshApprovalBridge";
 import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, normalizeDshTurnPageSize, planDshHistoryRounds, trimToOldestTurnStart } from "./dshHistoryPagePlan";
 import { isContextOverflowError } from "../../shared/contextOverflow";
@@ -323,7 +323,7 @@ export class DshAgentManager implements SessionAgentGateway {
 				if (runtime.projection.todos !== undefined) runtime.todos = runtime.projection.todos;
 				// 尾页 projections baseline 兜底：底层完整折叠不受事件窗口截断影响
 				this.applyHistoryProjectionBaseline(runtime, history.result.value.projections);
-				// 轨迹系统提示随历史重放恢复（request/header 事件随历史投影）
+				// 轨迹系统提示随历史重放恢复（V4 system/message，兼容旧请求头）
 				if (runtime.projection.systemPrompt !== undefined) {
 					runtime.systemPrompt = runtime.projection.systemPrompt;
 				}
@@ -927,15 +927,15 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/**
-	 * 轨迹系统提示（与 dsh-web 轨迹同源：request/header 事件的 EpochHeader.system）：
+	 * 轨迹系统提示（V4 system/message，兼容旧版 request/header）：
 	 * - 运行时会话：mux 实时 + attach/backfill 重放收集的投影缓存；
-	 * - 历史（未激活）会话：从 host history 尾部折叠最后一个 request/header，
+	 * - 历史（未激活）会话：从 host history 尾部折叠系统提示事件，
 	 *   失败/无 host 时返回 undefined（不阻断轨迹展示）。
 	 */
 	async readSystemPrompt(agentId: string | undefined, dshSessionId: string | undefined): Promise<string | undefined> {
 		if (agentId) {
 			const runtime = this.runtimes.get(agentId);
-			if (runtime?.systemPrompt) return runtime.systemPrompt;
+			if (runtime?.systemPrompt !== undefined) return runtime.systemPrompt;
 		}
 		if (!dshSessionId) return undefined;
 		try {
@@ -1056,8 +1056,13 @@ export class DshAgentManager implements SessionAgentGateway {
 
 	private async refreshModelDirectory(runtime: DshAgentRuntime, client: import("./dshRemoteClient").DshRemoteClient) {
 		const listed = await client.sessionsModelCatalog();
-		if (listed.result.ok) this.syncModelDirectoryState(runtime, listed.result.value);
-		return listed;
+		if (!listed.result.ok) return { result: listed.result };
+		const projection = await client.sessionsProjections({ sessionId: runtime.sessionId });
+		if (!projection.result.ok) throw new Error(`dsh model selection unavailable: ${projection.result.error.message}`);
+		// 0.2 将会话选择从目录拆到投影；只有未配置会话才用 host 默认值。
+		const value = { ...listed.result.value, ...resolveDshModelDirectory(listed.result.value, projection.result.value) };
+		this.syncModelDirectoryState(runtime, value);
+		return { result: { ok: true, value } } as const;
 	}
 
 	async getAvailableModels(agentId: string): Promise<AvailableModel[]> {
@@ -1227,24 +1232,22 @@ export class DshAgentManager implements SessionAgentGateway {
 		const client = this.requireClient();
 		const listed = await client.subagentsList({ parentSessionId: runtime.sessionId });
 		if (!listed.result.ok) return [];
-		return (listed.result.value.entries ?? []).map((entry: any) => ({
-			id: String(entry.id),
-			label: "label" in entry ? entry.label : undefined,
-			activity: "activity" in entry ? entry.activity : "inactive",
-			hasChildren: "hasChildren" in entry ? entry.hasChildren : false,
-			mode: "mode" in entry ? entry.mode : "one-shot",
-			kind: entry.kind,
-		}));
+		return listed.result.value.entries;
 	}
 
 	/** 子代理历史（G6）：只读 transcript（不激活 Agent），投影成 ChatMessage。 */
 	async readSubagentHistory(agentId: string, childSessionId: string, beforeSeq?: number, maxMessages = 100): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
 		const runtime = this.runtime(agentId);
 		const client = this.requireClient();
+		// 新目录保留 continuable 模式；页地址必须与真实 descriptor 一致，不能硬编码 one-shot。
+		const listed = await client.subagentsList({ parentSessionId: runtime.sessionId });
+		if (!listed.result.ok) throw new Error(`dsh subagent catalog unavailable: ${listed.result.error.message}`);
+		const entry = listed.result.value.entries.find((item) => item.id === childSessionId && item.kind === "child");
+		if (!entry) throw new Error("dsh subagent is not a readable direct child");
 		const address = {
 			parentSessionId: runtime.sessionId,
-			childSessionId: childSessionId as SessionId,
-			mode: "one-shot" as const,
+			childSessionId,
+			mode: entry.mode,
 		};
 		let throughSeq: number;
 		try {
@@ -1296,7 +1299,7 @@ export class DshAgentManager implements SessionAgentGateway {
 
 	async setModel(agentId: string, provider: string, modelId: string): Promise<unknown> {
 		const runtime = this.runtime(agentId);
-		// 普通 DSH session 的 model selection 是 host 级可变状态：运行中切换时，
+		// DSH 0.2 的 model selection 是会话级持久化选择：运行中切换时，
 		// 已经发出的 provider request 保持原配置，后续 step 读取新的完整选择。
 		// 若某类后端/会话不接受该操作，让 selectModel 返回 busy，由上层排队到下一轮。
 		const client = this.requireClient();
@@ -1324,8 +1327,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		try {
 			const catalog = await client.sessionsModelCatalog();
 			if (catalog.result.ok) {
-				const group = catalog.result.value.groups.find((item: any) => item.id === provider);
-				const model = group?.models.find((item: any) => item.id === modelId);
+				const group = catalog.result.value.groups.find((item) => item.id === provider);
+				const model = group?.models.find((item) => item.id === modelId);
 				reasoningEffort = model?.reasoning?.defaultEffort;
 			}
 		} catch {
@@ -1470,8 +1473,13 @@ export class DshAgentManager implements SessionAgentGateway {
 		// DSH fork：session.fork 在 atSeq 处裁剪出新会话，然后把当前 runtime 换绑过去
 		// （保留 agentId，模拟 pi /fork 的「当前会话变成 fork 结果」语义）。
 		const seqMatch = /^seq:(\d+)$/.exec(entryId);
-		if (!seqMatch) throw new Error(`Invalid dsh fork entryId: ${entryId}`);
-		return this.replaceWithFork(agentId, Number(seqMatch[1]));
+		const seq = seqMatch ? Number(seqMatch[1]) : NaN;
+		// V4 atSeq 包含边界事件；首条用户消息之前至少有 session/create，seq=0
+		// 不能减成 -1 或省略成 clone。只接受当前历史里可回填的用户消息。
+		if (!Number.isSafeInteger(seq) || seq <= 0 || !this.runtime(agentId).messages.some((message) => message.role === "user" && message.id === `dsh:${seq}`)) {
+			throw new Error(`Invalid dsh fork entryId: ${entryId}`);
+		}
+		return this.replaceWithFork(agentId, seq);
 	}
 
 	/** DSH clone = fork 无锚点：wire 语义是复制到源会话最后一个完成的 turn（完整副本）。 */
@@ -1488,7 +1496,8 @@ export class DshAgentManager implements SessionAgentGateway {
 		const client = this.requireClient();
 		const forked = await client.sessionsFork({
 			sessionId: runtime.sessionId,
-			...(atSeq !== undefined ? { atSeq } : {}),
+			// UI 选中的是待编辑消息；包含式截断必须停在它之前，避免重复发送。
+			...(atSeq !== undefined ? { atSeq: atSeq - 1 } : {}),
 		});
 		if (!forked.result.ok) {
 			throw new Error(`dsh session.fork failed: ${JSON.stringify(forked.result.error)}`);
@@ -2422,7 +2431,7 @@ type DshAgentRuntime = {
 	usageTotals?: DshUsageTotals;
 	/** 会话统计（host sessionStats 投影；整段日志回合/步骤计数与墙钟汇总，dsh-web StatsLine 同源）。 */
 	sessionStats?: DshSessionStatsProjection;
-	/** DSH 当轮真实系统提示（request/header 事件投影；attach/backfill 重放与 mux 实时双来源）。 */
+	/** DSH 当轮真实系统提示（system/message 投影；attach/backfill 重放与 mux 实时双来源）。 */
 	systemPrompt?: string;
 	/**
 	 * 上下文占用投影（host contextPressure 单元）：provider 上报的最新请求大小 +

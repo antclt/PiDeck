@@ -2628,38 +2628,23 @@
   background: var(--image-preview-control-bg-hover);
 }
 
-/* RPC 日志弹窗 */
-.rpc-log-modal {
-  --rpc-log-bg: var(--color-bg-panel);
+/* RPC 日志面板（右侧抽屉的 rpcLog 临时面板）
+   外壳尺寸/边框/背景改由抽屉与 Tailwind utility 承担；本块只保留 token 定义
+   （双轨迁移允许的例外）与行/详情等需要精确滚动、省略、等宽排版的规则。 */
+.rpc-log-panel {
   --rpc-log-surface: var(--color-bg-muted);
   --rpc-log-input-bg: var(--color-bg-panel);
   --rpc-log-border: var(--color-border-subtle);
-  --rpc-log-border-strong: var(--color-border-strong);
   --rpc-log-text: var(--color-text-secondary);
   --rpc-log-strong: var(--color-text-primary);
   --rpc-log-muted: var(--color-text-tertiary);
   --rpc-log-send: var(--color-info);
   --rpc-log-recv: var(--color-accent);
+  /* 模型快照行（pi → 供应商的请求/响应）：与 stdio 两个方向再区分一路颜色 */
+  --rpc-log-model: var(--color-warning);
   --rpc-log-detail-bg: var(--color-code-bg);
   --rpc-log-detail-text: var(--color-code-text);
-  width: min(1000px, 92vw);
-  height: min(720px, 82vh);
-  display: flex;
-  flex-direction: column;
-  background: var(--rpc-log-bg);
-  border: 1px solid var(--rpc-log-border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
 }
-.rpc-log-modal .modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background: var(--rpc-log-surface);
-  color: var(--rpc-log-strong);
-}
-.rpc-log-toolbar button,
 .rpc-log-entry-actions button {
   border: 1px solid var(--rpc-log-border);
   background: var(--rpc-log-input-bg);
@@ -2669,39 +2654,9 @@
   font-size: var(--font-size-caption);
   cursor: pointer;
 }
-.rpc-log-toolbar button:hover,
-.rpc-log-entry-actions button:hover,
-.rpc-log-toolbar button.active {
+.rpc-log-entry-actions button:hover {
   border-color: var(--color-info);
   color: var(--color-info);
-}
-.rpc-log-toolbar {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 10px 14px;
-  background: var(--rpc-log-surface);
-  border-bottom: 1px solid var(--rpc-log-border);
-}
-.rpc-log-filter-tabs {
-  display: inline-flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.rpc-log-autoscroll.active {
-  border-color: var(--color-info);
-  color: var(--color-info);
-}
-
-.rpc-log-toolbar input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid var(--rpc-log-border);
-  border-radius: var(--radius-lg);
-  background: var(--rpc-log-input-bg);
-  color: var(--rpc-log-strong);
-  padding: 6px 9px;
-  font-size: var(--font-size-caption);
 }
 .rpc-log-list {
   flex: 1;
@@ -2729,6 +2684,9 @@
 }
 .rpc-log-entry.log-recv {
   color: var(--rpc-log-recv);
+}
+.rpc-log-entry.log-model {
+  color: var(--rpc-log-model);
 }
 .rpc-log-entry time {
   color: var(--rpc-log-muted);
@@ -2764,6 +2722,12 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
+}
+/* 模型请求行展开时的加载/缺失提示（与 pre 同缩进，但不用等宽块底色） */
+.rpc-log-detail-note {
+  padding: 8px 16px 8px 40px;
+  color: var(--rpc-log-muted);
+  font-size: var(--font-size-micro);
 }
 .rpc-log-empty {
   padding: 40px;

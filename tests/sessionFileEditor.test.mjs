@@ -1,46 +1,14 @@
 import assert from "node:assert/strict";
 import { appendFile, mkdtemp, open, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { createRequire } from "node:module";
 import test from "node:test";
-import ts from "typescript";
-import vm from "node:vm";
+import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
-const nodeRequire = createRequire(import.meta.url);
+// 用统一 TS 沙箱加载：相对 import（如 logging/sharedLogger）按源文件目录解析
+const load = createTsSandbox({ globals: { AggregateError } });
 
-function loadEditorModule() {
-	const filePath = "src/main/pi/SessionFileEditor.ts";
-	const output = ts.transpileModule(readFileSync(filePath, "utf8"), {
-		compilerOptions: {
-			module: ts.ModuleKind.CommonJS,
-			target: ts.ScriptTarget.ES2022,
-			esModuleInterop: true,
-		},
-		fileName: filePath,
-	}).outputText;
-	const module = { exports: {} };
-	vm.runInNewContext(
-		output,
-		{
-			module,
-			exports: module.exports,
-			require: nodeRequire,
-			Buffer,
-			TextDecoder,
-			AggregateError,
-			process,
-			setTimeout,
-			clearTimeout,
-			console,
-		},
-		{ filename: filePath },
-	);
-	return module.exports;
-}
-
-const { SessionFileEditor } = loadEditorModule();
+const { SessionFileEditor } = load("src/main/pi/SessionFileEditor.ts");
 
 function header(overrides = {}) {
 	return { type: "session", version: 3, id: "session-header", ...overrides };

@@ -1,8 +1,7 @@
 import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
-import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog, RpcLogOpenedDialog } from "./SidebarParts";
-import { RpcLogViewer } from "./RpcLogViewer";
+import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
 import { sessionRecordToSummary } from "../../atoms";
 import { hasPendingUpdateAtom, pendingAppUpdateAtom, pendingCatalogUpdateAtom, pendingPiUpdateAtom, updateStatusAtom } from "../../atoms/update-atoms";
 import { useAtomValue } from "jotai";
@@ -11,7 +10,8 @@ import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { resolveSessionRunState, sessionRunCapabilities, type SessionRunAction } from "../../utils/sessionCommands";
-import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController, type SidebarRpcLog } from "../../hooks/useSidebarController";
+import { getBoundSidebarRuntimeAgent, getBoundSidebarRuntimeAgentByAgentId, type SidebarController } from "../../hooks/useSidebarController";
+import type { RpcLogEntry } from "../../../../shared/types/rpcLog";
 import type { SidebarRunControl } from "./SidebarComponents";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { DshSearchResults } from "./DshSearchResults";
@@ -114,7 +114,9 @@ export type SidebarActions = {
 	rpc: {
 		getLogging: (agentId: string) => Promise<boolean>;
 		setLogging: (agentId: string, enabled: boolean) => Promise<boolean>;
-		listLogs: (agentId: string) => Promise<SidebarRpcLog[]>;
+		listLogs: (agentId: string) => Promise<RpcLogEntry[]>;
+		/** 打开实时日志面板（右侧抽屉承载）；侧栏只发打开命令，不负责关闭 */
+		openViewer: (agentId: string) => void;
 	};
 };
 
@@ -173,8 +175,6 @@ export function SidebarContent(props: SidebarContentProps) {
 	// 注意不能拿 menuAgent.sessionId 直接查 runtimeBySessionId：AgentTab.sessionId
 	// 是 pi 自身会话 id，而 runtimeBySessionId 的 key 是会话记录 id，必须按 agentId 反查。
 	const menuAgentCanRpcLog = menuAgent !== undefined && getBoundSidebarRuntimeAgentByAgentId(controller.catalog, menuAgent.id) !== undefined;
-	// “RPC 日志已打开”提醒弹框的打开目标 agent id（null = 关闭）
-	const [rpcLogOpenedAgentId, setRpcLogOpenedAgentId] = useState<string | null>(null);
 	// 顶部「搜索」菜单项控制 MorphingSearch 命令面板的展开状态。
 	const [searchOpen, setSearchOpen] = useState(false);
 	// 生效快捷键绑定（用户设置可改），kbd 提示跟随真实键位；设置保存后自动刷新
@@ -628,12 +628,9 @@ export function SidebarContent(props: SidebarContentProps) {
 							.setLogging(menuAgent.id, true)
 							.then((enabled) => {
 								controller.setAgentRpcLogging(menuAgent.id, enabled);
-								if (enabled) {
-									// 开启成功弹提醒框（含“查看日志”入口），不再自动打开日志弹窗
-									setRpcLogOpenedAgentId(menuAgent.id);
-								} else {
-									showNotice(t("rpc.loggingEnableFailed"), 2500);
-								}
+								// 与面板内「开启记录」同一反馈：非阻塞 toast。
+								// （原先是 AlertDialog 确认框，挡操作且菜单已有「查看日志」入口，多余）
+								showNotice(enabled ? t("rpc.loggingEnabled") : t("rpc.loggingEnableFailed"), 2500);
 							})
 							.catch(() => showNotice(t("rpc.loggingEnableFailed"), 2500));
 					}}
@@ -741,11 +738,7 @@ export function SidebarContent(props: SidebarContentProps) {
 							.setLogging(menuSessionRuntimeAgent.id, true)
 							.then((enabled) => {
 								controller.setAgentRpcLogging(menuSessionRuntimeAgent.id, enabled);
-								if (enabled) {
-									setRpcLogOpenedAgentId(menuSessionRuntimeAgent.id);
-								} else {
-									showNotice(t("rpc.loggingEnableFailed"), 2500);
-								}
+								showNotice(enabled ? t("rpc.loggingEnabled") : t("rpc.loggingEnableFailed"), 2500);
 							})
 							.catch(() => showNotice(t("rpc.loggingEnableFailed"), 2500));
 					}}
@@ -790,17 +783,7 @@ export function SidebarContent(props: SidebarContentProps) {
 			{controller.worktreeCreateProjectId && (
 				<WorktreeCreateDialog projectId={controller.worktreeCreateProjectId} creating={Boolean(props.creatingWorktree)} onCreate={(branchName) => void actions.worktrees.create(controller.worktreeCreateProjectId!, branchName).then(controller.closeWorktreeCreate)} onClose={controller.closeWorktreeCreate} />
 			)}
-			{controller.rpcLogAgentId && <RpcLogViewer agentId={controller.rpcLogAgentId} loadHistory={actions.rpc.listLogs} getLogging={actions.rpc.getLogging} setLogging={actions.rpc.setLogging} onClose={controller.closeRpcLogs} />}
-			{/* “RPC 日志已打开”提醒：点击菜单后弹框，可直达日志查看弹窗 */}
-			{rpcLogOpenedAgentId && (
-				<RpcLogOpenedDialog
-					onView={() => {
-						controller.openRpcLogs(rpcLogOpenedAgentId);
-						setRpcLogOpenedAgentId(null);
-					}}
-					onClose={() => setRpcLogOpenedAgentId(null)}
-				/>
-			)}
+			{/* 实时日志面板挂在右侧工作区抽屉（App 层 rpcLog 面板），侧栏不再挂查看器 */}
 		</aside>
 	);
 }
