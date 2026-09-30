@@ -235,6 +235,15 @@ Prebuilt packages for **Windows**, **macOS**, and **Linux** are published on Git
 
 > PiDeck requires the `pi` CLI to be installed separately and available in your system `PATH`.
 
+### Dev Edition (PiDeck Dev)
+
+Besides the stable edition (PiDeck), the project also publishes **dev edition (PiDeck Dev)** packages for trying out pre-release features:
+
+- **Where to get it**: versions marked as *Pre-release* on [GitHub Releases](https://github.com/ayuayue/PiDeck/releases) (version numbers carry a `-beta.N` suffix, e.g. `v0.8.0-beta.1`).
+- **Side-by-side install**: PiDeck Dev uses its own app identity (appId), install directory and shortcuts, so it can be installed alongside the stable edition without interference.
+- **Data mode (choose one)**: on first launch PiDeck Dev asks whether to share data with the stable edition or use a separate data directory; you can switch later in-app and follow the guided migration.
+- **Protocol difference**: the dev edition registers the `pideck-dev://` deep-link protocol, which does not collide with the stable edition's `pideck://`.
+
 Requirements:
 
 - `pi` command available in system `PATH`
@@ -246,6 +255,16 @@ Verify pi is available:
 pi --version
 pi --mode rpc
 ```
+
+Build the dev edition from source:
+
+```bash
+npm run dist:win:dev   # Windows (NSIS + portable + zip)
+npm run dist:mac:dev   # macOS (DMG + zip)
+npm run dist:linux:dev # Linux (AppImage + deb + tar.gz)
+```
+
+Artifacts carry the `PiDeck-Dev-` prefix and can be installed alongside stable packages. Note that stable packaging commands such as `npm run dist:win` do **not** inject the dev channel marker — a `-beta` version number does not change the channel either (the channel is decided by the build command, not the version number).
 
 ---
 
@@ -304,6 +323,9 @@ A: Join the QQ / WeChat group at the bottom of this page (or add the author's We
 | `npm run dist:win` | Package for Windows (NSIS + portable + zip) |
 | `npm run dist:mac` | Package for macOS (DMG + zip) |
 | `npm run dist:linux` | Package for Linux (AppImage + deb + tar.gz) |
+| `npm run dist:win:dev` | Package dev edition for Windows (PiDeck Dev, dev channel + separate app identity) |
+| `npm run dist:mac:dev` | Package dev edition for macOS (PiDeck Dev, dev channel + separate app identity) |
+| `npm run dist:linux:dev` | Package dev edition for Linux (PiDeck Dev, dev channel + separate app identity) |
 | `npm run test:e2e` | Run Playwright end-to-end tests |
 | `npm run docs:dev` | Preview the docs-site locally |
 | `npm run make-icon` | Generate icon assets to `build/icon.svg` |
