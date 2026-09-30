@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Check, Copy, RotateCw } from "lucide-react";
 import type { AppSettings, WebNetworkAddress, WebServiceStatusInfo } from "../../../../../shared/types";
@@ -46,6 +46,7 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 	const [webNetworkLoading, setWebNetworkLoading] = useState(false);
 	const [webStatus, setWebStatus] = useState<WebServiceStatusInfo | null>(null);
 	const [qrCopied, setQrCopied] = useState(false);
+	const copyTimeoutRef = useRef<number | null>(null);
 
 	const applyWebPortDraft = () => {
 		const port = Number(webPortDraft);
@@ -123,14 +124,39 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 	useEffect(() => {
 		setWebPortDraft(String(draft.webServicePort));
 		setQrCopied(false);
+		if (copyTimeoutRef.current) {
+			window.clearTimeout(copyTimeoutRef.current);
+			copyTimeoutRef.current = null;
+		}
 	}, [props.resetKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// 组件卸载时清理复制状态恢复定时器
+	useEffect(() => {
+		return () => {
+			if (copyTimeoutRef.current) {
+				window.clearTimeout(copyTimeoutRef.current);
+			}
+		};
+	}, []);
 
 	const handleCopyQrUrl = useCallback(() => {
 		if (!qrUrl) return;
-		void navigator.clipboard.writeText(qrUrl).then(() => {
-			setQrCopied(true);
-			window.setTimeout(() => setQrCopied(false), 1500);
-		});
+		void navigator.clipboard
+			.writeText(qrUrl)
+			.then(() => {
+				setQrCopied(true);
+				if (copyTimeoutRef.current) {
+					window.clearTimeout(copyTimeoutRef.current);
+				}
+				copyTimeoutRef.current = window.setTimeout(() => {
+					copyTimeoutRef.current = null;
+					setQrCopied(false);
+				}, 1500);
+			})
+			.catch(() => {
+				// 剪贴板写入失败（权限拒绝/非安全上下文）时保持未复制状态
+				setQrCopied(false);
+			});
 	}, [qrUrl]);
 
 	return (
@@ -232,7 +258,7 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 							<img src={webQrDataUrl} alt={t("settings.webQrAlt")} className="size-44 rounded-md bg-white p-2" />
 							<div className="min-w-0 flex-1">
 								<div className="flex items-start gap-2 rounded-md border border-border-subtle/70 bg-bg-muted/40 p-2">
-									<code className="block flex-1 break-all text-caption text-text-primary">{qrUrl}</code>
+									<code className="block flex-1 break-all font-mono text-caption text-text-primary">{qrUrl}</code>
 									<Button
 										variant="ghost"
 										size="icon-xs"
