@@ -27,6 +27,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 	const historyBySession = new Map();
 	// 可选：history 尾页的 projections baseline（官方 host 在尾页携带完整投影折叠）
 	const historyProjections = new Map();
+	const modelSelections = new Map();
 	const attachments = new Map();
 	const calls = { create: 0, list: 0, history: 0, fork: 0, prompt: 0, cancel: 0, workspaceCreate: 0, attachment: 0 };
 	const createPayloads = [];
@@ -129,7 +130,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 				return { result: { ok: true, value: { title } } };
 			},
 			async models() {
-				return { result: { ok: true, value: modelsValue ?? { groups: [] } } };
+				return { result: { ok: true, value: modelsValue ?? { default: { provider: "test", model: "default" }, routableProviders: ["test"], groups: [], failures: [] } } };
 			},
 			async selectModel({ provider, model }) {
 				return { result: { ok: true, value: { selected: { provider, model } } } };
@@ -246,8 +247,13 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 		sessionsModelCatalog(...args) {
 			return client.sessions.models(...args);
 		},
-		sessionsSelectModel(...args) {
-			return client.sessions.selectModel(...args);
+		async sessionsSelectModel(...args) {
+			const response = await client.sessions.selectModel(...args);
+			if (response.result.ok) modelSelections.set(args[0].sessionId, response.result.value.selected);
+			return response;
+		},
+		async sessionsProjections({ sessionId }) {
+			return { result: { ok: true, value: { asOfSeq: historyBySession.get(sessionId)?.length ?? 0, values: { modelSelection: { lastUsed: null, next: modelSelections.get(sessionId) ?? null } } } } };
 		},
 		sessionsFork(...args) {
 			return client.sessions.fork(...args);
@@ -334,7 +340,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 			hostState.ready = true;
 		},
 	};
-	return { host, client, sessions, historyBySession, historyProjections, attachments, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls, controlCalls };
+	return { host, client, sessions, historyBySession, historyProjections, modelSelections, attachments, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls, controlCalls };
 }
 
 /**
@@ -861,7 +867,7 @@ test("forkSession 在 atSeq 裁剪出新会话并换绑 runtime", async () => {
 	const tab = await manager.create({ projectId: "project-1", backend: "dsh", dshSessionId: "session-fork-src" });
 	assert.equal(tab.sessionId, "session-fork-src");
 
-	// 从「第一问」(seq:2) fork：新会话只带 seq ≤ 2 的历史
+	// 0.2 atSeq 是包含式：待编辑的第一问不能同时留在新历史里。
 	const result = await manager.forkSession(tab.id, "seq:2");
 	assert.equal(calls.fork, 1);
 	assert.equal(result.text, "第一问", "fork 返回被 fork 的用户消息文本（渲染层预填输入框）");
@@ -870,10 +876,9 @@ test("forkSession 在 atSeq 裁剪出新会话并换绑 runtime", async () => {
 	assert.ok(newTab, "fork 后 agentId 保持存在");
 	assert.notEqual(newTab.sessionId, "session-fork-src");
 	assert.match(newTab.sessionId, /^session-forked-/);
-	// 新会话历史 = fork 点前内容（seq 1..2）
+	// 新会话只含第一问之前的事件，输入框回填与历史不可重复。
 	const messages = manager.getMessages(tab.id);
-	assert.equal(messages.length, 1);
-	assert.equal(messages[0].text, "第一问");
+	assert.equal(messages.length, 0);
 	// 旧会话不再被 runtime 持有（可从 catalog 重新打开）
 	assert.equal(manager.list().length, 1);
 });
@@ -885,6 +890,9 @@ test("forkSession 拒绝非法 entryId", async () => {
 	const tab = await manager.create({ projectId: "project-1", backend: "dsh", dshSessionId: "session-fork-bad" });
 	await assert.rejects(() => manager.forkSession(tab.id, "not-a-seq"));
 	await assert.rejects(() => manager.forkSession(tab.id, "seq:abc"));
+	for (const entryId of ["seq:0", "seq:9007199254740992", "seq:12"]) {
+		await assert.rejects(() => manager.forkSession(tab.id, entryId), /Invalid dsh fork/);
+	}
 });
 
 test("compact 以 /compact 提示词触发 host 命令并返回 runtime state", async () => {
@@ -1256,12 +1264,11 @@ test("host 进程退出后 mux 自动重连（流中断 → 退避 → 重新订
 });
 
 test("getAvailableModels 透传模型支持的思考档位（reasoningEfforts）", async () => {
-	// host 的 models catalog 带 reasoning.efforts：llm-deepseek 只声明 off/high/max，
-	// llm-pi-ai 按模型声明——选择器按它过滤档位，避免选不支持的档位导致回合失败。
+	// 0.2 模型目录只含 host 默认选择；不能将 default 当作会话当前选择。
 	const { host } = makeFakeHost({
 		modelsValue: {
-			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
-			routable: true,
+			default: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
+			routableProviders: ["llm-deepseek"],
 			failures: [],
 			groups: [
 				{
@@ -1296,11 +1303,44 @@ test("getAvailableModels 透传模型支持的思考档位（reasoningEfforts）
 	assert.equal(models[0].reasoningEfforts?.[1].name, "High");
 });
 
-test("sendPrompt rejects only when DSH sessions.models reports routable=false", async () => {
+test("0.2 目录默认值不覆盖会话 modelSelection.next；可路由但未列出的模型仍能发送", async () => {
+	const { host, client, modelSelections } = makeFakeHost({
+		modelsValue: {
+			default: { provider: "host-default", model: "default" },
+			routableProviders: ["host-default", "chosen"],
+			groups: [],
+			failures: [],
+		},
+	});
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	modelSelections.set("session-fake-1", { provider: "chosen", model: "private-model", reasoningEffort: "high" });
+	assert.equal((await manager.getAvailableModels(tab.id)).length, 0);
+	const state = await manager.getRuntimeState(tab.id);
+	assert.equal(state.modelId, "private-model");
+	assert.equal(state.provider, "chosen");
+	assert.equal(state.thinkingLevel, "high");
+	assert.equal(state.modelRoutable, true);
+	assert.equal((await manager.sendPrompt({ agentId: tab.id, message: "allowed" })).accepted, true);
+	client.abortAllPending();
+});
+
+test("0.2 模型投影不可读时不将 host 默认值覆盖已知选择", async () => {
+	const { host, client } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await manager.setModel(tab.id, "chosen", "remembered");
+	client.sessionsProjections = async () => ({ result: { ok: false, error: { code: "session/writer-held", message: "unavailable" } } });
+	await assert.rejects(() => manager.getAvailableModels(tab.id), /unavailable/);
+	assert.equal((await manager.getRuntimeState(tab.id)).modelId, "remembered");
+	client.abortAllPending();
+});
+
+test("sendPrompt rejects a provider absent from routableProviders", async () => {
 	const { host, calls } = makeFakeHost({
 		modelsValue: {
-			current: { provider: "gone-provider", model: "gone-model" },
-			routable: false,
+			default: { provider: "gone-provider", model: "gone-model" },
+			routableProviders: [],
 			groups: [],
 			failures: [],
 		},
@@ -1345,8 +1385,8 @@ test("setPermission 拒绝未知预设，避免把非法值送进 DSH 命令桥"
 test("setModel 按官方语义使用新模型默认档位，不携带旧模型的 thinkingLevel", async () => {
 	const { host, client } = makeFakeHost({
 		modelsValue: {
-			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
-			routable: true,
+			default: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
+			routableProviders: ["llm-deepseek", "jiyuan"],
 			failures: [],
 			groups: [
 				{
@@ -1413,8 +1453,8 @@ test("setModel 按官方语义使用新模型默认档位，不携带旧模型�
 test("setThinking 在 host 拒绝时回滚旧档位并抛出错误", async () => {
 	const { host, client } = makeFakeHost({
 		modelsValue: {
-			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
-			routable: true,
+			default: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
+			routableProviders: ["llm-deepseek"],
 			failures: [],
 			groups: [
 				{
@@ -1474,7 +1514,9 @@ test("setThinking 在 host 拒绝时回滚旧档位并抛出错误", async () =>
 });
 
 test("setThinking 无当前模型时不写入 runtime.thinkingLevel，避免污染后续换模型", async () => {
-	const { host } = makeFakeHost();
+	const { host, client } = makeFakeHost();
+	// 正常目录现在会提供默认选择；用读取失败复现确实没有当前模型的边界。
+	client.sessions.models = async () => ({ result: { ok: false, error: { code: "unavailable", message: "catalog unavailable" } } });
 	const manager = new DshAgentManager(host, () => PROJECT);
 	await manager.create({ projectId: "project-1", backend: "dsh" });
 	const agentId = "dsh:session-fake-1";
@@ -1698,9 +1740,10 @@ test("sendPrompt 仍拒绝 DSH 不支持的宿主指令", async () => {
 test("模型与思考强度在运行中交给后端，后续 step 使用已接受的选择", async () => {
 	const { host, client } = makeFakeHost({
 		modelsValue: {
-			current: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
-			routable: true,
+			default: { provider: "llm-deepseek", model: "deepseek-v4-flash" },
+			routableProviders: ["llm-deepseek"],
 			groups: [],
+			failures: [],
 		},
 	});
 	const manager = new DshAgentManager(host, () => PROJECT);

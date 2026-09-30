@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type { ModelCatalog } from "@deepseek-ai/dsh-api-session-controller/types";
+import { parseDshModelCatalog } from "./dshModels";
 import { DshApiClient, type DshRpcResult } from "./DshApiClient";
+import { projectSubagentCatalog, readSubagentCatalog, type DshSubagentView } from "./dshSubagentCatalog";
 
 /** 旧 AbstractApiClient 的返回信封（调用方沿用的解包形状 x.result.ok / x.result.value）。
  *  泛型默认 any：0.1.5 的生成 wire 类型随 dsh-host-apiproxy 一起消失，宿主侧
@@ -197,9 +200,16 @@ export class DshRemoteClient {
 		return envelope(this.rpc.call("session/search", { request: { query: input.query } }, signal));
 	}
 
-	/** 旧 client.sessions.models / client.llm.models 的 0.1.5 宿主：session/modelCatalog。 */
-	async sessionsModelCatalog(): Promise<DshEnvelope> {
-		return envelope(this.rpc.call("session/modelCatalog", {}));
+	/** 模型目录是 host 默认值与可路由供应商，不包含会话当前选择。 */
+	async sessionsModelCatalog(): Promise<DshEnvelope<ModelCatalog>> {
+		const result = await this.rpc.call("session/modelCatalog", {});
+		if (!result.ok) return { result };
+		return { result: { ok: true, value: parseDshModelCatalog(result.value) } };
+	}
+
+	/** 会话级投影冷读；不激活 Agent，不获取写租约。 */
+	async sessionsProjections(input: { sessionId: string }): Promise<DshEnvelope<unknown>> {
+		return envelope(this.rpc.call("session/projections", { request: { sessionId: input.sessionId } }));
 	}
 
 	async sessionsSelectModel(input: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<DshEnvelope> {
@@ -438,8 +448,19 @@ export class DshRemoteClient {
 
 	// ── 子代理 / 技能 ─────────────────────────────────────────────────────────
 
-	async subagentsList(input: { parentSessionId: string }): Promise<DshEnvelope> {
-		return envelope(this.rpc.call("subagents/list", { parentSessionId: input.parentSessionId }));
+	/** 0.2 删除 subagents/list；目录与运行状态都走官方冷读端点，不激活 Agent。 */
+	async subagentsList(input: { parentSessionId: string }): Promise<DshEnvelope<{ entries: DshSubagentView[] }>> {
+		const result = await this.rpc.call("session/projections", { request: { sessionId: input.parentSessionId } });
+		if (!result.ok) return { result };
+		try {
+			const catalog = readSubagentCatalog(result.value);
+			if (!catalog.length) return { result: { ok: true, value: { entries: [] } } };
+			const sessions = await this.rpc.call("session/list", { _request: {} });
+			if (!sessions.ok) return { result: sessions };
+			return { result: { ok: true, value: { entries: projectSubagentCatalog(catalog, sessions.value) } } };
+		} catch (error) {
+			return { result: { ok: false, error: { code: "subagent/catalog-unavailable", message: error instanceof Error ? error.message : String(error), details: {} } } };
+		}
 	}
 
 	/**
@@ -546,10 +567,6 @@ export class DshRemoteClient {
 
 	async agentPresetsList(): Promise<DshEnvelope> {
 		return envelope(this.rpc.call("agentPresets/list", {}));
-	}
-
-	async agentPresetsRemove(input: { agentPreset: string }): Promise<DshEnvelope> {
-		return envelope(this.rpc.call("agentPresets/deletePreset", { id: input.agentPreset }));
 	}
 
 	async workspaceCreate(input: { path: string }): Promise<DshEnvelope> {

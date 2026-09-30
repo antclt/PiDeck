@@ -127,15 +127,12 @@ export type DshBackendIpcDeps = {
 	listDshAgentPresets?: () => Promise<
 		Array<{
 			id: string;
-			trust: "system" | "user";
 			isDefault: boolean;
 			name?: string;
 			description?: string;
 			broken?: string;
 		}>
 	>;
-	/** DSH 删除本地（user）预设（agentPreset.remove）；system 预设由 host 拒绝。 */
-	removeDshAgentPreset?: (id: string) => Promise<void>;
 	/** DSH 部署默认模型选择（settings.yaml agent-default-model）；未装配/不可读时 undefined。 */
 	getDshDefaultModel?: () => Promise<
 		| {
@@ -405,7 +402,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		discoverDshModels,
 		listDshProviders,
 		listDshAgentPresets,
-		removeDshAgentPreset,
 		getDshDefaultModel,
 		getDshStatus,
 		getDshRuntimeStatus,
@@ -1468,13 +1464,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.dshListProviders, async () => (listDshProviders ? listDshProviders() : []));
 	ipcMain.handle(ipcChannels.dshAgentPresets, async () => (listDshAgentPresets ? listDshAgentPresets() : []));
-	// 预设删除：边界校验 id（非空字符串、去首尾空白）；system 预设由 host 侧拒绝并回传结构化错误。
-	ipcMain.handle(ipcChannels.dshAgentPresetRemove, async (_event, id: string) => {
-		const presetId = typeof id === "string" ? id.trim() : "";
-		if (!presetId) throw new Error("Invalid DSH agent preset id");
-		if (!removeDshAgentPreset) throw new Error("DSH agent presets are not available");
-		await removeDshAgentPreset(presetId);
-	});
 	ipcMain.handle(ipcChannels.dshDefaultModel, async () => (getDshDefaultModel ? getDshDefaultModel() : undefined));
 	ipcMain.handle(ipcChannels.dshGetStatus, async () => (getDshStatus ? getDshStatus() : { started: false, homeDir: "", bootError: null }));
 	// DSH runtime 安装态查询：未装配 dshBackend = 无 DSH 后端，按 notInstalled 返回

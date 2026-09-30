@@ -20,7 +20,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { installHiddenConsolePatch, installHostHiddenConsole, installRunnerNodeModeEnv, installRunnerPreloadEnv, getHiddenConsoleMode, configureDshRunnerNodeSidecar, getDshRunnerNodeSidecar } from "./hideChildConsoles";
 import { DSH_RUNNER_NODE_ENV } from "./dshRunnerNodeSidecar";
-import { agentPresetsRow, dshSubagentModelSelectionSettingsRow, dshWebAgentPlaneDisableRows, hostCompositionPath } from "./dshPresetComposition";
+import { agentPresetsRow, dshSubagentModelSelectionSettingsRow, dshWebAgentPlaneDisableRows } from "./dshPresetComposition";
+import { prepareDshHostProfile } from "./dshHostProfile";
+import { createLegacyPresetPlugin } from "./pideckLegacyPreset";
 import { PIDECK_PLUGIN_BRIDGE_PATH, handlePluginBridgeFetch } from "./pideckPluginBridge";
 import { PIDECK_COMMANDS_BRIDGE_PATH, handleCommandsBridgeFetch } from "./pideckCommandsBridge";
 import { PIDECK_SESSION_BRIDGE_PATH, handleSessionBridgeFetch } from "./pideckSessionBridge";
@@ -28,6 +30,7 @@ import { loadDshOpenCodeHeaders } from "./dshOpenCodeHeaders";
 
 // utilityProcess 的 parentPort：electron 包类型里有（Electron.ParentPort）。
 import type { ParentPort } from "electron";
+import type {} from "@deepseek-ai/dsh-client-connection";
 // 桥协议消息校验/收窄（fetch-* 与 stream-* 统一入口）。
 import { parseDshFetchMessage } from "./dshHostBridge";
 
@@ -106,7 +109,10 @@ async function main(): Promise<void> {
 	//    时 Windows 会新建【可见】控制台——命令秒回但每条弹黑窗口（2026-09-12 实测）。
 	try {
 		const runtimeRequire = createRequire(join(fileURLToPath(nodeModulesUrl), "package.json"));
-		const koffiEntry = runtimeRequire.resolve("koffi") as string;
+		// npm 0.2 依赖树可能把 koffi 留在 subprocess-local 下；沿实际 consumer 解析，
+		// 不依赖顶层提升，也不让 runner 回退到不属于该 runtime 的 native 版本。
+		const consumerRequire = createRequire(runtimeRequire.resolve("@deepseek-ai/dsh-subprocess-local/package.json"));
+		const koffiEntry = consumerRequire.resolve("koffi");
 		process.env.PIDECK_KOFFI_MODULE = koffiEntry;
 	} catch {
 		// runtime 里没有 koffi（异常形态）：退回 app 内解析——koffi 已进应用依赖，
@@ -139,14 +145,15 @@ async function main(): Promise<void> {
 	// HostConnectionHandle.createSharedFetchHandler('/api') 提供（见下方 apiHandler）。
 	const require = createRequire(join(fileURLToPath(nodeModulesUrl), "package.json"));
 	const importFromApp = (specifier: string) => import(pathToFileURL(require.resolve(specifier)).href);
-	const [{ boot, loadOverlayPatches, loadOptionalPatches, PROFILE_PATCH_FILENAME }, { provideCmdline }] = await Promise.all([importFromApp("@deepseek-ai/dsh-app-boot"), importFromApp("@deepseek-ai/dsh-cmdline")]);
+	const [appBoot, { provideCmdline }]: [typeof import("@deepseek-ai/dsh-app-boot"), typeof import("@deepseek-ai/dsh-cmdline")] = await Promise.all([importFromApp("@deepseek-ai/dsh-app-boot"), importFromApp("@deepseek-ai/dsh-cmdline")]);
+	const { boot, loadOverlayPatches, PluginPackages } = appBoot;
 
 	const basePatchPath = require.resolve("@deepseek-ai/dsh-base/cordis.patch.yml");
 	const patches = loadOverlayPatches("pideck-dsh", basePatchPath);
 	patches.push({ id: "hmr", disabled: true });
 	patches.push({ id: "session-telemetry-otel", disabled: true });
 	// 复刻 dsh-web-app/cordis.patch.yml 的「agent plane moves behind agent presets」：
-	// 基础层工具必须禁用，否则 minimal/standard/code 等 preset 只是叠加自己的工具，
+	// 基础层工具必须禁用，否则 minimal/standard/ptc 等 preset 只是叠加自己的工具，
 	// dsh-base 的进程级全局工具仍会对所有会话可见（极简模式失效的根因）。
 	for (const row of dshWebAgentPlaneDisableRows()) {
 		patches.push(row);
@@ -186,10 +193,8 @@ async function main(): Promise<void> {
 				id: "tool-pwsh-persistent",
 				name: require.resolve("dsh-tool-pwsh-persistent"),
 			},
-			// Agent preset 名单（standard/code/minimal/cordis 等组合预设）：与 dsh-web
-			// 同一部署形态——0.1.5 起随包 system 根由 dsh-agent-presets 自带
-			// （includeShippedRoot 默认），行内只声明默认预设。不声明该行时
-			// agentPreset.list 返回空名单，配置页「预设设置」无模式可选。
+			// 0.2 registry 与预设声明分离：此处登记服务，官方 bundle 的声明在
+			// prepareDshHostProfile 装配；配置页与会话使用同一组稳定 ID。
 			agentPresetsRow(),
 			// subagent 模型选择开关（Host 作用域服务）：standard/code 预设的 tool-subagent
 			// 行带 modelSelectionSettings: true，Host 缺该服务时整棵 preset 挂载失败
@@ -217,7 +222,7 @@ async function main(): Promise<void> {
 			{ id: "bill", name: require.resolve("dsh-bill") },
 			// PiDeck 最小化收敛：host 层仍保留 bill_stats / pwsh_persistent 供
 			// 非 minimal 预设使用，但 minimal 会话必须挡掉这两个全局扩展，
-			// 保持与官方 minimal（Windows 为 pwsh + str_replace_editor）一致。
+			// 保持与官方 minimal（Windows 为持久 pwsh + 文件工具）一致。
 			{
 				id: "pideck-minimal-tool-filter",
 				// 文件本体在下方 writeFileSync 落盘（boot 前必已存在），这里只内联绝对路径。
@@ -226,33 +231,9 @@ async function main(): Promise<void> {
 		],
 	});
 
-	// 官方 home 级用户补丁层（$DSH_HOME/cordis.patch.yml）：dsh CLI / dsh-web 的
-	// 用户自装插件与机器本地配置覆盖都写在这一层（官方语义：作用于每个 profile，
-	// 优先级高于 profile 自身层）。PiDeck 之前不加载它，dsh-web 侧安装的插件在
-	// PiDeck host 里既不显示也不生效；这里追加在 PiDeck 自有行之后（官方层级顺序：
-	// bundle < profile < home < overlay），让两侧部署一致。
-	// 容错：文件缺失 = 无层（loadOptionalPatches 语义）；文件存在但读取/解析失败
-	// 仅告警跳过——不让用户补丁写坏阻断 PiDeck host 启动（对官方 fail-loud 的放宽）。
-	// 注意：补丁里 insert 的裸包名按 --dsh-node-modules 锚点解析，dsh-web 安装到
-	// 其自身目录的包在 PiDeck runtime 里可能解析不到，boot 会 fail-loud 并把原因
-	// 透到配置页错误 banner（可从补丁文件移除该行后重启 host 恢复）。
-	try {
-		const homeUserPatches = loadOptionalPatches("pideck-dsh", join(dshHome, PROFILE_PATCH_FILENAME)) ?? [];
-		if (homeUserPatches.length > 0) {
-			patches.push(...homeUserPatches);
-			console.log(`[dsh-host-entry] home user patch layer loaded: ${homeUserPatches.length} patch(es)`);
-		}
-	} catch (error) {
-		console.warn("[dsh-host-entry] home user patch layer ignored:", error instanceof Error ? error.message : String(error));
-	}
-
-	// 组合文件的落盘位置有硬约束，见 hostCompositionPath 的说明：必须落在 appRoot
-	// 子树内，否则 dsh-agent-presets 的包名行解析基准（ctx.baseUrl）走不到 runtime 的
-	// node_modules，随包预设的插件行会被整体判为不可解析。
-	const hostRoot = fileURLToPath(nodeModulesUrl);
-	const configPath = hostCompositionPath(hostRoot);
-	mkdirSync(dirname(configPath), { recursive: true });
-	if (!existsSync(configPath)) writeFileSync(configPath, "[]\n");
+	// 0.2 配置由官方 profile/config-editor 持有。共享 home patch 最后加载，
+	// 遥测禁用再压到最终层；非法用户补丁必须报错，不能静默丢配置。
+	const profile = await prepareDshHostProfile(dshHome, require, appBoot, patches);
 	const pickerPath = join(configDir, "pideck-directory-picker.js");
 	if (!existsSync(pickerPath)) {
 		writeFileSync(pickerPath, ["export default {", "  apply(ctx) {", "    ctx.provide('directoryPicker', {", "      capability() { return { kind: 'none' }; },", "    });", "  },", "};", ""].join("\n"));
@@ -335,8 +316,8 @@ async function main(): Promise<void> {
 	const startedAt = Date.now();
 	const ctx = await boot(
 		"pideck-dsh",
-		configPath,
-		patches,
+		profile.configPath,
+		profile.patches,
 		async (hostCtx: import("@deepseek-ai/cordis").Context) => {
 			// prepare 早于所有 config-tree 插件挂载；用 runtime adapter 的依赖，
 			// 不用 app 顶层 pi-ai。随 host fiber 清理，不改安装包/共享 profile。
@@ -347,6 +328,14 @@ async function main(): Promise<void> {
 				// runtime API 变化最多让兼容头缺席，不能阻断其它供应商与 host 启动。
 				hostCtx.logger("pideck-opencode-headers").warn("Request header compatibility unavailable: %s", error instanceof Error ? error.message : String(error));
 			}
+			const [cordis, loader, include]: [typeof import("@deepseek-ai/cordis"), typeof import("@deepseek-ai/cordis-plugin-loader"), typeof import("@deepseek-ai/cordis-plugin-include")] = await Promise.all([
+				importFromApp("@deepseek-ai/cordis"),
+				importFromApp("@deepseek-ai/cordis-plugin-loader"),
+				importFromApp("@deepseek-ai/cordis-plugin-include"),
+			]);
+			hostCtx.loader.builtins["pideck-legacy-preset"] = createLegacyPresetPlugin(cordis, loader, include, nodeModulesUrl);
+			hostCtx.provide("profileContext", profile.profileContext);
+			hostCtx.plugin(PluginPackages, { resolution: profile.resolution });
 			provideCmdline(hostCtx, {
 				args: [],
 				exit: (code: number) => {
@@ -507,7 +496,9 @@ function openGatewayStream(port: ParentPort, wireStream: import("@deepseek-ai/ds
 	openStreams.set(id, controller);
 	void (async () => {
 		try {
-			const items = await wireStream.open(endpoint, payload, controller.signal);
+			// 本载体尚无客户端 uplink；显式传空流，undefined peer 是官方进程内 operator。
+			const uplink: AsyncIterable<unknown> = { async *[Symbol.asyncIterator]() {} };
+			const items = await wireStream.open(endpoint, payload, uplink, undefined, controller.signal);
 			for await (const value of items) {
 				if (controller.signal.aborted) return;
 				port.postMessage({ type: "stream-item", id, value });

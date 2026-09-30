@@ -550,10 +550,10 @@ export const DshConfigTab = forwardRef<
 									<div className="p-4">
 										<PresetsTab
 											writable={writable}
-											namespace={namespaces.find((ns) => ns.ns === "agent-presets")}
+											namespace={namespaces.find((ns) => ns.ns === "agent-preset-registry")}
 											onSave={async (id) => {
-												const view = namespaces.find((ns) => ns.ns === "agent-presets");
-												await desktopApi.sessions.updateDshSettings("agent-presets", { default: id }, view?.revision);
+												const view = namespaces.find((ns) => ns.ns === "agent-preset-registry");
+												await desktopApi.sessions.updateDshSettings("agent-preset-registry", { selectedDefault: id }, view?.revision);
 												await load();
 											}}
 											sectionApi={sectionApi}
@@ -901,7 +901,6 @@ function openDocument() {
 
 type DshAgentPreset = {
 	id: string;
-	trust: "system" | "user";
 	isDefault: boolean;
 	name?: string;
 	description?: string;
@@ -946,8 +945,8 @@ function PluginCard(props: {
 
 /**
  * 预设设置 tab（对齐 dsh-web 的 agent preset 选择/管理）：列出 host 可组合的会话
- * Agent 预设（standard/code/minimal/cordis 等），标记当前默认，并支持把任一预设
- * 设为新会话默认（写入 settings 文档的 agent-presets.default，与 dsh-web 的
+ * Agent 预设（standard/ptc/minimal/cordis 等），标记当前默认，并支持把任一预设
+ * 设为新会话默认（profile 中 agent-preset-registry.selectedDefault，与 dsh-web 的
  * General 设置行同一写入目标；仅对之后新建的会话生效，运行中会话保持原组合）。
  * 保存语义与 Pi 管理页一致：点击「设为默认」只暂存选择，由顶部统一保存提交。
  */
@@ -959,9 +958,6 @@ function PresetsTab(props: { writable: boolean; namespace?: DshNamespaceView; on
 	/** 暂存的新默认预设 id（未保存；顶部统一保存时提交）。 */
 	const [pendingDefault, setPendingDefault] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
-	/** 正在等待确认删除的 user 预设（null = 无弹窗；确认后调 agentPreset.remove）。 */
-	const [removingPreset, setRemovingPreset] = useState<DshAgentPreset | null>(null);
-	const [deleting, setDeleting] = useState(false);
 
 	const reload = useCallback(async () => {
 		try {
@@ -995,26 +991,6 @@ function PresetsTab(props: { writable: boolean; namespace?: DshNamespaceView; on
 	const currentDefaultId = presets.find((preset) => preset.isDefault)?.id;
 	const dirty = pendingDefault !== null;
 
-	/**
-	 * 删除本地（user）预设：立即调 agentPreset.remove（host 拒绝 system 预设），
-	 * 成功后重拉名单。与「设为默认」的暂存语义不同——删除是独立破坏性操作，
-	 * 走 ConfirmDialog 确认后即时生效，不并入顶部统一保存。
-	 */
-	const deletePreset = async (preset: DshAgentPreset) => {
-		setDeleting(true);
-		try {
-			await desktopApi.sessions.removeDshAgentPreset(preset.id);
-			// 被删的是暂存的新默认时清掉待保存选择，避免保存一个已不存在的预设 id
-			setPendingDefault((prev) => (prev === preset.id ? null : prev));
-			setRemovingPreset(null);
-			showNotice(t("config.dsh.presetRemoved"), 3000);
-			await reload();
-		} catch (error) {
-			showNotice(error instanceof Error ? error.message : String(error), 4000);
-		} finally {
-			setDeleting(false);
-		}
-	};
 	useEffect(() => {
 		props.sectionApi?.onDirtyChange(instanceId, dirty);
 		// 卸载时清掉本实例的脏来源，避免收起/切换后残留黄点
@@ -1068,7 +1044,6 @@ function PresetsTab(props: { writable: boolean; namespace?: DshNamespaceView; on
 							<div className="flex items-center gap-2">
 								<span className="min-w-0 flex-1 truncate font-mono text-control font-semibold text-foreground">{name}</span>
 								{isDefault && <span className="rounded-full border border-emerald-300/70 bg-emerald-500/10 px-2 py-0.5 text-micro font-medium text-emerald-700 dark:border-emerald-700/70 dark:text-emerald-300">{t("config.dsh.presetDefault")}</span>}
-								<span className={`rounded-full border border-border-subtle px-2 py-0.5 text-micro ${preset.trust === "user" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>{t(preset.trust === "user" ? "config.dsh.presetUser" : "config.dsh.presetSystem")}</span>
 								{canSetDefault && (
 									<Button
 										type="button"
@@ -1085,13 +1060,6 @@ function PresetsTab(props: { writable: boolean; namespace?: DshNamespaceView; on
 										{isPending ? t("config.dsh.presetPending") : t("config.dsh.presetSetDefault")}
 									</Button>
 								)}
-								{/* 删除入口仅 user 预设（本地目录的组合行，含 broken 预设——host 契约
-								    要求必须可删）；system 预设是部署自带组合行，host 侧拒绝删除。 */}
-								{props.writable && preset.trust === "user" && (
-									<Button type="button" variant="ghost" size="sm" className="h-7 text-muted-foreground hover:text-danger" disabled={deleting} title={t("config.dsh.presetRemove")} aria-label={t("config.dsh.presetRemove")} onClick={() => setRemovingPreset(preset)}>
-										<Trash2 className="size-3.5" aria-hidden="true" />
-									</Button>
-								)}
 							</div>
 							{description && <p className="mt-1 text-micro text-muted-foreground">{description}</p>}
 							{preset.broken && <p className="mt-1 text-micro text-danger">{t("config.dsh.presetBroken", { reason: preset.broken })}</p>}
@@ -1100,7 +1068,6 @@ function PresetsTab(props: { writable: boolean; namespace?: DshNamespaceView; on
 					);
 				})
 			)}
-			{removingPreset && <ConfirmDialog title={t("common.deleteConfirm")} message={t("common.deleteConfirmMsg", { name: presetDisplayName(removingPreset, t) })} confirmLabel={t("common.delete")} danger onConfirm={() => void deletePreset(removingPreset)} onCancel={() => setRemovingPreset(null)} />}
 		</div>
 	);
 }
