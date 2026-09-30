@@ -5,18 +5,18 @@ import ts from "typescript";
 import vm from "node:vm";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-function loadWebServiceManager() {
+function loadWebServiceModule() {
 	return loadTsCommonJs("src/main/web/WebServiceManager.ts", {
 		globals: { fetch: globalThis.fetch },
-	}).WebServiceManager;
+	});
 }
 
-async function withManager(host, run) {
-	const WebServiceManager = loadWebServiceManager();
+async function withManager(host, run, requiresAuth) {
+	const { WebServiceManager } = loadWebServiceModule();
 	const manager = new WebServiceManager({
 		subscribePiEvents: () => () => undefined,
 	});
-	await manager.start(host, 0);
+	await manager.start(host, 0, requiresAuth);
 	const baseUrl = `http://127.0.0.1:${manager.current.port}`;
 	try {
 		await run({ manager, baseUrl });
@@ -24,6 +24,16 @@ async function withManager(host, run) {
 		await manager.stop();
 	}
 }
+
+test("normalizeWebHost trims whitespace and unwraps IPv6 brackets", () => {
+	const { normalizeWebHost } = loadWebServiceModule();
+	assert.equal(normalizeWebHost("[::1]"), "::1");
+	assert.equal(normalizeWebHost("  0.0.0.0 "), "0.0.0.0");
+	assert.equal(normalizeWebHost(""), "0.0.0.0");
+	assert.equal(normalizeWebHost("[2001:db8::1]"), "2001:db8::1");
+	assert.equal(normalizeWebHost("  "), "0.0.0.0");
+	assert.equal(normalizeWebHost("localhost"), "localhost");
+});
 
 test("non-loopback binding rejects /api without a valid token", async () => {
 	await withManager("0.0.0.0", async ({ manager, baseUrl }) => {
@@ -57,23 +67,52 @@ test("non-loopback binding rejects /api without a valid token", async () => {
 	});
 });
 
-test("loopback binding stays tokenless for backward compatibility", async () => {
-	await withManager("127.0.0.1", async ({ manager, baseUrl }) => {
-		assert.equal(manager.current.requiresAuth, false);
-		const response = await fetch(`${baseUrl}/api/nope`);
-		assert.equal(response.status, 404);
-	});
+test("loopback binding with auth disabled stays tokenless", async () => {
+	await withManager(
+		"127.0.0.1",
+		async ({ manager, baseUrl }) => {
+			assert.equal(manager.current.requiresAuth, false);
+			const response = await fetch(`${baseUrl}/api/nope`);
+			assert.equal(response.status, 404);
+		},
+		false,
+	);
+});
+
+test("loopback binding with auth enabled requires a valid token", async () => {
+	await withManager(
+		"127.0.0.1",
+		async ({ manager, baseUrl }) => {
+			const token = manager.current.token;
+			assert.equal(manager.current.requiresAuth, true);
+
+			let response = await fetch(`${baseUrl}/api/nope`);
+			assert.equal(response.status, 401);
+
+			response = await fetch(`${baseUrl}/api/nope?token=${encodeURIComponent(token)}`);
+			assert.equal(response.status, 404);
+
+			response = await fetch(`${baseUrl}/api/nope`, {
+				headers: { authorization: `Bearer ${token}` },
+			});
+			assert.equal(response.status, 404);
+
+			response = await fetch(`${baseUrl}/api/health`);
+			assert.equal(response.status, 200);
+		},
+		true,
+	);
 });
 
 test("token is regenerated on every start", async () => {
-	const WebServiceManager = loadWebServiceManager();
+	const { WebServiceManager } = loadWebServiceModule();
 	const manager = new WebServiceManager({
 		subscribePiEvents: () => () => undefined,
 	});
-	await manager.start("0.0.0.0", 0);
+	await manager.start("0.0.0.0", 0, false);
 	const first = manager.current.token;
 	await manager.stop();
-	await manager.start("0.0.0.0", 0);
+	await manager.start("0.0.0.0", 0, false);
 	const second = manager.current.token;
 	try {
 		assert.notEqual(first, second);
@@ -147,19 +186,82 @@ test("web client sends stored token as Bearer header on every request", async ()
 	);
 });
 
-test("getStatus reports running shape and clears after stop", async () => {
-	await withManager("0.0.0.0", async ({ manager }) => {
+test("IPv6 bracketed host is normalized and enforces auth when enabled", async () => {
+	const { WebServiceManager } = loadWebServiceModule();
+	const manager = new WebServiceManager({
+		subscribePiEvents: () => () => undefined,
+	});
+	// 先裸 start 取可用端口，再走 applySettings 验证方括号 host 被清洗。
+	await manager.start("127.0.0.1", 0, true);
+	const port = manager.current.port;
+	try {
+		await manager.applySettings({
+			webServiceEnabled: true,
+			webServiceHost: "[::1]",
+			webServicePort: port,
+			webServiceRequiresAuth: true,
+		});
 		const status = manager.getStatus();
 		assert.equal(status.running, true);
-		assert.equal(status.host, "0.0.0.0");
-		assert.equal(typeof status.port, "number");
-		assert.equal(typeof status.token, "string");
+		assert.equal(status.host, "::1");
 		assert.equal(status.requiresAuth, true);
+		const baseUrl = `http://[::1]:${status.port}`;
+		let response = await fetch(`${baseUrl}/api/nope`);
+		assert.equal(response.status, 401);
+		response = await fetch(`${baseUrl}/api/nope?token=${encodeURIComponent(status.token)}`);
+		assert.equal(response.status, 404);
+		response = await fetch(`${baseUrl}/api/health`);
+		assert.equal(response.status, 200);
+	} finally {
+		await manager.stop();
+	}
+});
+
+test("toggling requiresAuth alone restarts the service", async () => {
+	const { WebServiceManager } = loadWebServiceModule();
+	const manager = new WebServiceManager({
+		subscribePiEvents: () => () => undefined,
 	});
+	// 先裸 start 取可用端口，再走 applySettings 验证仅切换 requiresAuth 会触发重启。
+	await manager.start("127.0.0.1", 0, true);
+	const port = manager.current.port;
+	const firstToken = manager.current.token;
+	try {
+		let response = await fetch(`http://127.0.0.1:${port}/api/nope`);
+		assert.equal(response.status, 401);
+
+		await manager.applySettings({
+			webServiceEnabled: true,
+			webServiceHost: "127.0.0.1",
+			webServicePort: port,
+			webServiceRequiresAuth: false,
+		});
+		assert.equal(manager.getStatus().requiresAuth, false);
+		assert.notEqual(manager.current.token, firstToken, "token must be regenerated after restart");
+		response = await fetch(`http://127.0.0.1:${port}/api/nope`);
+		assert.equal(response.status, 404);
+	} finally {
+		await manager.stop();
+	}
+});
+
+test("getStatus reports running shape and clears after stop", async () => {
+	await withManager(
+		"0.0.0.0",
+		async ({ manager }) => {
+			const status = manager.getStatus();
+			assert.equal(status.running, true);
+			assert.equal(status.host, "0.0.0.0");
+			assert.equal(typeof status.port, "number");
+			assert.equal(typeof status.token, "string");
+			assert.equal(status.requiresAuth, true);
+		},
+		true,
+	);
 	// withManager 的 finally 已 stop；此处验证 stop 后的形状
-	const WebServiceManager = loadWebServiceManager();
+	const { WebServiceManager } = loadWebServiceModule();
 	const manager = new WebServiceManager({ subscribePiEvents: () => () => undefined });
-	await manager.start("127.0.0.1", 0);
+	await manager.start("127.0.0.1", 0, false);
 	await manager.stop();
 	// loadTsCommonJs 在独立 vm 域编译，对象原型不同，deepStrictEqual 按原型判等会误报，逐字段断言。
 	const stopped = manager.getStatus();

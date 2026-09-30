@@ -179,8 +179,9 @@ Gitmoji 对应关系：
 	wslUser: "root",
 	telemetryEnabled: true,
 	webServiceEnabled: false,
-	webServiceHost: "127.0.0.1",
+	webServiceHost: "0.0.0.0",
 	webServicePort: 8765,
+	webServiceRequiresAuth: true,
 	rpcTimeout: 600_000,
 	linkOpenMode: "external",
 	workspaceContentOpenMode: "split",
@@ -420,6 +421,12 @@ export class SettingsStore {
 			// 避免把脏值当成迁移种子写进配置文件；缺字段回落空数组（“没有旧数据”），
 			// 不要在这里注入出厂清单——出厂清单改由随包资源文件提供。
 			this.settings.quickMessages = normalizeQuickMessages(parsed.quickMessages);
+			// Web 服务 host 脏值/旧版缺字段回落到 0.0.0.0，与默认监听所有网卡保持一致。
+			this.settings.webServiceHost = typeof parsed.webServiceHost === "string" ? parsed.webServiceHost.trim() || defaultSettings.webServiceHost : defaultSettings.webServiceHost;
+			// 新增鉴权开关：旧 settings.json 缺字段或脏值回落 true，默认强制 token 校验。
+			if (typeof this.settings.webServiceRequiresAuth !== "boolean") {
+				this.settings.webServiceRequiresAuth = defaultSettings.webServiceRequiresAuth;
+			}
 			// 隐藏模块来自旧 JSON 时可能是脏值（非数组/含空串与重复项）；统一清洗，缺字段回落空数组（全显示）。
 			this.settings.hiddenModules = normalizeHiddenModules(parsed.hiddenModules);
 		}

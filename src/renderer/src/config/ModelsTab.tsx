@@ -9,10 +9,11 @@ import { getHeaderValue, setHeaderValue } from "./providerHeaders";
 import { buildModelsFromFetchedSelection } from "./modelsUtils";
 // 排序键收敛到 shared：与模型下拉列表 / 主进程写入保持同一顺序。
 import { compareModelRows } from "../../../shared/modelOrder";
-import { countSelectedModelIndexes, toggleAllModelIndexes, toggleModelIndex } from "./modelBatchSelection";
+import { countSelectedModelIndexes, invertModelIndexes, selectAllModelIndexes, toggleAllModelIndexes, toggleModelIndex } from "./modelBatchSelection";
 import { FetchedModelCombobox } from "./FetchedModelCombobox";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Label } from "../components/ui-shadcn/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui-shadcn/select";
 import { showNotice } from "../utils/notice";
 import { applyModelPatches, computeModelSpecPatches, looksDeepSeekBacked } from "../utils/modelSpecAutoFill";
 import type { FetchedModel, ConfigProxyMode } from "../../../shared/types/fetchedModel";
@@ -180,8 +181,25 @@ export function ModelsTab(props: {
 	const [showGuide, setShowGuide] = useState(false);
 	const [batchMode, setBatchMode] = useState(false);
 	const [selectedProviders, setSelectedProviders] = useState<Set<string>>(() => new Set());
+	// 批量模式当前动作；null = 未选择（进入批量管理时不预选，强制用户显式选择）
+	const [batchAction, setBatchAction] = useState<"delete" | "export" | null>(null);
 	// 批量导出：非空时列表区被面板独占（与 AddProviderDialog 同一模式）。
 	const [transferView, setTransferView] = useState<{ kind: "export"; ids: string[] } | { kind: "import" } | null>(null);
+	const exitBatchMode = () => {
+		setBatchMode(false);
+		setSelectedProviders(new Set());
+		setBatchAction(null);
+	};
+	const handleBatchExecute = () => {
+		if (!batchAction || selectedProviders.size === 0) return;
+		if (batchAction === "delete") {
+			// 确认弹窗由 ConfigModal.handleDeleteProviders 承载（common.deleteBatchConfirm），此处只发起
+			props.onDeleteProviders([...selectedProviders]);
+		} else {
+			setTransferView({ kind: "export", ids: [...selectedProviders] });
+		}
+		exitBatchMode();
+	};
 	// 模型批量删除只作用于当前展开的 provider，避免不同 provider 的同一行索引互相污染。
 	const [modelBatchProvider, setModelBatchProvider] = useState<string | null>(null);
 	const [selectedModelIndexes, setSelectedModelIndexes] = useState<Set<number>>(() => new Set());
@@ -269,50 +287,47 @@ export function ModelsTab(props: {
 					<div className="mb-3 flex items-center justify-between gap-3">
 						<span className="font-mono text-xs tabular-nums text-text-tertiary">{t("config.count.providers", { count: visibleProviderNames.length })}</span>
 						<div className="flex min-w-0 items-center gap-1.5">
-							<Button size="sm" variant="outline" onClick={props.onStartAddProvider} disabled={saving}>
-								{t("config.addProvider")}
-							</Button>
-							<Button size="sm" variant="outline" onClick={() => setTransferView({ kind: "import" })} disabled={saving}>
-								{t("config.models.transfer.importButton")}
-							</Button>
-							<Button size="sm" variant="outline" onClick={() => setShowGuide(!showGuide)} disabled={saving}>
-								{t("config.providerGuide")}
-							</Button>
-							<Button
-								size="sm"
-								variant="destructive"
-								onClick={() => {
-									if (batchMode) {
-										setBatchMode(false);
-										setSelectedProviders(new Set());
-									} else {
-										setBatchMode(true);
-									}
-								}}
-								disabled={saving || visibleProviderNames.length === 0}
-							>
-								{batchMode ? t("common.cancel") : t("common.deleteBatch")}
-							</Button>
-							{batchMode && (
-								<Button
-									size="sm"
-									variant="destructive"
-									onClick={() => {
-										if (selectedProviders.size > 0) {
-											props.onDeleteProviders([...selectedProviders]);
-											setSelectedProviders(new Set());
-											setBatchMode(false);
-										}
-									}}
-									disabled={selectedProviders.size === 0}
-								>
-									{t("common.deleteSelected")} ({selectedProviders.size})
-								</Button>
+							{!batchMode && (
+								<>
+									<Button size="sm" variant="outline" onClick={props.onStartAddProvider} disabled={saving}>
+										{t("config.addProvider")}
+									</Button>
+									<Button size="sm" variant="outline" onClick={() => setTransferView({ kind: "import" })} disabled={saving}>
+										{t("config.models.transfer.importButton")}
+									</Button>
+									<Button size="sm" variant="outline" onClick={() => setShowGuide(!showGuide)} disabled={saving}>
+										{t("config.providerGuide")}
+									</Button>
+								</>
 							)}
+							<Button size="sm" variant="outline" onClick={() => (batchMode ? exitBatchMode() : setBatchMode(true))} disabled={saving || visibleProviderNames.length === 0}>
+								{batchMode ? t("common.cancel") : t("common.batchManage")}
+							</Button>
 							{batchMode && (
-								<Button size="sm" variant="outline" disabled={selectedProviders.size === 0} onClick={() => setTransferView({ kind: "export", ids: [...selectedProviders] })}>
-									{t("config.models.transfer.exportSelected", { count: selectedProviders.size })}
-								</Button>
+								<>
+									<Button size="sm" variant="ghost" disabled={visibleProviderNames.length === 0} onClick={() => setSelectedProviders(new Set(visibleProviderNames))}>
+										{t("common.selectAll")}
+									</Button>
+									<Button size="sm" variant="ghost" disabled={visibleProviderNames.length === 0} onClick={() => setSelectedProviders(new Set(visibleProviderNames.filter((name) => !selectedProviders.has(name))))}>
+										{t("common.invertSelection")}
+									</Button>
+									{/* 清除选择只清空勾选，留在批量模式（不动 batchAction） */}
+									<Button size="sm" variant="ghost" disabled={visibleProviderNames.length === 0} onClick={() => setSelectedProviders(new Set())}>
+										{t("common.clearSelection")}
+									</Button>
+									<Select value={batchAction ?? undefined} onValueChange={(next) => setBatchAction(next === "delete" || next === "export" ? next : null)}>
+										<SelectTrigger aria-label={t("config.models.batchActionLabel")} className="h-8 w-32">
+											<SelectValue placeholder={t("config.models.batchActionLabel")} />
+										</SelectTrigger>
+										<SelectContent position="popper">
+											<SelectItem value="delete">{t("config.models.batchAction.delete")}</SelectItem>
+											<SelectItem value="export">{t("config.models.batchAction.export")}</SelectItem>
+										</SelectContent>
+									</Select>
+									<Button size="sm" variant="outline" disabled={!batchAction || selectedProviders.size === 0} onClick={handleBatchExecute}>
+										{t("config.models.batchExecute")}
+									</Button>
+								</>
 							)}
 						</div>
 					</div>
@@ -645,19 +660,31 @@ export function ModelsTab(props: {
 															{isModelBatchMode ? t("common.cancel") : t("common.deleteBatch")}
 														</Button>
 														{isModelBatchMode && (
-															<Button
-																variant="destructive"
-																size="sm"
-																onClick={() => {
-																	if (selectedModelCount === 0) return;
-																	props.onDeleteModels(name, [...selectedModelIndexes]);
-																	clearModelBatch();
-																}}
-																disabled={selectedModelCount === 0}
-															>
-																<Trash2 className="size-3.5" aria-hidden="true" />
-																{t("common.deleteSelected")} ({selectedModelCount})
-															</Button>
+															<>
+																<Button size="sm" variant="ghost" disabled={provider.models.length === 0} onClick={() => setSelectedModelIndexes(selectAllModelIndexes(provider.models.length))}>
+																	{t("common.selectAll")}
+																</Button>
+																<Button size="sm" variant="ghost" disabled={provider.models.length === 0} onClick={() => setSelectedModelIndexes(invertModelIndexes(selectedModelIndexes, provider.models.length))}>
+																	{t("common.invertSelection")}
+																</Button>
+																{/* 清除选择只清空勾选，留在批量模式（不动 modelBatchProvider） */}
+																<Button size="sm" variant="ghost" disabled={provider.models.length === 0} onClick={() => setSelectedModelIndexes(new Set())}>
+																	{t("common.clearSelection")}
+																</Button>
+																<Button
+																	variant="destructive"
+																	size="sm"
+																	onClick={() => {
+																		if (selectedModelCount === 0) return;
+																		props.onDeleteModels(name, [...selectedModelIndexes]);
+																		clearModelBatch();
+																	}}
+																	disabled={selectedModelCount === 0}
+																>
+																	<Trash2 className="size-3.5" aria-hidden="true" />
+																	{t("common.deleteSelected")} ({selectedModelCount})
+																</Button>
+															</>
 														)}
 													</div>
 												</div>

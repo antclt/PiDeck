@@ -24,6 +24,7 @@ export type WebNetworkAddress = {
 	interfaceName: string;
 	cidr: string | null;
 	isPrivate: boolean;
+	family: "IPv4" | "IPv6";
 };
 /** 文件/Git Diff 在中间栏的默认打开方式：分屏与会话并排，或占满中间栏 */
 export type WorkspaceContentOpenMode = "split" | "maximize";
@@ -249,12 +250,17 @@ export type AppSettings = {
 	/** 是否开启局域网 Web 服务 */
 	webServiceEnabled: boolean;
 	/**
-	 * Web 服务监听地址。默认 127.0.0.1（仅本机）：绑定到网卡（0.0.0.0/局域网 IP）
-	 * 会让同网段任意主机访问本机的会话/文件，因此默认不对外暴露，需用户显式改。
+	 * Web 服务监听地址。默认 0.0.0.0（绑定到所有网卡）：同网段任意主机可访问，
+	 * 需配合 webServiceRequiresAuth 强制令牌校验，避免未授权调用。
 	 */
 	webServiceHost: string;
 	/** Web 服务监听端口 */
 	webServicePort: number;
+	/**
+	 * 鉴权开关。开 = 所有 /api/*（/api/health 除外）需携带访问令牌，环回地址也不例外；
+	 * 默认 true，与默认 0.0.0.0 绑定配合，阻断局域网未授权访问。
+	 */
+	webServiceRequiresAuth: boolean;
 	/** 本地生成的匿名安装标识，不包含账号、路径或机器名 */
 	telemetryInstallId?: string;
 	/** 最近一次发送 app_heartbeat 的本地日期，格式 YYYY-MM-DD */
@@ -617,7 +623,8 @@ export type AppSettings = {
 };
 
 /**
- * Web 服务运行时状态；token 每次 start 随机重生成，requiresAuth 仅在非环回绑定时为 true。
+ * Web 服务运行时状态；token 每次 start 随机重生成。
+ * requiresAuth 反映用户设置 webServiceRequiresAuth 的清洗结果，缺省视为 true。
  * 渲染层设置页二维码/令牌提示据此附上访问令牌。
  */
 export type WebServiceStatusInfo = {
