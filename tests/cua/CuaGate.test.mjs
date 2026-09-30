@@ -100,32 +100,32 @@ test("handler that never settles times out and denies", async () => {
 });
 
 test("in-process handler receives agentId + runtimeGeneration metadata", async () => {
-  const gate = new CuaGate({ enabled: true });
-  let seen = null;
-  gate.setApprovalHandler(async (request) => {
-    seen = request;
-    return { allowed: true };
-  });
+	const gate = new CuaGate({ enabled: true });
+	let seen = null;
+	gate.setApprovalHandler(async (request) => {
+		seen = request;
+		return { allowed: true };
+	});
 
-  const decision = await gate.check("click", "sess1", { x: 1, y: 2 }, { agentId: "agent-7", runtimeGeneration: 42 });
-  assert.strictEqual(decision.allowed, true);
-  assert.ok(seen, "handler should have been called");
-  assert.strictEqual(seen.agentId, "agent-7");
-  assert.strictEqual(seen.runtimeGeneration, 42);
-  assert.strictEqual(seen.sessionId, "sess1");
+	const decision = await gate.check("click", "sess1", { x: 1, y: 2 }, { agentId: "agent-7", runtimeGeneration: 42 });
+	assert.strictEqual(decision.allowed, true);
+	assert.ok(seen, "handler should have been called");
+	assert.strictEqual(seen.agentId, "agent-7");
+	assert.strictEqual(seen.runtimeGeneration, 42);
+	assert.strictEqual(seen.sessionId, "sess1");
 });
 
 test("metadata is optional and omitted when not provided", async () => {
-  const gate = new CuaGate({ enabled: true });
-  let seen = null;
-  gate.setApprovalHandler(async (request) => {
-    seen = request;
-    return { allowed: true };
-  });
+	const gate = new CuaGate({ enabled: true });
+	let seen = null;
+	gate.setApprovalHandler(async (request) => {
+		seen = request;
+		return { allowed: true };
+	});
 
-  await gate.check("type", "sess1", { text: "hi" });
-  assert.strictEqual(seen.agentId, undefined);
-  assert.strictEqual(seen.runtimeGeneration, undefined);
+	await gate.check("type", "sess1", { text: "hi" });
+	assert.strictEqual(seen.agentId, undefined);
+	assert.strictEqual(seen.runtimeGeneration, undefined);
 });
 
 test("getSessionOverrides reflects setSessionOverride", () => {

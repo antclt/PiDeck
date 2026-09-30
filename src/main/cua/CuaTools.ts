@@ -161,11 +161,15 @@ export function registerCuaTools(server: McpServer, engine: CuaEngine, gate: Cua
 			},
 		},
 		async (args) => {
-			const result = await engine.type(args.sessionId, {
-				text: args.text,
-				key: args.key,
-				modifiers: args.modifiers,
-			}, { meta: { agentId: args.agentId, runtimeGeneration: args.runtimeGeneration } });
+			const result = await engine.type(
+				args.sessionId,
+				{
+					text: args.text,
+					key: args.key,
+					modifiers: args.modifiers,
+				},
+				{ meta: { agentId: args.agentId, runtimeGeneration: args.runtimeGeneration } },
+			);
 
 			return {
 				content: [

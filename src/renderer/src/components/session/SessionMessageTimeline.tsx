@@ -485,49 +485,12 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 		latestRunIdRef.current = latestRun?.kind === "agent-run" ? latestRun.id : undefined;
 	}, [displayRuns, lastAgentRunIndex]);
 
-	const scrollFinalAnswerToUpperMiddle = controller.scrollFinalAnswerToUpperMiddle;
-	// 布局稳定窗口：折叠动画（Collapsible 高度变化）基本结束后再读取最终位置。
-	// 定时器不需要被输入事件取消——scrollFinalAnswerToUpperMiddle 会按触发时的
-	// autoScroll/ownerKey/几何守卫决定跳过，输入不参与取消（2026-09 状态驱动）。
-	const scheduleFinalAnswerSettle = useCallback(
-		(runId: string) => {
-			if (turnSettleScrollTimerRef.current !== undefined) {
-				window.clearTimeout(turnSettleScrollTimerRef.current);
-				turnSettleScrollTimerRef.current = undefined;
-			}
-			turnSettleScrollTimerRef.current = window.setTimeout(() => {
-				turnSettleScrollTimerRef.current = undefined;
-				scrollFinalAnswerToUpperMiddle(runId);
-			}, TURN_SETTLE_SCROLL_DELAY_MS);
-		},
-		[scrollFinalAnswerToUpperMiddle],
-	);
-	// 统一流水线：1.5s 阅读停顿 → 折叠执行过程（若仍展开）→ 布局稳定后定位。
-	// 定位不依赖「是否真的发生折叠」；同 run 已在途时复用，避免双调度。
-	const armSettledReposition = useCallback(
-		(runId: string | undefined) => {
-			if (!runId) return;
-			if (turnSettleIdleTimerRef.current !== undefined && turnSettleIdleLastRunRef.current === runId) {
-				return;
-			}
-			turnSettleIdleLastRunRef.current = runId;
-			if (turnSettleIdleTimerRef.current !== undefined) {
-				window.clearTimeout(turnSettleIdleTimerRef.current);
-				turnSettleIdleTimerRef.current = undefined;
-			}
-			turnSettleIdleTimerRef.current = window.setTimeout(() => {
-				turnSettleIdleTimerRef.current = undefined;
-				setLatestTurnAutoCollapseTick((tick) => tick + 1);
-				scheduleFinalAnswerSettle(runId);
-			}, TURN_SETTLE_IDLE_COLLAPSE_MS);
-		},
-		[scheduleFinalAnswerSettle],
-	);
-
+	// 回复完结后不再「自动滚回答案开头」（旧"安静收起"/完结定位已删除）。
+	// 自动滚动只发生在「发送那一刻」：由 controller 对新 user 行做一次性置顶动画。
+	// 完结后视口应保持用户在离开时的位置不变；会话切换由 controller 的恢复逻辑负责。
 	useEffect(() => {
 		const wasBusy = wasRuntimeBusyRef.current;
 		wasRuntimeBusyRef.current = isRuntimeBusy;
-
 		const clearIdle = () => {
 			if (turnSettleIdleTimerRef.current !== undefined) {
 				window.clearTimeout(turnSettleIdleTimerRef.current);
@@ -539,40 +502,26 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 			}
 			turnSettleIdleLastRunRef.current = undefined;
 		};
-
-		if (isRuntimeBusy || !hasLiveRuntime) {
-			// 实例结束或新一轮开始时作废旧定位；只在动画仍在途时恢复跟随。
-			// 用户正在读历史（无在途动画）则不打扰。
-			controller.cancelSettledRepositionForNewRun();
+		if (isRuntimeBusy || !hasLiveRuntime || !controller.autoScroll) {
 			clearIdle();
 			return;
 		}
-		if (!controller.autoScroll) {
-			clearIdle();
-			return;
-		}
-		// 唯一入口：只处理「运行中 → 停转」边沿。会话挂载/切回（含切回后台已结束的
-		// 会话、启动历史会话实例、分屏重开）不再补齐定位——视口保持在用户离开时的位置，
-		// 只由真实的本轮结束驱动（对齐 Proma：轮次结束不移动视口）。
 		if (!wasBusy) return;
-
-		// 最新轮结束且仍在跟随：arm 1.5s 阅读停顿流水线。
-		// 不再监听任何全局输入事件——鼠标移动/键盘/其他面板滚动与本轮是否结束无关,
-		// 不得参与取消（2026-09 收敛为状态驱动）。
-		armSettledReposition(latestRunIdRef.current);
-
-		return clearIdle;
-	}, [controller.autoScroll, controller.cancelSettledRepositionForNewRun, hasLiveRuntime, isRuntimeBusy, runtime?.agentId, runtime?.runtimeGeneration, sessionId, armSettledReposition]);
-
-	// 跟随状态变化（回底/下滚重锁）会作废在途的 settle 布局定时：不能让刚回底的
-	// 视口在 320ms 后又被定位拉到 30% 高度。定位动画开始后 autoScroll 恒为 false，
-	// 不会误清自身已触发的定时器；挂载首帧的 autoScroll true 不会清掉尚未排定的定时器。
-	useEffect(() => {
-		if (turnSettleScrollTimerRef.current !== undefined) {
-			window.clearTimeout(turnSettleScrollTimerRef.current);
-			turnSettleScrollTimerRef.current = undefined;
+		// 「运行中 → 停转」边沿仅用于让旧的 settled 流水线失效；不再调度任何定位。
+		// 仍保留「1.5s 阅读停顿 → 自动收起最新轮」的让读不托苏。
+		const latestRunId = latestRunIdRef.current;
+		if (!latestRunId) return clearIdle;
+		if (turnSettleIdleTimerRef.current !== undefined) {
+			window.clearTimeout(turnSettleIdleTimerRef.current);
 		}
-	}, [controller.autoScroll]);
+		turnSettleIdleLastRunRef.current = latestRunId;
+		turnSettleIdleTimerRef.current = window.setTimeout(() => {
+			turnSettleIdleTimerRef.current = undefined;
+			if (turnSettleIdleLastRunRef.current !== latestRunId) return;
+			setLatestTurnAutoCollapseTick((tick) => tick + 1);
+		}, TURN_SETTLE_IDLE_COLLAPSE_MS);
+		return clearIdle;
+	}, [controller.autoScroll, hasLiveRuntime, isRuntimeBusy, runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
 
 	const turnWindowActive = shouldWindowTimelineTurns(countAgentRunItems(reconciledRuns), turnWindowTurns);
 	// 方案 C（2026-12）渐进扩展：把「窗口是否仍可扩展」同步给 controller 的滚动监听——

@@ -43,16 +43,23 @@ test("scrollToBottom uses stick-to-bottom spring via scrollerScrollApiRef", () =
 	assert.match(timeline, /scrollApiRef=\{controller\.scrollerScrollApiRef\}/);
 });
 
-test("auto-collapse uses run-start positioning without breaking follow semantics", () => {
+test("auto-collapse survives without completion-reposition; send-time pin is the only auto-scroll", () => {
 	// 最终回答标记仍在（折叠后阅读用）；自动收起回调使用新的 onAutoCollapsed。
 	assert.match(turnRow, /data-final-answer=\{run\.id\}/);
 	assert.doesNotMatch(controller, /scrollFinalAnswerIntoView/);
 	assert.doesNotMatch(turnRow, /onProcessAutoCollapsed/);
 	assert.doesNotMatch(timeline, /onProcessAutoCollapsed/);
 	assert.match(turnRow, /onAutoCollapsed/);
-	assert.match(controller, /scrollFinalAnswerToUpperMiddle/);
-	assert.match(controller, /data-final-answer/);
-	assert.match(controller, /SETTLED_TURN_VIEWPORT_ANCHOR_RATIO/);
+	// 用户请求（m00677）：去掉完结/切回的自上旋滚动，自动滚动只在「发送那一刻」。
+	// 完结定位整链必须移除（scrollFinalAnswerToUpperMiddle 只允许安全的内部 no-op 吞杀）。
+	assert.doesNotMatch(timeline, /scheduleFinalAnswerSettle/);
+	assert.doesNotMatch(timeline, /scheduleSettleFinalAnswerTop/);
+	assert.doesNotMatch(timeline, /settleFinalAnswerTargetPx/);
+	// 自动滚动唯一路径：发送时 controller 对新 user 行做一次性置顶动画（含尾垫+未占改+取消）。
+	assert.match(controller, /pinScrollDurationMs/);
+	assert.match(controller, /pinToTopCancelRef/);
+	assert.match(controller, /PIN_TO_TOP_TARGET_GAP_PX/);
+	assert.match(controller, /PIN_TO_TOP_SKIP_EPSILON_PX/);
 	// isLatestRun（自动收起）保持按「最后一条显示条目」判定；
 	// live 挂载门用单独的 isLastAgentRun（最后一个 agent-run）判定——
 	// 两者语义不同，不能合并（见 liveMountDecision 回归）。
@@ -68,10 +75,8 @@ test("followOutput re-lock uses spring when far from bottom", () => {
 	assert.match(scroller, /reduce \|\| distance <= followThreshold \? "instant" : "smooth"/);
 });
 
-test("settled positioning is state-driven, inputs never cancel it", () => {
-	// 2026-09 对抗审查收敛：鼠标移动/键盘/滚轮/触摸等输入事件不参与「最终回答
-	// 安静定位」的取消——只有「已结束且仍跟随」才触发，只有状态边界（真实上滚/回底/
-	// 切会话/新一轮）才取消。
+test("settled reposition removed: no completion-driven scrolling, state-driven send pin only", () => {
+	// 2026-09 对抗审查收敛仍适用：鼠标移动/键盘/滚轮/触摸等输入事件不参与滚动取消。
 	assert.doesNotMatch(timeline, /addEventListener\("pointermove"/);
 	assert.doesNotMatch(timeline, /addEventListener\("pointerdown"/);
 	assert.doesNotMatch(timeline, /addEventListener\("wheel"/);
@@ -79,30 +84,14 @@ test("settled positioning is state-driven, inputs never cancel it", () => {
 	assert.doesNotMatch(timeline, /addEventListener\("touchstart"/);
 	assert.doesNotMatch(controller, /addEventListener\("wheel", interrupt/);
 	assert.doesNotMatch(controller, /addEventListener\("pointerdown", interrupt/);
-	// 状态驱动取消仍然保留：
-	// - 引擎真实输入（wheel/touch）带 source="input" → 终止在途定位动画；
-	// - 历史浏览失效事务（回底/重锁/切会话）→ invalidateHistoryBrowsing 取消。
-	assert.match(controller, /source === "input"/);
-	assert.match(controller, /settleScrollCancelRef\.current\?\.\(\);/);
-	// 对抗审查补修：
-	// - F1：新一轮开始（busy 边沿）取消在途 settle 动画并恢复跟随贴底；
-	// - P2-①：动画期间用户接管（拖动滚动条等）经几何检测中断，不再逐帧覆盖。
-	assert.match(controller, /cancelSettledRepositionForNewRun/);
-	assert.match(timeline, /controller\.cancelSettledRepositionForNewRun\(\)/);
-	// 滚动条拖动取消用「命中滚动条区域」的事件判定；不用几何分叉启发式——
-	// 内容收缩 clamp 也会改变 scrollTop，几何启发式会误判并取消定位动画。
-	assert.match(controller, /onScrollbarPointerDown/);
-	assert.match(controller, /event\.clientX >= rect\.left \+ timeline\.clientWidth/);
+	// 完结定位系统全删除：不再有完结后的自动滚动/定位目标/完结动画取消链。
+	assert.doesNotMatch(timeline, /addEventListener\("wheel", turnSettle/);
+	assert.doesNotMatch(timeline, /turnSettleIdleLastRunRef\.current = runId/);
+	assert.doesNotMatch(timeline, /armSettledReposition\(latestRunIdRef/);
 	const pinScrollSource = readFileSync("src/renderer/src/lib/pinTurnScroll.ts", "utf8");
 	assert.doesNotMatch(pinScrollSource, /TAKEOVER_TOLERANCE_PX/);
-	// 唯一边沿契约（2026-09 收口「触发场景太多」）：定位只能由「运行中 → 停转」
-	// 的 busy 边沿 arm。挂载/切回/启动实例/预热 runtime 一律补齐定位的旧实现已删除，
-	// 其幂等标记 settleTickConsumedRunRef 必须同步消失（否则是删漏的死代码）。
-	assert.doesNotMatch(timeline, /settleTickConsumedRunRef/);
-	assert.doesNotMatch(timeline, /latestSettledRunId/);
-	// 触发时序不变：1.5s 阅读停顿 + 320ms 布局稳定窗口。
-	assert.match(timeline, /TURN_SETTLE_IDLE_COLLAPSE_MS = 1500/);
-	assert.match(timeline, /TURN_SETTLE_SCROLL_DELAY_MS/);
-	// TurnRow 保留 onAutoCollapsed 通道（契约不依赖折叠回调驱动定位，但可扩展）。
+	// 完结动画取消只依靠历史浏览失效事务/回底/切会话；不再需要 run-start 忙搃取消完结定位。
+	assert.doesNotMatch(timeline, /controller\.cancelSettledRepositionForNewRun\(\)/);
+	// TurnRow 保留 onAutoCollapsed 通道（自动折叠仍独立于滚动定位）。
 	assert.match(turnRow, /onAutoCollapsed/);
 });
