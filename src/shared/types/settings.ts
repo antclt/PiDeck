@@ -585,7 +585,8 @@ export type AppSettings = {
 };
 
 /**
- * Web 服务运行时状态；token 每次 start 随机重生成，requiresAuth 仅在非环回绑定时为 true。
+ * Web 服务运行时状态；token 每次 start 随机重生成。
+ * requiresAuth 反映用户设置 webServiceRequiresAuth 的清洗结果，缺省视为 true。
  * 渲染层设置页二维码/令牌提示据此附上访问令牌。
  */
 export type WebServiceStatusInfo = {

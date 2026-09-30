@@ -3994,7 +3994,6 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.webQrScanHint": "Your phone and computer must be on the same local network",
 	"settings.webQrTokenHint": "LAN access requires a token; the QR link includes it automatically",
 	"settings.webQrUnavailable": "Unable to generate a QR code. Check the service port",
-	"settings.webQrEnableHint": "Enable Web Service to generate a QR code",
 	"settings.webRestartService": "Restart Web Service",
 	"settings.webRestarting": "Restarting Web Service...",
 	"settings.webRestarted": "Web Service restarted",
