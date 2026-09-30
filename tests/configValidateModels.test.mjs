@@ -55,6 +55,10 @@ function compile() {
 			};
 		}
 		// saveModelsConfig 会调用归因兜底（仅依赖纯常量，无副作用），加载真实实现避免空对象 stub
+		// 配置写盘留痕（ConfigManager.writeJsonFile 调 getAppLogger()?.info）；validate 路径只断言校验结果，未安装 logger 时返回 undefined。
+		if (specifier === "../logging/sharedLogger") {
+			return { getAppLogger: () => undefined };
+		}
 		if (specifier === "./tokendanceAttribution") {
 			return loadTsCommonJs("src/main/config/tokendanceAttribution.ts");
 		}
