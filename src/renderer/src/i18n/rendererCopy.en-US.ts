@@ -3975,6 +3975,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.webServiceSectionDesc": "LAN access entry",
 	"settings.webServiceHost": "Service host",
 	"settings.webServicePort": "Service port",
+	"settings.webUseTokenAuth": "Enable access token (loopback too)",
 	"settings.enableWebServiceDesc": "Starts an HTTP service on this computer so devices on the LAN can access it by IP and port",
 	"settings.openWebService": "Open Web Service",
 	"settings.webLocalService": "LAN Web Service",

@@ -3965,6 +3965,7 @@ export const zhCN = {
 	"settings.webServiceSectionDesc": "局域网访问入口",
 	"settings.webServiceHost": "服务主机",
 	"settings.webServicePort": "服务端口",
+	"settings.webUseTokenAuth": "启用访问令牌（环回也校验）",
 	"settings.enableWebServiceDesc": "开启后会在本机启动 HTTP 服务，局域网内其他设备可通过你的电脑 IP 和端口访问",
 	"settings.openWebService": "打开 Web 服务",
 	"settings.webLocalService": "局域网 Web 服务",

@@ -197,7 +197,7 @@ export class WebServiceManager {
 			return;
 		}
 
-		const host = settings.webServiceHost.trim() || "127.0.0.1";
+		const host = settings.webServiceHost.trim() || "0.0.0.0";
 		const port = this.normalizePort(settings.webServicePort);
 		if (this.server && this.current?.host === host && this.current.port === port) return;
 		await this.stop();
@@ -210,7 +210,7 @@ export class WebServiceManager {
 	 */
 	async restart(settings: WebServiceSettings) {
 		if (!settings.webServiceEnabled) return;
-		const host = settings.webServiceHost.trim() || "127.0.0.1";
+		const host = settings.webServiceHost.trim() || "0.0.0.0";
 		const port = this.normalizePort(settings.webServicePort);
 		await this.stop();
 		await this.start(host, port);
