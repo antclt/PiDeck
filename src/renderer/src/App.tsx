@@ -2612,7 +2612,7 @@ export function App() {
 	}
 
 	async function updateSettings(patch: Partial<AppSettings>) {
-		const changesWebService = "webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch;
+		const changesWebService = "webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch;
 		if (changesWebService) {
 			setWebServiceChanging(true);
 			showToast(patch.webServiceEnabled === false ? t("app.webStopping") : t("app.webApplying"));
@@ -2632,7 +2632,7 @@ export function App() {
 			if ("sendShortcut" in patch) {
 				notice = t("app.sendShortcutSaved");
 			}
-			if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch) {
+			if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch) {
 				notice = next.webServiceEnabled ? t("app.webServiceStarted", { port: next.webServicePort }) : t("app.webServiceStopped");
 			}
 			if ("useNativeTitleBar" in patch) {

@@ -135,7 +135,7 @@ export function SettingsFeatureRoot(props: SettingsFeatureRootProps) {
 			},
 			// forceSystem=true：Web 服务页必须离开内置浏览器面板——面板在 Dialog 下层，
 			// 设置弹窗打开时会被遮挡；且外部端按桌面浏览器视口设计，系统浏览器体验更完整。
-			onOpenWebService: (port: string) => api.app.openExternal(`http://127.0.0.1:${port}`, true),
+			onOpenWebService: (url: string) => api.app.openExternal(url, true),
 			onClose: () => {
 				// 关闭时清掉未消费的深链，避免下次从侧栏打开仍跳到 Git 分区。
 				setFocus(null);
