@@ -183,13 +183,16 @@ test("IPv6 bracketed host is normalized and enforces auth when enabled", async (
 	const manager = new WebServiceManager({
 		subscribePiEvents: () => () => undefined,
 	});
-	await manager.applySettings({
-		webServiceEnabled: true,
-		webServiceHost: "[::1]",
-		webServicePort: 0,
-		webServiceRequiresAuth: true,
-	});
+	// 先裸 start 取可用端口，再走 applySettings 验证方括号 host 被清洗。
+	await manager.start("127.0.0.1", 0, true);
+	const port = manager.current.port;
 	try {
+		await manager.applySettings({
+			webServiceEnabled: true,
+			webServiceHost: "[::1]",
+			webServicePort: port,
+			webServiceRequiresAuth: true,
+		});
 		const status = manager.getStatus();
 		assert.equal(status.running, true);
 		assert.equal(status.host, "::1");
@@ -211,15 +214,11 @@ test("toggling requiresAuth alone restarts the service", async () => {
 	const manager = new WebServiceManager({
 		subscribePiEvents: () => () => undefined,
 	});
-	await manager.applySettings({
-		webServiceEnabled: true,
-		webServiceHost: "127.0.0.1",
-		webServicePort: 0,
-		webServiceRequiresAuth: true,
-	});
+	// 先裸 start 取可用端口，再走 applySettings 验证仅切换 requiresAuth 会触发重启。
+	await manager.start("127.0.0.1", 0, true);
+	const port = manager.current.port;
+	const firstToken = manager.current.token;
 	try {
-		const port = manager.current.port;
-		const firstToken = manager.current.token;
 		let response = await fetch(`http://127.0.0.1:${port}/api/nope`);
 		assert.equal(response.status, 401);
 

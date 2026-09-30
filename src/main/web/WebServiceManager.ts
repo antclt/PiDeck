@@ -311,7 +311,7 @@ export class WebServiceManager {
 			return;
 		}
 
-		// 非环回绑定（0.0.0.0 / 局域网 IP）时强制令牌；环回绑定豁免保持本机/测试零摩擦。
+		// webServiceRequiresAuth 为 true 时强制令牌；/api/health 保持免鉴权以便健康检查。
 		// GET 与 SSE 允许 ?token= 查询参数（浏览器 EventSource 无法携带 header），其余走 Authorization: Bearer。
 		if (this.requiresAuth && url.pathname.startsWith("/api/") && !this.isAuthorized(request, url)) {
 			this.sendError(response, 401, "webError.unauthorized", "A valid web service token is required");
@@ -1625,7 +1625,7 @@ export class WebServiceManager {
 
 	private normalizePort(value: number) {
 		const port = Number(value);
-		if (!Number.isInteger(port) || port < 0 || port > 65535) {
+		if (!Number.isInteger(port) || port < 1 || port > 65535) {
 			throw new Error("WEB_SERVICE_INVALID_PORT");
 		}
 		return port;
