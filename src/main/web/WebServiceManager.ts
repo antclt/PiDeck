@@ -39,14 +39,16 @@ import { replaceExpandedRefBlocksWithLabels } from "../../shared/expandedRefBloc
 import { serializeWebClientDictionaries, webEnUS } from "./WebI18n";
 import { WebEventStreamRouter, serializeSseFrame, type PiEvent } from "./WebEventStream";
 
-type WebServiceSettings = Pick<AppSettings, "webServiceEnabled" | "webServiceHost" | "webServicePort">;
+type WebServiceSettings = Pick<AppSettings, "webServiceEnabled" | "webServiceHost" | "webServicePort" | "webServiceRequiresAuth">;
 
-/**
- * 仅环回地址绑定时不启用令牌校验：本机页面与既有测试无需令牌；
- * 一旦绑定到网卡（0.0.0.0 / 局域网 IP / ::），所有 /api/*（/api/health 除外）强制令牌，
- * 阻断局域网内任意主机的建项目/发 prompt/删会话等未授权调用（memo H2）。
- */
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+/** 清洗 host 输入：去空白、剥 IPv6 方括号、空串兜底为 0.0.0.0。 */
+export function normalizeWebHost(raw: string): string {
+	const trimmed = raw.trim();
+	if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+		return trimmed.slice(1, -1).trim();
+	}
+	return trimmed || "0.0.0.0";
+}
 
 /** /api JSON 请求体逻辑上限：超出后丢弃剩余数据并回 413（合法 payload 都是短 JSON，见 memo H3） */
 const MAX_JSON_BODY_BYTES = 2 * 1024 * 1024;
@@ -63,7 +65,7 @@ class WebBodyTooLargeError extends Error {
 
 type WebServiceDependencies = {
 	/**
-	 * dev 模式渲染层 dev server 基址（如 http://127.0.0.1:5181）。
+	 * dev 模式渲染层 dev server 基址（如 http://localhost:5181）。
 	 * 设置后静态资源请求全部代理到该地址，保证外部 Web 端在开发模式下
 	 * 也加载重构后的 React 版（A2）页面并支持热更新；未设置时回退到
 	 * out/renderer 构建产物（打包/正式构建场景）。
@@ -178,7 +180,7 @@ export class WebServiceManager {
 	} | null = null;
 	/** 访问令牌：每次启动随机重生成，泄露的旧令牌在服务重启后即失效。 */
 	private authToken = "";
-	/** 非环回绑定（暴露到网卡）时为 true，此时所有 /api/*（/api/health 除外）强制令牌。 */
+	/** 设置页「需要 token 鉴权」开关；true 时所有 /api/*（/api/health 除外）强制令牌。 */
 	private requiresAuth = false;
 	/** dev 模式渲染层 dev server 基址（无尾斜杠）；空串表示走构建产物。 */
 	private readonly devRendererUrl: string;
@@ -197,11 +199,12 @@ export class WebServiceManager {
 			return;
 		}
 
-		const host = settings.webServiceHost.trim() || "0.0.0.0";
+		const host = normalizeWebHost(settings.webServiceHost);
 		const port = this.normalizePort(settings.webServicePort);
-		if (this.server && this.current?.host === host && this.current.port === port) return;
+		const requiresAuth = settings.webServiceRequiresAuth ?? true;
+		if (this.server && this.current?.host === host && this.current.port === port && this.current.requiresAuth === requiresAuth) return;
 		await this.stop();
-		await this.start(host, port);
+		await this.start(host, port, requiresAuth);
 	}
 
 	/**
@@ -210,10 +213,11 @@ export class WebServiceManager {
 	 */
 	async restart(settings: WebServiceSettings) {
 		if (!settings.webServiceEnabled) return;
-		const host = settings.webServiceHost.trim() || "0.0.0.0";
+		const host = normalizeWebHost(settings.webServiceHost);
 		const port = this.normalizePort(settings.webServicePort);
+		const requiresAuth = settings.webServiceRequiresAuth ?? true;
 		await this.stop();
-		await this.start(host, port);
+		await this.start(host, port, requiresAuth);
 	}
 
 	/** 渲染层展示二维码/令牌用；未运行时返回空形状（running=false） */
@@ -243,7 +247,7 @@ export class WebServiceManager {
 		});
 	}
 
-	private async start(host: string, port: number) {
+	private async start(host: string, port: number, requiresAuth = true) {
 		// 启动时绑定 pi 事件源；路由器只在存在活跃 SSE 连接时转发，空闲时零开销。
 		this.eventStreamRouter.bindPiSource(this.deps.subscribePiEvents);
 		const server = createServer(async (request, response) => {
@@ -281,7 +285,7 @@ export class WebServiceManager {
 		this.server = server;
 		// 令牌每次启动随机重生成：泄露的旧令牌在服务重启后即失效。
 		this.authToken = randomUUID();
-		this.requiresAuth = !LOOPBACK_HOSTS.has(host);
+		this.requiresAuth = requiresAuth;
 		this.current = {
 			host,
 			port: this.getPort(server, port),
@@ -1621,7 +1625,7 @@ export class WebServiceManager {
 
 	private normalizePort(value: number) {
 		const port = Number(value);
-		if (!Number.isInteger(port) || port < 1 || port > 65535) {
+		if (!Number.isInteger(port) || port < 0 || port > 65535) {
 			throw new Error("WEB_SERVICE_INVALID_PORT");
 		}
 		return port;

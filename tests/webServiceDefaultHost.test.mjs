@@ -12,7 +12,8 @@ test("web service default host is 0.0.0.0 in every default-settings site", () =>
 		assert.match(source, /webServiceHost:\s*"0\.0\.0\.0"/, `${file} must default webServiceHost to 0.0.0.0`);
 	}
 	const managerSource = readFileSync("src/main/web/WebServiceManager.ts", "utf8");
-	assert.match(managerSource, /\|\|\s*"0\.0\.0\.0"/, "manager fallback must be 0.0.0.0 too");
+	assert.match(managerSource, /normalizeWebHost\(/, "manager must route host through normalizeWebHost");
+	assert.doesNotMatch(managerSource, /127\.0\.0\.1/, "manager must not hard-code 127.0.0.1 fallback");
 });
 
 test("WebServiceManager falls back to 0.0.0.0 when host setting is blank", async () => {

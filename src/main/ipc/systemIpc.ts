@@ -1481,7 +1481,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("zoomFactor" in patch) {
 			getMainWindow()?.webContents.setZoomFactor(settings.zoomFactor);
 		}
-		if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch) {
+		if ("webServiceEnabled" in patch || "webServiceHost" in patch || "webServicePort" in patch || "webServiceRequiresAuth" in patch) {
 			try {
 				if (applyWebServiceSettings) await applyWebServiceSettings(settings);
 			} catch (error) {
