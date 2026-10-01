@@ -430,8 +430,9 @@ let configManager: ConfigManager;
 /** pi 原生资源配置服务与迁移状态（A2/A3；启动装配，IPC 复用）。 */
 let piResourceConfigService: PiResourceConfigService | undefined;
 let piResourceStateStore: PiResourceStateStore | undefined;
-/** 全局 settings.json 的 skills 条目缓存（供列表状态投影；迁移/开关后刷新）。 */
+/** 全局 settings.json 的 skills / prompts 条目缓存（供列表状态投影；迁移/开关后刷新）。 */
 let skillManagerNativeEntries: string[] | null = null;
+let promptManagerNativeEntries: string[] | null = null;
 let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -3564,6 +3565,19 @@ app
 			() => settingsStore.get(),
 			(patch) => settingsStore.update(patch),
 		);
+		// 原生配置接线（A4）：模板开关写 pi settings.json 精确规则，列表状态按原生条目投影。
+		promptManager.configureNativeToggle(async (templatePath, enabled) => {
+			const service = piResourceConfigService;
+			if (!service) return { ok: false, error: "pi resource service unavailable" };
+			const saved = await service.setFileResourceEnabled({ scope: { scope: "global" }, kind: "prompts", resourceId: templatePath, enabled });
+			if (saved.ok) await refreshPromptProjection();
+			return saved;
+		});
+		promptManager.configureNativeEnabledReader((templatePath) => {
+			const entries = promptManagerNativeEntries;
+			if (!entries) return undefined;
+			return projectResourceEnabled({ entries, value: templatePath, baseDir: dirname(templatePath) });
+		});
 		// 提示词商店官方模板 / 内置技能热更新：与内置扩展同一套「resources 只读 → userData 覆盖层」机制。
 		// 覆盖层供查询侧（XuePromptManager / SkillManager）叠加解析：远端新增/修改的模板与技能免发版生效。
 		const promptStoreUpdater = new PromptStoreUpdater({
@@ -4256,14 +4270,21 @@ app
 			piResourceStateStore,
 			{ projectTrust: async (projectId, _root) => (await configManager.getProjectTrustDecision(projectStore.get(projectId)?.path ?? "")) === true },
 		);
-		/** 刷新技能状态投影缓存（迁移完成、或用户切开关后调用）。 */
-		const refreshSkillProjection = async (): Promise<void> => {
+		/** 刷新技能/模板状态投影缓存（迁移完成、或用户切开关后调用）。 */
+		const readNativeEntries = async (key: "skills" | "prompts"): Promise<string[] | null> => {
 			try {
 				const file = await readPiConfigFile(join(configManager.getConfigDir(), "settings.json"));
-				skillManagerNativeEntries = Array.isArray(file.data.skills) ? file.data.skills.filter((item): item is string => typeof item === "string") : [];
+				const value = file.data[key];
+				return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 			} catch {
-				skillManagerNativeEntries = null;
+				return null;
 			}
+		};
+		const refreshSkillProjection = async (): Promise<void> => {
+			skillManagerNativeEntries = await readNativeEntries("skills");
+		};
+		const refreshPromptProjection = async (): Promise<void> => {
+			promptManagerNativeEntries = await readNativeEntries("prompts");
 		};
 		void runGlobalResourceMigration({
 			service: piResourceConfigService,
@@ -4322,7 +4343,7 @@ app
 			logger: { info: (scope, message, detail) => void appLogger.info(scope, message, detail), warn: (scope, message, detail) => void appLogger.warn(scope, message, detail) },
 		}).then(async (result) => {
 			// 迁移后必须刷新投影缓存：否则列表仍按旧列表显示，与实际生效的原生规则不一致。
-			await refreshSkillProjection();
+			await Promise.all([refreshSkillProjection(), refreshPromptProjection()]);
 			if (result.errors.length > 0) {
 				void appLogger.warn("migration", "Resource migration reported problems", { status: result.status, errors: result.errors });
 			}

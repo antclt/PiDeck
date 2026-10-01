@@ -49,6 +49,21 @@ export class PromptManager {
 		this.settingsPatcher = patchSettings;
 	}
 
+	/**
+	 * 注入原生开关与状态投影（A4：迁移完成后禁用列表不再是真值来源）。
+	 * 装配后模板开关写 pi settings.json 的精确过滤规则。
+	 */
+	configureNativeToggle(toggle: (templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>): void {
+		this.nativeToggle = toggle;
+	}
+
+	configureNativeEnabledReader(reader: (templatePath: string) => boolean | undefined): void {
+		this.nativeEnabledReader = reader;
+	}
+
+	private nativeToggle: ((templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>) | null = null;
+	private nativeEnabledReader: ((templatePath: string) => boolean | undefined) | null = null;
+
 	/** 模板名是否在 PiDeck settings 禁用列表（小写比较；未配置 settings 时视为未禁用）。 */
 	private isDisabledInSettings(name: string): boolean {
 		if (!this.settingsProvider) return false;
@@ -65,6 +80,11 @@ export class PromptManager {
 		const { templates } = await this.list();
 		const template = templates.find((item) => item.path === comparablePath);
 		if (!template) throw new Error(this.translate("mainPrompt.fileNotFound"));
+		if (this.nativeToggle) {
+			const result = await this.nativeToggle(template.path, enabled);
+			if (!result.ok) throw new Error(this.translate("mainPrompt.toggleFailed", { error: result.error ?? "unknown" }));
+			return { ...template, enabled };
+		}
 		if (this.settingsProvider && this.settingsPatcher) {
 			const current = this.settingsProvider().disabledPrompts ?? [];
 			const nameKey = template.name.toLowerCase();
@@ -235,7 +255,8 @@ export class PromptManager {
 				userCreated: true,
 				scope: "global",
 				// 禁用状态 = PiDeck settings 禁用列表（模板白名单模式的依据）
-				enabled: !this.isDisabledInSettings(name),
+				// 优先原生投影（迁移后 disabledPrompts 已清空）；未装配时退回旧列表。
+				enabled: this.nativeEnabledReader?.(fullPath) ?? !this.isDisabledInSettings(name),
 			});
 		}
 
