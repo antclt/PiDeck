@@ -6,6 +6,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const {
+	projectResourceEnabled,
 	setResourceRuleEnabled,
 	stripExactResourceRules,
 	hasExactResourceEntry,
@@ -88,4 +89,17 @@ test("project package delta disable/enable use native pattern sets, not empty ar
 	assert.equal(isPackageDeltaFullyDisabled(enabled), false);
 	// 空的 delta 数组是「没有覆盖」，绝不能被当成停用
 	assert.equal(isPackageDeltaFullyDisabled({ source: "npm:demo", autoload: false, extensions: [] }), false);
+});
+
+test("projectResourceEnabled reflects native include/exclude ordering", () => {
+	// 无规则 → 启用
+	assert.equal(projectResourceEnabled({ entries: [], value: "/a/x/SKILL.md", baseDir: "/a/x" }), true);
+	// 精确 - 停用
+	assert.equal(projectResourceEnabled({ entries: ["-/a/x/SKILL.md"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), false);
+	// + 覆盖更宽的 ! 排除
+	assert.equal(projectResourceEnabled({ entries: ["!*.md", "+/a/x/SKILL.md"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), true);
+	// - 又覆盖 +
+	assert.equal(projectResourceEnabled({ entries: ["!*.md", "+/a/x/SKILL.md", "-/a/x/SKILL.md"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), false);
+	// 目录名匹配（技能的父目录形态）
+	assert.equal(projectResourceEnabled({ entries: ["-x"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), false);
 });

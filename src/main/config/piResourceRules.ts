@@ -135,6 +135,64 @@ export function isPackageDeltaFullyDisabled(entry: PackageEntryShape): boolean {
 	});
 }
 
+// ── 有效状态投影 ────────────────────────────────────────────
+
+/**
+ * 按 pi 的原生顺序判定一个资源值是否被加载：排除(`!`) → 强制包含(`+`) → 强制排除(`-`)。
+ * 这是给「列表显示」用的投影，运行时真值仍是 pi 自己（见计划 3.3）。
+ * `baseEntries` 为下层（项目层读全局层时传入）原始条目。
+ */
+export function projectResourceEnabled(options: { baseEntries?: readonly string[]; entries: readonly string[]; value: string; baseDir: string; matcher?: (value: string, patterns: string[], baseDir: string) => boolean }): boolean {
+	const evaluate = (entries: readonly string[]): boolean => {
+		const excludes = entries.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
+		const forceIncludes = entries.filter((entry) => entry.startsWith("+") && !entry.startsWith("++")).map((entry) => entry.slice(1));
+		const forceExcludes = entries.filter((entry) => entry.startsWith("-")).map((entry) => entry.slice(1));
+		let enabled = true;
+		if (excludes.some((pattern) => patternMatches(options.value, pattern, options.baseDir))) enabled = false;
+		if (forceIncludes.some((pattern) => patternMatches(options.value, pattern, options.baseDir))) enabled = true;
+		if (forceExcludes.some((pattern) => patternMatches(options.value, pattern, options.baseDir))) enabled = false;
+		return enabled;
+	};
+	// 项目层：先按全局得出结果，再叠加项目层条目（与 pi 的两层合并近似一致）。
+	if (options.baseEntries && options.baseEntries.length > 0 && !evaluate(options.baseEntries)) {
+		// 全局已排除：只有项目层精确 `+` 才能重新启用。
+		const forceIncludes = options.entries.filter((entry) => entry.startsWith("+")).map((entry) => entry.slice(1));
+		return forceIncludes.some((pattern) => patternMatches(options.value, pattern, options.baseDir));
+	}
+	return evaluate(options.entries);
+}
+
+/** 简化匹配：精确路径、同目录/文件名与 `*` 通配（覆盖 pi 的常用形态）。 */
+function patternMatches(value: string, pattern: string, baseDir: string): boolean {
+	const normalizedValue = value.replace(/\\/g, "/");
+	const normalizedPattern = pattern.replace(/\\/g, "/");
+	const isSkillFile = (normalizedValue.split("/").pop() ?? "") === "SKILL.md";
+	const parentDir = isSkillFile ? normalizedValue.slice(0, normalizedValue.lastIndexOf("/")) : undefined;
+	const parentName = parentDir ? (parentDir.split("/").pop() ?? parentDir) : undefined;
+	const baseDirPosix = baseDir.replace(/\\/g, "/").replace(/\/$/, "");
+	if (!normalizedPattern.includes("*") && !normalizedPattern.includes("?")) {
+		const bareValue = normalizedValue.split("/").pop() ?? normalizedValue;
+		const barePattern = normalizedPattern.split("/").pop() ?? normalizedPattern;
+		if (normalizedValue === normalizedPattern || bareValue === barePattern) return true;
+		if (normalizedValue === `${baseDirPosix}/${normalizedPattern}`) return true;
+		// 技能按父目录匹配（pi 的 matchesAnyExactPattern 对 SKILL.md 也匹配父目录/metric）。
+		if (parentDir) {
+			if (parentDir === normalizedPattern || parentName === normalizedPattern || parentName === barePattern) return true;
+			if (parentDir === `${baseDirPosix}/${normalizedPattern}`) return true;
+		}
+		return false;
+	}
+	const escaped = normalizedPattern
+		.replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+		.replace(/\*/g, ".*")
+		.replace(/\?/g, ".");
+	try {
+		return new RegExp(`^${escaped}$`).test(normalizedValue) || new RegExp(`^${escaped}$`).test(normalizedValue.split("/").pop() ?? "");
+	} catch {
+		return false;
+	}
+}
+
 // ── 原生内置扩展 ────────────────────────────────────────────
 
 /**

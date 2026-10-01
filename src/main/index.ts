@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, safeStorage, screen, session, shell, Tray, Notification } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
@@ -25,7 +25,9 @@ import { isShortcutInput, refreshShortcutBindings } from "./appShortcuts";
 // 主进程复用共享的接管型扩展识别规则（与渲染层横幅单一来源；纯函数无依赖）。
 import { detectThirdPartyMcpExtensions } from "../shared/mcpThirdParty";
 import { PiResourceConfigService } from "./config/PiResourceConfigService";
+import { projectResourceEnabled } from "./config/piResourceRules";
 import { PiResourceStateStore } from "./config/PiResourceStateStore";
+import { readPiConfigFile } from "./config/piConfigFileStore";
 import { runGlobalResourceMigration } from "./config/piResourceMigrationRunner";
 import type { ResolvedMigrationResource } from "./config/piResourceMigration";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
@@ -428,6 +430,8 @@ let configManager: ConfigManager;
 /** pi 原生资源配置服务与迁移状态（A2/A3；启动装配，IPC 复用）。 */
 let piResourceConfigService: PiResourceConfigService | undefined;
 let piResourceStateStore: PiResourceStateStore | undefined;
+/** 全局 settings.json 的 skills 条目缓存（供列表状态投影；迁移/开关后刷新）。 */
+let skillManagerNativeEntries: string[] | null = null;
 let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -3594,6 +3598,24 @@ app
 			() => settingsStore.get(),
 			(patch) => settingsStore.update(patch),
 		);
+		// 原生配置接线（A4）：迁移后禁用列表不再是真值来源，技能开关直接写 pi settings.json
+		// 的精确过滤规则；列表状态也按原生条目投影（见 PiResourceConfigService）。
+		// 闭包延迟读 piResourceConfigService（它在启动迁移阶段才装配）。
+		skillManager.configureNativeToggle(async (skillPath, enabled) => {
+			const service = piResourceConfigService;
+			if (!service) return { ok: false, error: "pi resource service unavailable" };
+			// revision 交给服务内部锁内重读；这里不传，避免把并发页面草稿误判成冲突。
+			const saved = await service.setFileResourceEnabled({ scope: { scope: "global" }, kind: "skills", resourceId: skillPath, enabled });
+			if (saved.ok) await refreshSkillProjection();
+			return saved;
+		});
+		// 状态投影：按原生条目判定该技能当前是否加载（排除 → 强制包含 → 强制排除）。
+		// 运行时真值仍是 pi；这里只用于列表展示与开关初始值。
+		skillManager.configureNativeEnabledReader((skillPath) => {
+			const entries = skillManagerNativeEntries;
+			if (!entries) return undefined;
+			return projectResourceEnabled({ entries, value: skillPath, baseDir: dirname(skillPath) });
+		});
 		// 启动时自动安装内置 usage-probe 技能模板到用户全局技能目录：
 		// pi 只扫 ~/.pi/agent/skills、~/.agents/skills，不读 pideck 打包资源目录（resources/skills），
 		// 必须落到用户目录，用户才能在聊天里 /skill:usage-probe 让 AI 引导写用量探针配置。
@@ -4234,6 +4256,15 @@ app
 			piResourceStateStore,
 			{ projectTrust: async (projectId, _root) => (await configManager.getProjectTrustDecision(projectStore.get(projectId)?.path ?? "")) === true },
 		);
+		/** 刷新技能状态投影缓存（迁移完成、或用户切开关后调用）。 */
+		const refreshSkillProjection = async (): Promise<void> => {
+			try {
+				const file = await readPiConfigFile(join(configManager.getConfigDir(), "settings.json"));
+				skillManagerNativeEntries = Array.isArray(file.data.skills) ? file.data.skills.filter((item): item is string => typeof item === "string") : [];
+			} catch {
+				skillManagerNativeEntries = null;
+			}
+		};
 		void runGlobalResourceMigration({
 			service: piResourceConfigService,
 			state: piResourceStateStore,
@@ -4289,6 +4320,12 @@ app
 				await projectResourceManager.clearProjectLegacyDisables(projectId, patch);
 			},
 			logger: { info: (scope, message, detail) => void appLogger.info(scope, message, detail), warn: (scope, message, detail) => void appLogger.warn(scope, message, detail) },
+		}).then(async (result) => {
+			// 迁移后必须刷新投影缓存：否则列表仍按旧列表显示，与实际生效的原生规则不一致。
+			await refreshSkillProjection();
+			if (result.errors.length > 0) {
+				void appLogger.warn("migration", "Resource migration reported problems", { status: result.status, errors: result.errors });
+			}
 		});
 		// 多后端网关装配：pi + dsh（DSH 在窗口创建后后台预热，失败时按需重试）。
 		// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
