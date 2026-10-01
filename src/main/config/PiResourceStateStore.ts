@@ -39,7 +39,13 @@ export type PiResourceStateFile = {
 	migrations: Record<string, ResourceMigrationRecord>;
 };
 
-const EMPTY_STATE: PiResourceStateFile = { version: 1, packageSnapshots: {}, migrations: {} };
+/**
+ * 每次返回**全新对象**：曾用浅拷贝共享嵌套对象，导致一个实例的迁移记录
+ * 泄漏到同进程内文件缺失状态下的另一个实例（测试已复现）。
+ */
+function emptyState(): PiResourceStateFile {
+	return { version: 1, packageSnapshots: {}, migrations: {} };
+}
 
 export function packageSnapshotFingerprint(entry: unknown): string {
 	const shape = (entry && typeof entry === "object" && !Array.isArray(entry) ? entry : {}) as Record<string, unknown>;
@@ -62,7 +68,7 @@ export class PiResourceStateStore {
 	read(): PiResourceStateFile {
 		try {
 			const parsed: unknown = JSON.parse(readFileSync(this.filePath, "utf8"));
-			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ...EMPTY_STATE };
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyState();
 			const shape = parsed as Partial<PiResourceStateFile>;
 			return {
 				version: 1,
@@ -70,7 +76,7 @@ export class PiResourceStateStore {
 				migrations: shape.migrations && typeof shape.migrations === "object" ? { ...shape.migrations } : {},
 			};
 		} catch {
-			return { ...EMPTY_STATE };
+			return emptyState();
 		}
 	}
 
