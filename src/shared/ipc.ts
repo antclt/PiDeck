@@ -617,14 +617,26 @@ export const ipcChannels = {
 	configGetAuth: "config:get-auth",
 	configGetSettings: "config:get-settings",
 	configGetTrust: "config:get-trust",
-	/** 读取合并后的 MCP 服务列表 + Pi 可写层（pi-mcp-adapter mcp.json）。 */
+	/** 读取合并后的 MCP 服务列表 + Pi 可写层（pi 内置 MCP 0.99+ 读取的 mcp.json）。 */
 	configGetMcp: "config:get-mcp",
 	/** 整份写入 ~/.pi/agent/mcp.json（可视化保存）。 */
 	configSaveMcp: "config:save-mcp",
 	/** 轻量探测：stdio 命令是否在 PATH、HTTP URL 是否可达；不 spawn MCP SDK。 */
 	configProbeMcp: "config:probe-mcp",
+	/** 真实连接检测：spawn `pi mcp list --json`，返回每台 server 的 state/tools/errors。 */
+	mcpListStatus: "mcp:list-status",
+	/** OAuth 登录：spawn `pi mcp login <server>`；授权 URL 经 mcpLoginUrl 事件推送。 */
+	mcpLogin: "mcp:login",
+	/** OAuth 登出：spawn `pi mcp logout <server>`。 */
+	mcpLogout: "mcp:logout",
+	/** OAuth 登录过程中捕获的授权 URL（{ server, url }），供 UI 内嵌兑底链接。 */
+	mcpLoginUrl: "mcp:login-url",
 	resourceImportScan: "resource-import:scan",
 	resourceImportApply: "resource-import:apply",
+	/** pi 原生资源配置摘要（内置扩展开关 + 四类资源数组原文）。 */
+	piResourcesSummary: "pi-resources:summary",
+	/** 切换 pi 原生内置扩展（mcp / llama.cpp / codemode / tool-search）。 */
+	piResourcesSetBuiltin: "pi-resources:set-builtin",
 	/** 只读返回 pi 全局配置目录（渲染层展示源文件实际编辑位置）。 */
 	configGetDir: "config:get-dir",
 	configSaveModels: "config:save-models",

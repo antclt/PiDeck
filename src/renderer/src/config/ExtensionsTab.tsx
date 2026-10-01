@@ -12,6 +12,7 @@ import { isProjectDiscoverySource, type ResourceScope } from "./resourceScopeMod
 import { DiscoveredExtensionRow, ExtensionTableRow } from "./extensionsTableRows";
 import { RecommendedPackagesPanel } from "./extensionsRecommendedPackages";
 import { BuiltInExtensionsUpdatePanel } from "./BuiltInExtensionsUpdatePanel";
+import { PiBuiltinExtensionsPanel } from "./PiBuiltinExtensionsPanel";
 
 type ExtensionsApi = {
 	list: () => Promise<PiExtensionListResult>;
@@ -233,6 +234,8 @@ export function ExtensionsTab(props: {
 
 	return (
 		<div className="extensions-tab">
+			{/* pi 原生内置扩展开关：写 settings.json 的 builtin: 条目，全局/项目各自生效 */}
+			<PiBuiltinExtensionsPanel scope={props.scope} projectId={props.projectId} onChanged={props.onRefresh} />
 			{/* 一级 tab：已安装 / 扩展商店（shadcn Tabs，与 SkillsTab 的「本地/商店」结构对齐） */}
 			<div className="mb-3 flex items-center justify-between gap-3">
 				<ContentTabs

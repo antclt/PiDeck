@@ -1096,6 +1096,10 @@ const api = {
 		},
 		// 只读：pi 全局配置目录（源文件编辑页标注实际路径用）。
 		getConfigDir: () => ipcRenderer.invoke(ipcChannels.configGetDir) as Promise<string>,
+		// pi 原生资源配置（内置扩展开关 + 四类资源数组原文）；作用域同 MCP：全局页/项目页。
+		piResourcesSummary: (scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.piResourcesSummary, scope) as Promise<import("../shared/types/piResources").PiResourceConfigSummary>,
+		piResourcesSetBuiltin: (input: { scope?: import("../shared/types/mcp").McpConfigScope; name: import("../shared/types/piResources").PiBuiltinExtension; enabled: boolean; expectedRevision?: string }) =>
+			ipcRenderer.invoke(ipcChannels.piResourcesSetBuiltin, input) as Promise<import("../shared/types/piResources").PiResourceToggleResult>,
 		saveModels: (data: unknown) =>
 			ipcRenderer.invoke(ipcChannels.configSaveModels, data) as Promise<{
 				valid: boolean;

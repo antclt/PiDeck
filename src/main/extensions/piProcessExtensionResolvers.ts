@@ -4,6 +4,8 @@ import type { AppSettings } from "../../shared/types";
 import { INTERNAL_BUILT_IN_EXTENSIONS, listActiveBuiltInExtensionPaths, resolveBuiltInExtensionsOverlayDir, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { resolveEnabledExtensionPaths } from "./enabledExtensionResolver";
 import { readProjectResourceOverrides } from "../projects/projectResourceOverrides";
+import { builtinSpecifiersToRestore } from "./builtInExtensionToggles";
+import { homedir } from "node:os";
 
 /**
  * 为 PiProcess 构造扩展解析器（内置扩展注入 + 白名单枚举）。
@@ -20,6 +22,8 @@ export function createPiProcessExtensionResolvers(
 ): {
 	resolveBuiltInExtensionPaths: (processSettings?: Partial<AppSettings>, includeProjectResources?: boolean) => string[];
 	resolveEnabledExtensionPaths: (processSettings?: Partial<AppSettings>, cwd?: string, includeProjectResources?: boolean) => string[] | null;
+	/** pi 原生内置扩展：白名单模式要显式带回的 specifier（尊重用户停用选择）。 */
+	resolveBuiltinExtensionSpecifiers: () => string[];
 } {
 	const builtInRoots: BuiltInExtensionPathRoots = {
 		appPath: app.getAppPath(),
@@ -29,6 +33,10 @@ export function createPiProcessExtensionResolvers(
 		overlayDir: resolveBuiltInExtensionsOverlayDir(app.getPath("userData")),
 	};
 	return {
+		// 白名单/诊断模式显式带回 pi 原生内置扩展时，只带回用户没有显式停用的那些，
+		// 避免覆盖用户在 pi config / settings.json 里的选择（计划 A4/E）。
+		// `piRpcNoExtensions` 是诊断总开关，由 PiProcess 提前判掉，这里不重复处理。
+		resolveBuiltinExtensionSpecifiers: () => builtinSpecifiersToRestore({ agentHomeDir: homedir(), cwd, includeProjectResources: true }),
 		resolveBuiltInExtensionPaths: (processSettings, includeProjectResources = true) => {
 			const disabledForProject = new Set(includeProjectResources ? readProjectResourceOverrides(cwd).disabledGlobalExtensions : []);
 			return listActiveBuiltInExtensionPaths(builtInRoots, processSettings?.removedBuiltInExtensions ?? settings.removedBuiltInExtensions ?? []).filter((path) => {

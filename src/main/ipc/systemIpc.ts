@@ -20,6 +20,8 @@ import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { PiMcpCli } from "../pi/piMcpCli";
 import { validateMcpConfigFile } from "../config/mcpConfig";
+import { PiResourceConfigService } from "../config/PiResourceConfigService";
+import { PiResourceStateStore } from "../config/PiResourceStateStore";
 import { tmpdir } from "node:os";
 import { installPiRuntimeNode, piRuntimeNodeBinDir, probeNodeVersion, detectPiRuntimeNode } from "../pi/runtimeNodeInstall";
 import { runPiGlobalInstall } from "../pi/piGlobalInstall";
@@ -420,6 +422,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	/** `pi mcp` CLI 封装（连接检测 / OAuth 登录登出）；惰性构造，无状态可安全复用。 */
 	let piMcpCli: PiMcpCli | null = null;
+	/** pi 原生资源配置服务（懒建：只在用户打开相关页面/切换开关时才需要）。 */
+	let piResourceService: PiResourceConfigService | undefined;
 	const getPiMcpCli = () => {
 		piMcpCli ??= new PiMcpCli({
 			locator: piLocator,
@@ -1883,6 +1887,39 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 		const parsed = parseMcpScopeRequest(scope);
 		return getPiMcpCli().logout(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId }, server.trim());
+	});
+	// ── pi 原生资源配置（内置扩展开关 + 四类资源数组）──
+	// 只改 pi 自己认识的字段；未知字段、用户 glob 与显式路径一律保留（见计划 A2/A4）。
+	const getPiResources = (): import("../config/PiResourceConfigService").PiResourceConfigService => {
+		piResourceService ??= new PiResourceConfigService(
+			{
+				globalSettingsPath: () => join(configManager.getConfigDir(), "settings.json"),
+				resolveProject: async (projectId) => {
+					const root = projectResourceManager.getProjectRoot(projectId);
+					const trusted = isProjectTrusted ? await isProjectTrusted(projectId, root) : false;
+					return { root, trusted };
+				},
+			},
+			new PiResourceStateStore(join(app.getPath("userData"), "pi-native-resources.json")),
+			{ projectTrust: (projectId, root) => (isProjectTrusted ? isProjectTrusted(projectId, root) : Promise.resolve(false)) },
+		);
+		return piResourceService;
+	};
+	ipcMain.handle(ipcChannels.piResourcesSummary, async (_event, scope: unknown) => {
+		const parsed = parseMcpScopeRequest(scope);
+		return getPiResources().readSummary(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId });
+	});
+	ipcMain.handle(ipcChannels.piResourcesSetBuiltin, async (_event, input: unknown) => {
+		if (!isUnknownRecord(input)) throw new Error("Invalid built-in extension input.");
+		const parsed = parseMcpScopeRequest(input.scope);
+		const name = input.name;
+		const enabled = input.enabled;
+		if (typeof name !== "string" || typeof enabled !== "boolean") throw new Error("Invalid built-in extension input.");
+		const result = await getPiResources().setBuiltinEnabled(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId }, name as import("../../shared/types/piResources").PiBuiltinExtension, enabled, {
+			expectedRevision: typeof input.expectedRevision === "string" ? input.expectedRevision : undefined,
+		});
+		void appLogger.info("config", "pi built-in extension toggled", { scope: parsed.kind, name, enabled, ok: result.ok });
+		return result;
 	});
 	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
 	ipcMain.handle(ipcChannels.configGetDir, () => configManager.getConfigDir());

@@ -1477,6 +1477,9 @@ export function createPreviewApi(): PiDesktopApi {
 			onMcpLoginUrl: noop,
 			// 预览模式无真实 pi 配置目录，返回占位（源文件页不显示路径行）。
 			getConfigDir: async () => "",
+			// 预览模式没有真实 settings.json：返回空摘要，开关操作直接失败。
+			piResourcesSummary: async () => ({ settingsPath: "", exists: false, revision: "preview", builtins: [], entries: { extensions: [], skills: [], prompts: [], themes: [] } }),
+			piResourcesSetBuiltin: async () => ({ ok: false, error: "preview" }),
 			saveModels: async () => ({ valid: true, modelLoadOk: true, modelCount: 2, modelLoadReason: null, modelLoadDetail: "" }),
 			// 预览模式无主进程验证链路：返回空订阅函数保持 API 形状一致。
 			onModelsVerifyResult: () => () => {},

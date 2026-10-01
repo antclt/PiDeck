@@ -38,6 +38,12 @@ type PiProcessOptions = {
 	 */
 	resolveEnabledExtensionPaths?: (settings?: PiProcessSettings, cwd?: string, includeProjectResources?: boolean) => string[] | null;
 	/**
+	 * 白名单/诊断模式下要显式带回的 pi 原生内置扩展 specifier（`builtin:mcp` 等）。
+	 * 由原生配置计算（用户显式停用的不带回）；未提供时按 pi 默认（全部四个）处理，
+	 * 保证旧调用方与测试行为不变。
+	 */
+	resolveBuiltinExtensionSpecifiers?: () => string[];
+	/**
 	 * 技能白名单模式解析器：全局/项目技能目录 + settings.skills + 包技能的全部启用路径。
 	 * 返回 null = 无禁用项，不启用白名单（pi 自动发现全部技能）；
 	 * 返回数组（可能为空）= 启用白名单，start() 附加 --no-skills 并逐条 --skill 注入。
@@ -141,6 +147,9 @@ function estimateWhitelistInjectionChars(kind: WhitelistKind, paths: readonly st
 	return total;
 }
 
+/** 未装配原生配置解析器时的默认注入集（与 pi 默认加载的四个内置扩展一致）。 */
+const DEFAULT_BUILTIN_EXTENSION_SPECIFIERS: readonly string[] = ["builtin:mcp", "builtin:llama.cpp", "builtin:codemode", "builtin:tool-search"];
+
 /**
  * 把 pi 0.99 的内置扩展（built-in extensions）显式带回命令行。
  *
@@ -159,16 +168,18 @@ function estimateWhitelistInjectionChars(kind: WhitelistKind, paths: readonly st
  * 版本未知（探测失败，minorVersion 为 null）同样不注入：未知时保守退回
  * 「不注入」最坏只是 MCP 不加载，而误注入可能直接让会话起不来。
  *
- * 只带 mcp 与 llama.cpp：codemode / tool-search 是 0.99 全新能力、用户尚无依赖，
- * 未配置 exposure 时它们只是「工具未激活」，不影响既有行为。两者都是 replaceable——
- * 用户若另装了注册 /mcp 的第三方扩展，会优先取代内置 mcp，注入不会与之冲突。
+ * 四个内置扩展全部带回（mcp / llama.cpp / codemode / tool-search）：与 pi 默认发现语义一致。
+ * codemode 是 MCP 默认 exposure（codemode）的硬依赖——缺它时默认暴露的 MCP 工具既不声明给模型、
+ * 也没有 codemode 工具可调（dist/extensions/mcp/index.js 的 hasCodemode 分支只 warn 一次），
+ * 现象是「配了 MCP 但工具不可用」；tool-search 同理是 deferred exposure 的依赖。
+ * 两者都是 replaceable——用户若另装了同名工具的第三方扩展，会优先取代内置版，注入不会与之冲突。
  */
-function appendBuiltInExtensionSpecifierArgs(args: string[], minorVersion: number | null | undefined): void {
+function appendBuiltInExtensionSpecifierArgs(args: string[], minorVersion: number | null | undefined, specifiers: readonly string[] = []): void {
 	if (minorVersion === null || minorVersion === undefined) return;
 	if (minorVersion < MIN_PI_MINOR_VERSION_FOR_BUILTIN_EXTENSION_SPECIFIER) return;
 	// 值不是文件路径：WSL 下 finalPiArgs.map 的路径转换只认盘符 / UNC 前缀，
 	// `builtin:mcp` 两个条件都不匹配，会原样进 distro；不要给它加转换分支。
-	args.push("--extension", "builtin:mcp", "--extension", "builtin:llama.cpp");
+	for (const specifier of specifiers) args.push("--extension", specifier);
 }
 
 /**
@@ -253,6 +264,8 @@ export class PiProcess extends EventEmitter {
 		 * 跳过不影响启动（pi 走默认发现），只意味着本次「禁用」不生效，需要告知用户。
 		 */
 		whitelistSkipped?: WhitelistSkip[];
+		/** 从 pi --version 解析的次版本号（第二段，如 0.99.1 → 99）；探测失败/未探时 null。 */
+		piMinorVersion: number | null;
 	} | null = null;
 
 	constructor(
@@ -295,6 +308,8 @@ export class PiProcess extends EventEmitter {
 		launch?: { channel: "node-direct" | "cmd-shim"; reason?: string; entry?: string };
 		blockedExtensions?: string[];
 		whitelistSkipped?: WhitelistSkip[];
+		/** 从 pi --version 解析的次版本号（第二段，如 0.99.1 → 99）；探测失败/未探时 null。 */
+		piMinorVersion: number | null;
 	}> | null {
 		return this.diagnostics;
 	}
@@ -522,8 +537,11 @@ export class PiProcess extends EventEmitter {
 					// pi 0.99 起 --no-extensions 会连带关掉内置扩展（mcp / llama.cpp / codemode / tool-search），
 					// 不显式带回来会让用户 MCP 面板里配好的服务器（含 CUA 注册项）与 llama.cpp provider
 					// 被静默禁用——现象是「升级 pi 后 MCP 工具消失」。--extension 走私有 specifier 分支，
-					// 不参与白名单预算（两条共 ~40 字符，可忽略）。
-					appendBuiltInExtensionSpecifierArgs(finalPiArgs, minorForGate);
+					// 不参与白名单预算（每条 ~20 字符，可忽略）。
+					//
+					// 但不能无条件带回全部四个：那会覆盖用户在 pi config / settings.json 里的停用选择。
+					// 需要带回哪些由原生配置决定（用户没有显式停用时为全部四个）。
+					appendBuiltInExtensionSpecifierArgs(finalPiArgs, minorForGate, this.options.resolveBuiltinExtensionSpecifiers?.() ?? DEFAULT_BUILTIN_EXTENSION_SPECIFIERS);
 					void getAppLogger()?.info("pi-process", "Extension whitelist mode enabled", {
 						extensions: whitelistPaths.length,
 						cwd: this.cwd,
@@ -661,6 +679,7 @@ export class PiProcess extends EventEmitter {
 				launch: invocation.windowsLaunch,
 				blockedExtensions: blockedNames.length > 0 ? blockedNames : undefined,
 				whitelistSkipped: whitelistSkipped.length > 0 ? whitelistSkipped : undefined,
+				piMinorVersion: this.piMinorVersion,
 			};
 			if (invocation.windowsLaunch?.channel === "cmd-shim" && invocation.windowsLaunch.reason) {
 				// 显式记录回退原因：命令行里出现 cmd.exe 时，用户与支持人员都要能立刻知道为什么没走 node 直启。
