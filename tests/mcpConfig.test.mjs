@@ -5,22 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const {
-	inferMcpTransport,
-	isMcpServerName,
-	mergeMcpServers,
-	mergeMcpServersWithErrors,
-	mcpNamespacesClash,
-	mcpLayerPaths,
-	parseMcpConfigFile,
-	probeHttpUrl,
-	probeStdioCommand,
-	resolveExposureAlias,
-	validateMcpServer,
-	validateMcpServerValue,
-	validateMcpConfigFile,
-	loadMcpConfigSnapshot,
-} = loadTsCommonJs("src/main/config/mcpConfig.ts");
+const { inferMcpTransport, isMcpServerName, mergeMcpServers, mergeMcpServersWithErrors, mcpNamespacesClash, mcpLayerPaths, parseMcpConfigFile, probeHttpUrl, probeStdioCommand, resolveExposureAlias, validateMcpServer, validateMcpServerValue, validateMcpConfigFile, loadMcpConfigSnapshot } =
+	loadTsCommonJs("src/main/config/mcpConfig.ts");
 
 /** 跨 VM 数组/对象先复制再比较（见 tests/helpers/loadTsCommonJs.mjs）。 */
 const plain = (value) => JSON.parse(JSON.stringify(value));

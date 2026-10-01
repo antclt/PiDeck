@@ -35,7 +35,7 @@ test("parseMcpListOutput tolerates partial entries but keeps unknown state", () 
 
 test("authorization URL extraction accepts only complete http(s) URLs", () => {
 	// 同一行
-	assert.equal(extractAuthorizationUrl('prefix in your browser: https://auth.example.com/a?b=1'), "https://auth.example.com/a?b=1");
+	assert.equal(extractAuthorizationUrl("prefix in your browser: https://auth.example.com/a?b=1"), "https://auth.example.com/a?b=1");
 	// 「提示行 + 下一行 URL」（pi 的实际输出）
 	const scan = createAuthorizationUrlScanner();
 	assert.equal(scan('Sign in to MCP server "sentry" in your browser:'), undefined);

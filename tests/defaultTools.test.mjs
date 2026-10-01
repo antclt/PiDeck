@@ -2,20 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const {
-	mergeDefaultTools,
-	resolveDefaultTools,
-	resolveDefaultToolsInLayer,
-	isToolEnabled,
-	isToolEnabledInLayer,
-	setToolEnabled,
-	encodeDefaultToolsSelection,
-	defaultToolsDisablesAll,
-	mergeCodemodeSetting,
-	normalizeCodemodeMode,
-	normalizeCodemodeInlineBudget,
-	PI_DEFAULT_TOOL_NAMES,
-} = loadTsCommonJs("src/shared/defaultTools.ts");
+const { mergeDefaultTools, resolveDefaultTools, resolveDefaultToolsInLayer, isToolEnabled, isToolEnabledInLayer, setToolEnabled, encodeDefaultToolsSelection, defaultToolsDisablesAll, mergeCodemodeSetting, normalizeCodemodeMode, normalizeCodemodeInlineBudget, PI_DEFAULT_TOOL_NAMES } =
+	loadTsCommonJs("src/shared/defaultTools.ts");
 
 /** 跨 VM 数组需复制后再比较（见 tests/helpers/loadTsCommonJs.mjs）。 */
 const plain = (value) => (value === undefined ? undefined : [...value]);

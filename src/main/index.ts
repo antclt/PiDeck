@@ -22,6 +22,8 @@ import { acquireVersionSingleInstance, type FocusPayload } from "./singleInstanc
 import { mainProcessJsFlags, rendererHeapAdditionalArguments } from "./v8HeapLimits";
 import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
 import { isShortcutInput, refreshShortcutBindings } from "./appShortcuts";
+// 主进程复用共享的接管型扩展识别规则（与渲染层横幅单一来源；纯函数无依赖）。
+import { detectThirdPartyMcpExtensions } from "../shared/mcpThirdParty";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
 import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName, sanitizeDevBranchSegment } from "./devIsolation";
 import { isPortablePackagedEnv, resolveAppUserDataDir, resolveChannelDevDataDir, resolvePackagedUserDataDir } from "./portableUserData";
@@ -3717,6 +3719,24 @@ app
 					// 目录查询失败（pi 缺失/CLI 异常等）时退回旧行为：不标 needsRestart，
 					// 保持错误形态不变，避免把可诊断错误变成误导性的“重启即可”。
 					return false;
+				}
+			},
+			// 第三方接管型 MCP 扩展提醒（M5b）：复用 ExtensionManager.list() 的缓存路径（轻扫描，
+			// 不查 npm view），把命中的接管型扩展交给 AgentManager 在启动后提醒。闭包延迟读
+			// extensionManager（构造晚于 agentManager）；列表查询失败时返回空集（宁可漏提醒也不报错）。
+			async () => {
+				try {
+					const list = await extensionManager?.list(false);
+					if (!list) return [];
+					return detectThirdPartyMcpExtensions(list.extensions).map((hit) => ({
+						source: hit.source,
+						scope: hit.scope,
+						enabled: hit.enabled,
+						uninstallCommand: hit.uninstallCommand,
+						isLocalFile: hit.isLocalFile,
+					}));
+				} catch {
+					return [];
 				}
 			},
 		);

@@ -475,10 +475,13 @@ test("拒绝 trust 时旧版 pi 会阻止 spawn", async () => {
 
 // ---------------------------------------------------------------------------
 // pi 0.99 内置扩展（built-in extensions）注入：--no-extensions 语义扩大后
-// 必须用 `-e builtin:<name>` 把 mcp / llama.cpp 带回来（见 appendBuiltInExtensionSpecifierArgs）。
+// 必须用 `-e builtin:<name>` 把 mcp / llama.cpp / codemode / tool-search 四个都带回来
+// （见 appendBuiltInExtensionSpecifierArgs；codemode 是 MCP 默认 exposure 的硬依赖）。
 // ---------------------------------------------------------------------------
 
-test("白名单模式在 pi 0.99 上额外注入 -e builtin:mcp 与 -e builtin:llama.cpp", async () => {
+const BUILT_IN_SPECIFIER_ARGS = ["--extension", "builtin:mcp", "--extension", "builtin:llama.cpp", "--extension", "builtin:codemode", "--extension", "builtin:tool-search"];
+
+test("白名单模式在 pi 0.99 上注入全部四个 -e builtin:<name> specifier", async () => {
 	const { PiProcess, mockLocator, getCaptured } = loadPiProcess({ output: "0.99.1\n" });
 	const proc = new PiProcess("C:\\proj", { wslEnabled: true, wslDistro: "Ubuntu-24.04", wslUser: "root" }, mockLocator, {
 		resolveEnabledExtensionPaths: () => [],
@@ -491,7 +494,7 @@ test("白名单模式在 pi 0.99 上额外注入 -e builtin:mcp 与 -e builtin:l
 	const noExtensionsIdx = captured.args.indexOf("--no-extensions");
 	assert.ok(noExtensionsIdx >= 0, "空禁用列表同样表示全部禁用，应注入 --no-extensions");
 	// 跨 vm 沙箱边界的数组原型不同，deepStrictEqual 会因 prototype 不等而失败，先拍平成宿主数组
-	assert.deepEqual([...captured.args.slice(noExtensionsIdx)], ["--no-extensions", "--extension", "builtin:mcp", "--extension", "builtin:llama.cpp"]);
+	assert.deepEqual([...captured.args.slice(noExtensionsIdx)], ["--no-extensions", ...BUILT_IN_SPECIFIER_ARGS]);
 });
 
 test("低于 0.99 的 pi 不注入 builtin: specifier（老版本 -e 只认 path/npm/git 源）", async () => {
@@ -506,6 +509,8 @@ test("低于 0.99 的 pi 不注入 builtin: specifier（老版本 -e 只认 path
 	assert.ok(captured?.args?.includes("--no-extensions"), "白名单模式仍应注入 --no-extensions");
 	assert.ok(!captured.args.includes("builtin:mcp"), "老版本 pi 不识别 builtin: specifier，注入会导致启动失败");
 	assert.ok(!captured.args.includes("builtin:llama.cpp"));
+	assert.ok(!captured.args.includes("builtin:codemode"));
+	assert.ok(!captured.args.includes("builtin:tool-search"));
 });
 
 test("piRpcNoExtensions 诊断开关开启时不注入 builtin: specifier（诊断路径必须干净）", async () => {
@@ -520,6 +525,8 @@ test("piRpcNoExtensions 诊断开关开启时不注入 builtin: specifier（诊�
 	assert.ok(captured?.args?.includes("--no-extensions"), "诊断开关应注入 --no-extensions");
 	assert.ok(!captured.args.includes("builtin:mcp"), "诊断路径要求 pi 一个扩展都不加载");
 	assert.ok(!captured.args.includes("builtin:llama.cpp"));
+	assert.ok(!captured.args.includes("builtin:codemode"));
+	assert.ok(!captured.args.includes("builtin:tool-search"));
 });
 
 test("无禁用项（resolver 返回 null）时不注入 --no-extensions 与 builtin: specifier", async () => {
@@ -535,4 +542,6 @@ test("无禁用项（resolver 返回 null）时不注入 --no-extensions 与 bui
 	assert.ok(!captured.args.includes("--no-extensions"), "默认发现路径不应注入 --no-extensions（内置扩展本就自动启用）");
 	assert.ok(!captured.args.includes("builtin:mcp"));
 	assert.ok(!captured.args.includes("builtin:llama.cpp"));
+	assert.ok(!captured.args.includes("builtin:codemode"));
+	assert.ok(!captured.args.includes("builtin:tool-search"));
 });

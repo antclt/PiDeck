@@ -34,7 +34,10 @@ test("builtinSpecifiersToRestore returns all four when the user disabled nothing
 	try {
 		writeGlobal(agentDir, { defaultTools: ["read"] });
 		const specifiers = builtinSpecifiersToRestore({ agentHomeDir: home });
-		assert.deepEqual([...specifiers], [...PI_BUILTIN_EXTENSIONS].map((name) => `builtin:${name}`));
+		assert.deepEqual(
+			[...specifiers],
+			[...PI_BUILTIN_EXTENSIONS].map((name) => `builtin:${name}`),
+		);
 	} finally {
 		cleanup();
 	}
