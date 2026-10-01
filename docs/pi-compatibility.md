@@ -6,11 +6,48 @@
 
 ## 当前基线
 
-- 最近核对版本：`pi 0.85.0`（2026-09-04 发布）
+- 最近核对版本：`pi 0.99.2`（2026-09-30 发布；依据：正式 tag 发布说明、`v0.99.1...v0.99.2` 完整文件差异、本机 `package.json` 与相关 docs/dist；未运行真实供应商 OAuth）
 - PiDeck 通信方式：`pi --mode rpc`，stdio JSON-RPC
 - 本记录范围：Pi 后端（`src/main/pi/`）以及 PiDeck 对 Pi 配置/事件的适配
 - 不包含：DSH 的 `pwsh_persistent`、Electron 自带终端、PiDeck 自己的应用更新器
-- 当前原则：PiDeck 不替 Pi 管理内置工具选择，不自动安装 PowerShell 7，不向 Pi 传硬编码 `--tools` 白名单。
+- 当前原则：工具选择由用户决定，PiDeck 的图形编辑器写 pi 原生 `settings.json`，解析与执行仍归 pi；不自动安装 PowerShell 7，不向 Pi 传硬编码 `--tools` 白名单。
+
+## 0.99.2 增量核对
+
+来源：[v0.99.2 发布说明](https://github.com/earendil-works/pi/releases/tag/v0.99.2)、[v0.99.1 → v0.99.2 差异](https://github.com/earendil-works/pi/compare/v0.99.1...v0.99.2)。以下已并入执行计划第 1.4 节及原有阶段，不是另一份独立计划。
+
+前轮本地源码核对中已有 description/clientName/provider auth 等内容，但版本归属写成了 0.99.1；按正式 tag 校正为 0.99.2。本轮用明确版本的本机包重跑了四组 defaultTools 合并、exposure alias、namespace、HTTPS/loopback、clientName 和 provider-token 回调的纯内存探针，未访问真实凭据或 MCP 网络服务。
+
+| 变化 | PiDeck 适配结论 | 状态/验收 |
+|---|---|---|
+| 默认 codemode 的 MCP 不进工具描述，首轮只等待含 direct 工具的服务器；其他服务器后台连接 | 去掉两种 codemode exposure 的误导性解释；不在桌面 prompt 前增加全连接检测，不从 codemode 描述判断服务器不存在 | 待 A5/M2/M3；慢连接不能阻塞普通首轮 |
+| `description`、`mcp_servers` 提示词段、`describeNamespace()` | 补配置编辑/导入/保存；提示词和工具搜索归 pi，PiDeck 不生成另一份 server 摘要 | 待 M1/M3；字段保留与请求日志兼容 |
+| MCP namespace 将 `-` 规范为 `_`；工具重名都加 hash；server 命名冲突拒绝 | 校验配置命名冲突；toolExposure 仍按 server 原始工具名，RPC 工具名原样消费。现有 `mcp__` badge 判断无需换算法 | 待 M1/V1；新旧历史名称、hash 后缀用例 |
+| `oauth.clientName` | 类型/表单/导入支持非空客户端名称；仅注册时生效，改名需登出再注册，不能自动替用户登出 | 待 M1/M3 |
+| HTTP `auth.provider` 使用供应商当前 token，逐请求刷新，配置限全局和 HTTPS（loopback HTTP 例外） | 复用现有供应商登录入口；不调用 MCP OAuth login/logout，不读取/复制 provider token，不允许项目 provider-auth 覆盖 | 待 M1/M2/M3 |
+| **0.99.2 独立 MCP CLI 未传 providerToken 回调**，会话路径有该回调 | CLI 对 provider-auth 的认证结论不能代表会话；如实保留报告并标注检测限制，不提示用户反复 MCP OAuth 登录；不引入 SDK 验证通道 | 源码与纯内存探针已确认；处理待 M2/M3。上游修复后重核并撤销限制 |
+| `/reload` 只激活 defaultTools 新增项，移除项仍可活跃，CLI tools flags 优先 | 不是新增 RPC，也不是完整重置工具集；桌面继续以新建/重启完整应用配置，不发送虚构 reload_config | 待 T1/V1；运行态和配置态文案分开 |
+| Anthropic workload identity federation | native env 清洗当前保留其变量；补假值透传测试，token 文件读取/交换/刷新归 pi；WSL 不自动拷宿主凭据路径 | 待 A1/A5/V1；不新增联邦认证 UI |
+| `/mcp` TUI 超链接、TUI 单行折叠；codemode worker/image、provider/model/retry 修复 | 独立 CLI login 仍是明文 URL，RPC 命令定义未改；不移植 TUI renderer 或重写 pi 内部逻辑，相关既有接入路径回归 | 上游随外部 pi 升级生效；PiDeck 验收待 V1 |
+
+`package-manager/settings-manager` 未在本次 tag 差异中改动，原生资源管理方向保持。静态模型 catalog 的源数据也未改；PiDeck 的构建期 `pi-ai@0.99.1` 和 DSH 独立依赖不随外部 CLI 补丁版本自动升级。
+
+## 0.99.x 整体适配矩阵
+
+以下按当前工作区事实记录，**初版代码存在不等于适配已验收**。完整收尾与原生资源迁移方案见 [pi 原生资源管理与 MCP / Codemode 执行计划](./pi-0.99-mcp-codemode-plan.md)；其中阶段和测试尚待执行，本次文档更新没有重跑业务测试。
+
+| 上游变化 | PiDeck 当前处理与待办 | 状态 | 代码/验证入口 | 兼容代码移除条件 |
+|---|---|---|---|---|
+| `--no-extensions` 连带关闭 mcp/codemode/tool-search/llama.cpp；0.99+ 支持 `builtin:` | 当前仅在资源白名单模式补回四个内置扩展；诊断总关不补回。补回仍会越过用户原生禁用设置；最终应退出普通资源白名单，交给 pi 正常发现 | 初版有缺陷，待 A3–A5 | `PiProcess.appendBuiltInExtensionSpecifierArgs`、`tests/piProcessSecurityEnv.test.mjs` | 旧禁用记录完成安全迁移、正常启动不再使用资源白名单后删除补回逻辑 |
+| 原生 `extensions/skills/prompts/packages` 支持过滤和项目覆盖；`pi config` 提供四个内置扩展开关 | 当前普通启停仍依赖 PiDeck 私有禁用列表；原生内置面板缺失。计划改用原生规则，支持整包开关与项目三态；PiDeck 自带扩展保持桌面专用 | 待 A1–A5 | 各 Resource Manager、`packageResourceResolver.ts`、执行计划第 2–5 节 | 原生管理基线为 pi >= 0.99.2；私有旧字段仅作迁移读取，不能永久双写 |
+| MCP 全局 + 已信任项目配置，同名项目定义整体替换全局 | 当前数据层仍浅合并，项目只读；需要完整 project CRUD、来源展示、有效停用覆盖与恢复继承 | 待 M1 | `mcpConfig.ts`、`ConfigManager.ts`、`McpTab.tsx`、`tests/mcpConfig.test.mjs` | 无；整体替换是长期原生语义 |
+| MCP schema：`enabled/exposure/toolExposure/oauth`、全局 `auth.provider`、顶层 `autoEnableCodemode` | 已有表单初版；需补严格类型校验、未知字段保留、OAuth 字段与原生 provider auth；`codemode-deferred` 仅为 `codemode` 别名 | 部分实现，待 M1/M3 | `types/mcp.ts`、`mcpConfig.ts`、`mcpForm.ts`、MCP UI 测试 | 旧别名读取跟随 pi，不能当成第五种独立 exposure |
+| `pi mcp list/login/logout` CLI | 已有命令包装和页面按钮；尚缺准确 scope/cwd、WSL/agentDir 对齐、取消、操作身份、退出原因校验和 URL 分块处理。报告仅代表 CLI 检测进程 | 部分实现，待 M2 | `piMcpCli.ts`、system IPC/preload；应补 CLI 行为测试 | 长期只走 CLI，不以 RPC OAuth 或 SDK 桥替代 |
+| 第三方 `/mcp` 扩展可替换内置 MCP | 已有已知包识别和启动提醒初版；缺当前 runtime 来源确认、迟到结果保护、可靠首轮投递和可用导航 | 部分实现，待 M3 | `mcpThirdParty.ts`、`AgentManager.ts`；应补启动提醒行为测试 | 保留准确的检测/卸载引导，不恢复 adapter 安装教程 |
+| 默认工具选择及 codemode 子设置 | 多选初版已存在；显式空列表后添加工具会错误恢复默认，项目跨层空数组语义未处理，子字段启用判断及未知字段保存有缺陷 | 部分实现，待 T1 | `defaultTools.ts`、`DefaultToolsInput.tsx`、`SettingsTab.tsx`、`tests/defaultTools.test.mjs` | 无；必须按实际原生合并语义编码 |
+| `disabled` 不是原生启停字段；socket / SSE 不支持 | UI 仍将 `disabled` 当作停用，启用实际写 `enabled:true`；导入器仍有 legacy 转换路径。须纠正展示、校验和导入，保留原文且提示不支持项 | 待 M1/M3 | `McpResourceViews.isMcpServerDisabled`、`McpTab.toggleDisabled`、`mcpImport.ts` | 仅在明确旧来源导入时转为原生值；不能永久伪装 legacy 字段生效 |
+| OAuth 凭据存于 `mcp-auth.json` | 备份 file key 已加入；脱敏、旧备份兼容与恢复行为仍需验证 | 待 M1 验证 | `ConfigBackupManager.ts`、`types/backup.ts`、`tests/configBackupManager.test.mjs` | 无；凭据继续由 pi 管理，PiDeck 不借备份实现认证 |
+| bash 结构化结果 1MiB + `truncated/full_output_path`（codemode 脚本可见） | 提交 `65da84fe` 已适配提示；本轮不扩展该逻辑 | 已有提交 | `65da84fe` | 不适用 |
 
 ## 0.85.0 适配矩阵
 
