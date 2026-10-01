@@ -10,6 +10,8 @@ import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Label } from "../components/ui-shadcn/label";
 import { SettingBox, SettingRow, SettingSwitchRow, ClearableSettingsInput } from "../components/app/settings/SettingRows";
 import { SettingsSection } from "../components/app/settings/SettingsStorageTab";
+import { DefaultToolsInput } from "./DefaultToolsInput";
+import { defaultToolsDisablesAll, mergeCodemodeSetting, normalizeCodemodeInlineBudget, normalizeCodemodeMode } from "../../../shared/defaultTools";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui-shadcn/popover";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui-shadcn/command";
 
@@ -65,6 +67,25 @@ const SEND_MODE_OPTIONS = ["all", "one-at-a-time"].map((v) => ({ value: v, label
 /** 项目信任兜底策略（pi 文档：ask/always/never，仅全局设置生效；RPC 模式不弹信任询问，靠此值决定是否加载项目 .pi 资源）。 */
 const PROJECT_TRUST_OPTIONS = ["ask", "always", "never"].map((v) => ({ value: v, label: v }));
 
+/** codemode.mode 枚举（pi settings.md#tools：on 默认声明并存、only 模型只能经脚本调工具）。 */
+const CODEMODE_MODE_OPTIONS = [
+	{ value: "on", label: "on" },
+	{ value: "only", label: "only" },
+];
+
+/**
+ * 写回 codemode 子设置：只 patch 用户改动的键，保留未知嵌套字段；
+ * 合并后对象为空则移除整个键（避免落盘 codemode:{} 脏数据）。
+ */
+function withCodemode(data: SettingsFile, existing: unknown, patch: { mode?: string | undefined; inlineBudget?: number | undefined }): SettingsFile {
+	const next = mergeCodemodeSetting(existing, patch);
+	if (next === undefined) {
+		const { codemode: _removed, ...rest } = data;
+		return rest;
+	}
+	return { ...data, codemode: next };
+}
+
 export function SettingsTab(props: {
 	data: SettingsFile;
 	saving: boolean;
@@ -99,7 +120,10 @@ export function SettingsTab(props: {
 			key !== "steeringMode" &&
 			key !== "followUpMode" &&
 			key !== "defaultProjectTrust" &&
-			key !== "transport",
+			key !== "transport" &&
+			// 「工具与 Codemode」区块占用：不走「其他设置项」的 JSON 兜底
+			key !== "defaultTools" &&
+			key !== "codemode",
 	);
 
 	/**
@@ -343,6 +367,62 @@ export function SettingsTab(props: {
 						<ConfigSelect value={typeof data.transport === "string" ? data.transport : ""} options={TRANSPORT_OPTIONS} onChange={(v) => props.onChange({ ...data, transport: v })} placeholder={t("config.general.transportPlaceholder")} />
 					</ClearableSettingsInput>
 				</SettingRow>
+			</SettingsSection>
+
+			{/* ── 工具与 Codemode：defaultTools 单一字段 + codemode 子设置（计划 S 篇）── */}
+			<SettingsSection title={t("config.tools.title")} description={t("config.tools.hint")}>
+				<SettingRow title={<span>{t("config.tools.defaultTools")}</span>} description={t("config.tools.defaultToolsHint")} stacked>
+					<DefaultToolsInput
+						value={Array.isArray(data.defaultTools) ? (data.defaultTools as string[]) : undefined}
+						onChange={(next) => {
+							// undefined = 移除键（回到 pi 默认）；[] = 禁用全部内置工具（pi 语义）
+							if (next === undefined) {
+								const { defaultTools: _removed, ...rest } = data;
+								props.onChange(rest);
+								return;
+							}
+							props.onChange({ ...data, defaultTools: next });
+						}}
+					/>
+					{defaultToolsDisablesAll(data.defaultTools as readonly string[] | undefined) ? <small className="text-caption text-danger">{t("config.tools.allDisabledWarn")}</small> : null}
+				</SettingRow>
+
+				{(() => {
+					const codemode = data.codemode && typeof data.codemode === "object" && !Array.isArray(data.codemode) ? (data.codemode as { mode?: unknown; inlineBudget?: unknown }) : undefined;
+					// 子设置始终允许预配置：codemode 扩展可用且工具被手动/MCP 自动激活后才生效；
+					// 不能仅因为当前 defaultTools 里没写 "+codemode" 就禁用输入（裸名列表、继承层、
+					// MCP 自动激活都会让 codemode 生效）。仅在扩展层被显式关闭时提示原因，不自动改写工具选择。
+					const codemodeDisabledByExtension = (Array.isArray(data.extensions) ? (data.extensions as string[]) : []).some((entry) => entry === "-builtin:codemode");
+					const mode = normalizeCodemodeMode(codemode?.mode);
+					const budget = normalizeCodemodeInlineBudget(codemode?.inlineBudget);
+					return (
+						<>
+							<SettingRow title={<span>{t("config.tools.codemodeMode")}</span>} description={codemodeDisabledByExtension ? t("config.tools.codemodeBuiltinDisabled") : t("config.tools.codemodeModeHint")} alignEnd={false}>
+								<div className={codemodeDisabledByExtension ? "pointer-events-none opacity-50" : ""}>
+									<ClearableSettingsInput empty={typeof mode !== "string"} onClear={() => props.onChange(withCodemode(data, codemode, { mode: undefined }))}>
+										<ConfigSelect value={mode ?? ""} options={CODEMODE_MODE_OPTIONS} onChange={(v) => props.onChange(withCodemode(data, codemode, { mode: normalizeCodemodeMode(v) }))} placeholder={t("config.tools.codemodeModePlaceholder")} />
+									</ClearableSettingsInput>
+								</div>
+							</SettingRow>
+							<SettingRow title={<span>{t("config.tools.codemodeBudget")}</span>} description={codemodeDisabledByExtension ? t("config.tools.codemodeBuiltinDisabled") : t("config.tools.codemodeBudgetHint")} alignEnd>
+								<div className={codemodeDisabledByExtension ? "pointer-events-none opacity-50" : ""}>
+									<Input
+										type="number"
+										min={0}
+										step={500}
+										value={typeof budget === "number" ? budget : ""}
+										onChange={(e) => {
+											const raw = e.target.value.trim();
+											props.onChange(withCodemode(data, codemode, { inlineBudget: raw === "" ? undefined : normalizeCodemodeInlineBudget(Number(raw)) }));
+										}}
+										className="h-8 w-24 rounded-sm border border-border-subtle bg-bg-panel px-3 text-control text-text-primary outline-none focus:border-[var(--color-accent)] focus:shadow-[var(--focus-ring)]"
+										placeholder="3000"
+									/>
+								</div>
+							</SettingRow>
+						</>
+					);
+				})()}
 			</SettingsSection>
 
 			{/* ── 全局会话目录（仅编辑 ~/.pi/agent/settings.json 的 sessionDir） ── */}
