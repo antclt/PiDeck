@@ -29,11 +29,11 @@ const api = (
 				getMcp: (scope?: McpConfigScope) => Promise<McpConfigSnapshot>;
 				saveMcp: (data: McpConfigFile, scope?: McpConfigScope) => Promise<{ valid: boolean; error?: string }>;
 				probeMcp: (definition: McpServerDefinition) => Promise<McpProbeResult>;
-				/** pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线，见计划 M4/M6）。 */
-				mcpListStatus: () => Promise<McpCliListResult>;
-				mcpLogin: (server: string, timeoutSec?: number) => Promise<{ ok: boolean; output: string }>;
-				mcpLogout: (server: string) => Promise<{ ok: boolean; output: string }>;
-				onMcpLoginUrl: (callback: (payload: { server: string; url: string }) => void) => () => void;
+				/** pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线，见计划 M2）。 */
+				mcpListStatus: (scope?: McpConfigScope) => Promise<McpCliListResult>;
+				mcpLogin: (server: string, timeoutSec?: number, scope?: McpConfigScope, operationId?: string) => Promise<{ ok: boolean; output: string }>;
+				mcpLogout: (server: string, scope?: McpConfigScope) => Promise<{ ok: boolean; output: string }>;
+				onMcpLoginUrl: (callback: (payload: { server: string; scope?: McpConfigScope; operationId?: string; url: string }) => void) => () => void;
 			};
 			app: {
 				openExternal: (url: string, forceSystem?: boolean) => Promise<void> | void;
@@ -141,6 +141,8 @@ export const McpTab = forwardRef<
 	/** 第三方接管型 MCP 扩展（pi-mcp-adapter 等）识别结果；null = 探测失败（横幅降级，不阻塞编辑）。 */
 	const [thirdPartyMcp, setThirdPartyMcp] = useState<ThirdPartyMcpExtension[] | null>(null);
 	const loadGenerationRef = useRef(0);
+	/** 当前登录操作的绑定身份：只有同一次操作的 URL 事件才能更新登录区域。 */
+	const loginOperationRef = useRef<{ operationId: string; server: string } | null>(null);
 
 	/** 脏状态上报父层（标题栏保存按钮与关闭确认依赖它）。 */
 	const markDirty = useCallback(() => onDirtyChange(true), [onDirtyChange]);
@@ -377,12 +379,20 @@ export const McpTab = forwardRef<
 		}
 	};
 
+	/** 有未保存草稿时不允许运行检测/登录：CLI 读的是磁盘配置，不能显示草稿的结果。 */
+	const blockedByDraft = (): boolean => {
+		const dirty = Boolean(snapshot && JSON.stringify(writable) !== JSON.stringify(snapshot.writableFile)) || Boolean(creating);
+		if (dirty) setStatusError(t("config.mcp.draftBlocked"));
+		return dirty;
+	};
+
 	/** 真实连接检测：spawn `pi mcp list --json`（exit 1 不算失败，stdout 仍是合法报告）。 */
 	const runStatusCheck = async () => {
+		if (blockedByDraft()) return;
 		setStatusLoading(true);
 		setStatusError(null);
 		try {
-			setStatus(await api.config.mcpListStatus());
+			setStatus(await api.config.mcpListStatus(scope));
 		} catch (caught) {
 			setStatus(null);
 			setStatusError(caught instanceof Error ? caught.message : String(caught));
@@ -393,13 +403,19 @@ export const McpTab = forwardRef<
 
 	/** OAuth 登录：授权 URL 经 onMcpLoginUrl 推送（内嵌在按钮行里），成功后刷新状态。 */
 	const runLogin = async (server: string) => {
+		if (blockedByDraft()) return;
+		// 每次登录一个独立 operationId：迟到/跨作用域的结果不会覆盖当前登录区域。
+		const operationId = `mcp-login-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		loginOperationRef.current = { operationId, server };
 		setLoggingInServer(server);
 		setLoginUrl(null);
 		const unsubscribe = api.config.onMcpLoginUrl((payload) => {
+			const expected = loginOperationRef.current;
+			if (!expected || payload.operationId !== expected.operationId) return;
 			if (payload.server === server) setLoginUrl(payload);
 		});
 		try {
-			const result = await api.config.mcpLogin(server, 240);
+			const result = await api.config.mcpLogin(server, 240, scope, operationId);
 			if (result.ok) {
 				// 凭据生效时机（pi 行为）：运行中的会话不会立刻重连，下一轮对话自动使用新凭据。
 				showNotice(t("config.mcp.oauth.loginOk"), 5000, "info");
@@ -410,6 +426,7 @@ export const McpTab = forwardRef<
 			setLoginResult({ server, ok: false, output: caught instanceof Error ? caught.message : String(caught) });
 		} finally {
 			unsubscribe();
+			if (loginOperationRef.current?.operationId === operationId) loginOperationRef.current = null;
 			setLoggingInServer(null);
 			setLoginUrl(null);
 		}
@@ -417,7 +434,7 @@ export const McpTab = forwardRef<
 
 	const runLogout = async (server: string) => {
 		try {
-			const result = await api.config.mcpLogout(server);
+			const result = await api.config.mcpLogout(server, scope);
 			setLoginResult({ server, ok: result.ok, output: result.output });
 			if (result.ok) await runStatusCheck();
 		} catch (caught) {
@@ -560,7 +577,7 @@ export const McpTab = forwardRef<
 						<Radio size={14} />
 						{t("config.mcp.status.title")}
 					</div>
-					<Button variant="outline" size="sm" onClick={() => void runStatusCheck()} disabled={statusLoading || saving}>
+					<Button variant="outline" size="sm" onClick={() => void runStatusCheck()} disabled={statusLoading || saving} title={statusError === t("config.mcp.draftBlocked") ? t("config.mcp.draftBlocked") : undefined}>
 						{statusLoading ? t("config.mcp.status.checking") : t("config.mcp.status.check")}
 					</Button>
 				</div>

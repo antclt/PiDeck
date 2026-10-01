@@ -421,7 +421,15 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	/** `pi mcp` CLI 封装（连接检测 / OAuth 登录登出）；惰性构造，无状态可安全复用。 */
 	let piMcpCli: PiMcpCli | null = null;
 	const getPiMcpCli = () => {
-		piMcpCli ??= new PiMcpCli({ locator: piLocator, getSettings: () => settingsStore.get() });
+		piMcpCli ??= new PiMcpCli({
+			locator: piLocator,
+			getSettings: () => settingsStore.get(),
+			resolveProjectScope: async (projectId) => {
+				const root = projectResourceManager.getProjectRoot(projectId);
+				const trusted = isProjectTrusted ? await isProjectTrusted(projectId, root) : false;
+				return { cwd: root, trusted };
+			},
+		});
 		return piMcpCli;
 	};
 
@@ -1837,9 +1845,11 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线，不走 RPC，见计划 M4/M6）──
 
-	ipcMain.handle(ipcChannels.mcpListStatus, async () => {
-		const result = await getPiMcpCli().list();
+	ipcMain.handle(ipcChannels.mcpListStatus, async (_event, scope: unknown) => {
+		const parsed = parseMcpScopeRequest(scope);
+		const result = await getPiMcpCli().list(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId });
 		void appLogger.info("config", "pi mcp list finished", {
+			scope: parsed.kind,
 			servers: result.servers.length,
 			errors: result.errors.length,
 			connected: result.servers.filter((server) => server.state === "connected").length,
@@ -1847,23 +1857,32 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		return result;
 	});
 
-	ipcMain.handle(ipcChannels.mcpLogin, (event, server: unknown, timeoutSec: unknown) => {
+	ipcMain.handle(ipcChannels.mcpLogin, (event, server: unknown, timeoutSec: unknown, scope: unknown, operationId: unknown) => {
 		if (typeof server !== "string" || !server.trim() || server.length > 128) {
 			return Promise.resolve({ ok: false, output: "invalid server name" });
 		}
 		const seconds = typeof timeoutSec === "number" && Number.isFinite(timeoutSec) && timeoutSec > 0 ? Math.min(Math.floor(timeoutSec), 600) : 240;
+		const parsed = parseMcpScopeRequest(scope);
+		const operation = typeof operationId === "string" && operationId.length <= 128 ? operationId : undefined;
 		const webContents = event.sender;
-		return getPiMcpCli().login(server.trim(), seconds, (url) => {
-			// WSL 下 pi 自动开浏览器经常失败；把授权 URL 推给 UI 内嵌兑底（不弹 toast，见计划 M6）。
-			if (!webContents.isDestroyed()) webContents.send(ipcChannels.mcpLoginUrl, { server: server.trim(), url });
-		});
+		return getPiMcpCli()
+			.login(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId }, server.trim(), seconds, {
+				operationId: operation,
+				onUrl: (url) => {
+					// WSL 下 pi 自动开浏览器经常失败；把授权 URL 推给 UI 内嵌兜底（不弹 toast，见计划 M2）。
+					// 带 operationId + scope：迟到结果不会串到别的 server/作用域/已关闭页面。
+					if (!webContents.isDestroyed()) webContents.send(ipcChannels.mcpLoginUrl, { server: server.trim(), scope: parsed, operationId: operation, url });
+				},
+			})
+			.catch((error: unknown) => ({ ok: false as const, output: error instanceof Error ? error.message : String(error) }));
 	});
 
-	ipcMain.handle(ipcChannels.mcpLogout, (_event, server: unknown) => {
+	ipcMain.handle(ipcChannels.mcpLogout, async (_event, server: unknown, scope: unknown) => {
 		if (typeof server !== "string" || !server.trim() || server.length > 128) {
-			return Promise.resolve({ ok: false, output: "invalid server name" });
+			return { ok: false, output: "invalid server name" };
 		}
-		return getPiMcpCli().logout(server.trim());
+		const parsed = parseMcpScopeRequest(scope);
+		return getPiMcpCli().logout(parsed.kind === "global" ? { scope: "global" } : { scope: "project", projectId: parsed.projectId }, server.trim());
 	});
 	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
 	ipcMain.handle(ipcChannels.configGetDir, () => configManager.getConfigDir());

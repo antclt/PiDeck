@@ -1086,11 +1086,11 @@ const api = {
 			}>,
 		probeMcp: (definition: import("../shared/types/mcp").McpServerDefinition) => ipcRenderer.invoke(ipcChannels.configProbeMcp, definition) as Promise<import("../shared/types/mcp").McpProbeResult>,
 		// pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线；登录授权 URL 经 onMcpLoginUrl 推送）。
-		mcpListStatus: () => ipcRenderer.invoke(ipcChannels.mcpListStatus) as Promise<import("../shared/types/mcp").McpCliListResult>,
-		mcpLogin: (server: string, timeoutSec?: number) => ipcRenderer.invoke(ipcChannels.mcpLogin, server, timeoutSec) as Promise<{ ok: boolean; output: string }>,
-		mcpLogout: (server: string) => ipcRenderer.invoke(ipcChannels.mcpLogout, server) as Promise<{ ok: boolean; output: string }>,
-		onMcpLoginUrl: (callback: (payload: { server: string; url: string }) => void) => {
-			const listener = (_event: Electron.IpcRendererEvent, payload: { server: string; url: string }) => callback(payload);
+		mcpListStatus: (scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.mcpListStatus, scope) as Promise<import("../shared/types/mcp").McpCliListResult>,
+		mcpLogin: (server: string, timeoutSec?: number, scope?: import("../shared/types/mcp").McpConfigScope, operationId?: string) => ipcRenderer.invoke(ipcChannels.mcpLogin, server, timeoutSec, scope, operationId) as Promise<{ ok: boolean; output: string }>,
+		mcpLogout: (server: string, scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.mcpLogout, server, scope) as Promise<{ ok: boolean; output: string }>,
+		onMcpLoginUrl: (callback: (payload: { server: string; scope?: import("../shared/types/mcp").McpConfigScope; operationId?: string; url: string }) => void) => {
+			const listener = (_event: Electron.IpcRendererEvent, payload: { server: string; scope?: import("../shared/types/mcp").McpConfigScope; operationId?: string; url: string }) => callback(payload);
 			ipcRenderer.on(ipcChannels.mcpLoginUrl, listener);
 			return () => ipcRenderer.removeListener(ipcChannels.mcpLoginUrl, listener);
 		},

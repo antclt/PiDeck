@@ -1795,6 +1795,7 @@ export const zhCN = {
 	"config.mcp.origin": "来源",
 	"config.mcp.overlayHint": "定义来自只读层，此处修改会写入 Pi 覆盖层",
 	"config.mcp.inheritedHint": "定义来自其他层（继承），本页修改会写入本层覆盖；删除本层覆盖即恢复继承。",
+	"config.mcp.draftBlocked": "有未保存的 MCP 修改。检测与登录读取的是磁盘配置，请先保存再运行。",
 	"config.mcp.disableInstead": "禁用",
 	"config.mcp.probe": "检测",
 	"config.mcp.probing": "检测中…",

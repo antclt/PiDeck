@@ -1799,6 +1799,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.origin": "Source",
 	"config.mcp.overlayHint": "Defined in a read-only layer; edits write a Pi overlay",
 	"config.mcp.inheritedHint": "Defined in another layer (inherited); edits write an override in this layer, deleting it restores inheritance.",
+	"config.mcp.draftBlocked": "You have unsaved MCP changes. Connection checks and sign-in read the saved file; save first.",
 	"config.mcp.disableInstead": "Disable",
 	"config.mcp.probe": "Probe",
 	"config.mcp.probing": "Probing…",
