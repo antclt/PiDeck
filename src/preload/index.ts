@@ -1078,13 +1078,22 @@ const api = {
 				parsed: Record<string, unknown>;
 				diagnostic?: ConfigFileDiagnostic;
 			}>,
-		getMcp: (projectId?: string) => ipcRenderer.invoke(ipcChannels.configGetMcp, projectId) as Promise<import("../shared/types/mcp").McpConfigSnapshot>,
-		saveMcp: (data: import("../shared/types/mcp").McpConfigFile) =>
-			ipcRenderer.invoke(ipcChannels.configSaveMcp, data) as Promise<{
+		getMcp: (scope?: import("../shared/types/mcp").McpConfigScope) => ipcRenderer.invoke(ipcChannels.configGetMcp, scope) as Promise<import("../shared/types/mcp").McpConfigSnapshot>,
+		saveMcp: (data: import("../shared/types/mcp").McpConfigFile, scope?: import("../shared/types/mcp").McpConfigScope) =>
+			ipcRenderer.invoke(ipcChannels.configSaveMcp, data, scope) as Promise<{
 				valid: boolean;
 				error?: string;
 			}>,
 		probeMcp: (definition: import("../shared/types/mcp").McpServerDefinition) => ipcRenderer.invoke(ipcChannels.configProbeMcp, definition) as Promise<import("../shared/types/mcp").McpProbeResult>,
+		// pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线；登录授权 URL 经 onMcpLoginUrl 推送）。
+		mcpListStatus: () => ipcRenderer.invoke(ipcChannels.mcpListStatus) as Promise<import("../shared/types/mcp").McpCliListResult>,
+		mcpLogin: (server: string, timeoutSec?: number) => ipcRenderer.invoke(ipcChannels.mcpLogin, server, timeoutSec) as Promise<{ ok: boolean; output: string }>,
+		mcpLogout: (server: string) => ipcRenderer.invoke(ipcChannels.mcpLogout, server) as Promise<{ ok: boolean; output: string }>,
+		onMcpLoginUrl: (callback: (payload: { server: string; url: string }) => void) => {
+			const listener = (_event: Electron.IpcRendererEvent, payload: { server: string; url: string }) => callback(payload);
+			ipcRenderer.on(ipcChannels.mcpLoginUrl, listener);
+			return () => ipcRenderer.removeListener(ipcChannels.mcpLoginUrl, listener);
+		},
 		// 只读：pi 全局配置目录（源文件编辑页标注实际路径用）。
 		getConfigDir: () => ipcRenderer.invoke(ipcChannels.configGetDir) as Promise<string>,
 		saveModels: (data: unknown) =>

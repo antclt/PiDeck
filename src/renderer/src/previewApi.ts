@@ -1466,9 +1466,15 @@ export function createPreviewApi(): PiDesktopApi {
 				writableRaw: '{\n  "mcpServers": {}\n}\n',
 				layers: [],
 				servers: [],
+				invalidServers: [],
 			}),
 			saveMcp: async () => ({ valid: true }),
 			probeMcp: async () => ({ ok: true, transport: "stdio" as const, detail: "preview" }),
+			// 预览模式无 pi CLI：连接检测返回空集，登录/登出静默失败，授权 URL 无订阅源。
+			mcpListStatus: async () => ({ servers: [], errors: [] }),
+			mcpLogin: async () => ({ ok: false, output: "preview" }),
+			mcpLogout: async () => ({ ok: false, output: "preview" }),
+			onMcpLoginUrl: noop,
 			// 预览模式无真实 pi 配置目录，返回占位（源文件页不显示路径行）。
 			getConfigDir: async () => "",
 			saveModels: async () => ({ valid: true, modelLoadOk: true, modelCount: 2, modelLoadReason: null, modelLoadDetail: "" }),

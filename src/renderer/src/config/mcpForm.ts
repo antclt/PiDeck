@@ -3,14 +3,14 @@
  * 放独立模块是为了可单测，并避免 McpTab 继续变长。
  */
 
-import type { McpConfigFile, McpConfigSnapshot, McpServerListItem } from "../../../shared/types/mcp";
+import type { McpConfigFile, McpConfigLayerKind, McpConfigSnapshot, McpServerListItem } from "../../../shared/types/mcp";
 
-const SERVER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
 /** 与主进程 mcpConfig.isMcpServerName 同一规则，避免渲染层 import 主进程模块。 */
 export function isMcpServerName(name: string): boolean {
 	const trimmed = name.trim();
-	return trimmed.length > 0 && trimmed.length <= 64 && !/[\\/]/.test(trimmed) && SERVER_NAME_RE.test(trimmed);
+	return trimmed.length > 0 && !/[\\/]/.test(trimmed) && SERVER_NAME_RE.test(trimmed);
 }
 
 export function argsToText(args: string[] | undefined): string {
@@ -45,16 +45,19 @@ export function omitUndefined<T extends Record<string, unknown>>(value: T): Part
  */
 export function buildMcpDisplayServers(snapshot: McpConfigSnapshot, writable: McpConfigFile): McpServerListItem[] {
 	const writableServers = writable.mcpServers ?? {};
+	const writableScope: McpConfigLayerKind = snapshot.layers.find((layer) => layer.path === snapshot.writablePath)?.kind ?? "pi-agent";
 	const seen = new Set<string>();
 	const items = snapshot.servers.map((item) => {
 		seen.add(item.name);
 		const overlay = writableServers[item.name];
 		if (!overlay) return item;
+		// pi 语义：同名条目由可写层**整体替换**，不是字段级合并。
 		return {
 			...item,
-			definition: { ...item.definition, ...omitUndefined(overlay) },
-			ownedByWritable: item.originPath === snapshot.writablePath,
-			overridePath: snapshot.writablePath,
+			definition: overlay,
+			originPath: snapshot.writablePath,
+			originScope: writableScope,
+			ownedByWritable: true,
 		};
 	});
 	for (const [name, definition] of Object.entries(writableServers)) {
@@ -63,7 +66,7 @@ export function buildMcpDisplayServers(snapshot: McpConfigSnapshot, writable: Mc
 			name,
 			definition,
 			originPath: snapshot.writablePath,
-			overridePath: snapshot.writablePath,
+			originScope: writableScope,
 			ownedByWritable: true,
 		});
 	}

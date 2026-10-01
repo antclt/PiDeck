@@ -58,7 +58,7 @@ const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi }).piD
 // 其余组直接以 section 名作 value；Tabs 受控 value 由此编码，业务仍走 section/tab 双 state，
 // loadConfig 等既有依赖零改动。
 // `page.*` 是桥贡献的独立配置页（落点 `config.page`）—— 数量由扩展决定，不是静态枚举。
-type ConfigSection = "config" | "security" | "skills" | "prompts" | "extensions" | `page.${string}`;
+type ConfigSection = "config" | "security" | "skills" | "prompts" | "extensions" | "mcp" | `page.${string}`;
 
 // 注意：修改 ConfigSection/ConfigTab 枚举时需同步更新 CONFIG_SECTIONS/CONFIG_TABS 校验数组
 
@@ -85,7 +85,7 @@ function loadLastConfigBackendPane(): "dsh" | "pi" {
 }
 
 /** 全部合法 section / config 组子 tab，用于校验持久化值（避免版本更新后残留旧值导致无高亮）。 */
-const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "skills", "prompts", "extensions"];
+const CONFIG_SECTIONS: readonly ConfigSection[] = ["config", "security", "skills", "prompts", "extensions", "mcp"];
 const CONFIG_TABS: readonly ConfigTab[] = ["models", "auth", "settings", "trust", "mcp", "raw"];
 /**
  * 读取上次打开的 tab；localStorage 不可用、无记录或值已失效时返回 null（由调用方回退默认值）。
@@ -461,6 +461,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	dirtyTabsRef.current = dirtyTabs;
 	/** MCP 页句柄：自管加载/保存，顶部统一保存按钮经 saveByKey 转发。 */
 	const mcpTabRef = useRef<McpTabHandle>(null);
+	/** 项目资源管理器里的 MCP 页句柄（项目作用域；主配置页没有这个 section）。 */
+	const resourceMcpTabRef = useRef<McpTabHandle>(null);
 	/** 关闭弹框时存在未保存修改 → 弹出保存确认（借鉴设置页关闭逻辑） */
 	const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
 	const hasDirty = dirtyTabs.size > 0;
@@ -2349,6 +2351,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				}
 				return ok;
 			}
+			case "mcp": {
+				const ok = (await resourceMcpTabRef.current?.save()) ?? false;
+				if (ok) {
+					clearDirty("mcp");
+					onSaved();
+					showToast(t("config.saved"));
+				}
+				return ok;
+			}
 			case "config:raw":
 				return handleSaveRaw();
 			case "skills":
@@ -2578,6 +2589,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 										<Puzzle size={14} aria-hidden="true" />
 									</span>
 									{t("config.nav.extensions")}
+								</TabsTrigger>
+								<TabsTrigger value="mcp" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
+									<span className="config-nav-icon">
+										<PlugZap size={14} aria-hidden="true" />
+									</span>
+									{t("config.nav.mcp")}
 								</TabsTrigger>
 								<TabsTrigger value="skills" className="config-nav-btn h-8 justify-start gap-1.5 px-2.5 text-control font-medium">
 									<span className="config-nav-icon">
@@ -2922,8 +2939,22 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						{/* forceMount：MCP 页自管草稿，切走再回来不能丢未保存编辑；inactive 必须 hidden，否则叠在别的 tab 上。 */}
 						<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
 							<div className="config-content flex min-h-0 flex-col">
-								{/* MCP 页固定全局作用域（项目下拉已移除）；activeProjectId 只作导入扫描的项目来源。 */}
+								{/* 全局作用域：activeProjectId 只作导入扫描的项目来源，配置仍写全局 mcp.json。 */}
 								<McpTab ref={mcpTabRef} activeProjectId={projectId} onDirtyChange={handleMcpDirtyChange} />
+							</div>
+						</TabsContent>
+
+						<TabsContent value="mcp" className="config-main min-w-0">
+							<div className="config-content flex min-h-0 flex-col">
+								<McpTab
+									ref={resourceMcpTabRef}
+									projectId={resourceOnly && projectKind !== "chat" ? effectiveProjectId : undefined}
+									projectName={resourceOnly ? projectName : undefined}
+									onDirtyChange={(dirty) => {
+										if (dirty) markDirty("mcp");
+										else clearDirty("mcp");
+									}}
+								/>
 							</div>
 						</TabsContent>
 

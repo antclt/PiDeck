@@ -18,6 +18,8 @@ import { resolveAppTimes } from "../utils/appInfoTimes";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { PiMcpCli } from "../pi/piMcpCli";
+import { validateMcpConfigFile } from "../config/mcpConfig";
 import { tmpdir } from "node:os";
 import { installPiRuntimeNode, piRuntimeNodeBinDir, probeNodeVersion, detectPiRuntimeNode } from "../pi/runtimeNodeInstall";
 import { runPiGlobalInstall } from "../pi/piGlobalInstall";
@@ -89,17 +91,20 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 const MCP_EXPOSURE_VALUES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"];
+/** 仅属于全局层的字段：项目层含它会被 pi 跳过（auth）或仅能读不能校验（不拦）。 */
+function isProviderAuth(value: unknown): boolean {
+	return isUnknownRecord(value) && (value.provider === undefined || typeof value.provider === "string");
+}
 
 function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
 	if (!isUnknownRecord(value)) return false;
 	const optionalString = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "string";
-	const optionalNumber = (key: string) => !(key in value) || value[key] === undefined || typeof value[key] === "number";
 	const optionalExposure = (key: string) => !(key in value) || value[key] === undefined || (typeof value[key] === "string" && MCP_EXPOSURE_VALUES.includes(value[key]));
+	// pi 0.99.2 内置 MCP schema：command/cwd/url + exposure/toolExposure/enabled/timeout/description
+	// + oauth + auth.provider。legacy 字段（socket/lifecycle/directTools/disabled…）pi 静默忽略，PiDeck 不再接受。
 	return (
-		["command", "cwd", "url", "socket", "bearerToken", "bearerTokenEnv"].every(optionalString) &&
-		optionalNumber("idleTimeout") &&
-		optionalNumber("requestTimeoutMs") &&
-		// pi 0.99 内置 MCP 字段：exposure / toolExposure / enabled / timeout
+		["command", "cwd", "url"].every(optionalString) &&
+		optionalString("description") &&
 		optionalExposure("exposure") &&
 		(!("toolExposure" in value) || value.toolExposure === undefined || (isUnknownRecord(value.toolExposure) && Object.values(value.toolExposure).every((entry) => typeof entry === "string" && MCP_EXPOSURE_VALUES.includes(entry)))) &&
 		(!("enabled" in value) || value.enabled === undefined || typeof value.enabled === "boolean") &&
@@ -107,10 +112,8 @@ function isMcpServerDefinition(value: unknown): value is McpServerDefinition {
 		(!("args" in value) || value.args === undefined || (Array.isArray(value.args) && value.args.every((entry) => typeof entry === "string"))) &&
 		(!("env" in value) || value.env === undefined || isStringRecord(value.env)) &&
 		(!("headers" in value) || value.headers === undefined || isStringRecord(value.headers)) &&
-		(!("auth" in value) || value.auth === undefined || value.auth === "bearer" || value.auth === "oauth") &&
-		(!("lifecycle" in value) || value.lifecycle === undefined || ["lazy", "eager", "keep-alive", "lazy-keep-alive"].includes(String(value.lifecycle))) &&
-		(!("disabled" in value) || value.disabled === undefined || typeof value.disabled === "boolean") &&
-		(!("directTools" in value) || value.directTools === undefined || typeof value.directTools === "boolean" || (Array.isArray(value.directTools) && value.directTools.every((entry) => typeof entry === "string")))
+		(!("oauth" in value) || value.oauth === undefined || isUnknownRecord(value.oauth)) &&
+		(!("auth" in value) || value.auth === undefined || isProviderAuth(value.auth))
 	);
 }
 
@@ -120,6 +123,27 @@ function isMcpConfigFile(value: unknown): value is McpConfigFile {
 	if (!("mcpServers" in value) || value.mcpServers === undefined) return true;
 	if (!isUnknownRecord(value.mcpServers)) return false;
 	return Object.values(value.mcpServers).every(isMcpServerDefinition);
+}
+
+/**
+ * MCP 作用域请求：`{scope:"global"}` / `{scope:"project",projectId}`。
+ * 渲染层只能传注册过的 projectId，不传路径。旧的无参/裸 projectId 形式按全局处理，兼容旧预加载。
+ */
+type McpScopeRequest = { kind: "global" } | { kind: "project"; projectId: string };
+
+function parseMcpScopeRequest(value: unknown): McpScopeRequest {
+	if (value === undefined || value === null) return { kind: "global" };
+	if (typeof value === "string") {
+		if (!value.trim() || value.length > 256) throw new Error("Invalid project id.");
+		return { kind: "project", projectId: value.trim() };
+	}
+	if (!isUnknownRecord(value)) throw new Error("Invalid MCP scope.");
+	const scope = value.scope;
+	if (scope === undefined || scope === "global") return { kind: "global" };
+	if (scope !== "project") throw new Error("Invalid MCP scope.");
+	const projectId = value.projectId;
+	if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw new Error("Invalid project id.");
+	return { kind: "project", projectId: projectId.trim() };
 }
 
 export type SystemIpcDeps = {
@@ -132,6 +156,11 @@ export type SystemIpcDeps = {
 	appLogger: AppLogger;
 	rpcLogger: RpcLogger;
 	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
+	/**
+	 * 项目目录的信任判定（index.ts 注入，已处理 WSL 路径映射）。未装配时按未信任处理，
+	 * 使项目 MCP 读写不会在缺少门禁的路径上放开。
+	 */
+	isProjectTrusted?: (projectId: string, projectRoot: string) => Promise<boolean>;
 	/** pi 环境引导：便携 Node 安装器（下载/解压 IO 由 index.ts 装配 DSH 同源实现）；未装配 = 引导入口降级不可用。 */
 	piRuntimeNodeInstaller?: import("../pi/runtimeNodeInstall").RuntimeNodeInstallerDeps;
 	/** DSH 后端判定（G17：RPC 日志按 backend 分流）。 */
@@ -336,6 +365,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
+		isProjectTrusted,
 		isDshAgent,
 		setDshRpcLogging,
 		isDshRpcLogging,
@@ -387,6 +417,13 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		environmentDoctor,
 		logBundleExporter,
 	} = deps;
+
+	/** `pi mcp` CLI 封装（连接检测 / OAuth 登录登出）；惰性构造，无状态可安全复用。 */
+	let piMcpCli: PiMcpCli | null = null;
+	const getPiMcpCli = () => {
+		piMcpCli ??= new PiMcpCli({ locator: piLocator, getSettings: () => settingsStore.get() });
+		return piMcpCli;
+	};
 
 	/**
 	 * Models/auth 的任何写入都必须同时失效 CLI fallback 与 Pi-authoritative
@@ -1756,19 +1793,36 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.configGetSettings, () => configManager.getSettingsConfig());
 	ipcMain.handle(ipcChannels.configGetTrust, () => configManager.getTrustConfig());
 	// MCP project layers are selected by a stable registered project id; renderer paths are never trusted.
-	ipcMain.handle(ipcChannels.configGetMcp, (_event, projectId?: unknown) => {
-		if (projectId === undefined) return configManager.getMcpConfig();
-		if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) {
-			throw new Error("Invalid project id.");
-		}
-		return configManager.getMcpConfig(projectResourceManager.getProjectRoot(projectId.trim()));
+	// MCP 作用域：projectId 省略 = 全局页；项目页固定写项目 .pi/mcp.json（读也要过信任门禁）。
+	const assertTrustedMcpProject = async (projectId: string, root: string): Promise<void> => {
+		if (!isProjectTrusted) throw new Error(mainCopy("mainProjectResource.projectNotTrusted"));
+		if (!(await isProjectTrusted(projectId, root))) throw new Error(mainCopy("mainProjectResource.projectNotTrusted"));
+	};
+	ipcMain.handle(ipcChannels.configGetMcp, async (_event, scope: unknown) => {
+		const parsed = parseMcpScopeRequest(scope);
+		if (parsed.kind === "global") return configManager.getMcpConfig();
+		const root = projectResourceManager.getProjectRoot(parsed.projectId);
+		await assertTrustedMcpProject(parsed.projectId, root);
+		return configManager.getMcpConfig(root, { writableScope: "project-pi", projectTrusted: true });
 	});
-	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown) => {
+	ipcMain.handle(ipcChannels.configSaveMcp, async (_event, data: unknown, scope: unknown) => {
+		const parsed = parseMcpScopeRequest(scope);
 		if (!isMcpConfigFile(data)) {
 			return { valid: false, error: "mcp.json must contain an object of server definitions" };
 		}
-		const result = await configManager.saveMcpConfig(data);
+		let result: { valid: boolean; error?: string };
+		if (parsed.kind === "global") {
+			result = await configManager.saveMcpConfig(data);
+		} else {
+			const root = projectResourceManager.getProjectRoot(parsed.projectId);
+			await assertTrustedMcpProject(parsed.projectId, root);
+			// 项目写入走 ProjectResourceManager：canonical 边界 + 临时文件 rename，拒绝 junction 逃逸。
+			const validationError = validateMcpConfigFile(data, { scope: "project-pi" });
+			result = validationError ? { valid: false, error: validationError } : { valid: true };
+			if (result.valid) await projectResourceManager.saveProjectMcpConfig(parsed.projectId, data);
+		}
 		void appLogger.info("config", "MCP config saved", {
+			scope: parsed.kind,
 			serverCount: Object.keys(data.mcpServers ?? {}).length,
 		});
 		return result;
@@ -1779,6 +1833,37 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return { ok: false, error: "invalid MCP server definition" };
 		}
 		return configManager.probeMcpServer(definition);
+	});
+
+	// ── pi mcp CLI：真实连接检测 + OAuth 登录/登出（仅命令路线，不走 RPC，见计划 M4/M6）──
+
+	ipcMain.handle(ipcChannels.mcpListStatus, async () => {
+		const result = await getPiMcpCli().list();
+		void appLogger.info("config", "pi mcp list finished", {
+			servers: result.servers.length,
+			errors: result.errors.length,
+			connected: result.servers.filter((server) => server.state === "connected").length,
+		});
+		return result;
+	});
+
+	ipcMain.handle(ipcChannels.mcpLogin, (event, server: unknown, timeoutSec: unknown) => {
+		if (typeof server !== "string" || !server.trim() || server.length > 128) {
+			return Promise.resolve({ ok: false, output: "invalid server name" });
+		}
+		const seconds = typeof timeoutSec === "number" && Number.isFinite(timeoutSec) && timeoutSec > 0 ? Math.min(Math.floor(timeoutSec), 600) : 240;
+		const webContents = event.sender;
+		return getPiMcpCli().login(server.trim(), seconds, (url) => {
+			// WSL 下 pi 自动开浏览器经常失败；把授权 URL 推给 UI 内嵌兑底（不弹 toast，见计划 M6）。
+			if (!webContents.isDestroyed()) webContents.send(ipcChannels.mcpLoginUrl, { server: server.trim(), url });
+		});
+	});
+
+	ipcMain.handle(ipcChannels.mcpLogout, (_event, server: unknown) => {
+		if (typeof server !== "string" || !server.trim() || server.length > 128) {
+			return Promise.resolve({ ok: false, output: "invalid server name" });
+		}
+		return getPiMcpCli().logout(server.trim());
 	});
 	// 只读：pi 全局配置目录，供源文件编辑页标注实际路径（渲染层不感知配置位置）。
 	ipcMain.handle(ipcChannels.configGetDir, () => configManager.getConfigDir());
