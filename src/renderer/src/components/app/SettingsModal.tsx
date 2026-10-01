@@ -23,7 +23,7 @@ import { showNotice } from "../../utils/notice";
 import { useGitModels } from "./settings/gitModels.ts";
 import { formatSettingsUnsavedMessage, summarizeSettingsUnsavedChanges } from "./settings/unsavedChangesSummary.ts";
 import { UpdateInstallUnsavedDialog } from "./settings/UpdateInstallUnsavedDialog.tsx";
-import type { AppSettings, AppInfo, AvailableModel, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult, Project } from "../../../../shared/types";
+import type { AppSettings, AppInfo, AvailableModel, PiInstallation, PiInstallStatus, PiUpdateCheckResult, PiCliUpdateResult, Project } from "../../../../shared/types";
 
 // ── 各 tab 内容 lazy 加载：首开只下载壳 + 当前 tab 的 chunk（qrcode/表格/日志查看器等
 //    重依赖随各自 tab 拆包），切换到某 tab 时才加载其 chunk（本地文件，秒级以内）。──
@@ -91,23 +91,32 @@ type SettingsModalProps = {
 	settings: AppSettings;
 	piStatus: PiInstallStatus | null;
 	piChecking: boolean;
+	piInstallations: PiInstallation[];
+	onChoosePiInstallation: (path: string) => void;
+	onShellProbePiInstallations: () => void;
+	shellProbingPiInstallations: boolean;
+	/** 正在校验的安装路径（列表行内 loading）；由 hook 自持，不用 customPiPath 反推 */
+	applyingPiInstallationPath: string | null;
+	/** 进入 dev tab 时拉一次安装列表 */
+	onRequestPiInstallations: () => void;
+	/** 系统文件选择器挑 pi 可执行文件（稀有/自定义安装） */
+	onBrowsePiPath: () => void;
+	browsingPiPath: boolean;
 	piProxyChecking: boolean;
 	piProxyNotice: string;
 	piProxyNoticeTone: "info" | "success" | "error";
 	webServiceChanging: boolean;
 	onRestartWebService: () => void;
 	appInfo: AppInfo;
-	customPiPath: string;
-	customPathValidating: boolean;
-	customPathResult: PiInstallStatus | null;
+	/** 添加/编辑/移除用户自加的候选路径（列表内联表单驱动） */
+	onAddPiCustomPath: (path: string) => Promise<void> | void;
+	onUpdatePiCustomPath: (previousPath: string, nextPath: string) => Promise<void> | void;
+	onRemovePiCustomPath: (path: string) => Promise<void> | void;
 	updateChecking: boolean;
 	piUpdating: boolean;
 	piUpdateChecking: boolean;
 	piUpdateCheck: PiUpdateCheckResult | null;
 	piUpdateResult: PiCliUpdateResult | null;
-	onCustomPathChange: (path: string) => void;
-	onValidateCustomPath: () => void;
-	onClearCustomPath: () => void;
 	onCheckPi: () => void;
 	onTestPiProxy: () => void;
 	onCheckUpdate: () => void;
@@ -758,13 +767,18 @@ function SettingsModalContent(props: SettingsModalProps) {
 											appInfo={props.appInfo}
 											piStatus={props.piStatus}
 											piChecking={props.piChecking}
-											customPiPath={props.customPiPath}
-											customPathValidating={props.customPathValidating}
-											customPathResult={props.customPathResult}
-											onCustomPathChange={props.onCustomPathChange}
-											onValidateCustomPath={props.onValidateCustomPath}
-											onClearCustomPath={props.onClearCustomPath}
+											piInstallations={props.piInstallations}
+											onChoosePiInstallation={props.onChoosePiInstallation}
+											onShellProbePiInstallations={props.onShellProbePiInstallations}
+											shellProbingPiInstallations={props.shellProbingPiInstallations}
+											applyingPiInstallationPath={props.applyingPiInstallationPath}
+											onRequestPiInstallations={props.onRequestPiInstallations}
+											onBrowsePiPath={props.onBrowsePiPath}
+											browsingPiPath={props.browsingPiPath}
 											onCheckPi={props.onCheckPi}
+											onAddPiCustomPath={props.onAddPiCustomPath}
+											onUpdatePiCustomPath={props.onUpdatePiCustomPath}
+											onRemovePiCustomPath={props.onRemovePiCustomPath}
 											onClearCheckFlag={props.onClearCheckFlag}
 											piUpdateChecking={props.piUpdateChecking}
 											onCheckPiUpdate={props.onCheckPiUpdate}

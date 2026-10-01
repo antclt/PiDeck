@@ -232,7 +232,7 @@ import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
 import { DshRuntimeStatusService } from "./dsh/runtime/DshRuntimeStatus";
 import { DshRuntimeManager, DSH_BUNDLED_RUNTIME_DIRNAME, readBundledRuntime, readDeclaredDshVersion } from "./dsh/runtime/DshRuntimeManager";
-import { DshRuntimeInstaller } from "./dsh/runtime/DshRuntimeInstaller";
+import { DshRuntimeInstaller, DSH_RUNTIME_VERSION_UNAVAILABLE_PREFIX } from "./dsh/runtime/DshRuntimeInstaller";
 import { resolveDshRuntimeReleaseTag } from "./dsh/runtime/dshRuntimeReleaseTarget";
 import { resolveDshRuntimeIndexUrl } from "../shared/types/dshRuntimeManifest";
 import { autoUpdateDshRuntimeIfOutdated } from "./dsh/runtime/dshRuntimeAutoUpdate";
@@ -2025,6 +2025,14 @@ function mainCopy(key: MainProcessTranslationKey, params?: Record<string, string
  * 因此这里只做「码 → 文案」映射，不修改下层返回值。
  */
 function dshRuntimeErrorCopy(error: string): string {
+	if (error.startsWith(DSH_RUNTIME_VERSION_UNAVAILABLE_PREFIX)) {
+		// 错误码格式由 DshRuntimeInstaller 固定：`required=<版本> available=<版本,版本>`。
+		const detail = /^required=(?<required>.*?) available=(?<available>.*)$/.exec(error.slice(DSH_RUNTIME_VERSION_UNAVAILABLE_PREFIX.length));
+		return mainCopy("dsh.runtime.errors.runtimeVersionUnavailable", {
+			required: detail?.groups?.required ?? "",
+			available: (detail?.groups?.available ?? "").split(",").filter(Boolean).join("、"),
+		});
+	}
 	if (error === "manifest missing") return mainCopy("dsh.runtime.errors.manifestMissing");
 	if (error === "manifest unreadable") return mainCopy("dsh.runtime.errors.manifestUnreadable");
 	if (error === "manifest schema unsupported") return mainCopy("dsh.runtime.errors.schemaUnsupported");
@@ -2841,6 +2849,9 @@ function registerIpc() {
 				const result = await dshRuntimeInstaller.installFromIndex();
 				dshRuntimeStatus.refresh();
 				if (result.ok) await startDshHostAfterRuntimeDiskOperation(wasRunning);
+				// 与手动导入同一套文案映射：在线安装的失败原因（尤其是「发布源没有
+				// 配套版本」）必须可读，否则用户只会看到「点了安装没反应」。
+				if (!result.ok) return { ok: false, error: dshRuntimeErrorCopy(result.error) };
 				return result;
 			},
 			importDshRuntime: async (filePath: string) => {
@@ -3757,6 +3768,9 @@ app
 			extract: createTarExtractor((scope, message, detail) => void appLogger.warn(scope, message, detail)),
 			log: (scope, message, detail) => void appLogger.info(scope, message, detail),
 		});
+		// 「本版本配套哪个 dsh runtime」只有一个事实源：状态服务的门控与安装器的挑版本
+		// 必须同源，否则会出现「门控要 0.2.0-rc.2、安装器装 0.1.5-rc.1 并报成功」的死循环。
+		const declaredDshVersion = () => readDeclaredDshVersion(app.getAppPath());
 		// DSH runtime 安装态服务先于 DshHost 装配（探测只依赖 appPath，不 fork host）。
 		// 探测顺序：外部已装 runtime 优先 → 兼容旧版 full/存量包时才回退 app 内置。
 		// 官方 lite 包与 dev 都把 runtime 获取统一到 userData 外部目录，未安装时从同一份
@@ -3775,8 +3789,8 @@ app
 			// 保留构造位次供旧调用方兼容；安装入口现在由状态服务统一开放，不读取打包态。
 			() => app.isPackaged,
 			// 声明的配套 dsh 版本（package.json）：与已装 runtime 比对得出 updateAvailable，
-			// 升级 PiDeck 后旧 runtime 仍「兼容」会被一直选用，UI 需要这个信号提示更新。
-			() => readDeclaredDshVersion(app.getAppPath()),
+			// 升级 app 后旧 runtime 仍「兼容」会被一直选用，UI 需要这个信号提示更新。
+			declaredDshVersion,
 		);
 		dshRuntimeStatus.subscribe((status) => {
 			if (mainWindow && !mainWindow.isDestroyed()) {
@@ -3802,6 +3816,8 @@ app
 					appVersion: app.getVersion(),
 				}),
 			appVersion: () => app.getVersion(),
+			// 与状态服务同源：安装只认这个配套版本，索引里没有就报错而不是退装旧版。
+			declaredVersion: declaredDshVersion,
 			fetchIndex: fetchDshRuntimeIndex,
 			// dev 与官方 lite 包统一走远程 Release；只给显式 full/存量包保留离线兼容入口。
 			// 通过显式环境变量开启，避免开发机或新包因残留资源误绕过远程下载链路。

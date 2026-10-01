@@ -10,6 +10,7 @@ import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { sanitizeShortcutOverrides } from "../../shared/shortcuts";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { normalizeQuickMessages } from "../../shared/quickMessages";
+import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import { normalizeFontSizeMode, normalizeOptionalFontSizeMode } from "../../shared/fontSize";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -174,6 +175,7 @@ Gitmoji 对应关系：
 	desktopProxyUrl: "http://127.0.0.1:7890",
 	desktopProxyBypass: "localhost,127.0.0.1,::1",
 	customPiPath: "",
+	piCustomPaths: [],
 	wslEnabled: false,
 	wslDistro: "Ubuntu",
 	wslUser: "root",
@@ -525,6 +527,10 @@ export class SettingsStore {
 		}
 		if ("piProxyModels" in safePatch) {
 			safePatch.piProxyModels = normalizeProxyList(safePatch.piProxyModels);
+		}
+		// 用户自加的 pi 候选路径来自渲染层，入参不可信：只保留绝对路径/wsl 标记、去重、限额。
+		if ("piCustomPaths" in safePatch) {
+			safePatch.piCustomPaths = sanitizePiCustomPaths(safePatch.piCustomPaths).paths;
 		}
 		// IPC 入参不可信：自动标题开关只接受布尔值，非法值保持原有设置。
 		if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {

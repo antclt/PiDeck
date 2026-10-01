@@ -143,6 +143,7 @@ import type {
 	RewindRestoreScope,
 	PiExtensionListResult,
 	PiInstallStatus,
+	PiInstallation,
 	PiInstallExecResult,
 	WslConnectionValidation,
 	NpmAvailabilityResult,
@@ -470,9 +471,15 @@ const api = {
 				ok: boolean;
 				error?: string;
 			}>,
-		/** 从本地导入 runtime（.tgz 归档或已解压目录；主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
+		/** 从本地导入 runtime 归档（.tgz；主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
 		importDshRuntimeFile: () =>
 			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocal) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 从本地导入「已解压」的 runtime 目录（主进程弹目录对话框；与归档入口分开，见 shared/ipc.ts）。 */
+		importDshRuntimeDir: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocalDir) as Promise<{
 				ok: boolean;
 				error?: string;
 			}>,
@@ -831,7 +838,20 @@ const api = {
 		 */
 		check: (force?: boolean) => ipcRenderer.invoke(ipcChannels.piCheck, force === true) as Promise<PiInstallStatus>,
 		/** 验证用户手动输入的 pi 路径，通过后主进程会自动保存到 settings.customPiPath */
-		checkCustom: (customPath: string) => ipcRenderer.invoke(ipcChannels.piCheckCustom, customPath) as Promise<PiInstallStatus>,
+		/**
+		 * 验证用户手动输入的 pi 路径，通过后主进程会自动保存到 settings.customPiPath。
+		 * `activate=false`：只校验不改「当前使用」（编辑备选路径时用）。
+		 */
+		checkCustom: (customPath: string, activate?: boolean) => ipcRenderer.invoke(ipcChannels.piCheckCustom, customPath, activate !== false) as Promise<PiInstallStatus>,
+		/**
+		 * 列出系统上探测到的全部 pi 安装（含官方安装器的 managed 安装）。
+		 * `forceShellProbe` = 额外跑一次交互式登录 shell 反查（用户显式点「从终端再找一次」）。
+		 */
+		listInstallations: (forceShellProbe?: boolean) => ipcRenderer.invoke(ipcChannels.piInstallations, forceShellProbe === true) as Promise<PiInstallation[]>,
+		/** 打开文件选择器挑一个 pi 可执行文件（稀有/自定义安装）；取消返回 null */
+		chooseExecutable: () => ipcRenderer.invoke(ipcChannels.piChooseExecutable) as Promise<string | null>,
+		/** 保存用户自加的 pi 候选路径列表；返回落盘后的列表与「当前使用是否被一并清空」 */
+		setCustomPaths: (paths: readonly string[]) => ipcRenderer.invoke(ipcChannels.piSetCustomPaths, [...paths]) as Promise<{ paths: string[]; clearedActive: boolean }>,
 		checkUpdate: () => ipcRenderer.invoke(ipcChannels.piUpdateCheck) as Promise<PiUpdateCheckResult>,
 		update: () => ipcRenderer.invoke(ipcChannels.piUpdate) as Promise<PiCliUpdateResult>,
 		/** 执行安装命令（如 npm install -g pi）并返回执行结果 */

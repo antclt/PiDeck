@@ -12,7 +12,7 @@
  * 双包切换不丢配置；并行运行依赖按版本互斥的单实例锁。
  *
  * 配置策略：只维护与 package.json build 字段的**差异项**，运行时读取主配置
- * 深合并后写临时配置文件传给 electron-builder（--config 外部文件是完整配置、
+ * 浅合并后写临时配置文件传给 electron-builder（--config 外部文件是完整配置、
  * 不与 package.json 合并）。不做全量复制——主配置改 asar/extraResources 时
  * dev 包自动跟随，避免两份配置漂移。
  *

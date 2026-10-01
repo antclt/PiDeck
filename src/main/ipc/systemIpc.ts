@@ -6,7 +6,6 @@
 import { app, dialog, ipcMain, shell } from "electron";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
 import { resolveUpdateChannel } from "../update/channelIdentity";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
@@ -20,11 +19,13 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { installPiRuntimeNode, piRuntimeNodeExePath, probeNodeVersion, detectPiRuntimeNode } from "../pi/runtimeNodeInstall";
+import { installPiRuntimeNode, piRuntimeNodeBinDir, probeNodeVersion, detectPiRuntimeNode } from "../pi/runtimeNodeInstall";
 import { runPiGlobalInstall } from "../pi/piGlobalInstall";
 import type { NpmAvailabilityResult, PiInstallExecResult, PiInstallStatus, PiRuntimeNodeInstallResult, PiRuntimeNodeStatus, WebServiceStatusInfo } from "../../shared/types";
 import type { AppInfo, AppLogLevel, AppLogQuery, AppSettings, AvailableModel, ChangelogPayload, CreatePiSkillInput, ModelListReport, ModelsVerifyResult, SessionCommandResult, SessionRuntimeTarget } from "../../shared/types";
-import type { PiLocator } from "../pi/PiLocator";
+import { invalidatePiInstallationCache, type PiLocator } from "../pi/PiLocator";
+import { resolvePiInstallGuard } from "../pi/piInstallGuard";
+import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { AgentManager } from "../pi/AgentManager";
@@ -467,11 +468,77 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		return status;
 	});
 
-	ipcMain.handle(ipcChannels.piCheckCustom, async (_event, customPath: string) => {
+	/**
+	 * 列出全部 pi 安装（含官方安装器的 managed 安装）。
+	 *
+	 * `force` = 用户显式点「从终端再找一次」：额外跑一次交互式登录 shell 反查并绕过列表缓存。
+	 * 渲染层输入不可信，只认布尔 true。
+	 */
+	ipcMain.handle(ipcChannels.piInstallations, async (_event, force?: unknown) => {
+		const settings = settingsStore.get();
+		const forceShellProbe = force === true;
+		const installations = await piLocator.listInstallations(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser, { forceShellProbe, customPaths: settings.piCustomPaths });
+		void appLogger.info("pi", "Pi installations listed", {
+			count: installations.length,
+			forceShellProbe,
+			// 只记来源与版本：路径可能含 username，日志里不需要它（诊断报告另有脱敏路径）
+			sources: installations.map((item) => `${item.source}:${item.version ?? "unknown"}`),
+		});
+		return installations;
+	});
+
+	/**
+	 * 保存用户自加的 pi 候选路径（设置页列表的「我添加的」分组）。
+	 *
+	 * 入参不可信：只接数组，逐条校验绝对路径/wsl 标记、去重、限额（见 sanitizePiCustomPaths）。
+	 * 额外处理「移除的正好是当前使用的那条」：同步清空 customPiPath，让解析回落到自动检测的首选——
+	 * 否则会留下一份指向已被用户删掉的路径的“当前使用”状态。
+	 */
+	ipcMain.handle(ipcChannels.piSetCustomPaths, async (_event, input: unknown) => {
+		const settings = settingsStore.get();
+		const { paths, rejected } = sanitizePiCustomPaths(input);
+		const activePath = settings.customPiPath.trim();
+		const activeStillPresent = !activePath || paths.some((path) => path === activePath);
+		const next = await settingsStore.update(activeStillPresent ? { piCustomPaths: paths } : { piCustomPaths: paths, customPiPath: "" });
+		invalidatePiInstallationCache();
+		void appLogger.info("pi", "Pi custom paths saved", {
+			count: paths.length,
+			rejected: rejected.length,
+			// 仅记「当前使用是否被一并清空」，不记路径本身
+			clearedActive: !activeStillPresent,
+		});
+		return { paths: next.piCustomPaths, clearedActive: !activeStillPresent };
+	});
+
+	/** 打开文件选择器挑 pi 可执行文件（稀有/自定义安装场景）。取消返回 null。 */
+	ipcMain.handle(ipcChannels.piChooseExecutable, async () => {
+		const options = {
+			properties: ["openFile"],
+			title: mainCopy("mainPi.chooseExecutableTitle"),
+			filters:
+				process.platform === "win32"
+					? [
+							{ name: "Executables", extensions: ["exe", "cmd", "bat"] },
+							{ name: "All Files", extensions: ["*"] },
+						]
+					: [{ name: "All Files", extensions: ["*"] }],
+		} satisfies Electron.OpenDialogOptions;
+		const result = await dialog.showOpenDialog(options);
+		return result.canceled ? null : (result.filePaths[0] ?? null);
+	});
+
+	/**
+	 * 校验一条用户给出的 pi 路径。
+	 * `activate=false` 只校验不落 customPiPath——设置页「编辑备选路径」不能因此改掉正在使用的那份。
+	 */
+	ipcMain.handle(ipcChannels.piCheckCustom, async (_event, customPath: string, activate?: unknown) => {
+		const shouldActivate = activate !== false;
 		const settings = settingsStore.get();
 		const status = await piLocator.validateCustomPath(customPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
-		if (status.installed && status.command) {
+		if (status.installed && status.command && shouldActivate) {
 			await settingsStore.update({ customPiPath: status.command });
+			// 自定义路径变了，当前使用项/排序跟着变；不清缓存会让设置页在 TTL 内显示旧列表。
+			invalidatePiInstallationCache();
 			void refreshPiModelCatalogs().catch(() => undefined);
 		}
 		void appLogger.info("pi", "Custom pi path checked", {
@@ -852,11 +919,24 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		// 边界校验：只认布尔；其他类型一律按 false（官方源）处理，不回退猜默认。
 		const mirrorArg = useMirror === true;
 		try {
+			// 硬约束（用户明确要求）：本机已经有 pi 就**不再装第二份**。
+			// 只在 UI 层不展示引导不够——检测总有覆盖不到的地方（自定义目录、别名、只在 GUI 看不见的 shell 里配的 PATH），
+			// 一旦漏判，用户点一下就会真的多出一份，之后终端与 PiDeck 各用各的、更新走两条路。
+			const settings = settingsStore.get();
+			const existing = await piLocator.listInstallations(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+			const guard = resolvePiInstallGuard(existing);
+			if (guard.skip) {
+				void appLogger.info("pi", "Runtime pi install skipped because pi already exists", {
+					count: guard.installations.length,
+					sources: guard.installations.map((item) => item.source),
+				});
+				return { success: false, exitCode: null, stdout: "", stderr: "", alreadyInstalled: guard.installations };
+			}
 			const userData = app.getPath("userData");
-			const portableNode = piRuntimeNodeExePath(userData);
 			// npm 解析顺序：便携 node 同目录 npm（引导链路主路径）→ 系统 npm。
-			// 便携包里 npm 与 node 同目录（bin/npm 或 npm.cmd），同一 PATH 前缀即可解析。
-			const portableBinDir = dirname(portableNode);
+			// 便携目录层级由 piRuntimeNodeBinDir 统一给（POSIX 是 node/bin，Windows 是 node），
+			// 自己拼 dirname(node) 容易在 POSIX 上错一层，导致永远回退到系统 npm。
+			const portableBinDir = piRuntimeNodeBinDir(userData);
 			const portableNpm = join(portableBinDir, process.platform === "win32" ? "npm.cmd" : "npm");
 			const usePortable = existsSync(portableNpm);
 			if (!usePortable) {
@@ -877,7 +957,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				npmArgs.push("--registry=https://registry.npmmirror.com");
 			}
 			// 安装前缀：pi 装进 <userData>/pi-runtime/pi-global，不写系统 npm 全局目录，
-			// 无需提权（mac/Linux 免 sudo）；PiLocator 搜索目录已包含该路径，装完即可检测到。
+			// 无需提权（mac/Linux 免 sudo）；PiLocator 搜索目录已包含该路径（POSIX 是 pi-global/bin），
+			// 装完即可被检测到。
 			const prefixDir = join(userData, "pi-runtime", "pi-global");
 			void appLogger.info("pi", "Runtime pi install started", {
 				npm: npmCommand,
@@ -914,6 +995,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				// 没有 npm 输出也没有 registry 凭据面；缺了它日志里只剩 stdout/stderr=0 无从诊断。
 				stderrPreview: result.exitCode === -1 ? result.stderr.slice(0, 200) : undefined,
 			});
+			// 引导安装写完 pi 后必须让安装列表重新枚举，否则用户点「重新检测」看到的还是旧列表。
+			if (result.success && result.exitCode === 0) invalidatePiInstallationCache();
 			return result;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -1562,6 +1645,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("customPiPath" in patch || "wslEnabled" in patch || "wslDistro" in patch || "wslUser" in patch) {
 			// WSL 切换会改变 ConfigManager 的目录；先重新挂 watcher，再启动新 generation。
 			modelCapabilityCache.watchConfigDirectory();
+			// 当前使用项与候选列表都随这些字段变化：不清缓存会让 UI 在 TTL 内显示旧安装列表。
+			invalidatePiInstallationCache();
 			void refreshPiModelCatalogs().catch(() => undefined);
 		}
 		return settings;

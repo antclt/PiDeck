@@ -3,13 +3,13 @@ import { readFileSync, existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // runtimeNodeInstall 依赖 DshRuntimeManager（sha256OfFile / IO 类型），后者 import electron
 // 仅用于常量与类型；测试里给最小替身即可加载。
-const { installPiRuntimeNode, detectPiRuntimeNode, piRuntimeNodeExePath, piRuntimeRootDir, probeNodeVersion } = loadTsCommonJs("src/main/pi/runtimeNodeInstall.ts", {
+const { installPiRuntimeNode, detectPiRuntimeNode, piRuntimeNodeExePath, piRuntimeNodeBinDir, piRuntimeRootDir, probeNodeVersion, copyDirEntryVerbatim, repairPortableNodeLinks } = loadTsCommonJs("src/main/pi/runtimeNodeInstall.ts", {
 	stubs: { electron: { app: {} } },
 });
 const { PI_RUNTIME_NODE_VERSION, PI_RUNTIME_NODE_SHA256, piRuntimeNodeArchiveName, piRuntimeNodeDownloadUrls, piRuntimeNodeInnerDir, officialPiRuntimeNodeUrl, toPiRuntimePlatform, toPiRuntimeArch } = loadTsCommonJs("src/shared/types/piRuntimeNode.ts");
@@ -263,6 +263,75 @@ test("detectPiRuntimeNode：无副本时 installed=false 且透传系统 node �
 		// 安装目录约定：<userData>/pi-runtime/node/
 		assert.ok(piRuntimeRootDir(root).endsWith(join("pi-runtime")));
 		assert.ok(piRuntimeNodeExePath(root, "win32").endsWith(join("pi-runtime", "node", "node.exe")));
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+// 回归（2026-09-30 Linux 实机）：POSIX 官方 node 发行包把可执行文件放在 bin/ 下，
+// Windows zip 才直接放在发行包根目录。少这一层会同时弄坏三件事：
+// 便携 node 永远判未安装、点安装报 extracted node is not executable、
+// 引导永远回退到系统 npm（无系统 npm 的机器直接卡在第 2 步）。
+test("便携 node 路径按平台区分 bin 层：POSIX 在 node/bin，Windows 在 node", () => {
+	const root = "/tmp/userData";
+	assert.ok(piRuntimeNodeExePath(root, "linux").endsWith(join("pi-runtime", "node", "bin", "node")));
+	assert.ok(piRuntimeNodeExePath(root, "darwin").endsWith(join("pi-runtime", "node", "bin", "node")));
+	assert.ok(piRuntimeNodeExePath(root, "win32").endsWith(join("pi-runtime", "node", "node.exe")));
+
+	// 子进程 PATH 前置目录与可执行文件同源（pi 的 shim 是 #!/usr/bin/env node）
+	assert.equal(piRuntimeNodeBinDir(root, "linux"), dirname(piRuntimeNodeExePath(root, "linux")));
+	assert.equal(piRuntimeNodeBinDir(root, "win32"), dirname(piRuntimeNodeExePath(root, "win32")));
+});
+
+// 回归（2026-09-30 Linux 实机）：跨设备回退复制必须保留相对软链。
+// Node 的 cpSync 默认 verbatimSymlinks:false 会把 bin/npm 这类相对链接改写成绝对路径，
+// 解压临时目录（/tmp/pideck-node-extract-*）一删，便携 npm/npx/corepack 全部悬空。
+test("跨设备回退复制保留相对软链（verbatimSymlinks）", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-node-link-"));
+	try {
+		const from = join(root, "src-bin");
+		const to = join(root, "dest-bin");
+		await mkdir(join(from, "..", "lib", "node_modules", "npm", "bin"), { recursive: true });
+		await writeFile(join(root, "lib", "node_modules", "npm", "bin", "npm-cli.js"), "// cli\n", "utf8");
+		await mkdir(from, { recursive: true });
+		const { symlinkSync, readlinkSync } = await import("node:fs");
+		symlinkSync(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(from, "npm"));
+
+		copyDirEntryVerbatim(from, to);
+
+		const target = readlinkSync(join(to, "npm"));
+		assert.equal(target, join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), "复制后必须是相对链接，不能落到绝对路径");
+		assert.ok(!target.includes(root), "链接目标不能包含临时目录路径");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+// 自愈：旧版本（cpSync 默认把相对链接写成绝对路径）装出来的便携副本里，
+// npm/npx/corepack 会指向已被删掉的解压临时目录。判据保守，只修「绝对链接 + 目标已不在 + 本地有同名文件」。
+test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相对链接", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-node-repair-"));
+	try {
+		const { symlinkSync, readlinkSync, mkdirSync } = await import("node:fs");
+		const binDir = piRuntimeNodeBinDir(root, "linux");
+		mkdirSync(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin"), { recursive: true });
+		mkdirSync(binDir, { recursive: true });
+		// fs/promises 的写盘必须 await：不 await 时自愈会在文件真正落盘前读到「本地副本不存在」，
+		// 于是修不了（表现为随机失败，跑十几次才复现一次）。
+		await writeFile(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin", "npm-cli.js"), "// cli\n", "utf8");
+		// 复现旧安装的现场：指向已删除的 /tmp 解压目录
+		symlinkSync("/tmp/pideck-node-extract-gone/node-v24.13.0-linux-x64/lib/node_modules/npm/bin/npm-cli.js", join(binDir, "npm"));
+		// 相对链接本来就没问题，不应被动
+		symlinkSync(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(binDir, "npx"));
+
+		const repaired = repairPortableNodeLinks(root, "linux");
+
+		// 沙箱 realm 的数组与宿主原型不同，转成宿主数组再比
+		assert.deepEqual([...repaired], ["npm"]);
+		assert.equal(readlinkSync(join(binDir, "npm")), join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"));
+		assert.equal(readlinkSync(join(binDir, "npx")), join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"));
+		// 幂等：再跑一次不应再报修复
+		assert.deepEqual([...repairPortableNodeLinks(root, "linux")], []);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

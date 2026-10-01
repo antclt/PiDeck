@@ -254,6 +254,15 @@ PiDeck
 
 > PiDeck 需要单独安装 `pi` CLI 并确保其加入系统 `PATH`。
 
+### 开发版（PiDeck Dev）
+
+除正式版（PiDeck）外，项目同时发布**开发版（PiDeck Dev）**安装包，用于提前体验预发布功能：
+
+- **获取入口**：[GitHub Releases](https://github.com/ayuayue/PiDeck/releases) 中标记为 *Pre-release* 的版本（版本号带 `-beta.N` 后缀，如 `v0.8.0-beta.1`）。
+- **并行安装**：PiDeck Dev 与正式版使用独立的应用标识（appId）、安装目录与快捷方式，可同时安装、互不影响。
+- **数据模式二选一**：首次启动 PiDeck Dev 时可选择「与正式版共用数据」或「独立数据目录」，后续可在应用内切换并按引导迁移数据。
+- **协议差异**：开发版注册 `pideck-dev://` 深度链接协议，与正式版的 `pideck://` 互不抢占。
+
 环境要求：
 
 - 系统 `PATH` 中可访问 `pi` 命令
@@ -265,6 +274,16 @@ PiDeck
 pi --version
 pi --mode rpc
 ```
+
+从源码构建开发版：
+
+```bash
+npm run dist:win:dev   # Windows（NSIS + portable + zip）
+npm run dist:mac:dev   # macOS（DMG + zip）
+npm run dist:linux:dev # Linux（AppImage + deb + tar.gz）
+```
+
+产物名带 `PiDeck-Dev-` 前缀，可与 stable 包并存安装。注意 `npm run dist:win` 等 stable 系打包命令**不会**注入 dev 通道标记——版本号含 `-beta` 也不改变通道判定（通道由构建命令决定，不由版本号决定）。
 
 ---
 
@@ -323,6 +342,9 @@ A：欢迎加入文末 QQ 群 / 微信群反馈（也可加作者微信 `caoayu9
 | `npm run dist:win` | 打包 Windows（NSIS + portable + zip） |
 | `npm run dist:mac` | 打包 macOS（DMG + zip） |
 | `npm run dist:linux` | 打包 Linux（AppImage + deb + tar.gz） |
+| `npm run dist:win:dev` | 打包开发版 Windows（PiDeck Dev，dev 通道 + 独立应用身份） |
+| `npm run dist:mac:dev` | 打包开发版 macOS（PiDeck Dev，dev 通道 + 独立应用身份） |
+| `npm run dist:linux:dev` | 打包开发版 Linux（PiDeck Dev，dev 通道 + 独立应用身份） |
 | `npm run test:e2e` | 运行 Playwright 端到端测试 |
 | `npm run docs:dev` | 本地预览官网（docs-site） |
 | `npm run make-icon` | 生成图标资源到 `build/icon.svg` |

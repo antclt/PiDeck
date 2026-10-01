@@ -153,6 +153,7 @@ let previewSettings: AppSettings = {
 	desktopProxyUrl: "http://127.0.0.1:7890",
 	desktopProxyBypass: "localhost,127.0.0.1,::1",
 	customPiPath: "",
+	piCustomPaths: [],
 	wslEnabled: false,
 	wslDistro: "Ubuntu",
 	wslUser: "root",
@@ -727,6 +728,7 @@ export function createPreviewApi(): PiDesktopApi {
 			onDshRuntimeStatusChanged: () => () => {},
 			installDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
 			importDshRuntimeFile: async () => ({ ok: false, error: "unavailable in preview" }),
+			importDshRuntimeDir: async () => ({ ok: false, error: "unavailable in preview" }),
 			uninstallDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
 			onDshRuntimeInstallProgress: () => () => {},
 			describeDshSettings: async () => ({ writable: false, hasDocument: false, namespaces: [] }),
@@ -944,6 +946,29 @@ export function createPreviewApi(): PiDesktopApi {
 				version: "preview",
 				searchedDirs: [],
 			}),
+			// 预览模式固定给两份安装：用来验证「多安装让用户自己选」的 UI 分支。
+			listInstallations: async () => [
+				{
+					path: "/usr/local/bin/pi",
+					realPath: "/usr/local/bin/pi",
+					version: "preview",
+					source: "package-manager" as const,
+					isActive: true,
+				},
+				{
+					path: "/home/preview/.pi/agent/bin/pi",
+					realPath: "/home/preview/.pi/agent/bin/pi",
+					version: "preview",
+					source: "managed" as const,
+					managedRoot: "/home/preview/.pi/agent/install",
+					isActive: false,
+					shellDefault: true,
+				},
+			],
+			/** 预览模式的「浏览…」：固定返回一个假路径，验证交互链路。 */
+			chooseExecutable: async () => "/home/preview/.pi/agent/bin/pi",
+			/** 预览模式：只回显，不落盘 */
+			setCustomPaths: async (paths) => ({ paths: [...paths], clearedActive: false }),
 			checkUpdate: async () => ({
 				currentVersion: "preview",
 				latestVersion: "preview",

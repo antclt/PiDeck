@@ -22,6 +22,47 @@ export type PiInstallStatus = {
 };
 
 /**
+ * pi 安装来源。用于「检测到多个安装时让用户自己选」：
+ * - managed：pi 官方安装器（curl install.sh / PowerShell install.ps1）的安装，
+ *   实体在 `<agentDir>/install/releases/<ver>`
+ * - package-manager：npm / pnpm / yarn / bun / volta / mise / asdf / nvm 等包管理器的全局 bin
+ * - portable：PiDeck 引导安装写进 `<userData>/pi-runtime/pi-global` 的便携副本
+ * - custom：用户在设置里自己指定的路径（不在上面任何已知落点）
+ * - path：其余来源（系统 PATH、`~/.local/bin`、/usr/local/bin 等）
+ */
+export type PiInstallationSource = "managed" | "package-manager" | "portable" | "custom" | "path";
+
+/** 一次探测到的 pi 安装；列表由主进程给出，渲染层只做展示与选择。 */
+export type PiInstallation = {
+	/** 可直接执行的入口（managed 安装是指向启动器脚本的软链，或启动器本身） */
+	path: string;
+	/** 解析软链后的真实入口；用于去重与诊断 */
+	realPath: string;
+	version?: string;
+	/** 版本探测失败原因（入口存在但跑不起来，例如残留的旧垫片） */
+	versionError?: string;
+	source: PiInstallationSource;
+	/** managed 安装的 install 根目录（含 managed-install.json） */
+	managedRoot?: string;
+	/** 当前 resolveCommand（含用户自定义路径）选中的就是它 */
+	isActive: boolean;
+	/** 用户在设置里自己添加的候选路径（可编辑/移除；自动发现的项不带此标记） */
+	userAdded?: boolean;
+	/**
+	 * 用户添加的路径当前不存在（文件被删/盘未挂载）。
+	 * 仍然列出来让用户能改或删，不静默从列表里消失。
+	 */
+	missing?: boolean;
+	/**
+	 * 用户交互式登录 shell 里 `command -v pi` 解析出的那份（终端里敲 pi 用的）。
+	 * 官方安装器只把 PATH 写进当前 shell 的 rc 文件，非交互探测读不到，因此单独反查。
+	 */
+	shellDefault?: boolean;
+	/** 多个安装中版本最高的那份（版本无法比较时不标记） */
+	isNewest?: boolean;
+};
+
+/**
  * 设置页「验证并保存」的 WSL 连接结果。
  * piVersion / piPath 由与 agent 启动同一条探测链路产出，避免「验证通过但启动失败」。
  */
@@ -39,6 +80,11 @@ export type PiInstallExecResult = {
 	exitCode: number | null;
 	stdout: string;
 	stderr: string;
+	/**
+	 * 引导安装被拦下时的现场：本机已经检测到这些 pi 安装，因此**没有再装第二份**。
+	 * 用户要求「已经有了就不要再安装」，这是最后一道硬约束（UI 不展示引导只是第一道）。
+	 */
+	alreadyInstalled?: PiInstallation[];
 };
 
 /** npm 可用性检测结果 */

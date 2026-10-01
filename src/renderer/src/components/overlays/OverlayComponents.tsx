@@ -1,13 +1,15 @@
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui-shadcn/button";
-import { X } from "lucide-react";
+import { X, FolderOpen } from "lucide-react";
 import { ConfirmDialog as ShadcnConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
-import type { AppInfo, Project, PiInstallStatus, PiInstallExecResult } from "../../../../shared/types";
+import type { AppInfo, Project, PiInstallation, PiInstallStatus, PiInstallExecResult } from "../../../../shared/types";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
 import { EnvironmentGuidePanel } from "./EnvironmentGuidePanel";
+import { PiCommandSourcePanel } from "../app/PiCommandSourcePanel";
+import { shouldOfferInstallationChoice } from "../../utils/piInstallationOptions";
 import type { PiEnvironmentGuide } from "../../hooks/usePiEnvironmentGuide";
 
 export function EnvironmentDialog(props: {
@@ -30,6 +32,20 @@ export function EnvironmentDialog(props: {
 	npmAvailable: boolean | null;
 	npmVersion?: string;
 	npmChecking: boolean;
+	/**
+	 * 探测到的全部 pi 安装。多份时弹窗不再自动关闭，必须让用户先选一份——
+	 * 静默用其中一份正是「终端里能用、PiDeck 用的是另一份」的根源。
+	 */
+	installations?: PiInstallation[];
+	/** 正在校验的安装路径（行内 loading） */
+	applyingInstallationPath?: string | null;
+	onChooseInstallation?: (path: string) => void;
+	/** 反查交互式登录 shell 再找一次（zsh/自定义 PATH 场景） */
+	onShellProbeInstallations?: () => void;
+	shellProbingInstallations?: boolean;
+	/** 系统文件选择器挑 pi 可执行文件（稀有/自定义安装） */
+	onBrowsePiPath: () => void;
+	browsingPiPath: boolean;
 	/** 当前安装命令文本 */
 	installCommand: string;
 	/** 是否使用国内镜像源 */
@@ -86,21 +102,40 @@ export function EnvironmentDialog(props: {
 					)}
 
 					{!props.checking && installed && (
-						<div className="env-card env-success-card">
-							<div className="env-success-icon">✓</div>
-							<div className="env-success-info">
-								<strong>{t("environment.passed")}</strong>
-								<span>
-									{t("environment.path")}：{(props.customPathResult || props.status)?.command}
-								</span>
-								{(props.customPathResult || props.status)?.version && (
+						<>
+							<div className="env-card env-success-card">
+								<div className="env-success-icon">✓</div>
+								<div className="env-success-info">
+									<strong>{t("environment.passed")}</strong>
 									<span>
-										{t("environment.version")}：{(props.customPathResult || props.status)!.version}
+										{t("environment.path")}：{(props.customPathResult || props.status)?.command}
 									</span>
-								)}
-								<small>{t("environment.autoClose")}</small>
+									{(props.customPathResult || props.status)?.version && (
+										<span>
+											{t("environment.version")}：{(props.customPathResult || props.status)!.version}
+										</span>
+									)}
+									{/* 多份安装时不能承诺自动关闭：用户得先在这里选一份 */}
+									{!shouldOfferInstallationChoice(props.installations ?? []) && <small>{t("environment.autoClose")}</small>}
+								</div>
 							</div>
-						</div>
+
+							{/* 多份 pi 安装：列出全部（含官方安装器那份）让用户自己选 */}
+							{shouldOfferInstallationChoice(props.installations ?? []) && props.onChooseInstallation && (
+								<div className="env-card">
+									<PiCommandSourcePanel
+										variant="dialog"
+										installations={props.installations ?? []}
+										applyingPath={props.applyingInstallationPath}
+										onChoose={props.onChooseInstallation}
+										onShellProbe={props.onShellProbeInstallations}
+										shellProbing={props.shellProbingInstallations}
+										onBrowse={props.onBrowsePiPath}
+										browsing={props.browsingPiPath}
+									/>
+								</div>
+							)}
+						</>
 					)}
 
 					{!props.checking && !installed && (
@@ -137,6 +172,10 @@ export function EnvironmentDialog(props: {
 								</div>
 								<div className="custom-path-input-row">
 									<Input type="text" placeholder="D:\\mise-data\\installs\\node\\24 13 0\\pi.cmd" value={props.customPath} onChange={(e) => props.onCustomPathChange(e.target.value)} disabled={props.customPathValidating} />
+									<Button variant="outline" size="sm" className="env-card-btn h-auto gap-1.5 rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onBrowsePiPath} disabled={props.browsingPiPath || props.customPathValidating}>
+										<FolderOpen size={13} strokeWidth={2} aria-hidden="true" />
+										{t("environment.installsBrowse")}
+									</Button>
 									<Button variant="default" size="sm" className="env-card-btn primary env-card-btn h-auto rounded-[6px] px-4 py-[7px] text-xs shadow-none" onClick={props.onValidateCustomPath} disabled={!props.customPath.trim() || props.customPathValidating}>
 										{props.customPathValidating ? t("environment.validatingPath") : t("environment.validatePath")}
 									</Button>

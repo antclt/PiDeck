@@ -719,6 +719,7 @@ export function App() {
 		desktopProxyUrl: "http://127.0.0.1:7890",
 		desktopProxyBypass: "localhost,127.0.0.1,::1",
 		customPiPath: "",
+		piCustomPaths: [],
 		wslEnabled: false,
 		wslDistro: "Ubuntu",
 		wslUser: "root",
@@ -4247,6 +4248,13 @@ export function App() {
 								piUpdate.checkPiInstall("manual");
 							}}
 							onOpenInstallDocs={() => api.app.openExternal("https://pi.dev/docs/latest/quickstart#install")}
+							installations={piUpdate.piInstallations ?? []}
+							applyingInstallationPath={piUpdate.applyingInstallationPath}
+							onChooseInstallation={(path) => void piUpdate.choosePiInstallation(path)}
+							onShellProbeInstallations={() => void piUpdate.loadPiInstallations({ forceShellProbe: true })}
+							shellProbingInstallations={piUpdate.piInstallationsProbing}
+							onBrowsePiPath={() => void piUpdate.browsePiPath()}
+							browsingPiPath={piUpdate.browsingPiPath}
 							customPath={piUpdate.customPiPath}
 							customPathValidating={piUpdate.customPathValidating}
 							customPathResult={piUpdate.customPathResult}

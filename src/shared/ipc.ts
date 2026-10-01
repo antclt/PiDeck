@@ -269,8 +269,14 @@ export const ipcChannels = {
 	dshRuntimeStatusChanged: "dsh-runtime:status-changed",
 	/** 按需安装 DSH runtime（从下载源索引挑兼容版本；进度走 dsh-runtime:install-progress）。 */
 	dshRuntimeInstall: "dsh-runtime:install",
-	/** 从本地导入 runtime（.tgz 归档或已解压目录；离线 / 镜像不可达时的兜底）。 */
+	/** 从本地导入 runtime 归档（.tgz；离线 / 镜像不可达时的兜底）。只开文件选择框。 */
 	dshRuntimeInstallLocal: "dsh-runtime:install-local",
+	/**
+	 * 从本地导入「已解压」的 runtime 目录。与上一条分开：Windows 上
+	 * showOpenDialog 同时给 openFile + openDirectory 会退化成只能选目录，
+	 * .tgz 反而选不到（2026-10 用户报「本地导入选不了归档」）。
+	 */
+	dshRuntimeInstallLocalDir: "dsh-runtime:install-local-dir",
 	/** 卸载已安装的 DSH runtime。 */
 	dshRuntimeUninstall: "dsh-runtime:uninstall",
 	/** 安装进度推送（订阅式）。 */
@@ -446,6 +452,13 @@ export const ipcChannels = {
 	gitChooseExecutable: "git:choose-executable",
 	piCheck: "pi:check",
 	piCheckCustom: "pi:check-custom",
+	/** 列出系统上探测到的全部 pi 安装（含官方 managed 安装），供「多个安装时让用户自己选」；
+	 *  传 true 表示额外跑一次交互式登录 shell 反查（用户显式点「从终端再找一次」）。 */
+	piInstallations: "pi:installations",
+	/** 打开文件选择器挑一个 pi 可执行文件（用户手边有稀有/自定义安装时用），放弃返回 null */
+	piChooseExecutable: "pi:choose-executable",
+	/** 保存用户自加的 pi 候选路径列表（设置页「我添加的」分组） */
+	piSetCustomPaths: "pi:set-custom-paths",
 	/** 获取已安装的 WSL 发行版列表（仅 Windows） */
 	wslListDistros: "wsl:list-distros",
 	/** 验证 WSL 连接：检查 distro + user 是否可达，以及 pi 是否已安装 */
