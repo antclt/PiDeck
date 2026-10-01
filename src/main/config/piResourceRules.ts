@@ -81,7 +81,7 @@ export function effectiveResourceState(resolved: boolean | undefined): "enabled"
 export type PackageFilterSnapshot = Partial<Record<PiResourceKind, string[]>>;
 
 export type PackageEntryShape = {
-	source: string;
+	source?: string;
 	[filter: string]: unknown;
 };
 
