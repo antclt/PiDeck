@@ -1046,6 +1046,7 @@ export const zhCN = {
 	"notice.extensionsDisabledBySetting": "「禁用扩展启动」已开启：本次会话未加载任何扩展，todo/plan/ask 等能力不可用。不需要排查扩展时请去设置关闭该开关。",
 	"notice.extensionsDisabledFallback": "扩展加载失败，本次运行已临时禁用扩展（不会写入设置）。可把本会话的错误详情发给 AI 排查扩展问题。",
 	"notice.openDevExtensionsSettings": "去设置关闭",
+	"notice.openMcpSettings": "去 MCP 设置",
 	// DSH 模型偏好被 host 拒绝的 toast（applyPreferences 降级路径，issue #253 的「选了但没生效」）：
 	// host 是模型/档位能力的最终裁决者，PiDeck 只能告知并保留偏好供重试。
 	// 注意：agentsNotice 通道的 t() 不支持占位符（与 app.abortSlow 等既有 key 同约定），
@@ -1878,9 +1879,10 @@ export const zhCN = {
 	"config.mcp.thirdParty.descDisabled": "它未启用、暂时不影响会话；但只要启用就会顶掉 pi 自带的 MCP，建议卸载：",
 	"config.mcp.thirdParty.localFileHint": "本地文件扩展：请在「配置管理 → 扩展」页删除",
 	"config.mcp.thirdParty.copyCommand": "复制命令",
+	"config.mcp.thirdParty.goToExtensions": "去扩展页管理",
 	"config.mcp.thirdParty.detectFailed": "未能检测已安装的扩展（第三方 MCP 接管检测不可用）。",
-	"notice.mcpThirdParty.takeoverActive": "你的 MCP 由 {source} 接管，本页配置不生效。卸载它：{command}",
-	"notice.mcpThirdParty.takeoverIdle": "{source} 会接管 MCP（当前未配置服务器，暂无影响）；之后在 PiDeck 配的 MCP 不会生效。建议卸载：{command}",
+	"notice.mcpThirdParty.takeoverActive": "你的 MCP 由 {source} 接管，PiDeck 里配置的服务器不会被本会话加载。",
+	"notice.mcpThirdParty.takeoverIdle": "{source} 会接管 MCP（当前未配置服务器，暂无影响）；之后在 PiDeck 配的 MCP 不会生效。",
 	"diagnostic.mcpThirdParty.takeoverActive": "已安装 {source}，会话中的 MCP 由它接管，PiDeck MCP 页配置的服务器不会被当前会话加载。建议卸载：{command}",
 	"diagnostic.mcpThirdParty.takeoverIdle": "已安装 {source}，它会接管 MCP 会话（当前未配置 MCP 服务器，暂无影响）；之后在 PiDeck 配置的 MCP 不会生效。建议卸载：{command}",
 	// ── 设置页「工具与 Codemode」区块（defaultTools / codemode 子设置）──

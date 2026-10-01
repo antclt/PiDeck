@@ -599,6 +599,11 @@ export class AgentManager {
 		 * 选择器可见、TUI 可用，但 PiDeck 运行中的 Agent 快照没有）。
 		 */
 		private readonly resolveModelInCatalog?: (provider: string, modelId: string) => Promise<boolean>,
+		/**
+		 * 第三方接管型 MCP 扩展列表（计划 M5b）。由 main/index.ts 注入 ExtensionManager.list()
+		 * 的轻量查询（缓存优先）；缺省 = 不检测（测试/预览环境）。
+		 */
+		private readonly listThirdPartyMcpExtensions?: () => Promise<import("../../shared/mcpThirdParty").ThirdPartyMcpExtension[]>,
 	) {
 		this.messageProjector = new AgentMessageProjector({
 			translate: this.translate,
@@ -994,6 +999,79 @@ export class AgentManager {
 
 	/** 已弹过的「扩展被禁用」成因（本次运行内）：见 notifyExtensionsDisabled。 */
 	private readonly disabledExtensionsNoticesSent = new Set<DisabledExtensionsReason>();
+	/** 已 toast 过的「第三方 MCP 接管」扩展 source（本次运行内去重，见 notifyMcpThirdPartyTakeover）。 */
+	private readonly mcpThirdPartyNoticesSent = new Set<string>();
+
+	/**
+	 * 第三方接管型 MCP 扩展提醒（计划 M5b）：pi 0.99 内置 MCP 后，pi-mcp-adapter 等
+	 * 注册 /mcp 的扩展会整体顶掉内置 MCP——会话里配置的 mcp.json 不被读取，属「静默能力
+	 * 缺失」，直接开对话时用户毫无感知。与 notifyExtensionsDisabled 同一双通道：
+	 * ① 首个 run 落到时间线的系统诊断（跟随对话流）；② sticky 全局 toast（带操作）。
+	 * 仅 pi ≥ 0.99 提醒（旧版内置 MCP 不存在，adapter 反而是必需品）；DSH 无 pi 扩展不涉及。
+	 */
+	private async notifyMcpThirdPartyTakeover(agentId: string, piMinorVersion: number | null): Promise<void> {
+		if (!this.listThirdPartyMcpExtensions) return;
+		if (piMinorVersion === null || piMinorVersion < 99) return;
+		const runtime = this.agents.get(agentId);
+		// 首个 run 可能已经开始（检测是异步的）：直接落时间线而不是永远留在 pending。
+		const deliver = (diagnostic: QueuedStartupDiagnostic) => {
+			if (this.agentStartedFirstRun.has(agentId)) {
+				this.addLocalizedMessage(agentId, diagnostic.role, diagnostic.i18nKey, diagnostic.fallbackText, diagnostic.options);
+			} else {
+				this.queueStartupDiagnostic(agentId, diagnostic);
+			}
+		};
+		let hits: import("../../shared/mcpThirdParty").ThirdPartyMcpExtension[];
+		try {
+			hits = await this.listThirdPartyMcpExtensions();
+		} catch {
+			return; // 扩展列表不可用：宁可漏提醒也不在启动链路报错
+		}
+		// 运行时事实优先：`/mcp` 命令的来源比安装列表更能代表当前会话。
+		// 诊断无扩展（piRpcNoExtensions）或被配置停用时 get_commands 里就没有 mcp，
+		// 这种情况不能发“当前被接管”的断言。
+		const owner = runtime ? await this.resolveMcpCommandOwner(runtime) : null;
+		if (runtime && owner && owner.builtin) return;
+		const active = hits.filter((hit) => hit.enabled);
+		if (active.length === 0) return;
+		// mcp.json 里是否有启用的 server 决定文案分档（有 → 现在就受影响；无 → 暂无影响）。
+		let hasEnabledServer = false;
+		try {
+			const snapshot = await this.configManager.getMcpConfig();
+			hasEnabledServer = snapshot.servers.some((server) => server.definition.enabled !== false);
+		} catch {
+			// 配置读取失败按「无 server」分档，避免阻塞提醒
+		}
+		// 运行时确认了第三方 `/mcp` 时只谈那个来源；没有运行时结论（老版本/探测失败）时按安装列表逐条提醒。
+		const confirmedSource = owner && !owner.builtin ? owner.sourcePath : undefined;
+		const mentioned = confirmedSource ? active.filter((hit) => confirmedSource.includes(hit.source)) : active;
+		if (mentioned.length === 0) return;
+		for (const hit of mentioned) {
+			const command = hit.isLocalFile ? "" : hit.uninstallCommand;
+			// 时间线诊断（首个 run 前暂存、之后直接落盘）。
+			deliver({
+				role: "system",
+				i18nKey: hasEnabledServer ? "diagnostic.mcpThirdParty.takeoverActive" : "diagnostic.mcpThirdParty.takeoverIdle",
+				fallbackText: hasEnabledServer
+					? `已安装 ${hit.source}，会话中的 MCP 由它接管，PiDeck MCP 页配置的服务器不会被当前会话加载。${command ? `建议卸载：${command}` : ""}`
+					: `已安装 ${hit.source}，它会接管 MCP 会话（当前未配置 MCP 服务器，暂无影响）；之后在 PiDeck 配置的 MCP 不会生效。${command ? `建议卸载：${command}` : ""}`,
+				options: { params: { source: hit.source, ...(command ? { command } : {}) } },
+			});
+			// 全局 toast：本次运行每个扩展只弹一次（连续新建会话/进程重连不刷屏）。
+			if (this.mcpThirdPartyNoticesSent.has(hit.source)) continue;
+			this.mcpThirdPartyNoticesSent.add(hit.source);
+			this.emit(ipcChannels.agentsNotice, {
+				agentId,
+				message: hasEnabledServer ? `你的 MCP 由 ${hit.source} 接管，PiDeck 里配置的服务器不会被本会话加载。` : `${hit.source} 会接管 MCP（当前未配置服务器，暂无影响）；之后在 PiDeck 配的 MCP 不会生效。`,
+				i18nKey: hasEnabledServer ? "notice.mcpThirdParty.takeoverActive" : "notice.mcpThirdParty.takeoverIdle",
+				i18nParams: { source: hit.source, ...(command ? { command } : {}) },
+				kind: hasEnabledServer ? "warning" : "info",
+				duration: Number.POSITIVE_INFINITY,
+				// 渲染层解析成导航（主进程不持有 UI 路径）：去配置管理 → MCP 页。
+				action: "openMcpSettings",
+			});
+		}
+	}
 
 	/**
 	 * 某类白名单（扩展/技能/提示词）因超出启动参数预算被跳过：告知用户本次「禁用」不生效。
@@ -1712,6 +1790,8 @@ export class AgentManager {
 				fallbackFromExtensions,
 				debugDetails: handshake.fallbackDebug,
 			});
+			// 第三方接管型 MCP 扩展提醒（M5b）：异步、不 await，绝不阻塞 Agent 就绪。
+			void this.notifyMcpThirdPartyTakeover(id, diag?.piMinorVersion ?? null);
 			if (tab.sessionPath) {
 				void this.loadMessages(id, true, this.readRecentMessagesFromSessionFile(tab.sessionPath, AgentManager.MAX_HISTORY_LOAD_TURNS), { preserveMessagesAfter })
 					.then(() => {
@@ -2442,10 +2522,41 @@ export class AgentManager {
 	 * 不区分 extension/prompt/skill 来源：`/ctx-wrapup` 这类接管者命令只可能来自扩展。
 	 */
 	private async listRegisteredCommandNames(runtime: AgentRuntime): Promise<string[] | undefined> {
+		const commands = await this.listRegisteredCommands(runtime);
+		if (!commands) return undefined;
+		return commands.map((command) => command.name).filter((name) => name.length > 0);
+	}
+
+	/** `get_commands` 原始条目（带 source/sourceInfo）；失败返回 undefined。 */
+	private async listRegisteredCommands(runtime: AgentRuntime): Promise<Array<{ name: string; source?: string; sourcePath?: string }> | undefined> {
 		const response = await runtime.process.client.request({ type: "get_commands" }, 10_000).catch(() => undefined);
 		const commands = (response?.data as { commands?: unknown[] } | undefined)?.commands;
 		if (!Array.isArray(commands)) return undefined;
-		return commands.map((command) => (command && typeof command === "object" ? (command as { name?: unknown }).name : undefined)).filter((name): name is string => typeof name === "string" && name.length > 0);
+		return commands
+			.filter((command): command is Record<string, unknown> => typeof command === "object" && command !== null)
+			.map((command) => {
+				const sourceInfo = typeof command.sourceInfo === "object" && command.sourceInfo !== null ? (command.sourceInfo as { path?: unknown }) : undefined;
+				return {
+					name: typeof command.name === "string" ? command.name : "",
+					source: typeof command.source === "string" ? command.source : undefined,
+					sourcePath: typeof sourceInfo?.path === "string" ? sourceInfo.path : undefined,
+				};
+			})
+			.filter((command) => command.name.length > 0);
+	}
+
+	/**
+	 * 当前会话的 `/mcp` 命令是否来自 pi 内置扩展。
+	 * `get_commands` 的 `sourceInfo.path` 对内置扩展是 `builtin:mcp`，第三方接管是扩展文件路径。
+	 * 返回 null = 无法确认（老版本/探测失败），调用方应降级而不是断言。
+	 */
+	private async resolveMcpCommandOwner(runtime: AgentRuntime): Promise<{ builtin: boolean; sourcePath?: string } | null> {
+		const commands = await this.listRegisteredCommands(runtime);
+		if (!commands) return null;
+		const mcp = commands.find((command) => command.name === "mcp");
+		if (!mcp) return null;
+		const path = mcp.sourcePath ?? "";
+		return { builtin: path === "builtin:mcp", ...(path ? { sourcePath: path } : {}) };
 	}
 
 	/**

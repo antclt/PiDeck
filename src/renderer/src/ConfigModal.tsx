@@ -2940,7 +2940,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="config:mcp" forceMount className="config-main min-w-0 data-[state=inactive]:hidden">
 							<div className="config-content flex min-h-0 flex-col">
 								{/* 全局作用域：activeProjectId 只作导入扫描的项目来源，配置仍写全局 mcp.json。 */}
-								<McpTab ref={mcpTabRef} activeProjectId={projectId} onDirtyChange={handleMcpDirtyChange} />
+								<McpTab
+									ref={mcpTabRef}
+									activeProjectId={projectId}
+									onGoToExtensions={() => {
+										// 同区导航：扩展页与 MCP 页都属于配置区/项目资源区，保留当前作用域。
+										setSection("extensions");
+									}}
+									onDirtyChange={handleMcpDirtyChange}
+								/>
 							</div>
 						</TabsContent>
 
@@ -2950,6 +2958,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 									ref={resourceMcpTabRef}
 									projectId={resourceOnly && projectKind !== "chat" ? effectiveProjectId : undefined}
 									projectName={resourceOnly ? projectName : undefined}
+									onGoToExtensions={() => setSection("extensions")}
 									onDirtyChange={(dirty) => {
 										if (dirty) markDirty("mcp");
 										else clearDirty("mcp");

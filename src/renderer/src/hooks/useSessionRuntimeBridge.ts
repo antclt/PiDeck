@@ -55,12 +55,14 @@ export function useSessionRuntimeBridge(callbacks: RuntimeBridgeCallbacks = {}):
 				const notice = event.payload as {
 					message?: string;
 					i18nKey?: string;
+					/** i18n 占位符参数：主进程无法本地化时把 source/command 等一起传下来。 */
+					i18nParams?: Record<string, string | number>;
 					kind?: NoticeKind;
 					duration?: number;
 					/** 主进程只能给符号化动作 id（它不掌握 UI 导航），在这里解析成实际跳转。 */
 					action?: string;
 				};
-				const text = notice.i18nKey ? t(notice.i18nKey as TranslationKey) : notice.message;
+				const text = notice.i18nKey ? t(notice.i18nKey as TranslationKey, notice.i18nParams) : notice.message;
 				if (text) {
 					// 异常（error）常驻不自动消失；其余时长由设置项 toastDurationMs 全局决定，
 					// 主进程带的 duration 不再单独尊重。
@@ -75,7 +77,15 @@ export function useSessionRuntimeBridge(callbacks: RuntimeBridgeCallbacks = {}):
 										onClick: () => store.set(openSettingsAtom, { tab: "dev", section: "dev-pi-rpc" }),
 									},
 								}
-							: undefined;
+							: notice.action === "openMcpSettings"
+								? {
+										action: {
+											// 去配置管理 → MCP 页（Pi 后端）；与设置页「配置管理」深链同一套目标结构。
+											label: t("notice.openMcpSettings"),
+											onClick: () => store.set(openSettingsAtom, { pane: "config", tab: "dev", backendPane: "pi", configTab: "mcp" }),
+										},
+									}
+								: undefined;
 					showNotice(
 						text,
 						kind === "error" ? Number.POSITIVE_INFINITY : undefined,

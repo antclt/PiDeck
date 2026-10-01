@@ -1079,6 +1079,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"notice.extensionsDisabledBySetting": '"Disable extensions on start" is on: this session loaded no extensions, so todo/plan/ask are unavailable. Turn the switch off in settings unless you are debugging extensions.',
 	"notice.extensionsDisabledFallback": "Extensions failed to load, so this run temporarily disables them (nothing was written to settings). Send this session's error details to the AI to troubleshoot.",
 	"notice.openDevExtensionsSettings": "Open settings",
+	"notice.openMcpSettings": "Open MCP settings",
 	// Toast for a rejected DSH model preference (applyPreferences degradation, the "picked but not applied" half of issue #253):
 	// the host is the final arbiter of model/effort capabilities; PiDeck only informs and keeps the preference for a retry.
 	// No placeholders: the agentsNotice channel's t() has no params support (same as app.abortSlow);
@@ -1882,9 +1883,10 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.mcp.thirdParty.descDisabled": "It is disabled and does not affect sessions; once enabled it would take over pi's built-in MCP. To remove it:",
 	"config.mcp.thirdParty.localFileHint": "Local file extension: delete it in Configuration → Extensions",
 	"config.mcp.thirdParty.copyCommand": "Copy command",
+	"config.mcp.thirdParty.goToExtensions": "Manage in Extensions",
 	"config.mcp.thirdParty.detectFailed": "Could not detect installed extensions (third-party MCP takeover check unavailable).",
-	"notice.mcpThirdParty.takeoverActive": "Your MCP is taken over by {source}; servers configured in PiDeck will not load. Remove it: {command}",
-	"notice.mcpThirdParty.takeoverIdle": "{source} takes over MCP (no servers configured yet, no impact); MCP configured in PiDeck later will not load. To remove: {command}",
+	"notice.mcpThirdParty.takeoverActive": "Your MCP is handled by {source}; servers configured in PiDeck are not loaded into this session.",
+	"notice.mcpThirdParty.takeoverIdle": "{source} handles MCP sessions (no servers configured yet, so no impact); MCP configured in PiDeck later will not load.",
 	"diagnostic.mcpThirdParty.takeoverActive": "Installed {source}: session MCP is handled by it, servers configured on PiDeck's MCP page are not loaded into this session. To remove: {command}",
 	"diagnostic.mcpThirdParty.takeoverIdle": "Installed {source}: it takes over MCP sessions (no MCP servers configured yet, no impact); MCP configured in PiDeck later will not load. To remove: {command}",
 	// ── Tools & Codemode section (defaultTools / codemode settings) ──

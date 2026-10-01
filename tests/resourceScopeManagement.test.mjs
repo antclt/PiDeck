@@ -27,8 +27,9 @@ test("configuration resources share one global/project scope owner", () => {
 	assert.match(modal, /resourceScopeSelector = resourceOnly \?/);
 	assert.doesNotMatch(modal, /getMcp\(projectPath\)/);
 	// 全局 McpTab 装配：只下发导入扫描的项目来源与脏回调，不传项目列表、不传项目作用域
-	const globalMount = modal.split("\n").find((line) => /<McpTab ref=\{mcpTabRef\}/.test(line));
-	assert.ok(globalMount, "ConfigModal 未挂载全局 McpTab");
+	const globalMountMatch = /<McpTab[\s\S]{0,320}?ref=\{mcpTabRef\}[\s\S]{0,320}?\/>/.exec(modal);
+	assert.ok(globalMountMatch, "ConfigModal 未挂载全局 McpTab");
+	const globalMount = globalMountMatch[0];
 	assert.match(globalMount, /activeProjectId=\{projectId\}/);
 	assert.match(globalMount, /onDirtyChange=\{handleMcpDirtyChange\}/);
 	assert.doesNotMatch(globalMount, /projectId=\{/);

@@ -110,6 +110,8 @@ export const McpTab = forwardRef<
 		projectName?: string;
 		/** 导入对话框的项目来源：扫描激活项目里的 Claude/Codex MCP 配置（Chat 项目由主进程过滤）。 */
 		activeProjectId?: string;
+		/** 「去扩展页」由父层导航（本页不掌握 UI 路由），保留当前作用域。 */
+		onGoToExtensions?: () => void;
 		onDirtyChange: (dirty: boolean) => void;
 	}
 >(function McpTab(props, ref) {
@@ -547,6 +549,9 @@ export const McpTab = forwardRef<
 									</Button>
 								</>
 							)}
+							<Button variant="ghost" size="xs" onClick={() => props.onGoToExtensions?.()}>
+								{t("config.mcp.thirdParty.goToExtensions")}
+							</Button>
 						</div>
 					</div>
 				))
