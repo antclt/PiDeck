@@ -239,7 +239,7 @@ export type MigrationApplyReport = {
  */
 export async function applyResourceMigration(options: {
 	plan: MigrationPlan;
-	service: Pick<PiResourceConfigService, "setFileResourceEnabled" | "setBuiltinEnabled" | "setPackageEnabled" | "readSummary">;
+	service: Pick<PiResourceConfigService, "setFileResourceEnabled">;
 	state: PiResourceStateStore;
 	/** 迁移记录 key（作用域标识）。 */
 	migrationKey: string;

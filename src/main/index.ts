@@ -24,6 +24,10 @@ import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
 import { isShortcutInput, refreshShortcutBindings } from "./appShortcuts";
 // 主进程复用共享的接管型扩展识别规则（与渲染层横幅单一来源；纯函数无依赖）。
 import { detectThirdPartyMcpExtensions } from "../shared/mcpThirdParty";
+import { PiResourceConfigService } from "./config/PiResourceConfigService";
+import { PiResourceStateStore } from "./config/PiResourceStateStore";
+import { runGlobalResourceMigration } from "./config/piResourceMigrationRunner";
+import type { ResolvedMigrationResource } from "./config/piResourceMigration";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
 import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName, sanitizeDevBranchSegment } from "./devIsolation";
 import { isPortablePackagedEnv, resolveAppUserDataDir, resolveChannelDevDataDir, resolvePackagedUserDataDir } from "./portableUserData";
@@ -288,11 +292,11 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { BuiltInExtensionsUpdater } from "./extensions/builtInExtensionsUpdater";
 import { resolveBuiltInExtensionsDir, resolveBuiltInExtensionsOverlayDir, resolveVendorNodeModulesDir, type BuiltInExtensionPathRoots } from "./extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensionResolvers";
+import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
 import { registerBuiltInExtensionIpc } from "./ipc/builtInExtensionIpc";
 import { PROMPTS_STORE_CHANNELS, SKILLS_STORE_CHANNELS, registerContentStoreIpc } from "./ipc/contentStoreIpc";
 import { PromptStoreUpdater } from "./prompts/promptStoreUpdater";
 import { SkillStoreUpdater } from "./skills/skillStoreUpdater";
-import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
 import { createPiProcessPromptResolvers } from "./prompts/piProcessPromptResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
 import { ResourceImportManager } from "./resourceImport/ResourceImportManager";
@@ -421,6 +425,9 @@ let dshAgentManager: DshAgentManager;
 /** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
 let compositeAgentGateway: CompositeAgentGateway | undefined;
 let configManager: ConfigManager;
+/** pi 原生资源配置服务与迁移状态（A2/A3；启动装配，IPC 复用）。 */
+let piResourceConfigService: PiResourceConfigService | undefined;
+let piResourceStateStore: PiResourceStateStore | undefined;
 let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -4207,6 +4214,82 @@ app
 			(filePath, options) => sessionScanner.inferSessionNameAndValidity(filePath, options),
 		);
 		await sessionCatalog.load();
+
+		// ── 旧禁用记录 → pi 原生配置迁移（计划 A3/A5）──
+		// 启动期一次性执行：旧列表一旦被清理，原生过滤就是唯一生效来源。
+		// 失败/未解析时保留旧记录并记日志（下次启动幂等重试），不静默打开用户禁用的资源。
+		piResourceStateStore = new PiResourceStateStore(join(app.getPath("userData"), "pi-native-resources.json"));
+		piResourceConfigService = new PiResourceConfigService(
+			{
+				globalSettingsPath: () => join(configManager.getConfigDir(), "settings.json"),
+				resolveProject: async (projectId) => {
+					const project = projectStore.get(projectId);
+					if (!project || project.kind === "chat") return null;
+					const root = project.path;
+					const settings = settingsStore.get();
+					const trustPath = process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(root, { distro: settings.wslDistro }) : root;
+					return { root, trusted: (await configManager.getProjectTrustDecision(trustPath)) === true };
+				},
+			},
+			piResourceStateStore,
+			{ projectTrust: async (projectId, _root) => (await configManager.getProjectTrustDecision(projectStore.get(projectId)?.path ?? "")) === true },
+		);
+		void runGlobalResourceMigration({
+			service: piResourceConfigService,
+			state: piResourceStateStore,
+			readSettings: () => settingsStore.get(),
+			resolveGlobalResources: async () => {
+				const settings = settingsStore.get();
+				const resources: ResolvedMigrationResource[] = [];
+				// 扩展：走与应用相同的白名单解析，拿到的就是 pi 会加载的全部路径。
+				const extensionPaths = createPiProcessExtensionResolvers(process.cwd(), settings).resolveEnabledExtensionPaths(settings, process.cwd(), true);
+				const extensionList = await extensionManager?.list(false).catch(() => null);
+				for (const item of extensionList?.extensions ?? []) {
+					if (!item.source || item.builtIn) continue;
+					resources.push({ kind: "extensions", name: item.source, value: item.source, scope: item.scope === "project" ? "project" : "user" });
+				}
+				for (const path of extensionPaths ?? []) {
+					resources.push({ kind: "extensions", name: path.split(/[/\\]/).pop() ?? path, value: path, scope: "user" });
+				}
+				// 技能：经白名单解析拿绝对路径（技能过滤按 SKILL.md 的父目录精确匹配）。
+				const skillPaths = createPiProcessSkillResolvers(process.cwd(), settings).resolveEnabledSkillPaths(settings, process.cwd(), true) ?? null;
+				if (skillPaths) {
+					const listed = await skillManager?.list().catch(() => null);
+					const byPath = new Map((listed?.skills ?? []).map((skill) => [skill.path, skill.name]));
+					for (const path of skillPaths) resources.push({ kind: "skills", name: byPath.get(path) ?? path, value: path, scope: "user" });
+				} else {
+					const listed = await skillManager?.list().catch(() => null);
+					for (const skill of listed?.skills ?? []) {
+						if (skill.sourceId !== "pi-global" && skill.sourceId !== "agents-global") continue;
+						resources.push({ kind: "skills", name: skill.name, value: skill.path, scope: "user" });
+					}
+				}
+				// 提示词：全局目录下的 .md 模板。
+				const prompts = await promptManager?.list().catch(() => null);
+				for (const template of prompts?.templates ?? []) {
+					if (template.scope === "project") continue;
+					resources.push({ kind: "prompts", name: template.name, value: template.path, scope: "user" });
+				}
+				return resources;
+			},
+			readProjectLegacyState: async (projectId) => projectResourceManager.readProjectLegacyDisables(projectId),
+			resolveProjectResources: async (projectId) => {
+				const project = projectStore.get(projectId);
+				if (!project) return [];
+				const resources: ResolvedMigrationResource[] = [];
+				for (const skill of (await projectResourceManager.list(projectId).catch(() => null))?.skills ?? []) {
+					if (typeof skill.path === "string") resources.push({ kind: "skills", name: skill.name, value: skill.path, scope: "project" });
+				}
+				return resources;
+			},
+			writeSettingsPatch: async (patch) => {
+				await settingsStore.update(patch as Parameters<typeof settingsStore.update>[0]);
+			},
+			clearProjectLegacyState: async (projectId, patch) => {
+				await projectResourceManager.clearProjectLegacyDisables(projectId, patch);
+			},
+			logger: { info: (scope, message, detail) => void appLogger.info(scope, message, detail), warn: (scope, message, detail) => void appLogger.warn(scope, message, detail) },
+		});
 		// 多后端网关装配：pi + dsh（DSH 在窗口创建后后台预热，失败时按需重试）。
 		// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);

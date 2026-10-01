@@ -343,6 +343,64 @@ export class ProjectResourceManager {
 		await trashPath(target, { source: "projects:delete-skill" });
 	}
 
+	/**
+	 * 读取项目 `.pi/settings.json` 里的 PiDeck 私有禁用记录（迁移用，只读）。
+	 * 这不是 pi 原生字段：迁移会把它们翻译成原生过滤规则，再由 clearProjectLegacyState 清理。
+	 */
+	async readProjectLegacyDisables(projectId: string): Promise<{
+		disabledExtensions: string[];
+		disabledSkills: string[];
+		disabledPrompts: string[];
+		inheritedExtensions: string[];
+		inheritedSkills: string[];
+		inheritedPrompts: string[];
+	} | null> {
+		const project = this.getProject(projectId);
+		if (!project || project.kind === "chat") return null;
+		const settingsFile = join(this.projectRoot(project), ".pi", "settings.json");
+		if (!existsSync(settingsFile)) {
+			return { disabledExtensions: [], disabledSkills: [], disabledPrompts: [], inheritedExtensions: [], inheritedSkills: [], inheritedPrompts: [] };
+		}
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(await readFile(settingsFile, "utf8"));
+		} catch {
+			return null;
+		}
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+		const settings = parsed as Record<string, unknown>;
+		const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+		return {
+			disabledExtensions: strings(settings.disabledExtensions),
+			disabledSkills: strings(settings.disabledSkills),
+			disabledPrompts: strings(settings.disabledPrompts),
+			inheritedExtensions: strings(settings.pideckDisabledGlobalExtensions),
+			inheritedSkills: strings(settings.pideckDisabledGlobalSkills),
+			inheritedPrompts: strings(settings.pideckDisabledGlobalPrompts),
+		};
+	}
+
+	/**
+	 * 清理已成功迁移的项目私有禁用字段（不碰其它 pi 原生字段与未知键）。
+	 * 未成功迁移的类别由调用方置 false 保留。
+	 */
+	async clearProjectLegacyDisables(projectId: string, patch: { extensions?: boolean; skills?: boolean; prompts?: boolean; inherited?: boolean }): Promise<void> {
+		const project = this.requireProject(projectId);
+		const settingsFile = await this.resolveProjectWritePath(project, join(this.projectRoot(project), ".pi", "settings.json"));
+		if (!existsSync(settingsFile)) return;
+		const settings = await readProjectSettingsForWrite(settingsFile, this.translate("mainConfig.invalidJson"));
+		if (patch.extensions) delete settings.disabledExtensions;
+		if (patch.skills) delete settings.disabledSkills;
+		if (patch.prompts) delete settings.disabledPrompts;
+		if (patch.inherited) {
+			delete settings.pideckDisabledGlobalExtensions;
+			delete settings.pideckDisabledGlobalSkills;
+			delete settings.pideckDisabledGlobalPrompts;
+		}
+		await mkdir(dirname(settingsFile), { recursive: true });
+		await writeFile(settingsFile, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+	}
+
 	async toggleSkill(projectId: string, skillPath: string, enabled: boolean): Promise<PiSkillSummary> {
 		const project = this.requireProject(projectId);
 		const skill = await this.findSkill(project, skillPath);
