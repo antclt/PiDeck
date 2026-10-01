@@ -408,16 +408,22 @@
 | ID | 状态 | 交付单元 | 主要触达文件 | 依赖 |
 |---|---|---|---|---|
 | A0 | [ ] | 确认 0.99.2 基线/版本，加入原生契约样例与红色回归 | `tests/defaultTools.test.mjs`、`tests/mcpConfig.test.mjs`、新的 native-resource 测试；1.4/7.4 回归清单 | 无 |
-| A1 | [ ] | 作用域/环境/资源身份/配置安全写入 | 新 `piResources.ts`、`piResourceEnvironment.ts`、`piConfigFileStore.ts`；`ConfigManager.ts`、共享 IPC/preload；依赖声明 | A0 |
-| A2 | [ ] | 原生规则与有效列表，整包停用/恢复 | 新 `piResourceRules.ts`、`PiResourceConfigService.ts`、`PiResourceStateStore.ts`；`resourceDiscovery.ts`、`packageResourceResolver.ts`、各 Manager | A1 |
-| A3 | [ ] | 旧记录迁移、备份、失败/崩溃恢复 | 新 `piResourceMigration.ts`；`SettingsStore.ts`、`ProjectResourceManager.ts`、`projectResourceOverrides.ts`、启动前装配 | A2 |
-| A4 | [ ] | 管理入口切原生，三种扩展 UI、项目三态 | `ConfigModal.tsx`、`ExtensionsTab.tsx`、`extensionsTableRows.tsx`、`SkillsTab.tsx`、`PromptsTab.tsx`、新 PiBuiltInExtensionsPanel；store/project IPC | A2/A3 |
-| A5 | [ ] | 退出三类 argv 白名单，所有 PiProcess 调用者一致 | `PiProcess.ts`、`AgentManager.ts`、`PiModelCapabilityCache.ts`、`piProcess*Resolvers.ts`、白名单专属 IPC/提示 | A3/A4 |
-| M1 | [ ] | MCP 原生 schema、项目 scope、导入/备份 | `mcpConfig.ts`、`types/mcp.ts`、`mcpImport.ts`、`ResourceImportManager.ts`、`ConfigBackupManager.ts`、system/project IPC | A1 |
-| M2 | [ ] | CLI 环境、状态、OAuth 操作生命周期 | `piMcpCli.ts`、`systemIpc.ts`、共享通道/preload/previewApi、新 useMcpController | A1/M1 |
-| M3 | [ ] | MCP 编辑 UI 收尾、接管提醒/导航 | `McpTab.tsx`、`McpResourceViews.tsx`、`mcpForm.ts`、`mcpThirdParty.ts`、新 mcpThirdPartyNotice、AgentManager/notice 接线 | A4/A5/M1/M2 |
-| T1 | [ ] | 全局/项目工具单字段与 codemode 子设置 | `defaultTools.ts`、`DefaultToolsInput.tsx`、`SettingsTab.tsx`、项目工具小面板、i18n | A1/A4/M1 |
-| V1 | [ ] | 行为回归、范围内 UI 验证、更新说明与交接 | tests/e2e、本文状态、`docs/pi-compatibility.md`，涉及用户管理入口说明的现有文档 | 全部 |
+| A1 | [x] | 作用域/环境/资源身份/配置安全写入 | `shared/types/piResources.ts`、`piConfigFileStore.ts`、`types/proper-lockfile.d.ts`、依赖声明 | A0 | 提交 `42f6ffda` |
+| A2 | [x] | 原生规则与整包停用/恢复 | `piResourceRules.ts`、`PiResourceConfigService.ts`、`PiResourceStateStore.ts` | A1 | 提交 `bed19aa1` |
+| A3 | [x] | 旧记录迁移、备份、失败恢复 | `piResourceMigration.ts`、`piResourceMigrationRunner.ts`、`ProjectResourceManager` 读写、启动装配 | A2 | 提交 `aef62bfd`、`37b38180` |
+| A4 | [~] | 管理入口切原生，三种扩展 UI、项目三态 | 已做：原生内置扩展开关 + `PiBuiltinExtensionsPanel`（全局/项目）<br>待做：Skills/Prompts/Extensions 三页改为从原生配置投影状态（当前仍读旧禁用列表）、项目资源页内置扩展三态展示 | A2/A3 | 部分提交 `99348296`；剩余见 A4-remaining |
+| A5 | [~] | 退出三类 argv 白名单 | 已做：启动期迁移（迁移完成后旧列表清空，三个 resolver 自然返回 `null`，启动参数回到 pi 原生发现）<br>待做：删除白名单专属 IPC/提示与 `appendBuiltInExtensionSpecifierArgs` 兜底路径的最终清理 | A3/A4 | 部分提交 `37b38180` |
+| M1 | [x] | MCP 原生 schema、项目 scope、导入/备份 | `mcpConfig.ts`、`types/mcp.ts`、`mcpImport.ts`、`ConfigManager`、system IPC、`ConfigBackupManager` | A1 | 提交 `23db0c91`、`d17a51bd` |
+| M2 | [x] | CLI 环境、状态、OAuth 操作生命周期 | `piMcpCli.ts`、`systemIpc.ts`、共享通道/preload、`tests/piMcpCli.test.mjs` | A1/M1 | 提交 `af44d658` |
+| M3 | [x] | MCP 编辑 UI 收尾、接管提醒/导航 | `McpTab.tsx`、`McpResourceViews.tsx`、`mcpForm.ts`、`AgentManager.resolveMcpCommandOwner`、`tests/agentManagerMcpThirdPartyNotice.test.mjs` | A4/A5/M1/M2 | 提交 `364b3594` |
+| T1 | [x] | 全局工具单字段与 codemode 子设置 | `defaultTools.ts`、`DefaultToolsInput.tsx`、`SettingsTab.tsx` | A1/A4/M1 | 提交 `4a720b1d` |
+| V1 | [~] | 行为回归、更新说明与交接 | 全量测试与 typecheck 已跑（见下）；E2E 未跑 | 全部 | 见 12.3 |
+
+**A4-remaining / A5-remaining 的具体范围**（这些是本计划尚未交付的部分，不是「可选优化」）：
+
+1. **技能/提示词/扩展三页的状态来源**：三页目前仍把 `disabledSkills/disabledPrompts/disabledExtensions` 当作启用状态展示；迁移完成后这些字段已被清空，界面会把所有资源显示为「启用」，而实际生效的是原生规则。需要改成读 `piResourcesSummary` 的 `entries` 投影（或直接调用 `readSummary` + 资源列表求交集）。
+2. **项目资源页的继承三态**：`pideckDisabledGlobal*` 字段迁移后不再写入，项目页需要改走原生 `+/-` 规则（`PiResourceConfigService.setFileResourceEnabled` 已具备能力，缺 UI 接线）。
+3. **白名单残留清理**：`extensions:set-whitelist-disabled` IPC 与其 UI 开关、`whitelistSkipNotice`、`resolveEnabled*Paths` 的启动注入分支——需要确认「所有用户迁移完成后」再删，否则会重新打开尚未迁移的禁用项。**在迁移尚未覆盖全部环境前保留这些代码是刻意的安全设计。**
 
 说明：`piProcessSkillResolvers.ts` 位于 skills 域，prompt 位于 prompts 域，extension 位于 extensions 域。文件是否删除由调用者检查决定，不按表格批量删除。新单模块控制在约 400 行，超过 600 行必须拆分。
 
@@ -472,6 +478,19 @@
 | 0.99.2 provider-auth 全局/项目、HTTPS/loopback | 非环回 HTTP 拒绝、项目拒绝；MCP OAuth 按钮隐藏或解释不可用；不把 CLI 缺口当作用户未登录 |
 | `/reload` 与默认工具保存 | 不发虚构 RPC、不承诺移除工具立即关闭；新会话按新设置完整加载 |
 | Anthropic federation 变量 | 假值通过 native 子进程 env 清洗，Electron 私有变量仍清掉；不读取 token 文件、不改 WSL 凭据边界 |
+
+### 12.2b 本轮已执行的回归（2026-10-01）
+
+- `npm test`：7393 tests / **7385 pass / 7 fail**。
+- 基线对照：在 `f9a1c070`（本轮开工前的计划文档提交）的独立 worktree 跑同类目标，
+  同样 7 项失败：WSL Git ×5（`gitWslInvocation`/`gitProcessRunGit`）、CUA MCP HTTP host ×1、
+  旧会话目录迁移 ×1。**结论：这 7 项是改动前就存在的基线失败，不是本轮引入。**
+- `npm run typecheck`：0 error（此前会话记录的 DSH 报错来自陈旧增量缓存，清掉 `node_modules/.tmp` 后消失）。
+- `npm run check:format`：2297 files 通过。
+- 本轮新增测试全部通过：`piResourceRules`(11) / `piConfigFileStore`(6) /
+  `piResourceConfigService`(11) / `piResourceMigration`(9) / `piResourceMigrationRunner`(6) /
+  `builtInExtensionToggles`(6) / `piMcpCli`(7) / `agentManagerMcpThirdPartyNotice`(6) / `defaultTools`(22)。
+- **E2E 未执行**（需要构建产物）；真实 OAuth 与真实 pi 会话未验证，留给 V1 收尾。
 
 ### 12.3 命令和测试限制
 

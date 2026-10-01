@@ -38,8 +38,8 @@
 
 | 上游变化 | PiDeck 当前处理与待办 | 状态 | 代码/验证入口 | 兼容代码移除条件 |
 |---|---|---|---|---|
-| `--no-extensions` 连带关闭 mcp/codemode/tool-search/llama.cpp；0.99+ 支持 `builtin:` | 当前仅在资源白名单模式补回四个内置扩展；诊断总关不补回。补回仍会越过用户原生禁用设置；最终应退出普通资源白名单，交给 pi 正常发现 | 初版有缺陷，待 A3–A5 | `PiProcess.appendBuiltInExtensionSpecifierArgs`、`tests/piProcessSecurityEnv.test.mjs` | 旧禁用记录完成安全迁移、正常启动不再使用资源白名单后删除补回逻辑 |
-| 原生 `extensions/skills/prompts/packages` 支持过滤和项目覆盖；`pi config` 提供四个内置扩展开关 | 当前普通启停仍依赖 PiDeck 私有禁用列表；原生内置面板缺失。计划改用原生规则，支持整包开关与项目三态；PiDeck 自带扩展保持桌面专用 | 待 A1–A5 | 各 Resource Manager、`packageResourceResolver.ts`、执行计划第 2–5 节 | 原生管理基线为 pi >= 0.99.2；私有旧字段仅作迁移读取，不能永久双写 |
+| `--no-extensions` 连带关闭 mcp/codemode/tool-search/llama.cpp；0.99+ 支持 `builtin:` | 白名单补回改为按原生配置计算：`builtInExtensionToggles.builtinSpecifiersToRestore` 只带回用户未显式停用的内置扩展，不再覆盖 `pi config` 的选择；诊断总关仍一个都不带 | 已修复（提交 `99348296`） | `src/main/extensions/builtInExtensionToggles.ts`、`PiProcess.ts`、`piProcessExtensionResolvers.ts`、`tests/builtInExtensionToggles.test.mjs` | 旧禁用记录完成安全迁移、正常启动不再使用资源白名单后删除补回逻辑 |
+| 原生 `extensions/skills/prompts/packages` 支持过滤和项目覆盖；`pi config` 提供四个内置扩展开关 | 规则层/服务/迁移/启动接线已完成：新增原生规则、整包启停、启动期把旧禁用记录翻译成原生过滤；四个内置扩展开关已有全局/项目 UI，白名单模式不再覆盖用户的停用选择。三页状态投影与项目三态 UI 仍待接线（A4-remaining） | 部分完成（A1–A3 已提交；A4/A5 剩余见执行计划） | `piResourceRules.ts`、`PiResourceConfigService.ts`、`piResourceMigration*.ts`、`builtInExtensionToggles.ts`、`PiBuiltinExtensionsPanel.tsx` | 原生管理基线为 pi >= 0.99.2；私有旧字段仅作迁移读取，不能永久双写；白名单解析器在三页状态切换前保留 |
 | MCP 全局 + 已信任项目配置，同名项目定义整体替换全局 | 当前数据层仍浅合并，项目只读；需要完整 project CRUD、来源展示、有效停用覆盖与恢复继承 | 待 M1 | `mcpConfig.ts`、`ConfigManager.ts`、`McpTab.tsx`、`tests/mcpConfig.test.mjs` | 无；整体替换是长期原生语义 |
 | MCP schema：`enabled/exposure/toolExposure/oauth`、全局 `auth.provider`、顶层 `autoEnableCodemode` | 已有表单初版；需补严格类型校验、未知字段保留、OAuth 字段与原生 provider auth；`codemode-deferred` 仅为 `codemode` 别名 | 部分实现，待 M1/M3 | `types/mcp.ts`、`mcpConfig.ts`、`mcpForm.ts`、MCP UI 测试 | 旧别名读取跟随 pi，不能当成第五种独立 exposure |
 | `pi mcp list/login/logout` CLI | 已有命令包装和页面按钮；尚缺准确 scope/cwd、WSL/agentDir 对齐、取消、操作身份、退出原因校验和 URL 分块处理。报告仅代表 CLI 检测进程 | 部分实现，待 M2 | `piMcpCli.ts`、system IPC/preload；应补 CLI 行为测试 | 长期只走 CLI，不以 RPC OAuth 或 SDK 桥替代 |
