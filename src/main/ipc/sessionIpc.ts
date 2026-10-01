@@ -1480,9 +1480,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		// 对话框在主进程弹：渲染层不参与路径选择，也就没有「传任意路径读文件」的入口。
 		const picked = await dialog.showOpenDialog({
 			title: mainCopy("dsh.runtime.pickArchiveTitle"),
-			// 过滤器只影响文件选择；openDirectory 让已解压目录也能被选中。
-			filters: [{ name: "DSH runtime", extensions: ["tgz", "tar.gz"] }],
-			properties: ["openFile", "openDirectory"],
+			// 只收归档：与目录入口分开弹。Windows 上 openFile + openDirectory 同时给会
+			// 退化成只能选目录，.tgz 选不到（见 shared/ipc.ts 的 dshRuntimeInstallLocalDir）。
+			filters: [{ name: "DSH runtime", extensions: ["tgz", "gz"] }],
+			properties: ["openFile"],
 		});
 		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
 		const filePath = picked.filePaths[0];
@@ -1491,6 +1492,19 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
 		}
 		return importDshRuntime(filePath);
+	});
+	ipcMain.handle(ipcChannels.dshRuntimeInstallLocalDir, async () => {
+		if (!importDshRuntime) throw new Error("DSH runtime installation is not available");
+		const picked = await dialog.showOpenDialog({
+			title: mainCopy("dsh.runtime.pickDirectoryTitle"),
+			properties: ["openDirectory"],
+		});
+		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
+		const dirPath = picked.filePaths[0];
+		if (!dirPath || !existsSync(dirPath)) {
+			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
+		}
+		return importDshRuntime(dirPath);
 	});
 	ipcMain.handle(ipcChannels.dshRuntimeUninstall, async () => {
 		if (!uninstallDshRuntime) throw new Error("DSH runtime installation is not available");

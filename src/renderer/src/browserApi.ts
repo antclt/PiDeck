@@ -332,6 +332,7 @@ export function createBrowserApi(): PiDesktopApi {
 			onDshRuntimeStatusChanged: () => () => {},
 			installDshRuntime: async () => ({ ok: false, error: "unavailable in browser" }),
 			importDshRuntimeFile: async () => ({ ok: false, error: "unavailable in browser" }),
+			importDshRuntimeDir: async () => ({ ok: false, error: "unavailable in browser" }),
 			uninstallDshRuntime: async () => ({ ok: false, error: "unavailable in browser" }),
 			onDshRuntimeInstallProgress: () => () => {},
 			describeDshSettings: async () => ({ writable: false, hasDocument: false, namespaces: [] }),

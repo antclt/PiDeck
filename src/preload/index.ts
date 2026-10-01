@@ -471,9 +471,15 @@ const api = {
 				ok: boolean;
 				error?: string;
 			}>,
-		/** 从本地导入 runtime（.tgz 归档或已解压目录；主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
+		/** 从本地导入 runtime 归档（.tgz；主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
 		importDshRuntimeFile: () =>
 			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocal) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 从本地导入「已解压」的 runtime 目录（主进程弹目录对话框；与归档入口分开，见 shared/ipc.ts）。 */
+		importDshRuntimeDir: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocalDir) as Promise<{
 				ok: boolean;
 				error?: string;
 			}>,

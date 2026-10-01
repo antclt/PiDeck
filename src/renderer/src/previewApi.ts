@@ -728,6 +728,7 @@ export function createPreviewApi(): PiDesktopApi {
 			onDshRuntimeStatusChanged: () => () => {},
 			installDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
 			importDshRuntimeFile: async () => ({ ok: false, error: "unavailable in preview" }),
+			importDshRuntimeDir: async () => ({ ok: false, error: "unavailable in preview" }),
 			uninstallDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
 			onDshRuntimeInstallProgress: () => () => {},
 			describeDshSettings: async () => ({ writable: false, hasDocument: false, namespaces: [] }),

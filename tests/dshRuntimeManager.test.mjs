@@ -119,6 +119,17 @@ test("selectRelease：与 selectRuntime 同样按兼容区间 + 取最新", () =
 	assert.equal(selectRelease(releases, "0.6.0"), undefined, "没有任何兼容版本");
 });
 
+test("selectRelease：给了配套版本就只认它，不退回区间内最新版", () => {
+	const releases = [
+		{ runtimeVersion: "0.1.0", minAppVersion: "0.7.0", maxAppVersion: "", url: "a", sha256: "a", size: 1 },
+		{ runtimeVersion: "0.1.1", minAppVersion: "0.7.0", maxAppVersion: "0.8.0", url: "b", sha256: "b", size: 1 },
+	];
+	assert.equal(selectRelease(releases, "0.7.5", "0.1.0").runtimeVersion, "0.1.0", "命中声明版本时不能装更大的那版（门控按逐字相等判定）");
+	assert.equal(selectRelease(releases, "0.7.5", "0.2.0"), undefined, "索引没有配套版本时报缺版本，而不是偷偷装 0.1.1");
+	assert.equal(selectRelease(releases, "0.7.5", "v0.1.1").runtimeVersion, "0.1.1", "容忍 v 前缀写法差异");
+	assert.equal(selectRelease(releases, "0.8.0", "0.1.1"), undefined, "区间不兼容的声明版本不发放（装了也起不来）");
+});
+
 // ── 归档条目安全（tar slip）──
 
 test("isSafeArchiveEntry 拒绝绝对路径与 ../ 逃逸", () => {
