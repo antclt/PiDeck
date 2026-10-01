@@ -114,6 +114,9 @@
      但随 data-ui-font-size / data-chat-font-size 设置缩放（全局统一字号规范） */
   --text-micro: var(--font-size-micro);
   --text-micro--line-height: var(--line-height-micro);
+  /* 会话 Tab 栏标题：随「会话 Tab 栏字号」设置缩放（--font-size-tab，见 foundation.css） */
+  --text-tab: var(--font-size-tab);
+  --text-tab--line-height: var(--line-height-tab);
   --text-caption: var(--font-size-caption);
   --text-caption--line-height: var(--line-height-caption);
   --text-control: var(--font-size-control);

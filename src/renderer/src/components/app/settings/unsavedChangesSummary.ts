@@ -85,6 +85,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "zoomFactor", tab: "appearance", itemKey: "settings.zoomFactor" },
 	{ field: "fontSize", tab: "appearance", itemKey: "settings.fontSize" },
 	{ field: "uiFontSize", tab: "appearance", itemKey: "settings.uiFontSize" },
+	{ field: "tabBarFontSize", tab: "appearance", itemKey: "settings.tabBarFontSize" },
 	{ field: "chatFontSize", tab: "appearance", itemKey: "settings.chatFontSize" },
 	{ field: "inputFontSize", tab: "appearance", itemKey: "settings.inputFontSize" },
 	{ field: "fontFamilyBase", tab: "appearance", itemKey: "settings.fontFamilyBase" },

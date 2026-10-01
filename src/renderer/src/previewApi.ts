@@ -193,6 +193,7 @@ let previewSettings: AppSettings = {
 
 	fontSize: "medium",
 	uiFontSize: null,
+	tabBarFontSize: null,
 	chatFontSize: null,
 	inputFontSize: null,
 	zoomFactor: 1,

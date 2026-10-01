@@ -755,6 +755,7 @@ export function App() {
 		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
 		fontSize: "medium",
 		uiFontSize: null,
+		tabBarFontSize: null,
 		chatFontSize: null,
 		inputFontSize: null,
 		zoomFactor: 1,
@@ -1276,6 +1277,8 @@ export function App() {
 		const chatFontSize = settings.chatFontSize ?? settings.fontSize;
 		const inputFontSize = settings.inputFontSize ?? settings.fontSize;
 		root.dataset.uiFontSize = uiFontSize;
+		// Tab 栏未单独设置时跟随界面字号（历史上 Tab 标题吃的是界面轨的 --font-size-micro）
+		root.dataset.tabFontSize = settings.tabBarFontSize ?? uiFontSize;
 		root.dataset.chatFontSize = chatFontSize;
 		root.dataset.inputFontSize = inputFontSize;
 		// 旧属性保留，兼容外部依赖或测试仍读取 dataset.fontSize 的场景
@@ -1300,7 +1303,7 @@ export function App() {
 		} else {
 			root.style.removeProperty("--font-family-mono");
 		}
-	}, [settings.fontSize, settings.uiFontSize, settings.chatFontSize, settings.inputFontSize, settings.fontFamilyBase, settings.fontFamilyBaseCustom, settings.fontFamilyMono, settings.fontFamilyMonoCustom]);
+	}, [settings.fontSize, settings.uiFontSize, settings.tabBarFontSize, settings.chatFontSize, settings.inputFontSize, settings.fontFamilyBase, settings.fontFamilyBaseCustom, settings.fontFamilyMono, settings.fontFamilyMonoCustom]);
 
 	/** 当前会话中 agent 修改过的文件(从 tool 消息 meta 中提取) */
 	// 优化:只在消息数量变化时才重新计算,减少不必要的遍历
