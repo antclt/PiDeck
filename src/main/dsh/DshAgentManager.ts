@@ -622,7 +622,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/**
-	 * DSH 会话历史分页统一入口（0.1.5 契约收口，见 docs/dsh-0.1.5-typert-migration.md）。
+	 * DSH 会话历史分页统一入口（契约收口，见 docs/dsh-remote-contract.md）。
 	 *
 	 * `session/page` 的 throughSeq 是「包含式日志切点」，必须 ≤ 会话当前 cursor；
 	 * 旧实现固定送 MAX_SAFE_INTEGER，恒被 host 拒绝（gateway/bad-request）——这就是
