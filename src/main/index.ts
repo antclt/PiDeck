@@ -3580,6 +3580,23 @@ app
 			if (!entries) return undefined;
 			return projectResourceEnabled({ entries, value: templatePath, baseDir: dirname(templatePath) });
 		});
+		// 项目作用域：模板开关写项目 `.pi/settings.json` 的 prompts 精确规则。
+		promptManager.configureNativeProjectToggle(async (projectId, templatePath, enabled) => {
+			const service = piResourceConfigService;
+			if (!service) return { ok: false, error: "pi resource service unavailable" };
+			return service.setFileResourceEnabled({ scope: { scope: "project", projectId }, kind: "prompts", resourceId: templatePath, enabled });
+		});
+		promptManager.configureNativeProjectEntriesReader(async (projectId) => {
+			const project = projectStore.get(projectId);
+			if (!project) return null;
+			try {
+				const file = await readPiConfigFile(join(project.path, ".pi", "settings.json"));
+				const value = file.data.prompts;
+				return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+			} catch {
+				return null;
+			}
+		});
 		// 提示词商店官方模板 / 内置技能热更新：与内置扩展同一套「resources 只读 → userData 覆盖层」机制。
 		// 覆盖层供查询侧（XuePromptManager / SkillManager）叠加解析：远端新增/修改的模板与技能免发版生效。
 		const promptStoreUpdater = new PromptStoreUpdater({

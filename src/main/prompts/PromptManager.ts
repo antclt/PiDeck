@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { trashPath } from "../fs/trash";
 import type { AppSettings, CreatePiPromptTemplateInput, PiPromptTemplateListResult, PiPromptTemplateSummary } from "../../shared/types";
 import { parseWslUncPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
+import { projectResourceEnabled } from "../config/piResourceRules";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 
 type PromptCopy = (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
@@ -61,6 +62,13 @@ export class PromptManager {
 		this.nativeEnabledReader = reader;
 	}
 
+	/** 项目作用域的原生开关（写项目 `.pi/settings.json` 的 prompts 精确规则）。 */
+	configureNativeProjectToggle(toggle: (projectId: string, templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>): void {
+		this.nativeProjectToggle = toggle;
+	}
+
+	private nativeProjectToggle: ((projectId: string, templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>) | null = null;
+
 	private nativeToggle: ((templatePath: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>) | null = null;
 	private nativeEnabledReader: ((templatePath: string) => boolean | undefined) | null = null;
 
@@ -109,11 +117,17 @@ export class PromptManager {
 	}
 
 	/** Toggles one project-owned template by updating that project's whitelist input. */
-	async toggleInProject(projectPath: string, promptName: string, enabled: boolean): Promise<PiPromptTemplateSummary> {
+	async toggleInProject(projectPath: string, promptName: string, enabled: boolean, projectId?: string): Promise<PiPromptTemplateSummary> {
 		const projectRoot = resolve(this.hostPath(projectPath));
 		const boundary = await this.createProjectBoundary(projectRoot);
 		const name = this.validProjectPromptName(promptName);
 		const target = await this.resolveExistingProjectPath(boundary, join(projectRoot, ".pi", "prompts", `${name}.md`));
+		// 原生过滤规则优先：项目自有模板写 `.pi/settings.json` 的 prompts 精确 `-path`。
+		if (this.nativeProjectToggle && projectId) {
+			const result = await this.nativeProjectToggle(projectId, target, enabled);
+			if (!result.ok) throw new Error(this.translate("mainPrompt.toggleFailed", { error: result.error ?? "unknown" }));
+			return this.readProjectTemplate(target, name, enabled);
+		}
 		const settingsFile = await this.resolveProjectWritePath(boundary, join(projectRoot, ".pi", "settings.json"));
 		let settings: Record<string, unknown> = {};
 		if (existsSync(settingsFile)) {
@@ -133,6 +147,11 @@ export class PromptManager {
 		settings.disabledPrompts = next;
 		await mkdir(dirname(settingsFile), { recursive: true });
 		await writeFile(settingsFile, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+		return this.readProjectTemplate(target, name, enabled);
+	}
+
+	/** 读取单个项目模板结果（原生与私有两条写入路径共用）。 */
+	private async readProjectTemplate(target: string, name: string, enabled: boolean): Promise<PiPromptTemplateSummary> {
 		const raw = await readFile(target, "utf8");
 		const frontmatter = this.parseFrontmatter(raw);
 		return {
@@ -297,7 +316,7 @@ export class PromptManager {
 	}
 
 	/** 扫描项目 .pi/prompts/ 目录下的模板 */
-	async listByProject(projectPath: string): Promise<PiPromptTemplateListResult> {
+	async listByProject(projectPath: string, projectId?: string): Promise<PiPromptTemplateListResult> {
 		const projectRoot = resolve(this.hostPath(projectPath));
 		const boundary = await this.createProjectBoundary(projectRoot);
 		const lexicalPromptsDir = join(projectRoot, ".pi", "prompts");
@@ -336,8 +355,21 @@ export class PromptManager {
 				enabled: !disabledNames.has(name.toLowerCase()),
 			});
 		}
+		// 原生投影优先（迁移后项目私有 disabledPrompts 已清空）。
+		const projectEntries = this.nativeProjectEntries && projectId ? await this.nativeProjectEntries(projectId) : null;
+		if (projectEntries) {
+			const baseDir = join(projectRoot, ".pi");
+			for (const template of templates) template.enabled = projectResourceEnabled({ entries: projectEntries, value: template.path, baseDir });
+		}
 		templates.sort((a, b) => a.name.localeCompare(b.name));
 		return { templates, globalDir: lexicalPromptsDir };
+	}
+
+	/** 项目层原生 prompts 条目读取器（列表投影用）；未装配时返回 null。 */
+	private nativeProjectEntries: ((projectId: string) => Promise<string[] | null>) | null = null;
+
+	configureNativeProjectEntriesReader(reader: (projectId: string) => Promise<string[] | null>): void {
+		this.nativeProjectEntries = reader;
 	}
 
 	/** 在项目 .pi/prompts/ 下创建模板 */

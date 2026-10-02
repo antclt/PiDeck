@@ -93,7 +93,8 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		return promptManager.readContent(validPath);
 	});
 	ipcMain.handle(ipcChannels.promptsListByProject, async (_event, projectId: unknown) => {
-		return promptManager.listByProject(projectRoot(projectId));
+		const root = projectRoot(projectId);
+		return promptManager.listByProject(root, (projectId as string).trim());
 	});
 	ipcMain.handle(ipcChannels.promptsCreateInProject, async (_event, projectId: unknown, input: unknown) => {
 		const validInput = promptInput(input);
@@ -144,7 +145,7 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		if (typeof enabled !== "boolean") {
 			throw new Error("Invalid project prompt toggle input.");
 		}
-		const result = await promptManager.toggleInProject(projectRoot(projectId), validName, enabled);
+		const result = await promptManager.toggleInProject(projectRoot(projectId), validName, enabled, (projectId as string).trim());
 		void appLogger.info("prompt", "Project prompt template toggled", {
 			projectId,
 			name: validName,
