@@ -1760,6 +1760,8 @@ export class SessionScanner {
 		let codexSourcePath: string | undefined;
 		let latestSessionInfoName: string | undefined;
 		let forkParentSession: string | undefined;
+		// 会话 header 的 cwd：resolveForkParentPath 的第二解析基准（扩展写入相对 cwd 的 parentSession）。
+		let sessionHeaderCwd: string | undefined;
 		let hasSubagentChildMarker = false;
 		/** 最后一条 model_change / thinking_level_change 记录 */
 		let modelProvider: string | undefined;
@@ -1786,6 +1788,7 @@ export class SessionScanner {
 			}
 			if (entry.type === "session") {
 				forkParentSession ||= this.optionalString(entry.parentSession ?? entry.header?.parentSession);
+				sessionHeaderCwd ||= this.optionalString(entry.cwd ?? entry.header?.cwd);
 			}
 			// 检测显式子会话标记：支持任何 "*.child-session" 格式，
 			// 不仅限于 pi-subagents，未来其他扩展也可沿用此约定。
@@ -1890,7 +1893,7 @@ export class SessionScanner {
 			parentSessionPath = pathInferredParent;
 			// 路径推断失败时，尝试使用 forkParentSession header 引用的父路径
 			if (!parentSessionPath && forkParentSession) {
-				parentSessionPath = await this.resolveForkParentPath(filePath, forkParentSession, isWsl, signal);
+				parentSessionPath = await this.resolveForkParentPath(filePath, forkParentSession, isWsl, sessionHeaderCwd, signal);
 			}
 		}
 
@@ -2124,15 +2127,30 @@ export class SessionScanner {
 	 * 仅允许引用当前 sessions 根目录内的现有文件（防路径穿越/误挂载），
 	 * 本地/WSL 分别按平台语义拼接（绝对 Windows 路径用 resolve 而非 join，
 	 * 否则盘符路径会在 join 时被重置）。解析失败返回 undefined，不抛异常。
+	 *
+	 * parentSession 的写入方有两种基准：pi 原生 fork/branch 传绝对路径或相对会话
+	 * 文件所在目录的路径；@tintinweb/pi-subagents（≤0.19）传相对会话 cwd 的路径
+	 * （如 `.pi\sessions\<stem>.jsonl`，项目级 sessionDir 场景），只按文件所在目录解析必然落空。
+	 * 因此依次尝试「会话文件所在目录 → 会话 cwd」两个基准，返回第一个存在且在扫描根内的候选。
 	 */
-	private async resolveForkParentPath(filePath: string, forkParentSession: string, isWsl: boolean, signal?: AbortSignal): Promise<string | undefined> {
+	private async resolveForkParentPath(filePath: string, forkParentSession: string, isWsl: boolean, sessionCwd?: string, signal?: AbortSignal): Promise<string | undefined> {
 		const normalizedForkParent = forkParentSession.replace(/\\/g, "/");
-		const resolved = isWsl ? posixJoin(posixDirname(filePath), normalizedForkParent) : resolve(dirname(filePath), forkParentSession);
-		const normalizedResolved = this.normalize(resolved);
+		const candidates: string[] = [];
+		const fileDir = isWsl ? posixDirname(filePath) : dirname(filePath);
+		candidates.push(isWsl ? posixJoin(fileDir, normalizedForkParent) : resolve(fileDir, forkParentSession));
+		if (sessionCwd) {
+			// WSL 会话的 cwd 是发行版内 posix 路径；本地是 Windows 绝对路径，resolve 直接吃绝对 parentSession。
+			candidates.push(isWsl ? posixJoin(this.normalize(sessionCwd), normalizedForkParent) : resolve(sessionCwd, forkParentSession));
+		}
 		const normalizedSessionsRoot = this.normalize(this.findSessionsRootForFile(filePath));
-		const isInsideSessionsRoot = normalizedResolved !== normalizedSessionsRoot && normalizedResolved.startsWith(`${normalizedSessionsRoot}/`);
-		const resolvedExists = isInsideSessionsRoot && (isWsl ? await this.existsWslFile(resolved, signal) : existsSync(resolved));
-		return resolvedExists ? resolved : undefined;
+		for (const resolved of candidates) {
+			const normalizedResolved = this.normalize(resolved);
+			const isInsideSessionsRoot = normalizedResolved !== normalizedSessionsRoot && normalizedResolved.startsWith(`${normalizedSessionsRoot}/`);
+			if (!isInsideSessionsRoot) continue;
+			const resolvedExists = isWsl ? await this.existsWslFile(resolved, signal) : existsSync(resolved);
+			if (resolvedExists) return resolved;
+		}
+		return undefined;
 	}
 
 	/**
@@ -2144,6 +2162,7 @@ export class SessionScanner {
 		// 头部截断产生的半行会被 JSON.parse 跳过，不影响本次探测。
 		let forkParentSession: string | undefined;
 		let latestSessionInfoName: string | undefined;
+		let sessionHeaderCwd: string | undefined;
 		for (const line of raw.split(/\r?\n/).filter(Boolean)) {
 			let parsed: unknown;
 			try {
@@ -2155,6 +2174,7 @@ export class SessionScanner {
 			const entry = parsed;
 			if (entry.type === "session") {
 				forkParentSession ||= this.optionalString(entry.parentSession ?? entry.header?.parentSession);
+				sessionHeaderCwd ||= this.optionalString(entry.cwd ?? entry.header?.cwd);
 			} else if (entry.type === "session_info") {
 				latestSessionInfoName = this.optionalString(entry.name ?? entry.data?.name);
 			}
@@ -2164,7 +2184,8 @@ export class SessionScanner {
 		// 否则视为用户 fork / 普通会话（fork 名由用户命名，通常不含该模式）。
 		if (!/^[^#]+#[0-9a-f]{8}$/i.test(latestSessionInfoName)) return undefined;
 		const isWsl = this.isWslPath(filePath);
-		return this.resolveForkParentPath(filePath, forkParentSession, isWsl);
+		// header cwd 缺失（旧文件）时回退按文件路径推断项目根，两种基准都覆盖不到才放弃。
+		return this.resolveForkParentPath(filePath, forkParentSession, isWsl, sessionHeaderCwd ?? this.inferProjectPathFromFile(filePath));
 	}
 
 	/**
