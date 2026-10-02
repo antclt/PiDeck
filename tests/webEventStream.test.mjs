@@ -93,9 +93,13 @@ test("tool_execution_start/end produces tool-input-available and tool-output-ava
 		toolName: "bash",
 		toolCallId: "call_1",
 		isError: false,
+		// P2 工具卡展开：真实执行结果必须透传到 output（空对象会让历史工具卡无详情可展开）
+		result: { code: 0, stdout: "ok" },
 	});
 	assert.equal(end[0].type, "tool-output-available");
 	assert.equal(end[0].toolCallId, "call_1");
+	// result 对象由宿主传入、适配器原样透传；JSON 归一后 deepEqual（避开 vm realm 原型差异）
+	assert.deepEqual(JSON.parse(JSON.stringify(end[0].output)), { code: 0, stdout: "ok" });
 });
 
 test("assistant done and agent_end do not close the stream before tools finish", () => {

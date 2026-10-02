@@ -18,14 +18,24 @@ import type { UIMessage } from "ai";
 import type { AvailableModel } from "../../../shared/types";
 import { createSessionModelPreference } from "../../../shared/modelDisplayName";
 import { t } from "@/i18n";
-import { WebSidebar } from "./WebSidebar";
+import { WebSidebar, type WebSessionRowAction } from "./WebSidebar";
 import { WebHeader, type WebHeaderStatus } from "./WebHeader";
 import { WebTimeline } from "./WebTimeline";
 import { WebComposer } from "./WebComposer";
 import { WebDshToolsPanel } from "./WebDshToolsPanel";
+import { WebBranchBar } from "./WebBranchBar";
+import { WebRewindPanel } from "./WebRewindPanel";
+import { WebWorkspaceDrawer } from "./WebWorkspaceDrawer";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui-shadcn/alert-dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui-shadcn/dialog";
+import { Button } from "@/components/ui-shadcn/button";
+import { Input } from "@/components/ui-shadcn/input";
 import { chatMessagesToUiMessages, createProject, createSession, deleteProject, fetchMessagePage, fetchModels, fetchState, getWebAuthHeaders, respondToUi, setRuntimeModel, setRuntimeThinking, updateSessionRecord } from "./webApi";
+import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime } from "./webApi";
+import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
+import { sessionUiMessagesToMarkdown } from "./webMarkdown";
 import type { AgentUiResponse } from "../../../shared/types";
-import type { WebProject, WebState } from "./webTypes";
+import type { WebProject, WebState, WebContextUsage } from "./webTypes";
 
 /** 分页元数据：已加载消息总数 + 更早一页的游标。 */
 type HistoryMeta = {
@@ -65,14 +75,24 @@ export function WebChatApp() {
 	const [uiResponding, setUiResponding] = useState(false);
 	// S6.3：DSH 工具面板（goals/subagents/skills）开关
 	const [dshToolsOpen, setDshToolsOpen] = useState(false);
+	// P1：rewind / workspace 抽屉 / 重命名 / 删除确认
+	const [rewindOpen, setRewindOpen] = useState(false);
+	const [workspaceOpen, setWorkspaceOpen] = useState(false);
+	const [renameDraft, setRenameDraft] = useState<{ sessionId: string; title: string } | null>(null);
+	const [renameValue, setRenameValue] = useState("");
+	const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+	// P2：composer 预填充（重发取回文本）；nonce 避免同文本重复触发
+	const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+	// P2：上下文用量（随主轮询拉取 runtime state 子集）
+	const [contextUsage, setContextUsage] = useState<WebContextUsage | undefined>(undefined);
 
 	// ── 本组件自持的 per-session 消息缓存（useChat 切换 id 会重建 Chat 实例） ──
 	const messagesBySessionRef = useRef<Record<string, UIMessage[]>>({});
 	const loadedSessionsRef = useRef<Set<string>>(new Set());
 	const historyMetaRef = useRef<Record<string, HistoryMeta>>({});
 	const activeSessionIdRef = useRef<string>("");
-	// 首页直发暂存：新建会话后等 useChat 实例切换完成，再投递首条消息
-	const pendingSendRef = useRef<{ sessionId: string; text: string } | null>(null);
+	// 首页直发暂存：新建会话后等 useChat 实例切换完成，再投递首条消息（含图片）
+	const pendingSendRef = useRef<{ sessionId: string; text: string; images?: string[] } | null>(null);
 
 	// useChat：sessionId 作为 chat id；切会话时 id 变化重建 Chat 实例
 	const { messages, sendMessage, status, stop, setMessages, error } = useChat({
@@ -133,7 +153,7 @@ export function WebChatApp() {
 		if (!pending || pending.sessionId !== activeSessionId) return;
 		if (streaming) return; // 新实例就绪（空闲）后才投递
 		pendingSendRef.current = null;
-		void sendMessage({ text: pending.text });
+		void sendMessage({ text: pending.text }, { body: { images: pending.images ?? [] } });
 	}, [activeSessionId, streaming, sendMessage]);
 
 	// 模型列表是全局 pi 配置，草稿会话也需要先选模型再发送第一条消息。
@@ -169,19 +189,35 @@ export function WebChatApp() {
 		};
 	}, [streaming]);
 
-	const handleSend = (text: string) => {
-		if (!text.trim()) return;
+	// P0：停止 = 客户端断流 + 尽力打断 pi runtime（有 agent 时）。两者都发：
+	// stop() 只断 SSE，pi 会继续跑完；abortRuntime 才是真正的打断命令。
+	const handleStop = () => {
+		stop();
+		const runtime = activeSessionId ? runtimeFor(activeSessionId) : undefined;
+		if (runtime) {
+			void abortRuntime(runtime.sessionId, {
+				sessionId: runtime.sessionId,
+				agentId: runtime.agentId,
+				runtimeGeneration: runtime.runtimeGeneration ?? 0,
+			}).catch(() => {
+				// runtime 已退出时静默（下次轮询会收敛状态）
+			});
+		}
+	};
+
+	// P2：发送携带图片附件（data URL，已压缩）；首页直发走 pending 队列。
+	const handleSend = (text: string, images: string[]) => {
+		if (!text.trim() && images.length === 0) return;
 		if (!activeSessionId) {
-			// 首页直发：无会话时自动新建会话（携带已选模型/思考级别）再投递首条消息
-			void sendFromHome(text);
+			void sendFromHome(text, images);
 			return;
 		}
-		void sendMessage({ text });
+		void sendMessage({ text }, { body: { images } });
 	};
 
 	// 首页直发流程：优先内置 chat 项目（未配置项目时的兜底），否则取第一个项目；
 	// 创建期间复用 creatingProjectId 短暂禁用输入，防止重复提交。
-	const sendFromHome = async (text: string) => {
+	const sendFromHome = async (text: string, images: string[]) => {
 		const project = state.projects.find((candidate) => candidate.kind === "chat") ?? state.projects[0];
 		if (!project) {
 			setCommandError(t("web.sendNoProject"));
@@ -198,7 +234,7 @@ export function WebChatApp() {
 			setActiveSessionId(id);
 			setMobileSidebarOpen(false);
 			// 会话 id 变化后 useChat 重建实例；等新实例就绪再投递（见上方 effect）
-			pendingSendRef.current = { sessionId: id, text };
+			pendingSendRef.current = { sessionId: id, text, images };
 			await refreshNow();
 		} catch (error) {
 			setCommandError(error instanceof Error ? error.message : String(error));
@@ -388,6 +424,189 @@ export function WebChatApp() {
 		}
 	};
 
+	// ── P1/P2/P3：会话、runtime 与消息操作（供 Header 溢出菜单 / 侧栏菜单 / 时间线 hover） ──
+
+	/** 当前活跃会话的 runtime 命令目标（无 runtime 返回 undefined，入口按钮随之隐藏）。 */
+	const activeTarget = activeRuntime
+		? {
+				sessionId: activeRuntime.sessionId,
+				agentId: activeRuntime.agentId,
+				runtimeGeneration: activeRuntime.runtimeGeneration ?? 0,
+			}
+		: undefined;
+
+	/** 重新拉取活跃会话历史（编辑/删除/压缩后刷新时间线）。 */
+	const reloadActiveHistory = async () => {
+		if (!activeSessionId) return;
+		try {
+			const page = await fetchMessagePage(activeSessionId);
+			const history = chatMessagesToUiMessages(page.messages);
+			messagesBySessionRef.current[activeSessionId] = history;
+			historyMetaRef.current[activeSessionId] = { total: page.total, nextBefore: page.nextBefore };
+			loadedSessionsRef.current.add(activeSessionId);
+			if (activeSessionIdRef.current === activeSessionId) setMessages(history);
+		} catch {
+			// 刷新失败保持现状（下次轮询/操作会重试）
+		}
+	};
+
+	const runSessionAction = async (action: WebSessionRowAction, sessionId: string) => {
+		setCommandError(null);
+		try {
+			if (action === "rename") {
+				const session = state.sessions.find((item) => item.id === sessionId);
+				setRenameDraft({ sessionId, title: session?.title ?? "" });
+				setRenameValue(session?.title ?? "");
+				return;
+			}
+			if (action === "duplicate") {
+				const newId = await copySession(sessionId);
+				if (newId) markSessionLoaded(newId);
+				await refreshNow();
+				return;
+			}
+			if (action === "export") {
+				await downloadSessionHtml(sessionId);
+				return;
+			}
+			setDeleteConfirmId(sessionId);
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	const confirmRename = async () => {
+		if (!renameDraft) return;
+		const title = renameValue.trim();
+		if (!title) return;
+		try {
+			await renameSession(renameDraft.sessionId, title);
+			setState((current) => ({ ...current, sessions: current.sessions.map((session) => (session.id === renameDraft.sessionId ? { ...session, title } : session)) }));
+			setRenameDraft(null);
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	const confirmDeleteSession = async () => {
+		const sessionId = deleteConfirmId;
+		if (!sessionId) return;
+		setDeleteConfirmId(null);
+		setCommandError(null);
+		try {
+			await deleteSession(sessionId);
+			delete messagesBySessionRef.current[sessionId];
+			delete historyMetaRef.current[sessionId];
+			loadedSessionsRef.current.delete(sessionId);
+			if (activeSessionIdRef.current === sessionId) setActiveSessionId("");
+			await refreshNow();
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	const runRuntimeAction = async (action: "restart" | "compact" | "clone") => {
+		if (!activeTarget) return;
+		setCommandError(null);
+		try {
+			if (action === "restart") {
+				await restartRuntime(activeTarget.sessionId, activeTarget);
+			} else if (action === "compact") {
+				await compactRuntime(activeTarget.sessionId, activeTarget);
+			} else {
+				const cloned = await cloneRuntime(activeTarget.sessionId, activeTarget);
+				const newId = cloned.session?.id;
+				if (newId) markSessionLoaded(newId);
+				await refreshNow();
+				if (newId) setActiveSessionId(newId);
+				return;
+			}
+			await refreshNow();
+			await reloadActiveHistory();
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	const handleCopyMarkdown = async () => {
+		if (!activeSessionId) return;
+		const markdown = sessionUiMessagesToMarkdown(messagesBySessionRef.current[activeSessionId] ?? []);
+		try {
+			await navigator.clipboard.writeText(markdown || "");
+		} catch {
+			setCommandError(t("web.copyFailed"));
+		}
+	};
+
+	const handleEditMessage = async (messageId: string, newText: string) => {
+		if (!activeTarget) return;
+		setCommandError(null);
+		try {
+			await editRuntimeMessage(activeTarget.sessionId, activeTarget, messageId, newText);
+			await reloadActiveHistory();
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	const handleDeleteMessage = async (messageId: string) => {
+		if (!activeTarget) return;
+		setCommandError(null);
+		try {
+			await deleteRuntimeMessage(activeTarget.sessionId, activeTarget, messageId);
+			await reloadActiveHistory();
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	const handleResendMessage = async (messageId: string) => {
+		if (!activeTarget) return;
+		setCommandError(null);
+		try {
+			const prepared = await prepareResend(activeTarget.sessionId, activeTarget, messageId);
+			setPrefill({ text: prepared.text ?? "", nonce: Date.now() });
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	const handlePermissionChange = async (preset: string) => {
+		if (!activeTarget || !activeSessionId) return;
+		setCommandError(null);
+		try {
+			await setRuntimePermission(activeTarget, preset);
+			// 先乐观更新本地记录，事件流确认后由轮询收敛
+			setState((current) => ({ ...current, sessions: current.sessions.map((session) => (session.id === activeSessionId ? { ...session, permissionPreset: preset } : session)) }));
+		} catch (error) {
+			setCommandError(error instanceof Error ? error.message : String(error));
+		}
+	};
+
+	// P2：上下文用量随主轮询节奏拉取（活跃 runtime 存在时；无 runtime 清空圆环）
+	useEffect(() => {
+		if (!activeTarget) {
+			setContextUsage(undefined);
+			return;
+		}
+		let disposed = false;
+		const load = async () => {
+			try {
+				const usage = await fetchRuntimeContextUsage(activeTarget.sessionId, activeTarget);
+				if (!disposed) setContextUsage(usage);
+			} catch {
+				// runtime 退出/竞态时静默，下一轮轮询自然收敛
+			}
+		};
+		void load();
+		const timer = setInterval(load, streaming ? 1000 : 3000);
+		return () => {
+			disposed = true;
+			clearInterval(timer);
+		};
+		// activeTarget 每次渲染都是新对象，改用稳定原始字段做依赖
+	}, [activeTarget?.sessionId, activeTarget?.agentId, activeTarget?.runtimeGeneration, streaming]);
+
 	// 头部运行态：流式优先；否则用轮询到的 runtime 状态兜底
 	const headerStatus: WebHeaderStatus = (() => {
 		if (streaming) return "running";
@@ -415,6 +634,7 @@ export function WebChatApp() {
 					setActiveSessionId(sessionId);
 					setMobileSidebarOpen(false);
 				}}
+				onSessionAction={(action, sessionId) => void runSessionAction(action, sessionId)}
 				onCreateSession={(projectId) => void handleCreateSession(projectId)}
 				onCreateProject={handleCreateProject}
 				onDeleteProject={handleDeleteProject}
@@ -429,11 +649,28 @@ export function WebChatApp() {
 					models={models}
 					backend={activeSession?.backend}
 					refreshingModels={modelsRefreshing}
+					contextUsage={contextUsage}
+					permissionPreset={activeSession?.permissionPreset}
+					actions={{
+						onPermissionChange: activeSession?.backend === "dsh" ? (preset) => void handlePermissionChange(preset) : undefined,
+						onOpenRewind: activeTarget ? () => setRewindOpen(true) : undefined,
+						onOpenWorkspace: activeSession ? () => setWorkspaceOpen(true) : undefined,
+						onRename: activeSessionId ? () => void runSessionAction("rename", activeSessionId) : undefined,
+						onDuplicate: activeSessionId ? () => void runSessionAction("duplicate", activeSessionId) : undefined,
+						onExportHtml: activeSessionId ? () => void runSessionAction("export", activeSessionId) : undefined,
+						onCopyMarkdown: activeSessionId ? () => void handleCopyMarkdown() : undefined,
+						onRestart: activeTarget ? () => void runRuntimeAction("restart") : undefined,
+						onCompact: activeTarget ? () => void runRuntimeAction("compact") : undefined,
+						onClone: activeTarget ? () => void runRuntimeAction("clone") : undefined,
+						onDelete: activeSessionId ? () => void runSessionAction("delete", activeSessionId) : undefined,
+					}}
 					onRefreshModels={() => void refreshModels()}
 					onModelChange={(model) => void handleModelChange(model)}
 					onThinkingChange={(level) => void handleThinkingChange(level)}
 					onOpenDshTools={() => setDshToolsOpen(true)}
 				/>
+				{/* P3：fork 家族分支导航（家族只有一条会话时自渲染为 null） */}
+				<WebBranchBar sessions={state.sessions} activeSessionId={activeSessionId} onSelect={(sessionId) => setActiveSessionId(sessionId)} />
 				<WebTimeline
 					messages={messages}
 					hasActiveSession={Boolean(activeSession)}
@@ -446,11 +683,71 @@ export function WebChatApp() {
 					uiResponding={uiResponding}
 					onRespondUi={(response) => void handleRespondUi(response)}
 					onLoadMore={() => void handleLoadMore()}
+					canManageMessages={Boolean(activeTarget)}
+					onEditMessage={(messageId, newText) => void handleEditMessage(messageId, newText)}
+					onDeleteMessage={(messageId) => void handleDeleteMessage(messageId)}
+					onResendMessage={(messageId) => void handleResendMessage(messageId)}
 				/>
-				<WebComposer disabled={Boolean(creatingProjectId)} streaming={streaming} onSend={handleSend} onStop={() => stop()} />
+				<WebComposer disabled={Boolean(creatingProjectId)} streaming={streaming} prefill={prefill ?? undefined} onSend={handleSend} onStop={handleStop} />
 			</main>
 			{/* S6.3：DSH 工具面板（仅 dsh 会话头部按钮触发） */}
 			{dshToolsOpen && activeSessionId && <WebDshToolsPanel sessionId={activeSessionId} onClose={() => setDshToolsOpen(false)} />}
+			{/* P1：rewind 检查点面板（需活跃 runtime；conversation/all 恢复会 fork 新会话并切换） */}
+			{rewindOpen && activeTarget && (
+				<WebRewindPanel
+					sessionId={activeTarget.sessionId}
+					target={activeTarget}
+					open={rewindOpen}
+					onClose={() => setRewindOpen(false)}
+					onRestored={(result) => {
+						setRewindOpen(false);
+						void (async () => {
+							if (result.forkedSessionId) {
+								markSessionLoaded(result.forkedSessionId);
+								await refreshNow();
+								setActiveSessionId(result.forkedSessionId);
+							} else {
+								await refreshNow();
+								await reloadActiveHistory();
+							}
+						})();
+					}}
+				/>
+			)}
+			{/* P3：工作区抽屉（Git 状态/diff + 文件浏览，projectId 来自活跃会话） */}
+			{workspaceOpen && activeSession && <WebWorkspaceDrawer projectId={activeSession.projectId} open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />}
+			{/* P1：重命名会话对话框 */}
+			<Dialog open={renameDraft != null} onOpenChange={(open) => (!open ? setRenameDraft(null) : undefined)}>
+				<DialogContent className="max-w-sm">
+					<DialogHeader>
+						<DialogTitle>{t("web.renameTitle")}</DialogTitle>
+					</DialogHeader>
+					<Input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} placeholder={t("web.renamePlaceholder")} onKeyDown={(event) => (event.key === "Enter" ? void confirmRename() : undefined)} />
+					<DialogFooter>
+						<Button type="button" variant="ghost" size="sm" onClick={() => setRenameDraft(null)}>
+							{t("common.cancel")}
+						</Button>
+						<Button type="button" size="sm" disabled={!renameValue.trim()} onClick={() => void confirmRename()}>
+							{t("common.confirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+			{/* P1：删除会话确认（不可恢复操作走 AlertDialog 双保险） */}
+			<AlertDialog open={deleteConfirmId != null} onOpenChange={(open) => (!open ? setDeleteConfirmId(null) : undefined)}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>{t("web.deleteSessionConfirmTitle")}</AlertDialogTitle>
+						<AlertDialogDescription>{t("web.deleteSessionConfirmBody")}</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+						<AlertDialogAction className="bg-danger text-danger-foreground hover:bg-danger/90" onClick={() => void confirmDeleteSession()}>
+							{t("common.delete")}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

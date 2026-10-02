@@ -90,7 +90,7 @@ function fixture(overrides = {}) {
 		status: "idle",
 		createdAt: 2,
 	};
-	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], messageSessions: [], rewindTargets: [], rewindParams: [], rewindRestores: [] };
+	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], rewindTargets: [], rewindParams: [], rewindRestores: [] };
 	const targeted = (target, value) => ({ ok: true, value: { target, value } });
 	const deps = {
 		// SSE 流式依赖：测试环境不订阅真实 pi 事件，但必须提供可调用实现满足契约。
@@ -108,10 +108,6 @@ function fixture(overrides = {}) {
 		listModels: async () => [{ provider: "openai", id: "gpt-test", name: "GPT Test" }],
 		listAgents: () => [agent],
 		listSessions: async () => [],
-		getSessionRuntimeMessages: (sessionId) => {
-			calls.messageSessions.push(sessionId);
-			return { target: runtime, value: [{ id: "m1", role: "assistant", text: "ready", timestamp: 1 }] };
-		},
 		listCatalogSessions: async () => [session],
 		createSessionDraft: async (input) => {
 			calls.createDraft += 1;
@@ -512,14 +508,14 @@ test("whole-history read endpoint returns a bounded window with truncation metad
 	});
 });
 
-test("web polling state includes Session records, runtimes, and Session-keyed messages", async () => {
-	await withServer(async ({ baseUrl, calls }) => {
+test("web polling state carries sessions/runtimes but no per-session message payloads (P0 slim)", async () => {
+	await withServer(async ({ baseUrl }) => {
 		const response = await fetch(`${baseUrl}/api/state`);
 		const state = await response.json();
 		assert.equal(state.sessions[0].id, "session-1");
 		assert.equal(state.runtimes[0].runtimeGeneration, 3);
-		assert.equal(state.messagesBySession["session-1"][0].text, "ready");
-		assert.deepEqual(calls.messageSessions, ["session-1"]);
+		// P0 瘦身：/api/state 不再携带任何会话消息（历史走 /messages 与 /messages/page，运行中走 SSE）
+		assert.equal("messagesBySession" in state, false);
 	});
 });
 
@@ -538,33 +534,17 @@ test("the browser client accepts the real Session-first web-state contract", asy
 			assert.equal(runtimeEvent?.sessionId, "session-1");
 			assert.equal(runtimeEvent?.payload.status, "idle");
 			const messageEvent = events.find((event) => event.sourceChannel === "sessions:messages");
-			assert.equal(messageEvent?.payload.messages[0].text, "ready");
+			assert.equal(messageEvent?.payload.messages[0].text, "window");
 		} finally {
 			unsubscribe();
 		}
 	});
 });
 
-test("web polling omits a message snapshot whose runtime target no longer matches", async () => {
-	await withServer(
-		async ({ baseUrl }) => {
-			const response = await fetch(`${baseUrl}/api/state`);
-			const state = await response.json();
-			assert.equal(state.runtimes[0].agentId, "agent-1");
-			assert.equal("session-1" in state.messagesBySession, false);
-		},
-		{
-			getSessionRuntimeMessages: () => ({
-				target: { sessionId: "session-1", agentId: "agent-2", runtimeGeneration: 4 },
-				value: [{ id: "stale", role: "assistant", text: "stale", timestamp: 1 }],
-			}),
-		},
-	);
-});
-
-test("web polling cannot read runtime messages directly by Agent ID", () => {
+test("web polling no longer pulls per-runtime message snapshots", () => {
 	const source = readFileSync("src/main/web/WebServiceManager.ts", "utf8");
-	assert.match(source, /getSessionRuntimeMessages\(runtime\.sessionId\)/);
+	// P0：deps 已删除 getSessionRuntimeMessages，/api/state 与 Agent 内存消息解耦
+	assert.doesNotMatch(source, /getSessionRuntimeMessages/);
 	assert.doesNotMatch(source, /getMessages\(runtime\.agentId\)/);
 });
 
@@ -623,10 +603,10 @@ test("web errors expose stable codes without leaking unknown server exceptions",
 test("web responses strip desktop diagnostics and raw prompt errors recursively", async () => {
 	await withServer(
 		async ({ baseUrl, runtime }) => {
-			const state = await (await fetch(`${baseUrl}/api/state`)).json();
-			const serializedState = JSON.stringify(state);
-			assert.doesNotMatch(serializedState, /SECRET_MESSAGE_DIAGNOSTIC/);
-			assert.equal("debugDetails" in state.messagesBySession["session-1"][0].meta, false);
+			// P0 瘦身后诊断剥离从有界消息端点断言（/api/state 已无消息负载）
+			const messagesBody = await (await fetch(`${baseUrl}/api/sessions/session-1/messages`)).json();
+			assert.doesNotMatch(JSON.stringify(messagesBody), /SECRET_MESSAGE_DIAGNOSTIC/);
+			assert.equal("debugDetails" in messagesBody.messages[0].meta, false);
 
 			const prompt = await (
 				await fetch(`${baseUrl}/api/sessions/session-1/prompt`, {
@@ -651,13 +631,8 @@ test("web responses strip desktop diagnostics and raw prompt errors recursively"
 			assert.doesNotMatch(JSON.stringify(command), /SECRET_COMMAND_STACK/);
 		},
 		{
-			getSessionRuntimeMessages: (_sessionId) => ({
-				target: {
-					sessionId: "session-1",
-					agentId: "agent-1",
-					runtimeGeneration: 3,
-				},
-				value: [
+			readSessionMessages: async () => ({
+				messages: [
 					{
 						id: "m-secret",
 						agentId: "agent-1",
@@ -670,6 +645,9 @@ test("web responses strip desktop diagnostics and raw prompt errors recursively"
 						},
 					},
 				],
+				total: 1,
+				windowStart: 0,
+				truncated: false,
 			}),
 			sendSessionPrompt: async (input) => ({
 				accepted: false,

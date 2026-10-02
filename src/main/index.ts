@@ -343,6 +343,7 @@ import { QuickTaskWindowChrome } from "./quickTask/quickTaskWindowChrome";
 import { registerQuickTaskIpc } from "./ipc/quickTaskIpc";
 import { BROWSER_PANEL_PARTITION as BROWSER_PANEL_PARTITION_SHARED, isAllowedBrowserPanelUrl as isAllowedBrowserPanelUrlShared } from "./browser/browserSecurity";
 import { WebServiceManager } from "./web/WebServiceManager";
+import { WebWorkspaceRoutes } from "./web/WebWorkspaceRoutes";
 import { preparePreloadPath } from "./preloadPath";
 import { AppLogger } from "./logging/AppLogger";
 import { setAppLogger } from "./logging/sharedLogger";
@@ -2915,6 +2916,7 @@ function registerIpc() {
 			searchDshSessions: (query) => dshHost.searchSessions(query),
 			createDshGoal: (agentId, objective, maxGoalRounds) => dshAgentManager.createGoal(agentId, objective, maxGoalRounds),
 			runDshGoalAction: (agentId, action) => dshAgentManager.goalAction(agentId, action),
+			cancelDshQueuedMessage: (agentId, itemId) => dshAgentManager.cancelQueuedMessage(agentId, itemId),
 			listDshSubagents: (agentId) => dshAgentManager.listSubagents(agentId),
 			listDshSkills: (agentId) => dshAgentManager.listSkills(agentId),
 			readDshSubagentHistory: (agentId, childSessionId, beforeSeq, maxMessages) => dshAgentManager.readSubagentHistory(agentId, childSessionId, beforeSeq, maxMessages),
@@ -3949,7 +3951,6 @@ app
 				const project = projectStore.get(projectId);
 				return sessionScanner.list(project?.path);
 			},
-			getSessionRuntimeMessages: (sessionId) => sessionRuntimeCoordinator.getRuntimeMessages(sessionId),
 			listCatalogSessions: async (projectId) => {
 				if (!projectId) {
 					return sessionCatalog
@@ -4120,6 +4121,29 @@ app
 					};
 				}
 			},
+			getForkMessages: (target) => sessionRuntimeCoordinator.getRuntimeForkMessages(target),
+			forkRuntimeSession: (target, entryId) => sessionRuntimeCoordinator.forkRuntimeSession(target, entryId),
+		});
+		// P1-P3 工作区路由（git/files/prompts）：只读能力注入，未装配的服务自动 503
+		webServiceManager.workspaceRoutes = new WebWorkspaceRoutes({
+			listProjects: () => projectStore.list(),
+			git: {
+				isGitRepo: (cwd) => gitService.isGitRepo(cwd),
+				getBranches: (cwd) => gitService.getBranches(cwd),
+				getStatus: (cwd) => gitService.getStatus(cwd),
+				getWorkspaceFileDiff: (cwd, group, filePath, maxBytes) => gitService.getWorkspaceFileDiff(cwd, group, filePath, maxBytes),
+				getCommitLog: (cwd, options) => gitService.getCommitLog(cwd, options),
+			},
+			files: {
+				listTree: (root, maxDepth, directory) => fileSystemService.listTree(root, maxDepth, directory),
+			},
+			// 提示词库只在 SQLite 库可用时注入（缺库时路由返回 503，前端隐藏入口）
+			prompts: xuePromptManager
+				? {
+						list: (opts) => xuePromptManager.list(opts),
+						detail: (slug, category) => xuePromptManager.detail(slug, category),
+					}
+				: undefined,
 		});
 		// C12：退出清理登记（before-quit 统一 runAll）
 		quitCleanup.register("theme-schedule", () => clearThemeScheduleTimer());

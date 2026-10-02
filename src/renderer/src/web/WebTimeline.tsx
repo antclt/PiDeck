@@ -9,7 +9,7 @@
  * - 流式期间底部显示响应指示器；出错显示诊断卡
  */
 import { Fragment, memo, useEffect, useRef, useState } from "react";
-import { ArrowDown, Brain, ChevronDown, ChevronRight, ChevronUp, Wrench } from "lucide-react";
+import { ArrowDown, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Copy, Pencil, RefreshCw, Trash2, Wrench, X } from "lucide-react";
 import type { UIMessage } from "ai";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
@@ -22,22 +22,161 @@ import { MarkdownStream } from "@/components/session/MarkdownStream";
 import { SingleLinePreview } from "@/components/session/SingleLinePreview";
 import { TimelineMarker } from "../components/session/TimelineMarker";
 import { LogoMark } from "../components/app/LogoMark";
+import { copyTextToClipboard } from "./webClipboard";
 
-/** 用户消息右对齐气泡（结构与桌面 UserBubble 一致，去掉操作栏/附件能力）。 */
-export const WebUserBubble = memo(function WebUserBubble(props: { message: UIMessage }) {
-	const text = props.message.parts
+/** 工具参数/结果格式化：字符串原样，对象 pretty JSON，超长截断。 */
+function prettyToolValue(value: unknown, maxChars = 4000): string {
+	if (value == null) return "";
+	let text = typeof value === "string" ? value : "";
+	if (!text) {
+		try {
+			text = JSON.stringify(value, null, 2);
+		} catch {
+			text = String(value);
+		}
+	}
+	return text.length > maxChars ? `${text.slice(0, maxChars)}\n… (${text.length} chars)` : text;
+}
+
+/** 从 UIMessage 提取纯文本（复制/重发用）。 */
+export function uiMessageText(message: UIMessage): string {
+	return message.parts
 		.filter((part) => part.type === "text")
 		.map((part) => (part.type === "text" ? part.text : ""))
-		.join("");
-	if (!text.trim()) return null;
+		.join("")
+		.trim();
+}
+
+/** 提取消息中的图片 data URL（用户气泡缩略图 / 重发附件）。 */
+export function uiMessageImages(message: UIMessage): string[] {
+	const urls: string[] = [];
+	for (const part of message.parts) {
+		if (part.type !== "file") continue;
+		const filePart = part as { mediaType?: string; data?: string; url?: string };
+		const src = typeof filePart.data === "string" ? filePart.data : typeof filePart.url === "string" ? filePart.url : "";
+		if (src && (!filePart.mediaType || filePart.mediaType.startsWith("image/"))) urls.push(src);
+	}
+	return urls;
+}
+
+/** 用户消息右对齐气泡（结构与桌面 UserBubble 一致；P1/P2 增加图片与 hover 操作）。 */
+export const WebUserBubble = memo(function WebUserBubble(props: {
+	message: UIMessage;
+	/** runtime 存活且非流式时才允许编辑/删除/重发（历史静态会话不提供） */
+	canManage?: boolean;
+	onEdit?: (messageId: string, newText: string) => void;
+	onDelete?: (messageId: string) => void;
+	onResend?: (messageId: string) => void;
+}) {
+	const text = uiMessageText(props.message);
+	const images = uiMessageImages(props.message);
+	const [editing, setEditing] = useState(false);
+	const [editDraft, setEditDraft] = useState("");
+	if (!text.trim() && images.length === 0) return null;
+	const manage = Boolean(props.canManage && props.onEdit && props.onDelete && props.onResend);
 	return (
 		<article className="user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end">
-			<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
-				<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
-			</div>
+			{images.length > 0 ? (
+				<div className="mb-1.5 flex w-fit max-w-full flex-wrap justify-end gap-1.5">
+					{images.map((src, index) => (
+						// eslint-disable-next-line @next/next/no-img-element
+						<img key={index} src={src} alt={t("web.messageImage")} className="h-24 w-24 rounded-lg border border-border object-cover" loading="lazy" />
+					))}
+				</div>
+			) : null}
+			{editing ? (
+				<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-primary/40 bg-muted/60 p-2">
+					<textarea
+						className="min-h-16 w-full resize-y rounded-md bg-transparent text-sm text-text-primary outline-none"
+						value={editDraft}
+						autoFocus
+						onChange={(event) => setEditDraft(event.target.value)}
+						onKeyDown={(event) => {
+							if (event.key === "Escape") setEditing(false);
+							if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+								event.preventDefault();
+								if (editDraft.trim()) {
+									props.onEdit?.(props.message.id, editDraft.trim());
+									setEditing(false);
+								}
+							}
+						}}
+					/>
+					<div className="mt-1.5 flex justify-end gap-1.5">
+						<Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={() => setEditing(false)}>
+							<X className="size-3.5" aria-hidden="true" />
+						</Button>
+						<Button
+							type="button"
+							size="sm"
+							className="h-7 px-2"
+							disabled={!editDraft.trim()}
+							onClick={() => {
+								if (editDraft.trim()) {
+									props.onEdit?.(props.message.id, editDraft.trim());
+									setEditing(false);
+								}
+							}}
+						>
+							<Check className="size-3.5" aria-hidden="true" />
+						</Button>
+					</div>
+				</div>
+			) : (
+				<>
+					{text.trim() ? (
+						<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
+							<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
+						</div>
+					) : null}
+					{/* hover 操作行：复制恒有；编辑/删除/重发需 runtime 存活 */}
+					<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100">
+						<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(text)}>
+							<Copy className="size-3.5" aria-hidden="true" />
+						</ActionButton>
+						{manage ? (
+							<>
+								<ActionButton
+									label={t("web.msgEdit")}
+									onClick={() => {
+										setEditDraft(text);
+										setEditing(true);
+									}}
+								>
+									<Pencil className="size-3.5" aria-hidden="true" />
+								</ActionButton>
+								<ActionButton label={t("web.msgResend")} onClick={() => props.onResend?.(props.message.id)}>
+									<RefreshCw className="size-3.5" aria-hidden="true" />
+								</ActionButton>
+								<ActionButton label={t("web.msgDelete")} danger onClick={() => props.onDelete?.(props.message.id)}>
+									<Trash2 className="size-3.5" aria-hidden="true" />
+								</ActionButton>
+							</>
+						) : null}
+					</div>
+				</>
+			)}
 		</article>
 	);
 });
+
+/** hover 工具按钮（消息操作行用）。 */
+function ActionButton(props: { label: string; onClick: () => void; danger?: boolean; children: React.ReactNode }) {
+	return (
+		<button
+			type="button"
+			className={cn(
+				"inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_60%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]",
+				props.danger && "hover:text-danger",
+			)}
+			title={props.label}
+			aria-label={props.label}
+			onClick={props.onClick}
+		>
+			{props.children}
+		</button>
+	);
+}
 
 /** 思考折叠卡片（复用桌面 ThinkingBlock 视觉：Brain + 耗时/标题 + 同行预览）。
  * 默认永远单行；流式时预览尾部跟随，不自动撑开正文（对齐 dsh-web ReasoningRow）。 */
@@ -98,6 +237,7 @@ type WebToolPart = {
 	toolName?: string;
 	toolCallId?: string;
 	state?: string;
+	input?: unknown;
 	output?: unknown;
 	errorText?: string;
 };
@@ -110,10 +250,16 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 	const state = part.state ?? "input-streaming";
 	const running = state === "input-streaming" || state === "input-available";
 	const error = state === "output-error" || state === "error" || Boolean(part.errorText);
+	const [expanded, setExpanded] = useState(false);
+	const inputText = prettyToolValue(part.input);
+	const outputText = prettyToolValue(part.output);
+	const errorText = typeof part.errorText === "string" ? prettyToolValue(part.errorText) : "";
+	// 运行中（输出未到）也可先展开看已流式到的输入
+	const hasBody = Boolean(inputText || outputText || errorText);
 	return (
 		<TimelineMarker kind="tool" tone={error ? "error" : running ? "active" : "success"}>
 			<section className={cn("tool-card w-full min-w-0 overflow-hidden", running && "tone-running", error && "tone-error")} data-status={error ? "error" : running ? "running" : "done"} data-tool-name={toolName}>
-				<div className="relative flex min-h-7 items-center rounded-md px-1 py-1">
+				<button type="button" className="relative flex min-h-7 w-full cursor-pointer items-center rounded-md px-1 py-1 text-left" onClick={() => hasBody && setExpanded((value) => !value)} aria-expanded={expanded}>
 					<span className="tool-card-trigger flex min-w-0 items-center gap-2 text-control leading-5 text-text-secondary">
 						<span className="tool-card-icon">
 							<Wrench size={14} aria-hidden="true" />
@@ -129,18 +275,37 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 								<span className="inline-flex items-center gap-1.5">{t("tool.statusError")}</span>
 							) : null}
 						</span>
+						{hasBody ? <ChevronDown size={14} className={cn("ml-auto shrink-0 text-text-tertiary transition-transform duration-150", expanded && "rotate-180")} aria-hidden="true" /> : null}
 					</span>
-				</div>
+				</button>
+				{expanded ? (
+					<div className="mx-1 mb-1 space-y-1.5 rounded-md border border-border-subtle bg-[color:color-mix(in_srgb,var(--color-bg-app)_60%,transparent)] p-2">
+						{errorText ? <ToolValueBlock label={t("web.toolError")} text={errorText} tone="error" /> : null}
+						{inputText ? <ToolValueBlock label={t("web.toolInput")} text={inputText} /> : null}
+						{outputText ? <ToolValueBlock label={t("web.toolOutput")} text={outputText} /> : null}
+					</div>
+				) : null}
 			</section>
 		</TimelineMarker>
 	);
 });
 
+/** 工具输入/输出展示块（等宽 + 限高滚动）。 */
+function ToolValueBlock(props: { label: string; text: string; tone?: "error" }) {
+	return (
+		<div className="min-w-0">
+			<div className={cn("mb-0.5 font-mono text-micro uppercase tracking-wide text-text-tertiary", props.tone === "error" && "text-danger")}>{props.label}</div>
+			<pre className={cn("max-h-56 overflow-auto rounded border border-border-subtle bg-black/[0.03] p-1.5 font-mono text-micro leading-relaxed whitespace-pre-wrap break-all text-text-secondary", props.tone === "error" && "text-danger")}>{props.text}</pre>
+		</div>
+	);
+}
+
 /** 助手消息：思考 + 工具 + 正文 的扁平容器（不套气泡，左对齐全宽）。 */
 export const WebAssistantMessage = memo(function WebAssistantMessage(props: { message: UIMessage; isStreaming: boolean }) {
 	const { message, isStreaming } = props;
+	const text = uiMessageText(message);
 	return (
-		<div className="w-full min-w-0">
+		<div className="group/assistant w-full min-w-0">
 			{message.parts.map((part, index) => {
 				if (part.type === "reasoning") {
 					return <WebThinkingBlock key={index} text={part.text} running={isStreaming} />;
@@ -163,6 +328,13 @@ export const WebAssistantMessage = memo(function WebAssistantMessage(props: { me
 				}
 				return null;
 			})}
+			{!isStreaming && text ? (
+				<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/assistant:opacity-100 focus-within:opacity-100">
+					<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(text)}>
+						<Copy className="size-3.5" aria-hidden="true" />
+					</ActionButton>
+				</div>
+			) : null}
 		</div>
 	);
 });
@@ -362,6 +534,11 @@ export function WebTimeline(props: {
 	uiResponding?: boolean;
 	onRespondUi?: (response: AgentUiResponse) => void;
 	onLoadMore: () => void;
+	/** P1：消息操作（runtime 存活时可用） */
+	canManageMessages?: boolean;
+	onEditMessage?: (messageId: string, newText: string) => void;
+	onDeleteMessage?: (messageId: string) => void;
+	onResendMessage?: (messageId: string) => void;
 }) {
 	const { messages, hasActiveSession, hasMoreHistory, moreCount, loadingMore, streaming, error, onLoadMore } = props;
 	const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -417,7 +594,13 @@ export function WebTimeline(props: {
 				) : (
 					<>
 						{messages.map((message) => (
-							<div key={message.id}>{message.role === "user" ? <WebUserBubble message={message} /> : <WebAssistantMessage message={message} isStreaming={streaming && message === messages[messages.length - 1]} />}</div>
+							<div key={message.id}>
+								{message.role === "user" ? (
+									<WebUserBubble message={message} canManage={props.canManageMessages} onEdit={props.onEditMessage} onDelete={props.onDeleteMessage} onResend={props.onResendMessage} />
+								) : (
+									<WebAssistantMessage message={message} isStreaming={streaming && message === messages[messages.length - 1]} />
+								)}
+							</div>
 						))}
 					</>
 				)}
