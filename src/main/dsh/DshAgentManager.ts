@@ -32,10 +32,12 @@ import { resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
 import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshApprovalFrame, parseDshQuestionFrame, questionUiRequest, type DshApprovalFrame, type DshQuestionFrame } from "./dshApprovalBridge";
 import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, normalizeDshTurnPageSize, planDshHistoryRounds, trimToOldestTurnStart } from "./dshHistoryPagePlan";
 import { isContextOverflowError } from "../../shared/contextOverflow";
+import { parseDshTeamProjection } from "./dshTeamProjection";
+import type { DshTeamState } from "../../shared/types/agent";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
 import type { RpcLogLiveSink } from "../logging/RpcLogLiveBroadcaster";
 
-const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats", "todos", "inbox"];
+const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats", "todos", "inbox", "agentTeam"];
 
 /**
  * DSH 后端网关：实现 SessionAgentGateway，把 DSH host（DshHost）的会话/事件
@@ -355,6 +357,11 @@ export class DshAgentManager implements SessionAgentGateway {
 			const baselineTodos = attachProjectionValues !== null && typeof attachProjectionValues === "object" ? (attachProjectionValues as Record<string, unknown>).todos : undefined;
 			const parsedBaselineTodos = parseDshTodoList(baselineTodos);
 			if (parsedBaselineTodos !== undefined) runtime.todos = parsedBaselineTodos;
+			// agentTeam 投影同样以 list 的完整折叠为 attach 初值（启用实验预设的历史会话
+			// 重启后即恢复成员/任务板，不等第一条实时帧）。
+			const baselineTeam = attachProjectionValues !== null && typeof attachProjectionValues === "object" ? (attachProjectionValues as Record<string, unknown>).agentTeam : undefined;
+			const parsedBaselineTeam = parseDshTeamProjection(baselineTeam);
+			if (parsedBaselineTeam !== undefined) runtime.dshTeam = parsedBaselineTeam;
 			if (attachProjectionSeq !== undefined && attachProjectionValues !== null && typeof attachProjectionValues === "object") {
 				for (const key of DSH_PROJECTION_KEYS) {
 					if (Object.prototype.hasOwnProperty.call(attachProjectionValues, key)) {
@@ -890,6 +897,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			goal: runtime.goal,
 			// 当前待办计划（官方 todos projection / todo/write 快照；渲染层 todo 条数据源）
 			todos: runtime.todos,
+			// agent-team 团队状态（agentTeam 投影；渲染层 Team 面板数据源，未启用预设时 undefined）
+			dshTeam: runtime.dshTeam,
 			// host 侧排队消息（inbox 投影；渲染层排队提示条数据源）
 			queuedMessages: runtime.queuedMessages,
 			// 上下文占用（host contextPressure/contextBreakdown 投影；缺失时消息估算兜底）
@@ -1895,6 +1904,16 @@ export class DshAgentManager implements SessionAgentGateway {
 			}
 			return;
 		}
+		if (key === "agentTeam") {
+			// agent-team 实验预设的团队投影（成员/任务板整值替换；解析失败保持原值）。
+			// 未启用预设的会话不会收到该 key，白名单已把它与其他会话的杂散帧隔开。
+			const parsed = parseDshTeamProjection(payload.value);
+			if (parsed !== undefined) {
+				runtime.dshTeam = parsed;
+				this.emitRuntimeState(runtime.tab.id);
+			}
+			return;
+		}
 	}
 
 	/**
@@ -2511,6 +2530,8 @@ type DshAgentRuntime = {
 	 * 经 runtime-state 推给渲染层 todo 条；null = 已清空（standing plan 语义）。
 	 */
 	todos?: TodoItem[] | null;
+	/** agent-team 团队状态（agentTeam 投影；仅启用实验预设的会话有值）。见 parseDshTeamProjection。 */
+	dshTeam?: DshTeamState | null;
 	/** 进行中的思考段 id（turn 内首个 reasoning-delta 起登记；终态清空）。 */
 	thinkingId?: string;
 	thinkingStartedAt?: number;

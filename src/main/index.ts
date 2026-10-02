@@ -3561,6 +3561,8 @@ app
 			() => settingsStore.get().dshRunnerNodePath ?? "",
 			// 手动停止标记（持久化）：为真时 ensureStarted 拒绝自动拉起，只有用户显式启动才 boot。
 			() => settingsStore.get().dshManualStopped === true,
+			// agent-team 实验预设（默认关）：fork 时读快照传入 hostEntry；变更需重启 host。
+			() => settingsStore.get().dshAgentTeamPreset === true,
 		);
 		// 实时 RPC 日志广播器（DSH 后端用）：镜像 pi AgentManager 的 80ms 节流批量推送语义，
 		// 窗口销毁后静默丢弃；观看登记由 rpcLogsSetWatching IPC 按面板挂载/卸载成对驱动。

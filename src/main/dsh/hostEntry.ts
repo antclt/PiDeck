@@ -10,6 +10,8 @@
  *   --dsh-home <dir>           DSH_HOME（会话/存储/凭证目录）
  *   --dsh-config <dir>         cordis.yml 与本地插件目录
  *   --dsh-node-modules <dir>   bareModuleBaseUrl 锚点（node_modules 目录 URL）
+ *   --dsh-agent-team <0|1>     启用 agent-team 实验预设（设置项 dshAgentTeamPreset；
+ *                              仅 fork 时读取，变更后需重启 DSH host 生效）
  *
  * 注意：本文件被 electron-vite 主进程构建打包（rollup 多入口），产物为 CJS；
  * @deepseek-ai/* 全部 externalize，运行时动态 import() 加载（与 DshHost 一致）。
@@ -20,7 +22,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { installHiddenConsolePatch, installHostHiddenConsole, installRunnerNodeModeEnv, installRunnerPreloadEnv, getHiddenConsoleMode, configureDshRunnerNodeSidecar, getDshRunnerNodeSidecar } from "./hideChildConsoles";
 import { DSH_RUNNER_NODE_ENV } from "./dshRunnerNodeSidecar";
-import { agentPresetsRow, dshSubagentModelSelectionSettingsRow, dshWebAgentPlaneDisableRows } from "./dshPresetComposition";
+import { agentPresetsRow, agentTeamPresetPatchPath, dshSubagentModelSelectionSettingsRow, dshWebAgentPlaneDisableRows } from "./dshPresetComposition";
 import { prepareDshHostProfile } from "./dshHostProfile";
 import { createLegacyPresetPlugin } from "./pideckLegacyPreset";
 import { PIDECK_PLUGIN_BRIDGE_PATH, handlePluginBridgeFetch } from "./pideckPluginBridge";
@@ -233,7 +235,9 @@ async function main(): Promise<void> {
 
 	// 0.2 配置由官方 profile/config-editor 持有。共享 home patch 最后加载，
 	// 遥测禁用再压到最终层；非法用户补丁必须报错，不能静默丢配置。
-	const profile = await prepareDshHostProfile(dshHome, require, appBoot, patches);
+	// agent-team 实验预设（--dsh-agent-team=1，设置项 dshAgentTeamPreset，默认关）：
+	// 仅影响 host 组合层，会话/存储层无感知。
+	const profile = await prepareDshHostProfile(dshHome, require, appBoot, patches, args["dsh-agent-team"] === "1");
 	const pickerPath = join(configDir, "pideck-directory-picker.js");
 	if (!existsSync(pickerPath)) {
 		writeFileSync(pickerPath, ["export default {", "  apply(ctx) {", "    ctx.provide('directoryPicker', {", "      capability() { return { kind: 'none' }; },", "    });", "  },", "};", ""].join("\n"));
