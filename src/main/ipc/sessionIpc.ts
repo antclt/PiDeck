@@ -41,6 +41,8 @@ import type {
 import type { BridgeEventInput, BridgeResyncInput } from "../../shared/types/bridge";
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
 import { dshUnavailablePageFor } from "../dsh/dshManualStop";
+import { validateNpmSpec } from "../dsh/dshPluginNpmRunner";
+import { validateSearchKeyword } from "../dsh/dshPluginMarket";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "../pi/derivedSubagents";
 import { resolveLaunchDefaultOptions, isModelInModelsConfig } from "../sessions/launchDefaults";
 import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator";
@@ -277,6 +279,12 @@ export type DshBackendIpcDeps = {
 	listDshStaticPlugins?: () => Promise<import("../../shared/types").DshStaticPluginView[]>;
 	/** DSH 用户自装静态插件卸载（移除用户补丁层行 + 可选回收插件目录）；未装配时抛错。 */
 	uninstallDshUserPlugin?: (input: import("../../shared/types").DshUserPluginUninstallInput) => Promise<import("../../shared/types").DshUserPluginUninstallResult>;
+	/** DSH 插件市场搜索（官方目录 + npm 双源）；未装配时抛错。 */
+	searchDshPluginMarket?: (keyword: string) => Promise<import("../../shared/types").DshPluginMarketSearchResult>;
+	/** DSH 用户自装静态插件安装（npm pack → 受管目录 → 用户补丁层行；幂等）；未装配时抛错。 */
+	installDshUserPlugin?: (spec: string) => Promise<import("../../shared/types").DshUserPluginInstallResult>;
+	/** DSH 用户补丁层清单（安装服务视角）；未装配时返回空列表。 */
+	listDshUserPlugins?: () => Promise<import("../../shared/types").DshUserPluginListEntry[]>;
 	/** DSH 动态插件安装（define）；未装配时抛错。 */
 	installDshPlugin?: (input: import("../../shared/types").DshPluginInstallInput) => Promise<unknown>;
 	/** DSH 动态插件运行（面板手势）；未装配时抛错。 */
@@ -446,6 +454,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		listDshDynamicPlugins,
 		listDshStaticPlugins,
 		uninstallDshUserPlugin,
+		searchDshPluginMarket,
+		installDshUserPlugin,
+		listDshUserPlugins,
 		installDshPlugin,
 		runDshPlugin,
 		stopDshPlugin,
@@ -1218,6 +1229,29 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			moduleName: record.moduleName,
 			deleteFiles: record.deleteFiles === true,
 		});
+	});
+	// DSH 插件市场搜索：关键词 1-80 字符、无控制字符（渲染层输入不可信）。
+	ipcMain.handle(ipcChannels.dshPluginMarketSearch, async (_event, keyword: unknown): Promise<import("../../shared/types").DshPluginMarketSearchResult> => {
+		if (typeof keyword !== "string") throw new Error("invalid plugin market search payload");
+		const validated = validateSearchKeyword(keyword);
+		if (!validated.ok) throw new Error(validated.reason);
+		if (!searchDshPluginMarket) throw new Error("DSH plugin market search is not available");
+		return searchDshPluginMarket(validated.value);
+	});
+	// DSH 用户插件安装：spec 只接受 npm 包名或 name@精确版本（路径/range/tag 全拒）。
+	ipcMain.handle(ipcChannels.dshPluginUserInstall, async (_event, input: unknown): Promise<import("../../shared/types").DshUserPluginInstallResult> => {
+		if (typeof input !== "object" || input === null) throw new Error("invalid user plugin install payload");
+		const record = input as Record<string, unknown>;
+		if (typeof record.spec !== "string" || !record.spec.trim()) throw new Error("invalid user plugin install payload");
+		const spec = validateNpmSpec(record.spec);
+		if (!spec.ok) throw new Error(spec.reason);
+		if (!installDshUserPlugin) throw new Error("DSH user plugin install is not available");
+		return installDshUserPlugin(record.spec.trim());
+	});
+	// DSH 用户补丁层清单（安装服务视角；未装配返回空列表与既有 list 通道语义一致）。
+	ipcMain.handle(ipcChannels.dshPluginUserList, async (): Promise<import("../../shared/types").DshUserPluginListEntry[]> => {
+		if (!listDshUserPlugins) return [];
+		return listDshUserPlugins();
 	});
 	ipcMain.handle(ipcChannels.dshPluginInstall, async (_event, input: unknown): Promise<unknown> => {
 		if (typeof input !== "object" || input === null) {

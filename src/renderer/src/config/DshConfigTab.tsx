@@ -19,6 +19,7 @@ import { DshHomeSharingNotice } from "./DshHomeSharingNotice";
 import { dshRuntimeStatusAtom } from "../atoms/dsh-atoms";
 import { isDshPluginNamespace, dshPluginNamespaceTitleKey, dshPluginNamespaceDescriptionKey } from "./dshPluginNamespaces";
 import { DshPluginSection, PluginInventoryView } from "./DshPluginSection";
+import { DshPluginMarketSection } from "./DshPluginMarketSection";
 import { DeepseekRouteCard, PiAiProvidersCard } from "./DshProviderCards";
 import { collectCredentialRefsWithValue, normalizeDshSchema, type DshSectionApi } from "./dshSchema";
 import { presetDisplayDescription, presetDisplayName } from "./dshPresetDisplay";
@@ -593,6 +594,10 @@ export const DshConfigTab = forwardRef<
 									    与上方静态插件配置卡片分区：横线 + 间距隔开，避免两区视觉粘连。 */}
 											<div className="mt-6 border-t border-border/60 pt-4">
 												<DshPluginSection />
+											</div>
+											{/* 插件市场（搜索/安装/已安装列表）：与上方插件管理分区，同用横线隔开。 */}
+											<div className="mt-6 border-t border-border/60 pt-4">
+												<DshPluginMarketSection />
 											</div>
 										</div>
 										<div hidden={pluginPane !== "list"}>
