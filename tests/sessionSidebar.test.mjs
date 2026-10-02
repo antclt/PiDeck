@@ -186,14 +186,16 @@ test("unstarted drafts have an independent delete control and context menu", () 
 test("session context menu exposes archive and restores refresh the manager project", () => {
 	const components = readFileSync("src/renderer/src/components/sidebar/SidebarComponents.tsx", "utf8");
 	const content = readFileSync("src/renderer/src/components/sidebar/SidebarContent.tsx", "utf8");
-	const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+	// 归档/删除族已从 App.tsx 迁至 hooks/sidebar/useSidebarArchiveActions.ts（域 owner）；App 只保留 sidebarActions 接线
+	const app = readFileSync("src/renderer/src/hooks/sidebar/useSidebarArchiveActions.ts", "utf8");
+	const appWiring = readFileSync("src/renderer/src/App.tsx", "utf8");
 
 	assert.match(components, /onArchiveSession: \(\) => void/);
 	assert.match(components, /onSelect=\{props\.onArchiveSession\}/);
 	assert.match(content, /actions\.sessions\.archive\(menu\.projectId, menuSession\)/);
 	assert.match(content, /actions\.sessions\.unarchive\(archived, managerProject\.id\)/);
 	assert.match(app, /unarchiveSidebarSession\(archivedPath: string, projectId = activeProjectId\)/);
-	assert.match(app, /unarchiveSidebarSession\(archived\.filePath, projectId\)/);
+	assert.match(appWiring, /unarchiveSidebarSession\(archived\.filePath, projectId\)/);
 	assert.match(app, /archivedSessionToastMessage\(session\)/);
 	assert.match(app, /ARCHIVED_SESSION_TOAST_MS/);
 });
@@ -212,6 +214,8 @@ function appFunctionBlock(source, name, nextName) {
 // 只 removeSessionState(session.id) 会在 currentSessionId 被清空后留下空态 Composer。
 test("sidebar archive and delete dismiss nested subagent chats instead of leaving a composer", () => {
 	const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+	// 归档/删除族已迁至 hooks/sidebar/useSidebarArchiveActions.ts；App 只保留 chrome 接线
+	const archiveHook = readFileSync("src/renderer/src/hooks/sidebar/useSidebarArchiveActions.ts", "utf8");
 	const chrome = readFileSync("src/renderer/src/hooks/useSessionWorkspaceChrome.ts", "utf8");
 	const ipc = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
 
@@ -219,8 +223,8 @@ test("sidebar archive and delete dismiss nested subagent chats instead of leavin
 	assert.match(chrome, /closeTab = useCallback\(\s*\(sessionId: string\) => \{\s*closeTabs\(\[sessionId\]\)/);
 	assert.match(app, /closeTabs: workspaceChrome\.closeTabs/);
 
-	const remove = appFunctionBlock(app, "deleteSidebarSession", "archiveSidebarSession");
-	const archive = appFunctionBlock(app, "archiveSidebarSession", "unarchiveSidebarSession");
+	const remove = appFunctionBlock(archiveHook, "deleteSidebarSession", "archiveSidebarSession");
+	const archive = appFunctionBlock(archiveHook, "archiveSidebarSession", "unarchiveSidebarSession");
 	for (const [name, block] of [
 		["delete", remove],
 		["archive", archive],

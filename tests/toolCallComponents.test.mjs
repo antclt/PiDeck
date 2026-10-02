@@ -7,7 +7,8 @@ const toolCalls = readFileSync("src/renderer/src/components/session/ToolCallComp
 const timelineFormat = readFileSync("src/renderer/src/components/session/TimelineFormat.ts", "utf8");
 const toolResult = readFileSync("src/renderer/src/components/agents/tool-result.tsx", "utf8");
 const runtimeInjector = readFileSync("src/renderer/src/components/session/SessionRuntimeInjector.tsx", "utf8");
-const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+// 文件链接打开路由（含栏级上下文 projectId 闸门）已迁入 useSessionFileLinks。
+const app = readFileSync("src/renderer/src/hooks/workspace/useSessionFileLinks.ts", "utf8");
 const fileEditor = readFileSync("src/renderer/src/hooks/useFileEditor.ts", "utf8");
 const sessionFilePathOpener = readFileSync("src/renderer/src/hooks/useSessionFilePathOpener.ts", "utf8");
 

@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const turnExecution = readFileSync("src/renderer/src/components/session/turn/useTurnExecution.ts", "utf8");
-const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+// dispatchPromptSnapshot 已迁入 useSessionPromptDispatch（App 只保留接线）。
+const app = readFileSync("src/renderer/src/hooks/session/useSessionPromptDispatch.ts", "utf8");
 const appUiAtoms = readFileSync("src/renderer/src/atoms/app-ui-atoms.ts", "utf8");
 const settingsStore = readFileSync("src/main/settings/SettingsStore.ts", "utf8");
 const sessionAtoms = readFileSync("src/renderer/src/atoms/session-atoms.ts", "utf8");
@@ -29,7 +30,7 @@ test("queued prompt drains bump the new-turn collapse tick", () => {
 	// 排队投递（steer「插入当前回合」/ followUp 排队）从 dispatchPromptSnapshot 出口提交，
 	// 必须与普通发送一样 bump tick；否则重启后（tick=0）第一次排队发送永远不会
 	// 触发「新一轮折叠」，上一轮（尤其被打断、无最终回答的轮）一直保持展开。
-	const dispatchStart = app.indexOf("async function dispatchPromptSnapshot");
+	const dispatchStart = app.indexOf("const dispatchPromptSnapshot = useCallback(");
 	assert.ok(dispatchStart > 0, "dispatchPromptSnapshot exists");
 	const dispatch = app.slice(dispatchStart);
 	const acceptedIndex = dispatch.indexOf("if (!result.accepted)");

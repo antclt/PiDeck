@@ -161,7 +161,8 @@ test("queue drain is serialized and waits for an ordered canonical Session capab
 	//（见 tests/sessionRunControl.test.mjs 的能力矩阵断言）。
 	assert.match(sessionRuntimeControllerSource, /hasInFlightQueuedPrompt: activeQueuedPrompts\.some\(/);
 	assert.match(sessionRuntimeControllerSource, /sessionRunCapabilities\(\{/);
-	assert.match(appSource, /queueFlushBySessionRef\.current\.has\(sessionId\)/);
+	// flush 串行化闸门随队列逻辑迁入 useQueuedPrompt；App 只保留 ref 定义并注入。
+	assert.match(queuedPromptHookSource, /queueFlushBySessionRef\.current\.has\(sessionId\)/);
 	assert.doesNotMatch(sessionRuntimeControllerSource, /queuedPrompts\[activeAgentId\]/);
 	assert.doesNotMatch(globalListenersSource, /sessions\.onRuntimeEvent\(/);
 	assert.match(sessionRuntimeBridgeSource, /sessions\.onRuntimeEvent\(/);
@@ -246,5 +247,7 @@ test("prompt acceptance is explicit across the main and renderer boundary", () =
 	assert.match(webServiceSource, /this\.sendJson\(response, \{ result \}\)/);
 	assert.doesNotMatch(webServiceSource, /sendError\(response, 409, result\.error\)/);
 	assert.match(agentManagerSource, /if \(cancelled\)[\s\S]*?命令已取消[\s\S]*?return \{ accepted: true \}/);
-	assert.match(appSource, /if \(!result\.accepted\)[\s\S]*?translateI18nDescriptor\(result, result\.error\)[\s\S]*?PromptDeliveryUnknownError\(localizedError\)[\s\S]*?throw new Error\(localizedError\)/);
+	// sendPrompt 的显式接受/失败判定随 dispatchPromptSnapshot 迁入 useSessionPromptDispatch。
+	const promptDispatchSource = readFileSync("src/renderer/src/hooks/session/useSessionPromptDispatch.ts", "utf8");
+	assert.match(promptDispatchSource, /if \(!result\.accepted\)[\s\S]*?translateI18nDescriptor\(result, result\.error\)[\s\S]*?PromptDeliveryUnknownError\(localizedError\)[\s\S]*?throw new Error\(localizedError\)/);
 });

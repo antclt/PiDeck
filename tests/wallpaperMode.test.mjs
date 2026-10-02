@@ -85,8 +85,9 @@ test("all wallpaper dialogs share one readable baseline (no panel-alpha downgrad
 	assert.match(css, /\[data-slot="dialog-content"\]\.environment-dialog \{[\s\S]{0,700}?--color-bg-panel: transparent;[\s\S]{0,200}?--color-card: transparent;[\s\S]{0,200}?--color-bg-muted: transparent;/);
 });
 
-test("App.tsx toggles wallpaper mode marker with background image setting", () => {
-	const appSource = readFileSync("src/renderer/src/App.tsx", "utf8");
+test("useAppAppearance toggles wallpaper mode marker with background image setting", () => {
+	// 壁纸/皮肤注入已从 App.tsx 迁至 hooks/appearance/useAppAppearance.ts（域 owner）
+	const appSource = readFileSync("src/renderer/src/hooks/appearance/useAppAppearance.ts", "utf8");
 	assert.match(appSource, /root\.dataset\.bgImage = settings\.backgroundImage \? "on" : "off"/);
 	// 皮肤 + 背景图合并为单一 effect（修复互相清除：皮肤 effect 清 token 误清壁纸注入、
 	// 背景 else 分支误清皮肤 bg 键）

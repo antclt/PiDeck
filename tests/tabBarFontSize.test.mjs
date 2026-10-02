@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 // SessionTabsBar 应用 → AppearanceTab 行 → i18n 文案。
 const settingsType = readFileSync("src/shared/types/settings.ts", "utf8");
 const store = readFileSync("src/main/settings/SettingsStore.ts", "utf8");
-const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+// data-tab-font-size 的写入已迁入 useAppAppearance（Wave 1 拆分）。
+const app = readFileSync("src/renderer/src/hooks/appearance/useAppAppearance.ts", "utf8");
 const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
 const tailwind = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
 const tabsBar = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");

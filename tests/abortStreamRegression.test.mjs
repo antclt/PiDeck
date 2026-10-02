@@ -51,6 +51,8 @@ test("abort failures surface to the user and escalate when pi keeps running", ()
 	const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 	const composer = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
 	const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+	// 运行控制（abort/stop 的 toast 与 runtimeUnavailable 提示）已迁入 useSessionRunControl。
+	const runControl = readFileSync("src/renderer/src/hooks/session/useSessionRunControl.ts", "utf8");
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
@@ -73,5 +75,5 @@ test("abort failures surface to the user and escalate when pi keeps running", ()
 
 	// 4) 无运行时目标时也不得静默：给出 runtimeUnavailable 提示
 	assert.match(composer, /sessionCommand\.runtimeUnavailable/);
-	assert.match(app, /sessionCommand\.runtimeUnavailable/);
+	assert.match(runControl, /sessionCommand\.runtimeUnavailable/);
 });

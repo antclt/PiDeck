@@ -10,7 +10,14 @@ const panelControls = readFileSync("src/renderer/src/components/app/git/GitPanel
 const gitSurface = [panel, resourceTree, graph, panelControls].join("\n");
 const styles = readRendererStyles();
 const i18n = [readFileSync("src/renderer/src/i18n.ts", "utf8"), readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8"), readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8")].join("\n");
-const app = [readFileSync("src/renderer/src/hooks/useFileEditor.ts", "utf8"), readFileSync("src/renderer/src/App.tsx", "utf8"), readFileSync("src/renderer/src/components/app/AppShell.tsx", "utf8"), readFileSync("src/renderer/src/components/workspace/DrawerSurface.tsx", "utf8")].join("\n");
+const app = [
+	readFileSync("src/renderer/src/hooks/useFileEditor.ts", "utf8"),
+	readFileSync("src/renderer/src/App.tsx", "utf8"),
+	readFileSync("src/renderer/src/hooks/app/useAppBootstrapInfo.ts", "utf8"),
+	readFileSync("src/renderer/src/components/app/AppShell.tsx", "utf8"),
+	readFileSync("src/renderer/src/components/workspace/DrawerSurface.tsx", "utf8"),
+	readFileSync("src/renderer/src/hooks/workspace/useSessionFileLinks.ts", "utf8"),
+].join("\n");
 const preload = readFileSync("src/preload/index.ts", "utf8");
 const main = readFileSync("src/main/index.ts", "utf8");
 const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
