@@ -3577,6 +3577,8 @@ app
 			() => settingsStore.get().dshRunnerNodePath ?? "",
 			// 手动停止标记（持久化）：为真时 ensureStarted 拒绝自动拉起，只有用户显式启动才 boot。
 			() => settingsStore.get().dshManualStopped === true,
+			// agent-team 实验预设（默认关）：fork 时读快照传入 hostEntry；变更需重启 host。
+			() => settingsStore.get().dshAgentTeamPreset === true,
 		);
 		// 用户插件安装服务（搜索/安装/清单；npm 走 PiLocator 的跨平台启动规格，市场 API 走 fetch）。
 		// 依赖闭包优先取 runtime node_modules（与 host 同版本）；runtime 未安装时也能装（registry 补齐）。

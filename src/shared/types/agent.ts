@@ -17,6 +17,41 @@ export type DshQueuedMessage = {
 	text: string;
 };
 
+/** DSH agent-team 成员（官方 `agentTeam` projection 的 TeamMemberProjection 归一化形态）。 */
+export type DshTeamMember = {
+	/** 成员会话 id（host 侧 SessionId）。 */
+	id: string;
+	name: string;
+	role: "lead" | "teammate";
+	/** 持久生命周期（lead 行恒为 active；进行态看会话状态，不在投影里）。 */
+	phase: "provisioning" | "active" | "failed";
+	/** failed 相的失败原因（phase=failed 时可能有）。 */
+	error?: string;
+};
+
+/** DSH agent-team 任务（TeamTaskView 归一化：只留面板展示字段）。 */
+export type DshTeamTask = {
+	id: string;
+	subject: string;
+	description: string;
+	status: "pending" | "in_progress" | "completed" | "deleted";
+	/** 承接成员名（任务未分配时缺省）。 */
+	ownerName?: string;
+	/** 依赖是否就绪（blockedBy 全部完成且无写入范围告警）。 */
+	ready: boolean;
+};
+
+/**
+ * DSH agent-team 团队状态（官方 `agentTeam` projection 的 TeamProjection 归一化）。
+ * 发布在 lead 会话的投影 map 上：PiDeck 里每个会话各自是自己团队的 lead，
+ * 按会话订阅即天然隔离。`failure` 是官方持久化记录被拒的首个错误名。
+ */
+export type DshTeamState = {
+	members: DshTeamMember[];
+	tasks: DshTeamTask[];
+	failure?: string;
+};
+
 export type AgentStatus = "starting" | "idle" | "running" | "error" | "closed";
 
 /**
@@ -105,6 +140,13 @@ export type AgentRuntimeState = {
 	 * pi 后端无此字段（仍走 widget 行快照），渲染层按后端数据源分别消费。
 	 */
 	todos?: TodoItem[] | null;
+	/**
+	 * DSH agent-team 团队状态（官方 `agentTeam` projection：成员 roster + 任务板）。
+	 * 仅启用了 agent-team 实验预设的会话才会有值：members 为空数组 = 已启用但尚未
+	 * spawn 成员；null = 显式清空；undefined = 投影未到达/插件未挂载（面板隐藏）。
+	 * pi 后端无此字段。
+	 */
+	dshTeam?: DshTeamState | null;
 	/**
 	 * DSH host 侧排队中的消息（官方 `inbox` projection：next-turn/next-step 合并视图，
 	 * 按入队顺序）。补齐本地排队队列（queuedPromptQueue，waitForIdle 前的客户端暂存）

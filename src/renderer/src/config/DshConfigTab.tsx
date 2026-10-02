@@ -963,6 +963,33 @@ function PresetsTab(props: { writable: boolean; namespace?: DshNamespaceView; on
 	/** 暂存的新默认预设 id（未保存；顶部统一保存时提交）。 */
 	const [pendingDefault, setPendingDefault] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
+	/** agent-team 实验预设（PiDeck 侧设置项，默认关）：即时写入不入统一保存；
+	 *  变更只影响之后 fork 的 host，运行中的 DSH 会话需重启才换到新组合。 */
+	const [agentTeam, setAgentTeam] = useState(false);
+	const [agentTeamLoaded, setAgentTeamLoaded] = useState(false);
+
+	useEffect(() => {
+		void desktopApi.settings
+			.get()
+			.then((settings) => {
+				setAgentTeam(settings.dshAgentTeamPreset === true);
+				setAgentTeamLoaded(true);
+			})
+			.catch(() => setAgentTeamLoaded(true));
+	}, []);
+
+	/** 切换 agent-team 预设：乐观更新 UI，写设置失败回滚；重启 host 后生效。 */
+	const toggleAgentTeam = async (checked: boolean) => {
+		const prev = agentTeam;
+		setAgentTeam(checked);
+		try {
+			await desktopApi.settings.update({ dshAgentTeamPreset: checked });
+			showNotice(t(checked ? "config.dsh.agentTeamPresetOn" : "config.dsh.agentTeamPresetOff"), 4000);
+		} catch (saveError) {
+			setAgentTeam(prev);
+			showNotice(saveError instanceof Error ? saveError.message : String(saveError), 4000);
+		}
+	};
 
 	const reload = useCallback(async () => {
 		try {
@@ -1035,6 +1062,16 @@ function PresetsTab(props: { writable: boolean; namespace?: DshNamespaceView; on
 	return (
 		<div className="grid gap-4">
 			<p className="text-micro text-muted-foreground">{t("config.dsh.presetsHint")}</p>
+			{/* agent-team 实验预设（默认关）：PiDeck 侧开关，即时写入；组合变更需重启 host 生效 */}
+			<section className="rounded-md border border-border-subtle bg-bg-panel px-3.5 py-2.5">
+				<div className="flex items-center justify-between gap-4">
+					<div className="grid gap-0.5">
+						<span className="text-caption font-semibold text-foreground">{t("config.dsh.agentTeamPreset")}</span>
+						<p className="text-micro text-muted-foreground">{t("config.dsh.agentTeamPresetHint")}</p>
+					</div>
+					<Switch checked={agentTeam} disabled={!agentTeamLoaded} onCheckedChange={(checked) => void toggleAgentTeam(checked)} />
+				</div>
+			</section>
 			{presets.length === 0 ? (
 				<Empty text={t("config.dsh.presetsEmpty")} />
 			) : (
