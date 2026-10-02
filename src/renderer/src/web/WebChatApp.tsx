@@ -766,11 +766,7 @@ export function WebChatApp() {
 					title={activeSession?.title || t("web.chooseSession")}
 					status={headerStatus}
 					onOpenSidebar={() => setMobileSidebarOpen(true)}
-					model={activeSession?.model ?? pendingModel ?? undefined}
-					thinkingLevel={activeSession?.thinkingLevel ?? pendingThinkingLevel ?? undefined}
-					models={models}
 					backend={activeSession?.backend}
-					refreshingModels={modelsRefreshing}
 					contextUsage={contextUsage}
 					permissionPreset={activeSession?.permissionPreset}
 					actions={{
@@ -786,9 +782,6 @@ export function WebChatApp() {
 						onClone: activeTarget ? () => void runRuntimeAction("clone") : undefined,
 						onDelete: activeSessionId ? () => void runSessionAction("delete", activeSessionId) : undefined,
 					}}
-					onRefreshModels={() => void refreshModels()}
-					onModelChange={(model) => void handleModelChange(model)}
-					onThinkingChange={(level) => void handleThinkingChange(level)}
 					onOpenDshTools={() => setDshToolsOpen(true)}
 					onOpenSearch={() => setSearchOpen(true)}
 					themePreference={themePreference}
@@ -820,7 +813,20 @@ export function WebChatApp() {
 					onResendMessage={(messageId) => void handleResendMessage(messageId)}
 				/>
 				<WebSessionStrips sessionId={activeSessionId} />
-				<WebComposer disabled={Boolean(creatingProjectId)} streaming={streaming} prefill={prefill ?? undefined} onSend={handleSend} onStop={handleStop} />
+				<WebComposer
+					disabled={Boolean(creatingProjectId)}
+					streaming={streaming}
+					prefill={prefill ?? undefined}
+					onSend={handleSend}
+					onStop={handleStop}
+					model={activeSession?.model ?? pendingModel ?? undefined}
+					models={models}
+					refreshingModels={modelsRefreshing}
+					onRefreshModels={() => void refreshModels()}
+					onModelChange={(model) => void handleModelChange(model)}
+					thinkingLevel={activeSession?.thinkingLevel ?? pendingThinkingLevel ?? undefined}
+					onThinkingChange={(level) => void handleThinkingChange(level)}
+				/>
 			</main>
 			{/* S6.3：DSH 工具面板（仅 dsh 会话头部按钮触发） */}
 			{/* 第二批：会话内搜索（Ctrl+K）与技能/扩展面板 */}

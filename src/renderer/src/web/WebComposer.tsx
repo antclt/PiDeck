@@ -6,6 +6,7 @@
  * - Enter 发送、Shift/Ctrl+Enter 换行
  * - 图片附件：文件选择 + 粘贴，发送前经 webImageCompress 压缩（P2）
  * - 提示词库：内嵌 WebPromptPicker，选中后回填 draft（P2）
+ * - 模型/思考选择驻留工具行（第三批 DeepSeek 式交互）：WebModelSelector/WebThinkingSelector
  * - prefill：重发（prepare-resend）/提示词插入时由父级填充文本，nonce 变化触发
  * - 无会话时禁用；流式期间提交按钮转为停止
  */
@@ -13,7 +14,10 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, ImagePlus, X } from "lucide-react";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
+import type { AvailableModel, SessionModelPreference } from "../../../shared/types";
 import { compressImageToDataUrl, imagesFromPasteEvent } from "./webImageCompress";
+import { WebModelSelector } from "./WebModelSheet";
+import { WebThinkingSelector } from "./WebThinkingSelector";
 import { WebPromptPicker } from "./WebPromptPicker";
 
 /** 单会话图片上限（压缩后每张约 100–300KB，4 张足够多数场景且 body 可控）。 */
@@ -22,6 +26,14 @@ const MAX_ATTACHED_IMAGES = 4;
 export function WebComposer(props: {
 	disabled: boolean;
 	streaming: boolean;
+	/** 第三批：模型/思考选择驻留 composer（从 WebHeader 迁入）。 */
+	model?: SessionModelPreference;
+	models: AvailableModel[];
+	refreshingModels?: boolean;
+	onRefreshModels?: () => void;
+	onModelChange: (model: AvailableModel) => void;
+	thinkingLevel?: string;
+	onThinkingChange: (level: string) => void;
 	/** 提交时携带的图片（data URL，已压缩）；父级在 onSend 后清空自己的附件态。 */
 	onSend: (text: string, images: string[]) => void;
 	onStop: () => void;
@@ -126,6 +138,8 @@ export function WebComposer(props: {
 								event.target.value = "";
 							}}
 						/>
+						<WebModelSelector model={props.model} models={props.models} refreshing={props.refreshingModels} onRefresh={props.onRefreshModels} onChange={props.onModelChange} />
+						<WebThinkingSelector level={props.thinkingLevel} onChange={props.onThinkingChange} />
 						{/* 移动端相机直拍：capture 调起后置相机，单张；仅触屏设备显示（桌面无相机语义） */}
 						<input
 							ref={cameraInputRef}
@@ -155,7 +169,8 @@ export function WebComposer(props: {
 							<ImagePlus className="size-3.5" aria-hidden="true" />
 						</Button>
 						<WebPromptPicker disabled={props.disabled} onPick={(content) => setDraft((prev) => (prev ? `${prev}\n\n${content}` : content))} />
-						<span className="composer-hint min-w-0 truncate text-caption text-muted-foreground">{t("web.composerHint")}</span>
+						{/* 桌面提示文案：窄屏让位给模型/思考 pill，避免工具行溢出 */}
+						<span className="composer-hint hidden min-w-0 truncate text-caption text-muted-foreground sm:inline">{t("web.composerHint")}</span>
 					</span>
 					{props.streaming ? (
 						<Button type="button" variant="destructive" size="sm" className="h-8 shrink-0" onClick={props.onStop}>

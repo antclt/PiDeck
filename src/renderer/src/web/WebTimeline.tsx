@@ -86,7 +86,7 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 				</div>
 			) : null}
 			{editing ? (
-				<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-primary/40 bg-muted/60 p-2">
+				<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-primary/40 bg-muted/60 px-3.5 py-2.5">
 					<textarea
 						className="min-h-16 w-full resize-y rounded-md bg-transparent text-sm text-text-primary outline-none"
 						value={editDraft}
@@ -126,7 +126,7 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 			) : (
 				<>
 					{text.trim() ? (
-						<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-[14px] border border-border bg-muted/60 px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere] break-words">
+						<div className="w-fit min-w-0 max-w-[min(82%,64ch)] rounded-2xl border border-border bg-muted/60 px-3.5 py-2.5 text-sm text-foreground [overflow-wrap:anywhere] break-words">
 							<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
 						</div>
 					) : null}
@@ -580,7 +580,7 @@ export function WebTimeline(props: {
 
 	return (
 		<section className="message-timeline relative h-full min-h-0 flex-1 overflow-y-auto" ref={timelineRef} onScroll={updateScrollState}>
-			<div className="message-list flex flex-col gap-4 p-4">
+			<div className="message-list flex flex-col gap-5 p-4 sm:px-6">
 				{!hasActiveSession && messages.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-logo">
