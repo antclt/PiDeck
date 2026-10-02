@@ -96,22 +96,19 @@ export function useSettingsUpdater({ showToast, piUpdate, onSettingsApplied, onP
 		[showToast, piUpdate, onSettingsApplied, onProjectsChanged, activeProjectId, refreshProjectSessions],
 	);
 
-	const restartWebService = useCallback(
-		async () => {
-			if (!webServiceEnabled || webServiceChanging) return;
-			setWebServiceChanging(true);
-			showToast(t("settings.webRestarting"));
-			try {
-				await api.settings.restartWebService();
-				showToast(t("settings.webRestarted"));
-			} catch (error) {
-				showToast(error instanceof Error ? error.message : String(error));
-			} finally {
-				setWebServiceChanging(false);
-			}
-		},
-		[showToast, webServiceEnabled, webServiceChanging],
-	);
+	const restartWebService = useCallback(async () => {
+		if (!webServiceEnabled || webServiceChanging) return;
+		setWebServiceChanging(true);
+		showToast(t("settings.webRestarting"));
+		try {
+			await api.settings.restartWebService();
+			showToast(t("settings.webRestarted"));
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : String(error));
+		} finally {
+			setWebServiceChanging(false);
+		}
+	}, [showToast, webServiceEnabled, webServiceChanging]);
 
 	return { updateSettings, restartWebService, webServiceChanging };
 }

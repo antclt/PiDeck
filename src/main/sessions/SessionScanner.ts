@@ -1286,8 +1286,9 @@ export class SessionScanner {
 		const head = `<!doctype html><html><head><meta charset=\"utf-8\"><title>${this.escapeHtml(title)}</title><style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:920px;margin:32px auto;padding:0 20px;color:#1f2937}.msg{border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin:12px 0;background:#fff}.msg h2{margin:0 0 8px;font-size:13px;color:#64748b}.msg pre{white-space:pre-wrap;margin:0;font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}</style></head><body><h1>${this.escapeHtml(title)}</h1><p>${new Date(summary.updatedAt).toLocaleString()} · ${summary.messageCount} messages</p>`;
 		const toRow = (line: string): string => {
 			try {
-				const entry = JSON.parse(line) as any;
-				const message = entry.message ?? entry.data?.message ?? entry;
+				// JSON.parse 本身返回 any；这里不重复标注，消费点各自判空/收窄
+				const entry = JSON.parse(line);
+				const message = entry?.message ?? entry?.data?.message ?? entry;
 				if (!message?.role) return "";
 				const text = this.extractText(message.content).trim();
 				if (!text) return "";
@@ -1956,8 +1957,8 @@ export class SessionScanner {
 			const target = this.normalize(sourcePath);
 			if (target !== root && !target.startsWith(`${root}/`)) return undefined;
 			for (const line of this.readLocalFileHead(sourcePath).split(/\r?\n/).filter(Boolean).slice(0, 16)) {
-				const entry = JSON.parse(line) as any;
-				if (entry.type === "session_meta" && entry.payload) {
+				const entry = JSON.parse(line);
+				if (entry?.type === "session_meta" && entry.payload) {
 					return getCodexSessionThreadInfo(entry.payload);
 				}
 			}
@@ -1973,7 +1974,10 @@ export class SessionScanner {
 			return content
 				.map((item) => {
 					if (typeof item === "string") return item;
-					if (item && typeof item === "object") return String((item as any).text ?? (item as any).thinking ?? "");
+					if (item && typeof item === "object") {
+						const record = item as Record<string, unknown>;
+						return String(record.text ?? record.thinking ?? "");
+					}
 					return "";
 				})
 				.filter(Boolean)

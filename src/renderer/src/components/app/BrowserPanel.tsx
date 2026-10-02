@@ -466,7 +466,7 @@ export function BrowserPanel(props: {
 						title={t("browser.deviceLabel")}
 					>
 						{deviceIcon}
-						<span>{t(activeDevicePreset.label as any)}</span>
+						<span>{t(activeDevicePreset.label as Parameters<typeof t>[0])}</span>
 					</Button>
 					{deviceMenuOpen && (
 						<div className="absolute top-[calc(100%+6px)] right-0 z-30 min-w-[112px] rounded-md border border-border-subtle bg-bg-panel p-1 shadow-[var(--shadow-popover)]">
@@ -480,7 +480,7 @@ export function BrowserPanel(props: {
 									onClick={() => selectDevice(preset.id)}
 								>
 									{preset.id === "mobile" ? <Smartphone size={13} /> : preset.id === "tablet" ? <Tablet size={13} /> : <span className="size-[13px] rounded-[3px] border border-current" />}
-									<span>{t(preset.label as any)}</span>
+									<span>{t(preset.label as Parameters<typeof t>[0])}</span>
 								</Button>
 							))}
 						</div>

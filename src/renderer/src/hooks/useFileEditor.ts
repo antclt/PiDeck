@@ -1,3 +1,4 @@
+import { t as i18nT } from "../i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentTab, CommitEntry, GitChangedFile, GitResourceGroupType, Project, ProjectFileAccessScope } from "../../../shared/types";
 import type { WorkspaceContentOpenMode } from "../../../shared/types/settings";
@@ -79,7 +80,7 @@ export interface UseFileEditorInput {
 		modifiedContent: string;
 	} | null>;
 	/** 翻译函数 */
-	t: (...args: any[]) => string;
+	t: typeof i18nT;
 }
 
 export interface UseFileEditorOutput {

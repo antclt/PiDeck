@@ -60,9 +60,7 @@ export function SessionQueuedMessagesStrip(props: { sessionId: string }) {
 			<ul className="max-h-44 overflow-y-auto">
 				{items.map((item) => (
 					<li key={item.id} className="flex shrink-0 items-center gap-2.5 px-3 py-1.5">
-						<span className="shrink-0 rounded bg-bg-active px-1.5 text-[11px] leading-5 text-text-tertiary">
-							{item.target === "next-turn" ? t("sessionQueue.targetNextTurn") : t("sessionQueue.targetNextStep")}
-						</span>
+						<span className="shrink-0 rounded bg-bg-active px-1.5 text-[11px] leading-5 text-text-tertiary">{item.target === "next-turn" ? t("sessionQueue.targetNextTurn") : t("sessionQueue.targetNextStep")}</span>
 						<span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-text-secondary" title={item.text}>
 							{item.text || t("sessionQueue.emptyText")}
 						</span>

@@ -106,9 +106,11 @@ export function SettingsTab(props: {
 	 * 设置页只暴露外层重试次数和基础延迟。
 	 * provider 级 timeout/maxRetries 的单位和 SDK 语义容易误解，写入后可能导致立即超时或长时间重试卡住。
 	 */
+	const retryRaw = data && typeof data === "object" ? (data as Record<string, unknown>).retry : undefined;
+	const retryRecord = retryRaw && typeof retryRaw === "object" ? (retryRaw as Record<string, unknown>) : undefined;
 	const retryConfig = {
-		maxRetries: (data as any).retry?.maxRetries ?? 10,
-		baseDelayMs: (data as any).retry?.baseDelayMs ?? 5000,
+		maxRetries: typeof retryRecord?.maxRetries === "number" ? retryRecord.maxRetries : 10,
+		baseDelayMs: typeof retryRecord?.baseDelayMs === "number" ? retryRecord.baseDelayMs : 5000,
 	};
 
 	/**

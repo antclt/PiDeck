@@ -906,7 +906,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 							return <DiagnosticMessageCard key={message.id} message={message} />;
 						}
 						if (message.role === "system") {
-							const meta = message.meta as any;
+							const meta = message.meta && typeof message.meta === "object" ? (message.meta as { type?: string }) : undefined;
 							if (meta?.type === "askQuestion") {
 								// Pending extension UI is rendered once in the timeline footer.
 								// Legacy in-memory messages may still contain this placeholder.

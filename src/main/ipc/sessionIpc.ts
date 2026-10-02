@@ -327,7 +327,7 @@ export type SessionIpcDeps = {
 	readImageSessionMessages?: (sessionId: string) => Promise<import("../../shared/types").ChatMessage[]>;
 	copyCatalogSession: (sessionId: string) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
 	exportCatalogSessionHtml: (sessionId: string) => Promise<Record<string, unknown> & { path: string }>;
-	replaceAgentSession: (agentId: string, fn: () => Promise<any>, options?: { markForked?: boolean }) => Promise<any>;
+	replaceAgentSession: (agentId: string, fn: () => Promise<unknown>, options?: { markForked?: boolean }) => Promise<unknown>;
 	/** DSH 后端专用 IPC 依赖（C1 分组；未装配 = 无 DSH 后端）。 */
 	dshBackend?: DshBackendIpcDeps;
 };

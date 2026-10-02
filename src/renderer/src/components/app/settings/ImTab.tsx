@@ -303,7 +303,7 @@ export function ImTab(_props: Props) {
 	const getVisibleBindingsForBot = useCallback((botId: string) => visibleBindingsByBot[botId] ?? 10, [visibleBindingsByBot]);
 
 	const isConnected = bindings.length > 0;
-	const statusLabel = t(`config.im.status.${status.status}` as any) || status.status;
+	const statusLabel = t(`config.im.status.${status.status}` as Parameters<typeof t>[0]) || status.status;
 
 	if (loading) {
 		return <div className="py-12 text-center text-control text-text-tertiary">{t("common.loading")}</div>;

@@ -212,14 +212,14 @@ export class DshHost {
 		return {
 			writable: described.result.value.writable,
 			hasDocument: described.result.value.hasDocument,
-			namespaces: (described.result.value.namespaces ?? []).map((ns: any) => ({
+			namespaces: (described.result.value.namespaces ?? []).map((ns) => ({
 				ns: ns.ns,
 				applies: ns.applies,
 				revision: ns.revision,
 				value: ns.value,
 				base: ns.base,
 				user: ns.user,
-				secrets: (ns.secrets ?? []).map((secret: any) => ({ path: secret.path, set: secret.set })),
+				secrets: (ns.secrets ?? []).map((secret) => ({ path: secret.path, set: secret.set })),
 				schema: ns.schema,
 			})),
 		};
@@ -291,7 +291,7 @@ export class DshHost {
 		try {
 			const described = await client.settingsDescribe();
 			if (!described.result.ok) return undefined;
-			const found = (described.result.value.namespaces ?? []).find((item: any) => item.ns === ns);
+			const found = (described.result.value.namespaces ?? []).find((item) => item.ns === ns);
 			return typeof found?.revision === "number" ? found.revision : undefined;
 		} catch {
 			return undefined;
@@ -819,9 +819,9 @@ export class DshHost {
 		if (!client) return [];
 		const searched = await client.sessionsSearch({ query: trimmed }, new AbortController().signal);
 		if (!searched.result.ok) return [];
-		return (searched.result.value.items ?? []).map((item: any) => ({
+		return (searched.result.value.items ?? []).map((item) => ({
 			sessionId: String(item.sessionId),
-			snippet: item.snippet,
+			snippet: item.snippet ?? "",
 		}));
 	}
 
@@ -888,7 +888,7 @@ export class DshHost {
 		if (!client) return [];
 		const listed = await client.llmProviders();
 		if (!listed.result.ok) return [];
-		return (listed.result.value.providers ?? []).map((entry: any) => ({
+		return (listed.result.value.providers ?? []).map((entry) => ({
 			provider: entry.provider,
 			displayName: entry.displayName,
 			active: entry.active,

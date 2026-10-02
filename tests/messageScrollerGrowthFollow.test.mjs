@@ -195,7 +195,8 @@ test("stopReason flows from RPC message_end into ChatMessage", () => {
 	// pending 是骨架占位值，必须被排除（否则 message_end 缺字段时消息永远停 in pending，
 	// 渲染层回退启发式失效——reviewer 指出删掉该守卫测试照样绿的漏洞，故显式断言）。
 	assert.match(agentSource, /extractedStopReason/);
-	assert.match(agentSource, /partialMessage as any\)\.stopReason/);
+	// 入参收窄后不再有 as any：stopReason 经 nonEmptyString(asRecord(partialMessage)) 提取
+	assert.match(agentSource, /nonEmptyString\(asRecord\(partialMessage\)\?\.stopReason\)/);
 	assert.match(agentSource, /existing\.stopReason = finalStopReason/);
 	assert.match(agentSource, /extractedStopReason && extractedStopReason !== "pending"/);
 	// 历史回放路径：JSONL 持久化的 stopReason 透传

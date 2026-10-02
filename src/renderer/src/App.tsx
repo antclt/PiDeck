@@ -909,12 +909,14 @@ export function App() {
 		for (const msg of activeMessages) {
 			if (msg.role !== "tool") continue;
 			const toolName: string | undefined = msg.meta?.toolName as string | undefined;
-			const args: unknown = msg.meta?.args;
+			// 工具入参只可能是字符串或参数对象（投影器写入 meta 的两路形态），先收窄再交给工具解析器
+			const argsRaw: unknown = msg.meta?.args;
+			const args = typeof argsRaw === "string" || (argsRaw && typeof argsRaw === "object") ? (argsRaw as string | Record<string, unknown>) : undefined;
 			const status: string = String(msg.meta?.status ?? "done");
 			// 只收集文件写入/编辑类的工具调用，作为右侧 Files 与会话结束摘要的统一数据源。
 			if (!toolName || !/write|edit|create|patch/i.test(toolName)) continue;
 			const filePath = getToolFilePath(args);
-			if (!filePath) continue;
+			if (!filePath || !args) continue;
 			const previous = byPath.get(filePath);
 			// 同一路径再次被修改时移动到 Map 末尾，右侧修改清单才能按"最新修改"展示。
 			if (previous) byPath.delete(filePath);

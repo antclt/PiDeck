@@ -226,7 +226,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (input.dshSessionId) {
 			const listed = await client.sessionsList();
 			if (listed.result.ok) {
-				const existing = listed.result.value.items.find((item: any) => item.sessionId === input.dshSessionId);
+				const existing = listed.result.value.items?.find((item) => item.sessionId === input.dshSessionId);
 				if (existing) {
 					sessionId = input.dshSessionId;
 					attached = true;
@@ -493,7 +493,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		let sessionId = old.tab.sessionId;
 		if (sessionId) {
 			const listed = await client.sessionsList().catch(() => null);
-			const exists = listed?.result.ok === true && listed.result.value.items.some((item: any) => item.sessionId === sessionId);
+			const exists = listed?.result.ok === true && (listed.result.value.items ?? []).some((item) => item.sessionId === sessionId);
 			if (!exists) sessionId = undefined;
 		}
 		if (!sessionId) {
@@ -1327,7 +1327,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const client = this.requireClient();
 		const listed = await client.skillsList({ sessionId: runtime.sessionId });
 		if (!listed.result.ok) return [];
-		return (listed.result.value.skills ?? []).map((skill: any) => ({
+		return (listed.result.value.skills ?? []).map((skill) => ({
 			name: String(skill.name),
 			description: String(skill.description),
 			...(skill.whenToUse !== undefined && skill.whenToUse !== null ? { whenToUse: String(skill.whenToUse) } : {}),

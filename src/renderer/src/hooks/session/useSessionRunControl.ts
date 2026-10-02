@@ -1,12 +1,6 @@
 import { useCallback, useRef, useState, type MutableRefObject } from "react";
 import { useStore, useSetAtom } from "jotai";
-import {
-	applySessionRuntimeEventAtom,
-	cacheSessionMessagesAtom,
-	sessionRecordsAtom,
-	setSessionHistoryMutationOverlayAtom,
-	setSessionMessageLoadStateAtom,
-} from "../../atoms/session-atoms";
+import { applySessionRuntimeEventAtom, cacheSessionMessagesAtom, sessionRecordsAtom, setSessionHistoryMutationOverlayAtom, setSessionMessageLoadStateAtom } from "../../atoms/session-atoms";
 import { sessionIdByRuntimeAgentIdAtomFamily, sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selectors";
 import { dshRuntimeStatusAtom } from "../../atoms/dsh-atoms";
 import { openSettingsAtom } from "../../atoms/app-ui-atoms";

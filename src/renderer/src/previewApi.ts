@@ -218,7 +218,8 @@ let previewSettings: AppSettings = {
 };
 
 export function createPreviewApi(): PiDesktopApi {
-	const noop = (() => () => undefined) as any;
+	// noop 是「订阅类槽位」的通用占位：调用它返回退订函数；never[] 入参使其可赋给任意回调签名
+	const noop = (() => () => undefined) as unknown as (...args: unknown[]) => () => void;
 	const previewImportKinds = new Map<string, ResourceImportKind>();
 	const clipboardStub: PiDesktopApi["clipboard"] = {
 		// preview 模式无真实剪贴板；浏览器下 navigator.clipboard 为异步 API，

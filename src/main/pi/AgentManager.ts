@@ -80,6 +80,8 @@ import {
 	stripAnsi,
 	pickNumber,
 	clampPercent,
+	asRecord,
+	nonEmptyString,
 	trimHistoryMessages,
 	turnTrimStartIndex,
 	countRoleMessagesBefore,
@@ -1104,7 +1106,7 @@ export class AgentManager {
 		// 有会话文件时禁止 get_entries：pi 把整棵 entry 树打成单行 JSON，
 		// PiRpcClient 同步 JSON.parse 会再冻一次窗口。entryId 从 JSONL 索引取，
 		// 与尾部窗口消息一一对应。skipEntries 仍保留给无文件/显式跳过路径。
-		let entriesPromise: Promise<any> | undefined;
+		let entriesPromise: Promise<{ data?: unknown } | undefined> | undefined;
 		const useFileEntryIds = Boolean(sessionPath);
 		if (!skipEntries && !useFileEntryIds) {
 			entriesPromise = runtime.process.client
@@ -2370,15 +2372,20 @@ export class AgentManager {
 						messageChars: undefined as number | undefined,
 					}),
 		]);
-		const state = stateResponse.data as any;
-		const stats = statsResponse.data as any;
-		const model = state?.model;
-		const tokens = stats?.tokens;
-		const inputTokens = pickNumber(tokens?.input, tokens?.inputTokens, tokens?.prompt, tokens?.promptTokens, stats?.inputTokens, stats?.usage?.input);
-		const outputTokens = pickNumber(tokens?.output, tokens?.outputTokens, tokens?.completion, tokens?.completionTokens, stats?.outputTokens, stats?.usage?.output);
-		const cacheRead = pickNumber(tokens?.cacheRead, tokens?.cache?.read, stats?.cacheRead, stats?.usage?.cacheRead);
-		const cacheWrite = pickNumber(tokens?.cacheWrite, tokens?.cache?.write, stats?.cacheWrite, stats?.usage?.cacheWrite);
-		const directCacheHitPercent = pickNumber(tokens?.cacheHitPercent, tokens?.cacheHitRate != null ? tokens.cacheHitRate * 100 : undefined, stats?.cacheHitPercent, stats?.cacheHitRate != null ? stats.cacheHitRate * 100 : undefined);
+		const state = asRecord(stateResponse.data);
+		const stats = asRecord(statsResponse.data);
+		const model = asRecord(state?.model);
+		const tokens = asRecord(stats?.tokens);
+		const usage = asRecord(stats?.usage);
+		const tokenCache = asRecord(tokens?.cache);
+		const contextUsage = asRecord(stats?.contextUsage);
+		const tokenHitRate = pickNumber(tokens?.cacheHitRate);
+		const statsHitRate = pickNumber(stats?.cacheHitRate);
+		const inputTokens = pickNumber(tokens?.input, tokens?.inputTokens, tokens?.prompt, tokens?.promptTokens, stats?.inputTokens, usage?.input);
+		const outputTokens = pickNumber(tokens?.output, tokens?.outputTokens, tokens?.completion, tokens?.completionTokens, stats?.outputTokens, usage?.output);
+		const cacheRead = pickNumber(tokens?.cacheRead, tokenCache?.read, stats?.cacheRead, usage?.cacheRead);
+		const cacheWrite = pickNumber(tokens?.cacheWrite, tokenCache?.write, stats?.cacheWrite, usage?.cacheWrite);
+		const directCacheHitPercent = pickNumber(tokens?.cacheHitPercent, tokenHitRate != null ? tokenHitRate * 100 : undefined, stats?.cacheHitPercent, statsHitRate != null ? statsHitRate * 100 : undefined);
 		/**
 		 * 使用最新一条 assistant 消息的缓存命中率，与 pi CLI footer 保持一致。
 		 * pi 的 get_session_stats RPC 不直接返回 cacheHitPercent，需读取 session 文件。
@@ -2391,17 +2398,17 @@ export class AgentManager {
 			modelName: normalizedRuntimeName(model?.name) ?? normalizedRuntimeName(model?.id),
 			provider: normalizedRuntimeName(model?.provider),
 			modelId: normalizedRuntimeName(model?.id),
-			thinkingLevel: state?.thinkingLevel,
-			isStreaming: state?.isStreaming || this.streamingAgents.has(agentId),
+			thinkingLevel: nonEmptyString(state?.thinkingLevel),
+			isStreaming: state?.isStreaming === true || this.streamingAgents.has(agentId),
 			...(this.agentTurnActiveById.has(agentId) ? { isTurnActive: this.agentTurnActiveById.get(agentId) } : {}),
-			isCompacting: state?.isCompacting || this.rpcCompactingAgents.has(agentId) || this.compactingAgents.has(agentId),
+			isCompacting: state?.isCompacting === true || this.rpcCompactingAgents.has(agentId) || this.compactingAgents.has(agentId),
 			/** 工具执行状态从本地追踪，无需 Pi 进程查询 */
 			isExecutingTool: !!this.toolExecutingByAgent.get(agentId),
 			executingToolName: this.toolExecutingByAgent.get(agentId) ?? undefined,
 			toolStateSequence: this.toolStateSequenceByAgent.get(agentId) ?? 0,
-			contextTokens: stats?.contextUsage?.tokens,
-			contextWindow: stats?.contextUsage?.contextWindow ?? model?.contextWindow,
-			contextPercent: stats?.contextUsage?.percent,
+			contextTokens: pickNumber(contextUsage?.tokens),
+			contextWindow: pickNumber(contextUsage?.contextWindow) ?? pickNumber(model?.contextWindow),
+			contextPercent: pickNumber(contextUsage?.percent),
 			contextOverflow: this.contextOverflowByAgent.get(agentId) === true,
 			/** 对话消息估算 token：消息字符 ÷ 4（1 token ≈ 4 chars），缺文件数据时不报 */
 			contextMessageTokens: fileHitStats.messageChars != null ? Math.round(fileHitStats.messageChars / 4) : undefined,
@@ -2413,7 +2420,7 @@ export class AgentManager {
 			cacheHitPercent,
 			cacheHitAveragePercent,
 			cacheHitSampleCount: fileHitStats.sampleCount,
-			cost: stats?.cost,
+			cost: pickNumber(stats?.cost),
 			// 最近一次回复性能指标：本地结算缓存（不经 RPC），会话切换/轮询时保持可用
 			ttftMs: perf?.ttftMs,
 			totalMs: perf?.totalMs,
@@ -2484,7 +2491,9 @@ export class AgentManager {
 	async getAvailableModels(agentId: string): Promise<AvailableModel[]> {
 		const runtime = this.requireRuntime(agentId);
 		const response = await runtime.process.client.request({ type: "get_available_models" }, 60_000);
-		return ((response.data as any)?.models ?? []) as AvailableModel[];
+		// RPC 边界信任点：pi 返回的 models 数组元素结构由 pi 版本保证，这里只收窄外层。
+		const models = asRecord(response.data)?.models;
+		return (Array.isArray(models) ? models : []) as AvailableModel[];
 	}
 
 	/**
@@ -4223,14 +4232,14 @@ export class AgentManager {
 			//   2. messages 数组中 stopReason=error 的消息的 errorMessage
 			//   3. messages 数组中 assistant 消息的 content 里包含 error 片段
 			//   4. agent_end 顶层 stopReason=error 但无 messages
-			const agentMessages = Array.isArray(typed.messages) ? typed.messages : [];
-			const errorMessages = agentMessages.filter((m: any) => m.stopReason === "error");
+			const agentMessages = (Array.isArray(typed.messages) ? typed.messages : []) as AgentEndMessage[];
+			const errorMessages = agentMessages.filter((m) => m.stopReason === "error");
 			// 逐级查找错误文本：顶层 → 错误消息列表 → 仅检查最后一轮对话中 type=error 的 content 块
 			const topMsg = errorMessages[errorMessages.length - 1];
 			// 只从最后一条 assistant 消息中查找显式 type=error 的 content 块，
 			// 避免扫描全部历史消息导致工具成功输出被误判为错误。
-			const lastAssistant = agentMessages.filter((m: any) => m.role === "assistant").pop();
-			const contentError = Array.isArray(lastAssistant?.content) ? lastAssistant.content.find((c: any) => c?.type === "error") : undefined;
+			const lastAssistant = agentMessages.filter((m) => m.role === "assistant").pop();
+			const contentError = Array.isArray(lastAssistant?.content) ? lastAssistant.content.find((c) => c?.type === "error") : undefined;
 			const errorMsg = (typed.errorMessage as string | undefined) ?? topMsg?.errorMessage ?? (typed.error as string | undefined) ?? (typeof contentError?.text === "string" ? contentError.text : undefined) ?? (typeof contentError?.message === "string" ? contentError.message : undefined);
 			// 用户主动 abort 的回合偶发携带错误文本（工具被 abort_bash 杀掉、abort 与
 			// 工具事件交错等）：终止不应该把仍存活的进程标成终态 error，否则下次激活
@@ -4587,7 +4596,7 @@ export class AgentManager {
 	private finalizeThinkingIntoMessage(agentId: string, partialMessage?: unknown) {
 		const segment = this.liveStream.getSegment(agentId);
 		const fromStream = this.liveStream.getThinking(agentId) ?? "";
-		const fromMessage = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractThinking((partialMessage as any).content) : "";
+		const fromMessage = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractThinking(asRecord(partialMessage)?.content) : "";
 		const nextThinking = stripAnsi(fromStream || fromMessage || "");
 		if (!nextThinking.trim()) return;
 
@@ -4601,7 +4610,7 @@ export class AgentManager {
 		// 重载后事件迟到：运行期 id 已不在列表（被投影身份替换）。若列表里已有同一条
 		// pi 消息（正文一致）则更新它并重定向身份，避免 append 造出双份。
 		if (existingIndex < 0) {
-			const textForMatch = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractText((partialMessage as any).content) : "";
+			const textForMatch = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractText(asRecord(partialMessage)?.content) : "";
 			const rebindIndex = this.findSamePiMessageIndex(list, "assistant", textForMatch);
 			if (rebindIndex >= 0) {
 				existingIndex = rebindIndex;
@@ -4647,7 +4656,7 @@ export class AgentManager {
 		// pi 消息的投影版，append 会造出双份（同内容消息被用户消息切分到两个 run）。
 		// 按内容指纹匹配既有消息：命中则更新它并把身份映射重定向到它，保持单份。
 		if (existingIndex < 0) {
-			const extractedTextForMatch = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractText((partialMessage as any).content) : "";
+			const extractedTextForMatch = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractText(asRecord(partialMessage)?.content) : "";
 			const rebindIndex = this.findSamePiMessageIndex(list, "assistant", extractedTextForMatch || fallbackDelta);
 			if (rebindIndex >= 0) {
 				existingIndex = rebindIndex;
@@ -4656,12 +4665,12 @@ export class AgentManager {
 			}
 		}
 		const existing = existingIndex >= 0 ? list[existingIndex] : undefined;
-		const extractedText = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractText((partialMessage as any).content) : "";
+		const extractedText = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractText(asRecord(partialMessage)?.content) : "";
 		// stopReason（provider 归一化）：message_start 骨架为 pending，message_end 更新为
 		// 真实值（stop/toolUse/aborted/error/length）。渲染层据此精确区分中间/最终回复。
 		// pending 是骨架占位值：不持久化（new 分支）也不覆盖既有值（existing 分支），
 		// 否则 message_end 缺 stopReason 时消息永远停 in pending，渲染层回退启发式失效。
-		const extractedStopReason = partialMessage && typeof partialMessage === "object" ? String((partialMessage as any).stopReason ?? "") || undefined : undefined;
+		const extractedStopReason = partialMessage && typeof partialMessage === "object" ? (nonEmptyString(asRecord(partialMessage)?.stopReason) ?? "") : "";
 		const finalStopReason = extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined;
 
 		if (existing) {
@@ -4864,15 +4873,17 @@ export class AgentManager {
 		const argsMeta = typeof args === "string" ? args : this.messageProjector.truncateForDetail(this.messageProjector.safeJson(args));
 		// 提取 ask_question 详情用于渲染提问卡片；支持批量（questions 数组）和单问题两种格式。
 		// pi RPC 返回格式可能为 result.details 嵌套 或 result 顶层（无 details 包装）
-		const askDetails = (() => {
+		const askDetails: AskDetailsLike | undefined = (() => {
 			if (toolName !== "ask_question" || !result || typeof result !== "object") return undefined;
+			const resultRecord = asRecord(result);
+			const details = asRecord(resultRecord?.details);
 			// 格式 1: result.details.question 或 result.details.answers（批量）
-			if ((result as any).details?.question || Array.isArray((result as any).details?.answers)) {
-				return (result as any).details;
+			if (details?.question || Array.isArray(details?.answers)) {
+				return details;
 			}
 			// 格式 2: result.question（无 details 包装）
-			if ((result as any).question) {
-				return result as any;
+			if (resultRecord?.question) {
+				return resultRecord;
 			}
 			// 格式 3: 从 args 回退读取提问内容（当 result 仅为简单值如选中项字符串时）
 			let parsedArgs: unknown = args;
@@ -4883,13 +4894,15 @@ export class AgentManager {
 					parsedArgs = undefined;
 				}
 			}
-			if (parsedArgs && typeof parsedArgs === "object" && (parsedArgs as any).question) {
+			const parsedRecord = asRecord(parsedArgs);
+			if (parsedRecord?.question) {
+				const answerValue = typeof result === "string" ? result : (resultRecord?.value ?? resultRecord?.answer);
 				return {
-					question: (parsedArgs as any).question,
-					options: (parsedArgs as any).options,
-					answer: typeof result === "string" ? result : ((result as any).value ?? (result as any).answer),
+					question: parsedRecord.question,
+					options: parsedRecord.options,
+					answer: answerValue,
 					answered: true,
-					answerLabel: typeof result === "string" ? result : ((result as any).value ?? (result as any).answer),
+					answerLabel: answerValue,
 				};
 			}
 			return undefined;
@@ -5481,7 +5494,7 @@ export class AgentManager {
 	 */
 	private extractStreamingText(agentId: string, partialMessage?: unknown): string | undefined {
 		if (partialMessage && typeof partialMessage === "object") {
-			const text = this.messageProjector.extractText((partialMessage as any).content);
+			const text = this.messageProjector.extractText(asRecord(partialMessage)?.content);
 			if (text) return text;
 		}
 		return undefined;
@@ -5535,6 +5548,27 @@ function normalizedRuntimeName(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const normalized = value.trim();
 	return normalized || undefined;
+}
+
+/** agent_end 携带消息的最小结构（pi 版本间字段不稳定，仅声明实际消费的字段）。 */
+interface AgentEndMessage {
+	role?: string;
+	stopReason?: string;
+	errorMessage?: string;
+	content?: Array<{ type?: string; text?: unknown; message?: unknown }>;
+}
+
+/** ask_question 结果（result.details 嵌套或 result 顶层）的最小结构，仅声明渲染卡片消费的字段。 */
+interface AskDetailsLike {
+	question?: unknown;
+	type?: unknown;
+	options?: unknown[];
+	answers?: unknown[];
+	questions?: unknown[];
+	answer?: unknown;
+	answerLabel?: unknown;
+	answered?: boolean;
+	cancelled?: boolean;
 }
 
 type AgentRuntime = {
