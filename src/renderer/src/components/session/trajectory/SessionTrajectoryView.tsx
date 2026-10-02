@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useAtomValue } from "jotai";
-import { Activity, Check, Clock, Copy, Hash, Wrench } from "lucide-react";
+import { Activity, ArrowLeft, Check, Clock, Copy, CornerUpLeft, FileJson, Hash, Wrench } from "lucide-react";
 import type { AgentRuntimeState, ChatMessage } from "../../../../../shared/types";
 import type { SessionProcessEvent } from "../../../../../shared/types/trajectory";
+import type { ModelTraceLogData } from "../../../../../shared/types/rpcLog";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../../atoms";
+import { desktopApi } from "../../../desktopApi";
 import { t } from "../../../i18n";
 import { writeClipboard } from "../../../utils/clipboard";
 import { formatDuration, formatTime } from "../TimelineFormat";
-import { buildTrajectory, filterRecordsByRange, type TrajectoryLane, type TrajectoryRecord, type TrajectoryTimeRange, type TrajectoryTurn } from "./buildTrajectory";
+import { buildTrajectory, filterRecordsByRange, traceSizeLabel, type TrajectoryLane, type TrajectoryModelTraceSummary, type TrajectoryRecord, type TrajectoryTimeRange, type TrajectoryTurn } from "./buildTrajectory";
+import { ModelTraceDetail } from "../../workspace/ModelTraceDetail";
 import { countUserTurns } from "../timeline/turnRenderWindow";
 
 const LANE_ORDER: TrajectoryLane[] = ["input", "model", "tools", "process"];
@@ -35,6 +38,7 @@ function kindLabel(record: TrajectoryRecord): string {
 	if (record.kind === "assistant") return t("session.trajectory.kind.assistant");
 	if (record.kind === "thinking") return t("session.trajectory.kind.thinking");
 	if (record.kind === "tool") return t("session.trajectory.kind.tool");
+	if (record.kind === "modelRequest") return t("session.trajectory.kind.modelRequest");
 	if (record.kind === "error") return t("session.trajectory.kind.error");
 	if (record.kind === "systemPrompt") return t("session.trajectory.kind.systemPrompt");
 	if (record.kind === "process") {
@@ -76,8 +80,10 @@ function formatClock(ts: number): string {
 	});
 }
 
-/** 进行中 / 未测到 / 真实耗时 三分：0ms 不得再冒充「瞬间完成」。 */
+/** 进行中 / 未测到 / 真实耗时 三分：0ms 不得再冒充「瞬间完成」；
+ *  模型请求快照是时间点，时长列改显请求体体积（信息量更大）。 */
 function durationLabel(record: TrajectoryRecord): string {
+	if (record.kind === "modelRequest") return traceSizeLabel(record.modelTrace?.payloadBytes) || "—";
 	if (record.endedAt === undefined) return t("session.trajectory.inFlight");
 	if (record.durationMs === undefined) return t("session.trajectory.durationUnknown");
 	return formatDuration(record.durationMs);
@@ -95,6 +101,12 @@ export function SessionTrajectoryView(props: {
 	systemPrompt?: string;
 	/** 会话是否 DSH 后端（系统提示说明文案按后端区分）。 */
 	isDsh?: boolean;
+	/** 模型请求快照摘要（pi 会话；每个请求一行，可回读完整请求体）。 */
+	modelTraces?: TrajectoryModelTraceSummary[];
+	/** 来源会话（fork/子代理的父会话）：显示在面板顶部，可跳转。 */
+	sourceSession?: { sessionId: string; title: string };
+	/** 点击来源会话行时打开父会话（跨项目时缺省，行退化为纯展示）。 */
+	onOpenSourceSession?: () => void;
 	hasMoreMessages?: boolean;
 	isLoadingMoreMessages?: boolean;
 	onLoadMore?: () => void;
@@ -118,8 +130,9 @@ export function SessionTrajectoryView(props: {
 			buildTrajectory(props.messages, now, {
 				processEvents: props.processEvents,
 				systemPrompt: props.systemPrompt,
+				modelTraces: props.modelTraces,
 			}),
-		[props.messages, props.processEvents, props.systemPrompt, now],
+		[props.messages, props.processEvents, props.systemPrompt, props.modelTraces, now],
 	);
 	const visible = useMemo(() => filterRecordsByRange(model.records, range), [model.records, range]);
 	const selected = visible.find((record) => record.id === selectedId) ?? model.records.find((record) => record.id === selectedId);
@@ -174,6 +187,15 @@ export function SessionTrajectoryView(props: {
 				) : null}
 			</div>
 			<TrajectoryOverview records={model.records} domainStart={model.domainStart} domainEnd={model.domainEnd} range={range} selectedId={selected?.id} onSelect={setSelectedId} onRangeChange={setRange} onHoverTick={refreshNow} />
+			{props.sourceSession ? (
+				<div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-1 text-caption text-muted-foreground">
+					<CornerUpLeft size={12} className="shrink-0" aria-hidden="true" />
+					<span className="shrink-0">{t("session.trajectory.sourceSession")}</span>
+					<button type="button" disabled={!props.onOpenSourceSession} className={`min-w-0 truncate font-medium ${props.onOpenSourceSession ? "text-primary hover:underline" : "cursor-default"}`} onClick={props.onOpenSourceSession} title={props.sourceSession.title}>
+						{props.sourceSession.title}
+					</button>
+				</div>
+			) : null}
 			<div className={drawer ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(140px,38%)]" : "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(220px,32%)]"}>
 				<TrajectoryLedger records={visible} turns={model.turns} now={now} selectedId={selected?.id} onSelect={setSelectedId} borderBottom={drawer} scrollRef={ledgerScrollRef} />
 				<TrajectoryInspector record={selected} runtimeState={runtime?.state} isDsh={props.isDsh} />
@@ -410,13 +432,59 @@ function TrajectoryInspector(props: {
 }) {
 	const record = props.record;
 	const state = props.runtimeState;
+	// modelRequest 检查器的完整请求体回读：按记录隔离，切换选中即清空。
+	const [traceView, setTraceView] = useState<{ traceId: string; status: "loading" | "loaded" | "missing"; payloadJson?: string } | undefined>(undefined);
+	useEffect(() => {
+		setTraceView(undefined);
+	}, [record?.id]);
+	const openTrace = useCallback(() => {
+		const target = record?.modelTrace;
+		if (!target?.agentId) return;
+		setTraceView({ traceId: target.traceId, status: "loading" });
+		void desktopApi.rpcLogs
+			.getModelTrace({ agentId: target.agentId, traceId: target.traceId })
+			.then((result) => {
+				setTraceView(result ? { traceId: target.traceId, status: "loaded", payloadJson: result.payloadJson } : { traceId: target.traceId, status: "missing" });
+			})
+			.catch(() => {
+				setTraceView({ traceId: target.traceId, status: "missing" });
+			});
+	}, [record?.modelTrace]);
 	if (!record) {
 		return <div className="min-h-0 overflow-auto px-3 py-4 text-caption text-muted-foreground">{t("session.trajectory.inspectHint")}</div>;
+	}
+	// 请求体回读视图接管检查器：结构与 RPC 面板的模型行展开共用 ModelTraceDetail。
+	if (record.kind === "modelRequest" && traceView) {
+		const summary: ModelTraceLogData | undefined = record.modelTrace
+			? {
+					kind: "request",
+					traceId: record.modelTrace.traceId,
+					model: record.modelId,
+					provider: record.provider,
+					messageCount: record.modelTrace.messageCount,
+					toolCount: record.modelTrace.toolCount,
+					payloadBytes: record.modelTrace.payloadBytes,
+					truncated: record.modelTrace.truncated,
+				}
+			: undefined;
+		return (
+			<div className="flex h-full min-h-0 flex-col px-3 py-2">
+				<button type="button" className="mb-2 inline-flex w-fit items-center gap-1 rounded-sm px-1.5 py-0.5 text-caption text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setTraceView(undefined)}>
+					<ArrowLeft size={12} />
+					{t("session.trajectory.backToRecord")}
+				</button>
+				<div className="min-h-0 flex-1 overflow-auto">
+					{traceView.status === "loading" ? <p className="py-4 text-center text-caption text-muted-foreground">{t("session.trajectory.traceLoading")}</p> : null}
+					{traceView.status === "missing" ? <p className="py-4 text-center text-caption text-muted-foreground">{t("session.trajectory.traceMissing")}</p> : null}
+					{traceView.status === "loaded" && summary ? <ModelTraceDetail payloadJson={traceView.payloadJson ?? ""} summary={summary} /> : null}
+				</div>
+			</div>
+		);
 	}
 	return (
 		<div className="min-h-0 overflow-auto px-3 py-3">
 			<div className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-				{record.kind === "tool" ? <Wrench size={14} /> : <Hash size={14} />}
+				{record.kind === "tool" ? <Wrench size={14} /> : record.kind === "modelRequest" ? <FileJson size={14} /> : <Hash size={14} />}
 				{record.kind === "tool" ? record.toolName : kindLabel(record)}
 			</div>
 			{record.kind === "systemPrompt" ? <p className="mb-2 text-caption text-muted-foreground">{props.isDsh ? t("session.trajectory.systemPromptHintDsh") : t("session.trajectory.systemPromptHint")}</p> : null}
@@ -481,6 +549,34 @@ function TrajectoryInspector(props: {
 						) : null}
 					</>
 				) : null}
+				{record.modelTrace ? (
+					<>
+						{record.modelTrace.messageCount !== undefined ? (
+							<>
+								<dt className="text-muted-foreground">{t("session.trajectory.field.traceMessages")}</dt>
+								<dd className="tabular-nums">{record.modelTrace.messageCount}</dd>
+							</>
+						) : null}
+						{record.modelTrace.toolCount !== undefined ? (
+							<>
+								<dt className="text-muted-foreground">{t("session.trajectory.field.traceTools")}</dt>
+								<dd className="tabular-nums">{record.modelTrace.toolCount}</dd>
+							</>
+						) : null}
+						{record.modelTrace.payloadBytes !== undefined ? (
+							<>
+								<dt className="text-muted-foreground">{t("session.trajectory.field.traceSize")}</dt>
+								<dd className="tabular-nums">{traceSizeLabel(record.modelTrace.payloadBytes) || "—"}</dd>
+							</>
+						) : null}
+						{record.modelTrace.truncated ? (
+							<>
+								<dt className="text-muted-foreground">{t("session.trajectory.field.traceTruncated")}</dt>
+								<dd>{t("session.trajectory.traceTruncatedYes")}</dd>
+							</>
+						) : null}
+					</>
+				) : null}
 				{record.customType ? (
 					<>
 						<dt className="text-muted-foreground">{t("session.trajectory.field.customType")}</dt>
@@ -502,6 +598,12 @@ function TrajectoryInspector(props: {
 			</dl>
 			{record.inputDetail ? <CopyableBlock label={t("session.trajectory.field.payload")} text={record.inputDetail} /> : null}
 			{record.outputDetail ? <CopyableBlock label={t("session.trajectory.field.result")} text={record.outputDetail} /> : null}
+			{record.kind === "modelRequest" && record.modelTrace?.agentId ? (
+				<button type="button" className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-border/70 px-2 py-1.5 text-caption hover:bg-muted" onClick={openTrace}>
+					<FileJson size={13} />
+					{t("session.trajectory.viewFullRequest")}
+				</button>
+			) : null}
 			{!record.inputDetail && !record.outputDetail && (record.detail || record.text) ? <CopyableBlock text={record.detail || record.text || ""} /> : null}
 			{state && (state.ttftMs !== undefined || state.inputTokens !== undefined) ? (
 				<div className="mt-4 border-t border-border/60 pt-3">
