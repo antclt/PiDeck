@@ -32,6 +32,8 @@ import { resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
 import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshApprovalFrame, parseDshQuestionFrame, questionUiRequest, type DshApprovalFrame, type DshQuestionFrame } from "./dshApprovalBridge";
 import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, normalizeDshTurnPageSize, planDshHistoryRounds, trimToOldestTurnStart } from "./dshHistoryPagePlan";
 import { isContextOverflowError } from "../../shared/contextOverflow";
+import type { RpcLogEntry } from "../../shared/types/rpcLog";
+import type { RpcLogLiveSink } from "../logging/RpcLogLiveBroadcaster";
 
 const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats", "todos", "inbox"];
 
@@ -121,12 +123,15 @@ export class DshAgentManager implements SessionAgentGateway {
 		 *  装配层据此写回 catalog 并推送侧栏刷新——DSH 会话没有 pi 会话文件，
 		 *  标题只存在于 host（dsh-session-title 的 session/title 事件 fold）。 */
 		private readonly onTitleChanged?: (dshSessionId: string, title: string) => void,
-		/** RPC 日志服务（G17：DSH 领域调用记录，与 pi 共用 RpcLogger；未注入时静默）。 */
-		private readonly rpcLogger?: { push(entry: import("../../shared/types/rpcLog").RpcLogEntry): void },
+		/** RPC 日志服务（G17：DSH 领域调用记录，与 pi 共用 RpcLogger；未注入时静默）。
+		 *  push 返回截断后的实时副本（与 getLive 环形缓冲同形态），供实时广播复用。 */
+		private readonly rpcLogger?: { push(entry: RpcLogEntry): RpcLogEntry },
 		/** 会话 HTML 导出目录（G10：应用数据目录内，装配层注入；空串 = 导出不可用）。 */
 		private readonly getExportDir: () => string = () => "",
 		/** 新会话无标题时的兜底标题（i18n；缺省保留历史文案「DSH 会话」）。 */
 		private readonly getUntitledTitle: () => string = () => "DSH 会话",
+		/** 实时 RPC 日志广播（RpcLogLiveBroadcaster；未注入时实时流不可用但记录/落盘不受影响）。 */
+		private readonly rpcLogLive?: RpcLogLiveSink,
 	) {
 		// E4：host 崩溃自动重启完成后恢复所有 runtime（host 内存已丢失：流式/工具/
 		// 压缩状态停在崩溃前，mux 重连后新 host 没有已订阅会话，事件不会再推）。
@@ -148,10 +153,16 @@ export class DshAgentManager implements SessionAgentGateway {
 		return this.rpcLoggingAgents.has(agentId);
 	}
 
-	/** 记录一条 DSH 领域调用日志（仅开关开启时；data 透传 RpcLogger 的截断/脱敏）。 */
+	/** 登记「实时日志面板是否在看」（rpcLogsSetWatching；面板挂载/卸载成对调用，只影响广播）。 */
+	setRpcLogWatching(agentId: string, watching: boolean): void {
+		this.rpcLogLive?.setWatching(agentId, watching);
+	}
+
+	/** 记录一条 DSH 领域调用日志（仅开关开启时；data 透传 RpcLogger 的截断/脱敏）。
+	 *  落盘与实时广播共用同一次 push 的截断结果，保证面板实时流与环形缓冲/文件内容一致。 */
 	private logRpc(agentId: string, direction: "send" | "recv", summary: string, data?: unknown): void {
 		if (!this.rpcLoggingAgents.has(agentId)) return;
-		this.rpcLogger?.push({
+		const liveEntry = this.rpcLogger?.push({
 			id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 			agentId,
 			direction,
@@ -159,6 +170,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			time: Date.now(),
 			...(data !== undefined ? { data } : {}),
 		});
+		if (liveEntry) this.rpcLogLive?.enqueue(liveEntry);
 	}
 
 	// ── 网关身份与订阅 ─────────────────────────────────────────────────────────
@@ -567,6 +579,9 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.runtimes.delete(agentId);
 		// 本会话的 follow 泵随之终止（避免已删会话空转重连）。
 		this.stopFollowPump(agentId);
+		// 丢弃该会话的实时日志聚合缓冲（防止残留条目泄给下一次 attach）；观看登记刻意保留——
+		// DSH agentId（dsh:<sessionId>）跨 stop/attach 稳定，面板可能跨重启周期保持挂载。
+		this.rpcLogLive?.dropPending(agentId);
 		// 共享 mux 只在最后一个 runtime 离开时关掉，避免停当前会话把其他会话的流一起掐掉。
 		if (this.runtimes.size === 0) this.stopSharedMux();
 		this.emit(ipcChannels.agentsState, this.list());

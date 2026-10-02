@@ -3173,6 +3173,7 @@ export const zhCN = {
 	"drawer.collapseAllDirs": "收起全部目录",
 	"drawer.expandAllDirs": "展开全部目录",
 	"drawer.sourceControl": "源代码管理",
+	"drawer.rpcLog": "RPC 日志",
 	"drawer.expandPanel": "展开右侧面板",
 	"drawer.fileItems": "{count} 个文件和目录",
 	"drawer.fileSort": "文件排序",

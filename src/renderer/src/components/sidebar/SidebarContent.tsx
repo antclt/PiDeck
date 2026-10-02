@@ -618,7 +618,6 @@ export function SidebarContent(props: SidebarContentProps) {
 							void actions.rpc
 								.setLogging(menuAgent.id, false)
 								.then((enabled) => {
-									controller.setAgentRpcLogging(menuAgent.id, enabled);
 									showNotice(enabled ? t("rpc.loggingDisableFailed") : t("rpc.loggingDisabled"), 2500);
 								})
 								.catch(() => showNotice(t("rpc.loggingDisableFailed"), 2500));
@@ -627,9 +626,9 @@ export function SidebarContent(props: SidebarContentProps) {
 						void actions.rpc
 							.setLogging(menuAgent.id, true)
 							.then((enabled) => {
-								controller.setAgentRpcLogging(menuAgent.id, enabled);
-								// 与面板内「开启记录」同一反馈：非阻塞 toast。
-								// （原先是 AlertDialog 确认框，挡操作且菜单已有「查看日志」入口，多余）
+								// 开启成功即自动打开日志面板：开记录的意图就是「现在要看」，省掉再点一次「查看日志」。
+								// 状态镜像由 App 层 rpc.setLogging 包装统一写入，这里只负责视图跳转与反馈。
+								if (enabled) controller.openRpcLogs(menuAgent.id);
 								showNotice(enabled ? t("rpc.loggingEnabled") : t("rpc.loggingEnableFailed"), 2500);
 							})
 							.catch(() => showNotice(t("rpc.loggingEnableFailed"), 2500));
@@ -728,7 +727,6 @@ export function SidebarContent(props: SidebarContentProps) {
 							void actions.rpc
 								.setLogging(menuSessionRuntimeAgent.id, false)
 								.then((enabled) => {
-									controller.setAgentRpcLogging(menuSessionRuntimeAgent.id, enabled);
 									showNotice(enabled ? t("rpc.loggingDisableFailed") : t("rpc.loggingDisabled"), 2500);
 								})
 								.catch(() => showNotice(t("rpc.loggingDisableFailed"), 2500));
@@ -737,7 +735,8 @@ export function SidebarContent(props: SidebarContentProps) {
 						void actions.rpc
 							.setLogging(menuSessionRuntimeAgent.id, true)
 							.then((enabled) => {
-								controller.setAgentRpcLogging(menuSessionRuntimeAgent.id, enabled);
+								// 开启成功即自动打开日志面板（语义同 agent 菜单分支）；镜像状态由 App 层 rpc.setLogging 包装统一写 atom。
+								if (enabled) controller.openRpcLogs(menuSessionRuntimeAgent.id);
 								showNotice(enabled ? t("rpc.loggingEnabled") : t("rpc.loggingEnableFailed"), 2500);
 							})
 							.catch(() => showNotice(t("rpc.loggingEnableFailed"), 2500));

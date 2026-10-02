@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import type { AgentBackend, AgentTab, Project, SessionRecord } from "../../../shared/types";
-import { agentInventoryAtom, projectInventoryAtom, sessionCatalogLoadStateAtom, sessionIdsByProjectAtom, sessionRecordsAtom, sidebarExpandedProjectIdsAtom, sidebarNavTabAtom, sidebarRuntimeAtom } from "../atoms";
+import { agentInventoryAtom, projectInventoryAtom, rpcLoggingAgentIdsAtom, sessionCatalogLoadStateAtom, sessionIdsByProjectAtom, sessionRecordsAtom, sidebarExpandedProjectIdsAtom, sidebarNavTabAtom, sidebarRuntimeAtom, toggleRpcLoggingAgent } from "../atoms";
 import { migrateLegacyCollapsedProjects, sameProjectIdSet, writeExpandedSidebarProjects } from "../utils/sidebarExpandedProjects";
 import { parseSidebarNavTab, writeSidebarNavTab, type SidebarNavTab } from "../utils/sidebarNavTab";
 import { SESSION_FILTER_PILLS, parseSessionFilterState, serializeSessionFilterState, sessionPillOf, type SessionFilterPill, type SessionFilterState } from "../sessionFilterPills";
@@ -90,7 +90,6 @@ export type SidebarController = {
 	openMenu: (target: SidebarMenuTarget) => Promise<void>;
 	closeMenu: () => void;
 	isAgentRpcLogging: (agentId: string) => boolean;
-	setAgentRpcLogging: (agentId: string, enabled: boolean) => void;
 	sessionManagerProjectId?: string;
 	openSessionManager: (projectId: string) => void;
 	closeSessionManager: () => void;
@@ -202,15 +201,11 @@ export function useSidebarController(
 	const [expandedWorktreePaths, setExpandedWorktreePaths] = useState<Set<string>>(() => new Set());
 	const [drag, setDrag] = useState<{ sourceProjectId?: string; overProjectId?: string }>({});
 	const [menu, setMenu] = useState<SidebarMenuTarget | null>(null);
-	const [agentRpcLogging, setAgentRpcLoggingById] = useState<Map<string, boolean>>(() => new Map());
-	// RPC 日志开关（agentId 键，只增不清 → 关闭时删键；agentId 每次 spawn 随机，旧键无复用价值）
+	// RPC 日志开关镜像存 atom（rpcLoggingAgentIdsAtom）：右键菜单文案与抽屉 rpcLog Tab 门控共用，
+	// 写入方统一跟随主进程回执（App 层 rpc.setLogging 包装 + 本处菜单打开时的预查）。
+	const [agentRpcLogging, setAgentRpcLoggingById] = useAtom(rpcLoggingAgentIdsAtom);
 	const patchRpcLogging = useCallback((agentId: string, enabled: boolean) => {
-		setAgentRpcLoggingById((current) => {
-			const next = new Map(current);
-			if (enabled) next.set(agentId, true);
-			else next.delete(agentId);
-			return next;
-		});
+		setAgentRpcLoggingById((current) => toggleRpcLoggingAgent(current, agentId, enabled));
 	}, []);
 	const [sessionManagerProjectId, setSessionManagerProjectId] = useState<string>();
 	const [worktreeCreateProjectId, setWorktreeCreateProjectId] = useState<string>();
@@ -533,8 +528,7 @@ export function useSidebarController(
 			requestGateRef.current.cancelMenu();
 			setMenu(null);
 		},
-		isAgentRpcLogging: (agentId) => agentRpcLogging.get(agentId) ?? false,
-		setAgentRpcLogging: (agentId, enabled) => patchRpcLogging(agentId, enabled),
+		isAgentRpcLogging: (agentId) => agentRpcLogging.has(agentId),
 		sessionManagerProjectId,
 		openSessionManager: setSessionManagerProjectId,
 		closeSessionManager: () => setSessionManagerProjectId(undefined),

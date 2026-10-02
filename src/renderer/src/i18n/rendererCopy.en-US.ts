@@ -3181,6 +3181,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"drawer.collapseAllDirs": "Collapse all directories",
 	"drawer.expandAllDirs": "Expand all directories",
 	"drawer.sourceControl": "Source Control",
+	"drawer.rpcLog": "RPC Log",
 	"drawer.expandPanel": "Expand right panel",
 	"drawer.fileItems": "{count} files and folders",
 	"drawer.fileSort": "Sort files",

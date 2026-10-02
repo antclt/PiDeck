@@ -140,6 +140,8 @@ export type SystemIpcDeps = {
 	setDshRpcLogging?: (agentId: string, enabled: boolean) => void;
 	/** DSH RPC 日志状态查询（G17）。 */
 	isDshRpcLogging?: (agentId: string) => boolean;
+	/** DSH 实时日志观看登记（面板挂载/卸载成对调用；未装配 = 无 DSH 后端）。 */
+	setDshRpcLogWatching?: (agentId: string, watching: boolean) => void;
 	/** 开发诊断采样（设置开关热启停） */
 	diagnosticsMonitor?: DiagnosticsMonitor;
 	/** 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送），装配层注入 */
@@ -339,6 +341,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		isDshAgent,
 		setDshRpcLogging,
 		isDshRpcLogging,
+		setDshRpcLogWatching,
 		getMainWindow,
 		mainCopy,
 		checkForAppUpdate,
@@ -1296,9 +1299,15 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	// 实时日志面板挂载/卸载登记观看状态：没有观看者时主进程跳过广播（落盘与环形缓冲不受影响），
 	// 避免重度会话里无人认领的批次每 80ms 跨一次进程克隆。
+	// G17+DSH：观看登记同样按 backend 分流——DSH 经注入的 setDshRpcLogWatching 走
+	// RpcLogLiveBroadcaster，pi 走 AgentManager 自带的实时广播。
 	ipcMain.handle(ipcChannels.rpcLogsSetWatching, async (_event, agentId?: unknown, watching?: unknown) => {
 		if (typeof agentId !== "string" || !agentId || typeof watching !== "boolean") return false;
-		agentManager.setRpcLogWatching(agentId, watching);
+		if (isDshAgent?.(agentId)) {
+			setDshRpcLogWatching?.(agentId, watching);
+		} else {
+			agentManager.setRpcLogWatching(agentId, watching);
+		}
 		return true;
 	});
 

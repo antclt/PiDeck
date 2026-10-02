@@ -26,6 +26,8 @@ import {
 	CircleStop,
 	RefreshCw,
 	Fingerprint,
+	// 抽屉 RPC 日志 Tab 图标
+	ScrollText,
 } from "lucide-react";
 import { configureNoticeDefaults, showNotice, type NoticeKind } from "./utils/notice";
 import { copyTextWithCopiedNotice } from "./utils/clipboardNotice";
@@ -34,7 +36,21 @@ import { buildSettingsCommands, type PaletteCommand } from "./utils/commandPalet
 import { CommandPalette } from "./components/overlays/CommandPalette";
 import { CommandPaletteOnboarding, markCommandPaletteOnboardingSeen } from "./components/overlays/CommandPaletteOnboarding";
 import { desktopApi as api, isLanWeb, missingElectronPreload } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, hiddenModulesAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, openAutomationModalAtom, sessionRecordsAtom, bumpNewTurnCollapseTickAtom } from "./atoms";
+import {
+	turnFlowSettingsAtom,
+	defaultAgentBackendAtom,
+	effectiveAgentBackendAtom,
+	busySendDeliveryAtom,
+	hiddenModulesAtom,
+	imageGenConfigAtom,
+	dshRuntimeStatusAtom,
+	openSettingsAtom,
+	openAutomationModalAtom,
+	sessionRecordsAtom,
+	bumpNewTurnCollapseTickAtom,
+	rpcLoggingAgentIdsAtom,
+	toggleRpcLoggingAgent,
+} from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
@@ -989,6 +1005,25 @@ export function App() {
 	// （dsh/imagegen 会话不展示入口）。与 Injector 的 isDshBackend 同源判定。
 	const rewindBackend = activeAgent?.backend ?? currentSessionRecord?.backend;
 	const rewindSupported = rewindBackend === undefined || rewindBackend === "pi";
+
+	// === RPC 日志 Tab 门控（抽屉活动栏）===
+	// rpcLoggingAgentIdsAtom 是「开启了 RPC 日志记录的 agent」渲染层镜像，唯一写入方是
+	// rpc.setLogging 包装（主进程回执落地才写，见下方 sidebarActions）。Tab 门控叠加
+	// 「agent 仍存活」判定：agentId 键在进程关闭后不清理（无复用价值），陈旧键只允许让
+	// Tab 多显示（保守方向），叠加存活判定后即使有陈旧键也不会渲染出指向死 agent 的 Tab。
+	const rpcLoggingAgentIds = useAtomValue(rpcLoggingAgentIdsAtom);
+	const setRpcLoggingAgentIds = useSetAtom(rpcLoggingAgentIdsAtom);
+	const patchRpcLoggingAgentIds = useCallback((agentId: string, enabled: boolean) => {
+		setRpcLoggingAgentIds((current) => toggleRpcLoggingAgent(current, agentId, enabled));
+	}, []);
+	const rpcLogTabTargetAgentId = useMemo(() => {
+		if (rpcLoggingAgentIds.size === 0) return undefined;
+		const liveIds = new Set([...displayAgents, ...pendingAgents].filter((agent) => agent.status !== "closed" && agent.status !== "error").map((agent) => agent.id));
+		// 优先沿用面板当前绑定的 agent（同一次观看会话内 Tab 点击不切换观察对象）
+		if (workspace.rpcLogAgentId && rpcLoggingAgentIds.has(workspace.rpcLogAgentId) && liveIds.has(workspace.rpcLogAgentId)) return workspace.rpcLogAgentId;
+		for (const id of rpcLoggingAgentIds) if (liveIds.has(id)) return id;
+		return undefined;
+	}, [rpcLoggingAgentIds, displayAgents, pendingAgents, workspace.rpcLogAgentId]);
 
 	// Timeline scroll, pagination and jump ownership lives in sessionTimeline.
 	// Modern Session drafts and attachments are subscribed by ComposerArea; the root only
@@ -3158,7 +3193,13 @@ export function App() {
 			},
 			setLogging: (agentId, enabled) => {
 				const target = getRuntimeTargetForAgent(agentId);
-				return target ? api.rpcLogs.setLogging(target, enabled) : Promise.resolve(false);
+				if (!target) return Promise.resolve(false);
+				// 回执落地后才写渲染层镜像：侧栏菜单文案与抽屉 rpcLog Tab 门控都读它，
+				// 写早了会把开关失败误显示为已开启（回执 false 表示主进程未允许）。
+				return api.rpcLogs.setLogging(target, enabled).then((receipt) => {
+					patchRpcLoggingAgentIds(agentId, receipt);
+					return receipt;
+				});
 			},
 			listLogs: (agentId) => {
 				const target = getRuntimeTargetForAgent(agentId);
@@ -4074,6 +4115,24 @@ export function App() {
 									active: drawer === "browser",
 									onClick: () => handleToolDrawerAction("browser"),
 								},
+								// RPC 日志专属 Tab：默认隐藏，任一存活的 agent 开启记录后才出现
+								//（门控与目标 agent 计算见 rpcLogTabTargetAgentId）。
+								...(rpcLogTabTargetAgentId
+									? [
+											{
+												id: "rpcLog",
+												label: t("drawer.rpcLog"),
+												icon: <ScrollText size={16} />,
+												active: drawer === "rpcLog",
+												onClick: () => {
+													// rpcLog 面板必须绑定 agentId（无 id 的 openDrawer("rpcLog") 会渲染空面板）：
+													// 已展开则点击关闭走还原语义（回到日志打开前的面板），否则切到目标 agent 的日志。
+													if (workspace.drawer === "rpcLog" && !workspace.drawerCollapsed) workspace.closeRpcLogPanel();
+													else workspace.openRpcLogPanel(rpcLogTabTargetAgentId);
+												},
+											},
+										]
+									: []),
 							]}
 						/>
 					}

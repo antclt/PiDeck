@@ -349,6 +349,7 @@ import { preparePreloadPath } from "./preloadPath";
 import { AppLogger } from "./logging/AppLogger";
 import { setAppLogger } from "./logging/sharedLogger";
 import { RpcLogger } from "./logging/RpcLogger";
+import { RpcLogLiveBroadcaster } from "./logging/RpcLogLiveBroadcaster";
 import { registerEditorsIpc } from "./ipc/editorsIpc";
 import { registerPiAuthIpc } from "./ipc/piAuthIpc";
 import { detectExternalEditors, listConfiguredExternalEditors, mergeDetectedExternalEditors, openProjectInEditor, validateExternalEditorCommand } from "./editors/EditorDetector";
@@ -3168,6 +3169,8 @@ function registerIpc() {
 		isDshAgent: (agentId) => dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
 		setDshRpcLogging: (agentId, enabled) => dshAgentManager.setRpcLogging(agentId, enabled),
 		isDshRpcLogging: (agentId) => dshAgentManager.isRpcLogging(agentId),
+		// 实时观看登记同样分流到 DSH 的广播器
+		setDshRpcLogWatching: (agentId, watching) => dshAgentManager.setRpcLogWatching(agentId, watching),
 		diagnosticsMonitor: diagnosticsMonitor ?? undefined,
 		environmentDoctor: environmentDoctor ?? undefined,
 		logBundleExporter: logBundleExporter ?? undefined,
@@ -3881,6 +3884,13 @@ app
 			// 手动停止标记（持久化）：为真时 ensureStarted 拒绝自动拉起，只有用户显式启动才 boot。
 			() => settingsStore.get().dshManualStopped === true,
 		);
+		// 实时 RPC 日志广播器（DSH 后端用）：镜像 pi AgentManager 的 80ms 节流批量推送语义，
+		// 窗口销毁后静默丢弃；观看登记由 rpcLogsSetWatching IPC 按面板挂载/卸载成对驱动。
+		const rpcLogLiveBroadcaster = new RpcLogLiveBroadcaster({
+			send: (channel, payload) => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+			},
+		});
 		dshAgentManager = new DshAgentManager(
 			dshHost,
 			(projectId) => projectStore.get(projectId),
@@ -3915,11 +3925,14 @@ app
 			() => join(app.getPath("userData"), "exports"),
 			// 新会话无标题时的兜底标题（i18n；与外部会话导入兜底一致）
 			() => mainCopy("session.dshUntitled"),
+			rpcLogLiveBroadcaster,
 		);
 		// C12/E15：DSH 退出清理——先停全部活跃会话（清 mux/订阅/pending）再 dispose host，
 		// 顺序保证避免 host 先被杀导致会话清理路径访问已死 transport。
 		quitCleanup.register("dsh", async () => {
 			await dshAgentManager?.stopAll();
+			// 退出前清空实时广播的观看登记与聚合缓冲（含在途节流定时器，配对清理）
+			rpcLogLiveBroadcaster.clear();
 			await dshHost?.dispose();
 		});
 		// DSH 外部会话自动导入改到 projectStore.load 之后（见下方 scheduleDshForeignAutoImport）：
@@ -4140,8 +4153,8 @@ app
 				const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
 				if (!liveTarget) {
 					if (!sessionRuntimeCoordinator.isActivating(sessionId)) {
-							records = downgradeStaleRunning(records);
-						}
+						records = downgradeStaleRunning(records);
+					}
 				} else {
 					const liveTab = agentManager.list().find((tab) => tab.id === liveTarget.agentId);
 					if (liveTab?.createdAt) {
