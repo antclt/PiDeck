@@ -1,9 +1,9 @@
 import type { AgentBackend } from "./agent";
 import type { BusySendDelivery } from "../busySendDelivery";
-import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../sessionTabWidth.ts";
-import { createDefaultExternalEditorSettings, type ExternalEditorSettings } from "./project.ts";
+import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../sessionTabWidth";
+import { createDefaultExternalEditorSettings, type ExternalEditorSettings } from "./project";
 import type { SecurityConfig } from "./security";
-import { createDefaultSoundAlertSettings, type SoundAlertSettings } from "./soundAlert.ts";
+import { createDefaultSoundAlertSettings, type SoundAlertSettings } from "./soundAlert";
 
 export type SendShortcutMode = "enter-send" | "ctrl-enter-send" | "shift-enter-send";
 

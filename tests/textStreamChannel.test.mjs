@@ -11,9 +11,11 @@ import test from "node:test";
 
 test("main process: textEmitter tracks and pushes streaming text", () => {
 	const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+	// 节流常量已随消息 emit 域迁入 MessageEmitBatcher（AgentManager 拆分 Wave 2）
+	const batcher = readFileSync("src/main/pi/messageEmitBatcher.ts", "utf8");
 
 	assert.match(agentManager, /private readonly textEmitter = new LatestByKeyEmitter/);
-	assert.match(agentManager, /private static readonly MESSAGE_FLUSH_INTERVAL_MS = 50/);
+	assert.match(batcher, /MESSAGE_FLUSH_INTERVAL_MS = 50/);
 	assert.match(agentManager, /this\.streamingText\.set\(agentId, nextText\)/);
 	assert.match(agentManager, /this\.textEmitter\.push\(agentId, stripAnsi\(nextText\)\)/);
 
