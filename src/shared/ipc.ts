@@ -175,6 +175,7 @@ export const ipcChannels = {
 	dshGoalAction: "dsh:goal-action",
 	/** DSH 子代理列表（subagent.list 直接子代目录）。 */
 	dshListSubagents: "dsh:list-subagents",
+	dshCancelQueuedMessage: "dsh:cancel-queued-message",
 	/** DSH 子代理历史（subagent.history 只读 transcript）。 */
 	dshSubagentHistory: "dsh:subagent-history",
 	/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */

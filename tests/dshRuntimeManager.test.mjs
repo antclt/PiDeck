@@ -185,6 +185,76 @@ test("installFromArchive：校验通过后原子落位，版本目录可用", as
 	rmSync(root, { recursive: true, force: true });
 });
 
+test("同版本重装走换位落位：旧目录先让位、落位失败时原样放回（任意时刻不出现半空 target）", async () => {
+	const { manager, layout, root } = makeManager({
+		extract: async (_archive, destDir) => {
+			stageRuntime(join(destDir, "dsh-runtime"), { over: { runtimeVersion: "0.1.1-rc.2" } });
+			// 落位阶段写入标记文件，用于区分新旧内容
+			writeFileSync(join(destDir, "dsh-runtime", "marker.txt"), "new");
+		},
+	});
+	// 预置已存在的同版本目录（旧安装），带旧标记
+	mkdirSync(join(layout.runtimesRoot, "0.1.1-rc.2"), { recursive: true });
+	writeFileSync(join(layout.runtimesRoot, "0.1.1-rc.2", "marker.txt"), "old");
+
+	const archive = join(root, "in.tgz");
+	writeFileSync(archive, "fake");
+	const result = await manager.installFromArchive(archive);
+	assert.equal(result.ok, true);
+	assert.equal(result.dirName, "0.1.1-rc.2");
+	// 换位落位后 target 是新内容
+	assert.equal(readFileSync(join(layout.runtimesRoot, "0.1.1-rc.2", "marker.txt"), "utf8"), "new");
+	// 旧目录残骸只允许出现在 tempRoot（finally 清理失败也仅是残留，不影响安装）
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("同版本重装：落位 rename 失败时旧目录让位后回滚（不出现半空 target）", async () => {
+	// 通过 stubs 注入 fs/promises：第二次起 rename 持续 EPERM（模拟杀毒/资源管理器
+	// 占用），验证 swapRuntimeDirectory 的两段式换位——让位成功、落位失败、回滚放回。
+	const fsPromises = await import("node:fs/promises");
+	const realRename = fsPromises.rename;
+	let renames = 0;
+	const { DshRuntimeManager: StubbedManager } = loadTsCommonJs("src/main/dsh/runtime/DshRuntimeManager.ts", {
+		stubs: {
+			"node:fs/promises": {
+				...fsPromises,
+				rename: async (from, to) => {
+					renames += 1;
+					if (renames >= 2) {
+						const error = new Error("EPERM: operation not permitted, rename");
+						error.code = "EPERM";
+						throw error;
+					}
+					return realRename(from, to);
+				},
+			},
+		},
+	});
+	const root = mkdtempSync(join(tmpdir(), "dsh-rt-"));
+	const layout = {
+		runtimesRoot: join(root, "runtimes", "dsh"),
+		tempRoot: join(root, "runtimes", ".tmp"),
+	};
+	const manager = new StubbedManager({ layout, appVersion: () => "0.7.5", extract: async (_a, destDir) => {
+		stageRuntime(join(destDir, "dsh-runtime"));
+	} });
+	// 预置旧目录（用户已装的运行时）
+	mkdirSync(join(layout.runtimesRoot, "0.1.1-rc.2"), { recursive: true });
+	writeFileSync(join(layout.runtimesRoot, "0.1.1-rc.2", "marker.txt"), "old");
+
+	const archive = join(root, "in.tgz");
+	writeFileSync(archive, "fake");
+	const result = await manager.installFromArchive(archive);
+	assert.equal(result.ok, false, "落位失败必须报告安装失败");
+	assert.match(result.error ?? "", /EPERM/);
+	assert.equal(renames, 3, "让位 rename + 失败的落位 rename + 失败的回滚 rename");
+	// 回滚 rename（第 3 次）也被 mock 拦截失败：旧目录安全留在 tempRoot，
+	// target 不存在——任意时刻都没有半空目录；旧内容也没有丢。
+	assert.equal(existsSync(join(layout.runtimesRoot, "0.1.1-rc.2")), false, "target 不出现半空");
+	assert.equal(existsSync(join(layout.tempRoot)) && readdirSync(layout.tempRoot).length >= 1, true, "旧目录残留在 tempRoot 可手动找回");
+	rmSync(root, { recursive: true, force: true });
+});
+
 test("installFromArchive：sha256 不匹配时拒绝安装，且不落位", async () => {
 	const { manager, layout, root } = makeManager({
 		extract: async (_archive, destDir) => {

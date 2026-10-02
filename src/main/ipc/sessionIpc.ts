@@ -231,6 +231,8 @@ export type DshBackendIpcDeps = {
 	createDshGoal?: (agentId: string, objective: string, maxGoalRounds?: number) => Promise<void>;
 	/** DSH 目标操作（G5：pause/resume/complete/clear）；未装配时抛错。 */
 	runDshGoalAction?: (agentId: string, action: "pause" | "resume" | "complete" | "clear") => Promise<void>;
+	/** DSH 取消 host 侧排队消息（session/updateQueue remove）；未装配时抛错。 */
+	cancelDshQueuedMessage?: (agentId: string, itemId: string) => Promise<void>;
 	/** DSH 子代理列表（G6）；未装配时返回空列表。 */
 	listDshSubagents?: (agentId: string) => Promise<
 		Array<{
@@ -428,6 +430,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		searchDshSessions,
 		createDshGoal,
 		runDshGoalAction,
+		cancelDshQueuedMessage,
 		listDshSubagents,
 		readDshSubagentHistory,
 		listDshSkills,
@@ -1070,6 +1073,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (typeof agentId !== "string") return [];
 		if (!listDshSubagents) return [];
 		return listDshSubagents(agentId);
+	});
+	// DSH 取消 host 侧排队消息（inbox 投影项的撤回）
+	ipcMain.handle(ipcChannels.dshCancelQueuedMessage, async (_event, agentId: unknown, itemId: unknown) => {
+		if (typeof agentId !== "string" || typeof itemId !== "string" || itemId === "") {
+			throw new Error("Invalid agentId or queue item id");
+		}
+		if (!cancelDshQueuedMessage) throw new Error("dsh queue is not available");
+		await cancelDshQueuedMessage(agentId, itemId);
 	});
 	// DSH 子代理历史（G6）
 	ipcMain.handle(ipcChannels.dshSubagentHistory, async (_event, agentId: unknown, childSessionId: unknown, beforeSeq?: unknown, maxMessages?: unknown) => {

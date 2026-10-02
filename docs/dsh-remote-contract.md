@@ -40,7 +40,7 @@
 `session/page` 的 `throughSeq` 是**包含式日志切点**：
 
 - 必须 ≤ 该会话当前 cursor，超出直接 `gateway/bad-request`；
-- 官方约定这个值来自 `session/follow` 暴露的 observation cursor（PiDeck 由 pideck-session-bridge 桥接到主进程）；
+- PiDeck 实现经 pideck-session-bridge 的 `sessionQuery.observeSession` **冷读** observation cursor（不激活冷会话；语义同为最后事件 seq），
 - 任何对 throughSeq 语义的误用（`MAX_SAFE_INTEGER`、负数等）会让历史读取**静默变空**——守卫见 `tests/dshSessionBridge.test.mjs` 与 `DshAgentManager.historyPage` 注释。
 
 ## PiDeck 传输设计

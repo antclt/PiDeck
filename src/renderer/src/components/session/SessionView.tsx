@@ -14,6 +14,7 @@ import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
+import { SessionQueuedMessagesStrip } from "./SessionQueuedMessagesStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { useReplyActions } from "../../hooks/useReplyActions";
@@ -351,6 +352,7 @@ export function SessionView({
 								queuePanel={queuePanel}
 								widgets={
 									<>
+										<SessionQueuedMessagesStrip sessionId={sessionId} />
 										<SessionTodoStrip sessionId={sessionId} />
 										<SessionFilesStrip sessionId={sessionId} run={latestAgentRun} onOpenFile={onOpenFile} onDiffFile={onDiffFile} />
 										<SessionSubagentsStrip sessionId={sessionId} onOpenChildSession={onOpenBranchSession} />

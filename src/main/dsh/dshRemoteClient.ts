@@ -160,6 +160,17 @@ export class DshRemoteClient {
 		return envelope(this.rpc.call("session/cancel", { request: { sessionId: input.sessionId } }));
 	}
 
+	/**
+	 * 变更一条排队中的消息（`session/updateQueue`）：remove 撤回排队项、
+	 * edit 仅接受 text 块重写内容、steer 仅对运行中会话的 next-turn 项合法
+	 * （把排队项转为立即插入当前回合的转向指令）。PiDeck 目前只用 remove
+	 * （取消排队）；edit/steer 的 UI 语义未定，不透出到渲染层。
+	 */
+	sessionUpdateQueue(input: { sessionId: string; itemId: string; action: { kind: "remove" } | { kind: "edit"; content: Array<{ type: "text"; text: string }> } | { kind: "steer" } }): Promise<DshEnvelope> {
+		const { sessionId, itemId, action } = input;
+		return envelope(this.rpc.call("session/updateQueue", { request: { sessionId, itemId, action } }));
+	}
+
 	async sessionsRename(input: { sessionId: string; title: string }): Promise<DshEnvelope> {
 		return envelope(this.rpc.call("session/rename", { request: { sessionId: input.sessionId, title: input.title } }));
 	}

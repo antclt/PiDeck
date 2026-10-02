@@ -579,6 +579,8 @@ const api = {
 		createDshGoal: (agentId: string, objective: string, maxGoalRounds?: number) => ipcRenderer.invoke(ipcChannels.dshCreateGoal, agentId, objective, maxGoalRounds) as Promise<void>,
 		/** DSH 目标操作（pause/resume/complete/clear）。 */
 		runDshGoalAction: (agentId: string, action: "pause" | "resume" | "complete" | "clear") => ipcRenderer.invoke(ipcChannels.dshGoalAction, agentId, action) as Promise<void>,
+		/** DSH 取消 host 侧排队消息（session/updateQueue remove；幂等：已消费也成功）。 */
+		cancelDshQueuedMessage: (agentId: string, itemId: string) => ipcRenderer.invoke(ipcChannels.dshCancelQueuedMessage, agentId, itemId) as Promise<void>,
 		/** DSH 子代理列表（subagent.list）。 */
 		listDshSubagents: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshListSubagents, agentId) as Promise<

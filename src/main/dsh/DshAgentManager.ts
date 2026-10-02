@@ -1,4 +1,4 @@
-import type { AgentBackend, AgentGatewayCapability, AgentRuntimeState, AgentTab, DshPermissionPreset, AvailableModel, ChatMessage, CreateAgentInput, DshSkillView, ImageContent, PiCommand, Project, SendPromptInput, SendPromptResult, SessionUiResponseInput, TodoItem } from "../../shared/types";
+import type { AgentBackend, AgentGatewayCapability, AgentRuntimeState, AgentTab, DshPermissionPreset, AvailableModel, ChatMessage, CreateAgentInput, DshQueuedMessage, DshSkillView, ImageContent, PiCommand, Project, SendPromptInput, SendPromptResult, SessionUiResponseInput, TodoItem } from "../../shared/types";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
 // DSH 会话 id 品牌类型（零运行时成本，仅类型擦除）
@@ -11,7 +11,7 @@ import type { DshEnvelope, DshHistoryEntry, DshHistoryPage } from "./dshRemoteCl
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
 import type { DshHost } from "./DshHost";
 import { renderDshSessionHtml, sanitizeExportFileName } from "./dshSessionHtmlExport";
-import { projectDshEvent, parseDshTodoList, type DshProjection } from "./dshEventProjector";
+import { projectDshEvent, parseDshTodoList, parseDshInboxProjection, type DshProjection } from "./dshEventProjector";
 import {
 	cacheHitPercentOf,
 	collectDshProcessEvent,
@@ -33,7 +33,7 @@ import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshA
 import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, normalizeDshTurnPageSize, planDshHistoryRounds, trimToOldestTurnStart } from "./dshHistoryPagePlan";
 import { isContextOverflowError } from "../../shared/contextOverflow";
 
-const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats", "todos"];
+const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats", "todos", "inbox"];
 
 /**
  * DSH 后端网关：实现 SessionAgentGateway，把 DSH host（DshHost）的会话/事件
@@ -875,6 +875,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			goal: runtime.goal,
 			// 当前待办计划（官方 todos projection / todo/write 快照；渲染层 todo 条数据源）
 			todos: runtime.todos,
+			// host 侧排队消息（inbox 投影；渲染层排队提示条数据源）
+			queuedMessages: runtime.queuedMessages,
 			// 上下文占用（host contextPressure/contextBreakdown 投影；缺失时消息估算兜底）
 			contextTokens: typeof contextTokens === "number" ? contextTokens : undefined,
 			contextWindow: typeof contextWindow === "number" ? contextWindow : undefined,
@@ -1214,6 +1216,27 @@ export class DshAgentManager implements SessionAgentGateway {
 		const result = action === "pause" ? await client.goalsPause(request) : action === "resume" ? await client.goalsResume(request) : action === "complete" ? await client.goalsComplete(request) : await client.goalsClear({ sessionId: runtime.sessionId, ref });
 		if (!result.result.ok) {
 			throw new Error(`dsh goal.${action} failed: ${JSON.stringify(result.result.error)}`);
+		}
+	}
+
+	/**
+	 * 取消 DSH host 侧排队消息（`session/updateQueue` 的 remove）。
+	 * 不 waitForIdle：排队项的存在意义就是运行中可撤回，等 idle 反而错过窗口；
+	 * 与 host 消费赛跑时对 queue-item-not-found 幂等成功（目标已不在队列，结果等价）。
+	 */
+	async cancelQueuedMessage(agentId: string, itemId: string): Promise<void> {
+		if (typeof itemId !== "string" || itemId === "") throw new Error("Queue item id is required");
+		const runtime = this.runtime(agentId);
+		const client = this.requireClient();
+		const result = await client.sessionUpdateQueue({
+			sessionId: runtime.sessionId,
+			itemId,
+			action: { kind: "remove" },
+		});
+		if (!result.result.ok) {
+			const error = result.result.error as { code?: unknown } | undefined;
+			if (error && typeof error === "object" && error.code === "session/queue-item-not-found") return;
+			throw new Error(`dsh updateQueue failed: ${JSON.stringify(result.result.error)}`);
 		}
 	}
 
@@ -1846,6 +1869,17 @@ export class DshAgentManager implements SessionAgentGateway {
 			}
 			return;
 		}
+		if (key === "inbox") {
+			// 官方 inbox 投影：host 侧排队消息（next-turn/next-step 整值替换）。与本地
+			// 排队队列（queuedPromptQueue，waitForIdle 前的客户端暂存）互补——覆盖的是已
+			// 发出但 host 因运行中回合而滞留 inbox 的盲区；空数组是有效值（排队被消费）。
+			const parsed = parseDshInboxProjection(payload.value);
+			if (parsed !== undefined) {
+				runtime.queuedMessages = parsed;
+				this.emitRuntimeState(runtime.tab.id);
+			}
+			return;
+		}
 	}
 
 	/**
@@ -2431,6 +2465,8 @@ type DshAgentRuntime = {
 	usageTotals?: DshUsageTotals;
 	/** 会话统计（host sessionStats 投影；整段日志回合/步骤计数与墙钟汇总，dsh-web StatsLine 同源）。 */
 	sessionStats?: DshSessionStatsProjection;
+	/** host 侧排队消息（inbox 投影；空数组 = 无排队）。见 parseDshInboxProjection。 */
+	queuedMessages?: DshQueuedMessage[];
 	/** DSH 当轮真实系统提示（system/message 投影；attach/backfill 重放与 mux 实时双来源）。 */
 	systemPrompt?: string;
 	/**
