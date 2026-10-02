@@ -70,9 +70,9 @@ export function WebPromptPicker(props: { disabled?: boolean; onPick: (content: s
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>
-				<Button type="button" variant="ghost" size="sm" className="h-7 shrink-0 gap-1 px-2 text-caption text-muted-foreground" disabled={props.disabled} title={t("web.promptLibrary")} aria-label={t("web.promptLibrary")}>
-					<Sparkles className="size-3.5" aria-hidden="true" />
-					{t("web.promptLibrary")}
+				<Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 p-0 text-muted-foreground" disabled={props.disabled} title={t("web.promptLibrary")} aria-label={t("web.promptLibrary")}>
+					{/* 纯图标触发器（与相邻 ImagePlus/Camera 同规格）：带文字时在窄屏把右侧发送按钮挤出视口/遮住。 */}
+					<Sparkles className="size-4" aria-hidden="true" />
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent align="start" className="w-96 p-0">

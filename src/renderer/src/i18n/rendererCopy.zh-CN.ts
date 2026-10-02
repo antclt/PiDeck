@@ -5018,6 +5018,7 @@ export const zhCN = {
 	"web.themeDark": "暗色",
 	"web.themeSystem": "跟随系统",
 	"web.themeToggle": "切换主题",
+	"web.globalMenu": "全局菜单",
 	"web.installApp": "安装应用",
 	"web.takePhoto": "拍照",
 	"web.streamRecovered": "网络已恢复，已同步最新消息",

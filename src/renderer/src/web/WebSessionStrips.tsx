@@ -78,16 +78,17 @@ function basename(path: string): string {
 }
 
 function StripShell({ icon, title, count, children }: { icon: React.ReactNode; title: string; count: number; children: React.ReactNode }) {
-	const [open, setOpen] = useState(true);
+	// 默认折叠：三条 strip 全展开在移动端正屏占位过大；标题行本身就是可点的摘要，点按才展开明细。
+	const [open, setOpen] = useState(false);
 	return (
-		<section className="rounded-lg border border-border bg-bg-subtle/60">
-			<button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-text-muted">
-				{icon}
+		<section className="border-b border-border-subtle last:border-b-0">
+			<button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex min-h-8 w-full items-center gap-1.5 px-1 py-1 text-xs text-text-tertiary transition-colors hover:text-text-secondary">
+				<span className="text-text-tertiary">{icon}</span>
 				<span className="font-medium">{title}</span>
-				<span className="rounded bg-bg-active px-1 tabular-nums">{count}</span>
+				<span className="rounded-full bg-bg-muted px-1.5 py-px text-[10px] leading-4 tabular-nums text-text-secondary">{count}</span>
 				<ChevronDown className={`ml-auto size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />
 			</button>
-			{open ? <div className="px-2 pb-2">{children}</div> : null}
+			{open ? <div className="px-1 pt-0.5 pb-2">{children}</div> : null}
 		</section>
 	);
 }
@@ -99,9 +100,9 @@ function WebFileChangesStrip({ changes }: { changes: SessionFileChange[] }) {
 			<ul className="flex flex-wrap gap-1">
 				{changes.slice(0, 30).map((change) => (
 					<li key={change.path}>
-						<button type="button" title={`${change.path} × ${change.count}`} onClick={() => void copyTextToClipboard(change.path)} className="flex items-center gap-1 rounded border border-border bg-bg-surface px-1.5 py-0.5 text-xs hover:bg-bg-active">
+						<button type="button" title={`${change.path} × ${change.count}`} onClick={() => void copyTextToClipboard(change.path)} className="flex items-center gap-1 rounded border border-border-subtle bg-bg-panel px-1.5 py-0.5 text-xs text-text-secondary transition-colors hover:bg-bg-hover">
 							<span className="max-w-44 truncate">{basename(change.path)}</span>
-							<span className="rounded bg-bg-active px-1 text-[10px] tabular-nums text-text-muted">{change.count}</span>
+							<span className="rounded bg-bg-muted px-1 text-[10px] tabular-nums text-text-tertiary">{change.count}</span>
 						</button>
 					</li>
 				))}
@@ -119,20 +120,20 @@ function WebSubagentsStrip({ subagents }: { subagents: PiSubagentEntry[] }) {
 				{subagents.map((entry) => {
 					const isOpen = expanded === entry.id;
 					return (
-						<li key={entry.id} className="shrink-0 rounded border border-border bg-bg-surface px-2 py-1 text-xs">
+						<li key={entry.id} className="shrink-0 rounded border border-border-subtle bg-bg-panel px-2 py-1 text-xs">
 							<div className="flex items-center gap-1.5">
 								<span className="shrink-0 rounded bg-primary/10 px-1 py-0.5 text-[10px] font-medium text-primary">{entry.type}</span>
-								<span className="min-w-0 flex-1 truncate text-text-muted" title={entry.description}>
+								<span className="min-w-0 flex-1 truncate text-text-tertiary" title={entry.description}>
 									{entry.description}
 								</span>
 								<span className={`shrink-0 text-[10px] ${SUB_STATUS_TONE[entry.status]}`}>{t(SUB_STATUS_LABEL[entry.status])}</span>
 								{(entry.result || entry.error) && (
-									<button type="button" aria-label={entry.description} onClick={() => setExpanded(isOpen ? null : entry.id)} className="shrink-0 rounded p-0.5 hover:bg-bg-active">
+									<button type="button" aria-label={entry.description} onClick={() => setExpanded(isOpen ? null : entry.id)} className="shrink-0 rounded p-0.5 text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary">
 										<ChevronDown className={`size-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
 									</button>
 								)}
 							</div>
-							{isOpen ? <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-inset p-1.5 text-[11px] leading-relaxed text-text-muted">{entry.error ?? entry.result}</pre> : null}
+							{isOpen ? <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-muted p-1.5 text-[11px] leading-relaxed text-text-secondary">{entry.error ?? entry.result}</pre> : null}
 						</li>
 					);
 				})}
@@ -148,9 +149,9 @@ function WebTodoStrip({ todo }: { todo: SessionTodoSnapshot | null }) {
 			{/* 限高滚动容器内的行必须 shrink-0（2027-01 桌面端压缩事故：overflow-hidden 行会被 flex 压扁叠字） */}
 			<ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
 				{todo.todos.map((item) => (
-					<li key={`${todo.planId}-${item.id}`} className="flex shrink-0 items-start gap-1.5 rounded border border-border bg-bg-surface px-2 py-1 text-xs">
-						{item.status === "completed" ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-500" /> : item.status === "in_progress" ? <Circle className="mt-0.5 size-3.5 shrink-0 animate-pulse text-sky-500" /> : <Circle className="mt-0.5 size-3.5 shrink-0 text-text-muted" />}
-						<span className={item.status === "completed" ? "text-text-muted line-through" : ""}>{item.text}</span>
+					<li key={`${todo.planId}-${item.id}`} className="flex shrink-0 items-start gap-1.5 rounded border border-border-subtle bg-bg-panel px-2 py-1 text-xs">
+						{item.status === "completed" ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-500" /> : item.status === "in_progress" ? <Circle className="mt-0.5 size-3.5 shrink-0 animate-pulse text-sky-500" /> : <Circle className="mt-0.5 size-3.5 shrink-0 text-text-tertiary" />}
+						<span className={item.status === "completed" ? "text-text-tertiary line-through" : ""}>{item.text}</span>
 					</li>
 				))}
 			</ul>
@@ -162,8 +163,10 @@ function WebTodoStrip({ todo }: { todo: SessionTodoSnapshot | null }) {
 export function WebSessionStrips({ sessionId }: { sessionId: string | null }) {
 	const { changes, subagents, todo } = useSessionActivity(sessionId);
 	if (!sessionId) return null;
+	const empty = changes.length === 0 && subagents.length === 0 && (!todo || todo.todos.length === 0);
+	if (empty) return null;
 	return (
-		<div className="flex flex-col gap-1.5" aria-label={t("web.filesStripTitle")}>
+		<div className="flex flex-col border-t border-border-subtle px-3" aria-label={t("web.filesStripTitle")}>
 			<WebFileChangesStrip changes={changes} />
 			<WebSubagentsStrip subagents={subagents} />
 			<WebTodoStrip todo={todo} />

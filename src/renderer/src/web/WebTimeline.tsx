@@ -580,7 +580,7 @@ export function WebTimeline(props: {
 
 	return (
 		<section className="message-timeline relative h-full min-h-0 flex-1 overflow-y-auto" ref={timelineRef} onScroll={updateScrollState}>
-			<div className="message-list flex flex-col gap-5 p-4 sm:px-6">
+			<div className="message-list flex flex-col gap-4 p-4 pb-2 sm:px-6">
 				{!hasActiveSession && messages.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-logo">

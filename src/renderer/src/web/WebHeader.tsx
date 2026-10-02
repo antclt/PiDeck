@@ -5,7 +5,7 @@
  * 模型与思考档位已迁往 composer 工具行（WebModelSelector/WebThinkingSelector）。
  * 运行态来自 useChat status（submitted/streaming）与轮询的 runtime.status 兜底。
  */
-import { Download, History, Menu, Monitor, Moon, MoreHorizontal, PanelRight, Puzzle, Search, ShieldCheck, Sun, Target } from "lucide-react";
+import { Download, EllipsisVertical, History, Menu, Monitor, Moon, MoreHorizontal, PanelRight, Puzzle, Search, ShieldCheck, Sun, Target } from "lucide-react";
 import type { AgentBackend } from "../../../shared/types";
 import { Button } from "@/components/ui-shadcn/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui-shadcn/select";
@@ -56,21 +56,24 @@ export function WebHeader(props: {
 	onInstall?: () => void;
 	onOpenAssets?: () => void;
 }) {
-	const { title, status, onOpenSidebar, backend, contextUsage, permissionPreset, actions, onOpenDshTools, onOpenSearch, themePreference, resolvedTheme, onCycleTheme, canInstall, onInstall, onOpenAssets } = props;
-	// 允许窄屏换行：标题保留可用宽度，控制项在下一行展开，避免手机上相互挤压。
+	const { title, status, onOpenSidebar, backend, contextUsage, permissionPreset, actions, onOpenDshTools, onOpenSearch, themePreference, onCycleTheme, canInstall, onInstall, onOpenAssets } = props;
+	// 头部固定单行：标题+状态占左侧，右侧动作收敛后窄屏不再换行错位（全局入口收进溢出菜单）。
 	return (
-		<header className="chat-header flex min-w-0 flex-wrap items-center gap-2 border-b border-border/60 bg-background px-3 py-2">
+		<header className="web-header flex min-w-0 items-center gap-2 border-b border-border/60 bg-background px-3 py-2">
 			<Button type="button" variant="ghost" size="icon" className="mobile-sidebar-toggle size-8 shrink-0" onClick={onOpenSidebar} aria-label={t("web.openProjects")} title={t("web.openProjects")}>
 				<Menu className="size-4" aria-hidden="true" />
 			</Button>
-			<div className="chat-title-block min-w-0 flex-1">
+			<div className="web-title-block flex min-w-0 flex-1 flex-col gap-0.5">
 				<strong className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold tracking-tight text-foreground" title={title}>
 					{/* 后端徽标（C18 同源）：与侧栏会话行一致，头部可辨 pi/dsh */}
 					{backend && <SessionBackendMark backend={backend} className="size-4 shrink-0 rounded" />}
 					<span className="min-w-0 truncate">{title}</span>
 				</strong>
+				{/* 运行态：随标题展示。flex-col 容器默认 stretch 会把 inline pill 拉成整行横条，
+				    这里 self-start 让它收缩为左对齐的小标记。 */}
+				<span className={cn("agent-status-indicator self-start", status === "running" && "status-running", status === "starting" && "status-starting", status === "error" && "status-error", status === "idle" && "status-idle")}>{t(statusLabelKey(status))}</span>
 			</div>
-			<div className="chat-header-actions flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
+			<div className="web-header-actions flex min-w-0 items-center justify-end gap-1.5">
 				{/* P2：上下文用量环（无窗口数据时隐藏；超限变红） */}
 				{contextUsage && (contextUsage.contextWindow ?? 0) > 0 ? <ContextRing usage={contextUsage} /> : null}
 				{/* S6.3：DSH 会话的 goals/subagents/skills 工具面板入口（仅 dsh 后端显示） */}
@@ -96,10 +99,6 @@ export function WebHeader(props: {
 						</SelectContent>
 					</Select>
 				) : null}
-				{/* 运行态指示：复用桌面 agent-status-indicator 视觉 */}
-				<span className="flex items-center gap-2">
-					<span className={cn("agent-status-indicator", status === "running" && "status-running", status === "starting" && "status-starting", status === "error" && "status-error", status === "idle" && "status-idle")}>{t(statusLabelKey(status))}</span>
-				</span>
 				{/* P1：rewind 检查点入口（需活跃 runtime） */}
 				{actions?.onOpenRewind ? (
 					<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={actions.onOpenRewind} aria-label={t("web.rewind")} title={t("web.rewind")}>
@@ -140,35 +139,41 @@ export function WebHeader(props: {
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}
-				{/* 第二批：全局入口组（与会话级 actions 分开；均可选，缺失即隐藏） */}
-				{onOpenSearch ? (
-					<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={onOpenSearch} aria-label={t("web.searchTitle")} title={t("web.searchTitle")}>
-						<Search className="size-4" aria-hidden="true" />
-					</Button>
-				) : null}
-				{onCycleTheme ? (
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon"
-						className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-						onClick={onCycleTheme}
-						aria-label={t("web.themeToggle")}
-						title={`${t("web.themeToggle")} · ${t(themePreference === "light" ? "web.themeLight" : themePreference === "dark" ? "web.themeDark" : "web.themeSystem")}`}
-					>
-						{/* system 模式统一 Monitor 图标：避免系统亮暗切换时按钮闪烁换图标 */}
-						{themePreference === "light" ? <Sun className="size-4" aria-hidden="true" /> : themePreference === "dark" ? <Moon className="size-4" aria-hidden="true" /> : <Monitor className="size-4" aria-hidden="true" />}
-					</Button>
-				) : null}
-				{canInstall && onInstall ? (
-					<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={onInstall} aria-label={t("web.installApp")} title={t("web.installApp")}>
-						<Download className="size-4" aria-hidden="true" />
-					</Button>
-				) : null}
-				{onOpenAssets ? (
-					<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={onOpenAssets} aria-label={t("web.assetsTitle")} title={t("web.assetsTitle")}>
-						<Puzzle className="size-4" aria-hidden="true" />
-					</Button>
+				{/* 第二批：全局入口（搜索/主题/安装/技能）收敛进溢出菜单——窄屏头部固定单行不换行（竖三点区分会话菜单的横三点） */}
+				{onOpenSearch || onCycleTheme || (canInstall && onInstall) || onOpenAssets ? (
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.globalMenu")} title={t("web.globalMenu")}>
+								<EllipsisVertical className="size-4" aria-hidden="true" />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-52">
+							{onOpenSearch ? (
+								<DropdownMenuItem onClick={onOpenSearch}>
+									<Search className="size-4" aria-hidden="true" />
+									{t("web.searchTitle")}
+								</DropdownMenuItem>
+							) : null}
+							{onCycleTheme ? (
+								<DropdownMenuItem onClick={onCycleTheme}>
+									{themePreference === "light" ? <Sun className="size-4" aria-hidden="true" /> : themePreference === "dark" ? <Moon className="size-4" aria-hidden="true" /> : <Monitor className="size-4" aria-hidden="true" />}
+									{t("web.themeToggle")} · {t(themePreference === "light" ? "web.themeLight" : themePreference === "dark" ? "web.themeDark" : "web.themeSystem")}
+								</DropdownMenuItem>
+							) : null}
+							{canInstall && onInstall ? (
+								<DropdownMenuItem onClick={onInstall}>
+									<Download className="size-4" aria-hidden="true" />
+									{t("web.installApp")}
+								</DropdownMenuItem>
+							) : null}
+							{onOpenAssets ? (
+								<DropdownMenuItem onClick={onOpenAssets}>
+									<Puzzle className="size-4" aria-hidden="true" />
+									{t("web.assetsTitle")}
+								</DropdownMenuItem>
+							) : null}
+						</DropdownMenuContent>
+					</DropdownMenu>
 				) : null}
 			</div>
 		</header>
