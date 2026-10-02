@@ -24,6 +24,7 @@ import { runPiGlobalInstall } from "../pi/piGlobalInstall";
 import type { NpmAvailabilityResult, PiInstallExecResult, PiInstallStatus, PiRuntimeNodeInstallResult, PiRuntimeNodeStatus, WebServiceStatusInfo } from "../../shared/types";
 import type { AppInfo, AppLogLevel, AppLogQuery, AppSettings, AvailableModel, ChangelogPayload, CreatePiSkillInput, ModelListReport, ModelsVerifyResult, SessionCommandResult, SessionRuntimeTarget } from "../../shared/types";
 import { invalidatePiInstallationCache, type PiLocator } from "../pi/PiLocator";
+import { validateInstallCommand } from "../pi/installCommandPolicy";
 import { resolvePiInstallGuard } from "../pi/piInstallGuard";
 import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import type { SettingsStore } from "../settings/SettingsStore";
@@ -742,8 +743,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── Pi 安装 / NPM ────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.piExecInstall, async (_event, command: string): Promise<import("../../shared/types").PiInstallExecResult> => {
-		void appLogger.info("pi", "Executing install command", { command });
+	ipcMain.handle(ipcChannels.piExecInstall, async (_event, command: string): Promise<PiInstallExecResult> => {
+		// IPC 边界第一行职责是校验：安装命令白名单化（installCommandPolicy），
+		// 拒绝任意 shell 串直通 cmd.exe /c / sh -c（渲染层输入不可信）。
+		const check = validateInstallCommand(command);
+		if (!check.ok) {
+			void appLogger.warn("pi", "Install command rejected", { command, reason: check.reason });
+			return { success: false, exitCode: -1, stdout: "", stderr: `Command rejected: ${check.reason}` };
+		}
+		const normalized = check.command;
+		void appLogger.info("pi", "Executing install command", { command: normalized });
 		try {
 			const { execFile } = await import("node:child_process");
 			const result = await new Promise<import("../../shared/types").PiInstallExecResult>((resolve) => {
@@ -751,7 +760,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				if (isWin) {
 					const child = execFile(
 						process.env.ComSpec || "cmd.exe",
-						["/d", "/s", "/c", command],
+						["/d", "/s", "/c", normalized],
 						{
 							cwd: app.getPath("home"),
 							timeout: 120_000,
@@ -776,7 +785,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				} else {
 					execFile(
 						"/bin/sh",
-						["-c", command],
+						["-c", normalized],
 						{
 							cwd: app.getPath("home"),
 							timeout: 120_000,

@@ -466,6 +466,12 @@ let cleanupPasteFiles: (() => Promise<number>) | undefined;
 
 /** 退出清理登记表（C12）：常驻资源创建处登记，before-quit 统一顺序执行。 */
 const quitCleanup = new QuitCleanupRegistry();
+// feishuBridge 在多个 IPC 处理器里重建/置空（临时连接/正式连接/重连），此前没登记
+// 退出清理——quit 时若 bridge 在线，其长轮询/WS 不会被停。闭包延迟读当前实例。
+quitCleanup.register("feishu-bridge", () => {
+	feishuBridge?.stop();
+	feishuBridge = null;
+});
 
 // 窗口整体缩放快捷键（Ctrl/Cmd+= 放大、Ctrl/Cmd+- 缩小）：按 shared/zoom 档位应用并持久化。
 // 主窗口与内置浏览器 webview guest 的 before-input-event 共用同一判定函数。
@@ -1726,14 +1732,8 @@ async function createWindow() {
 			}
 		}
 	});
-	// 子进程（含 GPU/utility）异常退出：Mac 上偶发“整窗闪一下”，需要留下 reason/exitCode。
-	app.on("child-process-gone", (_event, details) => {
-		void appLogger.error("process", "Child process gone", {
-			...details,
-			platform: process.platform,
-			arch: process.arch,
-		});
-	});
+	// 子进程（含 GPU/utility）异常退出监听已提到模块级 app.on（见 before-quit 附近）：
+	// 注册在 createWindow 内会随窗口重建（macOS activate）重复叠监听器。
 	mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
 		void appLogger.error("app", "Main window preload failed", {
 			preloadPath,
@@ -4713,7 +4713,9 @@ app
 
 		// macOS dock 点击或任务栏点击时恢复窗口
 		app.on("activate", () => {
-			if (mainWindow) {
+			// 窗口销毁后 mainWindow 不会置 null（closed 只满空一次），销毁实例上调
+			// show() 会抛 "Object has been destroyed"——降级到重建窗口。
+			if (mainWindow && !mainWindow.isDestroyed()) {
 				mainWindow.show();
 				mainWindow.focus();
 			} else {
@@ -4827,11 +4829,37 @@ async function ensureAllPiSettingsDefaults(): Promise<void> {
 	}
 }
 
-app.on("before-quit", () => {
+// 子进程（含 GPU/utility）异常退出：Mac 上偶发“整窗闪一下”，需要留下 reason/exitCode。
+// 注册在 app 级而不是 createWindow 内：窗口重建（macOS activate）会重复叠监听器。
+app.on("child-process-gone", (_event, details) => {
+	void appLogger.error("process", "Child process gone", {
+		...details,
+		platform: process.platform,
+		arch: process.arch,
+	});
+});
+
+let quitCleanupStarted = false;
+app.on("before-quit", (event) => {
 	isQuitting = true;
 	// 退出清理统一走登记表（C12）：各常驻资源在创建处 register，这里只负责顺序执行。
 	// 新增资源不再改 before-quit；单项失败由 registry 记日志不阻塞其余清理。
-	void quitCleanup.runAll();
+	// Electron 不等异步 promise：preventDefault 挡住本次退出，等 runAll 收尾后再
+	// app.quit()（重入时放行），否则 whisper/DSH dispose 等异步清理会被进程终止截断。
+	// 总预算 5s：任一清理任务挂死不能让应用永远退不出去。
+	if (quitCleanupStarted) return;
+	quitCleanupStarted = true;
+	event.preventDefault();
+	const cleanupBudget = new Promise<void>((resolve) => {
+		setTimeout(resolve, 5000).unref();
+	});
+	void Promise.race([quitCleanup.runAll(), cleanupBudget])
+		.catch((error) => {
+			void appLogger.error("quit", "Quit cleanup crashed", { error: error instanceof Error ? error.message : String(error) });
+		})
+		.finally(() => {
+			app.quit();
+		});
 });
 
 app.on("window-all-closed", () => {

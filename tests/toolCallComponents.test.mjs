@@ -97,7 +97,8 @@ test("edit/write diff cards expose an accessible open-file action", () => {
 	assert.match(app, /const\s+openSessionFilePath\s*=\s*useSessionFilePathOpener\(\{\s*onPreviewImage:\s*setPreviewImage,\s*viewFilePath\s*\}\)/);
 	assert.match(app, /await\s+openSessionFilePath\(\s*resolved,\s*\{\s*line,\s*scope:\s*projectId\s*\?\s*\{\s*projectId\s*\}\s*:\s*undefined\s*\}\s*\)/);
 	assert.match(sessionFilePathOpener, /viewFilePath\(\s*path,\s*undefined,\s*options\.line,\s*options\.scope,\s*options\.readOnly\s*===\s*true\s*\)/);
-	assert.match(sessionFilePathOpener, /readBase64\(\s*path,\s*undefined,\s*options\.scope\s*\)/);
+	// 预览读图必须带字节上界（COMPOSER_IMAGE_MAX_BYTES），不能无界 readBase64。
+	assert.match(sessionFilePathOpener, /readBase64\(\s*path,\s*COMPOSER_IMAGE_MAX_BYTES,\s*options\.scope\s*\)/);
 	assert.match(sessionFilePathOpener, /mimeType:\s*imageMimeTypeFromPath\(\s*path\s*\)/);
 	assert.doesNotMatch(sessionFilePathOpener, /dataUrl\.match\(\/\^data:/);
 	// 授权随 editor tab 固化，异步加载不能改用后来聚焦的项目。

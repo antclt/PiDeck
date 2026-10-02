@@ -4157,8 +4157,21 @@ export class AgentManager {
 				});
 				// 握手中的 exit 交给 handshakePiProcess 决定是否 --no-extensions 回退。
 				// 回退后旧进程的迟到 exit 不能把新 runtime 标 closed。
-				if (this.startupHandshakeAgents.has(agentId)) return;
-				if (this.agents.get(agentId)?.process !== piProcess) return;
+				if (this.startupHandshakeAgents.has(agentId)) {
+					// 握手期间 runtime 已注册，stop() 可达并已添加 userInitiatedStop 标记；
+					// 此分支 return 后不会再走 handleCreateProcessExit 的标记清理，必须在此补删，
+					// 否则泄漏。非 stop 场景标记本就不存在，删除是 no-op。
+					this.userInitiatedStop.delete(agentId);
+					return;
+				}
+				if (this.agents.get(agentId)?.process !== piProcess) {
+					// stop() 先把 runtime 从 agents 删除再 process.stop()：迟到的 exit 走到这里，
+					// 而清理标记的 handleCreateProcessExit 不会执行——不补删则每次 stop 泄漏一个
+					// entry；agentId 复用（重启同一会话）时会把意外退出误判为用户主动停止，
+					// 跳过自动重连（Issue 回归）。
+					this.userInitiatedStop.delete(agentId);
+					return;
+				}
 				options.onExit(payload);
 			} catch (error) {
 				void this.appLogger?.error("agent", "Pi process exit handler failed", {
