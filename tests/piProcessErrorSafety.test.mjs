@@ -154,7 +154,7 @@ test("AgentManager attaches lifecycle listeners before process.start", () => {
 	assert.match(source, /attachPiProcessLifecycle\(/);
 	assert.match(source, /buildStartupFailureMessage\(/);
 	// spawnAndGetState：先 attach，再 await process.start（create/reattach 共用握手）
-	const spawnBlock = source.slice(source.indexOf("private async spawnAndGetState"), source.indexOf("private notifyExtensionsDisabled"));
+	const spawnBlock = source.slice(source.indexOf("private async spawnAndGetState"), source.indexOf("private toSessionHostPath"));
 	const attachAt = spawnBlock.indexOf("this.attachPiProcessLifecycle");
 	const startAt = spawnBlock.indexOf("await process.start");
 	assert.ok(attachAt >= 0 && startAt > attachAt, "lifecycle must be attached before start()");

@@ -169,10 +169,13 @@ test("only PiDeck automatic titles can write runtime names back to the catalog",
 	const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 	const index = readFileSync("src/main/index.ts", "utf8");
 	const utils = readFileSync("src/main/pi/agentUtils.ts", "utf8");
+	// auto-title marker 已随扩展 UI 闸迁入 extensionUiGate.ts（Wave 4B）；消费判定仍在 AgentManager。
+	const uiGateModule = readFileSync("src/main/pi/extensionUiGate.ts", "utf8");
 	assert.match(utils, /session\.newTitle/);
 	assert.match(utils, /session\.dshUntitled/);
 	assert.match(agentManager, /setAutomaticTitleChangedHandler\(/);
-	assert.match(agentManager, /pendingAutomaticTitles/);
+	assert.match(uiGateModule, /pendingAutomaticTitles/);
+	assert.match(agentManager, /uiGate\.takeAutomaticTitle\(agentId\)/);
 	assert.match(agentManager, /automaticMarker\?\.title === name/);
 	assert.doesNotMatch(agentManager, /forceCatalogSync/);
 	assert.match(agentManager, /return this\.applyRuntimeTitle\(agentId, nextTitle, true, "fallback"\)/);

@@ -26,7 +26,6 @@ import type {
 	SessionEnvironment,
 	SessionMessagePage,
 	SessionRuntimeModelSelection,
-	ThinkingUpdate,
 	SessionFileChange,
 	SessionTodoSnapshot,
 } from "../../shared/types";
@@ -50,6 +49,10 @@ import { getBridgeServer } from "./bridge/BridgeServer";
 import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../shared/types/bridge";
 import { describeExtensionFallbackSkip, formatExtensionFallbackDebug, resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason, shouldRetryWithoutExtensions } from "./extensionStartupFallback";
 import type { DisabledExtensionsReason } from "./extensionStartupFallback";
+import { StartupDiagnosticsQueue } from "./startupDiagnosticsQueue";
+import type { QueuedStartupDiagnostic } from "./startupDiagnosticsQueue";
+
+export type { QueuedStartupDiagnostic };
 import { formatExtensionErrorReason } from "./extensionError";
 import type { RpcResponse } from "./PiRpcClient";
 import { formatBashToolMessage } from "./bashResult";
@@ -64,7 +67,7 @@ import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
 import { currentIndexTree, diffCheckpoints, loadAllCheckpoints, loadCheckpointFromRef, MUTATING_TOOLS, restoreCheckpoint as applyCheckpointRestore, toCheckpointSummary } from "../rewind/index.ts";
 import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay } from "./AgentMessageProjector";
 import { RewindCheckpointCoordinator } from "./RewindCheckpointCoordinator";
-import { LatestByKeyEmitter } from "./LatestByKeyEmitter";
+import { LiveStreamChannel } from "./liveStreamChannel";
 import { resolveNotificationSessionId } from "./agentUtils";
 import { isRoleMessageRole } from "./sessionEntryIds";
 import { createStreamGateState, isStreamGateSealed, noteAbortSettled, openStreamGateForNewRun, sealStreamGate, type StreamGateState } from "./streamGate";
@@ -98,10 +101,12 @@ import { buildModelTraceLogEntry } from "../logging/ModelTrace";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
 import type { AppLogger } from "../logging/AppLogger";
 import { toWindowsHostPath, toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
-import { isContextOverflowError } from "../../shared/contextOverflow";
+import { ProjectTrustGate } from "./projectTrustGate";
+import { ExtensionUiGate } from "./extensionUiGate";
+import type { ProjectTrustChoice } from "./projectTrustGate";
 
-/** 项目信任确认弹窗的用户选择 */
-export type ProjectTrustChoice = "trust-remember" | "trust-session" | "deny";
+export type { ProjectTrustChoice };
+import { isContextOverflowError } from "../../shared/contextOverflow";
 
 /** 从 RPC 返回的未知 ask 记录中安全读取字段，避免批量答案转换扩散 any 强转。 */
 function readAskField(input: unknown, key: string): unknown {
@@ -131,22 +136,6 @@ function readPromptDisposition(data: unknown): PromptDisposition | undefined {
 }
 
 /**
- * 暂存中的启动期诊断（扩展回退说明 / 首个 run 前的 extension_error）。
- * 首个 agent_start 到达前不写时间线，避免插进历史轮次与当前消息之间。
- * 见 AgentManager.pendingStartupDiagnostics / flushStartupDiagnostics。
- */
-export type QueuedStartupDiagnostic = {
-	role: "system" | "error";
-	i18nKey: string;
-	fallbackText: string;
-	options?: {
-		params?: I18nParams;
-		debugDetails?: string;
-		meta?: Record<string, unknown>;
-	};
-};
-
-/**
  * PiDeck 自动命名的来源（#266）："auto" = 内置扩展经 marker 校验的模型标题（终态），
  * "fallback" = 首条消息派生的兜底名（可被 auto 升级）。catalog 据此决定是否能领取占位标题。
  */
@@ -165,13 +154,6 @@ export class AgentManager {
 	/** 已驻留完整文本的总字节数（字节预算 LRU 淘汰用）。 */
 	private toolFullTextBytes = 0;
 
-	/** 当前流式思考的累积文本，用于实时推送给前端展示 */
-	private readonly streamingThinking = new Map<string, string>();
-	/**
-	 * 当前思考段身份：id = msg-thinking-${assistantMessageId}，与 History 一致。
-	 * 首 thinking_delta 铸造；message_end/abort 写入 messages 后清掉。
-	 */
-	private readonly thinkingSegmentByAgent = new Map<string, { id: string; assistantMessageId: string; startedAt: number; endedAt: number }>();
 	/** 当前正在流式更新文本的 agent（message_start/text_delta/thinking_delta 置位，
 	 *  message_end/done/error/agent_end/agent_settled/abort 清除）。
 	 *  isStreaming 不再只依赖 pi get_state 轮询：轮询在 text_delta 期间不触发，
@@ -224,27 +206,14 @@ export class AgentManager {
 	private readonly messageHeadOffsetByAgent = new Map<string, number>();
 	/** 会话文件版本（mtime:size）：随消息载荷下发，渲染层据此检测压缩改写并丢弃 disk 前缀。 */
 	private readonly sessionFileVersionByAgent = new Map<string, string>();
-	private readonly thinkingEmitter = new LatestByKeyEmitter<string, string>(100, (agentId, thinking) => this.emitThinkingNow(agentId, thinking));
-	/** 当前流式正文的累积文本，独立于 messages 数组推送（阶段1：学 Proma 独立存储）。
-	 *  100ms 合并窗口（2026-08 占用治理）：渲染层每次到达都要做 O(n) 累积拼接、
-	 *  MarkdownStream 重渲染与 GC 回收，50ms→100ms 让流式期这些 churn 减半
-	 *  （实测流式期 RSS 增长率随之减半），打字机（useSmoothStream）负责逐字
-	 *  平滑，100ms 的到达粒度肉眼不可感知；窗口越大 burst 时单帧步进越大，
-	 *  100ms 是平滑度与占用之间的折中。 */
-	private readonly textEmitter = new LatestByKeyEmitter<string, string>(100, (agentId, text) => this.emitTextStreamNow(agentId, text));
-	/** 流式正文累积缓冲：text_delta 时累加，message_end/agent_end/settled/abort 清除。 */
-	private readonly streamingText = new Map<string, string>();
-	/**
-	 * 已推送正文快照（delta 基准，2026-08 IPC 治理）：流式期间只推增量，
-	 * 避免每 50ms 全量重推（100K+ 文本 ≈ 4MB/s 瞬时 IPC 流量，主/渲染两侧
-	 * 分配器把 RSS 抬到流量峰值且不归还 → GB 级爬升）。见 emitTextStreamNow。
-	 */
-	private readonly lastSentTextByAgent = new Map<string, string>();
-	/** 距上次全量快照的增量推送次数（每 50 次 ≈ 5s 补一次全量自愈，兜底渲染层丢增量）。 */
-	private readonly textPushCountByAgent = new Map<string, number>();
-	/** 已推送思考快照（delta 基准，同正文通道治理，见 emitThinkingNow）。 */
-	private readonly lastSentThinkingByAgent = new Map<string, string>();
-	private readonly thinkingPushCountByAgent = new Map<string, number>();
+	/** Live 双通道（thinking/正文）流式状态机（Wave 3 拆分）：缓冲/节流发射/增量基准/思考段生命周期见 liveStreamChannel.ts；
+	 *  100ms 合并窗口（2026-08 占用治理）与 delta 基准治理（2026-08 IPC 治理）的历史注释随域迁往该模块。 */
+	private readonly liveStream = new LiveStreamChannel({
+		emit: (channel, payload) => this.emit(channel, payload),
+		onTextStreamPushed: (agentId) => this.emitStreamingStatePatch(agentId),
+		streamRuntimeTriple: (agentId) => this.streamRuntimeTriple(agentId),
+		ensureSegmentMount: (agentId) => this.mountThinkingSegment(agentId),
+	});
 	/** 流式 emit 合并窗口（毫秒）。50ms 兼顾流畅度与传输量，肉眼几乎无延迟。 */
 	/** 激活显示窗口轮数：renderer atom 常驻最近 9 轮，DOM 仍按 3 轮窗口渐进挂载；更早历史走轮次分页。 */
 	private static readonly DISPLAY_WINDOW_TURNS = 9;
@@ -261,20 +230,6 @@ export class AgentManager {
 	 * 这补偿了 Pi 在某些边缘情况下不发送 agent_settled 导致动画永久卡住的问题。
 	 */
 	private static readonly AGENT_SETTLED_TIMEOUT_MS = 5000;
-	/**
-	 * 扩展 UI 请求（select/confirm/input/editor）未显式指定 timeout 时的兜底上限。
-	 *
-	 * pi 侧没有任何默认超时：createDialogPromise 只把 opts.timeout 原样透传（扩展不传就是
-	 * undefined），editor 更是从不带 timeout 字段，而 pending 请求只在收到
-	 * extension_ui_response 时才 settle。于是「扩展没传 timeout + PiDeck 没回包」会让 pi
-	 * 永久阻塞在读取 stdin 上——表现为工具返回后卡住、只有点「停止」才解开
-	 * （abort → cancelPendingUIRequests 发 value:null）。这里给一个足够宽松的上限兜底，
-	 * 保证 pi 不会被永久卡死；扩展显式指定的 timeout 仍然优先。
-	 *
-	 * 30 分钟远大于正常人工思考时间，且定时器回调只在请求仍 pending 时才真正取消，
-	 * 用户已作答/已取消的请求不受影响。
-	 */
-	private static readonly DEFAULT_UI_REQUEST_TIMEOUT_MS = 30 * 60 * 1000;
 	/**
 	 * 超过该大小的历史会话跳过 get_messages RPC，改为直接从 JSONL 文件尾部读取最近 N 条消息。
 	 * pi 当前不支持 limit/cursor，40MB JSONL 会以单行大 JSON 返回，主进程 JSON.parse 会短暂冻结整个应用。
@@ -412,22 +367,13 @@ export class AgentManager {
 	private readonly lastAbortAtByAgent = new Map<string, number>();
 	/** 终止窗口判定时长：覆盖 abort RPC ack（pi 等 idle 才响应）+ settled + 收尾清理。 */
 	private static readonly ABORT_EXIT_REATTACH_WINDOW_MS = 15_000;
-	/**
-	 * 待处理的 Extension UI 请求。key 为 agentId，value 为 Map<requestId, { method, title, raisedAt }>。
-	 * 用于在 abort 时及时发送 cancellation 防止 pi 等待超时；raisedAt 记录提问弹起时刻，
-	 * 供 ask_question 工具耗时扣除用户等待时间（exclude_wait）使用。
-	 */
-	private readonly pendingUIRequests = new Map<string, Map<string, { method: string; title: string; raisedAt: number }>>();
-	/**
-	 * 各 agent 已累计的 ask 用户等待毫秒数（raisedAt→回答时刻）。
-	 * 工具耗时（durationMs）应只算 agent 实际处理时长，不含用户盯着问卷思考的时间；
-	 * ask_question 工具结束时从中扣除并清零，工具开始新一轮时也清零防泄漏到后续工具。
-	 */
-	private readonly askWaitMsByAgent = new Map<string, number>();
-	/** abort 时正在等待 ask_question 响应的 agent，用于在工具结果中覆写 answer 为 null。 */
 	private readonly abortedDuringAsk = new Set<string>();
+	/** 扩展 UI 请求闸（提问分发/ANSI 净化/pending 跟踪/超时兜底）：见 extensionUiGate.ts（Wave 4B 迁出）。 */
+	private readonly uiGate: ExtensionUiGate;
 	/** 成功空闲（settled）回调：供 PetStateBridge 等主进程内部模块订阅，携带完成 Agent 身份。 */
 	private readonly settledListeners = new Set<(info: { agentId: string; title: string }) => void>();
+	/** 项目信任闸（trust.json 决策/弹窗/超时）：见 projectTrustGate.ts（Wave 4C 迁出）。 */
+	private readonly projectTrust: ProjectTrustGate;
 	/**
 	 * PiDeck automatic-title callback. Generic pi runtime names never reach this
 	 * callback: catalog titles are authoritative after initial discovery.
@@ -436,12 +382,8 @@ export class AgentManager {
 	 * 反向不可（否则首条消息会压住扩展模型标题）。
 	 */
 	private onAutomaticTitleChanged?: (agentId: string, title: string, source: AutomaticTitleSource) => void;
-	/** Extension marker recorded immediately before its own setSessionName call. */
-	private readonly pendingAutomaticTitles = new Map<string, { title: string; sessionId: string; runtimeGeneration: number }>();
 	/** 已发送 ask 系统通知的 agent；新一轮 run（agent_start）时清除，避免同一轮多次提问刷屏。 */
 	private readonly notifiedAskAgents = new Set<string>();
-	/** 待处理的项目信任确认请求。key 为 requestId，用于在 Agent 启动前等待用户的信任决策。 */
-	private readonly pendingTrustRequests = new Map<string, { resolve: (choice: ProjectTrustChoice) => void }>();
 	private wslEnvironment: WslEnvironment | null = null;
 
 	/**
@@ -527,6 +469,28 @@ export class AgentManager {
 			sessionFileVersion: (agentId) => this.sessionFileVersionByAgent.get(agentId),
 			emitMessageFlush: (payload) => this.emit(ipcChannels.agentsMessage, payload),
 			emitStreamingStatePatch: (agentId) => this.emitStreamingStatePatch(agentId),
+		});
+		// 启动期诊断队列（Wave 4A）：宿主回调只暴露时间线写入/toast/设置读取/warn 日志。
+		this.startupDiagnostics = new StartupDiagnosticsQueue({
+			addLocalizedMessage: (agentId, role, i18nKey, fallbackText, options) => this.addLocalizedMessage(agentId, role, i18nKey, fallbackText, options),
+			emitNotice: (payload) => this.emit(ipcChannels.agentsNotice, payload),
+			isNoExtensionsSetting: () => Boolean(this.settingsStore.get().piRpcNoExtensions),
+			warn: (message, data) => void this.appLogger?.warn("agent", message, data),
+		});
+		// 项目信任闸（Wave 4C）：宿主回调只暴露配置读写/日志/WSL 环境/窗口获取。
+		this.projectTrust = new ProjectTrustGate({
+			getConfigStore: () => this.configManager,
+			info: (message, data) => void this.appLogger?.info("agent", message, data),
+			getWslEnvironment: () => this.wslEnvironment,
+			getWindow: () => this.getWindow(),
+		});
+		// 扩展 UI 请求闸（Wave 4B）：宿主回调只暴露事件广播/runtime 访问/abort 标记。
+		this.uiGate = new ExtensionUiGate({
+			emitUiRequest: (payload) => this.emit(ipcChannels.agentsUiRequest, payload),
+			getRuntimeTab: (agentId) => this.agents.get(agentId)?.tab,
+			getClient: (agentId) => this.agents.get(agentId)?.process.client,
+			markAbortedDuringAsk: (agentId) => this.abortedDuringAsk.add(agentId),
+			warn: (message, data) => void this.appLogger?.warn("agent", message, data),
 		});
 		this.messageProjector = new AgentMessageProjector({
 			translate: this.translate,
@@ -863,91 +827,8 @@ export class AgentManager {
 		return { client, process, state };
 	}
 
-	/**
-	 * 暂存中的启动期诊断（扩展回退说明 / 首个 run 前的 extension_error）。
-	 * 在首个 agent_start 前收到时先不写时间线——用户的触发消息还没落盘，
-	 * 直接 append 会插进历史轮次与当前消息之间（用户体感「错误提示跑上旧卡片」）。
-	 * 首个 run 开始时按序落盘：位于用户消息之后、回答之前，正好在当前活动点上。
-	 */
-	private readonly pendingStartupDiagnostics = new Map<string, QueuedStartupDiagnostic[]>();
-	/** 已发生过首个 agent_start 的 agent：此后的 extension_error 属于运行期间，直接落盘。 */
-	private readonly agentStartedFirstRun = new Set<string>();
-
-	/** 暂存一条启动期诊断，等首个 agent_start 统一落盘（见 pendingStartupDiagnostics）。 */
-	private queueStartupDiagnostic(agentId: string, diagnostic: QueuedStartupDiagnostic): void {
-		const list = this.pendingStartupDiagnostics.get(agentId) ?? [];
-		list.push(diagnostic);
-		this.pendingStartupDiagnostics.set(agentId, list);
-	}
-
-	/** 首个 run 开始：把启动期诊断按序写入时间线（此刻用户消息已就位，位置正确）。 */
-	private flushStartupDiagnostics(agentId: string): void {
-		const list = this.pendingStartupDiagnostics.get(agentId);
-		if (!list || list.length === 0) return;
-		this.pendingStartupDiagnostics.delete(agentId);
-		for (const diagnostic of list) {
-			this.addLocalizedMessage(agentId, diagnostic.role, diagnostic.i18nKey, diagnostic.fallbackText, diagnostic.options);
-		}
-	}
-
-	/** 回退成功或设置开关生效时的统一说明：已禁用扩展，附上可粘贴给 AI 的 stderr。
-	 *  不立即写时间线，等首个 run（用户消息之后）落盘，避免插进历史轮次中间。
-	 *  设置开关（piRpcNoExtensions）是持续成因：只弹一次 toast，避免每个新会话连发；
-	 *  用户反馈过「设置里一直是禁用扩展启动但没人提示」，能力静默缺失比报错更难发现。 */
-	private notifyExtensionsDisabled(agentId: string, input: { fallbackFromExtensions: boolean; debugDetails?: string }): void {
-		const reason = resolveDisabledExtensionsReason({
-			settingDisabled: Boolean(this.settingsStore.get().piRpcNoExtensions),
-			fallbackFromExtensions: input.fallbackFromExtensions,
-		});
-		if (!reason) return;
-		const copy = resolveDisabledExtensionsCopy(reason);
-		this.queueStartupDiagnostic(agentId, {
-			role: "system",
-			i18nKey: copy.diagnosticKey,
-			fallbackText: copy.diagnosticFallback,
-			...(input.debugDetails ? { options: { debugDetails: input.debugDetails } } : {}),
-		});
-		// toast 每个成因每次运行只弹一次：进程自动重连/连续新建会话都会走到这里，重复弹会刷屏。
-		if (this.disabledExtensionsNoticesSent.has(reason)) return;
-		this.disabledExtensionsNoticesSent.add(reason);
-		this.emit(ipcChannels.agentsNotice, {
-			agentId,
-			message: copy.noticeFallback,
-			i18nKey: copy.noticeKey,
-			kind: "warning",
-			duration: copy.noticeDurationMs,
-			...(copy.noticeAction ? { action: copy.noticeAction } : {}),
-		});
-	}
-
-	/** 已弹过的「扩展被禁用」成因（本次运行内）：见 notifyExtensionsDisabled。 */
-	private readonly disabledExtensionsNoticesSent = new Set<DisabledExtensionsReason>();
-
-	/**
-	 * 某类白名单（扩展/技能/提示词）因超出启动参数预算被跳过：告知用户本次「禁用」不生效。
-	 * 跳过本身不影响启动，但用户看到「禁用的东西又被加载了」会当成 bug，必须显式说明。
-	 * 三类共用同一条命令行预算（见 PiProcess.evaluateWhitelistBudget），可能同时被跳过，
-	 * 因此按条逐条提示，而不是把两种资源揉成一句话。
-	 * 与扩展回退同一条启动期诊断链路（首个 run 时落到时间线），理由见 queueStartupDiagnostic。
-	 */
-	private notifyWhitelistSkipped(agentId: string, entries: readonly WhitelistSkip[]): void {
-		for (const entry of entries) {
-			const copy = resolveWhitelistSkipCopy(entry);
-			void this.appLogger?.warn("agent", "Whitelist skipped: too many entries for launch args", {
-				agentId,
-				kind: entry.kind,
-				count: entry.count,
-				estimatedChars: entry.chars,
-				budget: entry.budget,
-			});
-			this.queueStartupDiagnostic(agentId, {
-				role: "system",
-				i18nKey: copy.i18nKey,
-				fallbackText: copy.fallbackText,
-				options: { params: { count: entry.count, budget: entry.budget } },
-			});
-		}
-	}
+	/** 启动期诊断队列（暂存/落盘/扩展禁用与白名单跳过提示）：见 startupDiagnosticsQueue.ts（Wave 4A 迁出）。 */
+	private readonly startupDiagnostics: StartupDiagnosticsQueue;
 
 	/** Windows 主进程文件操作必须使用可由 host 访问的路径。 */
 	private toSessionHostPath(sessionPath: string): string {
@@ -1556,7 +1437,7 @@ export class AgentManager {
 		};
 
 		const t1 = Date.now();
-		const trustOverride = await this.ensureProjectTrust(project);
+		const trustOverride = await this.projectTrust.ensureProjectTrust(project);
 		const t2 = Date.now();
 
 		void this.appLogger?.info("agent", "Agent pi process start", { agentId: id });
@@ -1613,7 +1494,7 @@ export class AgentManager {
 		// 白名单因条数过多被跳过：本次 pi 按默认发现加载全部扩展/技能/提示词（禁用不生效），
 		// 需显式告知用户。
 		if (diag?.whitelistSkipped && diag.whitelistSkipped.length > 0) {
-			this.notifyWhitelistSkipped(id, diag.whitelistSkipped);
+			this.startupDiagnostics.notifyWhitelistSkipped(id, diag.whitelistSkipped);
 		}
 
 		try {
@@ -1636,7 +1517,7 @@ export class AgentManager {
 			// Agent 可用只依赖 get_state；历史后台加载，加载期间新消息由 preserveMessagesAfter 保护。
 			const historyLoadDecision = this.getHistoryAutoLoadDecision(tab.sessionPath);
 			const preserveMessagesAfter = Date.now();
-			this.notifyExtensionsDisabled(id, {
+			this.startupDiagnostics.notifyExtensionsDisabled(id, {
 				fallbackFromExtensions,
 				debugDetails: handshake.fallbackDebug,
 			});
@@ -1784,7 +1665,7 @@ export class AgentManager {
 		// 用户未回答挂起的 Ask 提问却直接发送新消息：先取消所有挂起 UI 请求（见
 		// cancelPendingUIRequests）。否则 pi 事件循环仍阻塞在 extension_ui_response 上，
 		// 新 prompt 进入 steer 队列也永远不会被消费，悬浮 Ask 卡片也不会消失。
-		this.cancelPendingUIRequests(input.agentId);
+		this.uiGate.cancelPendingUIRequests(input.agentId);
 
 		// 乐观更新：在等待 RPC 返回前先把用户消息写入会话，让用户立即看到自己的消息。
 		// 只展示用户原文；agentMessage 里的宿主指令不进 UI 气泡。
@@ -1994,45 +1875,6 @@ export class AgentManager {
 		}
 	}
 
-	/**
-	 * 取消该 agent 所有挂起的 UI 请求（ask_question 等）。
-	 *
-	 * 两个触发路径共享此实现：
-	 * 1. abort()：用户点击停止；
-	 * 2. sendPrompt()：用户未回答提问直接发送新消息——pi 的事件循环正阻塞在
-	 *    extension_ui_response 上等待回答，不先解除阻塞则新 prompt 永远不会被消费，
-	 *    且渲染层收不到 completed 事件，Ask 卡片会一直悬浮在界面上。
-	 *
-	 * 语义与完整 abort 不同：不终止回合、不清流式状态，只解除提问阻塞。
-	 * 发 value: null（不带 cancelled 标记），select parser 返回 null，
-	 * 工具 result 的 answer = null、answered = false → 历史卡片显示"已取消"；
-	 * 同时广播 completed+cancelled 让渲染层立即移除纯运行时交互。
-	 */
-	private cancelPendingUIRequests(agentId: string): void {
-		const pending = this.pendingUIRequests.get(agentId);
-		if (!pending || pending.size === 0) return;
-		const runtime = this.requireRuntime(agentId);
-		this.abortedDuringAsk.add(agentId);
-		for (const [requestId] of pending) {
-			// 视作用户在此刻结束等待：结算等待时长，供该 ask 工具耗时扣除
-			this.settleAskWait(agentId, requestId);
-			runtime.process.client.sendRaw({
-				type: "extension_ui_response",
-				id: requestId,
-				value: null,
-			});
-			// extension 收到 null 保持其取消语义；渲染层必须立即移除纯运行时交互
-			this.emit(ipcChannels.agentsUiRequest, {
-				agentId,
-				requestId,
-				completed: true,
-				cancelled: true,
-			});
-		}
-		// pending dialogs 是纯运行时状态，清空请求表即可
-		this.pendingUIRequests.delete(agentId);
-	}
-
 	async abort(agentId: string) {
 		const runtime = this.requireRuntime(agentId);
 
@@ -2040,7 +1882,7 @@ export class AgentManager {
 		// 但必须解除 pending 请求的阻塞，否则 pi 不会继续读取 stdin 中的后续命令。
 		// 取消语义（value:null 解阻塞 + 广播 completed）见 cancelPendingUIRequests，
 		// abort 与「未作答直接发送新消息」两条路径共用同一实现。
-		this.cancelPendingUIRequests(agentId);
+		this.uiGate.cancelPendingUIRequests(agentId);
 
 		// 标记最近中止的 agent，用于抑制 auto-retry/compaction 把状态重新标为 running。
 		// 必须在发送 abort RPC 之前加入集合，避免事件处理函数在 RPC 发出后、
@@ -2097,13 +1939,10 @@ export class AgentManager {
 		// 先把已累积思考落入当前 assistant 骨架（保留中断轮的推理），再清 live 通道。
 		this.finalizeThinkingIntoMessage(agentId);
 		this.flushMessageEmit(agentId);
-		this.finishThinkingChannel(agentId);
+		this.liveStream.finishThinkingChannel(agentId);
 		this.activeAssistantMessageIds.delete(agentId);
 		this.streamingAgents.delete(agentId);
-		this.textEmitter.cancel(agentId);
-		this.streamingText.delete(agentId);
-		this.lastSentTextByAgent.delete(agentId);
-		this.textPushCountByAgent.delete(agentId);
+		this.liveStream.clearTextChannel(agentId);
 		this.toolMessageIds.delete(agentId);
 		this.activeToolCallsByAgent.delete(agentId);
 		this.toolExecutingByAgent.set(agentId, null);
@@ -2471,7 +2310,7 @@ export class AgentManager {
 
 			// 重连期间用户可能已发送消息（乐观上屏）：必须保护，否则替换投影时未落盘消息丢失
 			await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() }).catch(() => undefined);
-			this.notifyExtensionsDisabled(agentId, {
+			this.startupDiagnostics.notifyExtensionsDisabled(agentId, {
 				fallbackFromExtensions: handshake.fallbackFromExtensions,
 				debugDetails: handshake.fallbackDebug,
 			});
@@ -3193,19 +3032,12 @@ export class AgentManager {
 	 * compactingAgents（compact 的 catch 靠它决定重连）。
 	 */
 	private clearAgentState(agentId: string) {
-		this.streamingThinking.delete(agentId);
-		this.thinkingSegmentByAgent.delete(agentId);
+		// 双通道缓冲/基准/思考段随生命周期整体清理（stop/restart/closed 等非 done 终止路径，防键残留慢泄漏）
+		this.liveStream.clearAll(agentId);
 		this.streamingAgents.delete(agentId);
 		this.activeAssistantMessageIds.delete(agentId);
 		this.toolMessageIds.delete(agentId);
 		this.retryStatusMessageIds.delete(agentId);
-		this.streamingText.delete(agentId);
-		// 流式 delta 基准随生命周期清理（emitTextStreamNow 的 done 路径已自清，
-		// 这里兜底 stop/restart/closed 等非 done 终止路径，防键残留慢泄漏）
-		this.lastSentTextByAgent.delete(agentId);
-		this.textPushCountByAgent.delete(agentId);
-		this.lastSentThinkingByAgent.delete(agentId);
-		this.thinkingPushCountByAgent.delete(agentId);
 		this.rpcCompactingAgents.delete(agentId);
 		// 取消来源判定用的运行期观测随生命周期清理（agentId 每次 spawn 都是新 UUID）
 		this.lastUserAbortAt.delete(agentId);
@@ -3219,12 +3051,10 @@ export class AgentManager {
 		this.abortedDuringAsk.delete(agentId);
 		this.abortGate.clearEscalation(agentId);
 		this.lastAbortAtByAgent.delete(agentId);
-		this.pendingUIRequests.delete(agentId);
-		this.pendingAutomaticTitles.delete(agentId);
+		this.uiGate.clearAgent(agentId);
 		this.startupHandshakeAgents.delete(agentId);
 		// 启动期诊断与首 run 标记随生命周期清理：重启/关闭后新 runtime 重新队列
-		this.pendingStartupDiagnostics.delete(agentId);
-		this.agentStartedFirstRun.delete(agentId);
+		this.startupDiagnostics.clear(agentId);
 		this.clearStreamGate(agentId);
 		// 数值游标与回合计数随生命周期清理（2026 内存排查补漏）：
 		// agentId 每次 spawn 都是 randomUUID，漏删 = 每次 stop/restart 永久留一个键（慢泄漏）。
@@ -3345,7 +3175,7 @@ export class AgentManager {
 	private async withTemporarySession<T>(projectId: string, sessionPath: string, run: (process: PiProcess) => Promise<T>): Promise<T> {
 		const project = this.getProject(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
-		const trustOverride = await this.ensureProjectTrust(project);
+		const trustOverride = await this.projectTrust.ensureProjectTrust(project);
 		const process = this.createPiProcess(project.path, sessionPath);
 		await process.start(sessionPath, trustOverride);
 		try {
@@ -3387,7 +3217,7 @@ export class AgentManager {
 	private async refreshRuntimeAfterSessionReplacement(agentId: string) {
 		// A status marker belongs to the pre-replacement session/runtime and must not
 		// authorize a delayed session_info event for the newly bound catalog record.
-		this.pendingAutomaticTitles.delete(agentId);
+		this.uiGate.clearAutomaticTitle(agentId);
 		const runtime = this.requireRuntime(agentId);
 		const stateResponse = await runtime.process.client.request({ type: "get_state" }, this.rpcTimeoutMs).catch(() => ({ data: undefined }));
 		const state = stateResponse.data as { sessionFile?: string; sessionName?: string } | undefined;
@@ -4199,8 +4029,7 @@ export class AgentManager {
 		// setStatus marker，只有 marker 与紧随的名称和 runtime 身份完全匹配才可领取占位标题。
 		if (typed.type === "session_info_changed" && runtime) {
 			const name = typeof typed.name === "string" ? typed.name.replace(/\s+/g, " ").trim() : "";
-			const automaticMarker = this.pendingAutomaticTitles.get(agentId);
-			this.pendingAutomaticTitles.delete(agentId);
+			const automaticMarker = this.uiGate.takeAutomaticTitle(agentId);
 			const automaticTitle = automaticMarker?.title === name && automaticMarker.sessionId === runtime.tab.sessionId && automaticMarker.runtimeGeneration === runtime.tab.runtimeGeneration;
 			if (automaticTitle) this.applyRuntimeTitle(agentId, name, true, "auto");
 		}
@@ -4208,8 +4037,7 @@ export class AgentManager {
 		if (typed.type === "agent_start" && runtime) {
 			// 首个 run 开始：此刻用户的触发消息已落盘，把启动期诊断（扩展回退/启动扩展报错）
 			// 按序写入时间线——位于用户消息之后、回答之前，避免插进历史轮次中间。
-			this.flushStartupDiagnostics(agentId);
-			this.agentStartedFirstRun.add(agentId);
+			this.startupDiagnostics.markFirstRun(agentId);
 			// agent_start 表示一轮新的 agent run 开始：
 			// 1) 清理 recentlyAborted，允许状态机恢复 running
 			// 2) 推进 stream generation，解封流式闸门（唯一合法解封点）
@@ -4387,10 +4215,7 @@ export class AgentManager {
 				this.activeAssistantMessageIds.delete(agentId);
 				this.streamingAgents.delete(agentId);
 				this.toolMessageIds.delete(agentId);
-				this.textEmitter.cancel(agentId);
-				this.streamingText.delete(agentId);
-				this.lastSentTextByAgent.delete(agentId);
-				this.textPushCountByAgent.delete(agentId);
+				this.liveStream.clearTextChannel(agentId);
 			}
 			// agent 异常结束时（如 API 返回 400、模型报错等），将错误提示写入会话，避免用户看到空白。
 			// 错误信息的存放位置因 pi 版本和错误类型不同而有多种可能：
@@ -4496,14 +4321,11 @@ export class AgentManager {
 				this.finalizeThinkingIntoMessage(agentId);
 				this.flushMessageEmit(agentId);
 				this.trimRuntimeCache(agentId);
-				this.finishThinkingChannel(agentId);
+				this.liveStream.finishThinkingChannel(agentId);
 				this.activeAssistantMessageIds.delete(agentId);
 				this.streamingAgents.delete(agentId);
 				this.toolMessageIds.delete(agentId);
-				this.textEmitter.cancel(agentId);
-				this.streamingText.delete(agentId);
-				this.lastSentTextByAgent.delete(agentId);
-				this.textPushCountByAgent.delete(agentId);
+				this.liveStream.clearTextChannel(agentId);
 				this.activeToolCallsByAgent.delete(agentId);
 				this.toolExecutingByAgent.set(agentId, null);
 				this.rpcCompactingAgents.delete(agentId);
@@ -4549,22 +4371,14 @@ export class AgentManager {
 				this.finalizeThinkingIntoMessage(agentId);
 				this.upsertAssistantMessage(agentId, messageEnd);
 				this.flushMessageEmit(agentId);
-				this.finishThinkingChannel(agentId);
+				this.liveStream.finishThinkingChannel(agentId);
 				this.activeAssistantMessageIds.delete(agentId);
 			}
 			// 结算性能指标（幂等：message_update done 先结算则 map 已删，直接返回）
 			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), messageEnd);
 			// 终结 Live 正文通道（顶层 message_end 不经 handleAssistantMessageEvent）
 			this.streamingAgents.delete(agentId);
-			const finalText = this.streamingText.get(agentId);
-			if (finalText !== undefined) {
-				this.textEmitter.flush(agentId);
-				this.emitTextStreamNow(agentId, finalText, true);
-			}
-			this.textEmitter.cancel(agentId);
-			this.streamingText.delete(agentId);
-			this.lastSentTextByAgent.delete(agentId);
-			this.textPushCountByAgent.delete(agentId);
+			this.liveStream.finalizeText(agentId);
 			this.emitStreamingStatePatch(agentId);
 		}
 
@@ -4575,7 +4389,7 @@ export class AgentManager {
 			}
 			// 新工具轮次开始：上一个 ask 的等待累计若未被其 end 事件消耗（如 abort 封印），
 			// 在此清空，防止把旧等待算进后续工具耗时。
-			this.askWaitMsByAgent.delete(agentId);
+			this.uiGate.clearAskWait(agentId);
 			this.upsertToolMessage(agentId, typed, "running");
 			// 并行工具会先连续发多个 start；按 toolCallId 追踪，只有最后一个 end 才能表示工具阶段完成。
 			const toolName = typeof typed.toolName === "string" ? typed.toolName : "tool";
@@ -4635,7 +4449,7 @@ export class AgentManager {
 		}
 
 		if (typed.type === "extension_ui_request") {
-			this.handleUIRequest(agentId, typed);
+			this.uiGate.handleUIRequest(agentId, typed);
 		}
 
 		if (typed.type === "extension_error") {
@@ -4648,301 +4462,20 @@ export class AgentManager {
 				fallbackText: "扩展执行错误。",
 				options: { debugDetails: reason },
 			};
-			// 首个 agent_start 之前到达 = 启动期扩展报错：按启动诊断暂存，
+			// 首个 agent_start 之前到达 = 启动期扩展报错：按启动诊断暂存（见 startupDiagnosticsQueue），
 			// 首个 run 落盘到用户消息之后；否则是运行期间的报错，直接写时间线。
-			if (!this.agentStartedFirstRun.has(agentId)) {
-				this.queueStartupDiagnostic(agentId, diagnostic);
-			} else {
-				this.addLocalizedMessage(agentId, diagnostic.role, diagnostic.i18nKey, diagnostic.fallbackText, diagnostic.options);
-			}
+			this.startupDiagnostics.deliver(agentId, diagnostic);
 		}
 	}
 
-	/**
-	 * 处理 pi 扩展发起的 UI 请求。
-	 * 对话类请求写入消息流等待用户回答；fire-and-forget 请求只转发给渲染进程或忽略。
-	 *
-	 * **扩展文本在此统一剥 ANSI**：这些字段最终都渲染成 GUI 文本（toast / 输入框 /
-	 * 输入框上下方的 widget 卡 / 提问卡），而扩展常顺手 `ctx.ui.theme.fg()` 上色 ——
-	 * pi 的 `Theme.fg` 产的是真 ANSI，透传就是界面上的一行 `[38;2;…m` 乱码
-	 * （2026-09 事故，事故现场见 `shared/bridgeText.ts`）。用 `stripBridgeAnsi`
-	 * 而不是 `stripAnsi`：后者只认 CSI，OSC 超链接 / 字符集切换会残留。
-	 */
-	private handleUIRequest(agentId: string, typed: Record<string, unknown>) {
-		const method = String(typed.method ?? "");
-		const requestId = String(typed.id ?? "");
-		// pi RPC 协议将 setWidget / dialog 字段放在顶层，不嵌套 params
-		if (method === "notify") {
-			this.emit(ipcChannels.agentsUiRequest, {
-				agentId,
-				requestId,
-				method,
-				title: "",
-				// 扩展的 notify 消息常带终端颜色转义（如 billion-context-pi 的更新通知
-				// `\x1B[32m✔ ACP auto-updated ...\x1B[0m`），toast 不是终端，直接透传会显示乱码转义符，
-				// 在进程边界统一清洗后再交给渲染层。
-				message: stripBridgeAnsi(String(typed.message ?? "")),
-				notifyType: typed.notifyType,
-			});
-			return;
-		}
-
-		if (method === "set_editor_text") {
-			this.emit(ipcChannels.agentsUiRequest, {
-				agentId,
-				requestId,
-				method,
-				title: "",
-				// 写进 composer 输入框的文本：同样不能带转义码
-				text: stripBridgeAnsi(String(typed.text ?? "")),
-			});
-			return;
-		}
-
-		if (method === "setWidget") {
-			// Plan Mode 等扩展会频繁刷新 widget；只走 IPC 状态，不落入会话消息，避免 JSONL 被进度噪声污染。
-			// ★ 字符串形式保持原路（§14.4），因此**不过桥的出帧净化口** —— 渲染层会把这些行
-			// 原样画进输入框上下方的 widget 卡（ComposerComponents.renderWidgetLine），
-			// 带码就是乱码，所以在进程边界逐行剥掉。
-			this.emit(ipcChannels.agentsUiRequest, {
-				agentId,
-				requestId,
-				method,
-				title: "",
-				widgetKey: String(typed.widgetKey ?? requestId),
-				widgetLines: Array.isArray(typed.widgetLines) ? typed.widgetLines.map((line) => stripBridgeAnsi(String(line))) : undefined,
-				widgetPlacement: typed.widgetPlacement,
-			});
-			return;
-		}
-		if (method === "setStatus") {
-			const statusKey = typeof typed.statusKey === "string" ? typed.statusKey : "";
-			if (statusKey === "pideck:auto-title") {
-				const title = typeof typed.statusText === "string" ? typed.statusText.replace(/\s+/g, " ").trim() : "";
-				const runtime = this.agents.get(agentId);
-				if (title && !looksLikePiSessionFileStem(title) && runtime?.tab.sessionId && typeof runtime.tab.runtimeGeneration === "number") {
-					this.pendingAutomaticTitles.set(agentId, {
-						title,
-						sessionId: runtime.tab.sessionId,
-						runtimeGeneration: runtime.tab.runtimeGeneration,
-					});
-				}
-			}
-			return;
-		}
-
-		// 其他非对话 UI 方法暂不占用桌面 UI 空间。
-		if (method === "setTitle") return;
-		if (!["select", "confirm", "input", "editor"].includes(method)) return;
-
-		// Batch ask_question sends its form as an input title envelope. Decode it at
-		// the process boundary so no renderer can mistake the raw JSON for a prompt.
-		const rawTitle = String(typed.title ?? typed.question ?? "");
-		const batchEnvelope = this.tryParseBatchAskEnvelope(rawTitle);
-		const rawOptions = Array.isArray(typed.options) ? typed.options.filter((option): option is string => typeof option === "string") : undefined;
-		// The bundled extension appends this marker for non-desktop clients. Replace it
-		// with the desktop's own inline field so selecting custom text never opens a
-		// second request above the composer.
-		const hasCustomOption = rawOptions?.some((option) => option.startsWith("✎")) ?? false;
-		const effectiveOptions = hasCustomOption ? rawOptions?.filter((option) => !option.startsWith("✎")) : rawOptions;
-		// select 无有效选项时降级为 input 而不是静默取消：ask_question 的 options 是
-		// 可选的，模型经常只问问题不给选项——自动取消会让用户完全看不到提问 UI。
-		// 降级后问题文本保留为标题，用户仍可输入文字回答。
-		const effectiveMethod = method === "select" && (!effectiveOptions || effectiveOptions.length === 0) ? "input" : method;
-		const request = batchEnvelope
-			? {
-					agentId,
-					requestId,
-					method: "batch_ask" as const,
-					title: "",
-					batchQuestions: batchEnvelope.questions,
-					batchReview: batchEnvelope.review,
-				}
-			: {
-					agentId,
-					requestId,
-					method: effectiveMethod,
-					title: rawTitle,
-					options: effectiveOptions,
-					placeholder: typed.placeholder as string | undefined,
-					prefill: typed.prefill as string | undefined,
-					allowOther: typed.allowOther === true || hasCustomOption,
-				};
-
-		// 记录 pending UI 请求，用于 abort 时自动 cancel；raisedAt 同时作为用户等待计时起点
-		if (!this.pendingUIRequests.has(agentId)) {
-			this.pendingUIRequests.set(agentId, new Map());
-		}
-		this.pendingUIRequests.get(agentId)!.set(requestId, {
-			method: effectiveMethod,
-			title: request.title,
-			raisedAt: Date.now(),
-		});
-
-		// The session runtime owns pending UI. Do not write an additional system
-		// message, because that creates a second interactive card in the timeline.
-		this.emit(ipcChannels.agentsUiRequest, request);
-		this.scheduleUIRequestTimeout(agentId, requestId, typed.timeout);
-		// 桌面通知由 SessionRuntimeCoordinator 统一触发（非聚焦会话才提醒，避免打扰正在看当前会话的用户）；
-		// 此处不重复发，防止一条提问出现两条通知。
-	}
-
-	/**
-	 * 结算一次 ask 的用户等待时长（answer 时刻 - 提问弹起时刻），累加到该 agent 的
-	 * 等待累计值（askWaitMsByAgent）。调用时机 = 用户回答 / 超时 / abort 取消，
-	 * 与 pendingUIRequests 中该请求的删除成对，避免重复结算。
-	 * 用途：ask_question 工具耗时（durationMs）要排除用户思考时间，只展示 agent 处理时长。
-	 */
-	private settleAskWait(agentId: string, requestId: string) {
-		const entry = this.pendingUIRequests.get(agentId)?.get(requestId);
-		if (!entry || typeof entry.raisedAt !== "number") return;
-		const waitMs = Math.max(0, Date.now() - entry.raisedAt);
-		this.askWaitMsByAgent.set(agentId, (this.askWaitMsByAgent.get(agentId) ?? 0) + waitMs);
-	}
-
-	/**
-	 * 发送 Extension UI 响应（extension_ui_response）到 pi 的 stdin。
-	 * 同时更新对应卡片消息的状态。
-	 */
-	sendUIResponse(agentId: string, requestId: string, response: { value?: string | boolean; cancelled?: boolean; confirmed?: boolean }) {
-		const runtime = this.agents.get(agentId);
-		if (!runtime) return;
-
-		// 写入 extension_ui_response 到 pi 的 stdin
-
-		const extPayload: Record<string, unknown> = {
-			type: "extension_ui_response",
-			id: requestId,
-			value: response.value,
-		};
-		// pi 的 ctx.ui.confirm() 检查 confirmed 字段，ctx.ui.select/input 检查 value
-		if ("confirmed" in response) extPayload.confirmed = response.confirmed;
-		// 取消时发 cancelled: true
-		if (response.cancelled) extPayload.cancelled = true;
-		runtime.process.client.sendRaw(extPayload);
-
-		// 结算用户等待时长（回答时刻），供该 ask 所属工具耗时扣除
-		this.settleAskWait(agentId, requestId);
-
-		// 清理 pending 记录
-		const pending = this.pendingUIRequests.get(agentId);
-		if (pending) {
-			pending.delete(requestId);
-			if (pending.size === 0) this.pendingUIRequests.delete(agentId);
-		}
-
-		// 通知渲染进程 UI 请求已完成
-		this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true, ...response });
-	}
-
-	/**
-	 * pi 信任机制只对“含项目级 pi 资源”的项目触发，且 RPC 模式下 pi 的 project_trust 事件
-	 * hasUI 恒为 false、ctx.ui.select 不接 RPC UI 协议，无法弹窗。
-	 * 因此 pi-desktop 在启动 pi 进程前自行完成信任确认：干净项目自动信任并写入 trust.json；
-	 * 含 .pi/.agents 资源且未记录的项目弹窗让用户决策。
-	 */
-	private static readonly TRUST_REQUIRING_RESOURCE_FILES = ["settings.json", "extensions", "skills", "mcp.json", "themes", "SYSTEM.md", "APPEND_SYSTEM.md"] as const;
-
-	/**
-	 * 复刻 pi 的 hasTrustRequiringProjectResources：检查项目目录或其父目录是否存在
-	 * 需要信任才能加载的资源（.pi 下的配置/扩展/skills 等，或项目级 .agents/skills）。
-	 * 用户全局 ~/.agents/skills 视为可信，不触发信任确认。
-	 */
-	private hasTrustRequiringResources(hostCwd: string): boolean {
-		const configDir = join(hostCwd, ".pi");
-		if (
-			AgentManager.TRUST_REQUIRING_RESOURCE_FILES.some((file) => existsSync(join(configDir, file))) ||
-			// pi-mcp-adapter also loads a project-root layer. It can define stdio commands,
-			// so a project with only .mcp.json still requires an explicit trust decision.
-			existsSync(join(hostCwd, ".mcp.json"))
-		) {
-			return true;
-		}
-		const userAgentsSkillsDir = join(this.wslEnvironment?.windowsHome ?? homedir(), ".agents", "skills");
-		let currentDir = hostCwd;
-		while (true) {
-			const agentsSkillsDir = join(currentDir, ".agents", "skills");
-			if (agentsSkillsDir !== userAgentsSkillsDir && existsSync(agentsSkillsDir)) {
-				return true;
-			}
-			const parentDir = dirname(currentDir);
-			if (parentDir === currentDir) return false;
-			currentDir = parentDir;
-		}
-	}
-
-	/**
-	 * 启动 pi 前完成项目信任确认。
-	 * - 无需信任资源的项目（干净项目）：自动写入 trust.json 标记信任，后续不再重复检查。
-	 * - 含信任资源的项目：已信任则放行；已显式拒绝则抛错；未记录则弹窗等待用户决策。
-	 */
-	/**
-	 * 启动 pi 前完成项目信任确认，返回需传给 pi 的信任覆盖指令。
-	 * - 无需信任资源的项目（干净项目）：自动写入 trust.json 标记信任。
-	 * - 已信任：放行，pi 查 trustStore 即可。
-	 * - 未记录或曾记 false：弹窗让用户选择。不持久化 false，保证下次仍可重新选择。
-	 *   - trust-remember：写 true，pi 信任加载资源。
-	 *   - trust-session：用 --approve 本次覆盖，不落盘。
-	 *   - deny：用 --no-approve 本次以不信任模式启动，pi 不加载项目级资源，Agent 仍可创建。
-	 */
-	private async ensureProjectTrust(project: Project): Promise<"approve" | "no-approve" | undefined> {
-		const cwd = this.wslEnvironment ? toWslLinuxPath(project.path, this.wslEnvironment) : project.path;
-		const hostCwd = this.wslEnvironment ? toWindowsHostPath(project.path, this.wslEnvironment) : project.path;
-		if (!this.hasTrustRequiringResources(hostCwd)) {
-			// 干净项目：pi 无需加载项目级资源，pi-desktop 自动记入信任，避免每次创建 Agent 重复检查。
-			void this.appLogger?.info("agent", "Agent ensure trusted directory start", { cwd });
-			await this.configManager.ensureTrustedDirectory(cwd);
-			void this.appLogger?.info("agent", "Agent ensure trusted directory completed", { cwd });
-			return undefined;
-		}
-		const decision = await this.configManager.getProjectTrustDecision(cwd);
-		if (decision === true) return undefined;
-		// 未记录或曾记 false：弹窗让用户选择信任策略。不写 false，确保下次打开仍可重新决策。
-		const choice = await this.requestProjectTrust(cwd, project.name);
-		if (choice === "trust-remember") {
-			await this.configManager.setProjectTrustDecision(cwd, true);
-			return undefined;
-		}
-		if (choice === "trust-session") {
-			return "approve";
-		}
-		// deny：本次以不信任模式启动，pi 不加载项目级资源，Agent 仍可创建。
-		return "no-approve";
-	}
-
-	/**
-	 * 通过 IPC 请求渲染进程弹出项目信任确认窗，等待用户选择。
-	 * 无窗口可用（如 headless）或 60 秒未响应时默认拒绝（安全优先）。
-	 */
-	private requestProjectTrust(cwd: string, projectName: string): Promise<ProjectTrustChoice> {
-		const requestId = randomUUID();
-		const win = this.getWindow();
-		if (!win || win.isDestroyed()) {
-			return Promise.resolve<ProjectTrustChoice>("deny");
-		}
-		return new Promise<ProjectTrustChoice>((resolve) => {
-			const timer = setTimeout(() => {
-				if (this.pendingTrustRequests.delete(requestId)) {
-					resolve("deny");
-				}
-			}, 60_000);
-			this.pendingTrustRequests.set(requestId, {
-				resolve: (choice) => {
-					clearTimeout(timer);
-					resolve(choice);
-				},
-			});
-			win.webContents.send(ipcChannels.projectsTrustRequest, { requestId, cwd, projectName });
-		});
-	}
-
-	/** 渲染进程回传用户对信任确认弹窗的选择，唤醒等待中的 Agent 创建流程。 */
+	/** 渲染层信任决策回传（IPC 入口，systemIpc 调用）：转发给信任闸唤醒等待中的创建流程。 */
 	respondTrustRequest(requestId: string, choice: ProjectTrustChoice): void {
-		const pending = this.pendingTrustRequests.get(requestId);
-		if (pending) {
-			this.pendingTrustRequests.delete(requestId);
-			pending.resolve(choice);
-		}
+		this.projectTrust.respondTrustRequest(requestId, choice);
+	}
+
+	/** 渲染层提问回答（IPC 入口）：转发给 UI 请求闸直写 pi stdin 并结算等待时长。 */
+	sendUIResponse(agentId: string, requestId: string, response: { value?: string | boolean; cancelled?: boolean; confirmed?: boolean }) {
+		this.uiGate.sendUIResponse(agentId, requestId, response);
 	}
 
 	private handleAssistantMessageEvent(agentId: string, event: unknown) {
@@ -4978,39 +4511,34 @@ export class AgentManager {
 			this.messagePerf.markFirstDelta(agentId);
 			this.messagePerf.markFirstText(agentId);
 			const delta = String(assistantEvent.delta ?? "");
-			// Live 正文唯一热路径：累积后经 textEmitter（50ms）推送，不增长 messages。
-			const prevText = this.streamingText.get(agentId) ?? "";
+			// Live 正文唯一热路径：累积后经 textEmitter（100ms）推送，不增长 messages。
+			const prevText = this.liveStream.getText(agentId) ?? "";
 			const nextText = this.extractStreamingText(agentId, partialMessage) ?? prevText + delta;
-			this.streamingText.set(agentId, nextText);
-			this.textEmitter.push(agentId, stripAnsi(nextText));
+			this.liveStream.accumulateText(agentId, nextText);
 			// 思考切正文：只标 endedAt，不落盘、不清 live（message_end/abort 才写入）。
-			if (this.thinkingSegmentByAgent.has(agentId)) {
-				this.markThinkingSegmentEnded(agentId);
+			if (this.liveStream.hasSegment(agentId)) {
+				this.liveStream.markThinkingSegmentEnded(agentId);
 			}
 			return;
 		}
 
 		if (eventType === "thinking_delta") {
-			this.ensureThinkingSegment(agentId);
+			this.liveStream.ensureThinkingSegment(agentId);
 			this.messagePerf.markFirstDelta(agentId);
-			const prev = this.streamingThinking.get(agentId) ?? "";
-			const delta = String(assistantEvent.delta ?? "");
-			const next = prev + delta;
-			this.streamingThinking.set(agentId, next);
-			this.thinkingEmitter.push(agentId, stripAnsi(next));
+			this.liveStream.pushThinkingDelta(agentId, String(assistantEvent.delta ?? ""));
 			this.streamingAgents.add(agentId);
 			// Live 思考唯一热路径：不 upsert messages，避免 50ms timeline 重组。
 			return;
 		}
 
 		if (eventType === "thinking_end") {
-			const finalThinking = String(assistantEvent.content ?? this.streamingThinking.get(agentId) ?? "");
+			const finalThinking = String(assistantEvent.content ?? this.liveStream.getThinking(agentId) ?? "");
 			if (finalThinking) {
-				this.ensureThinkingSegment(agentId);
-				this.streamingThinking.set(agentId, finalThinking);
+				this.liveStream.ensureThinkingSegment(agentId);
+				this.liveStream.setThinking(agentId, finalThinking);
 			}
 			// 阶段性终态：只标 endedAt + flush live；不落盘（message_end/abort 才写 messages）。
-			this.markThinkingSegmentEnded(agentId);
+			this.liveStream.markThinkingSegmentEnded(agentId);
 			return;
 		}
 
@@ -5022,19 +4550,11 @@ export class AgentManager {
 			this.upsertAssistantMessage(agentId, partialMessage);
 			// message_end/done/error 是本轮回答的最终状态，立即 flush 确保完整消息及时可见。
 			this.flushMessageEmit(agentId);
-			this.finishThinkingChannel(agentId);
+			this.liveStream.finishThinkingChannel(agentId);
 			this.activeAssistantMessageIds.delete(agentId);
 			this.streamingAgents.delete(agentId);
 			// 独立流式正文通道终止：推一次最终累积文本后清缓冲（渲染层由历史消息接管）
-			const finalText = this.streamingText.get(agentId);
-			if (finalText !== undefined) {
-				this.textEmitter.flush(agentId);
-				this.emitTextStreamNow(agentId, finalText, true);
-			}
-			this.textEmitter.cancel(agentId);
-			this.streamingText.delete(agentId);
-			this.lastSentTextByAgent.delete(agentId);
-			this.textPushCountByAgent.delete(agentId);
+			this.liveStream.finalizeText(agentId);
 		}
 	}
 
@@ -5046,43 +4566,18 @@ export class AgentManager {
 
 	// 流式性能计时（markFirstDelta/markFirstText/ensureTimer/settle）收口在 MessagePerfTracker。
 
-	/** 首 thinking_delta：铸造与 History 相同的稳定段 id（msg-thinking-${assistantMessageId}）。 */
-	private ensureThinkingSegment(agentId: string) {
-		const existing = this.thinkingSegmentByAgent.get(agentId);
-		if (existing) return existing;
-		// 新段开始：重置思考 delta 基准（上一段的末尾文本可能碰巧是下一段前缀，
-		// 直接续 delta 会让新段在渲染层缺头，直到 2.5s 快照自愈）。
-		this.lastSentThinkingByAgent.delete(agentId);
-		this.thinkingPushCountByAgent.delete(agentId);
+	/** 首 thinking_delta 的 History 挂载点（LiveStreamChannel.ensureThinkingSegment 的 host 回调）：
+	 *  建立 assistant 身份、保证骨架 upsert + flush，并返回 assistantMessageId 供段 id 铸造。 */
+	private mountThinkingSegment(agentId: string): string | undefined {
 		this.beginAssistantMessage(agentId);
 		const assistantMessageId = this.activeAssistantMessageIds.get(agentId);
 		if (!assistantMessageId) {
 			throw new Error(`ensureThinkingSegment: missing assistant message id for ${agentId}`);
 		}
-		const segment = {
-			id: `msg-thinking-${assistantMessageId}`,
-			assistantMessageId,
-			startedAt: Date.now(),
-			endedAt: 0,
-		};
-		this.thinkingSegmentByAgent.set(agentId, segment);
 		// 保证 History 有同 id 骨架，buildTurnDisplay 才能用 liveThinkingId 挂思考步。
 		this.upsertAssistantMessage(agentId, undefined, "", { allowEmpty: true });
 		this.flushMessageEmit(agentId);
-		return segment;
-	}
-
-	/** thinking_end / 转正文：标 endedAt 并 flush live，不写 messages。 */
-	private markThinkingSegmentEnded(agentId: string) {
-		const segment = this.thinkingSegmentByAgent.get(agentId);
-		if (!segment) return;
-		// 已结束后勿在每个 text_delta 上重复 flush/emit。
-		if (segment.endedAt > 0) return;
-		segment.endedAt = Date.now();
-		this.thinkingSegmentByAgent.set(agentId, segment);
-		const text = this.streamingThinking.get(agentId) ?? "";
-		this.thinkingEmitter.flush(agentId);
-		this.emitThinkingNow(agentId, stripAnsi(text));
+		return assistantMessageId;
 	}
 
 	/**
@@ -5090,8 +4585,8 @@ export class AgentManager {
 	 * 必须在 finishThinkingChannel（done）之前调用，并先 flush messages。
 	 */
 	private finalizeThinkingIntoMessage(agentId: string, partialMessage?: unknown) {
-		const segment = this.thinkingSegmentByAgent.get(agentId);
-		const fromStream = this.streamingThinking.get(agentId) ?? "";
+		const segment = this.liveStream.getSegment(agentId);
+		const fromStream = this.liveStream.getThinking(agentId) ?? "";
 		const fromMessage = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractThinking((partialMessage as any).content) : "";
 		const nextThinking = stripAnsi(fromStream || fromMessage || "");
 		if (!nextThinking.trim()) return;
@@ -5111,10 +4606,7 @@ export class AgentManager {
 			if (rebindIndex >= 0) {
 				existingIndex = rebindIndex;
 				messageId = list[rebindIndex].id;
-				if (segment) {
-					segment.assistantMessageId = messageId;
-					segment.id = `msg-thinking-${messageId}`;
-				}
+				this.liveStream.rebindSegmentTo(agentId, messageId);
 				this.activeAssistantMessageIds.set(agentId, messageId);
 			}
 		}
@@ -5139,28 +4631,6 @@ export class AgentManager {
 			this.markMessagesDirtyFrom(agentId, list.length - 1);
 		}
 		this.messages.set(agentId, list);
-	}
-
-	/** 发 done 并清 live 思考通道；须在 finalize + flushMessageEmit 之后调用。 */
-	private finishThinkingChannel(agentId: string) {
-		const segment = this.thinkingSegmentByAgent.get(agentId);
-		const text = stripAnsi(this.streamingThinking.get(agentId) ?? "");
-		this.thinkingEmitter.cancel(agentId);
-		this.lastSentThinkingByAgent.delete(agentId);
-		this.thinkingPushCountByAgent.delete(agentId);
-		if (segment) {
-			const update: ThinkingUpdate = {
-				agentId,
-				id: segment.id,
-				text,
-				startedAt: segment.startedAt,
-				endedAt: segment.endedAt > 0 ? segment.endedAt : Date.now(),
-				done: true,
-			};
-			this.emit(ipcChannels.agentsThinking, update);
-		}
-		this.streamingThinking.delete(agentId);
-		this.thinkingSegmentByAgent.delete(agentId);
 	}
 
 	private upsertAssistantMessage(agentId: string, partialMessage?: unknown, fallbackDelta = "", options?: { allowEmpty?: boolean }) {
@@ -5292,11 +4762,7 @@ export class AgentManager {
 				const skeletonIndex = nextMessages.findIndex((message) => message.id === runningAssistantId);
 				if (skeletonIndex >= 0) nextMessages.splice(skeletonIndex, 1);
 				this.activeAssistantMessageIds.set(agentId, projectedIncomplete.id);
-				const segment = this.thinkingSegmentByAgent.get(agentId);
-				if (segment && segment.assistantMessageId === runningAssistantId) {
-					segment.assistantMessageId = projectedIncomplete.id;
-					segment.id = `msg-thinking-${projectedIncomplete.id}`;
-				}
+				this.liveStream.rebindSegmentFrom(agentId, runningAssistantId, projectedIncomplete.id);
 			}
 		}
 		const runningTool = this.toolMessageIds.get(agentId);
@@ -5353,10 +4819,9 @@ export class AgentManager {
 		// 「代理的时间也有问题」）。
 		let durationMs = status === "running" ? undefined : Math.max(0, Date.now() - startedAt);
 		if (durationMs !== undefined) {
-			const askWaitMs = this.askWaitMsByAgent.get(agentId) ?? 0;
+			const askWaitMs = this.uiGate.consumeAskWaitMs(agentId);
 			if (askWaitMs > 0) {
 				durationMs = Math.max(0, durationMs - askWaitMs);
-				this.askWaitMsByAgent.delete(agentId);
 			}
 		}
 		const result = event.result ?? event.partialResult ?? event.output ?? existing?.meta?.result;
@@ -5674,50 +5139,6 @@ export class AgentManager {
 	 * because Pi RPC dialogs are otherwise strictly sequential. Validate the shape
 	 * before forwarding it so malformed extension data falls back to normal input.
 	 */
-	private tryParseBatchAskEnvelope(title: string):
-		| {
-				review: boolean;
-				questions: Array<Record<string, unknown>>;
-		  }
-		| undefined {
-		const raw = title.trim();
-		if (!raw.startsWith("{")) return undefined;
-		try {
-			const parsed = JSON.parse(raw) as Record<string, unknown>;
-			if (parsed.__piDeckBatchAsk !== 1 || !Array.isArray(parsed.questions)) {
-				return undefined;
-			}
-			const questions = parsed.questions.filter((question): question is Record<string, unknown> => {
-				if (!question || typeof question !== "object") return false;
-				const typed = question as Record<string, unknown>;
-				return typeof typed.id === "string" && typeof typed.question === "string" && ["select", "multi_select", "confirm", "input", "editor"].includes(String(typed.type));
-			});
-			return questions.length > 0 ? { review: parsed.review === true, questions } : undefined;
-		} catch {
-			return undefined;
-		}
-	}
-
-	private scheduleUIRequestTimeout(agentId: string, requestId: string, timeout: unknown) {
-		// 扩展显式指定且合法时优先用它；否则退回兜底上限，避免 pi 永久阻塞（见常量注释）。
-		const explicitTimeout = typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : undefined;
-		const effectiveTimeout = explicitTimeout ?? AgentManager.DEFAULT_UI_REQUEST_TIMEOUT_MS;
-
-		const timer = setTimeout(() => {
-			if (!this.pendingUIRequests.get(agentId)?.has(requestId)) return;
-			// A timeout must close both ends of the protocol. Merely hiding the
-			// renderer form leaves Pi blocked on extension_ui_response indefinitely.
-			void this.appLogger?.warn("agent", "Extension UI request timed out; cancelling to unblock pi", {
-				agentId,
-				requestId,
-				timeoutMs: effectiveTimeout,
-				explicitTimeout: explicitTimeout != null,
-			});
-			this.sendUIResponse(agentId, requestId, { cancelled: true });
-		}, effectiveTimeout);
-		timer.unref?.();
-	}
-
 	private scheduleIdleCheckAfterExtensionCommand(agentId: string) {
 		const timer = setTimeout(() => {
 			void this.markIdleIfPiReportsNoWork(agentId);
@@ -5728,7 +5149,7 @@ export class AgentManager {
 	private async markIdleIfPiReportsNoWork(agentId: string) {
 		const runtime = this.agents.get(agentId);
 		if (!runtime || runtime.tab.status !== "running") return;
-		if ((this.pendingUIRequests.get(agentId)?.size ?? 0) > 0) return;
+		if (this.uiGate.hasPendingUIRequests(agentId)) return;
 		if (this.rpcCompactingAgents.has(agentId) || this.compactingAgents.has(agentId)) return;
 		if (this.activeAssistantMessageIds.has(agentId)) return;
 		// 这里刻意不再用本地 toolExecutingByAgent 做否决：pi 的 isStreaming 就是
@@ -5768,11 +5189,8 @@ export class AgentManager {
 		this.flushMessageEmit(agentId);
 		// 兜底确认空闲同样视为一轮结束：重算尾部 9 轮窗口并裁剪运行期缓存。
 		this.trimRuntimeCache(agentId);
-		this.finishThinkingChannel(agentId);
-		this.textEmitter.cancel(agentId);
-		this.streamingText.delete(agentId);
-		this.lastSentTextByAgent.delete(agentId);
-		this.textPushCountByAgent.delete(agentId);
+		this.liveStream.finishThinkingChannel(agentId);
+		this.liveStream.clearTextChannel(agentId);
 		this.emitState();
 		void this.emitRuntimeState(agentId);
 		// 兜底确认无工作也算成功空闲：与 agent_settled 一样通知完成（PetStateBridge 侧有去重冷却）。
@@ -5943,9 +5361,7 @@ export class AgentManager {
 		// 流闸/兜底定时器/升级上下文统一清；thinkingEmitter 与消息 flush 属跨域编排，仍在此清
 		this.abortGate.clearAgent(agentId);
 		this.recentlyAborted.delete(agentId);
-		this.thinkingEmitter.cancel(agentId);
-		this.lastSentThinkingByAgent.delete(agentId);
-		this.thinkingPushCountByAgent.delete(agentId);
+		this.liveStream.cancelThinkingPush(agentId);
 		this.cancelMessageEmit(agentId);
 	}
 
@@ -6059,29 +5475,6 @@ export class AgentManager {
 		this.flushMessageEmit(agentId);
 	}
 
-	/** 节流推送 live 思考（done=false）；无段身份时丢弃。 */
-	private emitThinkingNow(agentId: string, text: string) {
-		const segment = this.thinkingSegmentByAgent.get(agentId);
-		if (!segment) return;
-		// 增量推送（同正文通道治理）：只发上次快照之后的新字符；非 append
-		// （重置/ANSI 变化）或距上次快照超过 50 次推送（≈2.5s）时补一次全量，
-		// 兜底渲染层 HMR/晚绑定丢失的增量。
-		const lastSent = this.lastSentThinkingByAgent.get(agentId) ?? "";
-		const pushCount = (this.thinkingPushCountByAgent.get(agentId) ?? 0) + 1;
-		const sendFull = !text.startsWith(lastSent) || pushCount >= 50;
-		const update: ThinkingUpdate = {
-			agentId,
-			id: segment.id,
-			...(!sendFull ? { delta: text.slice(lastSent.length) } : { text }),
-			startedAt: segment.startedAt,
-			endedAt: segment.endedAt,
-			done: false,
-		};
-		this.lastSentThinkingByAgent.set(agentId, text);
-		this.thinkingPushCountByAgent.set(agentId, sendFull ? 0 : pushCount);
-		this.emit(ipcChannels.agentsThinking, update);
-	}
-
 	/**
 	 * 从 message_update 的 partialMessage 提取累积正文；无法提取时返回 undefined，
 	 * 调用方回退到「旧累积 + delta」拼接（兼容仅带 delta 的事件格式）。
@@ -6092,41 +5485,6 @@ export class AgentManager {
 			if (text) return text;
 		}
 		return undefined;
-	}
-
-	/** 推送独立流式正文通道（agents:text-stream），渲染层写入 streamingTextByIdAtom。
-	 *  done=true 表示本轮回答结束（message_end），渲染层据此把 streaming 置 false。
-	 *  顺带同步 isStreaming 补丁：text_delta 走独立通道后不再触发 flushMessageEmit，
-	 *  若仍只在 flush 里推 patch，渲染层拿不到 isStreaming=true，气泡不会渲染。
-	 *
-	 *  增量推送（2026-08 IPC 治理）：正常 append 只发 delta；非 append（重置/
-	 *  ANSI 变化）或距上次全量超过 50 次推送（≈2.5s）时改发全量快照（text 字段），
-	 *  渲染层据此替换本地累积。done 时清空 delta 基准。 */
-	private emitTextStreamNow(agentId: string, text: string, done = false) {
-		const lastSent = this.lastSentTextByAgent.get(agentId) ?? "";
-		const pushCount = (this.textPushCountByAgent.get(agentId) ?? 0) + 1;
-		const sendFull = !text.startsWith(lastSent) || pushCount >= 50;
-		const payload: {
-			agentId: string;
-			sessionId?: string;
-			runtimeGeneration?: number;
-			text?: string;
-			delta?: string;
-			done: boolean;
-		} = {
-			agentId,
-			...this.streamRuntimeTriple(agentId),
-			...(!sendFull ? { delta: text.slice(lastSent.length) } : { text }),
-			done,
-		};
-		this.lastSentTextByAgent.set(agentId, text);
-		this.textPushCountByAgent.set(agentId, sendFull ? 0 : pushCount);
-		if (done) {
-			this.lastSentTextByAgent.delete(agentId);
-			this.textPushCountByAgent.delete(agentId);
-		}
-		this.emit(ipcChannels.agentsTextStream, payload);
-		this.emitStreamingStatePatch(agentId);
 	}
 
 	private emitState() {

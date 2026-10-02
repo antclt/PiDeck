@@ -5,6 +5,8 @@ import test from "node:test";
 const coordinator = readFileSync("src/main/sessions/SessionRuntimeCoordinator.ts", "utf8");
 const main = readFileSync("src/main/index.ts", "utf8");
 const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+// 扩展 UI 请求闸已迁入 extensionUiGate.ts（AgentManager 拆分 Wave 4B）
+const uiGate = readFileSync("src/main/pi/extensionUiGate.ts", "utf8");
 const sessionIpc = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
 const app = readFileSync("src/renderer/src/App.tsx", "utf8");
 const runtimeInjector = readFileSync("src/renderer/src/components/session/SessionRuntimeInjector.tsx", "utf8");
@@ -29,10 +31,11 @@ test("unbound interactive UI is cancelled and cannot be surfaced as Session UI",
 
 test("Ask Question keeps normalized batch requests pending for the session responder", () => {
 	assert.match(coordinator, /method === "batch_ask"/);
-	assert.match(agentManager, /hasCustomOption/);
-	assert.match(agentManager, /option\.startsWith\("✎"\)/);
-	assert.match(agentManager, /allowOther: typed\.allowOther === true \|\| hasCustomOption/);
+	assert.match(uiGate, /hasCustomOption/);
+	assert.match(uiGate, /option\.startsWith\("✎"\)/);
+	assert.match(uiGate, /allowOther: typed\.allowOther === true \|\| hasCustomOption/);
 	assert.match(agentManager, /questions: batchQuestions/);
+	assert.match(agentManager, /uiGate\.handleUIRequest\(agentId, typed\)/);
 });
 
 test("session UI requests remain generation-bound and render in the timeline footer", () => {
