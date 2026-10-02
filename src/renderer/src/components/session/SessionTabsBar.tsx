@@ -193,19 +193,29 @@ export type SessionTabsBarProps = {
 	 * 可见性判定与侧栏会话右键菜单同一套（DSH 历史会话无宿主文件 → 隐藏复制/导出/路径组）。
 	 * undefined = 无当前会话（引导页等），整组不渲染。
 	 */
-	sessionActions?: {
-		/** 复制会话：live 走 clone 分流（DSH 亦可），历史走 copyRecord；草稿会话隐藏 */
-		canCopySession: boolean;
-		/** 导出 HTML：DSH 无实现，隐藏 */
-		canExportHtml: boolean;
-		/** 有会话文件：无（草稿/DSH）则隐藏「复制路径 / 打开文件」 */
-		hasFilePath: boolean;
-		onCopySession: () => void;
-		onCopySessionFilePath: () => void;
-		onOpenSessionFile?: () => void;
-		onExportSessionHtml?: () => void;
-		onRenameSession?: () => void;
-	};
+	sessionActions?: SessionTabActions;
+	/**
+	 * Tab 右键菜单的「会话操作」组：按被右键 Tab 的 sessionId 参数化（后台 Tab 同样可操作）。
+	 * 装配层与 sessionActions 同一工厂（能力闸门一致）；返回 undefined = 无该会话记录，整组不渲染。
+	 */
+	contextSessionActions?: (sessionId: string) => SessionTabActions | undefined;
+};
+
+/** 会话操作组（⋯ 菜单与 Tab 右键菜单共用）：能力闸门由装配层按目标会话算好
+ *  （草稿/DSH/无文件路径），渲染层只按 flags 与回调存在性出菜单项。 */
+export type SessionTabActions = {
+	/** 复制会话：live 走 clone 分流（DSH 亦可），历史走 copyRecord；草稿会话隐藏 */
+	canCopySession: boolean;
+	/** 导出 HTML：DSH 无实现，隐藏 */
+	canExportHtml: boolean;
+	/** 有会话文件：无（草稿/DSH）则隐藏「复制路径 / 打开文件」 */
+	hasFilePath: boolean;
+	onCopySession: () => void;
+	onCopySessionFilePath: () => void;
+	onOpenSessionFile?: () => void;
+	onExportSessionHtml?: () => void;
+	/** 重命名回调；undefined（草稿期）时隐藏入口——草稿自动命名前先钉名字会进 manual 终态 */
+	onRename?: () => void;
 };
 
 export function SessionTabsBar(props: SessionTabsBarProps) {
@@ -413,6 +423,9 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 								onCloseOthers={props.onCloseOthers}
 								onCloseAll={props.onCloseAll}
 								onTogglePin={props.onTogglePin}
+								// 右键菜单的「会话操作」组（重命名/复制/导出/路径/打开）：按本 Tab 的 sessionId 现取，
+								// 后台 Tab 也能操作；工厂与 ⋯ 菜单 sessionActions 同源（App 同一装配）。
+								sessionActions={props.contextSessionActions?.(sessionId)}
 								onDragStart={(event) => {
 									dragSourceRef.current = sessionId;
 									dragTargetRef.current = null;
@@ -635,8 +648,8 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 							{props.sessionActions && (
 								<>
 									{!props.runControl?.capabilities && <DropdownMenuLabel>{t("tabs.currentSessionGroup")}</DropdownMenuLabel>}
-									{props.sessionActions.onRenameSession && (
-										<DropdownMenuItem onSelect={props.sessionActions.onRenameSession}>
+									{props.sessionActions.onRename && (
+										<DropdownMenuItem onSelect={props.sessionActions.onRename}>
 											<span className="inline-flex items-center gap-2">
 												<Pencil className="size-3.5" aria-hidden="true" />
 												{t("common.rename")}
@@ -886,6 +899,8 @@ function SessionTab(props: {
 	indicatorId: string;
 	/** 指示器 transition：spring（默认）/ 减少动态时瞬时 */
 	indicatorTransition: Transition;
+	/** 右键菜单的「会话操作」组（App 按 sessionId 参数化装配）；undefined = 整组不渲染 */
+	sessionActions?: SessionTabActions;
 }) {
 	const { sessionId, active, pinned, preview, dragging } = props;
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
@@ -948,77 +963,79 @@ function SessionTab(props: {
 		);
 
 	return (
-		/* 嵌套顺序契约：ContextMenuTrigger 必须直接包住 Tab div。
-		   Radix asChild 只把 onContextMenu 等合并到「直接子元素」，中间若隔一层
-		   Tooltip.Root（非 DOM 组件）事件会被静默丢弃 → 右键菜单失效
-		   （2026-10-01 e2e 复现：右键 Tab 后 DOM 无任何 menu）。
-		   ContextMenu.Root 与 Tooltip.Root 都是非 DOM 组件，均不能做 asChild 的
-		   直接子层；这里 Tooltip 做外层壳、菜单内容经 Fragment 兄弟节点渲染。 */
+		/* 嵌套顺序契约：TooltipTrigger(asChild) > ContextMenuTrigger(asChild) > Tab div。
+		   Radix asChild 只把 props 合并到「直接子元素」：中间隔 Root（ContextMenu.Root /
+		   Tooltip.Provider 等非 DOM、非 Slot 组件）事件会被静默丢弃（2026-10-01 右键菜单
+		   失效的根因）；但 Trigger 都是 Slot 合并透传组件——外层 Trigger 的 hover/focus
+		   props 会随链路逐层合并到 div，两层 Trigger 可以叠。2026-10-02 重排时误删
+		   TooltipTrigger（Tooltip.Root 失去 trigger）→ hover 富提示（标题+工作区）失效
+		   （用户报「移入的效果没了」）；TooltipTrigger 必须保留在链上（单测/e2e 双契约）。 */
 		<ContextMenu>
 			<Tooltip delayDuration={500}>
-				<ContextMenuTrigger asChild>
-					<div
-						role="tab"
-						aria-selected={active}
-						data-session-id={sessionId}
-						aria-label={workspaceName ? `${title} — ${workspaceName}` : title}
-						draggable
-						onDragStart={props.onDragStart}
-						onDragOver={props.onDragOver}
-						onDrop={props.onDrop}
-						onDragEnd={props.onDragEnd}
-						onClick={select}
-						onDoubleClick={() => {
-							if (preview) props.onPromotePreview?.(sessionId);
-						}}
-						onAuxClick={(event) => {
-							// 中键关闭（固定 Tab 忽略，需先取消固定），与浏览器 Tab 行为一致
-							if (event.button === 1 && !pinned) close();
-						}}
-						className={cn(
-							"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-tab transition-[color,background-color,border-color,box-shadow,transform] duration-200",
-							// 固定 Tab 与普通 Tab 同宽策略（按内容收缩）：固定 Tab 无关闭按钮，
-							// hover 不会因按钮出现而跳动，无需 w-20 占位；固定宽度反而让 Pin 图标挤占标题空间。
-							// 有 DSH/生图徽标或模式 chip 时放宽上限：基础上限 + 徽标预留 28px
-							// （SESSION_TAB_BADGE_EXTRA_WIDTH，旧 132/104 差值）。
-							hasLeadingBadges ? "w-fit max-w-(--session-tab-max-w-badged)" : "w-fit max-w-(--session-tab-max-w)",
-							dragging && "opacity-50",
-							// 选中态：灰色柔和实底（bg-accent = --color-bg-active，与左侧 SessionTree 选中行一致），
-							// 背景由下方共享 layoutId 的 motion.span spring 滑到当前 Tab；不做黑色实底/阴影/底部条。
-							// 文字用 text-foreground（灰底上直接可读，无需反色）。
-							// hover 底用 accent-soft 实底而非 accent/50：半透明灰叠在白底上几乎不可见（同 EditorWorkbenchTab 注释）。
-							active ? "border-transparent font-medium text-foreground" : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent-soft hover:text-foreground",
-							preview && "italic font-normal text-muted-foreground",
-						)}
-					>
-						{/* 内容包装：relative z-10 抬到灰色背景面板之上（背景面板是 absolute，按层序会在内容下）。 */}
-						<span className="relative z-10 flex min-w-0 flex-1 items-center gap-1.5">
-							{badge && (
-								// beui AnimatedBadge bare 模式：去掉胶囊边框/背景，仅保留图标滚动/旋转动画；
-								// 图标经 [&_svg] 稳定选择器缩到 10px；运行中通过 colorClass 覆盖成黄色旋转。
-								<AnimatedBadge status={badge.status} size="sm" bare pulse={false} className={cn("[&_svg]:h-2.5 [&_svg]:w-2.5", badge.colorClass)} aria-hidden="true" />
+				<TooltipTrigger asChild>
+					<ContextMenuTrigger asChild>
+						<div
+							role="tab"
+							aria-selected={active}
+							data-session-id={sessionId}
+							aria-label={workspaceName ? `${title} — ${workspaceName}` : title}
+							draggable
+							onDragStart={props.onDragStart}
+							onDragOver={props.onDragOver}
+							onDrop={props.onDrop}
+							onDragEnd={props.onDragEnd}
+							onClick={select}
+							onDoubleClick={() => {
+								if (preview) props.onPromotePreview?.(sessionId);
+							}}
+							onAuxClick={(event) => {
+								// 中键关闭（固定 Tab 忽略，需先取消固定），与浏览器 Tab 行为一致
+								if (event.button === 1 && !pinned) close();
+							}}
+							className={cn(
+								"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-tab transition-[color,background-color,border-color,box-shadow,transform] duration-200",
+								// 固定 Tab 与普通 Tab 同宽策略（按内容收缩）：固定 Tab 无关闭按钮，
+								// hover 不会因按钮出现而跳动，无需 w-20 占位；固定宽度反而让 Pin 图标挤占标题空间。
+								// 有 DSH/生图徽标或模式 chip 时放宽上限：基础上限 + 徽标预留 28px
+								// （SESSION_TAB_BADGE_EXTRA_WIDTH，旧 132/104 差值）。
+								hasLeadingBadges ? "w-fit max-w-(--session-tab-max-w-badged)" : "w-fit max-w-(--session-tab-max-w)",
+								dragging && "opacity-50",
+								// 选中态：灰色柔和实底（bg-accent = --color-bg-active，与左侧 SessionTree 选中行一致），
+								// 背景由下方共享 layoutId 的 motion.span spring 滑到当前 Tab；不做黑色实底/阴影/底部条。
+								// 文字用 text-foreground（灰底上直接可读，无需反色）。
+								// hover 底用 accent-soft 实底而非 accent/50：半透明灰叠在白底上几乎不可见（同 EditorWorkbenchTab 注释）。
+								active ? "border-transparent font-medium text-foreground" : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent-soft hover:text-foreground",
+								preview && "italic font-normal text-muted-foreground",
 							)}
-							{pinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />}
-							{/* DSH/生图是文字标记，保留自然宽度；固定 size-4 会让文字溢出到右侧操作按钮区域。 */}
-							{(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />}
-							{/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
-							{runtime?.state?.planModeActive && (
-								<span className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary" title={t("app.composerModePlan")}>
-									{t("app.composerModePlan")}
-								</span>
-							)}
-							{runtime?.state?.goal && runtime.state.goal.phase !== "complete" && (
-								<span
-									// 底色与 plan chip 同用 bg-primary/15：不能用 bg-accent/15——激活 tab 的
-									// 滑动背景就是实底 bg-accent，accent/15 叠上去完全不可见，chip 会退化成裸文字
-									//（浅色主题下尤其明显）。淡蓝底在明暗主题的激活/非激活 tab 上均可读。
-									className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary"
-									title={t("app.composerModeGoal")}
-								>
-									{t("app.composerModeGoal")}
-								</span>
-							)}
-							{/* 标题复用侧栏 TitleScrollText：溢出时 hover 滚动到尾、离开回开头（与左侧会话列表一致）。
+						>
+							{/* 内容包装：relative z-10 抬到灰色背景面板之上（背景面板是 absolute，按层序会在内容下）。 */}
+							<span className="relative z-10 flex min-w-0 flex-1 items-center gap-1.5">
+								{badge && (
+									// beui AnimatedBadge bare 模式：去掉胶囊边框/背景，仅保留图标滚动/旋转动画；
+									// 图标经 [&_svg] 稳定选择器缩到 10px；运行中通过 colorClass 覆盖成黄色旋转。
+									<AnimatedBadge status={badge.status} size="sm" bare pulse={false} className={cn("[&_svg]:h-2.5 [&_svg]:w-2.5", badge.colorClass)} aria-hidden="true" />
+								)}
+								{pinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />}
+								{/* DSH/生图是文字标记，保留自然宽度；固定 size-4 会让文字溢出到右侧操作按钮区域。 */}
+								{(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />}
+								{/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
+								{runtime?.state?.planModeActive && (
+									<span className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary" title={t("app.composerModePlan")}>
+										{t("app.composerModePlan")}
+									</span>
+								)}
+								{runtime?.state?.goal && runtime.state.goal.phase !== "complete" && (
+									<span
+										// 底色与 plan chip 同用 bg-primary/15：不能用 bg-accent/15——激活 tab 的
+										// 滑动背景就是实底 bg-accent，accent/15 叠上去完全不可见，chip 会退化成裸文字
+										//（浅色主题下尤其明显）。淡蓝底在明暗主题的激活/非激活 tab 上均可读。
+										className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary"
+										title={t("app.composerModeGoal")}
+									>
+										{t("app.composerModeGoal")}
+									</span>
+								)}
+								{/* 标题复用侧栏 TitleScrollText：溢出时 hover 滚动到尾、离开回开头（与左侧会话列表一致）。
             strong 是块级元素（flex-1 占满剩余空间），需显式覆盖字重：非激活 400、激活 500，
             否则 strong 的 UA 默认 bold(700) 会让所有 tab 标题变粗。truncate 补省略号
             （组件自带 overflow-hidden 只截断不省略，侧栏靠 legacy .conversation-title strong 补）。
@@ -1026,34 +1043,35 @@ function SessionTab(props: {
             - disabled={active}：激活 tab 不滚动——内容已在右侧看全，且切换 tab 时鼠标恰好落在
               新激活 tab 上，立即滚动体验很吵（原生 title 提示兜底）；
             - hoverDelayMs=500：快速扫过 tab 栏不触发，停留半秒才滚。 */}
-							<TitleScrollText text={title} disabled={active} hoverDelayMs={500} className={cn("truncate", active ? "font-medium" : "font-normal", preview && "italic")} />
-							{!pinned && (
-								<button
-									type="button"
-									role="tab-close"
-									aria-label={t("tabs.close")}
-									title={t("tabs.close")}
-									className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 hover:bg-accent hover:text-foreground", active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
-									onClick={(event) => {
-										event.stopPropagation();
-										close();
-									}}
-								>
-									<X className="size-3" />
-								</button>
-							)}
-						</span>
-						{/* 拖拽插入指示线：2px 主题色竖线，贴在目标 Tab 左/右缘 */}
-						{props.indicator && <span aria-hidden="true" className={cn("pointer-events-none absolute top-1 bottom-1 w-0.5 rounded-full bg-primary", props.indicator === "before" ? "-left-0.5" : "-right-0.5")} />}
-						{/* 灰色选中背景按钮（beui Tabs 同款滑动；无底部条）：只有 active Tab 渲染，layoutId 全栏共享，
+								<TitleScrollText text={title} disabled={active} hoverDelayMs={500} className={cn("truncate", active ? "font-medium" : "font-normal", preview && "italic")} />
+								{!pinned && (
+									<button
+										type="button"
+										role="tab-close"
+										aria-label={t("tabs.close")}
+										title={t("tabs.close")}
+										className={cn("inline-grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground/70 hover:bg-accent hover:text-foreground", active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60")}
+										onClick={(event) => {
+											event.stopPropagation();
+											close();
+										}}
+									>
+										<X className="size-3" />
+									</button>
+								)}
+							</span>
+							{/* 拖拽插入指示线：2px 主题色竖线，贴在目标 Tab 左/右缘 */}
+							{props.indicator && <span aria-hidden="true" className={cn("pointer-events-none absolute top-1 bottom-1 w-0.5 rounded-full bg-primary", props.indicator === "before" ? "-left-0.5" : "-right-0.5")} />}
+							{/* 灰色选中背景按钮（beui Tabs 同款滑动；无底部条）：只有 active Tab 渲染，layoutId 全栏共享，
             切换时 spring 滑到新位置并在目标 Tab 铺满整块灰底——替代旧的底部细条/黑色实底；
             拖拽插入线（props.indicator）是竖线且仅拖拽期存在，二者位置不重叠。
             背景色用 inline 变量（var(--color-bg-active)）而非 bg-accent 类：类依赖 Tailwind
             扫描生成，曾出现在部分环境下类未输出导致「激活 Tab 无背景」的回归。inline 变量
             随主题实时切换，与 SessionTree 选中态同色。 */}
-						{active && <motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
-					</div>
-				</ContextMenuTrigger>
+							{active && <motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
+						</div>
+					</ContextMenuTrigger>
+				</TooltipTrigger>
 				{/* 富 hover 提示替代原生 title：第一行会话标题，第二行工作区（项目目录名 + 完整路径）。
 			    无工作区（草稿/项目缺失）时退化为单行标题，行为与旧 title 一致。
 			    delayDuration=500 与 TitleScrollText 的 hoverDelayMs 同拍：快速扫过不弹。 */}
@@ -1102,6 +1120,55 @@ function SessionTab(props: {
 						{t("tabs.closeAll")}
 					</span>
 				</ContextMenuItem>
+				{/* 会话操作组：与右上角 ⋯ 菜单「当前会话操作」同一工厂装配，作用目标是被右键的 Tab；
+				    能力闸门（草稿/DSH/无文件路径）在装配层算好，这里只按 flags 与回调存在性出项。 */}
+				{props.sessionActions && (
+					<>
+						<ContextMenuSeparator />
+						{props.sessionActions.onRename && (
+							<ContextMenuItem onSelect={props.sessionActions.onRename}>
+								<span className="inline-flex items-center gap-2">
+									<Pencil className="size-3.5" aria-hidden="true" />
+									{t("common.rename")}
+								</span>
+							</ContextMenuItem>
+						)}
+						{props.sessionActions.canCopySession && (
+							<ContextMenuItem onSelect={props.sessionActions.onCopySession}>
+								<span className="inline-flex items-center gap-2">
+									<Copy className="size-3.5" aria-hidden="true" />
+									{t("menu.copySession")}
+								</span>
+							</ContextMenuItem>
+						)}
+						{props.sessionActions.canExportHtml && props.sessionActions.onExportSessionHtml && (
+							<ContextMenuItem onSelect={props.sessionActions.onExportSessionHtml}>
+								<span className="inline-flex items-center gap-2">
+									<FileDown className="size-3.5" aria-hidden="true" />
+									{t("menu.exportHtml")}
+								</span>
+							</ContextMenuItem>
+						)}
+						{props.sessionActions.hasFilePath && (
+							<>
+								<ContextMenuItem onSelect={props.sessionActions.onCopySessionFilePath}>
+									<span className="inline-flex items-center gap-2">
+										<Link2 className="size-3.5" aria-hidden="true" />
+										{t("menu.copySessionFilePath")}
+									</span>
+								</ContextMenuItem>
+								{props.sessionActions.onOpenSessionFile && (
+									<ContextMenuItem onSelect={props.sessionActions.onOpenSessionFile}>
+										<span className="inline-flex items-center gap-2">
+											<FileText className="size-3.5" aria-hidden="true" />
+											{t("menu.openSessionFile")}
+										</span>
+									</ContextMenuItem>
+								)}
+							</>
+						)}
+					</>
+				)}
 			</ContextMenuContent>
 		</ContextMenu>
 	);

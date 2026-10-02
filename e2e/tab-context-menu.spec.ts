@@ -40,6 +40,12 @@ test("session tab: context menu opens on right click", async ({ window }) => {
 	// 菜单内容契约：固定 + 关闭组
 	await expect(menu.getByText("固定标签页")).toBeVisible();
 	await expect(menu.getByText("关闭标签页")).toBeVisible();
+	// 会话操作组（2026-10-02 需求：右键菜单与 ⋯ 菜单结合）：刚发消息的 live 会话
+	// 非草稿、有会话文件 → 重命名/复制会话/导出 HTML/路径组都应出现。
+	await expect(menu.getByText("重命名")).toBeVisible();
+	await expect(menu.getByText("复制会话")).toBeVisible();
+	await expect(menu.getByText("导出 HTML")).toBeVisible();
+	await expect(menu.getByText("复制会话文件路径")).toBeVisible();
 
 	// ESC 关闭后再次右键仍可打开（排除「只能弹一次」的焦点残留）
 	await window.keyboard.press("Escape");

@@ -3271,96 +3271,96 @@ export function App() {
 		return () => anim.cancel();
 	}, [currentSessionId, workspaceChrome.splitLayout, settings.navigationMode]);
 
-	// —— Tab 栏 ⋯ 菜单「当前会话操作」：重命名 / 复制会话 / 导出 HTML / 复制路径 / 打开文件 ——
-	// 与侧栏会话右键菜单同源同语义：搜索定位的会话可能不在侧栏可见（侧栏只渲染部分行），
-	// ⋯ 菜单是唯一稳定入口。live 会话复制走 clone 分流（Agent 换绑新会话，DSH 亦可），
-	// 历史/未启动会话走 copyRecord；DSH 历史会话无宿主文件，隐藏复制/导出组（与侧栏一致）。
-	async function copyCurrentSessionFromTabs() {
-		if (!currentSessionId) return;
-		if (currentSessionIsLive && activeAgentId) {
-			await cloneAgentSession(activeAgentId);
-			return;
-		}
-		await runCopySession(currentSessionId, currentSessionRecord?.projectId);
-	}
-
-	async function copyCurrentSessionPathFromTabs() {
-		if (!currentSessionId) return;
-		// DSH 会话文件路径按 dshSessionId + cwd 推导（与侧栏 copyPath 同源）；
-		// 失败/不可推导时提示而不是把空值写进剪贴板。
-		const path = currentSessionRecord?.backend === "dsh" ? await api.sessions.getDshSessionPath(currentSessionId) : currentSessionRecord?.filePath;
-		if (!path) {
-			showToast(t("menu.copySessionFilePathUnavailable"), 3000);
-			return;
-		}
-		await navigator.clipboard.writeText(path);
-		showToast(t("common.copied"));
-	}
-
-	const tabsSessionActions: SessionTabsBarProps["sessionActions"] =
-		currentSessionId && currentSessionRecord
-			? {
-					canCopySession: currentSessionRecord.status !== "draft" && (currentSessionIsLive || currentSessionRecord.backend !== "dsh"),
-					canExportHtml: currentSessionRecord.status !== "draft" && currentSessionRecord.backend !== "dsh",
-					hasFilePath: Boolean(currentSessionRecord.filePath),
-					onCopySession: () => {
-						void copyCurrentSessionFromTabs();
-					},
-					onCopySessionFilePath: () => {
-						void copyCurrentSessionPathFromTabs();
-					},
-					onOpenSessionFile: currentSessionRecord.filePath
-						? () => {
-								const filePath = currentSessionRecord.filePath;
-								if (!filePath) return;
-								api.files.open(filePath).catch((error) => {
-									showToast(
-										t("app.openFileFailed", {
-											error: error instanceof Error ? error.message : String(error),
-										}),
-										4000,
-									);
-								});
-							}
-						: undefined,
-					onExportSessionHtml: () => {
-						if (!currentSessionId) return;
-						// live 会话走 runtime 导出（与侧栏 agent 导出同源）；历史会话读文件导出
-						if (currentSessionIsLive && activeAgentId) {
-							void exportAgentHtml(activeAgentId);
+	// —— Tab 栏会话操作组（重命名 / 复制会话 / 导出 HTML / 复制路径 / 打开文件）——
+	// 与侧栏会话右键菜单同源同语义，参数化到任意 sessionId：⋯ 菜单喂当前会话，
+	// Tab 右键菜单（SessionTabsBar contextSessionActions）喂被右键的 Tab——后台 Tab
+	// 同样可操作。live 会话复制走 clone 分流（Agent 换绑新会话，DSH 亦可），历史/
+	// 未启动会话走 copyRecord；DSH 历史会话无宿主文件，隐藏复制/导出组（与侧栏一致）。
+	// record/runtime 用 store 现查（右键目标不在 current* 闭包里）；agent 列表闭包自
+	// 当次渲染（SessionTabsBar 的 renderTab 每渲染重建，无过期问题）。
+	const buildTabsSessionActions = (sessionId: string): SessionTabsBarProps["sessionActions"] => {
+		const record = store.get(sessionRecordsAtom)[sessionId];
+		if (!record) return undefined;
+		const runtime = store.get(sessionRuntimeBySessionIdAtomFamily(sessionId));
+		const isLive = isLiveRuntimeStatus(runtime?.status);
+		const agentId = runtime?.agentId;
+		// 草稿闸门：草稿期不提供重命名（自动命名还没跑，先钉名字会让条目进 manual
+		// 终态，扩展规划的会话名再也写不进来）；复制/导出同款闸门。
+		const canRename = record.status !== "draft";
+		return {
+			canCopySession: canRename && (isLive || record.backend !== "dsh"),
+			canExportHtml: canRename && record.backend !== "dsh",
+			hasFilePath: Boolean(record.filePath),
+			onCopySession: () => {
+				if (isLive && agentId) {
+					void cloneAgentSession(agentId);
+					return;
+				}
+				void runCopySession(sessionId, record.projectId);
+			},
+			onCopySessionFilePath: () => {
+				void (async () => {
+					// DSH 会话文件路径按 dshSessionId + cwd 推导（与侧栏 copyPath 同源）；
+					// 失败/不可推导时提示而不是把空值写进剪贴板。
+					const path = record.backend === "dsh" ? await api.sessions.getDshSessionPath(sessionId) : record.filePath;
+					if (!path) {
+						showToast(t("menu.copySessionFilePathUnavailable"), 3000);
+						return;
+					}
+					await navigator.clipboard.writeText(path);
+					showToast(t("common.copied"));
+				})();
+			},
+			onOpenSessionFile: record.filePath
+				? () => {
+						const filePath = record.filePath;
+						if (!filePath) return;
+						api.files.open(filePath).catch((error) => {
+							showToast(
+								t("app.openFileFailed", {
+									error: error instanceof Error ? error.message : String(error),
+								}),
+								4000,
+							);
+						});
+					}
+				: undefined,
+			onExportSessionHtml: () => {
+				// live 会话走 runtime 导出（与侧栏 agent 导出同源）；历史会话读文件导出
+				if (isLive && agentId) {
+					void exportAgentHtml(agentId);
+					return;
+				}
+				api.sessions
+					.exportRecordHtml(sessionId)
+					.then((result) => showToast(t("app.exportedPath", { path: result.path }), 3500))
+					.catch((error) => showToast(error instanceof Error ? error.message : String(error), 5000));
+			},
+			onRename: canRename
+				? () => {
+						// live 会话用 agent 重命名（与侧栏 AgentContextMenu 同源，改名同步运行时标题）；
+						// 历史/未启动会话用 record 拼侧栏同构的 SessionSummary 走统一重命名弹框。
+						const agent = agentId ? [...displayAgents, ...pendingAgents].find((candidate) => candidate.id === agentId) : undefined;
+						if (isLive && agent) {
+							rename.openAgentRename(agent);
 							return;
 						}
-						api.sessions
-							.exportRecordHtml(currentSessionId)
-							.then((result) => showToast(t("app.exportedPath", { path: result.path }), 3500))
-							.catch((error) => showToast(error instanceof Error ? error.message : String(error), 5000));
-					},
-					// 草稿期不提供重命名入口（与 canCopySession/canExportHtml 同款草稿闸门）：此时
-					// 自动命名还没跑，先钉一个名字会让条目进 manual 终态，扩展规划的会话名再也写不进来。
-					onRenameSession:
-						currentSessionRecord.status === "draft"
-							? undefined
-							: () => {
-									if (!currentSessionRecord) return;
-									// live 会话用 agent 重命名（与侧栏 AgentContextMenu 同源，改名同步运行时标题）；
-									// 历史/未启动会话用 record 拼侧栏同构的 SessionSummary 走统一重命名弹框。
-									if (currentSessionIsLive && activeAgent) {
-										rename.openAgentRename(activeAgent);
-										return;
-									}
-									rename.openSessionRename(currentSessionRecord.projectId, {
-										id: currentSessionRecord.id,
-										filePath: currentSessionRecord.filePath ?? "",
-										name: currentSessionRecord.title,
-										preview: currentSessionRecord.preview,
-										updatedAt: currentSessionRecord.updatedAt,
-										messageCount: currentSessionRecord.messageCount,
-										backend: currentSessionRecord.backend,
-										forked: currentSessionRecord.forked,
-									});
-								},
-				}
-			: undefined;
+						rename.openSessionRename(record.projectId, {
+							id: record.id,
+							filePath: record.filePath ?? "",
+							name: record.title,
+							preview: record.preview,
+							updatedAt: record.updatedAt,
+							messageCount: record.messageCount,
+							backend: record.backend,
+							forked: record.forked,
+						});
+					}
+				: undefined,
+		};
+	};
+	// ⋯ 菜单（当前会话）与 Tab 右键菜单（被右键的 Tab）共用同一工厂，闸门语义一致。
+	const tabsSessionActions = currentSessionId ? buildTabsSessionActions(currentSessionId) : undefined;
 
 	useEffect(() => {
 		if (settings.navigationMode === "simple" && workspaceChrome.previewSessionTabId) workspaceChrome.promotePreview(workspaceChrome.previewSessionTabId);
@@ -3811,6 +3811,7 @@ export function App() {
 			{...sessionTabsProps}
 			simple={simpleMode}
 			sessionActions={tabsSessionActions}
+			contextSessionActions={buildTabsSessionActions}
 			toolActions={sessionToolActions}
 			editorTabs={simpleMode ? [] : workbenchEditorTabs}
 			onSelectEditorTab={(tabId) => {
