@@ -101,15 +101,16 @@ src/
 1. **必过门禁**：合并前 `npm run typecheck` + 改动涉及的针对性测试全绿，不许「先合再修」。
 2. **何时必须写测试**：修 bug 先写复现测试（红）再修到绿，回归测试永久保留；新增主进程业务逻辑、数据转换/解析/状态机逻辑必须有单测；交互状态流转的 hook 应有测试，纯 UI 布局可不强求。
 3. **测试写法**：测行为不测实现（从公开接口/IPC 边界断言）；不依赖执行顺序、真实网络、真实 pi 进程；一个测试验证一件事，命名即意图。
-4. **加载生产 TS 模块用现成 helper，禁止手写 vm 加载器**：完整依赖图用 `tests/helpers/loadTsCommonJs.mjs`；自定义 sandbox 全局用 `tests/helpers/createTsSandbox.mjs`。两者的相对 import 按源文件目录解析——手写沙箱把 specifier 丢给 `require(specifier)` 会以 `tests/` 为基准，生产代码新增本地 import 就整片 MODULE_NOT_FOUND（2026-09 连踩三次）。
-5. **禁止**：放宽断言、注释掉失败测试、改成恒真。
+4. **加载生产 TS 模块用现成 helper，禁止手写 vm 加载器**：完整依赖图用 `tests/helpers/loadTsCommonJs.mjs`；自定义 sandbox 全局用 `tests/helpers/createTsSandbox.mjs`。两者的相对 import 按源文件目录解析——手写沙箱把 specifier 丢给 `require(specifier)` 会以 `tests/` 为基准，生产代码新增本地 import 就整片 MODULE_NOT_FOUND（2026-09 连踩三次）。沙箱不注入 Node 全局（`setTimeout`/`clearTimeout` 等），被 vm 加载的生产模块用定时器时必须显式 `import { setTimeout } from "node:timers"`，否则测试内 ReferenceError。
+5. **红名单归属判定**：全量测试出现失败时，先用 `git worktree add` 在改动前基线 commit 复跑同一批测试文件——基线也红的是上游/并行改动，不顺手修也不算进自己的回归；只修自己引入的（2027-02 全量核对验证）。
+6. **禁止**：放宽断言、注释掉失败测试、改成恒真。
 
 ## 安全约束
 
 1. **IPC 最小权限**：preload 只暴露页面需要的 API，禁止 `ipcRenderer` 透传。
 2. **输入校验在边界**：IPC handler 第一行职责是校验入参（类型/路径合法性/枚举范围）；渲染层数据一律不可信。
 3. **路径安全**：文件读写限制在项目目录或应用数据目录内；拼接前规范化 + 逃逸检查，禁止直接拼用户输入。
-4. **进程调用**：spawn/exec 参数必须数组形式，禁止字符串插值拼 shell；子进程环境变量经 `sanitizePiChildEnv` 类函数清洗。
+4. **进程调用**：spawn/exec 参数必须数组形式，禁止字符串插值拼 shell；子进程环境变量经 `sanitizePiChildEnv` 类函数清洗；所有 spawn（含 fire-and-forget 的 `open`/`taskkill`/安装器）必须挂 `error` 监听或等价兜底——未处理的 `error` 事件会直接崩主进程；可能长时间不返回的外部命令（如 `reg query /s`）必须带超时 kill（2027-02 三处兜底修复）。
 5. **Webview**：禁止加载 `file://` 以外任意本地内容；`allowpopups`/node integration 保持最小化，新增 webview 属性需评审。
 6. **密钥与令牌**：Auth 配置只经 `config/` 模块读写；日志/错误上报/遥测禁止输出 token/key。
 7. **依赖引入**：新增依赖需说明理由，优先用已有能力，禁止为小功能引重型库。
@@ -205,5 +206,6 @@ src/
 ### 长期重构纪律
 
 - 大重构先写对照计划（能力 parity 表 + 合并门禁），文档放 `docs/` 并注明状态；落地后收口（更新状态行或删除），不留悬空计划文档。
+- 域迁移的固定门禁（App.tsx/AgentManager/index.ts 拆分验证过，方法详见 skill `pideck-large-file-domain-migration`）：源码整块迁出 + 原文件留薄包装或依赖注入，行为零变化，不顺手改语义；每步迁完 `grep -rl "旧文件路径" tests/` 找出 readFileSync 源码契约测试同步改读新模块（含断言里的旧标识符前缀，如 `feishuBridge` → `deps.feishuBridgeRef.current`）；跨文件共享的可变单例用 `{ current }` ref 槽位，不复制第二份状态；目标文件行数单调下降才算一个 wave 完成。
 - 禁止无对照表的长期分叉分支；main 的用户可感知改动当周回填到进行中重构分支。
 - 重构期间禁止 `-X theirs`/`-X ours` 静默吞掉对方改动；每个冲突都要确认能力归属。
