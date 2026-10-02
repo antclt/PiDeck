@@ -264,6 +264,18 @@ function validateOAuth(oauth: unknown): string | null {
 	if (oauth.clientName !== undefined && (typeof oauth.clientName !== "string" || !oauth.clientName.trim())) {
 		return "oauth.clientName must be a non-empty string";
 	}
+	if (oauth.authServerMetadataUrl !== undefined) {
+		if (typeof oauth.authServerMetadataUrl !== "string") return "oauth.authServerMetadataUrl must be a string";
+		let metadataUrl: URL;
+		try {
+			metadataUrl = new URL(oauth.authServerMetadataUrl);
+		} catch {
+			return "oauth.authServerMetadataUrl must be an https URL, or http on localhost, 127.0.0.1, or [::1]";
+		}
+		if (metadataUrl.protocol !== "https:" && !LOOPBACK_HOSTS.has(metadataUrl.hostname)) {
+			return "oauth.authServerMetadataUrl must be an https URL, or http on localhost, 127.0.0.1, or [::1]";
+		}
+	}
 	return null;
 }
 

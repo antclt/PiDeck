@@ -64,6 +64,13 @@ const TRANSPORT_OPTIONS = ["sse", "websocket", "websocket-cached", "auto"].map((
 /** steering / follow-up 消息发送模式（pi 文档："all" 一次全部发送，"one-at-a-time" 逐条，默认 one-at-a-time）。 */
 const SEND_MODE_OPTIONS = ["all", "one-at-a-time"].map((v) => ({ value: v, label: v }));
 
+/** pi 1.0 起 quietStartup 是 boolean | "header" 三态（"header" 保留版本横幅、隐藏其余启动输出）。 */
+const QUIET_STARTUP_OPTIONS: Array<{ value: string; labelKey: "config.general.quietStartup.off" | "config.general.quietStartup.true" | "config.general.quietStartup.header" }> = [
+	{ value: "false", labelKey: "config.general.quietStartup.off" },
+	{ value: "true", labelKey: "config.general.quietStartup.true" },
+	{ value: "header", labelKey: "config.general.quietStartup.header" },
+];
+
 /** 项目信任兜底策略（pi 文档：ask/always/never，仅全局设置生效；RPC 模式不弹信任询问，靠此值决定是否加载项目 .pi 资源）。 */
 const PROJECT_TRUST_OPTIONS = ["ask", "always", "never"].map((v) => ({ value: v, label: v }));
 
@@ -337,9 +344,20 @@ export function SettingsTab(props: {
 					</ClearableSettingsInput>
 				</SettingRow>
 
-				{/* 布尔开关行：hideThinkingBlock / quietStartup，直接写 true/false */}
+				{/* 布尔开关行：hideThinkingBlock 直接写 true/false。 */}
 				<SettingSwitchRow title={configLabel("hideThinkingBlock")} description={t("config.general.hideThinkingBlockHint")} checked={data.hideThinkingBlock === true} onChange={(checked) => props.onChange({ ...data, hideThinkingBlock: checked })} />
-				<SettingSwitchRow title={configLabel("quietStartup")} description={t("config.general.quietStartupHint")} checked={data.quietStartup === true} onChange={(checked) => props.onChange({ ...data, quietStartup: checked })} />
+				{/* quietStartup 是三态（pi 1.0 新增 "header"）：布尔开关会把 "header" 覆盖成
+				    true/false 造成数据丢失，必须用下拉表达完整枚举。 */}
+				<SettingRow title={<span>{configLabel("quietStartup")}</span>} description={t("config.general.quietStartupHint")} alignEnd={false}>
+					<ClearableSettingsInput empty={data.quietStartup !== true && data.quietStartup !== "header"} onClear={() => props.onChange({ ...data, quietStartup: false })}>
+						<ConfigSelect
+							value={data.quietStartup === true ? "true" : data.quietStartup === "header" ? "header" : "false"}
+							options={QUIET_STARTUP_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+							onChange={(v) => props.onChange({ ...data, quietStartup: v === "true" ? true : v === "header" ? "header" : false })}
+							placeholder="false"
+						/>
+					</ClearableSettingsInput>
+				</SettingRow>
 
 				{/* steeringMode / followUpMode：steering 与 follow-up 消息的发送模式，
 				    all 一次全部发送，one-at-a-time 逐条（pi 默认），RPC 场景下影响 API 调用方式 */}

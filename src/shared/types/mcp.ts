@@ -36,6 +36,11 @@ export type McpOAuth = {
 	scope?: string;
 	/** 动态客户端注册时发送的 client_name（默认 "pi"）；改名需先登出再注册。 */
 	clientName?: string;
+	/**
+	 * 授权服务器元数据文档地址（pi 1.0）：服务器的 OAuth 发现宣告错误或缺失时，
+	 * 用它替代自动发现。必须是 https（或环回 http）。
+	 */
+	authServerMetadataUrl?: string;
 	[key: string]: unknown;
 };
 

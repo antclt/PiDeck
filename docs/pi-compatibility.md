@@ -6,11 +6,29 @@
 
 ## 当前基线
 
-- 最近核对版本：`pi 0.99.2`（2026-09-30 发布；依据：正式 tag 发布说明、`v0.99.1...v0.99.2` 完整文件差异、本机 `package.json` 与相关 docs/dist；未运行真实供应商 OAuth）
+- 最近核对版本：`pi 1.0.0`（2026-10-01 发布；依据：本机安装包 CHANGELOG + docs + dist 源码核对，见下方 1.0.0 矩阵；未运行真实供应商 OAuth）
 - PiDeck 通信方式：`pi --mode rpc`，stdio JSON-RPC
 - 本记录范围：Pi 后端（`src/main/pi/`）以及 PiDeck 对 Pi 配置/事件的适配
 - 不包含：DSH 的 `pwsh_persistent`、Electron 自带终端、PiDeck 自己的应用更新器
 - 当前原则：工具选择由用户决定，PiDeck 的图形编辑器写 pi 原生 `settings.json`，解析与执行仍归 pi；不自动安装 PowerShell 7，不向 Pi 传硬编码 `--tools` 白名单。
+
+## 1.0.0 审计矩阵（本机 dist 源码逐条核对）
+
+结论：**资源管理与 defaultTools 合并语义完全未变，0.99.2 适配全部直接适用**；变化集中在 MCP OAuth（凭据按 name+URL、`authServerMetadataUrl`、`iss` 校验、scope 保留）与 TUI。本轮已修两处 + 一处文案。
+
+| 上游变化（CHANGELOG + 源码核实） | PiDeck 处理 | 状态 | 代码/验证 | 移除条件 |
+|---|---|---|---|---|
+| `settings.json` 资源过滤：`RESOURCE_TYPES`/`isEnabledByOverrides`/`applyPackageFilter`/`applyPackageDeltaFilter`/builtin 处理逐行一致（`package-manager.js`） | A1–A5 原生规则层/迁移/白名单移除全部直接适用 | **已核对无变化** | 源码比对 | — |
+| `defaultTools` 合并：`mergeDefaultTools`/`resolveDefaultTools` 与 0.99.2 逐行一致（`settings-manager.js`） | T1 编码回验继续有效 | **已核对无变化** | 源码比对 | — |
+| MCP schema：名称正则/exposure 四值 + 别名/项目层禁 `auth`/`enabled` 语义不变；**新增 `oauth.authServerMetadataUrl`**（https 或环回 http，替代 OAuth 自动发现） | 类型 + 校验 + 表单字段（高级区） | 已适配（本轮） | `types/mcp.ts`、`mcpConfig.validateOAuth`、`McpTab`、`tests/mcpConfig.test.mjs` | 无 |
+| **OAuth 凭据改为按服务器名 + URL 分别存储**（`McpOAuthCredentialStore.forServer(name, url)`）；按 URL 存的旧凭据自动迁移给第一个使用它的服务器；`credentials.remove(name, url)` | 登出确认文案更新（旧文案称同 URL 全部失效，已不准确） | 已适配（本轮） | `McpTab` 登出确认、`rendererCopy.*.ts` | 无 |
+| MCP OAuth 安全加固：RFC 9207 `iss` 校验、空 `scope` 容忍、`insufficient_scope` 追加登录保留已授 scope、登录 URL 超链接修复 | pi 运行时行为，PiDeck 不经手令牌交换 | 无需改动 | — | — |
+| `pi mcp list/login/logout` 仍不接受 `-l`（帮助文本与命令分发核实：`-l` 只属于 add/remove）；登录输出格式不变 | M2 的作用域假设与 URL 逐行解析继续有效 | **已核对无变化** | `extensions/mcp/cli.js` 源码比对 | — |
+| RPC `get_commands` 的 `sourceInfo`（含 `builtin:mcp` 合成路径）不变 | M3 第三方接管提醒继续有效 | **已核对无变化** | `modes/rpc/rpc-mode.js` 源码比对 | — |
+| **`quietStartup` 新增 `"header"` 三态**（保留版本横幅、隐藏模型范围行与资源列表） | 设置页布尔开关会把 `"header"` 覆盖成 true/false——已改三态下拉并保留原值 | **已修复数据丢失缺陷**（本轮） | `SettingsTab.tsx`、`tests/settingsQuietStartup.test.mjs` | 无 |
+| codemode 描述瘦身 ~40%（`models.generateImages()`、错误恢复提示、`"name" in tools` 探测） | pi 运行时行为；PiDeck 的 codemode 预算提示文案仍准确 | 无需改动 | — | — |
+| `/login` 顶层提供 Radius 登录并可写入 `auth:{provider:"radius"}` 的 MCP 配置 | PiDeck 已按 `auth.provider` 展示「供应商登录」并隐藏 MCP OAuth 按钮 | 无需改动 | `McpResourceViews.usesProviderAuth` | — |
+| TUI 默认全屏（`tuiMode`）、`--provider` 缺 `--model` 报错、主题/内存/补全等修复 | PiDeck 走 RPC 不受 TUI 影响；PiModelProber 始终同时传 `--provider --model` | 无需改动 | `PiModelProber.tsx` 核实 | — |
 
 ## 0.99.2 增量核对
 

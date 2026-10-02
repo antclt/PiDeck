@@ -147,6 +147,13 @@ test("HTTP probe treats 4xx as reachable config and 5xx as failure", async () =>
 	assert.equal(invalid.ok, false);
 });
 
+test("pi 1.0 schema validation accepts oauth.authServerMetadataUrl (https or loopback http)", () => {
+	assert.equal(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { authServerMetadataUrl: "https://auth.example.com/.well-known/oauth-authorization-server" } }), null);
+	assert.equal(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { authServerMetadataUrl: "http://127.0.0.1:9000/.well-known/oauth-authorization-server" } }), null);
+	assert.match(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { authServerMetadataUrl: "http://auth.example.com/metadata" } }), /authServerMetadataUrl/);
+	assert.match(validateMcpServerValue("docs", { url: "https://x/mcp", oauth: { authServerMetadataUrl: "not a url" } }), /authServerMetadataUrl/);
+});
+
 test("pi 0.99.2 schema validation rejects socket, sse, bad exposure, bad oauth, bad auth", () => {
 	assert.match(validateMcpServerValue("docs", { socket: "/tmp/x.sock" }), /needs either/);
 	assert.match(validateMcpServerValue("docs", { url: "https://x/sse", type: "sse" }), /SSE/);
