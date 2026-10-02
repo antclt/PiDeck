@@ -1,3 +1,4 @@
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
@@ -81,7 +82,7 @@ function loadPiProcess(spawnCalls) {
 				return { appendBuiltInExtensionArgs: (args) => [...args] };
 			}
 			if (id === "../extensions/extensionVersionGate") {
-				return require("../src/main/extensions/extensionVersionGate.ts");
+				return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
 			}
 			// sharedLogger 未注册时 getAppLogger 返回 null，PiProcess 埋点静默跳过
 			if (id === "../logging/sharedLogger") {

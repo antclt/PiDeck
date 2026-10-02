@@ -1,3 +1,4 @@
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -119,7 +120,7 @@ function loadPiProcess(versionResult = { output: "0.82.1\n" }, options = { parke
 				return { appendBuiltInExtensionArgs: (args) => args };
 			}
 			if (id === "../extensions/extensionVersionGate") {
-				return require("../src/main/extensions/extensionVersionGate.ts");
+				return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
 			}
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => undefined };
 			if (id === "../sessions/sessionProxyPolicy") {

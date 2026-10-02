@@ -17,7 +17,6 @@ import type {
 	I18nParams,
 	ImageContent,
 	Project,
-	RewindCheckpointHealth,
 	RewindCheckpointPage,
 	RewindCheckpointPageParams,
 	RewindRestoreResult,
@@ -62,26 +61,17 @@ import { SessionHistoryReader, boundTurnWindowStart } from "./SessionHistoryRead
 import { scanJsonlLines } from "../sessions/jsonlLineStream";
 import { estimateMessagesPayloadBytes } from "./messagePayloadSize";
 import { StoppedMessageIdentityCache } from "./stoppedMessageIdentity";
-import {
-	currentIndexTree,
-	createCheckpoint,
-	diffCheckpoints,
-	loadAllCheckpoints,
-	loadCheckpointFromRef,
-	MIN_CHECKPOINT_INTERVAL_MS,
-	MUTATING_TOOLS,
-	pruneCheckpoints,
-	pruneOldSessions,
-	PRUNE_CURRENT_MIN_INTERVAL_MS,
-	PRUNE_OLD_SESSIONS_MIN_INTERVAL_MS,
-	restoreCheckpoint as applyCheckpointRestore,
-	toCheckpointSummary,
-} from "../rewind/index.ts";
+import { currentIndexTree, diffCheckpoints, loadAllCheckpoints, loadCheckpointFromRef, MUTATING_TOOLS, restoreCheckpoint as applyCheckpointRestore, toCheckpointSummary } from "../rewind/index.ts";
 import { AgentMessageProjector, buildActiveBranchEntryIds as buildActiveBranchEntryIdsForDisplay } from "./AgentMessageProjector";
+import { RewindCheckpointCoordinator } from "./RewindCheckpointCoordinator";
 import { LatestByKeyEmitter } from "./LatestByKeyEmitter";
 import { resolveNotificationSessionId } from "./agentUtils";
 import { isRoleMessageRole } from "./sessionEntryIds";
 import { createStreamGateState, isStreamGateSealed, noteAbortSettled, openStreamGateForNewRun, sealStreamGate, type StreamGateState } from "./streamGate";
+import { RpcLiveLogTap } from "./rpcLiveLogTap";
+import { MessagePerfTracker } from "./messagePerfTracker";
+import { AbortStreamGateController } from "./abortStreamGateController";
+import { MessageEmitBatcher } from "./messageEmitBatcher";
 import { createCacheHitStatsReader, type CacheHitStats, type CacheHitStatsReader } from "./cacheHitStats";
 import {
 	stripAnsi,
@@ -105,7 +95,7 @@ import type { SecurityStore } from "../security/SecurityStore";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { RpcLogger } from "../logging/RpcLogger";
 import { buildModelTraceLogEntry } from "../logging/ModelTrace";
-import type { RpcLogBatch, RpcLogEntry } from "../../shared/types/rpcLog";
+import type { RpcLogEntry } from "../../shared/types/rpcLog";
 import type { AppLogger } from "../logging/AppLogger";
 import { toWindowsHostPath, toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
 import { isContextOverflowError } from "../../shared/contextOverflow";
@@ -212,11 +202,14 @@ export class AgentManager {
 	private readonly sessionFileEditor: SessionFileEditor;
 	private readonly sessionHistoryReader: SessionHistoryReader;
 	private readonly messageProjector: AgentMessageProjector;
+	/**
+	 * agents:message 的节流批处理/增量标记/显示窗口推进收口在 MessageEmitBatcher；
+	 * 消息数组本体与窗口数学入口（computeDisplayWindowStart）仍在此。
+	 * public：行为测试注入窗口起点/读取待发滑出（agentManagerRuntimeCache H2/M2）。
+	 */
+	public readonly messageEmit: MessageEmitBatcher;
 	/** catalog 改写发生在 stop 之后：保留受限身份摘要，而不是保留整个已停 runtime。 */
 	private readonly stoppedMessageIdentities = new StoppedMessageIdentityCache();
-	/** 流式消息 emit 节流状态。 */
-	private readonly messageFlushTimers = new Map<string, NodeJS.Timeout>();
-	private readonly pendingMessageAgents = new Set<string>();
 	/**
 	 * 压缩成功后的在途重载集合（单飞锁）。
 	 * compaction_end 可能连续到达（自动重试/多段压缩/压缩与用户发消息几乎同时完成），
@@ -224,30 +217,11 @@ export class AgentManager {
 	 * 会把内存峰值翻倍（#213）。同一 agent 压缩重载只保留一次在途，其后到达的合并到本次。
 	 */
 	private readonly compactionReloadInFlight = new Set<string>();
-	/** 增量消息 flush 的脏下标：自上次 flush 以来最早的变化位置（取多次标记的最小值）。
-	 *  只在流式 upsert/append 高频路径显式标记；编辑/删除/截断/重载不标记 → flush 回退全量。 */
-	private readonly messageDirtyFromByAgent = new Map<string, number>();
-	/**
-	 * 激活显示窗口起点（2026-08 激活分页）：loadMessages 后以「尾部 N 轮」算出，
-	 * flush 只下发窗口段；窗口前历史由渲染层走 disk 轮次分页 prepend。
-	 */
-	private readonly displayWindowStartByAgent = new Map<string, number>();
-	/**
-	 * displayWindowStartByAgent 最近一次重算时的数组长度。
-	 * 流式期 assistant/tool 更新不改变轮次边界，flush 若长度未变可跳过 findTurnPageStart 的
-	 * O(n) map/scan；只有 append/截断/重载等长度变化才重算，降低 50ms flush 的分配频率。
-	 */
-	private readonly displayWindowComputedLengthByAgent = new Map<string, number>();
 	/**
 	 * 运行期消息缓存头部在会话文件消息下标空间中的偏移（entryId 缺失时的数值游标换算）。
 	 * loadMessages / trimRuntimeCache 维护；-1 表示未知（匿名会话等无文件场景）。
 	 */
 	private readonly messageHeadOffsetByAgent = new Map<string, number>();
-	/**
-	 * trim 窗口右移滑出显示区的旧窗口头部轮次（待下次全量 flush 下发，渲染层并入历史前缀）。
-	 * 防止「翻历史 → 新轮 settle → 窗口前移」时锚点轮从视口消失且无法翻回。
-	 */
-	private readonly pendingSlideOutByAgent = new Map<string, ChatMessage[]>();
 	/** 会话文件版本（mtime:size）：随消息载荷下发，渲染层据此检测压缩改写并丢弃 disk 前缀。 */
 	private readonly sessionFileVersionByAgent = new Map<string, string>();
 	private readonly thinkingEmitter = new LatestByKeyEmitter<string, string>(100, (agentId, thinking) => this.emitThinkingNow(agentId, thinking));
@@ -272,7 +246,6 @@ export class AgentManager {
 	private readonly lastSentThinkingByAgent = new Map<string, string>();
 	private readonly thinkingPushCountByAgent = new Map<string, number>();
 	/** 流式 emit 合并窗口（毫秒）。50ms 兼顾流畅度与传输量，肉眼几乎无延迟。 */
-	private static readonly MESSAGE_FLUSH_INTERVAL_MS = 50;
 	/** 激活显示窗口轮数：renderer atom 常驻最近 9 轮，DOM 仍按 3 轮窗口渐进挂载；更早历史走轮次分页。 */
 	private static readonly DISPLAY_WINDOW_TURNS = 9;
 	/**
@@ -343,27 +316,8 @@ export class AgentManager {
 	private readonly stateListeners = new Set<(tabs: AgentTab[]) => void>();
 	/** 主进程内部观察所有 renderer 输出，用于增量桥接 session-addressed 事件。 */
 	private readonly outputListeners = new Set<(channel: string, payload: unknown) => void>();
-	/** 开启了 RPC 日志记录的 agent id 集合 */
-	private readonly rpcLoggingAgents = new Set<string>();
-	/**
-	 * 当前有渲染层日志面板在看的 agent id 集合（面板挂载/卸载时经 rpcLogsSetWatching 登记）。
-	 * 落盘与环形缓冲不受它影响（记录开着就一直写），只用于**广播闸门**：
-	 * 没有观看者时每条 RPC 日志仍按批结构化克隆发过去，重度会话里等于每秒 ~5MB 的
-	 * 无主 IPC，序列化在主进程做，表现为整个应用（含输入、流式）掉帧。
-	 */
-	private readonly rpcLogWatchingAgents = new Set<string>();
-	/**
-	 * 实时 RPC 日志广播缓冲：按 agent 聚合待发条目，节流刷出。
-	 * 流式阶段 RPC 事件可能非常高频，逐条 IPC 会把渲染进程打爆，必须批量推送。
-	 */
-	private readonly pendingLiveRpcLogs = new Map<string, RpcLogEntry[]>();
-	private liveRpcLogFlushTimer: NodeJS.Timeout | null = null;
-	/** 实时日志广播节流间隔：聚合 ~80ms 的条目一次性推送 */
-	private static readonly LIVE_RPC_LOG_FLUSH_MS = 80;
-	/** 单次广播批次的条数上限，防止单条 IPC 负载过大 */
-	private static readonly LIVE_RPC_LOG_MAX_BATCH = 100;
-	/** 聚合缓冲的条数上限，极端高频时丢弃最旧条目，防止内存失控 */
-	private static readonly LIVE_RPC_LOG_MAX_PENDING = 1000;
+	/** RPC 实时日志广播（记录/观看闸门 + 批量聚合推送）收口在 RpcLiveLogTap。 */
+	private readonly rpcLiveTap = new RpcLiveLogTap((channel, payload) => this.emit(channel, payload));
 	/** 正在执行手动压缩操作的 agent，用于区分手动压缩重启和异常崩溃 */
 	private readonly compactingAgents = new Set<string>();
 	/**
@@ -399,38 +353,19 @@ export class AgentManager {
 	 */
 	private readonly agentTurnActiveById = new Map<string, boolean>();
 	/**
-	 * rewind 自动打点的回合计数（agent_start 递增一次 = 一轮 run）。
-	 * pi 事件流没有 turnIndex 概念，用本地计数近似 pi-rewind 的 turn 语义。
+	 * rewind 自动打点（回合计数/节流打点/裁剪/健康状态）收口在 RewindCheckpointCoordinator；
+	 * rewindHostRoot 的 WSL 归一化与 listCheckpoints/restoreCheckpoint 等 RPC 入口仍在此。
 	 */
-	private readonly rewindTurnCounters = new Map<string, number>();
-	/**
-	 * 自动打点节流状态（per agent）：最小间隔 + 在途合并。
-	 * 每个文件类工具动作结束都请求打点，不节流时高频 bash 循环下中位间隔仅 6.3s
-	 * （2026-09-13 用户报告：两个会话并排施工把磁盘读满整机卡死）。与字节预算构成
-	 * 双重防线：预算限「单次多贵」，这里限「单位时间打几次」。
-	 */
-	private readonly rewindSchedules = new Map<
-		string,
-		{
-			/** 最近一次打点发起（成功开始创建）时刻 */
-			lastAt: number;
-			inFlight: boolean;
-			/** 在途/间隔期内的合并请求：当前快照完成后补拍一次最新状态 */
-			pending: boolean;
-			timer: NodeJS.Timeout | null;
-		}
-	>();
-	/**
-	 * checkpoint 裁剪节流（key = `${cwd}:${kind}`，kind = current | old）。
-	 * 2026-09-15 发现：pruneCheckpoints/pruneOldSessions 一直是死代码，本仓库
-	 * refs/pi-checkpoints 积累到 5627 条，`git log --all` 被 73% 的快照噪声占据。
-	 */
-	private readonly rewindPruneAt = new Map<string, number>();
-	/**
-	 * 自动打点健康状态（per 工作目录）：失败态上屏用。
-	 * 此前失败只写日志，用户以为有快照、真要回滚才发现全是空的。
-	 */
-	private readonly rewindHealthByRoot = new Map<string, RewindCheckpointHealth>();
+	private readonly rewindCheckpoints = new RewindCheckpointCoordinator({
+		getSessionInfo: (agentId) => {
+			const runtime = this.agents.get(agentId);
+			return runtime ? { cwd: runtime.tab.cwd, wslDistro: runtime.tab.wslDistro, sessionId: runtime.tab.sessionId } : undefined;
+		},
+		hostRoot: (cwd, distro) => this.rewindHostRoot(cwd, distro),
+		listAgentSessions: () => [...this.agents.values()].map((runtime) => ({ cwd: runtime.tab.cwd, wslDistro: runtime.tab.wslDistro, sessionId: runtime.tab.sessionId })),
+		logInfo: (message, meta) => void this.appLogger?.info("rewind", message, meta),
+		logWarn: (message, meta) => void this.appLogger?.warn("rewind", message, meta),
+	});
 	/** 用户主动停止的 agent，用于退出处理器中跳过自动重连 */
 	private readonly userInitiatedStop = new Set<string>();
 	/** 已尝试过自动重连的 agent（防止无限循环），重连成功后清除 */
@@ -449,31 +384,25 @@ export class AgentManager {
 	 */
 	private readonly recentlyAborted = new Set<string>();
 	/**
-	 * 每个 agent 的流式 generation 闸门。
-	 * abort 封印当前 generation；须等 abort settled（或超时兜底）后，
-	 * 再由 agent_start 推进 generation 放行，防止残留 thinking/text delta 串台。
+	 * abort 流闸与升级（封印/兜底定时器/abort_bash 升级）收口在 AbortStreamGateController。
+	 * recentlyAborted/thinkingEmitter/messageFlush 的跨域编排仍在 clearStreamGate。
 	 */
-	private readonly streamGates = new Map<string, StreamGateState>();
+	private readonly abortGate = new AbortStreamGateController({
+		getRpcClient: (agentId) => this.agents.get(agentId)?.process.client,
+		logInfo: (message, meta) => void this.appLogger?.info("agent", message, meta),
+		logWarn: (message, meta) => void this.appLogger?.warn("agent", message, meta),
+		emitAbortSlowNotice: (agentId) =>
+			this.emit(ipcChannels.agentsNotice, {
+				agentId,
+				message: "停止响应较慢，可尝试重启会话",
+				i18nKey: "app.abortSlow",
+				kind: "warning",
+				duration: 6000,
+			}),
+	});
 
-	/**
-	 * 流式性能计时：以 sendPrompt 发出的请求时刻为起点（而非收到 message_start），
-	 * 首个 thinking/text delta 记 firstDeltaAt，正文首 delta 记 firstTextAt，
-	 * message_end/done/error 结算。用于计算首 token 延迟（TTFT）、总耗时与生成速度（TPS）。
-	 * pi 不暴露耗时字段，只能由本地事件时间戳推算。
-	 */
-	private readonly messagePerfByAgent = new Map<string, { startedAt: number; firstDeltaAt: number; firstTextAt: number }>();
-
-	/** sendPrompt 发出的请求时刻（毫秒），供首个 message_start 起表时优先使用（含排队时间）。 */
-	private readonly promptRequestedAtByAgent = new Map<string, number>();
-
-	/** 最近一次 assistant 回复的性能指标（结算后保留，供 getRuntimeState 合并展示）。 */
-	private readonly lastPerfByAgent = new Map<string, { ttftMs?: number; totalMs: number; tps?: number; at: number }>();
-	/** abort 后等待 agent_settled 的超时定时器；避免 pi 漏发 settled 导致永久封印。 */
-	private readonly abortSettledFallbackTimers = new Map<string, NodeJS.Timeout>();
-	/** abort settled 兜底超时：覆盖多数管道残留，同时不让“立刻重发”永久卡死。 */
-	private static readonly ABORT_SETTLED_FALLBACK_MS = 1500;
-	/** abort 升级验证窗口：abort_bash + 二次 abort 后仍 running 则提示用户。 */
-	private static readonly ABORT_ESCALATION_VERIFY_MS = 4000;
+	/** 流式性能计时（TTFT/总耗时/TPS，起点为请求发出时刻）收口在 MessagePerfTracker。 */
+	private readonly messagePerf = new MessagePerfTracker();
 	/**
 	 * 最近一次用户 abort 的时刻（毫秒）。退出处理器用它识别「终止窗口内的进程退出」：
 	 * pi 在处理 abort 时可能自行崩溃（上游 #2716 族：abort 期间 unhandled rejection
@@ -483,13 +412,6 @@ export class AgentManager {
 	private readonly lastAbortAtByAgent = new Map<string, number>();
 	/** 终止窗口判定时长：覆盖 abort RPC ack（pi 等 idle 才响应）+ settled + 收尾清理。 */
 	private static readonly ABORT_EXIT_REATTACH_WINDOW_MS = 15_000;
-	/**
-	 * 进行中的 abort 升级上下文。pi 的 abort RPC 语义是「中止并等 idle 才响应」，
-	 * ack 迟到是正常路径；升级（补 abort_bash / 二次 abort）必须感知 ack 状态，
-	 * 否则 WSL 慢链路下 1.5s 兜底会对正在收尾的 pi 补刀（老版本 pi 有崩溃史）。
-	 */
-	private readonly pendingAbortEscalations = new Map<string, { hadActiveTool: boolean; acked: boolean; failed: boolean }>();
-
 	/**
 	 * 待处理的 Extension UI 请求。key 为 agentId，value 为 Map<requestId, { method, title, raisedAt }>。
 	 * 用于在 abort 时及时发送 cancellation 防止 pi 等待超时；raisedAt 记录提问弹起时刻，
@@ -598,6 +520,14 @@ export class AgentManager {
 		 */
 		private readonly resolveModelInCatalog?: (provider: string, modelId: string) => Promise<boolean>,
 	) {
+		this.messageEmit = new MessageEmitBatcher({
+			getMessages: (agentId) => this.messages.get(agentId) ?? [],
+			computeDisplayWindowStart: (messages) => this.computeDisplayWindowStart(messages),
+			computeWindowStartFilePos: (agentId, messages, windowStart) => this.computeWindowStartFilePos(agentId, messages, windowStart),
+			sessionFileVersion: (agentId) => this.sessionFileVersionByAgent.get(agentId),
+			emitMessageFlush: (payload) => this.emit(ipcChannels.agentsMessage, payload),
+			emitStreamingStatePatch: (agentId) => this.emitStreamingStatePatch(agentId),
+		});
 		this.messageProjector = new AgentMessageProjector({
 			translate: this.translate,
 			isAskAborted: (agentId) => this.abortedDuringAsk.has(agentId),
@@ -719,7 +649,7 @@ export class AgentManager {
 	 */
 	private handleModelTrace(agentId: string, trace: ModelTraceInput): void {
 		try {
-			if (!this.rpcLoggingAgents.has(agentId)) return;
+			if (!this.rpcLiveTap.isLogging(agentId)) return;
 			const entry = buildModelTraceLogEntry(agentId, trace);
 			// 请求体只在 request 快照里；response 只有状态码与耗时（紧凑条目已含）
 			if (trace.kind === "request") {
@@ -731,7 +661,7 @@ export class AgentManager {
 					});
 				});
 			}
-			this.enqueueLiveRpcLog(this.rpcLogger?.push(entry) ?? entry);
+			this.rpcLiveTap.enqueue(this.rpcLogger?.push(entry) ?? entry);
 		} catch (error) {
 			// 日志功能任何故障都不影响会话
 			void this.appLogger?.warn("agent", "model-trace handler failed", {
@@ -1107,7 +1037,7 @@ export class AgentManager {
 		windowStartFilePos?: number;
 	} {
 		const all = this.messages.get(agentId) ?? [];
-		const windowStart = Math.min(Math.max(0, this.displayWindowStartByAgent.get(agentId) ?? 0), all.length);
+		const windowStart = Math.min(Math.max(0, this.messageEmit.windowStart(agentId)), all.length);
 		const fileVersion = this.sessionFileVersionByAgent.get(agentId);
 		// 窗口前若存在系统摘要卡片（压缩/分支），prepend 回来——压缩卡片插在数组最前，
 		// 不 prepend 会被窗口 slice 切掉（与 buildMessageFlushPayload 全量分支同一约定）。
@@ -1462,7 +1392,7 @@ export class AgentManager {
 		// 显示窗口 = 尾部 9 轮（DOM 3 / atom 9 / main 12 模型；轮次起点对齐 user 消息，
 		// 与 disk 轮次分页同一约定；单轮再大也整轮显示，折叠完整性优先），
 		// 但叠了条目预算：极端会话下窗口缩轮也不切半轮（#213）。
-		this.displayWindowStartByAgent.set(agentId, this.computeDisplayWindowStart(nextMessages));
+		this.messageEmit.setWindowStart(agentId, this.computeDisplayWindowStart(nextMessages));
 		// 文件版本随本次加载快照：压缩/外部改写会改变 mtime:size，渲染层据此丢弃 disk 前缀
 		if (runtime.tab.sessionPath) {
 			try {
@@ -1891,7 +1821,7 @@ export class AgentManager {
 			const rpcStartedAt = Date.now();
 			// 首字计时起点：RPC 请求发出时刻（而非收到 message_start），把 pi 内部排队与
 			// 模型服务端等待计入用户体感的首 token 延迟，避免统计系统性偏短。
-			this.promptRequestedAtByAgent.set(input.agentId, rpcStartedAt);
+			this.messagePerf.notePromptRequested(input.agentId, rpcStartedAt);
 			void this.appLogger?.info("session-perf", "Prompt RPC request started", {
 				agentId: input.agentId,
 				requestId: input.requestId,
@@ -2131,7 +2061,7 @@ export class AgentManager {
 		// abort 升级上下文：记录 abort 时是否有工具在执行 + RPC ack 状态。
 		// pi 的 abort RPC 要等会话 idle 才响应，ack 迟到 ≠ 卡死；升级逻辑据此避免补刀。
 		const hadActiveTool = Boolean(this.toolExecutingByAgent.get(agentId) || (this.activeToolCallsByAgent.get(agentId)?.size ?? 0) > 0);
-		this.pendingAbortEscalations.set(agentId, { hadActiveTool, acked: false, failed: false });
+		this.abortGate.beginEscalation(agentId, hadActiveTool);
 
 		// pi 的交互 Esc 语义（pi docs/rpc-commands.md「clear_queue」段）：先 clear_queue 再 abort。
 		// abort 只停当前 run，队列里剩余的 steering/followUp 消息会被继续投递并另起
@@ -2148,12 +2078,10 @@ export class AgentManager {
 		runtime.process.client
 			.request({ type: "abort" }, 10_000)
 			.then(() => {
-				const escalation = this.pendingAbortEscalations.get(agentId);
-				if (escalation) escalation.acked = true;
+				this.abortGate.markAbortAcked(agentId);
 			})
 			.catch((error) => {
-				const escalation = this.pendingAbortEscalations.get(agentId);
-				if (escalation) escalation.failed = true;
+				this.abortGate.markAbortFailed(agentId);
 				// abort 超时或失败不影响前端状态切换，但必须留痕：abort 失败后
 				// pi 可能仍在流式输出而 UI 已显示停止，是排查状态错位的关键线索。
 				void this.appLogger?.warn("agent", "Abort RPC failed", {
@@ -2619,7 +2547,7 @@ export class AgentManager {
 		 */
 		const cacheHitPercent = clampPercent(directCacheHitPercent ?? fileHitStats.latest);
 		const cacheHitAveragePercent = clampPercent(fileHitStats.average);
-		const perf = this.lastPerfByAgent.get(agentId);
+		const perf = this.messagePerf.getLast(agentId);
 		return {
 			modelName: normalizedRuntimeName(model?.name) ?? normalizedRuntimeName(model?.id),
 			provider: normalizedRuntimeName(model?.provider),
@@ -3286,11 +3214,10 @@ export class AgentManager {
 		this.compactionStartedAt.delete(agentId);
 		this.agentTurnActiveById.delete(agentId);
 		this.autoRestartAttempted.delete(agentId);
-		this.messagePerfByAgent.delete(agentId);
-		this.lastPerfByAgent.delete(agentId);
+		this.messagePerf.clearAgent(agentId);
 		this.notifiedAskAgents.delete(agentId);
 		this.abortedDuringAsk.delete(agentId);
-		this.pendingAbortEscalations.delete(agentId);
+		this.abortGate.clearEscalation(agentId);
 		this.lastAbortAtByAgent.delete(agentId);
 		this.pendingUIRequests.delete(agentId);
 		this.pendingAutomaticTitles.delete(agentId);
@@ -3302,12 +3229,8 @@ export class AgentManager {
 		// 数值游标与回合计数随生命周期清理（2026 内存排查补漏）：
 		// agentId 每次 spawn 都是 randomUUID，漏删 = 每次 stop/restart 永久留一个键（慢泄漏）。
 		this.messageHeadOffsetByAgent.delete(agentId);
-		this.rewindTurnCounters.delete(agentId);
-		// 打点节流状态随生命周期清理；pending 补拍自然终止（runRewindCheckpoint
-		// 运行时会重新校验 agent 存活），timer 未触发也要清掉防悬挂回调。
-		const rewindSchedule = this.rewindSchedules.get(agentId);
-		if (rewindSchedule?.timer) clearTimeout(rewindSchedule.timer);
-		this.rewindSchedules.delete(agentId);
+		// rewind 打点域（回合计数/节流状态/悬挂 timer）统一清理
+		this.rewindCheckpoints.clearAgent(agentId);
 		// 工具完整结果缓存是运行期性能优化（回退读文件等价），agent 停止时整体释放
 		this.toolFullTextByMessageId.clear();
 		this.toolFullTextBytes = 0;
@@ -3364,13 +3287,11 @@ export class AgentManager {
 		// 必须在这里注销，否则每重启一次就多留一条永不回收的记录（PR 评审 §2）。
 		this.unregisterBridgeSession(agentId);
 		this.messages.delete(agentId);
-		this.messageDirtyFromByAgent.delete(agentId);
 		this.activeToolCallsByAgent.delete(agentId);
 		this.toolExecutingByAgent.delete(agentId);
 		this.toolStateSequenceByAgent.delete(agentId);
-		this.pendingSlideOutByAgent.delete(agentId);
-		this.displayWindowStartByAgent.delete(agentId);
-		this.displayWindowComputedLengthByAgent.delete(agentId);
+		// 消息 flush 域（脏标记/窗口游标/待发滑出/节流定时器）统一清理
+		this.messageEmit.clearAll(agentId);
 		this.clearAgentState(agentId);
 		this.emitState();
 
@@ -3525,7 +3446,7 @@ export class AgentManager {
 		const filtered = all.filter((cp) => cp.timestamp < before);
 		// 附带自动打点健康状态：失败态渲染层显示警示条（此前失败完全静默，
 		// 用户以为有快照、真要回滚才发现列表是空的）。
-		const health = this.rewindHealthByRoot.get(root);
+		const health = this.rewindCheckpoints.healthForRoot(root);
 		// 未传 limit（如 rewind-to-message 需要全量最近检查点）时返回全部；
 		// 否则按 limit 截取一页，并据此判断是否还有更早的检查点。
 		if (params?.limit === undefined) {
@@ -3602,204 +3523,6 @@ export class AgentManager {
 		return pick(this.messages.get(agentId) ?? []);
 	}
 
-	/** agent_start 时推进回合计数，返回本轮 turnIndex（供自动打点用）。 */
-	private bumpRewindTurn(agentId: string): number {
-		const next = (this.rewindTurnCounters.get(agentId) ?? 0) + 1;
-		this.rewindTurnCounters.set(agentId, next);
-		return next;
-	}
-
-	/**
-	 * 文件类工具（write/edit/bash）执行结束后异步创建文件检查点（fire-and-forget）。
-	 * 打点放在 tool_execution_end：此时文件系统已静默，快照内容稳定，不会与进行中的
-	 * 写入竞争；恢复语义为「回到该工具执行完成后的状态」。失败不影响 agent 主链路
-	 * （纯旁路快照），记日志并更新健康状态供界面提示。
-	 *
-	 * 节流（MIN_CHECKPOINT_INTERVAL_MS + 在途合并）：
-	 * - 在途时有新请求 → 置 pending，当前快照完成后立即补拍一次（合并到最新状态）；
-	 * - 距上次打点不足间隔 → 挂 trailing 定时器到点补拍（间隔内的多次请求合并成一次）；
-	 * - before-restore 等关键快照不走此路径，不受节流影响。
-	 */
-	private scheduleRewindCheckpoint(agentId: string, toolName: string, turnIndex: number): void {
-		const runtime = this.agents.get(agentId);
-		const root = runtime?.tab.cwd;
-		const sessionId = runtime?.tab.sessionId;
-		if (!root || !sessionId) return;
-		const state = this.rewindSchedules.get(agentId) ?? { lastAt: 0, inFlight: false, pending: false, timer: null as NodeJS.Timeout | null };
-		this.rewindSchedules.set(agentId, state);
-
-		if (state.inFlight) {
-			state.pending = true;
-			return;
-		}
-		const elapsed = Date.now() - state.lastAt;
-		if (elapsed < MIN_CHECKPOINT_INTERVAL_MS) {
-			// 间隔内：已有 trailing 定时器就无需重复挂（到点拍的本来就是最新状态）。
-			if (state.timer) return;
-			state.timer = setTimeout(() => {
-				state.timer = null;
-				if (state.inFlight) {
-					state.pending = true;
-					return;
-				}
-				void this.runRewindCheckpoint(agentId, state, toolName, turnIndex);
-			}, MIN_CHECKPOINT_INTERVAL_MS - elapsed);
-			state.timer.unref?.();
-			return;
-		}
-		void this.runRewindCheckpoint(agentId, state, toolName, turnIndex);
-	}
-
-	/** 实际执行打点：成功/失败都更新健康状态；完成后处理 pending 合并补拍。 */
-	private async runRewindCheckpoint(agentId: string, state: { lastAt: number; inFlight: boolean; pending: boolean; timer: NodeJS.Timeout | null }, toolName: string, turnIndex: number): Promise<void> {
-		const runtime = this.agents.get(agentId);
-		const root = runtime ? this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro) : undefined;
-		const sessionId = runtime?.tab.sessionId;
-		// agent 已停止/换 runtime：丢弃补拍（节流 map 已随生命周期清理兜底）。
-		if (!root || !sessionId) return;
-		state.inFlight = true;
-		state.lastAt = Date.now();
-		try {
-			const result = await createCheckpoint({
-				root,
-				// id 拼进 git ref 名，必须是 isRewindCheckpointId 允许的安全字符。
-				id: `tool-${sessionId}-${turnIndex}-${Date.now()}`,
-				sessionId,
-				trigger: "tool",
-				turnIndex,
-				toolName,
-			});
-			this.recordRewindHealth(root, null);
-			// merge 冲突态降级快照：健康恢复但要留集，便于用户自查「为什么恢复后暂存区变了」。
-			if (result.indexTreeDegraded) {
-				this.appLogger?.warn("rewind", "checkpoint index tree degraded (unmerged index), recorded HEAD tree instead", {
-					agentId,
-					toolName,
-				});
-			}
-			// 被剔除的路径只在开发诊断时有用：有值记一条 debug 级摘要（不刷屏）。
-			if (result.droppedPaths) {
-				this.appLogger?.warn("rewind", "checkpoint added with dropped paths", {
-					agentId,
-					toolName,
-					dropped: result.droppedPaths.length,
-					sample: result.droppedPaths.slice(0, 5).join(", "),
-				});
-			}
-		} catch (error: unknown) {
-			this.recordRewindHealth(root, error);
-			// 错误串可能极长（git add 会把全部路径 + CRLF 警告写进一条消息，实测 9KB+），
-			// 截断后再进日志，防止失败风暴时日志膨胀（一天 2.4MB 的教训）。
-			const rawError = error instanceof Error ? error.message : String(error);
-			this.appLogger?.warn("rewind", "checkpoint creation failed", {
-				agentId,
-				toolName,
-				error: rawError.length > 500 ? `${rawError.slice(0, 500)}…(${rawError.length} chars)` : rawError,
-			});
-		} finally {
-			state.inFlight = false;
-			if (state.pending) {
-				state.pending = false;
-				if (this.agents.has(agentId)) {
-					void this.runRewindCheckpoint(agentId, state, toolName, turnIndex);
-				}
-			}
-		}
-	}
-
-	/**
-	 * 打点成功后裁剪当前会话 checkpoint（保留 DEFAULT_MAX_CHECKPOINTS 个）。
-	 * 节流：每仓库至少间隔 PRUNE_CURRENT_MIN_INTERVAL_MS——prune 要全量扫 refs，
-	 * 不必跟着每次打点跑；60s 一次足够把超限部分削掉。
-	 */
-	private maybePruneCurrentSessionCheckpoints(root: string, sessionId: string): void {
-		const now = Date.now();
-		const key = `${root}\u0000current`;
-		const last = this.rewindPruneAt.get(key) ?? 0;
-		if (now - last < PRUNE_CURRENT_MIN_INTERVAL_MS) return;
-		this.rewindPruneAt.set(key, now);
-		void pruneCheckpoints(root, sessionId)
-			.then((deleted) => {
-				if (deleted > 0) {
-					void this.appLogger?.info("rewind", "pruned checkpoints for session", {
-						root,
-						sessionId,
-						deleted,
-					});
-				}
-			})
-			.catch((error: unknown) => {
-				this.appLogger?.warn("rewind", "checkpoint prune failed", {
-					root,
-					sessionId,
-					error: error instanceof Error ? error.message : String(error),
-				});
-			});
-	}
-
-	/**
-	 * 会话首轮 run 时清理非活跃会话的 checkpoint（keepPerOldSession=0，设计默认）。
-	 * keep 集合 = 同仓库当前所有活跃 agent 的 sessionId，并发会话互不误删；
-	 * 首次触发会顺带消化历史积压（本仓库实测 5627 条 ref）。
-	 * 节流：每仓库至少间隔 PRUNE_OLD_SESSIONS_MIN_INTERVAL_MS。
-	 */
-	private maybePruneOldSessionCheckpoints(root: string, sessionId: string): void {
-		const now = Date.now();
-		const key = `${root}\u0000old`;
-		const last = this.rewindPruneAt.get(key) ?? 0;
-		if (now - last < PRUNE_OLD_SESSIONS_MIN_INTERVAL_MS) return;
-		this.rewindPruneAt.set(key, now);
-		const keep = this.activeSessionIdsForRoot(root);
-		void pruneOldSessions(root, keep)
-			.then((deleted) => {
-				if (deleted > 0) {
-					void this.appLogger?.info("rewind", "pruned checkpoints of inactive sessions", {
-						root,
-						kept: keep.length,
-						deleted,
-					});
-				}
-			})
-			.catch((error: unknown) => {
-				this.appLogger?.warn("rewind", "old session checkpoint prune failed", {
-					root,
-					error: error instanceof Error ? error.message : String(error),
-				});
-			});
-	}
-
-	/** 同仓库当前所有活跃 agent 的 sessionId（pruneOldSessions 的 keep 集合）。 */
-	private activeSessionIdsForRoot(root: string): string[] {
-		const ids = new Set<string>();
-		for (const runtime of this.agents.values()) {
-			// 与 prune 传入的 root 同为宿主形态：WSL 项目的 tab.cwd 是存储形态（UNC 或 /mnt/...），
-			// 不归一化会与宿主 root 对不上，keep 集合漏掉同仓库活跃会话 → 并发会话被误删。
-			if (this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro) === root && runtime.tab.sessionId) {
-				ids.add(runtime.tab.sessionId);
-			}
-		}
-		return [...ids];
-	}
-
-	/** 更新工作目录的打点健康状态（成功清零；失败累计并保留最近原因）。 */
-	private recordRewindHealth(root: string, error: unknown): void {
-		const health = this.rewindHealthByRoot.get(root) ?? { consecutiveFailures: 0 };
-		if (error === null) {
-			health.lastSuccessAt = Date.now();
-			health.consecutiveFailures = 0;
-			health.lastError = undefined;
-			health.lastErrorAt = undefined;
-			health.lastErrorKind = undefined;
-		} else {
-			const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
-			health.lastErrorAt = Date.now();
-			health.consecutiveFailures += 1;
-			health.lastError = message;
-			health.lastErrorKind = /not a git repository/i.test(message) ? "no-git" : "other";
-		}
-		this.rewindHealthByRoot.set(root, health);
-	}
-
 	/**
 	 * get_commands 启发式：判断这条 prompt 是否是扩展命令（会被 AgentSession
 	 * _tryExecuteExtensionCommand 消费、不进入 agent run）。
@@ -3826,66 +3549,14 @@ export class AgentManager {
 		});
 	}
 
-	/**
-	 * 聚合待广播的实时日志条目，节流刷出（见 LIVE_RPC_LOG_FLUSH_MS）。
-	 * 批量推送既能降低 IPC 次数，也让渲染层一次 state 更新收到多条，减少重渲染频率。
-	 */
-	private enqueueLiveRpcLog(entry: RpcLogEntry) {
-		// 广播闸门：面板没打开就直接丢弃（落盘/环形缓冲已在 RpcLogger.push 里完成）。
-		// 面板打开时会先 setRpcLogWatching(true)，初始历史走 getLive 环形缓冲补齐。
-		if (!this.rpcLogWatchingAgents.has(entry.agentId)) return;
-		let pending = this.pendingLiveRpcLogs.get(entry.agentId);
-		if (!pending) {
-			pending = [];
-			this.pendingLiveRpcLogs.set(entry.agentId, pending);
-		}
-		if (pending.length >= AgentManager.LIVE_RPC_LOG_MAX_PENDING) {
-			// 极端高频下丢弃最旧，保证聚合缓冲有界
-			pending.splice(0, pending.length - AgentManager.LIVE_RPC_LOG_MAX_PENDING + 1);
-		}
-		pending.push(entry);
-		if (this.liveRpcLogFlushTimer === null) {
-			this.liveRpcLogFlushTimer = setTimeout(() => {
-				this.liveRpcLogFlushTimer = null;
-				this.flushLiveRpcLogs();
-			}, AgentManager.LIVE_RPC_LOG_FLUSH_MS);
-		}
-	}
-
-	/** 把聚合缓冲按 agent 拆分后批量广播；单次批次超限的条目留到下一轮，不丢日志 */
-	private flushLiveRpcLogs() {
-		if (this.pendingLiveRpcLogs.size === 0) return;
-		for (const [agentId, entries] of [...this.pendingLiveRpcLogs]) {
-			const batch = entries.slice(0, AgentManager.LIVE_RPC_LOG_MAX_BATCH);
-			if (batch.length > 0) {
-				this.emit(ipcChannels.agentsRpcLog, { agentId, entries: batch } satisfies RpcLogBatch);
-			}
-			const rest = entries.slice(AgentManager.LIVE_RPC_LOG_MAX_BATCH);
-			if (rest.length > 0) {
-				this.pendingLiveRpcLogs.set(agentId, rest);
-			} else {
-				this.pendingLiveRpcLogs.delete(agentId);
-			}
-		}
-	}
-
-	/** 清空某 agent 的实时日志聚合缓冲（agent 关闭时调用，防止残留数据泄漏） */
-	private dropPendingLiveRpcLogs(agentId: string) {
-		this.pendingLiveRpcLogs.delete(agentId);
-	}
-
-	/** 设置某 agent 的 RPC 日志记录开关 */
+	/** 设置某 agent 的 RPC 日志记录开关（收口在 RpcLiveLogTap） */
 	setRpcLogging(agentId: string, enabled: boolean) {
-		if (enabled) {
-			this.rpcLoggingAgents.add(agentId);
-		} else {
-			this.rpcLoggingAgents.delete(agentId);
-		}
+		this.rpcLiveTap.setLogging(agentId, enabled);
 	}
 
 	/** 查询某 agent 是否开启了 RPC 日志记录 */
 	isRpcLogging(agentId: string): boolean {
-		return this.rpcLoggingAgents.has(agentId);
+		return this.rpcLiveTap.isLogging(agentId);
 	}
 
 	/**
@@ -3893,11 +3564,7 @@ export class AgentManager {
 	 * 由渲染层面板挂载/卸载成对调用；只影响广播，不影响记录与落盘。
 	 */
 	setRpcLogWatching(agentId: string, watching: boolean) {
-		if (watching) {
-			this.rpcLogWatchingAgents.add(agentId);
-		} else {
-			this.rpcLogWatchingAgents.delete(agentId);
-		}
+		this.rpcLiveTap.setWatching(agentId, watching);
 	}
 
 	/**
@@ -3937,18 +3604,13 @@ export class AgentManager {
 		// 桥会话与 agent 生命周期配对：stop / 会话删除路径都走这里（PR 评审 §2）。
 		this.unregisterBridgeSession(agentId);
 		this.messages.delete(agentId);
-		this.messageDirtyFromByAgent.delete(agentId);
 		this.activeToolCallsByAgent.delete(agentId);
 		this.toolExecutingByAgent.delete(agentId);
 		this.toolStateSequenceByAgent.delete(agentId);
-		this.pendingSlideOutByAgent.delete(agentId);
 		this.clearStreamGate(agentId);
 		// agent 关闭时自动关闭 RPC 日志记录，并丢弃未广播的实时日志缓冲
-		this.rpcLoggingAgents.delete(agentId);
-		this.rpcLogWatchingAgents.delete(agentId);
-		this.dropPendingLiveRpcLogs(agentId);
-		this.displayWindowStartByAgent.delete(agentId);
-		this.displayWindowComputedLengthByAgent.delete(agentId);
+		this.rpcLiveTap.clearAgent(agentId);
+		this.messageEmit.clearAll(agentId);
 		this.sessionFileVersionByAgent.delete(agentId);
 		this.clearAgentState(agentId);
 		process.stop();
@@ -4041,15 +3703,10 @@ export class AgentManager {
 		this.messages.clear();
 		this.stoppedMessageIdentities.clear();
 		// 退出时统一清理所有 gate / abort 兜底定时器，避免泄漏到下一次生命周期。
-		for (const agentId of [...this.streamGates.keys()]) this.clearStreamGate(agentId);
+		for (const agentId of this.abortGate.gateAgentIds()) this.clearStreamGate(agentId);
 		this.recentlyAborted.clear();
 		// 实时日志广播的节流定时器与聚合缓冲同步清理
-		if (this.liveRpcLogFlushTimer !== null) {
-			clearTimeout(this.liveRpcLogFlushTimer);
-			this.liveRpcLogFlushTimer = null;
-		}
-		this.pendingLiveRpcLogs.clear();
-		this.rpcLogWatchingAgents.clear();
+		this.rpcLiveTap.dispose();
 		this.emitState();
 	}
 
@@ -4135,8 +3792,8 @@ export class AgentManager {
 				};
 				// 只有用户手动开启 RPC 日志记录的 agent 才产生日志流量（落盘 + 实时广播）。
 				// 未开启的 agent 不发射任何事件，避免每一条 RPC 通信都白白过一遍 IPC。
-				if (this.rpcLoggingAgents.has(agentId)) {
-					this.enqueueLiveRpcLog(this.rpcLogger?.push(logEntry) ?? logEntry);
+				if (this.rpcLiveTap.isLogging(agentId)) {
+					this.rpcLiveTap.enqueue(this.rpcLogger?.push(logEntry) ?? logEntry);
 				}
 			} catch (error) {
 				void this.appLogger?.warn("agent", "rpc-log handler failed", {
@@ -4558,16 +4215,16 @@ export class AgentManager {
 			// 2) 推进 stream generation，解封流式闸门（唯一合法解封点）
 			this.recentlyAborted.delete(agentId);
 			// 上一轮的 abort 升级上下文随之作废（新一轮 run 与上次终止无关）
-			this.pendingAbortEscalations.delete(agentId);
+			this.abortGate.clearEscalation(agentId);
 			this.notifiedAskAgents.delete(agentId);
 			this.openAgentStream(agentId);
 			this.setAgentTurnActive(agentId, true);
 			// rewind 回合计数：每轮 run 递增一次，供文件自动打点标记 turnIndex。
-			this.bumpRewindTurn(agentId);
+			this.rewindCheckpoints.bumpTurn(agentId);
 			// 首轮 run 顺带清理非活跃会话的 checkpoint（fire-and-forget，
 			// keep 集合含当前会话，并发会话不误删；节流见方法内注释）。
 			if (runtime.tab.cwd && runtime.tab.sessionId) {
-				this.maybePruneOldSessionCheckpoints(this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro), runtime.tab.sessionId);
+				this.rewindCheckpoints.pruneOldSessionsFor(this.rewindHostRoot(runtime.tab.cwd, runtime.tab.wslDistro), runtime.tab.sessionId);
 			}
 			runtime.tab.status = "running";
 			this.activeAssistantMessageIds.delete(agentId);
@@ -4603,7 +4260,7 @@ export class AgentManager {
 			this.streamingAgents.add(agentId);
 			// 性能计时起表（幂等：message_update start 先到则不重置）。
 			// 顶层 message_start 是 mock/pi 均走的确定路径，不能只依赖 delta 事件。
-			this.ensurePerfTimer(agentId);
+			this.messagePerf.ensureTimer(agentId);
 			// 顶层 message_start（mock/pi 均走此路径）：必须允许空骨架，否则
 			// text_delta 不再 upsert 时 History 无挂载点，Live 正文无处渲染。
 			this.upsertAssistantMessage(agentId, startMessage, "", { allowEmpty: true });
@@ -4825,9 +4482,9 @@ export class AgentManager {
 			// 若 settled 前已有 agent_start（用户立刻重发），此处才真正解封；
 			// 若还没有新 start，则保持封印，防止 settled 后残留 delta 复活旧气泡。
 			// abort 的 settled（或 abort 后重发时迟到的旧 settled）不算成功完成：
-			// recentlyAborted 被 agent_start 清除，但 abortSettledFallbackTimers 保留到 settled，
+			// recentlyAborted 被 agent_start 清除，但 settled 兜底定时器保留到 settled，
 			// 两者任一命中都说明本轮被用户中止，不得触发「已完成」提醒。
-			const isAbortSettled = this.recentlyAborted.has(agentId) || this.abortSettledFallbackTimers.has(agentId);
+			const isAbortSettled = this.recentlyAborted.has(agentId) || this.abortGate.hasSettledFallback(agentId);
 			this.noteAgentAbortSettled(agentId);
 			this.recentlyAborted.delete(agentId);
 			if (runtime && runtime.tab.status !== "error" && runtime.tab.status !== "closed") {
@@ -4896,7 +4553,7 @@ export class AgentManager {
 				this.activeAssistantMessageIds.delete(agentId);
 			}
 			// 结算性能指标（幂等：message_update done 先结算则 map 已删，直接返回）
-			this.settleMessagePerf(agentId, messageEnd);
+			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), messageEnd);
 			// 终结 Live 正文通道（顶层 message_end 不经 handleAssistantMessageEvent）
 			this.streamingAgents.delete(agentId);
 			const finalText = this.streamingText.get(agentId);
@@ -4944,7 +4601,7 @@ export class AgentManager {
 			// 检查点创建不阻塞工具结果推送（fire-and-forget，失败只记日志）。
 			const endedToolName = typeof typed.toolName === "string" ? typed.toolName : "";
 			if (MUTATING_TOOLS.has(endedToolName)) {
-				this.scheduleRewindCheckpoint(agentId, endedToolName, this.rewindTurnCounters.get(agentId) ?? 0);
+				this.rewindCheckpoints.scheduleToolCheckpoint(agentId, endedToolName, this.rewindCheckpoints.turnCounter(agentId));
 			}
 			// 工具执行结束是终态，立即 flush 把最终结果推给渲染进程，避免节流窗口内用户看不到完成状态。
 			this.flushMessageEmit(agentId);
@@ -5302,7 +4959,7 @@ export class AgentManager {
 			this.beginAssistantMessage(agentId);
 			this.streamingAgents.add(agentId);
 			// 性能计时起表（幂等：顶层 message_start 先到则不重置）
-			this.ensurePerfTimer(agentId);
+			this.messagePerf.ensureTimer(agentId);
 			// 允许空正文骨架：Live 正文走独立通道，TurnRow 需要 History 挂载点。
 			this.upsertAssistantMessage(agentId, partialMessage, "", { allowEmpty: true });
 			this.flushMessageEmit(agentId);
@@ -5318,8 +4975,8 @@ export class AgentManager {
 
 		if (eventType === "text_delta") {
 			this.streamingAgents.add(agentId);
-			this.markFirstDelta(agentId);
-			this.markFirstText(agentId);
+			this.messagePerf.markFirstDelta(agentId);
+			this.messagePerf.markFirstText(agentId);
 			const delta = String(assistantEvent.delta ?? "");
 			// Live 正文唯一热路径：累积后经 textEmitter（50ms）推送，不增长 messages。
 			const prevText = this.streamingText.get(agentId) ?? "";
@@ -5335,7 +4992,7 @@ export class AgentManager {
 
 		if (eventType === "thinking_delta") {
 			this.ensureThinkingSegment(agentId);
-			this.markFirstDelta(agentId);
+			this.messagePerf.markFirstDelta(agentId);
 			const prev = this.streamingThinking.get(agentId) ?? "";
 			const delta = String(assistantEvent.delta ?? "");
 			const next = prev + delta;
@@ -5359,7 +5016,7 @@ export class AgentManager {
 
 		if (eventType === "message_end" || eventType === "done" || eventType === "error") {
 			// 结算性能指标（TTFT/总耗时/TPS）并边沿推送渲染层
-			this.settleMessagePerf(agentId, partialMessage);
+			this.messagePerf.settle(agentId, (channel, payload) => this.emit(channel, payload), partialMessage);
 			// 先写入 History thinking 并 flush，再发 done 清 live。
 			this.finalizeThinkingIntoMessage(agentId, partialMessage);
 			this.upsertAssistantMessage(agentId, partialMessage);
@@ -5387,73 +5044,7 @@ export class AgentManager {
 		}
 	}
 
-	/**
-	 * 记录首个内容 delta 时刻（text/thinking 均算首 token，用户最先感知到的是二者之一）。
-	 * 只记一次：思考切正文时 text_delta 不会覆盖已有的 firstDeltaAt。
-	 */
-	private markFirstDelta(agentId: string) {
-		const perf = this.messagePerfByAgent.get(agentId);
-		if (perf && perf.firstDeltaAt === 0) {
-			perf.firstDeltaAt = Date.now();
-		}
-	}
-
-	/**
-	 * 记录正文首 delta 时刻：思考模式下 thinking_delta 先到，用户感知的「首字」是正文首字，
-	 * 因此 text_delta 单独记一次（只在 text_delta 分支调用）；无思考时即首个 text_delta。
-	 */
-	private markFirstText(agentId: string) {
-		const perf = this.messagePerfByAgent.get(agentId);
-		if (perf && perf.firstTextAt === 0) {
-			perf.firstTextAt = Date.now();
-		}
-	}
-
-	/**
-	 * 幂等起表：顶层 message_start 与 message_update start 两条路径都可能先到，
-	 * 只在尚无计时器时创建，避免后者覆盖前者丢失 startedAt。
-	 * 起点优先取 sendPrompt 记录的请求发出时刻（消费后删除，防止工具后续答回合
-	 * 误用上一次请求起点）；无请求起点（续答/内部触发）时回退到事件到达时刻。
-	 */
-	private ensurePerfTimer(agentId: string) {
-		if (!this.messagePerfByAgent.has(agentId)) {
-			const requestedAt = this.promptRequestedAtByAgent.get(agentId);
-			if (requestedAt !== undefined) this.promptRequestedAtByAgent.delete(agentId);
-			this.messagePerfByAgent.set(agentId, {
-				startedAt: requestedAt ?? Date.now(),
-				firstDeltaAt: 0,
-				firstTextAt: 0,
-			});
-		}
-	}
-
-	/**
-	 * message_end/done/error：结算本次回复的性能指标并边沿推送渲染层（不触发 RPC，
-	 * 避免流式热路径上叠加 get_state/get_session_stats 开销）。
-	 * - ttftMs = 首字（正文首 delta，思考模式下用户感知的首字；无正文退回首 delta）− 请求发出时刻；
-	 * - totalMs = 终态 − 请求发出时刻（本轮回复总耗时）；
-	 * - tps = output tokens ÷ 生成期时长（首 delta → 终态），分母排除 TTFT 更贴近真实生成速度。
-	 * 纯工具调用回合（无 text/thinking delta）只有 totalMs，ttft/tps 缺省。
-	 */
-	private settleMessagePerf(agentId: string, message?: unknown) {
-		const perf = this.messagePerfByAgent.get(agentId);
-		this.messagePerfByAgent.delete(agentId);
-		if (!perf) return;
-		const now = Date.now();
-		const totalMs = now - perf.startedAt;
-		// 首字延迟：正文首 delta 优先；纯思考/中途 abort 无正文时退回首 delta，保证有值可展示
-		const firstContentAt = perf.firstTextAt > 0 ? perf.firstTextAt : perf.firstDeltaAt > 0 ? perf.firstDeltaAt : 0;
-		const ttftMs = firstContentAt > 0 ? firstContentAt - perf.startedAt : undefined;
-		// message_end 携带完整 assistant 消息，usage 兼容多种命名提取 output tokens
-		const usage = isRecord(message) && isRecord(message.usage) ? message.usage : undefined;
-		const outputTokens = pickNumber(usage?.output, usage?.outputTokens, usage?.completion, usage?.completionTokens);
-		const tps = outputTokens != null && outputTokens > 0 && perf.firstDeltaAt > 0 && now > perf.firstDeltaAt ? outputTokens / ((now - perf.firstDeltaAt) / 1000) : undefined;
-		this.lastPerfByAgent.set(agentId, { ttftMs, totalMs, tps, at: now });
-		this.emit(ipcChannels.agentsRuntimeState, {
-			agentId,
-			state: { ttftMs, totalMs, tps, perfAt: now },
-		});
-	}
+	// 流式性能计时（markFirstDelta/markFirstText/ensureTimer/settle）收口在 MessagePerfTracker。
 
 	/** 首 thinking_delta：铸造与 History 相同的稳定段 id（msg-thinking-${assistantMessageId}）。 */
 	private ensureThinkingSegment(agentId: string) {
@@ -6320,216 +5911,42 @@ export class AgentManager {
 </toast>`;
 	}
 
-	/**
-	 * 安排一次消息 emit。流式高频事件走节流合并（同一 agent 50ms 内多次调用只 emit 一次最新数组）；
-	 * immediate=true 时跳过节流立即 flush，用于 message_end/tool_execution_end 等终态事件，确保最终状态不丢。
-	 */
-	/** 取/建 agent 的 stream gate 状态。 */
-	private getStreamGate(agentId: string): StreamGateState {
-		let gate = this.streamGates.get(agentId);
-		if (!gate) {
-			gate = createStreamGateState();
-			this.streamGates.set(agentId, gate);
-		}
-		return gate;
-	}
+	// abort 流闸与升级收口在 AbortStreamGateController；以下薄包装保持事件路径调用点与契约测试形态。
 
 	/** abort 时封印当前 generation。 */
 	private sealAgentStream(agentId: string) {
-		const next = sealStreamGate(this.getStreamGate(agentId));
-		this.streamGates.set(agentId, next);
+		this.abortGate.seal(agentId);
 	}
 
 	/** agent_start 时尝试推进 generation；若仍在等 abort settled，则只记 pending。 */
 	private openAgentStream(agentId: string) {
-		const next = openStreamGateForNewRun(this.getStreamGate(agentId));
-		this.streamGates.set(agentId, next);
+		this.abortGate.openForNewRun(agentId);
 	}
 
 	/** abort 后的 agent_settled：结束 waiting，必要时解封 pending start。 */
 	private noteAgentAbortSettled(agentId: string) {
-		this.clearAbortSettledFallback(agentId);
-		const next = noteAbortSettled(this.getStreamGate(agentId));
-		this.streamGates.set(agentId, next);
+		this.abortGate.noteAbortSettled(agentId);
 	}
 
-	/**
-	 * pi 偶发不发 agent_settled 时的兜底：超时后按 settled 处理，
-	 * 避免用户立刻重发时新一轮永远无法接收流式事件。
-	 * 同时触发 abort 升级检查：若 pi 仍未停稳，补发 abort_bash / 二次 abort。
-	 */
+	/** abort settled 兜底（pi 漏发 settled 时超时解封并触发升级检查）。 */
 	private scheduleAbortSettledFallback(agentId: string) {
-		this.clearAbortSettledFallback(agentId);
-		const timer = setTimeout(() => {
-			this.abortSettledFallbackTimers.delete(agentId);
-			// 仅在仍 waiting 时生效；正常 settled 路径会先 clear 定时器。
-			if (this.getStreamGate(agentId).waitingForAbortSettled) {
-				this.noteAgentAbortSettled(agentId);
-			}
-			// 工具执行中 abort 偶发不被 pi 及时处理（长 bash/扩展工具阻塞），
-			// 若不升级，agent 会继续跑到工具结束，用户看到“停止不了”。
-			void this.escalateAbortIfStillRunning(agentId);
-		}, AgentManager.ABORT_SETTLED_FALLBACK_MS);
-		timer.unref?.();
-		this.abortSettledFallbackTimers.set(agentId, timer);
-	}
-
-	/**
-	 * abort 升级：兜底窗口已过但 pi 仍在流式/执行，按 ack 状态决定是否补命令。
-	 * pi 的 abort RPC 语义是「中止当前操作并等到会话空闲才响应」（上游 rpc.md），
-	 * 因此 ack 迟到是正常路径，不代表卡死；对正在收尾 abort 的 pi 补二次中止，
-	 * 在老版本 pi 上有 unhandled rejection 直接杀进程的崩溃史（上游 #2716），
-	 * WSL 慢链路下 1.5s 兜底几乎必误触发（Issue #218 WSL 终止必挂）。
-	 *
-	 * 策略：
-	 * - bash 工具确实在执行 → 补 abort_bash（升级的本意：解卡被 bash 阻塞的 abort）；
-	 * - abort RPC 已失败/超时（pi 可能没收到）→ 补二次 abort；
-	 * - 其余（ack pending / acked 且无工具）→ 不补刀，等 pi 自然 settle。
-	 * - 仍卡死则通过 notice 明确告知用户（stop 慢是可见问题，不能只写日志）
-	 */
-	private async escalateAbortIfStillRunning(agentId: string) {
-		const runtime = this.agents.get(agentId);
-		if (!runtime) return;
-		try {
-			const response = await runtime.process.client.request({ type: "get_state" }, 5_000).catch(() => undefined);
-			const isStreaming = response?.success && Boolean((response.data as { isStreaming?: boolean } | undefined)?.isStreaming);
-			if (!isStreaming) return; // pi 已停，无需升级
-			const escalation = this.pendingAbortEscalations.get(agentId);
-			const shouldSendAbortBash = escalation?.hadActiveTool === true;
-			const shouldResendAbort = !escalation || escalation.failed;
-			if (!shouldSendAbortBash && !shouldResendAbort) {
-				// ack pending / acked 且无工具在跑：pi 正在按语义收敛到 idle，不补刀。
-				void this.appLogger?.info("agent", "Abort escalation skipped: abort RPC ack pending/acked, waiting for idle", {
-					agentId,
-					acked: escalation?.acked === true,
-				});
-				return;
-			}
-			void this.appLogger?.warn("agent", "Abort escalation: pi still streaming after abort", {
-				agentId,
-				abortBash: shouldSendAbortBash,
-				resendAbort: shouldResendAbort,
-			});
-			if (shouldSendAbortBash) {
-				await runtime.process.client.request({ type: "abort_bash" }, 5_000).catch(() => undefined);
-			}
-			if (shouldResendAbort) {
-				await runtime.process.client.request({ type: "abort" }, 5_000).catch(() => undefined);
-			}
-			// 第二轮验证：仍未停则通知用户，提示可重启会话。
-			const verifyTimer = setTimeout(() => {
-				void this.appLogger?.warn("agent", "Abort escalation: still running after second attempt", {
-					agentId,
-				});
-				this.emit(ipcChannels.agentsNotice, {
-					agentId,
-					message: "停止响应较慢，可尝试重启会话",
-					i18nKey: "app.abortSlow",
-					kind: "warning",
-					duration: 6000,
-				});
-			}, AgentManager.ABORT_ESCALATION_VERIFY_MS);
-			verifyTimer.unref?.();
-		} catch {
-			// RPC 失败（进程退出等）不再升级；agent 生命周期由 exit 路径接管。
-		}
-	}
-
-	private clearAbortSettledFallback(agentId: string) {
-		const timer = this.abortSettledFallbackTimers.get(agentId);
-		if (timer) {
-			clearTimeout(timer);
-			this.abortSettledFallbackTimers.delete(agentId);
-		}
+		this.abortGate.scheduleSettledFallback(agentId);
 	}
 
 	/** 当前 generation 是否已封印，封印期间所有流式事件应丢弃。 */
 	private isAgentStreamSealed(agentId: string): boolean {
-		return isStreamGateSealed(this.getStreamGate(agentId));
+		return this.abortGate.isSealed(agentId);
 	}
 
 	/** agent 关闭/重建时清理 gate，避免泄漏到新生命周期。 */
 	private clearStreamGate(agentId: string) {
-		this.clearAbortSettledFallback(agentId);
-		this.streamGates.delete(agentId);
+		// 流闸/兜底定时器/升级上下文统一清；thinkingEmitter 与消息 flush 属跨域编排，仍在此清
+		this.abortGate.clearAgent(agentId);
 		this.recentlyAborted.delete(agentId);
 		this.thinkingEmitter.cancel(agentId);
 		this.lastSentThinkingByAgent.delete(agentId);
 		this.thinkingPushCountByAgent.delete(agentId);
 		this.cancelMessageEmit(agentId);
-	}
-
-	/** 取消节流中的消息推送（不触发 emit），用于 abort/关闭时丢弃 pending 的旧内容。 */
-	private cancelMessageEmit(agentId: string) {
-		const timer = this.messageFlushTimers.get(agentId);
-		if (timer) {
-			clearTimeout(timer);
-			this.messageFlushTimers.delete(agentId);
-		}
-		this.pendingMessageAgents.delete(agentId);
-	}
-
-	private scheduleMessageEmit(agentId: string, immediate = false) {
-		if (immediate) {
-			// 终态 immediate flush 永远全量：作为渲染层增量合并的天然校准点，
-			// 丢弃的增量（长度不连续）由这里的全量纠正（message_end/tool 结束/加载完成）。
-			this.messageDirtyFromByAgent.delete(agentId);
-			this.flushMessageEmit(agentId);
-			return;
-		}
-		if (this.pendingMessageAgents.has(agentId)) return;
-		this.pendingMessageAgents.add(agentId);
-		const timer = setTimeout(() => this.flushMessageEmit(agentId), AgentManager.MESSAGE_FLUSH_INTERVAL_MS);
-		// 节流定时器不应阻止进程退出
-		timer.unref?.();
-		this.messageFlushTimers.set(agentId, timer);
-	}
-
-	private flushMessageEmit(agentId: string) {
-		const timer = this.messageFlushTimers.get(agentId);
-		if (timer) {
-			clearTimeout(timer);
-			this.messageFlushTimers.delete(agentId);
-		}
-		this.pendingMessageAgents.delete(agentId);
-		const all = this.messages.get(agentId) ?? [];
-		let dirtyFrom = this.messageDirtyFromByAgent.get(agentId);
-		this.messageDirtyFromByAgent.delete(agentId);
-		// 新一轮进入尾部后，窗口起点必须右移到最近 9 轮；坐标变化时升级为
-		// 全量快照，并把滑出的完整轮次交给 renderer history 保存。
-		const currentWindowStart = this.displayWindowStartByAgent.get(agentId) ?? 0;
-		const lastComputedLength = this.displayWindowComputedLengthByAgent.get(agentId) ?? -1;
-		let nextWindowStart = currentWindowStart;
-		if (all.length !== lastComputedLength) {
-			nextWindowStart = this.computeDisplayWindowStart(all);
-			this.displayWindowComputedLengthByAgent.set(agentId, all.length);
-		}
-		if (nextWindowStart > currentWindowStart) {
-			const slideOut = all.slice(currentWindowStart, nextWindowStart);
-			if (slideOut.length > 0) {
-				const pending = this.pendingSlideOutByAgent.get(agentId) ?? [];
-				this.pendingSlideOutByAgent.set(agentId, [...pending, ...slideOut]);
-			}
-			dirtyFrom = undefined;
-		}
-		this.displayWindowStartByAgent.set(agentId, nextWindowStart);
-		const windowStart = nextWindowStart;
-		const payload = buildMessageFlushPayload(agentId, all, dirtyFrom, windowStart, this.sessionFileVersionByAgent.get(agentId), this.computeWindowStartFilePos(agentId, all, windowStart));
-		// trim 窗口右移滑出的旧窗口头部轮次随全量 flush 下发（渲染层并入历史前缀）；
-		// 增量 flush 不携带（新轮还在写），等终态全量校准。
-		if (payload.upsertFrom === undefined) {
-			const slideOut = this.pendingSlideOutByAgent.get(agentId);
-			if (slideOut && slideOut.length > 0) {
-				// 与窗口段同口径脱敏（删 tool result 大载荷），避免前缀持有未脱敏副本
-				payload.slideOut = stripToolResultForDelivery(slideOut);
-				this.pendingSlideOutByAgent.delete(agentId);
-			}
-		}
-		this.emit(ipcChannels.agentsMessage, payload);
-		// 消息 flush 时顺带同步本地流式标志：text_delta 置位 streamingAgents 后，
-		// 渲染进程必须及时拿到 isStreaming=true 才会走逐字渐显；此路径 50ms 节流、
-		// 无 RPC（不发 get_state），不会像 emitRuntimeState 那样在高频 delta 下过重。
-		this.emitStreamingStatePatch(agentId);
 	}
 
 	/** 轻量 runtime 状态补丁：只同步本地流式标志与工具执行状态，不发 RPC。 */
@@ -6567,12 +5984,28 @@ export class AgentManager {
 		});
 	}
 
+	// agents:message 的节流批处理/增量标记收口在 MessageEmitBatcher；以下薄包装保持调用点与契约测试形态。
+
+	/** 取消节流中的消息推送（不触发 emit），用于 abort/关闭时丢弃 pending 的旧内容。 */
+	private cancelMessageEmit(agentId: string) {
+		this.messageEmit.cancel(agentId);
+	}
+
+	/**
+	 * 安排一次消息 emit。流式高频事件走节流合并（同一 agent 50ms 内多次调用只 emit 一次最新数组）；
+	 * immediate=true 时跳过节流立即 flush，用于 message_end/tool_execution_end 等终态事件，确保最终状态不丢。
+	 */
+	private scheduleMessageEmit(agentId: string, immediate = false) {
+		this.messageEmit.schedule(agentId, immediate);
+	}
+
+	private flushMessageEmit(agentId: string) {
+		this.messageEmit.flush(agentId);
+	}
+
 	/** 标记 agent 消息数组自 index 起变脏（多次标记取最小值），供增量 flush 使用。 */
 	private markMessagesDirtyFrom(agentId: string, index: number) {
-		const prev = this.messageDirtyFromByAgent.get(agentId);
-		if (prev === undefined || index < prev) {
-			this.messageDirtyFromByAgent.set(agentId, Math.max(0, index));
-		}
+		this.messageEmit.markDirtyFrom(agentId, index);
 	}
 
 	/**
@@ -6596,18 +6029,14 @@ export class AgentManager {
 		);
 		const trimmed = list.slice(trimmedStart);
 		const didTrim = trimmed.length !== list.length;
-		const currentWindowStart = this.displayWindowStartByAgent.get(agentId) ?? 0;
+		const currentWindowStart = this.messageEmit.windowStart(agentId);
 		const nextWindowStartInList = this.computeDisplayWindowStart(list);
 		// 不超过 12 轮时也要校准尾部 9 轮窗口。通常 settled 前的 flush 已经做过这步，
 		// 这里保留独立调用时的兜底，避免新会话在 12 轮以内把全部消息留在 atom。
 		if (!didTrim) {
 			if (nextWindowStartInList > currentWindowStart) {
-				const slideOut = list.slice(currentWindowStart, nextWindowStartInList);
-				if (slideOut.length > 0) {
-					const pending = this.pendingSlideOutByAgent.get(agentId) ?? [];
-					this.pendingSlideOutByAgent.set(agentId, [...pending, ...slideOut]);
-				}
-				this.displayWindowStartByAgent.set(agentId, nextWindowStartInList);
+				this.messageEmit.enqueueSlideOut(agentId, list.slice(currentWindowStart, nextWindowStartInList));
+				this.messageEmit.setWindowStart(agentId, nextWindowStartInList);
 				this.markMessagesDirtyFrom(agentId, 0);
 				this.flushMessageEmit(agentId);
 			}
@@ -6625,7 +6054,7 @@ export class AgentManager {
 		this.messages.set(agentId, next);
 		// 裁剪后数组下标空间前移，尾部 9 轮的身份不变但数值起点改变；
 		// 先重置坐标，再用全量 flush 校准 renderer。
-		this.displayWindowStartByAgent.set(agentId, this.computeDisplayWindowStart(next));
+		this.messageEmit.setWindowStart(agentId, this.computeDisplayWindowStart(next));
 		this.markMessagesDirtyFrom(agentId, 0);
 		this.flushMessageEmit(agentId);
 	}
