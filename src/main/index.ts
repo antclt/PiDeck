@@ -19,7 +19,7 @@ import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator"
 import { registerAutomationIpc } from "./ipc/automationIpc";
 import { registerFeishuIpc } from "./ipc/feishuIpc";
 import { applyLinuxDisplayBackendWorkaround, isUsingLinuxXWaylandWorkaround } from "./linuxDisplayBackend";
-import { readElectronChromiumSandboxPreference, readPetEnabledPreference, readSingleInstancePreference } from "./settings/SettingsStore";
+import { readBootPreferences } from "./settings/SettingsStore";
 import { acquireVersionSingleInstance, type FocusPayload } from "./singleInstance";
 import { mainProcessJsFlags, rendererHeapAdditionalArguments } from "./v8HeapLimits";
 import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
@@ -52,6 +52,10 @@ const isDevBuild = !app.isPackaged || __PIDECK_DEV_BUILD__;
 // E2E（Playwright 驱动）静默运行：窗口显示但不抢焦点、不最大化铺满屏，
 // 避免打断用户在其他软件的输入。fixture 通过 env PIDECK_E2E=1 标识。
 const isE2E = process.env.PIDECK_E2E === "1";
+
+// 冷启动计时锚点（2026-10 流畅度审计）：里程碑在 whenReady 与 showMainWindowOnce 记录，
+// 日志对比 sinceModuleLoadMs / processUptimeMs 两个口径即可观测启动回归。
+const bootAnchorMs = Date.now();
 
 // userData 决策（三分支判定在 portableUserData.resolveAppUserDataDir，单测覆盖）：
 // - 未打包 npm run dev：功能分支再按 git 分支名拆目录（pi-desktop-dev-<branch>），
@@ -106,13 +110,16 @@ app.setPath(
 // 强制 XWayland 在部分 GNOME/Wayland 环境会导致主窗口不可见）。
 // ozone 平台一经启动不可更改，整个生命周期统一使用启动时快照。
 // 注意必须放在 dev userData 覆盖之后，否则 dev 模式会误读正式版的 petEnabled。
-const petEnabledAtLaunch = readPetEnabledPreference();
+// 启动偏好共享一次读取（沙箱/单实例/宠物开关同源 settings.json）：三个快照值在
+// dev userData 覆盖之后一次读齐，替代原来三次独立的 readFileSync+JSON.parse。
+const bootPreferences = readBootPreferences();
+const petEnabledAtLaunch = bootPreferences.petEnabled;
 applyLinuxDisplayBackendWorkaround(petEnabledAtLaunch);
 
 // Chromium 沙箱开关必须在 app.ready 前生效。
 // 默认关闭：Windows 上部分安全软件/旧 GPU 驱动会在沙箱初始化时触发原生断点（0x80000003）。
 // 用户可在「开发设置」中开启 electronChromiumSandbox，重启后走 Chromium 默认沙箱。
-const electronChromiumSandboxEnabled = readElectronChromiumSandboxPreference();
+const electronChromiumSandboxEnabled = bootPreferences.electronChromiumSandbox;
 if (!electronChromiumSandboxEnabled) {
 	// 关闭沙箱时显式附带 no-sandbox，避免部分环境仍按默认策略启用。
 	app.commandLine.appendSwitch("no-sandbox");
@@ -151,7 +158,7 @@ if (app.isPackaged) {
 // focus 回调稍后挂到 focusMainWindow（定义在文件后部），避免顶层 TDZ。
 // payload 携带次实例的 argv，可解析「点击系统通知」激活时携带的跳转目标。
 let focusExistingWindow: ((payload?: FocusPayload) => void) | null = null;
-const singleInstanceEnabled = readSingleInstancePreference();
+const singleInstanceEnabled = bootPreferences.singleInstance;
 const versionSingleInstance = acquireVersionSingleInstance(singleInstanceEnabled, app.getVersion(), (payload) => {
 	focusExistingWindow?.(payload);
 });
@@ -1662,6 +1669,11 @@ async function createWindow() {
 			createdWindow.show();
 			createdWindow.focus();
 		}
+		// 冷启动里程碑（2/2）：首窗可见（ready-to-show / did-finish-load / 3s 兜底三路共用此口）。
+		void appLogger?.info("app", "Cold start milestone: first window shown", {
+			sinceModuleLoadMs: Date.now() - bootAnchorMs,
+			processUptimeMs: Math.round(process.uptime() * 1000),
+		});
 		// 向开发者工具输出启动信息
 		printStartupInfo();
 	}
@@ -3156,6 +3168,12 @@ app
 		});
 		appLogger = new AppLogger();
 		setAppLogger(appLogger);
+		// 冷启动里程碑（1/2）：主进程 ready。sinceModuleLoadMs 从 index.ts 模块加载起算；
+		// processUptimeMs 从 Electron 进程创建起算（含二进制启动），差值即 ready 前主进程耗时。
+		void appLogger.info("app", "Cold start milestone: app ready", {
+			sinceModuleLoadMs: Date.now() - bootAnchorMs,
+			processUptimeMs: Math.round(process.uptime() * 1000),
+		});
 		// userData 更名迁移（pi-desktop → PiDeck）在 setPath 前同步执行，当时还没有日志器；
 		// 结果在此补记，失败/回退路径必须可从日志诊断。
 		if (userDataNameMigrationResult?.kind === "migrated") {

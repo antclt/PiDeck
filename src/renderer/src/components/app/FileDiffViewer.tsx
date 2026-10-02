@@ -211,7 +211,9 @@ export function FileDiffViewer(props: {
 				mediaUrlRef.current = url;
 				setMediaUrl(url);
 			} catch (e) {
-				if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+				// 主进程的 FILE_TOO_LARGE 结构化前缀经 fileLoadErrorMessage 转 i18n 文案；
+				// 直接展示 e.message 会把 FILE_TOO_LARGE:size:max 裸码给用户。
+				if (!cancelled) setError(fileLoadErrorMessage(e));
 			}
 		}
 		void load();

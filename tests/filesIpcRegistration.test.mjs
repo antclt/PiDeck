@@ -63,3 +63,15 @@ test("files:list maps a deleted project root to a stable missing-directory error
 	assert.match(block[0], /if \(!directory && \(error as NodeJS\.ErrnoException\)\.code === "ENOENT"\)/);
 	assert.match(block[0], /throw new Error\("PROJECT_DIRECTORY_MISSING"\)/);
 });
+
+test("filesReadBase64 enforces a main-process default cap when the renderer omits maxBytes", () => {
+	// 回归（2026-10 内存审计）：文件抽屉二进制预览不传 maxBytes，曾整文件读入再 base64
+	// 放大 1.33 倍过 IPC——上限必须由主进程兜底（渲染层输入不可信），不能依赖调用方自觉。
+	const block = filesIpc.match(/ipcMain\.handle\(\s*ipcChannels\.filesReadBase64,[\s\S]*?\n\t\}\);/);
+	assert.ok(block, "filesReadBase64 handler should be discoverable");
+	assert.match(filesIpc, /MAX_BINARY_PREVIEW_BYTES = 64 \* 1024 \* 1024/, "默认上限常量必须存在");
+	// stat 拦截必须无条件执行：不再包在「调用方传了 maxBytes」的 if 里
+	assert.match(block[0], /const effectiveMaxBytes\s*=/);
+	assert.match(block[0], /const fileStat = await stat\(readablePath\)/);
+	assert.match(block[0], /FILE_TOO_LARGE:\$\{fileStat\.size\}:\$\{Math\.floor\(effectiveMaxBytes\)\}/);
+});
