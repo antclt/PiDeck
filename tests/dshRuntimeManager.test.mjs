@@ -235,9 +235,13 @@ test("同版本重装：落位 rename 失败时旧目录让位后回滚（不出
 		runtimesRoot: join(root, "runtimes", "dsh"),
 		tempRoot: join(root, "runtimes", ".tmp"),
 	};
-	const manager = new StubbedManager({ layout, appVersion: () => "0.7.5", extract: async (_a, destDir) => {
-		stageRuntime(join(destDir, "dsh-runtime"));
-	} });
+	const manager = new StubbedManager({
+		layout,
+		appVersion: () => "0.7.5",
+		extract: async (_a, destDir) => {
+			stageRuntime(join(destDir, "dsh-runtime"));
+		},
+	});
 	// 预置旧目录（用户已装的运行时）
 	mkdirSync(join(layout.runtimesRoot, "0.1.1-rc.2"), { recursive: true });
 	writeFileSync(join(layout.runtimesRoot, "0.1.1-rc.2", "marker.txt"), "old");

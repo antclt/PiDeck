@@ -1281,7 +1281,13 @@ test("parseDshInboxProjection：合法投影归一化为排队项（next-turn �
 	const parsed = parseDshInboxProjection({
 		"next-turn": [
 			{ id: "q1", content: [{ type: "text", text: "接着做" }] },
-			{ id: "q2", content: [{ type: "text", text: "带图" }, { type: "image", mediaType: "image/png", data: "x" }] },
+			{
+				id: "q2",
+				content: [
+					{ type: "text", text: "带图" },
+					{ type: "image", mediaType: "image/png", data: "x" },
+				],
+			},
 		],
 		"next-step": [{ id: "q3", content: [{ type: "text", text: "中途插入" }] }],
 	});
