@@ -40,6 +40,23 @@ test("visual snapshot: thinking + tool card on mobile", async ({ app }) => {
 	await page.locator(".project-group .project-action").first().click();
 	await expect(page.locator(".chat-list-pane .session-row.active")).toHaveCount(1, { timeout: 20_000 });
 
+	// 空态：Logo 水平居中（web.css 自带 empty-state 样式，不依赖桌面 foundation）
+	const emptyState = await page.locator(".empty-state").evaluate((el) => {
+		const s = getComputedStyle(el);
+		return { display: s.display, align: s.alignItems, justify: s.justifyContent, hasLogo: Boolean(el.querySelector(".empty-logo")) };
+	});
+	expect(emptyState.hasLogo).toBe(true);
+	expect(emptyState.display).toBe("flex");
+	expect(emptyState.align).toBe("center");
+	expect(emptyState.justify).toBe("center");
+	const logoBox = await page.locator(".empty-logo").boundingBox();
+	const listBox = await page.locator(".message-list").boundingBox();
+	expect(logoBox).toBeTruthy();
+	expect(listBox).toBeTruthy();
+	const logoCenter = logoBox.x + logoBox.width / 2;
+	const listCenter = listBox.x + listBox.width / 2;
+	expect(Math.abs(logoCenter - listCenter)).toBeLessThanOrEqual(2, "empty logo must be horizontally centered in the timeline");
+
 	// 触发思考 + 工具卡 + 正文
 	const textarea = page.locator("textarea#prompt");
 	await textarea.fill("THINK TOOL 帮我看一下目录");

@@ -146,6 +146,22 @@
   width: 100%;
 }
 
+/* 空态：web 入口不加载桌面 foundation.css 的 empty-state 样式，这里自带居中，
+ 否则 Logo 按 block 默认靠左（WebTimeline .empty-state 内 .empty-logo）。 */
+.web-app .message-timeline .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 56vh;
+  text-align: center;
+}
+.web-app .message-timeline .empty-state .empty-hint {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
 /* 用户气泡：dsh-web 风格（layer-2 面 + 细边框 + 14px 圆角） */
 .web-app .user-turn .rounded-\[14px\] {
   background: var(--color-bg-muted);
@@ -211,6 +227,21 @@
 .web-app .tool-card.tone-error .tool-card-icon,
 .web-app .tool-card[data-status="error"] .tool-card-icon {
   color: var(--color-danger);
+}
+
+/* 过程组（回合折叠容器）：对齐桌面 process-summary 的左导轨结构。
+   摘要条常驻；展开后明细区以细竖线缩进，把工具/思考/中间回复串成一条执行流。
+   间距收紧：组内明细行距 4px、思考/工具行自带 pb-1，避免桌面默认 pb-2 叠加出的空隙。 */
+.web-app .execution-fold {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.web-app .execution-fold-details {
+  margin-left: 7px;
+  padding-left: 10px;
+  gap: 4px;
+  border-left: 1px solid color-mix(in srgb, var(--color-border-default) 70%, transparent);
 }
 /* 思考行图标走靛紫身份色（thinking-row-icon 类在 timeline.css 已定义 color，
    这里仅确保 web 覆盖后变量可用，无需重复声明）。 */

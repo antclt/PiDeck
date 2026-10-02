@@ -8,8 +8,8 @@
  * - tool-invocation part → 工具卡片（复用桌面 tool-card 视觉）
  * - 流式期间底部显示响应指示器；出错显示诊断卡
  */
-import { Fragment, memo, useEffect, useRef, useState } from "react";
-import { ArrowDown, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Copy, Pencil, RefreshCw, Share2, Trash2, Wrench, X } from "lucide-react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Copy, ListTree, MessagesSquare, Pencil, RefreshCw, Share2, Trash2, Wrench, X } from "lucide-react";
 import type { UIMessage } from "ai";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
@@ -58,6 +58,110 @@ export function uiMessageImages(message: UIMessage): string[] {
 		if (src && (!filePart.mediaType || filePart.mediaType.startsWith("image/"))) urls.push(src);
 	}
 	return urls;
+}
+
+type WebToolPart = {
+	type: string;
+	toolName?: string;
+	toolCallId?: string;
+	state?: string;
+	input?: unknown;
+	output?: unknown;
+	errorText?: string;
+};
+
+/** 回合内一段过程内容：合并后的思考块 / 工具调用 / 中间回复。 */
+export type TurnSegment =
+	| { kind: "thinking"; id: string; texts: string[] }
+	| { kind: "tool"; id: string; part: WebToolPart }
+	| { kind: "interim"; id: string; text: string };
+
+/** 一轮助手回合：用户消息之后的连续 assistant 消息聚合（对齐桌面 run 语义）。 */
+export interface AssistantTurn {
+	/** 回合内首条消息 id（容器 key/锚点） */
+	id: string;
+	/** 回合内全部消息 id（含首条；锚点补偿用） */
+	messageIds: string[];
+	/** 过程内容（不含常驻正文），按原始顺序 */
+	segments: TurnSegment[];
+	/** 最后一段非空正文：常驻折叠容器外；流式中即正在生成的文本 */
+	finalText: string;
+	toolCount: number;
+	/** 思考段数（合并后块内 texts 总数，对齐桌面「N 次思考」） */
+	thinkingCount: number;
+	/** 中间回复段数（不含 final） */
+	interimCount: number;
+}
+
+export type TimelineEntry = { kind: "user"; id: string; message: UIMessage } | { kind: "turn"; id: string; turn: AssistantTurn };
+
+/** 把扁平 messages 聚合成「用户气泡 / 助手回合」交替序列（桌面 groupAgentRuns 的 Web 版）。
+ *
+ * - 连续 assistant 消息归为一个回合，跨消息的连续 reasoning part 合并成同一思考块
+ *   （修复：一轮里被拆成多个思考卡片）；
+ * - 回合内最后一段非空 text 剔出过程组作为常驻正文（对齐桌面「最终回答永不折叠」）；
+ * - 纯函数，行为由 tests/webLayout.test.mjs 锁定。 */
+export function groupTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
+	const entries: TimelineEntry[] = [];
+	let messageIds: string[] = [];
+	let segments: TurnSegment[] = [];
+	let finalText = "";
+	let finalId = "";
+	let turnId = "";
+	const flush = () => {
+		if (!turnId) return;
+		// 把 final 对应的最后一个 interim 从过程组剔除（只剔除一次，同 id 不会重复）
+		const processSegments = finalId ? segments.filter((segment) => !(segment.kind === "interim" && segment.id === finalId)) : segments;
+		entries.push({
+			kind: "turn",
+			id: turnId,
+			turn: {
+				id: turnId,
+				messageIds,
+				segments: processSegments,
+				finalText,
+				toolCount: processSegments.filter((segment) => segment.kind === "tool").length,
+				thinkingCount: processSegments.reduce((sum, segment) => sum + (segment.kind === "thinking" ? segment.texts.length : 0), 0),
+				interimCount: processSegments.filter((segment) => segment.kind === "interim").length,
+			},
+		});
+		messageIds = [];
+		segments = [];
+		finalText = "";
+		finalId = "";
+		turnId = "";
+	};
+	for (const message of messages) {
+		if (message.role !== "assistant") {
+			flush();
+			entries.push({ kind: "user", id: message.id, message });
+			continue;
+		}
+		if (!turnId) turnId = message.id;
+		messageIds.push(message.id);
+		for (let index = 0; index < message.parts.length; index += 1) {
+			const part = message.parts[index];
+			if (part.type === "reasoning") {
+				const text = part.text ?? "";
+				if (!text.trim()) continue;
+				const last = segments.at(-1);
+				if (last && last.kind === "thinking") last.texts.push(text);
+				else segments.push({ kind: "thinking", id: `${message.id}:p${index}`, texts: [text] });
+			} else if (part.type === "dynamic-tool" || (typeof part.type === "string" && part.type.startsWith("tool-"))) {
+				const toolPart = part as unknown as WebToolPart;
+				segments.push({ kind: "tool", id: toolPart.toolCallId ?? `${message.id}:p${index}`, part: toolPart });
+			} else if (part.type === "text") {
+				const text = part.text ?? "";
+				if (!text.trim()) continue;
+				const id = `${message.id}:p${index}`;
+				segments.push({ kind: "interim", id, text });
+				finalText = text;
+				finalId = id;
+			}
+		}
+	}
+	flush();
+	return entries;
 }
 
 /** 用户消息右对齐气泡（结构与桌面 UserBubble 一致；P1/P2 增加图片与 hover 操作）。 */
@@ -233,16 +337,6 @@ export const WebThinkingBlock = memo(function WebThinkingBlock(props: {
 	);
 });
 
-type WebToolPart = {
-	type: string;
-	toolName?: string;
-	toolCallId?: string;
-	state?: string;
-	input?: unknown;
-	output?: unknown;
-	errorText?: string;
-};
-
 /** 工具卡片（复用桌面 tool-card 视觉：图标 + 工具名 + 状态）。 */
 export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart }) {
 	const { part } = props;
@@ -258,7 +352,7 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 	// 运行中（输出未到）也可先展开看已流式到的输入
 	const hasBody = Boolean(inputText || outputText || errorText);
 	return (
-		<TimelineMarker kind="tool" tone={error ? "error" : running ? "active" : "success"}>
+		<TimelineMarker kind="tool" tone={error ? "error" : running ? "active" : "success"} contentClassName="pb-1">
 			<section className={cn("tool-card w-full min-w-0 overflow-hidden", running && "tone-running", error && "tone-error")} data-status={error ? "error" : running ? "running" : "done"} data-tool-name={toolName}>
 				<button type="button" className="relative flex min-h-7 w-full cursor-pointer items-center rounded-md px-1 py-1 text-left" onClick={() => hasBody && setExpanded((value) => !value)} aria-expanded={expanded}>
 					<span className="tool-card-trigger flex min-w-0 items-center gap-2 text-control leading-5 text-text-secondary">
@@ -276,7 +370,13 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 								<span className="inline-flex items-center gap-1.5">{t("tool.statusError")}</span>
 							) : null}
 						</span>
-						{hasBody ? <ChevronDown size={14} className={cn("ml-auto shrink-0 text-text-tertiary transition-transform duration-150", expanded && "rotate-180")} aria-hidden="true" /> : null}
+						{hasBody ? (
+							expanded ? (
+								<ChevronDown size={14} className="ml-auto shrink-0 text-text-tertiary" aria-hidden="true" />
+							) : (
+								<ChevronRight size={14} className="ml-auto shrink-0 text-text-tertiary" aria-hidden="true" />
+							)
+						) : null}
 					</span>
 				</button>
 				{expanded ? (
@@ -301,40 +401,92 @@ function ToolValueBlock(props: { label: string; text: string; tone?: "error" }) 
 	);
 }
 
-/** 助手消息：思考 + 工具 + 正文 的扁平容器（不套气泡，左对齐全宽）。 */
-export const WebAssistantMessage = memo(function WebAssistantMessage(props: { message: UIMessage; isStreaming: boolean }) {
-	const { message, isStreaming } = props;
-	const text = uiMessageText(message);
+/** 助手回合：连续 assistant 消息聚合成一轮（对齐桌面 TurnRow 语义）。
+ *
+ * - 过程内容（合并后的思考块/工具卡/中间回复）收进「执行过程」折叠容器，
+ *   摘要条对齐桌面 ProcessSummaryToggle（ListTree + 计数）；
+ * - 最后一段非空正文常驻容器外，流式中即正在生成的文本（不被折叠卸载）；
+ * - 操作行（复制/分享）只挂回合尾，中间回复不再各自携带；
+ * - 流式中过程组自动展开（实时看过程），结束回落折叠（历史紧凑），手动开合优先。
+ */
+export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: AssistantTurn; isStreaming: boolean }) {
+	const { turn } = props;
+	const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+	const processOpen = manualOpen ?? props.isStreaming;
+	const hasProcess = turn.segments.length > 0;
 	return (
-		<div className="group/assistant w-full min-w-0">
-			{message.parts.map((part, index) => {
-				if (part.type === "reasoning") {
-					return <WebThinkingBlock key={index} text={part.text} running={isStreaming} />;
-				}
-				if (part.type === "dynamic-tool" || (typeof part.type === "string" && part.type.startsWith("tool-"))) {
-					// v7：静态工具 part.type 为 `tool-${toolName}`（tool-input-start 无 dynamic 标志），
-					// 动态工具为 "dynamic-tool"；toolName/toolCallId/state 都直接挂在 part 上
-					return <WebToolCard key={index} part={part as unknown as WebToolPart} />;
-				}
-				if (part.type === "text") {
-					return (
-						<Fragment key={index}>
-							{part.text ? (
-								<div className="timeline-inline-text">
-									<WebAssistantText text={part.text} isStreaming={isStreaming} />
-								</div>
+		<div className="group/assistant flex w-full min-w-0 flex-col gap-2">
+			{hasProcess ? (
+				<div className="execution-fold" data-open={processOpen}>
+					<button
+						type="button"
+						className="inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-control text-text-secondary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+						onClick={() => setManualOpen(!processOpen)}
+						aria-expanded={processOpen}
+						title={processOpen ? t("common.collapse") : t("common.expand")}
+					>
+						{processOpen ? <ChevronDown size={13} className="shrink-0 text-text-tertiary" aria-hidden="true" /> : <ChevronRight size={13} className="shrink-0 text-text-tertiary" aria-hidden="true" />}
+						<ListTree size={13} className="shrink-0 text-text-tertiary" aria-hidden="true" />
+						<span className="shrink-0 font-medium">{t("activity.executionTitle")}</span>
+						<span className="inline-flex min-w-0 items-center gap-2 text-text-tertiary">
+							{turn.toolCount > 0 ? (
+								<span className="inline-flex items-center gap-0.5" title={t("activity.executionToolCount", { count: turn.toolCount })}>
+									<Wrench size={12} aria-hidden="true" />
+									<span className="tabular-nums">{turn.toolCount}</span>
+								</span>
 							) : null}
-						</Fragment>
-					);
-				}
-				return null;
-			})}
-			{!isStreaming && text ? (
-				<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/assistant:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
-					<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(text)}>
+							{turn.thinkingCount > 0 ? (
+								<span className="inline-flex items-center gap-0.5" title={t("activity.executionThinkingCount", { count: turn.thinkingCount })}>
+									<Brain size={12} aria-hidden="true" />
+									<span className="tabular-nums">{turn.thinkingCount}</span>
+								</span>
+							) : null}
+							{turn.interimCount > 0 ? (
+								<span className="inline-flex items-center gap-0.5" title={t("activity.executionInterimCount", { count: turn.interimCount })}>
+									<MessagesSquare size={12} aria-hidden="true" />
+									<span className="tabular-nums">{turn.interimCount}</span>
+								</span>
+							) : null}
+						</span>
+					</button>
+					{processOpen ? (
+						<div className="execution-fold-details mt-0.5 flex flex-col">
+							{turn.segments.map((segment) => {
+								if (segment.kind === "thinking") {
+									return <WebThinkingBlock key={segment.id} text={segment.texts.join("\n\n")} running={props.isStreaming} />;
+								}
+								if (segment.kind === "tool") {
+									return <WebToolCard key={segment.id} part={segment.part} />;
+								}
+								return (
+									<div key={segment.id} className="timeline-inline-text">
+										<WebAssistantText text={segment.text} />
+									</div>
+								);
+							})}
+							<button
+								type="button"
+								className="mt-1 inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-micro text-text-tertiary transition-colors hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+								onClick={() => setManualOpen(false)}
+							>
+								<ChevronUp size={12} aria-hidden="true" />
+								{t("common.collapse")}
+							</button>
+						</div>
+					) : null}
+				</div>
+			) : null}
+			{turn.finalText ? (
+				<div className="timeline-inline-text">
+					<WebAssistantText text={turn.finalText} isStreaming={props.isStreaming} />
+				</div>
+			) : null}
+			{!props.isStreaming && turn.finalText ? (
+				<div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/assistant:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
+					<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(turn.finalText)}>
 						<Copy className="size-3.5" aria-hidden="true" />
 					</ActionButton>
-					<ActionButton label={t("web.shareReply")} onClick={() => void shareWebText(t("web.shareReply"), text)}>
+					<ActionButton label={t("web.shareReply")} onClick={() => void shareWebText(t("web.shareReply"), turn.finalText)}>
 						<Share2 className="size-3.5" aria-hidden="true" />
 					</ActionButton>
 				</div>
@@ -578,6 +730,10 @@ export function WebTimeline(props: {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [messages, streaming]);
 
+	// 回合聚合：连续 assistant 消息合并成「过程组 + 常驻正文」（桌面 TurnRow 语义）。
+	const timelineEntries = useMemo(() => groupTimelineEntries(messages), [messages]);
+	const lastEntryId = timelineEntries.length > 0 ? timelineEntries[timelineEntries.length - 1].id : "";
+
 	return (
 		<section className="message-timeline relative h-full min-h-0 flex-1 overflow-y-auto" ref={timelineRef} onScroll={updateScrollState}>
 			<div className="message-list flex flex-col gap-4 p-4 pb-2 sm:px-6">
@@ -597,12 +753,20 @@ export function WebTimeline(props: {
 					</div>
 				) : (
 					<>
-						{messages.map((message) => (
-							<div key={message.id} id={`web-msg-${message.id}`} className="scroll-mt-24">
-								{message.role === "user" ? (
-									<WebUserBubble message={message} canManage={props.canManageMessages} onEdit={props.onEditMessage} onDelete={props.onDeleteMessage} onResend={props.onResendMessage} />
+						{timelineEntries.map((entry) => (
+							<div key={entry.id} id={`web-msg-${entry.id}`} className="scroll-mt-24">
+								{entry.kind === "user" ? (
+									<WebUserBubble message={entry.message} canManage={props.canManageMessages} onEdit={props.onEditMessage} onDelete={props.onDeleteMessage} onResend={props.onResendMessage} />
 								) : (
-									<WebAssistantMessage message={message} isStreaming={streaming && message === messages[messages.length - 1]} />
+									<>
+										{/* 回合聚合后锚点补偿：回合内非首条消息保留 web-msg-{id} 定位（跳转/分支定位用） */}
+										{entry.turn.messageIds
+											.filter((messageId) => messageId !== entry.id)
+											.map((messageId) => (
+												<span key={messageId} id={`web-msg-${messageId}`} className="sr-only" />
+											))}
+										<WebAssistantTurn turn={entry.turn} isStreaming={streaming && entry.id === lastEntryId} />
+									</>
 								)}
 							</div>
 						))}
