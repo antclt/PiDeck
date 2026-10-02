@@ -411,7 +411,7 @@
 | A1 | [x] | 作用域/环境/资源身份/配置安全写入 | `shared/types/piResources.ts`、`piConfigFileStore.ts`、`types/proper-lockfile.d.ts`、依赖声明 | A0 | 提交 `42f6ffda` |
 | A2 | [x] | 原生规则与整包停用/恢复 | `piResourceRules.ts`、`PiResourceConfigService.ts`、`PiResourceStateStore.ts` | A1 | 提交 `bed19aa1` |
 | A3 | [x] | 旧记录迁移、备份、失败恢复 | `piResourceMigration.ts`、`piResourceMigrationRunner.ts`、`ProjectResourceManager` 读写、启动装配 | A2 | 提交 `aef62bfd`、`37b38180` |
-| A4 | [~] | 管理入口切原生，三种扩展 UI、项目三态 | 已做：原生内置扩展开关 + `PiBuiltinExtensionsPanel`（全局/项目）<br>待做：Skills/Prompts/Extensions 三页改为从原生配置投影状态（当前仍读旧禁用列表）、项目资源页内置扩展三态展示 | A2/A3 | 部分提交 `99348296`；剩余见 A4-remaining |
+| A4 | [x] | 管理入口切原生，三种扩展 UI、项目三态 | 原生内置扩展开关 + 面板；技能/提示词/扩展三页与项目侧开关全部改走原生过滤规则，列表状态按原生条目投影；项目继承覆盖写「绝对路径 plain + 精确规则」并可恢复继承 | A2/A3 | 提交 `99348296`、`00982a6b`、`7645e283`、`83c2aeb5`、`184b5e68`、`4fec5ccb` |
 | A5 | [~] | 退出三类 argv 白名单 | 已做：启动期迁移（迁移完成后旧列表清空，三个 resolver 自然返回 `null`，启动参数回到 pi 原生发现）<br>待做：删除白名单专属 IPC/提示与 `appendBuiltInExtensionSpecifierArgs` 兜底路径的最终清理 | A3/A4 | 部分提交 `37b38180` |
 | M1 | [x] | MCP 原生 schema、项目 scope、导入/备份 | `mcpConfig.ts`、`types/mcp.ts`、`mcpImport.ts`、`ConfigManager`、system IPC、`ConfigBackupManager` | A1 | 提交 `23db0c91`、`d17a51bd` |
 | M2 | [x] | CLI 环境、状态、OAuth 操作生命周期 | `piMcpCli.ts`、`systemIpc.ts`、共享通道/preload、`tests/piMcpCli.test.mjs` | A1/M1 | 提交 `af44d658` |
@@ -419,11 +419,18 @@
 | T1 | [x] | 全局工具单字段与 codemode 子设置 | `defaultTools.ts`、`DefaultToolsInput.tsx`、`SettingsTab.tsx` | A1/A4/M1 | 提交 `4a720b1d` |
 | V1 | [~] | 行为回归、更新说明与交接 | 全量测试与 typecheck 已跑（见下）；E2E 未跑 | 全部 | 见 12.3 |
 
-**A4-remaining / A5-remaining 的具体范围**（这些是本计划尚未交付的部分，不是「可选优化」）：
+**A5-remaining 的具体范围**（这是本计划尚未交付的部分，不是「可选优化」）：
 
-1. **技能/提示词/扩展三页的状态来源**：三页目前仍把 `disabledSkills/disabledPrompts/disabledExtensions` 当作启用状态展示；迁移完成后这些字段已被清空，界面会把所有资源显示为「启用」，而实际生效的是原生规则。需要改成读 `piResourcesSummary` 的 `entries` 投影（或直接调用 `readSummary` + 资源列表求交集）。
-2. **项目资源页的继承三态**：`pideckDisabledGlobal*` 字段迁移后不再写入，项目页需要改走原生 `+/-` 规则（`PiResourceConfigService.setFileResourceEnabled` 已具备能力，缺 UI 接线）。
-3. **白名单残留清理**：`extensions:set-whitelist-disabled` IPC 与其 UI 开关、`whitelistSkipNotice`、`resolveEnabled*Paths` 的启动注入分支——需要确认「所有用户迁移完成后」再删，否则会重新打开尚未迁移的禁用项。**在迁移尚未覆盖全部环境前保留这些代码是刻意的安全设计。**
+**白名单残留清理**：`extensions:set-whitelist-disabled` IPC 与其 UI 开关、`whitelistSkipNotice`、
+`resolveEnabled*Paths` 的启动注入分支——需要确认「所有用户迁移完成后」再删，否则会重新打开尚未迁移的禁用项。
+
+**在迁移尚未覆盖全部环境前保留这些代码是刻意的安全设计**：当前的实际行为是「迁移成功 → 旧列表清空 →
+三个 resolver 返回 null → 启动参数回到 pi 原生发现」，即白名单自动退役；迁移未完成的环境继续走白名单，
+不会丢用户的禁用意图。等确认迁移覆盖后再删残留代码。
+
+**A4 遗留的一处展示细节**：项目资源页「继承的全局」行现在按原生投影显示（ExtensionManager /
+resourceDiscovery 读原生条目），但页面顶部仍展示旧的 `pideckDisabledGlobal*` 覆盖计数徽标；
+迁移后该计数恒为 0，属于显示冗余而非功能错误，可随 A5 清理一并去掉。
 
 说明：`piProcessSkillResolvers.ts` 位于 skills 域，prompt 位于 prompts 域，extension 位于 extensions 域。文件是否删除由调用者检查决定，不按表格批量删除。新单模块控制在约 400 行，超过 600 行必须拆分。
 
