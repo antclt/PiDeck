@@ -2,16 +2,7 @@ import { ipcMain } from "electron";
 import type { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
 import { FeishuBridge, type SessionRuntimeBindingGateway } from "../feishu/FeishuBridge";
-import {
-	listBots,
-	getBot,
-	addBot as addFeishuBot,
-	removeBot as removeFeishuBot,
-	updateBot as updateFeishuBot,
-	getDecryptedBotAppSecret,
-	getSessionBotId,
-	setSessionBotId,
-} from "../feishu/FeishuConfig";
+import { listBots, getBot, addBot as addFeishuBot, removeBot as removeFeishuBot, updateBot as updateFeishuBot, getDecryptedBotAppSecret, getSessionBotId, setSessionBotId } from "../feishu/FeishuConfig";
 import { feishuT, type FeishuLocale } from "../feishu/FeishuI18n";
 import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuConnectInput } from "../../shared/types/feishu";
 import type { AgentManager } from "../pi/AgentManager";
