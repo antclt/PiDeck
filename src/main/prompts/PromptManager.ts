@@ -44,7 +44,7 @@ export class PromptManager {
 		this.promptsDir = join(home ?? homedir(), ".pi", "agent", "prompts");
 	}
 
-	/** 注入 PiDeck 设置读写：启用后 toggle 同步持久化禁用列表（模板白名单模式的依据）。 */
+	/** 注入 PiDeck 设置读写：旧禁用列表的兼容通道（原生服务未装配时使用；迁移后为空）。 */
 	configureSettings(getSettings: () => AppSettings, patchSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>) {
 		this.settingsProvider = getSettings;
 		this.settingsPatcher = patchSettings;
@@ -80,8 +80,9 @@ export class PromptManager {
 	}
 
 	/**
-	 * 开关模板：写 PiDeck settings 禁用列表（模板白名单模式 --no-prompt-templates/
-	 * --prompt-template 的依据）。内置推荐模板（builtin://，无磁盘文件）不可禁用。
+	 * 开关模板：原生配置优先写 pi settings.json 的 prompts 精确规则；
+	 * 未装配原生服务时退回 PiDeck settings 禁用列表（旧机制，迁移后为空）。
+	 * 内置推荐模板（builtin://，无磁盘文件）不可禁用。
 	 */
 	async toggle(filePath: string, enabled: boolean): Promise<PiPromptTemplateSummary> {
 		const comparablePath = await this.resolveExistingGlobalPath(filePath);
@@ -273,7 +274,7 @@ export class PromptManager {
 				content: raw,
 				userCreated: true,
 				scope: "global",
-				// 禁用状态 = PiDeck settings 禁用列表（模板白名单模式的依据）
+				// 禁用状态 = 原生投影优先；未装配原生服务时退回 PiDeck settings 禁用列表
 				// 优先原生投影（迁移后 disabledPrompts 已清空）；未装配时退回旧列表。
 				enabled: this.nativeEnabledReader?.(fullPath) ?? !this.isDisabledInSettings(name),
 			});

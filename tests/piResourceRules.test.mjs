@@ -91,15 +91,22 @@ test("project package delta disable/enable use native pattern sets, not empty ar
 	assert.equal(isPackageDeltaFullyDisabled({ source: "npm:demo", autoload: false, extensions: [] }), false);
 });
 
-test("projectResourceEnabled reflects native include/exclude ordering", () => {
+test("projectResourceEnabled reflects native include/exclude ordering (pi-verified)", () => {
 	// 无规则 → 启用
 	assert.equal(projectResourceEnabled({ entries: [], value: "/a/x/SKILL.md", baseDir: "/a/x" }), true);
 	// 精确 - 停用
 	assert.equal(projectResourceEnabled({ entries: ["-/a/x/SKILL.md"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), false);
 	// + 覆盖更宽的 ! 排除
 	assert.equal(projectResourceEnabled({ entries: ["!*.md", "+/a/x/SKILL.md"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), true);
-	// - 又覆盖 +
+	// - 又覆盖 +（pi 顺序：排除 → 强制包含 → 强制排除，- 最后生效）
 	assert.equal(projectResourceEnabled({ entries: ["!*.md", "+/a/x/SKILL.md", "-/a/x/SKILL.md"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), false);
-	// 目录名匹配（技能的父目录形态）
-	assert.equal(projectResourceEnabled({ entries: ["-x"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), false);
+	// 裸目录名不匹配（真实冒烟校准：pi 的 matchesAnyExactPattern 只认相对/绝对路径）
+	assert.equal(projectResourceEnabled({ entries: ["-x"], value: "/a/x/SKILL.md", baseDir: "/a/x" }), true, "裸目录名在 pi 里不生效，投影不得显示为已停用");
+	// 父目录相对路径形态：pi 对用户技能的 baseDir 是 agentDir，parentRel = "skills/x"
+	assert.equal(projectResourceEnabled({ entries: ["-x"], value: "/agent/skills/x/SKILL.md", baseDir: "/agent" }), true, "baseDir=agentDir 时 -x 不等于 parentRel(skills/x)，不命中");
+	assert.equal(projectResourceEnabled({ entries: ["-skills/x"], value: "/agent/skills/x/SKILL.md", baseDir: "/agent" }), false, "parentRel 完整形态命中");
+	// baseDir 是技能目录的父目录时，parentRel 才是裸目录名
+	assert.equal(projectResourceEnabled({ entries: ["-x"], value: "/agent/skills/x/SKILL.md", baseDir: "/agent/skills" }), false, "parentRel=x 时 -x 命中");
+	// 父目录绝对路径
+	assert.equal(projectResourceEnabled({ entries: ["-/agent/skills/x"], value: "/agent/skills/x/SKILL.md", baseDir: "/agent" }), false);
 });

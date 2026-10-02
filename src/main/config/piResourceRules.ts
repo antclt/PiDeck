@@ -162,35 +162,54 @@ export function projectResourceEnabled(options: { baseEntries?: readonly string[
 	return evaluate(options.entries);
 }
 
-/** 简化匹配：精确路径、同目录/文件名与 `*` 通配（覆盖 pi 的常用形态）。 */
+/**
+ * 精确规则匹配，**逐条对齐 pi 的 matchesAnyExactPattern**（真实冒烟校准，2026-10-01）：
+ * - 非技能文件：条目 === 相对路径（相对 baseDir）或 === 绝对路径才命中；
+ * - SKILL.md：额外命中父目录的相对路径 / 绝对路径；
+ * - **不匹配裸文件名或裸目录名**——此前实现多加了 basename 匹配，导致投影把
+ *   pi 实际会加载的资源显示成已停用（pi 对 `-目录名` 不生效，冒烟已复现）。
+ * `!`/`+`/`-` 前缀由调用方剥掉后传入；`*` 通配走简化全路径/文件名匹配（仅 `!` 排除用）。
+ */
 function patternMatches(value: string, pattern: string, baseDir: string): boolean {
-	const normalizedValue = value.replace(/\\/g, "/");
-	const normalizedPattern = pattern.replace(/\\/g, "/");
-	const isSkillFile = (normalizedValue.split("/").pop() ?? "") === "SKILL.md";
-	const parentDir = isSkillFile ? normalizedValue.slice(0, normalizedValue.lastIndexOf("/")) : undefined;
-	const parentName = parentDir ? (parentDir.split("/").pop() ?? parentDir) : undefined;
+	const valuePosix = value.replace(/\\/g, "/");
+	const patternPosix = pattern.replace(/\\/g, "/");
+	// normalizeExactPattern：剥掉 "./" 前缀后转 POSIX（pi 同款）。
+	const normalized = patternPosix.startsWith("./") ? patternPosix.slice(2) : patternPosix;
 	const baseDirPosix = baseDir.replace(/\\/g, "/").replace(/\/$/, "");
-	if (!normalizedPattern.includes("*") && !normalizedPattern.includes("?")) {
-		const bareValue = normalizedValue.split("/").pop() ?? normalizedValue;
-		const barePattern = normalizedPattern.split("/").pop() ?? normalizedPattern;
-		if (normalizedValue === normalizedPattern || bareValue === barePattern) return true;
-		if (normalizedValue === `${baseDirPosix}/${normalizedPattern}`) return true;
-		// 技能按父目录匹配（pi 的 matchesAnyExactPattern 对 SKILL.md 也匹配父目录/metric）。
-		if (parentDir) {
-			if (parentDir === normalizedPattern || parentName === normalizedPattern || parentName === barePattern) return true;
-			if (parentDir === `${baseDirPosix}/${normalizedPattern}`) return true;
+	const rel = baseDirPosix ? relativePosix(baseDirPosix, valuePosix) : valuePosix;
+	const isSkillFile = (valuePosix.split("/").pop() ?? "") === "SKILL.md";
+	const parentDir = isSkillFile ? valuePosix.slice(0, valuePosix.lastIndexOf("/")) : undefined;
+	const parentRel = parentDir && baseDirPosix ? relativePosix(baseDirPosix, parentDir) : undefined;
+	if (patternPosix.includes("*") || patternPosix.includes("?")) {
+		// 通配（仅 `!` 排除路径用到）：全路径或文件名的简化 glob。
+		const escaped = patternPosix
+			.replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+			.replace(/\*/g, ".*")
+			.replace(/\?/g, ".");
+		try {
+			const re = new RegExp(`^${escaped}$`);
+			return re.test(valuePosix) || re.test(valuePosix.split("/").pop() ?? "") || (parentDir ? re.test(parentDir) : false);
+		} catch {
+			return false;
 		}
-		return false;
 	}
-	const escaped = normalizedPattern
-		.replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-		.replace(/\*/g, ".*")
-		.replace(/\?/g, ".");
-	try {
-		return new RegExp(`^${escaped}$`).test(normalizedValue) || new RegExp(`^${escaped}$`).test(normalizedValue.split("/").pop() ?? "");
-	} catch {
-		return false;
-	}
+	if (normalized === rel || normalized === valuePosix) return true;
+	if (!isSkillFile) return false;
+	return normalized === parentRel || normalized === parentDir;
+}
+
+/** POSIX 版 path.relative（分隔符已归一，纯字符串推导避免跨平台 path 语义差异）。 */
+function relativePosix(from: string, to: string): string {
+	const a = from.split("/");
+	const b = to.split("/");
+	let i = 0;
+	while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+	const up = a
+		.slice(i)
+		.filter((segment) => segment.length > 0)
+		.map(() => "..");
+	const rest = b.slice(i);
+	return [...up, ...rest].join("/");
 }
 
 // ── 原生内置扩展 ────────────────────────────────────────────

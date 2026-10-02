@@ -78,7 +78,7 @@ export class SkillManager {
 		this.skillOverlayProvider = provider;
 	}
 
-	/** 注入 PiDeck 设置读写：启用后 toggle 同步持久化禁用列表（技能白名单模式的依据）。 */
+	/** 注入 PiDeck 设置读写：旧禁用列表的兼容通道（原生服务未装配时使用；迁移后为空）。 */
 	configureSettings(getSettings: () => AppSettings, patchSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>) {
 		this.settingsProvider = getSettings;
 		this.settingsPatcher = patchSettings;
@@ -531,7 +531,7 @@ export class SkillManager {
 		const newSkillPath = isDirectory ? join(newTarget, SKILL_FILE) : newTarget;
 		await writeFile(newSkillPath, this.setFrontmatterName(raw, displayName), "utf8");
 
-		// 禁用列表同步迁移：旧名条目替换为新名，避免孤儿数据与白名单双源漂移
+		// 禁用列表同步迁移：旧名条目替换为新名，避免孤儿数据与原生规则双源漂移
 		await this.migrateDisabledSkillName(skill.name, displayName);
 
 		// 找对应的 location（搜索所有 locations）
