@@ -1520,6 +1520,25 @@ export const zhCN = {
 	"config.dsh.pluginUserUninstallFailed": "卸载失败",
 	"config.dsh.pluginFilesKeepHint": "已从用户补丁层移除；插件文件不在 PiDeck 管理目录内，请手动删除",
 	"config.dsh.pluginHostRestartFailed": "DSH host 重启失败，请到概览页手动重启",
+	"config.dsh.pluginMarket": "插件市场",
+	"config.dsh.pluginMarketHint": "从 DSH 插件市场与 npm 搜索并安装插件（安装目录与 host 隔离，可随时卸载）。安装后需重启 DSH 会话才生效（host 进程启动时读取补丁层）。",
+	"config.dsh.pluginMarketSearchPlaceholder": "搜索插件（名称 / 描述）",
+	"config.dsh.pluginMarketSearch": "搜索",
+	"config.dsh.pluginMarketSearching": "搜索中…",
+	"config.dsh.pluginMarketEmpty": "没有匹配的插件。",
+	"config.dsh.pluginMarketSourceMarket": "市场",
+	"config.dsh.pluginMarketSourceNpm": "npm",
+	"config.dsh.pluginMarketUiOnlyBadge": "Web UI",
+	"config.dsh.pluginMarketUiOnlyWarning": "该插件主要提供 DSH Web 界面功能，PiDeck 无 Web 客户端，安装后无可见效果。",
+	"config.dsh.pluginMarketUiOnlyConfirm": "仍要安装",
+	"config.dsh.pluginMarketInstall": "安装",
+	"config.dsh.pluginMarketInstalling": "安装中…",
+	"config.dsh.pluginMarketInstallFailed": "安装失败",
+	"config.dsh.pluginMarketInstalledRestartHint": "安装完成，重启 DSH 会话后生效",
+	"config.dsh.pluginMarketInstalledUiOnlyHint": "安装完成（该插件提供 Web 界面功能，PiDeck 无可见效果），重启 DSH 会话后生效",
+	"config.dsh.pluginMarketInstalledTitle": "已安装",
+	"config.dsh.pluginMarketInstalledEmpty": "暂无已安装的用户插件（上方「插件列表」子页可查看 host 实际加载的全部条目）。",
+	"config.dsh.pluginMarketInstallExact": "按输入安装",
 	"config.dsh.pluginEnabled": "启用",
 	"config.dsh.pluginDisabled": "停用",
 	"config.dsh.notStarted": "DSH host 未运行。",
@@ -5012,7 +5031,6 @@ export const zhCN = {
 	"providerLogin.errorHint.region": "该供应商在你所在的国家/地区不可用，需要走代理网络才能完成授权。",
 	"providerLogin.errorHint.network": "无法连接供应商服务器，请检查网络或代理设置后重试。",
 	"providerLogin.errorHint.codeExpired": "授权码已失效，请重新发起登录。",
-} as const;
 
 	"web.themeLight": "亮色",
 	"web.themeDark": "暗色",
@@ -5052,4 +5070,6 @@ export const zhCN = {
 	"web.skillToggle": "启用或禁用技能",
 	"web.extensionToggle": "启用或禁用扩展",
 	"web.assetsLoading": "加载中…",
+} as const;
+
 export type TranslationKey = keyof typeof zhCN;

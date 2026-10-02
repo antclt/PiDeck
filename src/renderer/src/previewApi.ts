@@ -549,6 +549,12 @@ export function createPreviewApi(): PiDesktopApi {
 			listDshDynamicPlugins: async () => [],
 			listDshStaticPlugins: async () => [],
 			uninstallDshUserPlugin: async () => ({ rowRemoved: false, reason: "preview mode" }),
+			// 预览模式无主进程 npm/市场链路：搜索与安装拒绝、已装列表为空，满足接口契约
+			searchDshPluginMarket: async () => ({ entries: [], warnings: ["preview mode"] }),
+			installDshUserPlugin: async () => {
+				throw new Error("preview mode: DSH plugin install is not available");
+			},
+			listDshUserPlugins: async () => [],
 			installDshPlugin: async () => undefined,
 			runDshPlugin: async () => undefined,
 			stopDshPlugin: async () => undefined,
