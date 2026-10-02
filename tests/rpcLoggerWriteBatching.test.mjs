@@ -30,8 +30,11 @@ function createHarness() {
 		},
 		readdir: async () => [],
 		rename: async () => undefined,
-		stat: async () => {
-			throw new Error("not needed");
+		// readEntryIds 走 stat 预检的有界读：内存 FS 必须能报 size，否则去重窗口永远为空
+		stat: async (filePath) => {
+			const content = files.get(filePath);
+			if (content === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+			return { mtimeMs: 1, size: content.length };
 		},
 		unlink: async () => undefined,
 		writeFile: async () => undefined,

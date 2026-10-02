@@ -43,8 +43,8 @@ test("App 装配层写 data-tab-font-size，未单独设置时回落界面字号
 	assert.match(app, /root\.dataset\.tabFontSize\s*=\s*settings\.tabBarFontSize\s*\?\?\s*uiFontSize/);
 	// 依赖数组必须登记，否则改了设置不重算（视觉要到下次渲染才生效）
 	assert.match(app, /\[[^\]]*settings\.tabBarFontSize[^\]]*\]/);
-	// 首拉 settings 前的兜底默认值
-	assert.match(app, /tabBarFontSize:\s*null/);
+	// 首拉 settings 前的兜底默认值已抽到 shared/types/settings.ts 的 createDefaultAppSettings
+	assert.match(settingsType, /tabBarFontSize:\s*null/);
 });
 
 test("foundation.css：四档齐备，且逐档与界面轨 micro 同值（保证默认视觉不变）", () => {

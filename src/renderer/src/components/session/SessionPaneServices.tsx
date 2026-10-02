@@ -63,7 +63,6 @@ export type SessionPaneServices = {
 	/** 分屏栏分支变化（切换成功/失败回读）后的回写通知：App 只在 projectId 为当前聚焦项目时采纳，避免非聚焦栏污染全局 Git 抽屉 */
 	onProjectGitChanged?: (projectId: string, info: GitBranchInfo) => void;
 	showThinking: boolean;
-	validCommandNames: Set<string>;
 	validFilePaths: Set<string>;
 	terminalStatesByOwner: TerminalDockStateByOwner;
 	availableTerminalHeight: number;

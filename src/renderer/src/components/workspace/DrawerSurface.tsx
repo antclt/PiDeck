@@ -1,5 +1,5 @@
 import { BrowserSurface } from "./BrowserSurface";
-import { GitDrawerHost } from "./GitDrawerHost";
+import { GitDrawerHost, type GitDrawerApi } from "./GitDrawerHost";
 import { RewindPanel } from "./RewindPanel";
 import { RpcLogPanel } from "./RpcLogPanel";
 import { DrawerContent } from "../app/AppParts";
@@ -10,22 +10,23 @@ import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
 import type { RpcLogEntry } from "../../../../shared/types/rpcLog";
 import { sessionPillOf, type SessionFilterPill } from "../../sessionFilterPills";
 import { t } from "../../i18n";
+import type { CommitEntry, FileTreeNode, GitBranchInfo, GitChangedFile, GitResourceGroupType, Project, SessionSummary } from "../../../../shared/types";
+import type { PiDesktopApi } from "../../../../preload";
 
-// ── port objects (typed loosely — type tightening is a follow-up task) ──
+// ── port objects（字段类型直接取自消费组件的 props 契约：GitDrawerHost / DrawerContent）──
 
 export interface DrawerGitPort {
 	enableGitManagement: boolean;
 	activeProjectId: string | undefined;
-	gitDrawerDiff: any;
 	gitDiffDisplayMode: string;
-	openCommitFileDiff: any;
-	openWorkspaceFileDiff: any;
+	openCommitFileDiff: (commit: CommitEntry, file: GitChangedFile, repoPath?: string) => void | Promise<void>;
+	openWorkspaceFileDiff: (group: GitResourceGroupType, path: string, repoPath?: string) => void | Promise<void>;
 	toggleGitDiffDisplayMode: () => void;
 	closeGitDiff: () => void;
-	gitApi: any;
-	gitInfo: any;
-	switchBranch: any;
-	createBranch: any;
+	gitApi: GitDrawerApi;
+	gitInfo: GitBranchInfo;
+	switchBranch: (branch: string) => void;
+	createBranch: (branchName: string) => void;
 }
 
 export interface DrawerChromePort {
@@ -51,32 +52,40 @@ export interface DrawerRpcLogPort {
 	onClose: () => void;
 }
 
+/** 文件树右键菜单状态（App 级 setFileMenu 的载荷） */
+export interface DrawerFileMenu {
+	node: FileTreeNode;
+	x: number;
+	y: number;
+}
+
 export interface DrawerFilesPort {
-	sessionsProject: any;
+	sessionsProject: Project | undefined;
 	sessionsProjectId: string | undefined;
-	files: any[];
-	sessions: any[];
+	files: FileTreeNode[];
+	sessions: SessionSummary[];
 	sessionSourceFilter: Record<string, Set<SessionFilterPill> | null>;
 	sessionHistoryLoading: boolean;
 	expandedDirs: Set<string>;
 	onToggleDirectory: (dir: string) => void;
 	onCollapseAllDirectories: () => void;
-	setFileMenu: any;
-	refreshFiles: any;
+	setFileMenu: (menu: DrawerFileMenu | null) => void;
+	refreshFiles: (projectId: string | undefined) => void | Promise<void>;
 	showToast?: (message: string, duration?: number) => void;
-	projects: any[];
-	refreshProjectSessions: any;
-	runOpenSidebarSession: any;
-	isSameSessionPath: any;
-	runCopySession: any;
-	runExportHistorySession: any;
-	runDeleteHistorySession: any;
-	viewFilePath: any;
-	openFilePath: any;
+	projects: Project[];
+	/** 返回 ProjectSessionRefreshPromise（自带防未处理 rejection 的 thenable）；调用方统一 void 丢弃 */
+	refreshProjectSessions: (projectId: string, force?: boolean) => unknown;
+	runOpenSidebarSession: (projectId: string, session: SessionSummary) => void | Promise<void>;
+	isSameSessionPath: (pathA: string | undefined, pathB: string, mode: "wsl" | "native") => boolean;
+	runCopySession: (sessionId: string, projectId: string | undefined) => void | Promise<void>;
+	runExportHistorySession: (session: SessionSummary) => void | Promise<void>;
+	runDeleteHistorySession: (session: SessionSummary) => void | Promise<void>;
+	viewFilePath: (path: string, openMode?: "preview" | "permanent") => void;
+	openFilePath: (path: string) => void;
 	/** 在中间栏编辑器打开（可编辑 tab）；Git 变更行内“打开”按钮使用 */
-	openEditorTab: any;
-	api: any;
-	t: any;
+	openEditorTab: (path: string) => void;
+	api: PiDesktopApi;
+	t: typeof t;
 	/** 当前项目根目录：文件面板空白处拖入/粘贴/右键菜单的落点 */
 	projectRoot: string | undefined;
 	/** 从 OS 拖入文件（复制到目标目录） */
@@ -173,7 +182,7 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 						files={files.files}
 						sessions={
 							files.sessionsProjectId && files.sessionSourceFilter[files.sessionsProjectId as string]
-								? files.sessions.filter((s: any) => !s.parentSessionPath && files.sessionSourceFilter[files.sessionsProjectId as string]!!.has(sessionPillOf(s))).concat(files.sessions.filter((s: any) => s.parentSessionPath && files.sessionSourceFilter[files.sessionsProjectId as string]!!.has(sessionPillOf(s))))
+								? files.sessions.filter((s) => !s.parentSessionPath && files.sessionSourceFilter[files.sessionsProjectId as string]!!.has(sessionPillOf(s))).concat(files.sessions.filter((s) => s.parentSessionPath && files.sessionSourceFilter[files.sessionsProjectId as string]!!.has(sessionPillOf(s))))
 								: files.sessions
 						}
 						sessionsLoading={files.sessionHistoryLoading}
@@ -181,12 +190,12 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 						onToggleDirectory={files.onToggleDirectory}
 						onCollapseAllDirectories={files.onCollapseAllDirectories}
 						onClose={chrome.onCloseDrawer}
-						onFileContextMenu={(node: any, x: number, y: number) => files.setFileMenu({ node, x, y })}
+						onFileContextMenu={(node, x, y) => files.setFileMenu({ node, x, y })}
 						onRefreshFiles={() => {
 							files.refreshFiles(git.activeProjectId);
 						}}
 						onOpenFolder={() => {
-							const p = files.projects.find((p: any) => p.id === git.activeProjectId);
+							const p = files.projects.find((p) => p.id === git.activeProjectId);
 							if (p) {
 								void files.api.files.open(p.path).catch((error: unknown) => {
 									files.showToast?.(
@@ -206,15 +215,15 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 							const projectId = files.sessionsProjectId ?? git.activeProjectId;
 							if (projectId) void files.refreshProjectSessions(projectId, true);
 						}}
-						onOpenSession={(session: any) => void files.runOpenSidebarSession(files.sessionsProjectId ?? git.activeProjectId ?? "", session)}
+						onOpenSession={(session) => void files.runOpenSidebarSession(files.sessionsProjectId ?? git.activeProjectId ?? "", session)}
 						onRenameSession={async (filePath: string, newName: string) => {
-							const session = files.sessions.find((candidate: any) => files.isSameSessionPath(candidate.filePath, filePath, candidate.wsl ? "wsl" : "native"));
+							const session = files.sessions.find((candidate) => files.isSameSessionPath(candidate.filePath, filePath, candidate.wsl ? "wsl" : "native"));
 							if (!session) return;
 							await files.api.sessions.updateRecord(session.id, { title: newName });
 							const projectId = files.sessionsProjectId ?? git.activeProjectId;
 							if (projectId) await files.refreshProjectSessions(projectId, true);
 						}}
-						onCopySession={(session: any) => files.runCopySession(session.id, files.sessionsProjectId ?? git.activeProjectId)}
+						onCopySession={(session) => files.runCopySession(session.id, files.sessionsProjectId ?? git.activeProjectId)}
 						onExportSession={files.runExportHistorySession}
 						onDeleteSession={files.runDeleteHistorySession}
 						onViewFile={files.viewFilePath}

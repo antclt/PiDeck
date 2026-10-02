@@ -15,6 +15,7 @@ import { FileLinkBaseProvider } from "./FileLinkBase";
 import { SessionView } from "./SessionView";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { usePaneGitInfo } from "../../hooks/usePaneGitInfo";
+import { useSessionCommandNames } from "../../hooks/useSessionCommandNames";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { requireSessionCommand, sessionCommandFailureToast, toSessionRuntimeTarget } from "../../utils/sessionCommands";
@@ -107,6 +108,11 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
 		},
 		[paneOwnerKey, services.setTerminalCollapsedByOwnerKey],
 	);
+
+	// 本栏命令白名单：历史消息 /命令 chip 按本会话的 runtime 命令表渲染。
+	// 历史缺陷：白名单挂在 App 全局 state（跟随聚焦会话），分屏时另一栏的命令 chip 会
+	// 拿错白名单；改为栏级 hook 后各栏独立加载自己会话的命令表。
+	const paneValidCommandNames = useSessionCommandNames(currentSessionId);
 
 	// 本栏 Git 分支状态：按本会话项目（paneProjectId，即所属 worktree）加载/轮询/切换。
 	// 历史缺陷：分屏双栏共用 App 聚焦项目的 services.gitInfo——点击任一栏，所有栏的
@@ -251,7 +257,7 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
 					isRestarting={runtime.isRestartingThisAgent}
 					sessionDuration={runtime.sessionDuration}
 					showThinking={services.showThinking}
-					validCommandNames={services.validCommandNames}
+					validCommandNames={paneValidCommandNames}
 					validFilePaths={services.validFilePaths}
 					onPreviewImage={services.onPreviewImage}
 					onOpenFile={openPaneFile}

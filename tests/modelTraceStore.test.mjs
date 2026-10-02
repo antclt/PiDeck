@@ -165,3 +165,19 @@ describe("buildModelTraceLogEntry: 时间线紧凑条目", () => {
 		assert.equal(entry.summary, "HTTP 502");
 	});
 });
+
+describe("ModelTraceStore: 有界回读", () => {
+	it("超过回读上限的快照按损坏处理返回 null（内存保护，摘要不受影响）", async () => {
+		const { store, root } = makeStore();
+		// 稀疏文件：瞬时占位 65MB（上限 64MB），不实际写内容
+		const bigPath = join(root, "model-agent-big-tracetoolong000000000000000001.json");
+		const fsPromises = await import("node:fs/promises");
+		const handle = await fsPromises.open(bigPath, "w");
+		try {
+			await handle.truncate(65 * 1024 * 1024);
+		} finally {
+			await handle.close();
+		}
+		assert.equal(await store.read("agent-big", "tracetoolong000000000000000001"), null);
+	});
+});

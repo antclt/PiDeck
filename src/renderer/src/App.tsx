@@ -52,7 +52,6 @@ import {
 	toggleRpcLoggingAgent,
 } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
-import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
 import { type SidebarActions } from "./components/sidebar/SidebarContent";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
@@ -179,10 +178,9 @@ import { navigateTo } from "./components/app/BrowserPanel";
 import { flattenFiles, fileNodeDragPayloadToRef, mergeCommands, getToolFilePath, getToolNewContent, getToolChangedLineCount } from "./components/app/AppUtils";
 // ProjectResourcesModal 仅在打开资源弹层时加载
 const ProjectResourcesModal = lazy(() => import("./components/app/ProjectResourcesModal").then((m) => ({ default: m.ProjectResourcesModal })));
-import { createDefaultExternalEditorSettings, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE } from "../../shared/types";
+import { createDefaultAppSettings } from "../../shared/types";
 import { hydrateImageContents } from "../../shared/imageContentSrc";
 import type { AgentRuntimeState, AgentTab, SessionRuntimeTarget, AppInfo, AppSettings, ChatMessage, FileTreeNode, ImageContent, PiCommand, Project, AgentBackend, SessionLaunchPreferences, SessionRecord, SessionSummary, ComposerAgentMode, TerminalTarget, GitBranchInfo, FocusTargetPayload } from "../../shared/types";
-import { DEFAULT_TOAST_DURATION_MS } from "../../shared/types";
 
 export function App() {
 	if (missingElectronPreload) {
@@ -268,8 +266,6 @@ export function App() {
 	const expandedProjects = useAtomValue(sidebarExpandedProjectIdsAtom);
 	const compactMiddlePackagesEnabled = useAtomValue(compactMiddlePackagesAtom);
 
-	const [commands, setCommands] = useState<PiCommand[]>([]);
-	const [promptTemplateList] = useState<Array<{ name: string; path: string; description: string; content: string; argumentHint?: string }>>([]);
 	const jumpToMessageRef = useRef<((messageId: string) => void) | null>(null);
 	// TECH DEBT (Phase 3): promptByAgent / attachedImagesByAgent legacy mirrors removed.
 	// All drafts/attachments go through Session atoms (setSessionDraft / setSessionAttachments).
@@ -668,132 +664,7 @@ export function App() {
 	// 跟随时间模式到达浅/暗边界的时间戳；null = 尚未到达边界（用当前时刻解析）。
 	const [scheduleNow, setScheduleNow] = useState<Date | null>(null);
 	const [expandedProjectsReady, setExpandedProjectsReady] = useState(false);
-	const [settings, setSettings] = useState<AppSettings>({
-		useNativeTitleBar: true,
-		showNativeMenu: false,
-		sendShortcut: "enter-send",
-		defaultAgentBackend: "pi",
-		theme: "system",
-		themeScheduleLightStart: "07:00",
-		themeScheduleDarkStart: "19:00",
-		accent: "default",
-		themeSkin: "classic-green",
-		customThemeOverrides: {},
-		backgroundImage: "",
-		backgroundImageOpacity: 0.8,
-		language: "system",
-		startupWindowMode: "last",
-		piEnvironmentChecked: false,
-		/** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
-		disabledExtensions: [],
-		disableExtensionWhitelist: false,
-		/** 技能禁用列表：与 SettingsStore 默认一致，空数组 = 不启用技能白名单 */
-		disabledSkills: [],
-		/** 提示词模板禁用列表：与 SettingsStore 默认一致，空数组 = 不启用模板白名单 */
-		disabledPrompts: [],
-		sessionTabOpenMode: "preview",
-		// 与 main SettingsStore 默认一致：标题生成默认开启，侧栏不再全是「新会话」
-		autoSessionTitle: true,
-		// 与 main SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
-		busySendDelivery: "steer",
-		// 遗留字段：快捷消息已改存独立配置文件 userData/quick-messages.json（见 useQuickMessages），
-		// 这里保留字段只为满足 AppSettings 类型，内容不再被读取。
-		quickMessages: [],
-		enableGitManagement: true,
-		gitCommitMessagePrompt: "请根据以下 git diff 生成一条中文 git commit message。\n\n变更描述：\n{diff}\n\nGitmoji 对应关系：\n✨ feat - 新功能\n🐛 fix - Bug 修复\n📚 docs - 文档更新\n💎 style - 代码格式\n♻️ refactor - 重构\n🧪 test - 测试\n🔧 chore - 构建/工具",
-		gitCommitMessageProvider: "",
-		gitCommitMessageModel: "",
-		gitExecutablePath: "",
-		dshRunnerNodePath: "",
-		closeToTray: true,
-		singleInstance: true,
-		enableNotifications: true,
-		// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致（默认不打扰）
-		askNotificationEnabled: false,
-		// 人文关怀提醒默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不关闭提醒
-		agentCountReminderEnabled: true,
-		// 公告通知默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不误关提醒
-		announcementNotificationEnabled: true,
-		// toast 展示时长：与主进程 defaultSettings 同源（全局统一口径）
-		toastDurationMs: DEFAULT_TOAST_DURATION_MS,
-		// showThinking 由 pi agent 的 hideThinkingBlock 控制，启动后从主进程加载的真实值会覆盖此处
-		showThinking: true,
-		// 流式对话行为：默认自动展开中间过程（与 SettingsStore 一致）
-		expandInterimDuringStream: true,
-		// 过程组显示默认开启：与主进程 SettingsStore 默认一致，首屏即按过程组渲染
-		processGroupDisplay: true,
-		showDevTools: false,
-		developerDiagnostics: false,
-		// Electron Chromium 沙箱默认关，与主进程历史兼容策略一致
-		electronChromiumSandbox: false,
-		piProxyEnabled: false,
-		piProxyUrl: "http://127.0.0.1:7890",
-		piProxyBypass: "localhost,127.0.0.1,::1",
-		piProxyProviders: [],
-		piProxyModels: [],
-		desktopProxyEnabled: false,
-		desktopProxyUrl: "http://127.0.0.1:7890",
-		desktopProxyBypass: "localhost,127.0.0.1,::1",
-		customPiPath: "",
-		piCustomPaths: [],
-		wslEnabled: false,
-		wslDistro: "Ubuntu",
-		wslUser: "root",
-		telemetryEnabled: true,
-		webServiceEnabled: false,
-		webServiceHost: "0.0.0.0",
-		webServicePort: 8765,
-		webServiceRequiresAuth: true,
-		rpcTimeout: 600_000,
-		linkOpenMode: "external",
-		workspaceContentOpenMode: "split",
-		contentMaxWidth: 1800,
-		chatContentWidthPct: 80,
-		navigationMode: "tabs",
-		sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
-		maxEditorFileSizeMB: 5,
-		externalEditors: createDefaultExternalEditorSettings(),
-
-		// 桌面宠物默认关闭：关闭后应用与现状完全一致，零回归
-		petEnabled: false,
-		petId: "clawd",
-		petAlwaysOnTop: true,
-		petScale: DEFAULT_PET_SCALE,
-		petPatrolEnabled: true,
-		petPatrolPauseMin: 5,
-		// 闲置 agent 自动释放：与 main SettingsStore 默认值保持一致，避免启动时闪烁
-		idleAgentAutoRelease: true,
-		idleAgentKeepCount: 5,
-		idleAgentTimeoutMin: 60,
-		cuaEnabled: false,
-		favoriteModels: [],
-
-		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
-		fontSize: "medium",
-		uiFontSize: null,
-		tabBarFontSize: null,
-		chatFontSize: null,
-		inputFontSize: null,
-		zoomFactor: 1,
-		fontFamilyBase: "system",
-		fontFamilyBaseCustom: "",
-		fontFamilyMono: "system-mono",
-		fontFamilyMonoCustom: "",
-		removedBuiltInExtensions: [],
-		// 声音提醒：与主进程 defaultSettings 保持一致（完成/异常开、等待输入关）
-		soundAlert: createDefaultSoundAlertSettings(),
-		imageGenSize: "unset",
-		imageGenWatermark: false,
-		imageGenOutputFormat: "png",
-		autoDownloadUpdates: true,
-		// 与主进程 defaultSettings 保持一致：更新源默认 GitHub 官方，自定义镜像前缀留空
-		updateSource: "github",
-		customUpdateSourceUrl: "",
-		// 与主进程 defaultSettings 保持一致：offline 默认关，让模型目录随启动刷新
-		piRpcOffline: false,
-		piRpcNoExtensions: false,
-		piRpcNoSkills: false,
-	});
+	const [settings, setSettings] = useState<AppSettings>(createDefaultAppSettings);
 
 	// 已解析明暗（system 跟 OS、schedule 跟本地时钟、其余原样）：进下方外观应用与壁纸注入两个 effect
 	// 的依赖，明暗翻转时壁纸 inline token 才会按新主题重算（issue #297）。
@@ -863,7 +734,11 @@ export function App() {
 	});
 	const [systemLanguage, setSystemLanguage] = useState<string | null>(null);
 	const resolvedLocale = resolveLocale(settings.language, systemLanguage ?? undefined);
-	setI18nLocale(resolvedLocale);
+	// i18n 是模块级单例：切语言属于外部系统副作用，必须放 effect（渲染期直写在 StrictMode 双渲染下会与其他实例竞态）；
+	// 用 useLayoutEffect 保证首帧绘制前生效，避免旧语言闪一帧
+	useLayoutEffect(() => {
+		setI18nLocale(resolvedLocale);
+	}, [resolvedLocale]);
 
 	// ===== Pi 更新/安装/代理 hook (H1) =====
 	const piUpdate = usePiUpdate({
@@ -1368,7 +1243,7 @@ export function App() {
 			});
 		}
 		return Array.from(byPath.values());
-	}, [activeMessages.length, activeAgentId]);
+	}, [activeMessages, activeAgentId]);
 	const flatFiles = useMemo(() => flattenFiles(files), [files]);
 	// === file editor hook ===
 	const {
@@ -1692,10 +1567,6 @@ export function App() {
 		[activeProjectId, projects, promoteSessionComposerState, promoteSessionMessagesCache, selectSessionCommand, upsertSession, workspaceChrome, effectiveAgentBackend],
 	);
 
-	/** 有效命令名白名单：仅已知命令渲染为 chip */
-	const mergedCommands = useMemo(() => mergeCommands(commands), [commands]);
-	const validCommandNames = useMemo(() => new Set([...mergedCommands.map((c) => c.name), ...promptTemplateList.map((t) => t.name)]), [mergedCommands, promptTemplateList]);
-
 	/** 有效文件路径白名单：仅工作区真实存在的 @ 引用渲染为 chip */
 	const validFilePaths = useMemo(() => new Set(flatFiles.map((f) => f.relativePath)), [flatFiles]);
 
@@ -1895,18 +1766,6 @@ export function App() {
 	}, [activeAgentId, activeQueuedPrompts.length, composerRef]);
 
 	// Outline jumps through the same timeline controller that owns pagination and scroll state.
-
-	useEffect(() => {
-		const target = getRuntimeTargetForSession(currentSessionId);
-		if (!target) {
-			setCommands([]);
-			return;
-		}
-		void api.sessions
-			.listRuntimeCommands(target)
-			.then((result) => setCommands(requireSessionCommand(result).value))
-			.catch(() => setCommands([]));
-	}, [activeAgentId, currentSessionId]);
 
 	// 持久化会话来源过滤配置
 	useEffect(() => {
@@ -2843,28 +2702,25 @@ export function App() {
 		}
 		// 整条链（含链尾）一次性并入展开集合：折叠模式下只有链尾 path 可见，
 		// 但关闭折叠后整条链仍需保持展开；持久化保证重新打开项目能重建。
-		setExpandedDirs((prev) => {
-			const next = new Set(prev);
-			for (const p of chain) next.add(p);
-			if (activeProjectIdRef.current === projectId) saveExpandedDirs(projectId, next);
-			return next;
-		});
+		// setState updater 必须纯（StrictMode 会双跑）：用 ref 镜像同步算 next，副作用放在外面。
+		const nextChain = new Set(expandedDirsRef.current);
+		for (const p of chain) nextChain.add(p);
+		expandedDirsRef.current = nextChain;
+		setExpandedDirs(nextChain);
+		if (activeProjectIdRef.current === projectId) saveExpandedDirs(projectId, nextChain);
 	}
 
 	function toggleDirectory(path: string) {
 		// 文件树默认折叠,只有用户显式展开目录才显示子项,避免大仓库一打开就产生视觉噪音。
-		let expanding = false;
-		setExpandedDirs((current) => {
-			const next = new Set(current);
-			if (next.has(path)) next.delete(path);
-			else {
-				next.add(path);
-				expanding = true;
-			}
-			// 持久化展开状态到 localStorage，切换回此项目时恢复
-			if (activeProjectId) saveExpandedDirs(activeProjectId, next);
-			return next;
-		});
+		// updater 必须纯：next 在外面用 ref 镜像算，持久化副作用与 expanding 判定同源。
+		const next = new Set(expandedDirsRef.current);
+		const expanding = !next.has(path);
+		if (expanding) next.add(path);
+		else next.delete(path);
+		expandedDirsRef.current = next;
+		setExpandedDirs(next);
+		// 持久化展开状态到 localStorage，切换回此项目时恢复
+		if (activeProjectId) saveExpandedDirs(activeProjectId, next);
 		// 首次展开时按需拉这一层；收起或已有 children 只改展开态，避免重复 IPC。
 		if (!expanding || !activeProjectId) return;
 		const projectId = activeProjectId;
@@ -3531,7 +3387,6 @@ export function App() {
 			activeProjectId,
 			onProjectGitChanged: handleProjectGitChanged,
 			showThinking: settings.showThinking,
-			validCommandNames,
 			validFilePaths,
 			terminalStatesByOwner,
 			activeTerminalOwnerKey,
@@ -3589,7 +3444,6 @@ export function App() {
 			showToast,
 			terminalStatesByOwner,
 			availableTerminalHeight,
-			validCommandNames,
 			validFilePaths,
 			workspaceChrome.exitSplit,
 			workspaceChrome.promotePreview,
@@ -3910,7 +3764,6 @@ export function App() {
 	const drawerPorts = useDrawerPorts({
 		enableGitManagement: settings.enableGitManagement,
 		activeProjectId,
-		gitDrawerDiff,
 		gitDiffDisplayMode,
 		openCommitFileDiff,
 		openWorkspaceFileDiff,

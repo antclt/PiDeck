@@ -16,7 +16,8 @@ test("askNotificationEnabled 三处默认值一致且默认关闭", () => {
 	assert.match(settingsType, /askNotificationEnabled: boolean/);
 	// 默认关闭：主进程持久化默认、渲染层首屏默认、预览 mock 三处同步
 	assert.match(store, /askNotificationEnabled: false/);
-	assert.match(app, /askNotificationEnabled: false/);
+	// App 首屏默认已抽到 shared/types/settings.ts 的 createDefaultAppSettings；settingsType 已含该文件
+	assert.match(settingsType, /askNotificationEnabled: false/);
 	assert.match(preview, /askNotificationEnabled: false/);
 });
 
@@ -31,7 +32,7 @@ test("autoSessionTitle 四处默认开启且设置说明提示额外 token 消�
 	assert.match(settingsType, /autoSessionTitle: boolean/);
 	// 默认开启：主进程持久化默认、渲染层首屏默认、预览 mock 三处同步
 	assert.match(store, /autoSessionTitle: true/);
-	assert.match(app, /autoSessionTitle: true/);
+	assert.match(settingsType, /autoSessionTitle: true/);
 	assert.match(preview, /autoSessionTitle: true/);
 	assert.match(commonTab, /checked=\{draft\.autoSessionTitle \?\? false\}/);
 	assert.match(zh, /settings\.autoSessionTitleDesc[\s\S]{0,220}token/);
