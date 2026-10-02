@@ -66,6 +66,8 @@ export type WorkspaceExternalEditorAdapter = {
 	openProject: (editor: ExternalEditor, projectPath: string) => Promise<void>;
 };
 
+export const DEFAULT_PINNED_DRAWER_PANELS: WorkspaceDrawerPanel[] = ["files", "git"];
+
 export type WorkspacePanelOptions = {
 	projectId?: string | null;
 	git?: WorkspaceGitResourceAdapter;
@@ -83,22 +85,22 @@ function readDrawerState(storage: WorkspacePanelOptions["storage"], key: string)
 	try {
 		const parsed: unknown = JSON.parse(storage.getItem(key) ?? "null");
 		if (!parsed || typeof parsed !== "object") return null;
-		const value = parsed as { panel?: unknown; pinned?: unknown };
-		// 编辑器面板已从抽屉移除（阅读面迁到分屏）；旧存档里的 "editor" 降级为文件树，
-		// 避免读到旧值后面板状态无效（validPanel 校验失败会整体返回 null）。
+		const value = parsed as { panel?: unknown; pinned?: unknown; pinnedPanels?: unknown };
 		const panel = value.panel === "editor" ? "files" : value.panel;
-		// 白名单刻意不含 "rpcLog"：它绑定 agentId，跨重启必然失效；意外读到旧值当作无存档处理，
-		// 宁可丢掉本次恢复也不能让抽屉首屏弹出一个查不到数据的日志面板（写盘侧同样不落它）。
-		const validPanel = panel === null || ["files", "sessions", "browser", "git", "trajectory", "rewind"].includes(String(panel));
-		return validPanel && typeof value.pinned === "boolean" ? { panel: panel as WorkspaceDrawerPanel | null, pinned: value.pinned } : null;
+		const validPanels = ["files", "sessions", "browser", "git", "trajectory", "rewind"];
+		const validPanel = panel === null || validPanels.includes(String(panel));
+		const pinnedPanels = Array.isArray(value.pinnedPanels)
+			? value.pinnedPanels.filter((item): item is WorkspaceDrawerPanel => typeof item === "string" && validPanels.includes(item))
+			: typeof value.pinned === "boolean" && value.pinned && validPanel && panel ? [panel as WorkspaceDrawerPanel] : undefined;
+		return validPanel && Array.isArray(pinnedPanels) ? { panel: panel as WorkspaceDrawerPanel | null, pinnedPanels } : null;
 	} catch {
 		return null;
 	}
 }
 
-function writeDrawerState(storage: WorkspacePanelOptions["storage"], key: string, panel: WorkspaceDrawerPanel | null, pinned: boolean) {
+function writeDrawerState(storage: WorkspacePanelOptions["storage"], key: string, panel: WorkspaceDrawerPanel | null, pinnedPanels: readonly WorkspaceDrawerPanel[]) {
 	try {
-		storage?.setItem(key, JSON.stringify({ panel, pinned }));
+		storage?.setItem(key, JSON.stringify({ panel, pinnedPanels }));
 	} catch {
 		// Storage is a convenience; panel commands must continue working when it is unavailable.
 	}
@@ -194,15 +196,19 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 	const [drawerPinnedByProject, setDrawerPinnedByProject] = useState<Record<string, WorkspaceDrawerPanel>>({});
 	const drawerRef = useRef<WorkspaceDrawerPanel | null>(null);
 	const drawerPinnedByProjectRef = useRef<Record<string, WorkspaceDrawerPanel>>({});
+	const [pinnedPanelsByProject, setPinnedPanelsByProject] = useState<Record<string, WorkspaceDrawerPanel[]>>({});
+	const pinnedPanelsByProjectRef = useRef<Record<string, WorkspaceDrawerPanel[]>>({});
 	const drawerPinnedPanel = projectId ? drawerPinnedByProject[projectId] : undefined;
 	const drawerPinned = Boolean(drawerPinnedPanel && drawer === drawerPinnedPanel);
 	const drawerPinnedRef = useRef(false);
 	drawerRef.current = drawer;
 	drawerPinnedByProjectRef.current = drawerPinnedByProject;
 	drawerPinnedRef.current = drawerPinned;
+	pinnedPanelsByProjectRef.current = pinnedPanelsByProject;
 
 	const loadDrawerState = useCallback((id: string) => readDrawerState(storageRef.current, `${drawerPrefixRef.current}${id}`), []);
-	const saveDrawerState = useCallback((id: string, panel: WorkspaceDrawerPanel | null, pinned: boolean) => writeDrawerState(storageRef.current, `${drawerPrefixRef.current}${id}`, panel, pinned), []);
+	const saveDrawerState = useCallback((id: string, panel: WorkspaceDrawerPanel | null, pinnedPanels: readonly WorkspaceDrawerPanel[]) => writeDrawerState(storageRef.current, `${drawerPrefixRef.current}${id}`, panel, pinnedPanels), []);
+	const pinnedPanels = projectId ? pinnedPanelsByProject[projectId] ?? DEFAULT_PINNED_DRAWER_PANELS : DEFAULT_PINNED_DRAWER_PANELS;
 
 	// 项目上下文水合（null → 首个 projectId）不得视为「切换项目」：
 	// 用户在水合完成前已手动打开的抽屉会被保存态重置误关（E2E 与快速操作均可复现）。
@@ -221,13 +227,16 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			return;
 		}
 		const saved = loadDrawerState(projectId);
+		const nextPinnedPanels = saved?.pinnedPanels?.length ? saved.pinnedPanels : DEFAULT_PINNED_DRAWER_PANELS;
 		if (!isInitialHydration || !drawerRef.current) {
 			setDrawer(saved?.panel ?? null);
 			setDrawerCollapsed(false);
 		}
+		setPinnedPanelsByProject((current) => ({ ...current, [projectId]: nextPinnedPanels }));
 		setDrawerPinnedByProject((current) => {
 			const next = { ...current };
-			if (saved?.pinned && saved.panel) next[projectId] = saved.panel;
+			const restoredPinned = saved?.panel && nextPinnedPanels.includes(saved.panel) ? saved.panel : undefined;
+			if (restoredPinned) next[projectId] = restoredPinned;
 			else delete next[projectId];
 			return next;
 		});
@@ -239,7 +248,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			if (pinnedPanel && pinnedPanel !== panel) return;
 			const next = drawerRef.current === panel && !drawerPinnedRef.current ? null : panel;
 			if (next !== "git") invalidateGitDiff();
-			if (projectIdRef.current) saveDrawerState(projectIdRef.current, next, Boolean(pinnedPanel && next === pinnedPanel));
+			if (projectIdRef.current) saveDrawerState(projectIdRef.current, next, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS);
 			setDrawer(next);
 			setDrawerCollapsed(false);
 		},
@@ -256,7 +265,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			const pinnedPanel = projectIdRef.current ? drawerPinnedByProjectRef.current[projectIdRef.current] : undefined;
 			if (pinnedPanel && pinnedPanel !== panel) return;
 			if (panel !== "git") invalidateGitDiff();
-			if (projectIdRef.current) saveDrawerState(projectIdRef.current, panel, Boolean(pinnedPanel && panel === pinnedPanel));
+			if (projectIdRef.current) saveDrawerState(projectIdRef.current, panel, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS);
 			setDrawer(panel);
 			setDrawerCollapsed(false);
 		},
@@ -304,7 +313,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			return;
 		}
 		invalidateGitDiff();
-		if (projectIdRef.current) saveDrawerState(projectIdRef.current, null, false);
+		if (projectIdRef.current) saveDrawerState(projectIdRef.current, null, pinnedPanelsByProjectRef.current[projectIdRef.current] ?? DEFAULT_PINNED_DRAWER_PANELS);
 		setDrawer(null);
 	}, [closeRpcLogPanel, invalidateGitDiff, saveDrawerState]);
 
@@ -313,6 +322,17 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 	}, []);
 
 	const expandDrawer = useCallback(() => setDrawerCollapsed(false), []);
+
+	const toggleDrawerPanelPinned = useCallback((panel: WorkspaceDrawerPanel) => {
+		const id = projectIdRef.current;
+		if (!id || panel === "rpcLog") return;
+		const current = pinnedPanelsByProjectRef.current[id] ?? DEFAULT_PINNED_DRAWER_PANELS;
+		const next = current.includes(panel) ? current.filter((item) => item !== panel) : [...current, panel];
+		if (next.length === 0) return;
+		pinnedPanelsByProjectRef.current = { ...pinnedPanelsByProjectRef.current, [id]: next };
+		setPinnedPanelsByProject((all) => ({ ...all, [id]: next }));
+		saveDrawerState(id, drawerRef.current, next);
+	}, [saveDrawerState]);
 
 	const toggleDrawerPinned = useCallback(() => {
 		const id = projectIdRef.current;
@@ -325,7 +345,11 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 			else delete next[id];
 			return next;
 		});
-		saveDrawerState(id, currentDrawer, willPin);
+		const currentPanels = pinnedPanelsByProjectRef.current[id] ?? DEFAULT_PINNED_DRAWER_PANELS;
+		const nextPanels = willPin ? (currentPanels.includes(currentDrawer) ? currentPanels : [...currentPanels, currentDrawer]) : currentPanels.filter((panel) => panel !== currentDrawer);
+		if (nextPanels.length === 0) return;
+		setPinnedPanelsByProject((all) => ({ ...all, [id]: nextPanels }));
+		saveDrawerState(id, currentDrawer, nextPanels);
 	}, [saveDrawerState]);
 
 	const closeGitDiff = useCallback(() => {
@@ -489,6 +513,8 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 		collapseDrawer,
 		expandDrawer,
 		toggleDrawerPinned,
+		toggleDrawerPanelPinned,
+		pinnedPanels,
 		gitDiff,
 		gitDiffDisplayMode,
 		closeGitDiff,

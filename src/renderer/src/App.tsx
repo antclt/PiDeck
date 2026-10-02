@@ -2717,12 +2717,14 @@ export function App() {
 					chatPaneContent={chatPaneContentNode}
 					drawerRail={
 						<WorkspaceDrawerRail
+							addLabel={t("drawer.addPanel")}
 							actions={[
 								{
 									id: "files",
 									label: t("app.files"),
 									icon: <FolderOpen size={16} />,
 									active: drawer === "files",
+									pinned: true,
 									onClick: () => handleToolDrawerAction("files"),
 								},
 								// 编辑器入口已迁到分屏（SessionTabsBar），右侧抽屉不再提供 editor 面板
@@ -2734,6 +2736,7 @@ export function App() {
 												label: t("drawer.sourceControl"),
 												icon: <GitBranch size={16} />,
 												active: drawer === "git",
+														pinned: true,
 												onClick: () => handleToolDrawerAction("git"),
 											},
 										]
@@ -2744,6 +2747,9 @@ export function App() {
 									label: t("session.view.trajectory"),
 									icon: <Activity size={16} />,
 									active: drawer === "trajectory",
+									pinned: workspace.pinnedPanels.includes("trajectory"),
+									canRemove: true,
+									onTogglePinned: () => workspace.toggleDrawerPanelPinned("trajectory"),
 									onClick: () => handleToolDrawerAction("trajectory"),
 								},
 								// 检查点面板：仅当前会话为 pi 后端时展示（rewind 能力；dsh 暂不声明）。
@@ -2754,6 +2760,9 @@ export function App() {
 												label: t("rewind.title"),
 												icon: <History size={16} />,
 												active: drawer === "rewind",
+														pinned: workspace.pinnedPanels.includes("rewind"),
+														canRemove: true,
+														onTogglePinned: () => workspace.toggleDrawerPanelPinned("rewind"),
 												onClick: () => handleToolDrawerAction("rewind"),
 											},
 										]
@@ -2763,6 +2772,9 @@ export function App() {
 									label: t("app.browser"),
 									icon: <Globe size={16} />,
 									active: drawer === "browser",
+									pinned: workspace.pinnedPanels.includes("browser"),
+									canRemove: true,
+									onTogglePinned: () => workspace.toggleDrawerPanelPinned("browser"),
 									onClick: () => handleToolDrawerAction("browser"),
 								},
 								// RPC 日志专属 Tab：默认隐藏，任一存活的 agent 开启记录后才出现

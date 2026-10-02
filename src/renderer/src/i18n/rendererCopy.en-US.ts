@@ -1984,6 +1984,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.imagegen.providerNamePlaceholder": "e.g. OpenAI or Ark",
 	"config.imagegen.baseUrl": "Base URL",
 	"config.imagegen.apiKey": "API Key",
+	"config.imagegen.apiKeySavedSummary": "Saved ••••{tail} ({length} chars). Click the eye to reveal it.",
+	"config.imagegen.apiKeyCurrentSummary": "Current ••••{tail} ({length} chars, not saved yet). Click the eye to reveal it.",
 	"config.imagegen.models": "Models",
 	"config.imagegen.modelId": "Model ID",
 	"config.imagegen.addModel": "Add manually",
