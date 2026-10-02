@@ -2192,7 +2192,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			}
 			return;
 		}
-		await api.extensions.toggle(extension.source, enabled, extension.scope);
+		// 传路径与项目上下文：本地文件扩展需要精确路径，项目作用域需要 projectId 写项目 .pi/settings.json。
+		await api.extensions.toggle(extension.source, enabled, extension.scope, extension.path, effectiveProjectId);
 	};
 
 	const handleRequestExtensionUninstall = (extension: PiExtensionSummary) => {

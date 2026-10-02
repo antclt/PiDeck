@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { PiResourceConfigService, packageSourceOf, isPackageDelta, isEntryDisabled, packageFilterSnapshot, restorePackageDefaults } = loadTsCommonJs("src/main/config/PiResourceConfigService.ts");
+const { PiResourceConfigService, isPackageSource, isExactEntryFor, packageSourceOf, isPackageDelta, isEntryDisabled, packageFilterSnapshot, restorePackageDefaults } = loadTsCommonJs("src/main/config/PiResourceConfigService.ts");
 const { PiResourceStateStore, packageSnapshotFingerprint } = loadTsCommonJs("src/main/config/PiResourceStateStore.ts");
 
 function setupProject() {
@@ -209,4 +209,55 @@ test("state store snapshot is idempotent and detects external changes", () => {
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("setExtensionEnabled dispatches package installs to package filters and local files to exact rules", async () => {
+	const { service, agentDir, cleanup } = setupProject();
+	try {
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:pkg", extensions: ["keep.ts"] }], extensions: [] }), "utf8");
+		// 包安装 → 整包停用（extensions 数组不受影响）
+		const pkgOff = await service.setExtensionEnabled({ scope: { scope: "global" }, source: "npm:pkg", enabled: false });
+		assert.equal(pkgOff.ok, true);
+		const afterPkg = readJson(join(agentDir, "settings.json"));
+		assert.deepEqual(afterPkg.packages[0].extensions, []);
+		assert.deepEqual(afterPkg.extensions, []);
+		// 本地文件扩展 → 顶层精确 -path
+		const fileOff = await service.setExtensionEnabled({ scope: { scope: "global" }, source: "my-ext", path: "/home/me/.pi/agent/extensions/my-ext.ts", enabled: false });
+		assert.equal(fileOff.ok, true);
+		assert.deepEqual(readJson(join(agentDir, "settings.json")).extensions, ["-/home/me/.pi/agent/extensions/my-ext.ts"]);
+	} finally {
+		cleanup();
+	}
+});
+
+test("setProjectInheritedOverride writes plain path + exact rule and can restore inheritance", async () => {
+	const { service, projectRoot, cleanup } = setupProject();
+	try {
+		const applied = await service.setProjectInheritedOverride({ projectId: "p1", kind: "skills", value: "/home/me/.pi/agent/skills/x/SKILL.md", state: "disabled" });
+		assert.equal(applied.ok, true);
+		assert.deepEqual(readJson(join(projectRoot, ".pi", "settings.json")).skills, ["/home/me/.pi/agent/skills/x/SKILL.md", "-/home/me/.pi/agent/skills/x/SKILL.md"]);
+		// 在本层启用：替换成精确 +
+		const enabled = await service.setProjectInheritedOverride({ projectId: "p1", kind: "skills", value: "/home/me/.pi/agent/skills/x/SKILL.md", state: "enabled" });
+		assert.equal(enabled.ok, true);
+		assert.deepEqual(readJson(join(projectRoot, ".pi", "settings.json")).skills, ["/home/me/.pi/agent/skills/x/SKILL.md", "+/home/me/.pi/agent/skills/x/SKILL.md"]);
+		// 恢复继承：移除覆盖条目，保留用户其它条目
+		await service.setFileResourceEnabled({ scope: { scope: "project", projectId: "p1" }, kind: "skills", resourceId: "/keep/SKILL.md", enabled: false });
+		const restored = await service.setProjectInheritedOverride({ projectId: "p1", kind: "skills", value: "/home/me/.pi/agent/skills/x/SKILL.md", state: "inherit" });
+		assert.equal(restored.ok, true);
+		assert.deepEqual(readJson(join(projectRoot, ".pi", "settings.json")).skills, ["-/keep/SKILL.md"]);
+	} finally {
+		cleanup();
+	}
+});
+
+test("isPackageSource / isExactEntryFor pure helpers", () => {
+	assert.equal(isPackageSource("npm:foo"), true);
+	assert.equal(isPackageSource("git:github.com/a/b"), true);
+	assert.equal(isPackageSource("github:x/y"), true);
+	assert.equal(isPackageSource("my-local-ext"), false);
+	assert.equal(isPackageSource("/abs/path.ts"), false);
+	assert.equal(isExactEntryFor("-/a/b.ts", "/a/b.ts"), true);
+	assert.equal(isExactEntryFor("+/a/b.ts", "/a/b.ts"), true);
+	assert.equal(isExactEntryFor("/a/b.ts", "/a/b.ts"), true);
+	assert.equal(isExactEntryFor("-/a/c.ts", "/a/b.ts"), false);
 });

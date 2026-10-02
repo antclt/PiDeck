@@ -183,7 +183,8 @@ export class ExtensionManager {
 				ext.enabled = !removedBuiltIn.has(ext.source);
 				if (builtInVersion) ext.currentVersion = builtInVersion;
 			} else {
-				ext.enabled = !disabledExtKeys.has(`${ext.scope}:${ext.source}`);
+				// 原生投影优先（迁移后 disabledExtensions 已清空）；未装配时退回旧列表。
+				ext.enabled = this.nativeEnabledReader?.(ext) ?? !disabledExtKeys.has(`${ext.scope}:${ext.source}`);
 			}
 		}
 
@@ -515,7 +516,31 @@ export class ExtensionManager {
 	 * 启动 RPC 时由白名单模式生效；enabled=true 从列表移除。
 	 * 不写 pi settings.json：pi 0.82.x 不支持 disabledExtensions，写了也不生效。
 	 */
-	async setEnabled(source: string, enabled: boolean, scope: PiExtensionSummary["scope"] = "user"): Promise<void> {
+	/**
+	 * 注入原生开关（A4）：装配后扩展到开关写 pi settings.json 的过滤规则
+	 * （包安装 → 整包停用；本地文件扩展 → 顶层精确 `+path`/`-path`），
+	 * 与 TUI 的 pi config 等价。未装配时退回旧禁用列表（渐进迁移，行为不突变）。
+	 */
+	configureNativeToggle(toggle: (input: { source: string; path?: string; scope: PiExtensionSummary["scope"]; projectId?: string; enabled: boolean }) => Promise<{ ok: boolean; error?: string }>): void {
+		this.nativeToggle = toggle;
+	}
+
+	/** 注入原生有效状态读取（迁移完成后禁用列表不再是真值来源）。 */
+	configureNativeEnabledReader(reader: (extension: PiExtensionSummary) => boolean | undefined): void {
+		this.nativeEnabledReader = reader;
+	}
+
+	private nativeToggle: ((input: { source: string; path?: string; scope: PiExtensionSummary["scope"]; projectId?: string; enabled: boolean }) => Promise<{ ok: boolean; error?: string }>) | null = null;
+	private nativeEnabledReader: ((extension: PiExtensionSummary) => boolean | undefined) | null = null;
+
+	async setEnabled(source: string, enabled: boolean, scope: PiExtensionSummary["scope"] = "user", path?: string, projectId?: string): Promise<void> {
+		// 原生配置优先：迁移完成后旧禁用列表已清空，开关直接写 pi 的过滤规则。
+		if (this.nativeToggle) {
+			const result = await this.nativeToggle({ source, path, scope, projectId, enabled });
+			if (!result.ok) throw new Error(result.error ?? "Extension toggle failed.");
+			this.invalidateListCache();
+			return;
+		}
 		// 禁用动作受版本门槛约束：白名单机制（--no-extensions + -e）依赖 pi >= 0.60
 		// 的目录/包源语义，过低版本禁用不生效（还会导致白名单降级），这里直接拒绝并提示。
 		// 启用/移除禁用条目无风险（只是回到默认发现），不做检查；版本未知（getPiVersion 为

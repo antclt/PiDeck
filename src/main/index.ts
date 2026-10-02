@@ -30,6 +30,7 @@ import { PiResourceStateStore } from "./config/PiResourceStateStore";
 import { readPiConfigFile } from "./config/piConfigFileStore";
 import { runGlobalResourceMigration } from "./config/piResourceMigrationRunner";
 import type { ResolvedMigrationResource } from "./config/piResourceMigration";
+import type { PiResourceScope } from "../shared/types/piResources";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
 import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName, sanitizeDevBranchSegment } from "./devIsolation";
 import { isPortablePackagedEnv, resolveAppUserDataDir, resolveChannelDevDataDir, resolvePackagedUserDataDir } from "./portableUserData";
@@ -430,9 +431,10 @@ let configManager: ConfigManager;
 /** pi 原生资源配置服务与迁移状态（A2/A3；启动装配，IPC 复用）。 */
 let piResourceConfigService: PiResourceConfigService | undefined;
 let piResourceStateStore: PiResourceStateStore | undefined;
-/** 全局 settings.json 的 skills / prompts 条目缓存（供列表状态投影；迁移/开关后刷新）。 */
+/** 全局 settings.json 的 skills / prompts / extensions 条目缓存（供列表状态投影；迁移/开关后刷新）。 */
 let skillManagerNativeEntries: string[] | null = null;
 let promptManagerNativeEntries: string[] | null = null;
+let extensionManagerNativeEntries: string[] | null = null;
 let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -3669,6 +3671,54 @@ app
 			// 才能反映「当前真正生效」的那一份。
 			resolveBuiltInExtensionRoots(),
 		);
+		// 原生配置接线（A4）：扩展到开关写 pi settings.json 的过滤规则
+		// （包安装 → 整包停用；本地文件扩展 → 顶层精确 +/-路径），列表状态按原生条目投影。
+		// 闭包延迟读 piResourceConfigService（启动迁移阶段才装配）。
+		extensionManager.configureNativeToggle(async ({ source, path, scope, projectId, enabled }) => {
+			const service = piResourceConfigService;
+			if (!service) return { ok: false, error: "pi resource service unavailable" };
+			let target: PiResourceScope;
+			if (scope === "project") {
+				// 项目作用域必须由渲染层显式给出注册 projectId：缺它就报错，绝不猜一个项目写错配置。
+				if (!projectId) return { ok: false, error: "Project scope requires a project id." };
+				target = { scope: "project", projectId };
+			} else {
+				target = { scope: "global" };
+			}
+			const saved = await service.setExtensionEnabled({ scope: target, source, path, enabled });
+			if (saved.ok) await refreshExtensionProjection();
+			return saved;
+		});
+		extensionManager.configureNativeEnabledReader((extension) => {
+			const entries = extensionManagerNativeEntries;
+			if (!entries) return undefined;
+			return projectResourceEnabled({ entries, value: extension.path ?? extension.source, baseDir: extension.path ? dirname(extension.path) : "" });
+		});
+		// 项目侧资源开关写项目 `.pi/settings.json` 的原生过滤规则（A4）。
+		// 项目自有资源用精确 `-path`；继承全局资源写「绝对路径 plain + +/-」，与 pi config 一致。
+		const projectNativeRules = {
+			setResourceEnabled: async (projectId: string, kind: "extensions" | "skills" | "prompts", value: string, enabled: boolean) => {
+				const service = piResourceConfigService;
+				if (!service) return { ok: false, error: "pi resource service unavailable" };
+				return service.setFileResourceEnabled({ scope: { scope: "project", projectId }, kind, resourceId: value, enabled });
+			},
+			setInheritedOverride: async (projectId: string, kind: "extensions" | "skills" | "prompts", value: string, state: "inherit" | "enabled" | "disabled") => {
+				const service = piResourceConfigService;
+				if (!service) return { ok: false, error: "pi resource service unavailable" };
+				return service.setProjectInheritedOverride({ projectId, kind, value, state });
+			},
+			readEntries: async (projectId: string, kind: "extensions" | "skills" | "prompts") => {
+				try {
+					const project = projectStore.get(projectId);
+					if (!project) return null;
+					const file = await readPiConfigFile(join(project.path, ".pi", "settings.json"));
+					const value = file.data[kind];
+					return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+				} catch {
+					return null;
+				}
+			},
+		};
 		projectResourceManager = new ProjectResourceManager(
 			(projectId) => projectStore.get(projectId),
 			mainCopy,
@@ -3694,6 +3744,7 @@ app
 					return { skills: settings.disabledSkills, prompts: settings.disabledPrompts };
 				},
 			},
+			projectNativeRules,
 		);
 		resourceImportManager = new ResourceImportManager(
 			configManager,
@@ -4271,7 +4322,7 @@ app
 			{ projectTrust: async (projectId, _root) => (await configManager.getProjectTrustDecision(projectStore.get(projectId)?.path ?? "")) === true },
 		);
 		/** 刷新技能/模板状态投影缓存（迁移完成、或用户切开关后调用）。 */
-		const readNativeEntries = async (key: "skills" | "prompts"): Promise<string[] | null> => {
+		const readNativeEntries = async (key: "skills" | "prompts" | "extensions"): Promise<string[] | null> => {
 			try {
 				const file = await readPiConfigFile(join(configManager.getConfigDir(), "settings.json"));
 				const value = file.data[key];
@@ -4285,6 +4336,9 @@ app
 		};
 		const refreshPromptProjection = async (): Promise<void> => {
 			promptManagerNativeEntries = await readNativeEntries("prompts");
+		};
+		const refreshExtensionProjection = async (): Promise<void> => {
+			extensionManagerNativeEntries = await readNativeEntries("extensions");
 		};
 		void runGlobalResourceMigration({
 			service: piResourceConfigService,
@@ -4343,7 +4397,7 @@ app
 			logger: { info: (scope, message, detail) => void appLogger.info(scope, message, detail), warn: (scope, message, detail) => void appLogger.warn(scope, message, detail) },
 		}).then(async (result) => {
 			// 迁移后必须刷新投影缓存：否则列表仍按旧列表显示，与实际生效的原生规则不一致。
-			await Promise.all([refreshSkillProjection(), refreshPromptProjection()]);
+			await Promise.all([refreshSkillProjection(), refreshPromptProjection(), refreshExtensionProjection()]);
 			if (result.errors.length > 0) {
 				void appLogger.warn("migration", "Resource migration reported problems", { status: result.status, errors: result.errors });
 			}

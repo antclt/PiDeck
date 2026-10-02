@@ -99,6 +99,61 @@ export class PiResourceConfigService {
 		}));
 	}
 
+	/**
+	 * 开关一个扩展（全局/项目）。
+	 *
+	 * 分派规则与 pi 一致：
+	 * - 包安装（`npm:`/`file:`/`git…`/`github:` 等 source 协议）→ 整包过滤
+	 *   （普通包写四类 `[]` / 恢复快照；`autoload:false` delta 用 `["!*","!.*"]`）。
+	 * - 本地文件扩展（`~/.pi/agent/extensions` 下自动发现）→ 顶层精确 `+path` / `-path`。
+	 */
+	async setExtensionEnabled(input: { scope: PiResourceScope; source: string; path?: string; enabled: boolean }, options: { expectedRevision?: string } = {}): Promise<PiResourceToggleResult> {
+		const source = input.source.trim();
+		if (!source) return { ok: false, error: "Extension source is required." };
+		if (isPackageSource(source)) {
+			return this.setPackageEnabled({ scope: input.scope, resourceId: source, enabled: input.enabled }, options);
+		}
+		// 本地文件扩展：优先用真实磁盘路径（pi 的精确匹配按绝对路径 / baseDir 相对路径）。
+		const value = input.path?.trim() || source;
+		return this.setFileResourceEnabled({ scope: input.scope, kind: "extensions", resourceId: value, enabled: input.enabled }, options);
+	}
+
+	/**
+	 * 在项目层覆盖一个「继承自全局」的资源（扩展/技能/提示词）。
+	 *
+	 * 与 pi `config-selector` 的项目覆盖写法一致：写入该资源的**绝对路径**（plain 声明，
+	 * 否则项目层匹配不到全局文件），再配精确 `+path`/`-path`。恢复继承时移除本次写入的
+	 * plain 路径与精确规则（不删用户原有的其它引用）。
+	 */
+	async setProjectInheritedOverride(
+		input: {
+			projectId: string;
+			kind: Exclude<PiResourceKind, "themes">;
+			/** 继承资源在 pi 里的路径（绝对路径）。 */
+			value: string;
+			/** "inherit" = 移除覆盖；true/false = 在本层启用/停用。 */
+			state: "inherit" | "enabled" | "disabled";
+		},
+		options: { expectedRevision?: string } = {},
+	): Promise<PiResourceToggleResult> {
+		const value = input.value.trim();
+		if (!value) return { ok: false, error: "Resource path is required." };
+		return this.writeScope({ scope: "project", projectId: input.projectId }, options.expectedRevision, (current) => {
+			const entries = readStringArraySetting(current, input.kind);
+			const withoutOurRules = entries.filter((entry) => !isExactEntryFor(entry, value));
+			if (input.state === "inherit") {
+				// 恢复继承：只移除我们写的精确规则；plain 路径若为用户原有引用则保留。
+				return { ...current, [input.kind]: withoutOurRules };
+			}
+			// plain 路径声明：项目层要匹配跨作用域的全局文件时必须显式列出该路径，
+			// 否则精确 `+`/`-` 找不到目标（pi config-selector 的项目覆盖同样先写路径）。
+			const plain = value;
+			const rest = withoutOurRules.filter((entry) => entry !== value);
+			const next = input.state === "enabled" ? `+${value}` : `-${value}`;
+			return { ...current, [input.kind]: [plain, next, ...rest] };
+		});
+	}
+
 	/** 恢复某资源的默认（删除 PiDeck 加的精确覆盖规则，保留用户显式路径）。 */
 	async clearFileResourceOverride(scope: PiResourceScope, kind: PiResourceKind, value: string, options: { expectedRevision?: string } = {}): Promise<PiResourceToggleResult> {
 		return this.writeScope(scope, options.expectedRevision, (current) => ({
@@ -188,6 +243,19 @@ export class PiResourceConfigService {
 		if (!resolved) return false;
 		return this.options.projectTrust(scope.projectId, resolved.root);
 	}
+}
+
+// ── 辅助（纯函数，便于测试） ─────────────────────────────
+
+/** 包安装 source 的协议前缀（与 pi list 输出的 source 形态一致）。 */
+export function isPackageSource(source: string): boolean {
+	return /^(?:npm|file|github|git|https?):/i.test(source.trim());
+}
+
+/** 条目是否精确指向该值（带 `+`/`-` 前缀时比较去掉前缀后的值）。 */
+export function isExactEntryFor(entry: string, value: string): boolean {
+	const bare = entry.startsWith("+") || entry.startsWith("-") || entry.startsWith("!") ? entry.slice(1) : entry;
+	return bare === value;
 }
 
 // ── 包条目辅助（纯函数，便于测试） ─────────────────────────────

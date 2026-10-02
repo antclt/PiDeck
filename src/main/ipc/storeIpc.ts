@@ -586,16 +586,19 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		});
 		return result;
 	});
-	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => {
-		// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi disabledExtensions。
+	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: unknown, projectId?: unknown) => {
+		// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi 过滤规则。
 		if (source.startsWith("pi-deck-") && source.endsWith(".ts")) {
 			if (enabled) await extensionManager.restoreBuiltIn(source);
 			else await extensionManager.disableBuiltIn(source);
 		} else {
-			// 非内置扩展禁用记录存 PiDeck settings（scope+source），启动 RPC 时走白名单模式生效。
-			await extensionManager.setEnabled(source, enabled, scope);
+			// 原生过滤规则：本地文件扩展要精确路径，项目作用域要 projectId（来自渲染层，主进程校验）。
+			const extensionPath = typeof path === "string" && path.length <= 32_768 ? path : undefined;
+			const resolvedProjectId = typeof projectId === "string" && projectId.trim() && projectId.length <= 256 ? projectId.trim() : undefined;
+			if (scope === "project" && !resolvedProjectId) throw new Error("Project scope requires a project id.");
+			await extensionManager.setEnabled(source, enabled, scope, extensionPath, resolvedProjectId);
 		}
-		void appLogger.info("extension", "Extension toggled", { source, enabled, scope });
+		void appLogger.info("extension", "Extension toggled", { source, enabled, scope, projectId });
 	});
 	ipcMain.handle(ipcChannels.extensionsSetWhitelistDisabled, async (_event, enabled: boolean) => {
 		// 白名单总开关：开启后 PiProcess 不再注入 --no-extensions/-e，pi 默认加载全部扩展，
