@@ -3564,8 +3564,13 @@ export class AgentManager {
 
 		const wantFiles = scope === "files" || scope === "all";
 		const wantConversation = scope === "conversation" || scope === "all";
-		// 会话回退先解析 fork 锚点（失败则整体拒绝，避免「文件已回退但会话没 fork」的半成功态）。
+		// 会话回退先解析 fork 锚点（失败或找不到都整体拒绝，避免「文件已回退但会话没 fork」
+		// 的半成功态）。找不到锚点（检查点早于任何已落盘消息）也必须拒绝：静默跳过
+		// 会让 UI 报成功但什么都没发生（2026-10 假成功事故）。
 		const forkEntryId = wantConversation ? await this.resolveForkEntryBeforeCheckpoint(agentId, cp.timestamp) : undefined;
+		if (wantConversation && !forkEntryId) {
+			throw new Error("Cannot locate a conversation anchor before this checkpoint (no persisted message found)");
+		}
 		if (wantFiles) await applyCheckpointRestore(root, cp);
 		let forkedSessionId: string | undefined;
 		if (wantConversation && forkEntryId) {
@@ -3665,6 +3670,13 @@ export class AgentManager {
 				toolName,
 			});
 			this.recordRewindHealth(root, null);
+			// merge 冲突态降级快照：健康恢复但要留集，便于用户自查「为什么恢复后暂存区变了」。
+			if (result.indexTreeDegraded) {
+				this.appLogger?.warn("rewind", "checkpoint index tree degraded (unmerged index), recorded HEAD tree instead", {
+					agentId,
+					toolName,
+				});
+			}
 			// 被剔除的路径只在开发诊断时有用：有值记一条 debug 级摘要（不刷屏）。
 			if (result.droppedPaths) {
 				this.appLogger?.warn("rewind", "checkpoint added with dropped paths", {

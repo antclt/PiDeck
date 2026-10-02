@@ -181,6 +181,7 @@ src/
 | 提示词库 xueprompts.db | `content`/`description` 是 gzip BLOB，SQL LIKE 中文恒不命中，必须应用层 gunzip 后匹配 | 商店提示词库维护 |
 | 内置扩展热更新 | 判据是逐文件 sha256 不是版本号；覆盖层必须完整快照 + vendored 依赖；磁盘根统一走 `resolveBuiltInExtensionRoots()` | 内置扩展热更新 |
 | 生图存储 | **base64 不进 JSONL**（只存 ref）；读取永远有字节上界；`<img src>` 只走 `imageContentSrc()` | 生图会话存储 |
+| 会话消息编辑/删除/重发 | 墓碑是自造格式但与 pi 跨版本契约已验证（别误迁）；pi 活着禁改会话文件，三道闸不许放宽；unmerged 降级不弃快照 | 会话消息编辑/删除/重发 |
 | Markdown 渲染 | 唯一引擎 MarkdownStream，禁止再引 marked/react-markdown；流式与 settle 是两条路径，**复现要看最终态** | 会话 Markdown 渲染管线 |
 | 发版 | CHANGELOG 中英一致 → sync-release-notes → sync-workflow-choices → 打包人工 smoke | docs/release-process.md |
 

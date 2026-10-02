@@ -340,10 +340,11 @@ function sessionCommandIpcError(error: SessionCommandError, appLogger: Pick<AppL
 /**
  * 会话命令失败日志：edit/delete/resend 等 IPC 直接返回 SessionCommandResult，
  * 不走 sessionCommandIpcError 抛错，漏打这条就会出现「toast 失败、主进程无日志」。
+ * 标题带上错误码：按 code/关键词（如 edit、BUSY）就能在日志里搜到对应失败，
+ * 不依赖结构化字段（2026-10 教训：按「编辑」搜正文一无所获）。
  */
 function logSessionCommandFailure(appLogger: Pick<AppLogger, "warn">, error: SessionCommandError, extra?: Record<string, unknown>): void {
-	if (!error.debugDetails && extra === undefined) return;
-	void appLogger.warn("session-command", "Session command failed", {
+	void appLogger.warn("session-command", `Session command failed (${error.code})`, {
 		code: error.code,
 		...(error.debugDetails ? { debugDetails: error.debugDetails } : {}),
 		...extra,

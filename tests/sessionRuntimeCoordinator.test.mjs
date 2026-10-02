@@ -1795,3 +1795,27 @@ test("过大错误经协调器映射后能渲染出带体积的中文文案", ()
 	assert.doesNotMatch(zh, /\{\w+\}/);
 	assert.doesNotMatch(en, /\{\w+\}/);
 });
+
+test("catalog mutation returns success when runtime re-activates mid-write (file already persisted)", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({
+		entry: catalogEntry({ filePath: "C:/sessions/session-1.jsonl", status: "active" }),
+		tabs: [{ id: "agent-a", status: "idle", createdAt: 1 }],
+	});
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+	const generation = coordinator.bindExistingAgent("session-1", "agent-a");
+	const stopped = await coordinator.stopRuntime({ sessionId: "session-1", agentId: "agent-a", runtimeGeneration: generation });
+	assert.equal(stopped.ok, true);
+
+	// 模拟「写盘期间用户点发送重新激活」：桩执行时重新绑定运行实例，
+	// 写后复检 requireStoppedForFileMutation 会发现 busy。
+	// 2026-10 修复前：此时报 SESSION_RUNTIME_BUSY，但文件已改（用户被误导重试 → 二次编辑）。
+	const original = harness.agents.mutatePersistedSessionMessage;
+	harness.agents.mutatePersistedSessionMessage = async (...args) => {
+		coordinator.bindExistingAgent("session-1", "agent-a");
+		return original.apply(harness.agents, args);
+	};
+	const result = await coordinator.editCatalogMessage("session-1", "message-1", "updated");
+	assert.equal(result.ok, true, "文件已持久化的变更应按成功返回，而不是误导性的 BUSY");
+	assert.equal(harness.calls.mutatePersisted.length, 1);
+});

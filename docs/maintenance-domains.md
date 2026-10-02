@@ -36,6 +36,14 @@
 - 安全底线：先下载校验、后原子替换（tmp → `.bak` 换位 → rename，失败回滚）；`invalidateBuiltInExtensionsOverlayCache()` 必须在写盘/还原后调用，否则本次更新要等重启才参与注入。
 - 三处磁盘根（`ExtensionManager` 列表/版本、热更新器写盘、`-e` 注入解析）必须同源，统一走 `src/main/index.ts` 的 `resolveBuiltInExtensionRoots()`；各拼一次路径迟早漂移成「更新成功但会话仍加载旧扩展」。
 
+## 会话消息编辑/删除/重发（SessionFileEditor 墓碑协议，与 pi 的跨系统契约）
+
+- **PiDeck 的 `deleted` 墓碑（`{type:"deleted", id, originalEntryId, parentId, ts, reason?}`）是自造格式，不是 pi 的 SessionEntry 类型**；pi 1.0 已实测兼容（2026-10 探针，真实 SessionManager）：`parseSessionEntryLine` 是裸 `JSON.parse` 无类型校验，投影按类型白名单跳过 unknown 条目 → 墓碑不进模型上下文、不抢 leafId、墓碑后 append 正常。**不要因为「pi 没这个类型」误判要迁移**；pi 升大版本后重跑探针验证（构造含墓碑的 jsonl → `SessionManager.open` + `buildSessionProjection` 断言被删文本不出现）。
+- 删除/重发截断只影响模型上下文，原文永远保留在 jsonl（pi 官方删除语义 `context_edit + replacement:null` 同理是 append-only）。墓碑必须带 id+parentId（pi 索引把最后一条带 id 的记录当 leaf，无 id 墓碑会让 `get_messages` 整页变空）。
+- **pi 进程运行中禁止外部改会话文件**：pi 内存 fileEntries 是唯一权威，外部改行被忽略，一旦 pi 全量重写（版本迁移/fork 新文件）外部修改会被覆盖丢失。三道闸（coordinator `requireStoppedForFileMutation` 写前+写后、AgentManager 对 live runtime 二次防御、runtime 通道 `ensureAgentIdle`）不许放宽；写盘期间被重新激活时按「已生效」返回成功并记 warn 日志，不要报 BUSY 引导用户重试（文件已是新内容，重试=二次编辑，2026-10 修复）。
+- rewind checkpoint：merge 冲突（unmerged index）时真实 index 的 `write-tree` 必败，必须降级为 HEAD 树（`indexTreeDegraded` 标志 + warn 日志）而不是放弃快照（2026-10 事故：冲突期间检查点 3 连败整体不可用）；conversation 回退找不到 fork 锚点必须先于文件回退抛错拒绝，静默跳过会 UI 假成功（2026-10 事故）。
+- 失败日志：`logSessionCommandFailure` 标题带错误码（`(SESSION_RUNTIME_BUSY)` 等），按关键词可搜；不要加「无 debugDetails 就不打日志」类早退。
+
 ## 生图会话存储（userData/imagegen：sessions 索引 + blobs 图片）
 
 - 生图（`backend: "imagegen"`）不走 pi/DSH agent，历史独立落在 `<userData>/imagegen/sessions/<sessionId>.jsonl`（`ImageSessionStore`），**图片二进制另存 `<userData>/imagegen/blobs/<sha256>.<ext>`**（`ImageBlobStore`，内容寻址天然去重）。两个磁盘根必须同源解析，统一走 `src/main/index.ts` 的 `resolveImageGenStorageRoots()`。

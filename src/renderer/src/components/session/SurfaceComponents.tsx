@@ -816,10 +816,14 @@ export const UserBubble = memo(function UserBubble(props: {
 	const bubbleSegments = buildBubbleRefSegments(cleanText);
 	/** 原地编辑不影响输入框；先提交给确认弹窗。 */
 	const handleSaveEdit = () => {
-		if (props.onEditMessage && editText.trim()) {
-			props.onEditMessage(message.id, editText, messageEntryId(message));
+		if (!props.onEditMessage) return;
+		// 空文本 = 放弃编辑（退出编辑态、保留原文），不让按钮无响应。
+		if (!editText.trim()) {
 			setEditing(false);
+			return;
 		}
+		props.onEditMessage(message.id, editText, messageEntryId(message));
+		setEditing(false);
 	};
 	/** 编辑后重发：放回 composer 输入框，由用户自行修改后发送。 */
 	const handleEditAndResend = () => {
