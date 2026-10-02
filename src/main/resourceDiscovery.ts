@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { readSettingsObject, readStringArray, resolveFromBase, splitResourceEntries, applyPatterns, SKILL_FILE } from "./resourceWhitelist";
+import { projectResourceEnabled } from "./config/piResourceRules";
 import { resolveConfiguredPackageResources } from "./packageResourceResolver";
 
 /**
@@ -79,6 +80,15 @@ export type ResourceDiscoveryOptions = {
 	disabledExtensions?: { scope: "user" | "project" | "unknown"; source: string }[];
 };
 
+/**
+ * 原生过滤投影：该资源在给定层的 settings 条目下是否加载。
+ * 迁移后禁用列表已清空，列表必须按原生 `!`/`+`/`-` 规则判定，否则会把用户停用的资源显示成启用。
+ * `baseEntries` 是下层条目（项目层判定时传全局条目），支持「全局排除、项目精确 + 恢复」的形态。
+ */
+function nativeResourceEnabled(options: { entries: readonly string[]; baseEntries?: readonly string[]; value: string; baseDir: string }): boolean {
+	return projectResourceEnabled({ entries: options.entries, baseEntries: options.baseEntries, value: options.value, baseDir: options.baseDir });
+}
+
 export function discoverSkills(options: ResourceDiscoveryOptions): DiscoveredSkillResource[] {
 	const home = options.agentHomeDir?.trim() || homedir();
 	const agentDir = join(home, ".pi", "agent");
@@ -92,6 +102,9 @@ export function discoverSkills(options: ResourceDiscoveryOptions): DiscoveredSki
 	const disabledProjectKeys = new Set((options.disabledProjectSkillNames ?? []).map((name) => name.toLowerCase()));
 	const isGlobalSkillEnabled = (name: string) => !disabledGlobalKeys.has(name.toLowerCase());
 	const isProjectSkillEnabled = (name: string) => !disabledProjectKeys.has(name.toLowerCase());
+	// 原生条目（迁移后禁用列表为空，列表状态必须按 `!`/`+`/`-` 规则投影）。
+	const userSkills = (Array.isArray(userSettings.skills) ? userSettings.skills : []).filter((entry): entry is string => typeof entry === "string");
+	const projectSkills = (Array.isArray(projectSettings.skills) ? projectSettings.skills : []).filter((entry): entry is string => typeof entry === "string");
 
 	const result: DiscoveredSkillResource[] = [];
 	const seen = new Set<string>();
@@ -115,7 +128,7 @@ export function discoverSkills(options: ResourceDiscoveryOptions): DiscoveredSki
 			sourceLabel: "settings.skills",
 			description: readSkillDescription(item),
 			userOnly: readSkillUserOnly(item),
-			enabled: isGlobalSkillEnabled(name),
+			enabled: isGlobalSkillEnabled(name) && nativeResourceEnabled({ entries: userSkills, value: item, baseDir: agentDir }),
 			managed: true,
 		});
 	}
@@ -131,7 +144,7 @@ export function discoverSkills(options: ResourceDiscoveryOptions): DiscoveredSki
 				sourceLabel: "settings.skills",
 				description: readSkillDescription(item),
 				userOnly: readSkillUserOnly(item),
-				enabled: isProjectSkillEnabled(name),
+				enabled: isProjectSkillEnabled(name) && nativeResourceEnabled({ entries: projectSkills, baseEntries: userSkills, value: item, baseDir: projectBaseDir }),
 				managed: true,
 			});
 		}
@@ -150,7 +163,7 @@ export function discoverSkills(options: ResourceDiscoveryOptions): DiscoveredSki
 				sourceLabel: ".agents/skills",
 				description: readSkillDescription(item),
 				userOnly: readSkillUserOnly(item),
-				enabled: isProjectSkillEnabled(name),
+				enabled: isProjectSkillEnabled(name) && nativeResourceEnabled({ entries: projectSkills, baseEntries: userSkills, value: item, baseDir: projectBaseDir }),
 				managed: true,
 			});
 		}
@@ -194,6 +207,8 @@ export function discoverPrompts(options: ResourceDiscoveryOptions): DiscoveredPr
 	const projectSettings = includeProjectResources ? readSettingsObject(join(projectBaseDir, "settings.json")) : {};
 	const disabledGlobalKeys = new Set((options.disabledPromptNames ?? []).map((name) => name.toLowerCase()));
 	const disabledProjectKeys = new Set((options.disabledProjectPromptNames ?? []).map((name) => name.toLowerCase()));
+	const userPrompts = (Array.isArray(userSettings.prompts) ? userSettings.prompts : []).filter((entry): entry is string => typeof entry === "string");
+	const projectPrompts = (Array.isArray(projectSettings.prompts) ? projectSettings.prompts : []).filter((entry): entry is string => typeof entry === "string");
 	const disabledInheritedKeys = new Set((options.disabledGlobalPromptNames ?? []).map((name) => name.toLowerCase()));
 	const isGlobalPromptEnabled = (name: string) => {
 		const key = name.toLowerCase();
@@ -220,7 +235,7 @@ export function discoverPrompts(options: ResourceDiscoveryOptions): DiscoveredPr
 			sourceId: "settings-user",
 			sourceLabel: "settings.prompts",
 			description: readPromptDescription(item),
-			enabled: isGlobalPromptEnabled(name),
+			enabled: isGlobalPromptEnabled(name) && nativeResourceEnabled({ entries: userPrompts, value: item, baseDir: agentDir }),
 			managed: true,
 		});
 	}
@@ -233,7 +248,7 @@ export function discoverPrompts(options: ResourceDiscoveryOptions): DiscoveredPr
 				sourceId: "settings-project",
 				sourceLabel: "settings.prompts",
 				description: readPromptDescription(item),
-				enabled: isProjectPromptEnabled(name),
+				enabled: isProjectPromptEnabled(name) && nativeResourceEnabled({ entries: projectPrompts, baseEntries: userPrompts, value: item, baseDir: projectBaseDir }),
 				managed: true,
 			});
 		}
@@ -284,6 +299,8 @@ export function discoverExtensions(options: ResourceDiscoveryOptions): Discovere
 
 	const { plain: userPlain, patterns: userPatterns } = splitResourceEntries(Array.isArray(userSettings.extensions) ? userSettings.extensions : []);
 	const { plain: projectPlain, patterns: projectPatterns } = splitResourceEntries(Array.isArray(projectSettings.extensions) ? projectSettings.extensions : []);
+	const userExtensions = (Array.isArray(userSettings.extensions) ? userSettings.extensions : []).filter((entry): entry is string => typeof entry === "string");
+	const projectExtensions = (Array.isArray(projectSettings.extensions) ? projectSettings.extensions : []).filter((entry): entry is string => typeof entry === "string");
 	for (const item of collectSettingsExtensionFiles(agentDir, userPlain, userPatterns)) {
 		const source = extensionSource(item);
 		add({
@@ -292,7 +309,7 @@ export function discoverExtensions(options: ResourceDiscoveryOptions): Discovere
 			sourceId: "settings-user",
 			sourceLabel: "settings.extensions",
 			physicalScope: "user",
-			enabled: !disabledKeys.has(`user:${source}`),
+			enabled: !disabledKeys.has(`user:${source}`) && nativeResourceEnabled({ entries: userExtensions, value: item, baseDir: agentDir }),
 			managed: true,
 		});
 	}
@@ -305,7 +322,7 @@ export function discoverExtensions(options: ResourceDiscoveryOptions): Discovere
 				sourceId: "settings-project",
 				sourceLabel: "settings.extensions",
 				physicalScope: "project",
-				enabled: !disabledKeys.has(`project:${source}`),
+				enabled: !disabledKeys.has(`project:${source}`) && nativeResourceEnabled({ entries: projectExtensions, baseEntries: userExtensions, value: item, baseDir: projectBaseDir }),
 				managed: true,
 			});
 		}
