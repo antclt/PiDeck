@@ -65,7 +65,13 @@ function loadExtensionManagerModule() {
 					return { getAppLogger: () => null };
 				}
 				if (specifier === "./extensionVersionGate") {
-					return nodeRequire("../src/main/extensions/extensionVersionGate.ts");
+					// 版本门槛模块新增了对 ../utils/versionCompare 的无扩展名相对导入，
+					// node 原生类型剥离解析不了，改用能递归处理相对导入的 loadTsCommonJs。
+					return loadTsCommonJs("src/main/extensions/extensionVersionGate.ts");
+				}
+				// updatePi 成功后调用 PiProcess.invalidateVersionCache；桩掉避免拉 PiProcess 依赖图。
+				if (specifier === "../pi/PiProcess") {
+					return { PiProcess: { invalidateVersionCache: () => {} } };
 				}
 				// ExtensionManager 依赖 ../utils/versionCompare 的 compareVersions；.ts 经 node 类型剥离可 require。
 				if (specifier === "../utils/versionCompare") {

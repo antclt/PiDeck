@@ -67,6 +67,8 @@ function loadExtensionManager({ homeDir, runPiOutput = "", fsOverrides = {} } = 
 			}
 			// 需替换为替身的依赖（外部副作用 / 需重定向 home）
 			if (id === "../pi/PiLocator") return {};
+			// updatePi 成功后调用 PiProcess.invalidateVersionCache；桩掉避免拉 PiProcess 依赖图。
+			if (id === "../pi/PiProcess") return { PiProcess: { invalidateVersionCache: () => {} } };
 			if (id === "../fs/trash") return { trashPath: async () => {} };
 			if (id === "../logging/sharedLogger") return { getAppLogger: () => null };
 			// 其余本地 TS 依赖一律加载**真模块**（含导出与行为），不再造部分导出桩

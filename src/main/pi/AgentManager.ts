@@ -431,8 +431,6 @@ export class AgentManager {
 	 * 此前失败只写日志，用户以为有快照、真要回滚才发现全是空的。
 	 */
 	private readonly rewindHealthByRoot = new Map<string, RewindCheckpointHealth>();
-	/** 正在执行模型配置刷新的 agent，用于退出处理器中忽略进程退出事件 */
-	private readonly modelRefreshingAgents = new Set<string>();
 	/** 用户主动停止的 agent，用于退出处理器中跳过自动重连 */
 	private readonly userInitiatedStop = new Set<string>();
 	/** 已尝试过自动重连的 agent（防止无限循环），重连成功后清除 */
@@ -2812,67 +2810,18 @@ export class AgentManager {
 	}
 
 	/**
-	 * 刷新模型配置：让运行中的 agent 重新加载 models.json，无需完全重启。
+	 * 刷新模型配置：让运行中的 agent 重新加载 models.json。
 	 *
-	 * 当前仅支持轻量级 reload_config RPC（策略 1）。
-	 * 策略 2（进程重启）已注释，等待 pi 官方支持 reload_config RPC 后再考虑：
-	 *   - 运行中的 Agent 重启进程会打断正在进行的对话/工具执行
-	 *   - 进程重启涉及 exit 事件竞态、模型恢复等复杂边界条件
-	 *
-	 * RPC 提案：https://github.com/earendil-works/pi/issues/6890
-	 * pi 合并 reload_config 后，本方法将自动生效，无需任何修改。
+	 * 现状（pi 1.0.0 核对）：RPC 命令表没有 reload_config（提案
+	 * https://github.com/earendil-works/pi/issues/6890 已以 not_planned 关闭），
+	 * 轻量级热重载不可用；进程重启方案会打断对话/工具执行且有 exit 竞态，不值得
+	 * 为此牺牲稳定性。因此本方法只返回当前状态，模型配置变更由 agent 重启（stop/start）生效。
+	 * 若未来 pi 新增 reload 类命令，在这里接入即可。
 	 */
 	async refreshModels(agentId: string): Promise<AgentRuntimeState> {
 		const runtime = this.requireRuntime(agentId);
-		const startTime = Date.now();
-
-		void this.appLogger?.info("agent", "Model refresh requested", { agentId });
-
-		// 策略 1：尝试 reload_config RPC（轻量级，无需重启进程）
-		// 该命令在 pi model-runtime 中已实现为 reloadConfig()，会重新读取 models.json
-		// 并重建所有 provider。当前 pi 0.80.10 的 RPC 协议尚未暴露此命令，
-		// 待 pi 合并 https://github.com/earendil-works/pi/issues/6890 后自动生效。
-		try {
-			const response = await runtime.process.client.request({ type: "reload_config" }, 8_000);
-			if (response.success) {
-				await this.loadMessages(agentId, false, undefined, { preserveMessagesAfter: Date.now() }).catch(() => undefined);
-				void this.appLogger?.info("agent", "Model refresh succeeded via reload_config RPC", {
-					agentId,
-					elapsedMs: Date.now() - startTime,
-				});
-				this.emitState();
-				return this.getRuntimeState(agentId);
-			}
-		} catch {
-			// reload_config 尚不支持，当前 pi 版本无轻量级刷新路径
-		}
-
-		// 策略 2（已注释）：进程重启方案。
-		// 原因：运行中重启会打断用户对话、工具执行，且涉及 exit 事件竞态。
-		// 等 pi 官方支持 reload_config RPC 后，策略 1 自动生效，无需回退到策略 2。
-		//
-		// const sessionPath = runtime.tab.sessionPath;
-		// if (!sessionPath) {
-		// 	throw new Error("Cannot refresh models: agent has no session path");
-		// }
-		// this.modelRefreshingAgents.add(agentId);
-		// try {
-		// 	const previousState = await this.getRuntimeState(agentId).catch(() => null);
-		// 	runtime.process.stop();
-		// 	await new Promise<void>((resolve) => setTimeout(resolve, 600));
-		// 	await this.reattachProcess(agentId, sessionPath);
-		// 	if (previousState?.provider && previousState?.modelId) {
-		// 		try { await this.setModel(agentId, previousState.provider, previousState.modelId); } catch {}
-		// 	}
-		// 	runtime.tab.status = "idle";
-		// 	await this.loadMessages(agentId).catch(() => undefined);
-		// } finally {
-		// 	this.modelRefreshingAgents.delete(agentId);
-		// }
-
-		void this.appLogger?.info("agent", "Model refresh: reload_config not supported by current pi version, skipping", {
+		void this.appLogger?.info("agent", "Model refresh requested; hot reload unsupported by pi, restart agent to apply models.json changes", {
 			agentId,
-			elapsedMs: Date.now() - startTime,
 		});
 		this.emitState();
 		return this.getRuntimeState(agentId);
@@ -3312,8 +3261,7 @@ export class AgentManager {
 	 * 在 agent 生命周期终止点（stop/restart/最终 closed/stopAll）统一调用。
 	 *
 	 * 不清的键（各自语义）：agents/messages（调用方处理）、userInitiatedStop
-	 * （stop 后由退出处理器消费删除）、modelRefreshingAgents（refresh 流程跨 stop 存活）、
-	 * pendingTrustRequests（启动流程 await 中，删键会挂死 create）、
+	 * （stop 后由退出处理器消费删除）、pendingTrustRequests（启动流程 await 中，删键会挂死 create）、
 	 * compactingAgents（compact 的 catch 靠它决定重连）。
 	 */
 	private clearAgentState(agentId: string) {
@@ -4240,8 +4188,6 @@ export class AgentManager {
 	/** createUnlocked 路径的进程 exit：支持压缩后自动重连，其余标 closed。 */
 	private handleCreateProcessExit(agentId: string, tab: AgentTab, payload: { code: number | null; signal: string | null }) {
 		if (this.startupHandshakeAgents.has(agentId)) return;
-		// 模型配置刷新期间的进程退出由 refreshModels() 负责重连，此处静默忽略
-		if (this.modelRefreshingAgents.has(agentId)) return;
 		// 用户主动停止 → 不自动重连
 		if (this.userInitiatedStop.has(agentId)) {
 			this.userInitiatedStop.delete(agentId);
@@ -4343,7 +4289,6 @@ export class AgentManager {
 	/** reattach 路径的进程 exit：同样做单次自动重连保护。 */
 	private handleReattachProcessExit(agentId: string, runtime: AgentRuntime, payload: { code: number | null; signal: string | null }) {
 		if (this.startupHandshakeAgents.has(agentId)) return;
-		if (this.modelRefreshingAgents.has(agentId)) return;
 		if (this.userInitiatedStop.has(agentId)) {
 			this.userInitiatedStop.delete(agentId);
 			runtime.tab.status = "closed";
@@ -4705,6 +4650,13 @@ export class AgentManager {
 				elapsedMs,
 				at: Date.now(),
 			});
+			// 压缩失败且不会自动重试时给用户可见提示（否则只进日志，用户会误以为一切正常，
+			// 直到下一轮上下文溢出）。aborted 是用户主动取消、willRetry 是 pi 自动重试中，都不提示。
+			if (typed.result === false && typed.aborted !== true && typed.willRetry !== true && runtime) {
+				this.addLocalizedMessage(agentId, "error", "diagnostic.compactionFailed", "会话压缩失败，上下文可能已接近上限；可稍后手动重试压缩，或重启会话。", {
+					debugDetails: typeof typed.errorMessage === "string" && typed.errorMessage ? typed.errorMessage : undefined,
+				});
+			}
 			if (runtime) {
 				// compaction 成功时才会向 session JSONL 写入新的边界记录；只有此时才需要重载，
 				// 否则前端仍展示压缩前分支，下一轮继续对话时看起来像“断在旧会话”。

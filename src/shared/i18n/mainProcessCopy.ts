@@ -1,6 +1,7 @@
 export const mainProcessZhCN = {
 	"diagnostic.historyLoadFailed": "历史会话加载失败，可继续使用当前 Agent 或重新打开会话重试。",
 	"diagnostic.compactReconnected": "会话压缩完成，Agent 已自动重连",
+	"diagnostic.compactionFailed": "会话压缩失败，上下文可能已接近上限；可稍后手动重试压缩，或重启会话。",
 	"diagnostic.abortReconnected": "终止后进程异常退出，会话已自动恢复",
 	"diagnostic.processReconnectFailed": "Agent 进程意外退出，自动重连失败",
 	"diagnostic.runtimeError": "Agent 运行时发生错误。",
@@ -249,6 +250,7 @@ export type MainProcessTranslationKey = keyof typeof mainProcessZhCN;
 export const mainProcessEnUS: Record<MainProcessTranslationKey, string> = {
 	"diagnostic.historyLoadFailed": "Failed to load session history. You can keep using this Agent or reopen the session to retry.",
 	"diagnostic.compactReconnected": "Session compacted and the Agent reconnected automatically",
+	"diagnostic.compactionFailed": "Session compaction failed and the context may be near its limit. Retry compaction later or restart the session.",
 	"diagnostic.abortReconnected": "The process exited unexpectedly after abort; the session has been recovered",
 	"diagnostic.processReconnectFailed": "The Agent process exited unexpectedly and could not reconnect",
 	"diagnostic.runtimeError": "The Agent runtime encountered an error.",
