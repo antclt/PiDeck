@@ -10,7 +10,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { readFile, stat } from "node:fs/promises";
-import type { CommitEntry, FileTreeNode, GitBranchInfo, GitResourceGroups, GitWorkspaceFileDiff, Project, YaoPromptDetailResult, YaoPromptListResult } from "../../shared/types";
+import type { CommitEntry, FileTreeNode, GitBranchInfo, GitResourceGroups, GitWorkspaceFileDiff, PiExtensionListResult, PiExtensionSummary, PiSkillListResult, PiSkillSummary, Project, YaoPromptDetailResult, YaoPromptListResult } from "../../shared/types";
 import { assertProjectFileReadPath, FILE_OUTSIDE_PROJECT_ERROR } from "../files/projectFileAccess";
 
 export type WebWorkspaceRoutesDeps = {
@@ -32,6 +32,13 @@ export type WebWorkspaceRoutesDeps = {
 	prompts?: {
 		list: (opts?: { category?: string; search?: string; page?: number; pageSize?: number }) => Promise<YaoPromptListResult>;
 		detail: (slug: string, category: string) => Promise<YaoPromptDetailResult | null>;
+	};
+	/** 技能/扩展资产面板（SkillManager / ExtensionManager 注入；缺省时对应路由返回 503）。 */
+	assets?: {
+		listSkills: () => Promise<PiSkillListResult>;
+		toggleSkill: (skillPath: string, enabled: boolean) => Promise<PiSkillSummary>;
+		listExtensions: () => Promise<PiExtensionListResult>;
+		setExtensionEnabled: (source: string, enabled: boolean, scope: PiExtensionSummary["scope"]) => Promise<void>;
 	};
 };
 
@@ -136,7 +143,7 @@ export class WebWorkspaceRoutes {
 	constructor(private readonly deps: WebWorkspaceRoutesDeps) {}
 
 	/** 命中已知路由并完成响应时返回 true；未命中返回 false 交给上层 404。 */
-	async handle(url: URL, _request: IncomingMessage, response: ServerResponse): Promise<boolean> {
+	async handle(url: URL, request: IncomingMessage, response: ServerResponse): Promise<boolean> {
 		if (!url.pathname.startsWith("/api/")) return false;
 		try {
 			if (url.pathname === "/api/git/status") return await this.gitStatus(url, response);
@@ -147,9 +154,14 @@ export class WebWorkspaceRoutes {
 			if (url.pathname === "/api/prompts") return await this.listPrompts(url, response);
 			const promptDetailMatch = url.pathname.match(/^\/api\/prompts\/([^/]+)$/);
 			if (promptDetailMatch) return await this.promptDetail(promptDetailMatch[1], url, response);
+			if (url.pathname === "/api/skills" && request.method === "GET") return await this.listSkills(response);
+			if (url.pathname === "/api/skills/toggle" && request.method === "POST") return await this.toggleSkill(request, response);
+			if (url.pathname === "/api/extensions" && request.method === "GET") return await this.listExtensions(response);
+			if (url.pathname === "/api/extensions/toggle" && request.method === "POST") return await this.toggleExtension(request, response);
 			return false;
 		} catch (error) {
-			sendError(response, 500, "webError.internal", error instanceof Error ? error.message : "workspace route failed");
+			const message = typeof error === "object" && error !== null && "message" in error ? String((error as { message: unknown }).message) : "workspace route failed";
+			sendError(response, 500, "webError.internal", message);
 			return true;
 		}
 	}
@@ -346,5 +358,107 @@ export class WebWorkspaceRoutes {
 		}
 		sendJson(response, 200, { detail: { title: detail.title, description: detail.description, promptContent: detail.promptContent } });
 		return true;
+	}
+
+	// ── 技能/扩展资产面板（第二批：与桌面设置页同源的列表 + 开关）──
+
+	private async listSkills(response: ServerResponse): Promise<boolean> {
+		if (!this.deps.assets) {
+			sendError(response, 503, "webError.skillsUnavailable", "skill service is not available");
+			return true;
+		}
+		// PiSkillSummary.path/dir 是宿主机绝对路径 —— 对外剥离（与 prompts 同款脱敏策略）
+		const result = await this.deps.assets.listSkills();
+		sendJson(response, 200, {
+			locations: result.locations.map(({ path: _path, ...rest }) => rest),
+			skills: result.skills.map(({ path: _path, dir: _dir, ...rest }) => rest),
+		});
+		return true;
+	}
+
+	private async toggleSkill(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
+		if (!this.deps.assets) {
+			sendError(response, 503, "webError.skillsUnavailable", "skill service is not available");
+			return true;
+		}
+		const body = await this.readJsonBody(request);
+		// 前端拿不到宿主绝对路径（脱敏），用 name + sourceId 定位：
+		// SkillManager 的持久化本身按 name 写 disabledSkills，path 仅用于进程内定位。
+		if (typeof body.name !== "string" || !body.name || typeof body.enabled !== "boolean") {
+			sendError(response, 400, "webError.invalidRequest", "name (string) and enabled (boolean) are required");
+			return true;
+		}
+		const sourceId = body.sourceId;
+		if (sourceId !== "pi-global" && sourceId !== "agents-global" && sourceId !== "project-pi" && sourceId !== "project-agents") {
+			sendError(response, 400, "webError.invalidRequest", "sourceId must be a valid skill location id");
+			return true;
+		}
+		const result = await this.deps.assets.listSkills();
+		const target = result.skills.find((skill) => skill.name === body.name && skill.sourceId === sourceId);
+		if (!target) {
+			sendError(response, 404, "webError.skillNotFound", "skill not found");
+			return true;
+		}
+		const skill = await this.deps.assets.toggleSkill(target.path, body.enabled);
+		const { path: _path, dir: _dir, ...rest } = skill;
+		sendJson(response, 200, { skill: rest });
+		return true;
+	}
+
+	private async listExtensions(response: ServerResponse): Promise<boolean> {
+		if (!this.deps.assets) {
+			sendError(response, 503, "webError.extensionsUnavailable", "extension service is not available");
+			return true;
+		}
+		const result = await this.deps.assets.listExtensions();
+		// path 是宿主机绝对路径，对外剥离（与 skills/prompts 同款脱敏策略）
+		sendJson(response, 200, {
+			extensions: result.extensions.map(({ path: _path, ...rest }) => rest),
+			conflicts: result.conflicts ?? [],
+		});
+		return true;
+	}
+
+	private async toggleExtension(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
+		if (!this.deps.assets) {
+			sendError(response, 503, "webError.extensionsUnavailable", "extension service is not available");
+			return true;
+		}
+		const body = await this.readJsonBody(request);
+		// scope 必须是合法枚举：user/project/unknown，其余拒绝（不猜默认）
+		const scope = body.scope;
+		if (typeof body.source !== "string" || !body.source || typeof body.enabled !== "boolean" || (scope !== "user" && scope !== "project" && scope !== "unknown")) {
+			sendError(response, 400, "webError.invalidRequest", "source (string), enabled (boolean), scope (user|project|unknown) are required");
+			return true;
+		}
+		await this.deps.assets.setExtensionEnabled(body.source, body.enabled, scope);
+		sendJson(response, 200, { ok: true });
+		return true;
+	}
+
+	/** 读 POST JSON body（开关类请求很小；上限 64KB 防滥用）。 */
+	private readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+		return new Promise((resolve, reject) => {
+			const chunks: Buffer[] = [];
+			let total = 0;
+			request.on("data", (chunk: Buffer) => {
+				total += chunk.length;
+				if (total > 64 * 1024) {
+					request.destroy();
+					reject(new Error("body too large"));
+					return;
+				}
+				chunks.push(chunk);
+			});
+			request.on("end", () => {
+				try {
+					const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+					resolve(typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {});
+				} catch (error) {
+					reject(error instanceof Error ? error : new Error("invalid json"));
+				}
+			});
+			request.on("error", reject);
+		});
 	}
 }

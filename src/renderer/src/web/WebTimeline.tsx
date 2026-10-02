@@ -9,10 +9,11 @@
  * - 流式期间底部显示响应指示器；出错显示诊断卡
  */
 import { Fragment, memo, useEffect, useRef, useState } from "react";
-import { ArrowDown, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Copy, Pencil, RefreshCw, Trash2, Wrench, X } from "lucide-react";
+import { ArrowDown, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Copy, Pencil, RefreshCw, Share2, Trash2, Wrench, X } from "lucide-react";
 import type { UIMessage } from "ai";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
+import { shareWebText } from "./webShare";
 import { cn } from "@/lib/utils";
 import { splitAskOption, formatAskTitle, serializeBatchAnswers } from "../utils/askUi";
 import { WebAssistantText } from "./WebAssistantText";
@@ -129,8 +130,8 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 							<div className="text-chat text-text-primary whitespace-pre-wrap break-words">{text}</div>
 						</div>
 					) : null}
-					{/* hover 操作行：复制恒有；编辑/删除/重发需 runtime 存活 */}
-					<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100">
+					{/* hover 操作行：复制恒有；编辑/删除/重发需 runtime 存活；触屏无 hover，常驻显示 */}
+					<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
 						<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(text)}>
 							<Copy className="size-3.5" aria-hidden="true" />
 						</ActionButton>
@@ -329,9 +330,12 @@ export const WebAssistantMessage = memo(function WebAssistantMessage(props: { me
 				return null;
 			})}
 			{!isStreaming && text ? (
-				<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/assistant:opacity-100 focus-within:opacity-100">
+				<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/assistant:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
 					<ActionButton label={t("web.msgCopy")} onClick={() => void copyTextToClipboard(text)}>
 						<Copy className="size-3.5" aria-hidden="true" />
+					</ActionButton>
+					<ActionButton label={t("web.shareReply")} onClick={() => void shareWebText(t("web.shareReply"), text)}>
+						<Share2 className="size-3.5" aria-hidden="true" />
 					</ActionButton>
 				</div>
 			) : null}
@@ -594,7 +598,7 @@ export function WebTimeline(props: {
 				) : (
 					<>
 						{messages.map((message) => (
-							<div key={message.id}>
+							<div key={message.id} id={`web-msg-${message.id}`} className="scroll-mt-24">
 								{message.role === "user" ? (
 									<WebUserBubble message={message} canManage={props.canManageMessages} onEdit={props.onEditMessage} onDelete={props.onDeleteMessage} onResend={props.onResendMessage} />
 								) : (

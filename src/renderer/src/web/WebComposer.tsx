@@ -10,7 +10,7 @@
  * - 无会话时禁用；流式期间提交按钮转为停止
  */
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, X } from "lucide-react";
+import { Camera, ImagePlus, X } from "lucide-react";
 import { Button } from "@/components/ui-shadcn/button";
 import { t } from "@/i18n";
 import { compressImageToDataUrl, imagesFromPasteEvent } from "./webImageCompress";
@@ -34,6 +34,7 @@ export function WebComposer(props: {
 	const [attachError, setAttachError] = useState(false);
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const cameraInputRef = useRef<HTMLInputElement | null>(null);
 	const lastPrefillNonce = useRef<number>(-1);
 
 	useEffect(() => {
@@ -125,6 +126,31 @@ export function WebComposer(props: {
 								event.target.value = "";
 							}}
 						/>
+						{/* 移动端相机直拍：capture 调起后置相机，单张；仅触屏设备显示（桌面无相机语义） */}
+						<input
+							ref={cameraInputRef}
+							type="file"
+							accept="image/*"
+							capture="environment"
+							className="hidden"
+							onChange={(event) => {
+								const files = Array.from(event.target.files ?? []);
+								void addFiles(files);
+								event.target.value = "";
+							}}
+						/>
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="hidden h-7 w-7 shrink-0 p-0 text-muted-foreground [@media(pointer:coarse)]:inline-flex"
+							disabled={props.disabled || busy || images.length >= MAX_ATTACHED_IMAGES}
+							title={t("web.takePhoto")}
+							aria-label={t("web.takePhoto")}
+							onClick={() => cameraInputRef.current?.click()}
+						>
+							<Camera className="size-3.5" aria-hidden="true" />
+						</Button>
 						<Button type="button" variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 text-muted-foreground" disabled={props.disabled || busy || images.length >= MAX_ATTACHED_IMAGES} title={t("web.attachImage")} aria-label={t("web.attachImage")} onClick={() => fileInputRef.current?.click()}>
 							<ImagePlus className="size-3.5" aria-hidden="true" />
 						</Button>

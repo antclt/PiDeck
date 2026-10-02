@@ -5,7 +5,7 @@
  * 运行态来自 useChat status（submitted/streaming）与轮询的 runtime.status 兜底。
  */
 import { useState } from "react";
-import { Check, ChevronsUpDown, History, Menu, MoreHorizontal, PanelRight, RefreshCw, ShieldCheck, Target } from "lucide-react";
+import { Check, ChevronsUpDown, Download, History, Menu, Monitor, Moon, MoreHorizontal, PanelRight, Puzzle, RefreshCw, Search, ShieldCheck, Sun, Target } from "lucide-react";
 import type { AgentBackend, AvailableModel, SessionModelPreference } from "../../../shared/types";
 import { resolveModelDisplayName } from "../../../shared/modelDisplayName";
 import { Button } from "@/components/ui-shadcn/button";
@@ -18,6 +18,7 @@ import { SessionBackendMark } from "@/components/session/SessionSourceBadge";
 import { DSH_PERMISSION_PRESETS } from "@/components/session/DshPermissionMenu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui-shadcn/dropdown-menu";
 import type { WebContextUsage } from "./webTypes";
+import type { ResolvedWebTheme, WebThemePreference } from "./webTheme";
 
 export type WebHeaderStatus = "idle" | "starting" | "running" | "error";
 
@@ -55,8 +56,16 @@ export function WebHeader(props: {
 	onModelChange: (model: AvailableModel) => void;
 	onThinkingChange: (level: string) => void;
 	onOpenDshTools?: () => void;
+	/** 第二批：全局入口（搜索/主题/PWA 安装/技能扩展面板）。 */
+	onOpenSearch?: () => void;
+	themePreference?: WebThemePreference;
+	resolvedTheme?: ResolvedWebTheme;
+	onCycleTheme?: () => void;
+	canInstall?: boolean;
+	onInstall?: () => void;
+	onOpenAssets?: () => void;
 }) {
-	const { title, status, onOpenSidebar, model, thinkingLevel, models, backend, refreshingModels, contextUsage, permissionPreset, actions, onRefreshModels, onModelChange, onThinkingChange, onOpenDshTools } = props;
+	const { title, status, onOpenSidebar, model, thinkingLevel, models, backend, refreshingModels, contextUsage, permissionPreset, actions, onRefreshModels, onModelChange, onThinkingChange, onOpenDshTools, onOpenSearch, themePreference, resolvedTheme, onCycleTheme, canInstall, onInstall, onOpenAssets } = props;
 	// 允许窄屏换行：标题保留可用宽度，控制项在下一行展开，避免手机上相互挤压。
 	return (
 		<header className="chat-header flex min-w-0 flex-wrap items-center gap-2 border-b border-border bg-background px-3 py-2">
@@ -152,6 +161,36 @@ export function WebHeader(props: {
 							) : null}
 						</DropdownMenuContent>
 					</DropdownMenu>
+				) : null}
+				{/* 第二批：全局入口组（与会话级 actions 分开；均可选，缺失即隐藏） */}
+				{onOpenSearch ? (
+					<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={onOpenSearch} aria-label={t("web.searchTitle")} title={t("web.searchTitle")}>
+						<Search className="size-4" aria-hidden="true" />
+					</Button>
+				) : null}
+				{onCycleTheme ? (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+						onClick={onCycleTheme}
+						aria-label={t("web.themeToggle")}
+						title={`${t("web.themeToggle")} · ${t(themePreference === "light" ? "web.themeLight" : themePreference === "dark" ? "web.themeDark" : "web.themeSystem")}`}
+					>
+						{/* system 模式统一 Monitor 图标：避免系统亮暗切换时按钮闪烁换图标 */}
+						{themePreference === "light" ? <Sun className="size-4" aria-hidden="true" /> : themePreference === "dark" ? <Moon className="size-4" aria-hidden="true" /> : <Monitor className="size-4" aria-hidden="true" />}
+					</Button>
+				) : null}
+				{canInstall && onInstall ? (
+					<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={onInstall} aria-label={t("web.installApp")} title={t("web.installApp")}>
+						<Download className="size-4" aria-hidden="true" />
+					</Button>
+				) : null}
+				{onOpenAssets ? (
+					<Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={onOpenAssets} aria-label={t("web.assetsTitle")} title={t("web.assetsTitle")}>
+						<Puzzle className="size-4" aria-hidden="true" />
+					</Button>
 				) : null}
 			</div>
 		</header>

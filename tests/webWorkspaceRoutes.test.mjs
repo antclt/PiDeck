@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
+import { EventEmitter } from "node:events";
 import { mkdtemp, writeFile, realpath, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -31,7 +32,7 @@ function fakeResponse() {
 
 async function call(routes, path) {
 	const res = fakeResponse();
-	const handled = await routes.handle(new URL(`http://localhost${path}`), {}, res);
+	const handled = await routes.handle(new URL(`http://localhost${path}`), { method: "GET" }, res);
 	return { handled, status: res.status, body: res.body ? JSON.parse(res.body) : null };
 }
 
@@ -225,4 +226,86 @@ test("unknown api paths fall through to the caller (returns false)", async () =>
 	const routes = new WebWorkspaceRoutes({ listProjects: () => [] });
 	const result = await call(routes, "/api/not-a-workspace-route");
 	assert.equal(result.handled, false);
+});
+
+/** 技能/扩展资产 stub：列表带宿主路径（应被脱敏），toggle 记录调用。 */
+function stubAssets(overrides = {}) {
+	const calls = { skills: [], extensions: [] };
+	return {
+		calls,
+		assets: {
+			listSkills: async () => ({
+				locations: [{ id: "pi-global", label: "pi global", path: "/host/pi/skills" }],
+				skills: [{ name: "alpha", sourceId: "pi-global", path: "/host/pi/skills/alpha", dir: "/host/pi/skills", enabled: true }],
+			}),
+			toggleSkill: async (path, enabled) => {
+				calls.skills.push({ path, enabled });
+				return { name: "alpha", sourceId: "pi-global", path, dir: "/host/pi/skills", enabled };
+			},
+			listExtensions: async () => ({
+				extensions: [{ name: "beta", scope: "project", path: "/host/proj/beta.ts", enabled: false }],
+				raw: "cli output",
+				conflicts: [],
+			}),
+			toggleExtension: async (path, enabled) => {
+				calls.extensions.push({ path, enabled });
+				return { name: "beta", scope: "project", path, enabled: false };
+			},
+			...overrides,
+		},
+	};
+}
+
+async function post(routes, path, body) {
+	const res = fakeResponse();
+	// readJsonBody 按事件流读 body：用 EventEmitter 模拟 IncomingMessage
+	const req = new EventEmitter();
+	req.method = "POST";
+	setImmediate(() => {
+		req.emit("data", Buffer.from(JSON.stringify(body)));
+		req.emit("end");
+	});
+	const handled = await routes.handle(new URL(`http://localhost${path}`), req, res);
+	return { handled, status: res.status, body: res.body ? JSON.parse(res.body) : null };
+}
+
+test("skills listing strips host paths; toggle requires name/enabled/sourceId", async () => {
+	const stub = stubAssets();
+	const routes = new WebWorkspaceRoutes({ listProjects: () => [], assets: stub.assets });
+	const list = await call(routes, "/api/skills");
+	assert.equal(list.status, 200);
+	assert.deepEqual(Object.keys(list.body.skills[0]), ["name", "sourceId", "enabled"]);
+	assert.deepEqual(Object.keys(list.body.locations[0]), ["id", "label"]);
+
+	// 校验：缺 enabled / 非法 sourceId 都 400，不触发写操作
+	assert.equal((await post(routes, "/api/skills/toggle", { name: "alpha", sourceId: "pi-global" })).status, 400);
+	assert.equal((await post(routes, "/api/skills/toggle", { name: "alpha", enabled: true, sourceId: "nope" })).status, 400);
+	assert.equal(stub.calls.skills.length, 0);
+});
+
+test("skills toggle resolves by name+sourceId (前端拿不到宿主路径) and 404s unknown", async () => {
+	const stub = stubAssets();
+	const routes = new WebWorkspaceRoutes({ listProjects: () => [], assets: stub.assets });
+	const ok = await post(routes, "/api/skills/toggle", { name: "alpha", sourceId: "pi-global", enabled: false });
+	assert.equal(ok.status, 200);
+	assert.equal(ok.body.skill.enabled, false);
+	assert.equal(stub.calls.skills[0].path, "/host/pi/skills/alpha");
+
+	const missing = await post(routes, "/api/skills/toggle", { name: "ghost", sourceId: "pi-global", enabled: true });
+	assert.equal(missing.status, 404);
+});
+
+test("extensions listing drops raw cli output and host paths; toggle validates scope enum", async () => {
+	const stub = stubAssets();
+	const routes = new WebWorkspaceRoutes({ listProjects: () => [], assets: stub.assets });
+	const list = await call(routes, "/api/extensions");
+	assert.equal(list.status, 200);
+	assert.deepEqual(Object.keys(list.body.extensions[0]), ["name", "scope", "enabled"]);
+	assert.ok(!JSON.stringify(list.body).includes("cli output"));
+});
+
+test("skills/extensions routes 503 when assets service missing", async () => {
+	const routes = new WebWorkspaceRoutes({ listProjects: () => [] });
+	assert.equal((await call(routes, "/api/skills")).status, 503);
+	assert.equal((await call(routes, "/api/extensions")).status, 503);
 });

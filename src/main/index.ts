@@ -6,6 +6,7 @@ import { createWriteStream, existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { is } from "@electron-toolkit/utils";
 import { PetSystem, type PetSystemDeps } from "./pet";
+import { downgradeRunningStartedBefore, downgradeStaleRunning } from "./pi/derivedSubagents";
 import { SoundAlertService } from "./sounds/SoundAlertService";
 import { registerSoundIpc } from "./ipc/soundIpc";
 import { registerSoundProtocol } from "./sounds/soundProtocol";
@@ -4123,6 +4124,38 @@ app
 			},
 			getForkMessages: (target) => sessionRuntimeCoordinator.getRuntimeForkMessages(target),
 			forkRuntimeSession: (target, entryId) => sessionRuntimeCoordinator.forkRuntimeSession(target, entryId),
+			// 会话活动监控（第二批 strips）：与桌面 sessionIpc.ts 同源同闸门
+			listSessionFileChanges: (sessionId) => {
+				const entry = sessionCatalog.get(sessionId);
+				// DSH/生图会话无 pi 会话文件，文件汇总无意义
+				if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return Promise.resolve([]);
+				return agentManager.readSessionFileChanges(entry.filePath);
+			},
+			listSessionSubagents: async (sessionId) => {
+				const entry = sessionCatalog.get(sessionId);
+				if (!entry?.filePath) return [];
+				let records = await agentManager.readSessionSubagentRecords(entry.filePath);
+				// 与桌面同款对账：无活 runtime 时把残留 running 降级（终态通知未落盘）；
+				// 活 runtime 按本代启动时间降级上一代派发的 running。
+				const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
+				if (!liveTarget) {
+					if (!sessionRuntimeCoordinator.isActivating(sessionId)) {
+							records = downgradeStaleRunning(records);
+						}
+				} else {
+					const liveTab = agentManager.list().find((tab) => tab.id === liveTarget.agentId);
+					if (liveTab?.createdAt) {
+						records = downgradeRunningStartedBefore(records, liveTab.createdAt);
+					}
+				}
+				return records;
+			},
+			listSessionTodo: (sessionId) => {
+				const entry = sessionCatalog.get(sessionId);
+				// DSH/生图会话无 pi 会话文件，无 todo 快照
+				if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return Promise.resolve(undefined);
+				return agentManager.readSessionTodo(entry.filePath);
+			},
 		});
 		// P1-P3 工作区路由（git/files/prompts）：只读能力注入，未装配的服务自动 503
 		webServiceManager.workspaceRoutes = new WebWorkspaceRoutes({
@@ -4144,6 +4177,13 @@ app
 						detail: (slug, category) => xuePromptManager.detail(slug, category),
 					}
 				: undefined,
+			// 技能/扩展资产面板（第二批）：与桌面设置页同源；列表脱敏在路由层做
+			assets: {
+				listSkills: () => skillManager.list(),
+				toggleSkill: (skillPath, enabled) => skillManager.toggle(skillPath, enabled),
+				listExtensions: () => extensionManager.list(),
+				setExtensionEnabled: (source, enabled, scope) => extensionManager.setEnabled(source, enabled, scope),
+			},
 		});
 		// C12：退出清理登记（before-quit 统一 runAll）
 		quitCleanup.register("theme-schedule", () => clearThemeScheduleTimer());

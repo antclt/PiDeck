@@ -90,7 +90,7 @@ function fixture(overrides = {}) {
 		status: "idle",
 		createdAt: 2,
 	};
-	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], rewindTargets: [], rewindParams: [], rewindRestores: [] };
+	const calls = { createDraft: 0, createAnonymous: 0, createAgent: 0, createProject: [], deleteProject: [], send: [], stateTargets: [], modelTargets: [], rewindTargets: [], rewindParams: [], rewindRestores: [], fileChanges: [], subagents: [], todo: [] };
 	const targeted = (target, value) => ({ ok: true, value: { target, value } });
 	const deps = {
 		// SSE 流式依赖：测试环境不订阅真实 pi 事件，但必须提供可调用实现满足契约。
@@ -144,6 +144,19 @@ function fixture(overrides = {}) {
 			windowStart: 30,
 			truncated: true,
 		}),
+		listSessionFileChanges: async (sessionId) => {
+			calls.fileChanges.push(sessionId);
+			return [{ path: "src/a.ts", changeType: "edit", additions: 1, deletions: 0, timestamp: 1 }];
+		},
+		listSessionSubagents: async (sessionId) => {
+			calls.subagents.push(sessionId);
+			return [{ id: "sub-1", name: "explore", status: "completed", startedAt: 1 }];
+		},
+		listSessionTodo: async (sessionId) => {
+			calls.todo.push(sessionId);
+			// 与真实实现对齐：会话无 todo 快照时返回 null（路由侧归一为 {todo:null}）
+			return sessionId === "session-1" ? { todos: [{ content: "ship it", status: "completed" }], updatedAt: 2 } : null;
+		},
 		readSessionMessagePage: async () => ({ messages: [], total: 0, nextBefore: null }),
 		sendSessionPrompt: async (input) => {
 			calls.send.push(input);
@@ -826,6 +839,24 @@ async function startMockDevServer() {
 }
 
 /** dev 模式（devRendererUrl 已注入）下，静态请求全部代理到 vite dev server。 */
+test("session activity strips routes expose file changes, subagents, and todo snapshots", async () => {
+	await withServer(async ({ baseUrl }) => {
+		// 与桌面 IPC 同源的三条监控路由：形状 + 按 sessionId 取数
+		const files = await (await fetch(`${baseUrl}/api/sessions/session-1/file-changes`)).json();
+		assert.equal(files.changes.length, 1);
+		assert.equal(files.changes[0].path, "src/a.ts");
+
+		const subs = await (await fetch(`${baseUrl}/api/sessions/session-1/subagents`)).json();
+		assert.equal(subs.subagents[0].id, "sub-1");
+
+		const todo = await (await fetch(`${baseUrl}/api/sessions/session-1/todo`)).json();
+		assert.equal(todo.todo.todos[0].content, "ship it");
+
+		const missing = await (await fetch(`${baseUrl}/api/sessions/missing-session/todo`)).json();
+		assert.equal(missing.todo, null);
+	});
+});
+
 test("web service dev mode proxies static assets to the renderer dev server", async () => {
 	const devServer = await startMockDevServer();
 	try {

@@ -23,6 +23,7 @@ import type {
 	SendSessionPromptInput,
 	SendSessionPromptResult,
 	SessionCommandResult,
+	SessionFileChange,
 	SessionMessagePage,
 	SessionRecord,
 	SessionRuntimeInfo,
@@ -31,7 +32,9 @@ import type {
 	SessionRuntimeTarget,
 	SessionSummary,
 	SessionTargetedValue,
+	SessionTodoSnapshot,
 	SessionUiResponseInput,
+	PiSubagentEntry,
 	UpdateSessionRecordInput,
 	WebServiceStatusInfo,
 } from "../../shared/types";
@@ -170,6 +173,10 @@ type WebServiceDependencies = {
 	/** 从历史轮次分叉新会话（P3 分支条；BrowserApi 已映射，服务端此前缺席）。 */
 	getForkMessages: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<SessionTargetedValue<Array<{ entryId: string; text: string }>>>>;
 	forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string) => Promise<SessionCommandResult<SessionTargetedValue<unknown>>>;
+	/** 会话活动监控（第二批 strips）：文件变更/子代理/todo 快照，装配侧对齐桌面 IPC 语义（含 running 降级对账）。缺省时路由返回 503。 */
+	listSessionFileChanges?: (sessionId: string) => Promise<SessionFileChange[]>;
+	listSessionSubagents?: (sessionId: string) => Promise<PiSubagentEntry[]>;
+	listSessionTodo?: (sessionId: string) => Promise<SessionTodoSnapshot | undefined>;
 	listPendingUiRequests: () => PendingUiRequestSnapshot[];
 	respondToUi: (input: SessionUiResponseInput) => Promise<void>;
 	/** DSH 子代理列表（S6.3：web 端工具面板；未装配 DSH 时缺省）。 */
@@ -432,6 +439,34 @@ export class WebServiceManager {
 		if (catalogSessionsMatch && request.method === "GET") {
 			const sessions = await this.deps.listCatalogSessions(decodeURIComponent(catalogSessionsMatch[1]));
 			this.sendJson(response, { sessions });
+			return;
+		}
+		// ── 会话活动监控（第二批 strips）：文件变更/子代理/todo，与桌面 IPC 同源数据 ──
+		const fileChangesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/file-changes$/);
+		if (fileChangesMatch && request.method === "GET") {
+			if (!this.deps.listSessionFileChanges) {
+				this.sendError(response, 503, "webError.stripsUnavailable", "session file changes are not available");
+				return;
+			}
+			this.sendJson(response, { changes: await this.deps.listSessionFileChanges(decodeURIComponent(fileChangesMatch[1])) });
+			return;
+		}
+		const subagentsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/subagents$/);
+		if (subagentsMatch && request.method === "GET") {
+			if (!this.deps.listSessionSubagents) {
+				this.sendError(response, 503, "webError.stripsUnavailable", "session subagents are not available");
+				return;
+			}
+			this.sendJson(response, { subagents: await this.deps.listSessionSubagents(decodeURIComponent(subagentsMatch[1])) });
+			return;
+		}
+		const todoMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/todo$/);
+		if (todoMatch && request.method === "GET") {
+			if (!this.deps.listSessionTodo) {
+				this.sendError(response, 503, "webError.stripsUnavailable", "session todo is not available");
+				return;
+			}
+			this.sendJson(response, { todo: (await this.deps.listSessionTodo(decodeURIComponent(todoMatch[1]))) ?? null });
 			return;
 		}
 		// ── DSH 工具面板路由（S6.3：goals/subagents/skills；无活跃 runtime 返回空）──
@@ -866,7 +901,10 @@ export class WebServiceManager {
 <html lang="en-US">
 <head>
 	<meta charset="utf-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<link rel="manifest" href="/manifest.webmanifest" />
+	<meta name="theme-color" content="#18181b" />
+	<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 	<title>PiDeck Web Service</title>
 	<style>
 		:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -1518,7 +1556,9 @@ export class WebServiceManager {
 		const body = await readFile(filePath);
 		response.writeHead(200, {
 			"content-type": this.contentType(filePath),
-			"cache-control": filePath.endsWith("index.html") ? "no-store" : "public, max-age=31536000, immutable",
+			// HTML 入口（index.html / web.html）必须 no-store：PWA/SW 发新版后不能拿到旧壳引用旧 bundle；
+			// sw.js 主脚本浏览器按规范绕过 HTTP 缓存检查更新，不受 immutable 影响
+			"cache-control": filePath.endsWith(".html") ? "no-store" : "public, max-age=31536000, immutable",
 		});
 		response.end(body);
 	}
@@ -1545,6 +1585,8 @@ export class WebServiceManager {
 				return "image/png";
 			case ".ico":
 				return "image/x-icon";
+			case ".webmanifest":
+				return "application/manifest+json; charset=utf-8";
 			default:
 				return "application/octet-stream";
 		}

@@ -8,8 +8,8 @@
  * - 发送消息走 useChat（/api/chat 流式），不在此处重复实现
  */
 import type { UIMessage } from "ai";
-import type { AvailableModel, ChatMessage, SessionCommandResult, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeTarget, SessionTargetedValue, UpdateSessionRecordInput } from "../../../shared/types";
-import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, YaoPromptCategory } from "../../../shared/types";
+import type { AvailableModel, ChatMessage, SessionCommandResult, SessionFileChange, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
+import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory } from "../../../shared/types";
 import type { RewindCheckpointPage, RewindRestoreResult, RewindRestoreScope } from "../../../shared/types";
 import type { AgentUiResponse } from "../../../shared/types";
 import type { WebContextUsage, WebFileNodeLite, WebState } from "./webTypes";
@@ -502,4 +502,69 @@ export async function fetchFileContent(projectId: string, path: string): Promise
 	const res = await apiFetch(`/api/file-content?projectId=${encodeURIComponent(projectId)}&${params.toString()}`);
 	if (!res.ok) throw new Error(`file content ${res.status}`);
 	return (await res.json()) as { content?: string; size?: number; tooLarge?: boolean; binary?: boolean };
+}
+
+// ── 第二批：会话活动监控 strips（文件变更/子代理/todo，与桌面端同源数据） ──
+
+export async function fetchSessionFileChanges(sessionId: string): Promise<SessionFileChange[]> {
+	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/file-changes`);
+	if (!res.ok) throw new Error(`file changes ${res.status}`);
+	const payload = (await res.json()) as { changes?: SessionFileChange[] };
+	return payload.changes ?? [];
+}
+
+export async function fetchSessionSubagents(sessionId: string): Promise<PiSubagentEntry[]> {
+	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/subagents`);
+	if (!res.ok) throw new Error(`subagents ${res.status}`);
+	const payload = (await res.json()) as { subagents?: PiSubagentEntry[] };
+	return payload.subagents ?? [];
+}
+
+export async function fetchSessionTodo(sessionId: string): Promise<SessionTodoSnapshot | null> {
+	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/todo`);
+	if (!res.ok) throw new Error(`todo ${res.status}`);
+	const payload = (await res.json()) as { todo?: SessionTodoSnapshot | null };
+	return payload.todo ?? null;
+}
+
+// ── 第二批：技能/扩展资产面板（后端剥离宿主路径，前端类型同步去字段） ──
+
+export type WebSkillLocation = Omit<PiSkillLocation, "path">;
+export type WebSkillSummary = Omit<PiSkillSummary, "path" | "dir">;
+export type WebExtensionSummary = Omit<PiExtensionSummary, "path">;
+
+export async function listWebSkills(): Promise<{ locations: WebSkillLocation[]; skills: WebSkillSummary[] }> {
+	const res = await apiFetch("/api/skills");
+	if (!res.ok) throw new Error(`skills ${res.status}`);
+	return (await res.json()) as { locations: WebSkillLocation[]; skills: WebSkillSummary[] };
+}
+
+/** 开关走 name+sourceId（前端无宿主路径；持久化按 name 写 disabledSkills）。 */
+export async function toggleWebSkill(name: string, sourceId: WebSkillSummary["sourceId"], enabled: boolean): Promise<WebSkillSummary> {
+	const res = await apiFetch("/api/skills/toggle", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ name, sourceId, enabled }),
+	});
+	if (!res.ok) throw new Error(`skill toggle ${res.status}`);
+	const payload = (await res.json()) as { skill?: WebSkillSummary };
+	if (!payload.skill) throw new Error("skill toggle returned no skill");
+	return payload.skill;
+}
+
+export async function listWebExtensions(): Promise<{ extensions: WebExtensionSummary[]; conflicts: { builtIn: string; thirdParty: string }[] }> {
+	const res = await apiFetch("/api/extensions");
+	if (!res.ok) throw new Error(`extensions ${res.status}`);
+	const payload = (await res.json()) as { extensions?: WebExtensionSummary[]; conflicts?: { builtIn: string; thirdParty: string }[] };
+	return { extensions: payload.extensions ?? [], conflicts: payload.conflicts ?? [] };
+}
+
+/** 扩展开关写入配置，重启会话后生效（UI 需提示）。 */
+export async function toggleWebExtension(source: string, enabled: boolean, scope: "user" | "project" | "unknown"): Promise<void> {
+	const res = await apiFetch("/api/extensions/toggle", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ source, enabled, scope }),
+	});
+	if (!res.ok) throw new Error(`extension toggle ${res.status}`);
 }

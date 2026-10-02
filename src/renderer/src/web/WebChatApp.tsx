@@ -34,6 +34,12 @@ import { chatMessagesToUiMessages, createProject, createSession, deleteProject, 
 import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime } from "./webApi";
 import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
+import { WebSessionStrips } from "./WebSessionStrips";
+import { WebSearchDialog } from "./WebSearchDialog";
+import { WebSkillsExtensionsDialog } from "./WebSkillsExtensionsDialog";
+import { applyWebTheme, readStoredWebTheme, resolveWebTheme, storeWebTheme, systemPrefersDark, type ResolvedWebTheme, type WebThemePreference } from "./webTheme";
+import { registerWebServiceWorker, usePwaInstall } from "./webPwa";
+import { decideStreamRecovery } from "./webStreamRecovery";
 import type { AgentUiResponse } from "../../../shared/types";
 import type { WebProject, WebState, WebContextUsage } from "./webTypes";
 
@@ -104,6 +110,122 @@ export function WebChatApp() {
 	});
 
 	const streaming = status === "submitted" || status === "streaming";
+
+	// ── 第二批：主题 / PWA / 搜索 / SSE 断线恢复 ──
+	const [themePreference, setThemePreference] = useState<WebThemePreference>(() => readStoredWebTheme());
+	const [systemDark, setSystemDark] = useState(() => systemPrefersDark());
+	const resolvedTheme: ResolvedWebTheme = resolveWebTheme(themePreference, systemDark);
+	const [searchOpen, setSearchOpen] = useState(false);
+	const [assetsOpen, setAssetsOpen] = useState(false);
+	const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+	const recoveryLastAttemptRef = useRef(0);
+	const statusRef = useRef(status);
+	statusRef.current = status;
+	const { canInstall, install } = usePwaInstall();
+
+	// 主题：应用为与桌面同源的 data-theme 机制；跟随系统变化时重解析
+	useEffect(() => {
+		applyWebTheme(resolvedTheme);
+	}, [resolvedTheme]);
+	useEffect(() => {
+		const media = window.matchMedia("(prefers-color-scheme: dark)");
+		const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+		media.addEventListener("change", onChange);
+		return () => media.removeEventListener("change", onChange);
+	}, []);
+	const cycleTheme = () => {
+		const next: WebThemePreference = themePreference === "light" ? "dark" : themePreference === "dark" ? "system" : "light";
+		setThemePreference(next);
+		storeWebTheme(next);
+	};
+
+	// PWA：SW 注册一次（失败静默降级，不影响页面功能）
+	useEffect(() => {
+		registerWebServiceWorker();
+	}, []);
+
+	// SSE 断线恢复：手机锁屏/切网/后台节流断流后，回前台/网络恢复/error 态时
+	// 从磁盘拉最新消息窗口覆盖本地（pi 侧不受影响，见 webStreamRecovery.ts）
+	const recoverFromDisk = async (notify: boolean) => {
+		const sessionId = activeSessionIdRef.current;
+		if (!sessionId) return;
+		try {
+			const page = await fetchMessagePage(sessionId);
+			const history = chatMessagesToUiMessages(page.messages);
+			messagesBySessionRef.current[sessionId] = history;
+			historyMetaRef.current[sessionId] = { total: page.total, nextBefore: page.nextBefore };
+			if (activeSessionIdRef.current === sessionId) setMessages(history);
+			if (notify) {
+				setRecoveryNotice(t("web.streamRecovered"));
+				setTimeout(() => setRecoveryNotice(null), 4000);
+			}
+		} catch {
+			if (notify) {
+				setRecoveryNotice(t("web.streamRecoveryFailed"));
+				setTimeout(() => setRecoveryNotice(null), 4000);
+			}
+		}
+	};
+	useEffect(() => {
+		const maybeRecover = () => {
+			const decision = decideStreamRecovery({
+				status: statusRef.current,
+				documentVisible: !document.hidden,
+				online: navigator.onLine,
+				lastAttemptAt: recoveryLastAttemptRef.current,
+				now: Date.now(),
+			});
+			if (!decision.recover) return;
+			recoveryLastAttemptRef.current = Date.now();
+			void recoverFromDisk(decision.notify);
+		};
+		document.addEventListener("visibilitychange", maybeRecover);
+		window.addEventListener("online", maybeRecover);
+		// error 态（SSE 显式断流）立即尝试一次；防抖在 decideStreamRecovery 内
+		if (status === "error") maybeRecover();
+		return () => {
+			document.removeEventListener("visibilitychange", maybeRecover);
+			window.removeEventListener("online", maybeRecover);
+		};
+	}, [status]);
+
+	// Ctrl/Cmd+K：会话内搜索
+	useEffect(() => {
+		const onKey = (event: KeyboardEvent) => {
+			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+				event.preventDefault();
+				setSearchOpen(true);
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, []);
+
+	const scrollToMessage = (messageId: string) => {
+		document.getElementById(`web-msg-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+	};
+
+	// 移动端侧栏边缘手势：从左缘 28px 内起手右滑 56px 开抽屉（横向位移占优，不干扰纵向滚动）
+	const edgeSwipeRef = useRef<{ x: number; y: number } | null>(null);
+	const onMainTouchStart = (event: React.TouchEvent<HTMLElement>) => {
+		if (mobileSidebarOpen) return;
+		const touch = event.touches[0];
+		if (touch.clientX <= 28) edgeSwipeRef.current = { x: touch.clientX, y: touch.clientY };
+	};
+	const onMainTouchMove = (event: React.TouchEvent<HTMLElement>) => {
+		const start = edgeSwipeRef.current;
+		if (!start) return;
+		const touch = event.touches[0];
+		const dx = touch.clientX - start.x;
+		const dy = touch.clientY - start.y;
+		if (dx > 56 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+			edgeSwipeRef.current = null;
+			setMobileSidebarOpen(true);
+		}
+	};
+	const onMainTouchEnd = () => {
+		edgeSwipeRef.current = null;
+	};
 
 	activeSessionIdRef.current = activeSessionId;
 
@@ -622,7 +744,7 @@ export function WebChatApp() {
 	const moreCount = activeMeta ? Math.max(0, activeMeta.total - messagesBySessionRef.current[activeSessionId]?.length) : 0;
 
 	return (
-		<div className="app web-app wechat-shell flex h-screen w-full min-w-0 overflow-hidden bg-background text-foreground [[data-bg-image=on]_&]:bg-transparent">
+		<div className="app web-app wechat-shell flex h-[100dvh] w-full min-w-0 overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground [[data-bg-image=on]_&]:bg-transparent">
 			<WebSidebar
 				state={state}
 				activeSessionId={activeSessionId}
@@ -639,7 +761,7 @@ export function WebChatApp() {
 				onCreateProject={handleCreateProject}
 				onDeleteProject={handleDeleteProject}
 			/>
-			<main className="chat-pane flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-bg-panel">
+			<main className="chat-pane flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-bg-panel" onTouchStart={onMainTouchStart} onTouchMove={onMainTouchMove} onTouchEnd={onMainTouchEnd} onTouchCancel={onMainTouchEnd}>
 				<WebHeader
 					title={activeSession?.title || t("web.chooseSession")}
 					status={headerStatus}
@@ -668,9 +790,18 @@ export function WebChatApp() {
 					onModelChange={(model) => void handleModelChange(model)}
 					onThinkingChange={(level) => void handleThinkingChange(level)}
 					onOpenDshTools={() => setDshToolsOpen(true)}
+					onOpenSearch={() => setSearchOpen(true)}
+					themePreference={themePreference}
+					resolvedTheme={resolvedTheme}
+					onCycleTheme={cycleTheme}
+					canInstall={canInstall}
+					onInstall={() => void install()}
+					onOpenAssets={() => setAssetsOpen(true)}
 				/>
 				{/* P3：fork 家族分支导航（家族只有一条会话时自渲染为 null） */}
 				<WebBranchBar sessions={state.sessions} activeSessionId={activeSessionId} onSelect={(sessionId) => setActiveSessionId(sessionId)} />
+				{/* 第二批：断线恢复提示（几秒后自动消失） */}
+				{recoveryNotice ? <div className="border-b border-border bg-primary/10 px-3 py-1 text-center text-xs text-primary">{recoveryNotice}</div> : null}
 				<WebTimeline
 					messages={messages}
 					hasActiveSession={Boolean(activeSession)}
@@ -688,9 +819,13 @@ export function WebChatApp() {
 					onDeleteMessage={(messageId) => void handleDeleteMessage(messageId)}
 					onResendMessage={(messageId) => void handleResendMessage(messageId)}
 				/>
+				<WebSessionStrips sessionId={activeSessionId} />
 				<WebComposer disabled={Boolean(creatingProjectId)} streaming={streaming} prefill={prefill ?? undefined} onSend={handleSend} onStop={handleStop} />
 			</main>
 			{/* S6.3：DSH 工具面板（仅 dsh 会话头部按钮触发） */}
+			{/* 第二批：会话内搜索（Ctrl+K）与技能/扩展面板 */}
+			<WebSearchDialog open={searchOpen} onOpenChange={setSearchOpen} messages={messages} onJump={scrollToMessage} />
+			<WebSkillsExtensionsDialog open={assetsOpen} onOpenChange={setAssetsOpen} />
 			{dshToolsOpen && activeSessionId && <WebDshToolsPanel sessionId={activeSessionId} onClose={() => setDshToolsOpen(false)} />}
 			{/* P1：rewind 检查点面板（需活跃 runtime；conversation/all 恢复会 fork 新会话并切换） */}
 			{rewindOpen && activeTarget && (
