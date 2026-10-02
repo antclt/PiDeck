@@ -55,6 +55,14 @@ export class AutomationScheduler {
 				if (!task.enabled || task.schedule.type !== "cron") continue;
 				await this.evaluateTask(task, runs, now);
 			}
+		} catch (error) {
+			// 单个任务求值失败（如 cron 表达式损坏）不得炸掉调度器：记日志后等下个 tick 重试，
+			// 否则 void tick() 会变成每分钟一次的 unhandledRejection 噪音。
+			const logger = getAppLogger();
+			void logger?.error("automation", "Scheduler tick failed", {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+			});
 		} finally {
 			this.ticking = false;
 		}

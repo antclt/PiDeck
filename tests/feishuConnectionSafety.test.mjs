@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const mainSource = () => readFileSync("src/main/index.ts", "utf8");
+// 飞书 IPC 处理器已随主进程拆分迁入 ipc/feishuIpc.ts（2027-02），契约同步改读新模块。
+const feishuIpcSource = () => readFileSync("src/main/ipc/feishuIpc.ts", "utf8");
 const bridgeSource = () => readFileSync("src/main/feishu/FeishuBridge.ts", "utf8");
 const connectionSource = () => readFileSync("src/main/feishu/FeishuConnection.ts", "utf8");
 const configSource = () => readFileSync("src/main/feishu/FeishuConfig.ts", "utf8");
@@ -23,18 +25,18 @@ test("FeishuBridge.start propagates startup failure to IPC callers", () => {
 });
 
 test("updating a saved bot only hot-updates the active bridge for that bot", () => {
-	const source = mainSource();
+	const source = feishuIpcSource();
 	const handler = source.match(/ipcMain\.handle\(ipcChannels\.feishuBotConfig,[\s\S]*?\n\t\}\);/)?.[0] ?? "";
-	assert.match(handler, /feishuBridge\.getStatus\(\)\.botId === botId/);
+	assert.match(handler, /feishuBridgeRef\.current\.getStatus\(\)\.botId === botId/);
 });
 
 test("assigning a Session bot is stable-ID addressed and reports rejected bindings", () => {
-	const source = mainSource();
+	const source = feishuIpcSource();
 	const handler = source.match(/ipcMain\.handle\(ipcChannels\.feishuSessionBotSet,[\s\S]*?\n\t\}\);/)?.[0] ?? "";
 	assert.match(handler, /sessionId: string, botId: string \| null/);
-	assert.match(handler, /sessionRuntimeCoordinator\.getTarget\(sessionId\)/);
+	assert.match(handler, /deps\.sessionRuntimeCoordinator\.getTarget\(sessionId\)/);
 	assert.match(handler, /status\.botId !== botId/);
-	assert.match(handler, /return \{ success: false, message: feishuT\(currentFeishuLocale\(\), "session\.botMismatch"\) \}/);
+	assert.match(handler, /return \{ success: false, message: feishuT\(deps\.getCurrentLocale\(\), "session\.botMismatch"\) \}/);
 	assert.match(handler, /ensureSessionMirrorForSession\([\s\S]*?sessionId,[\s\S]*?target\.agentId/);
 	assert.ok(handler.indexOf("setSessionBotId(sessionId, botId)") > handler.indexOf("if (!chatId)"), "persistent assignment must happen only after the bridge confirms a chat binding");
 });
