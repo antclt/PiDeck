@@ -55,8 +55,8 @@ export const DSH_AGENT_TEAM_PROFILE_PACKAGE = "@deepseek-ai/dsh-experimental-age
 
 /**
  * agent-team 预设 patch 路径：官方 profile 包根的 cordis.patch.yml。
- * dev 与打包后同一解析方式——包在 dependencies 里，runtimeRequire 锚定 app/runtime
- * node_modules（与 @deepseek-ai/dsh-web-app 的解析同链路），不存在路径分叉。
+ * 包在 devDependencies（随 dev 闭包进外置 runtime tarball），runtimeRequire 锚定 runtime
+ * node_modules 解析（与 @deepseek-ai/dsh-web-app 同链路），dev 与打包后无路径分叉。
  * 包缺失（runtime 未带该依赖）返回 undefined，调用方跳过注入而不是启动失败。
  */
 export function agentTeamPresetPatchPath(resolvePackageJson: (specifier: string) => string): string | undefined {

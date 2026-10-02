@@ -3226,6 +3226,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"drawer.sourceControl": "Source Control",
 	"drawer.rpcLog": "RPC Log",
 	"drawer.expandPanel": "Expand right panel",
+	"drawer.addPanel": "Add pinned panel",
 	"drawer.fileItems": "{count} files and folders",
 	"drawer.fileSort": "Sort files",
 	"drawer.fileSort.name": "By name",

@@ -115,7 +115,6 @@
     "probe:dsh": "node scripts/dsh-embed-probe.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-experimental-agent-team-profile": "0.2.0-rc.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@larksuiteoapi/node-sdk": "^1.67.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -319,6 +318,7 @@
     "@deepseek-ai/dsh-bash-local": "0.2.0-rc.2",
     "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
     "@deepseek-ai/dsh-compaction": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-experimental-agent-team-profile": "0.2.0-rc.2",
     "@deepseek-ai/dsh-fs": "0.2.0-rc.2",
     "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
