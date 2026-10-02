@@ -19,7 +19,7 @@ import type { PiResourceConfigService } from "./PiResourceConfigService";
 import type { PiResourceStateStore } from "./PiResourceStateStore";
 import { applyResourceMigration, buildLegacyStateCleanup, planResourceMigration, type LegacyDisabledState, type MigrationPlan, type ResolvedMigrationResource } from "./piResourceMigration";
 
-export type LegacySettingsReader = () => Pick<AppSettings, "disabledExtensions" | "disabledSkills" | "disabledPrompts" | "disableExtensionWhitelist">;
+export type LegacySettingsReader = () => Pick<AppSettings, "disabledExtensions" | "disabledSkills" | "disabledPrompts">;
 
 export type ProjectLegacyState = {
 	disabledExtensions: string[];
@@ -62,7 +62,9 @@ function legacyStateFrom(deps: MigrationRunnerDeps, project?: ProjectLegacyState
 			disabledExtensions: settings.disabledExtensions ?? [],
 			disabledSkills: settings.disabledSkills ?? [],
 			disabledPrompts: settings.disabledPrompts ?? [],
-			disableExtensionWhitelist: Boolean(settings.disableExtensionWhitelist),
+			// 白名单总开关已随白名单机制一起移除：历史 true 值不再有任何语义，
+			// 迁移按「列表本身从未生效」处理会误判，因此统一按 false（照常迁移列表）。
+			disableExtensionWhitelist: false,
 		},
 		project: project ?? EMPTY_PROJECT_STATE,
 	};

@@ -345,7 +345,6 @@ export const ipcChannels = {
 	extensionsUninstall: "extensions:uninstall",
 	extensionsInstall: "extensions:install",
 	extensionsToggle: "extensions:toggle",
-	extensionsSetWhitelistDisabled: "extensions:set-whitelist-disabled",
 	extensionsRemoveBuiltIn: "extensions:remove-built-in",
 	extensionsRestoreBuiltIn: "extensions:restore-built-in",
 	extensionsUpdate: "extensions:update",

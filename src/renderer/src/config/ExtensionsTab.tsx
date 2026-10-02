@@ -19,7 +19,6 @@ type ExtensionsApi = {
 	uninstall: (source: string, scope?: "user" | "project" | "unknown") => Promise<void>;
 	install: (source: string, projectId?: string) => Promise<string>;
 	toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: string, projectId?: string) => Promise<void>;
-	setWhitelistDisabled: (enabled: boolean) => Promise<void>;
 	removeBuiltIn: (source: string) => Promise<void>;
 	update: () => Promise<PiCliUpdateResult>;
 	updateOne: (source: string) => Promise<PiCliUpdateResult>;
@@ -72,27 +71,6 @@ export function ExtensionsTab(props: {
 	const [extTab, setExtTab] = useState<"local" | "store">("local");
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
 	const [togglingSource, setTogglingSource] = useState<string | null>(null);
-	// 白名单总开关（「禁用 -e 参数」）：true = 不注入 --no-extensions/-e，pi 默认加载全部扩展。
-	// 从 PiDeck settings 读取默认状态；切换写入后本地同步，供 RPC 下次启动生效。
-	const [whitelistDisabled, setWhitelistDisabled] = useState(false);
-	const [togglingWhitelist, setTogglingWhitelist] = useState(false);
-
-	// 首次挂载读取白名单总开关状态（读取失败保持默认关闭，不影响禁用列表功能）
-	useEffect(() => {
-		let cancelled = false;
-		void (async () => {
-			try {
-				const settings = await window.piDesktop.settings.get();
-				if (!cancelled) setWhitelistDisabled(Boolean(settings.disableExtensionWhitelist));
-			} catch {
-				// 读取失败时保持默认值，不阻塞扩展列表展示
-			}
-		})();
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
 	// 首次加载或列表刷新时展示扩展冲突通知
 	useEffect(() => {
 		if (!props.data.conflicts || props.data.conflicts.length === 0) return;
@@ -145,26 +123,6 @@ export function ExtensionsTab(props: {
 	const [showUpdateDialog, setShowUpdateDialog] = useState(false);
 	// 单扩展更新进行中的 source（与批量更新互斥，同一时间只跑一个 pi update）
 	const [updatingOne, setUpdatingOne] = useState<string | null>(null);
-
-	/**
-	 * 切换白名单总开关（「禁用 -e 参数」）：开启后 PiProcess 不再注入 --no-extensions/-e，
-	 * pi 默认加载全部扩展，禁用列表暂不生效——防御个别扩展的 -e 注入导致 RPC 启动失败。
-	 * 写入 PiDeck settings，下次 RPC 启动生效；列表本身不变化，无需刷新。
-	 */
-	const handleToggleWhitelist = async () => {
-		if (togglingWhitelist) return;
-		setTogglingWhitelist(true);
-		const next = !whitelistDisabled;
-		try {
-			await getExtensionsApi().setWhitelistDisabled(next);
-			setWhitelistDisabled(next);
-			showNotice(t(next ? "config.extensionWhitelistOnToast" : "config.extensionWhitelistOffToast"), 3500);
-		} catch (e) {
-			showNotice(t("config.extensionWhitelistToggleFailed", { error: formatExtensionError(e) }), 4500, "error");
-		} finally {
-			setTogglingWhitelist(false);
-		}
-	};
 
 	const handleUpdateExtensions = async () => {
 		setUpdating("all");
@@ -309,11 +267,6 @@ export function ExtensionsTab(props: {
 							<div className="skills-toolbar-actions flex shrink-0 flex-wrap items-center justify-end gap-1.5">
 								{props.scope === "global" ? (
 									<>
-										{/* 白名单总开关：开启后 -e 白名单失效，pi 默认加载全部扩展（防御个别扩展导致启动失败） */}
-										<Button variant={whitelistDisabled ? "default" : "outline"} size="sm" onClick={() => void handleToggleWhitelist()} disabled={props.loading || togglingWhitelist} title={t("config.extensionWhitelistHint")}>
-											{whitelistDisabled ? <ToggleRight size={18} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" /> : <ToggleLeft size={18} strokeWidth={1.8} className="mr-1.5" aria-hidden="true" />}
-											{t(whitelistDisabled ? "config.extensionWhitelistOn" : "config.extensionWhitelistOff")}
-										</Button>
 										{/* 工具栏统一 size=sm，与设置页/会话顶栏控件高度对齐 */}
 										<Button variant="outline" size="sm" onClick={handleUpdateExtensions} disabled={props.loading || Boolean(updating)}>
 											{updating ? t("settings.updating") : t("settings.updateExtensionsAll")}

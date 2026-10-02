@@ -570,24 +570,6 @@ export class ExtensionManager {
 	}
 
 	/**
-	 * 白名单总开关是否关闭（true = 不走 -e 白名单，默认加载全部扩展）。
-	 * 默认 false：有禁用列表时 PiProcess 才启用白名单模式。
-	 */
-	isWhitelistDisabled(): boolean {
-		return Boolean(this.getPiDeckSettings().disableExtensionWhitelist);
-	}
-
-	/**
-	 * 切换白名单总开关（UI：扩展列表上方「禁用 -e 参数」按钮）。
-	 * 开启后 PiProcess 不再注入 --no-extensions/-e，pi 默认加载全部扩展，
-	 * 禁用列表暂不生效——用于防御个别扩展的白名单注入导致 RPC 启动失败。
-	 * 开关变化不影响扩展列表本身，无需 invalidateListCache。
-	 */
-	async setWhitelistDisabled(enabled: boolean): Promise<void> {
-		await this.patchPiDeckSettings({ disableExtensionWhitelist: Boolean(enabled) });
-	}
-
-	/**
 	 * --no-approve 标志在 pi 0.79.0 引入。检测本地安装的 pi 版本是否支持。
 	 */
 	private async noApproveSupported(): Promise<boolean> {

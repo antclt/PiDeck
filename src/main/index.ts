@@ -28,7 +28,7 @@ import { PiResourceConfigService } from "./config/PiResourceConfigService";
 import { projectResourceEnabled } from "./config/piResourceRules";
 import { PiResourceStateStore } from "./config/PiResourceStateStore";
 import { readPiConfigFile } from "./config/piConfigFileStore";
-import { runGlobalResourceMigration } from "./config/piResourceMigrationRunner";
+import { runGlobalResourceMigration, runProjectResourceMigration } from "./config/piResourceMigrationRunner";
 import type { ResolvedMigrationResource } from "./config/piResourceMigration";
 import type { PiResourceScope } from "../shared/types/piResources";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
@@ -295,12 +295,10 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { BuiltInExtensionsUpdater } from "./extensions/builtInExtensionsUpdater";
 import { resolveBuiltInExtensionsDir, resolveBuiltInExtensionsOverlayDir, resolveVendorNodeModulesDir, type BuiltInExtensionPathRoots } from "./extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensionResolvers";
-import { createPiProcessSkillResolvers } from "./skills/piProcessSkillResolvers";
 import { registerBuiltInExtensionIpc } from "./ipc/builtInExtensionIpc";
 import { PROMPTS_STORE_CHANNELS, SKILLS_STORE_CHANNELS, registerContentStoreIpc } from "./ipc/contentStoreIpc";
 import { PromptStoreUpdater } from "./prompts/promptStoreUpdater";
 import { SkillStoreUpdater } from "./skills/skillStoreUpdater";
-import { createPiProcessPromptResolvers } from "./prompts/piProcessPromptResolvers";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
 import { ResourceImportManager } from "./resourceImport/ResourceImportManager";
 import { toWslLinuxPath, toWindowsHostPath } from "./wsl/WslPaths";
@@ -431,6 +429,8 @@ let configManager: ConfigManager;
 /** pi 原生资源配置服务与迁移状态（A2/A3；启动装配，IPC 复用）。 */
 let piResourceConfigService: PiResourceConfigService | undefined;
 let piResourceStateStore: PiResourceStateStore | undefined;
+/** Agent spawn 前的迁移保证（幂等）；由启动装配注入，未注入时视为无需迁移。 */
+let ensurePiResourceMigration: ((projectId?: string) => Promise<void>) | undefined;
 /** 全局 settings.json 的 skills / prompts / extensions 条目缓存（供列表状态投影；迁移/开关后刷新）。 */
 let skillManagerNativeEntries: string[] | null = null;
 let promptManagerNativeEntries: string[] | null = null;
@@ -4285,14 +4285,7 @@ app
 					piLocator,
 					// 与 AgentManager 同一套扩展/技能解析（内置注入 + 禁用白名单），
 					// 保证「选择器看到的模型」与「运行时实际加载的扩展」同源。
-					{
-						...createPiProcessExtensionResolvers(process.cwd(), settingsStore.get()),
-						// 技能白名单解析器同源注入；该进程固定 piRpcNoSkills（模型查询不需要技能），
-						// PiProcess 侧会因 noSkills 关闭白名单，此处仅为装配一致性。
-						...createPiProcessSkillResolvers(process.cwd(), settingsStore.get()),
-						// 提示词模板白名单解析器同源注入（与技能一致）。
-						...createPiProcessPromptResolvers(process.cwd(), settingsStore.get()),
-					},
+					{ ...createPiProcessExtensionResolvers(process.cwd(), settingsStore.get()) },
 				),
 			getConfigDirectory: () => configManager.getConfigDir(),
 			watchDirectory: watchPiConfigDirectory,
@@ -4357,37 +4350,30 @@ app
 		const refreshExtensionProjection = async (): Promise<void> => {
 			extensionManagerNativeEntries = await readNativeEntries("extensions");
 		};
-		void runGlobalResourceMigration({
+		/**
+		 * 迁移依赖：全局与项目共用（项目迁移也需要全局资源做名称→路径映射）。
+		 * 迁移是「旧禁用记录 → 原生过滤规则」的唯一入口，必须在任何 Agent spawn 前跑完，
+		 * 否则退出白名单后旧记录不再有任何生效途径（见计划 A5）。
+		 */
+		const migrationDeps: import("./config/piResourceMigrationRunner").MigrationRunnerDeps = {
 			service: piResourceConfigService,
 			state: piResourceStateStore,
 			readSettings: () => settingsStore.get(),
 			resolveGlobalResources: async () => {
 				const settings = settingsStore.get();
 				const resources: ResolvedMigrationResource[] = [];
-				// 扩展：走与应用相同的白名单解析，拿到的就是 pi 会加载的全部路径。
-				const extensionPaths = createPiProcessExtensionResolvers(process.cwd(), settings).resolveEnabledExtensionPaths(settings, process.cwd(), true);
+				// 迁移只需要「旧禁用记录里的名字 → 原生过滤匹配值」的映射，直接用各 Manager
+				// 的列表（它们已按原生规则投影状态，但这里要的是全部条目，与启用与否无关）。
 				const extensionList = await extensionManager?.list(false).catch(() => null);
 				for (const item of extensionList?.extensions ?? []) {
 					if (!item.source || item.builtIn) continue;
-					resources.push({ kind: "extensions", name: item.source, value: item.source, scope: item.scope === "project" ? "project" : "user" });
+					resources.push({ kind: "extensions", name: item.source, value: item.path ?? item.source, scope: item.scope === "project" ? "project" : "user" });
 				}
-				for (const path of extensionPaths ?? []) {
-					resources.push({ kind: "extensions", name: path.split(/[/\\]/).pop() ?? path, value: path, scope: "user" });
+				const skills = await skillManager?.list().catch(() => null);
+				for (const skill of skills?.skills ?? []) {
+					if (skill.sourceId !== "pi-global" && skill.sourceId !== "agents-global") continue;
+					resources.push({ kind: "skills", name: skill.name, value: skill.path, scope: "user" });
 				}
-				// 技能：经白名单解析拿绝对路径（技能过滤按 SKILL.md 的父目录精确匹配）。
-				const skillPaths = createPiProcessSkillResolvers(process.cwd(), settings).resolveEnabledSkillPaths(settings, process.cwd(), true) ?? null;
-				if (skillPaths) {
-					const listed = await skillManager?.list().catch(() => null);
-					const byPath = new Map((listed?.skills ?? []).map((skill) => [skill.path, skill.name]));
-					for (const path of skillPaths) resources.push({ kind: "skills", name: byPath.get(path) ?? path, value: path, scope: "user" });
-				} else {
-					const listed = await skillManager?.list().catch(() => null);
-					for (const skill of listed?.skills ?? []) {
-						if (skill.sourceId !== "pi-global" && skill.sourceId !== "agents-global") continue;
-						resources.push({ kind: "skills", name: skill.name, value: skill.path, scope: "user" });
-					}
-				}
-				// 提示词：全局目录下的 .md 模板。
 				const prompts = await promptManager?.list().catch(() => null);
 				for (const template of prompts?.templates ?? []) {
 					if (template.scope === "project") continue;
@@ -4412,13 +4398,43 @@ app
 				await projectResourceManager.clearProjectLegacyDisables(projectId, patch);
 			},
 			logger: { info: (scope, message, detail) => void appLogger.info(scope, message, detail), warn: (scope, message, detail) => void appLogger.warn(scope, message, detail) },
-		}).then(async (result) => {
-			// 迁移后必须刷新投影缓存：否则列表仍按旧列表显示，与实际生效的原生规则不一致。
+		};
+		/** 迁移后刷新投影缓存：否则列表仍按旧列表显示，与实际生效的原生规则不一致。 */
+		const refreshAllProjections = async (): Promise<void> => {
 			await Promise.all([refreshSkillProjection(), refreshPromptProjection(), refreshExtensionProjection()]);
-			if (result.errors.length > 0) {
-				void appLogger.warn("migration", "Resource migration reported problems", { status: result.status, errors: result.errors });
+		};
+		let globalMigrationRun: Promise<void> | null = null;
+		const projectMigrationRuns = new Map<string, Promise<void>>();
+		/**
+		 * 确保该作用域的旧禁用记录已迁移（幂等、并发复用同一个 Promise）。
+		 * Agent spawn 前必须 await：迁移未完成就启动会话会把用户停用的资源重新加载。
+		 */
+		const ensureResourceMigration = async (projectId?: string): Promise<void> => {
+			if (!projectId) {
+				globalMigrationRun ??= runGlobalResourceMigration(migrationDeps).then(async (result) => {
+					await refreshAllProjections();
+					if (result.errors.length > 0) {
+						void appLogger.warn("migration", "Global resource migration reported problems", { status: result.status, errors: result.errors });
+					}
+				});
+				return globalMigrationRun;
 			}
-		});
+			let run = projectMigrationRuns.get(projectId);
+			if (!run) {
+				run = runProjectResourceMigration(migrationDeps, projectId).then(async (result) => {
+					await refreshAllProjections();
+					if (result.errors.length > 0) {
+						void appLogger.warn("migration", "Project resource migration reported problems", { projectId, status: result.status, errors: result.errors });
+					}
+				});
+				projectMigrationRuns.set(projectId, run);
+			}
+			return run;
+		};
+		// 启动即开始全局迁移（不阻塞窗口创建），并把它交给 AgentManager 在 spawn 前 await。
+		void ensureResourceMigration();
+		ensurePiResourceMigration = ensureResourceMigration;
+		agentManager.configureResourceMigrationGate(ensureResourceMigration);
 		// 多后端网关装配：pi + dsh（DSH 在窗口创建后后台预热，失败时按需重试）。
 		// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);

@@ -36,17 +36,16 @@ import { sanitizeBridgeUpdate, stripBridgeAnsi } from "../../shared/bridgeText";
 import { collectSessionFileChanges } from "../../shared/fileChanges";
 import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS } from "../../shared/compactFeedback";
-import { PiProcess, type WhitelistSkip } from "./PiProcess";
+import { PiProcess } from "./PiProcess";
 import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
 import { createCompactRpcRequest } from "./compactRpc";
-import { resolveWhitelistSkipCopy, WHITELIST_SKIP_KIND_COPY } from "./whitelistSkipNotice";
 import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compactionOwner";
 import { mergeSubagentSources } from "./derivedSubagents";
 import { parseAvailableThinkingLevelsResponse } from "./thinkingLevels";
 import { listActiveBuiltInExtensionPaths } from "../extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "../extensions/piProcessExtensionResolvers";
-import { createPiProcessSkillResolvers } from "../skills/piProcessSkillResolvers";
-import { createPiProcessPromptResolvers } from "../prompts/piProcessPromptResolvers";
+import { resolveLoadableExtensionPaths } from "../extensions/enabledExtensionResolver";
+import { resolveBuiltInExtensionsOverlayDir } from "../extensions/builtInExtensions";
 import { getBridgeServer } from "./bridge/BridgeServer";
 import type { BridgeEvent, BridgeUpdate, ModelTraceInput } from "../../shared/types/bridge";
 import { describeExtensionFallbackSkip, formatExtensionFallbackDebug, resolveDisabledExtensionsCopy, resolveDisabledExtensionsReason, shouldRetryWithoutExtensions } from "./extensionStartupFallback";
@@ -605,6 +604,7 @@ export class AgentManager {
 		 */
 		private readonly listThirdPartyMcpExtensions?: () => Promise<import("../../shared/mcpThirdParty").ThirdPartyMcpExtension[]>,
 	) {
+		// resourceMigrationGate 由 index.ts 在迁移器装配后注入（构造早于迁移器）。
 		this.messageProjector = new AgentMessageProjector({
 			translate: this.translate,
 			isAskAborted: (agentId) => this.abortedDuringAsk.has(agentId),
@@ -667,12 +667,8 @@ export class AgentManager {
 			// 扩展解析器与模型能力缓存共用（piProcessExtensionResolvers）：
 			// 保证「选择器能看到扩展贡献的模型」与「运行时实际加载的扩展」同源。
 			// 技能/模板解析器同源：禁用的技能与提示词模板在 RPC 启动时以白名单剔除。
+			// PiDeck 自带扩展注入（普通资源启停已交给 pi 原生 settings.json 过滤规则）。
 			...createPiProcessExtensionResolvers(cwd, settings),
-			// WSL 场景把 distro 家目录并入技能白名单扫描（issue #203）：WSL 里的 pi 以
-			// distro 内 HOME 运行，Linux 家目录的全局技能必须与 Windows 侧取并集注入；
-			// UNC 路径由 PiProcess 在 spawn 前转换为 distro 内 Linux 路径。
-			...createPiProcessSkillResolvers(cwd, settings, this.wslEnvironment ? [this.wslEnvironment.windowsHome] : undefined),
-			...createPiProcessPromptResolvers(cwd, settings),
 			// 会话身份 = PiDeck 会话 key（SessionRecord.id，UUID 或旧版文件路径），扩展按它解析等级覆盖；
 			// 匿名会话（noSession）无 key，扩展仅用全局默认等级。
 			securitySessionId: securitySessionKey ?? sessionPath,
@@ -1069,32 +1065,6 @@ export class AgentManager {
 				duration: Number.POSITIVE_INFINITY,
 				// 渲染层解析成导航（主进程不持有 UI 路径）：去配置管理 → MCP 页。
 				action: "openMcpSettings",
-			});
-		}
-	}
-
-	/**
-	 * 某类白名单（扩展/技能/提示词）因超出启动参数预算被跳过：告知用户本次「禁用」不生效。
-	 * 跳过本身不影响启动，但用户看到「禁用的东西又被加载了」会当成 bug，必须显式说明。
-	 * 三类共用同一条命令行预算（见 PiProcess.evaluateWhitelistBudget），可能同时被跳过，
-	 * 因此按条逐条提示，而不是把两种资源揉成一句话。
-	 * 与扩展回退同一条启动期诊断链路（首个 run 时落到时间线），理由见 queueStartupDiagnostic。
-	 */
-	private notifyWhitelistSkipped(agentId: string, entries: readonly WhitelistSkip[]): void {
-		for (const entry of entries) {
-			const copy = resolveWhitelistSkipCopy(entry);
-			void this.appLogger?.warn("agent", "Whitelist skipped: too many entries for launch args", {
-				agentId,
-				kind: entry.kind,
-				count: entry.count,
-				estimatedChars: entry.chars,
-				budget: entry.budget,
-			});
-			this.queueStartupDiagnostic(agentId, {
-				role: "system",
-				i18nKey: copy.i18nKey,
-				fallbackText: copy.fallbackText,
-				options: { params: { count: entry.count, budget: entry.budget } },
 			});
 		}
 	}
@@ -1663,10 +1633,23 @@ export class AgentManager {
 		);
 	}
 
+	/**
+	 * Agent spawn 前的资源配置迁移保证（index.ts 注入；幂等）。
+	 * 为什么必须在 spawn 前：旧禁用记录一旦退出白名单就再无生效途径，未迁移就启动
+	 * 等于把用户停用的资源重新加载（见执行计划 A5）。
+	 */
+	private resourceMigrationGate?: (projectId?: string) => Promise<void>;
+
+	configureResourceMigrationGate(gate: (projectId?: string) => Promise<void>): void {
+		this.resourceMigrationGate = gate;
+	}
+
 	private async createUnlocked(input: CreateAgentInput) {
 		const t0 = Date.now();
 		const project = this.getProject(input.projectId);
 		if (!project) throw new Error(`Project not found: ${input.projectId}`);
+		// 先迁移该项目作用域的旧禁用记录；失败不阻塞启动（迁移内部已记录，且旧记录会被保留）。
+		await this.resourceMigrationGate?.(project.id).catch(() => undefined);
 
 		const sessionIdentityDefaults = this.getAgentSessionIdentityDefaults();
 		const sessionEnvironment = input.environment ?? sessionIdentityDefaults.environment;
@@ -1760,11 +1743,6 @@ export class AgentManager {
 			cwd: diag?.cwd,
 			fallbackFromExtensions,
 		});
-		// 白名单因条数过多被跳过：本次 pi 按默认发现加载全部扩展/技能/提示词（禁用不生效），
-		// 需显式告知用户。
-		if (diag?.whitelistSkipped && diag.whitelistSkipped.length > 0) {
-			this.notifyWhitelistSkipped(id, diag.whitelistSkipped);
-		}
 
 		try {
 			void this.appLogger?.info("agent", "Agent get_state request completed", { agentId: id });
@@ -2502,7 +2480,21 @@ export class AgentManager {
 			const projectCwd = project?.path;
 			const sessionCommandNames = await this.listRegisteredCommandNames(runtime);
 			// 与 spawn 同源的白名单解析；拿不到项目 cwd 时传 undefined（退回磁盘 packages 推导）
-			const loadedExtensionPaths = projectCwd ? createPiProcessExtensionResolvers(projectCwd, this.settingsStore.get()).resolveEnabledExtensionPaths() : undefined;
+			// 与运行时同源的「会加载哪些扩展」查询（原生过滤 + 旧禁用记录）。
+			const loadedExtensionPaths = projectCwd
+				? resolveLoadableExtensionPaths({
+						cwd: projectCwd,
+						includeProjectResources: true,
+						disabled: this.settingsStore.get().disabledExtensions ?? [],
+						removedBuiltInExtensions: this.settingsStore.get().removedBuiltInExtensions ?? [],
+						builtInRoots: {
+							appPath: app.getAppPath(),
+							resourcesPath: process.resourcesPath,
+							isDev: !app.isPackaged,
+							overlayDir: resolveBuiltInExtensionsOverlayDir(app.getPath("userData")),
+						},
+					})
+				: undefined;
 			return readPiCompactionOwnership({
 				projectCwd,
 				sessionCommandNames,
@@ -4586,18 +4578,6 @@ export class AgentManager {
 		if (diag.blockedExtensions && diag.blockedExtensions.length > 0) {
 			// 桌面端已自动隔离的扩展（如 codeisland），方便用户对照「为何 RPC 没加载该扩展」。
 			lines.push(`已自动隔离扩展: ${diag.blockedExtensions.join(", ")}`);
-		}
-		if (diag.whitelistSkipped && diag.whitelistSkipped.length > 0) {
-			// 白名单条数超命令行预算 → 本次未注入 --no-extensions/--no-skills/--no-prompt-templates，
-			// pi 按默认发现加载了全部资源，对应「禁用」在本会话不生效。
-			// 排查「禁用为何无效」时这条是关键上下文。
-			const skipped = diag.whitelistSkipped
-				.map((entry) => {
-					const meta = WHITELIST_SKIP_KIND_COPY[entry.kind];
-					return `${meta.label} ${entry.count} 个（≈ ${entry.chars} 字符 / 预算 ${entry.budget}）`;
-				})
-				.join("、");
-			lines.push(`白名单注入: 已跳过 ${skipped} → 本次「禁用」不生效`);
 		}
 		lines.push("");
 		lines.push("━━━ 排查步骤 ━━━");

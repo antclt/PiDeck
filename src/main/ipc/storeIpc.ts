@@ -601,12 +601,6 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		}
 		void appLogger.info("extension", "Extension toggled", { source, enabled, scope, projectId });
 	});
-	ipcMain.handle(ipcChannels.extensionsSetWhitelistDisabled, async (_event, enabled: boolean) => {
-		// 白名单总开关：开启后 PiProcess 不再注入 --no-extensions/-e，pi 默认加载全部扩展，
-		// 禁用列表暂不生效（防御个别扩展的 -e 注入/白名单枚举导致 RPC 启动失败）。
-		await extensionManager.setWhitelistDisabled(Boolean(enabled));
-		void appLogger.info("extension", "Extension whitelist master switch toggled", { whitelistDisabled: !!enabled });
-	});
 	ipcMain.handle(ipcChannels.extensionsUpdate, async () => {
 		const result = await extensionManager.updateExtensions();
 		void appLogger.info("extension", "Extensions update command completed", { updated: result.updated, bytes: result.output.length });

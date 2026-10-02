@@ -160,12 +160,6 @@ test("AgentManager user-visible runtime diagnostics carry i18n descriptors", () 
 	assert.doesNotMatch(manager, /message\.text = `正在自动重试[^`]*原因：/);
 	assert.doesNotMatch(manager, /message\.text = `自动重试失败[^`]*原因：/);
 	assert.match(manager, /private addLocalizedMessage\(/);
-	// 白名单跳过文案按资源类型拆到 whitelistSkipNotice.ts（AgentManager 只负责按条派发），
-	// 三类 key 必须同时存在：漏一个类型，用户就不知道为什么「禁用」没生效。
-	const whitelistNotice = readFileSync("src/main/pi/whitelistSkipNotice.ts", "utf8");
-	for (const key of ["diagnostic.extensionWhitelistSkipped", "diagnostic.skillWhitelistSkipped", "diagnostic.promptWhitelistSkipped"]) {
-		assert.match(whitelistNotice, new RegExp(`"${key.replaceAll(".", "\\.")}"`));
-	}
 	assert.match(manager, /this\.translate\("session\.summaryPlaceholder"\)/);
 	assert.match(manager, /this\.translate\("session\.imagePlaceholder"\)/);
 	assert.match(manager, /this\.translate\("session\.historyTitle"/);

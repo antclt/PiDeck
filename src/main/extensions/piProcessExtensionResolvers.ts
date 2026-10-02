@@ -2,28 +2,23 @@ import { app } from "electron";
 import { basename } from "node:path";
 import type { AppSettings } from "../../shared/types";
 import { INTERNAL_BUILT_IN_EXTENSIONS, listActiveBuiltInExtensionPaths, resolveBuiltInExtensionsOverlayDir, type BuiltInExtensionPathRoots } from "./builtInExtensions";
-import { resolveEnabledExtensionPaths } from "./enabledExtensionResolver";
 import { readProjectResourceOverrides } from "../projects/projectResourceOverrides";
-import { builtinSpecifiersToRestore } from "./builtInExtensionToggles";
-import { homedir } from "node:os";
 
 /**
- * 为 PiProcess 构造扩展解析器（内置扩展注入 + 白名单枚举）。
- * 返回值可直接展开为 PiProcess 第 4 参 options 的
- * resolveBuiltInExtensionPaths / resolveEnabledExtensionPaths。
+ * 为 PiProcess 构造「PiDeck 自带扩展」注入解析器。
+ *
+ * 普通扩展（用户安装的 packages / 本地文件扩展）的启停已交给 pi 原生
+ * `settings.json` 过滤规则，PiDeck 不再注入 `--no-extensions` + 全量 `-e` 白名单；
+ * 这里只负责把随包分发的 PiDeck 扩展（`pi-deck-*.ts`）以 `-e` 附加到会话上。
  *
  * 为什么共用：AgentManager（会话运行时 RPC）与 PiModelCapabilityCache（模型能力快照）
- * 必须走同一套「哪些扩展加载」的判定，否则选择器可能展示运行时实际不存在的模型
- * （例如用户已禁用的扩展贡献的模型），用户选完才在会话启动时报错。
+ * 必须走同一套「哪些自带扩展加载」的判定，否则选择器可能展示运行时实际不存在的模型。
  */
 export function createPiProcessExtensionResolvers(
 	cwd: string,
 	settings: AppSettings,
 ): {
 	resolveBuiltInExtensionPaths: (processSettings?: Partial<AppSettings>, includeProjectResources?: boolean) => string[];
-	resolveEnabledExtensionPaths: (processSettings?: Partial<AppSettings>, cwd?: string, includeProjectResources?: boolean) => string[] | null;
-	/** pi 原生内置扩展：白名单模式要显式带回的 specifier（尊重用户停用选择）。 */
-	resolveBuiltinExtensionSpecifiers: () => string[];
 } {
 	const builtInRoots: BuiltInExtensionPathRoots = {
 		appPath: app.getAppPath(),
@@ -33,10 +28,6 @@ export function createPiProcessExtensionResolvers(
 		overlayDir: resolveBuiltInExtensionsOverlayDir(app.getPath("userData")),
 	};
 	return {
-		// 白名单/诊断模式显式带回 pi 原生内置扩展时，只带回用户没有显式停用的那些，
-		// 避免覆盖用户在 pi config / settings.json 里的选择（计划 A4/E）。
-		// `piRpcNoExtensions` 是诊断总开关，由 PiProcess 提前判掉，这里不重复处理。
-		resolveBuiltinExtensionSpecifiers: () => builtinSpecifiersToRestore({ agentHomeDir: homedir(), cwd, includeProjectResources: true }),
 		resolveBuiltInExtensionPaths: (processSettings, includeProjectResources = true) => {
 			const disabledForProject = new Set(includeProjectResources ? readProjectResourceOverrides(cwd).disabledGlobalExtensions : []);
 			return listActiveBuiltInExtensionPaths(builtInRoots, processSettings?.removedBuiltInExtensions ?? settings.removedBuiltInExtensions ?? []).filter((path) => {
@@ -44,13 +35,5 @@ export function createPiProcessExtensionResolvers(
 				return (INTERNAL_BUILT_IN_EXTENSIONS as readonly string[]).includes(name) || !disabledForProject.has(name);
 			});
 		},
-		resolveEnabledExtensionPaths: (processSettings, _processCwd, includeProjectResources = true) =>
-			resolveEnabledExtensionPaths({
-				cwd,
-				includeProjectResources,
-				disabled: processSettings?.disabledExtensions ?? settings.disabledExtensions ?? [],
-				removedBuiltInExtensions: processSettings?.removedBuiltInExtensions ?? settings.removedBuiltInExtensions ?? [],
-				builtInRoots,
-			}),
 	};
 }

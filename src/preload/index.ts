@@ -1006,7 +1006,6 @@ const api = {
 		uninstall: (source: string, scope?: "user" | "project" | "unknown") => ipcRenderer.invoke(ipcChannels.extensionsUninstall, source, scope) as Promise<void>,
 		install: (source: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsInstall, source, projectId) as Promise<string>,
 		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope, path, projectId) as Promise<void>,
-		setWhitelistDisabled: (enabled: boolean) => ipcRenderer.invoke(ipcChannels.extensionsSetWhitelistDisabled, enabled) as Promise<void>,
 		removeBuiltIn: (source: string) => ipcRenderer.invoke(ipcChannels.extensionsRemoveBuiltIn, source) as Promise<void>,
 		restoreBuiltIn: (source: string) => ipcRenderer.invoke(ipcChannels.extensionsRestoreBuiltIn, source) as Promise<void>,
 		update: () => ipcRenderer.invoke(ipcChannels.extensionsUpdate) as Promise<PiCliUpdateResult>,

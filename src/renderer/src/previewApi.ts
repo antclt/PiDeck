@@ -107,7 +107,6 @@ let previewSettings: AppSettings = {
 	/** 扩展禁用白名单：与 SettingsStore 默认一致，预览壳不启用白名单 */
 	/** 扩展禁用白名单：与 SettingsStore 默认一致，预览壳不启用白名单 */
 	disabledExtensions: [],
-	disableExtensionWhitelist: false,
 	/** 技能禁用列表：与 SettingsStore 默认一致，预览壳不启用技能白名单 */
 	disabledSkills: [],
 	/** 提示词模板禁用列表：与 SettingsStore 默认一致，预览壳不启用模板白名单 */
@@ -1201,7 +1200,6 @@ export function createPreviewApi(): PiDesktopApi {
 			uninstall: async () => undefined,
 			install: async (_source: string) => "",
 			toggle: async () => undefined,
-			setWhitelistDisabled: async () => undefined,
 			removeBuiltIn: async () => undefined,
 			restoreBuiltIn: async () => undefined,
 			update: async () => ({

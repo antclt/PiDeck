@@ -192,30 +192,3 @@ test("setEnabled 允许达标版本的 pi 禁用扩展（白名单机制可用�
 		]),
 	);
 });
-
-test("白名单总开关（禁用 -e 参数）默认关闭，可切换并持久化", async () => {
-	let pideckSettings = {};
-	const { ExtensionManager } = loadExtensionManager();
-	const manager = new ExtensionManager(
-		{},
-		() => ({}),
-		() => pideckSettings,
-		async (patch) => {
-			pideckSettings = { ...pideckSettings, ...patch };
-			return pideckSettings;
-		},
-	);
-
-	// 未设置时默认 false：白名单模式正常工作
-	assert.equal(manager.isWhitelistDisabled(), false);
-
-	// 开启总开关：写入 disableExtensionWhitelist=true
-	await manager.setWhitelistDisabled(true);
-	assert.equal(manager.isWhitelistDisabled(), true);
-	assert.equal(pideckSettings.disableExtensionWhitelist, true);
-
-	// 关闭恢复默认
-	await manager.setWhitelistDisabled(false);
-	assert.equal(manager.isWhitelistDisabled(), false);
-	assert.equal(pideckSettings.disableExtensionWhitelist, false);
-});

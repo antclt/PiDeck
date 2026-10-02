@@ -523,36 +523,23 @@ export type AppSettings = {
 	removedBuiltInExtensions: string[];
 
 	/**
-	 * 用户禁用的扩展列表（source 标识 + 作用域），存储于 PiDeck 自身设置（不写 pi settings）。
-	 * pi 0.82.x 不识别 settings.json 的 disabledExtensions，禁用只能靠 PiDeck 启动 RPC 时
-	 * 切「白名单模式」：--no-extensions + 逐条 -e 注入未禁用扩展实现（见 enabledExtensionResolver）。
-	 * 列表为空 = 白名单关闭，pi 自动发现全部扩展（兼容用户在 PiDeck 外手动安装的扩展）。
+	 * 旧版扩展禁用记录（source 标识 + 作用域）。
+	 * 现代版本已改为写 pi 原生 `settings.json` 过滤规则；此字段仅由启动迁移读取并清理，
+	 * 迁移完成前它仍会被扩展运行时查询与压缩归属启发式读取（见执行计划 A5）。
 	 */
 	disabledExtensions: DisabledExtensionEntry[];
 
 	/**
-	 * 白名单模式总开关（默认 false = 启用白名单机制）。
-	 * true = 不走 -e 注入，pi 按默认方式加载全部扩展（禁用列表暂不生效），
-	 * 用于防御个别扩展的 -e 注入 / 白名单枚举导致 RPC 启动失败的情况。
-	 */
-	disableExtensionWhitelist: boolean;
-
-	/**
 	 * 用户禁用的全局技能名列表（与 SkillManager.list 的 name 去重键一致，比较时小写），
 	 * 存储于 PiDeck 自身设置（不写 pi settings）。
-	 * pi 的 frontmatter `disable-model-invocation` 只阻止模型自动调用、技能仍被加载；
-	 * 完全禁用只能靠 PiDeck 启动 RPC 时切「白名单模式」：--no-skills + 逐条 --skill
-	 * 注入未禁用技能（见 skillWhitelistResolver）。
-	 * 列表为空 = 白名单关闭，pi 自动发现全部技能（兼容用户在 PiDeck 外手动安装的技能）。
+	 * 现代版本已改为写 pi 原生 `settings.json` 过滤规则；此字段仅由启动迁移读取并清理。
+	 * pi 的 frontmatter `disable-model-invocation` 只阻止模型自动调用，与「完全不加载」不同。
 	 */
 	disabledSkills: string[];
 
 	/**
-	 * 用户禁用的全局提示词模板名列表（与 PromptManager.list 的 name 一致，比较时小写），
-	 * 存储于 PiDeck 自身设置（不写 pi settings）。
-	 * 完全禁用只能靠 PiDeck 启动 RPC 时切「白名单模式」：--no-prompt-templates +
-	 * 逐条 --prompt-template 注入未禁用模板（见 promptWhitelistResolver）。
-	 * 列表为空 = 白名单关闭，pi 自动发现全部模板。
+	 * 旧版提示词禁用记录（与 PromptManager.list 的 name 一致，比较时小写）。
+	 * 现代版本已改为写 pi 原生 `settings.json` 过滤规则；此字段仅由启动迁移读取并清理。
 	 */
 	disabledPrompts: string[];
 
