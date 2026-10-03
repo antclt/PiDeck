@@ -1739,10 +1739,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				void appLogger.info("session", "Session cloned (dsh)", {
 					sessionId: target.sessionId,
 				});
+				notifyForkCatalogRefreshed(target.sessionId);
 				return { ok: true as const, value };
 			}
 			const value = await replaceAgentSession(target.agentId, () => agentManager.cloneSession(target.agentId), { markForked: true });
 			void appLogger.info("session", "Session cloned", { sessionId: target.sessionId });
+			notifyForkCatalogRefreshed(target.sessionId);
 			return {
 				ok: true as const,
 				value,
@@ -1758,6 +1760,17 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 	});
 	// fork 与 clone 共用 replaceAgentSession：RPC 成功后刷新 sessionPath / 消息投影
+	/** fork/clone 成功后推送 catalog 刷新：pi 新建了 catalog 条目、DSH 换绑了 dshSessionId，
+	 * 侧栏只有收到 sessionsCatalogRefreshed 才会静默重拉列表（useProjectSync），
+	 * 否则新建/换绑后的会话要等下次手动刷新才出现。 */
+	function notifyForkCatalogRefreshed(sessionId: string): void {
+		const projectId = sessionCatalog.get(sessionId)?.projectId;
+		if (!projectId) return;
+		const window = getMainWindow();
+		if (window && !window.isDestroyed()) {
+			window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
+		}
+	}
 	ipcMain.handle(ipcChannels.sessionsRuntimeGetForkMessages, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.getRuntimeForkMessages(target));
 	ipcMain.handle(ipcChannels.sessionsRuntimeFork, async (_event, target: SessionRuntimeTarget, entryId: string) => {
 		const validated = sessionRuntimeCoordinator.validateTarget(target);
@@ -1777,10 +1790,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					sessionId: target.sessionId,
 					entryId,
 				});
+				notifyForkCatalogRefreshed(target.sessionId);
 				return { ok: true as const, value };
 			}
 			const value = await replaceAgentSession(target.agentId, () => agentManager.forkSession(target.agentId, entryId), { markForked: true });
 			void appLogger.info("session", "Session forked", { sessionId: target.sessionId, entryId });
+			notifyForkCatalogRefreshed(target.sessionId);
 			return {
 				ok: true as const,
 				value,
