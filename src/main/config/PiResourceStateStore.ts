@@ -20,6 +20,8 @@ export type PackageSnapshotRecord = {
 	/** 停用后的指纹（重新启用/恢复前校验外部是否改过）。 */
 	after: string;
 	createdAt: number;
+	/** 停用前是纯字符串形态（"npm:foo"）：恢复时回到字符串而不是空对象。 */
+	plainString?: boolean;
 };
 
 export type ResourceMigrationRecord = {
@@ -92,11 +94,16 @@ export class PiResourceStateStore {
 	}
 
 	/** 保存整包停用前的过滤；已有快照不覆盖（幂等，避免用停用后的状态当"原始值"）。 */
-	savePackageSnapshot(key: string, before: PackageFilterSnapshot): void {
+	savePackageSnapshot(key: string, before: PackageFilterSnapshot, options: { plainString?: boolean } = {}): void {
 		const state = this.read();
 		if (state.packageSnapshots[key]) return;
-		state.packageSnapshots[key] = { before, after: "", createdAt: Date.now() };
+		state.packageSnapshots[key] = { before, after: "", createdAt: Date.now(), ...(options.plainString ? { plainString: true } : {}) };
 		this.write(state);
+	}
+
+	/** 快照是否记录了「停用前是纯字符串形态」。 */
+	isPackageSnapshotPlainString(key: string): boolean {
+		return Boolean(this.read().packageSnapshots[key]?.plainString);
 	}
 
 	/** 记录停用后的指纹（写在成功停用之后）。 */

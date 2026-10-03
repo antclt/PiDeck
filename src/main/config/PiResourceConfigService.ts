@@ -176,20 +176,35 @@ export class PiResourceConfigService {
 			if (file.error) return { ok: false, error: file.error };
 			const entry = findPackageEntry(file.data, request.resourceId);
 			if (!entry) return { ok: false, error: "Package not found in this scope." };
-			if (!isEntryDisabled(entry)) this.state.savePackageSnapshot(snapshotKey, packageFilterSnapshot(entry));
+			if (!isEntryDisabled(entry)) this.state.savePackageSnapshot(snapshotKey, packageFilterSnapshot(entry), { plainString: typeof entry === "string" });
 		}
 		const result = await this.writeScope(request.scope, options.expectedRevision, (current) => {
 			const packages = Array.isArray(current.packages) ? [...current.packages] : [];
 			const index = packages.findIndex((entry) => packageSourceOf(entry) === request.resourceId);
 			if (index === -1) return { abort: "Package not found in this scope." };
-			const entry = packages[index];
-			if (!entry || typeof entry !== "object") return { abort: "Package entry is invalid." };
+			const raw = packages[index];
+			const source = packageSourceOf(raw);
+			if (!source) return { abort: "Package entry is invalid." };
+			// pi 的 packages 条目有两种合法形态：纯字符串（"npm:foo"，安装默认）与对象
+			// （{ source, extensions?… }）。字符串形态此前被误判为 invalid——用户自己
+			// `pi install` 的扩展就是字符串，停用直接失败。统一先归一成对象再改写。
+			const entry: Record<string, unknown> = typeof raw === "string" ? { source } : { ...(raw as Record<string, unknown>) };
 			if (isPackageDelta(entry)) {
 				packages[index] = request.enabled ? enablePackageDeltaFilters(entry as { source: string }) : disablePackageDeltaFilters(entry as { source: string });
 			} else if (request.enabled) {
 				// 只有「当前状态仍等于停用后指纹」时才恢复快照；否则视为外部已改过，明确回到包默认。
-				const snapshot = this.state.isPackageSnapshotCurrent(snapshotKey, entry) ? this.state.takePackageSnapshot(snapshotKey) : undefined;
-				packages[index] = snapshot ? { ...restorePackageDefaults(entry as Record<string, unknown>), ...snapshot } : restorePackageDefaults(entry as Record<string, unknown>);
+				// 启用时文件里的条目已是停用对象，字符串形态信息只存在于快照标记里
+				// （wasPlainString 对停用后的对象恒为 false），恢复成原形态以保持文件最小扰动。
+				const snapshotCurrent = this.state.isPackageSnapshotCurrent(snapshotKey, entry);
+				const snapshot = snapshotCurrent ? this.state.takePackageSnapshot(snapshotKey) : undefined;
+				const wasPlainString = snapshotCurrent && this.state.isPackageSnapshotPlainString(snapshotKey);
+				if (snapshot && Object.keys(snapshot).length > 0) {
+					packages[index] = { ...restorePackageDefaults(entry), ...snapshot };
+				} else if (wasPlainString) {
+					packages[index] = source;
+				} else {
+					packages[index] = restorePackageDefaults(entry);
+				}
 			} else {
 				packages[index] = disablePackageFilters(entry as { source: string });
 			}

@@ -127,6 +127,42 @@ test("package enable restores the pre-disable filters when nothing changed exter
 	}
 });
 
+test("string-form package entry (pi install 默认形态) disables and re-enables", async () => {
+	const { service, agentDir, cleanup } = setupProject();
+	try {
+		// pi install 写入的默认形态是纯字符串，不是对象——此前被误判 invalid（用户实测踩中）
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:my-ext"] }), "utf8");
+		const off = await service.setPackageEnabled({ scope: { scope: "global" }, resourceId: "npm:my-ext", enabled: false });
+		assert.equal(off.ok, true, JSON.stringify(off));
+		const disabled = readJson(join(agentDir, "settings.json")).packages[0];
+		assert.equal(disabled.source, "npm:my-ext");
+		assert.deepEqual(disabled.extensions, []);
+		assert.deepEqual(disabled.skills, []);
+		const on = await service.setPackageEnabled({ scope: { scope: "global" }, resourceId: "npm:my-ext", enabled: true });
+		assert.equal(on.ok, true, JSON.stringify(on));
+		const restored = readJson(join(agentDir, "settings.json")).packages[0];
+		// 停用前就是纯字符串 → 恢复后回到纯字符串（不残留空对象形态）
+		assert.equal(restored, "npm:my-ext");
+	} finally {
+		cleanup();
+	}
+});
+
+test("string-form entry with prior partial filters restores those filters", async () => {
+	const { service, agentDir, cleanup } = setupProject();
+	try {
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:plain", { source: "npm:filtered", extensions: ["keep.ts"] }] }), "utf8");
+		// 对象形态、停用前有过滤 → 恢复时保留过滤（原行为回归）
+		await service.setPackageEnabled({ scope: { scope: "global" }, resourceId: "npm:filtered", enabled: false });
+		await service.setPackageEnabled({ scope: { scope: "global" }, resourceId: "npm:filtered", enabled: true });
+		const pkgs = readJson(join(agentDir, "settings.json")).packages;
+		assert.deepEqual(pkgs[1].extensions, ["keep.ts"]);
+		assert.equal(pkgs[0], "npm:plain");
+	} finally {
+		cleanup();
+	}
+});
+
 test("project package delta uses pattern sets on disable and enable", async () => {
 	const { service, projectRoot, cleanup } = setupProject();
 	try {
