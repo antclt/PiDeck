@@ -348,6 +348,13 @@ test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相
 			return;
 		}
 
+		// 前置条件断言：把 repairPortableNodeLinks 各 continue 分支的输入锁定住，
+		// 环境差异（软链被改成副本、悬空目标意外存在、本地副本未落盘）直接在断言消息里现形。
+		const { existsSync: existsSyncSync, readlinkSync: readlinkRaw } = await import("node:fs");
+		assert.equal(readlinkRaw(join(binDir, "npm")), danglingTarget, "npm 软链必须指向造出的绝对悬空目标");
+		assert.equal(existsSyncSync(join(binDir, "npm")), false, "悬空目标在该机器上必须真的不存在");
+		assert.equal(existsSyncSync(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin", "npm-cli.js")), true, "本地 npm-cli.js 必须已落盘");
+
 		const repaired = repairPortableNodeLinks(root, "linux");
 
 		// 沙箱 realm 的数组与宿主原型不同，转成宿主数组再比
