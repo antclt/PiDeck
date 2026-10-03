@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { applyAppearanceAttributes } from "../../themeAppearance";
 import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../../../../shared/themeSchedule";
 import { resolveLocale, setI18nLocale } from "../../i18n";
@@ -51,6 +51,8 @@ export function applyFontSizeAttributes(root: HTMLElement, settings: AppSettings
  * 全部副作用自包含，无返回值；settings 变化即重算（纯函数 of props）。
  */
 export function useAppAppearance({ settings, systemLanguage }: { settings: AppSettings; systemLanguage: string | null }): void {
+	// 外观属性是否已应用过一次：首次（冷启动）直接应用，后续切换才包 ViewTransition。
+	const hasAppliedAppearanceRef = useRef(false);
 	// 系统明暗（prefers-color-scheme）与跟随时间当前时刻提为 state：驱动 resolvedTheme 重算。
 	const [systemPrefersDark, setSystemPrefersDark] = useState(() => Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches));
 	const [scheduleNow, setScheduleNow] = useState<Date | null>(null);
@@ -102,7 +104,19 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 	useEffect(() => {
 		// 明暗 / 外观主题 / 主色统一经 themeAppearance 应用（与设置弹窗实时预览共用实现）：
 		// data-theme(浅暗) + data-appearance(表面色板) + data-accent(主题自带主色)。
-		applyAppearanceAttributes(document.documentElement, settings, systemPrefersDark);
+		// 保持直调字面 applyAppearanceAttributes(document.documentElement, …)：wallpaperThemeSync
+		// 契约扫描锚定该语句定位本 effect，改形状会误报「effect not found」。
+		const apply = () => applyAppearanceAttributes(document.documentElement, settings, systemPrefersDark);
+		// 首次应用（启动）不包 ViewTransition：冷启动不加快照开销；后续切换（dock 翻转/
+		// 定时边界/设置保存）经 ViewTransition 交叉淡入，避免整页颜色瞬时翻转刺眼。
+		// 设置弹窗的草稿拖动预览走的是直调路径（不经本 hook），不受影响。
+		const firstApply = !hasAppliedAppearanceRef.current;
+		hasAppliedAppearanceRef.current = true;
+		if (firstApply || typeof document.startViewTransition !== "function" || Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)) {
+			apply();
+			return;
+		}
+		document.startViewTransition(apply);
 		// 依赖 theme 与 accent：只改主题色时也必须重新应用 data-accent（否则界面不变）
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- settings 是整对象入参，列全字段反而脆弱；与既有行为一致（见 App.tsx 迁出前同注释）
 	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin, systemPrefersDark]);

@@ -1826,12 +1826,13 @@ export class FeishuBridge {
 	 */
 	private async sendFeishuFile(chatId: string, filePath: string, fileName?: string): Promise<string> {
 		if (!this.connection.client) return feishuT(this.locale, "file.bridgeNotReady");
-		const { existsSync, readFileSync } = await import("node:fs");
+		const { existsSync, readFileSync, statSync } = await import("node:fs");
 		const { basename } = await import("node:path");
 		if (!existsSync(filePath)) return feishuT(this.locale, "file.notFound", { path: filePath });
 		const fName = fileName || basename(filePath);
+		// 先 stat 后读：30MB 上限若在整文件进内存后才判，大文件等于白读一次。
+		if (statSync(filePath).size > 30 * 1024 * 1024) return feishuT(this.locale, "file.tooLarge");
 		const fileData = readFileSync(filePath);
-		if (fileData.length > 30 * 1024 * 1024) return feishuT(this.locale, "file.tooLarge");
 
 		try {
 			// 1. 用 SDK im.file.create 上传文件

@@ -81,8 +81,10 @@ function getInitialActiveTab(): TabEntry {
  * 供外部（App.tsx）调用：在浏览器侧栏/弹框中导航到指定 URL。
  * 每次都新建 tab，避免多个外部链接复用同一个 tab。
  */
-/** 待消费的外部导航 URL，BrowserPanel 通过轮询检测。 */
+/** 待消费的外部导航 URL，由 navigateTo 写入、BrowserPanel 挂载时消费。 */
 let pendingNavigateUrl: string | null = null;
+/** 外部导航监听：navigateTo 直接触发一次消费尝试，替代旧 50ms 常驻轮询的空转。 */
+let pendingNavigateListener: (() => void) | null = null;
 
 export function navigateTo(url: string) {
 	// 每次外部导航创建新 tab，避免多个链接复用同一个 tab
@@ -91,8 +93,9 @@ export function navigateTo(url: string) {
 	moduleState.tabs.push({ id, title: "", url });
 	moduleState.activeTabId = id;
 	moduleState.navigateKey += 1;
-	// 直接设 pendingUrl，轮询会立即检测到，无需等 re-render
+	// 直接设 pendingUrl，面板挂载时会消费（监听器未注册时 URL 留存，挂载后立即补消费）
 	pendingNavigateUrl = url;
+	pendingNavigateListener?.();
 }
 
 type WebviewEvent<T extends string> = T extends "did-fail-load"
@@ -310,17 +313,24 @@ export function BrowserPanel(props: {
 	// webview 是否已触发 dom-ready，用于延迟外部导航直到 webview 就绪。
 	const webviewReadyRef = useRef(false);
 
-	// 轮询检测 navigateTo 设置的 pendingNavigateUrl（module 变量不触发 React 重渲染）
+	// 外部导航消费：navigateTo 经监听器触发（module 变量不触发 React 重渲染）；
+	// webview 未挂载/加载中时 50ms 自重试，替代旧 50ms 常驻轮询——空转时钟归零。
 	useEffect(() => {
-		const interval = window.setInterval(() => {
-			if (!pendingNavigateUrl) return;
+		let alive = true;
+		let retryTimer = 0;
+		const consumePendingNavigate = () => {
+			if (!alive || !pendingNavigateUrl) return;
 			const url = pendingNavigateUrl;
 			moduleState.navigateKey = 0;
 			const wv = webviewRef.current;
-			if (!wv) return;
-			// 如果 webview 正在加载中，跳过本次轮询保留 pendingNavigateUrl，
-			// 下次轮询会重试，避免 URL 被静默丢弃
-			if (wv.isLoading && wv.isLoading()) return;
+			// webview 未挂载（面板刚开）或正在加载中：保留 pendingNavigateUrl 稍后重试，
+			// 避免 URL 被静默丢弃（与旧轮询的等待语义一致）
+			if (!wv || (wv.isLoading && wv.isLoading())) {
+				retryTimer = window.setTimeout(() => {
+					if (alive) consumePendingNavigate();
+				}, 50);
+				return;
+			}
 			// 通过加载检查后才消费 URL，防止加载中时丢请求
 			pendingNavigateUrl = null;
 			const activeTab = moduleState.tabs.find((t) => t.id === moduleState.activeTabId);
@@ -330,9 +340,16 @@ export function BrowserPanel(props: {
 				setActiveTabId(moduleState.activeTabId);
 				wv.loadURL(url).catch(() => {});
 			}
-		}, 50);
-		return () => window.clearInterval(interval);
-	}, [applyDeviceUserAgent, isLoading, loadUrl]);
+		};
+		pendingNavigateListener = consumePendingNavigate;
+		// 面板刚挂载时可能已有待消费 URL（navigateTo 在面板未挂载时到达过）
+		consumePendingNavigate();
+		return () => {
+			alive = false;
+			pendingNavigateListener = null;
+			window.clearTimeout(retryTimer);
+		};
+	}, [applyDeviceUserAgent]);
 
 	const closeTab = useCallback(
 		(tabId: string, event: React.MouseEvent) => {

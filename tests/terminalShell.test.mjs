@@ -56,6 +56,9 @@ function loadTerminalSessionManagerModule() {
 			if (name === "../wsl/wslExe") {
 				return { getWslExe: () => ({ command: "wsl.exe", shell: false }) };
 			}
+			if (name === "./terminalDataBatching") {
+				return loadTranspiledModule("src/main/terminal/terminalDataBatching.ts");
+			}
 			return require(name);
 		},
 	};
@@ -136,6 +139,9 @@ function loadWithPty() {
 			}
 			if (name === "../wsl/wslExe") {
 				return { getWslExe: () => ({ command: "wsl.exe", shell: false }) };
+			}
+			if (name === "./terminalDataBatching") {
+				return loadTranspiledModule("src/main/terminal/terminalDataBatching.ts");
 			}
 			return require(name);
 		},
