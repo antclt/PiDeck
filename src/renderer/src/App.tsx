@@ -648,25 +648,6 @@ export function App() {
 		terminalStatesByOwner,
 		prune: pruneTerminalDockState,
 	} = useTerminalDock(terminalOwner);
-	// 终端 IPC 目标：
-	// - agent owner → 当前会话的 runtime target（须绑定已启动 Agent）；拿不到 runtime
-	//   （从未启动 / 停止后绑定缺失）时回退项目 cwd 目标，主进程按 cwd 隔离 PTY——
-	//   保证普通项目的会话无论 Agent 是否激活都能开项目终端（按钮常显）。
-	// - project owner（引导页/未激活 agent/历史会话）→ 项目 cwd。
-	// - Chat 项目没有可落地的 cwd，不提供终端（激活中的匿名聊天除外，走 agent 目标）。
-	const terminalTarget: TerminalTarget | undefined = useMemo(() => {
-		if (!terminalOwner) return undefined;
-		const fallbackProject = (() => {
-			const pid = terminalOwner.kind === "project" ? terminalOwner.id : (activeProjectId ?? currentSessionRecord?.projectId);
-			return pid ? projects.find((p) => p.id === pid) : undefined;
-		})();
-		const projectTarget = fallbackProject && !isChatProject(fallbackProject) ? { kind: "project" as const, projectId: fallbackProject.id, cwd: fallbackProject.path } : undefined;
-		if (terminalOwner.kind === "agent") {
-			const runtimeTarget = getRuntimeTargetForSession(currentSessionId);
-			return runtimeTarget ? { kind: "agent", ...runtimeTarget } : projectTarget;
-		}
-		return projectTarget;
-	}, [terminalOwner, currentSessionId, currentSessionRecord, projects, activeProjectId]);
 	const [expandedSidebarProjects, setExpandedSidebarProjects] = useState<Set<string>>(new Set());
 	const expandedSidebarProjectsRef = useRef(expandedSidebarProjects);
 	expandedSidebarProjectsRef.current = expandedSidebarProjects;
@@ -1076,6 +1057,26 @@ export function App() {
 		queueFlushBySessionRef,
 		queuedPromptsRef: queue.queuedPromptsRef,
 	});
+
+	// 终端 IPC 目标：
+	// - agent owner → 当前会话的 runtime target（须绑定已启动 Agent）；拿不到 runtime
+	//   （从未启动 / 停止后绑定缺失）时回退项目 cwd 目标，主进程按 cwd 隔离 PTY——
+	//   保证普通项目的会话无论 Agent 是否激活都能开项目终端（按钮常显）。
+	// - project owner（引导页/未激活 agent/历史会话）→ 项目 cwd。
+	// - Chat 项目没有可落地的 cwd，不提供终端（激活中的匿名聊天除外，走 agent 目标）。
+	const terminalTarget: TerminalTarget | undefined = useMemo(() => {
+		if (!terminalOwner) return undefined;
+		const fallbackProject = (() => {
+			const pid = terminalOwner.kind === "project" ? terminalOwner.id : (activeProjectId ?? currentSessionRecord?.projectId);
+			return pid ? projects.find((p) => p.id === pid) : undefined;
+		})();
+		const projectTarget = fallbackProject && !isChatProject(fallbackProject) ? { kind: "project" as const, projectId: fallbackProject.id, cwd: fallbackProject.path } : undefined;
+		if (terminalOwner.kind === "agent") {
+			const runtimeTarget = getRuntimeTargetForSession(currentSessionId);
+			return runtimeTarget ? { kind: "agent", ...runtimeTarget } : projectTarget;
+		}
+		return projectTarget;
+	}, [terminalOwner, currentSessionId, currentSessionRecord, projects, activeProjectId]);
 
 	const quickTask = useQuickTask({ ready: settingsLoaded, backend: effectiveAgentBackend, upsertSession, selectSession: selectSessionCommand, registerSession: workspaceChrome.registerOpenSession, refreshProjects, getSessionRecord });
 
