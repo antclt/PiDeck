@@ -258,6 +258,7 @@ export const zhCN = {
 	"app.compacting": "压缩中…",
 	"app.compactDone": "上下文压缩完成",
 	"app.compactFailed": "压缩失败",
+	"app.compactWaitTimeout": "等待超时，压缩仍在后台进行；完成后会自动更新会话，无需重试",
 	"app.attachFile": "加入对话引用",
 	"app.quoteAddToPrompt": "引用并提问",
 	"app.quoteNeedsQuestion": "请先输入你想问的问题，再发送引用内容",

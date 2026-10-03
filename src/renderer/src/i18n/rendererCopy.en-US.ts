@@ -259,6 +259,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"app.compacting": "Compacting…",
 	"app.compactDone": "Context compacted",
 	"app.compactFailed": "Compaction failed",
+	"app.compactWaitTimeout": "Wait timed out; compaction is still running in the background. The session will refresh when it finishes — no retry needed",
 	"app.attachFile": "Attach file reference",
 	"app.quoteAddToPrompt": "Quote and ask",
 	"app.quoteNeedsQuestion": "Type your question before sending the quote",
