@@ -241,6 +241,7 @@ import { PiModelCapabilityCache, watchPiConfigDirectory } from "./pi/PiModelCapa
 import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { DshHost, resolveDshHomeDir } from "./dsh/DshHost";
+import { DshPluginInstallService } from "./dsh/DshPluginInstallService";
 import { DshRuntimeStatusService } from "./dsh/runtime/DshRuntimeStatus";
 import { DshRuntimeManager, DSH_BUNDLED_RUNTIME_DIRNAME, readBundledRuntime, readDeclaredDshVersion } from "./dsh/runtime/DshRuntimeManager";
 import { DshRuntimeInstaller, DSH_RUNTIME_VERSION_UNAVAILABLE_PREFIX } from "./dsh/runtime/DshRuntimeInstaller";
@@ -420,6 +421,8 @@ let agentManager: AgentManager;
 let piModelCapabilityCache: PiModelCapabilityCache | undefined;
 /** DSH 深融合宿主与后端网关；窗口创建后后台预热，发送链路仍可按需兜底。 */
 let dshHost: DshHost;
+/** DSH 用户插件安装服务（npm pack → 受管目录 → 用户补丁层行；随 DshHost 装配）。 */
+let dshPluginInstallService: DshPluginInstallService | undefined;
 /** DSH runtime 安装态服务（AgentRuntimeProvider 阶段 1）：installed 门控 UI/新建会话。 */
 let dshRuntimeStatus: DshRuntimeStatusService;
 /** DSH runtime 生命周期管理（阶段 2）：外部 runtime 的扫描/下载/安装/回收。 */
@@ -2655,6 +2658,19 @@ function registerIpc() {
 			listDshDynamicPlugins: () => dshHost.listDynamicPlugins(),
 			listDshStaticPlugins: () => dshHost.listStaticPlugins(),
 			uninstallDshUserPlugin: (input) => dshHost.uninstallUserPlugin(input),
+			// 用户插件市场搜索/安装/清单（安装服务视角；host 侧无此能力，主进程直连 npm 与市场 API）
+			searchDshPluginMarket: (keyword) => {
+				if (!dshPluginInstallService) throw new Error("DSH plugin install service is not available");
+				return dshPluginInstallService.searchPlugins(keyword);
+			},
+			installDshUserPlugin: (spec) => {
+				if (!dshPluginInstallService) throw new Error("DSH plugin install service is not available");
+				return dshPluginInstallService.installUserPlugin(spec);
+			},
+			listDshUserPlugins: () => {
+				if (!dshPluginInstallService) return Promise.resolve([]);
+				return dshPluginInstallService.listUserPlugins();
+			},
 			installDshPlugin: (input) => dshHost.installDynamicPlugin(input),
 			runDshPlugin: (input) => dshHost.runDynamicPlugin(input),
 			stopDshPlugin: (input) => dshHost.stopDynamicPlugin(input),
@@ -3690,7 +3706,26 @@ app
 			() => settingsStore.get().dshRunnerNodePath ?? "",
 			// 手动停止标记（持久化）：为真时 ensureStarted 拒绝自动拉起，只有用户显式启动才 boot。
 			() => settingsStore.get().dshManualStopped === true,
+			// agent-team 实验预设（默认关）：fork 时读快照传入 hostEntry；变更需重启 host。
+			() => settingsStore.get().dshAgentTeamPreset === true,
 		);
+		// 用户插件安装服务（搜索/安装/清单；npm 走 PiLocator 的跨平台启动规格，市场 API 走 fetch）。
+		// 依赖闭包优先取 runtime node_modules（与 host 同版本）；runtime 未安装时也能装（registry 补齐）。
+		dshPluginInstallService = new DshPluginInstallService({
+			getDshHomeDir: () => dshHost.getHomeDir(),
+			getUserDataDir: () => app.getPath("userData"),
+			resolveRuntimeNodeModules: () => {
+				const appRoot = dshRuntimeStatus.resolveAppRoot();
+				return appRoot === undefined ? undefined : join(appRoot, "node_modules");
+			},
+			launcher: {
+				createInvocation: (command, args) => piLocator.createInvocation(command, args),
+				// 参数顺序陷阱：createProcessEnv 首个参数是代理设置，pathPrefix 在第二位。
+				createProcessEnv: (pathPrefix) => piLocator.createProcessEnv(undefined, pathPrefix),
+			},
+			fetchImpl: (url, init) => fetch(url, init),
+			log: (scope, message, detail) => void appLogger.info(scope, message, detail),
+		});
 		// 实时 RPC 日志广播器（DSH 后端用）：镜像 pi AgentManager 的 80ms 节流批量推送语义，
 		// 窗口销毁后静默丢弃；观看登记由 rpcLogsSetWatching IPC 按面板挂载/卸载成对驱动。
 		const rpcLogLiveBroadcaster = new RpcLogLiveBroadcaster({

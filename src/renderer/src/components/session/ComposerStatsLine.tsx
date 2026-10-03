@@ -1,4 +1,4 @@
-import { Fragment, memo, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, memo, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "../../i18n";
 import type { AgentRuntimeState } from "../../../../shared/types";
 import { formatDuration } from "./TimelineFormat";
@@ -77,7 +77,7 @@ export function buildComposerStatsGroups(state: Pick<AgentRuntimeState, "dshSess
 	return groups;
 }
 
-export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?: AgentRuntimeState; turnCount?: number }) {
+export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?: AgentRuntimeState; turnCount?: number; contextMeter?: ReactNode }) {
 	const groups = buildComposerStatsGroups(props.state, props.turnCount);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const [truncated, setTruncated] = useState(false);
@@ -96,21 +96,26 @@ export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?
 		return () => observer.disconnect();
 	}, [line]);
 
+	// 首轮尚未产生统计数据时不单独显示圆环，避免输入框下方只剩一个孤立图标。
+	// 有轮次、性能或 token 数据后，再把圆环作为同一条统计栏的交互入口挂入。
 	if (groups.length === 0) return null;
 	return (
-		<div ref={rootRef} className="w-full min-w-0 truncate px-1 pb-0 pt-1 text-center text-[12px] leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
-			{groups.map((group, i) => (
-				<Fragment key={group}>
-					{i > 0 && (
-						<>
-							<span className="mx-2.5 text-border-strong" aria-hidden>
-								|
-							</span>{" "}
-						</>
-					)}
-					<span>{group}</span>
-				</Fragment>
-			))}
+		<div ref={rootRef} className="flex w-full min-w-0 items-center gap-2 px-1 pb-0 pt-1 text-[12px] leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
+			<div className="min-w-0 flex-1 truncate text-center">
+				{groups.map((group, i) => (
+					<Fragment key={group}>
+						{i > 0 && (
+							<>
+								<span className="mx-2.5 text-border-strong" aria-hidden>
+									|
+								</span>{" "}
+							</>
+						)}
+						<span>{group}</span>
+					</Fragment>
+				))}
+			</div>
+			{props.contextMeter}
 		</div>
 	);
 });

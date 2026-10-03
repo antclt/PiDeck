@@ -41,8 +41,8 @@ export function WebThinkingSelector(props: { level?: string; onChange: (level: s
 
 	return (
 		<>
-			<Button type="button" variant="ghost" className="h-8 min-w-0 shrink-0 gap-1 px-2.5 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.thinking")} title={t("web.thinkingSheetTitle")} onClick={() => setOpen(true)}>
-				<Brain className="size-3.5 shrink-0" aria-hidden="true" />
+			<Button type="button" variant="ghost" className="h-8 min-w-0 gap-1 px-2.5 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground" aria-label={t("web.thinking")} title={t("web.thinkingSheetTitle")} onClick={() => setOpen(true)}>
+				<Brain className="size-4 shrink-0" aria-hidden="true" />
 				<span className="min-w-0 truncate">{webThinkingLabel(current)}</span>
 			</Button>
 			<WebBottomSheet open={open} onOpenChange={setOpen} title={t("web.thinkingSheetTitle")}>

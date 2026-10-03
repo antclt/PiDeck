@@ -212,6 +212,12 @@ export const ipcChannels = {
 	dshPluginStaticList: "dsh:plugin-static-list",
 	/** DSH 用户自装静态插件卸载（从 $DSH_HOME/cordis.patch.yml 移除行，可选回收插件目录）。 */
 	dshPluginUserUninstall: "dsh:plugin-user-uninstall",
+	/** DSH 插件市场搜索（官方目录 + npm 双源，单源失败降级 warnings）。 */
+	dshPluginMarketSearch: "dsh:plugin-market-search",
+	/** DSH 用户自装静态插件安装（npm pack → 受管目录 → 用户补丁层行；幂等）。 */
+	dshPluginUserInstall: "dsh:plugin-user-install",
+	/** DSH 用户补丁层清单（安装服务视角：受管目录内的行补全包名/版本/uiOnly）。 */
+	dshPluginUserList: "dsh:plugin-user-list",
 	/** DSH 动态插件安装（define：定义源码包，不运行）。 */
 	dshPluginInstall: "dsh:plugin-install",
 	/** DSH 动态插件运行（面板手势，requestId=null 无需审批）。 */

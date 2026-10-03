@@ -104,6 +104,8 @@ export function WebComposer(props: {
 				<textarea
 					id="prompt"
 					ref={textareaRef}
+					/* legacy .composer textarea 带 height:100%（桌面横向布局遗留）：web 端纵列布局下会把工具行挤出，utilities 层覆盖为随内容自适应 */
+					className="h-auto max-h-[40dvh] min-h-14"
 					value={draft}
 					onChange={(event) => setDraft(event.target.value)}
 					onPaste={(event) => {
@@ -157,16 +159,16 @@ export function WebComposer(props: {
 							type="button"
 							variant="ghost"
 							size="sm"
-							className="hidden h-7 w-7 shrink-0 p-0 text-muted-foreground [@media(pointer:coarse)]:inline-flex"
+							className="hidden h-8 w-8 shrink-0 p-0 text-muted-foreground [@media(pointer:coarse)]:inline-flex"
 							disabled={props.disabled || busy || images.length >= MAX_ATTACHED_IMAGES}
 							title={t("web.takePhoto")}
 							aria-label={t("web.takePhoto")}
 							onClick={() => cameraInputRef.current?.click()}
 						>
-							<Camera className="size-3.5" aria-hidden="true" />
+							<Camera className="size-4" aria-hidden="true" />
 						</Button>
-						<Button type="button" variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 text-muted-foreground" disabled={props.disabled || busy || images.length >= MAX_ATTACHED_IMAGES} title={t("web.attachImage")} aria-label={t("web.attachImage")} onClick={() => fileInputRef.current?.click()}>
-							<ImagePlus className="size-3.5" aria-hidden="true" />
+						<Button type="button" variant="ghost" size="sm" className="h-8 w-8 shrink-0 p-0 text-muted-foreground" disabled={props.disabled || busy || images.length >= MAX_ATTACHED_IMAGES} title={t("web.attachImage")} aria-label={t("web.attachImage")} onClick={() => fileInputRef.current?.click()}>
+							<ImagePlus className="size-4" aria-hidden="true" />
 						</Button>
 						<WebPromptPicker disabled={props.disabled} onPick={(content) => setDraft((prev) => (prev ? `${prev}\n\n${content}` : content))} />
 						{/* 桌面提示文案：窄屏让位给模型/思考 pill，避免工具行溢出 */}

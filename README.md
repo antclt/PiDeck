@@ -258,7 +258,7 @@ PiDeck
 
 除正式版（PiDeck）外，项目同时发布**开发版（PiDeck Dev）**安装包，用于提前体验预发布功能：
 
-- **获取入口**：[GitHub Releases](https://github.com/ayuayue/PiDeck/releases) 中标记为 *Pre-release* 的版本（版本号带 `-beta.N` 后缀，如 `v0.8.0-beta.1`）。
+- **获取入口**：[GitHub Releases](https://github.com/ayuayue/PiDeck/releases) 中标记为 *Pre-release* 的版本（版本号带 `-beta` 或 `-beta.N` 后缀，如 `v0.7.8-beta`、`v0.8.0-beta.1`）。
 - **并行安装**：PiDeck Dev 与正式版使用独立的应用标识（appId）、安装目录与快捷方式，可同时安装、互不影响。
 - **数据模式二选一**：首次启动 PiDeck Dev 时可选择「与正式版共用数据」或「独立数据目录」，后续可在应用内切换并按引导迁移数据。
 - **协议差异**：开发版注册 `pideck-dev://` 深度链接协议，与正式版的 `pideck://` 互不抢占。

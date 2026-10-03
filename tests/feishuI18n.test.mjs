@@ -143,8 +143,10 @@ test("FeishuBridge keeps provider and process error details out of outbound copy
 	assert.match(source, /logErr\("\[飞书 Bridge\] Agent 运行失败:", e\)/);
 	assert.match(source, /logErr\("\[飞书 Bridge\] 模型切换失败:", e\)/);
 
-	const mainSource = readFileSync("src/main/index.ts", "utf8");
-	assert.match(mainSource, /feishuT\(currentFeishuLocale\(\), "bridge\.defaultBotName"\)/);
-	assert.match(mainSource, /feishuT\(currentFeishuLocale\(\), "bridge\.botAddFailed"\)/);
-	assert.doesNotMatch(mainSource, /return \{ success: false, error: error instanceof Error \? error\.message/);
+	// d8f5e3901 把飞书 IPC 迁出 index.ts 后，出站文案的 IPC 面在 ipc/feishuIpc.ts（locale 经 deps 注入）；
+	// 正则空白容忍，避免格式化再次断言。
+	const feishuIpcSource = readFileSync("src/main/ipc/feishuIpc.ts", "utf8");
+	assert.match(feishuIpcSource, /feishuT\(deps\.getCurrentLocale\(\),\s*"bridge\.defaultBotName"\)/);
+	assert.match(feishuIpcSource, /feishuT\(deps\.getCurrentLocale\(\),\s*"bridge\.botAddFailed"\)/);
+	assert.doesNotMatch(feishuIpcSource, /return \{ success: false, error: error instanceof Error \? error\.message/);
 });

@@ -170,9 +170,9 @@ export function SessionContextMeter(props: {
 	// 完整详情复用会话头部 SessionStatus 的构建器：平均命中率以主进程
 	// 文件统计为准（缓存快照历史均值仅作降级，头部同款语义）
 	const detail = buildSessionStatusDetail(props.state, props.state?.cacheHitAveragePercent ?? undefined, props.state?.cacheHitSampleCount ?? 0);
-	// 输入/输出 token 与最新缓存命中率已常驻输入框下方（ComposerStatsLine），
-	// 圆环面板不再重复这两行；会话头部（SessionStatus）共用同一构建器不受影响。
-	const panelDetailRows = detail.detailRows.filter((row) => row.label !== t("ctx.detail.tokens") && row.label !== t("ctx.detail.hitLatest"));
+	// 统计圆环已移动到输入框底栏，但点击后的详情仍需完整展示 token 与缓存数据。
+	// 这里保留完整明细，避免用户必须从一行截断文本里猜测具体数值。
+	const panelDetailRows = detail.detailRows;
 
 	// ── 面板内 provider 用量/余额区块 ─────────────────────────────
 	// 数据源与展示统一收敛到 ProviderUsageDetails（与模型选择器展开区共享同一份

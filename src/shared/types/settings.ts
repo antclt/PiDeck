@@ -620,6 +620,15 @@ export type AppSettings = {
 	 * 缺省 undefined/false：保持按需自动启动的历史语义。
 	 */
 	dshManualStopped?: boolean;
+
+	/**
+	 * DSH agent-team 实验预设（默认关）：开启后 DSH host 组合追加官方
+	 * @deepseek-ai/dsh-experimental-agent-team-profile（启用 Team 域 spawn_teammate
+	 * 等工具，并禁用 subagent/subagent_fork 工具——同一组合层后行覆盖先行）。
+	 * 仅在 host fork 时读取（--dsh-agent-team=1）：变更后需重启 DSH host 生效，
+	 * 对已运行会话不变。缺省 undefined/false = 完全等同现状（不注入任何行）。
+	 */
+	dshAgentTeamPreset?: boolean;
 };
 
 /**

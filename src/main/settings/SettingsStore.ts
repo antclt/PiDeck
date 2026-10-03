@@ -264,6 +264,9 @@ Gitmoji 对应关系：
 	// 跨重启不再自动 fork（不想用 DSH 的用户不用反复停）──
 	dshManualStopped: false,
 
+	// ── DSH agent-team 实验预设：默认关（组合层完全不注入）；开启需重启 host 生效 ──
+	dshAgentTeamPreset: false,
+
 	// ── Agent 启动诊断/加速：offline 默认关（保证 pi 启动时模型目录走网络刷新，
 	// 用户新增/更新的模型能实时出现在模型列表）；扩展/技能默认加载 ──
 	piRpcOffline: false,
@@ -416,6 +419,10 @@ export class SettingsStore {
 			// 否则一个 "true" 字符串会让 host 永远起不来，且 UI 开关状态不可信。
 			if (typeof this.settings.dshManualStopped !== "boolean") {
 				this.settings.dshManualStopped = false;
+			}
+			// agent-team 实验预设开关同理：非布尔一律回落 false（默认关，脏值不得误开实验域）。
+			if (typeof this.settings.dshAgentTeamPreset !== "boolean") {
+				this.settings.dshAgentTeamPreset = false;
 			}
 			// 快捷键覆盖来自旧 settings.json 时可能是脏值（未知 id / 非法 accelerator）；
 			// 统一清洗，坏条目回落平台默认，避免主进程匹配读到无效键。
@@ -667,6 +674,10 @@ export class SettingsStore {
 		// 避免脏值把 host 永久锁死在「已停止」态。
 		if ("dshManualStopped" in safePatch && typeof safePatch.dshManualStopped !== "boolean") {
 			delete safePatch.dshManualStopped;
+		}
+		// agent-team 实验预设开关来自渲染层，入参不可信：只接受布尔，非法值不落盘。
+		if ("dshAgentTeamPreset" in safePatch && typeof safePatch.dshAgentTeamPreset !== "boolean") {
+			delete safePatch.dshAgentTeamPreset;
 		}
 		this.settings = { ...this.settings, ...safePatch };
 		// 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。
