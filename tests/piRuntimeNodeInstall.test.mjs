@@ -367,7 +367,7 @@ test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相
 			const describePath = (p) => {
 				try {
 					const st = lstatSync(p);
-				return st.isDirectory() ? "dir" : st.isSymbolicLink() ? "symlink" : "file";
+					return st.isDirectory() ? "dir" : st.isSymbolicLink() ? "symlink" : "file";
 				} catch {
 					return "absent";
 				}
