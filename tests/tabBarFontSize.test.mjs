@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // 会话 Tab 栏字号可配置契约：shared 类型 → SettingsStore 默认+归一化 →
-// App data-tab-font-size → foundation.css token 四档 → Tailwind text-tab →
+// App data-tab-font-size → foundation.css token 四档 → Tailwind 字号 utility →
 // SessionTabsBar 应用 → AppearanceTab 行 → i18n 文案。
 const settingsType = readFileSync("src/shared/types/settings.ts", "utf8");
 const store = readFileSync("src/main/settings/SettingsStore.ts", "utf8");
@@ -19,6 +20,20 @@ const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
 const MODES = ["compact", "medium", "large", "xlarge"];
+const { cn } = loadTsCommonJs("src/renderer/src/lib/utils.ts");
+
+// 读取实际胶囊 class，经生产 cn 合并状态；只扫描源字符串会漏掉字号被误当颜色删除的回归。
+for (const [index, pill] of [...tabsBar.matchAll(/"(session-tab group[^"]*)"/g)].entries()) {
+	for (const active of [false, true]) {
+		for (const preview of [false, true]) {
+			test(`${index === 0 ? "文件" : "会话"} Tab 字号在 cn 合并后保留（active=${active}, preview=${preview}）`, () => {
+				const classes = cn(pill[1], active ? "border-transparent font-medium text-foreground" : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent-soft hover:text-foreground", preview && "italic font-normal text-muted-foreground");
+				assert.match(classes, /(?:^|\s)(?:text-tab|text-\[length:var\(--font-size-tab\)\])(?:\s|$)/, `合并状态颜色后必须保留 Tab 字号：${classes}`);
+				assert.ok(classes.split(/\s+/).includes(preview || !active ? "text-muted-foreground" : "text-foreground"), "字号类与状态颜色必须同时保留");
+			});
+		}
+	}
+}
 
 /** 从 foundation.css 取某个 data 属性各档位块里某 token 的值（正则空白容忍，不锁缩进）。 */
 function tokenByMode(css, attribute, token) {
@@ -66,11 +81,12 @@ test("Tailwind 暴露 text-tab 工具类并接上 token", () => {
 	assert.match(tailwind, /--text-tab--line-height:\s*var\(--line-height-tab\)/);
 });
 
-test("SessionTabsBar：会话 Tab 与文件 Tab 都用 text-tab，不再沿用 text-micro", () => {
+test("SessionTabsBar：会话 Tab 与文件 Tab 消费字号及行高 token，字号不再依赖 text-micro", () => {
 	const pills = tabsBar.match(/"session-tab group[^"]*"/g) ?? [];
 	assert.equal(pills.length, 2, "应有会话 Tab 与工作台文件 Tab 两处胶囊");
 	for (const pill of pills) {
-		assert.match(pill, /text-tab/);
+		assert.match(pill, /text-\[length:var\(--font-size-tab\)\]/);
+		assert.match(pill, /leading-\(--line-height-tab\)/);
 		assert.doesNotMatch(pill, /text-micro/);
 	}
 });

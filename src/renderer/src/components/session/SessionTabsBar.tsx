@@ -755,7 +755,8 @@ function EditorWorkbenchTab(props: {
 					aria-selected={Boolean(tab.active)}
 					aria-label={tab.title ?? tab.label}
 					className={cn(
-						"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-tab transition-[color,background-color,border-color,box-shadow,transform] duration-200",
+						// 显式标明 length，避免 cn 把自定义 text-tab 当颜色类、被状态颜色覆盖。
+						"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-[length:var(--font-size-tab)] leading-(--line-height-tab) transition-[color,background-color,border-color,box-shadow,transform] duration-200",
 						// 工作台文件/Diff Tab 宽度上限跟随外观设置（--session-tab-max-w 由 SessionTabsBar 根注入），
 						// 与会话 Tab 统一宽度来源，不再保留旧固定值。
 						"w-fit max-w-(--session-tab-max-w)",
@@ -993,7 +994,8 @@ function SessionTab(props: {
 								if (event.button === 1 && !pinned) close();
 							}}
 							className={cn(
-								"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-tab transition-[color,background-color,border-color,box-shadow,transform] duration-200",
+								// 与文件 Tab 一样标明字号类型，防 cn 将字号当颜色删掉；仍消费设置 token。
+								"session-tab group relative flex h-7 shrink-0 cursor-pointer select-none items-center rounded-md border px-2 text-[length:var(--font-size-tab)] leading-(--line-height-tab) transition-[color,background-color,border-color,box-shadow,transform] duration-200",
 								// 固定 Tab 与普通 Tab 同宽策略（按内容收缩）：固定 Tab 无关闭按钮，
 								// hover 不会因按钮出现而跳动，无需 w-20 占位；固定宽度反而让 Pin 图标挤占标题空间。
 								// 有 DSH/生图徽标或模式 chip 时放宽上限：基础上限 + 徽标预留 28px
