@@ -1277,6 +1277,7 @@ export const zhCN = {
 	"session.sendDshImagesUnsupported": "DSH 暂不支持图片附件",
 	"session.sendDshModelRouteUnavailable": "当前 DSH 模型路由不可用，请选择其他模型或恢复提供方配置。",
 	"session.sendDshUnsupportedPayload": "DSH 暂不支持宿主指令",
+	"session.sendDshWriterHeld": "该会话正被其他 DSH 客户端（如 DeepSeek 桌面版或 dsh CLI）占用写入。请在那边关闭该会话或退出程序，然后重试。",
 	"dshCommand.permission": "切换权限预设（read-only / workspace-write / danger-full-access）",
 	"dshCommand.plan": "开启计划模式",
 	"dshCommand.planOff": "关闭计划模式",

@@ -448,6 +448,17 @@ export class DshAgentManager implements SessionAgentGateway {
 		});
 		if (!sent.result.ok) {
 			this.logRpc(input.agentId, "recv", "sessions.prompt rejected", sent.result.error);
+			// session/writer-held：DSH 每会话跨进程独占写锁（无超时，持有进程退出才释放）。
+			// ~/.dsh 与 DeepSeek 桌面版/dsh CLI 共享，那边开着同一会话时 prompt 会被拒——
+			// 原始 JSON 对用户不可操作，必须映射为「去那边关闭后重试」的文案。
+			if (sent.result.error.code === "session/writer-held") {
+				return {
+					accepted: false,
+					error: JSON.stringify(sent.result.error),
+					delivery: "rejected",
+					i18nKey: "session.sendDshWriterHeld",
+				};
+			}
 			return { accepted: false, error: JSON.stringify(sent.result.error), delivery: "rejected" };
 		}
 		this.logRpc(input.agentId, "recv", "sessions.prompt accepted");

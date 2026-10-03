@@ -1281,6 +1281,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"session.sendDshImagesUnsupported": "Image attachments are not supported by DSH yet",
 	"session.sendDshModelRouteUnavailable": "The selected DSH provider route is unavailable. Select another model or restore the provider configuration.",
 	"session.sendDshUnsupportedPayload": "Host instructions are not supported by DSH",
+	"session.sendDshWriterHeld": "This session is locked for writing by another DSH client (e.g. the DeepSeek desktop app or a dsh CLI). Close it there or quit that app, then try again.",
 	"dshCommand.permission": "Switch permission preset (read-only / workspace-write / danger-full-access)",
 	"dshCommand.plan": "Enable plan mode",
 	"dshCommand.planOff": "Disable plan mode",
