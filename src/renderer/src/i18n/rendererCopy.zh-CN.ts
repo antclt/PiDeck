@@ -5013,8 +5013,8 @@ export const zhCN = {
 	"providerLogin.errorHint.region": "该供应商在你所在的国家/地区不可用，需要走代理网络才能完成授权。",
 	"providerLogin.errorHint.network": "无法连接供应商服务器，请检查网络或代理设置后重试。",
 	"providerLogin.errorHint.codeExpired": "授权码已失效，请重新发起登录。",
-} as const;
 
+	// ── Web 端第二批：主题 / PWA / 断线恢复 / 搜索 / 分享 / 活动 strips / 技能扩展面板 ──
 	"web.themeLight": "亮色",
 	"web.themeDark": "暗色",
 	"web.themeSystem": "跟随系统",
@@ -5053,4 +5053,6 @@ export const zhCN = {
 	"web.skillToggle": "启用或禁用技能",
 	"web.extensionToggle": "启用或禁用扩展",
 	"web.assetsLoading": "加载中…",
+} as const;
+
 export type TranslationKey = keyof typeof zhCN;

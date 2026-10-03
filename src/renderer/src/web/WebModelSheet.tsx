@@ -43,7 +43,7 @@ export function WebModelSelector(props: { model?: SessionModelPreference; models
 			<Button
 				type="button"
 				variant="ghost"
-				className="h-8 max-w-44 min-w-0 shrink-0 justify-between gap-1 px-2.5 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+				className="h-8 min-w-0 justify-between gap-1 px-2.5 text-caption text-muted-foreground hover:bg-muted/60 hover:text-foreground"
 				aria-label={t("web.model")}
 				title={selectedName ? `${selectedName} · ${model?.provider ?? ""}/${model?.modelId ?? ""}` : t("web.model")}
 				onClick={() => {
@@ -52,7 +52,7 @@ export function WebModelSelector(props: { model?: SessionModelPreference; models
 				}}
 			>
 				<span className="min-w-0 truncate">{pillLabel}</span>
-				<ChevronsUpDown className="size-3.5 shrink-0" aria-hidden="true" />
+				<ChevronsUpDown className="size-4 shrink-0" aria-hidden="true" />
 			</Button>
 			<WebBottomSheet open={open} onOpenChange={setOpen} title={t("web.modelSheetTitle")}>
 				<div className="flex flex-col">
