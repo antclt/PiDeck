@@ -88,12 +88,14 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		try {
 			return await fileSystemService.listTree(projectPath, maxDepth, directory);
 		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			// 项目根被外部删除时用稳定错误码替代 Node/Electron 的整段 ENOENT scandir，
 			// 渲染层据此清空陈旧文件树、刷新项目 presence，并显示可操作的本地化提示。
-			if (!directory && (error as NodeJS.ErrnoException).code === "ENOENT") {
-				throw new Error("PROJECT_DIRECTORY_MISSING");
-			}
-			throw error;
+			if (!directory) throw new Error("PROJECT_DIRECTORY_MISSING");
+			// 子目录 ENOENT 是常态竞态而非异常：典型如 pi-subagents 运行后清理 artifacts/outputs，
+			// 而文件抽屉记住的展开态仍指向它。返回空子树让节点自然落空；裸抛会在每次打开
+			// 会话时打主进程 handler 报错，且抽屉把节点标成「加载失败」误导用户以为文件丢了。
+			return [];
 		}
 	});
 
