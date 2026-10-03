@@ -385,6 +385,14 @@ export class ExtensionManager {
 		if (!isDefaultDisabledBuiltInExtension(normalized)) {
 			throw new Error("仅默认关闭的内置扩展支持此开关");
 		}
+		// 自愈：历史上被「移除」过（进了 removedBuiltInExtensions）的 opt-in 扩展，
+		// 用户重新打开开关时同步清掉 removed 标记——否则开关 ON 但注入层仍被 removed 拦住。
+		if (enabled) {
+			const removed = this.getPiDeckSettings().removedBuiltInExtensions ?? [];
+			if (removed.includes(normalized)) {
+				await this.saveRemovedBuiltIn(removed.filter((s) => s !== normalized));
+			}
+		}
 		const current = this.getPiDeckSettings().enabledBuiltInExtensions ?? [];
 		const next = enabled ? (current.includes(normalized) ? current : [...current, normalized]) : current.filter((s) => s !== normalized);
 		if (next.length === current.length && next.every((s, i) => s === current[i])) return;

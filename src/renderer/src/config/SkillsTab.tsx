@@ -1,9 +1,10 @@
 import { Button } from "../components/ui-shadcn/button";
+import { Switch } from "../components/ui-shadcn/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/ui-shadcn/select";
 import { useEffect, useState, type ReactNode } from "react";
 import { ContentTabs } from "./ContentTabs";
-import { Check, FileEdit, Pencil, ShoppingBag, Sparkles, ToggleLeft, ToggleRight, Trash2, X, Store, Globe } from "lucide-react";
+import { Check, FileEdit, Pencil, ShoppingBag, Sparkles, Trash2, X, Store, Globe } from "lucide-react";
 import type { CreatePiSkillInput, PiSkillListResult, PiSkillLocation, PiSkillSummary, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
 import { SkillStoreTab } from "./SkillStoreTab";
@@ -367,9 +368,8 @@ function SkillTableRow(props: { skill: PiSkillSummary; effectiveEnabled: boolean
 			</TableCell>
 			<TableCell className="text-right">
 				<div className="flex justify-end gap-1">
-					<Button variant="ghost" size="icon-sm" className={`size-7${effectiveEnabled ? " text-primary" : ""}`} disabled={inherited && !skill.enabled} onClick={() => props.onToggle(skill, !effectiveEnabled)} title={effectiveEnabled ? t("common.disable") : t("common.enabled")}>
-						{effectiveEnabled ? <ToggleRight size={18} strokeWidth={1.8} /> : <ToggleLeft size={18} strokeWidth={1.8} />}
-					</Button>
+					{/* 启停开关：Switch 轨道着色区分启用/禁用（Toggle 图标两态几乎无视觉差，用户反馈看不出状态） */}
+					<Switch checked={effectiveEnabled} onCheckedChange={(checked) => props.onToggle(skill, checked)} disabled={inherited && !skill.enabled} title={effectiveEnabled ? t("common.disable") : t("common.enabled")} />
 					{!inherited ? (
 						<>
 							<Button variant="ghost" size="icon-sm" className="size-7" onClick={() => props.onEdit(skill)} title={t("common.edit")}>

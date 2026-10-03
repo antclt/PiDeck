@@ -249,6 +249,11 @@ test("toggleBuiltIn opt-in writes enabledBuiltInExtensions and never touches rem
 	assert.equal(settings.enabledBuiltInExtensions?.length, 0);
 	// 非默认关的内置扩展必须走 removed 机制，拒绝用这个开关
 	await assert.rejects(() => manager.toggleBuiltIn("pi-deck-todo.ts", true), /默认关闭/);
+	// 自愈：曾被「移除」的 opt-in 扩展重新打开开关时，同步清除 removed 标记
+	settings = { removedBuiltInExtensions: ["pi-deck-gui-bridge.ts"], enabledBuiltInExtensions: [] };
+	await manager.toggleBuiltIn("pi-deck-gui-bridge.ts", true);
+	assert.equal(settings.removedBuiltInExtensions?.length, 0);
+	assert.equal(settings.enabledBuiltInExtensions?.[0], "pi-deck-gui-bridge.ts");
 
 	rmSync(fixtureHome, { recursive: true, force: true });
 });

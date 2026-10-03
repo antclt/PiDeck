@@ -763,6 +763,8 @@ export function createDefaultAppSettings(): AppSettings {
 		/** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
 		disabledExtensions: [],
 		disableExtensionWhitelist: false,
+		/** 默认关闭的内置扩展 opt-in 列表：与 SettingsStore 默认一致，空数组 = 桥/面板等默认不注入 */
+		enabledBuiltInExtensions: [],
 		/** 技能禁用列表：与 SettingsStore 默认一致，空数组 = 不启用技能白名单 */
 		disabledSkills: [],
 		/** 提示词模板禁用列表：与 SettingsStore 默认一致，空数组 = 不启用模板白名单 */
