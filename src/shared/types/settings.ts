@@ -536,6 +536,13 @@ export type AppSettings = {
 	removedBuiltInExtensions: string[];
 
 	/**
+	 * 用户显式开启的「默认关闭」内置扩展（见 DEFAULT_DISABLED_BUILT_IN_EXTENSIONS，
+	 * 目前为 GUI 扩展桥与扩展点面板）。这些扩展不进 removedBuiltInExtensions——
+	 * 默认就是不注入，opt-in 列表存在才随 -e 注入。
+	 */
+	enabledBuiltInExtensions: string[];
+
+	/**
 	 * 用户禁用的扩展列表（source 标识 + 作用域），存储于 PiDeck 自身设置（不写 pi settings）。
 	 * pi 0.82.x 不识别 settings.json 的 disabledExtensions，禁用只能靠 PiDeck 启动 RPC 时
 	 * 切「白名单模式」：--no-extensions + 逐条 -e 注入未禁用扩展实现（见 enabledExtensionResolver）。

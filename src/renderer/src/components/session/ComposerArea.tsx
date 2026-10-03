@@ -71,8 +71,6 @@ type ComposerExtrasProps = {
 	statsLine?: ReactNode;
 	/** GUI 扩展桥：输入框上方挂件（aboveEditor）。 */
 	bridgeWidgetsAbove?: ReactNode;
-	/** GUI 扩展桥：输入框下方挂件（belowEditor）。 */
-	bridgeWidgetsBelow?: ReactNode;
 };
 
 /**
@@ -103,13 +101,6 @@ function ComposerMeasuredExtras(props: ComposerExtrasProps) {
 				<div className="flex w-full min-w-0 shrink-0 flex-col">
 					{props.composerBox}
 					{props.statsLine}
-					{/* 桥状态栏**已按产品决定退役**（2026-09，方案 ②）：输入框下方只留 PiDeck
-					    自己的统计行，桥 `setStatus` 的条目不再渲染 —— 这是决定，不是漏挂。
-					    代价：pi-tracker 用量行 / `mcp-auth` 授权进度 / plan-mode 进度等只走
-					    setStatus 的信息在 GUI 里看不见了；数据侧仍在 bridgeStatus /
-					    bridgeStatusTone 里，恢复步骤见 BridgeSlot.tsx 的退役说明。 */}
-					{/* GUI 扩展桥：输入框下方挂件（belowEditor）。无内容时不占位。 */}
-					{props.bridgeWidgetsBelow}
 				</div>
 			</>
 		</ComposerWidgetLayoutProvider>
@@ -190,10 +181,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 									}
 								/>
 							}
-							// GUI 扩展桥的两个 widget 落点：全部「无内容不占位」（组件内部返回 null）。
-							// 桥状态栏（setStatus 条目）已按产品决定退役，不再有挂载点。
+							// GUI 扩展桥只挂输入框上方 widget；输入框下方保持 PiDeck 原生布局。
 							bridgeWidgetsAbove={<BridgeWidgetSlot sessionId={props.sessionId} placement="aboveEditor" />}
-							bridgeWidgetsBelow={<BridgeWidgetSlot sessionId={props.sessionId} placement="belowEditor" />}
 							composerBox={
 								<div
 									// overflow-visible：保留命令面板/建议浮层；面板 minSize 已保证底栏不被裁切

@@ -9,7 +9,7 @@ import type { PiLocator } from "../pi/PiLocator";
 import { PiProcess } from "../pi/PiProcess";
 import { toWslLinuxPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, piVersionAtLeast } from "./extensionVersionGate";
 // 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
 import { compareVersions } from "../utils/versionCompare";
@@ -175,13 +175,15 @@ export class ExtensionManager {
 		const removedBuiltIn = new Set(this.getPiDeckSettings().removedBuiltInExtensions ?? []);
 		// 用户禁用的非内置扩展：按 scope+source 匹配（同名可在 user/project 两级独立开关）。
 		const disabledExtKeys = new Set((this.getPiDeckSettings().disabledExtensions ?? []).map((entry) => `${entry.scope}:${entry.source}`));
+		// 默认关闭（opt-in）的内置扩展：仅当用户显式开启（enabledBuiltInExtensions）才视为启用。
+		const optInBuiltIn = new Set(this.getPiDeckSettings().enabledBuiltInExtensions ?? []);
 		// 内置扩展版本：包级版本号（extensions-manifest.json，不跟 PiDeck 应用版本走），
 		// 覆盖层（热更新）优先。逐行写入而非只在补齐分支赋值——内置条目可能来自
 		// pi list、本地目录扫描、兜底补齐三条路径，版本只认「当前生效的那一份」。
 		const builtInVersion = this.builtInRoots ? readEffectiveBuiltInExtensionsVersion(this.builtInRoots) : null;
 		for (const ext of merged) {
 			if (ext.builtIn) {
-				ext.enabled = !removedBuiltIn.has(ext.source);
+				ext.enabled = !removedBuiltIn.has(ext.source) && (!isDefaultDisabledBuiltInExtension(ext.source) || optInBuiltIn.has(ext.source));
 				if (builtInVersion) ext.currentVersion = builtInVersion;
 			} else {
 				ext.enabled = !disabledExtKeys.has(`${ext.scope}:${ext.source}`);
@@ -370,6 +372,23 @@ export class ExtensionManager {
 		await this.saveRemovedBuiltIn(next);
 		// 若用户目录仍有旧副本，一并删掉，避免与 -e 双加载。
 		await this.removeBuiltInFile(normalized).catch(() => undefined);
+		this.invalidateListCache();
+	}
+
+	/**
+	 * 开关「默认关闭」（opt-in）的内置扩展：enabled=true 写入 enabledBuiltInExtensions，
+	 * false 则移出；不碰 removedBuiltInExtensions（那是另一套「用户主动禁用默认启用扩展」机制）。
+	 * 下次 Agent 启动时按 opt-in 列表决定是否随 -e 注入。
+	 */
+	async toggleBuiltIn(source: string, enabled: boolean): Promise<void> {
+		const normalized = source.trim();
+		if (!isDefaultDisabledBuiltInExtension(normalized)) {
+			throw new Error("仅默认关闭的内置扩展支持此开关");
+		}
+		const current = this.getPiDeckSettings().enabledBuiltInExtensions ?? [];
+		const next = enabled ? (current.includes(normalized) ? current : [...current, normalized]) : current.filter((s) => s !== normalized);
+		if (next.length === current.length && next.every((s, i) => s === current[i])) return;
+		await this.patchPiDeckSettings({ enabledBuiltInExtensions: next });
 		this.invalidateListCache();
 	}
 

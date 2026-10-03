@@ -202,6 +202,8 @@ let previewSettings: AppSettings = {
 	fontFamilyMono: "system-mono",
 	fontFamilyMonoCustom: "",
 	removedBuiltInExtensions: [],
+	// 与主进程 defaultSettings 保持一致：默认关闭的内置扩展 opt-in 列表默认空
+	enabledBuiltInExtensions: [],
 	// 与主进程 defaultSettings 保持一致（预览壳不真实播放，仅保持设置项形状完整）
 	soundAlert: createDefaultSoundAlertSettings(),
 	imageGenSize: "unset",
