@@ -334,8 +334,11 @@ test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相
 		// fs/promises 的写盘必须 await：不 await 时自愈会在文件真正落盘前读到「本地副本不存在」，
 		// 于是修不了（表现为随机失败，跑十几次才复现一次）。
 		await writeFile(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin", "npm-cli.js"), "// cli\n", "utf8");
-		// 复现旧安装的现场：指向已删除的 /tmp 解压目录
-		if (!(await trySymlink("/tmp/pideck-node-extract-gone/node-v24.13.0-linux-x64/lib/node_modules/npm/bin/npm-cli.js", join(binDir, "npm")))) {
+		// 复现旧安装的现场：指向已删除的解压目录。用 join(root,...) 造出「带盘符的绝对路径」，
+		// 在任何机器上都确定性悬空——无盘符的 "/tmp/..." 在 Windows 上按 cwd 所在盘解析，
+		// CI runner 上可能意外命中真实目录（2026-10 v0.7.8 发版时 CI 反复红）。
+		const danglingTarget = join(root, "pideck-node-extract-gone", "node-v24.13.0-linux-x64", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+		if (!(await trySymlink(danglingTarget, join(binDir, "npm")))) {
 			t.skip("Windows 符号链接权限不足（EPERM）");
 			return;
 		}

@@ -94,6 +94,13 @@ function toPosixProbePath(path) {
 	return path.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
 }
 
+// 探测文件所在目录必须与 process.cwd() 同盘：/x/y 形式在 Windows 上解析回「当前盘」的同路径，
+// CI runner 的 cwd（D:\a\...）与 %TEMP%（C:\...）不同盘时，落在 C: 的临时文件永远「不存在」。
+// node_modules 在 .gitignore 内且必然存在，适合放这种同盘探针。
+function posixProbeTempDir(tag) {
+	return join(process.cwd(), "node_modules", `.tmp-pi-probe-${tag}-${process.pid}-${Date.now()}`);
+}
+
 function writeManagedInstall(home, version = "1.2.3") {
 	const agentDir = join(home, ".pi", "agent");
 	writeEntry(join(agentDir, "bin", "pi"));
@@ -260,7 +267,7 @@ test("目录扫描已命中时不启动交互式 shell；一份都没扫到才�
 	}
 
 	// 第一个 shell 就能报出路径时必须立即停下（不把每个 shell 都跑一遍）
-	const shellDir = join(tmpdir(), `pideck-pi-shell-${process.pid}-${Date.now()}`);
+	const shellDir = posixProbeTempDir("shell");
 	const shellPi = toPosixProbePath(writeEntry(join(shellDir, "pi")));
 	const fallback = createHarness({ platform: "linux", env: { SHELL: process.execPath }, shellPi: `${shellPi}\n` });
 	try {
@@ -276,7 +283,7 @@ test("目录扫描已命中时不启动交互式 shell；一份都没扫到才�
 });
 
 test("交互式登录 shell 解析出的 pi 会补进列表并标 shellDefault（即使在扫描目录之外）", async () => {
-	const customDir = join(tmpdir(), `pideck-pi-custom-${process.pid}-${Date.now()}`);
+	const customDir = posixProbeTempDir("custom");
 	// 同上：登录 shell 反查只在 posix 语义下发生，测试需显式指定平台与可用的 $SHELL；
 	// 路径用 posix 探测形式（probeLoginShellPi 只认 / 开头且存在的路径），
 	// 列表断言按同一形式比较。
