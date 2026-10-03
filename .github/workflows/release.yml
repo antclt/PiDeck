@@ -320,10 +320,10 @@ jobs:
   # libc:["glibc"] 的平台包（@img/sharp-linux-x64 等）静默过滤掉。
   pack-dsh-runtime:
     name: Pack DSH runtime (${{ matrix.os }}-${{ matrix.arch }})
-    # 依赖 build：Release 由 build 矩阵的「Upload release assets」末步创建（约 15-20 分钟），
+    # 依赖 build-release：Release 由 build 矩阵的「Upload release assets」末步创建（约 15-20 分钟），
     # 而本任务 3 分钟即完成——不等 build 会「release not found」重试 5 次后失败
     # （v0.7.8 首跑 5/6 失败、v0.7.8-beta 首跑失败二跑才过，都是这个竞态）。串行代价仅 +3 分钟。
-    needs: [resolve-version, build]
+    needs: [resolve-version, build-release]
     strategy:
       fail-fast: false
       matrix:
