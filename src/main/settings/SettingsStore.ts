@@ -275,6 +275,7 @@ Gitmoji 对应关系：
 	// 避免「默认」档位名与实际出厂外观错位（旧默认 medium 比 default 大一档）。
 	fontSize: "medium",
 	uiFontSize: null,
+	tabBarFontSize: null,
 	chatFontSize: null,
 	inputFontSize: null,
 	zoomFactor: 1,
@@ -402,6 +403,7 @@ export class SettingsStore {
 			// 同时避免 UI 下拉读到未知值时变成空白。null（跟随全局）必须保持 null。
 			this.settings.fontSize = normalizeFontSizeMode(this.settings.fontSize);
 			this.settings.uiFontSize = normalizeOptionalFontSizeMode(this.settings.uiFontSize);
+			this.settings.tabBarFontSize = normalizeOptionalFontSizeMode(this.settings.tabBarFontSize);
 			this.settings.chatFontSize = normalizeOptionalFontSizeMode(this.settings.chatFontSize);
 			this.settings.inputFontSize = normalizeOptionalFontSizeMode(this.settings.inputFontSize);
 			// 声音提醒来自旧 JSON 时可能缺字段/非法；统一归一化（旧数据自动获得默认配置）。

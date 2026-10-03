@@ -28,6 +28,7 @@ import { runPiGlobalInstall } from "../pi/piGlobalInstall";
 import type { NpmAvailabilityResult, PiInstallExecResult, PiInstallStatus, PiRuntimeNodeInstallResult, PiRuntimeNodeStatus, WebServiceStatusInfo } from "../../shared/types";
 import type { AppInfo, AppLogLevel, AppLogQuery, AppSettings, AvailableModel, ChangelogPayload, CreatePiSkillInput, ModelListReport, ModelsVerifyResult, SessionCommandResult, SessionRuntimeTarget } from "../../shared/types";
 import { invalidatePiInstallationCache, type PiLocator } from "../pi/PiLocator";
+import { validateInstallCommand } from "../pi/installCommandPolicy";
 import { resolvePiInstallGuard } from "../pi/piInstallGuard";
 import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import type { SettingsStore } from "../settings/SettingsStore";
@@ -171,6 +172,8 @@ export type SystemIpcDeps = {
 	setDshRpcLogging?: (agentId: string, enabled: boolean) => void;
 	/** DSH RPC 日志状态查询（G17）。 */
 	isDshRpcLogging?: (agentId: string) => boolean;
+	/** DSH 实时日志观看登记（面板挂载/卸载成对调用；未装配 = 无 DSH 后端）。 */
+	setDshRpcLogWatching?: (agentId: string, watching: boolean) => void;
 	/** 开发诊断采样（设置开关热启停） */
 	diagnosticsMonitor?: DiagnosticsMonitor;
 	/** 进程监控停止 agent：按 agentId 走完整会话停止链路（含 detach 推送），装配层注入 */
@@ -371,6 +374,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		isDshAgent,
 		setDshRpcLogging,
 		isDshRpcLogging,
+		setDshRpcLogWatching,
 		getMainWindow,
 		mainCopy,
 		checkForAppUpdate,
@@ -788,8 +792,16 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── Pi 安装 / NPM ────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.piExecInstall, async (_event, command: string): Promise<import("../../shared/types").PiInstallExecResult> => {
-		void appLogger.info("pi", "Executing install command", { command });
+	ipcMain.handle(ipcChannels.piExecInstall, async (_event, command: string): Promise<PiInstallExecResult> => {
+		// IPC 边界第一行职责是校验：安装命令白名单化（installCommandPolicy），
+		// 拒绝任意 shell 串直通 cmd.exe /c / sh -c（渲染层输入不可信）。
+		const check = validateInstallCommand(command);
+		if (!check.ok) {
+			void appLogger.warn("pi", "Install command rejected", { command, reason: check.reason });
+			return { success: false, exitCode: -1, stdout: "", stderr: `Command rejected: ${check.reason}` };
+		}
+		const normalized = check.command;
+		void appLogger.info("pi", "Executing install command", { command: normalized });
 		try {
 			const { execFile } = await import("node:child_process");
 			const result = await new Promise<import("../../shared/types").PiInstallExecResult>((resolve) => {
@@ -797,7 +809,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				if (isWin) {
 					const child = execFile(
 						process.env.ComSpec || "cmd.exe",
-						["/d", "/s", "/c", command],
+						["/d", "/s", "/c", normalized],
 						{
 							cwd: app.getPath("home"),
 							timeout: 120_000,
@@ -822,7 +834,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				} else {
 					execFile(
 						"/bin/sh",
-						["-c", command],
+						["-c", normalized],
 						{
 							cwd: app.getPath("home"),
 							timeout: 120_000,
@@ -1345,9 +1357,15 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	// 实时日志面板挂载/卸载登记观看状态：没有观看者时主进程跳过广播（落盘与环形缓冲不受影响），
 	// 避免重度会话里无人认领的批次每 80ms 跨一次进程克隆。
+	// G17+DSH：观看登记同样按 backend 分流——DSH 经注入的 setDshRpcLogWatching 走
+	// RpcLogLiveBroadcaster，pi 走 AgentManager 自带的实时广播。
 	ipcMain.handle(ipcChannels.rpcLogsSetWatching, async (_event, agentId?: unknown, watching?: unknown) => {
 		if (typeof agentId !== "string" || !agentId || typeof watching !== "boolean") return false;
-		agentManager.setRpcLogWatching(agentId, watching);
+		if (isDshAgent?.(agentId)) {
+			setDshRpcLogWatching?.(agentId, watching);
+		} else {
+			agentManager.setRpcLogWatching(agentId, watching);
+		}
 		return true;
 	});
 

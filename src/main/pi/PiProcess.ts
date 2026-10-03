@@ -14,6 +14,7 @@ import { appendBuiltInExtensionArgs } from "../extensions/builtInExtensions";
 import { getAppLogger } from "../logging/sharedLogger";
 import { applyPiProxyMode } from "../sessions/sessionProxyPolicy";
 import { killProcessTree } from "../git/gitProcess";
+import { parsePiVersion, piVersionAtLeast } from "../extensions/extensionVersionGate";
 
 type PiProcessSettings = Pick<
 	AppSettings,
@@ -89,13 +90,13 @@ function readCwdState(cwd: string): { exists: boolean; isDirectory: boolean } {
 	}
 }
 
-type VersionCacheEntry = { status: "pending"; promise: Promise<boolean> } | { status: "done"; ok: boolean; minorVersion: number | null };
+type VersionCacheEntry = { status: "pending"; promise: Promise<boolean> } | { status: "done"; ok: boolean; version: string | null };
 
 export class PiProcess extends EventEmitter {
 	private proc?: ChildProcessWithoutNullStreams;
 	private rpc?: PiRpcClient;
-	/** 从 --version 解析出的次版本号（第二段），用于启动诊断和信任标志兼容性判断。 */
-	private piMinorVersion: number | null = null;
+	/** 从 --version 归一化出的完整版本串（如 "0.85.0" / "1.0.0"），用于启动诊断与各版本门槛比较。 */
+	private piVersion: string | null = null;
 	/**
 	 * pi --version 只用于启动失败后的诊断，不应阻塞真正的 RPC 进程启动。
 	 * 按 command 路径缓存结果，避免连续打开多个 Agent 时重复启动 Node shim。
@@ -103,13 +104,19 @@ export class PiProcess extends EventEmitter {
 	private static readonly versionCache = new Map<string, VersionCacheEntry>();
 
 	/**
-	 * --approve/--no-approve 信任标志在 pi 0.79.0 引入。
-	 * 检查次版本号是否 >= 79（当前 pi 版本为 0.x.y，次版本号对应第二段）。
-	 * 未来 pi 升级到 1.x+ 后需要同步更新此检查。
+	 * 失效跨进程版本缓存（`pi update` 自更新后调用）：旧版本的门槛判断
+	 * （信任标志、白名单门等）对新版本毫无意义，必须重新探测。
 	 */
-	private static versionSupportsTrustFlags(minorVersion: number | null): boolean {
-		if (minorVersion === null) return false;
-		return minorVersion >= 79;
+	static invalidateVersionCache(): void {
+		PiProcess.versionCache.clear();
+	}
+
+	/**
+	 * --approve/--no-approve 信任标志在 pi 0.79.0 引入。
+	 * 完整 semver 比较：0.79+ 与 1.x+ 均支持；版本未知/探测失败时保守判不支持。
+	 */
+	private static versionSupportsTrustFlags(piVersion: string | null): boolean {
+		return piVersionAtLeast(piVersion, "0.79.0");
 	}
 
 	/**
@@ -152,8 +159,8 @@ export class PiProcess extends EventEmitter {
 		launch?: { channel: "node-direct" | "cmd-shim"; reason?: string; entry?: string };
 		/** 被桌面端 RPC 启动路径自动隔离的扩展名（如 codeisland） */
 		blockedExtensions?: string[];
-		/** 从 pi --version 解析的次版本号（第二段，如 0.99.1 → 99）；探测失败/未探时 null。 */
-		piMinorVersion: number | null;
+		/** 从 pi --version 归一化的完整版本串（如 "0.99.1" / "1.0.0"）；探测失败/未探时 null。 */
+		piVersion: string | null;
 	} | null = null;
 
 	constructor(
@@ -195,8 +202,8 @@ export class PiProcess extends EventEmitter {
 		cwdMissing?: boolean;
 		launch?: { channel: "node-direct" | "cmd-shim"; reason?: string; entry?: string };
 		blockedExtensions?: string[];
-		/** 从 pi --version 解析的次版本号（第二段，如 0.99.1 → 99）；探测失败/未探时 null。 */
-		piMinorVersion: number | null;
+		/** 从 pi --version 归一化的完整版本串（如 "0.99.1" / "1.0.0"）；探测失败/未探时 null。 */
+		piVersion: string | null;
 	}> | null {
 		return this.diagnostics;
 	}
@@ -313,12 +320,12 @@ export class PiProcess extends EventEmitter {
 			if (trustOverride) {
 				await this.ensureVersionCheck(command);
 				const cached = PiProcess.versionCache.get(command);
-				const supportsTrustFlags = cached?.status === "done" && cached.ok && PiProcess.versionSupportsTrustFlags(cached.minorVersion);
+				const supportsTrustFlags = cached?.status === "done" && cached.ok && PiProcess.versionSupportsTrustFlags(cached.version);
 				if (trustOverride === "no-approve" && !supportsTrustFlags) {
 					this.restoreParkedExtensions();
 					void getAppLogger()?.error("pi-process", "Cannot enforce denied project trust", {
 						command,
-						minorVersion: cached?.status === "done" ? cached.minorVersion : null,
+						piVersion: cached?.status === "done" ? cached.version : null,
 						versionCheck: cached?.status === "done" ? cached.ok : false,
 					});
 					throw new Error("Cannot start an untrusted project safely: pi 0.79.0 or newer is required and its version must be verifiable.");
@@ -356,7 +363,7 @@ export class PiProcess extends EventEmitter {
 			// 初始化诊断信息。信任场景的版本检测已在上方同步完成。
 			// 非信任场景仍异步触发，不阻塞 RPC 启动。
 			const cachedVersion = PiProcess.versionCache.get(command);
-			this.piMinorVersion = cachedVersion?.status === "done" ? cachedVersion.minorVersion : this.piMinorVersion;
+			this.piVersion = cachedVersion?.status === "done" ? cachedVersion.version : this.piVersion;
 			this.diagnostics = {
 				command: command,
 				args: finalArgs,
@@ -370,7 +377,7 @@ export class PiProcess extends EventEmitter {
 				versionCheckProbed: cachedVersion?.status === "done",
 				launch: invocation.windowsLaunch,
 				blockedExtensions: blockedNames.length > 0 ? blockedNames : undefined,
-				piMinorVersion: this.piMinorVersion,
+				piVersion: this.piVersion,
 			};
 			if (invocation.windowsLaunch?.channel === "cmd-shim" && invocation.windowsLaunch.reason) {
 				// 显式记录回退原因：命令行里出现 cmd.exe 时，用户与支持人员都要能立刻知道为什么没走 node 直启。
@@ -634,7 +641,7 @@ export class PiProcess extends EventEmitter {
 	private ensureVersionCheck(command: string): Promise<boolean> {
 		const cached = PiProcess.versionCache.get(command);
 		if (cached?.status === "done") {
-			this.piMinorVersion = cached.minorVersion;
+			this.piVersion = cached.version;
 			if (this.diagnostics?.command === command) {
 				this.diagnostics.versionCheck = cached.ok;
 				this.diagnostics.versionCheckProbed = true;
@@ -659,31 +666,19 @@ export class PiProcess extends EventEmitter {
 				},
 				(error, stdout) => {
 					const ok = !error;
-					const minorVersion = ok ? this.parseMinorVersion(stdout.trim()) : 0;
-					PiProcess.versionCache.set(command, { status: "done", ok, minorVersion });
-					this.piMinorVersion = minorVersion;
+					const version = ok ? parsePiVersion(stdout.trim()) : null;
+					PiProcess.versionCache.set(command, { status: "done", ok, version });
+					this.piVersion = version;
 					if (this.diagnostics?.command === command) {
 						this.diagnostics.versionCheck = ok;
 						this.diagnostics.versionCheckProbed = true;
 					}
-					this.emit("version-check", { ok, minorVersion });
+					this.emit("version-check", { ok, version });
 					resolve(ok);
 				},
 			);
 		});
 		PiProcess.versionCache.set(command, { status: "pending", promise });
 		return promise;
-	}
-
-	/**
-	 * 从 pi 的版本号字符串提取次版本号（第二段），用于信任标志兼容性判断。
-	 * 格式通常为 "0.79.4"，返回 79。
-	 */
-	private parseMinorVersion(version: string): number {
-		const match = version.match(/^(\d+)\.(\d+)/);
-		if (match) return parseInt(match[2], 10);
-		// fallback：如果只有主版本号或裸数字
-		const major = parseInt(version, 10);
-		return Number.isFinite(major) ? major : 0;
 	}
 }

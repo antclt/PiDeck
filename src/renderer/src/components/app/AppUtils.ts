@@ -1066,16 +1066,18 @@ export function getToolEditDiff(args: Record<string, unknown>): { oldText: strin
 	return { oldText, newText };
 }
 
-export function getToolNewContent(toolName: string, args: any): string | undefined {
+export function getToolNewContent(toolName: string, args: string | Record<string, unknown>): string | undefined {
 	if (!args) return undefined;
 	if (typeof args === "string" && args.trim()) {
 		try {
-			args = JSON.parse(args);
+			// JSON.parse 返回 any；这里立刻收窄为参数对象，后续按字段 typeof 判定
+			args = JSON.parse(args) as Record<string, unknown>;
 		} catch {
 			return undefined;
 		}
 	}
 	if (!toolName) return undefined;
+	if (typeof args !== "object") return undefined;
 	if (/write|create/i.test(toolName)) {
 		const a = args as Record<string, unknown>;
 		return typeof a.content === "string" ? a.content : typeof a.text === "string" ? a.text : typeof a.data === "string" ? a.data : typeof a.body === "string" ? a.body : undefined;
@@ -1087,19 +1089,20 @@ export function getToolNewContent(toolName: string, args: any): string | undefin
 	return undefined;
 }
 
-export function getToolChangedLineCount(toolName: string, args: any): number {
+export function getToolChangedLineCount(toolName: string, args: string | Record<string, unknown>): number {
 	if (typeof args === "string" && args.trim()) {
 		try {
-			args = JSON.parse(args);
+			args = JSON.parse(args) as Record<string, unknown>;
 		} catch {
 			return 0;
 		}
 	}
 	if (!toolName) return 0;
+	if (typeof args !== "object") return 0; // 空串入参：无内容可数，与原 String(undefined ?? "") 等价
 	if (/edit|patch/i.test(toolName)) {
-		const edits = Array.isArray(args?.edits) ? args.edits : undefined;
+		const edits = Array.isArray(args?.edits) ? (args.edits as Array<Record<string, unknown>>) : undefined;
 		if (edits) {
-			return edits.reduce((total: number, edit: any) => {
+			return edits.reduce((total: number, edit) => {
 				const oldLines = countTextLines(String(edit?.oldText ?? edit?.old_text ?? ""));
 				const newLines = countTextLines(String(edit?.newText ?? edit?.new_text ?? ""));
 				return total + Math.max(oldLines, newLines);

@@ -3,7 +3,7 @@ import type { ImageContent, ProjectFileAccessScope } from "../../../shared/types
 import type { EditorTabOpenMode } from "../utils/editorTabs";
 import { desktopApi as api } from "../desktopApi";
 import { t } from "../i18n";
-import { imageMimeTypeFromPath } from "../utils/composerImages";
+import { COMPOSER_IMAGE_MAX_BYTES, imageMimeTypeFromPath } from "../utils/composerImages";
 import { showNotice } from "../utils/notice";
 
 /** 图片后缀：走弹窗预览，不进文本编辑器（编辑器读二进制会显示乱码）。 */
@@ -57,8 +57,10 @@ export function useSessionFilePathOpener(props: { onPreviewImage: (image: ImageC
 			const ext = path.split(".").pop()?.toLowerCase() ?? "";
 			if (IMAGE_EXTENSIONS.has(ext)) {
 				// readBase64 返回原始 base64，不是 data URL；直接构造 ImageContent 供预览弹层使用。
+				// 传 COMPOSER_IMAGE_MAX_BYTES：预览也是完整读入内存，超限在主进程 stat 层拦截
+				// （与粘贴附件同一条防线），避免超大图片直接压垮两侧内存。
 				void api.files
-					.readBase64(path, undefined, options.scope)
+					.readBase64(path, COMPOSER_IMAGE_MAX_BYTES, options.scope)
 					.then((data) => {
 						if (!data) throw new Error("FILE_NOT_FOUND");
 						onPreviewImage({ type: "image", mimeType: imageMimeTypeFromPath(path), data });

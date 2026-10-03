@@ -1,4 +1,4 @@
-import type { ChatMessage, ImageContent, TodoItem } from "../../shared/types";
+import type { ChatMessage, DshQueuedMessage, ImageContent, TodoItem } from "../../shared/types";
 import { defaultToolDetailTranslate, formatToolDetail, truncateDetailWithMeta, type ToolDetailTranslate } from "../../shared/formatToolDetail";
 
 /**
@@ -112,6 +112,48 @@ export function parseDshTodoList(value: unknown): TodoItem[] | null | undefined 
 		items.push({ content, status });
 	}
 	return items;
+}
+
+/**
+ * DSH `inbox` projection 解析：`{ "next-turn": [...], "next-step": [...] }` 整值替换。
+ * 两个数组是必填键（官方投影 init 即写入空数组）；缺任一键视为脏帧返回 undefined
+ * （保持原值，不得把已有排队误清空）。单项非法只跳过该项（排队项之间的独立性好于
+ * todos 的整表约束：一条脏项不应掩盖其余可操作项），但 id 非字符串的项无法操作，
+ * 跳过即丢展示。空数组是合法值（排队被消费/清空）。
+ */
+export function parseDshInboxProjection(value: unknown): DshQueuedMessage[] | undefined {
+	if (value === null || typeof value !== "object") return undefined;
+	const record = value as Record<string, unknown>;
+	const nextTurn = record["next-turn"];
+	const nextStep = record["next-step"];
+	if (!Array.isArray(nextTurn) || !Array.isArray(nextStep)) return undefined;
+	const items: DshQueuedMessage[] = [];
+	for (const target of ["next-turn", "next-step"] as const) {
+		for (const raw of target === "next-turn" ? nextTurn : nextStep) {
+			if (!isRecord(raw)) continue;
+			const id = raw.id;
+			if (typeof id !== "string" || id === "") continue;
+			items.push({ id, target, text: inboxMessageText(raw.content) });
+		}
+	}
+	return items;
+}
+
+/** inbox 项展示文本：text 块拼接，非文本块（图片等）计为 [附件] 后缀。 */
+function inboxMessageText(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	let attachments = 0;
+	for (const block of content) {
+		if (!isRecord(block)) continue;
+		if (block.type === "text" && typeof block.text === "string") {
+			parts.push(block.text);
+		} else {
+			attachments += 1;
+		}
+	}
+	const text = parts.join(" ").trim();
+	return attachments > 0 ? (text ? `${text} [+${attachments}]` : ` [+${attachments}]`.trim()) : text;
 }
 
 /** 按类型拆分内容块：text 与 reasoning 分开提取（两者不能混在同一条正文里）。 */

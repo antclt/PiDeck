@@ -471,9 +471,15 @@ const api = {
 				ok: boolean;
 				error?: string;
 			}>,
-		/** 从本地导入 runtime（.tgz 归档或已解压目录；主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
+		/** 从本地导入 runtime 归档（.tgz；主进程弹文件对话框；离线/镜像不可达时的兜底）。 */
 		importDshRuntimeFile: () =>
 			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocal) as Promise<{
+				ok: boolean;
+				error?: string;
+			}>,
+		/** 从本地导入「已解压」的 runtime 目录（主进程弹目录对话框；与归档入口分开，见 shared/ipc.ts）。 */
+		importDshRuntimeDir: () =>
+			ipcRenderer.invoke(ipcChannels.dshRuntimeInstallLocalDir) as Promise<{
 				ok: boolean;
 				error?: string;
 			}>,
@@ -573,6 +579,8 @@ const api = {
 		createDshGoal: (agentId: string, objective: string, maxGoalRounds?: number) => ipcRenderer.invoke(ipcChannels.dshCreateGoal, agentId, objective, maxGoalRounds) as Promise<void>,
 		/** DSH 目标操作（pause/resume/complete/clear）。 */
 		runDshGoalAction: (agentId: string, action: "pause" | "resume" | "complete" | "clear") => ipcRenderer.invoke(ipcChannels.dshGoalAction, agentId, action) as Promise<void>,
+		/** DSH 取消 host 侧排队消息（session/updateQueue remove；幂等：已消费也成功）。 */
+		cancelDshQueuedMessage: (agentId: string, itemId: string) => ipcRenderer.invoke(ipcChannels.dshCancelQueuedMessage, agentId, itemId) as Promise<void>,
 		/** DSH 子代理列表（subagent.list）。 */
 		listDshSubagents: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.dshListSubagents, agentId) as Promise<
@@ -1091,7 +1099,9 @@ const api = {
 		onMcpLoginUrl: (callback: (payload: { server: string; scope?: import("../shared/types/mcp").McpConfigScope; operationId?: string; url: string }) => void) => {
 			const listener = (_event: Electron.IpcRendererEvent, payload: { server: string; scope?: import("../shared/types/mcp").McpConfigScope; operationId?: string; url: string }) => callback(payload);
 			ipcRenderer.on(ipcChannels.mcpLoginUrl, listener);
-			return () => ipcRenderer.removeListener(ipcChannels.mcpLoginUrl, listener);
+			return () => {
+				ipcRenderer.removeListener(ipcChannels.mcpLoginUrl, listener);
+			};
 		},
 		// 只读：pi 全局配置目录（源文件编辑页标注实际路径用）。
 		getConfigDir: () => ipcRenderer.invoke(ipcChannels.configGetDir) as Promise<string>,

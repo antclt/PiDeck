@@ -25,7 +25,7 @@ function collect(manager, typed) {
 	const off = manager.onOutput((channel, payload) => {
 		if (channel === "agents:ui-request") received.push(payload);
 	});
-	manager.handleUIRequest("agent-1", typed);
+	manager.uiGate.handleUIRequest("agent-1", typed);
 	off();
 	return received;
 }

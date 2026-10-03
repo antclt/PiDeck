@@ -22,10 +22,20 @@ export function SettingsSection(props: {
 	divided?: boolean;
 	/** 二级内容是否入淡色框（默认 true；图表类内容传 false 直接铺开） */
 	boxed?: boolean;
+	/** 标题行右侧动作（如「全部展开」）：由分区统一排版，避免各页自己拼 flex 头部长出第二套视觉 */
+	action?: ReactNode;
 }) {
+	const heading = <SectionHeading className="settings-section-header pb-2" titleClassName="text-body font-bold text-foreground" title={props.title} description={props.description} />;
 	return (
 		<section id={props.id} className={props.divided ? "mt-2 border-t border-border-subtle pt-4" : "mt-4 first:mt-0"}>
-			<SectionHeading className="settings-section-header pb-2" titleClassName="text-body font-bold text-foreground" title={props.title} description={props.description} />
+			{props.action != null ? (
+				<div className="flex items-start justify-between gap-2">
+					{heading}
+					<div className="shrink-0">{props.action}</div>
+				</div>
+			) : (
+				heading
+			)}
 			{props.children != null ? props.boxed === false ? <div className="px-0.5 pb-1">{props.children}</div> : <SettingBox>{props.children}</SettingBox> : null}
 		</section>
 	);

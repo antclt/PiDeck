@@ -16,7 +16,7 @@ export type DshAgentPresetIdentity = {
 /** 4 个随附预设 → i18n key 映射（与 dsh-web 的 BUILT_IN_PRESET_KEYS 同源）。 */
 const BUILTIN_PRESET_KEYS: Record<string, { name: TranslationKey; description: TranslationKey }> = {
 	standard: { name: "config.dsh.presetStandardName", description: "config.dsh.presetStandardDesc" },
-	ptc: { name: "config.dsh.presetCodeName", description: "config.dsh.presetCodeDesc" },
+	ptc: { name: "config.dsh.presetPtcName", description: "config.dsh.presetPtcDesc" },
 	minimal: { name: "config.dsh.presetMinimalName", description: "config.dsh.presetMinimalDesc" },
 	cordis: { name: "config.dsh.presetCordisName", description: "config.dsh.presetCordisDesc" },
 };

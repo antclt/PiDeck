@@ -100,6 +100,19 @@ export function replyActionsForSignals(rules: readonly ReplyActionRule[], signal
 	return texts;
 }
 
+/**
+ * 同步内置规则：text 相同的条目触发条件跟内置走（出厂优化后老用户点「同步内置」
+ * 才能拿到新 patterns——旧版只追加缺项，同文案条目的 triggers 永远停在首次 seed）；
+ * 内置没有的条目原样保留，内置新增的追加到末尾，顺序以个人清单为准。
+ */
+export function mergeReplyActionRules(current: readonly ReplyActionRule[], defaults: readonly ReplyActionRule[]): ReplyActionRule[] {
+	const byText = new Map(defaults.map((rule) => [rule.text, rule]));
+	const synced = current.map((rule) => byText.get(rule.text) ?? rule);
+	const known = new Set(current.map((rule) => rule.text));
+	const additions = defaults.filter((rule) => !known.has(rule.text));
+	return [...synced, ...additions];
+}
+
 /** 便捷入口：消息 → 建议文案（SessionReplyActions 直接用）。 */
 export function replyActionTextsForMessages(rules: readonly ReplyActionRule[], messages: readonly ChatMessage[]): string[] {
 	return replyActionsForSignals(rules, replySignalsForMessages(messages));

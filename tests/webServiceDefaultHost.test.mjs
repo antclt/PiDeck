@@ -4,7 +4,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // 默认值三处来源 + manager 兜底都必须是 0.0.0.0，确保任意路径默认对外可访问。
-const DEFAULT_HOST_SOURCES = ["src/main/settings/SettingsStore.ts", "src/renderer/src/App.tsx", "src/renderer/src/previewApi.ts"];
+const DEFAULT_HOST_SOURCES = ["src/main/settings/SettingsStore.ts", "src/shared/types/settings.ts", "src/renderer/src/previewApi.ts"];
 
 test("web service default host is 0.0.0.0 in every default-settings site", () => {
 	for (const file of DEFAULT_HOST_SOURCES) {

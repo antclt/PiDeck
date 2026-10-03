@@ -338,8 +338,9 @@ export function buildKeyboardInput(vk: number, scan: number, flags: number): Rec
 export function sendInputs(inputs: Record<string, number>[]): number {
 	if (inputs.length === 0) return 0;
 	// koffi 3.x: pass the JS array directly for call-by-reference arrays.
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	return SendInput(inputs.length, inputs as any, koffiLazy.sizeof(INPUT));
+	// koffi 的 call-by-value 数组参数在类型层是 opaque 指针（第三方 FFI 边界），
+	// 类型系统无法表达，这里收窄为该签名要求的入参形态而非 any 透传。
+	return SendInput(inputs.length, inputs as unknown as Parameters<typeof SendInput>[1], koffiLazy.sizeof(INPUT));
 }
 
 /**

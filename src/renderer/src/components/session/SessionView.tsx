@@ -2,7 +2,7 @@ import { useAtomValue } from "jotai";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from "react";
 import { type GroupImperativeHandle, type PanelImperativeHandle } from "react-resizable-panels";
 import { ResizablePanel, ResizablePanelGroup } from "../ui-shadcn/resizable";
-import type { GitBranchInfo, ImageContent, TerminalTarget } from "../../../../shared/types";
+import type { ChatMessage, GitBranchInfo, ImageContent, TerminalTarget } from "../../../../shared/types";
 import type { SessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { isLanWeb, desktopApi as api } from "../../desktopApi";
 import { SessionHeader } from "./SessionHeader";
@@ -14,6 +14,7 @@ import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
+import { SessionQueuedMessagesStrip } from "./SessionQueuedMessagesStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
 import { useReplyActions } from "../../hooks/useReplyActions";
@@ -66,11 +67,11 @@ export type SessionViewProps = {
 	onPreviewImage: (image: ImageContent) => void;
 	onOpenFile?: (path: string) => void;
 	onDiffFile?: (path: string) => void;
-	onResendUserMessage?: (message: any) => void;
+	onResendUserMessage?: (message: ChatMessage) => void;
 	onEditMessage?: (messageId: string, newText: string, entryId?: string) => void;
 	onDeleteMessage?: (messageId: string, entryId?: string) => void;
-	onForkMessage?: (message: any) => void;
-	onRewindToMessage?: (message: any) => void;
+	onForkMessage?: (message: ChatMessage) => void;
+	onRewindToMessage?: (message: ChatMessage) => void;
 	forkingMessageId?: string | null;
 	onToast: (message: string) => void;
 	onQuickPrompt?: (prompt: string) => void;
@@ -351,6 +352,7 @@ export function SessionView({
 								queuePanel={queuePanel}
 								widgets={
 									<>
+										<SessionQueuedMessagesStrip sessionId={sessionId} />
 										<SessionTodoStrip sessionId={sessionId} />
 										<SessionFilesStrip sessionId={sessionId} run={latestAgentRun} onOpenFile={onOpenFile} onDiffFile={onDiffFile} />
 										<SessionSubagentsStrip sessionId={sessionId} onOpenChildSession={onOpenBranchSession} />

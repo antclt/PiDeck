@@ -192,6 +192,7 @@ let previewSettings: AppSettings = {
 
 	fontSize: "medium",
 	uiFontSize: null,
+	tabBarFontSize: null,
 	chatFontSize: null,
 	inputFontSize: null,
 	zoomFactor: 1,
@@ -216,7 +217,8 @@ let previewSettings: AppSettings = {
 };
 
 export function createPreviewApi(): PiDesktopApi {
-	const noop = (() => () => undefined) as any;
+	// noop 是「订阅类槽位」的通用占位：调用它返回退订函数；never[] 入参使其可赋给任意回调签名
+	const noop = (() => () => undefined) as unknown as (...args: unknown[]) => () => void;
 	const previewImportKinds = new Map<string, ResourceImportKind>();
 	const clipboardStub: PiDesktopApi["clipboard"] = {
 		// preview 模式无真实剪贴板；浏览器下 navigator.clipboard 为异步 API，
@@ -527,6 +529,7 @@ export function createPreviewApi(): PiDesktopApi {
 			searchDshSessions: async () => [],
 			createDshGoal: async () => undefined,
 			runDshGoalAction: async () => undefined,
+			cancelDshQueuedMessage: async () => undefined,
 			listDshSubagents: async () => [],
 			readDshSubagentHistory: async () => ({ messages: [], hasMore: false }),
 			listSessionSubagents: async () => [],
@@ -727,6 +730,7 @@ export function createPreviewApi(): PiDesktopApi {
 			onDshRuntimeStatusChanged: () => () => {},
 			installDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
 			importDshRuntimeFile: async () => ({ ok: false, error: "unavailable in preview" }),
+			importDshRuntimeDir: async () => ({ ok: false, error: "unavailable in preview" }),
 			uninstallDshRuntime: async () => ({ ok: false, error: "unavailable in preview" }),
 			onDshRuntimeInstallProgress: () => () => {},
 			describeDshSettings: async () => ({ writable: false, hasDocument: false, namespaces: [] }),
@@ -1472,7 +1476,7 @@ export function createPreviewApi(): PiDesktopApi {
 			mcpListStatus: async () => ({ servers: [], errors: [] }),
 			mcpLogin: async () => ({ ok: false, output: "preview" }),
 			mcpLogout: async () => ({ ok: false, output: "preview" }),
-			onMcpLoginUrl: noop,
+			onMcpLoginUrl: () => () => undefined,
 			// 预览模式无真实 pi 配置目录，返回占位（源文件页不显示路径行）。
 			getConfigDir: async () => "",
 			// 预览模式没有真实 settings.json：返回空摘要，开关操作直接失败。

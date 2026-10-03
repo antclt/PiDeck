@@ -279,7 +279,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 					onChange={(checked) => {
 						props.setPerAreaFontSize(checked);
 						if (!checked) {
-							updateDraft({ uiFontSize: null, chatFontSize: null, inputFontSize: null });
+							updateDraft({ uiFontSize: null, tabBarFontSize: null, chatFontSize: null, inputFontSize: null });
 						}
 					}}
 				/>
@@ -295,6 +295,29 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 							alignEnd={false}
 						>
 							<Select value={draft.uiFontSize ?? draft.fontSize} onValueChange={(value) => updateDraft({ uiFontSize: value as AppSettings["uiFontSize"] })}>
+								<SelectTrigger className="w-full">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{fontSizeOptions.map((option) => (
+										<SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+											{option.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</SettingRow>
+						<SettingRow
+							title={
+								<>
+									<span>{t("settings.tabBarFontSize")}</span>
+									<DirtyMarker dirty={isDirty("tabBarFontSize")} label={t("settings.tabBarFontSize")} />
+								</>
+							}
+							alignEnd={false}
+						>
+							{/* 未单独设置时跟随界面字号（与 App.tsx 的 data-tab-font-size 回落一致），下拉显示实际生效档位 */}
+							<Select value={draft.tabBarFontSize ?? draft.uiFontSize ?? draft.fontSize} onValueChange={(value) => updateDraft({ tabBarFontSize: value as AppSettings["tabBarFontSize"] })}>
 								<SelectTrigger className="w-full">
 									<SelectValue />
 								</SelectTrigger>

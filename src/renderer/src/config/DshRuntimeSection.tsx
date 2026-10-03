@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { AlertCircle, Download, FolderOpen, LoaderCircle, Trash2 } from "lucide-react";
+import { AlertCircle, Download, FileArchive, FolderOpen, LoaderCircle, Trash2 } from "lucide-react";
 import { t } from "../i18n";
 import { Button } from "../components/ui-shadcn/button";
 import { ConfirmDialog } from "../components/ui-shadcn/ConfirmDialog";
@@ -40,17 +40,23 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 	const [uninstalling, setUninstalling] = useState(false);
 
 	const run = useCallback(
-		async (kind: "online" | "local") => {
+		async (kind: "online" | "archive" | "dir") => {
 			// 先落乐观进度：主进程首个 install-progress 推送到达前不让按钮无反馈。
 			setProgress({ phase: kind === "online" ? "downloading" : "verifying", percent: 0, error: undefined });
-			const result = kind === "online" ? await desktopApi.sessions.installDshRuntime() : await desktopApi.sessions.importDshRuntimeFile();
-			// 失败时错误文案通常已由 install-progress 推送（phase=error）；这里兜底
-			// 未推送的场景（如文件对话框取消后无事件），并保证 atom 与主进程结果一致。
-			// 用户取消不是错误，静默回到初始态即可。
-			if (!result.ok && result.error !== "cancelled") {
-				setProgress({ phase: "error", percent: 100, error: result.error ?? "unknown error" });
-			} else if (!result.ok) {
-				setProgress({ phase: null, percent: 0, error: undefined });
+			try {
+				const result = kind === "online" ? await desktopApi.sessions.installDshRuntime() : kind === "archive" ? await desktopApi.sessions.importDshRuntimeFile() : await desktopApi.sessions.importDshRuntimeDir();
+				// 失败时错误文案通常已由 install-progress 推送（phase=error）；这里兜底
+				// 未推送的场景（如文件对话框取消后无事件），并保证 atom 与主进程结果一致。
+				// 用户取消不是错误，静默回到初始态即可。
+				if (!result.ok && result.error !== "cancelled") {
+					setProgress({ phase: "error", percent: 100, error: result.error ?? "unknown error" });
+				} else if (!result.ok) {
+					setProgress({ phase: null, percent: 0, error: undefined });
+				}
+			} catch (error) {
+				// IPC reject（主进程对话框异常等）必须落回错误态：否则乐观进度永久转圈，
+				// 用户看到的正是「点了没反应」。
+				setProgress({ phase: "error", percent: 100, error: error instanceof Error ? error.message : String(error) });
 			}
 		},
 		[setProgress],
@@ -63,6 +69,9 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 			const result = await desktopApi.sessions.uninstallDshRuntime();
 			if (result.ok) showNotice(t("settings.dshRuntimeUninstalled"), 3000);
 			else showNotice(result.error ?? t("settings.dshRuntimeUninstall"), 4000, "error");
+		} catch (error) {
+			// IPC reject 也要有反馈，否则转圈停下后用户不知道发生了什么。
+			showNotice(error instanceof Error ? error.message : String(error), 4000, "error");
 		} finally {
 			setUninstalling(false);
 		}
@@ -105,10 +114,15 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 								{t("dsh.runtime.reinstall")}
 							</Button>
 						) : null}
-						{/* 手动导入：镜像不可达 / 离线场景的兜底，对话框由主进程弹出。 */}
-						<Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={() => void run("local")}>
+						{/* 手动导入：镜像不可达 / 离线场景的兜底，对话框由主进程弹出。
+							归档与已解压目录是两个入口：Windows 上单框同时允许选文件和目录会选不到 .tgz。 */}
+						<Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={() => void run("archive")}>
+							<FileArchive className="size-3.5" />
+							{t("dsh.runtime.importLocalArchive")}
+						</Button>
+						<Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={() => void run("dir")}>
 							<FolderOpen className="size-3.5" />
-							{t("dsh.runtime.importLocal")}
+							{t("dsh.runtime.importLocalDir")}
 						</Button>
 						{status.source === "managed" ? (
 							<Button size="sm" variant="outline" className="gap-1.5 text-destructive" disabled={busy} onClick={() => setUninstallOpen(true)}>
@@ -176,11 +190,18 @@ export function DshRuntimeSection({ status, onOpenFolder }: { status: DshRuntime
 								{t(broken || status.state === "outdated" ? "dsh.runtime.reinstall" : "dsh.runtime.install")}
 							</Button>
 						) : null}
-						{/* 手动导入：镜像不可达 / 离线场景的兜底；dev 模式同样隐藏（不提供安装入口）。 */}
+						{/* 手动导入：镜像不可达 / 离线场景的兜底；归档与已解压目录分两框
+							（Windows 单框 openFile+openDirectory 会选不到 .tgz）。 */}
 						{status.installEnabled !== false ? (
-							<Button size="sm" variant="outline" className="gap-1.5" onClick={() => void run("local")}>
+							<Button size="sm" variant="outline" className="gap-1.5" onClick={() => void run("archive")}>
+								<FileArchive className="size-3.5" />
+								{t("dsh.runtime.importLocalArchive")}
+							</Button>
+						) : null}
+						{status.installEnabled !== false ? (
+							<Button size="sm" variant="outline" className="gap-1.5" onClick={() => void run("dir")}>
 								<FolderOpen className="size-3.5" />
-								{t("dsh.runtime.importLocal")}
+								{t("dsh.runtime.importLocalDir")}
 							</Button>
 						) : null}
 					</div>

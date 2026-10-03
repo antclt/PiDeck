@@ -19,10 +19,12 @@ export const DEFAULT_GIT_TIMEOUT_MS = 30_000;
 export function killProcessTree(childPid: number, platform: NodeJS.Platform = process.platform): void {
 	if (platform === "win32") {
 		// /T 递归杀树，/F 强制；忽略 taskkill 自身退出码（目标进程可能已退出）。
-		spawn("taskkill", ["/pid", String(childPid), "/T", "/F"], {
+		const killer = spawn("taskkill", ["/pid", String(childPid), "/T", "/F"], {
 			windowsHide: true,
 			stdio: "ignore",
 		});
+		// fire-and-forget 也必须有 error 兜底（精简环境可能没有 taskkill），否则未处理 error 事件炸主进程。
+		killer.once("error", () => undefined);
 	} else {
 		try {
 			process.kill(-childPid, "SIGKILL");

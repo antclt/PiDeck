@@ -345,13 +345,16 @@ export class OpenCodeSessionImporter {
 		return value && typeof value === "object" ? (value as Record<string, any>) : {};
 	}
 
-	private toUsage(tokens: any) {
+	private toUsage(tokens: unknown) {
+		// 用量块来自 OpenCode 会话 JSON，字段名随版本漂移；这里统一收窄后取值，缺省落 0
+		const record = tokens && typeof tokens === "object" ? (tokens as Record<string, unknown>) : {};
+		const cache = record.cache && typeof record.cache === "object" ? (record.cache as Record<string, unknown>) : {};
 		return {
-			input: Number(tokens?.input ?? 0),
-			output: Number(tokens?.output ?? 0),
-			cacheRead: Number(tokens?.cache?.read ?? 0),
-			cacheWrite: Number(tokens?.cache?.write ?? 0),
-			totalTokens: Number(tokens?.total ?? 0),
+			input: Number(record.input ?? 0),
+			output: Number(record.output ?? 0),
+			cacheRead: Number(cache.read ?? 0),
+			cacheWrite: Number(cache.write ?? 0),
+			totalTokens: Number(record.total ?? 0),
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		};
 	}
@@ -390,7 +393,7 @@ export class OpenCodeSessionImporter {
 
 	private extractPiText(content: unknown[]) {
 		return content
-			.map((item: any) => item?.text ?? item?.thinking ?? item?.name ?? "")
+			.map((item) => (typeof item === "string" ? item : item && typeof item === "object" ? String((item as Record<string, unknown>).text ?? (item as Record<string, unknown>).thinking ?? (item as Record<string, unknown>).name ?? "") : ""))
 			.filter(Boolean)
 			.join(" ");
 	}

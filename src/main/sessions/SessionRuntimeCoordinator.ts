@@ -1868,8 +1868,18 @@ export class SessionRuntimeCoordinator {
 				wslDistro: entry.wslDistro,
 				entryId,
 			});
-			// 写文件期间若被重新激活，磁盘已改但内存是旧树——拒绝让调用方感知竞态。
-			this.requireStoppedForFileMutation(sessionId);
+			// 写文件期间若被重新激活：磁盘已改且后续激活的 pi 读的就是改后文件（编辑
+			// 实际已生效），此时报 BUSY 会让用户重试造成二次编辑。改为记录竞态日志并
+			// 按成功返回（文件状态是唯一事实源）。
+			try {
+				this.requireStoppedForFileMutation(sessionId);
+			} catch (busyError) {
+				void this.logger?.warn("session-runtime", "Session file mutated while runtime re-activated; mutation already persisted", {
+					sessionId,
+					messageId,
+					operation,
+				});
+			}
 			void this.logger?.info("session-runtime", "Catalog session message mutated", {
 				sessionId,
 				messageId,

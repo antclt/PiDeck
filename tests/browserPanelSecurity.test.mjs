@@ -36,6 +36,13 @@ test("BrowserPanel uses a fixed persistent partition without popup or file acces
 	assert.doesNotMatch(rendererTypes, /allowpopups/i);
 });
 
+test("BrowserPanel starts on a blank page and Home returns to blank", () => {
+	assert.match(browserPanel, /const DEFAULT_HOME = "about:blank"/);
+	assert.match(browserPanel, /src=\{initialTab\.url\}/);
+	assert.match(browserPanel, /onClick=\{\(\) => loadUrl\(DEFAULT_HOME\)\}/);
+	assert.doesNotMatch(browserPanel, /const DEFAULT_HOME = "https:\/\/pideck\.caoayu\.top\//);
+});
+
 test("BrowserPanel navigation goes through the module-state pending-URL poll loop", () => {
 	assert.match(browserPanel, /export function navigateTo\(url: string\)/);
 	assert.match(browserPanel, /pendingNavigateUrl = url/);

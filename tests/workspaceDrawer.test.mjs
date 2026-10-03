@@ -150,7 +150,9 @@ test("drawer host renders an injected activity rail while open", () => {
 	assert.match(shell, /drawerRail\?: ReactNode/);
 	assert.match(shell, /rail=\{drawerRail\}/);
 	// App：右侧栏开关只做开/关（不再半折叠）；rail 切换语义仍由 handleToolDrawerAction 承载
-	assert.match(app, /handleToolDrawerAction\s*=\s*useCallback\(\s*\(panel: WorkspaceDrawerPanel\)\s*=>/);
+	//（#9 拆分后收口在 useSessionFileLinks；App 只接线）
+	const fileLinks = readFileSync("src/renderer/src/hooks/workspace/useSessionFileLinks.ts", "utf8");
+	assert.match(fileLinks, /handleToolDrawerAction\s*=\s*useCallback\(\s*\(panel: WorkspaceDrawerPanel\)\s*=>/);
 	assert.match(app, /const toggleRightDrawer = useCallback\(\(\) => \{\n\s*if \(workspace\.drawer\) \{\n\s*workspace\.closeDrawer\(\);/);
 });
 

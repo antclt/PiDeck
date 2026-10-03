@@ -1,4 +1,4 @@
-import type { AgentBackend, AgentGatewayCapability, AgentRuntimeState, AgentTab, DshPermissionPreset, AvailableModel, ChatMessage, CreateAgentInput, DshSkillView, ImageContent, PiCommand, Project, SendPromptInput, SendPromptResult, SessionUiResponseInput, TodoItem } from "../../shared/types";
+import type { AgentBackend, AgentGatewayCapability, AgentRuntimeState, AgentTab, DshPermissionPreset, AvailableModel, ChatMessage, CreateAgentInput, DshQueuedMessage, DshSkillView, ImageContent, PiCommand, Project, SendPromptInput, SendPromptResult, SessionUiResponseInput, TodoItem } from "../../shared/types";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import type { SessionProcessEvent } from "../../shared/types/trajectory";
 // DSH 会话 id 品牌类型（零运行时成本，仅类型擦除）
@@ -11,7 +11,7 @@ import type { DshEnvelope, DshHistoryEntry, DshHistoryPage } from "./dshRemoteCl
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
 import type { DshHost } from "./DshHost";
 import { renderDshSessionHtml, sanitizeExportFileName } from "./dshSessionHtmlExport";
-import { projectDshEvent, parseDshTodoList, type DshProjection } from "./dshEventProjector";
+import { projectDshEvent, parseDshTodoList, parseDshInboxProjection, type DshProjection } from "./dshEventProjector";
 import {
 	cacheHitPercentOf,
 	collectDshProcessEvent,
@@ -32,8 +32,10 @@ import { resolveDshModelDirectory, toDshAvailableModels } from "./dshModels";
 import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshApprovalFrame, parseDshQuestionFrame, questionUiRequest, type DshApprovalFrame, type DshQuestionFrame } from "./dshApprovalBridge";
 import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, normalizeDshTurnPageSize, planDshHistoryRounds, trimToOldestTurnStart } from "./dshHistoryPagePlan";
 import { isContextOverflowError } from "../../shared/contextOverflow";
+import type { RpcLogEntry } from "../../shared/types/rpcLog";
+import type { RpcLogLiveSink } from "../logging/RpcLogLiveBroadcaster";
 
-const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats", "todos"];
+const DSH_PROJECTION_KEYS = ["contextPressure", "contextBreakdown", "tokenUsage", "sessionStats", "todos", "inbox"];
 
 /**
  * DSH 后端网关：实现 SessionAgentGateway，把 DSH host（DshHost）的会话/事件
@@ -121,12 +123,15 @@ export class DshAgentManager implements SessionAgentGateway {
 		 *  装配层据此写回 catalog 并推送侧栏刷新——DSH 会话没有 pi 会话文件，
 		 *  标题只存在于 host（dsh-session-title 的 session/title 事件 fold）。 */
 		private readonly onTitleChanged?: (dshSessionId: string, title: string) => void,
-		/** RPC 日志服务（G17：DSH 领域调用记录，与 pi 共用 RpcLogger；未注入时静默）。 */
-		private readonly rpcLogger?: { push(entry: import("../../shared/types/rpcLog").RpcLogEntry): void },
+		/** RPC 日志服务（G17：DSH 领域调用记录，与 pi 共用 RpcLogger；未注入时静默）。
+		 *  push 返回截断后的实时副本（与 getLive 环形缓冲同形态），供实时广播复用。 */
+		private readonly rpcLogger?: { push(entry: RpcLogEntry): RpcLogEntry },
 		/** 会话 HTML 导出目录（G10：应用数据目录内，装配层注入；空串 = 导出不可用）。 */
 		private readonly getExportDir: () => string = () => "",
 		/** 新会话无标题时的兜底标题（i18n；缺省保留历史文案「DSH 会话」）。 */
 		private readonly getUntitledTitle: () => string = () => "DSH 会话",
+		/** 实时 RPC 日志广播（RpcLogLiveBroadcaster；未注入时实时流不可用但记录/落盘不受影响）。 */
+		private readonly rpcLogLive?: RpcLogLiveSink,
 	) {
 		// E4：host 崩溃自动重启完成后恢复所有 runtime（host 内存已丢失：流式/工具/
 		// 压缩状态停在崩溃前，mux 重连后新 host 没有已订阅会话，事件不会再推）。
@@ -148,10 +153,16 @@ export class DshAgentManager implements SessionAgentGateway {
 		return this.rpcLoggingAgents.has(agentId);
 	}
 
-	/** 记录一条 DSH 领域调用日志（仅开关开启时；data 透传 RpcLogger 的截断/脱敏）。 */
+	/** 登记「实时日志面板是否在看」（rpcLogsSetWatching；面板挂载/卸载成对调用，只影响广播）。 */
+	setRpcLogWatching(agentId: string, watching: boolean): void {
+		this.rpcLogLive?.setWatching(agentId, watching);
+	}
+
+	/** 记录一条 DSH 领域调用日志（仅开关开启时；data 透传 RpcLogger 的截断/脱敏）。
+	 *  落盘与实时广播共用同一次 push 的截断结果，保证面板实时流与环形缓冲/文件内容一致。 */
 	private logRpc(agentId: string, direction: "send" | "recv", summary: string, data?: unknown): void {
 		if (!this.rpcLoggingAgents.has(agentId)) return;
-		this.rpcLogger?.push({
+		const liveEntry = this.rpcLogger?.push({
 			id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 			agentId,
 			direction,
@@ -159,6 +170,7 @@ export class DshAgentManager implements SessionAgentGateway {
 			time: Date.now(),
 			...(data !== undefined ? { data } : {}),
 		});
+		if (liveEntry) this.rpcLogLive?.enqueue(liveEntry);
 	}
 
 	// ── 网关身份与订阅 ─────────────────────────────────────────────────────────
@@ -214,7 +226,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (input.dshSessionId) {
 			const listed = await client.sessionsList();
 			if (listed.result.ok) {
-				const existing = listed.result.value.items.find((item: any) => item.sessionId === input.dshSessionId);
+				const existing = listed.result.value.items?.find((item) => item.sessionId === input.dshSessionId);
 				if (existing) {
 					sessionId = input.dshSessionId;
 					attached = true;
@@ -481,7 +493,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		let sessionId = old.tab.sessionId;
 		if (sessionId) {
 			const listed = await client.sessionsList().catch(() => null);
-			const exists = listed?.result.ok === true && listed.result.value.items.some((item: any) => item.sessionId === sessionId);
+			const exists = listed?.result.ok === true && (listed.result.value.items ?? []).some((item) => item.sessionId === sessionId);
 			if (!exists) sessionId = undefined;
 		}
 		if (!sessionId) {
@@ -567,6 +579,9 @@ export class DshAgentManager implements SessionAgentGateway {
 		this.runtimes.delete(agentId);
 		// 本会话的 follow 泵随之终止（避免已删会话空转重连）。
 		this.stopFollowPump(agentId);
+		// 丢弃该会话的实时日志聚合缓冲（防止残留条目泄给下一次 attach）；观看登记刻意保留——
+		// DSH agentId（dsh:<sessionId>）跨 stop/attach 稳定，面板可能跨重启周期保持挂载。
+		this.rpcLogLive?.dropPending(agentId);
 		// 共享 mux 只在最后一个 runtime 离开时关掉，避免停当前会话把其他会话的流一起掐掉。
 		if (this.runtimes.size === 0) this.stopSharedMux();
 		this.emit(ipcChannels.agentsState, this.list());
@@ -622,7 +637,7 @@ export class DshAgentManager implements SessionAgentGateway {
 	}
 
 	/**
-	 * DSH 会话历史分页统一入口（0.1.5 契约收口，见 docs/dsh-0.1.5-typert-migration.md）。
+	 * DSH 会话历史分页统一入口（契约收口，见 docs/dsh-remote-contract.md）。
 	 *
 	 * `session/page` 的 throughSeq 是「包含式日志切点」，必须 ≤ 会话当前 cursor；
 	 * 旧实现固定送 MAX_SAFE_INTEGER，恒被 host 拒绝（gateway/bad-request）——这就是
@@ -875,6 +890,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			goal: runtime.goal,
 			// 当前待办计划（官方 todos projection / todo/write 快照；渲染层 todo 条数据源）
 			todos: runtime.todos,
+			// host 侧排队消息（inbox 投影；渲染层排队提示条数据源）
+			queuedMessages: runtime.queuedMessages,
 			// 上下文占用（host contextPressure/contextBreakdown 投影；缺失时消息估算兜底）
 			contextTokens: typeof contextTokens === "number" ? contextTokens : undefined,
 			contextWindow: typeof contextWindow === "number" ? contextWindow : undefined,
@@ -1217,6 +1234,27 @@ export class DshAgentManager implements SessionAgentGateway {
 		}
 	}
 
+	/**
+	 * 取消 DSH host 侧排队消息（`session/updateQueue` 的 remove）。
+	 * 不 waitForIdle：排队项的存在意义就是运行中可撤回，等 idle 反而错过窗口；
+	 * 与 host 消费赛跑时对 queue-item-not-found 幂等成功（目标已不在队列，结果等价）。
+	 */
+	async cancelQueuedMessage(agentId: string, itemId: string): Promise<void> {
+		if (typeof itemId !== "string" || itemId === "") throw new Error("Queue item id is required");
+		const runtime = this.runtime(agentId);
+		const client = this.requireClient();
+		const result = await client.sessionUpdateQueue({
+			sessionId: runtime.sessionId,
+			itemId,
+			action: { kind: "remove" },
+		});
+		if (!result.result.ok) {
+			const error = result.result.error as { code?: unknown } | undefined;
+			if (error && typeof error === "object" && error.code === "session/queue-item-not-found") return;
+			throw new Error(`dsh updateQueue failed: ${JSON.stringify(result.result.error)}`);
+		}
+	}
+
 	/** 子代理列表（G6）：subagent.list 直接子代目录（不激活双方）。 */
 	async listSubagents(agentId: string): Promise<
 		Array<{
@@ -1289,7 +1327,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		const client = this.requireClient();
 		const listed = await client.skillsList({ sessionId: runtime.sessionId });
 		if (!listed.result.ok) return [];
-		return (listed.result.value.skills ?? []).map((skill: any) => ({
+		return (listed.result.value.skills ?? []).map((skill) => ({
 			name: String(skill.name),
 			description: String(skill.description),
 			...(skill.whenToUse !== undefined && skill.whenToUse !== null ? { whenToUse: String(skill.whenToUse) } : {}),
@@ -1842,6 +1880,17 @@ export class DshAgentManager implements SessionAgentGateway {
 			const parsed = parseDshTodoList(payload.value);
 			if (parsed !== undefined) {
 				runtime.todos = parsed;
+				this.emitRuntimeState(runtime.tab.id);
+			}
+			return;
+		}
+		if (key === "inbox") {
+			// 官方 inbox 投影：host 侧排队消息（next-turn/next-step 整值替换）。与本地
+			// 排队队列（queuedPromptQueue，waitForIdle 前的客户端暂存）互补——覆盖的是已
+			// 发出但 host 因运行中回合而滞留 inbox 的盲区；空数组是有效值（排队被消费）。
+			const parsed = parseDshInboxProjection(payload.value);
+			if (parsed !== undefined) {
+				runtime.queuedMessages = parsed;
 				this.emitRuntimeState(runtime.tab.id);
 			}
 			return;
@@ -2431,6 +2480,8 @@ type DshAgentRuntime = {
 	usageTotals?: DshUsageTotals;
 	/** 会话统计（host sessionStats 投影；整段日志回合/步骤计数与墙钟汇总，dsh-web StatsLine 同源）。 */
 	sessionStats?: DshSessionStatsProjection;
+	/** host 侧排队消息（inbox 投影；空数组 = 无排队）。见 parseDshInboxProjection。 */
+	queuedMessages?: DshQueuedMessage[];
 	/** DSH 当轮真实系统提示（system/message 投影；attach/backfill 重放与 mux 实时双来源）。 */
 	systemPrompt?: string;
 	/**

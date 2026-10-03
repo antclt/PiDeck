@@ -18,7 +18,9 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const read = (path) => readFileSync(path, "utf8");
-const appSource = read("src/renderer/src/App.tsx");
+// 项目外路径的路由（handleOpenLinkedFile）已迁入 useSessionFileLinks；弹框挂载点仍在 App。
+const appSource = read("src/renderer/src/hooks/workspace/useSessionFileLinks.ts");
+const appShellSource = read("src/renderer/src/App.tsx");
 const gateSource = read("src/renderer/src/hooks/useExternalPathOpenGate.tsx");
 const openerSource = read("src/renderer/src/hooks/useSessionFilePathOpener.ts");
 
@@ -78,7 +80,7 @@ test("App 路由：项目外路径走安全等级门，放行后只读且不带�
 	assert.doesNotMatch(proceed, /scope/);
 
 	// 宿主必须挂出弹框节点，否则确认框无处渲染
-	assert.match(appSource, /\{externalPathOpenDialog\}/);
+	assert.match(appShellSource, /\{externalPathOpenDialog\}/);
 
 	// 项目内路径的边界不变：仍带稳定 projectId 授权（绝不能因为「项目外可开」而放宽）
 	assert.match(appSource, /openSessionFilePath\(resolved,\s*\{\s*line,\s*scope:\s*projectId\s*\?\s*\{\s*projectId\s*\}\s*:\s*undefined\s*\}\)/);

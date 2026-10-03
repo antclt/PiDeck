@@ -70,10 +70,10 @@ export class XuePromptManager {
 	/**
 	 * 解压 BLOB 字段（gzip 压缩的 content/description）
 	 */
-	private blobToString(blob: any): string {
+	private blobToString(blob: unknown): string {
 		if (!blob) return "";
-		// sql.js 返回 BLOB 为 Uint8Array
-		const buf = blob instanceof Uint8Array || ArrayBuffer.isView(blob) ? Buffer.from(blob as Uint8Array) : Buffer.from(blob as number[]);
+		// sql.js 返回 BLOB 为 Uint8Array；两类收窄都不是 any 透传，非视图非数组的值落进空 Buffer 由 gunzip 失败兜底
+		const buf = blob instanceof Uint8Array || ArrayBuffer.isView(blob) ? Buffer.from(blob as Uint8Array) : Buffer.from(Array.isArray(blob) ? (blob as number[]) : []);
 		try {
 			return gunzipSync(buf).toString("utf8");
 		} catch {
@@ -137,7 +137,7 @@ export class XuePromptManager {
 	 * 把 SELECT slug, url, title, category, content, description 的一行映射为商店条目。
 	 * 全量查询与分页/搜索查询共用同一映射，避免列顺序在两处漂移。
 	 */
-	private rowToYaoPromptItem(row: any[]): YaoPromptItem {
+	private rowToYaoPromptItem(row: unknown[]): YaoPromptItem {
 		return {
 			slug: String(row[0] ?? ""),
 			title: String(row[2] ?? ""),
@@ -174,7 +174,7 @@ export class XuePromptManager {
 		try {
 			// 始终查询全部分类（数据量小，分类栏需要）
 			const catRows = db.exec("SELECT slug, name, count FROM xueprompt_categories ORDER BY count DESC");
-			const categories: YaoPromptCategory[] = (catRows[0]?.values ?? []).map((row: any[]) => ({
+			const categories: YaoPromptCategory[] = (catRows[0]?.values ?? []).map((row) => ({
 				slug: String(row[0] ?? ""),
 				name: String(row[1] ?? ""),
 				count: Number(row[2] ?? 0),
@@ -189,7 +189,7 @@ export class XuePromptManager {
 			// 原因：overlay 条目可能覆盖、新增、改分类，SQL 的 LIMIT/OFFSET 会因条目插入而错位，
 			// 全量合并后用同一套应用层逻辑处理才能保证 total 与页码准确。
 			const conditions: string[] = [];
-			const params: any[] = [];
+			const params: string[] = [];
 			if (opts?.category) {
 				conditions.push("(category = ? OR category = (SELECT name FROM xueprompt_categories WHERE slug = ?))");
 				params.push(opts.category, opts.category);
@@ -199,7 +199,7 @@ export class XuePromptManager {
 
 			// slug → 条目 合并表：overlay 优先（title/category 缺省时回退 db 同名值，
 			// 保证商店表格显示仍是友好中文标题而非文件名）
-			const bySlug = new Map<string, { item: YaoPromptItem; rawContent?: any; rawDesc?: any; overlayContent?: string }>();
+			const bySlug = new Map<string, { item: YaoPromptItem; rawContent?: unknown; rawDesc?: unknown; overlayContent?: string }>();
 			for (const row of rows[0]?.values ?? []) {
 				const slug = String(row[0] ?? "");
 				bySlug.set(slug, {
@@ -278,7 +278,7 @@ export class XuePromptManager {
 		if (!opts) {
 			// 向后兼容：全量查询
 			const promptRows = db.exec("SELECT slug, url, title, category, content, description FROM xueprompts ORDER BY category, title");
-			const prompts: YaoPromptItem[] = (promptRows[0]?.values ?? []).map((row: any[]) => this.rowToYaoPromptItem(row));
+			const prompts: YaoPromptItem[] = (promptRows[0]?.values ?? []).map((row: unknown[]) => this.rowToYaoPromptItem(row));
 			return { categories, prompts, repoPath: this.dbPath };
 		}
 
@@ -286,7 +286,7 @@ export class XuePromptManager {
 		// SQL 的 LIKE 对 BLOB 只做字节比较，中文关键词永远匹配不到（实测 description
 		// LIKE 命中数恒为 0），所以带 search 时必须走应用层解压匹配。
 		const conditions: string[] = [];
-		const params: any[] = [];
+		const params: string[] = [];
 
 		if (opts.category) {
 			conditions.push("(category = ? OR category = (SELECT name FROM xueprompt_categories WHERE slug = ?))");
@@ -301,7 +301,7 @@ export class XuePromptManager {
 			const categoryClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 			const rows = db.exec(`SELECT slug, url, title, category, content, description FROM xueprompts ${categoryClause} ORDER BY category, title`, params);
 			const needle = keyword.toLowerCase();
-			const matched = (rows[0]?.values ?? []).filter((row: any[]) => {
+			const matched = (rows[0]?.values ?? []).filter((row: unknown[]) => {
 				const title = String(row[2] ?? "");
 				if (title.toLowerCase().includes(needle)) return true;
 				if (row[5] && this.blobToString(row[5]).toLowerCase().includes(needle)) return true;
@@ -309,7 +309,7 @@ export class XuePromptManager {
 				return false;
 			});
 			const offset = (page - 1) * pageSize;
-			const prompts = matched.slice(offset, offset + pageSize).map((row: any[]) => this.rowToYaoPromptItem(row));
+			const prompts = matched.slice(offset, offset + pageSize).map((row: unknown[]) => this.rowToYaoPromptItem(row));
 			return { categories, prompts, repoPath: this.dbPath, total: matched.length, page, pageSize };
 		}
 
@@ -321,7 +321,7 @@ export class XuePromptManager {
 		const offset = (page - 1) * pageSize;
 
 		const promptRows = db.exec(`SELECT slug, url, title, category, content, description FROM xueprompts ${whereClause} ORDER BY category, title LIMIT ? OFFSET ?`, [...params, pageSize, offset]);
-		const prompts: YaoPromptItem[] = (promptRows[0]?.values ?? []).map((row: any[]) => this.rowToYaoPromptItem(row));
+		const prompts: YaoPromptItem[] = (promptRows[0]?.values ?? []).map((row: unknown[]) => this.rowToYaoPromptItem(row));
 
 		return { categories, prompts, repoPath: this.dbPath, total, page, pageSize };
 	}

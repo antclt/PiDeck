@@ -175,6 +175,7 @@ export const ipcChannels = {
 	dshGoalAction: "dsh:goal-action",
 	/** DSH 子代理列表（subagent.list 直接子代目录）。 */
 	dshListSubagents: "dsh:list-subagents",
+	dshCancelQueuedMessage: "dsh:cancel-queued-message",
 	/** DSH 子代理历史（subagent.history 只读 transcript）。 */
 	dshSubagentHistory: "dsh:subagent-history",
 	/** DSH 技能目录（skill.list 只读；/name 斜杠调用，G7）。 */
@@ -269,8 +270,14 @@ export const ipcChannels = {
 	dshRuntimeStatusChanged: "dsh-runtime:status-changed",
 	/** 按需安装 DSH runtime（从下载源索引挑兼容版本；进度走 dsh-runtime:install-progress）。 */
 	dshRuntimeInstall: "dsh-runtime:install",
-	/** 从本地导入 runtime（.tgz 归档或已解压目录；离线 / 镜像不可达时的兜底）。 */
+	/** 从本地导入 runtime 归档（.tgz；离线 / 镜像不可达时的兜底）。只开文件选择框。 */
 	dshRuntimeInstallLocal: "dsh-runtime:install-local",
+	/**
+	 * 从本地导入「已解压」的 runtime 目录。与上一条分开：Windows 上
+	 * showOpenDialog 同时给 openFile + openDirectory 会退化成只能选目录，
+	 * .tgz 反而选不到（2026-10 用户报「本地导入选不了归档」）。
+	 */
+	dshRuntimeInstallLocalDir: "dsh-runtime:install-local-dir",
 	/** 卸载已安装的 DSH runtime。 */
 	dshRuntimeUninstall: "dsh-runtime:uninstall",
 	/** 安装进度推送（订阅式）。 */

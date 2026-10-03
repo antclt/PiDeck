@@ -33,6 +33,9 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 	const createPayloads = [];
 	const promptCalls = [];
 	const promptModes = [];
+	// session/updateQueue 调用记录 + 可注入的失败序列（每次调用消耗一个；幂等测试用）
+	const updateQueueCalls = [];
+	const updateQueueFailures = [];
 	const respondCalls = [];
 	// host 进程状态（断连自愈测试用）：triggerExit 模拟崩溃，restartHost 模拟自动重启完成。
 	const hostState = { running: true, ready: true };
@@ -120,6 +123,12 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 				calls.prompt += 1;
 				promptCalls.push(content?.[0]?.text ?? "");
 				promptModes.push(mode ?? "queue");
+				return { result: { ok: true, value: { accepted: true } } };
+			},
+			async updateQueue(request) {
+				updateQueueCalls.push(request);
+				const fail = updateQueueFailures.shift();
+				if (fail) return { result: { ok: false, error: fail } };
 				return { result: { ok: true, value: { accepted: true } } };
 			},
 			async cancel() {
@@ -238,6 +247,9 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 		sessionsPrompt(...args) {
 			return client.sessions.prompt(...args);
 		},
+		sessionUpdateQueue(...args) {
+			return client.sessions.updateQueue(...args);
+		},
 		sessionsCancel(...args) {
 			return client.sessions.cancel(...args);
 		},
@@ -340,7 +352,7 @@ function makeFakeHost({ muxFrames = [], failRespond = false, modelsValue = undef
 			hostState.ready = true;
 		},
 	};
-	return { host, client, sessions, historyBySession, historyProjections, modelSelections, attachments, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls, controlCalls };
+	return { host, client, sessions, historyBySession, historyProjections, modelSelections, attachments, calls, createPayloads, promptCalls, promptModes, respondCalls, muxCalls, controlCalls, updateQueueCalls, updateQueueFailures };
 }
 
 /**
@@ -2105,4 +2117,84 @@ test("host 进程退出后 session/control 自动重连（投影流不再静默�
 	host.restartHost();
 	await new Promise((resolve) => setTimeout(resolve, 500));
 	assert.ok(controlCalls.length >= 2, `应自动重连投影流（实际订阅 ${controlCalls.length} 次）`);
+});
+
+test("inbox 投影帧归一化为 queuedMessages（空数组清空；低 seq 不覆盖）", async () => {
+	const { host, client } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).queuedMessages, undefined, "未推送前无排队");
+
+	// 官方 inbox 投影帧：next-turn/next-step 合并视图（seq higher-seq-wins）
+	client.pushFrames({
+		payload: {
+			type: "session/projection",
+			sessionId: "session-fake-1",
+			key: "inbox",
+			value: {
+				"next-turn": [{ id: "q1", content: [{ type: "text", text: "排队下一条" }] }],
+				"next-step": [{ id: "q2", content: [{ type: "text", text: "本轮插入" }] }],
+			},
+			seq: 2,
+		},
+	});
+	await flush();
+	assert.deepEqual(JSON.parse(JSON.stringify((await manager.getRuntimeState(tab.id)).queuedMessages)), [
+		{ id: "q1", target: "next-turn", text: "排队下一条" },
+		{ id: "q2", target: "next-step", text: "本轮插入" },
+	]);
+
+	// 低 seq 迟到帧按 higher-seq-wins 丢弃
+	client.pushFrames({
+		payload: {
+			type: "session/projection",
+			sessionId: "session-fake-1",
+			key: "inbox",
+			value: { "next-turn": [{ id: "old", content: [] }], "next-step": [] },
+			seq: 1,
+		},
+	});
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).queuedMessages.length, 2, "低 seq 不得覆盖");
+
+	// 空数组 = host 消费完排队（合法清空）
+	client.pushFrames({
+		payload: {
+			type: "session/projection",
+			sessionId: "session-fake-1",
+			key: "inbox",
+			value: { "next-turn": [], "next-step": [] },
+			seq: 3,
+		},
+	});
+	await flush();
+	assert.equal((await manager.getRuntimeState(tab.id)).queuedMessages.length, 0, "空数组清空排队");
+});
+
+test("cancelQueuedMessage：remove 成功；queue-item-not-found 幂等；其他失败抛错", async () => {
+	const { host, updateQueueCalls, updateQueueFailures } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+
+	// 成功路径：请求形状必须是 session/updateQueue 的 remove
+	await manager.cancelQueuedMessage(tab.id, "q1");
+	assert.equal(updateQueueCalls.length, 1);
+	assert.deepEqual(JSON.parse(JSON.stringify(updateQueueCalls[0])), {
+		sessionId: "session-fake-1",
+		itemId: "q1",
+		action: { kind: "remove" },
+	});
+
+	// 与 host 消费赛跑：项刚好不在队列 → 幂等成功（不抛错、不上报）
+	updateQueueFailures.push({ code: "session/queue-item-not-found", message: "queued item is no longer pending" });
+	await manager.cancelQueuedMessage(tab.id, "q1");
+
+	// 其他错误如实抛出（渲染层 toast）
+	updateQueueFailures.push({ code: "gateway/internal", message: "boom" });
+	await assert.rejects(() => manager.cancelQueuedMessage(tab.id, "q1"), /dsh updateQueue failed/);
+
+	// 空 itemId 是入参错误，不产生 RPC
+	await assert.rejects(() => manager.cancelQueuedMessage(tab.id, ""));
+	assert.equal(updateQueueCalls.length, 3);
 });

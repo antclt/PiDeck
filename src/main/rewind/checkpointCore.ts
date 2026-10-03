@@ -47,8 +47,10 @@ export interface CheckpointData {
 	branch: string;
 	/** HEAD SHA（空仓库为 ZEROS） */
 	headSha: string;
-	/** 真实 index 树 SHA（恢复暂存区态用） */
+	/** 真实 index 树 SHA（恢复暂存区态用；merge 冲突态降级为 HEAD 树） */
 	indexTreeSha: string;
+	/** true = 快照时仓库处于 merge 冲突态，indexTreeSha 是降级值（仅诊断） */
+	indexTreeDegraded?: boolean;
 	/** 全量 worktree 树 SHA（index + 未跟踪；恢复工作区用） */
 	worktreeTreeSha: string;
 	/** 创建时刻（epoch ms） */
@@ -268,6 +270,16 @@ export async function addPathsToIndex(root: string, env: NodeJS.ProcessEnv, path
 }
 
 /**
+ * 探测 index 是否处于 merge 冲突态（ls-files -u 非空 = 存在 unmerged 条目）。
+ * 冲突态下 write-tree 必败（fatal: git-write-tree: error building trees），
+ * 2026-10 用户实锤：merge 冲突期间自动打点 3 连败，检查点整体不可用。
+ */
+async function detectUnmerged(root: string): Promise<boolean> {
+	const out = await gitOp(root, ["ls-files", "-u"]).catch(() => "");
+	return out.trim().length > 0;
+}
+
+/**
  * 把 HEAD + index + worktree 快照成一个 git ref，返回完整元数据。
  *
  * 临时 index 说明：worktree 树要包含未跟踪文件，但不能污染用户真实 index，
@@ -282,7 +294,17 @@ export async function createCheckpoint(opts: CreateCheckpointOpts): Promise<Chec
 	// 空仓库（无提交）时 rev-parse HEAD 失败 → ZEROS，恢复时跳过 reset。
 	const headSha = await gitOp(root, ["rev-parse", "HEAD"]).catch(() => ZEROS);
 	const branch = await gitOp(root, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "unknown");
-	const indexTreeSha = await gitOp(root, ["write-tree"]);
+	// merge 冲突（unmerged index）时 write-tree 必败；降级用 HEAD 树记录 index 快照，
+	// 恢复语义 = 把冲突态的 index 重置回 HEAD（回退到检查点时期望的正是干净态）。
+	// 快照不因此中断：冲突期间 agent 的文件回退能力比暂存区精度更重要。
+	let indexTreeDegraded = false;
+	const indexTreeSha = await gitOp(root, ["write-tree"]).catch(async (error: unknown) => {
+		if (headSha !== ZEROS && (await detectUnmerged(root))) {
+			indexTreeDegraded = true;
+			return headSha;
+		}
+		throw error;
+	});
 
 	const tmpDir = await mkdtemp(join(tmpdir(), "pi-rewind-"));
 	// Windows 上 git 环境变量里的反斜杠路径偶尔有歧义，统一转正斜杠。
@@ -368,6 +390,9 @@ export async function createCheckpoint(opts: CreateCheckpointOpts): Promise<Chec
 			branch,
 			headSha,
 			indexTreeSha,
+			// 仅诊断用：true = 快照时仓库处于 merge 冲突态，index 树降级成了 HEAD 树。
+			// 不写进 commit message（重载后丢失无妨，健康面板靠创建时日志即可）。
+			...(indexTreeDegraded ? { indexTreeDegraded: true } : {}),
 			worktreeTreeSha,
 			timestamp,
 			preexistingUntrackedFiles,
@@ -681,9 +706,20 @@ export async function diffCheckpoints(root: string, fromTree: string, toTree: st
 	}
 }
 
-/** 当前 index 树 SHA（只读，不落盘）；回退预览时与 checkpoint 的 worktree 树做 diff。 */
+/**
+ * 当前 index 树 SHA（只读，不落盘）；回退预览时与 checkpoint 的 worktree 树做 diff。
+ * merge 冲突时 write-tree 必败——降级用 HEAD 树做当前基线（diff 结果不含冲突
+ * 文件的暂存态，但预览面板可用），非冲突失败照常抛出。
+ */
 export async function currentIndexTree(root: string): Promise<string> {
-	return gitOp(root, ["write-tree"]);
+	try {
+		return await gitOp(root, ["write-tree"]);
+	} catch (error: unknown) {
+		if (await detectUnmerged(root)) {
+			return (await gitOp(root, ["rev-parse", "HEAD"]).catch(() => ZEROS)).trim();
+		}
+		throw error;
+	}
 }
 
 /** 完整元数据 → IPC/UI 摘要（去掉 git 内部 SHA）。 */

@@ -65,50 +65,57 @@ export function CuaApprovalDialog(props: { request: CuaApprovalPayload | null; r
 	}
 
 	return (
-		<ApprovalCard open={props.open} onOpenChange={props.onOpenChange} title={LABELS.title} description={`${actionLabel} · ${LABELS.waiting}`} status={LABELS.waiting} statusTone="active" onCancel={props.onCancel} cancelDisabled={props.responding} cancelLabel={LABELS.close} className="w-full">
-			<div className="flex flex-col gap-2">
-				{/* 操作类型徽标 */}
-				<div className="flex flex-wrap items-center gap-1.5">
-					<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
-						<MousePointer2 size={12} className="shrink-0 text-[var(--color-warning)]" aria-hidden="true" />
-						<span className="shrink-0">{LABELS.actionLabel}</span>
-						<span className="font-semibold text-text-primary">{actionLabel}</span>
-					</span>
-					<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
-						<span className="shrink-0">{LABELS.sessionLabel}</span>
-						<span className="font-mono text-text-primary">{request.sessionId.slice(0, 8)}</span>
-					</span>
-					{request.agentId && (
-						<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
-							<span className="shrink-0">{LABELS.agentLabel}</span>
-							<span className="font-mono text-text-primary">{request.agentId}</span>
-						</span>
-					)}
-					{typeof request.runtimeGeneration === "number" && (
-						<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
-							<span className="shrink-0">{LABELS.generationLabel}</span>
-							<span className="font-mono text-text-primary">{request.runtimeGeneration}</span>
-						</span>
-					)}
-				</div>
+		// 根级浮层：CUA 审批必须固定定位（同 AskPanelOverlay 的 fixed z-50 约定）。
+		// ApprovalCard 本体是 position:relative 的内联卡片；若直接挂在 #root 下、排在 100vh 的
+		// .wechat-shell 之后，在 body{overflow:hidden} 下会被排到视口外而永远不可见。
+		<div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+			<div className="pointer-events-auto w-full max-w-[560px]">
+				<ApprovalCard open={props.open} onOpenChange={props.onOpenChange} title={LABELS.title} description={`${actionLabel} · ${LABELS.waiting}`} status={LABELS.waiting} statusTone="active" onCancel={props.onCancel} cancelDisabled={props.responding} cancelLabel={LABELS.close} className="w-full">
+					<div className="flex flex-col gap-2">
+						{/* 操作类型徽标 */}
+						<div className="flex flex-wrap items-center gap-1.5">
+							<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
+								<MousePointer2 size={12} className="shrink-0 text-[var(--color-warning)]" aria-hidden="true" />
+								<span className="shrink-0">{LABELS.actionLabel}</span>
+								<span className="font-semibold text-text-primary">{actionLabel}</span>
+							</span>
+							<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
+								<span className="shrink-0">{LABELS.sessionLabel}</span>
+								<span className="font-mono text-text-primary">{request.sessionId.slice(0, 8)}</span>
+							</span>
+							{request.agentId && (
+								<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
+									<span className="shrink-0">{LABELS.agentLabel}</span>
+									<span className="font-mono text-text-primary">{request.agentId}</span>
+								</span>
+							)}
+							{typeof request.runtimeGeneration === "number" && (
+								<span className="inline-flex items-center gap-1 rounded-full border border-border-subtle bg-bg-muted px-2 py-0.5 text-micro font-medium text-text-secondary">
+									<span className="shrink-0">{LABELS.generationLabel}</span>
+									<span className="font-mono text-text-primary">{request.runtimeGeneration}</span>
+								</span>
+							)}
+						</div>
 
-				{/* 详情区 */}
-				<div className="rounded-md border border-border-subtle bg-bg-muted px-2.5 py-2">
-					<div className="mb-1 text-micro font-semibold text-text-tertiary">{LABELS.detailLabel}</div>
-					<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-relaxed text-text-primary">{formatDetail(request.detail)}</pre>
-				</div>
+						{/* 详情区 */}
+						<div className="rounded-md border border-border-subtle bg-bg-muted px-2.5 py-2">
+							<div className="mb-1 text-micro font-semibold text-text-tertiary">{LABELS.detailLabel}</div>
+							<pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-relaxed text-text-primary">{formatDetail(request.detail)}</pre>
+						</div>
 
-				{/* 允许/拒绝 */}
-				<div className="flex gap-2">
-					<Button variant="default" className="h-8 px-3" disabled={props.responding} title={LABELS.allowHint} onClick={() => props.onRespond(true)}>
-						{LABELS.allow}
-					</Button>
-					<Button variant="outline" className="h-8 px-3" disabled={props.responding} title={LABELS.denyHint} onClick={() => props.onRespond(false)}>
-						{LABELS.deny}
-					</Button>
-				</div>
+						{/* 允许/拒绝 */}
+						<div className="flex gap-2">
+							<Button variant="default" className="h-8 px-3" disabled={props.responding} title={LABELS.allowHint} onClick={() => props.onRespond(true)}>
+								{LABELS.allow}
+							</Button>
+							<Button variant="outline" className="h-8 px-3" disabled={props.responding} title={LABELS.denyHint} onClick={() => props.onRespond(false)}>
+								{LABELS.deny}
+							</Button>
+						</div>
+					</div>
+				</ApprovalCard>
 			</div>
-		</ApprovalCard>
+		</div>
 	);
 }
 

@@ -7,7 +7,8 @@ const toolCalls = readFileSync("src/renderer/src/components/session/ToolCallComp
 const timelineFormat = readFileSync("src/renderer/src/components/session/TimelineFormat.ts", "utf8");
 const toolResult = readFileSync("src/renderer/src/components/agents/tool-result.tsx", "utf8");
 const runtimeInjector = readFileSync("src/renderer/src/components/session/SessionRuntimeInjector.tsx", "utf8");
-const app = readFileSync("src/renderer/src/App.tsx", "utf8");
+// 文件链接打开路由（含栏级上下文 projectId 闸门）已迁入 useSessionFileLinks。
+const app = readFileSync("src/renderer/src/hooks/workspace/useSessionFileLinks.ts", "utf8");
 const fileEditor = readFileSync("src/renderer/src/hooks/useFileEditor.ts", "utf8");
 const sessionFilePathOpener = readFileSync("src/renderer/src/hooks/useSessionFilePathOpener.ts", "utf8");
 
@@ -97,7 +98,8 @@ test("edit/write diff cards expose an accessible open-file action", () => {
 	assert.match(app, /const\s+openSessionFilePath\s*=\s*useSessionFilePathOpener\(\{\s*onPreviewImage:\s*setPreviewImage,\s*viewFilePath\s*\}\)/);
 	assert.match(app, /await\s+openSessionFilePath\(\s*resolved,\s*\{\s*line,\s*scope:\s*projectId\s*\?\s*\{\s*projectId\s*\}\s*:\s*undefined\s*\}\s*\)/);
 	assert.match(sessionFilePathOpener, /viewFilePath\(\s*path,\s*undefined,\s*options\.line,\s*options\.scope,\s*options\.readOnly\s*===\s*true\s*\)/);
-	assert.match(sessionFilePathOpener, /readBase64\(\s*path,\s*undefined,\s*options\.scope\s*\)/);
+	// 预览读图必须带字节上界（COMPOSER_IMAGE_MAX_BYTES），不能无界 readBase64。
+	assert.match(sessionFilePathOpener, /readBase64\(\s*path,\s*COMPOSER_IMAGE_MAX_BYTES,\s*options\.scope\s*\)/);
 	assert.match(sessionFilePathOpener, /mimeType:\s*imageMimeTypeFromPath\(\s*path\s*\)/);
 	assert.doesNotMatch(sessionFilePathOpener, /dataUrl\.match\(\/\^data:/);
 	// 授权随 editor tab 固化，异步加载不能改用后来聚焦的项目。

@@ -3,25 +3,47 @@ import type { WorkspaceDrawerPanel } from "./useWorkspacePanels";
 import type { SessionFilterPill } from "../sessionFilterPills";
 import { openGitFileInEditor } from "../utils/gitFileOpen";
 import type { RpcLogEntry } from "../../../shared/types/rpcLog";
-import type { DrawerGitPort, DrawerChromePort, DrawerBrowserPort, DrawerFilesPort, DrawerRpcLogPort } from "../components/workspace/DrawerSurface";
+import type { DrawerBrowserPort, DrawerChromePort, DrawerFilesPort, DrawerGitPort, DrawerRpcLogPort } from "../components/workspace/DrawerSurface";
 
-interface UseDrawerPortsInput {
-	// Git
-	enableGitManagement: boolean;
-	activeProjectId: string | undefined;
-	gitDrawerDiff: any;
-	gitDiffDisplayMode: string;
-	openCommitFileDiff: any;
-	openWorkspaceFileDiff: any;
-	toggleGitDiffDisplayMode: () => void;
-	closeGitDiff: () => void;
-	/** 仅关掉 Git Diff、保留文件 tab；Git 行内“打开文件”要先清 Diff 再开 tab。 */
-	dismissGitDiff: () => void;
-	gitApi: any;
-	gitInfo: any;
-	switchBranch: any;
-	createBranch: any;
+/** useFileEditor 返回的原始开 Tab 函数（openGitFileInEditor 的 openTab 参数签名） */
+type OpenEditorTabFn = Parameters<typeof openGitFileInEditor>[1];
 
+/** Git port 的直通字段：类型直接取自 DrawerGitPort，避免两处漂移 */
+type GitPortInput = Pick<DrawerGitPort, "enableGitManagement" | "activeProjectId" | "gitDiffDisplayMode" | "openCommitFileDiff" | "openWorkspaceFileDiff" | "toggleGitDiffDisplayMode" | "closeGitDiff" | "gitApi" | "gitInfo" | "switchBranch" | "createBranch">;
+
+/** 文件/会话 port 的直通字段：类型直接取自 DrawerFilesPort */
+type FilesPortInput = Pick<
+	DrawerFilesPort,
+	| "sessionsProject"
+	| "sessionsProjectId"
+	| "files"
+	| "sessions"
+	| "sessionSourceFilter"
+	| "sessionHistoryLoading"
+	| "expandedDirs"
+	| "onToggleDirectory"
+	| "onCollapseAllDirectories"
+	| "setFileMenu"
+	| "refreshFiles"
+	| "showToast"
+	| "projects"
+	| "refreshProjectSessions"
+	| "runOpenSidebarSession"
+	| "isSameSessionPath"
+	| "runCopySession"
+	| "runExportHistorySession"
+	| "runDeleteHistorySession"
+	| "viewFilePath"
+	| "openFilePath"
+	| "api"
+	| "t"
+	| "projectRoot"
+	| "onDropFiles"
+	| "onPasteFiles"
+	| "onMoveFiles"
+>;
+
+interface UseDrawerPortsInput extends GitPortInput, FilesPortInput {
 	// Workspace actions
 	openDrawer: (panel: WorkspaceDrawerPanel) => void;
 	closeDrawer: () => void;
@@ -43,40 +65,10 @@ interface UseDrawerPortsInput {
 	// Browser
 	browserFullscreen: boolean;
 
-	// Files/History
-	sessionsProject: any;
-	sessionsProjectId: string | undefined;
-	files: any[];
-	sessions: any[];
-	sessionSourceFilter: Record<string, Set<SessionFilterPill> | null>;
-	sessionHistoryLoading: boolean;
-	expandedDirs: Set<string>;
-	onToggleDirectory: (dir: string) => void;
-	onCollapseAllDirectories: () => void;
-	setFileMenu: any;
-	refreshFiles: any;
-	showToast?: (message: string, duration?: number) => void;
-	projects: any[];
-	refreshProjectSessions: any;
-	runOpenSidebarSession: any;
-	isSameSessionPath: any;
-	runCopySession: any;
-	runExportHistorySession: any;
-	runDeleteHistorySession: any;
-	viewFilePath: any;
-	openFilePath: any;
-	/** 在中间栏编辑器打开（可编辑 tab）；Git 变更行内“打开”按钮使用 */
-	openEditorTab: any;
-	api: any;
-	t: any;
-	/** 当前项目根目录：文件面板空白处拖入/粘贴/右键菜单的落点 */
-	projectRoot: string | undefined;
-	/** 从 OS 拖入文件（复制到目标目录） */
-	onDropFiles: (targetDir: string, files: FileList) => void;
-	/** 粘贴剪贴板文件（Ctrl+V / 右键菜单） */
-	onPasteFiles: (targetDir: string) => void;
-	/** 文件树内部拖拽移动 */
-	onMoveFiles: (sourcePaths: string[], targetDir: string) => void;
+	/** 仅关掉 Git Diff、保留文件 tab；Git 行内“打开文件”要先清 Diff 再开 tab。 */
+	dismissGitDiff: () => void;
+	/** 原始开 Tab 函数（签名同 useFileEditor 的 openEditorTab） */
+	openEditorTab: OpenEditorTabFn;
 }
 
 export function useDrawerPorts(input: UseDrawerPortsInput) {
@@ -84,7 +76,6 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
 		const git: DrawerGitPort = {
 			enableGitManagement: input.enableGitManagement,
 			activeProjectId: input.activeProjectId,
-			gitDrawerDiff: input.gitDrawerDiff,
 			gitDiffDisplayMode: input.gitDiffDisplayMode,
 			openCommitFileDiff: input.openCommitFileDiff,
 			openWorkspaceFileDiff: input.openWorkspaceFileDiff,
@@ -155,7 +146,6 @@ export function useDrawerPorts(input: UseDrawerPortsInput) {
 	}, [
 		input.enableGitManagement,
 		input.activeProjectId,
-		input.gitDrawerDiff,
 		input.gitDiffDisplayMode,
 		input.openCommitFileDiff,
 		input.openWorkspaceFileDiff,

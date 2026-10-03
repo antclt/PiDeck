@@ -22,7 +22,7 @@ import { foldSessionTitleFromDir, listForeignSessionsFromDisk, scanDshSessionHea
 import { externalHostHolderPid, resolveDshHomeSharing } from "./dshHomeSharing";
 import type { DshHomeSharingState } from "../../shared/types/dshHome";
 import { PIDECK_PLUGIN_BRIDGE_PATH } from "./pideckPluginBridge";
-import { classifyStaticPlugins, isUserPluginEntry, nearestPackageDir, readUserPatchRows, removeUserPatchRow, resolveManagedPluginDir, USER_PATCH_FILENAME } from "./dshUserPlugins";
+import { classifyStaticPlugins, ensureUserPatchLayerIsArrayDocument, isUserPluginEntry, nearestPackageDir, readUserPatchRows, removeUserPatchRow, resolveManagedPluginDir, USER_PATCH_FILENAME, withArrayDocumentFallback } from "./dshUserPlugins";
 import { PIDECK_COMMANDS_BRIDGE_PATH } from "./pideckCommandsBridge";
 import { PIDECK_SESSION_BRIDGE_PATH } from "./pideckSessionBridge";
 import type { DshFetchMessage } from "./dshHostBridge";
@@ -212,14 +212,14 @@ export class DshHost {
 		return {
 			writable: described.result.value.writable,
 			hasDocument: described.result.value.hasDocument,
-			namespaces: (described.result.value.namespaces ?? []).map((ns: any) => ({
+			namespaces: (described.result.value.namespaces ?? []).map((ns) => ({
 				ns: ns.ns,
 				applies: ns.applies,
 				revision: ns.revision,
 				value: ns.value,
 				base: ns.base,
 				user: ns.user,
-				secrets: (ns.secrets ?? []).map((secret: any) => ({ path: secret.path, set: secret.set })),
+				secrets: (ns.secrets ?? []).map((secret) => ({ path: secret.path, set: secret.set })),
 				schema: ns.schema,
 			})),
 		};
@@ -291,7 +291,7 @@ export class DshHost {
 		try {
 			const described = await client.settingsDescribe();
 			if (!described.result.ok) return undefined;
-			const found = (described.result.value.namespaces ?? []).find((item: any) => item.ns === ns);
+			const found = (described.result.value.namespaces ?? []).find((item) => item.ns === ns);
 			return typeof found?.revision === "number" ? found.revision : undefined;
 		} catch {
 			return undefined;
@@ -727,7 +727,8 @@ export class DshHost {
 		if (!removed.removed) {
 			return { rowRemoved: false, reason: removed.reason, backupPath };
 		}
-		writeFileSync(patchPath, removed.text, "utf8");
+		// 删掉最后一行会只剩表头注释：补成合法空数组文档，否则下次 host 启动被 dsh 拒。
+		writeFileSync(patchPath, withArrayDocumentFallback(removed.text), "utf8");
 		this.log("dsh-host", "user plugin uninstalled from patch layer", {
 			entryId: input.entryId,
 			moduleName: input.moduleName,
@@ -818,9 +819,9 @@ export class DshHost {
 		if (!client) return [];
 		const searched = await client.sessionsSearch({ query: trimmed }, new AbortController().signal);
 		if (!searched.result.ok) return [];
-		return (searched.result.value.items ?? []).map((item: any) => ({
+		return (searched.result.value.items ?? []).map((item) => ({
 			sessionId: String(item.sessionId),
-			snippet: item.snippet,
+			snippet: item.snippet ?? "",
 		}));
 	}
 
@@ -887,7 +888,7 @@ export class DshHost {
 		if (!client) return [];
 		const listed = await client.llmProviders();
 		if (!listed.result.ok) return [];
-		return (listed.result.value.providers ?? []).map((entry: any) => ({
+		return (listed.result.value.providers ?? []).map((entry) => ({
 			provider: entry.provider,
 			displayName: entry.displayName,
 			active: entry.active,
@@ -1003,6 +1004,12 @@ export class DshHost {
 		// 确认无残留后随下一版删除该调用（见 pideckDshHome.ts 头部「生命周期」说明）。
 		migrateLegacyPideckDshFiles(this.dshHome);
 		mkdirSync(pideckDshHome(this.dshHome), { recursive: true });
+		// 用户补丁层自愈：旧版本卸载最后一个用户插件后只留下表头注释（空文档），
+		// 而 dsh 0.2.0-rc.2 起要求补丁文件顶层必须是 YAML 数组，否则 loadOptionalPatches
+		// 直接抛错、host 起不来。fork 前补成 `[]`，用户不必手动编辑 ~/.dsh。
+		if (ensureUserPatchLayerIsArrayDocument(join(this.dshHome, USER_PATCH_FILENAME))) {
+			this.log("dsh-host", `用户补丁层是空文档，已补成合法空数组：${join(this.dshHome, USER_PATCH_FILENAME)}`);
+		}
 		this.acquireHostLock();
 
 		// 定位 hostEntry 产物与 node_modules 锚点（bareModuleBaseUrl）。

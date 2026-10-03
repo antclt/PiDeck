@@ -7,6 +7,7 @@ const historyReaderSource = readFileSync("src/main/pi/SessionHistoryReader.ts", 
 const fileServiceSource = readFileSync("src/main/fs/FileSystemService.ts", "utf8");
 const filesIpcSource = readFileSync("src/main/ipc/filesIpc.ts", "utf8");
 const composerSource = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
+const fileTreeControllerSource = readFileSync("src/renderer/src/hooks/files/useProjectFileTreeController.ts", "utf8");
 
 test("tab switch does not refresh the project file tree or git branches", () => {
 	// 切会话只改 currentSessionId / displayAgents.length；把它们绑进 files.list
@@ -14,9 +15,10 @@ test("tab switch does not refresh the project file tree or git branches", () => 
 	const effectStart = appSource.indexOf("setExpandedDirs(new Set());\n    void api.files");
 	assert.equal(effectStart, -1, "files.list effect must not clear expandedDirs (that belongs to project switch only)");
 	// 文件抽屉走 loadProjectFileTree（根层 maxDepth 0）；切会话不得把 currentSessionId 绑进扫盘。
-	assert.match(appSource, /loadProjectFileTree\(/);
+	// （文件树加载已迁入 useProjectFileTreeController，断言跟随迁移。）
+	assert.match(fileTreeControllerSource, /loadProjectFileTree\(/);
 	// 对象实参可能被格式化到多行：用 \s* 容忍。
-	assert.match(appSource, /api\.files\.list\(\s*projectId,\s*\{\s*maxDepth: 0\s*\}\)/);
+	assert.match(fileTreeControllerSource, /api\.files\.list\(\s*projectId,\s*\{\s*maxDepth: 0\s*\}\)/);
 	assert.match(appSource, /api\.git\.branches\(activeProjectId\)/);
 	assert.match(appSource, /\}, \[activeProjectId\]\);/);
 	assert.doesNotMatch(appSource, /api\.git\.branches\(activeProjectId\)[\s\S]{0,400}\}, \[activeProjectId, currentSessionId/);
@@ -34,7 +36,8 @@ test("file tree list is shallow by default in the drawer and accepts a scoped di
 	assert.match(fileServiceSource, /hasChildren/);
 	assert.match(filesIpcSource, /maxDepth/);
 	assert.match(filesIpcSource, /directory/);
-	assert.match(appSource, /maxDepth:\s*0/);
+	// （文件树加载已迁入 useProjectFileTreeController）
+	assert.match(fileTreeControllerSource, /maxDepth:\s*0/);
 	// composer @ 引用跟文件抽屉同一套懒加载，只跟项目（effectiveProjectId），不跟 sessionId
 	// （@ 引用取数已从 ComposerArea 迁入 useSessionComposerController）
 	assert.match(composerSource, /maxDepth:\s*0/);

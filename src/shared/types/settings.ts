@@ -1,8 +1,9 @@
 import type { AgentBackend } from "./agent";
 import type { BusySendDelivery } from "../busySendDelivery";
-import type { ExternalEditorSettings } from "./project";
+import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../sessionTabWidth";
+import { createDefaultExternalEditorSettings, type ExternalEditorSettings } from "./project";
 import type { SecurityConfig } from "./security";
-import type { SoundAlertSettings } from "./soundAlert";
+import { createDefaultSoundAlertSettings, type SoundAlertSettings } from "./soundAlert";
 
 export type SendShortcutMode = "enter-send" | "ctrl-enter-send" | "shift-enter-send";
 
@@ -412,6 +413,12 @@ export type AppSettings = {
 	fontSize: AppFontSizeMode;
 	/** UI 字号覆盖；null 表示跟随 fontSize。控制 sidebar、按钮、列表、弹窗等 */
 	uiFontSize: AppFontSizeMode | null;
+	/**
+	 * 会话 Tab 栏字号覆盖；null 表示跟随 uiFontSize（而非 fontSize）。
+	 * 为什么回落界面轨：Tab 标题历史上吃的是界面轨的 --font-size-micro，
+	 * 若回落全局字号，「只改过界面字号」的用户开启本开关后 Tab 会突变。
+	 */
+	tabBarFontSize: AppFontSizeMode | null;
 	/** 会话正文字号覆盖；null 表示跟随 fontSize。控制用户消息与助手回复 */
 	chatFontSize: AppFontSizeMode | null;
 	/** 输入框字号覆盖；null 表示跟随 fontSize。控制 composer 输入区 */
@@ -695,3 +702,136 @@ export type PetNotification = {
 	/** 已翻译的状态词，如「已完成」（状态色段）；缺省时退化为整行单色绘制 */
 	status?: string;
 };
+
+/**
+ * 渲染层 AppSettings 首屏默认值（App.tsx 在主进程 settings.get 返回前使用）。
+ * 口径必须与 main SettingsStore 的 defaultSettings 保持一致：新增设置项时两边同步补，
+ * 避免首屏默认与真实默认不一致造成启动闪烁。
+ */
+export function createDefaultAppSettings(): AppSettings {
+	return {
+		useNativeTitleBar: true,
+		showNativeMenu: false,
+		sendShortcut: "enter-send",
+		defaultAgentBackend: "pi",
+		theme: "system",
+		themeScheduleLightStart: "07:00",
+		themeScheduleDarkStart: "19:00",
+		accent: "default",
+		themeSkin: "classic-green",
+		customThemeOverrides: {},
+		backgroundImage: "",
+		backgroundImageOpacity: 0.8,
+		language: "system",
+		startupWindowMode: "last",
+		piEnvironmentChecked: false,
+		/** 扩展禁用白名单：与 SettingsStore 默认一致，空数组 = 不启用白名单（首屏未拉到真实设置前的默认值） */
+		disabledExtensions: [],
+		/** 技能禁用列表：与 SettingsStore 默认一致，空数组 = 不启用技能白名单 */
+		disabledSkills: [],
+		/** 提示词模板禁用列表：与 SettingsStore 默认一致，空数组 = 不启用模板白名单 */
+		disabledPrompts: [],
+		sessionTabOpenMode: "preview",
+		// 与 main SettingsStore 默认一致：标题生成默认开启，侧栏不再全是「新会话」
+		autoSessionTitle: true,
+		// 与 main SettingsStore 默认一致：忙碌时发送默认「插入当前回合」
+		busySendDelivery: "steer",
+		// 遗留字段：快捷消息已改存独立配置文件 userData/quick-messages.json（见 useQuickMessages），
+		// 这里保留字段只为满足 AppSettings 类型，内容不再被读取。
+		quickMessages: [],
+		enableGitManagement: true,
+		gitCommitMessagePrompt: "请根据以下 git diff 生成一条中文 git commit message。\n\n变更描述：\n{diff}\n\nGitmoji 对应关系：\n✨ feat - 新功能\n🐛 fix - Bug 修复\n📚 docs - 文档更新\n💎 style - 代码格式\n♻️ refactor - 重构\n🧪 test - 测试\n🔧 chore - 构建/工具",
+		gitCommitMessageProvider: "",
+		gitCommitMessageModel: "",
+		gitExecutablePath: "",
+		dshRunnerNodePath: "",
+		closeToTray: true,
+		singleInstance: true,
+		enableNotifications: true,
+		// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致（默认不打扰）
+		askNotificationEnabled: false,
+		// 人文关怀提醒默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不关闭提醒
+		agentCountReminderEnabled: true,
+		// 公告通知默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不误关提醒
+		announcementNotificationEnabled: true,
+		// toast 展示时长：与主进程 defaultSettings 同源（全局统一口径）
+		toastDurationMs: DEFAULT_TOAST_DURATION_MS,
+		// showThinking 由 pi agent 的 hideThinkingBlock 控制，启动后从主进程加载的真实值会覆盖此处
+		showThinking: true,
+		// 流式对话行为：默认自动展开中间过程（与 SettingsStore 一致）
+		expandInterimDuringStream: true,
+		// 过程组显示默认开启：与主进程 SettingsStore 默认一致，首屏即按过程组渲染
+		processGroupDisplay: true,
+		showDevTools: false,
+		developerDiagnostics: false,
+		// Electron Chromium 沙箱默认关，与主进程历史兼容策略一致
+		electronChromiumSandbox: false,
+		piProxyEnabled: false,
+		piProxyUrl: "http://127.0.0.1:7890",
+		piProxyBypass: "localhost,127.0.0.1,::1",
+		piProxyProviders: [],
+		piProxyModels: [],
+		desktopProxyEnabled: false,
+		desktopProxyUrl: "http://127.0.0.1:7890",
+		desktopProxyBypass: "localhost,127.0.0.1,::1",
+		customPiPath: "",
+		piCustomPaths: [],
+		wslEnabled: false,
+		wslDistro: "Ubuntu",
+		wslUser: "root",
+		telemetryEnabled: true,
+		webServiceEnabled: false,
+		webServiceHost: "0.0.0.0",
+		webServicePort: 8765,
+		webServiceRequiresAuth: true,
+		rpcTimeout: 600_000,
+		linkOpenMode: "external",
+		workspaceContentOpenMode: "split",
+		contentMaxWidth: 1800,
+		chatContentWidthPct: 80,
+		navigationMode: "tabs",
+		sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
+		maxEditorFileSizeMB: 5,
+		externalEditors: createDefaultExternalEditorSettings(),
+
+		// 桌面宠物默认关闭：关闭后应用与现状完全一致，零回归
+		petEnabled: false,
+		petId: "clawd",
+		petAlwaysOnTop: true,
+		petScale: DEFAULT_PET_SCALE,
+		petPatrolEnabled: true,
+		petPatrolPauseMin: 5,
+		// 闲置 agent 自动释放：与 main SettingsStore 默认值保持一致，避免启动时闪烁
+		idleAgentAutoRelease: true,
+		idleAgentKeepCount: 5,
+		idleAgentTimeoutMin: 60,
+		cuaEnabled: false,
+		favoriteModels: [],
+
+		// 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
+		fontSize: "medium",
+		uiFontSize: null,
+		tabBarFontSize: null,
+		chatFontSize: null,
+		inputFontSize: null,
+		zoomFactor: 1,
+		fontFamilyBase: "system",
+		fontFamilyBaseCustom: "",
+		fontFamilyMono: "system-mono",
+		fontFamilyMonoCustom: "",
+		removedBuiltInExtensions: [],
+		// 声音提醒：与主进程 defaultSettings 保持一致（完成/异常开、等待输入关）
+		soundAlert: createDefaultSoundAlertSettings(),
+		imageGenSize: "unset",
+		imageGenWatermark: false,
+		imageGenOutputFormat: "png",
+		autoDownloadUpdates: true,
+		// 与主进程 defaultSettings 保持一致：更新源默认 GitHub 官方，自定义镜像前缀留空
+		updateSource: "github",
+		customUpdateSourceUrl: "",
+		// 与主进程 defaultSettings 保持一致：offline 默认关，让模型目录随启动刷新
+		piRpcOffline: false,
+		piRpcNoExtensions: false,
+		piRpcNoSkills: false,
+	};
+}

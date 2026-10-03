@@ -231,6 +231,8 @@ export type DshBackendIpcDeps = {
 	createDshGoal?: (agentId: string, objective: string, maxGoalRounds?: number) => Promise<void>;
 	/** DSH 目标操作（G5：pause/resume/complete/clear）；未装配时抛错。 */
 	runDshGoalAction?: (agentId: string, action: "pause" | "resume" | "complete" | "clear") => Promise<void>;
+	/** DSH 取消 host 侧排队消息（session/updateQueue remove）；未装配时抛错。 */
+	cancelDshQueuedMessage?: (agentId: string, itemId: string) => Promise<void>;
 	/** DSH 子代理列表（G6）；未装配时返回空列表。 */
 	listDshSubagents?: (agentId: string) => Promise<
 		Array<{
@@ -325,7 +327,7 @@ export type SessionIpcDeps = {
 	readImageSessionMessages?: (sessionId: string) => Promise<import("../../shared/types").ChatMessage[]>;
 	copyCatalogSession: (sessionId: string) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
 	exportCatalogSessionHtml: (sessionId: string) => Promise<Record<string, unknown> & { path: string }>;
-	replaceAgentSession: (agentId: string, fn: () => Promise<any>, options?: { markForked?: boolean }) => Promise<any>;
+	replaceAgentSession: (agentId: string, fn: () => Promise<unknown>, options?: { markForked?: boolean }) => Promise<unknown>;
 	/** DSH 后端专用 IPC 依赖（C1 分组；未装配 = 无 DSH 后端）。 */
 	dshBackend?: DshBackendIpcDeps;
 };
@@ -338,10 +340,11 @@ function sessionCommandIpcError(error: SessionCommandError, appLogger: Pick<AppL
 /**
  * 会话命令失败日志：edit/delete/resend 等 IPC 直接返回 SessionCommandResult，
  * 不走 sessionCommandIpcError 抛错，漏打这条就会出现「toast 失败、主进程无日志」。
+ * 标题带上错误码：按 code/关键词（如 edit、BUSY）就能在日志里搜到对应失败，
+ * 不依赖结构化字段（2026-10 教训：按「编辑」搜正文一无所获）。
  */
 function logSessionCommandFailure(appLogger: Pick<AppLogger, "warn">, error: SessionCommandError, extra?: Record<string, unknown>): void {
-	if (!error.debugDetails && extra === undefined) return;
-	void appLogger.warn("session-command", "Session command failed", {
+	void appLogger.warn("session-command", `Session command failed (${error.code})`, {
 		code: error.code,
 		...(error.debugDetails ? { debugDetails: error.debugDetails } : {}),
 		...extra,
@@ -428,6 +431,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		searchDshSessions,
 		createDshGoal,
 		runDshGoalAction,
+		cancelDshQueuedMessage,
 		listDshSubagents,
 		readDshSubagentHistory,
 		listDshSkills,
@@ -1071,6 +1075,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (!listDshSubagents) return [];
 		return listDshSubagents(agentId);
 	});
+	// DSH 取消 host 侧排队消息（inbox 投影项的撤回）
+	ipcMain.handle(ipcChannels.dshCancelQueuedMessage, async (_event, agentId: unknown, itemId: unknown) => {
+		if (typeof agentId !== "string" || typeof itemId !== "string" || itemId === "") {
+			throw new Error("Invalid agentId or queue item id");
+		}
+		if (!cancelDshQueuedMessage) throw new Error("dsh queue is not available");
+		await cancelDshQueuedMessage(agentId, itemId);
+	});
 	// DSH 子代理历史（G6）
 	ipcMain.handle(ipcChannels.dshSubagentHistory, async (_event, agentId: unknown, childSessionId: unknown, beforeSeq?: unknown, maxMessages?: unknown) => {
 		if (typeof agentId !== "string" || typeof childSessionId !== "string") {
@@ -1480,9 +1492,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		// 对话框在主进程弹：渲染层不参与路径选择，也就没有「传任意路径读文件」的入口。
 		const picked = await dialog.showOpenDialog({
 			title: mainCopy("dsh.runtime.pickArchiveTitle"),
-			// 过滤器只影响文件选择；openDirectory 让已解压目录也能被选中。
-			filters: [{ name: "DSH runtime", extensions: ["tgz", "tar.gz"] }],
-			properties: ["openFile", "openDirectory"],
+			// 只收归档：与目录入口分开弹。Windows 上 openFile + openDirectory 同时给会
+			// 退化成只能选目录，.tgz 选不到（见 shared/ipc.ts 的 dshRuntimeInstallLocalDir）。
+			filters: [{ name: "DSH runtime", extensions: ["tgz", "gz"] }],
+			properties: ["openFile"],
 		});
 		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
 		const filePath = picked.filePaths[0];
@@ -1491,6 +1504,19 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
 		}
 		return importDshRuntime(filePath);
+	});
+	ipcMain.handle(ipcChannels.dshRuntimeInstallLocalDir, async () => {
+		if (!importDshRuntime) throw new Error("DSH runtime installation is not available");
+		const picked = await dialog.showOpenDialog({
+			title: mainCopy("dsh.runtime.pickDirectoryTitle"),
+			properties: ["openDirectory"],
+		});
+		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
+		const dirPath = picked.filePaths[0];
+		if (!dirPath || !existsSync(dirPath)) {
+			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
+		}
+		return importDshRuntime(dirPath);
 	});
 	ipcMain.handle(ipcChannels.dshRuntimeUninstall, async () => {
 		if (!uninstallDshRuntime) throw new Error("DSH runtime installation is not available");

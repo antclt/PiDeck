@@ -5,7 +5,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 // 声明式规则求值与清洗的回归测试：信号归约 × 规则匹配 × 文件清洗三层都要钉住。
 // loadTsCommonJs 在独立 VM realm 执行，跨 realm 数组 deepEqual 会报
 // “same structure but not reference-equal”，统一用 plain()（JSON 往返）比较。
-const { replySignalsForMessages, replyActionTextsForMessages } = loadTsCommonJs("src/renderer/src/utils/replyActionRules.ts");
+const { replySignalsForMessages, replyActionTextsForMessages, mergeReplyActionRules } = loadTsCommonJs("src/renderer/src/utils/replyActionRules.ts");
 const { sanitizeReplyActionRuleList, sanitizeReplyActionsFile } = loadTsCommonJs("src/shared/replyActions.ts");
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -113,4 +113,49 @@ test("清洗文件：裸数组与 {items} 都接受，items: [] 是合法清空�
 	);
 	assert.equal(sanitizeReplyActionsFile({ nope: true }), null);
 	assert.equal(sanitizeReplyActionsFile({ items: "继续" }), null);
+});
+
+// ── 出厂规则行为（直接加载 resources/reply-actions.default.json，防改 json 丢了匹配语义） ──
+
+import { readFileSync } from "node:fs";
+const factoryRules = JSON.parse(readFileSync(new URL("../resources/reply-actions.default.json", import.meta.url), "utf8")).items;
+
+test("出厂规则：普通成功回复只出「继续」，不相关建议不再无条件堆出", () => {
+	// 2026-10 优化前：「再确认一下」「运行测试看看结果」是纯 onStop，任何回复都显示
+	assert.deepEqual(texts(factoryRules, [user, answer("我看了下这个模块的结构，主要由三部分组成。")]), ["继续"]);
+});
+
+test("出厂规则：回复提到完成/测试时才出现提交与测试建议", () => {
+	assert.deepEqual(texts(factoryRules, [user, answer("修复完成，针对性测试全部通过。")]), ["继续", "提交", "提交并推送", "运行测试看看结果"]);
+	assert.deepEqual(texts(factoryRules, [user, answer("改动已实现，待提交。")]), ["继续", "提交", "提交并推送"]);
+});
+
+test("出厂规则：回复带确认语气才出「再确认一下」", () => {
+	assert.deepEqual(texts(factoryRules, [user, answer("是否需要我继续处理其余部分？")]), ["继续", "再确认一下"]);
+	assert.deepEqual(texts(factoryRules, [user, answer("方案 A 更稳妥。")]), ["继续"]);
+});
+
+test("出厂规则：失败轮出 3 条排查建议", () => {
+	assert.deepEqual(texts(factoryRules, [user, diagnostic("diagnostic.requestFailed")]), ["重新排查", "检查报错并修复", "重试一次"]);
+});
+
+// ── 同步内置（mergeReplyActionRules） ──────────────────────────
+
+test("同步内置：同文案条目触发条件跟内置走，缺项追加，个人顺序与自定义条目保留", () => {
+	const current = [
+		{ text: "我的自定义", triggers: [{ kind: "always" }] },
+		{ text: "提交", triggers: [{ kind: "onStop" }] }, // 旧 seed：无 textMatch 门
+		{ text: "继续", triggers: [{ kind: "onStop" }] },
+	];
+	const defaults = [
+		{ text: "继续", triggers: [{ kind: "onStop" }] },
+		{ text: "提交", triggers: [{ kind: "onStop" }, { kind: "textMatch", patterns: ["完成"] }] },
+		{ text: "新建议", triggers: [{ kind: "onFailure" }] },
+	];
+	assert.deepEqual(plain(mergeReplyActionRules(current, defaults)), [
+		{ text: "我的自定义", triggers: [{ kind: "always" }] },
+		{ text: "提交", triggers: [{ kind: "onStop" }, { kind: "textMatch", patterns: ["完成"] }] },
+		{ text: "继续", triggers: [{ kind: "onStop" }] },
+		{ text: "新建议", triggers: [{ kind: "onFailure" }] },
+	]);
 });

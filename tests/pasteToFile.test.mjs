@@ -59,7 +59,7 @@ test("pasteTextToFile：落盘 userData/paste-files、chip 元数据含 inProjec
 test("发送折叠：项目内文件 → @path 引用；匿名会话 → 原样文本内联", () => {
 	assert.match(controller, /file\.inProject/);
 	assert.match(controller, /refs\.push\(formatFilePathRef\(file\.path\)\)/);
-	assert.match(controller, /desktopApi\.files\.readContent\(file\.path\)/);
+	assert.match(controller, /desktopApi\.files\.readContent\(file\.path,\s*PASTE_FILE_CONTENT_MAX_BYTES\)/);
 	assert.match(controller, /setPasteFiles\(\[\]\)/, "折叠后应移除 chip");
 });
 

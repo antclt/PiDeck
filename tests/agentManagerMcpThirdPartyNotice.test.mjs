@@ -21,10 +21,10 @@ test("third-party takeover notice is delivered even after the first run has star
 	const agentManager = read("src/main/pi/AgentManager.ts");
 	// 异步检测可能晚于首个 agent_start：此时直接落时间线，不能永远留在 pending
 	const methodStart = agentManager.indexOf("notifyMcpThirdPartyTakeover");
-	const method = agentManager.slice(methodStart, agentManager.indexOf("notifyWhitelistSkipped", methodStart));
-	assert.match(method, /agentStartedFirstRun\.has\(agentId\)/);
-	assert.match(method, /addLocalizedMessage/);
-	assert.match(method, /queueStartupDiagnostic/);
+	const methodStart2 = agentManager.indexOf("private async notifyMcpThirdPartyTakeover");
+	const method = agentManager.slice(methodStart2, agentManager.indexOf("toSessionHostPath", methodStart2));
+	// Wave 4 后暂存/落盘判定迁入 StartupDiagnosticsQueue.deliver；通知侧只应调 deliver。
+	assert.match(method, /this\.startupDiagnostics\.deliver\(agentId,/);
 });
 
 test("third-party takeover notice carries interpolation params and a working action", () => {

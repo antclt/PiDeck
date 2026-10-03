@@ -550,7 +550,7 @@ const manifest = {
 	maxAppVersion: "",
 	// 见文件头说明：归档哈希由下载源索引提供，这里留空。
 	archiveSha256: "",
-	// 0.1.5（Typert Remote 迁移，见 docs/dsh-0.1.5-typert-migration.md）：
+	// Typert Remote 契约（见 docs/dsh-remote-contract.md）：
 	// dsh-host-apiproxy 已废，fetch 半在 dsh-client-connection，网关在
 	// dsh-api-gateway（base 补丁自带），领域端点在 dsh-api-session-controller。
 	requiredPackages: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-app-boot", "@deepseek-ai/dsh-cmdline", "@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-api-gateway", "@deepseek-ai/dsh-api-remotes", "@deepseek-ai/dsh-api-session-controller"],

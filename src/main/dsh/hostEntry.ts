@@ -140,7 +140,7 @@ async function main(): Promise<void> {
 	// 注意：CJS 产物里的裸 import("@deepseek-ai/...") 会走 Node 默认解析（out/main 向上找
 	// node_modules），找不到 app 根 node_modules → ERR_MODULE_NOT_FOUND → exit(1)。
 	// 必须先用 createRequire 解析出真实文件路径，再按 file URL 动态 import。
-	// 0.1.5 迁移（docs/dsh-0.1.5-typert-migration.md）：dsh-host-apiproxy 已被官方移除
+	// Typert Remote 契约（docs/dsh-remote-contract.md）：dsh-host-apiproxy 已被官方移除
 	// （Typert Remote 架构），fetch handler 改由 dsh-client-connection 的
 	// HostConnectionHandle.createSharedFetchHandler('/api') 提供（见下方 apiHandler）。
 	const require = createRequire(join(fileURLToPath(nodeModulesUrl), "package.json"));
