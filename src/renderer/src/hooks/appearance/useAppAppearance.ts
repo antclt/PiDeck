@@ -127,7 +127,12 @@ export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: {
 	// 合并后顺序固定：先自定义覆盖，后壁纸覆盖。内置外观主题色板由 CSS data-appearance 承担。）
 	useEffect(() => {
 		const root = document.documentElement;
-		const isDark = root.dataset.theme === "dark";
+		// isDark 不能读 root.dataset.theme：外观应用 effect 经 applyAppearanceWithTransition
+		// 走 View Transition（startViewTransition 回调异步执行），同一轮 commit 里
+		// dataset.theme 仍是旧明暗——按它选档会把自定义主题（含内置示例莓果夜色）的
+		// 错档 token 注入 inline 样式并压过样式表，亮暗切换后界面停留在上一档。
+		// resolvedTheme 与 applyAppearanceAttributes 写入 data-theme 用同一输入派生，等价且即时。
+		const isDark = resolvedTheme === "dark";
 		const BG_TOKENS = [
 			"--color-bg-app",
 			"--color-bg-sidebar",
