@@ -355,7 +355,20 @@ test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相
 		assert.equal(existsSyncSync(join(binDir, "npm")), false, "悬空目标在该机器上必须真的不存在");
 		assert.equal(existsSyncSync(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin", "npm-cli.js")), true, "本地 npm-cli.js 必须已落盘");
 
-		const repaired = repairPortableNodeLinks(root, "linux");
+		// 诊断梯子：修复返回空时，在宿主里重演同一组系统调用，暴露具体失败步骤与错误码
+		//（2026-10 GitHub runner 上模块内连续失败但 setup 阶段同类调用成功，需定位分叉）。
+		const firstRepair = repairPortableNodeLinks(root, "linux");
+		if (firstRepair.length === 0) {
+			const { rmSync: hostRm, symlinkSync: hostSymlink } = await import("node:fs");
+			try {
+				hostRm(join(binDir, "npm"), { force: true });
+				hostSymlink(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(binDir, "npm"));
+			} catch (error) {
+				assert.fail(`宿主重演修复失败: ${error?.code ?? "?"} ${error?.message ?? String(error)}`);
+			}
+			assert.fail("模块内修复失败但宿主重演同一组调用成功——模块环境分叉，需上报错误码定位");
+		}
+		const repaired = firstRepair;
 		// 先看链接终态再比对返回值：修复动作失败时（rm 后 symlink 被杀软锁住等），
 		// 终态断言能直接现形「链接没了还是还悬空」，比空数组比对信息量大。
 		assert.equal(readlinkRaw(join(binDir, "npm")), join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), "修复后 npm 应指向相对链接");
