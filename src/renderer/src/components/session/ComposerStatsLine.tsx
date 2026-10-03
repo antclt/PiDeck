@@ -100,8 +100,8 @@ export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?
 	// 有轮次、性能或 token 数据后，再把圆环作为同一条统计栏的交互入口挂入。
 	if (groups.length === 0) return null;
 	return (
-		<div ref={rootRef} className="flex w-full min-w-0 items-center gap-2 px-1 pb-0 pt-1 text-[12px] leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
-			<div className="min-w-0 flex-1 truncate text-center">
+		<div ref={rootRef} className="flex w-full min-w-0 items-center justify-center gap-2 px-1 pb-0 pt-1 text-[12px] leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
+			<div className="min-w-0 truncate text-center">
 				{groups.map((group, i) => (
 					<Fragment key={group}>
 						{i > 0 && (
@@ -115,7 +115,7 @@ export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?
 					</Fragment>
 				))}
 			</div>
-			{props.contextMeter}
+			<span className="shrink-0">{props.contextMeter}</span>
 		</div>
 	);
 });
