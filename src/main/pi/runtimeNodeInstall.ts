@@ -76,12 +76,13 @@ export function repairPortableNodeLinks(userDataPath: string, platform: NodeJS.P
 		const tail = marker ? target.slice(marker.index + marker[0].length) : "";
 		const localTarget = tail ? join(nodeRoot, tail) : "";
 		if (!localTarget || !existsSync(localTarget)) continue;
-		// Windows 杀毒/索引器可能短暂锁住刚 rmSync 的链接路径，紧接着的 symlinkSync 会 EPERM
-		//（2026-10 CI 复现：输入全部合法但修复静默失败返回空）。有界重试 + 同步退避；
-		// Atomics.wait 是主进程同步睡眠的标准做法，总耗时上限 ~100ms，仅修复路径触发。
+		// Windows 杀毒/索引器会短暂锁住新建的软链，紧接着的 rmSync/symlinkSync 报 EPERM/EBUSY
+		//（2026-10 GitHub runner 复现：输入全部合法但修复静默失败，25-50ms 退避仍不够扫描窗口）。
+		// 阶梯退避最多 ~1.5s，仅修复失败路径触发；Atomics.wait 是主进程同步睡眠的标准做法。
+		const retryBackoffMs = [0, 50, 150, 400, 900];
 		let linked = false;
-		for (let attempt = 0; attempt < 3 && !linked; attempt += 1) {
-			if (attempt > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * attempt);
+		for (let attempt = 0; attempt < retryBackoffMs.length && !linked; attempt += 1) {
+			if (retryBackoffMs[attempt] > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryBackoffMs[attempt]);
 			try {
 				rmSync(linkPath, { force: true });
 				symlinkSync(relative(binDir, localTarget), linkPath);
