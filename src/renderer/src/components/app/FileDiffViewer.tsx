@@ -10,7 +10,10 @@ import { defaultUrlTransform } from "../session/MarkdownLinkCore";
 import { defaultRehypePlugins } from "streamdown";
 import rehypeKatex from "rehype-katex";
 import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
-import { CodeMirrorEditor } from "./CodeMirrorEditor";
+// CodeMirrorEditor 静态链上挂着整个 CodeMirror 6 全家桶（view/state/commands/
+// autocomplete/search/lint/lang-json），经 WorkbenchContent 静态 import 进主 chunk，
+// App 启动即解析。与 CodeDiffView 同款懒加载：首次打开编辑器才拉 chunk。
+const CodeMirrorEditor = lazy(() => import("./CodeMirrorEditor").then((m) => ({ default: m.CodeMirrorEditor })));
 // CodeDiffView 静态链上挂着 @pierre/diffs + shiki（WASM 重库），懒加载后这些模块
 // 移出首屏初始 chunk（约 -500KB 解析量），仅在用户打开 diff 时才拉取。
 const CodeDiffView = lazy(() => import("./CodeDiffView").then((m) => ({ default: m.CodeDiffView })));
@@ -501,7 +504,23 @@ export function FileDiffViewer(props: {
 						{/* view 模式、非预览：常规编辑器（CodeMirror 6） */}
 						{!isDiffMode && !preview && (
 							<div style={{ height: "100%", flexDirection: "column" }}>
-								<CodeMirrorEditor value={content} language={language} readOnly={false} initialLine={props.initialLine} onChange={handleEditorChange} onAttachSelection={handleAttachSelection} />
+								{/* lazy 边界：首次打开编辑器才拉取 CodeMirror chunk，期间轻量占位 */}
+								<Suspense
+									fallback={
+										<div
+											style={{
+												height: "100%",
+												display: "grid",
+												placeItems: "center",
+											}}
+											className="text-caption text-foreground/50"
+										>
+											{t("common.loading")}
+										</div>
+									}
+								>
+									<CodeMirrorEditor value={content} language={language} readOnly={false} initialLine={props.initialLine} onChange={handleEditorChange} onAttachSelection={handleAttachSelection} />
+								</Suspense>
 							</div>
 						)}
 						{/* diff 模式：只读差异对比（分栏 / 单栏由 sideBySide 切换），

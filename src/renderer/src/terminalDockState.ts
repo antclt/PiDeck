@@ -27,6 +27,25 @@ export type TerminalDockStateByOwner = Record<string, TerminalDockState>;
 export const TERMINAL_HEIGHT_STORAGE_KEY = "pid:terminal-dock-height";
 export const TERMINAL_HEIGHT_MIN = 120;
 
+/**
+ * 渲染层回放缓冲上界（字符数）：与主进程 MAX_TERMINAL_REPLAY_BUFFER
+ * （TerminalSessionManager.ts，200_000）对齐——主进程回放缓冲已按此截尾，
+ * 渲染层若不截尾，长跑终端会把整段历史在 buffersRef 里无限常驻。
+ * 同步修改时两侧必须一起改（tests/terminalDataBatching.test.mjs 有守卫）。
+ */
+export const TERMINAL_REPLAY_MAX_CHARS = 200_000;
+
+/**
+ * 渲染层回放缓冲追加（纯函数，可单测）：xterm 实例在切 tab / 折叠 / 主题切换时
+ * 销毁重建，buffersRef 是重建时的回放源。按字符上限截尾——重建后回放最近
+ * 200K 字符（约 2500 行，xterm scrollback 5000 行本来就装不下更早的内容，
+ * 且主进程 ensure() 快照同样只给最近 200K，行为两侧一致）。
+ */
+export function appendTerminalReplayBuffer(current: string, data: string): string {
+	const next = current + data;
+	return next.length > TERMINAL_REPLAY_MAX_CHARS ? next.slice(next.length - TERMINAL_REPLAY_MAX_CHARS) : next;
+}
+
 export function terminalOwnerKey(owner: TerminalDockOwner): string {
 	return `${owner.kind}:${owner.id}`;
 }

@@ -3957,15 +3957,16 @@ app
 			// 把 pi-subagents transcript 等无 type 头的产物挡在 catalog 之外（#168）。
 			(filePath, options) => sessionScanner.inferSessionNameAndValidity(filePath, options),
 		);
-		await sessionCatalog.load();
+		// 定时任务存储先行构造：两份本地 JSON（session-catalog / automation）互不依赖，
+		// 各自带损坏兜底，并行读取省一个串行磁盘环节；装配点统一等两者落定。
+		automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
+		await Promise.all([sessionCatalog.load(), automationStore.load()]);
 		// 多后端网关装配：pi + dsh（DSH 在窗口创建后后台预热，失败时按需重试）。
 		// Coordinator 与事件桥接均面向合成器，新增后端只需追加网关实例。
 		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager]);
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
 
 		// 定时任务调度器与执行编排器装配
-		automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
-		await automationStore.load();
 		automationRunCoordinator = new AutomationRunCoordinator({
 			store: automationStore,
 			catalog: sessionCatalog,

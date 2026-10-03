@@ -1499,13 +1499,12 @@ export function App() {
 		let stopped = false;
 		const refreshGitInfo = async () => {
 			try {
-				// 轮询分支信息
 				const next = await api.git.branches(activeProjectId);
 				if (stopped) return;
-				// 分支可能在外部终端/IDE 中切换,轮询只在状态真的变化时更新,避免不必要重渲染。
+				// 外部终端/IDE 切分支时同步侧栏徽标与抽屉，只在状态真的变化时更新，避免不必要重渲染。
 				setGitInfo((current) => (current.current === next.current && current.branches.join("\n") === next.branches.join("\n") ? current : next));
 				// 侧栏分支徽标与 Git 抽屉同源：外部终端 checkout 后也要一起跟上。
-				// 只更新聚焦项目——非聚焦项目不在轮询范围内，由栏内 usePaneGitInfo 回写。
+				// 只更新聚焦项目——非聚焦项目不在监听范围内，由栏内 usePaneGitInfo 回写。
 				setBranchByProject((prev) => (prev[activeProjectId] === next.current ? prev : { ...prev, [activeProjectId]: next.current }));
 			} catch {
 				if (!stopped) {
@@ -1513,10 +1512,25 @@ export function App() {
 				}
 			}
 		};
-		const timer = window.setInterval(refreshGitInfo, 4000);
+		void refreshGitInfo();
+		// 与栏内 usePaneGitInfo 同一事件源：主进程 GitRefsWatcher 复用一份 1.5s refs
+		// 签名轮询，替代 App 级 4s 盲轮询；订阅失败时静默降级为初始一次回读。
+		const offRefsChanged = api.git.onRefsChanged((changedWatchId) => {
+			if (changedWatchId !== watchId || stopped) return;
+			void refreshGitInfo();
+		});
+		const watchPromise = api.git.watchRefs(activeProjectId).catch(() => null);
+		let watchId: string | null = null;
+		void watchPromise.then((id) => {
+			watchId = id;
+		});
 		return () => {
 			stopped = true;
-			window.clearInterval(timer);
+			offRefsChanged();
+			// 竞态安全：卸载时 watch 可能尚未 resolve，退订等它落地后执行。
+			void watchPromise.then((id) => {
+				if (id) void api.git.unwatchRefs(id);
+			});
 		};
 	}, [activeProjectId]);
 
@@ -2736,7 +2750,7 @@ export function App() {
 												label: t("drawer.sourceControl"),
 												icon: <GitBranch size={16} />,
 												active: drawer === "git",
-														pinned: true,
+												pinned: true,
 												onClick: () => handleToolDrawerAction("git"),
 											},
 										]
@@ -2760,9 +2774,9 @@ export function App() {
 												label: t("rewind.title"),
 												icon: <History size={16} />,
 												active: drawer === "rewind",
-														pinned: workspace.pinnedPanels.includes("rewind"),
-														canRemove: true,
-														onTogglePinned: () => workspace.toggleDrawerPanelPinned("rewind"),
+												pinned: workspace.pinnedPanels.includes("rewind"),
+												canRemove: true,
+												onTogglePinned: () => workspace.toggleDrawerPanelPinned("rewind"),
 												onClick: () => handleToolDrawerAction("rewind"),
 											},
 										]

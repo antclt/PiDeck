@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import type { PiDesktopApi } from "../../../../preload";
 import type { TerminalShell, TerminalTab, TerminalTarget } from "../../../../shared/types";
 import { t } from "../../i18n";
+import { appendTerminalReplayBuffer } from "../../terminalDockState";
 
 const TERMINAL_THEMES = {
 	"pi-soft": {
@@ -243,7 +244,8 @@ export function TerminalDock(props: {
 
 	useEffect(() => {
 		const offData = props.terminal.onData((payload) => {
-			buffersRef.current[payload.tabId] = (buffersRef.current[payload.tabId] ?? "") + payload.data;
+			// 回放缓冲与主进程对齐截尾到 200K：只作 xterm 重建回放源，不能无限常驻
+			buffersRef.current[payload.tabId] = appendTerminalReplayBuffer(buffersRef.current[payload.tabId] ?? "", payload.data);
 			if (payload.tabId === activeTabIdRef.current) {
 				xtermRef.current?.write(payload.data);
 			}
@@ -251,7 +253,7 @@ export function TerminalDock(props: {
 		const offExit = props.terminal.onExit((payload) => {
 			setTabs((current) => current.map((tab) => (tab.id === payload.tabId ? { ...tab, exited: true, exitCode: payload.exitCode } : tab)));
 			const exitText = `\r\n[process exited${payload.exitCode != null ? ` with code ${payload.exitCode}` : ""}]\r\n`;
-			buffersRef.current[payload.tabId] = (buffersRef.current[payload.tabId] ?? "") + exitText;
+			buffersRef.current[payload.tabId] = appendTerminalReplayBuffer(buffersRef.current[payload.tabId] ?? "", exitText);
 			if (payload.tabId === activeTabIdRef.current) xtermRef.current?.write(exitText);
 		});
 		return () => {
