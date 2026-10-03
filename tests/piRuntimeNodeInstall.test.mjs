@@ -290,7 +290,10 @@ test("便携 node 路径按平台区分 bin 层：POSIX 在 node/bin，Windows �
 async function trySymlink(target, path) {
 	const { symlinkSync } = await import("node:fs");
 	try {
-		symlinkSync(target, path);
+		// 显式 "file"：不传 type 时 Node 会推断，悬空目标在某些 Windows 环境
+		//（如 GitHub runner）会被建成目录型软链——rmSync(force) 对它报 ENOENT 假成功，
+		// 修复路径的 unlink 实际删不掉链接，后续 symlinkSync 全部 EEXIST（2026-10 CI 实锤）。
+		symlinkSync(target, path, "file");
 		return true;
 	} catch (error) {
 		if (process.platform === "win32" && error.code === "EPERM") return false;
