@@ -14,6 +14,7 @@ import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
 import { SessionTodoStrip } from "./SessionTodoStrip";
+import { SessionTeamStrip } from "./SessionTeamStrip";
 import { SessionQueuedMessagesStrip } from "./SessionQueuedMessagesStrip";
 import { SessionSurfaceStage } from "./SessionSurfaceStage";
 import { ComposerArea } from "./ComposerArea";
@@ -354,6 +355,7 @@ export function SessionView({
 									<>
 										<SessionQueuedMessagesStrip sessionId={sessionId} />
 										<SessionTodoStrip sessionId={sessionId} />
+										<SessionTeamStrip sessionId={sessionId} />
 										<SessionFilesStrip sessionId={sessionId} run={latestAgentRun} onOpenFile={onOpenFile} onDiffFile={onDiffFile} />
 										<SessionSubagentsStrip sessionId={sessionId} onOpenChildSession={onOpenBranchSession} />
 										<SessionGoalStrip sessionId={sessionId} />
