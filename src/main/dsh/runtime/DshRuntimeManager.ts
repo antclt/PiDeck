@@ -422,8 +422,8 @@ export class DshRuntimeManager {
 					try {
 						await renameWithRetry(previous, target);
 					} catch (rollbackError) {
-							rollbackFailed = true;
-							log("dsh-runtime", "runtime swap rollback failed; keeping previous copy", {
+						rollbackFailed = true;
+						log("dsh-runtime", "runtime swap rollback failed; keeping previous copy", {
 							error: errorMessage(rollbackError),
 							previous,
 						});

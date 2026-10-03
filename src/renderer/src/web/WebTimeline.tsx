@@ -71,10 +71,7 @@ type WebToolPart = {
 };
 
 /** 回合内一段过程内容：合并后的思考块 / 工具调用 / 中间回复。 */
-export type TurnSegment =
-	| { kind: "thinking"; id: string; texts: string[] }
-	| { kind: "tool"; id: string; part: WebToolPart }
-	| { kind: "interim"; id: string; text: string };
+export type TurnSegment = { kind: "thinking"; id: string; texts: string[] } | { kind: "tool"; id: string; part: WebToolPart } | { kind: "interim"; id: string; text: string };
 
 /** 一轮助手回合：用户消息之后的连续 assistant 消息聚合（对齐桌面 run 语义）。 */
 export interface AssistantTurn {
@@ -370,13 +367,7 @@ export const WebToolCard = memo(function WebToolCard(props: { part: WebToolPart 
 								<span className="inline-flex items-center gap-1.5">{t("tool.statusError")}</span>
 							) : null}
 						</span>
-						{hasBody ? (
-							expanded ? (
-								<ChevronDown size={14} className="ml-auto shrink-0 text-text-tertiary" aria-hidden="true" />
-							) : (
-								<ChevronRight size={14} className="ml-auto shrink-0 text-text-tertiary" aria-hidden="true" />
-							)
-						) : null}
+						{hasBody ? expanded ? <ChevronDown size={14} className="ml-auto shrink-0 text-text-tertiary" aria-hidden="true" /> : <ChevronRight size={14} className="ml-auto shrink-0 text-text-tertiary" aria-hidden="true" /> : null}
 					</span>
 				</button>
 				{expanded ? (

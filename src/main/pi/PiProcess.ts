@@ -506,8 +506,8 @@ export class PiProcess extends EventEmitter {
 					// 降级（版本过低 / 超预算）：不注入 --no-extensions/-e，恢复 pi 默认扩展发现，
 					// 并按非白名单路径补回内置扩展，避免降级后连内置扩展都缺失。
 					// appendBuiltInExtensionArgs 是纯函数（返回新数组，不改入参）——必须接收返回值，
-				// 否则降级后内置扩展（session-title/桥等）全部丢失（#307 诊断的第二层）。
-				finalPiArgs = appendBuiltInExtensionArgs(finalPiArgs, builtInPaths, { noExtensions: false });
+					// 否则降级后内置扩展（session-title/桥等）全部丢失（#307 诊断的第二层）。
+					finalPiArgs = appendBuiltInExtensionArgs(finalPiArgs, builtInPaths, { noExtensions: false });
 					if (versionTooOld) {
 						void getAppLogger()?.warn("pi-process", "pi version too old for extension whitelist; falling back to default discovery", {
 							piVersion: versionForGate,

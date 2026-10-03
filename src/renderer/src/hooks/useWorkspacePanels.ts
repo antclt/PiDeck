@@ -89,9 +89,7 @@ function readDrawerState(storage: WorkspacePanelOptions["storage"], key: string)
 		const panel = value.panel === "editor" ? "files" : value.panel;
 		const validPanels = ["files", "sessions", "browser", "git", "trajectory", "rewind"];
 		const validPanel = panel === null || validPanels.includes(String(panel));
-		const pinnedPanels = Array.isArray(value.pinnedPanels)
-			? value.pinnedPanels.filter((item): item is WorkspaceDrawerPanel => typeof item === "string" && validPanels.includes(item))
-			: typeof value.pinned === "boolean" && value.pinned && validPanel && panel ? [panel as WorkspaceDrawerPanel] : undefined;
+		const pinnedPanels = Array.isArray(value.pinnedPanels) ? value.pinnedPanels.filter((item): item is WorkspaceDrawerPanel => typeof item === "string" && validPanels.includes(item)) : typeof value.pinned === "boolean" && value.pinned && validPanel && panel ? [panel as WorkspaceDrawerPanel] : undefined;
 		// drawerPinned（工作区钉住）只能来自显式持久化；旧存档无此字段 → false（见下方水合注释）。
 		const drawerPinned = value.drawerPinned === true;
 		return validPanel && Array.isArray(pinnedPanels) ? { panel: panel as WorkspaceDrawerPanel | null, pinnedPanels, drawerPinned } : null;
@@ -211,7 +209,7 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 
 	const loadDrawerState = useCallback((id: string) => readDrawerState(storageRef.current, `${drawerPrefixRef.current}${id}`), []);
 	const saveDrawerState = useCallback((id: string, panel: WorkspaceDrawerPanel | null, pinnedPanels: readonly WorkspaceDrawerPanel[], drawerPinned: boolean) => writeDrawerState(storageRef.current, `${drawerPrefixRef.current}${id}`, panel, pinnedPanels, drawerPinned), []);
-	const pinnedPanels = projectId ? pinnedPanelsByProject[projectId] ?? DEFAULT_PINNED_DRAWER_PANELS : DEFAULT_PINNED_DRAWER_PANELS;
+	const pinnedPanels = projectId ? (pinnedPanelsByProject[projectId] ?? DEFAULT_PINNED_DRAWER_PANELS) : DEFAULT_PINNED_DRAWER_PANELS;
 
 	// 项目上下文水合（null → 首个 projectId）不得视为「切换项目」：
 	// 用户在水合完成前已手动打开的抽屉会被保存态重置误关（E2E 与快速操作均可复现）。
@@ -331,16 +329,19 @@ export function useWorkspacePanels(options: WorkspacePanelOptions = {}) {
 
 	const expandDrawer = useCallback(() => setDrawerCollapsed(false), []);
 
-	const toggleDrawerPanelPinned = useCallback((panel: WorkspaceDrawerPanel) => {
-		const id = projectIdRef.current;
-		if (!id || panel === "rpcLog") return;
-		const current = pinnedPanelsByProjectRef.current[id] ?? DEFAULT_PINNED_DRAWER_PANELS;
-		const next = current.includes(panel) ? current.filter((item) => item !== panel) : [...current, panel];
-		if (next.length === 0) return;
-		pinnedPanelsByProjectRef.current = { ...pinnedPanelsByProjectRef.current, [id]: next };
-		setPinnedPanelsByProject((all) => ({ ...all, [id]: next }));
-		saveDrawerState(id, drawerRef.current, next, drawerPinnedRef.current);
-	}, [saveDrawerState]);
+	const toggleDrawerPanelPinned = useCallback(
+		(panel: WorkspaceDrawerPanel) => {
+			const id = projectIdRef.current;
+			if (!id || panel === "rpcLog") return;
+			const current = pinnedPanelsByProjectRef.current[id] ?? DEFAULT_PINNED_DRAWER_PANELS;
+			const next = current.includes(panel) ? current.filter((item) => item !== panel) : [...current, panel];
+			if (next.length === 0) return;
+			pinnedPanelsByProjectRef.current = { ...pinnedPanelsByProjectRef.current, [id]: next };
+			setPinnedPanelsByProject((all) => ({ ...all, [id]: next }));
+			saveDrawerState(id, drawerRef.current, next, drawerPinnedRef.current);
+		},
+		[saveDrawerState],
+	);
 
 	const toggleDrawerPinned = useCallback(() => {
 		const id = projectIdRef.current;

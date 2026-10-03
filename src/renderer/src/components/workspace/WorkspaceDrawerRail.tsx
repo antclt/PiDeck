@@ -35,42 +35,41 @@ export function WorkspaceDrawerRail(props: { actions: WorkspaceDrawerRailAction[
 		<div className="drawer-activity-rail flex h-10 shrink-0 items-center gap-1 border-b border-border/40 bg-background px-2" role="tablist" aria-orientation="horizontal">
 			{visibleActions.map((action) => (
 				<Fragment key={action.id}>
-				<Button
-					type="button"
-					role="tab"
-					aria-selected={action.active}
-					data-testid={`drawer-rail-${action.id}`}
-					variant={action.active ? "secondary" : "ghost"}
-					size="icon"
-					className={cn("drawer-activity-rail-button relative size-8", action.active && "active")}
-					title={action.label}
-					aria-label={action.label}
-					onClick={action.onClick}
-				>
-					{action.icon}
-					{action.active ? <span className="pointer-events-none absolute inset-x-1.5 -bottom-1 h-0.5 rounded-full bg-foreground" aria-hidden="true" /> : null}
-				</Button>
-				{action.canRemove && action.pinned && action.onTogglePinned ? (
 					<Button
 						type="button"
-						variant="ghost"
+						role="tab"
+						aria-selected={action.active}
+						data-testid={`drawer-rail-${action.id}`}
+						variant={action.active ? "secondary" : "ghost"}
 						size="icon"
-						className="drawer-rail-remove size-6 text-muted-foreground"
-						title={`Remove ${action.label}`}
-						aria-label={`Remove ${action.label}`}
-						onClick={action.onTogglePinned}
+						className={cn("drawer-activity-rail-button relative size-8", action.active && "active")}
+						title={action.label}
+						aria-label={action.label}
+						onClick={action.onClick}
 					>
-						<X size={13} />
+						{action.icon}
+						{action.active ? <span className="pointer-events-none absolute inset-x-1.5 -bottom-1 h-0.5 rounded-full bg-foreground" aria-hidden="true" /> : null}
 					</Button>
-				) : null}
+					{action.canRemove && action.pinned && action.onTogglePinned ? (
+						<Button type="button" variant="ghost" size="icon" className="drawer-rail-remove size-6 text-muted-foreground" title={`Remove ${action.label}`} aria-label={`Remove ${action.label}`} onClick={action.onTogglePinned}>
+							<X size={13} />
+						</Button>
+					) : null}
 				</Fragment>
 			))}
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
-					<Button type="button" variant="ghost" size="icon" className="size-8" title={props.addLabel} aria-label={props.addLabel}><Plus size={16} /></Button>
+					<Button type="button" variant="ghost" size="icon" className="size-8" title={props.addLabel} aria-label={props.addLabel}>
+						<Plus size={16} />
+					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start">
-					{optionalActions.map((action) => <DropdownMenuCheckboxItem key={action.id} checked={action.pinned ?? false} onCheckedChange={() => action.onTogglePinned?.()}>{action.icon}{action.label}</DropdownMenuCheckboxItem>)}
+					{optionalActions.map((action) => (
+						<DropdownMenuCheckboxItem key={action.id} checked={action.pinned ?? false} onCheckedChange={() => action.onTogglePinned?.()}>
+							{action.icon}
+							{action.label}
+						</DropdownMenuCheckboxItem>
+					))}
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>
