@@ -50,12 +50,24 @@ function stripCode(text: string): string {
 // 中文「提交」排掉 git 语义外的固定搭配（提交节点/锁/表单/调度器等通用词），
 // 宁可漏判也不在无关回复里冒泡；英文 commit 用 ASCII 词边界。
 const NON_GIT_COMMIT_SUFFIX = "(?!节点|锁|表单|申请|调度|队列|作业|任务|流程|审批|请求|物化|视图)";
-const COMMIT_PATTERNS: RegExp[] = [new RegExp(`提交${NON_GIT_COMMIT_SUFFIX}`), /(?<![a-z0-9])commit(?![a-z0-9])/i];
+// 英文允许复数 commits（"ready to push the commits" 里单数模式 commit(?!s 前瞻)
+// 会漏掉，历史上就因此漏判）
+const COMMIT_PATTERNS: RegExp[] = [new RegExp(`提交${NON_GIT_COMMIT_SUFFIX}`), /(?<![a-z0-9])commits?(?![a-z0-9])/i];
 // 推送意图要求 git 语境同现（远程/origin/分支/改动…）；裸 "push"「推送」
 // 与产品语境的「推送消息/推送通知」歧义太大，不做无上下文匹配。
 // 「催更」是中文开发者社区对 push 的常用俗称，无需额外上下文。
 const GIT_PUSH_CONTEXT = "(?:远程|远端|origin|仓库|代码|改动|分支|main|dev)";
-const PUSH_PATTERNS: RegExp[] = [/催更/, new RegExp(`推(?:送)??.{0,8}${GIT_PUSH_CONTEXT}`), new RegExp(`${GIT_PUSH_CONTEXT}.{0,8}推`), /(?<![a-z0-9])(?:git\s+)?push(?:es)?\s+(?:to\s+)?[a-z0-9/_-]*(?:origin|remote|main|dev|branch)/i];
+const PUSH_PATTERNS: RegExp[] = [
+	/催更/,
+	new RegExp(`推(?:送)??.{0,8}${GIT_PUSH_CONTEXT}`),
+	new RegExp(`${GIT_PUSH_CONTEXT}.{0,8}推`),
+	// commit 与 push 同现（任意顺序、中间隔少量词，含复数）："commit and push"
+	// "push the commits" 这种短语本身就是明确 git 动作语境，无需再要求 origin/
+	// 远程等上下文词（上面英文通用模式要求了，这里补组合写法的缺口）
+	/(?<![a-z0-9])commits?[^.!?:;]{0,16}(?<![a-z0-9])push(?![a-z0-9])/i,
+	/(?<![a-z0-9])push(?![a-z0-9])[^.!?:;]{0,16}(?<![a-z0-9])commits?(?![a-z0-9])/i,
+	/(?<![a-z0-9])(?:git\s+)?push(?:es)?\s+(?:to\s+)?[a-z0-9/_-]*(?:origin|remote|main|dev|branch)/i,
+];
 
 function matchesAny(patterns: RegExp[], text: string): boolean {
 	return patterns.some((pattern) => pattern.test(text));
