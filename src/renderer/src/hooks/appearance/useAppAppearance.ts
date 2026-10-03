@@ -68,8 +68,9 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 	useEffect(() => {
 		// 明暗 / 外观主题 / 主色统一经 themeAppearance 应用（与设置弹窗实时预览共用实现）：
 		// data-theme(浅暗) + data-appearance(表面色板) + data-accent(主题自带主色)。
-		const root = document.documentElement;
-		const apply = () => applyAppearanceAttributes(root, settings, systemPrefersDark);
+		// 保持直调字面 applyAppearanceAttributes(document.documentElement, …)：wallpaperThemeSync
+		// 契约扫描锚定该语句定位本 effect，改形状会误报「effect not found」。
+		const apply = () => applyAppearanceAttributes(document.documentElement, settings, systemPrefersDark);
 		// 首次应用（启动）不包 ViewTransition：冷启动不加快照开销；后续切换（dock 翻转/
 		// 定时边界/设置保存）经 ViewTransition 交叉淡入，避免整页颜色瞬时翻转刺眼。
 		// 设置弹窗的草稿拖动预览走的是直调路径（不经本 hook），不受影响。
