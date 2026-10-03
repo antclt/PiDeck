@@ -27,6 +27,7 @@ import { isShortcutInput, refreshShortcutBindings } from "./appShortcuts";
 // 主进程复用共享的接管型扩展识别规则（与渲染层横幅单一来源；纯函数无依赖）。
 import { detectThirdPartyMcpExtensions } from "../shared/mcpThirdParty";
 import { PiResourceConfigService } from "./config/PiResourceConfigService";
+import { isPackageSource, isEntryDisabled, packageSourceOf } from "./config/PiResourceConfigService";
 import { projectResourceEnabled } from "./config/piResourceRules";
 import { PiResourceStateStore } from "./config/PiResourceStateStore";
 import { readPiConfigFile } from "./config/piConfigFileStore";
@@ -442,6 +443,8 @@ let ensurePiResourceMigration: ((projectId?: string) => Promise<void>) | undefin
 let skillManagerNativeEntries: string[] | null = null;
 let promptManagerNativeEntries: string[] | null = null;
 let extensionManagerNativeEntries: string[] | null = null;
+/** settings.json 的 packages 条目缓存：整包停用写在这里，扩展投影必须一并读取。 */
+let extensionManagerNativePackages: unknown[] | null = null;
 let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
@@ -3418,6 +3421,12 @@ app
 		extensionManager.configureNativeEnabledReader((extension) => {
 			const entries = extensionManagerNativeEntries;
 			if (!entries) return undefined;
+			// 包安装的扩展：整包停用写在 packages 条目过滤里（不在顶层 extensions 数组），
+			// 必须单独查——否则开关写成功了、刷新后仍显示启用，开关弹回。
+			if (extensionManagerNativePackages && isPackageSource(extension.source)) {
+				const pkg = extensionManagerNativePackages.find((entry) => packageSourceOf(entry) === extension.source);
+				if (pkg && isEntryDisabled(pkg)) return false;
+			}
 			return projectResourceEnabled({ entries, value: extension.path ?? extension.source, baseDir: extension.path ? dirname(extension.path) : "" });
 		});
 		// 项目侧资源开关写项目 `.pi/settings.json` 的原生过滤规则（A4）。
@@ -4152,7 +4161,16 @@ app
 			promptManagerNativeEntries = await readNativeEntries("prompts");
 		};
 		const refreshExtensionProjection = async (): Promise<void> => {
-			extensionManagerNativeEntries = await readNativeEntries("extensions");
+			try {
+				const file = await readPiConfigFile(join(configManager.getConfigDir(), "settings.json"));
+				const extensions = file.data.extensions;
+				const packages = file.data.packages;
+				extensionManagerNativeEntries = Array.isArray(extensions) ? extensions.filter((item): item is string => typeof item === "string") : [];
+				extensionManagerNativePackages = Array.isArray(packages) ? packages.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item)) : [];
+			} catch {
+				extensionManagerNativeEntries = null;
+				extensionManagerNativePackages = null;
+			}
 		};
 		/**
 		 * 迁移依赖：全局与项目共用（项目迁移也需要全局资源做名称→路径映射）。
