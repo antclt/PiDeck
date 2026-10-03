@@ -334,7 +334,9 @@ export function SessionContextMeter(props: {
 						}}
 					>
 						<div className="flex items-center gap-1.5">
-							<span className="text-text-tertiary">{reading}</span>
+							<span className="text-text-tertiary" title={t("sessionContext.usageHint")}>
+								{reading}
+							</span>
 							{available && figures !== undefined && <span className="ml-auto font-medium tabular-nums text-foreground">{figures}</span>}
 						</div>
 						<div className="mt-2.5 h-1 overflow-hidden rounded-full bg-muted">
@@ -375,17 +377,17 @@ export function SessionContextMeter(props: {
 									<>
 										<div className="flex items-center gap-1.5">
 											<span className="size-2 flex-none rounded-[2px]" style={{ backgroundColor: COLOR_SYSTEM }} />
-											<span>{t("sessionContext.system")}</span>
+											<span title={t("sessionContext.systemHint")}>{t("sessionContext.system")}</span>
 											<span className="ml-auto tabular-nums text-text-tertiary">~{formatTokens(segments.system)}</span>
 										</div>
 										<div className="flex items-center gap-1.5">
 											<span className="size-2 flex-none rounded-[2px]" style={{ backgroundColor: COLOR_TOOLS }} />
-											<span>{t("sessionContext.tools")}</span>
+											<span title={t("sessionContext.toolsHint")}>{t("sessionContext.tools")}</span>
 											<span className="ml-auto tabular-nums text-text-tertiary">~{formatTokens(segments.tools)}</span>
 										</div>
 										<div className="flex items-center gap-1.5">
 											<span className="size-2 flex-none rounded-[2px]" style={{ backgroundColor: COLOR_CONVERSATION }} />
-											<span>{t("sessionContext.conversation")}</span>
+											<span title={t("sessionContext.conversationHint")}>{t("sessionContext.conversation")}</span>
 											<span className="ml-auto tabular-nums text-text-tertiary">~{formatTokens(segments.conversation)}</span>
 										</div>
 									</>
@@ -393,12 +395,12 @@ export function SessionContextMeter(props: {
 									<>
 										<div className="flex items-center gap-1.5">
 											<span className="size-2 flex-none rounded-[2px]" style={{ backgroundColor: COLOR_CONVERSATION }} />
-											<span>{t("sessionContext.conversation")}</span>
+											<span title={t("sessionContext.conversationEstimateHint")}>{t("sessionContext.conversation")}</span>
 											<span className="ml-auto tabular-nums text-text-tertiary">~{formatTokens(segments.conversation)}</span>
 										</div>
 										<div className="flex items-center gap-1.5">
 											<span className="size-2 flex-none rounded-[2px]" style={{ backgroundColor: COLOR_SYSTEM_TOOLS }} />
-											<span>{t("sessionContext.systemTools")}</span>
+											<span title={t("sessionContext.systemToolsEstimateHint")}>{t("sessionContext.systemTools")}</span>
 											<span className="ml-auto tabular-nums text-text-tertiary">~{formatTokens(segments.systemTools)}</span>
 										</div>
 									</>
@@ -408,7 +410,7 @@ export function SessionContextMeter(props: {
 						{(panelDetailRows.length > 0 || detail.replyPerfRows.length > 0 || detail.sessionStatRows.length > 0) && (
 							<div className="mt-2 space-y-0.5 border-t border-border pt-2">
 								{panelDetailRows.map((row) => (
-									<div key={row.label} className={`flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}>
+									<div key={row.label} title={row.hint} className={`flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}>
 										<span className="shrink-0 text-text-secondary">{row.label}</span>
 										<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 									</div>
@@ -419,7 +421,7 @@ export function SessionContextMeter(props: {
 							<div className="mt-2.5 space-y-0.5 border-t border-border pt-2">
 								<div className="px-0.5 text-micro font-semibold uppercase tracking-wide text-text-tertiary">{t("ctx.detail.lastReply")}</div>
 								{detail.replyPerfRows.map((row) => (
-									<div key={row.label} className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5">
+									<div key={row.label} title={row.hint} className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5">
 										<span className="shrink-0 text-text-secondary">{row.label}</span>
 										<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 									</div>
@@ -430,7 +432,7 @@ export function SessionContextMeter(props: {
 							<div className="mt-2.5 space-y-0.5 border-t border-border pt-2">
 								<div className="px-0.5 text-micro font-semibold uppercase tracking-wide text-text-tertiary">{t("ctx.detail.sessionStats")}</div>
 								{detail.sessionStatRows.map((row) => (
-									<div key={row.label} className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5">
+									<div key={row.label} title={row.hint} className="flex items-baseline justify-between gap-4 px-0.5 py-0.5 text-caption leading-5">
 										<span className="shrink-0 text-text-secondary">{row.label}</span>
 										<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-foreground">{row.value}</span>
 									</div>
