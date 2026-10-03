@@ -362,14 +362,26 @@ test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相
 		//（2026-10 GitHub runner 上模块内连续失败但 setup 阶段同类调用成功，需定位分叉）。
 		const firstRepair = repairPortableNodeLinks(root, "linux");
 		if (firstRepair.length === 0) {
-			const { rmSync: hostRm, symlinkSync: hostSymlink } = await import("node:fs");
+			const { lstatSync, rmSync: hostRm, symlinkSync: hostSymlink } = await import("node:fs");
+			// 分步快照：定位「rmSync 假成功」时路径残留的到底是个什么（软链/真文件/目录）。
+			const describePath = (p) => {
+				try {
+					const st = lstatSync(p);
+				return st.isDirectory() ? "dir" : st.isSymbolicLink() ? "symlink" : "file";
+				} catch {
+					return "absent";
+				}
+			};
+			const beforeRm = describePath(join(binDir, "npm"));
+			hostRm(join(binDir, "npm"), { force: true });
+			const afterRm = describePath(join(binDir, "npm"));
+			assert.equal(afterRm, "absent", `rmSync 后路径仍存在：rm 前=${beforeRm} rm 后=${afterRm}`);
 			try {
-				hostRm(join(binDir, "npm"), { force: true });
 				hostSymlink(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(binDir, "npm"));
 			} catch (error) {
 				assert.fail(`宿主重演修复失败: ${error?.code ?? "?"} ${error?.message ?? String(error)}`);
 			}
-			assert.fail("模块内修复失败但宿主重演同一组调用成功——模块环境分叉，需上报错误码定位");
+			assert.fail(`模块内修复失败但宿主重演成功（rm 前=${beforeRm}）——模块环境分叉，需上报错误码定位`);
 		}
 		const repaired = firstRepair;
 		// 先看链接终态再比对返回值：修复动作失败时（rm 后 symlink 被杀软锁住等），
