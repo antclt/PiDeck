@@ -3096,7 +3096,7 @@ export class AgentManager {
 			projectId: runtime.tab.projectId,
 			sessionPath: runtime.tab.sessionPath,
 		});
-		const { projectId, title, sessionEnvironment: environment, sessionSource: source, wslDistro, wslUser, importedSourceId, noSession } = runtime.tab;
+		const { projectId, title, sessionEnvironment: environment, sessionSource: source, wslDistro, wslUser, importedSourceId, noSession, deckSessionId } = runtime.tab;
 
 		// 优先从 pi 获取最新 sessionFile，兜底用 tab 上缓存的值；
 		// 避免首次创建时未指定 session 路径、restart 后丢失历史的情况。
@@ -3135,6 +3135,8 @@ export class AgentManager {
 		this.emitState();
 
 		// 用相同的 session 重新创建 agent，新进程会重新加载所有配置
+		// deckSessionId 必须随 restart 带入：安全门扩展靠它（PIDECK_SESSION_ID）解析
+		// 以 catalog 会话 ID 存储的 sessionOverrides，丢了会回退全局默认等级（issue #302）。
 		return this.create({
 			projectId,
 			sessionPath: noSession ? undefined : sessionPath,
@@ -3145,6 +3147,7 @@ export class AgentManager {
 			wslUser,
 			importedSourceId,
 			noSession,
+			deckSessionId,
 		});
 	}
 
