@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.7-blue)
+![Version](https://img.shields.io/badge/version-0.7.8-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -42,7 +42,7 @@
   - [📑 Table of Contents](#-table-of-contents)
   - [✨ Highlights](#-highlights)
   - [📋 Changelog](#-changelog)
-    - [v0.7.7 Release Highlights](#v077-release-highlights)
+    - [v0.7.8 Release Highlights](#v078-release-highlights)
   - [🧩 Features](#-features)
     - [Workspace & Projects](#workspace--projects)
     - [Sessions & Conversation](#sessions--conversation)
@@ -85,6 +85,7 @@
 
 ### v0.7.8 Release Highlights
 - 🚀 **Data folder renamed to PiDeck with automatic migration**
+- 🚀 **Custom themes (JSON theme packs + an AI authoring guide)**
 - 🚀 **Usage probe template for Volcengine Ark (AK/SK)**
 - 🚀 **Provider names now accept Chinese**
 - 🚀 **DSH "Add provider" now collects everything it needs**
@@ -95,7 +96,6 @@
 - 🚀 **Import Qoder sessions**
 - 🚀 **Model configuration export / import panel (#261)**
 - 🚀 **The send button now carries the delivery menu**
-- 🚀 **Latest-reply quick actions**
 - ✨ **One-click pi install no longer fails on Windows**
 - ✨ **Fixed path linkification swallowing the rest of the text**
 - ✨ **Fixed Chinese prose slashes being mistaken for paths**
