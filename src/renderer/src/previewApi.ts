@@ -519,6 +519,14 @@ export function createPreviewApi(): PiDesktopApi {
 			pickBackgroundImage: async () => "",
 			removeBackgroundImage: async () => undefined,
 		},
+		// 自定义主题预览桩：返回空列表与拒绝保存，预览壳没有真实 userData 目录
+		customThemes: {
+			list: async () => ({ dir: "", themes: [] }),
+			read: async () => null,
+			save: async () => ({ ok: false as const, errors: ["preview"] }),
+			remove: async () => undefined,
+			writeGuide: async () => "",
+		},
 		sessions: {
 			list: async () => getSessions(),
 			// 预览模式无 DSH host：空预设目录满足接口契约

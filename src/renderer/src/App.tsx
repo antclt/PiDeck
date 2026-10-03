@@ -648,25 +648,6 @@ export function App() {
 		terminalStatesByOwner,
 		prune: pruneTerminalDockState,
 	} = useTerminalDock(terminalOwner);
-	// 终端 IPC 目标：
-	// - agent owner → 当前会话的 runtime target（须绑定已启动 Agent）；拿不到 runtime
-	//   （从未启动 / 停止后绑定缺失）时回退项目 cwd 目标，主进程按 cwd 隔离 PTY——
-	//   保证普通项目的会话无论 Agent 是否激活都能开项目终端（按钮常显）。
-	// - project owner（引导页/未激活 agent/历史会话）→ 项目 cwd。
-	// - Chat 项目没有可落地的 cwd，不提供终端（激活中的匿名聊天除外，走 agent 目标）。
-	const terminalTarget: TerminalTarget | undefined = useMemo(() => {
-		if (!terminalOwner) return undefined;
-		const fallbackProject = (() => {
-			const pid = terminalOwner.kind === "project" ? terminalOwner.id : (activeProjectId ?? currentSessionRecord?.projectId);
-			return pid ? projects.find((p) => p.id === pid) : undefined;
-		})();
-		const projectTarget = fallbackProject && !isChatProject(fallbackProject) ? { kind: "project" as const, projectId: fallbackProject.id, cwd: fallbackProject.path } : undefined;
-		if (terminalOwner.kind === "agent") {
-			const runtimeTarget = getRuntimeTargetForSession(currentSessionId);
-			return runtimeTarget ? { kind: "agent", ...runtimeTarget } : projectTarget;
-		}
-		return projectTarget;
-	}, [terminalOwner, currentSessionId, currentSessionRecord, projects, activeProjectId]);
 	const [expandedSidebarProjects, setExpandedSidebarProjects] = useState<Set<string>>(new Set());
 	const expandedSidebarProjectsRef = useRef(expandedSidebarProjects);
 	expandedSidebarProjectsRef.current = expandedSidebarProjects;
@@ -1076,6 +1057,22 @@ export function App() {
 		queueFlushBySessionRef,
 		queuedPromptsRef: queue.queuedPromptsRef,
 	});
+
+	// 终端 IPC 目标：Agent 会话优先绑定当前 runtime；未启动或已停止时回退到项目 cwd。
+	// 该计算必须放在 useSessionRunControl 之后，因为 runtime target resolver 是该 hook 的返回值。
+	const terminalTarget: TerminalTarget | undefined = useMemo(() => {
+		if (!terminalOwner) return undefined;
+		const fallbackProject = (() => {
+			const pid = terminalOwner.kind === "project" ? terminalOwner.id : (activeProjectId ?? currentSessionRecord?.projectId);
+			return pid ? projects.find((p) => p.id === pid) : undefined;
+		})();
+		const projectTarget = fallbackProject && !isChatProject(fallbackProject) ? { kind: "project" as const, projectId: fallbackProject.id, cwd: fallbackProject.path } : undefined;
+		if (terminalOwner.kind === "agent") {
+			const runtimeTarget = getRuntimeTargetForSession(currentSessionId);
+			return runtimeTarget ? { kind: "agent" as const, ...runtimeTarget } : projectTarget;
+		}
+		return projectTarget;
+	}, [terminalOwner, currentSessionId, currentSessionRecord, projects, activeProjectId, getRuntimeTargetForSession]);
 
 	const quickTask = useQuickTask({ ready: settingsLoaded, backend: effectiveAgentBackend, upsertSession, selectSession: selectSessionCommand, registerSession: workspaceChrome.registerOpenSession, refreshProjects, getSessionRecord });
 
@@ -1499,13 +1496,12 @@ export function App() {
 		let stopped = false;
 		const refreshGitInfo = async () => {
 			try {
-				// 轮询分支信息
 				const next = await api.git.branches(activeProjectId);
 				if (stopped) return;
-				// 分支可能在外部终端/IDE 中切换,轮询只在状态真的变化时更新,避免不必要重渲染。
+				// 外部终端/IDE 切分支时同步侧栏徽标与抽屉，只在状态真的变化时更新，避免不必要重渲染。
 				setGitInfo((current) => (current.current === next.current && current.branches.join("\n") === next.branches.join("\n") ? current : next));
 				// 侧栏分支徽标与 Git 抽屉同源：外部终端 checkout 后也要一起跟上。
-				// 只更新聚焦项目——非聚焦项目不在轮询范围内，由栏内 usePaneGitInfo 回写。
+				// 只更新聚焦项目——非聚焦项目不在监听范围内，由栏内 usePaneGitInfo 回写。
 				setBranchByProject((prev) => (prev[activeProjectId] === next.current ? prev : { ...prev, [activeProjectId]: next.current }));
 			} catch {
 				if (!stopped) {
@@ -1513,10 +1509,25 @@ export function App() {
 				}
 			}
 		};
-		const timer = window.setInterval(refreshGitInfo, 4000);
+		void refreshGitInfo();
+		// 与栏内 usePaneGitInfo 同一事件源：主进程 GitRefsWatcher 复用一份 1.5s refs
+		// 签名轮询，替代 App 级 4s 盲轮询；订阅失败时静默降级为初始一次回读。
+		const offRefsChanged = api.git.onRefsChanged((changedWatchId) => {
+			if (changedWatchId !== watchId || stopped) return;
+			void refreshGitInfo();
+		});
+		const watchPromise = api.git.watchRefs(activeProjectId).catch(() => null);
+		let watchId: string | null = null;
+		void watchPromise.then((id) => {
+			watchId = id;
+		});
 		return () => {
 			stopped = true;
-			window.clearInterval(timer);
+			offRefsChanged();
+			// 竞态安全：卸载时 watch 可能尚未 resolve，退订等它落地后执行。
+			void watchPromise.then((id) => {
+				if (id) void api.git.unwatchRefs(id);
+			});
 		};
 	}, [activeProjectId]);
 
@@ -2736,7 +2747,7 @@ export function App() {
 												label: t("drawer.sourceControl"),
 												icon: <GitBranch size={16} />,
 												active: drawer === "git",
-														pinned: true,
+												pinned: true,
 												onClick: () => handleToolDrawerAction("git"),
 											},
 										]
@@ -2760,9 +2771,9 @@ export function App() {
 												label: t("rewind.title"),
 												icon: <History size={16} />,
 												active: drawer === "rewind",
-														pinned: workspace.pinnedPanels.includes("rewind"),
-														canRemove: true,
-														onTogglePinned: () => workspace.toggleDrawerPanelPinned("rewind"),
+												pinned: workspace.pinnedPanels.includes("rewind"),
+												canRemove: true,
+												onTogglePinned: () => workspace.toggleDrawerPanelPinned("rewind"),
 												onClick: () => handleToolDrawerAction("rewind"),
 											},
 										]

@@ -11,6 +11,7 @@ import { sanitizeShortcutOverrides } from "../../shared/shortcuts";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { normalizeQuickMessages } from "../../shared/quickMessages";
 import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
+import { sanitizeCustomThemeSnapshot } from "../../shared/customThemes";
 import { normalizeFontSizeMode, normalizeOptionalFontSizeMode } from "../../shared/fontSize";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -41,18 +42,20 @@ function readDesktopSettingsSync(): Partial<AppSettings> {
  * 在 app.ready 之前同步读取 Chromium 沙箱偏好。
  * `no-sandbox` 必须在 ready 前 append，否则本进程已无法改 Chromium 启动参数。
  * 缺省 false：保持历史兼容（Windows 安全软件/旧驱动）。
+ * 可传入共享快照（readBootPreferences）：避免启动阶段重复读盘。
  */
-export function readElectronChromiumSandboxPreference(): boolean {
-	return readDesktopSettingsSync().electronChromiumSandbox === true;
+export function readElectronChromiumSandboxPreference(settings: Partial<AppSettings> = readDesktopSettingsSync()): boolean {
+	return settings.electronChromiumSandbox === true;
 }
 
 /**
  * 在 app.ready 之前同步读取单实例偏好。
  * 版本级单实例锁必须在 ready 前申请（见 main/singleInstance.ts）。
  * 缺省 true：同一版本再次打开时复用窗口；不同版本始终可并行。
+ * 可传入共享快照（readBootPreferences）：避免启动阶段重复读盘。
  */
-export function readSingleInstancePreference(): boolean {
-	const value = readDesktopSettingsSync().singleInstance;
+export function readSingleInstancePreference(settings: Partial<AppSettings> = readDesktopSettingsSync()): boolean {
+	const value = settings.singleInstance;
 	// 未配置时默认开启单实例；只有显式 false 才允许同版本多开。
 	return value !== false;
 }
@@ -62,9 +65,24 @@ export function readSingleInstancePreference(): boolean {
  * Linux 的 XWayland 兼容层（见 main/linuxDisplayBackend.ts，#108）必须在 ready 前
  * 决定是否强制 ozone-platform=x11，而宠物是该兼容层的唯一受益者，故以此为准。
  * 缺省 false：未启用宠物的 Linux 用户走原生显示后端，主窗口不受兼容层影响。
+ * 可传入共享快照（readBootPreferences）：避免启动阶段重复读盘。
  */
-export function readPetEnabledPreference(): boolean {
-	return readDesktopSettingsSync().petEnabled === true;
+export function readPetEnabledPreference(settings: Partial<AppSettings> = readDesktopSettingsSync()): boolean {
+	return settings.petEnabled === true;
+}
+
+/**
+ * ready 前启动偏好的合并读取（index.ts 模块顶层）：一次文件读取返回三个启动快照值，
+ * 替代三个 helper 各自 readFileSync+JSON.parse 的重复 IO（2026-10 启动审计）。
+ * 启动后调用方（PetWindow/EnvironmentDoctor）继续走各 helper 的独立读取，语义不变。
+ */
+export function readBootPreferences() {
+	const settings = readDesktopSettingsSync();
+	return {
+		electronChromiumSandbox: readElectronChromiumSandboxPreference(settings),
+		singleInstance: readSingleInstancePreference(settings),
+		petEnabled: readPetEnabledPreference(settings),
+	};
 }
 
 /**
@@ -540,6 +558,16 @@ export class SettingsStore {
 		// 用户自加的 pi 候选路径来自渲染层，入参不可信：只保留绝对路径/wsl 标记、去重、限额。
 		if ("piCustomPaths" in safePatch) {
 			safePatch.piCustomPaths = sanitizePiCustomPaths(safePatch.piCustomPaths).paths;
+		}
+		// 自定义主题快照入参不可信：逐键过滤非法 token/颜色，整体非法则丢弃字段（保持原设置）。
+		// undefined 是合法值（切回内置皮肤时清除快照），不能当成脏值丢弃。
+		if ("customTheme" in safePatch) {
+			const snapshot = sanitizeCustomThemeSnapshot(safePatch.customTheme);
+			if (snapshot || safePatch.customTheme === undefined) {
+				safePatch.customTheme = snapshot;
+			} else {
+				delete safePatch.customTheme;
+			}
 		}
 		// IPC 入参不可信：自动标题开关只接受布尔值，非法值保持原有设置。
 		if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {

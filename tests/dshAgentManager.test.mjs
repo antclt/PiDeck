@@ -1366,6 +1366,32 @@ test("sendPrompt rejects a provider absent from routableProviders", async () => 
 	assert.equal((await manager.getRuntimeState(tab.id)).modelRoutable, false);
 });
 
+test("sendPrompt 把 session/writer-held 映射为可操作文案，其他拒绝码不受影响", async () => {
+	const { host, client } = makeFakeHost();
+	const manager = new DshAgentManager(host, () => PROJECT);
+	const tab = await manager.create({ projectId: "project-1", backend: "dsh" });
+	// 写锁被其他 DSH 客户端（DeepSeek 桌面版/dsh CLI）持有时 host 拒绝 prompt；
+	// 该错误必须映射为可操作文案键，而不是把原始 JSON 甩给用户。
+	client.sessionsPrompt = async () => ({
+		result: { ok: false, error: { code: "session/writer-held", message: "already owned by an active write handle", details: {} } },
+	});
+	const held = await manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	assert.equal(held.accepted, false);
+	assert.equal(held.delivery, "rejected");
+	assert.equal(held.i18nKey, "session.sendDshWriterHeld");
+	assert.match(held.error, /writer-held/);
+
+	// 其他错误码保持原行为：不携带 i18nKey，由通用 rejected 兑底。
+	client.sessionsPrompt = async () => ({
+		result: { ok: false, error: { code: "gateway/bad-request", message: "nope", details: {} } },
+	});
+	const other = await manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	assert.equal(other.accepted, false);
+	assert.equal(other.i18nKey, undefined);
+
+	client.abortAllPending();
+});
+
 test("setPermission 只在 permission/preset 事件到达后报告成功，且命令不投影为用户消息", async () => {
 	const { host, client, promptCalls } = makeFakeHost();
 	const manager = new DshAgentManager(host, () => PROJECT);

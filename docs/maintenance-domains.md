@@ -63,3 +63,10 @@
 - **事故教训（2026-09-23，用户报「斜杠后文本不显示」）**：尾段回填在 `fb6b5667`（feat(markdown): 文件链接存在性校验，失效路径降级纯文本）把 `while` 改成 `for-of` 时被丢掉；表格 cell / API 路径场景下一个 text 节点几乎必以路径结尾，而日常只在段中命中路径，样例永远测不出来。用真实会话 jsonl 实测：91 条回复 47 条丢文本。判据是解析产物可见文本与原文一致，而不是「链接能点」。
 - **回归测试必须跑真实层级**：表格行（cell 内 text）、跨换行正文（`\n` 之后仍是同一个 text 节点）、inline code `__fileLink` 分支、路径正好在末尾（不留空 text 节点）。写法见 `tests/markdownPathTailTruncation.test.mjs`（unified + remark-parse 二次解析对比可见文本，不依赖 cwd/真实项目）。
 - **考古别只看最近几笔提交**：渲染丢文本这类回归可能潜伏数周，用 `git log --oneline -- <文件>` / `git log -S <片段>` 回到底，确认是「谁引入、为什么当时测不出」，再把这两件事写进注释与测试。
+
+## 自定义主题包（userData/custom-themes + shared/customThemes）
+
+- 单一事实源是 `src/shared/customThemes.ts`：token 白名单（`CUSTOM_THEME_TOKEN_GROUPS`，来自 foundation.css 语义 token 人工梳理）、id/颜色值校验、`DEMO_CUSTOM_THEME`、`CUSTOM_THEME_TEMPLATE` 全在这；主进程保存/目录扫描、渲染层编辑器提示、AI 指南（`customThemeGuide.ts` 生成的表格与示例）都从这里取数。**改 foundation token 命名或新增 token 时三处同步：foundation.css、白名单、指南测试断言**（`tests/customThemes.test.mjs` 会校验白名单全量 token 都出现在指南里）。
+- 用户 JSON 是不可信输入，两道闸都不可放宽：键必须在白名单内；值必须匹配静态颜色正则（`#hex` 或纯数值参数的 `rgb()/hsl()/oklch()`），天然排除 `var()/url()/渐变`（值最终只进 inline style，双保险）。坏文件不致命：目录扫描降级为 `parseError` 条目呈现。
+- 设置快照 `settings.customTheme`（无前缀键，亮暗双档）在 `SettingsStore.update` 里过 `sanitizeCustomThemeSnapshot`；**快照仅 `themeSkin === "custom"` 时生效**（`applyCustomThemeTokens` 守卫），切回内置皮肤的路径（AppearanceThemePicker onPick）必须同步 `customTheme: undefined`，否则残留快照压过内置皮肤。注入函数是 App 持久化应用（useAppAppearance）与设置弹窗预览/回滚（SettingsModal）共用入口，别复制第二份注入逻辑。
+- 内置示例 `DEMO_CUSTOM_THEME` 是常量不上磁盘：列表由它推导（校验不过就不上架，防常量与校验器漂移）、不可删除不可覆盖；「复制为新主题」靠字符串改写 id 生成副本。删除用户主题走 `trashPath` 回收站；主题文件被删后已应用主题不失效（快照内嵌设置文件）。

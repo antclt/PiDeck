@@ -11,6 +11,7 @@ import type { DataEnvChoiceFailure, DataEnvChoiceResult, DataEnvInfo, DataEnvMod
 import type { GitExecutableInfo } from "../shared/types/git";
 import type { DshRunnerNodeInfo, DshRunnerNodeInstallResult } from "../shared/types/dshRunnerNode";
 import type { ImageBlobPayload, ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
+import type { CustomThemeListItem } from "../shared/customThemes";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
 import type { BuiltInExtensionsCheckResult, BuiltInExtensionsUpdateResult, BuiltInExtensionsUpdateStatus } from "../shared/types/extensionsUpdate";
 import type { BuiltinContentCheckResult, BuiltinContentUpdateResult, BuiltinContentUpdateStatus } from "../shared/types/contentUpdate";
@@ -386,6 +387,18 @@ const api = {
 		pickBackgroundImage: () => ipcRenderer.invoke(ipcChannels.pickBackgroundImage) as Promise<string>,
 		/** 删除背景图文件（清空背景设置时调用） */
 		removeBackgroundImage: (name: string) => ipcRenderer.invoke(ipcChannels.removeBackgroundImage, name) as Promise<void>,
+	},
+	customThemes: {
+		/** 列出自定义主题（内置示例 + 用户目录；dir 为存放目录，供指南/提示展示） */
+		list: () => ipcRenderer.invoke(ipcChannels.listCustomThemes) as Promise<{ dir: string; themes: CustomThemeListItem[] }>,
+		/** 读取主题原始 JSON 文本（编辑器用；不存在返回 null） */
+		read: (id: string) => ipcRenderer.invoke(ipcChannels.readCustomTheme, id) as Promise<string | null>,
+		/** 校验并保存主题包；失败返回面向用户的错误清单 */
+		save: (raw: string) => ipcRenderer.invoke(ipcChannels.saveCustomTheme, raw) as Promise<{ ok: true; id: string } | { ok: false; errors: string[] }>,
+		/** 删除用户主题文件（回收站） */
+		remove: (id: string) => ipcRenderer.invoke(ipcChannels.deleteCustomTheme, id) as Promise<void>,
+		/** 把 AI 主题开发指南写入主题目录并在资源管理器定位，返回文件路径 */
+		writeGuide: (locale: "zh-CN" | "en-US") => ipcRenderer.invoke(ipcChannels.writeCustomThemeGuide, locale) as Promise<string>,
 	},
 	sessions: {
 		list: (projectId?: string) => ipcRenderer.invoke(ipcChannels.sessionsList, projectId) as Promise<SessionSummary[]>,

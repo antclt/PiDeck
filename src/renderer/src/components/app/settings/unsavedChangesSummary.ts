@@ -80,6 +80,8 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "accent", tab: "appearance", itemKey: "settings.accent" },
 	// 外观主题选择器同时改 themeSkin + accent（主题自带主色），两项归并到同一摘要
 	{ field: "themeSkin", tab: "appearance", itemKey: "settings.accent" },
+	// 自定义主题包快照与 themeSkin 联动（应用即切 custom + 写快照），归并到同一摘要
+	{ field: "customTheme", tab: "appearance", itemKey: "settings.sectionCustomThemes" },
 	{ field: "backgroundImage", tab: "appearance", itemKey: "settings.backgroundImage" },
 	{ field: "backgroundImageOpacity", tab: "appearance", itemKey: "settings.backgroundImage" },
 	{ field: "zoomFactor", tab: "appearance", itemKey: "settings.zoomFactor" },

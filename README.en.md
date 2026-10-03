@@ -81,25 +81,25 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.7.7** (2026-09-22)
+> **Latest: v0.7.8** (2026-10-03)
 
-### v0.7.7 Release Highlights
-- 🚀 **Search workspace files by name (#215)**
-- 🚀 **Import sessions from another directory (recover history after a move or rename)**
-- 🚀 **Import external resources (MCP / skills / prompt templates)**
-- 🚀 **Strict tool sampling can be switched explicitly (`compat.supportsStrictMode`)**
-- 🚀 **Hide and reorder providers, models and auth entries**
-- 🚀 **New “cycle model” and “cycle thinking effort” shortcuts (Ctrl+M / Ctrl+T, macOS ⌘⌥M / ⌘⌥T)**
-- 🚀 **Session tab hover tooltips show the workspace**
-- 🚀 **Hour-scale durations for long tasks**
-- 🚀 **DSH host can be stopped manually (persisted across restarts)**
-- 🚀 **The pi environment guide installs portable Node and the pi CLI in one click**
-- 🚀 **DSH runtime archives are cross-packed from a single runner**
-- 🚀 **The model catalogue moves to pi 0.86.1 (1443 models)**
-- ✨ **Third-party relays no longer fail to list models — or to use a manually typed one**
-- ✨ **Provider User-Agent collapsed into a single editable dropdown, with a much fuller preset list**
-- ✨ **Shared DSH config directory is now called out (#189)**
-- ✨ **Announcement toasts no longer repeat forever**
+### v0.7.8 Release Highlights
+- 🚀 **Data folder renamed to PiDeck with automatic migration**
+- 🚀 **Usage probe template for Volcengine Ark (AK/SK)**
+- 🚀 **Provider names now accept Chinese**
+- 🚀 **DSH "Add provider" now collects everything it needs**
+- 🚀 **Clear the model preselection in one click**
+- 🚀 **Voice dictation in the composer**
+- 🚀 **Grouped process timeline (on by default)**
+- 🚀 **Automatic session titles are now on by default**
+- 🚀 **Import Qoder sessions**
+- 🚀 **Model configuration export / import panel (#261)**
+- 🚀 **The send button now carries the delivery menu**
+- 🚀 **Latest-reply quick actions**
+- ✨ **One-click pi install no longer fails on Windows**
+- ✨ **Fixed path linkification swallowing the rest of the text**
+- ✨ **Fixed Chinese prose slashes being mistaken for paths**
+- ✨ **Session titles are no longer locked to the first message (#266)**
 
 [View Full Changelog →](CHANGELOG.md)
 

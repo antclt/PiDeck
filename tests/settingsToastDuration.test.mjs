@@ -4,7 +4,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
-import { DEFAULT_TOAST_DURATION_MS, TOAST_DURATION_STICKY_MS } from "../src/shared/types/settings.ts";
+
+// settings.ts 内部 import "../sessionTabWidth" 无扩展名（仓库 TS 惯例），真 ESM import
+// 在这里会 ERR_MODULE_NOT_FOUND；经 loadTsCommonJs 的 CJS 目录解析才能命中，与仓库测试惯例一致。
+const { DEFAULT_TOAST_DURATION_MS, TOAST_DURATION_STICKY_MS } = loadTsCommonJs("src/shared/types/settings.ts");
 
 // SettingsStore 依赖 electron / 日志 / git 路径解析器，全部用 stub 顶掉
 // （与 tests/settingsStoreHiddenModules.test.mjs 同款）。

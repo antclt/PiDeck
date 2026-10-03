@@ -3203,10 +3203,10 @@ div.fixed.inset-0.z-50 {
   border: 1px dashed color-mix(in srgb, var(--color-accent) 70%, transparent);
   border-radius: var(--radius-md);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
-  /* 预览定位由 Stage 按命中面板 rect 内联计算（left/top/width/height），
-     旧方向类（inset 定位）已随两层树模型移除 */
-  transition: left 80ms ease-out, top 80ms ease-out, width 80ms ease-out,
-    height 80ms ease-out;
+  /* 预览定位由 Stage 按命中面板 rect 内联计算（left/top/width/height）,
+     旧方向类（inset 定位）已随两层树模型移除。
+     刻意不给 left/top/width/height 加 transition：这些是 layout 属性，逐帧触发重排，
+     高频 dragover 下预览反而追不上指针（2026-10 动效审计）。 */
 }
 .session-split-drop-label {
   padding: 6px 12px;

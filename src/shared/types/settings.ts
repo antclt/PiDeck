@@ -3,6 +3,7 @@ import type { BusySendDelivery } from "../busySendDelivery";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../sessionTabWidth";
 import { createDefaultExternalEditorSettings, type ExternalEditorSettings } from "./project";
 import type { SecurityConfig } from "./security";
+import type { CustomThemeSnapshot } from "../customThemes";
 import { createDefaultSoundAlertSettings, type SoundAlertSettings } from "./soundAlert";
 
 export type SendShortcutMode = "enter-send" | "ctrl-enter-send" | "shift-enter-send";
@@ -96,10 +97,15 @@ export type AppSettings = {
 	themeScheduleDarkStart: string;
 	/** 主题色（accent）预设，data-accent 驱动；新增预设只需扩充 AppAccentMode 与色板 */
 	accent: AppAccentMode;
-	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides */
+	/** 皮肤（换肤）：内置预设见 themePresets.ts SKIN_PRESETS；custom 走 customThemeOverrides/customTheme */
 	themeSkin: AppSkinId;
 	/** 自定义主题：CSS 变量名 → 值（键不含 -- 前缀），叠加在内置皮肤之上 */
 	customThemeOverrides: Record<string, string>;
+	/**
+	 * 自定义主题包快照（设置页「自定义主题」应用时写入）：优先于 customThemeOverrides，
+	 * 按当前亮暗选档注入；切换回内置皮肤时清除。快照内嵌于设置文件，主题文件被删后观感不丢。
+	 */
+	customTheme?: CustomThemeSnapshot;
 	/** 背景图文件名（userData/backgrounds/ 目录下），空串=不启用 */
 	backgroundImage: string;
 	/** 背景图可见度 0-1：0=背景色完全遮住图片，1=图片全显；面板/弹层会按语义分档透出 */

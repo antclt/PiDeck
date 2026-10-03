@@ -21,6 +21,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 export function ReplyActionsDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
 	const editor = useReplyActionEditor();
 	const { rules } = editor;
+	// 新增行是纯本地 pending 草稿：空文案不落盘（主进程清洗会吞掉空 text 规则，
+	// 以前立即落盘导致「点了添加没反应」）；文案首次非空时才整条落盘。
+	const [pendingRule, setPendingRule] = useState<ReplyActionRule | null>(null);
 	const latestRef = useRef({ rules, open: props.open, reorderRules: editor.reorderRules });
 	latestRef.current = { rules, open: props.open, reorderRules: editor.reorderRules };
 	const dragRef = useRef<{ index: number; rules: ReplyActionRule[] } | null>(null);
@@ -33,6 +36,8 @@ export function ReplyActionsDialog(props: { open: boolean; onOpenChange: (open: 
 
 	useEffect(() => {
 		clearDrag();
+		// 弹框关闭时丢弃未落盘的新增行草稿（半截规则不跨打开周期保留）
+		if (!props.open) setPendingRule(null);
 		return () => {
 			dragRef.current = null;
 		};
@@ -126,11 +131,23 @@ export function ReplyActionsDialog(props: { open: boolean; onOpenChange: (open: 
 									) : (
 										rules.map((rule, index) => <RuleRow key={index} rule={rule} index={index} rowCount={rules.length} dropTargetActive={dropTarget === index} editor={editor} startDrag={startDrag} dragOver={dragOver} drop={drop} dragLeave={() => setDropTarget(null)} clearDrag={clearDrag} />)
 									)}
+									{pendingRule ? (
+										<PendingRuleRow
+											rule={pendingRule}
+											onChange={setPendingRule}
+											onCommit={(rule) => {
+												editor.addRule(rule);
+												setPendingRule(null);
+											}}
+											onDiscard={() => setPendingRule(null)}
+										/>
+									) : null}
 								</TableBody>
 							</Table>
 						</div>
 						<div className="flex flex-wrap items-center gap-2">
-							<Button type="button" variant="outline" size="sm" disabled={editor.atLimit} onClick={editor.addRule}>
+							{/* 新增只建本地 pending 行；已有 pending 行时按钮禁用，避免叠出多条空行 */}
+							<Button type="button" variant="outline" size="sm" disabled={editor.atLimit || pendingRule !== null} onClick={() => setPendingRule({ text: "", triggers: [{ kind: "onStop" }] })}>
 								<Plus data-icon="inline-start" aria-hidden="true" />
 								{t("settings.replyActionsAdd")}
 							</Button>
@@ -192,6 +209,10 @@ function RuleRow(props: {
 	// 关键词输入是受控的中间态：还没写出第一个关键词前只留在本地（draft 非 null），
 	// 不下发空的 textMatch——主进程会按「无 patterns」丢掉这个 trigger，整条规则跟着消失。
 	const [patternDraft, setPatternDraft] = useState<string | null>(null);
+	// 文案输入同理：清空到空白只留本地草稿不下发（主进程会把空 text 规则整条丢掉，
+	// 行会凭空消失）；输入非空才落盘。patternDraft 为空但文件里仍有旧 patterns 的
+	// 处理已由上面的 applyPatterns 覆盖，文案这边对称处理。
+	const [textDraft, setTextDraft] = useState<string | null>(null);
 	const mode: TriggerMode = patternDraft !== null ? "textMatch" : triggerModeOf(rule.triggers);
 
 	/** 换「何时显示」：状态类条件写成单个 trigger（组合语义只留在文件里，不暴露给用户）。 */
@@ -234,7 +255,14 @@ function RuleRow(props: {
 				</Button>
 			</TableCell>
 			<TableCell className="max-w-0">
-				<Input value={rule.text} placeholder={t("settings.replyActionsPlaceholder")} onChange={(event) => props.editor.setRuleText(index, event.target.value)} />
+				<Input
+					value={textDraft ?? rule.text}
+					placeholder={t("settings.replyActionsPlaceholder")}
+					onChange={(event) => {
+						setTextDraft(event.target.value);
+						props.editor.setRuleText(index, event.target.value);
+					}}
+				/>
 			</TableCell>
 			<TableCell className="max-w-0">
 				<div className="flex items-center gap-1">
@@ -278,4 +306,55 @@ function triggerModeOf(triggers: ReplyActionTrigger[]): TriggerMode {
 	if (triggers.some((trigger) => trigger.kind === "onStop")) return "onStop";
 	if (triggers.some((trigger) => trigger.kind === "onFailure")) return "onFailure";
 	return "always";
+}
+
+/**
+ * 未落盘的新增行：点了「添加」先出现在这里，文案输入首个非空字符才整条落盘
+ * （空文案规则会被主进程清洗丢弃，以前立即落盘表现为「点了添加没反应」）。
+ * 触发条件下拉可先调整（只改本地），落盘时带当前选择一起提交。
+ */
+function PendingRuleRow(props: { rule: ReplyActionRule; onChange: (rule: ReplyActionRule) => void; onCommit: (rule: ReplyActionRule) => void; onDiscard: () => void }) {
+	const { rule } = props;
+	const commitText = (text: string) => {
+		if (text.trim().length === 0) {
+			props.onChange({ ...rule, text });
+			return;
+		}
+		props.onCommit({ ...rule, text });
+	};
+	const setTriggers = (triggers: ReplyActionTrigger[]) => props.onChange({ ...rule, triggers });
+
+	return (
+		<TableRow>
+			<TableCell className="w-10 px-2 text-center align-middle">
+				<span className="text-xs text-muted-foreground" aria-hidden="true">
+					…
+				</span>
+			</TableCell>
+			<TableCell className="max-w-0">
+				<Input autoFocus value={rule.text} placeholder={t("settings.replyActionsPlaceholder")} onChange={(event) => commitText(event.target.value)} />
+			</TableCell>
+			<TableCell className="max-w-0">
+				<div className="flex items-center gap-1">
+					<Select value={triggerModeOf(rule.triggers)} onValueChange={(value) => setTriggers([{ kind: value as ReplyActionTrigger["kind"] }])}>
+						<SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={t("settings.replyActionsColumnTrigger")}>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="onStop">{t("settings.replyActionsTrigger.onStop")}</SelectItem>
+							<SelectItem value="onFailure">{t("settings.replyActionsTrigger.onFailure")}</SelectItem>
+							<SelectItem value="always">{t("settings.replyActionsTrigger.always")}</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+			</TableCell>
+			<TableCell className="text-right">
+				<div className="flex justify-end gap-0.5">
+					<Button type="button" variant="ghost" size="icon-sm" title={t("settings.replyActionsRemove")} aria-label={t("settings.replyActionsRemove")} onClick={props.onDiscard}>
+						<Trash2 data-icon="inline-start" aria-hidden="true" />
+					</Button>
+				</div>
+			</TableCell>
+		</TableRow>
+	);
 }
