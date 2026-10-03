@@ -10,6 +10,21 @@ let injectedWallpaperTokens = new Set<string>();
 let injectedCustomTokens = new Set<string>();
 
 /**
+ * 字号档位 dataset 写入：ui/tab/chat/input 四区域 + 旧 fontSize 属性。
+ * 回落链：ui ← uiFontSize ?? fontSize；tab ← tabBarFontSize ?? ui（Tab 跟界面不跟全局）；
+ * chat/input ← 各自字段 ?? fontSize。设置弹窗实时预览与持久化应用共用本函数，防两处漂移。
+ */
+export function applyFontSizeAttributes(root: HTMLElement, settings: AppSettings): void {
+	const uiFontSize = settings.uiFontSize ?? settings.fontSize;
+	root.dataset.uiFontSize = uiFontSize;
+	root.dataset.tabFontSize = settings.tabBarFontSize ?? uiFontSize;
+	root.dataset.chatFontSize = settings.chatFontSize ?? settings.fontSize;
+	root.dataset.inputFontSize = settings.inputFontSize ?? settings.fontSize;
+	// 旧属性保留，兼容外部依赖或测试仍读取 dataset.fontSize 的场景
+	root.dataset.fontSize = settings.fontSize;
+}
+
+/**
  * 应用外观域：明暗/时间表主题解析、data 属性应用、壁纸与自定义皮肤 token 注入、
  * 字号/字体 data 属性与自定义字体注入、i18n locale 与 document.lang 同步。
  * 全部副作用自包含，无返回值；settings 变化即重算（纯函数 of props）。
@@ -161,16 +176,7 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 	// 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
 	useEffect(() => {
 		const root = document.documentElement;
-		const uiFontSize = settings.uiFontSize ?? settings.fontSize;
-		const chatFontSize = settings.chatFontSize ?? settings.fontSize;
-		const inputFontSize = settings.inputFontSize ?? settings.fontSize;
-		root.dataset.uiFontSize = uiFontSize;
-		// Tab 栏未单独设置时跟随界面字号（历史上 Tab 标题吃的是界面轨的 --font-size-micro）
-		root.dataset.tabFontSize = settings.tabBarFontSize ?? uiFontSize;
-		root.dataset.chatFontSize = chatFontSize;
-		root.dataset.inputFontSize = inputFontSize;
-		// 旧属性保留，兼容外部依赖或测试仍读取 dataset.fontSize 的场景
-		root.dataset.fontSize = settings.fontSize;
+		applyFontSizeAttributes(root, settings);
 		root.dataset.fontBase = settings.fontFamilyBase;
 		root.dataset.fontMono = settings.fontFamilyMono;
 

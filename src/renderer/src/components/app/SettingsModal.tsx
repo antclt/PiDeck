@@ -6,6 +6,7 @@ import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
 import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, SlidersHorizontal, MonitorCog, Keyboard, X } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
+import { applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
 import { Button } from "../ui-shadcn/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
@@ -351,6 +352,14 @@ function SettingsModalContent(props: SettingsModalProps) {
 		applyAppearanceAttributes(document.documentElement, draftSettings as AppearanceSettings, Boolean(media?.matches));
 	}, [draftSettings.theme, draftSettings.themeScheduleLightStart, draftSettings.themeScheduleDarkStart, draftSettings.themeSkin, draftSettings.accent]);
 
+	// 字号档位实时预览：与上方主题色预览同理，草稿变化立即写入 <html> dataset（含 Tab 栏字号）。
+	// 此前字号不预览，弹窗内选档位界面毫无反应，用户以为设置无效（v0.7.8 发布前用户反馈）；
+	// 保存后由 App 的 useAppAppearance 接管（两处共用 applyFontSizeAttributes，回落链一致）；
+	// 取消/放弃时在 restoreAppearanceFromSnapshot 里回滚回快照。
+	useEffect(() => {
+		applyFontSizeAttributes(document.documentElement, draftSettings);
+	}, [draftSettings.fontSize, draftSettings.uiFontSize, draftSettings.tabBarFontSize, draftSettings.chatFontSize, draftSettings.inputFontSize]);
+
 	/** 检查指定字段在草稿中是否已被修改（与基准快照真实差异比较）。 */
 	const isDirty = useCallback(
 		(field: keyof AppSettings): boolean => {
@@ -364,6 +373,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const restoreAppearanceFromSnapshot = useCallback(() => {
 		const media = window.matchMedia?.("(prefers-color-scheme: dark)");
 		applyAppearanceAttributes(document.documentElement, baseSnapshotRef.current as AppearanceSettings, Boolean(media?.matches));
+		// 字号档位同样回滚：字号预览直接写 dataset，不恢复会残留草稿档位
+		applyFontSizeAttributes(document.documentElement, baseSnapshotRef.current);
 	}, []);
 
 	/** 保存全部内容：全局设置差异提交（无差异也提交空 patch，触发「已保存」反馈）+ 视觉桥/生图草稿（若有改动）；返回是否全部成功 */

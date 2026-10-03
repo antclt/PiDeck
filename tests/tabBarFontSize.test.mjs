@@ -87,6 +87,13 @@ test("SettingsModal：展开态判定把 tabBarFontSize 计入（任一覆盖非
 	assert.ok(derivations.length >= 2, "useState 初始值与 cancelAll 还原处都要计入 tabBarFontSize");
 });
 
+test("SettingsModal：字号档位纳入弹窗实时预览与放弃回滚（v0.7.8「改了没变化」反馈的修复）", () => {
+	// 预览：字号草稿变化立即写 html dataset（与 useAppAppearance 共用 applyFontSizeAttributes，回落链不漂移）
+	assert.match(modal, /applyFontSizeAttributes\(document\.documentElement,\s*draftSettings\)/);
+	// 回滚：放弃更改时同样用快照恢复字号 dataset，不能只回滚主题色
+	assert.match(modal, /applyFontSizeAttributes\(document\.documentElement,\s*baseSnapshotRef\.current\)/);
+});
+
 test("未保存变更摘要登记 tabBarFontSize", () => {
 	assert.match(unsaved, /\{\s*field:\s*"tabBarFontSize",\s*tab:\s*"appearance",\s*itemKey:\s*"settings\.tabBarFontSize"\s*\}/);
 });
