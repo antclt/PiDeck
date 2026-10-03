@@ -61,12 +61,9 @@ function loadAgentManager(existsPredicate = () => false) {
 		vm.runInNewContext(transpile("src/main/pi/streamGate.ts"), sandbox, { filename: "streamGate.ts" });
 		return sandbox.exports;
 	})();
-	// cacheHitStats：纯函数真实加载（getRuntimeState 读会话文件统计缓存命中率）
-	const cacheHitStats = (() => {
-		const sandbox = { exports: {}, require };
-		vm.runInNewContext(transpile("src/main/pi/cacheHitStats.ts"), sandbox, { filename: "cacheHitStats.ts" });
-		return sandbox.exports;
-	})();
+	// cacheHitStats：标准 loader 真实加载——该模块依赖 node:fs/promises 与 ../tokenEstimate，
+	// 裸 require 沙箱会把相对 specifier 按 tests/ 解析致 MODULE_NOT_FOUND（见 createTsSandbox 顶部注释）。
+	const cacheHitStats = loadTsCommonJs("src/main/pi/cacheHitStats.ts");
 	const sessionEntryIds = (() => {
 		const sandbox = { exports: {}, require };
 		vm.runInNewContext(transpile("src/main/pi/sessionEntryIds.ts"), sandbox, {
