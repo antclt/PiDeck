@@ -556,9 +556,8 @@ export class ExtensionManager {
 			this.invalidateListCache();
 			return;
 		}
-		// 禁用动作受版本门槛约束：白名单机制（--no-extensions + -e）依赖 pi >= 0.60
-		// 的目录/包源语义，过低版本禁用不生效（还会导致白名单降级），这里直接拒绝并提示。
-		// 启用/移除禁用条目无风险（只是回到默认发现），不做检查；版本未知（getPiVersion 为
+		// 旧兜底路径的版本门槛（原生开关已在上方优先处理）：过低版本的资源过滤语义不可考，
+		// 直接拒绝禁用并提示；启用/移除禁用条目无风险，不做检查；版本未知（getPiVersion 为
 		// null，如 pi 未安装/探测失败）时放行，避免拦截其他流程。
 		if (!enabled) {
 			const version = await this.getPiVersion();

@@ -12,6 +12,27 @@
 - 不包含：DSH 的 `pwsh_persistent`、Electron 自带终端、PiDeck 自己的应用更新器
 - 当前原则：工具选择由用户决定，PiDeck 的图形编辑器写 pi 原生 `settings.json`，解析与执行仍归 pi；不自动安装 PowerShell 7，不向 Pi 传硬编码 `--tools` 白名单。
 
+## 白名单机制移除核对（2026-10-01 终态，源码逐项验证）
+
+执行计划 A5 的「退出三类 argv 白名单」已落地。源码级核对结果：
+
+| 核对项 | 事实 |
+|---|---|
+| `--no-extensions` + 逐条 `-e` 白名单注入分支 | **已删除**（PiProcess 启动参数组装中不存在该路径） |
+| `--no-skills` + `--skill` 白名单注入 | **已删除** |
+| `--no-prompt-templates` + `--prompt-template` 白名单注入 | **已删除** |
+| `skillWhitelistResolver` / `promptWhitelistResolver` / `piProcessSkillResolvers` / `piProcessPromptResolvers` / `whitelistSkipNotice` / `builtInExtensionToggles` | **模块已删除** |
+| 白名单总开关（`extensions:set-whitelist-disabled` IPC、preload、扩展页按钮、`disableExtensionWhitelist` 设置字段、中英文案、预算跳过诊断） | **全部删除** |
+| `resolveEnabledExtensionPaths` | 改名 `resolveLoadableExtensionPaths` 且**始终返回数组**，仅作「会加载哪些扩展」只读查询（压缩归属启发式使用），不再有 null 白名单语义 |
+| 诊断开关 `piRpcNoExtensions` / `piRpcNoSkills` | **保留**（开发设置里的总关开关，语义就是「一个都不加载」） |
+| `ExtensionManager.setEnabled` 的旧禁用列表写入 | 仅作原生服务未装配时的兜底通道（渐进迁移）；生产装配后走 `PiResourceConfigService` 原生规则 |
+| 残留 `--no-*` 参数使用位置 | 仅三处合法场景：PiProcess 诊断开关、模型列表/探测快查（`modelListCache`/`PiModelProber`）、git 快照探针（`gitIpc`）——均与白名单机制无关 |
+| 迁移门禁 | `AgentManager.createUnlocked` 在 spawn 前 `await resourceMigrationGate(projectId)`（幂等，全局启动即跑、项目按需） |
+
+真实冒烟证据（`scripts/smoke-pi-native-resources.mjs`，对 pi 0.99.2 与 1.0.0 各 19/19）：
+无白名单启动下，原生 `+/-` 规则真实控制技能/扩展加载、`-builtin:mcp` 生效、项目层覆盖生效、
+未信任项目不读项目配置、旧禁用记录迁移后 pi 真的不加载该资源。
+
 ## 1.0.0 审计矩阵（本机 dist 源码逐条核对）
 
 结论：**资源管理与 defaultTools 合并语义完全未变，0.99.2 适配全部直接适用**；变化集中在 MCP OAuth（凭据按 name+URL、`authServerMetadataUrl`、`iss` 校验、scope 保留）与 TUI。本轮已修两处 + 一处文案。

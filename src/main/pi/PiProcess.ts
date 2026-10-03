@@ -271,7 +271,7 @@ export class PiProcess extends EventEmitter {
 		// pi 0.99 起这个开关会连带关掉内置扩展（mcp / llama.cpp / codemode / tool-search），
 		// 这恰好就是诊断语义——用户要的是「pi 一个扩展都不加载」；不要在此处用
 		// `-e builtin:mcp` 把内置扩展带回来（那会让诊断不再干净），
-		// 需要 MCP 能力时请关掉该开关（见 appendBuiltInExtensionSpecifierArgs）。
+		// 需要 MCP 能力时请关掉该开关。
 		if (this.settings?.piRpcNoExtensions) args.push("--no-extensions");
 		if (this.settings?.piRpcNoSkills) args.push("--no-skills");
 

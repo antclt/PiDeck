@@ -2250,7 +2250,7 @@ export class AgentManager {
 	 * 探测「这个会话的上下文窗口由谁管」（见 pi/compactionOwner.ts 的背景说明）。
 	 *
 	 * 两层证据：
-	 * 1. 「装了且启用」：用与 spawn 同源的扩展白名单解析（`resolveEnabledExtensionPaths`）——
+	 * 1. 「装了且启用」：用与 spawn 同源的加载查询（`resolveLoadableExtensionPaths`，原生过滤 + 旧禁用记录）——
 	 *    PiDeck 扩展管理里禁用的扩展不会出现在路径集合里，不能按磁盘 packages 判接管；
 	 * 2. 「命令本次可用」：`get_commands` 确认 /ctx-wrapup 已注册（compaction-off 模式 /
 	 *    子会话下 MC 不注册它）。

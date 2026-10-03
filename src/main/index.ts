@@ -3256,8 +3256,7 @@ app
 			onError: (message, detail) => void appLogger?.warn("backup", message, { detail }),
 		});
 		promptManager = new PromptManager(undefined, mainCopy);
-		// 注入设置读写：模板开关同步持久化禁用列表（--no-prompt-templates/--prompt-template
-		// 白名单模式的依据），跨重启保留。
+		// 注入旧禁用列表读写（原生服务未装配时的兜底通道；迁移后为空，仅兼容读取）。
 		promptManager.configureSettings(
 			() => settingsStore.get(),
 			(patch) => settingsStore.update(patch),
@@ -3320,8 +3319,7 @@ app
 		skillManager = new SkillManager(undefined, mainCopy);
 		// 内置技能覆盖层叠加：安装内置技能模板时覆盖层优先（修 bug/新增技能免发版）
 		skillManager.configureSkillOverlay(() => skillStoreUpdater.resolveEffectiveOverlayDir());
-		// 注入设置读写：技能开关同步持久化禁用列表（--no-skills/--skill 白名单模式的依据），
-		// 跨重启保留，不再只依赖 SKILL.md frontmatter（该标记仅阻止模型自动调用）。
+		// 注入旧禁用列表读写（原生服务未装配时的兜底通道；迁移后为空，仅兼容读取）。
 		skillManager.configureSettings(
 			() => settingsStore.get(),
 			(patch) => settingsStore.update(patch),
