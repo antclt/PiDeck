@@ -356,8 +356,9 @@ test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相
 		assert.equal(existsSyncSync(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin", "npm-cli.js")), true, "本地 npm-cli.js 必须已落盘");
 
 		const repaired = repairPortableNodeLinks(root, "linux");
-
-		// 沙箱 realm 的数组与宿主原型不同，转成宿主数组再比
+		// 先看链接终态再比对返回值：修复动作失败时（rm 后 symlink 被杀软锁住等），
+		// 终态断言能直接现形「链接没了还是还悬空」，比空数组比对信息量大。
+		assert.equal(readlinkRaw(join(binDir, "npm")), join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), "修复后 npm 应指向相对链接");
 		assert.deepEqual([...repaired], ["npm"]);
 		assert.equal(readlinkSync(join(binDir, "npm")), join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"));
 		assert.equal(readlinkSync(join(binDir, "npx")), join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"));
