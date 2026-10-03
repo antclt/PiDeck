@@ -987,9 +987,11 @@ export class AgentManager {
 	 * 读取会话文件中的子代理记录（subagents:record custom 条目），并合并
 	 * 工具调用推导条目（acp_delegate：billion-context；subagent 工具：nicobailon
 	 * pi-subagents）；同 id 时 record 优先（见 mergeSubagentSources 的例外规则）。
+	 * options.liveRuntimeStartedAt 透传给读取侧做 start 锚点对账（#300：本代
+	 * runtime 派发的锚点合成 running，否则运行中子代理误显「已停止」）。
 	 */
-	async readSessionSubagentRecords(sessionPath: string) {
-		const records = await this.sessionHistoryReader.readSubagentRecords(sessionPath);
+	async readSessionSubagentRecords(sessionPath: string, options?: { liveRuntimeStartedAt?: number }) {
+		const records = await this.sessionHistoryReader.readSubagentRecords(sessionPath, options);
 		const derived = await this.sessionHistoryReader.readDerivedSubagentEntries(sessionPath);
 		if (derived.length === 0) return records;
 		return mergeSubagentSources(records, derived);

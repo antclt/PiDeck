@@ -343,8 +343,9 @@ const WIDGET_KEY = "pi-deck-subagents";
  * 子代理 start 锚点条目类型（会话文件 custom 条目）。
  * created 事件时立即落盘：运行中被重启终止的子代理没有 subagents:record
  * （插件只在完成时写），无此锚点则重启后彻底消失。
- * 读取侧（SessionHistoryReader.readSubagentRecords）同字符串过滤，
- * 残留锚点（无 record 覆盖）合成 stopped 条目，改动需两侧同步。
+ * 读取侧（SessionHistoryReader.readSubagentRecords）同字符串过滤：
+ * 残留锚点（无 record 覆盖）按活 runtime 对账合成——本代派发 → running，
+ * 否则 stopped（详见 #300），改动需两侧同步。
  */
 const START_ENTRY_TYPE = "pi-deck-subagent-start";
 

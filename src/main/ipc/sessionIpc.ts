@@ -858,12 +858,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (typeof sessionId !== "string" || !sessionId) return [];
 		const entry = sessionCatalog.get(sessionId);
 		if (!entry?.filePath) return [];
-		let records = await agentManager.readSessionSubagentRecords(entry.filePath);
+		// 锚点对账要在读取侧做（liveRuntimeStartedAt）：record 完成时才写，运行中
+		// 子代理只剩 start 锚点，不传对账时间会一律合成 stopped，面板在子代理
+		// 实际运行期间误显「已停止」（issue #300）。本代派发的锚点 → running。
+		const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
+		const liveTab = liveTarget ? agentManager.list().find((t) => t.id === liveTarget.agentId) : undefined;
+		let records = await agentManager.readSessionSubagentRecords(entry.filePath, { liveRuntimeStartedAt: liveTab?.createdAt });
 		// acp_delegate 推导条目在会话无活 runtime 时残留的 running 视为已终止：
 		// 终态通知没写进文件（进程被杀/崩溃）的委托在历史会话里永远是 running，
 		// 会误导为仍在运行；活会话保持 running，由后续通知/桥接覆盖。
 		// 与 start 锚点残留合成 stopped 同一语义（见 downgradeStaleRunning）。
-		const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
 		if (!liveTarget) {
 			if (!sessionRuntimeCoordinator.isActivating(sessionId)) {
 				records = downgradeStaleRunning(records);
@@ -874,7 +878,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// hook 在绑定出现时会重新拉取本列表，激活完成后即看到降级结果
 			//（2026-09-14 用户环境实测：真实活动子代理 0，历史投影仍显示 33 个
 			// running；启动之后派发的异步运行不受影响，保持 running）。
-			const liveTab = agentManager.list().find((t) => t.id === liveTarget.agentId);
 			if (liveTab?.createdAt) {
 				records = downgradeRunningStartedBefore(records, liveTab.createdAt);
 			}
