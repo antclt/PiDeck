@@ -987,9 +987,11 @@ export class AgentManager {
 	 * 读取会话文件中的子代理记录（subagents:record custom 条目），并合并
 	 * 工具调用推导条目（acp_delegate：billion-context；subagent 工具：nicobailon
 	 * pi-subagents）；同 id 时 record 优先（见 mergeSubagentSources 的例外规则）。
+	 * options.liveRuntimeStartedAt 透传给读取侧做 start 锚点对账（#300：本代
+	 * runtime 派发的锚点合成 running，否则运行中子代理误显「已停止」）。
 	 */
-	async readSessionSubagentRecords(sessionPath: string) {
-		const records = await this.sessionHistoryReader.readSubagentRecords(sessionPath);
+	async readSessionSubagentRecords(sessionPath: string, options?: { liveRuntimeStartedAt?: number }) {
+		const records = await this.sessionHistoryReader.readSubagentRecords(sessionPath, options);
 		const derived = await this.sessionHistoryReader.readDerivedSubagentEntries(sessionPath);
 		if (derived.length === 0) return records;
 		return mergeSubagentSources(records, derived);
@@ -2398,7 +2400,7 @@ export class AgentManager {
 						latest: undefined as number | undefined,
 						average: undefined as number | undefined,
 						sampleCount: 0,
-						messageChars: undefined as number | undefined,
+						conversationTokens: undefined as number | undefined,
 					}),
 		]);
 		const state = asRecord(stateResponse.data);
@@ -2439,8 +2441,8 @@ export class AgentManager {
 			contextWindow: pickNumber(contextUsage?.contextWindow) ?? pickNumber(model?.contextWindow),
 			contextPercent: pickNumber(contextUsage?.percent),
 			contextOverflow: this.contextOverflowByAgent.get(agentId) === true,
-			/** 对话消息估算 token：消息字符 ÷ 4（1 token ≈ 4 chars），缺文件数据时不报 */
-			contextMessageTokens: fileHitStats.messageChars != null ? Math.round(fileHitStats.messageChars / 4) : undefined,
+			/** 对话消息估算 token：CJK 加权估算（中文 1.5 字/token、其余 4 字符/token），含工具调用/结果文本，遇压缩重置 */
+			contextMessageTokens: fileHitStats.conversationTokens,
 			inputTokens,
 			outputTokens,
 			cacheRead,

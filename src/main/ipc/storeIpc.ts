@@ -14,6 +14,7 @@ import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 import type { ConfigManager } from "../config/ConfigManager";
 import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
+import { isDefaultDisabledBuiltInExtension } from "../extensions/builtInExtensions";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
@@ -589,8 +590,15 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown") => {
 		// 内置扩展走 removedBuiltInExtensions + RPC -e，不再写用户扩展目录 / pi disabledExtensions。
 		if (source.startsWith("pi-deck-") && source.endsWith(".ts")) {
-			if (enabled) await extensionManager.restoreBuiltIn(source);
-			else await extensionManager.disableBuiltIn(source);
+			if (isDefaultDisabledBuiltInExtension(source)) {
+				// 默认关闭的内置扩展（GUI 桥/扩展点面板）：开关写 enabledBuiltInExtensions（opt-in）。
+				// 注意不碰 removedBuiltInExtensions——那是「默认启用扩展的用户禁用」机制，语义互斥。
+				await extensionManager.toggleBuiltIn(source, enabled);
+			} else if (enabled) {
+				await extensionManager.restoreBuiltIn(source);
+			} else {
+				await extensionManager.disableBuiltIn(source);
+			}
 		} else {
 			// 非内置扩展禁用记录存 PiDeck settings（scope+source），启动 RPC 时走白名单模式生效。
 			await extensionManager.setEnabled(source, enabled, scope);

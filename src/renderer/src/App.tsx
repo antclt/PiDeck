@@ -599,7 +599,7 @@ export function App() {
 	// 应用自描述信息域（版本/平台/目录 + 系统语言）收口到 useAppBootstrapInfo
 	const { appInfo, systemLanguage } = useAppBootstrapInfo(api);
 	// 外观/i18n 域（明暗解析、壁纸/皮肤/字体注入、locale 同步）统一收口到 useAppAppearance
-	useAppAppearance({ settings, systemLanguage });
+	useAppAppearance({ settings, systemLanguage, settingsLoaded });
 
 	// ===== Pi 更新/安装/代理 hook (H1) =====
 	const piUpdate = usePiUpdate({

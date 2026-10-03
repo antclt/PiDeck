@@ -9,11 +9,14 @@ import type { PiLocator } from "../pi/PiLocator";
 import { PiProcess } from "../pi/PiProcess";
 import { toWslLinuxPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, piVersionAtLeast } from "./extensionVersionGate";
 // 版本比较与应用更新检查共用同一实现（含预发布语义：beta < 同号正式版）。
 import { compareVersions } from "../utils/versionCompare";
 import { discoverExtensionEntries } from "./extensionDiscovery";
+
+const PI_LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
+const PI_LATEST_VERSION_TIMEOUT_MS = 10_000;
 
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
@@ -175,13 +178,15 @@ export class ExtensionManager {
 		const removedBuiltIn = new Set(this.getPiDeckSettings().removedBuiltInExtensions ?? []);
 		// 用户禁用的非内置扩展：按 scope+source 匹配（同名可在 user/project 两级独立开关）。
 		const disabledExtKeys = new Set((this.getPiDeckSettings().disabledExtensions ?? []).map((entry) => `${entry.scope}:${entry.source}`));
+		// 默认关闭（opt-in）的内置扩展：仅当用户显式开启（enabledBuiltInExtensions）才视为启用。
+		const optInBuiltIn = new Set(this.getPiDeckSettings().enabledBuiltInExtensions ?? []);
 		// 内置扩展版本：包级版本号（extensions-manifest.json，不跟 PiDeck 应用版本走），
 		// 覆盖层（热更新）优先。逐行写入而非只在补齐分支赋值——内置条目可能来自
 		// pi list、本地目录扫描、兜底补齐三条路径，版本只认「当前生效的那一份」。
 		const builtInVersion = this.builtInRoots ? readEffectiveBuiltInExtensionsVersion(this.builtInRoots) : null;
 		for (const ext of merged) {
 			if (ext.builtIn) {
-				ext.enabled = !removedBuiltIn.has(ext.source);
+				ext.enabled = !removedBuiltIn.has(ext.source) && (!isDefaultDisabledBuiltInExtension(ext.source) || optInBuiltIn.has(ext.source));
 				if (builtInVersion) ext.currentVersion = builtInVersion;
 			} else {
 				ext.enabled = !disabledExtKeys.has(`${ext.scope}:${ext.source}`);
@@ -373,6 +378,31 @@ export class ExtensionManager {
 		this.invalidateListCache();
 	}
 
+	/**
+	 * 开关「默认关闭」（opt-in）的内置扩展：enabled=true 写入 enabledBuiltInExtensions，
+	 * false 则移出；不碰 removedBuiltInExtensions（那是另一套「用户主动禁用默认启用扩展」机制）。
+	 * 下次 Agent 启动时按 opt-in 列表决定是否随 -e 注入。
+	 */
+	async toggleBuiltIn(source: string, enabled: boolean): Promise<void> {
+		const normalized = source.trim();
+		if (!isDefaultDisabledBuiltInExtension(normalized)) {
+			throw new Error("仅默认关闭的内置扩展支持此开关");
+		}
+		// 自愈：历史上被「移除」过（进了 removedBuiltInExtensions）的 opt-in 扩展，
+		// 用户重新打开开关时同步清掉 removed 标记——否则开关 ON 但注入层仍被 removed 拦住。
+		if (enabled) {
+			const removed = this.getPiDeckSettings().removedBuiltInExtensions ?? [];
+			if (removed.includes(normalized)) {
+				await this.saveRemovedBuiltIn(removed.filter((s) => s !== normalized));
+			}
+		}
+		const current = this.getPiDeckSettings().enabledBuiltInExtensions ?? [];
+		const next = enabled ? (current.includes(normalized) ? current : [...current, normalized]) : current.filter((s) => s !== normalized);
+		if (next.length === current.length && next.every((s, i) => s === current[i])) return;
+		await this.patchPiDeckSettings({ enabledBuiltInExtensions: next });
+		this.invalidateListCache();
+	}
+
 	async uninstall(source: string, scope: PiExtensionSummary["scope"] = "user"): Promise<void> {
 		const normalized = source.trim();
 		if (!normalized) throw new Error(this.translate("mainExtension.sourceRequired"));
@@ -411,7 +441,9 @@ export class ExtensionManager {
 			const settings = this.getSettings();
 			const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
 			if (!status.installed) return { hasUpdate: false, error: this.translate("mainExtension.piNotInstalled") };
-			const latestVersion = await this.npmViewVersion("@earendil-works/pi-coding-agent");
+			// 与 `pi update --self` 使用同一个 pi.dev 版本接口，避免 npm latest 与 Pi 官方
+			// 发布门槛短暂不同步时，PiDeck 显示的版本和 CLI 提示不一致。
+			const latestVersion = await this.fetchPiLatestVersion(status.version ?? "0.0.0");
 			return {
 				currentVersion: status.version,
 				latestVersion,
@@ -493,6 +525,25 @@ export class ExtensionManager {
 		const raw = await readFile(join(hostPath, "package.json"), "utf8");
 		const parsed = JSON.parse(raw) as { version?: string };
 		return parsed.version;
+	}
+
+	private async fetchPiLatestVersion(currentVersion: string): Promise<string> {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), PI_LATEST_VERSION_TIMEOUT_MS);
+		try {
+			const response = await fetch(PI_LATEST_VERSION_URL, {
+				headers: { accept: "application/json", "user-agent": `pi-deck/${currentVersion}` },
+				signal: controller.signal,
+			});
+			if (!response.ok) throw new Error(`pi version check returned HTTP ${response.status}`);
+			const payload: unknown = await response.json();
+			if (typeof payload !== "object" || payload === null || !("version" in payload) || typeof payload.version !== "string" || !payload.version.trim()) {
+				throw new Error("pi version check returned an invalid version");
+			}
+			return payload.version.trim();
+		} finally {
+			clearTimeout(timeout);
+		}
 	}
 
 	private npmViewVersion(packageName: string) {

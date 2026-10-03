@@ -442,7 +442,7 @@ test("meter stays visible without capacity: placeholder ring + unavailable panel
 	assert.match(source, /const percent = context\?\.percent \?\? 0;/);
 	assert.doesNotMatch(source, /if \(context === null\) return null/);
 	// 面板标题走 reading（占位时显示 unavailable 文案），figures 仅在可用时渲染
-	assert.match(source, /<span className="text-text-tertiary">\{reading\}<\/span>/);
+	assert.match(source, /<span className="text-text-tertiary" title=\{t\("sessionContext\.usageHint"\)\}>[\s\S]*?\{reading\}[\s\S]*?<\/span>/);
 	assert.match(source, /\{available && figures !== undefined && /);
 	// 不再因 capacity 消失自动关闭面板
 	assert.doesNotMatch(source, /if \(!available && open\) setOpen\(false\)/);

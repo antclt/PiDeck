@@ -174,7 +174,7 @@ type SessionModifiedFile = {
  */
 export const USD_TO_CNY_RATE = 7.2;
 
-export type SessionDetailRow = { label: string; value: string; emphasis?: boolean };
+export type SessionDetailRow = { label: string; value: string; emphasis?: boolean; /** 悬停说明：解释这行指标怎么算的（用户可自行核对口径） */ hint?: string };
 
 export type SessionStatusDetail = {
 	detailRows: SessionDetailRow[];
@@ -206,6 +206,7 @@ export function buildSessionStatusDetail(
 		detailRows.push({
 			label: t("ctx.detail.context"),
 			value: `${state.contextPercent != null ? `${formatPercent(state.contextPercent)}%` : "-"} / ${formatCompact(state.contextTokens)} / ${formatCompact(state.contextWindow)}`,
+			hint: t("ctx.detail.contextHint"),
 		});
 	}
 	if (state.inputTokens != null || state.outputTokens != null) {
@@ -213,46 +214,51 @@ export function buildSessionStatusDetail(
 		detailRows.push({
 			label: t("ctx.detail.tokens"),
 			value: `${formatCompact(state.inputTokens)} / ${formatCompact(state.outputTokens)}`,
+			hint: t("ctx.detail.tokensHint"),
 		});
 	}
 	if (state.cacheRead != null || state.cacheWrite != null) {
 		detailRows.push({
 			label: t("ctx.detail.cacheIO"),
 			value: `${t("ctx.detail.cacheRead")} ${formatCompact(state.cacheRead)} / ${t("ctx.detail.cacheWrite")} ${formatCompact(state.cacheWrite)}`,
+			hint: t("ctx.detail.cacheIOHint"),
 		});
 	}
 	if (state.cacheTotal != null) {
 		detailRows.push({
 			label: t("ctx.detail.cacheTotal"),
 			value: formatCompact(state.cacheTotal),
+			hint: t("ctx.detail.cacheTotalHint"),
 		});
 	}
 	if (state.cacheHitPercent != null) {
 		detailRows.push({
 			label: t("ctx.detail.hitLatest"),
 			value: `${state.cacheHitPercent.toFixed(1)}%`,
+			hint: t("ctx.detail.hitLatestHint"),
 		});
 	}
 	if (averageCacheHit != null) {
 		detailRows.push({
 			label: t("ctx.detail.hitAverage"),
 			value: `${averageCacheHit.toFixed(1)}% (${averageCacheHitSampleCount} ${t("ctx.detail.snapshots")})`,
+			hint: t("ctx.detail.hitAverageHint"),
 		});
 	}
 	// 这些值来自 AgentManager 的 lastPerfByAgent，只代表最近一条 assistant 回复，
 	// 不能和上下文累计量混在同一组，否则用户会误以为是整段会话的平均性能。
 	if (state.ttftMs != null) {
-		replyPerfRows.push({ label: t("ctx.detail.ttft"), value: formatDuration(state.ttftMs) });
+		replyPerfRows.push({ label: t("ctx.detail.ttft"), value: formatDuration(state.ttftMs), hint: t("ctx.detail.ttftHint") });
 	}
 	if (state.totalMs != null) {
-		replyPerfRows.push({ label: t("ctx.detail.total"), value: formatDuration(state.totalMs) });
+		replyPerfRows.push({ label: t("ctx.detail.total"), value: formatDuration(state.totalMs), hint: t("ctx.detail.totalHint") });
 	}
 	if (state.tps != null) {
-		replyPerfRows.push({ label: t("ctx.detail.tps"), value: `${state.tps.toFixed(0)} tok/s` });
+		replyPerfRows.push({ label: t("ctx.detail.tps"), value: `${state.tps.toFixed(0)} tok/s`, hint: t("ctx.detail.tpsHint") });
 	}
 	if (state.cost != null) {
-		detailRows.push({ label: t("ctx.detail.cost"), value: `$${state.cost.toFixed(3)}`, emphasis: true });
-		detailRows.push({ label: t("ctx.detail.costCny"), value: cnyAmount ?? "-", emphasis: true });
+		detailRows.push({ label: t("ctx.detail.cost"), value: `$${state.cost.toFixed(3)}`, emphasis: true, hint: t("ctx.detail.costHint") });
+		detailRows.push({ label: t("ctx.detail.costCny"), value: cnyAmount ?? "-", emphasis: true, hint: t("ctx.detail.costCnyHint") });
 	}
 	// DSH 会话统计（host sessionStats 投影，dsh-web StatsLine 同源）：整段日志的
 	// 回合/步骤计数与墙钟汇总。与 pi 的「上次回复」性能组语义不同，独立成组展示。
@@ -261,18 +267,19 @@ export function buildSessionStatusDetail(
 		sessionStatRows.push({
 			label: t("ctx.detail.turnsSteps"),
 			value: `${sessionStats.turns} / ${sessionStats.steps}`,
+			hint: t("ctx.detail.turnsStepsHint"),
 		});
 		if (sessionStats.llmMs > 0) {
-			sessionStatRows.push({ label: t("ctx.detail.llmDuration"), value: formatDuration(sessionStats.llmMs) });
+			sessionStatRows.push({ label: t("ctx.detail.llmDuration"), value: formatDuration(sessionStats.llmMs), hint: t("ctx.detail.llmDurationHint") });
 		}
 		if (sessionStats.toolMs > 0) {
-			sessionStatRows.push({ label: t("ctx.detail.toolDuration"), value: formatDuration(sessionStats.toolMs) });
+			sessionStatRows.push({ label: t("ctx.detail.toolDuration"), value: formatDuration(sessionStats.toolMs), hint: t("ctx.detail.toolDurationHint") });
 		}
 		if (sessionStats.ttftAvgMs != null) {
-			sessionStatRows.push({ label: t("ctx.detail.ttftAverage"), value: formatDuration(sessionStats.ttftAvgMs) });
+			sessionStatRows.push({ label: t("ctx.detail.ttftAverage"), value: formatDuration(sessionStats.ttftAvgMs), hint: t("ctx.detail.ttftAverageHint") });
 		}
 		if (sessionStats.tokensPerSecond != null) {
-			sessionStatRows.push({ label: t("ctx.detail.tps"), value: `${sessionStats.tokensPerSecond.toFixed(0)} tok/s` });
+			sessionStatRows.push({ label: t("ctx.detail.tps"), value: `${sessionStats.tokensPerSecond.toFixed(0)} tok/s`, hint: t("ctx.detail.tpsAverageHint") });
 		}
 	}
 	return {
@@ -340,7 +347,7 @@ export function SessionStatus(props: {
 					</div>
 					<div className="grid gap-1">
 						{detailRows.map((row) => (
-							<div key={row.label} className={`flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}>
+							<div key={row.label} title={row.hint} className={`flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5${row.emphasis ? " mt-1 border-t border-border/70 pt-1.5" : ""}`}>
 								<span className="shrink-0 text-muted-foreground">{row.label}</span>
 								<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 							</div>
@@ -350,7 +357,7 @@ export function SessionStatus(props: {
 						<div className="mt-2.5 grid gap-1 border-t border-border/70 pt-2">
 							<div className="px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t("ctx.detail.lastReply")}</div>
 							{replyPerfRows.map((row) => (
-								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
+								<div key={row.label} title={row.hint} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
 									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 								</div>
@@ -361,7 +368,7 @@ export function SessionStatus(props: {
 						<div className="mt-2.5 grid gap-1 border-t border-border/70 pt-2">
 							<div className="px-1 text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t("ctx.detail.sessionStats")}</div>
 							{sessionStatRows.map((row) => (
-								<div key={row.label} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
+								<div key={row.label} title={row.hint} className="flex items-baseline justify-between gap-4 px-1 py-0.5 text-caption leading-5">
 									<span className="shrink-0 text-muted-foreground">{row.label}</span>
 									<span className="min-w-0 whitespace-nowrap text-right font-mono font-semibold tabular-nums text-popover-foreground">{row.value}</span>
 								</div>

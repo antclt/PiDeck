@@ -67,7 +67,7 @@ pi 以 `--mode rpc` 运行时没有终端，`rpc-mode.js` 里一批 UI 方法被
 | 顶部区 | `ctx.ui.setHeader(factory)` | 聊天区顶部 |
 | 底部状态区 | `ctx.ui.setFooter(factory)` | 底部状态区 |
 | 状态栏条目 | `ctx.ui.setStatus(key, text)` | 状态栏（多 key 共存） |
-| 输入框挂件 | `ctx.ui.setWidget(key, factory \| string[], opts)` | 输入框上/下方 |
+| 输入框上方挂件 | `ctx.ui.setWidget(key, factory \| string[], { placement: "aboveEditor" })` | 输入框上方（PiDeck 原生输入框下方区域不挂桥） |
 | 流式状态行 | `ctx.ui.setWorkingMessage` / `setWorkingVisible` / `setWorkingIndicator` | 流式状态行 |
 | 折叠思考块标签 | `ctx.ui.setHiddenThinkingLabel(label)` | 思考块标题 |
 | 会话标题 | `ctx.ui.setTitle(title)` | 会话标签 |
@@ -160,7 +160,8 @@ type GuiSlotOptions = { title?: string; order?: number; placement?: "above" | "b
 | 顶部区 | `SessionView` → `BridgeSlot(target="header")` | ✅ |
 | 底部状态区 | `SessionView` → `BridgeSlot(target="footer")` | ✅ |
 | 状态栏条目 | `ComposerArea` → `BridgeStatusBar`（多 key 共存） | ✅ |
-| 输入框挂件 | `ComposerArea` → `BridgeWidgetSlot(aboveEditor / belowEditor)` | ✅ |
+| 输入框上方挂件 | `ComposerArea` → `BridgeWidgetSlot(aboveEditor)` | ✅ |
+| 输入框下方区域 | PiDeck 原生 composer，不挂 GUI 扩展桥 | ⛔ **刻意不接**（避免 TUI 组件树干扰原生布局） |
 | 流式状态行 | `SessionMessageTimeline` → `BridgeWorkingLine`（旁插在原生指示器之后） | ✅ |
 | 会话标题 | `useBridgeSessionTitle` → `document.title` | ✅ |
 | 折叠思考块标签 | `ThinkingStep` → `ThinkingBlock(hiddenLabel)`，有值时替换折叠行耗时小字 | ✅ |

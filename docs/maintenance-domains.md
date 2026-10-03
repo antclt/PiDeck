@@ -70,3 +70,11 @@
 - 用户 JSON 是不可信输入，两道闸都不可放宽：键必须在白名单内；值必须匹配静态颜色正则（`#hex` 或纯数值参数的 `rgb()/hsl()/oklch()`），天然排除 `var()/url()/渐变`（值最终只进 inline style，双保险）。坏文件不致命：目录扫描降级为 `parseError` 条目呈现。
 - 设置快照 `settings.customTheme`（无前缀键，亮暗双档）在 `SettingsStore.update` 里过 `sanitizeCustomThemeSnapshot`；**快照仅 `themeSkin === "custom"` 时生效**（`applyCustomThemeTokens` 守卫），切回内置皮肤的路径（AppearanceThemePicker onPick）必须同步 `customTheme: undefined`，否则残留快照压过内置皮肤。注入函数是 App 持久化应用（useAppAppearance）与设置弹窗预览/回滚（SettingsModal）共用入口，别复制第二份注入逻辑。
 - 内置示例 `DEMO_CUSTOM_THEME` 是常量不上磁盘：列表由它推导（校验不过就不上架，防常量与校验器漂移）、不可删除不可覆盖；「复制为新主题」靠字符串改写 id 生成副本。删除用户主题走 `trashPath` 回收站；主题文件被删后已应用主题不失效（快照内嵌设置文件）。
+
+## dev 态渲染层缓存（Vite 预构建 chunk 的 immutable 陷阱）
+
+- 现象：`npm run dev` 启动或打开资源弹层/编辑器时报 `Failed to fetch dynamically imported module: http://127.0.0.1:<port>/@fs/.../node_modules/.vite/deps/<chunk>.js?v=<hash>`。不是代码 bug，是渲染进程命中了上一轮预构建的旧模块。
+- 机理：Vite 给 `.vite/deps` 打 `Cache-Control: max-age=31536000, immutable`，缓存键只有「URL + `?v=browserHash`」，而 browserHash 由 lockfile 与配置推导——重新预构建改变 chunk 切分时它可以不变。于是同一 URL 磁盘内容已换、Chromium 仍返回旧副本，旧副本 import 的 chunk 已被删除，Vite 回 504；又因为请求没出网络，Vite「504 → full-reload」的自愈路径也不会触发。
+- 收口：`src/main/devRendererCache.ts` + `src/main/index.ts` 的 `createWindow`，仅在 dev（`shouldUseDevRendererUrl()`）加载 renderer 前 `await` 清一次默认 session 的 HTTP 缓存与 JS 编译缓存；清理失败只记日志，不挡窗口创建。打包态零影响。
+- 逃生开关：`PIDECK_DEV_KEEP_HTTP_CACHE=1` 跳过清理（需要保留 dev 态登录态时）。手工排查用 `grep -rl <chunk后缀> node_modules/.vite/deps/_metadata.json` 与 `%APPDATA%/pi-desktop-dev[-<branch>]/Cache/Cache_Data`：URL 里的 `?v=` 若与当前 metadata 的 browserHash 相同却找不到对应文件，即为陈旧缓存。
+- 时序是契约：清理必须 `await` 在 `loadURL` 之前，写在之后等于没清。守卫见 `tests/devRendererCache.test.mjs`。

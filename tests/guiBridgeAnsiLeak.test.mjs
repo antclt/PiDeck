@@ -720,7 +720,7 @@ describe("host: tone 渲染与状态栏退役契约", () => {
 	 * 自己的统计行）。这条测试防「将来有人无意把它加回来」——加回时它会红，
 	 * 提醒先去确认产品意图；恢复步骤写在 `BridgeSlot.tsx` 的退役说明里。
 	 */
-	it("★ 桥状态栏不再有渲染挂载点（防无意加回；要加回先确认产品决定）", () => {
+	it("★ 桥状态栏与输入框下方 widget 都不再有渲染挂载点", () => {
 		// 先剥注释再扫：退役说明里写着「恢复步骤」的代码样例（含组件名与 data 锚点），
 		// 那是文档不是挂载点 —— 守卫只认**真代码**里的挂载。
 		const stripComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[\t ]*\/\/.*$/gm, "");
@@ -730,6 +730,11 @@ describe("host: tone 渲染与状态栏退役契约", () => {
 			assert.doesNotMatch(code, /data-bridge-status[=\s]/, `${name} 不得再有状态栏条目锚点`);
 			assert.doesNotMatch(code, /bridgeStatusBar\s*[=:{]/, `${name} 不得再透传状态栏 prop`);
 		}
+		// 输入框下方必须保持 PiDeck 原生区域：ComposerArea 只能挂 aboveEditor，
+		// 不得重新引入 belowEditor prop、挂载或传递。
+		assert.doesNotMatch(composerAreaSource, /bridgeWidgetsBelow|placement=["']belowEditor["']|belowEditor/, "输入框下方不得挂 GUI 扩展桥");
+		assert.doesNotMatch(bridgeSlotSource, /placement:\s*["']aboveEditor["']\s*\|\s*["']belowEditor["']/, "BridgeWidgetSlot 不得接受 belowEditor");
+
 		// 数据侧必须保留：桥仍收 state.status，渲染层仍存 bridgeStatus / bridgeStatusTone，
 		// 这样「接回来」是零成本的（或做成设置开关）。
 		const atomsSource = stripComments(readFileSync("src/renderer/src/atoms/session-atoms.ts", "utf8"));

@@ -858,12 +858,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (typeof sessionId !== "string" || !sessionId) return [];
 		const entry = sessionCatalog.get(sessionId);
 		if (!entry?.filePath) return [];
-		let records = await agentManager.readSessionSubagentRecords(entry.filePath);
+		// 锚点对账要在读取侧做（liveRuntimeStartedAt）：record 完成时才写，运行中
+		// 子代理只剩 start 锚点，不传对账时间会一律合成 stopped，面板在子代理
+		// 实际运行期间误显「已停止」（issue #300）。本代派发的锚点 → running。
+		const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
+		const liveTab = liveTarget ? agentManager.list().find((t) => t.id === liveTarget.agentId) : undefined;
+		let records = await agentManager.readSessionSubagentRecords(entry.filePath, { liveRuntimeStartedAt: liveTab?.createdAt });
 		// acp_delegate 推导条目在会话无活 runtime 时残留的 running 视为已终止：
 		// 终态通知没写进文件（进程被杀/崩溃）的委托在历史会话里永远是 running，
 		// 会误导为仍在运行；活会话保持 running，由后续通知/桥接覆盖。
 		// 与 start 锚点残留合成 stopped 同一语义（见 downgradeStaleRunning）。
-		const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
 		if (!liveTarget) {
 			if (!sessionRuntimeCoordinator.isActivating(sessionId)) {
 				records = downgradeStaleRunning(records);
@@ -874,7 +878,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// hook 在绑定出现时会重新拉取本列表，激活完成后即看到降级结果
 			//（2026-09-14 用户环境实测：真实活动子代理 0，历史投影仍显示 33 个
 			// running；启动之后派发的异步运行不受影响，保持 running）。
-			const liveTab = agentManager.list().find((t) => t.id === liveTarget.agentId);
 			if (liveTab?.createdAt) {
 				records = downgradeRunningStartedBefore(records, liveTab.createdAt);
 			}
@@ -1736,10 +1739,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				void appLogger.info("session", "Session cloned (dsh)", {
 					sessionId: target.sessionId,
 				});
+				notifyForkCatalogRefreshed(target.sessionId);
 				return { ok: true as const, value };
 			}
 			const value = await replaceAgentSession(target.agentId, () => agentManager.cloneSession(target.agentId), { markForked: true });
 			void appLogger.info("session", "Session cloned", { sessionId: target.sessionId });
+			notifyForkCatalogRefreshed(target.sessionId);
 			return {
 				ok: true as const,
 				value,
@@ -1755,6 +1760,17 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 	});
 	// fork 与 clone 共用 replaceAgentSession：RPC 成功后刷新 sessionPath / 消息投影
+	/** fork/clone 成功后推送 catalog 刷新：pi 新建了 catalog 条目、DSH 换绑了 dshSessionId，
+	 * 侧栏只有收到 sessionsCatalogRefreshed 才会静默重拉列表（useProjectSync），
+	 * 否则新建/换绑后的会话要等下次手动刷新才出现。 */
+	function notifyForkCatalogRefreshed(sessionId: string): void {
+		const projectId = sessionCatalog.get(sessionId)?.projectId;
+		if (!projectId) return;
+		const window = getMainWindow();
+		if (window && !window.isDestroyed()) {
+			window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
+		}
+	}
 	ipcMain.handle(ipcChannels.sessionsRuntimeGetForkMessages, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.getRuntimeForkMessages(target));
 	ipcMain.handle(ipcChannels.sessionsRuntimeFork, async (_event, target: SessionRuntimeTarget, entryId: string) => {
 		const validated = sessionRuntimeCoordinator.validateTarget(target);
@@ -1774,10 +1790,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					sessionId: target.sessionId,
 					entryId,
 				});
+				notifyForkCatalogRefreshed(target.sessionId);
 				return { ok: true as const, value };
 			}
 			const value = await replaceAgentSession(target.agentId, () => agentManager.forkSession(target.agentId, entryId), { markForked: true });
 			void appLogger.info("session", "Session forked", { sessionId: target.sessionId, entryId });
+			notifyForkCatalogRefreshed(target.sessionId);
 			return {
 				ok: true as const,
 				value,

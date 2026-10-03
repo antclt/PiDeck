@@ -26,6 +26,7 @@ import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
 import { isShortcutInput, refreshShortcutBindings } from "./appShortcuts";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
 import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName, sanitizeDevBranchSegment } from "./devIsolation";
+import { KEEP_DEV_HTTP_CACHE_ENV, clearDevRendererCache } from "./devRendererCache";
 import { isPortablePackagedEnv, resolveAppUserDataDir, resolveChannelDevDataDir, resolvePackagedUserDataDir } from "./portableUserData";
 import { readDataEnvDecision, validateStartupDataEnv, writeDataEnvDecision } from "./dataEnv/dataEnvMarker";
 import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
@@ -1878,6 +1879,13 @@ async function createWindow() {
 
 	const devRendererUrl = shouldUseDevRendererUrl() ? process.env.ELECTRON_RENDERER_URL : undefined;
 	if (devRendererUrl) {
+		// Vite 预构建 chunk 是 immutable 强缓存，重新预构建后同一 URL 内容会变但缓存键不变，
+		// 渲染层会拿到旧模块去 import 已被删除的 chunk（504）→ 动态 import 失败；dev 加载前先清一次。
+		await clearDevRendererCache({
+			session: session.defaultSession,
+			keepHttpCacheFlag: process.env[KEEP_DEV_HTTP_CACHE_ENV],
+			onLog: (outcome, detail) => void appLogger.info("app", `dev renderer http cache ${outcome}`, detail),
+		});
 		mainWindow.loadURL(devRendererUrl);
 	} else {
 		mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
@@ -3880,16 +3888,19 @@ app
 			listSessionSubagents: async (sessionId) => {
 				const entry = sessionCatalog.get(sessionId);
 				if (!entry?.filePath) return [];
-				let records = await agentManager.readSessionSubagentRecords(entry.filePath);
+				// 锚点对账要在读取侧做（liveRuntimeStartedAt，同桌面 sessionIpc）：
+				// 运行中子代理只剩 start 锚点（record 完成时才写），不传对账时间会一律
+				// 合成 stopped，面板误显「已停止」（issue #300）。
+				const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
+				const liveTab = liveTarget ? agentManager.list().find((tab) => tab.id === liveTarget.agentId) : undefined;
+				let records = await agentManager.readSessionSubagentRecords(entry.filePath, { liveRuntimeStartedAt: liveTab?.createdAt });
 				// 与桌面同款对账：无活 runtime 时把残留 running 降级（终态通知未落盘）；
 				// 活 runtime 按本代启动时间降级上一代派发的 running。
-				const liveTarget = sessionRuntimeCoordinator.getTarget(sessionId);
 				if (!liveTarget) {
 					if (!sessionRuntimeCoordinator.isActivating(sessionId)) {
 						records = downgradeStaleRunning(records);
 					}
 				} else {
-					const liveTab = agentManager.list().find((tab) => tab.id === liveTarget.agentId);
 					if (liveTab?.createdAt) {
 						records = downgradeRunningStartedBefore(records, liveTab.createdAt);
 					}

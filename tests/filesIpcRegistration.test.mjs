@@ -55,13 +55,18 @@ test("project-scoped open/show operations resolve the registered project boundar
 	assert.match(showBlock[0], /shell\.showItemInFolder\(readablePath\)/);
 });
 
-test("files:list maps a deleted project root to a stable missing-directory error", () => {
+test("files:list maps ENOENT by scope: project root → stable error, vanished subdirectory → empty subtree", () => {
 	// 闭合括号的缩进/写法可能被 formatter 调整：用 \s* 容忍。
 	const block = filesIpc.match(/ipcMain\.handle\(\s*ipcChannels\.filesList,[\s\S]*?\n[\t ]*\}?\s*\);/);
 	assert.ok(block, "filesList handler should be discoverable");
-	// 只转换根 listing 的 ENOENT；展开子目录的竞态错误保留原始上下文，便于定位具体路径。
-	assert.match(block[0], /if \(!directory && \(error as NodeJS\.ErrnoException\)\.code === "ENOENT"\)/);
-	assert.match(block[0], /throw new Error\("PROJECT_DIRECTORY_MISSING"\)/);
+	// 根 listing 的 ENOENT 必须映射为稳定错误码（渲染层据此清空文件树/刷新 presence）。
+	assert.match(block[0], /if\s*\(\s*!directory\s*\)\s*throw new Error\("PROJECT_DIRECTORY_MISSING"\)/);
+	// 子目录 ENOENT 返回空子树而非裸抛：抽屉记住的展开态可能指向已被清理的目录
+	// （典型：pi-subagents 运行后清理 artifacts/outputs），裸抛会打 handler 报错
+	// 并把节点标成「加载失败」（2026-10-03 子代理会话实测）。
+	assert.match(block[0], /return\s*\[\]\s*;/);
+	// 非 ENOENT 错误（目录过大/越界）仍须原样抛出，不得被空子树吞掉。
+	assert.match(block[0], /if\s*\(\s*\(error as NodeJS\.ErrnoException\)\.code !== "ENOENT"\s*\)\s*throw error/);
 });
 
 test("filesReadBase64 enforces a main-process default cap when the renderer omits maxBytes", () => {

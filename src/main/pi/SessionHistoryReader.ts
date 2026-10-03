@@ -1562,7 +1562,13 @@ export class SessionHistoryReader {
 	 *
 	 * 同时读取 pi-deck-subagents 桥接扩展落盘的 start 锚点（pi-deck-subagent-start）：
 	 * 运行中被会话重启终止的子代理没有 record（插件只在完成时写），无锚点则重启后
-	 * 从面板彻底消失。锚点残留（同 id 无更晚的 record 覆盖）合成 stopped 条目。
+	 * 从面板彻底消失。锚点残留（同 id 无更晚的 record 覆盖）按对账信息合成条目。
+	 *
+	 * #300：record 在完成时才写，运行中的子代理只剩锚点，一律合成 stopped 会让
+	 * 面板在子代理实际运行期间误显「已停止」。options.liveRuntimeStartedAt 是
+	 * 本代 runtime 启动时间（无活 runtime 时不传）：锚点 startedAt ≥ 它则为本代
+	 * 派发、record 未落，合成 running（与 downgradeRunningStartedBefore 同一阈值
+	 * 同方向）；早于它或无法对账（缺 startedAt / 无活 runtime）仍合成 stopped。
 	 *
 	 * IO 约束：customType 已在建索引时捕获，只对目标两类行发起磁盘读，
 	 * pi-deck-todo / om.* 等高频 custom 快照零读取，IO 量恒等于目标行数（每次
@@ -1570,7 +1576,7 @@ export class SessionHistoryReader {
 	 * （= 写入顺序）后写覆盖先写：start 锚点（spawn 时写）自然被 record（完成时写）
 	 * 覆盖。status 不在白名单的 record 条目丢弃并记日志。
 	 */
-	async readSubagentRecords(sessionPath: string): Promise<PiSubagentEntry[]> {
+	async readSubagentRecords(sessionPath: string, options?: { liveRuntimeStartedAt?: number }): Promise<PiSubagentEntry[]> {
 		const index = await this.getSessionDisplayIndex(sessionPath);
 		const recordEntries = [...index.entries.values()].filter((entry) => entry.type === "custom" && (entry.customType === "subagents:record" || entry.customType === SessionHistoryReader.SUBAGENT_START_ENTRY)).sort((a, b) => a.offset - b.offset);
 		if (recordEntries.length === 0) return [];
@@ -1587,8 +1593,17 @@ export class SessionHistoryReader {
 				if (!agentId) continue;
 				// start 锚点无 status 字段：残留（未被更晚的 record 覆盖）说明子代理
 				// 运行中被会话重启终止，合成 stopped；record 条目沿用真实 status。
+				// 例外（#300）：本代活 runtime 派发的锚点是「运行中、record 未落」，
+				// 合成 running，否则面板在子代理运行期间误显「已停止」。
 				const isStartAnchor = recordEntries[i].customType === SessionHistoryReader.SUBAGENT_START_ENTRY;
-				const status = isStartAnchor ? "stopped" : String(data.status ?? "");
+				let status: string;
+				if (!isStartAnchor) {
+					status = String(data.status ?? "");
+				} else {
+					const anchorStartedAt = typeof data.startedAt === "number" ? data.startedAt : undefined;
+					const runtimeStartedAt = options?.liveRuntimeStartedAt;
+					status = anchorStartedAt != null && runtimeStartedAt != null && anchorStartedAt >= runtimeStartedAt ? "running" : "stopped";
+				}
 				if (!validStatuses.has(status)) {
 					void this.deps.logger?.warn("agent", "Invalid subagent status in subagents:record, skipped", {
 						sessionPath,

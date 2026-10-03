@@ -3,6 +3,7 @@ import { applyAppearanceAttributes } from "../../themeAppearance";
 import { msUntilNextThemeBoundary, resolveAppColorScheme } from "../../../../shared/themeSchedule";
 import { resolveLocale, setI18nLocale } from "../../i18n";
 import type { AppSettings } from "../../../../shared/types";
+import { applyAppearanceWithTransition } from "./appearanceTransition";
 
 // 壁纸模式已注入的 token 键（effect 重跑/清除设置时需要跨运行保留，避免漏清）
 let injectedWallpaperTokens = new Set<string>();
@@ -50,9 +51,9 @@ export function applyFontSizeAttributes(root: HTMLElement, settings: AppSettings
  * 字号/字体 data 属性与自定义字体注入、i18n locale 与 document.lang 同步。
  * 全部副作用自包含，无返回值；settings 变化即重算（纯函数 of props）。
  */
-export function useAppAppearance({ settings, systemLanguage }: { settings: AppSettings; systemLanguage: string | null }): void {
-	// 外观属性是否已应用过一次：首次（冷启动）直接应用，后续切换才包 ViewTransition。
-	const hasAppliedAppearanceRef = useRef(false);
+export function useAppAppearance({ settings, systemLanguage, settingsLoaded }: { settings: AppSettings; systemLanguage: string | null; settingsLoaded: boolean }): void {
+	// 启动默认值和首次权威 settings 都直接应用；只有此后用户/系统触发的切换才播放动画。
+	const hasAppliedAuthoritativeAppearanceRef = useRef(false);
 	// 系统明暗（prefers-color-scheme）与跟随时间当前时刻提为 state：驱动 resolvedTheme 重算。
 	const [systemPrefersDark, setSystemPrefersDark] = useState(() => Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches));
 	const [scheduleNow, setScheduleNow] = useState<Date | null>(null);
@@ -107,26 +108,31 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 		// 保持直调字面 applyAppearanceAttributes(document.documentElement, …)：wallpaperThemeSync
 		// 契约扫描锚定该语句定位本 effect，改形状会误报「effect not found」。
 		const apply = () => applyAppearanceAttributes(document.documentElement, settings, systemPrefersDark);
-		// 首次应用（启动）不包 ViewTransition：冷启动不加快照开销；后续切换（dock 翻转/
-		// 定时边界/设置保存）经 ViewTransition 交叉淡入，避免整页颜色瞬时翻转刺眼。
-		// 设置弹窗的草稿拖动预览走的是直调路径（不经本 hook），不受影响。
-		const firstApply = !hasAppliedAppearanceRef.current;
-		hasAppliedAppearanceRef.current = true;
-		if (firstApply || typeof document.startViewTransition !== "function" || Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)) {
-			apply();
-			return;
-		}
-		document.startViewTransition(apply);
+		// 启动默认值 → 权威 settings 的两次应用都不做页面快照；否则窗口尚未激活时
+		// Chromium 会跳过动画，并把 ready rejection 泄漏成全局「未处理异常」。
+		applyAppearanceWithTransition({
+			host: document,
+			apply,
+			settingsLoaded,
+			hasAppliedAuthoritativeAppearance: hasAppliedAuthoritativeAppearanceRef.current,
+			prefersReducedMotion: Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches),
+		});
+		if (settingsLoaded) hasAppliedAuthoritativeAppearanceRef.current = true;
 		// 依赖 theme 与 accent：只改主题色时也必须重新应用 data-accent（否则界面不变）
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- settings 是整对象入参，列全字段反而脆弱；与既有行为一致（见 App.tsx 迁出前同注释）
-	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin, systemPrefersDark]);
+	}, [resolvedTheme, settings.theme, settings.themeScheduleLightStart, settings.themeScheduleDarkStart, settings.accent, settings.themeSkin, settingsLoaded, systemPrefersDark]);
 
 	// 外观主题自定义覆盖 + 换肤背景图统一管理（原两个 effect 互相清除：
 	// 皮肤 effect 清 token 时误清壁纸注入、背景 effect 的 else 分支又误清皮肤 bg 键——
 	// 合并后顺序固定：先自定义覆盖，后壁纸覆盖。内置外观主题色板由 CSS data-appearance 承担。）
 	useEffect(() => {
 		const root = document.documentElement;
-		const isDark = root.dataset.theme === "dark";
+		// isDark 不能读 root.dataset.theme：外观应用 effect 经 applyAppearanceWithTransition
+		// 走 View Transition（startViewTransition 回调异步执行），同一轮 commit 里
+		// dataset.theme 仍是旧明暗——按它选档会把自定义主题（含内置示例莓果夜色）的
+		// 错档 token 注入 inline 样式并压过样式表，亮暗切换后界面停留在上一档。
+		// resolvedTheme 与 applyAppearanceAttributes 写入 data-theme 用同一输入派生，等价且即时。
+		const isDark = resolvedTheme === "dark";
 		const BG_TOKENS = [
 			"--color-bg-app",
 			"--color-bg-sidebar",

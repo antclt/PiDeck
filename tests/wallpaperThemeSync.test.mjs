@@ -12,6 +12,11 @@ import test from "node:test";
  * 修复：系统明暗（systemPrefersDark）与跟随时间到达边界（scheduleNow）提为 state，
  * resolvedTheme 派生值进入「外观应用」与「壁纸注入」两个 effect 的依赖数组，
  * 明暗翻转即重算壁纸 token。
+ *
+ * 后续回归（自定义主题亮暗切换，如内置示例「莓果夜色」）：依赖数组补齐只保证 effect
+ * 重跑，但注入 effect 读 root.dataset.theme 选档——data-theme 由外观应用 effect 经
+ * startViewTransition 异步写入，重跑时仍是旧明暗，错档 token 注入 inline 样式后压过
+ * 样式表，界面停在上一档。isDark 必须改用 resolvedTheme（与写入值同源派生，即时）。
  */
 
 // 外观域已从 App.tsx 迁到 hooks/appearance/useAppAppearance.ts（useAppAppearance）
@@ -38,4 +43,14 @@ test("appearance application effect also tracks the resolved theme", () => {
 	const appearanceEffect = app.match(/applyAppearanceAttributes\(document\.documentElement, settings, systemPrefersDark\);[\s\S]*?\}, \[([^\]]*)\]\);/);
 	assert.ok(appearanceEffect, "appearance application effect not found");
 	assert.match(appearanceEffect[1], /resolvedTheme/);
+});
+
+test("token injection derives isDark from resolvedTheme, not the deferred dataset.theme", () => {
+	// 注入 effect（自定义主题快照 + 壁纸）读 root.dataset.theme 会拿到 View Transition
+	// 异步写入前的旧明暗：自定义主题注入错档 token 且 inline 压过样式表，亮暗切换后
+	// 界面停留在上一档。isDark 必须用 resolvedTheme（与 data-theme 写入值同源派生）。
+	const injectionEffect = app.match(/applyCustomThemeTokens\(root, settings, isDark\);[\s\S]*?\}, \[([^\]]*)\]\);/);
+	assert.ok(injectionEffect, "token injection effect not found");
+	assert.match(app, /const isDark = resolvedTheme === "dark";/);
+	assert.doesNotMatch(app, /isDark = root\.dataset\.theme === "dark"/);
 });

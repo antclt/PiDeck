@@ -39,13 +39,13 @@ test("extension scope table keeps three columns and horizontal state toggles", (
 	assert.match(extensions, /config\.extensionVersion/);
 	assert.match(extensions, /config\.actions/);
 	assert.doesNotMatch(extensions, /config\.extensionPath/);
-	// 启停开关用水平 ToggleLeft/ToggleRight，不使用 Power 图标
+	// 启停开关用 Switch（轨道着色区分启用/禁用），不使用 Power 图标或无色差的 Toggle 图标
 	assert.doesNotMatch(extensions + rows, /\bPower\b/);
-	assert.match(rows, /<ToggleRight/);
-	assert.match(rows, /<ToggleLeft/);
+	assert.doesNotMatch(rows, /ToggleRight|ToggleLeft/);
+	assert.match(rows, /<Switch\s+checked=\{effectiveEnabled\}/);
 	// 内置扩展也使用同一启停开关；仅保留全局范围下的独立移除入口。
-	assert.match(rows, /启停开关：内置扩展也复用 extensions:toggle/);
-	assert.match(rows, /onClick=\{\(\) => props\.onToggle\(extension, !effectiveEnabled\)\}/);
+	assert.match(rows, /启停开关：Switch 轨道着色[\s\S]*?内置扩展也复用 extensions:toggle/);
+	assert.match(rows, /onCheckedChange=\{\(checked\) => props\.onToggle\(extension, checked\)\}/);
 	assert.match(rows, /extension\.builtIn && extension\.enabled !== false && !inherited/);
 	assert.doesNotMatch(rows, /onRestoreBuiltIn|restoringBuiltIn/);
 	// 继承的全局行只读：全局禁用项不可在项目视图重新启用，卸载/移除均隐藏

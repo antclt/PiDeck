@@ -48,6 +48,21 @@ export const BUILT_IN_EXTENSIONS = [
 export const INTERNAL_BUILT_IN_EXTENSIONS = ["pi-deck-shell-proxy.ts"] as const;
 const ALL_BUILT_IN_EXTENSIONS = [...BUILT_IN_EXTENSIONS, ...INTERNAL_BUILT_IN_EXTENSIONS] as const;
 
+/**
+ * 默认关闭、需用户在扩展页显式开启的内置扩展（opt-in）。
+ *
+ * 桥（GUI 扩展桥）与扩展点面板面向开发者/高级用户，默认关闭可减少普通用户的
+ * 攻击面与后台开销；需要时在设置 → 扩展里手动打开（写入 enabledBuiltInExtensions）。
+ * 注意：面板（ext-points）依赖桥挂出的 ctx.ui.gui，单独开启面板而桥关闭时
+ * 面板会降级（读不到 GUI 落点），不报错。
+ */
+export const DEFAULT_DISABLED_BUILT_IN_EXTENSIONS = ["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"] as const;
+
+/** 是否为默认关闭的内置扩展（opt-in 集合成员）。 */
+export function isDefaultDisabledBuiltInExtension(name: string): boolean {
+	return (DEFAULT_DISABLED_BUILT_IN_EXTENSIONS as readonly string[]).includes(basename(name.trim()));
+}
+
 export type BuiltInExtensionName = (typeof BUILT_IN_EXTENSIONS | typeof INTERNAL_BUILT_IN_EXTENSIONS)[number];
 
 export type BuiltInExtensionPathRoots = {
@@ -154,14 +169,19 @@ export function resolveBuiltInExtensionPath(extensionName: string, roots: BuiltI
 /**
  * 返回当前应注入到 pi RPC 的内置扩展绝对路径列表。
  * - removedBuiltInExtensions 中的用户扩展跳过；内部适配器始终保留
+ * - DEFAULT_DISABLED_BUILT_IN_EXTENSIONS 成员默认不注入，除非出现在
+ *   optInBuiltInExtensions（settings.enabledBuiltInExtensions，用户在扩展页显式开启）
  * - 源文件缺失的跳过（打日志由调用方处理）
  * - piRpcNoExtensions 由调用方决定是否整段跳过
  */
-export function listActiveBuiltInExtensionPaths(roots: BuiltInExtensionPathRoots, removedBuiltInExtensions: readonly string[] = []): string[] {
+export function listActiveBuiltInExtensionPaths(roots: BuiltInExtensionPathRoots, removedBuiltInExtensions: readonly string[] = [], optInBuiltInExtensions: readonly string[] = []): string[] {
 	const removed = new Set(removedBuiltInExtensions.map((item) => basename(item.trim())).filter(Boolean));
+	const optIn = new Set(optInBuiltInExtensions.map((item) => basename(item.trim())).filter(Boolean));
 	const paths: string[] = [];
 	for (const name of ALL_BUILT_IN_EXTENSIONS) {
 		if (name !== "pi-deck-shell-proxy.ts" && removed.has(name)) continue;
+		// 默认关闭的内置扩展：不在显式 opt-in 列表里就不注入（内部适配器不在该集合，不受影响）
+		if (isDefaultDisabledBuiltInExtension(name) && !optIn.has(name)) continue;
 		const fullPath = resolveBuiltInExtensionPath(name, roots);
 		if (!existsSync(fullPath)) continue;
 		paths.push(fullPath);

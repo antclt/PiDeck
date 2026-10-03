@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.7.7-blue)
+![Version](https://img.shields.io/badge/version-0.7.8-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -61,7 +61,7 @@
   - [📑 目录](#-目录)
   - [✨ 核心亮点](#-核心亮点)
   - [📋 更新日志](#-更新日志)
-    - [v0.7.7 更新亮点](#v077-更新亮点)
+    - [v0.7.8 更新亮点](#v078-更新亮点)
   - [🧩 功能总览](#-功能总览)
     - [工作区与项目](#工作区与项目)
     - [会话与对话](#会话与对话)
@@ -104,6 +104,7 @@
 
 ### v0.7.8 更新亮点
 - 🚀 **数据目录更名为 PiDeck 并自动迁移历史数据**
+- 🚀 **自定义主题（JSON 主题包 + AI 开发指南）**
 - 🚀 **用量查询新增「火山方舟 AK/SK」模板**
 - 🚀 **供应商 / 提供方名称支持中文**
 - 🚀 **DSH「添加 provider」补齐必要字段**
@@ -114,7 +115,6 @@
 - 🚀 **支持导入 Qoder 会话**
 - 🚀 **模型配置导出 / 导入面板（#261）**
 - 🚀 **发送钮自带投递菜单**
-- 🚀 **最新回复快捷操作**
 - ✨ **修复一键安装 pi 在 Windows 上必然失败**
 - ✨ **修复路径链接化吞掉后续正文**
 - ✨ **修复中文句子里的斜杠被误判为路径**
