@@ -6,8 +6,29 @@ import type { AppSettings } from "../../../../shared/types";
 
 // 壁纸模式已注入的 token 键（effect 重跑/清除设置时需要跨运行保留，避免漏清）
 let injectedWallpaperTokens = new Set<string>();
-// 自定义外观主题（customThemeOverrides）已注入的 token 键：切换主题时先清后注，防残留
+// 自定义外观主题（customThemeOverrides / customTheme 快照）已注入的 token 键：切换主题时先清后注，防残留
 let injectedCustomTokens = new Set<string>();
+
+/**
+ * 自定义 token 注入（主题包快照 + 手写 overrides）：App 持久化应用与设置弹窗实时预览共用。
+ * 先清后注、幂等；快照仅 themeSkin=custom 时生效（切回内置皮肤不残留），
+ * overrides 沿袭历史行为始终叠加（inline 样式压过 [data-appearance] 样式表）。
+ */
+export function applyCustomThemeTokens(root: HTMLElement, settings: Pick<AppSettings, "themeSkin" | "customTheme" | "customThemeOverrides">, isDark: boolean): void {
+	for (const k of injectedCustomTokens) root.style.removeProperty(`--color-${k}`);
+	injectedCustomTokens.clear();
+	if (settings.themeSkin === "custom" && settings.customTheme) {
+		const schemeTokens = isDark ? settings.customTheme.dark : settings.customTheme.light;
+		for (const [k, v] of Object.entries(schemeTokens)) {
+			root.style.setProperty(`--color-${k}`, v);
+			injectedCustomTokens.add(k);
+		}
+	}
+	for (const [k, v] of Object.entries(settings.customThemeOverrides ?? {})) {
+		root.style.setProperty(`--color-${k}`, v);
+		injectedCustomTokens.add(k);
+	}
+}
 
 /**
  * 字号档位 dataset 写入：ui/tab/chat/input 四区域 + 旧 fontSize 属性。
@@ -113,13 +134,8 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 		//    （inline 样式优先于 stylesheet 的 [data-appearance] 块，语义=「自定义压过内置」）。
 		//    内置主题（classic-green/graphite/sea-blue/warm-beige）的表面色板由 CSS
 		//    [data-appearance] 块承担，这里不再注入内置皮肤变量，避免 inline 与样式表互相覆盖。
-		//    先清掉上次注入的 custom token，保证切换主题后无残留。
-		for (const k of injectedCustomTokens) root.style.removeProperty(`--color-${k}`);
-		injectedCustomTokens.clear();
-		for (const [k, v] of Object.entries(settings.customThemeOverrides ?? {})) {
-			root.style.setProperty(`--color-${k}`, v);
-			injectedCustomTokens.add(k);
-		}
+		//    注入逻辑与设置弹窗预览共用 applyCustomThemeTokens（见上）。
+		applyCustomThemeTokens(root, settings, isDark);
 
 		// 2. 换肤背景图：遮罩同色渐变（浅白/暗黑）+ 壁纸模式 token 半透明注入。
 		//    存储语义=图片可见度（0=全遮，1=图全显）；滑块 80% → 遮罩 0.2 → 图 80% 透出。
@@ -171,7 +187,7 @@ export function useAppAppearance({ settings, systemLanguage }: { settings: AppSe
 		}
 		// resolvedTheme 必须进依赖：系统明暗翻转/时间边界到达时壁纸 inline token 要按新明暗重算，
 		// 否则上一主题烤进的 color-mix 基色焊死在 root.style 上压过样式表（issue #297）
-	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity]);
+	}, [resolvedTheme, settings.themeSkin, settings.theme, settings.customTheme, settings.customThemeOverrides, settings.backgroundImage, settings.backgroundImageOpacity]);
 
 	// 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
 	useEffect(() => {

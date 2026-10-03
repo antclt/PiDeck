@@ -304,6 +304,7 @@ import { UsageStatsService } from "./usageStats/UsageStatsService";
 import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, readLastWindowBounds, saveLastWindowBounds } from "./windowState";
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
+import { registerThemesIpc } from "./ipc/themesIpc";
 import { registerGitIpc } from "./ipc/gitIpc";
 import { registerStoreIpc } from "./ipc/storeIpc";
 import { registerTerminalIpc } from "./ipc/terminalIpc";
@@ -2249,6 +2250,7 @@ function registerIpc() {
 	// 换肤背景图：协议服务 userData/backgrounds/，IPC 负责选图复制与删除
 	registerBackgroundImageProtocol();
 	registerBackgroundsIpc();
+	registerThemesIpc();
 	registerProjectsIpc({
 		projectStore,
 		settingsStore,

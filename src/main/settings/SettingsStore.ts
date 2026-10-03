@@ -11,6 +11,7 @@ import { sanitizeShortcutOverrides } from "../../shared/shortcuts";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
 import { normalizeQuickMessages } from "../../shared/quickMessages";
 import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
+import { sanitizeCustomThemeSnapshot } from "../../shared/customThemes";
 import { normalizeFontSizeMode, normalizeOptionalFontSizeMode } from "../../shared/fontSize";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -540,6 +541,16 @@ export class SettingsStore {
 		// 用户自加的 pi 候选路径来自渲染层，入参不可信：只保留绝对路径/wsl 标记、去重、限额。
 		if ("piCustomPaths" in safePatch) {
 			safePatch.piCustomPaths = sanitizePiCustomPaths(safePatch.piCustomPaths).paths;
+		}
+		// 自定义主题快照入参不可信：逐键过滤非法 token/颜色，整体非法则丢弃字段（保持原设置）。
+		// undefined 是合法值（切回内置皮肤时清除快照），不能当成脏值丢弃。
+		if ("customTheme" in safePatch) {
+			const snapshot = sanitizeCustomThemeSnapshot(safePatch.customTheme);
+			if (snapshot || safePatch.customTheme === undefined) {
+				safePatch.customTheme = snapshot;
+			} else {
+				delete safePatch.customTheme;
+			}
 		}
 		// IPC 入参不可信：自动标题开关只接受布尔值，非法值保持原有设置。
 		if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {

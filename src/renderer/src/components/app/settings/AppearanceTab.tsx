@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { ModuleVisibilitySection } from "./ModuleVisibilitySection";
+import { CustomThemeSection } from "./CustomThemeSection";
 import { Check, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -145,10 +146,24 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						value={draft.themeSkin}
 						onPick={(id) => {
 							const preset = SKIN_PRESETS.find((p) => p.id === id);
-							// 外观主题自带推荐主色：选择主题时联动写入 accent，保证「一套主题 = 完整外观」
-							updateDraft(preset ? { themeSkin: id, accent: preset.accent } : { themeSkin: id });
+							// 外观主题自带推荐主色：选择主题时联动写入 accent，保证「一套主题 = 完整外观」；
+							// 切回内置皮肤时同时清掉自定义主题包快照（快照仅 themeSkin=custom 时生效，双保险防残留）
+							updateDraft(preset ? { themeSkin: id, accent: preset.accent, customTheme: undefined } : { themeSkin: id, customTheme: undefined });
 						}}
 					/>
+				</SettingRow>
+				{/* 自定义主题包（userData/custom-themes/）：卡片列表 + JSON 编辑器 + AI 指南 */}
+				<SettingRow
+					title={
+						<>
+							<span>{t("settings.sectionCustomThemes")}</span>
+							<DirtyMarker dirty={isDirty("customTheme") || (isDirty("themeSkin") && draft.themeSkin === "custom")} label={t("settings.sectionCustomThemes")} />
+						</>
+					}
+					description={t("settings.customThemesDesc")}
+					stacked
+				>
+					<CustomThemeSection draft={draft} updateDraft={updateDraft} />
 				</SettingRow>
 				{/* 背景图片：pideck-bg:// 协议加载 userData/backgrounds/ 下文件 */}
 				<SettingRow
