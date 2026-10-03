@@ -10,7 +10,11 @@ const hidden = () => null;
 const passthrough = ({ children }) => children;
 // 配置化后 ComposerArea 不再内置规则，按 SessionView 的实际契约传入规则快照。
 const defaultRules = JSON.parse(readFileSync("resources/reply-actions.default.json", "utf8")).items;
-const completedActionTexts = ["继续", "再确认一下", "提交", "提交并推送", "运行测试看看结果"];
+// 52cd7a46c 后 triggers 是 AND 语义（全部命中才展示，降噪）：fixture 文本「修改已完成，可以提交这些改动。」
+// 只命中「继续」（纯 onStop）与「提交」「提交并推送」（textMatch 含完成/可以提交）；
+// 「再确认一下」「运行测试看看结果」的 patterns 不往 fixture 里出现，必须不展示——这是降噪契约。
+const matchedActionTexts = ["继续", "提交", "提交并推送"];
+const textMatchOnlyTexts = ["再确认一下", "运行测试看看结果"];
 
 /** 渲染真实输入栏布局，只替换与位置无关的编辑器、进程桥和发送控制器。 */
 function renderComposer(run, options = {}) {
@@ -18,7 +22,18 @@ function renderComposer(run, options = {}) {
 	const target = options.target === undefined ? { dataset: { sessionId: "session-a" } } : options.target;
 	const { ComposerArea } = loadTsCommonJs("src/renderer/src/components/session/ComposerArea.tsx", {
 		stubs: {
-			jotai: { useAtomValue: () => ({}) },
+			jotai: {
+				useAtomValue: () => ({}),
+				// ComposerArea 的加载链拉进了 atoms/dsh-atoms.ts（模块顶层 atom() 建原子），
+				// stub 需给一个可调用形式，返回对象字面量即可（useAtomValue 已被拦截，不会真正读它）。
+				atom: (initial) => ({ init: initial }),
+			},
+			"@/lib/utils": { cn: (...classes) => classes.filter(Boolean).join(" ") },
+			// desktopApi 模块顶层会按环境初始化 browserApi（访问 window），vm 沙箱无 window；
+			// 本测试只验证布局与投递位置，不真调桌面 API，把不同层级的相对 specifier 都拦下。
+			"../../desktopApi": { desktopApi: {} },
+			"../desktopApi": { desktopApi: {} },
+			"./desktopApi": { desktopApi: {} },
 			"react-dom": {
 				createPortal: (children, container) => {
 					portals.push({ children, container });
@@ -43,6 +58,9 @@ function renderComposer(run, options = {}) {
 			"./ComposerParts": { ComposerBottomBar: hidden, ImagePreviewModal: hidden, PromptSuggestions: hidden },
 			"./composer": { TipTapComposer: () => createElement("textarea", { "data-testid": "composer-editor", defaultValue: "保留的草稿" }) },
 			"../app/SessionReferenceModal": { SessionReferenceModal: hidden },
+			// SessionContextMeter 依赖链拉进 MarkdownStream → streamdown（ESM-only，vm CJS 加载不了）；
+			// 本测试只验证建议 chips 的位置与投递，圆环渲染不在关注面内。
+			"./SessionContextMeter": { SessionContextMeter: hidden },
 			"./ComposerPanels": { ComposerAttachmentBar: hidden, ComposerSendControls: hidden, SessionDeliveryNotice: hidden },
 			"./ComposerPickerHost": { ComposerPickerHost: hidden },
 			"./SecurityControl": { SecurityControl: hidden },
@@ -89,7 +107,8 @@ test("快捷操作只投到本会话的消息末尾，不再位于输入栏或�
 	assert.ok(!html.includes('data-testid="session-reply-action-strip"'));
 	assert.equal(portals.length, 1);
 	assert.equal(portals[0].container, target);
-	for (const text of completedActionTexts) assert.ok(actionsHtml.includes(text));
+	for (const text of matchedActionTexts) assert.ok(actionsHtml.includes(text));
+	for (const text of textMatchOnlyTexts) assert.ok(!actionsHtml.includes(`title="${text}"`), "textMatch 未命中的动作不得展示（52cd7a46c 降噪语义）");
 	assert.ok(html.indexOf('data-testid="session-todo-strip"') < html.indexOf('data-testid="composer-editor"'));
 });
 
@@ -133,15 +152,15 @@ test("回复操作沿用直发通道，不能替换输入框草稿", () => {
 	const sent = [];
 	const { html, portals } = renderComposer(completedRun, { composer: { delivery: { canSendQuickMessage: true, sendQuickMessage: (text) => sent.push(text) } } });
 	assert.equal(portals.length, 1);
-	assert.equal(portals[0].children.props.children.length, completedActionTexts.length);
+	assert.equal(portals[0].children.props.children.length, matchedActionTexts.length);
 	for (const button of portals[0].children.props.children) button.props.onClick();
-	assert.deepEqual(sent, completedActionTexts);
+	assert.deepEqual(sent, matchedActionTexts);
 	assert.ok(html.includes("保留的草稿"));
 });
 
 test("发送不可用时所有回复操作都禁用", () => {
 	const { portals } = renderComposer(completedRun, { composer: { delivery: { canSendQuickMessage: false, sendQuickMessage: noop } } });
 	assert.equal(portals.length, 1);
-	assert.equal(portals[0].children.props.children.length, completedActionTexts.length);
+	assert.equal(portals[0].children.props.children.length, matchedActionTexts.length);
 	for (const button of portals[0].children.props.children) assert.equal(button.props.disabled, true);
 });

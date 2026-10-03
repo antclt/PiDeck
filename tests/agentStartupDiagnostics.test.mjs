@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const mainSource = readFileSync("src/main/pi/AgentManager.ts", "utf8");
+// 信任闸已迁出 AgentManager（Wave 3/4 拆分，见 docs/agent-manager-split-plan.md）：
+// 启动诊断文案随实现落在 projectTrustGate.ts，契约测试跟随新性所。
+const trustGateSource = readFileSync("src/main/pi/projectTrustGate.ts", "utf8");
 const indexSource = readFileSync("src/main/index.ts", "utf8");
 const systemIpcSource = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
 const sessionIpcSource = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
@@ -18,8 +21,8 @@ test("agent startup writes diagnostics across renderer IPC and pi launch boundar
 	assert.match(systemIpcSource, /ipcChannels\.rendererLog/);
 	assert.doesNotMatch(indexSource, /Agent create IPC received|ipcChannels\.agentsCreate/);
 	assert.match(mainSource, /Agent create requested/);
-	assert.match(mainSource, /Agent ensure trusted directory start/);
-	assert.match(mainSource, /Agent ensure trusted directory completed/);
+	assert.match(trustGateSource, /Agent ensure trusted directory start/);
+	assert.match(trustGateSource, /Agent ensure trusted directory completed/);
 	assert.match(mainSource, /Agent pi process start/);
 	assert.match(mainSource, /Agent get_state request start/);
 	assert.match(mainSource, /handshakePiProcess/);

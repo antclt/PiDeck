@@ -117,13 +117,14 @@ test("composer area mounts the stats strip under the input card", () => {
 	const area = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
 	const stats = readFileSync("src/renderer/src/components/session/ComposerStatsLine.tsx", "utf8");
 	assert.match(area, /import \{ ComposerStatsLine \} from "\.\/ComposerStatsLine"/);
-	assert.match(area, /statsLine=\{\s*<ComposerStatsLine state=\{composer\.runtime\?\.state\}(?: turnCount=\{props\.turnCount\})? \/>/);
+	assert.match(area, /statsLine=\{\s*<ComposerStatsLine\s+state=\{composer\.runtime\?\.state\}\s+turnCount=\{props\.turnCount\}\s+contextMeter=/);
 	assert.match(area, /\{props\.statsLine\}/);
 	// footer 固定保留 8px 底部留白；ComposerMeasuredExtras 会把它计入总高度，
 	// StatsLine 自身仍只在有数字时渲染。
 	assert.match(area, /className="composer[^\"]*px-0 pb-2"/);
 	assert.match(stats, /if \(groups\.length === 0\) return null/);
-	assert.match(stats, /truncate px-1 pb-0 pt-1/);
+	assert.match(stats, /px-1 pb-0 pt-1/);
+	assert.match(stats, /min-w-0 truncate text-center/);
 });
 
 test("stats copy exists in both locales", () => {

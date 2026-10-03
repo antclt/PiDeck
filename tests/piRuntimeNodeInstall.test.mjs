@@ -286,7 +286,19 @@ test("便携 node 路径按平台区分 bin 层：POSIX 在 node/bin，Windows �
 // 回归（2026-09-30 Linux 实机）：跨设备回退复制必须保留相对软链。
 // Node 的 cpSync 默认 verbatimSymlinks:false 会把 bin/npm 这类相对链接改写成绝对路径，
 // 解压临时目录（/tmp/pideck-node-extract-*）一删，便携 npm/npx/corepack 全部悬空。
-test("跨设备回退复制保留相对软链（verbatimSymlinks）", async () => {
+// Windows 未开开发者模式/非管理员时创建符号链接被系统拒绝（EPERM）——环境限制，跳过。
+async function trySymlink(target, path) {
+	const { symlinkSync } = await import("node:fs");
+	try {
+		symlinkSync(target, path);
+		return true;
+	} catch (error) {
+		if (process.platform === "win32" && error.code === "EPERM") return false;
+		throw error;
+	}
+}
+
+test("跨设备回退复制保留相对软链（verbatimSymlinks）", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "pideck-node-link-"));
 	try {
 		const from = join(root, "src-bin");
@@ -294,8 +306,11 @@ test("跨设备回退复制保留相对软链（verbatimSymlinks）", async () =
 		await mkdir(join(from, "..", "lib", "node_modules", "npm", "bin"), { recursive: true });
 		await writeFile(join(root, "lib", "node_modules", "npm", "bin", "npm-cli.js"), "// cli\n", "utf8");
 		await mkdir(from, { recursive: true });
-		const { symlinkSync, readlinkSync } = await import("node:fs");
-		symlinkSync(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(from, "npm"));
+		const { readlinkSync } = await import("node:fs");
+		if (!(await trySymlink(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(from, "npm")))) {
+			t.skip("Windows 符号链接权限不足（EPERM）");
+			return;
+		}
 
 		copyDirEntryVerbatim(from, to);
 
@@ -309,10 +324,10 @@ test("跨设备回退复制保留相对软链（verbatimSymlinks）", async () =
 
 // 自愈：旧版本（cpSync 默认把相对链接写成绝对路径）装出来的便携副本里，
 // npm/npx/corepack 会指向已被删掉的解压临时目录。判据保守，只修「绝对链接 + 目标已不在 + 本地有同名文件」。
-test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相对链接", async () => {
+test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相对链接", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "pideck-node-repair-"));
 	try {
-		const { symlinkSync, readlinkSync, mkdirSync } = await import("node:fs");
+		const { readlinkSync, mkdirSync } = await import("node:fs");
 		const binDir = piRuntimeNodeBinDir(root, "linux");
 		mkdirSync(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin"), { recursive: true });
 		mkdirSync(binDir, { recursive: true });
@@ -320,9 +335,15 @@ test("repairPortableNodeLinks：悬空的绝对软链会被改写成可用的相
 		// 于是修不了（表现为随机失败，跑十几次才复现一次）。
 		await writeFile(join(root, "pi-runtime", "node", "lib", "node_modules", "npm", "bin", "npm-cli.js"), "// cli\n", "utf8");
 		// 复现旧安装的现场：指向已删除的 /tmp 解压目录
-		symlinkSync("/tmp/pideck-node-extract-gone/node-v24.13.0-linux-x64/lib/node_modules/npm/bin/npm-cli.js", join(binDir, "npm"));
+		if (!(await trySymlink("/tmp/pideck-node-extract-gone/node-v24.13.0-linux-x64/lib/node_modules/npm/bin/npm-cli.js", join(binDir, "npm")))) {
+			t.skip("Windows 符号链接权限不足（EPERM）");
+			return;
+		}
 		// 相对链接本来就没问题，不应被动
-		symlinkSync(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(binDir, "npx"));
+		if (!(await trySymlink(join("..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join(binDir, "npx")))) {
+			t.skip("Windows 符号链接权限不足（EPERM）");
+			return;
+		}
 
 		const repaired = repairPortableNodeLinks(root, "linux");
 

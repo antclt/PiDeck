@@ -410,6 +410,7 @@ export class DshRuntimeManager {
 	private async swapRuntimeDirectory(stagingDir: string, target: string): Promise<void> {
 		const log = this.deps.log ?? (() => {});
 		const previous = existsSync(target) ? join(this.deps.layout.tempRoot, `previous-${Date.now()}`) : undefined;
+		let rollbackFailed = false;
 		try {
 			if (previous) await renameWithRetry(target, previous);
 			try {
@@ -421,13 +422,20 @@ export class DshRuntimeManager {
 					try {
 						await renameWithRetry(previous, target);
 					} catch (rollbackError) {
-						log("dsh-runtime", "runtime swap rollback failed", { error: errorMessage(rollbackError) });
+							rollbackFailed = true;
+							log("dsh-runtime", "runtime swap rollback failed; keeping previous copy", {
+							error: errorMessage(rollbackError),
+							previous,
+						});
 					}
 				}
 				throw error;
 			}
 		} finally {
-			if (previous) await rm(previous, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }).catch(() => {});
+			// 成功路径：previous 是被换下的旧版本垃圾，正常清理。
+			// 回滚失败时：previous 是旧运行时的唯一幸存副本，绝不能删——删了它，
+			// 用户已装运行时就彻底丢失（target 半空 + tempRoot 被清）。残留仅供找回。
+			if (previous && !rollbackFailed) await rm(previous, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }).catch(() => {});
 		}
 	}
 
