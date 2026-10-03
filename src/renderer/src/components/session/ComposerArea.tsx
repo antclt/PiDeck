@@ -23,6 +23,7 @@ import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 import { VoiceTranscriptionControls } from "./VoiceTranscriptionControls";
 import { SessionReplyActions } from "./SessionReplyActions";
 import { BridgeWidgetSlot } from "../bridge/BridgeSlot";
+import { SessionContextMeter } from "./SessionContextMeter";
 
 /** 无规则时的稳定空数组（避免每渲染新引用让下游 memo 失效）。 */
 const EMPTY_REPLY_RULES: readonly ReplyActionRule[] = [];
@@ -171,7 +172,24 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 									<ComposerAttachmentBar images={composer.attachments} onPreview={composer.images.preview} onRemove={composer.images.remove} onClear={composer.images.clear} pasteFiles={composer.pasteFiles.files} onRemovePasteFile={composer.pasteFiles.remove} onClearPasteFiles={composer.pasteFiles.clear} />
 								) : null
 							}
-							statsLine={<ComposerStatsLine state={composer.runtime?.state} turnCount={props.turnCount} />}
+							statsLine={
+								<ComposerStatsLine
+									state={composer.runtime?.state}
+									turnCount={props.turnCount}
+									contextMeter={
+										composer.mode === "imagegen" ? null : (
+											<SessionContextMeter
+												state={composer.runtime?.state}
+												onCompact={composer.delivery.compact}
+												overflowRecoveryTarget={composer.delivery.overflowRecoveryTarget}
+												onOverflowRecovery={composer.delivery.onOverflowRecovery}
+												backend={composer.backend === "dsh" ? "dsh" : "pi"}
+												fallbackProvider={composer.dshDefaultModel?.provider ?? composer.bootstrapDefaultModel?.provider}
+											/>
+										)
+									}
+								/>
+							}
 							// GUI 扩展桥的两个 widget 落点：全部「无内容不占位」（组件内部返回 null）。
 							// 桥状态栏（setStatus 条目）已按产品决定退役，不再有挂载点。
 							bridgeWidgetsAbove={<BridgeWidgetSlot sessionId={props.sessionId} placement="aboveEditor" />}

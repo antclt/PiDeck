@@ -14,7 +14,6 @@ import { ConfirmDialog } from "../app/AppParts";
 import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { useComposerModeAvailability } from "../../hooks/useComposerModeAvailability";
 import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
-import { SessionContextMeter } from "./SessionContextMeter";
 import { ProviderUsageInline } from "../app/ProviderUsageInline";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
@@ -360,7 +359,6 @@ export function ComposerBottomBar(props: {
 	});
 	// 用量查询链路随会话后端：DSH 会话走 dsh（$DSH_HOME 配置 + 凭据库），其余走 pi。
 	// 圆球面板必须与 DSH 卡片/选择器同一 backend，否则查的是另一条 usage-probes.json。
-	const usageBackend: UsageProbeBackend = isDsh ? "dsh" : "pi";
 	// DSH 草稿：记录未填默认时用部署默认（settings.yaml agent-default-model）兜底展示。
 	// Composer 的选择文字只取记录或引导页偏好，不能由 runtime state 改写。
 	const currentThinkingLevel = resolveComposerThinkingLevel({
@@ -391,7 +389,6 @@ export function ComposerBottomBar(props: {
 	const modelDisplay = computeModelDisplay(liveModel.modelId ? liveModel : undefined, props.modelPending);
 	const modelFrom = modelDisplay.from;
 	const modelTo = modelDisplay.to;
-	const modelProvider = modelFrom?.provider;
 	const modelName = modelFrom?.modelName || modelFrom?.modelId;
 	const modelLabel = modelName ? formatModelRef(modelFrom ?? { provider: "", modelId: "" }) : `${t("app.model")}: -`;
 	const modelPendingTitle = props.modelPending
@@ -527,22 +524,6 @@ export function ComposerBottomBar(props: {
 					    原独立 compact 按钮移除，避免双入口。 */}
 				</div>
 				<div className="composer-bottom-right ml-auto flex shrink-0 items-center gap-2">
-					{/* 上下文占用圆环（dsh ContextMeter 移植）：发送按钮旁常驻指示,
-					    点击展开占用面板（两段占比/缓存命中/输入输出/压缩入口）；
-					    压缩动作从右上角紧凑徽章迁入面板；无 capacity 数据时自身不渲染。
-					    生图模式没有 LLM 上下文（消息不进 pi/DSH 会话，历史独立存 ImageSessionStore），
-					    圆环与压缩入口一并屏蔽。 */}
-					{isImageGenMode ? null : (
-						<SessionContextMeter
-							state={props.state}
-							onCompact={props.onCompact}
-							overflowRecoveryTarget={props.overflowRecoveryTarget}
-							onOverflowRecovery={props.onOverflowRecovery}
-							backend={usageBackend}
-							// 未激活会话用会话记录/默认 model 推导的 provider 查用量（用量不依赖 agent 运行）
-							fallbackProvider={modelProvider}
-						/>
-					)}
 					{/* 分支只读 chip 升级为可切换下拉：当前分支即触发器，展开列表选目标分支后
 					    先弹确认（切换会携带未提交更改），确认后才调栏级 switchBranch（绑定本栏项目）。 */}
 					{props.gitInfo?.current && props.onSwitchBranch ? (

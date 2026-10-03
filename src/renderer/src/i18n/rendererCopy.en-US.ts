@@ -1644,7 +1644,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.dsh.resetHome": "Reset to default (~/.dsh)",
 	"config.dsh.homeHint": "Defaults to your local ~/.dsh (shared config/credentials/sessions with the dsh CLI); you can switch to another directory — the host restarts immediately.",
 	"config.dsh.homeSharedTitle": "Sharing the config directory with the dsh CLI",
-	"config.dsh.homeSharedHint": "You are using the default ~/.dsh, so the dsh CLI and PiDeck may read and write the same config and plugin state — the last writer wins (theme, workspace selection, and so on). The session format also evolves with versions (PiDeck's bundled 0.2 runtime writes V4): sessions written after the upgrade cannot be read by older dsh CLI versions. Isolate the CLI with its own DSH_HOME:",
+	"config.dsh.homeSharedHint":
+		"You are using the default ~/.dsh, so the dsh CLI and PiDeck may read and write the same config and plugin state — the last writer wins (theme, workspace selection, and so on). The session format also evolves with versions (PiDeck's bundled 0.2 runtime writes V4): sessions written after the upgrade cannot be read by older dsh CLI versions. Isolate the CLI with its own DSH_HOME:",
 	"config.dsh.homeConflictTitle": "Another DSH host is using this directory",
 	"config.dsh.homeConflictHint": "The lock file shows DSH host (pid={pid}) still using the current DSH_HOME. DSH allows only one host per directory; concurrent hosts overwrite each other's sessions and config. Close the other instance, or move it to its own DSH_HOME:",
 	"config.dsh.approvals": "Approvals",
@@ -3185,6 +3186,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"drawer.sourceControl": "Source Control",
 	"drawer.rpcLog": "RPC Log",
 	"drawer.expandPanel": "Expand right panel",
+	"drawer.addPanel": "Add pinned panel",
 	"drawer.fileItems": "{count} files and folders",
 	"drawer.fileSort": "Sort files",
 	"drawer.fileSort.name": "By name",

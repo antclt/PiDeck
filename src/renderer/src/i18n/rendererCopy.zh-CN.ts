@@ -1980,6 +1980,8 @@ export const zhCN = {
 	"config.imagegen.providerNamePlaceholder": "例如 OpenAI 或火山方舟",
 	"config.imagegen.baseUrl": "接口地址",
 	"config.imagegen.apiKey": "API Key",
+	"config.imagegen.apiKeySavedSummary": "已保存 ••••{tail}（共 {length} 位）；点眼睛看完整值",
+	"config.imagegen.apiKeyCurrentSummary": "当前 ••••{tail}（共 {length} 位，尚未保存）；点眼睛看完整值",
 	"config.imagegen.models": "模型",
 	"config.imagegen.modelId": "模型 ID",
 	"config.imagegen.addModel": "手动添加",

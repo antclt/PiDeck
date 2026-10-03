@@ -13,8 +13,8 @@ const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
 const viteConfigSource = readFileSync(new URL("../electron.vite.config.ts", import.meta.url), "utf8");
 const distDevSource = readFileSync(new URL("../scripts/dist-dev.js", import.meta.url), "utf8");
 
-test("三个 dev 打包脚本存在且各自接 dist-dev.js", () => {
-	for (const name of ["dist:win:dev", "dist:mac:dev", "dist:linux:dev"]) {
+test("四个 dev 打包脚本存在且各自接 dist-dev.js", () => {
+	for (const name of ["dist:win:dev", "dist:mac:dev", "dist:linux:dev", "dist:linux:dev:arm64"]) {
 		assert.match(pkg.scripts[name], /dist-dev\.js/, name);
 	}
 });
