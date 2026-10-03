@@ -13,6 +13,13 @@ import type { SettingsStore } from "../settings/SettingsStore";
 import type { AppLogger } from "../logging/AppLogger";
 import { parseWslUncPath, toWindowsHostPath } from "../wsl/WslPaths";
 
+/**
+ * filesReadBase64 未显式传 maxBytes 时的默认读取上限（64MB）。
+ * 文件抽屉二进制预览走的是无参调用，而 base64 + IPC 过桥会把体积放大约 1.33 倍且两侧各持
+ * 一份；上限必须在主进程侧兜底（渲染层输入不可信），防单点无界读把内存推到数百 MB。
+ */
+const MAX_BINARY_PREVIEW_BYTES = 64 * 1024 * 1024;
+
 export type FilesIpcDeps = {
 	fileSystemService: FileSystemService;
 	projectStore: ProjectStore;
@@ -236,16 +243,15 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 		try {
 			const boundary = await resolveProjectReadBoundary(scope);
 			const readablePath = await resolveReadablePath(path, boundary);
-			// 粘贴图片等场景传入 maxBytes 预检：超大文件在 stat 层拦截，
+			// 二进制预览（图片/PDF 等）读为 base64 由渲染层转 Blob URL 显示。粘贴图片等场景
+			// 传 maxBytes 预检；未传时（文件抽屉预览）强制默认上限，两种都先 stat 拦截，
 			// 避免全量读入主进程再经 IPC 传输压垮两侧内存（与 filesReadContent 同一策略）。
-			if (typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0) {
-				const fileStat = await stat(readablePath);
-				if (fileStat.size > maxBytes) {
-					// 结构化前缀供渲染层识别后走回退逻辑；message 不直接展示给用户
-					throw new Error(`FILE_TOO_LARGE:${fileStat.size}:${Math.floor(maxBytes)}`);
-				}
+			const effectiveMaxBytes = typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : MAX_BINARY_PREVIEW_BYTES;
+			const fileStat = await stat(readablePath);
+			if (fileStat.size > effectiveMaxBytes) {
+				// 结构化前缀供渲染层识别后走 i18n 文案；message 不直接展示给用户
+				throw new Error(`FILE_TOO_LARGE:${fileStat.size}:${Math.floor(effectiveMaxBytes)}`);
 			}
-			// 二进制预览（图片/PDF 等）：读为 base64 由渲染层转 Blob URL 显示。
 			// 渲染层对空串（ENOENT）走「不支持」提示。
 			const buffer = await readFile(readablePath);
 			return buffer.toString("base64");
